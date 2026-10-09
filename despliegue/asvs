@@ -12,11 +12,18 @@
 #                        (no para una tanda en marcha; --forzar para hacerlo)
 #      asvs clave        ver o cambiar la contrasena de acceso
 #      asvs https        (re)intentar el certificado
+#      asvs repositorio  de donde se baja el codigo (y cambiarlo: asvs repositorio usuario/repo)
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
 RAIZ="${ASVS_RAIZ:-/opt/as-video-studio}"
-REPO="${ASVS_REPO:-NeverBlink/as-video-studio}"
+# DE DONDE SE BAJA EL CODIGO, por este orden: ASVS_REPO si se pasa, lo que
+# diga $RAIZ/datos/repositorio (lo escribe el instalador y `asvs repositorio`),
+# y si no, el de fabrica. Vive en datos/ y no en el codigo a proposito:
+# actualizar reemplaza el codigo entero y no puede olvidarse de donde viene.
+FICHERO_REPO="$RAIZ/datos/repositorio"
+REPO_GUARDADO="$( { tr -d '[:space:]' < "$FICHERO_REPO"; } 2>/dev/null || true)"
+REPO="${ASVS_REPO:-${REPO_GUARDADO:-mtjavierdelgado-afk/automatizacion-contenido-studio}}"
 RAMA="${ASVS_RAMA:-main}"
 USUARIO="${ASVS_USUARIO:-studio}"
 
@@ -141,11 +148,35 @@ actualizar() {
   chown -R "$USUARIO:$USUARIO" "$RAIZ/app" "$RAIZ/login"
   rm -rf "$temporal"
   trap - ERR
+  # Se apunta de donde ha venido lo que acaba de instalarse: la proxima vez
+  # se baja del mismo sitio aunque nadie pase ASVS_REPO.
+  printf '%s\n' "$REPO" > "$FICHERO_REPO"
 
   systemctl restart as-video-login as-video-studio
   sleep 2
   echo
   estado
+}
+
+repositorio() {
+  local nuevo="${1:-}"
+  if [ -z "$nuevo" ]; then
+    echo "El codigo se baja de:  https://github.com/$REPO  (rama $RAMA)"
+    echo "Para cambiarlo:        asvs repositorio usuario/repositorio"
+    return
+  fi
+  # usuario/repositorio y nada mas: ni la URL entera ni barras de sobra
+  nuevo="${nuevo#https://github.com/}"; nuevo="${nuevo%.git}"; nuevo="${nuevo%/}"
+  printf '%s' "$nuevo" | grep -Eq '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$' \
+    || { no "«$1» no tiene la forma usuario/repositorio"; exit 1; }
+  # Se comprueba ANTES de guardarlo: un nombre mal escrito haria fallar la
+  # proxima actualizacion, y entonces nadie se acuerda de por que.
+  curl -fsSIL --max-time 20 -o /dev/null \
+       "https://codeload.github.com/$nuevo/tar.gz/refs/heads/$RAMA" \
+    || { no "no encuentro https://github.com/$nuevo (rama $RAMA). Tiene que existir y ser publico."; exit 1; }
+  printf '%s\n' "$nuevo" > "$FICHERO_REPO"
+  si "a partir de ahora el codigo se baja de https://github.com/$nuevo"
+  echo "  Para traerlo ya:  asvs actualizar"
 }
 
 https() {
@@ -169,6 +200,7 @@ case "${1:-estado}" in
   actualizar)  actualizar "${2:-}" ;;
   clave)       shift; estudio-clave "$@" ;;
   https)       https ;;
-  -h|--help|ayuda) sed -n '5,14p' "$0" | sed 's/^#  \{0,1\}//' ;;
+  repositorio) repositorio "${2:-}" ;;
+  -h|--help|ayuda) sed -n '5,15p' "$0" | sed 's/^#  \{0,1\}//' ;;
   *) echo "No entiendo «$1». Prueba:  asvs ayuda"; exit 1 ;;
 esac

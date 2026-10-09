@@ -48,7 +48,7 @@ su candado y su contraseña — incluido todo lo que hace falta alrededor (ffmpe
 el navegador que dibuja los planos, las fuentes, el CLI de Claude):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NeverBlink/as-video-studio/main/instalar.sh -o instalar.sh && bash instalar.sh
+curl -fsSL https://raw.githubusercontent.com/mtjavierdelgado-afk/automatizacion-contenido-studio/main/instalar.sh -o instalar.sh && bash instalar.sh
 ```
 
 Los tres pasos, con qué pulsar y qué hacer si algo falla, están en

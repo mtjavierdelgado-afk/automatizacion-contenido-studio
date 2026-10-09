@@ -5,7 +5,7 @@
 #  Se pega UNA linea en la consola del servidor y esto deja el estudio montado,
 #  con su acceso por contrasena y su HTTPS:
 #
-#      curl -fsSL https://raw.githubusercontent.com/NeverBlink/as-video-studio/main/instalar.sh -o instalar.sh
+#      curl -fsSL https://raw.githubusercontent.com/mtjavierdelgado-afk/automatizacion-contenido-studio/main/instalar.sh -o instalar.sh
 #      bash instalar.sh
 #
 #  Se puede volver a lanzar las veces que haga falta: no repite lo que ya esta
@@ -22,7 +22,7 @@ set -euo pipefail
 
 VERSION_INSTALADOR="1.0.0"
 
-REPO="${ASVS_REPO:-NeverBlink/as-video-studio}"
+REPO="${ASVS_REPO:-mtjavierdelgado-afk/automatizacion-contenido-studio}"
 RAMA="${ASVS_RAMA:-main}"
 RAIZ="${ASVS_RAIZ:-/opt/as-video-studio}"
 USUARIO="${ASVS_USUARIO:-studio}"
@@ -450,6 +450,9 @@ ENTORNO
   # Las tarifas son del producto (lo que cuesta cada cosa), pero se copian a los
   # datos para que quien quiera pueda ajustarlas sin que un update se las lleve.
   [ -f "$RAIZ/datos/tarifas.json" ] || cp "$RAIZ/app/tarifas.json" "$RAIZ/datos/tarifas.json" 2>/dev/null || true
+  # De donde se ha bajado el codigo: `asvs actualizar` lo lee de aqui, asi que
+  # una instalacion hecha desde otro repositorio se sigue actualizando de el.
+  printf '%s\n' "$REPO" > "$RAIZ/datos/repositorio"
   chown -R "$USUARIO:$USUARIO" "$RAIZ/datos"
   chmod 600 "$RAIZ/datos/entorno"
 }

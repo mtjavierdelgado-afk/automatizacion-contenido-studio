@@ -197,6 +197,8 @@ GUIAS = {
             "estilo, su velocidad, su emoción y el silencio entre bloques.",
             "El RITMO del estilo también mueve la velocidad: «muy lento» frena la "
             "voz. Para Reels y Shorts suele ir mejor «medio» o «rápido».",
+            "Si el idioma del estilo es «Español (Latinoamérica)», la voz ya se "
+            "elige con acento latino: no hace falta repetirlo.",
         ],
         "si": [
             "Género, edad aproximada y acento (por ejemplo, latinoamericano "

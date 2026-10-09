@@ -8,6 +8,31 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ---
 
+## V2.0 · octubre de 2026 (segunda parte)
+
+**Qué lleva cada vídeo**
+- Al crear un vídeo, el bloque **«Qué lleva este vídeo»** tiene cuatro
+  interruptores: **voz, subtítulos, música y efectos**. Lo apagado no se
+  produce: sin música no se busca banda sonora, sin efectos no se buscan
+  sonidos, sin subtítulos no se dibujan.
+- Se puede cambiar después desde el **Encargo** del vídeo. Solo se rehace el
+  montaje (el MP4): **ninguna imagen se vuelve a pagar**.
+- La **voz** se ve pero todavía no se puede apagar: todo el montaje se
+  cronometra con la locución. El vídeo sin voz llega en la siguiente parte.
+
+**Español de Latinoamérica**
+- Nueva opción **«Español (Latinoamérica)»** en el idioma del estilo. El guion
+  se escribe en español latinoamericano neutro («ustedes», computadora,
+  celular, departamento…) y la voz se elige con acento latino.
+- Se puede cambiar en un estilo ya creado (Nombre e idioma), sin regenerar
+  imágenes.
+
+**Guía de inicio**
+- Tarjeta nueva **«Cómo se trabaja»** con lo de la V2.0: guías, qué lleva cada
+  vídeo, español de Latinoamérica, duración, asistente con imágenes, novedades
+  y notas. Se vuelve a ver desde Configuración → «Volver a ver la guía de
+  inicio».
+
 ## V2.0 · octubre de 2026
 
 **Nombre y aspecto**

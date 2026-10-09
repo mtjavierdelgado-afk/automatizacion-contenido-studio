@@ -119,7 +119,9 @@ TIPOS = {
                    "duracion_objetivo_s",
                    "palabras_por_bloque",
                    "anotaciones_voz", "emocion_en_voz",
-                   "modelo", "esfuerzo"),
+                   "modelo", "esfuerzo",
+                   # «latam»: espanol de Latinoamerica (ver presets_light)
+                   "variante_idioma"),
         "pasos": ("brief", "guion"),
     },
     "estilo": {
@@ -186,6 +188,9 @@ TIPOS = {
 #: imagenes que se adjuntaron, asi que rehacer la guia no las vuelve a pedir.
 CLAVES_ORIGEN = ("estilo_prompt", "estilo_imagenes", "tono_prompt",
                  "voz_prompt", "voz_id", "idioma", "ritmo", "taller", "feedback",
+                 # el espanol de Latinoamerica: sin esto, rehacer una parte del
+                 # estilo lo devolveria al espanol de siempre en silencio
+                 "variante_idioma",
                  # Descripciones cortas de lo que salio, para poder ENSENAR el
                  # estilo sin abrirlo entero. No son params: no se aplican a
                  # ningun paso, solo se leen.
@@ -453,7 +458,22 @@ NOMBRES_IDIOMA = {
     "es": "Español", "en": "Inglés", "pt": "Portugués", "fr": "Francés",
     "it": "Italiano", "de": "Alemán", "ca": "Catalán", "gl": "Gallego",
     "eu": "Euskera",
+    "es-419": "Español (Latinoamérica)",
 }
+
+
+def variante_de(ficha):
+    """«latam» si el canal escribe en espanol de Latinoamerica; si no, ""."""
+    guion = (ficha.get("datos") or {}).get("guion") or {}
+    return str(guion.get("variante_idioma") or "")
+
+
+def idioma_en_pantalla(ficha):
+    """El idioma tal como se elige en la pantalla: «es-419» para la variante."""
+    codigo = idioma_de(ficha)
+    if codigo == "es" and variante_de(ficha) == "latam":
+        return "es-419"
+    return codigo
 
 
 def _idioma_de_guion(bloque):
@@ -511,7 +531,7 @@ def vinetas_de(ficha):
         if texto:
             lineas.append({"icono": icono, "texto": texto})
 
-    idioma = idioma_de(ficha)
+    idioma = idioma_en_pantalla(ficha)
     poner("🌐", NOMBRES_IDIOMA.get(idioma, idioma) if idioma else "")
 
     guia = estilo.get("guia") if isinstance(estilo.get("guia"), dict) else {}
@@ -557,6 +577,10 @@ def _publicar(ficha):
     # la tabla de tipos, igual que con `cambios_para`.
     salida["vinetas"] = vinetas_de(ficha)
     salida["idioma"] = idioma_de(ficha)
+    # Y como se elige en la pantalla: «es-419» para el espanol de Latinoamerica.
+    # Va APARTE de `idioma`, que sigue siendo «es»: con ese codigo se estiman las
+    # palabras y se buscan las voces, y «es-419» no esta en ninguna de esas tablas.
+    salida["idioma_pantalla"] = idioma_en_pantalla(ficha)
     # El ritmo con el que se creo, para que el deslizador de la pantalla sepa
     # donde ponerse. Vive en `origen` porque es la ENTRADA que se dio; lo que el
     # preset fija de verdad son los min_s/max_s que hay en `estilo`.
@@ -995,7 +1019,7 @@ def cambios_para(ficha, params_actuales=None):
         # la ficha y no hace nada -- se escribe una vez y se olvida sola.
         de_guion = {c: copy.deepcopy(datos[c])
                     for c in ("anotaciones_voz", "emocion_en_voz",
-                              "modelo", "esfuerzo")
+                              "modelo", "esfuerzo", "variante_idioma")
                     if c in datos}
         if de_brief:
             cambios["brief"] = de_brief
@@ -1091,7 +1115,7 @@ def datos_de_params(params_por_paso, incluir=ORDEN):
         if codigo:
             bloque["idioma_salida"] = codigo
         for clave in ("anotaciones_voz", "emocion_en_voz", "modelo",
-                      "esfuerzo"):
+                      "esfuerzo", "variante_idioma"):
             if guion.get(clave) not in (None, ""):
                 bloque[clave] = copy.deepcopy(guion[clave])
         if bloque:

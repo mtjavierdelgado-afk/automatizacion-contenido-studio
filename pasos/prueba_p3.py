@@ -349,6 +349,19 @@ def prueba_instruccion():
         comprobar(fragmento in texto, f"la instruccion incluye: {fragmento!r}")
     comprobar("No copies ninguna frase" in texto and "parafrasees frase a frase" in texto,
               "la instruccion prohibe copiar y parafrasear frase a frase")
+    comprobar("vosotros" not in texto,
+              "sin variante, el espanol de siempre: no se habla de vosotros")
+
+    # EL ESPANOL DE LATINOAMERICA llega a la regla del idioma
+    latam = p3_guion._instruccion(transcript, {"titulo": "Rockefeller", "canal": "Canal",
+                                               "duracion_s": 60, "palabras_transcript": 200},
+                                  brief, anterior,
+                                  p3_guion._normalizar({"variante_idioma": "latam"}),
+                                  [], "es")
+    comprobar("latinoamericano NEUTRO" in latam and "nunca «vosotros»" in latam,
+              "con la variante latam, la regla 2 pide espanol latinoamericano y ustedes")
+    comprobar("computadora" in latam and "ordenador" in latam,
+              "y da el vocabulario de un lado y del otro, que es lo que se puede cumplir")
     comprobar("no persigas un numero exacto" in texto,
               "la instruccion pide una horquilla, no una cifra exacta")
 

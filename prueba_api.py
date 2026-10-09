@@ -1819,6 +1819,77 @@ def probar_sistema(cliente):
        "y al CLI le llega la ruta con la orden de abrirla")
 
 
+def probar_lo_que_lleva(cliente):
+    """«Que lleva este video»: voz, subtitulos, musica y efectos."""
+    seccion("QUE LLEVA ESTE VIDEO")
+    respuesta, datos = cliente.post("/api/presets-canal", {
+        "tipo": "canal", "nombre": "Estilo para lleva",
+        "datos": {"guion": {"idioma_salida": "es"},
+                  "voz": {"voz_id": "v-de-prueba", "idioma": "es"},
+                  "origen": {"tono_prompt": "serio", "estilo_prompt": "plano"}}})
+    estilo = (datos.get("preset") or {}).get("id") or ""
+    antes = set(os.listdir(cliente.carpeta))
+    respuesta, datos = cliente.post(f"/api/presets-light/{estilo}/video", {
+        "nombre": "Sin voz", "material": "x", "lleva": {"voz": False}})
+    igual(respuesta.status_code, 400, "un video sin voz todavia se rechaza, con su motivo")
+    respuesta, _ = cliente.post(f"/api/presets-light/{estilo}/video", {
+        "nombre": "Raro", "material": "x", "lleva": {"karaoke": True}})
+    igual(respuesta.status_code, 400, "una pieza que no existe da 400")
+    igual(set(os.listdir(cliente.carpeta)), antes,
+          "y ninguno de los dos deja un proyecto a medias")
+
+    respuesta, datos = cliente.post(f"/api/presets-light/{estilo}/video", {
+        "nombre": "Lleva poco", "material": "x",
+        "lleva": {"subtitulos": False, "musica": False}})
+    igual(respuesta.status_code, 201, "con subtitulos y musica apagados se crea")
+    pid = (datos.get("proyecto") or {}).get("id") or ""
+    respuesta, datos = cliente.get(f"/api/proyectos/{pid}/lleva")
+    igual(datos.get("lleva"), {"voz": True, "subtitulos": False, "musica": False,
+                               "efectos": True}, "y lo recuerda")
+    respuesta, datos = cliente.get(f"/api/proyectos/{pid}/pasos/callouts")
+    igual((datos.get("params") or {}).get("subtitulos"), False,
+          "los subtitulos apagados van al param de callouts")
+    respuesta, datos = cliente.get(f"/api/proyectos/{pid}/pasos/render")
+    ok("musica" not in (datos.get("params") or {}),
+       "y la musica apagada en un video nuevo no escribe nada en el render")
+    respuesta, datos = cliente.get(f"/api/proyectos/{pid}/pestanas/render")
+    puestas = {t["id"]: t.get("puesta") for t in datos.get("tareas") or []}
+    igual(puestas.get("banda_sonora"), False, "la tanda se salta la banda sonora")
+    igual(puestas.get("efectos"), True, "y no los efectos, que si los lleva")
+
+    # un video que YA tenia musica: apagarla la vacia en el render, y nada mas
+    cliente.put(f"/api/proyectos/{pid}/pasos/render/params",
+                {"params": {"musica": {"tramos": [{"animo": "calma"}]}}})
+    cliente.put(f"/api/proyectos/{pid}/lleva", {"lleva": {"musica": True}})
+    respuesta, datos = cliente.put(f"/api/proyectos/{pid}/lleva", {"lleva": {"musica": False}})
+    igual(respuesta.status_code, 200, "apagar la musica de un video responde 200")
+    respuesta, datos = cliente.get(f"/api/proyectos/{pid}/pasos/render")
+    igual((datos.get("params") or {}).get("musica"), {},
+          "y vacia la que ya tenia: el render se rehace sin ella")
+    respuesta, datos = cliente.get(f"/api/proyectos/{pid}/pasos/assets")
+    ok("subtitulos" not in (datos.get("params") or {})
+       and "musica" not in (datos.get("params") or {}),
+       "las imagenes (assets) no se tocan: no hay nada que volver a pagar")
+    respuesta, _ = cliente.put(f"/api/proyectos/{pid}/lleva", {"lleva": {"voz": False}})
+    igual(respuesta.status_code, 400, "apagar la voz de un video abierto tambien se rechaza")
+
+
+    seccion("EL ESPANOL DE LATINOAMERICA")
+    respuesta, datos = cliente.get("/api/presets-light")
+    idiomas = {i["valor"]: i["nombre"] for i in datos.get("idiomas") or []}
+    igual(idiomas.get("es-419"), "Español (Latinoamérica)",
+          "la lista de idiomas ofrece el espanol de Latinoamerica")
+    ok(list(idiomas)[:2] == ["es", "es-419"], "justo detras del espanol de siempre")
+    respuesta, datos = cliente.post("/api/presets-light/plan", {
+        "nombre": "Canal latino", "idioma": "es-419", "estilo_imagenes": ["x.png"],
+        "tono_prompt": "cercano y claro", "voz_prompt": "calida y serena"})
+    igual(respuesta.status_code, 200, "un encargo en es-419 se acepta")
+    igual((datos.get("encargo") or {}).get("idioma"), "es",
+          "y por dentro es espanol: las voces y las palabras se cuentan con «es»")
+    igual((datos.get("encargo") or {}).get("variante_idioma"), "latam",
+          "con la variante latina aparte")
+
+
 def probar_onboarding(cliente):
     """La marca de la guia de inicio vive en los ajustes del servidor."""
     seccion("LA GUIA DE INICIO")
@@ -3518,6 +3589,7 @@ def main():
         probar_la_foto_del_asistente(cliente, pid)
         probar_onboarding(cliente)
         probar_sistema(cliente)
+        probar_lo_que_lleva(cliente)
         probar_salud_de_las_cuentas(cliente)
         probar_recetas(cliente, pid)
         probar_lo_que_se_cuenta_en_publico()

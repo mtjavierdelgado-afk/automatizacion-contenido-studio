@@ -34,6 +34,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/duplicar` | Copia un proyecto entero con lo que tiene puesto HOY. -> el nuevo. |
 | `POST` | `/api/proyectos/{pid}/escenas/{sid}/vale` | «Este dibujo me vale para lo que dice ahora». -> {ok} |
 | `POST` | `/api/proyectos/{pid}/feedback` | Feedback general o sobre una unidad; rehace SOLO lo que apunta. |
+| `GET` | `/api/proyectos/{pid}/lleva` | Lo que lleva este video: voz, subtitulos, musica y efectos. |
+| `PUT` | `/api/proyectos/{pid}/lleva` | Enciende o apaga lo que lleva el video. Rehace solo el montaje, nunca imagenes. |
 | `POST` | `/api/proyectos/{pid}/presets-canal/{preset_id}/aplicar` | Copia los valores del preset a los params de los pasos que toque. |
 | `GET` | `/api/proyectos/{pid}/previsualizacion` | Las piezas para ver el video sin montarlo. -> {escenas, audio, ...} |
 | `PUT` | `/api/proyectos/{pid}/redactor` | Guarda el prompt escrito de cada plano. Un prompt vacío lo quita. |
@@ -269,4 +271,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**155 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**157 endpoints.** Escrito por `generar_api.py` desde `app.py`.

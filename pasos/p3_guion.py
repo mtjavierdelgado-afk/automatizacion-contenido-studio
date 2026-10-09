@@ -142,6 +142,9 @@ PARAMS_POR_DEFECTO = {
     "umbral_reintento_s": 0,  # 0 = automatico segun el esfuerzo
     "max_caracteres_transcript": 120000,
     "idioma": "",           # vacio: el que diga el brief
+    # «latam»: espanol de Latinoamerica (lo pone el estilo; ver
+    # presets_light.separar_idioma). Vacio: el espanol de siempre.
+    "variante_idioma": "",
     # EL MATERIAL NO ESTA AQUI: vive en el paso «Origen» (`p1_ingesta`), con
     # su propia version y su propia firma. Este paso depende de ese, asi que
     # cambiarlo ya deja el guion obsoleto sin necesidad de duplicar el texto
@@ -224,6 +227,24 @@ def describir(params):
 
 # --------------------------------------------------------------------- params
 
+#: El espanol de LATINOAMERICA, dicho como lo puede cumplir quien redacta: con
+#: lo que se ve en una linea de guion (ustedes, el vocabulario) y no con un
+#: adjetivo. Neutro a proposito: el canal le habla a varios paises a la vez.
+REGLA_LATAM = (
+    "Escribe en español latinoamericano NEUTRO. Usa «ustedes» y nunca «vosotros» "
+    "ni sus formas (habéis, vuestro, os). Usa el vocabulario común en "
+    "Latinoamérica (computadora, celular, auto, departamento, jugo, manejar) y "
+    "no el de España (ordenador, móvil, coche, piso, zumo, conducir). Evita "
+    "modismos de un solo país y el voseo.")
+
+
+def regla_de_idioma(nombre_idioma, idioma, variante):
+    """La regla 2 del prompt: en que idioma, y si es la variante latina."""
+    if variante == "latam" and str(idioma or "").startswith("es"):
+        return REGLA_LATAM
+    return f"Escribe en {nombre_idioma}."
+
+
 def _normalizar(params, estricto=True):
     """Params completos y con los tipos correctos; valida si estricto."""
     opciones = dict(PARAMS_POR_DEFECTO)
@@ -285,6 +306,7 @@ def _normalizar(params, estricto=True):
     opciones["idioma"] = str(crudo or "").strip().lower()
 
     opciones["guion_propio"] = bool(opciones.get("guion_propio"))
+    opciones["variante_idioma"] = str(opciones.get("variante_idioma") or "").strip().lower()
 
     # LOS PARAMS CRUDOS otra vez, y por el mismo motivo: `cta._normalizar` mira
     # tambien los personajes para TRADUCIR lo de antes del 06-09-2026 (cuando
@@ -620,7 +642,7 @@ def _instruccion(transcript, metadatos, brief, anterior, opciones, correcciones,
         "",
         "== REGLAS ==",
         f"1. {regla_redaccion}",
-        f"2. Escribe en {nombre_idioma}.",
+        f"2. {regla_de_idioma(nombre_idioma, idioma, opciones['variante_idioma'])}",
         f"3. Longitud total del guion: entre {minimo} y {maximo} palabras. "
         f"Cualquier cifra dentro de esa horquilla vale igual; no persigas un "
         f"numero exacto. El centro es {presupuesto} palabras y de esto depende "

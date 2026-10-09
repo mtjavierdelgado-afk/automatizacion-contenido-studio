@@ -279,6 +279,9 @@ assert DISENO_POR_DEFECTO in SETS_DISENO
 def describir(params):
     """Frase corta con lo que hara el paso con estos parametros."""
     p = _con_defectos(params)
+    if p.get("subtitulos") is False:
+        return (f"Sin subtitulos (este video no los lleva); calcula las ventanas "
+                f"de zoom sobre hyperframes x{p['escala_hyper']}.")
     return (f"Escribe los subtitulos de cada plano en {p['fuente']} "
             f"(tamano {p['subtitulo_tam']}), sincronizados con la voz y en una "
             f"banda que es la misma en todo el video, y calcula las ventanas de "
@@ -712,6 +715,11 @@ def capa_fija_de(escena, p, banda=None, salida=SALIDA):
     agujero que la decision del 23 venia a tapar, y se asume a sabiendas.
     """
     if cartelas.es_cartela(escena) or escena.get("capitulo_svg"):
+        return _envoltorio_fijo("", salida), []
+    # UN VIDEO SIN SUBTITULOS (lo decide quien lo crea, «Que lleva este video»).
+    # `is False` y no `not`: un proyecto que nunca tuvo la clave los lleva, como
+    # siempre; solo un False escrito a proposito los quita.
+    if p.get("subtitulos") is False:
         return _envoltorio_fijo("", salida), []
     banda = banda or banda_subtitulo(salida)
     paleta = paleta_de_guia((p.get("estilo") or {}).get("guia"), p.get("paleta"))

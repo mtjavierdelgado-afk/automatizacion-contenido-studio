@@ -5875,8 +5875,8 @@ def generar_pestana(pid: str, pestana: str, cuerpo: dict = Body(default=None)):
     if modo not in ("todo", "pendientes"):
         raise ErrorApi(400, f"modo desconocido: {modo!r}. Usa 'todo' o 'pendientes'")
     try:
-        receta = recetas.resolver(pestana, datos.get("receta"),
-                                  datos.get("tareas"))
+        receta = _apagar_lo_que_no_lleva(ctx, recetas.resolver(
+            pestana, datos.get("receta"), datos.get("tareas")))
     except recetas.ErrorReceta as fallo:
         raise ErrorApi(400, str(fallo))
 
@@ -7307,6 +7307,11 @@ def _sembrar_taller(ctx, encargo):
     idioma = encargo["idioma"]
     ctx.estado.actualizar_params("brief", {"idioma_salida": idioma})
     ctx.estado.actualizar_params("voz", {"idioma": idioma})
+    # LA VARIANTE (espanol de Latinoamerica), al guion. Solo si cambia: un taller
+    # que nunca la tuvo no recibe una clave vacia que moveria su firma.
+    variante = str(encargo.get("variante_idioma") or "")
+    if variante != str((ctx.estado.params("guion") or {}).get("variante_idioma") or ""):
+        ctx.estado.actualizar_params("guion", {"variante_idioma": variante})
     # Y LAS LLAMADAS A LA ACCION, que tambien son un mando: se eligen al crear
     # el estilo y de aqui salen a su preset de guion (`datos_de_params`), que es
     # lo que hace que cada video nazca con ellas puestas.
@@ -7585,7 +7590,8 @@ def _correr_light_voz(avisar, ctx, encargo):
         ritmo=light.contexto_de_ritmo(encargo.get("ritmo")),
         # la voz elegida a mano (la clonada del canal): el agente solo pone
         # los mandos
-        voz_fija=encargo.get("voz_id") or "")
+        voz_fija=encargo.get("voz_id") or "",
+        variante=encargo.get("variante_idioma") or "")
     cambios = {c: elegido[c] for c in ("modelo", "voz_id", "voz_nombre",
                                        "velocidad", "emociones", "hueco_minimo")
                if elegido.get(c) is not None}
@@ -7956,7 +7962,7 @@ def listar_presets_light():
         _curar_muestras(ficha)
     return {"presets": fichas,
             "idiomas": [{"valor": c, "nombre": presets.NOMBRES_IDIOMA.get(c, c)}
-                        for c in light.IDIOMAS],
+                        for c in light.IDIOMAS_PANTALLA],
             "partes": {k: v["nombre"] for k, v in light.PARTES.items()},
             # lo que cuesta rehacer cada parte, para poder decirlo ANTES de
             # pulsar sin que la pantalla se invente la cifra
@@ -8323,9 +8329,12 @@ def editar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     # delante una guia de mil palabras sin decir nada.
     instrucciones = datos.get("instrucciones")
     instrucciones = None if instrucciones is None else str(instrucciones).strip()
+    # «es-419» es «es» con la variante latina (ver presets_light.separar_idioma)
+    idioma_pedido = idioma
+    idioma, variante = light.separar_idioma(idioma)
     if idioma and idioma not in light.IDIOMAS:
-        raise ErrorApi(400, f"idioma desconocido: {idioma!r}. Los que hay son: "
-                            + ", ".join(light.IDIOMAS))
+        raise ErrorApi(400, f"idioma desconocido: {idioma_pedido!r}. Los que hay son: "
+                            + ", ".join(light.IDIOMAS_PANTALLA))
 
     contenido = copy.deepcopy(ficha.get("datos") or {})
 
@@ -8411,18 +8420,29 @@ def editar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
             pass                    # sin taller el preset sigue siendo correcto
 
     idioma_anterior = presets.idioma_de(ficha)
-    if idioma and idioma != idioma_anterior:
+    variante_anterior = presets.variante_de(ficha)
+    solo_variante = bool(idioma) and idioma == idioma_anterior \
+        and variante != variante_anterior
+    if idioma and (idioma != idioma_anterior or solo_variante):
         contenido.setdefault("guion", {})["idioma_salida"] = idioma
         contenido["guion"].pop("idiomas_salida", None)
+        if variante:
+            contenido["guion"]["variante_idioma"] = variante
+        else:
+            contenido["guion"].pop("variante_idioma", None)
         if contenido.get("voz"):
             contenido["voz"]["idioma"] = idioma
         contenido.setdefault("origen", {})["idioma"] = idioma
+        if variante:
+            contenido["origen"]["variante_idioma"] = variante
+        else:
+            contenido["origen"].pop("variante_idioma", None)
         # Y en el taller, que es de donde saldria la proxima regeneracion: sin
         # esto, corregir el tono despues de cambiar el idioma lo devolveria al
         # anterior en silencio.
         try:
             ctx = _taller_de(ficha)
-            _sembrar_taller(ctx, {"idioma": idioma})
+            _sembrar_taller(ctx, {"idioma": idioma, "variante_idioma": variante})
         except ErrorApi:
             pass                    # sin taller el preset sigue siendo correcto
     try:
@@ -8597,6 +8617,111 @@ def _sin_de_la_tanda(datos):
     return set(ficha.get("sin") or ())
 
 
+# ------------------------------------------------- lo que lleva cada video
+# «Que lleva este video»: voz, subtitulos, musica y efectos, elegidos al
+# crearlo. Viven en la CONFIG del proyecto, que no entra en ninguna firma: se
+# pueden guardar y leer sin dejar nada obsoleto. Lo que de verdad cambia el
+# resultado se escribe en params SOLO cuando cambia de verdad:
+#
+#   subtitulos   el param `subtitulos: false` de callouts (rehace la capa de
+#                subtitulos y el montaje; ni una imagen)
+#   musica       la tanda se salta «La banda sonora»; y al APAGARLA en un video
+#                que ya la tenia, `musica: {}` en render (solo el montaje)
+#   efectos      lo mismo con «Los efectos de sonido» y `efectos: {}`
+#   voz          todo el video se cronometra con la locucion: un video sin voz
+#                necesita otro reloj, y llega en la fase 3. De momento SIEMPRE
+#                lleva voz y apagarla se rechaza con su motivo.
+CONFIG_LLEVA = "lleva"
+LLEVA_POR_DEFECTO = {"voz": True, "subtitulos": True, "musica": True, "efectos": True}
+# que tarea de la receta se salta cuando el video no lleva esa cosa
+TAREA_DE_LLEVA = {"musica": "banda_sonora", "efectos": "efectos"}
+
+
+def lleva_de(ctx):
+    """Lo que lleva este video. Lo que no se eligio nunca, lo lleva (como antes)."""
+    guardado = ctx.proyecto.config.get(CONFIG_LLEVA)
+    salida = dict(LLEVA_POR_DEFECTO)
+    if isinstance(guardado, dict):
+        for clave in salida:
+            if isinstance(guardado.get(clave), bool):
+                salida[clave] = guardado[clave]
+    return salida
+
+
+def _normalizar_lleva(crudo):
+    """Lo que manda la pantalla, validado. -> {clave: bool} solo con lo enviado."""
+    if not isinstance(crudo, dict):
+        raise ErrorApi(400, "«lleva» tiene que ser un objeto: "
+                            "{voz, subtitulos, musica, efectos}")
+    limpio = {}
+    for clave, valor in crudo.items():
+        if clave not in LLEVA_POR_DEFECTO:
+            raise ErrorApi(400, f"«lleva» no sabe qué es «{clave}»: son "
+                                + ", ".join(LLEVA_POR_DEFECTO))
+        if not isinstance(valor, bool):
+            raise ErrorApi(400, f"«lleva.{clave}» tiene que ser true o false")
+        limpio[clave] = valor
+    if limpio.get("voz") is False:
+        raise ErrorApi(400, "un vídeo sin voz todavía no se puede hacer: todo el "
+                            "montaje se cronometra con la locución. Llega en la "
+                            "próxima actualización")
+    return limpio
+
+
+def _aplicar_lleva(ctx, pedido, al_crear=False):
+    """Guarda lo que lleva el video y escribe en params lo que cambia de verdad.
+
+    -> lo que lleva ahora. `al_crear`: en un video recien creado no hay nada
+    hecho, asi que solo se escribe lo que se APAGA (el defecto es llevarlo).
+    """
+    antes = lleva_de(ctx)
+    ahora = dict(antes)
+    ahora.update(pedido)
+    ctx.proyecto.config[CONFIG_LLEVA] = ahora
+    ctx.proyecto.guardar_config()
+    if ahora["subtitulos"] != antes["subtitulos"] or (al_crear and not ahora["subtitulos"]):
+        ctx.estado.actualizar_params("callouts", {"subtitulos": ahora["subtitulos"]})
+    render = ctx.estado.params("render") or {}
+    vaciar = {}
+    for clave in ("musica", "efectos"):
+        # solo se vacia lo que habia: escribir `{}` donde no habia nada moveria
+        # la firma del render sin cambiar el video
+        if not ahora[clave] and antes[clave] and render.get(clave):
+            vaciar[clave] = {}
+    if vaciar:
+        ctx.estado.actualizar_params("render", vaciar)
+    if pedido:
+        ctx.bitacora.anotar("lleva_cambiado", None, {"antes": antes, "ahora": ahora})
+    return ahora
+
+
+def _apagar_lo_que_no_lleva(ctx, receta):
+    """Quita de la receta las tareas de lo que este video no lleva."""
+    lleva = lleva_de(ctx)
+    tareas = receta.setdefault("tareas", {}) if isinstance(receta, dict) else {}
+    for clave, tarea in TAREA_DE_LLEVA.items():
+        if not lleva[clave]:
+            tareas[tarea] = False
+    return receta
+
+
+@app.get("/api/proyectos/{pid}/lleva")
+def leer_lleva(pid: str):
+    """Lo que lleva este video: voz, subtitulos, musica y efectos."""
+    ctx = contexto(pid)
+    return {"lleva": lleva_de(ctx)}
+
+
+@app.put("/api/proyectos/{pid}/lleva")
+def cambiar_lleva(pid: str, cuerpo: dict = Body(default=None)):
+    """Enciende o apaga lo que lleva el video. Rehace solo el montaje, nunca imagenes."""
+    ctx = contexto(pid)
+    pedido = _normalizar_lleva(_cuerpo(cuerpo).get("lleva", _cuerpo(cuerpo)))
+    ahora = _aplicar_lleva(ctx, pedido)
+    return {"lleva": ahora,
+            "pasos": [ficha_paso(ctx, p["id"]) for p in PASOS]}
+
+
 def _receta_de_video(ctx, pestana, datos=None):
     """La receta con la que corre una pestana de ESTE proyecto.
 
@@ -8631,7 +8756,8 @@ def _receta_de_video(ctx, pestana, datos=None):
     if ctx.proyecto.config.get(CONFIG_VIDEO_LIGHT) \
             or not ctx.proyecto.version_activa("assets"):
         pedidas.setdefault("direccion", True)
-    return recetas.resolver(pestana, datos.get("receta"), pedidas)
+    return _apagar_lo_que_no_lleva(
+        ctx, recetas.resolver(pestana, datos.get("receta"), pedidas))
 
 
 def _planos_previstos(ctx):
@@ -9191,6 +9317,10 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
                             f"'{ficha_preset.get('tipo')}': el modo light hace "
                             f"videos con estilos de canal")
 
+    # LO QUE LLEVA, validado ANTES de crear nada: un «lleva» que no vale se
+    # dice ahora, y no con el video ya creado a medias
+    lleva = _normalizar_lleva(datos["lleva"]) if datos.get("lleva") is not None else {}
+
     nombre = str(datos.get("nombre") or "").strip()
     if not nombre:
         nombre = f"Vídeo de {ficha_preset.get('nombre') or preset_id}"
@@ -9215,6 +9345,8 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     # preset guarde una mas.
     aplicado = aplicar_preset_canal(proyecto.id, preset_id)
     avisos = _sembrar_video_light(ctx, datos)
+    if lleva:
+        _aplicar_lleva(ctx, lleva, al_crear=True)
     ctx.bitacora.anotar("video_light_creado", None, {
         "preset": preset_id, "estilo": ficha_preset.get("nombre"),
         "nombre": nombre, "avisos": avisos})

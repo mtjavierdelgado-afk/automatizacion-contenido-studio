@@ -165,7 +165,7 @@ def _validar(datos, ids):
 
 
 def proponer(encargo, idioma="es", ajuste=None, avisar=None, proyecto_id=None,
-             cwd=None, peticion="", ritmo="", voz_fija=""):
+             cwd=None, peticion="", ritmo="", voz_fija="", variante=""):
     """Describe como quieres que suene y devuelve voz y mandos.
 
     `ritmo` es una frase sobre el MONTAJE ("planos de unos 2 s de media"), no
@@ -174,6 +174,13 @@ def proponer(encargo, idioma="es", ajuste=None, avisar=None, proyecto_id=None,
     corte cada dos. Quien decide sigue siendo el encargo.
     """
     encargo = " ".join(str(encargo or "").split())
+    # El espanol de Latinoamerica: entre las voces en espanol se prefieren las
+    # de acento latino. Se dice en el encargo, que es lo que el modelo lee para
+    # elegir, y despues de lo escrito: si la persona ya lo pidio, no estorba.
+    if encargo and variante == "latam":
+        encargo += (" Acento latinoamericano neutro: entre las voces en español, "
+                    "elige una de Latinoamérica (México, Colombia, Perú...), "
+                    "nunca de España.")
     if not encargo:
         raise RuntimeError("hace falta describir como quieres que suene la voz")
     avisa = avisar if callable(avisar) else (lambda v, m="": v)

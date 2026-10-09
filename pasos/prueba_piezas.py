@@ -435,6 +435,17 @@ def prueba_callouts():
                                            p7_callouts._con_defectos({}))
     ok(fichas_n, f"y el plano sin cartela sigue con sus {len(fichas_n)} trozo(s)")
 
+    titulo("p7_callouts: un video SIN subtitulos no los dibuja («Que lleva este video»)")
+    svg_s, fichas_s = p7_callouts.capa_fija_de(
+        dict(escena_sub), p7_callouts._con_defectos({"subtitulos": False}))
+    igual(fichas_s, [], "con subtitulos: false no sale ni un trozo")
+    ok("<text" not in svg_s, "y la capa quieta sale vacia")
+    _, fichas_t = p7_callouts.capa_fija_de(
+        dict(escena_sub), p7_callouts._con_defectos({"subtitulos": True}))
+    ok(fichas_t, "con subtitulos: true salen como siempre")
+    ok("Sin subtitulos" in p7_callouts.describir({"subtitulos": False}),
+       "y el paso lo dice al describirse")
+
     titulo("p8_render: la capa QUIETA va ENCIMA, y dicho, no deducido")
     # En una cabecera, el velo de la cartela cubre el cuadro entero y vive dentro
     # de #camara. Por orden del DOM la capa quieta ya quedaba encima --medido

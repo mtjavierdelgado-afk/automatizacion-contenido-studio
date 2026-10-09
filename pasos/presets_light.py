@@ -461,6 +461,24 @@ class ErrorEncargo(ValueError):
 
 IDIOMAS = ("es", "en", "pt", "fr", "it", "de")
 
+#: EL ESPANOL DE LATINOAMERICA no es un idioma mas para el codigo: «es» es la
+#: clave de las voces, de la cadencia de lectura y de media docena de tablas, y
+#: un codigo nuevo las dejaria vacias en cascada. Es una VARIANTE del espanol:
+#: se elige en la pantalla como «es-419» y aqui se traduce a idioma «es» mas
+#: `variante_idioma: "latam"`, que leen el redactor (p3_guion) y quien elige la
+#: voz (voz_descrita). Lo que la pantalla ofrece es IDIOMAS_PANTALLA.
+IDIOMA_LATAM = "es-419"
+VARIANTE_LATAM = "latam"
+IDIOMAS_PANTALLA = IDIOMAS[:1] + (IDIOMA_LATAM,) + IDIOMAS[1:]
+
+
+def separar_idioma(valor):
+    """«es-419» -> ("es", "latam"); cualquier otro -> (valor, "")."""
+    codigo = str(valor or "").strip().lower()
+    if codigo == IDIOMA_LATAM:
+        return "es", VARIANTE_LATAM
+    return codigo, ""
+
 #: Cuantos videos de referencia admite el tono. Tiene que ser el MISMO que
 #: `tono.MAX_VIDEOS`, que es quien de verdad los lee y quien levanta si se pasa;
 #: aqui esta escrito aparte para que la validacion del encargo no tenga que
@@ -487,12 +505,17 @@ def validar_encargo(crudo):
                            "tarjeta y lo único que distingue un preset de otro")
     limpio["nombre"] = nombre[:80]
 
-    idioma = str(datos.get("idioma") or "").strip().lower()
+    idioma, variante = separar_idioma(datos.get("idioma"))
+    # tambien se acepta la variante suelta, que es como vuelve del preset
+    if not variante and idioma == "es" \
+            and str(datos.get("variante_idioma") or "") == VARIANTE_LATAM:
+        variante = VARIANTE_LATAM
     if idioma not in IDIOMAS:
         raise ErrorEncargo(
             f"idioma desconocido: {idioma!r}. Los que hay son: "
-            + ", ".join(IDIOMAS))
+            + ", ".join(IDIOMAS_PANTALLA))
     limpio["idioma"] = idioma
+    limpio["variante_idioma"] = variante
 
     # El ritmo tiene defecto y no se exige: es un deslizador, y un deslizador
     # siempre esta en algun sitio. Uno desconocido cae en el de en medio en vez

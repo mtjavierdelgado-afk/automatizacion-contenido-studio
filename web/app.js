@@ -4899,6 +4899,13 @@ const IDIOMAS_LIGHT = [
   { valor: 'it', nombre: 'Italiano' }, { valor: 'de', nombre: 'Alemán' },
 ];
 
+/* «es-419» es lo que se ELIGE para el español de Latinoamérica; para todo lo
+   que mira el idioma por dentro (las voces, la estimación de palabras) sigue
+   siendo «es». El servidor hace la misma traducción (`separar_idioma`). */
+function idiomaBase(codigo) {
+  return String(codigo || 'es') === 'es-419' ? 'es' : String(codigo || 'es');
+}
+
 function idiomasLight() {
   const servidos = (APP.light.datos || {}).idiomas;
   return (servidos && servidos.length) ? servidos : IDIOMAS_LIGHT;
@@ -5610,6 +5617,8 @@ function encargoVideoLight() {
       material: '',
       // si lo pegado YA es el guion, el redactor no reescribe: respeta
       guion_propio: false,
+      // QUÉ LLEVA ESTE VÍDEO: se decide al crearlo (`bloqueLleva`)
+      lleva: { voz: true, subtitulos: true, musica: true, efectos: true },
       // COMO contarlo, aparte de los hechos: «no fuerces una historia de
       // personaje», «no incluyas la entrevista»
       indicaciones: '',
@@ -5951,6 +5960,11 @@ function vistaElegidoLight() {
     duracionLight(e),
     selectorFormato(e.formato, v => { e.formato = v; })));
 
+  if (!e.lleva) e.lleva = { voz: true, subtitulos: true, musica: true, efectos: true };
+  caja.appendChild(bloqueLight('Qué lleva este vídeo',
+    'lo que se produce y lo que no; apagar algo no cuesta nada',
+    bloqueLleva(e.lleva, () => {})));
+
   caja.appendChild(bloqueLight('El material',
     'de dónde salen los hechos que se van a contar',
     materialLight(e)));
@@ -6256,6 +6270,7 @@ async function crearYGenerarLight(estilo) {
         guion_propio: !!e.guion_propio,
         indicaciones: e.indicaciones,
         cta: e.cta,
+        lleva: e.lleva || undefined,
       },
     });
     const pid = (datos.proyecto || {}).id;
@@ -6401,6 +6416,10 @@ function vistaEncargoVideoLight() {
     nombre,
     duracionLight(e, estilo),
     selectorFormato(e.formato, valor => { e.formato = valor; programarGuardadoEncargo(); })));
+
+  caja.appendChild(bloqueLight('Qué lleva este vídeo',
+    'cambiarlo rehace solo el montaje: ninguna imagen se vuelve a pagar',
+    bloqueLlevaDelVideo()));
 
   caja.appendChild(bloqueLight('El material',
     'de dónde salen los hechos que se van a contar',
@@ -9654,7 +9673,7 @@ function vistaPresetLight() {
   // 🌐 lo que se cambia a mano. Autoguardado, como todo lo demás.
   caja.appendChild(bloqueLight('🌐 Nombre e idioma', 'se cambian sin regenerar nada',
     campoTexto('', ficha.nombre, v => guardarPresetLight(ficha.id, { nombre: v })),
-    campoSelect('', ficha.idioma || 'es',
+    campoSelect('', ficha.idioma_pantalla || ficha.idioma || 'es',
       idiomasLight().map(i => ({ valor: i.valor, nombre: i.nombre })),
       v => guardarPresetLight(ficha.id, { idioma: v }, true))));
 
@@ -9862,7 +9881,7 @@ function repintarBloqueVoz(ficha) {
    repinta solo cuando llega. Lo comparten la ficha del estilo y el formulario
    de crear, que es lo que hace que la voz clonada aparezca en los dos. */
 function vocesLight(idioma) {
-  idioma = idioma || 'es';
+  idioma = idiomaBase(idioma);
   const catalogo = APP.light.voces || {};
   if (catalogo.idioma === idioma) return catalogo.lista || [];
   if (!catalogo.pidiendo || catalogo.pidiendo !== idioma) {
@@ -10564,6 +10583,7 @@ const TARJETAS_INICIO = [
   { id: 'cartesia', titulo: '3 · La clave de Cartesia (voz)', pinta: tarjetaCartesiaInicio },
   { id: 'jamendo', titulo: '4 · La clave de Jamendo (música, opcional)', pinta: tarjetaJamendoInicio },
   { id: 'freesound', titulo: '5 · La clave de FreeSound (efectos, opcional)', pinta: tarjetaFreeSoundInicio },
+  { id: 'como', titulo: 'Cómo se trabaja', pinta: tarjetaComoInicio },
   { id: 'listo', titulo: 'Todo listo', pinta: tarjetaFinalInicio },
 ];
 
@@ -10681,7 +10701,7 @@ function tarjetaBienvenidaInicio() {
       h('li', {}, h('b', {}, 'OpenAI'), ': con ella se dibujan los planos.'),
       h('li', {}, h('b', {}, 'Cartesia'), ': la voz que narra.'),
       h('li', {}, h('b', {}, 'Jamendo y FreeSound'), ': música y efectos. Son las dos únicas que se '
-        + 'pueden dejar para luego; las otras tres hacen falta.')),
+        + 'pueden dejar para luego (o apagar en cada vídeo); las otras tres hacen falta.')),
     h('div', { clase: 'caja-info' },
       'Abajo a la derecha hay una burbuja: es el asistente. Sabe cómo funciona '
       + 'todo esto y ve lo que está pasando en tu Estudio, así que cuando algo '
@@ -10938,6 +10958,35 @@ function tarjetaFreeSoundInicio() {
     ficha ? estadoClaveInicio(!!freesound.puesta, freesound.cola || '')
       : h('div', { clase: 'cargando' }, 'leyendo las claves…'),
     campoClaveInicio('la API key de FreeSound', clave => guardarClaves({ freesound: { clave } })),
+  ];
+}
+
+/* LO QUE HAY QUE SABER PARA TRABAJAR, en una tarjeta: lo de la V2.0 que no se
+   descubre solo. Va antes de «Todo listo», que es la que comprueba las claves. */
+function tarjetaComoInicio() {
+  const punto = (icono, titulo, texto) => h('li', {},
+    h('span', { clase: 'inicio-icono', 'aria-hidden': 'true' }, icono),
+    h('span', {}, h('b', {}, titulo), ' ', texto));
+  return [
+    h('div', { clase: 'pista' },
+      'Primero se crea un ESTILO (cómo se ve, cómo se cuenta y quién lo narra) y '
+      + 'con él se hacen los VÍDEOS. Lo que conviene saber desde el principio:'),
+    h('ul', { clase: 'inicio-como' },
+      punto('✦', 'Guía en cada campo.', 'Junto al estilo gráfico, el tono, la voz, el '
+        + 'material, las indicaciones y las llamadas a la acción hay un botón «Guía» '
+        + 'con una plantilla, un ejemplo y un prompt para preparar el texto con '
+        + 'ChatGPT o Claude. Seguirla evita la mayoría de los errores.'),
+      punto('🎛️', 'Qué lleva cada vídeo.', 'Al crearlo eliges si lleva subtítulos, '
+        + 'música y efectos. Cambiarlo después solo rehace el montaje: ninguna imagen '
+        + 'se vuelve a pagar.'),
+      punto('🌎', 'Español de Latinoamérica.', 'En el idioma del estilo: el guion usa '
+        + '«ustedes» y vocabulario latino, y la voz se elige con acento latino.'),
+      punto('⏱️', 'De 1 segundo a 30 minutos.', 'La duración se ajusta en minutos y '
+        + 'segundos, con atajos para Reels, Shorts y YouTube.'),
+      punto('💬', 'El asistente.', 'Pégale capturas o imágenes para explicarle qué pasa. '
+        + 'Si estorba, la «–» lo deja en una pestaña en el borde.'),
+      punto('🗒️', 'Novedades y notas.', 'En Configuración ves qué ha cambiado y apuntas '
+        + 'mejoras para más adelante. El sol/luna de arriba cambia a modo claro u oscuro.')),
   ];
 }
 
@@ -11377,6 +11426,83 @@ function enLinea(texto) {
   }
   if (ultimo < texto.length) nodos.push(texto.slice(ultimo));
   return nodos;
+}
+
+/* ===================================================== QUÉ LLEVA ESTE VÍDEO
+ *
+ * Cuatro interruptores: voz, subtítulos, música y efectos. Al crear un vídeo
+ * viajan con el encargo (`lleva`); en un vídeo abierto se cambian al momento
+ * con PUT /api/proyectos/<pid>/lleva, y el servidor escribe en params solo lo
+ * que cambia el resultado (ver `_aplicar_lleva` en app.py): el montaje se
+ * rehace, las imágenes no. La voz sale pero bloqueada: todo el vídeo se
+ * cronometra con ella y el vídeo sin voz es la fase siguiente.
+ */
+const PIEZAS_LLEVA = [
+  { id: 'voz', icono: '🎙️', nombre: 'Voz', que: 'la narración',
+    bloqueada: 'todo el montaje se cronometra con la voz: el vídeo sin voz llega en la próxima actualización' },
+  { id: 'subtitulos', icono: '💬', nombre: 'Subtítulos', que: 'el texto de lo que se dice' },
+  { id: 'musica', icono: '🎵', nombre: 'Música', que: 'la banda sonora de fondo' },
+  { id: 'efectos', icono: '✨', nombre: 'Efectos', que: 'golpes de transición y sonidos' },
+];
+
+function bloqueLleva(lleva, alCambiar, ocupado) {
+  const rejilla = h('div', { clase: 'lleva' });
+  PIEZAS_LLEVA.forEach(pieza => {
+    const encendida = lleva[pieza.id] !== false;
+    const casilla = h('input', {
+      type: 'checkbox', role: 'switch', checked: encendida,
+      disabled: !!pieza.bloqueada || !!ocupado,
+      'aria-label': pieza.nombre,
+      onchange: ev => { lleva[pieza.id] = ev.target.checked; tarjeta.classList.toggle('apagada', !ev.target.checked); alCambiar(pieza.id, ev.target.checked); },
+    });
+    const tarjeta = h('label', {
+      clase: 'lleva-pieza' + (encendida ? '' : ' apagada') + (pieza.bloqueada ? ' bloqueada' : ''),
+      title: pieza.bloqueada || `${encendida ? 'Lleva' : 'No lleva'} ${pieza.que}`,
+    },
+      h('span', { clase: 'lleva-icono', 'aria-hidden': 'true' }, pieza.icono),
+      h('span', { clase: 'lleva-texto' },
+        h('b', {}, pieza.nombre),
+        h('span', { clase: 'meta' }, pieza.bloqueada ? 'siempre, por ahora' : pieza.que)),
+      casilla,
+      h('span', { clase: 'interruptor', 'aria-hidden': 'true' }));
+    rejilla.appendChild(tarjeta);
+  });
+  return rejilla;
+}
+
+/* En el encargo de un vídeo abierto: se lee del servidor y se guarda al tocar. */
+function bloqueLlevaDelVideo() {
+  const v = APP.light.video;
+  const caja = h('div', {});
+  const pintar = () => {
+    vaciar(caja);
+    if (!v.lleva) { caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…')); return; }
+    caja.appendChild(bloqueLleva(v.lleva, async (pieza, valor) => {
+      try {
+        const r = await pedir(`${API.proyecto(v.pid)}/lleva`, {
+          method: 'PUT', cuerpo: { lleva: { [pieza]: valor } } });
+        v.lleva = r.lleva;
+        (r.pasos || []).forEach(f => { v.fichas[f.id] = f; });
+        toast(valor ? `${pieza}: se añadirá al volver a montar el vídeo`
+                    : `${pieza}: se quitará al volver a montar el vídeo`);
+      } catch (e) {
+        toast(e.message, true);
+        v.lleva = null;
+        cargar();
+      }
+    }));
+  };
+  const cargar = async () => {
+    try {
+      v.lleva = (await pedir(`${API.proyecto(v.pid)}/lleva`)).lleva;
+    } catch (e) {
+      v.lleva = { voz: true, subtitulos: true, musica: true, efectos: true };
+    }
+    pintar();
+  };
+  if (!v.lleva || v.llevaDe !== v.pid) { v.llevaDe = v.pid; v.lleva = null; cargar(); }
+  pintar();
+  return caja;
 }
 
 /* ======================================================== GUÍAS DE ESCRITURA

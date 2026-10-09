@@ -2760,3 +2760,44 @@ body.burbuja-minimizada .pestana-asistente { display: flex; }
   body.config-abierta .minimizar-burbuja,
   body.config-abierta .pestana-asistente { display: none; }
 }
+
+/* ---- «Que lleva este video»: cuatro tarjetas con su interruptor */
+.lleva { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.lleva-pieza {
+  position: relative; display: flex; align-items: center; gap: 10px; cursor: pointer;
+  padding: 11px 12px; border: 1px solid var(--linea); border-radius: 12px;
+  background: var(--degradado-suave); transition: border-color .15s, background-color .15s, opacity .15s;
+  text-transform: none; letter-spacing: normal; font-size: 13px; color: var(--texto); margin: 0;
+}
+.lleva-pieza:hover { border-color: var(--acento); }
+.lleva-pieza.apagada { background: var(--hueco); }
+.lleva-pieza.apagada .lleva-icono, .lleva-pieza.apagada .lleva-texto { opacity: .55; }
+.lleva-pieza.bloqueada { cursor: not-allowed; }
+.lleva-icono { font-size: 20px; line-height: 1; }
+.lleva-texto { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.lleva-texto .meta { font-size: 11.5px; }
+/* el interruptor: la casilla de verdad va invisible encima, para que el
+   teclado y los lectores de pantalla la sigan manejando */
+.lleva-pieza input[type=checkbox] { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.interruptor {
+  flex: 0 0 auto; width: 38px; height: 22px; border-radius: 999px; position: relative;
+  background: var(--surco-alto); transition: background .18s;
+}
+.interruptor::after {
+  content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--blanco); box-shadow: 0 1px 3px rgba(0, 0, 0, .35); transition: transform .18s;
+}
+.lleva-pieza input:checked ~ .interruptor { background: var(--degradado); }
+.lleva-pieza input:checked ~ .interruptor::after { transform: translateX(16px); }
+.lleva-pieza input:focus-visible ~ .interruptor { box-shadow: 0 0 0 3px rgba(139, 92, 246, .35); }
+.lleva-pieza input:disabled ~ .interruptor { opacity: .55; }
+@media (max-width: 620px) { .lleva { grid-template-columns: 1fr; } }
+
+/* ---- la tarjeta «Como se trabaja» de la guia de inicio */
+ul.inicio-como { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+ul.inicio-como li { display: flex; gap: 10px; align-items: flex-start; line-height: 1.45; }
+.inicio-icono {
+  flex: 0 0 auto; width: 30px; height: 30px; border-radius: 9px; display: inline-flex;
+  align-items: center; justify-content: center; background: var(--degradado-suave);
+  border: 1px solid var(--acento-borde); font-size: 15px;
+}

@@ -533,6 +533,15 @@ def entorno(cuenta=None):
     carpeta = (cuenta or {}).get("config_dir") if isinstance(cuenta, dict) else None
     if carpeta:
         limpio["CLAUDE_CONFIG_DIR"] = carpeta
+        # UN TOKEN DE SESION HEREDADO MANDA SOBRE LA CARPETA. Con
+        # CLAUDE_CODE_OAUTH_TOKEN en el entorno del servicio (el que da
+        # `claude setup-token`), el CLI entra con ese token e ignora el login
+        # de CLAUDE_CONFIG_DIR: todas las cuentas de la cadena serian en
+        # realidad la misma, el respaldo no respaldaria nada y `auth status`
+        # daria por conectada una carpeta vacia. Con una cuenta elegida, manda
+        # su carpeta. Sin cuenta (la sesion por defecto) se respeta: puede ser
+        # justo como se ha montado la maquina.
+        limpio.pop("CLAUDE_CODE_OAUTH_TOKEN", None)
     return limpio
 
 

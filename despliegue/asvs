@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # -----------------------------------------------------------------------------
-#  asvs — el mando de AS Video Studio en el servidor.
+#  asvs — el mando de Automatización Contenido Studio en el servidor.
 #
 #  Existe para que, cuando algo va raro, la respuesta a «¿que hago?» sea una
 #  palabra y no un parrafo de comandos de systemd.
@@ -47,7 +47,7 @@ estado() {
   puerto="$(_puerto)"; dominio="$(_dominio)"; esquema="$(_esquema)"
   [ -n "$esquema" ] || esquema=https
 
-  printf '\n%s  AS Video Studio%s   %s%s://%s%s\n\n' "$B" "$N" "$GRIS" "$esquema" "$dominio" "$N"
+  printf '\n%s  Automatización Contenido Studio%s   %s%s://%s%s\n\n' "$B" "$N" "$GRIS" "$esquema" "$dominio" "$N"
 
   systemctl is-active --quiet as-video-studio && si "el estudio esta en marcha" || no "el estudio esta PARADO"
   systemctl is-active --quiet as-video-login  && si "el acceso esta en marcha"  || no "el acceso esta PARADO"

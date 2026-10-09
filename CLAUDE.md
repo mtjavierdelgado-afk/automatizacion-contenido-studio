@@ -1,4 +1,4 @@
-# AS Video Studio — lo que hay que saber antes de tocarlo
+# Automatización Contenido Studio — lo que hay que saber antes de tocarlo
 
 Lee primero [README.md](README.md): qué es, cómo se arranca y cómo está montado.
 Y si vienes a retomar sin contexto, [docs/RETOMAR.md](docs/RETOMAR.md): el
@@ -199,6 +199,32 @@ La burbuja de abajo a la derecha es `pasos/asistente.py` más las rutas
 - **En `app.js`, un acento grave dentro de una expresión regular** parte por la
   mitad los tokenizadores de `herramientas/` (se creen que empieza una
   plantilla) y dan por muerto todo lo que venga detrás. Se escribe `\x60`.
+
+---
+
+## La V2.0: nombre, diseño, guías, novedades y notas
+
+- **El producto se llama «Automatización Contenido Studio»** en todo lo que se
+  ve (`NOMBRE_PRODUCTO` en `app.py`). Los nombres INTERNOS no se cambian:
+  `/opt/as-video-studio`, el comando `asvs`, los servicios `as-video-*`, el
+  repositorio. Renombrarlos rompe las instalaciones que ya funcionan sin que
+  nada lo diga.
+- **Todo cambio visible se apunta en `docs/NOVEDADES.md`.** Lo enseña
+  Configuración → Novedades y lo lee el asistente en el primer turno: si no se
+  apunta, el asistente explica el sistema de antes.
+- **Las guías de escritura viven en `pasos/guias.py`, y SOLO ahí.** La pantalla
+  las pide a `/api/sistema/guias` y el asistente las lee con Read. Si cambia lo
+  que hace un campo (el código que dice su clave `usa`), se revisa su guía.
+  El botón sale por el TÍTULO del bloque (`GUIA_DE_BLOQUE` en `app.js`).
+- **Las notas de mejoras son datos**: `<proyectos>/_sistema/notas.json`, fuera
+  del código, para que `asvs actualizar` no se las lleve.
+- **El tema** (claro/oscuro) es solo `data-tema="claro"` en `<html>` y la paleta
+  de `:root[data-tema="claro"]`. Ni un color fuera de las variables.
+- **Dos funciones con el mismo nombre en Python también se pisan sin avisar.**
+  Pasó al añadir las notas: `_ruta_notas()` ya existía para el repaso y la
+  nueva la pisó (500 al guardar la nota de un vídeo). Lo canta
+  `herramientas/repetidas_py.py`; los huecos de plantilla sin rellenar
+  (el `KeyError: 'fijos'`) los canta `herramientas/plantillas_py.py`.
 
 ---
 

@@ -85,7 +85,7 @@ echo
 for h in herramientas/indefinidos_py.py herramientas/indefinidos_js.py \
          herramientas/huerfanas_js.py herramientas/sin_llamar_js.py \
          herramientas/alcanzables_js.py herramientas/atributos_py.py \
-         herramientas/plantillas_py.py \
+         herramientas/plantillas_py.py herramientas/repetidas_py.py \
          herramientas/css_sin_usar.py; do
   [ -f "$h" ] || continue
   resumen="$("$PYTHON" "$h" 2>&1 | grep -m1 -E ':|NO |NADIE|SOSPECHOSAS' || echo 'sin nada que decir')"

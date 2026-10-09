@@ -243,6 +243,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/asistente/charlas/{cid}/cancelar` | Para la respuesta que esté en marcha en esa charla. |
 | `POST` | `/api/asistente/charlas/{cid}/mensajes` | Manda una pregunta; la respuesta se sigue con GET de la charla. |
 | `GET` | `/api/asistente/foto` | Lo que el asistente ve del Estudio ahora mismo, en texto y sin claves. |
+| `POST` | `/api/asistente/imagenes` | Imagenes para la proxima pregunta al asistente (pegadas o adjuntas). |
+| `GET` | `/api/asistente/imagenes/{nombre}` | Una imagen pegada al asistente, para su miniatura en la charla. |
 | `POST` | `/api/asistente/probar` | Prueba las cuentas con las que contestaría el asistente y dice cómo están. |
 
 ## Ficheros y salud
@@ -257,8 +259,14 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/` | La interfaz del Estudio. |
+| `GET` | `/api/sistema/guias` | Como rellenar cada campo de texto: plantilla, ejemplo y prompt para otra IA. |
+| `GET` | `/api/sistema/notas` | Las notas de mejoras futuras, las pendientes primero. |
+| `POST` | `/api/sistema/notas` | Apunta una mejora para hacer mas adelante. |
+| `DELETE` | `/api/sistema/notas/{nid}` | — |
+| `PUT` | `/api/sistema/notas/{nid}` | Cambia el texto de una nota o la marca como hecha / pendiente. |
+| `GET` | `/api/sistema/novedades` | El historial de cambios, tal cual esta en docs/NOVEDADES.md. |
 | `GET` | `/{fichero}` | Sirve un fichero suelto de web/ (app.js, estilo.css...). |
 
 ---
 
-**147 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**155 endpoints.** Escrito por `generar_api.py` desde `app.py`.

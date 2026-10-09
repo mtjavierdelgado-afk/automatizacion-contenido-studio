@@ -109,7 +109,7 @@ Write-Output ""
 foreach ($h in @('herramientas\indefinidos_py.py', 'herramientas\indefinidos_js.py',
                  'herramientas\huerfanas_js.py', 'herramientas\sin_llamar_js.py',
                  'herramientas\alcanzables_js.py', 'herramientas\atributos_py.py',
-                 'herramientas\plantillas_py.py',
+                 'herramientas\plantillas_py.py', 'herramientas\repetidas_py.py',
                  'herramientas\css_sin_usar.py')) {
   if (-not (Test-Path $h)) { continue }
   $salida = & $Python $h 2>&1 | Out-String

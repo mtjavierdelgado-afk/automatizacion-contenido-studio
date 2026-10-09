@@ -67,6 +67,7 @@ from . import repaso  # noqa: E402,F401
 # frase) necesita p7_callouts para su vocabulario de valores, asi que va
 # detras de el.
 from . import enrutar_estilo  # noqa: E402,F401
+from . import guias  # noqa: E402,F401
 from . import presets_light  # noqa: E402,F401
 
 MODULOS = {

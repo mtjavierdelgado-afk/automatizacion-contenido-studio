@@ -1747,6 +1747,78 @@ def probar_la_foto_del_asistente(cliente, pid):
     cliente.put("/api/claves", {"openai": []})
 
 
+def probar_sistema(cliente):
+    """Lo de la V2.0: guias de escritura, novedades, notas e imagenes del asistente."""
+    seccion("EL SISTEMA: GUIAS, NOVEDADES, NOTAS E IMAGENES DEL ASISTENTE")
+    respuesta, datos = cliente.get("/api/sistema/guias")
+    igual(respuesta.status_code, 200, "GET /api/sistema/guias responde 200")
+    ids = [g.get("id") for g in datos.get("guias") or []]
+    igual(ids, ["estilo_grafico", "tono", "voz", "material", "indicaciones", "cta"],
+          "estan las seis guias, en el orden de la pantalla")
+    ok(all(g.get("plantilla") and g.get("prompt_ia") and g.get("que_hace")
+           for g in datos.get("guias") or []),
+       "cada guia trae plantilla, prompt para otra IA y que hace el sistema")
+
+    respuesta, datos = cliente.get("/api/sistema/novedades")
+    igual(respuesta.status_code, 200, "GET /api/sistema/novedades responde 200")
+    ok("V2.0" in (datos.get("texto") or ""), "las novedades hablan de la V2.0")
+    igual(datos.get("producto"), "Automatización Contenido Studio", "con el nombre nuevo")
+
+    respuesta, datos = cliente.post("/api/sistema/notas", {"texto": "  "})
+    igual(respuesta.status_code, 400, "una nota vacia da 400")
+    respuesta, datos = cliente.post("/api/sistema/notas", {"texto": "subir el subtitulo"})
+    igual(respuesta.status_code, 201, "crear una nota responde 201")
+    nid = (datos.get("nota") or {}).get("id") or ""
+    igual((datos.get("nota") or {}).get("estado"), "pendiente", "y nace pendiente")
+    respuesta, datos = cliente.put(f"/api/sistema/notas/{nid}", {"estado": "hecha"})
+    igual((datos.get("nota") or {}).get("estado"), "hecha", "se marca como hecha")
+    ok((datos.get("nota") or {}).get("hecha_el"), "y apunta cuando")
+    respuesta, _ = cliente.put(f"/api/sistema/notas/{nid}", {"estado": "inventado"})
+    igual(respuesta.status_code, 400, "un estado desconocido da 400")
+    respuesta, datos = cliente.get("/api/sistema/notas")
+    ok(any(n["id"] == nid for n in datos.get("notas") or []), "la nota se lista")
+    ok("_sistema" in (datos.get("ruta") or ""),
+       "y vive en la carpeta de datos, fuera del codigo")
+    respuesta, _ = cliente.delete(f"/api/sistema/notas/{nid}")
+    igual(respuesta.status_code, 200, "se borra")
+    respuesta, _ = cliente.delete(f"/api/sistema/notas/{nid}")
+    igual(respuesta.status_code, 404, "y borrarla otra vez es un 404")
+
+    # las imagenes que se pegan al asistente
+    from PIL import Image
+    imagen = io.BytesIO()
+    Image.new("RGB", (40, 30), "red").save(imagen, "PNG")
+    respuesta = cliente.sesion.post(
+        f"{cliente.base}/api/asistente/imagenes", timeout=30,
+        files={"imagenes": ("captura.png", imagen.getvalue(), "image/png")})
+    igual(respuesta.status_code, 201, "subir una imagen al asistente responde 201")
+    nombre = ((respuesta.json().get("imagenes") or [{}])[0]).get("nombre") or ""
+    ok(re.fullmatch(r"[0-9a-f]{12}\.png", nombre or ""),
+       f"y se guarda con un nombre que no dice nada: {nombre}")
+    respuesta = cliente.sesion.get(f"{cliente.base}/api/asistente/imagenes/{nombre}", timeout=30)
+    igual(respuesta.status_code, 200, "la miniatura se sirve")
+    respuesta = cliente.sesion.get(f"{cliente.base}/api/asistente/imagenes/%2E%2E", timeout=30)
+    igual(respuesta.status_code, 404, "y pedir la carpeta de arriba es un 404")
+    respuesta, charla = cliente.post("/api/asistente/charlas", {})
+    cid = charla.get("id") or (charla.get("charla") or {}).get("id")
+    respuesta, _ = cliente.post(f"/api/asistente/charlas/{cid}/mensajes",
+                                {"texto": "x", "imagenes": ["../../secretos/claves.json"]})
+    igual(respuesta.status_code, 400, "una imagen que no es de la subida se rechaza")
+    respuesta, _ = cliente.post(f"/api/asistente/charlas/{cid}/mensajes",
+                                {"texto": "¿qué ves?", "imagenes": [nombre]})
+    igual(respuesta.status_code, 202, "una pregunta con imagen se acepta")
+    final = None
+    for _ in range(40):
+        _, final = cliente.get(f"/api/asistente/charlas/{cid}")
+        if final["turnos"][-1]["estado"] != "pensando":
+            break
+        time.sleep(0.25)
+    igual(final["turnos"][0].get("imagenes"), [nombre], "la pregunta recuerda su imagen")
+    ok(nombre in final["turnos"][-1]["texto"]
+       and "IMAGENES ADJUNTAS" in final["turnos"][-1]["texto"],
+       "y al CLI le llega la ruta con la orden de abrirla")
+
+
 def probar_onboarding(cliente):
     """La marca de la guia de inicio vive en los ajustes del servidor."""
     seccion("LA GUIA DE INICIO")
@@ -3445,6 +3517,7 @@ def main():
         probar_asistente(cliente)
         probar_la_foto_del_asistente(cliente, pid)
         probar_onboarding(cliente)
+        probar_sistema(cliente)
         probar_salud_de_las_cuentas(cliente)
         probar_recetas(cliente, pid)
         probar_lo_que_se_cuenta_en_publico()

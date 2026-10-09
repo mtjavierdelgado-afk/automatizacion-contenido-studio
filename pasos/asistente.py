@@ -90,7 +90,8 @@ TIEMPO_MAX_S = 420
 
 #: Lo que se le da a leer en el primer turno, en este orden. Lo que no exista
 #: se salta sin avisar: un despliegue puede no llevar la carpeta docs/.
-DOCUMENTOS = ("CLAUDE.md", "README.md", "docs/RETOMAR.md", "docs/API.md")
+DOCUMENTOS = ("CLAUDE.md", "README.md", "docs/NOVEDADES.md", "docs/RETOMAR.md",
+              "docs/API.md")
 
 #: Lo que puede hacer ademas de contestar: LEER el codigo, y las herramientas
 #: del Estudio (pasos/mcp_estudio.py): probar las claves, ver el estado, los
@@ -162,7 +163,7 @@ def sistema():
     raras. Lo que va por stdin (el mensaje) si lleva acentos.
     """
     return (
-        "Eres el asistente de AS Video Studio, un producto que convierte texto en "
+        "Eres el asistente de Automatizacion Contenido Studio, un producto que convierte texto en "
         "un video narrado en ocho pasos (ingesta, brief, guion, voz, revision de "
         "audio, assets, callouts, render). Hablas con la persona que lo esta usando "
         "desde la propia pantalla del Estudio, y tu trabajo es resolver dudas y "
@@ -191,7 +192,17 @@ def sistema():
         "estado actual del Estudio: fiate de ella para lo que esta pasando ahora "
         "mismo, y de la documentacion para como funciona. Si no sabes algo, dilo y "
         "propone donde mirar en vez de inventarlo. No repitas la pregunta ni "
-        "saludes: contesta.")
+        "saludes: contesta. Las GUIAS DE ESCRITURA de cada campo (indicaciones del "
+        "estilo grafico, tono del guion, voz, material, indicaciones del video y "
+        "llamadas a la accion) estan en pasos/guias.py: leelas con Read cuando "
+        "alguien pregunte como escribir uno de esos campos o pegue un texto suyo "
+        "para revisarlo, y ayudale a reescribirlo para que encaje con el sistema "
+        "siguiendo la plantilla de esa guia (tu no puedes guardarlo: devuelvele el "
+        "texto para que lo pegue). Lo que ha cambiado en el sistema esta en "
+        "docs/NOVEDADES.md, y las notas de mejoras pendientes que ha dejado la "
+        "persona estan en _sistema/notas.json dentro de la carpeta de proyectos. "
+        "Si la pregunta trae IMAGENES ADJUNTAS, abre cada una con Read antes de "
+        "contestar y tenlas en cuenta.")
 
 
 def vetos_de_lectura(raiz=None):
@@ -253,6 +264,21 @@ def mensaje_de_arranque(foto, pregunta, raiz=None, historia=()):
             "\n\n".join(lineas)))
     partes.append(mensaje_de_turno(foto, pregunta))
     return "\n".join(partes)
+
+
+def con_imagenes(pregunta, rutas):
+    """La pregunta con las rutas de sus imagenes, para que el CLI las abra.
+
+    El CLI no recibe adjuntos por stdin: las mira con Read, que abre imagenes.
+    Por eso viajan como RUTAS dentro de la carpeta de proyectos, que es la que
+    tiene permitida (`--add-dir`), y la instruccion de abrirlas va en el texto.
+    """
+    rutas = [str(r) for r in (rutas or ()) if r]
+    if not rutas:
+        return pregunta
+    lista = "\n".join(f"- {r}" for r in rutas)
+    return (f"{pregunta}\n\n[IMAGENES ADJUNTAS: abre cada una con Read antes de "
+            f"contestar]\n{lista}")
 
 
 def mensaje_de_turno(foto, pregunta):
@@ -389,7 +415,7 @@ class Charla:
         return turno
 
     def preguntar(self, pregunta, foto, raiz=None, carpetas_extra=(),
-                  ejecutar=None, pid=""):
+                  ejecutar=None, pid="", imagenes=()):
         """Arranca un turno. -> la ficha de la charla, con el turno 'pensando'.
 
         No espera: el turno corre en un hilo y la pantalla vuelve a preguntar.
@@ -407,7 +433,9 @@ class Charla:
                               "o cancelala")
             self.tocada = time.time()
             self.pid = str(pid or "")
-            self._anadir("tu", pregunta)
+            imagenes = [str(r) for r in (imagenes or ()) if r]
+            self._anadir("tu", pregunta,
+                         imagenes=[os.path.basename(r) for r in imagenes])
             respuesta = self._anadir("asistente", "", estado="pensando",
                                      segundos=0)
             avance = Avance()
@@ -416,8 +444,9 @@ class Charla:
         ejecutar = ejecutar or ejecutor()
         hilo = threading.Thread(
             target=self._correr,
-            args=(pregunta, foto, raiz, tuple(carpetas_extra or ()), ejecutar,
-                  respuesta, avance, arranque),
+            args=(con_imagenes(pregunta, imagenes), foto, raiz,
+                  tuple(carpetas_extra or ()), ejecutar, respuesta, avance,
+                  arranque),
             daemon=True)
         self._hilo = hilo
         hilo.start()

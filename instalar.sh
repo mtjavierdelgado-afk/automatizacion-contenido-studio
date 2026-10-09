@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # =============================================================================
-#  AS Video Studio — instalador para un VPS con Ubuntu.
+#  Automatización Contenido Studio — instalador para un VPS con Ubuntu.
 #
 #  Se pega UNA linea en la consola del servidor y esto deja el estudio montado,
 #  con su acceso por contrasena y su HTTPS:
@@ -762,7 +762,7 @@ despedida() {
 
   printf '\n%s' "$VERDE"
   printf '  ┌────────────────────────────────────────────────────────────┐\n'
-  printf '  │  AS Video Studio esta listo                                │\n'
+  printf '  │  Automatización Contenido Studio está listo                │\n'
   printf '  └────────────────────────────────────────────────────────────┘\n'
   printf '%s\n' "$N"
   printf '   Entra aqui:   %s%s://%s%s\n' "$B" "$ESQUEMA" "$DOMINIO" "$N"
@@ -786,7 +786,7 @@ despedida() {
 ESQUEMA="https"
 
 cabecera() {
-  printf '\n%s  AS Video Studio%s  ·  instalador %s\n' "$B" "$N" "$VERSION_INSTALADOR"
+  printf '\n%s  Automatización Contenido Studio%s  ·  instalador %s\n' "$B" "$N" "$VERSION_INSTALADOR"
   printf '%s  Convierte lo que escribas en un video narrado y animado.%s\n' "$GRIS" "$N"
   printf '%s  Esto tarda unos 5 minutos. No hay que hacer nada mientras.%s\n' "$GRIS" "$N"
 }

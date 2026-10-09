@@ -1,4 +1,4 @@
-# AS Video Studio
+# Automatización Contenido Studio
 
 Convierte **lo que escribas** —unas notas, un artículo pegado, una cronología, o
 tu propio guion— en un vídeo de animación narrada, pasando por ocho fases con

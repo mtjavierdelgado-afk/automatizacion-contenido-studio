@@ -2188,6 +2188,9 @@ function conmutarConfig(abrir) {
   const cajon = $('#config');
   const quiero = abrir === undefined ? cajon.classList.contains('plegado') : !!abrir;
   cajon.classList.toggle('plegado', !quiero);
+  // en el movil la burbuja se esconde mientras Configuracion esta abierta:
+  // si no, tapa los botones del fondo del cajon
+  document.body.classList.toggle('config-abierta', quiero);
   if (quiero) cargarClaves().then(repintarClaves);
   /* Al cerrar el cajón se para el latido: un sondeo que sigue corriendo detrás
      de una pantalla que nadie mira es una llamada por segundo para siempre. */
@@ -2275,6 +2278,9 @@ function pintarConfig() {
     caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo las claves…'));
     return;
   }
+  if (SISTEMA.notas === null && !SISTEMA.pedido) { SISTEMA.pedido = true; cargarSistema(); }
+  caja.appendChild(seccionNovedades());
+  caja.appendChild(seccionNotas());
   caja.appendChild(bloquePruebaClaves());
   caja.appendChild(seccionOpenAI(ficha));
   caja.appendChild(seccionCalidadImagen());
@@ -4582,8 +4588,55 @@ async function nuevoProyecto() {
   } catch (e) { toast(`no se ha podido crear: ${e.message}`, true); }
 }
 
+/* ---------------------------------------------------------- el tema y el pie
+ *
+ * EL TEMA: oscuro de fabrica, claro si se elige. Solo cambia un atributo en
+ * <html>; toda la paleta vive en variables de `estilo.css`, asi que no hay ni
+ * una regla que repetir. Se recuerda en el navegador (es de quien mira, no del
+ * servidor) y el <head> lo aplica antes de pintar para que no parpadee.
+ */
+const ICONO_TEMA = {
+  oscuro: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>',
+  claro: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+};
+
+function temaActual() {
+  return document.documentElement.getAttribute('data-tema') === 'claro' ? 'claro' : 'oscuro';
+}
+
+function aplicarTema(tema) {
+  const claro = tema === 'claro';
+  if (claro) document.documentElement.setAttribute('data-tema', 'claro');
+  else document.documentElement.removeAttribute('data-tema');
+  try { localStorage.setItem('tema', claro ? 'claro' : 'oscuro'); } catch (e) { /* sin almacen: dura la sesion */ }
+  const boton = document.getElementById('btn-tema');
+  if (boton) {
+    // el icono es el del tema AL QUE SE VA, como en cualquier conmutador
+    boton.innerHTML = ICONO_TEMA[claro ? 'oscuro' : 'claro'];
+    boton.title = claro ? 'Pasar a modo oscuro' : 'Pasar a modo claro';
+  }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute('content', getComputedStyle(document.documentElement)
+    .getPropertyValue('--panel').trim() || '#14122a');
+}
+
+/* EL PIE DEL SISTEMA. Va al final de cada pantalla, dentro del panel que
+   rueda: anclado abajo se comeria una franja en el movil, donde ya estan la
+   barra de pasos y la de mandos. */
+const PIE_SISTEMA = 'Todos los derechos reservados y creación pertenecen a '
+  + 'Agencia Redes Botánica · Octubre 2026 · V2.0';
+
+function pieSistema() {
+  return h('footer', { clase: 'pie-sistema' },
+    h('span', { clase: 'pie-marca' }, 'Automatización Contenido Studio'),
+    h('span', {}, PIE_SISTEMA));
+}
+
 function arrancar() {
   ponerMandosDeCabecera();
+  aplicarTema(temaActual());
+  $('#btn-tema').addEventListener('click', () =>
+    aplicarTema(temaActual() === 'claro' ? 'oscuro' : 'claro'));
   /* LA CLASE DEL <body>, ANTES QUE NADA. Hay cosas que se esconden con CSS y
      no con JS --el medidor de coste del vídeo y el botón de proyecto no
      significan nada mientras no haya un vídeo abierto--, y si esto llegara
@@ -4600,6 +4653,8 @@ function arrancar() {
   $('#btn-salir').addEventListener('click', () => salirDeStudio());
   cargarCuenta();
   montarAsistente();
+  montarAdjuntosAsistente();
+  montarBurbujaMinimizable();
   $('#btn-cerrar-config').addEventListener('click', () => conmutarConfig(false));
   // El catalogo de recetas se pide una vez al arrancar: de el salen la barra de
   // cada pestana y el ajuste RECORDADO de cada fase del CLI, asi que sin el los
@@ -5237,6 +5292,7 @@ function pintarLightAhora() {
   /* FUERA DE `contenido`, pegadas al panel: dentro se irían con el scroll del
      documento y dejarían de estar donde se las busca. Y fuera pueden ir de
      borde a borde, que dentro no: la columna tiene ancho maximo. */
+  contenido.appendChild(pieSistema());
   if (BARRA_INFERIOR.nodo) contenedor.appendChild(BARRA_INFERIOR.nodo);
   contenedor.appendChild(navLight());
 }
@@ -5963,29 +6019,106 @@ function formatoDelVideo() {
 /* `estilo` es el del vídeo cuando ya existe (el encargo de un vídeo abierto);
    sin él se estima con el estilo elegido en la galería, que es el de un vídeo
    que se está creando. */
+/* LA DURACION: de 1 s a 30 min. Tres formas de decirla, y las tres mueven lo
+   mismo: la barra (para ir rapido), los minutos y segundos (para afinar) y unas
+   duraciones tipicas de redes y de YouTube (para no tener que calcular). La
+   barra no es lineal: con 1.800 s en una barra recta, los primeros dos minutos
+   --donde viven los Reels y los Shorts-- ocupaban un dedo. Va por la raiz
+   cuadrada, que reparte el recorrido de forma que el corto se pueda elegir.
+
+   POR DEBAJO DE 10 s el estudio hace un video de 10 s: el guion necesita sitio
+   al menos para una frase, y el servidor lo sube solo (`p2_brief`). Se deja
+   escribir igual y se avisa, que es mejor que un tope que no se explica. */
+const DURACION_MIN_S = 1;
+const DURACION_MAX_S = 1800;
+const DURACION_MIN_REAL_S = 10;
+const DURACIONES_TIPICAS = [15, 30, 60, 90, 180, 300, 600, 1800];
+
+function textoDuracion(s) {
+  s = Math.round(Number(s) || 0);
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60), r = s % 60;
+  return r ? `${m} min ${r} s` : `${m} min`;
+}
+
 function duracionLight(e, estilo) {
   const linea = h('div', { clase: 'ritmo-linea' }, '…');
-  const numero = h('input', {
-    type: 'number', min: 30, max: 3600, step: 10, value: e.duracion_objetivo_s,
-    clase: 'duracion-num',
-  });
+  const aviso = h('div', { clase: 'duracion-aviso', hidden: true });
+  const grande = h('span', { clase: 'duracion-grande' });
+  const PASOS = 1000;
+  const aBarra = s => Math.round(Math.sqrt((s - DURACION_MIN_S) / (DURACION_MAX_S - DURACION_MIN_S)) * PASOS);
+  const deBarra = v => {
+    const s = DURACION_MIN_S + Math.pow(Number(v) / PASOS, 2) * (DURACION_MAX_S - DURACION_MIN_S);
+    // redondeo amable: de uno en uno abajo, de cinco en cinco arriba
+    return s < 120 ? Math.round(s) : Math.round(s / 5) * 5;
+  };
   const barra = h('input', {
-    type: 'range', min: 60, max: 1800, step: 30, value: e.duracion_objetivo_s,
-    clase: 'ritmo',
+    type: 'range', min: 0, max: PASOS, step: 1, clase: 'ritmo duracion-barra',
+    'aria-label': 'Duración objetivo',
   });
-  const mover = valor => {
-    e.duracion_objetivo_s = Math.max(30, Math.round(Number(valor) || 0));
-    numero.value = e.duracion_objetivo_s;
-    barra.value = Math.min(1800, Math.max(60, e.duracion_objetivo_s));
+  const minutos = h('input', {
+    type: 'number', min: 0, max: 30, step: 1, clase: 'duracion-num', inputmode: 'numeric',
+    'aria-label': 'Minutos',
+  });
+  const segundos = h('input', {
+    type: 'number', min: 0, max: 59, step: 1, clase: 'duracion-num', inputmode: 'numeric',
+    'aria-label': 'Segundos',
+  });
+  const chips = h('div', { clase: 'duracion-chips' });
+  // Lo que se ENSEÑA, no lo que se guarda: un vídeo antiguo con más de 30 min
+  // o sin duración se ve dentro del rango, pero su valor no se toca hasta que
+  // alguien mueva el control (escribirlo al pintar movería la firma del brief
+  // y dejaría obsoleto el vídeo sin que nadie pidiera nada: CLAUDE.md, regla 1).
+  const visible = () => Math.max(DURACION_MIN_S,
+    Math.min(DURACION_MAX_S, Math.round(Number(e.duracion_objetivo_s) || 60)));
+  const pintar = (desde) => {
+    const s = visible();
+    if (desde !== 'barra') barra.value = aBarra(s);
+    if (desde !== 'campos') {
+      minutos.value = Math.floor(s / 60);
+      segundos.value = s % 60;
+    }
+    grande.textContent = textoDuracion(s);
+    chips.querySelectorAll('button').forEach(b =>
+      b.classList.toggle('activo', Number(b.dataset.s) === s));
+    const corto = s < DURACION_MIN_REAL_S;
+    aviso.hidden = !corto;
+    aviso.textContent = corto
+      ? `Con ${s} s no cabe ni una frase narrada: el estudio hará el vídeo de `
+        + `${DURACION_MIN_REAL_S} s, que es lo mínimo para un guion.`
+      : '';
+  };
+  const mover = (valor, desde) => {
+    const n = Math.round(Number(valor));
+    e.duracion_objetivo_s = Math.max(DURACION_MIN_S,
+      Math.min(DURACION_MAX_S, Number.isFinite(n) ? n : DURACION_MIN_S));
+    pintar(desde);
     refrescarEstimacionLight(e, linea, estilo);
   };
-  barra.addEventListener('input', () => mover(barra.value));
-  numero.addEventListener('input', () => mover(numero.value));
+  DURACIONES_TIPICAS.forEach(t => chips.appendChild(h('button', {
+    type: 'button', clase: 'mini pastilla', 'data-s': t,
+    // `change` y no `input`: lo escucha el autoguardado del encargo, y la
+    // barra no tiene oyente de `change` que vuelva a mover el valor
+    onclick: () => { mover(t); barra.dispatchEvent(new Event('change', { bubbles: true })); },
+  }, textoDuracion(t))));
+  barra.addEventListener('input', () => mover(deBarra(barra.value), 'barra'));
+  const desdeCampos = () => mover(
+    (Number(minutos.value) || 0) * 60 + (Number(segundos.value) || 0), 'campos');
+  minutos.addEventListener('input', desdeCampos);
+  segundos.addEventListener('input', desdeCampos);
+  // al salir del campo se normaliza lo escrito (75 s -> 1 min 15 s)
+  [minutos, segundos].forEach(c => c.addEventListener('change', () => pintar()));
+  pintar();
   refrescarEstimacionLight(e, linea, estilo);
-  return h('div', { clase: 'campo' },
+  return h('div', { clase: 'campo duracion' },
     h('label', {}, 'Duración objetivo'),
-    h('div', { clase: 'fila' }, barra, numero, h('span', { clase: 'meta' }, 'segundos')),
-    linea);
+    h('div', { clase: 'duracion-cabeza' }, grande,
+      h('span', { clase: 'meta' }, `de ${DURACION_MIN_S} s a ${DURACION_MAX_S / 60} min`)),
+    barra,
+    h('div', { clase: 'duracion-campos' },
+      minutos, h('span', { clase: 'meta' }, 'min'),
+      segundos, h('span', { clase: 'meta' }, 's')),
+    chips, aviso, linea);
 }
 
 /* La línea de debajo de la duración: palabras, horquilla REAL de vuelta y de
@@ -9075,12 +9208,29 @@ function vistaCrearLight() {
 /* Una caja: a la izquierda QUÉ es, a la derecha el campo. Las dos columnas son
    de la caja y no de la pantalla — la pantalla es una sola columna a todo el
    ancho — y en vertical se apilan solas. */
+/* Que guia de escritura va con cada bloque. Se decide por el TITULO del bloque
+   para no tocar los seis sitios que los pintan: el titulo es lo que se ve, y si
+   cambia, la guia deja de salir (no sale una guia equivocada). */
+const GUIA_DE_BLOQUE = {
+  '🎨 Estilo gráfico': 'estilo_grafico',
+  '🗣️ Tono del guion': 'tono',
+  '🎙️ Voz': 'voz',
+  'El material': 'material',
+  'Las indicaciones': 'indicaciones',
+  'Las llamadas a la acción': 'cta',
+};
+
 function bloqueLight(titulo, porque, ...contenido) {
+  const mandos = h('div', { clase: 'mandos' }, ...contenido);
+  const guia = GUIA_DE_BLOQUE[titulo];
   return h('div', { clase: 'bloque-light' },
     h('div', { clase: 'titulo' },
-      h('h3', {}, titulo),
+      h('div', { clase: 'titulo-fila' },
+        h('h3', {}, titulo),
+        // la de las llamadas a la accion solo copia: el bloque tiene tres campos
+        guia ? botonGuia(guia, guia === 'cta' ? null : () => mandos.querySelector('textarea')) : null),
       porque ? h('span', { clase: 'meta' }, porque) : null),
-    h('div', { clase: 'mandos' }, ...contenido));
+    mandos);
 }
 
 /* HASTA CINCO VÍDEOS PARA EL TONO, y la razón de que sean varios no es
@@ -10408,7 +10558,7 @@ const INICIO = { abierta: false, paso: 0, arrancando: false, accesoFallido: '' }
    `estadoConfig()` (las claves y las cuentas del CLI, que son las mismas que
    ve Configuración). */
 const TARJETAS_INICIO = [
-  { id: 'bienvenida', titulo: 'Bienvenido a AS Video Studio', pinta: tarjetaBienvenidaInicio },
+  { id: 'bienvenida', titulo: 'Bienvenido a Automatización Contenido Studio', pinta: tarjetaBienvenidaInicio },
   { id: 'claude', titulo: '1 · Tu cuenta de Claude', pinta: tarjetaClaudeInicio },
   { id: 'openai', titulo: '2 · La clave de OpenAI (imágenes)', pinta: tarjetaOpenAIInicio },
   { id: 'cartesia', titulo: '3 · La clave de Cartesia (voz)', pinta: tarjetaCartesiaInicio },
@@ -10979,9 +11129,14 @@ async function enviarAlAsistente(reintento) {
     ASISTENTE.arranque = Date.now();
     ASISTENTE.charla = await pedir(API.mensajesAsistente(charla.id), {
       method: 'POST',
-      cuerpo: { texto, proyecto: APP.pid || '', pantalla: fotoDePantalla() },
+      cuerpo: {
+        texto, proyecto: APP.pid || '', pantalla: fotoDePantalla(),
+        imagenes: ADJUNTOS_ASISTENTE.map(i => i.nombre),
+      },
     });
     campo.value = '';
+    ADJUNTOS_ASISTENTE.length = 0;
+    pintarAdjuntosAsistente();
     pintarAsistente();
     latirAsistente();
   } catch (e) {
@@ -11141,7 +11296,10 @@ function vacioDelAsistente() {
 
 function burbujaDeTurno(turno) {
   if (turno.quien === 'tu') {
-    return h('div', { clase: 'turno tu' }, turno.texto);
+    const imgs = turno.imagenes || [];
+    return h('div', { clase: 'turno tu' }, turno.texto,
+      imgs.length ? h('div', { clase: 'turno-imagenes' }, imgs.map(n =>
+        h('img', { src: `${BASE}/api/asistente/imagenes/${n}`, alt: '', loading: 'lazy' }))) : null);
   }
   if (turno.estado === 'pensando') {
     const segundos = Math.max(0, Math.round((Date.now() - (ASISTENTE.arranque || Date.now())) / 1000));
@@ -11219,6 +11377,350 @@ function enLinea(texto) {
   }
   if (ultimo < texto.length) nodos.push(texto.slice(ultimo));
   return nodos;
+}
+
+/* ======================================================== GUÍAS DE ESCRITURA
+ *
+ * El botón «Guía» de cada campo de texto. Abre una ventana con lo que el
+ * sistema hace con ese texto, qué sí y qué no, una plantilla, un ejemplo y un
+ * prompt para pegar en otra IA. Las guías las sirve el servidor
+ * (`pasos/guias.py`), que es también de donde las lee el asistente: una sola
+ * fuente para las dos caras.
+ */
+const GUIAS = { lista: null, cargando: null };
+
+function cargarGuias() {
+  if (GUIAS.lista) return Promise.resolve(GUIAS.lista);
+  if (!GUIAS.cargando) {
+    GUIAS.cargando = pedir(`${BASE}/api/sistema/guias`)
+      .then(r => { GUIAS.lista = r.guias || []; return GUIAS.lista; })
+      .catch(e => { GUIAS.cargando = null; throw e; });
+  }
+  return GUIAS.cargando;
+}
+
+function botonGuia(id, campo) {
+  return h('button', {
+    type: 'button', clase: 'mini boton-guia',
+    title: 'Cómo escribir este campo para que el sistema lo entienda',
+    onclick: ev => { ev.preventDefault(); ev.stopPropagation(); abrirGuia(id, campo); },
+  }, '✦ Guía');
+}
+
+async function copiarTexto(texto) {
+  try {
+    await navigator.clipboard.writeText(texto);
+  } catch (e) {
+    // sin permiso de portapapeles (http sin candado): el truco de siempre
+    const area = h('textarea', { clase: 'copia-oculta' });
+    area.value = texto;
+    document.body.appendChild(area);
+    area.select();
+    try { document.execCommand('copy'); } finally { area.remove(); }
+  }
+  toast('copiado');
+}
+
+async function abrirGuia(id, campo) {
+  let lista;
+  try {
+    lista = await cargarGuias();
+  } catch (e) {
+    toast(`no se han podido leer las guías: ${e.message}`, true);
+    return;
+  }
+  const guia = lista.find(g => g.id === id);
+  if (!guia) { toast('esa guía no existe', true); return; }
+  const previa = document.getElementById('ventana-guia');
+  if (previa) previa.remove();
+  const destino = typeof campo === 'function' ? campo() : campo;
+
+  const cerrar = () => { velo.remove(); document.removeEventListener('keydown', alTeclear); };
+  const alTeclear = ev => { if (ev.key === 'Escape') cerrar(); };
+  document.addEventListener('keydown', alTeclear);
+
+  const usar = texto => {
+    if (!destino) return;
+    if (destino.value.trim() && !confirm('El campo ya tiene texto. ¿Lo reemplazo?')) return;
+    destino.value = texto;
+    destino.dispatchEvent(new Event('input', { bubbles: true }));
+    cerrar();
+    destino.focus();
+    toast('pegado en el campo: cambia lo que está entre corchetes');
+  };
+
+  const bloqueTexto = (titulo, texto, explicacion, conUsar) => h('div', { clase: 'guia-bloque' },
+    h('div', { clase: 'guia-bloque-cab' },
+      h('h4', {}, titulo),
+      h('span', { clase: 'crece' }),
+      conUsar && destino ? h('button', { clase: 'mini', onclick: () => usar(texto) }, 'Usar en el campo') : null,
+      h('button', { clase: 'mini primario', onclick: () => copiarTexto(texto) }, 'Copiar')),
+    explicacion ? h('div', { clase: 'meta' }, explicacion) : null,
+    h('pre', { clase: 'guia-texto' }, texto));
+
+  const lista2 = (titulo, cosas, clase) => h('div', { clase: `guia-lista ${clase}` },
+    h('h4', {}, titulo),
+    h('ul', {}, cosas.map(c => h('li', {}, c))));
+
+  const cuadro = h('div', { clase: 'cuadro-guia', role: 'dialog', 'aria-label': guia.titulo },
+    h('div', { clase: 'guia-cab' },
+      h('div', {},
+        h('div', { clase: 'guia-etiqueta' }, 'Guía de escritura'),
+        h('h2', {}, guia.titulo),
+        h('div', { clase: 'meta' }, guia.donde)),
+      h('button', { clase: 'mini fantasma', title: 'Cerrar', onclick: cerrar }, '×')),
+    h('div', { clase: 'guia-cuerpo' },
+      lista2('Qué hace el sistema con este texto', guia.que_hace, 'info'),
+      h('div', { clase: 'guia-dos' },
+        lista2('Sí', guia.si, 'si'),
+        lista2('No', guia.no, 'no')),
+      bloqueTexto('Plantilla', guia.plantilla,
+        'Rellena lo que está entre corchetes y borra lo que no aplique.', true),
+      bloqueTexto('Ejemplo', guia.ejemplo, '', true),
+      bloqueTexto('Prompt para otra IA', guia.prompt_ia,
+        'Pégalo en ChatGPT o Claude con tus notas al final: te devuelve el texto '
+        + 'listo para este campo.', false)));
+  const velo = h('div', { id: 'ventana-guia', clase: 'velo-guia', onclick: ev => { if (ev.target === velo) cerrar(); } },
+    cuadro);
+  document.body.appendChild(velo);
+}
+
+/* ============================================================ NOVEDADES Y NOTAS
+ *
+ * Dos secciones de Configuración. NOVEDADES es el historial de cambios del
+ * sistema (`docs/NOVEDADES.md`, que viaja con el código). NOTAS DE MEJORAS es
+ * una lista que se escribe aquí y se guarda en el servidor, con los datos: lo
+ * que se quiere corregir o añadir más adelante. El asistente lee las dos.
+ */
+const SISTEMA = { novedades: null, notas: null, error: '' };
+
+async function cargarSistema() {
+  try {
+    const [nov, notas] = await Promise.all([
+      pedir(`${BASE}/api/sistema/novedades`), pedir(`${BASE}/api/sistema/notas`)]);
+    SISTEMA.novedades = nov;
+    SISTEMA.notas = notas.notas || [];
+    SISTEMA.error = '';
+  } catch (e) {
+    SISTEMA.error = e.message;
+  }
+  repintarClaves();
+}
+
+/* El Markdown de un fichero viene partido a 80 columnas, y el pintor del
+   asistente trata cada salto como un parrafo: las frases salian cortadas por la
+   mitad. Aqui se vuelven a unir las lineas de un mismo parrafo o de un mismo
+   punto de lista, y se quitan las rayas de separacion. */
+function unirLineas(texto) {
+  const salida = [];
+  String(texto || '').replace(/\r/g, '').split('\n').forEach(linea => {
+    if (/^\s*---+\s*$/.test(linea)) return;
+    const previa = salida.length ? salida[salida.length - 1] : '';
+    const sigue = linea.trim() && previa.trim()
+      && !/^\s*([-*•]|\d+[.)])\s+/.test(linea) && !/^#{1,6}\s/.test(linea)
+      && !/^#{1,6}\s/.test(previa);
+    if (sigue) salida[salida.length - 1] = `${previa.trimEnd()} ${linea.trim()}`;
+    else salida.push(linea);
+  });
+  return salida.join('\n');
+}
+
+function seccionNovedades() {
+  const caja = h('details', { clase: 'bloque-config plegable-config' });
+  const nov = SISTEMA.novedades;
+  caja.appendChild(h('summary', {},
+    h('h3', {}, 'Novedades'),
+    h('span', { clase: 'pastilla' }, nov ? `V${nov.version}` : '…')));
+  if (SISTEMA.error) caja.appendChild(h('div', { clase: 'meta' }, SISTEMA.error));
+  else if (!nov) caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+  else if (!nov.texto) caja.appendChild(h('div', { clase: 'meta' }, 'sin novedades escritas'));
+  else caja.appendChild(h('div', { clase: 'novedades' }, textoConFormato(unirLineas(nov.texto))));
+  return caja;
+}
+
+function seccionNotas() {
+  const caja = h('section', { clase: 'bloque-config' },
+    h('h3', {}, 'Notas de mejoras'),
+    h('div', { clase: 'pista' },
+      'Apunta lo que quieras corregir o añadir más adelante. Se guarda en el '
+      + 'servidor y el asistente lo lee. Para que Claude lo trabaje en otra '
+      + 'conversación, cópiale la lista con «Copiar todas».'));
+  const notas = SISTEMA.notas;
+  if (notas === null) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+    return caja;
+  }
+  const nueva = h('textarea', { rows: 2, placeholder: 'Ej.: que el subtítulo vaya más arriba en vertical' });
+  caja.appendChild(h('div', { clase: 'nota-nueva' }, nueva,
+    h('button', {
+      clase: 'mini primario',
+      onclick: async () => {
+        const texto = nueva.value.trim();
+        if (!texto) { toast('escribe la nota', true); return; }
+        try {
+          await pedir(`${BASE}/api/sistema/notas`, { method: 'POST', cuerpo: { texto } });
+          nueva.value = '';
+          cargarSistema();
+        } catch (e) { toast(e.message, true); }
+      },
+    }, 'Añadir')));
+  const pendientes = notas.filter(n => n.estado !== 'hecha');
+  const hechas = notas.filter(n => n.estado === 'hecha');
+  const fila = nota => h('div', { clase: 'nota' + (nota.estado === 'hecha' ? ' hecha' : '') },
+    h('input', {
+      type: 'checkbox', checked: nota.estado === 'hecha',
+      title: nota.estado === 'hecha' ? 'Marcar como pendiente' : 'Marcar como hecha',
+      onchange: async ev => {
+        try {
+          await pedir(`${BASE}/api/sistema/notas/${nota.id}`, {
+            method: 'PUT', cuerpo: { estado: ev.target.checked ? 'hecha' : 'pendiente' } });
+          cargarSistema();
+        } catch (e) { toast(e.message, true); }
+      },
+    }),
+    h('div', { clase: 'nota-texto' },
+      h('div', {}, nota.texto),
+      h('div', { clase: 'meta' }, nota.estado === 'hecha'
+        ? `hecha el ${nota.hecha_el || '—'}` : `apuntada el ${nota.fecha}`)),
+    h('button', {
+      clase: 'mini fantasma', title: 'Borrar la nota',
+      onclick: async () => {
+        if (!confirm('¿Borrar esta nota?')) return;
+        try {
+          await pedir(`${BASE}/api/sistema/notas/${nota.id}`, { method: 'DELETE' });
+          cargarSistema();
+        } catch (e) { toast(e.message, true); }
+      },
+    }, '×'));
+  if (!notas.length) caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay ninguna.'));
+  pendientes.forEach(n => caja.appendChild(fila(n)));
+  if (hechas.length) {
+    caja.appendChild(h('div', { clase: 'nota-separador' }, `Hechas (${hechas.length})`));
+    hechas.forEach(n => caja.appendChild(fila(n)));
+  }
+  if (notas.length) {
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('button', {
+        clase: 'mini',
+        onclick: () => copiarTexto(
+          'NOTAS DE MEJORAS de Automatización Contenido Studio\n\n'
+          + (pendientes.length ? 'PENDIENTES:\n' + pendientes.map(n => `- ${n.texto}`).join('\n') : 'Sin pendientes.')
+          + (hechas.length ? '\n\nHECHAS:\n' + hechas.map(n => `- ${n.texto}`).join('\n') : '')),
+      }, 'Copiar todas')));
+  }
+  return caja;
+}
+
+/* ===================================================== EL ASISTENTE: IMÁGENES
+ *
+ * Se pegan (Ctrl+V), se arrastran al cajón o se eligen con el clip. Se suben
+ * al momento y lo que viaja con la pregunta son sus nombres; el servidor las
+ * guarda donde el asistente puede abrirlas.
+ */
+const ADJUNTOS_ASISTENTE = [];
+const MAX_ADJUNTOS_ASISTENTE = 6;
+
+async function adjuntarAlAsistente(ficheros) {
+  const imagenes = [...ficheros].filter(f => /^image\/(png|jpe?g|webp)$/.test(f.type));
+  if (!imagenes.length) { toast('solo imágenes PNG, JPG o WEBP', true); return; }
+  const sitio = MAX_ADJUNTOS_ASISTENTE - ADJUNTOS_ASISTENTE.length;
+  if (sitio <= 0) { toast(`como mucho ${MAX_ADJUNTOS_ASISTENTE} imágenes por pregunta`, true); return; }
+  const datos = new FormData();
+  imagenes.slice(0, sitio).forEach((f, i) => {
+    const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    datos.append('imagenes', f, f.name && /\.\w+$/.test(f.name) ? f.name : `pegada-${i}.${ext}`);
+  });
+  try {
+    const r = await pedir(`${BASE}/api/asistente/imagenes`, { method: 'POST', cuerpo: datos });
+    (r.imagenes || []).forEach(img => ADJUNTOS_ASISTENTE.push(img));
+    (r.avisos || []).forEach(a => toast(a, true));
+  } catch (e) {
+    toast(e.message, true);
+  }
+  pintarAdjuntosAsistente();
+}
+
+function pintarAdjuntosAsistente() {
+  const tira = $('#asistente-adjuntos');
+  if (!tira) return;
+  vaciar(tira);
+  tira.hidden = !ADJUNTOS_ASISTENTE.length;
+  ADJUNTOS_ASISTENTE.forEach((img, i) => tira.appendChild(h('div', { clase: 'adjunto' },
+    h('img', { src: `${BASE}/api/asistente/imagenes/${img.nombre}`, alt: img.origen || '' }),
+    h('button', {
+      clase: 'quitar', title: 'Quitar',
+      onclick: () => { ADJUNTOS_ASISTENTE.splice(i, 1); pintarAdjuntosAsistente(); },
+    }, '×'))));
+}
+
+function montarAdjuntosAsistente() {
+  const pie = $('#asistente-pie');
+  const campo = $('#asistente-texto');
+  if (!pie || !campo) return;
+  const tira = h('div', { id: 'asistente-adjuntos', clase: 'asistente-adjuntos', hidden: true });
+  pie.insertBefore(tira, campo);
+  const entrada = h('input', {
+    type: 'file', accept: 'image/png,image/jpeg,image/webp', multiple: true, clase: 'oculto',
+    onchange: ev => { adjuntarAlAsistente(ev.target.files); ev.target.value = ''; },
+  });
+  const clip = h('button', {
+    clase: 'mini fantasma', title: 'Adjuntar imágenes (también puedes pegarlas con Ctrl+V)',
+    onclick: () => entrada.click(),
+  }, '📎 Imagen');
+  const mandos = pie.querySelector('.asistente-mandos');
+  if (mandos) mandos.insertBefore(clip, mandos.firstChild);
+  pie.appendChild(entrada);
+  campo.addEventListener('paste', ev => {
+    const ficheros = [...((ev.clipboardData || {}).files || [])];
+    if (ficheros.length) { ev.preventDefault(); adjuntarAlAsistente(ficheros); }
+  });
+  const cajon = $('#asistente');
+  ['dragenter', 'dragover'].forEach(n => cajon.addEventListener(n, ev => {
+    if ([...((ev.dataTransfer || {}).types || [])].includes('Files')) {
+      ev.preventDefault(); cajon.classList.add('soltando');
+    }
+  }));
+  ['dragleave', 'drop'].forEach(n => cajon.addEventListener(n, ev => {
+    if (n === 'dragleave' && cajon.contains(ev.relatedTarget)) return;
+    cajon.classList.remove('soltando');
+  }));
+  cajon.addEventListener('drop', ev => {
+    const ficheros = [...((ev.dataTransfer || {}).files || [])];
+    if (ficheros.length) { ev.preventDefault(); adjuntarAlAsistente(ficheros); }
+  });
+}
+
+/* ===================================================== LA BURBUJA, MINIMIZABLE
+ *
+ * La «×» pequeña de la burbuja la esconde en una pestaña fina en el borde
+ * derecho, que no tapa nada; tocar la pestaña la devuelve. Se recuerda en el
+ * navegador: en el móvil se minimiza una vez y se queda así.
+ */
+function montarBurbujaMinimizable() {
+  const burbuja = $('#burbuja-asistente');
+  if (!burbuja) return;
+  const pestana = h('button', {
+    id: 'pestana-asistente', clase: 'pestana-asistente',
+    title: 'Mostrar el asistente', 'aria-label': 'Mostrar el asistente',
+    onclick: () => minimizarBurbuja(false),
+  }, h('span', {}, '‹'));
+  const cerrar = h('button', {
+    clase: 'minimizar-burbuja', title: 'Minimizar el asistente', 'aria-label': 'Minimizar el asistente',
+    onclick: ev => { ev.stopPropagation(); minimizarBurbuja(true); },
+  }, '–');
+  document.body.appendChild(pestana);
+  document.body.appendChild(cerrar);
+  let guardado = '';
+  try { guardado = localStorage.getItem('asistente.minimizado') || ''; } catch (e) { /* nada */ }
+  minimizarBurbuja(guardado === '1', true);
+}
+
+function minimizarBurbuja(si, sinGuardar) {
+  document.body.classList.toggle('burbuja-minimizada', !!si);
+  if (si && ASISTENTE.abierto) conmutarAsistente(false);
+  if (!sinGuardar) {
+    try { localStorage.setItem('asistente.minimizado', si ? '1' : ''); } catch (e) { /* nada */ }
+  }
 }
 
 /* ARRANCA AQUI, Y ESTA LINEA VA LA ULTIMA DEL FICHERO A PROPOSITO.

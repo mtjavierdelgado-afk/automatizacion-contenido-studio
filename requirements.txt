@@ -1,4 +1,4 @@
-# Lo que necesita AS Video Studio para arrancar, con version fija.
+# Lo que necesita Automatización Contenido Studio para arrancar, con version fija.
 #
 # POR QUE FIJA Y NO "lo ultimo": esto se instala en la maquina de otra persona,
 # a la que no se le puede pedir que depure un fallo de una version que salio

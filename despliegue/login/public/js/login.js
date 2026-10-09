@@ -3,6 +3,11 @@
 (function () {
   'use strict';
 
+  /* El tema que se eligio dentro de la aplicacion (mismo origen, misma marca). */
+  try {
+    if (localStorage.getItem('tema') === 'claro') document.documentElement.setAttribute('data-tema', 'claro');
+  } catch (e) { /* sin almacen: el oscuro */ }
+
   const form       = document.getElementById('loginForm');
   const password   = document.getElementById('password');
   const submit     = document.getElementById('submit');
@@ -32,9 +37,9 @@
   /* Y se dice cual es, que si no el login de la v2 no se distingue del de la v1. */
   (function marcarVersion() {
     if (!window.location.pathname.startsWith('/v2/')) return;
-    document.title = 'Acceso · AS Video Studio';
+    document.title = 'Acceso · Automatización Contenido Studio';
     const sub = document.querySelector('.card__sub');
-    if (sub) sub.textContent = 'AS Video Studio';
+    if (sub) sub.textContent = 'Automatización Contenido Studio';
   })();
 
   /* --- token anti-CSRF: se pide al cargar y se refresca si caduca ---------- */

@@ -95,7 +95,9 @@ def comun_tokens(sobre):
     return {"entrada": int(uso.get("input_tokens") or 0),
             "salida": int(uso.get("output_tokens") or 0)}
 
-VERSION = "1.0"
+VERSION = "2.0"
+#: Como se llama el producto en pantalla, en los avisos y en la documentacion.
+NOMBRE_PRODUCTO = "Automatización Contenido Studio"
 RAIZ_POR_DEFECTO = os.path.join(RAIZ_ESTUDIO, "proyectos")
 RAIZ_WEB = os.path.join(RAIZ_ESTUDIO, "web")
 ID_VALIDO = re.compile(r"^[a-z0-9_]+$")
@@ -757,7 +759,7 @@ def url_de(pid, ruta_absoluta, raiz):
 
 # ------------------------------------------------------------------ aplicacion
 
-app = FastAPI(title="Estudio de Video", version=VERSION,
+app = FastAPI(title=NOMBRE_PRODUCTO, version=VERSION,
               description="API del estudio: grafo de build, pasos y revision.")
 
 
@@ -6555,6 +6557,234 @@ def foto_del_asistente(proyecto: str = Query(default=""),
     return {"foto": foto, "caracteres": len(foto)}
 
 
+# ------------------------------------------------------------ el sistema
+# Lo que no es de ningun video ni de ningun estilo: las guias de escritura, la
+# lista de novedades y las notas de mejoras que se le dejan a quien mantenga
+# el codigo. Las notas son DATOS (viven con los proyectos, fuera del codigo,
+# para que `asvs actualizar` no se las lleve); las novedades y las guias son
+# del codigo y viajan con el.
+
+def _guias():
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    return PASOS_MODULOS.guias
+
+
+@app.get("/api/sistema/guias")
+def guias_de_escritura():
+    """Como rellenar cada campo de texto: plantilla, ejemplo y prompt para otra IA."""
+    modulo = _guias()
+    return {"guias": modulo.listar()}
+
+
+RUTA_NOVEDADES = os.path.join(RAIZ_ESTUDIO, "docs", "NOVEDADES.md")
+
+
+@app.get("/api/sistema/novedades")
+def novedades_del_sistema():
+    """El historial de cambios, tal cual esta en docs/NOVEDADES.md."""
+    try:
+        with open(RUTA_NOVEDADES, encoding="utf-8") as fh:
+            texto = fh.read()
+    except OSError:
+        texto = ""
+    return {"version": VERSION, "producto": NOMBRE_PRODUCTO, "texto": texto}
+
+
+#: Las notas de mejoras: una lista corta que se edita desde Configuracion. En
+#: la carpeta de proyectos, con guion bajo para que no se liste como video.
+MAX_NOTAS_MEJORAS = 300
+MAX_TEXTO_NOTA_MEJORA = 4000
+ESTADOS_NOTA_MEJORA = ("pendiente", "hecha")
+_LOCK_NOTAS_MEJORAS = threading.Lock()
+
+
+def _ruta_notas_mejoras():
+    return os.path.join(raiz_proyectos(), "_sistema", "notas.json")
+
+
+def _leer_notas_mejoras():
+    try:
+        with open(_ruta_notas_mejoras(), encoding="utf-8") as fh:
+            datos = json.load(fh)
+        notas = datos.get("notas") if isinstance(datos, dict) else None
+        return [n for n in (notas or []) if isinstance(n, dict) and n.get("id")]
+    except (OSError, ValueError):
+        return []
+
+
+def _escribir_notas_mejoras(notas):
+    ruta = _ruta_notas_mejoras()
+    os.makedirs(os.path.dirname(ruta), exist_ok=True)
+    temporal = f"{ruta}.{uuid.uuid4().hex[:8]}.tmp"
+    with open(temporal, "w", encoding="utf-8") as fh:
+        json.dump({"notas": notas}, fh, ensure_ascii=False, indent=2)
+    os.replace(temporal, ruta)
+
+
+def _texto_de_nota_mejora(datos):
+    texto = str((datos or {}).get("texto") or "").strip()
+    if not texto:
+        raise ErrorApi(400, "la nota está vacía")
+    if len(texto) > MAX_TEXTO_NOTA_MEJORA:
+        raise ErrorApi(400, f"la nota pasa de {MAX_TEXTO_NOTA_MEJORA} caracteres")
+    return texto
+
+
+@app.get("/api/sistema/notas")
+def listar_notas_mejoras():
+    """Las notas de mejoras futuras, las pendientes primero."""
+    with _LOCK_NOTAS_MEJORAS:
+        notas = _leer_notas_mejoras()
+    notas.sort(key=lambda n: (n.get("estado") == "hecha", n.get("fecha") or ""),
+               reverse=False)
+    return {"notas": notas, "ruta": _ruta_notas_mejoras()}
+
+
+@app.post("/api/sistema/notas", status_code=201)
+def crear_nota_mejora(cuerpo: dict = Body(default=None)):
+    """Apunta una mejora para hacer mas adelante."""
+    texto = _texto_de_nota_mejora(_cuerpo(cuerpo))
+    with _LOCK_NOTAS_MEJORAS:
+        notas = _leer_notas_mejoras()
+        if len(notas) >= MAX_NOTAS_MEJORAS:
+            raise ErrorApi(400, f"hay {MAX_NOTAS_MEJORAS} notas: borra o marca como hechas "
+                                f"las que ya no hagan falta")
+        nota = {"id": uuid.uuid4().hex[:10], "texto": texto, "estado": "pendiente",
+                "fecha": time.strftime("%Y-%m-%d %H:%M"), "hecha_el": ""}
+        notas.append(nota)
+        _escribir_notas_mejoras(notas)
+    return {"nota": nota}
+
+
+@app.put("/api/sistema/notas/{nid}")
+def cambiar_nota_mejora(nid: str, cuerpo: dict = Body(default=None)):
+    """Cambia el texto de una nota o la marca como hecha / pendiente."""
+    datos = _cuerpo(cuerpo)
+    with _LOCK_NOTAS_MEJORAS:
+        notas = _leer_notas_mejoras()
+        nota = next((n for n in notas if n.get("id") == nid), None)
+        if nota is None:
+            raise ErrorApi(404, f"no hay ninguna nota {nid}")
+        if "texto" in datos:
+            nota["texto"] = _texto_de_nota_mejora(datos)
+        if "estado" in datos:
+            estado = str(datos.get("estado") or "")
+            if estado not in ESTADOS_NOTA_MEJORA:
+                raise ErrorApi(400, f"estado desconocido: {estado!r}")
+            nota["estado"] = estado
+            nota["hecha_el"] = time.strftime("%Y-%m-%d %H:%M") if estado == "hecha" else ""
+        _escribir_notas_mejoras(notas)
+    return {"nota": nota}
+
+
+@app.delete("/api/sistema/notas/{nid}")
+def borrar_nota_mejora(nid: str):
+    with _LOCK_NOTAS_MEJORAS:
+        notas = _leer_notas_mejoras()
+        quedan = [n for n in notas if n.get("id") != nid]
+        if len(quedan) == len(notas):
+            raise ErrorApi(404, f"no hay ninguna nota {nid}")
+        _escribir_notas_mejoras(quedan)
+    return {"borrada": nid}
+
+
+# ------------------------------------------- las imagenes que se le pegan al asistente
+# Van a la carpeta de proyectos (que el asistente puede leer: es su `--add-dir`)
+# con un nombre que no dice nada, y en la pregunta viaja la ruta para que el
+# CLI las abra con Read. Se borran solas a los siete dias.
+CARPETA_IMAGENES_ASISTENTE = os.path.join("_asistente", "imagenes")
+MAX_IMAGENES_ASISTENTE = 6
+CADUCIDAD_IMAGENES_ASISTENTE_S = 7 * 24 * 3600
+
+
+def _carpeta_imagenes_asistente(crear=False):
+    carpeta = os.path.join(raiz_proyectos(), CARPETA_IMAGENES_ASISTENTE)
+    if crear:
+        os.makedirs(carpeta, exist_ok=True)
+    return carpeta
+
+
+def _barrer_imagenes_asistente():
+    carpeta = _carpeta_imagenes_asistente()
+    if not os.path.isdir(carpeta):
+        return
+    limite = time.time() - CADUCIDAD_IMAGENES_ASISTENTE_S
+    for nombre in os.listdir(carpeta):
+        ruta = os.path.join(carpeta, nombre)
+        try:
+            if os.path.isfile(ruta) and os.path.getmtime(ruta) < limite:
+                os.remove(ruta)
+        except OSError:
+            pass
+
+
+def _rutas_imagenes_asistente(nombres):
+    """De los nombres que devolvio la subida a rutas de verdad, validados."""
+    carpeta = _carpeta_imagenes_asistente()
+    rutas = []
+    for nombre in list(nombres or [])[:MAX_IMAGENES_ASISTENTE]:
+        limpio = os.path.basename(str(nombre or ""))
+        if not re.fullmatch(r"[0-9a-f]{12}\.(png|jpg|jpeg|webp)", limpio):
+            raise ErrorApi(400, f"imagen desconocida: {nombre!r}")
+        ruta = os.path.join(carpeta, limpio)
+        if not os.path.isfile(ruta):
+            raise ErrorApi(400, f"esa imagen ya no está: {limpio}; vuelve a pegarla")
+        rutas.append(ruta)
+    return rutas
+
+
+@app.post("/api/asistente/imagenes", status_code=201)
+async def subir_imagenes_asistente(peticion: Request):
+    """Imagenes para la proxima pregunta al asistente (pegadas o adjuntas)."""
+    tipo = (peticion.headers.get("content-type") or "").lower()
+    if not tipo.startswith("multipart/"):
+        raise ErrorApi(400, "manda las imágenes como multipart")
+    try:
+        formulario = await peticion.form()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(400, f"multipart ilegible: {fallo}")
+    _barrer_imagenes_asistente()
+    carpeta = _carpeta_imagenes_asistente(crear=True)
+    guardadas, avisos = [], []
+    for _clave, valor in formulario.multi_items():
+        if not hasattr(valor, "read"):
+            continue
+        if len(guardadas) >= MAX_IMAGENES_ASISTENTE:
+            avisos.append(f"como mucho {MAX_IMAGENES_ASISTENTE} imágenes por pregunta")
+            break
+        origen = os.path.basename(str(getattr(valor, "filename", "") or "")) or "pegada.png"
+        extension = os.path.splitext(origen)[1].lower() or ".png"
+        if extension not in EXT_REPASO:
+            avisos.append(f"«{origen}» no es una imagen ({', '.join(EXT_REPASO)})")
+            continue
+        contenido = await valor.read()
+        if len(contenido) > MAX_BYTES_REPASO:
+            avisos.append(f"«{origen}» pesa {len(contenido) / 1024 / 1024:.1f} MB y el "
+                          f"tope son {MAX_BYTES_REPASO // 1024 // 1024}")
+            continue
+        nombre = f"{uuid.uuid4().hex[:12]}{extension}"
+        with open(os.path.join(carpeta, nombre), "wb") as fh:
+            fh.write(contenido)
+        guardadas.append({"nombre": nombre, "origen": origen, "bytes": len(contenido)})
+    if not guardadas and avisos:
+        raise ErrorApi(400, "no se ha podido guardar ninguna: " + "; ".join(avisos))
+    return {"imagenes": guardadas, "avisos": avisos}
+
+
+@app.get("/api/asistente/imagenes/{nombre}")
+def servir_imagen_asistente(nombre: str, peticion: Request):
+    """Una imagen pegada al asistente, para su miniatura en la charla."""
+    carpeta = _carpeta_imagenes_asistente()
+    try:
+        ruta = ruta_contenida(carpeta, os.path.basename(nombre))
+    except ValueError:
+        raise ErrorApi(404, f"esa imagen no está: {nombre}")
+    if not os.path.isfile(ruta):
+        raise ErrorApi(404, f"esa imagen no está: {nombre}")
+    return servir_fichero(peticion, ruta)
+
+
 @app.post("/api/asistente/charlas", status_code=201)
 def abrir_charla():
     """Abre una charla vacía con el asistente."""
@@ -6592,16 +6822,19 @@ def preguntar_al_asistente(cid: str, cuerpo: dict = Body(default=None)):
     if not listo and not modulo.simulado():
         raise ErrorApi(409, f"el asistente no puede contestar todavía: {motivo}")
     pid = str(datos.get("proyecto") or "").strip()
+    imagenes = _rutas_imagenes_asistente(datos.get("imagenes"))
     foto = _foto_para_asistente(pid, datos.get("pantalla"))
     try:
         ficha = charla.preguntar(texto, foto, raiz=RAIZ_ESTUDIO,
-                                 carpetas_extra=(raiz_proyectos(),), pid=pid)
+                                 carpetas_extra=(raiz_proyectos(),), pid=pid,
+                                 imagenes=imagenes)
     except modulo.Ocupada as fallo:
         raise ErrorApi(409, str(fallo))
     except modulo.ErrorAsistente as fallo:
         raise ErrorApi(400, str(fallo))
     anotar_global("asistente_pregunta", {"charla": cid, "proyecto": pid or None,
-                                         "caracteres": len(texto)})
+                                         "caracteres": len(texto),
+                                         "imagenes": len(imagenes)})
     return ficha
 
 

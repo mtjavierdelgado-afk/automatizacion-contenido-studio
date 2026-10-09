@@ -50,6 +50,14 @@ const config = {
   // desde la consola web de ese panel. Vacio, la pantalla enlaza al listado de
   // VPS y el resto de las instrucciones vale igual.
   hostingerVpsId: String(process.env.HOSTINGER_VPS_ID || '').trim(),
+
+  // A DONDE SE VA quien ya tiene sesion y abre el login. En esta instalacion el
+  // estudio vive en la raiz, asi que el defecto es `/`. El despliegue doble
+  // (v1 en la raiz con su panel de Node en `/studio`) lo declara con
+  // APP_INICIO=/studio. Antes estaba escrito `/studio` a fuego, y aqui esa ruta
+  // la contesta el estudio con un 404: quien volvia al login con la sesion
+  // abierta (un marcador, el boton Atras) acababa mirando un JSON de error.
+  inicio: (process.env.APP_INICIO || '/').trim() || '/',
 };
 
 if (!config.sessionSecret || config.sessionSecret.length < 32) {

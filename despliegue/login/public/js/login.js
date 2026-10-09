@@ -127,7 +127,7 @@
         submitText.textContent = 'Entrando…';
         // Redirección dura: que la página la sirva el servidor con la sesión ya
         // activa. A dónde, lo dice él (ver `destinoTrasLogin`).
-        window.location.assign(data.redirect || '/studio');
+        window.location.assign(data.redirect || '/');
         return;
       }
 

@@ -109,7 +109,7 @@ app.get('/api/_auth', (req, res) => {
 
 // ---------------------------------------------------------------- paginas
 app.get('/', (req, res) => {
-  res.redirect(req.session && req.session.userId ? '/studio' : '/login');
+  res.redirect(req.session && req.session.userId ? config.inicio : '/login');
 });
 
 // El login, uno por version. Es LA MISMA pantalla y la misma sesion: lo unico

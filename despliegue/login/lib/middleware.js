@@ -132,9 +132,9 @@ function requireAuth(req, res, next) {
 /** Si ya hay sesion, el login no tiene nada que preguntar: a su sitio. */
 function redirectIfAuthenticated(req, res, next) {
   if (!req.session || !req.session.userId) return next();
-  // El defecto de la v1 se queda como estaba (`/studio`, el panel de Node); el
-  // de la v2 es su portada, que es lo unico que sirve por ahi.
-  const casa = loginDe(req.path) === LOGIN_V2 ? '/v2/' : '/studio';
+  // El defecto es `config.inicio` (la raiz, donde vive el estudio; `/studio`
+  // en el despliegue doble, ver lib/config.js); el de la v2 es su portada.
+  const casa = loginDe(req.path) === LOGIN_V2 ? '/v2/' : config.inicio;
   return res.redirect(destinoTrasLogin(req.query && req.query.next, casa));
 }
 

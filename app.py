@@ -562,6 +562,18 @@ def _version_ligera(version):
     }
 
 
+def _params_cambiados(estado, paso_id, params):
+    """Las claves de params que difieren de las de la version activa."""
+    from nucleo.estado import CORRECCIONES
+    activa = next((v for v in estado.versiones(paso_id) if v.get("activa")), None)
+    if not activa:
+        return []
+    antes = activa.get("params") or {}
+    fuera = set(CORRECCIONES.get(paso_id) or ()) | {"unidades"}
+    claves = (set(antes) | set(params or {})) - fuera
+    return sorted(k for k in claves if antes.get(k) != (params or {}).get(k))
+
+
 def ficha_paso(ctx, paso_id, completa=False):
     """Ficha de un paso para la API: estado, params, salidas y unidades."""
     estado = ctx.estado
@@ -606,6 +618,12 @@ def ficha_paso(ctx, paso_id, completa=False):
         "trabajo_id": activo["id"] if activo else None,
         "params": params,
     }
+    # QUE HA CAMBIADO desde la version que hay, en los pasos de arriba: la
+    # pantalla lo necesita para decir POR QUE el guion quedo viejo («cambiaste
+    # la duracion») en vez de un «obsoleto» a secas que no dice que hacer. Solo
+    # aqui: son params pequenos y sin unidades.
+    if paso_id in ("ingesta", "brief", "guion") and ficha["estado"] == "obsoleto":
+        ficha["cambiado_desde"] = _params_cambiados(estado, paso_id, params)
     try:
         modulo = modulo_de(paso_id)
         ficha["descripcion"] = _describir(modulo, params)

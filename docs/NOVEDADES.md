@@ -49,6 +49,9 @@ vídeos, estilos, claves y contraseña no se tocan.
   dice qué hay que pulsar, con su botón y su coste: regenerar el guion si
   cambió el tono, **regrabar el audio** si cambió la voz, o poner al día las
   imágenes si cambió el estilo gráfico.
+- Cuando el guion queda marcado como viejo, el aviso dice **por qué** («cambió
+  la duración», «cambió el tono»…) y ofrece dos caminos: **regenerarlo** con lo
+  nuevo, o **grabar el audio con el texto tal cual** si ya te sirve.
 - Traer **no genera nada**: deja marcado lo que quedó viejo y se rehace al
   pulsar Generar. No pisa lo propio del vídeo: duración, formato, llamadas a la
   acción, indicaciones, qué lleva y lo editado a mano en el guion.

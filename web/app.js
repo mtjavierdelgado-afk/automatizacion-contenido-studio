@@ -12055,10 +12055,34 @@ function siguientePasoLight() {
     h('div', { clase: 'crece' }, h('strong', {}, 'Siguiente paso: '), texto),
     boton ? h('button', { clase: 'mini primario', disabled: corriendo, onclick: accion }, boton) : null);
   if (!v.guion) return null;
-  if (['brief', 'guion'].some(p => estado(p) === 'obsoleto')) {
-    return aviso('el guion quedó viejo con el tono nuevo. Regenéralo; después '
-      + 'habrá que grabar el audio otra vez.', 'Regenerar el guion',
-    () => lanzarTandaLight('guion', 'pendientes'));
+  if (['ingesta', 'brief', 'guion'].some(p => estado(p) === 'obsoleto')) {
+    const motivos = motivosGuionViejoLight();
+    const porque = motivos.length ? `cambió ${listaConY(motivos)} desde que se escribió`
+      : 'cambió algo de lo que se le pidió';
+    /* DOS CAMINOS, Y LOS DOS VALEN. Regenerar reescribe el texto con lo nuevo
+       (lo editado a mano se conserva); grabar tal cual usa el texto que ves.
+       Para un cambio que no toca lo que se dice --el aire entre bloques, por
+       ejemplo-- lo segundo es lo razonable, y no había forma de saberlo. */
+    // YA SE GRABÓ CON ESTE TEXTO: no se vuelve a ofrecer grabarlo, solo se
+    // recuerda que el guion se podría reescribir
+    if (v.audio && estado('voz') === 'listo') {
+      return h('div', { clase: 'caja-info siguiente-paso' },
+        h('div', { clase: 'crece' }, `El audio está grabado con el texto que ves. El `
+          + `guion sigue marcado como viejo porque ${porque}: regenéralo solo si `
+          + 'quieres que se reescriba con eso.'),
+        h('button', { clase: 'mini', disabled: corriendo,
+          onclick: () => lanzarTandaLight('guion', 'pendientes') }, 'Regenerar el guion'));
+    }
+    return h('div', { clase: 'caja-aviso siguiente-paso' },
+      h('div', { clase: 'crece' }, h('strong', {}, 'El guion está marcado como viejo: '),
+        `${porque}. Si quieres que se reescriba con eso, regenéralo (lo que editaste `
+        + 'a mano se conserva). Si el texto de abajo ya te sirve, '
+        + (v.audio ? 'puedes regrabar el audio con él tal cual.' : 'puedes generar el audio con él tal cual.')),
+      h('button', { clase: 'mini primario', disabled: corriendo,
+        onclick: () => lanzarTandaLight('guion', 'pendientes') }, 'Regenerar el guion'),
+      h('button', { clase: 'mini', disabled: corriendo,
+        onclick: () => lanzarTandaLight('voz', 'pendientes') },
+      v.audio ? 'Regrabar el audio tal cual' : 'Generar el audio tal cual'));
   }
   if (v.audio && estado('voz') === 'obsoleto') {
     const plan = textoDelPlan('voz');
@@ -12072,6 +12096,32 @@ function siguientePasoLight() {
       + 'que haya cambiado.', 'Poner al día las imágenes', () => lanzarTandaLight('video'));
   }
   return null;
+}
+
+/* Por qué quedó viejo el guion, en palabras: las claves que cambiaron desde su
+   versión (las da el servidor en `cambiado_desde`). */
+const MOTIVO_DE_CLAVE = {
+  texto: 'el material', titulo: 'el material', duracion_objetivo_s: 'la duración',
+  formato: 'el formato', instrucciones: 'el tono', palabras_por_bloque: 'el tamaño de bloque',
+  idioma_salida: 'el idioma', velocidad: 'la velocidad de la voz',
+  hueco_minimo: 'el aire entre bloques', voz_id: 'la voz', prompt_general: 'las indicaciones',
+  cta: 'las llamadas a la acción', variante_idioma: 'la variante del idioma',
+  guion_propio: 'si el material ya es el guion',
+};
+function motivosGuionViejoLight() {
+  const v = APP.light.video;
+  const motivos = [];
+  for (const paso of ['ingesta', 'brief', 'guion']) {
+    for (const clave of ((v.fichas[paso] || {}).cambiado_desde || [])) {
+      const motivo = MOTIVO_DE_CLAVE[clave] || 'un ajuste avanzado';
+      if (!motivos.includes(motivo)) motivos.push(motivo);
+    }
+  }
+  return motivos;
+}
+function listaConY(lista) {
+  return lista.length < 2 ? (lista[0] || '')
+    : `${lista.slice(0, -1).join(', ')} y ${lista[lista.length - 1]}`;
 }
 
 function usdCorto(usd) {

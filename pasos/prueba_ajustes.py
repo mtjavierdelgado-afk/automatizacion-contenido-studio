@@ -24,7 +24,7 @@ import tempfile
 # La salud de las cuentas del CLI (pasos/salud_cli.py) se apunta en CADA
 # llamada, tambien en las de los dobles de esta suite: sin redirigirla iria
 # al almacen de claves de verdad.
-os.environ.setdefault("ESTUDIO_SECRETOS", tempfile.mkdtemp(prefix="secretos_prueba_"))
+os.environ["ESTUDIO_SECRETOS"] = tempfile.mkdtemp(prefix="secretos_prueba_")
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -147,6 +147,31 @@ def prueba_orden():
     comprobar("CLAUDE_EFFORT" not in entorno
               and "MAX_THINKING_TOKENS" not in entorno,
               "el entorno del hijo va limpio de variables de razonamiento")
+
+    # Lo que sacaria al CLI de la suscripcion, y el token que se salta la
+    # carpeta de la cuenta elegida.
+    guardadas = {k: os.environ.get(k) for k in
+                 ("ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN")}
+    os.environ["ANTHROPIC_API_KEY"] = "sk-ant-api-de-mentira"
+    os.environ["CLAUDE_CODE_OAUTH_TOKEN"] = "token-de-mentira"
+    try:
+        defecto = cli_claude.entorno()
+        comprobar("ANTHROPIC_API_KEY" not in defecto,
+                  "una clave de API heredada NO llega al hijo (seria pago por uso)")
+        comprobar("CLAUDE_CODE_OAUTH_TOKEN" in defecto,
+                  "sin cuenta elegida, el token de la sesion por defecto se respeta")
+        elegida = cli_claude.entorno({"config_dir": "/una/carpeta"})
+        igual(elegida.get("CLAUDE_CONFIG_DIR"), "/una/carpeta",
+              "con cuenta elegida, el hijo va a su carpeta")
+        comprobar("CLAUDE_CODE_OAUTH_TOKEN" not in elegida,
+                  "y sin el token heredado, que mandaria sobre la carpeta y "
+                  "haria de todas las cuentas la misma")
+    finally:
+        for clave, valor in guardadas.items():
+            if valor is None:
+                os.environ.pop(clave, None)
+            else:
+                os.environ[clave] = valor
 
 
 class ProcesoFalso:
@@ -541,3 +566,37 @@ def prueba_retencion(carpeta):
     igual(len(comunes), estadisticas.MUESTRAS_POR_AJUSTE,
           f"y del ajuste usado se guardan las ultimas {estadisticas.MUESTRAS_POR_AJUSTE}")
 
+
+def main():
+    # EL HISTORICO DE TIEMPOS, A UNA CARPETA APARTE desde la primera linea: las
+    # secciones 4-6 llaman al CLI doblado y cada llamada se anota; sin esto
+    # expulsarian por antiguedad las muestras reales de la maquina.
+    carpeta = tempfile.mkdtemp(prefix="prueba_ajustes_")
+    os.environ["ESTUDIO_ESTADISTICAS"] = os.path.join(carpeta, "inicio.json")
+    try:
+        prueba_validacion()
+        prueba_tiempo()
+        prueba_orden()
+        prueba_ejecucion()
+        prueba_limite()
+        prueba_cadena()
+        prueba_login()
+        prueba_historico(carpeta)
+        prueba_recomendacion(carpeta)
+        prueba_retencion(carpeta)
+    finally:
+        shutil.rmtree(carpeta, ignore_errors=True)
+
+    if FALLOS:
+        print(f"\nFALLARON {len(FALLOS)} comprobaciones:")
+        for texto in FALLOS:
+            print(f"  - {texto}")
+        return 1
+    print("\nAJUSTES OK: todas las comprobaciones pasan")
+    return 0
+
+
+# SIN ESTO LA SUITE NO HACIA NADA: se importaba, definia sus funciones y salia
+# con codigo 0, y pruebas.ps1 la pintaba en verde con el resumen en blanco.
+if __name__ == "__main__":
+    sys.exit(main())

@@ -462,6 +462,11 @@ const API = {
   // Presets de canal: lo que se decide una vez por canal y se repite en cada
   // video. No son los presets de voz de /api/presets, que estan escritos en el
   // codigo y no se pueden ni crear ni borrar.
+  /* LA ESTRUCTURA DEL GUION: el orden de los bloques de ahora (con los
+     añadidos y partidos a mano) y lo que costaría regrabar lo cambiado. */
+  guionBloques: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/guion/bloques`,
+  guionBloque: (pid, bid) => `${BASE}/api/proyectos/${encodeURIComponent(pid)}`
+    + `/guion/bloques/${encodeURIComponent(bid)}`,
   regrabarSeccion: (pid, sid) => `${BASE}/api/proyectos/${encodeURIComponent(pid)}`
     + `/voz/secciones/${encodeURIComponent(sid)}/regrabar`,
   vozDescribir: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/voz/describir`,
@@ -5596,6 +5601,9 @@ APP.light.video = {
   promptGeneral: '',
   abierto: '',          // el bloque con la caja de prompt abierta
   editando: '',         // el bloque que se está editando a mano con la toma hecha
+  estructura: null,     // orden de los bloques y lo que costaría regrabar (servidor)
+  anadiendo: null,      // {texto, donde, ancla} del formulario de «Añadir bloque»
+  partiendo: null,      // {bid, trozos:[...]} del bloque que se está partiendo
   velocidad: 1,         // ×1..×5 del reproductor
   planos: [],           // los planos que van cayendo durante el render
   encargo: null,        // el formulario de crear un vídeo NUEVO
@@ -5810,15 +5818,45 @@ async function reengancharTandaLight(pid) {
 async function leerGuionLight() {
   const documento = await archivoDeVideoLight('guion', 'guion.json');
   if (!documento) return null;
-  const bloques = (documento.guion || documento.bloques || [])
+  let bloques = (documento.guion || documento.bloques || [])
     .map(b => ({ id: b.id, texto: b.texto || '' }));
   if (!bloques.length) return null;
+  /* EL ORDEN LO DA EL SERVIDOR: los bloques añadidos o partidos a mano no
+     están en guion.json, viven en params.guion y los coloca
+     `pasos/estructura_guion.py`. Un añadido entra con texto base vacío: su
+     texto es el del cajón de ediciones, como el de cualquier bloque tocado. */
+  const estructura = await leerEstructuraLight();
+  if (estructura && (estructura.bloques || []).length) {
+    const porId = {};
+    for (const b of bloques) porId[b.id] = b;
+    bloques = estructura.bloques.map(b => porId[b.id]
+      || { id: b.id, texto: '', insertado: true });
+  }
   return {
     titulo: documento.titulo || '',
     palabras: documento.palabras || 0,
     avisos: documento.avisos || [],
     bloques,
   };
+}
+
+async function leerEstructuraLight() {
+  const v = APP.light.video;
+  try {
+    v.estructura = await pedir(API.guionBloques(v.pid));
+  } catch (e) {
+    v.estructura = null;          // sin esto se ve el guion de disco, como antes
+  }
+  return v.estructura;
+}
+
+/* Lo que costaría regrabar, al día con lo último escrito. Sin repintar si hay
+   alguien escribiendo: repintar rehace el área de texto y le roba el cursor. */
+async function refrescarEstructuraLight() {
+  await leerEstructuraLight();
+  const activo = document.activeElement;
+  if (activo && activo.tagName === 'TEXTAREA') return;
+  pintarLight();
 }
 
 async function leerAudioLight() {
@@ -6999,6 +7037,26 @@ function bloquesLight() {
   for (const sec of ((v.audio || {}).secciones || [])) {
     for (const bid of (sec.bloques || [])) seccionDe[bid] = sec;
   }
+  /* un bloque AÑADIDO todavía no está en la toma: su sección es la que le
+     asigna el servidor (la del bloque grabado que tiene delante) */
+  const deServidor = ((v.estructura || {}).regrabar || {}).seccion_de || {};
+  for (const [bid, sid] of Object.entries(deServidor)) {
+    if (!seccionDe[bid]) seccionDe[bid] = { id: sid, bloques: [bid] };
+  }
+
+  const barra = barraRegrabarLight();
+  if (barra) lista.appendChild(barra);
+  lista.appendChild(v.anadiendo ? formularioAnadirLight() : h('div', { clase: 'fila acciones-guion' },
+    h('button', {
+      clase: 'mini fantasma', disabled: !!trabajoVideoLight(),
+      onclick: () => {
+        const ultimo = (v.guion.bloques[v.guion.bloques.length - 1] || {}).id;
+        v.anadiendo = { texto: '', donde: 'final', ancla: ultimo };
+        v.partiendo = null;
+        pintarLight();
+      },
+    }, '+ Añadir bloque'),
+    h('span', { clase: 'meta' }, 'antes o después de cualquier bloque, al principio o al final')));
 
   for (const bloque of v.guion.bloques) {
     const texto = textoDeBloqueLight(bloque);
@@ -7015,14 +7073,29 @@ function bloquesLight() {
        y «Editar a mano» lo cambia a un área para ese bloque y solo ese. */
     const editando = v.editando === bloque.id;
     const hayAudio = !!(conAudio && (conAudio.palabras || []).length);
+    const insertado = !!bloque.insertado;
     ficha.appendChild(h('div', { clase: 'cabecera' },
       h('span', { clase: 'id' }, bloque.id),
+      insertado ? h('span', { clase: 'pastilla nuevo' }, 'añadido') : null,
       bloqueEditadoLight(bloque) ? h('span', { clase: 'pastilla tocado' }, 'editado') : null,
       h('span', { clase: 'crece' }),
+      h('button', {
+        clase: 'mini fantasma', disabled: !!trabajoVideoLight(),
+        onclick: () => abrirPartirLight(bloque),
+      }, 'Partir'),
+      insertado ? h('button', {
+        clase: 'mini fantasma', disabled: !!trabajoVideoLight(),
+        onclick: () => quitarBloqueLight(bloque),
+      }, 'Quitar') : null,
       hayAudio ? h('button', {
         clase: 'mini fantasma',
-        onclick: () => {
+        onclick: async () => {
           v.editando = editando ? '' : bloque.id;
+          if (editando) {
+            // al cerrar la edición: guardar ya y saber qué costaría grabarla
+            await guardarBloquesPendientesLight();
+            await leerEstructuraLight();
+          }
           pintarLight();
         },
       }, editando ? 'Hecho' : 'Editar a mano') : null,
@@ -7034,14 +7107,24 @@ function bloquesLight() {
         },
       }, v.abierto === bloque.id ? 'Cerrar' : 'Cambiar con una frase')));
 
-    if (hayAudio && !editando) {
+    if (v.partiendo && v.partiendo.bid === bloque.id) {
+      ficha.appendChild(editorPartirLight());
+    } else if (hayAudio && !editando
+      && textoVisibleLight(texto) !== textoVisibleLight(conAudio.texto || texto)) {
+      /* ESCRITO Y TODAVÍA SIN GRABAR: se enseña lo escrito, no lo que suena.
+         El karaoke pinta las palabras de la toma —son las que tienen marca de
+         tiempo—, así que después de «Hecho» el bloque volvía a decir la frase
+         vieja y parecía que la edición se había perdido. */
+      ficha.appendChild(h('p', { clase: 'texto-bloque sin-grabar' }, textoVisibleLight(texto)));
+    } else if (hayAudio && !editando) {
       ficha.appendChild(parrafoKaraokeLight(bloque, conAudio, texto));
     } else {
       const visible = textoVisibleLight(texto);
       const area = h('textarea', {
         rows: Math.max(2, Math.ceil(visible.length / 90)),
         clase: 'texto-bloque',
-        oninput: ev => guardarBloqueLight(bloque.id, ev.target.value, texto),
+        oninput: ev => guardarBloqueLight(bloque.id, ev.target.value,
+          insertado ? undefined : bloque.texto, insertado),
       });
       area.value = visible;
       ficha.appendChild(area);
@@ -7095,7 +7178,8 @@ function parrafoKaraokeLight(bloque, conAudio, texto) {
    editor y el que `p4_voz` aplica al grabar — así una corrección a mano llega
    al audio sin volver a pedirle el guion entero al modelo. */
 let _guardadoBloqueLight = null;
-function guardarBloqueLight(bid, texto, original) {
+let _bloquesPorGuardarLight = null;
+function guardarBloqueLight(bid, texto, original, insertado) {
   const v = APP.light.video;
   const ficha = v.fichas.guion || {};
   ficha.params = ficha.params || {};
@@ -7104,20 +7188,238 @@ function guardarBloqueLight(bid, texto, original) {
      las anotaciones del TTS, así que guardarlo tal cual por haber puesto el
      cursor encima le quitaría sus pausas a un bloque que nadie ha tocado. Si de
      verdad se edita sí se pierden, y eso es lo que se pidió: una frase
-     reescrita ya no tiene las pausas donde las tenía. */
-  if (original !== undefined && texto === textoVisibleLight(original)) {
+     reescrita ya no tiene las pausas donde las tenía.
+     Un bloque AÑADIDO no tiene texto de origen: su texto vive SOLO aquí, así
+     que se guarda siempre y nunca se borra la entrada. */
+  if (!insertado && original !== undefined && texto === textoVisibleLight(original)) {
     delete ficha.params.bloques[bid];
   } else {
     ficha.params.bloques[bid] = { texto };
   }
+  _bloquesPorGuardarLight = ficha.params.bloques;
   clearTimeout(_guardadoBloqueLight);
-  _guardadoBloqueLight = setTimeout(async () => {
-    try {
-      await pedir(API.params(v.pid, 'guion'), {
-        method: 'PUT', cuerpo: { params: { bloques: ficha.params.bloques } },
-      });
-    } catch (err) { toast(`no se ha podido guardar: ${err.message}`, true); }
+  _guardadoBloqueLight = setTimeout(() => {
+    guardarBloquesPendientesLight().then(refrescarEstructuraLight);
   }, 700);
+}
+
+/* LO QUE QUEDA POR GUARDAR, YA. El autoguardado espera 700 ms a que se deje de
+   escribir, y «Hecho» + «Regrabar» se pulsan en menos: la regrabación salía
+   con el texto de antes de la última tecla. Todo lo que lee el guion del
+   servidor pasa antes por aquí. */
+async function guardarBloquesPendientesLight() {
+  clearTimeout(_guardadoBloqueLight);
+  const bloques = _bloquesPorGuardarLight;
+  _bloquesPorGuardarLight = null;
+  if (!bloques) return;
+  try {
+    await pedir(API.params(APP.light.video.pid, 'guion'), {
+      method: 'PUT', cuerpo: { params: { bloques } },
+    });
+  } catch (err) { toast(`no se ha podido guardar: ${err.message}`, true); }
+}
+
+/* LO QUE COSTARÍA DEJAR EL AUDIO DICIENDO EL GUION DE AHORA, antes de pulsar.
+   Sale del servidor (`/guion/bloques`), que es el mismo cálculo que hace la
+   regrabación: se regraban TODOS los tramos con cambios, no solo uno, porque
+   dejar uno a medias haría que el audio se declarase al día sin estarlo. */
+function regrabarPrevistoLight() {
+  const v = APP.light.video;
+  const previsto = (v.estructura || {}).regrabar;
+  if (!v.audio || !previsto) return null;
+  return previsto;
+}
+
+function textoCosteRegrabarLight(previsto) {
+  const tramos = (previsto.orden || previsto.pendientes || []).length;
+  const usd = Number(previsto.usd || 0);
+  return `${tramos} ${tramos === 1 ? 'tramo' : 'tramos'} del audio · ≈ `
+    + `${usd.toFixed(usd < 0.1 ? 3 : 2)} $`;
+}
+
+function barraRegrabarLight() {
+  const previsto = regrabarPrevistoLight();
+  if (!previsto) return null;
+  if (previsto.posible === false) {
+    return h('div', { clase: 'caja-aviso regrabar-pendiente' },
+      `El audio no se puede coser por tramos: ${previsto.por_que_no}`);
+  }
+  if (!(previsto.pendientes || []).length) return null;
+  return h('div', { clase: 'caja-aviso regrabar-pendiente' },
+    h('div', { clase: 'crece' },
+      h('strong', {}, 'Hay cambios sin grabar. '),
+      `Regrabarlos: ${textoCosteRegrabarLight(previsto)}. Las imágenes no se `
+      + 'tocan ahora: al generar el vídeo solo se pagan las de los planos con '
+      + 'texto nuevo.'),
+    h('button', {
+      clase: 'mini', disabled: !!trabajoVideoLight(),
+      onclick: () => regrabarPendientesLight(previsto.pendientes[0]),
+    }, 'Regrabar lo que he escrito'));
+}
+
+async function regrabarPendientesLight(seccion) {
+  const v = APP.light.video;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    await guardarBloquesPendientesLight();
+    const datos = await pedir(API.regrabarSeccion(v.pid, seccion), {
+      method: 'POST', cuerpo: { peticion: '' },
+    });
+    v.editando = '';
+    const tid = datos.trabajo_id || (datos.trabajo || {}).id;
+    if (!tid) throw new Error('el servidor no ha devuelto ningún trabajo');
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, tid, async trabajo => {
+      if (trabajo.estado === 'listo') await cargarVideoLight(v.pid);
+      pintarLight();
+    });
+    pintarLight();
+  } catch (err) { mostrarError(CLAVE_VIDEO_LIGHT, err); pintarLight(); }
+}
+
+/* ---- AÑADIR, PARTIR Y QUITAR BLOQUES ----
+ *
+ * Nada de esto cuesta: escribe en params.guion. Lo que cuesta es regrabar el
+ * tramo donde cae el cambio, y eso lo dice la barra de arriba con su precio.
+ * Los ids NO se renumeran: lo nuevo recibe el siguiente número libre. */
+function formularioAnadirLight() {
+  const v = APP.light.video;
+  const f = v.anadiendo;
+  const ids = (v.guion.bloques || []).map(b => b.id);
+  const area = h('textarea', {
+    rows: 3, clase: 'texto-bloque',
+    placeholder: 'El texto del bloque nuevo, tal y como se tiene que decir',
+    oninput: ev => { f.texto = ev.target.value; },
+  });
+  area.value = f.texto || '';
+  const donde = h('select', {
+    onchange: ev => { f.donde = ev.target.value; pintarLight(); },
+  }, ...[['despues', 'Después de'], ['antes', 'Antes de'],
+    ['principio', 'Al principio'], ['final', 'Al final']].map(([valor, texto]) =>
+    h('option', { value: valor, selected: f.donde === valor }, texto)));
+  const conAncla = f.donde === 'antes' || f.donde === 'despues';
+  const ancla = conAncla ? h('select', {
+    onchange: ev => { f.ancla = ev.target.value; },
+  }, ...ids.map(bid => {
+    const bloque = v.guion.bloques.find(b => b.id === bid);
+    const inicio = textoVisibleLight(textoDeBloqueLight(bloque)).split(' ')
+      .slice(0, 6).join(' ');
+    return h('option', { value: bid, selected: f.ancla === bid },
+      `${bid} · ${inicio}…`);
+  })) : null;
+  if (conAncla && !ids.includes(f.ancla)) f.ancla = ids[0];
+  return h('div', { clase: 'anadir-bloque' },
+    h('div', { clase: 'titulo-mandos' }, 'Añadir un bloque'),
+    cajaCampo(area, { clase: 'area' }),
+    h('div', { clase: 'fila' },
+      donde, ancla,
+      h('span', { clase: 'crece' }),
+      h('button', {
+        clase: 'mini fantasma',
+        onclick: () => { v.anadiendo = null; pintarLight(); },
+      }, 'Cancelar'),
+      h('button', {
+        clase: 'mini', disabled: !!trabajoVideoLight(),
+        onclick: () => anadirBloqueLight(),
+      }, 'Añadir')),
+    v.audio ? h('div', { clase: 'meta' },
+      'Después habrá que regrabar el tramo donde cae: la barra de arriba dice '
+      + 'cuánto cuesta antes de grabar.') : null);
+}
+
+async function anadirBloqueLight() {
+  const v = APP.light.video;
+  const f = v.anadiendo || {};
+  if (!String(f.texto || '').trim()) { toast('escribe el texto del bloque', true); return; }
+  try {
+    await guardarBloquesPendientesLight();
+    const datos = await pedir(API.guionBloques(v.pid), {
+      method: 'POST', cuerpo: { texto: f.texto, donde: f.donde, ancla: f.ancla },
+    });
+    v.anadiendo = null;
+    toast(`bloque ${datos.id} añadido`);
+    await cargarVideoLight(v.pid);
+  } catch (err) { toast(`no se ha podido añadir: ${err.message}`, true); }
+}
+
+function abrirPartirLight(bloque) {
+  const v = APP.light.video;
+  v.partiendo = { bid: bloque.id,
+    trozos: [textoVisibleLight(textoDeBloqueLight(bloque))] };
+  v.abierto = '';
+  v.editando = '';
+  pintarLight();
+}
+
+/* EL EDITOR DE CORTES: un área por trozo. «Cortar aquí» parte el área donde
+   está el cursor en dos; cada trozo se puede retocar antes de partir. */
+function editorPartirLight() {
+  const v = APP.light.video;
+  const p = v.partiendo;
+  const caja = h('div', { clase: 'partir-bloque' },
+    h('div', { clase: 'meta' }, 'Pon el cursor donde quieras cortar y pulsa '
+      + '«Cortar aquí». Puedes cortar varias veces. El primer trozo se queda en '
+      + `${p.bid}; los demás pasan a ser bloques nuevos justo debajo.`));
+  p.trozos.forEach((trozo, indice) => {
+    const area = h('textarea', {
+      rows: Math.max(2, Math.ceil(trozo.length / 90)), clase: 'texto-bloque trozo-partir',
+      oninput: ev => { p.trozos[indice] = ev.target.value; },
+    });
+    area.value = trozo;
+    caja.appendChild(h('div', { clase: 'trozo' },
+      h('span', { clase: 'pastilla' }, indice === 0 ? p.bid : `nuevo ${indice}`),
+      area,
+      h('button', {
+        clase: 'mini fantasma',
+        onclick: () => {
+          const corte = area.selectionStart;
+          const texto = area.value;
+          const antes = texto.slice(0, corte).trim();
+          const despues = texto.slice(corte).trim();
+          if (!antes || !despues) {
+            toast('pon el cursor dentro del texto, no al principio ni al final', true);
+            return;
+          }
+          p.trozos.splice(indice, 1, antes, despues);
+          pintarLight();
+        },
+      }, 'Cortar aquí')));
+  });
+  const validos = p.trozos.filter(t => String(t).trim()).length;
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('span', { clase: 'crece' }),
+    h('button', {
+      clase: 'mini fantasma', onclick: () => { v.partiendo = null; pintarLight(); },
+    }, 'Cancelar'),
+    h('button', {
+      clase: 'mini', disabled: validos < 2 || !!trabajoVideoLight(),
+      onclick: () => partirBloqueLight(),
+    }, validos < 2 ? 'Corta al menos una vez' : `Partir en ${validos} bloques`)));
+  return caja;
+}
+
+async function partirBloqueLight() {
+  const v = APP.light.video;
+  const p = v.partiendo;
+  try {
+    await guardarBloquesPendientesLight();
+    const datos = await pedir(`${API.guionBloque(v.pid, p.bid)}/partir`, {
+      method: 'POST', cuerpo: { trozos: p.trozos },
+    });
+    v.partiendo = null;
+    toast(`${p.bid} partido: ${[p.bid].concat(datos.nuevos || []).join(', ')}`);
+    await cargarVideoLight(v.pid);
+  } catch (err) { toast(`no se ha podido partir: ${err.message}`, true); }
+}
+
+async function quitarBloqueLight(bloque) {
+  const v = APP.light.video;
+  if (!confirm(`¿Quitar el bloque ${bloque.id}? Es uno añadido a mano.`)) return;
+  try {
+    await guardarBloquesPendientesLight();
+    await pedir(API.guionBloque(v.pid, bloque.id), { method: 'DELETE' });
+    toast(`bloque ${bloque.id} quitado`);
+    await cargarVideoLight(v.pid);
+  } catch (err) { toast(`no se ha podido quitar: ${err.message}`, true); }
 }
 
 /* Los mandos de un bloque. Los DOS verbos de la casa, y el botón dice qué
@@ -7152,8 +7454,10 @@ function mandosBloqueLight(bloque, seccionDe) {
         clase: 'mini', disabled: !!trabajoVideoLight(),
         onclick: () => cambiarBloqueLight(bloque, sec, true),
       }, 'Solo regrabar lo que he escrito'),
-      h('span', { clase: 'meta' },
-        'graba este tramo con tu texto, sin reescribirlo')) : null);
+      h('span', { clase: 'meta' }, regrabarPrevistoLight()
+        && (regrabarPrevistoLight().pendientes || []).length
+        ? `graba tu texto tal cual, sin reescribirlo: ${textoCosteRegrabarLight(regrabarPrevistoLight())}`
+        : 'graba este tramo con tu texto, sin reescribirlo')) : null);
 }
 
 async function cambiarBloqueLight(bloque, sec, soloGrabar) {
@@ -7165,6 +7469,7 @@ async function cambiarBloqueLight(bloque, sec, soloGrabar) {
   }
   limpiarError(CLAVE_VIDEO_LIGHT);
   try {
+    await guardarBloquesPendientesLight();
     /* EL MISMO GESTO, DOS CAMINOS, y lo que los separa es si hay toma: sin
        audio se reescribe el bloque y ya; con audio se reescribe Y se regraba su
        tramo. Por dentro el que reescribe es el mismo (`p4_voz.reescribir_bloques`),
@@ -11051,6 +11356,8 @@ const ASISTENTE = {
   latiendo: false,
   arranque: 0,         // cuándo se mandó la última pregunta, para el «pensando… N s»
   sinLeer: false,      // llegó una respuesta con el cajón cerrado
+  verHistorial: false, // el cuerpo enseña la lista de charlas de antes
+  historial: null,     // [{id, titulo, tocada, turnos}] tal como lo da el servidor
 };
 
 const CLAVE_CHARLA = 'estudio.asistente.charla';
@@ -11061,6 +11368,7 @@ function montarAsistente() {
   burbuja.addEventListener('click', () => conmutarAsistente());
   $('#btn-cerrar-asistente').addEventListener('click', () => conmutarAsistente(false));
   $('#btn-nueva-charla').addEventListener('click', () => nuevaCharla());
+  $('#btn-historial-asistente').addEventListener('click', () => conmutarHistorial());
   $('#btn-enviar-asistente').addEventListener('click', () => enviarAlAsistente());
   $('#btn-cancelar-asistente').addEventListener('click', () => cancelarAsistente());
   const campo = $('#asistente-texto');
@@ -11139,15 +11447,95 @@ async function asegurarCharla() {
   return ASISTENTE.charla;
 }
 
+/* EMPEZAR OTRA NO BORRA LA DE ANTES: se queda en el historial. Antes se
+   borraba al pulsar «Nueva», y como además vivían solo en memoria, una
+   respuesta útil de ayer no había forma de volver a encontrarla. */
 function nuevaCharla() {
-  const vieja = ASISTENTE.charla;
-  if (vieja) pedir(API.charla(vieja.id), { method: 'DELETE' }).catch(() => {});
+  ASISTENTE.verHistorial = false;
   ASISTENTE.charla = null;
   ASISTENTE.latiendo = false;
   localStorage.removeItem(CLAVE_CHARLA);
   pintarAsistente();
   const campo = $('#asistente-texto');
   if (campo && !campo.disabled) campo.focus();
+}
+
+/* EL HISTORIAL: las charlas de antes, guardadas en el servidor junto a los
+   datos. Se abre una para leerla o seguirla; la × la borra del todo. */
+async function conmutarHistorial(ver) {
+  ASISTENTE.verHistorial = ver === undefined ? !ASISTENTE.verHistorial : !!ver;
+  if (ASISTENTE.verHistorial) {
+    ASISTENTE.historial = null;
+    pintarAsistente();
+    try {
+      ASISTENTE.historial = (await pedir(API.charlas())).charlas || [];
+    } catch (e) {
+      ASISTENTE.historial = [];
+      toast(`no se ha podido leer el historial: ${e.message}`, true);
+    }
+  }
+  pintarAsistente();
+}
+
+async function abrirCharlaDelHistorial(cid) {
+  try {
+    ASISTENTE.charla = await pedir(API.charla(cid));
+    localStorage.setItem(CLAVE_CHARLA, cid);
+    ASISTENTE.verHistorial = false;
+    pintarAsistente();
+    latirAsistente();
+  } catch (e) { toast(`no se ha podido abrir: ${e.message}`, true); }
+}
+
+async function borrarCharlaDelHistorial(resumen) {
+  if (!confirm(`¿Borrar la charla «${resumen.titulo}»? No se puede deshacer.`)) return;
+  try {
+    await pedir(API.charla(resumen.id), { method: 'DELETE' });
+    if (ASISTENTE.charla && ASISTENTE.charla.id === resumen.id) {
+      ASISTENTE.charla = null;
+      localStorage.removeItem(CLAVE_CHARLA);
+    }
+    ASISTENTE.historial = (ASISTENTE.historial || []).filter(c => c.id !== resumen.id);
+    pintarAsistente();
+  } catch (e) { toast(`no se ha podido borrar: ${e.message}`, true); }
+}
+
+function historialDelAsistente() {
+  const lista = ASISTENTE.historial;
+  const caja = h('div', { clase: 'asistente-historial' },
+    h('div', { clase: 'fila' },
+      h('b', {}, 'Charlas anteriores'),
+      h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini fantasma', onclick: () => conmutarHistorial(false) },
+        'Volver')));
+  if (lista === null) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo el historial…'));
+    return caja;
+  }
+  if (!lista.length) {
+    caja.appendChild(h('div', { clase: 'meta' },
+      'Todavía no hay charlas guardadas. Cada vez que preguntas algo, la charla '
+      + 'queda aquí para volver a ella.'));
+    return caja;
+  }
+  for (const resumen of lista) {
+    const actual = ASISTENTE.charla && ASISTENTE.charla.id === resumen.id;
+    caja.appendChild(h('div', { clase: 'charla-guardada' + (actual ? ' actual' : '') },
+      h('button', {
+        clase: 'abrir', onclick: () => abrirCharlaDelHistorial(resumen.id),
+      },
+        h('span', { clase: 'titulo' }, resumen.titulo),
+        h('span', { clase: 'meta' },
+          `${resumen.tocada} · ${Math.ceil((resumen.turnos || 0) / 2)} `
+          + `${Math.ceil((resumen.turnos || 0) / 2) === 1 ? 'pregunta' : 'preguntas'}`
+          + (actual ? ' · abierta' : ''))),
+      h('button', {
+        clase: 'mini fantasma borrar', title: 'Borrar esta charla',
+        disabled: !!resumen.ocupada,
+        onclick: () => borrarCharlaDelHistorial(resumen),
+      }, '×')));
+  }
+  return caja;
 }
 
 /* Lo que la pantalla tiene delante y el servidor no puede saber: en qué
@@ -11274,13 +11662,18 @@ function pintarAsistente() {
           : (conCupoAgotado ? 'sin cupo' : (conSesion ? 'no contesta' : 'sin sesión')))));
 
   const cuerpo = vaciar($('#asistente-cuerpo'));
-  if (estado && !listo) cuerpo.appendChild(puertaDelAsistente(estado));
-  if (!charla || !(charla.turnos || []).length) {
+  if (ASISTENTE.verHistorial) {
+    cuerpo.appendChild(historialDelAsistente());
+  } else if (estado && !listo) cuerpo.appendChild(puertaDelAsistente(estado));
+  if (ASISTENTE.verHistorial) {
+    // nada más: el historial ocupa el cuerpo entero
+  } else if (!charla || !(charla.turnos || []).length) {
     if (listo) cuerpo.appendChild(vacioDelAsistente());
   } else {
     charla.turnos.forEach(turno => cuerpo.appendChild(burbujaDeTurno(turno)));
   }
-  cuerpo.scrollTop = cuerpo.scrollHeight;
+  cuerpo.scrollTop = ASISTENTE.verHistorial ? 0 : cuerpo.scrollHeight;
+  $('#btn-historial-asistente').classList.toggle('activo', ASISTENTE.verHistorial);
 
   const campo = $('#asistente-texto');
   campo.disabled = !listo || ocupada;
@@ -11289,7 +11682,7 @@ function pintarAsistente() {
     : 'Entra con tu cuenta de Claude para poder preguntar';
   $('#btn-enviar-asistente').disabled = !listo || ocupada;
   $('#btn-cancelar-asistente').hidden = !ocupada;
-  $('#btn-nueva-charla').disabled = ocupada || !charla;
+  $('#btn-nueva-charla').disabled = ocupada || (!charla && !ASISTENTE.verHistorial);
 }
 
 /* Sin cuenta que conteste no hay asistente, y se dice POR QUÉ con el camino

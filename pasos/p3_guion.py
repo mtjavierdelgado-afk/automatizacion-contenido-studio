@@ -103,12 +103,14 @@ import subprocess  # noqa: F401  (las pruebas sustituyen p3_guion.subprocess.Pop
 import time
 
 try:
-    from . import cli_claude, comun, cta, estadisticas, fuentes, marcas_tts
+    from . import (cli_claude, comun, cta, estadisticas, estructura_guion,
+                   fuentes, marcas_tts)
 except ImportError:  # ejecutado con la carpeta pasos directamente en sys.path
     import cli_claude
     import comun
     import cta
     import estadisticas
+    import estructura_guion
     import fuentes
     import marcas_tts
 
@@ -344,13 +346,25 @@ def _transcript_legible(transcript, maximo):
     return texto
 
 
-def _guion_anterior(proyecto):
-    """Guion de la version activa del paso, si ya se redacto alguna vez."""
+def _guion_anterior(proyecto, params=None):
+    """Guion de la version activa del paso, si ya se redacto alguna vez.
+
+    CON LO ESCRITO A MANO Y LO AÑADIDO ENCIMA: es el guion que se ve en la
+    pantalla, y es sobre ese sobre el que se pide el cambio. Sin esto el modelo
+    reescribia un guion sin los bloques añadidos, y despues habia que
+    colocarlos a ciegas en un texto que ya no era el suyo.
+    """
     datos = comun.leer_salida(proyecto, PASO, "guion.json", obligatorio=False)
     if not isinstance(datos, dict):
         return None
     bloques = datos.get("guion") or datos.get("bloques") or []
-    return datos if bloques else None
+    if not bloques:
+        return None
+    if params:
+        datos = dict(datos)
+        datos["guion"] = [{k: v for k, v in b.items() if k != "insertado"}
+                          for b in estructura_guion.aplicar(bloques, params)]
+    return datos
 
 
 def _idioma_pedido(brief, opciones):
@@ -1392,7 +1406,8 @@ def _redactar(proyecto, params, avisar):
     # dia que haya una segunda fuente que aporte la FORMA y no los hechos.
     origen = None
 
-    anterior = None if opciones["regenerar_desde_cero"] else _guion_anterior(proyecto)
+    anterior = (None if opciones["regenerar_desde_cero"]
+                else _guion_anterior(proyecto, params))
     idioma = _idioma_pedido(brief_doc, opciones)
     palabras_material = int(metadatos.get("palabras_transcript") or
                             sum(comun.contar_palabras(t.get("texto", ""))
@@ -1434,9 +1449,11 @@ def _redactar(proyecto, params, avisar):
     # humano ya vio ese bloque y lo corrigio, y perder su texto en la siguiente
     # pasada seria tirar su trabajo.
     editados = [b["id"] for b in bloques if b["id"] in opciones["bloques"]]
-    for bloque in bloques:
-        if bloque["id"] in opciones["bloques"]:
-            bloque["texto"] = opciones["bloques"][bloque["id"]]
+    # Y LOS BLOQUES AÑADIDOS O PARTIDOS a mano, en su sitio. Los coloca
+    # `estructura_guion.aplicar`, que tambien pone encima los textos editados:
+    # el mismo calculo que hace la voz, asi que no hay dos guiones distintos.
+    # Si el modelo ya los devolvio (los vio en el guion anterior), no se repiten.
+    bloques = estructura_guion.aplicar(bloques, params)
     # tambien lo escrito a mano: la interfaz ensena las anotaciones dentro del
     # texto, asi que una persona puede teclear una que no existe sin saberlo, y
     # lo que Cartesia no reconoce lo locuta

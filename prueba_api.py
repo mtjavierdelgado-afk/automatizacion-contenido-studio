@@ -651,6 +651,199 @@ def probar_voz(cliente, pid):
     igual(respuesta.status_code, 400, "una duracion absurda da 400")
 
 
+def _ficha_paso(cliente, pid, paso):
+    _r, datos = cliente.get(f"/api/proyectos/{pid}/pasos/{paso}")
+    return datos or {}
+
+
+def _meta_activa(carpeta, pid, cliente):
+    """El audio_meta.json de la version ACTIVA de la voz, leido del disco."""
+    version = _ficha_paso(cliente, pid, "voz").get("version_activa")
+    ruta = os.path.join(carpeta, pid, "pasos", "voz", f"v{version}", "audio_meta.json")
+    with open(ruta, encoding="utf-8") as fh:
+        return json.load(fh), ruta
+
+
+def _firmas(raiz_proyecto):
+    """Firmas de todos los pasos y de las unidades de assets, del nucleo."""
+    from nucleo.estado import PASOS, Estado
+    from nucleo.proyecto import Proyecto
+    estado = Estado(Proyecto(raiz_proyecto))
+    return ({p["id"]: estado.firma(p["id"]) for p in PASOS},
+            {u: estado.firma_unidad("assets", u)
+             for u in estado.unidades_declaradas("assets")},
+            estado.unidades_obsoletas("assets"))
+
+
+def _regrabar(cliente, pid, seccion_id, peticion=""):
+    respuesta, datos = cliente.post(
+        f"/api/proyectos/{pid}/voz/secciones/{seccion_id}/regrabar",
+        {"peticion": peticion})
+    igual(respuesta.status_code, 202, f"regrabar {seccion_id} responde 202")
+    ficha = esperar_trabajo(cliente, (datos or {}).get("trabajo_id"))
+    igual(ficha.get("estado"), "listo",
+          f"la regrabacion de {seccion_id} termina bien ({ficha.get('error')})")
+    return ficha.get("resultado") or {}
+
+
+def probar_regrabar_y_estructura(cliente, carpeta):
+    """«Solo regrabar lo que he escrito» de verdad, y añadir/partir bloques.
+
+    EL FALLO (09-10-2026): la regrabacion de una seccion cosia la toma en
+    `voz/trabajo/` y nunca la registraba con `completar()`. El trabajo salia
+    «listo», pero la version activa seguia siendo la de antes: la pantalla
+    enseñaba el texto viejo y la voz seguia en obsoleto.
+    """
+    seccion("REGRABAR UNA SECCION Y AÑADIR O PARTIR BLOQUES")
+    from nucleo.estado import Estado
+    from nucleo.proyecto import Proyecto
+    respuesta, datos = cliente.post("/api/proyectos", {"nombre": "Regrabar tramos"})
+    igual(respuesta.status_code, 201, "se crea el proyecto de la prueba")
+    pid = (datos.get("proyecto") or {}).get("id")
+    raiz = os.path.join(carpeta, pid)
+    sembrar(raiz)
+    for paso in ("voz", "revision_audio"):
+        _r, lanzado = cliente.post(f"/api/proyectos/{pid}/pasos/{paso}/ejecutar", {})
+        ficha = esperar_trabajo(cliente, lanzado.get("trabajo_id"))
+        igual(ficha.get("estado"), "listo", f"{paso} de partida ({ficha.get('error')})")
+
+    # DOS SECCIONES: la toma simulada sale de una sola, y lo que se prueba
+    # es justo lo que pasa entre secciones. Se parte su meta en el disco.
+    meta, ruta_meta = _meta_activa(carpeta, pid, cliente)
+    from pasos import p4_voz
+    meta["secciones"] = p4_voz._fichas_de_seccion(
+        [{"id": "SB001", "bloques": [f"B{n:03d}" for n in range(1, 21)]},
+         {"id": "SB002", "bloques": [f"B{n:03d}" for n in range(21, 41)]}],
+        meta["bloques"])
+    with open(ruta_meta, "w", encoding="utf-8") as fh:
+        json.dump(meta, fh, ensure_ascii=False)
+
+    # unos planos ya «pagados» aguas abajo, para medir que les pasa
+    estado = Estado(Proyecto(raiz))
+    planos = {f"escena:S{n:03d}": {"prompt": f"plano {n}"} for n in range(1, 6)}
+    estado.actualizar_params("assets", {"unidades": planos})
+    estado.completar("assets", {"resumen": "planos"},
+                     {u: {"png": f"{u}.png"} for u in planos})
+    for paso in ("callouts", "render"):
+        estado.completar(paso, {"resumen": paso},
+                         {u: {"hecho": True} for u in planos})
+    igual(_firmas(raiz)[2], [], "de partida, ningun plano pide rehacerse")
+
+    # 1. LO QUE HACE LA PANTALLA: escribir el texto en params.guion.bloques
+    nuevo_b002 = "Texto escrito a mano para el bloque dos, que es el que cambia."
+    nuevo_b030 = "Y otro escrito a mano en la segunda seccion del guion."
+    cliente.put(f"/api/proyectos/{pid}/pasos/guion/params",
+                {"params": {"bloques": {"B002": {"texto": nuevo_b002},
+                                        "B030": {"texto": nuevo_b030}}}})
+    igual(_ficha_paso(cliente, pid, "voz").get("estado"), "obsoleto",
+          "editar a mano deja la voz obsoleta: dice la frase vieja")
+    igual(_ficha_paso(cliente, pid, "guion").get("estado"), "listo",
+          "pero no al guion: corregirlo no es pedir otro")
+    _r, previsto = cliente.get(f"/api/proyectos/{pid}/guion/bloques",
+                               params={"seccion": "SB001"})
+    regrabar = (previsto or {}).get("regrabar") or {}
+    igual(regrabar.get("orden"), ["SB001", "SB002"],
+          "lo previsto: la seccion pedida y la otra que tiene cambios sin grabar")
+    ok((regrabar.get("usd") or 0) > 0 and regrabar.get("caracteres", 0) > 0,
+       f"y lo que cuesta, ANTES de pulsar ({regrabar.get('usd')} $)")
+    firmas_antes, unidades_antes, sucios_antes = _firmas(raiz)
+    version_antes = _ficha_paso(cliente, pid, "voz").get("version_activa")
+
+    resultado = _regrabar(cliente, pid, "SB001")
+    igual(resultado.get("secciones"), ["SB001", "SB002"],
+          "se regraban las DOS secciones con cambios, no solo la del boton")
+    ok({"B002", "B030"} <= set(resultado.get("bloques_cambiados") or []),
+       f"y dice que bloques cambiaron ({resultado.get('bloques_cambiados')})")
+    voz = _ficha_paso(cliente, pid, "voz")
+    igual(voz.get("version_activa"), version_antes + 1,
+          "LA REGRABACION QUEDA REGISTRADA: version nueva de la voz")
+    igual(voz.get("estado"), "listo", "y la voz deja de estar obsoleta")
+    meta, _ruta = _meta_activa(carpeta, pid, cliente)
+    textos = {b["id"]: b["texto"] for b in meta["bloques"]}
+    igual(textos.get("B002"), nuevo_b002,
+          "la version activa de la voz trae el texto NUEVO de B002")
+    igual(textos.get("B030"), nuevo_b030, "y el de B030")
+    ok(os.path.exists(os.path.join(raiz, "pasos", "voz", f"v{version_antes + 1}",
+                                   "guion_locutado.json")),
+       "deja guion_locutado.json: el 'antes' de la conservacion de planos")
+    igual(_ficha_paso(cliente, pid, "revision_audio").get("estado"), "listo",
+          "la revision se sella gratis y queda al dia (su toma es la que suena "
+          "en la vista previa)")
+    igual(resultado.get("revision_audio"), "sellada", "y se dice")
+
+    # LAS FIRMAS: que se mueve y por que
+    firmas_despues, unidades_despues, sucios_despues = _firmas(raiz)
+    movidas = sorted(p for p in firmas_antes if firmas_antes[p] != firmas_despues[p])
+    print(f"      firmas movidas por la regrabacion: {movidas}; planos que "
+          f"piden rehacerse: {len(sucios_antes)} antes y {len(sucios_despues)} "
+          f"despues de regrabar, de {len(planos)}")
+    for paso in ("ingesta", "brief", "guion"):
+        ok(paso not in movidas, f"la firma de {paso} no se mueve al regrabar")
+    igual(unidades_despues, unidades_antes,
+          "LA FIRMA DE CADA PLANO NO SE MUEVE: regrabar no deja obsoleta "
+          "ninguna imagen pagada")
+    igual(sucios_despues, sucios_antes,
+          "los planos que piden rehacerse son los mismos que antes de regrabar "
+          "(los mueve la edicion del texto, no la toma)")
+
+    _r, bitacora = cliente.get(f"/api/proyectos/{pid}/bitacora")
+    entradas = [e for e in ((bitacora or {}).get("eventos") or [])
+                if e.get("evento") == "seccion_regrabada"]
+    ok(entradas and "B002" in ((entradas[-1].get("datos") or {})
+                               .get("bloques_cambiados") or []),
+       "la bitacora anota QUE bloques se regrabaron, no una lista vacia")
+
+    # 2. REGRABAR OTRA DESPUES NO SE LLEVA LA PRIMERA
+    _regrabar(cliente, pid, "SB002")
+    meta, _ruta = _meta_activa(carpeta, pid, cliente)
+    igual({b["id"]: b["texto"] for b in meta["bloques"]}.get("B002"), nuevo_b002,
+          "regrabar SB002 despues de SB001 conserva lo de SB001")
+
+    # 3. AÑADIR, PARTIR Y QUITAR BLOQUES
+    base = f"/api/proyectos/{pid}/guion/bloques"
+    respuesta, datos = cliente.post(base, {"texto": "Un bloque nuevo.",
+                                           "donde": "despues", "ancla": "B005"})
+    igual(respuesta.status_code, 201, "añadir un bloque da 201")
+    igual(datos.get("id"), "B041", "con el siguiente id libre: ninguno se renombra")
+    orden = [b["id"] for b in datos.get("bloques") or []]
+    igual(orden[4:7], ["B005", "B041", "B006"], "y en el sitio pedido")
+    respuesta, _d = cliente.post(base, {"texto": "x", "donde": "despues",
+                                        "ancla": "B999"})
+    igual(respuesta.status_code, 400, "un ancla que no existe da 400")
+    respuesta, datos = cliente.post(f"{base}/B010/partir",
+                                    {"trozos": ["Primera parte.", "Segunda parte.",
+                                                "Tercera parte."]})
+    igual(respuesta.status_code, 200, "partir un bloque responde 200")
+    igual(datos.get("nuevos"), ["B042", "B043"], "en bloques nuevos con ids nuevos")
+    orden = [b["id"] for b in datos.get("bloques") or []]
+    igual(orden[orden.index("B010"):orden.index("B010") + 4],
+          ["B010", "B042", "B043", "B011"], "detras del partido y en orden")
+    respuesta, _d = cliente.post(f"{base}/B010/partir", {"trozos": ["solo uno"]})
+    igual(respuesta.status_code, 400, "partir en menos de dos trozos da 400")
+    respuesta, _d = cliente.delete(f"{base}/B001")
+    igual(respuesta.status_code, 400, "un bloque del guion original no se quita")
+    respuesta, datos = cliente.delete(f"{base}/B041")
+    igual(respuesta.status_code, 200, "un bloque añadido si")
+    ok("B041" not in [b["id"] for b in datos.get("bloques") or []], "y desaparece")
+    igual(_ficha_paso(cliente, pid, "guion").get("estado"), "listo",
+          "cambiar la estructura tampoco deja obsoleto al guion")
+    igual(_ficha_paso(cliente, pid, "voz").get("estado"), "obsoleto",
+          "pero si a la voz")
+    igual(((datos.get("regrabar") or {}).get("pendientes")), ["SB001"],
+          "y lo previsto es regrabar solo la seccion donde cayo el cambio")
+
+    _regrabar(cliente, pid, "SB001")
+    meta, _ruta = _meta_activa(carpeta, pid, cliente)
+    ids = [b["id"] for b in meta["bloques"]]
+    igual(ids[ids.index("B010"):ids.index("B010") + 4],
+          ["B010", "B042", "B043", "B011"],
+          "la toma nueva dice los bloques partidos, en su orden")
+    igual({b["id"]: b["texto"] for b in meta["bloques"]}.get("B010"), "Primera parte.",
+          "y B010 se queda con el primer trozo")
+    igual(_ficha_paso(cliente, pid, "voz").get("estado"), "listo",
+          "y la voz vuelve a estar al dia")
+
+
 def probar_bitacora(cliente, pid):
     seccion("BITACORA")
     respuesta, datos = cliente.get(f"/api/proyectos/{pid}/bitacora")
@@ -1704,9 +1897,21 @@ def probar_asistente(cliente):
     igual(respuesta.status_code, 200, "cancelar sin nada en marcha responde 200")
     ok(ficha.get("cancelado") is False, "diciendo que no habia nada que parar")
 
+    # EL HISTORIAL: la charla queda guardada junto a los datos, no en memoria
+    respuesta, historial = cliente.get("/api/asistente/charlas")
+    igual(respuesta.status_code, 200, "GET /api/asistente/charlas da el historial")
+    suya = [c for c in (historial or {}).get("charlas") or [] if c.get("id") == cid]
+    ok(suya and suya[0].get("titulo") == "que me falta?",
+       f"con esta charla y su primera pregunta como titulo: {suya}")
+    ok(os.path.isfile(os.path.join(cliente.carpeta, "_asistente", "charlas", f"{cid}.json")),
+       "guardada en <proyectos>/_asistente/charlas/, fuera del codigo")
+
     respuesta, ficha = cliente.delete(f"/api/asistente/charlas/{cid}")
     igual(respuesta.status_code, 200, "cerrar la charla responde 200")
     ok(ficha.get("cerrada") is True, "y la cierra")
+    ok(not os.path.exists(os.path.join(cliente.carpeta, "_asistente", "charlas",
+                                       f"{cid}.json")),
+       "y la borra del historial")
     respuesta, _ = cliente.get(f"/api/asistente/charlas/{cid}")
     igual(respuesta.status_code, 404, "y ya no esta")
 
@@ -3564,6 +3769,7 @@ def main():
         probar_archivos(cliente, pid, salidas)
         probar_feedback(cliente, pid)
         probar_voz(cliente, pid)
+        probar_regrabar_y_estructura(cliente, carpeta)
         probar_bitacora(cliente, pid)
         probar_presets_canal(cliente)
         probar_modo_light(cliente)

@@ -45,11 +45,12 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    from . import cli_claude, comun, estadisticas, medios
+    from . import cli_claude, comun, estadisticas, estructura_guion, medios
 except ImportError:  # ejecutado con la carpeta pasos directamente en sys.path
     import cli_claude
     import comun
     import estadisticas
+    import estructura_guion
     import medios
 
 PASO = "conservacion"
@@ -448,18 +449,12 @@ def guion_ahora(proyecto, estado=None):
     bloques = [dict(b) for b in (documento.get("bloques_detalle")
                                  or documento.get("guion") or [])
                if isinstance(b, dict) and b.get("id")]
-    ediciones = {}
     if estado is not None:
-        crudas = (estado.params("guion") or {}).get("bloques") or {}
-        for clave, valor in crudas.items():
-            texto = valor.get("texto") if isinstance(valor, dict) else valor
-            texto = " ".join(str(texto or "").split())
-            if texto:
-                ediciones[str(clave).strip().upper()] = texto
-    for bloque in bloques:
-        nuevo = ediciones.get(str(bloque.get("id") or "").strip().upper())
-        if nuevo:
-            bloque["texto"] = nuevo
+        # las ediciones Y LOS BLOQUES AÑADIDOS: los aplica quien sabe hacerlo
+        bloques = [dict(b) for b in estructura_guion.aplicar(
+            bloques, estado.params("guion") or {})]
+        for bloque in bloques:
+            bloque.pop("insertado", None)
     return bloques
 
 

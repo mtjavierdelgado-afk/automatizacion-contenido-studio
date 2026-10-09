@@ -75,9 +75,11 @@ import time
 import requests
 
 try:
-    from . import cadencia, cli_claude, comun, estadisticas, marcas_tts, presets_voz
+    from . import (cadencia, cli_claude, comun, estadisticas, estructura_guion,
+                   marcas_tts, presets_voz)
 except ImportError:  # ejecutado con la carpeta pasos directamente en sys.path
     import cli_claude
+    import estructura_guion
     import comun
     import cadencia
     import estadisticas
@@ -469,24 +471,23 @@ def ediciones_a_mano(proyecto, bloques):
 
     Un id que ya no existe se ignora en silencio: es una edicion de un guion
     anterior, no un error de nadie.
+
+    Y LOS BLOQUES AÑADIDOS O PARTIDOS desde la pantalla, en su sitio: viven en
+    el mismo `params.guion` y los coloca `estructura_guion.aplicar`, que es el
+    unico que sabe hacerlo. Sin ellos aqui, añadir un bloque se veia en la
+    pantalla y la voz no lo decia nunca.
     """
     estado = _estado_de(proyecto)
     if estado is None:
         return bloques
     try:
-        ediciones = (estado.params("guion") or {}).get("bloques") or {}
+        params = estado.params("guion") or {}
     except Exception:                                        # noqa: BLE001
         return bloques
-    if not isinstance(ediciones, dict) or not ediciones:
+    if not isinstance(params, dict):
         return bloques
-    salida = []
-    for bloque in bloques:
-        ficha = ediciones.get(bloque.get("id"))
-        texto = ficha.get("texto") if isinstance(ficha, dict) else ficha
-        if isinstance(texto, str) and texto.strip():
-            bloque = dict(bloque, texto=" ".join(texto.split()))
-        salida.append(bloque)
-    return salida
+    return [{k: v for k, v in b.items() if k != "insertado"}
+            for b in estructura_guion.aplicar(bloques, params)]
 
 
 def cargar_guion(proyecto, params=None):
@@ -1554,19 +1555,101 @@ def reescribir_bloques(bloques, ids, peticion, ajuste=None, cwd=None,
     return salida
 
 
+def _igual_que_grabado(texto, grabado):
+    """Si un texto dice lo mismo que lo que se grabo, contado como se MANDA."""
+    def forma(t):
+        return " ".join(marcas_tts.sanear(" ".join(str(t or "").split())).split())
+    return forma(texto) == forma(grabado)
+
+
+def plan_regrabado(meta, efectivos, seccion_pedida=None):
+    """Que secciones hay que regrabar para que la toma diga el guion de ahora.
+
+    `meta` es el audio_meta de la toma activa; `efectivos`, el guion como esta
+    AHORA (`cargar_guion`: version activa + lo escrito a mano + lo añadido).
+
+    Devuelve:
+      secciones   [{"id","bloques"}] con los bloques de AHORA: un añadido entra
+                  en la seccion del bloque grabado que tiene delante (o en la
+                  primera, si va al principio); uno quitado sale de la suya.
+      cambiados   {seccion: [bloques que no dicen lo grabado, nuevos o quitados]}
+      pendientes  las secciones con algo en `cambiados`, en orden de toma
+      orden       la pedida primero y despues el resto de pendientes
+      quitados    bloques grabados que el guion ya no tiene
+      grabados    {bloque: texto grabado}
+
+    POR QUE TODAS LAS PENDIENTES Y NO SOLO LA PEDIDA. Regrabar una sola deja a
+    la voz al dia con el guion de ahora -- su firma lo incluye entero --
+    mientras otra seccion sigue sonando a lo de antes: la etiqueta diria
+    «listo» y la frase editada no llegaria nunca al video. Grabar lo pendiente
+    de una vez es la unica forma de que «listo» sea verdad.
+    """
+    grabados = {str(b.get("id")): b.get("texto") or ""
+                for b in (meta.get("bloques") or []) if b.get("id")}
+    secciones = [{"id": s["id"], "bloques": list(s.get("bloques") or [])}
+                 for s in (meta.get("secciones") or []) if s.get("id")]
+    if not secciones:
+        raise RuntimeError("la toma no esta partida en secciones: hay que "
+                           "volver a generar el audio entero")
+    if seccion_pedida and seccion_pedida not in {s["id"] for s in secciones}:
+        raise RuntimeError(f"la toma no tiene ninguna seccion {seccion_pedida!r}")
+    ids = [b["id"] for b in efectivos]
+    if not ids:
+        raise RuntimeError("el guion no tiene bloques")
+    seccion_de = {bid: s["id"] for s in secciones for bid in s["bloques"]}
+    # LO QUE NO ESTA GRABADO Y NO SE SABE DONDE VA: un guion vuelto a redactar
+    # entero. Ahi no hay tramo que coser, hay que grabar la toma de nuevo.
+    comunes = [bid for bid in ids if bid in seccion_de]
+    if not comunes:
+        raise RuntimeError("el guion de ahora no comparte ningun bloque con la "
+                           "toma: hay que volver a generar el audio entero")
+    for indice, bid in enumerate(ids):
+        if bid in seccion_de:
+            continue
+        previos = [x for x in ids[:indice] if x in seccion_de]
+        siguientes = [x for x in ids[indice + 1:] if x in seccion_de]
+        seccion_de[bid] = seccion_de[(previos or siguientes)[-1 if previos else 0]]
+    quitados = [bid for bid in grabados if bid not in set(ids)]
+    textos = {b["id"]: b["texto"] for b in efectivos}
+    cambiados = {}
+    for bid in ids:
+        if bid not in grabados or not _igual_que_grabado(textos[bid], grabados[bid]):
+            cambiados.setdefault(seccion_de[bid], []).append(bid)
+    for bid in quitados:
+        cambiados.setdefault(seccion_de[bid], []).append(bid)
+    ahora = [{"id": s["id"],
+              "bloques": [bid for bid in ids if seccion_de.get(bid) == s["id"]]}
+             for s in secciones]
+    pendientes = [s["id"] for s in secciones if s["id"] in cambiados]
+    orden = ([seccion_pedida] if seccion_pedida else []) + \
+        [sid for sid in pendientes if sid != seccion_pedida]
+    return {"secciones": ahora, "cambiados": cambiados, "pendientes": pendientes,
+            "orden": orden, "quitados": quitados, "grabados": grabados,
+            "seccion_de": seccion_de}
+
+
 def regrabar_seccion(bloques, seccion_id, cfg, meta, destino, peticion="",
-                     ajuste=None, avisar=None, cwd=None):
+                     ajuste=None, avisar=None, cwd=None, secciones=None):
     """Vuelve a grabar UNA seccion y la cose en la toma que ya existe.
 
     Devuelve (salidas, bloques_nuevos). Las salidas tienen la misma forma de
     siempre -- lista de palabras con tiempos absolutos -- porque lo que hay
     aguas abajo no puede enterarse de que esto existe.
+
+    `secciones` ([{"id","bloques"}]) manda sobre las de la toma cuando el guion
+    ha ganado o perdido bloques: los TIEMPOS de cada seccion siguen saliendo de
+    la toma, que es donde esta el audio que se sustituye.
     """
     avisa = _avisador(avisar)
-    secciones = {s["id"]: s for s in (meta.get("secciones") or [])}
-    if seccion_id not in secciones:
+    grabadas = {s["id"]: s for s in (meta.get("secciones") or [])}
+    if seccion_id not in grabadas:
         raise RuntimeError(f"la toma no tiene ninguna seccion {seccion_id!r}")
-    seccion = secciones[seccion_id]
+    lista = ([{"id": s["id"], "bloques": list(s["bloques"])} for s in secciones]
+             if secciones is not None else
+             [{"id": s["id"], "bloques": s["bloques"]} for s in grabadas.values()])
+    seccion = dict(grabadas[seccion_id])
+    seccion["bloques"] = next((s["bloques"] for s in lista if s["id"] == seccion_id),
+                              seccion["bloques"])
     dentro = set(seccion["bloques"])
     if seccion.get("t_in") is None:
         raise RuntimeError(f"la seccion {seccion_id} no tiene audio que sustituir")
@@ -1578,17 +1661,26 @@ def regrabar_seccion(bloques, seccion_id, cfg, meta, destino, peticion="",
         nuevos = reescribir_bloques(nuevos, dentro, peticion, ajuste=ajuste,
                                     cwd=cwd, motivo=MOTIVO_TTS)
 
-    # 2. se graba SOLO esa seccion, en su propio contexto
+    # 2. se graba SOLO esa seccion, en su propio contexto. Saneado como al
+    # grabar la toma entera: una etiqueta mal escrita a mano Cartesia la LEE.
+    nuevos = [dict(b, texto=marcas_tts.sanear(b["texto"])) if b["id"] in dentro
+              else b for b in nuevos]
     trozo = " ".join(b["texto"].strip() for b in nuevos if b["id"] in dentro)
-    avisa(0.35, f"grabando {seccion_id} ({len(trozo.split())} palabras)")
 
     def progreso(fraccion, mensaje=""):
         return avisa(0.35 + 0.4 * max(0.0, min(1.0, fraccion)), mensaje)
 
-    if simulado():
-        wav_nuevo, dur_nueva, marcas_nuevas = _toma_simulada(trozo, cfg)
+    if not trozo.strip():
+        # una seccion que se ha quedado sin bloques (se quitaron todos los que
+        # tenia): no se graba nada, se corta su tramo y ya
+        avisa(0.35, f"{seccion_id} se queda sin texto: se quita su tramo")
+        wav_nuevo, marcas_nuevas = None, []
+    elif simulado():
+        avisa(0.35, f"grabando {seccion_id} ({len(trozo.split())} palabras)")
+        wav_nuevo, _dur, marcas_nuevas = _toma_simulada(trozo, cfg)
     else:
-        wav_nuevo, dur_nueva, marcas_nuevas = _toma_por_contexto(
+        avisa(0.35, f"grabando {seccion_id} ({len(trozo.split())} palabras)")
+        wav_nuevo, _dur, marcas_nuevas = _toma_por_contexto(
             [trozo], cfg, progreso)
 
     # 3. se cose: lo de antes + lo nuevo + lo de despues
@@ -1599,7 +1691,7 @@ def regrabar_seccion(bloques, seccion_id, cfg, meta, destino, peticion="",
     bytes_seg = SR * 2
     corte_ini = int(seccion["t_in"] * bytes_seg) & ~1
     corte_fin = int(seccion["t_out"] * bytes_seg) & ~1
-    pcm_nuevo = _pcm_de(wav_nuevo)
+    pcm_nuevo = _pcm_de(wav_nuevo) if wav_nuevo else b""
     wav = motor.wav_desde_pcm(pcm[:corte_ini] + pcm_nuevo + pcm[corte_fin:])
 
     # 4. las marcas: las de antes, las nuevas desplazadas, y las de despues
@@ -1637,9 +1729,7 @@ def regrabar_seccion(bloques, seccion_id, cfg, meta, destino, peticion="",
         "pista": os.path.join(destino, nombre), "archivo": nombre,
         "duracion": round(len(_pcm_de(wav)) / bytes_seg, 3),
         "palabras": ordenadas, "bloques": fichas,
-        "secciones": _fichas_de_seccion(
-            [{"id": s["id"], "bloques": s["bloques"]}
-             for s in (meta.get("secciones") or [])], fichas),
+        "secciones": _fichas_de_seccion(lista, fichas),
         "resumen": f"{seccion_id} regrabada ({len(trozo.split())} palabras)",
     })
     salidas.pop("transcript", None)

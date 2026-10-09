@@ -65,6 +65,7 @@ recibio, que es lo que dejan comprobar las pruebas de la API.
 """
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -135,6 +136,30 @@ MAX_PREGUNTA = 20000
 
 _LOCK = threading.RLock()
 _CHARLAS = {}
+
+#: EL HISTORIAL: cada charla con algun turno se guarda en un JSON propio, en
+#: `<proyectos>/_asistente/charlas/` (lo fija `app.py` con `fijar_historial`).
+#: Fuera del codigo, como las notas de mejoras: `asvs actualizar` reemplaza el
+#: codigo entero y no se lo puede llevar. La memoria de arriba sigue siendo la
+#: de trabajo; el disco es lo que sobrevive a reiniciar el servicio y lo que
+#: deja volver a una charla de la semana pasada.
+CARPETA_HISTORIAL = os.environ.get("ESTUDIO_ASISTENTE_HISTORIAL") or ""
+MAX_HISTORIAL = 200
+_ID_CHARLA = re.compile(r"[0-9a-f]{6,32}")
+
+
+def fijar_historial(carpeta):
+    """Donde se guardan las charlas. Lo llama `app.py` al conocer la carpeta
+    de proyectos; la variable ESTUDIO_ASISTENTE_HISTORIAL manda sobre esto."""
+    global CARPETA_HISTORIAL
+    if not os.environ.get("ESTUDIO_ASISTENTE_HISTORIAL"):
+        CARPETA_HISTORIAL = str(carpeta or "")
+
+
+def _ruta_charla(cid):
+    if not CARPETA_HISTORIAL or not _ID_CHARLA.fullmatch(str(cid or "")):
+        return ""
+    return os.path.join(CARPETA_HISTORIAL, f"{cid}.json")
 
 
 class ErrorAsistente(ValueError):
@@ -404,6 +429,64 @@ class Charla:
     def ocupada(self):
         return bool(self.turnos) and self.turnos[-1].get("estado") == "pensando"
 
+    def titulo(self):
+        """La primera pregunta, recortada: es como se reconoce una charla."""
+        for turno in self.turnos:
+            if turno.get("quien") == "tu":
+                texto = " ".join(str(turno.get("texto") or "").split())
+                return texto[:90] + ("…" if len(texto) > 90 else "")
+        return "Charla sin preguntas"
+
+    def resumen(self):
+        return {"id": self.id, "titulo": self.titulo(), "proyecto": self.pid,
+                "creada": _fecha(self.creada), "tocada": _fecha(self.tocada),
+                "tocada_s": self.tocada,
+                "turnos": len(self.turnos), "ocupada": self.ocupada()}
+
+    def guardar(self):
+        """La charla al disco. Una charla sin turnos no se guarda: abrir la
+        burbuja y cerrarla sin preguntar no es una charla."""
+        ruta = _ruta_charla(self.id)
+        if not ruta:
+            return
+        with self._lock:
+            if not self.turnos:
+                return
+            datos = {"id": self.id, "session_id": self.session_id,
+                     "proyecto": self.pid, "creada": self.creada,
+                     "tocada": self.tocada, "turnos": [dict(t) for t in self.turnos]}
+        try:
+            os.makedirs(os.path.dirname(ruta), exist_ok=True)
+            temporal = ruta + ".tmp"
+            with open(temporal, "w", encoding="utf-8") as fh:
+                json.dump(datos, fh, ensure_ascii=False)
+            os.replace(temporal, ruta)
+        except OSError as fallo:
+            # el historial es una comodidad: que no se pueda escribir no puede
+            # tumbar la respuesta, que ya esta en memoria
+            print(f"[asistente] no se pudo guardar la charla {self.id}: {fallo}",
+                  flush=True)
+            return
+        _podar_historial()
+
+    @classmethod
+    def desde_disco(cls, datos):
+        charla = cls(str(datos.get("id") or ""))
+        charla.session_id = str(datos.get("session_id") or "")
+        charla.pid = str(datos.get("proyecto") or "")
+        charla.creada = float(datos.get("creada") or time.time())
+        charla.tocada = float(datos.get("tocada") or charla.creada)
+        charla.turnos = [dict(t) for t in (datos.get("turnos") or [])
+                         if isinstance(t, dict)]
+        # UN TURNO QUE SE QUEDO PENSANDO es de un servicio que se reinicio a
+        # media respuesta: ese hilo ya no existe y la charla se quedaria
+        # «ocupada» para siempre, sin poder preguntar nada mas.
+        if charla.turnos and charla.turnos[-1].get("estado") == "pensando":
+            charla.turnos[-1].update({
+                "estado": "error",
+                "texto": "el servicio se reinició mientras contestaba: vuelve a preguntar"})
+        return charla
+
     def caducada(self):
         return time.time() - self.tocada > CADUCIDAD_CHARLA_S
 
@@ -449,6 +532,7 @@ class Charla:
                   arranque),
             daemon=True)
         self._hilo = hilo
+        self.guardar()
         hilo.start()
         return self.ver()
 
@@ -480,6 +564,7 @@ class Charla:
             with self._lock:
                 self.tocada = time.time()
                 self._avance = None
+            self.guardar()
 
     def _contestar(self, pregunta, foto, raiz, carpetas_extra, ejecutar, avance):
         """Reanuda si hay sesion; si reanudar falla, vuelve a empezar."""
@@ -547,20 +632,94 @@ def nueva():
 
 
 def obtener(cid):
-    """La charla con ese id, o None."""
+    """La charla con ese id, o None. Si no esta en memoria (el servicio se
+    reinicio, o es una de hace dias) se trae del historial."""
+    cid = str(cid or "")
     with _LOCK:
         _barrer()
-        return _CHARLAS.get(str(cid or ""))
+        charla = _CHARLAS.get(cid)
+        if charla is not None:
+            return charla
+        ruta = _ruta_charla(cid)
+        if not ruta or not os.path.isfile(ruta):
+            return None
+        try:
+            with open(ruta, encoding="utf-8") as fh:
+                charla = Charla.desde_disco(json.load(fh))
+        except (OSError, ValueError):
+            return None
+        if charla.id != cid:
+            return None
+        _CHARLAS[cid] = charla
+        return charla
+
+
+def listar(limite=50):
+    """Las charlas del historial, la mas reciente primero. -> [resumen]"""
+    vistas = {}
+    if CARPETA_HISTORIAL and os.path.isdir(CARPETA_HISTORIAL):
+        for nombre in os.listdir(CARPETA_HISTORIAL):
+            cid, extension = os.path.splitext(nombre)
+            if extension != ".json" or not _ID_CHARLA.fullmatch(cid):
+                continue
+            try:
+                with open(os.path.join(CARPETA_HISTORIAL, nombre), encoding="utf-8") as fh:
+                    vistas[cid] = Charla.desde_disco(json.load(fh)).resumen()
+            except (OSError, ValueError):
+                continue
+    with _LOCK:
+        # lo de memoria manda: puede estar a media respuesta
+        for cid, charla in _CHARLAS.items():
+            if charla.turnos:
+                vistas[cid] = charla.resumen()
+    return sorted(vistas.values(), key=lambda r: r["tocada_s"], reverse=True)[:limite]
 
 
 def olvidar(cid):
-    """Tira una charla, cancelando lo que tuviera en marcha. -> bool"""
+    """Suelta una charla de la memoria, cancelando lo que tuviera en marcha.
+    El historial se queda: para borrarlo esta `borrar`. -> bool"""
     with _LOCK:
         charla = _CHARLAS.pop(str(cid or ""), None)
     if charla is None:
         return False
     charla.cancelar()
     return True
+
+
+def borrar(cid):
+    """Quita una charla de la memoria Y del historial. -> bool (habia algo)"""
+    habia = olvidar(cid)
+    ruta = _ruta_charla(cid)
+    if ruta and os.path.isfile(ruta):
+        try:
+            os.remove(ruta)
+            habia = True
+        except OSError:
+            pass
+    return habia
+
+
+def _podar_historial():
+    """Deja las MAX_HISTORIAL charlas mas recientes; el resto se borra."""
+    if not CARPETA_HISTORIAL or not os.path.isdir(CARPETA_HISTORIAL):
+        return
+    try:
+        ficheros = [os.path.join(CARPETA_HISTORIAL, n) for n in os.listdir(CARPETA_HISTORIAL)
+                    if n.endswith(".json")]
+    except OSError:
+        return
+    if len(ficheros) <= MAX_HISTORIAL:
+        return
+    ficheros.sort(key=lambda r: os.path.getmtime(r), reverse=True)
+    for ruta in ficheros[MAX_HISTORIAL:]:
+        try:
+            os.remove(ruta)
+        except OSError:
+            pass
+
+
+def _fecha(segundos):
+    return time.strftime("%Y-%m-%d %H:%M", time.localtime(float(segundos or 0)))
 
 
 def olvidar_todas():

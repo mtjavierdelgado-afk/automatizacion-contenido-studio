@@ -8,6 +8,39 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ---
 
+## V2.0 · octubre de 2026 (tercera parte)
+
+**El guion: regrabar, añadir y partir bloques**
+- **Corregido: «Solo regrabar lo que he escrito» no se veía.** El audio se
+  grababa pero no se registraba como versión nueva: la pantalla seguía con el
+  texto de antes, la voz en «obsoleto» y una segunda regrabación se llevaba la
+  primera. Ahora queda guardado, la voz pasa a «al día» y el reproductor suena
+  con lo nuevo.
+- Si editas bloques de **varios tramos** del audio, se regraban **todos los
+  tramos con cambios** de una vez. Una barra arriba del guion avisa de que hay
+  cambios sin grabar y dice **cuánto cuesta regrabarlos antes de pulsar**.
+- Un bloque editado y todavía sin grabar enseña **lo que escribiste** (en
+  cursiva), no la frase vieja.
+- **«+ Añadir bloque»**: escribe el texto y elige dónde va: antes o después de
+  un bloque concreto, al principio o al final. Los bloques añadidos llevan la
+  etiqueta «añadido» y se pueden **quitar**.
+- **«Partir»** en cada bloque: pon el cursor donde quieras cortar y pulsa
+  «Cortar aquí», tantas veces como quieras. El primer trozo se queda en el
+  bloque y el resto pasan a ser bloques nuevos justo debajo.
+- Ningún bloque cambia de número: los nuevos reciben el siguiente libre
+  (B041, B042…). Las imágenes de los planos que siguen diciendo lo mismo **se
+  conservan**; al generar el vídeo solo se pagan las de los planos con texto
+  nuevo.
+- En el móvil, los botones de cada bloque (Partir, Editar, Cambiar) ya se ven
+  sin tener que pasar el ratón por encima.
+
+**El asistente: historial de charlas**
+- Botón **«Historial»** en la burbuja: las charlas de antes, con su primera
+  pregunta y la fecha. Se abren para leerlas o **seguir donde se quedaron**, y
+  la × las borra.
+- Se guardan en el servidor junto a tus datos: sobreviven a recargar, a
+  reiniciar el servicio y a `asvs actualizar`. «Nueva» ya no borra la anterior.
+
 ## V2.0 · octubre de 2026 (segunda parte)
 
 **Qué lleva cada vídeo**

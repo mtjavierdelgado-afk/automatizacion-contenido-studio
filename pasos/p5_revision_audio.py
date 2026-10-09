@@ -427,6 +427,35 @@ def _sellar_sin_cambios(proyecto, bloques, cfg, destino, avisa):
 
     Devuelve las salidas ya escritas, o None si hay que regrabar de verdad.
     """
+    toma = _toma_sellable(proyecto, bloques, cfg)
+    if toma is None:
+        return None
+    meta, origen_wav = toma
+
+    avisa(0.3, "la toma del paso 4 vale tal cual: se sella sin regrabar")
+    nombre = meta.get("archivo") or p4_voz.NOMBRE_PISTA
+    shutil.copy2(origen_wav, os.path.join(destino, nombre))
+
+    salidas = {k: v for k, v in meta.items() if k != "transcript"}
+    salidas["pista"] = os.path.join(destino, nombre)
+    salidas["bloques_modificados"] = []
+    salidas["cambios"] = []
+    salidas["avisos"] = []
+    salidas["sellada_del_paso_4"] = True
+    salidas["resumen"] = (f"toma dada por buena sin cambios: es la del paso 4 "
+                          f"({salidas.get('duracion')}s, sin regrabar)")
+    nueva_meta = dict(salidas)
+    nueva_meta["transcript"] = meta.get("transcript")
+    comun.escribir_json(os.path.join(destino, p4_voz.NOMBRE_META), nueva_meta)
+    return salidas
+
+
+def _toma_sellable(proyecto, bloques, cfg):
+    """La toma del paso 4 si se puede sellar tal cual. -> (meta, wav) o None.
+
+    Las tres condiciones de `_sellar_sin_cambios`, sin escribir nada: las mira
+    tambien quien quiere saber ANTES si sellar sale gratis (`se_puede_sellar`).
+    """
     carpeta = comun.carpeta_activa(proyecto, "voz")
     if not carpeta:
         return None
@@ -445,28 +474,36 @@ def _sellar_sin_cambios(proyecto, bloques, cfg, destino, avisa):
     if {k: controles.get(k) for k in cfg} != dict(cfg):
         return None
 
-    grabados = [(b.get("id"), (b.get("texto") or "").strip())
-                for b in (meta.get("bloques") or [])]
-    ahora = [(b.get("id"), (b.get("texto") or "").strip()) for b in bloques]
-    if grabados != ahora:
+    # LO QUE SE GRABO contra lo que diria ahora, contado como se MANDA a
+    # Cartesia (saneado): la regrabacion de una seccion guarda el texto ya
+    # saneado, y comparar en crudo daba por distinta una frase identica y
+    # mandaba a resintetizar la toma ENTERA, que se paga.
+    grabados = [b.get("id") for b in (meta.get("bloques") or [])]
+    if grabados != [b.get("id") for b in bloques]:
         return None
+    for grabado, ahora in zip(meta.get("bloques") or [], bloques):
+        if not p4_voz._igual_que_grabado(ahora.get("texto"), grabado.get("texto")):
+            return None
+    return meta, origen_wav
 
-    avisa(0.3, "la toma del paso 4 vale tal cual: se sella sin regrabar")
-    nombre = meta.get("archivo") or p4_voz.NOMBRE_PISTA
-    shutil.copy2(origen_wav, os.path.join(destino, nombre))
 
-    salidas = {k: v for k, v in meta.items() if k != "transcript"}
-    salidas["pista"] = os.path.join(destino, nombre)
-    salidas["bloques_modificados"] = []
-    salidas["cambios"] = []
-    salidas["avisos"] = []
-    salidas["sellada_del_paso_4"] = True
-    salidas["resumen"] = (f"toma dada por buena sin cambios: es la del paso 4 "
-                          f"({salidas.get('duracion')}s, sin regrabar)")
-    nueva_meta = dict(salidas)
-    nueva_meta["transcript"] = meta.get("transcript")
-    comun.escribir_json(os.path.join(destino, p4_voz.NOMBRE_META), nueva_meta)
-    return salidas
+def se_puede_sellar(proyecto, params=None):
+    """Si esta pasada saldria GRATIS: sin comentarios y con la toma intacta.
+
+    Es la pregunta que hace la regrabacion de una seccion antes de dejar al dia
+    esta revision: sellarla no cuesta nada, pero si no se puede sellar,
+    ejecutar este paso resintetiza la toma entera -- y eso no lo ha pedido
+    nadie desde un boton que dice «regrabar este tramo».
+    """
+    params = dict(params or {})
+    if agrupar_comentarios(params.get("comentarios")):
+        return False
+    try:
+        bloques = p4_voz.cargar_guion(proyecto, params)
+        cfg = p4_voz.resolver_params(_config_voz(proyecto, params))
+    except Exception:                                        # noqa: BLE001
+        return False
+    return _toma_sellable(proyecto, bloques, cfg) is not None
 
 
 def ejecutar(proyecto, params, avisar=None):

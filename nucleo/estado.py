@@ -68,7 +68,10 @@ CLAVE_UNIDADES = "unidades"
 #: Lo que si invalidan es lo de AGUAS ABAJO, y eso no se toca: si cambias el
 #: texto, la voz hay que regrabarla. Por eso solo se descuentan de la firma
 #: PROPIA del paso (ver `_firma(propias=False)`), nunca de la que ven los demas.
-CORRECCIONES = {"guion": ("bloques",)}
+#:
+#: `insertados` es lo mismo: donde van los bloques AÑADIDOS o partidos a mano
+#: (ver `pasos/estructura_guion.py`). Su texto vive en `bloques`.
+CORRECCIONES = {"guion": ("bloques", "insertados")}
 
 # Los `id` son el contrato (carpetas, params, firmas): NO se renombran nunca.
 # El `nombre` es solo lo que se enseña, y va alineado con las pestañas de la

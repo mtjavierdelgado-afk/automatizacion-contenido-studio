@@ -99,7 +99,11 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 | | Ruta | Qué hace |
 |---|---|---|
+| `GET` | `/api/proyectos/{pid}/guion/bloques` | El orden de los bloques de ahora y lo que costaria regrabar lo cambiado. |
+| `POST` | `/api/proyectos/{pid}/guion/bloques` | Un bloque nuevo: {texto, donde: antes|despues|principio|final, ancla}. |
 | `POST` | `/api/proyectos/{pid}/guion/bloques/reescribir` | Reescribe unos bloques del guion con una frase. Sin tocar el audio. |
+| `DELETE` | `/api/proyectos/{pid}/guion/bloques/{bid}` | Quita un bloque AÑADIDO a mano. Los del guion original no se quitan. |
+| `POST` | `/api/proyectos/{pid}/guion/bloques/{bid}/partir` | Parte un bloque: {trozos: [texto, texto, ...]}. El primero se queda en el. |
 
 ## Voz
 
@@ -239,8 +243,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/api/asistente` | Si el asistente puede contestar ahora, y con qué cuenta. |
+| `GET` | `/api/asistente/charlas` | El historial: las charlas guardadas, la más reciente primero. |
 | `POST` | `/api/asistente/charlas` | Abre una charla vacía con el asistente. |
-| `DELETE` | `/api/asistente/charlas/{cid}` | Cierra una charla; lo que estuviera contestando se cancela. |
+| `DELETE` | `/api/asistente/charlas/{cid}` | Borra una charla del historial; lo que estuviera contestando se cancela. |
 | `GET` | `/api/asistente/charlas/{cid}` | Los turnos de una charla; el último dice si sigue pensando. |
 | `POST` | `/api/asistente/charlas/{cid}/cancelar` | Para la respuesta que esté en marcha en esa charla. |
 | `POST` | `/api/asistente/charlas/{cid}/mensajes` | Manda una pregunta; la respuesta se sigue con GET de la charla. |
@@ -271,4 +276,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**157 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**162 endpoints.** Escrito por `generar_api.py` desde `app.py`.

@@ -320,6 +320,85 @@ def prueba_registro():
               "y sin ella, el CLI de verdad")
 
 
+def prueba_historial():
+    seccion("6b] el historial: las charlas sobreviven a reiniciar el servicio")
+    carpeta = tempfile.mkdtemp(prefix="asist_hist_")
+    antes = asistente.CARPETA_HISTORIAL
+    asistente.CARPETA_HISTORIAL = carpeta
+    try:
+        asistente.olvidar_todas()
+        vacia = asistente.nueva()
+        igual(asistente.listar(), [], "una charla sin preguntas no entra en el historial")
+        comprobar(not os.listdir(carpeta), "ni deja fichero")
+
+        charla = asistente.nueva()
+        charla.preguntar("como se parte un bloque?", "FOTO", raiz=asistente.RAIZ_ESTUDIO,
+                         ejecutar=Doble(["asi se parte"]), pid="p9")
+        esperar(charla)
+        charla._hilo.join(5)
+        ruta = os.path.join(carpeta, f"{charla.id}.json")
+        comprobar(os.path.isfile(ruta), "al contestar, la charla queda en el disco")
+
+        asistente.olvidar_todas()          # lo que pasa al reiniciar el servicio
+        de_vuelta = asistente.obtener(charla.id)
+        comprobar(de_vuelta is not None, "y se reencuentra aunque no este en memoria")
+        igual([t["texto"] for t in de_vuelta.turnos],
+              ["como se parte un bloque?", "asi se parte"], "con sus turnos")
+        igual(de_vuelta.session_id, "ses-1", "y con la sesion para poder reanudarla")
+        igual(de_vuelta.pid, "p9", "y el proyecto")
+        lista = asistente.listar()
+        igual([r["id"] for r in lista], [charla.id], "el historial la lista")
+        igual(lista[0]["titulo"], "como se parte un bloque?",
+              "con la primera pregunta como titulo")
+
+        # se puede seguir hablando en ella
+        doble = Doble(["segunda respuesta"])
+        de_vuelta.preguntar("y despues?", "FOTO", raiz="C:/estudio", ejecutar=doble)
+        esperar(de_vuelta)
+        de_vuelta._hilo.join(5)            # hasta que haya guardado
+        igual(doble.llamadas[0]["extra"][:2], ["--resume", "ses-1"],
+              "y continuarla reanuda la sesion de antes")
+
+        # una que se quedo pensando al reiniciar no se queda ocupada para siempre
+        import json as _json
+        with open(ruta, encoding="utf-8") as fh:
+            datos = _json.load(fh)
+        datos["turnos"][-1]["estado"] = "pensando"
+        with open(ruta, "w", encoding="utf-8") as fh:
+            _json.dump(datos, fh)
+        asistente.olvidar_todas()
+        recuperada = asistente.obtener(charla.id)
+        comprobar(not recuperada.ocupada(),
+                  "un turno a medias de antes de reiniciar no deja la charla ocupada")
+        igual(recuperada.turnos[-1]["estado"], "error", "sale como error, y se dice")
+
+        comprobar(asistente.obtener("../../secretos/claves") is None,
+                  "un id con ruta no sale de la carpeta del historial")
+        comprobar(asistente.borrar(charla.id), "borrar dice que habia algo")
+        comprobar(not os.path.exists(ruta), "y quita el fichero")
+        comprobar(asistente.obtener(charla.id) is None, "ya no se reencuentra")
+
+        tope = asistente.MAX_HISTORIAL
+        asistente.MAX_HISTORIAL = 3
+        try:
+            for n in range(5):
+                otra = asistente.nueva()
+                otra.preguntar(f"pregunta {n}", "FOTO", raiz="C:/estudio",
+                               ejecutar=Doble([f"r{n}"]))
+                esperar(otra)
+                otra._hilo.join(5)
+                time.sleep(0.02)
+            comprobar(len(os.listdir(carpeta)) <= 3,
+                      "por encima del tope se borran las mas viejas")
+        finally:
+            asistente.MAX_HISTORIAL = tope
+        del vacia
+    finally:
+        asistente.olvidar_todas()
+        asistente.CARPETA_HISTORIAL = antes
+        shutil.rmtree(carpeta, ignore_errors=True)
+
+
 def prueba_onboarding_visto():
     seccion("7] la marca de la guia de inicio, en los ajustes")
     carpeta = tempfile.mkdtemp(prefix="asist_aj_")
@@ -352,6 +431,7 @@ def main():
     prueba_charla()
     prueba_ocupada_y_cancelar()
     prueba_registro()
+    prueba_historial()
     prueba_onboarding_visto()
     print()
     if FALLOS:

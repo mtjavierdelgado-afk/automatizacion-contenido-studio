@@ -1830,7 +1830,13 @@ def describir_voz(pid: str, cuerpo: dict = Body(default=None)):
 # todo lo que viene despues -- los planos, los rotulos--. Es gratis porque es la
 # misma informacion.
 
-def _correr_regrabar(avisar, ctx, seccion_id, peticion, ajuste):
+def _plan_regrabado(ctx, seccion_id=None):
+    """Lo que habria que regrabar ahora para que la toma diga el guion. -> dict
+
+    Tambien lo usa la pantalla ANTES de pulsar: cuantos tramos, cuantos
+    caracteres y cuanto cuesta. Un solo calculo para los dos, asi que lo que
+    se anuncia es lo que se graba.
+    """
     p4 = PASOS_MODULOS.p4_voz
     ficha_voz = ctx.estado.salidas("voz") or {}
     carpeta = ctx.proyecto.ruta_paso("voz")
@@ -1838,45 +1844,158 @@ def _correr_regrabar(avisar, ctx, seccion_id, peticion, ajuste):
                                     or p4.NOMBRE_META))
     if not meta:
         raise RuntimeError("no encuentro el audio_meta.json de la toma actual")
-    bloques = [{"id": b["id"], "texto": b["texto"]}
-               for b in (meta.get("bloques") or [])]
-    if not bloques:
+    if not meta.get("bloques"):
         raise RuntimeError("la toma no trae bloques que regrabar")
-    # LO EDITADO A MANO MANDA sobre lo que se grabo. Aqui se partia del texto de
-    # la TOMA, asi que reescribir un bloque a mano y darle a regrabar su tramo
-    # volvia a grabar la frase vieja: la unica forma de que la correccion
-    # llegara era pedir el guion entero otra vez. Es el mismo cajon y la misma
-    # regla que `p4_voz.cargar_guion`.
-    bloques = p4.ediciones_a_mano(ctx.proyecto, bloques)
+    # el guion de AHORA: version activa + lo escrito a mano + lo añadido. Es
+    # lo que la pantalla enseña, y por tanto lo que hay que grabar.
+    efectivos = p4.cargar_guion(ctx.proyecto)
+    plan = p4.plan_regrabado(meta, efectivos, seccion_id)
+    textos = {b["id"]: b["texto"] for b in efectivos}
+    caracteres = sum(len(PASOS_MODULOS.marcas_tts.limpiar(textos[bid]))
+                     for s in plan["secciones"] if s["id"] in plan["orden"]
+                     for bid in s["bloques"])
+    plan.update({"meta": meta, "efectivos": efectivos, "caracteres": caracteres,
+                 "usd": round(caracteres * COSTE.tarifa_caracter(), 4)})
+    return plan
+
+
+def _correr_regrabar(avisar, ctx, seccion_id, peticion, ajuste):
+    """Regraba lo que haga falta y lo REGISTRA como version nueva de la voz.
+
+    EL FALLO QUE ARREGLA (09-10-2026): esto cosia la toma en `voz/trabajo/` y
+    nunca llamaba a `completar()`. El trabajo acababa en «listo», pero la
+    version activa seguia siendo la de antes: la pantalla enseñaba el texto
+    viejo, la voz seguia en obsoleto y la siguiente regrabacion partia otra vez
+    de la version activa, asi que regrabar SB001 y despues SB002 perdia la
+    primera.
+
+    Se graban la seccion pedida Y las demas que tengan cambios sin grabar (ver
+    `p4_voz.plan_regrabado`): la firma de la voz incluye el guion entero, asi
+    que dejar una pendiente haria que «listo» mintiera.
+    """
+    p4 = PASOS_MODULOS.p4_voz
+    plan = _plan_regrabado(ctx, seccion_id)
+    meta = plan["meta"]
+    efectivos = plan["efectivos"]
+    grabados = dict(plan["grabados"])
+    seccion_de = plan["seccion_de"]
+    ficha_voz = ctx.estado.salidas("voz") or {}
+    carpeta = ctx.proyecto.ruta_paso("voz")
     cfg = p4.resolver_params(p4.params_con_idioma(
         ctx.proyecto, ctx.estado.params("voz") or {}))
     destino = PASOS_MODULOS.comun.preparar_trabajo(ctx.proyecto, "voz")
+    nombre = ficha_voz.get("archivo") or meta.get("archivo") or p4.NOMBRE_PISTA
     # se parte de la toma que hay: se cose sobre ella
-    shutil.copy2(os.path.join(carpeta, ficha_voz.get("archivo")
-                              or p4.NOMBRE_PISTA),
-                 os.path.join(destino, ficha_voz.get("archivo")
-                              or p4.NOMBRE_PISTA))
-    salidas, nuevos = p4.regrabar_seccion(
-        bloques, seccion_id, cfg, meta, destino, peticion=peticion,
-        ajuste=ajuste, avisar=avisar, cwd=ctx.proyecto.raiz)
+    shutil.copy2(os.path.join(carpeta, nombre), os.path.join(destino, nombre))
 
-    cambiados = [b["id"] for b, viejo in zip(nuevos, bloques)
-                 if b["texto"] != viejo["texto"]]
-    if cambiados:
-        # al guion, que es de donde bebe todo lo de despues. Con la MISMA forma
-        # que escribe y lee la pantalla ({"texto": ...}): se guardaba la cadena
-        # pelada, p3 la toleraba, pero la interfaz leia `.texto`, no veia la
-        # edicion y la machacaba al primer toque del bloque.
-        ediciones = dict((ctx.estado.params("guion") or {}).get("bloques") or {})
+    # LA LINEA ENTERA: el guion de ahora mas los bloques QUITADOS que todavia
+    # suenan en la toma, cada uno detras del que tenia delante al grabarse.
+    # Hasta que se regraba su seccion siguen ahi, y el reparto de palabras
+    # tiene que contar con ellos o se comeria sus palabras el de al lado.
+    linea = [b["id"] for b in efectivos]
+    orden_grabado = [str(b.get("id")) for b in meta.get("bloques") or []]
+    for indice, bid in enumerate(orden_grabado):
+        if bid in linea:
+            continue
+        previos = [x for x in orden_grabado[:indice] if x in linea]
+        linea.insert(linea.index(previos[-1]) + 1 if previos else 0, bid)
+    textos_ahora = {b["id"]: b["texto"] for b in efectivos}
+
+    orden = plan["orden"]
+    hechas = []
+    salidas = None
+    for numero, sid in enumerate(orden):
+        dentro = {bid for s in plan["secciones"] if s["id"] == sid
+                  for bid in s["bloques"]}
+        bloques = []
+        for bid in linea:
+            if bid in dentro:
+                bloques.append({"id": bid, "texto": textos_ahora[bid]})
+            elif bid in grabados:
+                bloques.append({"id": bid, "texto": grabados[bid]})
+            # y lo que no esta en ninguna de las dos (un añadido de una seccion
+            # que todavia no se ha regrabado) no suena aun: fuera
+        presentes = {b["id"] for b in bloques}
+        secciones = [{"id": s["id"],
+                      "bloques": [bid for bid in linea if bid in presentes
+                                  and seccion_de.get(bid) == s["id"]]}
+                     for s in plan["secciones"]]
+
+        def tramo(valor, mensaje="", publico="", _n=numero):
+            return avisar(0.02 + 0.85 * (_n + max(0.0, min(1.0, valor))) / len(orden),
+                          mensaje, publico)
+
+        salidas, nuevos = p4.regrabar_seccion(
+            bloques, sid, cfg, meta, destino,
+            peticion=peticion if sid == seccion_id else "",
+            ajuste=ajuste, avisar=tramo, cwd=ctx.proyecto.raiz,
+            secciones=secciones)
         for bloque in nuevos:
-            if bloque["id"] in cambiados:
-                ediciones[bloque["id"]] = {"texto": bloque["texto"]}
+            if bloque["id"] in dentro:
+                grabados[bloque["id"]] = bloque["texto"]
+        for bid in plan["quitados"]:
+            if seccion_de.get(bid) == sid:
+                grabados.pop(bid, None)
+        meta = dict(salidas)
+        hechas.append(sid)
+
+    if salidas is None:
+        raise RuntimeError("no hay nada que regrabar: la toma ya dice el guion "
+                           "de ahora")
+    # lo que dice la toma, bloque a bloque: el 'antes' contra el que compara la
+    # conservacion de planos (`conservar.guion_locutado`)
+    locutado = [{"id": bid, "texto": grabados[bid]} for bid in linea if bid in grabados]
+    PASOS_MODULOS.comun.escribir_json(
+        os.path.join(destino, "guion_locutado.json"), {"bloques": locutado})
+
+    # el microcambio puede haber reescrito texto: AL GUION, que es de donde
+    # bebe todo lo de despues. Con la MISMA forma que escribe y lee la pantalla
+    # ({"texto": ...}): se guardaba la cadena pelada, p3 la toleraba, pero la
+    # interfaz leia `.texto`, no veia la edicion y la machacaba.
+    reescritos = [bid for bid in textos_ahora if bid in grabados
+                  and not p4._igual_que_grabado(textos_ahora[bid], grabados[bid])]
+    if reescritos:
+        ediciones = dict((ctx.estado.params("guion") or {}).get("bloques") or {})
+        for bid in reescritos:
+            ediciones[bid] = {"texto": grabados[bid]}
         ctx.estado.actualizar_params("guion", {"bloques": ediciones})
+        # y se vuelve a fotografiar la entrada: la toma se ha grabado CON ese
+        # texto, asi que es con el que tiene que quedar sellada. Sin esto
+        # `completar` sellaria con la firma del arranque y la voz recien
+        # grabada saldria obsoleta por su propio microcambio.
+        ctx.estado.marcar_ejecutando("voz")
+
+    cambiados = [bid for bid in linea
+                 if bid not in plan["grabados"] or bid not in grabados
+                 or not p4._igual_que_grabado(grabados[bid], plan["grabados"][bid])]
+    salidas["resumen"] = (f"{', '.join(hechas)} regrabada" + ("s" if len(hechas) > 1 else "")
+                          + f" ({len(cambiados)} bloque(s) cambiados)")
+    ligeras, _recortadas = _aligerar(salidas)
+    version = ctx.estado.completar("voz", ligeras)
     ctx.bitacora.anotar("seccion_regrabada", "voz", {
-        "seccion": seccion_id, "peticion": peticion[:200],
-        "bloques_cambiados": cambiados})
-    salidas["bloques_cambiados"] = cambiados
-    return salidas
+        "seccion": seccion_id, "secciones": hechas, "version": version,
+        "peticion": peticion[:200], "bloques_cambiados": cambiados,
+        "quitados": plan["quitados"]})
+
+    # LA REVISION, si sale gratis. Nada depende de ella, pero el reproductor de
+    # vista previa prefiere SU toma (`_audio_de_la_toma`): dejarla en la
+    # anterior hacia sonar la frase vieja. Sellarla es copiar; si no se puede
+    # sellar, ejecutarla resintetizaria la toma ENTERA, y eso no lo ha pedido
+    # nadie desde un boton de un tramo: se queda en obsoleto y se dice.
+    revision = "sin_tocar"
+    if ctx.estado.versiones("revision_audio"):
+        p5 = PASOS_MODULOS.p5_revision_audio
+        params_rev = ctx.estado.params("revision_audio") or {}
+        if p5.se_puede_sellar(ctx.proyecto, params_rev):
+            _correr_paso(lambda v, m="", publico="": avisar(0.9 + 0.1 * v, m, publico),
+                         ctx, "revision_audio", None)
+            revision = "sellada"
+        else:
+            revision = "obsoleta"
+    avisar(1.0, salidas["resumen"])
+    return {"version": version, "resumen": salidas["resumen"], "secciones": hechas,
+            "bloques_cambiados": cambiados, "revision_audio": revision,
+            "duracion": salidas.get("duracion")}
 
 
 def medios_json(ruta):
@@ -1901,20 +2020,17 @@ def _correr_reescribir(avisar, ctx, ids, peticion, ajuste):
     camino normal.
     """
     p4 = PASOS_MODULOS.p4_voz
-    documento = PASOS_MODULOS.comun.leer_salida(ctx.proyecto, "guion",
-                                                "guion.json", obligatorio=False)
-    bloques = [{"id": b["id"], "texto": b["texto"]}
-               for b in ((documento or {}).get("guion") or [])]
+    # EL GUION DE AHORA: lo escrito a mano y los bloques añadidos mandan sobre
+    # lo que hay en disco. Es lo que se esta viendo en la pantalla, y es sobre
+    # eso sobre lo que se pide (y un bloque añadido tambien se puede reescribir)
+    try:
+        bloques = [{"id": b["id"], "texto": b["texto"]}
+                   for b in p4.cargar_guion(ctx.proyecto)]
+    except RuntimeError:
+        bloques = []
     if not bloques:
         raise RuntimeError("todavia no hay guion que reescribir")
-    # lo que ya se haya editado a mano manda sobre lo que hay en disco: es lo
-    # que se esta viendo en la pantalla, y es sobre eso sobre lo que se pide
     editados = (ctx.estado.params("guion") or {}).get("bloques") or {}
-    for bloque in bloques:
-        ficha = editados.get(bloque["id"])
-        texto = ficha.get("texto") if isinstance(ficha, dict) else ficha
-        if isinstance(texto, str) and texto.strip():
-            bloque["texto"] = texto
     faltan = [b for b in ids if b not in {x["id"] for x in bloques}]
     if faltan:
         raise RuntimeError("el guion no tiene los bloques " + ", ".join(faltan))
@@ -1963,6 +2079,144 @@ def reescribir_bloques_guion(pid: str, cuerpo: dict = Body(default=None)):
     return {"trabajo_id": trabajo_id, "bloques": ids, "ajuste": ajuste,
             "trabajo": ctx.gestor.estado(trabajo_id),
             "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
+
+
+# ----------------------------------------- añadir, partir y quitar bloques
+#
+# Lo que se escribe a mano sobre la ESTRUCTURA del guion: un bloque nuevo en un
+# sitio concreto, uno partido en varios, un añadido que se quita. Vive en
+# `params.guion` (`insertados` + el cajon de textos de siempre) y lo aplica
+# `pasos/estructura_guion.py`: ver alli por que anclado y no por posicion.
+#
+# NADA DE ESTO CUESTA: es escribir params. Lo que cuesta es grabar despues, y
+# por eso cada respuesta trae lo que costaria regrabar (`regrabar`), para que
+# la pantalla lo diga ANTES de que alguien pulse.
+
+def _guion_efectivo(ctx):
+    """[{"id","texto","insertado"?}] del guion de ahora, o [] si no hay."""
+    p4 = PASOS_MODULOS.p4_voz
+    documento = PASOS_MODULOS.comun.leer_salida(ctx.proyecto, "guion",
+                                                "guion.json", obligatorio=False)
+    base = p4.normalizar_bloques(documento) if documento else []
+    if not base:
+        return []
+    return PASOS_MODULOS.estructura_guion.aplicar(
+        base, ctx.estado.params("guion") or {})
+
+
+def _previsto_regrabar(ctx, seccion_id=None):
+    """Lo que costaria dejar la toma diciendo el guion de ahora, o None."""
+    if not ctx.estado.versiones("voz"):
+        return None
+    try:
+        plan = _plan_regrabado(ctx, seccion_id)
+    except (RuntimeError, OSError) as fallo:
+        return {"posible": False, "por_que_no": str(fallo)}
+    return {"posible": True, "pendientes": plan["pendientes"],
+            "orden": plan["orden"], "cambiados": plan["cambiados"],
+            "seccion_de": plan["seccion_de"], "caracteres": plan["caracteres"],
+            "usd": plan["usd"]}
+
+
+def _respuesta_estructura(ctx, **extra):
+    bloques = _guion_efectivo(ctx)
+    return dict({
+        "bloques": [{"id": b["id"], "insertado": bool(b.get("insertado"))}
+                    for b in bloques],
+        "insertados": [f["id"] for f in PASOS_MODULOS.estructura_guion.insertados_de(
+            ctx.estado.params("guion") or {})],
+        "regrabar": _previsto_regrabar(ctx),
+    }, **extra)
+
+
+def _cambiar_estructura(ctx, hacer):
+    """Escribe un cambio de estructura en params.guion, con las guardas."""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    for paso in ("guion", "voz"):
+        if _trabajo_activo(ctx, paso):
+            raise ErrorApi(409, "hay un trabajo en marcha sobre el guion o la voz: "
+                                "espera a que termine")
+    bloques = _guion_efectivo(ctx)
+    if not bloques:
+        raise ErrorApi(409, "todavia no hay guion: genera el guion primero")
+    grabados = []
+    meta = None
+    if ctx.estado.versiones("voz"):
+        ficha_voz = ctx.estado.salidas("voz") or {}
+        meta = medios_json(os.path.join(ctx.proyecto.ruta_paso("voz"),
+                                        ficha_voz.get("meta") or "audio_meta.json"))
+        grabados = [b.get("id") for b in (meta or {}).get("bloques") or []]
+    try:
+        cambios, nuevos = hacer(ctx.estado.params("guion") or {}, bloques, grabados)
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    ctx.estado.actualizar_params("guion", cambios)
+    return nuevos
+
+
+@app.get("/api/proyectos/{pid}/guion/bloques")
+def leer_estructura_guion(pid: str, seccion: str = Query(default="")):
+    """El orden de los bloques de ahora y lo que costaria regrabar lo cambiado."""
+    ctx = contexto(pid)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    respuesta = _respuesta_estructura(ctx)
+    if seccion:
+        respuesta["regrabar"] = _previsto_regrabar(ctx, seccion.strip().upper())
+    return respuesta
+
+
+@app.post("/api/proyectos/{pid}/guion/bloques", status_code=201)
+def anadir_bloque_guion(pid: str, cuerpo: dict = Body(default=None)):
+    """Un bloque nuevo: {texto, donde: antes|despues|principio|final, ancla}."""
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    estructura = PASOS_MODULOS.estructura_guion if PASOS_MODULOS else None
+
+    def hacer(params, bloques, grabados):
+        cambios, nuevo = estructura.insertar(
+            params, bloques, datos.get("texto"), datos.get("donde"),
+            datos.get("ancla"), otros=grabados)
+        return cambios, [nuevo]
+
+    nuevos = _cambiar_estructura(ctx, hacer)
+    ctx.bitacora.anotar("bloque_anadido", "guion", {
+        "id": nuevos[0], "donde": datos.get("donde"), "ancla": datos.get("ancla")})
+    return _respuesta_estructura(ctx, id=nuevos[0], nuevos=nuevos)
+
+
+@app.post("/api/proyectos/{pid}/guion/bloques/{bid}/partir")
+def partir_bloque_guion(pid: str, bid: str, cuerpo: dict = Body(default=None)):
+    """Parte un bloque: {trozos: [texto, texto, ...]}. El primero se queda en el."""
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    trozos = datos.get("trozos")
+    if not isinstance(trozos, list):
+        raise ErrorApi(400, "hace falta 'trozos': la lista de textos en que se parte")
+    estructura = PASOS_MODULOS.estructura_guion if PASOS_MODULOS else None
+
+    def hacer(params, bloques, grabados):
+        return estructura.partir(params, bloques, bid, trozos, otros=grabados)
+
+    nuevos = _cambiar_estructura(ctx, hacer)
+    ctx.bitacora.anotar("bloque_partido", "guion", {
+        "id": bid.strip().upper(), "nuevos": nuevos})
+    return _respuesta_estructura(ctx, id=bid.strip().upper(), nuevos=nuevos)
+
+
+@app.delete("/api/proyectos/{pid}/guion/bloques/{bid}")
+def quitar_bloque_guion(pid: str, bid: str):
+    """Quita un bloque AÑADIDO a mano. Los del guion original no se quitan."""
+    ctx = contexto(pid)
+    estructura = PASOS_MODULOS.estructura_guion if PASOS_MODULOS else None
+
+    def hacer(params, _bloques, _grabados):
+        return estructura.quitar(params, bid), []
+
+    _cambiar_estructura(ctx, hacer)
+    ctx.bitacora.anotar("bloque_quitado", "guion", {"id": bid.strip().upper()})
+    return _respuesta_estructura(ctx, id=bid.strip().upper(), nuevos=[])
 
 
 @app.post("/api/proyectos/{pid}/voz/secciones/{seccion_id}/regrabar",
@@ -6256,7 +6510,15 @@ def salir_cuenta_cli(cid: str):
 def _asistente():
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    # el historial de charlas vive junto a los datos, no en el codigo
+    PASOS_MODULOS.asistente.fijar_historial(
+        os.path.join(raiz_proyectos(), CARPETA_CHARLAS_ASISTENTE))
     return PASOS_MODULOS.asistente
+
+
+#: Donde se guarda el historial de charlas del asistente, dentro de la carpeta
+#: de proyectos (al lado de las imagenes que se le adjuntan).
+CARPETA_CHARLAS_ASISTENTE = os.path.join("_asistente", "charlas")
 
 
 def _salud_cli():
@@ -6846,10 +7108,18 @@ def cancelar_asistente(cid: str):
     return {"cancelado": habia, "charla": charla.ver()}
 
 
+@app.get("/api/asistente/charlas")
+def historial_de_charlas(limite: int = Query(default=50)):
+    """El historial: las charlas guardadas, la más reciente primero."""
+    charlas = _asistente().listar(max(1, min(int(limite or 50), 200)))
+    return {"charlas": charlas, "total": len(charlas)}
+
+
 @app.delete("/api/asistente/charlas/{cid}")
 def cerrar_charla(cid: str):
-    """Cierra una charla; lo que estuviera contestando se cancela."""
-    return {"cerrada": _asistente().olvidar(cid)}
+    """Borra una charla del historial; lo que estuviera contestando se cancela."""
+    borrada = _asistente().borrar(cid)
+    return {"cerrada": borrada, "borrada": borrada}
 
 
 # ----------------------------------------------------------- presets de canal

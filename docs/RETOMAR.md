@@ -370,3 +370,52 @@ botón «Generar las diapositivas» se llama «Generar imágenes».
   parches largos van en un fichero escrito con Write y se ejecutan con Python.
 - El `--mcp-config` va como FICHERO en `%TEMP%/estudio_mcp_<pid>.json`,
   reescrito en cada turno porque lleva el proyecto abierto.
+
+## 9. Regrabar por tramos, añadir y partir bloques, historial del asistente (09-10-2026)
+
+### El fallo y su causa
+
+- **«Solo regrabar lo que he escrito» no se veía.** `_correr_regrabar` (app.py)
+  cosía la toma en `pasos/voz/trabajo/` y nunca llamaba a
+  `estado.completar("voz", ...)`: `nucleo/trabajos.py` solo limpiaba la marca.
+  La pantalla leía la versión activa (la de antes), la voz seguía en obsoleto y
+  la siguiente regrabación partía otra vez de esa versión. Ahora registra la
+  toma como versión nueva, por el mismo camino que `_correr_paso`.
+- **Regraba TODAS las secciones con cambios**, no solo la del botón
+  (`p4_voz.plan_regrabado`). La firma de la voz incluye el guion entero: grabar
+  una sola y sellar habría dejado «listo» con otra sección diciendo lo viejo.
+  Los bloques de otras secciones sin grabar todavía conservan en el reparto el
+  texto GRABADO, no el editado (antes `ediciones_a_mano` los pisaba todos).
+- **`revision_audio`** se sella gratis en el mismo trabajo si no tiene
+  comentarios (`p5.se_puede_sellar`); si no se puede sellar, se queda en
+  obsoleto: ejecutarla resintetizaría la toma entera. Importa porque
+  `_audio_de_la_toma` prefiere su toma para la vista previa.
+- **Firmas, medidas en `prueba_api.probar_regrabar_y_estructura`**: regrabar
+  mueve `revision_audio`, `assets`, `callouts` y `render` (el sello de salida
+  de la voz cambia: el audio tiene otros tiempos) y NO mueve ninguna firma de
+  plano. Lo que deja los planos sucios es editar el texto (la firma global del
+  guion entra en la de cada plano), y eso ya era así; al montar, los planos con
+  el mismo prompt salen de la caché de imágenes por contenido y no se pagan.
+- Con un microcambio por prompt se escribe el texto en `params.guion.bloques` y
+  se vuelve a fotografiar la marca (`marcar_ejecutando`) antes de `completar`:
+  si no, la voz se sellaba con la firma del arranque y salía obsoleta por su
+  propio cambio.
+
+### Añadir y partir bloques
+
+- `pasos/estructura_guion.py` es el ÚNICO que aplica el guion efectivo (guion.json
+  + `insertados` + el cajón de textos). Lo usan `p4_voz.ediciones_a_mano`,
+  `p3_guion` (al volver a redactar), `conservar.guion_ahora` y la reescritura.
+- `insertados` va en `CORRECCIONES` junto a `bloques`: no deja obsoleto al
+  guion, sí a la voz y lo de abajo.
+- Ids: el siguiente número libre con tres cifras (`p3_guion` renumera el guion
+  entero si recibe un id con otra forma). Cuenta también los ids de la toma
+  grabada, para no reutilizar el de un añadido quitado que aún suena.
+
+### Historial del asistente
+
+- Cada charla con turnos se guarda en `<proyectos>/_asistente/charlas/<id>.json`
+  (`asistente.fijar_historial`, lo fija `app._asistente`). `obtener` la trae del
+  disco si no está en memoria; un turno que se quedó «pensando» al reiniciar
+  sale como error. Tope de 200. «Nueva» ya no borra la anterior; el DELETE sí
+  la borra del historial.

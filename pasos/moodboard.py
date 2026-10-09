@@ -667,8 +667,18 @@ def importar(carpeta, clave, raiz=None):
 # de las palabras del canal y las laminas salen de la guia, en ese orden.
 
 def dibujar_desde_guia(estilo, destino, ejes=None, calidad="medium",
-                       avisar=None, idioma="", peticiones=None):
+                       avisar=None, idioma="", peticiones=None,
+                       referencias=None):
     """Dibuja las laminas de un estilo DESCRITO. -> {rutas, ejes, coste_usd}.
+
+    'referencias' son las imagenes que la persona ADJUNTO al describir el
+    estilo. Se montan en UNA hoja de contacto y viajan como la imagen 1, igual
+    que los fotogramas en el camino del video (`generar`): una sola adjunta se
+    paga una vez, y el prompt dice que de ella se copia el trazo y no el
+    contenido. Sin esto las laminas salian a la API sin ninguna imagen, y el
+    motor (que llama al endpoint de EDICION, que exige adjuntos) cortaba la
+    tanda con «generar() necesita al menos una imagen de referencia» aunque
+    hubiera catorce subidas.
 
     Sin fotogramas de entrada y sin tocar el banco de moodboards: las laminas se
     dejan en `destino`, que es de quien las pide (el taller de un preset), y lo
@@ -701,6 +711,27 @@ def dibujar_desde_guia(estilo, destino, ejes=None, calidad="medium",
             "el estilo por defecto del generador")
     bloque = reglas.bloque_prompt("prompt_imagen")
 
+    # LAS IMAGENES APORTADAS, EN UNA HOJA. La API de edicion no puede llamarse
+    # sin adjuntos (ver `imagen.generar`), y las aportadas son justo el estilo
+    # que hay que copiar: la guia escrita se escribio mirandolas, pero un texto
+    # no transmite un trazo como lo transmite el propio dibujo.
+    aportadas = [r for r in (referencias or []) if r and os.path.isfile(r)]
+    if not aportadas:
+        raise RuntimeError(
+            "no hay ninguna imagen de referencia del estilo en el disco: las "
+            "laminas se dibujan copiando el trazo de las imagenes que adjuntaste. "
+            "Vuelve a subir al menos una imagen al estilo")
+    cache = os.path.join(os.path.dirname(os.path.abspath(destino)),
+                         "_lamina_aportadas")
+    os.makedirs(cache, exist_ok=True)
+    hoja = _montar([imagen.normalizar(r, cache) for r in aportadas],
+                   os.path.join(cache, "aportadas.png"))
+    if not hoja:
+        raise RuntimeError(
+            "ninguna de las imagenes adjuntas se ha podido abrir como imagen: "
+            "vuelve a subirlas en PNG, JPG o WEBP")
+    refs = [imagen.normalizar(hoja, cache)]
+
     resultados = [None] * len(pedidos)
     hechas = [0]
     candado = threading.Lock()
@@ -713,12 +744,13 @@ def dibujar_desde_guia(estilo, destino, ejes=None, calidad="medium",
         prompt = prompt_de_dibujo(
             (EJES.get(eje) or {}).get("prompt") or "", estilo,
             peticiones.get(eje), guia, bloque,
-            con_lamina=False,
+            con_lamina=True,
             encabezado="Produce one single full-frame image for a style "
-                       "reference sheet.")
-        # SIN referencias: no hay ninguna que mandar, y mandar una lamina vacia
-        # es lo que provoca el "Unsupported content type" que no dice nada.
-        png, meta = imagen.generar(prompt, [], quality=calidad,
+                       "reference sheet.",
+            # el idioma del canal, que llegaba hasta aqui y no se usaba: la
+            # lamina «diagrama» de un canal en espanol salia rotulada en ingles
+            idioma=idioma)
+        png, meta = imagen.generar(prompt, refs, quality=calidad,
                                    tamano="apaisado")
         ruta = os.path.join(destino, f"{eje}.png")
         with open(ruta, "wb") as fh:

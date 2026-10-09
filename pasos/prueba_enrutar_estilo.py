@@ -363,6 +363,79 @@ def prueba_con_cli():
                f"«{str(r['laminas'].get(eje) or '')[:70]}»")
 
 
+def prueba_las_aportadas_llegan_al_dibujo():
+    seccion("7b] las imágenes que adjuntaste LLEGAN al dibujo de las láminas")
+    # EL FALLO: `dibujar_desde_guia` llamaba al motor con la lista de
+    # referencias VACIA, y el motor (endpoint de edicion, que exige adjuntos)
+    # cortaba la tanda con «generar() necesita al menos una imagen de
+    # referencia» aunque el estilo tuviera catorce. Aqui el motor de imagen es un
+    # doble que apunta lo que le llega: no se paga nada.
+    import shutil
+    import tempfile
+    from PIL import Image
+
+    carpeta = tempfile.mkdtemp(prefix="prueba_aportadas_")
+    llamadas = []
+
+    class ImagenFalsa:
+        @staticmethod
+        def normalizar(ruta, cache_dir, lado_max=1024):
+            return ruta
+
+        @staticmethod
+        def generar(prompt, referencias, **_):
+            if not referencias:
+                raise ValueError("generar() necesita al menos una imagen de referencia")
+            llamadas.append((prompt, list(referencias)))
+            return b"png", {"coste": 0.0}
+
+    motor_real = moodboard.medios.motor
+    moodboard.medios.motor = (lambda nombre: ImagenFalsa if "imagen_openai" in nombre
+                              else motor_real(nombre))
+    try:
+        aportadas = []
+        for i, color in enumerate(("red", "green", "blue")):
+            ruta = os.path.join(carpeta, f"aportada_{i}.png")
+            Image.new("RGB", (64, 48), color).save(ruta)
+            aportadas.append(ruta)
+        estilo = {"guia": {"guia": "Trazo grueso, paleta tierra."}}
+        destino = os.path.join(carpeta, "estilo", "dibujadas")
+
+        hecho = moodboard.dibujar_desde_guia(
+            estilo, destino, ejes=["cara", "diagrama"], calidad="low",
+            idioma="es", referencias=aportadas)
+        igual(len(llamadas), 2, "se dibuja una lámina por eje pedido")
+        ok(all(len(refs) == 1 for _, refs in llamadas),
+           "cada lámina lleva UNA adjunta: las aportadas montadas en una hoja, "
+           "que se paga una vez y no catorce")
+        ok(all(os.path.isfile(refs[0]) for _, refs in llamadas),
+           "y esa hoja existe en el disco")
+        ok(all("STYLE SHEET" in prompt for prompt, _ in llamadas),
+           "el prompt dice que de la imagen 1 se copia el trazo, no el contenido")
+        ok(all("Spanish" in prompt or "español" in prompt.lower()
+               for prompt, _ in llamadas),
+           "y el idioma del canal llega al prompt (llegaba a la función y no se usaba)")
+        igual(sorted(hecho["ejes"]), ["cara", "diagrama"], "y devuelve lo dibujado")
+
+        llamadas.clear()
+        try:
+            moodboard.dibujar_desde_guia(estilo, destino, ejes=["cara"],
+                                         referencias=[])
+            sin = None
+        except RuntimeError as fallo:
+            sin = str(fallo)
+        ok(sin and "adjuntaste" in sin,
+           f"sin ninguna imagen se dice qué falta, en cristiano: {sin!r}")
+        igual(llamadas, [], "y no se llega a llamar al motor")
+    finally:
+        moodboard.medios.motor = motor_real
+        shutil.rmtree(carpeta, ignore_errors=True)
+
+    fuente = _fuente("app.py")
+    ok("referencias=_aportadas_del_taller(ctx)" in fuente,
+       "app.py le pasa al dibujo las imágenes del taller")
+
+
 def main():
     prueba_vocabulario()
     prueba_los_cajones_se_leen()
@@ -371,6 +444,7 @@ def main():
     prueba_la_tupla_vacia_es_una_respuesta()
     prueba_una_sola_referencia()
     prueba_la_lamina_llega_al_prompt()
+    prueba_las_aportadas_llegan_al_dibujo()
     prueba_lo_que_devuelve_el_modelo_para_una_lamina()
     prueba_sin_frase()
     if "--con-cli" in sys.argv:

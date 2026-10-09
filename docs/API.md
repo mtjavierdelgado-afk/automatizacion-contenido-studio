@@ -104,6 +104,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/guion/bloques/reescribir` | Reescribe unos bloques del guion con una frase. Sin tocar el audio. |
 | `DELETE` | `/api/proyectos/{pid}/guion/bloques/{bid}` | Quita un bloque AÑADIDO a mano. Los del guion original no se quitan. |
 | `POST` | `/api/proyectos/{pid}/guion/bloques/{bid}/partir` | Parte un bloque: {trozos: [texto, texto, ...]}. El primero se queda en el. |
+| `POST` | `/api/proyectos/{pid}/guion/pausas/quitar` | Quita las pausas largas de unos bloques: {bloques: [ids]} o {sobrantes: true}. |
 
 ## Voz
 
@@ -279,4 +280,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**165 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**166 endpoints.** Escrito por `generar_api.py` desde `app.py`.

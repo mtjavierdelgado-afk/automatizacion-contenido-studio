@@ -56,6 +56,15 @@ vídeos, estilos, claves y contraseña no se tocan.
   pulsar Generar. No pisa lo propio del vídeo: duración, formato, llamadas a la
   acción, indicaciones, qué lleva y lo editado a mano en el guion.
 
+**Las pausas largas del guion, a la vista**
+- Cada bloque que lleva una pausa larga invisible (`<break>`) muestra la
+  etiqueta **«⏸ pausa 0,9 s»** y un botón **«Quitar pausa»**, que la quita sin
+  tocar el resto del bloque.
+- Arriba del guion, el aviso de pausas se calcula con el **texto de ahora**
+  (contando lo editado a mano), dice en qué bloques están y cuántas conviene
+  dejar, y ofrece **«Quitar las sobrantes»**: deja la del principio y las de
+  cambio de tema. Es gratis; si ya había audio, hay que regrabarlo.
+
 **El asistente: dictar las preguntas con la voz**
 - Botón **«🎙 Hablar»** junto a «Imagen»: pulsas, hablas y pulsas «Parar». El
   texto aparece en la caja para que lo revises y lo envíes; no se manda solo.

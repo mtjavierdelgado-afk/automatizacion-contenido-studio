@@ -7012,9 +7012,15 @@ function vistaGuionLight() {
     return caja;
   }
 
-  (v.guion.avisos || []).slice(0, 6).forEach(aviso => {
-    caja.appendChild(h('div', { clase: 'caja-aviso' }, aviso));
-  });
+  /* El aviso de los silencios NO se pinta del guion.json: se calculó al
+     redactar y no sabía de lo editado después. El de verdad lo da el servidor
+     sobre el texto de ahora (ver barraPausasLight). */
+  (v.guion.avisos || []).filter(a => !/^\d+ silencios para \d+ bloques/.test(a))
+    .slice(0, 6).forEach(aviso => {
+      caja.appendChild(h('div', { clase: 'caja-aviso' }, aviso));
+    });
+  const pausas = barraPausasLight();
+  if (pausas) caja.appendChild(pausas);
   // si algo quedó viejo (un cambio de estilo traído, por ejemplo), qué pulsar
   const siguiente = siguientePasoLight();
   if (siguiente) caja.appendChild(siguiente);
@@ -7128,8 +7134,17 @@ function bloquesLight() {
     ficha.appendChild(h('div', { clase: 'cabecera' },
       h('span', { clase: 'id' }, bloque.id),
       insertado ? h('span', { clase: 'pastilla nuevo' }, 'añadido') : null,
+      pausasDeBloqueLight(bloque.id).length ? h('span', {
+        clase: 'pastilla pausa',
+        title: 'Este bloque lleva una pausa larga invisible en el texto',
+      }, `⏸ pausa ${pausasDeBloqueLight(bloque.id).map(ms => `${(ms / 1000).toFixed(1).replace('.', ',')} s`).join(' + ')}`) : null,
       bloqueEditadoLight(bloque) ? h('span', { clase: 'pastilla tocado' }, 'editado') : null,
       h('span', { clase: 'crece' }),
+      pausasDeBloqueLight(bloque.id).length ? h('button', {
+        clase: 'mini fantasma', disabled: !!trabajoVideoLight(),
+        title: 'Quita la pausa larga de este bloque; el resto queda igual',
+        onclick: () => quitarPausasLight({ bloques: [bloque.id] }),
+      }, 'Quitar pausa') : null,
       h('button', {
         clase: 'mini fantasma', disabled: !!trabajoVideoLight(),
         onclick: () => abrirPartirLight(bloque),
@@ -7325,6 +7340,58 @@ async function regrabarPendientesLight(seccion) {
     });
     pintarLight();
   } catch (err) { mostrarError(CLAVE_VIDEO_LIGHT, err); pintarLight(); }
+}
+
+/* ---- LAS PAUSAS LARGAS (<break>) ----
+ *
+ * Son marcas invisibles en el texto que le piden a la voz un silencio. Pocas
+ * dan aire donde cambia el tema; muchas hacen que la toma suene a lista
+ * leída, porque cada una corta la generación. Aquí se ven: cuántas hay con el
+ * texto de AHORA, en qué bloques, y se quitan con un botón (sin tocar el resto
+ * de anotaciones del bloque). Quitarlas es gratis; el audio hay que regrabarlo. */
+function pausasDeBloqueLight(bid) {
+  const ficha = ((v => (v.estructura || {}).bloques || [])(APP.light.video))
+    .find(b => b.id === bid);
+  return (ficha && ficha.pausas) || [];
+}
+
+function barraPausasLight() {
+  const v = APP.light.video;
+  const pausas = (v.estructura || {}).pausas;
+  if (!pausas || !pausas.total) return null;
+  const sobra = pausas.total > pausas.tope;
+  const segundos = ms => `${(ms / 1000).toFixed(1).replace('.', ',')} s`;
+  return h('div', { clase: (sobra ? 'caja-aviso' : 'caja-info') + ' barra-pausas' },
+    h('div', { clase: 'crece' },
+      h('strong', {}, `${pausas.total} ${pausas.total === 1 ? 'pausa larga' : 'pausas largas'} `
+        + `en el guion`),
+      ` (marcadas con ⏸ en ${pausas.con_pausa.join(', ')}). `,
+      sobra
+        ? `Para que el audio suene seguido y no a lista leída, conviene dejar como `
+          + `mucho ${pausas.tope}: la del principio y las de cambio de tema.`
+        : 'Está dentro de lo recomendado.',
+      sobra && (pausas.sobrantes || []).length
+        ? ` «Quitar las sobrantes» quita las de ${pausas.sobrantes.join(', ')}.` : ''),
+    sobra && (pausas.sobrantes || []).length ? h('button', {
+      clase: 'mini', disabled: !!trabajoVideoLight(),
+      onclick: () => quitarPausasLight({ sobrantes: true }),
+    }, 'Quitar las sobrantes') : null,
+    h('span', { clase: 'meta' }, `cada pausa: ${[...new Set(
+      (v.estructura.bloques || []).flatMap(b => b.pausas || []))].map(segundos).join(', ')}`));
+}
+
+async function quitarPausasLight(cuerpo) {
+  const v = APP.light.video;
+  try {
+    await guardarBloquesPendientesLight();
+    const r = await pedir(`${API.proyecto(v.pid)}/guion/pausas/quitar`, {
+      method: 'POST', cuerpo,
+    });
+    toast((r.quitadas || []).length
+      ? `pausa quitada en ${r.quitadas.join(', ')}${v.audio ? ': regraba el audio para oírlo' : ''}`
+      : 'no había pausas que quitar');
+    await cargarVideoLight(v.pid);
+  } catch (e) { toast(`no se ha podido: ${e.message}`, true); }
 }
 
 /* ---- AÑADIR, PARTIR Y QUITAR BLOQUES ----

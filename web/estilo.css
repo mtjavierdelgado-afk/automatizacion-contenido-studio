@@ -2889,3 +2889,8 @@ ul.inicio-como li { display: flex; gap: 10px; align-items: flex-start; line-heig
 .fila-calidad.opcion-dictado .desglose { grid-column: 1; }
 .siguiente-paso { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0; }
 .siguiente-paso .crece { min-width: 200px; }
+
+/* ---- las pausas largas del guion (V2.0) */
+.barra-pausas { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }
+.barra-pausas .crece { min-width: 220px; }
+.parrafo-guion .pastilla.pausa { color: var(--aviso); }

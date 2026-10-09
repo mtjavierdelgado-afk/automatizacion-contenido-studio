@@ -2119,6 +2119,12 @@ def _guion_efectivo(ctx):
     base = p4.normalizar_bloques(documento) if documento else []
     if not base:
         return []
+    # `abre_seccion` no sobrevive a normalizar_bloques y hace falta para saber
+    # que pausas son las de un cambio de tema (ver _pausas_sobrantes)
+    secciones = {str(b.get("id")): bool(b.get("abre_seccion"))
+                 for b in (documento.get("guion") or []) if isinstance(b, dict)}
+    for bloque in base:
+        bloque["abre_seccion"] = secciones.get(bloque["id"], False)
     return PASOS_MODULOS.estructura_guion.aplicar(
         base, ctx.estado.params("guion") or {})
 
@@ -2137,11 +2143,56 @@ def _previsto_regrabar(ctx, seccion_id=None):
             "usd": plan["usd"]}
 
 
+def _pausas_del_guion(bloques):
+    """Las pausas largas (<break>) del guion DE AHORA, contando lo editado.
+
+    El aviso de «demasiados silencios» se calculaba al redactar y se quedaba
+    escrito en guion.json: editar un bloque a mano le quita sus pausas, pero el
+    aviso seguia contando las de antes. Aqui se cuentan sobre el texto efectivo.
+    """
+    marcas = PASOS_MODULOS.marcas_tts
+    por_bloque = {b["id"]: marcas.pausas_de(b.get("texto")) for b in bloques}
+    total = sum(len(v) for v in por_bloque.values())
+    return {"total": total, "tope": marcas.tope_de_pausas(len(bloques)),
+            "con_pausa": [bid for bid, v in por_bloque.items() if v],
+            "aviso": (marcas.revisar_conjunto(bloques) or [""])[0],
+            "sobrantes": _pausas_sobrantes(bloques, por_bloque)}
+
+
+def _pausas_sobrantes(bloques, por_bloque):
+    """Que bloques quitarian su pausa para quedarse en el tope recomendado.
+
+    Se quedan, por este orden, la del primer bloque (el gancho: sin aire detras
+    el segundo bloque le pisa el remate) y las que cierran un tramo antes de un
+    cambio de tema (`abre_seccion` en el bloque siguiente). El resto sobra.
+    """
+    tope = PASOS_MODULOS.marcas_tts.tope_de_pausas(len(bloques))
+    con = [b["id"] for b in bloques if por_bloque.get(b["id"])]
+    if sum(len(por_bloque[b]) for b in con) <= tope:
+        return []
+    abre = {}
+    for anterior, siguiente in zip(bloques, bloques[1:]):
+        abre[anterior["id"]] = bool(siguiente.get("abre_seccion"))
+    prioridad = sorted(con, key=lambda bid: (
+        0 if bloques and bid == bloques[0]["id"] else 1 if abre.get(bid) else 2,
+        [b["id"] for b in bloques].index(bid)))
+    quedan, cuenta = set(), 0
+    for bid in prioridad:
+        if cuenta + len(por_bloque[bid]) > tope:
+            continue
+        quedan.add(bid)
+        cuenta += len(por_bloque[bid])
+    return [bid for bid in con if bid not in quedan]
+
+
 def _respuesta_estructura(ctx, **extra):
     bloques = _guion_efectivo(ctx)
+    marcas = PASOS_MODULOS.marcas_tts
     return dict({
-        "bloques": [{"id": b["id"], "insertado": bool(b.get("insertado"))}
+        "bloques": [{"id": b["id"], "insertado": bool(b.get("insertado")),
+                     "pausas": marcas.pausas_de(b.get("texto"))}
                     for b in bloques],
+        "pausas": _pausas_del_guion(bloques),
         "insertados": [f["id"] for f in PASOS_MODULOS.estructura_guion.insertados_de(
             ctx.estado.params("guion") or {})],
         "regrabar": _previsto_regrabar(ctx),
@@ -2222,6 +2273,44 @@ def partir_bloque_guion(pid: str, bid: str, cuerpo: dict = Body(default=None)):
     ctx.bitacora.anotar("bloque_partido", "guion", {
         "id": bid.strip().upper(), "nuevos": nuevos})
     return _respuesta_estructura(ctx, id=bid.strip().upper(), nuevos=nuevos)
+
+
+@app.post("/api/proyectos/{pid}/guion/pausas/quitar")
+def quitar_pausas_guion(pid: str, cuerpo: dict = Body(default=None)):
+    """Quita las pausas largas de unos bloques: {bloques: [ids]} o {sobrantes: true}.
+
+    Es una edicion mas del texto (va al cajon de siempre): no cuesta nada, deja
+    la voz obsoleta y el resto de anotaciones del bloque se queda como estaba.
+    """
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    marcas = PASOS_MODULOS.marcas_tts if PASOS_MODULOS else None
+
+    def hacer(params, bloques, _grabados):
+        por_id = {b["id"]: b for b in bloques}
+        if datos.get("sobrantes"):
+            ids = _pausas_sobrantes(bloques, {b["id"]: marcas.pausas_de(b.get("texto"))
+                                              for b in bloques})
+        else:
+            ids = [str(b).strip().upper() for b in (datos.get("bloques") or [])]
+        faltan = [b for b in ids if b not in por_id]
+        if faltan:
+            raise ValueError("el guion no tiene los bloques " + ", ".join(faltan))
+        crudos = (params or {}).get("bloques") or {}
+        cajon = {str(k).upper(): (dict(v) if isinstance(v, dict) else {"texto": v})
+                 for k, v in (crudos.items() if isinstance(crudos, dict) else [])}
+        quitadas = []
+        for bid in ids:
+            texto = por_id[bid].get("texto") or ""
+            if not marcas.pausas_de(texto):
+                continue
+            cajon[bid] = {"texto": marcas.sin_pausas(texto)}
+            quitadas.append(bid)
+        return {"bloques": cajon}, quitadas
+
+    quitadas = _cambiar_estructura(ctx, hacer)
+    ctx.bitacora.anotar("pausas_quitadas", "guion", {"bloques": quitadas})
+    return _respuesta_estructura(ctx, quitadas=quitadas)
 
 
 @app.delete("/api/proyectos/{pid}/guion/bloques/{bid}")

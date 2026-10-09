@@ -540,6 +540,28 @@ def _rearmar(piezas):
     return "".join(trozos)
 
 
+def pausas_de(texto):
+    """Los silencios (<break>) de un texto, en milisegundos y en orden."""
+    return [int(pieza) for clase, pieza in trocear(str(texto or "")) if clase == "break"]
+
+
+def sin_pausas(texto):
+    """El texto sin sus <break>, con el resto de anotaciones intactas.
+
+    Es lo que hace «Quitar pausa» en la pantalla: editar el bloque a mano
+    tambien las quitaba, pero se llevaba por delante las demas anotaciones
+    (velocidad, emocion, deletreo) porque el area de texto no las ensena.
+    """
+    piezas = [(clase, pieza) for clase, pieza in trocear(str(texto or ""))
+              if clase != "break"]
+    return " ".join(_rearmar(piezas).split())
+
+
+def tope_de_pausas(cuantos_bloques):
+    """Cuantos silencios admite un guion de N bloques sin sonar a lista leida."""
+    return max(1, int(int(cuantos_bloques or 0) * DENSIDAD_MAXIMA))
+
+
 def revisar_conjunto(bloques):
     """Problemas que solo se ven mirando el guion ENTERO, no bloque a bloque.
 

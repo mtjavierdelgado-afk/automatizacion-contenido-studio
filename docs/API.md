@@ -133,8 +133,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 |---|---|---|
 | `GET` | `/api/moodboard/{clave}/{origen}/{archivo}` | Sirve una lamina del banco de moodboards, que vive fuera de los proyectos. |
 | `GET` | `/api/proyectos/{pid}/estilo` | Fotogramas ya extraidos y cuales estan elegidos ahora mismo. |
+| `GET` | `/api/proyectos/{pid}/estilo/cambios` | Que tiene el estilo del video que el video no tiene, por partes, y lo que |
 | `POST` | `/api/proyectos/{pid}/estilo/guia` | Escribe la guia de estilo mirando los fotogramas elegidos. |
 | `PUT` | `/api/proyectos/{pid}/estilo/seleccion` | Guarda las imagenes de estilo elegidas en los params de assets. |
+| `POST` | `/api/proyectos/{pid}/estilo/traer` | Trae al video las partes elegidas del estilo: {partes: [estilo, tono, |
 | `GET` | `/api/proyectos/{pid}/moodboard` | Las referencias de estilo dibujadas a proposito para este estilo. |
 | `POST` | `/api/proyectos/{pid}/moodboard` | Dibuja las laminas de estilo. Quedan PROPUESTAS hasta que alguien las mira. |
 | `POST` | `/api/proyectos/{pid}/moodboard/aprobar` | Mete el moodboard en el banco del canal. Es la decision de una persona. |
@@ -276,4 +278,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**162 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**164 endpoints.** Escrito por `generar_api.py` desde `app.py`.

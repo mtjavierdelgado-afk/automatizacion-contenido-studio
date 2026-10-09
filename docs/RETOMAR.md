@@ -419,3 +419,16 @@ botón «Generar las diapositivas» se llama «Generar imágenes».
   disco si no está en memoria; un turno que se quedó «pensando» al reiniciar
   sale como error. Tope de 200. «Nueva» ya no borra la anterior; el DELETE sí
   la borra del historial.
+
+### Traer los cambios del estilo (09-10-2026, tarde)
+
+- Un vídeo copia el estilo al crearse y se queda con esa copia. `GET
+  /api/proyectos/{pid}/estilo/cambios` compara parte a parte (estilo, tono,
+  voz, rótulos) con `presets_canal.cambios_para` —el mismo código que al
+  crear— y no escribe nada. `POST .../estilo/traer` aplica las partes pedidas.
+- `PROPIAS_DEL_VIDEO` (app.py) deja fuera `brief.duracion_objetivo_s` y
+  `brief.formato`: el bloque de guion del preset trae la duración del taller y
+  pisaría la del encargo. CTA, indicaciones y `lleva` no viajan en un estilo.
+- El coste que se enseña sale de la etapa: imágenes producidas × tarifa de la
+  calidad, caracteres del guion × tarifa de voz; para el tono se da un tope,
+  porque cuántos planos cambian no se sabe hasta reescribir.

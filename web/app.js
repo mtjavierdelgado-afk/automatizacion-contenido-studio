@@ -6459,6 +6459,10 @@ function vistaEncargoVideoLight() {
     'cambiarlo rehace solo el montaje: ninguna imagen se vuelve a pagar',
     bloqueLlevaDelVideo()));
 
+  caja.appendChild(bloqueLight('Su estilo',
+    'los cambios que hagas en el estilo no llegan solos: se traen desde aquí',
+    bloqueEstiloDelVideo()));
+
   caja.appendChild(bloqueLight('El material',
     'de dónde salen los hechos que se van a contar',
     materialLight(e)));
@@ -11896,6 +11900,105 @@ function bloqueLlevaDelVideo() {
   if (!v.lleva || v.llevaDe !== v.pid) { v.llevaDe = v.pid; v.lleva = null; cargar(); }
   pintar();
   return caja;
+}
+
+/* TRAER LOS CAMBIOS DEL ESTILO. Un vídeo se queda con la copia del estilo del
+   día en que se creó —a propósito: retocar una referencia no puede dejar
+   obsoletas las imágenes ya pagadas de todos los vídeos—. Aquí se ve qué tiene
+   el estilo que el vídeo no, por partes y con lo que cuesta, y se trae lo que
+   se marque. Traer NO genera: deja marcado lo que hay que rehacer. */
+function bloqueEstiloDelVideo() {
+  const v = APP.light.video;
+  const caja = h('div', { clase: 'estilo-del-video' });
+  const pintar = () => {
+    vaciar(caja);
+    const datos = v.cambiosEstilo;
+    if (!datos) { caja.appendChild(h('div', { clase: 'cargando' }, 'comparando con el estilo…')); return; }
+    if (!datos.estilo || datos.por_que_no) {
+      caja.appendChild(h('div', { clase: 'meta' }, datos.por_que_no || 'sin estilo'));
+      return;
+    }
+    const nombre = datos.estilo.nombre || datos.estilo.id;
+    if (datos.al_dia) {
+      caja.appendChild(h('div', { clase: 'meta' },
+        `Al día con «${nombre}»: no hay nada que traer.`));
+      return;
+    }
+    v.partesEstilo = v.partesEstilo || {};
+    caja.appendChild(h('div', { clase: 'meta' },
+      `«${nombre}» tiene cambios que este vídeo no tiene. Marca lo que quieras traer:`));
+    for (const parte of datos.partes) {
+      if (!parte.cambia && !parte.error) continue;
+      if (parte.error) {
+        caja.appendChild(h('div', { clase: 'caja-aviso' }, `${parte.nombre}: ${parte.error}`));
+        continue;
+      }
+      const marca = h('input', {
+        type: 'checkbox', checked: !!v.partesEstilo[parte.id],
+        onchange: ev => {
+          ev.stopPropagation();          // no es un campo del encargo
+          v.partesEstilo[parte.id] = ev.target.checked;
+          pintar();
+        },
+      });
+      const coste = parte.usd_hasta !== undefined
+        ? `≈ ${usdCorto(parte.usd)} de voz y hasta ${usdCorto(parte.usd_hasta)} si cambian todas las imágenes`
+        : (parte.usd ? `≈ ${usdCorto(parte.usd)}` : 'gratis');
+      caja.appendChild(h('label', { clase: 'parte-estilo' },
+        marca,
+        h('span', { clase: 'crece' },
+          h('b', {}, parte.nombre),
+          h('span', { clase: 'meta' }, ` · ${parte.rehace}`)),
+        h('span', { clase: 'pastilla' + (parte.usd ? ' coste' : '') }, coste)));
+    }
+    const elegidas = datos.partes.filter(p => p.cambia && v.partesEstilo[p.id]);
+    const total = elegidas.reduce((suma, p) => suma + Number(p.usd || 0), 0);
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('span', { clase: 'meta crece' }, elegidas.length
+        ? `Se marca como pendiente; no se genera nada hasta que pulses Generar.`
+        : 'Nada marcado.'),
+      h('button', {
+        clase: 'mini', disabled: !elegidas.length || !!trabajoVideoLight(),
+        onclick: () => traerEstiloLight(elegidas, total),
+      }, elegidas.length ? `Traer ${elegidas.length === 1 ? 'esto' : 'lo marcado'}`
+        + (total ? ` (≈ ${usdCorto(total)} al generar)` : '') : 'Traer')));
+  };
+  const cargar = async () => {
+    try {
+      v.cambiosEstilo = await pedir(`${API.proyecto(v.pid)}/estilo/cambios`);
+    } catch (e) {
+      v.cambiosEstilo = { estilo: null, partes: [], por_que_no: e.message };
+    }
+    pintar();
+  };
+  if (!v.cambiosEstilo || v.cambiosEstiloDe !== v.pid) {
+    v.cambiosEstiloDe = v.pid; v.cambiosEstilo = null; v.partesEstilo = {}; cargar();
+  }
+  pintar();
+  return caja;
+}
+
+function usdCorto(usd) {
+  const n = Number(usd || 0);
+  return `${n.toFixed(n < 0.1 ? 3 : 2)} $`;
+}
+
+async function traerEstiloLight(partes, total) {
+  const v = APP.light.video;
+  const lista = partes.map(p => `• ${p.nombre}: ${p.rehace}`).join('\n');
+  if (!confirm(`Traer del estilo:\n${lista}\n\n`
+    + (total ? `Al volver a generar costará ≈ ${usdCorto(total)}. ` : '')
+    + 'Ahora no se genera nada: queda marcado lo que hay que rehacer.')) return;
+  try {
+    const r = await pedir(`${API.proyecto(v.pid)}/estilo/traer`, {
+      method: 'POST', cuerpo: { partes: partes.map(p => p.id) },
+    });
+    v.cambiosEstilo = null;
+    toast((r.traidas || []).length
+      ? 'Traído. Lo que quedó viejo está marcado; se rehace al generar.'
+      : 'No había nada que cambiar.');
+    await cargarVideoLight(v.pid);
+  } catch (e) { toast(`no se ha podido traer: ${e.message}`, true); }
 }
 
 /* ======================================================== GUÍAS DE ESCRITURA

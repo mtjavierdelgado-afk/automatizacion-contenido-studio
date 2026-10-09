@@ -1855,7 +1855,7 @@ def _plan_regrabado(ctx, seccion_id=None):
                      for s in plan["secciones"] if s["id"] in plan["orden"]
                      for bid in s["bloques"])
     plan.update({"meta": meta, "efectivos": efectivos, "caracteres": caracteres,
-                 "usd": round(caracteres * COSTE.tarifa_caracter(), 4)})
+                 "usd": round(caracteres * (COSTE.tarifa_caracter() or 0.0), 4)})
     return plan
 
 
@@ -8973,6 +8973,174 @@ def _apagar_lo_que_no_lleva(ctx, receta):
         if not lleva[clave]:
             tareas[tarea] = False
     return receta
+
+
+# ------------------------------------------ traer los cambios del estilo
+#
+# UN VIDEO SE QUEDA CON LA COPIA DEL ESTILO DEL DIA EN QUE SE CREO. Es a
+# proposito: si cada retoque del estilo llegara solo a todos los videos, cambiar
+# una imagen de referencia dejaria obsoletas las imagenes YA PAGADAS de todos
+# los videos en curso. Esto es la puerta para traerlo cuando uno quiere, por
+# partes y con lo que cuesta delante.
+#
+# Se aplica con `presets_canal.cambios_para`, el MISMO codigo que al crear el
+# video, parte a parte. Y no se pisa lo que es DEL VIDEO: la duracion del
+# encargo (va en el brief junto al tono), las llamadas a la accion, las
+# indicaciones, lo que lleva y lo escrito a mano en el guion -- nada de eso
+# viaja en un estilo.
+
+#: parte de la pantalla -> bloque del preset de canal
+PARTES_ESTILO = {"estilo": "estilo", "tono": "guion", "voz": "voz", "rotulos": "rotulos"}
+NOMBRES_PARTE = {"estilo": "Estilo gráfico", "tono": "Tono del guion",
+                 "voz": "Voz", "rotulos": "Rótulos y subtítulos"}
+#: claves que el preset escribe pero que en un video ya creado son SUYAS
+PROPIAS_DEL_VIDEO = {"brief": ("duracion_objetivo_s", "formato")}
+
+
+def _cambios_de_parte(ctx, ficha, parte):
+    """{paso: {clave: valor}} con SOLO lo que de verdad cambiaria."""
+    presets = _presets()
+    bloque = (ficha.get("datos") or {}).get(PARTES_ESTILO[parte])
+    if not bloque:
+        return {}
+    pasos = presets.TIPOS[PARTES_ESTILO[parte]]["pasos"]
+    actuales = {paso: (ctx.estado.params(paso) or {}) for paso in pasos}
+    crudos = presets.cambios_para({"tipo": PARTES_ESTILO[parte], "datos": bloque},
+                                  actuales)
+    cambios = {}
+    for paso, valores in crudos.items():
+        fuera = PROPIAS_DEL_VIDEO.get(paso, ())
+        distintos = {k: v for k, v in valores.items()
+                     if k not in fuera and (actuales.get(paso) or {}).get(k) != v}
+        if distintos:
+            cambios[paso] = distintos
+    return cambios
+
+
+def _que_rehace(ctx, parte, cambios):
+    """Lo que habria que rehacer y lo que costaria, segun la etapa del video."""
+    hechas = len([u for u in ctx.estado.unidades_producidas("assets")
+                  if str(u).startswith("escena:")]) if ctx.estado.versiones("assets") else 0
+    tarifa = COSTE.tarifa_caracter() or 0.0
+    caracteres = 0
+    if ctx.estado.versiones("voz"):
+        try:
+            caracteres = sum(len(PASOS_MODULOS.marcas_tts.limpiar(b["texto"]))
+                             for b in PASOS_MODULOS.p4_voz.cargar_guion(ctx.proyecto))
+        except RuntimeError:
+            caracteres = 0
+    usd_voz = round(caracteres * tarifa, 3)
+    calidad = ((cambios.get("assets") or {}).get("calidad")
+               or (ctx.estado.params("assets") or {}).get("calidad") or "low")
+    usd_imagen = _light().USD_POR_IMAGEN.get(str(calidad), _light().USD_POR_IMAGEN["low"])
+    if parte == "rotulos":
+        return {"rehace": "rehace solo el montaje del vídeo", "usd": 0.0}
+    if parte == "voz":
+        if not caracteres:
+            return {"rehace": "no rehace nada: aún no hay audio", "usd": 0.0}
+        return {"rehace": "rehace el audio entero y el montaje; las imágenes se conservan",
+                "usd": usd_voz}
+    if parte == "estilo":
+        if not hechas:
+            return {"rehace": "no rehace nada: aún no hay imágenes", "usd": 0.0}
+        return {"rehace": f"rehace las {hechas} imágenes del vídeo y el montaje",
+                "usd": round(hechas * usd_imagen, 2), "imagenes": hechas}
+    # el tono: el guion se reescribe con la cuenta de Claude (sin coste de API),
+    # y detras la voz y las imagenes de los planos cuyo texto cambie, que no se
+    # sabe cuantas son hasta reescribirlo: se da el tope
+    if not ctx.estado.versiones("guion"):
+        return {"rehace": "no rehace nada: aún no hay guion", "usd": 0.0}
+    tope = round(usd_voz + hechas * usd_imagen, 2)
+    return {"rehace": "rehace el guion (con tu cuenta de Claude), la voz y las imágenes de "
+                      "los planos cuyo texto cambie", "usd": usd_voz,
+            "usd_hasta": tope, "imagenes_hasta": hechas}
+
+
+@app.get("/api/proyectos/{pid}/estilo/cambios")
+def cambios_del_estilo(pid: str):
+    """Que tiene el estilo del video que el video no tiene, por partes, y lo que
+    costaria traerlo. No escribe nada."""
+    ctx = contexto(pid)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    preset_id = ctx.proyecto.config.get(CONFIG_ESTILO_LIGHT) or ""
+    if not preset_id:
+        return {"estilo": None, "partes": [],
+                "por_que_no": "este vídeo no se creó desde un estilo"}
+    presets = _presets()
+    try:
+        ficha = presets.leer(preset_id)
+    except presets.ErrorPreset as fallo:
+        ficha, motivo = None, str(fallo)
+    else:
+        motivo = "el estilo con el que se creó ya no existe"
+    if not ficha:
+        return {"estilo": {"id": preset_id}, "partes": [], "por_que_no": motivo}
+    partes = []
+    for parte in PARTES_ESTILO:
+        try:
+            cambios = _cambios_de_parte(ctx, ficha, parte)
+        except presets.ErrorPreset as fallo:
+            partes.append({"id": parte, "nombre": NOMBRES_PARTE[parte],
+                           "cambia": False, "error": str(fallo)})
+            continue
+        ficha_parte = {"id": parte, "nombre": NOMBRES_PARTE[parte],
+                       "cambia": bool(cambios),
+                       "pasos": sorted(cambios),
+                       "claves": sorted({k for v in cambios.values() for k in v})}
+        if cambios:
+            ficha_parte.update(_que_rehace(ctx, parte, cambios))
+        partes.append(ficha_parte)
+    return {"estilo": {"id": preset_id, "nombre": ficha.get("nombre") or preset_id},
+            "partes": partes, "al_dia": not any(p["cambia"] for p in partes)}
+
+
+@app.post("/api/proyectos/{pid}/estilo/traer")
+def traer_cambios_del_estilo(pid: str, cuerpo: dict = Body(default=None)):
+    """Trae al video las partes elegidas del estilo: {partes: [estilo, tono,
+    voz, rotulos]}. No genera nada: deja obsoleto lo que toque."""
+    ctx = contexto(pid)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    datos = _cuerpo(cuerpo)
+    pedidas = [str(p).strip().lower() for p in (datos.get("partes") or [])]
+    malas = [p for p in pedidas if p not in PARTES_ESTILO]
+    if not pedidas or malas:
+        raise ErrorApi(400, "hace falta 'partes' con alguna de: "
+                            + ", ".join(PARTES_ESTILO))
+    if ctx.gestor.listar(activos=True):
+        raise ErrorApi(409, "hay algo generándose en este vídeo: espera a que "
+                            "termine para traer los cambios del estilo")
+    preset_id = ctx.proyecto.config.get(CONFIG_ESTILO_LIGHT) or ""
+    if not preset_id:
+        raise ErrorApi(409, "este vídeo no se creó desde un estilo")
+    presets = _presets()
+    ficha = _preset_o_400(lambda p: p.leer(preset_id))
+    if not ficha:
+        raise ErrorApi(404, "el estilo con el que se creó este vídeo ya no existe")
+    # todo calculado ANTES de escribir nada: una parte que no se puede aplicar
+    # (fotogramas que ya no estan) no deja el video a medias
+    por_parte = {}
+    for parte in pedidas:
+        por_parte[parte] = _preset_o_400(lambda _p, parte=parte:
+                                         _cambios_de_parte(ctx, ficha, parte))
+    if any(p == "estilo" for p in pedidas):
+        presets.restaurar_moodboard(ficha)
+    cambiados = {}
+    for parte, cambios in por_parte.items():
+        for paso, valores in cambios.items():
+            if ctx.estado.actualizar_params(paso, valores):
+                cambiados.setdefault(parte, []).append(paso)
+    afectados = {paso for pasos in cambiados.values() for paso in pasos}
+    ctx.bitacora.anotar("estilo_traido", None, {
+        "estilo": preset_id, "partes": pedidas,
+        "cambiados": {k: sorted(v) for k, v in cambiados.items()}})
+    return {"traidas": sorted(cambiados), "cambiados": cambiados,
+            "obsoletos": sorted(p["id"] for p in PASOS
+                                if ctx.estado.estado_de(p["id"]) == "obsoleto"),
+            "aguas_abajo": sorted({h for paso in afectados
+                                   for h in descendientes_de(paso)} - afectados),
+            "pasos": [ficha_paso(ctx, p["id"]) for p in PASOS]}
 
 
 @app.get("/api/proyectos/{pid}/lleva")

@@ -2855,3 +2855,19 @@ ul.inicio-como li { display: flex; gap: 10px; align-items: flex-start; line-heig
 .charla-guardada .meta { font-size: 11px; }
 .charla-guardada .borrar { align-self: center; margin-right: 6px; }
 #btn-historial-asistente.activo { border-color: var(--acento-borde); color: var(--acento); }
+
+/* ---- traer los cambios del estilo a un vídeo (V2.0) */
+.estilo-del-video { display: flex; flex-direction: column; gap: 8px; }
+.parte-estilo {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  border: 1px solid var(--linea); border-radius: 10px; padding: 8px 11px;
+  background: var(--panel); cursor: pointer;
+  /* es un <label>, y los label del formulario van en versalitas pequeñas */
+  text-transform: none; letter-spacing: normal; font-size: 13px;
+  color: var(--texto); margin: 0;
+}
+.parte-estilo input[type="checkbox"] { width: auto; margin: 0; flex: none; }
+.parte-estilo .crece { flex: 1; min-width: 0; }
+.parte-estilo .pastilla { flex: none; }
+.parte-estilo .pastilla.coste { color: var(--acento); }
+.estilo-del-video > .fila { align-items: center; gap: 10px; flex-wrap: wrap; }

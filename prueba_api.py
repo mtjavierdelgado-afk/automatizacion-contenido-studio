@@ -3414,6 +3414,74 @@ def probar_video_light(cliente):
     cliente.delete(f"/api/presets-light/{estilo_id}")
 
 
+def probar_traer_estilo(cliente):
+    """Un video se queda con la copia del estilo; esto la trae cuando se pide.
+
+    Lo que se prueba: que mirar no escriba nada, que diga que partes cambian,
+    que traer una parte no pise lo que es del video (duracion, llamadas a la
+    accion, indicaciones) y que deje obsoleto lo que toca y nada mas.
+    """
+    seccion("TRAER LOS CAMBIOS DEL ESTILO A UN VIDEO")
+    respuesta, datos = cliente.post("/api/presets-canal", {
+        "tipo": "canal", "nombre": "Estilo que cambia",
+        "datos": {"guion": {"idioma_salida": "es",
+                            "instrucciones": "Habla claro y sin adornos."},
+                  "voz": {"voz_id": "v-de-prueba", "idioma": "es",
+                          "velocidad": "normal"},
+                  "origen": {"tono_prompt": "serio", "estilo_prompt": "plano"}}})
+    estilo_id = (datos.get("preset") or {}).get("id") or ""
+    respuesta, creado = cliente.post(f"/api/presets-light/{estilo_id}/video", {
+        "nombre": "Vídeo que hereda", "duracion_objetivo_s": 90,
+        "material": "Un hecho.\n\nY otro.",
+        "indicaciones": "Sin rodeos.",
+        "cta": {"cta_final": {"puesto": True, "texto": "que se suscriba"}}})
+    vid = (creado.get("proyecto") or {}).get("id") or ""
+    ok(bool(vid), "se crea el vídeo desde el estilo")
+    base = f"/api/proyectos/{vid}/estilo"
+
+    respuesta, cambios = cliente.get(f"{base}/cambios")
+    igual(respuesta.status_code, 200, "GET estilo/cambios responde 200")
+    ok(cambios.get("al_dia") is True, f"recién creado está al día: {cambios}")
+    _r, antes = cliente.get(f"/api/proyectos/{vid}/pasos/brief")
+
+    # el estilo cambia de tono DESPUES de crear el video
+    respuesta, _d = cliente.put(f"/api/presets-light/{estilo_id}",
+                                {"instrucciones": "Cuéntalo como una historia."})
+    igual(respuesta.status_code, 200, "se cambia la guía de tono del estilo")
+    respuesta, cambios = cliente.get(f"{base}/cambios")
+    tono = [p for p in cambios.get("partes") or [] if p["id"] == "tono"]
+    ok(cambios.get("al_dia") is False and tono and tono[0]["cambia"],
+       f"ahora dice que el TONO tiene cambios: {cambios.get('partes')}")
+    ok(all(not p["cambia"] for p in cambios["partes"] if p["id"] != "tono"),
+       "y que lo demás sigue igual")
+    ok(tono and "rehace" in tono[0], "diciendo qué se rehace")
+    _r, despues = cliente.get(f"/api/proyectos/{vid}/pasos/brief")
+    igual(despues.get("firma"), antes.get("firma"),
+          "MIRAR NO ESCRIBE NADA: la firma del brief no se mueve")
+
+    respuesta, _d = cliente.post(f"{base}/traer", {"partes": ["inventada"]})
+    igual(respuesta.status_code, 400, "una parte que no existe da 400")
+    respuesta, traido = cliente.post(f"{base}/traer", {"partes": ["tono"]})
+    igual(respuesta.status_code, 200, f"traer el tono responde 200: {traido}")
+    igual(traido.get("traidas"), ["tono"], "y dice qué trajo")
+    _r, brief = cliente.get(f"/api/proyectos/{vid}/pasos/brief")
+    igual((brief.get("params") or {}).get("instrucciones"),
+          "Cuéntalo como una historia.", "el tono nuevo llega al vídeo")
+    igual((brief.get("params") or {}).get("duracion_objetivo_s"), 90,
+          "SIN PISAR LA DURACIÓN del encargo")
+    _r, guion = cliente.get(f"/api/proyectos/{vid}/pasos/guion")
+    ok(((guion.get("params") or {}).get("cta") or {}).get("cta_final", {}).get("texto")
+       == "que se suscriba", "ni las llamadas a la acción del vídeo")
+    igual((guion.get("params") or {}).get("prompt_general"), "Sin rodeos.",
+          "ni sus indicaciones")
+    _r, voz = cliente.get(f"/api/proyectos/{vid}/pasos/voz")
+    igual(voz.get("firma") is not None, True, "la voz sigue ahí")
+    respuesta, cambios = cliente.get(f"{base}/cambios")
+    ok(cambios.get("al_dia") is True, "y después vuelve a estar al día")
+    respuesta, otra = cliente.post(f"{base}/traer", {"partes": ["tono"]})
+    igual(otra.get("traidas"), [], "traer otra vez lo mismo no cambia nada")
+
+
 def probar_planos_hechos(cliente, pid):
     """Los PNG que hay AHORA, y cuales son de este plan.
 
@@ -3774,6 +3842,7 @@ def main():
         probar_presets_canal(cliente)
         probar_modo_light(cliente)
         probar_video_light(cliente)
+        probar_traer_estilo(cliente)
         probar_estimacion(cliente)
         probar_planos_hechos(cliente, pid)
         probar_escucha_de_voz_light(cliente)

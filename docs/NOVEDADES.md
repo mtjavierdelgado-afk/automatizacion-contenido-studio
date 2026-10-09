@@ -34,6 +34,18 @@ vídeos, estilos, claves y contraseña no se tocan.
 - En el móvil, los botones de cada bloque (Partir, Editar, Cambiar) ya se ven
   sin tener que pasar el ratón por encima.
 
+**Traer los cambios del estilo a un vídeo**
+- Un vídeo se queda con el estilo **tal como era el día en que se creó**: así,
+  retocar el estilo no deja obsoletas las imágenes ya pagadas de los vídeos en
+  curso.
+- Nuevo bloque **«Su estilo»** en el Encargo de cada vídeo: dice qué partes del
+  estilo han cambiado (estilo gráfico, tono del guion, voz, rótulos), qué
+  habría que rehacer según la etapa en que esté el vídeo y **cuánto costaría**,
+  y trae solo lo que marques.
+- Traer **no genera nada**: deja marcado lo que quedó viejo y se rehace al
+  pulsar Generar. No pisa lo propio del vídeo: duración, formato, llamadas a la
+  acción, indicaciones, qué lleva y lo editado a mano en el guion.
+
 **El asistente: historial de charlas**
 - Botón **«Historial»** en la burbuja: las charlas de antes, con su primera
   pregunta y la fecha. Se abren para leerlas o **seguir donde se quedaron**, y

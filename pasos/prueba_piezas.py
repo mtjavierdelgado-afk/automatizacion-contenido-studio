@@ -272,6 +272,50 @@ def prueba_sitios_sin_tramo():
     ok("cruza las dos listas" in catalogo_visual.CRITERIO,
        "con la comprobacion dicha: todo id de 'sets' en el 'set' de algun tramo")
 
+def prueba_instruccion_del_catalogo():
+    """La instruccion del catalogo se MONTA, con todos sus huecos rellenos.
+
+    Al retirar los personajes fijos del canal se quito el codigo que rellenaba
+    `{fijos}`, y el hueco se quedo en la plantilla: «Generar imagenes» moria al
+    instante con «KeyError: 'fijos'» en todos los proyectos. Ninguna prueba
+    pasaba por `proponer`, que es donde se monta. Aqui se llama de verdad, con
+    el CLI sustituido por un doble que apunta la instruccion y corta.
+    """
+    titulo("catalogo: la instruccion se monta entera, sin huecos sin rellenar")
+
+    class Cortar(Exception):
+        pass
+
+    vistas = []
+
+    def claude_falso(instruccion, *_a, **_k):
+        vistas.append(instruccion)
+        raise Cortar()
+
+    real = catalogo_visual._llamar_claude                # noqa: SLF001
+    catalogo_visual._llamar_claude = claude_falso        # noqa: SLF001
+    try:
+        try:
+            catalogo_visual.proponer(
+                [{"id": "B001", "texto": "Enciendes la luz del techo."},
+                 {"id": "B002", "texto": "Y aparecen sombras bajo los ojos."}],
+                brief={"titulo": "Tu bano", "resumen": "la luz del bano"},
+                peticion="mas luz natural", planos=4, min_s=3, max_s=6)
+            llego = "sin cortar"
+        except Cortar:
+            llego = "al CLI"
+        except KeyError as fallo:
+            llego = f"KeyError {fallo}"
+    finally:
+        catalogo_visual._llamar_claude = real            # noqa: SLF001
+    igual(llego, "al CLI",
+          "proponer monta la instruccion y llega a llamar al CLI")
+    ok(vistas and "Enciendes la luz del techo." in vistas[0],
+       "y la instruccion lleva el guion dentro")
+    ok(vistas and not re.search(r"\{[a-z_]+\}", vistas[0]),
+       "y no queda ningun {hueco} sin rellenar")
+
+
 def prueba_planos_por_sitio():
     """Los sitios que se piden salen de cuantos planos hay, no de una constante.
 
@@ -4265,6 +4309,7 @@ def main():
     prueba_feedback_en_prompts()
     prueba_catalogo()
     prueba_planos_por_sitio()
+    prueba_instruccion_del_catalogo()
     prueba_reparto_inventado()
     prueba_sitios_sin_tramo()
     prueba_callouts()

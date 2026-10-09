@@ -549,6 +549,16 @@ def probar_archivos(cliente, pid, salidas):
         ok(respuesta.status_code in (403, 404),
            f"{etiqueta} se corta ({respuesta.status_code})")
 
+    # Las imagenes del repaso: `..` era un 500 con traza (ruta_contenida LANZA,
+    # no devuelve False) y `.` intentaba servir la carpeta.
+    for intento, etiqueta in (("%2E%2E", "la carpeta de arriba"),
+                              ("%2E", "la propia carpeta")):
+        respuesta = cliente.sesion.get(
+            f"{cliente.base}/api/proyectos/{pid}/repaso/imagenes/{intento}",
+            timeout=30, allow_redirects=False)
+        igual(respuesta.status_code, 404,
+              f"pedir {etiqueta} como imagen del repaso es un 404, no un 500")
+
 
 def probar_feedback(cliente, pid):
     seccion("FEEDBACK EN CASCADA")

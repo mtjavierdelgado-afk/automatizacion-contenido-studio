@@ -4657,8 +4657,14 @@ def servir_imagen_repaso(pid: str, nombre: str, peticion: Request):
     """Una imagen de referencia de una nota."""
     ctx = contexto(pid)
     carpeta = _repaso().carpeta_imagenes(ctx.proyecto)
-    ruta = os.path.join(carpeta, os.path.basename(nombre))
-    if not ruta_contenida(carpeta, ruta) or not os.path.exists(ruta):
+    # `ruta_contenida` LANZA al salirse (no devuelve False): con `..` esto era un
+    # 500 con traza en vez de un 404. Y `isfile`, no `exists`: con `.` la ruta
+    # es la propia carpeta, que existe pero no se puede servir.
+    try:
+        ruta = ruta_contenida(carpeta, os.path.basename(nombre))
+    except ValueError:
+        raise ErrorApi(404, f"esa imagen no está: {nombre}")
+    if not os.path.isfile(ruta):
         raise ErrorApi(404, f"esa imagen no está: {nombre}")
     return servir_fichero(peticion, ruta)
 
@@ -5270,7 +5276,7 @@ def montar_banda_sonora(pid: str, cuerpo: dict = Body(default=None)):
     sonido = _sonido()
     datos = _cuerpo(cuerpo)
     if not sonido.hay_claves()[0]:
-        raise ErrorApi(409, "falta JAMENDO_CLIENT_ID en C:\\IA\\secrets\\.env")
+        raise ErrorApi(409, "falta la clave de Jamendo: ponla en Configuracion")
     # los tramos se pueden pasar retocados desde avanzadas (otro ánimo), pero el
     # camino normal es no pasar nada y que los deduzca del ritmo
     tramos = datos.get("tramos") if isinstance(datos.get("tramos"), list) else None
@@ -5344,7 +5350,7 @@ def surtir_efectos(pid: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(400, f"papeles desconocidos: {', '.join(desconocidos)}. "
                             f"Los que hay son: {', '.join(sonido.PAPELES)}")
     if not sonido.hay_claves()[1]:
-        raise ErrorApi(409, "falta FREESOUND_API_KEY en C:\\IA\\secrets\\.env")
+        raise ErrorApi(409, "falta la clave de FreeSound: ponla en Configuracion")
     # 'salteado' rota por qué consulta se empieza: volver a pulsar trae OTROS
     # sonidos en vez de los mismos, que es lo que se espera de «buscar más».
     salteado = int(datos.get("salteado") or 0)

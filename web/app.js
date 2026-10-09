@@ -7015,6 +7015,9 @@ function vistaGuionLight() {
   (v.guion.avisos || []).slice(0, 6).forEach(aviso => {
     caja.appendChild(h('div', { clase: 'caja-aviso' }, aviso));
   });
+  // si algo quedó viejo (un cambio de estilo traído, por ejemplo), qué pulsar
+  const siguiente = siguientePasoLight();
+  if (siguiente) caja.appendChild(siguiente);
 
   // EL REPRODUCTOR VIVE EN LA BARRA DE ABAJO (ver `pieLight`). Estaba arriba
   // del guion para que los mandos no se fueran con el scroll; la barra fija lo
@@ -11964,9 +11967,11 @@ function bloqueEstiloDelVideo() {
       return;
     }
     const nombre = datos.estilo.nombre || datos.estilo.id;
+    const siguiente = siguientePasoLight();
     if (datos.al_dia) {
       caja.appendChild(h('div', { clase: 'meta' },
         `Al día con «${nombre}»: no hay nada que traer.`));
+      if (siguiente) caja.appendChild(siguiente);
       return;
     }
     v.partesEstilo = v.partesEstilo || {};
@@ -11986,15 +11991,16 @@ function bloqueEstiloDelVideo() {
           pintar();
         },
       });
-      const coste = parte.usd_hasta !== undefined
-        ? `≈ ${usdCorto(parte.usd)} de voz y hasta ${usdCorto(parte.usd_hasta)} si cambian todas las imágenes`
-        : (parte.usd ? `≈ ${usdCorto(parte.usd)}` : 'gratis');
+      const coste = parte.usd === null ? 'cuesta según tu plan de voz'
+        : parte.usd_hasta !== undefined
+          ? `≈ ${usdCorto(parte.usd)} de voz y hasta ${usdCorto(parte.usd_hasta)} si cambian todas las imágenes`
+          : (parte.usd ? `≈ ${usdCorto(parte.usd)}` : 'gratis');
       caja.appendChild(h('label', { clase: 'parte-estilo' },
         marca,
         h('span', { clase: 'crece' },
           h('b', {}, parte.nombre),
           h('span', { clase: 'meta' }, ` · ${parte.rehace}`)),
-        h('span', { clase: 'pastilla' + (parte.usd ? ' coste' : '') }, coste)));
+        h('span', { clase: 'pastilla' + (parte.usd !== 0 ? ' coste' : '') }, coste)));
     }
     const elegidas = datos.partes.filter(p => p.cambia && v.partesEstilo[p.id]);
     const total = elegidas.reduce((suma, p) => suma + Number(p.usd || 0), 0);
@@ -12036,6 +12042,38 @@ function bloqueEstiloDelVideo() {
   return caja;
 }
 
+/* QUÉ HAY QUE PULSAR AHORA. Traer una parte del estilo deja algo obsoleto y
+   no genera nada, y eso dejaba a quien lo hacía sin saber qué venía después:
+   el guion tiene su botón en el encargo, el audio en el guion y las imágenes en
+   su pestaña. Aquí se dice el PRIMER paso que falta, con su botón al lado, en
+   el orden en que se rehacen (guion → audio → imágenes y montaje). */
+function siguientePasoLight() {
+  const v = APP.light.video;
+  const estado = paso => (v.fichas[paso] || {}).estado;
+  const corriendo = !!trabajoVideoLight();
+  const aviso = (texto, boton, accion) => h('div', { clase: 'caja-aviso siguiente-paso' },
+    h('div', { clase: 'crece' }, h('strong', {}, 'Siguiente paso: '), texto),
+    boton ? h('button', { clase: 'mini primario', disabled: corriendo, onclick: accion }, boton) : null);
+  if (!v.guion) return null;
+  if (['brief', 'guion'].some(p => estado(p) === 'obsoleto')) {
+    return aviso('el guion quedó viejo con el tono nuevo. Regenéralo; después '
+      + 'habrá que grabar el audio otra vez.', 'Regenerar el guion',
+    () => lanzarTandaLight('guion', 'pendientes'));
+  }
+  if (v.audio && estado('voz') === 'obsoleto') {
+    const plan = textoDelPlan('voz');
+    return aviso('el audio ya no corresponde a la voz del estilo. Regrábalo: las '
+      + 'imágenes no se vuelven a pagar.' + (plan ? ` (${plan})` : ''),
+    'Regrabar el audio', () => lanzarTandaLight('voz', 'pendientes'));
+  }
+  if (v.audio && videoObsoletoLight()) {
+    return aviso('las imágenes o el vídeo montado quedaron viejos. Ponlos al día '
+      + 'desde aquí o con «Poner al día las imágenes» en el guion: solo se paga lo '
+      + 'que haya cambiado.', 'Poner al día las imágenes', () => lanzarTandaLight('video'));
+  }
+  return null;
+}
+
 function usdCorto(usd) {
   const n = Number(usd || 0);
   return `${n.toFixed(n < 0.1 ? 3 : 2)} $`;
@@ -12053,7 +12091,7 @@ async function traerEstiloLight(partes, total) {
     });
     v.cambiosEstilo = null;
     toast((r.traidas || []).length
-      ? 'Traído. Lo que quedó viejo está marcado; se rehace al generar.'
+      ? 'Traído. Debajo tienes el siguiente paso.'
       : 'No había nada que cambiar.');
     await cargarVideoLight(v.pid);
   } catch (e) { toast(`no se ha podido traer: ${e.message}`, true); }

@@ -45,6 +45,10 @@ vídeos, estilos, claves y contraseña no se tocan.
 - El bloque vuelve a comparar con el estilo **cada vez que abres el Encargo**
   (corregido: se quedaba con la primera comparación y no veía un cambio hecho
   después, como el aire entre bloques).
+- Después de traer, un aviso **«Siguiente paso»** (en el Encargo y en el Guion)
+  dice qué hay que pulsar, con su botón y su coste: regenerar el guion si
+  cambió el tono, **regrabar el audio** si cambió la voz, o poner al día las
+  imágenes si cambió el estilo gráfico.
 - Traer **no genera nada**: deja marcado lo que quedó viejo y se rehace al
   pulsar Generar. No pisa lo propio del vídeo: duración, formato, llamadas a la
   acción, indicaciones, qué lleva y lo editado a mano en el guion.

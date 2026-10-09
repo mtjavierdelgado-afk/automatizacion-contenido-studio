@@ -9080,10 +9080,17 @@ def _que_rehace(ctx, parte, cambios):
     if parte == "rotulos":
         return {"rehace": "rehace solo el montaje del vídeo", "usd": 0.0}
     if parte == "voz":
-        if not caracteres:
+        # SE MIRA SI HAY TOMA, no si se han podido contar los caracteres: con
+        # el guion ilegible por lo que sea salia «aún no hay audio» en un video
+        # con audio, y se traia la voz sin saber que habia que regrabarlo
+        if not ctx.estado.versiones("voz"):
             return {"rehace": "no rehace nada: aún no hay audio", "usd": 0.0}
-        return {"rehace": "rehace el audio entero y el montaje; las imágenes se conservan",
-                "usd": usd_voz}
+        ficha = {"rehace": "hay que regrabar el audio entero (las imágenes se "
+                           "conservan) y volver a montar el vídeo",
+                 "usd": usd_voz}
+        if not tarifa or not caracteres:
+            ficha["usd"] = None          # se sabe que cuesta, no cuanto
+        return ficha
     if parte == "estilo":
         if not hechas:
             return {"rehace": "no rehace nada: aún no hay imágenes", "usd": 0.0}

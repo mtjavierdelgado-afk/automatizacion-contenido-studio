@@ -240,7 +240,7 @@ Si echas una en falta, esto es por qué no está:
 | El documentalista (buscar en internet) | con una sola vía para el material no hay nada que decidir |
 | Los personajes fijos del canal | el **reparto** de cada vídeo sí está: es lo que sostiene la consistencia visual |
 | Las menciones ilustradas de un producto | con ellas se fue todo lo que llevaba el nombre de un patrocinador |
-| El dictado por voz | pedía un modelo aparte y su propio entorno |
+| El dictado por voz con un modelo local | pedía un modelo aparte y su propio entorno. El dictado del ASISTENTE volvió en la V2.0 sin instalar nada: graba en el navegador y lo transcribe la API de OpenAI (`pasos/dictado.py`), o el dictado del propio navegador si no hay clave |
 | El bloc de enlaces, la bitácora, el monitor | notas y telemetría que no hacen un vídeo |
 
 **Y no vuelvas a meter ninguna sin mirar `pasos/recetas.py`:** una tarea que no

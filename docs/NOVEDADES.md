@@ -46,6 +46,15 @@ vídeos, estilos, claves y contraseña no se tocan.
   pulsar Generar. No pisa lo propio del vídeo: duración, formato, llamadas a la
   acción, indicaciones, qué lleva y lo editado a mano en el guion.
 
+**El asistente: dictar las preguntas con la voz**
+- Botón **«🎙 Hablar»** junto a «Imagen»: pulsas, hablas y pulsas «Parar». El
+  texto aparece en la caja para que lo revises y lo envíes; no se manda solo.
+- Con una clave de OpenAI en Configuración, el audio se pasa a texto en el
+  servidor (cualquier navegador, buen castellano; un minuto ≈ 0,003 $). Sin
+  clave, usa el dictado del propio navegador (Chrome, Edge, Safari), gratis.
+- La primera vez el navegador pide permiso para el micrófono. Hasta 3 minutos
+  por dictado.
+
 **El asistente: historial de charlas**
 - Botón **«Historial»** en la burbuja: las charlas de antes, con su primera
   pregunta y la fecha. Se abren para leerlas o **seguir donde se quedaron**, y

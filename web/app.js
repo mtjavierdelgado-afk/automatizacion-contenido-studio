@@ -4659,6 +4659,7 @@ function arrancar() {
   cargarCuenta();
   montarAsistente();
   montarAdjuntosAsistente();
+  montarDictadoAsistente();
   montarBurbujaMinimizable();
   $('#btn-cerrar-config').addEventListener('click', () => conmutarConfig(false));
   // El catalogo de recetas se pide una vez al arrancar: de el salen la barra de
@@ -11685,6 +11686,7 @@ function pintarAsistente() {
     ? 'Pregunta lo que quieras: un error, un paso parado, dónde está algo…'
     : 'Entra con tu cuenta de Claude para poder preguntar';
   $('#btn-enviar-asistente').disabled = !listo || ocupada;
+  pintarDictado();
   $('#btn-cancelar-asistente').hidden = !ocupada;
   $('#btn-nueva-charla').disabled = ocupada || (!charla && !ASISTENTE.verHistorial);
 }
@@ -12310,6 +12312,180 @@ function montarAdjuntosAsistente() {
     const ficheros = [...((ev.dataTransfer || {}).files || [])];
     if (ficheros.length) { ev.preventDefault(); adjuntarAlAsistente(ficheros); }
   });
+}
+
+/* ============================================================ EL DICTADO
+ *
+ * «🎙 Hablar» junto al clip: se dice la duda en vez de escribirla. Dos caminos,
+ * por este orden:
+ *   1. con clave de OpenAI, se GRABA y el servidor lo pasa a texto
+ *      (`/api/asistente/dictado`, pasos/dictado.py): funciona en cualquier
+ *      navegador y entiende bien el castellano; un minuto ≈ 0,003 $.
+ *   2. sin clave, el dictado del PROPIO navegador (Chrome, Edge, Safari),
+ *      gratis, con el texto apareciendo mientras se habla.
+ * En los dos el texto vuelve a la CAJA y no se envía solo: se lee, se corrige
+ * y se manda, que un nombre mal oído cambia la pregunta.
+ */
+const DICTADO = {
+  estado: '',          // '' | 'grabando' | 'transcribiendo'
+  grabadora: null, trozos: [], flujo: null, arranque: 0, reloj: null,
+  reconocimiento: null,
+};
+const MAX_DICTADO_S = 180;
+
+function montarDictadoAsistente() {
+  const mandos = $('#asistente-pie .asistente-mandos');
+  if (!mandos) return;
+  const boton = h('button', {
+    id: 'btn-dictar-asistente', clase: 'mini fantasma',
+    title: 'Dictar la pregunta con la voz', onclick: () => conmutarDictado(),
+  }, '🎙 Hablar');
+  const clip = mandos.firstChild;
+  mandos.insertBefore(boton, clip ? clip.nextSibling : null);
+}
+
+function pintarDictado() {
+  const boton = $('#btn-dictar-asistente');
+  if (!boton) return;
+  const listo = !!(ASISTENTE.estado && ASISTENTE.estado.listo);
+  const ocupada = !!(ASISTENTE.charla && ASISTENTE.charla.ocupada);
+  boton.classList.toggle('grabando', DICTADO.estado === 'grabando');
+  if (DICTADO.estado === 'grabando') {
+    const s = Math.floor((Date.now() - DICTADO.arranque) / 1000);
+    boton.textContent = `● ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')} · Parar`;
+    boton.disabled = false;
+  } else if (DICTADO.estado === 'transcribiendo') {
+    boton.textContent = 'pasando a texto…';
+    boton.disabled = true;
+  } else {
+    boton.textContent = '🎙 Hablar';
+    boton.disabled = !listo || ocupada;
+  }
+}
+
+function conmutarDictado() {
+  if (DICTADO.estado === 'grabando') { pararDictado(); return; }
+  if (DICTADO.estado) return;
+  const conServidor = !!(ASISTENTE.estado && ASISTENTE.estado.dictado);
+  const Reconocimiento = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const puedeGrabar = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+    && window.MediaRecorder);
+  if (conServidor && puedeGrabar) { grabarParaTranscribir(); return; }
+  if (Reconocimiento) { dictarConNavegador(Reconocimiento); return; }
+  toast(puedeGrabar
+    ? 'Para dictar pon una clave de OpenAI en Configuración, o usa Chrome o Edge, '
+      + 'que traen dictado propio.'
+    : 'Este navegador no deja usar el micrófono aquí.', true);
+}
+
+function arrancarRelojDictado() {
+  DICTADO.arranque = Date.now();
+  clearInterval(DICTADO.reloj);
+  DICTADO.reloj = setInterval(() => {
+    pintarDictado();
+    if (Date.now() - DICTADO.arranque > MAX_DICTADO_S * 1000) pararDictado();
+  }, 500);
+  pintarDictado();
+}
+
+function escribirDictado(texto, base) {
+  const campo = $('#asistente-texto');
+  if (!campo) return;
+  const antes = base === undefined ? campo.value : base;
+  campo.value = (antes && texto ? `${antes.replace(/\s+$/, '')} ` : antes) + texto;
+  campo.focus();
+}
+
+async function grabarParaTranscribir() {
+  let flujo;
+  try {
+    flujo = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    toast('No hay permiso para el micrófono: dale permiso en el candado de la '
+      + 'barra de direcciones y vuelve a probar.', true);
+    return;
+  }
+  const tipos = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
+  const tipo = tipos.find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t)) || '';
+  const grabadora = tipo ? new MediaRecorder(flujo, { mimeType: tipo }) : new MediaRecorder(flujo);
+  DICTADO.grabadora = grabadora;
+  DICTADO.flujo = flujo;
+  DICTADO.trozos = [];
+  grabadora.ondataavailable = ev => { if (ev.data && ev.data.size) DICTADO.trozos.push(ev.data); };
+  grabadora.onstop = () => enviarDictado(grabadora.mimeType || tipo || 'audio/webm');
+  grabadora.start(1000);
+  DICTADO.estado = 'grabando';
+  arrancarRelojDictado();
+}
+
+async function enviarDictado(tipo) {
+  clearInterval(DICTADO.reloj);
+  (DICTADO.flujo ? DICTADO.flujo.getTracks() : []).forEach(p => p.stop());
+  DICTADO.flujo = null;
+  const audio = new Blob(DICTADO.trozos, { type: tipo });
+  DICTADO.trozos = [];
+  if (!audio.size) { DICTADO.estado = ''; pintarDictado(); return; }
+  DICTADO.estado = 'transcribiendo';
+  pintarDictado();
+  const base = tipo.split(';')[0];
+  const ext = base.includes('mp4') ? '.m4a' : base.includes('ogg') ? '.ogg' : '.webm';
+  const datos = new FormData();
+  datos.append('audio', audio, `dictado${ext}`);
+  datos.append('idioma', 'es');
+  try {
+    const r = await pedir(`${BASE}/api/asistente/dictado`, { method: 'POST', cuerpo: datos });
+    escribirDictado(r.texto || '');
+  } catch (e) {
+    toast(`no se ha podido pasar a texto: ${e.message}`, true);
+  } finally {
+    DICTADO.estado = '';
+    pintarDictado();
+  }
+}
+
+function dictarConNavegador(Reconocimiento) {
+  const campo = $('#asistente-texto');
+  const base = campo ? campo.value : '';
+  const rec = new Reconocimiento();
+  rec.lang = /^es/i.test(navigator.language || '') ? navigator.language : 'es-419';
+  rec.continuous = true;
+  rec.interimResults = true;
+  let firme = '';
+  rec.onresult = ev => {
+    let provisional = '';
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const trozo = ev.results[i][0].transcript;
+      if (ev.results[i].isFinal) firme += trozo; else provisional += trozo;
+    }
+    escribirDictado((firme + provisional).trim(), base);
+  };
+  rec.onerror = ev => {
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
+      toast('No hay permiso para el micrófono: dale permiso en el candado de la '
+        + 'barra de direcciones.', true);
+    } else if (ev.error !== 'no-speech' && ev.error !== 'aborted') {
+      toast(`el dictado del navegador ha fallado: ${ev.error}`, true);
+    }
+  };
+  rec.onend = () => {
+    clearInterval(DICTADO.reloj);
+    DICTADO.reconocimiento = null;
+    DICTADO.estado = '';
+    pintarDictado();
+  };
+  DICTADO.reconocimiento = rec;
+  try { rec.start(); } catch (e) { toast(e.message, true); return; }
+  DICTADO.estado = 'grabando';
+  arrancarRelojDictado();
+}
+
+function pararDictado() {
+  if (DICTADO.grabadora && DICTADO.grabadora.state !== 'inactive') {
+    DICTADO.grabadora.stop();          // onstop manda el audio
+    DICTADO.grabadora = null;
+    return;
+  }
+  if (DICTADO.reconocimiento) DICTADO.reconocimiento.stop();
 }
 
 /* ===================================================== LA BURBUJA, MINIMIZABLE

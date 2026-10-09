@@ -1897,6 +1897,24 @@ def probar_asistente(cliente):
     igual(respuesta.status_code, 200, "cancelar sin nada en marcha responde 200")
     ok(ficha.get("cancelado") is False, "diciendo que no habia nada que parar")
 
+    # EL DICTADO: un audio del navegador pasado a texto para la caja. En
+    # simulado no sale a OpenAI; lo que se prueba es el camino y sus errores.
+    respuesta, estado = cliente.get("/api/asistente")
+    ok(estado.get("dictado") is True, "el estado dice que se puede dictar")
+    respuesta, dictado = cliente.pedir(
+        "POST", "/api/asistente/dictado",
+        files={"audio": ("dictado.webm", b"\x1a\x45\xdf\xa3" + b"0" * 2000, "audio/webm")},
+        data={"idioma": "es"})
+    igual(respuesta.status_code, 200, f"POST /api/asistente/dictado pasa a texto: {dictado}")
+    ok("dictado de" in ((dictado or {}).get("texto") or ""),
+       "y devuelve el texto (no pregunta nada al asistente)")
+    respuesta, _d = cliente.pedir("POST", "/api/asistente/dictado",
+                                  files={"otro": ("x.txt", b"hola", "text/plain")})
+    igual(respuesta.status_code, 400, "sin campo 'audio' da 400")
+    respuesta, _d = cliente.pedir("POST", "/api/asistente/dictado",
+                                  files={"audio": ("vacio.webm", b"", "audio/webm")})
+    igual(respuesta.status_code, 400, "un audio vacío da 400 con el motivo")
+
     # EL HISTORIAL: la charla queda guardada junto a los datos, no en memoria
     respuesta, historial = cliente.get("/api/asistente/charlas")
     igual(respuesta.status_code, 200, "GET /api/asistente/charlas da el historial")

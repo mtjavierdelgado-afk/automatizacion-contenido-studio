@@ -2871,3 +2871,13 @@ ul.inicio-como li { display: flex; gap: 10px; align-items: flex-start; line-heig
 .parte-estilo .pastilla { flex: none; }
 .parte-estilo .pastilla.coste { color: var(--acento); }
 .estilo-del-video > .fila { align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ---- dictado del asistente (V2.0) */
+#btn-dictar-asistente.grabando {
+  color: var(--malo); border-color: currentColor;
+  animation: latido-dictado 1.2s ease-in-out infinite;
+}
+@keyframes latido-dictado { 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) {
+  #btn-dictar-asistente.grabando { animation: none; }
+}

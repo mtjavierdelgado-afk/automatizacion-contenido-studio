@@ -51,6 +51,7 @@ if RAIZ_ESTUDIO not in sys.path:
     sys.path.insert(0, RAIZ_ESTUDIO)
 
 from fastapi import Body, FastAPI, Query, Request  # noqa: E402
+from starlette.concurrency import run_in_threadpool  # noqa: E402
 from fastapi.exceptions import RequestValidationError  # noqa: E402
 from fastapi.responses import (FileResponse, HTMLResponse,  # noqa: E402
                                JSONResponse, PlainTextResponse, Response,
@@ -6768,7 +6769,10 @@ def estado_asistente():
     return {"listo": listo, "motivo": motivo, "cuenta": cuenta,
             "cuentas": cuentas, "sin_probar": sin_probar,
             "modelo": modulo.MODELO, "esfuerzo": modulo.ESFUERZO,
-            "simulado": modulo.simulado()}
+            "simulado": modulo.simulado(),
+            # si se puede dictar con la clave de OpenAI; sin ella la pantalla
+            # usa el dictado del navegador, si lo tiene
+            "dictado": PASOS_MODULOS.dictado.disponible()}
 
 
 @app.post("/api/asistente/probar")
@@ -7032,6 +7036,40 @@ async def subir_imagenes_asistente(peticion: Request):
     if not guardadas and avisos:
         raise ErrorApi(400, "no se ha podido guardar ninguna: " + "; ".join(avisos))
     return {"imagenes": guardadas, "avisos": avisos}
+
+
+@app.post("/api/asistente/dictado")
+async def dictar_al_asistente(peticion: Request):
+    """Un audio grabado en el navegador, pasado a texto para la pregunta.
+
+    No pregunta nada al asistente: el texto vuelve a la caja para que quien
+    habla lo lea y lo corrija antes de enviarlo (ver pasos/dictado.py).
+    """
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    dictado = PASOS_MODULOS.dictado
+    tipo = (peticion.headers.get("content-type") or "").lower()
+    if not tipo.startswith("multipart/"):
+        raise ErrorApi(400, "manda el audio como multipart (campo 'audio')")
+    try:
+        formulario = await peticion.form()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(400, f"multipart ilegible: {fallo}")
+    fichero = formulario.get("audio")
+    if not hasattr(fichero, "read"):
+        raise ErrorApi(400, "falta el campo 'audio'")
+    audio = await fichero.read()
+    idioma = str(formulario.get("idioma") or "es")
+    try:
+        resultado = await run_in_threadpool(
+            dictado.transcribir, audio, getattr(fichero, "filename", "") or "dictado",
+            getattr(fichero, "content_type", "") or "audio/webm", idioma)
+    except dictado.ErrorDictado as fallo:
+        raise ErrorApi(400, str(fallo))
+    anotar_global("asistente_dictado", {"bytes": resultado.get("bytes"),
+                                        "modelo": resultado.get("modelo"),
+                                        "segundos": resultado.get("segundos")})
+    return resultado
 
 
 @app.get("/api/asistente/imagenes/{nombre}")

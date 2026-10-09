@@ -399,6 +399,78 @@ def prueba_historial():
         shutil.rmtree(carpeta, ignore_errors=True)
 
 
+def prueba_dictado():
+    seccion("6c] el dictado: el audio a OpenAI con su formato, y el respaldo")
+    import dictado
+    import requests
+
+    class Respuesta:
+        def __init__(self, codigo, datos):
+            self.status_code, self._datos, self.text = codigo, datos, str(datos)
+
+        def json(self):
+            return self._datos
+
+    llamadas = []
+    guion = []
+
+    def post(url, headers=None, files=None, data=None, timeout=None):
+        llamadas.append({"url": url, "headers": headers, "files": files, "data": data})
+        return guion.pop(0)
+
+    original_post, original_claves = requests.post, dictado._claves
+    simular = os.environ.pop("ESTUDIO_SIMULAR", None)
+    requests.post = post
+    dictado._claves = lambda: ["sk-uno", "sk-dos"]
+    try:
+        guion[:] = [Respuesta(200, {"text": " ¿Por qué la voz sale obsoleta? "})]
+        r = dictado.transcribir(b"audio", "dictado", "audio/webm;codecs=opus", "es-419")
+        igual(r["texto"], "¿Por qué la voz sale obsoleta?", "devuelve el texto limpio")
+        igual(llamadas[0]["files"]["file"][0], "dictado.webm",
+              "el nombre lleva la extension: OpenAI decide el formato por ella")
+        igual(llamadas[0]["data"]["language"], "es", "y el idioma en dos letras")
+        igual(llamadas[0]["data"]["model"], dictado.MODELO, "con el modelo barato")
+
+        llamadas.clear()
+        guion[:] = [Respuesta(404, {"error": {"message": "The model does not exist"}}),
+                    Respuesta(200, {"text": "hola"})]
+        r = dictado.transcribir(b"audio", "d.m4a", "audio/mp4")
+        igual([c["data"]["model"] for c in llamadas], [dictado.MODELO, "whisper-1"],
+              "si la cuenta no tiene ese modelo, se cae a whisper-1")
+        igual(r["modelo"], "whisper-1", "y dice con cual salio")
+
+        llamadas.clear()
+        guion[:] = [Respuesta(401, {"error": {"message": "bad key"}}),
+                    Respuesta(200, {"text": "con la segunda"})]
+        r = dictado.transcribir(b"audio")
+        igual([c["headers"]["Authorization"] for c in llamadas],
+              ["Bearer sk-uno", "Bearer sk-dos"], "una clave mala pasa a la siguiente")
+        igual(r["texto"], "con la segunda", "y contesta con ella")
+
+        guion[:] = [Respuesta(200, {"text": "  "})]
+        try:
+            dictado.transcribir(b"audio")
+            comprobar(False, "un audio sin voz tenia que fallar")
+        except dictado.ErrorDictado as fallo:
+            comprobar("no se ha entendido" in str(fallo), "sin voz lo dice en castellano")
+        try:
+            dictado.transcribir(b"x" * (dictado.MAX_BYTES + 1))
+            comprobar(False, "un audio enorme tenia que fallar")
+        except dictado.ErrorDictado:
+            comprobar(True, "un audio por encima del tope se rechaza antes de mandarlo")
+        dictado._claves = lambda: []
+        try:
+            dictado.transcribir(b"audio")
+            comprobar(False, "sin clave tenia que fallar")
+        except dictado.ErrorDictado as fallo:
+            comprobar("Configuración" in str(fallo), "sin clave dice donde ponerla")
+    finally:
+        requests.post = original_post
+        dictado._claves = original_claves
+        if simular is not None:
+            os.environ["ESTUDIO_SIMULAR"] = simular
+
+
 def prueba_onboarding_visto():
     seccion("7] la marca de la guia de inicio, en los ajustes")
     carpeta = tempfile.mkdtemp(prefix="asist_aj_")
@@ -432,6 +504,7 @@ def main():
     prueba_ocupada_y_cancelar()
     prueba_registro()
     prueba_historial()
+    prueba_dictado()
     prueba_onboarding_visto()
     print()
     if FALLOS:

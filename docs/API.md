@@ -251,6 +251,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/asistente/charlas/{cid}` | Los turnos de una charla; el último dice si sigue pensando. |
 | `POST` | `/api/asistente/charlas/{cid}/cancelar` | Para la respuesta que esté en marcha en esa charla. |
 | `POST` | `/api/asistente/charlas/{cid}/mensajes` | Manda una pregunta; la respuesta se sigue con GET de la charla. |
+| `POST` | `/api/asistente/dictado` | Un audio grabado en el navegador, pasado a texto para la pregunta. |
 | `GET` | `/api/asistente/foto` | Lo que el asistente ve del Estudio ahora mismo, en texto y sin claves. |
 | `POST` | `/api/asistente/imagenes` | Imagenes para la proxima pregunta al asistente (pegadas o adjuntas). |
 | `GET` | `/api/asistente/imagenes/{nombre}` | Una imagen pegada al asistente, para su miniatura en la charla. |
@@ -278,4 +279,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**164 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**165 endpoints.** Escrito por `generar_api.py` desde `app.py`.

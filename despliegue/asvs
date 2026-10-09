@@ -9,6 +9,7 @@
 #      asvs registro     que ha dicho el estudio ultimamente
 #      asvs reiniciar    apagar y encender
 #      asvs actualizar   traer la ultima version (sin tocar tus videos)
+#                        (no para una tanda en marcha; --forzar para hacerlo)
 #      asvs clave        ver o cambiar la contrasena de acceso
 #      asvs https        (re)intentar el certificado
 # -----------------------------------------------------------------------------
@@ -84,8 +85,29 @@ reiniciar() {
   estado
 }
 
+# Cuantos trabajos estan corriendo ahora mismo. Vacio si no se puede saber
+# (el estudio parado, o sin jq): quien llama lo trata como «ninguno».
+_trabajos_activos() {
+  local puerto
+  puerto="$(_puerto)"
+  curl -fsS --max-time 5 "http://127.0.0.1:${puerto:-8110}/api/trabajos?activos=1" 2>/dev/null \
+    | jq -r '.trabajos | length' 2>/dev/null || true
+}
+
 actualizar() {
-  local temporal
+  local temporal forzar=0 activos
+  [ "${1:-}" = "--forzar" ] && forzar=1
+
+  # PARAR EL SERVICIO MATA LA TANDA QUE ESTE CORRIENDO, y una tanda son
+  # imagenes que ya se han pagado. Se pregunta antes de bajar nada.
+  activos="$(_trabajos_activos)"
+  if [ -n "$activos" ] && [ "$activos" -gt 0 ] && [ "$forzar" = 0 ]; then
+    no "hay $activos trabajo(s) en marcha (una tanda de imagenes, un render...)."
+    echo "  Actualizar ahora lo cortaria a medias. Espera a que acabe, o fuerza con:"
+    echo "      asvs actualizar --forzar"
+    exit 1
+  fi
+
   temporal="$(mktemp -d)"
   echo "Bajando la ultima version de $REPO ($RAMA)..."
   curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$RAMA" -o "$temporal/c.tgz"
@@ -94,6 +116,12 @@ actualizar() {
 
   # Se para antes de tocar nada: cambiar el codigo por debajo de una tanda que
   # esta corriendo es la forma mas rapida de perderla.
+  #
+  # Y SI ALGO FALLA DE AQUI EN ADELANTE, se vuelve a arrancar. Con `set -e`, un
+  # `pip install` sin red abortaba el script con el estudio PARADO y nadie que
+  # lo encendiera: la web daba un 502 hasta que alguien entraba a la consola.
+  trap 'echo; no "la actualizacion ha fallado a medias: vuelvo a arrancar lo que habia"; \
+        systemctl restart as-video-login as-video-studio || true; rm -rf "$temporal"' ERR
   systemctl stop as-video-studio
   # reglas.json va excluido a proposito: es lo unico del arbol de codigo que la
   # aplicacion reescribe (el destilador aprende de tu feedback y lo guarda ahi).
@@ -112,6 +140,7 @@ actualizar() {
   install -m 755 "$RAIZ/app/despliegue/estudio-clave" /usr/local/bin/estudio-clave
   chown -R "$USUARIO:$USUARIO" "$RAIZ/app" "$RAIZ/login"
   rm -rf "$temporal"
+  trap - ERR
 
   systemctl restart as-video-login as-video-studio
   sleep 2
@@ -137,9 +166,9 @@ case "${1:-estado}" in
   estado|"")   estado ;;
   registro)    registro "${2:-60}" ;;
   reiniciar)   reiniciar ;;
-  actualizar)  actualizar ;;
+  actualizar)  actualizar "${2:-}" ;;
   clave)       shift; estudio-clave "$@" ;;
   https)       https ;;
-  -h|--help|ayuda) sed -n '5,13p' "$0" | sed 's/^#  \{0,1\}//' ;;
+  -h|--help|ayuda) sed -n '5,14p' "$0" | sed 's/^#  \{0,1\}//' ;;
   *) echo "No entiendo «$1». Prueba:  asvs ayuda"; exit 1 ;;
 esac

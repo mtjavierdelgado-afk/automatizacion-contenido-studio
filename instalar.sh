@@ -659,11 +659,21 @@ _http2() {
 
 cortafuegos() {
   paso "El cortafuegos"
+  # EL PUERTO DEL SSH SE PREGUNTA, no se supone. Con el SSH en otro puerto (lo
+  # hace mucha gente para quitarse ruido), abrir solo el 22 y encender ufw
+  # cortaba la sesion de quien estaba instalando, a mitad de instalacion.
+  local puertos_ssh p
+  puertos_ssh="$( { sshd -T 2>/dev/null | awk '$1=="port"{print $2}'
+                    ss -Htlnp 2>/dev/null | awk '/"sshd"/{n=split($4,a,":"); print a[n]}'; } \
+                  | grep -E '^[0-9]+$' | sort -u )"
   ufw allow OpenSSH >/dev/null 2>&1 || ufw allow 22/tcp >/dev/null
+  for p in $puertos_ssh; do
+    [ "$p" = 22 ] || { ufw allow "$p/tcp" >/dev/null; nota "el SSH escucha en el $p: abierto tambien"; }
+  done
   ufw allow 80/tcp  >/dev/null
   ufw allow 443/tcp >/dev/null
   yes | ufw enable  >/dev/null 2>&1 || true
-  bien "solo abiertos el 22 (consola), el 80 y el 443 (la web)"
+  bien "solo abiertos el SSH (${puertos_ssh:-22}), el 80 y el 443 (la web)"
 }
 
 # ------------------------------------------------------------ 13. contrasena
@@ -674,14 +684,23 @@ la_contrasena() {
   # Se pregunta por «No hay cuentas», que es la frase exacta que imprime el CLI
   # cuando la base esta vacia. Buscar el nombre de la cuenta en la tabla seria
   # fragil: la cabecera de esa tabla tambien lleva texto.
-  local vacio
-  vacio="$( cd "$RAIZ/login" && set -a && . ./.env && set +a && \
-            sudo -u "$USUARIO" -E node bin/user.js list 2>/dev/null \
-            | grep -c 'No hay cuentas' || true )"
-  if [ "${vacio:-0}" -eq 0 ]; then
+  #
+  # Y UN LISTADO QUE FALLA NO ES «YA HAY CUENTA». Se miraba solo si salia la
+  # frase; si `user.js list` reventaba (la base sin crear, una libreria nativa
+  # que no cargo), no salia, y el instalador concluia que ya habia una cuenta:
+  # la instalacion nueva se quedaba SIN contrasena y sin decir por que. Ahora
+  # solo se salta con un listado que funciona y trae cuentas.
+  local listado codigo_lista=0
+  listado="$( cd "$RAIZ/login" && set -a && . ./.env && set +a && \
+              sudo -u "$USUARIO" -E node bin/user.js list 2>&1 )" || codigo_lista=$?
+  if [ "$codigo_lista" -eq 0 ] && ! printf '%s' "$listado" | grep -q 'No hay cuentas'; then
     nota "ya habia una cuenta: no se toca."
     nota "para cambiar la contrasena:  estudio-clave --nueva"
     return
+  fi
+  if [ "$codigo_lista" -ne 0 ]; then
+    aviso "no he podido listar las cuentas (codigo $codigo_lista); creo la de '$CUENTA' por si acaso."
+    printf '%s\n' "$listado" | tail -5 | sed 's/^/          /'
   fi
 
   # Con alguien delante se ELIGE; sin nadie (una instalacion automatica) se
@@ -700,7 +719,7 @@ la_contrasena() {
   if : 2>/dev/null < /dev/tty; then
     local intento
     for intento in 1 2 3; do
-      if ESTUDIO_LOGIN_APP="$RAIZ/login" estudio-clave --nueva "$CUENTA" \
+      if ESTUDIO_LOGIN_APP="$RAIZ/login" ESTUDIO_USUARIO="$USUARIO" estudio-clave --nueva "$CUENTA" \
            </dev/tty >&3 2>&4; then
         return 0
       fi
@@ -710,7 +729,7 @@ la_contrasena() {
   fi
   # Tambien por la pantalla (3 y 4): lo que imprime lleva la contrasena, y el
   # registro de la instalacion queda en disco.
-  ESTUDIO_LOGIN_APP="$RAIZ/login" estudio-clave --nueva "$CUENTA" </dev/null >&3 2>&4
+  ESTUDIO_LOGIN_APP="$RAIZ/login" ESTUDIO_USUARIO="$USUARIO" estudio-clave --nueva "$CUENTA" </dev/null >&3 2>&4
 }
 
 # ------------------------------------------------------------ comprobacion

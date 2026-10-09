@@ -23,6 +23,9 @@
 set -euo pipefail
 
 APP="${ESTUDIO_LOGIN_APP:-/opt/as-video-studio/login}"
+# El usuario con el que corre el login. El instalador lo pasa (ASVS_USUARIO);
+# a mano, sin pasarlo, se deduce del dueno de la carpeta de la aplicacion.
+USUARIO_APP="${ESTUDIO_USUARIO:-$(stat -c %U "$APP" 2>/dev/null || echo studio)}"
 CARPETA="${ESTUDIO_CLAVES:-/root/estudio}"
 ALFABETO='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789@#%+=?'
 
@@ -109,7 +112,7 @@ nueva() {
   (
     cd "$APP"
     set -a; . ./.env; set +a
-    printf '%s\n' "$pw" | sudo -u studio -E node bin/user.js poner "$cuenta" --password-stdin >/dev/null
+    printf '%s\n' "$pw" | sudo -u "$USUARIO_APP" -E node bin/user.js poner "$cuenta" --password-stdin >/dev/null
   )
   # Y la copia, para poder volver a leerla desde aquí.
   printf '%s\n' "$pw" > "$CARPETA/clave-$cuenta.txt"

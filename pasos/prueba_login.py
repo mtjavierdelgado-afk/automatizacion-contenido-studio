@@ -54,11 +54,25 @@ def seccion(titulo):
 
 
 def edges():
-    """Cuantos procesos de Edge hay ahora mismo."""
-    orden = ["tasklist", "/FO", "CSV", "/NH"]
-    salida = subprocess.run(orden, capture_output=True, text=True,
-                            creationflags=0x08000000).stdout
-    return sum(1 for l in salida.splitlines() if l.lower().startswith('"msedge.exe'))
+    """Cuantos procesos de navegador hay ahora mismo.
+
+    En Windows, Edge por `tasklist`. En Linux (el VPS) se cuentan Edge y Chrome
+    por `ps`: `creationflags` solo existe en Windows y pasarlo en Linux lanza
+    ValueError, asi que la suite moria aqui sin haber probado nada.
+    """
+    if os.name == "nt":
+        orden = ["tasklist", "/FO", "CSV", "/NH"]
+        salida = subprocess.run(orden, capture_output=True, text=True,
+                                creationflags=0x08000000).stdout
+        return sum(1 for l in salida.splitlines()
+                   if l.lower().startswith('"msedge.exe'))
+    try:
+        salida = subprocess.run(["ps", "-eo", "comm="], capture_output=True,
+                                text=True).stdout
+    except OSError:
+        return 0
+    return sum(1 for l in salida.splitlines()
+               if l.strip().lower().startswith(("msedge", "chrome")))
 
 
 def main():

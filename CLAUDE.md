@@ -264,10 +264,16 @@ que nunca la fijaron, y regenerarlas se paga.
 ## Antes de dar algo por terminado
 
 ```bash
-powershell -NoProfile -File pruebas.ps1
+powershell -NoProfile -File pruebas.ps1      # Windows
+bash pruebas.sh                              # Linux: el mismo recorrido
 ```
 
-Las veintitrés en verde, y las herramientas de análisis sin nada que decir
+**Una suite que sale en verde con el resumen en blanco es sospechosa**:
+`prueba_ajustes.py` llegó a perder su `main` y pasaba sin ejecutar ni una
+comprobación. Toda suite termina con su `if __name__ == "__main__"` y una línea
+con «comprobaciones».
+
+Las veinticuatro en verde, y las herramientas de análisis sin nada que decir
 (`huerfanas_js` trae dos sospechosas de siempre, `async` y `fallar`, que no son
 llamadas).
 Y si has tocado la interfaz, **ábrela**: una regla de CSS de menos o un bloque

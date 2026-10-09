@@ -70,7 +70,7 @@ import p8_render  # noqa: E402
 import sonido  # noqa: E402
 import transiciones  # noqa: E402
 
-CARPETA = os.path.join(os.environ.get("TEMP", r"C:\Windows\Temp"),
+CARPETA = os.path.join(tempfile.gettempdir(),
                        "estudio_prueba_visual")
 # el banco de la prueba va en temporal y no en el `banco/` del producto: la
 # prueba no

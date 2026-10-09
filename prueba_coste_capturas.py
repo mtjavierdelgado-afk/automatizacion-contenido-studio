@@ -31,7 +31,7 @@ import tempfile
 # La salud de las cuentas del CLI (pasos/salud_cli.py) se apunta en CADA
 # llamada, tambien en las de los dobles de esta suite: sin redirigirla iria
 # al almacen de claves de verdad.
-os.environ.setdefault("ESTUDIO_SECRETOS", tempfile.mkdtemp(prefix="secretos_prueba_"))
+os.environ["ESTUDIO_SECRETOS"] = tempfile.mkdtemp(prefix="secretos_prueba_")
 import time
 
 RAIZ_ESTUDIO = os.path.dirname(os.path.abspath(__file__))

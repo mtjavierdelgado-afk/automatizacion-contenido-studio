@@ -145,12 +145,16 @@ De ahí salen dos reglas que parecen arbitrarias y no lo son:
 ## Las pruebas
 
 ```bash
-powershell -NoProfile -File pruebas.ps1
+powershell -NoProfile -File pruebas.ps1      # en Windows
+bash pruebas.sh                              # en Linux (el VPS, un clon)
 ```
 
-Veinticuatro suites, y **por PowerShell y no por bash**: Edge headless devuelve
-código 0 y no escribe el PNG cuando se lanza desde un shell sandboxeado, así que
-`prueba_pasos_visuales` falla con «Edge no generó ...png» sin que nada esté roto.
+Veinticuatro suites. En Windows, **por PowerShell y no por el bash de Git**: Edge
+headless devuelve código 0 y no escribe el PNG cuando se lanza desde un shell
+sandboxeado, así que `prueba_pasos_visuales` falla con «Edge no generó ...png»
+sin que nada esté roto. En Linux, `pruebas.sh` hace lo mismo con el intérprete
+del servicio (`/opt/as-video-studio/venv/bin/python` si existe, o `PYTHON=`) y
+el navegador de `ESTUDIO_EDGE`; `--solo <suite>` corre una suelta.
 
 Lo que se comprueba de verdad, y no es humo:
 

@@ -1715,7 +1715,7 @@ def prueba_moodboard():
           "y es determinista: dos planos iguales reciben lo mismo")
 
     titulo("moodboard: la clave es del ESTILO, no del video")
-    base = os.path.join(os.environ.get("TEMP", "."), "estudio_prueba_mood")
+    base = os.path.join(tempfile.gettempdir(), "estudio_prueba_mood")
     shutil.rmtree(base, ignore_errors=True)
     os.makedirs(base, exist_ok=True)
     rutas = []
@@ -2254,7 +2254,7 @@ def prueba_cache_referencias():
     """Dos referencias distintas con el mismo nombre no se pisan en la cache."""
     titulo("imagen.normalizar: la cache va por ruta, no por nombre de fichero")
     imagen = medios.motor("imagen_openai/imagen.py")
-    base = os.path.join(os.environ.get("TEMP", "."), "estudio_prueba_refs")
+    base = os.path.join(tempfile.gettempdir(), "estudio_prueba_refs")
     shutil.rmtree(base, ignore_errors=True)
     rutas = []
     for indice, sitio in enumerate(("despacho_regulador", "oficina_empleado")):
@@ -2282,7 +2282,7 @@ def prueba_rehacer_de_verdad():
     parte del video volvia igual, servida por la cache del banco de imagenes.
     """
     titulo("rehacer: con la cache llena, forzar tiene que pagar imagen nueva")
-    base = os.path.join(os.environ.get("TEMP", "."), "estudio_prueba_rehacer")
+    base = os.path.join(tempfile.gettempdir(), "estudio_prueba_rehacer")
     shutil.rmtree(base, ignore_errors=True)
     banco = os.path.join(base, "banco_imagenes")
     os.makedirs(banco, exist_ok=True)
@@ -2596,7 +2596,17 @@ def prueba_limite_de_la_api():
     imagen.LIMITE_POR_MINUTO[0] = 5
     imagen._TECHO_DEL_429[0] = None
     imagen._LLAMADAS[:] = []
-    imagen._pedir_ficha(4)
+    # UNA CUENTA DE PRUEBA con las listas del modulo, como la principal. Sin
+    # ella, `_pedir_ficha` y `_calibrar` cargan las cuentas del almacen y, en
+    # una maquina sin clave de OpenAI (el VPS recien instalado, un clon), la
+    # suite moria aqui con «Falta OPENAI_API_KEY» sin que nada estuviera roto.
+    principal = imagen._Cuenta("cuenta de prueba", "sk-prueba-no-se-usa",
+                               limite=imagen.LIMITE_POR_MINUTO,
+                               llamadas=imagen._LLAMADAS,
+                               libre_en=imagen._LIBRE_EN,
+                               techo=imagen._TECHO_DEL_429,
+                               vistas=imagen._CABECERAS_VISTAS)
+    imagen._pedir_ficha(4, cuenta=principal)
     igual(sum(n for _, n in imagen._LLAMADAS), 4,
           "una llamada con cuatro adjuntos gasta cuatro fichas, no una")
     imagen._LLAMADAS[:] = []
@@ -2610,13 +2620,13 @@ def prueba_limite_de_la_api():
                  "x-ratelimit-reset-tokens": "1s",
                  "x-ratelimit-limit-requests-day": "10000",
                  "x-ratelimit-reset-requests-day": "86400s"}
-    imagen._calibrar(Respuesta("{}", cabeceras, 200))
+    imagen._calibrar(Respuesta("{}", cabeceras, 200), cuenta=principal)
     igual(imagen.LIMITE_POR_MINUTO[0], 5,
           "de todas las cabeceras se coge la del cubo que salta, no la de tokens "
           "ni la del cupo diario")
     # y el orden en que las emita el servidor no puede cambiar el resultado
     imagen.LIMITE_POR_MINUTO[0] = 99
-    imagen._calibrar(Respuesta("{}", dict(reversed(list(cabeceras.items()))), 200))
+    imagen._calibrar(Respuesta("{}", dict(reversed(list(cabeceras.items()))), 200), cuenta=principal)
     igual(imagen.LIMITE_POR_MINUTO[0], 5, "y da igual el orden de las cabeceras")
     imagen.LIMITE_POR_MINUTO[0] = 5
 
@@ -2631,7 +2641,7 @@ def prueba_copiar_con_fichero_abierto():
     caia despues de haber pagado. Lo que si se puede es sobrescribirlo.
     """
     titulo("copiar: un fichero abierto no tumba el paso")
-    base = os.path.join(os.environ.get("TEMP", "."), "estudio_prueba_copiar")
+    base = os.path.join(tempfile.gettempdir(), "estudio_prueba_copiar")
     shutil.rmtree(base, ignore_errors=True)
 
     def sembrar(carpeta, texto, nombres=("ventanal__vista.png",
@@ -2727,7 +2737,7 @@ def prueba_render_con_fichero_abierto():
     en vez de borrarla.
     """
     titulo("render: un PNG retenido no tumba el lote")
-    base = os.path.join(os.environ.get("TEMP", "."), "estudio_prueba_render_fs")
+    base = os.path.join(tempfile.gettempdir(), "estudio_prueba_render_fs")
     shutil.rmtree(base, ignore_errors=True)
     os.makedirs(base, exist_ok=True)
 
@@ -3223,7 +3233,7 @@ def prueba_sonido():
     # MUESTRA del fichero, y un barrido tarda entre 0,05 y 0,90 s en pegar segun
     # cual sea. Medio segundo largo de recorrido, distinto en cada corte porque
     # el efecto lo reparte la semilla.
-    banco_efectos = os.path.join(os.environ.get("TEMP", "."),
+    banco_efectos = os.path.join(tempfile.gettempdir(),
                                  "estudio_prueba_golpe")
     shutil.rmtree(banco_efectos, ignore_errors=True)
     os.makedirs(banco_efectos, exist_ok=True)

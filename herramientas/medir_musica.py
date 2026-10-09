@@ -30,6 +30,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RAIZ)
@@ -213,7 +214,7 @@ def main():
         print("no encuentro el sidechaincompress en el grafo")
         return 3
 
-    tmp = os.path.join(os.environ.get("TEMP", "."), "estudio_medir_musica")
+    tmp = os.path.join(tempfile.gettempdir(), "estudio_medir_musica")
     os.makedirs(tmp, exist_ok=True)
     silencio = os.path.join(tmp, "silencio.wav")
     subprocess.run([medios.ffmpeg(), "-y", "-v", "error", "-f", "lavfi", "-i",

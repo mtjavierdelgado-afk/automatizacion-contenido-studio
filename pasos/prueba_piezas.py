@@ -2554,6 +2554,17 @@ def prueba_limite_de_la_api():
     """
     titulo("motor de imagen: el 429 se espera lo que la API dice")
     imagen = medios.motor("imagen_openai/imagen.py")
+    # UNA CUENTA DE PRUEBA con las listas del modulo, como la principal. Sin
+    # ella, `_motivo_limite`, `_pedir_ficha` y `_calibrar` cargan las cuentas
+    # del almacen y, en una maquina sin clave de OpenAI (el VPS recien
+    # instalado, un clon), la suite moria aqui con «Falta OPENAI_API_KEY» sin
+    # que nada estuviera roto.
+    principal = imagen._Cuenta("cuenta de prueba", "sk-prueba-no-se-usa",
+                               limite=imagen.LIMITE_POR_MINUTO,
+                               llamadas=imagen._LLAMADAS,
+                               libre_en=imagen._LIBRE_EN,
+                               techo=imagen._TECHO_DEL_429,
+                               vistas=imagen._CABECERAS_VISTAS)
 
     class Respuesta:
         def __init__(self, texto, cabeceras=None, codigo=429):
@@ -2580,8 +2591,8 @@ def prueba_limite_de_la_api():
     igual(imagen._cuanto_esperar(Respuesta("{}")), imagen.ESPERA_LIMITE_S,
           "sin ninguna pista se espera la ventana entera: con un limite POR "
           "MINUTO, esperar menos es garantizar otro 429")
-    ok("input-images por min" in imagen._motivo_limite(velocidad),
-       f"y se dice QUE limite ha saltado: {imagen._motivo_limite(velocidad)}")
+    ok("input-images por min" in imagen._motivo_limite(velocidad, cuenta=principal),
+       f"y se dice QUE limite ha saltado: {imagen._motivo_limite(velocidad, cuenta=principal)}")
 
     sin_saldo = Respuesta(json.dumps({"error": {
         "message": "You exceeded your current quota.",
@@ -2596,16 +2607,6 @@ def prueba_limite_de_la_api():
     imagen.LIMITE_POR_MINUTO[0] = 5
     imagen._TECHO_DEL_429[0] = None
     imagen._LLAMADAS[:] = []
-    # UNA CUENTA DE PRUEBA con las listas del modulo, como la principal. Sin
-    # ella, `_pedir_ficha` y `_calibrar` cargan las cuentas del almacen y, en
-    # una maquina sin clave de OpenAI (el VPS recien instalado, un clon), la
-    # suite moria aqui con «Falta OPENAI_API_KEY» sin que nada estuviera roto.
-    principal = imagen._Cuenta("cuenta de prueba", "sk-prueba-no-se-usa",
-                               limite=imagen.LIMITE_POR_MINUTO,
-                               llamadas=imagen._LLAMADAS,
-                               libre_en=imagen._LIBRE_EN,
-                               techo=imagen._TECHO_DEL_429,
-                               vistas=imagen._CABECERAS_VISTAS)
     imagen._pedir_ficha(4, cuenta=principal)
     igual(sum(n for _, n in imagen._LLAMADAS), 4,
           "una llamada con cuatro adjuntos gasta cuatro fichas, no una")
@@ -2685,7 +2686,10 @@ def prueba_copiar_con_fichero_abierto():
         sobrantes = medios.copiar_carpeta(origen, destino)
     finally:
         pegado.close()
-    igual([os.path.basename(s) for s in sobrantes], ["fantasma__vista.png"],
+    # Solo en Windows queda bloqueado: en Linux un fichero abierto se borra sin
+    # problema, y alli lo correcto es que no quede nada que declarar.
+    igual([os.path.basename(s) for s in sobrantes],
+          ["fantasma__vista.png"] if os.name == "nt" else [],
           "y lo que no se ha podido retirar se dice por su nombre")
 
     # Y EL CASO CONTRARIO: el fichero se esfuma ENTRE la foto y el borrado. La

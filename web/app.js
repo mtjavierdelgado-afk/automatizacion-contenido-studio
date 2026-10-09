@@ -2289,6 +2289,7 @@ function pintarConfig() {
   caja.appendChild(bloquePruebaClaves());
   caja.appendChild(seccionOpenAI(ficha));
   caja.appendChild(seccionCalidadImagen());
+  caja.appendChild(seccionDictado());
   caja.appendChild(seccionCartesia(ficha));
   caja.appendChild(seccionCLI());
   caja.appendChild(seccionOtrasClaves(ficha));
@@ -2392,6 +2393,48 @@ function seccionCalidadImagen() {
   return caja;
 }
 
+
+/* EL DICTADO DEL ASISTENTE: con OpenAI (si hay clave) o siempre el del
+   navegador, que es gratis. Ver pasos/dictado.py. */
+function seccionDictado() {
+  const vista = estadoConfig();
+  const datos = vista.ajustes;
+  const caja = h('section', { clase: 'bloque-config' },
+    h('div', { clase: 'fila' }, h('h3', {}, 'Dictado al asistente')));
+  if (!datos) return caja;
+  const modo = datos.ajustes.dictado || 'auto';
+  const opciones = [
+    ['auto', 'Con OpenAI si hay clave',
+      'Graba tu voz y la pasa a texto OpenAI: funciona en cualquier navegador y '
+      + 'entiende muy bien el castellano. Un minuto ≈ 0,003 $. Sin clave, usa el '
+      + 'del navegador.'],
+    ['navegador', 'Siempre el del navegador (gratis)',
+      'No se manda el audio a nadie de pago. Funciona en Chrome, Edge y Safari; '
+      + 'en Firefox no hay dictado.'],
+  ];
+  opciones.forEach(([valor, nombre, detalle]) => {
+    const puesta = valor === modo;
+    caja.appendChild(h('button', {
+      clase: 'fila-calidad opcion-dictado' + (puesta ? ' elegida' : ''), disabled: puesta,
+      onclick: () => guardarDictado(valor),
+    },
+      h('span', { clase: 'nombre' }, nombre),
+      h('span', { clase: 'meta desglose' }, detalle)));
+  });
+  return caja;
+}
+
+async function guardarDictado(modo) {
+  const vista = estadoConfig();
+  try {
+    const r = await pedir(API.ajustes(), { method: 'PUT', cuerpo: { dictado: modo } });
+    vista.ajustes = { ...(vista.ajustes || {}), ajustes: r.ajustes, costes: r.costes || (vista.ajustes || {}).costes };
+    refrescarEstadoAsistente();
+  } catch (e) {
+    vista.error = e.message;
+  }
+  repintarClaves();
+}
 
 /* Las cuentas de OpenAI: N, cada una con el correo de la suya. */
 function seccionOpenAI(ficha) {
@@ -12371,24 +12414,41 @@ function pintarDictado() {
     boton.textContent = 'pasando a texto…';
     boton.disabled = true;
   } else {
-    boton.textContent = '🎙 Hablar';
-    boton.disabled = !listo || ocupada;
+    const motor = motorDictado();
+    boton.textContent = motor === 'openai' ? '🎙 Hablar · OpenAI'
+      : motor === 'navegador' ? '🎙 Hablar · navegador' : '🎙 Hablar';
+    boton.title = motor === 'openai'
+      ? 'Graba y lo pasa a texto OpenAI (≈ 0,003 $ por minuto). En Configuración '
+        + 'puedes elegir el dictado gratuito del navegador.'
+      : motor === 'navegador'
+        ? 'Dictado del propio navegador: gratis, el texto aparece mientras hablas.'
+        : 'Este navegador no tiene dictado propio: pon una clave de OpenAI o usa '
+          + 'Chrome o Edge.';
+    boton.disabled = !listo || ocupada || !motor;
   }
+}
+
+/* Con qué se va a dictar en este navegador: 'openai', 'navegador' o ''. */
+function motorDictado() {
+  const conServidor = !!(ASISTENTE.estado && ASISTENTE.estado.dictado);
+  const puedeGrabar = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+    && window.MediaRecorder);
+  if (conServidor && puedeGrabar) return 'openai';
+  if (window.SpeechRecognition || window.webkitSpeechRecognition) return 'navegador';
+  return '';
 }
 
 function conmutarDictado() {
   if (DICTADO.estado === 'grabando') { pararDictado(); return; }
   if (DICTADO.estado) return;
-  const conServidor = !!(ASISTENTE.estado && ASISTENTE.estado.dictado);
-  const Reconocimiento = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const puedeGrabar = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia
-    && window.MediaRecorder);
-  if (conServidor && puedeGrabar) { grabarParaTranscribir(); return; }
-  if (Reconocimiento) { dictarConNavegador(Reconocimiento); return; }
-  toast(puedeGrabar
-    ? 'Para dictar pon una clave de OpenAI en Configuración, o usa Chrome o Edge, '
-      + 'que traen dictado propio.'
-    : 'Este navegador no deja usar el micrófono aquí.', true);
+  const motor = motorDictado();
+  if (motor === 'openai') { grabarParaTranscribir(); return; }
+  if (motor === 'navegador') {
+    dictarConNavegador(window.SpeechRecognition || window.webkitSpeechRecognition);
+    return;
+  }
+  toast('Este navegador no tiene dictado propio: pon una clave de OpenAI en '
+    + 'Configuración (y elige «Con OpenAI»), o usa Chrome o Edge.', true);
 }
 
 function arrancarRelojDictado() {

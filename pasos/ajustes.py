@@ -67,7 +67,14 @@ POR_DEFECTO = {
     # porque es de la instalacion, no de la pantalla: desde el movil no hay
     # que volver a verla.
     "onboarding_visto": False,
+    # COMO SE DICTA AL ASISTENTE (pasos/dictado.py). «auto»: con una clave de
+    # OpenAI se graba y lo transcribe OpenAI (~0,003 $/min); sin clave, el
+    # dictado del navegador. «navegador»: siempre el del navegador, gratis,
+    # aunque haya clave.
+    "dictado": "auto",
 }
+
+DICTADOS = ("auto", "navegador")
 
 
 def leer():
@@ -80,6 +87,8 @@ def leer():
     if salida.get("calidad_imagen") not in CALIDADES:
         salida["calidad_imagen"] = POR_DEFECTO["calidad_imagen"]
     salida["onboarding_visto"] = bool(salida.get("onboarding_visto"))
+    if salida.get("dictado") not in DICTADOS:
+        salida["dictado"] = POR_DEFECTO["dictado"]
     return salida
 
 
@@ -100,6 +109,8 @@ def guardar(cambios):
                 f"calidad {valor!r}: solo {', '.join(CALIDADES)}")
         if clave == "onboarding_visto" and not isinstance(valor, bool):
             raise ValueError("onboarding_visto es verdadero o falso")
+        if clave == "dictado" and valor not in DICTADOS:
+            raise ValueError(f"dictado {valor!r}: solo {', '.join(DICTADOS)}")
         actual[clave] = valor
     escribir_json(RUTA, actual)
     return actual

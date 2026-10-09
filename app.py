@@ -6770,9 +6770,12 @@ def estado_asistente():
             "cuentas": cuentas, "sin_probar": sin_probar,
             "modelo": modulo.MODELO, "esfuerzo": modulo.ESFUERZO,
             "simulado": modulo.simulado(),
-            # si se puede dictar con la clave de OpenAI; sin ella la pantalla
-            # usa el dictado del navegador, si lo tiene
-            "dictado": PASOS_MODULOS.dictado.disponible()}
+            # si se dicta con la clave de OpenAI; si no (sin clave, o porque
+            # en Configuración se eligio el del navegador) la pantalla usa el
+            # dictado del navegador, si lo tiene
+            "dictado": (AJUSTES.leer().get("dictado") != "navegador"
+                        and PASOS_MODULOS.dictado.disponible()),
+            "dictado_modo": AJUSTES.leer().get("dictado") or "auto"}
 
 
 @app.post("/api/asistente/probar")
@@ -7048,6 +7051,9 @@ async def dictar_al_asistente(peticion: Request):
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
     dictado = PASOS_MODULOS.dictado
+    if AJUSTES.leer().get("dictado") == "navegador":
+        raise ErrorApi(409, "en Configuración está elegido el dictado del navegador: "
+                            "no se manda el audio a OpenAI")
     tipo = (peticion.headers.get("content-type") or "").lower()
     if not tipo.startswith("multipart/"):
         raise ErrorApi(400, "manda el audio como multipart (campo 'audio')")

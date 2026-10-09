@@ -57,6 +57,9 @@ vídeos, estilos, claves y contraseña no se tocan.
   clave, usa el dictado del propio navegador (Chrome, Edge, Safari), gratis.
 - La primera vez el navegador pide permiso para el micrófono. Hasta 3 minutos
   por dictado.
+- El botón dice con qué se va a dictar: **«🎙 Hablar · OpenAI»** o **«🎙 Hablar
+  · navegador»**. En **Configuración → Dictado al asistente** se puede elegir
+  **«Siempre el del navegador (gratis)»** para no gastar nada al dictar.
 
 **El asistente: historial de charlas**
 - Botón **«Historial»** en la burbuja: las charlas de antes, con su primera

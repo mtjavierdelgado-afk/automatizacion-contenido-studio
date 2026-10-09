@@ -1915,6 +1915,19 @@ def probar_asistente(cliente):
                                   files={"audio": ("vacio.webm", b"", "audio/webm")})
     igual(respuesta.status_code, 400, "un audio vacío da 400 con el motivo")
 
+    # «SIEMPRE EL DEL NAVEGADOR»: elegido en Configuración, no se manda audio
+    respuesta, _d = cliente.put("/api/ajustes", {"dictado": "navegador"})
+    igual(respuesta.status_code, 200, "se elige el dictado del navegador")
+    _r, estado = cliente.get("/api/asistente")
+    ok(estado.get("dictado") is False and estado.get("dictado_modo") == "navegador",
+       "y el estado deja de ofrecer OpenAI")
+    respuesta, _d = cliente.pedir("POST", "/api/asistente/dictado",
+                                  files={"audio": ("d.webm", b"0" * 200, "audio/webm")})
+    igual(respuesta.status_code, 409, "y el servidor no manda el audio a OpenAI")
+    respuesta, _d = cliente.put("/api/ajustes", {"dictado": "siempre"})
+    igual(respuesta.status_code, 400, "un modo de dictado que no existe da 400")
+    cliente.put("/api/ajustes", {"dictado": "auto"})
+
     # EL HISTORIAL: la charla queda guardada junto a los datos, no en memoria
     respuesta, historial = cliente.get("/api/asistente/charlas")
     igual(respuesta.status_code, 200, "GET /api/asistente/charlas da el historial")

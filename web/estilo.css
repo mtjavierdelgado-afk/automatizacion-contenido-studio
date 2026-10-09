@@ -2881,3 +2881,9 @@ ul.inicio-como li { display: flex; gap: 10px; align-items: flex-start; line-heig
 @media (prefers-reduced-motion: reduce) {
   #btn-dictar-asistente.grabando { animation: none; }
 }
+/* las dos opciones del dictado: un nombre largo, no una calidad de una palabra */
+.fila-calidad.opcion-dictado { grid-template-columns: 1fr; }
+.fila-calidad.opcion-dictado .nombre {
+  text-transform: none; letter-spacing: normal; font-size: 14px; grid-row: auto;
+}
+.fila-calidad.opcion-dictado .desglose { grid-column: 1; }

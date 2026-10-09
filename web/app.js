@@ -11966,16 +11966,29 @@ function bloqueEstiloDelVideo() {
         + (total ? ` (≈ ${usdCorto(total)} al generar)` : '') : 'Traer')));
   };
   const cargar = async () => {
+    v.cambiosEstiloCargando = true;
     try {
       v.cambiosEstilo = await pedir(`${API.proyecto(v.pid)}/estilo/cambios`);
     } catch (e) {
       v.cambiosEstilo = { estilo: null, partes: [], por_que_no: e.message };
     }
-    pintar();
+    v.cambiosEstiloEn = Date.now();
+    v.cambiosEstiloCargando = false;
+    // la pantalla se ha podido repintar mientras tanto (abrir un vídeo pinta
+    // varias veces): esta caja ya no es la que se ve, y pintarla no serviría
+    if (!caja.isConnected && v.vista === 'encargo_video') pintarLight();
+    else pintar();
   };
-  if (!v.cambiosEstilo || v.cambiosEstiloDe !== v.pid) {
-    v.cambiosEstiloDe = v.pid; v.cambiosEstilo = null; v.partesEstilo = {}; cargar();
+  /* SE VUELVE A PREGUNTAR CADA VEZ QUE SE ENSEÑA, no una vez por vídeo. Se
+     guardaba la primera respuesta y ya: cambiar el aire entre bloques en el
+     estilo y volver al encargo seguía diciendo «al día», porque contestaba lo
+     de la primera visita. El encargo se repinta con cada tecla, así que hay un
+     margen de unos segundos para no preguntar en cada repintado. */
+  if (v.cambiosEstiloDe !== v.pid) {
+    v.cambiosEstiloDe = v.pid; v.cambiosEstilo = null; v.partesEstilo = {};
   }
+  if (!v.cambiosEstiloCargando
+    && (!v.cambiosEstilo || Date.now() - (v.cambiosEstiloEn || 0) > 4000)) cargar();
   pintar();
   return caja;
 }

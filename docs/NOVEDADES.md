@@ -42,6 +42,9 @@ vídeos, estilos, claves y contraseña no se tocan.
   estilo han cambiado (estilo gráfico, tono del guion, voz, rótulos), qué
   habría que rehacer según la etapa en que esté el vídeo y **cuánto costaría**,
   y trae solo lo que marques.
+- El bloque vuelve a comparar con el estilo **cada vez que abres el Encargo**
+  (corregido: se quedaba con la primera comparación y no veía un cambio hecho
+  después, como el aire entre bloques).
 - Traer **no genera nada**: deja marcado lo que quedó viejo y se rehace al
   pulsar Generar. No pisa lo propio del vídeo: duración, formato, llamadas a la
   acción, indicaciones, qué lleva y lo editado a mano en el guion.

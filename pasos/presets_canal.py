@@ -64,6 +64,7 @@ unos fotogramas y un parrafo. Se ensenan juntos en la misma pantalla, pero cada
 uno dice lo que es.
 """
 import copy
+import hashlib
 import os
 import re
 import shutil
@@ -744,6 +745,28 @@ def _devolver_propios(pid, aparte):
 
 #: Los prefijos de orden que ya trae un nombre: «00_», «00_00_»...
 _PREFIJO_ORDEN = re.compile(r"^(\d{2}_)+")
+#: Y la huella de contenido que lleva detras desde el 10-10-2026: «cara_1a2b3c4d»
+_HUELLA_NOMBRE = re.compile(r"_[0-9a-f]{10}$")
+
+
+def nombre_estable(ruta):
+    """«cara_1a2b3c4d5e.png»: el nombre de una referencia en el banco. -> str
+
+    POR SU CONTENIDO Y NO POR SU POSICION. Se llamaba «NN_cara.png» con NN la
+    posicion en la lista, asi que quitar o mover una referencia renumeraba las
+    demas y los videos que apuntaban al nombre de antes se quedaban sin estilo
+    (y antes aun, el prefijo crecia en cada guardado). Con la huella del
+    contenido, la misma imagen se llama igual se guarde las veces que se guarde
+    y este donde este en la lista, y una imagen distinta nunca pisa a otra: un
+    video hecho con la lamina de ayer sigue viendo la de ayer aunque hoy se
+    regenere. Ver `_sembrar_ficheros`, que ademas ya no borra lo viejo.
+    """
+    base = os.path.basename(str(ruta))
+    raiz, extension = os.path.splitext(base)
+    raiz = _HUELLA_NOMBRE.sub("", _PREFIJO_ORDEN.sub("", raiz)) or "referencia"
+    with open(ruta, "rb") as fh:
+        huella = hashlib.sha1(fh.read()).hexdigest()[:10]
+    return f"{raiz}_{huella}{extension.lower() or '.png'}"
 
 
 def nombre_numerado(indice, ruta):
@@ -817,31 +840,30 @@ def _sembrar_ficheros(tipo, pid, datos, miniatura, anterior):
                           + ", ".join(faltan[:5]))
 
     destino = carpeta_de(pid)
-    # se copia a un lado y solo se sustituye al final: si algo falla a mitad, el
-    # preset anterior sigue entero. Es la misma regla que estilo.extraer
-    trabajo = f"{destino}.nuevo"
-    shutil.rmtree(trabajo, ignore_errors=True)
-    os.makedirs(trabajo, exist_ok=True)
-    copiadas, elegida = [], ""
+    # NADA DE LO QUE HABIA SE BORRA (10-10-2026). La carpeta se vaciaba entera y
+    # se rehacia en cada guardado, y los videos hechos con este estilo guardan
+    # la ruta ABSOLUTA de cada referencia (`assets.estilo.referencias`): en
+    # cuanto un nombre cambiaba, el video se quedaba sin estilo. Ahora cada
+    # referencia se llama por su contenido (`nombre_estable`) y se COPIA al
+    # lado de las que ya estaban; lo de antes se queda donde estaba. Ocupa unas
+    # imagenes mas en disco y ningun video se rompe por guardar un estilo.
+    os.makedirs(destino, exist_ok=True)
+    finales, elegida = [], ""
     referencia_miniatura = str(miniatura or "").strip() or rutas[0]
     try:
-        for indice, origen in enumerate(rutas):
-            nombre = nombre_numerado(indice, origen)
-            final = os.path.join(trabajo, nombre)
-            shutil.copyfile(origen, final)
-            copiadas.append(final)
+        for origen in rutas:
+            final = os.path.join(destino, nombre_estable(origen))
+            if os.path.abspath(origen) != os.path.abspath(final) \
+                    and not os.path.exists(final):
+                temporal = final + ".tmp"
+                shutil.copyfile(origen, temporal)
+                os.replace(temporal, final)
+            finales.append(final)
             if os.path.abspath(origen) == os.path.abspath(referencia_miniatura):
                 elegida = final
     except OSError as fallo:
-        shutil.rmtree(trabajo, ignore_errors=True)
         raise ErrorPreset(f"no se han podido copiar los fotogramas al banco: {fallo}")
-
-    shutil.rmtree(destino, ignore_errors=True)
-    os.makedirs(os.path.dirname(destino), exist_ok=True)
-    shutil.move(trabajo, destino)
-    # las rutas definitivas son las del banco, no las de donde salieron
-    finales = [os.path.join(destino, os.path.basename(r)) for r in copiadas]
-    elegida = os.path.join(destino, os.path.basename(elegida)) if elegida else finales[0]
+    elegida = elegida or finales[0]
     datos = dict(datos, referencias=finales)
 
     # Las laminas dibujadas se guardan CON el preset, no solo se referencian.

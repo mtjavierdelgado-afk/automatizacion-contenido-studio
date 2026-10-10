@@ -79,6 +79,7 @@ def publica(ficha):
     return {"id": ficha["id"], "nombre": ficha.get("nombre") or ficha["id"],
             "oculto": bool(ficha.get("oculto")),
             "con_clave": bool(ficha.get("clave")),
+            "logo": ficha.get("logo") or None,
             "creado": ficha.get("creado") or ""}
 
 
@@ -121,8 +122,11 @@ def crear(raiz, nombre):
         return publica(ficha)
 
 
-def cambiar(raiz, cid, nombre=None, oculto=None, clave=None):
-    """`clave` "" la quita; None la deja como estaba."""
+def cambiar(raiz, cid, nombre=None, oculto=None, clave=None, logo=False):
+    """`clave` "" la quita; None la deja como estaba. `logo`: un dict
+    {fichero, posicion, tamano, opacidad} lo pone, None lo quita y False (el
+    defecto) no lo toca. Es el logo que llevan de fabrica los videos NUEVOS de
+    los estilos de este proyecto."""
     with _LOCK:
         datos = _leer(raiz)
         ficha = _ficha(datos, cid)
@@ -134,6 +138,11 @@ def cambiar(raiz, cid, nombre=None, oculto=None, clave=None):
             ficha["nombre"] = nuevo
         if oculto is not None:
             ficha["oculto"] = bool(oculto)
+        if logo is None:
+            ficha.pop("logo", None)
+        elif isinstance(logo, dict) and logo.get("fichero"):
+            ficha["logo"] = {k: logo[k] for k in ("fichero", "posicion", "tamano", "opacidad")
+                             if k in logo}
         if clave is not None:
             clave = str(clave)
             if clave and len(clave) < 4:
@@ -172,6 +181,14 @@ def asignar(raiz, preset_id, cid):
         else:
             datos["estilos"].pop(preset_id, None)
         _escribir(raiz, datos)
+
+
+def de_estilo(raiz, preset_id):
+    """La ficha publica del proyecto de un estilo, o None."""
+    datos = _leer(raiz)
+    cid = datos["estilos"].get(str(preset_id or ""))
+    ficha = next((c for c in datos["clientes"] if c["id"] == cid), None)
+    return publica(ficha) if ficha else None
 
 
 def abrir(raiz, cid, clave):

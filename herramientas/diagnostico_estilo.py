@@ -40,8 +40,13 @@ if RAIZ not in sys.path:
 _PREFIJO = re.compile(r"^((\d{2})_)+")
 
 
+_HUELLA = re.compile(r"_[0-9a-f]{10}(?=\.[A-Za-z]+$)")
+
+
 def _base(nombre):
-    return _PREFIJO.sub("", nombre)
+    """«cara.png» de «00_00_cara.png» y de «cara_1a2b3c4d5e.png» (los nombres
+    por contenido de `presets_canal.nombre_estable`)."""
+    return _HUELLA.sub("", _PREFIJO.sub("", nombre))
 
 
 def _orden(nombre):
@@ -73,6 +78,10 @@ def candidata(ruta):
     mismo_orden = [f for f in iguales if _orden(f) == orden]
     if len(mismo_orden) == 1:
         return os.path.join(carpeta, mismo_orden[0])
+    # varias con el mismo nombre de base (por ejemplo, la misma lamina
+    # regenerada): la mas reciente, que es la que tiene hoy el estilo
+    if iguales:
+        return max((os.path.join(carpeta, f) for f in iguales), key=os.path.getmtime)
     return None
 
 

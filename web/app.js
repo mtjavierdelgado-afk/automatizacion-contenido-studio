@@ -6353,7 +6353,7 @@ function vistaElegidoLight() {
   if (!e.lleva) e.lleva = { voz: true, subtitulos: true, musica: true, efectos: true };
   caja.appendChild(bloqueLight('Qué lleva este vídeo',
     'lo que se produce y lo que no; apagar algo no cuesta nada',
-    bloqueLleva(e.lleva, () => {})));
+    llevaConAjustes(e, ficha)));
 
   caja.appendChild(bloqueLight('El material',
     'de dónde salen los hechos que se van a contar',
@@ -6642,6 +6642,19 @@ function materialLight(e) {
 /* Crear el proyecto y lanzar la primera tanda, en un gesto. Son dos llamadas
    —el proyecto tiene que existir antes de poder generar nada en él— pero UNA
    decisión, así que un botón. */
+/* Lo elegido en «Ajustes del montaje» del borrador, tal como lo entiende
+   `_opciones_al_crear`. Lo que no se eligió no viaja: queda automático. */
+function opcionesParaCrear(e) {
+  const op = e.opciones || {};
+  const salida = {};
+  if (op.presencia) salida.presencia = op.presencia;
+  if (op.musica && op.musica.id) salida.musica = op.musica;
+  if (op.subtitulos && Object.keys(op.subtitulos).length) salida.subtitulos = op.subtitulos;
+  if (op.logo === false) salida.logo = false;
+  else if (op.logo && op.logo.fichero) salida.logo = op.logo;
+  return salida;
+}
+
 async function crearYGenerarLight(estilo) {
   const e = encargoVideoLight();
   if (!String(e.material || '').trim()) {
@@ -6661,6 +6674,8 @@ async function crearYGenerarLight(estilo) {
         indicaciones: e.indicaciones,
         cta: e.cta,
         lleva: e.lleva || undefined,
+        // la música, los subtítulos y el logo elegidos en el borrador
+        opciones: opcionesParaCrear(e),
       },
     });
     const pid = (datos.proyecto || {}).id;
@@ -12588,6 +12603,20 @@ function bloqueLleva(lleva, alCambiar, ocupado) {
 }
 
 /* En el encargo de un vídeo abierto: se lee del servidor y se guarda al tocar. */
+/* En el encargo de un vídeo NUEVO: los interruptores y, debajo, los ajustes
+   del montaje en modo borrador. Encender o apagar música o subtítulos
+   repinta los ajustes (sin ellos no hay nada que ajustar). */
+function llevaConAjustes(e, estilo) {
+  const caja = h('div', {});
+  const pintar = () => {
+    vaciar(caja);
+    caja.appendChild(bloqueLleva(e.lleva, () => pintar()));
+    caja.appendChild(ajustesDelMontaje({ tipo: 'borrador', e, estilo: (estilo || {}).id || '' }, e.lleva));
+  };
+  pintar();
+  return caja;
+}
+
 function bloqueLlevaDelVideo() {
   const v = APP.light.video;
   const caja = h('div', {});
@@ -12600,7 +12629,7 @@ function bloqueLlevaDelVideo() {
           method: 'PUT', cuerpo: { lleva: { [pieza]: valor } } });
         v.lleva = r.lleva;
         (r.pasos || []).forEach(f => { v.fichas[f.id] = f; });
-        if (pieza === 'musica') pintar();
+        if (['musica', 'subtitulos'].includes(pieza)) pintar();
         toast(valor ? `${pieza}: se añadirá al volver a montar el vídeo`
                     : `${pieza}: se quitará al volver a montar el vídeo`);
       } catch (e) {
@@ -12609,12 +12638,7 @@ function bloqueLlevaDelVideo() {
         cargar();
       }
     }));
-    if (v.lleva.musica !== false) {
-      caja.appendChild(bloquePresenciaMusica());
-      caja.appendChild(bloqueTemaMusica());
-    }
-    if (v.lleva.subtitulos !== false) caja.appendChild(bloqueSubtitulosVideo());
-    caja.appendChild(bloqueLogoVideo());
+    caja.appendChild(ajustesDelMontaje({ tipo: 'video', pid: v.pid }, v.lleva));
   };
   const cargar = async () => {
     try {
@@ -12629,316 +12653,452 @@ function bloqueLlevaDelVideo() {
   return caja;
 }
 
-/* CUÁNTO SE OYE LA MÚSICA. La música va agachada bajo la voz (ducking), y
-   cuánto se agacha es lo que decide si se oye: con los números del canal de
-   origen quedaba enterrada y solo asomaba en la cola del final. Tres niveles
-   (ver `sonido.PRESENCIAS`); cambiarlo en un vídeo ya montado vuelve a mezclar
-   el audio sobre los clips que hay, sin dibujar nada. Sin elegir, «normal»: la
-   pantalla no escribe nada al abrirse (regla 1 de CLAUDE.md). */
+/* ================================================ LOS AJUSTES DEL MONTAJE
+ *
+ * Debajo de los interruptores de «Qué lleva este vídeo»: la música, los
+ * subtítulos y el logo. Las MISMAS tres filas en el encargo de un vídeo NUEVO
+ * y en el de uno ya creado (10-10-2026: estaban solo en el segundo, y el
+ * encargo que se usa al crear no tenía ninguna). Cada fila dice en una línea
+ * cómo está y se despliega para cambiarlo. Sin tocar nada, todo automático.
+ *
+ *   modo «borrador»  el vídeo aún no existe: lo elegido se guarda en el
+ *                    encargo (`e.opciones`) y se aplica al crearlo
+ *                    (`_opciones_al_crear` en app.py).
+ *   modo «video»     se guarda al momento por la API del vídeo. La música y el
+ *                    logo vuelven a montar el MP4 solos (sin dibujar nada); los
+ *                    subtítulos rehacen además las capas de texto, que tarda
+ *                    más, y por eso piden un «Aplicar ahora».
+ *
+ * Nada de esto paga imágenes.
+ */
 const PRESENCIAS_MUSICA = [
   { id: 'suave', nombre: 'Suave', pista: 'Casi no se oye bajo la voz; sube en las pausas largas' },
   { id: 'normal', nombre: 'Normal', pista: 'Se oye de fondo sin tapar la voz' },
   { id: 'alta', nombre: 'Alta', pista: 'Música protagonista: se nota mientras se habla' },
 ];
-
-function bloquePresenciaMusica() {
-  const v = APP.light.video;
-  const caja = h('div', { clase: 'campo presencia-musica' });
-  const pintar = () => {
-    vaciar(caja);
-    const datos = v.presencia;
-    caja.appendChild(h('label', {}, 'Cuánto se oye la música'));
-    if (!datos) { caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…')); return; }
-    const tira = h('div', { clase: 'tira-modos' });
-    PRESENCIAS_MUSICA.forEach(nivel => {
-      tira.appendChild(h('button', {
-        clase: 'mini' + (nivel.id === datos.presencia ? ' activo' : ''),
-        title: nivel.pista, disabled: !!v.presenciaOcupada,
-        onclick: () => elegir(nivel.id),
-      }, nivel.nombre));
-    });
-    caja.appendChild(tira);
-    const elegida = PRESENCIAS_MUSICA.find(n => n.id === datos.presencia);
-    caja.appendChild(h('div', { clase: 'meta' }, v.presenciaOcupada
-      ? 'volviendo a mezclar el audio…'
-      : (elegida ? elegida.pista : '') + '. Cambiarlo solo vuelve a mezclar el audio.'));
-  };
-  const elegir = async nivel => {
-    if (!v.presencia || nivel === v.presencia.presencia) return;
-    v.presenciaOcupada = true;
-    pintar();
-    try {
-      const r = await pedir(`${API.proyecto(v.pid)}/musica/presencia`, {
-        method: 'PUT', cuerpo: { presencia: nivel } });
-      v.presencia = Object.assign({}, v.presencia, { presencia: r.presencia, elegida: true });
-      if (r.trabajo_id) {
-        toast('Música: volviendo a mezclar el vídeo, sin dibujar nada');
-        seguirTrabajo(CLAVE_VIDEO_LIGHT, r.trabajo_id, async trabajo => {
-          v.presenciaOcupada = false;
-          if (trabajo.estado === 'listo') toast('Música: el vídeo ya suena con el nivel nuevo');
-          pintar();
-          try { await recargarVideoAbierto(); } catch (e) { /* la ficha se relee al volver */ }
-        });
-        return;
-      }
-      v.presenciaOcupada = false;
-      toast(r.montado
-        ? 'Música: se aplicará al volver a montar el vídeo (hay planos pendientes)'
-        : 'Música: se aplicará al montar el vídeo');
-    } catch (e) {
-      v.presenciaOcupada = false;
-      toast(e.message, true);
-    }
-    pintar();
-  };
-  const cargar = async () => {
-    try {
-      v.presencia = await pedir(`${API.proyecto(v.pid)}/musica/presencia`);
-    } catch (e) {
-      v.presencia = { presencia: 'normal', elegida: false };
-    }
-    pintar();
-  };
-  if (!v.presencia || v.presenciaDe !== v.pid) { v.presenciaDe = v.pid; v.presencia = null; cargar(); }
-  pintar();
-  return caja;
-}
-
-/* ======================================= MÚSICA, SUBTÍTULOS Y LOGO DEL VÍDEO
- *
- * Tres mandos plegados debajo de «Qué lleva este vídeo». Sin tocarlos, todo
- * va en automático como siempre: la música la elige el ritmo, los subtítulos
- * son los del estilo y no hay logo. Ninguno paga imágenes: la música y el logo
- * solo vuelven a montar el MP4, y los subtítulos rehacen las capas de texto.
- */
-function trabajoDeMontaje(r, quePasa) {
-  const v = APP.light.video;
-  if (r && r.trabajo_id) {
-    toast(`${quePasa}: volviendo a montar el vídeo, sin pagar imágenes`);
-    seguirTrabajo(CLAVE_VIDEO_LIGHT, r.trabajo_id, async trabajo => {
-      if (trabajo.estado === 'listo') toast(`${quePasa}: el vídeo ya está montado de nuevo`);
-      try { await recargarVideoAbierto(); } catch (e) { /* se relee al volver */ }
-    });
-  } else if (r && r.montado) {
-    toast(`${quePasa}: se aplicará al volver a montar el vídeo`);
-  } else {
-    toast(`${quePasa}: se aplicará al montar el vídeo`);
-  }
-  if (v) v.opciones = null;
-}
-
-/* ELEGIR EL TEMA, o dejar que lo elija el ritmo (lo de siempre). Se buscan
-   temas de Jamendo por ánimo, se escuchan aquí mismo y se fija uno. */
 const ANIMOS_MUSICA = [
   ['sobrio', 'Sobrio'], ['corporativo', 'Corporativo'], ['esperanzador', 'Esperanzador'],
   ['epico', 'Épico'], ['misterioso', 'Misterioso'], ['tension', 'Tensión'],
   ['melancolico', 'Melancólico'], ['oscuro', 'Oscuro'],
 ];
-
-function bloqueTemaMusica() {
-  const v = APP.light.video;
-  const estado = v.temaMusica || (v.temaMusica = { animo: 'sobrio', extra: '', temas: null, buscando: false });
-  const detalles = h('details', { clase: 'opcion-montaje', open: !!estado.abierto });
-  detalles.addEventListener('toggle', () => { estado.abierto = detalles.open; if (detalles.open) cargar(); });
-  const dentro = h('div', {});
-  detalles.appendChild(h('summary', {}, 'Elegir la música',
-    h('span', { clase: 'meta' }, ' · automática si no eliges')));
-  detalles.appendChild(dentro);
-  const pintar = () => {
-    vaciar(dentro);
-    const puesto = estado.puesto;
-    dentro.appendChild(h('div', { clase: 'meta' }, puesto && puesto.id
-      ? ['Suena «', h('b', {}, puesto.titulo || puesto.id), `» de ${puesto.artista || '?'}. `,
-        h('button', { clase: 'mini fantasma', onclick: () => fijar(null) }, 'Volver a la automática')]
-      : 'Automática: el vídeo se parte en tramos según su ritmo y cada uno lleva su tema. '
-        + 'Si prefieres uno solo, búscalo aquí.'));
-    const tira = h('div', { clase: 'herramientas' });
-    ANIMOS_MUSICA.forEach(([id, nombre]) => tira.appendChild(h('button', {
-      clase: 'mini' + (estado.animo === id ? ' activo' : ''),
-      onclick: () => { estado.animo = id; pintar(); },
-    }, nombre)));
-    dentro.appendChild(tira);
-    dentro.appendChild(h('div', { clase: 'fila' },
-      h('input', { type: 'text', value: estado.extra, placeholder: 'algo más: piano, acústica, lo-fi…',
-        oninput: ev => { estado.extra = ev.target.value; } }),
-      h('button', { clase: 'mini primario', disabled: estado.buscando, onclick: buscar },
-        estado.buscando ? 'buscando…' : 'Buscar temas')));
-    (estado.temas || []).forEach(tema => {
-      const audio = h('audio', { controls: true, preload: 'none',
-        src: `${BASE}/api/musica/escucha?url=${encodeURIComponent(tema.escucha || '')}` });
-      dentro.appendChild(h('div', { clase: 'tema-musica' },
-        h('div', {}, h('b', {}, tema.titulo || tema.id),
-          h('span', { clase: 'meta' }, ` · ${tema.artista || '?'} · ${duracionCorta(tema.duracion)}`
-            + ((tema.generos || []).length ? ` · ${tema.generos.slice(0, 3).join(', ')}` : ''))),
-        audio,
-        h('button', { clase: 'mini', onclick: () => fijar(tema) },
-          puesto && puesto.id === tema.id ? 'Puesto' : 'Usar este')));
-    });
-    if (estado.temas && !estado.temas.length) {
-      dentro.appendChild(h('div', { clase: 'pista' }, 'Ningún tema con eso: prueba otro ánimo.'));
-    }
-    dentro.appendChild(h('div', { clase: 'pista' },
-      'Jamendo: música con licencia Creative Commons. Al fijar un tema se guarda su licencia; '
-      + 'revísala si el vídeo es para un uso comercial.'));
-  };
-  const cargar = async () => {
-    try {
-      const datos = await pedir(`${API.proyecto(v.pid)}/sonido`);
-      estado.puesto = datos.musica || (datos.tema || null);
-    } catch (e) { /* sin sonido todavía */ }
-    pintar();
-  };
-  const buscar = async () => {
-    estado.buscando = true;
-    pintar();
-    try {
-      const datos = await pedir(`${API.proyecto(v.pid)}/sonido/musica`, {
-        method: 'POST', cuerpo: { animo: estado.animo, extra: estado.extra, cuantas: 8 } });
-      estado.temas = datos.temas || [];
-    } catch (e) { toast(e.message, true); }
-    estado.buscando = false;
-    pintar();
-  };
-  const fijar = async tema => {
-    try {
-      const r = await pedir(`${API.proyecto(v.pid)}/sonido`, {
-        method: 'PUT', cuerpo: { musica: tema || {}, remontar: true } });
-      estado.puesto = tema;
-      trabajoDeMontaje(r, tema ? 'Música' : 'Música automática');
-    } catch (e) { toast(e.message, true); }
-    pintar();
-  };
-  pintar();
-  if (estado.abierto) cargar();
-  return detalles;
-}
-
-/* LOS SUBTÍTULOS: los del estilo, o a tu gusto. */
 const TAMANOS_SUB = [['pequeno', 'Pequeño'], ['normal', 'Normal'], ['grande', 'Grande'], ['enorme', 'Enorme']];
-const DISENOS_SUB = [['dibujo', 'Dibujo'], ['realista', 'Realista'], ['editorial', 'Editorial']];
 const CAJAS_SUB = [['auto', 'La del estilo'], [0, 'Sin caja'], [0.45, 'Suave'], [0.85, 'Opaca']];
+const ESQUINAS_LOGO = [['arriba_izquierda', '↖ Arriba izquierda'], ['arriba_derecha', '↗ Arriba derecha'],
+  ['abajo_izquierda', '↙ Abajo izquierda'], ['abajo_derecha', '↘ Abajo derecha']];
 
-function bloqueSubtitulosVideo() {
-  const v = APP.light.video;
-  const estado = v.subtitulos || (v.subtitulos = { datos: null, abierto: false });
-  const detalles = h('details', { clase: 'opcion-montaje', open: !!estado.abierto });
-  const dentro = h('div', {});
-  detalles.appendChild(h('summary', {}, 'Personalizar los subtítulos',
-    h('span', { clase: 'meta' }, ' · los del estilo si no tocas nada')));
-  detalles.appendChild(dentro);
-  detalles.addEventListener('toggle', () => { estado.abierto = detalles.open; if (detalles.open) cargar(); });
-  const fila = (etiqueta, opciones, actual, clave) => h('div', { clase: 'campo' },
-    h('label', {}, etiqueta),
-    h('div', { clase: 'herramientas' }, ...opciones.map(([valor, nombre]) => h('button', {
-      clase: 'mini' + (String(actual) === String(valor) ? ' activo' : ''),
-      onclick: () => cambiar({ [clave]: valor }),
-    }, nombre))));
-  const pintar = () => {
-    vaciar(dentro);
-    const d = estado.datos;
-    if (!d) { dentro.appendChild(h('div', { clase: 'cargando' }, 'leyendo…')); return; }
-    dentro.appendChild(fila('Tamaño', TAMANOS_SUB, d.tam, 'tam'));
-    dentro.appendChild(fila('Letra y forma', DISENOS_SUB, d.diseno, 'diseno'));
-    dentro.appendChild(fila('Caja detrás del texto', CAJAS_SUB, d.caja, 'caja'));
-    const color = h('input', { type: 'color', value: d.color || '#ffffff',
-      onchange: ev => cambiar({ color: ev.target.value }) });
-    dentro.appendChild(h('div', { clase: 'campo' }, h('label', {}, 'Color del texto'),
-      h('div', { clase: 'fila' }, color,
-        d.color ? h('button', { clase: 'mini fantasma', onclick: () => cambiar({ color: '' }) },
-          'El del estilo') : h('span', { clase: 'meta' }, 'ahora: el del estilo'))));
-    dentro.appendChild(h('div', { clase: 'pista' },
-      'Rehace las capas de texto y el montaje al volver a montar el vídeo; ninguna imagen se paga. ',
-      d.propios ? h('button', { clase: 'mini', onclick: () => cambiar({ automatico: true }) },
-        'Volver a los del estilo') : null));
-  };
-  const cargar = async () => {
-    try { estado.datos = await pedir(`${API.proyecto(v.pid)}/subtitulos`); } catch (e) { toast(e.message, true); }
-    pintar();
-  };
-  const cambiar = async cambios => {
-    try {
-      const r = await pedir(`${API.proyecto(v.pid)}/subtitulos`, { method: 'PUT', cuerpo: cambios });
-      if (r.cambiado) toast('Subtítulos: se aplicará al volver a montar el vídeo (sin pagar imágenes)');
-      await recargarVideoAbierto().catch(() => {});
-    } catch (e) { toast(e.message, true); }
-    cargar();
-  };
-  pintar();
-  if (estado.abierto) cargar();
-  return detalles;
+/* El estado de los ajustes, POR VÍDEO: lo de un vídeo no se cuela en otro. */
+function estadoAjustes(modo) {
+  const clave = modo.tipo === 'video' ? `v:${modo.pid}` : `b:${modo.estilo || ''}`;
+  APP.light.ajustesMontaje = APP.light.ajustesMontaje || {};
+  if (!APP.light.ajustesMontaje[clave]) {
+    APP.light.ajustesMontaje[clave] = { abierta: '', musica: null, subtitulos: null, logo: null,
+      busqueda: { animo: 'sobrio', extra: '', temas: null, buscando: false, comercial: true } };
+  }
+  return APP.light.ajustesMontaje[clave];
 }
 
-/* EL LOGO: una imagen (mejor PNG con fondo transparente) en una esquina. */
-const ESQUINAS_LOGO = [['arriba_izquierda', '↖ Arriba izq.'], ['arriba_derecha', '↗ Arriba der.'],
-  ['abajo_izquierda', '↙ Abajo izq.'], ['abajo_derecha', '↘ Abajo der.']];
+function opcionesBorrador(e) {
+  e.opciones = e.opciones || {};
+  return e.opciones;
+}
 
-function bloqueLogoVideo() {
-  const v = APP.light.video;
-  const estado = v.logo || (v.logo = { datos: null, abierto: false });
-  const detalles = h('details', { clase: 'opcion-montaje', open: !!estado.abierto });
-  const dentro = h('div', {});
-  detalles.appendChild(h('summary', {}, 'Logo',
-    h('span', { clase: 'meta' }, ' · opcional, en una esquina del vídeo')));
-  detalles.appendChild(dentro);
-  detalles.addEventListener('toggle', () => { estado.abierto = detalles.open; if (detalles.open) cargar(); });
-  const entrada = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', clase: 'oculto',
-    id: `logo-${v.pid}`, onchange: ev => subir(ev.target) });
+/* El logo del proyecto (cliente) del estilo, si lo tiene: entra solo en los
+   vídeos nuevos de ese estilo. */
+function logoDelProyecto(presetId) {
+  const cid = clienteDe(presetId || '');
+  const ficha = listaClientes().find(c => c.id === cid);
+  return ficha && ficha.logo ? { logo: ficha.logo, proyecto: ficha.nombre } : null;
+}
+
+function ajustesDelMontaje(modo, lleva) {
+  const est = estadoAjustes(modo);
+  const caja = h('div', { clase: 'ajustes-montaje' });
   const pintar = () => {
-    vaciar(dentro);
-    const d = estado.datos;
-    if (!d) { dentro.appendChild(h('div', { clase: 'cargando' }, 'leyendo…')); return; }
-    const logo = d.logo;
-    dentro.appendChild(entrada);
-    dentro.appendChild(h('div', { clase: 'fila' },
-      logo ? h('img', { clase: 'logo-previa', alt: 'logo',
-        src: `${API.proyecto(v.pid)}/logo/imagen?v=${encodeURIComponent(logo.fichero)}` }) : null,
-      h('label', { clase: 'mini boton-fichero', for: `logo-${v.pid}` }, logo ? 'Cambiar el logo' : 'Subir un logo'),
-      logo ? h('button', { clase: 'mini fantasma peligro', onclick: () => colocar({ quitar: true }) }, 'Quitar') : null));
-    if (!logo) {
-      dentro.appendChild(h('div', { clase: 'pista' },
-        'PNG con fondo transparente queda mejor. Ponerlo, moverlo o quitarlo solo vuelve a montar el vídeo.'));
+    vaciar(caja);
+    caja.appendChild(h('div', { clase: 'ajustes-cab' }, h('b', {}, 'Ajustes del montaje'),
+      h('span', { clase: 'meta' }, ' · todo automático si no tocas nada; nada de esto paga imágenes')));
+    if (lleva.musica !== false) caja.appendChild(filaAjuste(modo, est, 'musica', pintar));
+    if (lleva.subtitulos !== false) caja.appendChild(filaAjuste(modo, est, 'subtitulos', pintar));
+    caja.appendChild(filaAjuste(modo, est, 'logo', pintar));
+  };
+  // LA LECTURA PINTA EN LOS QUE ESTÉN EN PANTALLA: la pantalla puede pintar
+  // este bloque más de una vez mientras se lee (y alguna copia no llega a
+  // colgarse), así que se apuntan todos y al terminar se repintan los vivos.
+  est.pintores = (est.pintores || []).slice(-8);
+  est.pintores.push({ caja, pintar });
+  est.repintar = () => est.pintores.filter(x => x.caja.isConnected).forEach(x => x.pintar());
+  // en modo vídeo se lee lo guardado una vez; el borrador lo tiene en memoria
+  if (modo.tipo === 'video' && !est.cargado) {
+    est.cargado = true;
+    cargarAjustesVideo(modo, est).then(() => est.repintar());
+  }
+  pintar();
+  return caja;
+}
+
+async function cargarAjustesVideo(modo, est) {
+  const base = API.proyecto(modo.pid);
+  const [presencia, sonido, subtitulos, logo] = await Promise.all([
+    pedir(`${base}/musica/presencia`).catch(() => null),
+    pedir(`${base}/sonido`).catch(() => null),
+    pedir(`${base}/subtitulos`).catch(() => null),
+    pedir(`${base}/logo`).catch(() => null)]);
+  est.musica = { presencia: presencia || { presencia: 'normal', elegida: false },
+    tema: sonido && sonido.musica && sonido.musica.id ? sonido.musica : null };
+  est.subtitulos = subtitulos;
+  est.logo = logo ? logo.logo : null;
+  est.leido = true;
+}
+
+/* UNA FILA: el resumen en una línea y, desplegada, su editor. */
+function filaAjuste(modo, est, cual, repintar) {
+  const nombres = { musica: '🎵 Música', subtitulos: '💬 Subtítulos', logo: '🏷️ Logo' };
+  const abierta = est.abierta === cual;
+  const fila = h('div', { clase: 'fila-ajuste' + (abierta ? ' abierta' : '') });
+  fila.appendChild(h('div', { clase: 'fila-ajuste-cab' },
+    h('b', {}, nombres[cual]),
+    h('span', { clase: 'meta crece' }, resumenAjuste(modo, est, cual)),
+    h('button', { clase: 'mini', onclick: () => { est.abierta = abierta ? '' : cual; repintar(); } },
+      abierta ? 'Cerrar' : 'Cambiar')));
+  if (abierta) {
+    const editor = { musica: editorMusica, subtitulos: editorSubtitulos, logo: editorLogo }[cual];
+    fila.appendChild(editor(modo, est, repintar));
+  }
+  return fila;
+}
+
+function resumenAjuste(modo, est, cual) {
+  if (modo.tipo === 'video' && !est.leido) return 'leyendo…';
+  if (cual === 'musica') {
+    const op = modo.tipo === 'borrador' ? opcionesBorrador(modo.e) : null;
+    const presencia = op ? (op.presencia || 'normal') : ((est.musica || {}).presencia || {}).presencia || 'normal';
+    const tema = op ? op.musica : (est.musica || {}).tema;
+    const nivel = (PRESENCIAS_MUSICA.find(p => p.id === presencia) || {}).nombre || presencia;
+    return (tema ? `«${tema.titulo || tema.id}» de ${tema.artista || '?'}` : 'Automática (varios temas según el ritmo)')
+      + ` · se oye ${nivel.toLowerCase()}`;
+  }
+  if (cual === 'subtitulos') {
+    const sub = modo.tipo === 'borrador' ? opcionesBorrador(modo.e).subtitulos : est.subtitulos;
+    const propios = modo.tipo === 'borrador' ? sub && Object.keys(sub).length : sub && sub.propios;
+    if (!propios) return 'Los del estilo';
+    const partes = [];
+    if (sub.tam) partes.push(`tamaño ${(TAMANOS_SUB.find(t => t[0] === sub.tam) || [0, sub.tam])[1].toLowerCase()}`);
+    if (sub.diseno) partes.push(sub.diseno);
+    if (sub.color) partes.push(`color ${sub.color}`);
+    return `Personalizados: ${partes.join(', ') || 'a tu gusto'}`
+      + (modo.tipo === 'video' && sub.pendiente ? ' · sin aplicar todavía' : '');
+  }
+  const esquina = l => ((ESQUINAS_LOGO.find(x => x[0] === l.posicion) || [0, ''])[1]).replace(/^\S+ /, '').toLowerCase();
+  if (modo.tipo === 'borrador') {
+    const op = opcionesBorrador(modo.e);
+    if (op.logo === false) return 'Sin logo';
+    if (op.logo && op.logo.fichero) return `Logo propio, ${esquina(op.logo)}`;
+    const delProyecto = logoDelProyecto(modo.estilo);
+    return delProyecto ? `El del proyecto «${delProyecto.proyecto}», ${esquina(delProyecto.logo)}` : 'Sin logo';
+  }
+  return est.logo ? `Puesto, ${esquina(est.logo)}, ${Math.round((est.logo.tamano || 0.12) * 100)} % del ancho` : 'Sin logo';
+}
+
+/* Lo que devuelve la API al cambiar algo que vuelve a montar el vídeo. */
+function avisoDeMontaje(r, quePasa) {
+  if (r && r.trabajo_id) {
+    toast(`${quePasa}: volviendo a montar el vídeo, sin dibujar nada`);
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, r.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') toast(`${quePasa}: el vídeo ya está montado de nuevo`);
+      try { await recargarVideoAbierto(); } catch (e) { /* se relee al volver */ }
+    });
+  } else if (r && r.montado) {
+    toast(`${quePasa}: guardado. Se aplicará al volver a montar el vídeo (hay cosas pendientes)`);
+  } else {
+    toast(`${quePasa}: guardado. Se aplicará al montar el vídeo`);
+  }
+}
+
+/* ------------------------------------------------------------- la música */
+function editorMusica(modo, est, repintar) {
+  const caja = h('div', { clase: 'editor-ajuste' });
+  const borrador = modo.tipo === 'borrador';
+  const op = borrador ? opcionesBorrador(modo.e) : null;
+  const presencia = borrador ? (op.presencia || 'normal') : ((est.musica || {}).presencia || {}).presencia || 'normal';
+  const elegida = borrador ? !!op.presencia : !!(((est.musica || {}).presencia || {}).elegida);
+  const tema = borrador ? op.musica : (est.musica || {}).tema;
+
+  caja.appendChild(h('label', {}, 'Cuánto se oye bajo la voz'));
+  caja.appendChild(h('div', { clase: 'herramientas' }, ...PRESENCIAS_MUSICA.map(n => h('button', {
+    clase: 'mini' + (n.id === presencia ? ' activo' : ''), title: n.pista,
+    onclick: async () => {
+      if (borrador) { op.presencia = n.id; repintar(); return; }
+      try {
+        const r = await pedir(`${API.proyecto(modo.pid)}/musica/presencia`,
+          { method: 'PUT', cuerpo: { presencia: n.id } });
+        est.musica.presencia = Object.assign({}, est.musica.presencia, { presencia: r.presencia, elegida: true });
+        if (r.cambiado) avisoDeMontaje(r, 'Música');
+      } catch (e) { toast(e.message, true); }
+      repintar();
+    },
+  }, n.nombre))));
+  caja.appendChild(h('div', { clase: 'pista' },
+    (PRESENCIAS_MUSICA.find(n => n.id === presencia) || {}).pista || '',
+    !borrador && !elegida
+      ? '. Si este vídeo se montó antes del 10 de octubre, sonó «Suave»: pulsa «Normal» para volver a mezclarlo.'
+      : ''));
+
+  caja.appendChild(h('label', {}, 'Qué música'));
+  caja.appendChild(h('div', { clase: 'herramientas' },
+    h('button', { clase: 'mini' + (!tema ? ' activo' : ''), onclick: () => fijarTema(null) },
+      'Automática'),
+    h('button', { clase: 'mini' + (tema ? ' activo' : ''), onclick: () => {
+      est.busqueda.abierta = true; repintar(); } }, tema ? `«${tema.titulo || tema.id}»` : 'Elegir un tema…')));
+  caja.appendChild(h('div', { clase: 'pista' }, tema
+    ? `Suena todo el vídeo este tema: ${tema.titulo || tema.id} de ${tema.artista || '?'}`
+      + (tema.licencia_nombre ? ` · ${tema.licencia_nombre}` : '')
+    : 'Automática: el vídeo se parte en tramos según su ritmo y cada uno lleva su tema de Jamendo.'));
+
+  if (est.busqueda.abierta || tema) caja.appendChild(buscadorDeTemas(modo, est, repintar, fijarTema, tema));
+
+  async function fijarTema(nuevo) {
+    if (borrador) {
+      op.musica = nuevo || null;
+      if (!nuevo) est.busqueda.abierta = false;
+      repintar();
       return;
     }
-    dentro.appendChild(h('div', { clase: 'herramientas' }, ...ESQUINAS_LOGO.map(([id, nombre]) => h('button', {
-      clase: 'mini' + (logo.posicion === id ? ' activo' : ''), onclick: () => colocar({ posicion: id }),
-    }, nombre))));
-    const tam = Math.round((logo.tamano || 0.12) * 100);
-    dentro.appendChild(h('div', { clase: 'campo' },
-      h('label', {}, `Tamaño: ${tam} % del ancho`),
-      h('input', { type: 'range', min: 4, max: 40, step: 1, value: tam,
-        onchange: ev => colocar({ tamano: Number(ev.target.value) / 100 }) })));
-    const op = Math.round((logo.opacidad || 0.9) * 100);
-    dentro.appendChild(h('div', { clase: 'campo' },
-      h('label', {}, `Opacidad: ${op} %`),
-      h('input', { type: 'range', min: 10, max: 100, step: 5, value: op,
-        onchange: ev => colocar({ opacidad: Number(ev.target.value) / 100 }) })));
+    try {
+      const r = await pedir(`${API.proyecto(modo.pid)}/sonido`, {
+        method: 'PUT', cuerpo: { musica: nuevo || {}, remontar: true } });
+      est.musica.tema = nuevo || null;
+      if (!nuevo) est.busqueda.abierta = false;
+      avisoDeMontaje(r, nuevo ? 'Música' : 'Música automática');
+    } catch (e) { toast(e.message, true); }
+    repintar();
+  }
+  return caja;
+}
+
+function buscadorDeTemas(modo, est, repintar, fijarTema, puesto) {
+  const b = est.busqueda;
+  const caja = h('div', { clase: 'buscador-temas' });
+  caja.appendChild(h('div', { clase: 'herramientas' }, ...ANIMOS_MUSICA.map(([id, nombre]) => h('button', {
+    clase: 'mini' + (b.animo === id ? ' activo' : ''), onclick: () => { b.animo = id; repintar(); },
+  }, nombre))));
+  // del catálogo de Jamendo y no del vídeo: sirve también en un borrador
+  const buscar = async () => {
+    b.buscando = true; repintar();
+    try {
+      const datos = await pedir(`${BASE}/api/musica/buscar`, {
+        method: 'POST', cuerpo: { animo: b.animo, extra: b.extra, cuantas: 10 } });
+      b.temas = datos.temas || [];
+    } catch (e) { toast(e.message, true); }
+    b.buscando = false; repintar();
   };
-  const cargar = async () => {
-    try { estado.datos = await pedir(`${API.proyecto(v.pid)}/logo`); } catch (e) { toast(e.message, true); }
-    pintar();
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('input', { type: 'text', value: b.extra, placeholder: 'algo más: piano, acústica, lo-fi…',
+      oninput: ev => { b.extra = ev.target.value; },
+      onkeydown: ev => { if (ev.key === 'Enter') buscar(); } }),
+    h('button', { clase: 'mini primario', disabled: b.buscando, onclick: buscar },
+      b.buscando ? 'buscando…' : 'Buscar temas')));
+  caja.appendChild(h('label', { clase: 'casilla' },
+    h('input', { type: 'checkbox', checked: b.comercial, onchange: ev => { b.comercial = ev.target.checked; repintar(); } }),
+    ' Solo los que permiten uso comercial (vídeos para clientes o anuncios)'));
+  const temas = (b.temas || []).filter(t => !b.comercial || t.comercial);
+  temas.forEach(tema => {
+    caja.appendChild(h('div', { clase: 'tema-musica' + (puesto && puesto.id === tema.id ? ' puesto' : '') },
+      h('div', {}, h('b', {}, tema.titulo || tema.id),
+        h('span', { clase: 'meta' }, ` · ${tema.artista || '?'} · ${duracionCorta(tema.duracion)}`
+          + ((tema.generos || []).length ? ` · ${tema.generos.slice(0, 3).join(', ')}` : '')),
+        h('div', { clase: 'meta' }, `${tema.licencia_nombre || 'licencia sin datos'} · `
+          + (tema.comercial ? 'se puede usar en vídeos comerciales' : 'NO comercial')
+          + (tema.atribucion ? ' · pide citar al autor' : ''))),
+      h('audio', { controls: true, preload: 'none',
+        src: `${BASE}/api/musica/escucha?url=${encodeURIComponent(tema.escucha || '')}` }),
+      h('button', { clase: 'mini' + (puesto && puesto.id === tema.id ? ' activo' : ''),
+        onclick: () => fijarTema(tema) }, puesto && puesto.id === tema.id ? 'Puesto' : 'Usar este')));
+  });
+  if (b.temas && !temas.length) {
+    caja.appendChild(h('div', { clase: 'pista' }, b.temas.length
+      ? 'Ninguno de estos permite uso comercial: quita el filtro o prueba otro ánimo.'
+      : 'Ningún tema con eso: prueba otro ánimo.'));
+  }
+  return caja;
+}
+
+/* --------------------------------------------------------- los subtítulos */
+function editorSubtitulos(modo, est, repintar) {
+  const caja = h('div', { clase: 'editor-ajuste' });
+  const borrador = modo.tipo === 'borrador';
+  const op = borrador ? opcionesBorrador(modo.e) : null;
+  if (!borrador && !est.subtitulos) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+    return caja;
+  }
+  const actual = borrador ? (op.subtitulos || {}) : est.subtitulos;
+  const disenos = (est.subtitulos && est.subtitulos.disenos) || [
+    { id: 'dibujo', nombre: 'Dibujo', descripcion: 'trazo grueso, esquinas redondas y relleno opaco' },
+    { id: 'realista', nombre: 'Realista', descripcion: 'línea fina y sobria, para fotografía' },
+    { id: 'editorial', nombre: 'Editorial', descripcion: 'tipografía de revista, con serifa' }];
+  const cambiar = async cambios => {
+    if (borrador) {
+      op.subtitulos = cambios.automatico ? {} : Object.assign({}, op.subtitulos || {}, cambios);
+      if (cambios.color === '') delete op.subtitulos.color;
+      repintar();
+      return;
+    }
+    try {
+      await pedir(`${API.proyecto(modo.pid)}/subtitulos`, { method: 'PUT', cuerpo: cambios });
+      est.subtitulos = await pedir(`${API.proyecto(modo.pid)}/subtitulos`);
+    } catch (e) { toast(e.message, true); }
+    repintar();
   };
-  const subir = async input => {
+  const filaDe = (etiqueta, opciones, valor, clave, ayuda) => h('div', { clase: 'campo' },
+    h('label', {}, etiqueta),
+    h('div', { clase: 'herramientas' }, ...opciones.map(([v, nombre]) => h('button', {
+      clase: 'mini' + (valor !== undefined && String(valor) === String(v) ? ' activo' : ''),
+      onclick: () => cambiar({ [clave]: v }) }, nombre))),
+    ayuda ? h('div', { clase: 'pista' }, ayuda) : null);
+  caja.appendChild(filaDe('Tamaño', TAMANOS_SUB, actual.tam, 'tam'));
+  const elegido = disenos.find(d => d.id === actual.diseno);
+  caja.appendChild(filaDe('Letra y forma', disenos.map(d => [d.id, d.nombre]), actual.diseno, 'diseno',
+    elegido ? `${elegido.nombre}: ${elegido.descripcion}` : disenos.map(d => `${d.nombre}: ${d.descripcion}`).join(' · ')));
+  caja.appendChild(filaDe('Caja detrás del texto', CAJAS_SUB, actual.caja, 'caja'));
+  const color = h('input', { type: 'color', value: actual.color || '#ffffff',
+    onchange: ev => cambiar({ color: ev.target.value }) });
+  caja.appendChild(h('div', { clase: 'campo' }, h('label', {}, 'Color del texto'),
+    h('div', { clase: 'fila' }, color,
+      actual.color ? h('button', { clase: 'mini fantasma', onclick: () => cambiar({ color: '' }) },
+        'Quitar mi color') : h('span', { clase: 'meta' }, 'el del estilo'))));
+  const propios = borrador ? Object.keys(actual).length > 0 : actual.propios;
+  const pie = h('div', { clase: 'fila' });
+  if (propios) {
+    pie.appendChild(h('button', { clase: 'mini', onclick: () => cambiar({ automatico: true }) },
+      'Volver a los del estilo'));
+  }
+  if (!borrador && actual.montado && actual.pendiente) {
+    pie.appendChild(h('button', {
+      clase: 'mini primario',
+      onclick: async () => {
+        try {
+          const r = await pedir(`${API.proyecto(modo.pid)}/subtitulos/aplicar`, { method: 'POST' });
+          avisoDeMontaje(r, 'Subtítulos');
+          est.subtitulos.pendiente = false;
+        } catch (e) { toast(e.message, true); }
+        repintar();
+      },
+    }, 'Aplicar ahora'));
+    pie.appendChild(h('span', { clase: 'meta' },
+      'rehace las capas de texto y vuelve a montar el vídeo: unos minutos, ninguna imagen'));
+  } else if (!borrador) {
+    pie.appendChild(h('span', { clase: 'meta' },
+      actual.montado ? 'aplicados' : 'se aplicarán al montar el vídeo'));
+  } else {
+    pie.appendChild(h('span', { clase: 'meta' }, 'se aplican al crear el vídeo'));
+  }
+  caja.appendChild(pie);
+  return caja;
+}
+
+/* --------------------------------------------------------------- el logo */
+function editorLogo(modo, est, repintar) {
+  const caja = h('div', { clase: 'editor-ajuste' });
+  const borrador = modo.tipo === 'borrador';
+  const op = borrador ? opcionesBorrador(modo.e) : null;
+  const delProyecto = logoDelProyecto(borrador ? modo.estilo : (APP.light.video || {}).estilo);
+  let logo;
+  if (borrador) logo = op.logo === false ? null : (op.logo || (delProyecto && delProyecto.logo) || null);
+  else logo = est.logo;
+  const urlDe = l => (borrador || l.desdeBuzon
+    ? `${BASE}/api/logos/${encodeURIComponent(l.fichero)}`
+    : `${API.proyecto(modo.pid)}/logo/imagen?v=${encodeURIComponent(l.fichero)}`);
+
+  const idEntrada = `logo-${modo.pid || 'borrador'}`;
+  const entrada = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp',
+    clase: 'oculto', id: idEntrada, onchange: ev => subir(ev.target) });
+  caja.appendChild(entrada);
+
+  if (logo) caja.appendChild(vistaPreviaLogo(urlDe(logo), logo));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('label', { clase: 'boton mini', for: idEntrada }, logo ? 'Subir otro logo' : 'Subir un logo'),
+    delProyecto && (!logo || logo.fichero !== delProyecto.logo.fichero)
+      ? h('button', { clase: 'mini', onclick: () => usarDelProyecto() }, `Usar el de «${delProyecto.proyecto}»`) : null,
+    logo ? h('button', { clase: 'mini fantasma peligro', onclick: () => quitar() }, 'Sin logo') : null));
+  if (!logo) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Mejor un PNG con fondo transparente. '
+      + (delProyecto ? '' : 'Si todos los vídeos de un cliente llevan el mismo logo, ponlo en su proyecto (Estilos → el proyecto → Logo) y entrará solo.')));
+    return caja;
+  }
+  caja.appendChild(h('label', {}, 'Dónde'));
+  caja.appendChild(h('div', { clase: 'herramientas' }, ...ESQUINAS_LOGO.map(([id, nombre]) => h('button', {
+    clase: 'mini' + (logo.posicion === id ? ' activo' : ''), onclick: () => colocar({ posicion: id }) }, nombre))));
+  const tam = Math.round((logo.tamano || 0.12) * 100);
+  caja.appendChild(h('label', {}, `Tamaño: ${tam} % del ancho del vídeo`));
+  caja.appendChild(h('input', { type: 'range', min: 4, max: 40, step: 1, value: tam,
+    onchange: ev => colocar({ tamano: Number(ev.target.value) / 100 }) }));
+  const opa = Math.round((logo.opacidad || 0.9) * 100);
+  caja.appendChild(h('label', {}, `Opacidad: ${opa} %`));
+  caja.appendChild(h('input', { type: 'range', min: 10, max: 100, step: 5, value: opa,
+    onchange: ev => colocar({ opacidad: Number(ev.target.value) / 100 }) }));
+  caja.appendChild(h('div', { clase: 'pista' }, borrador ? 'Se pone al crear el vídeo.'
+    : 'Ponerlo, moverlo o quitarlo solo vuelve a montar el vídeo.'));
+  return caja;
+
+  async function subir(input) {
     const fichero = (input.files || [])[0];
     input.value = '';
     if (!fichero) return;
     const cuerpo = new FormData();
     cuerpo.append('logo', fichero);
     try {
-      const r = await pedir(`${API.proyecto(v.pid)}/logo`, { method: 'POST', cuerpo });
-      trabajoDeMontaje(r, 'Logo');
+      if (borrador) {
+        const r = await pedir(`${BASE}/api/logos`, { method: 'POST', cuerpo });
+        op.logo = Object.assign({ posicion: 'arriba_derecha', tamano: 0.12, opacidad: 0.9 },
+          op.logo || {}, { fichero: r.nombre });
+      } else {
+        const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'POST', cuerpo });
+        est.logo = r.logo;
+        avisoDeMontaje(r, 'Logo');
+      }
     } catch (e) { toast(e.message, true); }
-    cargar();
-  };
-  const colocar = async cambios => {
+    repintar();
+  }
+  async function usarDelProyecto() {
+    if (borrador) { op.logo = null; delete op.logo; repintar(); return; }
     try {
-      const r = await pedir(`${API.proyecto(v.pid)}/logo`, { method: 'PUT', cuerpo: cambios });
-      if (r.trabajo_id || r.montado !== undefined) trabajoDeMontaje(r, 'Logo');
+      const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'PUT', cuerpo: { usar: delProyecto.logo } });
+      est.logo = r.logo;
+      avisoDeMontaje(r, 'Logo');
     } catch (e) { toast(e.message, true); }
-    cargar();
-  };
-  pintar();
-  if (estado.abierto) cargar();
-  return detalles;
+    repintar();
+  }
+  async function quitar() {
+    if (borrador) { op.logo = false; repintar(); return; }
+    try {
+      const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'PUT', cuerpo: { quitar: true } });
+      est.logo = null;
+      avisoDeMontaje(r, 'Logo quitado');
+    } catch (e) { toast(e.message, true); }
+    repintar();
+  }
+  async function colocar(cambios) {
+    if (borrador) {
+      op.logo = Object.assign({}, logo, cambios);
+      repintar();
+      return;
+    }
+    try {
+      const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'PUT', cuerpo: cambios });
+      est.logo = r.logo || est.logo;
+      if (r.trabajo_id || r.montado !== undefined) avisoDeMontaje(r, 'Logo');
+    } catch (e) { toast(e.message, true); }
+    repintar();
+  }
+}
+
+/* Un cuadro 16:9 con el logo en su esquina y a su tamaño: lo que va a salir. */
+function vistaPreviaLogo(url, logo) {
+  const img = h('img', { src: url, alt: 'logo', clase: `logo-en-cuadro ${logo.posicion || 'arriba_derecha'}` });
+  img.style.width = `${Math.round((logo.tamano || 0.12) * 100)}%`;
+  img.style.opacity = String(logo.opacidad || 0.9);
+  return h('div', { clase: 'cuadro-logo' }, img, h('span', { clase: 'meta' }, 'así queda en el vídeo'));
 }
 
 /* TRAER LOS CAMBIOS DEL ESTILO. Un vídeo se queda con la copia del estilo del

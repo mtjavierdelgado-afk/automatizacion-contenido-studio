@@ -238,6 +238,154 @@ Fijate en, y contesta a todo lo que puedas afirmar mirando:
 """ + CONTRATO_JSON_GUIA
 
 
+# ------------------------------------------------- la guia de FOTO (Foto A)
+#
+# Un estilo en modo foto (`estilo.modo == "foto"`) no se describe con trazo,
+# relleno y dedos: se describe con camara, lente, luz, color, grano y como se ve
+# la gente real. Si se le pasara el contrato de dibujo, el modelo rellenaria
+# «grosor de contorno» de una foto y esa frase iria dentro de cada plano.
+#
+# Por eso un SEGUNDO CONTRATO, con sus claves: las que comparte con el de dibujo
+# (guia, paleta, luz, composicion, acabado, evitar, resumen_es) se llaman igual
+# y `p6_assets.guia_escrita` las lee igual; las propias (camara, color, gente,
+# entorno) las lee cuando estan. El de dibujo no se toca: es el que escribe las
+# guias de todos los estilos que ya existen.
+
+#: Las claves de una guia de foto. Las lee `_ficha_de_guia`.
+CLAVES_GUIA_FOTO = ("camara", "luz", "color", "gente", "entorno",
+                    "composicion", "acabado", "evitar")
+
+CONTRATO_JSON_GUIA_FOTO = """\
+DEVUELVE SOLO ESTE JSON, sin nada alrededor
+{{"guia": "el parrafo que se pega DENTRO del prompt de generacion de imagen. En
+INGLES, escrito como instrucciones de fotografia en imperativo, no como analisis.
+Sin mencionar las imagenes, sin la palabra 'reference', sin nombres de marcas,
+fotografos ni camaras concretas. Entre 220 y 380 palabras: tiene que caber que
+clase de foto es (candida, de evento, editorial...), el momento, la gente, los
+planos de profundidad, la camara, la luz, el color y el acabado. Denso, sin
+relleno y sin adjetivos vacios.",
+  "paleta": ["#rrggbb", "... de ocho a doce, dominantes primero"],
+  "camara": "una o dos frases en INGLES: altura de camara, focal en mm, apertura
+(f/), profundidad de campo, si hay distorsion o no, y si el horizonte va recto",
+  "luz": "una o dos frases en INGLES: de donde viene la luz, si es natural,
+artificial o mezclada, como son las sombras, para que se expone y si alguna
+fuente (una pantalla, una ventana) destaca",
+  "color": "una o dos frases en INGLES: balance de blancos (en kelvin si se puede
+decir), saturacion, tonos de piel, que pone los acentos de color y que es lo mas
+saturado del cuadro",
+  "gente": "una o dos frases en INGLES sobre como es y como se ve la gente: edades,
+ropa, expresiones, lenguaje corporal, piel con textura real, y MANOS reales de
+cinco dedos sosteniendo bien lo que sostengan",
+  "entorno": "una o dos frases en INGLES sobre los lugares: que clase de sitios,
+materiales, mobiliario y decoracion, y su nivel de cuidado",
+  "composicion": "una frase en INGLES sobre encuadre, planos de profundidad y que
+tiene que leerse siempre en el cuadro",
+  "acabado": "una frase en INGLES sobre grano, vineteado, nitidez y movimiento",
+  "evitar": "de tres a seis frases en INGLES con lo que NO debe aparecer nunca, en
+negativo y concreto, empezando por lo que este generador pone por defecto y que
+en una foto realista la delata: aspecto CGI o render, piel de plastico, HDR
+brillante, foto posada mirando a camara, dedos de mas, objetos flotando, logos o
+textos de terceros legibles. Cada frase tiene que salir de algo que se vea o se
+pida aqui, no una lista generica",
+  "resumen_es": "una linea en CASTELLANO que describa este estilo para que una
+persona lo reconozca en un desplegable, sin tecnicismos"}}
+"""
+
+INSTRUCCION_GUIA_FOTO = """\
+Eres director de fotografia. Te doy fotos de referencia y tienes que escribir la
+guia de estilo que permita generar FOTOGRAFIAS NUEVAS que parezcan tomadas por el
+mismo fotografo, con la misma camara y la misma luz.
+
+Abre y mira estas imagenes (usa la herramienta de lectura de ficheros):
+{imagenes}
+
+Estan en la carpeta {carpeta}.
+
+QUE BUSCAR
+Lo que TODAS tienen en comun, que es lo unico que define el estilo. Lo que solo
+aparece en una es contenido de esa foto, no estilo, y no debe entrar en la guia.
+No describas lo que pasa en las fotos: describe COMO estan hechas.
+
+Escribe como quien redacta el briefing con el que otro fotografo tiene que hacer
+una foto que encaje en la misma serie sin que se note el cambio de mano. Cada
+frase tiene que ser accionable: "35 mm lens at f/2.8, camera at standing eye
+level" sirve; "beautiful natural look" no dice nada y no debe aparecer.
+
+COMO SE MIRA
+Esta guia la va a leer un generador de imagenes que, en todo lo que tu no fijes,
+va a poner lo que pone por defecto: piel de plastico, luz de estudio perfecta,
+gente posando y sonriendo a camara, HDR brillante, aspecto de render. O sea que
+CADA HUECO QUE DEJES sale como no toca. Por eso:
+
+- CUENTA. Numeros, no adjetivos: focal en mm, apertura, temperatura de color en
+  kelvin, altura de camara. Un numero se puede obedecer; "natural" no.
+- Di lo que NO hay tanto como lo que hay: que nadie mire a camara, que no haya
+  flash directo, que no haya filtros, son decisiones igual de fuertes.
+- Describe lo que VES en ESTAS fotos, no lo que suele llevar un estilo que se
+  parezca a este. Si algo no se ve en ninguna, dilo con esas palabras en vez de
+  rellenarlo con lo probable.
+- No escatimes. Esto se escribe UNA vez por estilo y lo reciben todas las
+  imagenes que se generen.
+
+Fijate en, y contesta a todo lo que puedas afirmar mirando:
+- que clase de foto es: candida o posada, de evento, editorial, documental.
+- la camara: altura, focal aproximada, apertura y profundidad de campo,
+  distorsion, inclinacion.
+- la luz: natural, artificial o mezclada; dura o suave; de donde viene; que
+  fuente destaca; como caen las sombras; para que esta expuesta.
+- el color: balance de blancos, saturacion, tonos de piel, de donde salen los
+  acentos de color.
+- la paleta: entre ocho y doce codigos hexadecimales aproximados, ORDENADOS del
+  que mas superficie ocupa al que menos.
+- la gente: edades, ropa, expresiones, si posan o no, como se ven la piel y las
+  MANOS.
+- los lugares: que clase de sitios, materiales, mobiliario, decoracion.
+- la composicion: planos de profundidad, donde va el sujeto, cuanto aire.
+- el acabado: grano, vineteado, nitidez, movimiento.
+
+""" + CONTRATO_JSON_GUIA_FOTO
+
+INSTRUCCION_GUIA_DESCRIPCION_FOTO = """\
+Eres director de fotografia. Te doy en palabras el estilo de fotografia que
+quiere un canal y tienes que escribir la guia de estilo que permita generar sus
+fotos.
+
+LO QUE HA PEDIDO EL CANAL, entre comillas y tal cual lo escribio:
+"{descripcion}"
+
+QUE HACER CON ESO
+Convertirlo en decisiones de fotografia. Lo que ha escrito es una intencion --a
+menudo tres o cuatro palabras-- y tu trabajo es concretarla hasta que se pueda
+obedecer: donde el ha dicho "foto de evento natural" tu tienes que decir que
+focal, que apertura, a que altura va la camara y que luz hay.
+
+Todo lo que el no haya dicho lo eliges TU, de forma coherente con lo que si ha
+dicho. No dejes huecos: esta guia va a ser la unica descripcion de las fotos del
+canal, y lo que no fije lo pondra el generador por su cuenta (piel de plastico,
+gente posando, aspecto de render).
+
+- CUENTA. Numeros, no adjetivos: focal en mm, apertura, kelvin, altura de camara.
+- Di lo que NO hay tanto como lo que hay.
+- No nombres marcas, fotografos, camaras ni obras concretas, ni siquiera si el
+  canal las ha nombrado: describe la FOTO que tendrian, con sus numeros.
+- No te salgas de lo pedido: lo que el ha fijado manda sobre lo que a ti te
+  parezca que queda mejor.
+
+Decide, y escribe con numeros: la clase de foto, la camara, la luz, el color y la
+paleta (entre ocho y doce colores), la gente y sus manos, los lugares, la
+composicion y el acabado.
+
+""" + CONTRATO_JSON_GUIA_FOTO
+
+
+def instruccion_de_guia(modo="ilustracion", con_imagenes=True):
+    """La plantilla de instruccion de ese modo. -> str (con huecos de format)"""
+    if modo == "foto":
+        return INSTRUCCION_GUIA_FOTO if con_imagenes \
+            else INSTRUCCION_GUIA_DESCRIPCION_FOTO
+    return INSTRUCCION_GUIA if con_imagenes else INSTRUCCION_GUIA_DESCRIPCION
+
+
 def _llamar_claude(instruccion, modelo, esfuerzo, cwd, avance=None):
     """Se llama asi para que el medidor de coste pueda engancharla por nombre."""
     return cli_claude.ejecutar(
@@ -249,7 +397,8 @@ def _llamar_claude(instruccion, modelo, esfuerzo, cwd, avance=None):
 
 
 def generar_guia(proyecto, rutas, modelo=None, esfuerzo=None, avisar=None,
-                 proyecto_id=None, peticion="", indicaciones=""):
+                 proyecto_id=None, peticion="", indicaciones="",
+                 modo="ilustracion"):
     """Escribe la guia de estilo mirando los fotogramas elegidos.
 
     Por que ademas de adjuntar las imagenes
@@ -272,6 +421,10 @@ def generar_guia(proyecto, rutas, modelo=None, esfuerzo=None, avisar=None,
     El modo light lo pasa desde `_correr_light_guia` --es la forma normal de
     pedir un estilo, con una URL y una frase-- y como la firma no lo recibia el
     paso moria con un TypeError antes de llamar a nadie.
+
+    `modo` es el modo de imagen del estilo (`p6_assets.modo_de`): con "foto"
+    se escribe con el contrato de foto (`CONTRATO_JSON_GUIA_FOTO`); con
+    cualquier otro valor, con el de dibujo de siempre.
     """
     rutas = validar_seleccion(rutas)
     if len(rutas) < 3:
@@ -291,7 +444,7 @@ def generar_guia(proyecto, rutas, modelo=None, esfuerzo=None, avisar=None,
     ajuste = {"modelo": modelo, "esfuerzo": esfuerzo}
 
     carpeta = os.path.dirname(rutas[0])
-    instruccion = INSTRUCCION_GUIA.format(
+    instruccion = instruccion_de_guia(modo).format(
         imagenes="\n".join(f"  - {r}" for r in rutas), carpeta=carpeta)
     # Lo que escribio al pedir el canal, si escribio algo. MISMO bloque que en
     # `guia_de_descripcion`: los dos caminos escriben la misma guia, y dos
@@ -336,10 +489,10 @@ def generar_guia(proyecto, rutas, modelo=None, esfuerzo=None, avisar=None,
                                  "palabras": len(guia.split()),
                                  "tokens_salida": comun.tokens_de_cli(sobre).get("salida")})
 
-    return _ficha_de_guia(datos, guia, rutas, ajuste, segundos)
+    return _ficha_de_guia(datos, guia, rutas, ajuste, segundos, modo=modo)
 
 
-def _ficha_de_guia(datos, guia, rutas, ajuste, segundos):
+def _ficha_de_guia(datos, guia, rutas, ajuste, segundos, modo="ilustracion"):
     """La guia tal y como la guardan los params, venga de donde venga.
 
     La escriben DOS caminos --mirando fotogramas o leyendo una descripcion-- y
@@ -348,6 +501,24 @@ def _ficha_de_guia(datos, guia, rutas, ajuste, segundos):
     escritos a mano, el camino nuevo se olvidaria un campo y lo que fallaria es
     una imagen, tres pasos mas abajo.
     """
+    if modo == "foto":
+        # LA FICHA DE UNA GUIA DE FOTO: sus claves y ninguna de dibujo (un
+        # «trazo» vacio no molesta, pero una clave que nadie escribe es una
+        # promesa que la pantalla podria ensenar). `modo` va dentro para que
+        # la guia diga de que contrato salio: la lee quien quiera avisar de una
+        # guia de dibujo puesta en un estilo de foto, o al reves.
+        ficha = {"guia": guia, "modo": "foto",
+                 "paleta": [str(c) for c in (datos.get("paleta") or [])][:8]}
+        for clave in CLAVES_GUIA_FOTO:
+            ficha[clave] = str(datos.get(clave) or "").strip()
+        ficha.update({
+            "resumen_es": " ".join(str(datos.get("resumen_es") or "").split()),
+            "fotogramas": [os.path.basename(r) for r in rutas],
+            "ajuste": ajuste,
+            "segundos": round(segundos, 1),
+            "palabras": len(guia.split()),
+        })
+        return ficha
     # Los campos nuevos (luz, composicion, acabado, resumen_es) salen vacios en
     # una guia escrita antes de que existieran, y todo lo que los consume los
     # trata como opcionales: una guia vieja sigue valiendo exactamente igual.
@@ -505,7 +676,8 @@ Decide, y escribe con numeros, todo esto:
 
 
 def guia_de_descripcion(proyecto, descripcion, modelo=None, esfuerzo=None,
-                        avisar=None, proyecto_id=None, peticion="", rutas=None):
+                        avisar=None, proyecto_id=None, peticion="", rutas=None,
+                        modo="ilustracion"):
     """Escribe la guia de estilo sin un video delante. -> ficha de guia
 
     Mismo contrato de salida que `generar_guia`, y a proposito: lo que cambia es
@@ -549,12 +721,13 @@ def guia_de_descripcion(proyecto, descripcion, modelo=None, esfuerzo=None,
         # La lista se arma fuera del format(): un join con salto de linea dentro
         # de la llamada se lee fatal y ya se colo roto una vez.
         lista = "\n".join(f"  - {r}" for r in rutas)
-        instruccion = INSTRUCCION_GUIA.format(
+        instruccion = instruccion_de_guia(modo).format(
             imagenes=lista, carpeta=os.path.dirname(rutas[0]))
         if descripcion:
             instruccion += BLOQUE_INDICACIONES.format(texto=descripcion)
     else:
-        instruccion = INSTRUCCION_GUIA_DESCRIPCION.format(descripcion=descripcion)
+        instruccion = instruccion_de_guia(modo, con_imagenes=False).format(
+            descripcion=descripcion)
     instruccion += comun.bloque_correccion(peticion, "la guia de estilo")
     carpeta = os.path.dirname(rutas[0]) if rutas else raiz(proyecto)
     os.makedirs(carpeta, exist_ok=True)
@@ -599,7 +772,8 @@ def guia_de_descripcion(proyecto, descripcion, modelo=None, esfuerzo=None,
                                  "tokens_salida":
                                      comun.tokens_de_cli(sobre).get("salida")})
 
-    ficha_guia = _ficha_de_guia(datos, guia, rutas, ajuste, segundos)
+    ficha_guia = _ficha_de_guia(datos, guia, rutas, ajuste, segundos,
+                                modo=modo)
     ficha_guia["descripcion"] = descripcion
     return ficha_guia
 

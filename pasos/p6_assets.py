@@ -1923,7 +1923,7 @@ def _prompt_visual(escena, beat, catalogo, modo="ilustracion"):
         # otro camino. Si la trae, aqui no se toca nada: dos expresiones en el
         # mismo prompt seria pedir dos caras.
         if escena.get("personajes") and not _dice_la_cara(redactado):
-            redactado = _unir(redactado, _expresion(_tono_de(escena, beat)))
+            redactado = _unir(redactado, _expresion(_tono_de(escena, beat), modo))
         base = _con_narracion(redactado, escena)
         return (f"{base} SHOT TYPE, and this is not optional: "
                 f"{escena['encuadre']}." if escena.get("encuadre") else base)
@@ -1967,7 +1967,7 @@ def _prompt_visual(escena, beat, catalogo, modo="ilustracion"):
         if escena.get("personajes"):
             partes.append("with " + _citar_reparto(escena["personajes"], catalogo)
                 + REPARTO_ABSTRACTO[modo])
-            partes.append(_expresion(_tono_de(escena, beat)))
+            partes.append(_expresion(_tono_de(escena, beat), modo))
         base = _con_narracion(
             _con_direccion(", ".join(x for x in partes if x), escena), escena)
         return (f"{base} SHOT TYPE, and this is not optional: "
@@ -2000,7 +2000,7 @@ def _prompt_visual(escena, beat, catalogo, modo="ilustracion"):
         partes.append(beat["accion"])
     if escena.get("personajes") and not otro_sitio:
         partes.append("with " + _citar_reparto(escena["personajes"], catalogo))
-        partes.append(_expresion(_tono_de(escena, beat)))
+        partes.append(_expresion(_tono_de(escena, beat), modo))
     if escena.get("primer_termino"):
         # solo lo llevan los planos que han tenido que repetir camara: cambiar el
         # sujeto en primer termino es lo que hace que no se lean como el mismo
@@ -2044,9 +2044,22 @@ TONOS = {
 }
 
 
-def _expresion(tono):
+#: Las frases de TONOS que en una foto se dicen de otra manera (Etapa Foto A).
+#: Solo la alegre: es la unica que habla de «dibujar».
+TONOS_FOTO = {
+    "alegre": ("everyone is visibly happy: open relaxed smiles with the mouth "
+               "clearly curved up, raised eyebrows and bright eyes. The "
+               "cheerful expression is REQUIRED in this shot, do not show them "
+               "neutral"),
+}
+
+
+def _expresion(tono, modo="ilustracion"):
     """Frase de expresion facial del tono, con el neutro como valor seguro."""
-    return TONOS.get(str(tono or "").strip().lower(), TONOS["neutro"])
+    clave = str(tono or "").strip().lower()
+    if modo == "foto" and clave in TONOS_FOTO:
+        return TONOS_FOTO[clave]
+    return TONOS.get(clave, TONOS["neutro"])
 
 
 def _citar_reparto(personajes, catalogo):
@@ -2394,7 +2407,16 @@ def frase_de_referencia(indice, ref, modo="ilustracion"):
     foto = modo == "foto"
     if ref["papel"] in ("estilo", "lamina"):
         return None
-    if ref["papel"] == "reparto" and ref.get("de_nota"):
+    if ref["papel"] == "reparto" and ref.get("de_nota") and foto:
+        lineas.append(f"Reference image {indice} is the cast sheet for "
+                      f"'{ref['nombre']}', a person the reviewer's note at "
+                      f"the end of this prompt names. The note decides who is "
+                      f"in this shot: if it says {ref['nombre']} appears, or "
+                      f"that someone must be replaced by {ref['nombre']}, show "
+                      f"{ref['nombre']} as in this sheet -- same face, hair, "
+                      f"build and clothes -- with the same authority as any "
+                      f"cast sheet, and do not keep the person it replaces.")
+    elif ref["papel"] == "reparto" and ref.get("de_nota"):
         lineas.append(f"Reference image {indice} is the cast sheet for "
                       f"'{ref['nombre']}', a character the reviewer's note at "
                       f"the end of this prompt names. The note decides who is "
@@ -2403,6 +2425,21 @@ def frase_de_referencia(indice, ref, modo="ilustracion"):
                       f"{ref['nombre']} from this sheet -- same face, hair, "
                       f"build and clothes -- with the same authority as any "
                       f"cast sheet, and do not keep the character it replaces.")
+    elif ref["papel"] == "reparto" and foto:
+        lineas.append(f"Reference image {indice} is the cast sheet for "
+                      f"'{ref['nombre']}': show those exact people. Keep "
+                      f"their faces, hair, skin tone, build and clothes "
+                      f"exactly as in that sheet, and do not change them. The "
+                      f"cast sheet decides what they look like: where the "
+                      f"scene description below disagrees with it, the sheet "
+                      f"wins, and where the people in the style references "
+                      f"dress or look differently, the cast sheet still wins "
+                      f"for this person's identity and clothing."
+                      + (" Their faces are covered in that sheet and that is "
+                         "deliberate: keep every covering on, with its exact "
+                         "shape, markings and colours, and never show the "
+                         "face underneath."
+                         if ref.get("tapada") else ""))
     elif ref["papel"] == "reparto":
         # Con negativo y con prioridad, como las demas. Era el UNICO bloque de
         # referencia que decia solo que copiar y no que NO hacer: la lamina
@@ -2470,8 +2507,10 @@ def frase_de_referencia(indice, ref, modo="ilustracion"):
                   "frame, what they are doing and what the shot is about are "
                   "whatever that description says, even when none of it appears "
                   "in this image. Do NOT reuse its composition, framing, "
-                  "staging or character poses, and never redraw it with a small "
-                  "change.")
+                + ("staging or poses, and never reproduce it with a small "
+                   "change." if foto else
+                   "staging or character poses, and never redraw it with a small "
+                   "change."))
         # No hay «else». Una referencia de continuidad de OTRO sitio ya no se
         # adjunta (ver _referencias_escena): decirle con palabras que no
         # copie el contenido de una imagen no basta, y el precio de que no
@@ -2552,6 +2591,17 @@ def frase_de_referencia(indice, ref, modo="ilustracion"):
                    "rendering -- it is a photo and this must stay flat vector "
                    "cartoon exactly as described above -- and ignore its "
                    "lighting, texture, depth of field, grain and grading."))
+    elif ref["papel"] == "rechazada" and foto:
+        lineas.append(
+            f"Reference image {indice} is THE IMAGE THAT WAS REJECTED: it is "
+            f"this very shot as it was made last time. Recreate it as it is. "
+            f"Keep the same composition, the same framing, the same camera "
+            f"angle, the same people in the same places and poses, the same "
+            f"background, the same light and the same colours. Change ONLY "
+            f"what the reviewer's note at the end asks you to change; "
+            f"everything the note does not mention must come out identical. "
+            f"This is a correction of that photograph, not a new take on the "
+            f"shot.")
     elif ref["papel"] == "rechazada":
         # LA IMAGEN QUE SE RECHAZO, y va con la instruccion CONTRARIA a la
         # de continuidad: de esa no se copia el contenido, y de esta se copia
@@ -2568,6 +2618,14 @@ def frase_de_referencia(indice, ref, modo="ilustracion"):
             f"reviewer's note at the end asks you to change; everything the "
             f"note does not mention must come out identical. This is a "
             f"correction of that picture, not a new take on the shot.")
+    elif ref["papel"] == "adjunta" and foto:
+        lineas.append(
+            f"Reference image {indice} was attached by the reviewer together "
+            f"with the note at the end of this prompt. Use it ONLY for what "
+            f"that note asks of it. Do not copy its framing, its style, its "
+            f"look or anything in it that the note does not name, and never "
+            f"reproduce arrows, circles, handwriting or any other mark added "
+            f"on top of it: those are annotations, not part of the picture.")
     elif ref["papel"] == "adjunta":
         # Lo que arrastro quien escribio la nota. Con su negativo, como
         # todas: sin el, una foto suelta al final del prompt se lee como
@@ -2609,6 +2667,20 @@ def frase_de_referencia(indice, ref, modo="ilustracion"):
 #: La salida cuando no caben es la que ya funciona y esta en el mismo video: el
 #: primer plano dibuja su titular como una banda de garabatos ondulados y se lee
 #: como un periodico sin que haya una sola palabra.
+#: La version de FOTO (Etapa Foto A): las mismas tres cosas --solo lo pedido,
+#: dos como mucho, grandes-- sin «dibujar». En una foto, una superficie sin
+#: texto se ve en blanco o desenfocada, no con garabatos.
+ULTIMA_PALABRA_ROTULOS_FOTO = (
+    "LETTERING, AND THIS IS THE LAST WORD ON IT: the only words in the image "
+    "are the ones this prompt asked for in quotes, and nothing else. AT MOST "
+    "TWO pieces of lettering in the whole image -- one is better, none is fine "
+    "-- and every one of them large enough to read at a glance, occupying a "
+    "real part of the frame. Never a wall or a grid of small captions. Every "
+    "other surface that could carry text -- a page, a screen, a sign, a cover, "
+    "a label, a poster, a box -- shows NO legible words: it is blank, out of "
+    "focus or turned away. Never invent a headline, a title, a caption or a "
+    "label, not even a plausible one.")
+
 ULTIMA_PALABRA_ROTULOS = (
     "LETTERING, AND THIS IS THE LAST WORD ON IT: draw only the words this "
     "prompt asked for in quotes, and nothing else. AT MOST TWO pieces of "
@@ -2621,7 +2693,7 @@ ULTIMA_PALABRA_ROTULOS = (
     "caption or a label, not even a plausible one.")
 
 
-def _ultima_palabra_idioma(idioma):
+def _ultima_palabra_idioma(idioma, foto=False):
     """Y EN QUE IDIOMA, dicho en la ultima linea. -> str o ""
 
     La politica ya esta arriba, en la regla `texto-dibujado-en-el-idioma-del-
@@ -2647,6 +2719,16 @@ def _ultima_palabra_idioma(idioma):
     nombre = _nombre_en(idioma)
     if not nombre:
         return ""
+    if foto:
+        # la misma regla sin «dibujar» (Etapa Foto A)
+        return (f"AND IN WHICH LANGUAGE: every word in the image is written "
+                f"in {nombre}, correctly spelled, accents and diacritics "
+                f"included -- even when the scene description above quoted it "
+                f"in another language. If a quoted piece of lettering is not "
+                f"in {nombre}, write it in {nombre}. The only exceptions are "
+                f"real names that keep their real-world form: brands, logos, "
+                f"acronyms, institutions, place names and titles of real "
+                f"works.")
     return (f"AND IN WHICH LANGUAGE: every word you draw is written in "
             f"{nombre}, correctly spelled, accents and diacritics included -- "
             f"even when the scene description above quoted it in another "
@@ -2806,18 +2888,22 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
         descrito = " ".join(str(ficha.get("descripcion") or "").split())
         if descrito:
             lineas.append(f"No cast sheet is attached for '{quien}': "
-                          f"draw them from this description -- {descrito}")
+                          + ("show them as this description says -- "
+                             if foto else "draw them from this description -- ")
+                          + descrito)
     if escena.get("prompt"):
         lineas.append(f"Scene: {escena['prompt']}.")
     if escena.get("luz"):
         lineas.append(f"Time of day and lighting: {escena['luz']}. This is "
                       f"mandatory and must not drift from the previous shot.")
-    lineas.append(ULTIMA_PALABRA_ROTULOS)
-    cierre_idioma = _ultima_palabra_idioma(idioma)
+    lineas.append(ULTIMA_PALABRA_ROTULOS_FOTO if foto else ULTIMA_PALABRA_ROTULOS)
+    cierre_idioma = (_ultima_palabra_idioma(idioma, foto=True) if foto
+                     else _ultima_palabra_idioma(idioma))
     if cierre_idioma:
         lineas.append(cierre_idioma)
     if feedback:
-        lineas.append(_bloque_feedback(feedback))
+        lineas.append(_bloque_feedback(feedback, foto=True) if foto
+                      else _bloque_feedback(feedback))
     # Aqui iba «No text, no letters, no numbers, no watermarks anywhere», y era
     # la ultima linea del prompt: la que mas pesa. Lo que se puede escribir
     # dentro del dibujo lo dice ahora la regla `texto-en-imagen-permitido-pero-
@@ -2826,7 +2912,7 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
     return " ".join(lineas)
 
 
-def _bloque_feedback(feedback):
+def _bloque_feedback(feedback, foto=False):
     """La nota del revisor, escrita para que GANE. -> str
 
     QUE PASABA, Y ESTA MEDIDO (PENDIENTE 36). La nota iba al final del prompt
@@ -2879,8 +2965,10 @@ def _bloque_feedback(feedback):
             "the HIGHEST PRIORITY instruction in this entire prompt and it "
             "OVERRIDES anything above it that disagrees with it, including the "
             "subject, the objects on screen, the composition and the shot type: "
-            "where they disagree, draw what the note says and drop what the "
-            "description said. Whatever the note does not mention stays exactly "
+            + ("where they disagree, show what the note says and drop what the "
+               if foto else
+               "where they disagree, draw what the note says and drop what the ")
+            + "description said. Whatever the note does not mention stays exactly "
             f"as described above. The reviewer's note is: {feedback}.")
 
 
@@ -3025,7 +3113,26 @@ def _prompt_reparto(ficha, estilo):
     # que cuando la mascara se pide expresamente, la clausula no se calla: sigue
     # exigiendo lo mismo (algo identico y copiable donde va la cara) con la
     # mascara como sujeto. Ver `tapa_la_cara` para el porque entero.
-    if tapa_la_cara(ficha.get("descripcion"), ficha.get("feedback")):
+    if foto and tapa_la_cara(ficha.get("descripcion"), ficha.get("feedback")):
+        lineas.append("These people wear something over the face on purpose, "
+                      "and that is correct: the covering IS the face of each "
+                      "person here. Keep it exactly the same in both rows -- "
+                      "same shape, same proportions, same markings, same colours "
+                      "-- and clearly different from one person to the next, so "
+                      "that every later shot can copy it and get the same person "
+                      "back. Never leave the covered area vague, shadowed, "
+                      "blurred or blown out by glare: whatever is there must be "
+                      "sharp, in full detail and recognisable at a glance. Where "
+                      "a face IS visible, show eyes, eyebrows and mouth clearly, "
+                      "with a neutral and serious expression.")
+    elif foto:
+        lineas.append("Every face must be fully visible and unobstructed: eyes, "
+                      "eyebrows and mouth clearly shown, with a neutral and "
+                      "serious expression. Never cover a face with glare, "
+                      "reflection, shadow, hair, screens, masks or sunglasses. "
+                      "The face is what this sheet exists to fix: a person shown "
+                      "without one cannot be kept consistent.")
+    elif tapa_la_cara(ficha.get("descripcion"), ficha.get("feedback")):
         lineas.append("These characters wear something over the face on purpose, "
                       "and that is correct: the covering IS the face of each "
                       "character here. Draw it exactly the same in both rows -- "

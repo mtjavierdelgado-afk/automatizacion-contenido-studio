@@ -33,6 +33,77 @@ antes que lo que la justifica no es un bug.
 
 ---
 
+## Varias conversaciones trabajan aquí a la vez: ramas y coordinación
+
+Este repo lo cambian VARIAS conversaciones en paralelo, cada una con una fase
+distinta, y ninguna ve lo que hacen las demás. El único sitio que leen todas es
+este fichero. Si vienes a trabajar aquí, haz `git pull` y lee esta sección
+antes de tocar nada.
+
+### Los nombres, para no confundir fases
+
+| Nombre | Qué es |
+|---|---|
+| **V2.0 fase 1 a 5** | las fases de la V2.0 del Studio. Fase 3: vídeos sin voz (otro reloj para cronometrar). Fase 5: pasar a vídeo y formatos mixtos |
+| **Etapa Foto A, B, C** | el modo foto realista. A: `estilo.modo`, cabecera del prompt, guía de foto, reglas de foto y escalera de encuadres para foto. B: el catálogo de productos como referencia obligatoria. C: presets de marca, evento y servicio |
+| **Ruta fase 0, 1, 2…** | el plan de marketing de EstadoPlay. No es código; no la confundas con las de arriba |
+
+### Cada fase en su rama; `main` es lo que está en el servidor
+
+El servidor se actualiza desde `main` (`asvs actualizar`), así que `main` tiene
+que estar siempre listo para servirse. Por eso:
+
+1. **Cada fase o etapa trabaja en su propia rama**: `v2-fase-3`, `v2-fase-4`,
+   `v2-fase-5`, `etapa-foto-a`, `etapa-foto-b`, `etapa-foto-c`. Se crea desde el
+   `main` del día: `git fetch origin main && git switch -c <rama> origin/main`.
+2. **A `main` solo llegan dos cosas**: una rama terminada y probada, o un
+   arreglo urgente y pequeño (un fallo que tiene el servidor caído o roto). Todo
+   lo demás va en su rama.
+3. **Antes de unir una rama a `main`, se pone al día**: `git fetch origin main &&
+   git merge origin/main`, se resuelven los choques, `bash pruebas.sh` en verde,
+   y entonces se une (pull request en GitHub, o merge si el dueño lo pide).
+4. **Probar una rama en el servidor sin tocar `main`**: en la consola del VPS,
+   `ASVS_RAMA=<rama> asvs actualizar`. Para volver: `asvs actualizar` a secas
+   (la rama no se guarda, así que vuelve sola a `main`). No toca vídeos, banco
+   ni claves.
+5. **`docs/NOVEDADES.md` se escribe en la rama** y, al unir, las entradas de las
+   dos ramas se SUMAN: un choque ahí se resuelve conservando las dos, nunca
+   eligiendo una.
+
+### Ficheros reservados mientras una rama esté abierta
+
+Si tu fase necesita tocar un fichero reservado por otra rama abierta, no lo
+cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
+
+| Rama abierta | Ficheros reservados | Desde |
+|---|---|---|
+| `etapa-foto-a` | `pasos/p6_assets.py`, `pasos/encuadres.py`, `pasos/estilo.py`, `pasos/moodboard.py`, y el fichero nuevo de reglas de foto | 09-10-2026 |
+
+Quien abre una rama la apunta aquí; quien la une a `main`, la quita.
+
+### El orden acordado
+
+- **La Etapa Foto A se une a `main` ANTES de empezar la V2.0 fase 5.** La fase 5
+  genera vídeo a partir de las imágenes de los planos y comparte
+  `p6_assets.py`; construida sobre el prompt de ilustración, habría que
+  recalibrarla.
+- La Etapa Foto B se recomienda también antes de la fase 5; la C va después.
+- La V2.0 fase 3 puede ir en paralelo a la Etapa Foto A: no comparten ficheros.
+
+### Lo que la Etapa Foto A promete a las demás fases
+
+- `estilo.modo` vale `"ilustracion"` o `"foto"`. **Si no está guardado se lee
+  como `"ilustracion"` y el prompt sale idéntico al de hoy**: no escribas ese
+  param por defecto en ningún sitio (regla 1 de arriba).
+- La escalera de encuadres actual NO se toca; el modo foto tendrá la suya.
+- Las reglas de foto van en un fichero aparte de `motores/reglas/reglas.json`,
+  porque `asvs actualizar` no sobrescribe `reglas.json` y no llegarían al
+  servidor.
+- La fase 5 debe respetar `estilo.modo`, la carta de encuadre de cada plano y,
+  cuando exista (Etapa B), el campo `productos` de cada plano.
+
+---
+
 ## El grafo, y por qué no se toca
 
 ```

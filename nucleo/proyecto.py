@@ -473,7 +473,9 @@ class Proyecto:
         encontrados = []
         for nombre in sorted(os.listdir(base)):
             carpeta = os.path.join(base, nombre)
-            if not os.path.isdir(carpeta):
+            # las del sistema (_sistema, _papelera...) nunca son proyectos,
+            # aunque algo les haya dejado un proyecto.json dentro
+            if nombre.startswith("_") or not os.path.isdir(carpeta):
                 continue
             config = leer_json(os.path.join(carpeta, NOMBRE_CONFIG))
             if not isinstance(config, dict):

@@ -814,6 +814,38 @@ def probar_composicion():
         shutil.rmtree(carpeta, ignore_errors=True)
 
 
+def probar_las_laminas():
+    """Quitar, cambiar y anadir laminas: lo que se guarda y lo que se dibuja."""
+    seccion("LAS LAMINAS DEL ESTILO")
+    import laminas                                          # noqa: PLC0415
+    base = {"nombre": "Canal", "idioma": "es", "estilo_imagenes": ["a.png"],
+            "tono_prompt": "serio pero cercano", "voz_prompt": "grave y pausada"}
+    limpio = light.validar_encargo(base)
+    ok(not any(k.startswith("laminas_") for k in limpio),
+       "un estilo que no toca las laminas no recibe ninguna clave nueva")
+    igual(laminas.ids_de(limpio),
+          ["cara", "cuerpos", "interior", "exterior", "objeto", "diagrama"],
+          "sin tocar nada son las seis de fabrica")
+    tocado = light.validar_encargo(dict(base, laminas_quitadas=["cara", "inventada"],
+                                        laminas_propias={"extra_1": "una cocina de noche",
+                                                         "../x": "no"},
+                                        laminas_hoja="repartida"))
+    igual(tocado.get("laminas_quitadas"), ["cara"], "solo se quitan las que existen")
+    igual(tocado.get("laminas_propias"), {"extra_1": "una cocina de noche"},
+          "y solo se guardan ids validos")
+    igual(laminas.ids_de(tocado),
+          ["cuerpos", "interior", "exterior", "objeto", "diagrama", "extra_1"],
+          "la anadida va detras de las de fabrica")
+    igual(laminas.siguiente_extra(tocado), "extra_2", "la siguiente no pisa a la anterior")
+    igual(light.imagenes_de_parte("estilo", tocado), 6,
+          "regenerar el estilo paga UNA imagen por lamina de este estilo")
+    grupos = laminas.repartir([f"r{i}" for i in range(20)], 6, 8, ["r0"])
+    ok(all(g[0] == "r0" and len(g) == 8 for g in grupos),
+       "con hoja repartida la ★ va en todas y cada hoja sigue siendo de 8")
+    vistas = {r for g in grupos for r in g}
+    igual(len(vistas), 20, "y entre todas las laminas cuentan las 20 imagenes")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del modo light")
     parser.add_argument("--sin-navegador", action="store_true",
@@ -839,6 +871,7 @@ def main():
     probar_el_aviso_de_cambiar_de_idioma()
     probar_la_frase_del_estilo_llega_al_prompt()
     probar_lo_que_cuesta_cada_parte()
+    probar_las_laminas()
     if argumentos.sin_navegador:
         print("\n  (composicion de la miniatura saltada por --sin-navegador)")
     else:

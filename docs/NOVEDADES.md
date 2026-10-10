@@ -8,6 +8,32 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ---
 
+## V2.0 · octubre de 2026 (las láminas de tu estilo)
+
+**Las láminas, a la vista y a mano** (ficha del estilo → Estilo gráfico)
+- Explicado qué es una lámina: lo que de verdad copia cada plano de cada
+  vídeo. Tus imágenes escriben la guía (todas) y dibujan las láminas (8 por
+  lámina); cada plano recibe las láminas.
+- Cada lámina se ve limpia, con lo que enseña, y se puede **Regenerar** (con
+  una corrección opcional), **Cambiar qué enseña**, **Quitar** (gratis, y
+  **Devolver** también) o **Añadir** otra, hasta 8. Antes de pulsar se ve lo
+  que cuesta.
+- Si subiste más de 8 imágenes: **un grupo distinto para cada lámina**, para
+  que cuenten todas (mismo coste).
+- **Tus imágenes de referencia** en la ficha: se ven en grande, se describen y
+  se marcan con ★ sin gastar nada; se pueden quitar o sumar otras nuevas.
+- El texto de las muestras («10.000.000 cuentas a la venta»…) ahora dice lo
+  que es: un texto de ejemplo del Estudio, no algo tuyo.
+- **Corregido**: cambiar solo las *Indicaciones* del estilo gráfico en la ficha
+  daba «falta el estilo gráfico». Ahora conserva tus imágenes.
+- **Corregido**: **Guía** y **✓ Revisar** miraban el primer campo del bloque
+  (en el tono, la guía de dos mil palabras); ahora miran el campo que toca.
+
+**Otros**
+- El asistente deja escribir mientras piensa (lo que espera es el envío).
+- **Hora de tu región** con buscador.
+- La lista de voces se filtra por voz de hombre o de mujer y por país.
+
 ## V2.0 · octubre de 2026 (proyectos, logo y revisar)
 
 **Proyectos (clientes)**

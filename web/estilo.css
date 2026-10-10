@@ -951,7 +951,6 @@ video { width: 100%; border-radius: 9px; border: 1px solid var(--linea); backgro
 .avanzadas > summary:hover { color: var(--texto); }
 .avanzadas[open] > summary { margin-bottom: 8px; }
 .avanzadas > summary .meta { color: var(--acento); }
-.ajuste-cli .campo { margin-bottom: 0; }
 .tiempo-cli .cifra {
   font-size: 17px; font-weight: 600; color: var(--acento); font-variant-numeric: tabular-nums;
 }
@@ -3031,3 +3030,39 @@ textarea.autoalto, textarea.crece.autoalto { max-height: 60vh; overflow-y: auto;
 .dialogo input, .dialogo select { width: 100%; }
 .dialogo-botones { display: flex; justify-content: flex-end; gap: 8px; }
 .galeria-estilos { margin-bottom: 22px; }
+
+/* Las láminas del estilo, limpias y una a una (`laminasDelEstilo`). */
+.laminas-estilo { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.laminas-estilo h3 { margin: 0; font-size: 1rem; }
+.rejilla-laminas {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+.rejilla-laminas .lamina {
+  display: flex; flex-direction: column; gap: 4px; padding: 6px;
+  border: 1px solid var(--linea); border-radius: 8px; background: var(--hueco);
+}
+.rejilla-laminas .lamina img {
+  width: 100%; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 6px;
+  cursor: zoom-in; display: block;
+}
+.rejilla-laminas .lamina .sin-cara { aspect-ratio: 3 / 2; }
+.rejilla-laminas .lamina-titulo { font-weight: 600; }
+.rejilla-laminas .herramientas { display: flex; flex-wrap: wrap; gap: 4px; margin-top: auto; }
+.capa-dialogo .dialogo textarea { width: 100%; min-height: 4.5em; resize: vertical; }
+.imagenes-del-estilo { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.rejilla-aportadas {
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+.rejilla-aportadas .aportada {
+  display: flex; flex-direction: column; gap: 4px; padding: 4px;
+  border: 1px solid var(--linea); border-radius: 8px; background: var(--hueco);
+}
+.rejilla-aportadas .aportada.quitada { opacity: .45; }
+.rejilla-aportadas .aportada img {
+  width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; cursor: zoom-in;
+}
+.rejilla-aportadas .aportada input { width: 100%; }
+.rejilla-aportadas .herramientas { display: flex; gap: 4px; }
+.aviso-quitar { color: var(--aviso); }

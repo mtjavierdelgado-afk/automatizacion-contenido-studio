@@ -88,6 +88,50 @@ Si la creación se corta a medias verás **Retomar** y **Empezar de cero**:
 
 Al abrir un estilo ves sus muestras y cada parte (estilo gráfico, tono, voz).
 
+- **Las muestras de arriba** son tus láminas con un **texto de ejemplo** encima
+  («10.000.000 cuentas a la venta», «La nómina entera»…). Ese texto lo pone el
+  Estudio para que veas cómo quedan una cartela y un subtítulo sobre tu estilo:
+  es siempre el mismo, no sale de tus imágenes y nunca va al generador.
+
+#### Qué es una lámina (y qué son «las 8 de la hoja»)
+
+Tus imágenes de referencia **no viajan a cada plano**. Se usan para dos cosas:
+
+1. **Escribir la guía del estilo**: la IA las mira **todas** (hasta 50) y
+   describe por escrito cómo se dibuja tu canal.
+2. **Dibujar las láminas**: con esa guía y una **hoja de hasta 8 de tus
+   imágenes** (las ★ primero), la IA dibuja en tu estilo unas láminas: una cara,
+   varias personas, un interior, un exterior, un objeto y un diagrama.
+
+Cada plano de cada vídeo recibe **esas láminas** (hasta 8) como referencia y
+copia de ellas el trazo, la paleta y la luz. Son lo que da consistencia a tus
+vídeos. Cada lámina es una referencia más para cada plano, pero no cada imagen
+tuya: tus imágenes llegan a los planos a través de la guía y de las láminas.
+
+En **Las láminas de tu estilo** las ves limpias, con lo que enseña cada una:
+
+- **Regenerar**: la vuelve a dibujar (una imagen, ≈ el precio que pone), con
+  una corrección opcional («sin sombras duras»).
+- **Cambiar qué enseña**: que enseñe otra cosa («una cocina de noche con luz
+  cálida»). Se guarda con el estilo y se respeta al regenerarlo.
+- **Quitar**: sale de la hoja (gratis; su imagen se guarda y **Devolver** no
+  cuesta nada). Mínimo 3.
+- **+ Añadir una lámina**: hasta 8, las que caben en la hoja de cada plano. Más
+  de 8 no caben sin cambiar el motor de imágenes (reservado ahora por la Etapa
+  Foto A): lo útil es que cada lámina enseñe lo que más sale en tus vídeos.
+- **Con qué imágenes tuyas se dibuja cada lámina** (si subiste más de 8): las
+  mismas 8 para todas, o un grupo distinto para cada una, para que cuenten
+  todas tus imágenes. Mismo coste.
+- Cambiar las láminas **no toca los vídeos ya creados**: lo llevan los nuevos,
+  y en uno ya hecho, **Su estilo** en el Encargo te deja traerlo.
+
+#### Tus imágenes de referencia
+
+Debajo de las láminas están las imágenes que subiste: pulsa una para verla en
+grande, escribe qué mirar en cada una y marca con ★ las que deben ir sí o sí a
+la hoja de las láminas (se guarda solo y no gasta nada). **✕ Quitar** y añadir
+imágenes nuevas sí rehacen la guía y las láminas al pulsar **Regenerar**.
+
 - **Lo que se guarda solo**: el texto del tono (es la guía que lee el
   redactor, tal cual), el ritmo, el nombre, el idioma y los mandos de la voz.
   No hace falta regenerar nada: el botón de abajo dice **Guardar**.

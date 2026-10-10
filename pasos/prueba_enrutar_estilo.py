@@ -260,14 +260,20 @@ def prueba_la_lamina_llega_al_prompt():
     fuente = _fuente("app.py")
     ok('encargo.get("laminas")' in fuente,
        "app.py lee el cajón que escribe el reparto")
-    ok("ejes=pedidos, peticiones=peticiones" in fuente,
+    # las de fabrica van por `dibujar_desde_guia`; las cambiadas o anadidas,
+    # una a una por `laminas.dibujar_suelta` -- la correccion llega a las dos
+    ok("ejes=de_fabrica" in fuente and "peticiones=peticiones" in fuente
+       and "lam.peticion_de(eje, encargo, peticiones.get(eje" in fuente,
        "y se lo pasa a los dos caminos que dibujan")
     ok('encargo["laminas"] = dict(reparto.get("laminas") or {})' in fuente,
        "y quien reparte lo mete en el encargo, que es de ESTA pasada")
     # LO QUE SE ELIGE HAY QUE MONTARLO: sin video, las laminas SON la lista de
     # referencias del estilo. Escribir ahi solo la redibujada dejaria un estilo
     # de una referencia, sin error y sin aviso.
-    ok("previas + [r for r in hecho" in fuente,
+    # la lista se rehace desde el disco con TODAS las laminas del estilo, no
+    # con las recien dibujadas
+    ok('bloque["referencias"] = lista[:lam.MAX_LAMINAS]' in fuente
+       and "for eje in ids:" in fuente,
        "y redibujar una sola no borra de la lista las otras cinco")
 
     # Y EL ORDEN QUE SE LE ENSENA AL MODELO ES EL QUE SE VE, no uno inventado:
@@ -435,7 +441,9 @@ def prueba_las_aportadas_llegan_al_dibujo():
     # pasan por `para_la_hoja` (ocho como mucho en la hoja), pero son las del
     # taller: sin ellas el dibujo sale sin adjuntos y la API lo rechaza
     compacta = " ".join(fuente.split())
-    ok("referencias=_light().para_la_hoja( _aportadas_del_taller(ctx)" in compacta,
+    ok("aportadas = _aportadas_del_taller(ctx)" in compacta
+       and "comun = _light().para_la_hoja(aportadas," in compacta
+       and "referencias=comun" in compacta,
        "app.py le pasa al dibujo las imágenes del taller")
 
 

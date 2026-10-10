@@ -193,7 +193,11 @@ def contexto(pid):
     clave = str(pid or "")
     # el id llega por URL y se convierte en ruta: solo se acepta la forma que
     # produce identificador(), asi que no hay manera de salir de la carpeta base
-    if not ID_VALIDO.match(clave):
+    # LAS CARPETAS CON «_» DELANTE SON DEL SISTEMA (_sistema, _papelera,
+    # _asistente...) y un proyecto nunca se llama asi (`identificador` lo
+    # quita). Abrirlas como proyecto les escribia un proyecto.json y salian en
+    # «Tus vídeos» como videos rotos.
+    if not ID_VALIDO.match(clave) or clave.startswith("_"):
         raise ErrorApi(404, f"proyecto desconocido: {pid!r}")
     with _LOCK:
         existente = _CONTEXTOS.get(clave)
@@ -5901,6 +5905,7 @@ async def subir_logo_suelto(peticion: Request):
 
 @app.get("/api/logos/{nombre}")
 def servir_logo_suelto(nombre: str, peticion: Request):
+    """Un logo subido que todavia no esta en ningun video."""
     ruta = _ruta_logo_suelto(nombre)
     if not ruta:
         raise ErrorApi(404, "ese logo no está")
@@ -8310,14 +8315,50 @@ def _aportadas_del_taller(ctx):
             if os.path.splitext(n)[1].lower() in EXT_APORTADAS]
 
 
-def _sembrar_aportadas(ctx, encargo):
+def _sembrar_aportadas(ctx, encargo, conservar=None):
     """Mete en el taller las imagenes subidas, y vacia la carpeta de espera.
 
     EN EL TALLER: es lo que sobrevive al preset y lo que permite rehacer el
     estilo sin volver a pedir nada. La carpeta de espera es un buzon, no un
     almacen -- lo que se copia se borra de ahi, o se queda para siempre.
+
+    `conservar` (nombres sin «NN_») son las del taller que SIGUEN: la ficha de
+    un estilo deja quitar unas y anadir otras sin volver a subir las demas.
+    `None` es lo de siempre: las nuevas sustituyen a todas.
     """
     rutas = _rutas_aportadas(encargo.get("estilo_imagenes"))
+    if conservar is not None:
+        destino = _carpeta_aportadas_de(ctx)
+        sin = _light()._sin_prefijo
+        quedan = set(str(n) for n in conservar)
+        viejas = [r for r in _aportadas_del_taller(ctx) if sin(r) in quedan]
+        if not viejas and not rutas:
+            raise RuntimeError("el estilo se quedaría sin ninguna imagen de referencia")
+        apartado = destino + ".conservar"
+        shutil.rmtree(apartado, ignore_errors=True)
+        os.makedirs(apartado, exist_ok=True)
+        guardadas = []
+        for ruta in viejas:
+            final = os.path.join(apartado, sin(ruta))
+            shutil.copyfile(ruta, final)
+            guardadas.append(final)
+        shutil.rmtree(destino, ignore_errors=True)
+        os.makedirs(destino, exist_ok=True)
+        dentro = []
+        for indice, ruta in enumerate(guardadas + rutas):
+            final = os.path.join(destino, _presets().nombre_numerado(indice, ruta))
+            try:
+                shutil.copyfile(ruta, final)
+            except OSError:
+                continue
+            dentro.append(final)
+            if ruta in rutas:
+                try:
+                    os.remove(ruta)
+                except OSError:
+                    pass
+        shutil.rmtree(apartado, ignore_errors=True)
+        return dentro
     if not rutas:
         # sin nada nuevo NO se borra lo que ya hubiera: retomar un taller a
         # medias tiene que conservar el material con el que se lanzo
@@ -8559,14 +8600,27 @@ def _correr_light_referencias(avisar, ctx, encargo):
     faltaba era que alguien se lo pidiera.
     """
     mod = _moodboard()
+    lam = _laminas()
     calidad = str((ctx.estado.params("assets") or {}).get("calidad") or "medium")
     bloque = dict((ctx.estado.params("assets") or {}).get("estilo") or {})
-    # Se filtra contra los ejes que existen de verdad: una peticion escrita para
-    # un eje inventado no daria error, dibujaria las seis sin decirlo.
+    # LAS LAMINAS DE ESTE ESTILO (`laminas.py`): las seis de fabrica menos las
+    # quitadas, mas las anadidas. Sin tocar nada son las seis de siempre.
+    ids = lam.ids_de(encargo)
+    # Se filtra contra las laminas que existen de verdad: una peticion escrita
+    # para una inventada no daria error, dibujaria todas sin decirlo.
     peticiones = {eje: " ".join(str(texto).split())
                   for eje, texto in (encargo.get("laminas") or {}).items()
-                  if eje in mod.EJES and str(texto or "").strip()}
-    pedidos = sorted(peticiones) or None
+                  if eje in ids and str(texto or "").strip()}
+    # `laminas_solo` (por INVOCACION, de la pantalla de laminas): redibujar
+    # estas aunque no lleven correccion. Una lista VACIA es «no dibujes
+    # ninguna, solo rehaz la lista» --quitar o devolver una lamina--.
+    solo = encargo.get("laminas_solo")
+    if isinstance(solo, list):
+        pedidos = [e for e in ids if e in solo or e in peticiones]
+        sin_dibujar = not pedidos
+    else:
+        pedidos = [e for e in ids if e in peticiones] or list(ids)
+        sin_dibujar = False
     # EL IDIOMA DEL CANAL, hasta la lamina. Sin esto, un canal en espanol saca
     # el eje «diagrama» rotulado en ingles --paso: «PLAN / DO / REVIEW»-- porque
     # el encargo entero va en ingles y el generador rotula en el idioma en que
@@ -8579,32 +8633,95 @@ def _correr_light_referencias(avisar, ctx, encargo):
     # que la guia (`_correr_light_guia`): sin pasarlas, cada lamina salia a la
     # API sin adjuntos y la tanda caia con «generar() necesita al menos una
     # imagen de referencia» aunque el estilo tuviera catorce.
-    hecho = mod.dibujar_desde_guia({"guia": bloque.get("guia")}, destino,
-                                   ejes=pedidos, peticiones=peticiones,
-                                   calidad=calidad, avisar=avisar,
-                                   idioma=idioma,
-                                   # OCHO COMO MUCHO en la hoja: con 50 cada
-                                   # foto quedaria de 768x41 (`para_la_hoja`)
-                                   referencias=_light().para_la_hoja(
-                                       _aportadas_del_taller(ctx),
-                                       encargo.get("estilo_descripciones"),
-                                       destacadas=encargo.get("estilo_destacadas")))
-    # LA LISTA NO SE PISA CUANDO SOLO SE HA REDIBUJADO UNA. Cada lamina se
-    # escribe en `<eje>.png`, o sea encima de la que habia, asi que las otras
-    # cinco siguen en su sitio y en la lista. Escribir aqui `hecho["rutas"]` a
-    # secas dejaria un estilo con UNA referencia: sin error, sin aviso, y con el
-    # video montado despues sobre una sola lamina de apoyo.
-    previas = [r for r in (bloque.get("referencias") or []) if r]
-    if not pedidos or not previas:
-        bloque["referencias"] = hecho["rutas"]
+    aportadas = _aportadas_del_taller(ctx)
+    _, propias, hoja = lam.config_de(encargo)
+    # OCHO COMO MUCHO en la hoja: con 50 cada foto quedaria de 768x41
+    # (`para_la_hoja`). Con «repartida» cada lamina mira OTRO grupo de ocho
+    # --las marcadas con ★ en todos-- y entre todas cuentan todas tus imagenes.
+    comun = _light().para_la_hoja(aportadas, encargo.get("estilo_descripciones"),
+                                  destacadas=encargo.get("estilo_destacadas"))
+    if hoja == "repartida" and len(aportadas) > len(comun):
+        marcadas = {_light()._sin_prefijo(n)
+                    for n in (encargo.get("estilo_destacadas") or [])}
+        fijas = [r for r in aportadas if _light()._sin_prefijo(r) in marcadas]
+        grupos = dict(zip(ids, lam.repartir(aportadas, len(ids),
+                                            lam.MAX_LAMINAS, fijas)))
     else:
-        bloque["referencias"] = previas + [r for r in hecho["rutas"]
-                                           if r not in previas]
+        grupos = {}
+    # Las de fabrica sin cambiar y con la hoja comun van por el camino de
+    # siempre (en paralelo); las cambiadas, las anadidas y las de hoja
+    # repartida, una a una con su descripcion y su grupo de imagenes.
+    de_fabrica = [e for e in pedidos if e in mod.EJES and not propias.get(e)
+                  and e not in grupos]
+    sueltas = [e for e in pedidos if e not in de_fabrica]
+    hecho = {"rutas": [], "ejes": [], "coste_usd": 0.0}
+    if de_fabrica:
+        parcial = mod.dibujar_desde_guia(
+            {"guia": bloque.get("guia")}, destino, ejes=de_fabrica,
+            peticiones=peticiones, calidad=calidad,
+            avisar=(avisar if not sueltas else
+                    lambda v, m="": avisar(0.6 * float(v or 0), m)),
+            idioma=idioma, referencias=comun)
+        hecho["rutas"] += parcial["rutas"]
+        hecho["ejes"] += parcial["ejes"]
+        hecho["coste_usd"] += float(parcial.get("coste_usd") or 0.0)
+    for indice, eje in enumerate(sueltas):
+        base = 0.6 if de_fabrica else 0.0
+        avisar(base + (1 - base) * indice / max(1, len(sueltas)),
+               f"dibujando la lámina «{lam.titulo_de(eje, encargo)}»")
+        descripcion = (mod.EJES[eje]["prompt"] if eje in mod.EJES
+                       else lam.descripcion_extra(eje, encargo))
+        parcial = lam.dibujar_suelta(
+            {"guia": bloque.get("guia")}, destino, eje, descripcion,
+            calidad=calidad, idioma=idioma,
+            peticion=lam.peticion_de(eje, encargo, peticiones.get(eje, "")),
+            referencias=grupos.get(eje) or comun)
+        hecho["rutas"].append(parcial["ruta"])
+        hecho["ejes"].append(eje)
+        hecho["coste_usd"] += parcial["coste_usd"]
+    hecho["coste_usd"] = round(hecho["coste_usd"], 4)
+    # UN REDIBUJO ENTERO deja viejas las quitadas: su fichero se borra para
+    # que «Devolver» la dibuje con la guia de ahora y no traiga la de antes
+    if not isinstance(solo, list) and not peticiones:
+        for eje in mod.EJES:
+            if eje not in ids:
+                try:
+                    os.remove(os.path.join(destino, f"{eje}.png"))
+                except OSError:
+                    pass
+    # LA LISTA SE REHACE DESDE EL DISCO, en el orden de las laminas. Cada una se
+    # escribe en `<id>.png`, encima de la que habia, asi que las que no se han
+    # redibujado siguen en su sitio. Escribir aqui solo lo recien dibujado
+    # dejaria un estilo con UNA referencia: sin error, sin aviso, y con el
+    # video montado despues sobre una sola lamina de apoyo. Una quitada sale de
+    # la lista pero su fichero se queda: devolverla no cuesta nada.
+    previas = {os.path.splitext(os.path.basename(str(r)))[0]: r
+               for r in (bloque.get("referencias") or []) if r}
+    lista = []
+    for eje in ids:
+        ruta = os.path.join(destino, f"{eje}.png")
+        if os.path.isfile(ruta):
+            lista.append(ruta)
+        elif previas.get(eje) and os.path.isfile(previas[eje]):
+            lista.append(previas[eje])
+    bloque["referencias"] = lista[:lam.MAX_LAMINAS]
     ctx.estado.actualizar_params("assets", {"estilo": bloque})
     ctx.bitacora.anotar("estilo_dibujado", "assets", {
         "ejes": hecho["ejes"], "coste_usd": hecho["coste_usd"],
-        "pedidos": pedidos or "todos"})
+        "pedidos": pedidos if not sin_dibujar else "ninguna (solo la lista)",
+        "laminas": ids, "hoja": hoja})
+    if not sin_dibujar:
+        avisar(1.0, f"{len(hecho['ejes'])} lámina(s) dibujadas, "
+                    f"{hecho['coste_usd']:.3f} USD")
+    else:
+        avisar(1.0, f"{len(lista)} láminas en el estilo")
     return hecho
+
+
+def _laminas():
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    return PASOS_MODULOS.laminas
 
 
 def _enrutar_estilo():
@@ -9486,16 +9603,32 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     if ficha.get("tipo") != "canal":
         raise ErrorApi(400, "esto no es un preset de canal")
     ctx = _taller_de(ficha)
+    _taller_libre(ctx)
 
     origen = dict((ficha.get("datos") or {}).get("origen") or {})
     antes = dict(origen)
     origen["nombre"] = ficha.get("nombre") or "canal"
     origen.setdefault("idioma", _presets().idioma_de(ficha) or "es")
+    conservar = None
     if fuente and parte == "estilo":
         # las DOS a la vez y siempre: dejar la vieja puesta es como se acaba con
         # unas indicaciones que describen unas imagenes que ya no estan
         origen["estilo_prompt"] = fuente.get("estilo_prompt") or ""
-        origen["estilo_imagenes"] = fuente.get("estilo_imagenes") or []
+        # SIN IMAGENES NUEVAS SE QUEDAN LAS QUE HABIA. Cambiar solo las
+        # indicaciones mandaba una lista vacia y el encargo caia con «falta el
+        # estilo gráfico» aunque el estilo tuviera sus imagenes (10-10-2026).
+        origen["estilo_imagenes"] = (fuente.get("estilo_imagenes")
+                                     or origen.get("estilo_imagenes") or [])
+        # LAS QUE SIGUEN de las que ya tenia (la ficha deja quitar unas y
+        # anadir otras): van delante de las nuevas, con su nombre de siempre
+        # una lista VACIA sin imagenes nuevas no es «quitalas todas» (el
+        # estilo se quedaria sin material): es que la pantalla no las pudo leer
+        if isinstance(fuente.get("conservar"), list) and (
+                fuente["conservar"] or _rutas_aportadas(fuente.get("estilo_imagenes"))):
+            conservar = [str(n) for n in fuente["conservar"] if n][:200]
+            origen["estilo_imagenes"] = conservar + [
+                n for n in (fuente.get("estilo_imagenes") or [])
+                if n not in conservar]
         # las descripciones van con SUS imagenes: con imagenes nuevas, las
         # nuevas; sin imagenes nuevas se quedan las que habia
         if fuente.get("estilo_imagenes") or "estilo_descripciones" in fuente:
@@ -9510,8 +9643,10 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     # lo que cuelga de ella, que es justo lo que rehace la parte «estilo» de
     # siempre. Se compara con lo que habia, no con si vino `origen`: la pantalla
     # manda las dos claves juntas y una de ellas puede no haberse tocado.
-    material = bool(fuente) and parte == "estilo" and bool(
-        encargo.get("estilo_imagenes"))
+    material = bool(fuente) and parte == "estilo" and (
+        bool(_rutas_aportadas(fuente.get("estilo_imagenes")))
+        or (conservar is not None and set(conservar) != {
+            _light()._sin_prefijo(r) for r in _aportadas_del_taller(ctx)}))
     # El feedback viaja por INVOCACION y no se guarda en el encargo: describe
     # esta pasada, no lo que el preset es. Guardarlo lo aplicaria otra vez la
     # proxima, y dos correcciones seguidas se sumarian sin que nadie lo pida.
@@ -9563,7 +9698,10 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     # abajo y deja un plan VACIO -- el trabajo termina «listo» sin haber hecho
     # nada y la pantalla vuelve como si el cambio estuviera aplicado.
     tareas = tuple(t for t in tareas if t in light.TAREAS_POR_ID)
-    aportadas = _sembrar_aportadas(ctx, encargo) if material else []
+    try:
+        aportadas = _sembrar_aportadas(ctx, encargo, conservar) if material else []
+    except RuntimeError as fallo:
+        raise ErrorApi(400, str(fallo))
     ctx.bitacora.anotar("preset_light_regenerar", None,
                         {"preset": preset_id, "parte": parte,
                          "peticion": peticion[:200],
@@ -9590,9 +9728,330 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     return {"trabajo_id": trabajo_id, "taller": ctx.id, "parte": parte,
             "fuente_nueva": bool(fuente), "material_nuevo": material,
             "reparto": reparto,
-            "plan": light.plan_de(encargo, tareas),
+            "plan": (_plan_con_laminas(light.plan_de(encargo, tareas),
+                                       len(_laminas().ids_de(encargo)))
+                     if "referencias" in tareas and not encargo.get("laminas")
+                     else light.plan_de(encargo, tareas)),
             "trabajo": ctx.gestor.estado(trabajo_id),
             "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
+
+
+# ------------------------------------------------------------- las laminas
+#
+# Lo que ve cada plano de cada video de un estilo descrito NO son tus imagenes:
+# es la hoja de sus LAMINAS (`pasos/laminas.py`). Aqui se ven una a una, con lo
+# que ensena cada una, y se regeneran, se cambian, se quitan o se anaden.
+# Nada de esto toca un video ya hecho: sus params son suyos. Lo cambiado lo
+# llevan los videos que se creen DESPUES con el estilo (o los que traigan el
+# estilo desde su Encargo).
+
+_ID_LAMINA = re.compile(r"^[a-z]{3,12}$|^extra_\d{1,3}$")
+
+
+def _plan_con_laminas(plan, imagenes):
+    """El plan con las imagenes que de verdad se dibujan en la tarea de laminas.
+
+    La tabla de tareas dice seis (las de fabrica); quitar una no dibuja
+    ninguna, regenerar una dibuja una y un estilo puede tener de 3 a 8."""
+    plan = copy.deepcopy(plan)
+    antes = 0
+    for tanda in plan.get("tandas") or []:
+        for tarea in tanda:
+            if tarea.get("id") == "referencias":
+                antes += int(tarea.get("imagenes") or 0)
+                tarea["imagenes"] = int(imagenes)
+    for tarea in plan.get("tareas") or []:
+        if isinstance(tarea, dict) and tarea.get("id") == "referencias":
+            tarea["imagenes"] = int(imagenes)
+    if "imagenes" in plan:
+        plan["imagenes"] = max(0, int(plan["imagenes"]) - antes + int(imagenes))
+    return plan
+
+
+def _taller_libre(ctx):
+    """409 si el taller de este estilo esta generando algo.
+
+    Lo que se guarde mientras tanto se lo llevaria por delante el trabajo al
+    terminar (vuelve a guardar el estilo con SU copia del encargo), y dos
+    laminas nuevas seguidas se llamarian igual y se pagarian las dos."""
+    if ctx.gestor.listar(activos=True):
+        raise ErrorApi(409, "este estilo se está generando: espera a que termine "
+                            "para cambiar otra cosa")
+
+
+def _taller_con_laminas(preset_id):
+    """(ficha, ctx) de un estilo con laminas dibujadas, o un 409 que lo dice."""
+    ficha = _preset_o_400(lambda p: p.leer(preset_id))
+    if ficha.get("tipo") != "canal":
+        raise ErrorApi(400, "esto no es un preset de canal")
+    origen = (ficha.get("datos") or {}).get("origen") or {}
+    if not origen.get("estilo_imagenes"):
+        raise ErrorApi(409, "este estilo no salió de imágenes de referencia: sus "
+                            "láminas son las de su vídeo y no se tocan desde aquí")
+    return ficha, _taller_de(ficha)
+
+
+def _ruta_lamina(ctx, lamina):
+    if not _ID_LAMINA.match(str(lamina or "")):
+        raise ErrorApi(400, f"lámina desconocida: {lamina!r}")
+    return os.path.join(ctx.proyecto.raiz, "estilo", "dibujadas", f"{lamina}.png")
+
+
+def _ficha_lamina(preset_id, ctx, lamina, origen, en_uso):
+    lam = _laminas()
+    ruta = _ruta_lamina(ctx, lamina)
+    hay = os.path.isfile(ruta)
+    sello = int(os.path.getmtime(ruta)) if hay else 0
+    _, propias, _ = lam.config_de(origen)
+    return {"id": lamina, "titulo": lam.titulo_de(lamina, origen),
+            "explicacion": lam.explicacion_de(lamina, origen),
+            "texto": propias.get(lamina, ""),
+            "fabrica": lamina in _moodboard().EJES,
+            "en_uso": en_uso,
+            "url": (f"/api/presets-light/{preset_id}/laminas/{lamina}/imagen?v={sello}"
+                    if hay else "")}
+
+
+@app.get("/api/presets-light/{preset_id}/laminas")
+def laminas_de_preset(preset_id: str):
+    """Las laminas de un estilo, limpias y con lo que ensena cada una."""
+    lam = _laminas()
+    ficha, ctx = _taller_con_laminas(preset_id)
+    origen = (ficha.get("datos") or {}).get("origen") or {}
+    ids = lam.ids_de(origen)
+    quitadas, propias, hoja = lam.config_de(origen)
+    calidad = str((ctx.estado.params("assets") or {}).get("calidad") or "medium")
+    try:
+        usd = float(AJUSTES.coste_por_imagen(calidad).get("usd_total") or 0.0)
+    except Exception:                                       # noqa: BLE001
+        usd = 0.0
+    # las anadidas que se quitaron no se guardan: solo vuelven las de fabrica
+    return {"laminas": [_ficha_lamina(preset_id, ctx, e, origen, True) for e in ids],
+            "quitadas": [_ficha_lamina(preset_id, ctx, e, origen, False)
+                         for e in quitadas],
+            "hoja": hoja,
+            "imagenes": len(_aportadas_del_taller(ctx)),
+            "en_la_hoja": _light().MAX_EN_LA_HOJA,
+            "max": lam.MAX_LAMINAS, "min": lam.MIN_LAMINAS,
+            "calidad": calidad, "usd_por_lamina": round(usd, 4),
+            # lo que paga «Regenerar» el estilo entero con ESTAS laminas
+            "imagenes_estilo": _light().imagenes_de_parte("estilo", origen)}
+
+
+@app.get("/api/presets-light/{preset_id}/laminas/{lamina}/imagen")
+def imagen_de_lamina(preset_id: str, lamina: str, peticion: Request):
+    """Una lamina LIMPIA, sin texto encima: la que va en la hoja de cada plano."""
+    _, ctx = _taller_con_laminas(preset_id)
+    ruta = _ruta_lamina(ctx, lamina)
+    if not os.path.isfile(ruta):
+        raise ErrorApi(404, "esa lámina no está dibujada")
+    return servir_fichero(peticion, ruta)
+
+
+@app.post("/api/presets-light/{preset_id}/laminas", status_code=202)
+def cambiar_laminas(preset_id: str, cuerpo: dict = Body(default=None)):
+    """Una accion sobre las laminas de un estilo.
+
+        regenerar  {lamina, texto?}  la vuelve a dibujar; `texto` es una
+                                     correccion de esta vez («sin sombras»)
+        cambiar    {lamina, texto}   que ensene otra cosa, guardado: se respeta
+                                     al regenerar el estilo. Texto vacio en una
+                                     de fabrica la devuelve a lo de fabrica
+        nueva      {texto}           una lamina mas (hasta 8, las que caben en
+                                     la hoja de cada plano)
+        quitar     {lamina}          sale de la hoja; su imagen se queda
+        restaurar  {lamina}          vuelve una de fabrica quitada
+        hoja       {hoja}            "comun" o "repartida" (ver `laminas.py`)
+
+    Dibujar una lamina cuesta UNA imagen; quitar, restaurar una que ya estaba
+    dibujada y cambiar la hoja no cuestan nada. Despues se recomponen las
+    muestras (gratis) y se vuelve a guardar el estilo.
+    """
+    lam = _laminas()
+    mod = _moodboard()
+    light = _light()
+    datos = _cuerpo(cuerpo)
+    accion = str(datos.get("accion") or "").strip().lower()
+    lamina = str(datos.get("lamina") or "").strip()
+    texto = " ".join(str(datos.get("texto") or "").split())[:lam.MAX_TEXTO]
+    ficha, ctx = _taller_con_laminas(preset_id)
+    _taller_libre(ctx)
+    origen = dict((ficha.get("datos") or {}).get("origen") or {})
+    ids = lam.ids_de(origen)
+    quitadas, propias, hoja = lam.config_de(origen)
+    quitadas, propias = list(quitadas), dict(propias)
+    correccion = {}
+    dibujar = []
+
+    if accion == "regenerar":
+        if lamina not in ids:
+            raise ErrorApi(400, f"esa lámina no está en el estilo: {lamina!r}")
+        dibujar = [lamina]
+        if texto:
+            correccion[lamina] = texto
+    elif accion == "cambiar":
+        if lamina not in ids:
+            raise ErrorApi(400, f"esa lámina no está en el estilo: {lamina!r}")
+        if not texto and lamina not in mod.EJES:
+            raise ErrorApi(400, "di qué tiene que enseñar la lámina")
+        if texto and len(texto) < 8:
+            raise ErrorApi(400, "descríbelo con algo más de detalle")
+        if texto:
+            propias[lamina] = texto
+        else:
+            propias.pop(lamina, None)
+        dibujar = [lamina]
+    elif accion == "nueva":
+        if len(ids) >= lam.MAX_LAMINAS:
+            raise ErrorApi(409, f"ya hay {lam.MAX_LAMINAS} láminas, las que caben "
+                                f"en la hoja de cada plano: quita una antes")
+        if len(texto) < 8:
+            raise ErrorApi(400, "di qué tiene que enseñar la lámina nueva "
+                                "(«una cocina de noche con luz cálida»)")
+        lamina = lam.siguiente_extra(origen)
+        propias[lamina] = texto
+        dibujar = [lamina]
+    elif accion == "quitar":
+        if lamina not in ids:
+            raise ErrorApi(400, f"esa lámina no está en el estilo: {lamina!r}")
+        if len(ids) <= lam.MIN_LAMINAS:
+            raise ErrorApi(409, f"un estilo necesita al menos {lam.MIN_LAMINAS} "
+                                f"láminas: regenera o cambia esta en vez de quitarla")
+        if lamina in mod.EJES:
+            quitadas.append(lamina)
+        else:
+            propias.pop(lamina, None)
+    elif accion == "restaurar":
+        if lamina not in quitadas:
+            raise ErrorApi(400, f"esa lámina no está quitada: {lamina!r}")
+        if len(ids) >= lam.MAX_LAMINAS:
+            raise ErrorApi(409, f"ya hay {lam.MAX_LAMINAS} láminas: quita una antes")
+        quitadas.remove(lamina)
+        if not os.path.isfile(_ruta_lamina(ctx, lamina)):
+            dibujar = [lamina]
+    elif accion == "hoja":
+        nueva = str(datos.get("hoja") or "")
+        if nueva not in lam.HOJAS:
+            raise ErrorApi(400, "la hoja es «comun» o «repartida»")
+        hoja = nueva
+    else:
+        raise ErrorApi(400, "acción desconocida: regenerar, cambiar, nueva, "
+                            "quitar, restaurar u hoja")
+
+    # SOLO LO QUE NO ES DE FABRICA se escribe: un estilo que vuelve a las seis
+    # de siempre no se queda con claves vacias
+    for clave, valor in (("laminas_quitadas", quitadas), ("laminas_propias", propias),
+                         ("laminas_hoja", hoja if hoja != "comun" else "")):
+        if valor:
+            origen[clave] = valor
+        else:
+            origen.pop(clave, None)
+
+    if accion == "hoja":
+        # no se dibuja nada: vale para la proxima vez que se dibuje una lamina
+        contenido = copy.deepcopy(ficha.get("datos") or {})
+        contenido["origen"] = origen
+        try:
+            nueva_ficha = _presets().guardar(
+                "canal", ficha.get("nombre") or "canal", contenido,
+                nota=ficha.get("nota") or "",
+                miniatura=ficha.get("miniatura") or "", pid=preset_id)
+        except _presets().ErrorPreset as fallo:
+            raise ErrorApi(400, str(fallo))
+        return {"trabajo_id": "", "preset": nueva_ficha, "hoja": hoja}
+
+    origen["nombre"] = ficha.get("nombre") or "canal"
+    origen.setdefault("idioma", _presets().idioma_de(ficha) or "es")
+    encargo = _encargo_o_400(origen)
+    encargo["feedback"] = {}
+    encargo["laminas"] = correccion
+    encargo["laminas_solo"] = dibujar
+    ctx.bitacora.anotar("laminas_estilo", None, {
+        "preset": preset_id, "accion": accion, "lamina": lamina,
+        "dibujar": dibujar, "texto": texto[:200]})
+    trabajo_id = ctx.gestor.lanzar(
+        "preset_light", _correr_preset_light, ctx, encargo,
+        ["referencias", "muestra"], preset_id, paso="assets")
+    _registrar_trabajo(trabajo_id, ctx.id)
+    plan = _plan_con_laminas(light.plan_de(encargo, ("referencias", "muestra")),
+                             len(dibujar))
+    return {"trabajo_id": trabajo_id, "taller": ctx.id, "accion": accion,
+            "lamina": lamina, "imagenes": len(dibujar),
+            "plan": plan,
+            "trabajo": ctx.gestor.estado(trabajo_id),
+            "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
+
+
+# --------------------------------------------- tus imagenes de referencia
+
+@app.get("/api/presets-light/{preset_id}/aportadas")
+def aportadas_de_preset(preset_id: str):
+    """Las imagenes de referencia de un estilo, con lo que se dijo de cada una."""
+    ficha, ctx = _taller_con_laminas(preset_id)
+    origen = (ficha.get("datos") or {}).get("origen") or {}
+    sin = _light()._sin_prefijo
+    descripciones = origen.get("estilo_descripciones") or {}
+    destacadas = set(origen.get("estilo_destacadas") or [])
+    salida = []
+    for ruta in _aportadas_del_taller(ctx):
+        base = sin(ruta)
+        sello = int(os.path.getmtime(ruta))
+        salida.append({"nombre": base,
+                       "url": f"/api/presets-light/{preset_id}/aportadas/"
+                              f"{base}/imagen?v={sello}",
+                       "descripcion": str(descripciones.get(base) or ""),
+                       "destacada": base in destacadas})
+    return {"imagenes": salida, "tope": _light().max_imagenes_estilo(),
+            "en_la_hoja": _light().MAX_EN_LA_HOJA}
+
+
+@app.get("/api/presets-light/{preset_id}/aportadas/{nombre}/imagen")
+def imagen_aportada(preset_id: str, nombre: str, peticion: Request):
+    """Una de tus imagenes de referencia, tal cual la subiste."""
+    _, ctx = _taller_con_laminas(preset_id)
+    sin = _light()._sin_prefijo
+    ruta = next((r for r in _aportadas_del_taller(ctx) if sin(r) == nombre), "")
+    if not ruta:
+        raise ErrorApi(404, "esa imagen no está en el estilo")
+    return servir_fichero(peticion, ruta)
+
+
+@app.put("/api/presets-light/{preset_id}/aportadas")
+def describir_aportadas(preset_id: str, cuerpo: dict = Body(default=None)):
+    """Guarda lo que se dice de cada imagen y las ★: {descripciones, destacadas}.
+
+    No regenera nada: lo usan la guia (al regenerar el estilo) y la hoja de las
+    laminas (al dibujar una). Se dice en pantalla.
+    """
+    datos = _cuerpo(cuerpo)
+    ficha, ctx = _taller_con_laminas(preset_id)
+    _taller_libre(ctx)
+    light = _light()
+    sin = light._sin_prefijo
+    hay = {sin(r) for r in _aportadas_del_taller(ctx)}
+    descripciones = {}
+    for nombre, texto in (datos.get("descripciones") or {}).items():
+        texto = " ".join(str(texto or "").split())[:light.MAX_DESCRIPCION]
+        if sin(nombre) in hay and texto:
+            descripciones[sin(nombre)] = texto
+    destacadas = [sin(n) for n in (datos.get("destacadas") or [])
+                  if isinstance(n, str) and sin(n) in hay][:light.MAX_EN_LA_HOJA]
+    contenido = copy.deepcopy(ficha.get("datos") or {})
+    origen = contenido.setdefault("origen", {})
+    for clave, valor in (("estilo_descripciones", descripciones),
+                         ("estilo_destacadas", destacadas)):
+        if valor:
+            origen[clave] = valor
+        else:
+            origen.pop(clave, None)
+    try:
+        nueva = _presets().guardar("canal", ficha.get("nombre") or "canal", contenido,
+                                   nota=ficha.get("nota") or "",
+                                   miniatura=ficha.get("miniatura") or "",
+                                   pid=preset_id)
+    except _presets().ErrorPreset as fallo:
+        raise ErrorApi(400, str(fallo))
+    return {"preset": nueva}
 
 
 @app.put("/api/presets-light/{preset_id}")

@@ -233,8 +233,18 @@ def imagenes_de_parte(parte, encargo=None):
     donde esta el precio.
     """
     ficha = PARTES.get(parte) or {}
-    return sum(int((TAREAS_POR_ID.get(t) or {}).get("imagenes") or 0)
-               for t in ficha.get("tareas", ()))
+    total = 0
+    for tarea in ficha.get("tareas", ()):
+        if tarea == "referencias" and encargo is not None:
+            # las laminas de ESTE estilo: quitar o anadir alguna cambia la cuenta
+            try:
+                from . import laminas as _laminas              # noqa: PLC0415
+            except ImportError:
+                import laminas as _laminas                     # noqa: PLC0415
+            total += len(_laminas.ids_de(encargo))
+            continue
+        total += int((TAREAS_POR_ID.get(tarea) or {}).get("imagenes") or 0)
+    return total
 
 
 #: CAMBIAR EL IDIOMA NO ES REHACER EL ESTILO, y por eso no esta en PARTES: no
@@ -613,6 +623,21 @@ def validar_encargo(crudo):
     if cliente and not re.match(r"^cl_[a-z0-9_]{1,40}$", cliente):
         raise ErrorEncargo("«cliente» no es un proyecto válido")
     limpio["cliente"] = cliente
+    # LAS LAMINAS (`laminas.py`): cuales se quitaron de las seis de fabrica,
+    # lo que ensena cada una si se cambio y las anadidas, y con que imagenes
+    # tuyas se dibuja cada una. Solo se guarda lo que no es lo de fabrica: un
+    # estilo que nunca las toco no recibe ninguna clave nueva.
+    try:
+        from . import laminas as _laminas                  # noqa: PLC0415
+    except ImportError:
+        import laminas as _laminas                         # noqa: PLC0415
+    quitadas, propias, hoja = _laminas.config_de(datos)
+    if quitadas:
+        limpio["laminas_quitadas"] = quitadas
+    if propias:
+        limpio["laminas_propias"] = propias
+    if hoja != "comun":
+        limpio["laminas_hoja"] = hoja
 
     # AQUI NO HAY PERSONAJES DEL CANAL NI LLAMADAS A LA ACCION, y las dos
     # ausencias son decisiones:

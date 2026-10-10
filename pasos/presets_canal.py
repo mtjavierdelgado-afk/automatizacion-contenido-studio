@@ -189,6 +189,9 @@ TIPOS = {
 #: imagenes que se adjuntaron, asi que rehacer la guia no las vuelve a pedir.
 CLAVES_ORIGEN = ("estilo_prompt", "estilo_imagenes", "estilo_descripciones",
                  "estilo_destacadas",
+                 # las laminas a mano (`laminas.py`): quitadas, cambiadas o
+                 # anadidas, y con que imagenes se dibuja cada una
+                 "laminas_quitadas", "laminas_propias", "laminas_hoja",
                  "tono_prompt",
                  "voz_prompt", "voz_id", "idioma", "ritmo", "taller", "feedback",
                  # el espanol de Latinoamerica: sin esto, rehacer una parte del

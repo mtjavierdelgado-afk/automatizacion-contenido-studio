@@ -502,6 +502,7 @@ const API = {
   presetLight: id => `${BASE}/api/presets-light/${encodeURIComponent(id)}`,
   presetLightPlan: () => `${BASE}/api/presets-light/plan`,
   presetLightRegenerar: id => `${BASE}/api/presets-light/${encodeURIComponent(id)}/regenerar`,
+  presetLightLaminas: id => `${BASE}/api/presets-light/${encodeURIComponent(id)}/laminas`,
   // el buzón donde esperan las imágenes de apoyo antes de que exista el taller
   // EL REPASO: lo que se escribe MIRANDO el vídeo montado. Las notas viven en
   // su fichero y no en los params (comentar no puede dejar el vídeo obsoleto);
@@ -2510,13 +2511,26 @@ function seccionZonaHoraria() {
     + `${zona.desfase || '?'}). Es la hora que ves en el chat del asistente y en tus vídeos.`));
   const lista = zonasDelNavegador();
   if (elegida && !lista.includes(elegida)) lista.unshift(elegida);
+  /* CON BUSCADOR: son más de cuatrocientas zonas, y en una lista a pelo
+     encontrar «Lima» era bajar media pantalla. Se escribe la ciudad o el país
+     y la lista se queda con las que coinciden. */
+  const selector = h('select', {
+    'aria-label': 'Zona horaria',
+    onchange: ev => guardarZonaHoraria(ev.target.value),
+  });
+  const rellenar = filtro => {
+    const f = String(filtro || '').trim().toLowerCase().replace(/\s+/g, '_');
+    vaciar(selector);
+    selector.appendChild(h('option', { value: '', selected: !elegida }, '— la del servidor —'));
+    lista.filter(z => !f || z.toLowerCase().includes(f) || z === elegida)
+      .forEach(z => selector.appendChild(
+        h('option', { value: z, selected: z === elegida }, z.replace(/_/g, ' '))));
+  };
+  rellenar('');
   caja.appendChild(h('div', { clase: 'fila' },
-    h('select', {
-      'aria-label': 'Zona horaria',
-      onchange: ev => guardarZonaHoraria(ev.target.value),
-    },
-      h('option', { value: '', selected: !elegida }, '— la del servidor —'),
-      ...lista.map(z => h('option', { value: z, selected: z === elegida }, z.replace(/_/g, ' ')))),
+    h('input', { type: 'search', placeholder: 'busca tu ciudad (Lima, Madrid, Mexico…)',
+      'aria-label': 'Buscar zona horaria', oninput: ev => rellenar(ev.target.value) }),
+    selector,
     delNavegador && delNavegador !== elegida
       ? h('button', { clase: 'mini primario', onclick: () => guardarZonaHoraria(delNavegador) },
         `Usar la de este navegador (${delNavegador.replace(/_/g, ' ')})`)
@@ -5578,6 +5592,13 @@ function dialogo(op) {
     };
     const campo = c => {
       valores[c.clave] = c.valor === undefined ? '' : c.valor;
+      if (c.tipo === 'textarea') {
+        const area = h('textarea', { rows: 3, placeholder: c.pista || '',
+          oninput: ev => { valores[c.clave] = ev.target.value; } });
+        area.value = c.valor || '';
+        return h('label', { clase: 'campo' }, h('span', {}, c.etiqueta), area,
+          c.ayuda ? h('span', { clase: 'meta' }, c.ayuda) : null);
+      }
       const control = c.tipo === 'select'
         ? h('select', { onchange: ev => { valores[c.clave] = ev.target.value; } },
           ...(c.opciones || []).map(o => h('option', { value: o.valor, selected: o.valor === c.valor }, o.nombre)))
@@ -5601,7 +5622,7 @@ function dialogo(op) {
     capa.addEventListener('click', ev => { if (ev.target === capa) cerrar(null); });
     document.addEventListener('keydown', teclas);
     document.body.appendChild(capa);
-    setTimeout(() => { const f = formulario.querySelector('input, select'); if (f) f.focus(); }, 0);
+    setTimeout(() => { const f = formulario.querySelector('input, select, textarea'); if (f) f.focus(); }, 0);
   });
 }
 
@@ -10226,9 +10247,9 @@ function vistaCrearLight() {
      las que se redacta cada guion del canal, así que cuanto más concreto sea
      menos se lo inventa. */
   cajas.appendChild(bloqueLight('🗣️ Tono del guion', 'cómo se cuenta, nunca de qué',
-    campoArea('', e.tono_prompt, v => { e.tono_prompt = v; tocarEncargoLight(); },
+    conGuia(campoArea('', e.tono_prompt, v => { e.tono_prompt = v; tocarEncargoLight(); },
       'como quien te lo cuenta en la barra de un bar y del tema sabe más que tú: '
-      + 'frases cortas, sin adjetivos de relleno, los datos hablan solos')));
+      + 'frases cortas, sin adjetivos de relleno, los datos hablan solos'))));
 
   /* EL RITMO VA ANTES QUE LA VOZ, y no es orden estético: el ritmo entra en la
      decisión de la voz —«el montaje va a planos de 2 s»— y además le rellena la
@@ -10237,8 +10258,8 @@ function vistaCrearLight() {
     sliderRitmo(e.ritmo, v => { e.ritmo = v; tocarEncargoLight(); })));
 
   cajas.appendChild(bloqueLight('🎙️ Voz', 'quién lo locuta',
-    campoArea('', e.voz_prompt, v => { e.voz_prompt = v; tocarEncargoLight(); },
-      'grave, pausada, sin sonar a locutor de anuncio'),
+    conGuia(campoArea('', e.voz_prompt, v => { e.voz_prompt = v; tocarEncargoLight(); },
+      'grave, pausada, sin sonar a locutor de anuncio')),
     selectorVozPropiaLight(e)));
 
   cajas.appendChild(bloqueLight('🌐 Idioma', 'se cambia luego sin regenerar nada',
@@ -10335,6 +10356,20 @@ function pintarRevision(panel, r, area) {
   }
 }
 
+/* EL CAMPO AL QUE MIRAN «Guía» y «Revisar»: el marcado con `conGuia`, y si no
+   hay ninguno el primero. Con «el primero» a secas, en la ficha del tono se
+   revisaba la guía de dos mil palabras en vez de lo que habías pedido, y en el
+   estilo gráfico la descripción de una imagen en vez de las indicaciones. */
+function conGuia(campo) {
+  const area = campo.querySelector('textarea');
+  if (area) area.dataset.guia = '1';
+  return campo;
+}
+
+function campoDeLaGuia(mandos) {
+  return mandos.querySelector('textarea[data-guia]') || mandos.querySelector('textarea');
+}
+
 function bloqueLight(titulo, porque, ...contenido) {
   const mandos = h('div', { clase: 'mandos' }, ...contenido);
   const guia = GUIA_DE_BLOQUE[titulo];
@@ -10343,8 +10378,8 @@ function bloqueLight(titulo, porque, ...contenido) {
       h('div', { clase: 'titulo-fila' },
         h('h3', {}, titulo),
         // la de las llamadas a la accion solo copia: el bloque tiene tres campos
-        guia ? botonGuia(guia, guia === 'cta' ? null : () => mandos.querySelector('textarea')) : null,
-        guia && guia !== 'cta' ? botonRevisar(guia, () => mandos.querySelector('textarea'), mandos) : null),
+        guia ? botonGuia(guia, guia === 'cta' ? null : () => campoDeLaGuia(mandos)) : null,
+        guia && guia !== 'cta' ? botonRevisar(guia, () => campoDeLaGuia(mandos), mandos) : null),
       porque ? h('span', { clase: 'meta' }, porque) : null),
     mandos);
 }
@@ -10388,9 +10423,9 @@ function camposEstiloLight() {
   const e = encargoLight();
   const caja = h('div', {});
   caja.appendChild(imagenesDeApoyoLight(e, tocarEncargoLight));
-  caja.appendChild(campoArea('Indicaciones (opcional)', e.estilo_prompt,
+  caja.appendChild(conGuia(campoArea('Indicaciones (opcional)', e.estilo_prompt,
     v => { e.estilo_prompt = v; tocarEncargoLight(); },
-    'igual pero más frío, con menos detalle en los fondos'));
+    'igual pero más frío, con menos detalle en los fondos')));
   return caja;
 }
 
@@ -10829,6 +10864,7 @@ function vistaPresetLight() {
   // 🎨 el estilo gráfico, con sus muestras en fila
   const grafico = h('div', {});
   grafico.appendChild(bannerMuestras(ficha));
+  grafico.appendChild(laminasDelEstilo(ficha));
   /* SIN caja de «qué le cambiarías»: la de indicaciones es esa caja. Eran dos
      campos de texto seguidos preguntando lo mismo, y encima el de arriba se
      guardaba con el estilo y el de abajo no. Se queda el que se guarda: una
@@ -10932,14 +10968,175 @@ function bannerMuestras(ficha) {
 
   if (sueltas.length) {
     caja.appendChild(tiraDeImagenes(ficha, sueltas));
-    caja.appendChild(h('div', { clase: 'pista una-linea' },
-      `Las ${sueltas.length} referencias que copia cada plano, con el texto que `
-      + 'llevarían en el vídeo. Al generador van sin nada encima.'));
+    caja.appendChild(h('div', { clase: 'pista' },
+      `Tus ${sueltas.length} láminas con un TEXTO DE EJEMPLO encima, para ver cómo `
+      + 'quedarían una cartela y un subtítulo sobre tu estilo. Ese texto lo pone el '
+      + 'Estudio (es siempre el mismo, no sale de tus imágenes ni de tus vídeos) y '
+      + 'nunca va al generador: cada plano recibe las láminas limpias, las de abajo.'));
   } else {
     caja.appendChild(h('div', { clase: 'pista' },
       'Este estilo no tiene muestras todavía.'));
   }
   return caja;
+}
+
+/* ------------------------------------------------ LAS LÁMINAS DEL ESTILO
+ *
+ * Lo que de verdad copia cada plano de cada vídeo: no tus imágenes, sino estas
+ * láminas dibujadas en tu estilo (`pasos/laminas.py`). Aquí se ven LIMPIAS,
+ * con lo que enseña cada una, y se regeneran, se cambian, se quitan o se
+ * añaden. Dibujar una cuesta una imagen; quitar o devolver una ya dibujada,
+ * nada. Los vídeos ya creados no cambian: lo llevan los nuevos (o el que traiga
+ * el estilo desde su Encargo). */
+function laminasDelEstilo(ficha) {
+  const caja = h('div', { clase: 'laminas-estilo' });
+  const origen = (ficha.datos || {}).origen || {};
+  if (!origen.estilo_imagenes || !origen.taller) return caja;
+  const est = APP.light.laminas;
+  if (!est || est.preset !== ficha.id) {
+    APP.light.laminas = { preset: ficha.id, datos: null, error: '' };
+    pedir(API.presetLightLaminas(ficha.id))
+      .then(d => { APP.light.laminas = { preset: ficha.id, datos: d, error: '' }; })
+      .catch(e => { APP.light.laminas = { preset: ficha.id, datos: null, error: e.message }; })
+      .then(() => {
+        const vieja = document.querySelector('.light-preset .laminas-estilo');
+        if (vieja) vieja.replaceWith(laminasDelEstilo(ficha));
+      });
+  }
+  const d = (APP.light.laminas || {}).datos;
+  caja.appendChild(h('h3', {}, 'Las láminas de tu estilo'));
+  caja.appendChild(h('div', { clase: 'pista' },
+    'Qué es una lámina: tus imágenes de referencia NO van a cada plano. Con ellas '
+    + 'se escribe la guía del estilo (las mira todas) y la IA dibuja, en tu estilo, '
+    + 'estas láminas: una cara, unas personas, un interior, un exterior, un objeto, '
+    + 'un diagrama… Cada plano de cada vídeo recibe ESTAS láminas como referencia y '
+    + 'copia de ellas el trazo, la paleta y la luz. Por eso son lo que da '
+    + 'consistencia a tus vídeos: si una no te convence, regenérala, cámbiale lo '
+    + 'que enseña o quítala.'));
+  if ((APP.light.laminas || {}).error) {
+    caja.appendChild(h('div', { clase: 'caja-info' },
+      `no se han podido leer las láminas: ${APP.light.laminas.error}`));
+    return caja;
+  }
+  if (!d) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'leyendo las láminas…'));
+    return caja;
+  }
+  const precio = d.usd_por_lamina ? ` (≈ ${usdCorto(d.usd_por_lamina)})` : '';
+  const rejilla = h('div', { clase: 'rejilla-laminas' });
+  d.laminas.forEach((l, i) => {
+    rejilla.appendChild(h('div', { clase: 'lamina' },
+      l.url
+        ? h('img', { src: `${BASE}${l.url}`, alt: l.titulo, loading: 'lazy',
+          onclick: () => lupa(`${BASE}${l.url}`) })
+        : h('div', { clase: 'sin-cara' }, 'sin dibujar'),
+      h('div', { clase: 'lamina-titulo' }, `${i + 1}. ${l.titulo}`),
+      h('div', { clase: 'meta' }, l.explicacion),
+      h('div', { clase: 'herramientas' },
+        h('button', { clase: 'mini', title: `Dibujarla otra vez: una imagen${precio}`,
+          onclick: () => regenerarLamina(ficha, l, precio) }, 'Regenerar'),
+        h('button', { clase: 'mini', title: 'Que enseñe otra cosa',
+          onclick: () => cambiarLamina(ficha, l, precio) }, 'Cambiar qué enseña'),
+        d.laminas.length > d.min
+          ? h('button', { clase: 'mini fantasma', title: 'Sacarla de la hoja (gratis)',
+            onclick: () => accionLaminas(ficha, { accion: 'quitar', lamina: l.id },
+              `¿Quitar la lámina «${l.titulo}»?\n\nSale de la hoja que recibe cada plano. `
+              + 'Su imagen se guarda: devolverla después no cuesta nada.') }, 'Quitar')
+          : null)));
+  });
+  caja.appendChild(rejilla);
+
+  const pie = h('div', { clase: 'fila' });
+  if (d.laminas.length < d.max) {
+    pie.appendChild(h('button', { clase: 'mini', onclick: () => nuevaLamina(ficha, precio) },
+      `+ Añadir una lámina${precio}`));
+  }
+  (d.quitadas || []).forEach(l => {
+    pie.appendChild(h('button', { clase: 'mini fantasma',
+      title: l.url ? 'Ya está dibujada: devolverla es gratis' : `Hay que dibujarla${precio}`,
+      onclick: () => accionLaminas(ficha, { accion: 'restaurar', lamina: l.id }) },
+    `↺ Devolver «${l.titulo}»`));
+  });
+  caja.appendChild(pie);
+  caja.appendChild(h('div', { clase: 'meta' },
+    `${d.laminas.length} de ${d.max} láminas. Caben ${d.max} porque cada plano recibe `
+    + `una sola hoja con hasta ${d.max} referencias de estilo; pasar de ahí obliga a `
+    + 'cambiar el motor de imágenes, que ahora mismo está reservado por otra fase '
+    + '(Etapa Foto A). Lo que sí se puede: que cada lámina enseñe lo que más sale '
+    + 'en tus vídeos (por ejemplo «una cocina de noche con luz cálida»).'));
+
+  if (d.imagenes > d.en_la_hoja) {
+    caja.appendChild(campoSelect('Con qué imágenes tuyas se dibuja cada lámina',
+      d.hoja, [
+        { valor: 'comun', nombre: `Las mismas ${d.en_la_hoja} para todas (las ★ primero)` },
+        { valor: 'repartida', nombre: `Un grupo distinto para cada una: así cuentan tus ${d.imagenes} (mismo coste)` },
+      ], v => accionLaminas(ficha, { accion: 'hoja', hoja: v })));
+    caja.appendChild(h('div', { clase: 'meta' },
+      `Subiste ${d.imagenes} imágenes. La guía las mira todas; cada lámina se dibuja `
+      + `mirando una hoja de ${d.en_la_hoja}. Cambiar esto vale para las láminas que `
+      + 'dibujes a partir de ahora (no redibuja nada).'));
+  }
+  caja.appendChild(h('div', { clase: 'meta' },
+    'Cambiar las láminas no toca los vídeos ya creados: lo llevan los vídeos nuevos, '
+    + 'y en un vídeo ya hecho, «Su estilo» en el Encargo te deja traerlo.'));
+  return caja;
+}
+
+async function regenerarLamina(ficha, lamina, precio) {
+  const r = await dialogo({
+    titulo: `Regenerar «${lamina.titulo}»`,
+    texto: `Se dibuja otra vez con tu estilo: una imagen${precio}. Si quieres, di qué le corregirías.`,
+    campos: [{ clave: 'texto', tipo: 'textarea', etiqueta: 'Qué le corregirías (opcional)',
+      pista: 'sin sombras duras, y la persona mirando a cámara' }],
+    aceptar: 'Regenerar',
+  });
+  if (!r) return;
+  accionLaminas(ficha, { accion: 'regenerar', lamina: lamina.id, texto: r.texto || '' });
+}
+
+async function cambiarLamina(ficha, lamina, precio) {
+  const r = await dialogo({
+    titulo: `Qué enseña «${lamina.titulo}»`,
+    texto: `Se guarda con el estilo y se dibuja ya: una imagen${precio}.`
+      + (lamina.fabrica ? ' Déjalo vacío para volver a lo de fábrica.' : ''),
+    campos: [{ clave: 'texto', tipo: 'textarea', etiqueta: 'Lo que tiene que enseñar',
+      valor: lamina.texto || '', pista: 'una cocina pequeña de noche, con luz cálida y sin personas' }],
+    aceptar: 'Guardar y dibujar',
+  });
+  if (!r) return;
+  accionLaminas(ficha, { accion: 'cambiar', lamina: lamina.id, texto: r.texto || '' });
+}
+
+async function nuevaLamina(ficha, precio) {
+  const r = await dialogo({
+    titulo: 'Una lámina más',
+    texto: `Piensa en algo que salga a menudo en tus vídeos y que las otras no enseñen. Una imagen${precio}.`,
+    campos: [{ clave: 'texto', tipo: 'textarea', etiqueta: 'Lo que tiene que enseñar',
+      pista: 'un baño con espejo iluminado, plano general' }],
+    aceptar: 'Dibujarla',
+  });
+  if (!r) return;
+  accionLaminas(ficha, { accion: 'nueva', texto: r.texto || '' });
+}
+
+async function accionLaminas(ficha, cuerpo, pregunta) {
+  if (pregunta && !window.confirm(pregunta)) return;
+  try {
+    const datos = await pedir(API.presetLightLaminas(ficha.id), { method: 'POST', cuerpo });
+    APP.light.laminas = null;
+    if (datos.trabajo_id) {
+      irALight('generando', { plan: datos.plan || null, abierto: ficha.id });
+      seguirTrabajo(CLAVE_LIGHT, datos.trabajo_id, alTerminarLight, () => pintarLight());
+      return;
+    }
+    if (datos.preset && APP.light.datos) {
+      APP.light.datos.presets = presetsLight().map(p => (p.id === ficha.id ? datos.preset : p));
+    }
+    toast('guardado');
+    pintarLight();
+  } catch (e) {
+    toast(`no se ha podido: ${e.message}`, true);
+  }
 }
 
 /* Una fila de imágenes servidas desde la carpeta del estilo. El sello del
@@ -11184,7 +11381,7 @@ function selectorVozPropiaLight(e) {
 function selectorVozLight(ficha, voz, voces, guardar, alElegir) {
   const estado = (APP.light.picker && APP.light.picker.preset === ficha.id)
     ? APP.light.picker
-    : (APP.light.picker = { preset: ficha.id, abierto: false, busca: '' });
+    : (APP.light.picker = { preset: ficha.id, abierto: false, busca: '', genero: '', pais: '' });
   const idioma = ficha.idioma || 'es';
 
   /* LA VOZ PUESTA, AUNQUE NO ESTÉ EN LA LISTA. Si el estilo cambió de idioma, la
@@ -11208,8 +11405,10 @@ function selectorVozLight(ficha, voz, voces, guardar, alElegir) {
   const pintarRejilla = () => {
     vaciar(rejilla);
     const filtro = estado.busca.trim().toLowerCase();
-    const visibles = voces.filter(v => !filtro
-      || `${v.nombre} ${v.descripcion || ''} ${v.id}`.toLowerCase().includes(filtro));
+    const visibles = voces.filter(v => (!filtro
+      || `${v.nombre} ${v.descripcion || ''} ${v.id}`.toLowerCase().includes(filtro))
+      && (!estado.genero || generoDeVoz(v) === estado.genero)
+      && (!estado.pais || String(v.pais || '').toUpperCase() === estado.pais));
     const TOPE = 240;
     // Nada se recorta sin decir cuánto falta: una rejilla cortada en seco se lee
     // como «esto es lo que hay».
@@ -11253,8 +11452,29 @@ function selectorVozLight(ficha, voz, voces, guardar, alElegir) {
     value: estado.busca,
     oninput: ev => { estado.busca = ev.target.value; pintarRejilla(); },
   });
+  /* FILTROS por voz de hombre / de mujer y por país: con cientos de voces la
+     búsqueda por nombre no basta. Salen de lo que trae el catálogo; una voz sin
+     el dato no se esconde con «todos». */
+  const generos = [...new Set(voces.map(generoDeVoz).filter(Boolean))];
+  const paises = [...new Set(voces.map(v => String(v.pais || '').toUpperCase()).filter(Boolean))].sort();
+  const filtroGenero = generos.length > 1 ? h('select', {
+    'aria-label': 'Filtrar por tipo de voz',
+    onchange: ev => { estado.genero = ev.target.value; pintarRejilla(); },
+  }, h('option', { value: '' }, 'hombre y mujer'),
+  ...generos.map(g => h('option', { value: g, selected: g === estado.genero },
+    { masculina: 'voz de hombre', femenina: 'voz de mujer', neutra: 'neutra' }[g] || g))) : null;
+  const filtroPais = paises.length > 1 ? h('select', {
+    'aria-label': 'Filtrar por país',
+    onchange: ev => { estado.pais = ev.target.value; pintarRejilla(); },
+  }, h('option', { value: '' }, 'todos los países'),
+  ...paises.map(p => h('option', { value: p, selected: p === estado.pais }, nombrePais(p)))) : null;
   const panel = h('div', { clase: 'panel-voces' },
-    h('div', { clase: 'fila' }, buscador, cuenta), rejilla);
+    h('div', { clase: 'fila' }, buscador, filtroGenero, filtroPais, cuenta),
+    h('div', { clase: 'meta' },
+      '▶ escucha una frase de muestra sin elegirla (gasta unos pocos caracteres '
+      + 'de tu cuenta de Cartesia). Si no eliges ninguna, la elige el sistema '
+      + 'leyendo tu descripción.'),
+    rejilla);
   const pista = h('div', { clase: 'pista' },
     `${voces.length} voces nativas de ${nombreIdiomaLight(idioma)}, `
     + 'cada una con su escucha');
@@ -11277,6 +11497,18 @@ function selectorVozLight(ficha, voz, voces, guardar, alElegir) {
     h('label', {}, 'Voz'), disparo, panel, pista);
   aplicar();
   return campo;
+}
+
+function generoDeVoz(v) {
+  const g = String(v.genero || '').toLowerCase();
+  if (g.startsWith('masc') || g === 'male') return 'masculina';
+  if (g.startsWith('fem') || g === 'female') return 'femenina';
+  if (g) return 'neutra';
+  return '';
+}
+
+function nombrePais(codigo) {
+  try { return new Intl.DisplayNames(['es'], { type: 'region' }).of(codigo) || codigo; } catch (e) { return codigo; }
 }
 
 /* Una celda: su play, su nombre y de dónde es. El play NO elige —darle es
@@ -11479,15 +11711,16 @@ function fuenteDeEstiloLight(ficha) {
     });
 
   const caja = h('div', { clase: 'fuente-estilo' });
+  caja.appendChild(imagenesDelEstilo(ficha, f));
   caja.appendChild(h('div', { clase: 'meta' },
-    'Otras imágenes a las que parecerse. Rehace el dibujo entero y deja el '
-    + 'tono, la voz y el ritmo como están; las de ahora siguen puestas hasta '
-    + 'que pulses Regenerar.'));
+    'Añadir imágenes nuevas (se suman a las de arriba). Añadir o quitar imágenes '
+    + 'rehace la guía y las láminas al pulsar Regenerar, y deja el tono, la voz y '
+    + 'el ritmo como están.'));
   caja.appendChild(imagenesDeApoyoLight(f, repintarPieDeEstilo,
     `aportadas-${ficha.id}`));
-  caja.appendChild(campoArea('Indicaciones (opcional)', f.prompt,
+  caja.appendChild(conGuia(campoArea('Indicaciones (opcional)', f.prompt,
     v => { f.prompt = v; repintarPieDeEstilo(); },
-    'igual pero más frío y con menos detalle en los fondos'));
+    'igual pero más frío y con menos detalle en los fondos')));
   caja.appendChild(h('div', { clase: 'meta' },
     'Lo que el material no dice por sí solo. Reescribe la guía y rehace las '
     + 'muestras; se guarda con el estilo y se vuelve a aplicar si lo regeneras.'));
@@ -11502,6 +11735,7 @@ function fuenteCambiadaLight(ficha) {
   if (!f || f.preset !== ficha.id) return false;
   const origen = (ficha.datos || {}).origen || {};
   if (String(f.prompt || '').trim() !== (origen.estilo_prompt || '')) return true;
+  if ((f.quitar || []).length) return true;
   return (f.estilo_imagenes || []).length > 0;
 }
 
@@ -11510,12 +11744,108 @@ function fuenteCambiadaLight(ficha) {
    de «me manda una lista vacía», y sólo la segunda dice «quítalas». */
 function fuenteParaServidor(_ficha) {
   const f = APP.light.fuente || {};
-  return {
+  const cuerpo = {
     estilo_prompt: String(f.prompt || '').trim(),
     estilo_imagenes: (f.estilo_imagenes || []).map(x => x.nombre),
     estilo_descripciones: descripcionesDeAportadas(f.estilo_imagenes),
     estilo_destacadas: (f.estilo_imagenes || []).filter(x => x.destacada).map(x => x.nombre),
   };
+  /* LAS QUE YA TENÍA el estilo y siguen: el servidor las conserva y suma las
+     nuevas detrás. Con lo que se dijo de ellas, que va en la misma lista. */
+  if (Array.isArray(f.existentes)) {
+    const siguen = f.existentes.filter(x => !(f.quitar || []).includes(x.nombre));
+    cuerpo.conservar = siguen.map(x => x.nombre);
+    siguen.forEach(x => {
+      if (String(x.descripcion || '').trim()) cuerpo.estilo_descripciones[x.nombre] = x.descripcion;
+      if (x.destacada) cuerpo.estilo_destacadas.unshift(x.nombre);
+    });
+  }
+  return cuerpo;
+}
+
+/* TUS IMÁGENES DE REFERENCIA, las que ya tiene el estilo. Se ven en grande,
+   se describe cada una y se marca con ★ —eso se guarda solo y no regenera
+   nada: lo usan la guía y las láminas la próxima vez que se dibujen— y se
+   pueden quitar (eso sí rehace el estilo, al pulsar Regenerar). */
+function imagenesDelEstilo(ficha, f) {
+  const caja = h('div', { clase: 'imagenes-del-estilo' });
+  if (f.errorExistentes) {
+    caja.appendChild(h('div', { clase: 'meta' },
+      `no se han podido leer tus imágenes de referencia (${f.errorExistentes}); siguen puestas`));
+    return caja;
+  }
+  if (!Array.isArray(f.existentes)) {
+    if (!f.leyendo) {
+      f.leyendo = true;
+      pedir(`${API.presetLight(ficha.id)}/aportadas`)
+        .then(d => { f.existentes = d.imagenes || []; f.enLaHoja = d.en_la_hoja || 8; })
+        /* SIN LISTA NO SE MANDA `conservar`: una lista vacía diría «quítalas
+           todas» y el estilo se quedaría sin material. */
+        .catch(e => { f.errorExistentes = e.message || 'error'; })
+        .then(() => {
+          f.leyendo = false;
+          const vieja = document.querySelector('.light-preset .imagenes-del-estilo');
+          if (vieja) vieja.replaceWith(imagenesDelEstilo(ficha, f));
+        });
+    }
+    caja.appendChild(h('div', { clase: 'meta' }, 'leyendo tus imágenes…'));
+    return caja;
+  }
+  if (!f.existentes.length) return caja;
+  f.quitar = f.quitar || [];
+  const marcadas = f.existentes.filter(x => x.destacada).length;
+  caja.appendChild(h('label', {}, `Tus imágenes de referencia (${f.existentes.length})`));
+  caja.appendChild(h('div', { clase: 'meta' },
+    'La guía del estilo se escribió mirándolas todas. Escribe qué mirar en cada '
+    + `una y marca con ★ las que deben ir sí o sí a la hoja de ${f.enLaHoja || 8} con `
+    + 'la que se dibuja cada lámina. Esto se guarda solo y no gasta nada.'));
+  const rejilla = h('div', { clase: 'rejilla-aportadas' });
+  const guardar = () => {
+    clearTimeout(f.guardando);
+    f.guardando = setTimeout(async () => {
+      const descripciones = {};
+      f.existentes.forEach(x => { if (String(x.descripcion || '').trim()) descripciones[x.nombre] = x.descripcion; });
+      try {
+        const d = await pedir(`${API.presetLight(ficha.id)}/aportadas`, { method: 'PUT',
+          cuerpo: { descripciones, destacadas: f.existentes.filter(x => x.destacada).map(x => x.nombre) } });
+        if (d.preset && APP.light.datos) {
+          APP.light.datos.presets = presetsLight().map(p => (p.id === ficha.id ? d.preset : p));
+        }
+      } catch (e) { toast(`no se ha podido guardar: ${e.message}`, true); }
+    }, 900);
+  };
+  f.existentes.forEach((x, i) => {
+    const fuera = f.quitar.includes(x.nombre);
+    const url = `${BASE}${x.url}`;
+    const entrada = h('input', { type: 'text', value: x.descripcion || '',
+      placeholder: 'qué mirar en esta (opcional)',
+      oninput: ev => { x.descripcion = ev.target.value; guardar(); } });
+    rejilla.appendChild(h('div', { clase: `aportada${fuera ? ' quitada' : ''}` },
+      h('img', { src: url, alt: '', loading: 'lazy',
+        onclick: () => lupa(url, `${i + 1} de ${f.existentes.length}`) }),
+      h('div', { clase: 'herramientas' },
+        h('button', { clase: `mini${x.destacada ? ' activo' : ''}`,
+          title: x.destacada ? 'Quitar la ★' : `Que vaya sí o sí a la hoja de las láminas`,
+          disabled: !x.destacada && marcadas >= (f.enLaHoja || 8),
+          onclick: () => { x.destacada = !x.destacada; guardar();
+            const vieja = document.querySelector('.light-preset .imagenes-del-estilo');
+            if (vieja) vieja.replaceWith(imagenesDelEstilo(ficha, f)); } }, '★'),
+        h('button', { clase: 'mini fantasma',
+          title: fuera ? 'Volver a ponerla' : 'Quitarla del estilo (al pulsar Regenerar)',
+          onclick: () => {
+            f.quitar = fuera ? f.quitar.filter(n => n !== x.nombre) : f.quitar.concat([x.nombre]);
+            const vieja = document.querySelector('.light-preset .imagenes-del-estilo');
+            if (vieja) vieja.replaceWith(imagenesDelEstilo(ficha, f));
+            repintarPieDeEstilo();
+          } }, fuera ? '↺ Volver a poner' : '✕ Quitar')),
+      entrada));
+  });
+  caja.appendChild(rejilla);
+  if (f.quitar.length) {
+    caja.appendChild(h('div', { clase: 'aviso-quitar meta' },
+      `Vas a quitar ${f.quitar.length}: se aplica al pulsar Regenerar abajo (rehace la guía y las láminas).`));
+  }
+  return caja;
 }
 
 /* --------------------------------------- volver a escribir la GUÍA DE TONO
@@ -11542,9 +11872,9 @@ function fuenteDeTonoLight(ficha) {
     'Cómo quieres que suene, escrito de nuevo. Al pulsar Regenerar reescribe '
     + 'las instrucciones enteras —no cuesta ninguna imagen—; la guía de ahora '
     + 'sigue puesta hasta entonces.'));
-  caja.appendChild(campoArea('', f.prompt,
+  caja.appendChild(conGuia(campoArea('', f.prompt,
     v => { f.prompt = v; repintarPieDeEstilo(); },
-    'serio pero cercano, sin dramatismo, frases cortas'));
+    'serio pero cercano, sin dramatismo, frases cortas')));
   return caja;
 }
 
@@ -11627,7 +11957,12 @@ function partesPedidas(ficha) {
    de dibujarse el número se quedó mintiendo. El precio sale de donde está el
    precio (`presets_light.imagenes_de_parte`). */
 function imagenesDePartes(pedidas) {
-  const tabla = (APP.light.datos || {}).imagenes_por_parte || {};
+  const tabla = Object.assign({}, (APP.light.datos || {}).imagenes_por_parte || {});
+  // con las láminas de ESTE estilo a la vista, su cuenta (pueden ser 3 u 8)
+  const lam = (APP.light.laminas || {}).datos;
+  if (lam && APP.light.laminas.preset === APP.light.abierto && lam.imagenes_estilo !== undefined) {
+    tabla.estilo = lam.imagenes_estilo;
+  }
   const total = pedidas.reduce((suma, p) => suma + (Number(tabla[p]) || 0), 0);
   return total ? `${total} ${total === 1 ? 'imagen' : 'imágenes'}`
     : 'sin gastar imágenes';
@@ -12674,7 +13009,10 @@ function pintarAsistente() {
   $('#btn-historial-asistente').classList.toggle('activo', ASISTENTE.verHistorial);
 
   const campo = $('#asistente-texto');
-  campo.disabled = !listo || ocupada;
+  /* SE PUEDE ESCRIBIR MIENTRAS PIENSA: lo que se bloquea es ENVIAR (un turno
+     por charla). Con el campo bloqueado había que esperar para ir preparando
+     la siguiente pregunta. */
+  campo.disabled = !listo;
   campo.placeholder = listo
     ? 'Pregunta lo que quieras: un error, un paso parado, dónde está algo…'
     : 'Entra con tu cuenta de Claude para poder preguntar';

@@ -4088,6 +4088,120 @@ def probar_taller_oculto(cliente):
           "pero sigue abriendose por su id: es donde corre la generacion")
 
 
+def probar_laminas(cliente):
+    """Las laminas de un estilo: se ven, se quitan, se devuelven, y con limites.
+
+    No se dibuja nada (no hay clave de OpenAI): se prueba lo que decide ANTES
+    de gastar y lo que no gasta -- quitar y devolver una lamina ya dibujada
+    rehacen la lista de referencias sin pagar ninguna imagen.
+    """
+    seccion("MODO LIGHT: LAS LAMINAS DEL ESTILO")
+    respuesta, datos = cliente.post("/api/proyectos", {"nombre": "taller con laminas"})
+    tid = (datos.get("proyecto") or {}).get("id") or ""
+    config = os.path.join(cliente.carpeta, tid, "proyecto.json")
+    with open(config, "r", encoding="utf-8") as fh:
+        ficha = json.load(fh)
+    ficha["taller_de_preset"] = True
+    with open(config, "w", encoding="utf-8") as fh:
+        json.dump(ficha, fh)
+    dibujadas = os.path.join(cliente.carpeta, tid, "estilo", "dibujadas")
+    os.makedirs(dibujadas, exist_ok=True)
+    from PIL import Image
+    ejes = ["cara", "cuerpos", "interior", "exterior", "objeto", "diagrama"]
+    for indice, eje in enumerate(ejes):
+        Image.new("RGB", (64, 40), (indice * 30, 90, 160)).save(
+            os.path.join(dibujadas, f"{eje}.png"))
+    aportadas = os.path.join(cliente.carpeta, tid, "estilo", "aportadas")
+    os.makedirs(aportadas, exist_ok=True)
+    Image.new("RGB", (64, 40), (10, 10, 10)).save(os.path.join(aportadas, "01_a.png"))
+
+    respuesta, datos = cliente.post("/api/presets-canal", {
+        "tipo": "canal", "nombre": "Canal con laminas",
+        "datos": {"guion": {"idiomas_salida": ["es"]},
+                  "origen": {"estilo_prompt": "dibujo plano y limpio",
+                             "estilo_imagenes": ["a.png"],
+                             "tono_prompt": "serio pero cercano",
+                             "voz_prompt": "grave y pausada", "taller": tid}}})
+    pid = (datos.get("preset") or {}).get("id") or ""
+    ok(bool(pid), "se crea un estilo descrito con su taller")
+
+    respuesta, datos = cliente.get(f"/api/presets-light/{pid}/laminas")
+    igual(respuesta.status_code, 200, "las laminas se piden")
+    igual([l["id"] for l in datos.get("laminas") or []], ejes,
+          "un estilo sin tocar tiene las seis de fabrica, en orden")
+    ok(all(l.get("explicacion") and l.get("url") for l in datos["laminas"]),
+       "cada una dice que ensena y tiene su imagen limpia")
+    igual(datos.get("max"), 8, "caben 8: las de la hoja de cada plano")
+    ok(datos.get("usd_por_lamina") is not None, "y dice lo que cuesta dibujar una")
+    url = datos["laminas"][0]["url"]
+    respuesta = cliente.sesion.get(f"{cliente.base}{url}", timeout=30)
+    igual(respuesta.status_code, 200, "la imagen limpia se sirve")
+
+    respuesta, _ = cliente.post(f"/api/presets-light/{pid}/laminas",
+                                {"accion": "inventada"})
+    igual(respuesta.status_code, 400, "una accion inventada es un 400")
+    respuesta, _ = cliente.post(f"/api/presets-light/{pid}/laminas",
+                                {"accion": "nueva", "texto": "una"})
+    igual(respuesta.status_code, 400, "una lamina nueva sin decir que ensena, 400")
+    respuesta, _ = cliente.post(f"/api/presets-light/{pid}/laminas",
+                                {"accion": "quitar", "lamina": "../x"})
+    igual(respuesta.status_code, 400, "un nombre de lamina raro, 400")
+
+    respuesta, datos = cliente.get(f"/api/presets-light/{pid}/aportadas")
+    igual([x["nombre"] for x in datos.get("imagenes") or []], ["a.png"],
+          "la ficha ve las imagenes de referencia que ya tiene, sin el «NN_»")
+    respuesta = cliente.sesion.get(f"{cliente.base}{datos['imagenes'][0]['url']}",
+                                   timeout=30)
+    igual(respuesta.status_code, 200, "y las sirve")
+    respuesta, datos = cliente.put(f"/api/presets-light/{pid}/aportadas", {
+        "descripciones": {"a.png": "la luz de esta", "otra.png": "no esta"},
+        "destacadas": ["a.png", "otra.png"]})
+    igual(respuesta.status_code, 200, "describirlas se guarda sin regenerar")
+    origen = ((datos.get("preset") or {}).get("datos") or {}).get("origen") or {}
+    igual(origen.get("estilo_descripciones"), {"a.png": "la luz de esta"},
+          "solo de imagenes que estan")
+    igual(origen.get("estilo_destacadas"), ["a.png"], "y la ★ igual")
+    igual(origen.get("taller"), tid, "sin perder el taller")
+
+    respuesta, datos = cliente.post(f"/api/presets-light/{pid}/laminas",
+                                    {"accion": "hoja", "hoja": "repartida"})
+    igual(respuesta.status_code, 202, "cambiar la hoja se acepta")
+    igual(datos.get("trabajo_id"), "", "y no lanza nada: no se dibuja")
+    respuesta, datos = cliente.get(f"/api/presets-light/{pid}/laminas")
+    igual(datos.get("hoja"), "repartida", "la hoja queda guardada en el estilo")
+
+    respuesta, datos = cliente.post(f"/api/presets-light/{pid}/laminas",
+                                    {"accion": "quitar", "lamina": "diagrama"})
+    igual(respuesta.status_code, 202, "quitar una lamina lanza el rehacer")
+    igual(datos.get("imagenes"), 0, "y no paga ninguna imagen")
+    igual((datos.get("plan") or {}).get("imagenes"), 0,
+          "y la pantalla de generando tampoco dice que vaya a pagar seis")
+    fin = esperar_trabajo(cliente, datos.get("trabajo_id"))
+    igual(fin.get("estado"), "listo",
+          f"y termina bien ({fin.get('error') or ''})")
+    with open(os.path.join(cliente.carpeta, tid, "estado.json"), encoding="utf-8") as fh:
+        estado = json.load(fh)
+    refs = ((((estado.get("pasos") or {}).get("assets") or {}).get("params") or {}
+             ).get("estilo") or {}).get("referencias") or []
+    igual([os.path.basename(r) for r in refs], [f"{e}.png" for e in ejes[:5]],
+          "la quitada sale de las referencias y las otras siguen en orden")
+    ok(os.path.isfile(os.path.join(dibujadas, "diagrama.png")),
+       "y su imagen se queda en el disco para devolverla gratis")
+    respuesta, datos = cliente.get(f"/api/presets-light/{pid}/laminas")
+    igual([l["id"] for l in datos.get("quitadas") or []], ["diagrama"],
+          "el estilo recuerda cual se quito")
+
+    respuesta, datos = cliente.post(f"/api/presets-light/{pid}/laminas",
+                                    {"accion": "restaurar", "lamina": "diagrama"})
+    igual(datos.get("imagenes"), 0, "devolverla tampoco paga: ya estaba dibujada")
+    fin = esperar_trabajo(cliente, datos.get("trabajo_id"))
+    igual(fin.get("estado"), "listo",
+          f"y termina bien ({fin.get('error') or ''})")
+    respuesta, datos = cliente.get(f"/api/presets-light/{pid}/laminas")
+    igual(len(datos.get("laminas") or []), 6, "y vuelve a haber seis")
+    cliente.delete(f"/api/presets-light/{pid}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
     parser.add_argument("--conservar", action="store_true",
@@ -4124,6 +4238,7 @@ def main():
         probar_escucha_de_voz_light(cliente)
         probar_muestras_recuperadas(cliente)
         probar_imagenes_de_apoyo(cliente)
+        probar_laminas(cliente)
         probar_taller_oculto(cliente)
         probar_cartelas_y_transiciones(cliente, pid, os.path.join(carpeta, pid))
         probar_direccion(cliente, pid)

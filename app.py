@@ -2939,14 +2939,16 @@ def elegir_estilo(pid: str, cuerpo: dict = Body(default=None)):
 
 def _correr_guia_estilo(avisar, ctx, rutas, ajuste):
     estilo = _estilo()
+    actual = dict((ctx.estado.params("assets") or {}).get("estilo") or {})
+    # con el contrato del tipo de imagen del proyecto (Etapa Foto A)
     guia = estilo.generar_guia(ctx.proyecto, rutas,
                                modelo=ajuste["modelo"],
                                esfuerzo=ajuste["esfuerzo"],
-                               avisar=avisar, proyecto_id=ctx.id)
+                               avisar=avisar, proyecto_id=ctx.id,
+                               modo=PASOS_MODULOS.p6_assets.modo_de(actual))
     # La guia es parametro del paso: cambia lo que se le manda al generador, asi
     # que tiene que invalidar assets y lo que cuelga. Es el comportamiento
     # correcto, no un efecto secundario.
-    actual = dict((ctx.estado.params("assets") or {}).get("estilo") or {})
     actual["guia"] = guia
     ctx.estado.actualizar_params("assets", {"estilo": actual})
     ctx.bitacora.anotar("guia_estilo", "assets", {
@@ -7761,7 +7763,25 @@ def _sembrar_taller(ctx, encargo):
         ctx.estado.actualizar_params("guion", {"cta": encargo["cta"]})
     for paso, valores in light.params_de_ritmo(encargo.get("ritmo")).items():
         ctx.estado.actualizar_params(paso, valores)
+    _sembrar_modo(ctx, encargo)
     return idioma
+
+
+def _sembrar_modo(ctx, encargo):
+    """El tipo de imagen del encargo, a `assets.estilo.modo` del taller.
+
+    Etapa Foto A. Es de donde lo leen la guia, las laminas y, al guardar, el
+    preset. Solo si el encargo lo trae (los encargos a medias de idioma y ritmo
+    no) y solo si cambia: "foto" se escribe, ilustracion es QUITARLO si estaba.
+    Nunca se escribe "ilustracion": seria un param que el taller no tenia.
+    """
+    if "estilo_modo" not in (encargo or {}):
+        return
+    nuevo = _light().estilo_con_modo(
+        (ctx.estado.params("assets") or {}).get("estilo"),
+        encargo.get("estilo_modo"))
+    if nuevo is not None:
+        ctx.estado.actualizar_params("assets", {"estilo": nuevo})
 
 
 # ------------------------------------------------------------ las ocho tareas
@@ -7777,10 +7797,13 @@ def _correr_light_guia(avisar, ctx, encargo):
     # Se leen del TALLER y no del encargo: el encargo trae los nombres del buzon
     # y el buzon se vacia al copiarlas dentro.
     aportadas = _aportadas_del_taller(ctx)
+    bloque = dict((ctx.estado.params("assets") or {}).get("estilo") or {})
+    # con el contrato del tipo de imagen del taller (Etapa Foto A): una guia
+    # de foto pregunta por lente y luz, no por trazo y dedos
     guia = estilo.generar_guia(ctx.proyecto, aportadas, avisar=avisar,
                                proyecto_id=ctx.id, peticion=peticion,
-                               indicaciones=encargo.get("estilo_prompt"))
-    bloque = dict((ctx.estado.params("assets") or {}).get("estilo") or {})
+                               indicaciones=encargo.get("estilo_prompt"),
+                               modo=PASOS_MODULOS.p6_assets.modo_de(bloque))
     bloque["guia"] = guia
     ctx.estado.actualizar_params("assets", {"estilo": bloque})
     ctx.bitacora.anotar("guia_estilo", "assets", {
@@ -7833,7 +7856,13 @@ def _correr_light_referencias(avisar, ctx, encargo):
     # que la guia (`_correr_light_guia`): sin pasarlas, cada lamina salia a la
     # API sin adjuntos y la tanda caia con «generar() necesita al menos una
     # imagen de referencia» aunque el estilo tuviera catorce.
-    hecho = mod.dibujar_desde_guia({"guia": bloque.get("guia")}, destino,
+    # El modo va con la guia (Etapa Foto A): sin el, las laminas de un estilo
+    # de fotos se pedirian como imagen neutra. Solo si es foto: sin `modo`, el
+    # diccionario de siempre.
+    para_dibujar = {"guia": bloque.get("guia")}
+    if bloque.get("modo") == "foto":
+        para_dibujar["modo"] = "foto"
+    hecho = mod.dibujar_desde_guia(para_dibujar, destino,
                                    ejes=pedidos, peticiones=peticiones,
                                    calidad=calidad, avisar=avisar,
                                    idioma=idioma,
@@ -8641,11 +8670,19 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     antes = dict(origen)
     origen["nombre"] = ficha.get("nombre") or "canal"
     origen.setdefault("idioma", _presets().idioma_de(ficha) or "es")
-    if fuente and parte == "estilo":
+    if fuente and parte == "estilo" and (
+            "estilo_prompt" in fuente or "estilo_imagenes" in fuente):
         # las DOS a la vez y siempre: dejar la vieja puesta es como se acaba con
         # unas indicaciones que describen unas imagenes que ya no estan
         origen["estilo_prompt"] = fuente.get("estilo_prompt") or ""
         origen["estilo_imagenes"] = fuente.get("estilo_imagenes") or []
+    if fuente and parte == "estilo" and "estilo_modo" in fuente:
+        # EL TIPO DE IMAGEN (Etapa Foto A) es otra fuente del estilo: pasar a
+        # «Foto realista» con las MISMAS imagenes rehace la guia (con el
+        # contrato de foto) y las laminas, y deja el tono, la voz y el ritmo.
+        # Puede venir solo: entonces las imagenes y las indicaciones son las
+        # que ya tenia el estilo.
+        origen["estilo_modo"] = str(fuente.get("estilo_modo") or "")
     if fuente and parte == "tono":
         origen["tono_prompt"] = fuente.get("tono_prompt") or ""
     encargo = _encargo_o_400(origen)
@@ -8709,6 +8746,10 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     # nada y la pantalla vuelve como si el cambio estuviera aplicado.
     tareas = tuple(t for t in tareas if t in light.TAREAS_POR_ID)
     aportadas = _sembrar_aportadas(ctx, encargo) if material else []
+    # el tipo de imagen, al taller ANTES de lanzar: la guia es la primera
+    # tarea que lo lee (Etapa Foto A)
+    if fuente and parte == "estilo":
+        _sembrar_modo(ctx, encargo)
     ctx.bitacora.anotar("preset_light_regenerar", None,
                         {"preset": preset_id, "parte": parte,
                          "peticion": peticion[:200],

@@ -44,7 +44,7 @@ antes de tocar nada.
 
 | Nombre | Qué es |
 |---|---|
-| **V2.0 fase 1 a 5** | las fases de la V2.0 del Studio. Fase 3: vídeos sin voz (otro reloj para cronometrar). Fase 5: pasar a vídeo y formatos mixtos |
+| **V2.0 fase 1 a 5** | las fases de la V2.0 del Studio. Fase 3: vídeos sin voz (otro reloj para cronometrar). Fase 4: otras IAs (imágenes con la membresía de ChatGPT y la API de respaldo, ElevenLabs como alternativa a Cartesia, música generada por IA como alternativa a Jamendo, y una base para añadir más IAs sin rehacer nada). Fase 5: clips de vídeo (Veo 3.1 y Kling por API, modo mixto, e ida y vuelta con la membresía: descargar el paquete, generar en Flow o Kling y subir los clips) |
 | **Etapa Foto A, B, C** | el modo foto realista. A: `estilo.modo`, cabecera del prompt, guía de foto, reglas de foto y escalera de encuadres para foto. B: el catálogo de productos como referencia obligatoria. C: presets de marca, evento y servicio |
 | **Ruta fase 0, 1, 2…** | el plan de marketing de EstadoPlay. No es código; no la confundas con las de arriba |
 
@@ -53,7 +53,7 @@ antes de tocar nada.
 El servidor se actualiza desde `main` (`asvs actualizar`), así que `main` tiene
 que estar siempre listo para servirse. Por eso:
 
-1. **Cada fase o etapa trabaja en su propia rama**: `v2-fase-3`, `v2-fase-4`,
+1. **Cada fase o etapa trabaja en su propia rama**: `v2-fase-3`, `v2-fase-4a`, `v2-fase-4b`,
    `v2-fase-5`, `etapa-foto-a`, `etapa-foto-b`, `etapa-foto-c`. Se crea desde el
    `main` del día: `git fetch origin main && git switch -c <rama> origin/main`.
 2. **A `main` solo llegan dos cosas**: una rama terminada y probada, o un
@@ -83,12 +83,29 @@ Quien abre una rama la apunta aquí; quien la une a `main`, la quita.
 
 ### El orden acordado
 
-- **La Etapa Foto A se une a `main` ANTES de empezar la V2.0 fase 5.** La fase 5
-  genera vídeo a partir de las imágenes de los planos y comparte
-  `p6_assets.py`; construida sobre el prompt de ilustración, habría que
-  recalibrarla.
-- La Etapa Foto B se recomienda también antes de la fase 5; la C va después.
-- La V2.0 fase 3 puede ir en paralelo a la Etapa Foto A: no comparten ficheros.
+1. **Ahora, en paralelo**: la Etapa Foto A y la V2.0 fase 3. No comparten
+   ficheros.
+2. **La V2.0 fase 4 se parte en dos ramas**, porque cada mitad choca con una
+   cosa distinta:
+   - `v2-fase-4a` — la base para enchufar IAs y el motor de imágenes de ChatGPT
+     (membresía y API). Puede empezar ya con ficheros NUEVOS (la base y el
+     motor, en `motores/` o donde decida su chat). Lo único que toca un fichero
+     reservado es enchufar el motor nuevo en `p6_assets.py`, y eso espera a que
+     la Etapa Foto A esté unida. El prompt lo sigue armando `p6_assets.py`; la
+     base solo decide a quién se le manda.
+   - `v2-fase-4b` — ElevenLabs y la música por IA. Empieza cuando la V2.0 fase 3
+     esté unida: las dos tocan la voz (`p4_voz.py`, `p5_revision_audio.py`,
+     `marcas_tts.py`) y la música (`sonido.py`), y en un vídeo sin voz es
+     probable que la música pase a marcar el ritmo.
+3. **La Etapa Foto B** va después de la A. Añade imágenes de producto a cada
+   plano, así que todo motor de imágenes de la base de 4a tiene que aceptar
+   VARIAS imágenes de referencia por llamada (hoy se adjuntan estilo, reparto y
+   continuidad: hasta ~11).
+4. **La V2.0 fase 5 va la última**, con la Etapa Foto A, la fase 3 y la 4a
+   unidas (la B, recomendada). Veo y Kling se enchufan como motores de la base
+   de 4a, no aparte. El paquete de ida y vuelta lleva, por plano, la imagen
+   inicial, el prompt, la carta de encuadre y, cuando exista, sus productos.
+5. La Etapa Foto C va al final: es sobre todo pantalla (`web/app.js`).
 
 ### Lo que la Etapa Foto A promete a las demás fases
 

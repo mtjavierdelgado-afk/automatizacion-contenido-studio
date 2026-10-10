@@ -29,8 +29,16 @@ GUIAS = {
     "estilo_grafico": {
         "titulo": "Indicaciones del estilo gráfico",
         "donde": "Crear un estilo → Estilo gráfico → Indicaciones",
-        "usa": "pasos/estilo.py (generar_guia) y pasos/moodboard.py",
+        "usa": "pasos/estilo.py (generar_guia, y su contrato de foto), "
+               "pasos/moodboard.py y el «Tipo de imagen» (estilo.modo, "
+               "pasos/p6_assets.py)",
         "que_hace": [
+            "Primero eliges el TIPO DE IMAGEN: «Ilustración» (lo de siempre) o "
+            "«Foto realista». Con foto, la guía se escribe para fotografía "
+            "(cámara, lente, luz, color, gente, lugares) en vez de para dibujo "
+            "(trazo, relleno, dedos), y cada imagen se pide como foto de un "
+            "fotógrafo de eventos, con sus propias reglas y sus propios "
+            "encuadres (estación completa, manos en el mando, reacción...).",
             "Las IMÁGENES que subes son la fuente principal: el sistema las mira y "
             "escribe una guía de dibujo de 260 a 400 palabras que va dentro de "
             "cada imagen que se genera. Sube de 1 a 24 (mejor 5 o más), todas con el aspecto "
@@ -48,6 +56,9 @@ GUIAS = {
             "recargada).",
             "Que las imágenes que subas sean coherentes con lo que escribes: si "
             "pides fotografía realista, sube fotos, no ilustraciones.",
+            "Si quieres fotos, elige «Foto realista» en «Tipo de imagen»: "
+            "escribirlo solo en las indicaciones no basta, porque sin ese "
+            "selector cada imagen se sigue pidiendo como ilustración.",
             "Entre 60 y 250 palabras es lo ideal: más se condensa y se pierde.",
         ],
         "no": [

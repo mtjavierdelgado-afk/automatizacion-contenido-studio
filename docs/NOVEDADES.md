@@ -8,6 +8,38 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ---
 
+## Etapa Foto A · octubre de 2026 · foto realista
+
+**Tipo de imagen: Ilustración o Foto realista**
+- Al crear un estilo, el bloque **«Estilo gráfico»** tiene un selector nuevo,
+  **«Tipo de imagen»**. Por defecto queda en **Ilustración**, que es lo de
+  siempre: los estilos y vídeos que ya tienes no cambian y **no se vuelve a
+  pagar ninguna imagen**.
+- Con **Foto realista**, el Studio genera **fotografías de eventos** en vez de
+  dibujos:
+  - la guía del estilo se escribe **para foto** (cámara y lente, luz, color,
+    gente real, lugares, acabado) en vez de para dibujo (trazo, relleno, dedos);
+  - cada plano se pide como **una foto de un fotógrafo de eventos**, y las
+    láminas de referencia también salen como fotos;
+  - entran **reglas propias de foto**: manos de cinco dedos que sostienen bien
+    el mando, televisores siempre sobre su soporte, consolas nunca en el suelo,
+    cables sin flotar, sin logos ni nombres de juegos de otras marcas, nada de
+    aspecto de render;
+  - los planos se reparten con **encuadres de evento**: sala completa, picado,
+    estación completa, sobre el hombro, perfil de jugadores, reacción, cuerpo
+    con visor VR, manos, detalle del equipo, pies en los pedales, pantalla al
+    frente, contraluz y a ras de suelo. Si el vídeo no dice qué servicios
+    lleva, se toman las **consolas**: los pedales solo salen con simuladores y
+    el cuerpo con visor solo con realidad virtual.
+- En un estilo **ya guardado** también está el selector, en «Estilo gráfico»:
+  cambiarlo y pulsar **Regenerar** rehace la guía y las láminas **con las
+  mismas imágenes**, y deja el tono, la voz y el ritmo como están. Cuesta lo
+  mismo que rehacer el estilo gráfico.
+- Las imágenes que subas a un estilo de foto deberían ser **fotos**: el
+  sistema las mira para escribir la guía.
+- Todavía no entran aquí los productos de la marca como referencia (Etapa B) ni
+  los presets de marca, evento y servicio (Etapa C).
+
 ## V2.0 · octubre de 2026 (tercera parte)
 
 **El guion: regrabar, añadir y partir bloques**

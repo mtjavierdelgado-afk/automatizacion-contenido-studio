@@ -153,6 +153,42 @@ PARAMS_POR_DEFECTO = {
 
 TAMANO = (1536, 1024)
 
+
+# ------------------------------------------------- el modo de imagen (Foto A)
+#
+# `estilo.modo` dice si este video se DIBUJA o se FOTOGRAFIA: "ilustracion" o
+# "foto". Lo que no es "foto" es ilustracion, incluido --y es el caso de todos
+# los proyectos guardados hasta hoy-- no tenerlo.
+#
+# NUNCA SE ESCRIBE POR DEFECTO, y no es estilo: `estilo` entra entero en la
+# firma global del paso (`nucleo/estado.py:_params_globales` hashea los params
+# GUARDADOS), asi que escribir "ilustracion" donde no estaba dejaria obsoletos
+# los planos de un video que nadie ha tocado y la pantalla ofreceria pagarlos
+# otra vez. Por eso tampoco esta en PARAMS_POR_DEFECTO: se LEE con `modo_de` y
+# solo lo escribe alguien que elige «Foto realista».
+#
+# Y SIN EL, EL PROMPT ES EL DE SIEMPRE, byte a byte: cada frase que cambia en
+# modo foto lleva su gemela de ilustracion intacta al lado. Lo comprueba
+# `pasos/prueba_modo_foto.py` contra una huella de los prompts de antes.
+MODOS = ("ilustracion", "foto")
+
+
+def modo_de(estilo):
+    """El modo de imagen de un estilo: "foto" o "ilustracion". -> str"""
+    if isinstance(estilo, dict) and str(estilo.get("modo") or "") == "foto":
+        return "foto"
+    return "ilustracion"
+
+
+#: La primera linea del prompt de cada plano, por modo. La de ilustracion es la
+#: de siempre y no se toca.
+CABECERA_PLANO = {
+    "ilustracion": "Draw a single illustration for one shot of an animated "
+                   "documentary.",
+    "foto": "Create one photorealistic photograph for one shot of a social "
+            "media video, as taken by a professional event photographer.",
+}
+
 #: Cuantas referencias adjuntas a una nota entran en el prompt de un plano. Dos
 #: es lo que cabe decir con imagenes sobre UN cambio; con cuatro, el prompt deja
 #: de tener un encargo y pasa a tener un moodboard -- y cada una son ~700 tokens.
@@ -1072,8 +1108,18 @@ def _asignar_cartas(escenas, p):
     """
     forzadas = {e["id"]: str(_ajustes_unidad(p, f"escena:{e['id']}").get("carta")
                              or "") for e in escenas}
-    cartas = encuadres.repartir(escenas, semilla=p.get("semilla", 0),
-                                forzadas={k: v for k, v in forzadas.items() if v})
+    # EN MODO FOTO, SU ESCALERA (Etapa Foto A). La de ilustracion no se toca:
+    # sin `estilo.modo` se reparte con la llamada de siempre, sin un argumento
+    # de mas. `servicios` (param de assets, opcional) solo filtra la de foto.
+    if modo_de(p.get("estilo")) == "foto":
+        cartas = encuadres.repartir(
+            escenas, semilla=p.get("semilla", 0),
+            forzadas={k: v for k, v in forzadas.items() if v},
+            modo="foto", servicios=p.get("servicios"))
+    else:
+        cartas = encuadres.repartir(
+            escenas, semilla=p.get("semilla", 0),
+            forzadas={k: v for k, v in forzadas.items() if v})
     for escena in escenas:
         carta = cartas.get(escena["id"])
         if not carta:
@@ -1086,7 +1132,7 @@ def _asignar_cartas(escenas, p):
     return cartas
 
 
-def _repartir_zoom(escenas):
+def _repartir_zoom(escenas, modo="ilustracion", servicios=None):
     """El zoom de cada plano, alternado. Se juega en el CORTE, sobre la imagen.
 
     No necesita ninguna caja ni ningun ancla sobre el que centrarse: el
@@ -1095,10 +1141,10 @@ def _repartir_zoom(escenas):
     segmentar = medios.motor("guion/segmentar.py")
     for indice, escena in enumerate(escenas):
         escena["zoom"] = segmentar.alternar_zoom(indice, None)
-    return _informe_cartas(escenas)
+    return _informe_cartas(escenas, modo=modo, servicios=servicios)
 
 
-def _informe_cartas(escenas):
+def _informe_cartas(escenas, modo="ilustracion", servicios=None):
     """Que ha salido del reparto de cartas.
 
     'planos_repetidos' cuenta planos SEGUIDOS de la misma familia, que es la
@@ -1108,7 +1154,8 @@ def _informe_cartas(escenas):
     el ritmo.
     """
     cartas = [e.get("carta") for e in escenas if e.get("carta")]
-    familias = [(encuadres.POR_ID.get(c) or {}).get("familia") for c in cartas]
+    lookup = encuadres.por_id_de(modo)
+    familias = [(lookup.get(c) or {}).get("familia") for c in cartas]
     seguidas = [escenas[i]["id"] for i in range(1, len(familias))
                 if familias[i] and familias[i] == familias[i - 1]]
     return {
@@ -1121,8 +1168,9 @@ def _informe_cartas(escenas):
         # otra sin tener que conocer la escalera. Va en el plan y no en un
         # endpoint aparte porque la pantalla ya lee el plan entero: un viaje
         # menos y, sobre todo, imposible que se desincronicen.
+        # En modo foto, la suya: lo que se ofrece es lo que se puede repartir.
         "escalera": [{"id": c["id"], "nombre": c["nombre"]}
-                     for c in encuadres.ESCALERA],
+                     for c in encuadres.escalera_para(modo, servicios)],
     }
 
 
@@ -1204,7 +1252,8 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # libre sobre el SHOT TYPE. Se reparte sobre las escenas YA ordenadas: la
     # regla de no repetir familia mira a los vecinos, no a un plano suelto.
     _asignar_cartas(escenas, p)
-    camaras = _repartir_zoom(escenas)
+    modo = modo_de(p["estilo"])
+    camaras = _repartir_zoom(escenas, modo=modo, servicios=p.get("servicios"))
 
     # Las duraciones definitivas ANTES de decidir los rotulos: un plano de menos
     # de tres segundos no admite ninguno, y eso solo se sabe una vez repartidos
@@ -1297,7 +1346,7 @@ def planificar(proyecto, params, inventario=None, replantear=False,
             escena["accion"] = str(beat["accion"]).strip()
         if beat.get("tono"):
             escena["tono"] = str(beat["tono"]).strip()
-        escena["prompt"] = _prompt_visual(escena, beat, catalogo)
+        escena["prompt"] = _prompt_visual(escena, beat, catalogo, modo=modo)
         entra = bool(escena["set"]) and escena["set"] != set_anterior
         nuevos = [q for q in (escena.get("personajes") or []) if q not in presentados]
         presentados.update(nuevos)
@@ -1823,7 +1872,25 @@ def _assets_necesarios(plan, catalogo, params=None):
 
 # ------------------------------------------------------------------ prompts
 
-def _prompt_visual(escena, beat, catalogo):
+#: Las dos frases fijas de `_prompt_visual` que dicen COMO se hace la imagen,
+#: por modo. Las de ilustracion son las de siempre, letra por letra.
+BASE_ABSTRACTA = {
+    "ilustracion": ("not a physical location: a clean conceptual composition on "
+                    "a flat graphic backdrop, in the exact same flat vector style "
+                    "as the rest of the video"),
+    "foto": ("not a specific location: a clean, simple photograph of the idea "
+             "against a plain, softly lit background, in the exact same "
+             "photographic style as the rest of the video"),
+}
+REPARTO_ABSTRACTO = {
+    "ilustracion": (" drawn as the same stick-figure characters as the rest of "
+                    "the video, integrated into the composition"),
+    "foto": (" photographed as the same real people as the rest of the video, "
+             "integrated into the composition"),
+}
+
+
+def _prompt_visual(escena, beat, catalogo, modo="ilustracion"):
     """Descripcion del plano para el modelo de imagen.
 
     La frase narrada entra SIEMPRE, y es lo mas importante de esta funcion. El
@@ -1868,9 +1935,12 @@ def _prompt_visual(escena, beat, catalogo):
         # banco» a un diagrama produce un diagrama colgado en una pared. La
         # base es conceptual, la accion del tramo aporta el contenido y los
         # personajes siguen siendo los monigotes del estilo del video.
-        partes = ["not a physical location: a clean conceptual composition on "
-                  "a flat graphic backdrop, in the exact same flat vector style "
-                  "as the rest of the video"]
+        #
+        # En modo foto la escalera no tiene cartas abstractas, asi que aqui
+        # solo se llega con una forzada a mano antes de pasar a foto; aun asi
+        # la frase tiene su version, para no pedir «flat vector» en una foto.
+        modo = "foto" if modo == "foto" else "ilustracion"
+        partes = [BASE_ABSTRACTA[modo]]
     # LA ACCION DEL TRAMO SOLO MANDA SI ESTE PLANO NO TIENE LA SUYA.
     #
     # Aqui estaba la raiz de los dos fallos que se veian en el video montado.
@@ -1896,8 +1966,7 @@ def _prompt_visual(escena, beat, catalogo):
             partes.append(beat["accion"])
         if escena.get("personajes"):
             partes.append("with " + _citar_reparto(escena["personajes"], catalogo)
-                + " drawn as the same stick-figure characters as the rest of "
-                  "the video, integrated into the composition")
+                + REPARTO_ABSTRACTO[modo])
             partes.append(_expresion(_tono_de(escena, beat)))
         base = _con_narracion(
             _con_direccion(", ".join(x for x in partes if x), escena), escena)
@@ -2261,11 +2330,25 @@ def guia_escrita(estilo):
         lineas.append(f"Hands, arms and feet: {guia['manos']}")
     if guia.get("fondos"):
         lineas.append(f"Backgrounds: {guia['fondos']}")
+    # LAS CLAVES DE LA GUIA DE FOTO (Etapa Foto A, `estilo.CONTRATO_JSON_GUIA_FOTO`):
+    # camara, color, gente y entorno. Se leen igual que las demas --si la guia
+    # las trae, salen; si no, no--, y por eso una guia de dibujo, que no trae
+    # ninguna, da EXACTAMENTE las mismas lineas que antes. Las tres que
+    # comparten los dos contratos (luz, composicion, acabado, evitar) son las
+    # de siempre.
+    if guia.get("camara"):
+        lineas.append(f"Camera and lens: {guia['camara']}")
     # Los tres de abajo los escribe la guia desde el 14-08-2026. Una guia
     # anterior no los trae y aqui simplemente no salen: el prompt es el
     # mismo que antes, asi que no obsoleta ningun proyecto en marcha.
     if guia.get("luz"):
         lineas.append(f"Light and shadow: {guia['luz']}")
+    if guia.get("color"):
+        lineas.append(f"Colour and grading: {guia['color']}")
+    if guia.get("gente"):
+        lineas.append(f"People: {guia['gente']}")
+    if guia.get("entorno"):
+        lineas.append(f"Setting: {guia['entorno']}")
     if guia.get("composicion"):
         lineas.append(f"Composition: {guia['composicion']}")
     if guia.get("acabado"):
@@ -2291,7 +2374,7 @@ def _nombre_en(idioma):
     return p2_brief.nombre_idioma_en(codigo) if codigo else ""
 
 
-def frase_de_referencia(indice, ref):
+def frase_de_referencia(indice, ref, modo="ilustracion"):
     """La frase del prompt que presenta la referencia numero `indice`. -> str|None
 
     UNA SOLA FUNCION PARA LOS DOS CAMINOS. La primera generacion y el corrector
@@ -2302,8 +2385,13 @@ def frase_de_referencia(indice, ref):
     la precision que solo se sabe mirando la imagen («copy only the beige CRT
     at its left edge»), y va detras de la frase de la clase, no en su lugar.
     Las de estilo y lamina no llevan frase aqui: se presentan juntas arriba.
+
+    `modo` es el de `modo_de(estilo)`. En "foto" cambian las frases que dicen
+    COMO esta hecha la imagen (las que piden «flat vector cartoon» o «line
+    weight»); lo que se copia y lo que no de cada clase es lo mismo.
     """
     lineas = []
+    foto = modo == "foto"
     if ref["papel"] in ("estilo", "lamina"):
         return None
     if ref["papel"] == "reparto" and ref.get("de_nota"):
@@ -2374,7 +2462,8 @@ def frase_de_referencia(indice, ref):
                   "architecture, the same walls, floor and ceiling, the same "
                   "fixed furniture, materials and colours, so that a viewer "
                   "recognises it instantly as the same place. Match its "
-                  "palette, line weight and lighting. "
+                + ("palette, colour grading and lighting. " if foto else
+                   "palette, line weight and lighting. ")
                 + "Everything else comes from the scene description below, and "
                   "this is a DIFFERENT MOMENT of the story, not the same one "
                   "from another camera: what is in the foreground, who is in "
@@ -2392,14 +2481,23 @@ def frase_de_referencia(indice, ref):
         # adjuntarla sin decir esto empuja el dibujo al fotorrealismo, que es
         # justo lo contrario de lo que busca el Estudio. Se dice que se copia
         # (quien o que es) y, sobre todo, que NO se copia (como esta hecha).
+        #
+        # EN MODO FOTO el limite es otro: aqui SI se quiere una foto, pero la de
+        # ESTE plano. Lo que no se copia es su luz, su encuadre y su color, que
+        # son los de otra camara y otro dia; manda la guia de foto de arriba.
         lineas.append(
             f"Reference image {indice} is a PHOTOGRAPH of the real "
             f"{ref.get('que_es') or 'subject'}, for likeness only: use it to "
             f"know who or what this is"
             + (f" ({ref['rasgos']})" if ref.get("rasgos") else "")
-            + ". Do NOT copy its rendering: it is a photo and this must stay "
-              "flat vector cartoon exactly as described above. Ignore its "
-              "lighting, texture, depth of field, grain and colour grading.")
+            + (". Keep the likeness, but do NOT copy how that photo was taken: "
+               "this shot follows the photographic style described above. "
+               "Ignore its lighting, framing, background, depth of field and "
+               "colour grading."
+               if foto else
+               ". Do NOT copy its rendering: it is a photo and this must stay "
+               "flat vector cartoon exactly as described above. Ignore its "
+               "lighting, texture, depth of field, grain and colour grading."))
     elif ref["papel"] == "real":
         # La cosa REAL que la narracion acaba de nombrar, bajada de Wikimedia
         # Commons. Se separa de 'parecido' porque el encargo es distinto: alli
@@ -2411,7 +2509,19 @@ def frase_de_referencia(indice, ref):
         # eso se dice aqui, junto al logo, que ese va SI o SI.
         que = ref.get("que_es") or "thing"
         nombre = ref.get("nombre") or ""
-        if ref.get("tipo") == "logo":
+        if ref.get("tipo") == "logo" and foto:
+            lineas.append(
+                f"Reference image {indice} is the REAL logo of "
+                f"{nombre or 'the brand named in this shot'}. Show it as a "
+                f"real physical object in the scene -- printed, embroidered "
+                f"or displayed on a surface, lit by the same light as "
+                f"everything else -- and keep its actual shape, its actual "
+                f"symbol, its actual colours and its actual proportions, so "
+                f"that a viewer recognises the real brand. This logo is "
+                f"asked for: if it contains lettering, reproduce that "
+                f"lettering. Do not invent a different mark and do not add "
+                f"any other text.")
+        elif ref.get("tipo") == "logo":
             lineas.append(
                 f"Reference image {indice} is the REAL logo of "
                 f"{nombre or 'the brand named in this shot'}. Redraw it in "
@@ -2427,13 +2537,21 @@ def frase_de_referencia(indice, ref):
                 f"Reference image {indice} is a PHOTOGRAPH of the real "
                 f"{que}"
                 + (f", {nombre}" if nombre else "")
-                + ", which the narration of this shot names. Use it so that "
-                  "what you draw is recognisably THAT one and not a generic "
-                  "example: keep its real shape, its real proportions, its "
-                  "landmark details and its real colours. Do NOT copy its "
-                  "rendering -- it is a photo and this must stay flat vector "
-                  "cartoon exactly as described above -- and ignore its "
-                  "lighting, texture, depth of field, grain and grading.")
+                + (", which the narration of this shot names. Use it so that "
+                   "what you photograph is recognisably THAT one and not a "
+                   "generic example: keep its real shape, its real "
+                   "proportions, its landmark details and its real colours. "
+                   "Do NOT copy how that photo was taken -- this shot follows "
+                   "the photographic style described above -- and ignore its "
+                   "lighting, framing, depth of field and grading."
+                   if foto else
+                   ", which the narration of this shot names. Use it so that "
+                   "what you draw is recognisably THAT one and not a generic "
+                   "example: keep its real shape, its real proportions, its "
+                   "landmark details and its real colours. Do NOT copy its "
+                   "rendering -- it is a photo and this must stay flat vector "
+                   "cartoon exactly as described above -- and ignore its "
+                   "lighting, texture, depth of field, grain and grading."))
     elif ref["papel"] == "rechazada":
         # LA IMAGEN QUE SE RECHAZO, y va con la instruccion CONTRARIA a la
         # de continuidad: de esa no se copia el contenido, y de esta se copia
@@ -2547,7 +2665,13 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
     `_citar_reparto`, que es quien la quito del texto de la escena.
     """
     reglas = medios.motor("reglas/reglas.py")
-    lineas = ["Draw a single illustration for one shot of an animated documentary."]
+    # EL MODO DE IMAGEN (Etapa Foto A). Sin `estilo.modo` es ilustracion y cada
+    # linea de abajo es la de siempre; en "foto" cambian solo las que dicen
+    # COMO se hace la imagen: la cabecera, la presentacion de las referencias de
+    # estilo, las frases de `frase_de_referencia` y las reglas de la casa.
+    modo = modo_de(estilo)
+    foto = modo == "foto"
+    lineas = [CABECERA_PLANO[modo]]
     if p2_brief.comun.normalizar_formato(formato) == "vertical":
         # EL CUADRO ES VERTICAL, y hay que decirlo: las referencias de estilo
         # son apaisadas y sin esta linea el generador compone un plano apaisado
@@ -2570,7 +2694,22 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
     # invita a devolver una hoja de miniaturas.
     lamina = [(i, ref) for i, ref in enumerate(referencias, start=1)
               if ref["papel"] == "lamina"]
-    if lamina:
+    if lamina and foto:
+        indice, ref = lamina[0]
+        lineas.append(
+            f"Reference image {indice} is a STYLE SHEET: a single picture that "
+            f"contains {ref.get('cuantas') or 'several'} separate photographs "
+            f"from the same production, laid side by side only so they fit in "
+            f"one image. Copy the photographic style they share -- camera "
+            f"height and lens, depth of field, light, colour grading, grain -- "
+            f"and never their content. "
+            f"Its grid layout is NOT part of the style and must NOT be "
+            f"reproduced: your output is ONE single full-bleed photograph of "
+            f"one moment. Never produce a grid, a collage, a contact sheet, "
+            f"panels, a split screen, borders, frames or separate boxes.")
+        if estilo.get("prompt"):
+            lineas.append(f"Style: {estilo['prompt']}.")
+    elif lamina:
         indice, ref = lamina[0]
         lineas.append(
             f"Reference image {indice} is a STYLE SHEET: a single picture that "
@@ -2592,12 +2731,21 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
     if estilos:
         cita = (f"reference image {estilos[0]}" if len(estilos) == 1
                 else f"reference images {estilos[0]} to {estilos[-1]}")
-        lineas.append(
-            f"Match exactly the art style of {cita}"
-            + (f": {estilo['prompt']}" if estilo.get("prompt") else "") + "."
-            + (" They are different shots of the same production: copy the "
-               "drawing style they share, never their content."
-               if len(estilos) > 1 else ""))
+        if foto:
+            lineas.append(
+                f"Match exactly the photographic style of {cita}"
+                + (f": {estilo['prompt']}" if estilo.get("prompt") else "") + "."
+                + (" They are different photographs of the same production: "
+                   "copy the camera, light, colour and finish they share, "
+                   "never their content."
+                   if len(estilos) > 1 else ""))
+        else:
+            lineas.append(
+                f"Match exactly the art style of {cita}"
+                + (f": {estilo['prompt']}" if estilo.get("prompt") else "") + "."
+                + (" They are different shots of the same production: copy the "
+                   "drawing style they share, never their content."
+                   if len(estilos) > 1 else ""))
 
     if estilos or lamina:
         lineas.extend(guia_escrita(estilo))
@@ -2605,7 +2753,9 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
             lineas.extend(clausula_de_especie(estilo))
 
     for indice, ref in enumerate(referencias, start=1):
-        frase = frase_de_referencia(indice, ref)
+        # sin el modo, la llamada de siempre: el texto que sale es el mismo
+        frase = (frase_de_referencia(indice, ref, modo="foto") if foto
+                 else frase_de_referencia(indice, ref))
         if frase:
             lineas.append(frase)
     # LAS REGLAS DE LA CASA VAN ANTES DE `Scene:`, Y ESO ES LO CONTRARIO DE LO
@@ -2623,7 +2773,12 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
     # --la guia de estilo y la regla de especie--, que es donde se leen juntas.
     # Lo que gana el sitio del final es la unica linea que cambia de un plano al
     # de al lado.
-    bloque = reglas.bloque_prompt("prompt_imagen")
+    #
+    # En modo foto, las reglas de foto y NINGUNA de cartoon (ver
+    # `motores/reglas/reglas_foto.json`): las de `reglas.json` se escribieron y
+    # se siguen aprendiendo para dibujo.
+    bloque = (reglas.bloque_prompt("prompt_imagen", modo="foto") if foto
+              else reglas.bloque_prompt("prompt_imagen"))
     if bloque:
         lineas.append(bloque)
     # CUAL es el idioma del video. La POLITICA --que lo que la produccion
@@ -2806,10 +2961,22 @@ def _prompt_reparto(ficha, estilo):
     ninguna cara que copiar: cada plano se invento una.
     """
     reglas = medios.motor("reglas/reglas.py")
-    lineas = ["Draw a reference cast sheet for an animated documentary."]
-    lineas.append("Reference image 1 is a STYLE SHEET: copy the drawing style it "
-                  "shows -- line weight, palette, shapes, proportions -- and never "
-                  "its content, its framing or its layout.")
+    # En modo foto, una hoja de FOTOS de personas reales (Etapa Foto A). Sin
+    # `estilo.modo`, las lineas de siempre.
+    foto = modo_de(estilo) == "foto"
+    if foto:
+        lineas = ["Create a photographic reference cast sheet of real people "
+                  "for a social media video, as shot by a professional "
+                  "photographer."]
+        lineas.append("Reference image 1 is a STYLE SHEET: copy the "
+                      "photographic style it shows -- light, colour grading, "
+                      "lens and finish -- and never its content, its framing "
+                      "or its layout.")
+    else:
+        lineas = ["Draw a reference cast sheet for an animated documentary."]
+        lineas.append("Reference image 1 is a STYLE SHEET: copy the drawing style it "
+                      "shows -- line weight, palette, shapes, proportions -- and never "
+                      "its content, its framing or its layout.")
     if estilo.get("prompt"):
         lineas.append(f"Style: {estilo['prompt']}.")
     lineas.extend(guia_escrita(estilo))
@@ -2840,8 +3007,11 @@ def _prompt_reparto(ficha, estilo):
     # DENTRO de la hoja -- que es lo que paso-- y la hoja deja de ser una hoja.
     lineas.append("Ignore any setting, furniture, props, lighting or action "
                   "mentioned in that description: it describes where these "
-                  "characters appear in the film, not what this sheet shows. Draw "
-                  "only the characters, evenly lit, on an empty flat background.")
+                  "characters appear in the film, not what this sheet shows. "
+                  + ("Show only the people, evenly lit, on a plain seamless "
+                     "studio background." if foto else
+                     "Draw only the characters, evenly lit, on an empty flat "
+                     "background."))
     if ficha.get("feedback"):
         # la nota del revisor sobre ESTA hoja: sin esto se pagaba una hoja
         # nueva con el mismo prompt y salia una variacion de lo mismo
@@ -2876,7 +3046,8 @@ def _prompt_reparto(ficha, estilo):
     if ficha.get("grupo"):
         lineas.append("Show every member of the group side by side, clearly "
                       "different from each other in build, clothes and hair.")
-    bloque = reglas.bloque_prompt("reparto")
+    bloque = (reglas.bloque_prompt("reparto", modo="foto") if foto
+              else reglas.bloque_prompt("reparto"))
     if bloque:
         lineas.append(bloque)
     # LO QUE SE PROHIBE AQUI ES ANOTAR LA HOJA, no que el personaje lleve letras.

@@ -96,6 +96,19 @@ def revisar(carpeta):
     return rotas
 
 
+def orden_mudar(carpeta, reglas, aplicar=False):
+    """La orden lista para pegar como root: con el usuario y el entorno del
+    servicio, que es como se lanzan las herramientas en el servidor."""
+    raiz = os.environ.get("ASVS_RAIZ") or "/opt/as-video-studio"
+    partes = [f"{raiz}/venv/bin/python herramientas/mudar_proyecto.py {carpeta}"]
+    partes += [f'--regla "{rota}={nueva}"' for rota, nueva in reglas]
+    if aplicar:
+        partes.append("--aplicar")
+    interior = (f"set -a; . {raiz}/datos/entorno; cd {raiz}/app && "
+                + " ".join(partes))
+    return f"sudo -u studio bash -c '{interior}'"
+
+
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     if argv:
@@ -124,12 +137,24 @@ def main(argv=None):
             for f in sorted(os.listdir(carpeta_preset)):
                 print(f"     {f}")
         if reglas and len(reglas) == len(rotas):
-            print("  PROPUESTA (simulacro; con los servicios parados y añadiendo "
-                  "--aplicar solo cuando el simulacro cuadre):")
-            print(f"    python herramientas/mudar_proyecto.py {carpeta} \\")
-            for i, (rota, nueva) in enumerate(reglas):
-                cola = " \\" if i < len(reglas) - 1 else ""
-                print(f'      --regla "{rota}={nueva}"{cola}')
+            repetidos = any(re.match(r"^(\d{2}_){2,}", os.path.basename(n))
+                            for _r, n in reglas)
+            if repetidos:
+                print("  OJO: los ficheros del estilo todavia tienen el prefijo "
+                      "repetido. Abre ese estilo en el Estudio, cambia algo y "
+                      "deshazlo (por ejemplo, el nombre) para que se guarde una "
+                      "vez con la version arreglada: sus nombres quedaran limpios "
+                      "(00_cara.png...). Despues vuelve a correr esto: la "
+                      "orden para repuntar sale entonces, y no antes, porque "
+                      "esos nombres largos desaparecen al guardar.")
+                continue
+            print("  PROPUESTA, en SIMULACRO (no escribe nada). Pegala tal cual en "
+                  "la consola del servidor:")
+            print("    " + orden_mudar(carpeta, reglas, aplicar=False))
+            print("  Y solo cuando el simulacro cuadre, con el estudio PARADO:")
+            print("    systemctl stop as-video-studio && "
+                  + orden_mudar(carpeta, reglas, aplicar=True)
+                  + " ; systemctl start as-video-studio")
     print(f"\n{total} rutas rotas en {len(carpetas)} proyectos mirados. No se ha escrito nada.")
     return 0
 

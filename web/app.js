@@ -1882,6 +1882,47 @@ function ajustarAlto(area) {
   return area;
 }
 
+/* TODOS LOS CAMPOS DE TEXTO CRECEN CON LO QUE LLEVAN (10-10-2026). Antes cada
+   uno tenía su alto fijo: un tono de mil palabras se leía por una rendija de
+   cuatro líneas, y una indicación de una frase ocupaba media pantalla vacía.
+   Ahora el campo mide lo que su texto, hasta el 60 % de la pantalla; pasado
+   eso tiene su propia barra (`textarea.autoalto` en estilo.css) y se puede
+   seguir estirando a mano desde la esquina. Una sola vez para toda la página:
+   un observador mide los que aparecen y un oyente los que cambian. Incluye los
+   `.crece`: esos solo se medían al pintarse, así que escribir en ellos no los
+   hacía crecer y el texto se cortaba por debajo. */
+function autoajustarArea(area) {
+  if (!area || area.id === 'asistente-texto') return;
+  area.classList.add('autoalto');
+  // con la altura a «auto» el campo vuelve a sus filas (`rows`), que son el
+  // mínimo; scrollHeight nunca baja de ahí
+  area.style.height = 'auto';
+  area.style.height = `${area.scrollHeight + 2}px`;
+}
+
+function vigilarAreas() {
+  if (vigilarAreas.hecho) return;
+  vigilarAreas.hecho = true;
+  document.addEventListener('input', ev => {
+    if (ev.target && ev.target.tagName === 'TEXTAREA') autoajustarArea(ev.target);
+  });
+  let pendiente = false;
+  const medirTodas = () => {
+    pendiente = false;
+    document.querySelectorAll('textarea:not(.autoalto)').forEach(area => {
+      if (area.isConnected && area.offsetParent !== null) autoajustarArea(area);
+    });
+  };
+  new MutationObserver(() => {
+    if (pendiente) return;
+    pendiente = true;
+    requestAnimationFrame(medirTodas);
+  }).observe(document.body, { childList: true, subtree: true });
+  // un <details> que se abre deja ver campos que no se podían medir cerrados
+  document.addEventListener('toggle', () => requestAnimationFrame(medirTodas), true);
+  medirTodas();
+}
+
 function crecerConElTexto(area) {
   area.classList.add('crece');
   // Al crearlo todavia no esta en el DOM y scrollHeight es 0: se mide cuando ya
@@ -4761,6 +4802,7 @@ function arrancar() {
   if (ayuda) ayuda.addEventListener('click', () => abrirManual());
   $('#btn-salir').addEventListener('click', () => salirDeStudio());
   cargarCuenta();
+  vigilarAreas();
   montarAsistente();
   montarAdjuntosAsistente();
   montarDictadoAsistente();
@@ -4958,11 +5000,14 @@ function encargoParaServidor() {
     idioma: e.idioma,
     estilo_imagenes: (e.estilo_imagenes || []).map(x => x.nombre),
     estilo_descripciones: descripcionesDeAportadas(e.estilo_imagenes),
+    estilo_destacadas: (e.estilo_imagenes || []).filter(x => x.destacada).map(x => x.nombre),
     estilo_prompt: e.estilo_prompt,
     tono_prompt: e.tono_prompt,
     voz_prompt: e.voz_prompt,
     voz_id: e.voz_id || '',
     ritmo: e.ritmo || ritmoPorDefecto(),
+    // el proyecto (cliente) abierto en la galería: el estilo nace dentro de él
+    cliente: clienteElegido() || '',
   };
 }
 
@@ -4984,6 +5029,7 @@ async function cargarGaleriaLight(forzar) {
         .filter(p => p.video_light)
         .sort((a, b) => String(b.actualizado || '').localeCompare(String(a.actualizado || '')));
     } catch (e) { APP.light.datos.videos = []; }
+    await cargarClientes();
     // el ritmo de fábrica lo dice el servidor, no esta pantalla
     if (APP.light.encargo && !APP.light.encargo.ritmo) {
       APP.light.encargo.ritmo = ritmoPorDefecto();
@@ -5426,7 +5472,8 @@ function irALight(vista, extra) {
 
 function vistaGaleriaLight() {
   const caja = h('div', {});
-  const fichas = presetsLight();
+  caja.appendChild(barraDeClientes());
+  const fichas = presetsLight().filter(f => estiloALaVista(f.id));
   caja.appendChild(h('div', { clase: 'light-cab' },
     h('h2', {}, 'Tus estilos'),
     h('span', { clase: 'meta' }, fichas.length
@@ -5442,11 +5489,11 @@ function vistaGaleriaLight() {
      una recarga, del móvil, de otro día— y sin esta lista un vídeo a medio
      generar no tenía desde dónde retomarse: seguía corriendo en el servidor y
      no había ningún camino hasta él. */
-  const videos = videosLight();
+  const videos = videosLight().filter(v => estiloALaVista(v.estilo_light || ''));
   if (videos.length) {
     caja.appendChild(h('div', { clase: 'light-cab' },
       h('h2', {}, 'Tus vídeos'),
-      h('span', { clase: 'meta' }, `${videos.length} con este modo`)));
+      h('span', { clase: 'meta' }, `${videos.length} vídeo${videos.length === 1 ? '' : 's'}`)));
     const lista = h('div', { clase: 'videos-light' });
     videos.forEach(video => lista.appendChild(h('div', { clase: 'video-light' },
       h('button', {
@@ -5454,7 +5501,9 @@ function vistaGaleriaLight() {
         onclick: () => abrirVideoLight(video.id),
       },
         h('span', { clase: 'nombre' }, video.nombre || video.id),
-        h('span', { clase: 'meta' }, fechaCorta(video.actualizado) || '')),
+        // DE QUÉ ESTILO (y proyecto) SALIÓ, para saber de quién es cada vídeo
+        h('span', { clase: 'meta' }, [origenDeVideo(video), fechaCorta(video.actualizado)]
+          .filter(Boolean).join(' · '))),
       /* EL LAPIZ VA FUERA DEL BOTON DE ABRIR. Un boton dentro de otro no es
          HTML valido y el clic acabaria abriendo el video en vez de renombrarlo
          — la misma razon por la que la tarjeta de un estilo es un div con un
@@ -5497,6 +5546,202 @@ function vistaGaleriaLight() {
     caja.appendChild(aviso);
   }
   return caja;
+}
+
+/* ================================================== PROYECTOS (CLIENTES)
+ *
+ * Carpetas que agrupan estilos, y con ellos sus vídeos (un vídeo es del
+ * proyecto de su estilo). Ver pasos/clientes.py. La barra de arriba de la
+ * galería elige cuál se ve; «Todos» enseña lo que no está oculto ni con clave.
+ * Ocultar y la clave son privacidad de PANTALLA, no seguridad: la seguridad es
+ * el acceso de delante.
+ */
+const CLAVE_CLIENTE = 'estudio.light.cliente';
+const CLAVE_ABIERTOS = 'estudio.light.clientes_abiertos';
+
+async function cargarClientes() {
+  try {
+    APP.light.clientes = await pedir(`${BASE}/api/clientes`);
+  } catch (e) {
+    APP.light.clientes = { clientes: [], estilos: {} };
+  }
+}
+
+function listaClientes() { return ((APP.light.clientes || {}).clientes) || []; }
+
+function clienteDe(presetId) {
+  return (((APP.light.clientes || {}).estilos) || {})[presetId] || '';
+}
+
+function clienteElegido() {
+  let cid = '';
+  try { cid = localStorage.getItem(CLAVE_CLIENTE) || ''; } catch (e) { /* sin almacén */ }
+  if (cid === '_sin') return cid;
+  const ficha = listaClientes().find(c => c.id === cid);
+  return ficha && clienteAbierto(ficha) ? cid : '';
+}
+
+function elegirCliente(cid) {
+  try { localStorage.setItem(CLAVE_CLIENTE, cid || ''); } catch (e) { /* sin almacén */ }
+  pintarLight();
+}
+
+function abiertosEnSesion() {
+  try { return JSON.parse(sessionStorage.getItem(CLAVE_ABIERTOS) || '[]'); } catch (e) { return []; }
+}
+
+function clienteAbierto(ficha) {
+  return !ficha.con_clave || abiertosEnSesion().includes(ficha.id);
+}
+
+/* Si un estilo (o un vídeo, por su estilo) se ve con el proyecto elegido. */
+function estiloALaVista(presetId) {
+  const elegido = clienteElegido();
+  const suyo = clienteDe(presetId);
+  if (elegido === '_sin') return !suyo;
+  if (elegido) return suyo === elegido;
+  if (!suyo) return true;
+  const ficha = listaClientes().find(c => c.id === suyo);
+  if (!ficha) return true;
+  return clienteAbierto(ficha) && (!ficha.oculto || APP.light.verOcultos);
+}
+
+function origenDeVideo(video) {
+  const estilo = fichaLight(video.estilo_light || '');
+  if (!estilo) return '';
+  const cliente = listaClientes().find(c => c.id === clienteDe(estilo.id));
+  return `🎨 ${estilo.nombre || estilo.id}` + (cliente ? ` · 📁 ${cliente.nombre}` : '');
+}
+
+async function entrarEnCliente(ficha) {
+  if (!clienteAbierto(ficha)) {
+    const clave = window.prompt(`«${ficha.nombre}» tiene clave. Escríbela para verlo:`);
+    if (clave === null) return;
+    try {
+      await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}/abrir`,
+        { method: 'POST', cuerpo: { clave } });
+      try {
+        sessionStorage.setItem(CLAVE_ABIERTOS,
+          JSON.stringify(abiertosEnSesion().concat([ficha.id])));
+      } catch (e) { /* sin almacén: se pedirá otra vez */ }
+    } catch (e) {
+      toast(e.message, true);
+      return;
+    }
+  }
+  elegirCliente(ficha.id);
+}
+
+async function crearCliente() {
+  const nombre = window.prompt('Nombre del proyecto (cliente):', '');
+  if (!nombre || !nombre.trim()) return;
+  try {
+    const datos = await pedir(`${BASE}/api/clientes`, { method: 'POST', cuerpo: { nombre } });
+    await cargarClientes();
+    elegirCliente(datos.cliente.id);
+    toast(`Proyecto «${datos.cliente.nombre}» creado: los estilos que crees ahora irán dentro`);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function cambiarCliente(ficha, cambios, aviso) {
+  try {
+    await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}`,
+      { method: 'PUT', cuerpo: cambios });
+    await cargarClientes();
+    if (aviso) toast(aviso);
+    pintarLight();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function borrarCliente(ficha) {
+  if (!window.confirm(`¿Borrar el proyecto «${ficha.nombre}»? Sus estilos y vídeos `
+    + 'NO se borran: quedan sin proyecto.')) return;
+  try {
+    await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}`, { method: 'DELETE' });
+    await cargarClientes();
+    elegirCliente('');
+  } catch (e) { toast(e.message, true); }
+}
+
+function ponerClaveCliente(ficha) {
+  const clave = window.prompt(ficha.con_clave
+    ? `Nueva clave para «${ficha.nombre}» (déjala vacía para quitarla):`
+    : `Clave para «${ficha.nombre}» (al menos 4 caracteres). Se pedirá para ver sus estilos y vídeos:`, '');
+  if (clave === null) return;
+  cambiarCliente(ficha, { clave }, clave ? 'Clave puesta' : 'Clave quitada');
+}
+
+/* LA BARRA DE PROYECTOS, arriba de la galería: Todos, cada proyecto y «+». Con
+   uno elegido, sus mandos: renombrar, ocultar, clave y borrar. */
+function barraDeClientes() {
+  const lista = listaClientes();
+  const elegido = clienteElegido();
+  const caja = h('div', { clase: 'barra-clientes' });
+  const chips = h('div', { clase: 'chips-clientes' },
+    h('span', { clase: 'meta' }, 'Proyectos:'),
+    h('button', { clase: 'mini' + (!elegido ? ' activo' : ''), onclick: () => elegirCliente('') }, 'Todos'));
+  lista.filter(c => !c.oculto || APP.light.verOcultos || c.id === elegido).forEach(ficha => {
+    chips.appendChild(h('button', {
+      clase: 'mini' + (ficha.id === elegido ? ' activo' : '') + (ficha.oculto ? ' oculto' : ''),
+      title: ficha.con_clave ? 'Con clave' : '',
+      onclick: () => entrarEnCliente(ficha),
+    }, (ficha.con_clave ? '🔒 ' : '📁 ') + ficha.nombre));
+  });
+  if (lista.length && Object.keys((APP.light.clientes || {}).estilos || {}).length < presetsLight().length) {
+    chips.appendChild(h('button', {
+      clase: 'mini' + (elegido === '_sin' ? ' activo' : ''), onclick: () => elegirCliente('_sin'),
+    }, 'Sin proyecto'));
+  }
+  chips.appendChild(h('button', { clase: 'mini primario', onclick: crearCliente }, '+ Proyecto'));
+  if (lista.some(c => c.oculto)) {
+    chips.appendChild(h('button', {
+      clase: 'mini fantasma', onclick: () => { APP.light.verOcultos = !APP.light.verOcultos; pintarLight(); },
+    }, APP.light.verOcultos ? 'Esconder ocultos' : 'Ver ocultos'));
+  }
+  caja.appendChild(chips);
+  const ficha = lista.find(c => c.id === elegido);
+  if (ficha) {
+    caja.appendChild(h('div', { clase: 'mandos-cliente' },
+      h('b', {}, `📁 ${ficha.nombre}`),
+      h('span', { clase: 'meta' }, ' — los estilos que crees aquí quedan dentro, y sus vídeos con ellos. '),
+      h('button', { clase: 'mini fantasma', onclick: () => {
+        const nombre = window.prompt('Nuevo nombre del proyecto:', ficha.nombre);
+        if (nombre && nombre.trim()) cambiarCliente(ficha, { nombre }, 'Proyecto renombrado');
+      } }, 'Renombrar'),
+      h('button', { clase: 'mini fantasma', onclick: () => cambiarCliente(ficha,
+        { oculto: !ficha.oculto }, ficha.oculto ? 'Ya se ve en la lista' : 'Oculto: sale con «Ver ocultos»') },
+      ficha.oculto ? 'Mostrar' : 'Ocultar'),
+      h('button', { clase: 'mini fantasma', onclick: () => ponerClaveCliente(ficha) },
+        ficha.con_clave ? 'Cambiar clave' : 'Poner clave'),
+      h('button', { clase: 'mini fantasma peligro', onclick: () => borrarCliente(ficha) }, 'Borrar')));
+  } else if (!lista.length) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Crea un proyecto por cliente para tener sus estilos y vídeos separados. '
+      + 'Puedes ocultarlos o ponerles clave.'));
+  }
+  return caja;
+}
+
+/* Mover un estilo de proyecto, desde su menú ⋯. Sus vídeos van con él. */
+function selectorDeClienteDeEstilo(ficha) {
+  const lista = listaClientes();
+  if (!lista.length) return null;
+  const actual = clienteDe(ficha.id);
+  return h('label', { clase: 'mover-cliente' }, 'Proyecto',
+    h('select', {
+      onclick: ev => ev.stopPropagation(),
+      onchange: async ev => {
+        try {
+          await pedir(`${BASE}/api/clientes/estilos/${encodeURIComponent(ficha.id)}`,
+            { method: 'PUT', cuerpo: { cliente: ev.target.value } });
+          await cargarClientes();
+          toast('Estilo movido de proyecto');
+          pintarLight();
+        } catch (e) { toast(e.message, true); }
+      },
+    },
+      h('option', { value: '', selected: !actual }, '— sin proyecto —'),
+      ...lista.map(c => h('option', { value: c.id, selected: c.id === actual }, c.nombre))));
 }
 
 /* PULSAR UNA TARJETA LA ELIGE Y PASA AL SIGUIENTE PASO, no la abre. Lo que se
@@ -5601,7 +5846,8 @@ async function descartarTallerLight(taller) {
 function menuDeEstilo(ficha) {
   const menu = h('div', { clase: 'menu-estilo plegado' },
     h('button', { clase: 'mini fantasma', onclick: () => editarEstiloLight(ficha) }, 'Editar'),
-    h('button', { clase: 'mini fantasma', onclick: () => duplicarEstiloLight(ficha) }, 'Duplicar'));
+    h('button', { clase: 'mini fantasma', onclick: () => duplicarEstiloLight(ficha) }, 'Duplicar'),
+    selectorDeClienteDeEstilo(ficha));
   const puntos = h('button', {
     clase: 'puntos', title: 'Más opciones',
     onclick: ev => {
@@ -9735,6 +9981,75 @@ const GUIA_DE_BLOQUE = {
   'Las llamadas a la acción': 'cta',
 };
 
+/* «REVISAR»: lo escrito en el campo, contra su guía (pasos/revisar_campo.py).
+   Dice si sirve para lo que el sistema hace con ello, qué falla y por qué, y
+   propone una versión que se pone en el campo con un botón. Va por la
+   suscripción de Claude: no cuesta imágenes. */
+function botonRevisar(gid, campo, mandos) {
+  const panel = h('div', { clase: 'revision-campo', hidden: true });
+  const boton = h('button', {
+    clase: 'mini fantasma', type: 'button',
+    title: 'Comprobar si lo escrito sirve como dice la guía',
+    onclick: async () => {
+      const area = campo();
+      const texto = area ? area.value.trim() : '';
+      if (!texto) { toast('Escribe algo en el campo y vuelve a revisar', true); return; }
+      if (!panel.isConnected) mandos.appendChild(panel);
+      panel.hidden = false;
+      vaciar(panel).appendChild(h('div', { clase: 'cargando' }, 'revisando con la guía… (unos segundos)'));
+      boton.disabled = true;
+      try {
+        const { id } = await pedir(`${BASE}/api/sistema/guias/${gid}/revisar`,
+          { method: 'POST', cuerpo: { texto } });
+        let ficha = { estado: 'pensando' };
+        for (let i = 0; i < 120 && ficha.estado === 'pensando'; i += 1) {
+          await new Promise(r => setTimeout(r, 1500));
+          ficha = await pedir(`${BASE}/api/sistema/revisiones/${id}`);
+        }
+        if (ficha.estado === 'error') throw new Error(ficha.error || 'no se ha podido revisar');
+        if (ficha.estado !== 'listo') throw new Error('la revisión ha tardado demasiado');
+        pintarRevision(panel, ficha.resultado || {}, area);
+      } catch (e) {
+        vaciar(panel).appendChild(cajaError(e.message));
+      }
+      boton.disabled = false;
+    },
+  }, '✓ Revisar');
+  return boton;
+}
+
+function pintarRevision(panel, r, area) {
+  const nombres = { sirve: '✅ Sirve', mejorable: '🟡 Mejorable', no_sirve: '🔴 No sirve así' };
+  vaciar(panel);
+  panel.appendChild(h('div', { clase: 'fila' },
+    h('b', {}, nombres[r.veredicto] || r.veredicto),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini fantasma', onclick: () => { panel.hidden = true; } }, 'Cerrar')));
+  if (r.resumen) panel.appendChild(h('div', {}, r.resumen));
+  if ((r.problemas || []).length) {
+    panel.appendChild(h('ul', {}, ...(r.problemas || []).map(p => h('li', {},
+      h('b', {}, p.que), p.por_que ? ` — ${p.por_que}` : '',
+      p.arreglo ? h('div', { clase: 'meta' }, `Mejor: ${p.arreglo}`) : null))));
+  }
+  if (r.sugerida && area) {
+    panel.appendChild(h('details', {},
+      h('summary', {}, 'Ver la versión sugerida'),
+      h('div', { clase: 'sugerida' }, r.sugerida)));
+    panel.appendChild(h('div', { clase: 'fila' },
+      h('button', {
+        clase: 'mini primario',
+        onclick: () => {
+          if (!window.confirm('¿Cambiar lo escrito por la versión sugerida?')) return;
+          area.value = r.sugerida;
+          area.dispatchEvent(new Event('input', { bubbles: true }));
+          area.dispatchEvent(new Event('change', { bubbles: true }));
+          panel.hidden = true;
+          toast('Puesta la versión sugerida: revísala y ajústala a tu gusto');
+        },
+      }, 'Usar la versión sugerida')));
+  }
+}
+
 function bloqueLight(titulo, porque, ...contenido) {
   const mandos = h('div', { clase: 'mandos' }, ...contenido);
   const guia = GUIA_DE_BLOQUE[titulo];
@@ -9743,7 +10058,8 @@ function bloqueLight(titulo, porque, ...contenido) {
       h('div', { clase: 'titulo-fila' },
         h('h3', {}, titulo),
         // la de las llamadas a la accion solo copia: el bloque tiene tres campos
-        guia ? botonGuia(guia, guia === 'cta' ? null : () => mandos.querySelector('textarea')) : null),
+        guia ? botonGuia(guia, guia === 'cta' ? null : () => mandos.querySelector('textarea')) : null,
+        guia && guia !== 'cta' ? botonRevisar(guia, () => mandos.querySelector('textarea'), mandos) : null),
       porque ? h('span', { clase: 'meta' }, porque) : null),
     mandos);
 }
@@ -9833,7 +10149,10 @@ function imagenesDeApoyoLight(e, alCambiar, idHueco, opciones) {
     vaciar(lista);
     e[clave].forEach((ficha, indice) => {
       lista.appendChild(h('div', { clase: 'descripcion-aportada' },
-        h('img', { src: API.imagenLight(ficha.nombre), alt: '', loading: 'lazy' }),
+        h('img', {
+          src: API.imagenLight(ficha.nombre), alt: '', loading: 'lazy',
+          title: 'ver en grande', onclick: () => verAportadaEnGrande(e[clave], ficha),
+        }),
         h('input', {
           type: 'text', maxlength: 300, value: ficha.descripcion || '',
           placeholder: `Imagen ${indice + 1}${ficha.origen ? ` · ${ficha.origen}` : ''}`,
@@ -9849,8 +10168,24 @@ function imagenesDeApoyoLight(e, alCambiar, idHueco, opciones) {
     vaciar(tira);
     e[clave].forEach(ficha => {
       tira.appendChild(h('div', { clase: 'aportada', title: ficha.origen || '' },
-        h('img', { src: API.imagenLight(ficha.nombre), alt: '', loading: 'lazy' }),
+        h('img', {
+          src: API.imagenLight(ficha.nombre), alt: '', loading: 'lazy',
+          title: 'ver en grande',
+          onclick: () => verAportadaEnGrande(e[clave], ficha),
+        }),
         ficha.descripcion ? h('span', { clase: 'con-descripcion', title: ficha.descripcion }, '✎') : null,
+        describir ? h('button', {
+          clase: 'destacar' + (ficha.destacada ? ' puesta' : ''),
+          title: ficha.destacada ? 'Va seguro a la hoja con la que se dibujan las láminas (pulsa para quitarla)'
+            : 'Marcar para dibujar: va seguro a la hoja de las láminas (hasta 8)',
+          onclick: () => {
+            const marcadas = e[clave].filter(x => x.destacada).length;
+            if (!ficha.destacada && marcadas >= 8) { toast('Caben 8 marcadas para dibujar', true); return; }
+            ficha.destacada = !ficha.destacada;
+            pintar();
+            alCambiar();
+          },
+        }, '★') : null,
         h('button', {
           clase: 'quitar', title: 'quitar esta imagen',
           onclick: () => quitarImagenLight(e, ficha, pintar, alCambiar, clave),
@@ -9896,9 +10231,51 @@ function imagenesDeApoyoLight(e, alCambiar, idHueco, opciones) {
   caja.appendChild(suelta);
   caja.appendChild(entrada);
   caja.appendChild(tira);
-  if (plegable) caja.appendChild(plegable);
+  if (plegable) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Pulsa una imagen para verla en grande. La guía del estilo las mira todas; '
+      + 'para dibujar las láminas se usan 8 como mucho: las que marques con ★, '
+      + 'luego las que describas, y el resto repartidas.'));
+    caja.appendChild(plegable);
+  }
   pintar();
   return caja;
+}
+
+/* UNA IMAGEN DE REFERENCIA EN GRANDE, con flechas para pasar a la de al lado
+   (también con ← y →) y lo que se haya dicho de ella. Las miniaturas solas no
+   bastaban para distinguir dos fotos parecidas. */
+function verAportadaEnGrande(lista, ficha) {
+  let indice = Math.max(0, lista.indexOf(ficha));
+  const imagen = h('img', { alt: '' });
+  const pie = h('div', { clase: 'ficha-lupa' });
+  const pintar = () => {
+    const actual = lista[indice];
+    imagen.src = API.imagenLight(actual.nombre);
+    vaciar(pie).append(`Imagen ${indice + 1} de ${lista.length}`
+      + (actual.origen ? ` · ${actual.origen}` : '')
+      + (actual.descripcion ? ` — ${actual.descripcion}` : ''));
+  };
+  const mover = paso => { indice = (indice + paso + lista.length) % lista.length; pintar(); };
+  const cerrar = () => { capa.remove(); document.removeEventListener('keydown', teclas); };
+  const teclas = ev => {
+    if (ev.key === 'ArrowRight') mover(1);
+    else if (ev.key === 'ArrowLeft') mover(-1);
+    else if (ev.key === 'Escape') cerrar();
+  };
+  const capa = h('div', {
+    id: 'lupa', clase: 'lupa-aportadas',
+    onclick: ev => { if (ev.target === capa || ev.target === imagen) cerrar(); },
+  },
+    lista.length > 1 ? h('button', { clase: 'lupa-flecha izq', title: 'anterior (←)',
+      onclick: ev => { ev.stopPropagation(); mover(-1); } }, '‹') : null,
+    imagen,
+    lista.length > 1 ? h('button', { clase: 'lupa-flecha der', title: 'siguiente (→)',
+      onclick: ev => { ev.stopPropagation(); mover(1); } }, '›') : null,
+    pie);
+  document.addEventListener('keydown', teclas);
+  document.body.appendChild(capa);
+  pintar();
 }
 
 /* {nombre: descripción} de las imágenes que la llevan. */
@@ -10295,7 +10672,14 @@ function tiraDeImagenes(ficha, nombres) {
    mismo código que el modo editor. */
 function escuchaDeVoz(ficha) {
   const voz = (ficha.datos || {}).voz || {};
+  const origen = (ficha.datos || {}).origen || {};
   const caja = h('div', { clase: 'bloque-voz' });
+  // CÓMO SE PIDIÓ, igual que en el formulario de crear: la descripción arriba
+  // y la voz concreta debajo. Para pedir otra, la caja de «qué le cambiarías».
+  if (origen.voz_prompt) {
+    caja.appendChild(h('div', { clase: 'voz-pedida' },
+      h('span', { clase: 'meta' }, 'Pedida así: '), origen.voz_prompt));
+  }
   const nombre = voz.voz_nombre || voz.voz_id || '';
   caja.appendChild(h('div', { clase: 'resumen-voz' },
     h('b', {}, nombre || 'sin voz elegida'),
@@ -10328,22 +10712,24 @@ function escuchaDeVoz(ficha) {
 function mandosDeVozLight(ficha, voz) {
   const caja = h('div', {});
   const dentro = h('div', {});
-  const avanzadas = opcionesAvanzadas({
-    clave: `voz-light-${ficha.id}`,
-    resumen: 'la voz concreta, la velocidad, el color y el aire',
-  }, dentro);
-  caja.appendChild(avanzadas);
-
+  /* LA VOZ CONCRETA, A LA VISTA, como al crear el estilo: la misma cuadrícula
+     con su play. Estaba dentro de «Opciones avanzadas» y la ficha recién
+     generada no se parecía al formulario con el que se pidió (10-10-2026).
+     Plegados quedan solo los mandos finos. */
   const guardar = cambios => apuntarVozLight(ficha, cambios);
-
   const idioma = ficha.idioma || 'es';
   const lista = vocesLight(idioma);
   if (!lista) {
-    dentro.appendChild(h('div', { clase: 'pista' },
+    caja.appendChild(h('div', { clase: 'pista' },
       `cargando las voces de ${nombreIdiomaLight(idioma)}…`));
   } else {
-    dentro.appendChild(selectorVozLight(ficha, voz, lista, guardar));
+    caja.appendChild(selectorVozLight(ficha, voz, lista, guardar));
   }
+  const avanzadas = opcionesAvanzadas({
+    clave: `voz-light-${ficha.id}`,
+    resumen: 'la velocidad, el color y el aire',
+  }, dentro);
+  caja.appendChild(avanzadas);
 
   dentro.appendChild(campoSelect('Velocidad', voz.velocidad || 'normal',
     VELOCIDADES.map(v => ({ valor: v, nombre: v })),
@@ -10444,41 +10830,50 @@ function vocesLight(idioma) {
 
 /* LA VOZ CONCRETA AL CREAR, OPCIONAL. Sin elegir, la voz la escoge el sistema
    leyendo la descripción de arriba; elegida, la descripción solo pone la
-   velocidad y el color. Salen primero las voces PROPIAS de la cuenta (las
-   clonadas) y después el catálogo del idioma: antes solo salían las clonadas, y
-   con una cuenta sin ninguna la caja decía «no hay» y no dejaba elegir nada
-   (09-10-2026). Escucharlas y compararlas se hace en el estilo ya creado
-   (Voz → Opciones avanzadas), que es donde hay una ficha con la que sonar.
+   velocidad y el color.
+
+   LA MISMA CUADRÍCULA QUE EN EL ESTILO YA CREADO (`selectorVozLight`): cada voz
+   con su play, que la escucha SIN elegirla, y un buscador. Antes aquí había un
+   desplegable del navegador con cientos de nombres en fila y sin forma de oír
+   ninguna (10-10-2026). La escucha, sin estilo todavía, sale de
+   `/api/voces/muestra` (ver `pedirEscuchaVoz`).
 
    EL CATÁLOGO SE GUARDA SIETE DÍAS en el servidor: una voz recién clonada no
    saldría hasta entonces. «Buscar mis voces otra vez» lo vuelve a pedir. */
 function selectorVozPropiaLight(e) {
-  const lista = vocesLight(e.idioma);
   const caja = h('div', { clase: 'campo voz-al-crear' });
-  if (!lista) {
-    caja.appendChild(h('div', { clase: 'pista' }, 'cargando las voces…'));
-    return caja;
-  }
-  const propias = lista.filter(v => v.publica === false);
-  const catalogo = lista.filter(v => v.publica !== false && v.nativa !== false);
-  if (e.voz_id && !lista.some(v => v.id === e.voz_id)) e.voz_id = '';
-  const nombreDe = v => `${v.nombre || v.id}${v.descripcion ? ` · ${v.descripcion.slice(0, 70)}` : ''}`;
-  caja.appendChild(h('label', {}, 'Voz concreta (opcional)'));
-  caja.appendChild(h('select', {
-    onchange: ev => { e.voz_id = ev.target.value; tocarEncargoLight(); },
-  },
-    h('option', { value: '', selected: !e.voz_id },
-      '— que la elija el sistema por la descripción —'),
-    propias.length ? h('optgroup', { label: 'Tus voces (clonadas)' },
-      ...propias.map(v => h('option', { value: v.id, selected: e.voz_id === v.id }, nombreDe(v))))
-      : null,
-    catalogo.length ? h('optgroup', { label: `Catálogo de Cartesia (${catalogo.length})` },
-      ...catalogo.map(v => h('option', { value: v.id, selected: e.voz_id === v.id }, nombreDe(v))))
-      : null));
-  caja.appendChild(h('div', { clase: 'pista' }, e.voz_id
-    ? 'La voz es esta; la descripción de arriba solo decide la velocidad y el color.'
-    : 'Si no eliges, se escoge la que mejor encaje con la descripción. Después '
-      + 'podrás escucharlas y cambiarla en el estilo: Voz → Opciones avanzadas.'));
+  const pintar = () => {
+    vaciar(caja);
+    const lista = vocesLight(e.idioma);
+    if (!lista) {
+      caja.appendChild(h('div', { clase: 'pista' }, 'cargando las voces…'));
+      return;
+    }
+    const propias = lista.filter(v => v.publica === false);
+    if (e.voz_id && !lista.some(v => v.id === e.voz_id)) { e.voz_id = ''; e.voz_nombre = ''; }
+    const ficha = { id: 'crear', sinEstilo: true, idioma: e.idioma || 'es' };
+    const voz = { voz_id: e.voz_id || '', voz_nombre: e.voz_nombre || '' };
+    caja.appendChild(selectorVozLight(ficha, voz, lista,
+      cambios => { e.voz_id = cambios.voz_id; e.voz_nombre = cambios.voz_nombre; tocarEncargoLight(); },
+      () => pintar()));
+    caja.appendChild(h('div', { clase: 'pista' }, e.voz_id
+      ? ['La voz es esta; la descripción de arriba solo decide la velocidad y el color. ',
+        h('button', { clase: 'mini fantasma', type: 'button',
+          onclick: () => { e.voz_id = ''; e.voz_nombre = ''; tocarEncargoLight(); pintar(); } },
+        'Que la elija el sistema')]
+      : 'Opcional. Si no eliges, se escoge la que mejor encaje con la descripción. '
+        + 'Pulsa ▶ en cualquier voz para oírla sin elegirla.'));
+    caja.appendChild(h('div', { clase: 'pista' },
+      propias.length
+        ? 'Tus voces clonadas salen las primeras de la lista. '
+        : 'No hay voces clonadas en tu cuenta de Cartesia. ',
+      h('b', {}, 'Para usar tu propia voz: '),
+      'clónala en play.cartesia.ai (Voices → Clone Voice, con unos segundos de '
+      + 'audio tuyo) con la MISMA cuenta cuya clave está en Configuración, y '
+      + 'pulsa aquí para que aparezca. ',
+      h('button', { clase: 'mini', type: 'button', onclick: ev => refrescar(ev.currentTarget) },
+        'Buscar mis voces otra vez')));
+  };
   const refrescar = async boton => {
     boton.disabled = true;
     boton.textContent = 'buscando…';
@@ -10491,22 +10886,13 @@ function selectorVozPropiaLight(e) {
     } catch (err) {
       toast(err.message, true);
     }
-    pintarLight();
+    pintar();
   };
-  caja.appendChild(h('div', { clase: 'pista' },
-    propias.length
-      ? 'Tus voces clonadas salen arriba de la lista. '
-      : 'No hay voces clonadas en tu cuenta de Cartesia. ',
-    h('b', {}, 'Para usar tu propia voz: '),
-    'clónala en play.cartesia.ai (Voices → Clone Voice, con unos segundos de '
-    + 'audio tuyo) con la MISMA cuenta cuya clave está en Configuración, y '
-    + 'pulsa aquí para que aparezca. ',
-    h('button', { clase: 'mini', type: 'button', onclick: ev => refrescar(ev.currentTarget) },
-      'Buscar mis voces otra vez')));
+  pintar();
   return caja;
 }
 
-function selectorVozLight(ficha, voz, voces, guardar) {
+function selectorVozLight(ficha, voz, voces, guardar, alElegir) {
   const estado = (APP.light.picker && APP.light.picker.preset === ficha.id)
     ? APP.light.picker
     : (APP.light.picker = { preset: ficha.id, abierto: false, busca: '' });
@@ -10527,7 +10913,8 @@ function selectorVozLight(ficha, voz, voces, guardar) {
     guardar({ voz_id: v.id, voz_nombre: v.nombre || '' });
     // el bloque entero y no la pantalla: el rótulo de arriba, la cuadrícula y
     // el botón de escuchar de abajo dicen los tres cuál es la voz puesta
-    repintarBloqueVoz(ficha);
+    if (alElegir) alElegir(v);
+    else repintarBloqueVoz(ficha);
   };
   const pintarRejilla = () => {
     vaciar(rejilla);
@@ -10751,6 +11138,14 @@ function claveEscucha(ficha, vozId) {
 /* Doce segundos, en el taller. Con `voz_id` se escucha una voz SIN elegirla, que
    es lo que hace el play de cada celda de la cuadrícula. */
 async function pedirEscuchaVoz(ficha, vozId) {
+  /* AL CREAR un estilo todavía no hay taller donde sintetizar: la muestra sale
+     del catálogo (`/api/voces/muestra`), con la frase del idioma y los mandos de
+     fábrica. Es síncrono: doce segundos se sintetizan en dos o tres. */
+  if (ficha.sinEstilo) {
+    const datos = await pedir(`${BASE}/api/voces/muestra`, {
+      method: 'POST', cuerpo: { voz_id: vozId || '', idioma: ficha.idioma || 'es' } });
+    return `${BASE}${datos.ruta}`;
+  }
   /* LO PENDIENTE PRIMERO. El autoguardado sale 900 ms después del último toque y
      el servidor sintetiza con lo que tenga GUARDADO el estilo: sin esto, subir
      la velocidad y darle al play escuchaba la de antes. */
@@ -10830,6 +11225,7 @@ function fuenteParaServidor(_ficha) {
     estilo_prompt: String(f.prompt || '').trim(),
     estilo_imagenes: (f.estilo_imagenes || []).map(x => x.nombre),
     estilo_descripciones: descripcionesDeAportadas(f.estilo_imagenes),
+    estilo_destacadas: (f.estilo_imagenes || []).filter(x => x.destacada).map(x => x.nombre),
   };
 }
 
@@ -11758,6 +12154,7 @@ async function asegurarCharla() {
    respuesta útil de ayer no había forma de volver a encontrarla. */
 function nuevaCharla() {
   ASISTENTE.verHistorial = false;
+  ASISTENTE.historial = null;
   ASISTENTE.charla = null;
   ASISTENTE.latiendo = false;
   localStorage.removeItem(CLAVE_CHARLA);
@@ -11790,6 +12187,7 @@ async function abrirCharlaDelHistorial(cid) {
     ASISTENTE.verHistorial = false;
     pintarAsistente();
     latirAsistente();
+    enfocarCampoAsistente();
   } catch (e) { toast(`no se ha podido abrir: ${e.message}`, true); }
 }
 
@@ -11866,6 +12264,9 @@ async function enviarAlAsistente(reintento) {
     toast('espera a que termine la respuesta anterior', true);
     return;
   }
+  // DESDE EL HISTORIAL TAMBIÉN SE PREGUNTA: se sale de la lista y se ve la
+  // charla. Antes se mandaba con la lista delante y parecía que no hacía nada.
+  ASISTENTE.verHistorial = false;
   campo.disabled = true;
   try {
     const charla = await asegurarCharla();
@@ -11936,6 +12337,7 @@ function latirAsistente() {
     else {
       ASISTENTE.latiendo = false;
       if (!ASISTENTE.abierto) { ASISTENTE.sinLeer = true; pintarAsistente(); }
+      else enfocarCampoAsistente();
     }
   };
   setTimeout(tic, 1500);
@@ -11990,7 +12392,21 @@ function pintarAsistente() {
   $('#btn-enviar-asistente').disabled = !listo || ocupada;
   pintarDictado();
   $('#btn-cancelar-asistente').hidden = !ocupada;
-  $('#btn-nueva-charla').disabled = ocupada || (!charla && !ASISTENTE.verHistorial);
+  // «Nueva» siempre que haya con quién hablar: una charla que está pensando
+  // sigue en el servidor, y empezar otra no la para.
+  $('#btn-nueva-charla').disabled = !listo || (!charla && !ASISTENTE.verHistorial);
+}
+
+/* EL CURSOR VUELVE AL CAMPO cuando el asistente termina de contestar, para
+   seguir escribiendo sin hacer clic. Solo si el foco no está en otro campo:
+   quitárselo a quien escribe en la pantalla de detrás sería peor. */
+function enfocarCampoAsistente() {
+  const campo = $('#asistente-texto');
+  if (!campo || campo.disabled) return;
+  const activo = document.activeElement;
+  const enOtroCampo = activo && activo !== campo && activo !== document.body
+    && /^(INPUT|TEXTAREA|SELECT)$/.test(activo.tagName) && !activo.closest('#asistente');
+  if (!enOtroCampo) campo.focus();
 }
 
 /* Sin cuenta que conteste no hay asistente, y se dice POR QUÉ con el camino
@@ -12193,7 +12609,12 @@ function bloqueLlevaDelVideo() {
         cargar();
       }
     }));
-    if (v.lleva.musica !== false) caja.appendChild(bloquePresenciaMusica());
+    if (v.lleva.musica !== false) {
+      caja.appendChild(bloquePresenciaMusica());
+      caja.appendChild(bloqueTemaMusica());
+    }
+    if (v.lleva.subtitulos !== false) caja.appendChild(bloqueSubtitulosVideo());
+    caja.appendChild(bloqueLogoVideo());
   };
   const cargar = async () => {
     try {
@@ -12281,6 +12702,243 @@ function bloquePresenciaMusica() {
   if (!v.presencia || v.presenciaDe !== v.pid) { v.presenciaDe = v.pid; v.presencia = null; cargar(); }
   pintar();
   return caja;
+}
+
+/* ======================================= MÚSICA, SUBTÍTULOS Y LOGO DEL VÍDEO
+ *
+ * Tres mandos plegados debajo de «Qué lleva este vídeo». Sin tocarlos, todo
+ * va en automático como siempre: la música la elige el ritmo, los subtítulos
+ * son los del estilo y no hay logo. Ninguno paga imágenes: la música y el logo
+ * solo vuelven a montar el MP4, y los subtítulos rehacen las capas de texto.
+ */
+function trabajoDeMontaje(r, quePasa) {
+  const v = APP.light.video;
+  if (r && r.trabajo_id) {
+    toast(`${quePasa}: volviendo a montar el vídeo, sin pagar imágenes`);
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, r.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') toast(`${quePasa}: el vídeo ya está montado de nuevo`);
+      try { await recargarVideoAbierto(); } catch (e) { /* se relee al volver */ }
+    });
+  } else if (r && r.montado) {
+    toast(`${quePasa}: se aplicará al volver a montar el vídeo`);
+  } else {
+    toast(`${quePasa}: se aplicará al montar el vídeo`);
+  }
+  if (v) v.opciones = null;
+}
+
+/* ELEGIR EL TEMA, o dejar que lo elija el ritmo (lo de siempre). Se buscan
+   temas de Jamendo por ánimo, se escuchan aquí mismo y se fija uno. */
+const ANIMOS_MUSICA = [
+  ['sobrio', 'Sobrio'], ['corporativo', 'Corporativo'], ['esperanzador', 'Esperanzador'],
+  ['epico', 'Épico'], ['misterioso', 'Misterioso'], ['tension', 'Tensión'],
+  ['melancolico', 'Melancólico'], ['oscuro', 'Oscuro'],
+];
+
+function bloqueTemaMusica() {
+  const v = APP.light.video;
+  const estado = v.temaMusica || (v.temaMusica = { animo: 'sobrio', extra: '', temas: null, buscando: false });
+  const detalles = h('details', { clase: 'opcion-montaje', open: !!estado.abierto });
+  detalles.addEventListener('toggle', () => { estado.abierto = detalles.open; if (detalles.open) cargar(); });
+  const dentro = h('div', {});
+  detalles.appendChild(h('summary', {}, 'Elegir la música',
+    h('span', { clase: 'meta' }, ' · automática si no eliges')));
+  detalles.appendChild(dentro);
+  const pintar = () => {
+    vaciar(dentro);
+    const puesto = estado.puesto;
+    dentro.appendChild(h('div', { clase: 'meta' }, puesto && puesto.id
+      ? ['Suena «', h('b', {}, puesto.titulo || puesto.id), `» de ${puesto.artista || '?'}. `,
+        h('button', { clase: 'mini fantasma', onclick: () => fijar(null) }, 'Volver a la automática')]
+      : 'Automática: el vídeo se parte en tramos según su ritmo y cada uno lleva su tema. '
+        + 'Si prefieres uno solo, búscalo aquí.'));
+    const tira = h('div', { clase: 'herramientas' });
+    ANIMOS_MUSICA.forEach(([id, nombre]) => tira.appendChild(h('button', {
+      clase: 'mini' + (estado.animo === id ? ' activo' : ''),
+      onclick: () => { estado.animo = id; pintar(); },
+    }, nombre)));
+    dentro.appendChild(tira);
+    dentro.appendChild(h('div', { clase: 'fila' },
+      h('input', { type: 'text', value: estado.extra, placeholder: 'algo más: piano, acústica, lo-fi…',
+        oninput: ev => { estado.extra = ev.target.value; } }),
+      h('button', { clase: 'mini primario', disabled: estado.buscando, onclick: buscar },
+        estado.buscando ? 'buscando…' : 'Buscar temas')));
+    (estado.temas || []).forEach(tema => {
+      const audio = h('audio', { controls: true, preload: 'none',
+        src: `${BASE}/api/musica/escucha?url=${encodeURIComponent(tema.escucha || '')}` });
+      dentro.appendChild(h('div', { clase: 'tema-musica' },
+        h('div', {}, h('b', {}, tema.titulo || tema.id),
+          h('span', { clase: 'meta' }, ` · ${tema.artista || '?'} · ${duracionCorta(tema.duracion)}`
+            + ((tema.generos || []).length ? ` · ${tema.generos.slice(0, 3).join(', ')}` : ''))),
+        audio,
+        h('button', { clase: 'mini', onclick: () => fijar(tema) },
+          puesto && puesto.id === tema.id ? 'Puesto' : 'Usar este')));
+    });
+    if (estado.temas && !estado.temas.length) {
+      dentro.appendChild(h('div', { clase: 'pista' }, 'Ningún tema con eso: prueba otro ánimo.'));
+    }
+    dentro.appendChild(h('div', { clase: 'pista' },
+      'Jamendo: música con licencia Creative Commons. Al fijar un tema se guarda su licencia; '
+      + 'revísala si el vídeo es para un uso comercial.'));
+  };
+  const cargar = async () => {
+    try {
+      const datos = await pedir(`${API.proyecto(v.pid)}/sonido`);
+      estado.puesto = datos.musica || (datos.tema || null);
+    } catch (e) { /* sin sonido todavía */ }
+    pintar();
+  };
+  const buscar = async () => {
+    estado.buscando = true;
+    pintar();
+    try {
+      const datos = await pedir(`${API.proyecto(v.pid)}/sonido/musica`, {
+        method: 'POST', cuerpo: { animo: estado.animo, extra: estado.extra, cuantas: 8 } });
+      estado.temas = datos.temas || [];
+    } catch (e) { toast(e.message, true); }
+    estado.buscando = false;
+    pintar();
+  };
+  const fijar = async tema => {
+    try {
+      const r = await pedir(`${API.proyecto(v.pid)}/sonido`, {
+        method: 'PUT', cuerpo: { musica: tema || {}, remontar: true } });
+      estado.puesto = tema;
+      trabajoDeMontaje(r, tema ? 'Música' : 'Música automática');
+    } catch (e) { toast(e.message, true); }
+    pintar();
+  };
+  pintar();
+  if (estado.abierto) cargar();
+  return detalles;
+}
+
+/* LOS SUBTÍTULOS: los del estilo, o a tu gusto. */
+const TAMANOS_SUB = [['pequeno', 'Pequeño'], ['normal', 'Normal'], ['grande', 'Grande'], ['enorme', 'Enorme']];
+const DISENOS_SUB = [['dibujo', 'Dibujo'], ['realista', 'Realista'], ['editorial', 'Editorial']];
+const CAJAS_SUB = [['auto', 'La del estilo'], [0, 'Sin caja'], [0.45, 'Suave'], [0.85, 'Opaca']];
+
+function bloqueSubtitulosVideo() {
+  const v = APP.light.video;
+  const estado = v.subtitulos || (v.subtitulos = { datos: null, abierto: false });
+  const detalles = h('details', { clase: 'opcion-montaje', open: !!estado.abierto });
+  const dentro = h('div', {});
+  detalles.appendChild(h('summary', {}, 'Personalizar los subtítulos',
+    h('span', { clase: 'meta' }, ' · los del estilo si no tocas nada')));
+  detalles.appendChild(dentro);
+  detalles.addEventListener('toggle', () => { estado.abierto = detalles.open; if (detalles.open) cargar(); });
+  const fila = (etiqueta, opciones, actual, clave) => h('div', { clase: 'campo' },
+    h('label', {}, etiqueta),
+    h('div', { clase: 'herramientas' }, ...opciones.map(([valor, nombre]) => h('button', {
+      clase: 'mini' + (String(actual) === String(valor) ? ' activo' : ''),
+      onclick: () => cambiar({ [clave]: valor }),
+    }, nombre))));
+  const pintar = () => {
+    vaciar(dentro);
+    const d = estado.datos;
+    if (!d) { dentro.appendChild(h('div', { clase: 'cargando' }, 'leyendo…')); return; }
+    dentro.appendChild(fila('Tamaño', TAMANOS_SUB, d.tam, 'tam'));
+    dentro.appendChild(fila('Letra y forma', DISENOS_SUB, d.diseno, 'diseno'));
+    dentro.appendChild(fila('Caja detrás del texto', CAJAS_SUB, d.caja, 'caja'));
+    const color = h('input', { type: 'color', value: d.color || '#ffffff',
+      onchange: ev => cambiar({ color: ev.target.value }) });
+    dentro.appendChild(h('div', { clase: 'campo' }, h('label', {}, 'Color del texto'),
+      h('div', { clase: 'fila' }, color,
+        d.color ? h('button', { clase: 'mini fantasma', onclick: () => cambiar({ color: '' }) },
+          'El del estilo') : h('span', { clase: 'meta' }, 'ahora: el del estilo'))));
+    dentro.appendChild(h('div', { clase: 'pista' },
+      'Rehace las capas de texto y el montaje al volver a montar el vídeo; ninguna imagen se paga. ',
+      d.propios ? h('button', { clase: 'mini', onclick: () => cambiar({ automatico: true }) },
+        'Volver a los del estilo') : null));
+  };
+  const cargar = async () => {
+    try { estado.datos = await pedir(`${API.proyecto(v.pid)}/subtitulos`); } catch (e) { toast(e.message, true); }
+    pintar();
+  };
+  const cambiar = async cambios => {
+    try {
+      const r = await pedir(`${API.proyecto(v.pid)}/subtitulos`, { method: 'PUT', cuerpo: cambios });
+      if (r.cambiado) toast('Subtítulos: se aplicará al volver a montar el vídeo (sin pagar imágenes)');
+      await recargarVideoAbierto().catch(() => {});
+    } catch (e) { toast(e.message, true); }
+    cargar();
+  };
+  pintar();
+  if (estado.abierto) cargar();
+  return detalles;
+}
+
+/* EL LOGO: una imagen (mejor PNG con fondo transparente) en una esquina. */
+const ESQUINAS_LOGO = [['arriba_izquierda', '↖ Arriba izq.'], ['arriba_derecha', '↗ Arriba der.'],
+  ['abajo_izquierda', '↙ Abajo izq.'], ['abajo_derecha', '↘ Abajo der.']];
+
+function bloqueLogoVideo() {
+  const v = APP.light.video;
+  const estado = v.logo || (v.logo = { datos: null, abierto: false });
+  const detalles = h('details', { clase: 'opcion-montaje', open: !!estado.abierto });
+  const dentro = h('div', {});
+  detalles.appendChild(h('summary', {}, 'Logo',
+    h('span', { clase: 'meta' }, ' · opcional, en una esquina del vídeo')));
+  detalles.appendChild(dentro);
+  detalles.addEventListener('toggle', () => { estado.abierto = detalles.open; if (detalles.open) cargar(); });
+  const entrada = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', clase: 'oculto',
+    id: `logo-${v.pid}`, onchange: ev => subir(ev.target) });
+  const pintar = () => {
+    vaciar(dentro);
+    const d = estado.datos;
+    if (!d) { dentro.appendChild(h('div', { clase: 'cargando' }, 'leyendo…')); return; }
+    const logo = d.logo;
+    dentro.appendChild(entrada);
+    dentro.appendChild(h('div', { clase: 'fila' },
+      logo ? h('img', { clase: 'logo-previa', alt: 'logo',
+        src: `${API.proyecto(v.pid)}/logo/imagen?v=${encodeURIComponent(logo.fichero)}` }) : null,
+      h('label', { clase: 'mini boton-fichero', for: `logo-${v.pid}` }, logo ? 'Cambiar el logo' : 'Subir un logo'),
+      logo ? h('button', { clase: 'mini fantasma peligro', onclick: () => colocar({ quitar: true }) }, 'Quitar') : null));
+    if (!logo) {
+      dentro.appendChild(h('div', { clase: 'pista' },
+        'PNG con fondo transparente queda mejor. Ponerlo, moverlo o quitarlo solo vuelve a montar el vídeo.'));
+      return;
+    }
+    dentro.appendChild(h('div', { clase: 'herramientas' }, ...ESQUINAS_LOGO.map(([id, nombre]) => h('button', {
+      clase: 'mini' + (logo.posicion === id ? ' activo' : ''), onclick: () => colocar({ posicion: id }),
+    }, nombre))));
+    const tam = Math.round((logo.tamano || 0.12) * 100);
+    dentro.appendChild(h('div', { clase: 'campo' },
+      h('label', {}, `Tamaño: ${tam} % del ancho`),
+      h('input', { type: 'range', min: 4, max: 40, step: 1, value: tam,
+        onchange: ev => colocar({ tamano: Number(ev.target.value) / 100 }) })));
+    const op = Math.round((logo.opacidad || 0.9) * 100);
+    dentro.appendChild(h('div', { clase: 'campo' },
+      h('label', {}, `Opacidad: ${op} %`),
+      h('input', { type: 'range', min: 10, max: 100, step: 5, value: op,
+        onchange: ev => colocar({ opacidad: Number(ev.target.value) / 100 }) })));
+  };
+  const cargar = async () => {
+    try { estado.datos = await pedir(`${API.proyecto(v.pid)}/logo`); } catch (e) { toast(e.message, true); }
+    pintar();
+  };
+  const subir = async input => {
+    const fichero = (input.files || [])[0];
+    input.value = '';
+    if (!fichero) return;
+    const cuerpo = new FormData();
+    cuerpo.append('logo', fichero);
+    try {
+      const r = await pedir(`${API.proyecto(v.pid)}/logo`, { method: 'POST', cuerpo });
+      trabajoDeMontaje(r, 'Logo');
+    } catch (e) { toast(e.message, true); }
+    cargar();
+  };
+  const colocar = async cambios => {
+    try {
+      const r = await pedir(`${API.proyecto(v.pid)}/logo`, { method: 'PUT', cuerpo: cambios });
+      if (r.trabajo_id || r.montado !== undefined) trabajoDeMontaje(r, 'Logo');
+    } catch (e) { toast(e.message, true); }
+    cargar();
+  };
+  pintar();
+  if (estado.abierto) cargar();
+  return detalles;
 }
 
 /* TRAER LOS CAMBIOS DEL ESTILO. Un vídeo se queda con la copia del estilo del

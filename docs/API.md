@@ -36,6 +36,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/feedback` | Feedback general o sobre una unidad; rehace SOLO lo que apunta. |
 | `GET` | `/api/proyectos/{pid}/lleva` | Lo que lleva este video: voz, subtitulos, musica y efectos. |
 | `PUT` | `/api/proyectos/{pid}/lleva` | Enciende o apaga lo que lleva el video. Rehace solo el montaje, nunca imagenes. |
+| `GET` | `/api/proyectos/{pid}/logo` | El logo de este video y donde va, o null si no lleva. |
+| `POST` | `/api/proyectos/{pid}/logo` | Sube el logo (PNG con transparencia, mejor) y lo pone arriba a la derecha. |
+| `PUT` | `/api/proyectos/{pid}/logo` | Donde va y como: {posicion?, tamano? (0,04-0,4), opacidad?} o {quitar: true}. |
+| `GET` | `/api/proyectos/{pid}/logo/imagen` | — |
 | `GET` | `/api/proyectos/{pid}/musica/presencia` | Cuánto se oye la música bajo la voz en este vídeo, y los niveles que hay. |
 | `PUT` | `/api/proyectos/{pid}/musica/presencia` | Fija cuánto se oye la música y, si el vídeo ya está montado, lo REMONTA. |
 | `POST` | `/api/proyectos/{pid}/presets-canal/{preset_id}/aplicar` | Copia los valores del preset a los params de los pasos que toque. |
@@ -49,6 +53,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/repaso/imagenes/{nombre}` | Una imagen de referencia de una nota. |
 | `DELETE` | `/api/proyectos/{pid}/repaso/{nid}` | Quita una nota del repaso. |
 | `PUT` | `/api/proyectos/{pid}/repaso/{nid}` | Cambia el texto, el instante o las imágenes de una nota. |
+| `GET` | `/api/proyectos/{pid}/subtitulos` | Como son los subtitulos de este video, y si son los del estilo. |
+| `PUT` | `/api/proyectos/{pid}/subtitulos` | {tam?, caja? ("auto" o 0-1), diseno?, color? ("#rrggbb" o "")} o {automatico: true}. |
 
 ## Pasos: estado, params y ejecución
 
@@ -116,6 +122,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/voz/previsualizar` | Sintetiza unos segundos con estos mandos de voz para escucharlos. |
 | `POST` | `/api/proyectos/{pid}/voz/secciones/{seccion_id}/regrabar` | Regraba una seccion de la toma, con microcambio si se pide. |
 | `GET` | `/api/voces` | Catalogo de voces de Cartesia, sin atarlo a ningun proyecto. |
+| `POST` | `/api/voces/muestra` | Doce segundos de una voz del catalogo, sin estilo ni proyecto. |
+| `GET` | `/api/voces/muestra/{nombre}` | El wav de una muestra ya sintetizada. |
 
 ## Catálogo, escenarios y piezas
 
@@ -272,15 +280,24 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/` | La interfaz del Estudio. |
+| `GET` | `/api/clientes` | Los proyectos (clientes) y a cual pertenece cada estilo. |
+| `POST` | `/api/clientes` | Un proyecto nuevo: {nombre}. |
+| `PUT` | `/api/clientes/estilos/{preset_id}` | Mueve un estilo (y sus videos) a un proyecto: {cliente} ("" lo saca). |
+| `DELETE` | `/api/clientes/{cid}` | Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto. |
+| `PUT` | `/api/clientes/{cid}` | Renombra, oculta o pone clave: {nombre?, oculto?, clave?} ("" la quita). |
+| `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
+| `GET` | `/api/musica/escucha` | Pasa por aqui la escucha de un tema de Jamendo antes de elegirlo. |
 | `GET` | `/api/sistema/guias` | Como rellenar cada campo de texto: plantilla, ejemplo y prompt para otra IA. |
+| `POST` | `/api/sistema/guias/{gid}/revisar` | Lanza la revision de un texto contra la guia de su campo. -> {id} |
 | `GET` | `/api/sistema/manual` | Cómo se usa el Estudio, tal cual esta en docs/MANUAL.md. |
 | `GET` | `/api/sistema/notas` | Las notas de mejoras futuras, las pendientes primero. |
 | `POST` | `/api/sistema/notas` | Apunta una mejora para hacer mas adelante. |
 | `DELETE` | `/api/sistema/notas/{nid}` | — |
 | `PUT` | `/api/sistema/notas/{nid}` | Cambia el texto de una nota o la marca como hecha / pendiente. |
 | `GET` | `/api/sistema/novedades` | El historial de cambios, tal cual esta en docs/NOVEDADES.md. |
+| `GET` | `/api/sistema/revisiones/{rid}` | — |
 | `GET` | `/{fichero}` | Sirve un fichero suelto de web/ (app.js, estilo.css...). |
 
 ---
 
-**169 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**186 endpoints.** Escrito por `generar_api.py` desde `app.py`.

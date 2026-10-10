@@ -87,6 +87,7 @@ sys.path.insert(0, os.path.join(RAIZ_ESTUDIO, "pasos"))
 import ajustes as AJUSTES  # noqa: E402
 import cli_claude as CLI_CLAUDE  # noqa: E402
 import estadisticas as ESTADISTICAS  # noqa: E402
+import clientes as CLIENTES  # noqa: E402
 
 # LA HORA DE LA REGION, para todo el proceso y desde el arranque: lo que el
 # servidor apunta con hora (chat, videos, notas) sale ya en la zona elegida en
@@ -842,6 +843,68 @@ def salud():
         "simulado": str(os.environ.get("ESTUDIO_SIMULAR", "")).strip() in ("1", "true", "si"),
         "fecha": ahora(),
     }
+
+
+# --------------------------------------------------------- proyectos (clientes)
+#
+# Carpetas que agrupan estilos, y con ellos sus videos. Ver pasos/clientes.py:
+# ocultar y la clave son privacidad de pantalla, no seguridad.
+
+def _cliente_o_400(funcion):
+    try:
+        return funcion()
+    except CLIENTES.ErrorCliente as fallo:
+        raise ErrorApi(400, str(fallo))
+
+
+@app.get("/api/clientes")
+def listar_clientes():
+    """Los proyectos (clientes) y a cual pertenece cada estilo."""
+    return CLIENTES.listar(raiz_proyectos())
+
+
+@app.post("/api/clientes", status_code=201)
+def crear_cliente(cuerpo: dict = Body(default=None)):
+    """Un proyecto nuevo: {nombre}."""
+    datos = _cuerpo(cuerpo)
+    ficha = _cliente_o_400(lambda: CLIENTES.crear(raiz_proyectos(), datos.get("nombre")))
+    anotar_global("cliente_creado", {"id": ficha["id"]})
+    return {"cliente": ficha}
+
+
+@app.put("/api/clientes/{cid}")
+def cambiar_cliente(cid: str, cuerpo: dict = Body(default=None)):
+    """Renombra, oculta o pone clave: {nombre?, oculto?, clave?} ("" la quita)."""
+    datos = _cuerpo(cuerpo)
+    ficha = _cliente_o_400(lambda: CLIENTES.cambiar(
+        raiz_proyectos(), cid, nombre=datos.get("nombre"),
+        oculto=datos.get("oculto"), clave=datos.get("clave")))
+    return {"cliente": ficha}
+
+
+@app.delete("/api/clientes/{cid}")
+def borrar_cliente(cid: str):
+    """Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto."""
+    sueltos = _cliente_o_400(lambda: CLIENTES.borrar(raiz_proyectos(), cid))
+    anotar_global("cliente_borrado", {"id": cid, "estilos": len(sueltos)})
+    return {"borrado": cid, "estilos_sin_proyecto": sueltos}
+
+
+@app.post("/api/clientes/{cid}/abrir")
+def abrir_cliente(cid: str, cuerpo: dict = Body(default=None)):
+    """Comprueba la clave de un proyecto. 403 si no es."""
+    clave = str(_cuerpo(cuerpo).get("clave") or "")
+    if not _cliente_o_400(lambda: CLIENTES.abrir(raiz_proyectos(), cid, clave)):
+        raise ErrorApi(403, "esa no es la clave de este proyecto")
+    return {"abierto": cid}
+
+
+@app.put("/api/clientes/estilos/{preset_id}")
+def asignar_estilo_a_cliente(preset_id: str, cuerpo: dict = Body(default=None)):
+    """Mueve un estilo (y sus videos) a un proyecto: {cliente} ("" lo saca)."""
+    cid = str(_cuerpo(cuerpo).get("cliente") or "").strip()
+    _cliente_o_400(lambda: CLIENTES.asignar(raiz_proyectos(), preset_id, cid))
+    return {"estilo": preset_id, "cliente": cid}
 
 
 @app.get("/api/proyectos")
@@ -5593,11 +5656,269 @@ def guardar_sonido(pid: str, cuerpo: dict = Body(default=None)):
             cambios["musica"] = ficha
     if not cambios:
         raise ErrorApi(400, "hace falta 'musica', 'activo' o 'lufs'")
+    al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
     ctx.estado.actualizar_params("render", cambios)
+    # ELEGIR OTRO TEMA solo vuelve a mezclar el audio, si el video estaba
+    # montado y al dia. Con `musica: {}` (volver a la automatica) no: hay que
+    # montar la banda otra vez, y eso lo hace el boton de montar.
+    trabajo_id = None
+    if datos.get("remontar") and cambios.get("musica"):
+        trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado,
+                                                "volver a mezclar la música")
     ctx.bitacora.anotar("sonido", "render", {
         "musica": (cambios.get("musica") or {}).get("titulo"),
         "activo": cambios.get("sonido")})
-    return {"guardado": list(cambios), "estado": ctx.estado.estado_de("render")}
+    return {"guardado": list(cambios), "estado": ctx.estado.estado_de("render"),
+            "trabajo_id": trabajo_id, "montado": montado}
+
+
+def _antes_de_cambiar_el_montaje(ctx):
+    """(al_dia, montado) del render ANTES de tocar sus params. 409 si se monta.
+
+    Se mira antes porque escribir un param del render lo deja «obsoleto»: si se
+    mirara despues, nunca estaria al dia y nunca se podria solo remezclar.
+    """
+    if _trabajo_activo(ctx, "render") is not None:
+        raise ErrorApi(409, "el vídeo se está montando ahora: cámbialo cuando termine")
+    return (ctx.estado.estado_de("render") == "listo",
+            bool(_ruta_de_version(ctx, "render", "video.mp4")))
+
+
+def _remontar_si_estaba_al_dia(ctx, al_dia, montado, nombre):
+    """Vuelve a MONTAR el MP4 sobre los clips que hay (`solo_montar`). -> trabajo|None
+
+    Solo si el montaje estaba al dia: con planos pendientes, montar sobre los
+    clips viejos sellaria como hechos unos clips que no lo estan. Entonces el
+    cambio queda guardado y se aplica al montar el video.
+    """
+    if not (al_dia and montado):
+        return None
+    return lanzar_paso(ctx, "render", None, nombre=nombre,
+                       opciones={"solo_montar": True})
+
+
+# ------------------------------------------------------------------- el logo
+
+EXT_LOGO = (".png", ".jpg", ".jpeg", ".webp")
+MAX_BYTES_LOGO = 5 * 1024 * 1024
+
+
+def _carpeta_logo(ctx):
+    return os.path.join(ctx.proyecto.raiz, PASOS_MODULOS.p8_render.CARPETA_LOGO)
+
+
+@app.get("/api/proyectos/{pid}/logo")
+def leer_logo(pid: str):
+    """El logo de este video y donde va, o null si no lleva."""
+    ctx = contexto(pid)
+    ficha = (ctx.estado.params("render") or {}).get("logo") or None
+    if ficha and not os.path.isfile(os.path.join(_carpeta_logo(ctx),
+                                                 str(ficha.get("fichero") or ""))):
+        ficha = None
+    return {"logo": ficha,
+            "posiciones": list(PASOS_MODULOS.p8_render.POSICIONES_LOGO)}
+
+
+@app.get("/api/proyectos/{pid}/logo/imagen")
+def imagen_del_logo(pid: str, peticion: Request):
+    ctx = contexto(pid)
+    ficha = (ctx.estado.params("render") or {}).get("logo") or {}
+    nombre = os.path.basename(str(ficha.get("fichero") or ""))
+    ruta = os.path.join(_carpeta_logo(ctx), nombre)
+    if not nombre or not os.path.isfile(ruta):
+        raise ErrorApi(404, "este vídeo no lleva logo")
+    return servir_fichero(peticion, ruta)
+
+
+@app.post("/api/proyectos/{pid}/logo")
+async def subir_logo(pid: str, peticion: Request):
+    """Sube el logo (PNG con transparencia, mejor) y lo pone arriba a la derecha.
+
+    Cambiarlo, moverlo o quitarlo SOLO vuelve a montar el MP4 (`poner_logo`):
+    ni una imagen ni un clip.
+    """
+    ctx = contexto(pid)
+    try:
+        formulario = await peticion.form()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(400, f"multipart ilegible: {fallo}")
+    fichero = formulario.get("logo")
+    if not hasattr(fichero, "read"):
+        raise ErrorApi(400, "manda la imagen en el campo «logo»")
+    extension = os.path.splitext(str(getattr(fichero, "filename", "") or ""))[1].lower()
+    if extension not in EXT_LOGO:
+        raise ErrorApi(400, f"el logo tiene que ser {', '.join(EXT_LOGO)}")
+    contenido = await fichero.read()
+    if not contenido or len(contenido) > MAX_BYTES_LOGO:
+        raise ErrorApi(400, f"el logo tiene que pesar menos de "
+                            f"{MAX_BYTES_LOGO // 1024 // 1024} MB")
+    carpeta = _carpeta_logo(ctx)
+    os.makedirs(carpeta, exist_ok=True)
+    # nombre nuevo cada vez: es lo que hace que la firma cambie al cambiar de logo
+    nombre = f"logo_{hashlib.sha1(contenido).hexdigest()[:10]}{extension}"
+    with open(os.path.join(carpeta, nombre), "wb") as fh:
+        fh.write(contenido)
+    al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
+    ficha = dict((ctx.estado.params("render") or {}).get("logo") or {})
+    ficha.update({"fichero": nombre})
+    ficha.setdefault("posicion", "arriba_derecha")
+    ficha.setdefault("tamano", 0.12)
+    ficha.setdefault("opacidad", 0.9)
+    ctx.estado.actualizar_params("render", {"logo": ficha})
+    trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado, "poner el logo")
+    return {"logo": ficha, "trabajo_id": trabajo_id, "montado": montado}
+
+
+@app.put("/api/proyectos/{pid}/logo")
+def colocar_logo(pid: str, cuerpo: dict = Body(default=None)):
+    """Donde va y como: {posicion?, tamano? (0,04-0,4), opacidad?} o {quitar: true}."""
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    p8 = PASOS_MODULOS.p8_render
+    actual = dict((ctx.estado.params("render") or {}).get("logo") or {})
+    if datos.get("quitar"):
+        if not actual:
+            return {"logo": None, "trabajo_id": None}
+        al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
+        ctx.estado.actualizar_params("render", {"logo": {}})
+        return {"logo": None, "montado": montado,
+                "trabajo_id": _remontar_si_estaba_al_dia(ctx, al_dia, montado,
+                                                         "quitar el logo")}
+    if not actual.get("fichero"):
+        raise ErrorApi(409, "primero sube el logo")
+    nuevo = dict(actual)
+    if "posicion" in datos:
+        if datos["posicion"] not in p8.POSICIONES_LOGO:
+            raise ErrorApi(400, "posicion: " + ", ".join(p8.POSICIONES_LOGO))
+        nuevo["posicion"] = datos["posicion"]
+    for clave, bajo, alto in (("tamano", 0.04, 0.4), ("opacidad", 0.1, 1.0)):
+        if clave in datos:
+            try:
+                nuevo[clave] = round(min(alto, max(bajo, float(datos[clave]))), 3)
+            except (TypeError, ValueError):
+                raise ErrorApi(400, f"'{clave}' tiene que ser un número")
+    if nuevo == actual:
+        return {"logo": actual, "trabajo_id": None}
+    al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
+    ctx.estado.actualizar_params("render", {"logo": nuevo})
+    return {"logo": nuevo, "montado": montado,
+            "trabajo_id": _remontar_si_estaba_al_dia(ctx, al_dia, montado,
+                                                     "mover el logo")}
+
+
+# --------------------------------------------------------- los subtitulos
+
+#: Lo que se puede elegir de los subtitulos de UN video. Sin elegir, lo del
+#: estilo (que es lo que habia). Cambiarlo rehace las capas y el montaje: ni
+#: una imagen.
+TAMANOS_SUBTITULO = ("pequeno", "normal", "grande", "enorme")
+DISENOS_SUBTITULO = ("dibujo", "realista", "editorial")
+CONFIG_SUBTITULOS_ESTILO = "subtitulos_del_estilo"
+
+
+@app.get("/api/proyectos/{pid}/subtitulos")
+def leer_subtitulos(pid: str):
+    """Como son los subtitulos de este video, y si son los del estilo."""
+    ctx = contexto(pid)
+    p = ctx.estado.params("callouts") or {}
+    p7 = PASOS_MODULOS.p7_callouts
+    paleta = p.get("paleta") or {}
+    return {"tam": p.get("subtitulo_tam") or p7.PARAMS_POR_DEFECTO["subtitulo_tam"],
+            "caja": p.get("subtitulo_caja", "auto"),
+            "diseno": p.get("diseno") or p7.PARAMS_POR_DEFECTO["diseno"],
+            "color": ((paleta.get("fijados") or {}).get("texto") or ""),
+            "propios": bool(ctx.proyecto.config.get(CONFIG_SUBTITULOS_ESTILO)),
+            "tamanos": list(TAMANOS_SUBTITULO), "disenos": list(DISENOS_SUBTITULO)}
+
+
+@app.put("/api/proyectos/{pid}/subtitulos")
+def cambiar_subtitulos(pid: str, cuerpo: dict = Body(default=None)):
+    """{tam?, caja? ("auto" o 0-1), diseno?, color? ("#rrggbb" o "")} o {automatico: true}.
+
+    La primera vez que se cambia se apunta lo que traia el estilo, y
+    «automatico» lo devuelve tal cual: volver no escribe valores inventados,
+    escribe los que habia (regla 1 de CLAUDE.md).
+    """
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    p = ctx.estado.params("callouts") or {}
+    p7 = PASOS_MODULOS.p7_callouts
+    claves = ("subtitulo_tam", "subtitulo_caja", "diseno", "paleta")
+    if datos.get("automatico"):
+        guardado = ctx.proyecto.config.get(CONFIG_SUBTITULOS_ESTILO)
+        if not isinstance(guardado, dict):
+            return {"cambiado": False}
+        guardado = guardado.get("valores") or {}
+        # lo que no estaba puesto vuelve a su valor de fabrica, que es el que
+        # se usaba cuando faltaba
+        ctx.estado.actualizar_params("callouts", {
+            k: guardado.get(k, p7.PARAMS_POR_DEFECTO.get(k, "auto")) for k in claves})
+        ctx.proyecto.config.pop(CONFIG_SUBTITULOS_ESTILO, None)
+        ctx.proyecto.guardar_config()
+        return {"cambiado": True, "estado": ctx.estado.estado_de("callouts")}
+    cambios = {}
+    if "tam" in datos:
+        if datos["tam"] not in TAMANOS_SUBTITULO:
+            raise ErrorApi(400, "tam: " + ", ".join(TAMANOS_SUBTITULO))
+        cambios["subtitulo_tam"] = datos["tam"]
+    if "caja" in datos:
+        caja = datos["caja"]
+        if caja != "auto":
+            try:
+                caja = round(min(1.0, max(0.0, float(caja))), 2)
+            except (TypeError, ValueError):
+                raise ErrorApi(400, "caja: «auto» o un número de 0 a 1")
+        cambios["subtitulo_caja"] = caja
+    if "diseno" in datos:
+        if datos["diseno"] not in DISENOS_SUBTITULO:
+            raise ErrorApi(400, "diseno: " + ", ".join(DISENOS_SUBTITULO))
+        cambios["diseno"] = datos["diseno"]
+    if "color" in datos:
+        color = str(datos["color"] or "").strip()
+        if color and not re.match(r"^#[0-9a-fA-F]{6}$", color):
+            raise ErrorApi(400, "color: «#rrggbb» o vacío")
+        paleta = dict(p7.PARAMS_POR_DEFECTO["paleta"])
+        paleta.update(p.get("paleta") or {})
+        fijados = dict(paleta.get("fijados") or {})
+        if color:
+            fijados["texto"] = color
+        else:
+            fijados.pop("texto", None)
+        paleta["fijados"] = fijados
+        cambios["paleta"] = paleta
+    cambios = {k: v for k, v in cambios.items() if p.get(k) != v}
+    if not cambios:
+        return {"cambiado": False}
+    if not ctx.proyecto.config.get(CONFIG_SUBTITULOS_ESTILO):
+        ctx.proyecto.config[CONFIG_SUBTITULOS_ESTILO] = {
+            "valores": {k: p[k] for k in claves if k in p}}
+        ctx.proyecto.guardar_config()
+    ctx.estado.actualizar_params("callouts", cambios)
+    ctx.bitacora.anotar("subtitulos_cambiados", "callouts", {"claves": sorted(cambios)})
+    return {"cambiado": True, "estado": ctx.estado.estado_de("callouts")}
+
+
+# ------------------------------------------------- escuchar un tema de Jamendo
+
+@app.get("/api/musica/escucha")
+def escuchar_tema(url: str = Query(...)):
+    """Pasa por aqui la escucha de un tema de Jamendo antes de elegirlo.
+
+    Por el servidor y no directo desde el navegador: la politica de seguridad
+    del acceso de delante no deja cargar audio de otros dominios. Solo Jamendo.
+    """
+    from urllib.parse import urlparse
+    destino = urlparse(str(url))
+    if destino.scheme != "https" or not (destino.hostname or "").endswith("jamendo.com"):
+        raise ErrorApi(400, "solo se escuchan temas de Jamendo")
+    import requests
+    try:
+        respuesta = requests.get(url, stream=True, timeout=30)
+        respuesta.raise_for_status()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(502, f"Jamendo no deja escuchar ese tema: {fallo}")
+    return StreamingResponse(respuesta.iter_content(64 * 1024),
+                             media_type=respuesta.headers.get("content-type") or "audio/mpeg")
 
 
 @app.get("/api/proyectos/{pid}/musica/presencia")
@@ -5637,19 +5958,13 @@ def cambiar_presencia_musica(pid: str, cuerpo: dict = Body(default=None)):
     if pedida == actual:
         return {"presencia": actual, "cambiado": False, "remontando": False,
                 "trabajo_id": None, "estado": ctx.estado.estado_de("render")}
-    if _trabajo_activo(ctx, "render") is not None:
-        raise ErrorApi(409, "el vídeo se está montando ahora: cambia la música "
-                            "cuando termine")
-    al_dia = ctx.estado.estado_de("render") == "listo"
-    montado = bool(_ruta_de_version(ctx, "render", "video.mp4"))
+    al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
     ctx.estado.actualizar_params("render", {"musica_presencia": pedida})
     ctx.bitacora.anotar("musica_presencia", "render",
                         {"antes": actual, "ahora": pedida})
-    trabajo_id = None
-    if datos.get("remontar", True) and al_dia and montado:
-        trabajo_id = lanzar_paso(ctx, "render", None,
-                                 nombre="volver a mezclar la música",
-                                 opciones={"solo_montar": True})
+    trabajo_id = _remontar_si_estaba_al_dia(
+        ctx, al_dia and datos.get("remontar", True), montado,
+        "volver a mezclar la música")
     return {"presencia": pedida, "cambiado": True,
             "remontando": bool(trabajo_id), "trabajo_id": trabajo_id,
             "montado": montado,
@@ -7036,6 +7351,55 @@ def _guias():
     return PASOS_MODULOS.guias
 
 
+#: Las revisiones en marcha: {id: {"estado", "resultado"|"error"}}. Se pregunta
+#: por ellas en vez de esperar en una peticion larga, porque el proxy de delante
+#: corta a los 60 s (lo mismo que el asistente).
+_REVISIONES = {}
+_LOCK_REVISIONES = threading.Lock()
+
+
+@app.post("/api/sistema/guias/{gid}/revisar", status_code=202)
+def revisar_campo_con_su_guia(gid: str, cuerpo: dict = Body(default=None)):
+    """Lanza la revision de un texto contra la guia de su campo. -> {id}
+
+    Ver pasos/revisar_campo.py. Va por suscripcion (CLI de Claude): no cuesta
+    imagenes ni dinero por llamada.
+    """
+    modulo = PASOS_MODULOS.revisar_campo
+    if gid not in _guias().GUIAS:
+        raise ErrorApi(404, f"no hay ninguna guía «{gid}»")
+    texto = str(_cuerpo(cuerpo).get("texto") or "")
+    if not texto.strip():
+        raise ErrorApi(400, "el campo está vacío: escribe algo y vuelve a revisar")
+    rid = uuid.uuid4().hex[:12]
+    with _LOCK_REVISIONES:
+        # se guardan las ultimas 50: es una ventanilla, no un archivo
+        for viejo in list(_REVISIONES)[:-49]:
+            _REVISIONES.pop(viejo, None)
+        _REVISIONES[rid] = {"estado": "pensando", "guia": gid}
+
+    def correr():
+        try:
+            resultado = modulo.revisar(gid, texto, cwd=RAIZ_ESTUDIO)
+            ficha = {"estado": "listo", "guia": gid, "resultado": resultado}
+        except Exception as fallo:                          # noqa: BLE001
+            ficha = {"estado": "error", "guia": gid, "error": str(fallo)[:600]}
+        with _LOCK_REVISIONES:
+            _REVISIONES[rid] = ficha
+
+    threading.Thread(target=correr, daemon=True, name=f"revision-{rid}").start()
+    return {"id": rid, "estado": "pensando"}
+
+
+@app.get("/api/sistema/revisiones/{rid}")
+def ver_revision(rid: str):
+    with _LOCK_REVISIONES:
+        ficha = _REVISIONES.get(rid)
+    if ficha is None:
+        raise ErrorApi(404, "esa revisión ya no está: vuelve a pulsar «Revisar»")
+    return dict(ficha, id=rid)
+
+
 @app.get("/api/sistema/guias")
 def guias_de_escritura():
     """Como rellenar cada campo de texto: plantilla, ejemplo y prompt para otra IA."""
@@ -7927,7 +8291,8 @@ def _correr_light_referencias(avisar, ctx, encargo):
                                    # foto quedaria de 768x41 (`para_la_hoja`)
                                    referencias=_light().para_la_hoja(
                                        _aportadas_del_taller(ctx),
-                                       encargo.get("estilo_descripciones")))
+                                       encargo.get("estilo_descripciones"),
+                                       destacadas=encargo.get("estilo_destacadas")))
     # LA LISTA NO SE PISA CUANDO SOLO SE HA REDIBUJADO UNA. Cada lamina se
     # escribe en `<eje>.png`, o sea encima de la que habia, asi que las otras
     # cinco siguen en su sitio y en la lista. Escribir aqui `hecho["rutas"]` a
@@ -8133,6 +8498,11 @@ def _correr_light_voz(avisar, ctx, encargo):
         cambios["velocidad"] = ficha_ritmo["velocidad"]
     cambios["hueco_minimo"] = ficha_ritmo["hueco_minimo"]
     ctx.estado.actualizar_params("voz", cambios)
+    # CON QUE SE HIZO, para que RETOMAR sepa si sigue valiendo (`_light_hecha`)
+    ctx.proyecto.config[CONFIG_VOZ_HECHA] = {
+        "voz_prompt": encargo.get("voz_prompt") or "",
+        "voz_id": encargo.get("voz_id") or ""}
+    ctx.proyecto.guardar_config()
     ctx.bitacora.anotar("voz_descrita", "voz", {
         "encargo": encargo["voz_prompt"][:200],
         "voz": elegido.get("voz_nombre"), "velocidad": cambios["velocidad"],
@@ -8257,11 +8627,29 @@ def _light_hecha(ctx, tarea_id, encargo):
     if tarea_id == "tono":
         return bool((ctx.estado.params("brief") or {}).get("instrucciones"))
     if tarea_id == "voz":
-        return bool((ctx.estado.params("voz") or {}).get("voz_id"))
+        # HECHA CON LO QUE SE PIDE AHORA, no solo hecha. Retomar tras cambiar la
+        # voz en el formulario se quedaba con la del primer intento: la ficha
+        # del estilo enseñaba otra voz que la elegida (10-10-2026).
+        puesta = (ctx.estado.params("voz") or {}).get("voz_id")
+        if not puesta:
+            return False
+        pedida = str(encargo.get("voz_id") or "").strip()
+        if pedida and pedida != puesta:
+            return False
+        hecha = ctx.proyecto.config.get(CONFIG_VOZ_HECHA)
+        if isinstance(hecha, dict) and (
+                hecha.get("voz_prompt") != (encargo.get("voz_prompt") or "")
+                or hecha.get("voz_id") != (encargo.get("voz_id") or "")):
+            return False
+        return True
     if tarea_id == "muestra":
         return os.path.isfile(os.path.join(ctx.proyecto.raiz, "muestras",
                                            "miniatura.png"))
     return False
+
+
+#: En la config del taller: con que encargo se eligio la voz (`_light_hecha`).
+CONFIG_VOZ_HECHA = "voz_hecha_con"
 
 
 _LIGHT_QUE_HACE = {
@@ -8332,6 +8720,13 @@ def _correr_preset_light(avisar, ctx, encargo, solo, preset_id, retomar=False):
     avisar(0.99, "guardando el preset", "Guardando tu estilo")
     ficha = _congelar_preset(ctx, encargo, preset_id)
     salida["preset"] = ficha["id"]
+    # EL PROYECTO (cliente) en el que se creo, si se creo dentro de uno. Solo
+    # al crear: rehacer una parte no lo mueve de donde este.
+    if encargo.get("cliente") and not preset_id:
+        try:
+            CLIENTES.asignar(raiz_proyectos(), ficha["id"], encargo["cliente"])
+        except CLIENTES.ErrorCliente as fallo:
+            ctx.bitacora.anotar("aviso", None, {"cliente": str(fallo)})
     salida["resumen"] = ficha.get("resumen") or ""
     salida["coste_usd"] = round(salida["coste_usd"], 4)
     avisar(1.0, f"preset «{ficha['nombre']}» listo", PUBLICO_LISTO)
@@ -8562,6 +8957,66 @@ def crear_preset_light(cuerpo: dict = Body(default=None)):
             "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
 
 
+#: Las muestras de voz que se escuchan ANTES de que exista el estilo (al
+#: crearlo). Se cachean por voz e idioma: volver a una ya oida no paga.
+_LOCK_MUESTRAS_VOZ = threading.Lock()
+
+
+def _carpeta_muestras_voz():
+    return os.path.join(raiz_proyectos(), "_sistema", "escuchas")
+
+
+@app.post("/api/voces/muestra")
+def muestra_de_voz(cuerpo: dict = Body(default=None)):
+    """Doce segundos de una voz del catalogo, sin estilo ni proyecto.
+
+    Es la escucha del formulario de CREAR un estilo: alli todavia no hay taller
+    (la de `/presets-light/{id}/voz/previsualizar` necesita uno), y elegir una
+    voz sin oirla era elegir por el nombre. Se sintetiza la misma frase de
+    muestra del idioma (`presets_light.bloques_de_escucha`) con los mandos por
+    defecto: lo que cambia entre dos muestras es la voz y nada mas. Cuesta lo
+    que doce segundos de Cartesia, y una sola vez por voz e idioma.
+    """
+    datos = _cuerpo(cuerpo)
+    voz_id = str(datos.get("voz_id") or "").strip()
+    if not re.match(r"^[A-Za-z0-9_-]{8,64}$", voz_id):
+        raise ErrorApi(400, "«voz_id» no parece un id de voz de Cartesia")
+    idioma = str(datos.get("idioma") or "es").strip() or "es"
+    p4 = PASOS_MODULOS.p4_voz
+    light = _light()
+    texto = p4.recortar_texto(light.bloques_de_escucha(idioma), 12, None)
+    clave = hashlib.sha256(json.dumps([voz_id, idioma, texto, p4.simulado()],
+                                      ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+    carpeta = _carpeta_muestras_voz()
+    nombre = f"voz_{clave}.wav"
+    ruta = os.path.join(carpeta, nombre)
+    with _LOCK_MUESTRAS_VOZ:
+        if not os.path.exists(ruta):
+            os.makedirs(carpeta, exist_ok=True)
+            try:
+                cfg = p4.resolver_params({"voz_id": voz_id, "idioma": idioma})
+                wav, _duracion, _palabras = p4.sintetizar_toma(texto, cfg)
+            except (Exception, SystemExit) as fallo:  # noqa: BLE001
+                raise ErrorApi(502, f"no se ha podido sintetizar la muestra: {fallo}")
+            temporal = ruta + ".tmp"
+            with open(temporal, "wb") as fh:
+                fh.write(wav)
+            os.replace(temporal, ruta)
+    return {"ruta": f"/api/voces/muestra/{nombre}", "voz_id": voz_id,
+            "idioma": idioma}
+
+
+@app.get("/api/voces/muestra/{nombre}")
+def servir_muestra_de_voz(nombre: str, peticion: Request):
+    """El wav de una muestra ya sintetizada."""
+    if not re.match(r"^voz_[0-9a-f]{16}\.wav$", nombre):
+        raise ErrorApi(404, "esa muestra no existe")
+    ruta = os.path.join(_carpeta_muestras_voz(), nombre)
+    if not os.path.isfile(ruta):
+        raise ErrorApi(404, "esa muestra no existe")
+    return servir_fichero(peticion, ruta)
+
+
 @app.post("/api/presets-light/{preset_id}/voz/previsualizar", status_code=202)
 def previsualizar_voz_light(preset_id: str, cuerpo: dict = Body(default=None)):
     """Unos segundos con la voz de este estilo, para escucharla.
@@ -8740,6 +9195,7 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
         # nuevas; sin imagenes nuevas se quedan las que habia
         if fuente.get("estilo_imagenes") or "estilo_descripciones" in fuente:
             origen["estilo_descripciones"] = fuente.get("estilo_descripciones") or {}
+            origen["estilo_destacadas"] = fuente.get("estilo_destacadas") or []
     if fuente and parte == "tono":
         origen["tono_prompt"] = fuente.get("tono_prompt") or ""
     encargo = _encargo_o_400(origen)

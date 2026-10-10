@@ -24,6 +24,25 @@ de una a otra.
   efectos. Rehace el montaje, no las imágenes.
 - Antes de cada botón que gasta se enseña cuánto va a costar.
 
+## Proyectos (clientes)
+
+Arriba de la primera pantalla está la barra de **Proyectos**: una carpeta por
+cliente para tener sus estilos y vídeos separados.
+
+- **+ Proyecto** crea uno y lo abre: los estilos que crees con él abierto
+  quedan dentro, y los vídeos van con su estilo.
+- Con un proyecto abierto: **Renombrar**, **Ocultar** (no sale en la lista
+  hasta pulsar «Ver ocultos»), **Poner clave** (se pide para ver sus estilos y
+  vídeos) y **Borrar** (sus estilos y vídeos no se borran: quedan sin proyecto).
+- **Todos** enseña lo que no está oculto ni con clave; **Sin proyecto**, lo que
+  no está en ninguno.
+- Para mover un estilo de proyecto: menú **⋯** de su tarjeta → **Proyecto**.
+- La clave y ocultar son privacidad de pantalla; la seguridad de verdad es la
+  contraseña de acceso al Estudio.
+
+En **Tus vídeos**, cada vídeo dice de qué estilo (🎨) y de qué proyecto (📁)
+salió.
+
 ## Estilos
 
 La primera pantalla. Cada tarjeta es un estilo; **Un estilo nuevo** crea otro.
@@ -34,18 +53,28 @@ La primera pantalla. Cada tarjeta es un estilo; **Un estilo nuevo** crea otro.
 - **Estilo gráfico → Imágenes de referencia**: hasta 50 imágenes que ya tengan
   el aspecto que quieres. Es lo más importante del estilo: la guía se escribe
   mirándolas. Arrástralas o pulsa la zona para buscarlas.
+  - Pulsa una miniatura para verla **en grande** (con ← y → pasas a la
+    siguiente).
   - **Describir las imágenes (opcional)**: una frase por imagen para decir qué
     mirar en ella («la luz de esta», «solo el mueble, no el fondo»).
+  - **★**: marca las que deben servir sí o sí para dibujar las láminas. La guía
+    del estilo mira las 50, pero las láminas se dibujan con una hoja de 8 como
+    mucho: primero las marcadas, luego las descritas y el resto repartidas.
 - **Indicaciones (opcional)**: lo que las imágenes no dicen solas («igual pero
   más frío», «sin personas»).
 - **Tono del guion**: cómo se cuenta (no de qué). Cuanto más concreto, mejor.
-  El botón **Guía** al lado del título da una plantilla y un ejemplo.
+  El botón **Guía** al lado del título da una plantilla y un ejemplo, y
+  **✓ Revisar** comprueba lo que has escrito contra esa guía: dice si sirve,
+  qué falla y por qué, y propone una versión que puedes poner con un botón.
+  Está en todos los campos que tienen guía y no cuesta imágenes.
 - **Ritmo**: cada cuánto cambia de plano el vídeo. Más rápido = más imágenes =
   más caro.
-- **Voz**: describe cómo quieres que suene. Con **Voz concreta (opcional)**
-  eliges tú una voz del catálogo de Cartesia o **tu voz clonada**. Para usar la
-  tuya: clónala en play.cartesia.ai (Voices → Clone Voice) con la misma cuenta
-  cuya clave pusiste en Configuración, y pulsa **Buscar mis voces otra vez**.
+- **Voz**: describe cómo quieres que suene. Debajo, la lista de voces: cada una
+  tiene **▶** para oírla sin elegirla, y un buscador. Si eliges una, esa es la
+  voz y la descripción solo pone la velocidad y el color; si no, la elige el
+  sistema por la descripción. **Tu voz clonada**: clónala en play.cartesia.ai
+  (Voices → Clone Voice) con la misma cuenta cuya clave pusiste en
+  Configuración, y pulsa **Buscar mis voces otra vez**: sale la primera.
 - **Idioma**: el del guion y la voz.
 - **Generar**: crea el estilo (unos minutos y unas pocas imágenes de muestra).
 
@@ -58,9 +87,17 @@ Si la creación se corta a medias verás **Retomar** y **Empezar de cero**:
 ### La ficha de un estilo
 
 Al abrir un estilo ves sus muestras y cada parte (estilo gráfico, tono, voz).
-En cada una puedes escribir **qué le cambiarías** y regenerar solo esa parte.
-En **Voz → Opciones avanzadas** eliges la voz concreta (con un play para
-escucharla antes), la velocidad, la emoción y el aire entre bloques.
+
+- **Lo que se guarda solo**: el texto del tono (es la guía que lee el
+  redactor, tal cual), el ritmo, el nombre, el idioma y los mandos de la voz.
+  No hace falta regenerar nada: el botón de abajo dice **Guardar**.
+- **Lo que pide regenerar**: imágenes nuevas o cambiar las **Indicaciones**
+  del estilo gráfico (rehace la guía y las muestras), escribir en **qué le
+  cambiarías** del tono o de la voz. Entonces el botón dice **Regenerar** y
+  cuánto cuesta.
+- **Voz**: arriba, cómo se pidió; debajo, la voz puesta en la misma lista con
+  ▶ que al crear. Cambiarla ahí es inmediato y gratis. En **Opciones
+  avanzadas**: velocidad, color y aire entre bloques.
 
 ## Encargo
 
@@ -69,8 +106,18 @@ Lo que se le pide a este vídeo. Todo se guarda solo mientras escribes.
 - **El vídeo**: nombre, **duración objetivo** y **formato** (horizontal 16:9 o
   vertical 9:16). Cambiar el formato rehace todas las imágenes.
 - **Qué lleva este vídeo**: interruptores de subtítulos, música y efectos.
-  Cambiarlos rehace solo el montaje. Con la música encendida, **Cuánto se oye
-  la música**: Suave, Normal o Alta.
+  Cambiarlos rehace solo el montaje. Debajo, todo en automático si no tocas
+  nada:
+  - **Cuánto se oye la música**: Suave, Normal o Alta.
+  - **Elegir la música**: busca temas por ánimo (Sobrio, Épico…), escúchalos
+    ahí mismo y fija uno. **Volver a la automática** deja que el ritmo elija
+    varios temas, como siempre.
+  - **Personalizar los subtítulos**: tamaño, letra y forma, caja detrás del
+    texto y color. **Volver a los del estilo** lo deshace.
+  - **Logo**: sube una imagen (mejor PNG con fondo transparente), elige la
+    esquina, el tamaño y la opacidad.
+  - Nada de esto paga imágenes: la música y el logo solo vuelven a montar el
+    MP4, y los subtítulos rehacen las capas de texto al montar.
 - **Su estilo**: si cambiaste el estilo después de crear el vídeo, aquí ves qué
   ha cambiado y lo traes. Traer no genera nada; marca lo que habría que rehacer.
 - **El material**: de dónde salen los hechos (pega el texto, notas, un
@@ -121,7 +168,23 @@ una**: espera a que termine una antes de lanzar otra.
 La burbuja de abajo a la derecha. Conoce el sistema, ve el estado de tu vídeo y
 puede probar las claves. Puedes dictarle (micrófono), adjuntarle capturas y
 **Ampliar** el panel para leer y escribir con más espacio. **Historial** guarda
-las charlas anteriores.
+las charlas anteriores: abre una para seguirla. Lo que escribas con la lista
+delante va a la charla abierta, y **Nueva** empieza otra. El cursor vuelve solo al campo cuando contesta.
+
+Los campos de texto de toda la aplicación crecen con lo que escribes; pasado
+un alto tienen su propia barra y se pueden estirar desde la esquina.
+
+## La música, la voz y los efectos: derechos
+
+- **Música**: de Jamendo, con licencias Creative Commons. Cada tema guarda la
+  suya; algunas piden citar al autor y otras no permiten uso comercial sin
+  licencia de Jamendo. Si el vídeo es para un cliente o anuncio, revisa la
+  licencia del tema.
+- **Efectos**: de FreeSound, también Creative Commons (cada uno con la suya).
+- **Voz**: generada con Cartesia; su uso comercial depende de tu plan de
+  Cartesia. Una voz clonada solo debe ser la tuya o de quien te dé permiso.
+- **Imágenes**: generadas con OpenAI; según sus condiciones de uso, lo
+  generado es de quien lo pide.
 
 ## Si algo falla
 

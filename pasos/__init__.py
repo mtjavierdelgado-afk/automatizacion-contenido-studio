@@ -70,6 +70,7 @@ from . import enrutar_estilo  # noqa: E402,F401
 from . import guias  # noqa: E402,F401
 from . import estructura_guion  # noqa: E402,F401
 from . import dictado  # noqa: E402,F401
+from . import revisar_campo  # noqa: E402,F401
 from . import presets_light  # noqa: E402,F401
 
 MODULOS = {
@@ -91,7 +92,7 @@ def modulo_de(paso_id):
 
 __all__ = ["catalogo_visual", "conservar", "repaso",
            "cartelas", "claves", "cli_claude", "comun", "direccion",
-           "dictado", "enrutar_estilo", "estructura_guion", "redactor",
+           "dictado", "revisar_campo", "enrutar_estilo", "estructura_guion", "redactor",
            "login_cli", "asistente", "salud_cli", "comprobar_claves", "mcp_estudio",
            "encuadres", "estadisticas", "estilo",
            "cadencia", "fuentes",

@@ -1570,10 +1570,13 @@ body.modo-light #coste { display: none; }
 .zona-suelta .meta { margin-left: auto; }
 .zona-suelta.llena { opacity: .5; cursor: not-allowed; }
 .zona-suelta.llena:hover { border-color: var(--linea); color: var(--tenue); }
+/* el doble que antes (76 px): con fotos de interiorismo parecidas no se
+   distinguia una de otra. Pulsar una la abre en grande (verAportadaEnGrande). */
 .tira-aportadas {
-  display: grid; gap: 5px; margin-top: 2px;
-  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  display: grid; gap: 6px; margin-top: 2px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
 }
+.aportada img { cursor: zoom-in; }
 .aportada { position: relative; border-radius: 7px; overflow: hidden; background: var(--lienzo); }
 .aportada img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; }
 .aportada .quitar {
@@ -2918,9 +2921,64 @@ ul.inicio-como li { display: flex; gap: 10px; align-items: flex-start; line-heig
 .describir-aportadas summary { cursor: pointer; color: var(--tenue); font-size: 13px; }
 .descripciones-aportadas { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
 .descripcion-aportada { display: flex; gap: 8px; align-items: center; }
-.descripcion-aportada img { width: 56px; height: 38px; object-fit: cover; border-radius: 5px; flex: none; }
+.descripcion-aportada img { width: 120px; height: 68px; object-fit: cover; border-radius: 5px; flex: none; cursor: zoom-in; }
 .descripcion-aportada input { flex: 1; min-width: 0; }
 .aportada .con-descripcion {
   position: absolute; left: 3px; bottom: 3px; font-size: 11px; line-height: 1;
   padding: 2px 4px; border-radius: 4px; background: var(--panel); color: var(--texto);
 }
+
+/* la descripcion con que se pidio la voz, en la ficha del estilo */
+.voz-pedida { font-size: 13px; color: var(--texto); margin-bottom: 8px; line-height: 1.5; }
+
+/* la lupa de las imagenes de referencia: flechas a los lados */
+.lupa-aportadas .lupa-flecha {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  font-size: 34px; line-height: 1; padding: 10px 16px; border-radius: 10px;
+  background: var(--panel); color: var(--texto); border: 1px solid var(--linea);
+}
+.lupa-aportadas .lupa-flecha.izq { left: 16px; }
+.lupa-aportadas .lupa-flecha.der { right: 16px; }
+#lupa.lupa-aportadas img { max-height: 78vh; }
+#lupa.lupa-aportadas .ficha-lupa { max-height: 14vh; }
+
+/* ★ marcar una imagen para la hoja de las laminas */
+.aportada .destacar {
+  position: absolute; right: 3px; bottom: 3px; font-size: 13px; line-height: 1;
+  padding: 3px 5px; border-radius: 5px; background: var(--panel); color: var(--tenue);
+  border: 1px solid var(--linea);
+}
+.aportada .destacar.puesta { color: var(--acento); border-color: var(--acento); }
+
+/* la barra de proyectos (clientes) de la galeria */
+.barra-clientes { margin-bottom: 14px; display: flex; flex-direction: column; gap: 8px; }
+.chips-clientes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chips-clientes .mini.activo { border-color: var(--acento); color: var(--acento); }
+.chips-clientes .mini.oculto { opacity: .6; }
+.mandos-cliente { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mover-cliente { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--tenue); }
+
+/* musica, subtitulos y logo del video: plegados bajo «Que lleva» */
+.opcion-montaje { margin-top: 12px; border: 1px solid var(--linea); border-radius: 10px; padding: 8px 12px; }
+.opcion-montaje summary { cursor: pointer; font-weight: 600; font-size: 14px; }
+.opcion-montaje > div { margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+.tema-musica { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center;
+  border-top: 1px solid var(--linea); padding-top: 8px; }
+.tema-musica audio { grid-column: 1 / -1; width: 100%; height: 32px; }
+.logo-previa { max-height: 56px; max-width: 160px; border-radius: 6px; background: var(--hueco); }
+.boton-fichero { cursor: pointer; }
+
+/* todos los campos de texto crecen con su contenido hasta el 60 % de la
+   pantalla, y desde ahi barra propia (ver `vigilarAreas` en app.js) */
+textarea.autoalto, textarea.crece.autoalto { max-height: 60vh; overflow-y: auto; resize: vertical; }
+
+/* «Revisar» un campo contra su guia */
+.revision-campo { border: 1px solid var(--acento-borde); background: var(--marcado);
+  border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+  font-size: 13px; line-height: 1.5; }
+.revision-campo ul { margin: 0; padding-left: 18px; }
+.revision-campo li { margin-bottom: 6px; }
+.revision-campo .sugerida { white-space: pre-wrap; margin-top: 6px; }
+/* la opcion elegida en una fila de botones (color de la voz, musica,
+   subtitulos, logo): se marca igual que en la barra de proyectos */
+.herramientas .mini.activo { border-color: var(--acento); color: var(--acento); background: var(--marcado); }

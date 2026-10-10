@@ -563,6 +563,12 @@ def validar_encargo(crudo):
             if nombre in nombres and texto:
                 descripciones[nombre] = texto
     limpio["estilo_descripciones"] = descripciones
+    # LAS MARCADAS PARA DIBUJAR (★), opcional: las que van seguro a la hoja de
+    # las laminas (`para_la_hoja`). Como mucho las que caben en ella.
+    nombres = {_sin_prefijo(n) for n in imagenes}
+    limpio["estilo_destacadas"] = [
+        _sin_prefijo(n) for n in (datos.get("estilo_destacadas") or [])
+        if isinstance(n, str) and _sin_prefijo(n) in nombres][:MAX_EN_LA_HOJA]
 
     # EL TONO SIGUE SIENDO VIDEO O DESCRIPCION, y aqui si son excluyentes: no
     # hay imagenes que adjuntar a un tono, y un parrafo sobre como se cuenta una
@@ -601,6 +607,12 @@ def validar_encargo(crudo):
     if voz_id and not re.match(r"^[A-Za-z0-9_-]{8,64}$", voz_id):
         raise ErrorEncargo("«voz_id» no parece un id de voz de Cartesia")
     limpio["voz_id"] = voz_id
+    # EL PROYECTO (cliente) donde se crea, opcional. No es del estilo: se apunta
+    # en `clientes.json` al terminar (ver `_correr_preset_light`).
+    cliente = str(datos.get("cliente") or "").strip()
+    if cliente and not re.match(r"^cl_[a-z0-9_]{1,40}$", cliente):
+        raise ErrorEncargo("«cliente» no es un proyecto válido")
+    limpio["cliente"] = cliente
 
     # AQUI NO HAY PERSONAJES DEL CANAL NI LLAMADAS A LA ACCION, y las dos
     # ausencias son decisiones:
@@ -638,18 +650,21 @@ def max_imagenes_estilo():
     return MAX_IMAGENES_ESTILO
 
 
-def para_la_hoja(rutas, descripciones=None, maximo=MAX_EN_LA_HOJA):
+def para_la_hoja(rutas, descripciones=None, maximo=MAX_EN_LA_HOJA, destacadas=None):
     """Las adjuntas que van a la hoja de las laminas, en su orden. -> [rutas]
 
-    Primero las que tienen descripcion (alguien se molesto en decir que son),
-    y el resto repartidas a lo largo de la lista, no las primeras: quien sube
-    cincuenta suele subirlas por grupos, y las ocho primeras serian un grupo.
+    Primero las MARCADAS con ★ (`destacadas`: quien las subio dijo «dibuja
+    con estas»), luego las que tienen descripcion, y el resto repartidas a lo
+    largo de la lista, no las primeras: quien sube cincuenta suele subirlas por
+    grupos, y las ocho primeras serian un grupo.
     """
     rutas = list(rutas or [])
     if len(rutas) <= maximo:
         return rutas
-    descritas = [r for r in rutas if descripcion_de(r, descripciones)]
-    elegidas = descritas[:maximo]
+    marcadas = {_sin_prefijo(n) for n in (destacadas or [])}
+    elegidas = [r for r in rutas if _sin_prefijo(r) in marcadas][:maximo]
+    elegidas += [r for r in rutas if descripcion_de(r, descripciones)
+                 and r not in elegidas][:maximo - len(elegidas)]
     resto = [r for r in rutas if r not in elegidas]
     hueco = maximo - len(elegidas)
     if hueco > 0 and resto:

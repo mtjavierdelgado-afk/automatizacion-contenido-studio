@@ -106,6 +106,74 @@ PARAMS_POR_DEFECTO = {
     # la meteria en la firma de todos los videos que nunca la eligieron.
 }
 
+#: Donde vive el logo del video, dentro del proyecto. En params va SOLO el
+#: nombre del fichero (`logo.fichero`): una ruta absoluta entraria en la firma
+#: y mudar el proyecto de maquina la dejaria obsoleta.
+CARPETA_LOGO = "marca"
+
+#: Las esquinas donde puede ir. Arriba a la derecha de fabrica: abajo estan los
+#: subtitulos, y a la izquierda suelen ir las cartelas.
+POSICIONES_LOGO = ("arriba_derecha", "arriba_izquierda", "abajo_derecha",
+                   "abajo_izquierda")
+
+
+def filtro_logo(ficha, ancho_video=1920):
+    """El grafo de ffmpeg que pone el logo sobre el video. -> str
+
+    El tamano va en proporcion al ANCHO DEL VIDEO, no en pixeles fijos: el mismo
+    ajuste vale en 16:9 y en 9:16. El margen, un 3 % del ancho. El ancho se mide
+    antes (`poner_logo`) y no con `scale2ref`, que en el ffmpeg del servidor
+    calcula el tamano sobre otra referencia y dejaba el logo diminuto.
+    """
+    ficha = ficha or {}
+    try:
+        tamano = min(0.4, max(0.04, float(ficha.get("tamano") or 0.12)))
+    except (TypeError, ValueError):
+        tamano = 0.12
+    try:
+        opacidad = min(1.0, max(0.1, float(ficha.get("opacidad") or 0.9)))
+    except (TypeError, ValueError):
+        opacidad = 0.9
+    posicion = ficha.get("posicion") if ficha.get("posicion") in POSICIONES_LOGO \
+        else POSICIONES_LOGO[0]
+    x = "W*0.03" if posicion.endswith("izquierda") else "W-w-W*0.03"
+    y = "W*0.03" if posicion.startswith("arriba") else "H-h-W*0.03"
+    lado = max(8, int(round(int(ancho_video) * tamano / 2.0)) * 2)
+    return (f"[1:v]scale={lado}:-2,format=rgba,colorchannelmixer=aa={opacidad:g}[lg];"
+            f"[0:v][lg]overlay=x={x}:y={y}:format=auto,format=yuv420p[v]")
+
+
+def poner_logo(destino, ruta_logo, ficha, calidad="media"):
+    """Pone el logo encima del MP4 montado, en su sitio. -> destino
+
+    Es la UNICA pasada que recodifica el video entero: el montaje une los clips
+    sin recodificar (`_concatenar`), y un logo encima obliga a volver a pintar
+    cada fotograma. Pero no vuelve a renderizar ningun plano ni toca el audio
+    (va copiado), asi que cambiar el logo cuesta minutos de maquina, no dinero.
+    """
+    ajustes = CALIDADES.get(calidad) or CALIDADES["media"]
+    temporal = destino + ".logo.mp4"
+    try:
+        sonda = subprocess.run(
+            [medios.ffprobe(), "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width", "-of", "csv=p=0", destino],
+            capture_output=True, text=True, timeout=120, **medios.SIN_VENTANA)
+        ancho = int((sonda.stdout or "").strip().split(",")[0])
+    except (ValueError, IndexError, OSError, subprocess.SubprocessError):
+        ancho = 1920
+    orden = [medios.ffmpeg(), "-y", "-loglevel", "error", "-i", destino,
+             "-i", ruta_logo, "-filter_complex", filtro_logo(ficha, ancho),
+             "-map", "[v]", "-map", "0:a?", "-c:a", "copy",
+             "-c:v", "libx264", "-preset", ajustes["preset"], "-crf", ajustes["crf"],
+             "-movflags", "+faststart", temporal]
+    proceso = subprocess.run(orden, capture_output=True, text=True, timeout=3600,
+                             **medios.SIN_VENTANA)
+    if proceso.returncode != 0 or not os.path.exists(temporal):
+        raise RuntimeError(f"ffmpeg no pudo poner el logo: {proceso.stderr[-400:]}")
+    os.replace(temporal, destino)
+    return destino
+
+
 CALIDADES = {
     "alta": {"crf": "16", "preset": "slow"},
     "media": {"crf": "20", "preset": "medium"},
@@ -1360,6 +1428,14 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
                 fps=fps, calidad=p.get("calidad") or "media",
                 efectos_db=ajuste_efectos,
                 presencia=p.get("musica_presencia"))
+    # EL LOGO, encima del video ya montado (ver `poner_logo`)
+    ficha_logo = p.get("logo") or {}
+    if isinstance(ficha_logo, dict) and ficha_logo.get("fichero"):
+        ruta_logo = os.path.join(proyecto.raiz, CARPETA_LOGO,
+                                 os.path.basename(str(ficha_logo["fichero"])))
+        if os.path.exists(ruta_logo):
+            avisar(0.97, "poniendo el logo")
+            poner_logo(destino, ruta_logo, ficha_logo, p.get("calidad") or "media")
     duracion = medios.duracion_media(destino)
 
     # los assets son unidades heredadas: no se renderizan, pero se sellan igual

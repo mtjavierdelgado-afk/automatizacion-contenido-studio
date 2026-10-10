@@ -8,6 +8,55 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ---
 
+## V2.0 · octubre de 2026 (proyectos, logo y revisar)
+
+**Proyectos (clientes)**
+- Barra de **Proyectos** arriba de tus estilos: una carpeta por cliente.
+  - Los estilos que creas con un proyecto abierto quedan dentro, y sus vídeos
+    van con ellos.
+  - Cada proyecto se puede renombrar, ocultar, ponerle clave o borrar. Borrarlo
+    no borra sus estilos ni sus vídeos.
+- En **Tus vídeos** cada vídeo dice de qué estilo (🎨) y de qué proyecto (📁)
+  salió.
+
+**Música, subtítulos y logo de cada vídeo** (Encargo → Qué lleva este vídeo)
+- **Elegir la música**: busca temas de Jamendo por ánimo, escúchalos ahí y
+  fija uno; o deja la automática.
+- **Personalizar los subtítulos**: tamaño, letra y forma, caja y color; o los
+  del estilo.
+- **Logo**: sube una imagen y elige la esquina, el tamaño y la opacidad.
+- Ninguno paga imágenes: la música y el logo solo vuelven a montar el vídeo.
+
+**✓ Revisar**, al lado de cada **Guía**
+- Comprueba lo que has escrito en ese campo contra su guía: dice si sirve, qué
+  falla y por qué, y propone una versión que puedes poner con un botón.
+- Va con tu suscripción de Claude: no cuesta imágenes.
+
+**La voz, con escucha**
+- Al crear un estilo, la voz se elige en una lista con **▶** en cada voz para
+  oírla antes, igual que en un estilo ya creado.
+- En la ficha del estilo la voz ya no está escondida en «Opciones avanzadas»,
+  y arriba se ve cómo se pidió.
+- **Corregido**: si un estilo se quedaba a medias y se retomaba después de
+  cambiar la voz, salía con la voz del primer intento. Ahora la vuelve a elegir.
+
+**Imágenes de referencia**
+- Las miniaturas son el doble de grandes, y al pulsar una se ve en grande, con
+  ← y → para pasar de una a otra.
+- **★** marca las que deben ir sí o sí a la hoja con la que se dibujan las
+  láminas (8 como mucho).
+
+**El asistente**
+- Desde el **Historial** ya se puede escribir y empezar una charla nueva.
+- El cursor vuelve solo al campo cuando contesta.
+
+**Todos los campos de texto crecen con lo que escribes**, hasta el 60 % de la
+pantalla, y desde ahí tienen su propia barra. Antes muchos se quedaban en dos
+líneas y cortaban el texto.
+
+**Ayuda**: «Cómo se usa» puesto al día con todo esto, y con un apartado sobre
+los derechos de la música, la voz y los efectos.
+
 ## V2.0 · octubre de 2026 (arreglos antes de la fase 3)
 
 **Corregido: generar imágenes fallaba con «No such file or directory … .tmp»**

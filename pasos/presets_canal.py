@@ -187,6 +187,7 @@ TIPOS = {
 #: `taller` es el id del proyecto oculto donde se genero: ahi siguen las
 #: imagenes que se adjuntaron, asi que rehacer la guia no las vuelve a pedir.
 CLAVES_ORIGEN = ("estilo_prompt", "estilo_imagenes", "estilo_descripciones",
+                 "estilo_destacadas",
                  "tono_prompt",
                  "voz_prompt", "voz_id", "idioma", "ritmo", "taller", "feedback",
                  # el espanol de Latinoamerica: sin esto, rehacer una parte del
@@ -756,6 +757,7 @@ def nombre_numerado(indice, ruta):
     """
     base = _PREFIJO_ORDEN.sub("", os.path.basename(str(ruta))) or os.path.basename(str(ruta))
     return f"{int(indice):02d}_{base}"
+
 
 def _sembrar_ficheros(tipo, pid, datos, miniatura, anterior):
     """Copia al banco lo que el preset necesita tener en propiedad.

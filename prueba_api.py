@@ -3592,6 +3592,101 @@ def probar_presencia_musica(cliente, carpeta):
         servidor.contexto, servidor.lanzar_paso, servidor._ruta_de_version = guardado
 
 
+def probar_ronda_octubre(cliente, carpeta):
+    """Proyectos (clientes), subtítulos, logo, muestra de voz y revisar."""
+    seccion("PROYECTOS, SUBTÍTULOS, LOGO, MUESTRA DE VOZ Y REVISAR")
+    from PIL import Image
+    # --- proyectos (clientes)
+    respuesta, datos = cliente.post("/api/clientes", {"nombre": "Suyu"})
+    igual(respuesta.status_code, 201, "se crea un proyecto")
+    cid = (datos.get("cliente") or {}).get("id") or ""
+    ok(cid.startswith("cl_"), f"con su id: {cid}")
+    respuesta, _d = cliente.post("/api/clientes", {"nombre": "suyu"})
+    igual(respuesta.status_code, 400, "dos proyectos con el mismo nombre no")
+    respuesta, _d = cliente.put(f"/api/clientes/estilos/pr_x", {"cliente": cid})
+    igual(respuesta.status_code, 200, "un estilo se mete en un proyecto")
+    _r, lista = cliente.get("/api/clientes")
+    igual((lista.get("estilos") or {}).get("pr_x"), cid, "y la lista lo dice")
+    _r, datos = cliente.put(f"/api/clientes/{cid}", {"clave": "1234", "oculto": True})
+    ficha = datos.get("cliente") or {}
+    ok(ficha.get("con_clave") and ficha.get("oculto") and "clave" not in ficha,
+       "se le pone clave y se oculta, y la clave nunca viaja")
+    respuesta, _d = cliente.post(f"/api/clientes/{cid}/abrir", {"clave": "mala"})
+    igual(respuesta.status_code, 403, "con la clave mala no se abre")
+    respuesta, _d = cliente.post(f"/api/clientes/{cid}/abrir", {"clave": "1234"})
+    igual(respuesta.status_code, 200, "con la buena, sí")
+    respuesta, datos = cliente.pedir("DELETE", f"/api/clientes/{cid}")
+    igual(datos.get("estilos_sin_proyecto"), ["pr_x"],
+          "borrar el proyecto deja sus estilos sin proyecto, no los borra")
+    # --- subtítulos y logo de un vídeo
+    _r, datos = cliente.post("/api/proyectos", {"nombre": "Ronda octubre"})
+    pid = (datos.get("proyecto") or {}).get("id")
+    base = f"/api/proyectos/{pid}"
+    _r, sub = cliente.get(f"{base}/subtitulos")
+    igual((sub.get("tam"), sub.get("propios")), ("normal", False),
+          "sin tocar, los subtítulos son los del estilo")
+    respuesta, _d = cliente.put(f"{base}/subtitulos", {"tam": "gigante"})
+    igual(respuesta.status_code, 400, "un tamaño que no existe es un 400")
+    _r, datos = cliente.put(f"{base}/subtitulos", {"tam": "grande", "color": "#ffcc00"})
+    igual(datos.get("cambiado"), True, "se cambian tamaño y color")
+    _r, sub = cliente.get(f"{base}/subtitulos")
+    igual((sub.get("tam"), sub.get("color"), sub.get("propios")),
+          ("grande", "#ffcc00", True), "y se leen como propios del vídeo")
+    _r, datos = cliente.put(f"{base}/subtitulos", {"automatico": True})
+    _r, sub = cliente.get(f"{base}/subtitulos")
+    igual((sub.get("tam"), sub.get("color"), sub.get("propios")),
+          ("normal", "", False), "«automático» vuelve a los del estilo")
+    respuesta, _d = cliente.put(f"{base}/logo", {"posicion": "arriba_derecha"})
+    igual(respuesta.status_code, 409, "colocar un logo que no se ha subido es un 409")
+    png = io.BytesIO()
+    Image.new("RGBA", (40, 20), (255, 0, 0, 255)).save(png, "PNG")
+    respuesta, datos = cliente.pedir("POST", f"{base}/logo",
+                                     files={"logo": ("logo.png", png.getvalue(), "image/png")})
+    igual(respuesta.status_code, 200, "se sube un logo")
+    igual((datos.get("logo") or {}).get("posicion"), "arriba_derecha",
+          "y va arriba a la derecha de fábrica")
+    igual(datos.get("trabajo_id"), None, "sin vídeo montado no se lanza nada")
+    _r, datos = cliente.put(f"{base}/logo", {"posicion": "abajo_izquierda", "tamano": 2})
+    igual(((datos.get("logo") or {}).get("posicion"), (datos.get("logo") or {}).get("tamano")),
+          ("abajo_izquierda", 0.4), "se mueve, y el tamaño se queda en su tope")
+    respuesta, _d = cliente.get(f"{base}/logo/imagen")
+    igual(respuesta.status_code, 200, "y se sirve su imagen")
+    _r, datos = cliente.put(f"{base}/logo", {"quitar": True})
+    _r, datos = cliente.get(f"{base}/logo")
+    igual(datos.get("logo"), None, "y se quita")
+    # --- escuchas y revisar
+    respuesta, _d = cliente.get("/api/musica/escucha?url=https://ejemplo.com/a.mp3")
+    igual(respuesta.status_code, 400, "solo se escuchan temas de Jamendo")
+    respuesta, _d = cliente.post("/api/voces/muestra", {"voz_id": "no vale"})
+    igual(respuesta.status_code, 400, "una voz con un id raro es un 400")
+    respuesta, _d = cliente.post("/api/sistema/guias/no_existe/revisar", {"texto": "x"})
+    igual(respuesta.status_code, 404, "revisar con una guía que no existe es un 404")
+    respuesta, _d = cliente.post("/api/sistema/guias/tono/revisar", {"texto": "  "})
+    igual(respuesta.status_code, 400, "y con el campo vacío, un 400")
+    respuesta, _d = cliente.get("/api/sistema/revisiones/nada")
+    igual(respuesta.status_code, 404, "una revisión que no existe es un 404")
+
+    # RETOMAR UN ESTILO TRAS CAMBIAR LA VOZ la vuelve a elegir (10-10-2026)
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+
+    class _Taller:
+        def __init__(self, voz_id, hecha):
+            self.estado = type("E", (), {"params": lambda _s, paso: {"voz_id": voz_id}})()
+            self.proyecto = type("P", (), {"config": {servidor.CONFIG_VOZ_HECHA: hecha}})()
+
+    hecha = {"voz_prompt": "grave", "voz_id": ""}
+    ok(servidor._light_hecha(_Taller("v1", hecha), "voz",
+                             {"voz_prompt": "grave", "voz_id": ""}),
+       "con el mismo encargo, la voz está hecha")
+    ok(not servidor._light_hecha(_Taller("v1", hecha), "voz",
+                                 {"voz_prompt": "grave", "voz_id": "v2"}),
+       "con otra voz elegida, hay que volver a elegirla")
+    ok(not servidor._light_hecha(_Taller("v1", hecha), "voz",
+                                 {"voz_prompt": "aguda", "voz_id": ""}),
+       "y con otra descripción, también")
+
+
 def probar_traer_estilo(cliente):
     """Un video se queda con la copia del estilo; esto la trae cuando se pide.
 
@@ -4018,6 +4113,7 @@ def main():
         probar_regrabar_y_estructura(cliente, carpeta)
         probar_pausas(cliente, carpeta)
         probar_presencia_musica(cliente, carpeta)
+        probar_ronda_octubre(cliente, carpeta)
         probar_bitacora(cliente, pid)
         probar_presets_canal(cliente)
         probar_modo_light(cliente)

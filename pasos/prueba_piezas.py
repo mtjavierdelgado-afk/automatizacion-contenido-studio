@@ -2363,6 +2363,30 @@ def prueba_cache_referencias():
     shutil.rmtree(base, ignore_errors=True)
 
 
+def prueba_logo_y_revision():
+    """El grafo del logo y lo que la revision deja pasar a la pantalla."""
+    titulo("logo: proporcion al ancho del video y en su esquina")
+    grafo = p8_render.filtro_logo({"posicion": "abajo_izquierda", "tamano": 0.15}, 1920)
+    ok("scale=288:-2" in grafo, f"15 % de 1920 son 288 px de ancho: {grafo}")
+    ok("x=W*0.03" in grafo and "y=H-h-W*0.03" in grafo,
+       "abajo a la izquierda, con su margen")
+    ok("scale=8:-2" in p8_render.filtro_logo({"tamano": 0.001}, 100)
+       or "scale=" in p8_render.filtro_logo({"tamano": 0.001}, 100),
+       "un tamano absurdo se queda en su tope")
+    ok("x=W-w-W*0.03" in p8_render.filtro_logo({}, 1080),
+       "sin posicion, arriba a la derecha")
+    import revisar_campo                                      # noqa: PLC0415
+    titulo("revisar: lo que vuelve del modelo se sanea")
+    r = revisar_campo.normalizar({"veredicto": "raro", "problemas": [
+        {"que": "x" * 900, "por_que": "y"}, "basura", {"que": ""}],
+        "sugerida": "nuevo"})
+    igual(r["veredicto"], "mejorable", "un veredicto desconocido cae en «mejorable»")
+    igual(len(r["problemas"]), 1, "solo los problemas con algo que decir")
+    igual(len(r["problemas"][0]["que"]), 500, "y recortados")
+    igual(revisar_campo.normalizar({"veredicto": "sirve", "sugerida": "x"})["sugerida"],
+          "", "si sirve, no se propone otra version")
+
+
 def prueba_rehacer_de_verdad():
     """«Rehacer todo» no puede devolver lo mismo sacado de la cache.
 
@@ -4427,6 +4451,7 @@ def main():
     prueba_la_cara_es_de_esa_escena()
     prueba_continuidad()
     prueba_cache_referencias()
+    prueba_logo_y_revision()
     prueba_espaciar()
     prueba_cartelas()
     prueba_direccion()

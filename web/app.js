@@ -9839,27 +9839,43 @@ function vigilarCola(deQuien) {
   if (COLA_IMG.sondeo && COLA_IMG.pid === pid) return;
   if (COLA_IMG.sondeo) clearInterval(COLA_IMG.sondeo);
   COLA_IMG.pid = pid;
-  COLA_IMG.sondeo = setInterval(async () => {
-    // otro vídeo abierto: esta cola no es la suya (la de aquel se mira al abrirlo)
-    if (videoAbierto().pid && videoAbierto().pid !== pid) { olvidarCola(); return; }
-    let datos;
-    try { datos = await pedir(`${API.colaImagenes(pid)}/cola`); } catch (e) { return; }
-    const antes = JSON.stringify([COLA_IMG.actual && COLA_IMG.actual.notas, COLA_IMG.cola]);
-    aplicarCola(datos);
-    const ahora = JSON.stringify([COLA_IMG.actual && COLA_IMG.actual.notas, COLA_IMG.cola]);
-    const vacia = !COLA_IMG.actual && !COLA_IMG.cola.length;
-    if (antes !== ahora || vacia) {
-      await recargarNotas();
-      await refrescarLoDibujado();
-      repintarVideo();
-    } else {
-      refrescarVivosLight();
+  let enVuelo = false;
+  /* SE COMPRUEBA DESPUÉS DE CADA ESPERA que siga siendo SU cola: si mientras
+     tanto se abrió otro vídeo, lo que llega es del anterior (y los ids de nota
+     se repiten entre vídeos: R001 de uno pintaría «Dibujando» en el otro). */
+  const mio = () => COLA_IMG.sondeo === sondeo && COLA_IMG.pid === pid;
+  const sondeo = setInterval(async () => {
+    if (enVuelo) return;                 // un tic lento no se pisa con el siguiente
+    if (videoAbierto().pid && videoAbierto().pid !== pid) {
+      if (mio()) olvidarCola(); else clearInterval(sondeo);
+      return;
     }
-    if (vacia) {
-      clearInterval(COLA_IMG.sondeo);
-      COLA_IMG.sondeo = null;
+    enVuelo = true;
+    try {
+      let datos;
+      try { datos = await pedir(`${API.colaImagenes(pid)}/cola`); } catch (e) { return; }
+      if (!mio()) { clearInterval(sondeo); return; }
+      const antes = JSON.stringify([COLA_IMG.actual && COLA_IMG.actual.notas, COLA_IMG.cola]);
+      aplicarCola(datos);
+      const ahora = JSON.stringify([COLA_IMG.actual && COLA_IMG.actual.notas, COLA_IMG.cola]);
+      const vacia = !COLA_IMG.actual && !COLA_IMG.cola.length;
+      if (antes !== ahora || vacia) {
+        await recargarNotas();
+        await refrescarLoDibujado();
+        if (!mio()) { clearInterval(sondeo); return; }
+        repintarVideo();
+      } else {
+        refrescarVivosLight();
+      }
+      if (vacia) {
+        clearInterval(sondeo);
+        if (COLA_IMG.sondeo === sondeo) COLA_IMG.sondeo = null;
+      }
+    } finally {
+      enVuelo = false;
     }
   }, 2000);
+  COLA_IMG.sondeo = sondeo;
 }
 
 async function sacarDeLaCola(nid) {

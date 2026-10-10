@@ -695,6 +695,12 @@ def _es_rechazo_de_seguridad(respuesta):
 REESCRITURAS = {}
 
 
+def _apuntar_reescritura(original, datos):
+    REESCRITURAS[huella_prompt(original)] = datos
+    while len(REESCRITURAS) > 200:                 # memoria, no archivo
+        REESCRITURAS.pop(next(iter(REESCRITURAS)))
+
+
 def huella_prompt(prompt):
     return hashlib.sha1(str(prompt or "").encode("utf-8")).hexdigest()[:16]
 
@@ -787,8 +793,8 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
             # 'usage' es el unico recuento real de tokens de esta llamada y solo
             # existe aqui: se devuelve tal cual para que el medidor no lo estime
             if prompt is not original:
-                REESCRITURAS[huella_prompt(original)] = dict(
-                    reescrito or {}, salio=True, cuando=time.time())
+                _apuntar_reescritura(original, dict(reescrito or {}, salio=True,
+                                                    cuando=time.time()))
             return png, {"segundos": round(segundos, 1), "quality": quality,
                          "sin_marcas": prompt is not original,
                          "refs": len(referencias), "coste": PRECIO[quality],
@@ -807,8 +813,7 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
                           f"reintenta sin marcas ({len(reescrito['cambios'])} cambios)",
                           flush=True)
                     prompt = reescrito["prompt"]
-                    REESCRITURAS[huella_prompt(original)] = dict(
-                        reescrito, cuando=time.time())
+                    _apuntar_reescritura(original, dict(reescrito, cuando=time.time()))
                     continue
             identificador = ""
             encaje = re.search(r"req_[A-Za-z0-9]+", r.text or "")

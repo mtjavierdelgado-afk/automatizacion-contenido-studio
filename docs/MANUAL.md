@@ -66,7 +66,9 @@ La primera pantalla. Cada tarjeta es un estilo; **Un estilo nuevo** crea otro.
   El botón **Guía** al lado del título da una plantilla y un ejemplo, y
   **✓ Revisar** comprueba lo que has escrito contra esa guía: dice si sirve,
   qué falla y por qué, y propone una versión que puedes poner con un botón.
-  Está en todos los campos que tienen guía y no cuesta imágenes.
+  Está en todos los campos que tienen guía y no cuesta imágenes. El mismo texto
+  recibe siempre la misma respuesta, y la versión que propone, revisada otra
+  vez, sale «Sirve»: no se queda buscando errores nuevos en cada vuelta.
 - **Ritmo**: cada cuánto cambia de plano el vídeo. Más rápido = más imágenes =
   más caro.
 - **Voz**: describe cómo quieres que suene. Debajo, la lista de voces: cada una
@@ -153,9 +155,15 @@ Lo que se le pide a este vídeo. Todo se guarda solo mientras escribes.
   Cambiarlos rehace solo el montaje. Debajo, todo en automático si no tocas
   nada:
   - **Cuánto se oye la música**: Suave, Normal o Alta.
-  - **Elegir la música**: busca temas por ánimo (Sobrio, Épico…), escúchalos
-    ahí mismo y fija uno. **Volver a la automática** deja que el ritmo elija
+  - **Elegir la música**: busca por lo que quieras («videojuegos retro»,
+    «fiesta») o por ánimo (24: alegre, divertido, gamer, infantil, lo-fi,
+    rock, sobrio, épico…), con **Solo instrumental**, **Solo uso comercial** y
+    **Ver más**. Escúchalos ahí mismo y fija uno, o **Sube tu música** (MP3,
+    WAV, M4A; tuya o con licencia). **Automática** deja que el ritmo elija
     varios temas, como siempre.
+  - **Efectos** (en un vídeo ya creado): cada sonido (aire de transición,
+    golpe, tecla, retorno) puede ser automático, uno buscado en FreeSound
+    (con escucha y su licencia) o **el tuyo** subido.
   - **Personalizar los subtítulos**: tamaño, letra y forma, caja detrás del
     texto y color. **Volver a los del estilo** lo deshace.
   - **Logo**: sube una imagen (mejor PNG con fondo transparente), elige la
@@ -185,9 +193,30 @@ El texto que se va a locutar, por bloques.
 
 ## Imágenes
 
-Un plano por cada trozo del guion. Puedes mirar cada imagen, escribir qué le
-cambiarías y regenerar solo esa. **Las imágenes se lanzan de una tanda en
-una**: espera a que termine una antes de lanzar otra.
+Un plano por cada trozo del guion. Debajo de cada imagen escribes qué le
+cambiarías y pulsas **Guardar nota**. La nota sale abajo en su tarjeta, con:
+
+- la **miniatura** de esa imagen (la de ahora; al rehacerse, la nueva),
+- el **bloque y el segundo**, y **la frase del guion** que se oye en ella,
+- tu nota y su **estado en palabras**: Pendiente, En cola, Dibujando (con el
+  tiempo que lleva y lo que suele tardar), Hecha ✓, Rechazada o Falló, con el
+  motivo.
+
+**Rehacer esta imagen** la pone en la cola; **Rehacer N imágenes** pone todas
+las pendientes y dice antes cuánto cuesta y cuánto tardará. Se dibujan **una
+detrás de otra** en el servidor: puedes cerrar o recargar la página y sigue.
+Si escribes **varias notas para la misma imagen**, se juntan y se paga **una**.
+
+**Si OpenAI la rechaza** (su filtro no dibuja marcas, logos ni personajes con
+derechos: «Mario Kart», «Nintendo Switch»…):
+
+1. El Studio lo reintenta solo **describiéndolo sin marcas** («juego de
+   carreras de karts de dibujos», «consola con mandos rojo y azul»): sale lo
+   más parecido posible sin copiar. La nota te cuenta qué cambió.
+2. Si aun así se rechaza, la nota dice **Rechazada por OpenAI** y ofrece
+   **Hacerla sin marcas**: te propone la nota reescrita, la puedes cambiar, y
+   te ofrece quitar las fotos adjuntas (pueden llevar logos).
+3. Un rechazo **no para las demás**: el resto de la cola sigue.
 
 ## Vídeo
 

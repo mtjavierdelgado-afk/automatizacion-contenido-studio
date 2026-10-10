@@ -51,6 +51,7 @@ import copy
 import json
 import os
 import re
+import threading
 import unicodedata
 import time
 
@@ -446,6 +447,14 @@ def carpeta_imagenes(proyecto, crear=False):
     return ruta
 
 
+#: LEER-CAMBIAR-ESCRIBIR, de uno en uno. La cola de imagenes escribe en las
+#: notas desde un hilo (el «hecha» y el error de cada una) mientras la persona
+#: sigue anadiendo y editando: sin esto, la escritura de uno se llevaba la del
+#: otro y una nota recien escrita desaparecia (10-10-2026). Reentrante: `editar`
+#: llama a `leer` y a `guardar` con el cerrojo ya cogido.
+CERROJO = threading.RLock()
+
+
 def leer(proyecto):
     """Las notas del repaso, en orden de vídeo. Nunca levanta."""
     try:
@@ -484,7 +493,7 @@ def _siguiente_id(notas):
 PANTALLAS = ("video", "imagenes")
 
 
-def anadir(proyecto, texto, t, plano="", imagenes=(), version_mp4=None,
+def _anadir_sin_cerrojo(proyecto, texto, t, plano="", imagenes=(), version_mp4=None,
            pantalla="video", ancla=""):
     """Una nota nueva, anclada a su segundo. El texto es OBLIGATORIO.
 
@@ -518,7 +527,7 @@ def anadir(proyecto, texto, t, plano="", imagenes=(), version_mp4=None,
     return nota
 
 
-def editar(proyecto, nid, texto=None, t=None, imagenes=None,
+def _editar_sin_cerrojo(proyecto, nid, texto=None, t=None, imagenes=None,
            regenerado=None, error=None, aviso=None):
     """`error` y `aviso` son lo que paso al redibujarla: «OpenAI la rechazo
     por...» o «se dibujo sin marcas: ...». Cadena vacia los quita."""
@@ -570,7 +579,7 @@ def editar(proyecto, nid, texto=None, t=None, imagenes=None,
     raise KeyError(nid)
 
 
-def borrar(proyecto, nid):
+def _borrar_sin_cerrojo(proyecto, nid):
     ficha = leer(proyecto)
     antes = len(ficha["notas"])
     ficha["notas"] = [n for n in ficha["notas"] if n.get("id") != nid]
@@ -1096,3 +1105,19 @@ def resumen_de(reparto):
             "tareas": tareas,
             "cuesta_imagenes": any(t in ("assets", "piezas") for t in tareas),
             "cuesta_voz": any(t in ("voz", "guion") for t in tareas)}
+
+
+
+def anadir(*args, **kwargs):
+    with CERROJO:
+        return _anadir_sin_cerrojo(*args, **kwargs)
+
+
+def editar(*args, **kwargs):
+    with CERROJO:
+        return _editar_sin_cerrojo(*args, **kwargs)
+
+
+def borrar(*args, **kwargs):
+    with CERROJO:
+        return _borrar_sin_cerrojo(*args, **kwargs)

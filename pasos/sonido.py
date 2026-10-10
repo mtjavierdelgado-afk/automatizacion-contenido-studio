@@ -1199,6 +1199,11 @@ def traer(ficha, familia):
     destino = banco(familia, _nombre_de(ficha))
     if os.path.exists(destino) and os.path.getsize(destino) > 2000:
         return destino
+    # LO TUYO no se descarga de ningun sitio: o esta en el banco, o no esta
+    if ficha.get("fuente") == "propia":
+        if os.path.exists(destino) and os.path.getsize(destino) > 0:
+            return destino
+        raise RuntimeError("ese audio tuyo ya no está en el banco: vuelve a subirlo")
     url = ficha.get("descarga") or ""
     if not url:
         raise RuntimeError(f"{ficha.get('id')}: no trae URL de descarga")
@@ -1682,16 +1687,21 @@ def guardar_propio(contenido, nombre_original, familia):
             orden = [medios.ffmpeg(), "-y",
                      "-loglevel", "error", "-i", crudo, "-vn", "-ac", "2",
                      "-ar", str(FRECUENCIA), "-b:a", "192k", destino + ".parcial.mp3"]
-            proceso = subprocess.run(orden, capture_output=True, timeout=180)
+            try:
+                proceso = subprocess.run(orden, capture_output=True, timeout=180)
+            except subprocess.TimeoutExpired:
+                raise ValueError("ese audio tarda demasiado en convertirse: "
+                                 "prueba con un MP3 más corto")
             if proceso.returncode != 0:
                 raise ValueError("no se ha podido leer ese audio: "
                                  + proceso.stderr.decode("utf-8", "replace")[-200:])
             os.replace(destino + ".parcial.mp3", destino)
         finally:
-            try:
-                os.remove(crudo)
-            except OSError:
-                pass
+            for sobra in (crudo, destino + ".parcial.mp3"):
+                try:
+                    os.remove(sobra)
+                except OSError:
+                    pass
     ficha["duracion"] = round(_duracion_de(destino), 2)
     return ficha
 

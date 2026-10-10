@@ -95,6 +95,8 @@ def preparar_entorno(base):
         "ESTUDIO_ESTADISTICAS": os.path.join(base, "estadisticas.json"),
         "ESTUDIO_COSTE_GLOBAL": os.path.join(base, "coste.jsonl"),
         "ESTUDIO_BITACORA_GLOBAL": os.path.join(base, "bitacora.jsonl"),
+        # el banco (musica, efectos, imagenes) tambien aparte: el de verdad no se toca
+        "ESTUDIO_BANCO": os.path.join(base, "banco"),
     })
     os.makedirs(env["ESTUDIO_SECRETOS"], exist_ok=True)
     # la guia de la primera vez, ya vista: si no, tapa la pantalla
@@ -185,7 +187,7 @@ def fabricar_video(proyectos, env):
     p6, p7 y p8. Lo que cambia es que aqui las imagenes NO se adoptan: se
     generan con el motor falso, que es el camino que recorre la pantalla.
     """
-    for clave in ("ESTUDIO_ESTADISTICAS",):
+    for clave in ("ESTUDIO_ESTADISTICAS", "ESTUDIO_BANCO"):
         os.environ[clave] = env[clave]
     os.environ["ESTUDIO_IMAGEN_FALSA"] = "1"
     import prueba_pasos_visuales as PV                       # noqa: PLC0415
@@ -570,6 +572,15 @@ def notas_de_imagenes(navegador, datos):
         pg.pulsar(".previa-feedback button", "Guardar nota")
     ok(pg.visible("button", "Rehacer 1 imagen"), "dos notas del mismo plano se pagan como UNA imagen")
     pg.captura("10_dos_notas_un_plano")
+    pg.pulsar("button", "Rehacer 1 imagen")
+    fin = time.time() + 120
+    juntas = pg.p.locator(".nota-imagen").filter(has_text="más luz")
+    otra = pg.p.locator(".nota-imagen").filter(has_text="sofá")
+    while time.time() < fin and not (
+            "hecha" in juntas.first.inner_text().lower() and "hecha" in otra.first.inner_text().lower()):
+        pg.p.wait_for_timeout(700)
+    ok("hecha" in juntas.first.inner_text().lower() and "hecha" in otra.first.inner_text().lower(),
+       "y al rehacerla, las dos notas quedan hechas con esa sola imagen")
     # el Encargo no arrastra nada de esto
     pg.pulsar(".nav-light button", "Encargo")
     ok(not pg.visible(".error-cerrable"), "el Encargo no enseña los errores de las imágenes")

@@ -147,7 +147,13 @@ def huella(gid, texto):
     """La misma revision para el mismo texto: se compara sin espacios de mas."""
     import hashlib                                          # noqa: PLC0415
     llano = " ".join(str(texto or "").split())
-    return hashlib.sha1(f"{gid}\n{llano}".encode("utf-8")).hexdigest()[:20]
+    # CON LA GUIA DENTRO: si la guia cambia, lo revisado contra la vieja no vale
+    try:
+        guia = guias.como_texto(gid)
+    except Exception:                                       # noqa: BLE001
+        guia = ""
+    sello = hashlib.sha1(guia.encode("utf-8")).hexdigest()[:8]
+    return hashlib.sha1(f"{gid}\n{sello}\n{llano}".encode("utf-8")).hexdigest()[:20]
 
 
 def aprobada_por_la_revision():

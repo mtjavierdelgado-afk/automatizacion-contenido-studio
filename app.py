@@ -5210,6 +5210,45 @@ def _texto_de_grupo(notas):
     return " | ".join(f"({i + 1}) {n['texto']}" for i, n in enumerate(notas))
 
 
+def _feedback_de_grupo(ctx, notas):
+    """Lo que se escribe en `feedback` del plano para estas notas.
+
+    Una nota: su texto, que es lo de siempre (p6 la casa con su nota del repaso
+    y de ahi saca sus imagenes adjuntas). VARIAS del mismo plano: el historial
+    que p6 ya entiende (`_texto_feedback` junta los textos y `_ultima_nota` lee
+    la ultima entrada), y la ultima lleva las imagenes de TODAS. Con el texto
+    juntado a mano, p6 no casaba ninguna nota y se quedaba con las imagenes de
+    una sola.
+    """
+    if len(notas) == 1:
+        return notas[0]["texto"]
+    carpeta = _repaso().carpeta_imagenes(ctx.proyecto)
+    imagenes = []
+    for nota in notas:
+        for nombre in nota.get("imagenes") or []:
+            ruta = os.path.join(carpeta, os.path.basename(str(nombre)))
+            if os.path.isfile(ruta) and ruta not in imagenes:
+                imagenes.append(ruta)
+    historial = [{"texto": n["texto"]} for n in notas[:-1]]
+    historial.append({"texto": notas[-1]["texto"], "de": "repaso", "imagenes": imagenes})
+    return historial
+
+
+def _devolver_unidad(ctx, uid, previo):
+    """Deja los params de un plano como estaban antes de pedirle nada."""
+    try:
+        params = ctx.estado.params("assets") or {}
+        unidades = dict(params.get("unidades") or {})
+        if previo is None:
+            unidades.pop(uid, None)
+        else:
+            unidades[uid] = previo
+        params["unidades"] = unidades
+        ctx.estado.set_params("assets", params)
+    except Exception as fallo:                              # noqa: BLE001
+        ctx.bitacora.anotar("aviso", "assets", {"devolver_unidad": str(fallo)})
+
+
 def _siguiente_plano(ctx, cola):
     """(plano, [notas]) del primero de la cola, con TODAS sus notas en cola."""
     vivas = {n["id"]: n for n in _notas_de_imagenes(ctx)}
@@ -5246,11 +5285,26 @@ def _correr_notas_imagenes(avisar, ctx):
             etiqueta = f"{plano} · {hechos + 1} de {total}"
             avisar(hechos / total, f"dibujando {etiqueta}", f"Dibujando {etiqueta}")
             uid = f"escena:{plano}"
+            # UN PLANO QUE YA NO EXISTE no se «hace»: los planos se renumeran al
+            # volver a cortar, y p6 se saltaria la unidad sin decir nada --la
+            # nota saldria «Hecha ✓» sin haberse dibujado--
+            if uid not in set(ctx.estado.unidades_declaradas("assets") or ()):
+                for nota in notas:
+                    try:
+                        repaso.editar(ctx.proyecto, nota["id"], aviso="", error=(
+                            f"la imagen {plano} ya no está en el vídeo (se volvieron "
+                            "a cortar los planos): borra esta nota y escríbela en la "
+                            "imagen que toque"))
+                    except (KeyError, ValueError):
+                        pass
+                fallidas.append(plano)
+                continue
             # SE FUSIONA con lo que ya tenia el plano (su direccion, su parrafo
             # redactado...): poner `{feedback}` a secas se los llevaba por delante
-            actual = dict(((ctx.estado.params("assets") or {}).get("unidades")
-                           or {}).get(uid) or {})
-            actual["feedback"] = _texto_de_grupo(notas)
+            unidades_antes = dict((ctx.estado.params("assets") or {}).get("unidades") or {})
+            previo = copy.deepcopy(unidades_antes.get(uid))
+            actual = dict(previo or {})
+            actual["feedback"] = _feedback_de_grupo(ctx, notas)
             ctx.estado.actualizar_params("assets", {"unidades": {uid: actual}})
             ctx.estado.marcar_ejecutando("assets")
             arranque = time.time()
@@ -5262,9 +5316,14 @@ def _correr_notas_imagenes(avisar, ctx):
             try:
                 _correr_paso(avisar_plano, ctx, "assets", [uid], {"rehacer": True})
             except Cancelado:
+                _devolver_unidad(ctx, uid, previo)
                 raise
             except Exception as fallo:                           # noqa: BLE001
                 ctx.estado.limpiar_marca("assets")
+                # LO PEDIDO NO SE QUEDA ESCRITO si no salio: dejaria el plano
+                # obsoleto y la proxima «regenerar lo obsoleto» lo volveria a
+                # pedir (y a pagar, o a que lo rechacen)
+                _devolver_unidad(ctx, uid, previo)
                 rechazo = type(fallo).__name__ == "RechazoSeguridad"
                 motivo = str(fallo)
                 for nota in notas:
@@ -5278,14 +5337,26 @@ def _correr_notas_imagenes(avisar, ctx):
                                      "error": motivo[:300]})
                 continue
             _SEGUNDOS_IMAGEN.append(time.time() - arranque)
-            # el motor se vuelve a pedir: si se recargo durante la tanda, el que
-            # apunto la reescritura es el nuevo
+            del _SEGUNDOS_IMAGEN[:-50]
+            # SE BUSCA POR SU PROMPT, el que quedo en la ficha del plano: por la
+            # hora se colaria la reescritura de otro video que corriera a la vez.
+            # El motor se vuelve a pedir: si se recargo, el que la apunto es el
+            # nuevo.
             imagen = PASOS_MODULOS.medios.motor("imagen_openai/imagen.py")
-            nuevas = [v for v in (getattr(imagen, "REESCRITURAS", {}) or {}).values()
-                      if float(v.get("cuando") or 0) >= arranque and v.get("salio")]
+            reescrita = None
+            ficha_json = os.path.join(ctx.proyecto.raiz, _ruta_de_version(
+                ctx, "assets", "escenas", f"{plano}.json") or "-")
+            try:
+                with open(ficha_json, encoding="utf-8") as fh:
+                    prompt_usado = json.load(fh).get("prompt") or ""
+                reescrita = (getattr(imagen, "REESCRITURAS", {}) or {}).get(
+                    imagen.huella_prompt(prompt_usado))
+            except (OSError, ValueError, AttributeError):
+                reescrita = None
             aviso = ""
-            if nuevas:
-                cambios = nuevas[-1].get("cambios") or []
+            if reescrita and reescrita.get("salio") \
+                    and float(reescrita.get("cuando") or 0) >= arranque:
+                cambios = reescrita.get("cambios") or []
                 lista = "; ".join(f"«{a}» → «{b}»" for a, b in cambios[:4])
                 aviso = ("OpenAI la rechazó con los nombres de marca, y se dibujó "
                          "describiéndola sin ellos" + (f": {lista}" if lista else "."))
@@ -5353,27 +5424,43 @@ def rehacer_imagenes_con_notas(pid: str, cuerpo: dict = Body(default=None)):
         vivas = [n for n in vivas if n["id"] in quiero]
     if not vivas:
         raise ErrorApi(400, "no hay ninguna nota pendiente con su imagen")
+    # ¿HAY OTRA TANDA DE IMAGENES? Si es la de esta misma cola y esta
+    # terminando (ya miro que no quedaba nada), se espera a que acabe: si no,
+    # en ese segundo se contestaba 409 a una nota que tenia que entrar.
+    otro = _trabajo_activo(ctx, "assets")
+    with _COLA_LOCK:
+        propio = (_COLA_NOTAS.get(ctx.id) or {}).get("trabajo")
+    if otro is not None and otro.get("nombre") == "notas_imagenes" and otro["id"] != propio:
+        ctx.gestor.esperar(otro["id"], 10)
+        otro = _trabajo_activo(ctx, "assets")
+    if otro is not None and otro["id"] != propio:
+        raise ErrorApi(409, "ya se están dibujando imágenes de este vídeo: espera a "
+                            "que terminen", {"trabajo_id": otro["id"]})
     repaso = _repaso()
+    # lo que paso la vez anterior ya no vale para esta: se borra YA aceptada
+    # (pasada la comprobacion de arriba) y ANTES de que el hilo pueda escribir
+    with _COLA_LOCK:
+        ocupadas = set((_COLA_NOTAS.get(ctx.id) or {}).get("cola") or []) | set(
+            ((_COLA_NOTAS.get(ctx.id) or {}).get("actual") or {}).get("notas") or [])
     for nota in vivas:
-        if nota.get("error"):
+        if nota.get("error") and nota["id"] not in ocupadas:
             try:
                 repaso.editar(ctx.proyecto, nota["id"], error="")
             except (KeyError, ValueError):
                 pass
     with _COLA_LOCK:
         estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
-        en_marcha = estado.get("actual") or (
-            estado.get("trabajo") and ctx.gestor.estado(estado["trabajo"])["estado"]
-            in ("pendiente", "ejecutando"))
+        en_marcha = False
+        if estado.get("trabajo"):
+            try:
+                en_marcha = ctx.gestor.estado(estado["trabajo"])["estado"] in (
+                    "pendiente", "ejecutando")
+            except KeyError:
+                en_marcha = False
         ya = set(estado["cola"]) | set((estado.get("actual") or {}).get("notas") or [])
-        estado["cola"].extend(n["id"] for n in vivas if n["id"] not in ya)
+        nuevas = [n for n in vivas if n["id"] not in ya]
+        estado["cola"].extend(n["id"] for n in nuevas)
         if not en_marcha:
-            otro = _trabajo_activo(ctx, "assets")
-            if otro is not None:
-                estado["cola"] = []
-                raise ErrorApi(409, "ya se están dibujando imágenes de este vídeo: "
-                                    "espera a que terminen",
-                               {"trabajo_id": otro["id"]})
             trabajo_id = ctx.gestor.lanzar("notas_imagenes", _correr_notas_imagenes,
                                            ctx, paso="assets")
             estado["trabajo"] = trabajo_id
@@ -5596,16 +5683,17 @@ def _correr_repaso(avisar, ctx, ajuste, modo=MODO_TRAS_REPASO,
 
     # las notas aplicadas se marcan DESPUÉS de generar: si la tanda se cae, las
     # notas siguen pendientes y volver a darle al botón las vuelve a intentar
-    ficha = repaso.leer(ctx.proyecto)
     aplicadas = {n["id"] for n in reparto.get("notas") or [] if n.get("cambios")}
-    for nota in ficha["notas"]:
-        if nota.get("id") in aplicadas:
-            nota["estado"] = "aplicado"
-            nota["aplicado_en"] = ahora()
-    ficha.setdefault("aplicado", []).append({
-        "cuando": ahora(), "notas": sorted(aplicadas), "tareas": tareas,
-        "por_ambito": resumen["por_ambito"]})
-    repaso.guardar(ctx.proyecto, ficha)
+    with repaso.CERROJO:                    # ver `repaso.CERROJO`
+        ficha = repaso.leer(ctx.proyecto)
+        for nota in ficha["notas"]:
+            if nota.get("id") in aplicadas:
+                nota["estado"] = "aplicado"
+                nota["aplicado_en"] = ahora()
+        ficha.setdefault("aplicado", []).append({
+            "cuando": ahora(), "notas": sorted(aplicadas), "tareas": tareas,
+            "por_ambito": resumen["por_ambito"]})
+        repaso.guardar(ctx.proyecto, ficha)
 
     frase = (f"{len(aplicadas)} de {len(notas)} notas aplicadas · "
              + (resumen["frase"] or "sin cambios"))
@@ -6030,6 +6118,24 @@ def licencia_de_tema(url):
             "atribucion": "by" in partes}
 
 
+def _ficha_de_audio_valida(ficha, fuentes, hosts):
+    """Lo que manda la pantalla de un tema o un efecto, comprobado: su id hace
+    de nombre de fichero en el banco y su `descarga` es a donde se sale a
+    pedirlo (con la clave de FreeSound, si es de alli)."""
+    from urllib.parse import urlparse                       # noqa: PLC0415
+    if ficha.get("fuente") not in fuentes:
+        raise ErrorApi(400, f"fuente desconocida: {ficha.get('fuente')!r}")
+    if not re.match(r"^[A-Za-z0-9_-]{1,64}$", str(ficha.get("id") or "")):
+        raise ErrorApi(400, "id de audio no válido")
+    url = str(ficha.get("descarga") or "")
+    if url:
+        destino = urlparse(url)
+        host = (destino.hostname or "").lower()
+        if destino.scheme != "https" or not any(host == h or host.endswith("." + h)
+                                                for h in hosts):
+            raise ErrorApi(400, "esa descarga no es de donde dice")
+
+
 @app.put("/api/proyectos/{pid}/sonido")
 def guardar_sonido(pid: str, cuerpo: dict = Body(default=None)):
     """Fija el tema (bajándolo al banco), el interruptor o el nivel de música."""
@@ -6047,6 +6153,7 @@ def guardar_sonido(pid: str, cuerpo: dict = Body(default=None)):
             cambios["musica"] = {}
         else:
             propio = ficha.get("fuente") == "propia"
+            _ficha_de_audio_valida(ficha, ("jamendo", "propia"), ("jamendo.com",))
             if not ficha.get("id") or not (ficha.get("descarga") or propio):
                 raise ErrorApi(400, "el tema tiene que traer 'id' y 'descarga'")
             if propio and not os.path.isfile(sonido.banco("musica", sonido._nombre_de(ficha))):
@@ -6541,10 +6648,19 @@ def _correr_surtir_efectos(avisar, ctx, papeles, salteado):
     fijos = set(render.get("efectos_fijos") or [])
     papeles = [p for p in papeles if p not in fijos or not surtido.get(p)]
     total = len(papeles)
+    nuevos = {}
     for indice, papel in enumerate(papeles):
         avisar(0.05 + 0.9 * (indice / max(1, total)),
                f"buscando y bajando «{sonido.PAPELES[papel]['nombre']}»")
-        surtido[papel] = sonido.surtir(papel, salteado=salteado)
+        nuevos[papel] = sonido.surtir(papel, salteado=salteado)
+    # SE RELEE ANTES DE ESCRIBIR: si mientras se buscaba alguien fijo un
+    # efecto a mano, ese papel se queda como lo dejo
+    ahora = ctx.estado.params("render") or {}
+    surtido = dict(ahora.get("efectos") or {})
+    fijos_ahora = set(ahora.get("efectos_fijos") or [])
+    for papel, fichas in nuevos.items():
+        if papel not in fijos_ahora or not surtido.get(papel):
+            surtido[papel] = fichas
     ctx.estado.actualizar_params("render", {"efectos": surtido})
     cuantos = sum(len(v or []) for v in surtido.values())
     avisar(1.0, f"{cuantos} efectos en el banco")
@@ -6631,7 +6747,11 @@ async def subir_audio_propio(peticion: Request, familia: str = Query(default="mu
     for _clave, valor in formulario.multi_items():
         if not hasattr(valor, "read"):
             continue
-        contenido = await valor.read()
+        # COMO MUCHO EL TOPE MAS UNO: leerlo entero para despues decir «pesa
+        # demasiado» es meter en memoria lo que se va a rechazar
+        contenido = await valor.read(sonido.MAX_BYTES_AUDIO + 1)
+        if len(contenido) > sonido.MAX_BYTES_AUDIO:
+            raise ErrorApi(400, f"pesa más de {sonido.MAX_BYTES_AUDIO // 1024 // 1024} MB")
         try:
             ficha = await asyncio.to_thread(
                 sonido.guardar_propio, contenido, getattr(valor, "filename", ""), familia)
@@ -6703,6 +6823,7 @@ def fijar_efecto(pid: str, cuerpo: dict = Body(default=None)):
     fijos = [p for p in (render.get("efectos_fijos") or []) if p in sonido.PAPELES]
     if ficha:
         propio = ficha.get("fuente") == "propia"
+        _ficha_de_audio_valida(ficha, ("freesound", "propia"), ("freesound.org",))
         if not ficha.get("id") or not (ficha.get("descarga") or propio):
             raise ErrorApi(400, "el efecto tiene que traer 'id' y 'descarga'")
         if not propio:

@@ -48,7 +48,9 @@ TABLA = [
     (r"mario\s*kart", "a colorful cartoon kart-racing video game with generic "
                       "cartoon characters driving go-karts on a bright track"),
     (r"super\s+mario(\s+bros\.?)?", "a colorful cartoon platform video game"),
-    (r"\bmario\b|\bluigi\b|\bbowser\b|\byoshi\b|princess\s+peach|\btoad\b",
+    # Solo los que no son nombres de persona corrientes: «Mario» a secas puede
+    # ser alguien del reparto (es un nombre comun), y se lo llevaba por delante
+    (r"\bbowser\b|\byoshi\b|princess\s+peach|donkey\s+kong",
      "a generic cartoon character"),
     (r"nintendo\s+switch(\s+(oled|lite))?", "a handheld hybrid game console with "
                                             "detachable red and blue controllers"),
@@ -156,7 +158,7 @@ TABLA_ES = [
     (r"playstation\s*\d?|\bps[45]\b", "una consola de sobremesa moderna"),
     (r"\bxbox\b", "una consola de sobremesa moderna"),
     (r"pok[eé]mon|pikachu", "una criatura de dibujos animados genérica"),
-    (r"\bmario\b|\bluigi\b", "un personaje de dibujos animados genérico"),
+    (r"\bbowser\b|\byoshi\b", "un personaje de dibujos animados genérico"),
     (r"coca[\s-]?cola|\bpepsi\b", "un refresco con etiqueta roja lisa"),
     (r"\biphone\b", "un móvil moderno sin logos"),
 ]

@@ -8,6 +8,42 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ---
 
+## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
+
+**Imágenes con nota**
+- Cada nota sale en una tarjeta con **la miniatura de su imagen**, el bloque y
+  el segundo, **la frase del guion** que se oye ahí y su estado en palabras.
+  «Apuntar» ahora es **Guardar nota**.
+- Mientras se dibuja: **«Dibujando 0:45 de ~1:20»** (antes, un «5 %» que no se
+  movía).
+- La cola vive en el servidor: se dibujan **de una en una**, se puede recargar
+  la página y **varias notas de la misma imagen se pagan como una**. El botón
+  dice cuánto cuesta y cuánto tarda.
+- **Si OpenAI rechaza una imagen** (marcas, logos, personajes con derechos):
+  se reintenta sola **sin marcas**, lo más parecida posible; si aun así no,
+  la nota lo explica y ofrece **Hacerla sin marcas** (texto propuesto y
+  editable). Un rechazo ya no para las demás ni sale como error en el Encargo.
+
+**Música y efectos**
+- **24 ánimos** (alegre, divertido, gamer, infantil, lo-fi, rock…),
+  **búsqueda libre**, **Ver más**, **Solo instrumental** y **Solo uso
+  comercial**.
+- **Sube tu música** (MP3, WAV, M4A) para usarla en el vídeo.
+- **Efectos** en Encargo → Ajustes del montaje: cada sonido automático,
+  buscado en FreeSound o **subido por ti**.
+
+**Corregido**
+- **Ver los ocultos** no enseñaba el proyecto oculto (un choque de estilos lo
+  escondía). Y en general, lo marcado como «escondido» ya se esconde siempre.
+- **Revisar** encontraba «errores» nuevos en cada vuelta: ahora el mismo texto
+  recibe la misma respuesta y la versión sugerida, revisada, sale «Sirve».
+- Los avisos de error del vídeo se pueden **cerrar**.
+
+**Para quien mantiene el Studio**
+- `prueba_recorrido.py`: abre la pantalla con un navegador y la recorre
+  entera pulsando como una persona (con imágenes, voz y Claude simulados y un
+  vídeo de prueba), dejando capturas. Va dentro de `pruebas.sh`.
+
 ## V2.0 · octubre de 2026 (las láminas de tu estilo)
 
 **Las láminas, a la vista y a mano** (ficha del estilo → Estilo gráfico)

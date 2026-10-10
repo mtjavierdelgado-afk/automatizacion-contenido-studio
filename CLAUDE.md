@@ -402,11 +402,16 @@ bash pruebas.sh                              # Linux: el mismo recorrido
 comprobación. Toda suite termina con su `if __name__ == "__main__"` y una línea
 con «comprobaciones».
 
-Las veinticuatro en verde, y las herramientas de análisis sin nada que decir
+Las veintiséis en verde, y las herramientas de análisis sin nada que decir
 (`huerfanas_js` trae dos sospechosas de siempre, `async` y `fallar`, que no son
 llamadas).
 Y si has tocado la interfaz, **ábrela**: una regla de CSS de menos o un bloque
-que no se pinta no da ningún error en ningún sitio.
+que no se pinta no da ningún error en ningún sitio. Para eso está
+`prueba_recorrido.py` (va en `pruebas.sh`): arranca el Estudio con datos de
+prueba y motores simulados, recorre las pantallas con Chromium pulsando como
+una persona y comprueba que lo que tiene que verse SE VE. Si añades una
+pantalla o un botón, añade su paso ahí. Las capturas quedan en la carpeta que
+imprime al empezar (`--capturas carpeta` para elegirla).
 
 Tres cosas que ahorran perseguir fallos que no existen:
 

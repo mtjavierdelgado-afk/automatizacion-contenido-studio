@@ -23,12 +23,25 @@ from datetime import date
 
 RUTA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reglas.json")
 
+#: LAS REGLAS DEL MODO FOTO, en su propio fichero (Etapa Foto A).
+#:
+#: Las de `reglas.json` se escribieron --y el destilador las sigue aprendiendo--
+#: para video cartoon, asi que en un video fotografico (`estilo.modo == "foto"`)
+#: no entra ninguna: entran estas. Y van APARTE a proposito: `asvs actualizar`
+#: no sobrescribe `reglas.json` en el servidor (es lo unico del arbol de codigo
+#: que la aplicacion reescribe), asi que una regla de foto escrita alli no
+#: llegaria nunca. Este fichero viaja con el codigo como cualquier otro.
+RUTA_FOTO = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "reglas_foto.json")
+
 AMBITOS = ("prompt_imagen", "referencias", "reparto", "blockout",
            "plan_escenas", "storyboard", "montaje", "voz")
 
 
-def cargar():
-    with open(RUTA, "r", encoding="utf-8") as fh:
+def cargar(modo="ilustracion"):
+    """Las reglas de ese modo de imagen. Todo lo que no sea "foto" es cartoon."""
+    ruta = RUTA_FOTO if modo == "foto" else RUTA
+    with open(ruta, "r", encoding="utf-8") as fh:
         return json.load(fh)
 
 
@@ -37,9 +50,9 @@ def guardar(datos):
         json.dump(datos, fh, ensure_ascii=False, indent=2)
 
 
-def para(ambito, como_texto=True):
+def para(ambito, como_texto=True, modo="ilustracion"):
     """Reglas de un ambito, ordenadas por prioridad."""
-    datos = cargar()
+    datos = cargar(modo)
     filtradas = [r for r in datos["reglas"] if r["ambito"] == ambito]
     filtradas.sort(key=lambda r: r.get("prioridad", 9))
     if not como_texto:
@@ -47,9 +60,13 @@ def para(ambito, como_texto=True):
     return [r["regla"] for r in filtradas]
 
 
-def bloque_prompt(ambito="prompt_imagen"):
-    """Devuelve las reglas como un parrafo listo para concatenar a un prompt."""
-    lineas = para(ambito)
+def bloque_prompt(ambito="prompt_imagen", modo="ilustracion"):
+    """Devuelve las reglas como un parrafo listo para concatenar a un prompt.
+
+    Con `modo="foto"` salen las de `reglas_foto.json` y ninguna de las de
+    cartoon; sin decirlo, las de siempre, igual que antes.
+    """
+    lineas = para(ambito, modo=modo)
     if not lineas:
         return ""
     return " ".join(lineas)

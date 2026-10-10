@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "descripcion": "Reglas transversales del MODO FOTO (estilo.modo = \"foto\", Etapa Foto A). Sustituyen a las de reglas.json, que se escribieron y se aprenden para video cartoon, en todo prompt de un video fotografico. Viven en un fichero aparte porque `asvs actualizar` no sobrescribe reglas.json (es lo que reescribe el destilador en el servidor) y una regla nueva puesta alli no llegaria nunca. Este fichero SI se actualiza con el codigo. Escritas en ingles porque se concatenan tal cual a un prompt en ingles.",
+  "reglas": [
+    {
+      "id": "foto-hora-y-luz-explicitas",
+      "ambito": "prompt_imagen",
+      "prioridad": 1,
+      "regla": "LIGHT AND TIME OF DAY ARE PART OF THE PHOTOGRAPH: every shot has one clear time of day and one consistent light source, and it carries over from the previous shot of the same event unless the scene says otherwise. Indoors, say what lights the room and whether daylight or night shows through the windows. Exposure is set for skin tones; the game screens are brighter than the room and cast a faint coloured glow on nearby faces and hands.",
+      "por_que": "Version fotografica de hora-del-dia-explicita y continuidad-luz-entre-planos: en una foto, un salto de luz entre dos planos del mismo evento delata que se generaron por separado.",
+      "fecha": "2026-10-09"
+    },
+    {
+      "id": "foto-gente-real-sin-posar",
+      "ambito": "prompt_imagen",
+      "prioridad": 1,
+      "regla": "REAL PEOPLE, CAUGHT IN THE MOMENT: guests are ordinary people with natural skin texture, varied ages, builds, hairstyles and everyday clothes. Nobody poses and nobody looks into the camera unless the scene asks for it. Faces show the expression the scene describes, never a stock-photo smile. Each named person appears only once in the frame, in person, and never also as a photo, poster or face on a screen.",
+      "por_que": "El generador tira a la foto de banco de imagenes: todos sonriendo mirando a camara. Y un-personaje-aparece-una-vez vale igual en una foto.",
+      "fecha": "2026-10-09"
+    },
+    {
+      "id": "foto-manos-con-mandos",
+      "ambito": "prompt_imagen",
+      "prioridad": 1,
+      "regla": "HANDS ARE PHOTOGRAPHED, NOT INVENTED: every visible hand has five fingers with real anatomy. A game controller is held with both hands, the right way up, thumbs on the sticks; a steering wheel with both hands; a microphone in one hand near the mouth; VR controllers one in each hand. Never extra, fused or missing fingers, never a controller held in one hand or floating. When a hand adds nothing to the shot, keep it out of frame rather than render it badly.",
+      "por_que": "Es lo primero que delata una foto generada, y en un servicio de alquiler de consolas las manos con el mando salen en casi todos los planos.",
+      "fecha": "2026-10-09"
+    },
+    {
+      "id": "foto-equipo-montado-de-verdad",
+      "ambito": "prompt_imagen",
+      "prioridad": 1,
+      "regla": "THE RENTED EQUIPMENT IS SET UP LIKE THE REAL THING: every TV stands on its tripod stand or a piece of furniture, never floating and never on the floor; consoles rest on a low table, never on the floor; cables run neatly down the stand to the console and never hang in the air or end in nothing. Screens are switched on and show generic gameplay that matches what the players are doing.",
+      "por_que": "Una pantalla sin soporte, una consola en el suelo o un cable flotando hacen que el montaje parezca falso, y es justo lo que el cliente esta contratando.",
+      "fecha": "2026-10-09"
+    },
+    {
+      "id": "foto-sin-marcas-de-terceros",
+      "ambito": "prompt_imagen",
+      "prioridad": 1,
+      "regla": "NO THIRD-PARTY BRANDING: no legible logos, brand names, game titles, team crests, player names or score overlays on screens, clothes, boxes or walls. Screens, shirts and packaging read as generic: shapes and colours, never a recognisable mark. No watermarks and no captions.",
+      "por_que": "Logos y nombres de juegos inventados salen mal escritos y ademas son marcas de otros: en una pieza publicitaria eso es un problema.",
+      "fecha": "2026-10-09"
+    },
+    {
+      "id": "foto-texto-solo-si-se-pide",
+      "ambito": "prompt_imagen",
+      "prioridad": 1,
+      "regla": "NO LETTERING THAT WAS NOT ASKED FOR: any text in the photograph -- a sign, a banner, a cake topper, a label -- has to be quoted explicitly in this prompt. Any surface that could carry text and was not given any shows none, or shows only illegible shapes. At most ten words in one piece of text, large enough to read at a glance, physically part of the object it is on, and correctly spelled. Text the production asks for is written in the language of the film this prompt states, while real names keep their real-world form.",
+      "por_que": "Las tres reglas de texto de reglas.json (permitido pero raro, nada de letras inventadas, el idioma del video) en una sola, escrita para foto.",
+      "fecha": "2026-10-09"
+    },
+    {
+      "id": "foto-nunca-render",
+      "ambito": "prompt_imagen",
+      "prioridad": 2,
+      "regla": "IT MUST READ AS A PHOTOGRAPH: real lens optics and depth of field, natural film grain, true colours. Never a CGI, 3D-render, illustration or painted look, never plastic or airbrushed skin, never glossy over-sharpened HDR.",
+      "por_que": "Las referencias y la guia empujan a la foto; esta linea cierra la salida por defecto del generador hacia el render limpio.",
+      "fecha": "2026-10-09"
+    },
+    {
+      "id": "foto-hoja-reparto-personas-reales",
+      "ambito": "reparto",
+      "prioridad": 1,
+      "regla": "A cast sheet in this production is a set of PHOTOGRAPHS of real people. Every face is fully visible, evenly lit, with a neutral and serious expression and nothing covering it by accident (glare, shadow, hair, sunglasses). When the entry is a GROUP, show clearly different individuals -- height, build, hair, skin tone, clothing -- never several views of the same person. Natural skin texture and real hands with five fingers; never a CGI or illustrated look.",
+      "por_que": "hoja-reparto-cara-visible y hoja-reparto-grupo-distinta, escritas para foto.",
+      "fecha": "2026-10-09"
+    }
+  ]
+}

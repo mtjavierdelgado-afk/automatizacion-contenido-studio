@@ -30,6 +30,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -76,7 +77,7 @@ def titulo(texto):
 #: SHA-256 de `_muestras_ilustracion()` con el codigo de ANTES de la Etapa Foto
 #: A (commit ba23adc de main, 09-10-2026). Ver la cabecera: si falla, lo que hay
 #: que mirar es que prompt ha cambiado, no esta cifra.
-HUELLA_ILUSTRACION = ("b6b21ead0dbfe17f592a6fb1092d7c530a3a2d220e0452467c97dc0e13f5868b")
+HUELLA_ILUSTRACION = ("9358025cbb3564c8d2ee58d2638529c579a7f89a23eaa81a9dba5a68b4bf0dec")
 
 #: Reglas fijas para la huella. Las de verdad (`reglas.json`) las reescribe el
 #: destilador en cada servidor, asi que una huella que las incluyera fallaria en
@@ -238,6 +239,12 @@ def _muestras_ilustracion():
     out["informe"] = p6_assets._repartir_zoom(                      # noqa: SLF001
         [dict(e) for e in asignadas])
     out["describir"] = p6_assets.describir({})
+    # las instrucciones con que se escribe una guia de DIBUJO: el contrato de
+    # foto va aparte y estas no se pueden mover
+    out["guia_instruccion"] = estilo_mod.INSTRUCCION_GUIA
+    out["guia_instruccion_descripcion"] = estilo_mod.INSTRUCCION_GUIA_DESCRIPCION
+    out["guia_contrato"] = estilo_mod.CONTRATO_JSON_GUIA
+    out["tonos"] = p6_assets.TONOS
     # sin `banco_imagenes`, que es una ruta de esta maquina
     out["defectos"] = {k: v for k, v in                             # noqa: SLF001
                        p6_assets._con_defectos({}).items()          # noqa: SLF001
@@ -320,6 +327,18 @@ def prueba_nada_por_defecto():
                                         "ilustracion"),
           {"guia": "g"}, "volver a ilustracion QUITA la clave, no escribe "
                          "'ilustracion'")
+
+    titulo("2 · lo que se guarda del encargo en el preset")
+    claves = presets_canal.CLAVES_ORIGEN
+    igual(presets_light.origen_de({"estilo_prompt": "x",
+                                   "estilo_modo": "ilustracion"}, claves),
+          {"estilo_prompt": "x"},
+          "un estilo de ilustracion no guarda estilo_modo (main no lo sabria "
+          "leer si se vuelve atras)")
+    igual(presets_light.origen_de({"estilo_prompt": "x", "estilo_modo": "foto",
+                                   "feedback": ""}, claves),
+          {"estilo_prompt": "x", "estilo_modo": "foto"},
+          "uno de foto si, y lo vacio se queda fuera como siempre")
 
     titulo("2 · el encargo del estilo")
     base = {"nombre": "Canal", "idioma": "es", "estilo_imagenes": ["a.png"],
@@ -472,6 +491,30 @@ def prueba_modo_foto():
     ok("photographic style of reference images" in prompt,
        "las referencias de estilo se presentan por su estilo fotografico")
 
+    titulo("4 · en una foto no se «dibuja» nada")
+    # «drawn-together eyebrows» es anatomia (cejas fruncidas), no dibujo
+    verbos = re.compile(r"\b(?:[Rr]e)?[Dd]raw(?:s|n|ing)?\b(?!-)")
+    for nesc, escena in ESCENAS.items():
+        for nrefs, refs in (("todas", REFS), ("lamina", LAMINA)):
+            prompt = p6_assets._prompt_completo(                     # noqa: SLF001
+                escena, refs, ESTILO_FOTO, feedback="the cup is wrong",
+                idioma="es",
+                fichas_reparto={"asset:luis": {"descripcion": "a tall man"}})
+            fuera = prompt.replace(
+                reglas.bloque_prompt("prompt_imagen", modo="foto"), "")
+            igual(verbos.findall(fuera), [],
+                  f"{nesc}/{nrefs}: ni draw, ni drawn, ni redraw fuera de las "
+                  f"reglas")
+    for ficha in FICHAS:
+        hoja = p6_assets._prompt_reparto(ficha, ESTILO_FOTO)        # noqa: SLF001
+        igual(verbos.findall(hoja), [], f"hoja de {ficha['nombre']}: tampoco")
+    for nombre, (escena, beat) in VISUALES.items():
+        foto = p6_assets._prompt_visual(dict(escena), beat, CATALOGO,  # noqa: SLF001
+                                        modo="foto")
+        igual(verbos.findall(foto), [], f"plano {nombre}: tampoco")
+    igual(p6_assets._expresion("alegre"), p6_assets.TONOS["alegre"],  # noqa: SLF001
+          "la expresion alegre de ilustracion es la de siempre")
+
     titulo("4 · las frases de referencia en modo foto")
     for indice, ref in enumerate(REFS, start=1):
         dibujo = p6_assets.frase_de_referencia(indice, ref)
@@ -493,7 +536,7 @@ def prueba_modo_foto():
            f"{nombre}: sin «flat vector» ni monigotes")
         ok("photographic style" in foto, f"{nombre}: pide el estilo fotografico")
     for nombre, (escena, beat) in VISUALES.items():
-        if escena.get("abstracta"):
+        if escena.get("abstracta") or beat.get("tono") == "alegre":
             continue
         igual(p6_assets._prompt_visual(dict(escena), beat, CATALOGO,  # noqa: SLF001
                                        modo="foto"),

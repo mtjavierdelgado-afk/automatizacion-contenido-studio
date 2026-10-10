@@ -456,7 +456,7 @@ En la rama, sin unir a `main`. `estilo.modo` = "ilustracion" | "foto".
   foto; sin la clave es ilustracion. No esta en `PARAMS_POR_DEFECTO`. Al estilo
   solo llega `modo: "foto"` (`presets_light.estilo_con_modo`); volver a
   ilustracion QUITA la clave. `prueba_modo_foto` guarda una huella SHA-256 de
-  176 prompts de ilustracion tomada con el codigo de antes (ba23adc): si falla,
+  180 prompts de ilustracion tomada con el codigo de antes (ba23adc): si falla,
   hay un prompt que ha cambiado y eso son imagenes pagadas que salen obsoletas.
 - **Que cambia en foto**: cabecera del plano (`CABECERA_PLANO`), las frases de
   «flat vector cartoon» (parecido, real, logo, planos abstractos y su reparto),
@@ -477,6 +477,19 @@ En la rama, sin unir a `main`. `estilo.modo` = "ilustracion" | "foto".
   `estilo_modo`).
 - Medido en local con el CLI de verdad: la guia de foto sale con sus claves y
   `modo: "foto"`, y el grafismo se deduce «realista» (`p7.diseno_sugerido`).
+
+- **Origen del preset**: `estilo_modo` solo se guarda si es "foto"
+  (`presets_light.origen_de`). Un estilo de FOTO creado probando la rama no se
+  puede volver a guardar con el codigo de `main` (no conoce `modo` ni
+  `estilo_modo`): si se vuelve atras, esos estilos de prueba se borran.
+- **Lo que queda abierto**: la clave del banco de moodboards
+  (`moodboard.clave_de`) no mira el modo. Solo afecta al camino de video
+  (fotogramas de YouTube), que el modo light ya no usa; si vuelve, los mismos
+  fotogramas en ilustracion y en foto compartirian laminas.
+- **De paso se arreglo un fallo de antes**: cambiar solo las «Indicaciones» de
+  un estilo guardado daba 400 («falta el estilo gráfico») porque la pantalla
+  manda la lista de imagenes vacia. Ahora vacia es «sin imagenes nuevas» y se
+  quedan las de antes (`regenerar_preset_light`).
 
 ### Trampas de esta sesion
 

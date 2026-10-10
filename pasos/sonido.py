@@ -259,7 +259,31 @@ ANIMOS = {
     "epico": "epic cinematic", "sobrio": "documentary ambient",
     "esperanzador": "uplifting hopeful", "corporativo": "corporate clean",
     "melancolico": "melancholic piano", "misterioso": "mysterious ambient",
+    # 10-10-2026: con ocho animos de documental no habia nada para un video
+    # alegre, de videojuegos o para ninos. Las claves de arriba no se tocan:
+    # son las que guardan los videos que ya existen.
+    "alegre": "happy upbeat", "divertido": "fun playful quirky",
+    "gamer": "electronic chiptune game", "infantil": "children playful",
+    "accion": "action energetic drums", "inspirador": "inspirational motivational",
+    "fiesta": "party dance electronic", "chill": "chill relaxing",
+    "lofi": "lofi hiphop chill", "acustico": "acoustic guitar",
+    "pop": "pop upbeat", "rock": "rock energetic",
+    "jazz": "jazz smooth", "latino": "latin", "romantico": "romantic soft",
+    "clasico": "classical orchestral",
 }
+
+#: Como se ensenan en pantalla, en el orden en que se ofrecen.
+NOMBRES_ANIMOS = [
+    ("alegre", "Alegre"), ("divertido", "Divertido"), ("gamer", "Gamer / electrónica"),
+    ("infantil", "Infantil"), ("accion", "Acción"), ("inspirador", "Inspirador"),
+    ("fiesta", "Fiesta"), ("chill", "Chill"), ("lofi", "Lo-fi"),
+    ("acustico", "Acústico"), ("pop", "Pop"), ("rock", "Rock"), ("jazz", "Jazz"),
+    ("latino", "Latino"), ("romantico", "Romántico"), ("clasico", "Clásica"),
+    ("sobrio", "Sobrio"), ("corporativo", "Corporativo"),
+    ("esperanzador", "Esperanzador"), ("epico", "Épico"),
+    ("misterioso", "Misterioso"), ("tension", "Tensión"),
+    ("melancolico", "Melancólico"), ("oscuro", "Oscuro"),
+]
 
 
 def _pedir_a_jamendo(params):
@@ -274,7 +298,7 @@ def _pedir_a_jamendo(params):
 
 
 def buscar_musica(animo="sobrio", duracion_s=0, cuantas=12, velocidad="low",
-                  instrumental=True, extra=""):
+                  instrumental=True, extra="", texto="", pagina=0):
     """Temas de Jamendo que encajan con el tono del video.
 
     POR QUE ESTO ES UNA ESCALERA Y NO UNA CONSULTA
@@ -301,13 +325,34 @@ def buscar_musica(animo="sobrio", duracion_s=0, cuantas=12, velocidad="low",
     if not claves.get("JAMENDO_CLIENT_ID"):
         raise RuntimeError("falta la clave de Jamendo: ponla en Configuracion "
                            "(el engranaje de arriba a la derecha)")
-    etiquetas = ANIMOS.get(animo, animo)
+    etiquetas = ANIMOS.get(animo, animo) if animo else ""
     if extra:
         etiquetas = f"{etiquetas} {extra}".strip()
     tope = max(1, min(50, int(cuantas)))
     comun = {"client_id": claves["JAMENDO_CLIENT_ID"], "format": "json",
              "limit": tope * 2, "include": "musicinfo licenses",
-             "boost": "popularity_total"}
+             "boost": "popularity_total",
+             # «Ver más»: la pagina siguiente de la MISMA busqueda
+             "offset": max(0, int(pagina or 0)) * tope * 2}
+    # BUSQUEDA LIBRE («videojuegos retro», «fiesta en la playa»): va por el
+    # buscador de Jamendo, que mira titulo, artista y etiquetas, y no por los
+    # animos, que son etiquetas fijas
+    texto = " ".join(str(texto or "").split())[:80]
+    if texto:
+        vistos, salida = set(), []
+        for params_texto in ({"search": texto}, {"fuzzytags": texto}):
+            params = dict(comun)
+            if instrumental:
+                params["vocalinstrumental"] = "instrumental"
+            params.update(params_texto)
+            for track in _pedir_a_jamendo(params):
+                ficha = _ficha_musica(track)
+                if ficha["descarga"] and ficha["id"] not in vistos:
+                    vistos.add(ficha["id"])
+                    salida.append(ficha)
+            if len(salida) >= tope:
+                break
+        return salida[:tope]
     if instrumental:
         comun["vocalinstrumental"] = "instrumental"
     minimo = int(max(60, min((duracion_s or 0) * 0.45, 420))) if duracion_s else 0
@@ -1596,3 +1641,66 @@ def describir(params):
     if cuantos:
         trozos.append(f"{cuantos} efectos en {len(surtido)} papeles")
     return " · ".join(trozos) if trozos else "sin música ni efectos"
+
+
+# ------------------------------------------------------- la musica y los efectos TUYOS
+#
+# Subir un MP3 (o WAV, M4A, OGG) propio para la musica o para un efecto. Se
+# pasa a MP3 con ffmpeg y se guarda en el banco con el nombre de su contenido,
+# igual que lo de Jamendo y FreeSound: asi el render no sabe ni le importa de
+# donde salio. Su licencia es la tuya.
+
+EXT_AUDIO = (".mp3", ".wav", ".m4a", ".ogg", ".aac", ".flac")
+MAX_BYTES_AUDIO = 40 * 1024 * 1024
+
+
+def guardar_propio(contenido, nombre_original, familia):
+    """Guarda un audio subido en el banco. -> ficha como las de Jamendo/FreeSound"""
+    import hashlib                                          # noqa: PLC0415
+    import tempfile                                         # noqa: PLC0415
+    if familia not in ("musica", "efectos"):
+        raise ValueError("familia desconocida")
+    extension = os.path.splitext(str(nombre_original or ""))[1].lower()
+    if extension not in EXT_AUDIO:
+        raise ValueError(f"no es un audio que se pueda usar ({', '.join(EXT_AUDIO)})")
+    if len(contenido) > MAX_BYTES_AUDIO:
+        raise ValueError(f"pesa más de {MAX_BYTES_AUDIO // 1024 // 1024} MB")
+    huella = hashlib.sha1(contenido).hexdigest()[:16]
+    ficha = {"fuente": "propia", "id": huella,
+             "titulo": os.path.splitext(os.path.basename(str(nombre_original)))[0][:80]
+                       or "audio propio",
+             "artista": "tuyo", "autor": "tuyo", "licencia": "propia",
+             "licencia_nombre": "tuya", "comercial": True, "atribucion": False,
+             "descarga": "", "escucha": ""}
+    destino = banco(familia, _nombre_de(ficha))
+    os.makedirs(os.path.dirname(destino), exist_ok=True)
+    if not (os.path.exists(destino) and os.path.getsize(destino) > 1000):
+        with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as fh:
+            fh.write(contenido)
+            crudo = fh.name
+        try:
+            orden = [medios.ffmpeg(), "-y",
+                     "-loglevel", "error", "-i", crudo, "-vn", "-ac", "2",
+                     "-ar", str(FRECUENCIA), "-b:a", "192k", destino + ".parcial.mp3"]
+            proceso = subprocess.run(orden, capture_output=True, timeout=180)
+            if proceso.returncode != 0:
+                raise ValueError("no se ha podido leer ese audio: "
+                                 + proceso.stderr.decode("utf-8", "replace")[-200:])
+            os.replace(destino + ".parcial.mp3", destino)
+        finally:
+            try:
+                os.remove(crudo)
+            except OSError:
+                pass
+    ficha["duracion"] = round(_duracion_de(destino), 2)
+    return ficha
+
+
+def _duracion_de(ruta):
+    try:
+        salida = subprocess.run(
+            [medios.ffprobe(), "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", ruta], capture_output=True, timeout=30)
+        return float(salida.stdout.decode().strip() or 0)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0.0

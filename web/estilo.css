@@ -935,6 +935,11 @@ video { width: 100%; border-radius: 9px; border: 1px solid var(--linea); backgro
 .tabla.pares td { word-break: break-word; }
 .cargando { color: var(--tenue); font-size: 13px; }
 .oculto { display: none; }
+/* EL ATRIBUTO `hidden` MANDA SIEMPRE. Sin esto, cualquier regla con
+   `display: flex` o `grid` le gana al `display: none` del navegador y el
+   elemento «escondido» se sigue viendo (o, al reves, `hidden = false` no basta
+   para que aparezca lo que una clase esconde). */
+[hidden] { display: none !important; }
 
 /* Fila de botones de una accion. En movil el principal ocupa la linea entera:
    es el que se busca con el pulgar, y de 90px se falla mas de lo que parece. */
@@ -3007,7 +3012,7 @@ textarea.autoalto, textarea.crece.autoalto { max-height: 60vh; overflow-y: auto;
 .tarjeta-proyecto:hover { border-color: var(--acento-borde); }
 .tarjeta-proyecto .nombre { font-weight: 700; font-size: 16px; }
 .tarjeta-proyecto.nuevo { border-style: dashed; background: transparent; }
-.tarjeta-proyecto.oculto { opacity: .65; }
+.tarjeta-proyecto.es-oculto { opacity: .65; border-style: dashed; }
 .icono-proyecto { font-size: 30px; line-height: 1; margin-bottom: 6px; }
 .logo-proyecto { max-height: 44px; max-width: 140px; object-fit: contain; margin-bottom: 6px; }
 .logo-proyecto.pequeno { max-height: 32px; margin: 0; }
@@ -3066,3 +3071,34 @@ textarea.autoalto, textarea.crece.autoalto { max-height: 60vh; overflow-y: auto;
 .rejilla-aportadas .aportada input { width: 100%; }
 .rejilla-aportadas .herramientas { display: flex; gap: 4px; }
 .aviso-quitar { color: var(--aviso); }
+
+/* La tarjeta de una nota de imagen (`tarjetaNotaImagen`). */
+.nota-imagen {
+  display: grid; grid-template-columns: 160px 1fr; gap: 12px; padding: 10px;
+  border: 1px solid var(--linea); border-radius: 10px; background: var(--panel);
+  margin-bottom: 8px;
+}
+.nota-imagen.estado-hecha { opacity: .8; }
+.nota-imagen.estado-fallo { border-color: var(--malo); }
+.nota-imagen.estado-corriendo { border-color: var(--acento); }
+.nota-imagen .nota-mini { padding: 0; border: 0; background: var(--lienzo); border-radius: 8px;
+  overflow: hidden; cursor: pointer; align-self: start; aspect-ratio: 16 / 9; }
+.nota-imagen .nota-mini img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.nota-imagen .nota-cuerpo { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.nota-imagen .nota-donde { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.nota-imagen .nota-guion { color: var(--tenue); font-style: italic; font-size: 13px; }
+.nota-imagen .texto { font-weight: 600; }
+.nota-imagen .nota-estado { align-items: center; gap: 6px; flex-wrap: wrap; }
+.nota-imagen .nota-error { color: var(--malo); font-size: 13px; margin-top: 4px; }
+.nota-imagen .nota-mandos { gap: 6px; }
+.pastilla.estado-corriendo { background: var(--marcado); color: var(--texto); }
+.pastilla.estado-hecha { background: var(--ok); color: var(--sobre-ok); }
+.pastilla.estado-fallo { background: var(--malo); color: var(--sobre-acento); }
+@media (max-width: 640px) {
+  .nota-imagen { grid-template-columns: 1fr; }
+}
+.error-cerrable { position: relative; }
+.error-cerrable > .mini { position: absolute; top: 8px; right: 8px; }
+.papel-efecto { display: flex; flex-direction: column; gap: 6px; padding: 8px 0;
+  border-bottom: 1px solid var(--linea-suave); }
+.papel-efecto audio, .tema-musica audio { max-width: 100%; height: 32px; }

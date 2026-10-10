@@ -519,11 +519,25 @@ def anadir(proyecto, texto, t, plano="", imagenes=(), version_mp4=None,
 
 
 def editar(proyecto, nid, texto=None, t=None, imagenes=None,
-           regenerado=None):
+           regenerado=None, error=None, aviso=None):
+    """`error` y `aviso` son lo que paso al redibujarla: «OpenAI la rechazo
+    por...» o «se dibujo sin marcas: ...». Cadena vacia los quita."""
     ficha = leer(proyecto)
     for nota in ficha["notas"]:
         if nota.get("id") != nid:
             continue
+        for clave, valor in (("error", error), ("aviso", aviso)):
+            if valor is None:
+                continue
+            valor = " ".join(str(valor).split())[:MAX_TEXTO]
+            if valor:
+                nota[clave] = valor
+            else:
+                nota.pop(clave, None)
+        if texto is not None and " ".join(str(texto).split()) != nota.get("texto"):
+            # otra peticion: lo que paso con la anterior ya no la describe
+            nota.pop("error", None)
+            nota.pop("aviso", None)
         if texto is not None:
             limpio = " ".join(str(texto).split())[:MAX_TEXTO]
             if not limpio:

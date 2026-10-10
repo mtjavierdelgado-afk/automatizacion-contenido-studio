@@ -54,6 +54,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/repaso/imagenes/{nombre}` | Una imagen de referencia de una nota. |
 | `DELETE` | `/api/proyectos/{pid}/repaso/{nid}` | Quita una nota del repaso. |
 | `PUT` | `/api/proyectos/{pid}/repaso/{nid}` | Cambia el texto, el instante o las imágenes de una nota. |
+| `POST` | `/api/proyectos/{pid}/repaso/{nid}/sin-marcas` | Propone la nota reescrita sin marcas ni personajes: NO la guarda. |
 | `GET` | `/api/proyectos/{pid}/subtitulos` | Como son los subtitulos de este video, y si son los del estilo. |
 | `PUT` | `/api/proyectos/{pid}/subtitulos` | {tam?, caja? ("auto" o 0-1), diseno?, color? ("#rrggbb" o "")} o {automatico: true}. |
 | `POST` | `/api/proyectos/{pid}/subtitulos/aplicar` | Rehace las capas de texto y vuelve a montar el video. Ni una imagen. |
@@ -168,16 +169,21 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/direccion` | Qué se ve en cada plano: lo dirigido, y los planos que lo admiten. |
 | `PUT` | `/api/proyectos/{pid}/direccion` | Guarda qué se ve en cada plano. Un texto vacío la quita. |
 | `POST` | `/api/proyectos/{pid}/direccion/proponer` | Escribe qué se ve en cada plano, con TODOS los planos delante de una vez. |
+| `GET` | `/api/proyectos/{pid}/imagenes/cola` | La cola de notas de imagenes: cual se dibuja, cuanto lleva y que espera. |
+| `DELETE` | `/api/proyectos/{pid}/imagenes/cola/{nid}` | Saca una nota de la cola (la que ya se esta dibujando no se para). |
+| `POST` | `/api/proyectos/{pid}/imagenes/rehacer` | Pone en la cola las notas de imagenes: {notas?: [ids]} (sin ids, todas). |
 
 ## Sonido y transiciones
 
 | | Ruta | Qué hace |
 |---|---|---|
+| `POST` | `/api/efectos/buscar` | Efectos de FreeSound por texto libre, para elegir uno: {texto, papel?, pagina?}. |
 | `GET` | `/api/efectos/{archivo}` | Sirve un efecto del banco del canal, para poder oírlo antes de vetarlo. |
 | `GET` | `/api/proyectos/{pid}/sonido` | Qué suena en este vídeo: el tema puesto, los efectos surtidos y el catálogo. |
 | `PUT` | `/api/proyectos/{pid}/sonido` | Fija el tema (bajándolo al banco), el interruptor o el nivel de música. |
 | `GET` | `/api/proyectos/{pid}/sonido/arco` | El arco que sale del RITMO del montaje. Gratis, sin salir a la red. |
 | `POST` | `/api/proyectos/{pid}/sonido/banda` | Monta la banda sonora SOLA: un tema por tramo, elegido por el ritmo. |
+| `PUT` | `/api/proyectos/{pid}/sonido/efecto` | Fija UN sonido para un papel ({papel, efecto}) o lo devuelve a automático |
 | `POST` | `/api/proyectos/{pid}/sonido/efectos` | Llena el banco de efectos del canal para los papeles que se pidan. |
 | `POST` | `/api/proyectos/{pid}/sonido/musica` | Temas de Jamendo que pegan con el tono. Devuelve candidatos, no elige. |
 | `POST` | `/api/proyectos/{pid}/sonido/vetados` | Prohíbe un efecto en TODO el canal, o levanta el veto con `quitar`. |
@@ -299,6 +305,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/logos/{nombre}` | Un logo subido que todavia no esta en ningun video. |
 | `POST` | `/api/musica/buscar` | Temas de Jamendo por animo, sin video: el borrador de un video nuevo. |
 | `GET` | `/api/musica/escucha` | Pasa por aqui la escucha de un tema de Jamendo antes de elegirlo. |
+| `GET` | `/api/musica/propia/{archivo}` | Un tema tuyo del banco, para escucharlo. |
 | `GET` | `/api/sistema/estilos-perdidos` | Los videos que apuntan a imagenes de estilo que ya no estan. Solo mira. |
 | `GET` | `/api/sistema/guias` | Como rellenar cada campo de texto: plantilla, ejemplo y prompt para otra IA. |
 | `POST` | `/api/sistema/guias/{gid}/revisar` | Lanza la revision de un texto contra la guia de su campo. -> {id} |
@@ -309,8 +316,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/sistema/notas/{nid}` | Cambia el texto de una nota o la marca como hecha / pendiente. |
 | `GET` | `/api/sistema/novedades` | El historial de cambios, tal cual esta en docs/NOVEDADES.md. |
 | `GET` | `/api/sistema/revisiones/{rid}` | — |
+| `POST` | `/api/sonido/subir` | Sube un audio tuyo (MP3, WAV, M4A, OGG) para la música o un efecto. |
 | `GET` | `/{fichero}` | Sirve un fichero suelto de web/ (app.js, estilo.css...). |
 
 ---
 
-**199 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**207 endpoints.** Escrito por `generar_api.py` desde `app.py`.

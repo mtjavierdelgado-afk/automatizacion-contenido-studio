@@ -71,6 +71,14 @@ function reloj(segundos) {
 }
 
 /* 780 -> '13:00'. Para duraciones de video, donde la decima no dice nada. */
+/* Un texto largo cortado por palabra, con «…» si sobra. */
+function recortar(texto, maximo) {
+  const t = String(texto || '').replace(/\s+/g, ' ').trim();
+  if (t.length <= maximo) return t;
+  const corte = t.slice(0, maximo);
+  return `${corte.slice(0, Math.max(corte.lastIndexOf(' '), maximo - 20))}…`;
+}
+
 function mmss(segundos) {
   const total = Math.max(0, Math.round(Number(segundos) || 0));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
@@ -512,6 +520,7 @@ const API = {
     + `/repaso/${encodeURIComponent(nid)}`,
   imagenesRepaso: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}`
     + `/repaso/imagenes`,
+  colaImagenes: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/imagenes`,
   imagenRepaso: (pid, nombre) => `${BASE}/api/proyectos/${encodeURIComponent(pid)}`
     + `/repaso/imagenes/${encodeURIComponent(nombre)}`,
   repasoAplicar: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}`
@@ -820,6 +829,16 @@ function toast(texto, malo) {
    Es el mismo motivo por el que la ranura de la barra vive fuera del DOM
    (RANURAS): el panel se rehace bajo los pies. */
 const ERRORES = {};
+
+/* EL ERROR DEL VÍDEO, con su botón de cerrar. Se queda arriba en cada
+   pantalla del vídeo hasta que se lee y se cierra (o hasta lanzar otra cosa),
+   no para siempre. */
+function errorDelVideo() {
+  return h('div', { clase: 'error-cerrable' },
+    cajaError(ERRORES[CLAVE_VIDEO_LIGHT]),
+    h('button', { clase: 'mini fantasma', title: 'Ya lo he leído',
+      onclick: () => { limpiarError(CLAVE_VIDEO_LIGHT); repintarVideo(); } }, 'Cerrar'));
+}
 
 function mostrarError(paso, error) {
   const crudo = error && error.message ? error.message : String(error);
@@ -1337,9 +1356,7 @@ async function abrirProyecto(pid) {
   pararPrevia();
   PREVIA.ficha = null;
   PREVIA.i = 0;
-  COLA_IMG.espera = [];
-  COLA_IMG.corriendo = [];
-  COLA_IMG.fallo = {};
+  olvidarCola();
   pintarCoste();
   await refrescarTodo();
   await cargarBitacora();
@@ -1412,30 +1429,10 @@ const AL_REENGANCHAR = {
    cosa --un personaje, un set-- no las trae de tipo escena, asi que ninguno de
    los dos se cuela aqui. */
 function retomarColaDeImagenes(t) {
-  const suyas = (t.unidades || []).filter(u => String(u).startsWith('escena:'));
-  if (t.paso !== 'assets' || !suyas.length
-      || suyas.length !== (t.unidades || []).length) return false;
-  if (APP.seguimientos[CLAVE_VIDEO_LIGHT]) return true;   // ya se sigue
-  // sin nota: de un trabajo vivo solo se sabe que planos lleva
-  COLA_IMG.corriendo = suyas.map(u => ({ sid: String(u).slice('escena:'.length), nid: '' }));
-  APP.trabajos[CLAVE_VIDEO_LIGHT] = Object.assign({}, t,
-    { inicio: Date.now() - (t.segundos || 0) * 1000 });
-  seguirTrabajo(CLAVE_VIDEO_LIGHT, t.id, async trabajo => {
-    const tanda = COLA_IMG.corriendo.slice();
-    /* AQUI NO SE MARCA NADA COMO HECHO. Al retomar tras una recarga solo se
-       sabe QUE PLANOS lleva el trabajo, no de que nota salieron, y el visto es
-       de la nota. Lo pone `refrescarLoDibujado` al releer el repaso: el
-       servidor ya guardo el `regenerado` de cada una. */
-    if (trabajo.estado === 'error') {
-      tanda.forEach(sid => { COLA_IMG.fallo[sid] = trabajo.error || 'fallo'; });
-    }
-    if (trabajo.estado !== 'ejecutando') {
-      COLA_IMG.corriendo = [];
-      await refrescarLoDibujado();
-      repintarVideo();
-      soltarCola();
-    }
-  }, () => repintarVideo());
+  /* LA COLA DE NOTAS (`notas_imagenes`): vive en el servidor, así que retomarla
+     es volver a mirarla. Cada tarjeta dice la suya. */
+  if (t.nombre !== 'notas_imagenes') return false;
+  vigilarCola(t.proyecto);
   return true;
 }
 
@@ -5847,7 +5844,7 @@ function tarjetaProyecto(ficha) {
   const estilos = estilosDeCliente(ficha.id).length;
   const videos = videosDeCliente(ficha.id).length;
   return h('button', {
-    clase: 'tarjeta-proyecto' + (ficha.oculto ? ' oculto' : ''),
+    clase: 'tarjeta-proyecto' + (ficha.oculto ? ' es-oculto' : ''),
     title: abierto ? 'Abrir el proyecto' : 'Tiene clave: pulsa para escribirla',
     onclick: () => entrarEnCliente(ficha),
   },
@@ -7073,8 +7070,7 @@ function vistaEncargoVideoLight() {
     h('span', { clase: 'crece' }),
     costeLight()));
 
-  const error = ERRORES[CLAVE_VIDEO_LIGHT];
-  if (error) caja.appendChild(cajaError(error));
+  if (ERRORES[CLAVE_VIDEO_LIGHT]) caja.appendChild(errorDelVideo());
 
   caja.appendChild(h('div', { clase: v.guion ? 'caja-aviso' : 'caja-info' }, v.guion
     ? 'Esto es lo que se le pidió al redactor, y de aquí salió el guion que hay. '
@@ -7277,7 +7273,7 @@ async function lanzarTandaLight(tanda, modo) {
     const tid = datos.trabajo_id || (datos.trabajo || {}).id;
     if (!tid) throw new Error('el servidor no ha devuelto ningún trabajo');
     // DE QUE TRABAJO ES ESE PREVISTO. La misma ranura la ocupan tambien las
-    // regeneraciones de un plano suelto (`soltarCola`), y sin esto la cuenta
+    // regeneraciones de un plano suelto, y sin esto la cuenta
     // atras de una imagen se pintaba con el previsto de la ultima tanda.
     v.planDe = tid;
     if (tanda === 'video') v.planos = [];
@@ -7595,8 +7591,7 @@ function vistaGuionLight() {
     h('span', { clase: 'crece' }),
     costeLight()));
 
-  const error = ERRORES[CLAVE_VIDEO_LIGHT];
-  if (error) caja.appendChild(cajaError(error));
+  if (ERRORES[CLAVE_VIDEO_LIGHT]) caja.appendChild(errorDelVideo());
 
   if (!v.guion) {
     const corriendo = !!trabajoVideoLight();
@@ -8681,14 +8676,6 @@ function pendientesDeAhora() {
 
 function guardarRepaso(datos) {
   const d = datos || {};
-  /* LO QUE SE GUARDA EN MEMORIA NO PUEDE SOBREVIVIR A SU NOTA. Los ids se
-     reciclan --borra R001 y la siguiente vuelve a llamarse R001--, asi que un
-     fallo apuntado contra una nota que ya no existe se lo quedaria la proxima
-     que herede el numero. */
-  const vivos = new Set((d.notas || []).map(n => n.id));
-  Object.keys(COLA_IMG.fallo).forEach(nid => {
-    if (!vivos.has(nid)) delete COLA_IMG.fallo[nid];
-  });
   PREVIA.notas = d.notas || [];
   const r = estadoRepaso();
   r.notas = d.notas || [];
@@ -8702,9 +8689,15 @@ function guardarRepaso(datos) {
 
 
 async function refrescarNotasPrevia() {
+  const pid = videoAbierto().pid;
   try {
-    guardarRepaso(await pedir(API.repaso(videoAbierto().pid)));
+    guardarRepaso(await pedir(API.repaso(pid)));
   } catch (e) { PREVIA.notas = []; }
+  // y la cola de imágenes: su precio, y si hay algo dibujándose, seguirlo
+  try {
+    aplicarCola(await pedir(`${API.colaImagenes(pid)}/cola`));
+    if (COLA_IMG.actual || COLA_IMG.cola.length) vigilarCola();
+  } catch (e) { /* sin cola se ve sin precio */ }
 }
 
 function escenaPrevia() {
@@ -9154,12 +9147,11 @@ function cuadroFeedbackEscena(escena) {
     h('button', {
       clase: 'mini primario', disabled: PREVIA.guardando,
       onclick: () => guardarNotaEscena(escena),
-    }, PREVIA.guardando ? 'guardando…' : 'Apuntar'),
+    }, PREVIA.guardando ? 'guardando…' : `Guardar nota de ${escena.id}`),
     h('span', { clase: 'meta' },
-      mias.length ? `${mias.length} nota(s) en esta imagen`
-        : 'cada nota trae su botón para rehacer ESA imagen: el corrector lee la nota, '
-          + 'mira las imágenes del vídeo (este plano, los vecinos, las hojas, las láminas) '
-          + 'y adjunta al generador lo que la nota pide')));
+      mias.length ? `${mias.length} nota(s) pendiente(s) en esta imagen: abajo, con su botón para rehacerla`
+        : 'la nota se guarda abajo, con la miniatura de esta imagen y su texto del guion; '
+          + 'desde ahí la rehaces cuando quieras (sola o todas juntas)')));
   if (esTactil()) {
     caja.appendChild(h('div', { clase: 'meta previa-pista' },
       'desliza sobre la imagen para pasar de escena'));
@@ -9223,7 +9215,6 @@ async function guardarNotaEditada(nota, texto) {
     /* CAMBIAR LA NOTA LA DEVUELVE A PENDIENTE. El visto se apaña solo --
        `regenerado` se queda con el texto viejo y deja de coincidir--; lo que
        hay que quitar a mano es el fallo, que no tiene copia en el servidor. */
-    delete COLA_IMG.fallo[nota.id];
     guardarRepaso(datos);
     PREVIA.editando = '';
   } catch (err) { mostrarError(CLAVE_VIDEO_LIGHT, err); }
@@ -9354,8 +9345,7 @@ function vistaVideoLight() {
     h('span', { clase: 'crece' }),
     costeLight()));
 
-  const error = ERRORES[CLAVE_VIDEO_LIGHT];
-  if (error) caja.appendChild(cajaError(error));
+  if (ERRORES[CLAVE_VIDEO_LIGHT]) caja.appendChild(errorDelVideo());
 
   const marco = h('div', { clase: `marco-video ${formatoDelVideo()}` });
   if (hayMp4Light() && !trabajoVideoLight()) {
@@ -9767,79 +9757,158 @@ async function guardarNota() {
  * ella. El enrutador se queda para el repaso del video, donde una nota puede
  * ser de la cartela, del subtitulo, de la musica o del guion.
  */
-/* CUANTAS A LA VEZ. Tres, que son las claves de imagen que hay: por debajo se
-   desaprovechan y por encima solo se hacen colas dentro del cubo de ritmo del
-   motor (ver MAX_CADENAS en p6_assets).
+/* LA COLA DE IMÁGENES VIVE EN EL SERVIDOR (`POST .../imagenes/rehacer`).
+ *
+ * Aquí había una cola del navegador que mandaba tandas de tres planos en UN
+ * trabajo, y fallaba de tres maneras (10-10-2026): una imagen rechazada por
+ * OpenAI tumbaba a las otras dos sin intentarlas, el error se quedaba como el
+ * del paso y salía en todas las pantallas, y recargar la página perdía la cola.
+ *
+ * Ahora el servidor las rehace UNA DETRÁS DE OTRA, junta en una sola imagen las
+ * notas del mismo plano, y apunta en CADA nota lo que le pasó (`error`,
+ * `aviso`). Aquí solo se pide y se mira: `actual` es la que se dibuja (con los
+ * segundos que lleva) y `cola` las que esperan. */
+const COLA_IMG = { pid: '', cola: [], actual: null, segundosPorImagen: 75,
+  usdPorImagen: 0, sondeo: null, visto: 0 };
 
-   Van en UN trabajo, no en tres: el servidor no admite dos tandas del mismo
-   paso a la vez --y hace bien, las dos escribirian el mismo plan y la misma
-   carpeta-- pero el paso SI dibuja en paralelo por dentro, una cadena por
-   sitio. Asi que el paralelismo se pide mandando los tres planos juntos. */
-const A_LA_VEZ = 3;
+function aplicarCola(datos) {
+  const d = datos || {};
+  COLA_IMG.cola = d.cola || [];
+  COLA_IMG.actual = d.actual || null;
+  COLA_IMG.segundosPorImagen = Number(d.segundos_por_imagen) || COLA_IMG.segundosPorImagen;
+  COLA_IMG.usdPorImagen = Number(d.usd_por_imagen) || COLA_IMG.usdPorImagen;
+  COLA_IMG.visto = Date.now();
+}
 
-/* `corriendo` es una LISTA, no un plano: son los que van en la tanda de ahora.
-   Y `espera` guarda {sid, texto}, asi que se busca por su sid -- preguntando
-   `espera.includes(sid)` no casaba NUNCA, que es lo que hacia que pulsar un
-   segundo boton no pareciera hacer nada: la nota entraba en la cola y el boton
-   seguia diciendo «Regenerar imagen». */
-/* `corriendo` guarda {sid, nid}: QUE plano y DE QUE nota. Iba solo con el
-   plano, y entonces dos notas del mismo plano se creian las dos en marcha --
-   la que ya estaba hecha volvia a decir «Regenerando». Lo que se ocupa es la
-   imagen, pero lo que se cuenta es la peticion.
+function olvidarCola() {
+  if (COLA_IMG.sondeo) clearInterval(COLA_IMG.sondeo);
+  Object.assign(COLA_IMG, { pid: '', cola: [], actual: null, sondeo: null });
+}
 
-   Y NO HAY MAPA DE «HECHAS»: el visto lo dice la nota (`regenerado`), que la
-   escribe el servidor nada mas terminar. Un mapa en memoria por id era una
-   trampa, porque los ids DE NOTA SE RECICLAN --borra R001 y la siguiente vuelve
-   a llamarse R001-- y el visto de una nota borrada se lo quedaba la nueva: una
-   nota recien escrita salia «Regenerada ✓» sin haberse dibujado nunca. */
-const COLA_IMG = { espera: [], corriendo: [], fallo: {} };
-
-
-/* EL ✓ LO DICE LA NOTA, Y LO ESCRIBE EL SERVIDOR (`regenerado`: contra qué
-   texto se redibujó). Así sobrevive a recargar, y si luego cambias la nota deja
-   de coincidir ella sola -- que es lo que se quiere: hay una petición nueva que
-   nadie ha atendido.
-
-   Aquí hubo dos intentos peores. Un mapa por PLANO hacía que, en cuanto S064 se
-   redibujaba una vez, cualquier nota sobre S064 saliera con el visto. Y un mapa
-   por id de NOTA tampoco vale: los ids se reciclan --borra R001 y la siguiente
-   vuelve a llamarse R001--, así que cada nota nueva heredaba el visto de una
-   borrada y salía «Regenerada ✓» sin haberse dibujado nunca. */
+/* QUÉ LE PASA A LA IMAGEN DE ESTA NOTA, en una palabra. El ✓ lo dice la nota
+   (`regenerado`: contra qué texto se redibujó) y lo escribe el servidor; el
+   fallo también (`error`), así que todo sobrevive a recargar. */
 function estadoDeImagen(sid, nota) {
   const nid = (nota || {}).id || '';
-  if (nid && COLA_IMG.corriendo.some(x => x.nid === nid)) return 'corriendo';
-  if (nid && COLA_IMG.espera.some(x => x.nid === nid)) return 'en cola';
-  if (nid && COLA_IMG.fallo[nid]) return 'fallo';
+  if (nid && COLA_IMG.actual && (COLA_IMG.actual.notas || []).includes(nid)) return 'corriendo';
+  if (nid && COLA_IMG.cola.includes(nid)) return 'en cola';
   if (nota && nota.regenerado && nota.regenerado === nota.texto) return 'hecha';
-  /* AL RETOMAR TRAS RECARGAR solo se sabe que PLANO lleva el trabajo, no de que
-     nota salio. Se pinta como en marcha la que NO esta hecha, que es la unica
-     que puede ser: la de arriba ya devolvio 'hecha'. */
-  if (COLA_IMG.corriendo.some(x => !x.nid && x.sid === sid)) return 'corriendo';
+  if (nota && nota.error) return 'fallo';
   return '';
 }
 
-
-/* TODAS LAS DE ESTA PANTALLA, DE UNA VEZ. Es el mismo gesto que pulsar el boton
-   de cada tarjeta, repetido: entran en la misma cola y salen de una en una. */
-function encolarTodasLasImagenes() {
-  notasDeAhora()
-    .filter(n => n.estado !== 'aplicado' && n.plano)
-    .forEach(n => encolarImagen(n.plano, n.texto, n.id));
+/* Lo que lleva la que se dibuja: «0:45 de ~1:20». Un porcentaje no sirve aquí:
+   una imagen es una sola llamada y se quedaba en el 5 % hasta el final. */
+function relojDeImagen() {
+  const a = COLA_IMG.actual;
+  if (!a) return '';
+  const lleva = (Number(a.segundos) || 0) + (Date.now() - COLA_IMG.visto) / 1000;
+  return `${mmss(lleva)} de ~${mmss(COLA_IMG.segundosPorImagen)}`;
 }
 
+function encolarTodasLasImagenes() { pedirCola({}); }
 
 function encolarImagen(sid, texto, nid) {
-  if (!sid) return;
-  /* NO SE REPITE LA MISMA NOTA. Antes se miraba el plano, asi que una segunda
-     nota sobre la misma imagen no entraba en la cola y pulsarla no hacia nada.
-     Dos notas del mismo plano son dos peticiones: entran las dos y salen una
-     detras de otra (ver el reparto de tandas en `soltarCola`). */
-  if (nid && (COLA_IMG.corriendo.some(x => x.nid === nid)
-              || COLA_IMG.espera.some(x => x.nid === nid))) return;
-  if (nid) delete COLA_IMG.fallo[nid];
-  COLA_IMG.espera.push({ sid, texto: String(texto || ''), nid: nid || '' });
-  repintarVideo();
-  soltarCola();
+  if (!sid || !nid) return;
+  pedirCola({ notas: [nid] });
+}
+
+async function pedirCola(cuerpo) {
+  const v = videoAbierto();
+  if (!v.pid) return;
+  try {
+    aplicarCola(await pedir(`${API.colaImagenes(v.pid)}/rehacer`, { method: 'POST', cuerpo }));
+    COLA_IMG.pid = v.pid;
+    await recargarNotas();
+    repintarVideo();
+    vigilarCola();
+  } catch (err) {
+    toast(`no se ha podido poner en cola: ${err.message}`, true);
+  }
+}
+
+async function recargarNotas() {
+  try { guardarRepaso(await pedir(API.repaso(videoAbierto().pid))); } catch (e) { /* se ve lo de antes */ }
+}
+
+/* MIRA LA COLA cada dos segundos mientras haya algo: al cambiar de plano relee
+   las notas y lo dibujado; entre medias solo repinta el reloj. */
+function vigilarCola(deQuien) {
+  const pid = deQuien || videoAbierto().pid;
+  if (!pid) return;
+  if (COLA_IMG.sondeo && COLA_IMG.pid === pid) return;
+  if (COLA_IMG.sondeo) clearInterval(COLA_IMG.sondeo);
+  COLA_IMG.pid = pid;
+  COLA_IMG.sondeo = setInterval(async () => {
+    // otro vídeo abierto: esta cola no es la suya (la de aquel se mira al abrirlo)
+    if (videoAbierto().pid && videoAbierto().pid !== pid) { olvidarCola(); return; }
+    let datos;
+    try { datos = await pedir(`${API.colaImagenes(pid)}/cola`); } catch (e) { return; }
+    const antes = JSON.stringify([COLA_IMG.actual && COLA_IMG.actual.notas, COLA_IMG.cola]);
+    aplicarCola(datos);
+    const ahora = JSON.stringify([COLA_IMG.actual && COLA_IMG.actual.notas, COLA_IMG.cola]);
+    const vacia = !COLA_IMG.actual && !COLA_IMG.cola.length;
+    if (antes !== ahora || vacia) {
+      await recargarNotas();
+      await refrescarLoDibujado();
+      repintarVideo();
+    } else {
+      refrescarVivosLight();
+    }
+    if (vacia) {
+      clearInterval(COLA_IMG.sondeo);
+      COLA_IMG.sondeo = null;
+    }
+  }, 2000);
+}
+
+async function sacarDeLaCola(nid) {
+  const v = videoAbierto();
+  try {
+    aplicarCola(await pedir(`${API.colaImagenes(v.pid)}/cola/${encodeURIComponent(nid)}`,
+      { method: 'DELETE' }));
+    repintarVideo();
+  } catch (err) { toast(err.message, true); }
+}
+
+/* «LO MÁS PARECIDO POSIBLE SIN COPIAR». El servidor propone la nota reescrita
+   sin marcas ni personajes con derechos; se lee, se puede tocar y, si convence,
+   se guarda y se vuelve a pedir la imagen. Las referencias adjuntas con logos
+   también pueden provocar el rechazo: se ofrece quitarlas. */
+async function notaSinMarcas(nota) {
+  const v = videoAbierto();
+  toast('reescribiendo la nota sin marcas… (unos segundos)');
+  let p;
+  try {
+    p = await pedir(`${API.repaso(v.pid)}/${nota.id}/sin-marcas`, { method: 'POST' });
+  } catch (err) { toast(`no se ha podido: ${err.message}`, true); return; }
+  const cambios = (p.cambios || []).map(c => `«${c[0]}» → «${c[1]}»`).join('\n');
+  const campos = [{ clave: 'texto', tipo: 'textarea', etiqueta: 'La nota, sin marcas (puedes cambiarla)',
+    valor: p.texto || nota.texto }];
+  if (p.con_imagenes) {
+    campos.push({ clave: 'imagenes', tipo: 'select', etiqueta: 'Tus imágenes adjuntas',
+      valor: 'quitar', opciones: [
+        { valor: 'quitar', nombre: 'Quitarlas (pueden llevar logos)' },
+        { valor: 'dejar', nombre: 'Dejarlas' }] });
+  }
+  const r = await dialogo({
+    titulo: 'Lo más parecido posible, sin marcas',
+    texto: 'OpenAI no dibuja marcas, logos ni personajes con derechos. Esta versión '
+      + 'describe lo que se ve (colores, formas, la escena) sin nombrarlos.'
+      + (cambios ? `\n\nCambios:\n${cambios}` : ''),
+    campos, aceptar: 'Guardar y rehacer la imagen',
+  });
+  if (!r) return;
+  try {
+    const cuerpo = { texto: r.texto || p.texto };
+    if (p.con_imagenes && r.imagenes !== 'dejar') cuerpo.imagenes = [];
+    guardarRepaso(await pedir(`${API.repaso(v.pid)}/${nota.id}`, { method: 'PUT', cuerpo }));
+    await pedirCola({ notas: [nota.id] });
+  } catch (err) { toast(err.message, true); }
+}
+
+function esRechazoDeSeguridad(texto) {
+  return /filtro de seguridad|safety system|rechaz/i.test(String(texto || ''));
 }
 
 
@@ -9896,86 +9965,6 @@ async function refrescarLoDibujado() {
   } catch (err) { /* igual: no poder leerla no puede tumbar la pantalla */ }
 }
 
-/* SE ESCRIBE EN LA NOTA QUE SU IMAGEN YA SE REHIZO, y con qué texto. Es lo que
-   hace que el «Regenerada ✓» siga ahí mañana. Va después del trabajo, no antes:
-   si la tanda falla, la nota tiene que seguir pidiendo lo suyo. */
-async function apuntarRegeneradas(tanda) {
-  const v = videoAbierto();
-  let ultima = null;
-  for (const x of tanda) {
-    if (!x.nid) continue;
-    try {
-      ultima = await pedir(API.repasoNota(v.pid, x.nid), {
-        method: 'PUT', cuerpo: { regenerado: x.texto },
-      });
-    } catch (err) { /* no poder marcarla no puede tirar la cola */ }
-  }
-  if (ultima) guardarRepaso(ultima);
-}
-
-async function soltarCola() {
-  if (COLA_IMG.corriendo.length || !COLA_IMG.espera.length) return;
-  const v = videoAbierto();
-  /* UN PLANO, UNA VEZ POR TANDA. Dos notas de la misma imagen son dos
-     peticiones, pero no pueden ir en el mismo trabajo: la segunda pisaria el
-     feedback de la primera y se dibujaria una sola vez. La que sobra se queda
-     en la cola y sale en la tanda siguiente. */
-  const tanda = [];
-  const puestos = new Set();
-  while (tanda.length < A_LA_VEZ) {
-    const i = COLA_IMG.espera.findIndex(x => !puestos.has(x.sid));
-    if (i < 0) break;
-    puestos.add(COLA_IMG.espera[i].sid);
-    tanda.push(COLA_IMG.espera.splice(i, 1)[0]);
-  }
-  if (!tanda.length) return;
-  COLA_IMG.corriendo = tanda.map(x => ({ sid: x.sid, nid: x.nid || '' }));
-  repintarVideo();
-  try {
-    /* EL TEXTO VA AL FEEDBACK DE ESA UNIDAD, que es el cajon que ya lee quien
-       dibuja (`_ajustes_unidad` en p6_assets). Ni un cajon nuevo.
-
-       Los de la tanda van en UNA sola llamada: son params del mismo paso, y
-       mandarlos de uno en uno son tres escrituras del estado que se pisan el
-       cerrojo entre ellas para decir lo mismo. */
-    const conTexto = tanda.filter(x => x.texto);
-    if (conTexto.length) {
-      const unidades = {};
-      conTexto.forEach(x => { unidades[`escena:${x.sid}`] = { feedback: x.texto }; });
-      await pedir(API.params(v.pid, 'assets'), {
-        method: 'PUT', cuerpo: { params: { unidades } },
-      });
-    }
-    /* `rehacer: true` a proposito: aqui SI lo estas pidiendo, y con el mismo
-       prompt la cache devolveria la imagen que acabas de rechazar. */
-    const datos = await pedir(API.ejecutar(v.pid, 'assets'), {
-      method: 'POST',
-      cuerpo: { unidades: tanda.map(x => `escena:${x.sid}`), rehacer: true },
-    });
-    const tid = datos.trabajo_id || (datos.trabajo || {}).id;
-    if (!tid) throw new Error('el servidor no ha devuelto ningún trabajo');
-    seguirTrabajo(CLAVE_VIDEO_LIGHT, tid, async trabajo => {
-      if (trabajo.estado === 'listo') {
-        await apuntarRegeneradas(tanda);
-      } else if (trabajo.estado === 'error') {
-        tanda.forEach(x => { if (x.nid) COLA_IMG.fallo[x.nid] = trabajo.error || 'fallo'; });
-      }
-      if (trabajo.estado !== 'ejecutando') {
-        COLA_IMG.corriendo = [];
-        await refrescarLoDibujado();
-        repintarVideo();
-        soltarCola();
-      }
-    }, () => refrescarVivosLight());
-  } catch (err) {
-    tanda.forEach(x => { if (x.nid) COLA_IMG.fallo[x.nid] = err.message; });
-    COLA_IMG.corriendo = [];
-    repintarVideo();
-    soltarCola();
-  }
-}
-
-
 function irAlMomentoDeLaNota(nota) {
   const v = videoAbierto();
   if (v.vista === 'previa') {
@@ -9995,6 +9984,94 @@ function irAlMomentoDeLaNota(nota) {
 }
 
 
+/* LA TARJETA DE UNA NOTA DE IMAGEN: qué imagen, qué se dice ahí y qué pasa.
+ *
+ * Decía «S002 S002» y la nota, y no había forma de saber qué imagen era ni de
+ * qué parte del guion (10-10-2026). Ahora lleva la miniatura del plano (la de
+ * AHORA: al rehacerse se ve la nueva), el bloque y el segundo, la frase que se
+ * oye en ese plano, la nota, y su estado en palabras con lo que pasó. */
+function tarjetaNotaImagen(nota) {
+  const v = videoAbierto();
+  const escenas = (PREVIA.ficha || {}).escenas || [];
+  const e = escenas.find(x => x.id === nota.plano) || null;
+  const est = estadoDeImagen(nota.plano, nota);
+  const porMirar = sinRevisar(nota);
+  const ir = () => { darPorRevisada(nota); irAlMomentoDeLaNota(nota); };
+  const tarjeta = h('div', { clase: `nota-imagen estado-${est || 'pendiente'}`
+    + (porMirar ? ' sin-revisar' : '') });
+  tarjeta.appendChild(h('button', { clase: 'nota-mini', title: 'Ver esta imagen', onclick: ir },
+    e && e.imagen
+      ? h('img', { src: `${API.archivo(v.pid, e.imagen)}?mini=512&v=${encodeURIComponent(nota.regenerado || '')}`,
+        alt: nota.plano, loading: 'lazy' })
+      : h('span', { clase: 'meta' }, 'sin imagen')));
+  const cuerpo = h('div', { clase: 'nota-cuerpo' });
+  cuerpo.appendChild(h('div', { clase: 'nota-donde' },
+    h('b', {}, `Imagen ${nota.plano || '?'}`),
+    e ? h('span', { clase: 'meta' }, `${e.bloque ? `bloque ${e.bloque} · ` : ''}${mmss(e.t_in)}–${mmss(e.t_out)}`) : null,
+    nota.descolgada ? h('span', { clase: 'pastilla aviso',
+      title: 'lo que se decía en este plano cuando escribiste la nota ya no está en el vídeo' },
+    'el texto cambió') : null));
+  if (e && e.narracion) {
+    cuerpo.appendChild(h('div', { clase: 'nota-guion', title: 'lo que se oye en esta imagen' },
+      `«${recortar(e.narracion, 160)}»`));
+  }
+  cuerpo.appendChild(h('div', { clase: 'texto' }, nota.texto));
+  if ((nota.imagenes || []).length) {
+    const tira = h('div', { clase: 'tira-aportadas' });
+    nota.imagenes.forEach(nombre => tira.appendChild(h('img', {
+      src: API.imagenRepaso(v.pid, nombre), alt: '', loading: 'lazy',
+      title: 'referencia adjunta a la nota',
+      onclick: () => lupa(API.imagenRepaso(v.pid, nombre)),
+    })));
+    cuerpo.appendChild(tira);
+  }
+  // EL ESTADO, en palabras y vivo (el reloj corre mientras se dibuja)
+  cuerpo.appendChild(enVivo(() => {
+    const ahora = estadoDeImagen(nota.plano, nota);
+    const fila = h('div', { clase: 'nota-estado fila' });
+    const etiqueta = {
+      corriendo: `Dibujando… ${relojDeImagen()}`,
+      'en cola': `En cola (${COLA_IMG.cola.indexOf(nota.id) + 1}ª)`,
+      hecha: 'Hecha ✓',
+      fallo: esRechazoDeSeguridad(nota.error) ? 'Rechazada por OpenAI' : 'Falló',
+    }[ahora] || 'Pendiente';
+    fila.appendChild(h('span', { clase: `pastilla estado-${ahora || 'pendiente'}` }, etiqueta));
+    if (ahora === 'hecha' && porMirar) {
+      fila.appendChild(h('span', { clase: 'sin-ver', title: 'ya está hecha y no la has mirado' }, 'sin revisar'));
+    }
+    fila.appendChild(h('span', { clase: 'crece' }));
+    if (ahora === '' || ahora === 'fallo') {
+      fila.appendChild(h('button', { clase: 'mini avisa',
+        title: `Vuelve a dibujar SOLO esta imagen con lo que has escrito (1 imagen, ≈ ${usdCorto(COLA_IMG.usdPorImagen)})`,
+        onclick: () => encolarImagen(nota.plano, nota.texto, nota.id) },
+      ahora === 'fallo' ? 'Reintentar' : 'Rehacer esta imagen'));
+    }
+    if (ahora === 'fallo' && esRechazoDeSeguridad(nota.error)) {
+      fila.appendChild(h('button', { clase: 'mini primario',
+        title: 'Reescribe la nota describiendo lo que se ve, sin marcas ni personajes',
+        onclick: () => notaSinMarcas(nota) }, 'Hacerla sin marcas'));
+    }
+    if (ahora === 'en cola') {
+      fila.appendChild(h('button', { clase: 'mini fantasma', onclick: () => sacarDeLaCola(nota.id) },
+        'Sacar de la cola'));
+    }
+    if (ahora === 'hecha') {
+      fila.appendChild(h('button', { clase: 'mini', onclick: ir }, 'Ver cómo quedó'));
+    }
+    const caja = h('div', {}, fila);
+    if (ahora === 'fallo' && nota.error) caja.appendChild(h('div', { clase: 'nota-error' }, nota.error));
+    if (nota.aviso && ahora === 'hecha') caja.appendChild(h('div', { clase: 'meta' }, nota.aviso));
+    return caja;
+  }));
+  cuerpo.appendChild(h('div', { clase: 'fila nota-mandos' },
+    h('button', { clase: 'mini fantasma', title: 'Cambiar esta nota',
+      onclick: () => { PREVIA.editando = nota.id; repintarVideo(); } }, '✎ Editar'),
+    h('button', { clase: 'mini peligro', title: 'Borrar esta nota',
+      onclick: () => borrarNota(nota.id) }, '× Borrar')));
+  tarjeta.appendChild(cuerpo);
+  return tarjeta;
+}
+
 function listaDeNotas() {
   const r = estadoRepaso();
   const v = videoAbierto();
@@ -10007,6 +10084,10 @@ function listaDeNotas() {
        habria dejado la nota «en edicion» sin ninguna caja donde escribirla. */
     if (enPrevia && PREVIA.editando === nota.id) {
       lista.appendChild(filaNotaEscena(nota));
+      return;
+    }
+    if (enPrevia) {
+      lista.appendChild(tarjetaNotaImagen(nota));
       return;
     }
     const aplicada = nota.estado === 'aplicado';
@@ -10140,6 +10221,24 @@ async function borrarNota(nid) {
 function botonAplicarRepaso() {
   const pend = pendientesDeAhora();
   if (!pend) return null;
+  /* EN IMÁGENES SE DICE QUÉ SE VA A PAGAR: una imagen por PLANO (las notas
+     del mismo plano van juntas), con su precio y lo que tardará. */
+  if (cuadernoDeAhora() === 'imagenes') {
+    const ocupadas = new Set([...(COLA_IMG.cola || []),
+      ...((COLA_IMG.actual || {}).notas || [])]);
+    const planos = new Set(notasDeAhora()
+      .filter(n => n.estado !== 'aplicado' && n.plano && !ocupadas.has(n.id))
+      .map(n => n.plano));
+    if (!planos.size) return null;
+    const n = planos.size;
+    return conAyuda(
+      'Rehace las imágenes de todas las notas pendientes, una detrás de otra. '
+      + 'Si hay varias notas para la misma imagen, se juntan y se paga una sola. '
+      + 'Si OpenAI rechaza una, las demás siguen y esa nota te dice por qué.',
+      h('button', { clase: 'avisa', onclick: encolarTodasLasImagenes },
+        `Rehacer ${n} ${n === 1 ? 'imagen' : 'imágenes'} · ≈ ${usdCorto(n * COLA_IMG.usdPorImagen)}`
+        + ` · ~${mmss(n * COLA_IMG.segundosPorImagen)}`));
+  }
   const corriendo = (APP.trabajos[CLAVE_VIDEO_LIGHT] || {}).estado === 'ejecutando';
   return conAyuda(
     (videoAbierto().vista === 'previa'
@@ -10291,6 +10390,10 @@ const GUIA_DE_BLOQUE = {
    Dice si sirve para lo que el sistema hace con ello, qué falla y por qué, y
    propone una versión que se pone en el campo con un botón. Va por la
    suscripción de Claude: no cuesta imágenes. */
+/* La última revisión de cada CAMPO (el textarea), para que la siguiente la
+   tenga delante. WeakMap: cuando el campo se va de la pantalla, se olvida. */
+const ULTIMA_REVISION = new WeakMap();
+
 function botonRevisar(gid, campo, mandos) {
   const panel = h('div', { clase: 'revision-campo', hidden: true });
   const boton = h('button', {
@@ -10305,15 +10408,24 @@ function botonRevisar(gid, campo, mandos) {
       vaciar(panel).appendChild(h('div', { clase: 'cargando' }, 'revisando con la guía… (unos segundos)'));
       boton.disabled = true;
       try {
-        const { id } = await pedir(`${BASE}/api/sistema/guias/${gid}/revisar`,
-          { method: 'POST', cuerpo: { texto } });
+        /* CON LA REVISIÓN ANTERIOR DE ESTE CAMPO: el revisor mira si aquello
+           se arregló en vez de buscar cosas nuevas cada vez. */
+        const anterior = (ULTIMA_REVISION.get(area) || {}).resultado || null;
+        const lanzada = await pedir(`${BASE}/api/sistema/guias/${gid}/revisar`,
+          { method: 'POST', cuerpo: { texto, anterior } });
+        // se pide SIEMPRE una vez: aunque venga «listo» (ya revisado), el
+        // resultado está en su ficha y no en la respuesta del lanzamiento
         let ficha = { estado: 'pensando' };
-        for (let i = 0; i < 120 && ficha.estado === 'pensando'; i += 1) {
-          await new Promise(r => setTimeout(r, 1500));
-          ficha = await pedir(`${BASE}/api/sistema/revisiones/${id}`);
+        for (let i = 0; i < 80 && ficha.estado === 'pensando'; i += 1) {
+          if (i) await new Promise(r => setTimeout(r, 1500));
+          ficha = await pedir(`${BASE}/api/sistema/revisiones/${lanzada.id}`);
         }
         if (ficha.estado === 'error') throw new Error(ficha.error || 'no se ha podido revisar');
-        if (ficha.estado !== 'listo') throw new Error('la revisión ha tardado demasiado');
+        if (ficha.estado !== 'listo') {
+          throw new Error('la revisión ha tardado más de dos minutos: el CLI de Claude '
+            + 'puede estar ocupado o sin cupo. Vuelve a pulsar «Revisar» en un momento');
+        }
+        ULTIMA_REVISION.set(area, { texto, resultado: ficha.resultado || {} });
         pintarRevision(panel, ficha.resultado || {}, area);
       } catch (e) {
         vaciar(panel).appendChild(cajaError(e.message));
@@ -10332,6 +10444,10 @@ function pintarRevision(panel, r, area) {
     h('span', { clase: 'crece' }),
     h('button', { clase: 'mini fantasma', onclick: () => { panel.hidden = true; } }, 'Cerrar')));
   if (r.resumen) panel.appendChild(h('div', {}, r.resumen));
+  if (r.de_memoria) {
+    panel.appendChild(h('div', { clase: 'meta' },
+      'Este texto ya se había revisado: es la misma respuesta (no gasta otra revisión).'));
+  }
   if ((r.problemas || []).length) {
     panel.appendChild(h('ul', {}, ...(r.problemas || []).map(p => h('li', {},
       h('b', {}, p.que), p.por_que ? ` — ${p.por_que}` : '',
@@ -13288,10 +13404,17 @@ const PRESENCIAS_MUSICA = [
   { id: 'normal', nombre: 'Normal', pista: 'Se oye de fondo sin tapar la voz' },
   { id: 'alta', nombre: 'Alta', pista: 'Música protagonista: se nota mientras se habla' },
 ];
+/* Los ánimos de la música. La misma lista que `sonido.NOMBRES_ANIMOS`: ocho de
+   documental no dejaban nada para un vídeo alegre, gamer o para niños. */
 const ANIMOS_MUSICA = [
-  ['sobrio', 'Sobrio'], ['corporativo', 'Corporativo'], ['esperanzador', 'Esperanzador'],
-  ['epico', 'Épico'], ['misterioso', 'Misterioso'], ['tension', 'Tensión'],
-  ['melancolico', 'Melancólico'], ['oscuro', 'Oscuro'],
+  ['alegre', 'Alegre'], ['divertido', 'Divertido'], ['gamer', 'Gamer / electrónica'],
+  ['infantil', 'Infantil'], ['accion', 'Acción'], ['inspirador', 'Inspirador'],
+  ['fiesta', 'Fiesta'], ['chill', 'Chill'], ['lofi', 'Lo-fi'], ['acustico', 'Acústico'],
+  ['pop', 'Pop'], ['rock', 'Rock'], ['jazz', 'Jazz'], ['latino', 'Latino'],
+  ['romantico', 'Romántico'], ['clasico', 'Clásica'], ['sobrio', 'Sobrio'],
+  ['corporativo', 'Corporativo'], ['esperanzador', 'Esperanzador'], ['epico', 'Épico'],
+  ['misterioso', 'Misterioso'], ['tension', 'Tensión'], ['melancolico', 'Melancólico'],
+  ['oscuro', 'Oscuro'],
 ];
 const TAMANOS_SUB = [['pequeno', 'Pequeño'], ['normal', 'Normal'], ['grande', 'Grande'], ['enorme', 'Enorme']];
 const CAJAS_SUB = [['auto', 'La del estilo'], [0, 'Sin caja'], [0.45, 'Suave'], [0.85, 'Opaca']];
@@ -13304,7 +13427,9 @@ function estadoAjustes(modo) {
   APP.light.ajustesMontaje = APP.light.ajustesMontaje || {};
   if (!APP.light.ajustesMontaje[clave]) {
     APP.light.ajustesMontaje[clave] = { abierta: '', musica: null, subtitulos: null, logo: null,
-      busqueda: { animo: 'sobrio', extra: '', temas: null, buscando: false, comercial: true } };
+      busqueda: { animo: 'sobrio', extra: '', texto: '', temas: null, buscando: false,
+        comercial: true, instrumental: true, pagina: 0 },
+      efectos: null, papeles: null, buscaEfecto: { papel: '', texto: '', lista: null, buscando: false } };
   }
   return APP.light.ajustesMontaje[clave];
 }
@@ -13332,6 +13457,7 @@ function ajustesDelMontaje(modo, lleva) {
     if (lleva.musica !== false) caja.appendChild(filaAjuste(modo, est, 'musica', pintar));
     if (lleva.subtitulos !== false) caja.appendChild(filaAjuste(modo, est, 'subtitulos', pintar));
     caja.appendChild(filaAjuste(modo, est, 'logo', pintar));
+    if (lleva.efectos !== false && modo.tipo === 'video') caja.appendChild(filaAjuste(modo, est, 'efectos', pintar));
   };
   // LA LECTURA PINTA EN LOS QUE ESTÉN EN PANTALLA: la pantalla puede pintar
   // este bloque más de una vez mientras se lee (y alguna copia no llega a
@@ -13357,6 +13483,9 @@ async function cargarAjustesVideo(modo, est) {
     pedir(`${base}/logo`).catch(() => null)]);
   est.musica = { presencia: presencia || { presencia: 'normal', elegida: false },
     tema: sonido && sonido.musica && sonido.musica.id ? sonido.musica : null };
+  est.efectos = (sonido && sonido.efectos) || {};
+  est.papeles = (sonido && sonido.papeles) || [];
+  est.fijos = (sonido && sonido.efectos_fijos) || [];
   est.subtitulos = subtitulos;
   est.logo = logo ? logo.logo : null;
   est.leido = true;
@@ -13364,7 +13493,7 @@ async function cargarAjustesVideo(modo, est) {
 
 /* UNA FILA: el resumen en una línea y, desplegada, su editor. */
 function filaAjuste(modo, est, cual, repintar) {
-  const nombres = { musica: '🎵 Música', subtitulos: '💬 Subtítulos', logo: '🏷️ Logo' };
+  const nombres = { musica: '🎵 Música', subtitulos: '💬 Subtítulos', logo: '🏷️ Logo', efectos: '✨ Efectos' };
   const abierta = est.abierta === cual;
   const fila = h('div', { clase: 'fila-ajuste' + (abierta ? ' abierta' : '') });
   fila.appendChild(h('div', { clase: 'fila-ajuste-cab' },
@@ -13373,7 +13502,8 @@ function filaAjuste(modo, est, cual, repintar) {
     h('button', { clase: 'mini', onclick: () => { est.abierta = abierta ? '' : cual; repintar(); } },
       abierta ? 'Cerrar' : 'Cambiar')));
   if (abierta) {
-    const editor = { musica: editorMusica, subtitulos: editorSubtitulos, logo: editorLogo }[cual];
+    const editor = { musica: editorMusica, subtitulos: editorSubtitulos, logo: editorLogo,
+      efectos: editorEfectos }[cual];
     fila.appendChild(editor(modo, est, repintar));
   }
   return fila;
@@ -13388,6 +13518,12 @@ function resumenAjuste(modo, est, cual) {
     const nivel = (PRESENCIAS_MUSICA.find(p => p.id === presencia) || {}).nombre || presencia;
     return (tema ? `«${tema.titulo || tema.id}» de ${tema.artista || '?'}` : 'Automática (varios temas según el ritmo)')
       + ` · se oye ${nivel.toLowerCase()}`;
+  }
+  if (cual === 'efectos') {
+    const fijos = (est.fijos || []).length;
+    const sonidos = Object.values(est.efectos || {}).reduce((n, l) => n + (l || []).length, 0);
+    return fijos ? `${fijos} elegido(s) a mano, el resto automáticos`
+      : (sonidos ? `Automáticos (${sonidos} sonidos de FreeSound)` : 'Automáticos (se eligen al montar)');
   }
   if (cual === 'subtitulos') {
     const sub = modo.tipo === 'borrador' ? opcionesBorrador(modo.e).subtitulos : est.subtitulos;
@@ -13490,28 +13626,46 @@ function editorMusica(modo, est, repintar) {
 function buscadorDeTemas(modo, est, repintar, fijarTema, puesto) {
   const b = est.busqueda;
   const caja = h('div', { clase: 'buscador-temas' });
-  caja.appendChild(h('div', { clase: 'herramientas' }, ...ANIMOS_MUSICA.map(([id, nombre]) => h('button', {
-    clase: 'mini' + (b.animo === id ? ' activo' : ''), onclick: () => { b.animo = id; repintar(); },
-  }, nombre))));
   // del catálogo de Jamendo y no del vídeo: sirve también en un borrador
-  const buscar = async () => {
+  const buscar = async (mas) => {
+    b.pagina = mas ? (b.pagina || 0) + 1 : 0;
     b.buscando = true; repintar();
     try {
       const datos = await pedir(`${BASE}/api/musica/buscar`, {
-        method: 'POST', cuerpo: { animo: b.animo, extra: b.extra, cuantas: 10 } });
-      b.temas = datos.temas || [];
+        method: 'POST',
+        cuerpo: { animo: b.texto ? '' : b.animo, extra: b.texto ? '' : b.extra, texto: b.texto,
+          instrumental: b.instrumental, pagina: b.pagina, cuantas: 12 } });
+      const nuevos = datos.temas || [];
+      b.temas = mas ? (b.temas || []).concat(nuevos.filter(t => !(b.temas || []).some(x => x.id === t.id)))
+        : nuevos;
+      b.sinMas = mas && !nuevos.length;
     } catch (e) { toast(e.message, true); }
     b.buscando = false; repintar();
   };
+  caja.appendChild(h('label', {}, 'Buscar por lo que quieras'));
   caja.appendChild(h('div', { clase: 'fila' },
-    h('input', { type: 'text', value: b.extra, placeholder: 'algo más: piano, acústica, lo-fi…',
-      oninput: ev => { b.extra = ev.target.value; },
+    h('input', { type: 'search', value: b.texto,
+      placeholder: 'videojuegos retro, fiesta, piano triste, verano…',
+      oninput: ev => { b.texto = ev.target.value; },
       onkeydown: ev => { if (ev.key === 'Enter') buscar(); } }),
-    h('button', { clase: 'mini primario', disabled: b.buscando, onclick: buscar },
-      b.buscando ? 'buscando…' : 'Buscar temas')));
-  caja.appendChild(h('label', { clase: 'casilla' },
-    h('input', { type: 'checkbox', checked: b.comercial, onchange: ev => { b.comercial = ev.target.checked; repintar(); } }),
-    ' Solo los que permiten uso comercial (vídeos para clientes o anuncios)'));
+    h('button', { clase: 'mini primario', disabled: b.buscando, onclick: () => buscar() },
+      b.buscando ? 'buscando…' : 'Buscar')));
+  caja.appendChild(h('label', {}, 'O por ánimo'));
+  caja.appendChild(h('div', { clase: 'herramientas' }, ...ANIMOS_MUSICA.map(([id, nombre]) => h('button', {
+    clase: 'mini' + (!b.texto && b.animo === id ? ' activo' : ''),
+    onclick: () => { b.animo = id; b.texto = ''; buscar(); },
+  }, nombre))));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('label', { clase: 'casilla' },
+      h('input', { type: 'checkbox', checked: b.instrumental,
+        onchange: ev => { b.instrumental = ev.target.checked; } }),
+      ' Solo instrumental (sin voz cantada)'),
+    h('label', { clase: 'casilla' },
+      h('input', { type: 'checkbox', checked: b.comercial,
+        onchange: ev => { b.comercial = ev.target.checked; repintar(); } }),
+      ' Solo uso comercial (para clientes o anuncios)')));
+  caja.appendChild(subirAudioPropio('musica', modo, ficha => fijarTema(ficha),
+    'Subir mi música (MP3, WAV, M4A)'));
   const temas = (b.temas || []).filter(t => !b.comercial || t.comercial);
   temas.forEach(tema => {
     caja.appendChild(h('div', { clase: 'tema-musica' + (puesto && puesto.id === tema.id ? ' puesto' : '') },
@@ -13528,8 +13682,122 @@ function buscadorDeTemas(modo, est, repintar, fijarTema, puesto) {
   });
   if (b.temas && !temas.length) {
     caja.appendChild(h('div', { clase: 'pista' }, b.temas.length
-      ? 'Ninguno de estos permite uso comercial: quita el filtro o prueba otro ánimo.'
-      : 'Ningún tema con eso: prueba otro ánimo.'));
+      ? 'Ninguno de estos permite uso comercial: quita el filtro, pulsa «Ver más» o prueba otra búsqueda.'
+      : 'Ningún tema con eso: prueba otras palabras u otro ánimo, o quita «solo instrumental».'));
+  }
+  if (b.temas && b.temas.length && !b.sinMas) {
+    caja.appendChild(h('button', { clase: 'mini', disabled: b.buscando, onclick: () => buscar(true) },
+      b.buscando ? 'buscando…' : 'Ver más temas'));
+  } else if (b.sinMas) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'No hay más temas con esta búsqueda.'));
+  }
+  return caja;
+}
+
+/* SUBIR UN AUDIO TUYO, para la música o para un efecto. Se guarda en el banco
+   del canal y se usa como uno de Jamendo o FreeSound. La licencia es la tuya. */
+function subirAudioPropio(familia, modo, alSubir, texto) {
+  const id = `audio-${familia}-${modo.pid || 'borrador'}-${Math.random().toString(36).slice(2, 7)}`;
+  const entrada = h('input', { type: 'file', accept: 'audio/*,.mp3,.wav,.m4a,.ogg,.aac,.flac',
+    clase: 'oculto', id,
+    onchange: async ev => {
+      const fichero = (ev.target.files || [])[0];
+      ev.target.value = '';
+      if (!fichero) return;
+      const cuerpo = new FormData();
+      cuerpo.append('audio', fichero);
+      toast(`subiendo «${fichero.name}»…`);
+      try {
+        const r = await pedir(`${BASE}/api/sonido/subir?familia=${familia}`, { method: 'POST', cuerpo });
+        alSubir(r.ficha);
+      } catch (e) { toast(`no se ha podido subir: ${e.message}`, true); }
+    } });
+  return h('div', { clase: 'fila' }, entrada,
+    h('label', { clase: 'boton mini', for: id }, texto),
+    h('span', { clase: 'meta' }, 'si es tuyo o tienes la licencia; hasta 40 MB'));
+}
+
+/* ------------------------------------------------------------ los efectos */
+/* CADA PAPEL (aire de transición, golpe, tecla, retorno) suena automático
+   —un surtido de FreeSound— o con UN sonido elegido a mano: buscado en
+   FreeSound por lo que quieras o subido por ti. */
+function editorEfectos(modo, est, repintar) {
+  const caja = h('div', { clase: 'editor-ajuste' });
+  if (!est.leido) { caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…')); return caja; }
+  const bf = est.buscaEfecto;
+  const fijar = async (papel, ficha) => {
+    try {
+      const r = await pedir(`${API.proyecto(modo.pid)}/sonido/efecto`, {
+        method: 'PUT', cuerpo: { papel, efecto: ficha || null, remontar: true } });
+      est.fijos = r.fijos || [];
+      est.efectos = Object.assign({}, est.efectos, { [papel]: r.efectos || [] });
+      if (ficha) bf.papel = '';
+      avisoDeMontaje(r, ficha ? 'Efecto' : 'Efecto automático');
+    } catch (e) { toast(e.message, true); }
+    repintar();
+  };
+  (est.papeles || []).forEach(papel => {
+    const fijo = (est.fijos || []).includes(papel.id);
+    const lista = (est.efectos || {})[papel.id] || [];
+    const bloque = h('div', { clase: 'papel-efecto' });
+    bloque.appendChild(h('div', { clase: 'fila' },
+      h('b', {}, papel.nombre), h('span', { clase: 'meta crece' }, papel.descripcion)));
+    if (fijo && lista[0]) {
+      bloque.appendChild(h('div', { clase: 'fila' },
+        h('span', {}, `Elegido: «${lista[0].titulo || lista[0].id}»`
+          + (lista[0].fuente === 'propia' ? ' (tuyo)' : ` de ${lista[0].autor || '?'}`)),
+        lista[0].muestra ? h('audio', { controls: true, preload: 'none', src: `${BASE}${lista[0].muestra}` }) : null,
+        h('button', { clase: 'mini fantasma', onclick: () => fijar(papel.id, null) }, 'Volver a automático')));
+    } else {
+      bloque.appendChild(h('div', { clase: 'meta' }, lista.length
+        ? `Automático: ${lista.length} sonidos de FreeSound, que se van alternando`
+        : 'Automático: se buscan en FreeSound al montar el vídeo'));
+    }
+    bloque.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'mini' + (bf.papel === papel.id ? ' activo' : ''),
+        onclick: () => { bf.papel = bf.papel === papel.id ? '' : papel.id; bf.lista = null; bf.texto = ''; repintar(); } },
+      bf.papel === papel.id ? 'Cerrar la búsqueda' : 'Buscar otro sonido'),
+      subirAudioPropio('efectos', modo, ficha => fijar(papel.id, ficha), 'Subir el mío')));
+    if (bf.papel === papel.id) bloque.appendChild(buscadorDeEfectos(papel, bf, repintar, fijar));
+    caja.appendChild(bloque);
+  });
+  caja.appendChild(h('div', { clase: 'pista' },
+    'Cambiar un efecto solo vuelve a mezclar el sonido del vídeo: no se dibuja nada.'));
+  return caja;
+}
+
+function buscadorDeEfectos(papel, bf, repintar, fijar) {
+  const caja = h('div', { clase: 'buscador-temas' });
+  const buscar = async () => {
+    bf.buscando = true; repintar();
+    try {
+      const r = await pedir(`${BASE}/api/efectos/buscar`, {
+        method: 'POST', cuerpo: { texto: bf.texto, papel: papel.id, cuantos: 15 } });
+      bf.lista = r.efectos || [];
+      if (!bf.texto) bf.texto = r.texto || '';
+    } catch (e) { toast(e.message, true); }
+    bf.buscando = false; repintar();
+  };
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('input', { type: 'search', value: bf.texto,
+      placeholder: 'en inglés funciona mejor: whoosh, pop, click, coin, magic…',
+      oninput: ev => { bf.texto = ev.target.value; },
+      onkeydown: ev => { if (ev.key === 'Enter') buscar(); } }),
+    h('button', { clase: 'mini primario', disabled: bf.buscando, onclick: buscar },
+      bf.buscando ? 'buscando…' : 'Buscar en FreeSound')));
+  (bf.lista || []).forEach(ef => {
+    caja.appendChild(h('div', { clase: 'tema-musica' },
+      h('div', {}, h('b', {}, ef.titulo || ef.id),
+        h('span', { clase: 'meta' }, ` · ${ef.autor || '?'} · ${(Number(ef.duracion) || 0).toFixed(1)} s`),
+        h('div', { clase: 'meta' }, `${ef.licencia_nombre || 'licencia sin datos'} · `
+          + (ef.comercial ? 'uso comercial permitido' : 'NO comercial')
+          + (ef.atribucion ? ' · pide citar al autor' : '') + (ef.vetado ? ' · lo vetaste' : ''))),
+      h('audio', { controls: true, preload: 'none',
+        src: `${BASE}/api/musica/escucha?url=${encodeURIComponent(ef.escucha || '')}` }),
+      h('button', { clase: 'mini', onclick: () => fijar(papel.id, ef) }, 'Usar este')));
+  });
+  if (bf.lista && !bf.lista.length) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Nada con eso: prueba otras palabras (mejor en inglés).'));
   }
   return caja;
 }

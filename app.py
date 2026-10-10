@@ -5165,6 +5165,253 @@ def editar_nota_repaso(pid: str, nid: str, cuerpo: dict = Body(default=None)):
     return {"nota": nota, **_ficha_repaso(ctx)}
 
 
+# ------------------------------------------- las notas de IMAGENES, en el servidor
+#
+# Rehacer las imagenes con nota vivia en una cola DEL NAVEGADOR que mandaba
+# tandas de tres planos en un solo trabajo. Dos problemas reales (10-10-2026):
+#
+#   · una imagen que OpenAI rechazaba tumbaba la tanda entera -- las otras dos
+#     se daban por fallidas sin haberse intentado -- y el error se quedaba como
+#     el del paso, saliendo arriba en TODAS las pantallas (tambien en Encargo);
+#   · recargar la pagina perdia la cola.
+#
+# Ahora la cola vive aqui: UN trabajo que rehace los planos UNO DETRAS DE OTRO
+# (la regla 2 de la casa: las tandas, de una en una), y lo que le pasa a cada
+# uno se apunta EN SU NOTA (`error`, `aviso`). Un rechazo no para a los demas.
+# Las notas del MISMO plano se juntan en UNA imagen: dos notas no son dos pagos.
+
+#: Lo que suele tardar una imagen, para decir «suele tardar ~1:20». Se afina con
+#: lo que van tardando de verdad.
+_SEGUNDOS_IMAGEN = [75.0]
+
+
+def _segundos_por_imagen():
+    ultimos = _SEGUNDOS_IMAGEN[-12:]
+    return round(sorted(ultimos)[len(ultimos) // 2], 1)
+
+
+#: La cola de cada video, EN EL SERVIDOR: {pid: {"cola": [nid...], "actual":
+#: {"plano", "notas", "desde"} | None, "trabajo": id}}. Sobrevive a recargar la
+#: pagina (no a reiniciar el servicio, y entonces no hay nada corriendo).
+_COLA_NOTAS = {}
+_COLA_LOCK = threading.Lock()
+
+
+def _notas_de_imagenes(ctx):
+    repaso = _repaso()
+    return [n for n in _ficha_repaso(ctx)["notas"]
+            if repaso.pantalla_de(n) == "imagenes"
+            and n.get("estado") != "aplicado" and n.get("plano")]
+
+
+def _texto_de_grupo(notas):
+    if len(notas) == 1:
+        return notas[0]["texto"]
+    return " | ".join(f"({i + 1}) {n['texto']}" for i, n in enumerate(notas))
+
+
+def _siguiente_plano(ctx, cola):
+    """(plano, [notas]) del primero de la cola, con TODAS sus notas en cola."""
+    vivas = {n["id"]: n for n in _notas_de_imagenes(ctx)}
+    cola[:] = [nid for nid in cola if nid in vivas]
+    if not cola:
+        return None, []
+    plano = str(vivas[cola[0]]["plano"])
+    notas = [vivas[nid] for nid in cola if str(vivas[nid]["plano"]) == plano]
+    return plano, notas
+
+
+def _correr_notas_imagenes(avisar, ctx):
+    from nucleo.trabajos import Cancelado                    # noqa: PLC0415
+    repaso = _repaso()
+    hechas, rechazadas, fallidas = [], [], []
+    try:
+        while True:
+            with _COLA_LOCK:
+                estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+                plano, notas = _siguiente_plano(ctx, estado["cola"])
+                if not plano:
+                    # en el MISMO cerrojo que mira la cola: si no, una nota que
+                    # llegase justo ahora se sumaria a un trabajo que ya se va
+                    estado["actual"] = None
+                    estado["trabajo"] = None
+                    break
+                ids = [n["id"] for n in notas]
+                estado["cola"] = [x for x in estado["cola"] if x not in ids]
+                estado["actual"] = {"plano": plano, "notas": ids, "desde": time.time()}
+                pendientes = len({str(n["plano"]) for n in _notas_de_imagenes(ctx)
+                                  if n["id"] in estado["cola"]})
+            hechos = len(hechas) + len(rechazadas) + len(fallidas)
+            total = hechos + 1 + pendientes
+            etiqueta = f"{plano} · {hechos + 1} de {total}"
+            avisar(hechos / total, f"dibujando {etiqueta}", f"Dibujando {etiqueta}")
+            uid = f"escena:{plano}"
+            # SE FUSIONA con lo que ya tenia el plano (su direccion, su parrafo
+            # redactado...): poner `{feedback}` a secas se los llevaba por delante
+            actual = dict(((ctx.estado.params("assets") or {}).get("unidades")
+                           or {}).get(uid) or {})
+            actual["feedback"] = _texto_de_grupo(notas)
+            ctx.estado.actualizar_params("assets", {"unidades": {uid: actual}})
+            ctx.estado.marcar_ejecutando("assets")
+            arranque = time.time()
+
+            def avisar_plano(valor, mensaje="", publico="", hechos=hechos,
+                             total=total, etiqueta=etiqueta):
+                return avisar((hechos + min(1.0, max(0.0, float(valor or 0)))) / total,
+                              f"{etiqueta} — {mensaje}" if mensaje else "")
+            try:
+                _correr_paso(avisar_plano, ctx, "assets", [uid], {"rehacer": True})
+            except Cancelado:
+                raise
+            except Exception as fallo:                           # noqa: BLE001
+                ctx.estado.limpiar_marca("assets")
+                rechazo = type(fallo).__name__ == "RechazoSeguridad"
+                motivo = str(fallo)
+                for nota in notas:
+                    try:
+                        repaso.editar(ctx.proyecto, nota["id"], error=motivo, aviso="")
+                    except (KeyError, ValueError):
+                        pass
+                (rechazadas if rechazo else fallidas).append(plano)
+                ctx.bitacora.anotar("nota_imagen_fallida", "assets",
+                                    {"plano": plano, "rechazo": rechazo,
+                                     "error": motivo[:300]})
+                continue
+            _SEGUNDOS_IMAGEN.append(time.time() - arranque)
+            # el motor se vuelve a pedir: si se recargo durante la tanda, el que
+            # apunto la reescritura es el nuevo
+            imagen = PASOS_MODULOS.medios.motor("imagen_openai/imagen.py")
+            nuevas = [v for v in (getattr(imagen, "REESCRITURAS", {}) or {}).values()
+                      if float(v.get("cuando") or 0) >= arranque and v.get("salio")]
+            aviso = ""
+            if nuevas:
+                cambios = nuevas[-1].get("cambios") or []
+                lista = "; ".join(f"«{a}» → «{b}»" for a, b in cambios[:4])
+                aviso = ("OpenAI la rechazó con los nombres de marca, y se dibujó "
+                         "describiéndola sin ellos" + (f": {lista}" if lista else "."))
+            for nota in notas:
+                try:
+                    repaso.editar(ctx.proyecto, nota["id"], regenerado=nota["texto"],
+                                  error="", aviso=aviso)
+                except (KeyError, ValueError):
+                    pass
+            hechas.append(plano)
+    finally:
+        with _COLA_LOCK:
+            estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+            estado["actual"] = None
+            # cortado (cancelado o un fallo del propio bucle): lo que quedaba
+            # en cola no lo va a dibujar nadie, y decir «en cola» seria mentir
+            if estado.get("trabajo"):
+                estado["cola"] = []
+            estado["trabajo"] = None
+    avisar(1.0, f"{len(hechas)} hechas, {len(rechazadas)} rechazadas, "
+                f"{len(fallidas)} con error")
+    return {"hechas": hechas, "rechazadas": rechazadas, "fallidas": fallidas}
+
+
+def _usd_por_imagen(ctx):
+    calidad = str((ctx.estado.params("assets") or {}).get("calidad") or "low")
+    try:
+        return round(float(AJUSTES.coste_por_imagen(calidad).get("usd_total") or 0.0), 4)
+    except Exception:                                       # noqa: BLE001
+        return 0.0
+
+
+def _ficha_cola(ctx):
+    with _COLA_LOCK:
+        estado = dict(_COLA_NOTAS.get(ctx.id) or {})
+    actual = estado.get("actual")
+    trabajo = None
+    if estado.get("trabajo"):
+        try:
+            trabajo = ctx.gestor.estado(estado["trabajo"])
+        except KeyError:
+            trabajo = None
+    return {"cola": list(estado.get("cola") or []),
+            "actual": dict(actual, segundos=round(time.time() - actual["desde"], 1))
+                      if actual else None,
+            "trabajo": trabajo,
+            "segundos_por_imagen": _segundos_por_imagen(),
+            "usd_por_imagen": _usd_por_imagen(ctx)}
+
+
+@app.post("/api/proyectos/{pid}/imagenes/rehacer", status_code=202)
+def rehacer_imagenes_con_notas(pid: str, cuerpo: dict = Body(default=None)):
+    """Pone en la cola las notas de imagenes: {notas?: [ids]} (sin ids, todas).
+
+    Se rehacen UNA DETRAS DE OTRA en un solo trabajo del servidor; si ya hay uno
+    en marcha, las nuevas se suman a su cola. Las notas del mismo plano salen en
+    UNA sola imagen.
+    """
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    pedidas = datos.get("notas") if isinstance(datos.get("notas"), list) else None
+    vivas = _notas_de_imagenes(ctx)
+    if pedidas is not None:
+        quiero = {str(x) for x in pedidas}
+        vivas = [n for n in vivas if n["id"] in quiero]
+    if not vivas:
+        raise ErrorApi(400, "no hay ninguna nota pendiente con su imagen")
+    repaso = _repaso()
+    for nota in vivas:
+        if nota.get("error"):
+            try:
+                repaso.editar(ctx.proyecto, nota["id"], error="")
+            except (KeyError, ValueError):
+                pass
+    with _COLA_LOCK:
+        estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+        en_marcha = estado.get("actual") or (
+            estado.get("trabajo") and ctx.gestor.estado(estado["trabajo"])["estado"]
+            in ("pendiente", "ejecutando"))
+        ya = set(estado["cola"]) | set((estado.get("actual") or {}).get("notas") or [])
+        estado["cola"].extend(n["id"] for n in vivas if n["id"] not in ya)
+        if not en_marcha:
+            otro = _trabajo_activo(ctx, "assets")
+            if otro is not None:
+                estado["cola"] = []
+                raise ErrorApi(409, "ya se están dibujando imágenes de este vídeo: "
+                                    "espera a que terminen",
+                               {"trabajo_id": otro["id"]})
+            trabajo_id = ctx.gestor.lanzar("notas_imagenes", _correr_notas_imagenes,
+                                           ctx, paso="assets")
+            estado["trabajo"] = trabajo_id
+            _registrar_trabajo(trabajo_id, ctx.id)
+    ctx.bitacora.anotar("notas_imagenes", "assets", {"notas": [n["id"] for n in vivas]})
+    return _ficha_cola(ctx)
+
+
+@app.get("/api/proyectos/{pid}/imagenes/cola")
+def cola_de_imagenes(pid: str):
+    """La cola de notas de imagenes: cual se dibuja, cuanto lleva y que espera."""
+    return _ficha_cola(contexto(pid))
+
+
+@app.delete("/api/proyectos/{pid}/imagenes/cola/{nid}")
+def sacar_de_la_cola(pid: str, nid: str):
+    """Saca una nota de la cola (la que ya se esta dibujando no se para)."""
+    ctx = contexto(pid)
+    with _COLA_LOCK:
+        estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+        estado["cola"] = [x for x in estado["cola"] if x != nid]
+    return _ficha_cola(ctx)
+
+
+@app.post("/api/proyectos/{pid}/repaso/{nid}/sin-marcas")
+def nota_sin_marcas(pid: str, nid: str):
+    """Propone la nota reescrita sin marcas ni personajes: NO la guarda."""
+    ctx = contexto(pid)
+    nota = next((n for n in _repaso().leer(ctx.proyecto)["notas"]
+                 if n.get("id") == nid), None)
+    if nota is None:
+        raise ErrorApi(404, f"no hay ninguna nota {nid}")
+    propuesta = PASOS_MODULOS.sin_marcas.reescribir_nota(
+        nota.get("texto"), cwd=ctx.proyecto.raiz)
+    return {"nota": nid, **propuesta,
+            "con_imagenes": bool(nota.get("imagenes"))}
+
+
 @app.delete("/api/proyectos/{pid}/repaso/{nid}")
 def borrar_nota_repaso(pid: str, nid: str):
     """Quita una nota del repaso."""
@@ -5692,6 +5939,7 @@ def leer_sonido(pid: str):
         "activo": render.get("sonido", True),
         "musica": render.get("musica") or {},
         "efectos": surtido,
+        "efectos_fijos": list(render.get("efectos_fijos") or []),
         # LOS VETADOS DEL CANAL. Viajan a la pantalla para poder pintar la ✕ ya
         # marcada en el efecto que se veto: si no, la lista enseñaria un sonido
         # con aspecto de estar puesto que en el vídeo no suena.
@@ -5706,6 +5954,7 @@ def leer_sonido(pid: str):
                                     if f.get("vetado"))}
                     for k, v in sonido.PAPELES.items()],
         "animos": sorted(sonido.ANIMOS),
+        "nombres_animos": sonido.NOMBRES_ANIMOS,
         "hay_jamendo": hay_jamendo,
         "hay_freesound": hay_freesound,
         "lufs": render.get("musica_lufs", sonido.MUSICA_LUFS),
@@ -5727,10 +5976,13 @@ def buscar_musica(pid: str, cuerpo: dict = Body(default=None)):
     plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
     try:
         temas = sonido.buscar_musica(
-            animo=str(datos.get("animo") or "sobrio"),
+            animo=str(datos.get("animo") or ("" if datos.get("texto") else "sobrio")),
             duracion_s=float(plan.get("duracion_total") or 0),
             velocidad=str(datos.get("velocidad") or "low"),
             extra=str(datos.get("extra") or "")[:80],
+            texto=str(datos.get("texto") or "")[:80],
+            pagina=int(datos.get("pagina") or 0),
+            instrumental=datos.get("instrumental") is not False,
             cuantas=int(datos.get("cuantas") or 12))
     except Exception as fallo:
         # una API caída no puede tumbar la pantalla: se dice y se sigue
@@ -5747,9 +5999,13 @@ def buscar_musica_suelta(cuerpo: dict = Body(default=None)):
     datos = _cuerpo(cuerpo)
     try:
         temas = sonido.buscar_musica(
-            animo=str(datos.get("animo") or "sobrio"), duracion_s=0,
+            animo=str(datos.get("animo") or ("" if datos.get("texto") else "sobrio")),
+            duracion_s=0,
             velocidad=str(datos.get("velocidad") or "low"),
             extra=str(datos.get("extra") or "")[:80],
+            texto=str(datos.get("texto") or "")[:80],
+            pagina=int(datos.get("pagina") or 0),
+            instrumental=datos.get("instrumental") is not False,
             cuantas=max(1, min(20, int(datos.get("cuantas") or 10))))
     except Exception as fallo:                              # noqa: BLE001
         raise ErrorApi(502, f"no se ha podido buscar música: {fallo}")
@@ -5790,8 +6046,11 @@ def guardar_sonido(pid: str, cuerpo: dict = Body(default=None)):
         if not ficha:
             cambios["musica"] = {}
         else:
-            if not ficha.get("id") or not ficha.get("descarga"):
+            propio = ficha.get("fuente") == "propia"
+            if not ficha.get("id") or not (ficha.get("descarga") or propio):
                 raise ErrorApi(400, "el tema tiene que traer 'id' y 'descarga'")
+            if propio and not os.path.isfile(sonido.banco("musica", sonido._nombre_de(ficha))):
+                raise ErrorApi(400, "ese audio tuyo ya no está: vuelve a subirlo")
             # Se BAJA aquí, al elegirlo, y no al renderizar: el render no sale a
             # la red, y enterarse de que el enlace ya no vale cuando llevas
             # veinte minutos de clips es la versión cara del mismo error.
@@ -6203,8 +6462,10 @@ def escuchar_tema(url: str = Query(...)):
     from urllib.parse import urlparse
     destino = urlparse(str(url))
     host = (destino.hostname or "").lower()
-    if destino.scheme != "https" or not (host == "jamendo.com" or host.endswith(".jamendo.com")):
-        raise ErrorApi(400, "solo se escuchan temas de Jamendo")
+    permitidos = ("jamendo.com", "freesound.org")
+    if destino.scheme != "https" or not any(
+            host == d or host.endswith("." + d) for d in permitidos):
+        raise ErrorApi(400, "solo se escuchan temas de Jamendo y sonidos de FreeSound")
     import requests
     try:
         respuesta = requests.get(url, stream=True, timeout=30)
@@ -6276,6 +6537,9 @@ def _correr_surtir_efectos(avisar, ctx, papeles, salteado):
     sonido = _sonido()
     render = ctx.estado.params("render") or {}
     surtido = dict(render.get("efectos") or {})
+    # los que se eligieron a mano no se vuelven a surtir: se pidieron ASI
+    fijos = set(render.get("efectos_fijos") or [])
+    papeles = [p for p in papeles if p not in fijos or not surtido.get(p)]
     total = len(papeles)
     for indice, papel in enumerate(papeles):
         avisar(0.05 + 0.9 * (indice / max(1, total)),
@@ -6350,6 +6614,127 @@ def montar_banda_sonora(pid: str, cuerpo: dict = Body(default=None)):
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id),
             "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
+
+
+# ---------------------------------------- tu música, tus efectos, y buscar más
+
+@app.post("/api/sonido/subir", status_code=201)
+async def subir_audio_propio(peticion: Request, familia: str = Query(default="musica")):
+    """Sube un audio tuyo (MP3, WAV, M4A, OGG) para la música o un efecto."""
+    sonido = _sonido()
+    if familia not in ("musica", "efectos"):
+        raise ErrorApi(400, "familia: «musica» o «efectos»")
+    tipo = (peticion.headers.get("content-type") or "").lower()
+    if not tipo.startswith("multipart/"):
+        raise ErrorApi(400, "manda el audio como multipart")
+    formulario = await peticion.form()
+    for _clave, valor in formulario.multi_items():
+        if not hasattr(valor, "read"):
+            continue
+        contenido = await valor.read()
+        try:
+            ficha = await asyncio.to_thread(
+                sonido.guardar_propio, contenido, getattr(valor, "filename", ""), familia)
+        except ValueError as fallo:
+            raise ErrorApi(400, str(fallo))
+        ficha["muestra"] = (f"/api/efectos/{sonido._nombre_de(ficha)}" if familia == "efectos"
+                            else f"/api/musica/propia/{sonido._nombre_de(ficha)}")
+        anotar_global("audio_propio", {"familia": familia, "id": ficha["id"],
+                                       "titulo": ficha["titulo"]})
+        return {"ficha": ficha}
+    raise ErrorApi(400, "no ha llegado ningún audio")
+
+
+@app.get("/api/musica/propia/{archivo}")
+def servir_musica_propia(archivo: str, peticion: Request):
+    """Un tema tuyo del banco, para escucharlo."""
+    sonido = _sonido()
+    if not archivo.startswith("propia_"):
+        raise ErrorApi(404, "solo se sirven aquí los temas subidos")
+    destino = ruta_segura(sonido.banco("musica"), archivo)
+    if not os.path.isfile(destino):
+        raise ErrorApi(404, f"no hay ningún tema {archivo!r}")
+    return servir_fichero(peticion, destino)
+
+
+@app.post("/api/efectos/buscar")
+def buscar_efectos_a_mano(cuerpo: dict = Body(default=None)):
+    """Efectos de FreeSound por texto libre, para elegir uno: {texto, papel?, pagina?}."""
+    sonido = _sonido()
+    datos = _cuerpo(cuerpo)
+    texto = " ".join(str(datos.get("texto") or "").split())[:80]
+    papel = str(datos.get("papel") or "")
+    if not texto:
+        texto = " ".join(sonido.PAPELES.get(papel, {}).get("consultas", ("whoosh",))[:1])
+    dur_min, dur_max = sonido.PAPELES.get(papel, {}).get("duracion", (0.1, 10.0))
+    try:
+        fichas = sonido.buscar_efectos(texto, dur_min, dur_max,
+                                       cuantos=max(1, min(30, int(datos.get("cuantos") or 15))))
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(502, f"no se ha podido buscar en FreeSound: {fallo}")
+    prohibidos = sonido.vetados()
+    for ficha in fichas:
+        ficha["vetado"] = sonido.clave_de(ficha) in prohibidos
+        ficha.update(licencia_de_efecto(ficha.get("licencia")))
+    return {"efectos": fichas, "texto": texto}
+
+
+def licencia_de_efecto(url):
+    """La licencia de un sonido de FreeSound, en claro (CC0, BY, BY-NC)."""
+    texto = str(url or "").lower()
+    if "publicdomain" in texto or "/zero/" in texto:
+        return {"licencia_nombre": "CC0 (libre)", "comercial": True, "atribucion": False}
+    return licencia_de_tema(url)
+
+
+@app.put("/api/proyectos/{pid}/sonido/efecto")
+def fijar_efecto(pid: str, cuerpo: dict = Body(default=None)):
+    """Fija UN sonido para un papel ({papel, efecto}) o lo devuelve a automático
+    ({papel, efecto: null}). Vuelve a montar el vídeo si estaba al día."""
+    ctx = contexto(pid)
+    sonido = _sonido()
+    datos = _cuerpo(cuerpo)
+    papel = str(datos.get("papel") or "")
+    if papel not in sonido.PAPELES:
+        raise ErrorApi(400, f"papel desconocido: {papel!r}. Son: {', '.join(sonido.PAPELES)}")
+    ficha = datos.get("efecto") if isinstance(datos.get("efecto"), dict) else None
+    render = ctx.estado.params("render") or {}
+    surtido = dict(render.get("efectos") or {})
+    fijos = [p for p in (render.get("efectos_fijos") or []) if p in sonido.PAPELES]
+    if ficha:
+        propio = ficha.get("fuente") == "propia"
+        if not ficha.get("id") or not (ficha.get("descarga") or propio):
+            raise ErrorApi(400, "el efecto tiene que traer 'id' y 'descarga'")
+        if not propio:
+            try:
+                sonido.traer(ficha, "efectos")
+            except Exception as fallo:                      # noqa: BLE001
+                raise ErrorApi(502, f"no se ha podido bajar el sonido: {fallo}")
+        if not os.path.isfile(sonido.banco("efectos", sonido._nombre_de(ficha))):
+            raise ErrorApi(400, "ese sonido no está en el banco: vuelve a subirlo")
+        limpio = {k: ficha.get(k) for k in ("fuente", "id", "titulo", "autor", "duracion",
+                                            "licencia", "pagina", "descarga", "escucha")}
+        limpio["papel"] = papel
+        surtido[papel] = [limpio]
+        if papel not in fijos:
+            fijos.append(papel)
+    else:
+        # A AUTOMATICO: el surtido de FreeSound otra vez (se busca al montar)
+        surtido.pop(papel, None)
+        fijos = [p for p in fijos if p != papel]
+    al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
+    ctx.estado.actualizar_params("render", {"efectos": surtido, "efectos_fijos": fijos})
+    trabajo_id = None
+    if datos.get("remontar"):
+        # los efectos se mezclan al montar el MP4: no se dibuja ni se surte nada
+        trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado,
+                                                "volver a mezclar los efectos")
+    ctx.bitacora.anotar("efecto_fijado", "render",
+                        {"papel": papel, "efecto": (ficha or {}).get("titulo")})
+    lista = [dict(f, muestra=f"/api/efectos/{sonido._nombre_de(f)}")
+             for f in (surtido.get(papel) or []) if isinstance(f, dict)]
+    return {"papel": papel, "fijos": fijos, "efectos": lista,
+            "trabajo_id": trabajo_id, "montado": montado}
 
 
 @app.get("/api/efectos/{archivo}")
@@ -7668,20 +8053,43 @@ def revisar_campo_con_su_guia(gid: str, cuerpo: dict = Body(default=None)):
     modulo = PASOS_MODULOS.revisar_campo
     if gid not in _guias().GUIAS:
         raise ErrorApi(404, f"no hay ninguna guía «{gid}»")
-    texto = str(_cuerpo(cuerpo).get("texto") or "")
+    datos = _cuerpo(cuerpo)
+    texto = str(datos.get("texto") or "")
     if not texto.strip():
         raise ErrorApi(400, "el campo está vacío: escribe algo y vuelve a revisar")
+    anterior = datos.get("anterior") if isinstance(datos.get("anterior"), dict) else None
+    clave = modulo.huella(gid, texto)
     rid = uuid.uuid4().hex[:12]
     with _LOCK_REVISIONES:
         # se guardan las ultimas 50: es una ventanilla, no un archivo
         for viejo in list(_REVISIONES)[:-49]:
             _REVISIONES.pop(viejo, None)
-        _REVISIONES[rid] = {"estado": "pensando", "guia": gid}
+        # EL MISMO TEXTO, LA MISMA RESPUESTA. Revisar lo que ya se reviso (o la
+        # version que la propia revision propuso) daba cada vez una opinion
+        # distinta y encontraba «errores» nuevos sin fin (10-10-2026).
+        guardada = _revisiones_guardadas().get(clave)
+        if guardada:
+            _REVISIONES[rid] = {"estado": "listo", "guia": gid,
+                                "resultado": dict(guardada, de_memoria=True)}
+            return {"id": rid, "estado": "listo"}
+        # y la que YA se esta revisando no se lanza dos veces
+        for otro, ficha in _REVISIONES.items():
+            if ficha.get("clave") == clave and ficha.get("estado") == "pensando":
+                return {"id": otro, "estado": "pensando"}
+        _REVISIONES[rid] = {"estado": "pensando", "guia": gid, "clave": clave}
 
     def correr():
         try:
-            resultado = modulo.revisar(gid, texto, cwd=RAIZ_ESTUDIO)
+            resultado = modulo.revisar(gid, texto, cwd=RAIZ_ESTUDIO, anterior=anterior)
             ficha = {"estado": "listo", "guia": gid, "resultado": resultado}
+            nuevas = {clave: {k: resultado.get(k) for k in
+                              ("veredicto", "resumen", "problemas", "sugerida")}}
+            if resultado.get("sugerida"):
+                # la que PROPONE la revision la da por buena la revision: si se
+                # pone tal cual y se vuelve a revisar, sale «sirve»
+                nuevas[modulo.huella(gid, resultado["sugerida"])] = \
+                    modulo.aprobada_por_la_revision()
+            _guardar_revisiones(nuevas)
         except Exception as fallo:                          # noqa: BLE001
             ficha = {"estado": "error", "guia": gid, "error": str(fallo)[:600]}
         with _LOCK_REVISIONES:
@@ -7689,6 +8097,35 @@ def revisar_campo_con_su_guia(gid: str, cuerpo: dict = Body(default=None)):
 
     threading.Thread(target=correr, daemon=True, name=f"revision-{rid}").start()
     return {"id": rid, "estado": "pensando"}
+
+
+def _ruta_revisiones():
+    return os.path.join(raiz_proyectos(), "_sistema", "revisiones.json")
+
+
+def _revisiones_guardadas():
+    try:
+        with open(_ruta_revisiones(), encoding="utf-8") as fh:
+            datos = json.load(fh)
+        return datos if isinstance(datos, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _guardar_revisiones(nuevas):
+    """Suma revisiones al almacen (las ultimas 400: es memoria, no archivo)."""
+    with _LOCK_REVISIONES:
+        todas = _revisiones_guardadas()
+        for clave, valor in nuevas.items():
+            todas.pop(clave, None)
+            todas[clave] = valor
+        while len(todas) > 400:
+            todas.pop(next(iter(todas)))
+        try:
+            os.makedirs(os.path.dirname(_ruta_revisiones()), exist_ok=True)
+            escribir_json(_ruta_revisiones(), todas)
+        except OSError:
+            pass
 
 
 @app.get("/api/sistema/revisiones/{rid}")

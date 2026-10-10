@@ -611,6 +611,106 @@ def _al_dia(destino, origen):
         return False
 
 
+# ------------------------------------------------- el motor FALSO, para probar
+#
+# ESTUDIO_IMAGEN_FALSA=1 no llama a OpenAI: devuelve una imagen de un color
+# sacado del prompt y responde COMO OpenAI a lo que hay que probar --que se vea
+# en pantalla y que cada fallo salga donde toca--. Es lo que usa el recorrido
+# automatico (`prueba_recorrido.py`). Con el valor:
+#
+#   1          imagenes buenas; un prompt con marcas (`sin_marcas.tiene_marcas`)
+#              o con «PROHIBIDO» se rechaza como lo hace el filtro de seguridad
+#   saldo      todo da «sin credito» (insufficient_quota)
+#   lento:N    como 1, tardando N segundos cada una
+
+class _RespuestaFalsa:
+    def __init__(self, codigo, cuerpo):
+        self.status_code = codigo
+        self._cuerpo = cuerpo
+        self.text = json.dumps(cuerpo)
+        self.headers = {}
+
+    def json(self):
+        return self._cuerpo
+
+
+def _modo_falso():
+    return str(os.environ.get("ESTUDIO_IMAGEN_FALSA") or "").strip().lower()
+
+
+def _llamada_falsa(prompt, tamano):
+    modo = _modo_falso()
+    if modo == "saldo":
+        return _RespuestaFalsa(429, {"error": {"code": "insufficient_quota",
+                                               "message": "You exceeded your current quota"}})
+    if modo.startswith("lento:"):
+        try:
+            time.sleep(min(60.0, float(modo.split(":", 1)[1])))
+        except ValueError:
+            pass
+    marcas = []
+    try:
+        import sin_marcas                                   # noqa: PLC0415
+        marcas = sin_marcas.tiene_marcas(prompt)
+    except ImportError:
+        pass
+    if marcas or "PROHIBIDO" in str(prompt):
+        return _RespuestaFalsa(400, {"error": {
+            "code": "moderation_blocked", "type": "image_generation_user_error",
+            "message": "Your request was rejected by the safety system. If you "
+                       "believe this is an error, contact us at help.openai.com "
+                       "and include the request ID req_falso123"}})
+    import io as _io                                        # noqa: PLC0415
+    from PIL import Image, ImageDraw                        # noqa: PLC0415
+    ancho, alto = [int(x) for x in TAMANOS[tamano].split("x")]
+    tono = hashlib.sha1(str(prompt).encode("utf-8")).digest()
+    lienzo = Image.new("RGB", (ancho // 4, alto // 4), tuple(tono[:3]))
+    ImageDraw.Draw(lienzo).ellipse((ancho // 16, alto // 16, ancho // 6, alto // 6),
+                                   fill=tuple(tono[3:6]))
+    salida = _io.BytesIO()
+    lienzo.resize((ancho, alto)).save(salida, "PNG")
+    return _RespuestaFalsa(200, {"data": [{"b64_json": base64.b64encode(
+        salida.getvalue()).decode("ascii")}], "usage": {}})
+
+
+class RechazoSeguridad(RuntimeError):
+    """OpenAI no dibuja esto: su filtro de seguridad lo ha rechazado.
+
+    No es un fallo de la red ni de la clave, y reintentar lo mismo no sirve: lo
+    que hay que cambiar es lo que se pide. Casi siempre son MARCAS o personajes
+    con derechos (Mario Kart, una Switch con su logo). Ver `pasos/sin_marcas.py`.
+    """
+
+
+def _es_rechazo_de_seguridad(respuesta):
+    if respuesta is None or respuesta.status_code != 400:
+        return False
+    texto = (respuesta.text or "").lower()
+    return ("safety system" in texto or "moderation_blocked" in texto
+            or "content_policy_violation" in texto or "safety_violations" in texto)
+
+
+#: {huella del prompt ORIGINAL: {"prompt": reescrito, "cambios": [...], "como"}}.
+#: Lo lee quien encarga la imagen para contar que se dibujo sin marcas.
+REESCRITURAS = {}
+
+
+def huella_prompt(prompt):
+    return hashlib.sha1(str(prompt or "").encode("utf-8")).hexdigest()[:16]
+
+
+def _sin_marcas(prompt):
+    """El prompt sin marcas (pasos/sin_marcas.py), o None si no hay con que."""
+    try:
+        import sin_marcas                                   # noqa: PLC0415
+    except ImportError:
+        return None
+    try:
+        return sin_marcas.reescribir(prompt)
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
 def generar(prompt, referencias, *, quality="low", tamano="apaisado",
             api_key=None, reintentos=6):
     # Sin referencias esta llamada NO se puede hacer, y hay que decirlo aqui.
@@ -636,17 +736,22 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
     cuenta_fija = _Cuenta("clave explicita", api_key) if api_key else None
     ultimo_error = None
     reintento_imagen = False
+    original = prompt
+    reescrito = None
     r = None
 
     for intento in range(reintentos + 1):
         cuenta = cuenta_fija or _elegir_cuenta(len(referencias))
         # si otra cadena se ha comido la ventana del limite de ESTA cuenta,
         # aqui se espera: salir a llamar igualmente es gastar otro 429
-        _esperar_turno(cuenta)
-        # y aunque no haya freno puesto, no se rebasa el ritmo permitido. Se
-        # piden tantas fichas como adjuntos lleva, que es lo que cuenta el cubo
-        # del otro lado.
-        _pedir_ficha(len(referencias), cuenta)
+        # (el motor falso no tiene limite que respetar: esperar ahi solo
+        # alarga las pruebas)
+        if not _modo_falso():
+            _esperar_turno(cuenta)
+            # y aunque no haya freno puesto, no se rebasa el ritmo permitido.
+            # Se piden tantas fichas como adjuntos lleva, que es lo que cuenta
+            # el cubo del otro lado.
+            _pedir_ficha(len(referencias), cuenta)
         abiertos, archivos = [], []
         try:
             for ruta in referencias:
@@ -656,9 +761,12 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
             datos = {"model": MODELO, "prompt": prompt,
                      "size": TAMANOS[tamano], "quality": quality, "n": "1"}
             t0 = time.time()
-            r = requests.post(API_URL,
-                              headers={"Authorization": f"Bearer {cuenta.clave}"},
-                              data=datos, files=archivos, timeout=600)
+            if _modo_falso():
+                r = _llamada_falsa(prompt, tamano)
+            else:
+                r = requests.post(API_URL,
+                                  headers={"Authorization": f"Bearer {cuenta.clave}"},
+                                  data=datos, files=archivos, timeout=600)
             segundos = time.time() - t0
         finally:
             for fh in abiertos:
@@ -678,12 +786,43 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
             _gasto["llamadas"] += 1
             # 'usage' es el unico recuento real de tokens de esta llamada y solo
             # existe aqui: se devuelve tal cual para que el medidor no lo estime
+            if prompt is not original:
+                REESCRITURAS[huella_prompt(original)] = dict(
+                    reescrito or {}, salio=True, cuando=time.time())
             return png, {"segundos": round(segundos, 1), "quality": quality,
+                         "sin_marcas": prompt is not original,
                          "refs": len(referencias), "coste": PRECIO[quality],
                          "modelo": MODELO, "tamano": TAMANOS[tamano],
                          "usage": payload.get("usage") or {}}
 
         ultimo_error = f"HTTP {r.status_code}: {r.text[:200]}"
+        # EL FILTRO DE SEGURIDAD: una vez, lo mismo SIN MARCAS. Rechazado no se
+        # cobra, asi que el segundo intento solo paga si sale. Si vuelve a
+        # rechazarse, no se insiste: se dice que y por que.
+        if _es_rechazo_de_seguridad(r):
+            if reescrito is None:
+                reescrito = _sin_marcas(original) or {}
+                if reescrito.get("cambios") and reescrito.get("prompt"):
+                    print(f"[imagen] OpenAI rechazo el prompt por su filtro; se "
+                          f"reintenta sin marcas ({len(reescrito['cambios'])} cambios)",
+                          flush=True)
+                    prompt = reescrito["prompt"]
+                    REESCRITURAS[huella_prompt(original)] = dict(
+                        reescrito, cuando=time.time())
+                    continue
+            identificador = ""
+            encaje = re.search(r"req_[A-Za-z0-9]+", r.text or "")
+            if encaje:
+                identificador = f" (id {encaje.group(0)})"
+            raise RechazoSeguridad(
+                "OpenAI ha rechazado esta imagen con su filtro de seguridad"
+                + identificador + ". Suele ser por pedir marcas, logos o "
+                "personajes con derechos (un videojuego, una consola, un "
+                "personaje conocido)"
+                + (" y ya se probó describiéndolo sin marcas"
+                   if (reescrito or {}).get("cambios") else "")
+                + ". Cambia la nota para describir lo que se ve sin nombres "
+                "propios, o quita las imágenes adjuntas con logos.")
         # UNA CLAVE QUE NO VALE aparta SU cuenta y se sigue con las demas. Es el
         # gemelo del «sin credito» de abajo, y existe por un caso real: una de
         # tres claves rotada en OpenAI y cada tanda con un tercio de

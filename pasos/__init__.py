@@ -73,6 +73,7 @@ from . import dictado  # noqa: E402,F401
 from . import revisar_campo  # noqa: E402,F401
 from . import presets_light  # noqa: E402,F401
 from . import laminas  # noqa: E402,F401
+from . import sin_marcas  # noqa: E402,F401
 
 MODULOS = {
     "ingesta": p1_ingesta,
@@ -97,7 +98,7 @@ __all__ = ["catalogo_visual", "conservar", "repaso",
            "login_cli", "asistente", "salud_cli", "comprobar_claves", "mcp_estudio",
            "encuadres", "estadisticas", "estilo",
            "cadencia", "fuentes",
-           "laminas", "marcas_tts", "medios", "moodboard",
+           "laminas", "sin_marcas", "marcas_tts", "medios", "moodboard",
            "p1_ingesta", "p2_brief", "p3_guion",
            "p4_voz", "p5_revision_audio", "presets_voz", "presets_canal",
            "presets_light", "recetas", "sonido", "tipografia", "subtitulos", "tono", "transiciones",

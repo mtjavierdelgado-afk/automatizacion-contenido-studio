@@ -4202,6 +4202,70 @@ def probar_laminas(cliente):
     cliente.delete(f"/api/presets-light/{pid}")
 
 
+def probar_sonido_propio_y_cola(cliente):
+    """Tu musica y tus efectos, la cola de imagenes y el motor ante el filtro."""
+    seccion("SONIDO PROPIO, COLA DE IMAGENES Y FILTRO DE SEGURIDAD")
+    carpeta = tempfile.mkdtemp(prefix="estudio_audio_")
+    mp3 = os.path.join(carpeta, "mio.mp3")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                    "sine=frequency=330:duration=2", mp3], check=True)
+    for familia, servida in (("efectos", "/api/efectos/"), ("musica", "/api/musica/propia/")):
+        with open(mp3, "rb") as fh:
+            r = cliente.sesion.post(f"{cliente.base}/api/sonido/subir?familia={familia}",
+                                    files={"audio": ("mio.mp3", fh, "audio/mpeg")}, timeout=60)
+        igual(r.status_code, 201, f"se sube un audio propio para {familia}")
+        ficha = (r.json() or {}).get("ficha") or {}
+        igual(ficha.get("fuente"), "propia", "y queda como audio propio")
+        ok(abs(float(ficha.get("duracion") or 0) - 2.0) < 0.3, "con su duracion medida")
+        r = cliente.sesion.get(cliente.base + ficha.get("muestra", ""), timeout=30)
+        igual(r.status_code, 200, f"y se puede escuchar ({ficha.get('muestra')})")
+    r = cliente.sesion.post(f"{cliente.base}/api/sonido/subir?familia=musica",
+                            files={"audio": ("nota.txt", b"hola", "text/plain")}, timeout=30)
+    igual(r.status_code, 400, "un fichero que no es audio se rechaza con su motivo")
+    respuesta, datos = cliente.post("/api/efectos/buscar", {"texto": "whoosh"})
+    ok(respuesta.status_code in (200, 502), "buscar efectos sin clave o sin red no rompe nada")
+    shutil.rmtree(carpeta, ignore_errors=True)
+
+    respuesta, datos = cliente.post("/api/proyectos", {"nombre": "cola de imagenes"})
+    pid = (datos.get("proyecto") or {}).get("id") or ""
+    respuesta, datos = cliente.get(f"/api/proyectos/{pid}/imagenes/cola")
+    igual(respuesta.status_code, 200, "la cola de imagenes se consulta")
+    igual(datos.get("cola"), [], "y empieza vacia")
+    respuesta, datos = cliente.post(f"/api/proyectos/{pid}/imagenes/rehacer", {})
+    igual(respuesta.status_code, 400, "sin notas pendientes no se lanza nada")
+
+    # EL MOTOR ANTE EL FILTRO DE SEGURIDAD (con el motor falso)
+    sys.path.insert(0, os.path.join(RAIZ_ESTUDIO, "pasos"))
+    import importlib.util
+    os.environ["ESTUDIO_IMAGEN_FALSA"] = "1"
+    os.environ.setdefault("OPENAI_API_KEY", "sk-falsa")
+    spec = importlib.util.spec_from_file_location(
+        "imagen_prueba", os.path.join(RAIZ_ESTUDIO, "motores", "imagen_openai", "imagen.py"))
+    imagen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(imagen)
+    import sin_marcas
+    sin_marcas.cli_claude = None            # solo la tabla: sin CLI ni red
+    ref = os.path.join(tempfile.mkdtemp(prefix="estudio_ref_"), "ref.png")
+    from PIL import Image
+    Image.new("RGB", (64, 64), (10, 20, 30)).save(ref)
+    try:
+        png, meta = imagen.generar("father and son playing Mario Kart on a Nintendo Switch",
+                                   [ref], quality="low")
+        ok(png[:4] == b"\x89PNG" and meta.get("sin_marcas"),
+           "con marcas: el filtro la rechaza, se reescribe sola y sale")
+        ultima = list(imagen.REESCRITURAS.values())[-1]
+        ok(any("Mario Kart" in a for a, _b in ultima.get("cambios") or []),
+           "y apunta que cambio (para contarlo en la nota)")
+        try:
+            imagen.generar("a big PROHIBIDO sign", [ref], quality="low")
+            ok(False, "lo que no se arregla quitando marcas se rechaza")
+        except imagen.RechazoSeguridad as fallo:
+            ok("filtro de seguridad" in str(fallo), "lo que no se arregla quitando marcas "
+               "sale como RechazoSeguridad, en claro")
+    finally:
+        os.environ.pop("ESTUDIO_IMAGEN_FALSA", None)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
     parser.add_argument("--conservar", action="store_true",
@@ -4239,6 +4303,7 @@ def main():
         probar_muestras_recuperadas(cliente)
         probar_imagenes_de_apoyo(cliente)
         probar_laminas(cliente)
+        probar_sonido_propio_y_cola(cliente)
         probar_taller_oculto(cliente)
         probar_cartelas_y_transiciones(cliente, pid, os.path.join(carpeta, pid))
         probar_direccion(cliente, pid)

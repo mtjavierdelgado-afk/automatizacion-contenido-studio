@@ -432,7 +432,10 @@ def prueba_las_aportadas_llegan_al_dibujo():
         shutil.rmtree(carpeta, ignore_errors=True)
 
     fuente = _fuente("app.py")
-    ok("referencias=_aportadas_del_taller(ctx)" in fuente,
+    # pasan por `para_la_hoja` (ocho como mucho en la hoja), pero son las del
+    # taller: sin ellas el dibujo sale sin adjuntos y la API lo rechaza
+    compacta = " ".join(fuente.split())
+    ok("referencias=_light().para_la_hoja( _aportadas_del_taller(ctx)" in compacta,
        "app.py le pasa al dibujo las imágenes del taller")
 
 

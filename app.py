@@ -2143,28 +2143,47 @@ def _previsto_regrabar(ctx, seccion_id=None):
             "usd": plan["usd"]}
 
 
+def _pausas_de_bloque(texto):
+    """[{"ms", "final"}]: las pausas de un bloque y si van al final de el.
+
+    Las del FINAL ya no cortan la voz: se hacen en el montaje (ver
+    `marcas_tts.separar_pausa_final`). Las de DENTRO de una frase si, y son las
+    que cuentan para el aviso.
+    """
+    marcas = PASOS_MODULOS.marcas_tts
+    _limpio, final = marcas.separar_pausa_final(texto)
+    fichas = [{"ms": ms, "final": False} for ms in marcas.pausas_internas(texto)]
+    if final:
+        fichas.append({"ms": final, "final": True})
+    return fichas
+
+
 def _pausas_del_guion(bloques):
     """Las pausas largas (<break>) del guion DE AHORA, contando lo editado.
 
     El aviso de «demasiados silencios» se calculaba al redactar y se quedaba
     escrito en guion.json: editar un bloque a mano le quita sus pausas, pero el
-    aviso seguia contando las de antes. Aqui se cuentan sobre el texto efectivo.
+    aviso seguia contando las de antes. Aqui se cuentan sobre el texto efectivo,
+    y solo cuentan las de DENTRO de una frase: las del final se hacen al montar.
     """
     marcas = PASOS_MODULOS.marcas_tts
-    por_bloque = {b["id"]: marcas.pausas_de(b.get("texto")) for b in bloques}
-    total = sum(len(v) for v in por_bloque.values())
+    internas = {b["id"]: marcas.pausas_internas(b.get("texto")) for b in bloques}
+    finales = [b["id"] for b in bloques
+               if marcas.separar_pausa_final(b.get("texto"))[1]]
+    total = sum(len(v) for v in internas.values())
     return {"total": total, "tope": marcas.tope_de_pausas(len(bloques)),
-            "con_pausa": [bid for bid, v in por_bloque.items() if v],
+            "con_pausa": [bid for bid, v in internas.items() if v],
+            "al_final": finales,
             "aviso": (marcas.revisar_conjunto(bloques) or [""])[0],
-            "sobrantes": _pausas_sobrantes(bloques, por_bloque)}
+            "sobrantes": _pausas_sobrantes(bloques, internas)}
 
 
 def _pausas_sobrantes(bloques, por_bloque):
-    """Que bloques quitarian su pausa para quedarse en el tope recomendado.
+    """Que bloques quitarian sus pausas INTERNAS para quedarse en el tope.
 
-    Se quedan, por este orden, la del primer bloque (el gancho: sin aire detras
-    el segundo bloque le pisa el remate) y las que cierran un tramo antes de un
-    cambio de tema (`abre_seccion` en el bloque siguiente). El resto sobra.
+    Se quedan, por este orden, las del primer bloque (el gancho) y las de los
+    bloques que cierran un tramo antes de un cambio de tema (`abre_seccion` en
+    el siguiente). El resto sobra.
     """
     tope = PASOS_MODULOS.marcas_tts.tope_de_pausas(len(bloques))
     con = [b["id"] for b in bloques if por_bloque.get(b["id"])]
@@ -2173,9 +2192,9 @@ def _pausas_sobrantes(bloques, por_bloque):
     abre = {}
     for anterior, siguiente in zip(bloques, bloques[1:]):
         abre[anterior["id"]] = bool(siguiente.get("abre_seccion"))
+    orden = [b["id"] for b in bloques]
     prioridad = sorted(con, key=lambda bid: (
-        0 if bloques and bid == bloques[0]["id"] else 1 if abre.get(bid) else 2,
-        [b["id"] for b in bloques].index(bid)))
+        0 if bid == orden[0] else 1 if abre.get(bid) else 2, orden.index(bid)))
     quedan, cuenta = set(), 0
     for bid in prioridad:
         if cuenta + len(por_bloque[bid]) > tope:
@@ -2187,10 +2206,9 @@ def _pausas_sobrantes(bloques, por_bloque):
 
 def _respuesta_estructura(ctx, **extra):
     bloques = _guion_efectivo(ctx)
-    marcas = PASOS_MODULOS.marcas_tts
     return dict({
         "bloques": [{"id": b["id"], "insertado": bool(b.get("insertado")),
-                     "pausas": marcas.pausas_de(b.get("texto"))}
+                     "pausas": _pausas_de_bloque(b.get("texto"))}
                     for b in bloques],
         "pausas": _pausas_del_guion(bloques),
         "insertados": [f["id"] for f in PASOS_MODULOS.estructura_guion.insertados_de(
@@ -2289,7 +2307,7 @@ def quitar_pausas_guion(pid: str, cuerpo: dict = Body(default=None)):
     def hacer(params, bloques, _grabados):
         por_id = {b["id"]: b for b in bloques}
         if datos.get("sobrantes"):
-            ids = _pausas_sobrantes(bloques, {b["id"]: marcas.pausas_de(b.get("texto"))
+            ids = _pausas_sobrantes(bloques, {b["id"]: marcas.pausas_internas(b.get("texto"))
                                               for b in bloques})
         else:
             ids = [str(b).strip().upper() for b in (datos.get("bloques") or [])]
@@ -2300,11 +2318,14 @@ def quitar_pausas_guion(pid: str, cuerpo: dict = Body(default=None)):
         cajon = {str(k).upper(): (dict(v) if isinstance(v, dict) else {"texto": v})
                  for k, v in (crudos.items() if isinstance(crudos, dict) else [])}
         quitadas = []
+        # «las sobrantes» quita solo las de DENTRO (las que cortan la voz); el
+        # boton de un bloque las quita todas, que es lo que pide quien lo pulsa
+        quitar = marcas.sin_pausas_internas if datos.get("sobrantes") else marcas.sin_pausas
         for bid in ids:
             texto = por_id[bid].get("texto") or ""
             if not marcas.pausas_de(texto):
                 continue
-            cajon[bid] = {"texto": marcas.sin_pausas(texto)}
+            cajon[bid] = {"texto": quitar(texto)}
             quitadas.append(bid)
         return {"bloques": cajon}, quitadas
 

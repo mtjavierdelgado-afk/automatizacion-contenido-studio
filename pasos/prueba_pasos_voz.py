@@ -486,6 +486,38 @@ def prueba_regrabacion_completa(proyecto):
 
 # ------------------------------------------------------------------- con red
 
+def prueba_pausas_en_el_montaje(base):
+    """La pausa del final de un bloque NO va a la voz: se hace al montar.
+
+    Un <break> parte la generacion; con uno por bloque la toma sonaba a lista
+    leida. Ahora la voz recibe el texto sin la cola de silencio y el corte se
+    estira despues, con la misma duracion.
+    """
+    print("\n[9b] las pausas de final de bloque se hacen en el montaje")
+    pausa = '<break time="1500ms"/>'
+    bloques = [{"id": "B001", "texto": "Primera frase del gancho." + pausa},
+               {"id": "B002", "texto": "Segunda frase, sin pausa al final."},
+               {"id": "B003", "texto": "Tercera con <break time=\"400ms\"/> una dentro."}]
+    cfg = p4_voz.resolver_params({"hueco_minimo": 0.3})
+    destino = os.path.join(base, "pausas")
+    salidas = p4_voz.sintetizar_bloques(bloques, destino, cfg)
+    with open(os.path.join(destino, p4_voz.NOMBRE_META), encoding="utf-8") as fh:
+        meta = json.load(fh)
+    comprobar("1500ms" not in meta["transcript"],
+              "a la voz NO le llega la pausa del final del bloque")
+    comprobar("400ms" in meta["transcript"],
+              "la de dentro de una frase si, que no se puede hacer al montar")
+    comprobar("1500ms" in salidas["bloques"][0]["texto"],
+              "la meta guarda el texto anotado entero (la revision compara contra el)")
+    fichas = {b["id"]: b for b in salidas["bloques"]}
+    hueco = fichas["B002"]["t_in"] - fichas["B001"]["t_out"]
+    comprobar(hueco >= 1.5,
+              f"y en el audio el corte de B001 dura la pausa pedida ({hueco:.2f} s)")
+    otro = fichas["B003"]["t_in"] - fichas["B002"]["t_out"]
+    comprobar(0.29 <= otro < 1.0,
+              f"donde no habia pausa manda el aire entre bloques ({otro:.2f} s)")
+
+
 def prueba_cache_por_clave():
     """EL CACHE SABE CON QUE CLAVE SE BAJO (06-09-2026).
 
@@ -707,6 +739,7 @@ def main():
         prueba_trabajo_en_segundo_plano(base)
         prueba_paso5(proyecto, estado, salidas)
         prueba_regrabacion_completa(proyecto)
+        prueba_pausas_en_el_montaje(base)
         prueba_cache_por_clave()
         prueba_catalogo_voces(con_red)
         if con_red:

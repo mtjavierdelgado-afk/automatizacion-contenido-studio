@@ -205,9 +205,18 @@ for muestra in ('El banco <spell>AT and T</spell> cayó.',
 print("\n== densidad: la toma tiene que seguir sonando continua ==")
 pocos = [{"texto": 'Uno.<break time="900ms"/>'}] + [{"texto": "Dos."}] * 5
 comprobar("un silencio en seis bloques no molesta", not m.revisar_conjunto(pocos))
-muchos = [{"texto": f'Bloque.<break time="900ms"/>'} for _ in range(6)]
-comprobar("un silencio en cada bloque si avisa",
+# las del FINAL de cada bloque ya no cortan la voz: se hacen al montar
+# (separar_pausa_final), asi que un silencio al final de cada bloque no avisa
+al_final = [{"texto": f'Bloque.<break time="900ms"/>'} for _ in range(6)]
+comprobar("un silencio AL FINAL de cada bloque no avisa: se hace al montar",
+          not m.revisar_conjunto(al_final))
+muchos = [{"texto": f'Bloque <break time="900ms"/> partido.'} for _ in range(6)]
+comprobar("un silencio DENTRO de cada bloque si avisa",
           any("continua" in p for p in m.revisar_conjunto(muchos)))
+comprobar("la pausa del final se separa del texto con su duracion",
+          m.separar_pausa_final('Fin.<break time="1s"/>') == ("Fin.", 1000))
+comprobar("y las de dentro se quedan",
+          m.pausas_internas('Uno <break time="400ms"/> dos.<break time="900ms"/>') == [400])
 comprobar("guion vacio no revienta", m.revisar_conjunto([]) == [])
 
 print("\n== idempotencia: sanear dos veces da lo mismo ==")

@@ -845,7 +845,11 @@ def probar_regrabar_y_estructura(cliente, carpeta):
 
 
 def probar_pausas(cliente, carpeta):
-    """Las pausas largas se cuentan con el texto DE AHORA y se quitan una a una."""
+    """Las pausas largas se cuentan con el texto DE AHORA y se quitan una a una.
+
+    Solo cuentan las de DENTRO de una frase: las del final de un bloque se hacen
+    al montar y ya no cortan la voz (marcas_tts.separar_pausa_final).
+    """
     seccion("LAS PAUSAS LARGAS DEL GUION")
     from nucleo.estado import Estado
     from nucleo.proyecto import Proyecto, escribir_json
@@ -856,24 +860,28 @@ def probar_pausas(cliente, carpeta):
     estado.completar("ingesta", {"r": 1})
     estado.completar("brief", {"r": 1})
     pausa = '<break time="900ms"/>'
-    bloques = [{"id": f"B00{n}", "texto": f"Frase {n} del guion.{pausa}",
+    bloques = [{"id": f"B00{n}", "texto": f"Frase {pausa} numero {n}.",
                 "abre_seccion": n in (1, 4)} for n in range(1, 6)]
-    bloques[1]["texto"] = f'Con <speed ratio="0.9"/>velocidad.{pausa}'
+    bloques[0]["texto"] = f"El gancho.{pausa}"
+    bloques[1]["texto"] = f'Con <speed ratio="0.9"/>velocidad {pausa} y mas.'
     escribir_json(os.path.join(proyecto.ruta_trabajo("guion"), "guion.json"),
                   {"titulo": "P", "guion": bloques})
     estado.completar("guion", {"guion": "guion.json"})
     base = f"/api/proyectos/{pid}/guion"
     _r, datos = cliente.get(f"{base}/bloques")
     pausas = datos.get("pausas") or {}
-    igual((pausas.get("total"), pausas.get("tope")), (5, 2),
-          "cuenta 5 pausas para 5 bloques, con un tope de 2")
-    igual(pausas.get("sobrantes"), ["B002", "B004", "B005"],
-          "y sobran todas menos la del gancho y la de antes de un cambio de tema")
+    igual((pausas.get("total"), pausas.get("tope")), (4, 2),
+          "cuenta 4 pausas DENTRO de frases (la del final del gancho no cuenta)")
+    igual(pausas.get("al_final"), ["B001"], "y aparte la del final del gancho")
+    primera = (datos.get("bloques") or [{}])[0].get("pausas")
+    igual(primera, [{"ms": 900, "final": True}], "cada bloque dice las suyas y dónde van")
+    igual(pausas.get("sobrantes"), ["B004", "B005"],
+          "sobran las que no cierran un tramo antes de un cambio de tema")
     # editar un bloque a mano le quita la pausa, y el aviso tiene que verlo
     cliente.put(f"/api/proyectos/{pid}/pasos/guion/params",
                 {"params": {"bloques": {"B005": {"texto": "Frase cinco reescrita."}}}})
     _r, datos = cliente.get(f"{base}/bloques")
-    igual(datos["pausas"]["total"], 4, "lo editado a mano cuenta: ya son 4")
+    igual(datos["pausas"]["total"], 3, "lo editado a mano cuenta: ya son 3")
     respuesta, datos = cliente.post(f"{base}/pausas/quitar", {"bloques": ["B002"]})
     igual(respuesta.status_code, 200, "quitar la pausa de un bloque responde 200")
     igual(datos.get("quitadas"), ["B002"], "y dice de cuál")
@@ -882,10 +890,10 @@ def probar_pausas(cliente, carpeta):
     ok("<break" not in texto and "<speed" in texto,
        f"quita la pausa y deja el resto de anotaciones: {texto}")
     igual(guion.get("estado"), "listo", "y no deja obsoleto al guion")
+    _r, datos = cliente.get(f"{base}/bloques")
+    igual(datos["pausas"]["total"], 2, "quedan 2: dentro de lo recomendado")
     respuesta, datos = cliente.post(f"{base}/pausas/quitar", {"sobrantes": True})
-    igual(datos["pausas"]["total"], 2, "«quitar las sobrantes» deja las 2 recomendadas")
-    igual(datos["pausas"]["con_pausa"], ["B001", "B003"],
-          "la del principio y la de antes del cambio de tema")
+    igual(datos.get("quitadas"), [], "y ya no sobra ninguna")
     respuesta, _d = cliente.post(f"{base}/pausas/quitar", {"bloques": ["B999"]})
     igual(respuesta.status_code, 400, "un bloque que no existe da 400")
 

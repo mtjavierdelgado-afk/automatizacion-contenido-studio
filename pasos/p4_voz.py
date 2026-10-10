@@ -912,6 +912,16 @@ def sintetizar_toma(texto, cfg, progreso=None):
     return _toma_real(texto, cfg, avisa)
 
 
+def pausas_de_final(bloques):
+    """({id: segundos de pausa al final}, bloques sin esa pausa en el texto)."""
+    pausa_de, para_voz = {}, []
+    for bloque in bloques:
+        limpio, ms = marcas_tts.separar_pausa_final(bloque["texto"])
+        pausa_de[bloque["id"]] = ms / 1000.0
+        para_voz.append(dict(bloque, texto=limpio))
+    return pausa_de, para_voz
+
+
 def _reparto(bloques, palabras):
     """Reparte las palabras de la toma entre los bloques.
 
@@ -955,7 +965,13 @@ def sintetizar_bloques(bloques, destino, cfg, avisar=None,
     anotados = [b for b in anotados if b["texto"].strip()]
     if not anotados:
         raise RuntimeError("el guion no tiene ni un bloque con texto que locutar")
-    texto = " ".join(b["texto"].strip() for b in anotados)
+    # LA PAUSA DEL FINAL DE CADA BLOQUE SALE DE LA TOMA y se hace al montar
+    # (ver `marcas_tts.separar_pausa_final`): un <break> parte la generacion, y
+    # uno por bloque devolvia el sonido de lista leida. El texto ANOTADO se
+    # guarda entero en la meta -- la revision compara contra el --; lo que se
+    # le manda a la voz va sin la cola de silencio.
+    pausa_de, para_voz = pausas_de_final(anotados)
+    texto = " ".join(b["texto"].strip() for b in para_voz)
 
     # Y todo lo demas trabaja sobre lo que se OYE. La cuenta de palabras, la
     # revision de tildes y el reparto de marcas cuentan la narracion, no el
@@ -993,7 +1009,7 @@ def sintetizar_bloques(bloques, destino, cfg, avisar=None,
     # siendo continuos -- y ademas queda escrito donde empieza y acaba cada una,
     # que es lo que permite regrabar solo la que salga mal.
     secciones = agrupar_secciones(anotados)
-    por_bloque = {b["id"]: b["texto"].strip() for b in anotados}
+    por_bloque = {b["id"]: b["texto"].strip() for b in para_voz}
     trozos = [" ".join(por_bloque[bid] for bid in sec["bloques"])
               for sec in secciones]
     wav = duracion = palabras = None
@@ -1014,7 +1030,9 @@ def sintetizar_bloques(bloques, destino, cfg, avisar=None,
 
     hueco = float(cfg.get("hueco_minimo") or 0.0)
     silencio_anadido = 0.0
-    if hueco > 0 and len(anotados) > 1:
+    for escena in escenas:
+        escena["pausa_despues"] = pausa_de.get(escena["id"], 0.0)
+    if (hueco > 0 or any(pausa_de.values())) and len(anotados) > 1:
         wav, desplazamientos = motor.espaciar(wav, palabras, reparto, escenas, hueco)
         if desplazamientos:
             for tramo in reparto.values():
@@ -1665,7 +1683,9 @@ def regrabar_seccion(bloques, seccion_id, cfg, meta, destino, peticion="",
     # grabar la toma entera: una etiqueta mal escrita a mano Cartesia la LEE.
     nuevos = [dict(b, texto=marcas_tts.sanear(b["texto"])) if b["id"] in dentro
               else b for b in nuevos]
-    trozo = " ".join(b["texto"].strip() for b in nuevos if b["id"] in dentro)
+    # la pausa del final de cada bloque, al montaje, como en la toma entera
+    pausa_de, para_voz = pausas_de_final([b for b in nuevos if b["id"] in dentro])
+    trozo = " ".join(b["texto"].strip() for b in para_voz)
 
     def progreso(fraccion, mensaje=""):
         return avisa(0.35 + 0.4 * max(0.0, min(1.0, fraccion)), mensaje)
@@ -1682,6 +1702,24 @@ def regrabar_seccion(bloques, seccion_id, cfg, meta, destino, peticion="",
         avisa(0.35, f"grabando {seccion_id} ({len(trozo.split())} palabras)")
         wav_nuevo, _dur, marcas_nuevas = _toma_por_contexto(
             [trozo], cfg, progreso)
+
+    # 2b. EL AIRE ENTRE LOS BLOQUES DE LA SECCION. La toma entera lo recibe de
+    # `motor.espaciar`; la seccion regrabada no lo recibia, y sus bloques
+    # quedaban pegados entre si en mitad de un video que respira. Se estira
+    # aqui, sobre el trozo nuevo y antes de coserlo.
+    hueco = float(cfg.get("hueco_minimo") or 0.0)
+    if wav_nuevo and len(para_voz) > 1 and (hueco > 0 or any(pausa_de.values())):
+        escenas_s, reparto_s = _reparto(
+            [b for b in nuevos if b["id"] in dentro], marcas_nuevas)
+        for escena in escenas_s:
+            escena["pausa_despues"] = pausa_de.get(escena["id"], 0.0)
+        wav_nuevo, desplazamientos = motor.espaciar(
+            wav_nuevo, marcas_nuevas, reparto_s, escenas_s, hueco)
+        if desplazamientos:
+            marcas_nuevas = [
+                dict(p, s=motor.aplicar_desplazamiento(p["s"], desplazamientos),
+                     e=motor.aplicar_desplazamiento(p["e"], desplazamientos))
+                for p in marcas_nuevas]
 
     # 3. se cose: lo de antes + lo nuevo + lo de despues
     avisa(0.8, "cosiendo la toma")

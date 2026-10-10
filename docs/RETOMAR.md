@@ -432,3 +432,18 @@ botón «Generar las diapositivas» se llama «Generar imágenes».
 - El coste que se enseña sale de la etapa: imágenes producidas × tarifa de la
   calidad, caracteres del guion × tarifa de voz; para el tono se da un tope,
   porque cuántos planos cambian no se sabe hasta reescribir.
+
+### Las pausas de final de bloque, al montaje (09-10-2026, noche)
+
+- Causa del aviso «N silencios para N bloques»: el propio p3 añade un `<break>`
+  tras el gancho y antes de cada cambio de tema DESPUES de revisar la densidad,
+  y en un video corto casi cada bloque es un tema. Cada `<break>` parte la
+  generacion de Cartesia (ElevenLabs documenta lo mismo).
+- Arreglo: `p4_voz.pausas_de_final` quita la cola de silencio de cada bloque
+  antes de mandarlo a la voz y la pasa como `pausa_despues` a `motor.espaciar`,
+  que estira el corte: `falta = max(hueco - hueco_natural, pausa)`, lo mismo
+  que hacia el `<break>`. La meta guarda el texto ANOTADO entero, asi que la
+  revision (`p5._toma_sellable`) sigue comparando igual.
+- `revisar_conjunto` cuenta solo las pausas INTERNAS. `regrabar_seccion` ahora
+  tambien pasa el trozo nuevo por `espaciar` (antes sus bloques quedaban sin
+  aire).

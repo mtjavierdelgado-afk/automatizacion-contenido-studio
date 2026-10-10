@@ -101,6 +101,9 @@ PARAMS_POR_DEFECTO = {
     # Lo que iguala unos efectos con otros va aparte y siempre puesto
     # (`sonido.igualar_por_papel`); esto decide cuanto suenan TODOS.
     "efectos_db": 0.0,
+    # `musica_presencia` ("suave", "normal", "alta") NO esta aqui a proposito:
+    # sin guardar vale `sonido.PRESENCIA_POR_DEFECTO`, y ponerla en esta lista
+    # la meteria en la firma de todos los videos que nunca la eligieron.
 }
 
 CALIDADES = {
@@ -550,7 +553,8 @@ def _cola_negra(clips, trabajo, fps, calidad, segundos=COLA_NEGRO_S):
 
 def _concatenar(clips, destino, audio, desfase, trabajo, musica=None,
                 efectos=None, duracion=0.0, lufs=None, cama=False,
-                ajuste_db=0.0, fps=12, calidad="media", efectos_db=0.0):
+                ajuste_db=0.0, fps=12, calidad="media", efectos_db=0.0,
+                presencia=None):
     """Une los clips sin recodificar y mezcla la banda sonora.
 
     La banda son tres pistas: la locucion, el tema de fondo agachado bajo ella
@@ -593,7 +597,8 @@ def _concatenar(clips, destino, audio, desfase, trabajo, musica=None,
                     con_musica, con_efectos, max(0.1, float(duracion)),
                     lufs if lufs is not None else sonido.MUSICA_LUFS,
                     ya_normalizada=cama, ajuste_db=ajuste_db,
-                    master=True, medida=medida, efectos_db=efectos_db)
+                    master=True, medida=medida, efectos_db=efectos_db,
+                    presencia=presencia)
             # LA PASADA QUE MIDE, con el MISMO grafo y sin escribir nada. Ver
             # `sonido.filtro_master`: la medida es lo que convierte el
             # `loudnorm` de adaptativo --que sobre voz con musica se oye como
@@ -1353,7 +1358,8 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
                 efectos=pista_efectos, duracion=largo_con_cola,
                 lufs=p.get("musica_lufs"), cama=cama, ajuste_db=ajuste_musica,
                 fps=fps, calidad=p.get("calidad") or "media",
-                efectos_db=ajuste_efectos)
+                efectos_db=ajuste_efectos,
+                presencia=p.get("musica_presencia"))
     duracion = medios.duracion_media(destino)
 
     # los assets son unidades heredadas: no se renderizan, pero se sellan igual

@@ -5592,6 +5592,63 @@ def guardar_sonido(pid: str, cuerpo: dict = Body(default=None)):
     return {"guardado": list(cambios), "estado": ctx.estado.estado_de("render")}
 
 
+@app.get("/api/proyectos/{pid}/musica/presencia")
+def leer_presencia_musica(pid: str):
+    """Cuánto se oye la música bajo la voz en este vídeo, y los niveles que hay."""
+    ctx = contexto(pid)
+    sonido = _sonido()
+    guardada = (ctx.estado.params("render") or {}).get("musica_presencia")
+    nombre, _ = sonido.presencia_de(guardada)
+    return {"presencia": nombre, "elegida": bool(guardada),
+            "por_defecto": sonido.PRESENCIA_POR_DEFECTO,
+            "niveles": list(sonido.PRESENCIAS)}
+
+
+@app.put("/api/proyectos/{pid}/musica/presencia")
+def cambiar_presencia_musica(pid: str, cuerpo: dict = Body(default=None)):
+    """Fija cuánto se oye la música y, si el vídeo ya está montado, lo REMONTA.
+
+    Remontar es volver a mezclar el audio sobre los clips que ya hay
+    (`solo_montar`): ni una imagen ni un clip, segundos de máquina. Solo se hace
+    si el montaje estaba al día: con planos pendientes, mezclar sobre los clips
+    viejos sellaría como hechos unos clips que no lo están, y entonces se
+    guarda y se deja para el siguiente montaje.
+
+    No se escribe nada si lo pedido es lo que ya suena (regla 1 de CLAUDE.md):
+    elegir «normal» en un vídeo que nunca eligió no mueve la firma.
+    """
+    ctx = contexto(pid)
+    sonido = _sonido()
+    datos = _cuerpo(cuerpo)
+    pedida = str(datos.get("presencia") or "").strip().lower()
+    if pedida not in sonido.PRESENCIAS:
+        raise ErrorApi(400, "«presencia» tiene que ser una de: "
+                            + ", ".join(sonido.PRESENCIAS))
+    render = ctx.estado.params("render") or {}
+    actual, _ = sonido.presencia_de(render.get("musica_presencia"))
+    if pedida == actual:
+        return {"presencia": actual, "cambiado": False, "remontando": False,
+                "trabajo_id": None, "estado": ctx.estado.estado_de("render")}
+    if _trabajo_activo(ctx, "render") is not None:
+        raise ErrorApi(409, "el vídeo se está montando ahora: cambia la música "
+                            "cuando termine")
+    al_dia = ctx.estado.estado_de("render") == "listo"
+    montado = bool(_ruta_de_version(ctx, "render", "video.mp4"))
+    ctx.estado.actualizar_params("render", {"musica_presencia": pedida})
+    ctx.bitacora.anotar("musica_presencia", "render",
+                        {"antes": actual, "ahora": pedida})
+    trabajo_id = None
+    if datos.get("remontar", True) and al_dia and montado:
+        trabajo_id = lanzar_paso(ctx, "render", None,
+                                 nombre="volver a mezclar la música",
+                                 opciones={"solo_montar": True})
+    return {"presencia": pedida, "cambiado": True,
+            "remontando": bool(trabajo_id), "trabajo_id": trabajo_id,
+            "montado": montado,
+            "trabajo": ctx.gestor.estado(trabajo_id) if trabajo_id else None,
+            "estado": ctx.estado.estado_de("render")}
+
+
 def _correr_surtir_efectos(avisar, ctx, papeles, salteado):
     sonido = _sonido()
     render = ctx.estado.params("render") or {}

@@ -467,6 +467,49 @@ DUCK_RATIO = 6
 DUCK_ATAQUE_MS = 15
 DUCK_CAIDA_MS = 1200
 
+# ===========================================================================
+# CUANTA MUSICA SE OYE: la presencia, por video
+#
+# Los numeros de arriba se calibraron en el canal de origen para que la musica
+# casi desapareciera bajo la voz (09-10-2026, primer video de prueba del
+# Studio: «no hay musica a pesar que esta seleccionada»). Medido sobre ese MP4:
+# la musica solo asomaba en la cola negra del final; bajo la voz quedaba
+# enterrada, y como la caida es de 1,2 s tampoco subia en las pausas entre
+# frases. Estaba en la mezcla; no se oia.
+#
+# La presencia junta los tres numeros que deciden eso -- cuanto se agacha
+# (ratio), cuanto se sube la pista (dB) y cuanto tarda en volver (caida) --
+# en tres niveles con nombre. Medido con ESTE grafo, voz real y un tema a -23
+# LUFS, en ventanas de 100 ms (mediana):
+#
+#                musica bajo la voz      musica en las pausas
+#   suave          25 dB por debajo           -40 dB      (los numeros de arriba)
+#   normal         15 dB por debajo           -30 dB      (cama: se oye, no tapa)
+#   alta           11 dB por debajo           -25 dB      (musica protagonista)
+#
+# «normal» es lo que suena cuando el video no ha guardado ninguna: no es un
+# param escrito por defecto (regla 1 de CLAUDE.md), es lo que vale si falta.
+# Cambiar el nivel de un video es un param del render (`musica_presencia`), y
+# se vuelve a MEZCLAR sobre los clips que ya hay (`solo_montar`): ni una imagen
+# ni un clip. Cambiar los numeros de esta tabla no mueve ninguna firma.
+# ===========================================================================
+
+PRESENCIAS = {
+    "suave": {"ratio": DUCK_RATIO, "subida_db": 0.0, "caida_ms": DUCK_CAIDA_MS},
+    "normal": {"ratio": 2.5, "subida_db": 4.0, "caida_ms": 600},
+    "alta": {"ratio": 2.0, "subida_db": 6.0, "caida_ms": 500},
+}
+PRESENCIA_POR_DEFECTO = "normal"
+
+
+def presencia_de(nombre):
+    """El nivel pedido, o el de por defecto si no se entiende. -> (nombre, ficha)"""
+    nombre = str(nombre or "").strip().lower()
+    if nombre not in PRESENCIAS:
+        nombre = PRESENCIA_POR_DEFECTO
+    return nombre, PRESENCIAS[nombre]
+
+
 # ------------------------------------------------------------ EL MASTER
 #
 # A CUANTO SALE EL VIDEO, y son las cifras de la plataforma. Medido con
@@ -1429,8 +1472,11 @@ def pista_de_efectos(lista, duracion_s, destino, igualar=True):
 
 def filtro_de_mezcla(con_musica, con_efectos, duracion_s, lufs=MUSICA_LUFS,
                      ya_normalizada=False, ajuste_db=0.0, master=False,
-                     medida=None, efectos_db=0.0):
+                     medida=None, efectos_db=0.0, presencia=None):
     """El grafo de ffmpeg que junta voz, musica agachada y efectos.
+
+    `presencia` es el nivel de `PRESENCIAS` ("suave", "normal", "alta"); sin
+    el, o con uno que no existe, el de por defecto.
 
     Las tres pistas se recortan al MISMO largo antes de mezclarse: con
     `-stream_loop -1` la musica es infinita, y un `amix` con una entrada
@@ -1462,7 +1508,8 @@ def filtro_de_mezcla(con_musica, con_efectos, duracion_s, lufs=MUSICA_LUFS,
         # el mando que mueve el repaso cuando alguien dice «la musica esta
         # alta»: un numero en dB, y remuxear. No toca ninguna imagen ni ningun
         # clip, asi que bajar la musica cuesta lo que tarda el mux.
-        subida = MUSICA_SUBIDA_DB + float(ajuste_db or 0.0)
+        _, ficha = presencia_de(presencia)
+        subida = MUSICA_SUBIDA_DB + ficha["subida_db"] + float(ajuste_db or 0.0)
         nivel = (f"volume={CAMA_GANANCIA_DB + subida:g}dB"
                  if ya_normalizada
                  else f"loudnorm=I={lufs:.1f}:TP=-1.5:LRA=11,"
@@ -1478,8 +1525,8 @@ def filtro_de_mezcla(con_musica, con_efectos, duracion_s, lufs=MUSICA_LUFS,
                       f"alimiter=limit={DUCK_LLAVE_TECHO:g}:attack=5:release=80"
                       f"[llave]")
         partes.append(f"[mus][llave]sidechaincompress=threshold={DUCK_UMBRAL:g}:"
-                      f"ratio={DUCK_RATIO:g}:attack={DUCK_ATAQUE_MS:g}:"
-                      f"release={DUCK_CAIDA_MS:g}:makeup=1[musduck]")
+                      f"ratio={ficha['ratio']:g}:attack={DUCK_ATAQUE_MS:g}:"
+                      f"release={ficha['caida_ms']:g}:makeup=1[musduck]")
         entradas.append("[musduck]")
     else:
         partes.append("[voz]anull[vozmix]")
@@ -1527,6 +1574,8 @@ def describir(params):
         ajuste = float(p.get("musica_db") or 0.0)
     except (TypeError, ValueError):
         ajuste = 0.0
+    presencia, ficha = presencia_de(p.get("musica_presencia"))
+    ajuste += ficha["subida_db"]
     trozos = []
     musica = p.get("musica") or {}
     tramos = musica.get("tramos") or []
@@ -1537,11 +1586,11 @@ def describir(params):
         animos = " > ".join(t.get("animo") or "?" for t in tramos)
         trozos.append(f"{len(tramos)} temas encadenados ({animos}) a "
                       f"{MUSICA_LUFS + CAMA_GANANCIA_DB + MUSICA_SUBIDA_DB + ajuste:.1f} "
-                      f"LUFS con ducking")
+                      f"LUFS con ducking {presencia}")
     elif musica.get("id"):
         trozos.append(f"«{musica.get('titulo') or musica['id']}» de "
                       f"{musica.get('artista') or '?'} a "
-                      f"{MUSICA_LUFS + MUSICA_SUBIDA_DB + ajuste:.1f} LUFS con ducking")
+                      f"{MUSICA_LUFS + MUSICA_SUBIDA_DB + ajuste:.1f} LUFS con ducking {presencia}")
     surtido = p.get("efectos") or {}
     cuantos = sum(len(v or []) for v in surtido.values())
     if cuantos:

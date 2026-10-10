@@ -8,6 +8,27 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ---
 
+## V2.0 · octubre de 2026 (música audible)
+
+**Corregido: la música no se oía aunque estuviera marcada**
+- La música sí iba en el vídeo, pero se agachaba tanto bajo la voz (unos
+  25 dB) que no se oía mientras se habla, y tardaba tanto en volver que
+  tampoco subía en las pausas: solo asomaba en los segundos negros del final.
+- Ahora, por defecto, queda **de fondo y audible** (unos 15 dB por debajo de
+  la voz) sin tapar lo que se dice.
+- Nuevo en **Encargo → Qué lleva este vídeo**, debajo de los interruptores,
+  cuando la música está encendida: **«Cuánto se oye la música»** con tres
+  niveles:
+  - **Suave**: como antes, casi no se oye bajo la voz.
+  - **Normal** (por defecto): de fondo, sin tapar la voz.
+  - **Alta**: música protagonista, se nota mientras se habla.
+- Cambiarlo en un vídeo ya montado **solo vuelve a mezclar el audio**: no se
+  dibuja ni se paga ninguna imagen, y tarda lo que tarda el montaje final. Si
+  el vídeo tiene planos pendientes, el nivel se guarda y se aplica al volver
+  a montarlo.
+- Los vídeos ya montados siguen sonando como estaban hasta que se vuelvan a
+  montar o se elija un nivel.
+
 ## V2.0 · octubre de 2026 (tercera parte)
 
 **El guion: regrabar, añadir y partir bloques**

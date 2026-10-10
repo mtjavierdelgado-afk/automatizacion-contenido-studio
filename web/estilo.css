@@ -2112,6 +2112,9 @@ button.primario.grande { padding: 9px 18px; font-size: 14px; }
   .marco-video.vertical { aspect-ratio: 9 / 16; height: 60vh; width: auto; }
 }
 .tira-modos.formatos button { min-width: 150px; }
+/* cuanto se oye la musica, debajo de los interruptores de «Que lleva» */
+.presencia-musica { margin-top: 14px; }
+.presencia-musica .tira-modos button { min-width: 90px; }
 .personaje-light .casillas { flex-wrap: wrap; gap: 14px; }
 .personaje-light .casillas label { display: inline-flex; align-items: center; gap: 6px; }
 

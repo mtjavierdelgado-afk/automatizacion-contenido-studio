@@ -4215,8 +4215,11 @@ def prueba_familias_de_receta():
 def prueba_musica_un_pelin_mas_alta():
     """La musica sube un pelin, y las dos ramas suben lo mismo."""
     titulo("sonido: el nivel de la musica, la cama y el tema suelto igual")
-    cama = sonido.filtro_de_mezcla(True, False, 10.0, ya_normalizada=True)
-    suelto = sonido.filtro_de_mezcla(True, False, 10.0)
+    # con la presencia «suave», que son los numeros del canal tal cual: la
+    # presencia por defecto suma lo suyo encima (ver la prueba de abajo)
+    cama = sonido.filtro_de_mezcla(True, False, 10.0, ya_normalizada=True,
+                                   presencia="suave")
+    suelto = sonido.filtro_de_mezcla(True, False, 10.0, presencia="suave")
     ok(f"volume={sonido.CAMA_GANANCIA_DB + sonido.MUSICA_SUBIDA_DB:g}dB" in cama,
        "la cama suma la subida del canal a su ganancia calibrada")
     ok(f"loudnorm=I={sonido.MUSICA_LUFS:.1f}" in suelto
@@ -4270,11 +4273,12 @@ def prueba_musica_un_pelin_mas_alta():
        "de la misma idea, o sea varias veces por plano")
 
     titulo("sonido: cuanta musica lleva ESTE video es un mando de un numero")
-    con_ajuste = sonido.filtro_de_mezcla(True, False, 10.0, ajuste_db=-3)
+    con_ajuste = sonido.filtro_de_mezcla(True, False, 10.0, ajuste_db=-3,
+                                         presencia="suave")
     ok(f"volume={sonido.MUSICA_SUBIDA_DB - 3:g}dB" in con_ajuste,
        "el ajuste del video se suma a la subida del canal, en la misma cuenta")
     cama_ajustada = sonido.filtro_de_mezcla(True, False, 10.0, ya_normalizada=True,
-                                            ajuste_db=-3)
+                                            ajuste_db=-3, presencia="suave")
     ok(f"volume={sonido.CAMA_GANANCIA_DB + sonido.MUSICA_SUBIDA_DB - 3:g}dB"
        in cama_ajustada,
        "y llega a las DOS ramas: con cama o con tema suelto, bajar la musica "
@@ -4283,6 +4287,46 @@ def prueba_musica_un_pelin_mas_alta():
        and p8_render.PARAMS_POR_DEFECTO["musica_db"] == 0.0,
        "vive en los params del render, a cero de fabrica: solo obliga a "
        "remuxear, ni una imagen ni un clip")
+
+    # LA PRESENCIA (09-10-2026). Con los numeros del canal la musica quedaba
+    # ~25 dB por debajo de la voz y solo se oia en la cola del final: «no hay
+    # musica a pesar que esta seleccionada».
+    titulo("sonido: cuanto se oye la musica es un nivel con nombre, por video")
+    igual(sorted(sonido.PRESENCIAS), ["alta", "normal", "suave"],
+          "tres niveles: suave, normal y alta")
+    igual(sonido.presencia_de(None)[0], sonido.PRESENCIA_POR_DEFECTO,
+          "sin elegir, la de por defecto")
+    igual(sonido.presencia_de("no-existe")[0], sonido.PRESENCIA_POR_DEFECTO,
+          "y lo que no se entiende, tambien")
+    ok(sonido.PRESENCIA_POR_DEFECTO != "suave",
+       "y la de por defecto NO es la de los numeros del canal, que la enterraban")
+    suave = sonido.filtro_de_mezcla(True, False, 10.0, presencia="suave")
+    ok(f"ratio={sonido.DUCK_RATIO:g}:" in suave
+       and f"release={sonido.DUCK_CAIDA_MS:g}" in suave,
+       "«suave» es el ducking del canal tal cual")
+    graficas = {n: sonido.filtro_de_mezcla(True, False, 10.0, presencia=n)
+                for n in sonido.PRESENCIAS}
+    for nombre, ficha in sonido.PRESENCIAS.items():
+        ok(f"ratio={ficha['ratio']:g}:" in graficas[nombre]
+           and f"release={ficha['caida_ms']:g}:" in graficas[nombre]
+           and f"volume={sonido.MUSICA_SUBIDA_DB + ficha['subida_db']:g}dB"
+           in graficas[nombre],
+           f"«{nombre}» llega al grafo: ratio, caida y subida")
+    ok(sonido.PRESENCIAS["suave"]["ratio"] > sonido.PRESENCIAS["normal"]["ratio"]
+       >= sonido.PRESENCIAS["alta"]["ratio"]
+       and sonido.PRESENCIAS["suave"]["subida_db"]
+       < sonido.PRESENCIAS["normal"]["subida_db"]
+       < sonido.PRESENCIAS["alta"]["subida_db"],
+       "y van en orden: cada nivel agacha menos y sube mas que el anterior")
+    ok(sonido.filtro_de_mezcla(True, False, 10.0)
+       == graficas[sonido.PRESENCIA_POR_DEFECTO],
+       "sin `presencia` el grafo es el del nivel por defecto")
+    ok("musica_presencia" not in p8_render.PARAMS_POR_DEFECTO,
+       "y NO esta en los params de fabrica: meterla ahi la pondria en la firma "
+       "de todos los videos que nunca la eligieron")
+    ok("ducking alta" in sonido.describir(
+        {"musica": {"id": "x", "titulo": "t"}, "musica_presencia": "alta"}),
+       "la frase del sonido dice el nivel")
 
 
 def _prohibir_pagar():

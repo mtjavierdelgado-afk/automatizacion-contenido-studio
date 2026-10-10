@@ -3499,6 +3499,85 @@ def probar_video_light(cliente):
     cliente.delete(f"/api/presets-light/{estilo_id}")
 
 
+def probar_presencia_musica(cliente, carpeta):
+    """Cuánto se oye la música: se elige por vídeo y, montado, solo se remezcla."""
+    seccion("CUÁNTO SE OYE LA MÚSICA")
+    from nucleo.estado import Estado
+    from nucleo.proyecto import Proyecto
+    _r, datos = cliente.post("/api/proyectos", {"nombre": "Presencia de la música"})
+    pid = (datos.get("proyecto") or {}).get("id")
+    ruta = f"/api/proyectos/{pid}/musica/presencia"
+    _r, datos = cliente.get(ruta)
+    igual((datos.get("presencia"), datos.get("elegida")), ("normal", False),
+          "sin elegir suena «normal», y lo dice")
+    igual(datos.get("niveles"), ["suave", "normal", "alta"], "y da los tres niveles")
+    respuesta, _d = cliente.put(ruta, {"presencia": "atronadora"})
+    igual(respuesta.status_code, 400, "un nivel que no existe es un 400")
+    _r, datos = cliente.put(ruta, {"presencia": "normal"})
+    igual(datos.get("cambiado"), False, "elegir lo que ya suena no cambia nada")
+    proyecto = Proyecto(os.path.join(carpeta, pid))
+    ok("musica_presencia" not in (Estado(proyecto).params("render") or {}),
+       "ni escribe el param: la firma del render no se mueve (regla 1)")
+    _r, datos = cliente.put(ruta, {"presencia": "alta"})
+    igual((datos.get("cambiado"), datos.get("remontando")), (True, False),
+          "sin vídeo montado se guarda y no se lanza nada")
+    igual(Estado(proyecto).params("render").get("musica_presencia"), "alta",
+          "y queda en los params del render")
+    _r, datos = cliente.get(ruta)
+    igual((datos.get("presencia"), datos.get("elegida")), ("alta", True),
+          "y al volver se lee la elegida")
+
+    # MONTADO Y AL DÍA: se remezcla con `solo_montar`, sin dibujar. En proceso
+    # y con un contexto de mentira: no hay clips, así que se mira qué se le
+    # pide al render y no se corre.
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+
+    class _Estado:
+        def __init__(self, estado):
+            self.render, self.estado = {"musica_presencia": "alta"}, estado
+
+        def params(self, _paso):
+            return dict(self.render)
+
+        def estado_de(self, _paso):
+            return self.estado
+
+        def actualizar_params(self, _paso, cambios):
+            self.render.update(cambios)
+
+    class _Ctx:
+        def __init__(self, estado):
+            self.estado = _Estado(estado)
+            self.bitacora = type("B", (), {"anotar": lambda *_a, **_k: None})()
+            self.gestor = type("G", (), {"estado": lambda _s, _t: {"id": _t},
+                                         "listar": lambda _s, **_k: []})()
+
+    lanzados = []
+    guardado = (servidor.contexto, servidor.lanzar_paso, servidor._ruta_de_version)
+    servidor.lanzar_paso = (lambda ctx, paso, unidades, **kw:
+                            lanzados.append((paso, kw.get("opciones"))) or "t-falso")
+    servidor._ruta_de_version = lambda ctx, paso, *partes: "pasos/render/v1/video.mp4"
+    try:
+        al_dia = _Ctx("listo")
+        servidor.contexto = lambda _pid: al_dia
+        datos = servidor.cambiar_presencia_musica("x", {"presencia": "suave"})
+        igual(datos.get("remontando"), True, "montado y al día: se vuelve a mezclar")
+        igual(lanzados, [("render", {"solo_montar": True})],
+              "con el render en `solo_montar`: ni un clip")
+        igual(al_dia.estado.render.get("musica_presencia"), "suave",
+              "y el nivel se guarda ANTES de lanzar, o la mezcla saldría con el viejo")
+        lanzados.clear()
+        pendiente = _Ctx("obsoleto")
+        servidor.contexto = lambda _pid: pendiente
+        datos = servidor.cambiar_presencia_musica("x", {"presencia": "normal"})
+        igual((datos.get("cambiado"), datos.get("remontando"), lanzados),
+              (True, False, []),
+              "con planos pendientes se guarda y NO se remezcla sobre clips viejos")
+    finally:
+        servidor.contexto, servidor.lanzar_paso, servidor._ruta_de_version = guardado
+
+
 def probar_traer_estilo(cliente):
     """Un video se queda con la copia del estilo; esto la trae cuando se pide.
 
@@ -3924,6 +4003,7 @@ def main():
         probar_voz(cliente, pid)
         probar_regrabar_y_estructura(cliente, carpeta)
         probar_pausas(cliente, carpeta)
+        probar_presencia_musica(cliente, carpeta)
         probar_bitacora(cliente, pid)
         probar_presets_canal(cliente)
         probar_modo_light(cliente)

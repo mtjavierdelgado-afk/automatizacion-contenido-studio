@@ -12006,6 +12006,7 @@ function bloqueLlevaDelVideo() {
           method: 'PUT', cuerpo: { lleva: { [pieza]: valor } } });
         v.lleva = r.lleva;
         (r.pasos || []).forEach(f => { v.fichas[f.id] = f; });
+        if (pieza === 'musica') pintar();
         toast(valor ? `${pieza}: se añadirá al volver a montar el vídeo`
                     : `${pieza}: se quitará al volver a montar el vídeo`);
       } catch (e) {
@@ -12014,6 +12015,7 @@ function bloqueLlevaDelVideo() {
         cargar();
       }
     }));
+    if (v.lleva.musica !== false) caja.appendChild(bloquePresenciaMusica());
   };
   const cargar = async () => {
     try {
@@ -12024,6 +12026,81 @@ function bloqueLlevaDelVideo() {
     pintar();
   };
   if (!v.lleva || v.llevaDe !== v.pid) { v.llevaDe = v.pid; v.lleva = null; cargar(); }
+  pintar();
+  return caja;
+}
+
+/* CUÁNTO SE OYE LA MÚSICA. La música va agachada bajo la voz (ducking), y
+   cuánto se agacha es lo que decide si se oye: con los números del canal de
+   origen quedaba enterrada y solo asomaba en la cola del final. Tres niveles
+   (ver `sonido.PRESENCIAS`); cambiarlo en un vídeo ya montado vuelve a mezclar
+   el audio sobre los clips que hay, sin dibujar nada. Sin elegir, «normal»: la
+   pantalla no escribe nada al abrirse (regla 1 de CLAUDE.md). */
+const PRESENCIAS_MUSICA = [
+  { id: 'suave', nombre: 'Suave', pista: 'Casi no se oye bajo la voz; sube en las pausas largas' },
+  { id: 'normal', nombre: 'Normal', pista: 'Se oye de fondo sin tapar la voz' },
+  { id: 'alta', nombre: 'Alta', pista: 'Música protagonista: se nota mientras se habla' },
+];
+
+function bloquePresenciaMusica() {
+  const v = APP.light.video;
+  const caja = h('div', { clase: 'campo presencia-musica' });
+  const pintar = () => {
+    vaciar(caja);
+    const datos = v.presencia;
+    caja.appendChild(h('label', {}, 'Cuánto se oye la música'));
+    if (!datos) { caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…')); return; }
+    const tira = h('div', { clase: 'tira-modos' });
+    PRESENCIAS_MUSICA.forEach(nivel => {
+      tira.appendChild(h('button', {
+        clase: 'mini' + (nivel.id === datos.presencia ? ' activo' : ''),
+        title: nivel.pista, disabled: !!v.presenciaOcupada,
+        onclick: () => elegir(nivel.id),
+      }, nivel.nombre));
+    });
+    caja.appendChild(tira);
+    const elegida = PRESENCIAS_MUSICA.find(n => n.id === datos.presencia);
+    caja.appendChild(h('div', { clase: 'meta' }, v.presenciaOcupada
+      ? 'volviendo a mezclar el audio…'
+      : (elegida ? elegida.pista : '') + '. Cambiarlo solo vuelve a mezclar el audio.'));
+  };
+  const elegir = async nivel => {
+    if (!v.presencia || nivel === v.presencia.presencia) return;
+    v.presenciaOcupada = true;
+    pintar();
+    try {
+      const r = await pedir(`${API.proyecto(v.pid)}/musica/presencia`, {
+        method: 'PUT', cuerpo: { presencia: nivel } });
+      v.presencia = Object.assign({}, v.presencia, { presencia: r.presencia, elegida: true });
+      if (r.trabajo_id) {
+        toast('Música: volviendo a mezclar el vídeo, sin dibujar nada');
+        seguirTrabajo(CLAVE_VIDEO_LIGHT, r.trabajo_id, async trabajo => {
+          v.presenciaOcupada = false;
+          if (trabajo.estado === 'listo') toast('Música: el vídeo ya suena con el nivel nuevo');
+          pintar();
+          try { await recargarVideoAbierto(); } catch (e) { /* la ficha se relee al volver */ }
+        });
+        return;
+      }
+      v.presenciaOcupada = false;
+      toast(r.montado
+        ? 'Música: se aplicará al volver a montar el vídeo (hay planos pendientes)'
+        : 'Música: se aplicará al montar el vídeo');
+    } catch (e) {
+      v.presenciaOcupada = false;
+      toast(e.message, true);
+    }
+    pintar();
+  };
+  const cargar = async () => {
+    try {
+      v.presencia = await pedir(`${API.proyecto(v.pid)}/musica/presencia`);
+    } catch (e) {
+      v.presencia = { presencia: 'normal', elegida: false };
+    }
+    pintar();
+  };
+  if (!v.presencia || v.presenciaDe !== v.pid) { v.presenciaDe = v.pid; v.presencia = null; cargar(); }
   pintar();
   return caja;
 }

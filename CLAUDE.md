@@ -69,6 +69,17 @@ que estar siempre listo para servirse. Por eso:
 5. **`docs/NOVEDADES.md` se escribe en la rama** y, al unir, las entradas de las
    dos ramas se SUMAN: un choque ahí se resuelve conservando las dos, nunca
    eligiendo una.
+6. **Como mucho tres ramas abiertas a la vez.** Más ramas suman choques sin ir
+   más rápido.
+7. **Se une de una en una**, y antes de cada unión el dueño hace una
+   instantánea del VPS en Hostinger. Después de unir, `asvs actualizar` en el
+   servidor y se comprueba que el Studio arranca antes de unir la siguiente.
+8. **La única excepción a «no toques `main`»** es esta sección de
+   coordinación de `CLAUDE.md` (los nombres, la tabla de ficheros reservados y
+   el orden). Se edita directamente en `main`, en un commit que no toca nada
+   más, y después cada rama abierta hace `git merge origin/main`. Si se
+   apuntara en la rama, las demás conversaciones no lo verían hasta la unión,
+   que es justo cuando ya no sirve.
 
 ### Ficheros reservados mientras una rama esté abierta
 
@@ -79,12 +90,13 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 |---|---|---|
 | `etapa-foto-a` | `pasos/p6_assets.py`, `pasos/encuadres.py`, `pasos/estilo.py`, `pasos/moodboard.py`, y el fichero nuevo de reglas de foto | 09-10-2026 |
 
-Quien abre una rama la apunta aquí; quien la une a `main`, la quita.
+Quien abre una rama la apunta aquí (en `main`, regla 8); quien la une a `main`,
+la quita.
 
 ### El orden acordado
 
-1. **Ahora, en paralelo**: la Etapa Foto A y la V2.0 fase 3. No comparten
-   ficheros.
+1. **Ahora, en paralelo (las tres ramas del máximo)**: la Etapa Foto A, la V2.0
+   fase 3 y la V2.0 fase 4a (esta, con ficheros nuevos; ver abajo).
 2. **La V2.0 fase 4 se parte en dos ramas**, porque cada mitad choca con una
    cosa distinta:
    - `v2-fase-4a` — la base para enchufar IAs y el motor de imágenes de ChatGPT
@@ -105,7 +117,10 @@ Quien abre una rama la apunta aquí; quien la une a `main`, la quita.
    unidas (la B, recomendada). Veo y Kling se enchufan como motores de la base
    de 4a, no aparte. El paquete de ida y vuelta lleva, por plano, la imagen
    inicial, el prompt, la carta de encuadre y, cuando exista, sus productos.
-5. La Etapa Foto C va al final: es sobre todo pantalla (`web/app.js`).
+5. **La Etapa Foto C** va después de la B, en la misma conversación que A y B.
+   Es casi solo pantalla (`web/app.js`), así que se abre cuando no haya otra
+   rama abierta cambiando la pantalla; si la fase 3 o la 4a siguen abiertas, se
+   espera a que se unan.
 
 ### Lo que la Etapa Foto A promete a las demás fases
 

@@ -13516,7 +13516,8 @@ function resumenAjuste(modo, est, cual) {
     const presencia = op ? (op.presencia || 'normal') : ((est.musica || {}).presencia || {}).presencia || 'normal';
     const tema = op ? op.musica : (est.musica || {}).tema;
     const nivel = (PRESENCIAS_MUSICA.find(p => p.id === presencia) || {}).nombre || presencia;
-    return (tema ? `«${tema.titulo || tema.id}» de ${tema.artista || '?'}` : 'Automática (varios temas según el ritmo)')
+    const deQuien = t => (t.fuente === 'propia' ? ' (tuya)' : ` de ${t.artista || '?'}`);
+    return (tema ? `«${tema.titulo || tema.id}»${deQuien(tema)}` : 'Automática (varios temas según el ritmo)')
       + ` · se oye ${nivel.toLowerCase()}`;
   }
   if (cual === 'efectos') {
@@ -13598,7 +13599,8 @@ function editorMusica(modo, est, repintar) {
     h('button', { clase: 'mini' + (tema ? ' activo' : ''), onclick: () => {
       est.busqueda.abierta = true; repintar(); } }, tema ? `«${tema.titulo || tema.id}»` : 'Elegir un tema…')));
   caja.appendChild(h('div', { clase: 'pista' }, tema
-    ? `Suena todo el vídeo este tema: ${tema.titulo || tema.id} de ${tema.artista || '?'}`
+    ? `Suena todo el vídeo este tema: ${tema.titulo || tema.id}`
+      + (tema.fuente === 'propia' ? ' (subido por ti)' : ` de ${tema.artista || '?'}`)
       + (tema.licencia_nombre ? ` · ${tema.licencia_nombre}` : '')
     : 'Automática: el vídeo se parte en tramos según su ritmo y cada uno lleva su tema de Jamendo.'));
 

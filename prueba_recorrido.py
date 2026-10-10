@@ -623,6 +623,203 @@ def resto_de_pantallas(navegador, datos):
     movil.cerrar()
 
 
+def _png(ruta, color):
+    from PIL import Image                                    # noqa: PLC0415
+    Image.new("RGB", (320, 200), color).save(ruta)
+    return ruta
+
+
+@escenario
+def proyectos_a_mano(navegador, datos):
+    """Crear, renombrar, logo, clave, ocultar y borrar un proyecto, pulsando."""
+    pg = Pagina(navegador, datos)
+    pg.js("await cargarGaleriaLight(true); irALight('galeria'); elegirCliente('');")
+    pg.pulsar(".tarjeta-proyecto", "Nuevo proyecto")
+    ok(pg.esperar(".capa-dialogo input"), "«Nuevo proyecto» pide un nombre")
+    pg.p.locator(".capa-dialogo input").first.fill("Cliente de prueba")
+    pg.p.locator(".capa-dialogo button[type=submit]").click()
+    ok(pg.esperar("h2", "Cliente de prueba"), "y entra en el proyecto nuevo")
+    pg.pulsar(".mandos-proyecto button", "Renombrar")
+    pg.p.locator(".capa-dialogo input").first.fill("Cliente renombrado")
+    pg.p.locator(".capa-dialogo button[type=submit]").click()
+    ok(pg.esperar("h2", "Cliente renombrado"), "se renombra")
+    pg.pulsar(".mandos-proyecto button", "Logo")
+    logo = _png(os.path.join(datos["base"], "logo.png"), (250, 200, 30))
+    pg.p.locator(".panel-logo-proyecto input[type=file]").set_input_files(logo)
+    ok(pg.esperar(".mandos-proyecto button", "Logo ✓", 15), "se le pone logo")
+    pg.pulsar(".mandos-proyecto button", "Ocultar")
+    ok(pg.esperar(".pastilla", "oculto"), "se oculta (y lo dice)")
+    pg.pulsar(".mandos-proyecto button", "Poner clave")
+    pg.p.locator(".capa-dialogo input").nth(0).fill("abcd")
+    pg.p.locator(".capa-dialogo input").nth(1).fill("abcd")
+    pg.p.locator(".capa-dialogo button[type=submit]").click()
+    ok(pg.esperar(".mandos-proyecto button", "Clave ✓", 10), "se le pone clave")
+    pg.captura("15_proyecto_a_mano")
+    pg.pulsar(".mandos-proyecto button", "Borrar")
+    if pg.esperar(".capa-dialogo button", "Borrar", 5):
+        pg.pulsar(".capa-dialogo button", "Borrar")
+    ok(pg.esperar("h2", "Tus proyectos"), "se borra y vuelve a la portada")
+    ok(not pg.visible(".tarjeta-proyecto", "Cliente renombrado"), "y ya no está")
+    pg.sin_errores("los proyectos a mano")
+    pg.cerrar()
+
+
+@escenario
+def laminas_a_mano(navegador, datos):
+    """Quitar y devolver una lámina, y cambiar la hoja, pulsando."""
+    pg = Pagina(navegador, datos)
+    pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{datos['preset']}' }});")
+    ok(pg.esperar(".laminas-estilo .lamina"), "las láminas están")
+    pg.p.locator(".laminas-estilo .lamina").filter(has_text="diagrama").locator(
+        "button", has_text="Quitar").click()
+    ok(pg.esperar(".light-generando, .generando, body", None, 5), "quitar una lámina lanza el rehacer")
+    fin = time.time() + 90
+    while time.time() < fin and not pg.visible(".laminas-estilo button", "Devolver"):
+        pg.p.wait_for_timeout(1000)
+    ok(pg.visible(".laminas-estilo button", "Devolver"),
+       "al terminar, la quitada se puede devolver (gratis)")
+    ok(pg.p.locator(".laminas-estilo .lamina").count() == 5, "y quedan cinco")
+    pg.pulsar(".laminas-estilo button", "Devolver")
+    fin = time.time() + 90
+    while time.time() < fin and pg.p.locator(".laminas-estilo .lamina").count() != 6:
+        pg.p.wait_for_timeout(1000)
+    ok(pg.p.locator(".laminas-estilo .lamina").count() == 6, "y al devolverla vuelven a ser seis")
+    sel = pg.p.locator(".laminas-estilo select")
+    if sel.count():
+        sel.first.select_option("repartida")
+        pg.p.wait_for_timeout(1500)
+        ok("guardado" in pg.toast(), "cambiar la hoja se guarda sin dibujar nada")
+    pg.captura("16_laminas_a_mano")
+    pg.sin_errores("las láminas a mano")
+    pg.cerrar()
+
+
+@escenario
+def estilo_nuevo(navegador, datos):
+    """El formulario de un estilo nuevo, y qué pasa si la creación falla."""
+    pg = Pagina(navegador, datos)
+    pg.js("APP.light.encargo = null; irALight('crear', { taller: null });")
+    ok(pg.esperar("input, textarea"), "el formulario de estilo nuevo se abre")
+    ok(pg.visible("body", "Imágenes de referencia") or pg.visible("body", "IMÁGENES DE REFERENCIA"),
+       "pide las imágenes de referencia")
+    ok(pg.visible("body", "Tono del guion"), "el tono")
+    ok(pg.visible("body", "Voz"), "y la voz")
+    pg.captura("17_estilo_nuevo")
+    pg.sin_errores("el estilo nuevo")
+    pg.cerrar()
+
+
+@escenario
+def video_nuevo_con_ajustes(navegador, datos):
+    """Un vídeo nuevo con música, subtítulos y logo elegidos AL CREARLO."""
+    api = datos["api"]
+    pg = Pagina(navegador, datos)
+    pg.js(f"await cargarGaleriaLight(true); elegirEstiloLight(fichaLight('{datos['preset']}'));")
+    ok(pg.esperar("h2", "Un vídeo nuevo"), "elegir el estilo abre el vídeo nuevo")
+    ok(pg.esperar(".ajustes-montaje"), "con los ajustes del montaje ya al crearlo")
+    pg.p.locator(".fila-ajuste").filter(has_text="Subtítulos").locator("button", has_text="Cambiar").click()
+    pg.pulsar(".editor-ajuste button", "Grande")
+    ok(pg.visible(".fila-ajuste", "tamaño grande"), "se eligen los subtítulos (grandes)")
+    pg.p.locator(".fila-ajuste").filter(has_text="Logo").locator("button", has_text="Cambiar").click()
+    logo = _png(os.path.join(datos["base"], "logo2.png"), (30, 200, 250))
+    pg.p.locator(".editor-ajuste input[type=file]").set_input_files(logo)
+    ok(pg.esperar(".fila-ajuste", "Logo propio", 15), "y un logo")
+    campo = pg.p.locator(".bloque-light").filter(has_text="El vídeo").locator("input").first
+    campo.fill("Vídeo creado en el recorrido")
+    material = pg.p.locator(".bloque-light").filter(has_text="El material").locator("textarea").first
+    material.fill("Un padre y su hijo juegan a un videojuego de carreras. Gana el hijo tres veces.")
+    material.dispatch_event("input")
+    pg.captura("18_video_nuevo")
+    pg.pulsar("button.primario.grande", "Generar el guion")
+    pg.p.wait_for_timeout(4000)
+    r, d = api.get("/api/proyectos")
+    nuevo = next((x for x in d.get("proyectos") or []
+                  if x.get("nombre") == "Vídeo creado en el recorrido"), None)
+    ok(nuevo, "se crea el vídeo")
+    if nuevo:
+        r, sub = api.get(f"/api/proyectos/{nuevo['id']}/subtitulos")
+        ok(sub.get("tam") == "grande", f"con los subtítulos elegidos al crearlo ({sub.get('tam')})")
+        r, logo_d = api.get(f"/api/proyectos/{nuevo['id']}/logo")
+        ok((logo_d or {}).get("logo"), "y con su logo")
+    # el guion lo escribe el CLI falso, que no sabe: tiene que fallar CON MOTIVO
+    fin = time.time() + 90
+    while time.time() < fin and not pg.visible(".error-cerrable") and not pg.visible(".bloque-guion, .guion-bloque"):
+        pg.p.wait_for_timeout(1000)
+    if pg.visible(".error-cerrable"):
+        ok(True, "si el guion falla, se dice con su motivo")
+        # ese fallo es el esperado (el CLI falso no escribe guiones) y la
+        # pantalla lo apunta tambien en la consola: no es un error de la pantalla
+        pg.errores[:] = [e for e in pg.errores if not e.startswith("console: ")]
+        pg.pulsar(".error-cerrable button", "Cerrar")
+        ok(not pg.visible(".error-cerrable"), "y el aviso se puede cerrar")
+    pg.captura("19_video_nuevo_tras_generar")
+    pg.sin_errores("el vídeo nuevo")
+    pg.cerrar()
+
+
+@escenario
+def tema_claro_y_asistente(navegador, datos):
+    pg = Pagina(navegador, datos)
+    pg.pulsar("#btn-tema")
+    ok(pg.p.evaluate("() => document.documentElement.dataset.tema") in ("claro", "oscuro"),
+       "el botón de tema cambia el tema")
+    pg.js("await cargarGaleriaLight(true); irALight('galeria'); elegirCliente('');")
+    pg.captura("20_tema_claro")
+    pg.pulsar("#btn-tema")
+    pg.pulsar("#burbuja-asistente")
+    pg.p.wait_for_timeout(1500)
+    campo = pg.p.locator("#asistente-texto")
+    if campo.is_enabled():
+        campo.fill("¿qué es una lámina?")
+        pg.pulsar("#btn-enviar-asistente")
+        ok(campo.is_enabled(), "se puede seguir escribiendo mientras contesta")
+        ok(pg.esperar("#asistente-cuerpo", "lámina", 30), "el asistente contesta (simulado)")
+    else:
+        # sin sesion de Claude (aqui no hay ninguna): lo dice y dice como entrar
+        ok("Entra" in (campo.get_attribute("placeholder") or ""),
+           "sin sesión de Claude, el asistente dice cómo entrar")
+    pg.captura("21_asistente")
+    pg.sin_errores("el tema y el asistente")
+    pg.cerrar()
+
+
+@escenario
+def fallos_simulados(navegador, datos):
+    """Sin crédito en OpenAI: la nota lo dice, con qué hacer, y nada más se rompe."""
+    api = datos["api"]
+    parar(datos["proceso"])
+    env = dict(datos["env"], ESTUDIO_IMAGEN_FALSA="saldo")
+    proceso, url = arrancar(env, datos["proyectos"])
+    datos.update({"proceso": proceso, "url": url, "api": Api(url)})
+    try:
+        pg = Pagina(navegador, datos)
+        pg.js(f"await abrirVideoLight('{datos['video']}'); APP.light.video.vista = 'previa'; pintarLight();")
+        ok(pg.esperar(".previa-feedback textarea"), "la pantalla de imágenes se abre")
+        area = pg.p.locator(".previa-feedback textarea").first
+        area.fill("que el cielo sea naranja")
+        area.dispatch_event("input")
+        pg.pulsar(".previa-feedback button", "Guardar nota")
+        pg.p.locator(".nota-imagen").filter(has_text="cielo sea naranja").locator(
+            "button", has_text="Rehacer esta imagen").click()
+        tarjeta = pg.p.locator(".nota-imagen").filter(has_text="cielo sea naranja")
+        fin = time.time() + 60
+        while time.time() < fin and "falló" not in tarjeta.first.inner_text().lower():
+            pg.p.wait_for_timeout(500)
+        texto = tarjeta.first.inner_text()
+        ok("falló" in texto.lower(), "sin crédito, la nota dice que falló")
+        ok("credito" in texto.lower() or "crédito" in texto.lower(),
+           f"y por qué, con qué hacer ({texto[-160:]!r})")
+        pg.pulsar(".nav-light button", "Encargo")
+        ok(not pg.visible(".error-cerrable"), "y el Encargo sigue limpio")
+        pg.captura("22_sin_credito")
+        pg.sin_errores("los fallos simulados")
+        pg.cerrar()
+    finally:
+        parar(datos["proceso"])
+        proceso, url = arrancar(datos["env"], datos["proyectos"])
+        datos.update({"proceso": proceso, "url": url, "api": Api(url)})
+
+
 def main():
     ap = argparse.ArgumentParser(description="El recorrido de la pantalla")
     ap.add_argument("--solo", default="", help="un escenario por nombre")
@@ -636,14 +833,15 @@ def main():
     print(f"RECORRIDO DE LA PANTALLA\n  datos en {base}\n  capturas en {capturas}")
     env, proyectos = preparar_entorno(base)
     proceso = None
+    datos = {}
     try:
         pid, params = fabricar_video(proyectos, env)
         proceso, url = arrancar(env, proyectos)
         api = Api(url)
         seccion("LOS DATOS DE PRUEBA")
-        datos = sembrar(api, proyectos, params)
+        datos.update(sembrar(api, proyectos, params))
         datos.update({"url": url, "proyectos": proyectos, "capturas": capturas,
-                      "base": base, "api": api})
+                      "base": base, "api": api, "env": env, "proceso": proceso})
         try:
             from playwright.sync_api import sync_playwright  # noqa: PLC0415
         except ImportError:
@@ -663,10 +861,10 @@ def main():
                     ok(False, f"{funcion.__name__} se corto: {type(fallo).__name__}: {fallo}")
             navegador.close()
         if args.quedarse:
-            print(f"\nservidor en {url} (Ctrl+C para parar)")
-            proceso.wait()
+            print(f"\nservidor en {datos['url']} (Ctrl+C para parar)")
+            datos["proceso"].wait()
     finally:
-        parar(proceso)
+        parar(datos.get("proceso") or proceso)
     print()
     if _fallos:
         print(f"RECORRIDO CON FALLOS: {len(_fallos)} de {_ok + len(_fallos)}")

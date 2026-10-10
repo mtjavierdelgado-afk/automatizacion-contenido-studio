@@ -402,7 +402,7 @@ bash pruebas.sh                              # Linux: el mismo recorrido
 comprobación. Toda suite termina con su `if __name__ == "__main__"` y una línea
 con «comprobaciones».
 
-Las veinticuatro en verde, y las herramientas de análisis sin nada que decir
+Las veinticinco en verde, y las herramientas de análisis sin nada que decir
 (`huerfanas_js` trae dos sospechosas de siempre, `async` y `fallar`, que no son
 llamadas).
 Y si has tocado la interfaz, **ábrela**: una regla de CSS de menos o un bloque

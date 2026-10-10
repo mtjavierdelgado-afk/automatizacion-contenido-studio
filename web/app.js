@@ -528,6 +528,9 @@ function consulta(pares) {
 
 async function pedir(url, opciones) {
   const cfg = Object.assign({ headers: {} }, opciones || {});
+  // LOS PROYECTOS CON CLAVE ABIERTOS: sin esto el servidor no lista lo suyo
+  const pases = typeof cabeceraDePases === 'function' ? cabeceraDePases() : '';
+  if (pases) cfg.headers = Object.assign({}, cfg.headers, { 'X-Estudio-Abiertos': pases });
   if (cfg.cuerpo !== undefined) {
     /* UN FormData VIAJA TAL CUAL. Serializarlo a JSON da «{}» —sus campos no
        son propiedades— así que el fichero se perdía en silencio y el servidor
@@ -5006,8 +5009,9 @@ function encargoParaServidor() {
     voz_prompt: e.voz_prompt,
     voz_id: e.voz_id || '',
     ritmo: e.ritmo || ritmoPorDefecto(),
-    // el proyecto (cliente) abierto en la galería: el estilo nace dentro de él
-    cliente: clienteElegido() || '',
+    // el proyecto (cliente) elegido en el formulario: el estilo nace dentro
+    cliente: e.cliente !== undefined ? (e.cliente || '')
+      : (clienteElegido() === '_sin' ? '' : clienteElegido()),
   };
 }
 
@@ -5030,6 +5034,9 @@ async function cargarGaleriaLight(forzar) {
         .sort((a, b) => String(b.actualizado || '').localeCompare(String(a.actualizado || '')));
     } catch (e) { APP.light.datos.videos = []; }
     await cargarClientes();
+    try {
+      APP.light.datos.perdidos = (await pedir(`${BASE}/api/sistema/estilos-perdidos`)).videos || [];
+    } catch (e) { APP.light.datos.perdidos = []; }
     // el ritmo de fábrica lo dice el servidor, no esta pantalla
     if (APP.light.encargo && !APP.light.encargo.ritmo) {
       APP.light.encargo.ritmo = ritmoPorDefecto();
@@ -5470,160 +5477,149 @@ function irALight(vista, extra) {
 
 /* ------------------------------------------------------------- la galería */
 
-function vistaGaleriaLight() {
-  const caja = h('div', {});
-  caja.appendChild(barraDeClientes());
-  const fichas = presetsLight().filter(f => estiloALaVista(f.id));
-  caja.appendChild(h('div', { clase: 'light-cab' },
-    h('h2', {}, 'Tus estilos'),
-    h('span', { clase: 'meta' }, fichas.length
-      ? `${fichas.length} estilo${fichas.length === 1 ? '' : 's'}`
-      : 'una estética, un tono, una voz y un idioma')));
-
-  const rejilla = h('div', { clase: 'galeria-estilos' });
-  fichas.forEach(ficha => rejilla.appendChild(tarjetaEstiloLight(ficha)));
-  rejilla.appendChild(tarjetaNuevoEstilo(fichas.length));
-  caja.appendChild(rejilla);
-
-  /* TUS VÍDEOS, debajo de los estilos. Aquí es donde se aterriza al volver —de
-     una recarga, del móvil, de otro día— y sin esta lista un vídeo a medio
-     generar no tenía desde dónde retomarse: seguía corriendo en el servidor y
-     no había ningún camino hasta él. */
-  const videos = videosLight().filter(v => estiloALaVista(v.estilo_light || ''));
-  if (videos.length) {
-    caja.appendChild(h('div', { clase: 'light-cab' },
-      h('h2', {}, 'Tus vídeos'),
-      h('span', { clase: 'meta' }, `${videos.length} vídeo${videos.length === 1 ? '' : 's'}`)));
-    const lista = h('div', { clase: 'videos-light' });
-    videos.forEach(video => lista.appendChild(h('div', { clase: 'video-light' },
-      h('button', {
-        clase: 'abrir', title: 'Seguir con este vídeo',
-        onclick: () => abrirVideoLight(video.id),
-      },
-        h('span', { clase: 'nombre' }, video.nombre || video.id),
-        // DE QUÉ ESTILO (y proyecto) SALIÓ, para saber de quién es cada vídeo
-        h('span', { clase: 'meta' }, [origenDeVideo(video), fechaCorta(video.actualizado)]
-          .filter(Boolean).join(' · '))),
-      /* EL LAPIZ VA FUERA DEL BOTON DE ABRIR. Un boton dentro de otro no es
-         HTML valido y el clic acabaria abriendo el video en vez de renombrarlo
-         — la misma razon por la que la tarjeta de un estilo es un div con un
-         boton grande dentro y no un boton entero. */
-      h('button', {
-        clase: 'mini fantasma renombrar', title: 'Cambiar el nombre',
-        'aria-label': `Cambiar el nombre de ${video.nombre || video.id}`,
-        onclick: () => renombrarVideoLight(video),
-      }, '✏️'),
-      h('button', {
-        clase: 'mini fantasma peligro', title: 'A la papelera de proyectos',
-        onclick: () => apartarVideoLight(video),
-      }, 'Apartar'))));
-    caja.appendChild(lista);
-  }
-
-  /* LOS INTENTOS A MEDIAS. Un taller nace antes que su estilo, así que una
-     generación que falla deja una carpeta de cientos de megas sin nadie que la
-     borre. En vez de barrerla sola por reloj —borrar por su cuenta lo que quizá
-     ibas a retomar— se enseña con sus dos salidas. Misma regla que la papelera:
-     nada se pierde sin que alguien lo diga. */
-  const sueltos = (APP.light.datos || {}).sueltos || [];
-  if (sueltos.length) {
-    const aviso = h('div', { clase: 'sueltos' },
-      h('b', {}, sueltos.length === 1 ? 'Un intento a medias'
-        : `${sueltos.length} intentos a medias`),
-      h('span', { clase: 'meta' }, sueltos.length === 1
-        ? ' — se quedó sin terminar y todavía no es ningún estilo.'
-        : ' — se quedaron sin terminar y todavía no son ningún estilo.'));
-    sueltos.forEach(taller => aviso.appendChild(h('div', { clase: 'fila' },
-      h('span', { clase: 'meta crece' },
-        `${taller.nombre} · ${fechaCorta(taller.actualizado) || ''}`),
-      h('button', {
-        clase: 'mini',
-        onclick: () => irALight('crear', { taller: taller.id }),
-      }, 'Retomar'),
-      h('button', {
-        clase: 'mini peligro', onclick: () => descartarTallerLight(taller),
-      }, 'Descartar'))));
-    caja.appendChild(aviso);
-  }
-  return caja;
-}
-
-/* ================================================== PROYECTOS (CLIENTES)
+/* ================================================ LA GALERÍA, POR PROYECTOS
  *
- * Carpetas que agrupan estilos, y con ellos sus vídeos (un vídeo es del
- * proyecto de su estilo). Ver pasos/clientes.py. La barra de arriba de la
- * galería elige cuál se ve; «Todos» enseña lo que no está oculto ni con clave.
- * Ocultar y la clave son privacidad de PANTALLA, no seguridad: la seguridad es
- * el acceso de delante.
+ * Un PROYECTO es un cliente: agrupa sus estilos y, con ellos, sus vídeos (un
+ * vídeo es del proyecto de su estilo, salvo que se mueva a mano). Ver
+ * pasos/clientes.py.
+ *
+ *   sin proyectos      la galería de siempre (estilos y vídeos) y una
+ *                      invitación a ordenarlos por cliente
+ *   con proyectos      la portada son las TARJETAS de los proyectos (y «Sin
+ *                      proyecto» si queda algo suelto); al entrar en uno se ven
+ *                      sus estilos, sus vídeos y sus intentos a medias, con
+ *                      sus mandos: renombrar, logo, ocultar, clave y borrar
+ *
+ * La clave se comprueba en el SERVIDOR: lo de un proyecto con clave no viene
+ * en las listas hasta que se abre (el pase va en `X-Estudio-Abiertos`, ver
+ * `pedir`). Ocultar solo lo quita de la portada.
  */
 const CLAVE_CLIENTE = 'estudio.light.cliente';
-const CLAVE_ABIERTOS = 'estudio.light.clientes_abiertos';
+const CLAVE_PASES = 'estudio.light.pases';
 
 async function cargarClientes() {
   try {
     APP.light.clientes = await pedir(`${BASE}/api/clientes`);
   } catch (e) {
-    APP.light.clientes = { clientes: [], estilos: {} };
+    APP.light.clientes = { clientes: [], estilos: {}, videos: {} };
   }
 }
 
 function listaClientes() { return ((APP.light.clientes || {}).clientes) || []; }
 
+function fichaCliente(cid) { return listaClientes().find(c => c.id === cid) || null; }
+
 function clienteDe(presetId) {
-  return (((APP.light.clientes || {}).estilos) || {})[presetId] || '';
+  const cid = (((APP.light.clientes || {}).estilos) || {})[presetId] || '';
+  return fichaCliente(cid) ? cid : '';
+}
+
+function clienteDeVideo(video) {
+  const propio = (((APP.light.clientes || {}).videos) || {})[video.id] || '';
+  if (fichaCliente(propio)) return propio;
+  return clienteDe(video.estilo_light || '');
+}
+
+/* Los pases de los proyectos con clave abiertos en esta pestaña. */
+function pasesAbiertos() {
+  try { return JSON.parse(sessionStorage.getItem(CLAVE_PASES) || '{}') || {}; } catch (e) { return {}; }
+}
+
+function cabeceraDePases() {
+  return Object.entries(pasesAbiertos()).map(([cid, pase]) => `${cid}.${pase}`).join(',');
+}
+
+function clienteAbierto(ficha) {
+  return !ficha.con_clave || !!pasesAbiertos()[ficha.id];
 }
 
 function clienteElegido() {
   let cid = '';
   try { cid = localStorage.getItem(CLAVE_CLIENTE) || ''; } catch (e) { /* sin almacén */ }
   if (cid === '_sin') return cid;
-  const ficha = listaClientes().find(c => c.id === cid);
+  const ficha = fichaCliente(cid);
   return ficha && clienteAbierto(ficha) ? cid : '';
 }
 
 function elegirCliente(cid) {
   try { localStorage.setItem(CLAVE_CLIENTE, cid || ''); } catch (e) { /* sin almacén */ }
+  $('#panel').scrollTop = 0;
   pintarLight();
 }
 
-function abiertosEnSesion() {
-  try { return JSON.parse(sessionStorage.getItem(CLAVE_ABIERTOS) || '[]'); } catch (e) { return []; }
+function estilosDeCliente(cid) {
+  return presetsLight().filter(f => clienteDe(f.id) === (cid === '_sin' ? '' : cid));
 }
 
-function clienteAbierto(ficha) {
-  return !ficha.con_clave || abiertosEnSesion().includes(ficha.id);
-}
-
-/* Si un estilo (o un vídeo, por su estilo) se ve con el proyecto elegido. */
-function estiloALaVista(presetId) {
-  const elegido = clienteElegido();
-  const suyo = clienteDe(presetId);
-  if (elegido === '_sin') return !suyo;
-  if (elegido) return suyo === elegido;
-  if (!suyo) return true;
-  const ficha = listaClientes().find(c => c.id === suyo);
-  if (!ficha) return true;
-  return clienteAbierto(ficha) && (!ficha.oculto || APP.light.verOcultos);
+function videosDeCliente(cid) {
+  return videosLight().filter(v => clienteDeVideo(v) === (cid === '_sin' ? '' : cid));
 }
 
 function origenDeVideo(video) {
   const estilo = fichaLight(video.estilo_light || '');
-  if (!estilo) return '';
-  const cliente = listaClientes().find(c => c.id === clienteDe(estilo.id));
-  return `🎨 ${estilo.nombre || estilo.id}` + (cliente ? ` · 📁 ${cliente.nombre}` : '');
+  const cliente = fichaCliente(clienteDeVideo(video));
+  return [estilo ? `🎨 ${estilo.nombre || estilo.id}` : '', cliente ? `📁 ${cliente.nombre}` : '']
+    .filter(Boolean).join(' · ');
+}
+
+/* UN DIÁLOGO DE LA CASA, en vez de los `prompt` del navegador: con su diseño,
+   con campo de contraseña de verdad (no se ve lo que se escribe) y con
+   desplegables. Devuelve los valores o null si se cancela. */
+function dialogo(op) {
+  const { titulo, texto, campos = [], aceptar = 'Aceptar', cancelar = 'Cancelar', peligro = false } = op;
+  return new Promise(resolver => {
+    const valores = {};
+    const capa = h('div', { clase: 'capa-dialogo' });
+    const teclas = ev => { if (ev.key === 'Escape') cerrar(null); };
+    const cerrar = valor => {
+      capa.remove();
+      document.removeEventListener('keydown', teclas);
+      resolver(valor);
+    };
+    const campo = c => {
+      valores[c.clave] = c.valor === undefined ? '' : c.valor;
+      const control = c.tipo === 'select'
+        ? h('select', { onchange: ev => { valores[c.clave] = ev.target.value; } },
+          ...(c.opciones || []).map(o => h('option', { value: o.valor, selected: o.valor === c.valor }, o.nombre)))
+        : h('input', {
+          type: c.tipo || 'text', value: c.valor || '', placeholder: c.pista || '',
+          autocomplete: c.tipo === 'password' ? 'new-password' : 'off',
+          oninput: ev => { valores[c.clave] = ev.target.value; } });
+      return h('label', { clase: 'campo' }, h('span', {}, c.etiqueta), control,
+        c.ayuda ? h('span', { clase: 'meta' }, c.ayuda) : null);
+    };
+    const formulario = h('form', {
+      clase: 'dialogo', onsubmit: ev => { ev.preventDefault(); cerrar(Object.assign({}, valores)); },
+    },
+      h('h3', {}, titulo),
+      texto ? h('div', { clase: 'meta' }, texto) : null,
+      ...campos.map(campo),
+      h('div', { clase: 'dialogo-botones' },
+        h('button', { type: 'button', clase: 'mini fantasma', onclick: () => cerrar(null) }, cancelar),
+        h('button', { type: 'submit', clase: `mini ${peligro ? 'peligro' : 'primario'}` }, aceptar)));
+    capa.appendChild(formulario);
+    capa.addEventListener('click', ev => { if (ev.target === capa) cerrar(null); });
+    document.addEventListener('keydown', teclas);
+    document.body.appendChild(capa);
+    setTimeout(() => { const f = formulario.querySelector('input, select'); if (f) f.focus(); }, 0);
+  });
 }
 
 async function entrarEnCliente(ficha) {
   if (!clienteAbierto(ficha)) {
-    const clave = window.prompt(`«${ficha.nombre}» tiene clave. Escríbela para verlo:`);
-    if (clave === null) return;
+    const r = await dialogo({ titulo: `🔒 ${ficha.nombre}`, texto: 'Este proyecto tiene clave.',
+      campos: [{ clave: 'clave', etiqueta: 'Clave', tipo: 'password' }], aceptar: 'Abrir' });
+    if (!r) return;
     try {
-      await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}/abrir`,
-        { method: 'POST', cuerpo: { clave } });
-      try {
-        sessionStorage.setItem(CLAVE_ABIERTOS,
-          JSON.stringify(abiertosEnSesion().concat([ficha.id])));
-      } catch (e) { /* sin almacén: se pedirá otra vez */ }
+      const datos = await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}/abrir`,
+        { method: 'POST', cuerpo: { clave: r.clave } });
+      const pases = pasesAbiertos();
+      pases[ficha.id] = datos.pase;
+      try { sessionStorage.setItem(CLAVE_PASES, JSON.stringify(pases)); } catch (e) { /* sin almacén */ }
+      // ahora el servidor ya enseña sus estilos y vídeos: se vuelven a pedir
+      try { localStorage.setItem(CLAVE_CLIENTE, ficha.id); } catch (e) { /* sin almacén */ }
+      await cargarGaleriaLight(true);
+      return;
     } catch (e) {
       toast(e.message, true);
       return;
@@ -5632,30 +5628,75 @@ async function entrarEnCliente(ficha) {
   elegirCliente(ficha.id);
 }
 
+/* Cerrar los proyectos con clave al terminar: se olvidan los pases. */
+function cerrarProyectosConClave() {
+  try { sessionStorage.removeItem(CLAVE_PASES); } catch (e) { /* sin almacén */ }
+  try { localStorage.setItem(CLAVE_CLIENTE, ''); } catch (e) { /* sin almacén */ }
+  cargarGaleriaLight(true);
+}
+
 async function crearCliente() {
-  const nombre = window.prompt('Nombre del proyecto (cliente):', '');
-  if (!nombre || !nombre.trim()) return;
+  const r = await dialogo({ titulo: 'Nuevo proyecto',
+    texto: 'Un proyecto por cliente. Los estilos que crees dentro quedan en él, y sus vídeos con ellos.',
+    campos: [{ clave: 'nombre', etiqueta: 'Nombre del cliente o proyecto', pista: 'Suyu Interiores' }],
+    aceptar: 'Crear' });
+  if (!r || !r.nombre.trim()) return;
   try {
-    const datos = await pedir(`${BASE}/api/clientes`, { method: 'POST', cuerpo: { nombre } });
+    const datos = await pedir(`${BASE}/api/clientes`, { method: 'POST', cuerpo: { nombre: r.nombre } });
     await cargarClientes();
     elegirCliente(datos.cliente.id);
-    toast(`Proyecto «${datos.cliente.nombre}» creado: los estilos que crees ahora irán dentro`);
+    toast(`Proyecto «${datos.cliente.nombre}» creado: crea su primer estilo o trae uno que ya tengas`);
   } catch (e) { toast(e.message, true); }
 }
 
 async function cambiarCliente(ficha, cambios, aviso) {
   try {
-    await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}`,
-      { method: 'PUT', cuerpo: cambios });
+    await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}`, { method: 'PUT', cuerpo: cambios });
     await cargarClientes();
     if (aviso) toast(aviso);
     pintarLight();
   } catch (e) { toast(e.message, true); }
 }
 
+async function renombrarCliente(ficha) {
+  const r = await dialogo({ titulo: 'Renombrar el proyecto',
+    campos: [{ clave: 'nombre', etiqueta: 'Nombre', valor: ficha.nombre }], aceptar: 'Guardar' });
+  if (r && r.nombre.trim() && r.nombre.trim() !== ficha.nombre) {
+    cambiarCliente(ficha, { nombre: r.nombre }, 'Proyecto renombrado');
+  }
+}
+
+async function claveCliente(ficha) {
+  const r = await dialogo({ titulo: ficha.con_clave ? 'Cambiar o quitar la clave' : 'Poner clave',
+    texto: 'Con clave, sus estilos y vídeos no se ven hasta escribirla (en cada pestaña nueva). '
+      + 'Es privacidad de pantalla: la seguridad de verdad es la contraseña de acceso al Studio.',
+    campos: [{ clave: 'clave', etiqueta: ficha.con_clave ? 'Clave nueva (vacía para quitarla)' : 'Clave (al menos 4 caracteres)', tipo: 'password' },
+      { clave: 'repite', etiqueta: 'Repítela', tipo: 'password' }],
+    aceptar: 'Guardar' });
+  if (!r) return;
+  if (r.clave !== r.repite) { toast('Las dos claves no coinciden', true); return; }
+  if (!r.clave && !ficha.con_clave) return;
+  try {
+    await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}`,
+      { method: 'PUT', cuerpo: { clave: r.clave } });
+    if (r.clave) {
+      // quien la acaba de poner sigue dentro sin tener que escribirla otra vez
+      const datos = await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}/abrir`,
+        { method: 'POST', cuerpo: { clave: r.clave } });
+      const pases = pasesAbiertos();
+      pases[ficha.id] = datos.pase;
+      try { sessionStorage.setItem(CLAVE_PASES, JSON.stringify(pases)); } catch (e) { /* sin almacén */ }
+    }
+    toast(r.clave ? 'Clave puesta' : 'Clave quitada');
+  } catch (e) { toast(e.message, true); }
+  await cargarGaleriaLight(true);
+}
+
 async function borrarCliente(ficha) {
-  if (!window.confirm(`¿Borrar el proyecto «${ficha.nombre}»? Sus estilos y vídeos `
-    + 'NO se borran: quedan sin proyecto.')) return;
+  const r = await dialogo({ titulo: `¿Borrar «${ficha.nombre}»?`,
+    texto: 'Se borra solo la carpeta: sus estilos y vídeos NO se borran, quedan en «Sin proyecto».',
+    aceptar: 'Borrar el proyecto', peligro: true });
+  if (!r) return;
   try {
     await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}`, { method: 'DELETE' });
     await cargarClientes();
@@ -5663,92 +5704,304 @@ async function borrarCliente(ficha) {
   } catch (e) { toast(e.message, true); }
 }
 
-function ponerClaveCliente(ficha) {
-  const clave = window.prompt(ficha.con_clave
-    ? `Nueva clave para «${ficha.nombre}» (déjala vacía para quitarla):`
-    : `Clave para «${ficha.nombre}» (al menos 4 caracteres). Se pedirá para ver sus estilos y vídeos:`, '');
-  if (clave === null) return;
-  cambiarCliente(ficha, { clave }, clave ? 'Clave puesta' : 'Clave quitada');
+async function moverEstiloACliente(ficha) {
+  const actual = clienteDe(ficha.id);
+  const r = await dialogo({ titulo: `Proyecto de «${ficha.nombre}»`,
+    texto: 'Sus vídeos van con él, salvo los que hayas movido a mano.',
+    campos: [{ clave: 'cliente', etiqueta: 'Proyecto', tipo: 'select', valor: actual,
+      opciones: [{ valor: '', nombre: '— sin proyecto —' }]
+        .concat(listaClientes().map(c => ({ valor: c.id, nombre: c.nombre }))) }],
+    aceptar: 'Mover' });
+  if (!r || r.cliente === actual) return;
+  try {
+    await pedir(`${BASE}/api/clientes/estilos/${encodeURIComponent(ficha.id)}`,
+      { method: 'PUT', cuerpo: { cliente: r.cliente } });
+    await cargarClientes();
+    toast('Estilo movido');
+    pintarLight();
+  } catch (e) { toast(e.message, true); }
 }
 
-/* LA BARRA DE PROYECTOS, arriba de la galería: Todos, cada proyecto y «+». Con
-   uno elegido, sus mandos: renombrar, ocultar, clave y borrar. */
-function barraDeClientes() {
+async function moverVideoACliente(video) {
+  const actual = clienteDeVideo(video);
+  const r = await dialogo({ titulo: `Proyecto de «${video.nombre || video.id}»`,
+    texto: 'Normalmente un vídeo está en el proyecto de su estilo. Muévelo si ese estilo lo usan dos clientes.',
+    campos: [{ clave: 'cliente', etiqueta: 'Proyecto', tipo: 'select', valor: actual,
+      opciones: [{ valor: '', nombre: '— el de su estilo —' }]
+        .concat(listaClientes().map(c => ({ valor: c.id, nombre: c.nombre }))) }],
+    aceptar: 'Mover' });
+  if (!r) return;
+  try {
+    await pedir(`${BASE}/api/clientes/videos/${encodeURIComponent(video.id)}`,
+      { method: 'PUT', cuerpo: { cliente: r.cliente } });
+    await cargarClientes();
+    toast('Vídeo movido');
+    pintarLight();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function traerEstiloACliente(ficha) {
+  const otros = presetsLight().filter(f => clienteDe(f.id) !== ficha.id);
+  if (!otros.length) { toast('No hay otros estilos que traer'); return; }
+  const r = await dialogo({ titulo: `Traer un estilo a «${ficha.nombre}»`,
+    campos: [{ clave: 'estilo', etiqueta: 'Estilo', tipo: 'select', valor: otros[0].id,
+      opciones: otros.map(f => ({ valor: f.id,
+        nombre: f.nombre + (clienteDe(f.id) ? ` (ahora en ${(fichaCliente(clienteDe(f.id)) || {}).nombre})` : '') })) }],
+    aceptar: 'Traer' });
+  if (!r) return;
+  try {
+    await pedir(`${BASE}/api/clientes/estilos/${encodeURIComponent(r.estilo)}`,
+      { method: 'PUT', cuerpo: { cliente: ficha.id } });
+    await cargarClientes();
+    pintarLight();
+  } catch (e) { toast(e.message, true); }
+}
+
+function vistaGaleriaLight() {
+  const caja = h('div', {});
+  caja.appendChild(avisoEstilosPerdidos());
   const lista = listaClientes();
   const elegido = clienteElegido();
-  const caja = h('div', { clase: 'barra-clientes' });
-  const chips = h('div', { clase: 'chips-clientes' },
-    h('span', { clase: 'meta' }, 'Proyectos:'),
-    h('button', { clase: 'mini' + (!elegido ? ' activo' : ''), onclick: () => elegirCliente('') }, 'Todos'));
-  lista.filter(c => !c.oculto || APP.light.verOcultos || c.id === elegido).forEach(ficha => {
-    chips.appendChild(h('button', {
-      clase: 'mini' + (ficha.id === elegido ? ' activo' : '') + (ficha.oculto ? ' oculto' : ''),
-      title: ficha.con_clave ? 'Con clave' : '',
-      onclick: () => entrarEnCliente(ficha),
-    }, (ficha.con_clave ? '🔒 ' : '📁 ') + ficha.nombre));
-  });
-  if (lista.length && Object.keys((APP.light.clientes || {}).estilos || {}).length < presetsLight().length) {
-    chips.appendChild(h('button', {
-      clase: 'mini' + (elegido === '_sin' ? ' activo' : ''), onclick: () => elegirCliente('_sin'),
-    }, 'Sin proyecto'));
+  if (!lista.length) {
+    // SIN PROYECTOS: la galería de siempre, con la invitación a ordenarla
+    caja.appendChild(h('div', { clase: 'invitacion-proyectos' },
+      h('div', {}, h('b', {}, '¿Trabajas para varios clientes? '),
+        'Crea un proyecto por cliente y tendrás sus estilos y vídeos separados (con logo propio y, si quieres, clave).'),
+      h('button', { clase: 'mini primario', onclick: crearCliente }, '+ Nuevo proyecto')));
+    seccionEstilos(caja, presetsLight(), '');
+    seccionVideos(caja, videosLight(), '');
+    seccionSueltos(caja, null);
+    return caja;
   }
-  chips.appendChild(h('button', { clase: 'mini primario', onclick: crearCliente }, '+ Proyecto'));
-  if (lista.some(c => c.oculto)) {
-    chips.appendChild(h('button', {
-      clase: 'mini fantasma', onclick: () => { APP.light.verOcultos = !APP.light.verOcultos; pintarLight(); },
-    }, APP.light.verOcultos ? 'Esconder ocultos' : 'Ver ocultos'));
+  if (!elegido) {
+    portadaDeProyectos(caja, lista);
+    return caja;
   }
-  caja.appendChild(chips);
-  const ficha = lista.find(c => c.id === elegido);
+  dentroDeProyecto(caja, elegido);
+  return caja;
+}
+
+/* LA PORTADA: una tarjeta por proyecto. */
+function portadaDeProyectos(caja, lista) {
+  const visibles = lista.filter(c => !c.oculto || APP.light.verOcultos);
+  const ocultos = lista.filter(c => c.oculto).length;
+  caja.appendChild(h('div', { clase: 'light-cab' },
+    h('h2', {}, 'Tus proyectos'),
+    h('span', { clase: 'meta' }, `${lista.length} proyecto${lista.length === 1 ? '' : 's'}`),
+    h('span', { clase: 'crece' }),
+    ocultos ? h('button', { clase: 'mini fantasma', onclick: () => {
+      APP.light.verOcultos = !APP.light.verOcultos; pintarLight(); } },
+    APP.light.verOcultos ? 'Esconder los ocultos' : `Ver los ocultos (${ocultos})`) : null,
+    Object.keys(pasesAbiertos()).length ? h('button', { clase: 'mini fantasma',
+      title: 'Vuelve a pedir la clave de los proyectos que has abierto', onclick: cerrarProyectosConClave },
+    '🔒 Cerrar los abiertos') : null));
+  const rejilla = h('div', { clase: 'galeria-proyectos' });
+  visibles.forEach(ficha => rejilla.appendChild(tarjetaProyecto(ficha)));
+  const sueltosEstilos = estilosDeCliente('_sin').length;
+  const sueltosVideos = videosDeCliente('_sin').length;
+  if (sueltosEstilos || sueltosVideos) {
+    rejilla.appendChild(h('button', { clase: 'tarjeta-proyecto sin', onclick: () => elegirCliente('_sin') },
+      h('div', { clase: 'icono-proyecto' }, '🗂️'),
+      h('div', { clase: 'nombre' }, 'Sin proyecto'),
+      h('div', { clase: 'meta' }, `${sueltosEstilos} estilo${sueltosEstilos === 1 ? '' : 's'} · `
+        + `${sueltosVideos} vídeo${sueltosVideos === 1 ? '' : 's'}`)));
+  }
+  rejilla.appendChild(h('button', { clase: 'tarjeta-proyecto nuevo', onclick: crearCliente },
+    h('div', { clase: 'icono-proyecto' }, '+'),
+    h('div', { clase: 'nombre' }, 'Nuevo proyecto'),
+    h('div', { clase: 'meta' }, 'un cliente, con sus estilos y vídeos')));
+  caja.appendChild(rejilla);
+  // lo último que se movió, de los proyectos que se ven: para seguir sin buscar
+  const recientes = videosLight().filter(v => {
+    const cid = clienteDeVideo(v);
+    const ficha = fichaCliente(cid);
+    return !ficha || (!ficha.oculto || APP.light.verOcultos);
+  }).slice(0, 5);
+  if (recientes.length) seccionVideos(caja, recientes, '', 'Últimos vídeos');
+  seccionSueltos(caja, '');
+}
+
+function tarjetaProyecto(ficha) {
+  const abierto = clienteAbierto(ficha);
+  const estilos = estilosDeCliente(ficha.id).length;
+  const videos = videosDeCliente(ficha.id).length;
+  return h('button', {
+    clase: 'tarjeta-proyecto' + (ficha.oculto ? ' oculto' : ''),
+    title: abierto ? 'Abrir el proyecto' : 'Tiene clave: pulsa para escribirla',
+    onclick: () => entrarEnCliente(ficha),
+  },
+    ficha.logo && abierto
+      ? h('img', { clase: 'logo-proyecto', alt: '', src: `${BASE}/api/logos/${encodeURIComponent(ficha.logo.fichero)}` })
+      : h('div', { clase: 'icono-proyecto' }, abierto ? '📁' : '🔒'),
+    h('div', { clase: 'nombre' }, ficha.nombre),
+    h('div', { clase: 'meta' }, abierto
+      ? `${estilos} estilo${estilos === 1 ? '' : 's'} · ${videos} vídeo${videos === 1 ? '' : 's'}`
+        + (ficha.con_clave ? ' · 🔓 abierto' : '')
+      : 'con clave'),
+    ficha.oculto ? h('div', { clase: 'meta' }, 'oculto') : null);
+}
+
+/* DENTRO DE UN PROYECTO (o de «Sin proyecto»). */
+function dentroDeProyecto(caja, cid) {
+  const ficha = fichaCliente(cid);
+  const nombre = ficha ? ficha.nombre : 'Sin proyecto';
+  caja.appendChild(h('div', { clase: 'migas' },
+    h('button', { clase: 'mini fantasma', onclick: () => elegirCliente('') }, '‹ Todos los proyectos')));
+  caja.appendChild(h('div', { clase: 'light-cab cab-proyecto' },
+    ficha && ficha.logo ? h('img', { clase: 'logo-proyecto pequeno', alt: '',
+      src: `${BASE}/api/logos/${encodeURIComponent(ficha.logo.fichero)}` }) : null,
+    h('h2', {}, `${ficha ? (ficha.con_clave ? '🔒 ' : '📁 ') : '🗂️ '}${nombre}`),
+    ficha && ficha.oculto ? h('span', { clase: 'pastilla' }, 'oculto') : null));
   if (ficha) {
-    caja.appendChild(h('div', { clase: 'mandos-cliente' },
-      h('b', {}, `📁 ${ficha.nombre}`),
-      h('span', { clase: 'meta' }, ' — los estilos que crees aquí quedan dentro, y sus vídeos con ellos. '),
-      h('button', { clase: 'mini fantasma', onclick: () => {
-        const nombre = window.prompt('Nuevo nombre del proyecto:', ficha.nombre);
-        if (nombre && nombre.trim()) cambiarCliente(ficha, { nombre }, 'Proyecto renombrado');
-      } }, 'Renombrar'),
-      h('button', { clase: 'mini fantasma', onclick: () => cambiarCliente(ficha,
-        { oculto: !ficha.oculto }, ficha.oculto ? 'Ya se ve en la lista' : 'Oculto: sale con «Ver ocultos»') },
-      ficha.oculto ? 'Mostrar' : 'Ocultar'),
-      h('button', { clase: 'mini fantasma', onclick: () => ponerClaveCliente(ficha) },
-        ficha.con_clave ? 'Cambiar clave' : 'Poner clave'),
+    caja.appendChild(h('div', { clase: 'mandos-proyecto' },
+      h('button', { clase: 'mini', onclick: () => renombrarCliente(ficha) }, 'Renombrar'),
+      h('button', { clase: 'mini' + (APP.light.logoProyecto === cid ? ' activo' : ''),
+        onclick: () => { APP.light.logoProyecto = APP.light.logoProyecto === cid ? '' : cid; pintarLight(); } },
+      ficha.logo ? 'Logo ✓' : 'Logo'),
+      h('button', { clase: 'mini', onclick: () => cambiarCliente(ficha, { oculto: !ficha.oculto },
+        ficha.oculto ? 'Ya se ve en la portada' : 'Oculto: sale con «Ver los ocultos»') },
+      ficha.oculto ? 'Mostrar en la portada' : 'Ocultar'),
+      h('button', { clase: 'mini', onclick: () => claveCliente(ficha) }, ficha.con_clave ? 'Clave ✓' : 'Poner clave'),
+      h('button', { clase: 'mini', onclick: () => traerEstiloACliente(ficha) }, 'Traer un estilo'),
       h('button', { clase: 'mini fantasma peligro', onclick: () => borrarCliente(ficha) }, 'Borrar')));
-  } else if (!lista.length) {
-    caja.appendChild(h('div', { clase: 'pista' },
-      'Crea un proyecto por cliente para tener sus estilos y vídeos separados. '
-      + 'Puedes ocultarlos o ponerles clave.'));
+    if (APP.light.logoProyecto === cid) caja.appendChild(panelLogoProyecto(ficha));
+  }
+  seccionEstilos(caja, estilosDeCliente(cid), cid);
+  seccionVideos(caja, videosDeCliente(cid), cid);
+  seccionSueltos(caja, cid === '_sin' ? '' : cid);
+}
+
+/* El logo del proyecto: lo llevan de fábrica los vídeos NUEVOS de sus estilos. */
+function panelLogoProyecto(ficha) {
+  const caja = h('div', { clase: 'panel-logo-proyecto' });
+  const logo = ficha.logo;
+  const id = `logo-proyecto-${ficha.id}`;
+  const entrada = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', clase: 'oculto', id,
+    onchange: async ev => {
+      const fichero = (ev.target.files || [])[0];
+      ev.target.value = '';
+      if (!fichero) return;
+      const cuerpo = new FormData();
+      cuerpo.append('logo', fichero);
+      try {
+        const r = await pedir(`${BASE}/api/logos`, { method: 'POST', cuerpo });
+        await cambiarCliente(ficha, { logo: Object.assign({ posicion: 'arriba_derecha', tamano: 0.12, opacidad: 0.9 },
+          logo || {}, { fichero: r.nombre }) }, 'Logo del proyecto guardado');
+      } catch (e) { toast(e.message, true); }
+    } });
+  caja.appendChild(h('div', { clase: 'pista' },
+    'Los vídeos NUEVOS de los estilos de este proyecto lo llevarán solos (se puede cambiar o quitar en cada vídeo). '
+    + 'Los que ya existen no cambian.'));
+  caja.appendChild(entrada);
+  if (logo) caja.appendChild(vistaPreviaLogo(`${BASE}/api/logos/${encodeURIComponent(logo.fichero)}`, logo));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('label', { clase: 'boton mini', for: id }, logo ? 'Subir otro' : 'Subir el logo'),
+    logo ? h('button', { clase: 'mini fantasma peligro', onclick: () => cambiarCliente(ficha, { logo: null }, 'Logo quitado') }, 'Quitar') : null));
+  if (logo) {
+    caja.appendChild(h('div', { clase: 'herramientas' }, ...ESQUINAS_LOGO.map(([pos, nombre]) => h('button', {
+      clase: 'mini' + (logo.posicion === pos ? ' activo' : ''),
+      onclick: () => cambiarCliente(ficha, { logo: Object.assign({}, logo, { posicion: pos }) }) }, nombre))));
+    const tam = Math.round((logo.tamano || 0.12) * 100);
+    caja.appendChild(h('label', {}, `Tamaño: ${tam} % del ancho`));
+    caja.appendChild(h('input', { type: 'range', min: 4, max: 40, step: 1, value: tam,
+      onchange: ev => cambiarCliente(ficha, { logo: Object.assign({}, logo, { tamano: Number(ev.target.value) / 100 }) }) }));
   }
   return caja;
 }
 
-/* Mover un estilo de proyecto, desde su menú ⋯. Sus vídeos van con él. */
-function selectorDeClienteDeEstilo(ficha) {
-  const lista = listaClientes();
-  if (!lista.length) return null;
-  const actual = clienteDe(ficha.id);
-  return h('label', { clase: 'mover-cliente' }, 'Proyecto',
-    h('select', {
-      onclick: ev => ev.stopPropagation(),
-      onchange: async ev => {
-        try {
-          await pedir(`${BASE}/api/clientes/estilos/${encodeURIComponent(ficha.id)}`,
-            { method: 'PUT', cuerpo: { cliente: ev.target.value } });
-          await cargarClientes();
-          toast('Estilo movido de proyecto');
-          pintarLight();
-        } catch (e) { toast(e.message, true); }
-      },
-    },
-      h('option', { value: '', selected: !actual }, '— sin proyecto —'),
-      ...lista.map(c => h('option', { value: c.id, selected: c.id === actual }, c.nombre))));
+function seccionEstilos(caja, fichas, cid) {
+  const ficha = fichaCliente(cid);
+  caja.appendChild(h('div', { clase: 'light-cab' },
+    h('h3', {}, ficha ? `Estilos de ${ficha.nombre}` : (cid === '_sin' ? 'Estilos sin proyecto' : 'Tus estilos')),
+    h('span', { clase: 'meta' }, fichas.length
+      ? `${fichas.length} estilo${fichas.length === 1 ? '' : 's'}`
+      : 'una estética, un tono, una voz y un idioma')));
+  const rejilla = h('div', { clase: 'galeria-estilos' });
+  fichas.forEach(f => rejilla.appendChild(tarjetaEstiloLight(f, !cid)));
+  rejilla.appendChild(tarjetaNuevoEstilo(fichas.length, ficha));
+  caja.appendChild(rejilla);
+}
+
+function seccionVideos(caja, videos, cid, titulo) {
+  if (!videos.length) return;
+  const ficha = fichaCliente(cid);
+  caja.appendChild(h('div', { clase: 'light-cab' },
+    h('h3', {}, titulo || (ficha ? `Vídeos de ${ficha.nombre}` : (cid === '_sin' ? 'Vídeos sin proyecto' : 'Tus vídeos'))),
+    h('span', { clase: 'meta' }, `${videos.length} vídeo${videos.length === 1 ? '' : 's'}`)));
+  const lista = h('div', { clase: 'videos-light' });
+  videos.forEach(video => lista.appendChild(filaVideoLight(video)));
+  caja.appendChild(lista);
+}
+
+/* LOS INTENTOS A MEDIAS de un estilo. Un taller nace antes que su estilo, así
+   que una generación que falla deja una carpeta sin nadie que la borre: se
+   enseña con sus dos salidas. Dentro de un proyecto, solo los suyos. */
+function seccionSueltos(caja, cid) {
+  let sueltos = (APP.light.datos || {}).sueltos || [];
+  if (cid !== null) sueltos = sueltos.filter(t => !cid || (t.cliente || '') === cid);
+  if (!sueltos.length) return;
+  const aviso = h('div', { clase: 'sueltos' },
+    h('b', {}, sueltos.length === 1 ? 'Un estilo a medias' : `${sueltos.length} estilos a medias`),
+    h('span', { clase: 'meta' }, ' — se quedaron sin terminar. «Retomar» sigue por donde iba sin volver a pagar lo hecho.'));
+  sueltos.forEach(taller => aviso.appendChild(h('div', { clase: 'fila' },
+    h('span', { clase: 'meta crece' }, `${taller.nombre} · ${fechaCorta(taller.actualizado) || ''}`),
+    h('button', { clase: 'mini', onclick: () => irALight('crear', { taller: taller.id }) }, 'Retomar'),
+    h('button', { clase: 'mini peligro', onclick: () => descartarTallerLight(taller) }, 'Descartar'))));
+  caja.appendChild(aviso);
+}
+
+/* LOS VÍDEOS QUE PERDIERON SUS IMÁGENES DE ESTILO (antes del 10-10-2026,
+   guardar un estilo podía cambiarles el nombre). Se reparan aquí, sin
+   regenerar nada (`/api/proyectos/{pid}/reparar-estilo`). */
+function avisoEstilosPerdidos() {
+  const caja = h('div', {});
+  const perdidos = (APP.light.datos || {}).perdidos || [];
+  if (!perdidos.length) return caja;
+  caja.appendChild(h('div', { clase: 'sueltos aviso-perdidos' },
+    h('b', {}, perdidos.length === 1 ? 'Un vídeo ha perdido sus imágenes de estilo'
+      : `${perdidos.length} vídeos han perdido sus imágenes de estilo`),
+    h('span', { clase: 'meta' }, ' — pasaba al volver a guardar un estilo y ya no puede pasar. '
+      + 'Repararlo las vuelve a apuntar a las que sí están: no regenera ni cobra nada.'),
+    ...perdidos.map(video => h('div', { clase: 'fila' },
+      h('span', { clase: 'meta crece' }, `${video.nombre} · ${video.rotas.length} imagen${video.rotas.length === 1 ? '' : 'es'}`),
+      video.reparable
+        ? h('button', { clase: 'mini primario', onclick: () => repararEstiloDeVideo(video) }, 'Reparar')
+        : h('span', { clase: 'meta' }, 'no hay otra que la sustituya: pregúntale al asistente')))));
+  return caja;
+}
+
+async function repararEstiloDeVideo(video) {
+  try {
+    const r = await pedir(`${API.proyecto(video.id)}/reparar-estilo`, { method: 'POST', cuerpo: { aplicar: true } });
+    toast(r.reparado ? `«${video.nombre}» reparado: sus imágenes ya están al día` : (r.motivo || 'nada que reparar'));
+    await cargarGaleriaLight(true);
+  } catch (e) { toast(e.message, true); }
+}
+
+/* Una fila de «Tus vídeos»: abrir, de dónde salió, y sus mandos. */
+function filaVideoLight(video) {
+  return h('div', { clase: 'video-light' },
+    h('button', { clase: 'abrir', title: 'Seguir con este vídeo', onclick: () => abrirVideoLight(video.id) },
+      h('span', { clase: 'nombre' }, video.nombre || video.id),
+      // DE QUÉ ESTILO (y proyecto) SALIÓ, para saber de quién es cada vídeo
+      h('span', { clase: 'meta' }, [origenDeVideo(video), fechaCorta(video.actualizado)]
+        .filter(Boolean).join(' · '))),
+    /* EL LAPIZ VA FUERA DEL BOTON DE ABRIR: un botón dentro de otro no es HTML
+       válido y el clic acabaría abriendo el vídeo en vez de renombrarlo. */
+    h('button', { clase: 'mini fantasma renombrar', title: 'Cambiar el nombre',
+      'aria-label': `Cambiar el nombre de ${video.nombre || video.id}`, onclick: () => renombrarVideoLight(video) }, '✏️'),
+    listaClientes().length ? h('button', { clase: 'mini fantasma', title: 'Moverlo a otro proyecto',
+      onclick: () => moverVideoACliente(video) }, '📁') : null,
+    h('button', { clase: 'mini fantasma peligro', title: 'A la papelera de proyectos',
+      onclick: () => apartarVideoLight(video) }, 'Apartar'));
 }
 
 /* PULSAR UNA TARJETA LA ELIGE Y PASA AL SIGUIENTE PASO, no la abre. Lo que se
    hace con un estilo el 95 % de las veces es usarlo para un vídeo; editarlo es
    lo raro, y por eso vive en el menú de los tres puntos junto a duplicarlo. */
-function tarjetaEstiloLight(ficha) {
+function tarjetaEstiloLight(ficha, conProyecto) {
   const vinetas = ficha.vinetas || [];
+  const cliente = conProyecto ? fichaCliente(clienteDe(ficha.id)) : null;
   return h('div', { clase: 'ficha-estilo' },
     h('button', {
       clase: 'cara-y-cuerpo', title: 'Usar este estilo',
@@ -5759,6 +6012,7 @@ function tarjetaEstiloLight(ficha) {
         : h('div', { clase: 'sin-cara' }, 'sin muestras')),
       h('div', { clase: 'cuerpo' },
         h('div', { clase: 'nombre' }, ficha.nombre || ficha.id),
+        cliente ? h('div', { clase: 'chip-proyecto' }, `📁 ${cliente.nombre}`) : null,
         h('ul', { clase: 'vinetas' },
           // el icono lo manda el servidor con cada línea (`presets_canal.vinetas_de`):
           // aquí no hay forma de saber cuál es el idioma y cuál la voz sin deducirlo
@@ -5768,14 +6022,15 @@ function tarjetaEstiloLight(ficha) {
     menuDeEstilo(ficha));
 }
 
-function tarjetaNuevoEstilo(cuantos) {
+function tarjetaNuevoEstilo(cuantos, cliente) {
   return h('button', {
     clase: 'ficha-estilo nuevo', title: 'Crear un estilo nuevo',
-    onclick: () => irALight('crear'),
+    onclick: () => { APP.light.encargo = null; irALight('crear', { taller: null }); },
   },
     h('div', { clase: 'cara' }, h('span', { clase: 'mas' }, '+')),
     h('div', { clase: 'cuerpo' },
-      h('div', { clase: 'nombre' }, cuantos ? 'Otro estilo' : 'Tu primer estilo'),
+      h('div', { clase: 'nombre' }, cliente ? `Nuevo estilo en ${cliente.nombre}`
+        : (cuantos ? 'Otro estilo' : 'Tu primer estilo')),
       h('div', { clase: 'pista' }, 'unas imágenes y cómo suena')));
 }
 
@@ -5847,7 +6102,8 @@ function menuDeEstilo(ficha) {
   const menu = h('div', { clase: 'menu-estilo plegado' },
     h('button', { clase: 'mini fantasma', onclick: () => editarEstiloLight(ficha) }, 'Editar'),
     h('button', { clase: 'mini fantasma', onclick: () => duplicarEstiloLight(ficha) }, 'Duplicar'),
-    selectorDeClienteDeEstilo(ficha));
+    listaClientes().length ? h('button', { clase: 'mini fantasma', onclick: () => moverEstiloACliente(ficha) },
+      'Mover a otro proyecto') : null);
   const puntos = h('button', {
     clase: 'puntos', title: 'Más opciones',
     onclick: ev => {
@@ -6788,7 +7044,11 @@ function vistaEncargoVideoLight() {
   caja.appendChild(h('div', { clase: 'light-cab' },
     h('h2', {}, 'El encargo'),
     h('span', { clase: 'meta' },
-      estilo ? `con «${estilo.nombre}»` : (v.estilo ? `con «${v.estilo}»` : '')),
+      (estilo ? `con «${estilo.nombre}»` : (v.estilo ? `con «${v.estilo}»` : ''))
+      + (() => {
+        const cliente = fichaCliente(clienteDeVideo({ id: v.pid, estilo_light: v.estilo }));
+        return cliente ? ` · 📁 ${cliente.nombre}` : '';
+      })()),
     h('span', { clase: 'crece' }),
     costeLight()));
 
@@ -9946,6 +10206,16 @@ function vistaCrearLight() {
     v => { e.nombre = v; tocarEncargoLight(); },
     { pista: 'Cartoon' }));
 
+  /* EN QUÉ PROYECTO NACE. De entrada, el que estaba abierto en la galería;
+     se puede cambiar aquí y después desde su menú ⋯. */
+  if (listaClientes().length) {
+    if (e.cliente === undefined) e.cliente = clienteElegido() === '_sin' ? '' : clienteElegido();
+    caja.appendChild(campoSelect('Proyecto (cliente)', e.cliente || '',
+      [{ valor: '', nombre: '— sin proyecto —' }]
+        .concat(listaClientes().filter(clienteAbierto).map(c => ({ valor: c.id, nombre: c.nombre }))),
+      v => { e.cliente = v; tocarEncargoLight(); }));
+  }
+
   const cajas = h('div', {});
 
   cajas.appendChild(bloqueLight('🎨 Estilo gráfico',
@@ -10608,8 +10878,12 @@ function vistaPresetLight() {
   caja.appendChild(bloqueLight('🎙️ Voz', 'quién lo locuta', voz));
 
   // 🌐 lo que se cambia a mano. Autoguardado, como todo lo demás.
-  caja.appendChild(bloqueLight('🌐 Nombre e idioma', 'se cambian sin regenerar nada',
+  const cliente = fichaCliente(clienteDe(ficha.id));
+  caja.appendChild(bloqueLight('🌐 Nombre, idioma y proyecto', 'se cambian sin regenerar nada',
     campoTexto('', ficha.nombre, v => guardarPresetLight(ficha.id, { nombre: v })),
+    listaClientes().length ? h('div', { clase: 'fila' },
+      h('span', { clase: 'meta' }, cliente ? `En el proyecto 📁 ${cliente.nombre}` : 'Sin proyecto'),
+      h('button', { clase: 'mini', onclick: () => moverEstiloACliente(ficha) }, 'Cambiar de proyecto')) : null,
     campoSelect('', ficha.idioma_pantalla || ficha.idioma || 'es',
       idiomasLight().map(i => ({ valor: i.valor, nombre: i.nombre })),
       v => guardarPresetLight(ficha.id, { idioma: v }, true))));

@@ -61,7 +61,11 @@ def _leer(raiz):
                 if isinstance(c, dict) and c.get("id")]
     estilos = {str(k): str(v) for k, v in (datos.get("estilos") or {}).items()
                if isinstance(v, str)}
-    return {"clientes": clientes, "estilos": estilos}
+    # un VIDEO va al proyecto de su estilo; esto es solo para el que se ha
+    # movido a mano a otro (el mismo estilo puede servir a dos clientes)
+    videos = {str(k): str(v) for k, v in (datos.get("videos") or {}).items()
+              if isinstance(v, str)}
+    return {"clientes": clientes, "estilos": estilos, "videos": videos}
 
 
 def _escribir(raiz, datos):
@@ -88,7 +92,8 @@ def listar(raiz):
     ids = {c["id"] for c in datos["clientes"]}
     return {"clientes": [publica(c) for c in datos["clientes"]],
             # una asignacion a un proyecto borrado no cuenta
-            "estilos": {k: v for k, v in datos["estilos"].items() if v in ids}}
+            "estilos": {k: v for k, v in datos["estilos"].items() if v in ids},
+            "videos": {k: v for k, v in datos["videos"].items() if v in ids}}
 
 
 def _nombre(nombre):
@@ -165,6 +170,8 @@ def borrar(raiz, cid):
         sueltos = [k for k, v in datos["estilos"].items() if v == cid]
         for preset in sueltos:
             datos["estilos"].pop(preset, None)
+        for video in [k for k, v in datos["videos"].items() if v == cid]:
+            datos["videos"].pop(video, None)
         _escribir(raiz, datos)
         return sueltos
 
@@ -181,6 +188,73 @@ def asignar(raiz, preset_id, cid):
         else:
             datos["estilos"].pop(preset_id, None)
         _escribir(raiz, datos)
+
+
+def asignar_video(raiz, video_id, cid):
+    """Mueve un video a un proyecto aunque su estilo sea de otro. "" lo devuelve
+    al de su estilo."""
+    video_id = str(video_id or "").strip()
+    if not video_id:
+        raise ErrorCliente("falta el video")
+    with _LOCK:
+        datos = _leer(raiz)
+        if cid:
+            _ficha(datos, cid)
+            datos["videos"][video_id] = cid
+        else:
+            datos["videos"].pop(video_id, None)
+        _escribir(raiz, datos)
+
+
+def cliente_de(raiz, estilo_id="", video_id="", datos=None):
+    """El proyecto de un video (el suyo propio o el de su estilo) o de un estilo."""
+    datos = datos or _leer(raiz)
+    ids = {c["id"] for c in datos["clientes"]}
+    cid = datos["videos"].get(str(video_id or "")) or datos["estilos"].get(str(estilo_id or ""))
+    return cid if cid in ids else ""
+
+
+# ---------------------------------------------------- la clave, en el servidor
+#
+# Abrir un proyecto con clave da un PASE (una firma del id con un secreto de la
+# instalacion). La pantalla lo manda en cada peticion (`X-Estudio-Abiertos`) y
+# las LISTAS de estilos y de videos esconden lo de un proyecto con clave a quien
+# no lo trae. Sigue sin cifrar ficheros: quien entra en el servidor los lee.
+
+def _secreto(raiz):
+    fichero = os.path.join(raiz, "_sistema", "clientes.secreto")
+    try:
+        with open(fichero, "r", encoding="utf-8") as fh:
+            valor = fh.read().strip()
+        if valor:
+            return valor
+    except OSError:
+        pass
+    valor = secrets.token_hex(32)
+    os.makedirs(os.path.dirname(fichero), exist_ok=True)
+    with open(fichero, "w", encoding="utf-8") as fh:
+        fh.write(valor)
+    return valor
+
+
+def pase(raiz, cid):
+    import hmac                                             # noqa: PLC0415
+    return hmac.new(_secreto(raiz).encode("utf-8"), str(cid).encode("utf-8"),
+                    "sha256").hexdigest()[:32]
+
+
+def cerrados_para(raiz, cabecera):
+    """Los proyectos con clave que esta peticion NO ha abierto. -> set de ids"""
+    datos = _leer(raiz)
+    con_clave = {c["id"] for c in datos["clientes"] if c.get("clave")}
+    if not con_clave:
+        return set()
+    abiertos = set()
+    for trozo in str(cabecera or "").split(","):
+        cid, _, firma = trozo.strip().partition(".")
+        if cid in con_clave and firma and secrets.compare_digest(firma, pase(raiz, cid)):
+            abiertos.add(cid)
+    return con_clave - abiertos
 
 
 def de_estilo(raiz, preset_id):

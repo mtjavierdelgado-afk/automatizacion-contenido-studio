@@ -902,7 +902,25 @@ def abrir_cliente(cid: str, cuerpo: dict = Body(default=None)):
     clave = str(_cuerpo(cuerpo).get("clave") or "")
     if not _cliente_o_400(lambda: CLIENTES.abrir(raiz_proyectos(), cid, clave)):
         raise ErrorApi(403, "esa no es la clave de este proyecto")
-    return {"abierto": cid}
+    # el PASE que la pantalla manda en cada peticion para ver lo de dentro
+    return {"abierto": cid, "pase": CLIENTES.pase(raiz_proyectos(), cid)}
+
+
+@app.put("/api/clientes/videos/{video_id}")
+def asignar_video_a_cliente(video_id: str, cuerpo: dict = Body(default=None)):
+    """Mueve un video a otro proyecto ("" lo devuelve al de su estilo)."""
+    cid = str(_cuerpo(cuerpo).get("cliente") or "").strip()
+    _cliente_o_400(lambda: CLIENTES.asignar_video(raiz_proyectos(), video_id, cid))
+    return {"video": video_id, "cliente": cid}
+
+
+def _cerrados(peticion):
+    """Los proyectos con clave que quien pide no ha abierto."""
+    try:
+        return CLIENTES.cerrados_para(raiz_proyectos(),
+                                      peticion.headers.get("x-estudio-abiertos"))
+    except Exception:                                       # noqa: BLE001
+        return set()
 
 
 @app.put("/api/clientes/estilos/{preset_id}")
@@ -989,7 +1007,7 @@ def reparar_estilo(pid: str, cuerpo: dict = Body(default=None)):
 
 
 @app.get("/api/proyectos")
-def listar_proyectos():
+def listar_proyectos(peticion: Request):
     """Proyectos disponibles, del mas reciente al mas antiguo.
 
     Sin los TALLERES de los presets del modo light. No son videos: son la
@@ -999,8 +1017,15 @@ def listar_proyectos():
     en el disco y se borran con su preset (`DELETE /api/presets-light/{id}`).
     """
     fichas = []
+    cerrados = _cerrados(peticion)
+    asignaciones = CLIENTES._leer(raiz_proyectos()) if cerrados else None
     for ficha in Proyecto.listar(raiz_proyectos()):
         if ficha.get(CONFIG_TALLER):
+            continue
+        # LO DE UN PROYECTO CON CLAVE no se lista a quien no lo ha abierto
+        if cerrados and CLIENTES.cliente_de(
+                raiz_proyectos(), ficha.get(CONFIG_ESTILO_LIGHT) or "",
+                ficha.get("id"), datos=asignaciones) in cerrados:
             continue
         fichas.append({
             "id": ficha.get("id"),
@@ -8414,6 +8439,7 @@ def _talleres_sueltos():
         if str(ficha.get("id")) in usados:
             continue
         sueltos.append({"id": ficha.get("id"),
+                        "cliente": ficha.get("cliente_del_taller") or "",
                         "nombre": ficha.get("nombre") or ficha.get("id"),
                         "creado": ficha.get("creado", ""),
                         "actualizado": ficha.get("actualizado", "")})
@@ -9143,7 +9169,7 @@ def _curar_muestras(ficha):
 
 
 @app.get("/api/presets-light")
-def listar_presets_light():
+def listar_presets_light(peticion: Request):
     """Los presets de canal, con sus viñetas y su plan de generacion.
 
     `plan` viaja aqui y no en un endpoint aparte porque la pantalla lo necesita
@@ -9155,6 +9181,11 @@ def listar_presets_light():
     # que este modo entiende. Los de guion, estilo, voz y grafismo siguen
     # existiendo y siguen siendo del modo editor: no se ensenan ni se tocan.
     fichas = (_preset_o_400(lambda p: p.listar())["presets"] or {}).get("canal") or []
+    cerrados = _cerrados(peticion)
+    if cerrados:
+        asignaciones = CLIENTES._leer(raiz_proyectos())
+        fichas = [f for f in fichas if CLIENTES.cliente_de(
+            raiz_proyectos(), f.get("id"), datos=asignaciones) not in cerrados]
     for ficha in fichas:
         _curar_muestras(ficha)
     return {"presets": fichas,
@@ -9210,6 +9241,10 @@ def crear_preset_light(cuerpo: dict = Body(default=None)):
         retomar = True
     else:
         ctx = _crear_taller(encargo)
+    if encargo.get("cliente"):
+        # para ensenar el intento a medias DENTRO de su proyecto
+        ctx.proyecto.config["cliente_del_taller"] = encargo["cliente"]
+        ctx.proyecto.guardar_config()
     _sembrar_taller(ctx, encargo)
     # ANTES de lanzar: la guia es la primera tarea que las mira, y retomar un
     # taller no puede perderlas -- se vuelven a copiar y ya estaban.

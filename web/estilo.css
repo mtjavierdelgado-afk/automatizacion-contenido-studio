@@ -2894,3 +2894,4 @@ ul.inicio-como li { display: flex; gap: 10px; align-items: flex-start; line-heig
 .barra-pausas { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; }
 .barra-pausas .crece { min-width: 220px; }
 .parrafo-guion .pastilla.pausa { color: var(--aviso); }
+.parrafo-guion .pastilla.pausa.al-final { color: var(--tenue); }

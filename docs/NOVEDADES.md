@@ -56,6 +56,20 @@ vídeos, estilos, claves y contraseña no se tocan.
   pulsar Generar. No pisa lo propio del vídeo: duración, formato, llamadas a la
   acción, indicaciones, qué lleva y lo editado a mano en el guion.
 
+**Las pausas se hacen al montar, y la voz se graba de corrido**
+- Las pausas del **final de cada bloque** (después del gancho, antes de cada
+  cambio de tema) ya no se le piden a la voz: la voz se graba seguida y el
+  silencio se añade al montar, con la misma duración. Así la narración no se
+  corta ni suena a lista leída, dure el vídeo lo que dure y con cualquier IA de
+  voz.
+- Solo cuentan para el aviso las pausas **dentro de una frase**, que son las que
+  cortan la voz. Cada bloque lo muestra: «⏸ 0,9 s al final» (sin problema) o
+  «⏸ 0,9 s dentro».
+- Al regrabar un tramo suelto, sus bloques ya respetan el aire entre bloques
+  (antes quedaban pegados).
+- Vale para los guiones que ya tienes: se aplica la próxima vez que se grabe o
+  se regrabe el audio.
+
 **Las pausas largas del guion, a la vista**
 - Cada bloque que lleva una pausa larga invisible (`<break>`) muestra la
   etiqueta **«⏸ pausa 0,9 s»** y un botón **«Quitar pausa»**, que la quita sin

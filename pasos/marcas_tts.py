@@ -495,6 +495,46 @@ def silencio_final(texto):
     return total
 
 
+def separar_pausa_final(texto):
+    """(texto sin los silencios de cola, milisegundos que tenian). 
+
+    LA PAUSA DE FINAL DE BLOQUE NO SE LE PIDE A LA VOZ: se hace en el montaje.
+    Cada <break> parte la generacion de Cartesia (y de cualquier otra voz con
+    etiquetas: ElevenLabs avisa de lo mismo), asi que un guion con una pausa al
+    final de cada bloque sonaba a lista leida. Una pausa ENTRE bloques no
+    necesita estar dentro de la toma: la voz se graba de corrido y el silencio
+    se estira despues en el corte (`motor.espaciar`), que ya existia para el
+    aire entre bloques. Mismo silencio en el oido, toma continua.
+
+    Las anotaciones que no son silencio y van detras (un <speed> que vuelve a
+    neutro) se conservan en su sitio.
+    """
+    crudo = str(texto or "")
+    piezas, cola, ms = trocear(crudo), [], 0
+    while piezas and (piezas[-1][0] in ("break", "speed", "volume", "emotion")
+                      or (piezas[-1][0] == "texto" and not str(piezas[-1][1]).strip())):
+        clase, pieza = piezas.pop()
+        if clase == "break":
+            ms += pieza
+        elif clase != "texto":
+            cola.insert(0, (clase, pieza))
+    if not ms:
+        return crudo, 0
+    return " ".join((_rearmar(piezas) + _rearmar(cola)).split()), int(ms)
+
+
+def sin_pausas_internas(texto):
+    """El texto sin las pausas de DENTRO, conservando la del final (que se hace
+    en el montaje y no corta la voz)."""
+    limpio, ms = separar_pausa_final(texto)
+    return sin_pausas(limpio) + (f'<break time="{int(ms)}ms"/>' if ms else "")
+
+
+def pausas_internas(texto):
+    """Los silencios que NO estan al final del bloque: los que cortan la voz."""
+    return pausas_de(separar_pausa_final(texto)[0])
+
+
 def pausa_al_final(texto, ms):
     """El bloque termina con al menos 'ms' de silencio, cueste lo que cueste.
 
@@ -573,7 +613,9 @@ def revisar_conjunto(bloques):
     textos = [str(t or "") for t in textos]
     if not textos:
         return []
-    silencios = sum(1 for t in textos for clase, _ in trocear(t) if clase == "break")
+    # SOLO LAS DE DENTRO: la del final de un bloque ya no corta la toma, se
+    # hace en el montaje (ver separar_pausa_final)
+    silencios = sum(len(pausas_internas(t)) for t in textos)
     tope = int(len(textos) * DENSIDAD_MAXIMA)
     if silencios <= max(1, tope):
         return []

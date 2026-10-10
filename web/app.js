@@ -7134,10 +7134,12 @@ function bloquesLight() {
     ficha.appendChild(h('div', { clase: 'cabecera' },
       h('span', { clase: 'id' }, bloque.id),
       insertado ? h('span', { clase: 'pastilla nuevo' }, 'añadido') : null,
-      pausasDeBloqueLight(bloque.id).length ? h('span', {
-        clase: 'pastilla pausa',
-        title: 'Este bloque lleva una pausa larga invisible en el texto',
-      }, `⏸ pausa ${pausasDeBloqueLight(bloque.id).map(ms => `${(ms / 1000).toFixed(1).replace('.', ',')} s`).join(' + ')}`) : null,
+      ...pausasDeBloqueLight(bloque.id).map(p => h('span', {
+        clase: 'pastilla pausa' + (p.final ? ' al-final' : ''),
+        title: p.final
+          ? 'Pausa al final del bloque: se hace al montar y no corta la voz'
+          : 'Pausa dentro de la frase: corta la voz al grabar',
+      }, `⏸ ${(p.ms / 1000).toFixed(1).replace('.', ',')} s ${p.final ? 'al final' : 'dentro'}`)),
       bloqueEditadoLight(bloque) ? h('span', { clase: 'pastilla tocado' }, 'editado') : null,
       h('span', { clase: 'crece' }),
       pausasDeBloqueLight(bloque.id).length ? h('button', {
@@ -7358,26 +7360,35 @@ function pausasDeBloqueLight(bid) {
 function barraPausasLight() {
   const v = APP.light.video;
   const pausas = (v.estructura || {}).pausas;
-  if (!pausas || !pausas.total) return null;
+  if (!pausas) return null;
+  const finales = pausas.al_final || [];
+  if (!pausas.total && !finales.length) return null;
   const sobra = pausas.total > pausas.tope;
-  const segundos = ms => `${(ms / 1000).toFixed(1).replace('.', ',')} s`;
-  return h('div', { clase: (sobra ? 'caja-aviso' : 'caja-info') + ' barra-pausas' },
+  /* LAS DEL FINAL DE UN BLOQUE YA NO SON UN PROBLEMA: se hacen al montar y la
+     voz se graba de corrido. Las que cuentan son las de DENTRO de una frase. */
+  const finalesTexto = finales.length
+    ? `${finales.length === 1 ? 'La pausa' : `Las ${finales.length} pausas`} al final de `
+      + `${finales.length === 1 ? 'bloque' : 'bloques'} (${finales.join(', ')}) se hacen al `
+      + 'montar el vídeo y no cortan la voz. '
+    : '';
+  if (!sobra) {
+    return h('div', { clase: 'caja-info barra-pausas' },
+      h('div', { clase: 'crece' }, finalesTexto,
+        pausas.total ? `Pausas dentro de una frase: ${pausas.total} (${pausas.con_pausa.join(', ')}), `
+          + 'dentro de lo recomendado.' : ''));
+  }
+  return h('div', { clase: 'caja-aviso barra-pausas' },
     h('div', { clase: 'crece' },
-      h('strong', {}, `${pausas.total} ${pausas.total === 1 ? 'pausa larga' : 'pausas largas'} `
-        + `en el guion`),
-      ` (marcadas con ⏸ en ${pausas.con_pausa.join(', ')}). `,
-      sobra
-        ? `Para que el audio suene seguido y no a lista leída, conviene dejar como `
-          + `mucho ${pausas.tope}: la del principio y las de cambio de tema.`
-        : 'Está dentro de lo recomendado.',
-      sobra && (pausas.sobrantes || []).length
-        ? ` «Quitar las sobrantes» quita las de ${pausas.sobrantes.join(', ')}.` : ''),
-    sobra && (pausas.sobrantes || []).length ? h('button', {
+      h('strong', {}, `${pausas.total} pausas dentro de frases`),
+      ` (en ${pausas.con_pausa.join(', ')}). Cada una corta la voz y, con tantas, el `
+      + `audio puede sonar a lista leída: conviene dejar como mucho ${pausas.tope}. `,
+      finalesTexto,
+      (pausas.sobrantes || []).length
+        ? `«Quitar las sobrantes» quita las de ${pausas.sobrantes.join(', ')}.` : ''),
+    (pausas.sobrantes || []).length ? h('button', {
       clase: 'mini', disabled: !!trabajoVideoLight(),
       onclick: () => quitarPausasLight({ sobrantes: true }),
-    }, 'Quitar las sobrantes') : null,
-    h('span', { clase: 'meta' }, `cada pausa: ${[...new Set(
-      (v.estructura.bloques || []).flatMap(b => b.pausas || []))].map(segundos).join(', ')}`));
+    }, 'Quitar las sobrantes') : null);
 }
 
 async function quitarPausasLight(cuerpo) {

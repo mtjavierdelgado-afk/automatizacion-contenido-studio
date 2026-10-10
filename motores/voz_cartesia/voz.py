@@ -269,6 +269,9 @@ def espaciar(wav, palabras, reparto, escenas, hueco_minimo=1.0):
     Lo que se inserta es RUIDO DE SALA de la propia pausa, no ceros: ver
     _relleno_de_sala.
 
+    Una escena puede traer `pausa_despues` (segundos): un silencio extra en su
+    corte, que es como se hacen ahora las pausas de final de bloque.
+
     Devuelve (wav_nuevo, desplazamientos) donde desplazamientos es el retardo
     acumulado a aplicar a cada marca segun el instante en que caiga.
     """
@@ -281,7 +284,12 @@ def espaciar(wav, palabras, reparto, escenas, hueco_minimo=1.0):
     for anterior, siguiente in zip(con_voz, con_voz[1:]):
         fin = reparto[anterior["id"]][-1]["e"]
         inicio = reparto[siguiente["id"]][0]["s"]
-        falta = hueco_minimo - (inicio - fin)
+        # LA PAUSA DEL FINAL DE ESA ESCENA, si la lleva (`pausa_despues`, en
+        # segundos): la que antes iba como <break> dentro de la toma y partia
+        # la generacion. Se suma a la pausa natural, que es lo que hacia el
+        # <break>; el hueco minimo sigue mandando si pide mas.
+        pausa = float(anterior.get("pausa_despues") or 0.0)
+        falta = max(hueco_minimo - (inicio - fin), pausa)
         if falta > 0.01:
             cortes.append((fin + (inicio - fin) / 2, falta, fin, inicio))
 

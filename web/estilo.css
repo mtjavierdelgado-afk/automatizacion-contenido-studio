@@ -2426,7 +2426,18 @@ button.avisa:hover:not(:disabled) { border-color: var(--aviso); }
   border-top: 1px solid var(--linea); padding: 10px 12px;
   display: flex; flex-direction: column; gap: 8px;
 }
-#asistente-pie textarea { resize: none; }
+/* EL CAMPO CRECE CON LO QUE SE ESCRIBE (o se dicta): de dos lineas hasta un
+   tercio del panel, y desde ahi barra propia. Con dos lineas fijas un dictado
+   largo no se podia revisar antes de mandarlo. */
+#asistente-pie textarea { resize: none; min-height: 52px; max-height: 34vh; overflow-y: auto; }
+/* AMPLIADO: mas ancho y mas alto, para leer respuestas largas y escribir con
+   sitio. Se recuerda por navegador. */
+#asistente.ampliado {
+  width: min(880px, calc(100vw - 24px));
+  height: calc(100vh - var(--alto) - var(--alto-nav) - var(--alto-pie) - 100px);
+}
+#asistente.ampliado .turno { font-size: 14px; }
+#asistente.ampliado #asistente-pie textarea { max-height: 45vh; }
 /* Parar a la izquierda, Enviar a la derecha, en una sola linea tambien en
    movil: la .fila generica se apila en pantalla estrecha y dejaba el boton
    de enviar suelto a la izquierda. */
@@ -2479,6 +2490,9 @@ button.avisa:hover:not(:disabled) { border-color: var(--aviso); }
     border-radius: 0; border: none; padding-top: env(safe-area-inset-top);
   }
   #asistente-pie { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  /* en movil el panel ya ocupa la pantalla entera: ampliar no tiene sentido */
+  #asistente.ampliado { width: auto; height: auto; }
+  #btn-ampliar-asistente { display: none; }
   .burbuja-asistente {
     right: 12px; width: 48px; height: 48px;
     bottom: calc(var(--alto-nav) + var(--alto-pie) + 10px + env(safe-area-inset-bottom, 0px));
@@ -2898,3 +2912,15 @@ ul.inicio-como li { display: flex; gap: 10px; align-items: flex-start; line-heig
 .barra-pausas .crece { min-width: 220px; }
 .parrafo-guion .pastilla.pausa { color: var(--aviso); }
 .parrafo-guion .pastilla.pausa.al-final { color: var(--tenue); }
+
+/* lo que se dice de cada imagen de referencia, plegado bajo la tira */
+.describir-aportadas { margin-top: 8px; }
+.describir-aportadas summary { cursor: pointer; color: var(--tenue); font-size: 13px; }
+.descripciones-aportadas { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.descripcion-aportada { display: flex; gap: 8px; align-items: center; }
+.descripcion-aportada img { width: 56px; height: 38px; object-fit: cover; border-radius: 5px; flex: none; }
+.descripcion-aportada input { flex: 1; min-width: 0; }
+.aportada .con-descripcion {
+  position: absolute; left: 3px; bottom: 3px; font-size: 11px; line-height: 1;
+  padding: 2px 4px; border-radius: 4px; background: var(--panel); color: var(--texto);
+}

@@ -186,7 +186,8 @@ TIPOS = {
 #:
 #: `taller` es el id del proyecto oculto donde se genero: ahi siguen las
 #: imagenes que se adjuntaron, asi que rehacer la guia no las vuelve a pedir.
-CLAVES_ORIGEN = ("estilo_prompt", "estilo_imagenes", "tono_prompt",
+CLAVES_ORIGEN = ("estilo_prompt", "estilo_imagenes", "estilo_descripciones",
+                 "tono_prompt",
                  "voz_prompt", "voz_id", "idioma", "ritmo", "taller", "feedback",
                  # el espanol de Latinoamerica: sin esto, rehacer una parte del
                  # estilo lo devolveria al espanol de siempre en silencio
@@ -739,6 +740,23 @@ def _devolver_propios(pid, aparte):
     shutil.rmtree(aparte, ignore_errors=True)
 
 
+
+#: Los prefijos de orden que ya trae un nombre: «00_», «00_00_»...
+_PREFIJO_ORDEN = re.compile(r"^(\d{2}_)+")
+
+
+def nombre_numerado(indice, ruta):
+    """«NN_nombre» para la imagen `indice`, SIN arrastrar el prefijo que ya traiga.
+
+    Al volver a guardar un preset sus referencias ya son las del banco, con su
+    «00_» puesto: anteponer otro daba «00_00_cara.png», y crecia en cada
+    guardado (se vio uno con 19 repeticiones). Como la carpeta vieja se borra
+    al sustituirla, los videos que apuntaban al nombre anterior se quedaban
+    sin estilo (09-10-2026). Lo usan el preset y las imagenes subidas al taller.
+    """
+    base = _PREFIJO_ORDEN.sub("", os.path.basename(str(ruta))) or os.path.basename(str(ruta))
+    return f"{int(indice):02d}_{base}"
+
 def _sembrar_ficheros(tipo, pid, datos, miniatura, anterior):
     """Copia al banco lo que el preset necesita tener en propiedad.
 
@@ -806,7 +824,7 @@ def _sembrar_ficheros(tipo, pid, datos, miniatura, anterior):
     referencia_miniatura = str(miniatura or "").strip() or rutas[0]
     try:
         for indice, origen in enumerate(rutas):
-            nombre = f"{indice:02d}_{os.path.basename(origen)}"
+            nombre = nombre_numerado(indice, origen)
             final = os.path.join(trabajo, nombre)
             shutil.copyfile(origen, final)
             copiadas.append(final)

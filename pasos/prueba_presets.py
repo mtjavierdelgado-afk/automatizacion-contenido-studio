@@ -23,6 +23,7 @@ No hay red, ni CLI, ni proyecto de verdad: todo es determinista.
     C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\pasos\\prueba_presets.py
 """
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -174,6 +175,40 @@ def prueba_estilo():
                                                       "C:\\no\\existe\\2.png",
                                                       "C:\\no\\existe\\3.png"]}),
              "no estan en el disco", "fotogramas que no existen se rechazan al guardar")
+    return ficha
+
+
+def prueba_guardar_otra_vez_no_crece(ficha):
+    """Volver a guardar un estilo con SUS PROPIAS referencias no les añade «00_».
+
+    Al volver a guardar, las referencias ya son las del banco y traen su prefijo
+    de orden; anteponer otro daba «00_00_f0.png», que crecia en cada guardado
+    (uno llego a 19 repeticiones) y dejaba sin estilo a los videos que apuntaban
+    al nombre de antes (09-10-2026).
+    """
+    print("\n  ESTILO: guardarlo otra vez no hace crecer los nombres")
+    esperados = None
+    for vuelta in range(3):
+        actual = presets.leer(ficha["id"])
+        ficha = presets.guardar("estilo", actual["nombre"],
+                                dict(actual["datos"]), pid=ficha["id"],
+                                miniatura=actual["datos"]["referencias"][1])
+        nombres = [os.path.basename(r)
+                   for r in presets.leer(ficha["id"])["datos"]["referencias"]]
+        if esperados is None:
+            esperados = nombres
+        igual(nombres, esperados, f"vuelta {vuelta + 1}: los mismos nombres")
+    igual(esperados, ["00_f0.png", "01_f1.png", "02_f2.png", "03_f3.png"],
+          "y son NN_nombre, con un solo prefijo")
+    ok(all(os.path.exists(r) for r in presets.leer(ficha["id"])["datos"]["referencias"]),
+       "y los ficheros a los que apuntan existen")
+    igual(sorted(f for f in os.listdir(presets.carpeta_de(ficha["id"]))
+                 if f.endswith(".png") and re.match(r"^\d{2}_\d{2}_", f)), [],
+          "en la carpeta no queda ningun nombre con el prefijo repetido")
+    igual(presets.nombre_numerado(3, "/x/00_00_00_cara.png"), "03_cara.png",
+          "un nombre que ya venia con prefijos repetidos se limpia entero")
+    igual(presets.nombre_numerado(0, "/x/cara.png"), "00_cara.png",
+          "y uno sin prefijo lo recibe")
     return ficha
 
 
@@ -428,6 +463,7 @@ def main():
     prueba_claves_cerradas()
     guion = prueba_guion()
     estilo = prueba_estilo()
+    estilo = prueba_guardar_otra_vez_no_crece(estilo)
     prueba_fusion(estilo)
     voz = prueba_voz()
     canal = prueba_canal(guion, estilo, voz)

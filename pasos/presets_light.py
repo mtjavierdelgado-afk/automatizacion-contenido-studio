@@ -551,6 +551,18 @@ def validar_encargo(crudo):
             "palabras no dicen nada: escríbelas enteras o déjalo en blanco")
     limpio["estilo_prompt"] = prompt
     limpio["estilo_imagenes"] = imagenes
+    # LO QUE SE DICE DE CADA IMAGEN, opcional: {nombre del buzon: texto}. Solo
+    # de imagenes que van en la lista; lo demas se tira sin error.
+    crudas = datos.get("estilo_descripciones")
+    descripciones = {}
+    if isinstance(crudas, dict):
+        nombres = {_sin_prefijo(n) for n in imagenes}
+        for nombre, texto in crudas.items():
+            nombre = _sin_prefijo(nombre)
+            texto = " ".join(str(texto or "").split())[:MAX_DESCRIPCION]
+            if nombre in nombres and texto:
+                descripciones[nombre] = texto
+    limpio["estilo_descripciones"] = descripciones
 
     # EL TONO SIGUE SIENDO VIDEO O DESCRIPCION, y aqui si son excluyentes: no
     # hay imagenes que adjuntar a un tono, y un parrafo sobre como se cuenta una
@@ -604,17 +616,80 @@ def validar_encargo(crudo):
     return limpio
 
 
-def max_imagenes_estilo():
-    """Cuantas imagenes se pueden adjuntar a una descripcion. -> int
+#: CUANTAS IMAGENES SE PUEDEN ADJUNTAR a un estilo. Eran las mismas que se
+#: eligen de un video (`p6_assets.REFERENCIAS_A_ELEGIR`, 24); se pidieron 50
+#: (09-10-2026). Lo que las mira es la GUIA, que las abre una a una con el CLI
+#: por suscripcion: mas imagenes alargan esa pasada y no cuestan dinero por
+#: imagen de plano. Para DIBUJAR las laminas no van todas (ver `para_la_hoja`).
+MAX_IMAGENES_ESTILO = 50
 
-    LAS MISMAS QUE SE ELIGEN DE UN VIDEO, y sale de alli en vez de escribirse
-    aqui: las dos listas alimentan a la MISMA funcion --la que escribe la guia
-    mirando imagenes-- asi que un tope propio se quedaria viejo el dia que
-    cambiara el otro. Se importa tarde porque p6_assets importa moodboard y
-    moodboard importa p6_assets: arriba seria un circulo.
+#: Cuantas de las adjuntas van en la HOJA con la que se dibujan las laminas.
+#: Es una sola imagen de 1536x1024 en cuadricula de dos columnas: con 24 cada
+#: foto quedaba de 768x85 y con 50 de 768x41, que ya no ensena ningun trazo.
+#: Con ocho cada una conserva 768x256.
+MAX_EN_LA_HOJA = 8
+
+#: Lo que cabe en la descripcion de una imagen.
+MAX_DESCRIPCION = 300
+
+
+def max_imagenes_estilo():
+    """Cuantas imagenes se pueden adjuntar a una descripcion. -> int"""
+    return MAX_IMAGENES_ESTILO
+
+
+def para_la_hoja(rutas, descripciones=None, maximo=MAX_EN_LA_HOJA):
+    """Las adjuntas que van a la hoja de las laminas, en su orden. -> [rutas]
+
+    Primero las que tienen descripcion (alguien se molesto en decir que son),
+    y el resto repartidas a lo largo de la lista, no las primeras: quien sube
+    cincuenta suele subirlas por grupos, y las ocho primeras serian un grupo.
     """
-    import p6_assets                                        # noqa: PLC0415
-    return p6_assets.REFERENCIAS_A_ELEGIR
+    rutas = list(rutas or [])
+    if len(rutas) <= maximo:
+        return rutas
+    descritas = [r for r in rutas if descripcion_de(r, descripciones)]
+    elegidas = descritas[:maximo]
+    resto = [r for r in rutas if r not in elegidas]
+    hueco = maximo - len(elegidas)
+    if hueco > 0 and resto:
+        paso = len(resto) / float(hueco)
+        elegidas += [resto[int(i * paso)] for i in range(hueco)]
+    return [r for r in rutas if r in elegidas]
+
+
+def _sin_prefijo(nombre):
+    return re.sub(r"^(\d{2}_)+", "", os.path.basename(str(nombre or "")))
+
+
+def descripcion_de(ruta, descripciones):
+    """La descripcion de una imagen, la busque por el nombre del buzon o por el
+    del taller («NN_» delante). -> str"""
+    if not descripciones:
+        return ""
+    return str(descripciones.get(_sin_prefijo(ruta)) or "").strip()
+
+
+def indicaciones_con_descripciones(indicaciones, rutas, descripciones):
+    """Las indicaciones del estilo con lo que se ha dicho de cada imagen. -> str
+
+    Va con el NOMBRE DEL FICHERO tal y como lo abre la guia, para que quien
+    escribe la guia sepa a que imagen se refiere cada frase.
+    """
+    lineas = []
+    for ruta in rutas or []:
+        texto = descripcion_de(ruta, descripciones)
+        if texto:
+            lineas.append(f"[{os.path.basename(ruta)}] {texto}")
+    base = " ".join(str(indicaciones or "").split())
+    if not lineas:
+        return base
+    # en UNA linea a proposito: la guia junta los espacios de las indicaciones
+    # (`estilo.generar_guia`), asi que los saltos de linea no llegarian
+    bloque = ("Lo que dice quien las subio de algunas imagenes, por fichero "
+              "(usalo para entender que muestra cada una y que tomar de ella): "
+              + " ".join(lineas))
+    return f"{base} {bloque}" if base else bloque
 
 
 def tareas_de(encargo, solo=None):

@@ -2325,6 +2325,41 @@ def prueba_cache_referencias():
     colores = [Image.open(d).convert("L").getpixel((0, 0)) for d in destinos]
     ok(colores[0] != colores[1],
        f"y cada una tiene su imagen, no la del otro set: {colores}")
+
+    # MUCHOS HILOS A LA VEZ SOBRE LA MISMA REFERENCIA (09-10-2026). En Linux el
+    # temporal llevaba los 16 bits bajos del id del hilo, que coinciden entre
+    # hilos: dos escribian el mismo .tmp y el segundo se lo encontraba movido
+    # («FileNotFoundError ... .tmp -> ...png») y tumbaba la tanda.
+    import threading                                          # noqa: PLC0415
+    compartida = os.path.join(base, "estilo.png")
+    Image.effect_noise((900, 600), 60).convert("RGB").save(compartida, "PNG")
+    cache_hilos = os.path.join(base, "_cache_hilos")
+    fallos = []
+
+    def normalizar_muchas():
+        try:
+            for _ in range(6):
+                # se borra SOLO el destino: asi cada vuelta vuelve a escribirlo
+                # y los doce hilos compiten por el mismo fichero
+                hecho = imagen.normalizar(compartida, cache_hilos)
+                try:
+                    os.remove(hecho)
+                except OSError:
+                    pass
+        except Exception as fallo:                            # noqa: BLE001
+            fallos.append(repr(fallo))
+
+    # 24 hilos: el id de un hilo en Linux cae en ~16 valores con esos bits,
+    # asi que con 24 a la vez la coincidencia esta garantizada
+    hilos = [threading.Thread(target=normalizar_muchas) for _ in range(24)]
+    for hilo in hilos:
+        hilo.start()
+    for hilo in hilos:
+        hilo.join()
+    igual(fallos[:2], [], "24 hilos normalizando la misma referencia no se pisan")
+    sobras = [f for f in os.listdir(cache_hilos) if f.endswith(".tmp")] \
+        if os.path.isdir(cache_hilos) else []
+    igual(sobras, [], "y no quedan temporales en la cache")
     shutil.rmtree(base, ignore_errors=True)
 
 

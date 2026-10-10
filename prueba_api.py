@@ -1982,6 +1982,20 @@ def probar_asistente(cliente):
     igual(respuesta.status_code, 400, "un modo de dictado que no existe da 400")
     cliente.put("/api/ajustes", {"dictado": "auto"})
 
+    # LA HORA DE LA REGIÓN: el servidor apunta las horas en la zona elegida
+    respuesta, datos = cliente.put("/api/ajustes", {"zona_horaria": "America/Lima"})
+    igual(respuesta.status_code, 200, "se elige la zona America/Lima")
+    igual((datos.get("zona") or {}).get("desfase"), "UTC-05:00",
+          "y el servidor pasa a UTC-05:00 en el acto, sin reiniciar")
+    _r, datos = cliente.get("/api/ajustes")
+    igual((datos.get("ajustes") or {}).get("zona_horaria"), "America/Lima",
+          "y queda guardada")
+    respuesta, _d = cliente.put("/api/ajustes", {"zona_horaria": "Marte/Olimpo"})
+    igual(respuesta.status_code, 400, "una zona que no existe da 400")
+    _r, datos = cliente.put("/api/ajustes", {"zona_horaria": ""})
+    igual((datos.get("ajustes") or {}).get("zona_horaria"), "",
+          "y vacía vuelve a la del servidor")
+
     # EL HISTORIAL: la charla queda guardada junto a los datos, no en memoria
     respuesta, historial = cliente.get("/api/asistente/charlas")
     igual(respuesta.status_code, 200, "GET /api/asistente/charlas da el historial")

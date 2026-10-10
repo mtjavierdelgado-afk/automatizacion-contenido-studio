@@ -926,7 +926,7 @@ def previsualizar(ruta_png, ruta_svg, destino, ruta_fija=None, mov=None,
     else:
         x0, y0, x1 = 0.0, 0.0, float(lienzo[0])
     escala = ancho / max(1.0, (x1 - x0))
-    html = (f'<html><body style="margin:0;width:{ancho}px;height:{alto}px;'
+    html = (f'<html><head><meta charset="utf-8"></head><body style="margin:0;width:{ancho}px;height:{alto}px;'
             f'overflow:hidden;background:#0b0c09">'
             f'<div style="position:absolute;left:0;top:0;'
             f'width:{ancho}px;height:{alto}px;overflow:hidden">'
@@ -934,7 +934,7 @@ def previsualizar(ruta_png, ruta_svg, destino, ruta_fija=None, mov=None,
             f'transform-origin:0 0;'
             f'transform:translate({-x0 * escala:.3f}px,{-y0 * escala:.3f}px) '
             f'scale({escala:.6f})">'
-            f'<img src="file:///{ruta_png.replace(chr(92), "/")}" '
+            f'<img src="{medios.url_de_fichero(ruta_png)}" '
             f'style="display:block;width:{lienzo[0]}px;height:{lienzo[1]}px">'
             f'<div style="position:absolute;left:0;top:0;'
             f'width:{lienzo[0]}px;height:{lienzo[1]}px">{svg}</div>'
@@ -944,19 +944,42 @@ def previsualizar(ruta_png, ruta_svg, destino, ruta_fija=None, mov=None,
             # dentro del grupo de arriba
             f'<div style="position:absolute;left:0;top:0;z-index:1;'
             f'width:{ancho}px;height:{alto}px">{fija}</div>'
+            # LA SEÑAL de que esta pagina se ha pintado (ver `_comprobar_previa`):
+            # un cuadradito de un color que ni la pagina de error ni un plano
+            # tienen, encima de todo. Se borra del PNG en cuanto se comprueba.
+            f'<div style="position:absolute;left:0;top:0;z-index:9;'
+            f'width:{SENAL_LADO}px;height:{SENAL_LADO}px;'
+            f'background:rgb{SENAL_PREVIA}"></div>'
             f'</div>'
             f'<script>{BUSCAR_ENTRADAS}</script>'
             f'</body></html>')
     ruta_html = medios.escribir_texto(destino + ".html", html)
     medios.rasterizar(ruta_html, destino, ancho, alto, transparente=False)
+    try:
+        _comprobar_previa(destino)
+    except RuntimeError as fallo:
+        # el HTML se QUEDA, con otro nombre: es lo unico que deja reproducir a
+        # mano lo que vio el navegador
+        guardado = destino + ".fallo.html"
+        try:
+            os.replace(ruta_html, guardado)
+        except OSError:
+            guardado = ruta_html
+        raise RuntimeError(f"{fallo} (pagina: {guardado}; imagen: "
+                           f"{medios.url_de_fichero(ruta_png)})") from None
     os.remove(ruta_html)
-    _comprobar_previa(destino)
     return destino
 
 
 #: El fondo del cuadro compuesto, en el HTML de arriba. Sirve de FIRMA: si la
 #: esquina no se parece a esto, lo que hay dentro no lo ha pintado esta funcion.
 FONDO_PREVIA = (0x0b, 0x0c, 0x09)
+
+#: LA SEÑAL: un cuadradito de este color en la esquina, encima de todo. Si esta
+#: en el PNG, la pagina se pinto; si no, lo fotografiado es otra cosa (la pagina
+#: de error del navegador). Un color que no sale ni en esa pagina ni en una foto.
+SENAL_PREVIA = (255, 0, 254)
+SENAL_LADO = 3
 
 
 def _comprobar_previa(destino):
@@ -969,23 +992,49 @@ def _comprobar_previa(destino):
     versiones, todas de 27 KB, y nadie levanto en ningun sitio: se vieron
     MIRANDO la pantalla.
 
-    La firma es la esquina. Este HTML pinta el fondo a #0b0c09 y encima el plano
-    escalado, asi que la esquina de un cuadro de verdad es oscura o es imagen;
-    la de la pagina de error es casi blanca. No se mira el peso: un plano
-    legitimamente plano pesa poco y seria un falso positivo.
+    LA FIRMA ES UNA SEÑAL PUESTA A PROPOSITO (`SENAL_PREVIA`), no el color de
+    la esquina. Se miraba si la esquina era casi blanca, y eso tumbaba a un
+    estilo FOTOGRAFICO: una pared blanca de interiorismo da (253, 253, 254) en
+    la esquina igual que la pagina de error, y el estilo nuevo fallaba al 89 %
+    siempre en el mismo sitio (09-10-2026). Con la señal la pregunta ya no
+    depende de lo que haya dibujado: o la pagina se pinto, o no.
+
+    La señal se BORRA del PNG en cuanto se comprueba (se cubre con el pixel de
+    al lado): la previa que se enseña no lleva nada que no sea el cuadro.
+
+    Un PNG sin señal pero con la esquina oscura se da por bueno: es una previa
+    de antes de la señal o un navegador que no pinta ese div, y lo que esto
+    busca es la pagina de error, que es clara.
 
     Levanta y no borra el PNG: quien llama lo recoge como aviso (ver `ejecutar`)
     y asi queda en disco para poder mirarlo si alguien pregunta por que.
     """
     try:
         from PIL import Image                                 # noqa: PLC0415
-        esquina = Image.open(destino).convert("RGB").load()[5, 5]
+        imagen = Image.open(destino).convert("RGB")
+        pixeles = imagen.load()
+        senal = pixeles[1, 1]
+        esquina = pixeles[5, 5]
     except Exception:                                         # noqa: BLE001
+        return
+    if _es_senal(senal):
+        # se tapa con el pixel de justo al lado, y se guarda tal cual
+        relleno = pixeles[SENAL_LADO + 1, SENAL_LADO + 1]
+        for x in range(SENAL_LADO + 1):
+            for y in range(SENAL_LADO + 1):
+                pixeles[x, y] = relleno
+        imagen.save(destino)
         return
     if min(esquina) > 200:
         raise RuntimeError(
             f"la previa salio en blanco ({esquina}): Edge ha fotografiado una "
             f"pagina de error en vez del cuadro")
+
+
+def _es_senal(color):
+    """Si un pixel es la señal (con margen: el navegador puede redondear)."""
+    rojo, verde, azul = color[:3]
+    return rojo > 220 and verde < 50 and azul > 220
 
 
 # ------------------------------------------------------------------ capturas

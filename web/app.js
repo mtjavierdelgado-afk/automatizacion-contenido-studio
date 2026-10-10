@@ -2284,12 +2284,14 @@ function pintarConfig() {
     return;
   }
   if (SISTEMA.notas === null && !SISTEMA.pedido) { SISTEMA.pedido = true; cargarSistema(); }
+  caja.appendChild(seccionManual());
   caja.appendChild(seccionNovedades());
   caja.appendChild(seccionNotas());
   caja.appendChild(bloquePruebaClaves());
   caja.appendChild(seccionOpenAI(ficha));
   caja.appendChild(seccionCalidadImagen());
   caja.appendChild(seccionDictado());
+  caja.appendChild(seccionZonaHoraria());
   caja.appendChild(seccionCartesia(ficha));
   caja.appendChild(seccionCLI());
   caja.appendChild(seccionOtrasClaves(ficha));
@@ -2430,6 +2432,63 @@ async function guardarDictado(modo) {
     const r = await pedir(API.ajustes(), { method: 'PUT', cuerpo: { dictado: modo } });
     vista.ajustes = { ...(vista.ajustes || {}), ajustes: r.ajustes, costes: r.costes || (vista.ajustes || {}).costes };
     refrescarEstadoAsistente();
+  } catch (e) {
+    vista.error = e.message;
+  }
+  repintarClaves();
+}
+
+/* LA HORA DE TU REGIÓN. El servidor apunta las horas (chat, vídeos, notas) con
+   su reloj, y en un VPS ese reloj suele ir en UTC: desde Lima, cinco horas de
+   más. Se elige una zona y el servidor pasa a apuntar en ella (ver
+   `ajustes.aplicar_zona`); lo apuntado antes se queda como estaba. */
+function zonasDelNavegador() {
+  try {
+    if (Intl.supportedValuesOf) return Intl.supportedValuesOf('timeZone');
+  } catch (e) { /* navegador viejo */ }
+  return ['America/Lima', 'America/Bogota', 'America/Mexico_City', 'America/Santiago',
+    'America/Argentina/Buenos_Aires', 'America/Caracas', 'America/New_York',
+    'Europe/Madrid', 'UTC'];
+}
+
+function seccionZonaHoraria() {
+  const vista = estadoConfig();
+  const datos = vista.ajustes;
+  const caja = h('section', { clase: 'bloque-config' },
+    h('div', { clase: 'fila' }, h('h3', {}, 'Hora de tu región')));
+  if (!datos) return caja;
+  const zona = datos.zona || {};
+  const elegida = (datos.ajustes || {}).zona_horaria || '';
+  let delNavegador = '';
+  try { delNavegador = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { /* sin Intl */ }
+  caja.appendChild(h('div', { clase: 'meta' },
+    `El Estudio apunta las horas así: ${zona.hora || '—'} (${elegida || 'la del servidor'}, `
+    + `${zona.desfase || '?'}). Es la hora que ves en el chat del asistente y en tus vídeos.`));
+  const lista = zonasDelNavegador();
+  if (elegida && !lista.includes(elegida)) lista.unshift(elegida);
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('select', {
+      'aria-label': 'Zona horaria',
+      onchange: ev => guardarZonaHoraria(ev.target.value),
+    },
+      h('option', { value: '', selected: !elegida }, '— la del servidor —'),
+      ...lista.map(z => h('option', { value: z, selected: z === elegida }, z.replace(/_/g, ' ')))),
+    delNavegador && delNavegador !== elegida
+      ? h('button', { clase: 'mini primario', onclick: () => guardarZonaHoraria(delNavegador) },
+        `Usar la de este navegador (${delNavegador.replace(/_/g, ' ')})`)
+      : null));
+  caja.appendChild(h('div', { clase: 'meta' },
+    'Lo que se apuntó antes de cambiarla conserva la hora que tenía.'));
+  return caja;
+}
+
+async function guardarZonaHoraria(zona) {
+  const vista = estadoConfig();
+  try {
+    const r = await pedir(API.ajustes(), { method: 'PUT', cuerpo: { zona_horaria: zona } });
+    vista.ajustes = { ...(vista.ajustes || {}), ajustes: r.ajustes, zona: r.zona,
+      costes: r.costes || (vista.ajustes || {}).costes };
+    toast(zona ? `Hora: ${zona.replace(/_/g, ' ')} (${(r.zona || {}).hora || ''})` : 'Hora: la del servidor');
   } catch (e) {
     vista.error = e.message;
   }
@@ -4698,6 +4757,8 @@ function arrancar() {
     if (PESTANAS.some(p => p.id === pedida) && pedida !== APP.activa) irA(pedida, true);
   });
   $('#btn-config').addEventListener('click', () => conmutarConfig());
+  const ayuda = $('#btn-ayuda');
+  if (ayuda) ayuda.addEventListener('click', () => abrirManual());
   $('#btn-salir').addEventListener('click', () => salirDeStudio());
   cargarCuenta();
   montarAsistente();
@@ -4896,6 +4957,7 @@ function encargoParaServidor() {
     nombre: e.nombre,
     idioma: e.idioma,
     estilo_imagenes: (e.estilo_imagenes || []).map(x => x.nombre),
+    estilo_descripciones: descripcionesDeAportadas(e.estilo_imagenes),
     estilo_prompt: e.estilo_prompt,
     tono_prompt: e.tono_prompt,
     voz_prompt: e.voz_prompt,
@@ -9733,10 +9795,9 @@ function camposEstiloLight() {
 
 /* LAS IMÁGENES QUE ACOMPAÑAN A LA DESCRIPCIÓN.
  *
- * El camino del vídeo le da a la guía veinticuatro fotogramas que mirar; el
- * descrito le daba un párrafo y nada más. Aquí se pueden adjuntar hasta las
- * MISMAS veinticuatro —el tope lo dice el servidor, que es donde vive— como
- * material de apoyo: manda lo escrito y esto lo concreta.
+ * Hasta cincuenta —el tope lo dice el servidor (`presets_light.MAX_IMAGENES_
+ * ESTILO`)—, cada una con una frase opcional que dice qué mirar en ella. La
+ * guía las mira todas; para dibujar las láminas van ocho como mucho.
  *
  * Se suben AL ELEGIRLAS y no al pulsar «Generar»: el taller no existe hasta
  * entonces, así que esperan en un buzón del servidor y lo que se guarda aquí es
@@ -9752,16 +9813,44 @@ function imagenesDeApoyoLight(e, alCambiar, idHueco, opciones) {
   // el <label for> necesita un id UNICO: con dos bloques en la misma pantalla
   // --el de crear y el de editar-- el segundo abriria el selector del primero
   const id = idHueco || 'aportadas-estilo';
-  const tope = op.tope || (APP.light.datos || {}).max_imagenes_estilo || 24;
+  const tope = op.tope || (APP.light.datos || {}).max_imagenes_estilo || 50;
   const caja = h('div', { clase: 'campo aportadas' });
   const tira = h('div', { clase: 'tira-aportadas' });
   const estado = h('span', { clase: 'meta' });
+  // LO QUE SE DICE DE CADA IMAGEN, opcional y solo en las del estilo: viaja a
+  // la guía con el nombre de su fichero (`presets_light.indicaciones_con_...`)
+  const describir = clave === 'estilo_imagenes';
+  const lista = h('div', { clase: 'descripciones-aportadas' });
+  const plegable = describir ? h('details', { clase: 'describir-aportadas' },
+    h('summary', {}, 'Describir las imágenes (opcional)'),
+    h('div', { clase: 'meta' },
+      'Una frase por imagen para que se entienda qué mirar en ella: «la luz de '
+      + 'esta», «solo el mueble, no el fondo». Las que dejes en blanco se miran igual.'),
+    lista) : null;
+
+  const pintarDescripciones = () => {
+    if (!describir) return;
+    vaciar(lista);
+    e[clave].forEach((ficha, indice) => {
+      lista.appendChild(h('div', { clase: 'descripcion-aportada' },
+        h('img', { src: API.imagenLight(ficha.nombre), alt: '', loading: 'lazy' }),
+        h('input', {
+          type: 'text', maxlength: 300, value: ficha.descripcion || '',
+          placeholder: `Imagen ${indice + 1}${ficha.origen ? ` · ${ficha.origen}` : ''}`,
+          'aria-label': `Descripción de la imagen ${indice + 1}`,
+          oninput: ev => { ficha.descripcion = ev.target.value; alCambiar(); },
+        })));
+    });
+    plegable.hidden = !e[clave].length;
+  };
 
   const pintar = () => {
+    pintarDescripciones();
     vaciar(tira);
     e[clave].forEach(ficha => {
       tira.appendChild(h('div', { clase: 'aportada', title: ficha.origen || '' },
         h('img', { src: API.imagenLight(ficha.nombre), alt: '', loading: 'lazy' }),
+        ficha.descripcion ? h('span', { clase: 'con-descripcion', title: ficha.descripcion }, '✎') : null,
         h('button', {
           clase: 'quitar', title: 'quitar esta imagen',
           onclick: () => quitarImagenLight(e, ficha, pintar, alCambiar, clave),
@@ -9807,8 +9896,19 @@ function imagenesDeApoyoLight(e, alCambiar, idHueco, opciones) {
   caja.appendChild(suelta);
   caja.appendChild(entrada);
   caja.appendChild(tira);
+  if (plegable) caja.appendChild(plegable);
   pintar();
   return caja;
+}
+
+/* {nombre: descripción} de las imágenes que la llevan. */
+function descripcionesDeAportadas(lista) {
+  const salida = {};
+  (lista || []).forEach(x => {
+    const texto = String(x.descripcion || '').trim();
+    if (x.nombre && texto) salida[x.nombre] = texto;
+  });
+  return salida;
 }
 
 function subirImagenesLight(entrada, e, tope, pintar, alCambiar, clave) {
@@ -9880,12 +9980,23 @@ function pieDeCreacion() {
   const nota = h('span', { clase: 'meta' }, 'comprobando…');
   caja.appendChild(h('div', { clase: 'fila' }, boton, nota));
   if (aMedias) {
+    /* LAS DOS SALIDAS, DICHAS. «Empezar de cero» a secas no decía nada: ni que
+       hay un intento a medias, ni que olvidarlo vuelve a pagar lo ya hecho. */
     caja.appendChild(h('div', { clase: 'pista' },
-      'Se salta lo que ya salió bien y sigue por donde iba. ',
+      h('b', {}, 'Este estilo se quedó a medias'),
+      ' (falló o se paró). «Retomar» aprovecha lo que ya salió bien —no vuelve a '
+      + 'pagar las imágenes hechas— y sigue por donde iba. ',
       h('button', {
         clase: 'mini fantasma',
-        onclick: () => { APP.light.taller = null; pintarLight(); },
-      }, 'Empezar de cero')));
+        title: 'Olvida el intento a medias y genera el estilo entero otra vez',
+        onclick: () => {
+          if (!window.confirm('¿Olvidar el intento a medias y generar el estilo entero '
+            + 'otra vez? Lo que ya se hizo se vuelve a generar y a pagar.')) return;
+          APP.light.taller = null;
+          pintarLight();
+        },
+      }, 'Empezar de cero'),
+      ' olvida ese intento y lo genera todo otra vez (se vuelve a pagar).'));
   }
 
   const comprobar = () => {
@@ -10331,36 +10442,67 @@ function vocesLight(idioma) {
   return null;
 }
 
-/* Las voces PROPIAS de la cuenta (clonadas): un desplegable aparte de la
-   descripción. Con una elegida, la descripción sigue mandando la velocidad y el
-   color, pero la voz es esa. Sin ninguna en la cuenta se dice, en una línea,
-   que no hay: es la forma de que nadie busque en el catálogo lo que no está. */
+/* LA VOZ CONCRETA AL CREAR, OPCIONAL. Sin elegir, la voz la escoge el sistema
+   leyendo la descripción de arriba; elegida, la descripción solo pone la
+   velocidad y el color. Salen primero las voces PROPIAS de la cuenta (las
+   clonadas) y después el catálogo del idioma: antes solo salían las clonadas, y
+   con una cuenta sin ninguna la caja decía «no hay» y no dejaba elegir nada
+   (09-10-2026). Escucharlas y compararlas se hace en el estilo ya creado
+   (Voz → Opciones avanzadas), que es donde hay una ficha con la que sonar.
+
+   EL CATÁLOGO SE GUARDA SIETE DÍAS en el servidor: una voz recién clonada no
+   saldría hasta entonces. «Buscar mis voces otra vez» lo vuelve a pedir. */
 function selectorVozPropiaLight(e) {
   const lista = vocesLight(e.idioma);
-  const caja = h('div', { clase: 'campo' });
+  const caja = h('div', { clase: 'campo voz-al-crear' });
   if (!lista) {
-    caja.appendChild(h('div', { clase: 'pista' }, 'cargando tus voces…'));
+    caja.appendChild(h('div', { clase: 'pista' }, 'cargando las voces…'));
     return caja;
   }
   const propias = lista.filter(v => v.publica === false);
-  if (!propias.length) {
-    caja.appendChild(h('div', { clase: 'pista' },
-      'No hay voces clonadas en esta cuenta de Cartesia: la voz se elige por la '
-      + 'descripción de arriba. Si clonas una, aparecerá aquí.'));
-    return caja;
-  }
-  if (e.voz_id && !propias.some(v => v.id === e.voz_id)) e.voz_id = '';
-  caja.appendChild(h('label', {}, 'Tus voces (clonadas)'));
+  const catalogo = lista.filter(v => v.publica !== false && v.nativa !== false);
+  if (e.voz_id && !lista.some(v => v.id === e.voz_id)) e.voz_id = '';
+  const nombreDe = v => `${v.nombre || v.id}${v.descripcion ? ` · ${v.descripcion.slice(0, 70)}` : ''}`;
+  caja.appendChild(h('label', {}, 'Voz concreta (opcional)'));
   caja.appendChild(h('select', {
     onchange: ev => { e.voz_id = ev.target.value; tocarEncargoLight(); },
   },
     h('option', { value: '', selected: !e.voz_id },
-      '— que la elija por la descripción —'),
-    ...propias.map(v => h('option', { value: v.id, selected: e.voz_id === v.id },
-      `${v.nombre || v.id}${v.descripcion ? ` · ${v.descripcion}` : ''}`))));
+      '— que la elija el sistema por la descripción —'),
+    propias.length ? h('optgroup', { label: 'Tus voces (clonadas)' },
+      ...propias.map(v => h('option', { value: v.id, selected: e.voz_id === v.id }, nombreDe(v))))
+      : null,
+    catalogo.length ? h('optgroup', { label: `Catálogo de Cartesia (${catalogo.length})` },
+      ...catalogo.map(v => h('option', { value: v.id, selected: e.voz_id === v.id }, nombreDe(v))))
+      : null));
+  caja.appendChild(h('div', { clase: 'pista' }, e.voz_id
+    ? 'La voz es esta; la descripción de arriba solo decide la velocidad y el color.'
+    : 'Si no eliges, se escoge la que mejor encaje con la descripción. Después '
+      + 'podrás escucharlas y cambiarla en el estilo: Voz → Opciones avanzadas.'));
+  const refrescar = async boton => {
+    boton.disabled = true;
+    boton.textContent = 'buscando…';
+    try {
+      const datos = await pedir(API.voces(e.idioma, true) + '&refrescar=1');
+      APP.light.voces = { idioma: idiomaBase(e.idioma), lista: datos.voces || [], pidiendo: null };
+      const nuevas = (datos.voces || []).filter(v => v.publica === false).length;
+      toast(nuevas ? `${nuevas} voz${nuevas === 1 ? '' : 'es'} clonada${nuevas === 1 ? '' : 's'} en tu cuenta`
+                   : 'Cartesia no tiene ninguna voz clonada en esta cuenta');
+    } catch (err) {
+      toast(err.message, true);
+    }
+    pintarLight();
+  };
   caja.appendChild(h('div', { clase: 'pista' },
-    'Con una elegida, la descripción de arriba solo decide la velocidad y el '
-    + 'color; la voz es esta y se queda en el estilo.'));
+    propias.length
+      ? 'Tus voces clonadas salen arriba de la lista. '
+      : 'No hay voces clonadas en tu cuenta de Cartesia. ',
+    h('b', {}, 'Para usar tu propia voz: '),
+    'clónala en play.cartesia.ai (Voices → Clone Voice, con unos segundos de '
+    + 'audio tuyo) con la MISMA cuenta cuya clave está en Configuración, y '
+    + 'pulsa aquí para que aparezca. ',
+    h('button', { clase: 'mini', type: 'button', onclick: ev => refrescar(ev.currentTarget) },
+      'Buscar mis voces otra vez')));
   return caja;
 }
 
@@ -10687,6 +10829,7 @@ function fuenteParaServidor(_ficha) {
   return {
     estilo_prompt: String(f.prompt || '').trim(),
     estilo_imagenes: (f.estilo_imagenes || []).map(x => x.nombre),
+    estilo_descripciones: descripcionesDeAportadas(f.estilo_imagenes),
   };
 }
 
@@ -11490,6 +11633,7 @@ const ASISTENTE = {
 };
 
 const CLAVE_CHARLA = 'estudio.asistente.charla';
+const CLAVE_ASISTENTE_AMPLIADO = 'estudio.asistente.ampliado';
 
 function montarAsistente() {
   const burbuja = $('#burbuja-asistente');
@@ -11505,7 +11649,40 @@ function montarAsistente() {
   campo.addEventListener('keydown', ev => {
     if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); enviarAlAsistente(); }
   });
+  campo.addEventListener('input', () => ajustarCampoAsistente());
+  const ampliar = $('#btn-ampliar-asistente');
+  if (ampliar) ampliar.addEventListener('click', () => ampliarAsistente());
+  let ampliado = false;
+  try { ampliado = localStorage.getItem(CLAVE_ASISTENTE_AMPLIADO) === '1'; } catch (e) { /* sin almacén */ }
+  ampliarAsistente(ampliado);
   refrescarEstadoAsistente();
+}
+
+/* El campo del asistente, del alto de lo que lleva. El tope lo pone el CSS
+   (max-height): pasado ese alto, el campo tiene su propia barra. Lo llama
+   también quien rellena el campo por código (el dictado, vaciarlo al enviar),
+   porque eso no dispara `input`. */
+function ajustarCampoAsistente() {
+  const campo = $('#asistente-texto');
+  if (!campo) return;
+  campo.style.height = 'auto';
+  campo.style.height = `${campo.scrollHeight + 2}px`;
+}
+
+/* Panel normal o AMPLIADO (más ancho y alto, para respuestas largas). Sin
+   argumento, conmuta. Se recuerda en este navegador. */
+function ampliarAsistente(quiero) {
+  const cajon = $('#asistente');
+  const boton = $('#btn-ampliar-asistente');
+  if (!cajon) return;
+  const ampliado = quiero === undefined ? !cajon.classList.contains('ampliado') : !!quiero;
+  cajon.classList.toggle('ampliado', ampliado);
+  if (boton) {
+    boton.textContent = ampliado ? 'Reducir' : 'Ampliar';
+    boton.setAttribute('aria-pressed', ampliado ? 'true' : 'false');
+  }
+  try { localStorage.setItem(CLAVE_ASISTENTE_AMPLIADO, ampliado ? '1' : '0'); } catch (e) { /* sin almacén */ }
+  ajustarCampoAsistente();
 }
 
 async function refrescarEstadoAsistente() {
@@ -11701,6 +11878,7 @@ async function enviarAlAsistente(reintento) {
       },
     });
     campo.value = '';
+    ajustarCampoAsistente();
     ADJUNTOS_ASISTENTE.length = 0;
     pintarAdjuntosAsistente();
     pintarAsistente();
@@ -12415,13 +12593,15 @@ async function abrirGuia(id, campo) {
  * una lista que se escribe aquí y se guarda en el servidor, con los datos: lo
  * que se quiere corregir o añadir más adelante. El asistente lee las dos.
  */
-const SISTEMA = { novedades: null, notas: null, error: '' };
+const SISTEMA = { novedades: null, notas: null, manual: null, manualAbierto: false, error: '' };
 
 async function cargarSistema() {
   try {
-    const [nov, notas] = await Promise.all([
-      pedir(`${BASE}/api/sistema/novedades`), pedir(`${BASE}/api/sistema/notas`)]);
+    const [nov, notas, manual] = await Promise.all([
+      pedir(`${BASE}/api/sistema/novedades`), pedir(`${BASE}/api/sistema/notas`),
+      pedir(`${BASE}/api/sistema/manual`).catch(() => ({ texto: '' }))]);
     SISTEMA.novedades = nov;
+    SISTEMA.manual = manual;
     SISTEMA.notas = notas.notas || [];
     SISTEMA.error = '';
   } catch (e) {
@@ -12446,6 +12626,32 @@ function unirLineas(texto) {
     else salida.push(linea);
   });
   return salida.join('\n');
+}
+
+/* CÓMO SE USA: docs/MANUAL.md, la misma guía que lee el asistente. Plegada,
+   salvo cuando se llega por el botón «?» de la cabecera (`abrirManual`). */
+function seccionManual() {
+  const caja = h('details', { clase: 'bloque-config plegable-config manual-config',
+    open: SISTEMA.manualAbierto });
+  caja.addEventListener('toggle', () => { SISTEMA.manualAbierto = caja.open; });
+  const manual = SISTEMA.manual;
+  caja.appendChild(h('summary', {}, h('h3', {}, 'Cómo se usa'),
+    h('span', { clase: 'meta' }, 'qué es cada pantalla y cada campo')));
+  if (SISTEMA.error) caja.appendChild(h('div', { clase: 'meta' }, SISTEMA.error));
+  else if (!manual) caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+  else if (!manual.texto) caja.appendChild(h('div', { clase: 'meta' }, 'sin guía escrita'));
+  else caja.appendChild(h('div', { clase: 'novedades' }, textoConFormato(unirLineas(manual.texto))));
+  return caja;
+}
+
+/* El botón «?»: abre Configuración con la guía desplegada y a la vista. */
+function abrirManual() {
+  SISTEMA.manualAbierto = true;
+  conmutarConfig(true);
+  setTimeout(() => {
+    const caja = document.querySelector('.manual-config');
+    if (caja) { caja.open = true; caja.scrollIntoView({ block: 'start' }); }
+  }, 400);
 }
 
 function seccionNovedades() {
@@ -12709,6 +12915,7 @@ function escribirDictado(texto, base) {
   if (!campo) return;
   const antes = base === undefined ? campo.value : base;
   campo.value = (antes && texto ? `${antes.replace(/\s+$/, '')} ` : antes) + texto;
+  ajustarCampoAsistente();
   campo.focus();
 }
 

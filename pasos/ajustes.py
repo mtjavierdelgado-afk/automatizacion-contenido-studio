@@ -30,6 +30,7 @@ multiplicar por 6,8 y multiplica por 1,7, porque la parte que se multiplica es
 la pequena. Sin esta cuenta delante, la pantalla asustaria con un numero falso.
 """
 import os
+import time
 
 try:
     from nucleo import coste as COSTE
@@ -72,6 +73,13 @@ POR_DEFECTO = {
     # dictado del navegador. «navegador»: siempre el del navegador, gratis,
     # aunque haya clave.
     "dictado": "auto",
+    # LA HORA DE TU REGION (IANA: «America/Lima», «Europe/Madrid»). Vacio: la
+    # del servidor, que en un VPS suele ser UTC -- y entonces el chat y la lista
+    # de videos enseñan cinco horas de mas desde Lima (09-10-2026). Se aplica
+    # al PROCESO (`aplicar_zona`): todo lo que el servidor apunta con hora
+    # (`ahora()`, `strftime`) sale ya en esa zona, sin tocar cada sitio que la
+    # escribe. Lo apuntado antes de cambiarla se queda con la hora que tenia.
+    "zona_horaria": "",
 }
 
 DICTADOS = ("auto", "navegador")
@@ -89,7 +97,54 @@ def leer():
     salida["onboarding_visto"] = bool(salida.get("onboarding_visto"))
     if salida.get("dictado") not in DICTADOS:
         salida["dictado"] = POR_DEFECTO["dictado"]
+    if not isinstance(salida.get("zona_horaria"), str) \
+            or (salida["zona_horaria"] and not zona_valida(salida["zona_horaria"])):
+        salida["zona_horaria"] = ""
     return salida
+
+
+def zona_valida(nombre):
+    """Si `nombre` es una zona IANA que esta maquina conoce. -> bool"""
+    try:
+        from zoneinfo import ZoneInfo
+        ZoneInfo(str(nombre))
+        return True
+    except Exception:                                         # noqa: BLE001
+        return False
+
+
+#: La TZ con la que arranco el proceso, para poder volver a ella si se borra
+#: el ajuste.
+_TZ_DE_ARRANQUE = os.environ.get("TZ")
+
+
+def aplicar_zona(zona=None):
+    """Pone la zona horaria del ajuste al proceso. -> la zona en uso ("" = la
+    del servidor). `time.tzset` no existe en Windows: ahi no hace nada, y la
+    hora es la del propio ordenador, que ya es la de quien lo usa."""
+    if zona is None:
+        zona = leer().get("zona_horaria") or ""
+    if not hasattr(time, "tzset"):
+        return ""
+    if zona:
+        os.environ["TZ"] = zona
+    elif _TZ_DE_ARRANQUE is not None:
+        os.environ["TZ"] = _TZ_DE_ARRANQUE
+    else:
+        os.environ.pop("TZ", None)
+    time.tzset()
+    return zona
+
+
+def zona_en_uso():
+    """{"zona", "abreviatura", "desfase", "hora"}: lo que el servidor usa ahora."""
+    desfase = -time.altzone if time.localtime().tm_isdst > 0 else -time.timezone
+    signo = "+" if desfase >= 0 else "-"
+    horas, resto = divmod(abs(desfase), 3600)
+    return {"zona": leer().get("zona_horaria") or "",
+            "abreviatura": time.strftime("%Z"),
+            "desfase": f"UTC{signo}{horas:02d}:{resto // 60:02d}",
+            "hora": time.strftime("%Y-%m-%d %H:%M")}
 
 
 def guardar(cambios):
@@ -111,6 +166,11 @@ def guardar(cambios):
             raise ValueError("onboarding_visto es verdadero o falso")
         if clave == "dictado" and valor not in DICTADOS:
             raise ValueError(f"dictado {valor!r}: solo {', '.join(DICTADOS)}")
+        if clave == "zona_horaria":
+            valor = str(valor or "").strip()
+            if valor and not zona_valida(valor):
+                raise ValueError(f"zona horaria {valor!r}: no es una zona que este "
+                                 "servidor conozca (p. ej. America/Lima)")
         actual[clave] = valor
     escribir_json(RUTA, actual)
     return actual

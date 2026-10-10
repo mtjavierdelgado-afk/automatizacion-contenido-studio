@@ -88,6 +88,14 @@ import ajustes as AJUSTES  # noqa: E402
 import cli_claude as CLI_CLAUDE  # noqa: E402
 import estadisticas as ESTADISTICAS  # noqa: E402
 
+# LA HORA DE LA REGION, para todo el proceso y desde el arranque: lo que el
+# servidor apunta con hora (chat, videos, notas) sale ya en la zona elegida en
+# Configuracion. Sin elegir, la del servidor. Ver `ajustes.aplicar_zona`.
+try:
+    AJUSTES.aplicar_zona()
+except Exception:  # noqa: BLE001 -- una zona rota no puede tumbar el arranque
+    pass
+
 
 def comun_tokens(sobre):
     """Tokens del sobre del CLI sin arrastrar el paquete de pasos entero."""
@@ -5816,7 +5824,8 @@ def leer_ajustes():
     return {"ajustes": AJUSTES.leer(),
             "calidades": list(AJUSTES.CALIDADES),
             "costes": AJUSTES.tabla_de_costes(),
-            "tamano": AJUSTES.TAMANO}
+            "tamano": AJUSTES.TAMANO,
+            "zona": AJUSTES.zona_en_uso()}
 
 
 @app.put("/api/ajustes")
@@ -5826,8 +5835,11 @@ def guardar_ajustes(cuerpo: dict = Body(default=None)):
         guardados = AJUSTES.guardar(_cuerpo(cuerpo))
     except ValueError as fallo:
         raise ErrorApi(400, str(fallo))
+    if "zona_horaria" in _cuerpo(cuerpo):
+        AJUSTES.aplicar_zona(guardados.get("zona_horaria") or "")
     anotar_global("ajustes_guardados", {"ajustes": guardados})
-    return {"ajustes": guardados, "costes": AJUSTES.tabla_de_costes()}
+    return {"ajustes": guardados, "costes": AJUSTES.tabla_de_costes(),
+            "zona": AJUSTES.zona_en_uso()}
 
 
 # ------------------------------------------------------------------ enlaces
@@ -7032,6 +7044,18 @@ def guias_de_escritura():
 
 
 RUTA_NOVEDADES = os.path.join(RAIZ_ESTUDIO, "docs", "NOVEDADES.md")
+RUTA_MANUAL = os.path.join(RAIZ_ESTUDIO, "docs", "MANUAL.md")
+
+
+@app.get("/api/sistema/manual")
+def manual_del_sistema():
+    """Cómo se usa el Estudio, tal cual esta en docs/MANUAL.md."""
+    try:
+        with open(RUTA_MANUAL, encoding="utf-8") as fh:
+            texto = fh.read()
+    except OSError:
+        texto = ""
+    return {"version": VERSION, "producto": NOMBRE_PRODUCTO, "texto": texto}
 
 
 @app.get("/api/sistema/novedades")
@@ -7644,7 +7668,7 @@ def _sembrar_aportadas(ctx, encargo):
     os.makedirs(destino, exist_ok=True)
     dentro = []
     for indice, ruta in enumerate(rutas):
-        final = os.path.join(destino, f"{indice:02d}_{os.path.basename(ruta)}")
+        final = os.path.join(destino, _presets().nombre_numerado(indice, ruta))
         try:
             shutil.copyfile(ruta, final)
         except OSError:
@@ -7834,9 +7858,14 @@ def _correr_light_guia(avisar, ctx, encargo):
     # Se leen del TALLER y no del encargo: el encargo trae los nombres del buzon
     # y el buzon se vacia al copiarlas dentro.
     aportadas = _aportadas_del_taller(ctx)
+    # LO QUE SE DIJO DE CADA IMAGEN viaja con las indicaciones, nombrando el
+    # fichero tal y como lo abre la guia (`presets_light.indicaciones_con_...`)
+    indicaciones = _light().indicaciones_con_descripciones(
+        encargo.get("estilo_prompt"), aportadas,
+        encargo.get("estilo_descripciones"))
     guia = estilo.generar_guia(ctx.proyecto, aportadas, avisar=avisar,
                                proyecto_id=ctx.id, peticion=peticion,
-                               indicaciones=encargo.get("estilo_prompt"))
+                               indicaciones=indicaciones)
     bloque = dict((ctx.estado.params("assets") or {}).get("estilo") or {})
     bloque["guia"] = guia
     ctx.estado.actualizar_params("assets", {"estilo": bloque})
@@ -7894,7 +7923,11 @@ def _correr_light_referencias(avisar, ctx, encargo):
                                    ejes=pedidos, peticiones=peticiones,
                                    calidad=calidad, avisar=avisar,
                                    idioma=idioma,
-                                   referencias=_aportadas_del_taller(ctx))
+                                   # OCHO COMO MUCHO en la hoja: con 50 cada
+                                   # foto quedaria de 768x41 (`para_la_hoja`)
+                                   referencias=_light().para_la_hoja(
+                                       _aportadas_del_taller(ctx),
+                                       encargo.get("estilo_descripciones")))
     # LA LISTA NO SE PISA CUANDO SOLO SE HA REDIBUJADO UNA. Cada lamina se
     # escribe en `<eje>.png`, o sea encima de la que habia, asi que las otras
     # cinco siguen en su sitio y en la lista. Escribir aqui `hecho["rutas"]` a
@@ -8703,6 +8736,10 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
         # unas indicaciones que describen unas imagenes que ya no estan
         origen["estilo_prompt"] = fuente.get("estilo_prompt") or ""
         origen["estilo_imagenes"] = fuente.get("estilo_imagenes") or []
+        # las descripciones van con SUS imagenes: con imagenes nuevas, las
+        # nuevas; sin imagenes nuevas se quedan las que habia
+        if fuente.get("estilo_imagenes") or "estilo_descripciones" in fuente:
+            origen["estilo_descripciones"] = fuente.get("estilo_descripciones") or {}
     if fuente and parte == "tono":
         origen["tono_prompt"] = fuente.get("tono_prompt") or ""
     encargo = _encargo_o_400(origen)

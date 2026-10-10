@@ -90,6 +90,45 @@ def probar_encargo():
                f"un encargo {etiqueta} se rechaza con un motivo legible")
 
 
+def probar_imagenes_descritas():
+    """Hasta 50 imagenes, cada una con una frase opcional (09-10-2026)."""
+    seccion("LAS IMAGENES DEL ESTILO: 50 Y CON SU DESCRIPCION")
+    igual(light.max_imagenes_estilo(), 50, "caben 50 imagenes de referencia")
+    muchas = [f"i{n}.png" for n in range(50)]
+    limpio = light.validar_encargo(dict(ENCARGO_VIDEO, estilo_imagenes=muchas))
+    igual(len(limpio["estilo_imagenes"]), 50, "y un encargo con 50 se acepta")
+    try:
+        light.validar_encargo(dict(ENCARGO_VIDEO, estilo_imagenes=muchas + ["x.png"]))
+        ok(False, "51 imagenes tenian que rechazarse")
+    except light.ErrorEncargo:
+        ok(True, "51 se rechazan")
+    limpio = light.validar_encargo(dict(
+        ENCARGO_VIDEO, estilo_descripciones={
+            "a.png": "  la luz   de esta ", "zz.png": "de una imagen que no va",
+            "b.png": ""}))
+    igual(limpio["estilo_descripciones"], {"a.png": "la luz de esta"},
+          "se guardan solo las descripciones con texto y de imagenes que van")
+    igual(light.validar_encargo(ENCARGO_VIDEO)["estilo_descripciones"], {},
+          "sin descripciones, ninguna: son opcionales")
+    texto = light.indicaciones_con_descripciones(
+        "igual pero mas frio", ["/t/estilo/aportadas/00_a.png",
+                                "/t/estilo/aportadas/01_b.png"],
+        {"a.png": "la luz de esta"})
+    ok(texto.startswith("igual pero mas frio")
+       and "[00_a.png] la luz de esta" in texto and "01_b.png" not in texto,
+       f"la guia recibe cada descripcion con el nombre del fichero que abre: {texto}")
+    igual(light.indicaciones_con_descripciones("solo esto", ["/x/00_a.png"], {}),
+          "solo esto", "sin descripciones, las indicaciones salen como estaban")
+    rutas = [f"/t/{n:02d}_i{n}.png" for n in range(50)]
+    hoja = light.para_la_hoja(rutas, {"i40.png": "esta si"})
+    igual(len(hoja), light.MAX_EN_LA_HOJA,
+          "a la hoja de las laminas van ocho como mucho")
+    ok("/t/40_i40.png" in hoja, "y la descrita va seguro")
+    ok(hoja == sorted(hoja) and hoja[-1] != rutas[7],
+       "en su orden y repartidas a lo largo de la lista, no las ocho primeras")
+    igual(light.para_la_hoja(rutas[:5]), rutas[:5], "con pocas, van todas")
+
+
 def probar_plan():
     seccion("EL PLAN: ORDEN, PARALELISMO Y CUENTAS")
     encargo = light.validar_encargo(ENCARGO_VIDEO)
@@ -789,6 +828,7 @@ def main():
         tempfile.gettempdir(), "estudio_prueba_light", "estadisticas.json")
     print("PRUEBA DEL MODO LIGHT")
     probar_encargo()
+    probar_imagenes_descritas()
     probar_plan()
     probar_ritmo()
     probar_tono_completo()

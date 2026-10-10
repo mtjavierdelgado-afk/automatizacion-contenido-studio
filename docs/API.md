@@ -273,6 +273,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 |---|---|---|
 | `GET` | `/` | La interfaz del Estudio. |
 | `GET` | `/api/sistema/guias` | Como rellenar cada campo de texto: plantilla, ejemplo y prompt para otra IA. |
+| `GET` | `/api/sistema/manual` | Cómo se usa el Estudio, tal cual esta en docs/MANUAL.md. |
 | `GET` | `/api/sistema/notas` | Las notas de mejoras futuras, las pendientes primero. |
 | `POST` | `/api/sistema/notas` | Apunta una mejora para hacer mas adelante. |
 | `DELETE` | `/api/sistema/notas/{nid}` | — |
@@ -282,4 +283,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**168 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**169 endpoints.** Escrito por `generar_api.py` desde `app.py`.

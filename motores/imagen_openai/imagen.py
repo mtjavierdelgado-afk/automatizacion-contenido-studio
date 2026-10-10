@@ -20,6 +20,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -523,11 +524,25 @@ def normalizar(ruta, cache_dir, lado_max=1024):
     # que manda a buscar un fichero corrupto en el disco -- y en el disco no hay
     # ninguno, porque para cuando alguien va a mirarlo ya se termino de escribir.
     # Visto el 25-08 tumbando una tanda en el plano 89 de 93, con las 88
-    # anteriores ya pagadas. El temporal lleva el pid y el hilo dentro para que
-    # dos escritores simultaneos tampoco se pisen entre ellos.
-    temporal = "%s.%d.%d.tmp" % (destino, os.getpid(),
-                                 threading.get_ident() & 0xffff)
-    img.save(temporal, "PNG")
+    # anteriores ya pagadas.
+    #
+    # EL TEMPORAL ES UNICO DE VERDAD (`mkstemp`). Llevaba el pid y los 16 bits
+    # bajos del hilo, que en Windows son un numero pequeno y distinto por hilo,
+    # pero en Linux el id de un hilo es una DIRECCION alineada: dos hilos daban
+    # el mismo nombre, el primero hacia el replace y el segundo se encontraba
+    # su temporal desaparecido (09-10-2026, en el servidor, al generar
+    # imagenes):  FileNotFoundError: '..._refs/cliente__868ef984.png.38985.59072.tmp'
+    descriptor, temporal = tempfile.mkstemp(
+        dir=cache_dir, prefix=os.path.basename(destino) + ".", suffix=".tmp")
+    os.close(descriptor)
+    try:
+        img.save(temporal, "PNG")
+    except Exception:
+        try:
+            os.remove(temporal)
+        except OSError:
+            pass
+        raise
     return _sustituir(temporal, destino, ruta)
 
 
@@ -569,6 +584,11 @@ def _sustituir(temporal, destino, origen):
         try:
             os.replace(temporal, destino)
             return destino
+        except FileNotFoundError as choque:
+            # el temporal ya no esta: alguien lo ha movido. Si el destino esta
+            # al dia, es el mismo fichero que hacia falta; si no, se sube.
+            fallo = choque
+            break
         except PermissionError as choque:
             fallo = choque
             if espera:

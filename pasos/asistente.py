@@ -91,8 +91,8 @@ TIEMPO_MAX_S = 420
 
 #: Lo que se le da a leer en el primer turno, en este orden. Lo que no exista
 #: se salta sin avisar: un despliegue puede no llevar la carpeta docs/.
-DOCUMENTOS = ("CLAUDE.md", "README.md", "docs/NOVEDADES.md", "docs/RETOMAR.md",
-              "docs/API.md")
+DOCUMENTOS = ("CLAUDE.md", "README.md", "docs/MANUAL.md", "docs/NOVEDADES.md",
+              "docs/RETOMAR.md", "docs/API.md")
 
 #: Lo que puede hacer ademas de contestar: LEER el codigo, y las herramientas
 #: del Estudio (pasos/mcp_estudio.py): probar las claves, ver el estado, los

@@ -8,7 +8,73 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ---
 
-## V2.0 · octubre de 2026 (música audible)
+## V2.0 · octubre de 2026 (arreglos antes de la fase 3)
+
+**Corregido: generar imágenes fallaba con «No such file or directory … .tmp»**
+- En el servidor (Linux), dos imágenes que se generaban a la vez y compartían
+  una referencia (el estilo, un personaje) preparaban su copia con el MISMO
+  nombre temporal; la segunda se encontraba la suya movida y la tanda se caía.
+  Ahora cada copia tiene un nombre único, y si otra ya dejó el fichero listo
+  se usa ese.
+
+**Corregido: crear un estilo fallaba al 89 % con «la previa salió en blanco»**
+- La comprobación que detecta que el navegador ha fotografiado su página de
+  error miraba si la esquina de la imagen era casi blanca. Con un estilo
+  **fotográfico** (paredes blancas, interiorismo) la esquina de una imagen
+  buena también lo es, y el estilo se tumbaba siempre en el mismo sitio.
+- Ahora la página lleva una señal invisible que se comprueba y se borra: un
+  plano claro ya no se confunde con un error, y un error de verdad se sigue
+  cazando.
+- Las direcciones de los ficheros que se le dan al navegador se escriben bien
+  en Linux y van codificadas: una carpeta con acentos, espacios o «#» ya no da
+  una página de error. Si una previa vuelve a fallar, el aviso dice qué página
+  y qué imagen se intentaron abrir, y la página se guarda para revisarla.
+
+**Corregido: las imágenes de un estilo acumulaban «00_00_00_…» en el nombre**
+- Cada vez que se guardaba un estilo se añadía otro prefijo de orden al nombre
+  de sus imágenes, y como la carpeta vieja se sustituía, los vídeos hechos con
+  ese estilo dejaban de encontrarlas («ninguna de las imágenes de estilo existe
+  en el disco del servidor»). Ahora el nombre se queda en `00_cara.png`
+  aunque se guarde mil veces.
+- Para los vídeos que ya se rompieron hay una herramienta que solo mira
+  (`herramientas/diagnostico_estilo.py`): dice qué rutas guardan, qué hay en
+  disco y propone cómo repuntarlas sin regenerar nada.
+
+**Estilos: hasta 50 imágenes de referencia, cada una con su descripción**
+- Antes cabían 24. La guía del estilo las mira todas; para dibujar las láminas
+  se usan ocho como mucho (con más, cada foto de la hoja quedaba diminuta).
+- **Describir las imágenes (opcional)**, debajo de las miniaturas: una frase
+  por imagen («la luz de esta», «solo el mueble, no el fondo»). Llega a quien
+  escribe la guía con el nombre de su fichero. Las imágenes con descripción
+  llevan un ✎.
+
+**La voz al crear un estilo**
+- **Voz concreta (opcional)** ya ofrece el catálogo entero de Cartesia del
+  idioma, además de tus voces clonadas. Sin elegir, la escoge el sistema por la
+  descripción, como antes. Escucharlas y compararlas sigue en el estilo ya
+  creado: Voz → Opciones avanzadas.
+- Cómo usar tu propia voz: clónala en play.cartesia.ai con la misma cuenta
+  cuya clave está en Configuración y pulsa **Buscar mis voces otra vez** (la
+  lista se guardaba siete días y una voz recién clonada no salía).
+
+**El asistente, con sitio para escribir y leer**
+- El campo crece con lo que escribes o dictas, hasta un tercio del panel.
+- **Ampliar** (arriba del panel) lo hace más ancho y alto, para leer
+  respuestas largas; **Reducir** lo devuelve. Se recuerda en ese navegador.
+
+**La hora de tu región**
+- **Configuración → Hora de tu región**: elige tu zona (o «Usar la de este
+  navegador») y el Estudio apunta las horas del chat, los vídeos y las notas
+  en ella. Lo apuntado antes conserva la hora que tenía.
+
+**Ayuda: «Cómo se usa»**
+- Botón **?** arriba a la derecha, o **Configuración → Cómo se usa**: qué es
+  cada pantalla, cada campo y qué cuesta cada botón. El asistente lee la misma
+  guía.
+- «Empezar de cero» ahora explica qué hace: olvida el intento a medias y lo
+  genera todo otra vez (se vuelve a pagar); «Retomar» aprovecha lo ya hecho.
+  Pide confirmación.
+
 
 **Corregido: la música no se oía aunque estuviera marcada**
 - La música sí iba en el vídeo, pero se agachaba tanto bajo la voz (unos

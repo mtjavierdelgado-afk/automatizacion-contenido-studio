@@ -320,6 +320,36 @@ def _montar(rutas, destino):
 #: Lado del tile. La misma proporcion en la que se generan los planos.
 TAMANO = (1536, 1024)
 
+#: La cabecera de una lamina en MODO FOTO (Etapa Foto A). La de ilustracion es
+#: la de siempre, escrita en `prompt_de_dibujo`.
+CABECERA_FOTO = ("Create one single photorealistic photograph for a style "
+                 "reference sheet, as taken by a professional event "
+                 "photographer.")
+
+
+def _modo_de(estilo):
+    """El modo de imagen del estilo. La regla vive en `p6_assets.modo_de`.
+
+    Tarde y a proposito, como los demas imports de p6 en este modulo: p6_assets
+    importa moodboard, asi que arriba seria un circulo.
+    """
+    try:
+        from . import p6_assets                             # noqa: PLC0415
+    except ImportError:
+        import p6_assets                                    # noqa: PLC0415
+    return p6_assets.modo_de(estilo)
+
+
+def _reglas_de(reglas, estilo):
+    """El bloque de reglas de la casa para las laminas de ese estilo.
+
+    Sin `estilo.modo`, la llamada de siempre; en foto, las de foto (ver
+    `motores/reglas/reglas_foto.json`).
+    """
+    if _modo_de(estilo) == "foto":
+        return reglas.bloque_prompt("prompt_imagen", modo="foto")
+    return reglas.bloque_prompt("prompt_imagen")
+
 
 def _nombre_en(idioma):
     """Codigo de idioma -> nombre EN INGLES para el prompt, o "".
@@ -373,20 +403,41 @@ def prompt_de_dibujo(descripcion, estilo, peticion="", guia_escrita=None,
     casa-- y con dos constructores uno de los dos se quedaria sin las reglas,
     que es exactamente el fallo que salio la primera vez (los tres cuerpos
     SONRIENDO con la regla que lo prohibe escrita y sin llegar).
+
+    EN MODO FOTO (`estilo.modo == "foto"`, Etapa Foto A) la lamina se pide como
+    FOTOGRAFIA: cabecera y presentacion de la hoja de estilo en su version de
+    foto. Sin `estilo.modo`, las lineas de siempre.
     """
-    lineas = [encabezado
-              or "Draw one single illustration for a style reference sheet."]
-    if con_lamina:
-        lineas.append("Reference image 1 is a STYLE SHEET: copy the drawing style it "
-                      "shows -- line weight, palette, shapes, proportions, how faces "
-                      "and volumes are resolved -- and never its content, its "
-                      "characters, its framing or its layout. Your output is ONE "
-                      "single full-bleed illustration, never a grid or a collage.")
+    if _modo_de(estilo) == "foto":
+        lineas = [encabezado or CABECERA_FOTO]
+        if con_lamina:
+            lineas.append("Reference image 1 is a STYLE SHEET: copy the "
+                          "photographic style it shows -- camera height and "
+                          "lens, depth of field, light, colour grading, grain, "
+                          "how real people and places look -- and never its "
+                          "content, its people, its framing or its layout. "
+                          "Your output is ONE single full-bleed photograph, "
+                          "never a grid or a collage.")
+        else:
+            lineas.append("Your output is ONE single full-bleed photograph, "
+                          "never a grid or a collage. The written style guide "
+                          "below is the only description of how this "
+                          "production is photographed: follow every one of its "
+                          "numbers exactly.")
     else:
-        lineas.append("Your output is ONE single full-bleed illustration, never "
-                      "a grid or a collage. The written style guide below is the "
-                      "only description of how this production is drawn: follow "
-                      "every one of its numbers exactly.")
+        lineas = [encabezado
+                  or "Draw one single illustration for a style reference sheet."]
+        if con_lamina:
+            lineas.append("Reference image 1 is a STYLE SHEET: copy the drawing style it "
+                          "shows -- line weight, palette, shapes, proportions, how faces "
+                          "and volumes are resolved -- and never its content, its "
+                          "characters, its framing or its layout. Your output is ONE "
+                          "single full-bleed illustration, never a grid or a collage.")
+        else:
+            lineas.append("Your output is ONE single full-bleed illustration, never "
+                          "a grid or a collage. The written style guide below is the "
+                          "only description of how this production is drawn: follow "
+                          "every one of its numbers exactly.")
     if guia_escrita:
         lineas.extend(guia_escrita)
     lineas.append(str(descripcion or ""))
@@ -457,7 +508,7 @@ def generar(referencias, estilo, ejes=None, peticiones=None, calidad="medium",
     # es el fallo que dejo las hojas de personaje en otro estilo durante meses.
     import p6_assets
     guia = p6_assets.guia_escrita(estilo)
-    bloque = reglas.bloque_prompt("prompt_imagen")
+    bloque = _reglas_de(reglas, estilo)
     ficha = medios.leer_json(
         os.path.join(raiz_propuestas(raiz), clave, "ficha.json"), {}) or {}
     ficha.setdefault("clave", clave)
@@ -709,7 +760,8 @@ def dibujar_desde_guia(estilo, destino, ejes=None, calidad="medium",
             "un estilo descrito no tiene fotogramas, asi que la guia escrita es "
             "lo unico que describe el dibujo: sin ella las laminas saldrian con "
             "el estilo por defecto del generador")
-    bloque = reglas.bloque_prompt("prompt_imagen")
+    bloque = _reglas_de(reglas, estilo)
+    foto = _modo_de(estilo) == "foto"
 
     # LAS IMAGENES APORTADAS, EN UNA HOJA. La API de edicion no puede llamarse
     # sin adjuntos (ver `imagen.generar`), y las aportadas son justo el estilo
@@ -741,12 +793,16 @@ def dibujar_desde_guia(estilo, destino, ejes=None, calidad="medium",
         # escrita es lo unico que dice si este canal se dibuja o se fotografia,
         # y "draw an illustration" la contradiria de entrada. El camino con
         # video no pasa por aqui y conserva su encabezado de siempre.
+        #
+        # Y CON `estilo.modo == "foto"` YA SE SABE: se pide una fotografia
+        # (`CABECERA_FOTO`, que pone `prompt_de_dibujo` sin encabezado).
         prompt = prompt_de_dibujo(
             (EJES.get(eje) or {}).get("prompt") or "", estilo,
             peticiones.get(eje), guia, bloque,
             con_lamina=True,
-            encabezado="Produce one single full-frame image for a style "
-                       "reference sheet.",
+            encabezado=(None if foto else
+                        "Produce one single full-frame image for a style "
+                        "reference sheet."),
             # el idioma del canal, que llegaba hasta aqui y no se usaba: la
             # lamina «diagrama» de un canal en espanol salia rotulada en ingles
             idioma=idioma)

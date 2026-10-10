@@ -466,6 +466,21 @@ IDIOMAS = ("es", "en", "pt", "fr", "it", "de")
 MODOS_IMAGEN = ("ilustracion", "foto")
 
 
+def origen_de(encargo, claves):
+    """Lo que se guarda del encargo en el `origen` del preset. -> dict
+
+    Las claves con valor, como siempre, salvo `estilo_modo`, que solo se guarda
+    cuando es "foto": ilustracion es no tenerlo, igual que en el estilo. Y no
+    es solo coherencia: el codigo de `main` de antes de la Etapa Foto A no sabe
+    guardar esa clave, asi que un estilo de ilustracion creado probando esta
+    rama no se podria volver a guardar si el servidor vuelve a `main`.
+    """
+    origen = {c: encargo[c] for c in claves if (encargo or {}).get(c)}
+    if origen.get("estilo_modo") != "foto":
+        origen.pop("estilo_modo", None)
+    return origen
+
+
 def estilo_con_modo(estilo, modo):
     """El diccionario `estilo` de assets con ese tipo de imagen. -> dict o None
 

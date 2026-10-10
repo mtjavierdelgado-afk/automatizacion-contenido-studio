@@ -8283,8 +8283,8 @@ def _congelar_preset(ctx, encargo, preset_id=None):
     params = {paso: (ctx.estado.params(paso) or {})
               for paso in ("brief", "guion", "assets", "voz", "callouts")}
     datos = presets.datos_de_params(params)
-    datos["origen"] = {c: encargo[c] for c in presets.CLAVES_ORIGEN
-                       if encargo.get(c)}
+    # `estilo_modo` solo si es foto (ver `presets_light.origen_de`)
+    datos["origen"] = _light().origen_de(encargo, presets.CLAVES_ORIGEN)
     datos["origen"]["taller"] = ctx.id
     taller_muestras = os.path.join(ctx.proyecto.raiz, "muestras")
     miniatura = os.path.join(taller_muestras, "miniatura.png")
@@ -8675,7 +8675,15 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
         # las DOS a la vez y siempre: dejar la vieja puesta es como se acaba con
         # unas indicaciones que describen unas imagenes que ya no estan
         origen["estilo_prompt"] = fuente.get("estilo_prompt") or ""
-        origen["estilo_imagenes"] = fuente.get("estilo_imagenes") or []
+        # SIN IMAGENES NUEVAS SE QUEDAN LAS DE AHORA. La pantalla manda la
+        # lista vacia cuando solo se han cambiado las indicaciones, y pisar con
+        # ella las de antes dejaba un encargo sin imagenes que `validar_encargo`
+        # rechazaba con un 400 («falta el estilo gráfico»): cambiar el texto de
+        # un estilo guardado no funcionaba. Un estilo no puede quedarse sin
+        # imagenes, asi que «vacia» solo puede querer decir «no hay nuevas».
+        nuevas = fuente.get("estilo_imagenes") or []
+        if nuevas:
+            origen["estilo_imagenes"] = nuevas
     if fuente and parte == "estilo" and "estilo_modo" in fuente:
         # EL TIPO DE IMAGEN (Etapa Foto A) es otra fuente del estilo: pasar a
         # «Foto realista» con las MISMAS imagenes rehace la guia (con el
@@ -8692,8 +8700,17 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     # lo que cuelga de ella, que es justo lo que rehace la parte «estilo» de
     # siempre. Se compara con lo que habia, no con si vino `origen`: la pantalla
     # manda las dos claves juntas y una de ellas puede no haberse tocado.
+    #
+    # Lo que SI es material nuevo: imagenes nuevas, o un TIPO DE IMAGEN
+    # distinto (Etapa Foto A), que cambia el contrato de la guia y como se
+    # piden las laminas: eso se rehace entero aunque tambien haya cambiado el
+    # texto, porque el reparto de la frase podria decidir no tocar la guia.
+    modo_antes = "foto" if antes.get("estilo_modo") == "foto" else "ilustracion"
+    modo_cambiado = (bool(fuente) and parte == "estilo"
+                     and encargo.get("estilo_modo") != modo_antes)
     material = bool(fuente) and parte == "estilo" and bool(
-        encargo.get("estilo_imagenes"))
+        encargo.get("estilo_imagenes")) and (
+        bool(fuente.get("estilo_imagenes")) or modo_cambiado)
     # El feedback viaja por INVOCACION y no se guarda en el encargo: describe
     # esta pasada, no lo que el preset es. Guardarlo lo aplicaria otra vez la
     # proxima, y dos correcciones seguidas se sumarian sin que nadie lo pida.

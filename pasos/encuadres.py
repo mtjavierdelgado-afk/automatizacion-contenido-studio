@@ -135,6 +135,166 @@ ESCALERA = (
 
 POR_ID = {carta["id"]: carta for carta in ESCALERA}
 
+
+# ------------------------------------------------ la escalera del MODO FOTO
+#
+# UNA ESCALERA APARTE, Y NO CARTAS NUEVAS EN LA DE ARRIBA. La de ilustracion no
+# se toca: anadirle una carta, cambiarle un peso o un texto le cambia la carta a
+# planos que narran lo mismo, y eso son imagenes ya pagadas que salen obsoletas.
+# El modo foto (`estilo.modo == "foto"`, Etapa Foto A) reparte sobre esta y el
+# de ilustracion sigue repartiendo sobre aquella exactamente igual que antes.
+#
+# Que cambia respecto a la de ilustracion, y por que:
+#   * el aereo pasa a ser un PICADO desde una escalera o un altillo: un dron
+#     dentro de una sala de fiestas no es creible en una foto;
+#   * las tres abstractas (diagrama, pantalla, eterea) se van: una foto de un
+#     evento no corta a un diagrama, y una «composicion eterea» fotografiada es
+#     una imagen generada que se nota;
+#   * entran los planos que venden un servicio de alquiler: las manos en el
+#     mando, la estacion completa y la reaccion de quien mira.
+#
+# `servicios` dice en que videos tiene sentido la carta: los pies en los pedales
+# solo si hay simuladores, el cuerpo con el visor solo si hay realidad virtual.
+# "todos" vale para cualquiera. Cual lleva el video lo dice el param
+# `servicios` de assets (ver `servicios_de`).
+#
+# Los ids llevan el prefijo `foto_` para que no se confundan nunca con los de
+# la escalera de ilustracion en un informe o en una carta forzada a mano.
+
+#: Los servicios que una carta de foto puede pedir.
+SERVICIOS = ("consolas", "simuladores", "vr", "karaoke")
+
+#: Lo que se supone cuando un video no dice que servicios lleva: el servicio
+#: base del alquiler, las consolas. Asi no sale nunca un plano de pedales en un
+#: video sin simuladores, que es el absurdo que la columna existe para evitar.
+#: La Etapa Foto C pondra en pantalla la eleccion (presets de servicio).
+SERVICIOS_POR_DEFECTO = ("consolas",)
+
+ESCALERA_FOTO = (
+    {"id": "foto_sala", "familia": "lejos", "peso": 2, "servicios": "todos",
+     "nombre": "sala completa",
+     "encuadre": ("a wide shot of the whole room taken from a corner at "
+                  "standing height, every gaming station and the party table "
+                  "visible, guests small within the space")},
+
+    {"id": "foto_picado", "familia": "lejos", "peso": 1, "servicios": "todos",
+     "nombre": "picado",
+     "encuadre": ("a high-angle shot taken from a staircase or a mezzanine "
+                  "looking down on the gaming stations and the guests around "
+                  "them")},
+
+    {"id": "foto_estacion", "familia": "medio", "peso": 3, "servicios": "todos",
+     "nombre": "estación completa",
+     "encuadre": ("the full gaming station in frame: the TV on its tripod "
+                  "stand, the low black side table, the console, and two "
+                  "players seen from behind")},
+
+    {"id": "foto_hombro", "familia": "medio", "peso": 2,
+     "servicios": ("consolas", "simuladores"), "nombre": "sobre el hombro",
+     "encuadre": ("an over-the-shoulder shot of one player looking at the "
+                  "screen, their hands and the controller soft in the "
+                  "foreground")},
+
+    {"id": "foto_perfil", "familia": "medio", "peso": 2,
+     "servicios": ("consolas", "karaoke"), "nombre": "perfil de jugadores",
+     "encuadre": ("a side profile of two players next to each other, their "
+                  "faces lit by the glow of the screen")},
+
+    {"id": "foto_reaccion", "familia": "medio", "peso": 2, "servicios": "todos",
+     "nombre": "reacción",
+     "encuadre": ("the people watching behind the players, laughing or "
+                  "cheering, the game screen softly out of focus")},
+
+    {"id": "foto_vr", "familia": "medio", "peso": 1, "servicios": ("vr",),
+     "nombre": "cuerpo VR",
+     "encuadre": ("a full-body shot of one player wearing a VR headset, arms "
+                  "extended holding both controllers, the room around them")},
+
+    {"id": "foto_manos", "familia": "cerca", "peso": 3,
+     "servicios": ("consolas", "simuladores"), "nombre": "manos",
+     "encuadre": ("a close-up of hands on the controller or on the steering "
+                  "wheel, thumbs and fingers in action")},
+
+    {"id": "foto_detalle", "familia": "cerca", "peso": 2, "servicios": "todos",
+     "nombre": "detalle de equipo",
+     "encuadre": ("a detail of the console and the controllers resting on the "
+                  "low black side table, a cable running to the tripod")},
+
+    {"id": "foto_pedales", "familia": "cerca", "peso": 1,
+     "servicios": ("simuladores",), "nombre": "pies en pedales",
+     "encuadre": ("a low close-up of sneakers pressing the three metal pedals "
+                  "of the racing simulator")},
+
+    {"id": "foto_pantalla", "familia": "cerca", "peso": 2, "servicios": "todos",
+     "nombre": "pantalla al frente",
+     "encuadre": ("the game screen large in the foreground, the players' "
+                  "silhouettes at the edge of the frame")},
+
+    {"id": "foto_contraluz", "familia": "luz", "peso": 1, "servicios": "todos",
+     "nombre": "contraluz",
+     "encuadre": ("the players in silhouette against a bright window, the "
+                  "screen glowing in front of them")},
+
+    {"id": "foto_suelo", "familia": "angulo", "peso": 1,
+     "servicios": ("consolas", "vr"), "nombre": "a ras de suelo",
+     "encuadre": ("a low angle from floor level between the poufs, looking up "
+                  "towards the TV and the players")},
+)
+
+POR_ID_FOTO = {carta["id"]: carta for carta in ESCALERA_FOTO}
+
+
+def escalera_de(modo="ilustracion"):
+    """La escalera de cartas de ese modo de imagen. -> tupla de cartas
+
+    Cualquier valor que no sea "foto" es ilustracion, que es lo que lee un
+    proyecto que nunca guardo `estilo.modo`.
+    """
+    return ESCALERA_FOTO if modo == "foto" else ESCALERA
+
+
+def por_id_de(modo="ilustracion"):
+    """{id: carta} de la escalera de ese modo."""
+    return POR_ID_FOTO if modo == "foto" else POR_ID
+
+
+def servicios_de(valor):
+    """Los servicios de un video, limpios y conocidos. -> tupla
+
+    Vacio o sin ninguno conocido es el servicio base (`SERVICIOS_POR_DEFECTO`).
+    Admite una lista o una cadena separada por comas.
+    """
+    if isinstance(valor, str):
+        valor = valor.split(",")
+    limpios = []
+    for crudo in (valor or []):
+        nombre = str(crudo or "").strip().lower()
+        if nombre in SERVICIOS and nombre not in limpios:
+            limpios.append(nombre)
+    return tuple(limpios) or SERVICIOS_POR_DEFECTO
+
+
+def _vale_para(carta, servicios):
+    """Si una carta de foto tiene sentido con esos servicios."""
+    suyos = carta.get("servicios") or "todos"
+    if suyos == "todos":
+        return True
+    return any(s in servicios for s in suyos)
+
+
+def escalera_para(modo="ilustracion", servicios=None):
+    """La escalera sobre la que se reparte: la del modo, filtrada por servicios.
+
+    El filtro solo existe en el modo foto. En ilustracion devuelve `ESCALERA`
+    tal cual, sin mirar `servicios`: el reparto de siempre no cambia ni en el
+    orden.
+    """
+    if modo != "foto":
+        return ESCALERA
+    suyos = servicios_de(servicios)
+    return tuple(c for c in ESCALERA_FOTO if _vale_para(c, suyos))
+
+
 #: Cuantos planos hacia atras se mira para no repetir FAMILIA. Regla dura. Dos y
 #: no uno: con uno, 'aereo'-'retrato'-'general' pasa el filtro y el espectador ve
 #: dos planos lejanos separados por uno cercano, que es el ritmo de siempre.
@@ -145,15 +305,16 @@ VENTANA_FAMILIA = 2
 VENTANA_CARTA = 5
 
 
-def _repartidas():
+def _repartidas(escalera=ESCALERA):
     """La escalera expandida por peso, que es sobre lo que se reparte."""
     expandida = []
-    for carta in ESCALERA:
+    for carta in escalera:
         expandida.extend([carta] * max(1, int(carta.get("peso") or 1)))
     return expandida
 
 
-def carta_de(sid, previas=(), semilla=0, forzada=""):
+def carta_de(sid, previas=(), semilla=0, forzada="", modo="ilustracion",
+             servicios=None):
     """Que clase de plano es este. Determinista, y nunca la familia de al lado.
 
     'previas' son los ids de carta de los planos que van justo antes, en orden.
@@ -166,15 +327,22 @@ def carta_de(sid, previas=(), semilla=0, forzada=""):
 
     'forzada' es el id que haya pedido una persona para ESE plano, y manda sobre
     todo lo demas. Una decision tomada mirando el video no se rebate sola.
+
+    'modo' y 'servicios' eligen la escalera (ver `escalera_para`). Una carta
+    forzada solo vale si es de la escalera de ese modo: un «diagrama» forzado
+    antes de pasar el estilo a foto no tiene sentido en una foto, y se reparte
+    como si no se hubiera forzado. Forzar a mano si salta el filtro de
+    servicios: es una decision tomada mirando.
     """
-    if forzada and forzada in POR_ID:
-        return POR_ID[forzada]
+    lookup = por_id_de(modo)
+    if forzada and forzada in lookup:
+        return lookup[forzada]
     previas = [str(p) for p in (previas or [])]
-    vetadas = {(POR_ID.get(p) or {}).get("familia")
+    vetadas = {(lookup.get(p) or {}).get("familia")
                for p in previas[-VENTANA_FAMILIA:]}
     vetadas.discard(None)
     recientes = set(previas[-VENTANA_CARTA:])
-    fondo = _repartidas()
+    fondo = _repartidas(escalera_para(modo, servicios))
     arranque = medios.desempatar(semilla, sid, "carta") % len(fondo)
     orden = [fondo[(arranque + i) % len(fondo)] for i in range(len(fondo))]
     libres = [c for c in orden if c["familia"] not in vetadas]
@@ -184,7 +352,8 @@ def carta_de(sid, previas=(), semilla=0, forzada=""):
     return (frescas or libres)[0]
 
 
-def repartir(escenas, semilla=0, forzadas=None):
+def repartir(escenas, semilla=0, forzadas=None, modo="ilustracion",
+             servicios=None):
     """Una carta por plano, en orden y con las dos reglas puestas.
 
     Va aparte de `carta_de` porque el reparto depende del ORDEN -- cada plano
@@ -196,7 +365,8 @@ def repartir(escenas, semilla=0, forzadas=None):
         sid = escena.get("id")
         if not sid:
             continue
-        carta = carta_de(sid, previas, semilla, forzadas.get(sid, ""))
+        carta = carta_de(sid, previas, semilla, forzadas.get(sid, ""),
+                         modo=modo, servicios=servicios)
         cartas[sid] = carta
         previas.append(carta["id"])
     return cartas

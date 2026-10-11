@@ -5419,6 +5419,80 @@ def _ficha_cola(ctx):
             "usd_por_imagen": _usd_por_imagen(ctx)}
 
 
+def _texto_roto_en(ctx):
+    """Cuantos planos tienen la narracion con «TÃº» (voz grabada antes del
+    10-10-2026, ver `subtitulos.reparar_mojibake`)."""
+    try:
+        plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    except Exception:                                       # noqa: BLE001
+        return 0
+    arreglar = PASOS_MODULOS.subtitulos.reparar_mojibake
+    return sum(1 for e in plan.get("escenas") or []
+               if arreglar(e.get("narracion") or "") != (e.get("narracion") or ""))
+
+
+def _ruta_subtitulos_reparados(ctx):
+    return os.path.join(ctx.proyecto.raiz, "subtitulos_reparados.json")
+
+
+@app.get("/api/proyectos/{pid}/subtitulos/rotos")
+def subtitulos_rotos(pid: str):
+    """{planos}: cuantos planos tienen la narracion con las tildes rotas Y los
+    subtitulos todavia sin volver a dibujar. Los datos no se tocan (la
+    narracion entra en la firma de las imagenes), asi que lo que dice que ya se
+    arreglo es la marca que deja «Arreglar los subtitulos»."""
+    ctx = contexto(pid)
+    try:
+        with open(_ruta_subtitulos_reparados(ctx), encoding="utf-8") as fh:
+            marca = json.load(fh)
+        if int(ctx.proyecto.version_activa("callouts") or 0) >= int(marca.get("callouts") or 0) > 0:
+            return {"planos": 0, "reparados": True}
+    except (OSError, ValueError, TypeError):
+        pass
+    return {"planos": _texto_roto_en(ctx)}
+
+
+def _correr_rehacer_subtitulos(avisar, ctx):
+    """Vuelve a dibujar los rotulos y subtitulos de TODOS los planos y monta.
+
+    No toca la voz, ni las imagenes, ni ningun param: los subtitulos salen de
+    la misma narracion, pero ahora se dibujan reparados. Nada se paga: los
+    rotulos y el montaje son trabajo de esta maquina.
+    """
+    for paso, desde, hasta in (("callouts", 0.0, 0.3), ("render", 0.3, 1.0)):
+        def tramo(valor, mensaje="", publico="", desde=desde, hasta=hasta):
+            return avisar(desde + (hasta - desde) * min(1.0, max(0.0, float(valor or 0))),
+                          mensaje)
+        ctx.estado.marcar_ejecutando(paso)
+        try:
+            _correr_paso(tramo, ctx, paso, None)
+        except BaseException:
+            ctx.estado.limpiar_marca(paso)
+            raise
+    with open(_ruta_subtitulos_reparados(ctx), "w", encoding="utf-8") as fh:
+        json.dump({"callouts": ctx.proyecto.version_activa("callouts"),
+                   "fecha": time.strftime("%Y-%m-%dT%H:%M:%S")}, fh)
+    avisar(1.0, "subtítulos rehechos y vídeo montado")
+    return {"planos": _texto_roto_en(ctx)}
+
+
+@app.post("/api/proyectos/{pid}/subtitulos/rehacer", status_code=202)
+def rehacer_subtitulos(pid: str):
+    """Rehace los subtitulos (y monta) de un video cuya voz llego con las
+    tildes rotas. Gratis: no dibuja imagenes ni graba voz."""
+    ctx = contexto(pid)
+    for paso in ("assets", "callouts", "render"):
+        otro = _trabajo_activo(ctx, paso)
+        if otro is not None:
+            raise ErrorApi(409, "este vídeo ya tiene un trabajo en marcha: espera a que termine",
+                           {"trabajo_id": otro["id"]})
+    trabajo_id = ctx.gestor.lanzar("subtitulos", _correr_rehacer_subtitulos, ctx,
+                                   paso="callouts")
+    _registrar_trabajo(trabajo_id, ctx.id)
+    ctx.bitacora.anotar("subtitulos_rehechos", "callouts", {"trabajo": trabajo_id})
+    return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id)}
+
+
 @app.post("/api/proyectos/{pid}/imagenes/rehacer", status_code=202)
 def rehacer_imagenes_con_notas(pid: str, cuerpo: dict = Body(default=None)):
     """Pone en la cola las notas de imagenes: {notas?: [ids], desde_cero?} (sin ids, todas).

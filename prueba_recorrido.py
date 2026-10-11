@@ -214,6 +214,18 @@ def fabricar_video(proyectos, env):
                 if proyecto.raiz in texto:
                     with open(ruta, "w", encoding="utf-8") as fh:
                         fh.write(texto.replace(proyecto.raiz, destino))
+    # LA VOZ CON LAS TILDES ROTAS, como la de los videos grabados antes del
+    # 10-10-2026 (Cartesia leida como Latin-1): «zarpó» llego «zarpÃ³». Es lo
+    # que hay en los videos de verdad, y la pantalla tiene que aguantarlo.
+    meta = os.path.join(destino, "pasos", "voz", "v1", "audio_meta.json")
+    with open(meta, encoding="utf-8") as fh:
+        voz = json.load(fh)
+    rotas = {"zarpo": "zarpÃ³", "manana": "maÃ±ana", "tripulacion": "tripulaciÃ³n"}
+    for palabra in voz.get("palabras") or []:
+        if isinstance(palabra, dict) and palabra.get("w") in rotas:
+            palabra["w"] = rotas[palabra["w"]]
+    with open(meta, "w", encoding="utf-8") as fh:
+        json.dump(voz, fh, ensure_ascii=False)
     referencias = []
     os.makedirs(os.path.join(taller, "refs"), exist_ok=True)
     for i in range(3):
@@ -717,6 +729,29 @@ def rehacer_y_verlo_en_el_video(navegador, datos):
     nuevo = pg.p.locator("video").first.get_attribute("src") or ""
     ok(nuevo and nuevo != src_video, f"y el reproductor carga el MP4 NUEVO ({src_video[-28:]} → {nuevo[-28:]})")
     ok(not pg.visible(".caja-aviso", "ANTES de tus últimos cambios"), "y el aviso se va")
+    # LAS TILDES ROTAS DE LA VOZ: la tarjeta las enseña bien y el Vídeo ofrece
+    # volver a dibujar los subtítulos sin pagar nada
+    pg.pulsar(".nav-light button", "Imágenes")
+    pg.p.wait_for_timeout(1200)
+    guion = " ".join(pg.p.locator(".nota-imagen .nota-guion").all_inner_texts()) + " " + \
+        " ".join(pg.p.locator(".previa-feedback .meta").all_inner_texts())
+    ok("Ã" not in pg.p.locator("#panel").inner_text(),
+       "en Imágenes ninguna frase sale con «Ã» (la voz llegó rota y se enseña bien)")
+    pg.pulsar(".nav-light button", "Vídeo")
+    ok(pg.esperar(".caja-aviso", "tildes rotas", 10), "el Vídeo avisa de los subtítulos con tildes rotas")
+    pg.pulsar(".caja-aviso button", "Arreglar los subtítulos")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.sin_trabajo(300), "«Arreglar los subtítulos» monta el vídeo otra vez")
+    pg.p.wait_for_timeout(2000)
+    ok(not pg.visible(".caja-aviso", "tildes rotas"), "y el aviso ya no sale")
+    capa = ""
+    for raiz, _d, ficheros in os.walk(os.path.join(datos["proyectos"], pid, "pasos", "callouts")):
+        for nombre in ficheros:
+            if nombre.endswith(".svg") and "S001" in nombre:
+                with open(os.path.join(raiz, nombre), encoding="utf-8", errors="replace") as fh:
+                    capa += fh.read()
+    ok("zarpó" in capa or "Zarpó" in capa or "ZARPÓ" in capa,
+       "y el subtítulo dibujado dice «zarpó», no «zarpÃ³»")
     pg.sin_errores("rehacer y verlo en el vídeo")
     pg.cerrar()
 

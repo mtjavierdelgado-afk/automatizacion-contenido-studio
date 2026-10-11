@@ -6364,6 +6364,7 @@ async function cargarVideoLight(pid) {
     v.audio = await leerAudioLight();
     v.plan = null;
     v.planDe = '';
+    v.subtitulosRotos = undefined;   // se vuelve a preguntar por este vídeo
     // el coste es de ESTE vídeo: arrastrar el del anterior seria enseñar la
     // cifra de otro proyecto mientras llega la buena
     v.coste = null;
@@ -7294,6 +7295,31 @@ async function refrescarFichasLight() {
    (`POST /api/proyectos/{pid}/generar`), no encadenada desde aquí: encadenar en
    el navegador se rompe al recargar la página, justo en un flujo pensado para
    dejarlo generando y mirarlo desde el móvil. */
+/* «Arreglar los subtítulos»: rótulos de todos los planos y montaje, sin pagar
+   nada (ver `rehacer_subtitulos` en app.py). */
+async function rehacerSubtitulosLight() {
+  const v = APP.light.video;
+  if (!v.pid) return;
+  if (!window.confirm('Se vuelven a dibujar los subtítulos de todos los planos y se monta el '
+    + 'vídeo otra vez. No se paga nada; tarda lo que un montaje. ¿Seguimos?')) return;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(`${API.proyecto(v.pid)}/subtitulos/rehacer`,
+      { method: 'POST', cuerpo: {} });
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') {
+        v.subtitulosRotos = undefined;
+        await cargarVideoLight(v.pid);
+        v.vista = 'video';
+      }
+      pintarLight();
+    }, () => refrescarVivosLight());
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+  }
+}
+
 async function lanzarTandaLight(tanda, modo) {
   const v = APP.light.video;
   if (!v.pid) return;
@@ -9390,6 +9416,29 @@ function vistaVideoLight() {
       'Este vídeo es de ANTES de tus últimos cambios (por ejemplo, imágenes rehechas '
       + 'en «Imágenes»): lo que ves aquí todavía no los lleva. Pulsa «Regenerar Vídeo» '
       + 'abajo para volver a montarlo con ellos.'));
+  }
+
+  /* LAS TILDES ROTAS DE LOS SUBTÍTULOS («TÃº»): la voz de este vídeo llegó
+     de Cartesia mal leída. Ya se enseña bien en pantalla, pero el MP4 lleva
+     los subtítulos dibujados así; esto los vuelve a dibujar todos y monta.
+     Gratis: ni imágenes ni voz. Se pregunta una vez por vídeo. */
+  if (v.subtitulosRotos === undefined && v.pid) {
+    v.subtitulosRotos = 0;
+    const pid = v.pid;
+    pedir(`${API.proyecto(pid)}/subtitulos/rotos`).then(r => {
+      if (videoAbierto().pid !== pid) return;
+      v.subtitulosRotos = Number(r.planos) || 0;
+      if (v.subtitulosRotos) pintarLight();
+    }).catch(() => {});
+  }
+  if (v.subtitulosRotos > 0 && hayMp4Light() && !trabajoVideoLight()) {
+    caja.appendChild(h('div', { clase: 'caja-aviso fila' },
+      h('span', { clase: 'crece' },
+        `Los subtítulos de ${v.subtitulosRotos} plano(s) salen con las tildes rotas («TÃº» en vez `
+        + 'de «Tú»): la voz de este vídeo se leyó con la codificación equivocada. Se pueden '
+        + 'volver a dibujar todos y montar el vídeo otra vez. No se paga nada: ni imágenes ni voz.'),
+      h('button', { clase: 'primario', onclick: () => rehacerSubtitulosLight() },
+        'Arreglar los subtítulos')));
   }
 
   const marco = h('div', { clase: `marco-video ${formatoDelVideo()}` });

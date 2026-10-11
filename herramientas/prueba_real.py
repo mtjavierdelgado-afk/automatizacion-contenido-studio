@@ -3,6 +3,16 @@
 
     asvs probar                 (en la consola del VPS, como root)
     asvs probar --estilo ID     con ese estilo (si no, el primero que haya)
+    asvs probar nueva           empieza otra aunque haya una a medias
+
+SI LA CONSOLA SE CORTA no pasa nada: la prueba corre aparte del terminal
+(`asvs probar` la lanza desligada y solo va enseñando su registro). Volver a
+escribir `asvs probar` vuelve a enseñarla si sigue corriendo, o la RETOMA donde
+se quedó si el proceso murió: guarda su estado tras cada paso
+(<proyectos>/_sistema/pruebas_reales/en_curso.json), no vuelve a lanzar lo ya
+lanzado --espera a ESE trabajo-- y mide el gasto contra lo prometido y lo
+gastado ANTES de lanzarlo, que quedaron guardados. Retomar no repite gasto ni
+afloja ninguna comprobación.
 
 Lo que prueba el recorrido (`prueba_recorrido.py`) es la PANTALLA con motores
 simulados. Esto es lo otro: con TUS claves, contra OpenAI, Cartesia, Jamendo,
@@ -71,6 +81,9 @@ class Api:
                 return fallo.code, json.loads(fallo.read() or b"{}")
             except ValueError:
                 return fallo.code, {}
+        except (urllib.error.URLError, OSError, ValueError):
+            # el Studio reiniciandose (o un corte de un segundo): 0 y se reintenta
+            return 0, {}
 
     def get(self, ruta):
         return self._pedir("GET", ruta)
@@ -84,10 +97,16 @@ class Api:
     def trabajo(self, tid, limite_s=3600, etiqueta=""):
         fin = time.time() + limite_s
         ultimo = ""
+        caidas = 0
         while time.time() < fin:
             codigo, ficha = self.get(f"/api/trabajos/{tid}")
+            if codigo == 0 and caidas < 60:              # el Studio no contesta: se espera
+                caidas += 1
+                time.sleep(5)
+                continue
             if codigo != 200:
                 return {"estado": "desconocido"}
+            caidas = 0
             if ficha.get("estado") in ("listo", "error", "cancelado"):
                 return ficha
             texto = f"{etiqueta}: {int(100 * float(ficha.get('progreso') or 0))} % {ficha.get('publico') or ficha.get('mensaje') or ''}"
@@ -100,18 +119,34 @@ class Api:
     def libre(self, pid, limite_s=1800):
         fin = time.time() + limite_s
         while time.time() < fin:
-            _c, d = self.get(f"/api/trabajos?proyecto={pid}&activos=1")
-            if not (d.get("trabajos") if isinstance(d, dict) else d):
+            codigo, d = self.get(f"/api/trabajos?proyecto={pid}&activos=1")
+            if codigo == 200 and not (d.get("trabajos") if isinstance(d, dict) else d):
                 return True
             time.sleep(3)
         return False
 
 
 class Informe:
-    def __init__(self):
+    """Las comprobaciones, cada una con la PARTE de la prueba a la que
+    pertenece. Al retomar una prueba cortada se conservan las de las partes
+    terminadas (no se vuelven a pagar ni a medir) y se rehacen las demás."""
+
+    def __init__(self, guardar=None):
         self.lineas = []
         self.fallos = 0
         self.avisos = 0
+        self.parte = ""
+        self._guardar = guardar or (lambda: None)
+
+    def cargar(self, lineas, hechas):
+        for linea in lineas or []:
+            if linea.get("parte") in hechas:
+                self.lineas.append(linea)
+                self.fallos += linea.get("estado") == "fallo"
+                self.avisos += linea.get("estado") == "aviso"
+                marca = {"ok": "✓", "fallo": "✗", "aviso": "!"}[linea["estado"]]
+                print(f"  {marca} {linea['que']}" + (f"  — {linea['detalle']}" if linea.get("detalle") else "")
+                      + "   (de antes del corte)", flush=True)
 
     def apunta(self, estado, que, detalle=""):
         marca = {"ok": "✓", "fallo": "✗", "aviso": "!"}[estado]
@@ -119,8 +154,9 @@ class Informe:
             self.fallos += 1
         elif estado == "aviso":
             self.avisos += 1
-        self.lineas.append({"estado": estado, "que": que, "detalle": detalle})
+        self.lineas.append({"estado": estado, "que": que, "detalle": detalle, "parte": self.parte})
         print(f"  {marca} {que}" + (f"  — {detalle}" if detalle else ""), flush=True)
+        self._guardar()
 
     def comprueba(self, condicion, que, detalle="", solo_aviso=False):
         self.apunta("ok" if condicion else ("aviso" if solo_aviso else "fallo"), que,
@@ -155,23 +191,114 @@ def _juez(instruccion, cwd):
     return comun.extraer_json(respuesta, "la prueba real")
 
 
+def _carpeta_informes(proyectos):
+    return os.path.join(proyectos, "_sistema", "pruebas_reales")
+
+
+def _ruta_en_curso(proyectos):
+    """La prueba a medias: lo justo para retomarla donde se cortó."""
+    return os.path.join(_carpeta_informes(proyectos), "en_curso.json")
+
+
+def _leer_en_curso(proyectos):
+    try:
+        with open(_ruta_en_curso(proyectos), encoding="utf-8") as fh:
+            est = json.load(fh)
+        return est if isinstance(est, dict) and est.get("proyecto") else None
+    except (OSError, ValueError):
+        return None
+
+
+def _prueba_cortada_sin_estado(api, proyectos):
+    """Una «Prueba real» que se cortó ANTES de que existiera el retomar (no
+    dejó en_curso.json): la más nueva, si es posterior al último informe."""
+    _c, lista = api.get("/api/proyectos")
+    fichas = lista if isinstance(lista, list) else (lista or {}).get("proyectos") or []
+    candidatas = []
+    for f in fichas:
+        m = re.match(r"Prueba real (\d{4}-\d{2}-\d{2} \d{2}\.\d{2})$", str(f.get("nombre") or ""))
+        if m:
+            candidatas.append((datetime.datetime.strptime(m.group(1), "%Y-%m-%d %H.%M"), f.get("id")))
+    if not candidatas:
+        return None
+    fecha, pid = max(candidatas)
+    carpeta = _carpeta_informes(proyectos)
+    for nombre in os.listdir(carpeta) if os.path.isdir(carpeta) else []:
+        m = re.match(r"(\d{4}-\d{2}-\d{2}_\d{4})\.json$", nombre)
+        if m and datetime.datetime.strptime(m.group(1), "%Y-%m-%d_%H%M") >= fecha:
+            return None                                 # esa ya terminó y tiene informe
+    return pid
+
+
 def main():
     ap = argparse.ArgumentParser(description="La prueba real del Studio")
     ap.add_argument("--api", default=f"http://127.0.0.1:{os.environ.get('PUERTO', '8110')}")
     ap.add_argument("--estilo", default="", help="id del estilo (si no, el primero)")
     ap.add_argument("--segundos", type=int, default=30)
+    ap.add_argument("--seguir", action="store_true",
+                    help="si hay una prueba cortada, la sigue donde se quedó (sin volver a pagar)")
     # PARA PROBAR ESTA PRUEBA (en local, con motores simulados): sobre un video
     # que ya existe y sin exigir las claves
     ap.add_argument("--proyecto", default="", help=argparse.SUPPRESS)
     ap.add_argument("--sin-claves", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
     api = Api(args.api)
-    informe = Informe()
-    inicio = time.time()
     proyectos = os.environ.get("ESTUDIO_PROYECTOS") or os.path.join(RAIZ, "proyectos")
-    print("LA PRUEBA REAL DEL STUDIO (gasta ~0,6-1 $; no toca tus vídeos)")
+    os.makedirs(_carpeta_informes(proyectos), exist_ok=True)
 
+    # EL ESTADO DE LA PRUEBA, en disco despues de cada paso: si la consola se
+    # corta (o el proceso muere), `asvs probar` la retoma donde estaba. Lo ya
+    # lanzado NO se vuelve a lanzar: se espera a SU trabajo y se mide contra lo
+    # que se prometio y se gastaba ANTES de lanzarlo, guardado aqui.
+    est = _leer_en_curso(proyectos) if args.seguir else None
+    adoptada = None
+    if args.seguir and not est and not args.proyecto:
+        adoptada = _prueba_cortada_sin_estado(api, proyectos)
+    if est:
+        est["retomada"] = True
+        print(f"RETOMANDO LA PRUEBA REAL del vídeo «{est['proyecto']}» donde se cortó "
+              "(lo ya hecho no se repite ni se paga otra vez)")
+    else:
+        est = {"proyecto": args.proyecto or adoptada or "", "estilo": "", "inicio": time.time(),
+               "hechas": [], "lineas": [], "tandas": {}, "notas": {}, "adoptada": bool(adoptada)}
+        if adoptada:
+            print(f"RETOMANDO la prueba real cortada «{adoptada}» (se cortó antes de que la "
+                  "prueba guardara su estado: la tanda que estaba en marcha no se puede medir "
+                  "contra lo prometido; el resto sí)")
+        else:
+            print("LA PRUEBA REAL DEL STUDIO (gasta ~0,6-1 $; no toca tus vídeos)")
+
+    def guardar():
+        est["lineas"] = informe.lineas
+        temporal = _ruta_en_curso(proyectos) + ".tmp"
+        try:
+            with open(temporal, "w", encoding="utf-8") as fh:
+                json.dump(est, fh, ensure_ascii=False)
+            os.replace(temporal, _ruta_en_curso(proyectos))
+        except OSError:
+            pass
+
+    informe = Informe(guardar)
+    informe.cargar(est.get("lineas"), set(est.get("hechas") or []))
+    inicio = float(est.get("inicio") or time.time())
+
+    def hecha(parte):
+        if parte not in est["hechas"]:
+            est["hechas"].append(parte)
+        guardar()
+
+    def cerrar(datos):
+        codigo = _cerrar(informe, proyectos, inicio, datos)
+        try:
+            os.remove(_ruta_en_curso(proyectos))
+        except OSError:
+            pass
+        return codigo
+
+    # 1. LAS CLAVES: siempre (es gratis y pueden haber cambiado)
     seccion("1. El servidor y las claves")
+    informe.parte = "claves"
+    informe.lineas = [l for l in informe.lineas if l.get("parte") != "claves"]
     codigo, _salud = api.get("/api/salud")
     if not informe.comprueba(codigo == 200, "el Studio contesta", f"HTTP {codigo}"):
         return 2
@@ -184,58 +311,97 @@ def main():
     if not args.sin_claves and any(imprescindibles.get(x) not in ("ok", None)
                                    for x in ("openai", "cartesia")):
         informe.apunta("fallo", "sin las claves de OpenAI y Cartesia no se puede seguir")
-        return _cerrar(informe, proyectos, inicio, {})
+        return cerrar({})
 
     seccion("2. El vídeo de prueba")
-    _c, lista = api.get("/api/presets-light")
-    estilos = [p for p in lista.get("presets") or [] if p.get("tipo", "canal") == "canal"]
-    estilo = next((p for p in estilos if p.get("id") == args.estilo), None) or (estilos[0] if estilos else None)
-    if not informe.comprueba(bool(estilo), "hay un estilo con el que hacerlo", "crea uno primero"):
-        return _cerrar(informe, proyectos, inicio, {})
-    nombre = "Prueba real " + datetime.datetime.now().strftime("%Y-%m-%d %H.%M")
-    if args.proyecto:
-        pid = args.proyecto
+    informe.parte = "crear"
+    if est["proyecto"]:
+        pid = est["proyecto"]
+        if "crear" not in est["hechas"]:
+            informe.apunta("ok", f"se sigue con el vídeo de prueba «{pid}»")
+            hecha("crear")
     else:
+        _c, lista = api.get("/api/presets-light")
+        estilos = [p for p in lista.get("presets") or [] if p.get("tipo", "canal") == "canal"]
+        estilo = next((p for p in estilos if p.get("id") == args.estilo), None) or (estilos[0] if estilos else None)
+        if not informe.comprueba(bool(estilo), "hay un estilo con el que hacerlo", "crea uno primero"):
+            return cerrar({})
+        nombre = "Prueba real " + datetime.datetime.now().strftime("%Y-%m-%d %H.%M")
         codigo, creado = api.post(f"/api/presets-light/{estilo['id']}/video", {
             "nombre": nombre, "duracion_objetivo_s": args.segundos, "material": MATERIAL,
             "indicaciones": "Cercano y con humor, frases cortas."})
         pid = (creado.get("proyecto") or {}).get("id") or ""
         if not informe.comprueba(codigo == 201 and pid, f"se crea «{nombre}» con el estilo «{estilo.get('nombre')}»",
                                  f"HTTP {codigo}: {creado}"):
-            return _cerrar(informe, proyectos, inicio, {})
+            return cerrar({})
         # CALIDAD BAJA: es una prueba (se escribe antes de generar nada: no mueve firmas)
         api.put(f"/api/proyectos/{pid}/pasos/assets/params", {"params": {"calidad": "low"}})
+        est["proyecto"], est["estilo"] = pid, estilo.get("id")
+        hecha("crear")
     raiz = os.path.join(proyectos, pid)
-    datos = {"proyecto": pid, "estilo": estilo.get("id")}
+    datos = {"proyecto": pid, "estilo": est.get("estilo")}
 
-    tiempos = {}
     for tanda, limite in (("guion", 900), ("voz", 900), ("video", 3600), ("render", 2400)):
-        seccion(f"3. La tanda «{tanda}»")
-        _c, plan = api.get(f"/api/proyectos/{pid}/generar?tanda={tanda}&modo=pendientes")
-        prometido = float(((plan.get("coste") or {}).get("usd_por_generar")) or 0)
-        if plan.get("tareas") == 0:
-            informe.apunta("ok", f"«{tanda}» ya estaba al día")
+        parte = f"tanda:{tanda}"
+        if parte in est["hechas"]:
             continue
-        _c, antes = api.get(f"/api/proyectos/{pid}/coste")
-        t0 = time.time()
-        codigo, lanzada = api.post(f"/api/proyectos/{pid}/generar", {"tanda": tanda, "modo": "pendientes"})
-        tid = lanzada.get("trabajo_id") or (lanzada.get("trabajo") or {}).get("id")
-        if not informe.comprueba(codigo == 202 and tid, f"se lanza «{tanda}»", f"HTTP {codigo}: {lanzada}"):
-            return _cerrar(informe, proyectos, inicio, datos)
-        fin = api.trabajo(tid, limite, tanda)
-        tiempos[tanda] = round(time.time() - t0)
-        if not informe.comprueba(fin.get("estado") == "listo", f"«{tanda}» termina bien ({tiempos[tanda]} s)",
+        seccion(f"3. La tanda «{tanda}»")
+        informe.parte = parte
+        informe.lineas = [l for l in informe.lineas if l.get("parte") != parte]
+        t = est["tandas"].get(tanda) or {}
+        if t.get("tid"):
+            # LANZADA ANTES DEL CORTE: se espera a ESE trabajo, no se lanza otro
+            print(f"     (estaba en marcha antes del corte: se sigue su trabajo {t['tid']})", flush=True)
+            fin = api.trabajo(t["tid"], limite, tanda)
+            if fin.get("estado") == "desconocido":
+                # el Studio se reinició y olvidó el trabajo: manda lo que diga el plan
+                api.libre(pid)
+                _c, plan = api.get(f"/api/proyectos/{pid}/generar?tanda={tanda}&modo=pendientes")
+                if plan.get("tareas") == 0:
+                    fin = {"estado": "listo"}
+        else:
+            # lo que hubiera en marcha (una prueba adoptada que se cortó a media tanda)
+            if not api.libre(pid, 3600):
+                informe.apunta("fallo", f"«{tanda}»: el vídeo sigue ocupado con otro trabajo tras una hora")
+                return cerrar(datos)
+            _c, plan = api.get(f"/api/proyectos/{pid}/generar?tanda={tanda}&modo=pendientes")
+            if plan.get("tareas") == 0:
+                informe.apunta("ok", f"«{tanda}» ya estaba al día")
+                if est.get("adoptada") and tanda in ("guion", "voz", "video"):
+                    informe.apunta("aviso", f"«{tanda}»: lo gastado no se ha podido comparar con lo prometido",
+                                   "se hizo antes del corte, cuando la prueba aún no guardaba lo prometido")
+                hecha(parte)
+                continue
+            _c, antes = api.get(f"/api/proyectos/{pid}/coste")
+            t = {"prometido": float(((plan.get("coste") or {}).get("usd_por_generar")) or 0),
+                 "antes": float(antes.get("total_usd") or 0), "t0": time.time()}
+            codigo, lanzada = api.post(f"/api/proyectos/{pid}/generar", {"tanda": tanda, "modo": "pendientes"})
+            tid = lanzada.get("trabajo_id") or (lanzada.get("trabajo") or {}).get("id")
+            if not informe.comprueba(codigo == 202 and tid, f"se lanza «{tanda}»", f"HTTP {codigo}: {lanzada}"):
+                return cerrar(datos)
+            t["tid"] = tid
+            est["tandas"][tanda] = t
+            guardar()
+            fin = api.trabajo(tid, limite, tanda)
+        segundos = round(time.time() - float(t.get("t0") or time.time()))
+        est.setdefault("tiempos_s", {})[tanda] = segundos
+        if not informe.comprueba(fin.get("estado") == "listo", f"«{tanda}» termina bien ({segundos} s)",
                                  f"{fin.get('estado')}: {fin.get('error') or fin.get('mensaje')}"):
-            return _cerrar(informe, proyectos, inicio, datos)
+            return cerrar(datos)
         _c, despues = api.get(f"/api/proyectos/{pid}/coste")
-        gastado = float(despues.get("total_usd") or 0) - float(antes.get("total_usd") or 0)
+        gastado = float(despues.get("total_usd") or 0) - float(t.get("antes") or 0)
+        prometido = float(t.get("prometido") or 0)
         if prometido or gastado > 0.01:
             informe.comprueba(gastado <= prometido * 1.35 + 0.05,
                               f"«{tanda}»: gastado {gastado:.3f} $ frente a {prometido:.3f} $ prometidos",
                               "se ha gastado bastante más de lo que se dijo antes de pulsar")
-    datos["tiempos_s"] = tiempos
+        hecha(parte)
+    datos["tiempos_s"] = est.get("tiempos_s") or {}
 
+    # 4. LO QUE HA SALIDO: solo lee, se repite entera al retomar
     seccion("4. Lo que ha salido")
+    informe.parte = "salida"
+    informe.lineas = [l for l in informe.lineas if l.get("parte") != "salida"]
     meta = os.path.join(raiz, "pasos", "voz")
     activa = _activa(raiz, "voz")
     palabras = []
@@ -268,33 +434,56 @@ def main():
                       "sin efectos (¿clave de FreeSound?)", solo_aviso=True)
     _c, eventos = api.get(f"/api/proyectos/{pid}/coste/eventos?proveedor=openai&limite=500")
     unidades = [e.get("unidad") for e in eventos.get("eventos") or [] if e.get("unidad")]
-    repetidas = sorted({u for u in unidades if unidades.count(u) > 1})
+    # las dos notas de la parte 5 rehacen DOS planos a proposito: no cuentan como repetidas
+    rehechas = {f"escena:{plano}" for plano in est["notas"]}
+    repetidas = sorted({u for u in unidades if unidades.count(u) > (2 if u in rehechas else 1)})
     informe.comprueba(not repetidas, f"cada imagen se pagó UNA vez ({len(unidades)} imágenes)",
                       f"pagadas dos veces: {repetidas[:6]}")
 
     seccion("5. Rehacer con notas (Rehacer y Desde cero)")
-    _c, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
-    escenas = [e for e in previa.get("escenas") or [] if e.get("imagen") and not e.get("cartela")]
-    elegidas = escenas[1:3] if len(escenas) >= 3 else escenas[:2]
-    juicios = []
-    for escena, texto, cero in zip(elegidas, (NOTA_RETOQUE, NOTA_DESDE_CERO), (False, True)):
-        antes_img = os.path.join(raiz, escena["imagen"])
-        _c, nota = api.post(f"/api/proyectos/{pid}/repaso", {"texto": texto, "t": escena.get("t_in", 0),
-                                                               "plano": escena["id"], "pantalla": "imagenes"})
-        nid = (nota.get("nota") or {}).get("id")
-        api.post(f"/api/proyectos/{pid}/imagenes/rehacer", {"notas": [nid], "desde_cero": cero})
+    juicios = est.setdefault("juicios", [])
+    if not est.get("elegidas"):
+        _c, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+        escenas = [e for e in previa.get("escenas") or [] if e.get("imagen") and not e.get("cartela")]
+        elegidas = escenas[1:3] if len(escenas) >= 3 else escenas[:2]
+        est["elegidas"] = [{"id": e["id"], "t_in": e.get("t_in", 0),
+                            "antes_img": os.path.join(raiz, e["imagen"])} for e in elegidas]
+        guardar()
+    for escena, texto, cero in zip(est["elegidas"], (NOTA_RETOQUE, NOTA_DESDE_CERO), (False, True)):
+        parte = f"nota:{escena['id']}"
+        if parte in est["hechas"]:
+            continue
+        informe.parte = parte
+        informe.lineas = [l for l in informe.lineas if l.get("parte") != parte]
+        juicios[:] = [j for j in juicios if j.get("plano") != escena["id"]]
+        n = est["notas"].setdefault(escena["id"], {})
+        antes_img = escena["antes_img"]
+        if not n.get("nid"):
+            _c, nota = api.post(f"/api/proyectos/{pid}/repaso", {"texto": texto, "t": escena.get("t_in", 0),
+                                                                   "plano": escena["id"], "pantalla": "imagenes"})
+            n["nid"] = (nota.get("nota") or {}).get("id")
+            guardar()
+        nid = n["nid"]
+        if not n.get("pedida"):
+            # pedir dos veces la misma nota la volveria a dibujar (y a pagar): solo una
+            api.post(f"/api/proyectos/{pid}/imagenes/rehacer", {"notas": [nid], "desde_cero": cero})
+            n["pedida"] = True
+            guardar()
+        else:
+            print(f"     (la nota de {escena['id']} ya estaba pedida antes del corte: se espera)", flush=True)
         fin = time.time() + 900
-        hecha = False
-        while time.time() < fin and not hecha:
+        aplicada, nota_viva = False, {}
+        while time.time() < fin and not aplicada:
             time.sleep(5)
             _c, rep = api.get(f"/api/proyectos/{pid}/repaso")
-            nota_viva = next((n for n in rep.get("notas") or [] if n.get("id") == nid), {})
-            hecha = nota_viva.get("estado") == "aplicado"
+            nota_viva = next((x for x in rep.get("notas") or [] if x.get("id") == nid), {})
+            aplicada = nota_viva.get("estado") == "aplicado"
             if nota_viva.get("error"):
                 break
         modo = "desde cero" if cero else "retoque"
-        if not informe.comprueba(hecha, f"{escena['id']} se rehace ({modo})",
+        if not informe.comprueba(aplicada, f"{escena['id']} se rehace ({modo})",
                                  nota_viva.get("error") or "no terminó"):
+            hecha(parte)
             continue
         _c, previa2 = api.get(f"/api/proyectos/{pid}/previsualizacion")
         nueva = next((e for e in previa2.get("escenas") or [] if e.get("id") == escena["id"]), {})
@@ -314,20 +503,23 @@ def main():
                           f"{escena['id']} ({modo}): Claude ve la nota aplicada",
                           f"{(veredicto or {}).get('aplicada')}: {(veredicto or {}).get('por_que')}",
                           solo_aviso=(veredicto or {}).get("aplicada") == "parcial")
+        hecha(parte)
     datos["juicios_imagenes"] = juicios
 
     seccion("6. El guion frente al material")
+    informe.parte = "guion"
+    informe.lineas = [l for l in informe.lineas if l.get("parte") != "guion"]
     guion = ""
     try:
         with open(os.path.join(raiz, "pasos", "guion", f"v{_activa(raiz, 'guion')}", "guion.json"),
                   encoding="utf-8") as fh:
             doc = json.load(fh)
         # el guion guarda sus bloques en «bloques» o en «guion», segun la version
-        bloques = doc.get("bloques") or doc.get("guion") or [] if isinstance(doc, dict) else doc
+        bloques = (doc.get("bloques") or doc.get("guion") or []) if isinstance(doc, dict) else doc
         if isinstance(bloques, dict):
             bloques = bloques.get("bloques") or []
         guion = " ".join(str(b.get("texto") or b.get("narracion") or "")
-                         for b in bloques if isinstance(b, dict))
+                         for b in bloques or [] if isinstance(b, dict))
     except (OSError, ValueError):
         pass
     if informe.comprueba(bool(guion), "hay guion", "sin guion.json"):
@@ -350,7 +542,9 @@ def main():
         cambios = sum((f.get("cambios") or [] for f in faltas.values()), [])
         informe.comprueba(not cambios, "el guion sale sin faltas de ortografía",
                           f"{len(cambios)}: {cambios[:5]}", solo_aviso=True)
-    return _cerrar(informe, proyectos, inicio, datos)
+    if est.get("adoptada") or est.get("retomada"):
+        datos["retomada"] = True
+    return cerrar(datos)
 
 
 def _activa(raiz, paso):

@@ -13,7 +13,8 @@
 #      asvs clave        ver o cambiar la contrasena de acceso
 #      asvs https        (re)intentar el certificado
 #      asvs repositorio  de donde se baja el codigo (y cambiarlo: asvs repositorio usuario/repo)
-#      asvs probar       la prueba real: un video de 30 s con tus claves (~1 $), comprobado solo
+#      asvs probar       la prueba real: un video de 30 s con tus claves (~1 $), comprobado solo;
+#                        si la consola se corta sigue sola, y repetirlo la vuelve a enseñar o la retoma
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
@@ -197,14 +198,43 @@ https() {
 # LA PRUEBA REAL (herramientas/prueba_real.py): un video de prueba con las
 # claves de verdad, comprobado de punta a punta. Corre como el usuario del
 # servicio y con su entorno, igual que el Studio.
+#
+# DESLIGADA DE LA CONSOLA: la consola web de Hostinger se corta a menudo, y un
+# corte mataba la prueba a medias. Se lanza con setsid/nohup y aqui solo se
+# va enseñando su registro: si la consola se cae, la prueba sigue. Volver a
+# escribir `asvs probar` la vuelve a enseñar si sigue viva, o la RETOMA donde
+# se quedo (--seguir) si el proceso murio. `asvs probar nueva` empieza otra.
 probar() {
-  local puerto
+  local puerto carpeta registro pidf pid seguir="--seguir"
   puerto="$(_puerto)"
-  echo "La prueba real gasta ~0,6-1 \$ (un video de 30 s en calidad baja) y tarda 15-25 min."
-  echo "No toca tus videos: crea uno nuevo, «Prueba real <fecha>»."
-  sudo -u "$USUARIO" bash -c "set -a; . '$RAIZ/datos/entorno'; set +a; cd '$RAIZ/app' && \
-    PUERTO='${puerto:-8110}' '$RAIZ/venv/bin/python' herramientas/prueba_real.py \
-    --api 'http://127.0.0.1:${puerto:-8110}' $*"
+  carpeta="$(grep -m1 '^ESTUDIO_PROYECTOS=' "$RAIZ/datos/entorno" 2>/dev/null | cut -d= -f2- || true)"
+  carpeta="${carpeta:-$RAIZ/datos/proyectos}/_sistema/pruebas_reales"
+  registro="$carpeta/registro.log"
+  pidf="$carpeta/proceso.pid"
+  if [ "${1:-}" = "nueva" ]; then seguir=""; shift; fi
+  if [ "${1:-}" = "ver" ]; then shift; fi
+  sudo -u "$USUARIO" mkdir -p "$carpeta"
+  pid="$(cat "$pidf" 2>/dev/null || true)"
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    echo "La prueba real ya está corriendo (proceso $pid). Te enseño cómo va;"
+    echo "si la consola se corta, sigue sola: vuelve a escribir  asvs probar  para verla."
+  else
+    if [ -n "$seguir" ] && [ -f "$carpeta/en_curso.json" ]; then
+      echo "Hay una prueba real a medias: la sigo donde se quedó (sin volver a pagar lo hecho)."
+    else
+      echo "La prueba real gasta ~0,6-1 \$ (un video de 30 s en calidad baja) y tarda 15-25 min."
+      echo "No toca tus videos: crea uno nuevo, «Prueba real <fecha>»."
+    fi
+    echo "Corre APARTE de esta consola: si se corta, sigue sola. Para volver a verla:  asvs probar"
+    sudo -u "$USUARIO" bash -c "set -a; . '$RAIZ/datos/entorno'; set +a; cd '$RAIZ/app' && \
+      PUERTO='${puerto:-8110}' setsid nohup '$RAIZ/venv/bin/python' -u herramientas/prueba_real.py \
+      --api 'http://127.0.0.1:${puerto:-8110}' $seguir $* > '$registro' 2>&1 < /dev/null & echo \$! > '$pidf'"
+    sleep 1
+    pid="$(cat "$pidf" 2>/dev/null || true)"
+  fi
+  echo
+  # enseña el registro hasta que la prueba acaba (Ctrl+C solo deja de mirar)
+  tail -n +1 -f --pid="${pid:-1}" "$registro" 2>/dev/null || true
 }
 
 case "${1:-estado}" in
@@ -216,6 +246,6 @@ case "${1:-estado}" in
   https)       https ;;
   repositorio) repositorio "${2:-}" ;;
   probar)      shift; probar "$@" ;;
-  -h|--help|ayuda) sed -n '5,16p' "$0" | sed 's/^#  \{0,1\}//' ;;
+  -h|--help|ayuda) sed -n '5,17p' "$0" | sed 's/^#  \{0,1\}//' ;;
   *) echo "No entiendo «$1». Prueba:  asvs ayuda"; exit 1 ;;
 esac

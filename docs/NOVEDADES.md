@@ -35,6 +35,10 @@ vídeos, estilos, claves y contraseña no se tocan.
 - **La prueba real**: en la consola del servidor, `asvs probar` hace un vídeo
   de prueba de 30 s con tus claves (~1 $), lo comprueba solo de punta a punta
   —también si cada nota se aplicó, mirándolo con Claude— y deja un informe.
+  **Si la consola se corta, la prueba sigue sola**: vuelve a escribir
+  `asvs probar` para verla, o para retomarla donde se quedó si se paró. Lo ya
+  hecho no se repite ni se paga dos veces, y el gasto de cada tanda se sigue
+  comparando con lo prometido. `asvs probar nueva` empieza otra.
 
 **Imágenes rehechas que «no cambiaban» (11 de octubre)**
 - **«Rehacer esta imagen» retoca la de ahora** (se la pone delante al

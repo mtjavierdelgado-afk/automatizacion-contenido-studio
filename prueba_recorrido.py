@@ -38,6 +38,8 @@ import tempfile
 import time
 import traceback
 
+import re
+
 import requests
 
 RAIZ = os.path.dirname(os.path.abspath(__file__))
@@ -351,6 +353,50 @@ def escenario(funcion):
     return funcion
 
 
+#: Se mete en cada pestaña: apunta el texto de cada botón que llega a verse y
+#: de cada uno que se pulsa. Con eso y `herramientas/inventario_botones.py`
+#: sale la cobertura: cuántos botones del código ha visto y pulsado el recorrido.
+ESPIA_DE_BOTONES = """
+(() => {
+  window.__vistos = new Set(); window.__pulsados = new Set();
+  const texto = b => (b.innerText || b.textContent || '').replace(/\\s+/g, ' ').trim();
+  const mirar = () => document.querySelectorAll('button, a.boton').forEach(b => {
+    if (b.offsetParent !== null || b.getClientRects().length) {
+      const t = texto(b); if (t) window.__vistos.add(t);
+    }
+  });
+  document.addEventListener('click', ev => {
+    const b = ev.target.closest && ev.target.closest('button, a.boton');
+    if (b) { const t = texto(b); if (t) window.__pulsados.add(t); }
+  }, true);
+  setInterval(mirar, 700);
+})();
+"""
+BOTONES_VISTOS = set()
+BOTONES_PULSADOS = set()
+
+
+def informe_de_cobertura(carpeta):
+    """Cuántos botones del código ha visto y pulsado el recorrido."""
+    sys.path.insert(0, os.path.join(RAIZ, "herramientas"))
+    import inventario_botones                                # noqa: PLC0415
+    botones = [b for b in inventario_botones.inventario() if b["textos"]]
+
+    def casa(textos, conjunto):
+        return any(any(v.startswith(t) or t in v for v in conjunto) for t in textos)
+    vistos = [b for b in botones if casa(b["textos"], BOTONES_VISTOS)]
+    pulsados = [b for b in botones if casa(b["textos"], BOTONES_PULSADOS)]
+    nunca = [b for b in botones if b not in vistos]
+    print(f"\nCOBERTURA: {len(vistos)} de {len(botones)} botones con texto se han VISTO, "
+          f"{len(pulsados)} se han PULSADO")
+    with open(os.path.join(carpeta, "cobertura.json"), "w", encoding="utf-8") as fh:
+        json.dump({"vistos": len(vistos), "pulsados": len(pulsados), "total": len(botones),
+                   "nunca_vistos": nunca,
+                   "sin_pulsar": [b for b in vistos if b not in pulsados]},
+                  fh, ensure_ascii=False, indent=1)
+    print(f"  la lista de los que faltan: {os.path.join(carpeta, 'cobertura.json')}")
+
+
 class Pagina:
     """Una pestana con sus errores de JavaScript apuntados y sus capturas."""
 
@@ -359,15 +405,26 @@ class Pagina:
         self.nombre = nombre
         self.errores = []
         self.contexto = navegador.new_context(viewport={"width": ancho, "height": alto})
+        # LO QUE SE VE Y LO QUE SE PULSA, para la cobertura (`--cobertura`)
+        self.contexto.add_init_script(ESPIA_DE_BOTONES)
         self.p = self.contexto.new_page()
         self.p.on("pageerror", lambda e: self.errores.append(f"pageerror: {e}"))
         self.p.on("console", lambda m: self.errores.append(f"console: {m.text}")
                   if m.type == "error" and "Failed to load resource" not in m.text else None)
         # los confirm() de la pantalla se aceptan: es lo que haria quien pulsa
-        self.p.on("dialog", lambda d: d.accept())
+        self.aceptar = True
+        self.dialogos = []
+        self.p.on("dialog", self._dialogo)
         self.p.goto(datos["url"] + "/")
         self.p.wait_for_function("() => typeof APP !== 'undefined' && APP.light && APP.light.datos", timeout=30000)
         self.p.wait_for_timeout(800)
+
+    def _dialogo(self, dialogo):
+        self.dialogos.append(dialogo.message)
+        if self.aceptar:
+            dialogo.accept()
+        else:
+            dialogo.dismiss()
 
     def js(self, codigo):
         resultado = self.p.evaluate(f"async () => {{ {codigo} }}")
@@ -438,6 +495,13 @@ class Pagina:
         self.errores.clear()
 
     def cerrar(self):
+        try:
+            vistos, pulsados = self.p.evaluate(
+                "() => [[...(window.__vistos || [])], [...(window.__pulsados || [])]]")
+            BOTONES_VISTOS.update(vistos)
+            BOTONES_PULSADOS.update(pulsados)
+        except Exception:                                    # noqa: BLE001
+            pass
         self.contexto.close()
 
 
@@ -527,7 +591,10 @@ def encargo_del_video(navegador, datos):
     # MUSICA
     pg.p.locator(".fila-ajuste").filter(has_text="Música").locator("button", has_text="Cambiar").click()
     pg.p.wait_for_timeout(500)
-    pg.pulsar(".editor-ajuste button", "Elegir un tema")
+    # el segundo de «Qué música»: «Elegir un tema…» o, si ya tiene uno, su nombre
+    pg.p.locator(".editor-ajuste .herramientas button").filter(
+        has_text=re.compile(r"^\s*(«|Elegir un tema)")).first.click()
+    pg.p.wait_for_timeout(600)
     ok(pg.visible(".buscador-temas button", "Gamer"), "hay muchos más ánimos (Gamer, Infantil…)")
     ok(pg.visible(".buscador-temas input[type=search]"), "y búsqueda libre")
     pg.pulsar(".buscador-temas button", "Gamer")
@@ -546,7 +613,7 @@ def encargo_del_video(navegador, datos):
     ok(pg.esperar(".papel-efecto"), "los efectos se enseñan por papel")
     ok(pg.p.locator(".papel-efecto").count() >= 4, "los cuatro papeles")
     pg.p.locator(".papel-efecto").first.locator("input[type=file]").set_input_files(mp3)
-    ok(pg.esperar(".papel-efecto", "Elegido", 30), "«Subir el mío» fija ese sonido para el papel"
+    ok(pg.esperar(".papel-efecto", "«mi_tema»", 30), "«Subir el mío» fija ese sonido para el papel"
        + f" -- aviso: {pg.toast()[:150]!r}")
     pg.pulsar(".papel-efecto button", "Buscar otro sonido")
     ok(pg.visible(".papel-efecto input[type=search]"), "y se puede buscar otro en FreeSound")
@@ -1061,6 +1128,164 @@ def tema_claro_y_asistente(navegador, datos):
     pg.cerrar()
 
 
+#: Lo que el recorrido de TODOS LOS BOTONES no pulsa: lo que lanza trabajos
+#: largos, borra o sale. Lo demás se pulsa todo (los confirm() se CANCELAN en
+#: este escenario, así que lo que pregunta antes no llega a hacer nada).
+NO_PULSAR = re.compile(r"(Borrar|Eliminar|papelera|Regenerar|Generar|Rehacer|Desde cero|"
+                       r"Montar|Aplicar|Arreglar|Salir|Descargar|Traer|Restablecer|Revertir|"
+                       r"Parar|Reintentar|Duplicar|Crear|Guardar|Subir|Probar|Entrar|"
+                       r"Pedir otro enlace|Ocultar|Esconder|Apartar|Mover|Quitar|Ver ocultos|"
+                       r"Hacerla sin marcas|Usar|Partir|Añadir|Nuevo|Nueva|\+)", re.I)
+
+#: Firma de «algo ha cambiado» tras un clic: el DOM, el aviso, lo abierto.
+FIRMA_JS = """() => {
+  const t = document.querySelector('#toast');
+  // un hash del DOM entero y no su largo: cambiar la clase «activo» de un botón
+  // a otro deja el largo igual
+  const html = document.body.innerHTML;
+  let hash = 5381;
+  for (let i = 0; i < html.length; i += 1) hash = ((hash * 33) ^ html.charCodeAt(i)) | 0;
+  const valores = [...document.querySelectorAll('input, textarea, select')]
+    .map(x => x.type === 'checkbox' || x.type === 'radio' ? (x.checked ? 1 : 0) : x.value).join('¦');
+  return [hash, valores, window.__toasts || 0, document.querySelectorAll('*').length,
+          t ? t.innerText + t.className : '', document.querySelector('#panel').scrollTop,
+          (document.activeElement || {}).id || '', document.body.className,
+          [...document.querySelectorAll('details')].map(d => d.open ? 1 : 0).join('')].join('|');
+}"""
+
+#: Dónde se está: si un clic saca de la pantalla, se vuelve a ella.
+DONDE_JS = """() => JSON.stringify([APP.light.vista, (APP.light.video || {}).pid,
+  (APP.light.video || {}).vista, APP.light.abierto || '',
+  document.querySelector('#config') && !document.querySelector('#config').classList.contains('plegado')])"""
+
+
+def _botones_visibles(pg):
+    # con un cajón abierto (Configuración) solo cuenta lo de dentro: lo de
+    # detrás está tapado A PROPÓSITO y se cierra con la ×
+    return pg.p.evaluate("""() => {
+      const cajon = document.querySelector('#config:not(.plegado)');
+      return [...document.querySelectorAll('button, a.boton')]
+      .filter(b => (b.offsetParent !== null || b.getClientRects().length) && !b.disabled
+              && !b.closest('#asistente') && b.id !== 'burbuja-asistente'
+              && (!cajon || cajon.contains(b))
+              && b.getAttribute('aria-current') !== 'page')
+      .map(b => (b.innerText || b.textContent || b.title || '').replace(/\\s+/g, ' ').trim()
+                || ('[' + (b.title || b.getAttribute('aria-label') || b.className) + ']')); }""")
+
+
+def _buscar_boton(pg, texto, n):
+    """El n-ésimo botón visible con ese texto, o None."""
+    candidatos = pg.p.locator("button:visible, a.boton:visible")
+    visto = 0
+    for i in range(candidatos.count()):
+        try:
+            b = candidatos.nth(i)
+            t = (b.inner_text(timeout=500) or b.get_attribute("title") or "").split()
+            t = " ".join(t) or "[" + (b.get_attribute("title") or b.get_attribute("aria-label")
+                                      or b.get_attribute("class") or "") + "]"
+        except Exception:                                    # noqa: BLE001
+            continue
+        if t == texto:
+            if visto == n:
+                return b
+            visto += 1
+    return None
+
+
+@escenario
+def todos_los_botones(navegador, datos):
+    """Cada pantalla, CADA botón: pulsarlo tiene que cambiar algo que se vea
+    (la pantalla, un aviso, un diálogo) y no dar ningún error. Un botón que no
+    hace nada al pulsarlo es el fallo más tonto de encontrar a mano y el más
+    fácil de dejar pasar: así salieron «Ver cómo quedó» y la miniatura."""
+    pid = datos["video"]
+    pantallas = [
+        ("portada", f"elegirCliente(''); recordarVideoLight(''); await cargarGaleriaLight(true); irALight('galeria');"),
+        ("proyecto", f"elegirCliente('{datos['cliente']}'); recordarVideoLight(''); irALight('galeria');"),
+        ("ficha del estilo", f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{datos['preset']}' }});"),
+        ("estilo nuevo", "irALight('crear');"),
+        ("encargo", f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; pintarLight();"),
+        ("guion", f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'guion'; pintarLight();"),
+        ("imágenes", f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();"),
+        ("vídeo", f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'video'; pintarLight();"),
+        ("configuración", "conmutarConfig(true);"),
+    ]
+    muertos, rotos, pulsados = [], [], 0
+    for nombre, ir in pantallas:
+        pg = Pagina(navegador, datos, nombre=nombre)
+        pg.aceptar = False           # lo que pregunta antes de hacer algo, se cancela
+        dialogos = pg.dialogos
+        abiertos = []
+        pg.p.on("filechooser", lambda f: abiertos.append(1))
+        pg.p.on("popup", lambda p_: abiertos.append(1))
+        # cada aviso cuenta como «ha hecho algo», aunque diga lo mismo que el anterior
+        pg.js("window.__toasts = 0; const _toast = toast; "
+              "toast = function (...a) { window.__toasts += 1; return _toast.apply(this, a); };")
+        pg.js(ir)
+        pg.p.wait_for_timeout(1500)
+        donde = pg.p.evaluate(DONDE_JS)
+        textos = _botones_visibles(pg)
+        vistos = {}
+        for texto in textos:
+            n = vistos.get(texto, 0)
+            vistos[texto] = n + 1
+            if NO_PULSAR.search(texto):
+                continue
+            if pg.p.evaluate(DONDE_JS) != donde:
+                pg.js(ir)
+                pg.p.wait_for_timeout(1200)
+            objetivo = _buscar_boton(pg, texto, n)
+            if objetivo is None:
+                continue
+            try:
+                ya_puesto = objetivo.evaluate(
+                    "b => /\\b(activo|puesta|activa)\\b/.test(b.className) || b.getAttribute('aria-pressed') === 'true'")
+            except Exception:                                # noqa: BLE001
+                ya_puesto = False
+            antes = pg.p.evaluate(FIRMA_JS)
+            n_dialogos, n_abiertos, n_errores = len(dialogos), len(abiertos), len(pg.errores)
+            try:
+                try:
+                    objetivo.click(timeout=3000)
+                except Exception:                            # noqa: BLE001
+                    # se repintó mientras (un aviso encima, la rejilla rehecha):
+                    # se vuelve a buscar y se pulsa otra vez, como haría alguien
+                    pg.p.wait_for_timeout(3500)
+                    objetivo = _buscar_boton(pg, texto, n)
+                    if objetivo is None:
+                        continue
+                    objetivo.click(timeout=3000)
+            except Exception as fallo:                       # noqa: BLE001
+                motivo = re.search(r"(<[^>]{0,120}> (?:from <[^>]{0,80}> subtree )?intercepts pointer events"
+                                   r"|element is not visible|element is outside of the viewport"
+                                   r"|element is not stable)", str(fallo))
+                rotos.append(f"{nombre} · «{texto}»: no se deja pulsar "
+                             f"({motivo.group(1) if motivo else str(fallo)[:80]})")
+                continue
+            pulsados += 1
+            pg.p.wait_for_timeout(900)
+            despues = pg.p.evaluate(FIRMA_JS)
+            if len(pg.errores) > n_errores:
+                rotos.append(f"{nombre} · «{texto}»: {pg.errores[n_errores:][:2]}")
+            # pulsar la opción que YA está elegida no tiene por qué hacer nada
+            if antes == despues and len(dialogos) == n_dialogos and len(abiertos) == n_abiertos \
+                    and not ya_puesto:
+                muertos.append(f"{nombre} · «{texto}»")
+            # se cierra lo que haya abierto encima (lupa, diálogos propios)
+            pg.p.keyboard.press("Escape")
+            pg.p.evaluate("() => document.querySelectorAll('#lupa, .capa-dialogo').forEach(x => x.remove())")
+        pg.errores.clear()
+        pg.cerrar()
+    print(f"  ({pulsados} botones pulsados en {len(pantallas)} pantallas)")
+    ok(not rotos, f"ningún botón da error al pulsarlo -- {rotos[:8]}")
+    ok(not muertos, f"ningún botón se queda sin hacer nada al pulsarlo ({len(muertos)}) -- {muertos[:30]}")
+    DATOS_BOTONES["muertos"] = muertos
+    DATOS_BOTONES["rotos"] = rotos
+
+
+DATOS_BOTONES = {}
+
+
 @escenario
 def fallos_simulados(navegador, datos):
     """Sin crédito en OpenAI: la nota lo dice, con qué hacer, y nada más se rompe."""
@@ -1138,6 +1363,7 @@ def main():
                     traceback.print_exc()
                     ok(False, f"{funcion.__name__} se corto: {type(fallo).__name__}: {fallo}")
             navegador.close()
+        informe_de_cobertura(capturas)
         if args.quedarse:
             print(f"\nservidor en {datos['url']} (Ctrl+C para parar)")
             datos["proceso"].wait()

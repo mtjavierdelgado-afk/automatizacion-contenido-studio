@@ -11,6 +11,10 @@ vídeos, estilos, claves y contraseña no se tocan.
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
 **Imágenes con nota**
+- **Una tarjeta por imagen**, en el orden del vídeo, con todas sus notas
+  dentro: antes cada nota tenía su tarjeta y dos notas de la misma imagen se
+  veían como «imágenes repetidas». Las ya rehechas (y miradas) se pliegan
+  abajo en «Imágenes ya rehechas».
 - Cada nota sale en una tarjeta con **la miniatura de su imagen**, el bloque y
   el segundo, **la frase del guion** que se oye ahí y su estado en palabras.
   «Apuntar» ahora es **Guardar nota**.

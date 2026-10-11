@@ -9782,6 +9782,7 @@ function aplicarCola(datos) {
 
 function olvidarCola() {
   if (COLA_IMG.sondeo) clearInterval(COLA_IMG.sondeo);
+  PREVIA.recienHechas = new Set();       // los ids de nota se repiten entre vídeos
   Object.assign(COLA_IMG, { pid: '', cola: [], actual: null, sondeo: null });
 }
 
@@ -9856,7 +9857,12 @@ function vigilarCola(deQuien) {
       try { datos = await pedir(`${API.colaImagenes(pid)}/cola`); } catch (e) { return; }
       if (!mio()) { clearInterval(sondeo); return; }
       const antes = JSON.stringify([COLA_IMG.actual && COLA_IMG.actual.notas, COLA_IMG.cola]);
+      // las que se estaban dibujando y ya no: recién hechas (o falladas)
+      const eran = (COLA_IMG.actual || {}).notas || [];
       aplicarCola(datos);
+      const siguen = new Set((COLA_IMG.actual || {}).notas || []);
+      PREVIA.recienHechas = PREVIA.recienHechas || new Set();
+      eran.filter(n => !siguen.has(n)).forEach(n => PREVIA.recienHechas.add(n));
       const ahora = JSON.stringify([COLA_IMG.actual && COLA_IMG.actual.notas, COLA_IMG.cola]);
       const vacia = !COLA_IMG.actual && !COLA_IMG.cola.length;
       if (antes !== ahora || vacia) {
@@ -10000,38 +10006,109 @@ function irAlMomentoDeLaNota(nota) {
 }
 
 
-/* LA TARJETA DE UNA NOTA DE IMAGEN: qué imagen, qué se dice ahí y qué pasa.
+/* LAS NOTAS DE IMÁGENES, UNA TARJETA POR IMAGEN.
  *
- * Decía «S002 S002» y la nota, y no había forma de saber qué imagen era ni de
- * qué parte del guion (10-10-2026). Ahora lleva la miniatura del plano (la de
- * AHORA: al rehacerse se ve la nueva), el bloque y el segundo, la frase que se
- * oye en ese plano, la nota, y su estado en palabras con lo que pasó. */
-function tarjetaNotaImagen(nota) {
+ * Iba una tarjeta por NOTA, y dos notas de la misma imagen salían como dos
+ * tarjetas con la misma miniatura y el mismo «Imagen S005»: se leía como
+ * «imágenes repetidas» (10-10-2026). Ahora cada imagen sale UNA vez, en el
+ * orden del vídeo, con sus notas dentro; arriba las que tienen algo pendiente,
+ * y las ya rehechas plegadas al final. */
+function listaPorImagen() {
+  const lista = h('div', { clase: 'repaso-notas' });
+  const escenas = (PREVIA.ficha || {}).escenas || [];
+  const orden = id => { const i = escenas.findIndex(e => e.id === id); return i < 0 ? 9999 : i; };
+  const porPlano = new Map();
+  notasDeAhora().forEach(n => {
+    const k = n.plano || '';
+    if (!porPlano.has(k)) porPlano.set(k, []);
+    porPlano.get(k).push(n);
+  });
+  const planos = [...porPlano.keys()].sort((a, b) => orden(a) - orden(b));
+  // «pendiente» aquí es «hay algo que mirar»: una recién hecha y sin revisar
+  // se queda arriba hasta que la miras, que es cuando ya no hace falta verla
+  // y las que se acaban de rehacer AHORA (en esta visita) se quedan arriba,
+  // para ver que salieron: se pliegan las de antes
+  const recien = PREVIA.recienHechas || new Set();
+  const pendiente = p => porPlano.get(p).some(n => estadoDeImagen(p, n) !== 'hecha'
+    || sinRevisar(n) || recien.has(n.id));
+  const conAlgo = planos.filter(pendiente);
+  const hechas = planos.filter(p => !pendiente(p));
+  conAlgo.forEach(p => lista.appendChild(tarjetaNotaImagen(p, porPlano.get(p))));
+  if (hechas.length) {
+    const plegable = h('details', { clase: 'imagenes-hechas' },
+      h('summary', {}, `Imágenes ya rehechas (${hechas.length})`));
+    if (PREVIA.verHechas) plegable.open = true;
+    plegable.addEventListener('toggle', () => { PREVIA.verHechas = plegable.open; });
+    hechas.forEach(p => plegable.appendChild(tarjetaNotaImagen(p, porPlano.get(p))));
+    lista.appendChild(plegable);
+  }
+  return lista;
+}
+
+/* LA TARJETA DE UNA IMAGEN: cuál es, qué se oye en ella, sus notas y qué pasa.
+ * La miniatura es la de AHORA (al rehacerse, la nueva), con el bloque y el
+ * segundo y la frase del guion; debajo, cada nota con su estado en palabras. */
+function tarjetaNotaImagen(plano, notas) {
   const v = videoAbierto();
   const escenas = (PREVIA.ficha || {}).escenas || [];
-  const e = escenas.find(x => x.id === nota.plano) || null;
-  const est = estadoDeImagen(nota.plano, nota);
-  const porMirar = sinRevisar(nota);
-  const ir = () => { darPorRevisada(nota); irAlMomentoDeLaNota(nota); };
-  const tarjeta = h('div', { clase: `nota-imagen estado-${est || 'pendiente'}`
-    + (porMirar ? ' sin-revisar' : '') });
+  const e = escenas.find(x => x.id === plano) || null;
+  const estados = notas.map(n => estadoDeImagen(plano, n));
+  const general = estados.includes('corriendo') ? 'corriendo'
+    : estados.includes('en cola') ? 'en cola'
+      : estados.includes('fallo') ? 'fallo'
+        : estados.includes('') ? 'pendiente' : 'hecha';
+  const porMirar = notas.some(sinRevisar);
+  const ir = () => { notas.forEach(darPorRevisada); irAlMomentoDeLaNota(notas[0]); };
+  const tarjeta = h('div', { clase: `nota-imagen estado-${general}` + (porMirar ? ' sin-revisar' : '') });
+  const ultima = notas.map(n => n.regenerado || '').join('|');
   tarjeta.appendChild(h('button', { clase: 'nota-mini', title: 'Ver esta imagen', onclick: ir },
     e && e.imagen
-      ? h('img', { src: `${API.archivo(v.pid, e.imagen)}?mini=512&v=${encodeURIComponent(nota.regenerado || '')}`,
-        alt: nota.plano, loading: 'lazy' })
+      ? h('img', { src: `${API.archivo(v.pid, e.imagen)}?mini=512&v=${encodeURIComponent(ultima)}`,
+        alt: plano, loading: 'lazy' })
       : h('span', { clase: 'meta' }, 'sin imagen')));
   const cuerpo = h('div', { clase: 'nota-cuerpo' });
   cuerpo.appendChild(h('div', { clase: 'nota-donde' },
-    h('b', {}, `Imagen ${nota.plano || '?'}`),
+    h('b', {}, `Imagen ${plano || '?'}`),
     e ? h('span', { clase: 'meta' }, `${e.bloque ? `bloque ${e.bloque} · ` : ''}${mmss(e.t_in)}–${mmss(e.t_out)}`) : null,
-    nota.descolgada ? h('span', { clase: 'pastilla aviso',
-      title: 'lo que se decía en este plano cuando escribiste la nota ya no está en el vídeo' },
-    'el texto cambió') : null));
+    notas.length > 1 ? h('span', { clase: 'meta' }, `· ${notas.length} notas`) : null));
   if (e && e.narracion) {
     cuerpo.appendChild(h('div', { clase: 'nota-guion', title: 'lo que se oye en esta imagen' },
       `«${recortar(e.narracion, 160)}»`));
   }
-  cuerpo.appendChild(h('div', { clase: 'texto' }, nota.texto));
+  notas.forEach(nota => cuerpo.appendChild(PREVIA.editando === nota.id
+    ? filaNotaEscena(nota) : filaDeNotaImagen(nota)));
+  // LO DE LA IMAGEN ENTERA: el reloj si se dibuja, y el botón que la rehace
+  // con TODAS sus notas pendientes (se juntan y se paga una)
+  cuerpo.appendChild(enVivo(() => {
+    const ahora = notas.map(n => estadoDeImagen(plano, n));
+    const fila = h('div', { clase: 'nota-estado fila' });
+    if (ahora.includes('corriendo')) {
+      fila.appendChild(h('span', { clase: 'pastilla estado-corriendo' }, `Dibujando… ${relojDeImagen()}`));
+    }
+    fila.appendChild(h('span', { clase: 'crece' }));
+    const pedir = notas.filter((n, i) => ahora[i] === '' || ahora[i] === 'fallo');
+    if (pedir.length) {
+      fila.appendChild(h('button', { clase: 'mini avisa',
+        title: `Vuelve a dibujar SOLO esta imagen con ${pedir.length > 1 ? 'sus notas juntas' : 'lo que has escrito'}`
+          + ` (1 imagen, ≈ ${usdCorto(COLA_IMG.usdPorImagen)})`,
+        onclick: () => pedirCola({ notas: pedir.map(n => n.id) }) },
+      (ahora.includes('fallo') ? 'Reintentar' : 'Rehacer esta imagen')
+        + (pedir.length > 1 ? ` (${pedir.length} notas juntas)` : '')));
+    }
+    if (ahora.every(x => x === 'hecha')) {
+      fila.appendChild(h('button', { clase: 'mini', onclick: ir }, 'Ver cómo quedó'));
+    }
+    return fila;
+  }));
+  tarjeta.appendChild(cuerpo);
+  return tarjeta;
+}
+
+/* UNA NOTA DENTRO DE SU IMAGEN: el texto, su estado en palabras y sus mandos. */
+function filaDeNotaImagen(nota) {
+  const v = videoAbierto();
+  const fila = h('div', { clase: 'nota-fila' });
+  fila.appendChild(h('div', { clase: 'texto' }, nota.texto));
   if ((nota.imagenes || []).length) {
     const tira = h('div', { clase: 'tira-aportadas' });
     nota.imagenes.forEach(nombre => tira.appendChild(h('img', {
@@ -10039,53 +10116,47 @@ function tarjetaNotaImagen(nota) {
       title: 'referencia adjunta a la nota',
       onclick: () => lupa(API.imagenRepaso(v.pid, nombre)),
     })));
-    cuerpo.appendChild(tira);
+    fila.appendChild(tira);
   }
-  // EL ESTADO, en palabras y vivo (el reloj corre mientras se dibuja)
-  cuerpo.appendChild(enVivo(() => {
+  fila.appendChild(enVivo(() => {
     const ahora = estadoDeImagen(nota.plano, nota);
-    const fila = h('div', { clase: 'nota-estado fila' });
+    const caja = h('div', {});
+    const linea = h('div', { clase: 'fila nota-mandos' });
     const etiqueta = {
-      corriendo: `Dibujando… ${relojDeImagen()}`,
+      corriendo: 'Dibujando…',
       'en cola': `En cola (${COLA_IMG.cola.indexOf(nota.id) + 1}ª)`,
       hecha: 'Hecha ✓',
       fallo: esRechazoDeSeguridad(nota.error) ? 'Rechazada por OpenAI' : 'Falló',
     }[ahora] || 'Pendiente';
-    fila.appendChild(h('span', { clase: `pastilla estado-${ahora || 'pendiente'}` }, etiqueta));
-    if (ahora === 'hecha' && porMirar) {
-      fila.appendChild(h('span', { clase: 'sin-ver', title: 'ya está hecha y no la has mirado' }, 'sin revisar'));
+    linea.appendChild(h('span', { clase: `pastilla estado-${ahora || 'pendiente'}` }, etiqueta));
+    if (ahora === 'hecha' && sinRevisar(nota)) {
+      linea.appendChild(h('span', { clase: 'sin-ver', title: 'ya está hecha y no la has mirado' }, 'sin revisar'));
     }
-    fila.appendChild(h('span', { clase: 'crece' }));
-    if (ahora === '' || ahora === 'fallo') {
-      fila.appendChild(h('button', { clase: 'mini avisa',
-        title: `Vuelve a dibujar SOLO esta imagen con lo que has escrito (1 imagen, ≈ ${usdCorto(COLA_IMG.usdPorImagen)})`,
-        onclick: () => encolarImagen(nota.plano, nota.texto, nota.id) },
-      ahora === 'fallo' ? 'Reintentar' : 'Rehacer esta imagen'));
+    if (nota.descolgada) {
+      linea.appendChild(h('span', { clase: 'pastilla aviso',
+        title: 'lo que se decía en esta imagen cuando escribiste la nota ya no está en el vídeo' },
+      'el texto cambió'));
     }
+    linea.appendChild(h('span', { clase: 'crece' }));
     if (ahora === 'fallo' && esRechazoDeSeguridad(nota.error)) {
-      fila.appendChild(h('button', { clase: 'mini primario',
+      linea.appendChild(h('button', { clase: 'mini primario',
         title: 'Reescribe la nota describiendo lo que se ve, sin marcas ni personajes',
         onclick: () => notaSinMarcas(nota) }, 'Hacerla sin marcas'));
     }
     if (ahora === 'en cola') {
-      fila.appendChild(h('button', { clase: 'mini fantasma', onclick: () => sacarDeLaCola(nota.id) },
+      linea.appendChild(h('button', { clase: 'mini fantasma', onclick: () => sacarDeLaCola(nota.id) },
         'Sacar de la cola'));
     }
-    if (ahora === 'hecha') {
-      fila.appendChild(h('button', { clase: 'mini', onclick: ir }, 'Ver cómo quedó'));
-    }
-    const caja = h('div', {}, fila);
+    linea.appendChild(h('button', { clase: 'mini fantasma', title: 'Cambiar esta nota',
+      onclick: () => { PREVIA.editando = nota.id; repintarVideo(); } }, '✎ Editar'));
+    linea.appendChild(h('button', { clase: 'mini peligro', title: 'Borrar esta nota',
+      onclick: () => borrarNota(nota.id) }, '× Borrar'));
+    caja.appendChild(linea);
     if (ahora === 'fallo' && nota.error) caja.appendChild(h('div', { clase: 'nota-error' }, nota.error));
     if (nota.aviso && ahora === 'hecha') caja.appendChild(h('div', { clase: 'meta' }, nota.aviso));
     return caja;
   }));
-  cuerpo.appendChild(h('div', { clase: 'fila nota-mandos' },
-    h('button', { clase: 'mini fantasma', title: 'Cambiar esta nota',
-      onclick: () => { PREVIA.editando = nota.id; repintarVideo(); } }, '✎ Editar'),
-    h('button', { clase: 'mini peligro', title: 'Borrar esta nota',
-      onclick: () => borrarNota(nota.id) }, '× Borrar')));
-  tarjeta.appendChild(cuerpo);
-  return tarjeta;
+  return fila;
 }
 
 function listaDeNotas() {
@@ -10093,6 +10164,8 @@ function listaDeNotas() {
   const v = videoAbierto();
   const lista = h('div', { clase: 'repaso-notas' });
   const enPrevia = v.vista === 'previa';
+  // EN IMÁGENES, UNA TARJETA POR IMAGEN con todas sus notas dentro
+  if (enPrevia) return listaPorImagen();
   notasDeAhora().forEach(nota => {
     /* EDITANDO Y EN LAS DIAPOSITIVAS, manda el editor EN LINEA que ya existe
        (`filaNotaEscena`). El boton de editar de esta lista abre el panel del
@@ -10100,10 +10173,6 @@ function listaDeNotas() {
        habria dejado la nota «en edicion» sin ninguna caja donde escribirla. */
     if (enPrevia && PREVIA.editando === nota.id) {
       lista.appendChild(filaNotaEscena(nota));
-      return;
-    }
-    if (enPrevia) {
-      lista.appendChild(tarjetaNotaImagen(nota));
       return;
     }
     const aplicada = nota.estado === 'aplicado';

@@ -537,7 +537,10 @@ def notas_de_imagenes(navegador, datos):
        "y al recargar la página la tarjeta sigue diciendo que se dibuja (no «Pendiente»)")
     ok(pg.esperar(".nota-imagen .pastilla", "Hecha", 120),
        "con marcas: OpenAI la rechaza, se reescribe sola sin marcas y SALE"
-       + f" -- vi: {pg.p.locator('.nota-imagen').first.inner_text()[:300]!r}")
+       + f" -- vi: {pg.p.locator('.nota-imagen').first.inner_text()[:300]!r}"
+       + f" / tarjetas {pg.p.locator('.nota-imagen').count()}, plegadas "
+         f"{pg.p.locator('details.imagenes-hechas .nota-imagen').count()}"
+       + f" / vistas: {pg.p.evaluate('() => [...notasVistas()].join(\",\")')!r}")
     ok(pg.visible(".nota-imagen", "sin ellos") or pg.visible(".nota-imagen", "sin marcas"),
        "y la nota cuenta que se dibujó sin las marcas")
     pg.captura("08_nota_hecha_sin_marcas")
@@ -551,6 +554,8 @@ def notas_de_imagenes(navegador, datos):
     ok(pg.esperar(".nota-imagen .pastilla", "Rechazada", 120),
        "si OpenAI la rechaza también sin marcas, la nota lo dice")
     ok(pg.visible(".nota-imagen .nota-error", "filtro de seguridad"), "con el motivo en claro")
+    ok(pg.p.locator(".nota-imagen").filter(has_text="Imagen S001").count() == 1,
+       "y las notas de la MISMA imagen van en UNA tarjeta (no se repite la imagen)")
     ok(pg.visible(".nota-imagen button", "Hacerla sin marcas"), "y ofrece hacerla sin marcas")
     pg.captura("09_nota_rechazada")
     pg.pulsar(".nota-imagen button", "Hacerla sin marcas")
@@ -558,7 +563,7 @@ def notas_de_imagenes(navegador, datos):
     texto = pg.p.locator(".capa-dialogo textarea").input_value()
     ok("PROHIBIDO" not in texto, f"sin lo que se rechazaba ({texto[:60]}…)")
     pg.p.locator(".capa-dialogo button[type=submit]").click()
-    tarjeta = pg.p.locator(".nota-imagen").filter(has_text="cartel")
+    tarjeta = pg.p.locator(".nota-fila").filter(has_text="cartel")
     fin = time.time() + 120
     while time.time() < fin and "hecha" not in tarjeta.first.inner_text().lower():
         pg.p.wait_for_timeout(500)
@@ -571,11 +576,12 @@ def notas_de_imagenes(navegador, datos):
         area.dispatch_event("input")
         pg.pulsar(".previa-feedback button", "Guardar nota")
     ok(pg.visible("button", "Rehacer 1 imagen"), "dos notas del mismo plano se pagan como UNA imagen")
-    pg.captura("10_dos_notas_un_plano")
+    pg.p.locator(".repaso-notas").first.scroll_into_view_if_needed()
+    pg.captura("10_dos_notas_un_plano", entera=False)
     pg.pulsar("button", "Rehacer 1 imagen")
     fin = time.time() + 120
-    juntas = pg.p.locator(".nota-imagen").filter(has_text="más luz")
-    otra = pg.p.locator(".nota-imagen").filter(has_text="sofá")
+    juntas = pg.p.locator(".nota-fila").filter(has_text="más luz")
+    otra = pg.p.locator(".nota-fila").filter(has_text="sofá")
     while time.time() < fin and not (
             "hecha" in juntas.first.inner_text().lower() and "hecha" in otra.first.inner_text().lower()):
         pg.p.wait_for_timeout(700)
@@ -812,7 +818,7 @@ def fallos_simulados(navegador, datos):
         pg.pulsar(".previa-feedback button", "Guardar nota")
         pg.p.locator(".nota-imagen").filter(has_text="cielo sea naranja").locator(
             "button", has_text="Rehacer esta imagen").click()
-        tarjeta = pg.p.locator(".nota-imagen").filter(has_text="cielo sea naranja")
+        tarjeta = pg.p.locator(".nota-fila").filter(has_text="cielo sea naranja")
         fin = time.time() + 60
         while time.time() < fin and "falló" not in tarjeta.first.inner_text().lower():
             pg.p.wait_for_timeout(500)

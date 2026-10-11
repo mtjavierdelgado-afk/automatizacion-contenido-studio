@@ -2413,7 +2413,7 @@ function seccionCalidadImagen() {
   const datos = vista.ajustes;
   const caja = h('section', { clase: 'bloque-config' },
     h('div', { clase: 'fila' },
-      h('h3', {}, 'Calidad de las imagenes'),
+      h('h3', {}, 'Calidad de las imágenes'),
       h('span', { clase: 'crece' }),
       datos ? pastillaEstado('ok', datos.ajustes.calidad_imagen) : null));
   if (!datos) {
@@ -2425,7 +2425,7 @@ function seccionCalidadImagen() {
   const porcentaje = base.usd_total
     ? Math.round(100 * base.usd_referencias / base.usd_total) : 0;
   caja.appendChild(h('div', { clase: 'pista' },
-    'Lo que se ve aqui NO es el precio de OpenAI: es lo que cuesta el plano '
+    'Lo que se ve aquí NO es el precio de OpenAI: es lo que cuesta el plano '
     + 'entero. A cada imagen se le adjuntan sus referencias de estilo, reparto y '
     + `continuidad, y esas se pagan aparte — en la calidad baja son el ${porcentaje} % `
     + 'del gasto. Por eso subir de calidad cuesta bastante menos de lo que '
@@ -2437,8 +2437,8 @@ function seccionCalidadImagen() {
     caja.appendChild(h('button', {
       clase: 'fila-calidad' + (puesta ? ' elegida' : ''),
       disabled: puesta,
-      title: puesta ? 'es la que esta puesta'
-        : `los videos nuevos empezaran en ${fila.calidad}`,
+      title: puesta ? 'es la que está puesta'
+        : `los vídeos nuevos empezarán en ${fila.calidad}`,
       onclick: () => guardarCalidadImagen(fila.calidad),
     },
       h('span', { clase: 'nombre' }, fila.calidad),
@@ -2449,11 +2449,11 @@ function seccionCalidadImagen() {
         + 'las referencias'),
       h('span', { clase: 'meta veces' }, fila.veces_total > 1
         ? `×${fila.veces_total} de coste real, no ×${fila.veces_imagen}`
-        : 'la mas barata')));
+        : 'la más barata')));
   });
 
   caja.appendChild(h('div', { clase: 'meta' },
-    'Es el punto de partida de los videos NUEVOS. Los que ya existen se quedan '
+    'Es el punto de partida de los vídeos NUEVOS. Los que ya existen se quedan '
     + 'con la suya: se cambia por vídeo desde su propia ficha.'));
   return caja;
 }
@@ -8449,7 +8449,7 @@ function ayudaAudio(hayAudio, queda) {
     ? 'Vuelve a grabar la toma con la voz del estilo. Se sintetiza el texto de '
       + 'ahora; lo que no haya cambiado sale de la cache y no se vuelve a pagar.'
     : 'Sintetiza la toma completa con la voz del estilo y la alinea con el '
-      + 'texto, que es lo que despues coloca los subtitulos.';
+      + 'texto, que es lo que después coloca los subtítulos.';
 }
 
 
@@ -8459,13 +8459,13 @@ function ayudaDiapositivas(hayVideo, obsoleto, queda) {
       + 'verlas, «Diapositivas» en la barra de abajo: no cuesta nada.';
   }
   if (hayVideo && obsoleto) {
-    return 'Vuelve a partir los subtitulos con los tiempos del audio de ahora y '
+    return 'Vuelve a partir los subtítulos con los tiempos del audio de ahora y '
       + 'redibuja las capas de los planos afectados. Una imagen solo se vuelve '
       + 'a pagar si el cambio altera su prompt; cambiar una palabra suelta no '
-      + 'lo hace. No monta el MP4: eso es «Montar el video», despues de mirarlo.';
+      + 'lo hace. No monta el MP4: eso es «Montar el vídeo», después de mirarlo.';
   }
-  return 'Dibuja los planos, les monta los subtitulos y las cartelas y prepara '
-    + 'la musica. Para ahi, en las diapositivas, para que lo mires antes de '
+  return 'Dibuja los planos, les monta los subtítulos y las cartelas y prepara '
+    + 'la música. Para ahí, en las diapositivas, para que lo mires antes de '
     + 'gastar el render: no monta ningun MP4.';
 }
 
@@ -8528,8 +8528,8 @@ function pieLight() {
         clase: 'mini peligro', onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
       }, 'Parar')) : null,
     conAyuda(!hayAudio
-      ? 'Primero hace falta el audio: los subtitulos se colocan con sus '
-        + 'tiempos, asi que sin voz no hay donde ponerlos.'
+      ? 'Primero hace falta el audio: los subtítulos se colocan con sus '
+        + 'tiempos, así que sin voz no hay dónde ponerlos.'
       : unirAyuda(ayudaDiapositivas(hayVideo, obsoleto, quedaVideo),
                   textoDelPlan('video')),
       h('button', {
@@ -9394,7 +9394,7 @@ function botonRenderizarLight() {
       ? 'Tienes notas del repaso sin aplicar. Esto solo montaria el MP4 y '
         + 'saldria sin ellas. Usa «Aplicar», que aplica y monta de una vez.'
       : unirAyuda('Encadena los planos que acabas de mirar, con sus transiciones, '
-        + 'la voz y la musica, y saca el MP4. No genera ninguna imagen: no cuesta '
+        + 'la voz y la música, y saca el MP4. No genera ninguna imagen: no cuesta '
         + 'dinero, cuesta tiempo de maquina.', textoDelPlan('render')),
     h('button', {
       clase: notasSinAplicar ? 'mini' : 'avisa',
@@ -9541,10 +9541,10 @@ function vistaVideoLight() {
         + 'y saldria igual, sin ellas. Usa «Aplicar los cambios» de abajo: '
         + 'aplica y monta, en un solo trabajo.'
       : (quedaTandaLight('render') === false
-        ? 'El MP4 esta al dia con los planos y el audio de ahora. Volver a '
+        ? 'El MP4 está al día con los planos y el audio de ahora. Volver a '
           + 'montarlo daria el mismo fichero.'
         : unirAyuda('Encadena los planos que ya has visto, con sus transiciones, '
-          + 'la voz y la musica, y saca el MP4. No genera ninguna imagen: no '
+          + 'la voz y la música, y saca el MP4. No genera ninguna imagen: no '
           + 'cuesta dinero, cuesta tiempo de maquina.', textoDelPlan('render'))),
       h('button', {
         clase: notasSinAplicar ? 'mini' : 'primario',
@@ -10512,9 +10512,9 @@ function botonAplicarRepaso() {
   return conAyuda(
     (videoAbierto().vista === 'previa'
       ? 'Pone en cola todas las notas de esta pantalla y va rehaciendo esas '
-        + 'imagenes, una a una. Puedes seguir mirando mientras: cada tarjeta '
+        + 'imágenes, una a una. Puedes seguir mirando mientras: cada tarjeta '
         + 'dice por donde va la suya.'
-      : 'Se aplica lo mas barato que resuelve cada nota: bajar la musica vuelve '
+      : 'Se aplica lo más barato que resuelve cada nota: bajar la música vuelve '
         + 'a mezclar el audio, cambiar una cartela redibuja una capa, y solo se '
         + 'repaga una imagen si de verdad hay que volver a dibujar ese plano. '
         + 'Al terminar, monta el MP4 con los cambios dentro.'),
@@ -11517,10 +11517,9 @@ function laminasDelEstilo(ficha) {
   caja.appendChild(pie);
   caja.appendChild(h('div', { clase: 'meta' },
     `${d.laminas.length} de ${d.max} láminas. Caben ${d.max} porque cada plano recibe `
-    + `una sola hoja con hasta ${d.max} referencias de estilo; pasar de ahí obliga a `
-    + 'cambiar el motor de imágenes, que ahora mismo está reservado por otra fase '
-    + '(Etapa Foto A). Lo que sí se puede: que cada lámina enseñe lo que más sale '
-    + 'en tus vídeos (por ejemplo «una cocina de noche con luz cálida»).'));
+    + `una sola hoja con hasta ${d.max} referencias de estilo. Lo que sí se puede: `
+    + 'que cada lámina enseñe lo que más sale en tus vídeos (por ejemplo «una cocina '
+    + 'de noche con luz cálida»).'));
 
   if (d.imagenes > d.en_la_hoja) {
     caja.appendChild(campoSelect('Con qué imágenes tuyas se dibuja cada lámina',

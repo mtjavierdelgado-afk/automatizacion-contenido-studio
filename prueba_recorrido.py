@@ -167,6 +167,18 @@ class Api:
     def put(self, ruta, cuerpo=None):
         return self._r("PUT", ruta, json=cuerpo)
 
+    def libre(self, pid, limite=300):
+        """Espera a que el video no tenga NINGUN trabajo en el servidor (un
+        remontaje de la musica lanzado por el servidor no lo sigue la pagina)."""
+        fin = time.time() + limite
+        while time.time() < fin:
+            _r, d = self.get(f"/api/trabajos?proyecto={pid}&activos=1")
+            lista = d if isinstance(d, list) else (d.get("trabajos") or [])
+            if not lista:
+                return True
+            time.sleep(1)
+        return False
+
     def esperar(self, tid, limite=600):
         fin = time.time() + limite
         while time.time() < fin:
@@ -658,6 +670,9 @@ def notas_de_imagenes(navegador, datos):
     ok(tarjeta.locator(".nota-mini img").count() == 1, "con su miniatura")
     ok(pg.visible(".nota-imagen button", "Rehacer esta imagen"), "y su botón para rehacerla")
     pg.captura("07_nota_nueva")
+    # mientras se monta el vídeo (el remontaje de la música del Encargo) no se
+    # rehace ninguna imagen: el servidor contesta que espere
+    ok(datos["api"].libre(datos["video"]), "el vídeo termina de montarse antes de rehacer")
     pg.pulsar(".nota-imagen button", "Rehacer esta imagen")
     ok(pg.esperar(".nota-imagen .pastilla", "Dibujando", 15),
        "mientras se dibuja lo dice, con su reloj")
@@ -1553,6 +1568,13 @@ def todos_los_botones(navegador, datos):
             if objetivo is None:
                 continue
             try:
+                # apagado A PROPÓSITO por lo pulsado antes (la novena ★ con ocho
+                # ya marcadas): no es un botón roto
+                if not objetivo.is_enabled():
+                    continue
+            except Exception:                                # noqa: BLE001
+                continue
+            try:
                 ya_puesto = objetivo.evaluate(
                     "b => /\\b(activo|puesta|activa)\\b/.test(b.className) || b.getAttribute('aria-pressed') === 'true'")
             except Exception:                                # noqa: BLE001
@@ -1627,6 +1649,7 @@ def fallos_simulados(navegador, datos):
         area.fill("que el cielo sea naranja")
         area.dispatch_event("input")
         pg.pulsar(".previa-feedback button", "Guardar nota")
+        datos["api"].libre(datos["video"])
         pg.p.locator(".nota-imagen").filter(has_text="cielo sea naranja").locator(
             "button", has_text="Rehacer esta imagen").click()
         tarjeta = pg.p.locator(".nota-fila").filter(has_text="cielo sea naranja")

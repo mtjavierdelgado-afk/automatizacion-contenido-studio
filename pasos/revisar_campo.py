@@ -57,9 +57,11 @@ EL LISTON ES FIJO, no se mueve en cada vuelta:
   el trozo y di que hara mal el sistema).
 - «no_sirve» = el sistema no puede trabajar con esto (falta lo esencial o
   contradice la guia).
-- La «sugerida» tiene que CUMPLIR LA GUIA ENTERA: es el texto que tu mismo
-  darias por «sirve» si te lo volvieran a pasar. Si no puedes escribirla asi,
-  dejala vacia.
+- Si el veredicto NO es «sirve», la «sugerida» es OBLIGATORIA: el texto entero
+  ya corregido, que la persona pone en el campo con un boton. Tiene que CUMPLIR
+  LA GUIA ENTERA: es el texto que tu mismo darias por «sirve» si te lo volvieran
+  a pasar. Si falta un dato que solo la persona sabe, no lo inventes: escribe
+  la version que mejor cumpla sin el y dilo en el resumen.
 {anterior}
 Devuelve SOLO este JSON:
 {{
@@ -152,7 +154,9 @@ def huella(gid, texto):
         guia = guias.como_texto(gid)
     except Exception:                                       # noqa: BLE001
         guia = ""
-    sello = hashlib.sha1(guia.encode("utf-8")).hexdigest()[:8]
+    # Y CON LA INSTRUCCION: las revisiones guardadas con la de antes (que
+    # dejaba la sugerida vacia a menudo) no se vuelven a servir
+    sello = hashlib.sha1((guia + INSTRUCCION).encode("utf-8")).hexdigest()[:8]
     return hashlib.sha1(f"{gid}\n{sello}\n{llano}".encode("utf-8")).hexdigest()[:20]
 
 

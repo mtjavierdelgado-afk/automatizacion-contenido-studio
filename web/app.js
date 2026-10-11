@@ -72,6 +72,23 @@ function reloj(segundos) {
 
 /* 780 -> '13:00'. Para duraciones de video, donde la decima no dice nada. */
 /* Un texto largo cortado por palabra, con «…» si sobra. */
+/* «TÃº» -> «Tú»: la narración de los vídeos cuya voz se grabó antes del
+ * 10-10-2026 llegó de Cartesia leída como Latin-1. Se arregla AL ENSEÑARLA y
+ * no en los datos, porque esa narración entra en la firma de las imágenes
+ * (ver `subtitulos.reparar_mojibake`, que hace lo mismo en el subtítulo). */
+function legible(texto) {
+  const t = String(texto || '');
+  // trozo a trozo y solo con estas cabezas: ver `subtitulos._MOJIBAKE`
+  return t.replace(/[\u00c2\u00c3][\u0080-\u00bf]|\u00e2[\u0080-\u00bf]{2}/g, trozo => {
+    try {
+      const bytes = Uint8Array.from([...trozo].map(c => c.charCodeAt(0)));
+      return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch (_) {
+      return trozo;
+    }
+  });
+}
+
 function recortar(texto, maximo) {
   const t = String(texto || '').replace(/\s+/g, ' ').trim();
   if (t.length <= maximo) return t;
@@ -5255,9 +5272,24 @@ function navLight() {
   const hayVideo = dentro && (!!v.audio || hayMp4Light());
 
   const paradas = [
-    { id: 'estilos', texto: 'Estilos', puede: true, activa: !dentro,
-      porque: 'tus estilos y tus vídeos',
-      ir: () => { pararPrevia(); recordarVideoLight(''); irALight('galeria'); } },
+    /* DESDE DENTRO DE UN VÍDEO, «Estilos» abre EL ESTILO DE ESE VÍDEO: es la
+       pregunta que se hace desde ahí («¿con qué estilo se hizo?, quiero
+       cambiarlo»), y antes caía en la portada sin decirlo (10-10-2026). La
+       ficha lleva «‹ Volver al vídeo» y su «‹ Volver» de siempre a la galería. */
+    { id: 'estilos', texto: 'Estilos', puede: true,
+      activa: !dentro,
+      porque: dentro && fichaLight(v.estilo)
+        ? `el estilo de este vídeo: «${fichaLight(v.estilo).nombre}»` : 'tus estilos y tus vídeos',
+      ir: () => {
+        pararPrevia();
+        if (dentro && fichaLight(v.estilo)) {
+          const pid = v.pid;
+          irALight('preset', { abierto: v.estilo, feedback: {}, desdeVideo: pid });
+          return;
+        }
+        recordarVideoLight('');
+        irALight('galeria');
+      } },
     /* EL ENCARGO: lo que se le pidió al redactor, tal cual está guardado en el
        vídeo abierto, y editable. Sin vídeo abierto no hay nada que revisar (el
        formulario de crear uno es otra pantalla, `vistaElegidoLight`). Cuenta
@@ -5481,6 +5513,8 @@ function pintarLightAhora() {
 
 function irALight(vista, extra) {
   APP.light.vista = vista;
+  // «‹ Volver al vídeo» solo vale para la ficha a la que se llegó desde él
+  APP.light.desdeVideo = '';
   Object.assign(APP.light, extra || {});
   $('#panel').scrollTop = 0;
   pintarLight();
@@ -8921,7 +8955,7 @@ function avisoImagenObsoleta(escena) {
       }, 'Me vale')),
     h('div', { clase: 'meta' },
       `se dibujó para: «${escena.dibujada_para || ''}»`),
-    h('div', { clase: 'meta' }, `y aquí ahora se dice: «${escena.narracion}»`));
+    h('div', { clase: 'meta' }, `y aquí ahora se dice: «${legible(escena.narracion)}»`));
 }
 
 
@@ -9999,6 +10033,11 @@ function irAlMomentoDeLaNota(nota) {
     pararPrevia();
     PREVIA.i = i;
     repintarVideo();
+    /* Y SE LLEVA LA VISTA A LA IMAGEN: la lista de notas está debajo del
+       visor, y sin esto el plano cambiaba fuera de la pantalla y pulsar la
+       miniatura o «Ver cómo quedó» parecía no hacer nada (10-10-2026). */
+    const marco = document.querySelector('.previa-marco');
+    if (marco) marco.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return;
   }
   const video = videoDelRepaso();
@@ -10073,7 +10112,7 @@ function tarjetaNotaImagen(plano, notas) {
     notas.length > 1 ? h('span', { clase: 'meta' }, `· ${notas.length} notas`) : null));
   if (e && e.narracion) {
     cuerpo.appendChild(h('div', { clase: 'nota-guion', title: 'lo que se oye en esta imagen' },
-      `«${recortar(e.narracion, 160)}»`));
+      `«${recortar(legible(e.narracion), 160)}»`));
   }
   notas.forEach(nota => cuerpo.appendChild(PREVIA.editando === nota.id
     ? filaNotaEscena(nota) : filaDeNotaImagen(nota)));
@@ -10475,27 +10514,83 @@ const GUIA_DE_BLOQUE = {
    Dice si sirve para lo que el sistema hace con ello, qué falla y por qué, y
    propone una versión que se pone en el campo con un botón. Va por la
    suscripción de Claude: no cuesta imágenes. */
-/* La última revisión de cada CAMPO (el textarea), para que la siguiente la
-   tenga delante. WeakMap: cuando el campo se va de la pantalla, se olvida. */
-const ULTIMA_REVISION = new WeakMap();
+/* LA REVISIÓN VIVE FUERA DE LA PANTALLA, por pantalla y por guía.
+ *
+ * Iba en un panel creado al pulsar y pegado al bloque. Pero la pantalla se
+ * repinta sola (al guardarse el encargo, al quedar el guion obsoleto, con el
+ * coste), y cada repintado hace un bloque NUEVO: la revisión, que tarda unos
+ * segundos, se pintaba en un panel que ya no estaba en ninguna parte, y
+ * «Usar la versión sugerida» escribía en un campo que ya no existía. Se veía
+ * como «Revisar no ofrece aplicar nada» (10-10-2026). Ahora el estado está en
+ * `REVISION_VIVA` y el bloque, cada vez que se pinta, pinta el panel con él; y
+ * los botones buscan el campo AL PULSARLOS, no el que había al revisar. */
+const REVISION_VIVA = new Map();
 
-function botonRevisar(gid, campo, mandos) {
-  const panel = h('div', { clase: 'revision-campo', hidden: true });
-  const boton = h('button', {
+function claveDeRevision(gid) {
+  const l = APP.light;
+  const donde = l.vista === 'preset' ? `e:${l.abierto}`
+    : l.vista === 'elegido' ? `v:${(l.video || {}).pid}:${(l.video || {}).vista}` : l.vista;
+  return `${donde}|${gid}`;
+}
+
+/* El panel de una revisión: lo pinta el bloque al construirse y lo repinta la
+ * revisión al avanzar (los dos con `pintarPanelRevision`). */
+function panelDeRevision(gid, mandos) {
+  const panel = h('div', { clase: 'revision-campo', datos: { revision: claveDeRevision(gid) } });
+  pintarPanelRevision(panel, gid, mandos);
+  return panel;
+}
+
+function pintarPanelRevision(panel, gid, mandos) {
+  const viva = REVISION_VIVA.get(claveDeRevision(gid));
+  vaciar(panel);
+  panel.hidden = !viva || viva.cerrada;
+  if (!viva || viva.cerrada) return;
+  if (viva.estado === 'pensando') {
+    panel.appendChild(h('div', { clase: 'cargando' }, 'revisando con la guía… (unos segundos)'));
+  } else if (viva.estado === 'error') {
+    panel.appendChild(cajaError(viva.error));
+  } else {
+    pintarRevision(panel, viva.resultado || {}, () => campoDeLaGuia(mandos), gid);
+  }
+}
+
+/* Repinta los paneles de esa revisión que estén en pantalla AHORA (el bloque
+ * puede haberse rehecho mientras se revisaba). */
+function repintarRevisiones(gid) {
+  const clave = claveDeRevision(gid);
+  document.querySelectorAll('.revision-campo').forEach(panel => {
+    if (panel.dataset.revision !== clave) return;
+    const mandos = panel.closest('.mandos');
+    if (mandos) pintarPanelRevision(panel, gid, mandos);
+  });
+}
+
+function botonRevisar(gid, campo) {
+  return h('button', {
     clase: 'mini fantasma', type: 'button',
     title: 'Comprobar si lo escrito sirve como dice la guía',
-    onclick: async () => {
+    onclick: async ev => {
       const area = campo();
       const texto = area ? area.value.trim() : '';
       if (!texto) { toast('Escribe algo en el campo y vuelve a revisar', true); return; }
-      if (!panel.isConnected) mandos.appendChild(panel);
-      panel.hidden = false;
-      vaciar(panel).appendChild(h('div', { clase: 'cargando' }, 'revisando con la guía… (unos segundos)'));
+      const clave = claveDeRevision(gid);
+      const previa = REVISION_VIVA.get(clave);
+      if (previa && previa.estado === 'pensando') return;
+      /* CON LA REVISIÓN ANTERIOR DE ESTE CAMPO: el revisor mira si aquello
+         se arregló en vez de buscar cosas nuevas cada vez. */
+      const anterior = previa && previa.estado === 'listo' ? previa.resultado : null;
+      REVISION_VIVA.set(clave, { estado: 'pensando', texto });
+      repintarRevisiones(gid);
+      const boton = ev.currentTarget;
       boton.disabled = true;
+      const fin = cambios => {
+        // si entretanto se ha ido a otra pantalla, la clave sigue siendo la suya
+        REVISION_VIVA.set(clave, Object.assign({ texto }, cambios));
+        repintarRevisiones(gid);
+        boton.disabled = false;
+      };
       try {
-        /* CON LA REVISIÓN ANTERIOR DE ESTE CAMPO: el revisor mira si aquello
-           se arregló en vez de buscar cosas nuevas cada vez. */
-        const anterior = (ULTIMA_REVISION.get(area) || {}).resultado || null;
         const lanzada = await pedir(`${BASE}/api/sistema/guias/${gid}/revisar`,
           { method: 'POST', cuerpo: { texto, anterior } });
         // se pide SIEMPRE una vez: aunque venga «listo» (ya revisado), el
@@ -10510,24 +10605,25 @@ function botonRevisar(gid, campo, mandos) {
           throw new Error('la revisión ha tardado más de dos minutos: el CLI de Claude '
             + 'puede estar ocupado o sin cupo. Vuelve a pulsar «Revisar» en un momento');
         }
-        ULTIMA_REVISION.set(area, { texto, resultado: ficha.resultado || {} });
-        pintarRevision(panel, ficha.resultado || {}, area);
+        fin({ estado: 'listo', resultado: ficha.resultado || {} });
       } catch (e) {
-        vaciar(panel).appendChild(cajaError(e.message));
+        fin({ estado: 'error', error: e.message });
       }
-      boton.disabled = false;
     },
   }, '✓ Revisar');
-  return boton;
 }
 
-function pintarRevision(panel, r, area) {
+function pintarRevision(panel, r, campo, gid) {
   const nombres = { sirve: '✅ Sirve', mejorable: '🟡 Mejorable', no_sirve: '🔴 No sirve así' };
-  vaciar(panel);
+  const cerrar = () => {
+    const viva = REVISION_VIVA.get(claveDeRevision(gid));
+    if (viva) viva.cerrada = true;
+    repintarRevisiones(gid);
+  };
   panel.appendChild(h('div', { clase: 'fila' },
     h('b', {}, nombres[r.veredicto] || r.veredicto),
     h('span', { clase: 'crece' }),
-    h('button', { clase: 'mini fantasma', onclick: () => { panel.hidden = true; } }, 'Cerrar')));
+    h('button', { clase: 'mini fantasma', onclick: cerrar }, 'Cerrar')));
   if (r.resumen) panel.appendChild(h('div', {}, r.resumen));
   if (r.de_memoria) {
     panel.appendChild(h('div', { clase: 'meta' },
@@ -10538,22 +10634,30 @@ function pintarRevision(panel, r, area) {
       h('b', {}, p.que), p.por_que ? ` — ${p.por_que}` : '',
       p.arreglo ? h('div', { clase: 'meta' }, `Mejor: ${p.arreglo}`) : null))));
   }
-  if (r.sugerida && area) {
-    panel.appendChild(h('details', {},
-      h('summary', {}, 'Ver la versión sugerida'),
+  if (r.sugerida) {
+    panel.appendChild(h('details', { open: true },
+      h('summary', {}, 'La versión sugerida'),
       h('div', { clase: 'sugerida' }, r.sugerida)));
     panel.appendChild(h('div', { clase: 'fila' },
       h('button', {
         clase: 'mini primario',
+        title: 'Pone la versión sugerida en el campo (se guarda como si la hubieras escrito)',
         onclick: () => {
+          const area = campo();
+          if (!area) { toast('No encuentro el campo: vuelve a abrir esta pantalla', true); return; }
           if (!window.confirm('¿Cambiar lo escrito por la versión sugerida?')) return;
           area.value = r.sugerida;
           area.dispatchEvent(new Event('input', { bubbles: true }));
           area.dispatchEvent(new Event('change', { bubbles: true }));
-          panel.hidden = true;
+          cerrar();
           toast('Puesta la versión sugerida: revísala y ajústala a tu gusto');
         },
-      }, 'Usar la versión sugerida')));
+      }, 'Aplicar la versión sugerida')));
+  } else if (r.veredicto && r.veredicto !== 'sirve') {
+    // sin versión propuesta, que lo diga: si no, parece que falta el botón
+    panel.appendChild(h('div', { clase: 'meta' },
+      'La revisión no ha propuesto un texto entero: cambia lo de arriba a mano '
+      + 'y vuelve a pulsar «Revisar».'));
   }
 }
 
@@ -10574,13 +10678,15 @@ function campoDeLaGuia(mandos) {
 function bloqueLight(titulo, porque, ...contenido) {
   const mandos = h('div', { clase: 'mandos' }, ...contenido);
   const guia = GUIA_DE_BLOQUE[titulo];
+  // la revisión de este campo, si la hay: sobrevive a que el bloque se rehaga
+  if (guia && guia !== 'cta') mandos.appendChild(panelDeRevision(guia, mandos));
   return h('div', { clase: 'bloque-light' },
     h('div', { clase: 'titulo' },
       h('div', { clase: 'titulo-fila' },
         h('h3', {}, titulo),
         // la de las llamadas a la accion solo copia: el bloque tiene tres campos
         guia ? botonGuia(guia, guia === 'cta' ? null : () => campoDeLaGuia(mandos)) : null,
-        guia && guia !== 'cta' ? botonRevisar(guia, () => campoDeLaGuia(mandos), mandos) : null),
+        guia && guia !== 'cta' ? botonRevisar(guia, () => campoDeLaGuia(mandos)) : null),
       porque ? h('span', { clase: 'meta' }, porque) : null),
     mandos);
 }
@@ -11051,11 +11157,16 @@ function vistaPresetLight() {
   const origen = datos.origen || {};
   const caja = h('div', { clase: 'light-preset' });
   caja.appendChild(h('div', { clase: 'light-cab' },
+    APP.light.desdeVideo ? h('button', {
+      clase: 'mini', onclick: () => abrirVideoLight(APP.light.desdeVideo),
+      title: 'Volver al vídeo desde el que has abierto este estilo',
+    }, '‹ Volver al vídeo') : null,
     h('button', {
       clase: 'mini fantasma', onclick: () => irALight('galeria'),
       title: 'Volver a tus estilos',
-    }, '‹ Volver'),
+    }, APP.light.desdeVideo ? 'Todos los estilos' : '‹ Volver'),
     h('h2', {}, ficha.nombre || ficha.id),
+    APP.light.desdeVideo ? h('span', { clase: 'meta' }, 'el estilo de tu vídeo') : null,
     h('span', { clase: 'crece' }),
     h('button', {
       clase: 'mini peligro', title: 'Mandar este estilo a la papelera',

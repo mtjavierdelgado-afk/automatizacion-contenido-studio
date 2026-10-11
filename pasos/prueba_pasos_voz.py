@@ -710,6 +710,45 @@ def _hay_clave_cartesia():
         return False
 
 
+def prueba_sse_en_utf8():
+    """Las marcas de palabra del SSE de Cartesia se leen en UTF-8.
+
+    El SSE llega como `text/event-stream` SIN charset y requests, sin que nadie
+    se lo diga, lo lee como Latin-1: «Tú» llegaba como «TÃº» a las marcas, a la
+    narracion de cada plano y a los subtitulos (10-10-2026). Aqui se le da una
+    respuesta HTTP de verdad (bytes UTF-8, la cabecera sin charset) y se mira
+    lo que sale.
+    """
+    print("\n[sse] las marcas de Cartesia, en UTF-8")
+    import base64 as b64                                    # noqa: PLC0415
+    import io                                               # noqa: PLC0415
+    import requests                                         # noqa: PLC0415
+    evento = {"data": b64.b64encode(b"\x00\x00" * 800).decode(),
+              "word_timestamps": {"words": ["Tú", "papá", "«ya»"],
+                                  "start": [0.0, 0.3, 0.6], "end": [0.3, 0.6, 0.9]}}
+    cuerpo = f"data: {json.dumps(evento, ensure_ascii=False)}\n\n".encode("utf-8")
+
+    def falso_post(*_a, **_k):
+        r = requests.models.Response()
+        r.status_code = 200
+        r.headers["Content-Type"] = "text/event-stream"
+        r.raw = io.BytesIO(cuerpo)
+        # lo que hace el adaptador de requests con esa cabecera: «ISO-8859-1»
+        r.encoding = requests.utils.get_encoding_from_headers(r.headers)
+        return r
+
+    original_post, original_clave = p4_voz.requests.post, p4_voz.motor.cargar_api_key
+    p4_voz.requests.post = falso_post
+    p4_voz.motor.cargar_api_key = lambda *a, **k: "clave-falsa"
+    try:
+        cfg = {"voz_id": "x", "modelo": "sonic-2", "idioma": "es"}
+        _wav, _dur, palabras = p4_voz._toma_real("Tú papá ya", cfg, lambda *a: None)
+        igual([x["w"] for x in palabras], ["Tú", "papá", "«ya»"],
+              "las palabras llegan con sus tildes, no como «TÃº»")
+    finally:
+        p4_voz.requests.post, p4_voz.motor.cargar_api_key = original_post, original_clave
+
+
 def main():
     con_red = "--sin-red" not in sys.argv
     con_claude = "--con-claude" in sys.argv
@@ -741,6 +780,7 @@ def main():
         prueba_regrabacion_completa(proyecto)
         prueba_pausas_en_el_montaje(base)
         prueba_cache_por_clave()
+        prueba_sse_en_utf8()
         prueba_catalogo_voces(con_red)
         if con_red:
             prueba_llamada_real(base)

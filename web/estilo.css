@@ -3105,5 +3105,12 @@ textarea.autoalto, textarea.crece.autoalto { max-height: 60vh; overflow-y: auto;
 .nota-imagen .nota-fila { border-top: 1px solid var(--linea-suave); padding-top: 6px; display: flex;
   flex-direction: column; gap: 4px; }
 .nota-imagen .nota-fila .texto { font-weight: 600; }
+/* las referencias adjuntas a una nota, en miniatura, en CUALQUIER sitio: sin esto salían a su
+   tamaño de verdad y una foto tapaba la pantalla entera (10-10-2026) */
+.nota-imagen .tira-aportadas { grid-template-columns: repeat(auto-fill, minmax(90px, 120px)); }
+.tira-aportadas > img {
+  width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block;
+  border-radius: 6px; cursor: zoom-in; background: var(--lienzo);
+}
 .imagenes-hechas { margin-top: 10px; }
 .imagenes-hechas > summary { cursor: pointer; color: var(--tenue); padding: 6px 0; }

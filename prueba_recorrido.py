@@ -452,7 +452,7 @@ def ficha_del_estilo(navegador, datos):
     area.dispatch_event("input")
     bloque.locator("button", has_text="Revisar").first.click()
     ok(pg.esperar(".revision-campo", "Mejorable", 60), "la revisión encuentra el hueco sin rellenar")
-    pg.pulsar(".revision-campo button", "Usar la versión sugerida")
+    pg.pulsar(".revision-campo button", "Aplicar la versión sugerida")
     pg.p.wait_for_timeout(500)
     bloque.locator("button", has_text="Revisar").first.click()
     ok(pg.esperar(".revision-campo", "Sirve", 60),
@@ -591,6 +591,105 @@ def notas_de_imagenes(navegador, datos):
     pg.pulsar(".nav-light button", "Encargo")
     ok(not pg.visible(".error-cerrable"), "el Encargo no enseña los errores de las imágenes")
     pg.sin_errores("las notas de imágenes")
+    pg.cerrar()
+
+
+@escenario
+def lo_que_se_vio_el_10_de_octubre(navegador, datos):
+    """Lo que encontro el dueno abriendo un video de verdad (10-10-2026), y que
+    el recorrido no miraba: la referencia adjunta a una nota a tamano real,
+    pulsar la miniatura o «Ver como quedo» sin que se viera nada, la narracion
+    con «TÃº», «Estilos» dentro de un video yendo a la portada y «Revisar» sin
+    poder aplicar lo que propone."""
+    import io                                                # noqa: PLC0415
+    from PIL import Image                                    # noqa: PLC0415
+    api, pid = datos["api"], datos["video"]
+    # UNA NOTA CON UNA FOTO GRANDE ADJUNTA (como el Joy-Con de la captura)
+    crudo = io.BytesIO()
+    Image.new("RGB", (2400, 1600), (200, 60, 60)).save(crudo, "PNG")
+    r, d = api.post(f"/api/proyectos/{pid}/repaso/imagenes",
+                    files={"f": ("joycon.png", crudo.getvalue(), "image/png")})
+    nombre = ((d.get("imagenes") or [{}])[0]).get("nombre")
+    ok(bool(nombre), "se sube la referencia de la nota")
+    api.post(f"/api/proyectos/{pid}/repaso", {"texto": "que el mando sea rojo y azul", "t": 5,
+                                               "plano": "S003", "imagenes": [nombre],
+                                               "pantalla": "imagenes"})
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.pulsar(".nav-light button", "Imágenes")
+    ok(pg.esperar(".nota-imagen .tira-aportadas img"), "la nota enseña su referencia")
+    pg.p.wait_for_timeout(800)
+    caja = pg.p.locator(".nota-imagen .tira-aportadas img").first.bounding_box()
+    ok(caja and caja["width"] <= 200 and caja["height"] <= 150,
+       f"y en MINIATURA, no a su tamaño real (2400x1600): {caja}")
+    tarjeta = pg.p.locator(".nota-imagen").filter(has_text="Imagen S003").first
+    tcaja = tarjeta.bounding_box()
+    ok(tcaja and tcaja["height"] < 600, f"la tarjeta no se come la pantalla: {tcaja}")
+    pg.captura("11_nota_con_referencia", entera=False)
+    # PULSAR LA MINIATURA LLEVA A LA IMAGEN Y SE VE
+    tarjeta.locator(".nota-mini").click()
+    pg.p.wait_for_timeout(1200)
+    ok(pg.p.evaluate("() => ((PREVIA.ficha || {}).escenas || [])[PREVIA.i].id") == "S003",
+       "pulsar la miniatura pone esa imagen en el visor")
+    dentro = pg.p.evaluate("""() => { const m = document.querySelector('.previa-marco');
+        if (!m) return false; const r = m.getBoundingClientRect();
+        return r.top < window.innerHeight * 0.5 && r.bottom > 80; }""")
+    ok(dentro, "y el visor queda A LA VISTA (antes cambiaba fuera de la pantalla)")
+    # «VER CÓMO QUEDÓ» de una imagen ya rehecha (la del recorrido de notas, S001)
+    if pg.p.locator("button", has_text="Ver cómo quedó").count():
+        pg.p.locator("details.imagenes-hechas").evaluate_all("ds => ds.forEach(d => d.open = true)")
+        pg.p.locator("button", has_text="Ver cómo quedó").first.scroll_into_view_if_needed()
+        pg.p.locator("button", has_text="Ver cómo quedó").first.click()
+        pg.p.wait_for_timeout(1200)
+        dentro = pg.p.evaluate("""() => { const m = document.querySelector('.previa-marco');
+            const r = m.getBoundingClientRect(); return r.top < window.innerHeight * 0.5 && r.bottom > 80; }""")
+        ok(dentro, "«Ver cómo quedó» también lleva al visor")
+    # LA NARRACION QUE LLEGO COMO LATIN-1 SE LEE BIEN
+    ok(pg.p.evaluate("() => legible('«TÃº no dices nada, papÃ¡» Â«yaÂ»')")
+       == "«Tú no dices nada, papá» «ya»", "la narración con «TÃº» se enseña como «Tú»")
+    ok(pg.p.evaluate("() => legible('año Ángel € normal')") == "año Ángel € normal",
+       "y un texto sano no se toca")
+    # «ESTILOS» DENTRO DE UN VÍDEO: EL ESTILO DE ESE VÍDEO
+    pg.pulsar(".nav-light button", "Estilos")
+    ok(pg.esperar(".light-preset h2", "Estado Play Matriz"),
+       "«Estilos» desde un vídeo abre el estilo con el que se hizo")
+    ok(pg.visible(".light-preset button", "Volver al vídeo"), "con «Volver al vídeo»")
+    pg.captura("12_estilos_desde_el_video", entera=False)
+    pg.pulsar(".light-preset button", "Volver al vídeo")
+    ok(pg.p.evaluate("() => APP.light.vista === 'elegido' && APP.light.video.pid") == pid,
+       "y vuelve a ese vídeo")
+    pg.sin_trabajo()
+    # «REVISAR» EN EL ENCARGO, CON LA PANTALLA REPINTÁNDOSE MIENTRAS
+    pg.pulsar(".nav-light button", "Encargo")
+    bloque = pg.p.locator(".bloque-light").filter(has_text="El material").first
+    area = bloque.locator("textarea").first
+    original = area.input_value()
+    area.fill(original + " [PENDIENTE]")
+    area.dispatch_event("input")
+    bloque.locator("button", has_text="Revisar").first.click()
+    pg.js("pintarLight();")     # lo que hace el guardado al quedar el guion obsoleto
+    ok(pg.esperar(".bloque-light .revision-campo", "Mejorable", 60),
+       "la revisión del material sale aunque la pantalla se haya repintado")
+    bloque = pg.p.locator(".bloque-light").filter(has_text="El material").first
+    ok(bloque.locator("button", has_text="Aplicar la versión sugerida").count() == 1,
+       "y ofrece aplicar la versión sugerida")
+    pg.js("pintarLight();")
+    bloque = pg.p.locator(".bloque-light").filter(has_text="El material").first
+    ok(bloque.locator("button", has_text="Aplicar la versión sugerida").count() == 1,
+       "y sigue ahí después de otro repintado")
+    bloque.locator("button", has_text="Aplicar la versión sugerida").first.click()
+    pg.p.wait_for_timeout(2500)
+    valor = pg.p.locator(".bloque-light").filter(has_text="El material").first.locator(
+        "textarea").first.input_value()
+    ok("PENDIENTE" not in valor and "(revisado)" in valor,
+       f"aplicarla cambia el material ({valor[-60:]!r})")
+    pg.captura("13_revisar_en_el_encargo", entera=False)
+    # se deja el material como estaba: lo que viene detras no tiene que verlo
+    area = pg.p.locator(".bloque-light").filter(has_text="El material").first.locator("textarea").first
+    area.fill(original)
+    area.dispatch_event("input")
+    pg.p.wait_for_timeout(2500)
+    pg.sin_errores("lo que se vio el 10 de octubre")
     pg.cerrar()
 
 

@@ -122,6 +122,10 @@ def tts_sse(api_key, voz_id, idioma, transcript):
         raise RuntimeError(f"SSE HTTP {respuesta.status_code}: {respuesta.text[:200]}")
 
     trozos, palabras = [], []
+    # EN UTF-8 A PROPOSITO: el SSE llega como text/event-stream sin charset y
+    # requests lo lee entonces como Latin-1: «tú» llegaba «tÃº» a las marcas,
+    # a la narracion de cada plano y a los subtitulos (10-10-2026)
+    respuesta.encoding = "utf-8"
     for linea in respuesta.iter_lines(decode_unicode=True):
         if not linea or not linea.startswith("data:"):
             continue

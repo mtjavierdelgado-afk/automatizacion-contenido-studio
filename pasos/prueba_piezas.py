@@ -3623,6 +3623,15 @@ def prueba_subtitulos():
     corto = subtitulos.tramos("Vale, si.".split())
     igual(len(corto), 1,
           "y un huerfano se funde con su vecino en vez de parpadear solo")
+    # LAS MARCAS DE CARTESIA LEIDAS COMO LATIN-1 (antes del 10-10-2026)
+    igual(subtitulos.reparar_mojibake("TÃº papÃ¡ Â«yaÂ»"), "Tú papá «ya»",
+          "el subtitulo arregla la narracion que llego como Latin-1")
+    for sano in ("año", "Ángel", "normal", "€ 30", ""):
+        igual(subtitulos.reparar_mojibake(sano), sano, f"y no toca un texto sano ({sano!r})")
+    rota = {"narracion": "TÃº ganas", "marcas": [[0.0, 0.4], [0.4, 0.9]], "t_in": 0.0}
+    trozos = subtitulos.de_escena(rota)
+    ok(trozos and "Tú" in trozos[0]["texto"],
+       f"y el subtitulo dibujado sale bien escrito, con sus tiempos: {trozos}")
 
     titulo("subtitulos: la hora sale de las marcas, no de recontar")
     escena = {"id": "S001", "t_in": 10.0, "t_out": 14.0,

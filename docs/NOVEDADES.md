@@ -10,6 +10,22 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Arreglos del 10 de octubre (lo que se vio abriendo un vídeo de verdad)**
+- Las **fotos adjuntas a una nota** salen en miniatura (antes, a su tamaño
+  real, tapando la pantalla). Pulsarlas las abre en grande.
+- Pulsar **la miniatura de una tarjeta** o **Ver cómo quedó** lleva la vista
+  a esa imagen (antes cambiaba arriba, fuera de la pantalla, y parecía que no
+  hacía nada).
+- La **narración con «TÃº», «papÃ¡»**: la voz de Cartesia se leía con la
+  codificación equivocada. Las voces nuevas llegan bien; en los vídeos ya
+  hechos se enseña bien y los subtítulos se dibujan bien al volver a montar,
+  **sin rehacer ni pagar ninguna imagen**.
+- **«Estilos» dentro de un vídeo abre el estilo de ese vídeo**, para verlo y
+  cambiarlo, con **Volver al vídeo** (antes iba a la portada).
+- **Revisar** ya no se pierde cuando la pantalla se refresca mientras revisa,
+  y su botón es **Aplicar la versión sugerida**. Si no es «Sirve», siempre
+  propone una versión.
+
 **Imágenes con nota**
 - **Una tarjeta por imagen**, en el orden del vídeo, con todas sus notas
   dentro: antes cada nota tenía su tarjeta y dos notas de la misma imagen se

@@ -345,6 +345,35 @@ def repartir_escrito(dibujados, texto):
     return [" ".join(p) for p in reparto]
 
 
+#: Lo que deja UTF-8 leido como Latin-1: «Ã»/«Â» y un byte de continuacion
+#: (0x80-0xBF) para las letras con tilde, la ñ, «» y ¿¡; «â» y dos para las
+#: comillas curvas, la raya, los puntos suspensivos y el euro. Solo esas
+#: cabezas: con otras («Ú»» en «PERÚ»») un texto sano se tomaria por roto.
+_MOJIBAKE = re.compile("[\u00c2\u00c3][\u0080-\u00bf]|\u00e2[\u0080-\u00bf]{2}")
+
+
+def _deshacer(trozo):
+    try:
+        return trozo.group(0).encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return trozo.group(0)
+
+
+def reparar_mojibake(texto):
+    """«TÃº» -> «Tú». Lo que dejaron las marcas de voz de Cartesia leidas como
+    Latin-1 hasta el 10-10-2026 (`p4_voz._toma_real`, sin charset en el SSE).
+
+    Esta en el DIBUJO del subtitulo y no en los datos: arreglarlo en la voz
+    guardada cambiaria la narracion de cada plano, que entra en la firma de sus
+    imagenes, y la pantalla ofreceria rehacerlas pagando (regla 1). Se arregla
+    TROZO A TROZO, asi que un texto que mezcla lo roto con lo sano (un
+    subtitulo corregido a mano) sale entero bien; lo que no se puede deshacer
+    se queda como estaba.
+    """
+    texto = str(texto or "")
+    return _MOJIBAKE.sub(_deshacer, texto) if _MOJIBAKE.search(texto) else texto
+
+
 def de_escena(escena, cap_linea=CAP_LINEA, idioma=None, texto="",
               cap_trozo=None):
     """[{"texto", "desde", "hasta"}] en el reloj DEL PLANO, o [] si no cuadra.
@@ -360,7 +389,9 @@ def de_escena(escena, cap_linea=CAP_LINEA, idioma=None, texto="",
     despues del troceo el texto puede encoger sin que nada se mueva.
     """
     escena = escena if isinstance(escena, dict) else {}
-    palabras = str(escena.get("narracion") or "").split()
+    # palabra a palabra: reparar no junta ni parte palabras, asi que el
+    # recuento contra las marcas sigue cuadrando
+    palabras = [reparar_mojibake(x) for x in str(escena.get("narracion") or "").split()]
     marcas = escena.get("marcas") or []
     if not palabras or len(palabras) != len(marcas):
         # LA GUARDA. Sin esto un plano cuyo texto y cuyas marcas no cuadran

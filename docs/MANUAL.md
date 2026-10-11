@@ -65,7 +65,8 @@ La primera pantalla. Cada tarjeta es un estilo; **Un estilo nuevo** crea otro.
 - **Tono del guion**: cómo se cuenta (no de qué). Cuanto más concreto, mejor.
   El botón **Guía** al lado del título da una plantilla y un ejemplo, y
   **✓ Revisar** comprueba lo que has escrito contra esa guía: dice si sirve,
-  qué falla y por qué, y propone una versión que puedes poner con un botón.
+  qué falla y por qué, y propone una versión que pones con **Aplicar la
+  versión sugerida** (si no es «Sirve», siempre propone una).
   Está en todos los campos que tienen guía y no cuesta imágenes. El mismo texto
   recibe siempre la misma respuesta, y la versión que propone, revisada otra
   vez, sale «Sirve»: no se queda buscando errores nuevos en cada vuelta.

@@ -9632,7 +9632,7 @@ function vistaCrearLight() {
 
   caja.appendChild(campoTexto('Nombre', e.nombre,
     v => { e.nombre = v; tocarEncargoLight(); },
-    { pista: 'Cartoon' }));
+    { pista: 'p. ej. «Cartoon del canal» o «Fotos de eventos»' }));
 
   const cajas = h('div', {});
 
@@ -9740,7 +9740,7 @@ function camposEstiloLight() {
   caja.appendChild(imagenesDeApoyoLight(e, tocarEncargoLight));
   caja.appendChild(campoArea('Indicaciones (opcional)', e.estilo_prompt,
     v => { e.estilo_prompt = v; tocarEncargoLight(); },
-    'igual pero más frío, con menos detalle en los fondos'));
+    'más cálido, con luz de tarde y menos cosas en el fondo'));
   return caja;
 }
 
@@ -9760,7 +9760,7 @@ const TIPOS_DE_IMAGEN = [
 function selectorTipoDeImagen(valor, alCambiar) {
   return campoSelect('Tipo de imagen', valor === 'foto' ? 'foto' : 'ilustracion',
     TIPOS_DE_IMAGEN, alCambiar,
-    'Foto realista pide fotografías en vez de dibujos: la guía se '
+    'Ilustración hace dibujos; Foto realista hace fotografías: la guía se '
     + 'escribe para foto y las imágenes que subas deberían ser fotos.');
 }
 
@@ -10693,14 +10693,15 @@ function fuenteDeEstiloLight(ficha) {
   caja.appendChild(selectorTipoDeImagen(f.modo,
     v => { f.modo = v; repintarPieDeEstilo(); }));
   caja.appendChild(h('div', { clase: 'meta' },
-    'Otras imágenes a las que parecerse. Rehace el dibujo entero y deja el '
+    'Otras imágenes a las que parecerse. Rehace el estilo gráfico entero '
+    + '(dibujo o foto) y deja el '
     + 'tono, la voz y el ritmo como están; las de ahora siguen puestas hasta '
     + 'que pulses Regenerar.'));
   caja.appendChild(imagenesDeApoyoLight(f, repintarPieDeEstilo,
     `aportadas-${ficha.id}`));
   caja.appendChild(campoArea('Indicaciones (opcional)', f.prompt,
     v => { f.prompt = v; repintarPieDeEstilo(); },
-    'igual pero más frío y con menos detalle en los fondos'));
+    'más cálido, con luz de tarde y menos cosas en el fondo'));
   caja.appendChild(h('div', { clase: 'meta' },
     'Lo que el material no dice por sí solo. Reescribe la guía y rehace las '
     + 'muestras; se guarda con el estilo y se vuelve a aplicar si lo regeneras.'));
@@ -11192,7 +11193,8 @@ function tarjetaBienvenidaInicio() {
   return [
     h('div', { clase: 'pista' },
       'Esto convierte lo que escribas —unas notas, un artículo, tu propio guion— '
-      + 'en un vídeo de animación narrada, en varios pasos con revisión entre '
+      + 'en un vídeo narrado, con dibujos o con fotos realistas, en varios '
+      + 'pasos con revisión entre '
       + 'ellos. Para que pueda hacerlo necesita hablar con cinco servicios, y '
       + 'cada uno pide su llave. Esta guía te lleva a por ellas una a una, con el '
       + 'enlace de cada sitio.'),

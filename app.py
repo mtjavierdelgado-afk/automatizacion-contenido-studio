@@ -1173,6 +1173,10 @@ def _ficha_papelera(nombre):
         "actualizado": config.get("actualizado", ""),
         "apartado": marca.replace("T", " ") if marca else "",
         "raiz": carpeta,
+        # QUE ES, para la pantalla: el taller de un estilo vuelve CON su estilo
+        # (no se enseña suelto) y un vídeo se llama vídeo
+        "taller": bool(config.get("taller_de_preset")),
+        "video": bool(config.get(CONFIG_VIDEO_LIGHT)),
     }
 
 
@@ -8808,9 +8812,23 @@ def apartar_preset_canal(pid: str):
 
 @app.post("/api/presets-canal/papelera/{pid}/restaurar")
 def restaurar_preset_canal(pid: str):
-    """Devuelve a la lista un preset apartado."""
+    """Devuelve a la lista un preset apartado. Y si es un estilo, su taller con
+    él: se apartaron juntos (`borrar_preset_light`) y sin el taller el estilo
+    vuelve sin sus láminas ni su escucha."""
     ficha = _preset_o_400(lambda p: p.restaurar(pid))
-    return {"restaurado": pid, "preset": ficha, **_presets().listar()}
+    taller = ((ficha.get("datos") or {}).get("origen") or {}).get("taller") if isinstance(ficha, dict) else ""
+    devuelto = ""
+    if taller and not os.path.isdir(os.path.join(raiz_proyectos(), taller)):
+        base = raiz_papelera()
+        candidatas = sorted((n for n in (os.listdir(base) if os.path.isdir(base) else [])
+                             if n.rpartition("__")[0] == taller), reverse=True)
+        if candidatas:
+            try:
+                restaurar_proyecto(candidatas[0])
+                devuelto = taller
+            except ErrorApi:
+                devuelto = ""
+    return {"restaurado": pid, "preset": ficha, "taller": devuelto, **_presets().listar()}
 
 
 @app.get("/api/presets-canal/papelera/{pid}")

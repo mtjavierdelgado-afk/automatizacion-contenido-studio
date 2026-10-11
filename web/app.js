@@ -39,7 +39,11 @@ function h(etiqueta, props, ...hijos) {
     if (clave === 'clase') n.className = valor;
     else if (clave === 'texto') n.textContent = valor;
     else if (clave === 'datos') Object.assign(n.dataset, valor);
-    else if (clave === 'estilo') n.setAttribute('style', valor);
+    /* POR CSSOM Y NO COMO ATRIBUTO: la CSP del proxy bloquea los atributos
+       `style=""` (también los puestos con setAttribute), y los 19 sitios que
+       usan `estilo` se quedaban sin su margen sin decir nada. Escribir en
+       `n.style` es CSSOM y la CSP lo deja pasar. */
+    else if (clave === 'estilo') n.style.cssText = valor;
     else if (clave.startsWith('on')) n.addEventListener(clave.slice(2), valor);
     else if (clave === 'value' && 'value' in n) valorDiferido = valor;
     else if (valor === true) n.setAttribute(clave, '');
@@ -4456,14 +4460,20 @@ function abrirPapelera() {
   const cuerpo = h('div', { clase: 'cuerpo' });
   const capa = h('div', {
     id: 'papelera',
-    onclick: ev => { if (ev.target === capa) capa.remove(); },
+    onclick: ev => { if (ev.target === capa) cerrar(); },
   }, h('div', { clase: 'cuadro' },
     h('div', { clase: 'cab' },
       h('b', {}, 'Papelera'),
       h('span', { clase: 'meta' }, 'lo apartado sigue entero en el disco'),
       h('span', { clase: 'crece' }),
-      h('button', { clase: 'mini fantasma', onclick: () => capa.remove() }, '×')),
+      h('button', { clase: 'mini fantasma', title: 'Cerrar', onclick: () => cerrar() }, '×')),
     cuerpo));
+  /* AL CERRAR, LA GALERÍA SE VUELVE A LEER: lo devuelto tiene que salir en
+     ella sin recargar la página. */
+  function cerrar() {
+    capa.remove();
+    if (document.body.classList.contains('modo-light')) cargarGaleriaLight(true);
+  }
   document.body.appendChild(capa);
 
   const marcadas = new Set();
@@ -4481,7 +4491,11 @@ function abrirPapelera() {
     try {
       const datos = await pedir(API.papelera());
       if (!document.getElementById('papelera')) return;
-      const lista = listaDe(datos.papelera) || [];
+      /* EN ESTA PANTALLA un taller no se enseña suelto: es la parte interna de
+         un estilo y vuelve CON él al devolver el estilo. Enseñarlo como
+         «proyecto» hacía que «Devolver» devolviera el taller y no el estilo. */
+      const light = document.body.classList.contains('modo-light');
+      const lista = (listaDe(datos.papelera) || []).filter(f => !(light && f.taller));
       // una carpeta que ya no esta no puede seguir marcada
       const vivas = new Set(lista.map(f => f.carpeta));
       [...marcadas].forEach(c => { if (!vivas.has(c)) marcadas.delete(c); });
@@ -4492,7 +4506,8 @@ function abrirPapelera() {
         return;
       }
       if (!lista.length) {
-        cuerpo.appendChild(h('div', { clase: 'vacio' }, 'no hay ningún proyecto apartado'));
+        cuerpo.appendChild(h('div', { clase: 'vacio' },
+          light ? 'no hay ningún vídeo apartado' : 'no hay ningún proyecto apartado'));
         cuerpo.appendChild(tablaPresetsPapelera(presetsApartados, pintar));
         return;
       }
@@ -4510,7 +4525,7 @@ function abrirPapelera() {
       };
 
       const tabla = h('table', { clase: 'tabla' },
-        h('tr', {}, h('th', {}, ''), h('th', {}, 'Qué es'), h('th', {}, 'Proyecto'),
+        h('tr', {}, h('th', {}, ''), h('th', {}, 'Qué es'), h('th', {}, light ? 'Nombre' : 'Proyecto'),
           h('th', {}, 'Apartado'), h('th', {}, 'Creado'), h('th', {}, '')));
       for (const ficha of lista) {
         const marca = h('input', {
@@ -4524,7 +4539,7 @@ function abrirPapelera() {
         });
         tabla.appendChild(h('tr', { datos: { carpeta: ficha.carpeta } },
           h('td', {}, marca),
-          h('td', {}, h('span', { clase: 'tag-papelera proyecto' }, 'proyecto')),
+          h('td', {}, h('span', { clase: 'tag-papelera proyecto' }, ficha.video ? 'vídeo' : 'proyecto')),
           h('th', {}, oHueco(ficha.nombre, ficha.id), h('div', { clase: 'meta' }, oHueco(ficha.id, ''))),
           h('td', { clase: 'meta' }, oHueco(ficha.apartado)),
           h('td', { clase: 'meta' }, fechaCorta(ficha.creado)),
@@ -4586,7 +4601,8 @@ function tablaPresetsPapelera(lista, alTerminar) {
   for (const ficha of lista) {
     tabla.appendChild(h('tr', {},
       h('td', {}, h('span', { clase: 'tag-papelera preset' },
-        `preset · ${NOMBRES_PRESET[ficha.tipo] || ficha.tipo}`)),
+        document.body.classList.contains('modo-light') && ficha.tipo === 'canal'
+          ? 'estilo' : `preset · ${NOMBRES_PRESET[ficha.tipo] || ficha.tipo}`)),
       h('th', {}, oHueco(ficha.nombre, ficha.id),
         h('div', { clase: 'meta' }, oHueco(ficha.resumen, ''))),
       h('td', { clase: 'meta' }, fechaCorta(ficha.apartado)),
@@ -4608,7 +4624,8 @@ function tablaPresetsPapelera(lista, alTerminar) {
         }, 'Borrar'))));
   }
   return h('div', {},
-    h('h3', { estilo: 'margin:18px 0 6px' }, 'Presets apartados'),
+    h('h3', { estilo: 'margin:18px 0 6px' },
+      document.body.classList.contains('modo-light') ? 'Estilos apartados' : 'Presets apartados'),
     tabla,
     h('div', { clase: 'pista' },
       'Un preset borrado no puede romper ningún vídeo: lo que los vídeos llevan dentro '
@@ -5819,7 +5836,8 @@ function vistaGaleriaLight() {
     caja.appendChild(h('div', { clase: 'invitacion-proyectos' },
       h('div', {}, h('b', {}, '¿Trabajas para varios clientes? '),
         'Crea un proyecto por cliente y tendrás sus estilos y vídeos separados (con logo propio y, si quieres, clave).'),
-      h('button', { clase: 'mini primario', onclick: crearCliente }, '+ Nuevo proyecto')));
+      h('button', { clase: 'mini primario', onclick: crearCliente }, '+ Nuevo proyecto'),
+      botonPapeleraLight()));
     seccionEstilos(caja, presetsLight(), '');
     seccionVideos(caja, videosLight(), '');
     seccionSueltos(caja, null);
@@ -5831,6 +5849,15 @@ function vistaGaleriaLight() {
   }
   dentroDeProyecto(caja, elegido);
   return caja;
+}
+
+/* LA PAPELERA, A LA VISTA. «Borrar» un estilo y «Apartar» un vídeo dicen «se
+   puede recuperar desde la papelera», y la papelera solo se abría desde el
+   menú de proyectos del modo editor, que en esta pantalla no se ve: lo
+   prometido no tenía puerta (11-10-2026). */
+function botonPapeleraLight() {
+  return h('button', { clase: 'mini fantasma', title: 'Lo que has borrado o apartado: se puede devolver',
+    onclick: () => abrirPapelera() }, '🗑 Papelera');
 }
 
 /* LA PORTADA: una tarjeta por proyecto. */
@@ -5846,7 +5873,8 @@ function portadaDeProyectos(caja, lista) {
     APP.light.verOcultos ? 'Esconder los ocultos' : `Ver los ocultos (${ocultos})`) : null,
     Object.keys(pasesAbiertos()).length ? h('button', { clase: 'mini fantasma',
       title: 'Vuelve a pedir la clave de los proyectos que has abierto', onclick: cerrarProyectosConClave },
-    '🔒 Cerrar los abiertos') : null));
+    '🔒 Cerrar los abiertos') : null,
+    botonPapeleraLight()));
   const rejilla = h('div', { clase: 'galeria-proyectos' });
   visibles.forEach(ficha => rejilla.appendChild(tarjetaProyecto(ficha)));
   const sueltosEstilos = estilosDeCliente('_sin').length;
@@ -5898,7 +5926,9 @@ function dentroDeProyecto(caja, cid) {
   const ficha = fichaCliente(cid);
   const nombre = ficha ? ficha.nombre : 'Sin proyecto';
   caja.appendChild(h('div', { clase: 'migas' },
-    h('button', { clase: 'mini fantasma', onclick: () => elegirCliente('') }, '‹ Todos los proyectos')));
+    h('button', { clase: 'mini fantasma', onclick: () => elegirCliente('') }, '‹ Todos los proyectos'),
+    h('span', { clase: 'crece' }),
+    botonPapeleraLight()));
   caja.appendChild(h('div', { clase: 'light-cab cab-proyecto' },
     ficha && ficha.logo ? h('img', { clase: 'logo-proyecto pequeno', alt: '',
       src: `${BASE}/api/logos/${encodeURIComponent(ficha.logo.fichero)}` }) : null,

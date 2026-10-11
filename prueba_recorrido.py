@@ -418,6 +418,25 @@ class Pagina:
         self.p.goto(datos["url"] + "/")
         self.p.wait_for_function("() => typeof APP !== 'undefined' && APP.light && APP.light.datos", timeout=30000)
         self.p.wait_for_timeout(800)
+        # TODOS LOS AVISOS, no solo el último: uno de un trabajo que acaba
+        # puede tapar al que se busca
+        self.p.evaluate("() => { window.__avisos = []; const _t = toast; "
+                        "toast = function (t) { window.__avisos.push(String(t)); "
+                        "return _t.apply(this, arguments); }; }")
+
+    def avisos(self):
+        return self.p.evaluate("() => window.__avisos || []")
+
+    def sin_trabajo_del_estilo(self, segundos=180):
+        """Espera a que el taller del estilo no tenga nada corriendo."""
+        fin = time.time() + segundos
+        while time.time() < fin:
+            if self.p.evaluate("() => ((APP.trabajos[CLAVE_LIGHT] || {}).estado) !== 'ejecutando'"
+                               " && APP.light.vista !== 'generando'"):
+                self.p.wait_for_timeout(1200)
+                return True
+            self.p.wait_for_timeout(500)
+        return False
 
     def _dialogo(self, dialogo):
         self.dialogos.append(dialogo.message)
@@ -705,6 +724,119 @@ def notas_de_imagenes(navegador, datos):
     pg.pulsar(".nav-light button", "Encargo")
     ok(not pg.visible(".error-cerrable"), "el Encargo no enseña los errores de las imágenes")
     pg.sin_errores("las notas de imágenes")
+    pg.cerrar()
+
+
+@escenario
+def lo_que_sale_a_veces(navegador, datos):
+    """Los botones que solo salen en una situación concreta y que el resto del
+    recorrido no veía (ver la cobertura): la papelera, duplicar un estilo,
+    quitar y devolver una lámina, la guía de un campo, las notas de mejoras,
+    la guía de inicio, el color del subtítulo y partir un bloque del guion."""
+    api, pid = datos["api"], datos["video"]
+    pg = Pagina(navegador, datos)
+    # LA PAPELERA: un estilo borrado se puede devolver desde la pantalla
+    r, d = api.post(f"/api/presets-light/{datos['preset']}/duplicar", {})
+    copia = (d.get("preset") or {}).get("id")
+    ok(bool(copia), "se duplica el estilo (para borrar la copia)")
+    api._r("DELETE", f"/api/presets-light/{copia}")
+    pg.js("elegirCliente(''); recordarVideoLight(''); await cargarGaleriaLight(true); irALight('galeria');")
+    ok(pg.esperar("button", "Papelera"), "la portada tiene la Papelera a la vista")
+    pg.pulsar("button", "Papelera")
+    ok(pg.esperar("#papelera button", "Devolver", 15), "la papelera enseña el estilo borrado con «Devolver»")
+    ok("taller" not in pg.p.locator("#papelera").inner_text(),
+       "sin su taller suelto (vuelve con el estilo, no aparte)")
+    pg.captura("15_papelera", entera=False)
+    pg.pulsar("#papelera button", "Devolver")
+    pg.p.wait_for_timeout(1200)
+    pg.pulsar("#papelera .cab button", "×")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.p.evaluate(f"() => presetsLight().some(p => p.id === '{copia}')"),
+       "al cerrarla, el estilo devuelto vuelve a salir en la galería")
+    r, d = api.get("/api/presets-light")
+    taller = next((((x.get("datos") or {}).get("origen") or {}).get("taller")
+                   for x in (d.get("presets") or []) if x.get("id") == copia), "")
+    ok(taller and os.path.isdir(os.path.join(datos["proyectos"], taller)),
+       f"y con él su taller (sus láminas y su escucha): {taller!r}")
+    # LA GUIA DE UN CAMPO: «Usar en el campo» y «Copiar»
+    pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{datos['preset']}' }});")
+    pg.p.wait_for_timeout(1200)
+    bloque = pg.p.locator(".bloque-light").filter(has_text="Tono del guion").first
+    if bloque.count():
+        bloque.locator("button", has_text="Guía").first.click()
+        ok(pg.esperar("button", "Copiar", 15), "«✦ Guía» abre la guía con su «Copiar»")
+        pg.pulsar("button", "Copiar")
+        ok(any("copiado" in a for a in pg.avisos()), "y «Copiar» copia (lo dice)")
+        if pg.visible("button", "Usar en el campo"):
+            pg.pulsar("button", "Usar en el campo")
+            ok(True, "«Usar en el campo» se deja pulsar")
+        pg.p.keyboard.press("Escape")
+        pg.p.evaluate("() => document.querySelectorAll('.capa-guia, #guia, .capa-dialogo').forEach(x => x.remove())")
+    # QUITAR UNA LAMINA Y DEVOLVERLA (gratis: ya está dibujada)
+    pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{datos['preset']}' }});")
+    ok(pg.esperar(".laminas-estilo .lamina"), "la ficha enseña las láminas")
+    antes = pg.p.locator(".laminas-estilo .lamina").count()
+    pg.p.locator(".laminas-estilo .lamina").last.locator("button", has_text="Quitar").click()
+    pg.p.wait_for_timeout(1000)
+    ok(pg.sin_trabajo_del_estilo(), "quitar una lámina rehace la hoja del estilo y termina")
+    pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{datos['preset']}' }});")
+    pg.esperar(".laminas-estilo .lamina")
+    ok(pg.p.locator(".laminas-estilo .lamina").count() == antes - 1, "«Quitar» quita la lámina")
+    ok(pg.visible(".laminas-estilo button", "Devolver"), "y ofrece devolverla")
+    pg.pulsar(".laminas-estilo button", "Devolver")
+    pg.p.wait_for_timeout(1000)
+    ok(pg.sin_trabajo_del_estilo(), "devolverla termina")
+    pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{datos['preset']}' }});")
+    pg.esperar(".laminas-estilo .lamina")
+    ok(pg.p.locator(".laminas-estilo .lamina").count() == antes, "«Devolver» la vuelve a poner")
+    # LAS NOTAS DE MEJORAS (Configuración)
+    pg.js("conmutarConfig(true);")
+    pg.p.wait_for_timeout(1200)
+    area = pg.p.locator("#config textarea").first
+    area.fill("que el subtítulo vaya más arriba en vertical")
+    area.dispatch_event("input")
+    pg.pulsar("#config button", "Añadir")
+    ok(pg.esperar("#config", "más arriba en vertical", 10), "una nota de mejoras se añade")
+    ok(pg.visible("#config button", "Copiar todas"), "y sale «Copiar todas»")
+    pg.pulsar("#config button", "Copiar todas")
+    ok(any("copiad" in a.lower() for a in pg.avisos()), f"que copia la lista ({pg.avisos()[-3:]!r})")
+    pg.js("conmutarConfig(false);")
+    # LA GUIA DE INICIO
+    pg.js("abrirInicio(0);")
+    ok(pg.esperar("#inicio button", "Vamos", 10), "la guía de inicio se abre (con «Vamos»)")
+    pg.pulsar("#inicio button", "Vamos")
+    ok(pg.visible("#inicio button", "Atrás"), "y avanza (con «‹ Atrás»)")
+    pg.pulsar("#inicio button", "Atrás")
+    ok(pg.visible("#inicio button", "Saltar"), "vuelve atrás, y se puede saltar")
+    pg.pulsar("#inicio button", "Saltar")
+    ok(not pg.visible("#inicio"), "«Saltar por ahora» la cierra")
+    # EL COLOR DEL SUBTITULO
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; pintarLight();")
+    pg.p.wait_for_timeout(1500)
+    pg.p.locator(".fila-ajuste").filter(has_text="Subtítulos").locator("button", has_text="Cambiar").click()
+    pg.p.wait_for_timeout(800)
+    color = pg.p.locator(".editor-ajuste input[type=color]").first
+    ok(color.count() == 1, "los subtítulos dejan elegir el color")
+    color.evaluate("x => { x.value = '#ff8800'; x.dispatchEvent(new Event('change', { bubbles: true })); }")
+    ok(pg.esperar(".editor-ajuste button", "Quitar mi color", 15), "elegido, sale «Quitar mi color»")
+    pg.pulsar(".editor-ajuste button", "Quitar mi color")
+    ok(pg.esperar(".editor-ajuste", "el del estilo", 15), "y quitarlo vuelve al del estilo")
+    pg.sin_trabajo(300)
+    # PARTIR UN BLOQUE DEL GUION (se abre y se cancela: partir regraba la voz)
+    pg.pulsar(".nav-light button", "Guion")
+    pg.p.wait_for_timeout(1200)
+    # los botones de cada bloque salen al pasar el ratón (en táctil, siempre)
+    pg.p.locator(".parrafo-guion").first.hover()
+    partir = pg.p.locator(".parrafo-guion button", has_text="Partir").first
+    fin = time.time() + 120
+    while time.time() < fin and not (partir.count() and partir.is_enabled()):
+        pg.p.wait_for_timeout(1000)
+    partir.click()
+    pg.p.wait_for_timeout(800)
+    ok(pg.visible("button", "Cortar aquí") or pg.visible("button", "Corta al menos"),
+       "«Partir» abre el editor para cortar el bloque")
+    pg.captura("16_partir_bloque", entera=False)
+    pg.sin_errores("lo que sale a veces")
     pg.cerrar()
 
 
@@ -1192,15 +1324,11 @@ def _buscar_boton(pg, texto, n):
     return None
 
 
-@escenario
-def todos_los_botones(navegador, datos):
-    """Cada pantalla, CADA botón: pulsarlo tiene que cambiar algo que se vea
-    (la pantalla, un aviso, un diálogo) y no dar ningún error. Un botón que no
-    hace nada al pulsarlo es el fallo más tonto de encontrar a mano y el más
-    fácil de dejar pasar: así salieron «Ver cómo quedó» y la miniatura."""
+def _pantallas(datos):
+    """Cada pantalla de la aplicación y cómo se llega a ella (JavaScript)."""
     pid = datos["video"]
-    pantallas = [
-        ("portada", f"elegirCliente(''); recordarVideoLight(''); await cargarGaleriaLight(true); irALight('galeria');"),
+    return [
+        ("portada", "elegirCliente(''); recordarVideoLight(''); await cargarGaleriaLight(true); irALight('galeria');"),
         ("proyecto", f"elegirCliente('{datos['cliente']}'); recordarVideoLight(''); irALight('galeria');"),
         ("ficha del estilo", f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{datos['preset']}' }});"),
         ("estilo nuevo", "irALight('crear');"),
@@ -1209,7 +1337,129 @@ def todos_los_botones(navegador, datos):
         ("imágenes", f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();"),
         ("vídeo", f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'video'; pintarLight();"),
         ("configuración", "conmutarConfig(true);"),
+        ("guía de inicio", "abrirInicio(0);"),
     ]
+
+
+#: Lo que no puede salir NUNCA en un texto de la pantalla.
+TEXTOS_MALOS = re.compile(r"\bundefined\b|\bNaN\b|\[object Object\]|\bnull\b|Ã[\u0080-\u00bf]|Â[«»¿¡]")
+
+MEDIR_JS = """() => {
+  const ancho = document.documentElement.clientWidth;
+  const fuera = [];
+  document.querySelectorAll('#panel *, #config *, #inicio *, header *, .nav-light *').forEach(e => {
+    const r = e.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+    const st = getComputedStyle(e);
+    if (st.position === 'fixed' && e.closest('#asistente')) return;
+    // dentro de algo que ya hace scroll horizontal a propósito, no cuenta
+    let p = e.parentElement, enScroll = false;
+    while (p && p !== document.body) {
+      const o = getComputedStyle(p).overflowX;
+      if (o === 'auto' || o === 'scroll' || o === 'hidden') { enScroll = true; break; }
+      p = p.parentElement;
+    }
+    if (!enScroll && r.right > ancho + 2) fuera.push((e.className || e.tagName) + ' ' + Math.round(r.right));
+  });
+  const grandes = [...document.querySelectorAll('#panel img, #config img')].filter(i => {
+    const r = i.getBoundingClientRect(); return r.width > ancho + 2;
+  }).map(i => i.src.slice(-40));
+  // LO QUE TAPA LA BURBUJA DEL ASISTENTE: un botón que no se puede pulsar
+  // porque la burbuja está encima (y no hay forma de apartarlo con el scroll)
+  const burbuja = document.querySelector('#burbuja-asistente');
+  const tapados = [];
+  if (burbuja && burbuja.getClientRects().length) {
+    const alto = document.documentElement.clientHeight;
+    const panel = document.querySelector('#panel');
+    const antes = panel.scrollTop;
+    // dos miradas: arriba del todo y abajo del todo. Tapado en las dos = no hay
+    // forma de pulsarlo (lo que está a media página se aparta con el scroll)
+    const mirar = () => {
+      const salen = new Set();
+      document.querySelectorAll('#panel button, #panel a.boton').forEach(b => {
+        const r = b.getBoundingClientRect();
+        if (!r.width || r.bottom > alto || r.top < 0) return;
+        const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        if (e && burbuja.contains(e)) salen.add(b);
+      });
+      return salen;
+    };
+    panel.scrollTop = 0;
+    const arriba = mirar();
+    panel.scrollTop = panel.scrollHeight;
+    const abajo = mirar();
+    panel.scrollTop = antes;
+    abajo.forEach(b => {
+      // tapado abajo y además es lo último (no se puede subir más)
+      tapados.push((b.innerText || b.title || '').trim().slice(0, 30));
+    });
+    if (panel.scrollHeight <= panel.clientHeight + 2) arriba.forEach(b => {
+      if (!abajo.has(b)) tapados.push((b.innerText || b.title || '').trim().slice(0, 30));
+    });
+  }
+  return { scroll: document.documentElement.scrollWidth - ancho, fuera: fuera.slice(0, 6),
+           grandes, tapados, texto: (document.body.innerText || '') };
+}"""
+
+TEXTOS_DE_PANTALLA = {}
+
+
+@escenario
+def tamanos_temas_y_textos(navegador, datos):
+    """Cada pantalla en móvil, tableta y ordenador, y en los dos temas: nada se
+    sale por los lados, ninguna imagen es más ancha que la pantalla y ningún
+    texto dice «undefined», «NaN», «null» ni sale con las tildes rotas. Los
+    textos de todas las pantallas quedan en `textos_de_pantalla.txt` para
+    leerlos de corrido."""
+    problemas = []
+    for ancho, alto, tema in ((390, 844, "oscuro"), (820, 1180, "claro"), (1300, 900, "oscuro"),
+                              (1300, 900, "claro")):
+        for nombre, ir in _pantallas(datos):
+            pg = Pagina(navegador, datos, ancho=ancho, alto=alto, nombre=nombre)
+            if tema == "claro":
+                pg.js("document.documentElement.dataset.tema = 'claro';")
+            pg.aceptar = False
+            pg.js(ir)
+            pg.p.wait_for_timeout(1800)
+            m = pg.p.evaluate(MEDIR_JS)
+            donde = f"{nombre} a {ancho}px ({tema})"
+            if m["scroll"] > 2:
+                problemas.append(f"{donde}: la página se sale {m['scroll']}px por la derecha "
+                                 f"({m['fuera'][:3]})")
+            if m["tapados"]:
+                problemas.append(f"{donde}: la burbuja del asistente tapa {m['tapados'][:3]}")
+            if m["grandes"]:
+                problemas.append(f"{donde}: imágenes más anchas que la pantalla {m['grandes'][:2]}")
+            # el aviso de los subtítulos rotos pone el ejemplo a propósito
+            m["texto"] = m["texto"].replace("«TÃº» en vez de «Tú»", "")
+            malos = sorted(set(x.group(0) for x in TEXTOS_MALOS.finditer(m["texto"])))
+            if malos:
+                trozo = TEXTOS_MALOS.search(m["texto"])
+                problemas.append(f"{donde}: texto con {malos} («…{m['texto'][max(0, trozo.start() - 40):trozo.end() + 20]}…»)")
+            if ancho == 1300 and tema == "oscuro":
+                TEXTOS_DE_PANTALLA[nombre] = m["texto"]
+            if ancho == 390 or (ancho == 1300 and tema == "claro"):
+                pg.captura(f"tam_{ancho}_{tema}_{nombre.replace(' ', '_')}", entera=False)
+            if pg.errores:
+                problemas.append(f"{donde}: errores de JavaScript {pg.errores[:2]}")
+            pg.cerrar()
+    with open(os.path.join(datos["capturas"], "textos_de_pantalla.txt"), "w", encoding="utf-8") as fh:
+        for nombre, texto in TEXTOS_DE_PANTALLA.items():
+            fh.write(f"\n\n========== {nombre.upper()} ==========\n\n{texto}\n")
+    print(f"  (40 combinaciones de pantalla, tamaño y tema; textos en "
+          f"{os.path.join(datos['capturas'], 'textos_de_pantalla.txt')})")
+    ok(not problemas, f"todas las pantallas caben y se leen bien ({len(problemas)}) -- "
+       + " | ".join(problemas[:12]))
+
+
+@escenario
+def todos_los_botones(navegador, datos):
+    """Cada pantalla, CADA botón: pulsarlo tiene que cambiar algo que se vea
+    (la pantalla, un aviso, un diálogo) y no dar ningún error. Un botón que no
+    hace nada al pulsarlo es el fallo más tonto de encontrar a mano y el más
+    fácil de dejar pasar: así salieron «Ver cómo quedó» y la miniatura."""
+    # la guía de inicio no: sus botones van tarjeta a tarjeta y se prueban en otro sitio
+    pantallas = [x for x in _pantallas(datos) if x[0] != 'guía de inicio']
     muertos, rotos, pulsados = [], [], 0
     for nombre, ir in pantallas:
         pg = Pagina(navegador, datos, nombre=nombre)

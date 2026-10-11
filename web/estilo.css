@@ -1967,8 +1967,11 @@ button.primario.grande { padding: 9px 18px; font-size: 14px; }
 /* EN EL MOVIL SE TOCA CON EL PULGAR, no con un raton: 44 px es el minimo que
    se acierta sin ampliar, y aqui el boton esta pegado a «Apartar», que borra. */
 @media (max-width: 560px) {
-  .video-light { gap: 6px; }
+  .video-light { gap: 6px; flex-wrap: wrap; }
   .video-light .renombrar { min-width: 44px; min-height: 40px; }
+  /* el nombre arriba y los botones debajo, a la izquierda: en una sola fila
+     «Apartar» quedaba en el borde derecho, debajo de la burbuja del asistente */
+  .video-light .abrir { flex-basis: 100%; flex-wrap: wrap; }
 }
 
 /* ---- volver, en la cabecera de una pantalla de dentro */
@@ -3016,7 +3019,7 @@ textarea.autoalto, textarea.crece.autoalto { max-height: 60vh; overflow-y: auto;
 .icono-proyecto { font-size: 30px; line-height: 1; margin-bottom: 6px; }
 .logo-proyecto { max-height: 44px; max-width: 140px; object-fit: contain; margin-bottom: 6px; }
 .logo-proyecto.pequeno { max-height: 32px; margin: 0; }
-.migas { margin-bottom: 8px; }
+.migas { margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
 .cab-proyecto { gap: 12px; }
 .mandos-proyecto { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 18px; }
 .mandos-proyecto .mini.activo { border-color: var(--acento); color: var(--acento); }

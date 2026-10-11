@@ -10,6 +10,26 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Ortografía, ocultos y la prueba real (11 de octubre, tarde)**
+- **Corrector de ortografía**: en el **Guion** (antes de grabar la voz, gratis)
+  y en la pantalla **Vídeo** para los **subtítulos** de un vídeo ya montado.
+  Propone las tildes, letras y signos que faltan; tú marcas y aplicas. En un
+  vídeo hecho solo cambia el texto del subtítulo: ni voz ni imágenes, y volver
+  a montar es gratis.
+- Revisados **todos los textos** del Studio: 107 corregidos (sobre todo los
+  mensajes de error, que iban sin tildes).
+- **Proyectos ocultos**: con «Ver los ocultos», cada uno tiene **Dejar de
+  ocultar** (antes solo se podía desde dentro del proyecto).
+- **Quitar o devolver una lámina** se hace en la propia ficha, con su barra (ya
+  no salta a la pantalla de «generando»).
+- **Rehacer una imagen mientras se monta el vídeo** ya no da error: entra en la
+  cola («empieza al terminar el montaje») y arranca sola.
+- Fuera el **menú de proyectos antiguo** y «Rendimiento» (no se veían). La
+  papelera está en la portada.
+- **La prueba real**: en la consola del servidor, `asvs probar` hace un vídeo
+  de prueba de 30 s con tus claves (~1 $), lo comprueba solo de punta a punta
+  —también si cada nota se aplicó, mirándolo con Claude— y deja un informe.
+
 **Imágenes rehechas que «no cambiaban» (11 de octubre)**
 - **«Rehacer esta imagen» retoca la de ahora** (se la pone delante al
   generador para conservar la composición), y en un cambio grande salía casi

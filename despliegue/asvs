@@ -13,6 +13,7 @@
 #      asvs clave        ver o cambiar la contrasena de acceso
 #      asvs https        (re)intentar el certificado
 #      asvs repositorio  de donde se baja el codigo (y cambiarlo: asvs repositorio usuario/repo)
+#      asvs probar       la prueba real: un video de 30 s con tus claves (~1 $), comprobado solo
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
@@ -193,6 +194,19 @@ https() {
   echo "Listo: https://$dominio"
 }
 
+# LA PRUEBA REAL (herramientas/prueba_real.py): un video de prueba con las
+# claves de verdad, comprobado de punta a punta. Corre como el usuario del
+# servicio y con su entorno, igual que el Studio.
+probar() {
+  local puerto
+  puerto="$(_puerto)"
+  echo "La prueba real gasta ~0,6-1 \$ (un video de 30 s en calidad baja) y tarda 15-25 min."
+  echo "No toca tus videos: crea uno nuevo, «Prueba real <fecha>»."
+  sudo -u "$USUARIO" bash -c "set -a; . '$RAIZ/datos/entorno'; set +a; cd '$RAIZ/app' && \
+    PUERTO='${puerto:-8110}' '$RAIZ/venv/bin/python' herramientas/prueba_real.py \
+    --api 'http://127.0.0.1:${puerto:-8110}' $*"
+}
+
 case "${1:-estado}" in
   estado|"")   estado ;;
   registro)    registro "${2:-60}" ;;
@@ -201,6 +215,7 @@ case "${1:-estado}" in
   clave)       shift; estudio-clave "$@" ;;
   https)       https ;;
   repositorio) repositorio "${2:-}" ;;
-  -h|--help|ayuda) sed -n '5,15p' "$0" | sed 's/^#  \{0,1\}//' ;;
+  probar)      shift; probar "$@" ;;
+  -h|--help|ayuda) sed -n '5,16p' "$0" | sed 's/^#  \{0,1\}//' ;;
   *) echo "No entiendo «$1». Prueba:  asvs ayuda"; exit 1 ;;
 esac

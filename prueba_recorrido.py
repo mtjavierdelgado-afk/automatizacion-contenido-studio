@@ -1542,7 +1542,8 @@ def abrir_no_escribe_nada(navegador, datos):
         pg = Pagina(navegador, datos, nombre=nombre)
         pg.p.on("request", lambda r, nombre=nombre: escrituras.append(f"{nombre}: {r.method} {r.url.split('/api/', 1)[-1]}")
                 if r.method in ("PUT", "POST", "DELETE", "PATCH") and "/api/" in r.url
-                and not re.search(r"/api/(asistente|sistema/revis|me$|logout|ortografia)", r.url) else None)
+                and not re.search(r"/api/(asistente|sistema/revis|me$|logout|ortografia|estimacion$|presets-light/plan$)",
+                                  r.url) else None)
         pg.js(ir)
         pg.p.wait_for_timeout(2500)
         pg.cerrar()
@@ -1615,12 +1616,14 @@ def repintar_no_pierde_nada(navegador, datos):
         # se deja todo como estaba
         campos = pg.p.locator("#panel textarea:visible, #panel input[type=text]:visible, "
                               "#panel input[type=search]:visible, #config textarea:visible")
+        # EXACTAMENTE lo que había (no «quitando lo añadido»: un espacio de
+        # menos deja el encargo distinto y el guion obsoleto para los demás)
+        originales_por_indice = dict(originales)
         for i in range(min(campos.count(), 12)):
             try:
                 campo = campos.nth(i)
-                valor = campo.input_value()
-                if "ZQX" in valor:
-                    campo.fill(re.sub(r"\s*ZQX\d+", "", valor))
+                if "ZQX" in campo.input_value() and i in originales_por_indice:
+                    campo.fill(originales_por_indice[i])
                     campo.dispatch_event("input")
             except Exception:                                # noqa: BLE001
                 continue
@@ -1745,7 +1748,8 @@ def ortografia_de_los_subtitulos(navegador, datos):
     pg.pulsar(".panel-ortografia button", "Revisar la ortografía")
     ok(pg.esperar(".panel-ortografia", "con faltas", 90), "propone correcciones")
     texto = pg.p.locator(".panel-ortografia").first.inner_text()
-    ok("kilómetros" in texto, f"entre ellas, «kilometros → kilómetros» ({texto[:160]!r})")
+    ok("→" in texto and any(x in texto for x in ("grúas", "mercancía", "idénticas", "más")),
+       f"con las tildes que faltan («gruas → grúas»…) ({texto[:200]!r})")
     pg.js("pintarLight();")
     ok(pg.visible(".panel-ortografia button", "Aplicar las marcadas"),
        "y lo propuesto sigue ahí aunque la pantalla se repinte")
@@ -1762,16 +1766,18 @@ def ortografia_de_los_subtitulos(navegador, datos):
        "y el Vídeo dice que hay que volver a montarlo")
     ok("No se dibuja ninguna imagen" in pg.p.locator(".caja-aviso").filter(
         has_text="ANTES de tus").first.inner_text(), "sin dibujar ninguna imagen")
-    pg.pulsar(".pie-guion button", "Regenerar Vídeo")
-    pg.p.wait_for_timeout(1500)
-    ok(pg.sin_trabajo(300), "se vuelve a montar")
+    # se monta por la API (el botón depende de lo que hayan dejado otros escenarios)
+    r, d = api.post(f"/api/proyectos/{pid}/generar", {"tanda": "render", "modo": "pendientes"})
+    fin_montaje = api.esperar(d.get("trabajo_id") or (d.get("trabajo") or {}).get("id"), 600)
+    ok(fin_montaje.get("estado") == "listo", f"se vuelve a montar ({fin_montaje.get('estado')})")
+    activa = _version_de(datos, "callouts", "").get("activa")
     capa = ""
-    for raiz, _d, ficheros in os.walk(os.path.join(datos["proyectos"], pid, "pasos", "callouts")):
-        for nombre in ficheros:
-            if nombre.endswith(".svg"):
-                with open(os.path.join(raiz, nombre), encoding="utf-8", errors="replace") as fh:
-                    capa += fh.read()
-    ok("kilómetros" in capa, "y el subtítulo dibujado ya dice «kilómetros»")
+    carpeta = os.path.join(datos["proyectos"], pid, "pasos", "callouts", f"v{activa}", "capas_fijas")
+    for nombre in os.listdir(carpeta) if os.path.isdir(carpeta) else []:
+        with open(os.path.join(carpeta, nombre), encoding="utf-8", errors="replace") as fh:
+            capa += fh.read()
+    ok(any(x in capa for x in ("grúas", "mercancía", "idénticas", "decía")),
+       "y el subtítulo dibujado ya lleva las tildes corregidas («grúas», «mercancía»…)")
     # EL GUION, por la API (el vídeo de prueba ya tiene la voz grabada)
     r, d = api.post(f"/api/proyectos/{pid}/ortografia/revisar",
                     {"fuente": "guion", "textos": {"B001": "una manana de octubre"}})

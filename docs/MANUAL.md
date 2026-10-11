@@ -47,6 +47,9 @@ salió.
 
 La primera pantalla. Cada tarjeta es un estilo; **Un estilo nuevo** crea otro.
 
+Un proyecto **oculto** no sale en la portada; con «Ver los ocultos» se ven, y
+**Dejar de ocultar** lo devuelve a la portada para siempre.
+
 Lo que borras o apartas (un estilo, un vídeo) va a la **🗑 Papelera**, arriba
 en la portada y dentro de cada proyecto: desde ahí se **devuelve** cuando
 quieras. Dentro de un vídeo, **Estilos** abre el estilo con el que se hizo.
@@ -237,6 +240,11 @@ derechos: «Mario Kart», «Nintendo Switch»…):
 ## Vídeo
 
 - **Montar el vídeo** junta imágenes, voz, subtítulos, música y efectos en el MP4.
+- **Ortografía de los subtítulos**: «Revisar la ortografía» propone las tildes,
+  letras y signos que faltan en lo que se lee. Marca las que quieras y «Aplicar
+  las marcadas»: cambia solo el texto del subtítulo (ni voz ni imágenes) y
+  «Regenerar Vídeo» lo monta, gratis. En el **Guion**, antes de grabar la voz,
+  hay el mismo corrector para el texto.
 - Si la voz de un vídeo llegó con las tildes rotas («TÃº»), sale el aviso
   **Arreglar los subtítulos**: los vuelve a dibujar y monta, sin pagar nada.
 - **El repaso**: escribe notas sobre el vídeo («la música está alta», «este

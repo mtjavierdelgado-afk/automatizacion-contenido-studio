@@ -135,6 +135,20 @@ scp -r . root@IP:/root/asvs-prueba
 ssh root@IP "cd /root/asvs-prueba && bash instalar.sh"
 ```
 
+## La prueba real: `asvs probar`
+
+`herramientas/prueba_real.py`, lanzada como el usuario del servicio y con su
+entorno. Crea un vídeo de prueba de 30 s en calidad baja **con las claves de
+verdad** (OpenAI, Cartesia, Jamendo, FreeSound y la cuenta de Claude), lo
+lleva hasta el MP4, rehace dos imágenes con notas («Rehacer» y «Desde cero») y
+comprueba sola: que cada paso termina, que el MP4 dura lo que la voz y lleva
+sonido, que no hay letras rotas, que lo gastado cuadra con lo prometido y nada
+se pagó dos veces, y —con Claude mirando las imágenes— si cada nota se aplicó y
+si el guion es fiel al material. Gasta ~0,6-1 $ y tarda 15-25 minutos. No toca
+ningún vídeo existente. El informe sale en la consola y queda en
+`<proyectos>/_sistema/pruebas_reales/`. Se lanza antes de unir una rama a `main`
+(después de `ASVS_RAMA=<rama> asvs actualizar`).
+
 ## Lo único del código que la aplicación reescribe
 
 `motores/reglas/reglas.json` — las reglas de dibujo que el destilador aprende de

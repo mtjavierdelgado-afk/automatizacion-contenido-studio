@@ -42,7 +42,7 @@ export ESTUDIO_ESTADISTICAS="$TMP_BASE/estudio_pruebas_estadisticas.json"
 rm -f "$ESTUDIO_ESTADISTICAS"
 
 suites=(
-  prueba_api.py prueba_coste_capturas.py prueba_clases_css.py
+  prueba_api.py prueba_coste_capturas.py prueba_clases_css.py prueba_textos.py
   nucleo/prueba_nucleo.py nucleo/prueba_adversarial.py
   nucleo/prueba_manifiestos.py
   pasos/prueba_ajustes.py pasos/prueba_login.py

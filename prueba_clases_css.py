@@ -74,6 +74,13 @@ def main():
            + (f" -- {combinada[:3]}" if combinada else ""))
     ok(re.search(r"\[hidden\]\s*\{[^}]*display\s*:\s*none\s*!important", css),
        "el atributo hidden esconde aunque la clase ponga display (regla global)")
+    # LA CSP DEL PROXY bloquea los atributos style="" (tambien puestos con
+    # setAttribute): `h()` los aplica por CSSOM y nadie los escribe a mano
+    ok("setAttribute('style'" not in js and 'setAttribute("style"' not in js,
+       "app.js no pone estilos como atributo (la CSP los bloquearía)")
+    ok("n.style.cssText = valor" in js, "y `h()` aplica `estilo` por CSSOM")
+    html = io.open(os.path.join(RAIZ, "web", "index.html"), encoding="utf-8").read()
+    ok(" style=" not in html, "index.html no lleva atributos style")
     print()
     if _fallos:
         print(f"CLASES CON FALLOS: {len(_fallos)} de {_ok + len(_fallos)}")

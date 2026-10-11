@@ -19,7 +19,27 @@ def _entre(texto, etiqueta):
     return encaje.group(1) if encaje else ""
 
 
+#: Lo que el corrector de ortografia falso sabe arreglar (las palabras sin
+#: tilde del video de prueba).
+TILDES = {"kilometros": "kilómetros", "mas": "más", "gruas": "grúas",
+          "mercancia": "mercancía", "decia": "decía", "identicas": "idénticas",
+          "manana": "mañana", "tripulacion": "tripulación", "zarpo": "zarpó"}
+
+
+def _ortografia(entrada):
+    salida = {}
+    for tid, texto in re.findall(r'<t id="([^"]+)">(.*?)</t>', entrada, re.S):
+        nuevo = re.sub(r"\b(" + "|".join(TILDES) + r")\b",
+                       lambda m: TILDES[m.group(1)], texto)
+        if nuevo != texto:
+            cambios = [[a, b] for a, b in TILDES.items() if re.search(rf"\b{a}\b", texto)]
+            salida[tid] = {"texto": nuevo, "cambios": cambios}
+    return {"correcciones": salida}
+
+
 def responder(entrada):
+    if "<textos>" in entrada and "ORTOGRAFIA" in entrada:
+        return _ortografia(entrada)
     if "<guia>" in entrada and "<texto>" in entrada:
         texto = _entre(entrada, "texto")
         if "[" in texto or "PENDIENTE" in texto:

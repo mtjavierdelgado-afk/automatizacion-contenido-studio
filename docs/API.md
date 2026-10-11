@@ -42,6 +42,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/logo/imagen` | — |
 | `GET` | `/api/proyectos/{pid}/musica/presencia` | Cuánto se oye la música bajo la voz en este vídeo, y los niveles que hay. |
 | `PUT` | `/api/proyectos/{pid}/musica/presencia` | Fija cuánto se oye la música y, si el vídeo ya está montado, lo REMONTA. |
+| `POST` | `/api/proyectos/{pid}/ortografia/aplicar` | Pone los subtitulos corregidos: {cambios: {plano: texto}}. |
+| `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de |
+| `GET` | `/api/proyectos/{pid}/ortografia/{rid}` | Como va la revision de ortografia, y lo que propone al terminar. |
 | `POST` | `/api/proyectos/{pid}/presets-canal/{preset_id}/aplicar` | Copia los valores del preset a los params de los pasos que toque. |
 | `GET` | `/api/proyectos/{pid}/previsualizacion` | Las piezas para ver el video sin montarlo. -> {escenas, audio, ...} |
 | `PUT` | `/api/proyectos/{pid}/redactor` | Guarda el prompt escrito de cada plano. Un prompt vacío lo quita. |
@@ -323,4 +326,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**209 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**212 endpoints.** Escrito por `generar_api.py` desde `app.py`.

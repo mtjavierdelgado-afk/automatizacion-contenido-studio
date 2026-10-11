@@ -270,7 +270,10 @@ def declarados(s):
         for x in re.findall(r"[A-Za-z_$][\w$]*", m.group(1)):
             encontrados.add(x)
     # metodos y propiedades de objeto: `nombre(...)` al principio de linea
-    declara(r"^\s*([A-Za-z_$][\w$]*)\s*\(", 1, re.M)
+    # SOLO si detras viene su cuerpo: `nombre(a, b) {`. Sin el `{` una llamada
+    # suelta en su linea (`cerrarMenuProyectos();`) contaba como declarada y
+    # una funcion borrada pasaba sin aviso (11-10-2026)
+    declara(r"^\s*(?:async\s+)?([A-Za-z_$][\w$]*)\s*\([^()\n]*\)\s*\{", 1, re.M)
     return encontrados
 
 

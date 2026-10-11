@@ -2547,7 +2547,7 @@ function seccionZonaHoraria() {
   };
   rellenar('');
   caja.appendChild(h('div', { clase: 'fila' },
-    h('input', { type: 'search', placeholder: 'busca tu ciudad (Lima, Madrid, Mexico…)',
+    h('input', { type: 'search', placeholder: 'busca tu ciudad (Lima, Madrid, México…)',
       'aria-label': 'Buscar zona horaria', oninput: ev => rellenar(ev.target.value) }),
     selector,
     delNavegador && delNavegador !== elegida
@@ -4484,11 +4484,10 @@ function arrancar() {
       guardarSucios().then(() => toast('guardado'));
     }
     if (ev.key === 'Escape') {
-      ['lupa', 'capturador', 'rendimiento', 'papelera', 'conservacion',
+      ['lupa', 'capturador', 'papelera', 'conservacion',
        'cuadro-texto']
         .map(id => document.getElementById(id))
         .forEach(nodo => { if (nodo) nodo.remove(); });
-      cerrarMenuProyectos();
       if (INICIO.abierta) cerrarInicio(true);
       if (ASISTENTE.abierto) conmutarAsistente(false);
       if (!$('#config').classList.contains('plegado')) conmutarConfig(false);
@@ -4790,8 +4789,8 @@ async function salirDeStudio() {
   /* Salir SI se pregunta, y es la excepcion de «editar es decidir»: no es una
      edicion, es irse. Un roce en el movil que te tira la sesion en mitad de un
      repaso obliga a volver a entrar para nada. */
-  if (!window.confirm('¿Cerrar la sesion? Habra que volver a entrar con la '
-                      + 'contrasena.')) return;
+  if (!window.confirm('¿Cerrar la sesión? Habrá que volver a entrar con la '
+                      + 'contraseña.')) return;
   const boton = $('#btn-salir');
   if (boton) boton.disabled = true;
   try {
@@ -4809,7 +4808,7 @@ async function salirDeStudio() {
     window.location.href = `${BASE}/login`;
   } catch (e) {
     if (boton) boton.disabled = false;
-    toast(`no se ha podido cerrar la sesion: ${e.message}`, true);
+    toast(`no se ha podido cerrar la sesión: ${e.message}`, true);
   }
 }
 
@@ -5490,7 +5489,7 @@ function portadaDeProyectos(caja, lista) {
   const listaOcultos = lista.filter(c => c.oculto);
   if (APP.light.verOcultos && listaOcultos.length) {
     const caja2 = h('div', { clase: 'sueltos ocultos-portada' },
-      h('b', {}, listaOcultos.length === 1 ? 'Un proyecto oculto' : `${listaOcultos.length} proyectos ocultos`),
+      h('b', {}, listaOcultos.length === 1 ? 'Oculto: 1 proyecto' : `${listaOcultos.length} proyectos ocultos`),
       h('span', { clase: 'meta' }, ' — se ven porque has pulsado «Ver los ocultos». Para que vuelvan a salir siempre:'));
     listaOcultos.forEach(ficha => caja2.appendChild(h('div', { clase: 'fila' },
       h('span', { clase: 'crece' }, ficha.nombre),
@@ -6933,6 +6932,121 @@ async function refrescarFichasLight() {
    (`POST /api/proyectos/{pid}/generar`), no encadenada desde aquí: encadenar en
    el navegador se rompe al recargar la página, justo en un flujo pensado para
    dejarlo generando y mirarlo desde el móvil. */
+/* EL CORRECTOR DE ORTOGRAFÍA (pasos/ortografia.py): del GUION antes de grabar
+   la voz, y de los SUBTÍTULOS de un vídeo ya montado. Propone; aplica solo lo
+   marcado. El estado vive en el vídeo (`v.ortografia`), no en el panel: la
+   pantalla se repinta mientras revisa y el resultado no puede perderse (es lo
+   que le pasaba a «Revisar»). */
+function panelOrtografia(fuente) {
+  const v = APP.light.video;
+  v.ortografia = v.ortografia || {};
+  const est = v.ortografia[fuente] || {};
+  const titulo = fuente === 'guion' ? 'Ortografía del guion' : 'Ortografía de los subtítulos';
+  const caja = h('div', { clase: 'panel-ortografia' });
+  const cab = h('div', { clase: 'fila' },
+    h('b', {}, titulo),
+    h('span', { clase: 'meta crece' }, fuente === 'guion'
+      ? 'tildes, letras y signos, antes de grabar la voz (gratis)'
+      : 'tildes, letras y signos de lo que se lee; corregir solo vuelve a montar (gratis)'),
+    h('button', { clase: 'mini', disabled: est.estado === 'pensando' || !!trabajoVideoLight(),
+      onclick: () => revisarOrtografia(fuente) },
+    est.estado === 'pensando' ? 'Revisando…' : (est.estado ? 'Revisar otra vez' : 'Revisar la ortografía')));
+  caja.appendChild(cab);
+  if (est.estado === 'pensando') {
+    caja.appendChild(h('div', { clase: 'cargando' }, `revisando ${est.revisados || ''} textos… (puede tardar un minuto)`));
+  } else if (est.estado === 'error') {
+    caja.appendChild(cajaError(est.error || 'no se ha podido revisar'));
+  } else if (est.estado === 'listo') {
+    const props = est.propuestas || [];
+    if (!props.length) {
+      caja.appendChild(h('div', { clase: 'meta' }, `✓ Sin faltas en ${est.revisados || 0} textos.`));
+    } else {
+      est.marcadas = est.marcadas || new Set(props.map(p => p.id));
+      const lista = h('div', { clase: 'lista-ortografia' });
+      props.forEach(p => {
+        const marca = h('input', { type: 'checkbox', checked: est.marcadas.has(p.id),
+          onchange: ev => { if (ev.target.checked) est.marcadas.add(p.id); else est.marcadas.delete(p.id); } });
+        lista.appendChild(h('label', { clase: 'fila-ortografia' }, marca,
+          h('span', { clase: 'id' }, p.id),
+          h('span', { clase: 'crece' },
+            h('span', { clase: 'despues' }, p.despues),
+            (p.cambios || []).length ? h('span', { clase: 'meta' },
+              ' · ' + p.cambios.map(c => `${c[0]} → ${c[1]}`).join(', ')) : null)));
+      });
+      caja.appendChild(h('div', { clase: 'meta' }, `${props.length} con faltas de ${est.revisados || props.length} textos:`));
+      caja.appendChild(lista);
+      caja.appendChild(h('div', { clase: 'fila' },
+        h('button', { clase: 'primario', disabled: !!trabajoVideoLight(),
+          onclick: () => aplicarOrtografia(fuente) }, 'Aplicar las marcadas'),
+        h('span', { clase: 'meta' }, fuente === 'guion'
+          ? 'se guardan en el guion; la voz se graba después con ellas'
+          : 'se quedan como texto del subtítulo de cada plano: «Regenerar Vídeo» las monta')));
+    }
+  }
+  return caja;
+}
+
+async function revisarOrtografia(fuente) {
+  const v = APP.light.video;
+  const pid = v.pid;
+  v.ortografia = v.ortografia || {};
+  const cuerpo = { fuente };
+  if (fuente === 'guion') {
+    cuerpo.textos = {};
+    ((v.guion || {}).bloques || []).forEach(b => {
+      cuerpo.textos[b.id] = textoVisibleLight(textoDeBloqueLight(b));
+    });
+  }
+  v.ortografia[fuente] = { estado: 'pensando' };
+  pintarLight();
+  try {
+    const lanzada = await pedir(`${API.proyecto(pid)}/ortografia/revisar`, { method: 'POST', cuerpo });
+    v.ortografia[fuente].revisados = lanzada.revisados;
+    let ficha = { estado: 'pensando' };
+    for (let i = 0; i < 160 && ficha.estado === 'pensando'; i += 1) {
+      await new Promise(r => setTimeout(r, 1500));
+      ficha = await pedir(`${API.proyecto(pid)}/ortografia/${lanzada.id}`);
+    }
+    if (ficha.estado === 'pensando') throw new Error('la revisión tarda demasiado: vuelve a pedirla en un momento');
+    if (videoAbierto().pid !== pid) return;
+    v.ortografia[fuente] = ficha;
+  } catch (e) {
+    if (videoAbierto().pid !== pid) return;
+    v.ortografia[fuente] = { estado: 'error', error: e.message };
+  }
+  pintarLight();
+}
+
+async function aplicarOrtografia(fuente) {
+  const v = APP.light.video;
+  const est = (v.ortografia || {})[fuente] || {};
+  const elegidas = (est.propuestas || []).filter(p => (est.marcadas || new Set()).has(p.id));
+  if (!elegidas.length) { toast('No hay ninguna marcada', true); return; }
+  try {
+    if (fuente === 'guion') {
+      // por el MISMO camino que escribir a mano en el bloque
+      const porId = {};
+      ((v.guion || {}).bloques || []).forEach(b => { porId[b.id] = b; });
+      elegidas.forEach(p => {
+        const b = porId[p.id];
+        if (b) guardarBloqueLight(b.id, p.despues, b.insertado ? undefined : b.texto, !!b.insertado);
+      });
+      await guardarBloquesPendientesLight();
+      await recargarVideoAbierto();
+    } else {
+      const cambios = {};
+      elegidas.forEach(p => { cambios[p.id] = p.despues; });
+      await pedir(`${API.proyecto(v.pid)}/ortografia/aplicar`, { method: 'POST', cuerpo: { cambios } });
+      await refrescarLoDibujado();
+    }
+    toast(`${elegidas.length} corrección(es) puestas`);
+    delete v.ortografia[fuente];
+    pintarLight();
+  } catch (e) {
+    toast(`no se han podido poner: ${e.message}`, true);
+  }
+}
+
 /* «Arreglar los subtítulos»: rótulos de todos los planos y montaje, sin pagar
    nada (ver `rehacer_subtitulos` en app.py). */
 async function rehacerSubtitulosLight() {
@@ -7321,6 +7435,10 @@ function vistaGuionLight() {
   // si algo quedó viejo (un cambio de estilo traído, por ejemplo), qué pulsar
   const siguiente = siguientePasoLight();
   if (siguiente) caja.appendChild(siguiente);
+  /* LA ORTOGRAFÍA DEL GUION, ANTES DE GRABAR: aquí es gratis, y de aquí salen
+     la voz y los subtítulos. Con la voz ya grabada, tocar el guion es
+     regrabar: entonces se corrigen los subtítulos, en la pantalla Vídeo. */
+  if (!v.audio) caja.appendChild(panelOrtografia('guion'));
 
   // EL REPRODUCTOR VIVE EN LA BARRA DE ABAJO (ver `pieLight`). Estaba arriba
   // del guion para que los mandos no se fueran con el scroll; la barra fija lo
@@ -8067,7 +8185,7 @@ function ayudaDiapositivas(hayVideo, obsoleto, queda) {
   }
   return 'Dibuja los planos, les monta los subtítulos y las cartelas y prepara '
     + 'la música. Para ahí, en las diapositivas, para que lo mires antes de '
-    + 'gastar el render: no monta ningun MP4.';
+    + 'gastar el render: no monta ningún MP4.';
 }
 
 
@@ -8123,7 +8241,7 @@ function pieLight() {
     corriendo ? barraTandaLight('voz')
       : (hayAudio ? reproductorLight() : h('span', { clase: 'crece' })),
     corriendo ? conAyuda(
-      'Corta la tanda donde este. Lo que ya se ha generado se queda hecho y no '
+      'Corta la tanda donde esté. Lo que ya se ha generado se queda hecho y no '
       + 'hay que volver a pagarlo.',
       h('button', {
         clase: 'mini peligro', onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
@@ -8992,11 +9110,11 @@ function botonRenderizarLight() {
   const notasSinAplicar = estadoRepaso().pendientes > 0;
   return conAyuda(
     notasSinAplicar
-      ? 'Tienes notas del repaso sin aplicar. Esto solo montaria el MP4 y '
-        + 'saldria sin ellas. Usa «Aplicar», que aplica y monta de una vez.'
+      ? 'Tienes notas del repaso sin aplicar. Esto solo montaría el MP4 y '
+        + 'saldría sin ellas. Usa «Aplicar», que aplica y monta de una vez.'
       : unirAyuda('Encadena los planos que acabas de mirar, con sus transiciones, '
         + 'la voz y la música, y saca el MP4. No genera ninguna imagen: no cuesta '
-        + 'dinero, cuesta tiempo de maquina.', textoDelPlan('render')),
+        + 'dinero, cuesta tiempo de máquina.', textoDelPlan('render')),
     h('button', {
       clase: notasSinAplicar ? 'mini' : 'avisa',
       disabled: corriendo || notasSinAplicar,
@@ -9086,6 +9204,8 @@ function vistaVideoLight() {
         'Arreglar los subtítulos')));
   }
 
+  if (hayMp4Light()) caja.appendChild(panelOrtografia('subtitulos'));
+
   const marco = h('div', { clase: `marco-video ${formatoDelVideo()}` });
   if (hayMp4Light() && !trabajoVideoLight()) {
     marco.appendChild(videoLight());
@@ -9138,15 +9258,15 @@ function vistaVideoLight() {
        para dejarte el mismo video sin tus notas. Se queda, apagado y con el
        motivo puesto, en vez de esconderse: desaparecer no explica nada. */
     conAyuda(notasSinAplicar
-      ? 'Tienes notas del repaso sin aplicar. Esto solo volveria a montar el MP4 '
-        + 'y saldria igual, sin ellas. Usa «Aplicar los cambios» de abajo: '
+      ? 'Tienes notas del repaso sin aplicar. Esto solo volvería a montar el MP4 '
+        + 'y saldría igual, sin ellas. Usa «Aplicar los cambios» de abajo: '
         + 'aplica y monta, en un solo trabajo.'
       : (quedaTandaLight('render') === false
         ? 'El MP4 está al día con los planos y el audio de ahora. Volver a '
-          + 'montarlo daria el mismo fichero.'
+          + 'montarlo daría el mismo fichero.'
         : unirAyuda('Encadena los planos que ya has visto, con sus transiciones, '
           + 'la voz y la música, y saca el MP4. No genera ninguna imagen: no '
-          + 'cuesta dinero, cuesta tiempo de maquina.', textoDelPlan('render'))),
+          + 'cuesta dinero, cuesta tiempo de máquina.', textoDelPlan('render'))),
       h('button', {
         clase: notasSinAplicar ? 'mini' : 'primario',
         disabled: !!trabajoVideoLight() || notasSinAplicar
@@ -9162,7 +9282,7 @@ function vistaVideoLight() {
     h('span', { clase: 'crece' }),
     barraTandaLight('render'),
     trabajoVideoLight() ? conAyuda(
-      'Corta el montaje donde este. Los clips ya encadenados se quedan hechos.',
+      'Corta el montaje donde esté. Los clips ya encadenados se quedan hechos.',
       h('button', {
         clase: 'mini peligro', onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
       }, 'Parar')) : null,
@@ -9173,7 +9293,7 @@ function vistaVideoLight() {
     h('span', { clase: 'crece' }),
     botonAplicarRepaso(),
     hayMp4Light() ? conAyuda(
-      'Baja el MP4 tal y como esta ahora mismo.',
+      'Baja el MP4 tal y como está ahora mismo.',
       h('a', {
         clase: 'boton mini', href: urlMp4Light(), download: '',
       }, 'Descargar')) : null);
@@ -9745,7 +9865,7 @@ function irAlMomentoDeLaNota(nota) {
     const escenas = (PREVIA.ficha || {}).escenas || [];
     const i = escenas.findIndex(e => e.id === nota.plano);
     if (i < 0) {
-      toast('esa nota no esta anclada a ninguna escena', true);
+      toast('esa nota no está anclada a ninguna escena', true);
       return;
     }
     pararPrevia();
@@ -10024,7 +10144,7 @@ function listaDeNotas() {
               ? 'Esperando turno. Entra en cuanto acabe alguna de las que van '
                 + 'ahora.'
               : 'Vuelve a dibujar SOLO este plano con lo que has escrito. Se '
-                + 'hacen hasta tres a la vez; si pides mas, esperan turno.',
+                + 'hacen hasta tres a la vez; si pides más, esperan turno.',
           h('button', {
             clase: est === 'hecha' ? 'mini' : 'mini avisa',
             disabled: !nota.plano || est === 'corriendo' || est === 'en cola',
@@ -10117,7 +10237,7 @@ function botonAplicarRepaso() {
     (videoAbierto().vista === 'previa'
       ? 'Pone en cola todas las notas de esta pantalla y va rehaciendo esas '
         + 'imágenes, una a una. Puedes seguir mirando mientras: cada tarjeta '
-        + 'dice por donde va la suya.'
+        + 'dice por dónde va la suya.'
       : 'Se aplica lo más barato que resuelve cada nota: bajar la música vuelve '
         + 'a mezclar el audio, cambiar una cartela redibuja una capa, y solo se '
         + 'repaga una imagen si de verdad hay que volver a dibujar ese plano. '

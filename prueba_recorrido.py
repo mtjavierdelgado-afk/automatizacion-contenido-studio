@@ -688,7 +688,7 @@ def notas_de_imagenes(navegador, datos):
     tarjeta = pg.p.locator(".nota-imagen").first
     ok("Imagen S" in tarjeta.inner_text(), "la tarjeta dice QUÉ imagen es")
     ok("«" in tarjeta.inner_text(), "y lo que se oye en ella (su frase del guion)")
-    ok(tarjeta.locator(".nota-mini img").count() == 1, "con su miniatura")
+    ok(tarjeta.locator(".nota-mini:not(.nota-antes) img").count() == 1, "con su miniatura")
     ok(pg.visible(".nota-imagen button", "Rehacer esta imagen"), "y su botón para rehacerla")
     pg.captura("07_nota_nueva")
     # mientras se monta el vídeo (el remontaje de la música del Encargo) no se
@@ -925,7 +925,7 @@ def rehacer_y_verlo_en_el_video(navegador, datos):
     ok(tarjeta().locator(".nota-antes img").count() == 1,
        "y la tarjeta enseña cómo era ANTES al lado de la nueva")
     src_antes = tarjeta().locator(".nota-antes img").get_attribute("src") or ""
-    src_ahora = tarjeta().locator(".nota-mini img").first.get_attribute("src") or ""
+    src_ahora = tarjeta().locator(".nota-mini:not(.nota-antes) img").first.get_attribute("src") or ""
     ok(src_antes.split("?")[0] != src_ahora.split("?")[0],
        f"y son dos imágenes distintas ({src_antes.split('?')[0][-30:]} / {src_ahora.split('?')[0][-30:]})")
     pg.captura("14_antes_y_ahora", entera=False)
@@ -957,7 +957,13 @@ def rehacer_y_verlo_en_el_video(navegador, datos):
     src_video = pg.p.locator("video").first.get_attribute("src") or ""
     boton = pg.p.locator(".pie-guion button").filter(has_text="Vídeo").first
     ok(boton.is_enabled(), "y «Regenerar Vídeo» se puede pulsar")
+    tandas = []
+    pg.p.on("request", lambda r: tandas.append(r.post_data or "")
+            if r.method == "POST" and r.url.endswith("/generar") else None)
     boton.click()
+    pg.p.wait_for_timeout(800)
+    ok(tandas and all('"pendientes"' in t for t in tandas),
+       f"y monta SOLO lo que quedó viejo (modo «pendientes», nunca «todo»): {tandas[:2]}")
     pg.p.wait_for_timeout(1500)
     ok(pg.sin_trabajo(300), "el vídeo se vuelve a montar")
     pg.p.wait_for_timeout(1500)
@@ -1055,7 +1061,7 @@ def lo_que_se_vio_el_10_de_octubre(navegador, datos):
     ok(tcaja and tcaja["height"] < 600, f"la tarjeta no se come la pantalla: {tcaja}")
     pg.captura("11_nota_con_referencia", entera=False)
     # PULSAR LA MINIATURA LLEVA A LA IMAGEN Y SE VE
-    tarjeta.locator(".nota-mini").click()
+    tarjeta.locator(".nota-mini:not(.nota-antes)").click()
     pg.p.wait_for_timeout(1200)
     ok(pg.p.evaluate("() => ((PREVIA.ficha || {}).escenas || [])[PREVIA.i].id") == "S003",
        "pulsar la miniatura pone esa imagen en el visor")
@@ -1522,6 +1528,57 @@ def tamanos_temas_y_textos(navegador, datos):
 
 
 @escenario
+def abrir_no_escribe_nada(navegador, datos):
+    """REGLA 1 DE CLAUDE.md: abrir una pantalla no escribe nada. Un param «por
+    defecto» escrito al abrir mueve la firma y la pantalla ofrece regenerar (y
+    pagar) el vídeo entero. Se abren todas las pantallas SIN tocar nada,
+    mirando cada petición que sale, y se comparan los estados de los pasos."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    _r, antes = api.get(f"/api/proyectos/{pid}")
+    firmas_antes = {p.get("id"): (p.get("estado"), p.get("firma")) for p in antes.get("pasos") or []}
+    escrituras = []
+    for nombre, ir in _pantallas(datos):
+        pg = Pagina(navegador, datos, nombre=nombre)
+        pg.p.on("request", lambda r, nombre=nombre: escrituras.append(f"{nombre}: {r.method} {r.url.split('/api/', 1)[-1]}")
+                if r.method in ("PUT", "POST", "DELETE", "PATCH") and "/api/" in r.url
+                and not re.search(r"/api/(asistente|sistema/revis|me$|logout|ortografia)", r.url) else None)
+        pg.js(ir)
+        pg.p.wait_for_timeout(2500)
+        pg.cerrar()
+    ok(not escrituras, f"abrir las {len(_pantallas(datos))} pantallas sin tocar nada no escribe nada -- {escrituras[:6]}")
+    _r, despues = api.get(f"/api/proyectos/{pid}")
+    firmas = {p.get("id"): (p.get("estado"), p.get("firma")) for p in despues.get("pasos") or []}
+    ok(firmas == firmas_antes, "y ningún paso cambia de estado ni de firma"
+       + ("" if firmas == firmas_antes else f" -- {[(k, firmas_antes.get(k), v) for k, v in firmas.items() if firmas_antes.get(k) != v]}"))
+
+
+@escenario
+def escape_cierra_lo_abierto(navegador, datos):
+    """Escape cierra la guía de inicio, Configuración, el asistente y el detalle
+    del coste, sin errores (se rompió el 11-10-2026 al quitar el menú de
+    proyectos: el atajo llamaba a una función borrada)."""
+    pg = Pagina(navegador, datos)
+    pg.js("abrirInicio(0);")
+    ok(pg.visible("#inicio"), "la guía de inicio está abierta")
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(500)
+    ok(not pg.visible("#inicio"), "Escape cierra la guía de inicio")
+    pg.js("conmutarConfig(true);")
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(500)
+    ok(pg.p.evaluate("() => document.querySelector('#config').classList.contains('plegado')"),
+       "Escape cierra Configuración")
+    pg.p.locator("#burbuja-asistente").click()
+    pg.p.wait_for_timeout(500)
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(500)
+    ok(not pg.p.evaluate("() => ASISTENTE.abierto"), "Escape cierra el asistente")
+    pg.sin_errores("Escape")
+    pg.cerrar()
+
+
+@escenario
 def repintar_no_pierde_nada(navegador, datos):
     """La pantalla se repinta sola (el coste, un trabajo que avanza, el guardado
     de otro campo). Lo que se está escribiendo NO puede perderse por eso: fue
@@ -1672,6 +1729,63 @@ def todos_los_botones(navegador, datos):
 
 
 DATOS_BOTONES = {}
+
+
+@escenario
+def ortografia_de_los_subtitulos(navegador, datos):
+    """El corrector de ortografía: propone las tildes que faltan en los
+    subtítulos, aplica las marcadas como texto del subtítulo de cada plano
+    (sin tocar voz ni imágenes) y el vídeo montado otra vez las lleva."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'video'; pintarLight();")
+    ok(pg.esperar(".panel-ortografia button", "Revisar la ortografía", 15),
+       "la pantalla Vídeo tiene «Revisar la ortografía» de los subtítulos")
+    pg.pulsar(".panel-ortografia button", "Revisar la ortografía")
+    ok(pg.esperar(".panel-ortografia", "con faltas", 90), "propone correcciones")
+    texto = pg.p.locator(".panel-ortografia").first.inner_text()
+    ok("kilómetros" in texto, f"entre ellas, «kilometros → kilómetros» ({texto[:160]!r})")
+    pg.js("pintarLight();")
+    ok(pg.visible(".panel-ortografia button", "Aplicar las marcadas"),
+       "y lo propuesto sigue ahí aunque la pantalla se repinte")
+    _r, antes = api.get(f"/api/proyectos/{pid}")
+    estado_assets = {p.get("id"): p.get("estado") for p in antes.get("pasos") or []}.get("assets")
+    pg.captura("18_ortografia", entera=False)
+    pg.pulsar(".panel-ortografia button", "Aplicar las marcadas")
+    pg.p.wait_for_timeout(2000)
+    _r, despues = api.get(f"/api/proyectos/{pid}")
+    estados = {p.get("id"): p.get("estado") for p in despues.get("pasos") or []}
+    ok(estados.get("assets") == estado_assets and estados.get("voz") != "obsoleto",
+       f"aplicarlas no toca ni la voz ni las imágenes ({estados})")
+    ok(pg.esperar(".caja-aviso", "ANTES de tus últimos cambios", 15),
+       "y el Vídeo dice que hay que volver a montarlo")
+    ok("No se dibuja ninguna imagen" in pg.p.locator(".caja-aviso").filter(
+        has_text="ANTES de tus").first.inner_text(), "sin dibujar ninguna imagen")
+    pg.pulsar(".pie-guion button", "Regenerar Vídeo")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.sin_trabajo(300), "se vuelve a montar")
+    capa = ""
+    for raiz, _d, ficheros in os.walk(os.path.join(datos["proyectos"], pid, "pasos", "callouts")):
+        for nombre in ficheros:
+            if nombre.endswith(".svg"):
+                with open(os.path.join(raiz, nombre), encoding="utf-8", errors="replace") as fh:
+                    capa += fh.read()
+    ok("kilómetros" in capa, "y el subtítulo dibujado ya dice «kilómetros»")
+    # EL GUION, por la API (el vídeo de prueba ya tiene la voz grabada)
+    r, d = api.post(f"/api/proyectos/{pid}/ortografia/revisar",
+                    {"fuente": "guion", "textos": {"B001": "una manana de octubre"}})
+    rid = d.get("id")
+    fin = time.time() + 60
+    while time.time() < fin:
+        _r, ficha = api.get(f"/api/proyectos/{pid}/ortografia/{rid}")
+        if ficha.get("estado") != "pensando":
+            break
+        time.sleep(1)
+    ok(any(p.get("despues") == "una mañana de octubre" for p in ficha.get("propuestas") or []),
+       "el guion también se revisa (antes de grabar la voz)")
+    pg.sin_errores("la ortografía de los subtítulos")
+    pg.cerrar()
 
 
 @escenario

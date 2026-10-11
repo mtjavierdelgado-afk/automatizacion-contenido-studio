@@ -241,9 +241,13 @@ def fabricar_video(proyectos, env):
     with open(meta, "w", encoding="utf-8") as fh:
         json.dump(voz, fh, ensure_ascii=False)
     referencias = []
-    os.makedirs(os.path.join(taller, "refs"), exist_ok=True)
-    for i in range(3):
-        ruta = os.path.join(taller, "refs", f"ref{i}.png")
+    # EN EL BANCO DE PRESETS y con el prefijo repetido de antes del 09-10-2026,
+    # como las de los videos de verdad: `reparar_estilo_perdido` las «pierde»
+    # renombrandolas y comprueba que «Reparar» las vuelve a encontrar
+    carpeta_refs = os.path.join(taller, "banco", "presets", "pr_prueba")
+    os.makedirs(carpeta_refs, exist_ok=True)
+    for i, eje in enumerate(("cara", "interior", "objeto")):
+        ruta = os.path.join(carpeta_refs, f"00_00_{eje}.png")
         Image.new("RGB", (512, 340), (40 * i + 60, 120, 200 - 30 * i)).save(ruta)
         referencias.append(ruta)
     params = PV.parametros(os.path.join(taller, "_arte"))
@@ -552,6 +556,23 @@ def portada_y_proyectos(navegador, datos):
     pg.captura("01_portada_con_ocultos")
     pg.pulsar("button", "Esconder los ocultos")
     ok(not pg.visible(".tarjeta-proyecto", "Suyu"), "y «Esconder» lo vuelve a esconder")
+    # DEJAR DE OCULTARLO desde la portada (11-10-2026: «lo mantiene como un
+    # oculto visible»)
+    pg.pulsar("button", "Ver los ocultos")
+    ok(pg.visible(".ocultos-portada button", "Dejar de ocultar"),
+       "con los ocultos a la vista, cada uno tiene «Dejar de ocultar»")
+    pg.pulsar(".ocultos-portada button", "Dejar de ocultar")
+    pg.p.wait_for_timeout(1000)
+    _r, d = api.get("/api/clientes")
+    ok(not any(c.get("oculto") for c in d.get("clientes") or [] if c.get("id") == datos["cliente_oculto"]),
+       "y deja de estar oculto de verdad")
+    ok(pg.visible(".tarjeta-proyecto", "Suyu") and "oculto" not in
+       pg.p.locator(".tarjeta-proyecto", has_text="Suyu").first.inner_text().lower(),
+       "su tarjeta sale en la portada sin la marca «oculto»")
+    pg.js("APP.light.verOcultos = false; pintarLight();")
+    ok(pg.visible(".tarjeta-proyecto", "Suyu"), "y sigue saliendo aunque no se pidan los ocultos")
+    api.put(f"/api/clientes/{datos['cliente_oculto']}", {"oculto": True})
+    pg.js("await cargarClientes(); pintarLight();")
     # con clave: se pide y se entra
     api.put(f"/api/clientes/{datos['cliente']}", {"clave": "1234"})
     pg.js("await cargarClientes(); pintarLight();")
@@ -979,6 +1000,24 @@ def rehacer_y_verlo_en_el_video(navegador, datos):
                     capa += fh.read()
     ok("zarpó" in capa or "Zarpó" in capa or "ZARPÓ" in capa,
        "y el subtítulo dibujado dice «zarpó», no «zarpÃ³»")
+    # REHACER UNA IMAGEN MIENTRAS SE MONTA: entra en la cola y espera sola
+    api = datos["api"]
+    api.libre(pid)
+    r, d = api.post(f"/api/proyectos/{pid}/subtitulos/rehacer", {})
+    ok(r.status_code == 202, "se lanza un montaje (los subtítulos)")
+    r, d = api.post(f"/api/proyectos/{pid}/repaso", {"texto": "un faro más grande", "t": 9,
+                                                      "plano": "S003", "pantalla": "imagenes"})
+    nid = (d.get("nota") or {}).get("id")
+    r, d = api.post(f"/api/proyectos/{pid}/imagenes/rehacer", {"notas": [nid]})
+    ok(r.status_code == 202 and d.get("esperando"),
+       f"rehacer una imagen mientras se monta ya no da error: espera en la cola ({r.status_code}, {d.get('esperando')!r})")
+    fin = time.time() + 400
+    hecha = False
+    while time.time() < fin and not hecha:
+        time.sleep(3)
+        _r, rep = api.get(f"/api/proyectos/{pid}/repaso")
+        hecha = any(n.get("id") == nid and n.get("estado") == "aplicado" for n in rep.get("notas") or [])
+    ok(hecha, "y la imagen se dibuja sola en cuanto termina el montaje")
     pg.sin_errores("rehacer y verlo en el vídeo")
     pg.cerrar()
 
@@ -1177,7 +1216,9 @@ def laminas_a_mano(navegador, datos):
     ok(pg.esperar(".laminas-estilo .lamina"), "las láminas están")
     pg.p.locator(".laminas-estilo .lamina").filter(has_text="diagrama").locator(
         "button", has_text="Quitar").click()
-    ok(pg.esperar(".light-generando, .generando, body", None, 5), "quitar una lámina lanza el rehacer")
+    ok(pg.esperar(".trabajo-laminas", "Rehaciendo las láminas", 10),
+       "quitar una lámina lo rehace AHÍ MISMO, con su barra (sin salir de la ficha)")
+    ok(pg.p.evaluate("() => APP.light.vista") == "preset", "y la ficha no se va a la pantalla de generar")
     fin = time.time() + 90
     while time.time() < fin and not pg.visible(".laminas-estilo button", "Devolver"):
         pg.p.wait_for_timeout(1000)
@@ -1631,6 +1672,40 @@ def todos_los_botones(navegador, datos):
 
 
 DATOS_BOTONES = {}
+
+
+@escenario
+def reparar_estilo_perdido(navegador, datos):
+    """«Capas de luz en baño»: un vídeo cuyo estilo se volvió a guardar antes
+    del 09-10-2026 apunta a imágenes que ya no se llaman así. La portada lo
+    avisa y «Reparar» las vuelve a apuntar SIN regenerar nada y sin dejar
+    nada obsoleto (re-sella solo lo que movió)."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    _r, antes = api.get(f"/api/proyectos/{pid}")
+    estados_antes = {p.get("id"): p.get("estado") for p in (antes.get("pasos") or [])}
+    carpeta = os.path.join(datos["proyectos"], "_fabrica", "banco", "presets", "pr_prueba")
+    for nombre in os.listdir(carpeta):
+        if nombre.startswith("00_00_"):
+            os.rename(os.path.join(carpeta, nombre), os.path.join(carpeta, nombre[3:]))
+    _r, d = api.get("/api/sistema/estilos-perdidos")
+    ok(any(v.get("id") == pid and v.get("reparable") for v in d.get("videos") or []),
+       "el vídeo con las imágenes de estilo perdidas se detecta (y se puede reparar)")
+    pg = Pagina(navegador, datos)
+    pg.js("elegirCliente(''); recordarVideoLight(''); await cargarGaleriaLight(true); irALight('galeria');")
+    ok(pg.esperar(".aviso-perdidos button", "Reparar", 15), "la portada lo avisa con «Reparar»")
+    pg.captura("17_estilo_perdido", entera=False)
+    pg.pulsar(".aviso-perdidos button", "Reparar")
+    ok(pg.esperar("#toast", "reparado", 20) or any("reparado" in a for a in pg.avisos()),
+       f"«Reparar» lo repara ({pg.avisos()[-2:]!r})")
+    _r, d = api.get("/api/sistema/estilos-perdidos")
+    ok(not any(v.get("id") == pid for v in d.get("videos") or []), "y deja de salir como perdido")
+    _r, despues = api.get(f"/api/proyectos/{pid}")
+    estados = {p.get("id"): p.get("estado") for p in (despues.get("pasos") or [])}
+    cambiados = {k: (estados_antes.get(k), v) for k, v in estados.items() if estados_antes.get(k) != v}
+    ok(not cambiados, f"sin dejar NADA obsoleto: ni imágenes que volver a pagar ({cambiados})")
+    pg.sin_errores("reparar el estilo perdido")
+    pg.cerrar()
 
 
 @escenario

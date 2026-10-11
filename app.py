@@ -5272,6 +5272,46 @@ def _siguiente_plano(ctx, cola):
     return plano, notas
 
 
+#: Los pasos cuyos trabajos tiene que esperar la cola de notas antes de dibujar.
+_PASOS_QUE_ESPERA_LA_COLA = ("voz", "assets", "callouts", "render")
+
+
+def _otros_trabajos(ctx):
+    """Los trabajos del video en marcha que no son la cola de notas. Sin
+    cerrojo: se llama con el _COLA_LOCK tomado."""
+    return [f for f in ctx.gestor.listar(activos=True)
+            if f.get("nombre") != "notas_imagenes"
+            and f.get("paso") in _PASOS_QUE_ESPERA_LA_COLA]
+
+
+def _lanzar_cola(ctx):
+    """Lanza el trabajo de la cola. Con el _COLA_LOCK tomado."""
+    estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+    trabajo_id = ctx.gestor.lanzar("notas_imagenes", _correr_notas_imagenes,
+                                   ctx, paso="assets")
+    estado["trabajo"] = trabajo_id
+    _registrar_trabajo(trabajo_id, ctx.id)
+    return trabajo_id
+
+
+def _lanzar_cuando_libre(ctx):
+    """Espera FUERA del gestor a que acabe el otro trabajo y lanza la cola.
+
+    Fuera del gestor a proposito: un trabajo del gestor con paso='assets'
+    marca el paso como en marcha mientras espera, y eso se cruzaria con el
+    montaje que se esta esperando."""
+    while True:
+        time.sleep(2)
+        if _otros_trabajos(ctx):
+            continue
+        with _COLA_LOCK:
+            estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+            estado.pop("esperando", None)
+            if estado.get("cola") and not estado.get("trabajo"):
+                _lanzar_cola(ctx)
+            return
+
+
 def _correr_notas_imagenes(avisar, ctx):
     from nucleo.trabajos import Cancelado                    # noqa: PLC0415
     repaso = _repaso()
@@ -5388,6 +5428,7 @@ def _correr_notas_imagenes(avisar, ctx):
         with _COLA_LOCK:
             estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
             estado["actual"] = None
+            estado.pop("esperando", None)
             # cortado (cancelado o un fallo del propio bucle): lo que quedaba
             # en cola no lo va a dibujar nadie, y decir «en cola» seria mentir
             if estado.get("trabajo"):
@@ -5424,6 +5465,8 @@ def _ficha_cola(ctx):
             "actual": dict(actual, segundos=round(time.time() - actual["desde"], 1))
                       if actual else None,
             "trabajo": trabajo,
+            # la cola espera a que termine otro trabajo (el montaje) antes de dibujar
+            "esperando": estado.get("esperando") or "",
             "segundos_por_imagen": _segundos_por_imagen(),
             "usd_por_imagen": _usd_por_imagen(ctx)}
 
@@ -5546,16 +5589,11 @@ def rehacer_imagenes_con_notas(pid: str, cuerpo: dict = Body(default=None)):
     if otro is not None and otro.get("nombre") == "notas_imagenes" and otro["id"] != propio:
         ctx.gestor.esperar(otro["id"], 10)
         otro = _trabajo_activo(ctx, "assets")
-    if otro is not None and otro["id"] != propio:
-        raise ErrorApi(409, "ya se están dibujando imágenes de este vídeo: espera a "
-                            "que terminen", {"trabajo_id": otro["id"]})
-    # NI MIENTRAS SE MONTA: una imagen nueva a mitad de los rotulos y el render
-    # dejaria un MP4 con la vieja sellado como al dia
-    for paso in ("callouts", "render"):
-        montando = _trabajo_activo(ctx, paso)
-        if montando is not None:
-            raise ErrorApi(409, "el vídeo se está montando ahora: rehaz la imagen cuando "
-                                "termine", {"trabajo_id": montando["id"]})
+    # CON OTRO TRABAJO EN MARCHA (el montaje, una tanda, la musica) ya no se
+    # contesta 409: la nota entra en la cola y la cola ESPERA a que termine
+    # antes de dibujar (`_esperar_a_los_demas`). Dibujar a la vez dejaria un
+    # MP4 con la imagen vieja sellado como al dia, y dos tandas de imagenes a
+    # la vez van contra la regla 2 de CLAUDE.md (11-10-2026).
     # ya aceptada: las hechas que se piden «desde cero» vuelven a pendiente
     for nota in rehechas:
         try:
@@ -5596,10 +5634,15 @@ def rehacer_imagenes_con_notas(pid: str, cuerpo: dict = Body(default=None)):
         else:
             cero.difference_update(pedidas_ahora)
         if not en_marcha:
-            trabajo_id = ctx.gestor.lanzar("notas_imagenes", _correr_notas_imagenes,
-                                           ctx, paso="assets")
-            estado["trabajo"] = trabajo_id
-            _registrar_trabajo(trabajo_id, ctx.id)
+            estado["trabajo"] = None
+            if _otros_trabajos(ctx):
+                # se monta (o se dibuja) otra cosa: la cola espera y arranca sola
+                if not estado.get("esperando"):
+                    estado["esperando"] = "el montaje del vídeo"
+                    threading.Thread(target=_lanzar_cuando_libre, args=(ctx,), daemon=True,
+                                     name=f"cola-espera-{ctx.id}").start()
+            else:
+                _lanzar_cola(ctx)
     ctx.bitacora.anotar("notas_imagenes", "assets", {"notas": [n["id"] for n in vivas]})
     return _ficha_cola(ctx)
 

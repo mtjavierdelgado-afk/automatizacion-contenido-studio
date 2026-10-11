@@ -3124,3 +3124,7 @@ textarea.autoalto, textarea.crece.autoalto { max-height: 60vh; overflow-y: auto;
 }
 .imagenes-hechas { margin-top: 10px; }
 .imagenes-hechas > summary { cursor: pointer; color: var(--tenue); padding: 6px 0; }
+
+/* las láminas mientras se rehacen: se ven, pero no se pueden tocar */
+.rejilla-laminas.ocupada { opacity: .6; pointer-events: none; }
+.trabajo-laminas progress { width: 100%; height: 8px; margin-top: 6px; }

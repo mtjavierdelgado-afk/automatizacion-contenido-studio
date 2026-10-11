@@ -1350,6 +1350,7 @@ async function cargarProyectos() {
    abrirMenuProyectos. */
 function pintarBotonProyecto() {
   const boton = $('#btn-proyecto');
+  if (!boton) return;            // ya no está en la cabecera (11-10-2026)
   const abierto = APP.proyectos.find(p => p.id === APP.pid);
   vaciar(boton).append(
     h('span', { clase: 'nombre' },
@@ -3217,46 +3218,6 @@ function usaCLI(paso) {
   return (listaDe((APP.cli || {}).pasos) || []).includes(paso);
 }
 
-function nombreCLI(lista, id) {
-  const ficha = (listaDe(lista) || []).find(x => x.id === id);
-  return (ficha && ficha.nombre) || oHueco(id);
-}
-
-function nombreModelo(id) { return nombreCLI((APP.cli || {}).modelos, id); }
-function nombreEsfuerzo(id) { return nombreCLI((APP.cli || {}).esfuerzos, id); }
-
-/* Comparativas pedidas al servidor, una por paso: la del ultimo tamano pedido,
-   que es la que se esta ensenando. Las peticiones en vuelo se comparten para que
-   tres bloques de la misma pantalla no pidan lo mismo tres veces. */
-const COMPARATIVAS_EN_VUELO = {};
-
-async function pedirComparativa(paso, tamano, forzar) {
-  const talla = Math.max(0, Math.round(Number(tamano) || 0));
-  const guardada = APP.comparativas[paso];
-  if (!forzar && guardada && guardada.tamano === talla) return guardada;
-  const clave = `${paso}|${talla}`;
-  if (!forzar && COMPARATIVAS_EN_VUELO[clave]) return COMPARATIVAS_EN_VUELO[clave];
-
-  const promesa = pedir(API.estadisticas({ paso, tamano: talla })).then(datos => {
-    const comparativa = datos.comparativa || {};
-    const lista = listaDe(comparativa.ajustes) || [];
-    const filas = {};
-    for (const fila of lista) filas[fila.clave || `${fila.modelo}|${fila.esfuerzo}`] = fila;
-    const ficha = {
-      paso, tamano: talla, lista, filas,
-      unidad: comparativa.unidad || 'unidades',
-      aviso: comparativa.aviso || '',
-      recomendacion: datos.recomendacion || null,
-      historial: listaDe(datos.historial) || [],
-    };
-    APP.comparativas[paso] = ficha;
-    return ficha;
-  });
-  COMPARATIVAS_EN_VUELO[clave] = promesa;
-  promesa.catch(() => null).then(() => { delete COMPARATIVAS_EN_VUELO[clave]; });
-  return promesa;
-}
-
 /* El ajuste por defecto de UN paso, que no es el general.
  *
  * El servidor sirve los dos en /api/ajustes-cli: `por_defecto` (sonnet/bajo,
@@ -3292,58 +3253,6 @@ function filaAjusteActual(paso) {
   if (!guardada || !CLAVES_CLI[paso]) return null;
   const ajuste = ajusteElegido(paso);
   return guardada.filas[`${ajuste.modelo}|${ajuste.esfuerzo}`] || null;
-}
-
-function tiempoDeFila(fila) {
-  if (!fila) return '—';
-  return fila.reloj || duracionCorta(fila.segundos);
-}
-
-/* Sello de honestidad de una cifra. Un tiempo sin esta etiqueta no se pinta. */
-function selloCifra(fila) {
-  if (!fila) return null;
-  if (fila.medida) {
-    return h('span', { clase: 'sello-cifra medida', title: fila.origen || '' },
-      `medida · ${cifra(fila.ejecuciones, '0')} ejecución(es)`);
-  }
-  return h('span', { clase: 'sello-cifra', title: fila.origen || '' }, 'estimación, no medida');
-}
-
-/* Lo que se sabe de una combinacion mas alla del tiempo: cuantas veces salio
-   bien, cuantas se valoraron y como. Es lo que distingue «rapida» de «buena». */
-function detalleFila(fila) {
-  if (!fila) return '';
-  const trozos = [];
-  if (fila.ejecuciones) {
-    trozos.push(`${cifra(fila.correctas, '0')} de ${cifra(fila.ejecuciones, '0')} terminaron bien`);
-    if (fila.fiabilidad !== undefined && fila.fiabilidad !== null) {
-      trozos.push(`fiabilidad ${Math.round(fila.fiabilidad * 100)}%`);
-    }
-    if (fila.sin_reintento !== undefined && fila.sin_reintento !== null) {
-      trozos.push(`a la primera ${Math.round(fila.sin_reintento * 100)}%`);
-    }
-    if (fila.aceptacion !== undefined && fila.aceptacion !== null) {
-      trozos.push(`aceptación ${Math.round(fila.aceptacion * 100)}%`);
-    }
-  }
-  if (fila.valorada_bien || fila.valorada_mal) {
-    trozos.push(`valorada ${fila.valorada_bien} bien / ${fila.valorada_mal} mal`);
-  } else if (fila.ejecuciones) {
-    trozos.push('nadie ha valorado todavía el resultado');
-  }
-  if (fila.tokens_salida) trozos.push(`${corto(fila.tokens_salida)} tokens de salida`);
-  return trozos.join(' · ');
-}
-
-async function valorarAjuste(paso, valoracion, modelo, esfuerzo) {
-  const datos = await pedir(API.valoracion(), {
-    method: 'POST',
-    cuerpo: { paso, valoracion, modelo, esfuerzo, proyecto: APP.pid || undefined },
-  });
-  const ajuste = (datos.recomendacion || {}).ajuste || {};
-  toast(`valoración anotada · ahora se recomienda ${nombreModelo(ajuste.modelo)}`
-    + ` con esfuerzo ${nombreEsfuerzo(ajuste.esfuerzo)}`);
-  return datos;
 }
 
 /* ================================================================== 1 INGESTA */
@@ -4098,8 +4007,6 @@ function conmutarCoste() {
  * justo lo contrario de lo que dice.
  */
 
-const RENDIMIENTO = { paso: null, panorama: null };
-
 /* Nombre legible tambien de los pasos que no son pestanas: el agente de capturas
    y el catalogo visual no estan en el grafo, pero miden tiempo igual. Sin esto
    salian en crudo ('capturas_agente') junto a los demas ya con su nombre. */
@@ -4124,263 +4031,15 @@ const NOMBRES_FUERA_DEL_GRAFO = {
   voz_light: 'La voz',
 };
 
-function nombrePasoCLI(id) {
-  const enGrafo = APP.pasos.find(p => p.id === id);
-  if (enGrafo) return enGrafo.nombre || id;
-  return NOMBRES_FUERA_DEL_GRAFO[id] || String(id || '').split('_').join(' ');
-}
-
-/* Pulgares. Son la unica senal de calidad que no es un proxy: sin ellos el
-   recomendador solo sabe recomendar lo mas rapido, que es una tautologia. */
-function botonesValoracion(paso, fila, alTerminar) {
-  const hay = !!(fila && fila.ejecuciones);
-  const motivo = hay
-    ? `valora la ÚLTIMA ejecución de ${nombrePasoCLI(paso)} con ${fila.modelo}/${fila.esfuerzo}`
-    : 'todavía no hay ninguna ejecución con esta combinación que valorar';
-  const votar = valoracion => async ev => {
-    ev.stopPropagation();
-    try {
-      await valorarAjuste(paso, valoracion, fila.modelo, fila.esfuerzo);
-      if (alTerminar) await alTerminar();
-    } catch (e) { toast(partirError(e.message).titular, true); }
-  };
-  return h('span', { clase: 'fila votos' },
-    h('button', { clase: 'mini', disabled: !hay, title: motivo, onclick: votar('bien') }, '👍'),
-    h('button', { clase: 'mini', disabled: !hay, title: motivo, onclick: votar('mal') }, '👎'),
-    (fila && (fila.valorada_bien || fila.valorada_mal))
-      ? h('span', { clase: 'meta', title: 'valorada bien / mal' },
-        `${fila.valorada_bien}/${fila.valorada_mal}`) : null);
-}
-
-function tablaPanorama(panorama) {
-  const pasos = (panorama || {}).pasos || {};
-  const enGrafo = APP.pasos.map(p => p.id);
-  const claves = Object.keys(pasos).sort((a, b) => {
-    const ia = enGrafo.indexOf(a) === -1 ? 99 : enGrafo.indexOf(a);
-    const ib = enGrafo.indexOf(b) === -1 ? 99 : enGrafo.indexOf(b);
-    return ia - ib || a.localeCompare(b);
-  });
-  const tabla = h('table', { clase: 'tabla' },
-    h('tr', {}, h('th', {}, 'Paso'), h('th', {}, 'CLI'), h('th', {}, 'Ejecuciones'),
-      h('th', {}, 'Bien'), h('th', {}, 'Proyectos'), h('th', {}, 'Mediana'),
-      h('th', {}, 'Unidad'), h('th', {}, 'Última'), h('th', {}, '')));
-  for (const clave of claves) {
-    const ficha = pasos[clave] || {};
-    tabla.appendChild(h('tr', { clase: ficha.usa_cli ? 'con-cli' : '' },
-      h('th', {}, nombrePasoCLI(clave)),
-      h('td', {}, ficha.usa_cli ? h('span', { clase: 'pastilla ok' }, 'sí') : h('span', { clase: 'meta' }, 'no')),
-      h('td', { clase: 'numerico' }, cifra(ficha.ejecuciones, '0')),
-      h('td', { clase: 'numerico' }, cifra(ficha.correctas, '0')),
-      h('td', { clase: 'numerico' }, cifra(ficha.proyectos, '0')),
-      h('td', { clase: 'numerico' }, ficha.ejecuciones
-        ? oHueco(ficha.mediana, duracionCorta(ficha.mediana_s)) : '—'),
-      h('td', { clase: 'meta' }, oHueco(ficha.unidad, '')),
-      h('td', { clase: 'meta' }, ficha.ultima ? fechaCorta(ficha.ultima) : '—'),
-      h('td', {}, ficha.usa_cli
-        ? h('button', { clase: 'mini fantasma', onclick: () => pintarRendimiento(clave) }, 'ver')
-        : null)));
-  }
-  return tabla;
-}
-
-function vistaPasoRendimiento(paso, ficha, datos, recargar) {
-  const rec = datos.recomendacion || {};
-  const ajusteRec = rec.ajuste || {};
-  const claveRec = ajusteRec.modelo ? `${ajusteRec.modelo}|${ajusteRec.esfuerzo}` : '';
-
-  const tabla = h('table', { clase: 'tabla comparativa-cli' },
-    h('tr', {}, h('th', {}, 'Modelo'), h('th', {}, 'Esfuerzo'), h('th', {}, 'Tiempo'),
-      h('th', {}, 'Qué es esa cifra'), h('th', {}, 'Lo que se sabe'),
-      h('th', {}, 'De dónde sale'), h('th', {}, '¿Salió bien?')));
-  for (const fila of datos.lista) {
-    const clave = fila.clave || `${fila.modelo}|${fila.esfuerzo}`;
-    tabla.appendChild(h('tr', { clase: clave === claveRec ? 'recomendada' : '' },
-      h('td', {}, nombreModelo(fila.modelo)),
-      h('td', {}, nombreEsfuerzo(fila.esfuerzo)),
-      h('td', { clase: 'numerico' }, tiempoDeFila(fila)),
-      h('td', {}, selloCifra(fila)),
-      h('td', { clase: 'meta' }, detalleFila(fila)),
-      h('td', { clase: 'meta' }, fila.origen || ''),
-      h('td', {}, botonesValoracion(paso, fila, recargar))));
-  }
-
-  const historial = h('table', { clase: 'tabla' },
-    h('tr', {}, h('th', {}, 'Cuándo'), h('th', {}, 'Tardó'), h('th', {}, 'Tamaño'),
-      h('th', {}, 'Ajuste'), h('th', {}, 'Terminó'), h('th', {}, 'Valoración')));
-  for (const registro of datos.historial.slice().reverse()) {
-    const detalle = registro.detalle && !esResumido(registro.detalle) ? registro.detalle : {};
-    historial.appendChild(h('tr', {},
-      h('td', { clase: 'meta' }, fechaCorta(registro.fecha)),
-      h('td', { clase: 'numerico' }, duracionCorta(registro.segundos)),
-      h('td', { clase: 'numerico meta' }, cifra(registro.tamano, '—')),
-      h('td', { clase: 'meta' }, `${oHueco(detalle.modelo)} / ${oHueco(detalle.esfuerzo)}`),
-      h('td', {}, registro.ok === false
-        ? h('span', { clase: 'pastilla error' }, 'error')
-        : h('span', { clase: 'pastilla ok' }, 'bien')),
-      h('td', { clase: 'meta' }, oHueco(registro.valoracion, '—'))));
-  }
-
-  return h('div', {},
-    h('div', { clase: 'fila' },
-      h('h2', {}, nombrePasoCLI(paso)),
-      h('span', { clase: 'meta' },
-        `${cifra(ficha.ejecuciones, '0')} ejecución(es) · ${cifra(ficha.correctas, '0')} terminaron bien`
-        + ` · ${cifra(ficha.proyectos, '0')} proyecto(s)`),
-      ficha.ejecuciones
-        ? h('span', { clase: 'meta' }, `mediana ${oHueco(ficha.mediana, duracionCorta(ficha.mediana_s))}`)
-        : null,
-      h('span', { clase: 'crece' }),
-      h('span', { clase: 'meta' }, datos.tamano
-        ? `comparativa para ${miles(datos.tamano)} ${datos.unidad}`
-        : `comparativa sin tamaño de entrada (${datos.unidad})`)),
-
-    h('div', { clase: 'caja-info recomendacion-cli', estilo: 'margin:10px 0' },
-      h('div', { clase: 'fila' },
-        h('b', {}, `Recomendado: ${nombreModelo(ajusteRec.modelo)}`
-          + ` · esfuerzo ${nombreEsfuerzo(ajusteRec.esfuerzo)}`),
-        rec.reloj ? h('span', { clase: 'meta' }, `≈ ${rec.reloj}`) : null,
-        h('span', { clase: `pastilla confianza ${rec.confianza || 'ninguna'}` },
-          `confianza ${rec.confianza || 'ninguna'}`)),
-      h('div', { clase: 'pista' }, rec.motivo || ''),
-      (listaDe(rec.descartadas) || []).length
-        ? h('div', { clase: 'pista' },
-          `Descartadas por poco fiables: ${rec.descartadas.join(' · ')}`) : null),
-
-    h('div', { clase: 'tabla-cli' }, tabla),
-    datos.aviso ? h('div', { clase: 'pista' }, datos.aviso) : null,
-    h('div', { clase: 'pista' },
-      'Los pulgares valoran la ÚLTIMA ejecución que hubo con esa combinación. Es la única '
-      + 'señal de calidad que tiene el recomendador: sin ellos solo puede recomendar lo más '
-      + 'rápido, que no es lo mismo que lo mejor.'),
-
-    h('h2', { estilo: 'margin-top:18px' }, 'Últimas ejecuciones'),
-    datos.historial.length ? historial
-      : h('div', { clase: 'vacio' }, 'este paso todavía no ha corrido nunca'));
-}
-
-async function pintarRendimiento(paso) {
-  const capa = document.getElementById('rendimiento');
-  if (!capa) return;
-  const elegido = paso || null;      // 'sin paso' es null, nunca undefined
-  RENDIMIENTO.paso = elegido;
-  const nav = vaciar(capa.querySelector('.nav-rendimiento'));
-  const cuerpo = vaciar(capa.querySelector('.cuerpo'));
-  cuerpo.appendChild(h('div', { clase: 'cargando' }, 'leyendo el histórico…'));
-
-  const conCLI = (listaDe((APP.cli || {}).pasos) || []);
-  nav.appendChild(h('button', {
-    clase: 'subpestana' + (RENDIMIENTO.paso ? '' : ' activa'),
-    onclick: () => pintarRendimiento(null),
-  }, 'Todos los pasos'));
-  for (const otro of conCLI) {
-    nav.appendChild(h('button', {
-      clase: 'subpestana' + (RENDIMIENTO.paso === otro ? ' activa' : ''),
-      onclick: () => pintarRendimiento(otro),
-    }, nombrePasoCLI(otro)));
-  }
-
-  try {
-    if (!RENDIMIENTO.panorama) RENDIMIENTO.panorama = await pedir(API.estadisticas({}));
-    const panorama = RENDIMIENTO.panorama;
-    if (!document.getElementById('rendimiento')) return;
-    vaciar(cuerpo);
-    if (!RENDIMIENTO.paso) {
-      cuerpo.append(
-        tablaPanorama(panorama),
-        h('div', { clase: 'pista' },
-          `Fichero del histórico: ${oHueco(panorama.fichero)} · se guardan hasta `
-          + `${cifra(panorama.muestras_por_ajuste, '?')} muestras por combinación. `
-          + 'Las medianas son de todos los proyectos juntos.'));
-      return;
-    }
-    // se reaprovecha el tamano que ya se pidio para ese paso, para no dejar en el
-    // cache una comparativa de otro tamano que luego el panel tendria que rehacer
-    const talla = (APP.comparativas[RENDIMIENTO.paso] || {}).tamano || 0;
-    const datos = await pedirComparativa(RENDIMIENTO.paso, talla, true);
-    // si mientras tanto se ha cambiado de subpestana, esto ya no es lo que se mira
-    if (!document.getElementById('rendimiento') || RENDIMIENTO.paso !== elegido) return;
-    vaciar(cuerpo);
-    cuerpo.appendChild(vistaPasoRendimiento(
-      RENDIMIENTO.paso, (panorama.pasos || {})[RENDIMIENTO.paso] || {}, datos,
-      async () => {
-        RENDIMIENTO.panorama = null;
-        await pintarRendimiento(RENDIMIENTO.paso);
-      }));
-  } catch (e) {
-    vaciar(cuerpo).appendChild(cajaError(e.message));
-  }
-}
-
-function abrirRendimiento(paso) {
-  const viejo = document.getElementById('rendimiento');
-  if (viejo) viejo.remove();
-  RENDIMIENTO.panorama = null;
-  const capa = h('div', {
-    id: 'rendimiento',
-    onclick: ev => { if (ev.target === capa) capa.remove(); },
-  }, h('div', { clase: 'cuadro' },
-    h('div', { clase: 'cab' },
-      h('b', {}, 'Rendimiento del CLI'),
-      h('span', { clase: 'meta' }, 'histórico de TODOS los proyectos, no solo del abierto'),
-      h('span', { clase: 'crece' }),
-      h('button', { clase: 'mini fantasma', onclick: () => capa.remove() }, '×')),
-    h('div', { clase: 'subpestanas nav-rendimiento' }),
-    h('div', { clase: 'cuerpo' })));
-  document.body.appendChild(capa);
-  pintarRendimiento(paso || null);
-}
-
 /* ============================================================== PROYECTOS
  * Apartar no es borrar: la carpeta entera se mueve a proyectos/_papelera/ y se
  * puede devolver. Borrar de verdad SOLO se puede hacer desde la papelera, con
  * confirmacion y diciendo cuantos ficheros y cuantos megas se pierden.
  */
 
-function cerrarMenuProyectos() {
-  $('#menu-proyectos').classList.add('plegado');
-}
-
-function conmutarMenuProyectos() {
-  const menu = $('#menu-proyectos');
-  if (!menu.classList.contains('plegado')) { cerrarMenuProyectos(); return; }
-  vaciar(menu);
-  for (const proyecto of APP.proyectos) {
-    const nombre = proyecto.nombre || proyecto.id;
-    menu.appendChild(h('div', {
-      clase: 'fila-proyecto' + (proyecto.id === APP.pid ? ' abierto' : ''),
-    },
-      h('button', {
-        clase: 'abrir', title: `abrir «${nombre}»`,
-        onclick: () => { cerrarMenuProyectos(); if (proyecto.id !== APP.pid) abrirProyecto(proyecto.id); },
-      }, h('span', { clase: 'nombre' }, nombre),
-        h('span', { clase: 'meta' }, proyecto.id)),
-      /* DUPLICAR va aquí, al lado de apartar, y no en el pie: las dos son
-         acciones sobre ESE proyecto, no sobre la lista. */
-      h('button', {
-        clase: 'mini fantasma', title: `duplicar «${nombre}» tal y como está hoy`,
-        onclick: () => { cerrarMenuProyectos(); duplicarProyecto(proyecto.id, nombre); },
-      }, '⧉'),
-      h('button', {
-        clase: 'mini fantasma apartar', title: `apartar «${nombre}» (no lo borra)`,
-        onclick: () => { cerrarMenuProyectos(); apartarProyecto(proyecto.id, nombre); },
-      }, '🗑')));
-  }
-  if (!APP.proyectos.length) {
-    menu.appendChild(h('div', { clase: 'vacio', estilo: 'padding:8px 12px' },
-      'no hay ningún proyecto'));
-  }
-  menu.appendChild(h('div', { clase: 'pie-menu' },
-    h('button', { clase: 'mini', onclick: () => { cerrarMenuProyectos(); nuevoProyecto(); } },
-      '+ nuevo'),
-    h('button', { clase: 'mini fantasma', onclick: () => { cerrarMenuProyectos(); abrirPapelera(); } },
-      'Papelera'),
-    h('span', { clase: 'crece' }),
-    h('button', {
-      clase: 'mini fantasma', title: 'Tiempos reales del CLI en todos los proyectos',
-      onclick: () => { cerrarMenuProyectos(); abrirRendimiento(); },
-    }, 'Rendimiento')));
-  menu.classList.remove('plegado');
-}
+/* El menú de proyectos del modo editor (cambiar de proyecto, «+ nuevo»,
+   apartar, papelera, rendimiento) se quitó el 11-10-2026: en esta pantalla
+   no se veía. La papelera está en la portada (`botonPapeleraLight`). */
 
 /* DUPLICAR UN PROYECTO: repetir un vídeo con algo cambiado sin volver a pagar
    las imágenes y sin tocar el original.
@@ -4389,58 +4048,6 @@ function conmutarMenuProyectos() {
    copia (lo que hay puesto HOY, no el historial de cómo se llegó) y qué NO se
    copia. Un proyecto son varias horas y varios euros; una copia que se lleva
    11 GB de versiones viejas sin avisar es una sorpresa cara. */
-async function duplicarProyecto(pid, nombre) {
-  if (!pid) { toast('no hay ningún proyecto que duplicar', true); return; }
-  const propuesto = `Copia ${nombre || pid}`;
-  const elegido = window.prompt(
-    `Duplicar «${nombre || pid}».\n\n`
-    + 'Se copia lo que el proyecto tiene puesto HOY: la versión activa de cada '
-    + 'paso, con sus imágenes y su locución. El historial de versiones se queda '
-    + 'en el original.\n\n'
-    + 'Nombre de la copia:', propuesto);
-  if (elegido === null) return;
-  const nombreCopia = String(elegido).trim() || propuesto;
-  toast(`copiando «${nombre || pid}»…`);
-  try {
-    const datos = await pedir(API.duplicar(pid), {
-      method: 'POST', cuerpo: { nombre: nombreCopia },
-    });
-    const copia = (datos.proyecto || {}).id;
-    await cargarProyectos();
-    toast(`copia hecha: «${nombreCopia}»`);
-    if (copia) abrirProyecto(copia);
-  } catch (e) {
-    toast(`no se ha podido duplicar: ${partirError(e.message).titular}`, true);
-  }
-}
-
-async function apartarProyecto(pid, nombre) {
-  if (!pid) { toast('no hay ningún proyecto que apartar', true); return; }
-  if (!window.confirm(`Apartar «${nombre || pid}».\n\n`
-    + 'NO se borra nada. La carpeta entera se mueve a la papelera y el proyecto deja de '
-    + 'salir en la lista. Se puede devolver cuando quieras desde la papelera.\n\n'
-    + 'Si tiene algún trabajo en marcha, el servidor lo rechazará: cancélalo antes.')) return;
-  try {
-    const datos = await pedir(API.apartar(pid), { method: 'DELETE' });
-    toast(`«${nombre || pid}» apartado · ${datos.aviso || 'sigue entero en la papelera'}`);
-    if (pid === APP.pid) {
-      localStorage.removeItem('estudio.pid');
-      Object.keys(APP.seguimientos).forEach(soltarSeguimiento);
-      APP.pid = null;
-    }
-    await cargarProyectos();
-    if (!APP.proyectos.length) {
-      APP.pid = null;
-      APP.proyecto = null;
-      $('#meta-proyecto').textContent = '';
-      pintarBotonProyecto();
-      vaciar($('#panel')).appendChild(h('div', { clase: 'contenido' },
-        h('div', { clase: 'caja-info' },
-          'No queda ningún proyecto. Crea uno con «+ nuevo», o devuelve uno desde la papelera.')));
-    }
-  } catch (e) { toast(partirError(e.message).titular, true); }
-}
-
 /* ------------------------------------------------------------- conservacion
  * Un cambio aguas arriba ya no significa rehacerlo todo. Aquí se ve qué se
  * salva, por qué, y se aplica.
@@ -4706,16 +4313,6 @@ async function borrarMarcadas(carpetas, lista, alTerminar) {
    como boton suelto actuaba sobre el proyecto abierto en vez de sobre el que
    quisieras apartar. */
 function ponerMandosDeCabecera() {
-  $('#btn-proyecto').addEventListener('click', ev => {
-    ev.stopPropagation();
-    conmutarMenuProyectos();
-  });
-  document.addEventListener('click', ev => {
-    const menu = $('#menu-proyectos');
-    if (menu.classList.contains('plegado')) return;
-    if (menu.contains(ev.target) || $('#btn-proyecto').contains(ev.target)) return;
-    cerrarMenuProyectos();
-  });
   // Lo mismo para el de presets. No puede cerrarse con el de proyectos porque
   // vive dentro del panel y se repinta con el: el estado de abierto esta en
   // APP.vista, no en una clase del DOM que el repintado se llevaria por delante.
@@ -4778,18 +4375,6 @@ function llenarFiltroBitacora() {
 }
 
 /* ------------------------------------------------------------------ arranque */
-
-async function nuevoProyecto() {
-  const nombre = window.prompt('Nombre del vídeo nuevo:');
-  if (!nombre) return;
-  try {
-    const datos = await pedir(API.proyectos(), { method: 'POST', cuerpo: { nombre } });
-    const proyecto = datos.proyecto || datos;
-    await cargarProyectos();
-    if (proyecto && proyecto.id) await abrirProyecto(proyecto.id);
-    toast(`proyecto «${nombre}» creado`);
-  } catch (e) { toast(`no se ha podido crear: ${e.message}`, true); }
-}
 
 /* ---------------------------------------------------------- el tema y el pie
  *
@@ -5898,6 +5483,22 @@ function portadaDeProyectos(caja, lista) {
     h('div', { clase: 'nombre' }, 'Nuevo proyecto'),
     h('div', { clase: 'meta' }, 'un cliente, con sus estilos y vídeos')));
   caja.appendChild(rejilla);
+  /* LOS OCULTOS, CON SU BOTÓN PARA DEJAR DE SERLO. «Ver los ocultos» solo los
+     enseña: el proyecto seguía oculto, y la forma de volver a mostrarlo estaba
+     dentro de él («Mostrar en la portada»), donde nadie la buscaba. Se leía
+     como «no me deja quitarlo de ocultos» (11-10-2026). */
+  const listaOcultos = lista.filter(c => c.oculto);
+  if (APP.light.verOcultos && listaOcultos.length) {
+    const caja2 = h('div', { clase: 'sueltos ocultos-portada' },
+      h('b', {}, listaOcultos.length === 1 ? 'Un proyecto oculto' : `${listaOcultos.length} proyectos ocultos`),
+      h('span', { clase: 'meta' }, ' — se ven porque has pulsado «Ver los ocultos». Para que vuelvan a salir siempre:'));
+    listaOcultos.forEach(ficha => caja2.appendChild(h('div', { clase: 'fila' },
+      h('span', { clase: 'crece' }, ficha.nombre),
+      h('button', { clase: 'mini primario',
+        onclick: () => cambiarCliente(ficha, { oculto: false }, `«${ficha.nombre}» ya se ve en la portada`) },
+      'Dejar de ocultar'))));
+    caja.appendChild(caja2);
+  }
   // lo último que se movió, de los proyectos que se ven: para seguir sin buscar
   const recientes = videosLight().filter(v => {
     const cid = clienteDeVideo(v);
@@ -5949,7 +5550,7 @@ function dentroDeProyecto(caja, cid) {
       ficha.logo ? 'Logo ✓' : 'Logo'),
       h('button', { clase: 'mini', onclick: () => cambiarCliente(ficha, { oculto: !ficha.oculto },
         ficha.oculto ? 'Ya se ve en la portada' : 'Oculto: sale con «Ver los ocultos»') },
-      ficha.oculto ? 'Mostrar en la portada' : 'Ocultar'),
+      ficha.oculto ? 'Dejar de ocultar' : 'Ocultar'),
       h('button', { clase: 'mini', onclick: () => claveCliente(ficha) }, ficha.con_clave ? 'Clave ✓' : 'Poner clave'),
       h('button', { clase: 'mini', onclick: () => traerEstiloACliente(ficha) }, 'Traer un estilo'),
       h('button', { clase: 'mini fantasma peligro', onclick: () => borrarCliente(ficha) }, 'Borrar')));
@@ -9917,6 +9518,8 @@ function aplicarCola(datos) {
   const d = datos || {};
   COLA_IMG.cola = d.cola || [];
   COLA_IMG.actual = d.actual || null;
+  // la cola espera a que termine otro trabajo (el montaje) y arranca sola
+  COLA_IMG.esperando = d.esperando || '';
   COLA_IMG.segundosPorImagen = Number(d.segundos_por_imagen) || COLA_IMG.segundosPorImagen;
   COLA_IMG.usdPorImagen = Number(d.usd_por_imagen) || COLA_IMG.usdPorImagen;
   COLA_IMG.visto = Date.now();
@@ -10308,7 +9911,8 @@ function filaDeNotaImagen(nota) {
     const linea = h('div', { clase: 'fila nota-mandos' });
     const etiqueta = {
       corriendo: 'Dibujando…',
-      'en cola': `En cola (${COLA_IMG.cola.indexOf(nota.id) + 1}ª)`,
+      'en cola': `En cola (${COLA_IMG.cola.indexOf(nota.id) + 1}ª)`
+        + (COLA_IMG.esperando ? ' · empieza al terminar el montaje del vídeo' : ''),
       hecha: 'Hecha ✓',
       fallo: esRechazoDeSeguridad(nota.error) ? 'Rechazada por OpenAI' : 'Falló',
     }[ahora] || 'Pendiente';
@@ -11480,7 +11084,19 @@ function laminasDelEstilo(ficha) {
     return caja;
   }
   const precio = d.usd_por_lamina ? ` (≈ ${usdCorto(d.usd_por_lamina)})` : '';
-  const rejilla = h('div', { clase: 'rejilla-laminas' });
+  // EL TRABAJO DE LAS LÁMINAS, aquí mismo y con su barra
+  const enMarcha = APP.light.trabajoLaminas && APP.light.trabajoLaminas.preset === ficha.id;
+  if (enMarcha) {
+    caja.appendChild(enVivo(() => {
+      const t = APP.trabajos[CLAVE_LIGHT] || {};
+      const pct = Math.round((Number(t.progreso) || 0) * 100);
+      return h('div', { clase: 'caja-info trabajo-laminas' },
+        h('div', {}, `Rehaciendo las láminas… ${pct} %`
+          + (t.publico || t.mensaje ? ` · ${t.publico || t.mensaje}` : '')),
+        h('progress', { max: 100, value: pct }));
+    }));
+  }
+  const rejilla = h('div', { clase: 'rejilla-laminas' + (enMarcha ? ' ocupada' : '') });
   d.laminas.forEach((l, i) => {
     rejilla.appendChild(h('div', { clase: 'lamina' },
       l.url
@@ -11503,7 +11119,7 @@ function laminasDelEstilo(ficha) {
   });
   caja.appendChild(rejilla);
 
-  const pie = h('div', { clase: 'fila' });
+  const pie = h('div', { clase: 'fila' + (enMarcha ? ' rejilla-laminas ocupada' : '') });
   if (d.laminas.length < d.max) {
     pie.appendChild(h('button', { clase: 'mini', onclick: () => nuevaLamina(ficha, precio) },
       `+ Añadir una lámina${precio}`));
@@ -11581,8 +11197,18 @@ async function accionLaminas(ficha, cuerpo, pregunta) {
     const datos = await pedir(API.presetLightLaminas(ficha.id), { method: 'POST', cuerpo });
     APP.light.laminas = null;
     if (datos.trabajo_id) {
-      irALight('generando', { plan: datos.plan || null, abierto: ficha.id });
-      seguirTrabajo(CLAVE_LIGHT, datos.trabajo_id, alTerminarLight, () => pintarLight());
+      /* SE QUEDA EN LA FICHA, con el progreso en las propias láminas. Antes
+         saltaba a la pantalla de «generando» (la de crear un estilo entero)
+         para quitar o devolver una lámina, que dura segundos (11-10-2026). */
+      APP.light.trabajoLaminas = { id: datos.trabajo_id, preset: ficha.id, accion: cuerpo.accion };
+      seguirTrabajo(CLAVE_LIGHT, datos.trabajo_id, async trabajo => {
+        APP.light.trabajoLaminas = null;
+        APP.light.laminas = null;
+        if (trabajo.estado === 'listo') toast('Láminas al día');
+        else if (trabajo.estado === 'error') toast(`no se ha podido: ${trabajo.error || 'falló'}`, true);
+        await cargarGaleriaLight(true);
+      }, () => refrescarVivosLight());
+      pintarLight();
       return;
     }
     if (datos.preset && APP.light.datos) {

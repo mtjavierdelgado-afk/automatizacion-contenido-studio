@@ -58,6 +58,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/subtitulos` | Como son los subtitulos de este video, y si son los del estilo. |
 | `PUT` | `/api/proyectos/{pid}/subtitulos` | {tam?, caja? ("auto" o 0-1), diseno?, color? ("#rrggbb" o "")} o {automatico: true}. |
 | `POST` | `/api/proyectos/{pid}/subtitulos/aplicar` | Rehace las capas de texto y vuelve a montar el video. Ni una imagen. |
+| `POST` | `/api/proyectos/{pid}/subtitulos/rehacer` | Rehace los subtitulos (y monta) de un video cuya voz llego con las |
+| `GET` | `/api/proyectos/{pid}/subtitulos/rotos` | {planos}: cuantos planos tienen los subtitulos dibujados con las tildes |
 
 ## Pasos: estado, params y ejecución
 
@@ -171,7 +173,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/direccion/proponer` | Escribe qué se ve en cada plano, con TODOS los planos delante de una vez. |
 | `GET` | `/api/proyectos/{pid}/imagenes/cola` | La cola de notas de imagenes: cual se dibuja, cuanto lleva y que espera. |
 | `DELETE` | `/api/proyectos/{pid}/imagenes/cola/{nid}` | Saca una nota de la cola (la que ya se esta dibujando no se para). |
-| `POST` | `/api/proyectos/{pid}/imagenes/rehacer` | Pone en la cola las notas de imagenes: {notas?: [ids]} (sin ids, todas). |
+| `POST` | `/api/proyectos/{pid}/imagenes/rehacer` | Pone en la cola las notas de imagenes: {notas?: [ids], desde_cero?} (sin ids, todas). |
 
 ## Sonido y transiciones
 
@@ -210,7 +212,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/presets-canal` | Guarda un preset nuevo, o sustituye el contenido de uno que ya existe. |
 | `DELETE` | `/api/presets-canal/papelera/{pid}` | Borrado definitivo. Solo alcanza a lo que ya esta en la papelera. |
 | `GET` | `/api/presets-canal/papelera/{pid}` | Que hay dentro de un preset apartado, para decir que se pierde. |
-| `POST` | `/api/presets-canal/papelera/{pid}/restaurar` | Devuelve a la lista un preset apartado. |
+| `POST` | `/api/presets-canal/papelera/{pid}/restaurar` | Devuelve a la lista un preset apartado. Y si es un estilo, su taller con |
 | `DELETE` | `/api/presets-canal/{pid}` | A la papelera. No borra nada: la ficha y sus fotogramas siguen enteros. |
 | `PATCH` | `/api/presets-canal/{pid}` | Cambia solo el nombre o la nota. Lo que el preset guarda no se toca. |
 | `GET` | `/api/presets-canal/{pid}/fichero/{archivo:path}` | Un fichero de la carpeta del preset (fotogramas, laminas del moodboard). |
@@ -321,4 +323,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**207 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**209 endpoints.** Escrito por `generar_api.py` desde `app.py`.

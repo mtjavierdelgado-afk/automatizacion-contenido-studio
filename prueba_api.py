@@ -4233,6 +4233,12 @@ def probar_sonido_propio_y_cola(cliente):
     igual(datos.get("cola"), [], "y empieza vacia")
     respuesta, datos = cliente.post(f"/api/proyectos/{pid}/imagenes/rehacer", {})
     igual(respuesta.status_code, 400, "sin notas pendientes no se lanza nada")
+    respuesta, datos = cliente.post(f"/api/proyectos/{pid}/imagenes/rehacer",
+                                    {"notas": ["R999"], "desde_cero": True})
+    igual(respuesta.status_code, 400, "«desde cero» de una nota que no existe tampoco")
+    respuesta, datos = cliente.get(f"/api/proyectos/{pid}/subtitulos/rotos")
+    igual(respuesta.status_code, 200, "se puede preguntar si los subtitulos tienen tildes rotas")
+    igual(datos.get("planos"), 0, "y un video sin montar no tiene ninguno")
 
     # EL MOTOR ANTE EL FILTRO DE SEGURIDAD (con el motor falso)
     sys.path.insert(0, os.path.join(RAIZ_ESTUDIO, "pasos"))

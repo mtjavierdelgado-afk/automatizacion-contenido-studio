@@ -26,6 +26,8 @@ escalera, un peso o un texto de `encuadre` le cambia la carta a planos que narra
 exactamente lo mismo, y eso se paga en imagenes. Por eso al retirar la caja se
 conservaron los ids, las familias, los pesos y el orden EXACTOS.
 """
+import re
+
 import medios
 
 
@@ -164,11 +166,39 @@ POR_ID = {carta["id"]: carta for carta in ESCALERA}
 #: Los servicios que una carta de foto puede pedir.
 SERVICIOS = ("consolas", "simuladores", "vr", "karaoke")
 
-#: Lo que se supone cuando un video no dice que servicios lleva: el servicio
-#: base del alquiler, las consolas. Asi no sale nunca un plano de pedales en un
-#: video sin simuladores, que es el absurdo que la columna existe para evitar.
-#: La Etapa Foto C pondra en pantalla la eleccion (presets de servicio).
-SERVICIOS_POR_DEFECTO = ("consolas",)
+#: Lo que se supone cuando un video no dice que servicios lleva Y su texto no
+#: nombra ninguno: NINGUNO, y entonces reparte la escalera GENERAL de foto (ver
+#: `ESCALERA_FOTO_GENERAL`). Antes era «consolas», y con eso un video de plantas
+#: salia con «primer plano de las manos en el mando» y «la estacion completa con
+#: el televisor en su tripode»: el modo foto es para cualquier proyecto.
+SERVICIOS_POR_DEFECTO = ()
+
+#: COMO SE RECONOCE CADA SERVICIO EN EL TEXTO DEL VIDEO (la guia del estilo, su
+#: prompt, el catalogo visual del guion). Mientras la Etapa Foto C no lo ponga en
+#: pantalla, es lo que hace que un video de EstadoPlay siga saliendo con sus
+#: planos de consolas sin que nadie tenga que decirlo. Expresiones regulares, sin
+#: distinguir mayusculas; en ingles y en castellano.
+SERVICIOS_EN_TEXTO = {
+    "consolas": (r"\bconsol(e|es|a|as)\b", r"\bcontrollers?\b", r"\bgamepads?\b",
+                 r"\bmandos?\b", r"\bvideo ?games?\b", r"\bvideojuegos?\b",
+                 r"\bgameplay\b", r"\bgaming\b", r"\bplaystation\b",
+                 r"\bps[345]\b", r"\bxbox\b", r"\bnintendo\b"),
+    "simuladores": (r"\bsimulat(or|ors)\b", r"\bsimuladore?s?\b",
+                    r"\bracing (rig|sim|wheel)s?\b", r"\bpedals?\b.*\bwheel\b"),
+    "vr": (r"\bvr\b", r"\bvirtual reality\b", r"\brealidad virtual\b",
+           r"\bmeta quest\b"),
+    "karaoke": (r"\bkaraoke\b",),
+}
+
+
+def servicios_en_texto(texto):
+    """Los servicios que nombra un texto. -> tupla (vacia si ninguno)"""
+    texto = str(texto or "")
+    if not texto:
+        return ()
+    return tuple(nombre for nombre, patrones in SERVICIOS_EN_TEXTO.items()
+                 if any(re.search(pat, texto, flags=re.IGNORECASE)
+                        for pat in patrones))
 
 ESCALERA_FOTO = (
     {"id": "foto_sala", "familia": "lejos", "peso": 2, "servicios": "todos",
@@ -241,7 +271,83 @@ ESCALERA_FOTO = (
                   "towards the TV and the players")},
 )
 
-POR_ID_FOTO = {carta["id"]: carta for carta in ESCALERA_FOTO}
+#: LA ESCALERA GENERAL DE FOTO, la de cualquier proyecto que no sea de un
+#: servicio de alquiler. La de arriba se escribio para EstadoPlay --estaciones,
+#: tripodes, mandos-- y repartida en un video de otra cosa metia consolas donde
+#: no las hay. Estas no nombran ningun objeto: piden la CLASE de plano y dejan
+#: que la escena diga que sale. Mismas familias, para que el reparto respire
+#: igual (dos lejos no seguidos, un cerca entre medios).
+ESCALERA_FOTO_GENERAL = (
+    {"id": "foto_g_general", "familia": "lejos", "peso": 2, "servicios": "todos",
+     "nombre": "plano general",
+     "encuadre": ("a wide establishing shot of the whole place taken from a "
+                  "corner at standing height, the people small within the space "
+                  "and the setting clearly readable")},
+
+    {"id": "foto_g_picado", "familia": "lejos", "peso": 1, "servicios": "todos",
+     "nombre": "picado",
+     "encuadre": ("a high-angle shot taken from a staircase, a balcony or a "
+                  "raised spot, looking down on the people and what they are "
+                  "doing")},
+
+    {"id": "foto_g_medio", "familia": "medio", "peso": 3, "servicios": "todos",
+     "nombre": "plano medio",
+     "encuadre": ("a medium shot of the main subject from the waist up, doing "
+                  "what the scene describes, the setting soft behind them")},
+
+    {"id": "foto_g_hombro", "familia": "medio", "peso": 2, "servicios": "todos",
+     "nombre": "sobre el hombro",
+     "encuadre": ("an over-the-shoulder shot of one person looking at what the "
+                  "scene is about, their shoulder and hair soft in the "
+                  "foreground")},
+
+    {"id": "foto_g_perfil", "familia": "medio", "peso": 2, "servicios": "todos",
+     "nombre": "perfil",
+     "encuadre": ("a side profile of two people next to each other, both "
+                  "absorbed in the same thing")},
+
+    {"id": "foto_g_reaccion", "familia": "medio", "peso": 2, "servicios": "todos",
+     "nombre": "reacción",
+     "encuadre": ("the people around the main action reacting to it -- "
+                  "listening, laughing, watching -- with the action itself "
+                  "softly out of focus")},
+
+    {"id": "foto_g_manos", "familia": "cerca", "peso": 3, "servicios": "todos",
+     "nombre": "manos",
+     "encuadre": ("a close-up of hands doing what the scene describes, the "
+                  "fingers and the object they hold sharp, everything else "
+                  "soft")},
+
+    {"id": "foto_g_detalle", "familia": "cerca", "peso": 2, "servicios": "todos",
+     "nombre": "detalle",
+     "encuadre": ("a close detail of the key object of the scene resting where "
+                  "it belongs, its material and texture readable")},
+
+    {"id": "foto_g_primer_termino", "familia": "cerca", "peso": 2,
+     "servicios": "todos", "nombre": "objeto en primer término",
+     "encuadre": ("the key object of the scene large and sharp in the "
+                  "foreground, the people out of focus behind it")},
+
+    {"id": "foto_g_retrato", "familia": "cerca", "peso": 2, "servicios": "todos",
+     "nombre": "retrato",
+     "encuadre": ("a candid head-and-shoulders portrait of one person in the "
+                  "middle of the moment, the setting soft behind them")},
+
+    {"id": "foto_g_contraluz", "familia": "luz", "peso": 1, "servicios": "todos",
+     "nombre": "contraluz",
+     "encuadre": ("the people in silhouette against a bright window or the open "
+                  "sky, the light wrapping around their outline")},
+
+    {"id": "foto_g_bajo", "familia": "angulo", "peso": 1, "servicios": "todos",
+     "nombre": "a ras de suelo",
+     "encuadre": ("a low angle from near the ground looking up at the people "
+                  "and the setting")},
+)
+
+#: Las dos de foto en un solo diccionario: una carta forzada o una carta ya
+#: repartida se encuentra sea de la general o de la de servicios.
+POR_ID_FOTO = {carta["id"]: carta
+               for carta in ESCALERA_FOTO + ESCALERA_FOTO_GENERAL}
 
 
 def escalera_de(modo="ilustracion"):
@@ -292,6 +398,9 @@ def escalera_para(modo="ilustracion", servicios=None):
     if modo != "foto":
         return ESCALERA
     suyos = servicios_de(servicios)
+    if not suyos:
+        # un video que no es de un servicio de alquiler: la general
+        return ESCALERA_FOTO_GENERAL
     return tuple(c for c in ESCALERA_FOTO if _vale_para(c, suyos))
 
 

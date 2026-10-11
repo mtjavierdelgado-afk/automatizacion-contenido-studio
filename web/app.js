@@ -2389,7 +2389,9 @@ function seccionCalidadImagen() {
 
   caja.appendChild(h('div', { clase: 'meta' },
     'Es el punto de partida de los videos NUEVOS. Los que ya existen se quedan '
-    + 'con la suya: se cambia por vídeo desde su propia ficha.'));
+    + 'con la suya: se cambia por vídeo desde su propia ficha. Los vídeos con un '
+    + 'estilo de Foto realista empiezan como mínimo en MEDIUM: en LOW la piel '
+    + 'sale lisa y la foto parece de plástico.'));
   return caja;
 }
 
@@ -6271,6 +6273,11 @@ async function pintarCosteDelEncargoLight(e, nodo) {
       min_s: (datos.estilo || {}).min_s,
       max_s: (datos.estilo || {}).max_s,
       calidad: (datos.estilo || {}).calidad,
+      /* un vídeo que aún no existe: sin calidad en el estilo, el servidor dice
+         la de Configuración (y en foto, como mínimo medium), que es con la que
+         va a nacer */
+      nuevo: true,
+      modo: (datos.estilo || {}).modo === 'foto' ? 'foto' : 'ilustracion',
     });
     vaciar(nodo).append(`El vídeo entero: ${textoDeCoste(ficha)}. `
       + 'Puede salir algo más corto o más largo que el objetivo.');
@@ -9753,7 +9760,7 @@ const TIPOS_DE_IMAGEN = [
 function selectorTipoDeImagen(valor, alCambiar) {
   return campoSelect('Tipo de imagen', valor === 'foto' ? 'foto' : 'ilustracion',
     TIPOS_DE_IMAGEN, alCambiar,
-    'Foto realista pide fotografías de evento en vez de dibujos: la guía se '
+    'Foto realista pide fotografías en vez de dibujos: la guía se '
     + 'escribe para foto y las imágenes que subas deberían ser fotos.');
 }
 

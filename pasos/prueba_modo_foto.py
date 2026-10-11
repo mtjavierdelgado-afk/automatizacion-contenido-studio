@@ -466,7 +466,7 @@ def prueba_modo_foto():
             donde = f"{nesc}/{nrefs}"
             ok(prompt.startswith(
                 "Create one photorealistic photograph for one shot of a social "
-                "media video, as taken by a professional event photographer."),
+                "media video, as taken by a professional photographer."),
                f"{donde}: empieza por la cabecera de foto")
             ok("flat vector" not in prompt and "cartoon" not in prompt,
                f"{donde}: no pide «flat vector cartoon» en ningun sitio")
@@ -536,12 +536,16 @@ def prueba_modo_foto():
            f"{nombre}: sin «flat vector» ni monigotes")
         ok("photographic style" in foto, f"{nombre}: pide el estilo fotografico")
     for nombre, (escena, beat) in VISUALES.items():
-        if escena.get("abstracta") or beat.get("tono") == "alegre":
+        if escena.get("abstracta"):
             continue
+        # el mismo texto que en ilustracion, salvo la expresion de las caras,
+        # que en foto sale de TONOS_FOTO (ver la seccion 8)
+        esperado = p6_assets._prompt_visual(dict(escena), beat, CATALOGO)  # noqa: SLF001
+        for tono, frase in p6_assets.TONOS.items():
+            esperado = esperado.replace(frase, p6_assets.TONOS_FOTO[tono])
         igual(p6_assets._prompt_visual(dict(escena), beat, CATALOGO,  # noqa: SLF001
-                                       modo="foto"),
-              p6_assets._prompt_visual(dict(escena), beat, CATALOGO),  # noqa: SLF001
-              f"{nombre}: un plano no abstracto no cambia de texto")
+                                       modo="foto"), esperado,
+              f"{nombre}: un plano no abstracto solo cambia la expresion")
 
     titulo("4 · la hoja de reparto y las laminas en modo foto")
     for ficha in FICHAS:
@@ -634,12 +638,13 @@ def prueba_escalera_foto():
           encuadres.ESCALERA, "en ilustracion los servicios no filtran nada")
 
     titulo("5 · servicios")
-    igual(encuadres.servicios_de(None), ("consolas",),
-          "sin servicios, el servicio base: consolas")
+    igual(encuadres.servicios_de(None), (),
+          "sin servicios no se supone ninguno (antes: consolas)")
     igual(encuadres.servicios_de("vr, Karaoke ,raro"), ("vr", "karaoke"),
           "se limpian y se quedan los conocidos")
     escenas = [{"id": f"S{n:03d}"} for n in range(1, 400)]
-    base = encuadres.repartir(escenas, semilla=7, modo="foto")
+    base = encuadres.repartir(escenas, semilla=7, modo="foto",
+                              servicios=["consolas"])
     salen = {c["id"] for c in base.values()}
     ok("foto_pedales" not in salen and "foto_vr" not in salen,
        "sin simuladores ni VR no salen pedales ni cuerpo con visor")
@@ -661,7 +666,8 @@ def prueba_escalera_foto():
         seguidas = [i for i in range(1, len(orden))
                     if orden[i]["familia"] == orden[i - 1]["familia"]]
         igual(seguidas, [], f"{nombre}: nunca dos familias seguidas")
-    igual([c["id"] for c in encuadres.repartir(escenas, 7, modo="foto")
+    igual([c["id"] for c in encuadres.repartir(escenas, 7, modo="foto",
+                                                servicios=["consolas"])
            .values()], [c["id"] for c in base.values()],
           "determinista: misma semilla, mismas cartas")
     forzado = encuadres.repartir(escenas[:5], 7, modo="foto",
@@ -693,6 +699,154 @@ def prueba_escalera_foto():
        "los pedales y no el perfil (que es de consolas y karaoke)")
 
 
+# ================================================= 6 a 8 · las correcciones
+#
+# Las tres del informe de pruebas (pruebas/informe_pruebas_etapa_foto_a.md en
+# el Proyecto): A1, las reglas de consolas solo en videos de consolas; A2, la
+# calidad con la que nace un video, y en foto como minimo medium; M1, las
+# expresiones de cara propias de la foto.
+
+#: Palabras que delatan una regla de consolas metida en un video que no lo es.
+DE_CONSOLAS = re.compile(r"controller|tripod|gameplay|game screen|console",
+                         re.IGNORECASE)
+
+
+def prueba_correcciones():
+    reglas = medios.motor("reglas/reglas.py")
+
+    titulo("6 · las reglas de consolas solo en videos de consolas (A1)")
+    con_condicion = [r for r in reglas.cargar("foto")["reglas"] if r.get("solo_si")]
+    ok(len(con_condicion) >= 2, "hay reglas de foto con «solo_si» (mandos y equipo)")
+    for regla in con_condicion:
+        ok(not reglas.aplica(regla), f"{regla['id']}: sin contexto no entra")
+        ok(not reglas.aplica(regla, "a woman waters the plants on her balcony"),
+           f"{regla['id']}: en un video de plantas no entra")
+        ok(reglas.aplica(regla, "two kids hold game controllers in front of the TV"),
+           f"{regla['id']}: con mandos en la escena, entra")
+        ok(reglas.aplica(regla, "Fiesta con CONSOLAS en Lima"),
+           f"{regla['id']}: en castellano y en mayusculas, tambien")
+    generales = [r for r in reglas.cargar("foto")["reglas"] if not r.get("solo_si")]
+    for regla in generales:
+        igual(DE_CONSOLAS.findall(regla["regla"]), [],
+              f"{regla['id']}: una regla general no habla de consolas")
+    ok(not any(r.get("solo_si") for r in reglas.cargar()["reglas"]),
+       "en reglas.json (ilustracion) no hay ninguna regla con «solo_si»")
+    igual(reglas.bloque_prompt("prompt_imagen", contexto="game controllers"),
+          reglas.bloque_prompt("prompt_imagen"),
+          "en ilustracion el contexto no cambia nada")
+
+    plantas = {"prompt": "a woman waters the plants on a sunny balcony",
+               "luz": "morning"}
+    consolas = {"prompt": "four kids play a racing video game on a big TV",
+                "luz": "afternoon"}
+    prompt = p6_assets._prompt_completo(plantas, LAMINA, ESTILO_FOTO)  # noqa: SLF001
+    igual(DE_CONSOLAS.findall(prompt), [],
+          "un plano de plantas en foto no lleva nada de consolas")
+    ok("HANDS ARE PHOTOGRAPHED" in prompt,
+       "pero si la regla general de las manos")
+    prompt = p6_assets._prompt_completo(consolas, LAMINA, ESTILO_FOTO)  # noqa: SLF001
+    ok("GAMING EQUIPMENT IS SET UP" in prompt and "GAME CONTROLLERS" in prompt,
+       "un plano con videojuegos lleva las reglas del equipo y de los mandos")
+    prompt = p6_assets._prompt_completo(                            # noqa: SLF001
+        plantas, LAMINA, ESTILO_FOTO, feedback="que se vea una consola en la mesa")
+    ok("GAMING EQUIPMENT IS SET UP" in prompt,
+       "la nota del revisor tambien cuenta: pide una consola y entra la regla")
+    estilo_consolas = dict(ESTILO_FOTO, prompt="birthday parties with game consoles")
+    prompt = p6_assets._prompt_completo(plantas, LAMINA, estilo_consolas)  # noqa: SLF001
+    ok("GAMING EQUIPMENT IS SET UP" in prompt,
+       "un estilo de fiestas con consolas las lleva en todos sus planos")
+    igual(DE_CONSOLAS.findall(moodboard._reglas_de(reglas, ESTILO_FOTO)), [],  # noqa: SLF001
+          "las laminas de un estilo foto cualquiera no llevan consolas")
+    ok("GAMING EQUIPMENT IS SET UP" in moodboard._reglas_de(reglas, estilo_consolas),  # noqa: SLF001
+       "las de un estilo de consolas si")
+
+    titulo("7 · la calidad con la que nace un video (A2)")
+    os.environ["ESTUDIO_AJUSTES"] = os.path.join(tempfile.mkdtemp(), "ajustes.json")
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import app                                                  # noqa: PLC0415
+    app.AJUSTES.RUTA = os.environ["ESTUDIO_AJUSTES"]
+    for ajuste, modo, del_estilo, esperado in (
+            ("low", "ilustracion", None, "low"),
+            ("medium", "ilustracion", None, "medium"),
+            ("high", "ilustracion", None, "high"),
+            ("low", "foto", None, "medium"),
+            ("medium", "foto", None, "medium"),
+            ("high", "foto", None, "high"),
+            ("low", "ilustracion", "high", "high"),
+            ("high", "foto", "low", "medium"),
+            ("low", "foto", "rara", "medium")):
+        app.AJUSTES.guardar({"calidad_imagen": ajuste})
+        igual(app.calidad_de_video_nuevo(modo, del_estilo), esperado,
+              f"Configuracion {ajuste}, {modo}, estilo {del_estilo} -> {esperado}")
+
+    titulo("8 · las expresiones de cara en foto (M1)")
+    igual(sorted(p6_assets.TONOS_FOTO), sorted(p6_assets.TONOS),
+          "foto tiene su frase para cada tono de ilustracion")
+    for tono, frase in p6_assets.TONOS_FOTO.items():
+        igual(re.findall(r"\bdraw\w*", frase, re.IGNORECASE), [],
+              f"{tono}: no habla de dibujar")
+        ok(frase != p6_assets.TONOS[tono], f"{tono}: no es la frase de dibujo")
+        igual(p6_assets._expresion(tono, "foto"), frase,           # noqa: SLF001
+              f"{tono}: es la que sale en foto")
+        igual(p6_assets._expresion(tono), p6_assets.TONOS[tono],    # noqa: SLF001
+              f"{tono}: en ilustracion, la de siempre")
+    for tono in ("alegre", "neutro"):
+        ok("No smiling" not in p6_assets.TONOS_FOTO[tono],
+           f"{tono}: en foto no prohibe sonreir (gente seria en una fiesta)")
+    ok("curved up" not in p6_assets.TONOS_FOTO["alegre"],
+       "alegre: sin la sonrisa de catalogo «mouth clearly curved up»")
+    igual(p6_assets._expresion("cualquiera", "foto"),               # noqa: SLF001
+          p6_assets.TONOS_FOTO["neutro"],
+          "un tono desconocido cae en el neutro DE FOTO, no en «No smiling»")
+
+    titulo("9 · la escalera general de foto (A1, tambien en los encuadres)")
+    general = encuadres.ESCALERA_FOTO_GENERAL
+    ids_g = [c["id"] for c in general]
+    igual(len(set(ids_g)), len(ids_g), "ids unicos")
+    ok(not set(ids_g) & set(encuadres.POR_ID) and not set(ids_g) & {
+        c["id"] for c in encuadres.ESCALERA_FOTO},
+       "ninguno se confunde con los de ilustracion ni con los de consolas")
+    igual({c["familia"] for c in general},
+          {c["familia"] for c in encuadres.ESCALERA_FOTO},
+          "las mismas familias que la de consolas")
+    for carta in general:
+        igual(DE_CONSOLAS.findall(carta["encuadre"])
+              + re.findall(r"\bTV\b|station|screen|pouf", carta["encuadre"],
+                           re.IGNORECASE), [],
+              f"{carta['id']}: no nombra equipo de consolas")
+        ok(carta["encuadre"][0].islower() and not carta["encuadre"].endswith("."),
+           f"{carta['id']}: encuadre para pegar tras «SHOT TYPE: »")
+    igual(encuadres.escalera_para("foto"), general,
+          "sin servicios, la general")
+    igual(encuadres.servicios_en_texto("a woman waters the plants"), (),
+          "un texto de plantas no nombra ningun servicio")
+    igual(encuadres.servicios_en_texto("Fiesta con CONSOLAS y karaoke"),
+          ("consolas", "karaoke"), "consolas y karaoke se reconocen en castellano")
+    igual(encuadres.servicios_en_texto("a kid in a VR headset"), ("vr",),
+          "y la realidad virtual")
+    planos = [{"id": f"S{n:03d}"} for n in range(1, 60)]
+    p6_assets._asignar_cartas(planos, p6_assets._con_defectos(      # noqa: SLF001
+        {"semilla": 3, "estilo": dict(ESTILO_FOTO)}),
+        texto='{"sets": [{"descripcion": "a sunny balcony full of plants"}]}')
+    ok(all(e["carta"].startswith("foto_g_") for e in planos),
+       "un video foto de plantas reparte solo cartas de la general")
+    planos = [{"id": f"S{n:03d}"} for n in range(1, 60)]
+    p6_assets._asignar_cartas(planos, p6_assets._con_defectos(      # noqa: SLF001
+        {"semilla": 3, "estilo": dict(ESTILO_FOTO)}),
+        texto='{"objetos": [{"descripcion": "two game controllers"}]}')
+    ok(all(e["carta"].startswith("foto_") and not e["carta"].startswith("foto_g_")
+           for e in planos),
+       "uno cuyo guion saca mandos reparte las de consolas")
+    planos = [{"id": f"S{n:03d}"} for n in range(1, 60)]
+    p6_assets._asignar_cartas(planos, p6_assets._con_defectos(      # noqa: SLF001
+        {"semilla": 3, "estilo": dict(ESTILO_FOTO, prompt="parties with consoles")}))
+    ok(all(not e["carta"].startswith("foto_g_") for e in planos),
+       "y uno cuyo estilo es de fiestas con consolas, tambien")
+    igual(p6_assets.servicios_del_video({"servicios": ["vr"], "estilo": {}},
+                                        "game controllers"), ["vr"],
+          "el param 'servicios' puesto a mano manda sobre lo que diga el texto")
+
+
 def main():
     base = tempfile.mkdtemp(prefix="prueba_modo_foto_")
     try:
@@ -701,6 +855,7 @@ def main():
         prueba_firma(base)
         prueba_modo_foto()
         prueba_escalera_foto()
+        prueba_correcciones()
     finally:
         shutil.rmtree(base, ignore_errors=True)
     print()

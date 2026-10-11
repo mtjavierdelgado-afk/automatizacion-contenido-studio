@@ -15,22 +15,37 @@ vídeos, estilos, claves y contraseña no se tocan.
   **«Tipo de imagen»**. Por defecto queda en **Ilustración**, que es lo de
   siempre: los estilos y vídeos que ya tienes no cambian y **no se vuelve a
   pagar ninguna imagen**.
-- Con **Foto realista**, el Studio genera **fotografías de eventos** en vez de
-  dibujos:
+- Con **Foto realista**, el Studio genera **fotografías** en vez de dibujos,
+  para **cualquier proyecto**:
   - la guía del estilo se escribe **para foto** (cámara y lente, luz, color,
     gente real, lugares, acabado) en vez de para dibujo (trazo, relleno, dedos);
-  - cada plano se pide como **una foto de un fotógrafo de eventos**, y las
+  - cada plano se pide como **una foto de un fotógrafo profesional**, y las
     láminas de referencia también salen como fotos;
-  - entran **reglas propias de foto**: manos de cinco dedos que sostienen bien
-    el mando, televisores siempre sobre su soporte, consolas nunca en el suelo,
-    cables sin flotar, sin logos ni nombres de juegos de otras marcas, nada de
-    aspecto de render;
-  - los planos se reparten con **encuadres de evento**: sala completa, picado,
-    estación completa, sobre el hombro, perfil de jugadores, reacción, cuerpo
-    con visor VR, manos, detalle del equipo, pies en los pedales, pantalla al
-    frente, contraluz y a ras de suelo. Si el vídeo no dice qué servicios
-    lleva, se toman las **consolas**: los pedales solo salen con simuladores y
-    el cuerpo con visor solo con realidad virtual.
+  - entran **reglas propias de foto**, para cualquier tema: piel real, manos de
+    cinco dedos que sostienen bien las cosas, gente que no posa, luz coherente
+    entre planos, sin logos de otras marcas y nada de aspecto de render;
+  - las **caras** tienen expresiones naturales, como las pillaría una cámara:
+    nada de «prohibido sonreír» en una fiesta ni de sonrisas de catálogo;
+  - los planos se reparten con **encuadres de foto**: plano general, picado,
+    plano medio, sobre el hombro, perfil, reacción, manos en la acción,
+    detalle, objeto en primer término, retrato, contraluz y a ras de suelo.
+- **Cuando el vídeo va de consolas** (lo dicen el estilo, el guion o una nota
+  de revisión: consolas, mandos, videojuegos, simuladores, VR, karaoke), se
+  suman solas las reglas y los encuadres de **EstadoPlay**: mandos sujetos con
+  las dos manos, televisores siempre sobre su trípode, consolas nunca en el
+  suelo, cables sin flotar, estación completa, pies en los pedales (solo con
+  simuladores), cuerpo con visor (solo con realidad virtual). En un vídeo de
+  cualquier otra cosa no aparecen.
+- **La calidad de imagen**:
+  - los vídeos nuevos arrancan con la calidad de **Configuración → Calidad de
+    las imágenes**. Hasta ahora los vídeos creados desde un estilo **la
+    ignoraban** y salían siempre en LOW;
+  - los vídeos con un estilo de **Foto realista** arrancan como mínimo en
+    **MEDIUM**: en LOW la piel sale lisa y la foto parece de plástico. Cuesta
+    unas 1,7 veces más por imagen (no 6,8: las referencias se pagan igual).
+    Con HIGH en Configuración, se respeta HIGH;
+  - la cifra «El vídeo entero: … $» de «Un vídeo nuevo» ya cuenta con esa
+    calidad.
 - En un estilo **ya guardado** también está el selector, en «Estilo gráfico»:
   cambiarlo y pulsar **Regenerar** rehace la guía y las láminas **con las
   mismas imágenes**, y deja el tono, la voz y el ritmo como están. Cuesta lo

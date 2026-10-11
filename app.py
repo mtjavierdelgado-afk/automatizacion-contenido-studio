@@ -2431,6 +2431,11 @@ def estimar_video(cuerpo: dict = Body(default=None)):
     planos = max(1, int(round(segundos / media)))
 
     calidad = str(datos.get("calidad") or "low").lower()
+    if not datos.get("calidad") and datos.get("nuevo"):
+        # un video que aun no existe: la calidad con la que va a nacer, la
+        # misma regla que `crear_video_light`
+        calidad = calidad_de_video_nuevo(
+            "foto" if datos.get("modo") == "foto" else "ilustracion")
     usd_imagen = light.USD_POR_IMAGEN.get(calidad, light.USD_POR_IMAGEN["low"])
 
     imagenes = max(1, planos)
@@ -9961,6 +9966,34 @@ def generar_video(pid: str, cuerpo: dict = Body(default=None)):
             "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
 
 
+#: LA CALIDAD MINIMA DE UN VIDEO FOTO. En foto, `low` es lo que da piel lisa y
+#: aspecto de plastico -- la queja que abrio la Etapa Foto --, y subir a `medium`
+#: cuesta 1,7 veces y no 6,8 (ver la tabla de CLAUDE.md: las referencias se
+#: pagan igual en las dos). Por eso un video NUEVO con estilo foto no arranca por
+#: debajo de esto aunque Configuracion diga `low`; con `high` puesto, se respeta.
+CALIDAD_MINIMA_FOTO = "medium"
+
+
+def calidad_de_video_nuevo(modo, calidad_del_estilo=None):
+    """Con que calidad arranca un video nuevo. -> "low" | "medium" | "high"
+
+    La del estilo si la trae; si no, la de Configuracion (`AJUSTES`). Y en foto,
+    nunca por debajo de `CALIDAD_MINIMA_FOTO`. Solo para videos NUEVOS: `calidad`
+    entra en la firma de cada imagen, asi que leer esto al generar dejaria
+    obsoletas las de los videos que ya existen.
+    """
+    calidad = str(calidad_del_estilo or "").strip().lower()
+    if calidad not in AJUSTES.CALIDADES:
+        try:
+            calidad = AJUSTES.calidad_imagen()
+        except Exception:  # noqa: BLE001
+            calidad = "low"
+    if modo == "foto" and (AJUSTES.CALIDADES.index(calidad)
+                           < AJUSTES.CALIDADES.index(CALIDAD_MINIMA_FOTO)):
+        calidad = CALIDAD_MINIMA_FOTO
+    return calidad
+
+
 @app.post("/api/presets-light/{preset_id}/video", status_code=201)
 def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     """Un proyecto de video nuevo con ese estilo ya aplicado. -> la ficha.
@@ -10019,6 +10052,19 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     # camino que copiara las claves a mano se quedaria viejo el dia que un
     # preset guarde una mas.
     aplicado = aplicar_preset_canal(proyecto.id, preset_id)
+    # LA CALIDAD DE IMAGEN, al nacer, como hace `crear_proyecto`. Este camino no
+    # la escribia, y es el UNICO por el que se crean videos desde la pantalla:
+    # todos salian en `low` dijera lo que dijera Configuracion. Es un video
+    # nuevo, asi que escribirla aqui no deja nada obsoleto.
+    params_assets = ctx.estado.params("assets") or {}
+    try:
+        ctx.estado.actualizar_params("assets", {"calidad": calidad_de_video_nuevo(
+            PASOS_MODULOS.p6_assets.modo_de(params_assets.get("estilo")),
+            params_assets.get("calidad"))})
+    except Exception:  # noqa: BLE001
+        # una calidad que no se puede escribir no impide crear el video: se
+        # queda con la del paso, que es lo que pasaba antes
+        pass
     avisos = _sembrar_video_light(ctx, datos)
     if lleva:
         _aplicar_lleva(ctx, lleva, al_crear=True)

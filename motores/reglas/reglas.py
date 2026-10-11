@@ -19,6 +19,7 @@ Uso desde consola:
 import argparse
 import json
 import os
+import re
 from datetime import date
 
 RUTA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reglas.json")
@@ -50,23 +51,48 @@ def guardar(datos):
         json.dump(datos, fh, ensure_ascii=False, indent=2)
 
 
-def para(ambito, como_texto=True, modo="ilustracion"):
-    """Reglas de un ambito, ordenadas por prioridad."""
+def aplica(regla, contexto=None):
+    """Si una regla entra con ese contexto. -> bool
+
+    Las de siempre (sin `solo_si`) entran siempre. Las que llevan `solo_si` son
+    de UN TIPO de video --las de consolas del modo foto, por ejemplo-- y solo
+    entran cuando el texto de este encargo (el estilo, la escena, la nota del
+    revisor) nombra alguna de sus palabras. Sin contexto no entran: es preferible
+    que a un video de consolas le falte una regla a que a uno de plantas le
+    sobre un televisor.
+    """
+    patrones = regla.get("solo_si") or []
+    if not patrones:
+        return True
+    texto = str(contexto or "")
+    if not texto:
+        return False
+    return any(re.search(p, texto, flags=re.IGNORECASE) for p in patrones)
+
+
+def para(ambito, como_texto=True, modo="ilustracion", contexto=None):
+    """Reglas de un ambito, ordenadas por prioridad.
+
+    `contexto` solo decide las reglas con `solo_si` (ver `aplica`); las demas
+    salen igual se pase o no.
+    """
     datos = cargar(modo)
-    filtradas = [r for r in datos["reglas"] if r["ambito"] == ambito]
+    filtradas = [r for r in datos["reglas"]
+                 if r["ambito"] == ambito and aplica(r, contexto)]
     filtradas.sort(key=lambda r: r.get("prioridad", 9))
     if not como_texto:
         return filtradas
     return [r["regla"] for r in filtradas]
 
 
-def bloque_prompt(ambito="prompt_imagen", modo="ilustracion"):
+def bloque_prompt(ambito="prompt_imagen", modo="ilustracion", contexto=None):
     """Devuelve las reglas como un parrafo listo para concatenar a un prompt.
 
     Con `modo="foto"` salen las de `reglas_foto.json` y ninguna de las de
-    cartoon; sin decirlo, las de siempre, igual que antes.
+    cartoon; sin decirlo, las de siempre, igual que antes. `contexto` es el
+    texto del encargo con el que se deciden las reglas con `solo_si`.
     """
-    lineas = para(ambito, modo=modo)
+    lineas = para(ambito, modo=modo, contexto=contexto)
     if not lineas:
         return ""
     return " ".join(lineas)

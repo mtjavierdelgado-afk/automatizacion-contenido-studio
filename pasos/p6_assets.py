@@ -52,6 +52,7 @@ lo que debe sellarse, y "dependencias" el mapa escena -> assets usados.
 """
 import difflib
 import hashlib
+import json
 import math
 import os
 import re
@@ -186,7 +187,7 @@ CABECERA_PLANO = {
     "ilustracion": "Draw a single illustration for one shot of an animated "
                    "documentary.",
     "foto": "Create one photorealistic photograph for one shot of a social "
-            "media video, as taken by a professional event photographer.",
+            "media video, as taken by a professional photographer.",
 }
 
 #: Cuantas referencias adjuntas a una nota entran en el prompt de un plano. Dos
@@ -1093,7 +1094,23 @@ def _asignar_sets(escenas, catalogo, p):
 
 
 
-def _asignar_cartas(escenas, p):
+def servicios_del_video(p, texto=""):
+    """Los servicios de alquiler de un video foto. -> lista (vacia: ninguno)
+
+    Lo que diga el param `servicios` de assets, si alguien lo ha puesto. Si no,
+    los que nombre el video: la guia y el prompt del estilo y `texto` (el
+    catalogo visual del guion). Sin ninguno, la escalera de foto es la GENERAL
+    (ver `encuadres.ESCALERA_FOTO_GENERAL`): un video de plantas no reparte
+    planos de mandos ni de tripodes. Solo cuenta en foto: en ilustracion la
+    escalera no mira servicios.
+    """
+    if p.get("servicios"):
+        return p.get("servicios")
+    return list(encuadres.servicios_en_texto(
+        contexto_de_reglas(p.get("estilo") or {}) + " " + str(texto or "")))
+
+
+def _asignar_cartas(escenas, p, texto=""):
     """Que CLASE de plano es cada uno: aereo, detalle macro, diagrama, pantalla.
 
     La carta es lo que produce ritmo: pedirle a un modelo de imagen «haz un
@@ -1115,7 +1132,7 @@ def _asignar_cartas(escenas, p):
         cartas = encuadres.repartir(
             escenas, semilla=p.get("semilla", 0),
             forzadas={k: v for k, v in forzadas.items() if v},
-            modo="foto", servicios=p.get("servicios"))
+            modo="foto", servicios=servicios_del_video(p, texto))
     else:
         cartas = encuadres.repartir(
             escenas, semilla=p.get("semilla", 0),
@@ -1251,9 +1268,13 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # La carta manda en texto y no hay nada que construir: el generador compone
     # libre sobre el SHOT TYPE. Se reparte sobre las escenas YA ordenadas: la
     # regla de no repetir familia mira a los vecinos, no a un plano suelto.
-    _asignar_cartas(escenas, p)
+    # el texto con el que se reconoce de que servicio va el video (consolas,
+    # simuladores...): lo que el guion ha decidido que sale, en el catalogo
+    texto_video = json.dumps(catalogo or {}, ensure_ascii=False)
+    _asignar_cartas(escenas, p, texto=texto_video)
     modo = modo_de(p["estilo"])
-    camaras = _repartir_zoom(escenas, modo=modo, servicios=p.get("servicios"))
+    camaras = _repartir_zoom(escenas, modo=modo,
+                             servicios=servicios_del_video(p, texto_video))
 
     # Las duraciones definitivas ANTES de decidir los rotulos: un plano de menos
     # de tres segundos no admite ninguno, y eso solo se sabe una vez repartidos
@@ -2044,21 +2065,45 @@ TONOS = {
 }
 
 
-#: Las frases de TONOS que en una foto se dicen de otra manera (Etapa Foto A).
-#: Solo la alegre: es la unica que habla de «dibujar».
+#: LAS EXPRESIONES EN FOTO, una por tono y todas propias (Etapa Foto A).
+#:
+#: Las de `TONOS` son de dibujo: caras de manual (boca recta, cejas a nivel) y
+#: la sonrisa PROHIBIDA salvo en el tono alegre, que es la regla de la casa del
+#: cartoon. En una foto eso sale mal por los dos lados, y se vio en las pruebas:
+#: en un cumpleanos, los planos de tono neutro llegaban con «No smiling» -- gente
+#: seria en una fiesta, contra la propia guia de estilo, que pedia risas -- y los
+#: alegres con «mouth clearly curved up», que es la sonrisa de banco de imagenes
+#: que la regla `foto-gente-real-sin-posar` prohibe. Aqui cada tono describe lo
+#: que una camara pillaria en gente de verdad: expresiones variadas, sin posar y
+#: sin actuar la emocion. `TONOS` no se toca: entra en la huella de ilustracion.
 TONOS_FOTO = {
-    "alegre": ("everyone is visibly happy: open relaxed smiles with the mouth "
-               "clearly curved up, raised eyebrows and bright eyes. The "
-               "cheerful expression is REQUIRED in this shot, do not show them "
-               "neutral"),
+    "alegre": ("people are genuinely enjoying the moment: natural laughter and "
+               "relaxed smiles that reach the eyes, caught mid-reaction and "
+               "different from person to person -- never the same posed grin on "
+               "every face and never a smile aimed at the camera"),
+    "neutro": ("natural, relaxed expressions of people absorbed in what they are "
+               "doing -- attentive, talking, concentrating. Nobody performs an "
+               "emotion, and a faint, unforced smile is fine where the moment "
+               "invites it"),
+    "tenso": ("tense, focused faces: set jaw, slightly narrowed eyes, brows "
+              "pulled together, attention locked on what is happening -- real "
+              "concentration, never a theatrical grimace"),
+    "triste": ("subdued, downcast expressions: lowered gaze, soft unsmiling "
+               "mouth, quiet body language -- understated as in a real candid "
+               "photograph, never theatrical crying"),
+    "solemne": ("serious, composed expressions: steady gaze, closed mouth, still "
+                "posture, the quiet respect of the moment. No smiling and no "
+                "posing"),
 }
 
 
 def _expresion(tono, modo="ilustracion"):
     """Frase de expresion facial del tono, con el neutro como valor seguro."""
     clave = str(tono or "").strip().lower()
-    if modo == "foto" and clave in TONOS_FOTO:
-        return TONOS_FOTO[clave]
+    if modo == "foto":
+        # en foto, siempre de su tabla: tambien el neutro de reserva, que en la
+        # de dibujo es «No smiling»
+        return TONOS_FOTO.get(clave, TONOS_FOTO["neutro"])
     return TONOS.get(clave, TONOS["neutro"])
 
 
@@ -2738,6 +2783,24 @@ def _ultima_palabra_idioma(idioma, foto=False):
             f"names and titles of real works.")
 
 
+def contexto_de_reglas(estilo, escena=None, feedback=""):
+    """El texto con el que se deciden las reglas de foto con `solo_si`. -> str
+
+    Las reglas de foto que son de UN TIPO de video --las de consolas-- solo
+    entran cuando el encargo habla de eso (ver `motores/reglas/reglas.py:aplica`).
+    El encargo, aqui, es lo que describe la imagen que se va a pedir: la guia
+    escrita del estilo y su prompt (lo que el estilo ES), la escena y su luz (lo
+    que sale en ESTE plano) y la nota del revisor (lo que alguien acaba de
+    pedir). Solo lo usa el modo foto: en ilustracion no hay reglas con `solo_si`.
+    """
+    escena = escena or {}
+    trozos = list(guia_escrita(estilo or {}))
+    trozos += [str((estilo or {}).get("prompt") or ""),
+               str(escena.get("prompt") or ""), str(escena.get("luz") or ""),
+               str(feedback or "")]
+    return " ".join(t for t in trozos if t)
+
+
 def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
                      formato="", fichas_reparto=None):
     """Prompt final citando cada referencia por su posicion, como espera la API.
@@ -2859,8 +2922,15 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
     # En modo foto, las reglas de foto y NINGUNA de cartoon (ver
     # `motores/reglas/reglas_foto.json`): las de `reglas.json` se escribieron y
     # se siguen aprendiendo para dibujo.
-    bloque = (reglas.bloque_prompt("prompt_imagen", modo="foto") if foto
-              else reglas.bloque_prompt("prompt_imagen"))
+    #
+    # Y en foto, las reglas de UN TIPO de video (las de consolas: mandos,
+    # televisores en su tripode) solo si este plano va de eso. Lo decide el texto
+    # de lo que se esta pidiendo: la guia del estilo, la escena y la nota del
+    # revisor (ver `contexto_de_reglas`).
+    bloque = (reglas.bloque_prompt("prompt_imagen", modo="foto",
+                                   contexto=contexto_de_reglas(estilo, escena,
+                                                               feedback))
+              if foto else reglas.bloque_prompt("prompt_imagen"))
     if bloque:
         lineas.append(bloque)
     # CUAL es el idioma del video. La POLITICA --que lo que la produccion

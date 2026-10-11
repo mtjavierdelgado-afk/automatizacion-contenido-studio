@@ -323,7 +323,7 @@ TAMANO = (1536, 1024)
 #: La cabecera de una lamina en MODO FOTO (Etapa Foto A). La de ilustracion es
 #: la de siempre, escrita en `prompt_de_dibujo`.
 CABECERA_FOTO = ("Create one single photorealistic photograph for a style "
-                 "reference sheet, as taken by a professional event "
+                 "reference sheet, as taken by a professional "
                  "photographer.")
 
 
@@ -347,7 +347,15 @@ def _reglas_de(reglas, estilo):
     `motores/reglas/reglas_foto.json`).
     """
     if _modo_de(estilo) == "foto":
-        return reglas.bloque_prompt("prompt_imagen", modo="foto")
+        # las reglas de un tipo de video (consolas) solo si el estilo va de eso:
+        # en una lamina no hay escena, asi que decide el estilo solo
+        try:
+            from . import p6_assets                         # noqa: PLC0415
+        except ImportError:
+            import p6_assets                                # noqa: PLC0415
+        return reglas.bloque_prompt(
+            "prompt_imagen", modo="foto",
+            contexto=p6_assets.contexto_de_reglas(estilo))
     return reglas.bloque_prompt("prompt_imagen")
 
 

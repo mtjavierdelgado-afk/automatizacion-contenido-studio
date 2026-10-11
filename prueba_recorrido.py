@@ -1747,7 +1747,8 @@ def ortografia_de_los_subtitulos(navegador, datos):
        "la pantalla Vídeo tiene «Revisar la ortografía» de los subtítulos")
     pg.pulsar(".panel-ortografia button", "Revisar la ortografía")
     ok(pg.esperar(".panel-ortografia", "con faltas", 90), "propone correcciones")
-    texto = pg.p.locator(".panel-ortografia").first.inner_text()
+    # en minúsculas: el estilo del subtítulo puede ir en MAYÚSCULAS («GRÚAS»)
+    texto = pg.p.locator(".panel-ortografia").first.inner_text().lower()
     ok("→" in texto and any(x in texto for x in ("grúas", "mercancía", "idénticas", "más")),
        f"con las tildes que faltan («gruas → grúas»…) ({texto[:200]!r})")
     pg.js("pintarLight();")
@@ -1776,7 +1777,7 @@ def ortografia_de_los_subtitulos(navegador, datos):
     for nombre in os.listdir(carpeta) if os.path.isdir(carpeta) else []:
         with open(os.path.join(carpeta, nombre), encoding="utf-8", errors="replace") as fh:
             capa += fh.read()
-    ok(any(x in capa for x in ("grúas", "mercancía", "idénticas", "decía")),
+    ok(any(x in capa.lower() for x in ("grúas", "mercancía", "idénticas", "decía")),
        "y el subtítulo dibujado ya lleva las tildes corregidas («grúas», «mercancía»…)")
     # EL GUION, por la API (el vídeo de prueba ya tiene la voz grabada)
     r, d = api.post(f"/api/proyectos/{pid}/ortografia/revisar",
@@ -1790,6 +1791,16 @@ def ortografia_de_los_subtitulos(navegador, datos):
         time.sleep(1)
     ok(any(p.get("despues") == "una mañana de octubre" for p in ficha.get("propuestas") or []),
        "el guion también se revisa (antes de grabar la voz)")
+    # LA REVISIÓN VA CON SU VÍDEO Y SU FUENTE: una revisión del guion (o de
+    # otro vídeo) no se puede aplicar como subtítulos de estos planos
+    r, _d = api.post(f"/api/proyectos/{pid}/ortografia/aplicar",
+                     {"cambios": {"S001": "otra cosa"}, "rid": rid})
+    ok(r.status_code == 409, f"aplicar con una revisión que no es de estos subtítulos: 409 ({r.status_code})")
+    with open(os.path.join(datos["proyectos"], pid, "estado.json"), encoding="utf-8") as fh:
+        unidades = ((json.load(fh).get("pasos") or {}).get("callouts") or {}).get("params", {}).get("unidades") or {}
+    puestas = [u for u in unidades.values() if isinstance(u, dict) and u.get("subtitulo_texto")]
+    ok(any(u.get("subtitulo_ancla") for u in puestas),
+       f"cada subtítulo corregido guarda la narración contra la que se corrigió ({len(puestas)})")
     pg.sin_errores("la ortografía de los subtítulos")
     pg.cerrar()
 

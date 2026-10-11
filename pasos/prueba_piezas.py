@@ -3840,6 +3840,22 @@ def prueba_subtitulos():
     igual(subtitulos.repartir_escrito(["lo de arriba", "lo de abajo"], ""),
           ["lo de arriba", "lo de abajo"],
           "sin texto no se toca nada: un override vacio no es un borrado")
+    # CON ANCLA (la pone el corrector de ortografia): el texto escrito vale
+    # mientras la narracion del plano siga siendo la que se corrigio
+    narracion = dict(escena).get("narracion")
+    con_ancla = subtitulos.de_escena(dict(escena), idioma="en",
+                                     texto="Thirty million accounts, and nobody spoke.",
+                                     ancla=narracion.upper())
+    igual(" ".join(x["texto"] for x in con_ancla),
+          "Thirty million accounts, and nobody spoke.",
+          "con el ancla de la misma narracion (da igual mayusculas o signos), "
+          "manda lo corregido")
+    otra = subtitulos.de_escena(dict(escena), idioma="en",
+                                texto="Thirty million accounts, and nobody spoke.",
+                                ancla="una frase que ya no se dice")
+    igual(" ".join(x["texto"] for x in otra), " ".join(x["texto"] for x in trozos),
+          "y si la narracion cambio (se regrabo, se volvio a cortar), lo "
+          "corregido se ignora: un subtitulo que no es lo que se oye miente")
     corto = subtitulos.de_escena(dict(escena), idioma="en", texto="30M.")
     ok(len(corto) == 1 and corto[0]["texto"] == "30M.",
        "un override mas corto que lo que sustituye deja trozos vacios, y un "

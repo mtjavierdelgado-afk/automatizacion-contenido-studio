@@ -54,6 +54,7 @@ que no tenerlo, y ademas miente sobre lo unico que promete.
 """
 import difflib
 import re
+import unicodedata
 
 #: Caracteres por linea. Se recalibro entero el 23-08 con el subtitulo: el
 #: cuerpo dejo de medirse en px del lienzo de generacion (34) para medirse en
@@ -374,8 +375,15 @@ def reparar_mojibake(texto):
     return _MOJIBAKE.sub(_deshacer, texto) if _MOJIBAKE.search(texto) else texto
 
 
+def _palabras_llanas(texto):
+    """Las palabras sin tildes, signos ni mayusculas (y sin letras rotas)."""
+    sin = unicodedata.normalize("NFD", reparar_mojibake(str(texto or "")))
+    sin = "".join(c for c in sin if unicodedata.category(c) != "Mn")
+    return re.findall(r"\w+", sin.lower())
+
+
 def de_escena(escena, cap_linea=CAP_LINEA, idioma=None, texto="",
-              cap_trozo=None):
+              cap_trozo=None, ancla=""):
     """[{"texto", "desde", "hasta"}] en el reloj DEL PLANO, o [] si no cuadra.
 
     `desde`/`hasta` salen de la primera y la ultima marca del rango, menos el
@@ -387,6 +395,11 @@ def de_escena(escena, cap_linea=CAP_LINEA, idioma=None, texto="",
     y vuelve a grabar la voz -- para cambiar «un uno por 100» por «1%», eso es
     absurdo. Entra AQUI y no antes de trocear, que es lo unico que importa:
     despues del troceo el texto puede encoger sin que nada se mueva.
+
+    `ancla` es la narracion del plano cuando se escribio `texto` (la pone el
+    corrector de ortografia). Si lo que dice ahora la narracion ya no es eso --se regrabo
+    el tramo, se volvieron a cortar los planos-- el texto escrito era de OTRA
+    frase y se ignora: un subtitulo que no es lo que se oye miente.
     """
     escena = escena if isinstance(escena, dict) else {}
     # palabra a palabra: reparar no junta ni parte palabras, asi que el
@@ -402,6 +415,8 @@ def de_escena(escena, cap_linea=CAP_LINEA, idioma=None, texto="",
     rangos = list(tramos(palabras, cap_linea=cap_linea, cap_trozo=cap_trozo,
                          intocables=_cifras_de(palabras, idioma)))
     dibujados = [limpiar_texto(palabras[a:b], idioma) for a, b in rangos]
+    if texto and ancla and _palabras_llanas(" ".join(palabras)) != _palabras_llanas(ancla):
+        texto = ""
     if texto:
         dibujados = repartir_escrito(dibujados, reparar_mojibake(texto))
     salida = []

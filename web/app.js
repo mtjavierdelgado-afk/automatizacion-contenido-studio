@@ -6934,13 +6934,18 @@ async function refrescarFichasLight() {
    dejarlo generando y mirarlo desde el móvil. */
 /* EL CORRECTOR DE ORTOGRAFÍA (pasos/ortografia.py): del GUION antes de grabar
    la voz, y de los SUBTÍTULOS de un vídeo ya montado. Propone; aplica solo lo
-   marcado. El estado vive en el vídeo (`v.ortografia`), no en el panel: la
-   pantalla se repinta mientras revisa y el resultado no puede perderse (es lo
-   que le pasaba a «Revisar»). */
+   marcado. El estado vive FUERA del panel y POR VÍDEO (`ORTOGRAFIA_VIVA`, con
+   la clave pid+fuente): la pantalla se repinta mientras revisa y el resultado
+   no puede perderse, y `APP.light.video` es un único objeto para todos los
+   vídeos, así que guardarlo ahí dejaba aplicar la revisión del vídeo A en los
+   planos del B (mismos ids S001, B01…). */
+const ORTOGRAFIA_VIVA = new Map();
+
+function claveOrtografia(pid, fuente) { return `${pid}|${fuente}`; }
+
 function panelOrtografia(fuente) {
   const v = APP.light.video;
-  v.ortografia = v.ortografia || {};
-  const est = v.ortografia[fuente] || {};
+  const est = ORTOGRAFIA_VIVA.get(claveOrtografia(v.pid, fuente)) || {};
   const titulo = fuente === 'guion' ? 'Ortografía del guion' : 'Ortografía de los subtítulos';
   const caja = h('div', { clase: 'panel-ortografia' });
   const cab = h('div', { clase: 'fila' },
@@ -6989,7 +6994,7 @@ function panelOrtografia(fuente) {
 async function revisarOrtografia(fuente) {
   const v = APP.light.video;
   const pid = v.pid;
-  v.ortografia = v.ortografia || {};
+  const clave = claveOrtografia(pid, fuente);
   const cuerpo = { fuente };
   if (fuente === 'guion') {
     cuerpo.textos = {};
@@ -6997,51 +7002,80 @@ async function revisarOrtografia(fuente) {
       cuerpo.textos[b.id] = textoVisibleLight(textoDeBloqueLight(b));
     });
   }
-  v.ortografia[fuente] = { estado: 'pensando' };
+  const est = { estado: 'pensando' };
+  ORTOGRAFIA_VIVA.set(clave, est);
   pintarLight();
   try {
     const lanzada = await pedir(`${API.proyecto(pid)}/ortografia/revisar`, { method: 'POST', cuerpo });
-    v.ortografia[fuente].revisados = lanzada.revisados;
+    est.revisados = lanzada.revisados;
     let ficha = { estado: 'pensando' };
     for (let i = 0; i < 160 && ficha.estado === 'pensando'; i += 1) {
       await new Promise(r => setTimeout(r, 1500));
       ficha = await pedir(`${API.proyecto(pid)}/ortografia/${lanzada.id}`);
     }
     if (ficha.estado === 'pensando') throw new Error('la revisión tarda demasiado: vuelve a pedirla en un momento');
-    if (videoAbierto().pid !== pid) return;
-    v.ortografia[fuente] = ficha;
+    ficha.rid = lanzada.id;
+    if (ORTOGRAFIA_VIVA.get(clave) === est) ORTOGRAFIA_VIVA.set(clave, ficha);
   } catch (e) {
-    if (videoAbierto().pid !== pid) return;
-    v.ortografia[fuente] = { estado: 'error', error: e.message };
+    if (ORTOGRAFIA_VIVA.get(clave) === est) ORTOGRAFIA_VIVA.set(clave, { estado: 'error', error: e.message });
   }
-  pintarLight();
+  if (videoAbierto().pid === pid) pintarLight();
+}
+
+/* Las correcciones del guion se ponen sobre el texto CRUDO del bloque, con
+   sus marcas de la voz (`<break time="900ms"/>`, énfasis…): el corrector ve
+   el texto sin marcas y guardar su versión tal cual las borraba. Cada pareja
+   (mal → bien) se sustituye en el crudo y se comprueba que el resultado, sin
+   marcas, es exactamente la propuesta; si no cuadra y el bloque tenía marcas,
+   ese bloque no se toca (se avisa) antes que perder pausas sin decirlo. */
+function ortografiaSobreCrudo(crudo, propuesta) {
+  const igual = (a, b) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
+  if (igual(textoVisibleLight(crudo), crudo)) return propuesta.despues;   // sin marcas
+  let nuevo = crudo;
+  (propuesta.cambios || []).forEach(([mal, bien]) => {
+    if (!mal || mal === bien) return;
+    const i = nuevo.indexOf(mal);
+    if (i >= 0) nuevo = nuevo.slice(0, i) + bien + nuevo.slice(i + mal.length);
+  });
+  return igual(textoVisibleLight(nuevo), propuesta.despues) ? nuevo : null;
 }
 
 async function aplicarOrtografia(fuente) {
   const v = APP.light.video;
-  const est = (v.ortografia || {})[fuente] || {};
+  const pid = v.pid;
+  const clave = claveOrtografia(pid, fuente);
+  const est = ORTOGRAFIA_VIVA.get(clave) || {};
   const elegidas = (est.propuestas || []).filter(p => (est.marcadas || new Set()).has(p.id));
   if (!elegidas.length) { toast('No hay ninguna marcada', true); return; }
+  let puestas = elegidas.length;
   try {
     if (fuente === 'guion') {
       // por el MISMO camino que escribir a mano en el bloque
       const porId = {};
       ((v.guion || {}).bloques || []).forEach(b => { porId[b.id] = b; });
+      const sinPoner = [];
       elegidas.forEach(p => {
         const b = porId[p.id];
-        if (b) guardarBloqueLight(b.id, p.despues, b.insertado ? undefined : b.texto, !!b.insertado);
+        if (!b) { sinPoner.push(p.id); return; }
+        const nuevo = ortografiaSobreCrudo(textoDeBloqueLight(b), p);
+        if (nuevo === null) { sinPoner.push(p.id); return; }
+        guardarBloqueLight(b.id, nuevo, b.insertado ? undefined : b.texto, !!b.insertado);
       });
+      puestas -= sinPoner.length;
       await guardarBloquesPendientesLight();
       await recargarVideoAbierto();
+      if (sinPoner.length) {
+        toast(`${sinPoner.join(', ')}: corrígelo a mano (lleva pausas o marcas de la voz y no se ha podido poner sin tocarlas)`, true);
+      }
     } else {
       const cambios = {};
       elegidas.forEach(p => { cambios[p.id] = p.despues; });
-      await pedir(`${API.proyecto(v.pid)}/ortografia/aplicar`, { method: 'POST', cuerpo: { cambios } });
+      await pedir(`${API.proyecto(pid)}/ortografia/aplicar`, { method: 'POST', cuerpo: { cambios, rid: est.rid } });
       await refrescarLoDibujado();
     }
-    toast(`${elegidas.length} corrección(es) puestas`);
-    delete v.ortografia[fuente];
-    pintarLight();
+    if (puestas) toast(`${puestas} corrección(es) puestas`);
+    ORTOGRAFIA_VIVA.delete(clave);
+    if (videoAbierto().pid === pid) pintarLight();
   } catch (e) {
     toast(`no se han podido poner: ${e.message}`, true);
   }
@@ -10032,7 +10066,7 @@ function filaDeNotaImagen(nota) {
     const etiqueta = {
       corriendo: 'Dibujando…',
       'en cola': `En cola (${COLA_IMG.cola.indexOf(nota.id) + 1}ª)`
-        + (COLA_IMG.esperando ? ' · empieza al terminar el montaje del vídeo' : ''),
+        + (COLA_IMG.esperando ? ` · empieza al terminar ${COLA_IMG.esperando}` : ''),
       hecha: 'Hecha ✓',
       fallo: esRechazoDeSeguridad(nota.error) ? 'Rechazada por OpenAI' : 'Falló',
     }[ahora] || 'Pendiente';
@@ -11205,7 +11239,16 @@ function laminasDelEstilo(ficha) {
   }
   const precio = d.usd_por_lamina ? ` (≈ ${usdCorto(d.usd_por_lamina)})` : '';
   // EL TRABAJO DE LAS LÁMINAS, aquí mismo y con su barra
-  const enMarcha = APP.light.trabajoLaminas && APP.light.trabajoLaminas.preset === ficha.id;
+  // Solo si la ranura de seguimiento sigue siendo la de ESTE trabajo: otro
+  // trabajo de estilos lanzado después (crear uno, cambiar el idioma) se queda
+  // la ranura sin pasar por el final de este, y la rejilla se quedaba bloqueada
+  // enseñando el progreso del otro.
+  const tl = APP.light.trabajoLaminas;
+  const ranura = APP.trabajos[CLAVE_LIGHT];
+  if (tl && !(ranura && ranura.id === tl.id && APP.seguimientos[CLAVE_LIGHT])) {
+    APP.light.trabajoLaminas = null;
+  }
+  const enMarcha = !!APP.light.trabajoLaminas && APP.light.trabajoLaminas.preset === ficha.id;
   if (enMarcha) {
     caja.appendChild(enVivo(() => {
       const t = APP.trabajos[CLAVE_LIGHT] || {};

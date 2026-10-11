@@ -23,7 +23,13 @@ vídeos, estilos, claves y contraseña no se tocan.
 - **Quitar o devolver una lámina** se hace en la propia ficha, con su barra (ya
   no salta a la pantalla de «generando»).
 - **Rehacer una imagen mientras se monta el vídeo** ya no da error: entra en la
-  cola («empieza al terminar el montaje») y arranca sola.
+  cola (dice qué está esperando: el montaje, la voz o la tanda en marcha) y
+  arranca sola. También espera a una tanda completa que todavía va por el guion.
+- La revisión de ortografía es **de su vídeo**: si cambias de vídeo no se
+  aplica en el otro. En el guion, corregir no borra las **pausas** de la voz.
+  Y un subtítulo corregido se deja de usar solo si después cambia lo que se
+  dice en ese plano (se regraba o se vuelve a cortar): nunca enseña una frase
+  que ya no se oye.
 - Fuera el **menú de proyectos antiguo** y «Rendimiento» (no se veían). La
   papelera está en la portada.
 - **La prueba real**: en la consola del servidor, `asvs probar` hace un vídeo

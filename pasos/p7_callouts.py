@@ -731,7 +731,8 @@ def capa_fija_de(escena, p, banda=None, salida=SALIDA):
         escena, idioma=p.get("idioma"),
         cap_linea=cap_subtitulo(tam, banda),
         cap_trozo=cap_trozo_subtitulo(cap_subtitulo(tam, banda), salida),
-        texto=texto_subtitulo_de(p, f"escena:{escena.get('id')}"))
+        texto=texto_subtitulo_de(p, f"escena:{escena.get('id')}"),
+        ancla=ancla_subtitulo_de(p, f"escena:{escena.get('id')}"))
     tapa = opacidad_de_caja(p)
     # en vertical sin fundidos: cada trozo dura poco y se lee entero
     piezas = [bloque_subtitulo(x, banda, tam, paleta, diseno, tapa,
@@ -1221,6 +1222,15 @@ def texto_subtitulo_de(p, uid):
     if not isinstance(bloque, dict):
         return ""
     return " ".join(str(bloque.get("subtitulo_texto") or "").split())
+
+
+def ancla_subtitulo_de(p, uid):
+    """La narracion del plano cuando se escribio el subtitulo a mano (solo la
+    pone el corrector de ortografia; el repaso no). Ver `subtitulos.de_escena`."""
+    bloque = (p.get("unidades") or {}).get(uid)
+    if not isinstance(bloque, dict):
+        return ""
+    return " ".join(str(bloque.get("subtitulo_ancla") or "").split())
 
 
 def _sin_callout(p, uid):

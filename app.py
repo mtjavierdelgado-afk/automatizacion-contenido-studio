@@ -4951,6 +4951,8 @@ def leer_previsualizacion(pid: str):
                     PASOS_MODULOS.p7_callouts.cap_subtitulo_de(params_callouts, plan),
                     PASOS_MODULOS.p7_callouts.salida_de(plan)),
                 texto=PASOS_MODULOS.p7_callouts.texto_subtitulo_de(
+                    params_callouts, f"escena:{sid}"),
+                ancla=PASOS_MODULOS.p7_callouts.ancla_subtitulo_de(
                     params_callouts, f"escena:{sid}")) or []
         except Exception:                                     # noqa: BLE001
             trozos = []
@@ -5274,6 +5276,10 @@ def _siguiente_plano(ctx, cola):
 
 #: Los pasos cuyos trabajos tiene que esperar la cola de notas antes de dibujar.
 _PASOS_QUE_ESPERA_LA_COLA = ("voz", "assets", "callouts", "render")
+#: Y los trabajos que ACABAN en esos pasos aunque empiecen por otro: la cadena
+#: (`generar:`) guarda como paso el de su primera tarea (el guion, por ejemplo)
+#: y llega a las imagenes y al montaje mas tarde.
+_TRABAJOS_QUE_ESPERA_LA_COLA = ("generar:", "receta:", "repaso", "subtitulos", "capturas:")
 
 
 def _otros_trabajos(ctx):
@@ -5281,7 +5287,21 @@ def _otros_trabajos(ctx):
     cerrojo: se llama con el _COLA_LOCK tomado."""
     return [f for f in ctx.gestor.listar(activos=True)
             if f.get("nombre") != "notas_imagenes"
-            and f.get("paso") in _PASOS_QUE_ESPERA_LA_COLA]
+            and (f.get("paso") in _PASOS_QUE_ESPERA_LA_COLA
+                 or str(f.get("nombre") or "").startswith(_TRABAJOS_QUE_ESPERA_LA_COLA))]
+
+
+def _que_se_espera(otros):
+    """El nombre para la persona de lo que la cola esta esperando."""
+    pasos = {f.get("paso") for f in otros}
+    nombres = " ".join(str(f.get("nombre") or "") for f in otros)
+    if "voz" in pasos:
+        return "la grabación de la voz"
+    if "generar:" in nombres or "receta:" in nombres:
+        return "la tanda en marcha"
+    if "assets" in pasos:
+        return "las imágenes en marcha"
+    return "el montaje del vídeo"
 
 
 def _lanzar_cola(ctx):
@@ -5305,7 +5325,13 @@ def _lanzar_cuando_libre(ctx):
         if _otros_trabajos(ctx):
             continue
         with _COLA_LOCK:
+            # se vuelve a mirar CON el cerrojo: entre mirar y lanzar puede
+            # haber arrancado un montaje
+            otros = _otros_trabajos(ctx)
             estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+            if otros and estado.get("cola"):
+                estado["esperando"] = _que_se_espera(otros)
+                continue
             estado.pop("esperando", None)
             if estado.get("cola") and not estado.get("trabajo"):
                 _lanzar_cola(ctx)
@@ -5569,6 +5595,13 @@ def _subtitulos_por_plano(pid):
     return salida
 
 
+def _narracion_por_plano(ctx):
+    """{plano: narracion} del plan de ahora: el ancla de un subtitulo corregido."""
+    plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    return {str(e.get("id")): " ".join(str(e.get("narracion") or "").split())
+            for e in plan.get("escenas") or [] if e.get("id")}
+
+
 @app.post("/api/proyectos/{pid}/ortografia/revisar", status_code=202)
 def revisar_ortografia(pid: str, cuerpo: dict = Body(default=None)):
     """Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de
@@ -5593,12 +5626,13 @@ def revisar_ortografia(pid: str, cuerpo: dict = Body(default=None)):
         for viejo in list(_ORTOGRAFIA)[:-19]:
             _ORTOGRAFIA.pop(viejo, None)
         _ORTOGRAFIA[rid] = {"estado": "pensando", "fuente": fuente, "proyecto": ctx.id}
+    anclas = _narracion_por_plano(ctx) if fuente == "subtitulos" else {}
 
     def correr():
         try:
             propuestas = PASOS_MODULOS.ortografia.revisar(textos, cwd=RAIZ_ESTUDIO)
             ficha = {"estado": "listo", "fuente": fuente, "proyecto": ctx.id,
-                     "revisados": len(textos),
+                     "revisados": len(textos), "_anclas": anclas,
                      "propuestas": [{"id": k, "antes": textos[k], "despues": v["texto"],
                                      "cambios": v.get("cambios") or []}
                                     for k, v in propuestas.items() if k in textos]}
@@ -5619,7 +5653,7 @@ def leer_ortografia(pid: str, rid: str):
         ficha = _ORTOGRAFIA.get(rid)
     if not ficha or ficha.get("proyecto") != pid:
         raise ErrorApi(404, "esa revisión de ortografía ya no está: vuelve a pedirla")
-    return ficha
+    return {k: v for k, v in ficha.items() if not k.startswith("_")}
 
 
 @app.post("/api/proyectos/{pid}/ortografia/aplicar")
@@ -5636,6 +5670,24 @@ def aplicar_ortografia_subtitulos(pid: str, cuerpo: dict = Body(default=None)):
     for paso in ("callouts", "render"):
         if _trabajo_activo(ctx, paso) is not None:
             raise ErrorApi(409, "el vídeo se está montando: aplica la corrección cuando termine")
+    # CON LA REVISION QUE LO PROPUSO (`rid`): solo planos de ESA revision, de
+    # ESTE proyecto y de los subtitulos. Sin esto, una pantalla que se quedo con
+    # la revision de otro video escribia sus textos en estos planos (los ids
+    # S001, S002... se repiten en todos). Y cada texto se guarda con lo que se
+    # leia al revisarlo (`subtitulo_ancla`): si luego cambia la narracion de ese
+    # plano, el texto corregido se ignora en vez de mentir (subtitulos.de_escena).
+    anclas = {}
+    rid = _cuerpo(cuerpo).get("rid")
+    if rid:
+        with _LOCK_ORTOGRAFIA:
+            ficha = _ORTOGRAFIA.get(str(rid))
+        if not ficha or ficha.get("proyecto") != pid or ficha.get("fuente") != "subtitulos":
+            raise ErrorApi(409, "esa revisión de ortografía no es de los subtítulos de este vídeo: vuelve a pedirla")
+        propuestas = {str(p["id"]) for p in ficha.get("propuestas") or []}
+        anclas = ficha.get("_anclas") or {}
+        ajenos = sorted(str(k) for k in cambios if str(k) not in propuestas)
+        if ajenos:
+            raise ErrorApi(400, f"esos planos no estaban en la revisión: {', '.join(ajenos[:10])}")
     declaradas = set(ctx.estado.unidades_declaradas("callouts") or ())
     previas = (ctx.estado.params("callouts") or {}).get("unidades") or {}
     bloque = {}
@@ -5647,6 +5699,10 @@ def aplicar_ortografia_subtitulos(pid: str, cuerpo: dict = Body(default=None)):
         actual = previas.get(uid)
         actual = dict(actual) if isinstance(actual, dict) else {}
         actual["subtitulo_texto"] = texto
+        if anclas.get(str(plano)):
+            actual["subtitulo_ancla"] = " ".join(anclas[str(plano)].split())
+        else:
+            actual.pop("subtitulo_ancla", None)
         bloque[uid] = actual
     if not bloque:
         raise ErrorApi(400, "ninguno de esos planos está en el vídeo")
@@ -5742,10 +5798,11 @@ def rehacer_imagenes_con_notas(pid: str, cuerpo: dict = Body(default=None)):
             cero.difference_update(pedidas_ahora)
         if not en_marcha:
             estado["trabajo"] = None
-            if _otros_trabajos(ctx):
+            otros = _otros_trabajos(ctx)
+            if otros:
                 # se monta (o se dibuja) otra cosa: la cola espera y arranca sola
                 if not estado.get("esperando"):
-                    estado["esperando"] = "el montaje del vídeo"
+                    estado["esperando"] = _que_se_espera(otros)
                     threading.Thread(target=_lanzar_cuando_libre, args=(ctx,), daemon=True,
                                      name=f"cola-espera-{ctx.id}").start()
             else:
@@ -6104,6 +6161,9 @@ def _aplicar_cambios_del_repaso(ctx, reparto, avisos):
             actual = previas.get(uid)
             actual = dict(actual) if isinstance(actual, dict) else {}
             actual["subtitulo_texto"] = texto
+            # escrito a mano contra la narracion de AHORA: el ancla de una
+            # corrección de ortografía anterior ya no vale (ver de_escena)
+            actual.pop("subtitulo_ancla", None)
             bloque[uid] = actual
         params_callouts["unidades"] = bloque
     if params_callouts:

@@ -47,6 +47,10 @@ salió.
 
 La primera pantalla. Cada tarjeta es un estilo; **Un estilo nuevo** crea otro.
 
+Lo que borras o apartas (un estilo, un vídeo) va a la **🗑 Papelera**, arriba
+en la portada y dentro de cada proyecto: desde ahí se **devuelve** cuando
+quieras. Dentro de un vídeo, **Estilos** abre el estilo con el que se hizo.
+
 ### Un estilo nuevo
 
 - **Nombre**: la etiqueta del estilo. Se cambia luego sin regenerar nada.
@@ -208,6 +212,17 @@ las pendientes y dice antes cuánto cuesta y cuánto tardará. Se dibujan **una
 detrás de otra** en el servidor: puedes cerrar o recargar la página y sigue.
 Si escribes **varias notas para la misma imagen**, se juntan y se paga **una**.
 
+**Retocar o dibujar desde cero.** «Rehacer esta imagen» **retoca** la de ahora:
+se la enseña al generador para que conserve la composición, y es lo mejor para
+cambios pequeños («que lleve gafas», «más luz»). Para un cambio grande («esto
+tenía que ser una consola, no un televisor») usa **Desde cero**: la dibuja de
+nuevo sin partir de la anterior. Si una ya hecha salió casi igual, pulsa
+**¿Salió igual? Desde cero**. Cuando está hecha, la tarjeta enseña **cómo era
+antes** debajo de la nueva.
+
+**Una imagen rehecha no entra en el MP4 hasta volver a montarlo**: la pantalla
+Vídeo lo avisa y **Regenerar Vídeo** lo monta (no paga imágenes ya hechas).
+
 **Si OpenAI la rechaza** (su filtro no dibuja marcas, logos ni personajes con
 derechos: «Mario Kart», «Nintendo Switch»…):
 
@@ -222,6 +237,8 @@ derechos: «Mario Kart», «Nintendo Switch»…):
 ## Vídeo
 
 - **Montar el vídeo** junta imágenes, voz, subtítulos, música y efectos en el MP4.
+- Si la voz de un vídeo llegó con las tildes rotas («TÃº»), sale el aviso
+  **Arreglar los subtítulos**: los vuelve a dibujar y monta, sin pagar nada.
 - **El repaso**: escribe notas sobre el vídeo («la música está alta», «este
   rótulo sobra») y se aplican rehaciendo solo lo que tocan.
 - **Descargar** baja el MP4.

@@ -1124,7 +1124,7 @@ video { width: 100%; border-radius: 9px; border: 1px solid var(--linea); backgro
   /* Un mando y su etiqueta, cada uno en su línea y a lo ancho. */
   .campo select, .campo input:not([type=checkbox]):not([type=range]),
   .campo textarea { width: 100%; }
-  .rejilla.cols3, .rejilla.cols2 { grid-template-columns: 1fr; }
+  .rejilla.cols3, .rejilla.cols2 { grid-template-columns: minmax(0, 1fr); }
   /* Ninguna etiqueta corta se parte. */
   .pastilla, .subpestana, .fila-preset .abrir .nombre, .cuenta { white-space: nowrap; }
   /* Y ningún texto explicativo se corta. */
@@ -1542,8 +1542,11 @@ body.modo-light #coste { display: none; }
 .bloque-light .mandos > .fila { margin-top: 9px; }
 /* en estrecho se apilan: la columna de 210 px no cabe con el campo al lado */
 @media (max-width: 720px) {
-  .bloque-light { grid-template-columns: 1fr; gap: 9px; }
+  /* minmax(0, 1fr) y no 1fr: con 1fr la columna crecía hasta el ancho natural
+     de lo de dentro, y las muestras del estilo salían a 1920 px en el móvil */
+  .bloque-light { grid-template-columns: minmax(0, 1fr); gap: 9px; }
 }
+.bloque-light > .mandos { min-width: 0; }
 
 /* ---- las imágenes de apoyo de una descripción de estilo
  *
@@ -2724,7 +2727,7 @@ textarea.copia-oculta { position: fixed; left: -9999px; top: 0; }
 @media (max-width: 620px) {
   .velo-guia { padding: 0; align-items: stretch; }
   .cuadro-guia { max-height: 100dvh; border-radius: 0; border: none; }
-  .guia-dos { grid-template-columns: 1fr; }
+  .guia-dos { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ---- Configuracion: novedades y notas */
@@ -2818,7 +2821,7 @@ body.burbuja-minimizada .pestana-asistente { display: flex; }
 .lleva-pieza input:checked ~ .interruptor::after { transform: translateX(16px); }
 .lleva-pieza input:focus-visible ~ .interruptor { box-shadow: 0 0 0 3px rgba(139, 92, 246, .35); }
 .lleva-pieza input:disabled ~ .interruptor { opacity: .55; }
-@media (max-width: 620px) { .lleva { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .lleva { grid-template-columns: minmax(0, 1fr); } }
 
 /* ---- la tarjeta «Como se trabaja» de la guia de inicio */
 ul.inicio-como { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
@@ -2909,7 +2912,7 @@ ul.inicio-como li { display: flex; gap: 10px; align-items: flex-start; line-heig
   #btn-dictar-asistente.grabando { animation: none; }
 }
 /* las dos opciones del dictado: un nombre largo, no una calidad de una palabra */
-.fila-calidad.opcion-dictado { grid-template-columns: 1fr; }
+.fila-calidad.opcion-dictado { grid-template-columns: minmax(0, 1fr); }
 .fila-calidad.opcion-dictado .nombre {
   text-transform: none; letter-spacing: normal; font-size: 14px; grid-row: auto;
 }
@@ -3102,7 +3105,7 @@ textarea.autoalto, textarea.crece.autoalto { max-height: 60vh; overflow-y: auto;
 .pastilla.estado-hecha { background: var(--ok); color: var(--sobre-ok); }
 .pastilla.estado-fallo { background: var(--malo); color: var(--sobre-acento); }
 @media (max-width: 640px) {
-  .nota-imagen { grid-template-columns: 1fr; }
+  .nota-imagen { grid-template-columns: minmax(0, 1fr); }
 }
 .error-cerrable { position: relative; }
 .error-cerrable > .mini { position: absolute; top: 8px; right: 8px; }

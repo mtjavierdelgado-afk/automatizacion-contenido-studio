@@ -10,6 +10,33 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Imágenes rehechas que «no cambiaban» (11 de octubre)**
+- **«Rehacer esta imagen» retoca la de ahora** (se la pone delante al
+  generador para conservar la composición), y en un cambio grande salía casi
+  igual. Nuevo **«Desde cero»**: la dibuja de nuevo SIN partir de la anterior.
+  En una ya hecha, **«¿Salió igual? Desde cero»**.
+- La tarjeta enseña **cómo era antes** debajo de la nueva.
+- **La pantalla Vídeo avisa** de que su MP4 es de antes de tus cambios (antes
+  no se enteraba hasta recargar la página) y «Regenerar Vídeo» lo monta con
+  las imágenes nuevas.
+- «Regenerar Vídeo» **ya nunca redibuja el vídeo entero**: con el MP4 al día y
+  algo menor pendiente (la música sin elegir), podía pagar todas las imágenes
+  otra vez. Ahora solo rehace lo que haya quedado viejo.
+- **«Arreglar los subtítulos»** en la pantalla Vídeo, para los vídeos cuya voz
+  llegó con las tildes rotas («TÃº»): vuelve a dibujar los subtítulos y monta.
+  No se paga nada.
+
+**La papelera, a la vista**
+- Botón **🗑 Papelera** en la portada y dentro de cada proyecto (antes solo
+  se abría desde un menú que esta pantalla no enseña). Devolver un estilo lo
+  devuelve con sus láminas y su escucha.
+
+**Pantalla**
+- En 19 sitios los márgenes no se aplicaban (la protección del servidor los
+  bloqueaba): ya se ven.
+- En el móvil, los botones de cada vídeo de la portada van debajo del nombre
+  (la burbuja del asistente tapaba «Apartar»).
+
 **Arreglos del 10 de octubre (lo que se vio abriendo un vídeo de verdad)**
 - Las **fotos adjuntas a una nota** salen en miniatura (antes, a su tamaño
   real, tapando la pantalla). Pulsarlas las abre en grande.

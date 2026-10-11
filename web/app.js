@@ -4495,7 +4495,13 @@ function abrirPapelera() {
          un estilo y vuelve CON él al devolver el estilo. Enseñarlo como
          «proyecto» hacía que «Devolver» devolviera el taller y no el estilo. */
       const light = document.body.classList.contains('modo-light');
-      const lista = (listaDe(datos.papelera) || []).filter(f => !(light && f.taller));
+      // solo se esconden los talleres de un estilo que está en la papelera (vuelven
+      // con él); uno cuyo estilo ya se borró del todo se enseña, para poder
+      // devolverlo o borrarlo y que no se quede ocupando disco a escondidas
+      const conSuEstilo = new Set(presetsApartados
+        .map(p => (((p.datos || {}).origen) || {}).taller).filter(Boolean));
+      const lista = (listaDe(datos.papelera) || [])
+        .filter(f => !(light && f.taller && conSuEstilo.has(f.id)));
       // una carpeta que ya no esta no puede seguir marcada
       const vivas = new Set(lista.map(f => f.carpeta));
       [...marcadas].forEach(c => { if (!vivas.has(c)) marcadas.delete(c); });
@@ -4539,7 +4545,8 @@ function abrirPapelera() {
         });
         tabla.appendChild(h('tr', { datos: { carpeta: ficha.carpeta } },
           h('td', {}, marca),
-          h('td', {}, h('span', { clase: 'tag-papelera proyecto' }, ficha.video ? 'vídeo' : 'proyecto')),
+          h('td', {}, h('span', { clase: 'tag-papelera proyecto' },
+            ficha.video ? 'vídeo' : (ficha.taller ? 'restos de un estilo borrado' : 'proyecto'))),
           h('th', {}, oHueco(ficha.nombre, ficha.id), h('div', { clase: 'meta' }, oHueco(ficha.id, ''))),
           h('td', { clase: 'meta' }, oHueco(ficha.apartado)),
           h('td', { clase: 'meta' }, fechaCorta(ficha.creado)),
@@ -9442,10 +9449,17 @@ function vistaVideoLight() {
      de «Obsoleto» abajo: se leía como «he regenerado y no cambia nada»
      (10-10-2026). */
   if (videoObsoletoLight() && !trabajoVideoLight()) {
+    /* Y SI MONTAR VA A DIBUJAR IMÁGENES (guion o voz cambiados), se dice con
+       su precio: el aviso empuja a pulsar, así que no puede callarse lo que se
+       paga. Sale del plan del servidor, la misma cifra que el botón. */
+    const coste = (((v.planes || {}).render || {}).coste) || {};
+    const porDibujar = Number(coste.imagenes_por_generar) || 0;
     caja.appendChild(h('div', { clase: 'caja-aviso' },
       'Este vídeo es de ANTES de tus últimos cambios (por ejemplo, imágenes rehechas '
       + 'en «Imágenes»): lo que ves aquí todavía no los lleva. Pulsa «Regenerar Vídeo» '
-      + 'abajo para volver a montarlo con ellos.'));
+      + 'abajo para volver a montarlo con ellos.'
+      + (porDibujar ? ` Ojo: además se dibujarán ${porDibujar} imagen(es) que han quedado `
+        + `viejas (≈ ${usdCorto(Number(coste.usd_por_generar) || 0)}).` : ' No se dibuja ninguna imagen.')));
   }
 
   /* LAS TILDES ROTAS DE LOS SUBTÍTULOS («TÃº»): la voz de este vídeo llegó

@@ -771,7 +771,7 @@ def lo_que_sale_a_veces(navegador, datos):
             pg.pulsar("button", "Usar en el campo")
             ok(True, "«Usar en el campo» se deja pulsar")
         pg.p.keyboard.press("Escape")
-        pg.p.evaluate("() => document.querySelectorAll('.capa-guia, #guia, .capa-dialogo').forEach(x => x.remove())")
+        pg.p.evaluate("() => document.querySelectorAll('#ventana-guia, .capa-dialogo').forEach(x => x.remove())")
     # QUITAR UNA LAMINA Y DEVOLVERLA (gratis: ya está dibujada)
     pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{datos['preset']}' }});")
     ok(pg.esperar(".laminas-estilo .lamina"), "la ficha enseña las láminas")
@@ -936,7 +936,20 @@ def rehacer_y_verlo_en_el_video(navegador, datos):
         " ".join(pg.p.locator(".previa-feedback .meta").all_inner_texts())
     ok("Ã" not in pg.p.locator("#panel").inner_text(),
        "en Imágenes ninguna frase sale con «Ã» (la voz llegó rota y se enseña bien)")
-    pg.pulsar(".nav-light button", "Vídeo")
+    ok(not pg.visible(".caja-aviso", "tildes rotas"),
+       "un vídeo cuyos subtítulos ya se dibujaron con el arreglo NO enseña el aviso")
+    # COMO UN VIDEO MONTADO ANTES DEL ARREGLO: su subtítulo dibujado dice «zarpÃ³»
+    activa = _version_de(datos, "callouts", "")
+    capas = os.path.join(datos["proyectos"], pid, "pasos", "callouts",
+                         f"v{activa.get('activa')}", "capas_fijas")
+    for nombre in os.listdir(capas):
+        ruta = os.path.join(capas, nombre)
+        with open(ruta, encoding="utf-8") as fh:
+            svg = fh.read()
+        if "zarpó" in svg:
+            with open(ruta, "w", encoding="utf-8") as fh:
+                fh.write(svg.replace("zarpó", "zarpÃ³"))
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'video'; pintarLight();")
     ok(pg.esperar(".caja-aviso", "tildes rotas", 10), "el Vídeo avisa de los subtítulos con tildes rotas")
     pg.pulsar(".caja-aviso button", "Arreglar los subtítulos")
     pg.p.wait_for_timeout(1500)
@@ -1453,6 +1466,58 @@ def tamanos_temas_y_textos(navegador, datos):
 
 
 @escenario
+def repintar_no_pierde_nada(navegador, datos):
+    """La pantalla se repinta sola (el coste, un trabajo que avanza, el guardado
+    de otro campo). Lo que se está escribiendo NO puede perderse por eso: fue
+    lo que dejaba a «Revisar» sin su botón de aplicar. En cada pantalla se
+    escribe en cada campo, se fuerza un repintado y se mira que siga ahí."""
+    perdidos = []
+    for nombre, ir in _pantallas(datos):
+        if nombre in ("guía de inicio",):
+            continue
+        pg = Pagina(navegador, datos, nombre=nombre)
+        pg.aceptar = False
+        pg.js(ir)
+        pg.p.wait_for_timeout(1500)
+        campos = pg.p.locator("#panel textarea:visible, #panel input[type=text]:visible, "
+                              "#panel input[type=search]:visible, #config textarea:visible")
+        originales = []
+        for i in range(min(campos.count(), 12)):
+            campo = campos.nth(i)
+            try:
+                originales.append((i, campo.input_value()))
+                campo.fill(f"{campo.input_value()} ZQX{i}")
+                campo.dispatch_event("input")
+            except Exception:                                # noqa: BLE001
+                continue
+        pg.p.wait_for_timeout(300)
+        pg.js("pintarLight();")
+        pg.p.wait_for_timeout(1500)
+        pg.js("pintarLight();")
+        pg.p.wait_for_timeout(800)
+        valores = pg.p.evaluate("() => [...document.querySelectorAll('textarea, input')].map(x => x.value).join(' ')")
+        for i, _ in originales:
+            if f"ZQX{i}" not in valores:
+                perdidos.append(f"{nombre}: el campo {i + 1} pierde lo escrito al repintarse")
+        # se deja todo como estaba
+        campos = pg.p.locator("#panel textarea:visible, #panel input[type=text]:visible, "
+                              "#panel input[type=search]:visible, #config textarea:visible")
+        for i in range(min(campos.count(), 12)):
+            try:
+                campo = campos.nth(i)
+                valor = campo.input_value()
+                if "ZQX" in valor:
+                    campo.fill(re.sub(r"\s*ZQX\d+", "", valor))
+                    campo.dispatch_event("input")
+            except Exception:                                # noqa: BLE001
+                continue
+        pg.p.wait_for_timeout(2500)
+        pg.sin_errores(f"repintar {nombre}")
+        pg.cerrar()
+    ok(not perdidos, f"repintar la pantalla no se lleva nada de lo escrito -- {perdidos[:10]}")
+
+
+@escenario
 def todos_los_botones(navegador, datos):
     """Cada pantalla, CADA botón: pulsarlo tiene que cambiar algo que se vea
     (la pantalla, un aviso, un diálogo) y no dar ningún error. Un botón que no
@@ -1500,7 +1565,14 @@ def todos_los_botones(navegador, datos):
                 except Exception:                            # noqa: BLE001
                     # se repintó mientras (un aviso encima, la rejilla rehecha):
                     # se vuelve a buscar y se pulsa otra vez, como haría alguien
-                    pg.p.wait_for_timeout(3500)
+                    pg.p.wait_for_timeout(1500)
+                    # y si algo quedó abierto encima (una guía, un cajón), se
+                    # vuelve a la pantalla limpia
+                    pg.p.keyboard.press("Escape")
+                    pg.p.evaluate("() => document.querySelectorAll('#lupa, .capa-dialogo, "
+                                  "#ventana-guia, #papelera').forEach(x => x.remove())")
+                    pg.js(ir)
+                    pg.p.wait_for_timeout(1200)
                     objetivo = _buscar_boton(pg, texto, n)
                     if objetivo is None:
                         continue
@@ -1515,15 +1587,18 @@ def todos_los_botones(navegador, datos):
             pulsados += 1
             pg.p.wait_for_timeout(900)
             despues = pg.p.evaluate(FIRMA_JS)
-            if len(pg.errores) > n_errores:
-                rotos.append(f"{nombre} · «{texto}»: {pg.errores[n_errores:][:2]}")
+            # solo las EXCEPCIONES sin recoger: un console.error es la pantalla
+            # contando un fallo que ya enseña (la tanda que murió, una clave)
+            nuevos = [e for e in pg.errores[n_errores:] if e.startswith("pageerror")]
+            if nuevos:
+                rotos.append(f"{nombre} · «{texto}»: {nuevos[:2]}")
             # pulsar la opción que YA está elegida no tiene por qué hacer nada
             if antes == despues and len(dialogos) == n_dialogos and len(abiertos) == n_abiertos \
                     and not ya_puesto:
                 muertos.append(f"{nombre} · «{texto}»")
             # se cierra lo que haya abierto encima (lupa, diálogos propios)
             pg.p.keyboard.press("Escape")
-            pg.p.evaluate("() => document.querySelectorAll('#lupa, .capa-dialogo').forEach(x => x.remove())")
+            pg.p.evaluate("() => document.querySelectorAll('#lupa, .capa-dialogo, #ventana-guia, #papelera').forEach(x => x.remove())")
         pg.errores.clear()
         pg.cerrar()
     print(f"  ({pulsados} botones pulsados en {len(pantallas)} pantallas)")

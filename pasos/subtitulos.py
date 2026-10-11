@@ -403,7 +403,7 @@ def de_escena(escena, cap_linea=CAP_LINEA, idioma=None, texto="",
                          intocables=_cifras_de(palabras, idioma)))
     dibujados = [limpiar_texto(palabras[a:b], idioma) for a, b in rangos]
     if texto:
-        dibujados = repartir_escrito(dibujados, texto)
+        dibujados = repartir_escrito(dibujados, reparar_mojibake(texto))
     salida = []
     for (a, b), escrito in zip(rangos, dibujados):
         try:

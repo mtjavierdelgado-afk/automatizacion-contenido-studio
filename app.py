@@ -34,6 +34,7 @@ import asyncio
 import copy
 import hashlib
 import inspect
+import html as html_lib
 import json
 import mimetypes
 import os
@@ -5391,6 +5392,10 @@ def _correr_notas_imagenes(avisar, ctx):
             # en cola no lo va a dibujar nadie, y decir «en cola» seria mentir
             if estado.get("trabajo"):
                 estado["cola"] = []
+            # y lo pedido «desde cero» que no se llego a dibujar no se queda
+            # apuntado para un retoque de otro dia
+            if not estado.get("cola"):
+                estado.pop("desde_cero", None)
             estado["trabajo"] = None
     avisar(1.0, f"{len(hechas)} hechas, {len(rechazadas)} rechazadas, "
                 f"{len(fallidas)} con error")
@@ -5424,36 +5429,42 @@ def _ficha_cola(ctx):
 
 
 def _texto_roto_en(ctx):
-    """Cuantos planos tienen la narracion con «TÃº» (voz grabada antes del
-    10-10-2026, ver `subtitulos.reparar_mojibake`)."""
-    try:
-        plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
-    except Exception:                                       # noqa: BLE001
+    """Cuantos planos tienen el subtitulo DIBUJADO con «TÃº» (voz grabada antes
+    del 10-10-2026, ver `subtitulos.reparar_mojibake`).
+
+    Se mira lo dibujado (las capas SVG de la version activa de `callouts`) y no
+    la narracion: la narracion se queda rota para siempre --entra en la firma
+    de las imagenes y no se toca--, pero un plano cuyos rotulos se rehicieron
+    con el codigo nuevo ya sale bien y no hay nada que arreglar."""
+    version = ctx.proyecto.version_activa("callouts")
+    if not version:
         return 0
-    arreglar = PASOS_MODULOS.subtitulos.reparar_mojibake
-    return sum(1 for e in plan.get("escenas") or []
-               if arreglar(e.get("narracion") or "") != (e.get("narracion") or ""))
-
-
-def _ruta_subtitulos_reparados(ctx):
-    return os.path.join(ctx.proyecto.raiz, "subtitulos_reparados.json")
+    patron = PASOS_MODULOS.subtitulos._MOJIBAKE
+    rotos = set()
+    base = os.path.join(ctx.proyecto.raiz, "pasos", "callouts", f"v{version}")
+    for carpeta in ("capas_fijas", "capas"):
+        directorio = os.path.join(base, carpeta)
+        if not os.path.isdir(directorio):
+            continue
+        for nombre in os.listdir(directorio):
+            if not nombre.endswith(".svg"):
+                continue
+            try:
+                with open(os.path.join(directorio, nombre), encoding="utf-8",
+                          errors="replace") as fh:
+                    texto = html_lib.unescape(fh.read())
+            except OSError:
+                continue
+            if patron.search(texto):
+                rotos.add(nombre[:-4])
+    return len(rotos)
 
 
 @app.get("/api/proyectos/{pid}/subtitulos/rotos")
 def subtitulos_rotos(pid: str):
-    """{planos}: cuantos planos tienen la narracion con las tildes rotas Y los
-    subtitulos todavia sin volver a dibujar. Los datos no se tocan (la
-    narracion entra en la firma de las imagenes), asi que lo que dice que ya se
-    arreglo es la marca que deja «Arreglar los subtitulos»."""
-    ctx = contexto(pid)
-    try:
-        with open(_ruta_subtitulos_reparados(ctx), encoding="utf-8") as fh:
-            marca = json.load(fh)
-        if int(ctx.proyecto.version_activa("callouts") or 0) >= int(marca.get("callouts") or 0) > 0:
-            return {"planos": 0, "reparados": True}
-    except (OSError, ValueError, TypeError):
-        pass
-    return {"planos": _texto_roto_en(ctx)}
+    """{planos}: cuantos planos tienen los subtitulos dibujados con las tildes
+    rotas («TÃº»)."""
+    return {"planos": _texto_roto_en(contexto(pid))}
 
 
 def _correr_rehacer_subtitulos(avisar, ctx):
@@ -5473,9 +5484,6 @@ def _correr_rehacer_subtitulos(avisar, ctx):
         except BaseException:
             ctx.estado.limpiar_marca(paso)
             raise
-    with open(_ruta_subtitulos_reparados(ctx), "w", encoding="utf-8") as fh:
-        json.dump({"callouts": ctx.proyecto.version_activa("callouts"),
-                   "fecha": time.strftime("%Y-%m-%dT%H:%M:%S")}, fh)
     avisar(1.0, "subtítulos rehechos y vídeo montado")
     return {"planos": _texto_roto_en(ctx)}
 
@@ -5485,7 +5493,7 @@ def rehacer_subtitulos(pid: str):
     """Rehace los subtitulos (y monta) de un video cuya voz llego con las
     tildes rotas. Gratis: no dibuja imagenes ni graba voz."""
     ctx = contexto(pid)
-    for paso in ("assets", "callouts", "render"):
+    for paso in ("voz", "assets", "callouts", "render"):
         otro = _trabajo_activo(ctx, paso)
         if otro is not None:
             raise ErrorApi(409, "este vídeo ya tiene un trabajo en marcha: espera a que termine",
@@ -5512,20 +5520,21 @@ def rehacer_imagenes_con_notas(pid: str, cuerpo: dict = Body(default=None)):
     datos = _cuerpo(cuerpo)
     pedidas = datos.get("notas") if isinstance(datos.get("notas"), list) else None
     # UNA YA HECHA SE PUEDE PEDIR OTRA VEZ «desde cero»: es justo el caso de
-    # «la rehice y salio igual». Vuelve a pendiente y entra en la cola.
+    # «la rehice y salio igual». Cuenta como viva aqui, pero NO se toca hasta
+    # pasar las comprobaciones de abajo: devolverla a pendiente y contestar
+    # despues un 409 la dejaba pendiente con su imagen ya hecha, y el
+    # siguiente «Aplicar» la volvia a pagar.
+    rehechas = []
     if datos.get("desde_cero") and pedidas:
         quiero = {str(x) for x in pedidas}
-        for nota in _ficha_repaso(ctx)["notas"]:
-            if nota.get("id") in quiero and nota.get("estado") == "aplicado" \
-                    and _repaso().pantalla_de(nota) == "imagenes" and nota.get("plano"):
-                try:
-                    _repaso().editar(ctx.proyecto, nota["id"], regenerado="")
-                except (KeyError, ValueError):
-                    pass
+        rehechas = [n for n in _ficha_repaso(ctx)["notas"]
+                    if n.get("id") in quiero and n.get("estado") == "aplicado"
+                    and _repaso().pantalla_de(n) == "imagenes" and n.get("plano")]
     vivas = _notas_de_imagenes(ctx)
     if pedidas is not None:
         quiero = {str(x) for x in pedidas}
         vivas = [n for n in vivas if n["id"] in quiero]
+    vivas += [n for n in rehechas if n["id"] not in {v["id"] for v in vivas}]
     if not vivas:
         raise ErrorApi(400, "no hay ninguna nota pendiente con su imagen")
     # ¿HAY OTRA TANDA DE IMAGENES? Si es la de esta misma cola y esta
@@ -5540,6 +5549,19 @@ def rehacer_imagenes_con_notas(pid: str, cuerpo: dict = Body(default=None)):
     if otro is not None and otro["id"] != propio:
         raise ErrorApi(409, "ya se están dibujando imágenes de este vídeo: espera a "
                             "que terminen", {"trabajo_id": otro["id"]})
+    # NI MIENTRAS SE MONTA: una imagen nueva a mitad de los rotulos y el render
+    # dejaria un MP4 con la vieja sellado como al dia
+    for paso in ("callouts", "render"):
+        montando = _trabajo_activo(ctx, paso)
+        if montando is not None:
+            raise ErrorApi(409, "el vídeo se está montando ahora: rehaz la imagen cuando "
+                                "termine", {"trabajo_id": montando["id"]})
+    # ya aceptada: las hechas que se piden «desde cero» vuelven a pendiente
+    for nota in rehechas:
+        try:
+            _repaso().editar(ctx.proyecto, nota["id"], regenerado="")
+        except (KeyError, ValueError):
+            pass
     repaso = _repaso()
     # lo que paso la vez anterior ya no vale para esta: se borra YA aceptada
     # (pasada la comprobacion de arriba) y ANTES de que el hilo pueda escribir
@@ -5564,10 +5586,15 @@ def rehacer_imagenes_con_notas(pid: str, cuerpo: dict = Body(default=None)):
         ya = set(estado["cola"]) | set((estado.get("actual") or {}).get("notas") or [])
         nuevas = [n for n in vivas if n["id"] not in ya]
         estado["cola"].extend(n["id"] for n in nuevas)
-        # «Desde cero» (sin la imagen de ahora delante): se apunta por nota
+        # «Desde cero» (sin la imagen de ahora delante): se apunta por nota,
+        # tambien en las que ya esperaban en la cola; y pedir un retoque la quita
         cero = estado.setdefault("desde_cero", set())
+        pedidas_ahora = {n["id"] for n in vivas} - {
+            x for x in ((estado.get("actual") or {}).get("notas") or [])}
         if datos.get("desde_cero"):
-            cero.update(n["id"] for n in nuevas)
+            cero.update(pedidas_ahora)
+        else:
+            cero.difference_update(pedidas_ahora)
         if not en_marcha:
             trabajo_id = ctx.gestor.lanzar("notas_imagenes", _correr_notas_imagenes,
                                            ctx, paso="assets")
@@ -5590,6 +5617,7 @@ def sacar_de_la_cola(pid: str, nid: str):
     with _COLA_LOCK:
         estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
         estado["cola"] = [x for x in estado["cola"] if x != nid]
+        (estado.get("desde_cero") or set()).discard(nid)
     return _ficha_cola(ctx)
 
 

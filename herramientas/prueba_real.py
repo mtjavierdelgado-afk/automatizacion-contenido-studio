@@ -187,6 +187,10 @@ def _juez(instruccion, cwd):
         instruccion, modelo="sonnet", esfuerzo="low", cwd=cwd, base_tiempo_s=240,
         sistema="Eres un revisor estricto. Contestas solo con el JSON pedido.",
         extra=["--no-session-persistence"], para="la prueba real",
+        # Read hay que QUITARLO de las vetadas, no basta con permitirlo: el
+        # veto por defecto del CLI incluye Read y gana (el 11-10 el juez
+        # contesto «la herramienta Read esta desactivada» y marco «no»)
+        herramientas_vetadas=tuple(h for h in cli_claude.HERRAMIENTAS_VETADAS if h != "Read"),
         herramientas_permitidas=("Read",))
     return comun.extraer_json(respuesta, "la prueba real")
 
@@ -498,6 +502,10 @@ def main():
                 '{"aplicada": "si" | "parcial" | "no", "por_que": "<una frase>"}', raiz)
         except Exception as fallo:                          # noqa: BLE001
             veredicto = {"aplicada": "?", "por_que": f"no se pudo preguntar a Claude: {fallo}"}
+        if re.search(r"no pude (abrir|ver|leer|comprobar)|no est[aá] disponible|desactivada",
+                     str((veredicto or {}).get("por_que") or ""), re.I):
+            veredicto = {"aplicada": "?", "por_que": "Claude no pudo abrir las imágenes: " +
+                         str((veredicto or {}).get("por_que"))}
         juicios.append({"plano": escena["id"], "nota": texto, "modo": modo, **(veredicto or {})})
         informe.comprueba((veredicto or {}).get("aplicada") in ("si", "sí"),
                           f"{escena['id']} ({modo}): Claude ve la nota aplicada",

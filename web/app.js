@@ -9381,6 +9381,17 @@ function vistaVideoLight() {
 
   if (ERRORES[CLAVE_VIDEO_LIGHT]) caja.appendChild(errorDelVideo());
 
+  /* EL MP4 ES DE ANTES DE TUS CAMBIOS. Una imagen rehecha en «Imágenes» no
+     entra en el vídeo hasta volver a montarlo, y solo lo decía una pastilla
+     de «Obsoleto» abajo: se leía como «he regenerado y no cambia nada»
+     (10-10-2026). */
+  if (videoObsoletoLight() && !trabajoVideoLight()) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      'Este vídeo es de ANTES de tus últimos cambios (por ejemplo, imágenes rehechas '
+      + 'en «Imágenes»): lo que ves aquí todavía no los lleva. Pulsa «Regenerar Vídeo» '
+      + 'abajo para volver a montarlo con ellos.'));
+  }
+
   const marco = h('div', { clase: `marco-video ${formatoDelVideo()}` });
   if (hayMp4Light() && !trabajoVideoLight()) {
     marco.appendChild(videoLight());
@@ -9423,8 +9434,8 @@ function vistaVideoLight() {
    *
    * EL MODO. Con el video obsoleto va 'pendientes': lo obsoleto es exactamente
    * lo que ha quedado viejo, y 'todo' volveria a rehacer los clips de un video
-   * entero por haber cambiado una frase. 'todo' se queda para cuando no hay
-   * nada obsoleto y aun asi quieres otro: ahi si lo estas pidiendo. */
+   * entero por haber cambiado una frase. Y ya NUNCA 'todo' desde aqui: ver el
+   * botón de abajo. */
   const notasSinAplicar = estadoRepaso().pendientes > 0;
   const pie = h('div', { clase: 'pie-guion' },
     /* CON NOTAS SIN APLICAR ESTE BOTON SOBRA, y no por repetirse: es que hace
@@ -9446,8 +9457,12 @@ function vistaVideoLight() {
         clase: notasSinAplicar ? 'mini' : 'primario',
         disabled: !!trabajoVideoLight() || notasSinAplicar
                   || quedaTandaLight('render') === false,
-        onclick: () => lanzarTandaLight('render',
-          (hayMp4Light() && !videoObsoletoLight()) ? 'todo' : 'pendientes'),
+        /* SIEMPRE 'pendientes'. Con el MP4 al día iba 'todo', y 'todo' en esta
+           tanda REDIBUJA LAS IMÁGENES de todo el vídeo (la tanda lleva la
+           pestaña de las imágenes): bastaba que quedara algo menor sin hacer
+           --la música sin elegir-- para que el botón se encendiera y pulsarlo
+           pagara el vídeo entero otra vez (visto en el recorrido, 11-10-2026). */
+        onclick: () => lanzarTandaLight('render', 'pendientes'),
       }, hayMp4Light() ? 'Regenerar Vídeo' : 'Generar Vídeo')),
     quedaTandaLight('render') === false ? null : pastillaObsoletoLight(),
     h('span', { clase: 'crece' }),
@@ -10015,10 +10030,17 @@ async function refrescarLoDibujado() {
   /* Y la ficha del paso, que es la que sabe si el video quedo obsoleto: sin
      esto «Montar el vídeo» seguiria diciendo que esta al dia. Es una llamada,
      no las seis de recargar el proyecto. */
-  try {
-    const ficha = await pedir(API.paso(pid, 'assets'));
-    if (videoAbierto().pid === pid) videoAbierto().fichas.assets = ficha;
-  } catch (err) { /* igual: no poder leerla no puede tumbar la pantalla */ }
+  /* LAS TRES: rehacer una imagen deja al dia `assets` y obsoletos `callouts`
+     y `render`. Leyendo solo la primera, la pantalla del Vídeo seguia diciendo
+     que el MP4 estaba al dia --sin «Obsoleto» y sin aviso-- hasta recargar: se
+     leia como «he regenerado y no cambia nada» (10-10-2026). */
+  await Promise.all(['assets', 'callouts', 'render'].map(async paso => {
+    try {
+      const ficha = await pedir(API.paso(pid, paso));
+      if (videoAbierto().pid === pid) videoAbierto().fichas[paso] = ficha;
+    } catch (err) { /* igual: no poder leerla no puede tumbar la pantalla */ }
+  }));
+  refrescarPlanLight('render', true);
 }
 
 function irAlMomentoDeLaNota(nota) {
@@ -10100,11 +10122,25 @@ function tarjetaNotaImagen(plano, notas) {
   const ir = () => { notas.forEach(darPorRevisada); irAlMomentoDeLaNota(notas[0]); };
   const tarjeta = h('div', { clase: `nota-imagen estado-${general}` + (porMirar ? ' sin-revisar' : '') });
   const ultima = notas.map(n => n.regenerado || '').join('|');
-  tarjeta.appendChild(h('button', { clase: 'nota-mini', title: 'Ver esta imagen', onclick: ir },
+  /* ANTES Y AHORA, una al lado de la otra cuando ya se rehizo: una corrección
+     pequeña sin la de antes delante se leía como «no ha cambiado nada»
+     (10-10-2026). La de antes es la que había al pedirla (`nota.antes`). */
+  const conAntes = notas.filter(n => n.antes && estadoDeImagen(plano, n) === 'hecha');
+  const antes = conAntes.length ? conAntes[conAntes.length - 1].antes : '';
+  const columna = h('div', { clase: 'nota-columna' });
+  columna.appendChild(h('button', { clase: 'nota-mini', title: 'Ver esta imagen en grande arriba', onclick: ir },
     e && e.imagen
       ? h('img', { src: `${API.archivo(v.pid, e.imagen)}?mini=512&v=${encodeURIComponent(ultima)}`,
         alt: plano, loading: 'lazy' })
       : h('span', { clase: 'meta' }, 'sin imagen')));
+  if (antes && e && antes !== e.imagen) {
+    columna.appendChild(h('div', { clase: 'nota-antes-ahora meta' }, '▲ ahora · antes ▼'));
+    columna.appendChild(h('button', {
+      clase: 'nota-mini nota-antes', title: 'Cómo era antes de esta nota (pulsa para verla en grande)',
+      onclick: () => lupa(API.archivo(v.pid, antes)),
+    }, h('img', { src: `${API.archivo(v.pid, antes)}?mini=512`, alt: `${plano} antes`, loading: 'lazy' })));
+  }
+  tarjeta.appendChild(columna);
   const cuerpo = h('div', { clase: 'nota-cuerpo' });
   cuerpo.appendChild(h('div', { clase: 'nota-donde' },
     h('b', {}, `Imagen ${plano || '?'}`),
@@ -10126,16 +10162,32 @@ function tarjetaNotaImagen(plano, notas) {
     }
     fila.appendChild(h('span', { clase: 'crece' }));
     const pedir = notas.filter((n, i) => ahora[i] === '' || ahora[i] === 'fallo');
+    const precio = `1 imagen, ≈ ${usdCorto(COLA_IMG.usdPorImagen)}`;
     if (pedir.length) {
       fila.appendChild(h('button', { clase: 'mini avisa',
-        title: `Vuelve a dibujar SOLO esta imagen con ${pedir.length > 1 ? 'sus notas juntas' : 'lo que has escrito'}`
-          + ` (1 imagen, ≈ ${usdCorto(COLA_IMG.usdPorImagen)})`,
+        title: `Retoca SOLO esta imagen con ${pedir.length > 1 ? 'sus notas juntas' : 'lo que has escrito'},`
+          + ` partiendo de la de ahora (${precio})`,
         onclick: () => pedirCola({ notas: pedir.map(n => n.id) }) },
       (ahora.includes('fallo') ? 'Reintentar' : 'Rehacer esta imagen')
         + (pedir.length > 1 ? ` (${pedir.length} notas juntas)` : '')));
+      fila.appendChild(h('button', { clase: 'mini fantasma',
+        title: 'La dibuja de nuevo SIN partir de la de ahora: para cambios grandes'
+          + ` (otra escena, otro objeto). ${precio}`,
+        onclick: () => pedirCola({ notas: pedir.map(n => n.id), desde_cero: true }) },
+      'Desde cero'));
     }
     if (ahora.every(x => x === 'hecha')) {
       fila.appendChild(h('button', { clase: 'mini', onclick: ir }, 'Ver cómo quedó'));
+      fila.appendChild(h('span', { clase: 'meta' }, 'en el vídeo entra al volver a montarlo'));
+      /* «LA REHICE Y SALIÓ IGUAL»: retocar parte de la imagen de ahora y la
+         conserva; desde cero no. */
+      fila.appendChild(h('button', { clase: 'mini fantasma',
+        title: 'Si salió casi igual: la vuelve a dibujar con la misma nota pero SIN partir'
+          + ` de la de ahora (${precio})`,
+        onclick: () => {
+          if (!window.confirm(`¿Dibujar ${plano} otra vez desde cero con esta nota? (${precio})`)) return;
+          pedirCola({ notas: notas.map(n => n.id), desde_cero: true });
+        } }, '¿Salió igual? Desde cero'));
     }
     return fila;
   }));

@@ -5220,7 +5220,8 @@ def _feedback_de_grupo(ctx, notas):
     juntado a mano, p6 no casaba ninguna nota y se quedaba con las imagenes de
     una sola.
     """
-    if len(notas) == 1:
+    desde_cero = any(n.get("desde_cero") for n in notas)
+    if len(notas) == 1 and not desde_cero:
         return notas[0]["texto"]
     carpeta = _repaso().carpeta_imagenes(ctx.proyecto)
     imagenes = []
@@ -5230,7 +5231,13 @@ def _feedback_de_grupo(ctx, notas):
             if os.path.isfile(ruta) and ruta not in imagenes:
                 imagenes.append(ruta)
     historial = [{"texto": n["texto"]} for n in notas[:-1]]
-    historial.append({"texto": notas[-1]["texto"], "de": "repaso", "imagenes": imagenes})
+    ultima = {"texto": notas[-1]["texto"], "de": "repaso", "imagenes": imagenes}
+    # «DESDE CERO»: p6 no le pone delante la imagen de ahora («sustituye», ver
+    # `p6_assets._adjuntos_de_la_nota`). Con ella delante el generador la
+    # retoca, y un cambio grande salia casi igual (10-10-2026).
+    if desde_cero:
+        ultima["alcance"] = "sustituye"
+    historial.append(ultima)
     return historial
 
 
@@ -5276,6 +5283,9 @@ def _correr_notas_imagenes(avisar, ctx):
                     estado["trabajo"] = None
                     break
                 ids = [n["id"] for n in notas]
+                cero = estado.get("desde_cero") or set()
+                notas = [dict(n, desde_cero=n["id"] in cero) for n in notas]
+                cero.difference_update(ids)
                 estado["cola"] = [x for x in estado["cola"] if x not in ids]
                 estado["actual"] = {"plano": plano, "notas": ids, "desde": time.time()}
                 pendientes = len({str(n["plano"]) for n in _notas_de_imagenes(ctx)
@@ -5301,6 +5311,8 @@ def _correr_notas_imagenes(avisar, ctx):
                 continue
             # SE FUSIONA con lo que ya tenia el plano (su direccion, su parrafo
             # redactado...): poner `{feedback}` a secas se los llevaba por delante
+            # LA IMAGEN DE AHORA, para enseñarla al lado de la nueva
+            imagen_antes = _ruta_de_version(ctx, "assets", "escenas", f"{plano}.png") or ""
             unidades_antes = dict((ctx.estado.params("assets") or {}).get("unidades") or {})
             previo = copy.deepcopy(unidades_antes.get(uid))
             actual = dict(previo or {})
@@ -5363,7 +5375,7 @@ def _correr_notas_imagenes(avisar, ctx):
             for nota in notas:
                 try:
                     repaso.editar(ctx.proyecto, nota["id"], regenerado=nota["texto"],
-                                  error="", aviso=aviso)
+                                  error="", aviso=aviso, antes=imagen_antes)
                 except (KeyError, ValueError):
                     pass
             hechas.append(plano)
@@ -5409,7 +5421,10 @@ def _ficha_cola(ctx):
 
 @app.post("/api/proyectos/{pid}/imagenes/rehacer", status_code=202)
 def rehacer_imagenes_con_notas(pid: str, cuerpo: dict = Body(default=None)):
-    """Pone en la cola las notas de imagenes: {notas?: [ids]} (sin ids, todas).
+    """Pone en la cola las notas de imagenes: {notas?: [ids], desde_cero?} (sin ids, todas).
+
+    Con `desde_cero` la imagen se dibuja SIN la de ahora delante: para cambios
+    grandes, que con ella delante salian casi iguales.
 
     Se rehacen UNA DETRAS DE OTRA en un solo trabajo del servidor; si ya hay uno
     en marcha, las nuevas se suman a su cola. Las notas del mismo plano salen en
@@ -5418,6 +5433,17 @@ def rehacer_imagenes_con_notas(pid: str, cuerpo: dict = Body(default=None)):
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
     pedidas = datos.get("notas") if isinstance(datos.get("notas"), list) else None
+    # UNA YA HECHA SE PUEDE PEDIR OTRA VEZ «desde cero»: es justo el caso de
+    # «la rehice y salio igual». Vuelve a pendiente y entra en la cola.
+    if datos.get("desde_cero") and pedidas:
+        quiero = {str(x) for x in pedidas}
+        for nota in _ficha_repaso(ctx)["notas"]:
+            if nota.get("id") in quiero and nota.get("estado") == "aplicado" \
+                    and _repaso().pantalla_de(nota) == "imagenes" and nota.get("plano"):
+                try:
+                    _repaso().editar(ctx.proyecto, nota["id"], regenerado="")
+                except (KeyError, ValueError):
+                    pass
     vivas = _notas_de_imagenes(ctx)
     if pedidas is not None:
         quiero = {str(x) for x in pedidas}
@@ -5460,6 +5486,10 @@ def rehacer_imagenes_con_notas(pid: str, cuerpo: dict = Body(default=None)):
         ya = set(estado["cola"]) | set((estado.get("actual") or {}).get("notas") or [])
         nuevas = [n for n in vivas if n["id"] not in ya]
         estado["cola"].extend(n["id"] for n in nuevas)
+        # «Desde cero» (sin la imagen de ahora delante): se apunta por nota
+        cero = estado.setdefault("desde_cero", set())
+        if datos.get("desde_cero"):
+            cero.update(n["id"] for n in nuevas)
         if not en_marcha:
             trabajo_id = ctx.gestor.lanzar("notas_imagenes", _correr_notas_imagenes,
                                            ctx, paso="assets")

@@ -3084,6 +3084,10 @@ textarea.autoalto, textarea.crece.autoalto { max-height: 60vh; overflow-y: auto;
 .nota-imagen .nota-mini { padding: 0; border: 0; background: var(--lienzo); border-radius: 8px;
   overflow: hidden; cursor: pointer; align-self: start; aspect-ratio: 16 / 9; }
 .nota-imagen .nota-mini img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.nota-imagen .nota-columna { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.nota-imagen .nota-antes { opacity: .75; }
+.nota-imagen .nota-antes:hover { opacity: 1; }
+.nota-imagen .nota-antes-ahora { text-align: center; font-size: 11px; }
 .nota-imagen .nota-cuerpo { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .nota-imagen .nota-donde { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
 .nota-imagen .nota-guion { color: var(--tenue); font-style: italic; font-size: 13px; }

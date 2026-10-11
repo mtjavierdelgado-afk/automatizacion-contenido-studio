@@ -528,13 +528,22 @@ def _anadir_sin_cerrojo(proyecto, texto, t, plano="", imagenes=(), version_mp4=N
 
 
 def _editar_sin_cerrojo(proyecto, nid, texto=None, t=None, imagenes=None,
-           regenerado=None, error=None, aviso=None):
+           regenerado=None, error=None, aviso=None, antes=None):
     """`error` y `aviso` son lo que paso al redibujarla: «OpenAI la rechazo
-    por...» o «se dibujo sin marcas: ...». Cadena vacia los quita."""
+    por...» o «se dibujo sin marcas: ...». Cadena vacia los quita.
+
+    `antes` es la imagen que habia ANTES de redibujarla (ruta relativa al
+    proyecto): la pantalla la pone al lado de la nueva para que se vea que
+    cambio. Sin ella, una correccion pequena se leia como «no ha hecho nada»."""
     ficha = leer(proyecto)
     for nota in ficha["notas"]:
         if nota.get("id") != nid:
             continue
+        if antes is not None:
+            if antes:
+                nota["antes"] = str(antes)[:400]
+            else:
+                nota.pop("antes", None)
         for clave, valor in (("error", error), ("aviso", aviso)):
             if valor is None:
                 continue

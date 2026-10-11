@@ -226,6 +226,19 @@ def fabricar_video(proyectos, env):
     params["corrector"] = "no"
     params["estilo"]["referencias"] = referencias
     params["banco_imagenes"] = os.path.join(taller, "_banco", "imagenes")
+    # COMO UN VIDEO DE VERDAD: uno hecho desde la pantalla ya tiene su guia de
+    # estilo y la direccion de sus planos. Sin ellas, «Regenerar Vídeo» las
+    # pedia al modelo (falso) y el montaje se caia por algo que en un video
+    # real no pasa (11-10-2026).
+    params["estilo"]["guia"] = {
+        "guia": "Ilustración plana, contornos negros gruesos, luz difusa sin sombras duras.",
+        "paleta": ["#2b2a33", "#c9a66b", "#7a9e7e", "#e8e1cf", "#b5523b"],
+        "trazo": "contorno negro grueso y uniforme", "relleno": "colores planos"}
+    params["unidades"] = dict(params.get("unidades") or {})
+    for plano in ("S001", "S002", "S004"):
+        unidad = dict(params["unidades"].get(f"escena:{plano}") or {})
+        unidad["direccion"] = "plano medio, el sujeto a la izquierda mirando al horizonte"
+        params["unidades"][f"escena:{plano}"] = unidad
     with open(os.path.join(destino, "proyecto.json"), encoding="utf-8") as fh:
         config = json.load(fh)
     config.update({"id": "padres_vs_hijos", "nombre": "Padres vs hijos en Mario Kart",
@@ -283,6 +296,28 @@ def sembrar(api, proyectos, params):
     with open(config, "w", encoding="utf-8") as fh:
         json.dump(ficha, fh)
     api.put(f"/api/proyectos/{pid}/pasos/assets/params", {"params": params, "reemplazar": True})
+    # SU MUSICA, subida (como hace quien no tiene clave de Jamendo): sin tema,
+    # el montaje desde la pantalla pide uno a Jamendo y aqui no hay clave
+    tema = os.path.join(proyectos, "_fabrica", "tema.mp3")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                    "sine=frequency=330:duration=20", tema], check=True)
+    with open(tema, "rb") as fh:
+        r, d = api.post("/api/sonido/subir?familia=musica",
+                        files={"f": ("tema de prueba.mp3", fh.read(), "audio/mpeg")})
+    if d.get("ficha"):
+        api.put(f"/api/proyectos/{pid}/sonido", {"musica": d["ficha"]})
+    ok(bool(d.get("ficha")), "el vídeo de prueba lleva su música (subida)")
+    # Y SUS EFECTOS, uno subido por papel: un video hecho desde la pantalla ya
+    # los tiene surtidos, y sin ellos montar pide FreeSound (sin clave aqui)
+    golpe = os.path.join(proyectos, "_fabrica", "golpe.mp3")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                    "sine=frequency=880:duration=0.6", golpe], check=True)
+    for papel in ("transicion_suave", "transicion_acento", "tecla", "retorno"):
+        with open(golpe, "rb") as fh:
+            r, d = api.post("/api/sonido/subir?familia=efectos",
+                            files={"f": (f"{papel}.mp3", fh.read(), "audio/mpeg")})
+        if d.get("ficha"):
+            api.put(f"/api/proyectos/{pid}/sonido/efecto", {"papel": papel, "efecto": d["ficha"]})
     for paso, extra in (("assets", {}), ("callouts", {"params": {"previsualizar": True}}),
                         ("render", {"params": {"fps": 12, "resolucion": [640, 360],
                                                "calidad_video": "baja"}})):
@@ -591,6 +626,98 @@ def notas_de_imagenes(navegador, datos):
     pg.pulsar(".nav-light button", "Encargo")
     ok(not pg.visible(".error-cerrable"), "el Encargo no enseña los errores de las imágenes")
     pg.sin_errores("las notas de imágenes")
+    pg.cerrar()
+
+
+def _montar_desde_video(pg):
+    """Pulsa «Regenerar/Generar Vídeo» en la pantalla del vídeo y espera."""
+    pg.pulsar(".nav-light button", "Vídeo")
+    pg.p.wait_for_timeout(1500)
+    boton = pg.p.locator(".pie-guion button").filter(has_text="Vídeo").first
+    if boton.is_enabled():
+        boton.click()
+        pg.p.wait_for_timeout(1500)
+    return pg.sin_trabajo(300)
+
+
+def _version_de(datos, paso, plano):
+    ruta = os.path.join(datos["proyectos"], datos["video"], "pasos", paso, "activa.json")
+    try:
+        with open(ruta, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+@escenario
+def rehacer_y_verlo_en_el_video(navegador, datos):
+    """«Regenero imágenes pero no veo los cambios» (11-10-2026). Tres cosas:
+    la imagen nueva al lado de la de antes, «Desde cero» que NO le pone delante
+    la de ahora (con ella delante el generador la retoca y sale casi igual), y
+    el Vídeo diciendo que su MP4 es de antes, SIN recargar la página."""
+    pid = datos["video"]
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    ok(_montar_desde_video(pg), "se parte de un vídeo montado al día")
+    pg.pulsar(".nav-light button", "Imágenes")
+    pg.p.wait_for_timeout(1000)
+    pg.js("PREVIA.i = 3; repintarVideo();")
+    area = pg.p.locator(".previa-feedback textarea").first
+    area.fill("que salga un faro en el horizonte")
+    area.dispatch_event("input")
+    pg.pulsar(".previa-feedback button", "Guardar nota")
+    tarjeta = lambda: pg.p.locator(".nota-imagen").filter(has_text="Imagen S004").first
+    ok(tarjeta().locator("button", has_text="Desde cero").count() == 1,
+       "la nota ofrece «Desde cero» además de «Rehacer esta imagen»")
+    tarjeta().locator("button", has_text="Rehacer esta imagen").click()
+    fin = time.time() + 150
+    while time.time() < fin and "hecha" not in tarjeta().inner_text().lower():
+        pg.p.wait_for_timeout(800)
+    pg.p.wait_for_timeout(2500)
+    ok("hecha" in tarjeta().inner_text().lower(), "la imagen se rehace")
+    ok(tarjeta().locator(".nota-antes img").count() == 1,
+       "y la tarjeta enseña cómo era ANTES al lado de la nueva")
+    src_antes = tarjeta().locator(".nota-antes img").get_attribute("src") or ""
+    src_ahora = tarjeta().locator(".nota-mini img").first.get_attribute("src") or ""
+    ok(src_antes.split("?")[0] != src_ahora.split("?")[0],
+       f"y son dos imágenes distintas ({src_antes.split('?')[0][-30:]} / {src_ahora.split('?')[0][-30:]})")
+    pg.captura("14_antes_y_ahora", entera=False)
+    # «Desde cero»: la ficha del plano dibujado no lleva la imagen rechazada
+    tarjeta().locator("button", has_text="Desde cero").click()
+    pg.p.wait_for_timeout(1500)
+    fin = time.time() + 150
+    while time.time() < fin and not ("hecha" in tarjeta().inner_text().lower()
+                                     and "dibujando" not in tarjeta().inner_text().lower()):
+        pg.p.wait_for_timeout(800)
+    pg.p.wait_for_timeout(2500)
+    activa = _version_de(datos, "assets", "S004")
+    version = activa.get("activa") or activa.get("n") or activa.get("version")
+    ficha = os.path.join(datos["proyectos"], pid, "pasos", "assets", f"v{version}",
+                         "escenas", "S004.json")
+    try:
+        with open(ficha, encoding="utf-8") as fh:
+            papeles = [r.get("papel") for r in json.load(fh).get("referencias") or []]
+    except (OSError, ValueError) as fallo:
+        papeles = [f"no se pudo leer {ficha}: {fallo}"]
+    ok("rechazada" not in papeles and papeles,
+       f"«Desde cero» la dibuja SIN la imagen de antes delante ({papeles})")
+    # EL VIDEO, sin recargar
+    pg.pulsar(".nav-light button", "Vídeo")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.visible(".caja-aviso", "ANTES de tus últimos cambios"),
+       "el Vídeo dice que su MP4 es de antes de las imágenes rehechas (sin recargar)")
+    ok(pg.visible(".pastilla.obsoleto"), "con su «Obsoleto»")
+    src_video = pg.p.locator("video").first.get_attribute("src") or ""
+    boton = pg.p.locator(".pie-guion button").filter(has_text="Vídeo").first
+    ok(boton.is_enabled(), "y «Regenerar Vídeo» se puede pulsar")
+    boton.click()
+    pg.p.wait_for_timeout(1500)
+    ok(pg.sin_trabajo(300), "el vídeo se vuelve a montar")
+    pg.p.wait_for_timeout(1500)
+    nuevo = pg.p.locator("video").first.get_attribute("src") or ""
+    ok(nuevo and nuevo != src_video, f"y el reproductor carga el MP4 NUEVO ({src_video[-28:]} → {nuevo[-28:]})")
+    ok(not pg.visible(".caja-aviso", "ANTES de tus últimos cambios"), "y el aviso se va")
+    pg.sin_errores("rehacer y verlo en el vídeo")
     pg.cerrar()
 
 

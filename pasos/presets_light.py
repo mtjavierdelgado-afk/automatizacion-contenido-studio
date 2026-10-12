@@ -484,6 +484,46 @@ class ErrorEncargo(ValueError):
 
 IDIOMAS = ("es", "en", "pt", "fr", "it", "de")
 
+#: Los tipos de imagen que se eligen al crear un estilo (Etapa Foto A). Son los
+#: valores de `estilo.modo` de p6_assets.
+MODOS_IMAGEN = ("ilustracion", "foto")
+
+
+def origen_de(encargo, claves):
+    """Lo que se guarda del encargo en el `origen` del preset. -> dict
+
+    Las claves con valor, como siempre, salvo `estilo_modo`, que solo se guarda
+    cuando es "foto": ilustracion es no tenerlo, igual que en el estilo. Y no
+    es solo coherencia: el codigo de `main` de antes de la Etapa Foto A no sabe
+    guardar esa clave, asi que un estilo de ilustracion creado probando esta
+    rama no se podria volver a guardar si el servidor vuelve a `main`.
+    """
+    origen = {c: encargo[c] for c in claves if (encargo or {}).get(c)}
+    if origen.get("estilo_modo") != "foto":
+        origen.pop("estilo_modo", None)
+    return origen
+
+
+def estilo_con_modo(estilo, modo):
+    """El diccionario `estilo` de assets con ese tipo de imagen. -> dict o None
+
+    None quiere decir «no hay nada que escribir», y es la respuesta en el caso
+    normal: un estilo de ilustracion que ya no tenia `modo`. Ahi esta toda la
+    regla 1 del repo: "foto" se escribe; ilustracion es QUITAR la clave si
+    estaba, y nunca escribir "ilustracion" donde no habia nada -- seria un param
+    nuevo, moveria la firma del paso y dejaria obsoletos planos ya pagados.
+    """
+    bloque = dict(estilo or {})
+    if modo == "foto":
+        if bloque.get("modo") == "foto":
+            return None
+        bloque["modo"] = "foto"
+        return bloque
+    if "modo" not in bloque:
+        return None
+    bloque.pop("modo")
+    return bloque
+
 #: EL ESPANOL DE LATINOAMERICA no es un idioma mas para el codigo: «es» es la
 #: clave de las voces, de la cadencia de lectura y de media docena de tablas, y
 #: un codigo nuevo las dejaria vacias en cascada. Es una VARIANTE del espanol:
@@ -592,6 +632,18 @@ def validar_encargo(crudo):
     limpio["estilo_destacadas"] = [
         _sin_prefijo(n) for n in (datos.get("estilo_destacadas") or [])
         if isinstance(n, str) and _sin_prefijo(n) in nombres][:MAX_EN_LA_HOJA]
+
+    # EL TIPO DE IMAGEN (Etapa Foto A): "ilustracion" o "foto". Va SIEMPRE en el
+    # encargo limpio, con ilustracion si no vino -- un encargo guardado antes de
+    # esto no lo trae --, para que quien siembra el taller distinga «elegi
+    # ilustracion» de «no se ha dicho nada» (`_sembrar_taller` en app.py). Al
+    # estilo, en cambio, solo llega `modo: "foto"`: ilustracion es no tenerlo.
+    modo = str(datos.get("estilo_modo") or "ilustracion").strip().lower()
+    if modo not in MODOS_IMAGEN:
+        raise ErrorEncargo(
+            f"tipo de imagen desconocido: {modo!r}. Los que hay son: "
+            + ", ".join(MODOS_IMAGEN))
+    limpio["estilo_modo"] = modo
 
     # EL TONO SIGUE SIENDO VIDEO O DESCRIPCION, y aqui si son excluyentes: no
     # hay imagenes que adjuntar a un tono, y un parrafo sobre como se cuenta una

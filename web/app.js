@@ -2512,7 +2512,9 @@ function seccionCalidadImagen() {
 
   caja.appendChild(h('div', { clase: 'meta' },
     'Es el punto de partida de los vídeos NUEVOS. Los que ya existen se quedan '
-    + 'con la suya: se cambia por vídeo desde su propia ficha.'));
+    + 'con la suya: se cambia por vídeo desde su propia ficha. Los vídeos con un '
+    + 'estilo de Foto realista empiezan como mínimo en MEDIUM: en LOW la piel '
+    + 'sale lisa y la foto parece de plástico.'));
   return caja;
 }
 
@@ -4668,6 +4670,9 @@ function encargoLight() {
       // devuelve el buzon del servidor-- y lo escrito las acompana: es el
       // «esto pero mas frio» que una imagen no puede decir sola.
       estilo_imagenes: [], estilo_prompt: '',
+      // EL TIPO DE IMAGEN (Etapa Foto A): 'ilustracion' o 'foto'. Ilustración
+      // por defecto, que es como salen todos los estilos de antes.
+      estilo_modo: 'ilustracion',
       // EL TONO SE ESCRIBE. Un parrafo sobre como se cuenta una historia basta
       // para escribir las instrucciones: no hay nada que copiar, hay algo que
       // decidir.
@@ -4708,6 +4713,7 @@ function encargoParaServidor() {
     estilo_descripciones: descripcionesDeAportadas(e.estilo_imagenes),
     estilo_destacadas: (e.estilo_imagenes || []).filter(x => x.destacada).map(x => x.nombre),
     estilo_prompt: e.estilo_prompt,
+    estilo_modo: e.estilo_modo || 'ilustracion',
     tono_prompt: e.tono_prompt,
     voz_prompt: e.voz_prompt,
     voz_id: e.voz_id || '',
@@ -6745,6 +6751,11 @@ async function pintarCosteDelEncargoLight(e, nodo) {
       min_s: (datos.estilo || {}).min_s,
       max_s: (datos.estilo || {}).max_s,
       calidad: (datos.estilo || {}).calidad,
+      /* un vídeo que aún no existe: sin calidad en el estilo, el servidor dice
+         la de Configuración (y en foto, como mínimo medium), que es con la que
+         va a nacer */
+      nuevo: true,
+      modo: (datos.estilo || {}).modo === 'foto' ? 'foto' : 'ilustracion',
     });
     vaciar(nodo).append(`El vídeo entero: ${textoDeCoste(ficha)}. `
       + 'Puede salir algo más corto o más largo que el objetivo.');
@@ -10887,7 +10898,7 @@ function vistaCrearLight() {
 
   caja.appendChild(campoTexto('Nombre', e.nombre,
     v => { e.nombre = v; tocarEncargoLight(); },
-    { pista: 'Cartoon' }));
+    { pista: 'p. ej. «Cartoon del canal» o «Fotos de eventos»' }));
 
   /* EN QUÉ PROYECTO NACE. De entrada, el que estaba abierto en la galería;
      se puede cambiar aquí y después desde su menú ⋯. */
@@ -11168,11 +11179,33 @@ function bloqueLight(titulo, porque, ...contenido) {
 function camposEstiloLight() {
   const e = encargoLight();
   const caja = h('div', {});
+  caja.appendChild(selectorTipoDeImagen(e.estilo_modo,
+    v => { e.estilo_modo = v; tocarEncargoLight(); }));
   caja.appendChild(imagenesDeApoyoLight(e, tocarEncargoLight));
   caja.appendChild(conGuia(campoArea('Indicaciones (opcional)', e.estilo_prompt,
     v => { e.estilo_prompt = v; tocarEncargoLight(); },
-    'igual pero más frío, con menos detalle en los fondos')));
+    'más cálido, con luz de tarde y menos cosas en el fondo')));
   return caja;
+}
+
+/* EL TIPO DE IMAGEN (Etapa Foto A): si el estilo DIBUJA o FOTOGRAFÍA.
+ *
+ * Decide con qué contrato se escribe la guía (dibujo o foto), cómo se piden las
+ * láminas y cada plano, qué reglas de la casa entran y qué escalera de
+ * encuadres se reparte. Ilustración es lo de siempre y el valor por defecto: un
+ * estilo de antes no tiene esta clave y se lee como ilustración (el servidor no
+ * la escribe nunca por defecto). Lo usan la pantalla de crear y la de cambiar
+ * la fuente de un estilo guardado. */
+const TIPOS_DE_IMAGEN = [
+  { valor: 'ilustracion', nombre: 'Ilustración' },
+  { valor: 'foto', nombre: 'Foto realista' },
+];
+
+function selectorTipoDeImagen(valor, alCambiar) {
+  return campoSelect('Tipo de imagen', valor === 'foto' ? 'foto' : 'ilustracion',
+    TIPOS_DE_IMAGEN, alCambiar,
+    'Ilustración hace dibujos; Foto realista hace fotografías: la guía se '
+    + 'escribe para foto y las imágenes que subas deberían ser fotos.');
 }
 
 /* LAS IMÁGENES QUE ACOMPAÑAN A LA DESCRIPCIÓN.
@@ -12493,19 +12526,25 @@ function fuenteDeEstiloLight(ficha) {
       preset: ficha.id,
       prompt: origen.estilo_prompt || '',
       estilo_imagenes: [],
+      modo: modoDeOrigen(origen),
     });
 
   const caja = h('div', { clase: 'fuente-estilo' });
+  /* Cambiar el tipo de imagen ES cambiar la fuente: rehace la guía (con el
+     contrato del tipo nuevo) y las láminas con las MISMAS imágenes, y deja el
+     tono, la voz y el ritmo. */
+  caja.appendChild(selectorTipoDeImagen(f.modo,
+    v => { f.modo = v; repintarPieDeEstilo(); }));
   caja.appendChild(imagenesDelEstilo(ficha, f));
   caja.appendChild(h('div', { clase: 'meta' },
-    'Añadir imágenes nuevas (se suman a las de arriba). Añadir o quitar imágenes '
-    + 'rehace la guía y las láminas al pulsar Regenerar, y deja el tono, la voz y '
-    + 'el ritmo como están.'));
+    'Añadir imágenes nuevas (se suman a las de arriba). Añadir o quitar imágenes, '
+    + 'o cambiar el tipo de imagen, rehace la guía y las láminas al pulsar '
+    + 'Regenerar (dibujo o foto), y deja el tono, la voz y el ritmo como están.'));
   caja.appendChild(imagenesDeApoyoLight(f, repintarPieDeEstilo,
     `aportadas-${ficha.id}`));
   caja.appendChild(conGuia(campoArea('Indicaciones (opcional)', f.prompt,
     v => { f.prompt = v; repintarPieDeEstilo(); },
-    'igual pero más frío y con menos detalle en los fondos')));
+    'más cálido, con luz de tarde y menos cosas en el fondo')));
   caja.appendChild(h('div', { clase: 'meta' },
     'Lo que el material no dice por sí solo. Reescribe la guía y rehace las '
     + 'muestras; se guarda con el estilo y se vuelve a aplicar si lo regeneras.'));
@@ -12518,32 +12557,59 @@ function fuenteDeEstiloLight(ficha) {
 function fuenteCambiadaLight(ficha) {
   const f = APP.light.fuente;
   if (!f || f.preset !== ficha.id) return false;
+  if (modoCambiadoLight(ficha)) return true;
+  return materialCambiadoLight(ficha);
+}
+
+/* Las imágenes o las indicaciones, que viajan SIEMPRE juntas. */
+function materialCambiadoLight(ficha) {
+  const f = APP.light.fuente;
+  if (!f || f.preset !== ficha.id) return false;
   const origen = (ficha.datos || {}).origen || {};
   if (String(f.prompt || '').trim() !== (origen.estilo_prompt || '')) return true;
   if ((f.quitar || []).length) return true;
   return (f.estilo_imagenes || []).length > 0;
 }
 
-/* Lo que viaja al servidor cuando la fuente ha cambiado. Las dos claves
-   SIEMPRE, aunque una vaya vacía: el servidor distingue «no me manda imágenes»
-   de «me manda una lista vacía», y sólo la segunda dice «quítalas». */
-function fuenteParaServidor(_ficha) {
+/* El tipo de imagen de un estilo guardado: el de su encargo, o ilustración si
+   es de antes de que existiera. */
+function modoDeOrigen(origen) {
+  return (origen || {}).estilo_modo === 'foto' ? 'foto' : 'ilustracion';
+}
+
+function modoCambiadoLight(ficha) {
+  const f = APP.light.fuente;
+  if (!f || f.preset !== ficha.id) return false;
+  return (f.modo || 'ilustracion') !== modoDeOrigen((ficha.datos || {}).origen);
+}
+
+/* Lo que viaja al servidor cuando la fuente ha cambiado. Las imágenes y las
+   indicaciones van JUNTAS, aunque una vaya vacía: el servidor distingue «no me
+   manda imágenes» de «me manda una lista vacía», y sólo la segunda dice
+   «quítalas». El tipo de imagen va aparte y solo si cambió. */
+function fuenteParaServidor(ficha) {
   const f = APP.light.fuente || {};
-  const cuerpo = {
-    estilo_prompt: String(f.prompt || '').trim(),
-    estilo_imagenes: (f.estilo_imagenes || []).map(x => x.nombre),
-    estilo_descripciones: descripcionesDeAportadas(f.estilo_imagenes),
-    estilo_destacadas: (f.estilo_imagenes || []).filter(x => x.destacada).map(x => x.nombre),
-  };
-  /* LAS QUE YA TENÍA el estilo y siguen: el servidor las conserva y suma las
-     nuevas detrás. Con lo que se dijo de ellas, que va en la misma lista. */
-  if (Array.isArray(f.existentes)) {
-    const siguen = f.existentes.filter(x => !(f.quitar || []).includes(x.nombre));
-    cuerpo.conservar = siguen.map(x => x.nombre);
-    siguen.forEach(x => {
-      if (String(x.descripcion || '').trim()) cuerpo.estilo_descripciones[x.nombre] = x.descripcion;
-      if (x.destacada) cuerpo.estilo_destacadas.unshift(x.nombre);
-    });
+  const cuerpo = {};
+  /* Las imágenes y las indicaciones, solo si son ellas lo que ha cambiado:
+     cambiar SOLO el tipo de imagen se rehace con el material que ya tenía. */
+  if (!ficha || materialCambiadoLight(ficha)) {
+    cuerpo.estilo_prompt = String(f.prompt || '').trim();
+    cuerpo.estilo_imagenes = (f.estilo_imagenes || []).map(x => x.nombre);
+    cuerpo.estilo_descripciones = descripcionesDeAportadas(f.estilo_imagenes);
+    cuerpo.estilo_destacadas = (f.estilo_imagenes || []).filter(x => x.destacada).map(x => x.nombre);
+    /* LAS QUE YA TENÍA el estilo y siguen: el servidor las conserva y suma las
+       nuevas detrás. Con lo que se dijo de ellas, que va en la misma lista. */
+    if (Array.isArray(f.existentes)) {
+      const siguen = f.existentes.filter(x => !(f.quitar || []).includes(x.nombre));
+      cuerpo.conservar = siguen.map(x => x.nombre);
+      siguen.forEach(x => {
+        if (String(x.descripcion || '').trim()) cuerpo.estilo_descripciones[x.nombre] = x.descripcion;
+        if (x.destacada) cuerpo.estilo_destacadas.unshift(x.nombre);
+      });
+    }
+  }
+  if (!ficha || modoCambiadoLight(ficha)) {
+    cuerpo.estilo_modo = f.modo === 'foto' ? 'foto' : 'ilustracion';
   }
   return cuerpo;
 }
@@ -13073,7 +13139,8 @@ function tarjetaBienvenidaInicio() {
   return [
     h('div', { clase: 'pista' },
       'Esto convierte lo que escribas —unas notas, un artículo, tu propio guion— '
-      + 'en un vídeo de animación narrada, en varios pasos con revisión entre '
+      + 'en un vídeo narrado, con dibujos o con fotos realistas, en varios '
+      + 'pasos con revisión entre '
       + 'ellos. Para que pueda hacerlo necesita hablar con cinco servicios, y '
       + 'cada uno pide su llave. Esta guía te lleva a por ellas una a una, con el '
       + 'enlace de cada sitio.'),

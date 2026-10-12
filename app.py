@@ -2691,6 +2691,11 @@ def estimar_video(cuerpo: dict = Body(default=None)):
     planos = max(1, int(round(segundos / media)))
 
     calidad = str(datos.get("calidad") or "low").lower()
+    if not datos.get("calidad") and datos.get("nuevo"):
+        # un video que aun no existe: la calidad con la que va a nacer, la
+        # misma regla que `crear_video_light`
+        calidad = calidad_de_video_nuevo(
+            "foto" if datos.get("modo") == "foto" else "ilustracion")
     usd_imagen = light.usd_por_imagen(calidad)
 
     imagenes = max(1, planos)
@@ -3427,14 +3432,16 @@ def elegir_estilo(pid: str, cuerpo: dict = Body(default=None)):
 
 def _correr_guia_estilo(avisar, ctx, rutas, ajuste):
     estilo = _estilo()
+    actual = dict((ctx.estado.params("assets") or {}).get("estilo") or {})
+    # con el contrato del tipo de imagen del proyecto (Etapa Foto A)
     guia = estilo.generar_guia(ctx.proyecto, rutas,
                                modelo=ajuste["modelo"],
                                esfuerzo=ajuste["esfuerzo"],
-                               avisar=avisar, proyecto_id=ctx.id)
+                               avisar=avisar, proyecto_id=ctx.id,
+                               modo=PASOS_MODULOS.p6_assets.modo_de(actual))
     # La guia es parametro del paso: cambia lo que se le manda al generador, asi
     # que tiene que invalidar assets y lo que cuelga. Es el comportamiento
     # correcto, no un efecto secundario.
-    actual = dict((ctx.estado.params("assets") or {}).get("estilo") or {})
     actual["guia"] = guia
     ctx.estado.actualizar_params("assets", {"estilo": actual})
     ctx.bitacora.anotar("guia_estilo", "assets", {
@@ -9936,7 +9943,25 @@ def _sembrar_taller(ctx, encargo):
         ctx.estado.actualizar_params("guion", {"cta": encargo["cta"]})
     for paso, valores in light.params_de_ritmo(encargo.get("ritmo")).items():
         ctx.estado.actualizar_params(paso, valores)
+    _sembrar_modo(ctx, encargo)
     return idioma
+
+
+def _sembrar_modo(ctx, encargo):
+    """El tipo de imagen del encargo, a `assets.estilo.modo` del taller.
+
+    Etapa Foto A. Es de donde lo leen la guia, las laminas y, al guardar, el
+    preset. Solo si el encargo lo trae (los encargos a medias de idioma y ritmo
+    no) y solo si cambia: "foto" se escribe, ilustracion es QUITARLO si estaba.
+    Nunca se escribe "ilustracion": seria un param que el taller no tenia.
+    """
+    if "estilo_modo" not in (encargo or {}):
+        return
+    nuevo = _light().estilo_con_modo(
+        (ctx.estado.params("assets") or {}).get("estilo"),
+        encargo.get("estilo_modo"))
+    if nuevo is not None:
+        ctx.estado.actualizar_params("assets", {"estilo": nuevo})
 
 
 # ------------------------------------------------------------ las ocho tareas
@@ -9952,15 +9977,18 @@ def _correr_light_guia(avisar, ctx, encargo):
     # Se leen del TALLER y no del encargo: el encargo trae los nombres del buzon
     # y el buzon se vacia al copiarlas dentro.
     aportadas = _aportadas_del_taller(ctx)
+    bloque = dict((ctx.estado.params("assets") or {}).get("estilo") or {})
     # LO QUE SE DIJO DE CADA IMAGEN viaja con las indicaciones, nombrando el
     # fichero tal y como lo abre la guia (`presets_light.indicaciones_con_...`)
     indicaciones = _light().indicaciones_con_descripciones(
         encargo.get("estilo_prompt"), aportadas,
         encargo.get("estilo_descripciones"))
+    # con el contrato del tipo de imagen del taller (Etapa Foto A): una guia
+    # de foto pregunta por lente y luz, no por trazo y dedos
     guia = estilo.generar_guia(ctx.proyecto, aportadas, avisar=avisar,
                                proyecto_id=ctx.id, peticion=peticion,
-                               indicaciones=indicaciones)
-    bloque = dict((ctx.estado.params("assets") or {}).get("estilo") or {})
+                               indicaciones=indicaciones,
+                               modo=PASOS_MODULOS.p6_assets.modo_de(bloque))
     bloque["guia"] = guia
     ctx.estado.actualizar_params("assets", {"estilo": bloque})
     ctx.bitacora.anotar("guia_estilo", "assets", {
@@ -10049,9 +10077,15 @@ def _correr_light_referencias(avisar, ctx, encargo):
                   and e not in grupos]
     sueltas = [e for e in pedidos if e not in de_fabrica]
     hecho = {"rutas": [], "ejes": [], "coste_usd": 0.0}
+    # El modo va con la guia (Etapa Foto A): sin el, las laminas de un estilo
+    # de fotos se pedirian como imagen neutra. Solo si es foto: sin `modo`, el
+    # diccionario de siempre.
+    para_dibujar = {"guia": bloque.get("guia")}
+    if bloque.get("modo") == "foto":
+        para_dibujar["modo"] = "foto"
     if de_fabrica:
         parcial = mod.dibujar_desde_guia(
-            {"guia": bloque.get("guia")}, destino, ejes=de_fabrica,
+            para_dibujar, destino, ejes=de_fabrica,
             peticiones=peticiones, calidad=calidad,
             avisar=(avisar if not sueltas else
                     lambda v, m="": avisar(0.6 * float(v or 0), m)),
@@ -10066,7 +10100,7 @@ def _correr_light_referencias(avisar, ctx, encargo):
         descripcion = (mod.EJES[eje]["prompt"] if eje in mod.EJES
                        else lam.descripcion_extra(eje, encargo))
         parcial = lam.dibujar_suelta(
-            {"guia": bloque.get("guia")}, destino, eje, descripcion,
+            para_dibujar, destino, eje, descripcion,
             calidad=calidad, idioma=idioma,
             peticion=lam.peticion_de(eje, encargo, peticiones.get(eje, "")),
             referencias=grupos.get(eje) or comun)
@@ -10547,8 +10581,8 @@ def _congelar_preset(ctx, encargo, preset_id=None):
     params = {paso: (ctx.estado.params(paso) or {})
               for paso in ("brief", "guion", "assets", "voz", "callouts")}
     datos = presets.datos_de_params(params)
-    datos["origen"] = {c: encargo[c] for c in presets.CLAVES_ORIGEN
-                       if encargo.get(c)}
+    # `estilo_modo` solo si es foto (ver `presets_light.origen_de`)
+    datos["origen"] = _light().origen_de(encargo, presets.CLAVES_ORIGEN)
     datos["origen"]["taller"] = ctx.id
     taller_muestras = os.path.join(ctx.proyecto.raiz, "muestras")
     miniatura = os.path.join(taller_muestras, "miniatura.png")
@@ -11005,10 +11039,13 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     origen["nombre"] = ficha.get("nombre") or "canal"
     origen.setdefault("idioma", _presets().idioma_de(ficha) or "es")
     conservar = None
-    if fuente and parte == "estilo":
+    if fuente and parte == "estilo" and any(
+            k in fuente for k in ("estilo_prompt", "estilo_imagenes", "conservar",
+                                  "estilo_descripciones")):
         # las DOS a la vez y siempre: dejar la vieja puesta es como se acaba con
         # unas indicaciones que describen unas imagenes que ya no estan
-        origen["estilo_prompt"] = fuente.get("estilo_prompt") or ""
+        if "estilo_prompt" in fuente or "estilo_imagenes" in fuente:
+            origen["estilo_prompt"] = fuente.get("estilo_prompt") or ""
         # SIN IMAGENES NUEVAS SE QUEDAN LAS QUE HABIA. Cambiar solo las
         # indicaciones mandaba una lista vacia y el encargo caia con «falta el
         # estilo gráfico» aunque el estilo tuviera sus imagenes (10-10-2026).
@@ -11029,6 +11066,13 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
         if fuente.get("estilo_imagenes") or "estilo_descripciones" in fuente:
             origen["estilo_descripciones"] = fuente.get("estilo_descripciones") or {}
             origen["estilo_destacadas"] = fuente.get("estilo_destacadas") or []
+    if fuente and parte == "estilo" and "estilo_modo" in fuente:
+        # EL TIPO DE IMAGEN (Etapa Foto A) es otra fuente del estilo: pasar a
+        # «Foto realista» con las MISMAS imagenes rehace la guia (con el
+        # contrato de foto) y las laminas, y deja el tono, la voz y el ritmo.
+        # Puede venir solo: entonces las imagenes y las indicaciones son las
+        # que ya tenia el estilo.
+        origen["estilo_modo"] = str(fuente.get("estilo_modo") or "")
     if fuente and parte == "tono":
         origen["tono_prompt"] = fuente.get("tono_prompt") or ""
     encargo = _encargo_o_400(origen)
@@ -11038,10 +11082,20 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     # lo que cuelga de ella, que es justo lo que rehace la parte «estilo» de
     # siempre. Se compara con lo que habia, no con si vino `origen`: la pantalla
     # manda las dos claves juntas y una de ellas puede no haberse tocado.
+    #
+    # Lo que SI es material nuevo: imagenes nuevas, quitar o anadir de las que
+    # habia, o un TIPO DE IMAGEN distinto (Etapa Foto A), que cambia el
+    # contrato de la guia y como se piden las laminas: eso se rehace entero
+    # aunque tambien haya cambiado el texto, porque el reparto de la frase
+    # podria decidir no tocar la guia.
+    modo_antes = "foto" if antes.get("estilo_modo") == "foto" else "ilustracion"
+    modo_cambiado = (bool(fuente) and parte == "estilo"
+                     and encargo.get("estilo_modo") != modo_antes)
     material = bool(fuente) and parte == "estilo" and (
         bool(_rutas_aportadas(fuente.get("estilo_imagenes")))
         or (conservar is not None and set(conservar) != {
-            _light()._sin_prefijo(r) for r in _aportadas_del_taller(ctx)}))
+            _light()._sin_prefijo(r) for r in _aportadas_del_taller(ctx)})
+        or (modo_cambiado and bool(encargo.get("estilo_imagenes"))))
     # El feedback viaja por INVOCACION y no se guarda en el encargo: describe
     # esta pasada, no lo que el preset es. Guardarlo lo aplicaria otra vez la
     # proxima, y dos correcciones seguidas se sumarian sin que nadie lo pida.
@@ -11097,6 +11151,10 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
         aportadas = _sembrar_aportadas(ctx, encargo, conservar) if material else []
     except RuntimeError as fallo:
         raise ErrorApi(400, str(fallo))
+    # el tipo de imagen, al taller ANTES de lanzar: la guia es la primera
+    # tarea que lo lee (Etapa Foto A)
+    if fuente and parte == "estilo":
+        _sembrar_modo(ctx, encargo)
     ctx.bitacora.anotar("preset_light_regenerar", None,
                         {"preset": preset_id, "parte": parte,
                          "peticion": peticion[:200],
@@ -12678,6 +12736,34 @@ def generar_video(pid: str, cuerpo: dict = Body(default=None)):
             "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
 
 
+#: LA CALIDAD MINIMA DE UN VIDEO FOTO. En foto, `low` es lo que da piel lisa y
+#: aspecto de plastico -- la queja que abrio la Etapa Foto --, y subir a `medium`
+#: cuesta 1,7 veces y no 6,8 (ver la tabla de CLAUDE.md: las referencias se
+#: pagan igual en las dos). Por eso un video NUEVO con estilo foto no arranca por
+#: debajo de esto aunque Configuracion diga `low`; con `high` puesto, se respeta.
+CALIDAD_MINIMA_FOTO = "medium"
+
+
+def calidad_de_video_nuevo(modo, calidad_del_estilo=None):
+    """Con que calidad arranca un video nuevo. -> "low" | "medium" | "high"
+
+    La del estilo si la trae; si no, la de Configuracion (`AJUSTES`). Y en foto,
+    nunca por debajo de `CALIDAD_MINIMA_FOTO`. Solo para videos NUEVOS: `calidad`
+    entra en la firma de cada imagen, asi que leer esto al generar dejaria
+    obsoletas las de los videos que ya existen.
+    """
+    calidad = str(calidad_del_estilo or "").strip().lower()
+    if calidad not in AJUSTES.CALIDADES:
+        try:
+            calidad = AJUSTES.calidad_imagen()
+        except Exception:  # noqa: BLE001
+            calidad = "low"
+    if modo == "foto" and (AJUSTES.CALIDADES.index(calidad)
+                           < AJUSTES.CALIDADES.index(CALIDAD_MINIMA_FOTO)):
+        calidad = CALIDAD_MINIMA_FOTO
+    return calidad
+
+
 @app.post("/api/presets-light/{preset_id}/video", status_code=201)
 def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     """Un proyecto de video nuevo con ese estilo ya aplicado. -> la ficha.
@@ -12736,6 +12822,19 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     # camino que copiara las claves a mano se quedaria viejo el dia que un
     # preset guarde una mas.
     aplicado = aplicar_preset_canal(proyecto.id, preset_id)
+    # LA CALIDAD DE IMAGEN, al nacer, como hace `crear_proyecto`. Este camino no
+    # la escribia, y es el UNICO por el que se crean videos desde la pantalla:
+    # todos salian en `low` dijera lo que dijera Configuracion. Es un video
+    # nuevo, asi que escribirla aqui no deja nada obsoleto.
+    params_assets = ctx.estado.params("assets") or {}
+    try:
+        ctx.estado.actualizar_params("assets", {"calidad": calidad_de_video_nuevo(
+            PASOS_MODULOS.p6_assets.modo_de(params_assets.get("estilo")),
+            params_assets.get("calidad"))})
+    except Exception:  # noqa: BLE001
+        # una calidad que no se puede escribir no impide crear el video: se
+        # queda con la del paso, que es lo que pasaba antes
+        pass
     avisos = _sembrar_video_light(ctx, datos)
     if lleva:
         _aplicar_lleva(ctx, lleva, al_crear=True)

@@ -39,7 +39,11 @@ function h(etiqueta, props, ...hijos) {
     if (clave === 'clase') n.className = valor;
     else if (clave === 'texto') n.textContent = valor;
     else if (clave === 'datos') Object.assign(n.dataset, valor);
-    else if (clave === 'estilo') n.setAttribute('style', valor);
+    /* POR CSSOM Y NO COMO ATRIBUTO: la CSP del proxy bloquea los atributos
+       `style=""` (también los puestos con setAttribute), y los 19 sitios que
+       usan `estilo` se quedaban sin su margen sin decir nada. Escribir en
+       `n.style` es CSSOM y la CSP lo deja pasar. */
+    else if (clave === 'estilo') n.style.cssText = valor;
     else if (clave.startsWith('on')) n.addEventListener(clave.slice(2), valor);
     else if (clave === 'value' && 'value' in n) valorDiferido = valor;
     else if (valor === true) n.setAttribute(clave, '');
@@ -71,6 +75,31 @@ function reloj(segundos) {
 }
 
 /* 780 -> '13:00'. Para duraciones de video, donde la decima no dice nada. */
+/* Un texto largo cortado por palabra, con «…» si sobra. */
+/* «TÃº» -> «Tú»: la narración de los vídeos cuya voz se grabó antes del
+ * 10-10-2026 llegó de Cartesia leída como Latin-1. Se arregla AL ENSEÑARLA y
+ * no en los datos, porque esa narración entra en la firma de las imágenes
+ * (ver `subtitulos.reparar_mojibake`, que hace lo mismo en el subtítulo). */
+function legible(texto) {
+  const t = String(texto || '');
+  // trozo a trozo y solo con estas cabezas: ver `subtitulos._MOJIBAKE`
+  return t.replace(/[\u00c2\u00c3][\u0080-\u00bf]|\u00e2[\u0080-\u00bf]{2}/g, trozo => {
+    try {
+      const bytes = Uint8Array.from([...trozo].map(c => c.charCodeAt(0)));
+      return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+    } catch (_) {
+      return trozo;
+    }
+  });
+}
+
+function recortar(texto, maximo) {
+  const t = String(texto || '').replace(/\s+/g, ' ').trim();
+  if (t.length <= maximo) return t;
+  const corte = t.slice(0, maximo);
+  return `${corte.slice(0, Math.max(corte.lastIndexOf(' '), maximo - 20))}…`;
+}
+
 function mmss(segundos) {
   const total = Math.max(0, Math.round(Number(segundos) || 0));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
@@ -375,6 +404,8 @@ const API = {
   archivo: (pid, ruta) => `${BASE}/a/${encodeURIComponent(pid)}/${String(ruta).split('\\').join('/')
     .split('/').map(encodeURIComponent).join('/')}`,
   coste: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/coste`,
+  costeDetalle: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/coste/detalle`,
+  costeEstilo: id => `${BASE}/api/presets-light/${encodeURIComponent(id)}/coste`,
   costePorPaso: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/coste/por-paso`,
   costePresupuesto: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/coste/presupuesto`,
   capturas: (pid, consulta) => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/capturas`
@@ -502,6 +533,7 @@ const API = {
   presetLight: id => `${BASE}/api/presets-light/${encodeURIComponent(id)}`,
   presetLightPlan: () => `${BASE}/api/presets-light/plan`,
   presetLightRegenerar: id => `${BASE}/api/presets-light/${encodeURIComponent(id)}/regenerar`,
+  presetLightLaminas: id => `${BASE}/api/presets-light/${encodeURIComponent(id)}/laminas`,
   // el buzón donde esperan las imágenes de apoyo antes de que exista el taller
   // EL REPASO: lo que se escribe MIRANDO el vídeo montado. Las notas viven en
   // su fichero y no en los params (comentar no puede dejar el vídeo obsoleto);
@@ -511,6 +543,7 @@ const API = {
     + `/repaso/${encodeURIComponent(nid)}`,
   imagenesRepaso: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}`
     + `/repaso/imagenes`,
+  colaImagenes: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/imagenes`,
   imagenRepaso: (pid, nombre) => `${BASE}/api/proyectos/${encodeURIComponent(pid)}`
     + `/repaso/imagenes/${encodeURIComponent(nombre)}`,
   repasoAplicar: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}`
@@ -528,6 +561,9 @@ function consulta(pares) {
 
 async function pedir(url, opciones) {
   const cfg = Object.assign({ headers: {} }, opciones || {});
+  // LOS PROYECTOS CON CLAVE ABIERTOS: sin esto el servidor no lista lo suyo
+  const pases = typeof cabeceraDePases === 'function' ? cabeceraDePases() : '';
+  if (pases) cfg.headers = Object.assign({}, cfg.headers, { 'X-Estudio-Abiertos': pases });
   if (cfg.cuerpo !== undefined) {
     /* UN FormData VIAJA TAL CUAL. Serializarlo a JSON da «{}» —sus campos no
        son propiedades— así que el fichero se perdía en silencio y el servidor
@@ -787,6 +823,8 @@ function descendientesDe(id) {
 function nombreDe(id) {
   // el agente de capturas y la guia de estilo no son pasos del grafo pero si
   // lanzan trabajos, y salen por su nombre en avisos y en el faro
+  if (/^exportar_/.test(String(id))) return 'Descarga por partes';
+  if (/^efectos_/.test(String(id))) return 'Efectos';
   return NOMBRES_FUERA_DEL_GRAFO[id] || pasoDe(id).nombre || id;
 }
 
@@ -816,6 +854,16 @@ function toast(texto, malo) {
    Es el mismo motivo por el que la ranura de la barra vive fuera del DOM
    (RANURAS): el panel se rehace bajo los pies. */
 const ERRORES = {};
+
+/* EL ERROR DEL VÍDEO, con su botón de cerrar. Se queda arriba en cada
+   pantalla del vídeo hasta que se lee y se cierra (o hasta lanzar otra cosa),
+   no para siempre. */
+function errorDelVideo() {
+  return h('div', { clase: 'error-cerrable' },
+    cajaError(ERRORES[CLAVE_VIDEO_LIGHT]),
+    h('button', { clase: 'mini fantasma', title: 'Ya lo he leído',
+      onclick: () => { limpiarError(CLAVE_VIDEO_LIGHT); repintarVideo(); } }, 'Cerrar'));
+}
 
 function mostrarError(paso, error) {
   const crudo = error && error.message ? error.message : String(error);
@@ -889,16 +937,49 @@ function arranqueDe(antes, tid) {
   return esDeEste ? previo : Date.now();
 }
 
-function seguirTrabajo(paso, tid, alTerminar, alAvanzar) {
+function seguirTrabajo(paso, tid, alTerminar, alAvanzar, pidDelTrabajo) {
   soltarSeguimiento(paso);
   const seguimiento = {};
   APP.seguimientos[paso] = seguimiento;
+  const previo = APP.trabajos[paso];
+  // lo de OTRO trabajo (su progreso, su vídeo) no se hereda
+  const heredable = previo && (previo.id === tid || previo.id == null) ? previo : {};
   APP.trabajos[paso] = Object.assign({
     id: tid, estado: 'ejecutando', progreso: 0, mensaje: 'lanzando…',
-  }, APP.trabajos[paso], {
+  }, heredable, {
     id: tid, estado: 'ejecutando',
-    inicio: arranqueDe(APP.trabajos[paso], tid),
+    inicio: arranqueDe(APP.trabajos[paso], tid),   // (aún es el previo)
   });
+  /* EL TRABAJO DE UN VÍDEO ES DE ESE VÍDEO. La ranura del vídeo es una sola
+     para toda la pantalla, y sin apuntar de quién es, el montaje de A se
+     enseñaba (y apagaba los botones) al abrir B, y al terminar volvía a cargar
+     A aunque estuvieras en B (11-10-2026). Con el vídeo apuntado, B no lo ve
+     (`trabajoVideoLight`), y lo que hace al terminar solo corre si sigues en A. */
+  if (paso === CLAVE_VIDEO_LIGHT) {
+    /* De QUÉ vídeo: el que lo lanzó (`pidDelTrabajo`, apuntado ANTES de
+       esperar al servidor) y, por si acaso, lo que diga el propio servidor, que
+       sabe de qué proyecto es cada trabajo. Sin esto, abrir otro vídeo
+       mientras /generar contestaba dejaba el trabajo apuntado al otro. */
+    const marca = { pid: pidDelTrabajo || APP.light.video.pid };
+    APP.trabajos[paso].pid = marca.pid;
+    APP.trabajos[paso].nombreVideo = nombreDeVideoLight(marca.pid);
+    pedir(API.trabajo(tid)).then(f => {
+      if (!f || !f.proyecto || f.proyecto === marca.pid) return;
+      marca.pid = f.proyecto;
+      const t = APP.trabajos[paso];
+      if (t && t.id === tid) { t.pid = f.proyecto; t.nombreVideo = nombreDeVideoLight(f.proyecto); }
+      refrescarVivosLight();
+    }).catch(() => {});
+    const deEste = () => !!marca.pid && APP.light.video.pid === marca.pid;
+    const fin = alTerminar;
+    const avance = alAvanzar;
+    alTerminar = fin ? async t => {
+      if (deEste()) return fin(t);
+      if (APP.light.vista !== 'elegido') cargarGaleriaLight(true);
+      return undefined;
+    } : fin;
+    alAvanzar = avance ? d => { if (deEste()) avance(d); } : avance;
+  }
   pintarTrabajo(paso);
 
   seguimiento.tic = setInterval(() => pintarTrabajo(paso), 500);
@@ -929,7 +1010,13 @@ function seguirTrabajo(paso, tid, alTerminar, alAvanzar) {
       const dicho = avancePublico(datos) || 'terminado';
       toast(`${nombreDe(paso)}: ${dicho} (${duracionCorta(segundos)})`);
     } else if (datos.estado === 'error') {
-      mostrarError(paso, datos.error || datos.mensaje || 'el trabajo ha fallado');
+      const t = APP.trabajos[paso] || {};
+      // el fallo del trabajo de OTRO vídeo no se pinta como error de este
+      if (paso === CLAVE_VIDEO_LIGHT && 'pid' in t && t.pid !== APP.light.video.pid) {
+        toast(`«${nombreDeVideoLight(t.pid)}»: ${datos.error || datos.mensaje || 'ha fallado'}`, true);
+      } else {
+        mostrarError(paso, datos.error || datos.mensaje || 'el trabajo ha fallado');
+      }
     } else {
       toast(`${nombreDe(paso)}: cancelado`, true);
     }
@@ -1125,15 +1212,29 @@ function pestanaDeTrabajo(paso) {
 /* El faro es lo único que se ve desde CUALQUIER pestaña mientras algo corre, y
    ahora además lleva a donde está la barra. Antes era texto muerto: sabías que
    Assets iba por el 54% y tenías que acordarte de en qué pestaña mirarlo. */
+function legibleCorto(texto) {
+  const t = String(texto || '');
+  return t.length > 24 ? `${t.slice(0, 23)}…` : t;
+}
+
 function pintarFaro() {
   const activos = Object.entries(APP.trabajos).filter(([paso]) => trabajando(paso));
   const faro = vaciar($('#faro'));
   if (!activos.length) return;
   faro.append('⏳ ');
   activos.forEach(([paso, t], indice) => {
+    if (indice) faro.append(' · ');
+    /* EL DE UN VÍDEO DICE DE CUÁL, y lleva a él: con varios vídeos abiertos
+       a lo largo del día, «El vídeo 42 %» no decía cuál se estaba montando. */
+    if (paso === CLAVE_VIDEO_LIGHT && t.pid) {
+      faro.appendChild(h('button', {
+        clase: 'mini fantasma', title: `abrir «${t.nombreVideo || t.pid}» y ver cómo va`,
+        onclick: () => abrirVideoLight(t.pid),
+      }, `«${legibleCorto(t.nombreVideo || t.pid)}» ${Math.round((t.progreso || 0) * 100)}%`));
+      return;
+    }
     const destino = pestanaDeTrabajo(paso);
     const texto = `${nombreDe(paso)} ${Math.round((t.progreso || 0) * 100)}%`;
-    if (indice) faro.append(' · ');
     faro.appendChild(destino
       ? h('button', {
         clase: 'mini fantasma', title: `ir a ${nombreDe(paso)} y ver cómo va`,
@@ -1306,6 +1407,7 @@ async function cargarProyectos() {
    abrirMenuProyectos. */
 function pintarBotonProyecto() {
   const boton = $('#btn-proyecto');
+  if (!boton) return;            // ya no está en la cabecera (11-10-2026)
   const abierto = APP.proyectos.find(p => p.id === APP.pid);
   vaciar(boton).append(
     h('span', { clase: 'nombre' },
@@ -1333,9 +1435,7 @@ async function abrirProyecto(pid) {
   pararPrevia();
   PREVIA.ficha = null;
   PREVIA.i = 0;
-  COLA_IMG.espera = [];
-  COLA_IMG.corriendo = [];
-  COLA_IMG.fallo = {};
+  olvidarCola();
   pintarCoste();
   await refrescarTodo();
   await cargarBitacora();
@@ -1408,30 +1508,10 @@ const AL_REENGANCHAR = {
    cosa --un personaje, un set-- no las trae de tipo escena, asi que ninguno de
    los dos se cuela aqui. */
 function retomarColaDeImagenes(t) {
-  const suyas = (t.unidades || []).filter(u => String(u).startsWith('escena:'));
-  if (t.paso !== 'assets' || !suyas.length
-      || suyas.length !== (t.unidades || []).length) return false;
-  if (APP.seguimientos[CLAVE_VIDEO_LIGHT]) return true;   // ya se sigue
-  // sin nota: de un trabajo vivo solo se sabe que planos lleva
-  COLA_IMG.corriendo = suyas.map(u => ({ sid: String(u).slice('escena:'.length), nid: '' }));
-  APP.trabajos[CLAVE_VIDEO_LIGHT] = Object.assign({}, t,
-    { inicio: Date.now() - (t.segundos || 0) * 1000 });
-  seguirTrabajo(CLAVE_VIDEO_LIGHT, t.id, async trabajo => {
-    const tanda = COLA_IMG.corriendo.slice();
-    /* AQUI NO SE MARCA NADA COMO HECHO. Al retomar tras una recarga solo se
-       sabe QUE PLANOS lleva el trabajo, no de que nota salieron, y el visto es
-       de la nota. Lo pone `refrescarLoDibujado` al releer el repaso: el
-       servidor ya guardo el `regenerado` de cada una. */
-    if (trabajo.estado === 'error') {
-      tanda.forEach(sid => { COLA_IMG.fallo[sid] = trabajo.error || 'fallo'; });
-    }
-    if (trabajo.estado !== 'ejecutando') {
-      COLA_IMG.corriendo = [];
-      await refrescarLoDibujado();
-      repintarVideo();
-      soltarCola();
-    }
-  }, () => repintarVideo());
+  /* LA COLA DE NOTAS (`notas_imagenes`): vive en el servidor, así que retomarla
+     es volver a mirarla. Cada tarjeta dice la suya. */
+  if (t.nombre !== 'notas_imagenes') return false;
+  vigilarCola(t.proyecto);
   return true;
 }
 
@@ -1882,6 +1962,47 @@ function ajustarAlto(area) {
   return area;
 }
 
+/* TODOS LOS CAMPOS DE TEXTO CRECEN CON LO QUE LLEVAN (10-10-2026). Antes cada
+   uno tenía su alto fijo: un tono de mil palabras se leía por una rendija de
+   cuatro líneas, y una indicación de una frase ocupaba media pantalla vacía.
+   Ahora el campo mide lo que su texto, hasta el 60 % de la pantalla; pasado
+   eso tiene su propia barra (`textarea.autoalto` en estilo.css) y se puede
+   seguir estirando a mano desde la esquina. Una sola vez para toda la página:
+   un observador mide los que aparecen y un oyente los que cambian. Incluye los
+   `.crece`: esos solo se medían al pintarse, así que escribir en ellos no los
+   hacía crecer y el texto se cortaba por debajo. */
+function autoajustarArea(area) {
+  if (!area || area.id === 'asistente-texto') return;
+  area.classList.add('autoalto');
+  // con la altura a «auto» el campo vuelve a sus filas (`rows`), que son el
+  // mínimo; scrollHeight nunca baja de ahí
+  area.style.height = 'auto';
+  area.style.height = `${area.scrollHeight + 2}px`;
+}
+
+function vigilarAreas() {
+  if (vigilarAreas.hecho) return;
+  vigilarAreas.hecho = true;
+  document.addEventListener('input', ev => {
+    if (ev.target && ev.target.tagName === 'TEXTAREA') autoajustarArea(ev.target);
+  });
+  let pendiente = false;
+  const medirTodas = () => {
+    pendiente = false;
+    document.querySelectorAll('textarea:not(.autoalto)').forEach(area => {
+      if (area.isConnected && area.offsetParent !== null) autoajustarArea(area);
+    });
+  };
+  new MutationObserver(() => {
+    if (pendiente) return;
+    pendiente = true;
+    requestAnimationFrame(medirTodas);
+  }).observe(document.body, { childList: true, subtree: true });
+  // un <details> que se abre deja ver campos que no se podían medir cerrados
+  document.addEventListener('toggle', () => requestAnimationFrame(medirTodas), true);
+  medirTodas();
+}
+
 function crecerConElTexto(area) {
   area.classList.add('crece');
   // Al crearlo todavia no esta en el DOM y scrollHeight es 0: se mide cuando ya
@@ -2284,12 +2405,14 @@ function pintarConfig() {
     return;
   }
   if (SISTEMA.notas === null && !SISTEMA.pedido) { SISTEMA.pedido = true; cargarSistema(); }
+  caja.appendChild(seccionManual());
   caja.appendChild(seccionNovedades());
   caja.appendChild(seccionNotas());
   caja.appendChild(bloquePruebaClaves());
   caja.appendChild(seccionOpenAI(ficha));
   caja.appendChild(seccionCalidadImagen());
   caja.appendChild(seccionDictado());
+  caja.appendChild(seccionZonaHoraria());
   caja.appendChild(seccionCartesia(ficha));
   caja.appendChild(seccionCLI());
   caja.appendChild(seccionOtrasClaves(ficha));
@@ -2348,7 +2471,7 @@ function seccionCalidadImagen() {
   const datos = vista.ajustes;
   const caja = h('section', { clase: 'bloque-config' },
     h('div', { clase: 'fila' },
-      h('h3', {}, 'Calidad de las imagenes'),
+      h('h3', {}, 'Calidad de las imágenes'),
       h('span', { clase: 'crece' }),
       datos ? pastillaEstado('ok', datos.ajustes.calidad_imagen) : null));
   if (!datos) {
@@ -2360,7 +2483,7 @@ function seccionCalidadImagen() {
   const porcentaje = base.usd_total
     ? Math.round(100 * base.usd_referencias / base.usd_total) : 0;
   caja.appendChild(h('div', { clase: 'pista' },
-    'Lo que se ve aqui NO es el precio de OpenAI: es lo que cuesta el plano '
+    'Lo que se ve aquí NO es el precio de OpenAI: es lo que cuesta el plano '
     + 'entero. A cada imagen se le adjuntan sus referencias de estilo, reparto y '
     + `continuidad, y esas se pagan aparte — en la calidad baja son el ${porcentaje} % `
     + 'del gasto. Por eso subir de calidad cuesta bastante menos de lo que '
@@ -2372,8 +2495,8 @@ function seccionCalidadImagen() {
     caja.appendChild(h('button', {
       clase: 'fila-calidad' + (puesta ? ' elegida' : ''),
       disabled: puesta,
-      title: puesta ? 'es la que esta puesta'
-        : `los videos nuevos empezaran en ${fila.calidad}`,
+      title: puesta ? 'es la que está puesta'
+        : `los vídeos nuevos empezarán en ${fila.calidad}`,
       onclick: () => guardarCalidadImagen(fila.calidad),
     },
       h('span', { clase: 'nombre' }, fila.calidad),
@@ -2384,11 +2507,11 @@ function seccionCalidadImagen() {
         + 'las referencias'),
       h('span', { clase: 'meta veces' }, fila.veces_total > 1
         ? `×${fila.veces_total} de coste real, no ×${fila.veces_imagen}`
-        : 'la mas barata')));
+        : 'la más barata')));
   });
 
   caja.appendChild(h('div', { clase: 'meta' },
-    'Es el punto de partida de los videos NUEVOS. Los que ya existen se quedan '
+    'Es el punto de partida de los vídeos NUEVOS. Los que ya existen se quedan '
     + 'con la suya: se cambia por vídeo desde su propia ficha. Los vídeos con un '
     + 'estilo de Foto realista empiezan como mínimo en MEDIUM: en LOW la piel '
     + 'sale lisa y la foto parece de plástico.'));
@@ -2432,6 +2555,76 @@ async function guardarDictado(modo) {
     const r = await pedir(API.ajustes(), { method: 'PUT', cuerpo: { dictado: modo } });
     vista.ajustes = { ...(vista.ajustes || {}), ajustes: r.ajustes, costes: r.costes || (vista.ajustes || {}).costes };
     refrescarEstadoAsistente();
+  } catch (e) {
+    vista.error = e.message;
+  }
+  repintarClaves();
+}
+
+/* LA HORA DE TU REGIÓN. El servidor apunta las horas (chat, vídeos, notas) con
+   su reloj, y en un VPS ese reloj suele ir en UTC: desde Lima, cinco horas de
+   más. Se elige una zona y el servidor pasa a apuntar en ella (ver
+   `ajustes.aplicar_zona`); lo apuntado antes se queda como estaba. */
+function zonasDelNavegador() {
+  try {
+    if (Intl.supportedValuesOf) return Intl.supportedValuesOf('timeZone');
+  } catch (e) { /* navegador viejo */ }
+  return ['America/Lima', 'America/Bogota', 'America/Mexico_City', 'America/Santiago',
+    'America/Argentina/Buenos_Aires', 'America/Caracas', 'America/New_York',
+    'Europe/Madrid', 'UTC'];
+}
+
+function seccionZonaHoraria() {
+  const vista = estadoConfig();
+  const datos = vista.ajustes;
+  const caja = h('section', { clase: 'bloque-config' },
+    h('div', { clase: 'fila' }, h('h3', {}, 'Hora de tu región')));
+  if (!datos) return caja;
+  const zona = datos.zona || {};
+  const elegida = (datos.ajustes || {}).zona_horaria || '';
+  let delNavegador = '';
+  try { delNavegador = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { /* sin Intl */ }
+  caja.appendChild(h('div', { clase: 'meta' },
+    `El Estudio apunta las horas así: ${zona.hora || '—'} (${elegida || 'la del servidor'}, `
+    + `${zona.desfase || '?'}). Es la hora que ves en el chat del asistente y en tus vídeos.`));
+  const lista = zonasDelNavegador();
+  if (elegida && !lista.includes(elegida)) lista.unshift(elegida);
+  /* CON BUSCADOR: son más de cuatrocientas zonas, y en una lista a pelo
+     encontrar «Lima» era bajar media pantalla. Se escribe la ciudad o el país
+     y la lista se queda con las que coinciden. */
+  const selector = h('select', {
+    'aria-label': 'Zona horaria',
+    onchange: ev => guardarZonaHoraria(ev.target.value),
+  });
+  const rellenar = filtro => {
+    const f = String(filtro || '').trim().toLowerCase().replace(/\s+/g, '_');
+    vaciar(selector);
+    selector.appendChild(h('option', { value: '', selected: !elegida }, '— la del servidor —'));
+    lista.filter(z => !f || z.toLowerCase().includes(f) || z === elegida)
+      .forEach(z => selector.appendChild(
+        h('option', { value: z, selected: z === elegida }, z.replace(/_/g, ' '))));
+  };
+  rellenar('');
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('input', { type: 'search', placeholder: 'busca tu ciudad (Lima, Madrid, México…)',
+      'aria-label': 'Buscar zona horaria', oninput: ev => rellenar(ev.target.value) }),
+    selector,
+    delNavegador && delNavegador !== elegida
+      ? h('button', { clase: 'mini primario', onclick: () => guardarZonaHoraria(delNavegador) },
+        `Usar la de este navegador (${delNavegador.replace(/_/g, ' ')})`)
+      : null));
+  caja.appendChild(h('div', { clase: 'meta' },
+    'Lo que se apuntó antes de cambiarla conserva la hora que tenía.'));
+  return caja;
+}
+
+async function guardarZonaHoraria(zona) {
+  const vista = estadoConfig();
+  try {
+    const r = await pedir(API.ajustes(), { method: 'PUT', cuerpo: { zona_horaria: zona } });
+    vista.ajustes = { ...(vista.ajustes || {}), ajustes: r.ajustes, zona: r.zona,
+      costes: r.costes || (vista.ajustes || {}).costes };
+    toast(zona ? `Hora: ${zona.replace(/_/g, ' ')} (${(r.zona || {}).hora || ''})` : 'Hora: la del servidor');
   } catch (e) {
     vista.error = e.message;
   }
@@ -3084,46 +3277,6 @@ function usaCLI(paso) {
   return (listaDe((APP.cli || {}).pasos) || []).includes(paso);
 }
 
-function nombreCLI(lista, id) {
-  const ficha = (listaDe(lista) || []).find(x => x.id === id);
-  return (ficha && ficha.nombre) || oHueco(id);
-}
-
-function nombreModelo(id) { return nombreCLI((APP.cli || {}).modelos, id); }
-function nombreEsfuerzo(id) { return nombreCLI((APP.cli || {}).esfuerzos, id); }
-
-/* Comparativas pedidas al servidor, una por paso: la del ultimo tamano pedido,
-   que es la que se esta ensenando. Las peticiones en vuelo se comparten para que
-   tres bloques de la misma pantalla no pidan lo mismo tres veces. */
-const COMPARATIVAS_EN_VUELO = {};
-
-async function pedirComparativa(paso, tamano, forzar) {
-  const talla = Math.max(0, Math.round(Number(tamano) || 0));
-  const guardada = APP.comparativas[paso];
-  if (!forzar && guardada && guardada.tamano === talla) return guardada;
-  const clave = `${paso}|${talla}`;
-  if (!forzar && COMPARATIVAS_EN_VUELO[clave]) return COMPARATIVAS_EN_VUELO[clave];
-
-  const promesa = pedir(API.estadisticas({ paso, tamano: talla })).then(datos => {
-    const comparativa = datos.comparativa || {};
-    const lista = listaDe(comparativa.ajustes) || [];
-    const filas = {};
-    for (const fila of lista) filas[fila.clave || `${fila.modelo}|${fila.esfuerzo}`] = fila;
-    const ficha = {
-      paso, tamano: talla, lista, filas,
-      unidad: comparativa.unidad || 'unidades',
-      aviso: comparativa.aviso || '',
-      recomendacion: datos.recomendacion || null,
-      historial: listaDe(datos.historial) || [],
-    };
-    APP.comparativas[paso] = ficha;
-    return ficha;
-  });
-  COMPARATIVAS_EN_VUELO[clave] = promesa;
-  promesa.catch(() => null).then(() => { delete COMPARATIVAS_EN_VUELO[clave]; });
-  return promesa;
-}
-
 /* El ajuste por defecto de UN paso, que no es el general.
  *
  * El servidor sirve los dos en /api/ajustes-cli: `por_defecto` (sonnet/bajo,
@@ -3159,58 +3312,6 @@ function filaAjusteActual(paso) {
   if (!guardada || !CLAVES_CLI[paso]) return null;
   const ajuste = ajusteElegido(paso);
   return guardada.filas[`${ajuste.modelo}|${ajuste.esfuerzo}`] || null;
-}
-
-function tiempoDeFila(fila) {
-  if (!fila) return '—';
-  return fila.reloj || duracionCorta(fila.segundos);
-}
-
-/* Sello de honestidad de una cifra. Un tiempo sin esta etiqueta no se pinta. */
-function selloCifra(fila) {
-  if (!fila) return null;
-  if (fila.medida) {
-    return h('span', { clase: 'sello-cifra medida', title: fila.origen || '' },
-      `medida · ${cifra(fila.ejecuciones, '0')} ejecución(es)`);
-  }
-  return h('span', { clase: 'sello-cifra', title: fila.origen || '' }, 'estimación, no medida');
-}
-
-/* Lo que se sabe de una combinacion mas alla del tiempo: cuantas veces salio
-   bien, cuantas se valoraron y como. Es lo que distingue «rapida» de «buena». */
-function detalleFila(fila) {
-  if (!fila) return '';
-  const trozos = [];
-  if (fila.ejecuciones) {
-    trozos.push(`${cifra(fila.correctas, '0')} de ${cifra(fila.ejecuciones, '0')} terminaron bien`);
-    if (fila.fiabilidad !== undefined && fila.fiabilidad !== null) {
-      trozos.push(`fiabilidad ${Math.round(fila.fiabilidad * 100)}%`);
-    }
-    if (fila.sin_reintento !== undefined && fila.sin_reintento !== null) {
-      trozos.push(`a la primera ${Math.round(fila.sin_reintento * 100)}%`);
-    }
-    if (fila.aceptacion !== undefined && fila.aceptacion !== null) {
-      trozos.push(`aceptación ${Math.round(fila.aceptacion * 100)}%`);
-    }
-  }
-  if (fila.valorada_bien || fila.valorada_mal) {
-    trozos.push(`valorada ${fila.valorada_bien} bien / ${fila.valorada_mal} mal`);
-  } else if (fila.ejecuciones) {
-    trozos.push('nadie ha valorado todavía el resultado');
-  }
-  if (fila.tokens_salida) trozos.push(`${corto(fila.tokens_salida)} tokens de salida`);
-  return trozos.join(' · ');
-}
-
-async function valorarAjuste(paso, valoracion, modelo, esfuerzo) {
-  const datos = await pedir(API.valoracion(), {
-    method: 'POST',
-    cuerpo: { paso, valoracion, modelo, esfuerzo, proyecto: APP.pid || undefined },
-  });
-  const ajuste = (datos.recomendacion || {}).ajuste || {};
-  toast(`valoración anotada · ahora se recomienda ${nombreModelo(ajuste.modelo)}`
-    + ` con esfuerzo ${nombreEsfuerzo(ajuste.esfuerzo)}`);
-  return datos;
 }
 
 /* ================================================================== 1 INGESTA */
@@ -3965,8 +4066,6 @@ function conmutarCoste() {
  * justo lo contrario de lo que dice.
  */
 
-const RENDIMIENTO = { paso: null, panorama: null };
-
 /* Nombre legible tambien de los pasos que no son pestanas: el agente de capturas
    y el catalogo visual no estan en el grafo, pero miden tiempo igual. Sin esto
    salian en crudo ('capturas_agente') junto a los demas ya con su nombre. */
@@ -3991,263 +4090,15 @@ const NOMBRES_FUERA_DEL_GRAFO = {
   voz_light: 'La voz',
 };
 
-function nombrePasoCLI(id) {
-  const enGrafo = APP.pasos.find(p => p.id === id);
-  if (enGrafo) return enGrafo.nombre || id;
-  return NOMBRES_FUERA_DEL_GRAFO[id] || String(id || '').split('_').join(' ');
-}
-
-/* Pulgares. Son la unica senal de calidad que no es un proxy: sin ellos el
-   recomendador solo sabe recomendar lo mas rapido, que es una tautologia. */
-function botonesValoracion(paso, fila, alTerminar) {
-  const hay = !!(fila && fila.ejecuciones);
-  const motivo = hay
-    ? `valora la ÚLTIMA ejecución de ${nombrePasoCLI(paso)} con ${fila.modelo}/${fila.esfuerzo}`
-    : 'todavía no hay ninguna ejecución con esta combinación que valorar';
-  const votar = valoracion => async ev => {
-    ev.stopPropagation();
-    try {
-      await valorarAjuste(paso, valoracion, fila.modelo, fila.esfuerzo);
-      if (alTerminar) await alTerminar();
-    } catch (e) { toast(partirError(e.message).titular, true); }
-  };
-  return h('span', { clase: 'fila votos' },
-    h('button', { clase: 'mini', disabled: !hay, title: motivo, onclick: votar('bien') }, '👍'),
-    h('button', { clase: 'mini', disabled: !hay, title: motivo, onclick: votar('mal') }, '👎'),
-    (fila && (fila.valorada_bien || fila.valorada_mal))
-      ? h('span', { clase: 'meta', title: 'valorada bien / mal' },
-        `${fila.valorada_bien}/${fila.valorada_mal}`) : null);
-}
-
-function tablaPanorama(panorama) {
-  const pasos = (panorama || {}).pasos || {};
-  const enGrafo = APP.pasos.map(p => p.id);
-  const claves = Object.keys(pasos).sort((a, b) => {
-    const ia = enGrafo.indexOf(a) === -1 ? 99 : enGrafo.indexOf(a);
-    const ib = enGrafo.indexOf(b) === -1 ? 99 : enGrafo.indexOf(b);
-    return ia - ib || a.localeCompare(b);
-  });
-  const tabla = h('table', { clase: 'tabla' },
-    h('tr', {}, h('th', {}, 'Paso'), h('th', {}, 'CLI'), h('th', {}, 'Ejecuciones'),
-      h('th', {}, 'Bien'), h('th', {}, 'Proyectos'), h('th', {}, 'Mediana'),
-      h('th', {}, 'Unidad'), h('th', {}, 'Última'), h('th', {}, '')));
-  for (const clave of claves) {
-    const ficha = pasos[clave] || {};
-    tabla.appendChild(h('tr', { clase: ficha.usa_cli ? 'con-cli' : '' },
-      h('th', {}, nombrePasoCLI(clave)),
-      h('td', {}, ficha.usa_cli ? h('span', { clase: 'pastilla ok' }, 'sí') : h('span', { clase: 'meta' }, 'no')),
-      h('td', { clase: 'numerico' }, cifra(ficha.ejecuciones, '0')),
-      h('td', { clase: 'numerico' }, cifra(ficha.correctas, '0')),
-      h('td', { clase: 'numerico' }, cifra(ficha.proyectos, '0')),
-      h('td', { clase: 'numerico' }, ficha.ejecuciones
-        ? oHueco(ficha.mediana, duracionCorta(ficha.mediana_s)) : '—'),
-      h('td', { clase: 'meta' }, oHueco(ficha.unidad, '')),
-      h('td', { clase: 'meta' }, ficha.ultima ? fechaCorta(ficha.ultima) : '—'),
-      h('td', {}, ficha.usa_cli
-        ? h('button', { clase: 'mini fantasma', onclick: () => pintarRendimiento(clave) }, 'ver')
-        : null)));
-  }
-  return tabla;
-}
-
-function vistaPasoRendimiento(paso, ficha, datos, recargar) {
-  const rec = datos.recomendacion || {};
-  const ajusteRec = rec.ajuste || {};
-  const claveRec = ajusteRec.modelo ? `${ajusteRec.modelo}|${ajusteRec.esfuerzo}` : '';
-
-  const tabla = h('table', { clase: 'tabla comparativa-cli' },
-    h('tr', {}, h('th', {}, 'Modelo'), h('th', {}, 'Esfuerzo'), h('th', {}, 'Tiempo'),
-      h('th', {}, 'Qué es esa cifra'), h('th', {}, 'Lo que se sabe'),
-      h('th', {}, 'De dónde sale'), h('th', {}, '¿Salió bien?')));
-  for (const fila of datos.lista) {
-    const clave = fila.clave || `${fila.modelo}|${fila.esfuerzo}`;
-    tabla.appendChild(h('tr', { clase: clave === claveRec ? 'recomendada' : '' },
-      h('td', {}, nombreModelo(fila.modelo)),
-      h('td', {}, nombreEsfuerzo(fila.esfuerzo)),
-      h('td', { clase: 'numerico' }, tiempoDeFila(fila)),
-      h('td', {}, selloCifra(fila)),
-      h('td', { clase: 'meta' }, detalleFila(fila)),
-      h('td', { clase: 'meta' }, fila.origen || ''),
-      h('td', {}, botonesValoracion(paso, fila, recargar))));
-  }
-
-  const historial = h('table', { clase: 'tabla' },
-    h('tr', {}, h('th', {}, 'Cuándo'), h('th', {}, 'Tardó'), h('th', {}, 'Tamaño'),
-      h('th', {}, 'Ajuste'), h('th', {}, 'Terminó'), h('th', {}, 'Valoración')));
-  for (const registro of datos.historial.slice().reverse()) {
-    const detalle = registro.detalle && !esResumido(registro.detalle) ? registro.detalle : {};
-    historial.appendChild(h('tr', {},
-      h('td', { clase: 'meta' }, fechaCorta(registro.fecha)),
-      h('td', { clase: 'numerico' }, duracionCorta(registro.segundos)),
-      h('td', { clase: 'numerico meta' }, cifra(registro.tamano, '—')),
-      h('td', { clase: 'meta' }, `${oHueco(detalle.modelo)} / ${oHueco(detalle.esfuerzo)}`),
-      h('td', {}, registro.ok === false
-        ? h('span', { clase: 'pastilla error' }, 'error')
-        : h('span', { clase: 'pastilla ok' }, 'bien')),
-      h('td', { clase: 'meta' }, oHueco(registro.valoracion, '—'))));
-  }
-
-  return h('div', {},
-    h('div', { clase: 'fila' },
-      h('h2', {}, nombrePasoCLI(paso)),
-      h('span', { clase: 'meta' },
-        `${cifra(ficha.ejecuciones, '0')} ejecución(es) · ${cifra(ficha.correctas, '0')} terminaron bien`
-        + ` · ${cifra(ficha.proyectos, '0')} proyecto(s)`),
-      ficha.ejecuciones
-        ? h('span', { clase: 'meta' }, `mediana ${oHueco(ficha.mediana, duracionCorta(ficha.mediana_s))}`)
-        : null,
-      h('span', { clase: 'crece' }),
-      h('span', { clase: 'meta' }, datos.tamano
-        ? `comparativa para ${miles(datos.tamano)} ${datos.unidad}`
-        : `comparativa sin tamaño de entrada (${datos.unidad})`)),
-
-    h('div', { clase: 'caja-info recomendacion-cli', estilo: 'margin:10px 0' },
-      h('div', { clase: 'fila' },
-        h('b', {}, `Recomendado: ${nombreModelo(ajusteRec.modelo)}`
-          + ` · esfuerzo ${nombreEsfuerzo(ajusteRec.esfuerzo)}`),
-        rec.reloj ? h('span', { clase: 'meta' }, `≈ ${rec.reloj}`) : null,
-        h('span', { clase: `pastilla confianza ${rec.confianza || 'ninguna'}` },
-          `confianza ${rec.confianza || 'ninguna'}`)),
-      h('div', { clase: 'pista' }, rec.motivo || ''),
-      (listaDe(rec.descartadas) || []).length
-        ? h('div', { clase: 'pista' },
-          `Descartadas por poco fiables: ${rec.descartadas.join(' · ')}`) : null),
-
-    h('div', { clase: 'tabla-cli' }, tabla),
-    datos.aviso ? h('div', { clase: 'pista' }, datos.aviso) : null,
-    h('div', { clase: 'pista' },
-      'Los pulgares valoran la ÚLTIMA ejecución que hubo con esa combinación. Es la única '
-      + 'señal de calidad que tiene el recomendador: sin ellos solo puede recomendar lo más '
-      + 'rápido, que no es lo mismo que lo mejor.'),
-
-    h('h2', { estilo: 'margin-top:18px' }, 'Últimas ejecuciones'),
-    datos.historial.length ? historial
-      : h('div', { clase: 'vacio' }, 'este paso todavía no ha corrido nunca'));
-}
-
-async function pintarRendimiento(paso) {
-  const capa = document.getElementById('rendimiento');
-  if (!capa) return;
-  const elegido = paso || null;      // 'sin paso' es null, nunca undefined
-  RENDIMIENTO.paso = elegido;
-  const nav = vaciar(capa.querySelector('.nav-rendimiento'));
-  const cuerpo = vaciar(capa.querySelector('.cuerpo'));
-  cuerpo.appendChild(h('div', { clase: 'cargando' }, 'leyendo el histórico…'));
-
-  const conCLI = (listaDe((APP.cli || {}).pasos) || []);
-  nav.appendChild(h('button', {
-    clase: 'subpestana' + (RENDIMIENTO.paso ? '' : ' activa'),
-    onclick: () => pintarRendimiento(null),
-  }, 'Todos los pasos'));
-  for (const otro of conCLI) {
-    nav.appendChild(h('button', {
-      clase: 'subpestana' + (RENDIMIENTO.paso === otro ? ' activa' : ''),
-      onclick: () => pintarRendimiento(otro),
-    }, nombrePasoCLI(otro)));
-  }
-
-  try {
-    if (!RENDIMIENTO.panorama) RENDIMIENTO.panorama = await pedir(API.estadisticas({}));
-    const panorama = RENDIMIENTO.panorama;
-    if (!document.getElementById('rendimiento')) return;
-    vaciar(cuerpo);
-    if (!RENDIMIENTO.paso) {
-      cuerpo.append(
-        tablaPanorama(panorama),
-        h('div', { clase: 'pista' },
-          `Fichero del histórico: ${oHueco(panorama.fichero)} · se guardan hasta `
-          + `${cifra(panorama.muestras_por_ajuste, '?')} muestras por combinación. `
-          + 'Las medianas son de todos los proyectos juntos.'));
-      return;
-    }
-    // se reaprovecha el tamano que ya se pidio para ese paso, para no dejar en el
-    // cache una comparativa de otro tamano que luego el panel tendria que rehacer
-    const talla = (APP.comparativas[RENDIMIENTO.paso] || {}).tamano || 0;
-    const datos = await pedirComparativa(RENDIMIENTO.paso, talla, true);
-    // si mientras tanto se ha cambiado de subpestana, esto ya no es lo que se mira
-    if (!document.getElementById('rendimiento') || RENDIMIENTO.paso !== elegido) return;
-    vaciar(cuerpo);
-    cuerpo.appendChild(vistaPasoRendimiento(
-      RENDIMIENTO.paso, (panorama.pasos || {})[RENDIMIENTO.paso] || {}, datos,
-      async () => {
-        RENDIMIENTO.panorama = null;
-        await pintarRendimiento(RENDIMIENTO.paso);
-      }));
-  } catch (e) {
-    vaciar(cuerpo).appendChild(cajaError(e.message));
-  }
-}
-
-function abrirRendimiento(paso) {
-  const viejo = document.getElementById('rendimiento');
-  if (viejo) viejo.remove();
-  RENDIMIENTO.panorama = null;
-  const capa = h('div', {
-    id: 'rendimiento',
-    onclick: ev => { if (ev.target === capa) capa.remove(); },
-  }, h('div', { clase: 'cuadro' },
-    h('div', { clase: 'cab' },
-      h('b', {}, 'Rendimiento del CLI'),
-      h('span', { clase: 'meta' }, 'histórico de TODOS los proyectos, no solo del abierto'),
-      h('span', { clase: 'crece' }),
-      h('button', { clase: 'mini fantasma', onclick: () => capa.remove() }, '×')),
-    h('div', { clase: 'subpestanas nav-rendimiento' }),
-    h('div', { clase: 'cuerpo' })));
-  document.body.appendChild(capa);
-  pintarRendimiento(paso || null);
-}
-
 /* ============================================================== PROYECTOS
  * Apartar no es borrar: la carpeta entera se mueve a proyectos/_papelera/ y se
  * puede devolver. Borrar de verdad SOLO se puede hacer desde la papelera, con
  * confirmacion y diciendo cuantos ficheros y cuantos megas se pierden.
  */
 
-function cerrarMenuProyectos() {
-  $('#menu-proyectos').classList.add('plegado');
-}
-
-function conmutarMenuProyectos() {
-  const menu = $('#menu-proyectos');
-  if (!menu.classList.contains('plegado')) { cerrarMenuProyectos(); return; }
-  vaciar(menu);
-  for (const proyecto of APP.proyectos) {
-    const nombre = proyecto.nombre || proyecto.id;
-    menu.appendChild(h('div', {
-      clase: 'fila-proyecto' + (proyecto.id === APP.pid ? ' abierto' : ''),
-    },
-      h('button', {
-        clase: 'abrir', title: `abrir «${nombre}»`,
-        onclick: () => { cerrarMenuProyectos(); if (proyecto.id !== APP.pid) abrirProyecto(proyecto.id); },
-      }, h('span', { clase: 'nombre' }, nombre),
-        h('span', { clase: 'meta' }, proyecto.id)),
-      /* DUPLICAR va aquí, al lado de apartar, y no en el pie: las dos son
-         acciones sobre ESE proyecto, no sobre la lista. */
-      h('button', {
-        clase: 'mini fantasma', title: `duplicar «${nombre}» tal y como está hoy`,
-        onclick: () => { cerrarMenuProyectos(); duplicarProyecto(proyecto.id, nombre); },
-      }, '⧉'),
-      h('button', {
-        clase: 'mini fantasma apartar', title: `apartar «${nombre}» (no lo borra)`,
-        onclick: () => { cerrarMenuProyectos(); apartarProyecto(proyecto.id, nombre); },
-      }, '🗑')));
-  }
-  if (!APP.proyectos.length) {
-    menu.appendChild(h('div', { clase: 'vacio', estilo: 'padding:8px 12px' },
-      'no hay ningún proyecto'));
-  }
-  menu.appendChild(h('div', { clase: 'pie-menu' },
-    h('button', { clase: 'mini', onclick: () => { cerrarMenuProyectos(); nuevoProyecto(); } },
-      '+ nuevo'),
-    h('button', { clase: 'mini fantasma', onclick: () => { cerrarMenuProyectos(); abrirPapelera(); } },
-      'Papelera'),
-    h('span', { clase: 'crece' }),
-    h('button', {
-      clase: 'mini fantasma', title: 'Tiempos reales del CLI en todos los proyectos',
-      onclick: () => { cerrarMenuProyectos(); abrirRendimiento(); },
-    }, 'Rendimiento')));
-  menu.classList.remove('plegado');
-}
+/* El menú de proyectos del modo editor (cambiar de proyecto, «+ nuevo»,
+   apartar, papelera, rendimiento) se quitó el 11-10-2026: en esta pantalla
+   no se veía. La papelera está en la portada (`botonPapeleraLight`). */
 
 /* DUPLICAR UN PROYECTO: repetir un vídeo con algo cambiado sin volver a pagar
    las imágenes y sin tocar el original.
@@ -4256,58 +4107,6 @@ function conmutarMenuProyectos() {
    copia (lo que hay puesto HOY, no el historial de cómo se llegó) y qué NO se
    copia. Un proyecto son varias horas y varios euros; una copia que se lleva
    11 GB de versiones viejas sin avisar es una sorpresa cara. */
-async function duplicarProyecto(pid, nombre) {
-  if (!pid) { toast('no hay ningún proyecto que duplicar', true); return; }
-  const propuesto = `Copia ${nombre || pid}`;
-  const elegido = window.prompt(
-    `Duplicar «${nombre || pid}».\n\n`
-    + 'Se copia lo que el proyecto tiene puesto HOY: la versión activa de cada '
-    + 'paso, con sus imágenes y su locución. El historial de versiones se queda '
-    + 'en el original.\n\n'
-    + 'Nombre de la copia:', propuesto);
-  if (elegido === null) return;
-  const nombreCopia = String(elegido).trim() || propuesto;
-  toast(`copiando «${nombre || pid}»…`);
-  try {
-    const datos = await pedir(API.duplicar(pid), {
-      method: 'POST', cuerpo: { nombre: nombreCopia },
-    });
-    const copia = (datos.proyecto || {}).id;
-    await cargarProyectos();
-    toast(`copia hecha: «${nombreCopia}»`);
-    if (copia) abrirProyecto(copia);
-  } catch (e) {
-    toast(`no se ha podido duplicar: ${partirError(e.message).titular}`, true);
-  }
-}
-
-async function apartarProyecto(pid, nombre) {
-  if (!pid) { toast('no hay ningún proyecto que apartar', true); return; }
-  if (!window.confirm(`Apartar «${nombre || pid}».\n\n`
-    + 'NO se borra nada. La carpeta entera se mueve a la papelera y el proyecto deja de '
-    + 'salir en la lista. Se puede devolver cuando quieras desde la papelera.\n\n'
-    + 'Si tiene algún trabajo en marcha, el servidor lo rechazará: cancélalo antes.')) return;
-  try {
-    const datos = await pedir(API.apartar(pid), { method: 'DELETE' });
-    toast(`«${nombre || pid}» apartado · ${datos.aviso || 'sigue entero en la papelera'}`);
-    if (pid === APP.pid) {
-      localStorage.removeItem('estudio.pid');
-      Object.keys(APP.seguimientos).forEach(soltarSeguimiento);
-      APP.pid = null;
-    }
-    await cargarProyectos();
-    if (!APP.proyectos.length) {
-      APP.pid = null;
-      APP.proyecto = null;
-      $('#meta-proyecto').textContent = '';
-      pintarBotonProyecto();
-      vaciar($('#panel')).appendChild(h('div', { clase: 'contenido' },
-        h('div', { clase: 'caja-info' },
-          'No queda ningún proyecto. Crea uno con «+ nuevo», o devuelve uno desde la papelera.')));
-    }
-  } catch (e) { toast(partirError(e.message).titular, true); }
-}
-
 /* ------------------------------------------------------------- conservacion
  * Un cambio aguas arriba ya no significa rehacerlo todo. Aquí se ve qué se
  * salva, por qué, y se aplica.
@@ -4327,14 +4126,20 @@ function abrirPapelera() {
   const cuerpo = h('div', { clase: 'cuerpo' });
   const capa = h('div', {
     id: 'papelera',
-    onclick: ev => { if (ev.target === capa) capa.remove(); },
+    onclick: ev => { if (ev.target === capa) cerrar(); },
   }, h('div', { clase: 'cuadro' },
     h('div', { clase: 'cab' },
       h('b', {}, 'Papelera'),
       h('span', { clase: 'meta' }, 'lo apartado sigue entero en el disco'),
       h('span', { clase: 'crece' }),
-      h('button', { clase: 'mini fantasma', onclick: () => capa.remove() }, '×')),
+      h('button', { clase: 'mini fantasma', title: 'Cerrar', onclick: () => cerrar() }, '×')),
     cuerpo));
+  /* AL CERRAR, LA GALERÍA SE VUELVE A LEER: lo devuelto tiene que salir en
+     ella sin recargar la página. */
+  function cerrar() {
+    capa.remove();
+    if (document.body.classList.contains('modo-light')) cargarGaleriaLight(true);
+  }
   document.body.appendChild(capa);
 
   const marcadas = new Set();
@@ -4352,7 +4157,17 @@ function abrirPapelera() {
     try {
       const datos = await pedir(API.papelera());
       if (!document.getElementById('papelera')) return;
-      const lista = listaDe(datos.papelera) || [];
+      /* EN ESTA PANTALLA un taller no se enseña suelto: es la parte interna de
+         un estilo y vuelve CON él al devolver el estilo. Enseñarlo como
+         «proyecto» hacía que «Devolver» devolviera el taller y no el estilo. */
+      const light = document.body.classList.contains('modo-light');
+      // solo se esconden los talleres de un estilo que está en la papelera (vuelven
+      // con él); uno cuyo estilo ya se borró del todo se enseña, para poder
+      // devolverlo o borrarlo y que no se quede ocupando disco a escondidas
+      const conSuEstilo = new Set(presetsApartados
+        .map(p => (((p.datos || {}).origen) || {}).taller).filter(Boolean));
+      const lista = (listaDe(datos.papelera) || [])
+        .filter(f => !(light && f.taller && conSuEstilo.has(f.id)));
       // una carpeta que ya no esta no puede seguir marcada
       const vivas = new Set(lista.map(f => f.carpeta));
       [...marcadas].forEach(c => { if (!vivas.has(c)) marcadas.delete(c); });
@@ -4363,7 +4178,8 @@ function abrirPapelera() {
         return;
       }
       if (!lista.length) {
-        cuerpo.appendChild(h('div', { clase: 'vacio' }, 'no hay ningún proyecto apartado'));
+        cuerpo.appendChild(h('div', { clase: 'vacio' },
+          light ? 'no hay ningún vídeo apartado' : 'no hay ningún proyecto apartado'));
         cuerpo.appendChild(tablaPresetsPapelera(presetsApartados, pintar));
         return;
       }
@@ -4381,7 +4197,7 @@ function abrirPapelera() {
       };
 
       const tabla = h('table', { clase: 'tabla' },
-        h('tr', {}, h('th', {}, ''), h('th', {}, 'Qué es'), h('th', {}, 'Proyecto'),
+        h('tr', {}, h('th', {}, ''), h('th', {}, 'Qué es'), h('th', {}, light ? 'Nombre' : 'Proyecto'),
           h('th', {}, 'Apartado'), h('th', {}, 'Creado'), h('th', {}, '')));
       for (const ficha of lista) {
         const marca = h('input', {
@@ -4395,7 +4211,8 @@ function abrirPapelera() {
         });
         tabla.appendChild(h('tr', { datos: { carpeta: ficha.carpeta } },
           h('td', {}, marca),
-          h('td', {}, h('span', { clase: 'tag-papelera proyecto' }, 'proyecto')),
+          h('td', {}, h('span', { clase: 'tag-papelera proyecto' },
+            ficha.video ? 'vídeo' : (ficha.taller ? 'restos de un estilo borrado' : 'proyecto'))),
           h('th', {}, oHueco(ficha.nombre, ficha.id), h('div', { clase: 'meta' }, oHueco(ficha.id, ''))),
           h('td', { clase: 'meta' }, oHueco(ficha.apartado)),
           h('td', { clase: 'meta' }, fechaCorta(ficha.creado)),
@@ -4457,7 +4274,8 @@ function tablaPresetsPapelera(lista, alTerminar) {
   for (const ficha of lista) {
     tabla.appendChild(h('tr', {},
       h('td', {}, h('span', { clase: 'tag-papelera preset' },
-        `preset · ${NOMBRES_PRESET[ficha.tipo] || ficha.tipo}`)),
+        document.body.classList.contains('modo-light') && ficha.tipo === 'canal'
+          ? 'estilo' : `preset · ${NOMBRES_PRESET[ficha.tipo] || ficha.tipo}`)),
       h('th', {}, oHueco(ficha.nombre, ficha.id),
         h('div', { clase: 'meta' }, oHueco(ficha.resumen, ''))),
       h('td', { clase: 'meta' }, fechaCorta(ficha.apartado)),
@@ -4479,7 +4297,8 @@ function tablaPresetsPapelera(lista, alTerminar) {
         }, 'Borrar'))));
   }
   return h('div', {},
-    h('h3', { estilo: 'margin:18px 0 6px' }, 'Presets apartados'),
+    h('h3', { estilo: 'margin:18px 0 6px' },
+      document.body.classList.contains('modo-light') ? 'Estilos apartados' : 'Presets apartados'),
     tabla,
     h('div', { clase: 'pista' },
       'Un preset borrado no puede romper ningún vídeo: lo que los vídeos llevan dentro '
@@ -4553,16 +4372,6 @@ async function borrarMarcadas(carpetas, lista, alTerminar) {
    como boton suelto actuaba sobre el proyecto abierto en vez de sobre el que
    quisieras apartar. */
 function ponerMandosDeCabecera() {
-  $('#btn-proyecto').addEventListener('click', ev => {
-    ev.stopPropagation();
-    conmutarMenuProyectos();
-  });
-  document.addEventListener('click', ev => {
-    const menu = $('#menu-proyectos');
-    if (menu.classList.contains('plegado')) return;
-    if (menu.contains(ev.target) || $('#btn-proyecto').contains(ev.target)) return;
-    cerrarMenuProyectos();
-  });
   // Lo mismo para el de presets. No puede cerrarse con el de proyectos porque
   // vive dentro del panel y se repinta con el: el estado de abierto esta en
   // APP.vista, no en una clase del DOM que el repintado se llevaria por delante.
@@ -4626,18 +4435,6 @@ function llenarFiltroBitacora() {
 
 /* ------------------------------------------------------------------ arranque */
 
-async function nuevoProyecto() {
-  const nombre = window.prompt('Nombre del vídeo nuevo:');
-  if (!nombre) return;
-  try {
-    const datos = await pedir(API.proyectos(), { method: 'POST', cuerpo: { nombre } });
-    const proyecto = datos.proyecto || datos;
-    await cargarProyectos();
-    if (proyecto && proyecto.id) await abrirProyecto(proyecto.id);
-    toast(`proyecto «${nombre}» creado`);
-  } catch (e) { toast(`no se ha podido crear: ${e.message}`, true); }
-}
-
 /* ---------------------------------------------------------- el tema y el pie
  *
  * EL TEMA: oscuro de fabrica, claro si se elige. Solo cambia un atributo en
@@ -4685,6 +4482,16 @@ function pieSistema() {
 function arrancar() {
   ponerMandosDeCabecera();
   aplicarTema(temaActual());
+  /* EL LOGO LLEVA AL INICIO, como en cualquier web: era la primera salida que
+     se buscaba y no hacía nada (11-10-2026). */
+  const marca = document.querySelector('#cabecera .marca');
+  if (marca) {
+    marca.setAttribute('role', 'button');
+    marca.setAttribute('tabindex', '0');
+    marca.title = 'Ir al inicio: tus estilos y tus vídeos';
+    marca.addEventListener('click', () => irAInicioLight());
+    marca.addEventListener('keydown', ev => { if (ev.key === 'Enter') irAInicioLight(); });
+  }
   $('#btn-tema').addEventListener('click', () =>
     aplicarTema(temaActual() === 'claro' ? 'oscuro' : 'claro'));
   /* LA CLASE DEL <body>, ANTES QUE NADA. Hay cosas que se esconden con CSS y
@@ -4700,8 +4507,11 @@ function arrancar() {
     if (PESTANAS.some(p => p.id === pedida) && pedida !== APP.activa) irA(pedida, true);
   });
   $('#btn-config').addEventListener('click', () => conmutarConfig());
+  const ayuda = $('#btn-ayuda');
+  if (ayuda) ayuda.addEventListener('click', () => abrirManual());
   $('#btn-salir').addEventListener('click', () => salirDeStudio());
   cargarCuenta();
+  vigilarAreas();
   montarAsistente();
   montarAdjuntosAsistente();
   montarDictadoAsistente();
@@ -4743,11 +4553,10 @@ function arrancar() {
       guardarSucios().then(() => toast('guardado'));
     }
     if (ev.key === 'Escape') {
-      ['lupa', 'capturador', 'rendimiento', 'papelera', 'conservacion',
+      ['lupa', 'capturador', 'papelera', 'coste-video', 'conservacion',
        'cuadro-texto']
         .map(id => document.getElementById(id))
         .forEach(nodo => { if (nodo) nodo.remove(); });
-      cerrarMenuProyectos();
       if (INICIO.abierta) cerrarInicio(true);
       if (ASISTENTE.abierto) conmutarAsistente(false);
       if (!$('#config').classList.contains('plegado')) conmutarConfig(false);
@@ -4901,12 +4710,17 @@ function encargoParaServidor() {
     nombre: e.nombre,
     idioma: e.idioma,
     estilo_imagenes: (e.estilo_imagenes || []).map(x => x.nombre),
+    estilo_descripciones: descripcionesDeAportadas(e.estilo_imagenes),
+    estilo_destacadas: (e.estilo_imagenes || []).filter(x => x.destacada).map(x => x.nombre),
     estilo_prompt: e.estilo_prompt,
     estilo_modo: e.estilo_modo || 'ilustracion',
     tono_prompt: e.tono_prompt,
     voz_prompt: e.voz_prompt,
     voz_id: e.voz_id || '',
     ritmo: e.ritmo || ritmoPorDefecto(),
+    // el proyecto (cliente) elegido en el formulario: el estilo nace dentro
+    cliente: e.cliente !== undefined ? (e.cliente || '')
+      : (clienteElegido() === '_sin' ? '' : clienteElegido()),
   };
 }
 
@@ -4928,6 +4742,10 @@ async function cargarGaleriaLight(forzar) {
         .filter(p => p.video_light)
         .sort((a, b) => String(b.actualizado || '').localeCompare(String(a.actualizado || '')));
     } catch (e) { APP.light.datos.videos = []; }
+    await cargarClientes();
+    try {
+      APP.light.datos.perdidos = (await pedir(`${BASE}/api/sistema/estilos-perdidos`)).videos || [];
+    } catch (e) { APP.light.datos.perdidos = []; }
     // el ritmo de fábrica lo dice el servidor, no esta pantalla
     if (APP.light.encargo && !APP.light.encargo.ritmo) {
       APP.light.encargo.ritmo = ritmoPorDefecto();
@@ -5044,8 +4862,8 @@ async function salirDeStudio() {
   /* Salir SI se pregunta, y es la excepcion de «editar es decidir»: no es una
      edicion, es irse. Un roce en el movil que te tira la sesion en mitad de un
      repaso obliga a volver a entrar para nada. */
-  if (!window.confirm('¿Cerrar la sesion? Habra que volver a entrar con la '
-                      + 'contrasena.')) return;
+  if (!window.confirm('¿Cerrar la sesión? Habrá que volver a entrar con la '
+                      + 'contraseña.')) return;
   const boton = $('#btn-salir');
   if (boton) boton.disabled = true;
   try {
@@ -5063,7 +4881,7 @@ async function salirDeStudio() {
     window.location.href = `${BASE}/login`;
   } catch (e) {
     if (boton) boton.disabled = false;
-    toast(`no se ha podido cerrar la sesion: ${e.message}`, true);
+    toast(`no se ha podido cerrar la sesión: ${e.message}`, true);
   }
 }
 
@@ -5093,6 +4911,7 @@ async function salirDeStudio() {
  * enseña el camino completo desde el primer día.
  */
 const ICONOS_NAV = {
+  inicio: 'M3 11l9-7 9 7 M5 9.5V20h5v-6h4v6h5V9.5',
   estilos: 'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z',
   encargo: 'M9 3h6v3H9z M7 5h10v16H7z M10 11h5 M10 15h4',
   guion: 'M6 3h12v18H6z M9 8h6 M9 12h6 M9 16h4',
@@ -5135,9 +4954,36 @@ function navLight() {
   const hayVideo = dentro && (!!v.audio || hayMp4Light());
 
   const paradas = [
-    { id: 'estilos', texto: 'Estilos', puede: true, activa: !dentro,
+    /* INICIO: la portada, con tus estilos y tus vídeos. Hasta el 11-10-2026 la
+       única salida de un vídeo era «Estilos», y al hacer que desde dentro de un
+       vídeo abriera SU estilo (10-10) no quedó ninguna: el dueño se encontró
+       dentro de un vídeo sin forma de volver. Ahora salen tres: esta parada, el
+       logo de arriba y «‹ Mis vídeos» encima de cada pantalla del vídeo. */
+    { id: 'inicio', texto: 'Inicio', puede: true,
+      activa: !['crear', 'generando', 'preset', 'elegido'].includes(APP.light.vista),
       porque: 'tus estilos y tus vídeos',
-      ir: () => { pararPrevia(); recordarVideoLight(''); irALight('galeria'); } },
+      ir: () => irAInicioLight() },
+    /* DESDE DENTRO DE UN VÍDEO, «Estilos» abre EL ESTILO DE ESE VÍDEO: es la
+       pregunta que se hace desde ahí («¿con qué estilo se hizo?, quiero
+       cambiarlo»), y antes caía en la portada sin decirlo (10-10-2026). La
+       ficha lleva «‹ Volver al vídeo» y su «‹ Volver» de siempre a la galería. */
+    /* Fuera de un vídeo, tus estilos están en Inicio: esta parada solo
+       repetía esa pantalla y pulsarla no hacía nada (11-10-2026). */
+    { id: 'estilos', texto: 'Estilo', puede: dentro || APP.light.vista === 'preset',
+      activa: APP.light.vista === 'preset',
+      porque: dentro && fichaLight(v.estilo)
+        ? `el estilo de este vídeo: «${fichaLight(v.estilo).nombre}»`
+        : 'el estilo de un vídeo (abre uno); tus estilos están en Inicio',
+      ir: () => {
+        pararPrevia();
+        if (dentro && fichaLight(v.estilo)) {
+          const pid = v.pid;
+          irALight('preset', { abierto: v.estilo, feedback: {}, desdeVideo: pid });
+          return;
+        }
+        recordarVideoLight('');
+        irALight('galeria');
+      } },
     /* EL ENCARGO: lo que se le pidió al redactor, tal cual está guardado en el
        vídeo abierto, y editable. Sin vídeo abierto no hay nada que revisar (el
        formulario de crear uno es otra pantalla, `vistaElegidoLight`). Cuenta
@@ -5336,13 +5182,21 @@ function pintarLightAhora() {
          está montando o ya está. Un menú de tres pestañas aquí sería pedirle a
          quien mira que elija en cuál de los tres momentos está. */
       const sub = APP.light.video.vista;
+      if (!APP.light.video.cargando) contenido.appendChild(migasDelVideoLight());
       if (APP.light.video.cargando) {
         contenido.appendChild(h('div', { clase: 'cargando' }, 'abriendo el vídeo…'));
       } else if (APP.light.video.error) {
         contenido.appendChild(cajaError(APP.light.video.error));
       } else if (sub === 'video') contenido.appendChild(vistaVideoLight());
-      else if (sub === 'previa') contenido.appendChild(vistaPreviaLight());
-      else if (sub === 'guion') contenido.appendChild(vistaGuionLight());
+      else if (sub === 'previa') {
+        contenido.appendChild(vistaPreviaLight());
+        const versiones = bloqueVersionesLight('assets');
+        if (versiones) contenido.appendChild(versiones);
+      } else if (sub === 'guion') {
+        contenido.appendChild(vistaGuionLight());
+        const versiones = bloqueVersionesLight('guion');
+        if (versiones) contenido.appendChild(versiones);
+      }
       else if (sub === 'encargo_video') contenido.appendChild(vistaEncargoVideoLight());
       else contenido.appendChild(vistaElegidoLight());
     }
@@ -5359,8 +5213,98 @@ function pintarLightAhora() {
   contenedor.appendChild(navLight());
 }
 
+/* A LA PORTADA desde donde sea (la parada «Inicio», el logo, «‹ Mis vídeos»).
+   El vídeo se cierra en la pantalla, no en el servidor: lo que se esté
+   generando sigue y se vuelve a ver al abrirlo. */
+function irAInicioLight() {
+  pararPrevia();
+  recordarVideoLight('');
+  irALight('galeria');
+  cargarGaleriaLight(true);
+}
+
+/* «‹ Mis vídeos / nombre del vídeo», encima de cada pantalla del vídeo. */
+function migasDelVideoLight() {
+  const v = APP.light.video;
+  const estilo = fichaLight(v.estilo);
+  return h('div', { clase: 'migas migas-video' },
+    h('button', { clase: 'mini fantasma', title: 'Volver a tus estilos y tus vídeos',
+      onclick: () => irAInicioLight() }, '‹ Mis vídeos'),
+    h('span', { clase: 'meta migas-nombre' }, v.pid ? `/ ${v.nombre || v.pid}` : '/ vídeo nuevo'),
+    h('span', { clase: 'crece' }),
+    estilo ? h('button', { clase: 'mini fantasma', title: 'Abrir el estilo con el que se hace este vídeo',
+      onclick: () => { pararPrevia(); irALight('preset', { abierto: v.estilo, feedback: {}, desdeVideo: v.pid }); } },
+    `Estilo: ${estilo.nombre}`) : null);
+}
+
+/* VOLVER A LA VERSIÓN ANTERIOR DE UN PASO (11-10-2026). Cada vez que se
+   regenera el guion o las imágenes, el Studio guarda una versión nueva y NO
+   BORRA las de antes (`Estado.revertir` en nucleo/estado.py: «nada se borra»).
+   El motor siempre supo volver a una; la pantalla no lo ofrecía. Lo que cuelga
+   del paso (la voz de un guion, el montaje de unas imágenes) queda pendiente,
+   y se dice antes de pulsar porque rehacer la voz o las imágenes se paga. */
+const QUE_ARRASTRA_LA_VERSION = {
+  guion: 'La voz, las imágenes y el vídeo de este vídeo quedarán por rehacer con ese guion '
+    + '(volver a grabar la voz y redibujar las imágenes que cambien SE PAGA).',
+  assets: 'Vuelven esas imágenes tal cual, sin pagar nada. El vídeo quedará por volver '
+    + 'a montar (eso es gratis).',
+};
+
+function bloqueVersionesLight(paso) {
+  const v = APP.light.video;
+  const ficha = (v.fichas || {})[paso] || {};
+  const versiones = (ficha.versiones || []).slice().sort((a, b) => b.n - a.n);
+  if (versiones.length < 2) return null;
+  const activa = versiones.find(x => x.activa) || versiones[0];
+  const anterior = versiones.find(x => x.n < activa.n);
+  const nombre = paso === 'guion' ? 'del guion' : 'de las imágenes';
+  const ocupado = !!trabajoVideoLight() || (COLA_IMG.pid === v.pid && (!!COLA_IMG.actual || COLA_IMG.cola.length > 0));
+  const caja = h('details', { clase: 'bloque-versiones' });
+  caja.appendChild(h('summary', {},
+    `Versiones ${nombre} (${versiones.length}) · usando la v${activa.n}`));
+  caja.appendChild(h('div', { clase: 'meta' },
+    'Cada vez que se regenera se guarda una versión nueva y las de antes no se borran: '
+    + 'puedes volver a cualquiera. ' + QUE_ARRASTRA_LA_VERSION[paso]));
+  if (anterior) {
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'primario', disabled: ocupado,
+        title: ocupado ? 'espera a que termine lo que está en marcha' : '',
+        onclick: () => volverAVersionLight(paso, anterior.n) },
+      `↶ Volver a la versión anterior (v${anterior.n})`)));
+  }
+  const lista = h('div', { clase: 'lista-versiones' });
+  versiones.slice(0, 12).forEach(x => lista.appendChild(h('div', { clase: 'fila fila-version' },
+    h('b', {}, `v${x.n}`),
+    h('span', { clase: 'meta crece' }, [fechaCorta(x.fecha), x.resumen].filter(Boolean).join(' · ')),
+    x.n === activa.n ? h('span', { clase: 'pastilla' }, 'en uso')
+      : h('button', { clase: 'mini', disabled: ocupado,
+        onclick: () => volverAVersionLight(paso, x.n) }, 'Usar esta'))));
+  caja.appendChild(lista);
+  return caja;
+}
+
+async function volverAVersionLight(paso, numero) {
+  const v = APP.light.video;
+  const pid = v.pid;
+  const nombre = paso === 'guion' ? 'el guion' : 'las imágenes';
+  if (!window.confirm(`¿Volver a ${nombre} de la v${numero}?\n\n${QUE_ARRASTRA_LA_VERSION[paso]}`
+    + '\n\nLa versión de ahora no se borra: puedes volver a ella desde esta misma lista.')) return;
+  try {
+    await pedir(API.revertir(pid, paso), { method: 'POST', cuerpo: { version: numero } });
+    toast(`Usando ${nombre} de la v${numero}`);
+    if (videoAbierto().pid === pid) {
+      PREVIA.ficha = null;
+      await cargarVideoLight(pid);
+    }
+  } catch (e) {
+    toast(`no se ha podido volver: ${e.message}`, true);
+  }
+}
+
 function irALight(vista, extra) {
   APP.light.vista = vista;
+  // «‹ Volver al vídeo» solo vale para la ficha a la que se llegó desde él
+  APP.light.desdeVideo = '';
   Object.assign(APP.light, extra || {});
   $('#panel').scrollTop = 0;
   pintarLight();
@@ -5368,86 +5312,567 @@ function irALight(vista, extra) {
 
 /* ------------------------------------------------------------- la galería */
 
+/* ================================================ LA GALERÍA, POR PROYECTOS
+ *
+ * Un PROYECTO es un cliente: agrupa sus estilos y, con ellos, sus vídeos (un
+ * vídeo es del proyecto de su estilo, salvo que se mueva a mano). Ver
+ * pasos/clientes.py.
+ *
+ *   sin proyectos      la galería de siempre (estilos y vídeos) y una
+ *                      invitación a ordenarlos por cliente
+ *   con proyectos      la portada son las TARJETAS de los proyectos (y «Sin
+ *                      proyecto» si queda algo suelto); al entrar en uno se ven
+ *                      sus estilos, sus vídeos y sus intentos a medias, con
+ *                      sus mandos: renombrar, logo, ocultar, clave y borrar
+ *
+ * La clave se comprueba en el SERVIDOR: lo de un proyecto con clave no viene
+ * en las listas hasta que se abre (el pase va en `X-Estudio-Abiertos`, ver
+ * `pedir`). Ocultar solo lo quita de la portada.
+ */
+const CLAVE_CLIENTE = 'estudio.light.cliente';
+const CLAVE_PASES = 'estudio.light.pases';
+
+async function cargarClientes() {
+  try {
+    APP.light.clientes = await pedir(`${BASE}/api/clientes`);
+  } catch (e) {
+    APP.light.clientes = { clientes: [], estilos: {}, videos: {} };
+  }
+}
+
+function listaClientes() { return ((APP.light.clientes || {}).clientes) || []; }
+
+function fichaCliente(cid) { return listaClientes().find(c => c.id === cid) || null; }
+
+function clienteDe(presetId) {
+  const cid = (((APP.light.clientes || {}).estilos) || {})[presetId] || '';
+  return fichaCliente(cid) ? cid : '';
+}
+
+function clienteDeVideo(video) {
+  const propio = (((APP.light.clientes || {}).videos) || {})[video.id] || '';
+  if (fichaCliente(propio)) return propio;
+  return clienteDe(video.estilo_light || '');
+}
+
+/* Los pases de los proyectos con clave abiertos en esta pestaña. */
+function pasesAbiertos() {
+  try { return JSON.parse(sessionStorage.getItem(CLAVE_PASES) || '{}') || {}; } catch (e) { return {}; }
+}
+
+function cabeceraDePases() {
+  return Object.entries(pasesAbiertos()).map(([cid, pase]) => `${cid}.${pase}`).join(',');
+}
+
+function clienteAbierto(ficha) {
+  return !ficha.con_clave || !!pasesAbiertos()[ficha.id];
+}
+
+function clienteElegido() {
+  let cid = '';
+  try { cid = localStorage.getItem(CLAVE_CLIENTE) || ''; } catch (e) { /* sin almacén */ }
+  if (cid === '_sin') return cid;
+  const ficha = fichaCliente(cid);
+  return ficha && clienteAbierto(ficha) ? cid : '';
+}
+
+function elegirCliente(cid) {
+  try { localStorage.setItem(CLAVE_CLIENTE, cid || ''); } catch (e) { /* sin almacén */ }
+  $('#panel').scrollTop = 0;
+  pintarLight();
+}
+
+function estilosDeCliente(cid) {
+  return presetsLight().filter(f => clienteDe(f.id) === (cid === '_sin' ? '' : cid));
+}
+
+function videosDeCliente(cid) {
+  return videosLight().filter(v => clienteDeVideo(v) === (cid === '_sin' ? '' : cid));
+}
+
+function origenDeVideo(video) {
+  const estilo = fichaLight(video.estilo_light || '');
+  const cliente = fichaCliente(clienteDeVideo(video));
+  return [estilo ? `🎨 ${estilo.nombre || estilo.id}` : '', cliente ? `📁 ${cliente.nombre}` : '']
+    .filter(Boolean).join(' · ');
+}
+
+/* UN DIÁLOGO DE LA CASA, en vez de los `prompt` del navegador: con su diseño,
+   con campo de contraseña de verdad (no se ve lo que se escribe) y con
+   desplegables. Devuelve los valores o null si se cancela. */
+function dialogo(op) {
+  const { titulo, texto, campos = [], aceptar = 'Aceptar', cancelar = 'Cancelar', peligro = false } = op;
+  return new Promise(resolver => {
+    const valores = {};
+    const capa = h('div', { clase: 'capa-dialogo' });
+    const teclas = ev => { if (ev.key === 'Escape') cerrar(null); };
+    const cerrar = valor => {
+      capa.remove();
+      document.removeEventListener('keydown', teclas);
+      resolver(valor);
+    };
+    const campo = c => {
+      valores[c.clave] = c.valor === undefined ? '' : c.valor;
+      if (c.tipo === 'textarea') {
+        const area = h('textarea', { rows: 3, placeholder: c.pista || '',
+          oninput: ev => { valores[c.clave] = ev.target.value; } });
+        area.value = c.valor || '';
+        return h('label', { clase: 'campo' }, h('span', {}, c.etiqueta), area,
+          c.ayuda ? h('span', { clase: 'meta' }, c.ayuda) : null);
+      }
+      const control = c.tipo === 'select'
+        ? h('select', { onchange: ev => { valores[c.clave] = ev.target.value; } },
+          ...(c.opciones || []).map(o => h('option', { value: o.valor, selected: o.valor === c.valor }, o.nombre)))
+        : h('input', {
+          type: c.tipo || 'text', value: c.valor || '', placeholder: c.pista || '',
+          autocomplete: c.tipo === 'password' ? 'new-password' : 'off',
+          oninput: ev => { valores[c.clave] = ev.target.value; } });
+      return h('label', { clase: 'campo' }, h('span', {}, c.etiqueta), control,
+        c.ayuda ? h('span', { clase: 'meta' }, c.ayuda) : null);
+    };
+    const formulario = h('form', {
+      clase: 'dialogo', onsubmit: ev => { ev.preventDefault(); cerrar(Object.assign({}, valores)); },
+    },
+      h('h3', {}, titulo),
+      texto ? h('div', { clase: 'meta' }, texto) : null,
+      ...campos.map(campo),
+      h('div', { clase: 'dialogo-botones' },
+        h('button', { type: 'button', clase: 'mini fantasma', onclick: () => cerrar(null) }, cancelar),
+        h('button', { type: 'submit', clase: `mini ${peligro ? 'peligro' : 'primario'}` }, aceptar)));
+    capa.appendChild(formulario);
+    capa.addEventListener('click', ev => { if (ev.target === capa) cerrar(null); });
+    document.addEventListener('keydown', teclas);
+    document.body.appendChild(capa);
+    setTimeout(() => { const f = formulario.querySelector('input, select, textarea'); if (f) f.focus(); }, 0);
+  });
+}
+
+async function entrarEnCliente(ficha) {
+  if (!clienteAbierto(ficha)) {
+    const r = await dialogo({ titulo: `🔒 ${ficha.nombre}`, texto: 'Este proyecto tiene clave.',
+      campos: [{ clave: 'clave', etiqueta: 'Clave', tipo: 'password' }], aceptar: 'Abrir' });
+    if (!r) return;
+    try {
+      const datos = await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}/abrir`,
+        { method: 'POST', cuerpo: { clave: r.clave } });
+      const pases = pasesAbiertos();
+      pases[ficha.id] = datos.pase;
+      try { sessionStorage.setItem(CLAVE_PASES, JSON.stringify(pases)); } catch (e) { /* sin almacén */ }
+      // ahora el servidor ya enseña sus estilos y vídeos: se vuelven a pedir
+      try { localStorage.setItem(CLAVE_CLIENTE, ficha.id); } catch (e) { /* sin almacén */ }
+      await cargarGaleriaLight(true);
+      return;
+    } catch (e) {
+      toast(e.message, true);
+      return;
+    }
+  }
+  elegirCliente(ficha.id);
+}
+
+/* Cerrar los proyectos con clave al terminar: se olvidan los pases. */
+function cerrarProyectosConClave() {
+  try { sessionStorage.removeItem(CLAVE_PASES); } catch (e) { /* sin almacén */ }
+  try { localStorage.setItem(CLAVE_CLIENTE, ''); } catch (e) { /* sin almacén */ }
+  cargarGaleriaLight(true);
+}
+
+async function crearCliente() {
+  const r = await dialogo({ titulo: 'Nuevo proyecto',
+    texto: 'Un proyecto por cliente. Los estilos que crees dentro quedan en él, y sus vídeos con ellos.',
+    campos: [{ clave: 'nombre', etiqueta: 'Nombre del cliente o proyecto', pista: 'Suyu Interiores' }],
+    aceptar: 'Crear' });
+  if (!r || !r.nombre.trim()) return;
+  try {
+    const datos = await pedir(`${BASE}/api/clientes`, { method: 'POST', cuerpo: { nombre: r.nombre } });
+    await cargarClientes();
+    elegirCliente(datos.cliente.id);
+    toast(`Proyecto «${datos.cliente.nombre}» creado: crea su primer estilo o trae uno que ya tengas`);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function cambiarCliente(ficha, cambios, aviso) {
+  try {
+    await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}`, { method: 'PUT', cuerpo: cambios });
+    await cargarClientes();
+    if (aviso) toast(aviso);
+    pintarLight();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function renombrarCliente(ficha) {
+  const r = await dialogo({ titulo: 'Renombrar el proyecto',
+    campos: [{ clave: 'nombre', etiqueta: 'Nombre', valor: ficha.nombre }], aceptar: 'Guardar' });
+  if (r && r.nombre.trim() && r.nombre.trim() !== ficha.nombre) {
+    cambiarCliente(ficha, { nombre: r.nombre }, 'Proyecto renombrado');
+  }
+}
+
+async function claveCliente(ficha) {
+  const r = await dialogo({ titulo: ficha.con_clave ? 'Cambiar o quitar la clave' : 'Poner clave',
+    texto: 'Con clave, sus estilos y vídeos no se ven hasta escribirla (en cada pestaña nueva). '
+      + 'Es privacidad de pantalla: la seguridad de verdad es la contraseña de acceso al Studio.',
+    campos: [{ clave: 'clave', etiqueta: ficha.con_clave ? 'Clave nueva (vacía para quitarla)' : 'Clave (al menos 4 caracteres)', tipo: 'password' },
+      { clave: 'repite', etiqueta: 'Repítela', tipo: 'password' }],
+    aceptar: 'Guardar' });
+  if (!r) return;
+  if (r.clave !== r.repite) { toast('Las dos claves no coinciden', true); return; }
+  if (!r.clave && !ficha.con_clave) return;
+  try {
+    await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}`,
+      { method: 'PUT', cuerpo: { clave: r.clave } });
+    if (r.clave) {
+      // quien la acaba de poner sigue dentro sin tener que escribirla otra vez
+      const datos = await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}/abrir`,
+        { method: 'POST', cuerpo: { clave: r.clave } });
+      const pases = pasesAbiertos();
+      pases[ficha.id] = datos.pase;
+      try { sessionStorage.setItem(CLAVE_PASES, JSON.stringify(pases)); } catch (e) { /* sin almacén */ }
+    }
+    toast(r.clave ? 'Clave puesta' : 'Clave quitada');
+  } catch (e) { toast(e.message, true); }
+  await cargarGaleriaLight(true);
+}
+
+async function borrarCliente(ficha) {
+  const r = await dialogo({ titulo: `¿Borrar «${ficha.nombre}»?`,
+    texto: 'Se borra solo la carpeta: sus estilos y vídeos NO se borran, quedan en «Sin proyecto».',
+    aceptar: 'Borrar el proyecto', peligro: true });
+  if (!r) return;
+  try {
+    await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}`, { method: 'DELETE' });
+    await cargarClientes();
+    elegirCliente('');
+  } catch (e) { toast(e.message, true); }
+}
+
+async function moverEstiloACliente(ficha) {
+  const actual = clienteDe(ficha.id);
+  const r = await dialogo({ titulo: `Proyecto de «${ficha.nombre}»`,
+    texto: 'Sus vídeos van con él, salvo los que hayas movido a mano.',
+    campos: [{ clave: 'cliente', etiqueta: 'Proyecto', tipo: 'select', valor: actual,
+      opciones: [{ valor: '', nombre: '— sin proyecto —' }]
+        .concat(listaClientes().map(c => ({ valor: c.id, nombre: c.nombre }))) }],
+    aceptar: 'Mover' });
+  if (!r || r.cliente === actual) return;
+  try {
+    await pedir(`${BASE}/api/clientes/estilos/${encodeURIComponent(ficha.id)}`,
+      { method: 'PUT', cuerpo: { cliente: r.cliente } });
+    await cargarClientes();
+    toast('Estilo movido');
+    pintarLight();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function moverVideoACliente(video) {
+  const actual = clienteDeVideo(video);
+  const r = await dialogo({ titulo: `Proyecto de «${video.nombre || video.id}»`,
+    texto: 'Normalmente un vídeo está en el proyecto de su estilo. Muévelo si ese estilo lo usan dos clientes.',
+    campos: [{ clave: 'cliente', etiqueta: 'Proyecto', tipo: 'select', valor: actual,
+      opciones: [{ valor: '', nombre: '— el de su estilo —' }]
+        .concat(listaClientes().map(c => ({ valor: c.id, nombre: c.nombre }))) }],
+    aceptar: 'Mover' });
+  if (!r) return;
+  try {
+    await pedir(`${BASE}/api/clientes/videos/${encodeURIComponent(video.id)}`,
+      { method: 'PUT', cuerpo: { cliente: r.cliente } });
+    await cargarClientes();
+    toast('Vídeo movido');
+    pintarLight();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function traerEstiloACliente(ficha) {
+  const otros = presetsLight().filter(f => clienteDe(f.id) !== ficha.id);
+  if (!otros.length) { toast('No hay otros estilos que traer'); return; }
+  const r = await dialogo({ titulo: `Traer un estilo a «${ficha.nombre}»`,
+    campos: [{ clave: 'estilo', etiqueta: 'Estilo', tipo: 'select', valor: otros[0].id,
+      opciones: otros.map(f => ({ valor: f.id,
+        nombre: f.nombre + (clienteDe(f.id) ? ` (ahora en ${(fichaCliente(clienteDe(f.id)) || {}).nombre})` : '') })) }],
+    aceptar: 'Traer' });
+  if (!r) return;
+  try {
+    await pedir(`${BASE}/api/clientes/estilos/${encodeURIComponent(r.estilo)}`,
+      { method: 'PUT', cuerpo: { cliente: ficha.id } });
+    await cargarClientes();
+    pintarLight();
+  } catch (e) { toast(e.message, true); }
+}
+
 function vistaGaleriaLight() {
   const caja = h('div', {});
-  const fichas = presetsLight();
+  caja.appendChild(avisoEstilosPerdidos());
+  const lista = listaClientes();
+  const elegido = clienteElegido();
+  if (!lista.length) {
+    // SIN PROYECTOS: la galería de siempre, con la invitación a ordenarla
+    caja.appendChild(h('div', { clase: 'invitacion-proyectos' },
+      h('div', {}, h('b', {}, '¿Trabajas para varios clientes? '),
+        'Crea un proyecto por cliente y tendrás sus estilos y vídeos separados (con logo propio y, si quieres, clave).'),
+      h('button', { clase: 'mini primario', onclick: crearCliente }, '+ Nuevo proyecto'),
+      botonPapeleraLight()));
+    seccionEstilos(caja, presetsLight(), '');
+    seccionVideos(caja, videosLight(), '');
+    seccionSueltos(caja, null);
+    return caja;
+  }
+  if (!elegido) {
+    portadaDeProyectos(caja, lista);
+    return caja;
+  }
+  dentroDeProyecto(caja, elegido);
+  return caja;
+}
+
+/* LA PAPELERA, A LA VISTA. «Borrar» un estilo y «Apartar» un vídeo dicen «se
+   puede recuperar desde la papelera», y la papelera solo se abría desde el
+   menú de proyectos del modo editor, que en esta pantalla no se ve: lo
+   prometido no tenía puerta (11-10-2026). */
+function botonPapeleraLight() {
+  return h('button', { clase: 'mini fantasma', title: 'Lo que has borrado o apartado: se puede devolver',
+    onclick: () => abrirPapelera() }, '🗑 Papelera');
+}
+
+/* LA PORTADA: una tarjeta por proyecto. */
+function portadaDeProyectos(caja, lista) {
+  const visibles = lista.filter(c => !c.oculto || APP.light.verOcultos);
+  const ocultos = lista.filter(c => c.oculto).length;
   caja.appendChild(h('div', { clase: 'light-cab' },
-    h('h2', {}, 'Tus estilos'),
+    h('h2', {}, 'Tus proyectos'),
+    h('span', { clase: 'meta' }, `${lista.length} proyecto${lista.length === 1 ? '' : 's'}`),
+    h('span', { clase: 'crece' }),
+    ocultos ? h('button', { clase: 'mini fantasma', onclick: () => {
+      APP.light.verOcultos = !APP.light.verOcultos; pintarLight(); } },
+    APP.light.verOcultos ? 'Esconder los ocultos' : `Ver los ocultos (${ocultos})`) : null,
+    Object.keys(pasesAbiertos()).length ? h('button', { clase: 'mini fantasma',
+      title: 'Vuelve a pedir la clave de los proyectos que has abierto', onclick: cerrarProyectosConClave },
+    '🔒 Cerrar los abiertos') : null,
+    botonPapeleraLight()));
+  const rejilla = h('div', { clase: 'galeria-proyectos' });
+  visibles.forEach(ficha => rejilla.appendChild(tarjetaProyecto(ficha)));
+  const sueltosEstilos = estilosDeCliente('_sin').length;
+  const sueltosVideos = videosDeCliente('_sin').length;
+  if (sueltosEstilos || sueltosVideos) {
+    rejilla.appendChild(h('button', { clase: 'tarjeta-proyecto sin', onclick: () => elegirCliente('_sin') },
+      h('div', { clase: 'icono-proyecto' }, '🗂️'),
+      h('div', { clase: 'nombre' }, 'Sin proyecto'),
+      h('div', { clase: 'meta' }, `${sueltosEstilos} estilo${sueltosEstilos === 1 ? '' : 's'} · `
+        + `${sueltosVideos} vídeo${sueltosVideos === 1 ? '' : 's'}`)));
+  }
+  rejilla.appendChild(h('button', { clase: 'tarjeta-proyecto nuevo', onclick: crearCliente },
+    h('div', { clase: 'icono-proyecto' }, '+'),
+    h('div', { clase: 'nombre' }, 'Nuevo proyecto'),
+    h('div', { clase: 'meta' }, 'un cliente, con sus estilos y vídeos')));
+  caja.appendChild(rejilla);
+  /* LOS OCULTOS, CON SU BOTÓN PARA DEJAR DE SERLO. «Ver los ocultos» solo los
+     enseña: el proyecto seguía oculto, y la forma de volver a mostrarlo estaba
+     dentro de él («Mostrar en la portada»), donde nadie la buscaba. Se leía
+     como «no me deja quitarlo de ocultos» (11-10-2026). */
+  const listaOcultos = lista.filter(c => c.oculto);
+  if (APP.light.verOcultos && listaOcultos.length) {
+    const caja2 = h('div', { clase: 'sueltos ocultos-portada' },
+      h('b', {}, listaOcultos.length === 1 ? 'Oculto: 1 proyecto' : `${listaOcultos.length} proyectos ocultos`),
+      h('span', { clase: 'meta' }, ' — se ven porque has pulsado «Ver los ocultos». Para que vuelvan a salir siempre:'));
+    listaOcultos.forEach(ficha => caja2.appendChild(h('div', { clase: 'fila' },
+      h('span', { clase: 'crece' }, ficha.nombre),
+      h('button', { clase: 'mini primario',
+        onclick: () => cambiarCliente(ficha, { oculto: false }, `«${ficha.nombre}» ya se ve en la portada`) },
+      'Dejar de ocultar'))));
+    caja.appendChild(caja2);
+  }
+  // lo último que se movió, de los proyectos que se ven: para seguir sin buscar
+  const recientes = videosLight().filter(v => {
+    const cid = clienteDeVideo(v);
+    const ficha = fichaCliente(cid);
+    return !ficha || (!ficha.oculto || APP.light.verOcultos);
+  }).slice(0, 5);
+  if (recientes.length) seccionVideos(caja, recientes, '', 'Últimos vídeos');
+  seccionSueltos(caja, '');
+}
+
+function tarjetaProyecto(ficha) {
+  const abierto = clienteAbierto(ficha);
+  const estilos = estilosDeCliente(ficha.id).length;
+  const videos = videosDeCliente(ficha.id).length;
+  return h('button', {
+    clase: 'tarjeta-proyecto' + (ficha.oculto ? ' es-oculto' : ''),
+    title: abierto ? 'Abrir el proyecto' : 'Tiene clave: pulsa para escribirla',
+    onclick: () => entrarEnCliente(ficha),
+  },
+    ficha.logo && abierto
+      ? h('img', { clase: 'logo-proyecto', alt: '', src: `${BASE}/api/logos/${encodeURIComponent(ficha.logo.fichero)}` })
+      : h('div', { clase: 'icono-proyecto' }, abierto ? '📁' : '🔒'),
+    h('div', { clase: 'nombre' }, ficha.nombre),
+    h('div', { clase: 'meta' }, abierto
+      ? `${estilos} estilo${estilos === 1 ? '' : 's'} · ${videos} vídeo${videos === 1 ? '' : 's'}`
+        + (ficha.con_clave ? ' · 🔓 abierto' : '')
+      : 'con clave'),
+    ficha.oculto ? h('div', { clase: 'meta' }, 'oculto') : null);
+}
+
+/* DENTRO DE UN PROYECTO (o de «Sin proyecto»). */
+function dentroDeProyecto(caja, cid) {
+  const ficha = fichaCliente(cid);
+  const nombre = ficha ? ficha.nombre : 'Sin proyecto';
+  caja.appendChild(h('div', { clase: 'migas' },
+    h('button', { clase: 'mini fantasma', onclick: () => elegirCliente('') }, '‹ Todos los proyectos'),
+    h('span', { clase: 'crece' }),
+    botonPapeleraLight()));
+  caja.appendChild(h('div', { clase: 'light-cab cab-proyecto' },
+    ficha && ficha.logo ? h('img', { clase: 'logo-proyecto pequeno', alt: '',
+      src: `${BASE}/api/logos/${encodeURIComponent(ficha.logo.fichero)}` }) : null,
+    h('h2', {}, `${ficha ? (ficha.con_clave ? '🔒 ' : '📁 ') : '🗂️ '}${nombre}`),
+    ficha && ficha.oculto ? h('span', { clase: 'pastilla' }, 'oculto') : null));
+  if (ficha) {
+    caja.appendChild(h('div', { clase: 'mandos-proyecto' },
+      h('button', { clase: 'mini', onclick: () => renombrarCliente(ficha) }, 'Renombrar'),
+      h('button', { clase: 'mini' + (APP.light.logoProyecto === cid ? ' activo' : ''),
+        onclick: () => { APP.light.logoProyecto = APP.light.logoProyecto === cid ? '' : cid; pintarLight(); } },
+      ficha.logo ? 'Logo ✓' : 'Logo'),
+      h('button', { clase: 'mini', onclick: () => cambiarCliente(ficha, { oculto: !ficha.oculto },
+        ficha.oculto ? 'Ya se ve en la portada' : 'Oculto: sale con «Ver los ocultos»') },
+      ficha.oculto ? 'Dejar de ocultar' : 'Ocultar'),
+      h('button', { clase: 'mini', onclick: () => claveCliente(ficha) }, ficha.con_clave ? 'Clave ✓' : 'Poner clave'),
+      h('button', { clase: 'mini', onclick: () => traerEstiloACliente(ficha) }, 'Traer un estilo'),
+      h('button', { clase: 'mini fantasma peligro', onclick: () => borrarCliente(ficha) }, 'Borrar')));
+    if (APP.light.logoProyecto === cid) caja.appendChild(panelLogoProyecto(ficha));
+  }
+  seccionEstilos(caja, estilosDeCliente(cid), cid);
+  seccionVideos(caja, videosDeCliente(cid), cid);
+  seccionSueltos(caja, cid === '_sin' ? '' : cid);
+}
+
+/* El logo del proyecto: lo llevan de fábrica los vídeos NUEVOS de sus estilos. */
+function panelLogoProyecto(ficha) {
+  const caja = h('div', { clase: 'panel-logo-proyecto' });
+  const logo = ficha.logo;
+  const id = `logo-proyecto-${ficha.id}`;
+  const entrada = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', clase: 'oculto', id,
+    onchange: async ev => {
+      const fichero = (ev.target.files || [])[0];
+      ev.target.value = '';
+      if (!fichero) return;
+      const cuerpo = new FormData();
+      cuerpo.append('logo', fichero);
+      try {
+        const r = await pedir(`${BASE}/api/logos`, { method: 'POST', cuerpo });
+        await cambiarCliente(ficha, { logo: Object.assign({ posicion: 'arriba_derecha', tamano: 0.12, opacidad: 0.9 },
+          logo || {}, { fichero: r.nombre }) }, 'Logo del proyecto guardado');
+      } catch (e) { toast(e.message, true); }
+    } });
+  caja.appendChild(h('div', { clase: 'pista' },
+    'Los vídeos NUEVOS de los estilos de este proyecto lo llevarán solos (se puede cambiar o quitar en cada vídeo). '
+    + 'Los que ya existen no cambian.'));
+  caja.appendChild(entrada);
+  if (logo) caja.appendChild(vistaPreviaLogo(`${BASE}/api/logos/${encodeURIComponent(logo.fichero)}`, logo));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('label', { clase: 'boton mini', for: id }, logo ? 'Subir otro' : 'Subir el logo'),
+    logo ? h('button', { clase: 'mini fantasma peligro', onclick: () => cambiarCliente(ficha, { logo: null }, 'Logo quitado') }, 'Quitar') : null));
+  if (logo) {
+    caja.appendChild(h('div', { clase: 'herramientas' }, ...ESQUINAS_LOGO.map(([pos, nombre]) => h('button', {
+      clase: 'mini' + (logo.posicion === pos ? ' activo' : ''),
+      onclick: () => cambiarCliente(ficha, { logo: Object.assign({}, logo, { posicion: pos }) }) }, nombre))));
+    const tam = Math.round((logo.tamano || 0.12) * 100);
+    caja.appendChild(h('label', {}, `Tamaño: ${tam} % del ancho`));
+    caja.appendChild(h('input', { type: 'range', min: 4, max: 40, step: 1, value: tam,
+      onchange: ev => cambiarCliente(ficha, { logo: Object.assign({}, logo, { tamano: Number(ev.target.value) / 100 }) }) }));
+  }
+  return caja;
+}
+
+function seccionEstilos(caja, fichas, cid) {
+  const ficha = fichaCliente(cid);
+  caja.appendChild(h('div', { clase: 'light-cab' },
+    h('h3', {}, ficha ? `Estilos de ${ficha.nombre}` : (cid === '_sin' ? 'Estilos sin proyecto' : 'Tus estilos')),
     h('span', { clase: 'meta' }, fichas.length
       ? `${fichas.length} estilo${fichas.length === 1 ? '' : 's'}`
       : 'una estética, un tono, una voz y un idioma')));
-
   const rejilla = h('div', { clase: 'galeria-estilos' });
-  fichas.forEach(ficha => rejilla.appendChild(tarjetaEstiloLight(ficha)));
-  rejilla.appendChild(tarjetaNuevoEstilo(fichas.length));
+  fichas.forEach(f => rejilla.appendChild(tarjetaEstiloLight(f, !cid)));
+  rejilla.appendChild(tarjetaNuevoEstilo(fichas.length, ficha));
   caja.appendChild(rejilla);
+}
 
-  /* TUS VÍDEOS, debajo de los estilos. Aquí es donde se aterriza al volver —de
-     una recarga, del móvil, de otro día— y sin esta lista un vídeo a medio
-     generar no tenía desde dónde retomarse: seguía corriendo en el servidor y
-     no había ningún camino hasta él. */
-  const videos = videosLight();
-  if (videos.length) {
-    caja.appendChild(h('div', { clase: 'light-cab' },
-      h('h2', {}, 'Tus vídeos'),
-      h('span', { clase: 'meta' }, `${videos.length} con este modo`)));
-    const lista = h('div', { clase: 'videos-light' });
-    videos.forEach(video => lista.appendChild(h('div', { clase: 'video-light' },
-      h('button', {
-        clase: 'abrir', title: 'Seguir con este vídeo',
-        onclick: () => abrirVideoLight(video.id),
-      },
-        h('span', { clase: 'nombre' }, video.nombre || video.id),
-        h('span', { clase: 'meta' }, fechaCorta(video.actualizado) || '')),
-      /* EL LAPIZ VA FUERA DEL BOTON DE ABRIR. Un boton dentro de otro no es
-         HTML valido y el clic acabaria abriendo el video en vez de renombrarlo
-         — la misma razon por la que la tarjeta de un estilo es un div con un
-         boton grande dentro y no un boton entero. */
-      h('button', {
-        clase: 'mini fantasma renombrar', title: 'Cambiar el nombre',
-        'aria-label': `Cambiar el nombre de ${video.nombre || video.id}`,
-        onclick: () => renombrarVideoLight(video),
-      }, '✏️'),
-      h('button', {
-        clase: 'mini fantasma peligro', title: 'A la papelera de proyectos',
-        onclick: () => apartarVideoLight(video),
-      }, 'Apartar'))));
-    caja.appendChild(lista);
-  }
+function seccionVideos(caja, videos, cid, titulo) {
+  if (!videos.length) return;
+  const ficha = fichaCliente(cid);
+  caja.appendChild(h('div', { clase: 'light-cab' },
+    h('h3', {}, titulo || (ficha ? `Vídeos de ${ficha.nombre}` : (cid === '_sin' ? 'Vídeos sin proyecto' : 'Tus vídeos'))),
+    h('span', { clase: 'meta' }, `${videos.length} vídeo${videos.length === 1 ? '' : 's'}`)));
+  const lista = h('div', { clase: 'videos-light' });
+  videos.forEach(video => lista.appendChild(filaVideoLight(video)));
+  caja.appendChild(lista);
+}
 
-  /* LOS INTENTOS A MEDIAS. Un taller nace antes que su estilo, así que una
-     generación que falla deja una carpeta de cientos de megas sin nadie que la
-     borre. En vez de barrerla sola por reloj —borrar por su cuenta lo que quizá
-     ibas a retomar— se enseña con sus dos salidas. Misma regla que la papelera:
-     nada se pierde sin que alguien lo diga. */
-  const sueltos = (APP.light.datos || {}).sueltos || [];
-  if (sueltos.length) {
-    const aviso = h('div', { clase: 'sueltos' },
-      h('b', {}, sueltos.length === 1 ? 'Un intento a medias'
-        : `${sueltos.length} intentos a medias`),
-      h('span', { clase: 'meta' }, sueltos.length === 1
-        ? ' — se quedó sin terminar y todavía no es ningún estilo.'
-        : ' — se quedaron sin terminar y todavía no son ningún estilo.'));
-    sueltos.forEach(taller => aviso.appendChild(h('div', { clase: 'fila' },
-      h('span', { clase: 'meta crece' },
-        `${taller.nombre} · ${fechaCorta(taller.actualizado) || ''}`),
-      h('button', {
-        clase: 'mini',
-        onclick: () => irALight('crear', { taller: taller.id }),
-      }, 'Retomar'),
-      h('button', {
-        clase: 'mini peligro', onclick: () => descartarTallerLight(taller),
-      }, 'Descartar'))));
-    caja.appendChild(aviso);
-  }
+/* LOS INTENTOS A MEDIAS de un estilo. Un taller nace antes que su estilo, así
+   que una generación que falla deja una carpeta sin nadie que la borre: se
+   enseña con sus dos salidas. Dentro de un proyecto, solo los suyos. */
+function seccionSueltos(caja, cid) {
+  let sueltos = (APP.light.datos || {}).sueltos || [];
+  if (cid !== null) sueltos = sueltos.filter(t => !cid || (t.cliente || '') === cid);
+  if (!sueltos.length) return;
+  const aviso = h('div', { clase: 'sueltos' },
+    h('b', {}, sueltos.length === 1 ? 'Un estilo a medias' : `${sueltos.length} estilos a medias`),
+    h('span', { clase: 'meta' }, ' — se quedaron sin terminar. «Retomar» sigue por donde iba sin volver a pagar lo hecho.'));
+  sueltos.forEach(taller => aviso.appendChild(h('div', { clase: 'fila' },
+    h('span', { clase: 'meta crece' }, `${taller.nombre} · ${fechaCorta(taller.actualizado) || ''}`),
+    h('button', { clase: 'mini', onclick: () => irALight('crear', { taller: taller.id }) }, 'Retomar'),
+    h('button', { clase: 'mini peligro', onclick: () => descartarTallerLight(taller) }, 'Descartar'))));
+  caja.appendChild(aviso);
+}
+
+/* LOS VÍDEOS QUE PERDIERON SUS IMÁGENES DE ESTILO (antes del 10-10-2026,
+   guardar un estilo podía cambiarles el nombre). Se reparan aquí, sin
+   regenerar nada (`/api/proyectos/{pid}/reparar-estilo`). */
+function avisoEstilosPerdidos() {
+  const caja = h('div', {});
+  const perdidos = (APP.light.datos || {}).perdidos || [];
+  if (!perdidos.length) return caja;
+  caja.appendChild(h('div', { clase: 'sueltos aviso-perdidos' },
+    h('b', {}, perdidos.length === 1 ? 'Un vídeo ha perdido sus imágenes de estilo'
+      : `${perdidos.length} vídeos han perdido sus imágenes de estilo`),
+    h('span', { clase: 'meta' }, ' — pasaba al volver a guardar un estilo y ya no puede pasar. '
+      + 'Repararlo las vuelve a apuntar a las que sí están: no regenera ni cobra nada.'),
+    ...perdidos.map(video => h('div', { clase: 'fila' },
+      h('span', { clase: 'meta crece' }, `${video.nombre} · ${video.rotas.length} imagen${video.rotas.length === 1 ? '' : 'es'}`),
+      video.reparable
+        ? h('button', { clase: 'mini primario', onclick: () => repararEstiloDeVideo(video) }, 'Reparar')
+        : h('span', { clase: 'meta' }, 'no hay otra que la sustituya: pregúntale al asistente')))));
   return caja;
+}
+
+async function repararEstiloDeVideo(video) {
+  try {
+    const r = await pedir(`${API.proyecto(video.id)}/reparar-estilo`, { method: 'POST', cuerpo: { aplicar: true } });
+    toast(r.reparado ? `«${video.nombre}» reparado: sus imágenes ya están al día` : (r.motivo || 'nada que reparar'));
+    await cargarGaleriaLight(true);
+  } catch (e) { toast(e.message, true); }
+}
+
+/* Una fila de «Tus vídeos»: abrir, de dónde salió, y sus mandos. */
+function filaVideoLight(video) {
+  return h('div', { clase: 'video-light' },
+    h('button', { clase: 'abrir', title: 'Seguir con este vídeo', onclick: () => abrirVideoLight(video.id) },
+      h('span', { clase: 'nombre' }, video.nombre || video.id),
+      // DE QUÉ ESTILO (y proyecto) SALIÓ, para saber de quién es cada vídeo
+      h('span', { clase: 'meta' }, [origenDeVideo(video), fechaCorta(video.actualizado)]
+        .filter(Boolean).join(' · '))),
+    /* EL LAPIZ VA FUERA DEL BOTON DE ABRIR: un botón dentro de otro no es HTML
+       válido y el clic acabaría abriendo el vídeo en vez de renombrarlo. */
+    h('button', { clase: 'mini fantasma renombrar', title: 'Cambiar el nombre',
+      'aria-label': `Cambiar el nombre de ${video.nombre || video.id}`, onclick: () => renombrarVideoLight(video) }, '✏️'),
+    listaClientes().length ? h('button', { clase: 'mini fantasma', title: 'Moverlo a otro proyecto',
+      onclick: () => moverVideoACliente(video) }, '📁') : null,
+    h('button', { clase: 'mini fantasma peligro', title: 'A la papelera de proyectos',
+      onclick: () => apartarVideoLight(video) }, 'Apartar'));
 }
 
 /* PULSAR UNA TARJETA LA ELIGE Y PASA AL SIGUIENTE PASO, no la abre. Lo que se
    hace con un estilo el 95 % de las veces es usarlo para un vídeo; editarlo es
    lo raro, y por eso vive en el menú de los tres puntos junto a duplicarlo. */
-function tarjetaEstiloLight(ficha) {
+function tarjetaEstiloLight(ficha, conProyecto) {
   const vinetas = ficha.vinetas || [];
+  const cliente = conProyecto ? fichaCliente(clienteDe(ficha.id)) : null;
   return h('div', { clase: 'ficha-estilo' },
     h('button', {
       clase: 'cara-y-cuerpo', title: 'Usar este estilo',
@@ -5458,6 +5883,7 @@ function tarjetaEstiloLight(ficha) {
         : h('div', { clase: 'sin-cara' }, 'sin muestras')),
       h('div', { clase: 'cuerpo' },
         h('div', { clase: 'nombre' }, ficha.nombre || ficha.id),
+        cliente ? h('div', { clase: 'chip-proyecto' }, `📁 ${cliente.nombre}`) : null,
         h('ul', { clase: 'vinetas' },
           // el icono lo manda el servidor con cada línea (`presets_canal.vinetas_de`):
           // aquí no hay forma de saber cuál es el idioma y cuál la voz sin deducirlo
@@ -5467,14 +5893,15 @@ function tarjetaEstiloLight(ficha) {
     menuDeEstilo(ficha));
 }
 
-function tarjetaNuevoEstilo(cuantos) {
+function tarjetaNuevoEstilo(cuantos, cliente) {
   return h('button', {
     clase: 'ficha-estilo nuevo', title: 'Crear un estilo nuevo',
-    onclick: () => irALight('crear'),
+    onclick: () => { APP.light.encargo = null; irALight('crear', { taller: null }); },
   },
     h('div', { clase: 'cara' }, h('span', { clase: 'mas' }, '+')),
     h('div', { clase: 'cuerpo' },
-      h('div', { clase: 'nombre' }, cuantos ? 'Otro estilo' : 'Tu primer estilo'),
+      h('div', { clase: 'nombre' }, cliente ? `Nuevo estilo en ${cliente.nombre}`
+        : (cuantos ? 'Otro estilo' : 'Tu primer estilo')),
       h('div', { clase: 'pista' }, 'unas imágenes y cómo suena')));
 }
 
@@ -5545,7 +5972,9 @@ async function descartarTallerLight(taller) {
 function menuDeEstilo(ficha) {
   const menu = h('div', { clase: 'menu-estilo plegado' },
     h('button', { clase: 'mini fantasma', onclick: () => editarEstiloLight(ficha) }, 'Editar'),
-    h('button', { clase: 'mini fantasma', onclick: () => duplicarEstiloLight(ficha) }, 'Duplicar'));
+    h('button', { clase: 'mini fantasma', onclick: () => duplicarEstiloLight(ficha) }, 'Duplicar'),
+    listaClientes().length ? h('button', { clase: 'mini fantasma', onclick: () => moverEstiloACliente(ficha) },
+      'Mover a otro proyecto') : null);
   const puntos = h('button', {
     clase: 'puntos', title: 'Más opciones',
     onclick: ev => {
@@ -5742,6 +6171,15 @@ async function cargarVideoLight(pid) {
   pintarLight();
   try {
     const proyecto = await pedir(API.proyecto(pid));
+    /* lo que se estaba viendo de OTRO vídeo no se queda en este. Contra
+       `cargadoDe` y no contra `pid`: abrir un vídeo ya apunta su pid ANTES de
+       cargarlo (`recordarVideoLight`). */
+    if (v.cargadoDe !== pid) {
+      v.planos = [];
+      v.firmaPlanos = '';
+      v.subtitulosRotos = undefined;
+    }
+    v.cargadoDe = pid;
     v.pid = pid;
     v.nombre = (proyecto.proyecto || {}).nombre || pid;
     v.estilo = ((proyecto.proyecto || {}).config || {}).estilo_light || '';
@@ -5754,6 +6192,7 @@ async function cargarVideoLight(pid) {
     v.audio = await leerAudioLight();
     v.plan = null;
     v.planDe = '';
+    v.subtitulosRotos = undefined;   // se vuelve a preguntar por este vídeo
     // el coste es de ESTE vídeo: arrastrar el del anterior seria enseñar la
     // cifra de otro proyecto mientras llega la buena
     v.coste = null;
@@ -5818,14 +6257,52 @@ async function contarLaTandaQueMurio(pid) {
    recargar y a mirarlo desde el móvil — pero sin esto, al volver se veía un
    vídeo a medias con los botones apagados y ninguna señal de que algo estuviera
    pasando, que es exactamente lo contrario de lo que la pantalla promete. */
+/* Los trabajos de vídeos que se dejaron de mirar al abrir otro: {pid: id}. */
+const OTROS_VIDEOS = {};
+/* Trabajos del proyecto que NO van en la ranura del vídeo: la cola de
+   imágenes (tiene la suya) y lo del estilo o de escuchar voces. */
+const NO_SON_DEL_VIDEO = /^(exportar|notas_imagenes|voz:previsualizar|voz_descrita|preset_light|moodboard|guia_estilo|catalogo_visual|conservacion|escenarios|banda_sonora|efectos|musica)/;
+
+function nombreDeVideoLight(pid) {
+  if (pid && APP.light.video.pid === pid && APP.light.video.nombre) return APP.light.video.nombre;
+  const v = ((APP.light.datos || {}).videos || []).find(x => x.id === pid);
+  return (v && v.nombre) || pid || '';
+}
+
 async function reengancharTandaLight(pid) {
-  if ((APP.trabajos[CLAVE_VIDEO_LIGHT] || {}).estado === 'ejecutando') return;
+  const ranura = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
+  if (ranura.estado === 'ejecutando') {
+    if (ranura.pid === pid) return;
+    /* LA RANURA ES DE OTRO VÍDEO: se deja de mirar (el trabajo sigue en el
+       servidor) y se apunta para volver a engancharlo al abrir ese vídeo. */
+    if (ranura.pid && ranura.id) OTROS_VIDEOS[ranura.pid] = ranura.id;
+    soltarSeguimiento(CLAVE_VIDEO_LIGHT);
+    delete APP.trabajos[CLAVE_VIDEO_LIGHT];
+  }
   try {
     const datos = await pedir(`${API.trabajosVivos()}?proyecto=`
       + `${encodeURIComponent(pid)}&activos=1`);
-    const vivo = (datos.trabajos || []).find(
-      t => String(t.nombre || '').startsWith('generar:'));
+    const vivos = datos.trabajos || [];
+    if (APP.light.video.pid !== pid) return;
+    /* CUALQUIER TRABAJO DEL VÍDEO, no solo una tanda: «Arreglar los
+       subtítulos», aplicar notas o regrabar también ocupan esta ranura, y sin
+       volver a engancharlos el vídeo salía con los botones encendidos y un
+       montaje corriendo debajo (dos a la vez escribiendo el mismo MP4). La
+       cola de imágenes y lo del estilo van por su lado. */
+    const apuntado = OTROS_VIDEOS[pid];
+    delete OTROS_VIDEOS[pid];
+    const vivo = vivos.find(t => t.id === apuntado)
+      || vivos.find(t => String(t.nombre || '').startsWith('generar:'))
+      || vivos.find(t => !NO_SON_DEL_VIDEO.test(String(t.nombre || '')));
     if (!vivo) { await contarLaTandaQueMurio(pid); return; }
+    if (!String(vivo.nombre || '').startsWith('generar:')) {
+      seguirTrabajo(CLAVE_VIDEO_LIGHT, vivo.id, async trabajo => {
+        if (trabajo.estado === 'listo') await cargarVideoLight(pid);
+        pintarLight();
+      }, () => refrescarVivosLight(), pid);
+      pintarLight();
+      return;
+    }
     /* DE QUE TANDA ES EL TRABAJO QUE YA VENIA CORRIENDO.
      *
      * El nombre es «generar:» y las pestañas que recorre (`_correr_cadena` en
@@ -5861,7 +6338,8 @@ async function reengancharTandaLight(pid) {
     }, () => {
       if (tanda === 'video') refrescarPlanosLight();
       refrescarVivosLight();
-    });
+    }, pid);
+    refrescarPlanosLight();
   } catch (e) { /* no poder mirar los trabajos no puede tumbar la pantalla */ }
 }
 
@@ -6051,7 +6529,7 @@ function vistaElegidoLight() {
   if (!e.lleva) e.lleva = { voz: true, subtitulos: true, musica: true, efectos: true };
   caja.appendChild(bloqueLight('Qué lleva este vídeo',
     'lo que se produce y lo que no; apagar algo no cuesta nada',
-    bloqueLleva(e.lleva, () => {})));
+    llevaConAjustes(e, ficha)));
 
   caja.appendChild(bloqueLight('El material',
     'de dónde salen los hechos que se van a contar',
@@ -6345,6 +6823,19 @@ function materialLight(e) {
 /* Crear el proyecto y lanzar la primera tanda, en un gesto. Son dos llamadas
    —el proyecto tiene que existir antes de poder generar nada en él— pero UNA
    decisión, así que un botón. */
+/* Lo elegido en «Ajustes del montaje» del borrador, tal como lo entiende
+   `_opciones_al_crear`. Lo que no se eligió no viaja: queda automático. */
+function opcionesParaCrear(e) {
+  const op = e.opciones || {};
+  const salida = {};
+  if (op.presencia) salida.presencia = op.presencia;
+  if (op.musica && op.musica.id) salida.musica = op.musica;
+  if (op.subtitulos && Object.keys(op.subtitulos).length) salida.subtitulos = op.subtitulos;
+  if (op.logo === false) salida.logo = false;
+  else if (op.logo && op.logo.fichero) salida.logo = op.logo;
+  return salida;
+}
+
 async function crearYGenerarLight(estilo) {
   const e = encargoVideoLight();
   if (!String(e.material || '').trim()) {
@@ -6364,6 +6855,8 @@ async function crearYGenerarLight(estilo) {
         indicaciones: e.indicaciones,
         cta: e.cta,
         lleva: e.lleva || undefined,
+        // la música, los subtítulos y el logo elegidos en el borrador
+        opciones: opcionesParaCrear(e),
       },
     });
     const pid = (datos.proyecto || {}).id;
@@ -6476,12 +6969,15 @@ function vistaEncargoVideoLight() {
   caja.appendChild(h('div', { clase: 'light-cab' },
     h('h2', {}, 'El encargo'),
     h('span', { clase: 'meta' },
-      estilo ? `con «${estilo.nombre}»` : (v.estilo ? `con «${v.estilo}»` : '')),
+      (estilo ? `con «${estilo.nombre}»` : (v.estilo ? `con «${v.estilo}»` : ''))
+      + (() => {
+        const cliente = fichaCliente(clienteDeVideo({ id: v.pid, estilo_light: v.estilo }));
+        return cliente ? ` · 📁 ${cliente.nombre}` : '';
+      })()),
     h('span', { clase: 'crece' }),
     costeLight()));
 
-  const error = ERRORES[CLAVE_VIDEO_LIGHT];
-  if (error) caja.appendChild(cajaError(error));
+  if (ERRORES[CLAVE_VIDEO_LIGHT]) caja.appendChild(errorDelVideo());
 
   caja.appendChild(h('div', { clase: v.guion ? 'caja-aviso' : 'caja-info' }, v.guion
     ? 'Esto es lo que se le pidió al redactor, y de aquí salió el guion que hay. '
@@ -6671,26 +7167,204 @@ async function refrescarFichasLight() {
    (`POST /api/proyectos/{pid}/generar`), no encadenada desde aquí: encadenar en
    el navegador se rompe al recargar la página, justo en un flujo pensado para
    dejarlo generando y mirarlo desde el móvil. */
+/* EL CORRECTOR DE ORTOGRAFÍA (pasos/ortografia.py): del GUION antes de grabar
+   la voz, y de los SUBTÍTULOS de un vídeo ya montado. Propone; aplica solo lo
+   marcado. El estado vive FUERA del panel y POR VÍDEO (`ORTOGRAFIA_VIVA`, con
+   la clave pid+fuente): la pantalla se repinta mientras revisa y el resultado
+   no puede perderse, y `APP.light.video` es un único objeto para todos los
+   vídeos, así que guardarlo ahí dejaba aplicar la revisión del vídeo A en los
+   planos del B (mismos ids S001, B01…). */
+const ORTOGRAFIA_VIVA = new Map();
+
+function claveOrtografia(pid, fuente) { return `${pid}|${fuente}`; }
+
+function panelOrtografia(fuente) {
+  const v = APP.light.video;
+  const est = ORTOGRAFIA_VIVA.get(claveOrtografia(v.pid, fuente)) || {};
+  const titulo = fuente === 'guion' ? 'Ortografía del guion' : 'Ortografía de los subtítulos';
+  const caja = h('div', { clase: 'panel-ortografia' });
+  const cab = h('div', { clase: 'fila' },
+    h('b', {}, titulo),
+    h('span', { clase: 'meta crece' }, fuente === 'guion'
+      ? 'tildes, letras y signos, antes de grabar la voz (gratis)'
+      : 'tildes, letras y signos de lo que se lee; corregir solo vuelve a montar (gratis)'),
+    h('button', { clase: 'mini', disabled: est.estado === 'pensando' || !!trabajoVideoLight(),
+      onclick: () => revisarOrtografia(fuente) },
+    est.estado === 'pensando' ? 'Revisando…' : (est.estado ? 'Revisar otra vez' : 'Revisar la ortografía')));
+  caja.appendChild(cab);
+  if (est.estado === 'pensando') {
+    caja.appendChild(h('div', { clase: 'cargando' }, `revisando ${est.revisados || ''} textos… (puede tardar un minuto)`));
+  } else if (est.estado === 'error') {
+    caja.appendChild(cajaError(est.error || 'no se ha podido revisar'));
+  } else if (est.estado === 'listo') {
+    const props = est.propuestas || [];
+    if (!props.length) {
+      caja.appendChild(h('div', { clase: 'meta' }, `✓ Sin faltas en ${est.revisados || 0} textos.`));
+    } else {
+      est.marcadas = est.marcadas || new Set(props.map(p => p.id));
+      const lista = h('div', { clase: 'lista-ortografia' });
+      props.forEach(p => {
+        const marca = h('input', { type: 'checkbox', checked: est.marcadas.has(p.id),
+          onchange: ev => { if (ev.target.checked) est.marcadas.add(p.id); else est.marcadas.delete(p.id); } });
+        lista.appendChild(h('label', { clase: 'fila-ortografia' }, marca,
+          h('span', { clase: 'id' }, p.id),
+          h('span', { clase: 'crece' },
+            h('span', { clase: 'despues' }, p.despues),
+            (p.cambios || []).length ? h('span', { clase: 'meta' },
+              ' · ' + p.cambios.map(c => `${c[0]} → ${c[1]}`).join(', ')) : null)));
+      });
+      caja.appendChild(h('div', { clase: 'meta' }, `${props.length} con faltas de ${est.revisados || props.length} textos:`));
+      caja.appendChild(lista);
+      caja.appendChild(h('div', { clase: 'fila' },
+        h('button', { clase: 'primario', disabled: !!trabajoVideoLight(),
+          onclick: () => aplicarOrtografia(fuente) }, 'Aplicar las marcadas'),
+        h('span', { clase: 'meta' }, fuente === 'guion'
+          ? 'se guardan en el guion; la voz se graba después con ellas'
+          : 'se quedan como texto del subtítulo de cada plano: «Regenerar Vídeo» las monta')));
+    }
+  }
+  return caja;
+}
+
+async function revisarOrtografia(fuente) {
+  const v = APP.light.video;
+  const pid = v.pid;
+  const clave = claveOrtografia(pid, fuente);
+  const cuerpo = { fuente };
+  if (fuente === 'guion') {
+    cuerpo.textos = {};
+    ((v.guion || {}).bloques || []).forEach(b => {
+      cuerpo.textos[b.id] = textoVisibleLight(textoDeBloqueLight(b));
+    });
+  }
+  const est = { estado: 'pensando' };
+  ORTOGRAFIA_VIVA.set(clave, est);
+  pintarLight();
+  try {
+    const lanzada = await pedir(`${API.proyecto(pid)}/ortografia/revisar`, { method: 'POST', cuerpo });
+    est.revisados = lanzada.revisados;
+    let ficha = { estado: 'pensando' };
+    for (let i = 0; i < 160 && ficha.estado === 'pensando'; i += 1) {
+      await new Promise(r => setTimeout(r, 1500));
+      ficha = await pedir(`${API.proyecto(pid)}/ortografia/${lanzada.id}`);
+    }
+    if (ficha.estado === 'pensando') throw new Error('la revisión tarda demasiado: vuelve a pedirla en un momento');
+    ficha.rid = lanzada.id;
+    if (ORTOGRAFIA_VIVA.get(clave) === est) ORTOGRAFIA_VIVA.set(clave, ficha);
+  } catch (e) {
+    if (ORTOGRAFIA_VIVA.get(clave) === est) ORTOGRAFIA_VIVA.set(clave, { estado: 'error', error: e.message });
+  }
+  if (videoAbierto().pid === pid) pintarLight();
+}
+
+/* Las correcciones del guion se ponen sobre el texto CRUDO del bloque, con
+   sus marcas de la voz (`<break time="900ms"/>`, énfasis…): el corrector ve
+   el texto sin marcas y guardar su versión tal cual las borraba. Cada pareja
+   (mal → bien) se sustituye en el crudo y se comprueba que el resultado, sin
+   marcas, es exactamente la propuesta; si no cuadra y el bloque tenía marcas,
+   ese bloque no se toca (se avisa) antes que perder pausas sin decirlo. */
+function ortografiaSobreCrudo(crudo, propuesta) {
+  const igual = (a, b) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
+  if (igual(textoVisibleLight(crudo), crudo)) return propuesta.despues;   // sin marcas
+  let nuevo = crudo;
+  (propuesta.cambios || []).forEach(([mal, bien]) => {
+    if (!mal || mal === bien) return;
+    const i = nuevo.indexOf(mal);
+    if (i >= 0) nuevo = nuevo.slice(0, i) + bien + nuevo.slice(i + mal.length);
+  });
+  return igual(textoVisibleLight(nuevo), propuesta.despues) ? nuevo : null;
+}
+
+async function aplicarOrtografia(fuente) {
+  const v = APP.light.video;
+  const pid = v.pid;
+  const clave = claveOrtografia(pid, fuente);
+  const est = ORTOGRAFIA_VIVA.get(clave) || {};
+  const elegidas = (est.propuestas || []).filter(p => (est.marcadas || new Set()).has(p.id));
+  if (!elegidas.length) { toast('No hay ninguna marcada', true); return; }
+  let puestas = elegidas.length;
+  try {
+    if (fuente === 'guion') {
+      // por el MISMO camino que escribir a mano en el bloque
+      const porId = {};
+      ((v.guion || {}).bloques || []).forEach(b => { porId[b.id] = b; });
+      const sinPoner = [];
+      elegidas.forEach(p => {
+        const b = porId[p.id];
+        if (!b) { sinPoner.push(p.id); return; }
+        const nuevo = ortografiaSobreCrudo(textoDeBloqueLight(b), p);
+        if (nuevo === null) { sinPoner.push(p.id); return; }
+        guardarBloqueLight(b.id, nuevo, b.insertado ? undefined : b.texto, !!b.insertado);
+      });
+      puestas -= sinPoner.length;
+      await guardarBloquesPendientesLight();
+      await recargarVideoAbierto();
+      if (sinPoner.length) {
+        toast(`${sinPoner.join(', ')}: corrígelo a mano (lleva pausas o marcas de la voz y no se ha podido poner sin tocarlas)`, true);
+      }
+    } else {
+      const cambios = {};
+      elegidas.forEach(p => { cambios[p.id] = p.despues; });
+      await pedir(`${API.proyecto(pid)}/ortografia/aplicar`, { method: 'POST', cuerpo: { cambios, rid: est.rid } });
+      await refrescarLoDibujado();
+    }
+    if (puestas) toast(`${puestas} corrección(es) puestas`);
+    ORTOGRAFIA_VIVA.delete(clave);
+    if (videoAbierto().pid === pid) pintarLight();
+  } catch (e) {
+    toast(`no se han podido poner: ${e.message}`, true);
+  }
+}
+
+/* «Arreglar los subtítulos»: rótulos de todos los planos y montaje, sin pagar
+   nada (ver `rehacer_subtitulos` en app.py). */
+async function rehacerSubtitulosLight() {
+  const v = APP.light.video;
+  if (!v.pid) return;
+  if (!window.confirm('Se vuelven a dibujar los subtítulos de todos los planos y se monta el '
+    + 'vídeo otra vez. No se paga nada; tarda lo que un montaje. ¿Seguimos?')) return;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(`${API.proyecto(v.pid)}/subtitulos/rehacer`,
+      { method: 'POST', cuerpo: {} });
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') {
+        v.subtitulosRotos = undefined;
+        await cargarVideoLight(v.pid);
+        v.vista = 'video';
+      }
+      pintarLight();
+    }, () => refrescarVivosLight());
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+  }
+}
+
 async function lanzarTandaLight(tanda, modo) {
   const v = APP.light.video;
   if (!v.pid) return;
+  const pid = v.pid;
   limpiarError(CLAVE_VIDEO_LIGHT);
   try {
-    const datos = await pedir(`${API.proyecto(v.pid)}/generar`, {
+    const datos = await pedir(`${API.proyecto(pid)}/generar`, {
       method: 'POST',
       cuerpo: { tanda, modo: modo || 'pendientes' },
     });
-    v.plan = datos.plan || null;
     const tid = datos.trabajo_id || (datos.trabajo || {}).id;
     if (!tid) throw new Error('el servidor no ha devuelto ningún trabajo');
+    /* SI MIENTRAS CONTESTABA SE ABRIÓ OTRO VÍDEO, este no se toca: el trabajo
+       se apunta y se engancha al volver a él. */
+    if (videoAbierto().pid !== pid) { OTROS_VIDEOS[pid] = tid; return; }
+    v.plan = datos.plan || null;
     // DE QUE TRABAJO ES ESE PREVISTO. La misma ranura la ocupan tambien las
-    // regeneraciones de un plano suelto (`soltarCola`), y sin esto la cuenta
+    // regeneraciones de un plano suelto, y sin esto la cuenta
     // atras de una imagen se pintaba con el previsto de la ultima tanda.
     v.planDe = tid;
     if (tanda === 'video') v.planos = [];
     seguirTrabajo(CLAVE_VIDEO_LIGHT, tid, async trabajo => {
       if (trabajo.estado === 'listo') {
-        await cargarVideoLight(v.pid);
+        await cargarVideoLight(pid);
         // LA TANDA DE VIDEO YA NO ACABA EN EL MP4, acaba en el
         // previsualizador: es la parada nueva y es lo que hay que mirar antes
         // de gastar el render (ver TANDAS_LIGHT en app.py).
@@ -6708,10 +7382,11 @@ async function lanzarTandaLight(tanda, modo) {
       // teclas (ver `refrescarVivosLight`).
       if (tanda === 'video') refrescarPlanosLight();
       refrescarVivosLight();
-    });
+    }, pid);
     pintarLight();
   } catch (err) {
-    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    if (videoAbierto().pid === pid) mostrarError(CLAVE_VIDEO_LIGHT, err);
+    else toast(`«${nombreDeVideoLight(pid)}»: ${err.message}`, true);
     pintarLight();
   }
 }
@@ -6721,13 +7396,14 @@ async function lanzarTandaLight(tanda, modo) {
 async function refrescarPlanosLight() {
   const v = APP.light.video;
   if (!v.pid || v.pidiendoPlanos) return;
+  const pid = v.pid;
   v.pidiendoPlanos = true;
   try {
     // LIGERO: de cada plano aquí solo se miran `id`, `ruta` y `sello`. Pedirlo
     // entero traía además el prompt de los 232, 3,88 MB por vuelta, y esto se
     // pregunta una vez por imagen generada: unos 900 MB por tanda para acabar
     // comparando `planos.length`.
-    const datos = await pedir(API.planosHechos(v.pid, true));
+    const datos = await pedir(API.planosHechos(pid, true));
     /* Llega como {S001: {ruta, sello, ...}} y se filtra por el PLAN de ahora:
        la carpeta de trabajo conserva lo de pasadas anteriores —es lo que
        permite retomar una tanda cortada— así que ahí hay PNG de planos que este
@@ -6741,7 +7417,14 @@ async function refrescarPlanosLight() {
       .filter(([id]) => !delPlan.size || delPlan.has(id))
       .map(([id, ficha]) => Object.assign({ id }, ficha))
       .sort((a, b) => (a.sello || 0) - (b.sello || 0));
-    if (planos.length !== v.planos.length) {
+    /* POR DÓNDE ESTÁN, no solo cuántos: al terminar la tanda las imágenes
+       pasan de la carpeta de trabajo a la de su versión, y con la misma
+       cuenta la tira se quedaba con las rutas viejas -- miniaturas rotas
+       mientras se montaba (11-10-2026). */
+    const firma = planos.map(x => `${x.id}:${x.ruta}`).join('|');
+    if (videoAbierto().pid !== pid) { v.pidiendoPlanos = false; return; }
+    if (firma !== v.firmaPlanos) {
+      v.firmaPlanos = firma;
       v.planos = planos;
       /* SOLO LA PANTALLA DEL VIDEO LOS ENSENA (el plano grande y el «N
          planos»). Desde las diapositivas esto corre mientras se aplican las
@@ -6753,9 +7436,13 @@ async function refrescarPlanosLight() {
   v.pidiendoPlanos = false;
 }
 
+/* El trabajo en marcha DEL VÍDEO ABIERTO, o null. El de otro vídeo no cuenta:
+   ni enseña su barra aquí ni apaga los botones de este. */
 function trabajoVideoLight() {
   const trabajo = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
-  return trabajo.estado === 'ejecutando' ? trabajo : null;
+  if (trabajo.estado !== 'ejecutando') return null;
+  if ('pid' in trabajo && trabajo.pid !== APP.light.video.pid) return null;
+  return trabajo;
 }
 
 /* La barra: a la derecha del botón y ocupando el resto de la franja. Dice por
@@ -6790,7 +7477,7 @@ function barraTandaLight(tanda) {
 }
 
 function barraTandaLightAhora(tanda) {
-  const trabajo = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
+  const trabajo = trabajoVideoLight() || {};
   const corriendo = trabajo.estado === 'ejecutando';
   if (!corriendo) {
     if (tanda) refrescarPlanLight(tanda);
@@ -6914,7 +7601,7 @@ const COSTE_LIGHT = { ultima: 0, cita: null, pid: '' };
 function refrescarCosteLight(forzar) {
   const v = APP.light.video;
   if (!v.pid) return;
-  const corriendo = (APP.trabajos[CLAVE_VIDEO_LIGHT] || {}).estado === 'ejecutando';
+  const corriendo = !!trabajoVideoLight();
   const mismo = COSTE_LIGHT.pid === v.pid;
   // YA SE SABE Y NO ESTA PASANDO NADA: no hay nada nuevo que preguntar. Sin
   // esta linea el bucle se cierra solo -- se pinta, se pide, la respuesta
@@ -6955,10 +7642,10 @@ function costeLight() {
 function costeLightAhora() {
   refrescarCosteLight();
   const datos = APP.light.video.coste;
-  const caja = h('span', {
+  const caja = h('button', {
     clase: 'coste-light' + (datos && datos.aviso_presupuesto ? ' aviso' : ''),
-    title: 'Lo que llevas gastado en este vídeo. El desglose por paso está en '
-      + 'el modo editor.',
+    title: 'Lo que llevas gastado en este vídeo, de verdad: pulsa para verlo todo desglosado',
+    onclick: () => abrirCosteDelVideo(APP.light.video.pid),
   });
   if (!datos) { caja.appendChild(h('span', { clase: 'meta' }, 'coste: —')); return caja; }
   const abierto = proveedorDe(datos, 'openai');
@@ -6989,6 +7676,242 @@ function costeLightAhora() {
   return caja;
 }
 
+/* EL COSTE DE UN VÍDEO, TODO Y DESGLOSADO (11-10-2026). Lo gastado de verdad
+   --cada imagen con lo que OpenAI dijo que cobró, la voz por los caracteres
+   enviados--, con TODOS sus cambios; lo que costó su estilo; la música y los
+   efectos (gratis, y de dónde salen); y cada tanda con lo prometido antes de
+   pulsar frente a lo gastado. Sale del servidor (`/coste/detalle`). */
+function filaCoste(que, cuantas, usd, nota) {
+  return h('tr', {},
+    h('th', {}, que),
+    h('td', { clase: 'meta' }, cuantas || ''),
+    h('td', { clase: 'usd' }, usd === null ? '—' : usdCorto(usd)),
+    h('td', { clase: 'meta' }, nota || ''));
+}
+
+function tablaDeGasto(d, incluirEstilo) {
+  const img = d.imagenes || {};
+  const voz = d.voz || {};
+  const filas = [
+    filaCoste('Imágenes nuevas', `${(img.nuevas || {}).cuantas || 0}`, (img.nuevas || {}).usd || 0,
+      'una por plano'),
+    filaCoste('Imágenes rehechas', `${(img.rehechas || {}).cuantas || 0}`, (img.rehechas || {}).usd || 0,
+      'notas, «Desde cero», regenerar'),
+    filaCoste('Personajes (hojas del reparto)', `${(img.personajes || {}).cuantas || 0}`,
+      (img.personajes || {}).usd || 0, ''),
+  ];
+  if ((img.otras || {}).cuantas) {
+    filas.push(filaCoste('Otras imágenes', `${img.otras.cuantas}`, img.otras.usd || 0, 'láminas, pruebas'));
+  }
+  filas.push(filaCoste('Voz', `${miles((voz.grabacion || {}).caracteres || 0)} caracteres`,
+    (voz.grabacion || {}).usd || 0, 'Cartesia, por carácter enviado'));
+  if ((voz.regrabaciones || {}).caracteres) {
+    filas.push(filaCoste('Voz: regrabaciones', `${miles(voz.regrabaciones.caracteres)} caracteres`,
+      voz.regrabaciones.usd || 0, 'tramos regrabados'));
+  }
+  if (incluirEstilo !== false) {
+    filas.push(filaCoste('Claude', `${miles(d.claude_tokens || 0)} tokens`, 0,
+      'va por tu suscripción: no se cobra aparte'));
+  }
+  return h('table', { clase: 'tabla tabla-coste' }, h('tbody', {}, ...filas));
+}
+
+async function abrirCosteDelVideo(pid) {
+  if (!pid) return;
+  const viejo = document.getElementById('coste-video');
+  if (viejo) viejo.remove();
+  const cuerpo = h('div', { clase: 'cuerpo' }, h('div', { clase: 'cargando' }, 'sumando lo gastado…'));
+  const capa = h('div', { id: 'coste-video', onclick: ev => { if (ev.target === capa) capa.remove(); } },
+    h('div', { clase: 'cuadro' },
+      h('div', { clase: 'cab' },
+        h('b', {}, 'Coste del vídeo'),
+        h('span', { clase: 'meta' }, 'lo gastado de verdad, con todos sus cambios'),
+        h('span', { clase: 'crece' }),
+        h('button', { clase: 'mini fantasma', title: 'Cerrar', onclick: () => capa.remove() }, '×')),
+      cuerpo));
+  document.body.appendChild(capa);
+  let d;
+  try { d = await pedir(API.costeDetalle(pid)); } catch (e) {
+    vaciar(cuerpo).appendChild(cajaError(`no se ha podido leer el coste: ${e.message}`));
+    return;
+  }
+  vaciar(cuerpo);
+  const estilo = d.estilo || null;
+  const partEstilo = estilo && estilo.disponible ? Number(estilo.usd || 0) : 0;
+  cuerpo.appendChild(h('div', { clase: 'marcador-conservacion fila' },
+    h('div', { clase: 'cifra' }, h('b', {}, usdCorto(d.total_usd)), h('span', {}, 'este vídeo')),
+    estilo ? h('div', { clase: 'cifra' }, h('b', {}, estilo.disponible ? usdCorto(partEstilo) : '—'),
+      h('span', {}, `su estilo «${estilo.nombre}» (una vez${estilo.videos > 1 ? `, para ${estilo.videos} vídeos` : ''})`)) : null,
+    h('div', { clase: 'cifra' }, h('b', {}, usdCorto(Number(d.total_usd || 0) + partEstilo)),
+      h('span', {}, 'vídeo + estilo'))));
+  const confirmadas = Number(d.imagenes_confirmadas || 0);
+  const estimadas = Number(d.imagenes_estimadas || 0);
+  cuerpo.appendChild(h('div', { clase: 'meta' },
+    `${confirmadas} imagen(es) con el importe que devolvió OpenAI (sus tokens reales)`
+    + (estimadas ? `; ${estimadas} sin ese dato, calculadas con la tarifa y sus referencias` : '')
+    + '. La voz, por los caracteres que se enviaron a Cartesia.'));
+  cuerpo.appendChild(h('h2', {}, 'Este vídeo'));
+  cuerpo.appendChild(tablaDeGasto(d));
+  const m = d.musica || {};
+  const ef = d.efectos || {};
+  cuerpo.appendChild(h('table', { clase: 'tabla tabla-coste' }, h('tbody', {},
+    filaCoste('Música', m.puesta ? (m.titulo || 'un tema') : 'sin música', 0,
+      m.puesta ? `${m.fuente || 'Jamendo'}: gratis` : ''),
+    filaCoste('Efectos de sonido', `${ef.cuantos || 0}`, 0, `${ef.fuente || 'FreeSound'}: gratis`))));
+  if (estilo && estilo.disponible) {
+    cuerpo.appendChild(h('h2', {}, `Su estilo: «${estilo.nombre}»`));
+    cuerpo.appendChild(tablaDeGasto(estilo));
+  } else if (estilo) {
+    cuerpo.appendChild(h('div', { clase: 'meta' },
+      `El taller del estilo «${estilo.nombre}» ya no está: no se puede saber lo que costó.`));
+  }
+  const tandas = d.tandas || [];
+  if (tandas.length) {
+    cuerpo.appendChild(h('h2', {}, 'Cada vez que generaste: prometido y gastado'));
+    cuerpo.appendChild(h('table', { clase: 'tabla tabla-coste' },
+      h('thead', {}, h('tr', {}, h('th', {}, 'Cuándo'), h('th', {}, 'Qué'),
+        h('th', {}, 'Prometido'), h('th', {}, 'Gastado'))),
+      h('tbody', {}, ...tandas.slice().reverse().map(t => h('tr', {},
+        h('th', {}, fechaCorta(t.lanzada)),
+        h('td', { clase: 'meta' }, (t.tandas || []).join(' + ') + (t.estado && t.estado !== 'listo' ? ` (${t.estado})` : '')),
+        h('td', { clase: 'usd' }, t.prometido_usd == null ? '—' : usdCorto(t.prometido_usd)),
+        h('td', { clase: 'usd' }, usdCorto(t.gastado_usd)))))));
+  }
+  const precio = d.precio_imagen || {};
+  cuerpo.appendChild(h('div', { clase: 'meta' },
+    `Lo que se promete antes de pulsar usa ${usdCorto(precio.usd)} por imagen: ${precio.fuente || ''}.`));
+  if ((d.claude || []).length) {
+    const det = h('details', {}, h('summary', {}, 'Claude, por para qué se usó (tokens)'));
+    det.appendChild(h('table', { clase: 'tabla tabla-coste' }, h('tbody', {},
+      ...d.claude.slice(0, 15).map(c => filaCoste(c.para, `${c.llamadas} llamada(s)`, 0,
+        `${miles(c.tokens)} tokens`)))));
+    cuerpo.appendChild(det);
+  }
+}
+
+async function abrirCosteDelEstilo(id) {
+  const viejo = document.getElementById('coste-video');
+  if (viejo) viejo.remove();
+  const cuerpo = h('div', { clase: 'cuerpo' }, h('div', { clase: 'cargando' }, 'sumando lo gastado…'));
+  const capa = h('div', { id: 'coste-video', onclick: ev => { if (ev.target === capa) capa.remove(); } },
+    h('div', { clase: 'cuadro' },
+      h('div', { clase: 'cab' }, h('b', {}, 'Coste del estilo'),
+        h('span', { clase: 'meta' }, 'láminas, guía y voz: se paga una vez'),
+        h('span', { clase: 'crece' }),
+        h('button', { clase: 'mini fantasma', title: 'Cerrar', onclick: () => capa.remove() }, '×')),
+      cuerpo));
+  document.body.appendChild(capa);
+  try {
+    const d = await pedir(API.costeEstilo(id));
+    vaciar(cuerpo);
+    if (!d.disponible) {
+      cuerpo.appendChild(h('div', { clase: 'meta' },
+        'Este estilo no tiene taller (se hizo fuera de esta pantalla o se borró): no se puede saber lo que costó.'));
+      return;
+    }
+    cuerpo.appendChild(h('div', { clase: 'marcador-conservacion fila' },
+      h('div', { clase: 'cifra' }, h('b', {}, usdCorto(d.usd)), h('span', {}, `«${d.nombre || id}»`))));
+    cuerpo.appendChild(tablaDeGasto(d));
+  } catch (e) {
+    vaciar(cuerpo).appendChild(cajaError(`no se ha podido leer el coste: ${e.message}`));
+  }
+}
+
+/* DESCARGAR EL VÍDEO POR PARTES (11-10-2026): elegir qué lleva el MP4 (voz,
+   música, efectos, subtítulos, logo) o bajar cada audio suelto. Lo prepara el
+   servidor en un trabajo (`/exportar`, pasos/exportes.py) sin tocar el
+   proyecto ni pagar nada; sin subtítulos tarda lo que un montaje. */
+const DESCARGA = {};
+
+function abrirDescargaPorPartes(pid) {
+  if (!pid) return;
+  const est = DESCARGA[pid] = DESCARGA[pid] || {
+    voz: true, musica: true, efectos: true, subtitulos: true, logo: true, preparando: '' };
+  const viejo = document.getElementById('coste-video');
+  if (viejo) viejo.remove();
+  const cuerpo = h('div', { clase: 'cuerpo' });
+  const capa = h('div', { id: 'coste-video', onclick: ev => { if (ev.target === capa) capa.remove(); } },
+    h('div', { clase: 'cuadro' },
+      h('div', { clase: 'cab' }, h('b', {}, 'Descargar por partes'),
+        h('span', { clase: 'meta' }, 'gratis: no se dibuja ni se graba nada'),
+        h('span', { clase: 'crece' }),
+        h('button', { clase: 'mini fantasma', title: 'Cerrar', onclick: () => capa.remove() }, '×')),
+      cuerpo));
+  document.body.appendChild(capa);
+  const preparar = async (pedido, etiqueta) => {
+    est.preparando = etiqueta;
+    pintar();
+    try {
+      const r = await pedir(`${API.proyecto(pid)}/exportar`, { method: 'POST', cuerpo: pedido });
+      seguirTrabajo(`exportar_${pid}`, r.trabajo_id, async t => {
+        est.preparando = '';
+        if (t.estado === 'listo' && t.resultado && t.resultado.fichero) {
+          const enlace = document.createElement('a');
+          enlace.href = `${API.proyecto(pid)}/exportes/${t.resultado.fichero}`;
+          enlace.download = '';
+          document.body.appendChild(enlace);
+          enlace.click();
+          enlace.remove();
+          toast(`${etiqueta}: descargando`);
+        } else if (t.estado === 'error') {
+          toast(`${etiqueta}: ${t.error || 'no se ha podido preparar'}`, true);
+        }
+        pintar();
+      }, () => pintar());
+    } catch (e) {
+      est.preparando = '';
+      toast(e.message, true);
+      pintar();
+    }
+  };
+  function pintar() {
+    if (!document.body.contains(capa)) return;
+    vaciar(cuerpo);
+    const ocupado = !!est.preparando;
+    const t = APP.trabajos[`exportar_${pid}`] || {};
+    if (ocupado) {
+      const pct = Math.round((Number(t.progreso) || 0) * 100);
+      cuerpo.appendChild(h('div', { clase: 'caja-info trabajo-laminas' },
+        h('div', {}, `Preparando «${est.preparando}»… ${pct} %` + (t.publico || t.mensaje ? ` · ${t.publico || t.mensaje}` : '')),
+        h('progress', { max: 100, value: pct })));
+    }
+    const casilla = (clave, texto) => h('label', { clase: 'casilla-parte' },
+      h('input', { type: 'checkbox', checked: !!est[clave], disabled: ocupado,
+        onchange: ev => { est[clave] = ev.target.checked; pintar(); } }), ` ${texto}`);
+    cuerpo.appendChild(h('h2', {}, 'El vídeo, con lo que elijas'));
+    cuerpo.appendChild(h('div', { clase: 'fila partes-video' },
+      casilla('voz', 'Voz'), casilla('musica', 'Música'), casilla('efectos', 'Efectos'),
+      casilla('subtitulos', 'Subtítulos'), casilla('logo', 'Logo')));
+    if (!est.subtitulos) {
+      cuerpo.appendChild(h('div', { clase: 'meta' },
+        'Sin subtítulos hay que volver a pasar los planos (están dentro de cada fotograma): '
+        + 'tarda más o menos lo que un montaje. No cuesta nada.'));
+    }
+    const partes = ['voz', 'musica', 'efectos'].filter(x => est[x]);
+    const que = (partes.length ? partes.map(x => ({ voz: 'voz', musica: 'música', efectos: 'efectos' })[x]).join(' + ')
+      : 'sin sonido') + (est.subtitulos ? '' : ', sin subtítulos') + (est.logo ? '' : ', sin logo');
+    cuerpo.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'primario', disabled: ocupado,
+        onclick: () => preparar({ que: 'video', partes, subtitulos: est.subtitulos, logo: est.logo },
+          `vídeo (${que})`) }, 'Descargar el vídeo'),
+      h('span', { clase: 'meta' }, que)));
+    cuerpo.appendChild(h('h2', {}, 'Cada audio, suelto'));
+    cuerpo.appendChild(h('div', { clase: 'meta' },
+      'En WAV, del largo del vídeo y alineados en el segundo 0, como suenan en el vídeo '
+      + '(la música ya agachada bajo la voz): juntos suman la mezcla.'));
+    cuerpo.appendChild(h('div', { clase: 'fila' },
+      ...[['voz', 'Voz'], ['musica', 'Música'], ['efectos', 'Efectos'], ['mezcla', 'Mezcla completa']]
+        .map(([parte, texto]) => h('button', { clase: 'mini', disabled: ocupado,
+          onclick: () => preparar({ que: 'audio', parte }, texto) }, texto))));
+    cuerpo.appendChild(h('h2', {}, 'Todo por partes'));
+    cuerpo.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', disabled: ocupado,
+        onclick: () => preparar({ que: 'zip' }, 'todo por partes') }, 'Descargar un ZIP con todo'),
+      h('span', { clase: 'meta' }, 'la imagen sin sonido y cada audio suelto')));
+  }
+  pintar();
+}
+
 /* --------------------------------------------------------------- el guion */
 
 function vistaGuionLight() {
@@ -7002,8 +7925,7 @@ function vistaGuionLight() {
     h('span', { clase: 'crece' }),
     costeLight()));
 
-  const error = ERRORES[CLAVE_VIDEO_LIGHT];
-  if (error) caja.appendChild(cajaError(error));
+  if (ERRORES[CLAVE_VIDEO_LIGHT]) caja.appendChild(errorDelVideo());
 
   if (!v.guion) {
     const corriendo = !!trabajoVideoLight();
@@ -7035,6 +7957,10 @@ function vistaGuionLight() {
   // si algo quedó viejo (un cambio de estilo traído, por ejemplo), qué pulsar
   const siguiente = siguientePasoLight();
   if (siguiente) caja.appendChild(siguiente);
+  /* LA ORTOGRAFÍA DEL GUION, ANTES DE GRABAR: aquí es gratis, y de aquí salen
+     la voz y los subtítulos. Con la voz ya grabada, tocar el guion es
+     regrabar: entonces se corrigen los subtítulos, en la pantalla Vídeo. */
+  if (!v.audio) caja.appendChild(panelOrtografia('guion'));
 
   // EL REPRODUCTOR VIVE EN LA BARRA DE ABAJO (ver `pieLight`). Estaba arriba
   // del guion para que los mandos no se fueran con el scroll; la barra fija lo
@@ -7764,7 +8690,7 @@ function ayudaAudio(hayAudio, queda) {
     ? 'Vuelve a grabar la toma con la voz del estilo. Se sintetiza el texto de '
       + 'ahora; lo que no haya cambiado sale de la cache y no se vuelve a pagar.'
     : 'Sintetiza la toma completa con la voz del estilo y la alinea con el '
-      + 'texto, que es lo que despues coloca los subtitulos.';
+      + 'texto, que es lo que después coloca los subtítulos.';
 }
 
 
@@ -7774,14 +8700,14 @@ function ayudaDiapositivas(hayVideo, obsoleto, queda) {
       + 'verlas, «Diapositivas» en la barra de abajo: no cuesta nada.';
   }
   if (hayVideo && obsoleto) {
-    return 'Vuelve a partir los subtitulos con los tiempos del audio de ahora y '
+    return 'Vuelve a partir los subtítulos con los tiempos del audio de ahora y '
       + 'redibuja las capas de los planos afectados. Una imagen solo se vuelve '
       + 'a pagar si el cambio altera su prompt; cambiar una palabra suelta no '
-      + 'lo hace. No monta el MP4: eso es «Montar el video», despues de mirarlo.';
+      + 'lo hace. No monta el MP4: eso es «Montar el vídeo», después de mirarlo.';
   }
-  return 'Dibuja los planos, les monta los subtitulos y las cartelas y prepara '
-    + 'la musica. Para ahi, en las diapositivas, para que lo mires antes de '
-    + 'gastar el render: no monta ningun MP4.';
+  return 'Dibuja los planos, les monta los subtítulos y las cartelas y prepara '
+    + 'la música. Para ahí, en las diapositivas, para que lo mires antes de '
+    + 'gastar el render: no monta ningún MP4.';
 }
 
 
@@ -7837,14 +8763,14 @@ function pieLight() {
     corriendo ? barraTandaLight('voz')
       : (hayAudio ? reproductorLight() : h('span', { clase: 'crece' })),
     corriendo ? conAyuda(
-      'Corta la tanda donde este. Lo que ya se ha generado se queda hecho y no '
+      'Corta la tanda donde esté. Lo que ya se ha generado se queda hecho y no '
       + 'hay que volver a pagarlo.',
       h('button', {
         clase: 'mini peligro', onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
       }, 'Parar')) : null,
     conAyuda(!hayAudio
-      ? 'Primero hace falta el audio: los subtitulos se colocan con sus '
-        + 'tiempos, asi que sin voz no hay donde ponerlos.'
+      ? 'Primero hace falta el audio: los subtítulos se colocan con sus '
+        + 'tiempos, así que sin voz no hay dónde ponerlos.'
       : unirAyuda(ayudaDiapositivas(hayVideo, obsoleto, quedaVideo),
                   textoDelPlan('video')),
       h('button', {
@@ -8088,14 +9014,6 @@ function pendientesDeAhora() {
 
 function guardarRepaso(datos) {
   const d = datos || {};
-  /* LO QUE SE GUARDA EN MEMORIA NO PUEDE SOBREVIVIR A SU NOTA. Los ids se
-     reciclan --borra R001 y la siguiente vuelve a llamarse R001--, asi que un
-     fallo apuntado contra una nota que ya no existe se lo quedaria la proxima
-     que herede el numero. */
-  const vivos = new Set((d.notas || []).map(n => n.id));
-  Object.keys(COLA_IMG.fallo).forEach(nid => {
-    if (!vivos.has(nid)) delete COLA_IMG.fallo[nid];
-  });
   PREVIA.notas = d.notas || [];
   const r = estadoRepaso();
   r.notas = d.notas || [];
@@ -8109,9 +9027,15 @@ function guardarRepaso(datos) {
 
 
 async function refrescarNotasPrevia() {
+  const pid = videoAbierto().pid;
   try {
-    guardarRepaso(await pedir(API.repaso(videoAbierto().pid)));
+    guardarRepaso(await pedir(API.repaso(pid)));
   } catch (e) { PREVIA.notas = []; }
+  // y la cola de imágenes: su precio, y si hay algo dibujándose, seguirlo
+  try {
+    aplicarCola(await pedir(`${API.colaImagenes(pid)}/cola`));
+    if (COLA_IMG.actual || COLA_IMG.cola.length) vigilarCola();
+  } catch (e) { /* sin cola se ve sin precio */ }
 }
 
 function escenaPrevia() {
@@ -8335,7 +9259,7 @@ function avisoImagenObsoleta(escena) {
       }, 'Me vale')),
     h('div', { clase: 'meta' },
       `se dibujó para: «${escena.dibujada_para || ''}»`),
-    h('div', { clase: 'meta' }, `y aquí ahora se dice: «${escena.narracion}»`));
+    h('div', { clase: 'meta' }, `y aquí ahora se dice: «${legible(escena.narracion)}»`));
 }
 
 
@@ -8561,12 +9485,11 @@ function cuadroFeedbackEscena(escena) {
     h('button', {
       clase: 'mini primario', disabled: PREVIA.guardando,
       onclick: () => guardarNotaEscena(escena),
-    }, PREVIA.guardando ? 'guardando…' : 'Apuntar'),
+    }, PREVIA.guardando ? 'guardando…' : `Guardar nota de ${escena.id}`),
     h('span', { clase: 'meta' },
-      mias.length ? `${mias.length} nota(s) en esta imagen`
-        : 'cada nota trae su botón para rehacer ESA imagen: el corrector lee la nota, '
-          + 'mira las imágenes del vídeo (este plano, los vecinos, las hojas, las láminas) '
-          + 'y adjunta al generador lo que la nota pide')));
+      mias.length ? `${mias.length} nota(s) pendiente(s) en esta imagen: abajo, con su botón para rehacerla`
+        : 'la nota se guarda abajo, con la miniatura de esta imagen y su texto del guion; '
+          + 'desde ahí la rehaces cuando quieras (sola o todas juntas)')));
   if (esTactil()) {
     caja.appendChild(h('div', { clase: 'meta previa-pista' },
       'desliza sobre la imagen para pasar de escena'));
@@ -8630,7 +9553,6 @@ async function guardarNotaEditada(nota, texto) {
     /* CAMBIAR LA NOTA LA DEVUELVE A PENDIENTE. El visto se apaña solo --
        `regenerado` se queda con el texto viejo y deja de coincidir--; lo que
        hay que quitar a mano es el fallo, que no tiene copia en el servidor. */
-    delete COLA_IMG.fallo[nota.id];
     guardarRepaso(datos);
     PREVIA.editando = '';
   } catch (err) { mostrarError(CLAVE_VIDEO_LIGHT, err); }
@@ -8701,7 +9623,7 @@ async function guardarNotaEscena(escena) {
  * leen como el mismo gesto. Aqui la etiqueta ya dice lo que hace. */
 function botonRenderizarLight() {
   if (hayMp4Light() && !videoObsoletoLight()) return null;
-  const corriendo = (APP.trabajos[CLAVE_VIDEO_LIGHT] || {}).estado === 'ejecutando';
+  const corriendo = !!trabajoVideoLight();
   /* CON NOTAS SIN APLICAR, ESTE BOTON HACE MENOS que el de al lado: «Aplicar»
      reparte las notas, redibuja lo que toquen y DESPUES monta; esto solo monta,
      o sea que gasta el render entero para dejarte el video sin tus notas. Es la
@@ -8710,11 +9632,11 @@ function botonRenderizarLight() {
   const notasSinAplicar = estadoRepaso().pendientes > 0;
   return conAyuda(
     notasSinAplicar
-      ? 'Tienes notas del repaso sin aplicar. Esto solo montaria el MP4 y '
-        + 'saldria sin ellas. Usa «Aplicar», que aplica y monta de una vez.'
+      ? 'Tienes notas del repaso sin aplicar. Esto solo montaría el MP4 y '
+        + 'saldría sin ellas. Usa «Aplicar», que aplica y monta de una vez.'
       : unirAyuda('Encadena los planos que acabas de mirar, con sus transiciones, '
-        + 'la voz y la musica, y saca el MP4. No genera ninguna imagen: no cuesta '
-        + 'dinero, cuesta tiempo de maquina.', textoDelPlan('render')),
+        + 'la voz y la música, y saca el MP4. No genera ninguna imagen: no cuesta '
+        + 'dinero, cuesta tiempo de máquina.', textoDelPlan('render')),
     h('button', {
       clase: notasSinAplicar ? 'mini' : 'avisa',
       disabled: corriendo || notasSinAplicar,
@@ -8761,8 +9683,50 @@ function vistaVideoLight() {
     h('span', { clase: 'crece' }),
     costeLight()));
 
-  const error = ERRORES[CLAVE_VIDEO_LIGHT];
-  if (error) caja.appendChild(cajaError(error));
+  if (ERRORES[CLAVE_VIDEO_LIGHT]) caja.appendChild(errorDelVideo());
+
+  /* EL MP4 ES DE ANTES DE TUS CAMBIOS. Una imagen rehecha en «Imágenes» no
+     entra en el vídeo hasta volver a montarlo, y solo lo decía una pastilla
+     de «Obsoleto» abajo: se leía como «he regenerado y no cambia nada»
+     (10-10-2026). */
+  if (videoObsoletoLight() && !trabajoVideoLight()) {
+    /* Y SI MONTAR VA A DIBUJAR IMÁGENES (guion o voz cambiados), se dice con
+       su precio: el aviso empuja a pulsar, así que no puede callarse lo que se
+       paga. Sale del plan del servidor, la misma cifra que el botón. */
+    const coste = (((v.planes || {}).render || {}).coste) || {};
+    const porDibujar = Number(coste.imagenes_por_generar) || 0;
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      'Este vídeo es de ANTES de tus últimos cambios (por ejemplo, imágenes rehechas '
+      + 'en «Imágenes»): lo que ves aquí todavía no los lleva. Pulsa «Regenerar Vídeo» '
+      + 'abajo para volver a montarlo con ellos.'
+      + (porDibujar ? ` Ojo: además se dibujarán ${porDibujar} imagen(es) que han quedado `
+        + `viejas (≈ ${usdCorto(Number(coste.usd_por_generar) || 0)}).` : ' No se dibuja ninguna imagen.')));
+  }
+
+  /* LAS TILDES ROTAS DE LOS SUBTÍTULOS («TÃº»): la voz de este vídeo llegó
+     de Cartesia mal leída. Ya se enseña bien en pantalla, pero el MP4 lleva
+     los subtítulos dibujados así; esto los vuelve a dibujar todos y monta.
+     Gratis: ni imágenes ni voz. Se pregunta una vez por vídeo. */
+  if (v.subtitulosRotos === undefined && v.pid) {
+    v.subtitulosRotos = 0;
+    const pid = v.pid;
+    pedir(`${API.proyecto(pid)}/subtitulos/rotos`).then(r => {
+      if (videoAbierto().pid !== pid) return;
+      v.subtitulosRotos = Number(r.planos) || 0;
+      if (v.subtitulosRotos) pintarLight();
+    }).catch(() => {});
+  }
+  if (v.subtitulosRotos > 0 && hayMp4Light() && !trabajoVideoLight()) {
+    caja.appendChild(h('div', { clase: 'caja-aviso fila' },
+      h('span', { clase: 'crece' },
+        `Los subtítulos de ${v.subtitulosRotos} plano(s) salen con las tildes rotas («TÃº» en vez `
+        + 'de «Tú»): la voz de este vídeo se leyó con la codificación equivocada. Se pueden '
+        + 'volver a dibujar todos y montar el vídeo otra vez. No se paga nada: ni imágenes ni voz.'),
+      h('button', { clase: 'primario', onclick: () => rehacerSubtitulosLight() },
+        'Arreglar los subtítulos')));
+  }
+
+  if (hayMp4Light()) caja.appendChild(panelOrtografia('subtitulos'));
 
   const marco = h('div', { clase: `marco-video ${formatoDelVideo()}` });
   if (hayMp4Light() && !trabajoVideoLight()) {
@@ -8806,8 +9770,8 @@ function vistaVideoLight() {
    *
    * EL MODO. Con el video obsoleto va 'pendientes': lo obsoleto es exactamente
    * lo que ha quedado viejo, y 'todo' volveria a rehacer los clips de un video
-   * entero por haber cambiado una frase. 'todo' se queda para cuando no hay
-   * nada obsoleto y aun asi quieres otro: ahi si lo estas pidiendo. */
+   * entero por haber cambiado una frase. Y ya NUNCA 'todo' desde aqui: ver el
+   * botón de abajo. */
   const notasSinAplicar = estadoRepaso().pendientes > 0;
   const pie = h('div', { clase: 'pie-guion' },
     /* CON NOTAS SIN APLICAR ESTE BOTON SOBRA, y no por repetirse: es que hace
@@ -8816,27 +9780,31 @@ function vistaVideoLight() {
        para dejarte el mismo video sin tus notas. Se queda, apagado y con el
        motivo puesto, en vez de esconderse: desaparecer no explica nada. */
     conAyuda(notasSinAplicar
-      ? 'Tienes notas del repaso sin aplicar. Esto solo volveria a montar el MP4 '
-        + 'y saldria igual, sin ellas. Usa «Aplicar los cambios» de abajo: '
+      ? 'Tienes notas del repaso sin aplicar. Esto solo volvería a montar el MP4 '
+        + 'y saldría igual, sin ellas. Usa «Aplicar los cambios» de abajo: '
         + 'aplica y monta, en un solo trabajo.'
       : (quedaTandaLight('render') === false
-        ? 'El MP4 esta al dia con los planos y el audio de ahora. Volver a '
-          + 'montarlo daria el mismo fichero.'
+        ? 'El MP4 está al día con los planos y el audio de ahora. Volver a '
+          + 'montarlo daría el mismo fichero.'
         : unirAyuda('Encadena los planos que ya has visto, con sus transiciones, '
-          + 'la voz y la musica, y saca el MP4. No genera ninguna imagen: no '
-          + 'cuesta dinero, cuesta tiempo de maquina.', textoDelPlan('render'))),
+          + 'la voz y la música, y saca el MP4. No genera ninguna imagen: no '
+          + 'cuesta dinero, cuesta tiempo de máquina.', textoDelPlan('render'))),
       h('button', {
         clase: notasSinAplicar ? 'mini' : 'primario',
         disabled: !!trabajoVideoLight() || notasSinAplicar
                   || quedaTandaLight('render') === false,
-        onclick: () => lanzarTandaLight('render',
-          (hayMp4Light() && !videoObsoletoLight()) ? 'todo' : 'pendientes'),
+        /* SIEMPRE 'pendientes'. Con el MP4 al día iba 'todo', y 'todo' en esta
+           tanda REDIBUJA LAS IMÁGENES de todo el vídeo (la tanda lleva la
+           pestaña de las imágenes): bastaba que quedara algo menor sin hacer
+           --la música sin elegir-- para que el botón se encendiera y pulsarlo
+           pagara el vídeo entero otra vez (visto en el recorrido, 11-10-2026). */
+        onclick: () => lanzarTandaLight('render', 'pendientes'),
       }, hayMp4Light() ? 'Regenerar Vídeo' : 'Generar Vídeo')),
     quedaTandaLight('render') === false ? null : pastillaObsoletoLight(),
     h('span', { clase: 'crece' }),
     barraTandaLight('render'),
     trabajoVideoLight() ? conAyuda(
-      'Corta el montaje donde este. Los clips ya encadenados se quedan hechos.',
+      'Corta el montaje donde esté. Los clips ya encadenados se quedan hechos.',
       h('button', {
         clase: 'mini peligro', onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
       }, 'Parar')) : null,
@@ -8847,10 +9815,13 @@ function vistaVideoLight() {
     h('span', { clase: 'crece' }),
     botonAplicarRepaso(),
     hayMp4Light() ? conAyuda(
-      'Baja el MP4 tal y como esta ahora mismo.',
+      'Baja el MP4 tal y como está ahora mismo.',
       h('a', {
         clase: 'boton mini', href: urlMp4Light(), download: '',
-      }, 'Descargar')) : null);
+      }, 'Descargar')) : null,
+    hayMp4Light() ? conAyuda(
+      'Sin música, sin efectos, sin subtítulos, sin voz… o cada audio suelto, para usarlo en otro sitio. Gratis.',
+      h('button', { clase: 'mini', onclick: () => abrirDescargaPorPartes(v.pid) }, 'Por partes…')) : null);
   BARRA_INFERIOR.nodo = pie;
 
   /* EL REPASO VA DEBAJO DEL VÍDEO Y SOLO CUANDO HAY VÍDEO. Antes de eso no hay
@@ -9174,79 +10145,182 @@ async function guardarNota() {
  * ella. El enrutador se queda para el repaso del video, donde una nota puede
  * ser de la cartela, del subtitulo, de la musica o del guion.
  */
-/* CUANTAS A LA VEZ. Tres, que son las claves de imagen que hay: por debajo se
-   desaprovechan y por encima solo se hacen colas dentro del cubo de ritmo del
-   motor (ver MAX_CADENAS en p6_assets).
+/* LA COLA DE IMÁGENES VIVE EN EL SERVIDOR (`POST .../imagenes/rehacer`).
+ *
+ * Aquí había una cola del navegador que mandaba tandas de tres planos en UN
+ * trabajo, y fallaba de tres maneras (10-10-2026): una imagen rechazada por
+ * OpenAI tumbaba a las otras dos sin intentarlas, el error se quedaba como el
+ * del paso y salía en todas las pantallas, y recargar la página perdía la cola.
+ *
+ * Ahora el servidor las rehace UNA DETRÁS DE OTRA, junta en una sola imagen las
+ * notas del mismo plano, y apunta en CADA nota lo que le pasó (`error`,
+ * `aviso`). Aquí solo se pide y se mira: `actual` es la que se dibuja (con los
+ * segundos que lleva) y `cola` las que esperan. */
+const COLA_IMG = { pid: '', cola: [], actual: null, segundosPorImagen: 75,
+  usdPorImagen: 0, sondeo: null, visto: 0 };
 
-   Van en UN trabajo, no en tres: el servidor no admite dos tandas del mismo
-   paso a la vez --y hace bien, las dos escribirian el mismo plan y la misma
-   carpeta-- pero el paso SI dibuja en paralelo por dentro, una cadena por
-   sitio. Asi que el paralelismo se pide mandando los tres planos juntos. */
-const A_LA_VEZ = 3;
+function aplicarCola(datos) {
+  const d = datos || {};
+  COLA_IMG.cola = d.cola || [];
+  COLA_IMG.actual = d.actual || null;
+  // la cola espera a que termine otro trabajo (el montaje) y arranca sola
+  COLA_IMG.esperando = d.esperando || '';
+  COLA_IMG.segundosPorImagen = Number(d.segundos_por_imagen) || COLA_IMG.segundosPorImagen;
+  COLA_IMG.usdPorImagen = Number(d.usd_por_imagen) || COLA_IMG.usdPorImagen;
+  COLA_IMG.visto = Date.now();
+}
 
-/* `corriendo` es una LISTA, no un plano: son los que van en la tanda de ahora.
-   Y `espera` guarda {sid, texto}, asi que se busca por su sid -- preguntando
-   `espera.includes(sid)` no casaba NUNCA, que es lo que hacia que pulsar un
-   segundo boton no pareciera hacer nada: la nota entraba en la cola y el boton
-   seguia diciendo «Regenerar imagen». */
-/* `corriendo` guarda {sid, nid}: QUE plano y DE QUE nota. Iba solo con el
-   plano, y entonces dos notas del mismo plano se creian las dos en marcha --
-   la que ya estaba hecha volvia a decir «Regenerando». Lo que se ocupa es la
-   imagen, pero lo que se cuenta es la peticion.
+function olvidarCola() {
+  if (COLA_IMG.sondeo) clearInterval(COLA_IMG.sondeo);
+  PREVIA.recienHechas = new Set();       // los ids de nota se repiten entre vídeos
+  Object.assign(COLA_IMG, { pid: '', cola: [], actual: null, sondeo: null });
+}
 
-   Y NO HAY MAPA DE «HECHAS»: el visto lo dice la nota (`regenerado`), que la
-   escribe el servidor nada mas terminar. Un mapa en memoria por id era una
-   trampa, porque los ids DE NOTA SE RECICLAN --borra R001 y la siguiente vuelve
-   a llamarse R001-- y el visto de una nota borrada se lo quedaba la nueva: una
-   nota recien escrita salia «Regenerada ✓» sin haberse dibujado nunca. */
-const COLA_IMG = { espera: [], corriendo: [], fallo: {} };
-
-
-/* EL ✓ LO DICE LA NOTA, Y LO ESCRIBE EL SERVIDOR (`regenerado`: contra qué
-   texto se redibujó). Así sobrevive a recargar, y si luego cambias la nota deja
-   de coincidir ella sola -- que es lo que se quiere: hay una petición nueva que
-   nadie ha atendido.
-
-   Aquí hubo dos intentos peores. Un mapa por PLANO hacía que, en cuanto S064 se
-   redibujaba una vez, cualquier nota sobre S064 saliera con el visto. Y un mapa
-   por id de NOTA tampoco vale: los ids se reciclan --borra R001 y la siguiente
-   vuelve a llamarse R001--, así que cada nota nueva heredaba el visto de una
-   borrada y salía «Regenerada ✓» sin haberse dibujado nunca. */
+/* QUÉ LE PASA A LA IMAGEN DE ESTA NOTA, en una palabra. El ✓ lo dice la nota
+   (`regenerado`: contra qué texto se redibujó) y lo escribe el servidor; el
+   fallo también (`error`), así que todo sobrevive a recargar. */
 function estadoDeImagen(sid, nota) {
   const nid = (nota || {}).id || '';
-  if (nid && COLA_IMG.corriendo.some(x => x.nid === nid)) return 'corriendo';
-  if (nid && COLA_IMG.espera.some(x => x.nid === nid)) return 'en cola';
-  if (nid && COLA_IMG.fallo[nid]) return 'fallo';
+  if (nid && COLA_IMG.actual && (COLA_IMG.actual.notas || []).includes(nid)) return 'corriendo';
+  if (nid && COLA_IMG.cola.includes(nid)) return 'en cola';
   if (nota && nota.regenerado && nota.regenerado === nota.texto) return 'hecha';
-  /* AL RETOMAR TRAS RECARGAR solo se sabe que PLANO lleva el trabajo, no de que
-     nota salio. Se pinta como en marcha la que NO esta hecha, que es la unica
-     que puede ser: la de arriba ya devolvio 'hecha'. */
-  if (COLA_IMG.corriendo.some(x => !x.nid && x.sid === sid)) return 'corriendo';
+  if (nota && nota.error) return 'fallo';
   return '';
 }
 
-
-/* TODAS LAS DE ESTA PANTALLA, DE UNA VEZ. Es el mismo gesto que pulsar el boton
-   de cada tarjeta, repetido: entran en la misma cola y salen de una en una. */
-function encolarTodasLasImagenes() {
-  notasDeAhora()
-    .filter(n => n.estado !== 'aplicado' && n.plano)
-    .forEach(n => encolarImagen(n.plano, n.texto, n.id));
+/* Lo que lleva la que se dibuja: «0:45 de ~1:20». Un porcentaje no sirve aquí:
+   una imagen es una sola llamada y se quedaba en el 5 % hasta el final. */
+function relojDeImagen() {
+  const a = COLA_IMG.actual;
+  if (!a) return '';
+  const lleva = (Number(a.segundos) || 0) + (Date.now() - COLA_IMG.visto) / 1000;
+  return `${mmss(lleva)} de ~${mmss(COLA_IMG.segundosPorImagen)}`;
 }
 
+function encolarTodasLasImagenes() { pedirCola({}); }
 
 function encolarImagen(sid, texto, nid) {
-  if (!sid) return;
-  /* NO SE REPITE LA MISMA NOTA. Antes se miraba el plano, asi que una segunda
-     nota sobre la misma imagen no entraba en la cola y pulsarla no hacia nada.
-     Dos notas del mismo plano son dos peticiones: entran las dos y salen una
-     detras de otra (ver el reparto de tandas en `soltarCola`). */
-  if (nid && (COLA_IMG.corriendo.some(x => x.nid === nid)
-              || COLA_IMG.espera.some(x => x.nid === nid))) return;
-  if (nid) delete COLA_IMG.fallo[nid];
-  COLA_IMG.espera.push({ sid, texto: String(texto || ''), nid: nid || '' });
-  repintarVideo();
-  soltarCola();
+  if (!sid || !nid) return;
+  pedirCola({ notas: [nid] });
+}
+
+async function pedirCola(cuerpo) {
+  const v = videoAbierto();
+  if (!v.pid) return;
+  try {
+    aplicarCola(await pedir(`${API.colaImagenes(v.pid)}/rehacer`, { method: 'POST', cuerpo }));
+    COLA_IMG.pid = v.pid;
+    await recargarNotas();
+    repintarVideo();
+    vigilarCola();
+  } catch (err) {
+    toast(`no se ha podido poner en cola: ${err.message}`, true);
+  }
+}
+
+async function recargarNotas() {
+  try { guardarRepaso(await pedir(API.repaso(videoAbierto().pid))); } catch (e) { /* se ve lo de antes */ }
+}
+
+/* MIRA LA COLA cada dos segundos mientras haya algo: al cambiar de plano relee
+   las notas y lo dibujado; entre medias solo repinta el reloj. */
+function vigilarCola(deQuien) {
+  const pid = deQuien || videoAbierto().pid;
+  if (!pid) return;
+  if (COLA_IMG.sondeo && COLA_IMG.pid === pid) return;
+  if (COLA_IMG.sondeo) clearInterval(COLA_IMG.sondeo);
+  COLA_IMG.pid = pid;
+  let enVuelo = false;
+  /* SE COMPRUEBA DESPUÉS DE CADA ESPERA que siga siendo SU cola: si mientras
+     tanto se abrió otro vídeo, lo que llega es del anterior (y los ids de nota
+     se repiten entre vídeos: R001 de uno pintaría «Dibujando» en el otro). */
+  const mio = () => COLA_IMG.sondeo === sondeo && COLA_IMG.pid === pid;
+  const sondeo = setInterval(async () => {
+    if (enVuelo) return;                 // un tic lento no se pisa con el siguiente
+    if (videoAbierto().pid && videoAbierto().pid !== pid) {
+      if (mio()) olvidarCola(); else clearInterval(sondeo);
+      return;
+    }
+    enVuelo = true;
+    try {
+      let datos;
+      try { datos = await pedir(`${API.colaImagenes(pid)}/cola`); } catch (e) { return; }
+      if (!mio()) { clearInterval(sondeo); return; }
+      const antes = JSON.stringify([COLA_IMG.actual && COLA_IMG.actual.notas, COLA_IMG.cola]);
+      // las que se estaban dibujando y ya no: recién hechas (o falladas)
+      const eran = (COLA_IMG.actual || {}).notas || [];
+      aplicarCola(datos);
+      const siguen = new Set((COLA_IMG.actual || {}).notas || []);
+      PREVIA.recienHechas = PREVIA.recienHechas || new Set();
+      eran.filter(n => !siguen.has(n)).forEach(n => PREVIA.recienHechas.add(n));
+      const ahora = JSON.stringify([COLA_IMG.actual && COLA_IMG.actual.notas, COLA_IMG.cola]);
+      const vacia = !COLA_IMG.actual && !COLA_IMG.cola.length;
+      if (antes !== ahora || vacia) {
+        await recargarNotas();
+        await refrescarLoDibujado();
+        if (!mio()) { clearInterval(sondeo); return; }
+        repintarVideo();
+      } else {
+        refrescarVivosLight();
+      }
+      if (vacia) {
+        clearInterval(sondeo);
+        if (COLA_IMG.sondeo === sondeo) COLA_IMG.sondeo = null;
+      }
+    } finally {
+      enVuelo = false;
+    }
+  }, 2000);
+  COLA_IMG.sondeo = sondeo;
+}
+
+async function sacarDeLaCola(nid) {
+  const v = videoAbierto();
+  try {
+    aplicarCola(await pedir(`${API.colaImagenes(v.pid)}/cola/${encodeURIComponent(nid)}`,
+      { method: 'DELETE' }));
+    repintarVideo();
+  } catch (err) { toast(err.message, true); }
+}
+
+/* «LO MÁS PARECIDO POSIBLE SIN COPIAR». El servidor propone la nota reescrita
+   sin marcas ni personajes con derechos; se lee, se puede tocar y, si convence,
+   se guarda y se vuelve a pedir la imagen. Las referencias adjuntas con logos
+   también pueden provocar el rechazo: se ofrece quitarlas. */
+async function notaSinMarcas(nota) {
+  const v = videoAbierto();
+  toast('reescribiendo la nota sin marcas… (unos segundos)');
+  let p;
+  try {
+    p = await pedir(`${API.repaso(v.pid)}/${nota.id}/sin-marcas`, { method: 'POST' });
+  } catch (err) { toast(`no se ha podido: ${err.message}`, true); return; }
+  const cambios = (p.cambios || []).map(c => `«${c[0]}» → «${c[1]}»`).join('\n');
+  const campos = [{ clave: 'texto', tipo: 'textarea', etiqueta: 'La nota, sin marcas (puedes cambiarla)',
+    valor: p.texto || nota.texto }];
+  if (p.con_imagenes) {
+    campos.push({ clave: 'imagenes', tipo: 'select', etiqueta: 'Tus imágenes adjuntas',
+      valor: 'quitar', opciones: [
+        { valor: 'quitar', nombre: 'Quitarlas (pueden llevar logos)' },
+        { valor: 'dejar', nombre: 'Dejarlas' }] });
+  }
+  const r = await dialogo({
+    titulo: 'Lo más parecido posible, sin marcas',
+    texto: 'OpenAI no dibuja marcas, logos ni personajes con derechos. Esta versión '
+      + 'describe lo que se ve (colores, formas, la escena) sin nombrarlos.'
+      + (cambios ? `\n\nCambios:\n${cambios}` : ''),
+    campos, aceptar: 'Guardar y rehacer la imagen',
+  });
+  if (!r) return;
+  try {
+    const cuerpo = { texto: r.texto || p.texto };
+    if (p.con_imagenes && r.imagenes !== 'dejar') cuerpo.imagenes = [];
+    guardarRepaso(await pedir(`${API.repaso(v.pid)}/${nota.id}`, { method: 'PUT', cuerpo }));
+    await pedirCola({ notas: [nota.id] });
+  } catch (err) { toast(err.message, true); }
+}
+
+function esRechazoDeSeguridad(texto) {
+  return /filtro de seguridad|safety system|rechaz/i.test(String(texto || ''));
 }
 
 
@@ -9297,91 +10371,18 @@ async function refrescarLoDibujado() {
   /* Y la ficha del paso, que es la que sabe si el video quedo obsoleto: sin
      esto «Montar el vídeo» seguiria diciendo que esta al dia. Es una llamada,
      no las seis de recargar el proyecto. */
-  try {
-    const ficha = await pedir(API.paso(pid, 'assets'));
-    if (videoAbierto().pid === pid) videoAbierto().fichas.assets = ficha;
-  } catch (err) { /* igual: no poder leerla no puede tumbar la pantalla */ }
-}
-
-/* SE ESCRIBE EN LA NOTA QUE SU IMAGEN YA SE REHIZO, y con qué texto. Es lo que
-   hace que el «Regenerada ✓» siga ahí mañana. Va después del trabajo, no antes:
-   si la tanda falla, la nota tiene que seguir pidiendo lo suyo. */
-async function apuntarRegeneradas(tanda) {
-  const v = videoAbierto();
-  let ultima = null;
-  for (const x of tanda) {
-    if (!x.nid) continue;
+  /* LAS TRES: rehacer una imagen deja al dia `assets` y obsoletos `callouts`
+     y `render`. Leyendo solo la primera, la pantalla del Vídeo seguia diciendo
+     que el MP4 estaba al dia --sin «Obsoleto» y sin aviso-- hasta recargar: se
+     leia como «he regenerado y no cambia nada» (10-10-2026). */
+  await Promise.all(['assets', 'callouts', 'render'].map(async paso => {
     try {
-      ultima = await pedir(API.repasoNota(v.pid, x.nid), {
-        method: 'PUT', cuerpo: { regenerado: x.texto },
-      });
-    } catch (err) { /* no poder marcarla no puede tirar la cola */ }
-  }
-  if (ultima) guardarRepaso(ultima);
+      const ficha = await pedir(API.paso(pid, paso));
+      if (videoAbierto().pid === pid) videoAbierto().fichas[paso] = ficha;
+    } catch (err) { /* igual: no poder leerla no puede tumbar la pantalla */ }
+  }));
+  refrescarPlanLight('render', true);
 }
-
-async function soltarCola() {
-  if (COLA_IMG.corriendo.length || !COLA_IMG.espera.length) return;
-  const v = videoAbierto();
-  /* UN PLANO, UNA VEZ POR TANDA. Dos notas de la misma imagen son dos
-     peticiones, pero no pueden ir en el mismo trabajo: la segunda pisaria el
-     feedback de la primera y se dibujaria una sola vez. La que sobra se queda
-     en la cola y sale en la tanda siguiente. */
-  const tanda = [];
-  const puestos = new Set();
-  while (tanda.length < A_LA_VEZ) {
-    const i = COLA_IMG.espera.findIndex(x => !puestos.has(x.sid));
-    if (i < 0) break;
-    puestos.add(COLA_IMG.espera[i].sid);
-    tanda.push(COLA_IMG.espera.splice(i, 1)[0]);
-  }
-  if (!tanda.length) return;
-  COLA_IMG.corriendo = tanda.map(x => ({ sid: x.sid, nid: x.nid || '' }));
-  repintarVideo();
-  try {
-    /* EL TEXTO VA AL FEEDBACK DE ESA UNIDAD, que es el cajon que ya lee quien
-       dibuja (`_ajustes_unidad` en p6_assets). Ni un cajon nuevo.
-
-       Los de la tanda van en UNA sola llamada: son params del mismo paso, y
-       mandarlos de uno en uno son tres escrituras del estado que se pisan el
-       cerrojo entre ellas para decir lo mismo. */
-    const conTexto = tanda.filter(x => x.texto);
-    if (conTexto.length) {
-      const unidades = {};
-      conTexto.forEach(x => { unidades[`escena:${x.sid}`] = { feedback: x.texto }; });
-      await pedir(API.params(v.pid, 'assets'), {
-        method: 'PUT', cuerpo: { params: { unidades } },
-      });
-    }
-    /* `rehacer: true` a proposito: aqui SI lo estas pidiendo, y con el mismo
-       prompt la cache devolveria la imagen que acabas de rechazar. */
-    const datos = await pedir(API.ejecutar(v.pid, 'assets'), {
-      method: 'POST',
-      cuerpo: { unidades: tanda.map(x => `escena:${x.sid}`), rehacer: true },
-    });
-    const tid = datos.trabajo_id || (datos.trabajo || {}).id;
-    if (!tid) throw new Error('el servidor no ha devuelto ningún trabajo');
-    seguirTrabajo(CLAVE_VIDEO_LIGHT, tid, async trabajo => {
-      if (trabajo.estado === 'listo') {
-        await apuntarRegeneradas(tanda);
-      } else if (trabajo.estado === 'error') {
-        tanda.forEach(x => { if (x.nid) COLA_IMG.fallo[x.nid] = trabajo.error || 'fallo'; });
-      }
-      if (trabajo.estado !== 'ejecutando') {
-        COLA_IMG.corriendo = [];
-        await refrescarLoDibujado();
-        repintarVideo();
-        soltarCola();
-      }
-    }, () => refrescarVivosLight());
-  } catch (err) {
-    tanda.forEach(x => { if (x.nid) COLA_IMG.fallo[x.nid] = err.message; });
-    COLA_IMG.corriendo = [];
-    repintarVideo();
-    soltarCola();
-  }
-}
-
 
 function irAlMomentoDeLaNota(nota) {
   const v = videoAbierto();
@@ -9389,24 +10390,271 @@ function irAlMomentoDeLaNota(nota) {
     const escenas = (PREVIA.ficha || {}).escenas || [];
     const i = escenas.findIndex(e => e.id === nota.plano);
     if (i < 0) {
-      toast('esa nota no esta anclada a ninguna escena', true);
+      toast('esa nota no está anclada a ninguna escena', true);
       return;
     }
     pararPrevia();
     PREVIA.i = i;
     repintarVideo();
+    /* Y SE LLEVA LA VISTA A LA IMAGEN: la lista de notas está debajo del
+       visor, y sin esto el plano cambiaba fuera de la pantalla y pulsar la
+       miniatura o «Ver cómo quedó» parecía no hacer nada (10-10-2026). */
+    const marco = document.querySelector('.previa-marco');
+    if (marco) marco.scrollIntoView({ behavior: 'smooth', block: 'start' });
     return;
   }
   const video = videoDelRepaso();
-  if (video) { video.currentTime = Number(nota.t) || 0; video.pause(); }
+  if (video && pantallaDeNota(nota) !== 'imagenes') {
+    video.currentTime = Number(nota.t) || 0; video.pause();
+    return;
+  }
+  /* DESDE EL GUION (o sin vídeo montado) NO HAY DÓNDE MOVERSE: el botón no
+     hacía nada (11-10-2026). Se va a Imágenes y, en cuanto está su lista de
+     planos, se pone ESE plano a la vista. */
+  if (!nota.plano) { toast('esa nota no está anclada a ninguna imagen', true); return; }
+  pararPrevia();
+  v.vista = 'previa';
+  pintarLight();
+  const hasta = Date.now() + 8000;
+  const colocar = () => {
+    const escenas = (PREVIA.ficha || {}).escenas || [];
+    const i = escenas.findIndex(e => e.id === nota.plano);
+    if (i >= 0 && videoAbierto().vista === 'previa') {
+      PREVIA.i = i;
+      repintarVideo();
+      const marco = document.querySelector('.previa-marco');
+      if (marco) marco.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else if (Date.now() < hasta && videoAbierto().vista === 'previa') {
+      setTimeout(colocar, 200);
+    }
+  };
+  colocar();
 }
 
+
+/* LAS NOTAS DE IMÁGENES, UNA TARJETA POR IMAGEN.
+ *
+ * Iba una tarjeta por NOTA, y dos notas de la misma imagen salían como dos
+ * tarjetas con la misma miniatura y el mismo «Imagen S005»: se leía como
+ * «imágenes repetidas» (10-10-2026). Ahora cada imagen sale UNA vez, en el
+ * orden del vídeo, con sus notas dentro; arriba las que tienen algo pendiente,
+ * y las ya rehechas plegadas al final. */
+function listaPorImagen() {
+  const lista = h('div', { clase: 'repaso-notas' });
+  const escenas = (PREVIA.ficha || {}).escenas || [];
+  const orden = id => { const i = escenas.findIndex(e => e.id === id); return i < 0 ? 9999 : i; };
+  const porPlano = new Map();
+  notasDeAhora().forEach(n => {
+    const k = n.plano || '';
+    if (!porPlano.has(k)) porPlano.set(k, []);
+    porPlano.get(k).push(n);
+  });
+  const planos = [...porPlano.keys()].sort((a, b) => orden(a) - orden(b));
+  // «pendiente» aquí es «hay algo que mirar»: una recién hecha y sin revisar
+  // se queda arriba hasta que la miras, que es cuando ya no hace falta verla
+  // y las que se acaban de rehacer AHORA (en esta visita) se quedan arriba,
+  // para ver que salieron: se pliegan las de antes
+  const recien = PREVIA.recienHechas || new Set();
+  const pendiente = p => porPlano.get(p).some(n => estadoDeImagen(p, n) !== 'hecha'
+    || sinRevisar(n) || recien.has(n.id));
+  /* LAS DE UNA VERSIÓN ANTERIOR DEL GUION: ya hechas, y escritas para una frase
+     que ese plano ya no dice (o para un plano que ya no está). Salían mezcladas
+     con las de ahora, con la imagen NUEVA del plano al lado, y parecían notas
+     de este vídeo (11-10-2026). Al regenerar ya no se aplican (ver
+     `_retirar_lo_de_otro_texto` en app.py): se guardan aquí, plegadas. */
+  // sin la lista de planos cargada no se sabe qué plano ya no está: no se adivina
+  const vieja = p => porPlano.get(p).every(n => estadoDeImagen(p, n) === 'hecha'
+    && (n.descolgada || (escenas.length > 0 && orden(p) === 9999)));
+  const viejas = planos.filter(vieja);
+  const actuales = planos.filter(p => !vieja(p));
+  const conAlgo = actuales.filter(pendiente);
+  const hechas = actuales.filter(p => !pendiente(p));
+  conAlgo.forEach(p => lista.appendChild(tarjetaNotaImagen(p, porPlano.get(p))));
+  if (hechas.length) {
+    const plegable = h('details', { clase: 'imagenes-hechas' },
+      h('summary', {}, `Imágenes ya rehechas (${hechas.length})`));
+    if (PREVIA.verHechas) plegable.open = true;
+    plegable.addEventListener('toggle', () => { PREVIA.verHechas = plegable.open; });
+    hechas.forEach(p => plegable.appendChild(tarjetaNotaImagen(p, porPlano.get(p))));
+    lista.appendChild(plegable);
+  }
+  if (viejas.length) {
+    const plegable = h('details', { clase: 'imagenes-hechas notas-viejas' },
+      h('summary', {}, `Notas de una versión anterior del guion (${viejas.length})`),
+      h('div', { clase: 'meta' }, 'Se escribieron para lo que se decía antes en ese plano. '
+        + 'Ya están hechas y no se aplican a las imágenes nuevas: se guardan aquí por si quieres releerlas.'));
+    if (PREVIA.verViejas) plegable.open = true;
+    plegable.addEventListener('toggle', () => { PREVIA.verViejas = plegable.open; });
+    viejas.forEach(p => plegable.appendChild(tarjetaNotaImagen(p, porPlano.get(p), true)));
+    lista.appendChild(plegable);
+  }
+  return lista;
+}
+
+/* LA TARJETA DE UNA IMAGEN: cuál es, qué se oye en ella, sus notas y qué pasa.
+ * La miniatura es la de AHORA (al rehacerse, la nueva), con el bloque y el
+ * segundo y la frase del guion; debajo, cada nota con su estado en palabras. */
+function tarjetaNotaImagen(plano, notas, vieja) {
+  const v = videoAbierto();
+  const escenas = (PREVIA.ficha || {}).escenas || [];
+  const e = escenas.find(x => x.id === plano) || null;
+  const estados = notas.map(n => estadoDeImagen(plano, n));
+  const general = estados.includes('corriendo') ? 'corriendo'
+    : estados.includes('en cola') ? 'en cola'
+      : estados.includes('fallo') ? 'fallo'
+        : estados.includes('') ? 'pendiente' : 'hecha';
+  const porMirar = notas.some(sinRevisar);
+  const ir = () => { notas.forEach(darPorRevisada); irAlMomentoDeLaNota(notas[0]); };
+  const tarjeta = h('div', { clase: `nota-imagen estado-${general}` + (porMirar ? ' sin-revisar' : '') });
+  const ultima = notas.map(n => n.regenerado || '').join('|');
+  /* ANTES Y AHORA, una al lado de la otra cuando ya se rehizo: una corrección
+     pequeña sin la de antes delante se leía como «no ha cambiado nada»
+     (10-10-2026). La de antes es la que había al pedirla (`nota.antes`). */
+  const conAntes = notas.filter(n => n.antes && estadoDeImagen(plano, n) === 'hecha');
+  const antes = conAntes.length ? conAntes[conAntes.length - 1].antes : '';
+  const columna = h('div', { clase: 'nota-columna' });
+  // la imagen de ahora de ese número es de OTRA escena: a una nota vieja no se le pone
+  if (vieja) {
+    columna.appendChild(h('div', { clase: 'nota-mini' }, h('span', { clase: 'meta' }, 'versión anterior')));
+  } else columna.appendChild(h('button', { clase: 'nota-mini', title: 'Ver esta imagen en grande arriba', onclick: ir },
+    e && e.imagen
+      ? h('img', { src: `${API.archivo(v.pid, e.imagen)}?mini=512&v=${encodeURIComponent(ultima)}`,
+        alt: plano, loading: 'lazy' })
+      : h('span', { clase: 'meta' }, 'sin imagen')));
+  if (!vieja && antes && e && antes !== e.imagen) {
+    columna.appendChild(h('div', { clase: 'nota-antes-ahora meta' }, '▲ ahora · antes ▼'));
+    columna.appendChild(h('button', {
+      clase: 'nota-mini nota-antes', title: 'Cómo era antes de esta nota (pulsa para verla en grande)',
+      onclick: () => lupa(API.archivo(v.pid, antes)),
+    }, h('img', { src: `${API.archivo(v.pid, antes)}?mini=512`, alt: `${plano} antes`, loading: 'lazy' })));
+  }
+  tarjeta.appendChild(columna);
+  const cuerpo = h('div', { clase: 'nota-cuerpo' });
+  cuerpo.appendChild(h('div', { clase: 'nota-donde' },
+    h('b', {}, `Imagen ${plano || '?'}`),
+    e && !vieja ? h('span', { clase: 'meta' }, `${e.bloque ? `bloque ${e.bloque} · ` : ''}${mmss(e.t_in)}–${mmss(e.t_out)}`) : null,
+    notas.length > 1 ? h('span', { clase: 'meta' }, `· ${notas.length} notas`) : null));
+  if (e && e.narracion && !vieja) {
+    cuerpo.appendChild(h('div', { clase: 'nota-guion', title: 'lo que se oye en esta imagen' },
+      `«${recortar(legible(e.narracion), 160)}»`));
+  }
+  notas.forEach(nota => cuerpo.appendChild(PREVIA.editando === nota.id
+    ? filaNotaEscena(nota) : filaDeNotaImagen(nota, vieja)));
+  // LO DE LA IMAGEN ENTERA: el reloj si se dibuja, y el botón que la rehace
+  // con TODAS sus notas pendientes (se juntan y se paga una)
+  cuerpo.appendChild(enVivo(() => {
+    const ahora = notas.map(n => estadoDeImagen(plano, n));
+    const fila = h('div', { clase: 'nota-estado fila' });
+    if (ahora.includes('corriendo')) {
+      fila.appendChild(h('span', { clase: 'pastilla estado-corriendo' }, `Dibujando… ${relojDeImagen()}`));
+    }
+    fila.appendChild(h('span', { clase: 'crece' }));
+    const pedir = notas.filter((n, i) => ahora[i] === '' || ahora[i] === 'fallo');
+    const precio = `1 imagen, ≈ ${usdCorto(COLA_IMG.usdPorImagen)}`;
+    if (pedir.length) {
+      fila.appendChild(h('button', { clase: 'mini avisa',
+        title: `Retoca SOLO esta imagen con ${pedir.length > 1 ? 'sus notas juntas' : 'lo que has escrito'},`
+          + ` partiendo de la de ahora (${precio})`,
+        onclick: () => pedirCola({ notas: pedir.map(n => n.id) }) },
+      (ahora.includes('fallo') ? 'Reintentar' : 'Rehacer esta imagen')
+        + (pedir.length > 1 ? ` (${pedir.length} notas juntas)` : '')));
+      fila.appendChild(h('button', { clase: 'mini fantasma',
+        title: 'La dibuja de nuevo SIN partir de la de ahora: para cambios grandes'
+          + ` (otra escena, otro objeto). ${precio}`,
+        onclick: () => pedirCola({ notas: pedir.map(n => n.id), desde_cero: true }) },
+      'Desde cero'));
+    }
+    if (vieja) {
+      // de otra frase: ni «Ver cómo quedó» (la imagen de ahora es de otra
+      // escena) ni volver a dibujarla con ella (sería traer la escena vieja)
+      fila.appendChild(h('span', { clase: 'meta' }, 'de una versión anterior: ya no se aplica'));
+      return fila;
+    }
+    if (ahora.every(x => x === 'hecha')) {
+      fila.appendChild(h('button', { clase: 'mini', onclick: ir }, 'Ver cómo quedó'));
+      fila.appendChild(h('span', { clase: 'meta' }, 'en el vídeo entra al volver a montarlo'));
+      /* «LA REHICE Y SALIÓ IGUAL»: retocar parte de la imagen de ahora y la
+         conserva; desde cero no. */
+      fila.appendChild(h('button', { clase: 'mini fantasma',
+        title: 'Si salió casi igual: la vuelve a dibujar con la misma nota pero SIN partir'
+          + ` de la de ahora (${precio})`,
+        onclick: () => {
+          if (!window.confirm(`¿Dibujar ${plano} otra vez desde cero con esta nota? (${precio})`)) return;
+          pedirCola({ notas: notas.map(n => n.id), desde_cero: true });
+        } }, '¿Salió igual? Desde cero'));
+    }
+    return fila;
+  }));
+  tarjeta.appendChild(cuerpo);
+  return tarjeta;
+}
+
+/* UNA NOTA DENTRO DE SU IMAGEN: el texto, su estado en palabras y sus mandos. */
+function filaDeNotaImagen(nota, vieja) {
+  const v = videoAbierto();
+  const fila = h('div', { clase: 'nota-fila' });
+  fila.appendChild(h('div', { clase: 'texto' }, nota.texto));
+  if ((nota.imagenes || []).length) {
+    const tira = h('div', { clase: 'tira-aportadas' });
+    nota.imagenes.forEach(nombre => tira.appendChild(h('img', {
+      src: API.imagenRepaso(v.pid, nombre), alt: '', loading: 'lazy',
+      title: 'referencia adjunta a la nota',
+      onclick: () => lupa(API.imagenRepaso(v.pid, nombre)),
+    })));
+    fila.appendChild(tira);
+  }
+  fila.appendChild(enVivo(() => {
+    const ahora = estadoDeImagen(nota.plano, nota);
+    const caja = h('div', {});
+    const linea = h('div', { clase: 'fila nota-mandos' });
+    const etiqueta = {
+      corriendo: 'Dibujando…',
+      'en cola': `En cola (${COLA_IMG.cola.indexOf(nota.id) + 1}ª)`
+        + (COLA_IMG.esperando ? ` · empieza al terminar ${COLA_IMG.esperando}` : ''),
+      hecha: 'Hecha ✓',
+      fallo: esRechazoDeSeguridad(nota.error) ? 'Rechazada por OpenAI' : 'Falló',
+    }[ahora] || 'Pendiente';
+    linea.appendChild(h('span', { clase: `pastilla estado-${ahora || 'pendiente'}` }, etiqueta));
+    if (ahora === 'hecha' && sinRevisar(nota)) {
+      linea.appendChild(h('span', { clase: 'sin-ver', title: 'ya está hecha y no la has mirado' }, 'sin revisar'));
+    }
+    if (nota.descolgada) {
+      linea.appendChild(h('span', { clase: 'pastilla aviso',
+        title: 'lo que se decía en esta imagen cuando escribiste la nota ya no está en el vídeo' },
+      'el texto cambió'));
+    }
+    linea.appendChild(h('span', { clase: 'crece' }));
+    if (ahora === 'fallo' && esRechazoDeSeguridad(nota.error)) {
+      linea.appendChild(h('button', { clase: 'mini primario',
+        title: 'Reescribe la nota describiendo lo que se ve, sin marcas ni personajes',
+        onclick: () => notaSinMarcas(nota) }, 'Hacerla sin marcas'));
+    }
+    if (ahora === 'en cola') {
+      linea.appendChild(h('button', { clase: 'mini fantasma', onclick: () => sacarDeLaCola(nota.id) },
+        'Sacar de la cola'));
+    }
+    // una nota de otra frase no se edita: editada volvería a aplicarse al plano nuevo
+    if (!vieja) {
+      linea.appendChild(h('button', { clase: 'mini fantasma', title: 'Cambiar esta nota',
+        onclick: () => { PREVIA.editando = nota.id; repintarVideo(); } }, '✎ Editar'));
+    }
+    linea.appendChild(h('button', { clase: 'mini peligro', title: 'Borrar esta nota',
+      onclick: () => borrarNota(nota.id) }, '× Borrar'));
+    caja.appendChild(linea);
+    if (ahora === 'fallo' && nota.error) caja.appendChild(h('div', { clase: 'nota-error' }, nota.error));
+    if (nota.aviso && ahora === 'hecha') caja.appendChild(h('div', { clase: 'meta' }, nota.aviso));
+    return caja;
+  }));
+  return fila;
+}
 
 function listaDeNotas() {
   const r = estadoRepaso();
   const v = videoAbierto();
   const lista = h('div', { clase: 'repaso-notas' });
   const enPrevia = v.vista === 'previa';
+  // EN IMÁGENES, UNA TARJETA POR IMAGEN con todas sus notas dentro
+  if (enPrevia) return listaPorImagen();
   notasDeAhora().forEach(nota => {
     /* EDITANDO Y EN LAS DIAPOSITIVAS, manda el editor EN LINEA que ya existe
        (`filaNotaEscena`). El boton de editar de esta lista abre el panel del
@@ -9467,7 +10715,7 @@ function listaDeNotas() {
          repintar el cuadro de feedback que se esta usando. */
       enPrevia ? enVivo(() => {
         const est = estadoDeImagen(nota.plano, nota);
-        const trabajo = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
+        const trabajo = trabajoVideoLight() || {};
         const pct = Math.round((Number(trabajo.progreso) || 0) * 100);
         return conAyuda(
           est === 'hecha'
@@ -9477,7 +10725,7 @@ function listaDeNotas() {
               ? 'Esperando turno. Entra en cuanto acabe alguna de las que van '
                 + 'ahora.'
               : 'Vuelve a dibujar SOLO este plano con lo que has escrito. Se '
-                + 'hacen hasta tres a la vez; si pides mas, esperan turno.',
+                + 'hacen hasta tres a la vez; si pides más, esperan turno.',
           h('button', {
             clase: est === 'hecha' ? 'mini' : 'mini avisa',
             disabled: !nota.plano || est === 'corriendo' || est === 'en cola',
@@ -9547,13 +10795,31 @@ async function borrarNota(nid) {
 function botonAplicarRepaso() {
   const pend = pendientesDeAhora();
   if (!pend) return null;
-  const corriendo = (APP.trabajos[CLAVE_VIDEO_LIGHT] || {}).estado === 'ejecutando';
+  /* EN IMÁGENES SE DICE QUÉ SE VA A PAGAR: una imagen por PLANO (las notas
+     del mismo plano van juntas), con su precio y lo que tardará. */
+  if (cuadernoDeAhora() === 'imagenes') {
+    const ocupadas = new Set([...(COLA_IMG.cola || []),
+      ...((COLA_IMG.actual || {}).notas || [])]);
+    const planos = new Set(notasDeAhora()
+      .filter(n => n.estado !== 'aplicado' && n.plano && !ocupadas.has(n.id))
+      .map(n => n.plano));
+    if (!planos.size) return null;
+    const n = planos.size;
+    return conAyuda(
+      'Rehace las imágenes de todas las notas pendientes, una detrás de otra. '
+      + 'Si hay varias notas para la misma imagen, se juntan y se paga una sola. '
+      + 'Si OpenAI rechaza una, las demás siguen y esa nota te dice por qué.',
+      h('button', { clase: 'avisa', onclick: encolarTodasLasImagenes },
+        `Rehacer ${n} ${n === 1 ? 'imagen' : 'imágenes'} · ≈ ${usdCorto(n * COLA_IMG.usdPorImagen)}`
+        + ` · ~${mmss(n * COLA_IMG.segundosPorImagen)}`));
+  }
+  const corriendo = !!trabajoVideoLight();
   return conAyuda(
     (videoAbierto().vista === 'previa'
       ? 'Pone en cola todas las notas de esta pantalla y va rehaciendo esas '
-        + 'imagenes, una a una. Puedes seguir mirando mientras: cada tarjeta '
-        + 'dice por donde va la suya.'
-      : 'Se aplica lo mas barato que resuelve cada nota: bajar la musica vuelve '
+        + 'imágenes, una a una. Puedes seguir mirando mientras: cada tarjeta '
+        + 'dice por dónde va la suya.'
+      : 'Se aplica lo más barato que resuelve cada nota: bajar la música vuelve '
         + 'a mezclar el audio, cambiar una cartela redibuja una capa, y solo se '
         + 'repaga una imagen si de verdad hay que volver a dibujar ese plano. '
         + 'Al terminar, monta el MP4 con los cambios dentro.'),
@@ -9634,6 +10900,16 @@ function vistaCrearLight() {
     v => { e.nombre = v; tocarEncargoLight(); },
     { pista: 'p. ej. «Cartoon del canal» o «Fotos de eventos»' }));
 
+  /* EN QUÉ PROYECTO NACE. De entrada, el que estaba abierto en la galería;
+     se puede cambiar aquí y después desde su menú ⋯. */
+  if (listaClientes().length) {
+    if (e.cliente === undefined) e.cliente = clienteElegido() === '_sin' ? '' : clienteElegido();
+    caja.appendChild(campoSelect('Proyecto (cliente)', e.cliente || '',
+      [{ valor: '', nombre: '— sin proyecto —' }]
+        .concat(listaClientes().filter(clienteAbierto).map(c => ({ valor: c.id, nombre: c.nombre }))),
+      v => { e.cliente = v; tocarEncargoLight(); }));
+  }
+
   const cajas = h('div', {});
 
   cajas.appendChild(bloqueLight('🎨 Estilo gráfico',
@@ -9644,9 +10920,9 @@ function vistaCrearLight() {
      las que se redacta cada guion del canal, así que cuanto más concreto sea
      menos se lo inventa. */
   cajas.appendChild(bloqueLight('🗣️ Tono del guion', 'cómo se cuenta, nunca de qué',
-    campoArea('', e.tono_prompt, v => { e.tono_prompt = v; tocarEncargoLight(); },
+    conGuia(campoArea('', e.tono_prompt, v => { e.tono_prompt = v; tocarEncargoLight(); },
       'como quien te lo cuenta en la barra de un bar y del tema sabe más que tú: '
-      + 'frases cortas, sin adjetivos de relleno, los datos hablan solos')));
+      + 'frases cortas, sin adjetivos de relleno, los datos hablan solos'))));
 
   /* EL RITMO VA ANTES QUE LA VOZ, y no es orden estético: el ritmo entra en la
      decisión de la voz —«el montaje va a planos de 2 s»— y además le rellena la
@@ -9655,8 +10931,8 @@ function vistaCrearLight() {
     sliderRitmo(e.ritmo, v => { e.ritmo = v; tocarEncargoLight(); })));
 
   cajas.appendChild(bloqueLight('🎙️ Voz', 'quién lo locuta',
-    campoArea('', e.voz_prompt, v => { e.voz_prompt = v; tocarEncargoLight(); },
-      'grave, pausada, sin sonar a locutor de anuncio'),
+    conGuia(campoArea('', e.voz_prompt, v => { e.voz_prompt = v; tocarEncargoLight(); },
+      'grave, pausada, sin sonar a locutor de anuncio')),
     selectorVozPropiaLight(e)));
 
   cajas.appendChild(bloqueLight('🌐 Idioma', 'se cambia luego sin regenerar nada',
@@ -9684,15 +10960,183 @@ const GUIA_DE_BLOQUE = {
   'Las llamadas a la acción': 'cta',
 };
 
+/* «REVISAR»: lo escrito en el campo, contra su guía (pasos/revisar_campo.py).
+   Dice si sirve para lo que el sistema hace con ello, qué falla y por qué, y
+   propone una versión que se pone en el campo con un botón. Va por la
+   suscripción de Claude: no cuesta imágenes. */
+/* LA REVISIÓN VIVE FUERA DE LA PANTALLA, por pantalla y por guía.
+ *
+ * Iba en un panel creado al pulsar y pegado al bloque. Pero la pantalla se
+ * repinta sola (al guardarse el encargo, al quedar el guion obsoleto, con el
+ * coste), y cada repintado hace un bloque NUEVO: la revisión, que tarda unos
+ * segundos, se pintaba en un panel que ya no estaba en ninguna parte, y
+ * «Usar la versión sugerida» escribía en un campo que ya no existía. Se veía
+ * como «Revisar no ofrece aplicar nada» (10-10-2026). Ahora el estado está en
+ * `REVISION_VIVA` y el bloque, cada vez que se pinta, pinta el panel con él; y
+ * los botones buscan el campo AL PULSARLOS, no el que había al revisar. */
+const REVISION_VIVA = new Map();
+
+function claveDeRevision(gid) {
+  const l = APP.light;
+  const donde = l.vista === 'preset' ? `e:${l.abierto}`
+    : l.vista === 'elegido' ? `v:${(l.video || {}).pid}:${(l.video || {}).vista}` : l.vista;
+  return `${donde}|${gid}`;
+}
+
+/* El panel de una revisión: lo pinta el bloque al construirse y lo repinta la
+ * revisión al avanzar (los dos con `pintarPanelRevision`). */
+function panelDeRevision(gid, mandos) {
+  const panel = h('div', { clase: 'revision-campo', datos: { revision: claveDeRevision(gid) } });
+  pintarPanelRevision(panel, gid, mandos);
+  return panel;
+}
+
+function pintarPanelRevision(panel, gid, mandos) {
+  const viva = REVISION_VIVA.get(claveDeRevision(gid));
+  vaciar(panel);
+  panel.hidden = !viva || viva.cerrada;
+  if (!viva || viva.cerrada) return;
+  if (viva.estado === 'pensando') {
+    panel.appendChild(h('div', { clase: 'cargando' }, 'revisando con la guía… (unos segundos)'));
+  } else if (viva.estado === 'error') {
+    panel.appendChild(cajaError(viva.error));
+  } else {
+    pintarRevision(panel, viva.resultado || {}, () => campoDeLaGuia(mandos), gid);
+  }
+}
+
+/* Repinta los paneles de esa revisión que estén en pantalla AHORA (el bloque
+ * puede haberse rehecho mientras se revisaba). */
+function repintarRevisiones(gid) {
+  const clave = claveDeRevision(gid);
+  document.querySelectorAll('.revision-campo').forEach(panel => {
+    if (panel.dataset.revision !== clave) return;
+    const mandos = panel.closest('.mandos');
+    if (mandos) pintarPanelRevision(panel, gid, mandos);
+  });
+}
+
+function botonRevisar(gid, campo) {
+  return h('button', {
+    clase: 'mini fantasma', type: 'button',
+    title: 'Comprobar si lo escrito sirve como dice la guía',
+    onclick: async ev => {
+      const area = campo();
+      const texto = area ? area.value.trim() : '';
+      if (!texto) { toast('Escribe algo en el campo y vuelve a revisar', true); return; }
+      const clave = claveDeRevision(gid);
+      const previa = REVISION_VIVA.get(clave);
+      if (previa && previa.estado === 'pensando') return;
+      /* CON LA REVISIÓN ANTERIOR DE ESTE CAMPO: el revisor mira si aquello
+         se arregló en vez de buscar cosas nuevas cada vez. */
+      const anterior = previa && previa.estado === 'listo' ? previa.resultado : null;
+      REVISION_VIVA.set(clave, { estado: 'pensando', texto });
+      repintarRevisiones(gid);
+      const boton = ev.currentTarget;
+      boton.disabled = true;
+      const fin = cambios => {
+        // si entretanto se ha ido a otra pantalla, la clave sigue siendo la suya
+        REVISION_VIVA.set(clave, Object.assign({ texto }, cambios));
+        repintarRevisiones(gid);
+        boton.disabled = false;
+      };
+      try {
+        const lanzada = await pedir(`${BASE}/api/sistema/guias/${gid}/revisar`,
+          { method: 'POST', cuerpo: { texto, anterior } });
+        // se pide SIEMPRE una vez: aunque venga «listo» (ya revisado), el
+        // resultado está en su ficha y no en la respuesta del lanzamiento
+        let ficha = { estado: 'pensando' };
+        for (let i = 0; i < 80 && ficha.estado === 'pensando'; i += 1) {
+          if (i) await new Promise(r => setTimeout(r, 1500));
+          ficha = await pedir(`${BASE}/api/sistema/revisiones/${lanzada.id}`);
+        }
+        if (ficha.estado === 'error') throw new Error(ficha.error || 'no se ha podido revisar');
+        if (ficha.estado !== 'listo') {
+          throw new Error('la revisión ha tardado más de dos minutos: el CLI de Claude '
+            + 'puede estar ocupado o sin cupo. Vuelve a pulsar «Revisar» en un momento');
+        }
+        fin({ estado: 'listo', resultado: ficha.resultado || {} });
+      } catch (e) {
+        fin({ estado: 'error', error: e.message });
+      }
+    },
+  }, '✓ Revisar');
+}
+
+function pintarRevision(panel, r, campo, gid) {
+  const nombres = { sirve: '✅ Sirve', mejorable: '🟡 Mejorable', no_sirve: '🔴 No sirve así' };
+  const cerrar = () => {
+    const viva = REVISION_VIVA.get(claveDeRevision(gid));
+    if (viva) viva.cerrada = true;
+    repintarRevisiones(gid);
+  };
+  panel.appendChild(h('div', { clase: 'fila' },
+    h('b', {}, nombres[r.veredicto] || r.veredicto),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini fantasma', onclick: cerrar }, 'Cerrar')));
+  if (r.resumen) panel.appendChild(h('div', {}, r.resumen));
+  if (r.de_memoria) {
+    panel.appendChild(h('div', { clase: 'meta' },
+      'Este texto ya se había revisado: es la misma respuesta (no gasta otra revisión).'));
+  }
+  if ((r.problemas || []).length) {
+    panel.appendChild(h('ul', {}, ...(r.problemas || []).map(p => h('li', {},
+      h('b', {}, p.que), p.por_que ? ` — ${p.por_que}` : '',
+      p.arreglo ? h('div', { clase: 'meta' }, `Mejor: ${p.arreglo}`) : null))));
+  }
+  if (r.sugerida) {
+    panel.appendChild(h('details', { open: true },
+      h('summary', {}, 'La versión sugerida'),
+      h('div', { clase: 'sugerida' }, r.sugerida)));
+    panel.appendChild(h('div', { clase: 'fila' },
+      h('button', {
+        clase: 'mini primario',
+        title: 'Pone la versión sugerida en el campo (se guarda como si la hubieras escrito)',
+        onclick: () => {
+          const area = campo();
+          if (!area) { toast('No encuentro el campo: vuelve a abrir esta pantalla', true); return; }
+          if (!window.confirm('¿Cambiar lo escrito por la versión sugerida?')) return;
+          area.value = r.sugerida;
+          area.dispatchEvent(new Event('input', { bubbles: true }));
+          area.dispatchEvent(new Event('change', { bubbles: true }));
+          cerrar();
+          toast('Puesta la versión sugerida: revísala y ajústala a tu gusto');
+        },
+      }, 'Aplicar la versión sugerida')));
+  } else if (r.veredicto && r.veredicto !== 'sirve') {
+    // sin versión propuesta, que lo diga: si no, parece que falta el botón
+    panel.appendChild(h('div', { clase: 'meta' },
+      'La revisión no ha propuesto un texto entero: cambia lo de arriba a mano '
+      + 'y vuelve a pulsar «Revisar».'));
+  }
+}
+
+/* EL CAMPO AL QUE MIRAN «Guía» y «Revisar»: el marcado con `conGuia`, y si no
+   hay ninguno el primero. Con «el primero» a secas, en la ficha del tono se
+   revisaba la guía de dos mil palabras en vez de lo que habías pedido, y en el
+   estilo gráfico la descripción de una imagen en vez de las indicaciones. */
+function conGuia(campo) {
+  const area = campo.querySelector('textarea');
+  if (area) area.dataset.guia = '1';
+  return campo;
+}
+
+function campoDeLaGuia(mandos) {
+  return mandos.querySelector('textarea[data-guia]') || mandos.querySelector('textarea');
+}
+
 function bloqueLight(titulo, porque, ...contenido) {
   const mandos = h('div', { clase: 'mandos' }, ...contenido);
   const guia = GUIA_DE_BLOQUE[titulo];
+  // la revisión de este campo, si la hay: sobrevive a que el bloque se rehaga
+  if (guia && guia !== 'cta') mandos.appendChild(panelDeRevision(guia, mandos));
   return h('div', { clase: 'bloque-light' },
     h('div', { clase: 'titulo' },
       h('div', { clase: 'titulo-fila' },
         h('h3', {}, titulo),
         // la de las llamadas a la accion solo copia: el bloque tiene tres campos
-        guia ? botonGuia(guia, guia === 'cta' ? null : () => mandos.querySelector('textarea')) : null),
+        guia ? botonGuia(guia, guia === 'cta' ? null : () => campoDeLaGuia(mandos)) : null,
+        guia && guia !== 'cta' ? botonRevisar(guia, () => campoDeLaGuia(mandos)) : null),
       porque ? h('span', { clase: 'meta' }, porque) : null),
     mandos);
 }
@@ -9738,9 +11182,9 @@ function camposEstiloLight() {
   caja.appendChild(selectorTipoDeImagen(e.estilo_modo,
     v => { e.estilo_modo = v; tocarEncargoLight(); }));
   caja.appendChild(imagenesDeApoyoLight(e, tocarEncargoLight));
-  caja.appendChild(campoArea('Indicaciones (opcional)', e.estilo_prompt,
+  caja.appendChild(conGuia(campoArea('Indicaciones (opcional)', e.estilo_prompt,
     v => { e.estilo_prompt = v; tocarEncargoLight(); },
-    'más cálido, con luz de tarde y menos cosas en el fondo'));
+    'más cálido, con luz de tarde y menos cosas en el fondo')));
   return caja;
 }
 
@@ -9766,10 +11210,9 @@ function selectorTipoDeImagen(valor, alCambiar) {
 
 /* LAS IMÁGENES QUE ACOMPAÑAN A LA DESCRIPCIÓN.
  *
- * El camino del vídeo le da a la guía veinticuatro fotogramas que mirar; el
- * descrito le daba un párrafo y nada más. Aquí se pueden adjuntar hasta las
- * MISMAS veinticuatro —el tope lo dice el servidor, que es donde vive— como
- * material de apoyo: manda lo escrito y esto lo concreta.
+ * Hasta cincuenta —el tope lo dice el servidor (`presets_light.MAX_IMAGENES_
+ * ESTILO`)—, cada una con una frase opcional que dice qué mirar en ella. La
+ * guía las mira todas; para dibujar las láminas van ocho como mucho.
  *
  * Se suben AL ELEGIRLAS y no al pulsar «Generar»: el taller no existe hasta
  * entonces, así que esperan en un buzón del servidor y lo que se guarda aquí es
@@ -9785,16 +11228,63 @@ function imagenesDeApoyoLight(e, alCambiar, idHueco, opciones) {
   // el <label for> necesita un id UNICO: con dos bloques en la misma pantalla
   // --el de crear y el de editar-- el segundo abriria el selector del primero
   const id = idHueco || 'aportadas-estilo';
-  const tope = op.tope || (APP.light.datos || {}).max_imagenes_estilo || 24;
+  const tope = op.tope || (APP.light.datos || {}).max_imagenes_estilo || 50;
   const caja = h('div', { clase: 'campo aportadas' });
   const tira = h('div', { clase: 'tira-aportadas' });
   const estado = h('span', { clase: 'meta' });
+  // LO QUE SE DICE DE CADA IMAGEN, opcional y solo en las del estilo: viaja a
+  // la guía con el nombre de su fichero (`presets_light.indicaciones_con_...`)
+  const describir = clave === 'estilo_imagenes';
+  const lista = h('div', { clase: 'descripciones-aportadas' });
+  const plegable = describir ? h('details', { clase: 'describir-aportadas' },
+    h('summary', {}, 'Describir las imágenes (opcional)'),
+    h('div', { clase: 'meta' },
+      'Una frase por imagen para que se entienda qué mirar en ella: «la luz de '
+      + 'esta», «solo el mueble, no el fondo». Las que dejes en blanco se miran igual.'),
+    lista) : null;
+
+  const pintarDescripciones = () => {
+    if (!describir) return;
+    vaciar(lista);
+    e[clave].forEach((ficha, indice) => {
+      lista.appendChild(h('div', { clase: 'descripcion-aportada' },
+        h('img', {
+          src: API.imagenLight(ficha.nombre), alt: '', loading: 'lazy',
+          title: 'ver en grande', onclick: () => verAportadaEnGrande(e[clave], ficha),
+        }),
+        h('input', {
+          type: 'text', maxlength: 300, value: ficha.descripcion || '',
+          placeholder: `Imagen ${indice + 1}${ficha.origen ? ` · ${ficha.origen}` : ''}`,
+          'aria-label': `Descripción de la imagen ${indice + 1}`,
+          oninput: ev => { ficha.descripcion = ev.target.value; alCambiar(); },
+        })));
+    });
+    plegable.hidden = !e[clave].length;
+  };
 
   const pintar = () => {
+    pintarDescripciones();
     vaciar(tira);
     e[clave].forEach(ficha => {
       tira.appendChild(h('div', { clase: 'aportada', title: ficha.origen || '' },
-        h('img', { src: API.imagenLight(ficha.nombre), alt: '', loading: 'lazy' }),
+        h('img', {
+          src: API.imagenLight(ficha.nombre), alt: '', loading: 'lazy',
+          title: 'ver en grande',
+          onclick: () => verAportadaEnGrande(e[clave], ficha),
+        }),
+        ficha.descripcion ? h('span', { clase: 'con-descripcion', title: ficha.descripcion }, '✎') : null,
+        describir ? h('button', {
+          clase: 'destacar' + (ficha.destacada ? ' puesta' : ''),
+          title: ficha.destacada ? 'Va seguro a la hoja con la que se dibujan las láminas (pulsa para quitarla)'
+            : 'Marcar para dibujar: va seguro a la hoja de las láminas (hasta 8)',
+          onclick: () => {
+            const marcadas = e[clave].filter(x => x.destacada).length;
+            if (!ficha.destacada && marcadas >= 8) { toast('Caben 8 marcadas para dibujar', true); return; }
+            ficha.destacada = !ficha.destacada;
+            pintar();
+            alCambiar();
+          },
+        }, '★') : null,
         h('button', {
           clase: 'quitar', title: 'quitar esta imagen',
           onclick: () => quitarImagenLight(e, ficha, pintar, alCambiar, clave),
@@ -9840,8 +11330,61 @@ function imagenesDeApoyoLight(e, alCambiar, idHueco, opciones) {
   caja.appendChild(suelta);
   caja.appendChild(entrada);
   caja.appendChild(tira);
+  if (plegable) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Pulsa una imagen para verla en grande. La guía del estilo las mira todas; '
+      + 'para dibujar las láminas se usan 8 como mucho: las que marques con ★, '
+      + 'luego las que describas, y el resto repartidas.'));
+    caja.appendChild(plegable);
+  }
   pintar();
   return caja;
+}
+
+/* UNA IMAGEN DE REFERENCIA EN GRANDE, con flechas para pasar a la de al lado
+   (también con ← y →) y lo que se haya dicho de ella. Las miniaturas solas no
+   bastaban para distinguir dos fotos parecidas. */
+function verAportadaEnGrande(lista, ficha) {
+  let indice = Math.max(0, lista.indexOf(ficha));
+  const imagen = h('img', { alt: '' });
+  const pie = h('div', { clase: 'ficha-lupa' });
+  const pintar = () => {
+    const actual = lista[indice];
+    imagen.src = API.imagenLight(actual.nombre);
+    vaciar(pie).append(`Imagen ${indice + 1} de ${lista.length}`
+      + (actual.origen ? ` · ${actual.origen}` : '')
+      + (actual.descripcion ? ` — ${actual.descripcion}` : ''));
+  };
+  const mover = paso => { indice = (indice + paso + lista.length) % lista.length; pintar(); };
+  const cerrar = () => { capa.remove(); document.removeEventListener('keydown', teclas); };
+  const teclas = ev => {
+    if (ev.key === 'ArrowRight') mover(1);
+    else if (ev.key === 'ArrowLeft') mover(-1);
+    else if (ev.key === 'Escape') cerrar();
+  };
+  const capa = h('div', {
+    id: 'lupa', clase: 'lupa-aportadas',
+    onclick: ev => { if (ev.target === capa || ev.target === imagen) cerrar(); },
+  },
+    lista.length > 1 ? h('button', { clase: 'lupa-flecha izq', title: 'anterior (←)',
+      onclick: ev => { ev.stopPropagation(); mover(-1); } }, '‹') : null,
+    imagen,
+    lista.length > 1 ? h('button', { clase: 'lupa-flecha der', title: 'siguiente (→)',
+      onclick: ev => { ev.stopPropagation(); mover(1); } }, '›') : null,
+    pie);
+  document.addEventListener('keydown', teclas);
+  document.body.appendChild(capa);
+  pintar();
+}
+
+/* {nombre: descripción} de las imágenes que la llevan. */
+function descripcionesDeAportadas(lista) {
+  const salida = {};
+  (lista || []).forEach(x => {
+    const texto = String(x.descripcion || '').trim();
+    if (x.nombre && texto) salida[x.nombre] = texto;
+  });
+  return salida;
 }
 
 function subirImagenesLight(entrada, e, tope, pintar, alCambiar, clave) {
@@ -9913,12 +11456,23 @@ function pieDeCreacion() {
   const nota = h('span', { clase: 'meta' }, 'comprobando…');
   caja.appendChild(h('div', { clase: 'fila' }, boton, nota));
   if (aMedias) {
+    /* LAS DOS SALIDAS, DICHAS. «Empezar de cero» a secas no decía nada: ni que
+       hay un intento a medias, ni que olvidarlo vuelve a pagar lo ya hecho. */
     caja.appendChild(h('div', { clase: 'pista' },
-      'Se salta lo que ya salió bien y sigue por donde iba. ',
+      h('b', {}, 'Este estilo se quedó a medias'),
+      ' (falló o se paró). «Retomar» aprovecha lo que ya salió bien —no vuelve a '
+      + 'pagar las imágenes hechas— y sigue por donde iba. ',
       h('button', {
         clase: 'mini fantasma',
-        onclick: () => { APP.light.taller = null; pintarLight(); },
-      }, 'Empezar de cero')));
+        title: 'Olvida el intento a medias y genera el estilo entero otra vez',
+        onclick: () => {
+          if (!window.confirm('¿Olvidar el intento a medias y generar el estilo entero '
+            + 'otra vez? Lo que ya se hizo se vuelve a generar y a pagar.')) return;
+          APP.light.taller = null;
+          pintarLight();
+        },
+      }, 'Empezar de cero'),
+      ' olvida ese intento y lo genera todo otra vez (se vuelve a pagar).'));
   }
 
   const comprobar = () => {
@@ -10075,12 +11629,21 @@ function vistaPresetLight() {
   const origen = datos.origen || {};
   const caja = h('div', { clase: 'light-preset' });
   caja.appendChild(h('div', { clase: 'light-cab' },
+    APP.light.desdeVideo ? h('button', {
+      clase: 'mini', onclick: () => abrirVideoLight(APP.light.desdeVideo),
+      title: 'Volver al vídeo desde el que has abierto este estilo',
+    }, '‹ Volver al vídeo') : null,
     h('button', {
       clase: 'mini fantasma', onclick: () => irALight('galeria'),
       title: 'Volver a tus estilos',
-    }, '‹ Volver'),
+    }, APP.light.desdeVideo ? 'Todos los estilos' : '‹ Volver'),
     h('h2', {}, ficha.nombre || ficha.id),
+    APP.light.desdeVideo ? h('span', { clase: 'meta' }, 'el estilo de tu vídeo') : null,
     h('span', { clase: 'crece' }),
+    h('button', {
+      clase: 'mini', title: 'Lo que costó hacer este estilo, desglosado',
+      onclick: () => abrirCosteDelEstilo(ficha.id),
+    }, 'Lo que costó'),
     h('button', {
       clase: 'mini peligro', title: 'Mandar este estilo a la papelera',
       onclick: () => borrarPresetLight(ficha),
@@ -10089,6 +11652,7 @@ function vistaPresetLight() {
   // 🎨 el estilo gráfico, con sus muestras en fila
   const grafico = h('div', {});
   grafico.appendChild(bannerMuestras(ficha));
+  grafico.appendChild(laminasDelEstilo(ficha));
   /* SIN caja de «qué le cambiarías»: la de indicaciones es esa caja. Eran dos
      campos de texto seguidos preguntando lo mismo, y encima el de arriba se
      guardaba con el estilo y el de abajo no. Se queda el que se guarda: una
@@ -10138,8 +11702,12 @@ function vistaPresetLight() {
   caja.appendChild(bloqueLight('🎙️ Voz', 'quién lo locuta', voz));
 
   // 🌐 lo que se cambia a mano. Autoguardado, como todo lo demás.
-  caja.appendChild(bloqueLight('🌐 Nombre e idioma', 'se cambian sin regenerar nada',
+  const cliente = fichaCliente(clienteDe(ficha.id));
+  caja.appendChild(bloqueLight('🌐 Nombre, idioma y proyecto', 'se cambian sin regenerar nada',
     campoTexto('', ficha.nombre, v => guardarPresetLight(ficha.id, { nombre: v })),
+    listaClientes().length ? h('div', { clase: 'fila' },
+      h('span', { clase: 'meta' }, cliente ? `En el proyecto 📁 ${cliente.nombre}` : 'Sin proyecto'),
+      h('button', { clase: 'mini', onclick: () => moverEstiloACliente(ficha) }, 'Cambiar de proyecto')) : null,
     campoSelect('', ficha.idioma_pantalla || ficha.idioma || 'es',
       idiomasLight().map(i => ({ valor: i.valor, nombre: i.nombre })),
       v => guardarPresetLight(ficha.id, { idioma: v }, true))));
@@ -10188,14 +11756,205 @@ function bannerMuestras(ficha) {
 
   if (sueltas.length) {
     caja.appendChild(tiraDeImagenes(ficha, sueltas));
-    caja.appendChild(h('div', { clase: 'pista una-linea' },
-      `Las ${sueltas.length} referencias que copia cada plano, con el texto que `
-      + 'llevarían en el vídeo. Al generador van sin nada encima.'));
+    caja.appendChild(h('div', { clase: 'pista' },
+      `Tus ${sueltas.length} láminas con un TEXTO DE EJEMPLO encima, para ver cómo `
+      + 'quedarían una cartela y un subtítulo sobre tu estilo. Ese texto lo pone el '
+      + 'Estudio (es siempre el mismo, no sale de tus imágenes ni de tus vídeos) y '
+      + 'nunca va al generador: cada plano recibe las láminas limpias, las de abajo.'));
   } else {
     caja.appendChild(h('div', { clase: 'pista' },
       'Este estilo no tiene muestras todavía.'));
   }
   return caja;
+}
+
+/* ------------------------------------------------ LAS LÁMINAS DEL ESTILO
+ *
+ * Lo que de verdad copia cada plano de cada vídeo: no tus imágenes, sino estas
+ * láminas dibujadas en tu estilo (`pasos/laminas.py`). Aquí se ven LIMPIAS,
+ * con lo que enseña cada una, y se regeneran, se cambian, se quitan o se
+ * añaden. Dibujar una cuesta una imagen; quitar o devolver una ya dibujada,
+ * nada. Los vídeos ya creados no cambian: lo llevan los nuevos (o el que traiga
+ * el estilo desde su Encargo). */
+function laminasDelEstilo(ficha) {
+  const caja = h('div', { clase: 'laminas-estilo' });
+  const origen = (ficha.datos || {}).origen || {};
+  if (!origen.estilo_imagenes || !origen.taller) return caja;
+  const est = APP.light.laminas;
+  if (!est || est.preset !== ficha.id) {
+    APP.light.laminas = { preset: ficha.id, datos: null, error: '' };
+    pedir(API.presetLightLaminas(ficha.id))
+      .then(d => { APP.light.laminas = { preset: ficha.id, datos: d, error: '' }; })
+      .catch(e => { APP.light.laminas = { preset: ficha.id, datos: null, error: e.message }; })
+      .then(() => {
+        const vieja = document.querySelector('.light-preset .laminas-estilo');
+        if (vieja) vieja.replaceWith(laminasDelEstilo(ficha));
+      });
+  }
+  const d = (APP.light.laminas || {}).datos;
+  caja.appendChild(h('h3', {}, 'Las láminas de tu estilo'));
+  caja.appendChild(h('div', { clase: 'pista' },
+    'Qué es una lámina: tus imágenes de referencia NO van a cada plano. Con ellas '
+    + 'se escribe la guía del estilo (las mira todas) y la IA dibuja, en tu estilo, '
+    + 'estas láminas: una cara, unas personas, un interior, un exterior, un objeto, '
+    + 'un diagrama… Cada plano de cada vídeo recibe ESTAS láminas como referencia y '
+    + 'copia de ellas el trazo, la paleta y la luz. Por eso son lo que da '
+    + 'consistencia a tus vídeos: si una no te convence, regenérala, cámbiale lo '
+    + 'que enseña o quítala.'));
+  if ((APP.light.laminas || {}).error) {
+    caja.appendChild(h('div', { clase: 'caja-info' },
+      `no se han podido leer las láminas: ${APP.light.laminas.error}`));
+    return caja;
+  }
+  if (!d) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'leyendo las láminas…'));
+    return caja;
+  }
+  const precio = d.usd_por_lamina ? ` (≈ ${usdCorto(d.usd_por_lamina)})` : '';
+  // EL TRABAJO DE LAS LÁMINAS, aquí mismo y con su barra
+  // Solo si la ranura de seguimiento sigue siendo la de ESTE trabajo: otro
+  // trabajo de estilos lanzado después (crear uno, cambiar el idioma) se queda
+  // la ranura sin pasar por el final de este, y la rejilla se quedaba bloqueada
+  // enseñando el progreso del otro.
+  const tl = APP.light.trabajoLaminas;
+  const ranura = APP.trabajos[CLAVE_LIGHT];
+  if (tl && !(ranura && ranura.id === tl.id && APP.seguimientos[CLAVE_LIGHT])) {
+    APP.light.trabajoLaminas = null;
+  }
+  const enMarcha = !!APP.light.trabajoLaminas && APP.light.trabajoLaminas.preset === ficha.id;
+  if (enMarcha) {
+    caja.appendChild(enVivo(() => {
+      const t = APP.trabajos[CLAVE_LIGHT] || {};
+      const pct = Math.round((Number(t.progreso) || 0) * 100);
+      return h('div', { clase: 'caja-info trabajo-laminas' },
+        h('div', {}, `Rehaciendo las láminas… ${pct} %`
+          + (t.publico || t.mensaje ? ` · ${t.publico || t.mensaje}` : '')),
+        h('progress', { max: 100, value: pct }));
+    }));
+  }
+  const rejilla = h('div', { clase: 'rejilla-laminas' + (enMarcha ? ' ocupada' : '') });
+  d.laminas.forEach((l, i) => {
+    rejilla.appendChild(h('div', { clase: 'lamina' },
+      l.url
+        ? h('img', { src: `${BASE}${l.url}`, alt: l.titulo, loading: 'lazy',
+          onclick: () => lupa(`${BASE}${l.url}`) })
+        : h('div', { clase: 'sin-cara' }, 'sin dibujar'),
+      h('div', { clase: 'lamina-titulo' }, `${i + 1}. ${l.titulo}`),
+      h('div', { clase: 'meta' }, l.explicacion),
+      h('div', { clase: 'herramientas' },
+        h('button', { clase: 'mini', title: `Dibujarla otra vez: una imagen${precio}`,
+          onclick: () => regenerarLamina(ficha, l, precio) }, 'Regenerar'),
+        h('button', { clase: 'mini', title: 'Que enseñe otra cosa',
+          onclick: () => cambiarLamina(ficha, l, precio) }, 'Cambiar qué enseña'),
+        d.laminas.length > d.min
+          ? h('button', { clase: 'mini fantasma', title: 'Sacarla de la hoja (gratis)',
+            onclick: () => accionLaminas(ficha, { accion: 'quitar', lamina: l.id },
+              `¿Quitar la lámina «${l.titulo}»?\n\nSale de la hoja que recibe cada plano. `
+              + 'Su imagen se guarda: devolverla después no cuesta nada.') }, 'Quitar')
+          : null)));
+  });
+  caja.appendChild(rejilla);
+
+  const pie = h('div', { clase: 'fila' + (enMarcha ? ' rejilla-laminas ocupada' : '') });
+  if (d.laminas.length < d.max) {
+    pie.appendChild(h('button', { clase: 'mini', onclick: () => nuevaLamina(ficha, precio) },
+      `+ Añadir una lámina${precio}`));
+  }
+  (d.quitadas || []).forEach(l => {
+    pie.appendChild(h('button', { clase: 'mini fantasma',
+      title: l.url ? 'Ya está dibujada: devolverla es gratis' : `Hay que dibujarla${precio}`,
+      onclick: () => accionLaminas(ficha, { accion: 'restaurar', lamina: l.id }) },
+    `↺ Devolver «${l.titulo}»`));
+  });
+  caja.appendChild(pie);
+  caja.appendChild(h('div', { clase: 'meta' },
+    `${d.laminas.length} de ${d.max} láminas. Caben ${d.max} porque cada plano recibe `
+    + `una sola hoja con hasta ${d.max} referencias de estilo. Lo que sí se puede: `
+    + 'que cada lámina enseñe lo que más sale en tus vídeos (por ejemplo «una cocina '
+    + 'de noche con luz cálida»).'));
+
+  if (d.imagenes > d.en_la_hoja) {
+    caja.appendChild(campoSelect('Con qué imágenes tuyas se dibuja cada lámina',
+      d.hoja, [
+        { valor: 'comun', nombre: `Las mismas ${d.en_la_hoja} para todas (las ★ primero)` },
+        { valor: 'repartida', nombre: `Un grupo distinto para cada una: así cuentan tus ${d.imagenes} (mismo coste)` },
+      ], v => accionLaminas(ficha, { accion: 'hoja', hoja: v })));
+    caja.appendChild(h('div', { clase: 'meta' },
+      `Subiste ${d.imagenes} imágenes. La guía las mira todas; cada lámina se dibuja `
+      + `mirando una hoja de ${d.en_la_hoja}. Cambiar esto vale para las láminas que `
+      + 'dibujes a partir de ahora (no redibuja nada).'));
+  }
+  caja.appendChild(h('div', { clase: 'meta' },
+    'Cambiar las láminas no toca los vídeos ya creados: lo llevan los vídeos nuevos, '
+    + 'y en un vídeo ya hecho, «Su estilo» en el Encargo te deja traerlo.'));
+  return caja;
+}
+
+async function regenerarLamina(ficha, lamina, precio) {
+  const r = await dialogo({
+    titulo: `Regenerar «${lamina.titulo}»`,
+    texto: `Se dibuja otra vez con tu estilo: una imagen${precio}. Si quieres, di qué le corregirías.`,
+    campos: [{ clave: 'texto', tipo: 'textarea', etiqueta: 'Qué le corregirías (opcional)',
+      pista: 'sin sombras duras, y la persona mirando a cámara' }],
+    aceptar: 'Regenerar',
+  });
+  if (!r) return;
+  accionLaminas(ficha, { accion: 'regenerar', lamina: lamina.id, texto: r.texto || '' });
+}
+
+async function cambiarLamina(ficha, lamina, precio) {
+  const r = await dialogo({
+    titulo: `Qué enseña «${lamina.titulo}»`,
+    texto: `Se guarda con el estilo y se dibuja ya: una imagen${precio}.`
+      + (lamina.fabrica ? ' Déjalo vacío para volver a lo de fábrica.' : ''),
+    campos: [{ clave: 'texto', tipo: 'textarea', etiqueta: 'Lo que tiene que enseñar',
+      valor: lamina.texto || '', pista: 'una cocina pequeña de noche, con luz cálida y sin personas' }],
+    aceptar: 'Guardar y dibujar',
+  });
+  if (!r) return;
+  accionLaminas(ficha, { accion: 'cambiar', lamina: lamina.id, texto: r.texto || '' });
+}
+
+async function nuevaLamina(ficha, precio) {
+  const r = await dialogo({
+    titulo: 'Una lámina más',
+    texto: `Piensa en algo que salga a menudo en tus vídeos y que las otras no enseñen. Una imagen${precio}.`,
+    campos: [{ clave: 'texto', tipo: 'textarea', etiqueta: 'Lo que tiene que enseñar',
+      pista: 'un baño con espejo iluminado, plano general' }],
+    aceptar: 'Dibujarla',
+  });
+  if (!r) return;
+  accionLaminas(ficha, { accion: 'nueva', texto: r.texto || '' });
+}
+
+async function accionLaminas(ficha, cuerpo, pregunta) {
+  if (pregunta && !window.confirm(pregunta)) return;
+  try {
+    const datos = await pedir(API.presetLightLaminas(ficha.id), { method: 'POST', cuerpo });
+    APP.light.laminas = null;
+    if (datos.trabajo_id) {
+      /* SE QUEDA EN LA FICHA, con el progreso en las propias láminas. Antes
+         saltaba a la pantalla de «generando» (la de crear un estilo entero)
+         para quitar o devolver una lámina, que dura segundos (11-10-2026). */
+      APP.light.trabajoLaminas = { id: datos.trabajo_id, preset: ficha.id, accion: cuerpo.accion };
+      seguirTrabajo(CLAVE_LIGHT, datos.trabajo_id, async trabajo => {
+        APP.light.trabajoLaminas = null;
+        APP.light.laminas = null;
+        if (trabajo.estado === 'listo') toast('Láminas al día');
+        else if (trabajo.estado === 'error') toast(`no se ha podido: ${trabajo.error || 'falló'}`, true);
+        await cargarGaleriaLight(true);
+      }, () => refrescarVivosLight());
+      pintarLight();
+      return;
+    }
+    if (datos.preset && APP.light.datos) {
+      APP.light.datos.presets = presetsLight().map(p => (p.id === ficha.id ? datos.preset : p));
+    }
+    toast('guardado');
+    pintarLight();
+  } catch (e) {
+    toast(`no se ha podido: ${e.message}`, true);
+  }
 }
 
 /* Una fila de imágenes servidas desde la carpeta del estilo. El sello del
@@ -10217,7 +11976,14 @@ function tiraDeImagenes(ficha, nombres) {
    mismo código que el modo editor. */
 function escuchaDeVoz(ficha) {
   const voz = (ficha.datos || {}).voz || {};
+  const origen = (ficha.datos || {}).origen || {};
   const caja = h('div', { clase: 'bloque-voz' });
+  // CÓMO SE PIDIÓ, igual que en el formulario de crear: la descripción arriba
+  // y la voz concreta debajo. Para pedir otra, la caja de «qué le cambiarías».
+  if (origen.voz_prompt) {
+    caja.appendChild(h('div', { clase: 'voz-pedida' },
+      h('span', { clase: 'meta' }, 'Pedida así: '), origen.voz_prompt));
+  }
   const nombre = voz.voz_nombre || voz.voz_id || '';
   caja.appendChild(h('div', { clase: 'resumen-voz' },
     h('b', {}, nombre || 'sin voz elegida'),
@@ -10250,22 +12016,24 @@ function escuchaDeVoz(ficha) {
 function mandosDeVozLight(ficha, voz) {
   const caja = h('div', {});
   const dentro = h('div', {});
-  const avanzadas = opcionesAvanzadas({
-    clave: `voz-light-${ficha.id}`,
-    resumen: 'la voz concreta, la velocidad, el color y el aire',
-  }, dentro);
-  caja.appendChild(avanzadas);
-
+  /* LA VOZ CONCRETA, A LA VISTA, como al crear el estilo: la misma cuadrícula
+     con su play. Estaba dentro de «Opciones avanzadas» y la ficha recién
+     generada no se parecía al formulario con el que se pidió (10-10-2026).
+     Plegados quedan solo los mandos finos. */
   const guardar = cambios => apuntarVozLight(ficha, cambios);
-
   const idioma = ficha.idioma || 'es';
   const lista = vocesLight(idioma);
   if (!lista) {
-    dentro.appendChild(h('div', { clase: 'pista' },
+    caja.appendChild(h('div', { clase: 'pista' },
       `cargando las voces de ${nombreIdiomaLight(idioma)}…`));
   } else {
-    dentro.appendChild(selectorVozLight(ficha, voz, lista, guardar));
+    caja.appendChild(selectorVozLight(ficha, voz, lista, guardar));
   }
+  const avanzadas = opcionesAvanzadas({
+    clave: `voz-light-${ficha.id}`,
+    resumen: 'la velocidad, el color y el aire',
+  }, dentro);
+  caja.appendChild(avanzadas);
 
   dentro.appendChild(campoSelect('Velocidad', voz.velocidad || 'normal',
     VELOCIDADES.map(v => ({ valor: v, nombre: v })),
@@ -10364,43 +12132,74 @@ function vocesLight(idioma) {
   return null;
 }
 
-/* Las voces PROPIAS de la cuenta (clonadas): un desplegable aparte de la
-   descripción. Con una elegida, la descripción sigue mandando la velocidad y el
-   color, pero la voz es esa. Sin ninguna en la cuenta se dice, en una línea,
-   que no hay: es la forma de que nadie busque en el catálogo lo que no está. */
+/* LA VOZ CONCRETA AL CREAR, OPCIONAL. Sin elegir, la voz la escoge el sistema
+   leyendo la descripción de arriba; elegida, la descripción solo pone la
+   velocidad y el color.
+
+   LA MISMA CUADRÍCULA QUE EN EL ESTILO YA CREADO (`selectorVozLight`): cada voz
+   con su play, que la escucha SIN elegirla, y un buscador. Antes aquí había un
+   desplegable del navegador con cientos de nombres en fila y sin forma de oír
+   ninguna (10-10-2026). La escucha, sin estilo todavía, sale de
+   `/api/voces/muestra` (ver `pedirEscuchaVoz`).
+
+   EL CATÁLOGO SE GUARDA SIETE DÍAS en el servidor: una voz recién clonada no
+   saldría hasta entonces. «Buscar mis voces otra vez» lo vuelve a pedir. */
 function selectorVozPropiaLight(e) {
-  const lista = vocesLight(e.idioma);
-  const caja = h('div', { clase: 'campo' });
-  if (!lista) {
-    caja.appendChild(h('div', { clase: 'pista' }, 'cargando tus voces…'));
-    return caja;
-  }
-  const propias = lista.filter(v => v.publica === false);
-  if (!propias.length) {
+  const caja = h('div', { clase: 'campo voz-al-crear' });
+  const pintar = () => {
+    vaciar(caja);
+    const lista = vocesLight(e.idioma);
+    if (!lista) {
+      caja.appendChild(h('div', { clase: 'pista' }, 'cargando las voces…'));
+      return;
+    }
+    const propias = lista.filter(v => v.publica === false);
+    if (e.voz_id && !lista.some(v => v.id === e.voz_id)) { e.voz_id = ''; e.voz_nombre = ''; }
+    const ficha = { id: 'crear', sinEstilo: true, idioma: e.idioma || 'es' };
+    const voz = { voz_id: e.voz_id || '', voz_nombre: e.voz_nombre || '' };
+    caja.appendChild(selectorVozLight(ficha, voz, lista,
+      cambios => { e.voz_id = cambios.voz_id; e.voz_nombre = cambios.voz_nombre; tocarEncargoLight(); },
+      () => pintar()));
+    caja.appendChild(h('div', { clase: 'pista' }, e.voz_id
+      ? ['La voz es esta; la descripción de arriba solo decide la velocidad y el color. ',
+        h('button', { clase: 'mini fantasma', type: 'button',
+          onclick: () => { e.voz_id = ''; e.voz_nombre = ''; tocarEncargoLight(); pintar(); } },
+        'Que la elija el sistema')]
+      : 'Opcional. Si no eliges, se escoge la que mejor encaje con la descripción. '
+        + 'Pulsa ▶ en cualquier voz para oírla sin elegirla.'));
     caja.appendChild(h('div', { clase: 'pista' },
-      'No hay voces clonadas en esta cuenta de Cartesia: la voz se elige por la '
-      + 'descripción de arriba. Si clonas una, aparecerá aquí.'));
-    return caja;
-  }
-  if (e.voz_id && !propias.some(v => v.id === e.voz_id)) e.voz_id = '';
-  caja.appendChild(h('label', {}, 'Tus voces (clonadas)'));
-  caja.appendChild(h('select', {
-    onchange: ev => { e.voz_id = ev.target.value; tocarEncargoLight(); },
-  },
-    h('option', { value: '', selected: !e.voz_id },
-      '— que la elija por la descripción —'),
-    ...propias.map(v => h('option', { value: v.id, selected: e.voz_id === v.id },
-      `${v.nombre || v.id}${v.descripcion ? ` · ${v.descripcion}` : ''}`))));
-  caja.appendChild(h('div', { clase: 'pista' },
-    'Con una elegida, la descripción de arriba solo decide la velocidad y el '
-    + 'color; la voz es esta y se queda en el estilo.'));
+      propias.length
+        ? 'Tus voces clonadas salen las primeras de la lista. '
+        : 'No hay voces clonadas en tu cuenta de Cartesia. ',
+      h('b', {}, 'Para usar tu propia voz: '),
+      'clónala en play.cartesia.ai (Voices → Clone Voice, con unos segundos de '
+      + 'audio tuyo) con la MISMA cuenta cuya clave está en Configuración, y '
+      + 'pulsa aquí para que aparezca. ',
+      h('button', { clase: 'mini', type: 'button', onclick: ev => refrescar(ev.currentTarget) },
+        'Buscar mis voces otra vez')));
+  };
+  const refrescar = async boton => {
+    boton.disabled = true;
+    boton.textContent = 'buscando…';
+    try {
+      const datos = await pedir(API.voces(e.idioma, true) + '&refrescar=1');
+      APP.light.voces = { idioma: idiomaBase(e.idioma), lista: datos.voces || [], pidiendo: null };
+      const nuevas = (datos.voces || []).filter(v => v.publica === false).length;
+      toast(nuevas ? `${nuevas} voz${nuevas === 1 ? '' : 'es'} clonada${nuevas === 1 ? '' : 's'} en tu cuenta`
+                   : 'Cartesia no tiene ninguna voz clonada en esta cuenta');
+    } catch (err) {
+      toast(err.message, true);
+    }
+    pintar();
+  };
+  pintar();
   return caja;
 }
 
-function selectorVozLight(ficha, voz, voces, guardar) {
+function selectorVozLight(ficha, voz, voces, guardar, alElegir) {
   const estado = (APP.light.picker && APP.light.picker.preset === ficha.id)
     ? APP.light.picker
-    : (APP.light.picker = { preset: ficha.id, abierto: false, busca: '' });
+    : (APP.light.picker = { preset: ficha.id, abierto: false, busca: '', genero: '', pais: '' });
   const idioma = ficha.idioma || 'es';
 
   /* LA VOZ PUESTA, AUNQUE NO ESTÉ EN LA LISTA. Si el estilo cambió de idioma, la
@@ -10418,13 +12217,16 @@ function selectorVozLight(ficha, voz, voces, guardar) {
     guardar({ voz_id: v.id, voz_nombre: v.nombre || '' });
     // el bloque entero y no la pantalla: el rótulo de arriba, la cuadrícula y
     // el botón de escuchar de abajo dicen los tres cuál es la voz puesta
-    repintarBloqueVoz(ficha);
+    if (alElegir) alElegir(v);
+    else repintarBloqueVoz(ficha);
   };
   const pintarRejilla = () => {
     vaciar(rejilla);
     const filtro = estado.busca.trim().toLowerCase();
-    const visibles = voces.filter(v => !filtro
-      || `${v.nombre} ${v.descripcion || ''} ${v.id}`.toLowerCase().includes(filtro));
+    const visibles = voces.filter(v => (!filtro
+      || `${v.nombre} ${v.descripcion || ''} ${v.id}`.toLowerCase().includes(filtro))
+      && (!estado.genero || generoDeVoz(v) === estado.genero)
+      && (!estado.pais || String(v.pais || '').toUpperCase() === estado.pais));
     const TOPE = 240;
     // Nada se recorta sin decir cuánto falta: una rejilla cortada en seco se lee
     // como «esto es lo que hay».
@@ -10468,8 +12270,29 @@ function selectorVozLight(ficha, voz, voces, guardar) {
     value: estado.busca,
     oninput: ev => { estado.busca = ev.target.value; pintarRejilla(); },
   });
+  /* FILTROS por voz de hombre / de mujer y por país: con cientos de voces la
+     búsqueda por nombre no basta. Salen de lo que trae el catálogo; una voz sin
+     el dato no se esconde con «todos». */
+  const generos = [...new Set(voces.map(generoDeVoz).filter(Boolean))];
+  const paises = [...new Set(voces.map(v => String(v.pais || '').toUpperCase()).filter(Boolean))].sort();
+  const filtroGenero = generos.length > 1 ? h('select', {
+    'aria-label': 'Filtrar por tipo de voz',
+    onchange: ev => { estado.genero = ev.target.value; pintarRejilla(); },
+  }, h('option', { value: '' }, 'hombre y mujer'),
+  ...generos.map(g => h('option', { value: g, selected: g === estado.genero },
+    { masculina: 'voz de hombre', femenina: 'voz de mujer', neutra: 'neutra' }[g] || g))) : null;
+  const filtroPais = paises.length > 1 ? h('select', {
+    'aria-label': 'Filtrar por país',
+    onchange: ev => { estado.pais = ev.target.value; pintarRejilla(); },
+  }, h('option', { value: '' }, 'todos los países'),
+  ...paises.map(p => h('option', { value: p, selected: p === estado.pais }, nombrePais(p)))) : null;
   const panel = h('div', { clase: 'panel-voces' },
-    h('div', { clase: 'fila' }, buscador, cuenta), rejilla);
+    h('div', { clase: 'fila' }, buscador, filtroGenero, filtroPais, cuenta),
+    h('div', { clase: 'meta' },
+      '▶ escucha una frase de muestra sin elegirla (gasta unos pocos caracteres '
+      + 'de tu cuenta de Cartesia). Si no eliges ninguna, la elige el sistema '
+      + 'leyendo tu descripción.'),
+    rejilla);
   const pista = h('div', { clase: 'pista' },
     `${voces.length} voces nativas de ${nombreIdiomaLight(idioma)}, `
     + 'cada una con su escucha');
@@ -10492,6 +12315,18 @@ function selectorVozLight(ficha, voz, voces, guardar) {
     h('label', {}, 'Voz'), disparo, panel, pista);
   aplicar();
   return campo;
+}
+
+function generoDeVoz(v) {
+  const g = String(v.genero || '').toLowerCase();
+  if (g.startsWith('masc') || g === 'male') return 'masculina';
+  if (g.startsWith('fem') || g === 'female') return 'femenina';
+  if (g) return 'neutra';
+  return '';
+}
+
+function nombrePais(codigo) {
+  try { return new Intl.DisplayNames(['es'], { type: 'region' }).of(codigo) || codigo; } catch (e) { return codigo; }
 }
 
 /* Una celda: su play, su nombre y de dónde es. El play NO elige —darle es
@@ -10642,6 +12477,14 @@ function claveEscucha(ficha, vozId) {
 /* Doce segundos, en el taller. Con `voz_id` se escucha una voz SIN elegirla, que
    es lo que hace el play de cada celda de la cuadrícula. */
 async function pedirEscuchaVoz(ficha, vozId) {
+  /* AL CREAR un estilo todavía no hay taller donde sintetizar: la muestra sale
+     del catálogo (`/api/voces/muestra`), con la frase del idioma y los mandos de
+     fábrica. Es síncrono: doce segundos se sintetizan en dos o tres. */
+  if (ficha.sinEstilo) {
+    const datos = await pedir(`${BASE}/api/voces/muestra`, {
+      method: 'POST', cuerpo: { voz_id: vozId || '', idioma: ficha.idioma || 'es' } });
+    return `${BASE}${datos.ruta}`;
+  }
   /* LO PENDIENTE PRIMERO. El autoguardado sale 900 ms después del último toque y
      el servidor sintetiza con lo que tenga GUARDADO el estilo: sin esto, subir
      la velocidad y darle al play escuchaba la de antes. */
@@ -10692,16 +12535,16 @@ function fuenteDeEstiloLight(ficha) {
      tono, la voz y el ritmo. */
   caja.appendChild(selectorTipoDeImagen(f.modo,
     v => { f.modo = v; repintarPieDeEstilo(); }));
+  caja.appendChild(imagenesDelEstilo(ficha, f));
   caja.appendChild(h('div', { clase: 'meta' },
-    'Otras imágenes a las que parecerse. Rehace el estilo gráfico entero '
-    + '(dibujo o foto) y deja el '
-    + 'tono, la voz y el ritmo como están; las de ahora siguen puestas hasta '
-    + 'que pulses Regenerar.'));
+    'Añadir imágenes nuevas (se suman a las de arriba). Añadir o quitar imágenes, '
+    + 'o cambiar el tipo de imagen, rehace la guía y las láminas al pulsar '
+    + 'Regenerar (dibujo o foto), y deja el tono, la voz y el ritmo como están.'));
   caja.appendChild(imagenesDeApoyoLight(f, repintarPieDeEstilo,
     `aportadas-${ficha.id}`));
-  caja.appendChild(campoArea('Indicaciones (opcional)', f.prompt,
+  caja.appendChild(conGuia(campoArea('Indicaciones (opcional)', f.prompt,
     v => { f.prompt = v; repintarPieDeEstilo(); },
-    'más cálido, con luz de tarde y menos cosas en el fondo'));
+    'más cálido, con luz de tarde y menos cosas en el fondo')));
   caja.appendChild(h('div', { clase: 'meta' },
     'Lo que el material no dice por sí solo. Reescribe la guía y rehace las '
     + 'muestras; se guarda con el estilo y se vuelve a aplicar si lo regeneras.'));
@@ -10724,6 +12567,7 @@ function materialCambiadoLight(ficha) {
   if (!f || f.preset !== ficha.id) return false;
   const origen = (ficha.datos || {}).origen || {};
   if (String(f.prompt || '').trim() !== (origen.estilo_prompt || '')) return true;
+  if ((f.quitar || []).length) return true;
   return (f.estilo_imagenes || []).length > 0;
 }
 
@@ -10751,11 +12595,108 @@ function fuenteParaServidor(ficha) {
   if (!ficha || materialCambiadoLight(ficha)) {
     cuerpo.estilo_prompt = String(f.prompt || '').trim();
     cuerpo.estilo_imagenes = (f.estilo_imagenes || []).map(x => x.nombre);
+    cuerpo.estilo_descripciones = descripcionesDeAportadas(f.estilo_imagenes);
+    cuerpo.estilo_destacadas = (f.estilo_imagenes || []).filter(x => x.destacada).map(x => x.nombre);
+    /* LAS QUE YA TENÍA el estilo y siguen: el servidor las conserva y suma las
+       nuevas detrás. Con lo que se dijo de ellas, que va en la misma lista. */
+    if (Array.isArray(f.existentes)) {
+      const siguen = f.existentes.filter(x => !(f.quitar || []).includes(x.nombre));
+      cuerpo.conservar = siguen.map(x => x.nombre);
+      siguen.forEach(x => {
+        if (String(x.descripcion || '').trim()) cuerpo.estilo_descripciones[x.nombre] = x.descripcion;
+        if (x.destacada) cuerpo.estilo_destacadas.unshift(x.nombre);
+      });
+    }
   }
   if (!ficha || modoCambiadoLight(ficha)) {
     cuerpo.estilo_modo = f.modo === 'foto' ? 'foto' : 'ilustracion';
   }
   return cuerpo;
+}
+
+/* TUS IMÁGENES DE REFERENCIA, las que ya tiene el estilo. Se ven en grande,
+   se describe cada una y se marca con ★ —eso se guarda solo y no regenera
+   nada: lo usan la guía y las láminas la próxima vez que se dibujen— y se
+   pueden quitar (eso sí rehace el estilo, al pulsar Regenerar). */
+function imagenesDelEstilo(ficha, f) {
+  const caja = h('div', { clase: 'imagenes-del-estilo' });
+  if (f.errorExistentes) {
+    caja.appendChild(h('div', { clase: 'meta' },
+      `no se han podido leer tus imágenes de referencia (${f.errorExistentes}); siguen puestas`));
+    return caja;
+  }
+  if (!Array.isArray(f.existentes)) {
+    if (!f.leyendo) {
+      f.leyendo = true;
+      pedir(`${API.presetLight(ficha.id)}/aportadas`)
+        .then(d => { f.existentes = d.imagenes || []; f.enLaHoja = d.en_la_hoja || 8; })
+        /* SIN LISTA NO SE MANDA `conservar`: una lista vacía diría «quítalas
+           todas» y el estilo se quedaría sin material. */
+        .catch(e => { f.errorExistentes = e.message || 'error'; })
+        .then(() => {
+          f.leyendo = false;
+          const vieja = document.querySelector('.light-preset .imagenes-del-estilo');
+          if (vieja) vieja.replaceWith(imagenesDelEstilo(ficha, f));
+        });
+    }
+    caja.appendChild(h('div', { clase: 'meta' }, 'leyendo tus imágenes…'));
+    return caja;
+  }
+  if (!f.existentes.length) return caja;
+  f.quitar = f.quitar || [];
+  const marcadas = f.existentes.filter(x => x.destacada).length;
+  caja.appendChild(h('label', {}, `Tus imágenes de referencia (${f.existentes.length})`));
+  caja.appendChild(h('div', { clase: 'meta' },
+    'La guía del estilo se escribió mirándolas todas. Escribe qué mirar en cada '
+    + `una y marca con ★ las que deben ir sí o sí a la hoja de ${f.enLaHoja || 8} con `
+    + 'la que se dibuja cada lámina. Esto se guarda solo y no gasta nada.'));
+  const rejilla = h('div', { clase: 'rejilla-aportadas' });
+  const guardar = () => {
+    clearTimeout(f.guardando);
+    f.guardando = setTimeout(async () => {
+      const descripciones = {};
+      f.existentes.forEach(x => { if (String(x.descripcion || '').trim()) descripciones[x.nombre] = x.descripcion; });
+      try {
+        const d = await pedir(`${API.presetLight(ficha.id)}/aportadas`, { method: 'PUT',
+          cuerpo: { descripciones, destacadas: f.existentes.filter(x => x.destacada).map(x => x.nombre) } });
+        if (d.preset && APP.light.datos) {
+          APP.light.datos.presets = presetsLight().map(p => (p.id === ficha.id ? d.preset : p));
+        }
+      } catch (e) { toast(`no se ha podido guardar: ${e.message}`, true); }
+    }, 900);
+  };
+  f.existentes.forEach((x, i) => {
+    const fuera = f.quitar.includes(x.nombre);
+    const url = `${BASE}${x.url}`;
+    const entrada = h('input', { type: 'text', value: x.descripcion || '',
+      placeholder: 'qué mirar en esta (opcional)',
+      oninput: ev => { x.descripcion = ev.target.value; guardar(); } });
+    rejilla.appendChild(h('div', { clase: `aportada${fuera ? ' quitada' : ''}` },
+      h('img', { src: url, alt: '', loading: 'lazy',
+        onclick: () => lupa(url, `${i + 1} de ${f.existentes.length}`) }),
+      h('div', { clase: 'herramientas' },
+        h('button', { clase: `mini${x.destacada ? ' activo' : ''}`,
+          title: x.destacada ? 'Quitar la ★' : `Que vaya sí o sí a la hoja de las láminas`,
+          disabled: !x.destacada && marcadas >= (f.enLaHoja || 8),
+          onclick: () => { x.destacada = !x.destacada; guardar();
+            const vieja = document.querySelector('.light-preset .imagenes-del-estilo');
+            if (vieja) vieja.replaceWith(imagenesDelEstilo(ficha, f)); } }, '★'),
+        h('button', { clase: 'mini fantasma',
+          title: fuera ? 'Volver a ponerla' : 'Quitarla del estilo (al pulsar Regenerar)',
+          onclick: () => {
+            f.quitar = fuera ? f.quitar.filter(n => n !== x.nombre) : f.quitar.concat([x.nombre]);
+            const vieja = document.querySelector('.light-preset .imagenes-del-estilo');
+            if (vieja) vieja.replaceWith(imagenesDelEstilo(ficha, f));
+            repintarPieDeEstilo();
+          } }, fuera ? '↺ Volver a poner' : '✕ Quitar')),
+      entrada));
+  });
+  caja.appendChild(rejilla);
+  if (f.quitar.length) {
+    caja.appendChild(h('div', { clase: 'aviso-quitar meta' },
+      `Vas a quitar ${f.quitar.length}: se aplica al pulsar Regenerar abajo (rehace la guía y las láminas).`));
+  }
+  return caja;
 }
 
 /* --------------------------------------- volver a escribir la GUÍA DE TONO
@@ -10782,9 +12723,9 @@ function fuenteDeTonoLight(ficha) {
     'Cómo quieres que suene, escrito de nuevo. Al pulsar Regenerar reescribe '
     + 'las instrucciones enteras —no cuesta ninguna imagen—; la guía de ahora '
     + 'sigue puesta hasta entonces.'));
-  caja.appendChild(campoArea('', f.prompt,
+  caja.appendChild(conGuia(campoArea('', f.prompt,
     v => { f.prompt = v; repintarPieDeEstilo(); },
-    'serio pero cercano, sin dramatismo, frases cortas'));
+    'serio pero cercano, sin dramatismo, frases cortas')));
   return caja;
 }
 
@@ -10867,7 +12808,12 @@ function partesPedidas(ficha) {
    de dibujarse el número se quedó mintiendo. El precio sale de donde está el
    precio (`presets_light.imagenes_de_parte`). */
 function imagenesDePartes(pedidas) {
-  const tabla = (APP.light.datos || {}).imagenes_por_parte || {};
+  const tabla = Object.assign({}, (APP.light.datos || {}).imagenes_por_parte || {});
+  // con las láminas de ESTE estilo a la vista, su cuenta (pueden ser 3 u 8)
+  const lam = (APP.light.laminas || {}).datos;
+  if (lam && APP.light.laminas.preset === APP.light.abierto && lam.imagenes_estilo !== undefined) {
+    tabla.estilo = lam.imagenes_estilo;
+  }
   const total = pedidas.reduce((suma, p) => suma + (Number(tabla[p]) || 0), 0);
   return total ? `${total} ${total === 1 ? 'imagen' : 'imágenes'}`
     : 'sin gastar imágenes';
@@ -11559,6 +13505,7 @@ const ASISTENTE = {
 };
 
 const CLAVE_CHARLA = 'estudio.asistente.charla';
+const CLAVE_ASISTENTE_AMPLIADO = 'estudio.asistente.ampliado';
 
 function montarAsistente() {
   const burbuja = $('#burbuja-asistente');
@@ -11574,7 +13521,40 @@ function montarAsistente() {
   campo.addEventListener('keydown', ev => {
     if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); enviarAlAsistente(); }
   });
+  campo.addEventListener('input', () => ajustarCampoAsistente());
+  const ampliar = $('#btn-ampliar-asistente');
+  if (ampliar) ampliar.addEventListener('click', () => ampliarAsistente());
+  let ampliado = false;
+  try { ampliado = localStorage.getItem(CLAVE_ASISTENTE_AMPLIADO) === '1'; } catch (e) { /* sin almacén */ }
+  ampliarAsistente(ampliado);
   refrescarEstadoAsistente();
+}
+
+/* El campo del asistente, del alto de lo que lleva. El tope lo pone el CSS
+   (max-height): pasado ese alto, el campo tiene su propia barra. Lo llama
+   también quien rellena el campo por código (el dictado, vaciarlo al enviar),
+   porque eso no dispara `input`. */
+function ajustarCampoAsistente() {
+  const campo = $('#asistente-texto');
+  if (!campo) return;
+  campo.style.height = 'auto';
+  campo.style.height = `${campo.scrollHeight + 2}px`;
+}
+
+/* Panel normal o AMPLIADO (más ancho y alto, para respuestas largas). Sin
+   argumento, conmuta. Se recuerda en este navegador. */
+function ampliarAsistente(quiero) {
+  const cajon = $('#asistente');
+  const boton = $('#btn-ampliar-asistente');
+  if (!cajon) return;
+  const ampliado = quiero === undefined ? !cajon.classList.contains('ampliado') : !!quiero;
+  cajon.classList.toggle('ampliado', ampliado);
+  if (boton) {
+    boton.textContent = ampliado ? 'Reducir' : 'Ampliar';
+    boton.setAttribute('aria-pressed', ampliado ? 'true' : 'false');
+  }
+  try { localStorage.setItem(CLAVE_ASISTENTE_AMPLIADO, ampliado ? '1' : '0'); } catch (e) { /* sin almacén */ }
+  ajustarCampoAsistente();
 }
 
 async function refrescarEstadoAsistente() {
@@ -11650,6 +13630,7 @@ async function asegurarCharla() {
    respuesta útil de ayer no había forma de volver a encontrarla. */
 function nuevaCharla() {
   ASISTENTE.verHistorial = false;
+  ASISTENTE.historial = null;
   ASISTENTE.charla = null;
   ASISTENTE.latiendo = false;
   localStorage.removeItem(CLAVE_CHARLA);
@@ -11682,6 +13663,7 @@ async function abrirCharlaDelHistorial(cid) {
     ASISTENTE.verHistorial = false;
     pintarAsistente();
     latirAsistente();
+    enfocarCampoAsistente();
   } catch (e) { toast(`no se ha podido abrir: ${e.message}`, true); }
 }
 
@@ -11758,6 +13740,9 @@ async function enviarAlAsistente(reintento) {
     toast('espera a que termine la respuesta anterior', true);
     return;
   }
+  // DESDE EL HISTORIAL TAMBIÉN SE PREGUNTA: se sale de la lista y se ve la
+  // charla. Antes se mandaba con la lista delante y parecía que no hacía nada.
+  ASISTENTE.verHistorial = false;
   campo.disabled = true;
   try {
     const charla = await asegurarCharla();
@@ -11770,6 +13755,7 @@ async function enviarAlAsistente(reintento) {
       },
     });
     campo.value = '';
+    ajustarCampoAsistente();
     ADJUNTOS_ASISTENTE.length = 0;
     pintarAdjuntosAsistente();
     pintarAsistente();
@@ -11827,6 +13813,7 @@ function latirAsistente() {
     else {
       ASISTENTE.latiendo = false;
       if (!ASISTENTE.abierto) { ASISTENTE.sinLeer = true; pintarAsistente(); }
+      else enfocarCampoAsistente();
     }
   };
   setTimeout(tic, 1500);
@@ -11874,14 +13861,31 @@ function pintarAsistente() {
   $('#btn-historial-asistente').classList.toggle('activo', ASISTENTE.verHistorial);
 
   const campo = $('#asistente-texto');
-  campo.disabled = !listo || ocupada;
+  /* SE PUEDE ESCRIBIR MIENTRAS PIENSA: lo que se bloquea es ENVIAR (un turno
+     por charla). Con el campo bloqueado había que esperar para ir preparando
+     la siguiente pregunta. */
+  campo.disabled = !listo;
   campo.placeholder = listo
     ? 'Pregunta lo que quieras: un error, un paso parado, dónde está algo…'
     : 'Entra con tu cuenta de Claude para poder preguntar';
   $('#btn-enviar-asistente').disabled = !listo || ocupada;
   pintarDictado();
   $('#btn-cancelar-asistente').hidden = !ocupada;
-  $('#btn-nueva-charla').disabled = ocupada || (!charla && !ASISTENTE.verHistorial);
+  // «Nueva» siempre que haya con quién hablar: una charla que está pensando
+  // sigue en el servidor, y empezar otra no la para.
+  $('#btn-nueva-charla').disabled = !listo || (!charla && !ASISTENTE.verHistorial);
+}
+
+/* EL CURSOR VUELVE AL CAMPO cuando el asistente termina de contestar, para
+   seguir escribiendo sin hacer clic. Solo si el foco no está en otro campo:
+   quitárselo a quien escribe en la pantalla de detrás sería peor. */
+function enfocarCampoAsistente() {
+  const campo = $('#asistente-texto');
+  if (!campo || campo.disabled) return;
+  const activo = document.activeElement;
+  const enOtroCampo = activo && activo !== campo && activo !== document.body
+    && /^(INPUT|TEXTAREA|SELECT)$/.test(activo.tagName) && !activo.closest('#asistente');
+  if (!enOtroCampo) campo.focus();
 }
 
 /* Sin cuenta que conteste no hay asistente, y se dice POR QUÉ con el camino
@@ -12063,6 +14067,20 @@ function bloqueLleva(lleva, alCambiar, ocupado) {
 }
 
 /* En el encargo de un vídeo abierto: se lee del servidor y se guarda al tocar. */
+/* En el encargo de un vídeo NUEVO: los interruptores y, debajo, los ajustes
+   del montaje en modo borrador. Encender o apagar música o subtítulos
+   repinta los ajustes (sin ellos no hay nada que ajustar). */
+function llevaConAjustes(e, estilo) {
+  const caja = h('div', {});
+  const pintar = () => {
+    vaciar(caja);
+    caja.appendChild(bloqueLleva(e.lleva, () => pintar()));
+    caja.appendChild(ajustesDelMontaje({ tipo: 'borrador', e, estilo: (estilo || {}).id || '' }, e.lleva));
+  };
+  pintar();
+  return caja;
+}
+
 function bloqueLlevaDelVideo() {
   const v = APP.light.video;
   const caja = h('div', {});
@@ -12075,6 +14093,7 @@ function bloqueLlevaDelVideo() {
           method: 'PUT', cuerpo: { lleva: { [pieza]: valor } } });
         v.lleva = r.lleva;
         (r.pasos || []).forEach(f => { v.fichas[f.id] = f; });
+        if (['musica', 'subtitulos'].includes(pieza)) pintar();
         toast(valor ? `${pieza}: se añadirá al volver a montar el vídeo`
                     : `${pieza}: se quitará al volver a montar el vídeo`);
       } catch (e) {
@@ -12083,6 +14102,7 @@ function bloqueLlevaDelVideo() {
         cargar();
       }
     }));
+    caja.appendChild(ajustesDelMontaje({ tipo: 'video', pid: v.pid }, v.lleva));
   };
   const cargar = async () => {
     try {
@@ -12095,6 +14115,673 @@ function bloqueLlevaDelVideo() {
   if (!v.lleva || v.llevaDe !== v.pid) { v.llevaDe = v.pid; v.lleva = null; cargar(); }
   pintar();
   return caja;
+}
+
+/* ================================================ LOS AJUSTES DEL MONTAJE
+ *
+ * Debajo de los interruptores de «Qué lleva este vídeo»: la música, los
+ * subtítulos y el logo. Las MISMAS tres filas en el encargo de un vídeo NUEVO
+ * y en el de uno ya creado (10-10-2026: estaban solo en el segundo, y el
+ * encargo que se usa al crear no tenía ninguna). Cada fila dice en una línea
+ * cómo está y se despliega para cambiarlo. Sin tocar nada, todo automático.
+ *
+ *   modo «borrador»  el vídeo aún no existe: lo elegido se guarda en el
+ *                    encargo (`e.opciones`) y se aplica al crearlo
+ *                    (`_opciones_al_crear` en app.py).
+ *   modo «video»     se guarda al momento por la API del vídeo. La música y el
+ *                    logo vuelven a montar el MP4 solos (sin dibujar nada); los
+ *                    subtítulos rehacen además las capas de texto, que tarda
+ *                    más, y por eso piden un «Aplicar ahora».
+ *
+ * Nada de esto paga imágenes.
+ */
+const PRESENCIAS_MUSICA = [
+  { id: 'suave', nombre: 'Suave', pista: 'Casi no se oye bajo la voz; sube en las pausas largas' },
+  { id: 'normal', nombre: 'Normal', pista: 'Se oye de fondo sin tapar la voz' },
+  { id: 'alta', nombre: 'Alta', pista: 'Música protagonista: se nota mientras se habla' },
+];
+/* Los ánimos de la música. La misma lista que `sonido.NOMBRES_ANIMOS`: ocho de
+   documental no dejaban nada para un vídeo alegre, gamer o para niños. */
+const ANIMOS_MUSICA = [
+  ['alegre', 'Alegre'], ['divertido', 'Divertido'], ['gamer', 'Gamer / electrónica'],
+  ['infantil', 'Infantil'], ['accion', 'Acción'], ['inspirador', 'Inspirador'],
+  ['fiesta', 'Fiesta'], ['chill', 'Chill'], ['lofi', 'Lo-fi'], ['acustico', 'Acústico'],
+  ['pop', 'Pop'], ['rock', 'Rock'], ['jazz', 'Jazz'], ['latino', 'Latino'],
+  ['romantico', 'Romántico'], ['clasico', 'Clásica'], ['sobrio', 'Sobrio'],
+  ['corporativo', 'Corporativo'], ['esperanzador', 'Esperanzador'], ['epico', 'Épico'],
+  ['misterioso', 'Misterioso'], ['tension', 'Tensión'], ['melancolico', 'Melancólico'],
+  ['oscuro', 'Oscuro'],
+];
+const TAMANOS_SUB = [['pequeno', 'Pequeño'], ['normal', 'Normal'], ['grande', 'Grande'], ['enorme', 'Enorme']];
+const CAJAS_SUB = [['auto', 'La del estilo'], [0, 'Sin caja'], [0.45, 'Suave'], [0.85, 'Opaca']];
+const ESQUINAS_LOGO = [['arriba_izquierda', '↖ Arriba izquierda'], ['arriba_derecha', '↗ Arriba derecha'],
+  ['abajo_izquierda', '↙ Abajo izquierda'], ['abajo_derecha', '↘ Abajo derecha']];
+
+/* El estado de los ajustes, POR VÍDEO: lo de un vídeo no se cuela en otro. */
+function estadoAjustes(modo) {
+  const clave = modo.tipo === 'video' ? `v:${modo.pid}` : `b:${modo.estilo || ''}`;
+  APP.light.ajustesMontaje = APP.light.ajustesMontaje || {};
+  if (!APP.light.ajustesMontaje[clave]) {
+    APP.light.ajustesMontaje[clave] = { abierta: '', musica: null, subtitulos: null, logo: null,
+      busqueda: { animo: 'sobrio', extra: '', texto: '', temas: null, buscando: false,
+        comercial: true, instrumental: true, pagina: 0 },
+      efectos: null, papeles: null, buscaEfecto: { papel: '', texto: '', lista: null, buscando: false } };
+  }
+  return APP.light.ajustesMontaje[clave];
+}
+
+function opcionesBorrador(e) {
+  e.opciones = e.opciones || {};
+  return e.opciones;
+}
+
+/* El logo del proyecto (cliente) del estilo, si lo tiene: entra solo en los
+   vídeos nuevos de ese estilo. */
+function logoDelProyecto(presetId) {
+  const cid = clienteDe(presetId || '');
+  const ficha = listaClientes().find(c => c.id === cid);
+  return ficha && ficha.logo ? { logo: ficha.logo, proyecto: ficha.nombre } : null;
+}
+
+function ajustesDelMontaje(modo, lleva) {
+  const est = estadoAjustes(modo);
+  const caja = h('div', { clase: 'ajustes-montaje' });
+  const pintar = () => {
+    vaciar(caja);
+    caja.appendChild(h('div', { clase: 'ajustes-cab' }, h('b', {}, 'Ajustes del montaje'),
+      h('span', { clase: 'meta' }, ' · todo automático si no tocas nada; nada de esto paga imágenes')));
+    if (lleva.musica !== false) caja.appendChild(filaAjuste(modo, est, 'musica', pintar));
+    if (lleva.subtitulos !== false) caja.appendChild(filaAjuste(modo, est, 'subtitulos', pintar));
+    caja.appendChild(filaAjuste(modo, est, 'logo', pintar));
+    if (lleva.efectos !== false && modo.tipo === 'video') caja.appendChild(filaAjuste(modo, est, 'efectos', pintar));
+  };
+  // LA LECTURA PINTA EN LOS QUE ESTÉN EN PANTALLA: la pantalla puede pintar
+  // este bloque más de una vez mientras se lee (y alguna copia no llega a
+  // colgarse), así que se apuntan todos y al terminar se repintan los vivos.
+  est.pintores = (est.pintores || []).slice(-8);
+  est.pintores.push({ caja, pintar });
+  est.repintar = () => est.pintores.filter(x => x.caja.isConnected).forEach(x => x.pintar());
+  // en modo vídeo se lee lo guardado una vez; el borrador lo tiene en memoria
+  if (modo.tipo === 'video' && !est.cargado) {
+    est.cargado = true;
+    cargarAjustesVideo(modo, est).then(() => est.repintar());
+  }
+  pintar();
+  return caja;
+}
+
+async function cargarAjustesVideo(modo, est) {
+  const base = API.proyecto(modo.pid);
+  const [presencia, sonido, subtitulos, logo] = await Promise.all([
+    pedir(`${base}/musica/presencia`).catch(() => null),
+    pedir(`${base}/sonido`).catch(() => null),
+    pedir(`${base}/subtitulos`).catch(() => null),
+    pedir(`${base}/logo`).catch(() => null)]);
+  est.musica = { presencia: presencia || { presencia: 'normal', elegida: false },
+    tema: sonido && sonido.musica && sonido.musica.id ? sonido.musica : null };
+  est.efectos = (sonido && sonido.efectos) || {};
+  est.efectosVolumen = (sonido && sonido.efectos_volumen) || 'normales';
+  est.papeles = (sonido && sonido.papeles) || [];
+  est.fijos = (sonido && sonido.efectos_fijos) || [];
+  est.subtitulos = subtitulos;
+  est.logo = logo ? logo.logo : null;
+  est.leido = true;
+}
+
+/* UNA FILA: el resumen en una línea y, desplegada, su editor. */
+function filaAjuste(modo, est, cual, repintar) {
+  const nombres = { musica: '🎵 Música', subtitulos: '💬 Subtítulos', logo: '🏷️ Logo', efectos: '✨ Efectos' };
+  const abierta = est.abierta === cual;
+  const fila = h('div', { clase: 'fila-ajuste' + (abierta ? ' abierta' : '') });
+  fila.appendChild(h('div', { clase: 'fila-ajuste-cab' },
+    h('b', {}, nombres[cual]),
+    h('span', { clase: 'meta crece' }, resumenAjuste(modo, est, cual)),
+    h('button', { clase: 'mini', onclick: () => { est.abierta = abierta ? '' : cual; repintar(); } },
+      abierta ? 'Cerrar' : 'Cambiar')));
+  if (abierta) {
+    const editor = { musica: editorMusica, subtitulos: editorSubtitulos, logo: editorLogo,
+      efectos: editorEfectos }[cual];
+    fila.appendChild(editor(modo, est, repintar));
+  }
+  return fila;
+}
+
+function resumenAjuste(modo, est, cual) {
+  if (modo.tipo === 'video' && !est.leido) return 'leyendo…';
+  if (cual === 'musica') {
+    const op = modo.tipo === 'borrador' ? opcionesBorrador(modo.e) : null;
+    const presencia = op ? (op.presencia || 'normal') : ((est.musica || {}).presencia || {}).presencia || 'normal';
+    const tema = op ? op.musica : (est.musica || {}).tema;
+    const nivel = (PRESENCIAS_MUSICA.find(p => p.id === presencia) || {}).nombre || presencia;
+    const deQuien = t => (t.fuente === 'propia' ? ' (tuya)' : ` de ${t.artista || '?'}`);
+    return (tema ? `«${tema.titulo || tema.id}»${deQuien(tema)}` : 'Automática (varios temas según el ritmo)')
+      + ` · se oye ${nivel.toLowerCase()}`;
+  }
+  if (cual === 'efectos') {
+    const fijos = (est.fijos || []).length;
+    const sonidos = Object.values(est.efectos || {}).reduce((n, l) => n + (l || []).length, 0);
+    return fijos ? `${fijos} elegido(s) a mano, el resto automáticos`
+      : (sonidos ? `Automáticos (${sonidos} sonidos de FreeSound)` : 'Automáticos (se eligen al montar)');
+  }
+  if (cual === 'subtitulos') {
+    const sub = modo.tipo === 'borrador' ? opcionesBorrador(modo.e).subtitulos : est.subtitulos;
+    const propios = modo.tipo === 'borrador' ? sub && Object.keys(sub).length : sub && sub.propios;
+    if (!propios) return 'Los del estilo';
+    const partes = [];
+    if (sub.tam) partes.push(`tamaño ${(TAMANOS_SUB.find(t => t[0] === sub.tam) || [0, sub.tam])[1].toLowerCase()}`);
+    if (sub.diseno) partes.push(sub.diseno);
+    if (sub.color) partes.push(`color ${sub.color}`);
+    return `Personalizados: ${partes.join(', ') || 'a tu gusto'}`
+      + (modo.tipo === 'video' && sub.pendiente ? ' · sin aplicar todavía' : '');
+  }
+  const esquina = l => ((ESQUINAS_LOGO.find(x => x[0] === l.posicion) || [0, ''])[1]).replace(/^\S+ /, '').toLowerCase();
+  if (modo.tipo === 'borrador') {
+    const op = opcionesBorrador(modo.e);
+    if (op.logo === false) return 'Sin logo';
+    if (op.logo && op.logo.fichero) return `Logo propio, ${esquina(op.logo)}`;
+    const delProyecto = logoDelProyecto(modo.estilo);
+    return delProyecto ? `El del proyecto «${delProyecto.proyecto}», ${esquina(delProyecto.logo)}` : 'Sin logo';
+  }
+  return est.logo ? `Puesto, ${esquina(est.logo)}, ${Math.round((est.logo.tamano || 0.12) * 100)} % del ancho` : 'Sin logo';
+}
+
+/* Lo que devuelve la API al cambiar algo que vuelve a montar el vídeo. */
+function avisoDeMontaje(r, quePasa) {
+  if (r && r.trabajo_id) {
+    toast(`${quePasa}: volviendo a montar el vídeo, sin dibujar nada`);
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, r.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') toast(`${quePasa}: el vídeo ya está montado de nuevo`);
+      try { await recargarVideoAbierto(); } catch (e) { /* se relee al volver */ }
+    });
+  } else if (r && r.montado) {
+    toast(`${quePasa}: guardado. Se aplicará al volver a montar el vídeo (hay cosas pendientes)`);
+  } else {
+    toast(`${quePasa}: guardado. Se aplicará al montar el vídeo`);
+  }
+}
+
+/* ------------------------------------------------------------- la música */
+function editorMusica(modo, est, repintar) {
+  const caja = h('div', { clase: 'editor-ajuste' });
+  const borrador = modo.tipo === 'borrador';
+  const op = borrador ? opcionesBorrador(modo.e) : null;
+  const presencia = borrador ? (op.presencia || 'normal') : ((est.musica || {}).presencia || {}).presencia || 'normal';
+  const elegida = borrador ? !!op.presencia : !!(((est.musica || {}).presencia || {}).elegida);
+  const tema = borrador ? op.musica : (est.musica || {}).tema;
+
+  caja.appendChild(h('label', {}, 'Cuánto se oye bajo la voz'));
+  caja.appendChild(h('div', { clase: 'herramientas' }, ...PRESENCIAS_MUSICA.map(n => h('button', {
+    clase: 'mini' + (n.id === presencia ? ' activo' : ''), title: n.pista,
+    onclick: async () => {
+      if (borrador) { op.presencia = n.id; repintar(); return; }
+      try {
+        const r = await pedir(`${API.proyecto(modo.pid)}/musica/presencia`,
+          { method: 'PUT', cuerpo: { presencia: n.id } });
+        est.musica.presencia = Object.assign({}, est.musica.presencia, { presencia: r.presencia, elegida: true });
+        if (r.cambiado) avisoDeMontaje(r, 'Música');
+      } catch (e) { toast(e.message, true); }
+      repintar();
+    },
+  }, n.nombre))));
+  caja.appendChild(h('div', { clase: 'pista' },
+    (PRESENCIAS_MUSICA.find(n => n.id === presencia) || {}).pista || '',
+    !borrador && !elegida
+      ? '. Si este vídeo se montó antes del 10 de octubre, sonó «Suave»: pulsa «Normal» para volver a mezclarlo.'
+      : ''));
+
+  caja.appendChild(h('label', {}, 'Qué música'));
+  caja.appendChild(h('div', { clase: 'herramientas' },
+    h('button', { clase: 'mini' + (!tema ? ' activo' : ''), onclick: () => fijarTema(null) },
+      'Automática'),
+    h('button', { clase: 'mini' + (tema ? ' activo' : ''), onclick: () => {
+      est.busqueda.abierta = true; repintar(); } }, tema ? `«${tema.titulo || tema.id}»` : 'Elegir un tema…')));
+  caja.appendChild(h('div', { clase: 'pista' }, tema
+    ? `Suena todo el vídeo este tema: ${tema.titulo || tema.id}`
+      + (tema.fuente === 'propia' ? ' (subido por ti)' : ` de ${tema.artista || '?'}`)
+      + (tema.licencia_nombre ? ` · ${tema.licencia_nombre}` : '')
+    : 'Automática: el vídeo se parte en tramos según su ritmo y cada uno lleva su tema de Jamendo.'));
+
+  if (est.busqueda.abierta || tema) caja.appendChild(buscadorDeTemas(modo, est, repintar, fijarTema, tema));
+
+  async function fijarTema(nuevo) {
+    if (borrador) {
+      op.musica = nuevo || null;
+      if (!nuevo) est.busqueda.abierta = false;
+      repintar();
+      return;
+    }
+    try {
+      const r = await pedir(`${API.proyecto(modo.pid)}/sonido`, {
+        method: 'PUT', cuerpo: { musica: nuevo || {}, remontar: true } });
+      est.musica.tema = nuevo || null;
+      if (!nuevo) est.busqueda.abierta = false;
+      avisoDeMontaje(r, nuevo ? 'Música' : 'Música automática');
+    } catch (e) { toast(e.message, true); }
+    repintar();
+  }
+  return caja;
+}
+
+function buscadorDeTemas(modo, est, repintar, fijarTema, puesto) {
+  const b = est.busqueda;
+  const caja = h('div', { clase: 'buscador-temas' });
+  // del catálogo de Jamendo y no del vídeo: sirve también en un borrador
+  const buscar = async (mas) => {
+    b.pagina = mas ? (b.pagina || 0) + 1 : 0;
+    b.buscando = true; repintar();
+    try {
+      const datos = await pedir(`${BASE}/api/musica/buscar`, {
+        method: 'POST',
+        cuerpo: { animo: b.texto ? '' : b.animo, extra: b.texto ? '' : b.extra, texto: b.texto,
+          instrumental: b.instrumental, pagina: b.pagina, cuantas: 12 } });
+      const nuevos = datos.temas || [];
+      b.temas = mas ? (b.temas || []).concat(nuevos.filter(t => !(b.temas || []).some(x => x.id === t.id)))
+        : nuevos;
+      b.sinMas = mas && !nuevos.length;
+    } catch (e) { toast(e.message, true); }
+    b.buscando = false; repintar();
+  };
+  caja.appendChild(h('label', {}, 'Buscar por lo que quieras'));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('input', { type: 'search', value: b.texto,
+      placeholder: 'videojuegos retro, fiesta, piano triste, verano…',
+      oninput: ev => { b.texto = ev.target.value; },
+      onkeydown: ev => { if (ev.key === 'Enter') buscar(); } }),
+    h('button', { clase: 'mini primario', disabled: b.buscando, onclick: () => buscar() },
+      b.buscando ? 'buscando…' : 'Buscar')));
+  caja.appendChild(h('label', {}, 'O por ánimo'));
+  caja.appendChild(h('div', { clase: 'herramientas' }, ...ANIMOS_MUSICA.map(([id, nombre]) => h('button', {
+    clase: 'mini' + (!b.texto && b.animo === id ? ' activo' : ''),
+    onclick: () => { b.animo = id; b.texto = ''; buscar(); },
+  }, nombre))));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('label', { clase: 'casilla' },
+      h('input', { type: 'checkbox', checked: b.instrumental,
+        onchange: ev => { b.instrumental = ev.target.checked; } }),
+      ' Solo instrumental (sin voz cantada)'),
+    h('label', { clase: 'casilla' },
+      h('input', { type: 'checkbox', checked: b.comercial,
+        onchange: ev => { b.comercial = ev.target.checked; repintar(); } }),
+      ' Solo uso comercial (para clientes o anuncios)')));
+  caja.appendChild(subirAudioPropio('musica', modo, ficha => fijarTema(ficha),
+    'Subir mi música (MP3, WAV, M4A)'));
+  const temas = (b.temas || []).filter(t => !b.comercial || t.comercial);
+  temas.forEach(tema => {
+    caja.appendChild(h('div', { clase: 'tema-musica' + (puesto && puesto.id === tema.id ? ' puesto' : '') },
+      h('div', {}, h('b', {}, tema.titulo || tema.id),
+        h('span', { clase: 'meta' }, ` · ${tema.artista || '?'} · ${duracionCorta(tema.duracion)}`
+          + ((tema.generos || []).length ? ` · ${tema.generos.slice(0, 3).join(', ')}` : '')),
+        h('div', { clase: 'meta' }, `${tema.licencia_nombre || 'licencia sin datos'} · `
+          + (tema.comercial ? 'se puede usar en vídeos comerciales' : 'NO comercial')
+          + (tema.atribucion ? ' · pide citar al autor' : ''))),
+      h('audio', { controls: true, preload: 'none',
+        src: `${BASE}/api/musica/escucha?url=${encodeURIComponent(tema.escucha || '')}` }),
+      h('button', { clase: 'mini' + (puesto && puesto.id === tema.id ? ' activo' : ''),
+        onclick: () => fijarTema(tema) }, puesto && puesto.id === tema.id ? 'Puesto' : 'Usar este')));
+  });
+  if (b.temas && !temas.length) {
+    caja.appendChild(h('div', { clase: 'pista' }, b.temas.length
+      ? 'Ninguno de estos permite uso comercial: quita el filtro, pulsa «Ver más» o prueba otra búsqueda.'
+      : 'Ningún tema con eso: prueba otras palabras u otro ánimo, o quita «solo instrumental».'));
+  }
+  if (b.temas && b.temas.length && !b.sinMas) {
+    caja.appendChild(h('button', { clase: 'mini', disabled: b.buscando, onclick: () => buscar(true) },
+      b.buscando ? 'buscando…' : 'Ver más temas'));
+  } else if (b.sinMas) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'No hay más temas con esta búsqueda.'));
+  }
+  return caja;
+}
+
+/* SUBIR UN AUDIO TUYO, para la música o para un efecto. Se guarda en el banco
+   del canal y se usa como uno de Jamendo o FreeSound. La licencia es la tuya. */
+function subirAudioPropio(familia, modo, alSubir, texto) {
+  const id = `audio-${familia}-${modo.pid || 'borrador'}-${Math.random().toString(36).slice(2, 7)}`;
+  const entrada = h('input', { type: 'file', accept: 'audio/*,.mp3,.wav,.m4a,.ogg,.aac,.flac',
+    clase: 'oculto', id,
+    onchange: async ev => {
+      const fichero = (ev.target.files || [])[0];
+      ev.target.value = '';
+      if (!fichero) return;
+      const cuerpo = new FormData();
+      cuerpo.append('audio', fichero);
+      toast(`subiendo «${fichero.name}»…`);
+      try {
+        const r = await pedir(`${BASE}/api/sonido/subir?familia=${familia}`, { method: 'POST', cuerpo });
+        alSubir(r.ficha);
+      } catch (e) { toast(`no se ha podido subir: ${e.message}`, true); }
+    } });
+  return h('div', { clase: 'fila' }, entrada,
+    h('label', { clase: 'boton mini', for: id }, texto),
+    h('span', { clase: 'meta' }, 'si es tuyo o tienes la licencia; hasta 40 MB'));
+}
+
+/* ------------------------------------------------------------ los efectos */
+/* CADA PAPEL (aire de transición, golpe, tecla, retorno) suena automático
+   —un surtido de FreeSound— o con UN sonido elegido a mano: buscado en
+   FreeSound por lo que quieras o subido por ti. */
+function editorEfectos(modo, est, repintar) {
+  const caja = h('div', { clase: 'editor-ajuste' });
+  if (!est.leido) { caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…')); return caja; }
+  const bf = est.buscaEfecto;
+  /* LO QUE TENÍA LA MÚSICA Y LOS EFECTOS NO (11-10-2026): cuánto se oyen,
+     escuchar los que eligió el automático, descartar uno («✕», para todo el
+     canal: no vuelve a salir) y traer otros. Todo solo vuelve a MEZCLAR. */
+  const releer = async () => {
+    const sonido = await pedir(`${API.proyecto(modo.pid)}/sonido`).catch(() => null);
+    if (sonido) {
+      est.efectos = sonido.efectos || {};
+      est.fijos = sonido.efectos_fijos || [];
+      est.papeles = sonido.papeles || est.papeles;
+      est.efectosVolumen = sonido.efectos_volumen || est.efectosVolumen;
+    }
+    repintar();
+  };
+  const volumen = async nivel => {
+    try {
+      const r = await pedir(`${API.proyecto(modo.pid)}/sonido/efectos/volumen`, {
+        method: 'PUT', cuerpo: { nivel } });
+      est.efectosVolumen = r.nivel;
+      if (r.cambiado) avisoDeMontaje(r, 'Volumen de los efectos');
+    } catch (e) { toast(e.message, true); }
+    repintar();
+  };
+  const vetar = async (papel, ef, quitar) => {
+    try {
+      const r = await pedir(API.sonidoVetados(modo.pid), {
+        method: 'POST', cuerpo: { efecto: ef, papel, quitar: !!quitar, remontar: true } });
+      avisoDeMontaje(r, quitar ? 'Efecto devuelto' : 'Efecto descartado');
+    } catch (e) { toast(e.message, true); }
+    await releer();
+  };
+  const otros = async papel => {
+    try {
+      const r = await pedir(API.efectos(modo.pid), {
+        method: 'POST', cuerpo: { papeles: [papel], salteado: 1 + Math.floor(Math.random() * 5) } });
+      est.buscandoOtros = papel;
+      repintar();
+      seguirTrabajo(`efectos_${modo.pid}`, r.trabajo_id, async t => {
+        est.buscandoOtros = '';
+        if (t.estado === 'listo') toast('Efectos nuevos: se oyen al volver a montar el vídeo');
+        await releer();
+      });
+    } catch (e) { toast(e.message, true); }
+  };
+  caja.appendChild(h('div', { clase: 'campo' },
+    h('label', {}, 'Cuánto se oyen'),
+    h('div', { clase: 'herramientas' }, ...[['bajos', 'Bajos'], ['normales', 'Normales'], ['altos', 'Altos']]
+      .map(([v, nombre]) => h('button', {
+        clase: 'mini' + (est.efectosVolumen === v ? ' activo' : ''),
+        onclick: () => { if (est.efectosVolumen !== v) volumen(v); } }, nombre)))));
+  const fijar = async (papel, ficha) => {
+    try {
+      const r = await pedir(`${API.proyecto(modo.pid)}/sonido/efecto`, {
+        method: 'PUT', cuerpo: { papel, efecto: ficha || null, remontar: true } });
+      est.fijos = r.fijos || [];
+      est.efectos = Object.assign({}, est.efectos, { [papel]: r.efectos || [] });
+      if (ficha) bf.papel = '';
+      avisoDeMontaje(r, ficha ? 'Efecto' : 'Efecto automático');
+    } catch (e) { toast(e.message, true); }
+    repintar();
+  };
+  (est.papeles || []).forEach(papel => {
+    const fijo = (est.fijos || []).includes(papel.id);
+    const lista = (est.efectos || {})[papel.id] || [];
+    const bloque = h('div', { clase: 'papel-efecto' });
+    bloque.appendChild(h('div', { clase: 'fila' },
+      h('b', {}, papel.nombre), h('span', { clase: 'meta crece' }, papel.descripcion)));
+    if (fijo && lista[0]) {
+      bloque.appendChild(h('div', { clase: 'fila' },
+        h('span', {}, `Elegido: «${lista[0].titulo || lista[0].id}»`
+          + (lista[0].fuente === 'propia' ? ' (tuyo)' : ` de ${lista[0].autor || '?'}`)),
+        lista[0].muestra ? h('audio', { controls: true, preload: 'none', src: `${BASE}${lista[0].muestra}` }) : null,
+        h('button', { clase: 'mini fantasma', onclick: () => fijar(papel.id, null) }, 'Volver a automático')));
+    } else {
+      bloque.appendChild(h('div', { clase: 'meta' }, lista.length
+        ? `Automático: ${lista.filter(x => !x.vetado).length} sonidos de FreeSound, que se van alternando`
+        : 'Automático: se buscan en FreeSound al montar el vídeo'));
+      // CADA UNO, PARA OÍRLO Y DESCARTARLO
+      lista.forEach(ef => bloque.appendChild(h('div', { clase: 'fila efecto-surtido' + (ef.vetado ? ' vetado' : '') },
+        h('span', { clase: 'crece' }, `${ef.titulo || ef.id || 'sonido'}`,
+          h('span', { clase: 'meta' }, ` · ${ef.autor || '?'}${ef.vetado ? ' · descartado' : ''}`)),
+        ef.muestra ? h('audio', { controls: true, preload: 'none', src: `${BASE}${ef.muestra}` }) : null,
+        ef.vetado
+          ? h('button', { clase: 'mini fantasma', title: 'Que vuelva a poder sonar',
+            onclick: () => vetar(papel.id, ef, true) }, 'Devolver')
+          : h('button', { clase: 'mini peligro', title: 'No me gusta: que no vuelva a sonar en ningún vídeo',
+            onclick: () => vetar(papel.id, ef, false) }, '✕ Descartar'))));
+      bloque.appendChild(h('div', { clase: 'fila' },
+        h('button', { clase: 'mini', disabled: est.buscandoOtros === papel.id,
+          title: 'Trae otros sonidos de FreeSound para este papel (gratis)',
+          onclick: () => otros(papel.id) },
+        est.buscandoOtros === papel.id ? 'buscando otros…' : 'Buscar otros')));
+    }
+    bloque.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'mini' + (bf.papel === papel.id ? ' activo' : ''),
+        onclick: () => { bf.papel = bf.papel === papel.id ? '' : papel.id; bf.lista = null; bf.texto = ''; repintar(); } },
+      bf.papel === papel.id ? 'Cerrar la búsqueda' : 'Buscar otro sonido'),
+      subirAudioPropio('efectos', modo, ficha => fijar(papel.id, ficha), 'Subir el mío')));
+    if (bf.papel === papel.id) bloque.appendChild(buscadorDeEfectos(papel, bf, repintar, fijar));
+    caja.appendChild(bloque);
+  });
+  caja.appendChild(h('div', { clase: 'pista' },
+    'Cambiar un efecto solo vuelve a mezclar el sonido del vídeo: no se dibuja nada.'));
+  return caja;
+}
+
+function buscadorDeEfectos(papel, bf, repintar, fijar) {
+  const caja = h('div', { clase: 'buscador-temas' });
+  const buscar = async () => {
+    bf.buscando = true; repintar();
+    try {
+      const r = await pedir(`${BASE}/api/efectos/buscar`, {
+        method: 'POST', cuerpo: { texto: bf.texto, papel: papel.id, cuantos: 15 } });
+      bf.lista = r.efectos || [];
+      if (!bf.texto) bf.texto = r.texto || '';
+    } catch (e) { toast(e.message, true); }
+    bf.buscando = false; repintar();
+  };
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('input', { type: 'search', value: bf.texto,
+      placeholder: 'en inglés funciona mejor: whoosh, pop, click, coin, magic…',
+      oninput: ev => { bf.texto = ev.target.value; },
+      onkeydown: ev => { if (ev.key === 'Enter') buscar(); } }),
+    h('button', { clase: 'mini primario', disabled: bf.buscando, onclick: buscar },
+      bf.buscando ? 'buscando…' : 'Buscar en FreeSound')));
+  (bf.lista || []).forEach(ef => {
+    caja.appendChild(h('div', { clase: 'tema-musica' },
+      h('div', {}, h('b', {}, ef.titulo || ef.id),
+        h('span', { clase: 'meta' }, ` · ${ef.autor || '?'} · ${(Number(ef.duracion) || 0).toFixed(1)} s`),
+        h('div', { clase: 'meta' }, `${ef.licencia_nombre || 'licencia sin datos'} · `
+          + (ef.comercial ? 'uso comercial permitido' : 'NO comercial')
+          + (ef.atribucion ? ' · pide citar al autor' : '') + (ef.vetado ? ' · lo vetaste' : ''))),
+      h('audio', { controls: true, preload: 'none',
+        src: `${BASE}/api/musica/escucha?url=${encodeURIComponent(ef.escucha || '')}` }),
+      h('button', { clase: 'mini', onclick: () => fijar(papel.id, ef) }, 'Usar este')));
+  });
+  if (bf.lista && !bf.lista.length) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Nada con eso: prueba otras palabras (mejor en inglés).'));
+  }
+  return caja;
+}
+
+/* --------------------------------------------------------- los subtítulos */
+function editorSubtitulos(modo, est, repintar) {
+  const caja = h('div', { clase: 'editor-ajuste' });
+  const borrador = modo.tipo === 'borrador';
+  const op = borrador ? opcionesBorrador(modo.e) : null;
+  if (!borrador && !est.subtitulos) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+    return caja;
+  }
+  const actual = borrador ? (op.subtitulos || {}) : est.subtitulos;
+  const disenos = (est.subtitulos && est.subtitulos.disenos) || [
+    { id: 'dibujo', nombre: 'Dibujo', descripcion: 'trazo grueso, esquinas redondas y relleno opaco' },
+    { id: 'realista', nombre: 'Realista', descripcion: 'línea fina y sobria, para fotografía' },
+    { id: 'editorial', nombre: 'Editorial', descripcion: 'tipografía de revista, con serifa' }];
+  const cambiar = async cambios => {
+    if (borrador) {
+      op.subtitulos = cambios.automatico ? {} : Object.assign({}, op.subtitulos || {}, cambios);
+      if (cambios.color === '') delete op.subtitulos.color;
+      repintar();
+      return;
+    }
+    try {
+      await pedir(`${API.proyecto(modo.pid)}/subtitulos`, { method: 'PUT', cuerpo: cambios });
+      est.subtitulos = await pedir(`${API.proyecto(modo.pid)}/subtitulos`);
+    } catch (e) { toast(e.message, true); }
+    repintar();
+  };
+  const filaDe = (etiqueta, opciones, valor, clave, ayuda) => h('div', { clase: 'campo' },
+    h('label', {}, etiqueta),
+    h('div', { clase: 'herramientas' }, ...opciones.map(([v, nombre]) => h('button', {
+      clase: 'mini' + (valor !== undefined && String(valor) === String(v) ? ' activo' : ''),
+      onclick: () => cambiar({ [clave]: v }) }, nombre))),
+    ayuda ? h('div', { clase: 'pista' }, ayuda) : null);
+  caja.appendChild(filaDe('Tamaño', TAMANOS_SUB, actual.tam, 'tam'));
+  const elegido = disenos.find(d => d.id === actual.diseno);
+  caja.appendChild(filaDe('Letra y forma', disenos.map(d => [d.id, d.nombre]), actual.diseno, 'diseno',
+    elegido ? `${elegido.nombre}: ${elegido.descripcion}` : disenos.map(d => `${d.nombre}: ${d.descripcion}`).join(' · ')));
+  caja.appendChild(filaDe('Caja detrás del texto', CAJAS_SUB, actual.caja, 'caja'));
+  const color = h('input', { type: 'color', value: actual.color || '#ffffff',
+    onchange: ev => cambiar({ color: ev.target.value }) });
+  caja.appendChild(h('div', { clase: 'campo' }, h('label', {}, 'Color del texto'),
+    h('div', { clase: 'fila' }, color,
+      actual.color ? h('button', { clase: 'mini fantasma', onclick: () => cambiar({ color: '' }) },
+        'Quitar mi color') : h('span', { clase: 'meta' }, 'el del estilo'))));
+  const propios = borrador ? Object.keys(actual).length > 0 : actual.propios;
+  const pie = h('div', { clase: 'fila' });
+  if (propios) {
+    pie.appendChild(h('button', { clase: 'mini', onclick: () => cambiar({ automatico: true }) },
+      'Volver a los del estilo'));
+  }
+  if (!borrador && actual.montado && actual.pendiente) {
+    pie.appendChild(h('button', {
+      clase: 'mini primario',
+      onclick: async () => {
+        try {
+          const r = await pedir(`${API.proyecto(modo.pid)}/subtitulos/aplicar`, { method: 'POST' });
+          avisoDeMontaje(r, 'Subtítulos');
+          est.subtitulos.pendiente = false;
+        } catch (e) { toast(e.message, true); }
+        repintar();
+      },
+    }, 'Aplicar ahora'));
+    pie.appendChild(h('span', { clase: 'meta' },
+      'rehace las capas de texto y vuelve a montar el vídeo: unos minutos, ninguna imagen'));
+  } else if (!borrador) {
+    pie.appendChild(h('span', { clase: 'meta' },
+      actual.montado ? 'aplicados' : 'se aplicarán al montar el vídeo'));
+  } else {
+    pie.appendChild(h('span', { clase: 'meta' }, 'se aplican al crear el vídeo'));
+  }
+  caja.appendChild(pie);
+  return caja;
+}
+
+/* --------------------------------------------------------------- el logo */
+function editorLogo(modo, est, repintar) {
+  const caja = h('div', { clase: 'editor-ajuste' });
+  const borrador = modo.tipo === 'borrador';
+  const op = borrador ? opcionesBorrador(modo.e) : null;
+  const delProyecto = logoDelProyecto(borrador ? modo.estilo : (APP.light.video || {}).estilo);
+  let logo;
+  if (borrador) logo = op.logo === false ? null : (op.logo || (delProyecto && delProyecto.logo) || null);
+  else logo = est.logo;
+  const urlDe = l => (borrador || l.desdeBuzon
+    ? `${BASE}/api/logos/${encodeURIComponent(l.fichero)}`
+    : `${API.proyecto(modo.pid)}/logo/imagen?v=${encodeURIComponent(l.fichero)}`);
+
+  const idEntrada = `logo-${modo.pid || 'borrador'}`;
+  const entrada = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp',
+    clase: 'oculto', id: idEntrada, onchange: ev => subir(ev.target) });
+  caja.appendChild(entrada);
+
+  if (logo) caja.appendChild(vistaPreviaLogo(urlDe(logo), logo));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('label', { clase: 'boton mini', for: idEntrada }, logo ? 'Subir otro logo' : 'Subir un logo'),
+    delProyecto && (!logo || logo.fichero !== delProyecto.logo.fichero)
+      ? h('button', { clase: 'mini', onclick: () => usarDelProyecto() }, `Usar el de «${delProyecto.proyecto}»`) : null,
+    logo ? h('button', { clase: 'mini fantasma peligro', onclick: () => quitar() }, 'Sin logo') : null));
+  if (!logo) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Mejor un PNG con fondo transparente. '
+      + (delProyecto ? '' : 'Si todos los vídeos de un cliente llevan el mismo logo, ponlo en su proyecto (Estilos → el proyecto → Logo) y entrará solo.')));
+    return caja;
+  }
+  caja.appendChild(h('label', {}, 'Dónde'));
+  caja.appendChild(h('div', { clase: 'herramientas' }, ...ESQUINAS_LOGO.map(([id, nombre]) => h('button', {
+    clase: 'mini' + (logo.posicion === id ? ' activo' : ''), onclick: () => colocar({ posicion: id }) }, nombre))));
+  const tam = Math.round((logo.tamano || 0.12) * 100);
+  caja.appendChild(h('label', {}, `Tamaño: ${tam} % del ancho del vídeo`));
+  caja.appendChild(h('input', { type: 'range', min: 4, max: 40, step: 1, value: tam,
+    onchange: ev => colocar({ tamano: Number(ev.target.value) / 100 }) }));
+  const opa = Math.round((logo.opacidad || 0.9) * 100);
+  caja.appendChild(h('label', {}, `Opacidad: ${opa} %`));
+  caja.appendChild(h('input', { type: 'range', min: 10, max: 100, step: 5, value: opa,
+    onchange: ev => colocar({ opacidad: Number(ev.target.value) / 100 }) }));
+  caja.appendChild(h('div', { clase: 'pista' }, borrador ? 'Se pone al crear el vídeo.'
+    : 'Ponerlo, moverlo o quitarlo solo vuelve a montar el vídeo.'));
+  return caja;
+
+  async function subir(input) {
+    const fichero = (input.files || [])[0];
+    input.value = '';
+    if (!fichero) return;
+    const cuerpo = new FormData();
+    cuerpo.append('logo', fichero);
+    try {
+      if (borrador) {
+        const r = await pedir(`${BASE}/api/logos`, { method: 'POST', cuerpo });
+        op.logo = Object.assign({ posicion: 'arriba_derecha', tamano: 0.12, opacidad: 0.9 },
+          op.logo || {}, { fichero: r.nombre });
+      } else {
+        const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'POST', cuerpo });
+        est.logo = r.logo;
+        avisoDeMontaje(r, 'Logo');
+      }
+    } catch (e) { toast(e.message, true); }
+    repintar();
+  }
+  async function usarDelProyecto() {
+    if (borrador) { op.logo = null; delete op.logo; repintar(); return; }
+    try {
+      const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'PUT', cuerpo: { usar: delProyecto.logo } });
+      est.logo = r.logo;
+      avisoDeMontaje(r, 'Logo');
+    } catch (e) { toast(e.message, true); }
+    repintar();
+  }
+  async function quitar() {
+    if (borrador) { op.logo = false; repintar(); return; }
+    try {
+      const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'PUT', cuerpo: { quitar: true } });
+      est.logo = null;
+      avisoDeMontaje(r, 'Logo quitado');
+    } catch (e) { toast(e.message, true); }
+    repintar();
+  }
+  async function colocar(cambios) {
+    if (borrador) {
+      op.logo = Object.assign({}, logo, cambios);
+      repintar();
+      return;
+    }
+    try {
+      const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'PUT', cuerpo: cambios });
+      est.logo = r.logo || est.logo;
+      if (r.trabajo_id || r.montado !== undefined) avisoDeMontaje(r, 'Logo');
+    } catch (e) { toast(e.message, true); }
+    repintar();
+  }
+}
+
+/* Un cuadro 16:9 con el logo en su esquina y a su tamaño: lo que va a salir. */
+function vistaPreviaLogo(url, logo) {
+  const img = h('img', { src: url, alt: 'logo', clase: `logo-en-cuadro ${logo.posicion || 'arriba_derecha'}` });
+  img.style.width = `${Math.round((logo.tamano || 0.12) * 100)}%`;
+  img.style.opacity = String(logo.opacidad || 0.9);
+  return h('div', { clase: 'cuadro-logo' }, img, h('span', { clase: 'meta' }, 'así queda en el vídeo'));
 }
 
 /* TRAER LOS CAMBIOS DEL ESTILO. Un vídeo se queda con la copia del estilo del
@@ -12407,13 +15094,15 @@ async function abrirGuia(id, campo) {
  * una lista que se escribe aquí y se guarda en el servidor, con los datos: lo
  * que se quiere corregir o añadir más adelante. El asistente lee las dos.
  */
-const SISTEMA = { novedades: null, notas: null, error: '' };
+const SISTEMA = { novedades: null, notas: null, manual: null, manualAbierto: false, error: '' };
 
 async function cargarSistema() {
   try {
-    const [nov, notas] = await Promise.all([
-      pedir(`${BASE}/api/sistema/novedades`), pedir(`${BASE}/api/sistema/notas`)]);
+    const [nov, notas, manual] = await Promise.all([
+      pedir(`${BASE}/api/sistema/novedades`), pedir(`${BASE}/api/sistema/notas`),
+      pedir(`${BASE}/api/sistema/manual`).catch(() => ({ texto: '' }))]);
     SISTEMA.novedades = nov;
+    SISTEMA.manual = manual;
     SISTEMA.notas = notas.notas || [];
     SISTEMA.error = '';
   } catch (e) {
@@ -12438,6 +15127,32 @@ function unirLineas(texto) {
     else salida.push(linea);
   });
   return salida.join('\n');
+}
+
+/* CÓMO SE USA: docs/MANUAL.md, la misma guía que lee el asistente. Plegada,
+   salvo cuando se llega por el botón «?» de la cabecera (`abrirManual`). */
+function seccionManual() {
+  const caja = h('details', { clase: 'bloque-config plegable-config manual-config',
+    open: SISTEMA.manualAbierto });
+  caja.addEventListener('toggle', () => { SISTEMA.manualAbierto = caja.open; });
+  const manual = SISTEMA.manual;
+  caja.appendChild(h('summary', {}, h('h3', {}, 'Cómo se usa'),
+    h('span', { clase: 'meta' }, 'qué es cada pantalla y cada campo')));
+  if (SISTEMA.error) caja.appendChild(h('div', { clase: 'meta' }, SISTEMA.error));
+  else if (!manual) caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+  else if (!manual.texto) caja.appendChild(h('div', { clase: 'meta' }, 'sin guía escrita'));
+  else caja.appendChild(h('div', { clase: 'novedades' }, textoConFormato(unirLineas(manual.texto))));
+  return caja;
+}
+
+/* El botón «?»: abre Configuración con la guía desplegada y a la vista. */
+function abrirManual() {
+  SISTEMA.manualAbierto = true;
+  conmutarConfig(true);
+  setTimeout(() => {
+    const caja = document.querySelector('.manual-config');
+    if (caja) { caja.open = true; caja.scrollIntoView({ block: 'start' }); }
+  }, 400);
 }
 
 function seccionNovedades() {
@@ -12701,6 +15416,7 @@ function escribirDictado(texto, base) {
   if (!campo) return;
   const antes = base === undefined ? campo.value : base;
   campo.value = (antes && texto ? `${antes.replace(/\s+$/, '')} ` : antes) + texto;
+  ajustarCampoAsistente();
   campo.focus();
 }
 

@@ -51,6 +51,7 @@ import copy
 import json
 import os
 import re
+import threading
 import unicodedata
 import time
 
@@ -446,6 +447,14 @@ def carpeta_imagenes(proyecto, crear=False):
     return ruta
 
 
+#: LEER-CAMBIAR-ESCRIBIR, de uno en uno. La cola de imagenes escribe en las
+#: notas desde un hilo (el «hecha» y el error de cada una) mientras la persona
+#: sigue anadiendo y editando: sin esto, la escritura de uno se llevaba la del
+#: otro y una nota recien escrita desaparecia (10-10-2026). Reentrante: `editar`
+#: llama a `leer` y a `guardar` con el cerrojo ya cogido.
+CERROJO = threading.RLock()
+
+
 def leer(proyecto):
     """Las notas del repaso, en orden de vídeo. Nunca levanta."""
     try:
@@ -484,7 +493,7 @@ def _siguiente_id(notas):
 PANTALLAS = ("video", "imagenes")
 
 
-def anadir(proyecto, texto, t, plano="", imagenes=(), version_mp4=None,
+def _anadir_sin_cerrojo(proyecto, texto, t, plano="", imagenes=(), version_mp4=None,
            pantalla="video", ancla=""):
     """Una nota nueva, anclada a su segundo. El texto es OBLIGATORIO.
 
@@ -518,12 +527,35 @@ def anadir(proyecto, texto, t, plano="", imagenes=(), version_mp4=None,
     return nota
 
 
-def editar(proyecto, nid, texto=None, t=None, imagenes=None,
-           regenerado=None):
+def _editar_sin_cerrojo(proyecto, nid, texto=None, t=None, imagenes=None,
+           regenerado=None, error=None, aviso=None, antes=None):
+    """`error` y `aviso` son lo que paso al redibujarla: «OpenAI la rechazo
+    por...» o «se dibujo sin marcas: ...». Cadena vacia los quita.
+
+    `antes` es la imagen que habia ANTES de redibujarla (ruta relativa al
+    proyecto): la pantalla la pone al lado de la nueva para que se vea que
+    cambio. Sin ella, una correccion pequena se leia como «no ha hecho nada»."""
     ficha = leer(proyecto)
     for nota in ficha["notas"]:
         if nota.get("id") != nid:
             continue
+        if antes is not None:
+            if antes:
+                nota["antes"] = str(antes)[:400]
+            else:
+                nota.pop("antes", None)
+        for clave, valor in (("error", error), ("aviso", aviso)):
+            if valor is None:
+                continue
+            valor = " ".join(str(valor).split())[:MAX_TEXTO]
+            if valor:
+                nota[clave] = valor
+            else:
+                nota.pop(clave, None)
+        if texto is not None and " ".join(str(texto).split()) != nota.get("texto"):
+            # otra peticion: lo que paso con la anterior ya no la describe
+            nota.pop("error", None)
+            nota.pop("aviso", None)
         if texto is not None:
             limpio = " ".join(str(texto).split())[:MAX_TEXTO]
             if not limpio:
@@ -556,7 +588,7 @@ def editar(proyecto, nid, texto=None, t=None, imagenes=None,
     raise KeyError(nid)
 
 
-def borrar(proyecto, nid):
+def _borrar_sin_cerrojo(proyecto, nid):
     ficha = leer(proyecto)
     antes = len(ficha["notas"])
     ficha["notas"] = [n for n in ficha["notas"] if n.get("id") != nid]
@@ -1082,3 +1114,19 @@ def resumen_de(reparto):
             "tareas": tareas,
             "cuesta_imagenes": any(t in ("assets", "piezas") for t in tareas),
             "cuesta_voz": any(t in ("voz", "guion") for t in tareas)}
+
+
+
+def anadir(*args, **kwargs):
+    with CERROJO:
+        return _anadir_sin_cerrojo(*args, **kwargs)
+
+
+def editar(*args, **kwargs):
+    with CERROJO:
+        return _editar_sin_cerrojo(*args, **kwargs)
+
+
+def borrar(*args, **kwargs):
+    with CERROJO:
+        return _borrar_sin_cerrojo(*args, **kwargs)

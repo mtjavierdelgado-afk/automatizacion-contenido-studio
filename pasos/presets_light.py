@@ -233,8 +233,18 @@ def imagenes_de_parte(parte, encargo=None):
     donde esta el precio.
     """
     ficha = PARTES.get(parte) or {}
-    return sum(int((TAREAS_POR_ID.get(t) or {}).get("imagenes") or 0)
-               for t in ficha.get("tareas", ()))
+    total = 0
+    for tarea in ficha.get("tareas", ()):
+        if tarea == "referencias" and encargo is not None:
+            # las laminas de ESTE estilo: quitar o anadir alguna cambia la cuenta
+            try:
+                from . import laminas as _laminas              # noqa: PLC0415
+            except ImportError:
+                import laminas as _laminas                     # noqa: PLC0415
+            total += len(_laminas.ids_de(encargo))
+            continue
+        total += int((TAREAS_POR_ID.get(tarea) or {}).get("imagenes") or 0)
+    return total
 
 
 #: CAMBIAR EL IDIOMA NO ES REHACER EL ESTILO, y por eso no esta en PARTES: no
@@ -297,8 +307,7 @@ def aviso_de_idioma(anterior, nuevo, calidad="medium"):
     imagenes = imagenes_de_parte("estilo")
     if not imagenes:
         return ""
-    por_imagen = USD_POR_IMAGEN.get(str(calidad or "medium"),
-                                    USD_POR_IMAGEN["medium"])
+    por_imagen = usd_por_imagen(calidad or "medium")
     return AVISO_LAMINAS_EN_OTRO_IDIOMA.format(
         anterior=_NOMBRES_LLANOS.get(anterior, anterior),
         nuevo=_NOMBRES_LLANOS.get(nuevo, nuevo),
@@ -386,6 +395,20 @@ def ritmo_de(id_ritmo):
 USD_POR_IMAGEN = {"low": 0.033, "medium": 0.074, "high": 0.198}
 
 
+def usd_por_imagen(calidad="low"):
+    """El precio de UNA imagen, el mismo en todo el Studio (`ajustes.precio_por_imagen`:
+    la mediana de lo que te han cobrado, o la tabla con las referencias). La
+    tabla de arriba solo queda de respaldo si `ajustes` no se puede cargar."""
+    try:
+        try:
+            from . import ajustes                       # noqa: PLC0415
+        except ImportError:
+            import ajustes                              # noqa: PLC0415
+        return float(ajustes.usd_por_imagen(str(calidad or "low")))
+    except Exception:                                   # noqa: BLE001
+        return USD_POR_IMAGEN.get(str(calidad or "low"), USD_POR_IMAGEN["low"])
+
+
 def coste_por_minuto(id_ritmo, calidad="low"):
     """Lo que cuesta un minuto de video a este ritmo. -> USD
 
@@ -395,7 +418,7 @@ def coste_por_minuto(id_ritmo, calidad="low"):
     dibujadas y las muestras): eso ya se dice al crearlo.
     """
     ficha = ritmo_de(id_ritmo)
-    por_imagen = USD_POR_IMAGEN.get(str(calidad or "low"), USD_POR_IMAGEN["low"])
+    por_imagen = usd_por_imagen(calidad or "low")
     return round((60.0 / max(0.5, float(ficha["media_s"]))) * por_imagen, 3)
 
 
@@ -591,6 +614,24 @@ def validar_encargo(crudo):
             "palabras no dicen nada: escríbelas enteras o déjalo en blanco")
     limpio["estilo_prompt"] = prompt
     limpio["estilo_imagenes"] = imagenes
+    # LO QUE SE DICE DE CADA IMAGEN, opcional: {nombre del buzon: texto}. Solo
+    # de imagenes que van en la lista; lo demas se tira sin error.
+    crudas = datos.get("estilo_descripciones")
+    descripciones = {}
+    if isinstance(crudas, dict):
+        nombres = {_sin_prefijo(n) for n in imagenes}
+        for nombre, texto in crudas.items():
+            nombre = _sin_prefijo(nombre)
+            texto = " ".join(str(texto or "").split())[:MAX_DESCRIPCION]
+            if nombre in nombres and texto:
+                descripciones[nombre] = texto
+    limpio["estilo_descripciones"] = descripciones
+    # LAS MARCADAS PARA DIBUJAR (★), opcional: las que van seguro a la hoja de
+    # las laminas (`para_la_hoja`). Como mucho las que caben en ella.
+    nombres = {_sin_prefijo(n) for n in imagenes}
+    limpio["estilo_destacadas"] = [
+        _sin_prefijo(n) for n in (datos.get("estilo_destacadas") or [])
+        if isinstance(n, str) and _sin_prefijo(n) in nombres][:MAX_EN_LA_HOJA]
 
     # EL TIPO DE IMAGEN (Etapa Foto A): "ilustracion" o "foto". Va SIEMPRE en el
     # encargo limpio, con ilustracion si no vino -- un encargo guardado antes de
@@ -641,6 +682,27 @@ def validar_encargo(crudo):
     if voz_id and not re.match(r"^[A-Za-z0-9_-]{8,64}$", voz_id):
         raise ErrorEncargo("«voz_id» no parece un id de voz de Cartesia")
     limpio["voz_id"] = voz_id
+    # EL PROYECTO (cliente) donde se crea, opcional. No es del estilo: se apunta
+    # en `clientes.json` al terminar (ver `_correr_preset_light`).
+    cliente = str(datos.get("cliente") or "").strip()
+    if cliente and not re.match(r"^cl_[a-z0-9_]{1,40}$", cliente):
+        raise ErrorEncargo("«cliente» no es un proyecto válido")
+    limpio["cliente"] = cliente
+    # LAS LAMINAS (`laminas.py`): cuales se quitaron de las seis de fabrica,
+    # lo que ensena cada una si se cambio y las anadidas, y con que imagenes
+    # tuyas se dibuja cada una. Solo se guarda lo que no es lo de fabrica: un
+    # estilo que nunca las toco no recibe ninguna clave nueva.
+    try:
+        from . import laminas as _laminas                  # noqa: PLC0415
+    except ImportError:
+        import laminas as _laminas                         # noqa: PLC0415
+    quitadas, propias, hoja = _laminas.config_de(datos)
+    if quitadas:
+        limpio["laminas_quitadas"] = quitadas
+    if propias:
+        limpio["laminas_propias"] = propias
+    if hoja != "comun":
+        limpio["laminas_hoja"] = hoja
 
     # AQUI NO HAY PERSONAJES DEL CANAL NI LLAMADAS A LA ACCION, y las dos
     # ausencias son decisiones:
@@ -656,17 +718,83 @@ def validar_encargo(crudo):
     return limpio
 
 
-def max_imagenes_estilo():
-    """Cuantas imagenes se pueden adjuntar a una descripcion. -> int
+#: CUANTAS IMAGENES SE PUEDEN ADJUNTAR a un estilo. Eran las mismas que se
+#: eligen de un video (`p6_assets.REFERENCIAS_A_ELEGIR`, 24); se pidieron 50
+#: (09-10-2026). Lo que las mira es la GUIA, que las abre una a una con el CLI
+#: por suscripcion: mas imagenes alargan esa pasada y no cuestan dinero por
+#: imagen de plano. Para DIBUJAR las laminas no van todas (ver `para_la_hoja`).
+MAX_IMAGENES_ESTILO = 50
 
-    LAS MISMAS QUE SE ELIGEN DE UN VIDEO, y sale de alli en vez de escribirse
-    aqui: las dos listas alimentan a la MISMA funcion --la que escribe la guia
-    mirando imagenes-- asi que un tope propio se quedaria viejo el dia que
-    cambiara el otro. Se importa tarde porque p6_assets importa moodboard y
-    moodboard importa p6_assets: arriba seria un circulo.
+#: Cuantas de las adjuntas van en la HOJA con la que se dibujan las laminas.
+#: Es una sola imagen de 1536x1024 en cuadricula de dos columnas: con 24 cada
+#: foto quedaba de 768x85 y con 50 de 768x41, que ya no ensena ningun trazo.
+#: Con ocho cada una conserva 768x256.
+MAX_EN_LA_HOJA = 8
+
+#: Lo que cabe en la descripcion de una imagen.
+MAX_DESCRIPCION = 300
+
+
+def max_imagenes_estilo():
+    """Cuantas imagenes se pueden adjuntar a una descripcion. -> int"""
+    return MAX_IMAGENES_ESTILO
+
+
+def para_la_hoja(rutas, descripciones=None, maximo=MAX_EN_LA_HOJA, destacadas=None):
+    """Las adjuntas que van a la hoja de las laminas, en su orden. -> [rutas]
+
+    Primero las MARCADAS con ★ (`destacadas`: quien las subio dijo «dibuja
+    con estas»), luego las que tienen descripcion, y el resto repartidas a lo
+    largo de la lista, no las primeras: quien sube cincuenta suele subirlas por
+    grupos, y las ocho primeras serian un grupo.
     """
-    import p6_assets                                        # noqa: PLC0415
-    return p6_assets.REFERENCIAS_A_ELEGIR
+    rutas = list(rutas or [])
+    if len(rutas) <= maximo:
+        return rutas
+    marcadas = {_sin_prefijo(n) for n in (destacadas or [])}
+    elegidas = [r for r in rutas if _sin_prefijo(r) in marcadas][:maximo]
+    elegidas += [r for r in rutas if descripcion_de(r, descripciones)
+                 and r not in elegidas][:maximo - len(elegidas)]
+    resto = [r for r in rutas if r not in elegidas]
+    hueco = maximo - len(elegidas)
+    if hueco > 0 and resto:
+        paso = len(resto) / float(hueco)
+        elegidas += [resto[int(i * paso)] for i in range(hueco)]
+    return [r for r in rutas if r in elegidas]
+
+
+def _sin_prefijo(nombre):
+    return re.sub(r"^(\d{2}_)+", "", os.path.basename(str(nombre or "")))
+
+
+def descripcion_de(ruta, descripciones):
+    """La descripcion de una imagen, la busque por el nombre del buzon o por el
+    del taller («NN_» delante). -> str"""
+    if not descripciones:
+        return ""
+    return str(descripciones.get(_sin_prefijo(ruta)) or "").strip()
+
+
+def indicaciones_con_descripciones(indicaciones, rutas, descripciones):
+    """Las indicaciones del estilo con lo que se ha dicho de cada imagen. -> str
+
+    Va con el NOMBRE DEL FICHERO tal y como lo abre la guia, para que quien
+    escribe la guia sepa a que imagen se refiere cada frase.
+    """
+    lineas = []
+    for ruta in rutas or []:
+        texto = descripcion_de(ruta, descripciones)
+        if texto:
+            lineas.append(f"[{os.path.basename(ruta)}] {texto}")
+    base = " ".join(str(indicaciones or "").split())
+    if not lineas:
+        return base
+    # en UNA linea a proposito: la guia junta los espacios de las indicaciones
+    # (`estilo.generar_guia`), asi que los saltos de linea no llegarian
+    bloque = ("Lo que dice quien las subio de algunas imagenes, por fichero "
+              "(usalo para entender que muestra cada una y que tomar de ella): "
+              + " ".join(lineas))
+    return f"{base} {bloque}" if base else bloque
 
 
 def tareas_de(encargo, solo=None):

@@ -259,7 +259,31 @@ ANIMOS = {
     "epico": "epic cinematic", "sobrio": "documentary ambient",
     "esperanzador": "uplifting hopeful", "corporativo": "corporate clean",
     "melancolico": "melancholic piano", "misterioso": "mysterious ambient",
+    # 10-10-2026: con ocho animos de documental no habia nada para un video
+    # alegre, de videojuegos o para ninos. Las claves de arriba no se tocan:
+    # son las que guardan los videos que ya existen.
+    "alegre": "happy upbeat", "divertido": "fun playful quirky",
+    "gamer": "electronic chiptune game", "infantil": "children playful",
+    "accion": "action energetic drums", "inspirador": "inspirational motivational",
+    "fiesta": "party dance electronic", "chill": "chill relaxing",
+    "lofi": "lofi hiphop chill", "acustico": "acoustic guitar",
+    "pop": "pop upbeat", "rock": "rock energetic",
+    "jazz": "jazz smooth", "latino": "latin", "romantico": "romantic soft",
+    "clasico": "classical orchestral",
 }
+
+#: Como se ensenan en pantalla, en el orden en que se ofrecen.
+NOMBRES_ANIMOS = [
+    ("alegre", "Alegre"), ("divertido", "Divertido"), ("gamer", "Gamer / electrónica"),
+    ("infantil", "Infantil"), ("accion", "Acción"), ("inspirador", "Inspirador"),
+    ("fiesta", "Fiesta"), ("chill", "Chill"), ("lofi", "Lo-fi"),
+    ("acustico", "Acústico"), ("pop", "Pop"), ("rock", "Rock"), ("jazz", "Jazz"),
+    ("latino", "Latino"), ("romantico", "Romántico"), ("clasico", "Clásica"),
+    ("sobrio", "Sobrio"), ("corporativo", "Corporativo"),
+    ("esperanzador", "Esperanzador"), ("epico", "Épico"),
+    ("misterioso", "Misterioso"), ("tension", "Tensión"),
+    ("melancolico", "Melancólico"), ("oscuro", "Oscuro"),
+]
 
 
 def _pedir_a_jamendo(params):
@@ -274,7 +298,7 @@ def _pedir_a_jamendo(params):
 
 
 def buscar_musica(animo="sobrio", duracion_s=0, cuantas=12, velocidad="low",
-                  instrumental=True, extra=""):
+                  instrumental=True, extra="", texto="", pagina=0):
     """Temas de Jamendo que encajan con el tono del video.
 
     POR QUE ESTO ES UNA ESCALERA Y NO UNA CONSULTA
@@ -301,13 +325,34 @@ def buscar_musica(animo="sobrio", duracion_s=0, cuantas=12, velocidad="low",
     if not claves.get("JAMENDO_CLIENT_ID"):
         raise RuntimeError("falta la clave de Jamendo: ponla en Configuracion "
                            "(el engranaje de arriba a la derecha)")
-    etiquetas = ANIMOS.get(animo, animo)
+    etiquetas = ANIMOS.get(animo, animo) if animo else ""
     if extra:
         etiquetas = f"{etiquetas} {extra}".strip()
     tope = max(1, min(50, int(cuantas)))
     comun = {"client_id": claves["JAMENDO_CLIENT_ID"], "format": "json",
              "limit": tope * 2, "include": "musicinfo licenses",
-             "boost": "popularity_total"}
+             "boost": "popularity_total",
+             # «Ver más»: la pagina siguiente de la MISMA busqueda
+             "offset": max(0, int(pagina or 0)) * tope * 2}
+    # BUSQUEDA LIBRE («videojuegos retro», «fiesta en la playa»): va por el
+    # buscador de Jamendo, que mira titulo, artista y etiquetas, y no por los
+    # animos, que son etiquetas fijas
+    texto = " ".join(str(texto or "").split())[:80]
+    if texto:
+        vistos, salida = set(), []
+        for params_texto in ({"search": texto}, {"fuzzytags": texto}):
+            params = dict(comun)
+            if instrumental:
+                params["vocalinstrumental"] = "instrumental"
+            params.update(params_texto)
+            for track in _pedir_a_jamendo(params):
+                ficha = _ficha_musica(track)
+                if ficha["descarga"] and ficha["id"] not in vistos:
+                    vistos.add(ficha["id"])
+                    salida.append(ficha)
+            if len(salida) >= tope:
+                break
+        return salida[:tope]
     if instrumental:
         comun["vocalinstrumental"] = "instrumental"
     minimo = int(max(60, min((duracion_s or 0) * 0.45, 420))) if duracion_s else 0
@@ -466,6 +511,49 @@ DUCK_RATIO = 6
 #: misma idea.
 DUCK_ATAQUE_MS = 15
 DUCK_CAIDA_MS = 1200
+
+# ===========================================================================
+# CUANTA MUSICA SE OYE: la presencia, por video
+#
+# Los numeros de arriba se calibraron en el canal de origen para que la musica
+# casi desapareciera bajo la voz (09-10-2026, primer video de prueba del
+# Studio: «no hay musica a pesar que esta seleccionada»). Medido sobre ese MP4:
+# la musica solo asomaba en la cola negra del final; bajo la voz quedaba
+# enterrada, y como la caida es de 1,2 s tampoco subia en las pausas entre
+# frases. Estaba en la mezcla; no se oia.
+#
+# La presencia junta los tres numeros que deciden eso -- cuanto se agacha
+# (ratio), cuanto se sube la pista (dB) y cuanto tarda en volver (caida) --
+# en tres niveles con nombre. Medido con ESTE grafo, voz real y un tema a -23
+# LUFS, en ventanas de 100 ms (mediana):
+#
+#                musica bajo la voz      musica en las pausas
+#   suave          25 dB por debajo           -40 dB      (los numeros de arriba)
+#   normal         15 dB por debajo           -30 dB      (cama: se oye, no tapa)
+#   alta           11 dB por debajo           -25 dB      (musica protagonista)
+#
+# «normal» es lo que suena cuando el video no ha guardado ninguna: no es un
+# param escrito por defecto (regla 1 de CLAUDE.md), es lo que vale si falta.
+# Cambiar el nivel de un video es un param del render (`musica_presencia`), y
+# se vuelve a MEZCLAR sobre los clips que ya hay (`solo_montar`): ni una imagen
+# ni un clip. Cambiar los numeros de esta tabla no mueve ninguna firma.
+# ===========================================================================
+
+PRESENCIAS = {
+    "suave": {"ratio": DUCK_RATIO, "subida_db": 0.0, "caida_ms": DUCK_CAIDA_MS},
+    "normal": {"ratio": 2.5, "subida_db": 4.0, "caida_ms": 600},
+    "alta": {"ratio": 2.0, "subida_db": 6.0, "caida_ms": 500},
+}
+PRESENCIA_POR_DEFECTO = "normal"
+
+
+def presencia_de(nombre):
+    """El nivel pedido, o el de por defecto si no se entiende. -> (nombre, ficha)"""
+    nombre = str(nombre or "").strip().lower()
+    if nombre not in PRESENCIAS:
+        nombre = PRESENCIA_POR_DEFECTO
+    return nombre, PRESENCIAS[nombre]
+
 
 # ------------------------------------------------------------ EL MASTER
 #
@@ -1111,6 +1199,11 @@ def traer(ficha, familia):
     destino = banco(familia, _nombre_de(ficha))
     if os.path.exists(destino) and os.path.getsize(destino) > 2000:
         return destino
+    # LO TUYO no se descarga de ningun sitio: o esta en el banco, o no esta
+    if ficha.get("fuente") == "propia":
+        if os.path.exists(destino) and os.path.getsize(destino) > 0:
+            return destino
+        raise RuntimeError("ese audio tuyo ya no está en el banco: vuelve a subirlo")
     url = ficha.get("descarga") or ""
     if not url:
         raise RuntimeError(f"{ficha.get('id')}: no trae URL de descarga")
@@ -1429,8 +1522,11 @@ def pista_de_efectos(lista, duracion_s, destino, igualar=True):
 
 def filtro_de_mezcla(con_musica, con_efectos, duracion_s, lufs=MUSICA_LUFS,
                      ya_normalizada=False, ajuste_db=0.0, master=False,
-                     medida=None, efectos_db=0.0):
+                     medida=None, efectos_db=0.0, presencia=None):
     """El grafo de ffmpeg que junta voz, musica agachada y efectos.
+
+    `presencia` es el nivel de `PRESENCIAS` ("suave", "normal", "alta"); sin
+    el, o con uno que no existe, el de por defecto.
 
     Las tres pistas se recortan al MISMO largo antes de mezclarse: con
     `-stream_loop -1` la musica es infinita, y un `amix` con una entrada
@@ -1462,7 +1558,8 @@ def filtro_de_mezcla(con_musica, con_efectos, duracion_s, lufs=MUSICA_LUFS,
         # el mando que mueve el repaso cuando alguien dice «la musica esta
         # alta»: un numero en dB, y remuxear. No toca ninguna imagen ni ningun
         # clip, asi que bajar la musica cuesta lo que tarda el mux.
-        subida = MUSICA_SUBIDA_DB + float(ajuste_db or 0.0)
+        _, ficha = presencia_de(presencia)
+        subida = MUSICA_SUBIDA_DB + ficha["subida_db"] + float(ajuste_db or 0.0)
         nivel = (f"volume={CAMA_GANANCIA_DB + subida:g}dB"
                  if ya_normalizada
                  else f"loudnorm=I={lufs:.1f}:TP=-1.5:LRA=11,"
@@ -1478,8 +1575,8 @@ def filtro_de_mezcla(con_musica, con_efectos, duracion_s, lufs=MUSICA_LUFS,
                       f"alimiter=limit={DUCK_LLAVE_TECHO:g}:attack=5:release=80"
                       f"[llave]")
         partes.append(f"[mus][llave]sidechaincompress=threshold={DUCK_UMBRAL:g}:"
-                      f"ratio={DUCK_RATIO:g}:attack={DUCK_ATAQUE_MS:g}:"
-                      f"release={DUCK_CAIDA_MS:g}:makeup=1[musduck]")
+                      f"ratio={ficha['ratio']:g}:attack={DUCK_ATAQUE_MS:g}:"
+                      f"release={ficha['caida_ms']:g}:makeup=1[musduck]")
         entradas.append("[musduck]")
     else:
         partes.append("[voz]anull[vozmix]")
@@ -1527,6 +1624,8 @@ def describir(params):
         ajuste = float(p.get("musica_db") or 0.0)
     except (TypeError, ValueError):
         ajuste = 0.0
+    presencia, ficha = presencia_de(p.get("musica_presencia"))
+    ajuste += ficha["subida_db"]
     trozos = []
     musica = p.get("musica") or {}
     tramos = musica.get("tramos") or []
@@ -1537,13 +1636,81 @@ def describir(params):
         animos = " > ".join(t.get("animo") or "?" for t in tramos)
         trozos.append(f"{len(tramos)} temas encadenados ({animos}) a "
                       f"{MUSICA_LUFS + CAMA_GANANCIA_DB + MUSICA_SUBIDA_DB + ajuste:.1f} "
-                      f"LUFS con ducking")
+                      f"LUFS con ducking {presencia}")
     elif musica.get("id"):
         trozos.append(f"«{musica.get('titulo') or musica['id']}» de "
                       f"{musica.get('artista') or '?'} a "
-                      f"{MUSICA_LUFS + MUSICA_SUBIDA_DB + ajuste:.1f} LUFS con ducking")
+                      f"{MUSICA_LUFS + MUSICA_SUBIDA_DB + ajuste:.1f} LUFS con ducking {presencia}")
     surtido = p.get("efectos") or {}
     cuantos = sum(len(v or []) for v in surtido.values())
     if cuantos:
         trozos.append(f"{cuantos} efectos en {len(surtido)} papeles")
     return " · ".join(trozos) if trozos else "sin música ni efectos"
+
+
+# ------------------------------------------------------- la musica y los efectos TUYOS
+#
+# Subir un MP3 (o WAV, M4A, OGG) propio para la musica o para un efecto. Se
+# pasa a MP3 con ffmpeg y se guarda en el banco con el nombre de su contenido,
+# igual que lo de Jamendo y FreeSound: asi el render no sabe ni le importa de
+# donde salio. Su licencia es la tuya.
+
+EXT_AUDIO = (".mp3", ".wav", ".m4a", ".ogg", ".aac", ".flac")
+MAX_BYTES_AUDIO = 40 * 1024 * 1024
+
+
+def guardar_propio(contenido, nombre_original, familia):
+    """Guarda un audio subido en el banco. -> ficha como las de Jamendo/FreeSound"""
+    import hashlib                                          # noqa: PLC0415
+    import tempfile                                         # noqa: PLC0415
+    if familia not in ("musica", "efectos"):
+        raise ValueError("familia desconocida")
+    extension = os.path.splitext(str(nombre_original or ""))[1].lower()
+    if extension not in EXT_AUDIO:
+        raise ValueError(f"no es un audio que se pueda usar ({', '.join(EXT_AUDIO)})")
+    if len(contenido) > MAX_BYTES_AUDIO:
+        raise ValueError(f"pesa más de {MAX_BYTES_AUDIO // 1024 // 1024} MB")
+    huella = hashlib.sha1(contenido).hexdigest()[:16]
+    ficha = {"fuente": "propia", "id": huella,
+             "titulo": os.path.splitext(os.path.basename(str(nombre_original)))[0][:80]
+                       or "audio propio",
+             "artista": "tuyo", "autor": "tuyo", "licencia": "propia",
+             "licencia_nombre": "tuya", "comercial": True, "atribucion": False,
+             "descarga": "", "escucha": ""}
+    destino = banco(familia, _nombre_de(ficha))
+    os.makedirs(os.path.dirname(destino), exist_ok=True)
+    if not (os.path.exists(destino) and os.path.getsize(destino) > 1000):
+        with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as fh:
+            fh.write(contenido)
+            crudo = fh.name
+        try:
+            orden = [medios.ffmpeg(), "-y",
+                     "-loglevel", "error", "-i", crudo, "-vn", "-ac", "2",
+                     "-ar", str(FRECUENCIA), "-b:a", "192k", destino + ".parcial.mp3"]
+            try:
+                proceso = subprocess.run(orden, capture_output=True, timeout=180)
+            except subprocess.TimeoutExpired:
+                raise ValueError("ese audio tarda demasiado en convertirse: "
+                                 "prueba con un MP3 más corto")
+            if proceso.returncode != 0:
+                raise ValueError("no se ha podido leer ese audio: "
+                                 + proceso.stderr.decode("utf-8", "replace")[-200:])
+            os.replace(destino + ".parcial.mp3", destino)
+        finally:
+            for sobra in (crudo, destino + ".parcial.mp3"):
+                try:
+                    os.remove(sobra)
+                except OSError:
+                    pass
+    ficha["duracion"] = round(_duracion_de(destino), 2)
+    return ficha
+
+
+def _duracion_de(ruta):
+    try:
+        salida = subprocess.run(
+            [medios.ffprobe(), "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=nw=1:nk=1", ruta], capture_output=True, timeout=30)
+        return float(salida.stdout.decode().strip() or 0)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0.0

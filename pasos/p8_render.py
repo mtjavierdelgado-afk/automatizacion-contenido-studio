@@ -101,7 +101,78 @@ PARAMS_POR_DEFECTO = {
     # Lo que iguala unos efectos con otros va aparte y siempre puesto
     # (`sonido.igualar_por_papel`); esto decide cuanto suenan TODOS.
     "efectos_db": 0.0,
+    # `musica_presencia` ("suave", "normal", "alta") NO esta aqui a proposito:
+    # sin guardar vale `sonido.PRESENCIA_POR_DEFECTO`, y ponerla en esta lista
+    # la meteria en la firma de todos los videos que nunca la eligieron.
 }
+
+#: Donde vive el logo del video, dentro del proyecto. En params va SOLO el
+#: nombre del fichero (`logo.fichero`): una ruta absoluta entraria en la firma
+#: y mudar el proyecto de maquina la dejaria obsoleta.
+CARPETA_LOGO = "marca"
+
+#: Las esquinas donde puede ir. Arriba a la derecha de fabrica: abajo estan los
+#: subtitulos, y a la izquierda suelen ir las cartelas.
+POSICIONES_LOGO = ("arriba_derecha", "arriba_izquierda", "abajo_derecha",
+                   "abajo_izquierda")
+
+
+def filtro_logo(ficha, ancho_video=1920):
+    """El grafo de ffmpeg que pone el logo sobre el video. -> str
+
+    El tamano va en proporcion al ANCHO DEL VIDEO, no en pixeles fijos: el mismo
+    ajuste vale en 16:9 y en 9:16. El margen, un 3 % del ancho. El ancho se mide
+    antes (`poner_logo`) y no con `scale2ref`, que en el ffmpeg del servidor
+    calcula el tamano sobre otra referencia y dejaba el logo diminuto.
+    """
+    ficha = ficha or {}
+    try:
+        tamano = min(0.4, max(0.04, float(ficha.get("tamano") or 0.12)))
+    except (TypeError, ValueError):
+        tamano = 0.12
+    try:
+        opacidad = min(1.0, max(0.1, float(ficha.get("opacidad") or 0.9)))
+    except (TypeError, ValueError):
+        opacidad = 0.9
+    posicion = ficha.get("posicion") if ficha.get("posicion") in POSICIONES_LOGO \
+        else POSICIONES_LOGO[0]
+    x = "W*0.03" if posicion.endswith("izquierda") else "W-w-W*0.03"
+    y = "W*0.03" if posicion.startswith("arriba") else "H-h-W*0.03"
+    lado = max(8, int(round(int(ancho_video) * tamano / 2.0)) * 2)
+    return (f"[1:v]scale={lado}:-2,format=rgba,colorchannelmixer=aa={opacidad:g}[lg];"
+            f"[0:v][lg]overlay=x={x}:y={y}:format=auto,format=yuv420p[v]")
+
+
+def poner_logo(destino, ruta_logo, ficha, calidad="media"):
+    """Pone el logo encima del MP4 montado, en su sitio. -> destino
+
+    Es la UNICA pasada que recodifica el video entero: el montaje une los clips
+    sin recodificar (`_concatenar`), y un logo encima obliga a volver a pintar
+    cada fotograma. Pero no vuelve a renderizar ningun plano ni toca el audio
+    (va copiado), asi que cambiar el logo cuesta minutos de maquina, no dinero.
+    """
+    ajustes = CALIDADES.get(calidad) or CALIDADES["media"]
+    temporal = destino + ".logo.mp4"
+    try:
+        sonda = subprocess.run(
+            [medios.ffprobe(), "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=width", "-of", "csv=p=0", destino],
+            capture_output=True, text=True, timeout=120, **medios.SIN_VENTANA)
+        ancho = int((sonda.stdout or "").strip().split(",")[0])
+    except (ValueError, IndexError, OSError, subprocess.SubprocessError):
+        ancho = 1920
+    orden = [medios.ffmpeg(), "-y", "-loglevel", "error", "-i", destino,
+             "-i", ruta_logo, "-filter_complex", filtro_logo(ficha, ancho),
+             "-map", "[v]", "-map", "0:a?", "-c:a", "copy",
+             "-c:v", "libx264", "-preset", ajustes["preset"], "-crf", ajustes["crf"],
+             "-movflags", "+faststart", temporal]
+    proceso = subprocess.run(orden, capture_output=True, text=True, timeout=3600,
+                             **medios.SIN_VENTANA)
+    if proceso.returncode != 0 or not os.path.exists(temporal):
+        raise RuntimeError(f"ffmpeg no pudo poner el logo: {proceso.stderr[-400:]}")
+    os.replace(temporal, destino)
+    return destino
+
 
 CALIDADES = {
     "alta": {"crf": "16", "preset": "slow"},
@@ -239,7 +310,7 @@ class Navegador:
             return mensaje.get("result", {})
 
     def abrir(self, ruta_html):
-        url = "file:///" + os.path.abspath(ruta_html).replace("\\", "/")
+        url = medios.url_de_fichero(ruta_html)
         self.llamar("Page.navigate", url=url)
         limite = time.time() + 30
         while time.time() < limite:
@@ -411,7 +482,7 @@ pintar(0);
 
 
 def _url_local(ruta):
-    return "file:///" + os.path.abspath(ruta).replace("\\", "/")
+    return medios.url_de_fichero(ruta)
 
 
 def _pagina_de(escena, mov, capa_svg, hyper, p, destino, capa_fija="", fps=30):
@@ -550,7 +621,8 @@ def _cola_negra(clips, trabajo, fps, calidad, segundos=COLA_NEGRO_S):
 
 def _concatenar(clips, destino, audio, desfase, trabajo, musica=None,
                 efectos=None, duracion=0.0, lufs=None, cama=False,
-                ajuste_db=0.0, fps=12, calidad="media", efectos_db=0.0):
+                ajuste_db=0.0, fps=12, calidad="media", efectos_db=0.0,
+                presencia=None):
     """Une los clips sin recodificar y mezcla la banda sonora.
 
     La banda son tres pistas: la locucion, el tema de fondo agachado bajo ella
@@ -593,7 +665,8 @@ def _concatenar(clips, destino, audio, desfase, trabajo, musica=None,
                     con_musica, con_efectos, max(0.1, float(duracion)),
                     lufs if lufs is not None else sonido.MUSICA_LUFS,
                     ya_normalizada=cama, ajuste_db=ajuste_db,
-                    master=True, medida=medida, efectos_db=efectos_db)
+                    master=True, medida=medida, efectos_db=efectos_db,
+                    presencia=presencia)
             # LA PASADA QUE MIDE, con el MISMO grafo y sin escribir nada. Ver
             # `sonido.filtro_master`: la medida es lo que convierte el
             # `loudnorm` de adaptativo --que sobre voz con musica se oye como
@@ -1315,6 +1388,15 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
     # habla, ese fundido cae ANTES del negro y la cola se queda muda de golpe.
     largo_con_cola = largo + (COLA_NEGRO_S if escenas else 0.0)
     pista_efectos, sonidos = None, 0
+    # LO DE LA PASADA ANTERIOR NO SE QUEDA: `trabajo/` se siembra con la version
+    # activa, y si esta pasada no produce efectos (todos vetados) o cama, el
+    # fichero viejo pasaria a la version nueva con pinta de ser de ella (y la
+    # descarga por partes lo mezclaria). Lo que se produzca ahora lo reescribe.
+    for viejo in ("efectos.wav", "cama.wav"):
+        try:
+            os.remove(os.path.join(trabajo, viejo))
+        except OSError:
+            pass
     if p.get("sonido", True):
         avisar(0.93, "montando la banda de efectos")
         lista_eventos = sonido.eventos(escenas, cortes, p,
@@ -1353,7 +1435,16 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
                 efectos=pista_efectos, duracion=largo_con_cola,
                 lufs=p.get("musica_lufs"), cama=cama, ajuste_db=ajuste_musica,
                 fps=fps, calidad=p.get("calidad") or "media",
-                efectos_db=ajuste_efectos)
+                efectos_db=ajuste_efectos,
+                presencia=p.get("musica_presencia"))
+    # EL LOGO, encima del video ya montado (ver `poner_logo`)
+    ficha_logo = p.get("logo") or {}
+    if isinstance(ficha_logo, dict) and ficha_logo.get("fichero"):
+        ruta_logo = os.path.join(proyecto.raiz, CARPETA_LOGO,
+                                 os.path.basename(str(ficha_logo["fichero"])))
+        if os.path.exists(ruta_logo):
+            avisar(0.97, "poniendo el logo")
+            poner_logo(destino, ruta_logo, ficha_logo, p.get("calidad") or "media")
     duracion = medios.duracion_media(destino)
 
     # los assets son unidades heredadas: no se renderizan, pero se sellan igual

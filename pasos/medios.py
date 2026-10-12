@@ -1602,6 +1602,20 @@ def reubicar_todas(rutas):
     return [reubicar(r) for r in (rutas or [])]
 
 
+def url_de_fichero(ruta):
+    """La URL `file:` de una ruta local, BIEN escrita en Windows y en Linux.
+
+    Se montaba a mano con `"file:///" + ruta`, pensado en Windows («C:/...»).
+    En Linux la ruta ya empieza por «/» y salian cuatro barras, y ademas nada
+    se codificaba: una carpeta con un acento, una almohadilla o un espacio
+    daba una URL que el navegador no encuentra -- pinta SU pagina de error,
+    casi blanca, y la fotografia (09-10-2026, la previa del estilo nuevo en el
+    servidor). `as_uri` escribe las barras justas y codifica lo que haga falta.
+    """
+    import pathlib                                          # noqa: PLC0415
+    return pathlib.Path(os.path.abspath(ruta)).as_uri()
+
+
 def edge():
     for ruta in EDGES:
         if os.path.exists(ruta):
@@ -1725,7 +1739,7 @@ def rasterizar(svg, destino, ancho, alto, transparente=True, espera_ms=1800):
                  f"--virtual-time-budget={int(espera_ms)}"]
         if transparente:
             orden.append("--default-background-color=00000000")
-        orden.append("file:///" + ruta_svg.replace("\\", "/"))
+        orden.append(url_de_fichero(ruta_svg))
         try:
             hecho = subprocess.run(orden, capture_output=True, timeout=180,
                                    **SIN_VENTANA)

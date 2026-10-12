@@ -90,6 +90,45 @@ def probar_encargo():
                f"un encargo {etiqueta} se rechaza con un motivo legible")
 
 
+def probar_imagenes_descritas():
+    """Hasta 50 imagenes, cada una con una frase opcional (09-10-2026)."""
+    seccion("LAS IMAGENES DEL ESTILO: 50 Y CON SU DESCRIPCION")
+    igual(light.max_imagenes_estilo(), 50, "caben 50 imagenes de referencia")
+    muchas = [f"i{n}.png" for n in range(50)]
+    limpio = light.validar_encargo(dict(ENCARGO_VIDEO, estilo_imagenes=muchas))
+    igual(len(limpio["estilo_imagenes"]), 50, "y un encargo con 50 se acepta")
+    try:
+        light.validar_encargo(dict(ENCARGO_VIDEO, estilo_imagenes=muchas + ["x.png"]))
+        ok(False, "51 imagenes tenian que rechazarse")
+    except light.ErrorEncargo:
+        ok(True, "51 se rechazan")
+    limpio = light.validar_encargo(dict(
+        ENCARGO_VIDEO, estilo_descripciones={
+            "a.png": "  la luz   de esta ", "zz.png": "de una imagen que no va",
+            "b.png": ""}))
+    igual(limpio["estilo_descripciones"], {"a.png": "la luz de esta"},
+          "se guardan solo las descripciones con texto y de imagenes que van")
+    igual(light.validar_encargo(ENCARGO_VIDEO)["estilo_descripciones"], {},
+          "sin descripciones, ninguna: son opcionales")
+    texto = light.indicaciones_con_descripciones(
+        "igual pero mas frio", ["/t/estilo/aportadas/00_a.png",
+                                "/t/estilo/aportadas/01_b.png"],
+        {"a.png": "la luz de esta"})
+    ok(texto.startswith("igual pero mas frio")
+       and "[00_a.png] la luz de esta" in texto and "01_b.png" not in texto,
+       f"la guia recibe cada descripcion con el nombre del fichero que abre: {texto}")
+    igual(light.indicaciones_con_descripciones("solo esto", ["/x/00_a.png"], {}),
+          "solo esto", "sin descripciones, las indicaciones salen como estaban")
+    rutas = [f"/t/{n:02d}_i{n}.png" for n in range(50)]
+    hoja = light.para_la_hoja(rutas, {"i40.png": "esta si"})
+    igual(len(hoja), light.MAX_EN_LA_HOJA,
+          "a la hoja de las laminas van ocho como mucho")
+    ok("/t/40_i40.png" in hoja, "y la descrita va seguro")
+    ok(hoja == sorted(hoja) and hoja[-1] != rutas[7],
+       "en su orden y repartidas a lo largo de la lista, no las ocho primeras")
+    igual(light.para_la_hoja(rutas[:5]), rutas[:5], "con pocas, van todas")
+
+
 def probar_plan():
     seccion("EL PLAN: ORDEN, PARALELISMO Y CUENTAS")
     encargo = light.validar_encargo(ENCARGO_VIDEO)
@@ -607,7 +646,10 @@ def probar_el_aviso_de_cambiar_de_idioma():
        f"que nombra los DOS idiomas, en cristiano: {aviso[:80]}…")
     ok("6 imágenes" in aviso,
        "y dice cuantas imagenes cuesta arreglarlo")
-    ok("0,44 $" in aviso, f"y cuanto: {aviso[-40:]}")
+    # el precio es EL DEL STUDIO (`usd_por_imagen`: lo cobrado, o la tabla con
+    # las referencias), no uno escrito aqui: el 11-10 eran dos y no casaban
+    esperado = f"{6 * light.usd_por_imagen('medium'):.2f}".replace(".", ",") + " $"
+    ok(esperado in aviso, f"y cuanto ({esperado}): {aviso[-40:]}")
     igual(aviso.count("$"), 1, "una cifra, no dos")
 
     igual(light.aviso_de_idioma("es", "es"), "",
@@ -775,6 +817,38 @@ def probar_composicion():
         shutil.rmtree(carpeta, ignore_errors=True)
 
 
+def probar_las_laminas():
+    """Quitar, cambiar y anadir laminas: lo que se guarda y lo que se dibuja."""
+    seccion("LAS LAMINAS DEL ESTILO")
+    import laminas                                          # noqa: PLC0415
+    base = {"nombre": "Canal", "idioma": "es", "estilo_imagenes": ["a.png"],
+            "tono_prompt": "serio pero cercano", "voz_prompt": "grave y pausada"}
+    limpio = light.validar_encargo(base)
+    ok(not any(k.startswith("laminas_") for k in limpio),
+       "un estilo que no toca las laminas no recibe ninguna clave nueva")
+    igual(laminas.ids_de(limpio),
+          ["cara", "cuerpos", "interior", "exterior", "objeto", "diagrama"],
+          "sin tocar nada son las seis de fabrica")
+    tocado = light.validar_encargo(dict(base, laminas_quitadas=["cara", "inventada"],
+                                        laminas_propias={"extra_1": "una cocina de noche",
+                                                         "../x": "no"},
+                                        laminas_hoja="repartida"))
+    igual(tocado.get("laminas_quitadas"), ["cara"], "solo se quitan las que existen")
+    igual(tocado.get("laminas_propias"), {"extra_1": "una cocina de noche"},
+          "y solo se guardan ids validos")
+    igual(laminas.ids_de(tocado),
+          ["cuerpos", "interior", "exterior", "objeto", "diagrama", "extra_1"],
+          "la anadida va detras de las de fabrica")
+    igual(laminas.siguiente_extra(tocado), "extra_2", "la siguiente no pisa a la anterior")
+    igual(light.imagenes_de_parte("estilo", tocado), 6,
+          "regenerar el estilo paga UNA imagen por lamina de este estilo")
+    grupos = laminas.repartir([f"r{i}" for i in range(20)], 6, 8, ["r0"])
+    ok(all(g[0] == "r0" and len(g) == 8 for g in grupos),
+       "con hoja repartida la ★ va en todas y cada hoja sigue siendo de 8")
+    vistas = {r for g in grupos for r in g}
+    igual(len(vistas), 20, "y entre todas las laminas cuentan las 20 imagenes")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del modo light")
     parser.add_argument("--sin-navegador", action="store_true",
@@ -789,6 +863,7 @@ def main():
         tempfile.gettempdir(), "estudio_prueba_light", "estadisticas.json")
     print("PRUEBA DEL MODO LIGHT")
     probar_encargo()
+    probar_imagenes_descritas()
     probar_plan()
     probar_ritmo()
     probar_tono_completo()
@@ -799,6 +874,7 @@ def main():
     probar_el_aviso_de_cambiar_de_idioma()
     probar_la_frase_del_estilo_llega_al_prompt()
     probar_lo_que_cuesta_cada_parte()
+    probar_las_laminas()
     if argumentos.sin_navegador:
         print("\n  (composicion de la miniatura saltada por --sin-navegador)")
     else:

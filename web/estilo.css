@@ -935,6 +935,11 @@ video { width: 100%; border-radius: 9px; border: 1px solid var(--linea); backgro
 .tabla.pares td { word-break: break-word; }
 .cargando { color: var(--tenue); font-size: 13px; }
 .oculto { display: none; }
+/* EL ATRIBUTO `hidden` MANDA SIEMPRE. Sin esto, cualquier regla con
+   `display: flex` o `grid` le gana al `display: none` del navegador y el
+   elemento «escondido» se sigue viendo (o, al reves, `hidden = false` no basta
+   para que aparezca lo que una clase esconde). */
+[hidden] { display: none !important; }
 
 /* Fila de botones de una accion. En movil el principal ocupa la linea entera:
    es el que se busca con el pulgar, y de 90px se falla mas de lo que parece. */
@@ -951,7 +956,6 @@ video { width: 100%; border-radius: 9px; border: 1px solid var(--linea); backgro
 .avanzadas > summary:hover { color: var(--texto); }
 .avanzadas[open] > summary { margin-bottom: 8px; }
 .avanzadas > summary .meta { color: var(--acento); }
-.ajuste-cli .campo { margin-bottom: 0; }
 .tiempo-cli .cifra {
   font-size: 17px; font-weight: 600; color: var(--acento); font-variant-numeric: tabular-nums;
 }
@@ -984,11 +988,11 @@ video { width: 100%; border-radius: 9px; border: 1px solid var(--linea); backgro
 
 /* ------------------------------------------------- rendimiento y papelera */
 
-#conservacion, #rendimiento, #papelera, #cuadro-texto {
+#conservacion, #coste-video, #papelera, #cuadro-texto {
   position: fixed; inset: 0; z-index: 66; background: var(--velo);
   display: flex; align-items: center; justify-content: center; padding: 20px;
 }
-#conservacion .cuadro, #rendimiento .cuadro, #papelera .cuadro,
+#conservacion .cuadro, #coste-video .cuadro, #papelera .cuadro,
 #cuadro-texto .cuadro {
   background: var(--panel); border: 1px solid var(--acento); border-radius: 12px;
   padding: 13px 16px; width: min(1100px, 100%); max-height: 100%; overflow-y: auto;
@@ -1012,17 +1016,17 @@ video { width: 100%; border-radius: 9px; border: 1px solid var(--linea); backgro
   border-radius: 8px; white-space: pre-wrap; word-break: break-word; line-height: 1.6;
   font: inherit; overflow-y: auto;
 }
-#conservacion .cab, #rendimiento .cab, #papelera .cab, #cuadro-texto .cab {
+#conservacion .cab, #coste-video .cab, #papelera .cab, #cuadro-texto .cab {
   display: flex; gap: 10px; align-items: baseline;
 }
-#conservacion .cab b, #rendimiento .cab b, #papelera .cab b,
+#conservacion .cab b, #coste-video .cab b, #papelera .cab b,
 #cuadro-texto .cab b {
   font-size: 12px; text-transform: uppercase; letter-spacing: .09em; color: var(--acento);
 }
-#rendimiento .cuerpo h2 { font-size: 13px; }
-#rendimiento .nav-rendimiento { margin-bottom: 0; flex-wrap: wrap; }
-#rendimiento .tabla tr.con-cli th { color: var(--texto); }
-#rendimiento .tabla td, #rendimiento .tabla th { padding-bottom: 6px; }
+#coste-video .cuerpo h2 { font-size: 13px; }
+#coste-video .nav-coste { margin-bottom: 0; flex-wrap: wrap; }
+#coste-video .tabla tr.con-cli th { color: var(--texto); }
+#coste-video .tabla td, #coste-video .tabla th { padding-bottom: 6px; }
 #papelera .tabla th { color: var(--texto); }
 #papelera .tabla tr[data-carpeta] td, #papelera .tabla tr[data-carpeta] th {
   border-top: 1px solid var(--linea); padding-top: 7px; padding-bottom: 7px;
@@ -1120,7 +1124,7 @@ video { width: 100%; border-radius: 9px; border: 1px solid var(--linea); backgro
   /* Un mando y su etiqueta, cada uno en su línea y a lo ancho. */
   .campo select, .campo input:not([type=checkbox]):not([type=range]),
   .campo textarea { width: 100%; }
-  .rejilla.cols3, .rejilla.cols2 { grid-template-columns: 1fr; }
+  .rejilla.cols3, .rejilla.cols2 { grid-template-columns: minmax(0, 1fr); }
   /* Ninguna etiqueta corta se parte. */
   .pastilla, .subpestana, .fila-preset .abrir .nombre, .cuenta { white-space: nowrap; }
   /* Y ningún texto explicativo se corta. */
@@ -1165,8 +1169,8 @@ video { width: 100%; border-radius: 9px; border: 1px solid var(--linea); backgro
 
   /* Los modales, a pantalla completa: un cuadro centrado con 20px de aire por
      todos lados desperdicia media pantalla de telefono. */
-  #capturador, #conservacion, #rendimiento, #papelera, #cuadro-texto { padding: 0; }
-  #capturador .cuadro, #conservacion .cuadro, #rendimiento .cuadro, #papelera .cuadro,
+  #capturador, #conservacion, #coste-video, #papelera, #cuadro-texto { padding: 0; }
+  #capturador .cuadro, #conservacion .cuadro, #coste-video .cuadro, #papelera .cuadro,
 #cuadro-texto .cuadro {
     width: 100%; height: 100%; max-height: none; border-radius: 0; border: none;
     padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
@@ -1538,8 +1542,11 @@ body.modo-light #coste { display: none; }
 .bloque-light .mandos > .fila { margin-top: 9px; }
 /* en estrecho se apilan: la columna de 210 px no cabe con el campo al lado */
 @media (max-width: 720px) {
-  .bloque-light { grid-template-columns: 1fr; gap: 9px; }
+  /* minmax(0, 1fr) y no 1fr: con 1fr la columna crecía hasta el ancho natural
+     de lo de dentro, y las muestras del estilo salían a 1920 px en el móvil */
+  .bloque-light { grid-template-columns: minmax(0, 1fr); gap: 9px; }
 }
+.bloque-light > .mandos { min-width: 0; }
 
 /* ---- las imágenes de apoyo de una descripción de estilo
  *
@@ -1570,10 +1577,13 @@ body.modo-light #coste { display: none; }
 .zona-suelta .meta { margin-left: auto; }
 .zona-suelta.llena { opacity: .5; cursor: not-allowed; }
 .zona-suelta.llena:hover { border-color: var(--linea); color: var(--tenue); }
+/* el doble que antes (76 px): con fotos de interiorismo parecidas no se
+   distinguia una de otra. Pulsar una la abre en grande (verAportadaEnGrande). */
 .tira-aportadas {
-  display: grid; gap: 5px; margin-top: 2px;
-  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  display: grid; gap: 6px; margin-top: 2px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
 }
+.aportada img { cursor: zoom-in; }
 .aportada { position: relative; border-radius: 7px; overflow: hidden; background: var(--lienzo); }
 .aportada img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block; }
 .aportada .quitar {
@@ -1960,8 +1970,11 @@ button.primario.grande { padding: 9px 18px; font-size: 14px; }
 /* EN EL MOVIL SE TOCA CON EL PULGAR, no con un raton: 44 px es el minimo que
    se acierta sin ampliar, y aqui el boton esta pegado a «Apartar», que borra. */
 @media (max-width: 560px) {
-  .video-light { gap: 6px; }
+  .video-light { gap: 6px; flex-wrap: wrap; }
   .video-light .renombrar { min-width: 44px; min-height: 40px; }
+  /* el nombre arriba y los botones debajo, a la izquierda: en una sola fila
+     «Apartar» quedaba en el borde derecho, debajo de la burbuja del asistente */
+  .video-light .abrir { flex-basis: 100%; flex-wrap: wrap; }
 }
 
 /* ---- volver, en la cabecera de una pantalla de dentro */
@@ -2112,6 +2125,9 @@ button.primario.grande { padding: 9px 18px; font-size: 14px; }
   .marco-video.vertical { aspect-ratio: 9 / 16; height: 60vh; width: auto; }
 }
 .tira-modos.formatos button { min-width: 150px; }
+/* cuanto se oye la musica, debajo de los interruptores de «Que lleva» */
+.presencia-musica { margin-top: 14px; }
+.presencia-musica .tira-modos button { min-width: 90px; }
 .personaje-light .casillas { flex-wrap: wrap; gap: 14px; }
 .personaje-light .casillas label { display: inline-flex; align-items: center; gap: 6px; }
 
@@ -2202,7 +2218,7 @@ body.modo-light #panel > .contenido {
 
 .nav-light {
   position: sticky; bottom: 0; z-index: 20;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
   background: var(--panel); border-top: 1px solid var(--linea);
   /* `auto` arriba la empuja al fondo cuando sobra sitio; de borde a borde a los
      lados, cancelando el relleno lateral del panel. Va TODO en la abreviada: el
@@ -2423,7 +2439,18 @@ button.avisa:hover:not(:disabled) { border-color: var(--aviso); }
   border-top: 1px solid var(--linea); padding: 10px 12px;
   display: flex; flex-direction: column; gap: 8px;
 }
-#asistente-pie textarea { resize: none; }
+/* EL CAMPO CRECE CON LO QUE SE ESCRIBE (o se dicta): de dos lineas hasta un
+   tercio del panel, y desde ahi barra propia. Con dos lineas fijas un dictado
+   largo no se podia revisar antes de mandarlo. */
+#asistente-pie textarea { resize: none; min-height: 52px; max-height: 34vh; overflow-y: auto; }
+/* AMPLIADO: mas ancho y mas alto, para leer respuestas largas y escribir con
+   sitio. Se recuerda por navegador. */
+#asistente.ampliado {
+  width: min(880px, calc(100vw - 24px));
+  height: calc(100vh - var(--alto) - var(--alto-nav) - var(--alto-pie) - 100px);
+}
+#asistente.ampliado .turno { font-size: 14px; }
+#asistente.ampliado #asistente-pie textarea { max-height: 45vh; }
 /* Parar a la izquierda, Enviar a la derecha, en una sola linea tambien en
    movil: la .fila generica se apila en pantalla estrecha y dejaba el boton
    de enviar suelto a la izquierda. */
@@ -2476,6 +2503,9 @@ button.avisa:hover:not(:disabled) { border-color: var(--aviso); }
     border-radius: 0; border: none; padding-top: env(safe-area-inset-top);
   }
   #asistente-pie { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+  /* en movil el panel ya ocupa la pantalla entera: ampliar no tiene sentido */
+  #asistente.ampliado { width: auto; height: auto; }
+  #btn-ampliar-asistente { display: none; }
   .burbuja-asistente {
     right: 12px; width: 48px; height: 48px;
     bottom: calc(var(--alto-nav) + var(--alto-pie) + 10px + env(safe-area-inset-bottom, 0px));
@@ -2608,7 +2638,10 @@ button.mini { border-radius: 8px; }
 /* ---- el pie del sistema, al final de cada pantalla */
 .pie-sistema {
   display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 10px;
-  margin: 36px auto 8px; padding: 14px 10px 4px;
+  /* el hueco de debajo es el de la burbuja del asistente: sin él, lo último de
+     una pantalla larga (el «× Borrar» de la última nota) quedaba debajo de ella
+     incluso con el scroll al fondo */
+  margin: 36px auto 96px; padding: 14px 10px 4px;
   border-top: 1px solid var(--linea-suave);
   color: var(--tenue2); font-size: 11.5px; text-align: center; line-height: 1.5;
 }
@@ -2697,7 +2730,7 @@ textarea.copia-oculta { position: fixed; left: -9999px; top: 0; }
 @media (max-width: 620px) {
   .velo-guia { padding: 0; align-items: stretch; }
   .cuadro-guia { max-height: 100dvh; border-radius: 0; border: none; }
-  .guia-dos { grid-template-columns: 1fr; }
+  .guia-dos { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ---- Configuracion: novedades y notas */
@@ -2791,7 +2824,7 @@ body.burbuja-minimizada .pestana-asistente { display: flex; }
 .lleva-pieza input:checked ~ .interruptor::after { transform: translateX(16px); }
 .lleva-pieza input:focus-visible ~ .interruptor { box-shadow: 0 0 0 3px rgba(139, 92, 246, .35); }
 .lleva-pieza input:disabled ~ .interruptor { opacity: .55; }
-@media (max-width: 620px) { .lleva { grid-template-columns: 1fr; } }
+@media (max-width: 620px) { .lleva { grid-template-columns: minmax(0, 1fr); } }
 
 /* ---- la tarjeta «Como se trabaja» de la guia de inicio */
 ul.inicio-como { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
@@ -2882,7 +2915,7 @@ ul.inicio-como li { display: flex; gap: 10px; align-items: flex-start; line-heig
   #btn-dictar-asistente.grabando { animation: none; }
 }
 /* las dos opciones del dictado: un nombre largo, no una calidad de una palabra */
-.fila-calidad.opcion-dictado { grid-template-columns: 1fr; }
+.fila-calidad.opcion-dictado { grid-template-columns: minmax(0, 1fr); }
 .fila-calidad.opcion-dictado .nombre {
   text-transform: none; letter-spacing: normal; font-size: 14px; grid-row: auto;
 }
@@ -2895,3 +2928,245 @@ ul.inicio-como li { display: flex; gap: 10px; align-items: flex-start; line-heig
 .barra-pausas .crece { min-width: 220px; }
 .parrafo-guion .pastilla.pausa { color: var(--aviso); }
 .parrafo-guion .pastilla.pausa.al-final { color: var(--tenue); }
+
+/* lo que se dice de cada imagen de referencia, plegado bajo la tira */
+.describir-aportadas { margin-top: 8px; }
+.describir-aportadas summary { cursor: pointer; color: var(--tenue); font-size: 13px; }
+.descripciones-aportadas { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.descripcion-aportada { display: flex; gap: 8px; align-items: center; }
+.descripcion-aportada img { width: 120px; height: 68px; object-fit: cover; border-radius: 5px; flex: none; cursor: zoom-in; }
+.descripcion-aportada input { flex: 1; min-width: 0; }
+.aportada .con-descripcion {
+  position: absolute; left: 3px; bottom: 3px; font-size: 11px; line-height: 1;
+  padding: 2px 4px; border-radius: 4px; background: var(--panel); color: var(--texto);
+}
+
+/* la descripcion con que se pidio la voz, en la ficha del estilo */
+.voz-pedida { font-size: 13px; color: var(--texto); margin-bottom: 8px; line-height: 1.5; }
+
+/* la lupa de las imagenes de referencia: flechas a los lados */
+.lupa-aportadas .lupa-flecha {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  font-size: 34px; line-height: 1; padding: 10px 16px; border-radius: 10px;
+  background: var(--panel); color: var(--texto); border: 1px solid var(--linea);
+}
+.lupa-aportadas .lupa-flecha.izq { left: 16px; }
+.lupa-aportadas .lupa-flecha.der { right: 16px; }
+#lupa.lupa-aportadas img { max-height: 78vh; }
+#lupa.lupa-aportadas .ficha-lupa { max-height: 14vh; }
+
+/* ★ marcar una imagen para la hoja de las laminas */
+.aportada .destacar {
+  position: absolute; right: 3px; bottom: 3px; font-size: 13px; line-height: 1;
+  padding: 3px 5px; border-radius: 5px; background: var(--panel); color: var(--tenue);
+  border: 1px solid var(--linea);
+}
+.aportada .destacar.puesta { color: var(--acento); border-color: var(--acento); }
+
+
+/* los ajustes del montaje (musica, subtitulos, logo) bajo «Que lleva» */
+.ajustes-montaje { margin-top: 14px; border: 1px solid var(--linea); border-radius: 12px; overflow: hidden; }
+.ajustes-cab { padding: 10px 14px; background: var(--hueco); font-size: 14px; }
+.fila-ajuste { border-top: 1px solid var(--linea); }
+.fila-ajuste-cab { display: flex; gap: 12px; align-items: center; padding: 10px 14px; }
+.fila-ajuste-cab b { min-width: 110px; }
+.fila-ajuste.abierta { background: var(--marcado); }
+.editor-ajuste { padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+.editor-ajuste > label, .editor-ajuste .campo > label { font-size: 12px; text-transform: uppercase;
+  letter-spacing: .06em; color: var(--tenue); margin-top: 4px; }
+.editor-ajuste input[type=range] { width: 100%; max-width: 420px; }
+.buscador-temas { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--linea);
+  border-radius: 10px; padding: 10px; }
+.tema-musica { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center;
+  border-top: 1px solid var(--linea); padding-top: 8px; }
+.tema-musica.puesto { border-top-color: var(--acento); }
+.tema-musica audio { grid-column: 1 / -1; width: 100%; height: 32px; }
+.casilla { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; cursor: pointer; }
+label.boton { display: inline-flex; align-items: center; cursor: pointer; border: 1px solid var(--linea);
+  border-radius: 8px; padding: 5px 10px; background: var(--boton); color: var(--texto);
+  font-size: 13px; text-transform: none; letter-spacing: 0; }
+.cuadro-logo { position: relative; width: min(360px, 100%); aspect-ratio: 16 / 9; border-radius: 8px;
+  background: linear-gradient(135deg, var(--hueco), var(--lienzo)); border: 1px solid var(--linea); }
+.cuadro-logo .meta { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.logo-en-cuadro { position: absolute; height: auto; }
+.logo-en-cuadro.arriba_derecha { top: 5%; right: 3%; }
+.logo-en-cuadro.arriba_izquierda { top: 5%; left: 3%; }
+.logo-en-cuadro.abajo_derecha { bottom: 5%; right: 3%; }
+.logo-en-cuadro.abajo_izquierda { bottom: 5%; left: 3%; }
+
+/* todos los campos de texto crecen con su contenido hasta el 60 % de la
+   pantalla, y desde ahi barra propia (ver `vigilarAreas` en app.js) */
+textarea.autoalto, textarea.crece.autoalto { max-height: 60vh; overflow-y: auto; resize: vertical; }
+
+/* «Revisar» un campo contra su guia */
+.revision-campo { border: 1px solid var(--acento-borde); background: var(--marcado);
+  border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px;
+  font-size: 13px; line-height: 1.5; }
+.revision-campo ul { margin: 0; padding-left: 18px; }
+.revision-campo li { margin-bottom: 6px; }
+.revision-campo .sugerida { white-space: pre-wrap; margin-top: 6px; }
+/* la opcion elegida en una fila de botones (color de la voz, musica,
+   subtitulos, logo): se marca igual que en la barra de proyectos */
+.herramientas .mini.activo { border-color: var(--acento); color: var(--acento); background: var(--marcado); }
+
+/* ------------------------------------------------ proyectos (clientes) */
+.invitacion-proyectos { display: flex; gap: 14px; align-items: center; justify-content: space-between;
+  border: 1px dashed var(--acento-borde); border-radius: 12px; padding: 12px 16px; margin-bottom: 18px;
+  background: var(--marcado); font-size: 14px; }
+.galeria-proyectos { display: grid; gap: 14px; margin-bottom: 26px;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); }
+.tarjeta-proyecto { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; text-align: left;
+  min-height: 150px; padding: 16px; border-radius: 14px; border: 1px solid var(--linea);
+  background: var(--hueco); color: var(--texto); cursor: pointer; }
+.tarjeta-proyecto:hover { border-color: var(--acento-borde); }
+.tarjeta-proyecto .nombre { font-weight: 700; font-size: 16px; }
+.tarjeta-proyecto.nuevo { border-style: dashed; background: transparent; }
+.tarjeta-proyecto.es-oculto { opacity: .65; border-style: dashed; }
+.icono-proyecto { font-size: 30px; line-height: 1; margin-bottom: 6px; }
+.logo-proyecto { max-height: 44px; max-width: 140px; object-fit: contain; margin-bottom: 6px; }
+.logo-proyecto.pequeno { max-height: 32px; margin: 0; }
+.migas { margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+.cab-proyecto { gap: 12px; }
+.mandos-proyecto { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 18px; }
+.mandos-proyecto .mini.activo { border-color: var(--acento); color: var(--acento); }
+.panel-logo-proyecto { border: 1px solid var(--linea); border-radius: 12px; padding: 12px 14px;
+  margin-bottom: 18px; display: flex; flex-direction: column; gap: 8px; }
+.chip-proyecto { font-size: 12px; color: var(--tenue); margin: 2px 0 4px; }
+.aviso-perdidos { margin-bottom: 18px; }
+/* el dialogo de la casa (en vez de los prompt del navegador) */
+.capa-dialogo { position: fixed; inset: 0; z-index: 90; background: var(--velo);
+  display: flex; align-items: center; justify-content: center; padding: 16px; }
+.dialogo { width: min(460px, 100%); background: var(--panel); border: 1px solid var(--linea);
+  border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 12px;
+  box-shadow: var(--sombra); }
+.dialogo h3 { margin: 0; }
+.dialogo .campo { display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+.dialogo input, .dialogo select { width: 100%; }
+.dialogo-botones { display: flex; justify-content: flex-end; gap: 8px; }
+.galeria-estilos { margin-bottom: 22px; }
+
+/* Las láminas del estilo, limpias y una a una (`laminasDelEstilo`). */
+.laminas-estilo { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+.laminas-estilo h3 { margin: 0; font-size: 1rem; }
+.rejilla-laminas {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
+.rejilla-laminas .lamina {
+  display: flex; flex-direction: column; gap: 4px; padding: 6px;
+  border: 1px solid var(--linea); border-radius: 8px; background: var(--hueco);
+}
+.rejilla-laminas .lamina img {
+  width: 100%; aspect-ratio: 3 / 2; object-fit: cover; border-radius: 6px;
+  cursor: zoom-in; display: block;
+}
+.rejilla-laminas .lamina .sin-cara { aspect-ratio: 3 / 2; }
+.rejilla-laminas .lamina-titulo { font-weight: 600; }
+.rejilla-laminas .herramientas { display: flex; flex-wrap: wrap; gap: 4px; margin-top: auto; }
+.capa-dialogo .dialogo textarea { width: 100%; min-height: 4.5em; resize: vertical; }
+.imagenes-del-estilo { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.rejilla-aportadas {
+  display: grid; gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+}
+.rejilla-aportadas .aportada {
+  display: flex; flex-direction: column; gap: 4px; padding: 4px;
+  border: 1px solid var(--linea); border-radius: 8px; background: var(--hueco);
+}
+.rejilla-aportadas .aportada.quitada { opacity: .45; }
+.rejilla-aportadas .aportada img {
+  width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 6px; cursor: zoom-in;
+}
+.rejilla-aportadas .aportada input { width: 100%; }
+.rejilla-aportadas .herramientas { display: flex; gap: 4px; }
+.aviso-quitar { color: var(--aviso); }
+
+/* La tarjeta de una nota de imagen (`tarjetaNotaImagen`). */
+.nota-imagen {
+  display: grid; grid-template-columns: 160px 1fr; gap: 12px; padding: 10px;
+  border: 1px solid var(--linea); border-radius: 10px; background: var(--panel);
+  margin-bottom: 8px;
+}
+.nota-imagen.estado-hecha { opacity: .8; }
+.nota-imagen.estado-fallo { border-color: var(--malo); }
+.nota-imagen.estado-corriendo { border-color: var(--acento); }
+.nota-imagen .nota-mini { padding: 0; border: 0; background: var(--lienzo); border-radius: 8px;
+  overflow: hidden; cursor: pointer; align-self: start; aspect-ratio: 16 / 9; }
+.nota-imagen .nota-mini img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.nota-imagen .nota-columna { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.nota-imagen .nota-antes { opacity: .75; }
+.nota-imagen .nota-antes:hover { opacity: 1; }
+.nota-imagen .nota-antes-ahora { text-align: center; font-size: 11px; }
+.nota-imagen .nota-cuerpo { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.nota-imagen .nota-donde { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.nota-imagen .nota-guion { color: var(--tenue); font-style: italic; font-size: 13px; }
+.nota-imagen .texto { font-weight: 600; }
+.nota-imagen .nota-estado { align-items: center; gap: 6px; flex-wrap: wrap; }
+.nota-imagen .nota-error { color: var(--malo); font-size: 13px; margin-top: 4px; }
+.nota-imagen .nota-mandos { gap: 6px; }
+.pastilla.estado-corriendo { background: var(--marcado); color: var(--texto); }
+.pastilla.estado-hecha { background: var(--ok); color: var(--sobre-ok); }
+.pastilla.estado-fallo { background: var(--malo); color: var(--sobre-acento); }
+@media (max-width: 640px) {
+  .nota-imagen { grid-template-columns: minmax(0, 1fr); }
+}
+.error-cerrable { position: relative; }
+.error-cerrable > .mini { position: absolute; top: 8px; right: 8px; }
+.papel-efecto { display: flex; flex-direction: column; gap: 6px; padding: 8px 0;
+  border-bottom: 1px solid var(--linea-suave); }
+.papel-efecto audio, .tema-musica audio { max-width: 100%; height: 32px; }
+.nota-imagen .nota-fila { border-top: 1px solid var(--linea-suave); padding-top: 6px; display: flex;
+  flex-direction: column; gap: 4px; }
+.nota-imagen .nota-fila .texto { font-weight: 600; }
+/* las referencias adjuntas a una nota, en miniatura, en CUALQUIER sitio: sin esto salían a su
+   tamaño de verdad y una foto tapaba la pantalla entera (10-10-2026) */
+.nota-imagen .tira-aportadas { grid-template-columns: repeat(auto-fill, minmax(90px, 120px)); }
+.tira-aportadas > img {
+  width: 100%; aspect-ratio: 16 / 9; object-fit: cover; display: block;
+  border-radius: 6px; cursor: zoom-in; background: var(--lienzo);
+}
+.imagenes-hechas { margin-top: 10px; }
+.imagenes-hechas > summary { cursor: pointer; color: var(--tenue); padding: 6px 0; }
+
+/* las láminas mientras se rehacen: se ven, pero no se pueden tocar */
+.rejilla-laminas.ocupada { opacity: .6; pointer-events: none; }
+.trabajo-laminas progress { width: 100%; height: 8px; margin-top: 6px; }
+
+/* el corrector de ortografía (guion y subtítulos) */
+.panel-ortografia { border: 1px solid var(--linea); border-radius: 10px; padding: 10px 12px;
+  margin: 10px 0; background: var(--panel); display: flex; flex-direction: column; gap: 8px; }
+.panel-ortografia > .fila { align-items: center; gap: 8px; flex-wrap: wrap; }
+.lista-ortografia { display: flex; flex-direction: column; gap: 4px; max-height: 320px; overflow-y: auto; }
+.fila-ortografia { display: flex; gap: 8px; align-items: baseline; font-size: 13px; cursor: pointer; }
+.fila-ortografia .id { color: var(--tenue); font-variant-numeric: tabular-nums; min-width: 42px; }
+.fila-ortografia .despues { color: var(--texto); }
+
+/* El logo lleva al inicio (irAInicioLight) */
+#cabecera .marca { cursor: pointer; }
+#cabecera .marca:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+/* «‹ Mis vídeos / nombre», encima de cada pantalla de un vídeo */
+.migas-video { flex-wrap: wrap; min-width: 0; }
+.migas-video .migas-nombre { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+
+/* Versiones de un paso: volver a una anterior (bloqueVersionesLight) */
+.bloque-versiones { margin: 16px 0 8px; padding: 10px 12px; border: 1px solid var(--linea); border-radius: 10px; background: var(--panel); }
+.bloque-versiones > summary { cursor: pointer; font-weight: 600; }
+.bloque-versiones > .meta, .bloque-versiones > .fila { margin-top: 8px; }
+.lista-versiones { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.fila-version { align-items: center; gap: 8px; min-width: 0; }
+.fila-version .meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* El coste de un vídeo, desglosado (abrirCosteDelVideo) */
+#coste-video .cuadro { width: min(760px, 100%); }
+.tabla-coste { width: 100%; }
+.tabla-coste td.usd { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+button.coste-light { cursor: pointer; font: inherit; color: inherit; }
+
+/* Los efectos que eligió el automático, para oírlos y descartarlos */
+.efecto-surtido { align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.efecto-surtido audio { height: 30px; max-width: 220px; }
+.efecto-surtido.vetado > .crece { text-decoration: line-through; opacity: .6; }
+
+/* Descargar por partes (abrirDescargaPorPartes) */
+.partes-video { flex-wrap: wrap; gap: 6px 14px; }
+.casilla-parte { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }

@@ -23,6 +23,7 @@ No hay red, ni CLI, ni proyecto de verdad: todo es determinista.
     C:\\IA\\venvs\\cartoon\\Scripts\\python.exe C:\\IA\\estudio\\pasos\\prueba_presets.py
 """
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -154,7 +155,7 @@ def prueba_estilo():
        "las referencias guardadas apuntan al banco, no al proyecto de origen")
     ok(all(os.path.exists(r) for r in guardado["datos"]["referencias"]),
        "y los ficheros estan de verdad ahi")
-    ok(os.path.basename(ficha["miniatura"]).endswith("f2.png"),
+    ok(os.path.basename(ficha["miniatura"]).startswith("f2_"),
        "la miniatura es el fotograma que se eligio, no siempre el primero")
     ok(ficha["hay_miniatura"], "y la interfaz sabe que la hay")
 
@@ -175,6 +176,45 @@ def prueba_estilo():
                                                       "C:\\no\\existe\\3.png"]}),
              "no estan en el disco", "fotogramas que no existen se rechazan al guardar")
     return ficha
+
+
+def prueba_guardar_otra_vez_no_crece(ficha):
+    """Guardar un estilo otra vez no cambia los nombres ni borra los de antes.
+
+    Antes cada guardado anteponia otro «00_» (uno llego a 19 repeticiones), y
+    quitar o mover una referencia renumeraba las demas. Como la carpeta se
+    vaciaba en cada guardado, los videos que apuntaban al nombre de antes se
+    quedaban sin estilo (09 y 10-10-2026). Ahora el nombre sale del contenido y
+    lo viejo no se borra.
+    """
+    print("\n  ESTILO: guardarlo otra vez no cambia los nombres ni rompe videos")
+    primeros = list(presets.leer(ficha["id"])["datos"]["referencias"])
+    for vuelta in range(3):
+        actual = presets.leer(ficha["id"])
+        ficha = presets.guardar("estilo", actual["nombre"],
+                                dict(actual["datos"]), pid=ficha["id"],
+                                miniatura=actual["datos"]["referencias"][1])
+        igual(presets.leer(ficha["id"])["datos"]["referencias"], primeros,
+              f"vuelta {vuelta + 1}: las mismas rutas, ni un prefijo mas")
+    nombres = [os.path.basename(r) for r in primeros]
+    ok(all(re.match(r"^f\d_[0-9a-f]{10}\.png$", n) for n in nombres),
+       f"cada una se llama por su contenido: {nombres}")
+    # QUITAR UNA Y MOVER OTRA: las que quedan conservan su nombre, y la quitada
+    # sigue en disco para el video que la usaba
+    actual = presets.leer(ficha["id"])
+    menos = [primeros[2], primeros[0], primeros[3]]
+    presets.guardar("estilo", actual["nombre"], dict(actual["datos"], referencias=menos),
+                    pid=ficha["id"])
+    igual(presets.leer(ficha["id"])["datos"]["referencias"], menos,
+          "quitar y reordenar no renombra las que quedan")
+    ok(os.path.exists(primeros[1]),
+       "y la que se quito sigue en disco: un video hecho con ella no se rompe")
+    igual(presets.nombre_numerado(3, "/x/00_00_00_cara.png"), "03_cara.png",
+          "(las imagenes del taller siguen numeradas, sin prefijos repetidos)")
+    actual = presets.leer(ficha["id"])
+    presets.guardar("estilo", actual["nombre"], dict(actual["datos"], referencias=primeros),
+                    pid=ficha["id"])
+    return presets.leer(ficha["id"]) and ficha
 
 
 def prueba_fusion(ficha_estilo):
@@ -428,6 +468,7 @@ def main():
     prueba_claves_cerradas()
     guion = prueba_guion()
     estilo = prueba_estilo()
+    estilo = prueba_guardar_otra_vez_no_crece(estilo)
     prueba_fusion(estilo)
     voz = prueba_voz()
     canal = prueba_canal(guion, estilo, voz)

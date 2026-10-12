@@ -2325,7 +2325,66 @@ def prueba_cache_referencias():
     colores = [Image.open(d).convert("L").getpixel((0, 0)) for d in destinos]
     ok(colores[0] != colores[1],
        f"y cada una tiene su imagen, no la del otro set: {colores}")
+
+    # MUCHOS HILOS A LA VEZ SOBRE LA MISMA REFERENCIA (09-10-2026). En Linux el
+    # temporal llevaba los 16 bits bajos del id del hilo, que coinciden entre
+    # hilos: dos escribian el mismo .tmp y el segundo se lo encontraba movido
+    # («FileNotFoundError ... .tmp -> ...png») y tumbaba la tanda.
+    import threading                                          # noqa: PLC0415
+    compartida = os.path.join(base, "estilo.png")
+    Image.effect_noise((900, 600), 60).convert("RGB").save(compartida, "PNG")
+    cache_hilos = os.path.join(base, "_cache_hilos")
+    fallos = []
+
+    def normalizar_muchas():
+        try:
+            for _ in range(6):
+                # se borra SOLO el destino: asi cada vuelta vuelve a escribirlo
+                # y los doce hilos compiten por el mismo fichero
+                hecho = imagen.normalizar(compartida, cache_hilos)
+                try:
+                    os.remove(hecho)
+                except OSError:
+                    pass
+        except Exception as fallo:                            # noqa: BLE001
+            fallos.append(repr(fallo))
+
+    # 24 hilos: el id de un hilo en Linux cae en ~16 valores con esos bits,
+    # asi que con 24 a la vez la coincidencia esta garantizada
+    hilos = [threading.Thread(target=normalizar_muchas) for _ in range(24)]
+    for hilo in hilos:
+        hilo.start()
+    for hilo in hilos:
+        hilo.join()
+    igual(fallos[:2], [], "24 hilos normalizando la misma referencia no se pisan")
+    sobras = [f for f in os.listdir(cache_hilos) if f.endswith(".tmp")] \
+        if os.path.isdir(cache_hilos) else []
+    igual(sobras, [], "y no quedan temporales en la cache")
     shutil.rmtree(base, ignore_errors=True)
+
+
+def prueba_logo_y_revision():
+    """El grafo del logo y lo que la revision deja pasar a la pantalla."""
+    titulo("logo: proporcion al ancho del video y en su esquina")
+    grafo = p8_render.filtro_logo({"posicion": "abajo_izquierda", "tamano": 0.15}, 1920)
+    ok("scale=288:-2" in grafo, f"15 % de 1920 son 288 px de ancho: {grafo}")
+    ok("x=W*0.03" in grafo and "y=H-h-W*0.03" in grafo,
+       "abajo a la izquierda, con su margen")
+    ok("scale=8:-2" in p8_render.filtro_logo({"tamano": 0.001}, 100)
+       or "scale=" in p8_render.filtro_logo({"tamano": 0.001}, 100),
+       "un tamano absurdo se queda en su tope")
+    ok("x=W-w-W*0.03" in p8_render.filtro_logo({}, 1080),
+       "sin posicion, arriba a la derecha")
+    import revisar_campo                                      # noqa: PLC0415
+    titulo("revisar: lo que vuelve del modelo se sanea")
+    r = revisar_campo.normalizar({"veredicto": "raro", "problemas": [
+        {"que": "x" * 900, "por_que": "y"}, "basura", {"que": ""}],
+        "sugerida": "nuevo"})
+    igual(r["veredicto"], "mejorable", "un veredicto desconocido cae en «mejorable»")
+    igual(len(r["problemas"]), 1, "solo los problemas con algo que decir")
+    igual(len(r["problemas"][0]["que"]), 500, "y recortados")
+    igual(revisar_campo.normalizar({"veredicto": "sirve", "sugerida": "x"})["sugerida"],
+          "", "si sirve, no se propone otra version")
 
 
 def prueba_rehacer_de_verdad():
@@ -3564,6 +3623,15 @@ def prueba_subtitulos():
     corto = subtitulos.tramos("Vale, si.".split())
     igual(len(corto), 1,
           "y un huerfano se funde con su vecino en vez de parpadear solo")
+    # LAS MARCAS DE CARTESIA LEIDAS COMO LATIN-1 (antes del 10-10-2026)
+    igual(subtitulos.reparar_mojibake("TÃº papÃ¡ Â«yaÂ»"), "Tú papá «ya»",
+          "el subtitulo arregla la narracion que llego como Latin-1")
+    for sano in ("año", "Ángel", "normal", "€ 30", ""):
+        igual(subtitulos.reparar_mojibake(sano), sano, f"y no toca un texto sano ({sano!r})")
+    rota = {"narracion": "TÃº ganas", "marcas": [[0.0, 0.4], [0.4, 0.9]], "t_in": 0.0}
+    trozos = subtitulos.de_escena(rota)
+    ok(trozos and "Tú" in trozos[0]["texto"],
+       f"y el subtitulo dibujado sale bien escrito, con sus tiempos: {trozos}")
 
     titulo("subtitulos: la hora sale de las marcas, no de recontar")
     escena = {"id": "S001", "t_in": 10.0, "t_out": 14.0,
@@ -3772,6 +3840,22 @@ def prueba_subtitulos():
     igual(subtitulos.repartir_escrito(["lo de arriba", "lo de abajo"], ""),
           ["lo de arriba", "lo de abajo"],
           "sin texto no se toca nada: un override vacio no es un borrado")
+    # CON ANCLA (la pone el corrector de ortografia): el texto escrito vale
+    # mientras la narracion del plano siga siendo la que se corrigio
+    narracion = dict(escena).get("narracion")
+    con_ancla = subtitulos.de_escena(dict(escena), idioma="en",
+                                     texto="Thirty million accounts, and nobody spoke.",
+                                     ancla=narracion.upper())
+    igual(" ".join(x["texto"] for x in con_ancla),
+          "Thirty million accounts, and nobody spoke.",
+          "con el ancla de la misma narracion (da igual mayusculas o signos), "
+          "manda lo corregido")
+    otra = subtitulos.de_escena(dict(escena), idioma="en",
+                                texto="Thirty million accounts, and nobody spoke.",
+                                ancla="una frase que ya no se dice")
+    igual(" ".join(x["texto"] for x in otra), " ".join(x["texto"] for x in trozos),
+          "y si la narracion cambio (se regrabo, se volvio a cortar), lo "
+          "corregido se ignora: un subtitulo que no es lo que se oye miente")
     corto = subtitulos.de_escena(dict(escena), idioma="en", texto="30M.")
     ok(len(corto) == 1 and corto[0]["texto"] == "30M.",
        "un override mas corto que lo que sustituye deja trozos vacios, y un "
@@ -4215,8 +4299,11 @@ def prueba_familias_de_receta():
 def prueba_musica_un_pelin_mas_alta():
     """La musica sube un pelin, y las dos ramas suben lo mismo."""
     titulo("sonido: el nivel de la musica, la cama y el tema suelto igual")
-    cama = sonido.filtro_de_mezcla(True, False, 10.0, ya_normalizada=True)
-    suelto = sonido.filtro_de_mezcla(True, False, 10.0)
+    # con la presencia «suave», que son los numeros del canal tal cual: la
+    # presencia por defecto suma lo suyo encima (ver la prueba de abajo)
+    cama = sonido.filtro_de_mezcla(True, False, 10.0, ya_normalizada=True,
+                                   presencia="suave")
+    suelto = sonido.filtro_de_mezcla(True, False, 10.0, presencia="suave")
     ok(f"volume={sonido.CAMA_GANANCIA_DB + sonido.MUSICA_SUBIDA_DB:g}dB" in cama,
        "la cama suma la subida del canal a su ganancia calibrada")
     ok(f"loudnorm=I={sonido.MUSICA_LUFS:.1f}" in suelto
@@ -4270,11 +4357,12 @@ def prueba_musica_un_pelin_mas_alta():
        "de la misma idea, o sea varias veces por plano")
 
     titulo("sonido: cuanta musica lleva ESTE video es un mando de un numero")
-    con_ajuste = sonido.filtro_de_mezcla(True, False, 10.0, ajuste_db=-3)
+    con_ajuste = sonido.filtro_de_mezcla(True, False, 10.0, ajuste_db=-3,
+                                         presencia="suave")
     ok(f"volume={sonido.MUSICA_SUBIDA_DB - 3:g}dB" in con_ajuste,
        "el ajuste del video se suma a la subida del canal, en la misma cuenta")
     cama_ajustada = sonido.filtro_de_mezcla(True, False, 10.0, ya_normalizada=True,
-                                            ajuste_db=-3)
+                                            ajuste_db=-3, presencia="suave")
     ok(f"volume={sonido.CAMA_GANANCIA_DB + sonido.MUSICA_SUBIDA_DB - 3:g}dB"
        in cama_ajustada,
        "y llega a las DOS ramas: con cama o con tema suelto, bajar la musica "
@@ -4283,6 +4371,46 @@ def prueba_musica_un_pelin_mas_alta():
        and p8_render.PARAMS_POR_DEFECTO["musica_db"] == 0.0,
        "vive en los params del render, a cero de fabrica: solo obliga a "
        "remuxear, ni una imagen ni un clip")
+
+    # LA PRESENCIA (09-10-2026). Con los numeros del canal la musica quedaba
+    # ~25 dB por debajo de la voz y solo se oia en la cola del final: «no hay
+    # musica a pesar que esta seleccionada».
+    titulo("sonido: cuanto se oye la musica es un nivel con nombre, por video")
+    igual(sorted(sonido.PRESENCIAS), ["alta", "normal", "suave"],
+          "tres niveles: suave, normal y alta")
+    igual(sonido.presencia_de(None)[0], sonido.PRESENCIA_POR_DEFECTO,
+          "sin elegir, la de por defecto")
+    igual(sonido.presencia_de("no-existe")[0], sonido.PRESENCIA_POR_DEFECTO,
+          "y lo que no se entiende, tambien")
+    ok(sonido.PRESENCIA_POR_DEFECTO != "suave",
+       "y la de por defecto NO es la de los numeros del canal, que la enterraban")
+    suave = sonido.filtro_de_mezcla(True, False, 10.0, presencia="suave")
+    ok(f"ratio={sonido.DUCK_RATIO:g}:" in suave
+       and f"release={sonido.DUCK_CAIDA_MS:g}" in suave,
+       "«suave» es el ducking del canal tal cual")
+    graficas = {n: sonido.filtro_de_mezcla(True, False, 10.0, presencia=n)
+                for n in sonido.PRESENCIAS}
+    for nombre, ficha in sonido.PRESENCIAS.items():
+        ok(f"ratio={ficha['ratio']:g}:" in graficas[nombre]
+           and f"release={ficha['caida_ms']:g}:" in graficas[nombre]
+           and f"volume={sonido.MUSICA_SUBIDA_DB + ficha['subida_db']:g}dB"
+           in graficas[nombre],
+           f"«{nombre}» llega al grafo: ratio, caida y subida")
+    ok(sonido.PRESENCIAS["suave"]["ratio"] > sonido.PRESENCIAS["normal"]["ratio"]
+       >= sonido.PRESENCIAS["alta"]["ratio"]
+       and sonido.PRESENCIAS["suave"]["subida_db"]
+       < sonido.PRESENCIAS["normal"]["subida_db"]
+       < sonido.PRESENCIAS["alta"]["subida_db"],
+       "y van en orden: cada nivel agacha menos y sube mas que el anterior")
+    ok(sonido.filtro_de_mezcla(True, False, 10.0)
+       == graficas[sonido.PRESENCIA_POR_DEFECTO],
+       "sin `presencia` el grafo es el del nivel por defecto")
+    ok("musica_presencia" not in p8_render.PARAMS_POR_DEFECTO,
+       "y NO esta en los params de fabrica: meterla ahi la pondria en la firma "
+       "de todos los videos que nunca la eligieron")
+    ok("ducking alta" in sonido.describir(
+        {"musica": {"id": "x", "titulo": "t"}, "musica_presencia": "alta"}),
+       "la frase del sonido dice el nivel")
 
 
 def _prohibir_pagar():
@@ -4348,6 +4476,7 @@ def main():
     prueba_la_cara_es_de_esa_escena()
     prueba_continuidad()
     prueba_cache_referencias()
+    prueba_logo_y_revision()
     prueba_espaciar()
     prueba_cartelas()
     prueba_direccion()

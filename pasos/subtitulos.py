@@ -54,6 +54,7 @@ que no tenerlo, y ademas miente sobre lo unico que promete.
 """
 import difflib
 import re
+import unicodedata
 
 #: Caracteres por linea. Se recalibro entero el 23-08 con el subtitulo: el
 #: cuerpo dejo de medirse en px del lienzo de generacion (34) para medirse en
@@ -345,8 +346,44 @@ def repartir_escrito(dibujados, texto):
     return [" ".join(p) for p in reparto]
 
 
+#: Lo que deja UTF-8 leido como Latin-1: «Ã»/«Â» y un byte de continuacion
+#: (0x80-0xBF) para las letras con tilde, la ñ, «» y ¿¡; «â» y dos para las
+#: comillas curvas, la raya, los puntos suspensivos y el euro. Solo esas
+#: cabezas: con otras («Ú»» en «PERÚ»») un texto sano se tomaria por roto.
+_MOJIBAKE = re.compile("[\u00c2\u00c3][\u0080-\u00bf]|\u00e2[\u0080-\u00bf]{2}")
+
+
+def _deshacer(trozo):
+    try:
+        return trozo.group(0).encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return trozo.group(0)
+
+
+def reparar_mojibake(texto):
+    """«TÃº» -> «Tú». Lo que dejaron las marcas de voz de Cartesia leidas como
+    Latin-1 hasta el 10-10-2026 (`p4_voz._toma_real`, sin charset en el SSE).
+
+    Esta en el DIBUJO del subtitulo y no en los datos: arreglarlo en la voz
+    guardada cambiaria la narracion de cada plano, que entra en la firma de sus
+    imagenes, y la pantalla ofreceria rehacerlas pagando (regla 1). Se arregla
+    TROZO A TROZO, asi que un texto que mezcla lo roto con lo sano (un
+    subtitulo corregido a mano) sale entero bien; lo que no se puede deshacer
+    se queda como estaba.
+    """
+    texto = str(texto or "")
+    return _MOJIBAKE.sub(_deshacer, texto) if _MOJIBAKE.search(texto) else texto
+
+
+def _palabras_llanas(texto):
+    """Las palabras sin tildes, signos ni mayusculas (y sin letras rotas)."""
+    sin = unicodedata.normalize("NFD", reparar_mojibake(str(texto or "")))
+    sin = "".join(c for c in sin if unicodedata.category(c) != "Mn")
+    return re.findall(r"\w+", sin.lower())
+
+
 def de_escena(escena, cap_linea=CAP_LINEA, idioma=None, texto="",
-              cap_trozo=None):
+              cap_trozo=None, ancla=""):
     """[{"texto", "desde", "hasta"}] en el reloj DEL PLANO, o [] si no cuadra.
 
     `desde`/`hasta` salen de la primera y la ultima marca del rango, menos el
@@ -358,9 +395,16 @@ def de_escena(escena, cap_linea=CAP_LINEA, idioma=None, texto="",
     y vuelve a grabar la voz -- para cambiar «un uno por 100» por «1%», eso es
     absurdo. Entra AQUI y no antes de trocear, que es lo unico que importa:
     despues del troceo el texto puede encoger sin que nada se mueva.
+
+    `ancla` es la narracion del plano cuando se escribio `texto` (la pone el
+    corrector de ortografia). Si lo que dice ahora la narracion ya no es eso --se regrabo
+    el tramo, se volvieron a cortar los planos-- el texto escrito era de OTRA
+    frase y se ignora: un subtitulo que no es lo que se oye miente.
     """
     escena = escena if isinstance(escena, dict) else {}
-    palabras = str(escena.get("narracion") or "").split()
+    # palabra a palabra: reparar no junta ni parte palabras, asi que el
+    # recuento contra las marcas sigue cuadrando
+    palabras = [reparar_mojibake(x) for x in str(escena.get("narracion") or "").split()]
     marcas = escena.get("marcas") or []
     if not palabras or len(palabras) != len(marcas):
         # LA GUARDA. Sin esto un plano cuyo texto y cuyas marcas no cuadran
@@ -371,8 +415,10 @@ def de_escena(escena, cap_linea=CAP_LINEA, idioma=None, texto="",
     rangos = list(tramos(palabras, cap_linea=cap_linea, cap_trozo=cap_trozo,
                          intocables=_cifras_de(palabras, idioma)))
     dibujados = [limpiar_texto(palabras[a:b], idioma) for a, b in rangos]
+    if texto and ancla and _palabras_llanas(" ".join(palabras)) != _palabras_llanas(ancla):
+        texto = ""
     if texto:
-        dibujados = repartir_escrito(dibujados, texto)
+        dibujados = repartir_escrito(dibujados, reparar_mojibake(texto))
     salida = []
     for (a, b), escrito in zip(rangos, dibujados):
         try:

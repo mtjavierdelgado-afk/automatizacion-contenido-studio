@@ -1371,6 +1371,50 @@ def probar_transicion_no_coge_la_vieja(proyecto):
 
 # ------------------------------------------------------------------- main
 
+def probar_previa_clara():
+    """La previa de un plano CLARO no se toma por la pagina de error (09-10-2026).
+
+    El estilo fotografico de interiorismo tenia la esquina en (253, 253, 254) y
+    la comprobacion vieja --«esquina casi blanca = pagina de error»-- tumbaba la
+    creacion del estilo al 89 %, siempre en el mismo sitio. Y una carpeta con
+    acento o almohadilla daba una URL que el navegador no encontraba.
+    """
+    print("\n  PREVIA · un plano claro, y rutas con acentos")
+    base = os.path.join(CARPETA, "previa clara", "acentó#1")
+    os.makedirs(base, exist_ok=True)
+    png = os.path.join(base, "S001.png")
+    Image.new("RGB", (1536, 1024), (253, 253, 254)).save(png)
+    svg = medios.escribir_texto(os.path.join(base, "S001.svg"),
+                                '<svg xmlns="http://www.w3.org/2000/svg" '
+                                'width="1536" height="1024"></svg>')
+    destino = os.path.join(base, "previa.png")
+    try:
+        p7_callouts.previsualizar(png, svg, destino)
+        hecho = True
+    except RuntimeError as fallo:
+        hecho = False
+        print(f"      {fallo}")
+    ok(hecho, "un plano casi blanco, en una carpeta con acento y almohadilla, "
+              "compone su previa")
+    if hecho:
+        pixeles = Image.open(destino).convert("RGB").load()
+        igual(pixeles[0, 0], (253, 253, 254),
+              "y la señal de la esquina no queda en el PNG que se enseña")
+        ok(not os.path.exists(destino + ".html"), "y el HTML de trabajo se borra")
+    blanco = os.path.join(base, "error.png")
+    Image.new("RGB", (64, 64), (255, 255, 255)).save(blanco)
+    try:
+        p7_callouts._comprobar_previa(blanco)
+        cazada = False
+    except RuntimeError:
+        cazada = True
+    ok(cazada, "una captura blanca SIN la señal sigue siendo la pagina de error")
+    url = medios.url_de_fichero(os.path.join(base, "x.html"))
+    ok(url.startswith("file:///") and not url.startswith("file:////")
+       and "%C3%B3%231" in url and " " not in url,
+       f"la URL de un fichero lleva tres barras y va codificada: {url}")
+
+
 def main():
     # NO HAY NADA QUE COMPROBAR ANTES DE EMPEZAR. Aqui habia un aviso de que
     # faltaban «los datos reales» en una carpeta de otro proyecto; el material
@@ -1414,6 +1458,7 @@ def main():
     params_render = {"fps": 12, "resolucion": [640, 360], "calidad_video": "baja"}
     estado.set_params("render", params_render)
     probar_render(proyecto, estado, params_render)
+    probar_previa_clara()
 
     # el gestor de trabajos es como lo llamara el estudio: en un hilo, con
     # progreso y con la marca de ejecutando limpiada al acabar

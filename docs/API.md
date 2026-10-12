@@ -36,10 +36,20 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/feedback` | Feedback general o sobre una unidad; rehace SOLO lo que apunta. |
 | `GET` | `/api/proyectos/{pid}/lleva` | Lo que lleva este video: voz, subtitulos, musica y efectos. |
 | `PUT` | `/api/proyectos/{pid}/lleva` | Enciende o apaga lo que lleva el video. Rehace solo el montaje, nunca imagenes. |
+| `GET` | `/api/proyectos/{pid}/logo` | El logo de este video y donde va, o null si no lleva. |
+| `POST` | `/api/proyectos/{pid}/logo` | Sube el logo (PNG con transparencia, mejor) y lo pone arriba a la derecha. |
+| `PUT` | `/api/proyectos/{pid}/logo` | Donde va y como: {posicion?, tamano? (0,04-0,4), opacidad?} o {quitar: true}. |
+| `GET` | `/api/proyectos/{pid}/logo/imagen` | — |
+| `GET` | `/api/proyectos/{pid}/musica/presencia` | Cuánto se oye la música bajo la voz en este vídeo, y los niveles que hay. |
+| `PUT` | `/api/proyectos/{pid}/musica/presencia` | Fija cuánto se oye la música y, si el vídeo ya está montado, lo REMONTA. |
+| `POST` | `/api/proyectos/{pid}/ortografia/aplicar` | Pone los subtitulos corregidos: {cambios: {plano: texto}}. |
+| `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de |
+| `GET` | `/api/proyectos/{pid}/ortografia/{rid}` | Como va la revision de ortografia, y lo que propone al terminar. |
 | `POST` | `/api/proyectos/{pid}/presets-canal/{preset_id}/aplicar` | Copia los valores del preset a los params de los pasos que toque. |
 | `GET` | `/api/proyectos/{pid}/previsualizacion` | Las piezas para ver el video sin montarlo. -> {escenas, audio, ...} |
 | `PUT` | `/api/proyectos/{pid}/redactor` | Guarda el prompt escrito de cada plano. Un prompt vacío lo quita. |
 | `POST` | `/api/proyectos/{pid}/redactor/proponer` | Escribe el prompt de cada plano, con TODOS los planos delante de una vez. |
+| `POST` | `/api/proyectos/{pid}/reparar-estilo` | Repunta las imagenes de estilo perdidas a las que SI estan. No regenera. |
 | `GET` | `/api/proyectos/{pid}/repaso` | Las notas escritas sobre el vídeo montado, con los cortes para anclarlas. |
 | `POST` | `/api/proyectos/{pid}/repaso` | Una nota nueva, anclada al segundo en el que se pausó. |
 | `POST` | `/api/proyectos/{pid}/repaso/aplicar` | Aplica las notas del repaso y vuelve a generar SOLO lo que cambian. |
@@ -47,6 +57,12 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/repaso/imagenes/{nombre}` | Una imagen de referencia de una nota. |
 | `DELETE` | `/api/proyectos/{pid}/repaso/{nid}` | Quita una nota del repaso. |
 | `PUT` | `/api/proyectos/{pid}/repaso/{nid}` | Cambia el texto, el instante o las imágenes de una nota. |
+| `POST` | `/api/proyectos/{pid}/repaso/{nid}/sin-marcas` | Propone la nota reescrita sin marcas ni personajes: NO la guarda. |
+| `GET` | `/api/proyectos/{pid}/subtitulos` | Como son los subtitulos de este video, y si son los del estilo. |
+| `PUT` | `/api/proyectos/{pid}/subtitulos` | {tam?, caja? ("auto" o 0-1), diseno?, color? ("#rrggbb" o "")} o {automatico: true}. |
+| `POST` | `/api/proyectos/{pid}/subtitulos/aplicar` | Rehace las capas de texto y vuelve a montar el video. Ni una imagen. |
+| `POST` | `/api/proyectos/{pid}/subtitulos/rehacer` | Rehace los subtitulos (y monta) de un video cuya voz llego con las |
+| `GET` | `/api/proyectos/{pid}/subtitulos/rotos` | {planos}: cuantos planos tienen los subtitulos dibujados con las tildes |
 
 ## Pasos: estado, params y ejecución
 
@@ -91,6 +107,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/bitacora/llm` | Historial en texto navegable, pensado para darselo a un LLM. |
 | `GET` | `/api/proyectos/{pid}/coste` | Total del video, desglosado por proveedor, con la linea de cabecera. |
 | `GET` | `/api/proyectos/{pid}/coste/eventos` | Detalle de cada consumo, filtrable por proveedor, paso y unidad. |
+| `GET` | `/api/proyectos/{pid}/coste/detalle` | El coste de un vídeo, todo y desglosado: imágenes nuevas/rehechas/personajes, voz y regrabaciones, Claude, música y efectos, su estilo y prometido frente a gastado de cada tanda. |
+| `GET` | `/api/presets-light/{preset_id}/coste` | Lo que costó hacer un estilo (su taller), desglosado. |
+| `POST` | `/api/proyectos/{pid}/exportar` | Prepara el vídeo, o una parte, para descargar (gratis, no toca el proyecto): {que: video, partes, subtitulos, logo} · {que: audio, parte} · {que: zip}. |
+| `GET` | `/api/proyectos/{pid}/exportes/{ruta:path}` | Un fichero preparado por /exportar, con su nombre de descarga. |
 | `GET` | `/api/proyectos/{pid}/coste/flujo` | Coste en vivo por SSE, para que la cabecera se mueva mientras corre un paso. |
 | `GET` | `/api/proyectos/{pid}/coste/por-paso` | Desglose por paso del pipeline: que fase se come el presupuesto. |
 | `PUT` | `/api/proyectos/{pid}/coste/presupuesto` | Fija el presupuesto en dolares del video (null para quitarlo). |
@@ -114,6 +134,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/voz/previsualizar` | Sintetiza unos segundos con estos mandos de voz para escucharlos. |
 | `POST` | `/api/proyectos/{pid}/voz/secciones/{seccion_id}/regrabar` | Regraba una seccion de la toma, con microcambio si se pide. |
 | `GET` | `/api/voces` | Catalogo de voces de Cartesia, sin atarlo a ningun proyecto. |
+| `POST` | `/api/voces/muestra` | Doce segundos de una voz del catalogo, sin estilo ni proyecto. |
+| `GET` | `/api/voces/muestra/{nombre}` | El wav de una muestra ya sintetizada. |
 
 ## Catálogo, escenarios y piezas
 
@@ -156,19 +178,25 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/direccion` | Qué se ve en cada plano: lo dirigido, y los planos que lo admiten. |
 | `PUT` | `/api/proyectos/{pid}/direccion` | Guarda qué se ve en cada plano. Un texto vacío la quita. |
 | `POST` | `/api/proyectos/{pid}/direccion/proponer` | Escribe qué se ve en cada plano, con TODOS los planos delante de una vez. |
+| `GET` | `/api/proyectos/{pid}/imagenes/cola` | La cola de notas de imagenes: cual se dibuja, cuanto lleva y que espera. |
+| `DELETE` | `/api/proyectos/{pid}/imagenes/cola/{nid}` | Saca una nota de la cola (la que ya se esta dibujando no se para). |
+| `POST` | `/api/proyectos/{pid}/imagenes/rehacer` | Pone en la cola las notas de imagenes: {notas?: [ids], desde_cero?} (sin ids, todas). |
 
 ## Sonido y transiciones
 
 | | Ruta | Qué hace |
 |---|---|---|
+| `POST` | `/api/efectos/buscar` | Efectos de FreeSound por texto libre, para elegir uno: {texto, papel?, pagina?}. |
 | `GET` | `/api/efectos/{archivo}` | Sirve un efecto del banco del canal, para poder oírlo antes de vetarlo. |
 | `GET` | `/api/proyectos/{pid}/sonido` | Qué suena en este vídeo: el tema puesto, los efectos surtidos y el catálogo. |
 | `PUT` | `/api/proyectos/{pid}/sonido` | Fija el tema (bajándolo al banco), el interruptor o el nivel de música. |
 | `GET` | `/api/proyectos/{pid}/sonido/arco` | El arco que sale del RITMO del montaje. Gratis, sin salir a la red. |
 | `POST` | `/api/proyectos/{pid}/sonido/banda` | Monta la banda sonora SOLA: un tema por tramo, elegido por el ritmo. |
+| `PUT` | `/api/proyectos/{pid}/sonido/efecto` | Fija UN sonido para un papel ({papel, efecto}) o lo devuelve a automático |
 | `POST` | `/api/proyectos/{pid}/sonido/efectos` | Llena el banco de efectos del canal para los papeles que se pidan. |
 | `POST` | `/api/proyectos/{pid}/sonido/musica` | Temas de Jamendo que pegan con el tono. Devuelve candidatos, no elige. |
 | `POST` | `/api/proyectos/{pid}/sonido/vetados` | Prohíbe un efecto en TODO el canal, o levanta el veto con `quitar`. |
+| `PUT` | `/api/proyectos/{pid}/sonido/efectos/volumen` | Cuánto se oyen los efectos ({nivel: bajos, normales, altos}); si el vídeo está al día, vuelve a mezclar. |
 | `GET` | `/api/proyectos/{pid}/transiciones` | Las transiciones que existen, con su GLSL, y cuales entran en este video. |
 
 ## Render y montaje
@@ -192,7 +220,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/presets-canal` | Guarda un preset nuevo, o sustituye el contenido de uno que ya existe. |
 | `DELETE` | `/api/presets-canal/papelera/{pid}` | Borrado definitivo. Solo alcanza a lo que ya esta en la papelera. |
 | `GET` | `/api/presets-canal/papelera/{pid}` | Que hay dentro de un preset apartado, para decir que se pierde. |
-| `POST` | `/api/presets-canal/papelera/{pid}/restaurar` | Devuelve a la lista un preset apartado. |
+| `POST` | `/api/presets-canal/papelera/{pid}/restaurar` | Devuelve a la lista un preset apartado. Y si es un estilo, su taller con |
 | `DELETE` | `/api/presets-canal/{pid}` | A la papelera. No borra nada: la ficha y sus fotogramas siguen enteros. |
 | `PATCH` | `/api/presets-canal/{pid}` | Cambia solo el nombre o la nota. Lo que el preset guarda no se toca. |
 | `GET` | `/api/presets-canal/{pid}/fichero/{archivo:path}` | Un fichero de la carpeta del preset (fotogramas, laminas del moodboard). |
@@ -212,7 +240,13 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/presets-light/talleres/{taller_id}` | Tira un intento a medias. A la papelera de proyectos, no al vacio. |
 | `DELETE` | `/api/presets-light/{preset_id}` | A la papelera de presets, y su taller con el. |
 | `PUT` | `/api/presets-light/{preset_id}` | El nombre, el idioma y la guia de tono: lo que se cambia a mano. |
+| `GET` | `/api/presets-light/{preset_id}/aportadas` | Las imagenes de referencia de un estilo, con lo que se dijo de cada una. |
+| `PUT` | `/api/presets-light/{preset_id}/aportadas` | Guarda lo que se dice de cada imagen y las ★: {descripciones, destacadas}. |
+| `GET` | `/api/presets-light/{preset_id}/aportadas/{nombre}/imagen` | Una de tus imagenes de referencia, tal cual la subiste. |
 | `POST` | `/api/presets-light/{preset_id}/duplicar` | Una copia del estilo, con su taller. |
+| `GET` | `/api/presets-light/{preset_id}/laminas` | Las laminas de un estilo, limpias y con lo que ensena cada una. |
+| `POST` | `/api/presets-light/{preset_id}/laminas` | Una accion sobre las laminas de un estilo. |
+| `GET` | `/api/presets-light/{preset_id}/laminas/{lamina}/imagen` | Una lamina LIMPIA, sin texto encima: la que va en la hoja de cada plano. |
 | `POST` | `/api/presets-light/{preset_id}/regenerar` | Rehace UNA de las tres partes con una frase de feedback. |
 | `POST` | `/api/presets-light/{preset_id}/video` | Un proyecto de video nuevo con ese estilo ya aplicado. -> la ficha. |
 | `POST` | `/api/presets-light/{preset_id}/voz/previsualizar` | Unos segundos con la voz de este estilo, para escucharla. |
@@ -270,14 +304,31 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/` | La interfaz del Estudio. |
+| `GET` | `/api/clientes` | Los proyectos (clientes) y a cual pertenece cada estilo. |
+| `POST` | `/api/clientes` | Un proyecto nuevo: {nombre}. |
+| `PUT` | `/api/clientes/estilos/{preset_id}` | Mueve un estilo (y sus videos) a un proyecto: {cliente} ("" lo saca). |
+| `PUT` | `/api/clientes/videos/{video_id}` | Mueve un video a otro proyecto ("" lo devuelve al de su estilo). |
+| `DELETE` | `/api/clientes/{cid}` | Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto. |
+| `PUT` | `/api/clientes/{cid}` | Renombra, oculta o pone clave: {nombre?, oculto?, clave?} ("" la quita). |
+| `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
+| `POST` | `/api/logos` | Guarda un logo sin video todavia: el de un borrador o el de un proyecto. |
+| `GET` | `/api/logos/{nombre}` | Un logo subido que todavia no esta en ningun video. |
+| `POST` | `/api/musica/buscar` | Temas de Jamendo por animo, sin video: el borrador de un video nuevo. |
+| `GET` | `/api/musica/escucha` | Pasa por aqui la escucha de un tema de Jamendo antes de elegirlo. |
+| `GET` | `/api/musica/propia/{archivo}` | Un tema tuyo del banco, para escucharlo. |
+| `GET` | `/api/sistema/estilos-perdidos` | Los videos que apuntan a imagenes de estilo que ya no estan. Solo mira. |
 | `GET` | `/api/sistema/guias` | Como rellenar cada campo de texto: plantilla, ejemplo y prompt para otra IA. |
+| `POST` | `/api/sistema/guias/{gid}/revisar` | Lanza la revision de un texto contra la guia de su campo. -> {id} |
+| `GET` | `/api/sistema/manual` | Cómo se usa el Estudio, tal cual esta en docs/MANUAL.md. |
 | `GET` | `/api/sistema/notas` | Las notas de mejoras futuras, las pendientes primero. |
 | `POST` | `/api/sistema/notas` | Apunta una mejora para hacer mas adelante. |
 | `DELETE` | `/api/sistema/notas/{nid}` | — |
 | `PUT` | `/api/sistema/notas/{nid}` | Cambia el texto de una nota o la marca como hecha / pendiente. |
 | `GET` | `/api/sistema/novedades` | El historial de cambios, tal cual esta en docs/NOVEDADES.md. |
+| `GET` | `/api/sistema/revisiones/{rid}` | — |
+| `POST` | `/api/sonido/subir` | Sube un audio tuyo (MP3, WAV, M4A, OGG) para la música o un efecto. |
 | `GET` | `/{fichero}` | Sirve un fichero suelto de web/ (app.js, estilo.css...). |
 
 ---
 
-**166 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**212 endpoints.** Escrito por `generar_api.py` desde `app.py`.

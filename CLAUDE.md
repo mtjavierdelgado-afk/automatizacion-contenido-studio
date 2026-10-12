@@ -402,11 +402,43 @@ bash pruebas.sh                              # Linux: el mismo recorrido
 comprobación. Toda suite termina con su `if __name__ == "__main__"` y una línea
 con «comprobaciones».
 
-Las veinticinco en verde, y las herramientas de análisis sin nada que decir
+Las veintiocho en verde, y las herramientas de análisis sin nada que decir
 (`huerfanas_js` trae dos sospechosas de siempre, `async` y `fallar`, que no son
 llamadas).
 Y si has tocado la interfaz, **ábrela**: una regla de CSS de menos o un bloque
-que no se pinta no da ningún error en ningún sitio.
+que no se pinta no da ningún error en ningún sitio. Para eso está
+`prueba_recorrido.py` (va en `pruebas.sh`): arranca el Estudio con datos de
+prueba y motores simulados, recorre las pantallas con Chromium pulsando como
+una persona y comprueba que lo que tiene que verse SE VE. Si añades una
+pantalla o un botón, añade su paso ahí. Las capturas quedan en la carpeta que
+imprime al empezar (`--capturas carpeta` para elegirla).
+
+**La revisión completa, que es lo que se hace antes de dar por buena una
+versión** (11-10-2026, después de que el dueño encontrara en un minuto cinco
+fallos que el recorrido «verde» no veía). El recorrido ya la lleva dentro:
+
+1. **El vídeo de prueba es como uno de verdad**: guía de estilo, dirección,
+   música y efectos subidos, y la voz con las tildes rotas de antes del
+   10-10. Un vídeo de prueba más limpio que los reales esconde sus fallos.
+2. **Todos los botones** (`todos_los_botones`): en cada pantalla se pulsan
+   uno a uno y cada uno tiene que cambiar algo que se vea, sin errores. Un
+   botón muerto falla la suite.
+3. **La cobertura** (`herramientas/inventario_botones.py`): al final se
+   imprime cuántos botones del código ha VISTO y PULSADO el recorrido, y
+   `cobertura.json` lista los que nunca salieron. Un botón nuevo que no sale
+   ahí es un botón sin probar: añade su escenario (`lo_que_sale_a_veces`).
+4. **Repintar no pierde nada** (`repintar_no_pierde_nada`): la pantalla se
+   repinta sola; lo escrito tiene que seguir ahí.
+5. **Tamaños, temas y textos** (`tamanos_temas_y_textos`): cada pantalla en
+   móvil, tableta y ordenador y en los dos temas, sin salirse por los lados,
+   sin imágenes gigantes, sin la burbuja tapando un botón y sin «undefined»,
+   «NaN», «null» ni tildes rotas. Los textos de todas las pantallas quedan en
+   `textos_de_pantalla.txt` para leerlos de corrido.
+6. **Cada fallo que reporte el dueño entra como comprobación** en el recorrido
+   (`lo_que_se_vio_el_10_de_octubre`, `rehacer_y_verlo_en_el_video`) y se
+   comprueba que falla SIN el arreglo antes de darlo por arreglado.
+7. **Una revisión independiente** del diff (un agente que no ha escrito el
+   cambio), centrada en dinero, firmas y carreras.
 
 Tres cosas que ahorran perseguir fallos que no existen:
 

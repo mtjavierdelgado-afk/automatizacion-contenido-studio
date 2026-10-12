@@ -1982,6 +1982,20 @@ def probar_asistente(cliente):
     igual(respuesta.status_code, 400, "un modo de dictado que no existe da 400")
     cliente.put("/api/ajustes", {"dictado": "auto"})
 
+    # LA HORA DE LA REGIÓN: el servidor apunta las horas en la zona elegida
+    respuesta, datos = cliente.put("/api/ajustes", {"zona_horaria": "America/Lima"})
+    igual(respuesta.status_code, 200, "se elige la zona America/Lima")
+    igual((datos.get("zona") or {}).get("desfase"), "UTC-05:00",
+          "y el servidor pasa a UTC-05:00 en el acto, sin reiniciar")
+    _r, datos = cliente.get("/api/ajustes")
+    igual((datos.get("ajustes") or {}).get("zona_horaria"), "America/Lima",
+          "y queda guardada")
+    respuesta, _d = cliente.put("/api/ajustes", {"zona_horaria": "Marte/Olimpo"})
+    igual(respuesta.status_code, 400, "una zona que no existe da 400")
+    _r, datos = cliente.put("/api/ajustes", {"zona_horaria": ""})
+    igual((datos.get("ajustes") or {}).get("zona_horaria"), "",
+          "y vacía vuelve a la del servidor")
+
     # EL HISTORIAL: la charla queda guardada junto a los datos, no en memoria
     respuesta, historial = cliente.get("/api/asistente/charlas")
     igual(respuesta.status_code, 200, "GET /api/asistente/charlas da el historial")
@@ -3499,6 +3513,349 @@ def probar_video_light(cliente):
     cliente.delete(f"/api/presets-light/{estilo_id}")
 
 
+def probar_presencia_musica(cliente, carpeta):
+    """Cuánto se oye la música: se elige por vídeo y, montado, solo se remezcla."""
+    seccion("CUÁNTO SE OYE LA MÚSICA")
+    from nucleo.estado import Estado
+    from nucleo.proyecto import Proyecto
+    _r, datos = cliente.post("/api/proyectos", {"nombre": "Presencia de la música"})
+    pid = (datos.get("proyecto") or {}).get("id")
+    ruta = f"/api/proyectos/{pid}/musica/presencia"
+    _r, datos = cliente.get(ruta)
+    igual((datos.get("presencia"), datos.get("elegida")), ("normal", False),
+          "sin elegir suena «normal», y lo dice")
+    igual(datos.get("niveles"), ["suave", "normal", "alta"], "y da los tres niveles")
+    respuesta, _d = cliente.put(ruta, {"presencia": "atronadora"})
+    igual(respuesta.status_code, 400, "un nivel que no existe es un 400")
+    _r, datos = cliente.put(ruta, {"presencia": "normal"})
+    igual(datos.get("cambiado"), False, "elegir lo que ya suena no cambia nada")
+    proyecto = Proyecto(os.path.join(carpeta, pid))
+    ok("musica_presencia" not in (Estado(proyecto).params("render") or {}),
+       "ni escribe el param: la firma del render no se mueve (regla 1)")
+    _r, datos = cliente.put(ruta, {"presencia": "alta"})
+    igual((datos.get("cambiado"), datos.get("remontando")), (True, False),
+          "sin vídeo montado se guarda y no se lanza nada")
+    igual(Estado(proyecto).params("render").get("musica_presencia"), "alta",
+          "y queda en los params del render")
+    _r, datos = cliente.get(ruta)
+    igual((datos.get("presencia"), datos.get("elegida")), ("alta", True),
+          "y al volver se lee la elegida")
+
+    # MONTADO Y AL DÍA: se remezcla con `solo_montar`, sin dibujar. En proceso
+    # y con un contexto de mentira: no hay clips, así que se mira qué se le
+    # pide al render y no se corre.
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+
+    class _Estado:
+        def __init__(self, estado):
+            self.render, self.estado = {"musica_presencia": "alta"}, estado
+
+        def params(self, _paso):
+            return dict(self.render)
+
+        def estado_de(self, _paso):
+            return self.estado
+
+        def actualizar_params(self, _paso, cambios):
+            self.render.update(cambios)
+
+    class _Ctx:
+        def __init__(self, estado):
+            self.estado = _Estado(estado)
+            self.bitacora = type("B", (), {"anotar": lambda *_a, **_k: None})()
+            self.gestor = type("G", (), {"estado": lambda _s, _t: {"id": _t},
+                                         "listar": lambda _s, **_k: []})()
+
+    lanzados = []
+    guardado = (servidor.contexto, servidor.lanzar_paso, servidor._ruta_de_version)
+    servidor.lanzar_paso = (lambda ctx, paso, unidades, **kw:
+                            lanzados.append((paso, kw.get("opciones"))) or "t-falso")
+    servidor._ruta_de_version = lambda ctx, paso, *partes: "pasos/render/v1/video.mp4"
+    try:
+        al_dia = _Ctx("listo")
+        servidor.contexto = lambda _pid: al_dia
+        datos = servidor.cambiar_presencia_musica("x", {"presencia": "suave"})
+        igual(datos.get("remontando"), True, "montado y al día: se vuelve a mezclar")
+        igual(lanzados, [("render", {"solo_montar": True})],
+              "con el render en `solo_montar`: ni un clip")
+        igual(al_dia.estado.render.get("musica_presencia"), "suave",
+              "y el nivel se guarda ANTES de lanzar, o la mezcla saldría con el viejo")
+        lanzados.clear()
+        pendiente = _Ctx("obsoleto")
+        servidor.contexto = lambda _pid: pendiente
+        datos = servidor.cambiar_presencia_musica("x", {"presencia": "normal"})
+        igual((datos.get("cambiado"), datos.get("remontando"), lanzados),
+              (True, False, []),
+              "con planos pendientes se guarda y NO se remezcla sobre clips viejos")
+    finally:
+        servidor.contexto, servidor.lanzar_paso, servidor._ruta_de_version = guardado
+
+
+def probar_ronda_octubre(cliente, carpeta):
+    """Proyectos (clientes), subtítulos, logo, muestra de voz y revisar."""
+    seccion("PROYECTOS, SUBTÍTULOS, LOGO, MUESTRA DE VOZ Y REVISAR")
+    from PIL import Image
+    # --- proyectos (clientes)
+    respuesta, datos = cliente.post("/api/clientes", {"nombre": "Suyu"})
+    igual(respuesta.status_code, 201, "se crea un proyecto")
+    cid = (datos.get("cliente") or {}).get("id") or ""
+    ok(cid.startswith("cl_"), f"con su id: {cid}")
+    respuesta, _d = cliente.post("/api/clientes", {"nombre": "suyu"})
+    igual(respuesta.status_code, 400, "dos proyectos con el mismo nombre no")
+    respuesta, _d = cliente.put(f"/api/clientes/estilos/pr_x", {"cliente": cid})
+    igual(respuesta.status_code, 200, "un estilo se mete en un proyecto")
+    _r, lista = cliente.get("/api/clientes")
+    igual((lista.get("estilos") or {}).get("pr_x"), cid, "y la lista lo dice")
+    _r, datos = cliente.put(f"/api/clientes/{cid}", {"clave": "1234", "oculto": True})
+    ficha = datos.get("cliente") or {}
+    ok(ficha.get("con_clave") and ficha.get("oculto") and "clave" not in ficha,
+       "se le pone clave y se oculta, y la clave nunca viaja")
+    respuesta, _d = cliente.post(f"/api/clientes/{cid}/abrir", {"clave": "mala"})
+    igual(respuesta.status_code, 403, "con la clave mala no se abre")
+    respuesta, _d = cliente.post(f"/api/clientes/{cid}/abrir", {"clave": "1234"})
+    igual(respuesta.status_code, 200, "con la buena, sí")
+    respuesta, datos = cliente.pedir("DELETE", f"/api/clientes/{cid}")
+    igual(datos.get("estilos_sin_proyecto"), ["pr_x"],
+          "borrar el proyecto deja sus estilos sin proyecto, no los borra")
+    # --- subtítulos y logo de un vídeo
+    _r, datos = cliente.post("/api/proyectos", {"nombre": "Ronda octubre"})
+    pid = (datos.get("proyecto") or {}).get("id")
+    base = f"/api/proyectos/{pid}"
+    _r, sub = cliente.get(f"{base}/subtitulos")
+    igual((sub.get("tam"), sub.get("propios")), ("normal", False),
+          "sin tocar, los subtítulos son los del estilo")
+    respuesta, _d = cliente.put(f"{base}/subtitulos", {"tam": "gigante"})
+    igual(respuesta.status_code, 400, "un tamaño que no existe es un 400")
+    _r, datos = cliente.put(f"{base}/subtitulos", {"tam": "grande", "color": "#ffcc00"})
+    igual(datos.get("cambiado"), True, "se cambian tamaño y color")
+    _r, sub = cliente.get(f"{base}/subtitulos")
+    igual((sub.get("tam"), sub.get("color"), sub.get("propios")),
+          ("grande", "#ffcc00", True), "y se leen como propios del vídeo")
+    _r, datos = cliente.put(f"{base}/subtitulos", {"automatico": True})
+    _r, sub = cliente.get(f"{base}/subtitulos")
+    igual((sub.get("tam"), sub.get("color"), sub.get("propios")),
+          ("normal", "", False), "«automático» vuelve a los del estilo")
+    respuesta, _d = cliente.put(f"{base}/logo", {"posicion": "arriba_derecha"})
+    igual(respuesta.status_code, 409, "colocar un logo que no se ha subido es un 409")
+    png = io.BytesIO()
+    Image.new("RGBA", (40, 20), (255, 0, 0, 255)).save(png, "PNG")
+    respuesta, datos = cliente.pedir("POST", f"{base}/logo",
+                                     files={"logo": ("logo.png", png.getvalue(), "image/png")})
+    igual(respuesta.status_code, 200, "se sube un logo")
+    igual((datos.get("logo") or {}).get("posicion"), "arriba_derecha",
+          "y va arriba a la derecha de fábrica")
+    igual(datos.get("trabajo_id"), None, "sin vídeo montado no se lanza nada")
+    _r, datos = cliente.put(f"{base}/logo", {"posicion": "abajo_izquierda", "tamano": 2})
+    igual(((datos.get("logo") or {}).get("posicion"), (datos.get("logo") or {}).get("tamano")),
+          ("abajo_izquierda", 0.4), "se mueve, y el tamaño se queda en su tope")
+    respuesta, _d = cliente.get(f"{base}/logo/imagen")
+    igual(respuesta.status_code, 200, "y se sirve su imagen")
+    _r, datos = cliente.put(f"{base}/logo", {"quitar": True})
+    _r, datos = cliente.get(f"{base}/logo")
+    igual(datos.get("logo"), None, "y se quita")
+    # --- escuchas y revisar
+    respuesta, _d = cliente.get("/api/musica/escucha?url=https://ejemplo.com/a.mp3")
+    igual(respuesta.status_code, 400, "solo se escuchan temas de Jamendo")
+    respuesta, _d = cliente.post("/api/voces/muestra", {"voz_id": "no vale"})
+    igual(respuesta.status_code, 400, "una voz con un id raro es un 400")
+    respuesta, _d = cliente.post("/api/sistema/guias/no_existe/revisar", {"texto": "x"})
+    igual(respuesta.status_code, 404, "revisar con una guía que no existe es un 404")
+    respuesta, _d = cliente.post("/api/sistema/guias/tono/revisar", {"texto": "  "})
+    igual(respuesta.status_code, 400, "y con el campo vacío, un 400")
+    respuesta, _d = cliente.get("/api/sistema/revisiones/nada")
+    igual(respuesta.status_code, 404, "una revisión que no existe es un 404")
+
+    # RETOMAR UN ESTILO TRAS CAMBIAR LA VOZ la vuelve a elegir (10-10-2026)
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+
+    class _Taller:
+        def __init__(self, voz_id, hecha):
+            self.estado = type("E", (), {"params": lambda _s, paso: {"voz_id": voz_id}})()
+            self.proyecto = type("P", (), {"config": {servidor.CONFIG_VOZ_HECHA: hecha}})()
+
+    hecha = {"voz_prompt": "grave", "voz_id": ""}
+    ok(servidor._light_hecha(_Taller("v1", hecha), "voz",
+                             {"voz_prompt": "grave", "voz_id": ""}),
+       "con el mismo encargo, la voz está hecha")
+    ok(not servidor._light_hecha(_Taller("v1", hecha), "voz",
+                                 {"voz_prompt": "grave", "voz_id": "v2"}),
+       "con otra voz elegida, hay que volver a elegirla")
+    ok(not servidor._light_hecha(_Taller("v1", hecha), "voz",
+                                 {"voz_prompt": "aguda", "voz_id": ""}),
+       "y con otra descripción, también")
+
+
+def probar_coste_en_detalle(cliente, pid):
+    """El coste de un vídeo, desglosado, y el volumen de los efectos (11-10)."""
+    seccion("EL COSTE EN DETALLE Y EL VOLUMEN DE LOS EFECTOS")
+    r, d = cliente.get(f"/api/proyectos/{pid}/coste/detalle")
+    igual(r.status_code, 200, "el coste en detalle contesta")
+    for clave in ("total_usd", "imagenes", "voz", "musica", "efectos", "tandas",
+                  "precio_imagen", "claude_tokens"):
+        ok(clave in d, f"y trae «{clave}»")
+    img = d.get("imagenes") or {}
+    ok(all(k in img for k in ("nuevas", "rehechas", "personajes")),
+       "las imágenes separadas en nuevas, rehechas y personajes")
+    _r, total = cliente.get(f"/api/proyectos/{pid}/coste")
+    ok(abs(float(d.get("total_usd") or 0) - float(total.get("total_usd") or 0)) < 0.01,
+       f"y el total cuadra con el de la cabecera ({d.get('total_usd')} / {total.get('total_usd')})")
+    ok(bool((d.get("precio_imagen") or {}).get("fuente")), "dice de dónde sale el precio por imagen")
+    r, _d = cliente.get("/api/presets-light/no_existe/coste")
+    igual(r.status_code, 404, "el coste de un estilo que no existe es un 404")
+    # EL VOLUMEN: pedir el que ya suena no escribe nada (regla 1)
+    _r, antes = cliente.get(f"/api/proyectos/{pid}/pasos/render")
+    r, d = cliente.put(f"/api/proyectos/{pid}/sonido/efectos/volumen", {"nivel": "normales"})
+    igual((r.status_code, d.get("cambiado")), (200, False), "pedir el volumen que ya suena no cambia nada")
+    _r, despues = cliente.get(f"/api/proyectos/{pid}/pasos/render")
+    igual(despues.get("params"), antes.get("params"), "ni escribe ningún param")
+    r, d = cliente.put(f"/api/proyectos/{pid}/sonido/efectos/volumen", {"nivel": "altos"})
+    igual((r.status_code, d.get("cambiado")), (200, True), "subir los efectos se guarda")
+    _r, sonido = cliente.get(f"/api/proyectos/{pid}/sonido")
+    igual(sonido.get("efectos_volumen"), "altos", "y el sonido lo dice")
+    r, _d = cliente.put(f"/api/proyectos/{pid}/sonido/efectos/volumen", {"nivel": "a tope"})
+    igual(r.status_code, 400, "un nivel que no existe es un 400")
+    cliente.put(f"/api/proyectos/{pid}/sonido/efectos/volumen", {"nivel": "normales"})
+    # DESCARGAR POR PARTES: lo que no se puede pedir, y nada fuera de exportes/
+    r, _d = cliente.post(f"/api/proyectos/{pid}/exportar", {"que": "otra cosa"})
+    igual(r.status_code, 400, "exportar algo que no existe es un 400")
+    r, _d = cliente.post(f"/api/proyectos/{pid}/exportar", {"que": "audio", "parte": "guitarra"})
+    igual(r.status_code, 400, "un audio que no es voz, música, efectos ni mezcla es un 400")
+    r, _d = cliente.get(f"/api/proyectos/{pid}/exportes/nada.mp4")
+    igual(r.status_code, 404, "un fichero no preparado es un 404")
+    r, _d = cliente.get(f"/api/proyectos/{pid}/exportes/..%2F..%2Festado.json")
+    ok(r.status_code in (404, 400), f"y no se sale de la carpeta de exportes ({r.status_code})")
+
+
+def probar_turno_y_notas_de_otro_texto():
+    """Dos arreglos del 11-10-2026 que no se ven desde la API.
+
+    1. LAS IMAGENES, DE UNA EN UNA EN TODO EL ESTUDIO: con un trabajo por
+       video, nada impedia dibujar en dos videos a la vez (regla 2).
+    2. LA NOTA DE UNA FRASE QUE YA NO SE DICE no se pega al plano nuevo con el
+       mismo numero: el S004 nuevo salia retocando la imagen vieja de S004.
+    """
+    seccion("EL TURNO DE LAS IMAGENES Y LAS NOTAS DE OTRA FRASE (11-10)")
+    import threading                                          # noqa: PLC0415
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo.trabajos import Cancelado                     # noqa: PLC0415
+
+    class _Bitacora:
+        def __init__(self):
+            self.eventos = []
+
+        def anotar(self, evento, paso, datos=None, unidad=None):
+            self.eventos.append((evento, paso, datos))
+
+    class _Ctx:
+        def __init__(self, nombre, params=None):
+            self.id = nombre
+            self.proyecto = type("P", (), {"config": {"nombre": nombre}})()
+            self.bitacora = _Bitacora()
+            self._params = params or {}
+            self.escrito = []
+            self.estado = self
+
+        def params(self, paso):
+            return self._params.get(paso) or {}
+
+        def actualizar_params(self, paso, nuevos, del_propio_paso=False):
+            self.escrito.append((paso, nuevos, del_propio_paso))
+            actual = self._params.setdefault(paso, {})
+            actual.setdefault("unidades", {}).update(nuevos.get("unidades") or {})
+
+    # 1. EL TURNO
+    cerrojo = servidor._TURNO_IMAGENES["cerrojo"]
+    otro = _Ctx("Vídeo A")
+    mensajes, hecho = [], []
+    cerrojo.acquire()
+    servidor._TURNO_IMAGENES["quien"] = "Vídeo A"
+    hilo = threading.Thread(target=lambda: hecho.append(servidor._con_turno_de_imagenes(
+        lambda v, m="", p="": mensajes.append(m), _Ctx("Vídeo B"), lambda: "dibujado")))
+    hilo.start()
+    time.sleep(4)
+    ok(not hecho, "con otro vídeo dibujando, este espera su turno")
+    ok(any("Vídeo A" in m for m in mensajes),
+       f"y la barra dice a quién espera ({mensajes[:1]})")
+    servidor._TURNO_IMAGENES["quien"] = ""
+    cerrojo.release()
+    hilo.join(10)
+    igual(hecho, ["dibujado"], "al soltarse el turno, dibuja")
+    ok(not cerrojo.locked(), "y al acabar lo suelta")
+
+    def _cancelado(*_a):
+        raise Cancelado("parado")
+    cerrojo.acquire()
+    try:
+        servidor._con_turno_de_imagenes(_cancelado, otro, lambda: "no")
+        ok(False, "parar mientras espera turno corta la espera")
+    except Cancelado:
+        ok(True, "parar mientras espera turno corta la espera")
+    finally:
+        cerrojo.release()
+    ok(not cerrojo.locked(), "y no se queda con el turno")
+
+    # 2. LAS NOTAS DE OTRA FRASE
+    viejo = {"escenas": [{"id": "S001", "narracion": "Hola a todos"},
+                         {"id": "S002", "narracion": "La cocina tiene una isla"},
+                         {"id": "S003", "narracion": "Y aquí el baño"},
+                         {"id": "S004", "narracion": "Hasta la próxima"}]}
+    nuevo = {"escenas": [{"id": "S001", "narracion": "¡Hola a TODOS!"},
+                         {"id": "S002", "narracion": "Mario Kart es el más vendido"},
+                         {"id": "S003", "narracion": "Un tramo nuevo en medio"},
+                         {"id": "S004", "narracion": "Y aquí el baño"},
+                         {"id": "S005", "narracion": "Hasta la próxima"}]}
+    params = {
+        "assets": {"unidades": {
+            "escena:S001": {"feedback": "más luz", "direccion": "plano medio"},
+            "escena:S002": {"feedback": "que aparezca un gato", "alcance": "retoque",
+                            "direccion": "cocina"},
+            "escena:S003": {"feedback": "el baño más luminoso", "direccion": "baño"},
+            "escena:S004": {"direccion": "despedida"}}},
+        "callouts": {"unidades": {
+            "escena:S002": {"subtitulo_texto": "La cocina tiene una isla.", "evitar": [1]}}}}
+    ctx = _Ctx("Vídeo C", params)
+    plan_actual = servidor.PASOS_MODULOS.p6_assets.plan_actual
+    plan_de_planos = servidor._plan_de_planos
+    try:
+        servidor.PASOS_MODULOS.p6_assets.plan_actual = lambda *a, **k: viejo
+        servidor._plan_de_planos = lambda *a, **k: nuevo
+        quitados = servidor._retirar_lo_de_otro_texto(ctx)
+    finally:
+        servidor.PASOS_MODULOS.p6_assets.plan_actual = plan_actual
+        servidor._plan_de_planos = plan_de_planos
+    igual(quitados, ["escena:S002", "escena:S003"], "solo los planos cuya frase cambia "
+          "(S001 dice lo mismo con otros signos y se queda)")
+    unidades = ctx.params("assets")["unidades"]
+    igual(unidades["escena:S002"], {"direccion": "cocina"},
+          "al S002 nuevo no le llega la nota del viejo (ni su retoque), y conserva lo demás")
+    igual(unidades["escena:S001"].get("feedback"), "más luz", "el S001 conserva la suya")
+    igual(unidades["escena:S003"], {"direccion": "baño"}, "el S003 nuevo (otra frase) se queda sin ella")
+    igual(unidades["escena:S004"], {"direccion": "despedida", "feedback": "el baño más luminoso"},
+          "y la nota se MUDA con su frase: «Y aquí el baño» ahora es el S004")
+    igual(ctx.params("callouts")["unidades"]["escena:S002"], {"evitar": [1]},
+          "ni el subtítulo escrito para la frase de antes")
+    igual(sorted(p for p, _n, _d in ctx.escrito), ["assets", "callouts"],
+          "y se escribe una vez por paso")
+    ok(all(d for p, _n, d in ctx.escrito if p == "assets"),
+       "las de las imágenes, como cambio de la propia tanda (no salen obsoletas al terminar)")
+    ctx2 = _Ctx("Vídeo C2", {"assets": {"unidades": {
+        "escena:S002": {"feedback": "que aparezca un gato"}}}})
+    try:
+        servidor.PASOS_MODULOS.p6_assets.plan_actual = lambda *a, **k: viejo
+        servidor._plan_de_planos = lambda *a, **k: nuevo
+        igual(servidor._retirar_lo_de_otro_texto(ctx2, en_cola={"S002"}), [],
+              "una nota que está en la cola de imágenes no se toca: es de ahora")
+    finally:
+        servidor.PASOS_MODULOS.p6_assets.plan_actual = plan_actual
+        servidor._plan_de_planos = plan_de_planos
+    sin_nada = _Ctx("Vídeo D", {"assets": {"unidades": {"escena:S001": {"direccion": "x"}}}})
+    igual(servidor._retirar_lo_de_otro_texto(sin_nada), [], "sin notas no hay nada que mirar")
+    igual(sin_nada.escrito, [], "ni que escribir")
+
+
 def probar_traer_estilo(cliente):
     """Un video se queda con la copia del estilo; esto la trae cuando se pide.
 
@@ -3900,6 +4257,190 @@ def probar_taller_oculto(cliente):
           "pero sigue abriendose por su id: es donde corre la generacion")
 
 
+def probar_laminas(cliente):
+    """Las laminas de un estilo: se ven, se quitan, se devuelven, y con limites.
+
+    No se dibuja nada (no hay clave de OpenAI): se prueba lo que decide ANTES
+    de gastar y lo que no gasta -- quitar y devolver una lamina ya dibujada
+    rehacen la lista de referencias sin pagar ninguna imagen.
+    """
+    seccion("MODO LIGHT: LAS LAMINAS DEL ESTILO")
+    respuesta, datos = cliente.post("/api/proyectos", {"nombre": "taller con laminas"})
+    tid = (datos.get("proyecto") or {}).get("id") or ""
+    config = os.path.join(cliente.carpeta, tid, "proyecto.json")
+    with open(config, "r", encoding="utf-8") as fh:
+        ficha = json.load(fh)
+    ficha["taller_de_preset"] = True
+    with open(config, "w", encoding="utf-8") as fh:
+        json.dump(ficha, fh)
+    dibujadas = os.path.join(cliente.carpeta, tid, "estilo", "dibujadas")
+    os.makedirs(dibujadas, exist_ok=True)
+    from PIL import Image
+    ejes = ["cara", "cuerpos", "interior", "exterior", "objeto", "diagrama"]
+    for indice, eje in enumerate(ejes):
+        Image.new("RGB", (64, 40), (indice * 30, 90, 160)).save(
+            os.path.join(dibujadas, f"{eje}.png"))
+    aportadas = os.path.join(cliente.carpeta, tid, "estilo", "aportadas")
+    os.makedirs(aportadas, exist_ok=True)
+    Image.new("RGB", (64, 40), (10, 10, 10)).save(os.path.join(aportadas, "01_a.png"))
+
+    respuesta, datos = cliente.post("/api/presets-canal", {
+        "tipo": "canal", "nombre": "Canal con laminas",
+        "datos": {"guion": {"idiomas_salida": ["es"]},
+                  "origen": {"estilo_prompt": "dibujo plano y limpio",
+                             "estilo_imagenes": ["a.png"],
+                             "tono_prompt": "serio pero cercano",
+                             "voz_prompt": "grave y pausada", "taller": tid}}})
+    pid = (datos.get("preset") or {}).get("id") or ""
+    ok(bool(pid), "se crea un estilo descrito con su taller")
+
+    respuesta, datos = cliente.get(f"/api/presets-light/{pid}/laminas")
+    igual(respuesta.status_code, 200, "las laminas se piden")
+    igual([l["id"] for l in datos.get("laminas") or []], ejes,
+          "un estilo sin tocar tiene las seis de fabrica, en orden")
+    ok(all(l.get("explicacion") and l.get("url") for l in datos["laminas"]),
+       "cada una dice que ensena y tiene su imagen limpia")
+    igual(datos.get("max"), 8, "caben 8: las de la hoja de cada plano")
+    ok(datos.get("usd_por_lamina") is not None, "y dice lo que cuesta dibujar una")
+    url = datos["laminas"][0]["url"]
+    respuesta = cliente.sesion.get(f"{cliente.base}{url}", timeout=30)
+    igual(respuesta.status_code, 200, "la imagen limpia se sirve")
+
+    respuesta, _ = cliente.post(f"/api/presets-light/{pid}/laminas",
+                                {"accion": "inventada"})
+    igual(respuesta.status_code, 400, "una accion inventada es un 400")
+    respuesta, _ = cliente.post(f"/api/presets-light/{pid}/laminas",
+                                {"accion": "nueva", "texto": "una"})
+    igual(respuesta.status_code, 400, "una lamina nueva sin decir que ensena, 400")
+    respuesta, _ = cliente.post(f"/api/presets-light/{pid}/laminas",
+                                {"accion": "quitar", "lamina": "../x"})
+    igual(respuesta.status_code, 400, "un nombre de lamina raro, 400")
+
+    respuesta, datos = cliente.get(f"/api/presets-light/{pid}/aportadas")
+    igual([x["nombre"] for x in datos.get("imagenes") or []], ["a.png"],
+          "la ficha ve las imagenes de referencia que ya tiene, sin el «NN_»")
+    respuesta = cliente.sesion.get(f"{cliente.base}{datos['imagenes'][0]['url']}",
+                                   timeout=30)
+    igual(respuesta.status_code, 200, "y las sirve")
+    respuesta, datos = cliente.put(f"/api/presets-light/{pid}/aportadas", {
+        "descripciones": {"a.png": "la luz de esta", "otra.png": "no esta"},
+        "destacadas": ["a.png", "otra.png"]})
+    igual(respuesta.status_code, 200, "describirlas se guarda sin regenerar")
+    origen = ((datos.get("preset") or {}).get("datos") or {}).get("origen") or {}
+    igual(origen.get("estilo_descripciones"), {"a.png": "la luz de esta"},
+          "solo de imagenes que estan")
+    igual(origen.get("estilo_destacadas"), ["a.png"], "y la ★ igual")
+    igual(origen.get("taller"), tid, "sin perder el taller")
+
+    respuesta, datos = cliente.post(f"/api/presets-light/{pid}/laminas",
+                                    {"accion": "hoja", "hoja": "repartida"})
+    igual(respuesta.status_code, 202, "cambiar la hoja se acepta")
+    igual(datos.get("trabajo_id"), "", "y no lanza nada: no se dibuja")
+    respuesta, datos = cliente.get(f"/api/presets-light/{pid}/laminas")
+    igual(datos.get("hoja"), "repartida", "la hoja queda guardada en el estilo")
+
+    respuesta, datos = cliente.post(f"/api/presets-light/{pid}/laminas",
+                                    {"accion": "quitar", "lamina": "diagrama"})
+    igual(respuesta.status_code, 202, "quitar una lamina lanza el rehacer")
+    igual(datos.get("imagenes"), 0, "y no paga ninguna imagen")
+    igual((datos.get("plan") or {}).get("imagenes"), 0,
+          "y la pantalla de generando tampoco dice que vaya a pagar seis")
+    fin = esperar_trabajo(cliente, datos.get("trabajo_id"))
+    igual(fin.get("estado"), "listo",
+          f"y termina bien ({fin.get('error') or ''})")
+    with open(os.path.join(cliente.carpeta, tid, "estado.json"), encoding="utf-8") as fh:
+        estado = json.load(fh)
+    refs = ((((estado.get("pasos") or {}).get("assets") or {}).get("params") or {}
+             ).get("estilo") or {}).get("referencias") or []
+    igual([os.path.basename(r) for r in refs], [f"{e}.png" for e in ejes[:5]],
+          "la quitada sale de las referencias y las otras siguen en orden")
+    ok(os.path.isfile(os.path.join(dibujadas, "diagrama.png")),
+       "y su imagen se queda en el disco para devolverla gratis")
+    respuesta, datos = cliente.get(f"/api/presets-light/{pid}/laminas")
+    igual([l["id"] for l in datos.get("quitadas") or []], ["diagrama"],
+          "el estilo recuerda cual se quito")
+
+    respuesta, datos = cliente.post(f"/api/presets-light/{pid}/laminas",
+                                    {"accion": "restaurar", "lamina": "diagrama"})
+    igual(datos.get("imagenes"), 0, "devolverla tampoco paga: ya estaba dibujada")
+    fin = esperar_trabajo(cliente, datos.get("trabajo_id"))
+    igual(fin.get("estado"), "listo",
+          f"y termina bien ({fin.get('error') or ''})")
+    respuesta, datos = cliente.get(f"/api/presets-light/{pid}/laminas")
+    igual(len(datos.get("laminas") or []), 6, "y vuelve a haber seis")
+    cliente.delete(f"/api/presets-light/{pid}")
+
+
+def probar_sonido_propio_y_cola(cliente):
+    """Tu musica y tus efectos, la cola de imagenes y el motor ante el filtro."""
+    seccion("SONIDO PROPIO, COLA DE IMAGENES Y FILTRO DE SEGURIDAD")
+    carpeta = tempfile.mkdtemp(prefix="estudio_audio_")
+    mp3 = os.path.join(carpeta, "mio.mp3")
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
+                    "sine=frequency=330:duration=2", mp3], check=True)
+    for familia, servida in (("efectos", "/api/efectos/"), ("musica", "/api/musica/propia/")):
+        with open(mp3, "rb") as fh:
+            r = cliente.sesion.post(f"{cliente.base}/api/sonido/subir?familia={familia}",
+                                    files={"audio": ("mio.mp3", fh, "audio/mpeg")}, timeout=60)
+        igual(r.status_code, 201, f"se sube un audio propio para {familia}")
+        ficha = (r.json() or {}).get("ficha") or {}
+        igual(ficha.get("fuente"), "propia", "y queda como audio propio")
+        ok(abs(float(ficha.get("duracion") or 0) - 2.0) < 0.3, "con su duracion medida")
+        r = cliente.sesion.get(cliente.base + ficha.get("muestra", ""), timeout=30)
+        igual(r.status_code, 200, f"y se puede escuchar ({ficha.get('muestra')})")
+    r = cliente.sesion.post(f"{cliente.base}/api/sonido/subir?familia=musica",
+                            files={"audio": ("nota.txt", b"hola", "text/plain")}, timeout=30)
+    igual(r.status_code, 400, "un fichero que no es audio se rechaza con su motivo")
+    respuesta, datos = cliente.post("/api/efectos/buscar", {"texto": "whoosh"})
+    ok(respuesta.status_code in (200, 502), "buscar efectos sin clave o sin red no rompe nada")
+    shutil.rmtree(carpeta, ignore_errors=True)
+
+    respuesta, datos = cliente.post("/api/proyectos", {"nombre": "cola de imagenes"})
+    pid = (datos.get("proyecto") or {}).get("id") or ""
+    respuesta, datos = cliente.get(f"/api/proyectos/{pid}/imagenes/cola")
+    igual(respuesta.status_code, 200, "la cola de imagenes se consulta")
+    igual(datos.get("cola"), [], "y empieza vacia")
+    respuesta, datos = cliente.post(f"/api/proyectos/{pid}/imagenes/rehacer", {})
+    igual(respuesta.status_code, 400, "sin notas pendientes no se lanza nada")
+    respuesta, datos = cliente.post(f"/api/proyectos/{pid}/imagenes/rehacer",
+                                    {"notas": ["R999"], "desde_cero": True})
+    igual(respuesta.status_code, 400, "«desde cero» de una nota que no existe tampoco")
+    respuesta, datos = cliente.get(f"/api/proyectos/{pid}/subtitulos/rotos")
+    igual(respuesta.status_code, 200, "se puede preguntar si los subtitulos tienen tildes rotas")
+    igual(datos.get("planos"), 0, "y un video sin montar no tiene ninguno")
+
+    # EL MOTOR ANTE EL FILTRO DE SEGURIDAD (con el motor falso)
+    sys.path.insert(0, os.path.join(RAIZ_ESTUDIO, "pasos"))
+    import importlib.util
+    os.environ["ESTUDIO_IMAGEN_FALSA"] = "1"
+    os.environ.setdefault("OPENAI_API_KEY", "sk-falsa")
+    spec = importlib.util.spec_from_file_location(
+        "imagen_prueba", os.path.join(RAIZ_ESTUDIO, "motores", "imagen_openai", "imagen.py"))
+    imagen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(imagen)
+    import sin_marcas
+    sin_marcas.cli_claude = None            # solo la tabla: sin CLI ni red
+    ref = os.path.join(tempfile.mkdtemp(prefix="estudio_ref_"), "ref.png")
+    from PIL import Image
+    Image.new("RGB", (64, 64), (10, 20, 30)).save(ref)
+    try:
+        png, meta = imagen.generar("father and son playing Mario Kart on a Nintendo Switch",
+                                   [ref], quality="low")
+        ok(png[:4] == b"\x89PNG" and meta.get("sin_marcas"),
+           "con marcas: el filtro la rechaza, se reescribe sola y sale")
+        ultima = list(imagen.REESCRITURAS.values())[-1]
+        ok(any("Mario Kart" in a for a, _b in ultima.get("cambios") or []),
+           "y apunta que cambio (para contarlo en la nota)")
+        try:
+            imagen.generar("a big PROHIBIDO sign", [ref], quality="low")
+            ok(False, "lo que no se arregla quitando marcas se rechaza")
+        except imagen.RechazoSeguridad as fallo:
+            ok("filtro de seguridad" in str(fallo), "lo que no se arregla quitando marcas "
+               "sale como RechazoSeguridad, en claro")
+    finally:
+        os.environ.pop("ESTUDIO_IMAGEN_FALSA", None)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
     parser.add_argument("--conservar", action="store_true",
@@ -3924,6 +4465,8 @@ def main():
         probar_voz(cliente, pid)
         probar_regrabar_y_estructura(cliente, carpeta)
         probar_pausas(cliente, carpeta)
+        probar_presencia_musica(cliente, carpeta)
+        probar_ronda_octubre(cliente, carpeta)
         probar_bitacora(cliente, pid)
         probar_presets_canal(cliente)
         probar_modo_light(cliente)
@@ -3934,6 +4477,8 @@ def main():
         probar_escucha_de_voz_light(cliente)
         probar_muestras_recuperadas(cliente)
         probar_imagenes_de_apoyo(cliente)
+        probar_laminas(cliente)
+        probar_sonido_propio_y_cola(cliente)
         probar_taller_oculto(cliente)
         probar_cartelas_y_transiciones(cliente, pid, os.path.join(carpeta, pid))
         probar_direccion(cliente, pid)
@@ -3949,6 +4494,8 @@ def main():
         probar_asistente(cliente)
         probar_la_foto_del_asistente(cliente, pid)
         probar_onboarding(cliente)
+        probar_turno_y_notas_de_otro_texto()
+        probar_coste_en_detalle(cliente, pid)
         probar_sistema(cliente)
         probar_lo_que_lleva(cliente)
         probar_salud_de_las_cuentas(cliente)

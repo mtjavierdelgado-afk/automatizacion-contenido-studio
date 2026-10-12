@@ -135,6 +135,38 @@ scp -r . root@IP:/root/asvs-prueba
 ssh root@IP "cd /root/asvs-prueba && bash instalar.sh"
 ```
 
+## La prueba real: `asvs probar`
+
+`herramientas/prueba_real.py`, lanzada como el usuario del servicio y con su
+entorno. Crea un vídeo de prueba de 30 s en calidad baja **con las claves de
+verdad** (OpenAI, Cartesia, Jamendo, FreeSound y la cuenta de Claude), lo
+lleva hasta el MP4, rehace dos imágenes con notas («Rehacer» y «Desde cero») y
+comprueba sola: que cada paso termina, que el MP4 dura lo que la voz y lleva
+sonido, que no hay letras rotas, que lo gastado cuadra con lo prometido y nada
+se pagó dos veces, y —con Claude mirando las imágenes— si cada nota se aplicó y
+si el guion es fiel al material. Gasta ~0,6-1 $ y tarda 15-25 minutos. No toca
+ningún vídeo existente. El informe sale en la consola y queda en
+`<proyectos>/_sistema/pruebas_reales/`. Se lanza antes de unir una rama a `main`
+(después de `ASVS_RAMA=<rama> asvs actualizar`).
+
+**Corre desligada de la consola** (`setsid nohup`): la consola web de Hostinger
+se corta a menudo, y un corte mataba la prueba. `asvs probar` solo va
+enseñando su registro (`registro.log` en esa carpeta); si la consola se cae, la
+prueba sigue. Volver a escribir `asvs probar`:
+
+- si sigue corriendo, la vuelve a enseñar;
+- si se paró (un reinicio, un fallo), la **retoma**: guarda su estado tras cada
+  paso en `en_curso.json`, no relanza lo ya lanzado (espera a ESE trabajo),
+  mide el gasto contra lo prometido y lo gastado ANTES de lanzarlo (guardados),
+  y no vuelve a pedir una nota ya pedida. Las comprobaciones de solo lectura
+  (el MP4, las letras, el guion) se repiten enteras.
+- `asvs probar nueva` empieza otra aunque haya una a medias.
+
+Una prueba cortada con la versión anterior (sin `en_curso.json`) también se
+retoma: se adopta el vídeo «Prueba real …» más nuevo sin informe. Lo único que
+no se puede medir es el gasto de las tandas hechas antes del corte (sale como
+aviso); que ninguna imagen se pagó dos veces sí se comprueba.
+
 ## Lo único del código que la aplicación reescribe
 
 `motores/reglas/reglas.json` — las reglas de dibujo que el destilador aprende de

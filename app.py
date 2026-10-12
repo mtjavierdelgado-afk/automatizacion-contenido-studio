@@ -34,10 +34,12 @@ import asyncio
 import copy
 import hashlib
 import inspect
+import html as html_lib
 import json
 import mimetypes
 import os
 import re
+import unicodedata
 import shutil
 import sys
 import threading
@@ -87,6 +89,15 @@ sys.path.insert(0, os.path.join(RAIZ_ESTUDIO, "pasos"))
 import ajustes as AJUSTES  # noqa: E402
 import cli_claude as CLI_CLAUDE  # noqa: E402
 import estadisticas as ESTADISTICAS  # noqa: E402
+import clientes as CLIENTES  # noqa: E402
+
+# LA HORA DE LA REGION, para todo el proceso y desde el arranque: lo que el
+# servidor apunta con hora (chat, videos, notas) sale ya en la zona elegida en
+# Configuracion. Sin elegir, la del servidor. Ver `ajustes.aplicar_zona`.
+try:
+    AJUSTES.aplicar_zona()
+except Exception:  # noqa: BLE001 -- una zona rota no puede tumbar el arranque
+    pass
 
 
 def comun_tokens(sobre):
@@ -184,7 +195,11 @@ def contexto(pid):
     clave = str(pid or "")
     # el id llega por URL y se convierte en ruta: solo se acepta la forma que
     # produce identificador(), asi que no hay manera de salir de la carpeta base
-    if not ID_VALIDO.match(clave):
+    # LAS CARPETAS CON «_» DELANTE SON DEL SISTEMA (_sistema, _papelera,
+    # _asistente...) y un proyecto nunca se llama asi (`identificador` lo
+    # quita). Abrirlas como proyecto les escribia un proyecto.json y salian en
+    # «Tus vídeos» como videos rotos.
+    if not ID_VALIDO.match(clave) or clave.startswith("_"):
         raise ErrorApi(404, f"proyecto desconocido: {pid!r}")
     with _LOCK:
         existente = _CONTEXTOS.get(clave)
@@ -231,7 +246,7 @@ def modulo_de(paso_id):
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
     modulo = PASOS_MODULOS.modulo_de(paso_id)
     if modulo is None or not hasattr(modulo, "ejecutar"):
-        raise ErrorApi(501, f"el paso '{paso_id}' no tiene implementacion")
+        raise ErrorApi(501, f"el paso '{paso_id}' no tiene implementación")
     return modulo
 
 
@@ -304,6 +319,65 @@ def _motores_congelados():
         yield
 
 
+#: LAS IMAGENES SE DIBUJAN DE UNA EN UNA EN TODO EL ESTUDIO (regla 2 de
+#: CLAUDE.md): dos tandas a la vez tardan el doble por imagen y pierden el
+#: registro del gasto. Con un trabajo por video, nada impedia dibujar en dos
+#: videos a la vez (11-10-2026: el dueño queria trabajar en otro video mientras
+#: uno se montaba). Montar, la voz y el guion SI van en paralelo; dibujar espera
+#: su turno aqui, con la barra diciendo a quien espera.
+_TURNO_IMAGENES = {"cerrojo": threading.Lock(), "quien": ""}
+
+
+def _con_turno_de_imagenes(avisar, ctx, funcion):
+    """Corre `funcion()` con el turno de dibujar. Espera si otro video dibuja."""
+    cerrojo = _TURNO_IMAGENES["cerrojo"]
+    avisado = False
+    while not cerrojo.acquire(timeout=3):
+        quien = _TURNO_IMAGENES["quien"] or "otro vídeo"
+        # avisar LANZA Cancelado si se pide parar: la espera se puede cancelar
+        frase = f"esperando turno: se están dibujando las imágenes de «{quien}»"
+        try:
+            avisar(0.0, frase, publico=frase)
+        except TypeError:
+            avisar(0.0, frase)        # un avisar sin «publico» (las tareas del estilo)
+        if not avisado:
+            ctx.bitacora.anotar("turno_imagenes", "assets", {"espera_a": quien})
+            avisado = True
+    try:
+        _TURNO_IMAGENES["quien"] = (ctx.proyecto.config or {}).get("nombre") or ctx.id
+        return funcion()
+    finally:
+        _TURNO_IMAGENES["quien"] = ""
+        cerrojo.release()
+
+
+def _medido_en(paso, unidad=None):
+    """Lo que gaste esta funcion de trabajo se apunta en SU proyecto.
+
+    Solo habia contexto de coste dentro del `ejecutar` de cada paso del grafo:
+    regrabar un tramo de la voz, el taller de un estilo (laminas, guia, voz) y
+    el moodboard gastaban FUERA de el, y ese gasto se perdia o se cargaba al
+    video que estuviera corriendo a la vez (11-10-2026)."""
+    def decorador(funcion):
+        def envuelta(avisar, ctx, *args, **kwargs):
+            with COSTE.contexto(ctx.proyecto, paso, unidad):
+                return funcion(avisar, ctx, *args, **kwargs)
+        envuelta.__name__ = funcion.__name__
+        envuelta.__doc__ = funcion.__doc__
+        return envuelta
+    return decorador
+
+
+def _con_turno(funcion):
+    """Para las funciones de trabajo que DIBUJAN fuera de `assets` (las laminas
+    de un estilo, el moodboard): tambien esperan su turno (regla 2)."""
+    def envuelta(avisar, ctx, *args, **kwargs):
+        return _con_turno_de_imagenes(avisar, ctx, lambda: funcion(avisar, ctx, *args, **kwargs))
+    envuelta.__name__ = funcion.__name__
+    envuelta.__doc__ = funcion.__doc__
+    return envuelta
+
+
 def _correr_paso(avisar, ctx, paso_id, unidades, opciones=None):
     """Ejecuta un paso y lo versiona. Es la funcion que corre en el hilo.
 
@@ -318,12 +392,15 @@ def _correr_paso(avisar, ctx, paso_id, unidades, opciones=None):
     extra = {k: v for k, v in (opciones or {}).items() if k in admitidas}
     # Los motores de `motores/` se recargan solos cuando cambian, pero NO a
     # media tanda: dentro de esto quedan congelados (ver medios.trabajo_en_curso)
-    with _motores_congelados():
-        if _acepta_unidades(modulo):
-            resultado = modulo.ejecutar(ctx.proyecto, params, avisar,
-                                        unidades=unidades, **extra)
-        else:
-            resultado = modulo.ejecutar(ctx.proyecto, params, avisar, **extra)
+    def correr():
+        with _motores_congelados():
+            if _acepta_unidades(modulo):
+                return modulo.ejecutar(ctx.proyecto, params, avisar,
+                                       unidades=unidades, **extra)
+            return modulo.ejecutar(ctx.proyecto, params, avisar, **extra)
+
+    resultado = (_con_turno_de_imagenes(avisar, ctx, correr) if paso_id == "assets"
+                 else correr())
 
     salidas, mapa = _desmontar(modulo, resultado)
 
@@ -433,8 +510,8 @@ def _comprobar_unidades(ctx, paso_id, unidades):
         except Exception:  # noqa: BLE001 - un plan ilegible no anula la validacion
             pass
     if not declaradas:
-        raise ErrorApi(409, f"el paso '{paso_id}' todavia no declara unidades: "
-                            f"ejecutalo entero una vez antes de pedir unidades sueltas")
+        raise ErrorApi(409, f"el paso '{paso_id}' todavía no declara unidades: "
+                            f"ejecútalo entero una vez antes de pedir unidades sueltas")
     desconocidas = [u for u in unidades if u not in declaradas]
     if desconocidas:
         muestra = sorted(declaradas)[:12]
@@ -482,7 +559,7 @@ def _unidades_que_faltan(ctx, paso_id, modulo):
     try:
         faltan = calcular(ctx.proyecto, ctx.estado.params(paso_id) or {})
     except Exception as fallo:  # noqa: BLE001
-        raise ErrorApi(500, f"no se ha podido mirar que falta: {fallo}")
+        raise ErrorApi(500, f"no se ha podido mirar qué falta: {fallo}")
     if faltan is None:
         return None                    # no hay nada empezado: retomar es ejecutar
     if not faltan:
@@ -523,11 +600,11 @@ def lanzar_paso(ctx, paso_id, unidades, nombre=None, evento="paso_lanzado",
     if estado_actual == "bloqueado":
         faltan = dependencias_que_faltan(ctx, paso_id)
         if faltan:
-            raise ErrorApi(409, f"'{paso_id}' esta bloqueado: falta ejecutar "
+            raise ErrorApi(409, f"'{paso_id}' está bloqueado: falta ejecutar "
                                 + ", ".join(faltan), {"faltan": faltan})
     activo = _trabajo_activo(ctx, paso_id)
     if activo is not None:
-        raise ErrorApi(409, f"'{paso_id}' ya se esta ejecutando",
+        raise ErrorApi(409, f"'{paso_id}' ya se está ejecutando",
                        {"trabajo_id": activo["id"], "progreso": activo["progreso"]})
 
     trabajo_id = ctx.gestor.lanzar(nombre or paso_id, _correr_paso, ctx, paso_id,
@@ -695,7 +772,7 @@ def ruta_segura(raiz, relativa):
     """Ruta dentro del proyecto; rechaza cualquier intento de salirse."""
     crudo = str(relativa or "").replace("\\", "/")
     if "\x00" in crudo:
-        raise ErrorApi(400, "ruta invalida")
+        raise ErrorApi(400, "ruta inválida")
     destino = os.path.realpath(os.path.join(raiz, crudo.lstrip("/")))
     base = os.path.realpath(raiz)
     # realpath resuelve '..' y los enlaces, asi que basta comparar el prefijo ya
@@ -836,8 +913,169 @@ def salud():
     }
 
 
+# --------------------------------------------------------- proyectos (clientes)
+#
+# Carpetas que agrupan estilos, y con ellos sus videos. Ver pasos/clientes.py:
+# ocultar y la clave son privacidad de pantalla, no seguridad.
+
+def _cliente_o_400(funcion):
+    try:
+        return funcion()
+    except CLIENTES.ErrorCliente as fallo:
+        raise ErrorApi(400, str(fallo))
+
+
+@app.get("/api/clientes")
+def listar_clientes():
+    """Los proyectos (clientes) y a cual pertenece cada estilo."""
+    return CLIENTES.listar(raiz_proyectos())
+
+
+@app.post("/api/clientes", status_code=201)
+def crear_cliente(cuerpo: dict = Body(default=None)):
+    """Un proyecto nuevo: {nombre}."""
+    datos = _cuerpo(cuerpo)
+    ficha = _cliente_o_400(lambda: CLIENTES.crear(raiz_proyectos(), datos.get("nombre")))
+    anotar_global("cliente_creado", {"id": ficha["id"]})
+    return {"cliente": ficha}
+
+
+@app.put("/api/clientes/{cid}")
+def cambiar_cliente(cid: str, cuerpo: dict = Body(default=None)):
+    """Renombra, oculta o pone clave: {nombre?, oculto?, clave?} ("" la quita)."""
+    datos = _cuerpo(cuerpo)
+    logo = False
+    if "logo" in datos:
+        logo = datos["logo"] or None
+        if logo is not None:
+            if not isinstance(logo, dict) or not _ruta_logo_suelto(logo.get("fichero")):
+                raise ErrorApi(400, "ese logo no está: súbelo primero (POST /api/logos)")
+    ficha = _cliente_o_400(lambda: CLIENTES.cambiar(
+        raiz_proyectos(), cid, nombre=datos.get("nombre"),
+        oculto=datos.get("oculto"), clave=datos.get("clave"), logo=logo))
+    return {"cliente": ficha}
+
+
+@app.delete("/api/clientes/{cid}")
+def borrar_cliente(cid: str):
+    """Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto."""
+    sueltos = _cliente_o_400(lambda: CLIENTES.borrar(raiz_proyectos(), cid))
+    anotar_global("cliente_borrado", {"id": cid, "estilos": len(sueltos)})
+    return {"borrado": cid, "estilos_sin_proyecto": sueltos}
+
+
+@app.post("/api/clientes/{cid}/abrir")
+def abrir_cliente(cid: str, cuerpo: dict = Body(default=None)):
+    """Comprueba la clave de un proyecto. 403 si no es."""
+    clave = str(_cuerpo(cuerpo).get("clave") or "")
+    if not _cliente_o_400(lambda: CLIENTES.abrir(raiz_proyectos(), cid, clave)):
+        raise ErrorApi(403, "esa no es la clave de este proyecto")
+    # el PASE que la pantalla manda en cada peticion para ver lo de dentro
+    return {"abierto": cid, "pase": CLIENTES.pase(raiz_proyectos(), cid)}
+
+
+@app.put("/api/clientes/videos/{video_id}")
+def asignar_video_a_cliente(video_id: str, cuerpo: dict = Body(default=None)):
+    """Mueve un video a otro proyecto ("" lo devuelve al de su estilo)."""
+    cid = str(_cuerpo(cuerpo).get("cliente") or "").strip()
+    _cliente_o_400(lambda: CLIENTES.asignar_video(raiz_proyectos(), video_id, cid))
+    return {"video": video_id, "cliente": cid}
+
+
+def _cerrados(peticion):
+    """Los proyectos con clave que quien pide no ha abierto."""
+    try:
+        return CLIENTES.cerrados_para(raiz_proyectos(),
+                                      peticion.headers.get("x-estudio-abiertos"))
+    except Exception:                                       # noqa: BLE001
+        return set()
+
+
+@app.put("/api/clientes/estilos/{preset_id}")
+def asignar_estilo_a_cliente(preset_id: str, cuerpo: dict = Body(default=None)):
+    """Mueve un estilo (y sus videos) a un proyecto: {cliente} ("" lo saca)."""
+    cid = str(_cuerpo(cuerpo).get("cliente") or "").strip()
+    _cliente_o_400(lambda: CLIENTES.asignar(raiz_proyectos(), preset_id, cid))
+    return {"estilo": preset_id, "cliente": cid}
+
+
+# ------------------------------------------- reparar imagenes de estilo perdidas
+
+def _herramienta(nombre):
+    """Una herramienta de `herramientas/` cargada como modulo (no es paquete)."""
+    import importlib.util
+    ruta = os.path.join(RAIZ_ESTUDIO, "herramientas", f"{nombre}.py")
+    spec = importlib.util.spec_from_file_location(f"herramienta_{nombre}", ruta)
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+@app.get("/api/sistema/estilos-perdidos")
+def estilos_perdidos():
+    """Los videos que apuntan a imagenes de estilo que ya no estan. Solo mira.
+
+    Pasaba al volver a guardar un estilo (los nombres cambiaban y la carpeta se
+    vaciaba). Desde el 10-10-2026 no puede volver a pasar, pero los videos que
+    se rompieron antes siguen rotos hasta repararlos (`reparar_estilo`).
+    """
+    diag = _herramienta("diagnostico_estilo")
+    salida = []
+    for ficha in Proyecto.listar(raiz_proyectos()):
+        if ficha.get(CONFIG_TALLER):
+            continue
+        rotas = diag.revisar(ficha.get("raiz"))
+        if rotas:
+            salida.append({
+                "id": ficha.get("id"), "nombre": ficha.get("nombre"),
+                "rotas": [{"ruta": r, "en_disco": c} for _p, _c, r, c in rotas],
+                "reparable": all(c for _p, _c, _r, c in rotas)})
+    return {"videos": salida}
+
+
+@app.post("/api/proyectos/{pid}/reparar-estilo")
+def reparar_estilo(pid: str, cuerpo: dict = Body(default=None)):
+    """Repunta las imagenes de estilo perdidas a las que SI estan. No regenera.
+
+    Usa `herramientas/mudar_proyecto.py`, que muda las rutas y RE-SELLA solo lo
+    que la mudanza movio (ver «Copiar un proyecto...» en CLAUDE.md): lo ya
+    pagado sigue al dia. Con {"aplicar": false} es un simulacro y no escribe.
+    """
+    ctx = contexto(pid)
+    aplicar = bool(_cuerpo(cuerpo).get("aplicar"))
+    if any(f.get("paso") for f in ctx.gestor.listar(activos=True)):
+        raise ErrorApi(409, "este vídeo tiene algo en marcha: repáralo cuando termine")
+    diag = _herramienta("diagnostico_estilo")
+    rotas = diag.revisar(ctx.proyecto.raiz)
+    if not rotas:
+        return {"reparado": False, "motivo": "no le falta ninguna imagen de estilo"}
+    if not all(c for _p, _c, _r, c in rotas):
+        raise ErrorApi(409, "hay imágenes perdidas sin otra que las sustituya: "
+                            "pídele ayuda al asistente")
+    reglas = [(r, c) for _p, _c, r, c in rotas]
+    mudar = _herramienta("mudar_proyecto")
+    import contextlib
+    import io as _io
+    salida = _io.StringIO()
+    with _LOCK:
+        with contextlib.redirect_stdout(salida):
+            mudar.mudar_objetivo(ctx.proyecto.raiz, reglas, aplicar, [])
+        if aplicar:
+            # el contexto en memoria leyo el estado de antes: se suelta y la
+            # siguiente peticion lo vuelve a abrir con el de ahora
+            _CONTEXTOS.pop(ctx.id, None)
+    if aplicar:
+        anotar_global("estilo_reparado", {"proyecto": ctx.id, "rutas": len(reglas)})
+        nuevo = contexto(pid)
+        estados = {p["id"]: nuevo.estado.estado_de(p["id"]) for p in PASOS}
+    else:
+        estados = {}
+    return {"reparado": aplicar, "reglas": [{"de": r, "a": c} for r, c in reglas],
+            "informe": salida.getvalue()[-4000:], "estados": estados}
+
+
 @app.get("/api/proyectos")
-def listar_proyectos():
+def listar_proyectos(peticion: Request):
     """Proyectos disponibles, del mas reciente al mas antiguo.
 
     Sin los TALLERES de los presets del modo light. No son videos: son la
@@ -847,8 +1085,15 @@ def listar_proyectos():
     en el disco y se borran con su preset (`DELETE /api/presets-light/{id}`).
     """
     fichas = []
+    cerrados = _cerrados(peticion)
+    asignaciones = CLIENTES._leer(raiz_proyectos()) if cerrados else None
     for ficha in Proyecto.listar(raiz_proyectos()):
         if ficha.get(CONFIG_TALLER):
+            continue
+        # LO DE UN PROYECTO CON CLAVE no se lista a quien no lo ha abierto
+        if cerrados and CLIENTES.cliente_de(
+                raiz_proyectos(), ficha.get(CONFIG_ESTILO_LIGHT) or "",
+                ficha.get("id"), datos=asignaciones) in cerrados:
             continue
         fichas.append({
             "id": ficha.get("id"),
@@ -881,7 +1126,7 @@ def crear_proyecto(cuerpo: dict = Body(default=None)):
     if not nombre:
         raise ErrorApi(400, "hace falta 'nombre' para crear el proyecto")
     if not identificador(nombre):
-        raise ErrorApi(400, f"'{nombre}' no da un identificador valido")
+        raise ErrorApi(400, f"'{nombre}' no da un identificador válido")
     os.makedirs(raiz_proyectos(), exist_ok=True)
     try:
         proyecto = Proyecto.crear(raiz_proyectos(), nombre)
@@ -932,7 +1177,7 @@ def duplicar_proyecto(pid: str, cuerpo: dict = Body(default=None)):
     datos = _cuerpo(cuerpo)
     nombre = str(datos.get("nombre") or "").strip() or f"Copia {ctx.proyecto.config.get('nombre') or ctx.id}"
     if not identificador(nombre):
-        raise ErrorApi(400, f"'{nombre}' no da un identificador valido")
+        raise ErrorApi(400, f"'{nombre}' no da un identificador válido")
     # NO SE DUPLICA CON UNA TANDA CORRIENDO. Un paso a medias escribe en
     # `trabajo/` y sella al terminar: copiar en mitad de eso da una copia que
     # dice «listo» de una version que todavia se estaba escribiendo.
@@ -992,6 +1237,10 @@ def _ficha_papelera(nombre):
         "actualizado": config.get("actualizado", ""),
         "apartado": marca.replace("T", " ") if marca else "",
         "raiz": carpeta,
+        # QUE ES, para la pantalla: el taller de un estilo vuelve CON su estilo
+        # (no se enseña suelto) y un vídeo se llama vídeo
+        "taller": bool(config.get("taller_de_preset")),
+        "video": bool(config.get(CONFIG_VIDEO_LIGHT)),
     }
 
 
@@ -1049,7 +1298,7 @@ def apartar_proyecto(pid: str):
     activos = [t for t in ctx.gestor.listar(activos=True)]
     if activos:
         raise ErrorApi(409, f"'{pid}' tiene {len(activos)} trabajo(s) en marcha: "
-                            f"cancelalos antes de apartarlo",
+                            f"cancélalos antes de apartarlo",
                        {"trabajos": [t.get("id") for t in activos]})
     origen = ctx.proyecto.raiz
     marca = time.strftime("%Y%m%dT%H%M%S")
@@ -1076,8 +1325,8 @@ def apartar_proyecto(pid: str):
     except OSError as fallo:
         raise ErrorApi(500, f"no se ha podido apartar el proyecto: {fallo}. "
                             f"Se ha insistido unos segundos y sigue tomado: mira "
-                            f"si tienes abierto algun fichero de {origen} en otro "
-                            f"programa (un video en un reproductor, una imagen en "
+                            f"si tienes abierto algún fichero de {origen} en otro "
+                            f"programa (un vídeo en un reproductor, una imagen en "
                             f"un editor) y vuelve a intentarlo")
     with _LOCK:
         _CONTEXTOS.pop(str(pid), None)
@@ -1089,10 +1338,10 @@ def apartar_proyecto(pid: str):
 def restaurar_proyecto(carpeta: str):
     """Devuelve a su sitio un proyecto apartado."""
     if not re.match(r"^[a-z0-9_]+__\d{8}T\d{6}$", str(carpeta or "")):
-        raise ErrorApi(404, f"no hay nada asi en la papelera: {carpeta!r}")
+        raise ErrorApi(404, f"no hay nada así en la papelera: {carpeta!r}")
     origen = os.path.join(raiz_papelera(), carpeta)
     if not os.path.isdir(origen):
-        raise ErrorApi(404, f"no hay nada asi en la papelera: {carpeta}")
+        raise ErrorApi(404, f"no hay nada así en la papelera: {carpeta}")
     pid = str(carpeta).rpartition("__")[0]
     destino = os.path.join(raiz_proyectos(), pid)
     if os.path.exists(destino):
@@ -1119,13 +1368,13 @@ def restaurar_proyecto(carpeta: str):
 def _carpeta_de_papelera(carpeta):
     """Ruta real de una carpeta de la papelera, validada. Nunca sale de ahi."""
     if not re.match(r"^[a-z0-9_]+__\d{8}T\d{6}$", str(carpeta or "")):
-        raise ErrorApi(404, f"no hay nada asi en la papelera: {carpeta!r}")
+        raise ErrorApi(404, f"no hay nada así en la papelera: {carpeta!r}")
     try:
         ruta = ruta_contenida(raiz_papelera(), str(carpeta))
     except ValueError as fallo:
         raise ErrorApi(400, str(fallo))
     if not os.path.isdir(ruta):
-        raise ErrorApi(404, f"no hay nada asi en la papelera: {carpeta}")
+        raise ErrorApi(404, f"no hay nada así en la papelera: {carpeta}")
     return ruta
 
 
@@ -1168,7 +1417,7 @@ def borrar_de_papelera(carpeta: str, confirmar: bool = Query(default=False)):
         shutil.rmtree(ruta)
     except OSError as fallo:
         raise ErrorApi(500, f"no se ha podido borrar: {fallo}. Suele ser que un "
-                            f"fichero del proyecto esta abierto en otro programa")
+                            f"fichero del proyecto está abierto en otro programa")
     # La bitacora global sobrevive al proyecto: es el unico sitio donde queda
     # constancia de que existio y de que se borro a proposito.
     anotar_global("proyecto_borrado",
@@ -1350,7 +1599,7 @@ def fijar_params(pid: str, paso: str, cuerpo: dict = Body(default=None)):
         # tragarselo como un parametro mas llamado "params" seria peor que fallar
         if not isinstance(datos["params"], dict):
             raise ErrorApi(400, "'params' debe ser un objeto, "
-                                f"llego {type(datos['params']).__name__}")
+                                f"llegó {type(datos['params']).__name__}")
         nuevos = datos["params"]
     else:
         nuevos = {k: v for k, v in datos.items() if k != "reemplazar"}
@@ -1423,7 +1672,7 @@ def ejecutar_paso(pid: str, paso: str, cuerpo: dict = Body(default=None)):
                                     {"propagar_dependencias": str(fallo)})
     elif datos.get("params") is not None:
         raise ErrorApi(400, "'params' debe ser un objeto, "
-                            f"llego {type(datos['params']).__name__}")
+                            f"llegó {type(datos['params']).__name__}")
     unidades = _plan_de_ejecucion(ctx, paso_id, datos)
     # Ajustes de ESTA invocacion. No son params y no mueven la firma: describen
     # como se corre esta vez, no que produce el paso.
@@ -1483,7 +1732,16 @@ def revertir_paso(pid: str, paso: str, cuerpo: dict = Body(default=None)):
     except (TypeError, ValueError):
         raise ErrorApi(400, f"'version' debe ser un entero, no {datos['version']!r}")
     if _trabajo_activo(ctx, paso_id):
-        raise ErrorApi(409, f"'{paso_id}' se esta ejecutando: no se puede revertir ahora")
+        raise ErrorApi(409, f"'{paso_id}' se está ejecutando: no se puede revertir ahora")
+    # NI CON OTRA COSA DEL VIDEO EN MARCHA: volver al guion de antes con la voz
+    # grabandose, o a otras imagenes con la cola de notas pendiente, deja lo que
+    # sale mezclado de dos versiones
+    with _COLA_LOCK:
+        cola = _COLA_NOTAS.get(ctx.id) or {}
+        cola_viva = bool(cola.get("cola") or cola.get("trabajo"))
+    if cola_viva or any(f.get("estado") in ("pendiente", "ejecutando")
+                        for f in ctx.gestor.listar(activos=True)):
+        raise ErrorApi(409, "el vídeo está trabajando: vuelve a la versión anterior cuando termine")
     try:
         ctx.estado.revertir(paso_id, numero)
     except ValueError as fallo:
@@ -1753,7 +2011,7 @@ def previsualizar_voz(pid: str, cuerpo: dict = Body(default=None)):
     try:
         segundos = float(datos.get("segundos") or 20)
     except (TypeError, ValueError):
-        raise ErrorApi(400, "'segundos' debe ser un numero")
+        raise ErrorApi(400, "'segundos' debe ser un número")
     if not 1 <= segundos <= 120:
         raise ErrorApi(400, "'segundos' debe estar entre 1 y 120")
 
@@ -1791,7 +2049,7 @@ def catalogo_voces_global(idioma: str = Query(default=None),
     # 500 sin texto: la pantalla se quedaba en «cargando tus voces...» sin decir
     # que lo que falta es la clave.
     except (Exception, SystemExit) as fallo:  # noqa: BLE001
-        raise ErrorApi(502, f"no se ha podido leer el catalogo de voces: {fallo}")
+        raise ErrorApi(502, f"no se ha podido leer el catálogo de voces: {fallo}")
     return {"voces": voces, "total": len(voces), "idioma": idioma,
             "solo_nativas": bool(nativas or solo_nativas)}
 
@@ -1804,6 +2062,7 @@ def catalogo_voces_global(idioma: str = Query(default=None),
 # toca los params, los rellena la interfaz y decide quien mira. La voz se paga
 # cada vez que se graba, asi que aplicar a ciegas son dos tomas en vez de una.
 
+@_medido_en("estilo")
 def _correr_voz_descrita(avisar, ctx, encargo, idioma, ajuste):
     if PASOS_MODULOS is None:
         raise RuntimeError(f"los pasos no se han podido cargar: {ERROR_PASOS}")
@@ -1825,7 +2084,7 @@ def describir_voz(pid: str, cuerpo: dict = Body(default=None)):
     datos = _cuerpo(cuerpo)
     encargo = str(datos.get("encargo") or "").strip()
     if not encargo:
-        raise ErrorApi(400, "hace falta describir como quieres que suene la voz")
+        raise ErrorApi(400, "hace falta describir cómo quieres que suene la voz")
     idioma = str(datos.get("idioma") or "").strip().lower()
     if not idioma and PASOS_MODULOS is not None:
         idioma = PASOS_MODULOS.p4_voz.idioma_de_salida(ctx.proyecto) or "es"
@@ -1878,6 +2137,7 @@ def _plan_regrabado(ctx, seccion_id=None):
     return plan
 
 
+@_medido_en("voz", "regrabar")
 def _correr_regrabar(avisar, ctx, seccion_id, peticion, ajuste):
     """Regraba lo que haga falta y lo REGISTRA como version nueva de la voz.
 
@@ -2089,7 +2349,7 @@ def reescribir_bloques_guion(pid: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(400, "hace falta 'bloque' o 'bloques' con los ids a reescribir")
     peticion = str(datos.get("peticion") or "").strip()
     if not peticion:
-        raise ErrorApi(400, "hace falta 'peticion': que hay que cambiar de ese bloque")
+        raise ErrorApi(400, "hace falta 'peticion': qué hay que cambiar de ese bloque")
     por_fase = CLI_CLAUDE.por_defecto_de("revision_audio")
     ajuste = _ajuste_cli(datos, por_fase["modelo"], por_fase["esfuerzo"])
     trabajo_id = ctx.gestor.lanzar("reescribir_bloques", _correr_reescribir,
@@ -2227,7 +2487,7 @@ def _cambiar_estructura(ctx, hacer):
                                 "espera a que termine")
     bloques = _guion_efectivo(ctx)
     if not bloques:
-        raise ErrorApi(409, "todavia no hay guion: genera el guion primero")
+        raise ErrorApi(409, "todavía no hay guion: genera el guion primero")
     grabados = []
     meta = None
     if ctx.estado.versiones("voz"):
@@ -2396,7 +2656,7 @@ def estimar_video(cuerpo: dict = Body(default=None)):
                        min(p2.DURACION_MAXIMA_S,
                            int(round(float(datos.get("duracion_objetivo_s") or 600)))))
     except (TypeError, ValueError):
-        raise ErrorApi(400, "duracion_objetivo_s tiene que ser un numero de segundos")
+        raise ErrorApi(400, "duracion_objetivo_s tiene que ser un número de segundos")
     idioma = p2.normalizar_idioma(datos.get("idioma")) or "es"
     velocidad = datos.get("velocidad") or "normal"
     try:
@@ -2436,7 +2696,7 @@ def estimar_video(cuerpo: dict = Body(default=None)):
         # misma regla que `crear_video_light`
         calidad = calidad_de_video_nuevo(
             "foto" if datos.get("modo") == "foto" else "ilustracion")
-    usd_imagen = light.USD_POR_IMAGEN.get(calidad, light.USD_POR_IMAGEN["low"])
+    usd_imagen = light.usd_por_imagen(calidad)
 
     imagenes = max(1, planos)
 
@@ -2662,6 +2922,234 @@ def coste_por_paso(pid: str):
     return medidor(contexto(pid)).por_paso()
 
 
+def _desglose_de_eventos(eventos):
+    """Lo gastado en un proyecto, por partes y con lo confirmado aparte."""
+    imagenes = {"nuevas": [0, 0.0], "rehechas": [0, 0.0], "personajes": [0, 0.0],
+                "otras": [0, 0.0]}
+    vistas = set()
+    confirmadas = estimadas = 0
+    voz = {"grabacion": [0, 0.0], "regrabaciones": [0, 0.0]}
+    claude = {}
+    for e in eventos:
+        usd = float(e.get("usd") or 0.0)
+        prov = e.get("proveedor")
+        unidad = str(e.get("unidad") or "")
+        if prov == "openai":
+            if unidad.startswith("escena:"):
+                clave = "rehechas" if unidad in vistas else "nuevas"
+                vistas.add(unidad)
+            elif unidad.startswith("asset:"):
+                clave = "personajes"
+            else:
+                clave = "otras"
+            n = int((e.get("cantidad") or {}).get("imagenes") or 1)
+            imagenes[clave][0] += n
+            imagenes[clave][1] += usd
+            if ((e.get("detalle") or {}).get("coste") or {}).get("via") == "tokens":
+                confirmadas += n
+            else:
+                estimadas += n
+        elif prov == "tts":
+            clave = "regrabaciones" if unidad.startswith("regrabar") else "grabacion"
+            voz[clave][0] += int((e.get("cantidad") or {}).get("caracteres") or 0)
+            voz[clave][1] += usd
+        elif prov == "claude_cli":
+            op = str(e.get("operacion") or "claude")
+            t = e.get("tokens") or {}
+            ficha = claude.setdefault(op, {"llamadas": 0, "tokens": 0})
+            ficha["llamadas"] += 1
+            ficha["tokens"] += int(t.get("entrada") or 0) + int(t.get("salida") or 0) + int(t.get("cache") or 0)
+    return {
+        "imagenes": {k: {"cuantas": v[0], "usd": round(v[1], 4)} for k, v in imagenes.items()},
+        "imagenes_confirmadas": confirmadas, "imagenes_estimadas": estimadas,
+        "voz": {k: {"caracteres": v[0], "usd": round(v[1], 4)} for k, v in voz.items()},
+        "claude": sorted(({"para": k, **v} for k, v in claude.items()),
+                         key=lambda x: -x["tokens"]),
+        "claude_tokens": sum(v["tokens"] for v in claude.values()),
+        "usd": round(sum(v[1] for v in imagenes.values()) + sum(v[1] for v in voz.values()), 4),
+    }
+
+
+def _tandas_de(ctx, eventos):
+    """Cada tanda lanzada: lo prometido antes de pulsar frente a lo gastado
+    mientras corria (los eventos de coste entre su inicio y su fin)."""
+    fichas = {}
+    try:
+        with open(ctx.proyecto.ruta(NOMBRE_TANDAS), encoding="utf-8") as fh:
+            for linea in fh:
+                try:
+                    r = json.loads(linea)
+                except ValueError:
+                    continue
+                fichas.setdefault(r.get("marca"), {}).update(r)
+    except OSError:
+        return []
+    salida = []
+    for f in fichas.values():
+        inicio, fin = f.get("inicio") or f.get("lanzada"), f.get("fin")
+        if not inicio:
+            continue
+        dentro = [e for e in eventos if str(e.get("momento") or "") >= inicio
+                  and (not fin or str(e.get("momento") or "") <= fin)]
+        salida.append({
+            "tandas": f.get("tandas") or [], "lanzada": f.get("lanzada") or inicio,
+            "estado": f.get("estado") or ("en marcha" if not fin else ""),
+            "prometido_usd": f.get("prometido_usd"),
+            "gastado_usd": round(sum(float(e.get("usd") or 0) for e in dentro), 4),
+            "imagenes": sum(int((e.get("cantidad") or {}).get("imagenes") or 0)
+                            for e in dentro if e.get("proveedor") == "openai")})
+    return sorted(salida, key=lambda x: x["lanzada"])
+
+
+def _coste_del_estilo(ficha_preset):
+    """Lo que costo hacer un estilo (su taller): laminas, guia y voz."""
+    tid = ((ficha_preset.get("datos") or {}).get("origen") or {}).get("taller") \
+        if isinstance(ficha_preset, dict) else ""
+    if not tid:
+        return None
+    try:
+        tctx = contexto(tid)
+    except ErrorApi:
+        return {"taller": tid, "disponible": False}
+    eventos = medidor(tctx).eventos()
+    return {"taller": tid, "disponible": True, **_desglose_de_eventos(eventos),
+            "eventos": len(eventos)}
+
+
+@app.get("/api/proyectos/{pid}/coste/detalle")
+def coste_en_detalle(pid: str):
+    """EL COSTE DE UN VIDEO, TODO Y DESGLOSADO (11-10-2026).
+
+    Lo gastado de verdad --cada imagen con lo que OpenAI dijo que cobro (su
+    `usage`), cada toma de voz con los caracteres enviados-- sumando TODOS los
+    cambios: versiones, rehechas, notas, regrabaciones, lo revertido. Mas lo
+    que costo su estilo (que se paga una vez y lo comparten sus videos), la
+    musica y los efectos (de donde salen y que cuestan: nada) y, por cada tanda,
+    lo prometido antes de pulsar frente a lo gastado."""
+    ctx = contexto(pid)
+    eventos = medidor(ctx).eventos()
+    detalle = _desglose_de_eventos(eventos)
+    render = ctx.estado.params("render") or {}
+    musica = render.get("musica") or {}
+    efectos = render.get("efectos") or {}
+    n_efectos = sum(len(v or []) for v in efectos.values()) if isinstance(efectos, dict) else 0
+    estilo = None
+    pid_estilo = (ctx.proyecto.config or {}).get("estilo_light") or ""
+    if pid_estilo:
+        try:
+            ficha = PASOS_MODULOS.presets_canal.leer(pid_estilo)
+        except Exception:                                   # noqa: BLE001
+            ficha = None
+        if isinstance(ficha, dict):
+            estilo = {"id": pid_estilo, "nombre": ficha.get("nombre") or pid_estilo,
+                      **(_coste_del_estilo(ficha) or {})}
+            videos = 0
+            for f in Proyecto.listar(raiz_proyectos()):
+                if (f.get("config") or f).get("estilo_light") == pid_estilo or f.get("estilo_light") == pid_estilo:
+                    videos += 1
+            estilo["videos"] = videos
+    calidad = str((ctx.estado.params("assets") or {}).get("calidad") or "low")
+    return {
+        "proyecto": ctx.id, "total_usd": detalle["usd"], **detalle,
+        "musica": {"usd": 0.0, "titulo": musica.get("titulo") or musica.get("nombre") or "",
+                   "fuente": musica.get("fuente") or musica.get("origen") or (
+                       "subida por ti" if musica.get("propia") else "Jamendo"),
+                   "puesta": bool(musica)},
+        "efectos": {"usd": 0.0, "cuantos": n_efectos, "fuente": "FreeSound o subidos por ti"},
+        "estilo": estilo,
+        "tandas": _tandas_de(ctx, eventos),
+        "precio_imagen": AJUSTES.precio_por_imagen(calidad),
+        "tarifas": {"usd_por_caracter": COSTE.tarifa_caracter(),
+                    "usd_por_token": COSTE.tarifa_tokens()},
+    }
+
+
+@app.get("/api/presets-light/{preset_id}/coste")
+def coste_de_un_estilo(preset_id: str):
+    """Lo que costo hacer este estilo (su taller), desglosado."""
+    try:
+        ficha = PASOS_MODULOS.presets_canal.leer(preset_id)
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(404, f"no hay ningún estilo «{preset_id}»: {fallo}")
+    return {"id": preset_id, "nombre": (ficha or {}).get("nombre"),
+            **(_coste_del_estilo(ficha) or {"disponible": False})}
+
+
+# ------------------------------------------------- descargar el video por partes
+
+def _correr_exporte(avisar, ctx, pedido):
+    """Prepara lo pedido en <proyecto>/exportes/ (ver pasos/exportes.py)."""
+    exp = PASOS_MODULOS.exportes
+    render = ctx.estado.params("render") or {}
+    try:
+        if pedido["que"] == "audio":
+            ruta = exp.audio(ctx.proyecto, render, pedido["parte"], avisar=avisar, estado=ctx.estado)
+        elif pedido["que"] == "zip":
+            ruta = exp.todo_por_partes(ctx.proyecto, render, avisar=avisar, estado=ctx.estado)
+        else:
+            ruta = exp.video(ctx.proyecto, render, pedido["partes"],
+                             subtitulos=pedido["subtitulos"], logo=pedido["logo"],
+                             avisar=avisar, estado=ctx.estado)
+    except exp.ErrorExporte as fallo:
+        raise RuntimeError(str(fallo)) from None
+    relativa = os.path.relpath(ruta, os.path.join(ctx.proyecto.raiz, "exportes")).replace(os.sep, "/")
+    avisar(1.0, "listo para descargar")
+    ctx.bitacora.anotar("exporte", "render", {"pedido": pedido, "fichero": relativa})
+    return {"fichero": relativa, "bytes": os.path.getsize(ruta)}
+
+
+@app.post("/api/proyectos/{pid}/exportar", status_code=202)
+def exportar_por_partes(pid: str, cuerpo: dict = Body(default=None)):
+    """Prepara el vídeo, o una parte, para descargar (gratis, no toca el proyecto).
+
+    {que: "video", partes: ["voz", "musica", "efectos"], subtitulos, logo}
+    {que: "audio", parte: "voz" | "musica" | "efectos" | "mezcla"}
+    {que: "zip"}: la imagen sin sonido y cada audio suelto.
+    Sin subtítulos se vuelven a capturar los planos: tarda lo que un montaje."""
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    que = str(datos.get("que") or "video")
+    if que not in ("video", "audio", "zip"):
+        raise ErrorApi(400, "«que» tiene que ser video, audio o zip")
+    partes = [str(x) for x in (datos.get("partes") or []) if str(x) in ("voz", "musica", "efectos")]
+    pedido = {"que": que, "partes": partes, "parte": str(datos.get("parte") or ""),
+              "subtitulos": datos.get("subtitulos", True) is not False,
+              "logo": datos.get("logo", True) is not False}
+    if que == "audio" and pedido["parte"] not in ("voz", "musica", "efectos", "mezcla"):
+        raise ErrorApi(400, "«parte» tiene que ser voz, música, efectos o mezcla")
+    if _trabajo_activo(ctx, "render") is not None:
+        raise ErrorApi(409, "el vídeo se está montando: descárgalo cuando termine")
+    # LO MONTADO TIENE QUE SER LO DE AHORA: las partes salen del montaje activo
+    # MAS la voz, el plan y la mezcla de ahora, y con algo cambiado sin montar
+    # (una voz regrabada) saldrían desincronizadas
+    if ctx.estado.estado_de("render") != "listo":
+        raise ErrorApi(409, "el vídeo tiene cambios sin montar: «Regenerar Vídeo» primero "
+                            "y después descárgalo por partes")
+    # UNA A LA VEZ por vídeo: comparten la carpeta de los planos sin subtítulos
+    if any(str(f.get("nombre") or "") == "exportar" for f in ctx.gestor.listar(activos=True)):
+        raise ErrorApi(409, "ya se está preparando una descarga de este vídeo: espera a que termine")
+    try:
+        PASOS_MODULOS.exportes.material(ctx.proyecto, ctx.estado.params("render") or {}, estado=ctx.estado)
+    except PASOS_MODULOS.exportes.ErrorExporte as fallo:
+        raise ErrorApi(409, str(fallo))
+    trabajo_id = ctx.gestor.lanzar("exportar", _correr_exporte, ctx, pedido)
+    _registrar_trabajo(trabajo_id, ctx.id)
+    return {"trabajo_id": trabajo_id, "pedido": pedido}
+
+
+@app.get("/api/proyectos/{pid}/exportes/{ruta:path}")
+def descargar_exporte(pid: str, ruta: str):
+    """Un fichero preparado por /exportar, para descargar con su nombre."""
+    ctx = contexto(pid)
+    base = os.path.realpath(os.path.join(ctx.proyecto.raiz, "exportes"))
+    destino = os.path.realpath(os.path.join(base, ruta))
+    if not destino.startswith(base + os.sep) or not os.path.isfile(destino):
+        raise ErrorApi(404, "ese fichero no está preparado: vuelve a pedirlo")
+    nombre = PASOS_MODULOS.exportes.nombre_descarga(
+        (ctx.proyecto.config or {}).get("nombre") or ctx.id, destino)
+    return FileResponse(destino, filename=nombre, media_type=_tipo_de(destino))
+
+
 @app.get("/api/proyectos/{pid}/coste/eventos")
 def eventos_coste(pid: str, proveedor: str = Query(default=None),
                   paso: str = Query(default=None),
@@ -2715,7 +3203,7 @@ def fijar_presupuesto(pid: str, cuerpo: dict = Body(default=None)):
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
     if "usd" not in datos and "presupuesto_usd" not in datos:
-        raise ErrorApi(400, "hace falta 'usd' con el presupuesto del video")
+        raise ErrorApi(400, "hace falta 'usd' con el presupuesto del vídeo")
     valor = datos.get("usd", datos.get("presupuesto_usd"))
     try:
         limite = medidor(ctx).fijar_presupuesto(valor)
@@ -2919,18 +3407,18 @@ def elegir_estilo(pid: str, cuerpo: dict = Body(default=None)):
     minimo = PASOS_MODULOS.p6_assets.MIN_REFERENCIAS_ESTILO
     tope = PASOS_MODULOS.p6_assets.MAX_REFERENCIAS_ESTILO
     if len(rutas) < minimo:
-        raise ErrorApi(400, f"elige al menos {minimo} imagenes de estilo; has "
+        raise ErrorApi(400, f"elige al menos {minimo} imágenes de estilo; has "
                             f"mandado {len(rutas)}. Con una o dos, el generador "
                             f"copia esa escena concreta en vez de quedarse con "
                             f"el estilo: hacen falta varias situaciones "
-                            f"distintas para que lo unico que puedan tener en "
-                            f"comun sea la forma de dibujar")
+                            f"distintas para que lo único que puedan tener en "
+                            f"común sea la forma de dibujar")
     if len(rutas) > tope:
-        raise ErrorApi(400, f"como mucho {tope} imagenes de estilo; has mandado "
-                            f"{len(rutas)}. A cada escena se le adjuntan ademas "
+        raise ErrorApi(400, f"como mucho {tope} imágenes de estilo; has mandado "
+                            f"{len(rutas)}. A cada escena se le adjuntan además "
                             f"las hojas de reparto y los dos planos anteriores, "
                             f"y pasado ese punto el estilo compite con ellas por "
-                            f"la atencion del modelo")
+                            f"la atención del modelo")
     actual = dict((ctx.estado.params("assets") or {}).get("estilo") or {})
     actual["referencias"] = rutas
     # se manda el objeto 'estilo' entero: escribir solo 'referencias' lo
@@ -2984,7 +3472,7 @@ def escribir_guia_estilo(pid: str, cuerpo: dict = Body(default=None)):
     minimo = PASOS_MODULOS.p6_assets.MIN_REFERENCIAS_ESTILO
     if len(rutas) < minimo:
         raise ErrorApi(400, f"elige al menos {minimo} fotogramas antes de pedir "
-                            f"la guia: con menos se describe una escena, no un "
+                            f"la guía: con menos se describe una escena, no un "
                             f"estilo")
     ajuste = _ajuste_cli(datos)
     trabajo_id = ctx.gestor.lanzar("guia_estilo", _correr_guia_estilo,
@@ -3131,7 +3619,7 @@ def guardar_catalogo(pid: str, cuerpo: dict = Body(default=None)):
         "beats": catalogo.get("beats") or [],
     }
     if not limpio["reparto"] and not limpio["sets"]:
-        raise ErrorApi(400, "el catalogo llega vacio: sin reparto ni sitios, el "
+        raise ErrorApi(400, "el catálogo llega vacío: sin reparto ni sitios, el "
                             "paso de assets no puede repartir encuadres ni "
                             "mantener a un personaje igual entre planos")
     # Lo que la pantalla no edita se CONSERVA del catalogo guardado: la lista
@@ -3176,7 +3664,7 @@ def planos_hechos(pid: str, ligero: int = Query(default=0)):
     try:
         hechos = PASOS_MODULOS.p6_assets.planos_hechos(ctx.proyecto)
     except Exception as fallo:  # noqa: BLE001
-        raise ErrorApi(500, f"no se ha podido mirar que planos hay: {fallo}")
+        raise ErrorApi(500, f"no se ha podido mirar qué planos hay: {fallo}")
     # QUE PLANOS TIENE EL PLAN DE AHORA. La carpeta de trabajo CONSERVA lo de
     # pasadas anteriores --es lo que permite retomar una tanda cortada-- asi que
     # ahi puede haber PNG de planos que el plan de hoy ya no tiene: un corte
@@ -3275,7 +3763,7 @@ def servir_lamina_moodboard(clave: str, origen: str, archivo: str,
         raise ErrorApi(404, str(fallo))
     destino = ruta_segura(carpeta, archivo)
     if not os.path.isfile(destino):
-        raise ErrorApi(404, f"el moodboard «{clave}» no tiene la lamina "
+        raise ErrorApi(404, f"el moodboard «{clave}» no tiene la lámina "
                             f"{archivo!r} en {origen}")
     if mini:
         reducida = _miniatura_de(destino, mini if mini in ANCHOS_MINI else None)
@@ -3285,6 +3773,8 @@ def servir_lamina_moodboard(clave: str, origen: str, archivo: str,
     return servir_fichero(peticion, destino)
 
 
+@_medido_en("estilo")
+@_con_turno
 def _correr_moodboard(avisar, ctx, ejes, peticiones, calidad):
     mod = _moodboard()
     rutas, estilo = _referencias_de_estilo(ctx)
@@ -3312,8 +3802,8 @@ def generar_moodboard(pid: str, cuerpo: dict = Body(default=None)):
                             "una escena, no un estilo")
     guia = estilo.get("guia")
     if not ((guia.get("guia") if isinstance(guia, dict) else guia)):
-        raise ErrorApi(409, "antes hace falta la guia escrita del estilo: es lo "
-                            "que le dice al generador COMO se dibuja, y sin ella "
+        raise ErrorApi(409, "antes hace falta la guía escrita del estilo: es lo "
+                            "que le dice al generador CÓMO se dibuja, y sin ella "
                             "el moodboard sale de lo que el modelo suponga")
     crudos = datos.get("ejes")
     ejes = [e for e in (crudos or []) if e in mod.EJES] or None
@@ -3585,7 +4075,7 @@ def aplicar_conservacion(pid: str, cuerpo: dict = Body(default=None)):
     datos = _cuerpo(cuerpo)
     plan = datos.get("plan") if isinstance(datos.get("plan"), dict) else None
     if not plan or not plan.get("pasos"):
-        raise ErrorApi(400, "hace falta el plan de conservacion que se ha "
+        raise ErrorApi(400, "hace falta el plan de conservación que se ha "
                             "revisado (el que devuelve /conservacion/analizar)")
     hecho = _conservar().aplicar(
         ctx.estado, plan, motivo=str(datos.get("motivo") or "")
@@ -3676,7 +4166,7 @@ def dibujar_capa(pid: str, plano: str = Query(...),
     escena = next((e for e in (plan.get("escenas") or [])
                    if e.get("id") == plano), None)
     if escena is None:
-        raise ErrorApi(404, f"no hay ningun plano '{plano}' en el plan")
+        raise ErrorApi(404, f"no hay ningún plano '{plano}' en el plan")
     # el grafismo DECIDIDO manda sobre lo que dedujo p6, igual que en el vídeo:
     # la pantalla no puede enseñar una cosa y el render otra
     params = dict(ctx.estado.params("callouts") or {})
@@ -3720,13 +4210,13 @@ def guardar_plan_callouts(pid: str, cuerpo: dict = Body(default=None)):
         # ni una imagen, solo las capas, que son gratis.
         nombre = str(datos["subtitulo_tam"]).strip().lower()
         if nombre not in p7.SUB_TAMANOS:
-            raise ErrorApi(400, f"tamano de subtitulo desconocido: {nombre}. "
-                                f"Los tamanos son: {', '.join(sorted(p7.SUB_TAMANOS))}")
+            raise ErrorApi(400, f"tamaño de subtítulo desconocido: {nombre}. "
+                                f"Los tamaños son: {', '.join(sorted(p7.SUB_TAMANOS))}")
         cambios["subtitulo_tam"] = nombre
         hecho.append("subtitulo_tam")
     if datos.get("diseno"):
         if datos["diseno"] not in p7.SETS_DISENO:
-            raise ErrorApi(400, f"set de diseno desconocido: {datos['diseno']}. "
+            raise ErrorApi(400, f"set de diseño desconocido: {datos['diseno']}. "
                                 f"Los sets son: {', '.join(p7.SETS_DISENO)}")
         cambios["diseno"] = datos["diseno"]
     if isinstance(datos.get("arquetipos"), list):
@@ -3921,7 +4411,7 @@ def dibujar_cartela(pid: str, plano: str = Query(...), animada: int = 0):
     escena = next((e for e in (plan.get("escenas") or [])
                    if e.get("id") == plano), None)
     if escena is None:
-        raise ErrorApi(404, f"no hay ningun plano '{plano}' en el plan")
+        raise ErrorApi(404, f"no hay ningún plano '{plano}' en el plan")
     # MANDA LA DECISION GUARDADA, no la copia que dejo la ultima tanda.
     #
     # `escena["cartela"]` es una FOTO: p6 estampa en plan.json lo que habia
@@ -4714,12 +5204,12 @@ def aceptar_imagen_obsoleta(pid: str, sid: str):
     ctx = contexto(pid)
     version = ctx.proyecto.version_activa("assets")
     if not version:
-        raise ErrorApi(409, "todavia no hay imagenes de este video")
+        raise ErrorApi(409, "todavía no hay imágenes de este vídeo")
     plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
     escena = next((e for e in (plan.get("escenas") or [])
                    if str(e.get("id") or "") == sid), None)
     if not escena:
-        raise ErrorApi(404, f"no hay ningun plano {sid} en este video")
+        raise ErrorApi(404, f"no hay ningún plano {sid} en este vídeo")
     ruta = os.path.join(ctx.proyecto.ruta_paso("assets", version),
                         "escenas", f"{sid}.json")
     ficha = PASOS_MODULOS.medios.leer_json(ruta, {}) or {}
@@ -4738,7 +5228,7 @@ def leer_previsualizacion(pid: str):
     plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
     escenas_plan = plan.get("escenas") or []
     if not escenas_plan:
-        raise ErrorApi(409, "todavia no hay plan de planos: genera el video "
+        raise ErrorApi(409, "todavía no hay plan de planos: genera el vídeo "
                             "antes de poder mirarlo")
     subtitulos = PASOS_MODULOS.subtitulos
     idioma = plan.get("idioma") or ""
@@ -4772,6 +5262,8 @@ def leer_previsualizacion(pid: str):
                     PASOS_MODULOS.p7_callouts.cap_subtitulo_de(params_callouts, plan),
                     PASOS_MODULOS.p7_callouts.salida_de(plan)),
                 texto=PASOS_MODULOS.p7_callouts.texto_subtitulo_de(
+                    params_callouts, f"escena:{sid}"),
+                ancla=PASOS_MODULOS.p7_callouts.ancla_subtitulo_de(
                     params_callouts, f"escena:{sid}")) or []
         except Exception:                                     # noqa: BLE001
             trozos = []
@@ -4991,6 +5483,679 @@ def editar_nota_repaso(pid: str, nid: str, cuerpo: dict = Body(default=None)):
     return {"nota": nota, **_ficha_repaso(ctx)}
 
 
+# ------------------------------------------- las notas de IMAGENES, en el servidor
+#
+# Rehacer las imagenes con nota vivia en una cola DEL NAVEGADOR que mandaba
+# tandas de tres planos en un solo trabajo. Dos problemas reales (10-10-2026):
+#
+#   · una imagen que OpenAI rechazaba tumbaba la tanda entera -- las otras dos
+#     se daban por fallidas sin haberse intentado -- y el error se quedaba como
+#     el del paso, saliendo arriba en TODAS las pantallas (tambien en Encargo);
+#   · recargar la pagina perdia la cola.
+#
+# Ahora la cola vive aqui: UN trabajo que rehace los planos UNO DETRAS DE OTRO
+# (la regla 2 de la casa: las tandas, de una en una), y lo que le pasa a cada
+# uno se apunta EN SU NOTA (`error`, `aviso`). Un rechazo no para a los demas.
+# Las notas del MISMO plano se juntan en UNA imagen: dos notas no son dos pagos.
+
+#: Lo que suele tardar una imagen, para decir «suele tardar ~1:20». Se afina con
+#: lo que van tardando de verdad.
+_SEGUNDOS_IMAGEN = [75.0]
+
+
+def _segundos_por_imagen():
+    ultimos = _SEGUNDOS_IMAGEN[-12:]
+    return round(sorted(ultimos)[len(ultimos) // 2], 1)
+
+
+#: La cola de cada video, EN EL SERVIDOR: {pid: {"cola": [nid...], "actual":
+#: {"plano", "notas", "desde"} | None, "trabajo": id}}. Sobrevive a recargar la
+#: pagina (no a reiniciar el servicio, y entonces no hay nada corriendo).
+_COLA_NOTAS = {}
+_COLA_LOCK = threading.Lock()
+
+
+def _notas_de_imagenes(ctx):
+    repaso = _repaso()
+    return [n for n in _ficha_repaso(ctx)["notas"]
+            if repaso.pantalla_de(n) == "imagenes"
+            and n.get("estado") != "aplicado" and n.get("plano")]
+
+
+def _texto_de_grupo(notas):
+    if len(notas) == 1:
+        return notas[0]["texto"]
+    return " | ".join(f"({i + 1}) {n['texto']}" for i, n in enumerate(notas))
+
+
+def _feedback_de_grupo(ctx, notas):
+    """Lo que se escribe en `feedback` del plano para estas notas.
+
+    Una nota: su texto, que es lo de siempre (p6 la casa con su nota del repaso
+    y de ahi saca sus imagenes adjuntas). VARIAS del mismo plano: el historial
+    que p6 ya entiende (`_texto_feedback` junta los textos y `_ultima_nota` lee
+    la ultima entrada), y la ultima lleva las imagenes de TODAS. Con el texto
+    juntado a mano, p6 no casaba ninguna nota y se quedaba con las imagenes de
+    una sola.
+    """
+    desde_cero = any(n.get("desde_cero") for n in notas)
+    if len(notas) == 1 and not desde_cero:
+        return notas[0]["texto"]
+    carpeta = _repaso().carpeta_imagenes(ctx.proyecto)
+    imagenes = []
+    for nota in notas:
+        for nombre in nota.get("imagenes") or []:
+            ruta = os.path.join(carpeta, os.path.basename(str(nombre)))
+            if os.path.isfile(ruta) and ruta not in imagenes:
+                imagenes.append(ruta)
+    historial = [{"texto": n["texto"]} for n in notas[:-1]]
+    ultima = {"texto": notas[-1]["texto"], "de": "repaso", "imagenes": imagenes}
+    # «DESDE CERO»: p6 no le pone delante la imagen de ahora («sustituye», ver
+    # `p6_assets._adjuntos_de_la_nota`). Con ella delante el generador la
+    # retoca, y un cambio grande salia casi igual (10-10-2026).
+    if desde_cero:
+        ultima["alcance"] = "sustituye"
+    historial.append(ultima)
+    return historial
+
+
+def _devolver_unidad(ctx, uid, previo):
+    """Deja los params de un plano como estaban antes de pedirle nada."""
+    try:
+        params = ctx.estado.params("assets") or {}
+        unidades = dict(params.get("unidades") or {})
+        if previo is None:
+            unidades.pop(uid, None)
+        else:
+            unidades[uid] = previo
+        params["unidades"] = unidades
+        ctx.estado.set_params("assets", params)
+    except Exception as fallo:                              # noqa: BLE001
+        ctx.bitacora.anotar("aviso", "assets", {"devolver_unidad": str(fallo)})
+
+
+def _siguiente_plano(ctx, cola):
+    """(plano, [notas]) del primero de la cola, con TODAS sus notas en cola."""
+    vivas = {n["id"]: n for n in _notas_de_imagenes(ctx)}
+    cola[:] = [nid for nid in cola if nid in vivas]
+    if not cola:
+        return None, []
+    plano = str(vivas[cola[0]]["plano"])
+    notas = [vivas[nid] for nid in cola if str(vivas[nid]["plano"]) == plano]
+    return plano, notas
+
+
+#: Los pasos cuyos trabajos tiene que esperar la cola de notas antes de dibujar.
+_PASOS_QUE_ESPERA_LA_COLA = ("voz", "assets", "callouts", "render")
+#: Y los trabajos que ACABAN en esos pasos aunque empiecen por otro: la cadena
+#: (`generar:`) guarda como paso el de su primera tarea (el guion, por ejemplo)
+#: y llega a las imagenes y al montaje mas tarde.
+_TRABAJOS_QUE_ESPERA_LA_COLA = ("generar:", "receta:", "repaso", "subtitulos", "capturas:")
+
+
+def _otros_trabajos(ctx):
+    """Los trabajos del video en marcha que no son la cola de notas. Sin
+    cerrojo: se llama con el _COLA_LOCK tomado."""
+    return [f for f in ctx.gestor.listar(activos=True)
+            if f.get("nombre") != "notas_imagenes"
+            and (f.get("paso") in _PASOS_QUE_ESPERA_LA_COLA
+                 or str(f.get("nombre") or "").startswith(_TRABAJOS_QUE_ESPERA_LA_COLA))]
+
+
+def _que_se_espera(otros):
+    """El nombre para la persona de lo que la cola esta esperando."""
+    pasos = {f.get("paso") for f in otros}
+    nombres = " ".join(str(f.get("nombre") or "") for f in otros)
+    if "voz" in pasos:
+        return "la grabación de la voz"
+    if "generar:" in nombres or "receta:" in nombres:
+        return "la tanda en marcha"
+    if "assets" in pasos:
+        return "las imágenes en marcha"
+    return "el montaje del vídeo"
+
+
+def _lanzar_cola(ctx):
+    """Lanza el trabajo de la cola. Con el _COLA_LOCK tomado."""
+    estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+    trabajo_id = ctx.gestor.lanzar("notas_imagenes", _correr_notas_imagenes,
+                                   ctx, paso="assets")
+    estado["trabajo"] = trabajo_id
+    _registrar_trabajo(trabajo_id, ctx.id)
+    return trabajo_id
+
+
+def _lanzar_cuando_libre(ctx):
+    """Espera FUERA del gestor a que acabe el otro trabajo y lanza la cola.
+
+    Fuera del gestor a proposito: un trabajo del gestor con paso='assets'
+    marca el paso como en marcha mientras espera, y eso se cruzaria con el
+    montaje que se esta esperando."""
+    while True:
+        time.sleep(2)
+        if _otros_trabajos(ctx):
+            continue
+        with _COLA_LOCK:
+            # se vuelve a mirar CON el cerrojo: entre mirar y lanzar puede
+            # haber arrancado un montaje
+            otros = _otros_trabajos(ctx)
+            estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+            if otros and estado.get("cola"):
+                estado["esperando"] = _que_se_espera(otros)
+                continue
+            estado.pop("esperando", None)
+            if estado.get("cola") and not estado.get("trabajo"):
+                _lanzar_cola(ctx)
+            return
+
+
+def _correr_notas_imagenes(avisar, ctx):
+    from nucleo.trabajos import Cancelado                    # noqa: PLC0415
+    repaso = _repaso()
+    hechas, rechazadas, fallidas = [], [], []
+    try:
+        while True:
+            with _COLA_LOCK:
+                estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+                plano, notas = _siguiente_plano(ctx, estado["cola"])
+                if not plano:
+                    # en el MISMO cerrojo que mira la cola: si no, una nota que
+                    # llegase justo ahora se sumaria a un trabajo que ya se va
+                    estado["actual"] = None
+                    estado["trabajo"] = None
+                    break
+                ids = [n["id"] for n in notas]
+                cero = estado.get("desde_cero") or set()
+                notas = [dict(n, desde_cero=n["id"] in cero) for n in notas]
+                cero.difference_update(ids)
+                estado["cola"] = [x for x in estado["cola"] if x not in ids]
+                estado["actual"] = {"plano": plano, "notas": ids, "desde": time.time()}
+                pendientes = len({str(n["plano"]) for n in _notas_de_imagenes(ctx)
+                                  if n["id"] in estado["cola"]})
+            hechos = len(hechas) + len(rechazadas) + len(fallidas)
+            total = hechos + 1 + pendientes
+            etiqueta = f"{plano} · {hechos + 1} de {total}"
+            avisar(hechos / total, f"dibujando {etiqueta}", f"Dibujando {etiqueta}")
+            uid = f"escena:{plano}"
+            # UN PLANO QUE YA NO EXISTE no se «hace»: los planos se renumeran al
+            # volver a cortar, y p6 se saltaria la unidad sin decir nada --la
+            # nota saldria «Hecha ✓» sin haberse dibujado--
+            if uid not in set(ctx.estado.unidades_declaradas("assets") or ()):
+                for nota in notas:
+                    try:
+                        repaso.editar(ctx.proyecto, nota["id"], aviso="", error=(
+                            f"la imagen {plano} ya no está en el vídeo (se volvieron "
+                            "a cortar los planos): borra esta nota y escríbela en la "
+                            "imagen que toque"))
+                    except (KeyError, ValueError):
+                        pass
+                fallidas.append(plano)
+                continue
+            # SE FUSIONA con lo que ya tenia el plano (su direccion, su parrafo
+            # redactado...): poner `{feedback}` a secas se los llevaba por delante
+            # LA IMAGEN DE AHORA, para enseñarla al lado de la nueva
+            imagen_antes = _ruta_de_version(ctx, "assets", "escenas", f"{plano}.png") or ""
+            unidades_antes = dict((ctx.estado.params("assets") or {}).get("unidades") or {})
+            previo = copy.deepcopy(unidades_antes.get(uid))
+            actual = dict(previo or {})
+            actual["feedback"] = _feedback_de_grupo(ctx, notas)
+            ctx.estado.actualizar_params("assets", {"unidades": {uid: actual}})
+            ctx.estado.marcar_ejecutando("assets")
+            arranque = time.time()
+
+            def avisar_plano(valor, mensaje="", publico="", hechos=hechos,
+                             total=total, etiqueta=etiqueta):
+                # `publico` solo llega de la espera de turno («esperando
+                # turno: ... de "X"»): es lo que tiene que leer la pantalla
+                return avisar((hechos + min(1.0, max(0.0, float(valor or 0)))) / total,
+                              f"{etiqueta} — {mensaje}" if mensaje else "",
+                              publico or "")
+            try:
+                _correr_paso(avisar_plano, ctx, "assets", [uid], {"rehacer": True})
+            except Cancelado:
+                _devolver_unidad(ctx, uid, previo)
+                raise
+            except Exception as fallo:                           # noqa: BLE001
+                ctx.estado.limpiar_marca("assets")
+                # LO PEDIDO NO SE QUEDA ESCRITO si no salio: dejaria el plano
+                # obsoleto y la proxima «regenerar lo obsoleto» lo volveria a
+                # pedir (y a pagar, o a que lo rechacen)
+                _devolver_unidad(ctx, uid, previo)
+                rechazo = type(fallo).__name__ == "RechazoSeguridad"
+                motivo = str(fallo)
+                for nota in notas:
+                    try:
+                        repaso.editar(ctx.proyecto, nota["id"], error=motivo, aviso="")
+                    except (KeyError, ValueError):
+                        pass
+                (rechazadas if rechazo else fallidas).append(plano)
+                ctx.bitacora.anotar("nota_imagen_fallida", "assets",
+                                    {"plano": plano, "rechazo": rechazo,
+                                     "error": motivo[:300]})
+                continue
+            _SEGUNDOS_IMAGEN.append(time.time() - arranque)
+            del _SEGUNDOS_IMAGEN[:-50]
+            # SE BUSCA POR SU PROMPT, el que quedo en la ficha del plano: por la
+            # hora se colaria la reescritura de otro video que corriera a la vez.
+            # El motor se vuelve a pedir: si se recargo, el que la apunto es el
+            # nuevo.
+            imagen = PASOS_MODULOS.medios.motor("imagen_openai/imagen.py")
+            reescrita = None
+            ficha_json = os.path.join(ctx.proyecto.raiz, _ruta_de_version(
+                ctx, "assets", "escenas", f"{plano}.json") or "-")
+            try:
+                with open(ficha_json, encoding="utf-8") as fh:
+                    prompt_usado = json.load(fh).get("prompt") or ""
+                reescrita = (getattr(imagen, "REESCRITURAS", {}) or {}).get(
+                    imagen.huella_prompt(prompt_usado))
+            except (OSError, ValueError, AttributeError):
+                reescrita = None
+            aviso = ""
+            if reescrita and reescrita.get("salio") \
+                    and float(reescrita.get("cuando") or 0) >= arranque:
+                cambios = reescrita.get("cambios") or []
+                lista = "; ".join(f"«{a}» → «{b}»" for a, b in cambios[:4])
+                aviso = ("OpenAI la rechazó con los nombres de marca, y se dibujó "
+                         "describiéndola sin ellos" + (f": {lista}" if lista else "."))
+            for nota in notas:
+                try:
+                    repaso.editar(ctx.proyecto, nota["id"], regenerado=nota["texto"],
+                                  error="", aviso=aviso, antes=imagen_antes)
+                except (KeyError, ValueError):
+                    pass
+            hechas.append(plano)
+    finally:
+        with _COLA_LOCK:
+            estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+            estado["actual"] = None
+            estado.pop("esperando", None)
+            # cortado (cancelado o un fallo del propio bucle): lo que quedaba
+            # en cola no lo va a dibujar nadie, y decir «en cola» seria mentir
+            if estado.get("trabajo"):
+                estado["cola"] = []
+            # y lo pedido «desde cero» que no se llego a dibujar no se queda
+            # apuntado para un retoque de otro dia
+            if not estado.get("cola"):
+                estado.pop("desde_cero", None)
+            estado["trabajo"] = None
+    avisar(1.0, f"{len(hechas)} hechas, {len(rechazadas)} rechazadas, "
+                f"{len(fallidas)} con error")
+    return {"hechas": hechas, "rechazadas": rechazadas, "fallidas": fallidas}
+
+
+def _usd_por_imagen(ctx):
+    calidad = str((ctx.estado.params("assets") or {}).get("calidad") or "low")
+    try:
+        return round(float(AJUSTES.usd_por_imagen(calidad) or 0.0), 4)
+    except Exception:                                       # noqa: BLE001
+        return 0.0
+
+
+def _ficha_cola(ctx):
+    with _COLA_LOCK:
+        estado = dict(_COLA_NOTAS.get(ctx.id) or {})
+    actual = estado.get("actual")
+    trabajo = None
+    if estado.get("trabajo"):
+        try:
+            trabajo = ctx.gestor.estado(estado["trabajo"])
+        except KeyError:
+            trabajo = None
+    return {"cola": list(estado.get("cola") or []),
+            "actual": dict(actual, segundos=round(time.time() - actual["desde"], 1))
+                      if actual else None,
+            "trabajo": trabajo,
+            # la cola espera a que termine otro trabajo (el montaje) antes de dibujar
+            "esperando": estado.get("esperando") or "",
+            "segundos_por_imagen": _segundos_por_imagen(),
+            "usd_por_imagen": _usd_por_imagen(ctx)}
+
+
+def _texto_roto_en(ctx):
+    """Cuantos planos tienen el subtitulo DIBUJADO con «TÃº» (voz grabada antes
+    del 10-10-2026, ver `subtitulos.reparar_mojibake`).
+
+    Se mira lo dibujado (las capas SVG de la version activa de `callouts`) y no
+    la narracion: la narracion se queda rota para siempre --entra en la firma
+    de las imagenes y no se toca--, pero un plano cuyos rotulos se rehicieron
+    con el codigo nuevo ya sale bien y no hay nada que arreglar."""
+    version = ctx.proyecto.version_activa("callouts")
+    if not version:
+        return 0
+    patron = PASOS_MODULOS.subtitulos._MOJIBAKE
+    rotos = set()
+    base = os.path.join(ctx.proyecto.raiz, "pasos", "callouts", f"v{version}")
+    for carpeta in ("capas_fijas", "capas"):
+        directorio = os.path.join(base, carpeta)
+        if not os.path.isdir(directorio):
+            continue
+        for nombre in os.listdir(directorio):
+            if not nombre.endswith(".svg"):
+                continue
+            try:
+                with open(os.path.join(directorio, nombre), encoding="utf-8",
+                          errors="replace") as fh:
+                    texto = html_lib.unescape(fh.read())
+            except OSError:
+                continue
+            if patron.search(texto):
+                rotos.add(nombre[:-4])
+    return len(rotos)
+
+
+@app.get("/api/proyectos/{pid}/subtitulos/rotos")
+def subtitulos_rotos(pid: str):
+    """{planos}: cuantos planos tienen los subtitulos dibujados con las tildes
+    rotas («TÃº»)."""
+    return {"planos": _texto_roto_en(contexto(pid))}
+
+
+def _correr_rehacer_subtitulos(avisar, ctx):
+    """Vuelve a dibujar los rotulos y subtitulos de TODOS los planos y monta.
+
+    No toca la voz, ni las imagenes, ni ningun param: los subtitulos salen de
+    la misma narracion, pero ahora se dibujan reparados. Nada se paga: los
+    rotulos y el montaje son trabajo de esta maquina.
+    """
+    for paso, desde, hasta in (("callouts", 0.0, 0.3), ("render", 0.3, 1.0)):
+        def tramo(valor, mensaje="", publico="", desde=desde, hasta=hasta):
+            return avisar(desde + (hasta - desde) * min(1.0, max(0.0, float(valor or 0))),
+                          mensaje)
+        ctx.estado.marcar_ejecutando(paso)
+        try:
+            _correr_paso(tramo, ctx, paso, None)
+        except BaseException:
+            ctx.estado.limpiar_marca(paso)
+            raise
+    avisar(1.0, "subtítulos rehechos y vídeo montado")
+    return {"planos": _texto_roto_en(ctx)}
+
+
+@app.post("/api/proyectos/{pid}/subtitulos/rehacer", status_code=202)
+def rehacer_subtitulos(pid: str):
+    """Rehace los subtitulos (y monta) de un video cuya voz llego con las
+    tildes rotas. Gratis: no dibuja imagenes ni graba voz."""
+    ctx = contexto(pid)
+    for paso in ("voz", "assets", "callouts", "render"):
+        otro = _trabajo_activo(ctx, paso)
+        if otro is not None:
+            raise ErrorApi(409, "este vídeo ya tiene un trabajo en marcha: espera a que termine",
+                           {"trabajo_id": otro["id"]})
+    trabajo_id = ctx.gestor.lanzar("subtitulos", _correr_rehacer_subtitulos, ctx,
+                                   paso="callouts")
+    _registrar_trabajo(trabajo_id, ctx.id)
+    ctx.bitacora.anotar("subtitulos_rehechos", "callouts", {"trabajo": trabajo_id})
+    return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id)}
+
+
+# --------------------------------------------------------------- la ortografia
+#
+# Ver pasos/ortografia.py. Se pide y se pregunta (como «Revisar»): una revision
+# de cien subtitulos tarda mas de lo que el proxy deja durar una peticion.
+
+_ORTOGRAFIA = {}
+_LOCK_ORTOGRAFIA = threading.Lock()
+
+
+def _subtitulos_por_plano(pid):
+    """{plano: texto del subtitulo tal y como se dibuja} (con lo corregido a mano)."""
+    ficha = leer_previsualizacion(pid)
+    salida = {}
+    for escena in ficha.get("escenas") or []:
+        texto = " ".join(" ".join(t.get("lineas") or []) for t in escena.get("subtitulos") or [])
+        texto = " ".join(texto.split())
+        if texto:
+            salida[escena["id"]] = texto
+    return salida
+
+
+def _narracion_por_plano(ctx):
+    """{plano: narracion} del plan de ahora: el ancla de un subtitulo corregido."""
+    plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    return {str(e.get("id")): " ".join(str(e.get("narracion") or "").split())
+            for e in plan.get("escenas") or [] if e.get("id")}
+
+
+@app.post("/api/proyectos/{pid}/ortografia/revisar", status_code=202)
+def revisar_ortografia(pid: str, cuerpo: dict = Body(default=None)):
+    """Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de
+    {fuente: "guion", textos: {bloque: texto}}. -> {id}; el resultado, en GET.
+    No cambia nada: propone."""
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    fuente = str(datos.get("fuente") or "subtitulos")
+    if fuente == "subtitulos":
+        textos = _subtitulos_por_plano(pid)
+        if not textos:
+            raise ErrorApi(400, "este vídeo todavía no tiene subtítulos que revisar")
+    elif fuente == "guion":
+        textos = datos.get("textos") if isinstance(datos.get("textos"), dict) else {}
+        textos = {str(k): str(v) for k, v in textos.items() if str(v or "").strip()}
+        if not textos:
+            raise ErrorApi(400, "manda los textos del guion a revisar")
+    else:
+        raise ErrorApi(400, "fuente: «subtitulos» o «guion»")
+    rid = uuid.uuid4().hex[:12]
+    with _LOCK_ORTOGRAFIA:
+        for viejo in list(_ORTOGRAFIA)[:-19]:
+            _ORTOGRAFIA.pop(viejo, None)
+        _ORTOGRAFIA[rid] = {"estado": "pensando", "fuente": fuente, "proyecto": ctx.id}
+    anclas = _narracion_por_plano(ctx) if fuente == "subtitulos" else {}
+
+    def correr():
+        try:
+            propuestas = PASOS_MODULOS.ortografia.revisar(textos, cwd=RAIZ_ESTUDIO)
+            ficha = {"estado": "listo", "fuente": fuente, "proyecto": ctx.id,
+                     "revisados": len(textos), "_anclas": anclas,
+                     "propuestas": [{"id": k, "antes": textos[k], "despues": v["texto"],
+                                     "cambios": v.get("cambios") or []}
+                                    for k, v in propuestas.items() if k in textos]}
+        except Exception as fallo:                          # noqa: BLE001
+            ficha = {"estado": "error", "fuente": fuente, "proyecto": ctx.id,
+                     "error": str(fallo)[:600]}
+        with _LOCK_ORTOGRAFIA:
+            _ORTOGRAFIA[rid] = ficha
+
+    threading.Thread(target=correr, daemon=True, name=f"ortografia-{rid}").start()
+    return {"id": rid, "estado": "pensando", "revisados": len(textos)}
+
+
+@app.get("/api/proyectos/{pid}/ortografia/{rid}")
+def leer_ortografia(pid: str, rid: str):
+    """Como va la revision de ortografia, y lo que propone al terminar."""
+    with _LOCK_ORTOGRAFIA:
+        ficha = _ORTOGRAFIA.get(rid)
+    if not ficha or ficha.get("proyecto") != pid:
+        raise ErrorApi(404, "esa revisión de ortografía ya no está: vuelve a pedirla")
+    return {k: v for k, v in ficha.items() if not k.startswith("_")}
+
+
+@app.post("/api/proyectos/{pid}/ortografia/aplicar")
+def aplicar_ortografia_subtitulos(pid: str, cuerpo: dict = Body(default=None)):
+    """Pone los subtitulos corregidos: {cambios: {plano: texto}}.
+
+    Van al texto escrito a mano de cada plano (`subtitulo_texto` de callouts),
+    asi que solo queda obsoleto el rotulo de esos planos: ni voz ni imagenes.
+    Volver a montar es gratis."""
+    ctx = contexto(pid)
+    cambios = _cuerpo(cuerpo).get("cambios")
+    if not isinstance(cambios, dict) or not cambios:
+        raise ErrorApi(400, "manda {cambios: {plano: texto}}")
+    for paso in ("callouts", "render"):
+        if _trabajo_activo(ctx, paso) is not None:
+            raise ErrorApi(409, "el vídeo se está montando: aplica la corrección cuando termine")
+    # CON LA REVISION QUE LO PROPUSO (`rid`): solo planos de ESA revision, de
+    # ESTE proyecto y de los subtitulos. Sin esto, una pantalla que se quedo con
+    # la revision de otro video escribia sus textos en estos planos (los ids
+    # S001, S002... se repiten en todos). Y cada texto se guarda con lo que se
+    # leia al revisarlo (`subtitulo_ancla`): si luego cambia la narracion de ese
+    # plano, el texto corregido se ignora en vez de mentir (subtitulos.de_escena).
+    anclas = {}
+    rid = _cuerpo(cuerpo).get("rid")
+    if rid:
+        with _LOCK_ORTOGRAFIA:
+            ficha = _ORTOGRAFIA.get(str(rid))
+        if not ficha or ficha.get("proyecto") != pid or ficha.get("fuente") != "subtitulos":
+            raise ErrorApi(409, "esa revisión de ortografía no es de los subtítulos de este vídeo: vuelve a pedirla")
+        propuestas = {str(p["id"]) for p in ficha.get("propuestas") or []}
+        anclas = ficha.get("_anclas") or {}
+        ajenos = sorted(str(k) for k in cambios if str(k) not in propuestas)
+        if ajenos:
+            raise ErrorApi(400, f"esos planos no estaban en la revisión: {', '.join(ajenos[:10])}")
+    declaradas = set(ctx.estado.unidades_declaradas("callouts") or ())
+    previas = (ctx.estado.params("callouts") or {}).get("unidades") or {}
+    bloque = {}
+    for plano, texto in cambios.items():
+        uid = f"escena:{plano}"
+        texto = " ".join(str(texto or "").split())
+        if not texto or (declaradas and uid not in declaradas):
+            continue
+        actual = previas.get(uid)
+        actual = dict(actual) if isinstance(actual, dict) else {}
+        actual["subtitulo_texto"] = texto
+        if anclas.get(str(plano)):
+            actual["subtitulo_ancla"] = " ".join(anclas[str(plano)].split())
+        else:
+            actual.pop("subtitulo_ancla", None)
+        bloque[uid] = actual
+    if not bloque:
+        raise ErrorApi(400, "ninguno de esos planos está en el vídeo")
+    ctx.estado.actualizar_params("callouts", {"unidades": bloque})
+    ctx.bitacora.anotar("ortografia_subtitulos", "callouts", {"planos": sorted(bloque)})
+    return {"aplicados": len(bloque), "planos": sorted(k.split(":", 1)[-1] for k in bloque)}
+
+
+@app.post("/api/proyectos/{pid}/imagenes/rehacer", status_code=202)
+def rehacer_imagenes_con_notas(pid: str, cuerpo: dict = Body(default=None)):
+    """Pone en la cola las notas de imagenes: {notas?: [ids], desde_cero?} (sin ids, todas).
+
+    Con `desde_cero` la imagen se dibuja SIN la de ahora delante: para cambios
+    grandes, que con ella delante salian casi iguales.
+
+    Se rehacen UNA DETRAS DE OTRA en un solo trabajo del servidor; si ya hay uno
+    en marcha, las nuevas se suman a su cola. Las notas del mismo plano salen en
+    UNA sola imagen.
+    """
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    pedidas = datos.get("notas") if isinstance(datos.get("notas"), list) else None
+    # UNA YA HECHA SE PUEDE PEDIR OTRA VEZ «desde cero»: es justo el caso de
+    # «la rehice y salio igual». Cuenta como viva aqui, pero NO se toca hasta
+    # pasar las comprobaciones de abajo: devolverla a pendiente y contestar
+    # despues un 409 la dejaba pendiente con su imagen ya hecha, y el
+    # siguiente «Aplicar» la volvia a pagar.
+    rehechas = []
+    if datos.get("desde_cero") and pedidas:
+        quiero = {str(x) for x in pedidas}
+        rehechas = [n for n in _ficha_repaso(ctx)["notas"]
+                    if n.get("id") in quiero and n.get("estado") == "aplicado"
+                    and _repaso().pantalla_de(n) == "imagenes" and n.get("plano")]
+    vivas = _notas_de_imagenes(ctx)
+    if pedidas is not None:
+        quiero = {str(x) for x in pedidas}
+        vivas = [n for n in vivas if n["id"] in quiero]
+    vivas += [n for n in rehechas if n["id"] not in {v["id"] for v in vivas}]
+    if not vivas:
+        raise ErrorApi(400, "no hay ninguna nota pendiente con su imagen")
+    # ¿HAY OTRA TANDA DE IMAGENES? Si es la de esta misma cola y esta
+    # terminando (ya miro que no quedaba nada), se espera a que acabe: si no,
+    # en ese segundo se contestaba 409 a una nota que tenia que entrar.
+    otro = _trabajo_activo(ctx, "assets")
+    with _COLA_LOCK:
+        propio = (_COLA_NOTAS.get(ctx.id) or {}).get("trabajo")
+    if otro is not None and otro.get("nombre") == "notas_imagenes" and otro["id"] != propio:
+        ctx.gestor.esperar(otro["id"], 10)
+        otro = _trabajo_activo(ctx, "assets")
+    # CON OTRO TRABAJO EN MARCHA (el montaje, una tanda, la musica) ya no se
+    # contesta 409: la nota entra en la cola y la cola ESPERA a que termine
+    # antes de dibujar (`_lanzar_cuando_libre`). Dibujar a la vez dejaria un
+    # MP4 con la imagen vieja sellado como al dia, y dos tandas de imagenes a
+    # la vez van contra la regla 2 de CLAUDE.md (11-10-2026).
+    # ya aceptada: las hechas que se piden «desde cero» vuelven a pendiente
+    for nota in rehechas:
+        try:
+            _repaso().editar(ctx.proyecto, nota["id"], regenerado="")
+        except (KeyError, ValueError):
+            pass
+    repaso = _repaso()
+    # lo que paso la vez anterior ya no vale para esta: se borra YA aceptada
+    # (pasada la comprobacion de arriba) y ANTES de que el hilo pueda escribir
+    with _COLA_LOCK:
+        ocupadas = set((_COLA_NOTAS.get(ctx.id) or {}).get("cola") or []) | set(
+            ((_COLA_NOTAS.get(ctx.id) or {}).get("actual") or {}).get("notas") or [])
+    for nota in vivas:
+        if nota.get("error") and nota["id"] not in ocupadas:
+            try:
+                repaso.editar(ctx.proyecto, nota["id"], error="")
+            except (KeyError, ValueError):
+                pass
+    with _COLA_LOCK:
+        estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+        en_marcha = False
+        if estado.get("trabajo"):
+            try:
+                en_marcha = ctx.gestor.estado(estado["trabajo"])["estado"] in (
+                    "pendiente", "ejecutando")
+            except KeyError:
+                en_marcha = False
+        ya = set(estado["cola"]) | set((estado.get("actual") or {}).get("notas") or [])
+        nuevas = [n for n in vivas if n["id"] not in ya]
+        estado["cola"].extend(n["id"] for n in nuevas)
+        # «Desde cero» (sin la imagen de ahora delante): se apunta por nota,
+        # tambien en las que ya esperaban en la cola; y pedir un retoque la quita
+        cero = estado.setdefault("desde_cero", set())
+        pedidas_ahora = {n["id"] for n in vivas} - {
+            x for x in ((estado.get("actual") or {}).get("notas") or [])}
+        if datos.get("desde_cero"):
+            cero.update(pedidas_ahora)
+        else:
+            cero.difference_update(pedidas_ahora)
+        if not en_marcha:
+            estado["trabajo"] = None
+            otros = _otros_trabajos(ctx)
+            if otros:
+                # se monta (o se dibuja) otra cosa: la cola espera y arranca sola
+                if not estado.get("esperando"):
+                    estado["esperando"] = _que_se_espera(otros)
+                    threading.Thread(target=_lanzar_cuando_libre, args=(ctx,), daemon=True,
+                                     name=f"cola-espera-{ctx.id}").start()
+            else:
+                _lanzar_cola(ctx)
+    ctx.bitacora.anotar("notas_imagenes", "assets", {"notas": [n["id"] for n in vivas]})
+    return _ficha_cola(ctx)
+
+
+@app.get("/api/proyectos/{pid}/imagenes/cola")
+def cola_de_imagenes(pid: str):
+    """La cola de notas de imagenes: cual se dibuja, cuanto lleva y que espera."""
+    return _ficha_cola(contexto(pid))
+
+
+@app.delete("/api/proyectos/{pid}/imagenes/cola/{nid}")
+def sacar_de_la_cola(pid: str, nid: str):
+    """Saca una nota de la cola (la que ya se esta dibujando no se para)."""
+    ctx = contexto(pid)
+    with _COLA_LOCK:
+        estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+        estado["cola"] = [x for x in estado["cola"] if x != nid]
+        (estado.get("desde_cero") or set()).discard(nid)
+    return _ficha_cola(ctx)
+
+
+@app.post("/api/proyectos/{pid}/repaso/{nid}/sin-marcas")
+def nota_sin_marcas(pid: str, nid: str):
+    """Propone la nota reescrita sin marcas ni personajes: NO la guarda."""
+    ctx = contexto(pid)
+    nota = next((n for n in _repaso().leer(ctx.proyecto)["notas"]
+                 if n.get("id") == nid), None)
+    if nota is None:
+        raise ErrorApi(404, f"no hay ninguna nota {nid}")
+    propuesta = PASOS_MODULOS.sin_marcas.reescribir_nota(
+        nota.get("texto"), cwd=ctx.proyecto.raiz)
+    return {"nota": nid, **propuesta,
+            "con_imagenes": bool(nota.get("imagenes"))}
+
+
 @app.delete("/api/proyectos/{pid}/repaso/{nid}")
 def borrar_nota_repaso(pid: str, nid: str):
     """Quita una nota del repaso."""
@@ -5175,16 +6340,17 @@ def _correr_repaso(avisar, ctx, ajuste, modo=MODO_TRAS_REPASO,
 
     # las notas aplicadas se marcan DESPUÉS de generar: si la tanda se cae, las
     # notas siguen pendientes y volver a darle al botón las vuelve a intentar
-    ficha = repaso.leer(ctx.proyecto)
     aplicadas = {n["id"] for n in reparto.get("notas") or [] if n.get("cambios")}
-    for nota in ficha["notas"]:
-        if nota.get("id") in aplicadas:
-            nota["estado"] = "aplicado"
-            nota["aplicado_en"] = ahora()
-    ficha.setdefault("aplicado", []).append({
-        "cuando": ahora(), "notas": sorted(aplicadas), "tareas": tareas,
-        "por_ambito": resumen["por_ambito"]})
-    repaso.guardar(ctx.proyecto, ficha)
+    with repaso.CERROJO:                    # ver `repaso.CERROJO`
+        ficha = repaso.leer(ctx.proyecto)
+        for nota in ficha["notas"]:
+            if nota.get("id") in aplicadas:
+                nota["estado"] = "aplicado"
+                nota["aplicado_en"] = ahora()
+        ficha.setdefault("aplicado", []).append({
+            "cuando": ahora(), "notas": sorted(aplicadas), "tareas": tareas,
+            "por_ambito": resumen["por_ambito"]})
+        repaso.guardar(ctx.proyecto, ficha)
 
     frase = (f"{len(aplicadas)} de {len(notas)} notas aplicadas · "
              + (resumen["frase"] or "sin cambios"))
@@ -5309,6 +6475,9 @@ def _aplicar_cambios_del_repaso(ctx, reparto, avisos):
             actual = previas.get(uid)
             actual = dict(actual) if isinstance(actual, dict) else {}
             actual["subtitulo_texto"] = texto
+            # escrito a mano contra la narracion de AHORA: el ancla de una
+            # corrección de ortografía anterior ya no vale (ver de_escena)
+            actual.pop("subtitulo_ancla", None)
             bloque[uid] = actual
         params_callouts["unidades"] = bloque
     if params_callouts:
@@ -5517,7 +6686,9 @@ def leer_sonido(pid: str):
     return {
         "activo": render.get("sonido", True),
         "musica": render.get("musica") or {},
+        "efectos_volumen": _volumen_de_efectos(render.get("efectos_db")),
         "efectos": surtido,
+        "efectos_fijos": list(render.get("efectos_fijos") or []),
         # LOS VETADOS DEL CANAL. Viajan a la pantalla para poder pintar la ✕ ya
         # marcada en el efecto que se veto: si no, la lista enseñaria un sonido
         # con aspecto de estar puesto que en el vídeo no suena.
@@ -5532,6 +6703,7 @@ def leer_sonido(pid: str):
                                     if f.get("vetado"))}
                     for k, v in sonido.PAPELES.items()],
         "animos": sorted(sonido.ANIMOS),
+        "nombres_animos": sonido.NOMBRES_ANIMOS,
         "hay_jamendo": hay_jamendo,
         "hay_freesound": hay_freesound,
         "lufs": render.get("musica_lufs", sonido.MUSICA_LUFS),
@@ -5553,15 +6725,76 @@ def buscar_musica(pid: str, cuerpo: dict = Body(default=None)):
     plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
     try:
         temas = sonido.buscar_musica(
-            animo=str(datos.get("animo") or "sobrio"),
+            animo=str(datos.get("animo") or ("" if datos.get("texto") else "sobrio")),
             duracion_s=float(plan.get("duracion_total") or 0),
             velocidad=str(datos.get("velocidad") or "low"),
             extra=str(datos.get("extra") or "")[:80],
+            texto=str(datos.get("texto") or "")[:80],
+            pagina=int(datos.get("pagina") or 0),
+            instrumental=datos.get("instrumental") is not False,
             cuantas=int(datos.get("cuantas") or 12))
     except Exception as fallo:
         # una API caída no puede tumbar la pantalla: se dice y se sigue
         raise ErrorApi(502, f"no se ha podido buscar música: {fallo}")
+    for tema in temas:
+        tema.update(licencia_de_tema(tema.get("licencia")))
     return {"temas": temas, "duracion_video": plan.get("duracion_total")}
+
+
+@app.post("/api/musica/buscar")
+def buscar_musica_suelta(cuerpo: dict = Body(default=None)):
+    """Temas de Jamendo por animo, sin video: el borrador de un video nuevo."""
+    sonido = _sonido()
+    datos = _cuerpo(cuerpo)
+    try:
+        temas = sonido.buscar_musica(
+            animo=str(datos.get("animo") or ("" if datos.get("texto") else "sobrio")),
+            duracion_s=0,
+            velocidad=str(datos.get("velocidad") or "low"),
+            extra=str(datos.get("extra") or "")[:80],
+            texto=str(datos.get("texto") or "")[:80],
+            pagina=int(datos.get("pagina") or 0),
+            instrumental=datos.get("instrumental") is not False,
+            cuantas=max(1, min(20, int(datos.get("cuantas") or 10))))
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(502, f"no se ha podido buscar música: {fallo}")
+    for tema in temas:
+        tema.update(licencia_de_tema(tema.get("licencia")))
+    return {"temas": temas}
+
+
+def licencia_de_tema(url):
+    """Lo que dice la licencia Creative Commons de un tema, en claro. -> dict
+
+    Los videos de este estudio son, muchas veces, para un CLIENTE: un tema
+    «NC» (no comercial) no se puede usar ahi sin comprar la licencia en
+    Jamendo. Se lee de la URL de la licencia (`.../licenses/by-nc-sa/3.0/`).
+    """
+    texto = str(url or "").lower()
+    encaje = re.search(r"/licenses/([a-z-]+)/", texto)
+    clave = encaje.group(1) if encaje else ""
+    partes = clave.split("-") if clave else []
+    return {"licencia_nombre": ("CC " + " ".join(p.upper() for p in partes)) if partes else "sin datos",
+            "comercial": bool(partes) and "nc" not in partes,
+            "atribucion": "by" in partes}
+
+
+def _ficha_de_audio_valida(ficha, fuentes, hosts):
+    """Lo que manda la pantalla de un tema o un efecto, comprobado: su id hace
+    de nombre de fichero en el banco y su `descarga` es a donde se sale a
+    pedirlo (con la clave de FreeSound, si es de alli)."""
+    from urllib.parse import urlparse                       # noqa: PLC0415
+    if ficha.get("fuente") not in fuentes:
+        raise ErrorApi(400, f"fuente desconocida: {ficha.get('fuente')!r}")
+    if not re.match(r"^[A-Za-z0-9_-]{1,64}$", str(ficha.get("id") or "")):
+        raise ErrorApi(400, "id de audio no válido")
+    url = str(ficha.get("descarga") or "")
+    if url:
+        destino = urlparse(url)
+        host = (destino.hostname or "").lower()
+        if destino.scheme != "https" or not any(host == h or host.endswith("." + h)
+                                                for h in hosts):
+            raise ErrorApi(400, "esa descarga no es de donde dice")
 
 
 @app.put("/api/proyectos/{pid}/sonido")
@@ -5580,8 +6813,12 @@ def guardar_sonido(pid: str, cuerpo: dict = Body(default=None)):
         if not ficha:
             cambios["musica"] = {}
         else:
-            if not ficha.get("id") or not ficha.get("descarga"):
+            propio = ficha.get("fuente") == "propia"
+            _ficha_de_audio_valida(ficha, ("jamendo", "propia"), ("jamendo.com",))
+            if not ficha.get("id") or not (ficha.get("descarga") or propio):
                 raise ErrorApi(400, "el tema tiene que traer 'id' y 'descarga'")
+            if propio and not os.path.isfile(sonido.banco("musica", sonido._nombre_de(ficha))):
+                raise ErrorApi(400, "ese audio tuyo ya no está: vuelve a subirlo")
             # Se BAJA aquí, al elegirlo, y no al renderizar: el render no sale a
             # la red, y enterarse de que el enlace ya no vale cuando llevas
             # veinte minutos de clips es la versión cara del mismo error.
@@ -5592,22 +6829,499 @@ def guardar_sonido(pid: str, cuerpo: dict = Body(default=None)):
             cambios["musica"] = ficha
     if not cambios:
         raise ErrorApi(400, "hace falta 'musica', 'activo' o 'lufs'")
+    al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
     ctx.estado.actualizar_params("render", cambios)
+    # ELEGIR OTRO TEMA solo vuelve a mezclar el audio, si el video estaba
+    # montado y al dia. Con `musica: {}` (volver a la automatica) no: hay que
+    # montar la banda otra vez, y eso lo hace el boton de montar.
+    trabajo_id = None
+    if datos.get("remontar") and cambios.get("musica"):
+        trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado,
+                                                "volver a mezclar la música")
+    elif datos.get("remontar") and "musica" in cambios and al_dia and montado:
+        # VOLVER A LA AUTOMATICA: hay que montar la banda otra vez (la elige el
+        # ritmo) y despues mezclar. Sigue sin dibujar nada.
+        trabajo_id = ctx.gestor.lanzar("musica automatica", _correr_rehacer_montaje,
+                                       ctx, ["banda_sonora", "render"], True,
+                                       paso="render")
+        _registrar_trabajo(trabajo_id, ctx.id)
     ctx.bitacora.anotar("sonido", "render", {
         "musica": (cambios.get("musica") or {}).get("titulo"),
         "activo": cambios.get("sonido")})
-    return {"guardado": list(cambios), "estado": ctx.estado.estado_de("render")}
+    return {"guardado": list(cambios), "estado": ctx.estado.estado_de("render"),
+            "trabajo_id": trabajo_id, "montado": montado}
+
+
+def _antes_de_cambiar_el_montaje(ctx):
+    """(al_dia, montado) del render ANTES de tocar sus params. 409 si se monta.
+
+    Se mira antes porque escribir un param del render lo deja «obsoleto»: si se
+    mirara despues, nunca estaria al dia y nunca se podria solo remezclar.
+    """
+    if _trabajo_activo(ctx, "render") is not None:
+        raise ErrorApi(409, "el vídeo se está montando ahora: cámbialo cuando termine")
+    return (ctx.estado.estado_de("render") == "listo",
+            bool(_ruta_de_version(ctx, "render", "video.mp4")))
+
+
+def _remontar_si_estaba_al_dia(ctx, al_dia, montado, nombre):
+    """Vuelve a MONTAR el MP4 sobre los clips que hay (`solo_montar`). -> trabajo|None
+
+    Solo si el montaje estaba al dia: con planos pendientes, montar sobre los
+    clips viejos sellaria como hechos unos clips que no lo estan. Entonces el
+    cambio queda guardado y se aplica al montar el video.
+    """
+    if not (al_dia and montado):
+        return None
+    return lanzar_paso(ctx, "render", None, nombre=nombre,
+                       opciones={"solo_montar": True})
+
+
+# ------------------------------------------------------------------- el logo
+
+EXT_LOGO = (".png", ".jpg", ".jpeg", ".webp")
+MAX_BYTES_LOGO = 5 * 1024 * 1024
+
+
+def _carpeta_logo(ctx):
+    return os.path.join(ctx.proyecto.raiz, PASOS_MODULOS.p8_render.CARPETA_LOGO)
+
+
+def _carpeta_logos():
+    """Los logos subidos ANTES de tener video (el borrador, el de un proyecto)."""
+    return os.path.join(raiz_proyectos(), "_sistema", "logos")
+
+
+def _ruta_logo_suelto(nombre):
+    nombre = os.path.basename(str(nombre or ""))
+    if not re.match(r"^logo_[0-9a-f]{10}\.(png|jpg|jpeg|webp)$", nombre):
+        return None
+    ruta = os.path.join(_carpeta_logos(), nombre)
+    return ruta if os.path.isfile(ruta) else None
+
+
+async def _leer_logo_subido(peticion):
+    """(contenido, extension) del campo «logo» de un multipart, validado."""
+    try:
+        formulario = await peticion.form()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(400, f"multipart ilegible: {fallo}")
+    fichero = formulario.get("logo")
+    if not hasattr(fichero, "read"):
+        raise ErrorApi(400, "manda la imagen en el campo «logo»")
+    extension = os.path.splitext(str(getattr(fichero, "filename", "") or ""))[1].lower()
+    if extension not in EXT_LOGO:
+        raise ErrorApi(400, f"el logo tiene que ser {', '.join(EXT_LOGO)}")
+    contenido = await fichero.read()
+    if not contenido or len(contenido) > MAX_BYTES_LOGO:
+        raise ErrorApi(400, f"el logo tiene que pesar menos de "
+                            f"{MAX_BYTES_LOGO // 1024 // 1024} MB")
+    return contenido, extension
+
+
+@app.post("/api/logos", status_code=201)
+async def subir_logo_suelto(peticion: Request):
+    """Guarda un logo sin video todavia: el de un borrador o el de un proyecto."""
+    contenido, extension = await _leer_logo_subido(peticion)
+    os.makedirs(_carpeta_logos(), exist_ok=True)
+    nombre = f"logo_{hashlib.sha1(contenido).hexdigest()[:10]}{extension}"
+    with open(os.path.join(_carpeta_logos(), nombre), "wb") as fh:
+        fh.write(contenido)
+    return {"nombre": nombre}
+
+
+@app.get("/api/logos/{nombre}")
+def servir_logo_suelto(nombre: str, peticion: Request):
+    """Un logo subido que todavia no esta en ningun video."""
+    ruta = _ruta_logo_suelto(nombre)
+    if not ruta:
+        raise ErrorApi(404, "ese logo no está")
+    return servir_fichero(peticion, ruta)
+
+
+def _poner_logo_suelto(ctx, ficha):
+    """Copia un logo del buzon al video y lo deja en sus params. -> ficha"""
+    ruta = _ruta_logo_suelto(ficha.get("fichero"))
+    if not ruta:
+        raise ErrorApi(400, "ese logo ya no está: vuelve a subirlo")
+    carpeta = _carpeta_logo(ctx)
+    os.makedirs(carpeta, exist_ok=True)
+    nombre = os.path.basename(ruta)
+    shutil.copyfile(ruta, os.path.join(carpeta, nombre))
+    p8 = PASOS_MODULOS.p8_render
+    limpio = {"fichero": nombre,
+              "posicion": ficha.get("posicion") if ficha.get("posicion") in p8.POSICIONES_LOGO
+              else "arriba_derecha"}
+    for clave, bajo, alto, defecto in (("tamano", 0.04, 0.4, 0.12), ("opacidad", 0.1, 1.0, 0.9)):
+        try:
+            limpio[clave] = round(min(alto, max(bajo, float(ficha.get(clave, defecto)))), 3)
+        except (TypeError, ValueError):
+            limpio[clave] = defecto
+    ctx.estado.actualizar_params("render", {"logo": limpio})
+    return limpio
+
+
+@app.get("/api/proyectos/{pid}/logo")
+def leer_logo(pid: str):
+    """El logo de este video y donde va, o null si no lleva."""
+    ctx = contexto(pid)
+    ficha = (ctx.estado.params("render") or {}).get("logo") or None
+    if ficha and not os.path.isfile(os.path.join(_carpeta_logo(ctx),
+                                                 str(ficha.get("fichero") or ""))):
+        ficha = None
+    return {"logo": ficha,
+            "posiciones": list(PASOS_MODULOS.p8_render.POSICIONES_LOGO)}
+
+
+@app.get("/api/proyectos/{pid}/logo/imagen")
+def imagen_del_logo(pid: str, peticion: Request):
+    ctx = contexto(pid)
+    ficha = (ctx.estado.params("render") or {}).get("logo") or {}
+    nombre = os.path.basename(str(ficha.get("fichero") or ""))
+    ruta = os.path.join(_carpeta_logo(ctx), nombre)
+    if not nombre or not os.path.isfile(ruta):
+        raise ErrorApi(404, "este vídeo no lleva logo")
+    return servir_fichero(peticion, ruta)
+
+
+@app.post("/api/proyectos/{pid}/logo")
+async def subir_logo(pid: str, peticion: Request):
+    """Sube el logo (PNG con transparencia, mejor) y lo pone arriba a la derecha.
+
+    Cambiarlo, moverlo o quitarlo SOLO vuelve a montar el MP4 (`poner_logo`):
+    ni una imagen ni un clip.
+    """
+    ctx = contexto(pid)
+    try:
+        formulario = await peticion.form()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(400, f"multipart ilegible: {fallo}")
+    fichero = formulario.get("logo")
+    if not hasattr(fichero, "read"):
+        raise ErrorApi(400, "manda la imagen en el campo «logo»")
+    extension = os.path.splitext(str(getattr(fichero, "filename", "") or ""))[1].lower()
+    if extension not in EXT_LOGO:
+        raise ErrorApi(400, f"el logo tiene que ser {', '.join(EXT_LOGO)}")
+    contenido = await fichero.read()
+    if not contenido or len(contenido) > MAX_BYTES_LOGO:
+        raise ErrorApi(400, f"el logo tiene que pesar menos de "
+                            f"{MAX_BYTES_LOGO // 1024 // 1024} MB")
+    carpeta = _carpeta_logo(ctx)
+    os.makedirs(carpeta, exist_ok=True)
+    # nombre nuevo cada vez: es lo que hace que la firma cambie al cambiar de logo
+    nombre = f"logo_{hashlib.sha1(contenido).hexdigest()[:10]}{extension}"
+    with open(os.path.join(carpeta, nombre), "wb") as fh:
+        fh.write(contenido)
+    al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
+    ficha = dict((ctx.estado.params("render") or {}).get("logo") or {})
+    ficha.update({"fichero": nombre})
+    ficha.setdefault("posicion", "arriba_derecha")
+    ficha.setdefault("tamano", 0.12)
+    ficha.setdefault("opacidad", 0.9)
+    ctx.estado.actualizar_params("render", {"logo": ficha})
+    trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado, "poner el logo")
+    return {"logo": ficha, "trabajo_id": trabajo_id, "montado": montado}
+
+
+@app.put("/api/proyectos/{pid}/logo")
+def colocar_logo(pid: str, cuerpo: dict = Body(default=None)):
+    """Donde va y como: {posicion?, tamano? (0,04-0,4), opacidad?} o {quitar: true}."""
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    p8 = PASOS_MODULOS.p8_render
+    actual = dict((ctx.estado.params("render") or {}).get("logo") or {})
+    if datos.get("usar"):
+        # el logo del proyecto (o cualquiera del buzon), puesto en este video
+        al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
+        ficha = dict(datos["usar"]) if isinstance(datos["usar"], dict) else {"fichero": datos["usar"]}
+        nuevo = _poner_logo_suelto(ctx, ficha)
+        return {"logo": nuevo, "montado": montado,
+                "trabajo_id": _remontar_si_estaba_al_dia(ctx, al_dia, montado,
+                                                         "poner el logo")}
+    if datos.get("quitar"):
+        if not actual:
+            return {"logo": None, "trabajo_id": None}
+        al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
+        # se QUITA la clave, no se deja vacia: un video que nunca tuvo logo
+        # vuelve a tener exactamente los params de antes
+        params = copy.deepcopy(ctx.estado.params("render") or {})
+        params.pop("logo", None)
+        ctx.estado.set_params("render", params)
+        return {"logo": None, "montado": montado,
+                "trabajo_id": _remontar_si_estaba_al_dia(ctx, al_dia, montado,
+                                                         "quitar el logo")}
+    if not actual.get("fichero"):
+        raise ErrorApi(409, "primero sube el logo")
+    nuevo = dict(actual)
+    if "posicion" in datos:
+        if datos["posicion"] not in p8.POSICIONES_LOGO:
+            raise ErrorApi(400, "posicion: " + ", ".join(p8.POSICIONES_LOGO))
+        nuevo["posicion"] = datos["posicion"]
+    for clave, bajo, alto in (("tamano", 0.04, 0.4), ("opacidad", 0.1, 1.0)):
+        if clave in datos:
+            try:
+                nuevo[clave] = round(min(alto, max(bajo, float(datos[clave]))), 3)
+            except (TypeError, ValueError):
+                raise ErrorApi(400, f"'{clave}' tiene que ser un número")
+    if nuevo == actual:
+        return {"logo": actual, "trabajo_id": None}
+    al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
+    ctx.estado.actualizar_params("render", {"logo": nuevo})
+    return {"logo": nuevo, "montado": montado,
+            "trabajo_id": _remontar_si_estaba_al_dia(ctx, al_dia, montado,
+                                                     "mover el logo")}
+
+
+# --------------------------------------------------------- los subtitulos
+
+#: Lo que se puede elegir de los subtitulos de UN video. Sin elegir, lo del
+#: estilo (que es lo que habia). Cambiarlo rehace las capas y el montaje: ni
+#: una imagen.
+TAMANOS_SUBTITULO = ("pequeno", "normal", "grande", "enorme")
+DISENOS_SUBTITULO = ("dibujo", "realista", "editorial")
+CONFIG_SUBTITULOS_ESTILO = "subtitulos_del_estilo"
+
+
+CLAVES_SUBTITULOS = ("subtitulo_tam", "subtitulo_caja", "diseno", "paleta")
+
+
+def _subtitulos_de(params_callouts, config=None):
+    """Lo que la pantalla ensena de los subtitulos de un video (o de un borrador)."""
+    p = params_callouts or {}
+    p7 = PASOS_MODULOS.p7_callouts
+    paleta = p.get("paleta") or {}
+    return {"tam": p.get("subtitulo_tam") or p7.PARAMS_POR_DEFECTO["subtitulo_tam"],
+            "caja": p.get("subtitulo_caja", "auto"),
+            "diseno": p.get("diseno") or p7.PARAMS_POR_DEFECTO["diseno"],
+            "color": ((paleta.get("fijados") or {}).get("texto") or ""),
+            "propios": bool((config or {}).get(CONFIG_SUBTITULOS_ESTILO)),
+            "tamanos": list(TAMANOS_SUBTITULO),
+            "disenos": [{"id": d, "nombre": (p7.SETS_DISENO.get(d) or {}).get("nombre") or d,
+                         "descripcion": (p7.SETS_DISENO.get(d) or {}).get("descripcion") or ""}
+                        for d in DISENOS_SUBTITULO]}
+
+
+def _cambios_de_subtitulos(p, datos):
+    """Lo pedido, validado, como cambios de los params de callouts. -> dict"""
+    p7 = PASOS_MODULOS.p7_callouts
+    cambios = {}
+    if "tam" in datos:
+        if datos["tam"] not in TAMANOS_SUBTITULO:
+            raise ErrorApi(400, "tam: " + ", ".join(TAMANOS_SUBTITULO))
+        cambios["subtitulo_tam"] = datos["tam"]
+    if "caja" in datos:
+        caja = datos["caja"]
+        if caja != "auto":
+            try:
+                caja = round(min(1.0, max(0.0, float(caja))), 2)
+            except (TypeError, ValueError):
+                raise ErrorApi(400, "caja: «auto» o un número de 0 a 1")
+        cambios["subtitulo_caja"] = caja
+    if "diseno" in datos:
+        if datos["diseno"] not in DISENOS_SUBTITULO:
+            raise ErrorApi(400, "diseno: " + ", ".join(DISENOS_SUBTITULO))
+        cambios["diseno"] = datos["diseno"]
+    if "color" in datos:
+        color = str(datos["color"] or "").strip()
+        if color and not re.match(r"^#[0-9a-fA-F]{6}$", color):
+            raise ErrorApi(400, "color: «#rrggbb» o vacío")
+        paleta = dict(p7.PARAMS_POR_DEFECTO["paleta"])
+        paleta.update(p.get("paleta") or {})
+        fijados = dict(paleta.get("fijados") or {})
+        if color:
+            fijados["texto"] = color
+        else:
+            fijados.pop("texto", None)
+        paleta["fijados"] = fijados
+        cambios["paleta"] = paleta
+    return {k: v for k, v in cambios.items() if p.get(k) != v}
+
+
+def _aplicar_subtitulos(ctx, datos):
+    """Escribe los subtitulos pedidos en los params de callouts. -> cambiado
+
+    La primera vez se apunta COMO ESTABAN (y que claves no estaban), y
+    «automatico» los deja exactamente asi: las claves que no existian se
+    QUITAN, no se rellenan con un valor de fabrica. Volver es volver: la firma
+    de callouts vuelve a ser la de antes y lo ya hecho vuelve a estar al dia.
+    """
+    p = ctx.estado.params("callouts") or {}
+    if datos.get("automatico"):
+        guardado = ctx.proyecto.config.get(CONFIG_SUBTITULOS_ESTILO)
+        if not isinstance(guardado, dict):
+            return False
+        valores = guardado.get("valores") or {}
+        params = copy.deepcopy(p)
+        for clave in CLAVES_SUBTITULOS:
+            if clave in valores:
+                params[clave] = copy.deepcopy(valores[clave])
+            else:
+                params.pop(clave, None)
+        ctx.estado.set_params("callouts", params)
+        ctx.proyecto.config.pop(CONFIG_SUBTITULOS_ESTILO, None)
+        ctx.proyecto.guardar_config()
+        ctx.bitacora.anotar("subtitulos_del_estilo", "callouts", {})
+        return True
+    cambios = _cambios_de_subtitulos(p, datos)
+    if not cambios:
+        return False
+    if not ctx.proyecto.config.get(CONFIG_SUBTITULOS_ESTILO):
+        ctx.proyecto.config[CONFIG_SUBTITULOS_ESTILO] = {
+            "valores": {k: copy.deepcopy(p[k]) for k in CLAVES_SUBTITULOS if k in p}}
+        ctx.proyecto.guardar_config()
+    ctx.estado.actualizar_params("callouts", cambios)
+    ctx.bitacora.anotar("subtitulos_cambiados", "callouts", {"claves": sorted(cambios)})
+    return True
+
+
+@app.get("/api/proyectos/{pid}/subtitulos")
+def leer_subtitulos(pid: str):
+    """Como son los subtitulos de este video, y si son los del estilo."""
+    ctx = contexto(pid)
+    salida = _subtitulos_de(ctx.estado.params("callouts"), ctx.proyecto.config)
+    salida["montado"] = bool(_ruta_de_version(ctx, "render", "video.mp4"))
+    salida["pendiente"] = ctx.estado.estado_de("callouts") == "obsoleto"
+    return salida
+
+
+@app.put("/api/proyectos/{pid}/subtitulos")
+def cambiar_subtitulos(pid: str, cuerpo: dict = Body(default=None)):
+    """{tam?, caja? ("auto" o 0-1), diseno?, color? ("#rrggbb" o "")} o {automatico: true}.
+
+    Cambiarlos deja pendientes las capas de texto y el montaje (no las
+    imagenes). Se aplican con `POST .../subtitulos/aplicar` o al montar.
+    """
+    ctx = contexto(pid)
+    if _trabajo_activo(ctx, "callouts") or _trabajo_activo(ctx, "render"):
+        raise ErrorApi(409, "el vídeo se está montando ahora: cámbialo cuando termine")
+    cambiado = _aplicar_subtitulos(ctx, _cuerpo(cuerpo))
+    return {"cambiado": cambiado, "estado": ctx.estado.estado_de("callouts")}
+
+
+def _correr_rehacer_montaje(avisar, ctx, tareas, solo_montar=False):
+    """Rehace lo que se pida del montaje (rotulos, banda sonora, MP4). Gratis."""
+    _regenerar_tras_repaso(avisar, ctx, tareas, "pendientes", solo_montar)
+    return {"tareas": tareas}
+
+
+@app.post("/api/proyectos/{pid}/subtitulos/aplicar", status_code=202)
+def aplicar_subtitulos(pid: str):
+    """Rehace las capas de texto y vuelve a montar el video. Ni una imagen."""
+    ctx = contexto(pid)
+    if not _ruta_de_version(ctx, "render", "video.mp4"):
+        raise ErrorApi(409, "este vídeo todavía no está montado: se aplicará al montarlo")
+    if _trabajo_activo(ctx, "callouts") or _trabajo_activo(ctx, "render"):
+        raise ErrorApi(409, "el vídeo ya se está montando")
+    trabajo_id = ctx.gestor.lanzar("subtitulos", _correr_rehacer_montaje, ctx,
+                                   ["callouts", "render"], paso="render")
+    _registrar_trabajo(trabajo_id, ctx.id)
+    return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id)}
+
+
+# ------------------------------------------------- escuchar un tema de Jamendo
+
+@app.get("/api/musica/escucha")
+def escuchar_tema(url: str = Query(...)):
+    """Pasa por aqui la escucha de un tema de Jamendo antes de elegirlo.
+
+    Por el servidor y no directo desde el navegador: la politica de seguridad
+    del acceso de delante no deja cargar audio de otros dominios. Solo Jamendo.
+    """
+    from urllib.parse import urlparse
+    destino = urlparse(str(url))
+    host = (destino.hostname or "").lower()
+    permitidos = ("jamendo.com", "freesound.org")
+    if destino.scheme != "https" or not any(
+            host == d or host.endswith("." + d) for d in permitidos):
+        raise ErrorApi(400, "solo se escuchan temas de Jamendo y sonidos de FreeSound")
+    import requests
+    try:
+        respuesta = requests.get(url, stream=True, timeout=30)
+        respuesta.raise_for_status()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(502, f"Jamendo no deja escuchar ese tema: {fallo}")
+    return StreamingResponse(respuesta.iter_content(64 * 1024),
+                             media_type=respuesta.headers.get("content-type") or "audio/mpeg")
+
+
+@app.get("/api/proyectos/{pid}/musica/presencia")
+def leer_presencia_musica(pid: str):
+    """Cuánto se oye la música bajo la voz en este vídeo, y los niveles que hay."""
+    ctx = contexto(pid)
+    sonido = _sonido()
+    guardada = (ctx.estado.params("render") or {}).get("musica_presencia")
+    nombre, _ = sonido.presencia_de(guardada)
+    return {"presencia": nombre, "elegida": bool(guardada),
+            "por_defecto": sonido.PRESENCIA_POR_DEFECTO,
+            "niveles": list(sonido.PRESENCIAS)}
+
+
+@app.put("/api/proyectos/{pid}/musica/presencia")
+def cambiar_presencia_musica(pid: str, cuerpo: dict = Body(default=None)):
+    """Fija cuánto se oye la música y, si el vídeo ya está montado, lo REMONTA.
+
+    Remontar es volver a mezclar el audio sobre los clips que ya hay
+    (`solo_montar`): ni una imagen ni un clip, segundos de máquina. Solo se hace
+    si el montaje estaba al día: con planos pendientes, mezclar sobre los clips
+    viejos sellaría como hechos unos clips que no lo están, y entonces se
+    guarda y se deja para el siguiente montaje.
+
+    No se escribe nada si lo pedido es lo que ya suena (regla 1 de CLAUDE.md):
+    elegir «normal» en un vídeo que nunca eligió no mueve la firma.
+    """
+    ctx = contexto(pid)
+    sonido = _sonido()
+    datos = _cuerpo(cuerpo)
+    pedida = str(datos.get("presencia") or "").strip().lower()
+    if pedida not in sonido.PRESENCIAS:
+        raise ErrorApi(400, "«presencia» tiene que ser una de: "
+                            + ", ".join(sonido.PRESENCIAS))
+    render = ctx.estado.params("render") or {}
+    actual, _ = sonido.presencia_de(render.get("musica_presencia"))
+    # UN VIDEO MONTADO SIN NIVEL GUARDADO se mezclo con lo que hubiera ese dia:
+    # si es de antes del 10-10-2026, con la musica enterrada («suave»), aunque
+    # la pantalla le marque «normal». Asi que ahi elegir «normal» SI se aplica
+    # --y vuelve a mezclar--; solo se ignora en un video sin montar, donde no
+    # escribir nada es lo que manda la regla 1.
+    montado_ya = bool(_ruta_de_version(ctx, "render", "video.mp4"))
+    if pedida == actual and (render.get("musica_presencia") or not montado_ya):
+        return {"presencia": actual, "cambiado": False, "remontando": False,
+                "trabajo_id": None, "estado": ctx.estado.estado_de("render")}
+    al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
+    ctx.estado.actualizar_params("render", {"musica_presencia": pedida})
+    ctx.bitacora.anotar("musica_presencia", "render",
+                        {"antes": actual, "ahora": pedida})
+    trabajo_id = _remontar_si_estaba_al_dia(
+        ctx, al_dia and datos.get("remontar", True), montado,
+        "volver a mezclar la música")
+    return {"presencia": pedida, "cambiado": True,
+            "remontando": bool(trabajo_id), "trabajo_id": trabajo_id,
+            "montado": montado,
+            "trabajo": ctx.gestor.estado(trabajo_id) if trabajo_id else None,
+            "estado": ctx.estado.estado_de("render")}
 
 
 def _correr_surtir_efectos(avisar, ctx, papeles, salteado):
     sonido = _sonido()
     render = ctx.estado.params("render") or {}
     surtido = dict(render.get("efectos") or {})
+    # los que se eligieron a mano no se vuelven a surtir: se pidieron ASI
+    fijos = set(render.get("efectos_fijos") or [])
+    papeles = [p for p in papeles if p not in fijos or not surtido.get(p)]
     total = len(papeles)
+    nuevos = {}
     for indice, papel in enumerate(papeles):
         avisar(0.05 + 0.9 * (indice / max(1, total)),
                f"buscando y bajando «{sonido.PAPELES[papel]['nombre']}»")
-        surtido[papel] = sonido.surtir(papel, salteado=salteado)
+        nuevos[papel] = sonido.surtir(papel, salteado=salteado)
+    # SE RELEE ANTES DE ESCRIBIR: si mientras se buscaba alguien fijo un
+    # efecto a mano, ese papel se queda como lo dejo
+    ahora = ctx.estado.params("render") or {}
+    surtido = dict(ahora.get("efectos") or {})
+    fijos_ahora = set(ahora.get("efectos_fijos") or [])
+    for papel, fichas in nuevos.items():
+        if papel not in fijos_ahora or not surtido.get(papel):
+            surtido[papel] = fichas
     ctx.estado.actualizar_params("render", {"efectos": surtido})
     cuantos = sum(len(v or []) for v in surtido.values())
     avisar(1.0, f"{cuantos} efectos en el banco")
@@ -5668,7 +7382,7 @@ def montar_banda_sonora(pid: str, cuerpo: dict = Body(default=None)):
     sonido = _sonido()
     datos = _cuerpo(cuerpo)
     if not sonido.hay_claves()[0]:
-        raise ErrorApi(409, "falta la clave de Jamendo: ponla en Configuracion")
+        raise ErrorApi(409, "falta la clave de Jamendo: ponla en Configuración")
     # los tramos se pueden pasar retocados desde avanzadas (otro ánimo), pero el
     # camino normal es no pasar nada y que los deduzca del ritmo
     tramos = datos.get("tramos") if isinstance(datos.get("tramos"), list) else None
@@ -5677,6 +7391,132 @@ def montar_banda_sonora(pid: str, cuerpo: dict = Body(default=None)):
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id),
             "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
+
+
+# ---------------------------------------- tu música, tus efectos, y buscar más
+
+@app.post("/api/sonido/subir", status_code=201)
+async def subir_audio_propio(peticion: Request, familia: str = Query(default="musica")):
+    """Sube un audio tuyo (MP3, WAV, M4A, OGG) para la música o un efecto."""
+    sonido = _sonido()
+    if familia not in ("musica", "efectos"):
+        raise ErrorApi(400, "familia: «musica» o «efectos»")
+    tipo = (peticion.headers.get("content-type") or "").lower()
+    if not tipo.startswith("multipart/"):
+        raise ErrorApi(400, "manda el audio como multipart")
+    formulario = await peticion.form()
+    for _clave, valor in formulario.multi_items():
+        if not hasattr(valor, "read"):
+            continue
+        # COMO MUCHO EL TOPE MAS UNO: leerlo entero para despues decir «pesa
+        # demasiado» es meter en memoria lo que se va a rechazar
+        contenido = await valor.read(sonido.MAX_BYTES_AUDIO + 1)
+        if len(contenido) > sonido.MAX_BYTES_AUDIO:
+            raise ErrorApi(400, f"pesa más de {sonido.MAX_BYTES_AUDIO // 1024 // 1024} MB")
+        try:
+            ficha = await asyncio.to_thread(
+                sonido.guardar_propio, contenido, getattr(valor, "filename", ""), familia)
+        except ValueError as fallo:
+            raise ErrorApi(400, str(fallo))
+        ficha["muestra"] = (f"/api/efectos/{sonido._nombre_de(ficha)}" if familia == "efectos"
+                            else f"/api/musica/propia/{sonido._nombre_de(ficha)}")
+        anotar_global("audio_propio", {"familia": familia, "id": ficha["id"],
+                                       "titulo": ficha["titulo"]})
+        return {"ficha": ficha}
+    raise ErrorApi(400, "no ha llegado ningún audio")
+
+
+@app.get("/api/musica/propia/{archivo}")
+def servir_musica_propia(archivo: str, peticion: Request):
+    """Un tema tuyo del banco, para escucharlo."""
+    sonido = _sonido()
+    if not archivo.startswith("propia_"):
+        raise ErrorApi(404, "solo se sirven aquí los temas subidos")
+    destino = ruta_segura(sonido.banco("musica"), archivo)
+    if not os.path.isfile(destino):
+        raise ErrorApi(404, f"no hay ningún tema {archivo!r}")
+    return servir_fichero(peticion, destino)
+
+
+@app.post("/api/efectos/buscar")
+def buscar_efectos_a_mano(cuerpo: dict = Body(default=None)):
+    """Efectos de FreeSound por texto libre, para elegir uno: {texto, papel?, pagina?}."""
+    sonido = _sonido()
+    datos = _cuerpo(cuerpo)
+    texto = " ".join(str(datos.get("texto") or "").split())[:80]
+    papel = str(datos.get("papel") or "")
+    if not texto:
+        texto = " ".join(sonido.PAPELES.get(papel, {}).get("consultas", ("whoosh",))[:1])
+    dur_min, dur_max = sonido.PAPELES.get(papel, {}).get("duracion", (0.1, 10.0))
+    try:
+        fichas = sonido.buscar_efectos(texto, dur_min, dur_max,
+                                       cuantos=max(1, min(30, int(datos.get("cuantos") or 15))))
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(502, f"no se ha podido buscar en FreeSound: {fallo}")
+    prohibidos = sonido.vetados()
+    for ficha in fichas:
+        ficha["vetado"] = sonido.clave_de(ficha) in prohibidos
+        ficha.update(licencia_de_efecto(ficha.get("licencia")))
+    return {"efectos": fichas, "texto": texto}
+
+
+def licencia_de_efecto(url):
+    """La licencia de un sonido de FreeSound, en claro (CC0, BY, BY-NC)."""
+    texto = str(url or "").lower()
+    if "publicdomain" in texto or "/zero/" in texto:
+        return {"licencia_nombre": "CC0 (libre)", "comercial": True, "atribucion": False}
+    return licencia_de_tema(url)
+
+
+@app.put("/api/proyectos/{pid}/sonido/efecto")
+def fijar_efecto(pid: str, cuerpo: dict = Body(default=None)):
+    """Fija UN sonido para un papel ({papel, efecto}) o lo devuelve a automático
+    ({papel, efecto: null}). Vuelve a montar el vídeo si estaba al día."""
+    ctx = contexto(pid)
+    sonido = _sonido()
+    datos = _cuerpo(cuerpo)
+    papel = str(datos.get("papel") or "")
+    if papel not in sonido.PAPELES:
+        raise ErrorApi(400, f"papel desconocido: {papel!r}. Son: {', '.join(sonido.PAPELES)}")
+    ficha = datos.get("efecto") if isinstance(datos.get("efecto"), dict) else None
+    render = ctx.estado.params("render") or {}
+    surtido = dict(render.get("efectos") or {})
+    fijos = [p for p in (render.get("efectos_fijos") or []) if p in sonido.PAPELES]
+    if ficha:
+        propio = ficha.get("fuente") == "propia"
+        _ficha_de_audio_valida(ficha, ("freesound", "propia"), ("freesound.org",))
+        if not ficha.get("id") or not (ficha.get("descarga") or propio):
+            raise ErrorApi(400, "el efecto tiene que traer 'id' y 'descarga'")
+        if not propio:
+            try:
+                sonido.traer(ficha, "efectos")
+            except Exception as fallo:                      # noqa: BLE001
+                raise ErrorApi(502, f"no se ha podido bajar el sonido: {fallo}")
+        if not os.path.isfile(sonido.banco("efectos", sonido._nombre_de(ficha))):
+            raise ErrorApi(400, "ese sonido no está en el banco: vuelve a subirlo")
+        limpio = {k: ficha.get(k) for k in ("fuente", "id", "titulo", "autor", "duracion",
+                                            "licencia", "pagina", "descarga", "escucha")}
+        limpio["papel"] = papel
+        surtido[papel] = [limpio]
+        if papel not in fijos:
+            fijos.append(papel)
+    else:
+        # A AUTOMATICO: el surtido de FreeSound otra vez (se busca al montar)
+        surtido.pop(papel, None)
+        fijos = [p for p in fijos if p != papel]
+    al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
+    ctx.estado.actualizar_params("render", {"efectos": surtido, "efectos_fijos": fijos})
+    trabajo_id = None
+    if datos.get("remontar"):
+        # los efectos se mezclan al montar el MP4: no se dibuja ni se surte nada
+        trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado,
+                                                "volver a mezclar los efectos")
+    ctx.bitacora.anotar("efecto_fijado", "render",
+                        {"papel": papel, "efecto": (ficha or {}).get("titulo")})
+    lista = [dict(f, muestra=f"/api/efectos/{sonido._nombre_de(f)}")
+             for f in (surtido.get(papel) or []) if isinstance(f, dict)]
+    return {"papel": papel, "fijos": fijos, "efectos": lista,
+            "trabajo_id": trabajo_id, "montado": montado}
 
 
 @app.get("/api/efectos/{archivo}")
@@ -5706,7 +7546,7 @@ def vetar_efecto(pid: str, cuerpo: dict = Body(default=None)):
     Y NO SE BORRA EL FICHERO. Freesound ordena por descargas: borrarlo sólo
     consigue que la siguiente búsqueda lo vuelva a bajar.
     """
-    contexto(pid)                      # el proyecto tiene que existir
+    ctx = contexto(pid)                # el proyecto tiene que existir
     sonido = _sonido()
     datos = _cuerpo(cuerpo)
     ficha = datos.get("efecto") if isinstance(datos.get("efecto"), dict) else None
@@ -5714,16 +7554,61 @@ def vetar_efecto(pid: str, cuerpo: dict = Body(default=None)):
         sonido.clave_de(ficha) if ficha else "")
     if not clave:
         raise ErrorApi(400, "hace falta 'clave' o 'efecto' con fuente e id")
+    # CON `remontar`, el video montado se vuelve a MEZCLAR ya sin (o con) ese
+    # sonido: vetar no toca ningun param, asi que el montaje seguiria «al dia»
+    # con el efecto dentro y no habria boton que lo quitara (11-10-2026).
+    # el veto se apunta SIEMPRE; si se esta montando (o buscando efectos) solo
+    # se deja el remontaje para el siguiente montaje
+    remontar = bool(datos.get("remontar")) and _trabajo_activo(ctx, "render") is None
+    al_dia, montado = _antes_de_cambiar_el_montaje(ctx) if remontar else (False, False)
     if datos.get("quitar"):
-        return {"vetado": False, "quitado": sonido.desvetar(clave),
+        quitado = sonido.desvetar(clave)
+        trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado, "volver a mezclar los efectos") \
+            if remontar and quitado else None
+        return {"vetado": False, "quitado": quitado, "trabajo_id": trabajo_id,
                 "vetados": [sonido.vetados()[k] for k in sorted(sonido.vetados())]}
     try:
         entrada = sonido.vetar(ficha or clave, papel=datos.get("papel"),
                                motivo=str(datos.get("motivo") or ""))
     except ValueError as fallo:
         raise ErrorApi(400, str(fallo))
-    return {"vetado": True, "efecto": entrada,
+    trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado, "volver a mezclar los efectos") \
+        if remontar else None
+    return {"vetado": True, "efecto": entrada, "trabajo_id": trabajo_id,
             "vetados": [sonido.vetados()[k] for k in sorted(sonido.vetados())]}
+
+
+#: Cuanto se oyen los efectos, en tres palabras (`render.efectos_db`, que el
+#: mezclador ya entendia y solo se podia tocar con una nota del repaso).
+VOLUMEN_EFECTOS = {"bajos": -8.0, "normales": 0.0, "altos": 4.0}
+
+
+def _volumen_de_efectos(db):
+    try:
+        valor = float(db or 0.0)
+    except (TypeError, ValueError):
+        valor = 0.0
+    return min(VOLUMEN_EFECTOS, key=lambda k: abs(VOLUMEN_EFECTOS[k] - valor))
+
+
+@app.put("/api/proyectos/{pid}/sonido/efectos/volumen")
+def cambiar_volumen_efectos(pid: str, cuerpo: dict = Body(default=None)):
+    """Fija cuánto se oyen los efectos ({nivel: bajos|normales|altos}) y, si
+    el vídeo ya está montado y al día, lo vuelve a MEZCLAR (no se dibuja nada).
+    No se escribe nada si lo pedido es lo que ya suena (regla 1)."""
+    ctx = contexto(pid)
+    nivel = str(_cuerpo(cuerpo).get("nivel") or "").strip().lower()
+    if nivel not in VOLUMEN_EFECTOS:
+        raise ErrorApi(400, "«nivel» tiene que ser: " + ", ".join(VOLUMEN_EFECTOS))
+    render = ctx.estado.params("render") or {}
+    actual = _volumen_de_efectos(render.get("efectos_db"))
+    if nivel == actual:
+        return {"nivel": actual, "cambiado": False, "trabajo_id": None}
+    al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
+    ctx.estado.actualizar_params("render", {"efectos_db": VOLUMEN_EFECTOS[nivel]})
+    ctx.bitacora.anotar("efectos_volumen", "render", {"antes": actual, "ahora": nivel})
+    trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado, "volver a mezclar los efectos")
+    return {"nivel": nivel, "cambiado": True, "trabajo_id": trabajo_id, "montado": montado}
 
 
 @app.post("/api/proyectos/{pid}/sonido/efectos", status_code=202)
@@ -5742,7 +7627,7 @@ def surtir_efectos(pid: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(400, f"papeles desconocidos: {', '.join(desconocidos)}. "
                             f"Los que hay son: {', '.join(sonido.PAPELES)}")
     if not sonido.hay_claves()[1]:
-        raise ErrorApi(409, "falta la clave de FreeSound: ponla en Configuracion")
+        raise ErrorApi(409, "falta la clave de FreeSound: ponla en Configuración")
     # 'salteado' rota por qué consulta se empieza: volver a pulsar trae OTROS
     # sonidos en vez de los mismos, que es lo que se espera de «buscar más».
     salteado = int(datos.get("salteado") or 0)
@@ -5766,7 +7651,8 @@ def leer_ajustes():
     return {"ajustes": AJUSTES.leer(),
             "calidades": list(AJUSTES.CALIDADES),
             "costes": AJUSTES.tabla_de_costes(),
-            "tamano": AJUSTES.TAMANO}
+            "tamano": AJUSTES.TAMANO,
+            "zona": AJUSTES.zona_en_uso()}
 
 
 @app.put("/api/ajustes")
@@ -5776,8 +7662,11 @@ def guardar_ajustes(cuerpo: dict = Body(default=None)):
         guardados = AJUSTES.guardar(_cuerpo(cuerpo))
     except ValueError as fallo:
         raise ErrorApi(400, str(fallo))
+    if "zona_horaria" in _cuerpo(cuerpo):
+        AJUSTES.aplicar_zona(guardados.get("zona_horaria") or "")
     anotar_global("ajustes_guardados", {"ajustes": guardados})
-    return {"ajustes": guardados, "costes": AJUSTES.tabla_de_costes()}
+    return {"ajustes": guardados, "costes": AJUSTES.tabla_de_costes(),
+            "zona": AJUSTES.zona_en_uso()}
 
 
 # ------------------------------------------------------------------ enlaces
@@ -5827,9 +7716,9 @@ def _referencias_de_estilo_o_400(ctx):
         raise ErrorApi(400, str(fallo))
     minimo = PASOS_MODULOS.p6_assets.MIN_REFERENCIAS_ESTILO
     if len(rutas) < minimo:
-        raise ErrorApi(400, f"la generacion necesita al menos {minimo} laminas "
+        raise ErrorApi(400, f"la generación necesita al menos {minimo} láminas "
                             f"de estilo y hay {len(rutas)}: rehaz el estilo "
-                            f"grafico de este canal y vuelve a lanzar")
+                            f"gráfico de este canal y vuelve a lanzar")
     return rutas
 
 
@@ -5853,7 +7742,14 @@ def _un_paso(ctx, paso_id, modo, extra=None):
     cuerpo = {"todo": True} if modo == "todo" else {}
     unidades = _plan_de_ejecucion(ctx, paso_id, cuerpo)
     opciones = dict(extra or {})
-    if modo == "todo" and paso_id == "assets":
+    if paso_id == "assets":
+        return _correr_assets_de_tanda, (ctx, unidades, _opciones_assets(modo, opciones))
+    return _correr_paso, (ctx, paso_id, unidades, opciones)
+
+
+def _opciones_assets(modo, opciones):
+    """Las opciones de las imagenes en una tanda (ver `_un_paso`)."""
+    if modo == "todo":
         # EL CORTE LO HACE LA TAREA `corte`, UNA VEZ POR TANDA, y por eso las
         # tareas de `assets` de una receta pasan `replantear: False` (gana sobre
         # este defecto). Replantear renumera los planos: si lo hicieran tambien
@@ -5862,7 +7758,119 @@ def _un_paso(ctx, paso_id, modo, extra=None):
         # video nuevo: el corte dio 97 planos y la pasada de piezas 98.
         opciones.setdefault("replantear", True)
         opciones.setdefault("rehacer", True)
-    return _correr_paso, (ctx, paso_id, unidades, opciones)
+    return opciones
+
+
+def _palabras_llanas(texto):
+    sin = unicodedata.normalize("NFD", str(texto or ""))
+    sin = "".join(c for c in sin if unicodedata.category(c) != "Mn")
+    return re.findall(r"\w+", sin.lower())
+
+
+def _retirar_lo_de_otro_texto(ctx, en_cola=()):
+    """Las notas de un plano cuya FRASE CAMBIA: se mudan con su frase, o se van.
+
+    EL FALLO (11-10-2026). Una nota aplicada deja su texto en
+    `assets.unidades["escena:S004"].feedback` (y una correccion del subtitulo,
+    en `callouts...subtitulo_texto`), pegado al NUMERO de plano. Al regenerar el
+    guion y volver a cortar, el S004 nuevo es otra escena -- y heredaba la nota:
+    p6 la leia como un retoque y le ponia delante la imagen vieja de S004
+    («rechazada»), asi que el plano nuevo salia derivado del video anterior.
+
+    Lo que se hace, plano a plano, comparando el plan con el que se dibujo (el
+    activo) con el que va a rodar la tanda (`_plan_de_planos`):
+
+    - si su frase sigue en el MISMO numero, no se toca nada;
+    - si su frase sigue en el video con OTRO numero (regrabar un tramo corre la
+      numeracion), la nota SE MUDA con ella: es de esa frase, no del numero;
+    - si su frase ya no se dice, se quita.
+
+    Solo se tocan planos cuya narracion cambia, que ya estan obsoletos (la
+    narracion entra en su firma) y que la tanda sella con los params de ahora:
+    no se paga nada que no se fuera a pagar. Las notas que estan en la cola de
+    imagenes (`en_cola`) no se tocan: son de ahora. -> [planos tocados]
+    """
+    p6 = PASOS_MODULOS.p6_assets
+    assets = ctx.estado.params("assets") or {}
+    callouts = ctx.estado.params("callouts") or {}
+    ua = dict(assets.get("unidades") or {})
+    uc = dict(callouts.get("unidades") or {})
+    con_algo = {uid for uid, b in ua.items() if isinstance(b, dict) and b.get("feedback")}
+    con_algo |= {uid for uid, b in uc.items() if isinstance(b, dict) and b.get("subtitulo_texto")}
+    con_algo -= {f"escena:{p}" for p in en_cola}
+    if not con_algo:
+        return []
+    viejo = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    try:
+        nuevo = _plan_de_planos(ctx) or {}
+    except Exception:                                       # noqa: BLE001
+        return []                       # sin plan nuevo no se sabe: no se toca nada
+    antes = {str(e.get("id")): tuple(_palabras_llanas(e.get("narracion")))
+             for e in viejo.get("escenas") or []}
+    ahora = {str(e.get("id")): tuple(_palabras_llanas(e.get("narracion")))
+             for e in nuevo.get("escenas") or []}
+    if not antes or not ahora:
+        return []
+    donde_ahora = {}
+    for sid, frase in ahora.items():
+        donde_ahora.setdefault(frase, sid)
+    cambiados = sorted(uid for uid in con_algo
+                       if uid.startswith("escena:") and uid.split(":", 1)[1] in antes
+                       and antes[uid.split(":", 1)[1]] != ahora.get(uid.split(":", 1)[1]))
+    if not cambiados:
+        return []
+    CAMPOS_A, CAMPOS_C = ("feedback", "alcance"), ("subtitulo_texto", "subtitulo_ancla")
+    nuevo_a, nuevo_c, mudanzas = {}, {}, {}
+    # 1. se quitan de su numero viejo
+    for uid in cambiados:
+        if isinstance(ua.get(uid), dict) and ua[uid].get("feedback"):
+            nuevo_a[uid] = {k: v for k, v in ua[uid].items() if k not in CAMPOS_A}
+        if isinstance(uc.get(uid), dict) and uc[uid].get("subtitulo_texto"):
+            nuevo_c[uid] = {k: v for k, v in uc[uid].items() if k not in CAMPOS_C}
+    # 2. y se mudan al numero donde su frase se dice ahora (si alli no hay ya
+    #    una nota que se quede)
+    for uid in cambiados:
+        destino = donde_ahora.get(antes[uid.split(":", 1)[1]])
+        if not destino:
+            continue
+        duid = f"escena:{destino}"
+        if duid == uid:
+            continue
+        for unidades, nuevos, campos in ((ua, nuevo_a, CAMPOS_A), (uc, nuevo_c, CAMPOS_C)):
+            origen = unidades.get(uid)
+            if not (isinstance(origen, dict) and origen.get(campos[0])):
+                continue
+            base = nuevos.get(duid, unidades.get(duid))
+            base = dict(base) if isinstance(base, dict) else {}
+            if base.get(campos[0]):
+                continue                          # el destino tiene la suya
+            base.update({k: origen[k] for k in campos if k in origen})
+            nuevos[duid] = base
+            mudanzas[uid.split(":", 1)[1]] = destino
+    if nuevo_a:
+        # lo escribe la propia tanda (assets ya esta en marcha): la foto de
+        # entradas se pone al dia y el plano no sale obsoleto al terminar
+        ctx.estado.actualizar_params("assets", {"unidades": nuevo_a}, del_propio_paso=True)
+    if nuevo_c:
+        ctx.estado.actualizar_params("callouts", {"unidades": nuevo_c})
+    ctx.bitacora.anotar("notas_de_otro_texto", "assets", {
+        "planos": [u.split(":", 1)[1] for u in cambiados], "mudadas": mudanzas})
+    return cambiados
+
+
+def _correr_assets_de_tanda(avisar, ctx, unidades, opciones):
+    """Las imagenes de una tanda: antes, fuera las notas de una frase que ya no
+    se dice (`_retirar_lo_de_otro_texto`). La cola de notas NO pasa por aqui:
+    alli la nota es justo lo que se quiere dibujar."""
+    try:
+        with _COLA_LOCK:
+            estado = _COLA_NOTAS.get(ctx.id) or {}
+            ids = set(estado.get("cola") or ()) | set((estado.get("actual") or {}).get("notas") or ())
+        vivas = {str(n["plano"]) for n in _notas_de_imagenes(ctx) if n["id"] in ids} if ids else set()
+        _retirar_lo_de_otro_texto(ctx, en_cola=vivas)
+    except Exception as fallo:                              # noqa: BLE001
+        ctx.bitacora.anotar("notas_de_otro_texto_fallo", "assets", {"error": str(fallo)[:300]})
+    return _correr_paso(avisar, ctx, "assets", unidades, opciones)
 
 
 def _que_hace(tarea_id, ctx, receta, modo="pendientes", solo_montar=False):
@@ -6080,8 +8088,11 @@ def _correr_receta(avisar, ctx, pestana, receta, tareas, modo,
         # pieza avisan con (hechas, total) --ver `comun.avisador`-- y esa cuenta
         # manda sobre la fase inventada: «34 de 216 planos» esta medido y
         # «rematando los detalles» solo significa «va por el ultimo tercio».
-        def avisar_tarea(valor, mensaje="", unidades=None):
-            if valor is not None or unidades:
+        def avisar_tarea(valor, mensaje="", unidades=None, publico=""):
+            if publico:
+                # la espera de turno de las imagenes: se dice tal cual
+                ultimo["frase"] = publico
+            elif valor is not None or unidades:
                 ultimo["frase"] = recetas.publico_de(tarea["id"], valor,
                                                      unidades)
             avisar(desde + ancho * min(1.0, max(0.0, float(valor or 0))),
@@ -6172,7 +8183,7 @@ def estado_de_pestana(pid: str, pestana: str):
     ctx = contexto(pid)
     recetas = _recetas()
     if pestana not in recetas.PESTANAS:
-        raise ErrorApi(404, f"pestana desconocida: {pestana}. Son "
+        raise ErrorApi(404, f"pestaña desconocida: {pestana}. Son "
                             + ", ".join(recetas.PESTANAS))
     # la de ESTE video, no la del canal a secas: es la misma que va a correr la
     # tanda, y la unica diferencia entre las dos --la direccion de un video sin
@@ -6258,7 +8269,7 @@ def generar_pestana(pid: str, pestana: str, cuerpo: dict = Body(default=None)):
     ctx = contexto(pid)
     recetas = _recetas()
     if pestana not in recetas.PESTANAS:
-        raise ErrorApi(404, f"pestana desconocida: {pestana}. Son "
+        raise ErrorApi(404, f"pestaña desconocida: {pestana}. Son "
                             + ", ".join(recetas.PESTANAS))
     datos = _cuerpo(cuerpo)
     modo = str(datos.get("modo") or "pendientes").strip().lower()
@@ -6272,7 +8283,7 @@ def generar_pestana(pid: str, pestana: str, cuerpo: dict = Body(default=None)):
 
     activo = _trabajo_de_receta(ctx, pestana)
     if activo is not None:
-        raise ErrorApi(409, f"la pestana '{pestana}' ya se esta generando",
+        raise ErrorApi(409, f"la pestaña '{pestana}' ya se está generando",
                        {"trabajo_id": activo["id"], "progreso": activo["progreso"]})
     puestas = recetas.puestas_de(pestana, receta)
     orden = [t for t in recetas.orden_de(pestana, puestas)]
@@ -6298,7 +8309,7 @@ def generar_pestana(pid: str, pestana: str, cuerpo: dict = Body(default=None)):
         # material aportado no tiene ingesta y no le falta ninguna.
         faltan = dependencias_que_faltan(ctx, paso, producidos)
         if faltan:
-            raise ErrorApi(409, f"'{pestana}' no se puede generar todavia: "
+            raise ErrorApi(409, f"'{pestana}' no se puede generar todavía: "
                                 f"falta ejecutar " + ", ".join(faltan),
                            {"faltan": faltan, "tarea": tarea["id"]})
     for tarea in orden:
@@ -6389,7 +8400,7 @@ def guardar_claves(cuerpo: dict = Body(default=None)):
     except modulo.ErrorClaves as fallo:
         raise ErrorApi(400, str(fallo))
     except OSError as fallo:
-        raise ErrorApi(500, f"no se ha podido escribir el almacen de claves: {fallo}")
+        raise ErrorApi(500, f"no se ha podido escribir el almacén de claves: {fallo}")
     anotar_global("claves_guardadas", {
         "openai": len(ficha["openai"]),
         "cartesia": ficha["cartesia"]["puesta"],
@@ -6517,7 +8528,7 @@ def probar_claves(cuerpo: dict = Body(default=None)):
             cuentas = [c for c in _candidatas_del_asistente()
                        if _sesion_de(c).get("conectada")]
         except Exception as fallo:  # noqa: BLE001
-            raise ErrorApi(500, f"no se ha podido leer el almacen de claves: {fallo}")
+            raise ErrorApi(500, f"no se ha podido leer el almacén de claves: {fallo}")
     modulo = PASOS_MODULOS.comprobar_claves
     pruebas = modulo.probar_todas(cuentas_claude=cuentas, con_claude=con_claude)
     for cuenta in cuentas:
@@ -6927,7 +8938,7 @@ def probar_asistente():
     except ErrorApi:
         raise
     except Exception as fallo:  # noqa: BLE001
-        raise ErrorApi(500, f"no se ha podido leer el almacen de claves: {fallo}")
+        raise ErrorApi(500, f"no se ha podido leer el almacén de claves: {fallo}")
     probadas = []
     for cuenta in candidatas:
         if not _sesion_de(cuenta).get("conectada"):
@@ -6974,6 +8985,107 @@ def _guias():
     return PASOS_MODULOS.guias
 
 
+#: Las revisiones en marcha: {id: {"estado", "resultado"|"error"}}. Se pregunta
+#: por ellas en vez de esperar en una peticion larga, porque el proxy de delante
+#: corta a los 60 s (lo mismo que el asistente).
+_REVISIONES = {}
+_LOCK_REVISIONES = threading.Lock()
+
+
+@app.post("/api/sistema/guias/{gid}/revisar", status_code=202)
+def revisar_campo_con_su_guia(gid: str, cuerpo: dict = Body(default=None)):
+    """Lanza la revision de un texto contra la guia de su campo. -> {id}
+
+    Ver pasos/revisar_campo.py. Va por suscripcion (CLI de Claude): no cuesta
+    imagenes ni dinero por llamada.
+    """
+    modulo = PASOS_MODULOS.revisar_campo
+    if gid not in _guias().GUIAS:
+        raise ErrorApi(404, f"no hay ninguna guía «{gid}»")
+    datos = _cuerpo(cuerpo)
+    texto = str(datos.get("texto") or "")
+    if not texto.strip():
+        raise ErrorApi(400, "el campo está vacío: escribe algo y vuelve a revisar")
+    anterior = datos.get("anterior") if isinstance(datos.get("anterior"), dict) else None
+    clave = modulo.huella(gid, texto)
+    rid = uuid.uuid4().hex[:12]
+    with _LOCK_REVISIONES:
+        # se guardan las ultimas 50: es una ventanilla, no un archivo
+        for viejo in list(_REVISIONES)[:-49]:
+            _REVISIONES.pop(viejo, None)
+        # EL MISMO TEXTO, LA MISMA RESPUESTA. Revisar lo que ya se reviso (o la
+        # version que la propia revision propuso) daba cada vez una opinion
+        # distinta y encontraba «errores» nuevos sin fin (10-10-2026).
+        guardada = _revisiones_guardadas().get(clave)
+        if guardada:
+            _REVISIONES[rid] = {"estado": "listo", "guia": gid,
+                                "resultado": dict(guardada, de_memoria=True)}
+            return {"id": rid, "estado": "listo"}
+        # y la que YA se esta revisando no se lanza dos veces
+        for otro, ficha in _REVISIONES.items():
+            if ficha.get("clave") == clave and ficha.get("estado") == "pensando":
+                return {"id": otro, "estado": "pensando"}
+        _REVISIONES[rid] = {"estado": "pensando", "guia": gid, "clave": clave}
+
+    def correr():
+        try:
+            resultado = modulo.revisar(gid, texto, cwd=RAIZ_ESTUDIO, anterior=anterior)
+            ficha = {"estado": "listo", "guia": gid, "resultado": resultado}
+            nuevas = {clave: {k: resultado.get(k) for k in
+                              ("veredicto", "resumen", "problemas", "sugerida")}}
+            if resultado.get("sugerida"):
+                # la que PROPONE la revision la da por buena la revision: si se
+                # pone tal cual y se vuelve a revisar, sale «sirve»
+                nuevas[modulo.huella(gid, resultado["sugerida"])] = \
+                    modulo.aprobada_por_la_revision()
+            _guardar_revisiones(nuevas)
+        except Exception as fallo:                          # noqa: BLE001
+            ficha = {"estado": "error", "guia": gid, "error": str(fallo)[:600]}
+        with _LOCK_REVISIONES:
+            _REVISIONES[rid] = ficha
+
+    threading.Thread(target=correr, daemon=True, name=f"revision-{rid}").start()
+    return {"id": rid, "estado": "pensando"}
+
+
+def _ruta_revisiones():
+    return os.path.join(raiz_proyectos(), "_sistema", "revisiones.json")
+
+
+def _revisiones_guardadas():
+    try:
+        with open(_ruta_revisiones(), encoding="utf-8") as fh:
+            datos = json.load(fh)
+        return datos if isinstance(datos, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _guardar_revisiones(nuevas):
+    """Suma revisiones al almacen (las ultimas 400: es memoria, no archivo)."""
+    with _LOCK_REVISIONES:
+        todas = _revisiones_guardadas()
+        for clave, valor in nuevas.items():
+            todas.pop(clave, None)
+            todas[clave] = valor
+        while len(todas) > 400:
+            todas.pop(next(iter(todas)))
+        try:
+            os.makedirs(os.path.dirname(_ruta_revisiones()), exist_ok=True)
+            escribir_json(_ruta_revisiones(), todas)
+        except OSError:
+            pass
+
+
+@app.get("/api/sistema/revisiones/{rid}")
+def ver_revision(rid: str):
+    with _LOCK_REVISIONES:
+        ficha = _REVISIONES.get(rid)
+    if ficha is None:
+        raise ErrorApi(404, "esa revisión ya no está: vuelve a pulsar «Revisar»")
+    return dict(ficha, id=rid)
+
+
 @app.get("/api/sistema/guias")
 def guias_de_escritura():
     """Como rellenar cada campo de texto: plantilla, ejemplo y prompt para otra IA."""
@@ -6982,6 +9094,18 @@ def guias_de_escritura():
 
 
 RUTA_NOVEDADES = os.path.join(RAIZ_ESTUDIO, "docs", "NOVEDADES.md")
+RUTA_MANUAL = os.path.join(RAIZ_ESTUDIO, "docs", "MANUAL.md")
+
+
+@app.get("/api/sistema/manual")
+def manual_del_sistema():
+    """Cómo se usa el Estudio, tal cual esta en docs/MANUAL.md."""
+    try:
+        with open(RUTA_MANUAL, encoding="utf-8") as fh:
+            texto = fh.read()
+    except OSError:
+        texto = ""
+    return {"version": VERSION, "producto": NOMBRE_PRODUCTO, "texto": texto}
 
 
 @app.get("/api/sistema/novedades")
@@ -7371,7 +9495,7 @@ def miniatura_preset_canal(pid: str, peticion: Request):
     if not ruta or not os.path.abspath(ruta).startswith(carpeta + os.sep):
         raise ErrorApi(404, f"el preset {pid} no tiene miniatura")
     if not os.path.isfile(ruta):
-        raise ErrorApi(404, f"la miniatura del preset {pid} ya no esta en el disco")
+        raise ErrorApi(404, f"la miniatura del preset {pid} ya no está en el disco")
     return servir_fichero(peticion, ruta)
 
 
@@ -7408,9 +9532,23 @@ def apartar_preset_canal(pid: str):
 
 @app.post("/api/presets-canal/papelera/{pid}/restaurar")
 def restaurar_preset_canal(pid: str):
-    """Devuelve a la lista un preset apartado."""
+    """Devuelve a la lista un preset apartado. Y si es un estilo, su taller con
+    él: se apartaron juntos (`borrar_preset_light`) y sin el taller el estilo
+    vuelve sin sus láminas ni su escucha."""
     ficha = _preset_o_400(lambda p: p.restaurar(pid))
-    return {"restaurado": pid, "preset": ficha, **_presets().listar()}
+    taller = ((ficha.get("datos") or {}).get("origen") or {}).get("taller") if isinstance(ficha, dict) else ""
+    devuelto = ""
+    if taller and not os.path.isdir(os.path.join(raiz_proyectos(), taller)):
+        base = raiz_papelera()
+        candidatas = sorted((n for n in (os.listdir(base) if os.path.isdir(base) else [])
+                             if n.rpartition("__")[0] == taller), reverse=True)
+        if candidatas:
+            try:
+                restaurar_proyecto(candidatas[0])
+                devuelto = taller
+            except ErrorApi:
+                devuelto = ""
+    return {"restaurado": pid, "preset": ficha, "taller": devuelto, **_presets().listar()}
 
 
 @app.get("/api/presets-canal/papelera/{pid}")
@@ -7577,14 +9715,50 @@ def _aportadas_del_taller(ctx):
             if os.path.splitext(n)[1].lower() in EXT_APORTADAS]
 
 
-def _sembrar_aportadas(ctx, encargo):
+def _sembrar_aportadas(ctx, encargo, conservar=None):
     """Mete en el taller las imagenes subidas, y vacia la carpeta de espera.
 
     EN EL TALLER: es lo que sobrevive al preset y lo que permite rehacer el
     estilo sin volver a pedir nada. La carpeta de espera es un buzon, no un
     almacen -- lo que se copia se borra de ahi, o se queda para siempre.
+
+    `conservar` (nombres sin «NN_») son las del taller que SIGUEN: la ficha de
+    un estilo deja quitar unas y anadir otras sin volver a subir las demas.
+    `None` es lo de siempre: las nuevas sustituyen a todas.
     """
     rutas = _rutas_aportadas(encargo.get("estilo_imagenes"))
+    if conservar is not None:
+        destino = _carpeta_aportadas_de(ctx)
+        sin = _light()._sin_prefijo
+        quedan = set(str(n) for n in conservar)
+        viejas = [r for r in _aportadas_del_taller(ctx) if sin(r) in quedan]
+        if not viejas and not rutas:
+            raise RuntimeError("el estilo se quedaría sin ninguna imagen de referencia")
+        apartado = destino + ".conservar"
+        shutil.rmtree(apartado, ignore_errors=True)
+        os.makedirs(apartado, exist_ok=True)
+        guardadas = []
+        for ruta in viejas:
+            final = os.path.join(apartado, sin(ruta))
+            shutil.copyfile(ruta, final)
+            guardadas.append(final)
+        shutil.rmtree(destino, ignore_errors=True)
+        os.makedirs(destino, exist_ok=True)
+        dentro = []
+        for indice, ruta in enumerate(guardadas + rutas):
+            final = os.path.join(destino, _presets().nombre_numerado(indice, ruta))
+            try:
+                shutil.copyfile(ruta, final)
+            except OSError:
+                continue
+            dentro.append(final)
+            if ruta in rutas:
+                try:
+                    os.remove(ruta)
+                except OSError:
+                    pass
+        shutil.rmtree(apartado, ignore_errors=True)
+        return dentro
     if not rutas:
         # sin nada nuevo NO se borra lo que ya hubiera: retomar un taller a
         # medias tiene que conservar el material con el que se lanzo
@@ -7594,7 +9768,7 @@ def _sembrar_aportadas(ctx, encargo):
     os.makedirs(destino, exist_ok=True)
     dentro = []
     for indice, ruta in enumerate(rutas):
-        final = os.path.join(destino, f"{indice:02d}_{os.path.basename(ruta)}")
+        final = os.path.join(destino, _presets().nombre_numerado(indice, ruta))
         try:
             shutil.copyfile(ruta, final)
         except OSError:
@@ -7617,7 +9791,7 @@ async def subir_imagenes_light(peticion: Request):
     """
     tipo = (peticion.headers.get("content-type") or "").lower()
     if not tipo.startswith("multipart/"):
-        raise ErrorApi(400, "manda las imagenes como multipart")
+        raise ErrorApi(400, "manda las imágenes como multipart")
     try:
         formulario = await peticion.form()
     except Exception as fallo:                              # noqa: BLE001
@@ -7660,7 +9834,7 @@ def servir_imagen_light(nombre: str, peticion: Request):
     """La miniatura de una imagen que espera en el buzon."""
     rutas = _rutas_aportadas([nombre])
     if not rutas:
-        raise ErrorApi(404, f"esa imagen no esta: {nombre}")
+        raise ErrorApi(404, f"esa imagen no está: {nombre}")
     return servir_fichero(peticion, rutas[0])
 
 
@@ -7669,7 +9843,7 @@ def borrar_imagen_light(nombre: str):
     """Quita una imagen de la carpeta de espera. Quitarla de la lista es esto."""
     rutas = _rutas_aportadas([nombre])
     if not rutas:
-        raise ErrorApi(404, f"esa imagen ya no esta: {nombre}")
+        raise ErrorApi(404, f"esa imagen ya no está: {nombre}")
     try:
         os.remove(rutas[0])
     except OSError as fallo:
@@ -7706,6 +9880,7 @@ def _talleres_sueltos():
         if str(ficha.get("id")) in usados:
             continue
         sueltos.append({"id": ficha.get("id"),
+                        "cliente": ficha.get("cliente_del_taller") or "",
                         "nombre": ficha.get("nombre") or ficha.get("id"),
                         "creado": ficha.get("creado", ""),
                         "actualizado": ficha.get("actualizado", "")})
@@ -7722,13 +9897,13 @@ def _taller_de(ficha):
     """
     tid = ((ficha.get("datos") or {}).get("origen") or {}).get("taller")
     if not tid:
-        raise ErrorApi(409, "este preset no se hizo en el modo light, asi que no "
-                            "tiene taller donde rehacer una parte. Editalo desde "
-                            "el modo editor, o crea uno nuevo aqui")
+        raise ErrorApi(409, "este preset no se hizo en el modo light, así que no "
+                            "tiene taller donde rehacer una parte. Edítalo desde "
+                            "el modo editor, o crea uno nuevo aquí")
     try:
         return contexto(tid)
     except ErrorApi:
-        raise ErrorApi(409, f"el taller de este preset ({tid}) ya no esta en el "
+        raise ErrorApi(409, f"el taller de este preset ({tid}) ya no está en el "
                             f"disco: no se puede rehacer una parte sin el "
                             f"material con el que se hizo. Crea un preset nuevo")
 
@@ -7803,11 +9978,16 @@ def _correr_light_guia(avisar, ctx, encargo):
     # y el buzon se vacia al copiarlas dentro.
     aportadas = _aportadas_del_taller(ctx)
     bloque = dict((ctx.estado.params("assets") or {}).get("estilo") or {})
+    # LO QUE SE DIJO DE CADA IMAGEN viaja con las indicaciones, nombrando el
+    # fichero tal y como lo abre la guia (`presets_light.indicaciones_con_...`)
+    indicaciones = _light().indicaciones_con_descripciones(
+        encargo.get("estilo_prompt"), aportadas,
+        encargo.get("estilo_descripciones"))
     # con el contrato del tipo de imagen del taller (Etapa Foto A): una guia
     # de foto pregunta por lente y luz, no por trazo y dedos
     guia = estilo.generar_guia(ctx.proyecto, aportadas, avisar=avisar,
                                proyecto_id=ctx.id, peticion=peticion,
-                               indicaciones=encargo.get("estilo_prompt"),
+                               indicaciones=indicaciones,
                                modo=PASOS_MODULOS.p6_assets.modo_de(bloque))
     bloque["guia"] = guia
     ctx.estado.actualizar_params("assets", {"estilo": bloque})
@@ -7818,6 +9998,7 @@ def _correr_light_guia(avisar, ctx, encargo):
     return guia
 
 
+@_con_turno
 def _correr_light_referencias(avisar, ctx, encargo):
     """Las laminas dibujadas, que SON las referencias del estilo.
 
@@ -7841,14 +10022,27 @@ def _correr_light_referencias(avisar, ctx, encargo):
     faltaba era que alguien se lo pidiera.
     """
     mod = _moodboard()
+    lam = _laminas()
     calidad = str((ctx.estado.params("assets") or {}).get("calidad") or "medium")
     bloque = dict((ctx.estado.params("assets") or {}).get("estilo") or {})
-    # Se filtra contra los ejes que existen de verdad: una peticion escrita para
-    # un eje inventado no daria error, dibujaria las seis sin decirlo.
+    # LAS LAMINAS DE ESTE ESTILO (`laminas.py`): las seis de fabrica menos las
+    # quitadas, mas las anadidas. Sin tocar nada son las seis de siempre.
+    ids = lam.ids_de(encargo)
+    # Se filtra contra las laminas que existen de verdad: una peticion escrita
+    # para una inventada no daria error, dibujaria todas sin decirlo.
     peticiones = {eje: " ".join(str(texto).split())
                   for eje, texto in (encargo.get("laminas") or {}).items()
-                  if eje in mod.EJES and str(texto or "").strip()}
-    pedidos = sorted(peticiones) or None
+                  if eje in ids and str(texto or "").strip()}
+    # `laminas_solo` (por INVOCACION, de la pantalla de laminas): redibujar
+    # estas aunque no lleven correccion. Una lista VACIA es «no dibujes
+    # ninguna, solo rehaz la lista» --quitar o devolver una lamina--.
+    solo = encargo.get("laminas_solo")
+    if isinstance(solo, list):
+        pedidos = [e for e in ids if e in solo or e in peticiones]
+        sin_dibujar = not pedidos
+    else:
+        pedidos = [e for e in ids if e in peticiones] or list(ids)
+        sin_dibujar = False
     # EL IDIOMA DEL CANAL, hasta la lamina. Sin esto, un canal en espanol saca
     # el eje «diagrama» rotulado en ingles --paso: «PLAN / DO / REVIEW»-- porque
     # el encargo entero va en ingles y el generador rotula en el idioma en que
@@ -7861,33 +10055,101 @@ def _correr_light_referencias(avisar, ctx, encargo):
     # que la guia (`_correr_light_guia`): sin pasarlas, cada lamina salia a la
     # API sin adjuntos y la tanda caia con «generar() necesita al menos una
     # imagen de referencia» aunque el estilo tuviera catorce.
+    aportadas = _aportadas_del_taller(ctx)
+    _, propias, hoja = lam.config_de(encargo)
+    # OCHO COMO MUCHO en la hoja: con 50 cada foto quedaria de 768x41
+    # (`para_la_hoja`). Con «repartida» cada lamina mira OTRO grupo de ocho
+    # --las marcadas con ★ en todos-- y entre todas cuentan todas tus imagenes.
+    comun = _light().para_la_hoja(aportadas, encargo.get("estilo_descripciones"),
+                                  destacadas=encargo.get("estilo_destacadas"))
+    if hoja == "repartida" and len(aportadas) > len(comun):
+        marcadas = {_light()._sin_prefijo(n)
+                    for n in (encargo.get("estilo_destacadas") or [])}
+        fijas = [r for r in aportadas if _light()._sin_prefijo(r) in marcadas]
+        grupos = dict(zip(ids, lam.repartir(aportadas, len(ids),
+                                            lam.MAX_LAMINAS, fijas)))
+    else:
+        grupos = {}
+    # Las de fabrica sin cambiar y con la hoja comun van por el camino de
+    # siempre (en paralelo); las cambiadas, las anadidas y las de hoja
+    # repartida, una a una con su descripcion y su grupo de imagenes.
+    de_fabrica = [e for e in pedidos if e in mod.EJES and not propias.get(e)
+                  and e not in grupos]
+    sueltas = [e for e in pedidos if e not in de_fabrica]
+    hecho = {"rutas": [], "ejes": [], "coste_usd": 0.0}
     # El modo va con la guia (Etapa Foto A): sin el, las laminas de un estilo
     # de fotos se pedirian como imagen neutra. Solo si es foto: sin `modo`, el
     # diccionario de siempre.
     para_dibujar = {"guia": bloque.get("guia")}
     if bloque.get("modo") == "foto":
         para_dibujar["modo"] = "foto"
-    hecho = mod.dibujar_desde_guia(para_dibujar, destino,
-                                   ejes=pedidos, peticiones=peticiones,
-                                   calidad=calidad, avisar=avisar,
-                                   idioma=idioma,
-                                   referencias=_aportadas_del_taller(ctx))
-    # LA LISTA NO SE PISA CUANDO SOLO SE HA REDIBUJADO UNA. Cada lamina se
-    # escribe en `<eje>.png`, o sea encima de la que habia, asi que las otras
-    # cinco siguen en su sitio y en la lista. Escribir aqui `hecho["rutas"]` a
-    # secas dejaria un estilo con UNA referencia: sin error, sin aviso, y con el
-    # video montado despues sobre una sola lamina de apoyo.
-    previas = [r for r in (bloque.get("referencias") or []) if r]
-    if not pedidos or not previas:
-        bloque["referencias"] = hecho["rutas"]
-    else:
-        bloque["referencias"] = previas + [r for r in hecho["rutas"]
-                                           if r not in previas]
+    if de_fabrica:
+        parcial = mod.dibujar_desde_guia(
+            para_dibujar, destino, ejes=de_fabrica,
+            peticiones=peticiones, calidad=calidad,
+            avisar=(avisar if not sueltas else
+                    lambda v, m="": avisar(0.6 * float(v or 0), m)),
+            idioma=idioma, referencias=comun)
+        hecho["rutas"] += parcial["rutas"]
+        hecho["ejes"] += parcial["ejes"]
+        hecho["coste_usd"] += float(parcial.get("coste_usd") or 0.0)
+    for indice, eje in enumerate(sueltas):
+        base = 0.6 if de_fabrica else 0.0
+        avisar(base + (1 - base) * indice / max(1, len(sueltas)),
+               f"dibujando la lámina «{lam.titulo_de(eje, encargo)}»")
+        descripcion = (mod.EJES[eje]["prompt"] if eje in mod.EJES
+                       else lam.descripcion_extra(eje, encargo))
+        parcial = lam.dibujar_suelta(
+            para_dibujar, destino, eje, descripcion,
+            calidad=calidad, idioma=idioma,
+            peticion=lam.peticion_de(eje, encargo, peticiones.get(eje, "")),
+            referencias=grupos.get(eje) or comun)
+        hecho["rutas"].append(parcial["ruta"])
+        hecho["ejes"].append(eje)
+        hecho["coste_usd"] += parcial["coste_usd"]
+    hecho["coste_usd"] = round(hecho["coste_usd"], 4)
+    # UN REDIBUJO ENTERO deja viejas las quitadas: su fichero se borra para
+    # que «Devolver» la dibuje con la guia de ahora y no traiga la de antes
+    if not isinstance(solo, list) and not peticiones:
+        for eje in mod.EJES:
+            if eje not in ids:
+                try:
+                    os.remove(os.path.join(destino, f"{eje}.png"))
+                except OSError:
+                    pass
+    # LA LISTA SE REHACE DESDE EL DISCO, en el orden de las laminas. Cada una se
+    # escribe en `<id>.png`, encima de la que habia, asi que las que no se han
+    # redibujado siguen en su sitio. Escribir aqui solo lo recien dibujado
+    # dejaria un estilo con UNA referencia: sin error, sin aviso, y con el
+    # video montado despues sobre una sola lamina de apoyo. Una quitada sale de
+    # la lista pero su fichero se queda: devolverla no cuesta nada.
+    previas = {os.path.splitext(os.path.basename(str(r)))[0]: r
+               for r in (bloque.get("referencias") or []) if r}
+    lista = []
+    for eje in ids:
+        ruta = os.path.join(destino, f"{eje}.png")
+        if os.path.isfile(ruta):
+            lista.append(ruta)
+        elif previas.get(eje) and os.path.isfile(previas[eje]):
+            lista.append(previas[eje])
+    bloque["referencias"] = lista[:lam.MAX_LAMINAS]
     ctx.estado.actualizar_params("assets", {"estilo": bloque})
     ctx.bitacora.anotar("estilo_dibujado", "assets", {
         "ejes": hecho["ejes"], "coste_usd": hecho["coste_usd"],
-        "pedidos": pedidos or "todos"})
+        "pedidos": pedidos if not sin_dibujar else "ninguna (solo la lista)",
+        "laminas": ids, "hoja": hoja})
+    if not sin_dibujar:
+        avisar(1.0, f"{len(hecho['ejes'])} lámina(s) dibujadas, "
+                    f"{hecho['coste_usd']:.3f} USD")
+    else:
+        avisar(1.0, f"{len(lista)} láminas en el estilo")
     return hecho
+
+
+def _laminas():
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    return PASOS_MODULOS.laminas
 
 
 def _enrutar_estilo():
@@ -8077,6 +10339,11 @@ def _correr_light_voz(avisar, ctx, encargo):
         cambios["velocidad"] = ficha_ritmo["velocidad"]
     cambios["hueco_minimo"] = ficha_ritmo["hueco_minimo"]
     ctx.estado.actualizar_params("voz", cambios)
+    # CON QUE SE HIZO, para que RETOMAR sepa si sigue valiendo (`_light_hecha`)
+    ctx.proyecto.config[CONFIG_VOZ_HECHA] = {
+        "voz_prompt": encargo.get("voz_prompt") or "",
+        "voz_id": encargo.get("voz_id") or ""}
+    ctx.proyecto.guardar_config()
     ctx.bitacora.anotar("voz_descrita", "voz", {
         "encargo": encargo["voz_prompt"][:200],
         "voz": elegido.get("voz_nombre"), "velocidad": cambios["velocidad"],
@@ -8201,11 +10468,29 @@ def _light_hecha(ctx, tarea_id, encargo):
     if tarea_id == "tono":
         return bool((ctx.estado.params("brief") or {}).get("instrucciones"))
     if tarea_id == "voz":
-        return bool((ctx.estado.params("voz") or {}).get("voz_id"))
+        # HECHA CON LO QUE SE PIDE AHORA, no solo hecha. Retomar tras cambiar la
+        # voz en el formulario se quedaba con la del primer intento: la ficha
+        # del estilo enseñaba otra voz que la elegida (10-10-2026).
+        puesta = (ctx.estado.params("voz") or {}).get("voz_id")
+        if not puesta:
+            return False
+        pedida = str(encargo.get("voz_id") or "").strip()
+        if pedida and pedida != puesta:
+            return False
+        hecha = ctx.proyecto.config.get(CONFIG_VOZ_HECHA)
+        if isinstance(hecha, dict) and (
+                hecha.get("voz_prompt") != (encargo.get("voz_prompt") or "")
+                or hecha.get("voz_id") != (encargo.get("voz_id") or "")):
+            return False
+        return True
     if tarea_id == "muestra":
         return os.path.isfile(os.path.join(ctx.proyecto.raiz, "muestras",
                                            "miniatura.png"))
     return False
+
+
+#: En la config del taller: con que encargo se eligio la voz (`_light_hecha`).
+CONFIG_VOZ_HECHA = "voz_hecha_con"
 
 
 _LIGHT_QUE_HACE = {
@@ -8218,6 +10503,7 @@ _LIGHT_QUE_HACE = {
 }
 
 
+@_medido_en("estilo")
 def _correr_preset_light(avisar, ctx, encargo, solo, preset_id, retomar=False):
     """Recorre el plan tanda a tanda y congela el resultado en el preset.
 
@@ -8276,6 +10562,13 @@ def _correr_preset_light(avisar, ctx, encargo, solo, preset_id, retomar=False):
     avisar(0.99, "guardando el preset", "Guardando tu estilo")
     ficha = _congelar_preset(ctx, encargo, preset_id)
     salida["preset"] = ficha["id"]
+    # EL PROYECTO (cliente) en el que se creo, si se creo dentro de uno. Solo
+    # al crear: rehacer una parte no lo mueve de donde este.
+    if encargo.get("cliente") and not preset_id:
+        try:
+            CLIENTES.asignar(raiz_proyectos(), ficha["id"], encargo["cliente"])
+        except CLIENTES.ErrorCliente as fallo:
+            ctx.bitacora.anotar("aviso", None, {"cliente": str(fallo)})
     salida["resumen"] = ficha.get("resumen") or ""
     salida["coste_usd"] = round(salida["coste_usd"], 4)
     avisar(1.0, f"preset «{ficha['nombre']}» listo", PUBLICO_LISTO)
@@ -8422,7 +10715,7 @@ def _curar_muestras(ficha):
 
 
 @app.get("/api/presets-light")
-def listar_presets_light():
+def listar_presets_light(peticion: Request):
     """Los presets de canal, con sus viñetas y su plan de generacion.
 
     `plan` viaja aqui y no en un endpoint aparte porque la pantalla lo necesita
@@ -8434,6 +10727,11 @@ def listar_presets_light():
     # que este modo entiende. Los de guion, estilo, voz y grafismo siguen
     # existiendo y siguen siendo del modo editor: no se ensenan ni se tocan.
     fichas = (_preset_o_400(lambda p: p.listar())["presets"] or {}).get("canal") or []
+    cerrados = _cerrados(peticion)
+    if cerrados:
+        asignaciones = CLIENTES._leer(raiz_proyectos())
+        fichas = [f for f in fichas if CLIENTES.cliente_de(
+            raiz_proyectos(), f.get("id"), datos=asignaciones) not in cerrados]
     for ficha in fichas:
         _curar_muestras(ficha)
     return {"presets": fichas,
@@ -8483,12 +10781,16 @@ def crear_preset_light(cuerpo: dict = Body(default=None)):
         try:
             ctx = contexto(pedido)
         except ErrorApi:
-            raise ErrorApi(404, f"el taller {pedido} ya no esta en el disco")
+            raise ErrorApi(404, f"el taller {pedido} ya no está en el disco")
         if not ctx.proyecto.config.get(CONFIG_TALLER):
             raise ErrorApi(400, f"{pedido} no es un taller de estilo")
         retomar = True
     else:
         ctx = _crear_taller(encargo)
+    if encargo.get("cliente"):
+        # para ensenar el intento a medias DENTRO de su proyecto
+        ctx.proyecto.config["cliente_del_taller"] = encargo["cliente"]
+        ctx.proyecto.guardar_config()
     _sembrar_taller(ctx, encargo)
     # ANTES de lanzar: la guia es la primera tarea que las mira, y retomar un
     # taller no puede perderlas -- se vuelven a copiar y ya estaban.
@@ -8504,6 +10806,66 @@ def crear_preset_light(cuerpo: dict = Body(default=None)):
             "retomado": retomar, "plan": _light().plan_de(encargo),
             "trabajo": ctx.gestor.estado(trabajo_id),
             "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
+
+
+#: Las muestras de voz que se escuchan ANTES de que exista el estilo (al
+#: crearlo). Se cachean por voz e idioma: volver a una ya oida no paga.
+_LOCK_MUESTRAS_VOZ = threading.Lock()
+
+
+def _carpeta_muestras_voz():
+    return os.path.join(raiz_proyectos(), "_sistema", "escuchas")
+
+
+@app.post("/api/voces/muestra")
+def muestra_de_voz(cuerpo: dict = Body(default=None)):
+    """Doce segundos de una voz del catalogo, sin estilo ni proyecto.
+
+    Es la escucha del formulario de CREAR un estilo: alli todavia no hay taller
+    (la de `/presets-light/{id}/voz/previsualizar` necesita uno), y elegir una
+    voz sin oirla era elegir por el nombre. Se sintetiza la misma frase de
+    muestra del idioma (`presets_light.bloques_de_escucha`) con los mandos por
+    defecto: lo que cambia entre dos muestras es la voz y nada mas. Cuesta lo
+    que doce segundos de Cartesia, y una sola vez por voz e idioma.
+    """
+    datos = _cuerpo(cuerpo)
+    voz_id = str(datos.get("voz_id") or "").strip()
+    if not re.match(r"^[A-Za-z0-9_-]{8,64}$", voz_id):
+        raise ErrorApi(400, "«voz_id» no parece un id de voz de Cartesia")
+    idioma = str(datos.get("idioma") or "es").strip() or "es"
+    p4 = PASOS_MODULOS.p4_voz
+    light = _light()
+    texto = p4.recortar_texto(light.bloques_de_escucha(idioma), 12, None)
+    clave = hashlib.sha256(json.dumps([voz_id, idioma, texto, p4.simulado()],
+                                      ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+    carpeta = _carpeta_muestras_voz()
+    nombre = f"voz_{clave}.wav"
+    ruta = os.path.join(carpeta, nombre)
+    with _LOCK_MUESTRAS_VOZ:
+        if not os.path.exists(ruta):
+            os.makedirs(carpeta, exist_ok=True)
+            try:
+                cfg = p4.resolver_params({"voz_id": voz_id, "idioma": idioma})
+                wav, _duracion, _palabras = p4.sintetizar_toma(texto, cfg)
+            except (Exception, SystemExit) as fallo:  # noqa: BLE001
+                raise ErrorApi(502, f"no se ha podido sintetizar la muestra: {fallo}")
+            temporal = ruta + ".tmp"
+            with open(temporal, "wb") as fh:
+                fh.write(wav)
+            os.replace(temporal, ruta)
+    return {"ruta": f"/api/voces/muestra/{nombre}", "voz_id": voz_id,
+            "idioma": idioma}
+
+
+@app.get("/api/voces/muestra/{nombre}")
+def servir_muestra_de_voz(nombre: str, peticion: Request):
+    """El wav de una muestra ya sintetizada."""
+    if not re.match(r"^voz_[0-9a-f]{16}\.wav$", nombre):
+        raise ErrorApi(404, "esa muestra no existe")
+    ruta = os.path.join(_carpeta_muestras_voz(), nombre)
+    if not os.path.isfile(ruta):
+        raise ErrorApi(404, "esa muestra no existe")
+    return servir_fichero(peticion, ruta)
 
 
 @app.post("/api/presets-light/{preset_id}/voz/previsualizar", status_code=202)
@@ -8533,7 +10895,7 @@ def previsualizar_voz_light(preset_id: str, cuerpo: dict = Body(default=None)):
     if suelta:
         params["voz_id"] = suelta
     if not params.get("voz_id"):
-        raise ErrorApi(409, "este estilo todavia no tiene voz elegida")
+        raise ErrorApi(409, "este estilo todavía no tiene voz elegida")
     # EL TEXTO QUE SE LEE. En un video sale del paso 3; en un taller no hay
     # guion --no es un video, es donde se monta un estilo-- y sin esto la
     # escucha moria con «no encuentro el guion». Se le pasa por params, que es
@@ -8544,7 +10906,7 @@ def previsualizar_voz_light(preset_id: str, cuerpo: dict = Body(default=None)):
     try:
         segundos = float(datos.get("segundos") or 12)
     except (TypeError, ValueError):
-        raise ErrorApi(400, "'segundos' debe ser un numero")
+        raise ErrorApi(400, "'segundos' debe ser un número")
     if not 1 <= segundos <= 60:
         raise ErrorApi(400, "'segundos' debe estar entre 1 y 60")
     trabajo_id = ctx.gestor.lanzar("voz:previsualizar", _previsualizar_voz,
@@ -8623,14 +10985,14 @@ def descartar_taller_light(taller_id: str):
     try:
         ctx = contexto(taller_id)
     except ErrorApi:
-        raise ErrorApi(404, f"el taller {taller_id} ya no esta")
+        raise ErrorApi(404, f"el taller {taller_id} ya no está")
     if not ctx.proyecto.config.get(CONFIG_TALLER):
         raise ErrorApi(400, f"{taller_id} no es un taller de estilo")
     if taller_id in {f["id"] for f in _talleres_sueltos()}:
         apartar_proyecto(taller_id)
         return {"descartado": taller_id}
     raise ErrorApi(409, f"el taller {taller_id} es de un estilo guardado: "
-                        f"borra el estilo y se va con el")
+                        f"borra el estilo y se va con él")
 
 
 @app.post("/api/presets-light/{preset_id}/regenerar", status_code=202)
@@ -8665,30 +11027,45 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     fuente = datos.get("origen") if isinstance(datos.get("origen"), dict) else None
     if fuente and parte not in ("estilo", "tono", "personajes"):
         raise ErrorApi(400, "la voz no tiene fuente que cambiar: se corrige "
-                            "con una frase, que ya es su descripcion entera")
+                            "con una frase, que ya es su descripción entera")
     ficha = _preset_o_400(lambda p: p.leer(preset_id))
     if ficha.get("tipo") != "canal":
         raise ErrorApi(400, "esto no es un preset de canal")
     ctx = _taller_de(ficha)
+    _taller_libre(ctx)
 
     origen = dict((ficha.get("datos") or {}).get("origen") or {})
     antes = dict(origen)
     origen["nombre"] = ficha.get("nombre") or "canal"
     origen.setdefault("idioma", _presets().idioma_de(ficha) or "es")
-    if fuente and parte == "estilo" and (
-            "estilo_prompt" in fuente or "estilo_imagenes" in fuente):
+    conservar = None
+    if fuente and parte == "estilo" and any(
+            k in fuente for k in ("estilo_prompt", "estilo_imagenes", "conservar",
+                                  "estilo_descripciones")):
         # las DOS a la vez y siempre: dejar la vieja puesta es como se acaba con
         # unas indicaciones que describen unas imagenes que ya no estan
-        origen["estilo_prompt"] = fuente.get("estilo_prompt") or ""
-        # SIN IMAGENES NUEVAS SE QUEDAN LAS DE AHORA. La pantalla manda la
-        # lista vacia cuando solo se han cambiado las indicaciones, y pisar con
-        # ella las de antes dejaba un encargo sin imagenes que `validar_encargo`
-        # rechazaba con un 400 («falta el estilo gráfico»): cambiar el texto de
-        # un estilo guardado no funcionaba. Un estilo no puede quedarse sin
-        # imagenes, asi que «vacia» solo puede querer decir «no hay nuevas».
-        nuevas = fuente.get("estilo_imagenes") or []
-        if nuevas:
-            origen["estilo_imagenes"] = nuevas
+        if "estilo_prompt" in fuente or "estilo_imagenes" in fuente:
+            origen["estilo_prompt"] = fuente.get("estilo_prompt") or ""
+        # SIN IMAGENES NUEVAS SE QUEDAN LAS QUE HABIA. Cambiar solo las
+        # indicaciones mandaba una lista vacia y el encargo caia con «falta el
+        # estilo gráfico» aunque el estilo tuviera sus imagenes (10-10-2026).
+        origen["estilo_imagenes"] = (fuente.get("estilo_imagenes")
+                                     or origen.get("estilo_imagenes") or [])
+        # LAS QUE SIGUEN de las que ya tenia (la ficha deja quitar unas y
+        # anadir otras): van delante de las nuevas, con su nombre de siempre
+        # una lista VACIA sin imagenes nuevas no es «quitalas todas» (el
+        # estilo se quedaria sin material): es que la pantalla no las pudo leer
+        if isinstance(fuente.get("conservar"), list) and (
+                fuente["conservar"] or _rutas_aportadas(fuente.get("estilo_imagenes"))):
+            conservar = [str(n) for n in fuente["conservar"] if n][:200]
+            origen["estilo_imagenes"] = conservar + [
+                n for n in (fuente.get("estilo_imagenes") or [])
+                if n not in conservar]
+        # las descripciones van con SUS imagenes: con imagenes nuevas, las
+        # nuevas; sin imagenes nuevas se quedan las que habia
+        if fuente.get("estilo_imagenes") or "estilo_descripciones" in fuente:
+            origen["estilo_descripciones"] = fuente.get("estilo_descripciones") or {}
+            origen["estilo_destacadas"] = fuente.get("estilo_destacadas") or []
     if fuente and parte == "estilo" and "estilo_modo" in fuente:
         # EL TIPO DE IMAGEN (Etapa Foto A) es otra fuente del estilo: pasar a
         # «Foto realista» con las MISMAS imagenes rehace la guia (con el
@@ -8706,16 +11083,19 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     # siempre. Se compara con lo que habia, no con si vino `origen`: la pantalla
     # manda las dos claves juntas y una de ellas puede no haberse tocado.
     #
-    # Lo que SI es material nuevo: imagenes nuevas, o un TIPO DE IMAGEN
-    # distinto (Etapa Foto A), que cambia el contrato de la guia y como se
-    # piden las laminas: eso se rehace entero aunque tambien haya cambiado el
-    # texto, porque el reparto de la frase podria decidir no tocar la guia.
+    # Lo que SI es material nuevo: imagenes nuevas, quitar o anadir de las que
+    # habia, o un TIPO DE IMAGEN distinto (Etapa Foto A), que cambia el
+    # contrato de la guia y como se piden las laminas: eso se rehace entero
+    # aunque tambien haya cambiado el texto, porque el reparto de la frase
+    # podria decidir no tocar la guia.
     modo_antes = "foto" if antes.get("estilo_modo") == "foto" else "ilustracion"
     modo_cambiado = (bool(fuente) and parte == "estilo"
                      and encargo.get("estilo_modo") != modo_antes)
-    material = bool(fuente) and parte == "estilo" and bool(
-        encargo.get("estilo_imagenes")) and (
-        bool(fuente.get("estilo_imagenes")) or modo_cambiado)
+    material = bool(fuente) and parte == "estilo" and (
+        bool(_rutas_aportadas(fuente.get("estilo_imagenes")))
+        or (conservar is not None and set(conservar) != {
+            _light()._sin_prefijo(r) for r in _aportadas_del_taller(ctx)})
+        or (modo_cambiado and bool(encargo.get("estilo_imagenes"))))
     # El feedback viaja por INVOCACION y no se guarda en el encargo: describe
     # esta pasada, no lo que el preset es. Guardarlo lo aplicaria otra vez la
     # proxima, y dos correcciones seguidas se sumarian sin que nadie lo pida.
@@ -8767,7 +11147,10 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     # abajo y deja un plan VACIO -- el trabajo termina «listo» sin haber hecho
     # nada y la pantalla vuelve como si el cambio estuviera aplicado.
     tareas = tuple(t for t in tareas if t in light.TAREAS_POR_ID)
-    aportadas = _sembrar_aportadas(ctx, encargo) if material else []
+    try:
+        aportadas = _sembrar_aportadas(ctx, encargo, conservar) if material else []
+    except RuntimeError as fallo:
+        raise ErrorApi(400, str(fallo))
     # el tipo de imagen, al taller ANTES de lanzar: la guia es la primera
     # tarea que lo lee (Etapa Foto A)
     if fuente and parte == "estilo":
@@ -8798,9 +11181,330 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     return {"trabajo_id": trabajo_id, "taller": ctx.id, "parte": parte,
             "fuente_nueva": bool(fuente), "material_nuevo": material,
             "reparto": reparto,
-            "plan": light.plan_de(encargo, tareas),
+            "plan": (_plan_con_laminas(light.plan_de(encargo, tareas),
+                                       len(_laminas().ids_de(encargo)))
+                     if "referencias" in tareas and not encargo.get("laminas")
+                     else light.plan_de(encargo, tareas)),
             "trabajo": ctx.gestor.estado(trabajo_id),
             "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
+
+
+# ------------------------------------------------------------- las laminas
+#
+# Lo que ve cada plano de cada video de un estilo descrito NO son tus imagenes:
+# es la hoja de sus LAMINAS (`pasos/laminas.py`). Aqui se ven una a una, con lo
+# que ensena cada una, y se regeneran, se cambian, se quitan o se anaden.
+# Nada de esto toca un video ya hecho: sus params son suyos. Lo cambiado lo
+# llevan los videos que se creen DESPUES con el estilo (o los que traigan el
+# estilo desde su Encargo).
+
+_ID_LAMINA = re.compile(r"^[a-z]{3,12}$|^extra_\d{1,3}$")
+
+
+def _plan_con_laminas(plan, imagenes):
+    """El plan con las imagenes que de verdad se dibujan en la tarea de laminas.
+
+    La tabla de tareas dice seis (las de fabrica); quitar una no dibuja
+    ninguna, regenerar una dibuja una y un estilo puede tener de 3 a 8."""
+    plan = copy.deepcopy(plan)
+    antes = 0
+    for tanda in plan.get("tandas") or []:
+        for tarea in tanda:
+            if tarea.get("id") == "referencias":
+                antes += int(tarea.get("imagenes") or 0)
+                tarea["imagenes"] = int(imagenes)
+    for tarea in plan.get("tareas") or []:
+        if isinstance(tarea, dict) and tarea.get("id") == "referencias":
+            tarea["imagenes"] = int(imagenes)
+    if "imagenes" in plan:
+        plan["imagenes"] = max(0, int(plan["imagenes"]) - antes + int(imagenes))
+    return plan
+
+
+def _taller_libre(ctx):
+    """409 si el taller de este estilo esta generando algo.
+
+    Lo que se guarde mientras tanto se lo llevaria por delante el trabajo al
+    terminar (vuelve a guardar el estilo con SU copia del encargo), y dos
+    laminas nuevas seguidas se llamarian igual y se pagarian las dos."""
+    if ctx.gestor.listar(activos=True):
+        raise ErrorApi(409, "este estilo se está generando: espera a que termine "
+                            "para cambiar otra cosa")
+
+
+def _taller_con_laminas(preset_id):
+    """(ficha, ctx) de un estilo con laminas dibujadas, o un 409 que lo dice."""
+    ficha = _preset_o_400(lambda p: p.leer(preset_id))
+    if ficha.get("tipo") != "canal":
+        raise ErrorApi(400, "esto no es un preset de canal")
+    origen = (ficha.get("datos") or {}).get("origen") or {}
+    if not origen.get("estilo_imagenes"):
+        raise ErrorApi(409, "este estilo no salió de imágenes de referencia: sus "
+                            "láminas son las de su vídeo y no se tocan desde aquí")
+    return ficha, _taller_de(ficha)
+
+
+def _ruta_lamina(ctx, lamina):
+    if not _ID_LAMINA.match(str(lamina or "")):
+        raise ErrorApi(400, f"lámina desconocida: {lamina!r}")
+    return os.path.join(ctx.proyecto.raiz, "estilo", "dibujadas", f"{lamina}.png")
+
+
+def _ficha_lamina(preset_id, ctx, lamina, origen, en_uso):
+    lam = _laminas()
+    ruta = _ruta_lamina(ctx, lamina)
+    hay = os.path.isfile(ruta)
+    sello = int(os.path.getmtime(ruta)) if hay else 0
+    _, propias, _ = lam.config_de(origen)
+    return {"id": lamina, "titulo": lam.titulo_de(lamina, origen),
+            "explicacion": lam.explicacion_de(lamina, origen),
+            "texto": propias.get(lamina, ""),
+            "fabrica": lamina in _moodboard().EJES,
+            "en_uso": en_uso,
+            "url": (f"/api/presets-light/{preset_id}/laminas/{lamina}/imagen?v={sello}"
+                    if hay else "")}
+
+
+@app.get("/api/presets-light/{preset_id}/laminas")
+def laminas_de_preset(preset_id: str):
+    """Las laminas de un estilo, limpias y con lo que ensena cada una."""
+    lam = _laminas()
+    ficha, ctx = _taller_con_laminas(preset_id)
+    origen = (ficha.get("datos") or {}).get("origen") or {}
+    ids = lam.ids_de(origen)
+    quitadas, propias, hoja = lam.config_de(origen)
+    calidad = str((ctx.estado.params("assets") or {}).get("calidad") or "medium")
+    try:
+        usd = float(AJUSTES.usd_por_imagen(calidad) or 0.0)
+    except Exception:                                       # noqa: BLE001
+        usd = 0.0
+    # las anadidas que se quitaron no se guardan: solo vuelven las de fabrica
+    return {"laminas": [_ficha_lamina(preset_id, ctx, e, origen, True) for e in ids],
+            "quitadas": [_ficha_lamina(preset_id, ctx, e, origen, False)
+                         for e in quitadas],
+            "hoja": hoja,
+            "imagenes": len(_aportadas_del_taller(ctx)),
+            "en_la_hoja": _light().MAX_EN_LA_HOJA,
+            "max": lam.MAX_LAMINAS, "min": lam.MIN_LAMINAS,
+            "calidad": calidad, "usd_por_lamina": round(usd, 4),
+            # lo que paga «Regenerar» el estilo entero con ESTAS laminas
+            "imagenes_estilo": _light().imagenes_de_parte("estilo", origen)}
+
+
+@app.get("/api/presets-light/{preset_id}/laminas/{lamina}/imagen")
+def imagen_de_lamina(preset_id: str, lamina: str, peticion: Request):
+    """Una lamina LIMPIA, sin texto encima: la que va en la hoja de cada plano."""
+    _, ctx = _taller_con_laminas(preset_id)
+    ruta = _ruta_lamina(ctx, lamina)
+    if not os.path.isfile(ruta):
+        raise ErrorApi(404, "esa lámina no está dibujada")
+    return servir_fichero(peticion, ruta)
+
+
+@app.post("/api/presets-light/{preset_id}/laminas", status_code=202)
+def cambiar_laminas(preset_id: str, cuerpo: dict = Body(default=None)):
+    """Una accion sobre las laminas de un estilo.
+
+        regenerar  {lamina, texto?}  la vuelve a dibujar; `texto` es una
+                                     correccion de esta vez («sin sombras»)
+        cambiar    {lamina, texto}   que ensene otra cosa, guardado: se respeta
+                                     al regenerar el estilo. Texto vacio en una
+                                     de fabrica la devuelve a lo de fabrica
+        nueva      {texto}           una lamina mas (hasta 8, las que caben en
+                                     la hoja de cada plano)
+        quitar     {lamina}          sale de la hoja; su imagen se queda
+        restaurar  {lamina}          vuelve una de fabrica quitada
+        hoja       {hoja}            "comun" o "repartida" (ver `laminas.py`)
+
+    Dibujar una lamina cuesta UNA imagen; quitar, restaurar una que ya estaba
+    dibujada y cambiar la hoja no cuestan nada. Despues se recomponen las
+    muestras (gratis) y se vuelve a guardar el estilo.
+    """
+    lam = _laminas()
+    mod = _moodboard()
+    light = _light()
+    datos = _cuerpo(cuerpo)
+    accion = str(datos.get("accion") or "").strip().lower()
+    lamina = str(datos.get("lamina") or "").strip()
+    texto = " ".join(str(datos.get("texto") or "").split())[:lam.MAX_TEXTO]
+    ficha, ctx = _taller_con_laminas(preset_id)
+    _taller_libre(ctx)
+    origen = dict((ficha.get("datos") or {}).get("origen") or {})
+    ids = lam.ids_de(origen)
+    quitadas, propias, hoja = lam.config_de(origen)
+    quitadas, propias = list(quitadas), dict(propias)
+    correccion = {}
+    dibujar = []
+
+    if accion == "regenerar":
+        if lamina not in ids:
+            raise ErrorApi(400, f"esa lámina no está en el estilo: {lamina!r}")
+        dibujar = [lamina]
+        if texto:
+            correccion[lamina] = texto
+    elif accion == "cambiar":
+        if lamina not in ids:
+            raise ErrorApi(400, f"esa lámina no está en el estilo: {lamina!r}")
+        if not texto and lamina not in mod.EJES:
+            raise ErrorApi(400, "di qué tiene que enseñar la lámina")
+        if texto and len(texto) < 8:
+            raise ErrorApi(400, "descríbelo con algo más de detalle")
+        if texto:
+            propias[lamina] = texto
+        else:
+            propias.pop(lamina, None)
+        dibujar = [lamina]
+    elif accion == "nueva":
+        if len(ids) >= lam.MAX_LAMINAS:
+            raise ErrorApi(409, f"ya hay {lam.MAX_LAMINAS} láminas, las que caben "
+                                f"en la hoja de cada plano: quita una antes")
+        if len(texto) < 8:
+            raise ErrorApi(400, "di qué tiene que enseñar la lámina nueva "
+                                "(«una cocina de noche con luz cálida»)")
+        lamina = lam.siguiente_extra(origen)
+        propias[lamina] = texto
+        dibujar = [lamina]
+    elif accion == "quitar":
+        if lamina not in ids:
+            raise ErrorApi(400, f"esa lámina no está en el estilo: {lamina!r}")
+        if len(ids) <= lam.MIN_LAMINAS:
+            raise ErrorApi(409, f"un estilo necesita al menos {lam.MIN_LAMINAS} "
+                                f"láminas: regenera o cambia esta en vez de quitarla")
+        if lamina in mod.EJES:
+            quitadas.append(lamina)
+        else:
+            propias.pop(lamina, None)
+    elif accion == "restaurar":
+        if lamina not in quitadas:
+            raise ErrorApi(400, f"esa lámina no está quitada: {lamina!r}")
+        if len(ids) >= lam.MAX_LAMINAS:
+            raise ErrorApi(409, f"ya hay {lam.MAX_LAMINAS} láminas: quita una antes")
+        quitadas.remove(lamina)
+        if not os.path.isfile(_ruta_lamina(ctx, lamina)):
+            dibujar = [lamina]
+    elif accion == "hoja":
+        nueva = str(datos.get("hoja") or "")
+        if nueva not in lam.HOJAS:
+            raise ErrorApi(400, "la hoja es «comun» o «repartida»")
+        hoja = nueva
+    else:
+        raise ErrorApi(400, "acción desconocida: regenerar, cambiar, nueva, "
+                            "quitar, restaurar u hoja")
+
+    # SOLO LO QUE NO ES DE FABRICA se escribe: un estilo que vuelve a las seis
+    # de siempre no se queda con claves vacias
+    for clave, valor in (("laminas_quitadas", quitadas), ("laminas_propias", propias),
+                         ("laminas_hoja", hoja if hoja != "comun" else "")):
+        if valor:
+            origen[clave] = valor
+        else:
+            origen.pop(clave, None)
+
+    if accion == "hoja":
+        # no se dibuja nada: vale para la proxima vez que se dibuje una lamina
+        contenido = copy.deepcopy(ficha.get("datos") or {})
+        contenido["origen"] = origen
+        try:
+            nueva_ficha = _presets().guardar(
+                "canal", ficha.get("nombre") or "canal", contenido,
+                nota=ficha.get("nota") or "",
+                miniatura=ficha.get("miniatura") or "", pid=preset_id)
+        except _presets().ErrorPreset as fallo:
+            raise ErrorApi(400, str(fallo))
+        return {"trabajo_id": "", "preset": nueva_ficha, "hoja": hoja}
+
+    origen["nombre"] = ficha.get("nombre") or "canal"
+    origen.setdefault("idioma", _presets().idioma_de(ficha) or "es")
+    encargo = _encargo_o_400(origen)
+    encargo["feedback"] = {}
+    encargo["laminas"] = correccion
+    encargo["laminas_solo"] = dibujar
+    ctx.bitacora.anotar("laminas_estilo", None, {
+        "preset": preset_id, "accion": accion, "lamina": lamina,
+        "dibujar": dibujar, "texto": texto[:200]})
+    trabajo_id = ctx.gestor.lanzar(
+        "preset_light", _correr_preset_light, ctx, encargo,
+        ["referencias", "muestra"], preset_id, paso="assets")
+    _registrar_trabajo(trabajo_id, ctx.id)
+    plan = _plan_con_laminas(light.plan_de(encargo, ("referencias", "muestra")),
+                             len(dibujar))
+    return {"trabajo_id": trabajo_id, "taller": ctx.id, "accion": accion,
+            "lamina": lamina, "imagenes": len(dibujar),
+            "plan": plan,
+            "trabajo": ctx.gestor.estado(trabajo_id),
+            "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
+
+
+# --------------------------------------------- tus imagenes de referencia
+
+@app.get("/api/presets-light/{preset_id}/aportadas")
+def aportadas_de_preset(preset_id: str):
+    """Las imagenes de referencia de un estilo, con lo que se dijo de cada una."""
+    ficha, ctx = _taller_con_laminas(preset_id)
+    origen = (ficha.get("datos") or {}).get("origen") or {}
+    sin = _light()._sin_prefijo
+    descripciones = origen.get("estilo_descripciones") or {}
+    destacadas = set(origen.get("estilo_destacadas") or [])
+    salida = []
+    for ruta in _aportadas_del_taller(ctx):
+        base = sin(ruta)
+        sello = int(os.path.getmtime(ruta))
+        salida.append({"nombre": base,
+                       "url": f"/api/presets-light/{preset_id}/aportadas/"
+                              f"{base}/imagen?v={sello}",
+                       "descripcion": str(descripciones.get(base) or ""),
+                       "destacada": base in destacadas})
+    return {"imagenes": salida, "tope": _light().max_imagenes_estilo(),
+            "en_la_hoja": _light().MAX_EN_LA_HOJA}
+
+
+@app.get("/api/presets-light/{preset_id}/aportadas/{nombre}/imagen")
+def imagen_aportada(preset_id: str, nombre: str, peticion: Request):
+    """Una de tus imagenes de referencia, tal cual la subiste."""
+    _, ctx = _taller_con_laminas(preset_id)
+    sin = _light()._sin_prefijo
+    ruta = next((r for r in _aportadas_del_taller(ctx) if sin(r) == nombre), "")
+    if not ruta:
+        raise ErrorApi(404, "esa imagen no está en el estilo")
+    return servir_fichero(peticion, ruta)
+
+
+@app.put("/api/presets-light/{preset_id}/aportadas")
+def describir_aportadas(preset_id: str, cuerpo: dict = Body(default=None)):
+    """Guarda lo que se dice de cada imagen y las ★: {descripciones, destacadas}.
+
+    No regenera nada: lo usan la guia (al regenerar el estilo) y la hoja de las
+    laminas (al dibujar una). Se dice en pantalla.
+    """
+    datos = _cuerpo(cuerpo)
+    ficha, ctx = _taller_con_laminas(preset_id)
+    _taller_libre(ctx)
+    light = _light()
+    sin = light._sin_prefijo
+    hay = {sin(r) for r in _aportadas_del_taller(ctx)}
+    descripciones = {}
+    for nombre, texto in (datos.get("descripciones") or {}).items():
+        texto = " ".join(str(texto or "").split())[:light.MAX_DESCRIPCION]
+        if sin(nombre) in hay and texto:
+            descripciones[sin(nombre)] = texto
+    destacadas = [sin(n) for n in (datos.get("destacadas") or [])
+                  if isinstance(n, str) and sin(n) in hay][:light.MAX_EN_LA_HOJA]
+    contenido = copy.deepcopy(ficha.get("datos") or {})
+    origen = contenido.setdefault("origen", {})
+    for clave, valor in (("estilo_descripciones", descripciones),
+                         ("estilo_destacadas", destacadas)):
+        if valor:
+            origen[clave] = valor
+        else:
+            origen.pop(clave, None)
+    try:
+        nueva = _presets().guardar("canal", ficha.get("nombre") or "canal", contenido,
+                                   nota=ficha.get("nota") or "",
+                                   miniatura=ficha.get("miniatura") or "",
+                                   pid=preset_id)
+    except _presets().ErrorPreset as fallo:
+        raise ErrorApi(400, str(fallo))
+    return {"preset": nueva}
 
 
 @app.put("/api/presets-light/{preset_id}")
@@ -9267,7 +11971,7 @@ def _que_rehace(ctx, parte, cambios):
     usd_voz = round(caracteres * tarifa, 3)
     calidad = ((cambios.get("assets") or {}).get("calidad")
                or (ctx.estado.params("assets") or {}).get("calidad") or "low")
-    usd_imagen = _light().USD_POR_IMAGEN.get(str(calidad), _light().USD_POR_IMAGEN["low"])
+    usd_imagen = _light().usd_por_imagen(str(calidad))
     if parte == "rotulos":
         return {"rehace": "rehace solo el montaje del vídeo", "usd": 0.0}
     if parte == "voz":
@@ -9530,7 +12234,7 @@ def _coste_previsto(ctx, pestanas):
     planos = _planos_previstos(ctx)
     assets = ctx.estado.params("assets") or {}
     calidad = str(assets.get("calidad") or "low").lower()
-    usd_imagen = light.USD_POR_IMAGEN.get(calidad, light.USD_POR_IMAGEN["low"])
+    usd_imagen = light.usd_por_imagen(calidad)
     tarifas = COSTE.tarifas()
     usd_caracter = float(((tarifas.get("tts") or {}).get("usd_por_caracter")) or 0.0)
 
@@ -9546,26 +12250,59 @@ def _coste_previsto(ctx, pestanas):
             ctx.proyecto, "guion", "guion.json", obligatorio=False) or {}
         bloques = guion.get("guion") or []
         if bloques:
-            caracteres = sum(len(str(b.get("texto") or "")) for b in bloques)
+            # lo que se ENVIA a la voz: el texto sin las marcas de pausa y
+            # enfasis (es lo que cuenta el medidor, y lo que cobra Cartesia)
+            limpiar = getattr(PASOS_MODULOS.marcas_tts, "limpiar", None)
+            caracteres = sum(len(limpiar(str(b.get("texto") or "")) if limpiar
+                                 else str(b.get("texto") or "")) for b in bloques)
         else:
             caracteres = int(round(palabras * 6.1))
+    # LAS HOJAS DE PERSONAJES TAMBIEN SE PAGAN: una imagen por personaje del
+    # reparto, antes de los planos. El cotizador solo contaba planos y se quedaba
+    # corto en 1-3 imagenes por video con personajes (11-10-2026).
+    hojas, hojas_hechas = (_hojas_de_reparto(ctx) if "video" in pestanas else (0, 0))
+    imagenes += hojas
     usd_imagenes = round(imagenes * usd_imagen, 3)
     usd_tts = round(caracteres * usd_caracter, 4)
+    # la voz ya grabada y al dia no se vuelve a pagar en una tanda «pendientes»
+    voz_al_dia = ctx.estado.estado_de("voz") == "listo"
+    usd_tts_por_generar = 0.0 if voz_al_dia else usd_tts
     # LO QUE YA ESTA HECHO VIAJA AL LADO DEL TECHO, no en su lugar. El total
     # sigue siendo lo que cuesta el video entero --que es lo que hay que pagar
     # si algo aguas arriba cambia y la cache falla-- y `por_generar` es lo que
     # cuesta si nada cambia. Ensenar solo uno de los dos miente en un sentido o
     # en el otro: uno asusta al que retoma, el otro promete barato de mas.
-    hechas = _imagenes_ya_generadas(ctx, planos) if imagenes else 0
+    hechas = (_imagenes_ya_generadas(ctx, planos) + hojas_hechas) if imagenes else 0
     hechas = min(hechas, imagenes)
     por_generar = max(0, imagenes - hechas)
+    precio = AJUSTES.precio_por_imagen(calidad)
     return {"imagenes": imagenes, "calidad": calidad,
             "usd_por_imagen": usd_imagen, "usd_imagenes": usd_imagenes,
+            "precio_de": precio.get("fuente"),
+            "hojas_reparto": hojas,
             "imagenes_hechas": hechas, "imagenes_por_generar": por_generar,
-            "usd_por_generar": round(por_generar * usd_imagen + usd_tts, 3),
+            "usd_por_generar": round(por_generar * usd_imagen + usd_tts_por_generar, 3),
             "caracteres": caracteres, "usd_tts": usd_tts,
             "usd_total": round(usd_imagenes + usd_tts, 3),
             "planos": planos}
+
+
+def _hojas_de_reparto(ctx):
+    """(personajes del reparto en el plan, cuantos ya tienen su hoja dibujada)."""
+    plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    reparto = [str(f.get("nombre") or k.split(":", 1)[-1])
+               for k, f in (plan.get("assets") or {}).items()
+               if isinstance(f, dict) and f.get("tipo") == "reparto"]
+    if not reparto:
+        return 0, 0
+    carpetas = [ctx.proyecto.ruta_trabajo("assets", crear=False)]
+    version = ctx.proyecto.version_activa("assets")
+    if version:
+        carpetas.append(ctx.proyecto.ruta_paso("assets", version))
+    hechas = sum(1 for nombre in reparto
+                 if any(c and os.path.exists(os.path.join(c, "assets", "reparto", f"{nombre}.png"))
+                        for c in carpetas))
+    return len(reparto), hechas
 
 
 def _tamano_para(clave, planos, palabras):
@@ -9711,6 +12448,34 @@ def _plan_de_generacion(ctx, pestanas, modo="pendientes", datos=None):
     }
 
 
+#: Las tandas lanzadas de un video, con lo prometido y cuando empezaron y
+#: acabaron: con eso se compara lo PROMETIDO antes de pulsar con lo GASTADO.
+NOMBRE_TANDAS = "tandas_coste.jsonl"
+
+
+def _apuntar_tanda(ctx, registro):
+    try:
+        with open(ctx.proyecto.ruta(NOMBRE_TANDAS), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(registro, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def _cadena_con_cuenta(avisar, ctx, marca, *args):
+    """`_correr_cadena` con su ventana de tiempo apuntada (ver NOMBRE_TANDAS)."""
+    _apuntar_tanda(ctx, {"marca": marca, "inicio": ahora()})
+    estado = "error"
+    try:
+        resultado = _correr_cadena(avisar, ctx, *args)
+        estado = "listo"
+        return resultado
+    except BaseException as fallo:
+        estado = "cancelado" if type(fallo).__name__ == "Cancelado" else "error"
+        raise
+    finally:
+        _apuntar_tanda(ctx, {"marca": marca, "fin": ahora(), "estado": estado})
+
+
 def _correr_cadena(avisar, ctx, pestanas, modo, datos, plan):
     """Recorre varias pestanas seguidas en UN trabajo. -> resumen.
 
@@ -9790,11 +12555,11 @@ def _pestanas_pedidas(datos):
     if isinstance(crudas, str):
         crudas = [crudas]
     if not isinstance(crudas, list) or not crudas:
-        raise ErrorApi(400, "'pestanas' tiene que ser una lista de pestanas")
+        raise ErrorApi(400, "'pestanas' tiene que ser una lista de pestañas")
     pedidas = [str(p).strip().lower() for p in crudas]
     for pestana in pedidas:
         if pestana not in recetas.PESTANAS:
-            raise ErrorApi(404, f"pestana desconocida: {pestana}. Son "
+            raise ErrorApi(404, f"pestaña desconocida: {pestana}. Son "
                                 + ", ".join(recetas.PESTANAS))
     # EN EL ORDEN DEL PIPELINE, no en el que lleguen: pedir «render, video»
     # renderizaria clips de unos planos que todavia no existen.
@@ -9920,11 +12685,11 @@ def generar_video(pid: str, cuerpo: dict = Body(default=None)):
     with _cerrojo_de_cadena(ctx.id):
         activo = _trabajo_de_cadena(ctx)
         if activo is not None:
-            raise ErrorApi(409, "este video ya se esta generando",
+            raise ErrorApi(409, "este vídeo ya se está generando",
                            {"trabajo_id": activo["id"], "progreso": activo["progreso"]})
         for pestana in elegidas:
             if _trabajo_de_receta(ctx, pestana) is not None:
-                raise ErrorApi(409, f"la pestana '{pestana}' ya se esta generando")
+                raise ErrorApi(409, f"la pestaña '{pestana}' ya se está generando")
 
         plan = _plan_de_generacion(ctx, elegidas, modo, datos)
         if not plan["tareas"]:
@@ -9949,13 +12714,18 @@ def generar_video(pid: str, cuerpo: dict = Body(default=None)):
                     continue
                 faltan = dependencias_que_faltan(ctx, paso, producidos)
                 if faltan:
-                    raise ErrorApi(409, "no se puede generar todavia: falta "
+                    raise ErrorApi(409, "no se puede generar todavía: falta "
                                         "ejecutar " + ", ".join(faltan),
                                    {"faltan": faltan, "tarea": tarea["id"]})
 
+        marca = uuid.uuid4().hex[:12]
         trabajo_id = ctx.gestor.lanzar("generar:" + "+".join(elegidas),
-                                       _correr_cadena, ctx, elegidas, modo, datos,
+                                       _cadena_con_cuenta, ctx, marca, elegidas, modo, datos,
                                        plan, paso=plan["fases"][0]["tareas"][0]["paso"])
+        _apuntar_tanda(ctx, {"marca": marca, "trabajo": trabajo_id, "tandas": elegidas,
+                             "modo": modo, "lanzada": ahora(),
+                             "prometido_usd": (plan.get("coste") or {}).get("usd_por_generar"),
+                             "prometido_imagenes": (plan.get("coste") or {}).get("imagenes_por_generar")})
     _registrar_trabajo(trabajo_id, ctx.id)
     ctx.bitacora.anotar("generacion_lanzada", None, {
         "pestanas": elegidas, "modo": modo, "tareas": plan["tareas"],
@@ -10019,11 +12789,11 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     except presets.ErrorPreset as fallo:
         raise ErrorApi(404, str(fallo))
     if not ficha_preset:
-        raise ErrorApi(404, f"no hay ningun estilo '{preset_id}'")
+        raise ErrorApi(404, f"no hay ningún estilo '{preset_id}'")
     if ficha_preset.get("tipo") != "canal":
         raise ErrorApi(400, f"el preset '{preset_id}' es de tipo "
                             f"'{ficha_preset.get('tipo')}': el modo light hace "
-                            f"videos con estilos de canal")
+                            f"vídeos con estilos de canal")
 
     # LO QUE LLEVA, validado ANTES de crear nada: un «lleva» que no vale se
     # dice ahora, y no con el video ya creado a medias
@@ -10033,7 +12803,7 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     if not nombre:
         nombre = f"Vídeo de {ficha_preset.get('nombre') or preset_id}"
     if not identificador(nombre):
-        raise ErrorApi(400, f"'{nombre}' no da un identificador valido")
+        raise ErrorApi(400, f"'{nombre}' no da un identificador válido")
     os.makedirs(raiz_proyectos(), exist_ok=True)
     base, intento = nombre[:60], 1
     while os.path.isdir(os.path.join(raiz_proyectos(), identificador(nombre))):
@@ -10042,7 +12812,7 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     try:
         proyecto = Proyecto.crear(raiz_proyectos(), nombre)
     except OSError as fallo:
-        raise ErrorApi(500, f"no se ha podido crear el video: {fallo}")
+        raise ErrorApi(500, f"no se ha podido crear el vídeo: {fallo}")
     ctx = contexto(proyecto.id)
     ctx.proyecto.config[CONFIG_VIDEO_LIGHT] = True
     ctx.proyecto.config[CONFIG_ESTILO_LIGHT] = preset_id
@@ -10068,6 +12838,7 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     avisos = _sembrar_video_light(ctx, datos)
     if lleva:
         _aplicar_lleva(ctx, lleva, al_crear=True)
+    avisos += _opciones_al_crear(ctx, preset_id, datos.get("opciones") or {})
     ctx.bitacora.anotar("video_light_creado", None, {
         "preset": preset_id, "estilo": ficha_preset.get("nombre"),
         "nombre": nombre, "avisos": avisos})
@@ -10076,6 +12847,48 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
             "aplicado": aplicado.get("pasos") or [],
             "avisos": avisos,
             "pasos": [ficha_paso(ctx, p["id"]) for p in PASOS]}
+
+
+def _opciones_al_crear(ctx, preset_id, opciones):
+    """Musica, subtitulos y logo elegidos en el encargo de un video NUEVO. -> avisos
+
+    Lo mismo que se puede cambiar despues en el video, decidido antes de que
+    exista. Solo se escribe lo que se eligio: lo que se deja en automatico no
+    toca ningun param (regla 1). Y el logo del PROYECTO del estilo entra solo,
+    salvo que el encargo diga «sin logo».
+    """
+    avisos = []
+    sonido = _sonido()
+    if not isinstance(opciones, dict):
+        return avisos
+    presencia = opciones.get("presencia")
+    if presencia:
+        if presencia not in sonido.PRESENCIAS:
+            raise ErrorApi(400, "presencia: " + ", ".join(sonido.PRESENCIAS))
+        if presencia != sonido.PRESENCIA_POR_DEFECTO:
+            ctx.estado.actualizar_params("render", {"musica_presencia": presencia})
+    tema = opciones.get("musica")
+    if isinstance(tema, dict) and tema.get("id") and tema.get("descarga"):
+        try:
+            sonido.traer(tema, "musica")
+            ctx.estado.actualizar_params("render", {"musica": tema})
+        except Exception as fallo:                          # noqa: BLE001
+            avisos.append(f"no se ha podido bajar el tema elegido ({fallo}): "
+                          f"irá la música automática")
+    if isinstance(opciones.get("subtitulos"), dict) and opciones["subtitulos"]:
+        _aplicar_subtitulos(ctx, opciones["subtitulos"])
+    logo = opciones.get("logo")
+    if logo is False or opciones.get("sin_logo"):
+        return avisos
+    if not (isinstance(logo, dict) and logo.get("fichero")):
+        del_proyecto = CLIENTES.de_estilo(raiz_proyectos(), preset_id) or {}
+        logo = del_proyecto.get("logo")
+    if isinstance(logo, dict) and logo.get("fichero"):
+        try:
+            _poner_logo_suelto(ctx, logo)
+        except ErrorApi as fallo:
+            avisos.append(f"el logo no se ha podido poner: {fallo.mensaje}")
+    return avisos
 
 
 def _sembrar_video_light(ctx, datos):
@@ -10194,7 +13007,7 @@ def valorar_ajuste(cuerpo: dict = Body(default=None)):
     datos = _cuerpo(cuerpo)
     paso = str(datos.get("paso") or "").strip()
     if not paso:
-        raise ErrorApi(400, "hace falta decir de que paso es la valoracion")
+        raise ErrorApi(400, "hace falta decir de qué paso es la valoración")
     ajuste = _ajuste_cli(datos)
     try:
         anotada = ESTADISTICAS.valorar(
@@ -10203,7 +13016,7 @@ def valorar_ajuste(cuerpo: dict = Body(default=None)):
     except ValueError as fallo:
         raise ErrorApi(400, str(fallo))
     if anotada is None:
-        raise ErrorApi(409, f"todavia no hay ninguna ejecucion de '{paso}' con "
+        raise ErrorApi(409, f"todavía no hay ninguna ejecución de '{paso}' con "
                             f"{ajuste['modelo']}/{ajuste['esfuerzo']} que valorar")
     return {"anotada": anotada,
             "recomendacion": ESTADISTICAS.recomendacion(paso)}
@@ -10279,7 +13092,7 @@ async def crear_captura(pid: str, peticion: Request):
     temporal = _p7().contexto_temporal(ctx.proyecto, escena, t_video, t_escena)
     escena = temporal.get("escena") or escena
     if not escena:
-        raise ErrorApi(400, f"no hay ningun plano en t_video={t_video}: "
+        raise ErrorApi(400, f"no hay ningún plano en t_video={t_video}: "
                             f"manda 'escena' o ejecuta callouts antes")
     _comprobar_unidades(ctx, paso, [f"escena:{escena}"])
 
@@ -10345,7 +13158,7 @@ def contexto_captura(pid: str, paso: str = Query(default="callouts"),
 
     mov = p7.movimientos_de(ctx.proyecto).get(ficha.get("escena"))
     if not mov:
-        raise ErrorApi(409, f"callouts todavia no ha producido el plano "
+        raise ErrorApi(409, f"callouts todavía no ha producido el plano "
                             f"{ficha.get('escena')}: no hay fotograma que componer")
     base = os.path.dirname(p7.ruta_movimiento(ctx.proyecto))
     hyper = os.path.join(base, mov.get("hyperframe") or "")
@@ -10488,7 +13301,7 @@ def _ajuste_cli(datos, defecto_modelo=None, defecto_esfuerzo=None):
         try:
             ajuste["tiempo_max_s"] = int(crudo["tiempo_max_s"])
         except (TypeError, ValueError):
-            raise ErrorApi(400, "tiempo_max_s tiene que ser un numero entero")
+            raise ErrorApi(400, "tiempo_max_s tiene que ser un número entero")
     return ajuste
 
 
@@ -10497,7 +13310,7 @@ def _lanzar_capturas(ctx, paso_id, unidades, grupos, modo, ajuste=None):
     if ctx.estado.estado_de(paso_id) == "bloqueado":
         faltan = [d for d in PASOS_POR_ID[paso_id]["depende_de"]
                   if ctx.proyecto.version_activa(d) is None]
-        raise ErrorApi(409, f"'{paso_id}' esta bloqueado: falta ejecutar "
+        raise ErrorApi(409, f"'{paso_id}' está bloqueado: falta ejecutar "
                             + ", ".join(faltan), {"faltan": faltan})
     if modo != "agente":
         return lanzar_paso(ctx, paso_id, unidades, nombre=f"capturas:{paso_id}",
@@ -10507,7 +13320,7 @@ def _lanzar_capturas(ctx, paso_id, unidades, grupos, modo, ajuste=None):
                                                for c in g["capturas"]]})
     activo = _trabajo_activo(ctx, paso_id)
     if activo is not None:
-        raise ErrorApi(409, f"'{paso_id}' ya se esta ejecutando",
+        raise ErrorApi(409, f"'{paso_id}' ya se está ejecutando",
                        {"trabajo_id": activo["id"], "progreso": activo["progreso"]})
     modulo_de(paso_id)
     trabajo_id = ctx.gestor.lanzar(f"capturas:{paso_id}", _correr_capturas_agente,

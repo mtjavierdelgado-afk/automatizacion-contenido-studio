@@ -1466,7 +1466,8 @@ MEDIR_JS = """() => {
     panel.scrollTop = antes;
     abajo.forEach(b => {
       // tapado abajo y además es lo último (no se puede subir más)
-      tapados.push((b.innerText || b.title || '').trim().slice(0, 30));
+      tapados.push(((b.innerText || b.title || b.getAttribute('aria-label') || '').trim()
+        || `<${b.tagName.toLowerCase()} class="${b.className}">`).slice(0, 40));
     });
     if (panel.scrollHeight <= panel.clientHeight + 2) arriba.forEach(b => {
       if (!abajo.has(b)) tapados.push((b.innerText || b.title || '').trim().slice(0, 30));

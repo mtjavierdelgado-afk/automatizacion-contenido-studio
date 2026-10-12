@@ -2638,7 +2638,10 @@ button.mini { border-radius: 8px; }
 /* ---- el pie del sistema, al final de cada pantalla */
 .pie-sistema {
   display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 10px;
-  margin: 36px auto 8px; padding: 14px 10px 4px;
+  /* el hueco de debajo es el de la burbuja del asistente: sin él, lo último de
+     una pantalla larga (el «× Borrar» de la última nota) quedaba debajo de ella
+     incluso con el scroll al fondo */
+  margin: 36px auto 96px; padding: 14px 10px 4px;
   border-top: 1px solid var(--linea-suave);
   color: var(--tenue2); font-size: 11.5px; text-align: center; line-height: 1.5;
 }

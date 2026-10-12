@@ -944,7 +944,7 @@ function seguirTrabajo(paso, tid, alTerminar, alAvanzar, pidDelTrabajo) {
     id: tid, estado: 'ejecutando', progreso: 0, mensaje: 'lanzando…',
   }, heredable, {
     id: tid, estado: 'ejecutando',
-    inicio: arranqueDe(previo, tid),
+    inicio: arranqueDe(APP.trabajos[paso], tid),   // (aún es el previo)
   });
   /* EL TRABAJO DE UN VÍDEO ES DE ESE VÍDEO. La ranura del vídeo es una sola
      para toda la pantalla, y sin apuntar de quién es, el montaje de A se
@@ -4957,10 +4957,13 @@ function navLight() {
        pregunta que se hace desde ahí («¿con qué estilo se hizo?, quiero
        cambiarlo»), y antes caía en la portada sin decirlo (10-10-2026). La
        ficha lleva «‹ Volver al vídeo» y su «‹ Volver» de siempre a la galería. */
-    { id: 'estilos', texto: dentro ? 'Estilo' : 'Estilos', puede: true,
+    /* Fuera de un vídeo, tus estilos están en Inicio: esta parada solo
+       repetía esa pantalla y pulsarla no hacía nada (11-10-2026). */
+    { id: 'estilos', texto: 'Estilo', puede: dentro || APP.light.vista === 'preset',
       activa: APP.light.vista === 'preset',
       porque: dentro && fichaLight(v.estilo)
-        ? `el estilo de este vídeo: «${fichaLight(v.estilo).nombre}»` : 'tus estilos y tus vídeos',
+        ? `el estilo de este vídeo: «${fichaLight(v.estilo).nombre}»`
+        : 'el estilo de un vídeo (abre uno); tus estilos están en Inicio',
       ir: () => {
         pararPrevia();
         if (dentro && fichaLight(v.estilo)) {

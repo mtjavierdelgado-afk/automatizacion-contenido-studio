@@ -88,7 +88,6 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 
 | Rama abierta | Ficheros reservados | Desde |
 |---|---|---|
-| `etapa-foto-a` | `pasos/p6_assets.py`, `pasos/encuadres.py`, `pasos/estilo.py`, `pasos/moodboard.py`, y el fichero nuevo de reglas de foto | 09-10-2026 |
 | `v2-fase-3` | `pasos/p4_voz.py`, `pasos/p5_revision_audio.py`, `pasos/marcas_tts.py`, `pasos/cadencia.py` (la voz y el reloj del vídeo). Comparte con `arreglos-v2` `pasos/sonido.py`, `pasos/p8_render.py`, `pasos/subtitulos.py` y `web/app.js`: si los toca, se pone al día con lo que haya en `main` antes | 12-10-2026 |
 
 Quien abre una rama la apunta aquí (en `main`, regla 8); quien la une a `main`,

@@ -646,7 +646,10 @@ def probar_el_aviso_de_cambiar_de_idioma():
        f"que nombra los DOS idiomas, en cristiano: {aviso[:80]}…")
     ok("6 imágenes" in aviso,
        "y dice cuantas imagenes cuesta arreglarlo")
-    ok("0,44 $" in aviso, f"y cuanto: {aviso[-40:]}")
+    # el precio es EL DEL STUDIO (`usd_por_imagen`: lo cobrado, o la tabla con
+    # las referencias), no uno escrito aqui: el 11-10 eran dos y no casaban
+    esperado = f"{6 * light.usd_por_imagen('medium'):.2f}".replace(".", ",") + " $"
+    ok(esperado in aviso, f"y cuanto ({esperado}): {aviso[-40:]}")
     igual(aviso.count("$"), 1, "una cifra, no dos")
 
     igual(light.aviso_de_idioma("es", "es"), "",

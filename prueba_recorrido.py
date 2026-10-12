@@ -1477,6 +1477,10 @@ MEDIR_JS = """() => {
         // los que solo salen al pasar el ratón (y en táctil, siempre: ver
         // estilo.css «hover: none») están escondidos: no hay nada que tapar
         if (getComputedStyle(b).visibility === 'hidden') return;
+        // dentro de un <details> cerrado: Chromium le deja su caja (content-
+        // visibility) pero no se pinta ni se puede pulsar; no hay nada tapado
+        const plegado = b.closest('details:not([open])');
+        if (plegado && !b.closest('summary')) return;
         const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
         if (e && burbuja.contains(e)) salen.add(b);
       });

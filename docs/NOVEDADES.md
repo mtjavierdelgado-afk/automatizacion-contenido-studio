@@ -10,6 +10,24 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Salir al inicio, varios vídeos a la vez y volver atrás (11 de octubre, noche)**
+- **Volver al inicio** desde cualquier pantalla de un vídeo: **Inicio** en la
+  barra de abajo, **‹ Mis vídeos** arriba y el **logo**. «Estilo» abre el
+  estilo del vídeo.
+- **Cada vídeo, su progreso**: el montaje de un vídeo ya no sale ni bloquea en
+  los demás, y al terminar no te saca del que estés mirando. Arriba se ve qué
+  vídeo se está haciendo.
+- **Las imágenes, por turnos** entre vídeos: si otro vídeo está dibujando, la
+  barra dice «esperando turno» y empieza sola. Montar, voz y guion sí van a la
+  vez.
+- **Al regenerar el guion, las notas viejas ya no se pegan** a los planos
+  nuevos: el plano nuevo con el mismo número salía retocando la imagen del
+  vídeo anterior. Quedan plegadas en «Notas de una versión anterior del guion».
+- **Volver a la versión anterior** del guion o de las imágenes (abajo en cada
+  pantalla). Nada se borra nunca; volver a unas imágenes es gratis.
+- **«Ver cómo quedó»** funciona también desde el Guion, y las miniaturas ya no
+  salen rotas mientras se monta.
+
 **Ortografía, ocultos y la prueba real (11 de octubre, tarde)**
 - **Corrector de ortografía**: en el **Guion** (antes de grabar la voz, gratis)
   y en la pantalla **Vídeo** para los **subtítulos** de un vídeo ya montado.

@@ -937,12 +937,34 @@ function seguirTrabajo(paso, tid, alTerminar, alAvanzar) {
   soltarSeguimiento(paso);
   const seguimiento = {};
   APP.seguimientos[paso] = seguimiento;
+  const previo = APP.trabajos[paso];
+  // lo de OTRO trabajo (su progreso, su vídeo) no se hereda
+  const heredable = previo && (previo.id === tid || previo.id == null) ? previo : {};
   APP.trabajos[paso] = Object.assign({
     id: tid, estado: 'ejecutando', progreso: 0, mensaje: 'lanzando…',
-  }, APP.trabajos[paso], {
+  }, heredable, {
     id: tid, estado: 'ejecutando',
-    inicio: arranqueDe(APP.trabajos[paso], tid),
+    inicio: arranqueDe(previo, tid),
   });
+  /* EL TRABAJO DE UN VÍDEO ES DE ESE VÍDEO. La ranura del vídeo es una sola
+     para toda la pantalla, y sin apuntar de quién es, el montaje de A se
+     enseñaba (y apagaba los botones) al abrir B, y al terminar volvía a cargar
+     A aunque estuvieras en B (11-10-2026). Con el vídeo apuntado, B no lo ve
+     (`trabajoVideoLight`), y lo que hace al terminar solo corre si sigues en A. */
+  if (paso === CLAVE_VIDEO_LIGHT) {
+    const pid = APP.light.video.pid;
+    APP.trabajos[paso].pid = pid;
+    APP.trabajos[paso].nombreVideo = APP.light.video.nombre || pid;
+    const deEste = () => APP.light.video.pid === pid;
+    const fin = alTerminar;
+    const avance = alAvanzar;
+    alTerminar = fin ? async t => {
+      if (deEste()) return fin(t);
+      if (APP.light.vista !== 'elegido') cargarGaleriaLight(true);
+      return undefined;
+    } : fin;
+    alAvanzar = avance ? d => { if (deEste()) avance(d); } : avance;
+  }
   pintarTrabajo(paso);
 
   seguimiento.tic = setInterval(() => pintarTrabajo(paso), 500);
@@ -1169,15 +1191,29 @@ function pestanaDeTrabajo(paso) {
 /* El faro es lo único que se ve desde CUALQUIER pestaña mientras algo corre, y
    ahora además lleva a donde está la barra. Antes era texto muerto: sabías que
    Assets iba por el 54% y tenías que acordarte de en qué pestaña mirarlo. */
+function legibleCorto(texto) {
+  const t = String(texto || '');
+  return t.length > 24 ? `${t.slice(0, 23)}…` : t;
+}
+
 function pintarFaro() {
   const activos = Object.entries(APP.trabajos).filter(([paso]) => trabajando(paso));
   const faro = vaciar($('#faro'));
   if (!activos.length) return;
   faro.append('⏳ ');
   activos.forEach(([paso, t], indice) => {
+    if (indice) faro.append(' · ');
+    /* EL DE UN VÍDEO DICE DE CUÁL, y lleva a él: con varios vídeos abiertos
+       a lo largo del día, «El vídeo 42 %» no decía cuál se estaba montando. */
+    if (paso === CLAVE_VIDEO_LIGHT && t.pid) {
+      faro.appendChild(h('button', {
+        clase: 'mini fantasma', title: `abrir «${t.nombreVideo || t.pid}» y ver cómo va`,
+        onclick: () => abrirVideoLight(t.pid),
+      }, `«${legibleCorto(t.nombreVideo || t.pid)}» ${Math.round((t.progreso || 0) * 100)}%`));
+      return;
+    }
     const destino = pestanaDeTrabajo(paso);
     const texto = `${nombreDe(paso)} ${Math.round((t.progreso || 0) * 100)}%`;
-    if (indice) faro.append(' · ');
     faro.appendChild(destino
       ? h('button', {
         clase: 'mini fantasma', title: `ir a ${nombreDe(paso)} y ver cómo va`,
@@ -4423,6 +4459,16 @@ function pieSistema() {
 function arrancar() {
   ponerMandosDeCabecera();
   aplicarTema(temaActual());
+  /* EL LOGO LLEVA AL INICIO, como en cualquier web: era la primera salida que
+     se buscaba y no hacía nada (11-10-2026). */
+  const marca = document.querySelector('#cabecera .marca');
+  if (marca) {
+    marca.setAttribute('role', 'button');
+    marca.setAttribute('tabindex', '0');
+    marca.title = 'Ir al inicio: tus estilos y tus vídeos';
+    marca.addEventListener('click', () => irAInicioLight());
+    marca.addEventListener('keydown', ev => { if (ev.key === 'Enter') irAInicioLight(); });
+  }
   $('#btn-tema').addEventListener('click', () =>
     aplicarTema(temaActual() === 'claro' ? 'oscuro' : 'claro'));
   /* LA CLASE DEL <body>, ANTES QUE NADA. Hay cosas que se esconden con CSS y
@@ -4838,6 +4884,7 @@ async function salirDeStudio() {
  * enseña el camino completo desde el primer día.
  */
 const ICONOS_NAV = {
+  inicio: 'M3 11l9-7 9 7 M5 9.5V20h5v-6h4v6h5V9.5',
   estilos: 'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z',
   encargo: 'M9 3h6v3H9z M7 5h10v16H7z M10 11h5 M10 15h4',
   guion: 'M6 3h12v18H6z M9 8h6 M9 12h6 M9 16h4',
@@ -4880,12 +4927,21 @@ function navLight() {
   const hayVideo = dentro && (!!v.audio || hayMp4Light());
 
   const paradas = [
+    /* INICIO: la portada, con tus estilos y tus vídeos. Hasta el 11-10-2026 la
+       única salida de un vídeo era «Estilos», y al hacer que desde dentro de un
+       vídeo abriera SU estilo (10-10) no quedó ninguna: el dueño se encontró
+       dentro de un vídeo sin forma de volver. Ahora salen tres: esta parada, el
+       logo de arriba y «‹ Mis vídeos» encima de cada pantalla del vídeo. */
+    { id: 'inicio', texto: 'Inicio', puede: true,
+      activa: !['crear', 'generando', 'preset', 'elegido'].includes(APP.light.vista),
+      porque: 'tus estilos y tus vídeos',
+      ir: () => irAInicioLight() },
     /* DESDE DENTRO DE UN VÍDEO, «Estilos» abre EL ESTILO DE ESE VÍDEO: es la
        pregunta que se hace desde ahí («¿con qué estilo se hizo?, quiero
        cambiarlo»), y antes caía en la portada sin decirlo (10-10-2026). La
        ficha lleva «‹ Volver al vídeo» y su «‹ Volver» de siempre a la galería. */
-    { id: 'estilos', texto: 'Estilos', puede: true,
-      activa: !dentro,
+    { id: 'estilos', texto: dentro ? 'Estilo' : 'Estilos', puede: true,
+      activa: APP.light.vista === 'preset',
       porque: dentro && fichaLight(v.estilo)
         ? `el estilo de este vídeo: «${fichaLight(v.estilo).nombre}»` : 'tus estilos y tus vídeos',
       ir: () => {
@@ -5096,13 +5152,21 @@ function pintarLightAhora() {
          está montando o ya está. Un menú de tres pestañas aquí sería pedirle a
          quien mira que elija en cuál de los tres momentos está. */
       const sub = APP.light.video.vista;
+      if (!APP.light.video.cargando) contenido.appendChild(migasDelVideoLight());
       if (APP.light.video.cargando) {
         contenido.appendChild(h('div', { clase: 'cargando' }, 'abriendo el vídeo…'));
       } else if (APP.light.video.error) {
         contenido.appendChild(cajaError(APP.light.video.error));
       } else if (sub === 'video') contenido.appendChild(vistaVideoLight());
-      else if (sub === 'previa') contenido.appendChild(vistaPreviaLight());
-      else if (sub === 'guion') contenido.appendChild(vistaGuionLight());
+      else if (sub === 'previa') {
+        contenido.appendChild(vistaPreviaLight());
+        const versiones = bloqueVersionesLight('assets');
+        if (versiones) contenido.appendChild(versiones);
+      } else if (sub === 'guion') {
+        contenido.appendChild(vistaGuionLight());
+        const versiones = bloqueVersionesLight('guion');
+        if (versiones) contenido.appendChild(versiones);
+      }
       else if (sub === 'encargo_video') contenido.appendChild(vistaEncargoVideoLight());
       else contenido.appendChild(vistaElegidoLight());
     }
@@ -5117,6 +5181,94 @@ function pintarLightAhora() {
   contenido.appendChild(pieSistema());
   if (BARRA_INFERIOR.nodo) contenedor.appendChild(BARRA_INFERIOR.nodo);
   contenedor.appendChild(navLight());
+}
+
+/* A LA PORTADA desde donde sea (la parada «Inicio», el logo, «‹ Mis vídeos»).
+   El vídeo se cierra en la pantalla, no en el servidor: lo que se esté
+   generando sigue y se vuelve a ver al abrirlo. */
+function irAInicioLight() {
+  pararPrevia();
+  recordarVideoLight('');
+  irALight('galeria');
+  cargarGaleriaLight(true);
+}
+
+/* «‹ Mis vídeos / nombre del vídeo», encima de cada pantalla del vídeo. */
+function migasDelVideoLight() {
+  const v = APP.light.video;
+  const estilo = fichaLight(v.estilo);
+  return h('div', { clase: 'migas migas-video' },
+    h('button', { clase: 'mini fantasma', title: 'Volver a tus estilos y tus vídeos',
+      onclick: () => irAInicioLight() }, '‹ Mis vídeos'),
+    h('span', { clase: 'meta migas-nombre' }, v.pid ? `/ ${v.nombre || v.pid}` : '/ vídeo nuevo'),
+    h('span', { clase: 'crece' }),
+    estilo ? h('button', { clase: 'mini fantasma', title: 'Abrir el estilo con el que se hace este vídeo',
+      onclick: () => { pararPrevia(); irALight('preset', { abierto: v.estilo, feedback: {}, desdeVideo: v.pid }); } },
+    `Estilo: ${estilo.nombre}`) : null);
+}
+
+/* VOLVER A LA VERSIÓN ANTERIOR DE UN PASO (11-10-2026). Cada vez que se
+   regenera el guion o las imágenes, el Studio guarda una versión nueva y NO
+   BORRA las de antes (`Estado.revertir` en nucleo/estado.py: «nada se borra»).
+   El motor siempre supo volver a una; la pantalla no lo ofrecía. Lo que cuelga
+   del paso (la voz de un guion, el montaje de unas imágenes) queda pendiente,
+   y se dice antes de pulsar porque rehacer la voz o las imágenes se paga. */
+const QUE_ARRASTRA_LA_VERSION = {
+  guion: 'La voz, las imágenes y el vídeo de este vídeo quedarán por rehacer con ese guion '
+    + '(volver a grabar la voz y redibujar las imágenes que cambien SE PAGA).',
+  assets: 'Vuelven esas imágenes tal cual, sin pagar nada. El vídeo quedará por volver '
+    + 'a montar (eso es gratis).',
+};
+
+function bloqueVersionesLight(paso) {
+  const v = APP.light.video;
+  const ficha = (v.fichas || {})[paso] || {};
+  const versiones = (ficha.versiones || []).slice().sort((a, b) => b.n - a.n);
+  if (versiones.length < 2) return null;
+  const activa = versiones.find(x => x.activa) || versiones[0];
+  const anterior = versiones.find(x => x.n < activa.n);
+  const nombre = paso === 'guion' ? 'del guion' : 'de las imágenes';
+  const ocupado = !!trabajoVideoLight() || (COLA_IMG.pid === v.pid && (!!COLA_IMG.actual || COLA_IMG.cola.length > 0));
+  const caja = h('details', { clase: 'bloque-versiones' });
+  caja.appendChild(h('summary', {},
+    `Versiones ${nombre} (${versiones.length}) · usando la v${activa.n}`));
+  caja.appendChild(h('div', { clase: 'meta' },
+    'Cada vez que se regenera se guarda una versión nueva y las de antes no se borran: '
+    + 'puedes volver a cualquiera. ' + QUE_ARRASTRA_LA_VERSION[paso]));
+  if (anterior) {
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'primario', disabled: ocupado,
+        title: ocupado ? 'espera a que termine lo que está en marcha' : '',
+        onclick: () => volverAVersionLight(paso, anterior.n) },
+      `↶ Volver a la versión anterior (v${anterior.n})`)));
+  }
+  const lista = h('div', { clase: 'lista-versiones' });
+  versiones.slice(0, 12).forEach(x => lista.appendChild(h('div', { clase: 'fila fila-version' },
+    h('b', {}, `v${x.n}`),
+    h('span', { clase: 'meta crece' }, [fechaCorta(x.fecha), x.resumen].filter(Boolean).join(' · ')),
+    x.n === activa.n ? h('span', { clase: 'pastilla' }, 'en uso')
+      : h('button', { clase: 'mini', disabled: ocupado,
+        onclick: () => volverAVersionLight(paso, x.n) }, 'Usar esta'))));
+  caja.appendChild(lista);
+  return caja;
+}
+
+async function volverAVersionLight(paso, numero) {
+  const v = APP.light.video;
+  const pid = v.pid;
+  const nombre = paso === 'guion' ? 'el guion' : 'las imágenes';
+  if (!window.confirm(`¿Volver a ${nombre} de la v${numero}?\n\n${QUE_ARRASTRA_LA_VERSION[paso]}`
+    + '\n\nLa versión de ahora no se borra: puedes volver a ella desde esta misma lista.')) return;
+  try {
+    await pedir(API.revertir(pid, paso), { method: 'POST', cuerpo: { version: numero } });
+    toast(`Usando ${nombre} de la v${numero}`);
+    if (videoAbierto().pid === pid) {
+      PREVIA.ficha = null;
+      await cargarVideoLight(pid);
+    }
+  } catch (e) {
+    toast(`no se ha podido volver: ${e.message}`, true);
+  }
 }
 
 function irALight(vista, extra) {
@@ -5989,6 +6141,15 @@ async function cargarVideoLight(pid) {
   pintarLight();
   try {
     const proyecto = await pedir(API.proyecto(pid));
+    /* lo que se estaba viendo de OTRO vídeo no se queda en este. Contra
+       `cargadoDe` y no contra `pid`: abrir un vídeo ya apunta su pid ANTES de
+       cargarlo (`recordarVideoLight`). */
+    if (v.cargadoDe !== pid) {
+      v.planos = [];
+      v.firmaPlanos = '';
+      v.subtitulosRotos = undefined;
+    }
+    v.cargadoDe = pid;
     v.pid = pid;
     v.nombre = (proyecto.proyecto || {}).nombre || pid;
     v.estilo = ((proyecto.proyecto || {}).config || {}).estilo_light || '';
@@ -6067,7 +6228,14 @@ async function contarLaTandaQueMurio(pid) {
    vídeo a medias con los botones apagados y ninguna señal de que algo estuviera
    pasando, que es exactamente lo contrario de lo que la pantalla promete. */
 async function reengancharTandaLight(pid) {
-  if ((APP.trabajos[CLAVE_VIDEO_LIGHT] || {}).estado === 'ejecutando') return;
+  const ranura = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
+  if (ranura.estado === 'ejecutando') {
+    if (!ranura.pid || ranura.pid === pid) return;
+    /* LA RANURA ES DE OTRO VÍDEO: se deja de mirar (el trabajo sigue en el
+       servidor y se vuelve a enganchar al abrir ese vídeo) y se mira el de este. */
+    soltarSeguimiento(CLAVE_VIDEO_LIGHT);
+    delete APP.trabajos[CLAVE_VIDEO_LIGHT];
+  }
   try {
     const datos = await pedir(`${API.trabajosVivos()}?proyecto=`
       + `${encodeURIComponent(pid)}&activos=1`);
@@ -6110,6 +6278,7 @@ async function reengancharTandaLight(pid) {
       if (tanda === 'video') refrescarPlanosLight();
       refrescarVivosLight();
     });
+    refrescarPlanosLight();
   } catch (e) { /* no poder mirar los trabajos no puede tumbar la pantalla */ }
 }
 
@@ -7156,13 +7325,14 @@ async function lanzarTandaLight(tanda, modo) {
 async function refrescarPlanosLight() {
   const v = APP.light.video;
   if (!v.pid || v.pidiendoPlanos) return;
+  const pid = v.pid;
   v.pidiendoPlanos = true;
   try {
     // LIGERO: de cada plano aquí solo se miran `id`, `ruta` y `sello`. Pedirlo
     // entero traía además el prompt de los 232, 3,88 MB por vuelta, y esto se
     // pregunta una vez por imagen generada: unos 900 MB por tanda para acabar
     // comparando `planos.length`.
-    const datos = await pedir(API.planosHechos(v.pid, true));
+    const datos = await pedir(API.planosHechos(pid, true));
     /* Llega como {S001: {ruta, sello, ...}} y se filtra por el PLAN de ahora:
        la carpeta de trabajo conserva lo de pasadas anteriores —es lo que
        permite retomar una tanda cortada— así que ahí hay PNG de planos que este
@@ -7176,7 +7346,14 @@ async function refrescarPlanosLight() {
       .filter(([id]) => !delPlan.size || delPlan.has(id))
       .map(([id, ficha]) => Object.assign({ id }, ficha))
       .sort((a, b) => (a.sello || 0) - (b.sello || 0));
-    if (planos.length !== v.planos.length) {
+    /* POR DÓNDE ESTÁN, no solo cuántos: al terminar la tanda las imágenes
+       pasan de la carpeta de trabajo a la de su versión, y con la misma
+       cuenta la tira se quedaba con las rutas viejas -- miniaturas rotas
+       mientras se montaba (11-10-2026). */
+    const firma = planos.map(x => `${x.id}:${x.ruta}`).join('|');
+    if (videoAbierto().pid !== pid) { v.pidiendoPlanos = false; return; }
+    if (firma !== v.firmaPlanos) {
+      v.firmaPlanos = firma;
       v.planos = planos;
       /* SOLO LA PANTALLA DEL VIDEO LOS ENSENA (el plano grande y el «N
          planos»). Desde las diapositivas esto corre mientras se aplican las
@@ -7188,9 +7365,13 @@ async function refrescarPlanosLight() {
   v.pidiendoPlanos = false;
 }
 
+/* El trabajo en marcha DEL VÍDEO ABIERTO, o null. El de otro vídeo no cuenta:
+   ni enseña su barra aquí ni apaga los botones de este. */
 function trabajoVideoLight() {
   const trabajo = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
-  return trabajo.estado === 'ejecutando' ? trabajo : null;
+  if (trabajo.estado !== 'ejecutando') return null;
+  if (trabajo.pid && trabajo.pid !== APP.light.video.pid) return null;
+  return trabajo;
 }
 
 /* La barra: a la derecha del botón y ocupando el resto de la franja. Dice por
@@ -7225,7 +7406,7 @@ function barraTandaLight(tanda) {
 }
 
 function barraTandaLightAhora(tanda) {
-  const trabajo = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
+  const trabajo = trabajoVideoLight() || {};
   const corriendo = trabajo.estado === 'ejecutando';
   if (!corriendo) {
     if (tanda) refrescarPlanLight(tanda);
@@ -7349,7 +7530,7 @@ const COSTE_LIGHT = { ultima: 0, cita: null, pid: '' };
 function refrescarCosteLight(forzar) {
   const v = APP.light.video;
   if (!v.pid) return;
-  const corriendo = (APP.trabajos[CLAVE_VIDEO_LIGHT] || {}).estado === 'ejecutando';
+  const corriendo = !!trabajoVideoLight();
   const mismo = COSTE_LIGHT.pid === v.pid;
   // YA SE SABE Y NO ESTA PASANDO NADA: no hay nada nuevo que preguntar. Sin
   // esta linea el bucle se cierra solo -- se pinta, se pide, la respuesta
@@ -9135,7 +9316,7 @@ async function guardarNotaEscena(escena) {
  * leen como el mismo gesto. Aqui la etiqueta ya dice lo que hace. */
 function botonRenderizarLight() {
   if (hayMp4Light() && !videoObsoletoLight()) return null;
-  const corriendo = (APP.trabajos[CLAVE_VIDEO_LIGHT] || {}).estado === 'ejecutando';
+  const corriendo = !!trabajoVideoLight();
   /* CON NOTAS SIN APLICAR, ESTE BOTON HACE MENOS que el de al lado: «Aplicar»
      reparte las notas, redibuja lo que toquen y DESPUES monta; esto solo monta,
      o sea que gasta el render entero para dejarte el video sin tus notas. Es la
@@ -9913,7 +10094,31 @@ function irAlMomentoDeLaNota(nota) {
     return;
   }
   const video = videoDelRepaso();
-  if (video) { video.currentTime = Number(nota.t) || 0; video.pause(); }
+  if (video && pantallaDeNota(nota) !== 'imagenes') {
+    video.currentTime = Number(nota.t) || 0; video.pause();
+    return;
+  }
+  /* DESDE EL GUION (o sin vídeo montado) NO HAY DÓNDE MOVERSE: el botón no
+     hacía nada (11-10-2026). Se va a Imágenes y, en cuanto está su lista de
+     planos, se pone ESE plano a la vista. */
+  if (!nota.plano) { toast('esa nota no está anclada a ninguna imagen', true); return; }
+  pararPrevia();
+  v.vista = 'previa';
+  pintarLight();
+  const hasta = Date.now() + 8000;
+  const colocar = () => {
+    const escenas = (PREVIA.ficha || {}).escenas || [];
+    const i = escenas.findIndex(e => e.id === nota.plano);
+    if (i >= 0 && videoAbierto().vista === 'previa') {
+      PREVIA.i = i;
+      repintarVideo();
+      const marco = document.querySelector('.previa-marco');
+      if (marco) marco.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } else if (Date.now() < hasta && videoAbierto().vista === 'previa') {
+      setTimeout(colocar, 200);
+    }
+  };
+  colocar();
 }
 
 
@@ -9942,8 +10147,17 @@ function listaPorImagen() {
   const recien = PREVIA.recienHechas || new Set();
   const pendiente = p => porPlano.get(p).some(n => estadoDeImagen(p, n) !== 'hecha'
     || sinRevisar(n) || recien.has(n.id));
-  const conAlgo = planos.filter(pendiente);
-  const hechas = planos.filter(p => !pendiente(p));
+  /* LAS DE UNA VERSIÓN ANTERIOR DEL GUION: ya hechas, y escritas para una frase
+     que ese plano ya no dice (o para un plano que ya no está). Salían mezcladas
+     con las de ahora, con la imagen NUEVA del plano al lado, y parecían notas
+     de este vídeo (11-10-2026). Al regenerar ya no se aplican (ver
+     `_retirar_lo_de_otro_texto` en app.py): se guardan aquí, plegadas. */
+  const vieja = p => porPlano.get(p).every(n => estadoDeImagen(p, n) === 'hecha'
+    && (n.descolgada || orden(p) === 9999));
+  const viejas = planos.filter(vieja);
+  const actuales = planos.filter(p => !vieja(p));
+  const conAlgo = actuales.filter(pendiente);
+  const hechas = actuales.filter(p => !pendiente(p));
   conAlgo.forEach(p => lista.appendChild(tarjetaNotaImagen(p, porPlano.get(p))));
   if (hechas.length) {
     const plegable = h('details', { clase: 'imagenes-hechas' },
@@ -9953,13 +10167,23 @@ function listaPorImagen() {
     hechas.forEach(p => plegable.appendChild(tarjetaNotaImagen(p, porPlano.get(p))));
     lista.appendChild(plegable);
   }
+  if (viejas.length) {
+    const plegable = h('details', { clase: 'imagenes-hechas notas-viejas' },
+      h('summary', {}, `Notas de una versión anterior del guion (${viejas.length})`),
+      h('div', { clase: 'meta' }, 'Se escribieron para lo que se decía antes en ese plano. '
+        + 'Ya están hechas y no se aplican a las imágenes nuevas: se guardan aquí por si quieres releerlas.'));
+    if (PREVIA.verViejas) plegable.open = true;
+    plegable.addEventListener('toggle', () => { PREVIA.verViejas = plegable.open; });
+    viejas.forEach(p => plegable.appendChild(tarjetaNotaImagen(p, porPlano.get(p), true)));
+    lista.appendChild(plegable);
+  }
   return lista;
 }
 
 /* LA TARJETA DE UNA IMAGEN: cuál es, qué se oye en ella, sus notas y qué pasa.
  * La miniatura es la de AHORA (al rehacerse, la nueva), con el bloque y el
  * segundo y la frase del guion; debajo, cada nota con su estado en palabras. */
-function tarjetaNotaImagen(plano, notas) {
+function tarjetaNotaImagen(plano, notas, vieja) {
   const v = videoAbierto();
   const escenas = (PREVIA.ficha || {}).escenas || [];
   const e = escenas.find(x => x.id === plano) || null;
@@ -10025,6 +10249,12 @@ function tarjetaNotaImagen(plano, notas) {
           + ` (otra escena, otro objeto). ${precio}`,
         onclick: () => pedirCola({ notas: pedir.map(n => n.id), desde_cero: true }) },
       'Desde cero'));
+    }
+    if (vieja) {
+      // de otra frase: ni «Ver cómo quedó» (la imagen de ahora es de otra
+      // escena) ni volver a dibujarla con ella (sería traer la escena vieja)
+      fila.appendChild(h('span', { clase: 'meta' }, 'de una versión anterior: ya no se aplica'));
+      return fila;
     }
     if (ahora.every(x => x === 'hecha')) {
       fila.appendChild(h('button', { clase: 'mini', onclick: ir }, 'Ver cómo quedó'));
@@ -10168,7 +10398,7 @@ function listaDeNotas() {
          repintar el cuadro de feedback que se esta usando. */
       enPrevia ? enVivo(() => {
         const est = estadoDeImagen(nota.plano, nota);
-        const trabajo = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
+        const trabajo = trabajoVideoLight() || {};
         const pct = Math.round((Number(trabajo.progreso) || 0) * 100);
         return conAyuda(
           est === 'hecha'
@@ -10266,7 +10496,7 @@ function botonAplicarRepaso() {
         `Rehacer ${n} ${n === 1 ? 'imagen' : 'imágenes'} · ≈ ${usdCorto(n * COLA_IMG.usdPorImagen)}`
         + ` · ~${mmss(n * COLA_IMG.segundosPorImagen)}`));
   }
-  const corriendo = (APP.trabajos[CLAVE_VIDEO_LIGHT] || {}).estado === 'ejecutando';
+  const corriendo = !!trabajoVideoLight();
   return conAyuda(
     (videoAbierto().vista === 'previa'
       ? 'Pone en cola todas las notas de esta pantalla y va rehaciendo esas '

@@ -52,7 +52,18 @@ Un proyecto **oculto** no sale en la portada; con «Ver los ocultos» se ven, y
 
 Lo que borras o apartas (un estilo, un vídeo) va a la **🗑 Papelera**, arriba
 en la portada y dentro de cada proyecto: desde ahí se **devuelve** cuando
-quieras. Dentro de un vídeo, **Estilos** abre el estilo con el que se hizo.
+quieras. Dentro de un vídeo, **Estilo** (en la barra de abajo, o «Estilo: …»
+arriba) abre el estilo con el que se hizo.
+
+**Volver al inicio** desde cualquier pantalla de un vídeo: **Inicio** en la
+barra de abajo, **‹ Mis vídeos** arriba, o el **logo**. Lo que se esté
+generando sigue en el servidor y lo vuelves a ver al abrir ese vídeo; arriba a
+la derecha se ve qué vídeo se está haciendo (púlsalo para ir a él).
+
+**Varios vídeos a la vez.** Mientras uno se monta puedes trabajar en otro y
+montarlo también: cada vídeo enseña solo su progreso. Las **imágenes**, en
+cambio, se dibujan de una en una en todo el Studio: si otro vídeo está
+dibujando, la barra dice «esperando turno» y empieza sola al acabar el otro.
 
 ### Un estilo nuevo
 
@@ -198,6 +209,10 @@ El texto que se va a locutar, por bloques.
 - **Regrabar lo que he escrito**: vuelve a grabar solo los tramos que cambiaste
   (dice cuánto cuesta antes de pulsar).
 - **Regenerar el guion** lo vuelve a escribir entero (y obliga a rehacer la voz).
+- **Versiones del guion** (abajo): cada vez que se regenera se guarda una
+  versión y las anteriores no se borran. **Volver a la versión anterior** la
+  recupera; avisa antes de que la voz y las imágenes quedarán por rehacer (eso
+  se paga).
 
 ## Imágenes
 
@@ -222,6 +237,15 @@ tenía que ser una consola, no un televisor») usa **Desde cero**: la dibuja de
 nuevo sin partir de la anterior. Si una ya hecha salió casi igual, pulsa
 **¿Salió igual? Desde cero**. Cuando está hecha, la tarjeta enseña **cómo era
 antes** debajo de la nueva.
+
+**Nada se pierde.** Cada vez que se rehacen imágenes se guarda una versión
+nueva y las de antes se quedan. Abajo, en **Versiones de las imágenes**,
+**Volver a la versión anterior** (o «Usar esta» en cualquiera de la lista) las
+recupera **sin pagar nada**; el vídeo queda por volver a montar (gratis).
+
+**Al regenerar el guion**, las notas escritas para una frase que ya no se dice
+dejan de aplicarse (el plano nuevo con ese número es otra escena) y se guardan
+plegadas en **Notas de una versión anterior del guion**.
 
 **Una imagen rehecha no entra en el MP4 hasta volver a montarlo**: la pantalla
 Vídeo lo avisa y **Regenerar Vídeo** lo monta (no paga imágenes ya hechas).

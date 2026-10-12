@@ -3687,6 +3687,115 @@ def probar_ronda_octubre(cliente, carpeta):
        "y con otra descripción, también")
 
 
+def probar_turno_y_notas_de_otro_texto():
+    """Dos arreglos del 11-10-2026 que no se ven desde la API.
+
+    1. LAS IMAGENES, DE UNA EN UNA EN TODO EL ESTUDIO: con un trabajo por
+       video, nada impedia dibujar en dos videos a la vez (regla 2).
+    2. LA NOTA DE UNA FRASE QUE YA NO SE DICE no se pega al plano nuevo con el
+       mismo numero: el S004 nuevo salia retocando la imagen vieja de S004.
+    """
+    seccion("EL TURNO DE LAS IMAGENES Y LAS NOTAS DE OTRA FRASE (11-10)")
+    import threading                                          # noqa: PLC0415
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo.trabajos import Cancelado                     # noqa: PLC0415
+
+    class _Bitacora:
+        def __init__(self):
+            self.eventos = []
+
+        def anotar(self, evento, paso, datos=None, unidad=None):
+            self.eventos.append((evento, paso, datos))
+
+    class _Ctx:
+        def __init__(self, nombre, params=None):
+            self.id = nombre
+            self.proyecto = type("P", (), {"config": {"nombre": nombre}})()
+            self.bitacora = _Bitacora()
+            self._params = params or {}
+            self.escrito = []
+            self.estado = self
+
+        def params(self, paso):
+            return self._params.get(paso) or {}
+
+        def actualizar_params(self, paso, nuevos):
+            self.escrito.append((paso, nuevos))
+            actual = self._params.setdefault(paso, {})
+            actual.setdefault("unidades", {}).update(nuevos.get("unidades") or {})
+
+    # 1. EL TURNO
+    cerrojo = servidor._TURNO_IMAGENES["cerrojo"]
+    otro = _Ctx("Vídeo A")
+    mensajes, hecho = [], []
+    cerrojo.acquire()
+    servidor._TURNO_IMAGENES["quien"] = "Vídeo A"
+    hilo = threading.Thread(target=lambda: hecho.append(servidor._con_turno_de_imagenes(
+        lambda v, m="", p="": mensajes.append(m), _Ctx("Vídeo B"), lambda: "dibujado")))
+    hilo.start()
+    time.sleep(4)
+    ok(not hecho, "con otro vídeo dibujando, este espera su turno")
+    ok(any("Vídeo A" in m for m in mensajes),
+       f"y la barra dice a quién espera ({mensajes[:1]})")
+    servidor._TURNO_IMAGENES["quien"] = ""
+    cerrojo.release()
+    hilo.join(10)
+    igual(hecho, ["dibujado"], "al soltarse el turno, dibuja")
+    ok(not cerrojo.locked(), "y al acabar lo suelta")
+
+    def _cancelado(*_a):
+        raise Cancelado("parado")
+    cerrojo.acquire()
+    try:
+        servidor._con_turno_de_imagenes(_cancelado, otro, lambda: "no")
+        ok(False, "parar mientras espera turno corta la espera")
+    except Cancelado:
+        ok(True, "parar mientras espera turno corta la espera")
+    finally:
+        cerrojo.release()
+    ok(not cerrojo.locked(), "y no se queda con el turno")
+
+    # 2. LAS NOTAS DE OTRA FRASE
+    viejo = {"escenas": [{"id": "S001", "narracion": "Hola a todos"},
+                         {"id": "S002", "narracion": "La cocina tiene una isla"},
+                         {"id": "S003", "narracion": "Y aquí el baño"}]}
+    nuevo = {"escenas": [{"id": "S001", "narracion": "¡Hola a TODOS!"},
+                         {"id": "S002", "narracion": "Mario Kart es el más vendido"},
+                         {"id": "S003", "narracion": "Y aquí el baño"}]}
+    params = {
+        "assets": {"unidades": {
+            "escena:S001": {"feedback": "más luz", "direccion": "plano medio"},
+            "escena:S002": {"feedback": "que aparezca un gato", "alcance": "retoque",
+                            "direccion": "cocina"},
+            "escena:S003": {"direccion": "baño"}}},
+        "callouts": {"unidades": {
+            "escena:S002": {"subtitulo_texto": "La cocina tiene una isla.", "evitar": [1]}}}}
+    ctx = _Ctx("Vídeo C", params)
+    plan_actual = servidor.PASOS_MODULOS.p6_assets.plan_actual
+    plan_de_planos = servidor._plan_de_planos
+    try:
+        servidor.PASOS_MODULOS.p6_assets.plan_actual = lambda *a, **k: viejo
+        servidor._plan_de_planos = lambda *a, **k: nuevo
+        quitados = servidor._retirar_lo_de_otro_texto(ctx)
+    finally:
+        servidor.PASOS_MODULOS.p6_assets.plan_actual = plan_actual
+        servidor._plan_de_planos = plan_de_planos
+    igual(quitados, ["escena:S002"], "solo el plano cuya frase cambia pierde su nota "
+          "(S001 dice lo mismo con otros signos y se queda)")
+    unidades = ctx.params("assets")["unidades"]
+    igual(unidades["escena:S002"], {"direccion": "cocina"},
+          "al S002 nuevo no le llega la nota del viejo (ni su retoque), y conserva lo demás")
+    igual(unidades["escena:S001"].get("feedback"), "más luz", "el S001 conserva la suya")
+    igual(ctx.params("callouts")["unidades"]["escena:S002"], {"evitar": [1]},
+          "ni el subtítulo escrito para la frase de antes")
+    igual(sorted(p for p, _n in ctx.escrito), ["assets", "callouts"],
+          "y no se escribe nada en los planos que no cambian")
+    sin_nada = _Ctx("Vídeo D", {"assets": {"unidades": {"escena:S001": {"direccion": "x"}}}})
+    igual(servidor._retirar_lo_de_otro_texto(sin_nada), [], "sin notas no hay nada que mirar")
+    igual(sin_nada.escrito, [], "ni que escribir")
+
+
 def probar_traer_estilo(cliente):
     """Un video se queda con la copia del estilo; esto la trae cuando se pide.
 
@@ -4325,6 +4434,7 @@ def main():
         probar_asistente(cliente)
         probar_la_foto_del_asistente(cliente, pid)
         probar_onboarding(cliente)
+        probar_turno_y_notas_de_otro_texto()
         probar_sistema(cliente)
         probar_lo_que_lleva(cliente)
         probar_salud_de_las_cuentas(cliente)

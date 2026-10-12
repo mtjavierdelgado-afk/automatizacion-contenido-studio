@@ -39,6 +39,7 @@ import json
 import mimetypes
 import os
 import re
+import unicodedata
 import shutil
 import sys
 import threading
@@ -318,6 +319,35 @@ def _motores_congelados():
         yield
 
 
+#: LAS IMAGENES SE DIBUJAN DE UNA EN UNA EN TODO EL ESTUDIO (regla 2 de
+#: CLAUDE.md): dos tandas a la vez tardan el doble por imagen y pierden el
+#: registro del gasto. Con un trabajo por video, nada impedia dibujar en dos
+#: videos a la vez (11-10-2026: el dueño queria trabajar en otro video mientras
+#: uno se montaba). Montar, la voz y el guion SI van en paralelo; dibujar espera
+#: su turno aqui, con la barra diciendo a quien espera.
+_TURNO_IMAGENES = {"cerrojo": threading.Lock(), "quien": ""}
+
+
+def _con_turno_de_imagenes(avisar, ctx, funcion):
+    """Corre `funcion()` con el turno de dibujar. Espera si otro video dibuja."""
+    cerrojo = _TURNO_IMAGENES["cerrojo"]
+    avisado = False
+    while not cerrojo.acquire(timeout=3):
+        quien = _TURNO_IMAGENES["quien"] or "otro vídeo"
+        # avisar LANZA Cancelado si se pide parar: la espera se puede cancelar
+        avisar(0.0, f"esperando turno: se están dibujando las imágenes de «{quien}»",
+               f"esperando turno: se están dibujando las imágenes de «{quien}»")
+        if not avisado:
+            ctx.bitacora.anotar("turno_imagenes", "assets", {"espera_a": quien})
+            avisado = True
+    try:
+        _TURNO_IMAGENES["quien"] = (ctx.proyecto.config or {}).get("nombre") or ctx.id
+        return funcion()
+    finally:
+        _TURNO_IMAGENES["quien"] = ""
+        cerrojo.release()
+
+
 def _correr_paso(avisar, ctx, paso_id, unidades, opciones=None):
     """Ejecuta un paso y lo versiona. Es la funcion que corre en el hilo.
 
@@ -332,12 +362,15 @@ def _correr_paso(avisar, ctx, paso_id, unidades, opciones=None):
     extra = {k: v for k, v in (opciones or {}).items() if k in admitidas}
     # Los motores de `motores/` se recargan solos cuando cambian, pero NO a
     # media tanda: dentro de esto quedan congelados (ver medios.trabajo_en_curso)
-    with _motores_congelados():
-        if _acepta_unidades(modulo):
-            resultado = modulo.ejecutar(ctx.proyecto, params, avisar,
-                                        unidades=unidades, **extra)
-        else:
-            resultado = modulo.ejecutar(ctx.proyecto, params, avisar, **extra)
+    def correr():
+        with _motores_congelados():
+            if _acepta_unidades(modulo):
+                return modulo.ejecutar(ctx.proyecto, params, avisar,
+                                       unidades=unidades, **extra)
+            return modulo.ejecutar(ctx.proyecto, params, avisar, **extra)
+
+    resultado = (_con_turno_de_imagenes(avisar, ctx, correr) if paso_id == "assets"
+                 else correr())
 
     salidas, mapa = _desmontar(modulo, resultado)
 
@@ -7382,7 +7415,14 @@ def _un_paso(ctx, paso_id, modo, extra=None):
     cuerpo = {"todo": True} if modo == "todo" else {}
     unidades = _plan_de_ejecucion(ctx, paso_id, cuerpo)
     opciones = dict(extra or {})
-    if modo == "todo" and paso_id == "assets":
+    if paso_id == "assets":
+        return _correr_assets_de_tanda, (ctx, unidades, _opciones_assets(modo, opciones))
+    return _correr_paso, (ctx, paso_id, unidades, opciones)
+
+
+def _opciones_assets(modo, opciones):
+    """Las opciones de las imagenes en una tanda (ver `_un_paso`)."""
+    if modo == "todo":
         # EL CORTE LO HACE LA TAREA `corte`, UNA VEZ POR TANDA, y por eso las
         # tareas de `assets` de una receta pasan `replantear: False` (gana sobre
         # este defecto). Replantear renumera los planos: si lo hicieran tambien
@@ -7391,7 +7431,81 @@ def _un_paso(ctx, paso_id, modo, extra=None):
         # video nuevo: el corte dio 97 planos y la pasada de piezas 98.
         opciones.setdefault("replantear", True)
         opciones.setdefault("rehacer", True)
-    return _correr_paso, (ctx, paso_id, unidades, opciones)
+    return opciones
+
+
+def _palabras_llanas(texto):
+    sin = unicodedata.normalize("NFD", str(texto or ""))
+    sin = "".join(c for c in sin if unicodedata.category(c) != "Mn")
+    return re.findall(r"\w+", sin.lower())
+
+
+def _retirar_lo_de_otro_texto(ctx):
+    """Quita de los planos cuya FRASE CAMBIA lo que se escribio para la de antes.
+
+    EL FALLO (11-10-2026). Una nota aplicada deja su texto en
+    `assets.unidades["escena:S004"].feedback` (y una correccion del subtitulo,
+    en `callouts...subtitulo_texto`), pegado al NUMERO de plano. Al regenerar el
+    guion y volver a cortar, el S004 nuevo es otra escena -- y heredaba la nota:
+    p6 la leia como un retoque y le ponia delante la imagen vieja de S004
+    («rechazada»), asi que el plano nuevo salia derivado del video anterior.
+
+    Solo se tocan los planos cuya narracion del plan NUEVO no es la del plan con
+    el que se dibujaron: esos ya estan obsoletos (la narracion entra en su
+    firma) y se van a dibujar igual, asi que quitarles la nota NO mueve ninguna
+    firma que no se moviera ya. Los demas se quedan como estan. -> [planos]
+    """
+    p6 = PASOS_MODULOS.p6_assets
+    assets = ctx.estado.params("assets") or {}
+    callouts = ctx.estado.params("callouts") or {}
+    con_algo = {uid for uid, b in (assets.get("unidades") or {}).items()
+                if isinstance(b, dict) and b.get("feedback")}
+    con_algo |= {uid for uid, b in (callouts.get("unidades") or {}).items()
+                 if isinstance(b, dict) and b.get("subtitulo_texto")}
+    if not con_algo:
+        return []
+    viejo = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    try:
+        nuevo = _plan_de_planos(ctx) or {}
+    except Exception:                                       # noqa: BLE001
+        return []                       # sin plan nuevo no se sabe: no se toca nada
+    antes = {str(e.get("id")): _palabras_llanas(e.get("narracion")) for e in viejo.get("escenas") or []}
+    ahora = {str(e.get("id")): _palabras_llanas(e.get("narracion")) for e in nuevo.get("escenas") or []}
+    if not antes or not ahora:
+        return []
+    cambiados = sorted(uid for uid in con_algo
+                       if uid.startswith("escena:") and uid.split(":", 1)[1] in antes
+                       and antes[uid.split(":", 1)[1]] != ahora.get(uid.split(":", 1)[1]))
+    if not cambiados:
+        return []
+    bloque_a, bloque_c = {}, {}
+    for uid in cambiados:
+        previo = (assets.get("unidades") or {}).get(uid)
+        if isinstance(previo, dict) and previo.get("feedback"):
+            limpio = {k: v for k, v in previo.items() if k not in ("feedback", "alcance")}
+            bloque_a[uid] = limpio
+        previo = (callouts.get("unidades") or {}).get(uid)
+        if isinstance(previo, dict) and previo.get("subtitulo_texto"):
+            bloque_c[uid] = {k: v for k, v in previo.items()
+                             if k not in ("subtitulo_texto", "subtitulo_ancla")}
+    if bloque_a:
+        ctx.estado.actualizar_params("assets", {"unidades": bloque_a})
+    if bloque_c:
+        ctx.estado.actualizar_params("callouts", {"unidades": bloque_c})
+    ctx.bitacora.anotar("notas_de_otro_texto", "assets",
+                        {"planos": [u.split(":", 1)[1] for u in cambiados]})
+    return cambiados
+
+
+def _correr_assets_de_tanda(avisar, ctx, unidades, opciones):
+    """Las imagenes de una tanda: antes, fuera las notas de una frase que ya no
+    se dice (`_retirar_lo_de_otro_texto`). La cola de notas NO pasa por aqui:
+    alli la nota es justo lo que se quiere dibujar."""
+    try:
+        _retirar_lo_de_otro_texto(ctx)
+    except Exception as fallo:                              # noqa: BLE001
+        ctx.bitacora.anotar("notas_de_otro_texto_fallo", "assets", {"error": str(fallo)[:300]})
+    return _correr_paso(avisar, ctx, "assets", unidades, opciones)
 
 
 def _que_hace(tarea_id, ctx, receta, modo="pendientes", solo_montar=False):

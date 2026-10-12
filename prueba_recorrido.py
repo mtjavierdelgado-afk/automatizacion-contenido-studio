@@ -1084,7 +1084,7 @@ def lo_que_se_vio_el_10_de_octubre(navegador, datos):
     ok(pg.p.evaluate("() => legible('año Ángel € normal')") == "año Ángel € normal",
        "y un texto sano no se toca")
     # «ESTILOS» DENTRO DE UN VÍDEO: EL ESTILO DE ESE VÍDEO
-    pg.pulsar(".nav-light button", "Estilos")
+    pg.pulsar(".nav-light button", "Estilo")
     ok(pg.esperar(".light-preset h2", "Estado Play Matriz"),
        "«Estilos» desde un vídeo abre el estilo con el que se hizo")
     ok(pg.visible(".light-preset button", "Volver al vídeo"), "con «Volver al vídeo»")
@@ -1342,7 +1342,7 @@ NO_PULSAR = re.compile(r"(Borrar|Eliminar|papelera|Regenerar|Generar|Rehacer|Des
                        r"Montar|Aplicar|Arreglar|Salir|Descargar|Traer|Restablecer|Revertir|"
                        r"Parar|Reintentar|Duplicar|Crear|Guardar|Subir|Probar|Entrar|"
                        r"Pedir otro enlace|Ocultar|Esconder|Apartar|Mover|Quitar|Ver ocultos|"
-                       r"Hacerla sin marcas|Usar|Partir|Añadir|Nuevo|Nueva|\+)", re.I)
+                       r"Hacerla sin marcas|Usar|Partir|Añadir|Nuevo|Nueva|Volver a la versi|\+)", re.I)
 
 #: Firma de «algo ha cambiado» tras un clic: el DOM, el aviso, lo abierto.
 FIRMA_JS = """() => {
@@ -1875,6 +1875,106 @@ def fallos_simulados(navegador, datos):
         parar(datos["proceso"])
         proceso, url = arrancar(datos["env"], datos["proyectos"])
         datos.update({"proceso": proceso, "url": url, "api": Api(url)})
+
+
+@escenario
+def salir_y_cada_video_lo_suyo(navegador, datos):
+    """Lo que el dueño encontró el 11-10-2026 por la noche:
+
+    - dentro de un vídeo no había forma de volver al inicio;
+    - el montaje de un vídeo bloqueaba (y enseñaba su barra en) todos los demás;
+    - «Ver cómo quedó» no hacía nada desde el Guion;
+    - y no había forma de volver a una versión anterior desde la pantalla.
+    """
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    r, d = api.post(f"/api/presets-light/{datos['preset']}/video", {
+        "nombre": "Otro vídeo de prueba", "duracion_objetivo_s": 30,
+        "material": "Un segundo vídeo, para comprobar que cada uno va a lo suyo."})
+    otro = (d.get("proyecto") or {}).get("id") or ""
+    ok(r.status_code == 201 and otro, f"se crea un segundo vídeo ({r.status_code})")
+    pg = Pagina(navegador, datos)
+
+    # 1. LAS TRES SALIDAS AL INICIO
+    salidas = (("«‹ Mis vídeos»", lambda: pg.pulsar(".migas-video button", "Mis vídeos")),
+               ("«Inicio» en la barra de abajo", lambda: pg.pulsar(".nav-light button", "Inicio")),
+               ("el logo", lambda: pg.p.click("#cabecera .marca")))
+    for vista in ("guion", "previa", "video"):
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = '{vista}'; pintarLight();")
+        ok(pg.esperar(".migas-video button", "Mis vídeos", 15),
+           f"en la pantalla «{vista}» del vídeo está «‹ Mis vídeos»")
+    for como, accion in salidas:
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'video'; pintarLight();")
+        pg.esperar(".migas-video", None, 15)
+        accion()
+        pg.p.wait_for_timeout(1200)
+        ok(pg.p.evaluate("() => APP.light.vista !== 'elegido' && !APP.light.video.pid"),
+           f"{como} saca del vídeo al inicio")
+    pg.captura("19_inicio", entera=False)
+
+    # 2. CADA VÍDEO CON SU TRABAJO
+    # algo que montar sin dibujar: un subtítulo corregido (gratis)
+    api.post(f"/api/proyectos/{pid}/ortografia/aplicar", {"cambios": {"S001": "Texto corregido de prueba."}})
+    r, d = api.post(f"/api/proyectos/{pid}/generar", {"tanda": "render", "modo": "pendientes"})
+    tid = d.get("trabajo_id") or (d.get("trabajo") or {}).get("id")
+    ok(r.status_code == 202 and tid, f"se monta el primer vídeo ({r.status_code})")
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'video'; pintarLight();")
+    ok(pg.esperar("button", "Parar", 20), "en el vídeo que se monta se ve su barra")
+    pg.js(f"await abrirVideoLight('{otro}');")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.p.evaluate("() => trabajoVideoLight() === null"),
+       "en otro vídeo, el montaje del primero no cuenta como suyo")
+    ok(not pg.visible("button", "Parar"), "ni enseña su barra ni su «Parar»")
+    pg.captura("20_otro_video_mientras_se_monta", entera=False)
+    fin = api.esperar(tid, 600)
+    pg.p.wait_for_timeout(2500)
+    ok(fin.get("estado") == "listo", f"el montaje del primero termina ({fin.get('estado')})")
+    ok(pg.p.evaluate("() => APP.light.video.pid") == otro,
+       "y al terminar NO te saca del vídeo que estás mirando")
+
+    # 3. «VER CÓMO QUEDÓ» DESDE EL GUION
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'guion'; pintarLight();")
+    pg.p.evaluate("() => irAlMomentoDeLaNota({plano: 'S002', pantalla: 'imagenes'})")
+    pg.p.wait_for_timeout(3000)
+    ok(pg.p.evaluate("() => APP.light.video.vista === 'previa' && "
+                     "((PREVIA.ficha || {}).escenas || [])[PREVIA.i].id === 'S002'"),
+       "«Ver cómo quedó» desde el Guion lleva a Imágenes con ese plano a la vista")
+
+    # 4. VOLVER A LA VERSIÓN ANTERIOR (de las imágenes: gratis)
+    _r, ficha = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    if len(ficha.get("versiones") or []) < 2:
+        # solo (con --solo) el vídeo tiene una: se rehace una imagen para tener dos
+        r, d = api.post(f"/api/proyectos/{pid}/pasos/assets/ejecutar",
+                        {"unidades": ["escena:S002"], "rehacer": True})
+        api.esperar(d.get("trabajo_id"), 300)
+        _r, ficha = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    versiones = sorted((v.get("n") for v in ficha.get("versiones") or []), reverse=True)
+    activa = next((v.get("n") for v in ficha.get("versiones") or [] if v.get("activa")), None)
+    if len(versiones) >= 2 and activa:
+        anterior = max(n for n in versiones if n < activa)
+        _r, antes = api.get(f"/api/proyectos/{pid}")
+        voz_antes = {p.get("id"): p.get("estado") for p in antes.get("pasos") or []}.get("voz")
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
+        ok(pg.esperar(".bloque-versiones summary", "Versiones de las imágenes", 15),
+           "en Imágenes está la lista de versiones")
+        pg.pulsar(".bloque-versiones summary")
+        pg.pulsar(".bloque-versiones button", "Volver a la versión anterior")
+        pg.p.wait_for_timeout(2500)
+        _r, ficha2 = api.get(f"/api/proyectos/{pid}/pasos/assets")
+        nueva = next((v.get("n") for v in ficha2.get("versiones") or [] if v.get("activa")), None)
+        igual_n = nueva == anterior
+        ok(igual_n, f"«Volver a la versión anterior» activa la v{anterior} (está la v{nueva})")
+        ok(any("v" in d and ("gratis" in d or "sin pagar" in d) for d in pg.dialogos[-1:]),
+           f"y antes avisa de lo que pasa ({pg.dialogos[-1:]})")
+        _r, despues = api.get(f"/api/proyectos/{pid}")
+        estados = {p.get("id"): p.get("estado") for p in despues.get("pasos") or []}
+        ok(estados.get("voz") == voz_antes, f"sin tocar la voz ({estados})")
+        # y se deja como estaba, para los escenarios que vengan detrás
+        api.post(f"/api/proyectos/{pid}/pasos/assets/revertir", {"version": activa})
+    else:
+        ok(False, f"el vídeo de prueba tiene al menos dos versiones de imágenes ({versiones})")
+    pg.sin_errores("salir al inicio y cada vídeo lo suyo")
+    pg.cerrar()
 
 
 def main():

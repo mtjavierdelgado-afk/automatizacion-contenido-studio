@@ -182,7 +182,10 @@ Lo que se le pide a este vídeo. Todo se guarda solo mientras escribes.
     varios temas, como siempre.
   - **Efectos** (en un vídeo ya creado): cada sonido (aire de transición,
     golpe, tecla, retorno) puede ser automático, uno buscado en FreeSound
-    (con escucha y su licencia) o **el tuyo** subido.
+    (con escucha y su licencia) o **el tuyo** subido. En automático se
+    **escucha** cada uno de los elegidos; **✕ Descartar** lo quita para
+    siempre (en todos los vídeos) y **Buscar otros** trae sonidos distintos.
+    **Cuánto se oyen**: bajos, normales o altos.
   - **Personalizar los subtítulos**: tamaño, letra y forma, caja detrás del
     texto y color. **Volver a los del estilo** lo deshace.
   - **Logo**: sube una imagen (mejor PNG con fondo transparente), elige la
@@ -273,7 +276,13 @@ derechos: «Mario Kart», «Nintendo Switch»…):
   **Arreglar los subtítulos**: los vuelve a dibujar y monta, sin pagar nada.
 - **El repaso**: escribe notas sobre el vídeo («la música está alta», «este
   rótulo sobra») y se aplican rehaciendo solo lo que tocan.
-- **Descargar** baja el MP4.
+- **Descargar** baja el MP4. **Por partes…** baja el vídeo con lo que elijas
+  (voz, música, efectos, subtítulos, logo), cada audio suelto en WAV —del largo
+  del vídeo y alineados, como suenan en él— o un ZIP con todo. No cuesta nada;
+  sin subtítulos tarda lo que un montaje porque están dentro de cada fotograma.
+- **El coste** (arriba): púlsalo y sale todo lo gastado de verdad en el vídeo,
+  desglosado, con lo que costó su estilo y lo prometido frente a lo gastado de
+  cada vez que generaste.
 
 ## Configuración (⚙)
 

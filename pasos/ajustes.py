@@ -200,6 +200,77 @@ def coste_por_imagen(calidad, tamano=TAMANO):
     }
 
 
+#: Cuantas imagenes recientes hacen falta para fiarse de la mediana propia.
+MUESTRAS_MINIMAS = 20
+_MEDIDO = {"sello": None, "por_calidad": {}}
+
+
+def _imagenes_registradas():
+    """{calidad: [usd...]} de las imagenes de plano YA COBRADAS con su `usage`
+    (tarifa por tokens), las mas recientes al final. Lee el final del registro
+    global, que puede ser grande, y se recuerda mientras no cambie."""
+    ruta = COSTE.RUTA_GLOBAL
+    try:
+        estado = os.stat(ruta)
+    except OSError:
+        return {}
+    sello = (estado.st_mtime_ns, estado.st_size)
+    if _MEDIDO["sello"] == sello:
+        return _MEDIDO["por_calidad"]
+    import json                                         # noqa: PLC0415
+    por_calidad = {}
+    try:
+        with open(ruta, "rb") as fh:
+            desde = max(0, estado.st_size - 4_000_000)
+            fh.seek(desde)
+            lineas = fh.read().decode("utf-8", "replace").splitlines()
+            if desde:
+                lineas = lineas[1:]        # la primera puede venir cortada
+    except OSError:
+        return {}
+    for linea in lineas:
+        try:
+            r = json.loads(linea)
+        except ValueError:
+            continue
+        detalle = r.get("detalle") or {}
+        if (r.get("proveedor") != "openai" or r.get("operacion") != "imagen"
+                or r.get("usd") is None
+                or (detalle.get("coste") or {}).get("via") != "tokens"):
+            continue
+        por_calidad.setdefault(str(detalle.get("calidad") or ""), []).append(float(r["usd"]))
+    _MEDIDO.update(sello=sello, por_calidad=por_calidad)
+    return por_calidad
+
+
+def precio_por_imagen(calidad, tamano=TAMANO):
+    """LO QUE CUESTA UNA IMAGEN, con su procedencia. -> {usd, fuente, muestras}
+
+    EL UNICO PRECIO DEL COTIZADOR (11-10-2026). Habia dos: el boton de generar
+    y la estimacion cotizaban con un 0,033 $ escrito a mano en presets_light, y
+    Configuracion, la cola de notas y las laminas con 0,047 $ de esta tabla. El
+    boton prometia un 30 % menos.
+
+    Primero, lo que de verdad te han cobrado: la MEDIANA de tus ultimas 200
+    imagenes de esa calidad, tarifadas con el `usage` que devolvio OpenAI (asi
+    lleva dentro las referencias adjuntas de TU estudio). Sin bastantes,
+    la cuenta de la tabla: imagen devuelta + la entrada medida."""
+    calidad = str(calidad or "low").lower()
+    cobradas = (_imagenes_registradas().get(calidad) or [])[-200:]
+    if len(cobradas) >= MUESTRAS_MINIMAS:
+        ordenadas = sorted(cobradas)
+        mediana = ordenadas[len(ordenadas) // 2]
+        return {"usd": round(mediana, 4), "muestras": len(cobradas),
+                "fuente": f"lo que te han cobrado: mediana de tus últimas {len(cobradas)} imágenes"}
+    tabla = coste_por_imagen(calidad, tamano)
+    return {"usd": tabla["usd_total"], "muestras": 0,
+            "fuente": "tabla de OpenAI + las referencias medidas (aún no hay bastantes imágenes tuyas)"}
+
+
+def usd_por_imagen(calidad, tamano=TAMANO):
+    return precio_por_imagen(calidad, tamano)["usd"]
+
+
 def tabla_de_costes(tamano=TAMANO):
     """Las tres calidades con su coste real y su multiplicador contra la base.
 

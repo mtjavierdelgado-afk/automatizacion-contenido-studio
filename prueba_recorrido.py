@@ -669,6 +669,26 @@ def encargo_del_video(navegador, datos):
        + f" -- aviso: {pg.toast()[:150]!r}")
     pg.pulsar(".papel-efecto button", "Buscar otro sonido")
     ok(pg.visible(".papel-efecto input[type=search]"), "y se puede buscar otro en FreeSound")
+    # EL VOLUMEN DE LOS EFECTOS (11-10-2026)
+    ok(pg.visible(".editor-ajuste button", "Altos"), "los efectos tienen su volumen (Bajos/Normales/Altos)")
+    pg.sin_trabajo()          # subir el efecto vuelve a mezclar: con eso en marcha, 409
+    datos["api"].libre(datos["video"])
+    pg.pulsar(".editor-ajuste button", "Altos")
+    pg.p.wait_for_timeout(1500)
+    _r, sonido = datos["api"].get(f"/api/proyectos/{datos['video']}/sonido")
+    ok(sonido.get("efectos_volumen") == "altos", f"«Altos» se guarda ({sonido.get('efectos_volumen')})")
+    pg.sin_trabajo()
+    pg.pulsar(".editor-ajuste button", "Normales")
+    pg.p.wait_for_timeout(1500)
+    pg.sin_trabajo()
+    # Y LOS QUE ELIGIÓ EL AUTOMÁTICO, PARA OÍRLOS Y DESCARTARLOS: el segundo
+    # papel no tiene ninguno fijado a mano
+    automatico = pg.p.locator(".papel-efecto").filter(has_text="Automático")
+    if automatico.count() and automatico.first.locator(".efecto-surtido").count():
+        ok(automatico.first.locator(".efecto-surtido audio").count() > 0,
+           "cada efecto automático se puede escuchar")
+        ok(automatico.first.locator("button", has_text="Descartar").count() > 0,
+           "y descartar")
     pg.captura("06_encargo_efectos")
     pg.sin_errores("el Encargo")
     pg.cerrar()
@@ -1879,6 +1899,80 @@ def fallos_simulados(navegador, datos):
         parar(datos["proceso"])
         proceso, url = arrancar(datos["env"], datos["proyectos"])
         datos.update({"proceso": proceso, "url": url, "api": Api(url)})
+
+
+@escenario
+def coste_en_detalle(navegador, datos):
+    """Pulsar el coste de arriba enseña TODO lo gastado del vídeo, desglosado;
+    y la ficha del estilo, lo que costó hacerlo (11-10-2026)."""
+    api, pid = datos["api"], datos["video"]
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'guion'; pintarLight();")
+    ok(pg.esperar("button.coste-light", None, 15), "el coste de arriba se puede pulsar")
+    pg.pulsar("button.coste-light")
+    ok(pg.esperar("#coste-video", "Coste del vídeo", 15), "y abre el coste del vídeo")
+    texto = pg.p.locator("#coste-video").inner_text()
+    for parte in ("Imágenes nuevas", "Imágenes rehechas", "Personajes", "Voz", "Claude",
+                  "Música", "Efectos", "Su estilo"):
+        ok(parte in texto, f"con «{parte}»")
+    _r, total = api.get(f"/api/proyectos/{pid}/coste")
+    ok(f"{float(total.get('total_usd') or 0):.2f}" in texto or f"{float(total.get('total_usd') or 0):.3f}" in texto,
+       f"y el mismo total que la cabecera ({total.get('total_usd')})")
+    pg.captura("21_coste_del_video", entera=False)
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible("#coste-video"), "Escape lo cierra")
+    pg.js(f"irALight('preset', {{ abierto: '{datos['preset']}', feedback: {{}} }});")
+    ok(pg.esperar(".light-preset button", "Lo que costó", 15), "la ficha del estilo tiene «Lo que costó»")
+    pg.pulsar(".light-preset button", "Lo que costó")
+    ok(pg.esperar("#coste-video", "Coste del estilo", 15), "y abre lo que costó el estilo")
+    pg.p.keyboard.press("Escape")
+    pg.sin_errores("el coste en detalle")
+    pg.cerrar()
+
+
+@escenario
+def descargar_por_partes(navegador, datos):
+    """«Por partes…» junto a «Descargar»: el vídeo sin música, un audio suelto
+    o todo en un ZIP, sin tocar el proyecto (11-10-2026)."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    _r, antes = api.get(f"/api/proyectos/{pid}")
+    estados_antes = {p.get("id"): p.get("estado") for p in antes.get("pasos") or []}
+    if estados_antes.get("render") != "listo":
+        # con cambios sin montar se pide montar antes (409): se monta
+        r, d = api.post(f"/api/proyectos/{pid}/exportar", {"que": "zip"})
+        ok(r.status_code == 409, f"con cambios sin montar, descargar por partes pide montar antes ({r.status_code})")
+        r, d = api.post(f"/api/proyectos/{pid}/generar", {"tanda": "render", "modo": "pendientes"})
+        api.esperar(d.get("trabajo_id") or (d.get("trabajo") or {}).get("id"), 600)
+        api.libre(pid)
+        _r, antes = api.get(f"/api/proyectos/{pid}")
+        estados_antes = {p.get("id"): p.get("estado") for p in antes.get("pasos") or []}
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'video'; pintarLight();")
+    ok(pg.esperar("button", "Por partes", 20), "junto a «Descargar» está «Por partes…»")
+    pg.pulsar("button", "Por partes")
+    ok(pg.esperar("#coste-video", "Descargar por partes", 10), "y abre la descarga por partes")
+    pg.p.locator("#coste-video label", has_text="Música").locator("input").uncheck()
+    pg.p.wait_for_timeout(300)
+    ok("voz + efectos" in pg.p.locator("#coste-video").inner_text(), "dice lo que va a llevar")
+    with pg.p.expect_download(timeout=180000) as bajada:
+        pg.pulsar("#coste-video button", "Descargar el vídeo")
+    ruta = bajada.value.path()
+    nombre = bajada.value.suggested_filename
+    ok(nombre.endswith("video_voz-efectos.mp4"), f"baja el vídeo sin música ({nombre})")
+    salida = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=codec_type",
+                             "-of", "csv=p=0", ruta], capture_output=True, text=True).stdout.split()
+    ok("video" in salida and "audio" in salida, f"con imagen y sonido ({salida})")
+    with pg.p.expect_download(timeout=180000) as bajada:
+        pg.pulsar("#coste-video button", "Efectos")
+    ok(bajada.value.suggested_filename.endswith("efectos.wav"), "y un audio suelto, en WAV")
+    _r, despues = api.get(f"/api/proyectos/{pid}")
+    estados = {p.get("id"): p.get("estado") for p in despues.get("pasos") or []}
+    ok(estados == estados_antes, f"sin tocar el proyecto ({estados})")
+    pg.captura("22_por_partes", entera=False)
+    pg.sin_errores("descargar por partes")
+    pg.cerrar()
 
 
 @escenario

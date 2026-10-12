@@ -307,8 +307,7 @@ def aviso_de_idioma(anterior, nuevo, calidad="medium"):
     imagenes = imagenes_de_parte("estilo")
     if not imagenes:
         return ""
-    por_imagen = USD_POR_IMAGEN.get(str(calidad or "medium"),
-                                    USD_POR_IMAGEN["medium"])
+    por_imagen = usd_por_imagen(calidad or "medium")
     return AVISO_LAMINAS_EN_OTRO_IDIOMA.format(
         anterior=_NOMBRES_LLANOS.get(anterior, anterior),
         nuevo=_NOMBRES_LLANOS.get(nuevo, nuevo),
@@ -396,6 +395,20 @@ def ritmo_de(id_ritmo):
 USD_POR_IMAGEN = {"low": 0.033, "medium": 0.074, "high": 0.198}
 
 
+def usd_por_imagen(calidad="low"):
+    """El precio de UNA imagen, el mismo en todo el Studio (`ajustes.precio_por_imagen`:
+    la mediana de lo que te han cobrado, o la tabla con las referencias). La
+    tabla de arriba solo queda de respaldo si `ajustes` no se puede cargar."""
+    try:
+        try:
+            from . import ajustes                       # noqa: PLC0415
+        except ImportError:
+            import ajustes                              # noqa: PLC0415
+        return float(ajustes.usd_por_imagen(str(calidad or "low")))
+    except Exception:                                   # noqa: BLE001
+        return USD_POR_IMAGEN.get(str(calidad or "low"), USD_POR_IMAGEN["low"])
+
+
 def coste_por_minuto(id_ritmo, calidad="low"):
     """Lo que cuesta un minuto de video a este ritmo. -> USD
 
@@ -405,7 +418,7 @@ def coste_por_minuto(id_ritmo, calidad="low"):
     dibujadas y las muestras): eso ya se dice al crearlo.
     """
     ficha = ritmo_de(id_ritmo)
-    por_imagen = USD_POR_IMAGEN.get(str(calidad or "low"), USD_POR_IMAGEN["low"])
+    por_imagen = usd_por_imagen(calidad or "low")
     return round((60.0 / max(0.5, float(ficha["media_s"]))) * por_imagen, 3)
 
 

@@ -404,6 +404,8 @@ const API = {
   archivo: (pid, ruta) => `${BASE}/a/${encodeURIComponent(pid)}/${String(ruta).split('\\').join('/')
     .split('/').map(encodeURIComponent).join('/')}`,
   coste: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/coste`,
+  costeDetalle: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/coste/detalle`,
+  costeEstilo: id => `${BASE}/api/presets-light/${encodeURIComponent(id)}/coste`,
   costePorPaso: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/coste/por-paso`,
   costePresupuesto: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/coste/presupuesto`,
   capturas: (pid, consulta) => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/capturas`
@@ -821,6 +823,8 @@ function descendientesDe(id) {
 function nombreDe(id) {
   // el agente de capturas y la guia de estilo no son pasos del grafo pero si
   // lanzan trabajos, y salen por su nombre en avisos y en el faro
+  if (/^exportar_/.test(String(id))) return 'Descarga por partes';
+  if (/^efectos_/.test(String(id))) return 'Efectos';
   return NOMBRES_FUERA_DEL_GRAFO[id] || pasoDe(id).nombre || id;
 }
 
@@ -4547,7 +4551,7 @@ function arrancar() {
       guardarSucios().then(() => toast('guardado'));
     }
     if (ev.key === 'Escape') {
-      ['lupa', 'capturador', 'papelera', 'conservacion',
+      ['lupa', 'capturador', 'papelera', 'coste-video', 'conservacion',
        'cuadro-texto']
         .map(id => document.getElementById(id))
         .forEach(nodo => { if (nodo) nodo.remove(); });
@@ -6251,7 +6255,7 @@ async function contarLaTandaQueMurio(pid) {
 const OTROS_VIDEOS = {};
 /* Trabajos del proyecto que NO van en la ranura del vídeo: la cola de
    imágenes (tiene la suya) y lo del estilo o de escuchar voces. */
-const NO_SON_DEL_VIDEO = /^(notas_imagenes|voz:previsualizar|voz_descrita|preset_light|moodboard|guia_estilo|catalogo_visual|conservacion|escenarios|banda_sonora|efectos|musica)/;
+const NO_SON_DEL_VIDEO = /^(exportar|notas_imagenes|voz:previsualizar|voz_descrita|preset_light|moodboard|guia_estilo|catalogo_visual|conservacion|escenarios|banda_sonora|efectos|musica)/;
 
 function nombreDeVideoLight(pid) {
   if (pid && APP.light.video.pid === pid && APP.light.video.nombre) return APP.light.video.nombre;
@@ -7627,10 +7631,10 @@ function costeLight() {
 function costeLightAhora() {
   refrescarCosteLight();
   const datos = APP.light.video.coste;
-  const caja = h('span', {
+  const caja = h('button', {
     clase: 'coste-light' + (datos && datos.aviso_presupuesto ? ' aviso' : ''),
-    title: 'Lo que llevas gastado en este vídeo. El desglose por paso está en '
-      + 'el modo editor.',
+    title: 'Lo que llevas gastado en este vídeo, de verdad: pulsa para verlo todo desglosado',
+    onclick: () => abrirCosteDelVideo(APP.light.video.pid),
   });
   if (!datos) { caja.appendChild(h('span', { clase: 'meta' }, 'coste: —')); return caja; }
   const abierto = proveedorDe(datos, 'openai');
@@ -7659,6 +7663,242 @@ function costeLightAhora() {
     }, h('i', { estilo: `width:${(fraccion * 100).toFixed(0)}%` })));
   }
   return caja;
+}
+
+/* EL COSTE DE UN VÍDEO, TODO Y DESGLOSADO (11-10-2026). Lo gastado de verdad
+   --cada imagen con lo que OpenAI dijo que cobró, la voz por los caracteres
+   enviados--, con TODOS sus cambios; lo que costó su estilo; la música y los
+   efectos (gratis, y de dónde salen); y cada tanda con lo prometido antes de
+   pulsar frente a lo gastado. Sale del servidor (`/coste/detalle`). */
+function filaCoste(que, cuantas, usd, nota) {
+  return h('tr', {},
+    h('th', {}, que),
+    h('td', { clase: 'meta' }, cuantas || ''),
+    h('td', { clase: 'usd' }, usd === null ? '—' : usdCorto(usd)),
+    h('td', { clase: 'meta' }, nota || ''));
+}
+
+function tablaDeGasto(d, incluirEstilo) {
+  const img = d.imagenes || {};
+  const voz = d.voz || {};
+  const filas = [
+    filaCoste('Imágenes nuevas', `${(img.nuevas || {}).cuantas || 0}`, (img.nuevas || {}).usd || 0,
+      'una por plano'),
+    filaCoste('Imágenes rehechas', `${(img.rehechas || {}).cuantas || 0}`, (img.rehechas || {}).usd || 0,
+      'notas, «Desde cero», regenerar'),
+    filaCoste('Personajes (hojas del reparto)', `${(img.personajes || {}).cuantas || 0}`,
+      (img.personajes || {}).usd || 0, ''),
+  ];
+  if ((img.otras || {}).cuantas) {
+    filas.push(filaCoste('Otras imágenes', `${img.otras.cuantas}`, img.otras.usd || 0, 'láminas, pruebas'));
+  }
+  filas.push(filaCoste('Voz', `${miles((voz.grabacion || {}).caracteres || 0)} caracteres`,
+    (voz.grabacion || {}).usd || 0, 'Cartesia, por carácter enviado'));
+  if ((voz.regrabaciones || {}).caracteres) {
+    filas.push(filaCoste('Voz: regrabaciones', `${miles(voz.regrabaciones.caracteres)} caracteres`,
+      voz.regrabaciones.usd || 0, 'tramos regrabados'));
+  }
+  if (incluirEstilo !== false) {
+    filas.push(filaCoste('Claude', `${miles(d.claude_tokens || 0)} tokens`, 0,
+      'va por tu suscripción: no se cobra aparte'));
+  }
+  return h('table', { clase: 'tabla tabla-coste' }, h('tbody', {}, ...filas));
+}
+
+async function abrirCosteDelVideo(pid) {
+  if (!pid) return;
+  const viejo = document.getElementById('coste-video');
+  if (viejo) viejo.remove();
+  const cuerpo = h('div', { clase: 'cuerpo' }, h('div', { clase: 'cargando' }, 'sumando lo gastado…'));
+  const capa = h('div', { id: 'coste-video', onclick: ev => { if (ev.target === capa) capa.remove(); } },
+    h('div', { clase: 'cuadro' },
+      h('div', { clase: 'cab' },
+        h('b', {}, 'Coste del vídeo'),
+        h('span', { clase: 'meta' }, 'lo gastado de verdad, con todos sus cambios'),
+        h('span', { clase: 'crece' }),
+        h('button', { clase: 'mini fantasma', title: 'Cerrar', onclick: () => capa.remove() }, '×')),
+      cuerpo));
+  document.body.appendChild(capa);
+  let d;
+  try { d = await pedir(API.costeDetalle(pid)); } catch (e) {
+    vaciar(cuerpo).appendChild(cajaError(`no se ha podido leer el coste: ${e.message}`));
+    return;
+  }
+  vaciar(cuerpo);
+  const estilo = d.estilo || null;
+  const partEstilo = estilo && estilo.disponible ? Number(estilo.usd || 0) : 0;
+  cuerpo.appendChild(h('div', { clase: 'marcador-conservacion fila' },
+    h('div', { clase: 'cifra' }, h('b', {}, usdCorto(d.total_usd)), h('span', {}, 'este vídeo')),
+    estilo ? h('div', { clase: 'cifra' }, h('b', {}, estilo.disponible ? usdCorto(partEstilo) : '—'),
+      h('span', {}, `su estilo «${estilo.nombre}» (una vez${estilo.videos > 1 ? `, para ${estilo.videos} vídeos` : ''})`)) : null,
+    h('div', { clase: 'cifra' }, h('b', {}, usdCorto(Number(d.total_usd || 0) + partEstilo)),
+      h('span', {}, 'vídeo + estilo'))));
+  const confirmadas = Number(d.imagenes_confirmadas || 0);
+  const estimadas = Number(d.imagenes_estimadas || 0);
+  cuerpo.appendChild(h('div', { clase: 'meta' },
+    `${confirmadas} imagen(es) con el importe que devolvió OpenAI (sus tokens reales)`
+    + (estimadas ? `; ${estimadas} sin ese dato, calculadas con la tarifa y sus referencias` : '')
+    + '. La voz, por los caracteres que se enviaron a Cartesia.'));
+  cuerpo.appendChild(h('h2', {}, 'Este vídeo'));
+  cuerpo.appendChild(tablaDeGasto(d));
+  const m = d.musica || {};
+  const ef = d.efectos || {};
+  cuerpo.appendChild(h('table', { clase: 'tabla tabla-coste' }, h('tbody', {},
+    filaCoste('Música', m.puesta ? (m.titulo || 'un tema') : 'sin música', 0,
+      m.puesta ? `${m.fuente || 'Jamendo'}: gratis` : ''),
+    filaCoste('Efectos de sonido', `${ef.cuantos || 0}`, 0, `${ef.fuente || 'FreeSound'}: gratis`))));
+  if (estilo && estilo.disponible) {
+    cuerpo.appendChild(h('h2', {}, `Su estilo: «${estilo.nombre}»`));
+    cuerpo.appendChild(tablaDeGasto(estilo));
+  } else if (estilo) {
+    cuerpo.appendChild(h('div', { clase: 'meta' },
+      `El taller del estilo «${estilo.nombre}» ya no está: no se puede saber lo que costó.`));
+  }
+  const tandas = d.tandas || [];
+  if (tandas.length) {
+    cuerpo.appendChild(h('h2', {}, 'Cada vez que generaste: prometido y gastado'));
+    cuerpo.appendChild(h('table', { clase: 'tabla tabla-coste' },
+      h('thead', {}, h('tr', {}, h('th', {}, 'Cuándo'), h('th', {}, 'Qué'),
+        h('th', {}, 'Prometido'), h('th', {}, 'Gastado'))),
+      h('tbody', {}, ...tandas.slice().reverse().map(t => h('tr', {},
+        h('th', {}, fechaCorta(t.lanzada)),
+        h('td', { clase: 'meta' }, (t.tandas || []).join(' + ') + (t.estado && t.estado !== 'listo' ? ` (${t.estado})` : '')),
+        h('td', { clase: 'usd' }, t.prometido_usd == null ? '—' : usdCorto(t.prometido_usd)),
+        h('td', { clase: 'usd' }, usdCorto(t.gastado_usd)))))));
+  }
+  const precio = d.precio_imagen || {};
+  cuerpo.appendChild(h('div', { clase: 'meta' },
+    `Lo que se promete antes de pulsar usa ${usdCorto(precio.usd)} por imagen: ${precio.fuente || ''}.`));
+  if ((d.claude || []).length) {
+    const det = h('details', {}, h('summary', {}, 'Claude, por para qué se usó (tokens)'));
+    det.appendChild(h('table', { clase: 'tabla tabla-coste' }, h('tbody', {},
+      ...d.claude.slice(0, 15).map(c => filaCoste(c.para, `${c.llamadas} llamada(s)`, 0,
+        `${miles(c.tokens)} tokens`)))));
+    cuerpo.appendChild(det);
+  }
+}
+
+async function abrirCosteDelEstilo(id) {
+  const viejo = document.getElementById('coste-video');
+  if (viejo) viejo.remove();
+  const cuerpo = h('div', { clase: 'cuerpo' }, h('div', { clase: 'cargando' }, 'sumando lo gastado…'));
+  const capa = h('div', { id: 'coste-video', onclick: ev => { if (ev.target === capa) capa.remove(); } },
+    h('div', { clase: 'cuadro' },
+      h('div', { clase: 'cab' }, h('b', {}, 'Coste del estilo'),
+        h('span', { clase: 'meta' }, 'láminas, guía y voz: se paga una vez'),
+        h('span', { clase: 'crece' }),
+        h('button', { clase: 'mini fantasma', title: 'Cerrar', onclick: () => capa.remove() }, '×')),
+      cuerpo));
+  document.body.appendChild(capa);
+  try {
+    const d = await pedir(API.costeEstilo(id));
+    vaciar(cuerpo);
+    if (!d.disponible) {
+      cuerpo.appendChild(h('div', { clase: 'meta' },
+        'Este estilo no tiene taller (se hizo fuera de esta pantalla o se borró): no se puede saber lo que costó.'));
+      return;
+    }
+    cuerpo.appendChild(h('div', { clase: 'marcador-conservacion fila' },
+      h('div', { clase: 'cifra' }, h('b', {}, usdCorto(d.usd)), h('span', {}, `«${d.nombre || id}»`))));
+    cuerpo.appendChild(tablaDeGasto(d));
+  } catch (e) {
+    vaciar(cuerpo).appendChild(cajaError(`no se ha podido leer el coste: ${e.message}`));
+  }
+}
+
+/* DESCARGAR EL VÍDEO POR PARTES (11-10-2026): elegir qué lleva el MP4 (voz,
+   música, efectos, subtítulos, logo) o bajar cada audio suelto. Lo prepara el
+   servidor en un trabajo (`/exportar`, pasos/exportes.py) sin tocar el
+   proyecto ni pagar nada; sin subtítulos tarda lo que un montaje. */
+const DESCARGA = {};
+
+function abrirDescargaPorPartes(pid) {
+  if (!pid) return;
+  const est = DESCARGA[pid] = DESCARGA[pid] || {
+    voz: true, musica: true, efectos: true, subtitulos: true, logo: true, preparando: '' };
+  const viejo = document.getElementById('coste-video');
+  if (viejo) viejo.remove();
+  const cuerpo = h('div', { clase: 'cuerpo' });
+  const capa = h('div', { id: 'coste-video', onclick: ev => { if (ev.target === capa) capa.remove(); } },
+    h('div', { clase: 'cuadro' },
+      h('div', { clase: 'cab' }, h('b', {}, 'Descargar por partes'),
+        h('span', { clase: 'meta' }, 'gratis: no se dibuja ni se graba nada'),
+        h('span', { clase: 'crece' }),
+        h('button', { clase: 'mini fantasma', title: 'Cerrar', onclick: () => capa.remove() }, '×')),
+      cuerpo));
+  document.body.appendChild(capa);
+  const preparar = async (pedido, etiqueta) => {
+    est.preparando = etiqueta;
+    pintar();
+    try {
+      const r = await pedir(`${API.proyecto(pid)}/exportar`, { method: 'POST', cuerpo: pedido });
+      seguirTrabajo(`exportar_${pid}`, r.trabajo_id, async t => {
+        est.preparando = '';
+        if (t.estado === 'listo' && t.resultado && t.resultado.fichero) {
+          const enlace = document.createElement('a');
+          enlace.href = `${API.proyecto(pid)}/exportes/${t.resultado.fichero}`;
+          enlace.download = '';
+          document.body.appendChild(enlace);
+          enlace.click();
+          enlace.remove();
+          toast(`${etiqueta}: descargando`);
+        } else if (t.estado === 'error') {
+          toast(`${etiqueta}: ${t.error || 'no se ha podido preparar'}`, true);
+        }
+        pintar();
+      }, () => pintar());
+    } catch (e) {
+      est.preparando = '';
+      toast(e.message, true);
+      pintar();
+    }
+  };
+  function pintar() {
+    if (!document.body.contains(capa)) return;
+    vaciar(cuerpo);
+    const ocupado = !!est.preparando;
+    const t = APP.trabajos[`exportar_${pid}`] || {};
+    if (ocupado) {
+      const pct = Math.round((Number(t.progreso) || 0) * 100);
+      cuerpo.appendChild(h('div', { clase: 'caja-info trabajo-laminas' },
+        h('div', {}, `Preparando «${est.preparando}»… ${pct} %` + (t.publico || t.mensaje ? ` · ${t.publico || t.mensaje}` : '')),
+        h('progress', { max: 100, value: pct })));
+    }
+    const casilla = (clave, texto) => h('label', { clase: 'casilla-parte' },
+      h('input', { type: 'checkbox', checked: !!est[clave], disabled: ocupado,
+        onchange: ev => { est[clave] = ev.target.checked; pintar(); } }), ` ${texto}`);
+    cuerpo.appendChild(h('h2', {}, 'El vídeo, con lo que elijas'));
+    cuerpo.appendChild(h('div', { clase: 'fila partes-video' },
+      casilla('voz', 'Voz'), casilla('musica', 'Música'), casilla('efectos', 'Efectos'),
+      casilla('subtitulos', 'Subtítulos'), casilla('logo', 'Logo')));
+    if (!est.subtitulos) {
+      cuerpo.appendChild(h('div', { clase: 'meta' },
+        'Sin subtítulos hay que volver a pasar los planos (están dentro de cada fotograma): '
+        + 'tarda más o menos lo que un montaje. No cuesta nada.'));
+    }
+    const partes = ['voz', 'musica', 'efectos'].filter(x => est[x]);
+    const que = (partes.length ? partes.map(x => ({ voz: 'voz', musica: 'música', efectos: 'efectos' })[x]).join(' + ')
+      : 'sin sonido') + (est.subtitulos ? '' : ', sin subtítulos') + (est.logo ? '' : ', sin logo');
+    cuerpo.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'primario', disabled: ocupado,
+        onclick: () => preparar({ que: 'video', partes, subtitulos: est.subtitulos, logo: est.logo },
+          `vídeo (${que})`) }, 'Descargar el vídeo'),
+      h('span', { clase: 'meta' }, que)));
+    cuerpo.appendChild(h('h2', {}, 'Cada audio, suelto'));
+    cuerpo.appendChild(h('div', { clase: 'meta' },
+      'En WAV, del largo del vídeo y alineados en el segundo 0, como suenan en el vídeo '
+      + '(la música ya agachada bajo la voz): juntos suman la mezcla.'));
+    cuerpo.appendChild(h('div', { clase: 'fila' },
+      ...[['voz', 'Voz'], ['musica', 'Música'], ['efectos', 'Efectos'], ['mezcla', 'Mezcla completa']]
+        .map(([parte, texto]) => h('button', { clase: 'mini', disabled: ocupado,
+          onclick: () => preparar({ que: 'audio', parte }, texto) }, texto))));
+    cuerpo.appendChild(h('h2', {}, 'Todo por partes'));
+    cuerpo.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', disabled: ocupado,
+        onclick: () => preparar({ que: 'zip' }, 'todo por partes') }, 'Descargar un ZIP con todo'),
+      h('span', { clase: 'meta' }, 'la imagen sin sonido y cada audio suelto')));
+  }
+  pintar();
 }
 
 /* --------------------------------------------------------------- el guion */
@@ -9567,7 +9807,10 @@ function vistaVideoLight() {
       'Baja el MP4 tal y como está ahora mismo.',
       h('a', {
         clase: 'boton mini', href: urlMp4Light(), download: '',
-      }, 'Descargar')) : null);
+      }, 'Descargar')) : null,
+    hayMp4Light() ? conAyuda(
+      'Sin música, sin efectos, sin subtítulos, sin voz… o cada audio suelto, para usarlo en otro sitio. Gratis.',
+      h('button', { clase: 'mini', onclick: () => abrirDescargaPorPartes(v.pid) }, 'Por partes…')) : null);
   BARRA_INFERIOR.nodo = pie;
 
   /* EL REPASO VA DEBAJO DEL VÍDEO Y SOLO CUANDO HAY VÍDEO. Antes de eso no hay
@@ -11364,6 +11607,10 @@ function vistaPresetLight() {
     h('h2', {}, ficha.nombre || ficha.id),
     APP.light.desdeVideo ? h('span', { clase: 'meta' }, 'el estilo de tu vídeo') : null,
     h('span', { clase: 'crece' }),
+    h('button', {
+      clase: 'mini', title: 'Lo que costó hacer este estilo, desglosado',
+      onclick: () => abrirCosteDelEstilo(ficha.id),
+    }, 'Lo que costó'),
     h('button', {
       clase: 'mini peligro', title: 'Mandar este estilo a la papelera',
       onclick: () => borrarPresetLight(ficha),
@@ -13906,6 +14153,7 @@ async function cargarAjustesVideo(modo, est) {
   est.musica = { presencia: presencia || { presencia: 'normal', elegida: false },
     tema: sonido && sonido.musica && sonido.musica.id ? sonido.musica : null };
   est.efectos = (sonido && sonido.efectos) || {};
+  est.efectosVolumen = (sonido && sonido.efectos_volumen) || 'normales';
   est.papeles = (sonido && sonido.papeles) || [];
   est.fijos = (sonido && sonido.efectos_fijos) || [];
   est.subtitulos = subtitulos;
@@ -14149,6 +14397,55 @@ function editorEfectos(modo, est, repintar) {
   const caja = h('div', { clase: 'editor-ajuste' });
   if (!est.leido) { caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…')); return caja; }
   const bf = est.buscaEfecto;
+  /* LO QUE TENÍA LA MÚSICA Y LOS EFECTOS NO (11-10-2026): cuánto se oyen,
+     escuchar los que eligió el automático, descartar uno («✕», para todo el
+     canal: no vuelve a salir) y traer otros. Todo solo vuelve a MEZCLAR. */
+  const releer = async () => {
+    const sonido = await pedir(`${API.proyecto(modo.pid)}/sonido`).catch(() => null);
+    if (sonido) {
+      est.efectos = sonido.efectos || {};
+      est.fijos = sonido.efectos_fijos || [];
+      est.papeles = sonido.papeles || est.papeles;
+      est.efectosVolumen = sonido.efectos_volumen || est.efectosVolumen;
+    }
+    repintar();
+  };
+  const volumen = async nivel => {
+    try {
+      const r = await pedir(`${API.proyecto(modo.pid)}/sonido/efectos/volumen`, {
+        method: 'PUT', cuerpo: { nivel } });
+      est.efectosVolumen = r.nivel;
+      if (r.cambiado) avisoDeMontaje(r, 'Volumen de los efectos');
+    } catch (e) { toast(e.message, true); }
+    repintar();
+  };
+  const vetar = async (papel, ef, quitar) => {
+    try {
+      const r = await pedir(API.sonidoVetados(modo.pid), {
+        method: 'POST', cuerpo: { efecto: ef, papel, quitar: !!quitar, remontar: true } });
+      avisoDeMontaje(r, quitar ? 'Efecto devuelto' : 'Efecto descartado');
+    } catch (e) { toast(e.message, true); }
+    await releer();
+  };
+  const otros = async papel => {
+    try {
+      const r = await pedir(API.efectos(modo.pid), {
+        method: 'POST', cuerpo: { papeles: [papel], salteado: 1 + Math.floor(Math.random() * 5) } });
+      est.buscandoOtros = papel;
+      repintar();
+      seguirTrabajo(`efectos_${modo.pid}`, r.trabajo_id, async t => {
+        est.buscandoOtros = '';
+        if (t.estado === 'listo') toast('Efectos nuevos: se oyen al volver a montar el vídeo');
+        await releer();
+      });
+    } catch (e) { toast(e.message, true); }
+  };
+  caja.appendChild(h('div', { clase: 'campo' },
+    h('label', {}, 'Cuánto se oyen'),
+    h('div', { clase: 'herramientas' }, ...[['bajos', 'Bajos'], ['normales', 'Normales'], ['altos', 'Altos']]
+      .map(([v, nombre]) => h('button', {
+        clase: 'mini' + (est.efectosVolumen === v ? ' activo' : ''),
+        onclick: () => { if (est.efectosVolumen !== v) volumen(v); } }, nombre)))));
   const fijar = async (papel, ficha) => {
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/sonido/efecto`, {
@@ -14174,8 +14471,23 @@ function editorEfectos(modo, est, repintar) {
         h('button', { clase: 'mini fantasma', onclick: () => fijar(papel.id, null) }, 'Volver a automático')));
     } else {
       bloque.appendChild(h('div', { clase: 'meta' }, lista.length
-        ? `Automático: ${lista.length} sonidos de FreeSound, que se van alternando`
+        ? `Automático: ${lista.filter(x => !x.vetado).length} sonidos de FreeSound, que se van alternando`
         : 'Automático: se buscan en FreeSound al montar el vídeo'));
+      // CADA UNO, PARA OÍRLO Y DESCARTARLO
+      lista.forEach(ef => bloque.appendChild(h('div', { clase: 'fila efecto-surtido' + (ef.vetado ? ' vetado' : '') },
+        h('span', { clase: 'crece' }, `${ef.titulo || ef.id || 'sonido'}`,
+          h('span', { clase: 'meta' }, ` · ${ef.autor || '?'}${ef.vetado ? ' · descartado' : ''}`)),
+        ef.muestra ? h('audio', { controls: true, preload: 'none', src: `${BASE}${ef.muestra}` }) : null,
+        ef.vetado
+          ? h('button', { clase: 'mini fantasma', title: 'Que vuelva a poder sonar',
+            onclick: () => vetar(papel.id, ef, true) }, 'Devolver')
+          : h('button', { clase: 'mini peligro', title: 'No me gusta: que no vuelva a sonar en ningún vídeo',
+            onclick: () => vetar(papel.id, ef, false) }, '✕ Descartar'))));
+      bloque.appendChild(h('div', { clase: 'fila' },
+        h('button', { clase: 'mini', disabled: est.buscandoOtros === papel.id,
+          title: 'Trae otros sonidos de FreeSound para este papel (gratis)',
+          onclick: () => otros(papel.id) },
+        est.buscandoOtros === papel.id ? 'buscando otros…' : 'Buscar otros')));
     }
     bloque.appendChild(h('div', { clase: 'fila' },
       h('button', { clase: 'mini' + (bf.papel === papel.id ? ' activo' : ''),

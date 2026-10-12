@@ -351,6 +351,23 @@ def _con_turno_de_imagenes(avisar, ctx, funcion):
         cerrojo.release()
 
 
+def _medido_en(paso, unidad=None):
+    """Lo que gaste esta funcion de trabajo se apunta en SU proyecto.
+
+    Solo habia contexto de coste dentro del `ejecutar` de cada paso del grafo:
+    regrabar un tramo de la voz, el taller de un estilo (laminas, guia, voz) y
+    el moodboard gastaban FUERA de el, y ese gasto se perdia o se cargaba al
+    video que estuviera corriendo a la vez (11-10-2026)."""
+    def decorador(funcion):
+        def envuelta(avisar, ctx, *args, **kwargs):
+            with COSTE.contexto(ctx.proyecto, paso, unidad):
+                return funcion(avisar, ctx, *args, **kwargs)
+        envuelta.__name__ = funcion.__name__
+        envuelta.__doc__ = funcion.__doc__
+        return envuelta
+    return decorador
+
+
 def _con_turno(funcion):
     """Para las funciones de trabajo que DIBUJAN fuera de `assets` (las laminas
     de un estilo, el moodboard): tambien esperan su turno (regla 2)."""
@@ -2045,6 +2062,7 @@ def catalogo_voces_global(idioma: str = Query(default=None),
 # toca los params, los rellena la interfaz y decide quien mira. La voz se paga
 # cada vez que se graba, asi que aplicar a ciegas son dos tomas en vez de una.
 
+@_medido_en("estilo")
 def _correr_voz_descrita(avisar, ctx, encargo, idioma, ajuste):
     if PASOS_MODULOS is None:
         raise RuntimeError(f"los pasos no se han podido cargar: {ERROR_PASOS}")
@@ -2119,6 +2137,7 @@ def _plan_regrabado(ctx, seccion_id=None):
     return plan
 
 
+@_medido_en("voz", "regrabar")
 def _correr_regrabar(avisar, ctx, seccion_id, peticion, ajuste):
     """Regraba lo que haga falta y lo REGISTRA como version nueva de la voz.
 
@@ -2672,7 +2691,7 @@ def estimar_video(cuerpo: dict = Body(default=None)):
     planos = max(1, int(round(segundos / media)))
 
     calidad = str(datos.get("calidad") or "low").lower()
-    usd_imagen = light.USD_POR_IMAGEN.get(calidad, light.USD_POR_IMAGEN["low"])
+    usd_imagen = light.usd_por_imagen(calidad)
 
     imagenes = max(1, planos)
 
@@ -2896,6 +2915,234 @@ def leer_coste(pid: str):
 def coste_por_paso(pid: str):
     """Desglose por paso del pipeline: que fase se come el presupuesto."""
     return medidor(contexto(pid)).por_paso()
+
+
+def _desglose_de_eventos(eventos):
+    """Lo gastado en un proyecto, por partes y con lo confirmado aparte."""
+    imagenes = {"nuevas": [0, 0.0], "rehechas": [0, 0.0], "personajes": [0, 0.0],
+                "otras": [0, 0.0]}
+    vistas = set()
+    confirmadas = estimadas = 0
+    voz = {"grabacion": [0, 0.0], "regrabaciones": [0, 0.0]}
+    claude = {}
+    for e in eventos:
+        usd = float(e.get("usd") or 0.0)
+        prov = e.get("proveedor")
+        unidad = str(e.get("unidad") or "")
+        if prov == "openai":
+            if unidad.startswith("escena:"):
+                clave = "rehechas" if unidad in vistas else "nuevas"
+                vistas.add(unidad)
+            elif unidad.startswith("asset:"):
+                clave = "personajes"
+            else:
+                clave = "otras"
+            n = int((e.get("cantidad") or {}).get("imagenes") or 1)
+            imagenes[clave][0] += n
+            imagenes[clave][1] += usd
+            if ((e.get("detalle") or {}).get("coste") or {}).get("via") == "tokens":
+                confirmadas += n
+            else:
+                estimadas += n
+        elif prov == "tts":
+            clave = "regrabaciones" if unidad.startswith("regrabar") else "grabacion"
+            voz[clave][0] += int((e.get("cantidad") or {}).get("caracteres") or 0)
+            voz[clave][1] += usd
+        elif prov == "claude_cli":
+            op = str(e.get("operacion") or "claude")
+            t = e.get("tokens") or {}
+            ficha = claude.setdefault(op, {"llamadas": 0, "tokens": 0})
+            ficha["llamadas"] += 1
+            ficha["tokens"] += int(t.get("entrada") or 0) + int(t.get("salida") or 0) + int(t.get("cache") or 0)
+    return {
+        "imagenes": {k: {"cuantas": v[0], "usd": round(v[1], 4)} for k, v in imagenes.items()},
+        "imagenes_confirmadas": confirmadas, "imagenes_estimadas": estimadas,
+        "voz": {k: {"caracteres": v[0], "usd": round(v[1], 4)} for k, v in voz.items()},
+        "claude": sorted(({"para": k, **v} for k, v in claude.items()),
+                         key=lambda x: -x["tokens"]),
+        "claude_tokens": sum(v["tokens"] for v in claude.values()),
+        "usd": round(sum(v[1] for v in imagenes.values()) + sum(v[1] for v in voz.values()), 4),
+    }
+
+
+def _tandas_de(ctx, eventos):
+    """Cada tanda lanzada: lo prometido antes de pulsar frente a lo gastado
+    mientras corria (los eventos de coste entre su inicio y su fin)."""
+    fichas = {}
+    try:
+        with open(ctx.proyecto.ruta(NOMBRE_TANDAS), encoding="utf-8") as fh:
+            for linea in fh:
+                try:
+                    r = json.loads(linea)
+                except ValueError:
+                    continue
+                fichas.setdefault(r.get("marca"), {}).update(r)
+    except OSError:
+        return []
+    salida = []
+    for f in fichas.values():
+        inicio, fin = f.get("inicio") or f.get("lanzada"), f.get("fin")
+        if not inicio:
+            continue
+        dentro = [e for e in eventos if str(e.get("momento") or "") >= inicio
+                  and (not fin or str(e.get("momento") or "") <= fin)]
+        salida.append({
+            "tandas": f.get("tandas") or [], "lanzada": f.get("lanzada") or inicio,
+            "estado": f.get("estado") or ("en marcha" if not fin else ""),
+            "prometido_usd": f.get("prometido_usd"),
+            "gastado_usd": round(sum(float(e.get("usd") or 0) for e in dentro), 4),
+            "imagenes": sum(int((e.get("cantidad") or {}).get("imagenes") or 0)
+                            for e in dentro if e.get("proveedor") == "openai")})
+    return sorted(salida, key=lambda x: x["lanzada"])
+
+
+def _coste_del_estilo(ficha_preset):
+    """Lo que costo hacer un estilo (su taller): laminas, guia y voz."""
+    tid = ((ficha_preset.get("datos") or {}).get("origen") or {}).get("taller") \
+        if isinstance(ficha_preset, dict) else ""
+    if not tid:
+        return None
+    try:
+        tctx = contexto(tid)
+    except ErrorApi:
+        return {"taller": tid, "disponible": False}
+    eventos = medidor(tctx).eventos()
+    return {"taller": tid, "disponible": True, **_desglose_de_eventos(eventos),
+            "eventos": len(eventos)}
+
+
+@app.get("/api/proyectos/{pid}/coste/detalle")
+def coste_en_detalle(pid: str):
+    """EL COSTE DE UN VIDEO, TODO Y DESGLOSADO (11-10-2026).
+
+    Lo gastado de verdad --cada imagen con lo que OpenAI dijo que cobro (su
+    `usage`), cada toma de voz con los caracteres enviados-- sumando TODOS los
+    cambios: versiones, rehechas, notas, regrabaciones, lo revertido. Mas lo
+    que costo su estilo (que se paga una vez y lo comparten sus videos), la
+    musica y los efectos (de donde salen y que cuestan: nada) y, por cada tanda,
+    lo prometido antes de pulsar frente a lo gastado."""
+    ctx = contexto(pid)
+    eventos = medidor(ctx).eventos()
+    detalle = _desglose_de_eventos(eventos)
+    render = ctx.estado.params("render") or {}
+    musica = render.get("musica") or {}
+    efectos = render.get("efectos") or {}
+    n_efectos = sum(len(v or []) for v in efectos.values()) if isinstance(efectos, dict) else 0
+    estilo = None
+    pid_estilo = (ctx.proyecto.config or {}).get("estilo_light") or ""
+    if pid_estilo:
+        try:
+            ficha = PASOS_MODULOS.presets_canal.leer(pid_estilo)
+        except Exception:                                   # noqa: BLE001
+            ficha = None
+        if isinstance(ficha, dict):
+            estilo = {"id": pid_estilo, "nombre": ficha.get("nombre") or pid_estilo,
+                      **(_coste_del_estilo(ficha) or {})}
+            videos = 0
+            for f in Proyecto.listar(raiz_proyectos()):
+                if (f.get("config") or f).get("estilo_light") == pid_estilo or f.get("estilo_light") == pid_estilo:
+                    videos += 1
+            estilo["videos"] = videos
+    calidad = str((ctx.estado.params("assets") or {}).get("calidad") or "low")
+    return {
+        "proyecto": ctx.id, "total_usd": detalle["usd"], **detalle,
+        "musica": {"usd": 0.0, "titulo": musica.get("titulo") or musica.get("nombre") or "",
+                   "fuente": musica.get("fuente") or musica.get("origen") or (
+                       "subida por ti" if musica.get("propia") else "Jamendo"),
+                   "puesta": bool(musica)},
+        "efectos": {"usd": 0.0, "cuantos": n_efectos, "fuente": "FreeSound o subidos por ti"},
+        "estilo": estilo,
+        "tandas": _tandas_de(ctx, eventos),
+        "precio_imagen": AJUSTES.precio_por_imagen(calidad),
+        "tarifas": {"usd_por_caracter": COSTE.tarifa_caracter(),
+                    "usd_por_token": COSTE.tarifa_tokens()},
+    }
+
+
+@app.get("/api/presets-light/{preset_id}/coste")
+def coste_de_un_estilo(preset_id: str):
+    """Lo que costo hacer este estilo (su taller), desglosado."""
+    try:
+        ficha = PASOS_MODULOS.presets_canal.leer(preset_id)
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(404, f"no hay ningún estilo «{preset_id}»: {fallo}")
+    return {"id": preset_id, "nombre": (ficha or {}).get("nombre"),
+            **(_coste_del_estilo(ficha) or {"disponible": False})}
+
+
+# ------------------------------------------------- descargar el video por partes
+
+def _correr_exporte(avisar, ctx, pedido):
+    """Prepara lo pedido en <proyecto>/exportes/ (ver pasos/exportes.py)."""
+    exp = PASOS_MODULOS.exportes
+    render = ctx.estado.params("render") or {}
+    try:
+        if pedido["que"] == "audio":
+            ruta = exp.audio(ctx.proyecto, render, pedido["parte"], avisar=avisar, estado=ctx.estado)
+        elif pedido["que"] == "zip":
+            ruta = exp.todo_por_partes(ctx.proyecto, render, avisar=avisar, estado=ctx.estado)
+        else:
+            ruta = exp.video(ctx.proyecto, render, pedido["partes"],
+                             subtitulos=pedido["subtitulos"], logo=pedido["logo"],
+                             avisar=avisar, estado=ctx.estado)
+    except exp.ErrorExporte as fallo:
+        raise RuntimeError(str(fallo)) from None
+    relativa = os.path.relpath(ruta, os.path.join(ctx.proyecto.raiz, "exportes")).replace(os.sep, "/")
+    avisar(1.0, "listo para descargar")
+    ctx.bitacora.anotar("exporte", "render", {"pedido": pedido, "fichero": relativa})
+    return {"fichero": relativa, "bytes": os.path.getsize(ruta)}
+
+
+@app.post("/api/proyectos/{pid}/exportar", status_code=202)
+def exportar_por_partes(pid: str, cuerpo: dict = Body(default=None)):
+    """Prepara el vídeo, o una parte, para descargar (gratis, no toca el proyecto).
+
+    {que: "video", partes: ["voz", "musica", "efectos"], subtitulos, logo}
+    {que: "audio", parte: "voz" | "musica" | "efectos" | "mezcla"}
+    {que: "zip"}: la imagen sin sonido y cada audio suelto.
+    Sin subtítulos se vuelven a capturar los planos: tarda lo que un montaje."""
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    que = str(datos.get("que") or "video")
+    if que not in ("video", "audio", "zip"):
+        raise ErrorApi(400, "«que» tiene que ser video, audio o zip")
+    partes = [str(x) for x in (datos.get("partes") or []) if str(x) in ("voz", "musica", "efectos")]
+    pedido = {"que": que, "partes": partes, "parte": str(datos.get("parte") or ""),
+              "subtitulos": datos.get("subtitulos", True) is not False,
+              "logo": datos.get("logo", True) is not False}
+    if que == "audio" and pedido["parte"] not in ("voz", "musica", "efectos", "mezcla"):
+        raise ErrorApi(400, "«parte» tiene que ser voz, música, efectos o mezcla")
+    if _trabajo_activo(ctx, "render") is not None:
+        raise ErrorApi(409, "el vídeo se está montando: descárgalo cuando termine")
+    # LO MONTADO TIENE QUE SER LO DE AHORA: las partes salen del montaje activo
+    # MAS la voz, el plan y la mezcla de ahora, y con algo cambiado sin montar
+    # (una voz regrabada) saldrían desincronizadas
+    if ctx.estado.estado_de("render") != "listo":
+        raise ErrorApi(409, "el vídeo tiene cambios sin montar: «Regenerar Vídeo» primero "
+                            "y después descárgalo por partes")
+    # UNA A LA VEZ por vídeo: comparten la carpeta de los planos sin subtítulos
+    if any(str(f.get("nombre") or "") == "exportar" for f in ctx.gestor.listar(activos=True)):
+        raise ErrorApi(409, "ya se está preparando una descarga de este vídeo: espera a que termine")
+    try:
+        PASOS_MODULOS.exportes.material(ctx.proyecto, ctx.estado.params("render") or {}, estado=ctx.estado)
+    except PASOS_MODULOS.exportes.ErrorExporte as fallo:
+        raise ErrorApi(409, str(fallo))
+    trabajo_id = ctx.gestor.lanzar("exportar", _correr_exporte, ctx, pedido)
+    _registrar_trabajo(trabajo_id, ctx.id)
+    return {"trabajo_id": trabajo_id, "pedido": pedido}
+
+
+@app.get("/api/proyectos/{pid}/exportes/{ruta:path}")
+def descargar_exporte(pid: str, ruta: str):
+    """Un fichero preparado por /exportar, para descargar con su nombre."""
+    ctx = contexto(pid)
+    base = os.path.realpath(os.path.join(ctx.proyecto.raiz, "exportes"))
+    destino = os.path.realpath(os.path.join(base, ruta))
+    if not destino.startswith(base + os.sep) or not os.path.isfile(destino):
+        raise ErrorApi(404, "ese fichero no está preparado: vuelve a pedirlo")
+    nombre = PASOS_MODULOS.exportes.nombre_descarga(
+        (ctx.proyecto.config or {}).get("nombre") or ctx.id, destino)
+    return FileResponse(destino, filename=nombre, media_type=_tipo_de(destino))
 
 
 @app.get("/api/proyectos/{pid}/coste/eventos")
@@ -3519,6 +3766,7 @@ def servir_lamina_moodboard(clave: str, origen: str, archivo: str,
     return servir_fichero(peticion, destino)
 
 
+@_medido_en("estilo")
 @_con_turno
 def _correr_moodboard(avisar, ctx, ejes, peticiones, calidad):
     mod = _moodboard()
@@ -5531,7 +5779,7 @@ def _correr_notas_imagenes(avisar, ctx):
 def _usd_por_imagen(ctx):
     calidad = str((ctx.estado.params("assets") or {}).get("calidad") or "low")
     try:
-        return round(float(AJUSTES.coste_por_imagen(calidad).get("usd_total") or 0.0), 4)
+        return round(float(AJUSTES.usd_por_imagen(calidad) or 0.0), 4)
     except Exception:                                       # noqa: BLE001
         return 0.0
 
@@ -6431,6 +6679,7 @@ def leer_sonido(pid: str):
     return {
         "activo": render.get("sonido", True),
         "musica": render.get("musica") or {},
+        "efectos_volumen": _volumen_de_efectos(render.get("efectos_db")),
         "efectos": surtido,
         "efectos_fijos": list(render.get("efectos_fijos") or []),
         # LOS VETADOS DEL CANAL. Viajan a la pantalla para poder pintar la ✕ ya
@@ -7290,7 +7539,7 @@ def vetar_efecto(pid: str, cuerpo: dict = Body(default=None)):
     Y NO SE BORRA EL FICHERO. Freesound ordena por descargas: borrarlo sólo
     consigue que la siguiente búsqueda lo vuelva a bajar.
     """
-    contexto(pid)                      # el proyecto tiene que existir
+    ctx = contexto(pid)                # el proyecto tiene que existir
     sonido = _sonido()
     datos = _cuerpo(cuerpo)
     ficha = datos.get("efecto") if isinstance(datos.get("efecto"), dict) else None
@@ -7298,16 +7547,61 @@ def vetar_efecto(pid: str, cuerpo: dict = Body(default=None)):
         sonido.clave_de(ficha) if ficha else "")
     if not clave:
         raise ErrorApi(400, "hace falta 'clave' o 'efecto' con fuente e id")
+    # CON `remontar`, el video montado se vuelve a MEZCLAR ya sin (o con) ese
+    # sonido: vetar no toca ningun param, asi que el montaje seguiria «al dia»
+    # con el efecto dentro y no habria boton que lo quitara (11-10-2026).
+    # el veto se apunta SIEMPRE; si se esta montando (o buscando efectos) solo
+    # se deja el remontaje para el siguiente montaje
+    remontar = bool(datos.get("remontar")) and _trabajo_activo(ctx, "render") is None
+    al_dia, montado = _antes_de_cambiar_el_montaje(ctx) if remontar else (False, False)
     if datos.get("quitar"):
-        return {"vetado": False, "quitado": sonido.desvetar(clave),
+        quitado = sonido.desvetar(clave)
+        trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado, "volver a mezclar los efectos") \
+            if remontar and quitado else None
+        return {"vetado": False, "quitado": quitado, "trabajo_id": trabajo_id,
                 "vetados": [sonido.vetados()[k] for k in sorted(sonido.vetados())]}
     try:
         entrada = sonido.vetar(ficha or clave, papel=datos.get("papel"),
                                motivo=str(datos.get("motivo") or ""))
     except ValueError as fallo:
         raise ErrorApi(400, str(fallo))
-    return {"vetado": True, "efecto": entrada,
+    trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado, "volver a mezclar los efectos") \
+        if remontar else None
+    return {"vetado": True, "efecto": entrada, "trabajo_id": trabajo_id,
             "vetados": [sonido.vetados()[k] for k in sorted(sonido.vetados())]}
+
+
+#: Cuanto se oyen los efectos, en tres palabras (`render.efectos_db`, que el
+#: mezclador ya entendia y solo se podia tocar con una nota del repaso).
+VOLUMEN_EFECTOS = {"bajos": -8.0, "normales": 0.0, "altos": 4.0}
+
+
+def _volumen_de_efectos(db):
+    try:
+        valor = float(db or 0.0)
+    except (TypeError, ValueError):
+        valor = 0.0
+    return min(VOLUMEN_EFECTOS, key=lambda k: abs(VOLUMEN_EFECTOS[k] - valor))
+
+
+@app.put("/api/proyectos/{pid}/sonido/efectos/volumen")
+def cambiar_volumen_efectos(pid: str, cuerpo: dict = Body(default=None)):
+    """Fija cuánto se oyen los efectos ({nivel: bajos|normales|altos}) y, si
+    el vídeo ya está montado y al día, lo vuelve a MEZCLAR (no se dibuja nada).
+    No se escribe nada si lo pedido es lo que ya suena (regla 1)."""
+    ctx = contexto(pid)
+    nivel = str(_cuerpo(cuerpo).get("nivel") or "").strip().lower()
+    if nivel not in VOLUMEN_EFECTOS:
+        raise ErrorApi(400, "«nivel» tiene que ser: " + ", ".join(VOLUMEN_EFECTOS))
+    render = ctx.estado.params("render") or {}
+    actual = _volumen_de_efectos(render.get("efectos_db"))
+    if nivel == actual:
+        return {"nivel": actual, "cambiado": False, "trabajo_id": None}
+    al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
+    ctx.estado.actualizar_params("render", {"efectos_db": VOLUMEN_EFECTOS[nivel]})
+    ctx.bitacora.anotar("efectos_volumen", "render", {"antes": actual, "ahora": nivel})
+    trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado, "volver a mezclar los efectos")
+    return {"nivel": nivel, "cambiado": True, "trabajo_id": trabajo_id, "montado": montado}
 
 
 @app.post("/api/proyectos/{pid}/sonido/efectos", status_code=202)
@@ -10175,6 +10469,7 @@ _LIGHT_QUE_HACE = {
 }
 
 
+@_medido_en("estilo")
 def _correr_preset_light(avisar, ctx, encargo, solo, preset_id, retomar=False):
     """Recorre el plan tanda a tanda y congela el resultado en el preset.
 
@@ -10922,7 +11217,7 @@ def laminas_de_preset(preset_id: str):
     quitadas, propias, hoja = lam.config_de(origen)
     calidad = str((ctx.estado.params("assets") or {}).get("calidad") or "medium")
     try:
-        usd = float(AJUSTES.coste_por_imagen(calidad).get("usd_total") or 0.0)
+        usd = float(AJUSTES.usd_por_imagen(calidad) or 0.0)
     except Exception:                                       # noqa: BLE001
         usd = 0.0
     # las anadidas que se quitaron no se guardan: solo vuelven las de fabrica
@@ -11618,7 +11913,7 @@ def _que_rehace(ctx, parte, cambios):
     usd_voz = round(caracteres * tarifa, 3)
     calidad = ((cambios.get("assets") or {}).get("calidad")
                or (ctx.estado.params("assets") or {}).get("calidad") or "low")
-    usd_imagen = _light().USD_POR_IMAGEN.get(str(calidad), _light().USD_POR_IMAGEN["low"])
+    usd_imagen = _light().usd_por_imagen(str(calidad))
     if parte == "rotulos":
         return {"rehace": "rehace solo el montaje del vídeo", "usd": 0.0}
     if parte == "voz":
@@ -11881,7 +12176,7 @@ def _coste_previsto(ctx, pestanas):
     planos = _planos_previstos(ctx)
     assets = ctx.estado.params("assets") or {}
     calidad = str(assets.get("calidad") or "low").lower()
-    usd_imagen = light.USD_POR_IMAGEN.get(calidad, light.USD_POR_IMAGEN["low"])
+    usd_imagen = light.usd_por_imagen(calidad)
     tarifas = COSTE.tarifas()
     usd_caracter = float(((tarifas.get("tts") or {}).get("usd_por_caracter")) or 0.0)
 
@@ -11897,26 +12192,59 @@ def _coste_previsto(ctx, pestanas):
             ctx.proyecto, "guion", "guion.json", obligatorio=False) or {}
         bloques = guion.get("guion") or []
         if bloques:
-            caracteres = sum(len(str(b.get("texto") or "")) for b in bloques)
+            # lo que se ENVIA a la voz: el texto sin las marcas de pausa y
+            # enfasis (es lo que cuenta el medidor, y lo que cobra Cartesia)
+            limpiar = getattr(PASOS_MODULOS.marcas_tts, "limpiar", None)
+            caracteres = sum(len(limpiar(str(b.get("texto") or "")) if limpiar
+                                 else str(b.get("texto") or "")) for b in bloques)
         else:
             caracteres = int(round(palabras * 6.1))
+    # LAS HOJAS DE PERSONAJES TAMBIEN SE PAGAN: una imagen por personaje del
+    # reparto, antes de los planos. El cotizador solo contaba planos y se quedaba
+    # corto en 1-3 imagenes por video con personajes (11-10-2026).
+    hojas, hojas_hechas = (_hojas_de_reparto(ctx) if "video" in pestanas else (0, 0))
+    imagenes += hojas
     usd_imagenes = round(imagenes * usd_imagen, 3)
     usd_tts = round(caracteres * usd_caracter, 4)
+    # la voz ya grabada y al dia no se vuelve a pagar en una tanda «pendientes»
+    voz_al_dia = ctx.estado.estado_de("voz") == "listo"
+    usd_tts_por_generar = 0.0 if voz_al_dia else usd_tts
     # LO QUE YA ESTA HECHO VIAJA AL LADO DEL TECHO, no en su lugar. El total
     # sigue siendo lo que cuesta el video entero --que es lo que hay que pagar
     # si algo aguas arriba cambia y la cache falla-- y `por_generar` es lo que
     # cuesta si nada cambia. Ensenar solo uno de los dos miente en un sentido o
     # en el otro: uno asusta al que retoma, el otro promete barato de mas.
-    hechas = _imagenes_ya_generadas(ctx, planos) if imagenes else 0
+    hechas = (_imagenes_ya_generadas(ctx, planos) + hojas_hechas) if imagenes else 0
     hechas = min(hechas, imagenes)
     por_generar = max(0, imagenes - hechas)
+    precio = AJUSTES.precio_por_imagen(calidad)
     return {"imagenes": imagenes, "calidad": calidad,
             "usd_por_imagen": usd_imagen, "usd_imagenes": usd_imagenes,
+            "precio_de": precio.get("fuente"),
+            "hojas_reparto": hojas,
             "imagenes_hechas": hechas, "imagenes_por_generar": por_generar,
-            "usd_por_generar": round(por_generar * usd_imagen + usd_tts, 3),
+            "usd_por_generar": round(por_generar * usd_imagen + usd_tts_por_generar, 3),
             "caracteres": caracteres, "usd_tts": usd_tts,
             "usd_total": round(usd_imagenes + usd_tts, 3),
             "planos": planos}
+
+
+def _hojas_de_reparto(ctx):
+    """(personajes del reparto en el plan, cuantos ya tienen su hoja dibujada)."""
+    plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    reparto = [str(f.get("nombre") or k.split(":", 1)[-1])
+               for k, f in (plan.get("assets") or {}).items()
+               if isinstance(f, dict) and f.get("tipo") == "reparto"]
+    if not reparto:
+        return 0, 0
+    carpetas = [ctx.proyecto.ruta_trabajo("assets", crear=False)]
+    version = ctx.proyecto.version_activa("assets")
+    if version:
+        carpetas.append(ctx.proyecto.ruta_paso("assets", version))
+    hechas = sum(1 for nombre in reparto
+                 if any(c and os.path.exists(os.path.join(c, "assets", "reparto", f"{nombre}.png"))
+                        for c in carpetas))
+    return len(reparto), hechas
 
 
 def _tamano_para(clave, planos, palabras):
@@ -12060,6 +12388,34 @@ def _plan_de_generacion(ctx, pestanas, modo="pendientes", datos=None):
         "coste": _coste_previsto(ctx, pestanas),
         "impedimentos": [i for f in fases for i in f["impedimentos"]],
     }
+
+
+#: Las tandas lanzadas de un video, con lo prometido y cuando empezaron y
+#: acabaron: con eso se compara lo PROMETIDO antes de pulsar con lo GASTADO.
+NOMBRE_TANDAS = "tandas_coste.jsonl"
+
+
+def _apuntar_tanda(ctx, registro):
+    try:
+        with open(ctx.proyecto.ruta(NOMBRE_TANDAS), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(registro, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def _cadena_con_cuenta(avisar, ctx, marca, *args):
+    """`_correr_cadena` con su ventana de tiempo apuntada (ver NOMBRE_TANDAS)."""
+    _apuntar_tanda(ctx, {"marca": marca, "inicio": ahora()})
+    estado = "error"
+    try:
+        resultado = _correr_cadena(avisar, ctx, *args)
+        estado = "listo"
+        return resultado
+    except BaseException as fallo:
+        estado = "cancelado" if type(fallo).__name__ == "Cancelado" else "error"
+        raise
+    finally:
+        _apuntar_tanda(ctx, {"marca": marca, "fin": ahora(), "estado": estado})
 
 
 def _correr_cadena(avisar, ctx, pestanas, modo, datos, plan):
@@ -12304,9 +12660,14 @@ def generar_video(pid: str, cuerpo: dict = Body(default=None)):
                                         "ejecutar " + ", ".join(faltan),
                                    {"faltan": faltan, "tarea": tarea["id"]})
 
+        marca = uuid.uuid4().hex[:12]
         trabajo_id = ctx.gestor.lanzar("generar:" + "+".join(elegidas),
-                                       _correr_cadena, ctx, elegidas, modo, datos,
+                                       _cadena_con_cuenta, ctx, marca, elegidas, modo, datos,
                                        plan, paso=plan["fases"][0]["tareas"][0]["paso"])
+        _apuntar_tanda(ctx, {"marca": marca, "trabajo": trabajo_id, "tandas": elegidas,
+                             "modo": modo, "lanzada": ahora(),
+                             "prometido_usd": (plan.get("coste") or {}).get("usd_por_generar"),
+                             "prometido_imagenes": (plan.get("coste") or {}).get("imagenes_por_generar")})
     _registrar_trabajo(trabajo_id, ctx.id)
     ctx.bitacora.anotar("generacion_lanzada", None, {
         "pestanas": elegidas, "modo": modo, "tareas": plan["tareas"],

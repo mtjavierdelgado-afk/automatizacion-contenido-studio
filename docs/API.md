@@ -107,6 +107,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/bitacora/llm` | Historial en texto navegable, pensado para darselo a un LLM. |
 | `GET` | `/api/proyectos/{pid}/coste` | Total del video, desglosado por proveedor, con la linea de cabecera. |
 | `GET` | `/api/proyectos/{pid}/coste/eventos` | Detalle de cada consumo, filtrable por proveedor, paso y unidad. |
+| `GET` | `/api/proyectos/{pid}/coste/detalle` | El coste de un vídeo, todo y desglosado: imágenes nuevas/rehechas/personajes, voz y regrabaciones, Claude, música y efectos, su estilo y prometido frente a gastado de cada tanda. |
+| `GET` | `/api/presets-light/{preset_id}/coste` | Lo que costó hacer un estilo (su taller), desglosado. |
+| `POST` | `/api/proyectos/{pid}/exportar` | Prepara el vídeo, o una parte, para descargar (gratis, no toca el proyecto): {que: video, partes, subtitulos, logo} · {que: audio, parte} · {que: zip}. |
+| `GET` | `/api/proyectos/{pid}/exportes/{ruta:path}` | Un fichero preparado por /exportar, con su nombre de descarga. |
 | `GET` | `/api/proyectos/{pid}/coste/flujo` | Coste en vivo por SSE, para que la cabecera se mueva mientras corre un paso. |
 | `GET` | `/api/proyectos/{pid}/coste/por-paso` | Desglose por paso del pipeline: que fase se come el presupuesto. |
 | `PUT` | `/api/proyectos/{pid}/coste/presupuesto` | Fija el presupuesto en dolares del video (null para quitarlo). |
@@ -192,6 +196,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/sonido/efectos` | Llena el banco de efectos del canal para los papeles que se pidan. |
 | `POST` | `/api/proyectos/{pid}/sonido/musica` | Temas de Jamendo que pegan con el tono. Devuelve candidatos, no elige. |
 | `POST` | `/api/proyectos/{pid}/sonido/vetados` | Prohíbe un efecto en TODO el canal, o levanta el veto con `quitar`. |
+| `PUT` | `/api/proyectos/{pid}/sonido/efectos/volumen` | Cuánto se oyen los efectos ({nivel: bajos, normales, altos}); si el vídeo está al día, vuelve a mezclar. |
 | `GET` | `/api/proyectos/{pid}/transiciones` | Las transiciones que existen, con su GLSL, y cuales entran en este video. |
 
 ## Render y montaje

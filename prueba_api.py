@@ -3687,6 +3687,47 @@ def probar_ronda_octubre(cliente, carpeta):
        "y con otra descripción, también")
 
 
+def probar_coste_en_detalle(cliente, pid):
+    """El coste de un vídeo, desglosado, y el volumen de los efectos (11-10)."""
+    seccion("EL COSTE EN DETALLE Y EL VOLUMEN DE LOS EFECTOS")
+    r, d = cliente.get(f"/api/proyectos/{pid}/coste/detalle")
+    igual(r.status_code, 200, "el coste en detalle contesta")
+    for clave in ("total_usd", "imagenes", "voz", "musica", "efectos", "tandas",
+                  "precio_imagen", "claude_tokens"):
+        ok(clave in d, f"y trae «{clave}»")
+    img = d.get("imagenes") or {}
+    ok(all(k in img for k in ("nuevas", "rehechas", "personajes")),
+       "las imágenes separadas en nuevas, rehechas y personajes")
+    _r, total = cliente.get(f"/api/proyectos/{pid}/coste")
+    ok(abs(float(d.get("total_usd") or 0) - float(total.get("total_usd") or 0)) < 0.01,
+       f"y el total cuadra con el de la cabecera ({d.get('total_usd')} / {total.get('total_usd')})")
+    ok(bool((d.get("precio_imagen") or {}).get("fuente")), "dice de dónde sale el precio por imagen")
+    r, _d = cliente.get("/api/presets-light/no_existe/coste")
+    igual(r.status_code, 404, "el coste de un estilo que no existe es un 404")
+    # EL VOLUMEN: pedir el que ya suena no escribe nada (regla 1)
+    _r, antes = cliente.get(f"/api/proyectos/{pid}/pasos/render")
+    r, d = cliente.put(f"/api/proyectos/{pid}/sonido/efectos/volumen", {"nivel": "normales"})
+    igual((r.status_code, d.get("cambiado")), (200, False), "pedir el volumen que ya suena no cambia nada")
+    _r, despues = cliente.get(f"/api/proyectos/{pid}/pasos/render")
+    igual(despues.get("params"), antes.get("params"), "ni escribe ningún param")
+    r, d = cliente.put(f"/api/proyectos/{pid}/sonido/efectos/volumen", {"nivel": "altos"})
+    igual((r.status_code, d.get("cambiado")), (200, True), "subir los efectos se guarda")
+    _r, sonido = cliente.get(f"/api/proyectos/{pid}/sonido")
+    igual(sonido.get("efectos_volumen"), "altos", "y el sonido lo dice")
+    r, _d = cliente.put(f"/api/proyectos/{pid}/sonido/efectos/volumen", {"nivel": "a tope"})
+    igual(r.status_code, 400, "un nivel que no existe es un 400")
+    cliente.put(f"/api/proyectos/{pid}/sonido/efectos/volumen", {"nivel": "normales"})
+    # DESCARGAR POR PARTES: lo que no se puede pedir, y nada fuera de exportes/
+    r, _d = cliente.post(f"/api/proyectos/{pid}/exportar", {"que": "otra cosa"})
+    igual(r.status_code, 400, "exportar algo que no existe es un 400")
+    r, _d = cliente.post(f"/api/proyectos/{pid}/exportar", {"que": "audio", "parte": "guitarra"})
+    igual(r.status_code, 400, "un audio que no es voz, música, efectos ni mezcla es un 400")
+    r, _d = cliente.get(f"/api/proyectos/{pid}/exportes/nada.mp4")
+    igual(r.status_code, 404, "un fichero no preparado es un 404")
+    r, _d = cliente.get(f"/api/proyectos/{pid}/exportes/..%2F..%2Festado.json")
+    ok(r.status_code in (404, 400), f"y no se sale de la carpeta de exportes ({r.status_code})")
+
+
 def probar_turno_y_notas_de_otro_texto():
     """Dos arreglos del 11-10-2026 que no se ven desde la API.
 
@@ -4454,6 +4495,7 @@ def main():
         probar_la_foto_del_asistente(cliente, pid)
         probar_onboarding(cliente)
         probar_turno_y_notas_de_otro_texto()
+        probar_coste_en_detalle(cliente, pid)
         probar_sistema(cliente)
         probar_lo_que_lleva(cliente)
         probar_salud_de_las_cuentas(cliente)

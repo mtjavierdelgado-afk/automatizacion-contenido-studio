@@ -10,6 +10,27 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**El coste de verdad, los efectos y descargar por partes (12 de octubre)**
+- **Pulsa el coste de arriba** y sale **todo lo gastado del vídeo, desglosado**:
+  imágenes nuevas, rehechas y de personajes, la voz y sus regrabaciones, Claude
+  (tokens de tu suscripción), la música y los efectos (gratis, de dónde salen),
+  **lo que costó su estilo**, y cada vez que generaste: **lo prometido frente a
+  lo gastado**. Cada imagen va con lo que OpenAI dijo que cobró. En la ficha de
+  cada estilo, **Lo que costó**.
+- **El precio que se promete antes de pulsar es uno solo** y sale de lo que de
+  verdad te han cobrado (la mediana de tus últimas imágenes). Antes el botón
+  prometía un 30 % menos y no contaba las hojas de los personajes.
+- Ya se apunta lo que antes se perdía: **regrabar un tramo**, el **taller de un
+  estilo** (láminas, guía, voz), dos vídeos generando a la vez y todo lo que
+  hace Claude.
+- **Efectos**: ahora se **escuchan** los que eligió el automático, se puede
+  **descartar** uno (✕, no vuelve a salir), **Buscar otros** y elegir **cuánto
+  se oyen** (bajos, normales, altos). Solo vuelve a mezclar.
+- **Descargar por partes** (junto a «Descargar»): el vídeo con lo que elijas
+  —voz, música, efectos, subtítulos, logo—, cada audio suelto en WAV (como
+  suena en el vídeo, alineado) o un ZIP con todo. Gratis; sin subtítulos tarda
+  lo que un montaje.
+
 **Salir al inicio, varios vídeos a la vez y volver atrás (11 de octubre, noche)**
 - **Volver al inicio** desde cualquier pantalla de un vídeo: **Inicio** en la
   barra de abajo, **‹ Mis vídeos** arriba y el **logo**. «Estilo» abre el

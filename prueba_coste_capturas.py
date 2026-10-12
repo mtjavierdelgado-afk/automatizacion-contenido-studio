@@ -416,6 +416,57 @@ def prueba_instrumentacion(proyecto):
     igual(len(medidor.eventos()) - antes, 1, "y no cuenta dos veces lo mismo")
 
 
+def prueba_lo_que_se_perdia(proyecto, otro):
+    """Los huecos del medidor que se cerraron el 11-10-2026."""
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from nucleo import coste
+    import pasos
+
+    seccion("medidor: lo que se perdía (hilos, sin usage, Claude entero)")
+    coste.instrumentar(pasos)
+    # 1. UN POOL DE HILOS HEREDA EL CONTEXTO, también con DOS trabajos midiendo
+    #    (con uno solo, el respaldo de contexto_actual ya acertaba)
+    dentro, salir = threading.Event(), threading.Event()
+
+    def otro_trabajo():
+        with coste.contexto(otro, "assets"):
+            dentro.set()
+            salir.wait(10)
+    hilo = threading.Thread(target=otro_trabajo)
+    hilo.start()
+    dentro.wait(10)
+    try:
+        with coste.contexto(proyecto, "assets"):
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                visto = pool.submit(lambda: coste.contexto_actual()).result()
+    finally:
+        salir.set()
+        hilo.join(10)
+    ok(visto is not None and visto.medidor.proyecto.id == proyecto.id,
+       "un hilo del pool apunta al proyecto de quien le dio trabajo, aunque haya otro "
+       f"trabajo midiendo a la vez ({visto})")
+    # 2. SIN `usage`, la tabla por imagen MÁS las referencias adjuntas
+    precio = coste.tarifa_imagen("1536x1024", "low") or 0.0
+    usd, origen = coste.coste_openai({}, "1536x1024", "low", 1, refs=7)
+    tokens = coste.tarifa_tokens()["entrada_imagen"] or 0.0
+    ok(abs(usd - (precio + 7 * coste.TOKENS_POR_REFERENCIA * tokens)) < 1e-6,
+       f"sin tokens de la API, se suma la entrada de sus 7 referencias ({usd} $, {origen})")
+    # 3. CLAUDE: toda llamada al CLI se apunta una vez, con su «para»
+    medidor = coste.Medidor(proyecto)
+    antes = len(medidor.eventos(proveedor="claude_cli"))
+    sobre = {"usage": {"input_tokens": 10, "output_tokens": 5}}
+    falso = coste._medir_cli(lambda *a, **k: ("{}", dict(sobre)))
+    with coste.contexto(proyecto, "callouts"):
+        _t, devuelto = falso("hola", para="la revision de ortografia")
+        coste._medir_claude("guion")(lambda: ("{}", devuelto))()
+    nuevos = medidor.eventos(proveedor="claude_cli")[antes:]
+    igual([e["operacion"] for e in nuevos], ["la revision de ortografia"],
+          "una llamada al CLI se apunta UNA vez, con para qué se hizo")
+    ok("cli_claude.ejecutar" in coste.informe_instrumentacion()["enganchado"],
+       "y el embudo del CLI está enganchado")
+
+
 # ---------------------------------------------------------------- geometria
 
 def prueba_geometria():
@@ -962,6 +1013,7 @@ def main():
         print(f"  proyecto: {proyecto.id}")
         prueba_medidor(proyecto)
         prueba_instrumentacion(proyecto)
+        prueba_lo_que_se_perdia(proyecto, sembrar(carpeta, "otro video que mide a la vez"))
         prueba_geometria()
         prueba_almacen(proyecto)
         prueba_aplicacion_render(proyecto)

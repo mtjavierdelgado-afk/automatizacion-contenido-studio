@@ -151,7 +151,12 @@ def tarifa_caracter():
     return _numero((tarifas().get("tts") or {}).get("usd_por_caracter"))
 
 
-def coste_openai(usage, tamano, calidad, imagenes=1):
+#: Tokens de entrada de UNA referencia adjunta (una lamina, una hoja de reparto,
+#: la continuidad). Medido: ~5.100 tokens de mediana con 7 referencias.
+TOKENS_POR_REFERENCIA = 730
+
+
+def coste_openai(usage, tamano, calidad, imagenes=1, refs=0):
     """Importe de una llamada de imagen, y de donde ha salido.
 
     El precio por imagen de la tabla cubre SOLO la imagen devuelta, que en este
@@ -171,8 +176,17 @@ def coste_openai(usage, tamano, calidad, imagenes=1):
     salida = int(usage.get("output_tokens") or 0)
     if not (entrada or salida) or precios["salida"] is None:
         precio = tarifa_imagen(tamano, calidad)
-        return (None if precio is None else precio * int(imagenes),
-                {"via": "imagen", "motivo": "la API no ha devuelto tokens"
+        if precio is None:
+            return None, {"via": "imagen", "motivo": "sin tarifa"}
+        # LA TABLA POR IMAGEN NO LLEVA LA ENTRADA, y la entrada (las referencias
+        # adjuntas) es el grueso: sin `usage` el importe salia unas ocho veces
+        # corto. Se le suma lo que cuestan las referencias que se mandaron, a
+        # ~TOKENS_POR_REFERENCIA cada una, y se marca como estimado.
+        extra = 0.0
+        if refs and precios.get("entrada_imagen") is not None:
+            extra = int(refs) * TOKENS_POR_REFERENCIA * float(precios["entrada_imagen"])
+        return (round(precio * int(imagenes) + extra, 6),
+                {"via": "imagen", "refs": int(refs or 0), "motivo": "la API no ha devuelto tokens"
                  if not (entrada or salida) else "faltan tarifas por token"})
 
     # La API desglosa la entrada cuando puede. Lo que no desglose se tarifa como
@@ -550,6 +564,45 @@ def unidad_activa(unidad):
         pila.pop()
 
 
+def _con_el_contexto_de(actual, fn):
+    """`fn` corriendo en otro hilo con una COPIA del contexto `actual`.
+
+    La copia va solo en la pila del hilo hijo, no en `_ACTIVOS`: registrarla ahi
+    haria parecer que hay mas de un trabajo midiendo y el respaldo de
+    `contexto_actual` dejaria de servir a los demas hilos."""
+    def envuelta(*args, **kwargs):
+        pila = _pila()
+        pila.append(_Contexto(actual.medidor, actual.paso, actual.unidad))
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            pila.pop()
+    return envuelta
+
+
+def propagar_a_los_hilos():
+    """Que los hilos de un pool hereden el contexto de quien les da trabajo.
+
+    EL HUECO (11-10-2026). p6, el moodboard y el motor de imagen dibujan en un
+    `ThreadPoolExecutor`, y sus hilos no heredaban el contexto: con UN trabajo
+    midiendo, el respaldo de `contexto_actual` acertaba; con dos a la vez (dos
+    videos, o un video y el taller de un estilo) el gasto de esas imagenes se
+    quedaba sin dueno y no se apuntaba en ningun sitio. Idempotente."""
+    import concurrent.futures as cf
+    original = cf.ThreadPoolExecutor.submit
+    if getattr(original, _MARCA, False):
+        return
+
+    def submit(self, fn, /, *args, **kwargs):
+        pila = getattr(_LOCAL, "pila", None)
+        if pila:
+            fn = _con_el_contexto_de(pila[-1], fn)
+        return original(self, fn, *args, **kwargs)
+
+    setattr(submit, _MARCA, True)
+    cf.ThreadPoolExecutor.submit = submit
+
+
 def contexto_actual():
     """Contexto de este hilo o, si no lo hay, el unico activo del proceso.
 
@@ -589,7 +642,10 @@ def reportar_openai(usage, calidad, tamano, imagenes=1, operacion="imagen",
     detalles = usage.get("input_tokens_details")
     cache = int((detalles or {}).get("cached_tokens") or 0) \
         if isinstance(detalles, dict) else 0
-    importe, procedencia = coste_openai(usage, tamano, calidad, imagenes)
+    refs = (detalle or {}).get("refs")
+    refs = len(refs) if isinstance(refs, (list, tuple)) else int(refs or 0) \
+        if isinstance(refs, (int, float)) else 0
+    importe, procedencia = coste_openai(usage, tamano, calidad, imagenes, refs=refs)
     ficha = {"calidad": calidad, "tamano": tamano}
     # De donde sale el importe, guardado con el evento: sin esto no habria forma
     # de saber despues si un gasto viejo se tarifo por tokens o por imagen.
@@ -738,10 +794,34 @@ def _medir_claude(operacion):
     def fabrica(original):
         def medido(*args, **kwargs):
             texto, sobre = original(*args, **kwargs)
-            reportar_claude(sobre, operacion=operacion)
+            # si ya lo apunto el embudo (`_medir_cli`) no se apunta dos veces
+            if not (isinstance(sobre, dict) and sobre.get("_coste_anotado")):
+                reportar_claude(sobre, operacion=operacion)
             return texto, sobre
         return medido
     return fabrica
+
+
+def _medir_cli(original):
+    """TODA llamada al CLI de Claude pasa por `cli_claude.ejecutar`: se mide ahi.
+
+    Solo seis modulos estaban enganchados uno a uno; el redactor, las
+    cartelas, la direccion, el repaso, la ortografia... no contaban, y la
+    cabecera ensenaba una fraccion de los tokens. La operacion es el `para` de
+    la llamada («la revision de ortografia»). No es dinero: va contra la
+    suscripcion."""
+    def medido(*args, **kwargs):
+        texto, sobre = original(*args, **kwargs)
+        # SOLO con un contexto DE ESTE HILO: el asistente, la ortografia o el
+        # repaso llaman desde hilos sin contexto, y el respaldo de
+        # `contexto_actual` les cargaria los tokens al video que este generando
+        if not getattr(_LOCAL, "pila", None):
+            return texto, sobre
+        if isinstance(sobre, dict) and not sobre.get("_coste_anotado"):
+            reportar_claude(sobre, operacion=str(kwargs.get("para") or "claude")[:60])
+            sobre["_coste_anotado"] = True
+        return texto, sobre
+    return medido
 
 
 def _medir_imagen(original):
@@ -816,6 +896,10 @@ def instrumentar(pasos=None):
         _envolver(modulo, "ejecutar", _medir_paso(paso_id), informe,
                   etiqueta=f"{paso_id}.ejecutar")
 
+    propagar_a_los_hilos()
+    cli = getattr(pasos, "cli_claude", None)
+    if cli is not None:
+        _envolver(cli, "ejecutar", _medir_cli, informe, "cli_claude.ejecutar")
     voz = getattr(pasos, "p4_voz", None)
     if voz is not None:
         _envolver(voz, "_toma_real", _medir_toma_real, informe, "voz.toma_real")

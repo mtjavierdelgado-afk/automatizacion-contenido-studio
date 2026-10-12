@@ -988,11 +988,11 @@ video { width: 100%; border-radius: 9px; border: 1px solid var(--linea); backgro
 
 /* ------------------------------------------------- rendimiento y papelera */
 
-#conservacion, #rendimiento, #papelera, #cuadro-texto {
+#conservacion, #coste-video, #papelera, #cuadro-texto {
   position: fixed; inset: 0; z-index: 66; background: var(--velo);
   display: flex; align-items: center; justify-content: center; padding: 20px;
 }
-#conservacion .cuadro, #rendimiento .cuadro, #papelera .cuadro,
+#conservacion .cuadro, #coste-video .cuadro, #papelera .cuadro,
 #cuadro-texto .cuadro {
   background: var(--panel); border: 1px solid var(--acento); border-radius: 12px;
   padding: 13px 16px; width: min(1100px, 100%); max-height: 100%; overflow-y: auto;
@@ -1016,17 +1016,17 @@ video { width: 100%; border-radius: 9px; border: 1px solid var(--linea); backgro
   border-radius: 8px; white-space: pre-wrap; word-break: break-word; line-height: 1.6;
   font: inherit; overflow-y: auto;
 }
-#conservacion .cab, #rendimiento .cab, #papelera .cab, #cuadro-texto .cab {
+#conservacion .cab, #coste-video .cab, #papelera .cab, #cuadro-texto .cab {
   display: flex; gap: 10px; align-items: baseline;
 }
-#conservacion .cab b, #rendimiento .cab b, #papelera .cab b,
+#conservacion .cab b, #coste-video .cab b, #papelera .cab b,
 #cuadro-texto .cab b {
   font-size: 12px; text-transform: uppercase; letter-spacing: .09em; color: var(--acento);
 }
-#rendimiento .cuerpo h2 { font-size: 13px; }
-#rendimiento .nav-rendimiento { margin-bottom: 0; flex-wrap: wrap; }
-#rendimiento .tabla tr.con-cli th { color: var(--texto); }
-#rendimiento .tabla td, #rendimiento .tabla th { padding-bottom: 6px; }
+#coste-video .cuerpo h2 { font-size: 13px; }
+#coste-video .nav-coste { margin-bottom: 0; flex-wrap: wrap; }
+#coste-video .tabla tr.con-cli th { color: var(--texto); }
+#coste-video .tabla td, #coste-video .tabla th { padding-bottom: 6px; }
 #papelera .tabla th { color: var(--texto); }
 #papelera .tabla tr[data-carpeta] td, #papelera .tabla tr[data-carpeta] th {
   border-top: 1px solid var(--linea); padding-top: 7px; padding-bottom: 7px;
@@ -1169,8 +1169,8 @@ video { width: 100%; border-radius: 9px; border: 1px solid var(--linea); backgro
 
   /* Los modales, a pantalla completa: un cuadro centrado con 20px de aire por
      todos lados desperdicia media pantalla de telefono. */
-  #capturador, #conservacion, #rendimiento, #papelera, #cuadro-texto { padding: 0; }
-  #capturador .cuadro, #conservacion .cuadro, #rendimiento .cuadro, #papelera .cuadro,
+  #capturador, #conservacion, #coste-video, #papelera, #cuadro-texto { padding: 0; }
+  #capturador .cuadro, #conservacion .cuadro, #coste-video .cuadro, #papelera .cuadro,
 #cuadro-texto .cuadro {
     width: 100%; height: 100%; max-height: none; border-radius: 0; border: none;
     padding: 12px 12px calc(12px + env(safe-area-inset-bottom));
@@ -3155,3 +3155,18 @@ textarea.autoalto, textarea.crece.autoalto { max-height: 60vh; overflow-y: auto;
 .lista-versiones { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
 .fila-version { align-items: center; gap: 8px; min-width: 0; }
 .fila-version .meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* El coste de un vídeo, desglosado (abrirCosteDelVideo) */
+#coste-video .cuadro { width: min(760px, 100%); }
+.tabla-coste { width: 100%; }
+.tabla-coste td.usd { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+button.coste-light { cursor: pointer; font: inherit; color: inherit; }
+
+/* Los efectos que eligió el automático, para oírlos y descartarlos */
+.efecto-surtido { align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.efecto-surtido audio { height: 30px; max-width: 220px; }
+.efecto-surtido.vetado > .crece { text-decoration: line-through; opacity: .6; }
+
+/* Descargar por partes (abrirDescargaPorPartes) */
+.partes-video { flex-wrap: wrap; gap: 6px 14px; }
+.casilla-parte { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }

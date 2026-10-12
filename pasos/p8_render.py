@@ -1388,6 +1388,15 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
     # habla, ese fundido cae ANTES del negro y la cola se queda muda de golpe.
     largo_con_cola = largo + (COLA_NEGRO_S if escenas else 0.0)
     pista_efectos, sonidos = None, 0
+    # LO DE LA PASADA ANTERIOR NO SE QUEDA: `trabajo/` se siembra con la version
+    # activa, y si esta pasada no produce efectos (todos vetados) o cama, el
+    # fichero viejo pasaria a la version nueva con pinta de ser de ella (y la
+    # descarga por partes lo mezclaria). Lo que se produzca ahora lo reescribe.
+    for viejo in ("efectos.wav", "cama.wav"):
+        try:
+            os.remove(os.path.join(trabajo, viejo))
+        except OSError:
+            pass
     if p.get("sonido", True):
         avisar(0.93, "montando la banda de efectos")
         lista_eventos = sonido.eventos(escenas, cortes, p,

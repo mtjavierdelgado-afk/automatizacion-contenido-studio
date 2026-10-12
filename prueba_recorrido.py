@@ -1454,6 +1454,9 @@ MEDIR_JS = """() => {
       document.querySelectorAll('#panel button, #panel a.boton').forEach(b => {
         const r = b.getBoundingClientRect();
         if (!r.width || r.bottom > alto || r.top < 0) return;
+        // los que solo salen al pasar el ratón (y en táctil, siempre: ver
+        // estilo.css «hover: none») están escondidos: no hay nada que tapar
+        if (getComputedStyle(b).visibility === 'hidden') return;
         const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
         if (e && burbuja.contains(e)) salen.add(b);
       });

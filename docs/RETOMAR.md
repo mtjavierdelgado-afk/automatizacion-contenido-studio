@@ -447,3 +447,59 @@ botón «Generar las diapositivas» se llama «Generar imágenes».
 - `revisar_conjunto` cuenta solo las pausas INTERNAS. `regrabar_seccion` ahora
   tambien pasa el trozo nuevo por `espaciar` (antes sus bloques quedaban sin
   aire).
+
+## 10. Etapa Foto A: el modo foto realista (09-10-2026, rama `etapa-foto-a`)
+
+En la rama, sin unir a `main`. `estilo.modo` = "ilustracion" | "foto".
+
+- **Se lee, no se escribe.** `p6_assets.modo_de(estilo)`: solo "foto" exacto es
+  foto; sin la clave es ilustracion. No esta en `PARAMS_POR_DEFECTO`. Al estilo
+  solo llega `modo: "foto"` (`presets_light.estilo_con_modo`); volver a
+  ilustracion QUITA la clave. `prueba_modo_foto` guarda una huella SHA-256 de
+  180 prompts de ilustracion tomada con el codigo de antes (ba23adc): si falla,
+  hay un prompt que ha cambiado y eso son imagenes pagadas que salen obsoletas.
+- **Que cambia en foto**: cabecera del plano (`CABECERA_PLANO`), las frases de
+  «flat vector cartoon» (parecido, real, logo, planos abstractos y su reparto),
+  la presentacion de las referencias de estilo, la hoja de reparto, las
+  laminas (`moodboard.CABECERA_FOTO`), la guia (contrato aparte,
+  `estilo.CONTRATO_JSON_GUIA_FOTO`), las reglas y la escalera.
+- **Reglas**: `motores/reglas/reglas_foto.json`, aparte de `reglas.json`
+  (`asvs actualizar` no sobrescribe este). En foto entran esas y NINGUNA de
+  cartoon. En ilustracion se llama a `bloque_prompt` sin el argumento `modo`, a
+  proposito: un `ESTUDIO_MOTORES` viejo no lo conoceria.
+- **Escalera**: `encuadres.ESCALERA_FOTO`, 13 cartas `foto_*` con `servicios`.
+  Los servicios del video salen del param `servicios` de assets (opcional,
+  nunca escrito por defecto); sin el, consolas. La Etapa C lo pondra en
+  pantalla.
+- **Pantalla**: «Tipo de imagen» en el bloque «Estilo grafico», al crear y en
+  un estilo guardado (ahi cambiarlo es cambiar la fuente: rehace guia y
+  laminas con las mismas imagenes; `fuenteParaServidor` manda solo
+  `estilo_modo`).
+- Medido en local con el CLI de verdad: la guia de foto sale con sus claves y
+  `modo: "foto"`, y el grafismo se deduce «realista» (`p7.diseno_sugerido`).
+
+- **Origen del preset**: `estilo_modo` solo se guarda si es "foto"
+  (`presets_light.origen_de`). Un estilo de FOTO creado probando la rama no se
+  puede volver a guardar con el codigo de `main` (no conoce `modo` ni
+  `estilo_modo`): si se vuelve atras, esos estilos de prueba se borran.
+- **Lo que queda abierto**: la clave del banco de moodboards
+  (`moodboard.clave_de`) no mira el modo. Solo afecta al camino de video
+  (fotogramas de YouTube), que el modo light ya no usa; si vuelve, los mismos
+  fotogramas en ilustracion y en foto compartirian laminas.
+- **De paso se arreglo un fallo de antes**: cambiar solo las «Indicaciones» de
+  un estilo guardado daba 400 («falta el estilo gráfico») porque la pantalla
+  manda la lista de imagenes vacia. Ahora vacia es «sin imagenes nuevas» y se
+  quedan las de antes (`regenerar_preset_light`).
+
+### Trampas de esta sesion
+
+- **Un `.pyc` viejo dio una huella falsa.** Al probar que la huella cazaba un
+  cambio, se cambio un `3` por un `2` en `encuadres.py` y se restauro en el
+  mismo segundo: mismo tamano, mismo segundo, y Python siguio usando el `.pyc`
+  del cambio. Si una prueba falla sin motivo despues de tocar y restaurar un
+  fichero, borra `__pycache__`.
+- En este sandbox no habia PyPI: `fastapi`, `websocket-client` y
+  `annotated-doc` se sacaron de GitHub con `PYTHONPATH`, las fuentes de Windows
+  se sustituyeron con `ESTUDIO_FUENTES` y el navegador fue Chromium con
+  `--no-sandbox` en `ESTUDIO_EDGE`. `prueba_login` falla aqui porque el CLI de
+  la sesion entra por token y no por suscripcion; en el VPS no aplica.

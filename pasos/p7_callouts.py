@@ -211,6 +211,10 @@ def diseno_sugerido(guia):
     dibujo plano de una imagen con aire realista. Es una sugerencia con su
     porque, no una imposicion: se puede cambiar a mano.
     """
+    # Una guia de FOTO (Etapa Foto A) no tiene trazo que mirar: lo dice ella
+    # misma, y es una imagen realista por definicion.
+    if isinstance(guia, dict) and guia.get("modo") == "foto":
+        return "realista", "la guía es de fotografía realista"
     trazo = medios.normalizar_texto(str((guia or {}).get("trazo") or ""))
     personajes = medios.normalizar_texto(str((guia or {}).get("personajes") or ""))
     junto = f"{trazo} {personajes}"

@@ -137,8 +137,10 @@ TIPOS = {
         # mirando que laminas hay APROBADAS para esos fotogramas. Es un dato
         # derivado, y dejar que viajara desde el navegador seria dejar que el
         # preset dijera que tiene referencias dibujadas que nadie ha mirado.
+        # 'modo' es el tipo de imagen (Etapa Foto A): solo se guarda cuando es
+        # "foto". Un estilo sin el es de ilustracion, como todos los de antes.
         "claves": ("referencias", "guia", "url", "moodboard",
-                   "calidad", "min_s", "max_s", "min_s_rotulos"),
+                   "calidad", "min_s", "max_s", "min_s_rotulos", "modo"),
         "pasos": ("assets",),
     },
     # El id se queda en 'rotulos' aunque ya no haya rotulos: es la clave con la
@@ -191,6 +193,9 @@ CLAVES_ORIGEN = ("estilo_prompt", "estilo_imagenes", "tono_prompt",
                  # el espanol de Latinoamerica: sin esto, rehacer una parte del
                  # estilo lo devolveria al espanol de siempre en silencio
                  "variante_idioma",
+                 # el tipo de imagen (Etapa Foto A), por lo mismo: rehacer el
+                 # estilo de un canal de fotos tiene que seguir en fotos
+                 "estilo_modo",
                  # Descripciones cortas de lo que salio, para poder ENSENAR el
                  # estilo sin abrirlo entero. No son params: no se aplican a
                  # ningun paso, solo se leen.
@@ -413,6 +418,8 @@ def resumen_de(ficha):
         cuantas = len(datos.get("referencias") or [])
         guia = datos.get("guia") or {}
         trozos = [f"{cuantas} fotograma(s)"]
+        if datos.get("modo") == "foto":
+            trozos.append("foto realista")
         trozos.append(f"guía de {guia.get('palabras', '?')} palabras" if guia
                       else "sin guía escrita")
         dibujadas = len((datos.get("moodboard") or {}).get("ejes") or [])
@@ -1040,6 +1047,15 @@ def cambios_para(ficha, params_actuales=None):
             estilo["referencias"] = rutas
         if datos.get("guia"):
             estilo["guia"] = copy.deepcopy(datos["guia"])
+        # EL TIPO DE IMAGEN VIAJA CON EL ESTILO (Etapa Foto A), y en los dos
+        # sentidos: un estilo de foto lo pone, y uno de ilustracion lo QUITA si
+        # el video lo tenia de un estilo anterior -- si no, aplicar un estilo de
+        # dibujo a un video que fue de fotos seguiria pidiendo fotos. Quitarlo
+        # solo toca a un video que lo tenia; a los demas no se les escribe nada.
+        if datos.get("modo") == "foto":
+            estilo["modo"] = "foto"
+        else:
+            estilo.pop("modo", None)
         cambios["assets"] = {"estilo": estilo}
         # la calidad y la duracion de plano son params sueltos de assets, no van
         # dentro del diccionario 'estilo'
@@ -1126,6 +1142,9 @@ def datos_de_params(params_por_paso, incluir=ORDEN):
         for clave in ("referencias", "guia", "url"):
             if estilo.get(clave):
                 bloque[clave] = copy.deepcopy(estilo[clave])
+        # solo "foto": ilustracion es no tenerlo (ver p6_assets.modo_de)
+        if estilo.get("modo") == "foto":
+            bloque["modo"] = "foto"
         for clave in ("calidad", "min_s", "max_s", "min_s_rotulos"):
             if assets.get(clave) not in (None, ""):
                 bloque[clave] = copy.deepcopy(assets[clave])

@@ -933,7 +933,7 @@ function arranqueDe(antes, tid) {
   return esDeEste ? previo : Date.now();
 }
 
-function seguirTrabajo(paso, tid, alTerminar, alAvanzar) {
+function seguirTrabajo(paso, tid, alTerminar, alAvanzar, pidDelTrabajo) {
   soltarSeguimiento(paso);
   const seguimiento = {};
   APP.seguimientos[paso] = seguimiento;
@@ -952,10 +952,21 @@ function seguirTrabajo(paso, tid, alTerminar, alAvanzar) {
      A aunque estuvieras en B (11-10-2026). Con el vídeo apuntado, B no lo ve
      (`trabajoVideoLight`), y lo que hace al terminar solo corre si sigues en A. */
   if (paso === CLAVE_VIDEO_LIGHT) {
-    const pid = APP.light.video.pid;
-    APP.trabajos[paso].pid = pid;
-    APP.trabajos[paso].nombreVideo = APP.light.video.nombre || pid;
-    const deEste = () => APP.light.video.pid === pid;
+    /* De QUÉ vídeo: el que lo lanzó (`pidDelTrabajo`, apuntado ANTES de
+       esperar al servidor) y, por si acaso, lo que diga el propio servidor, que
+       sabe de qué proyecto es cada trabajo. Sin esto, abrir otro vídeo
+       mientras /generar contestaba dejaba el trabajo apuntado al otro. */
+    const marca = { pid: pidDelTrabajo || APP.light.video.pid };
+    APP.trabajos[paso].pid = marca.pid;
+    APP.trabajos[paso].nombreVideo = nombreDeVideoLight(marca.pid);
+    pedir(API.trabajo(tid)).then(f => {
+      if (!f || !f.proyecto || f.proyecto === marca.pid) return;
+      marca.pid = f.proyecto;
+      const t = APP.trabajos[paso];
+      if (t && t.id === tid) { t.pid = f.proyecto; t.nombreVideo = nombreDeVideoLight(f.proyecto); }
+      refrescarVivosLight();
+    }).catch(() => {});
+    const deEste = () => !!marca.pid && APP.light.video.pid === marca.pid;
     const fin = alTerminar;
     const avance = alAvanzar;
     alTerminar = fin ? async t => {
@@ -995,7 +1006,13 @@ function seguirTrabajo(paso, tid, alTerminar, alAvanzar) {
       const dicho = avancePublico(datos) || 'terminado';
       toast(`${nombreDe(paso)}: ${dicho} (${duracionCorta(segundos)})`);
     } else if (datos.estado === 'error') {
-      mostrarError(paso, datos.error || datos.mensaje || 'el trabajo ha fallado');
+      const t = APP.trabajos[paso] || {};
+      // el fallo del trabajo de OTRO vídeo no se pinta como error de este
+      if (paso === CLAVE_VIDEO_LIGHT && 'pid' in t && t.pid !== APP.light.video.pid) {
+        toast(`«${nombreDeVideoLight(t.pid)}»: ${datos.error || datos.mensaje || 'ha fallado'}`, true);
+      } else {
+        mostrarError(paso, datos.error || datos.mensaje || 'el trabajo ha fallado');
+      }
     } else {
       toast(`${nombreDe(paso)}: cancelado`, true);
     }
@@ -6227,21 +6244,52 @@ async function contarLaTandaQueMurio(pid) {
    recargar y a mirarlo desde el móvil — pero sin esto, al volver se veía un
    vídeo a medias con los botones apagados y ninguna señal de que algo estuviera
    pasando, que es exactamente lo contrario de lo que la pantalla promete. */
+/* Los trabajos de vídeos que se dejaron de mirar al abrir otro: {pid: id}. */
+const OTROS_VIDEOS = {};
+/* Trabajos del proyecto que NO van en la ranura del vídeo: la cola de
+   imágenes (tiene la suya) y lo del estilo o de escuchar voces. */
+const NO_SON_DEL_VIDEO = /^(notas_imagenes|voz:previsualizar|voz_descrita|preset_light|moodboard|guia_estilo|catalogo_visual|conservacion|escenarios|banda_sonora|efectos|musica)/;
+
+function nombreDeVideoLight(pid) {
+  if (pid && APP.light.video.pid === pid && APP.light.video.nombre) return APP.light.video.nombre;
+  const v = ((APP.light.datos || {}).videos || []).find(x => x.id === pid);
+  return (v && v.nombre) || pid || '';
+}
+
 async function reengancharTandaLight(pid) {
   const ranura = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
   if (ranura.estado === 'ejecutando') {
-    if (!ranura.pid || ranura.pid === pid) return;
+    if (ranura.pid === pid) return;
     /* LA RANURA ES DE OTRO VÍDEO: se deja de mirar (el trabajo sigue en el
-       servidor y se vuelve a enganchar al abrir ese vídeo) y se mira el de este. */
+       servidor) y se apunta para volver a engancharlo al abrir ese vídeo. */
+    if (ranura.pid && ranura.id) OTROS_VIDEOS[ranura.pid] = ranura.id;
     soltarSeguimiento(CLAVE_VIDEO_LIGHT);
     delete APP.trabajos[CLAVE_VIDEO_LIGHT];
   }
   try {
     const datos = await pedir(`${API.trabajosVivos()}?proyecto=`
       + `${encodeURIComponent(pid)}&activos=1`);
-    const vivo = (datos.trabajos || []).find(
-      t => String(t.nombre || '').startsWith('generar:'));
+    const vivos = datos.trabajos || [];
+    if (APP.light.video.pid !== pid) return;
+    /* CUALQUIER TRABAJO DEL VÍDEO, no solo una tanda: «Arreglar los
+       subtítulos», aplicar notas o regrabar también ocupan esta ranura, y sin
+       volver a engancharlos el vídeo salía con los botones encendidos y un
+       montaje corriendo debajo (dos a la vez escribiendo el mismo MP4). La
+       cola de imágenes y lo del estilo van por su lado. */
+    const apuntado = OTROS_VIDEOS[pid];
+    delete OTROS_VIDEOS[pid];
+    const vivo = vivos.find(t => t.id === apuntado)
+      || vivos.find(t => String(t.nombre || '').startsWith('generar:'))
+      || vivos.find(t => !NO_SON_DEL_VIDEO.test(String(t.nombre || '')));
     if (!vivo) { await contarLaTandaQueMurio(pid); return; }
+    if (!String(vivo.nombre || '').startsWith('generar:')) {
+      seguirTrabajo(CLAVE_VIDEO_LIGHT, vivo.id, async trabajo => {
+        if (trabajo.estado === 'listo') await cargarVideoLight(pid);
+        pintarLight();
+      }, () => refrescarVivosLight(), pid);
+      pintarLight();
+      return;
+    }
     /* DE QUE TANDA ES EL TRABAJO QUE YA VENIA CORRIENDO.
      *
      * El nombre es «generar:» y las pestañas que recorre (`_correr_cadena` en
@@ -6277,7 +6325,7 @@ async function reengancharTandaLight(pid) {
     }, () => {
       if (tanda === 'video') refrescarPlanosLight();
       refrescarVivosLight();
-    });
+    }, pid);
     refrescarPlanosLight();
   } catch (e) { /* no poder mirar los trabajos no puede tumbar la pantalla */ }
 }
@@ -7278,15 +7326,19 @@ async function rehacerSubtitulosLight() {
 async function lanzarTandaLight(tanda, modo) {
   const v = APP.light.video;
   if (!v.pid) return;
+  const pid = v.pid;
   limpiarError(CLAVE_VIDEO_LIGHT);
   try {
-    const datos = await pedir(`${API.proyecto(v.pid)}/generar`, {
+    const datos = await pedir(`${API.proyecto(pid)}/generar`, {
       method: 'POST',
       cuerpo: { tanda, modo: modo || 'pendientes' },
     });
-    v.plan = datos.plan || null;
     const tid = datos.trabajo_id || (datos.trabajo || {}).id;
     if (!tid) throw new Error('el servidor no ha devuelto ningún trabajo');
+    /* SI MIENTRAS CONTESTABA SE ABRIÓ OTRO VÍDEO, este no se toca: el trabajo
+       se apunta y se engancha al volver a él. */
+    if (videoAbierto().pid !== pid) { OTROS_VIDEOS[pid] = tid; return; }
+    v.plan = datos.plan || null;
     // DE QUE TRABAJO ES ESE PREVISTO. La misma ranura la ocupan tambien las
     // regeneraciones de un plano suelto, y sin esto la cuenta
     // atras de una imagen se pintaba con el previsto de la ultima tanda.
@@ -7294,7 +7346,7 @@ async function lanzarTandaLight(tanda, modo) {
     if (tanda === 'video') v.planos = [];
     seguirTrabajo(CLAVE_VIDEO_LIGHT, tid, async trabajo => {
       if (trabajo.estado === 'listo') {
-        await cargarVideoLight(v.pid);
+        await cargarVideoLight(pid);
         // LA TANDA DE VIDEO YA NO ACABA EN EL MP4, acaba en el
         // previsualizador: es la parada nueva y es lo que hay que mirar antes
         // de gastar el render (ver TANDAS_LIGHT en app.py).
@@ -7312,10 +7364,11 @@ async function lanzarTandaLight(tanda, modo) {
       // teclas (ver `refrescarVivosLight`).
       if (tanda === 'video') refrescarPlanosLight();
       refrescarVivosLight();
-    });
+    }, pid);
     pintarLight();
   } catch (err) {
-    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    if (videoAbierto().pid === pid) mostrarError(CLAVE_VIDEO_LIGHT, err);
+    else toast(`«${nombreDeVideoLight(pid)}»: ${err.message}`, true);
     pintarLight();
   }
 }
@@ -7370,7 +7423,7 @@ async function refrescarPlanosLight() {
 function trabajoVideoLight() {
   const trabajo = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
   if (trabajo.estado !== 'ejecutando') return null;
-  if (trabajo.pid && trabajo.pid !== APP.light.video.pid) return null;
+  if ('pid' in trabajo && trabajo.pid !== APP.light.video.pid) return null;
   return trabajo;
 }
 
@@ -10152,8 +10205,9 @@ function listaPorImagen() {
      con las de ahora, con la imagen NUEVA del plano al lado, y parecían notas
      de este vídeo (11-10-2026). Al regenerar ya no se aplican (ver
      `_retirar_lo_de_otro_texto` en app.py): se guardan aquí, plegadas. */
+  // sin la lista de planos cargada no se sabe qué plano ya no está: no se adivina
   const vieja = p => porPlano.get(p).every(n => estadoDeImagen(p, n) === 'hecha'
-    && (n.descolgada || orden(p) === 9999));
+    && (n.descolgada || (escenas.length > 0 && orden(p) === 9999)));
   const viejas = planos.filter(vieja);
   const actuales = planos.filter(p => !vieja(p));
   const conAlgo = actuales.filter(pendiente);
@@ -10202,12 +10256,15 @@ function tarjetaNotaImagen(plano, notas, vieja) {
   const conAntes = notas.filter(n => n.antes && estadoDeImagen(plano, n) === 'hecha');
   const antes = conAntes.length ? conAntes[conAntes.length - 1].antes : '';
   const columna = h('div', { clase: 'nota-columna' });
-  columna.appendChild(h('button', { clase: 'nota-mini', title: 'Ver esta imagen en grande arriba', onclick: ir },
+  // la imagen de ahora de ese número es de OTRA escena: a una nota vieja no se le pone
+  if (vieja) {
+    columna.appendChild(h('div', { clase: 'nota-mini' }, h('span', { clase: 'meta' }, 'versión anterior')));
+  } else columna.appendChild(h('button', { clase: 'nota-mini', title: 'Ver esta imagen en grande arriba', onclick: ir },
     e && e.imagen
       ? h('img', { src: `${API.archivo(v.pid, e.imagen)}?mini=512&v=${encodeURIComponent(ultima)}`,
         alt: plano, loading: 'lazy' })
       : h('span', { clase: 'meta' }, 'sin imagen')));
-  if (antes && e && antes !== e.imagen) {
+  if (!vieja && antes && e && antes !== e.imagen) {
     columna.appendChild(h('div', { clase: 'nota-antes-ahora meta' }, '▲ ahora · antes ▼'));
     columna.appendChild(h('button', {
       clase: 'nota-mini nota-antes', title: 'Cómo era antes de esta nota (pulsa para verla en grande)',
@@ -10218,14 +10275,14 @@ function tarjetaNotaImagen(plano, notas, vieja) {
   const cuerpo = h('div', { clase: 'nota-cuerpo' });
   cuerpo.appendChild(h('div', { clase: 'nota-donde' },
     h('b', {}, `Imagen ${plano || '?'}`),
-    e ? h('span', { clase: 'meta' }, `${e.bloque ? `bloque ${e.bloque} · ` : ''}${mmss(e.t_in)}–${mmss(e.t_out)}`) : null,
+    e && !vieja ? h('span', { clase: 'meta' }, `${e.bloque ? `bloque ${e.bloque} · ` : ''}${mmss(e.t_in)}–${mmss(e.t_out)}`) : null,
     notas.length > 1 ? h('span', { clase: 'meta' }, `· ${notas.length} notas`) : null));
-  if (e && e.narracion) {
+  if (e && e.narracion && !vieja) {
     cuerpo.appendChild(h('div', { clase: 'nota-guion', title: 'lo que se oye en esta imagen' },
       `«${recortar(legible(e.narracion), 160)}»`));
   }
   notas.forEach(nota => cuerpo.appendChild(PREVIA.editando === nota.id
-    ? filaNotaEscena(nota) : filaDeNotaImagen(nota)));
+    ? filaNotaEscena(nota) : filaDeNotaImagen(nota, vieja)));
   // LO DE LA IMAGEN ENTERA: el reloj si se dibuja, y el botón que la rehace
   // con TODAS sus notas pendientes (se juntan y se paga una)
   cuerpo.appendChild(enVivo(() => {
@@ -10276,7 +10333,7 @@ function tarjetaNotaImagen(plano, notas, vieja) {
 }
 
 /* UNA NOTA DENTRO DE SU IMAGEN: el texto, su estado en palabras y sus mandos. */
-function filaDeNotaImagen(nota) {
+function filaDeNotaImagen(nota, vieja) {
   const v = videoAbierto();
   const fila = h('div', { clase: 'nota-fila' });
   fila.appendChild(h('div', { clase: 'texto' }, nota.texto));
@@ -10319,8 +10376,11 @@ function filaDeNotaImagen(nota) {
       linea.appendChild(h('button', { clase: 'mini fantasma', onclick: () => sacarDeLaCola(nota.id) },
         'Sacar de la cola'));
     }
-    linea.appendChild(h('button', { clase: 'mini fantasma', title: 'Cambiar esta nota',
-      onclick: () => { PREVIA.editando = nota.id; repintarVideo(); } }, '✎ Editar'));
+    // una nota de otra frase no se edita: editada volvería a aplicarse al plano nuevo
+    if (!vieja) {
+      linea.appendChild(h('button', { clase: 'mini fantasma', title: 'Cambiar esta nota',
+        onclick: () => { PREVIA.editando = nota.id; repintarVideo(); } }, '✎ Editar'));
+    }
     linea.appendChild(h('button', { clase: 'mini peligro', title: 'Borrar esta nota',
       onclick: () => borrarNota(nota.id) }, '× Borrar'));
     caja.appendChild(linea);

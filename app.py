@@ -335,8 +335,11 @@ def _con_turno_de_imagenes(avisar, ctx, funcion):
     while not cerrojo.acquire(timeout=3):
         quien = _TURNO_IMAGENES["quien"] or "otro vídeo"
         # avisar LANZA Cancelado si se pide parar: la espera se puede cancelar
-        avisar(0.0, f"esperando turno: se están dibujando las imágenes de «{quien}»",
-               f"esperando turno: se están dibujando las imágenes de «{quien}»")
+        frase = f"esperando turno: se están dibujando las imágenes de «{quien}»"
+        try:
+            avisar(0.0, frase, publico=frase)
+        except TypeError:
+            avisar(0.0, frase)        # un avisar sin «publico» (las tareas del estilo)
         if not avisado:
             ctx.bitacora.anotar("turno_imagenes", "assets", {"espera_a": quien})
             avisado = True
@@ -346,6 +349,16 @@ def _con_turno_de_imagenes(avisar, ctx, funcion):
     finally:
         _TURNO_IMAGENES["quien"] = ""
         cerrojo.release()
+
+
+def _con_turno(funcion):
+    """Para las funciones de trabajo que DIBUJAN fuera de `assets` (las laminas
+    de un estilo, el moodboard): tambien esperan su turno (regla 2)."""
+    def envuelta(avisar, ctx, *args, **kwargs):
+        return _con_turno_de_imagenes(avisar, ctx, lambda: funcion(avisar, ctx, *args, **kwargs))
+    envuelta.__name__ = funcion.__name__
+    envuelta.__doc__ = funcion.__doc__
+    return envuelta
 
 
 def _correr_paso(avisar, ctx, paso_id, unidades, opciones=None):
@@ -1703,6 +1716,15 @@ def revertir_paso(pid: str, paso: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(400, f"'version' debe ser un entero, no {datos['version']!r}")
     if _trabajo_activo(ctx, paso_id):
         raise ErrorApi(409, f"'{paso_id}' se está ejecutando: no se puede revertir ahora")
+    # NI CON OTRA COSA DEL VIDEO EN MARCHA: volver al guion de antes con la voz
+    # grabandose, o a otras imagenes con la cola de notas pendiente, deja lo que
+    # sale mezclado de dos versiones
+    with _COLA_LOCK:
+        cola = _COLA_NOTAS.get(ctx.id) or {}
+        cola_viva = bool(cola.get("cola") or cola.get("trabajo"))
+    if cola_viva or any(f.get("estado") in ("pendiente", "ejecutando")
+                        for f in ctx.gestor.listar(activos=True)):
+        raise ErrorApi(409, "el vídeo está trabajando: vuelve a la versión anterior cuando termine")
     try:
         ctx.estado.revertir(paso_id, numero)
     except ValueError as fallo:
@@ -3497,6 +3519,7 @@ def servir_lamina_moodboard(clave: str, origen: str, archivo: str,
     return servir_fichero(peticion, destino)
 
 
+@_con_turno
 def _correr_moodboard(avisar, ctx, ejes, peticiones, calidad):
     mod = _moodboard()
     rutas, estilo = _referencias_de_estilo(ctx)
@@ -5427,8 +5450,11 @@ def _correr_notas_imagenes(avisar, ctx):
 
             def avisar_plano(valor, mensaje="", publico="", hechos=hechos,
                              total=total, etiqueta=etiqueta):
+                # `publico` solo llega de la espera de turno («esperando
+                # turno: ... de "X"»): es lo que tiene que leer la pantalla
                 return avisar((hechos + min(1.0, max(0.0, float(valor or 0)))) / total,
-                              f"{etiqueta} — {mensaje}" if mensaje else "")
+                              f"{etiqueta} — {mensaje}" if mensaje else "",
+                              publico or "")
             try:
                 _correr_paso(avisar_plano, ctx, "assets", [uid], {"rehacer": True})
             except Cancelado:
@@ -7440,8 +7466,8 @@ def _palabras_llanas(texto):
     return re.findall(r"\w+", sin.lower())
 
 
-def _retirar_lo_de_otro_texto(ctx):
-    """Quita de los planos cuya FRASE CAMBIA lo que se escribio para la de antes.
+def _retirar_lo_de_otro_texto(ctx, en_cola=()):
+    """Las notas de un plano cuya FRASE CAMBIA: se mudan con su frase, o se van.
 
     EL FALLO (11-10-2026). Una nota aplicada deja su texto en
     `assets.unidades["escena:S004"].feedback` (y una correccion del subtitulo,
@@ -7450,18 +7476,27 @@ def _retirar_lo_de_otro_texto(ctx):
     p6 la leia como un retoque y le ponia delante la imagen vieja de S004
     («rechazada»), asi que el plano nuevo salia derivado del video anterior.
 
-    Solo se tocan los planos cuya narracion del plan NUEVO no es la del plan con
-    el que se dibujaron: esos ya estan obsoletos (la narracion entra en su
-    firma) y se van a dibujar igual, asi que quitarles la nota NO mueve ninguna
-    firma que no se moviera ya. Los demas se quedan como estan. -> [planos]
+    Lo que se hace, plano a plano, comparando el plan con el que se dibujo (el
+    activo) con el que va a rodar la tanda (`_plan_de_planos`):
+
+    - si su frase sigue en el MISMO numero, no se toca nada;
+    - si su frase sigue en el video con OTRO numero (regrabar un tramo corre la
+      numeracion), la nota SE MUDA con ella: es de esa frase, no del numero;
+    - si su frase ya no se dice, se quita.
+
+    Solo se tocan planos cuya narracion cambia, que ya estan obsoletos (la
+    narracion entra en su firma) y que la tanda sella con los params de ahora:
+    no se paga nada que no se fuera a pagar. Las notas que estan en la cola de
+    imagenes (`en_cola`) no se tocan: son de ahora. -> [planos tocados]
     """
     p6 = PASOS_MODULOS.p6_assets
     assets = ctx.estado.params("assets") or {}
     callouts = ctx.estado.params("callouts") or {}
-    con_algo = {uid for uid, b in (assets.get("unidades") or {}).items()
-                if isinstance(b, dict) and b.get("feedback")}
-    con_algo |= {uid for uid, b in (callouts.get("unidades") or {}).items()
-                 if isinstance(b, dict) and b.get("subtitulo_texto")}
+    ua = dict(assets.get("unidades") or {})
+    uc = dict(callouts.get("unidades") or {})
+    con_algo = {uid for uid, b in ua.items() if isinstance(b, dict) and b.get("feedback")}
+    con_algo |= {uid for uid, b in uc.items() if isinstance(b, dict) and b.get("subtitulo_texto")}
+    con_algo -= {f"escena:{p}" for p in en_cola}
     if not con_algo:
         return []
     viejo = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
@@ -7469,31 +7504,56 @@ def _retirar_lo_de_otro_texto(ctx):
         nuevo = _plan_de_planos(ctx) or {}
     except Exception:                                       # noqa: BLE001
         return []                       # sin plan nuevo no se sabe: no se toca nada
-    antes = {str(e.get("id")): _palabras_llanas(e.get("narracion")) for e in viejo.get("escenas") or []}
-    ahora = {str(e.get("id")): _palabras_llanas(e.get("narracion")) for e in nuevo.get("escenas") or []}
+    antes = {str(e.get("id")): tuple(_palabras_llanas(e.get("narracion")))
+             for e in viejo.get("escenas") or []}
+    ahora = {str(e.get("id")): tuple(_palabras_llanas(e.get("narracion")))
+             for e in nuevo.get("escenas") or []}
     if not antes or not ahora:
         return []
+    donde_ahora = {}
+    for sid, frase in ahora.items():
+        donde_ahora.setdefault(frase, sid)
     cambiados = sorted(uid for uid in con_algo
                        if uid.startswith("escena:") and uid.split(":", 1)[1] in antes
                        and antes[uid.split(":", 1)[1]] != ahora.get(uid.split(":", 1)[1]))
     if not cambiados:
         return []
-    bloque_a, bloque_c = {}, {}
+    CAMPOS_A, CAMPOS_C = ("feedback", "alcance"), ("subtitulo_texto", "subtitulo_ancla")
+    nuevo_a, nuevo_c, mudanzas = {}, {}, {}
+    # 1. se quitan de su numero viejo
     for uid in cambiados:
-        previo = (assets.get("unidades") or {}).get(uid)
-        if isinstance(previo, dict) and previo.get("feedback"):
-            limpio = {k: v for k, v in previo.items() if k not in ("feedback", "alcance")}
-            bloque_a[uid] = limpio
-        previo = (callouts.get("unidades") or {}).get(uid)
-        if isinstance(previo, dict) and previo.get("subtitulo_texto"):
-            bloque_c[uid] = {k: v for k, v in previo.items()
-                             if k not in ("subtitulo_texto", "subtitulo_ancla")}
-    if bloque_a:
-        ctx.estado.actualizar_params("assets", {"unidades": bloque_a})
-    if bloque_c:
-        ctx.estado.actualizar_params("callouts", {"unidades": bloque_c})
-    ctx.bitacora.anotar("notas_de_otro_texto", "assets",
-                        {"planos": [u.split(":", 1)[1] for u in cambiados]})
+        if isinstance(ua.get(uid), dict) and ua[uid].get("feedback"):
+            nuevo_a[uid] = {k: v for k, v in ua[uid].items() if k not in CAMPOS_A}
+        if isinstance(uc.get(uid), dict) and uc[uid].get("subtitulo_texto"):
+            nuevo_c[uid] = {k: v for k, v in uc[uid].items() if k not in CAMPOS_C}
+    # 2. y se mudan al numero donde su frase se dice ahora (si alli no hay ya
+    #    una nota que se quede)
+    for uid in cambiados:
+        destino = donde_ahora.get(antes[uid.split(":", 1)[1]])
+        if not destino:
+            continue
+        duid = f"escena:{destino}"
+        if duid == uid:
+            continue
+        for unidades, nuevos, campos in ((ua, nuevo_a, CAMPOS_A), (uc, nuevo_c, CAMPOS_C)):
+            origen = unidades.get(uid)
+            if not (isinstance(origen, dict) and origen.get(campos[0])):
+                continue
+            base = nuevos.get(duid, unidades.get(duid))
+            base = dict(base) if isinstance(base, dict) else {}
+            if base.get(campos[0]):
+                continue                          # el destino tiene la suya
+            base.update({k: origen[k] for k in campos if k in origen})
+            nuevos[duid] = base
+            mudanzas[uid.split(":", 1)[1]] = destino
+    if nuevo_a:
+        # lo escribe la propia tanda (assets ya esta en marcha): la foto de
+        # entradas se pone al dia y el plano no sale obsoleto al terminar
+        ctx.estado.actualizar_params("assets", {"unidades": nuevo_a}, del_propio_paso=True)
+    if nuevo_c:
+        ctx.estado.actualizar_params("callouts", {"unidades": nuevo_c})
+    ctx.bitacora.anotar("notas_de_otro_texto", "assets", {
+        "planos": [u.split(":", 1)[1] for u in cambiados], "mudadas": mudanzas})
     return cambiados
 
 
@@ -7502,7 +7562,11 @@ def _correr_assets_de_tanda(avisar, ctx, unidades, opciones):
     se dice (`_retirar_lo_de_otro_texto`). La cola de notas NO pasa por aqui:
     alli la nota es justo lo que se quiere dibujar."""
     try:
-        _retirar_lo_de_otro_texto(ctx)
+        with _COLA_LOCK:
+            estado = _COLA_NOTAS.get(ctx.id) or {}
+            ids = set(estado.get("cola") or ()) | set((estado.get("actual") or {}).get("notas") or ())
+        vivas = {str(n["plano"]) for n in _notas_de_imagenes(ctx) if n["id"] in ids} if ids else set()
+        _retirar_lo_de_otro_texto(ctx, en_cola=vivas)
     except Exception as fallo:                              # noqa: BLE001
         ctx.bitacora.anotar("notas_de_otro_texto_fallo", "assets", {"error": str(fallo)[:300]})
     return _correr_paso(avisar, ctx, "assets", unidades, opciones)
@@ -7723,8 +7787,11 @@ def _correr_receta(avisar, ctx, pestana, receta, tareas, modo,
         # pieza avisan con (hechas, total) --ver `comun.avisador`-- y esa cuenta
         # manda sobre la fase inventada: «34 de 216 planos» esta medido y
         # «rematando los detalles» solo significa «va por el ultimo tercio».
-        def avisar_tarea(valor, mensaje="", unidades=None):
-            if valor is not None or unidades:
+        def avisar_tarea(valor, mensaje="", unidades=None, publico=""):
+            if publico:
+                # la espera de turno de las imagenes: se dice tal cual
+                ultimo["frase"] = publico
+            elif valor is not None or unidades:
                 ultimo["frase"] = recetas.publico_de(tarea["id"], valor,
                                                      unidades)
             avisar(desde + ancho * min(1.0, max(0.0, float(valor or 0))),
@@ -9609,6 +9676,7 @@ def _correr_light_guia(avisar, ctx, encargo):
     return guia
 
 
+@_con_turno
 def _correr_light_referencias(avisar, ctx, encargo):
     """Las laminas dibujadas, que SON las referencias del estilo.
 

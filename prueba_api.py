@@ -3720,8 +3720,8 @@ def probar_turno_y_notas_de_otro_texto():
         def params(self, paso):
             return self._params.get(paso) or {}
 
-        def actualizar_params(self, paso, nuevos):
-            self.escrito.append((paso, nuevos))
+        def actualizar_params(self, paso, nuevos, del_propio_paso=False):
+            self.escrito.append((paso, nuevos, del_propio_paso))
             actual = self._params.setdefault(paso, {})
             actual.setdefault("unidades", {}).update(nuevos.get("unidades") or {})
 
@@ -3759,16 +3759,20 @@ def probar_turno_y_notas_de_otro_texto():
     # 2. LAS NOTAS DE OTRA FRASE
     viejo = {"escenas": [{"id": "S001", "narracion": "Hola a todos"},
                          {"id": "S002", "narracion": "La cocina tiene una isla"},
-                         {"id": "S003", "narracion": "Y aquí el baño"}]}
+                         {"id": "S003", "narracion": "Y aquí el baño"},
+                         {"id": "S004", "narracion": "Hasta la próxima"}]}
     nuevo = {"escenas": [{"id": "S001", "narracion": "¡Hola a TODOS!"},
                          {"id": "S002", "narracion": "Mario Kart es el más vendido"},
-                         {"id": "S003", "narracion": "Y aquí el baño"}]}
+                         {"id": "S003", "narracion": "Un tramo nuevo en medio"},
+                         {"id": "S004", "narracion": "Y aquí el baño"},
+                         {"id": "S005", "narracion": "Hasta la próxima"}]}
     params = {
         "assets": {"unidades": {
             "escena:S001": {"feedback": "más luz", "direccion": "plano medio"},
             "escena:S002": {"feedback": "que aparezca un gato", "alcance": "retoque",
                             "direccion": "cocina"},
-            "escena:S003": {"direccion": "baño"}}},
+            "escena:S003": {"feedback": "el baño más luminoso", "direccion": "baño"},
+            "escena:S004": {"direccion": "despedida"}}},
         "callouts": {"unidades": {
             "escena:S002": {"subtitulo_texto": "La cocina tiene una isla.", "evitar": [1]}}}}
     ctx = _Ctx("Vídeo C", params)
@@ -3781,16 +3785,31 @@ def probar_turno_y_notas_de_otro_texto():
     finally:
         servidor.PASOS_MODULOS.p6_assets.plan_actual = plan_actual
         servidor._plan_de_planos = plan_de_planos
-    igual(quitados, ["escena:S002"], "solo el plano cuya frase cambia pierde su nota "
+    igual(quitados, ["escena:S002", "escena:S003"], "solo los planos cuya frase cambia "
           "(S001 dice lo mismo con otros signos y se queda)")
     unidades = ctx.params("assets")["unidades"]
     igual(unidades["escena:S002"], {"direccion": "cocina"},
           "al S002 nuevo no le llega la nota del viejo (ni su retoque), y conserva lo demás")
     igual(unidades["escena:S001"].get("feedback"), "más luz", "el S001 conserva la suya")
+    igual(unidades["escena:S003"], {"direccion": "baño"}, "el S003 nuevo (otra frase) se queda sin ella")
+    igual(unidades["escena:S004"], {"direccion": "despedida", "feedback": "el baño más luminoso"},
+          "y la nota se MUDA con su frase: «Y aquí el baño» ahora es el S004")
     igual(ctx.params("callouts")["unidades"]["escena:S002"], {"evitar": [1]},
           "ni el subtítulo escrito para la frase de antes")
-    igual(sorted(p for p, _n in ctx.escrito), ["assets", "callouts"],
-          "y no se escribe nada en los planos que no cambian")
+    igual(sorted(p for p, _n, _d in ctx.escrito), ["assets", "callouts"],
+          "y se escribe una vez por paso")
+    ok(all(d for p, _n, d in ctx.escrito if p == "assets"),
+       "las de las imágenes, como cambio de la propia tanda (no salen obsoletas al terminar)")
+    ctx2 = _Ctx("Vídeo C2", {"assets": {"unidades": {
+        "escena:S002": {"feedback": "que aparezca un gato"}}}})
+    try:
+        servidor.PASOS_MODULOS.p6_assets.plan_actual = lambda *a, **k: viejo
+        servidor._plan_de_planos = lambda *a, **k: nuevo
+        igual(servidor._retirar_lo_de_otro_texto(ctx2, en_cola={"S002"}), [],
+              "una nota que está en la cola de imágenes no se toca: es de ahora")
+    finally:
+        servidor.PASOS_MODULOS.p6_assets.plan_actual = plan_actual
+        servidor._plan_de_planos = plan_de_planos
     sin_nada = _Ctx("Vídeo D", {"assets": {"unidades": {"escena:S001": {"direccion": "x"}}}})
     igual(servidor._retirar_lo_de_otro_texto(sin_nada), [], "sin notas no hay nada que mirar")
     igual(sin_nada.escrito, [], "ni que escribir")

@@ -40,6 +40,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/logo` | Sube el logo (PNG con transparencia, mejor) y lo pone arriba a la derecha. |
 | `PUT` | `/api/proyectos/{pid}/logo` | Donde va y como: {posicion?, tamano? (0,04-0,4), opacidad?} o {quitar: true}. |
 | `GET` | `/api/proyectos/{pid}/logo/imagen` | — |
+| `PUT` | `/api/proyectos/{pid}/musica/animo` | Rehace la música AUTOMÁTICA con un ánimo para todo el vídeo, y remezcla. |
 | `GET` | `/api/proyectos/{pid}/musica/presencia` | Cuánto se oye la música bajo la voz en este vídeo, y los niveles que hay. |
 | `PUT` | `/api/proyectos/{pid}/musica/presencia` | Fija cuánto se oye la música y, si el vídeo ya está montado, lo REMONTA. |
 | `POST` | `/api/proyectos/{pid}/ortografia/aplicar` | Pone los subtitulos corregidos: {cambios: {plano: texto}}. |

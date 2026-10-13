@@ -9763,6 +9763,11 @@ function vistaVideoLight() {
   }
   caja.appendChild(marco);
 
+  /* LA MÚSICA, LOS EFECTOS Y LOS SUBTÍTULOS, justo debajo del vídeo montado
+     (N9 de las notas de mejoras, 13-10-2026): es donde se oye lo que se
+     quiere cambiar. Cada fila es una línea cerrada; no empuja el repaso. */
+  if (hayMp4Light() && !trabajoVideoLight()) caja.appendChild(ajustesEnElVideo());
+
   /* LA TIRA DE VINETAS SOLO MIENTRAS SE GENERA.
      Con el video ya montado esta pantalla es para VERLO y comentarlo, y
      cuarenta miniaturas debajo del reproductor empujan el repaso fuera de
@@ -14142,15 +14147,51 @@ function bloqueLlevaDelVideo() {
     caja.appendChild(ajustesDelMontaje({ tipo: 'video', pid: v.pid }, v.lleva));
   };
   const cargar = async () => {
-    try {
-      v.lleva = (await pedir(`${API.proyecto(v.pid)}/lleva`)).lleva;
-    } catch (e) {
-      v.lleva = { voz: true, subtitulos: true, musica: true, efectos: true };
-    }
+    await leerLlevaDelVideo(v);
     pintar();
   };
-  if (!v.lleva || v.llevaDe !== v.pid) { v.llevaDe = v.pid; v.lleva = null; cargar(); }
+  if (!v.lleva || v.llevaDe !== v.pid) cargar();
   pintar();
+  return caja;
+}
+
+/* Lo que lleva el vídeo abierto (voz, subtítulos, música, efectos), leído del
+   servidor. Lo usan el Encargo y la pantalla Vídeo: es el mismo `v.lleva`. */
+async function leerLlevaDelVideo(v) {
+  v.llevaDe = v.pid;
+  v.lleva = null;
+  try {
+    v.lleva = (await pedir(`${API.proyecto(v.pid)}/lleva`)).lleva;
+  } catch (e) {
+    v.lleva = { voz: true, subtitulos: true, musica: true, efectos: true };
+  }
+}
+
+/* LA MÚSICA, LOS EFECTOS Y LOS SUBTÍTULOS, DEBAJO DEL VÍDEO MONTADO (N9 de las
+   notas de mejoras, 13-10-2026: «que cuando el vídeo esté generado me pueda
+   mostrar la música, los efectos y los subtítulos para modificarlos»). Todo
+   existía en Encargo → «Qué lleva este vídeo», a dos pantallas del vídeo y sin
+   un enlace que lo dijera. Son los MISMOS ajustes (`ajustesDelMontaje`, con su
+   estado por vídeo), no una copia: lo que se cambia aquí se ve allí. */
+function ajustesEnElVideo() {
+  const v = videoAbierto();
+  const caja = h('div', { clase: 'ajustes-en-video' });
+  caja.appendChild(h('h3', {}, 'Música, efectos y subtítulos'));
+  caja.appendChild(h('div', { clase: 'pista' },
+    'Cambiar esto solo vuelve a mezclar el sonido o a rotular el texto y monta el MP4 otra vez: '
+    + 'no se redibuja ninguna imagen ni se regraba la voz.'));
+  if (!v.lleva || v.llevaDe !== v.pid) {
+    if (v.leyendoLleva !== v.pid) {
+      const pid = v.leyendoLleva = v.pid;
+      leerLlevaDelVideo(v).then(() => {
+        v.leyendoLleva = '';
+        if (videoAbierto().pid === pid) repintarVideo();
+      });
+    }
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+    return caja;
+  }
+  caja.appendChild(ajustesDelMontaje({ tipo: 'video', pid: v.pid }, v.lleva));
   return caja;
 }
 
@@ -14255,7 +14296,11 @@ async function cargarAjustesVideo(modo, est) {
     pedir(`${base}/subtitulos`).catch(() => null),
     pedir(`${base}/logo`).catch(() => null)]);
   est.musica = { presencia: presencia || { presencia: 'normal', elegida: false },
-    tema: sonido && sonido.musica && sonido.musica.id ? sonido.musica : null };
+    tema: sonido && sonido.musica && sonido.musica.id ? sonido.musica : null,
+    // N9 (13-10-2026): el volumen fino y los ánimos de la automática
+    db: sonido ? Number(sonido.musica_db) || 0 : 0,
+    tramos: (sonido && sonido.musica && sonido.musica.tramos) || [] };
+  est.hayJamendo = !!(sonido && sonido.hay_jamendo);
   est.efectos = (sonido && sonido.efectos) || {};
   est.efectosVolumen = (sonido && sonido.efectos_volumen) || 'normales';
   est.papeles = (sonido && sonido.papeles) || [];
@@ -14291,8 +14336,13 @@ function resumenAjuste(modo, est, cual) {
     const tema = op ? op.musica : (est.musica || {}).tema;
     const nivel = (PRESENCIAS_MUSICA.find(p => p.id === presencia) || {}).nombre || presencia;
     const deQuien = t => (t.fuente === 'propia' ? ' (tuya)' : ` de ${t.artista || '?'}`);
-    return (tema ? `«${tema.titulo || tema.id}»${deQuien(tema)}` : 'Automática (varios temas según el ritmo)')
-      + ` · se oye ${nivel.toLowerCase()}`;
+    const db = op ? 0 : Number((est.musica || {}).db) || 0;
+    const animo = op ? '' : animoUnicoDe(est);
+    const automatica = animo
+      ? `Automática, toda ${(ANIMOS_MUSICA.find(a => a[0] === animo) || [0, animo])[1].toLowerCase()}`
+      : 'Automática (varios temas según el ritmo)';
+    return (tema ? `«${tema.titulo || tema.id}»${deQuien(tema)}` : automatica)
+      + ` · se oye ${nivel.toLowerCase()}` + (db ? ` (${textoDb(db)})` : '');
   }
   if (cual === 'efectos') {
     const fijos = (est.fijos || []).length;
@@ -14365,6 +14415,7 @@ function editorMusica(modo, est, repintar) {
     !borrador && !elegida
       ? '. Si este vídeo se montó antes del 10 de octubre, sonó «Suave»: pulsa «Normal» para volver a mezclarlo.'
       : ''));
+  if (!borrador) caja.appendChild(volumenFinoMusica(modo, est, repintar));
 
   caja.appendChild(h('label', {}, 'Qué música'));
   caja.appendChild(h('div', { clase: 'herramientas' },
@@ -14377,6 +14428,7 @@ function editorMusica(modo, est, repintar) {
       + (tema.fuente === 'propia' ? ' (subido por ti)' : ` de ${tema.artista || '?'}`)
       + (tema.licencia_nombre ? ` · ${tema.licencia_nombre}` : '')
     : 'Automática: el vídeo se parte en tramos según su ritmo y cada uno lleva su tema de Jamendo.'));
+  if (!borrador) caja.appendChild(animoDeLaAutomatica(modo, est, repintar));
 
   if (est.busqueda.abierta || tema) caja.appendChild(buscadorDeTemas(modo, est, repintar, fijarTema, tema));
 
@@ -14396,6 +14448,113 @@ function editorMusica(modo, est, repintar) {
     } catch (e) { toast(e.message, true); }
     repintar();
   }
+  return caja;
+}
+
+/* «+2 dB», «−3 dB», «tal cual». */
+function textoDb(db) {
+  const n = Math.round(Number(db) * 10) / 10 || 0;
+  return n ? `${n > 0 ? '+' : '−'}${Math.abs(n)} dB` : 'tal cual';
+}
+
+/* El ánimo de la música automática si se eligió a mano para todo el vídeo, o
+   '' si cada tramo lleva el del ritmo. Lo dice el `por_que` que deja el
+   servidor (`cambiar_animo_musica`): con un solo tramo, el del ritmo también
+   es «uno para todo». */
+function animoUnicoDe(est) {
+  const tramos = (est.musica || {}).tramos || [];
+  if (!tramos.length || (est.musica || {}).tema) return '';
+  const aMano = tramos.every(t => String(t.por_que || '').indexOf('elegido a mano') === 0
+    && t.animo === tramos[0].animo);
+  return aMano ? tramos[0].animo : '';
+}
+
+/* EL VOLUMEN FINO DE LA MÚSICA (N9 de las notas de mejoras, 13-10-2026): entre
+   «Suave», «Normal» y «Alta» no había nada. Un deslizador en pasos de 1 dB que
+   escribe `musica_db` (el mando que ya movía el repaso) y solo VUELVE A
+   MEZCLAR, como la presencia. Se guarda al SOLTARLO, y solo si alguien lo toca
+   (regla 1); y con un respiro, para que las flechas del teclado no lancen una
+   mezcla por cada paso. */
+function volumenFinoMusica(modo, est, repintar) {
+  const guardado = Number((est.musica || {}).db) || 0;
+  const actual = est.dbEnVuelo !== undefined ? est.dbEnVuelo : guardado;
+  const etiqueta = h('span', { clase: 'meta' }, textoDb(actual));
+  const guardar = async valor => {
+    try {
+      const r = await pedir(`${API.proyecto(modo.pid)}/sonido`, {
+        method: 'PUT', cuerpo: { musica_db: valor, remontar: true } });
+      est.musica.db = valor;
+      if (r.cambiado !== false) avisoDeMontaje(r, 'Volumen de la música');
+    } catch (e) { toast(e.message, true); }
+    est.dbEnVuelo = undefined;
+    repintar();
+  };
+  return h('div', { clase: 'campo' },
+    h('label', {}, 'Ajuste fino'),
+    h('div', { clase: 'fila' },
+      h('input', {
+        type: 'range', min: -12, max: 6, step: 1, value: actual, clase: 'volumen-fino',
+        'aria-label': 'Ajuste fino del volumen de la música, en decibelios',
+        oninput: ev => { est.dbEnVuelo = Number(ev.target.value); etiqueta.textContent = textoDb(est.dbEnVuelo); },
+        onchange: ev => {
+          est.dbEnVuelo = Number(ev.target.value);
+          clearTimeout(est.relojDb);
+          est.relojDb = setTimeout(() => {
+            if (est.dbEnVuelo !== guardado) guardar(est.dbEnVuelo);
+            else { est.dbEnVuelo = undefined; repintar(); }
+          }, 600);
+        },
+      }),
+      etiqueta),
+    h('div', { clase: 'pista' }, 'Sube o baja la música por encima de lo elegido arriba, de 1 en 1 dB.'));
+}
+
+/* EL ÁNIMO DE LA MÚSICA AUTOMÁTICA (N9 de las notas de mejoras, 13-10-2026):
+   la automática elige un ánimo por tramo según el ritmo, y no había forma de
+   pedir «que sea alegre». Esto la vuelve a montar con UN ánimo en todos los
+   tramos (`PUT /musica/animo`) y vuelve a mezclar: no se dibuja nada. */
+function animoDeLaAutomatica(modo, est, repintar) {
+  const unico = animoUnicoDe(est);
+  const pedido = est.animoPedido || unico;
+  const caja = h('div', { clase: 'campo' });
+  caja.appendChild(h('label', {}, 'Automática con un ánimo para todo el vídeo'));
+  const montar = async () => {
+    est.montandoAnimo = true; repintar();
+    try {
+      const r = await pedir(`${API.proyecto(modo.pid)}/musica/animo`, {
+        method: 'PUT', cuerpo: { animo: est.animoPedido } });
+      const nombre = ((ANIMOS_MUSICA.find(a => a[0] === r.animo) || [0, r.animo])[1]).toLowerCase();
+      toast(r.remontando
+        ? `Música: buscando temas «${nombre}» y volviendo a mezclar el vídeo, sin dibujar nada`
+        : `Música: buscando temas «${nombre}». Entrará al montar el vídeo`);
+      seguirTrabajo(CLAVE_VIDEO_LIGHT, r.trabajo_id, async () => {
+        est.montandoAnimo = false;
+        est.animoPedido = '';
+        try { await cargarAjustesVideo(modo, est); } catch (e) { /* se relee al volver */ }
+        est.repintar();
+        try { await recargarVideoAbierto(); } catch (e) { /* se relee al volver */ }
+      });
+    } catch (e) {
+      est.montandoAnimo = false;
+      toast(e.message, true);
+      repintar();
+    }
+  };
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('select', {
+      'aria-label': 'Ánimo de la música automática', clase: 'animo-automatica', value: pedido,
+      onchange: ev => { est.animoPedido = ev.target.value; repintar(); } },
+    h('option', { value: '' }, 'Según el ritmo (cada tramo el suyo)'),
+    ...ANIMOS_MUSICA.map(([id, nombre]) => h('option', { value: id }, nombre))),
+    h('button', {
+      clase: 'mini',
+      disabled: !est.animoPedido || est.montandoAnimo || !est.hayJamendo,
+      onclick: montar,
+    }, est.montandoAnimo ? 'montando la música…' : 'Montar la música con este ánimo')));
+  caja.appendChild(h('div', { clase: 'pista' }, !est.hayJamendo
+    ? 'Hace falta la clave de Jamendo (Configuración): los temas se buscan allí.'
+    : (unico ? 'Ahora suena toda con este ánimo. ' : '')
+      + 'Busca un tema de ese ánimo para cada tramo y vuelve a mezclar: no se dibuja nada.'));
   return caja;
 }
 

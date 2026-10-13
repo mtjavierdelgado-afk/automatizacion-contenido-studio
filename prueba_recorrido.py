@@ -2091,6 +2091,76 @@ def salir_y_cada_video_lo_suyo(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def musica_efectos_y_subtitulos_en_el_video(navegador, datos):
+    """N9 de las notas de mejoras (13-10-2026): «que cuando el vídeo esté
+    generado me pueda mostrar la música, los efectos y los subtítulos para
+    modificarlos, sin regenerar las imágenes ni la voz». Debajo del vídeo
+    montado salen los ajustes del montaje; el volumen fino guarda su valor y
+    lanza SOLO una remezcla; y el ánimo de la automática se ofrece (montarlo
+    pide Jamendo, que aquí no hay: lo de servidor va en prueba_api)."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    ok(_montar_desde_video(pg), "se parte de un vídeo montado al día")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.esperar(".ajustes-en-video h3", "Música, efectos y subtítulos", 15),
+       "debajo del vídeo montado sale «Música, efectos y subtítulos»")
+    ok(pg.visible(".ajustes-en-video .pista", "no se redibuja ninguna imagen"),
+       "y dice que cambiarlo no redibuja imágenes ni regraba la voz")
+    for fila in ("Música", "Efectos", "Subtítulos"):
+        ok(pg.esperar(".ajustes-en-video .fila-ajuste-cab", fila, 10),
+           f"con la fila de {fila.lower()} (la misma que en el Encargo)")
+    _r, antes = api.get(f"/api/trabajos?proyecto={pid}")
+    vistos = {t.get("id") for t in antes.get("trabajos") or []}
+    assets_antes = _version_de(datos, "assets", "").get("activa")
+    voz_antes = _version_de(datos, "voz", "").get("activa")
+    render_antes = _version_de(datos, "render", "").get("activa")
+    pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="Música").first \
+        .locator("button", has_text="Cambiar").click()
+    pg.p.wait_for_timeout(800)
+    ok(pg.visible(".ajustes-en-video input.volumen-fino"), "la música trae un ajuste fino del volumen")
+    ok(pg.visible(".ajustes-en-video select.animo-automatica"),
+       "y un selector del ánimo para la música automática")
+    ok(not pg.p.locator(".ajustes-en-video button", has_text="Montar la música con este ánimo")
+       .first.is_enabled(),
+       "que sin la clave de Jamendo no deja montarla (y lo dice)")
+    pg.captura("n9_ajustes_en_el_video", entera=False)
+    # EL VOLUMEN FINO: se suelta en −4 dB
+    pg.p.evaluate("""() => { const r = document.querySelector('.ajustes-en-video input.volumen-fino');
+      r.value = -4; r.dispatchEvent(new Event('input', { bubbles: true }));
+      r.dispatchEvent(new Event('change', { bubbles: true })); }""")
+    pg.p.wait_for_timeout(2500)
+    ok(api.libre(pid), "la remezcla termina")
+    pg.sin_trabajo(300)
+    _r, sonido = api.get(f"/api/proyectos/{pid}/sonido")
+    igual_db = sonido.get("musica_db") == -4.0
+    ok(igual_db, f"el volumen fino queda guardado en −4 dB ({sonido.get('musica_db')!r})")
+    _r, despues = api.get(f"/api/trabajos?proyecto={pid}")
+    nuevos = [t for t in despues.get("trabajos") or [] if t.get("id") not in vistos]
+    ok(nuevos and all(t.get("paso") == "render" and "mezclar" in (t.get("nombre") or "")
+                      for t in nuevos),
+       f"y lanza SOLO una remezcla del render ({[(t.get('nombre'), t.get('paso')) for t in nuevos]})")
+    ok(not any(t.get("paso") in ("assets", "voz", "callouts") for t in nuevos),
+       "ningún trabajo de imágenes, voz ni rótulos")
+    igual_versiones = (_version_de(datos, "assets", "").get("activa"),
+                       _version_de(datos, "voz", "").get("activa"))
+    ok(igual_versiones == (assets_antes, voz_antes),
+       f"las imágenes y la voz siguen en su versión ({(assets_antes, voz_antes)} → {igual_versiones})")
+    ok(_version_de(datos, "render", "").get("activa") != render_antes,
+       "y el MP4 se ha vuelto a montar")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.esperar(".ajustes-en-video .fila-ajuste-cab", "−4 dB", 15),
+       "y la fila de la música dice el ajuste (−4 dB)")
+    # se deja como estaba para quien venga detrás
+    api.put(f"/api/proyectos/{pid}/sonido", {"musica_db": 0, "remontar": True})
+    api.libre(pid)
+    pg.sin_errores("música, efectos y subtítulos en el vídeo")
+    pg.cerrar()
+
+
 def main():
     ap = argparse.ArgumentParser(description="El recorrido de la pantalla")
     ap.add_argument("--solo", default="", help="un escenario por nombre")

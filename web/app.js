@@ -11100,7 +11100,8 @@ function pintarRevision(panel, r, campo, gid) {
   if ((r.problemas || []).length) {
     panel.appendChild(h('ul', {}, ...(r.problemas || []).map(p => h('li', {},
       h('b', {}, p.que), p.por_que ? ` — ${p.por_que}` : '',
-      p.arreglo ? h('div', { clase: 'meta' }, `Mejor: ${p.arreglo}`) : null))));
+      p.arreglo ? h('div', { clase: 'meta' }, `Mejor: ${p.arreglo}`) : null,
+      mejoraAplicable(p, campo, gid)))));
   }
   if (r.sugerida) {
     panel.appendChild(h('details', { open: true },
@@ -11121,12 +11122,67 @@ function pintarRevision(panel, r, campo, gid) {
           toast('Puesta la versión sugerida: revísala y ajústala a tu gusto');
         },
       }, 'Aplicar la versión sugerida')));
-  } else if (r.veredicto && r.veredicto !== 'sirve') {
-    // sin versión propuesta, que lo diga: si no, parece que falta el botón
+  } else if ((r.veredicto && r.veredicto !== 'sirve') || (r.problemas || []).length) {
+    /* sin versión propuesta, que lo diga: si no, parece que falta el botón.
+       Y también con «Sirve» que trae problemas: ahí no salía NADA y se veían
+       mejoras sin forma de aplicarlas (N5 de las notas de mejoras, 13-10-2026). */
+    const sueltas = (r.problemas || []).some(p => p.original && p.mejor);
     panel.appendChild(h('div', { clase: 'meta' },
-      'La revisión no ha propuesto un texto entero: cambia lo de arriba a mano '
+      'La revisión no ha propuesto un texto entero corregido, así que no hay botón '
+      + 'para cambiarlo todo de una vez: '
+      + (sueltas ? 'aplica las mejoras de arriba con su «Aplicar» o cámbialas a mano, '
+        : 'cambia lo de arriba a mano ')
       + 'y vuelve a pulsar «Revisar».'));
   }
+}
+
+/* «APLICAR» UNA MEJORA SUELTA: cambia en el campo el trozo que cita el
+ * problema por su mejora, sin tocar el resto. Con material largo la revisión
+ * a menudo no reescribe el texto entero, y lo único aplicable eran estos
+ * «Mejor: …», que había que copiar a mano (N5 de las notas de mejoras,
+ * 13-10-2026). Solo si el trozo está UNA vez tal cual: si no está o está
+ * varias, cambiar «el que sea» sería adivinar, y se dice. Se guarda por el
+ * mismo camino que «Aplicar la versión sugerida» (el `input` del campo), que
+ * es una edición más y solo escribe ese campo. */
+function vecesEn(texto, trozo) {
+  let n = 0;
+  for (let i = texto.indexOf(trozo); i >= 0; i = texto.indexOf(trozo, i + trozo.length)) n += 1;
+  return n;
+}
+
+function mejoraAplicable(p, campo, gid) {
+  if (!p.original || !p.mejor) return null;
+  if (p.aplicada) return h('div', { clase: 'meta' }, '✓ Mejora aplicada en el campo');
+  const area = campo();
+  const veces = area ? vecesEn(area.value, p.original) : 0;
+  if (veces !== 1) {
+    return h('div', { clase: 'meta' }, veces > 1
+      ? `«${p.original}» aparece ${veces} veces en el campo: cambia a mano la que toque.`
+      : `«${p.original}» ya no está tal cual en el campo: cámbialo a mano.`);
+  }
+  return h('div', { clase: 'fila' },
+    h('button', {
+      clase: 'mini', type: 'button',
+      title: `Cambia «${p.original}» por «${p.mejor}» en el campo (se guarda como si lo hubieras escrito)`,
+      onclick: () => {
+        const ahora = campo();
+        if (!ahora) { toast('No encuentro el campo: vuelve a abrir esta pantalla', true); return; }
+        const n = vecesEn(ahora.value, p.original);
+        if (n !== 1) {
+          toast(n ? `Ese trozo aparece ${n} veces: cámbialo a mano`
+            : 'Ese trozo ya no está tal cual en el campo: cámbialo a mano', true);
+          repintarRevisiones(gid);
+          return;
+        }
+        const i = ahora.value.indexOf(p.original);
+        ahora.value = ahora.value.slice(0, i) + p.mejor + ahora.value.slice(i + p.original.length);
+        ahora.dispatchEvent(new Event('input', { bubbles: true }));
+        ahora.dispatchEvent(new Event('change', { bubbles: true }));
+        p.aplicada = true;
+        repintarRevisiones(gid);
+        toast('Mejora aplicada: revísala y ajústala a tu gusto');
+      },
+    }, 'Aplicar esta mejora'));
 }
 
 /* EL CAMPO AL QUE MIRAN «Guía» y «Revisar»: el marcado con `conGuia`, y si no

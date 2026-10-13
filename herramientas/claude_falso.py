@@ -42,6 +42,19 @@ def responder(entrada):
         return _ortografia(entrada)
     if "<guia>" in entrada and "<texto>" in entrada:
         texto = _entre(entrada, "texto")
+        if "BORRADOR" in texto:
+            # «Sirve» CON problemas, que es lo que dejaba la pantalla sin ningun
+            # boton (N5 de las notas de mejoras, 13-10-2026): uno con su trozo
+            # en el texto y otro con un trozo que no esta
+            return {"veredicto": "sirve",
+                    "resumen": "Sirve, aunque hay dos cosas que mejorar.",
+                    "problemas": [
+                        {"que": "BORRADOR", "por_que": "el guionista lo leeria como contenido",
+                         "arreglo": "quitalo", "original": "BORRADOR",
+                         "mejor": "versión final"},
+                        {"que": "una frase que no esta", "por_que": "x", "arreglo": "y",
+                         "original": "frase que no aparece en el campo", "mejor": "otra"}],
+                    "sugerida": texto.replace("BORRADOR", "").strip() + " (revisado)"}
         if "[" in texto or "PENDIENTE" in texto:
             limpio = re.sub(r"\[[^\]]*\]", "", texto).replace("PENDIENTE", "").strip()
             return {"veredicto": "mejorable",

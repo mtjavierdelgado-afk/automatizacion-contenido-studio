@@ -57,11 +57,18 @@ EL LISTON ES FIJO, no se mueve en cada vuelta:
   el trozo y di que hara mal el sistema).
 - «no_sirve» = el sistema no puede trabajar con esto (falta lo esencial o
   contradice la guia).
-- Si el veredicto NO es «sirve», la «sugerida» es OBLIGATORIA: el texto entero
-  ya corregido, que la persona pone en el campo con un boton. Tiene que CUMPLIR
+- Si listas ALGUN problema (aunque el veredicto sea «sirve») o el veredicto no
+  es «sirve», la «sugerida» es OBLIGATORIA: el texto entero ya corregido, que
+  la persona pone en el campo con un boton. Tiene que CUMPLIR
   LA GUIA ENTERA: es el texto que tu mismo darias por «sirve» si te lo volvieran
   a pasar. Si falta un dato que solo la persona sabe, no lo inventes: escribe
   la version que mejor cumpla sin el y dilo en el resumen.
+- En cada problema, «original» es el trozo EXACTO del texto que hay que
+  cambiar, copiado letra a letra (con sus tildes y signos), y «mejor» lo que va
+  en su lugar, listo para pegar: la persona lo cambia con un boton aunque no
+  aplique la sugerida entera. Deja los dos vacios si el problema es que FALTA
+  algo y no hay trozo que cambiar. Con un texto largo, aunque te cueste
+  reescribirlo entero, rellena SIEMPRE «original» y «mejor».
 {anterior}
 Devuelve SOLO este JSON:
 {{
@@ -70,10 +77,12 @@ Devuelve SOLO este JSON:
   "problemas": [
     {{"que": "<lo que falla, citando un trozo corto>",
       "por_que": "<que hara mal el sistema con eso, segun la guia>",
-      "arreglo": "<que poner en su lugar>"}}
+      "arreglo": "<que poner en su lugar>",
+      "original": "<el trozo exacto del texto que se cambia; vacio si falta algo>",
+      "mejor": "<lo que va en lugar de «original»>"}}
   ],
   "sugerida": "<el texto entero corregido, conservando todo lo que ya estaba bien
-               y la voz de la persona; vacio si el veredicto es «sirve»>"
+               y la voz de la persona; vacio SOLO si no hay ningun problema>"
 }}
 Como mucho 6 problemas, los que mas importan primero."""
 
@@ -134,10 +143,23 @@ def normalizar(datos, sobre=None):
     problemas = []
     for p in (datos.get("problemas") or [])[:6]:
         if isinstance(p, dict) and str(p.get("que") or "").strip():
-            problemas.append({k: " ".join(str(p.get(k) or "").split())[:500]
-                              for k in ("que", "por_que", "arreglo")})
+            problema = {k: " ".join(str(p.get(k) or "").split())[:500]
+                        for k in ("que", "por_que", "arreglo")}
+            # EL TROZO Y SU MEJORA, TAL CUAL: la pantalla los busca letra a
+            # letra en el campo para cambiar solo ese trozo con un boton, asi
+            # que aqui no se aplanan los espacios ni los saltos de linea (N5 de
+            # las notas de mejoras, 13-10-2026)
+            original = str(p.get("original") or "").strip()
+            mejor = str(p.get("mejor") or "").strip()
+            if original and mejor and original != mejor:
+                problema["original"], problema["mejor"] = original[:1000], mejor[:2000]
+            problemas.append(problema)
     sugerida = str(datos.get("sugerida") or "").strip()
-    if veredicto == "sirve":
+    # «Sirve» SIN problemas no propone nada. Pero un «sirve» que lista
+    # problemas con su «Mejor: …» y se quedaba sin la version corregida dejaba
+    # a la persona viendo mejoras sin ningun boton para aplicarlas (N5 de las
+    # notas de mejoras, 13-10-2026): si hay problemas, la sugerida se queda.
+    if veredicto == "sirve" and not problemas:
         sugerida = ""
     return {"veredicto": veredicto,
             "resumen": " ".join(str(datos.get("resumen") or "").split())[:600],

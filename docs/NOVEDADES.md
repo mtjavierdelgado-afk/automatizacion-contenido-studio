@@ -10,6 +10,15 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Más notas de mejoras (13 de octubre)**
+- **«Revisar» en el Encargo siempre te deja aplicar lo que propone.** Cuando
+  la revisión decía «Sirve» pero listaba cosas a mejorar, no salía ningún
+  botón: ahora sale «Aplicar la versión sugerida». Y cada mejora trae su
+  propio **«Aplicar esta mejora»**, que cambia solo ese trozo del campo (útil
+  con material largo, donde la revisión a veces no reescribe el texto entero).
+  Si el trozo ya no está en el campo, o está varias veces, te lo dice para que
+  lo cambies a mano.
+
 **Dos de tus notas de mejoras (13 de octubre)**
 - **«Un vídeo nuevo» empieza vacío** después de crear uno. Antes salía con el
   nombre, el material y las indicaciones del vídeo anterior, y se podía crear

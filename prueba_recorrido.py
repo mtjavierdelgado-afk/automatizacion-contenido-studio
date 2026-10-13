@@ -632,6 +632,102 @@ def ficha_del_estilo(navegador, datos):
 
 
 @escenario
+def voz_del_estilo_se_guarda_entera(navegador, datos):
+    """N4 de las notas de mejoras (13-10-2026): «los ajustes de voz no están
+    sincronizando en la muestra en estilo». Dos fallos: tocar dos mandos de voz
+    seguidos (en menos de los 0,9 s del autoguardado) guardaba solo el último,
+    y la escucha se apuntaba con la clave de la ficha que tenía el botón al
+    pintarse, no con la que el servidor había guardado: tras cambiar el ritmo
+    (que mueve el aire de la voz) el play servía la muestra de antes."""
+    api = datos["api"]
+    pid = datos["preset"]
+
+    def voz_guardada():
+        return dict((ficha_guardada().get("datos") or {}).get("voz") or {})
+
+    def ficha_guardada():
+        _r, d = api.get("/api/presets-light")
+        return next((p for p in d.get("presets") or [] if p.get("id") == pid), {})
+
+    # EL ESTILO DE PRUEBA NO TRAE ni voz ni bloque de estilo, y uno de verdad
+    # lleva los dos: sin fotogramas el ritmo no se puede guardar. Se le ponen
+    # aquí y se le devuelve lo suyo al final, para no cambiar los demás escenarios.
+    original = ficha_guardada()
+    from PIL import Image                                    # noqa: PLC0415
+    fotogramas = []
+    for i in range(3):
+        ruta = os.path.join(datos["base"], f"fotograma_voz_{i}.png")
+        Image.new("RGB", (64, 48), (40 * i, 120, 200)).save(ruta)
+        fotogramas.append(ruta)
+    api.post("/api/presets-canal", {
+        "tipo": "canal", "nombre": original.get("nombre"), "id": pid,
+        "datos": dict(original.get("datos") or {},
+                      estilo={"referencias": fotogramas},
+                      voz={"voz_id": "voz-de-prueba"})})
+    pg = Pagina(navegador, datos)
+    escuchas = []
+
+    def al_pedir(peticion):
+        # en el momento en que la pantalla pide la muestra, lo que el servidor
+        # tiene guardado es con lo que la va a sintetizar
+        if peticion.method == "POST" and "/voz/previsualizar" in peticion.url:
+            escuchas.append(voz_guardada())
+
+    pg.p.on("request", al_pedir)
+    pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{pid}' }});")
+    ok(pg.esperar(".bloque-voz button.escuchar", "Escuchar"), "la ficha enseña la voz con su «Escuchar»")
+    pg.pulsar(".bloque-voz summary", "la velocidad")
+    velocidad = pg.p.locator(".bloque-voz select").filter(
+        has=pg.p.locator("option[value=fastest]")).first
+    # DOS MANDOS SEGUIDOS, y el play enseguida: todo dentro de los 0,9 s
+    velocidad.select_option("fastest")
+    pg.p.locator(".bloque-voz button.mini", has_text="surprise").first.click()
+    pg.p.locator(".bloque-voz button.escuchar", has_text="Escuchar").first.click()
+    pg.p.wait_for_timeout(2500)
+    guardada = voz_guardada()
+    ok(guardada.get("velocidad") == "fastest" and guardada.get("emociones") == ["surprise"],
+       f"tocar velocidad y color seguidos guarda LOS DOS (guardado: {guardada})")
+    ok(len(escuchas) == 1 and escuchas[0].get("velocidad") == "fastest"
+       and escuchas[0].get("emociones") == ["surprise"],
+       f"y la escucha se pide con los dos ya guardados ({escuchas})")
+    for _ in range(40):                         # que termine la síntesis
+        if pg.p.evaluate("() => Object.keys(APP.light.escuchas || {}).length > 0"):
+            break
+        pg.p.wait_for_timeout(500)
+    claves = pg.p.evaluate(f"() => [Object.keys(APP.light.escuchas || {{}}), "
+                           f"claveEscucha(fichaLight('{pid}'), '')]")
+    ok(claves[1] in claves[0],
+       f"la muestra queda apuntada con la clave de lo GUARDADO -- {claves}")
+
+    # EL RITMO MUEVE EL AIRE DE LA VOZ en el servidor, sin repintar la voz
+    antes = voz_guardada().get("hueco_minimo")
+    barra = pg.p.locator("input.ritmo").first
+    actual = int(barra.input_value())
+    maximo = int(barra.get_attribute("max") or 0)
+    otro = 0 if actual != 0 else maximo
+    barra.evaluate("(b, v) => { b.value = String(v); b.dispatchEvent(new Event('input')); }", otro)
+    despues = antes
+    for _ in range(30):                         # el PUT sale a los 0,9 s
+        pg.p.wait_for_timeout(500)
+        despues = voz_guardada().get("hueco_minimo")
+        if despues is not None and despues != antes:
+            break
+    ok(despues is not None and despues != antes,
+       f"cambiar el ritmo cambia el aire guardado de la voz ({antes} -> {despues})"
+       f" -- aviso: {pg.toast()[:150]!r}")
+    pg.p.locator(".bloque-voz button.escuchar", has_text="Escuchar").first.click()
+    pg.p.wait_for_timeout(2500)
+    ok(len(escuchas) == 2,
+       "y el «Escuchar» de después pide una muestra NUEVA, no sirve la de antes"
+       f" ({len(escuchas)} peticiones)")
+    pg.p.remove_listener("request", al_pedir)
+    api.post("/api/presets-canal", {"tipo": "canal", "nombre": original.get("nombre"),
+                                    "id": pid, "datos": original.get("datos") or {}})
+    pg.sin_errores("la voz del estilo")
+    pg.cerrar()
+
+
+@escenario
 def encargo_del_video(navegador, datos):
     pg = Pagina(navegador, datos)
     pg.js(f"await abrirVideoLight('{datos['video']}');")

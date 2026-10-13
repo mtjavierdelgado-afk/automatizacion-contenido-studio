@@ -12099,8 +12099,15 @@ function nombreIdiomaLight(codigo) {
    repintado, y elegir una voz y darle al play de abajo escuchaba la anterior.
    Lo que vuelva del servidor sustituye a esto en cuanto llegue. */
 function apuntarVozLight(ficha, cambios) {
-  ficha.datos = Object.assign({}, ficha.datos || {});
-  ficha.datos.voz = Object.assign({}, ficha.datos.voz || {}, cambios);
+  /* En la que pinta la pantalla Y en la vigente: tras el primer guardado,
+     `volcarPresetLight` cambia el estilo en memoria por el que devuelve el
+     servidor y los mandos siguen con el objeto de antes (N4 de las notas de
+     mejoras, 13-10-2026). */
+  const vigente = fichaLight(ficha.id);
+  [ficha, vigente].filter((f, i, todas) => f && todas.indexOf(f) === i).forEach(f => {
+    f.datos = Object.assign({}, f.datos || {});
+    f.datos.voz = Object.assign({}, f.datos.voz || {}, cambios);
+  });
   guardarPresetLight(ficha.id, { voz: cambios }, false);
 }
 
@@ -12449,7 +12456,15 @@ function botonEscuchaVoz(ficha, op) {
       return;
     }
     const vozId = op.voz ? op.voz() : '';
-    const clave = claveEscucha(ficha, vozId);
+    /* LA CLAVE, DE LO GUARDADO. Primero sale lo pendiente y luego se lee la
+       ficha VIGENTE —la que devolvió el servidor, no la que tenía este botón al
+       pintarse—: el servidor sintetiza con lo guardado, y una clave calculada
+       antes etiquetaba con los mandos nuevos una muestra hecha con los viejos,
+       que se seguía sirviendo hasta recargar (N4 de las notas de mejoras,
+       13-10-2026). */
+    if (!ficha.sinEstilo) await volcarPresetLight();
+    const vigente = (!ficha.sinEstilo && fichaLight(ficha.id)) || ficha;
+    const clave = claveEscucha(vigente, vozId);
     const guardada = (APP.light.escuchas || {})[clave];
     if (guardada) {
       sonador().src = guardada;
@@ -12464,7 +12479,7 @@ function botonEscuchaVoz(ficha, op) {
     pidiendo = true;
     pintar();
     try {
-      const url = await pedirEscuchaVoz(ficha, vozId);
+      const url = await pedirEscuchaVoz(vigente, vozId);
       APP.light.escuchas = Object.assign({}, APP.light.escuchas, { [clave]: url });
       sonador().src = url;
       audio.play().catch(() => { /* el navegador puede negarse; el botón queda listo */ });
@@ -12926,9 +12941,33 @@ async function regenerarPedidasLight(ficha, pedidas) {
    la interfaz. `volcarPresetLight` es lo que hace que el botón «Guardar» no sea
    decorativo: escribe YA lo que quedara sin escribir. */
 function guardarPresetLight(id, cambios, repintar) {
-  APP.light.pendiente = Object.assign({}, APP.light.pendiente, cambios, { id });
+  /* LO PENDIENTE ES DE UN SOLO ESTILO. Si lo que quedaba por escribir era de
+     otro, sale antes con SU id: mezclarlo mandaba los cambios de aquel a este
+     (N4 de las notas de mejoras, 13-10-2026). */
+  const previo = APP.light.pendiente;
+  if (previo && previo.id !== id) volcarPresetLight();
+  /* Y SE MEZCLA CAMPO A CAMPO dentro de cada bloque. Un `Object.assign` a secas
+     reemplazaba `voz` entera: tocar la velocidad y enseguida una emoción
+     mandaba solo la emoción, y la velocidad se perdía sin decir nada. El
+     servidor ya mezcla `voz` campo a campo con lo guardado; aquí se hace lo
+     mismo con lo que aún no ha salido. */
+  const base = (APP.light.pendiente && APP.light.pendiente.id === id)
+    ? APP.light.pendiente : {};
+  const mezcla = Object.assign({}, base);
+  Object.keys(cambios || {}).forEach(k => {
+    const nuevo = cambios[k];
+    const viejo = base[k];
+    mezcla[k] = (esBloqueObjeto(nuevo) && esBloqueObjeto(viejo))
+      ? Object.assign({}, viejo, nuevo) : nuevo;
+  });
+  mezcla.id = id;
+  APP.light.pendiente = mezcla;
   clearTimeout(APP.light.guardando);
   APP.light.guardando = setTimeout(() => volcarPresetLight(repintar), 900);
+}
+
+function esBloqueObjeto(x) {
+  return !!x && typeof x === 'object' && !Array.isArray(x);
 }
 
 async function volcarPresetLight(repintar) {

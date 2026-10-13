@@ -10,6 +10,13 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Más notas de mejoras (13 de octubre)**
+- **Los ajustes de la voz de un estilo se guardan todos, y «Escuchar» suena
+  con ellos.** Si tocabas dos mandos seguidos (la velocidad y enseguida el
+  color), solo se guardaba el último. Y después de cambiar el ritmo, que mueve
+  el aire de la voz, «Escuchar» repetía la muestra de antes hasta recargar la
+  página.
+
 **Dos de tus notas de mejoras (13 de octubre)**
 - **«Un vídeo nuevo» empieza vacío** después de crear uno. Antes salía con el
   nombre, el material y las indicaciones del vídeo anterior, y se podía crear

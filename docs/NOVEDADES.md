@@ -10,6 +10,13 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Más notas de mejoras (13 de octubre)**
+- **Ir al estilo de un vídeo y volver ya no te saca al menú.** Desde el estilo
+  de un vídeo, «‹ Volver al vídeo» te devuelve a él (también después de
+  regenerar el estilo) y «Todos los estilos» abre los estilos del proyecto de
+  ese vídeo, no «Tus proyectos». Y si el estilo del vídeo ya no existe,
+  «Estilo» te lo dice en vez de sacarte del vídeo.
+
 **Dos de tus notas de mejoras (13 de octubre)**
 - **«Un vídeo nuevo» empieza vacío** después de crear uno. Antes salía con el
   nombre, el material y las indicaciones del vídeo anterior, y se podía crear

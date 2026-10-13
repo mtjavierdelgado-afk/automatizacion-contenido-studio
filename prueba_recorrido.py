@@ -632,6 +632,56 @@ def ficha_del_estilo(navegador, datos):
 
 
 @escenario
+def del_video_a_su_estilo_y_de_vuelta(navegador, datos):
+    """N3 de las notas de mejoras (13-10-2026): «cuando regreso a estilos en
+    proyecto avanzado me bota al menú». Un vídeo abierto desde «Últimos
+    vídeos» de la portada no apuntaba su proyecto: desde su estilo, «Todos
+    los estilos» caía en «Tus proyectos», y regenerar el estilo borraba el
+    «‹ Volver al vídeo». Y si el estilo ya no estaba, «Estilo» sacaba a la
+    galería sin decir nada."""
+    pid = datos["video"]
+    pg = Pagina(navegador, datos)
+    pg.js("await cargarGaleriaLight(true); elegirCliente(''); irALight('galeria');")
+    ok(pg.visible("h2", "Tus proyectos"), "se empieza en la portada de proyectos")
+    ok(pg.esperar(".video-light button.abrir", "Padres vs hijos"),
+       "el vídeo de prueba sale en «Últimos vídeos»")
+    pg.pulsar(".video-light button.abrir", "Padres vs hijos")
+    pg.esperar(".nav-light button", "Estilo")
+    pg.p.wait_for_timeout(1000)
+    pg.pulsar(".nav-light button", "Estilo")
+    ok(pg.esperar(".light-preset .light-cab h2", "Estado Play Matriz"),
+       "«Estilo» desde el vídeo abre su estilo")
+    pg.pulsar(".light-cab button", "Volver al vídeo")
+    pg.p.wait_for_timeout(1000)
+    ok(pg.p.evaluate(f"() => APP.light.vista === 'elegido' && APP.light.video.pid === '{pid}'"),
+       "«‹ Volver al vídeo» vuelve a ese vídeo")
+    pg.pulsar(".nav-light button", "Estilo")
+    pg.pulsar(".light-cab button", "Todos los estilos")
+    pg.p.wait_for_timeout(800)
+    ok(not pg.visible("h2", "Tus proyectos") and pg.visible("h2", "Estado Play"),
+       "«Todos los estilos» enseña los estilos del proyecto del vídeo, no «Tus proyectos»")
+    ok(pg.visible(".ficha-estilo", "Estado Play Matriz"),
+       "con el estilo del vídeo entre ellos")
+    pg.captura("05_todos_los_estilos_desde_un_video", entera=False)
+    # REGENERAR EL ESTILO pasa por «generando» y vuelve a la ficha: el camino
+    # de vuelta al vídeo tiene que seguir ahí (sin gastar: solo las vistas)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.pulsar(".nav-light button", "Estilo")
+    pg.js(f"irALight('generando', {{ plan: null, abierto: '{datos['preset']}' }}); "
+          f"irALight('preset', {{ abierto: '{datos['preset']}', taller: null, feedback: {{}} }});")
+    ok(pg.esperar(".light-cab button", "Volver al vídeo", 10),
+       "después de regenerar el estilo sigue «‹ Volver al vídeo»")
+    # UN ESTILO QUE YA NO ESTÁ: lo dice y te quedas en el vídeo
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.estilo = 'estilo_que_no_existe'; pintarLight();")
+    pg.pulsar(".nav-light button", "Estilo")
+    ok(pg.p.evaluate(f"() => APP.light.vista === 'elegido' && APP.light.video.pid === '{pid}'"),
+       "si el estilo del vídeo no está, «Estilo» no saca del vídeo")
+    ok(any("ya no está" in a for a in pg.avisos()), f"y lo dice ({pg.avisos()[-2:]})")
+    pg.sin_errores("del vídeo a su estilo y de vuelta")
+    pg.cerrar()
+
+
+@escenario
 def encargo_del_video(navegador, datos):
     pg = Pagina(navegador, datos)
     pg.js(f"await abrirVideoLight('{datos['video']}');")

@@ -1513,6 +1513,79 @@ def tema_claro_y_asistente(navegador, datos):
     pg.cerrar()
 
 
+#: Un reconocimiento de voz FALSO que, al arrancar, emite la tanda de eventos
+#: que se le dé (cada uno: [resultIndex, [[texto, esFinal], ...]]) y termina.
+DICTADO_FALSO_JS = """(tanda) => {
+  window.__dictadoAcabado = false;
+  function Falso() {}
+  Falso.prototype.start = function () {
+    const yo = this;
+    let i = 0;
+    const siguiente = () => {
+      if (i >= tanda.length) { window.__dictadoAcabado = true; if (yo.onend) yo.onend(); return; }
+      const [indice, lista] = tanda[i++];
+      const results = lista.map(([texto, final]) => {
+        const r = [{ transcript: texto, confidence: 0.9 }]; r.isFinal = final; return r;
+      });
+      yo.onresult({ resultIndex: indice, results });
+      setTimeout(siguiente, 30);
+    };
+    setTimeout(siguiente, 30);
+  };
+  Falso.prototype.stop = function () {};
+  window.SpeechRecognition = Falso;
+  window.webkitSpeechRecognition = Falso;
+}"""
+
+#: Lo que manda Chrome de ESCRITORIO: cada final es un trozo nuevo y
+#: resultIndex apunta al primero que cambia.
+DICTADO_ESCRITORIO = [
+    [0, [["hola", False]]],
+    [0, [["hola que tal", True]]],
+    [1, [["hola que tal", True], [" quiero", False]]],
+    [1, [["hola que tal", True], [" quiero un video", True]]],
+]
+#: Lo que manda Chrome en ANDROID con `continuous`: vuelve a mandar los
+#: finales ya dados con resultIndex 0, y cada final trae la frase acumulada.
+DICTADO_ANDROID = [
+    [0, [["hola", False]]],
+    [0, [["hola que tal", True]]],
+    [0, [["hola que tal", True], ["hola que tal quiero", False]]],
+    [0, [["hola que tal", True], ["hola que tal quiero un video", True]]],
+]
+
+
+@escenario
+def dictado_del_navegador_sin_repetir(navegador, datos):
+    """N8 de las notas de mejoras, 13-10-2026: «el dictado repite palabras».
+    Sin clave de OpenAI se dicta con el navegador; en Android Chrome repite los
+    finales acumulados y salía «hola que talhola que tal…»."""
+    pg = Pagina(navegador, datos)
+    pg.js("await cargarGaleriaLight(true); irALight('galeria'); elegirCliente('');")
+    pg.pulsar("#burbuja-asistente")
+    pg.p.wait_for_timeout(800)
+    casos = [("escritorio", DICTADO_ESCRITORIO, "", "hola que tal quiero un video"),
+             ("Android", DICTADO_ANDROID, "", "hola que tal quiero un video"),
+             ("Android, con texto escrito antes", DICTADO_ANDROID, "Oye:",
+              "Oye: hola que tal quiero un video")]
+    for nombre, tanda, antes, esperado in casos:
+        pg.p.evaluate(DICTADO_FALSO_JS, tanda)
+        # con ESTUDIO_SIMULAR el servidor da el dictado de OpenAI por disponible:
+        # se deja como sin clave (o con «navegador» elegido en Configuración)
+        pg.p.evaluate("() => { if (ASISTENTE.estado) ASISTENTE.estado.dictado = false; }")
+        ok(pg.p.evaluate("() => motorDictado()") == "navegador",
+           f"dictado ({nombre}): sin clave de OpenAI va por el navegador")
+        pg.p.evaluate("(t) => { DICTADO.estado = ''; $('#asistente-texto').value = t; "
+                      "conmutarDictado(); }", antes)
+        pg.p.wait_for_function("() => window.__dictadoAcabado", timeout=10000)
+        texto = pg.p.evaluate("() => $('#asistente-texto').value")
+        ok(texto == esperado, f"dictado ({nombre}): el campo queda «{esperado}» "
+                              f"sin repetir (queda «{texto}»)")
+    pg.p.evaluate("() => { $('#asistente-texto').value = ''; }")
+    pg.sin_errores("el dictado del navegador")
+    pg.cerrar()
+
+
 #: Lo que el recorrido de TODOS LOS BOTONES no pulsa: lo que lanza trabajos
 #: largos, borra o sale. Lo demás se pulsa todo (los confirm() se CANCELAN en
 #: este escenario, así que lo que pregunta antes no llega a hacer nada).

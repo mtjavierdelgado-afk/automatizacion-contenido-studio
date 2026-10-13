@@ -15648,6 +15648,36 @@ async function enviarDictado(tipo) {
   }
 }
 
+/* Junta lo que lleva oído el dictado del navegador, desde el primer resultado.
+ *
+ * N8 de las notas de mejoras, 13-10-2026: «repite palabras al dictar». Antes se
+ * sumaban los finales de cada evento a lo ya confirmado, y Chrome en Android
+ * (con `continuous`) vuelve a mandar los finales ya dados con `resultIndex` 0,
+ * y cada final nuevo trae la frase ACUMULADA: salía «hola que talhola que tal
+ * hola que tal quiero un video». Aquí se recorre la lista entera cada vez: los
+ * finales se unen con un espacio y, si uno EMPIEZA por lo ya juntado (el caso
+ * de Android), lo sustituye en vez de sumarse. En escritorio cada final es un
+ * trozo nuevo y sale lo mismo que antes. El provisional se trata igual. */
+function juntarDictado(resultados) {
+  const sumar = (junto, trozo) => {
+    if (!trozo) return junto;
+    if (!junto) return trozo;
+    const a = junto.toLowerCase();
+    const b = trozo.toLowerCase();
+    // empieza por lo ya junto, cortando por palabra: «hola» no se come «holanda»
+    if (b.startsWith(a) && (b.length === a.length || /\s/.test(b.charAt(a.length)))) return trozo;
+    return `${junto} ${trozo}`;
+  };
+  let firme = '';
+  let provisional = '';
+  for (let i = 0; i < resultados.length; i++) {
+    const trozo = String((resultados[i][0] || {}).transcript || '').trim();
+    if (resultados[i].isFinal) firme = sumar(firme, trozo);
+    else provisional = sumar(provisional, trozo);
+  }
+  return sumar(firme, provisional);
+}
+
 function dictarConNavegador(Reconocimiento) {
   const campo = $('#asistente-texto');
   const base = campo ? campo.value : '';
@@ -15655,15 +15685,9 @@ function dictarConNavegador(Reconocimiento) {
   rec.lang = /^es/i.test(navigator.language || '') ? navigator.language : 'es-419';
   rec.continuous = true;
   rec.interimResults = true;
-  let firme = '';
-  rec.onresult = ev => {
-    let provisional = '';
-    for (let i = ev.resultIndex; i < ev.results.length; i++) {
-      const trozo = ev.results[i][0].transcript;
-      if (ev.results[i].isFinal) firme += trozo; else provisional += trozo;
-    }
-    escribirDictado((firme + provisional).trim(), base);
-  };
+  // Se rehace el texto ENTERO en cada evento, sin acumular entre eventos: N8
+  // de las notas de mejoras, 13-10-2026 (el dictado repetía palabras).
+  rec.onresult = ev => escribirDictado(juntarDictado(ev.results), base);
   rec.onerror = ev => {
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
       toast('No hay permiso para el micrófono: dale permiso en el candado de la '

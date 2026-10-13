@@ -31,6 +31,10 @@ vídeos, estilos, claves y contraseña no se tocan.
   regenerar el estilo) y «Todos los estilos» abre los estilos del proyecto de
   ese vídeo, no «Tus proyectos». Y si el estilo del vídeo ya no existe,
   «Estilo» te lo dice en vez de sacarte del vídeo.
+- **El dictado ya no repite palabras.** Con el dictado gratuito del navegador
+  (sin clave de OpenAI), en el móvil salía «hola que talhola que tal hola que
+  tal quiero un vídeo». Ahora queda lo que dijiste, una vez, y se respeta lo
+  que hubieras escrito antes de pulsar el micrófono.
 
 **Dos de tus notas de mejoras (13 de octubre)**
 - **«Un vídeo nuevo» empieza vacío** después de crear uno. Antes salía con el

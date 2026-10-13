@@ -4973,12 +4973,23 @@ function navLight() {
       activa: APP.light.vista === 'preset',
       porque: dentro && fichaLight(v.estilo)
         ? `el estilo de este vídeo: «${fichaLight(v.estilo).nombre}»`
+        : dentro ? 'el estilo de este vídeo ya no está'
         : 'el estilo de un vídeo (abre uno); tus estilos están en Inicio',
       ir: () => {
         pararPrevia();
         if (dentro && fichaLight(v.estilo)) {
           const pid = v.pid;
+          apuntarClienteDe(clienteDe(v.estilo));
           irALight('preset', { abierto: v.estilo, feedback: {}, desdeVideo: pid });
+          return;
+        }
+        /* EL ESTILO DE ESTE VÍDEO YA NO ESTÁ (borrado, o de un proyecto con
+           clave sin abrir): se dice y te quedas en el vídeo. Antes te sacaba a
+           la galería sin una palabra (N3 de las notas de mejoras, 13-10-2026). */
+        if (dentro) {
+          toast(v.estilo
+            ? 'el estilo de este vídeo ya no está (borrado, o de un proyecto con clave sin abrir): el vídeo sigue igual'
+            : 'este vídeo no tiene un estilo apuntado', true);
           return;
         }
         recordarVideoLight('');
@@ -5233,7 +5244,11 @@ function migasDelVideoLight() {
     h('span', { clase: 'meta migas-nombre' }, v.pid ? `/ ${v.nombre || v.pid}` : '/ vídeo nuevo'),
     h('span', { clase: 'crece' }),
     estilo ? h('button', { clase: 'mini fantasma', title: 'Abrir el estilo con el que se hace este vídeo',
-      onclick: () => { pararPrevia(); irALight('preset', { abierto: v.estilo, feedback: {}, desdeVideo: v.pid }); } },
+      onclick: () => {
+        pararPrevia();
+        apuntarClienteDe(clienteDe(v.estilo));
+        irALight('preset', { abierto: v.estilo, feedback: {}, desdeVideo: v.pid });
+      } },
     `Estilo: ${estilo.nombre}`) : null);
 }
 
@@ -5302,10 +5317,19 @@ async function volverAVersionLight(paso, numero) {
 }
 
 function irALight(vista, extra) {
+  const desde = APP.light.desdeVideo || '';
+  const enFicha = ['preset', 'generando'].includes(APP.light.vista);
   APP.light.vista = vista;
   // «‹ Volver al vídeo» solo vale para la ficha a la que se llegó desde él
   APP.light.desdeVideo = '';
   Object.assign(APP.light, extra || {});
+  /* ...Y SIGUE VALIENDO MIENTRAS SE CORRIGE ESE ESTILO: regenerarlo pasa por
+     «generando» y vuelve a la ficha, y ese ir y volver borraba el camino de
+     vuelta. La ficha se quedaba con un «‹ Volver» que caía en «Tus proyectos»
+     (N3 de las notas de mejoras, 13-10-2026). */
+  if (desde && enFicha && ['preset', 'generando'].includes(vista) && !APP.light.desdeVideo) {
+    APP.light.desdeVideo = desde;
+  }
   $('#panel').scrollTop = 0;
   pintarLight();
 }
@@ -5376,8 +5400,21 @@ function clienteElegido() {
   return ficha && clienteAbierto(ficha) ? cid : '';
 }
 
-function elegirCliente(cid) {
+function apuntarCliente(cid) {
   try { localStorage.setItem(CLAVE_CLIENTE, cid || ''); } catch (e) { /* sin almacén */ }
+}
+
+/* EL PROYECTO DE LO QUE SE ABRE, apuntado como si se hubiera entrado en él.
+   Un vídeo abierto desde «Últimos vídeos» de la portada no pasaba por su
+   proyecto, y su «Todos los estilos» caía en «Tus proyectos» en vez de en los
+   estilos de ese cliente (N3 de las notas de mejoras, 13-10-2026). Sin
+   proyectos no hay nada que apuntar: la galería es la de siempre. */
+function apuntarClienteDe(cid) {
+  if (listaClientes().length) apuntarCliente(cid || '_sin');
+}
+
+function elegirCliente(cid) {
+  apuntarCliente(cid);
   $('#panel').scrollTop = 0;
   pintarLight();
 }
@@ -6884,9 +6921,13 @@ async function crearYGenerarLight(estilo) {
 
 async function abrirVideoLight(pid) {
   recordarVideoLight(pid);
+  const video = videosLight().find(x => x.id === pid);
+  if (video) apuntarClienteDe(clienteDeVideo(video));
   APP.light.video.vista = '';
   irALight('elegido');
   await cargarVideoLight(pid);
+  // fuera de la lista (recién creado): el proyecto de su estilo
+  if (!video && APP.light.video.estilo) apuntarClienteDe(clienteDe(APP.light.video.estilo));
 }
 
 /* ============================================ EL ENCARGO DE UN VÍDEO YA EMPEZADO
@@ -11703,7 +11744,9 @@ function vistaPresetLight() {
   const ficha = fichaLight(APP.light.abierto);
   if (!ficha) {
     return h('div', { clase: 'caja-info' }, 'ese estilo ya no está. ',
-      h('button', { clase: 'mini', onclick: () => irALight('galeria') }, 'Volver'));
+      APP.light.desdeVideo
+        ? h('button', { clase: 'mini', onclick: () => abrirVideoLight(APP.light.desdeVideo) }, '‹ Volver al vídeo')
+        : h('button', { clase: 'mini', onclick: () => irALight('galeria') }, 'Volver'));
   }
   const datos = ficha.datos || {};
   const origen = datos.origen || {};

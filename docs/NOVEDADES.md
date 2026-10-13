@@ -26,6 +26,11 @@ vídeos, estilos, claves y contraseña no se tocan.
   color), solo se guardaba el último. Y después de cambiar el ritmo, que mueve
   el aire de la voz, «Escuchar» repetía la muestra de antes hasta recargar la
   página.
+- **Ir al estilo de un vídeo y volver ya no te saca al menú.** Desde el estilo
+  de un vídeo, «‹ Volver al vídeo» te devuelve a él (también después de
+  regenerar el estilo) y «Todos los estilos» abre los estilos del proyecto de
+  ese vídeo, no «Tus proyectos». Y si el estilo del vídeo ya no existe,
+  «Estilo» te lo dice en vez de sacarte del vídeo.
 
 **Dos de tus notas de mejoras (13 de octubre)**
 - **«Un vídeo nuevo» empieza vacío** después de crear uno. Antes salía con el

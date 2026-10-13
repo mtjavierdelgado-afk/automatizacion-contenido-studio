@@ -1284,6 +1284,43 @@ def lo_que_se_vio_el_10_de_octubre(navegador, datos):
     ok("PENDIENTE" not in valor and "(revisado)" in valor,
        f"aplicarla cambia el material ({valor[-60:]!r})")
     pg.captura("13_revisar_en_el_encargo", entera=False)
+    # «SIRVE» CON PROBLEMAS (N5 de las notas de mejoras, 13-10-2026): la
+    # revision listaba mejoras y no salia ningun boton para aplicarlas
+    area = pg.p.locator(".bloque-light").filter(has_text="El material").first.locator("textarea").first
+    area.fill(original + " BORRADOR")
+    area.dispatch_event("input")
+    bloque = pg.p.locator(".bloque-light").filter(has_text="El material").first
+    bloque.locator("button", has_text="Revisar").first.click()
+    ok(pg.esperar(".bloque-light .revision-campo", "dos cosas que mejorar", 60),
+       "la revisión «Sirve» con problemas se pinta")
+    bloque = pg.p.locator(".bloque-light").filter(has_text="El material").first
+    ok(bloque.locator("button", has_text="Aplicar la versión sugerida").count() == 1,
+       "«Sirve» con problemas también ofrece aplicar la versión sugerida")
+    ok(bloque.locator("button", has_text="Aplicar esta mejora").count() == 1,
+       "y un «Aplicar» para la mejora cuyo trozo está en el campo")
+    ok(bloque.locator(".revision-campo", has_text="ya no está tal cual").count() == 1,
+       "y dice que el trozo de la otra mejora no está en el campo")
+    if bloque.locator("button", has_text="Aplicar esta mejora").count():
+        bloque.locator("button", has_text="Aplicar esta mejora").first.click()
+    pg.p.wait_for_timeout(2500)
+    bloque = pg.p.locator(".bloque-light").filter(has_text="El material").first
+    valor = bloque.locator("textarea").first.input_value()
+    ok("BORRADOR" not in valor and valor.endswith("versión final"),
+       f"aplicar la mejora cambia SOLO ese trozo del material ({valor[-60:]!r})")
+    ok(bloque.locator(".revision-campo", has_text="Mejora aplicada").count() == 1,
+       "y la mejora queda marcada como aplicada")
+    # SE GUARDA como cualquier edicion del encargo
+    _r, d = api.get(f"/api/proyectos/{pid}")
+    ok("versión final" in json.dumps(d, ensure_ascii=False),
+       "y la mejora aplicada queda guardada en el proyecto")
+    # SIN TEXTO ENTERO, QUE LO DIGA: la misma revision sin «sugerida»
+    pg.js("""REVISION_VIVA.forEach(v => { if (v.resultado && v.resultado.resumen
+               === 'Sirve, aunque hay dos cosas que mejorar.') v.resultado.sugerida = ''; });
+             pintarLight();""")
+    bloque = pg.p.locator(".bloque-light").filter(has_text="El material").first
+    ok(bloque.locator(".revision-campo", has_text="no ha propuesto un texto entero").count() == 1,
+       "con problemas y sin texto entero, dice que no hay versión entera que aplicar")
+    pg.captura("13b_sirve_con_problemas", entera=False)
     # se deja el material como estaba: lo que viene detras no tiene que verlo
     area = pg.p.locator(".bloque-light").filter(has_text="El material").first.locator("textarea").first
     area.fill(original)

@@ -2385,6 +2385,25 @@ def prueba_logo_y_revision():
     igual(len(r["problemas"][0]["que"]), 500, "y recortados")
     igual(revisar_campo.normalizar({"veredicto": "sirve", "sugerida": "x"})["sugerida"],
           "", "si sirve, no se propone otra version")
+    # N5 de las notas de mejoras (13-10-2026): «Sirve» con problemas listados
+    # borraba la sugerida y la pantalla no ofrecia aplicar nada
+    r = revisar_campo.normalizar({"veredicto": "sirve", "sugerida": "texto  nuevo\nentero",
+                                  "problemas": [{"que": "a", "arreglo": "b",
+                                                 "original": " linea uno\n  linea dos ",
+                                                 "mejor": "otra"},
+                                                {"que": "falta algo", "original": "",
+                                                 "mejor": "x"}]})
+    igual(r["sugerida"], "texto  nuevo\nentero",
+          "«sirve» CON problemas conserva la version sugerida")
+    igual(r["problemas"][0].get("original"), "linea uno\n  linea dos",
+          "el trozo original se guarda letra a letra (para buscarlo en el campo)")
+    igual(r["problemas"][0].get("mejor"), "otra", "con su mejora")
+    ok("original" not in r["problemas"][1],
+       "un problema sin trozo que cambiar no trae «original» ni «mejor»")
+    ok("«sugerida» es OBLIGATORIA" in revisar_campo.INSTRUCCION
+       and "aunque el veredicto sea «sirve»" in revisar_campo.INSTRUCCION
+       and '"original"' in revisar_campo.INSTRUCCION,
+       "el prompt pide la sugerida si hay problemas, y el trozo exacto de cada uno")
 
 
 def prueba_rehacer_de_verdad():

@@ -35,6 +35,13 @@ vídeos, estilos, claves y contraseña no se tocan.
   (sin clave de OpenAI), en el móvil salía «hola que talhola que tal hola que
   tal quiero un vídeo». Ahora queda lo que dijiste, una vez, y se respeta lo
   que hubieras escrito antes de pulsar el micrófono.
+- **«Revisar» en el Encargo siempre te deja aplicar lo que propone.** Cuando
+  la revisión decía «Sirve» pero listaba cosas a mejorar, no salía ningún
+  botón: ahora sale «Aplicar la versión sugerida». Y cada mejora trae su
+  propio **«Aplicar esta mejora»**, que cambia solo ese trozo del campo (útil
+  con material largo, donde la revisión a veces no reescribe el texto entero).
+  Si el trozo ya no está en el campo, o está varias veces, te lo dice para que
+  lo cambies a mano.
 
 **Dos de tus notas de mejoras (13 de octubre)**
 - **«Un vídeo nuevo» empieza vacío** después de crear uno. Antes salía con el

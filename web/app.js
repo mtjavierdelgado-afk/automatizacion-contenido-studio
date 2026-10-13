@@ -5319,6 +5319,7 @@ async function volverAVersionLight(paso, numero) {
 function irALight(vista, extra) {
   const desde = APP.light.desdeVideo || '';
   const enFicha = ['preset', 'generando'].includes(APP.light.vista);
+  const abiertoAntes = APP.light.abierto;
   APP.light.vista = vista;
   // «‹ Volver al vídeo» solo vale para la ficha a la que se llegó desde él
   APP.light.desdeVideo = '';
@@ -5327,7 +5328,11 @@ function irALight(vista, extra) {
      «generando» y vuelve a la ficha, y ese ir y volver borraba el camino de
      vuelta. La ficha se quedaba con un «‹ Volver» que caía en «Tus proyectos»
      (N3 de las notas de mejoras, 13-10-2026). */
-  if (desde && enFicha && ['preset', 'generando'].includes(vista) && !APP.light.desdeVideo) {
+  /* Solo para la MISMA ficha: duplicar o pasar a otro estilo no hereda el
+     camino de vuelta a un vídeo que no es suyo. */
+  const mismaFicha = !(extra && 'abierto' in extra) || extra.abierto === abiertoAntes;
+  if (desde && enFicha && mismaFicha && ['preset', 'generando'].includes(vista)
+      && !APP.light.desdeVideo) {
     APP.light.desdeVideo = desde;
   }
   $('#panel').scrollTop = 0;
@@ -6203,6 +6208,19 @@ function urlDeVideoLight(paso, nombre) {
    guion o no, hay audio o no, hay MP4 o no. */
 async function cargarVideoLight(pid) {
   const v = APP.light.video;
+  /* LOS AJUSTES DEL MONTAJE DE ESTE VÍDEO, A RELEER. Se guardaban leídos una
+     vez por sesión, y desde que están en la pantalla Vídeo (N9) los cambia
+     también el repaso: el deslizador enseñaba el volumen de antes y, al
+     comparar con ese, no mandaba nada. Y lo que se quedó «montando la
+     música…» con otro vídeo abierto no se queda así para siempre: si ese
+     trabajo sigue, el servidor contesta 409 al segundo intento. */
+  const ajustes = (APP.light.ajustesMontaje || {})[`v:${pid}`];
+  if (ajustes) {
+    ajustes.cargado = false;
+    ajustes.montandoAnimo = false;
+    ajustes.animoPedido = '';
+    ajustes.dbEnVuelo = undefined;
+  }
   v.cargando = true;
   v.error = '';
   pintarLight();
@@ -13139,12 +13157,22 @@ function esBloqueObjeto(x) {
 async function volcarPresetLight(repintar) {
   clearTimeout(APP.light.guardando);
   const pendiente = APP.light.pendiente;
-  if (!pendiente) return;
+  /* SI EL GUARDADO YA HA SALIDO, se espera a que vuelva: «Escuchar» vuelca
+     antes de pedir la muestra (N4), y sin esto, con el PUT todavía en camino,
+     la muestra podía sintetizarse con la voz de antes. */
+  if (!pendiente) {
+    if (APP.light.volcando) { try { await APP.light.volcando; } catch (e) { /* ya avisó */ } }
+    return;
+  }
   APP.light.pendiente = null;
   const { id, ...cambios } = pendiente;
   try {
-    const datos = await pedir(API.presetLight(id),
-      { method: 'PUT', cuerpo: cambios });
+    const enCamino = pedir(API.presetLight(id), { method: 'PUT', cuerpo: cambios });
+    APP.light.volcando = enCamino;
+    let datos;
+    try { datos = await enCamino; } finally {
+      if (APP.light.volcando === enCamino) APP.light.volcando = null;
+    }
     const nueva = datos.preset;
     if (nueva && APP.light.datos) {
       APP.light.datos.presets = presetsLight().map(p => (p.id === id ? nueva : p));
@@ -14719,6 +14747,10 @@ function animoDeLaAutomatica(modo, est, repintar) {
   const caja = h('div', { clase: 'campo' });
   caja.appendChild(h('label', {}, 'Automática con un ánimo para todo el vídeo'));
   const montar = async () => {
+    /* UN TEMA ELEGIDO A MANO se sustituye por la automática: se dice antes. */
+    if ((est.musica || {}).tema && !window.confirm(
+      'Ahora suena un tema que elegiste tú. La música automática lo sustituye por '
+      + 'temas de este ánimo. ¿Seguir?')) return;
     est.montandoAnimo = true; repintar();
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/musica/animo`, {

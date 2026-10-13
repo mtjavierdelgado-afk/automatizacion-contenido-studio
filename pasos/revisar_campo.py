@@ -151,8 +151,12 @@ def normalizar(datos, sobre=None):
             # las notas de mejoras, 13-10-2026)
             original = str(p.get("original") or "").strip()
             mejor = str(p.get("mejor") or "").strip()
-            if original and mejor and original != mejor:
-                problema["original"], problema["mejor"] = original[:1000], mejor[:2000]
+            # un trozo más largo que el tope NO se corta: cortado ya no coincide
+            # con el campo y la pantalla diría «ya no está tal cual»; sin él, el
+            # problema se enseña sin botón de aplicar
+            if (original and mejor and original != mejor
+                    and len(original) <= 1000 and len(mejor) <= 2000):
+                problema["original"], problema["mejor"] = original, mejor
             problemas.append(problema)
     sugerida = str(datos.get("sugerida") or "").strip()
     # «Sirve» SIN problemas no propone nada. Pero un «sirve» que lista

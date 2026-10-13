@@ -141,7 +141,7 @@ def repartir(rutas, cuantas, base_maximo=8, fijas=None):
 
 
 def dibujar_suelta(estilo, destino, nombre, descripcion, calidad="medium",
-                   idioma="", peticion="", referencias=None):
+                   idioma="", peticion="", referencias=None, reutilizar=True):
     """Dibuja UNA lamina con una descripcion libre. -> {ruta, coste_usd}
 
     El mismo camino que `moodboard.dibujar_desde_guia` para una de fabrica --la
@@ -169,9 +169,16 @@ def dibujar_suelta(estilo, destino, nombre, descripcion, calidad="medium",
         reglas.bloque_prompt("prompt_imagen"), con_lamina=True,
         encabezado="Produce one single full-frame image for a style reference sheet.",
         idioma=idioma)
-    png, meta = imagen.generar(prompt, [imagen.normalizar(hoja, cache)],
-                               quality=calidad, tamano="apaisado")
+    refs = [imagen.normalizar(hoja, cache)]
+    # LO YA PAGADO POR UNA PASADA QUE NO TERMINO no se repaga (ver la cabecera
+    # de las huellas en `moodboard`)
+    huella = moodboard.huella_de_lamina(prompt, refs, calidad)
+    ruta = moodboard.lamina_apuntada(destino, nombre, huella) if reutilizar else None
+    if ruta:
+        return {"ruta": ruta, "coste_usd": 0.0, "reutilizada": True}
+    png, meta = imagen.generar(prompt, refs, quality=calidad, tamano="apaisado")
     ruta = os.path.join(destino, f"{nombre}.png")
     with open(ruta, "wb") as fh:
         fh.write(png)
+    moodboard.apuntar_lamina(destino, nombre, huella)
     return {"ruta": ruta, "coste_usd": float(meta.get("coste") or 0.0)}

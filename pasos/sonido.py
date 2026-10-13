@@ -409,6 +409,27 @@ def buscar_musica(animo="sobrio", duracion_s=0, cuantas=12, velocidad="low",
     return salida[:tope]
 
 
+def url_sin_clave(url):
+    """La URL de un tema sin la clave de Jamendo. -> url
+
+    Jamendo mete su `client_id` en los enlaces de audio (`from=app-<id>`), y
+    esos enlaces viajan al navegador en la ficha de cada tema y se guardan en
+    el proyecto al elegirlo: la clave bajaba entera (S2 del analisis del
+    13-10-2026). Se quita `from` y cualquier `client_id`; quien necesite
+    atribuir la escucha es el servidor, que la vuelve a poner en su propia
+    peticion (`/api/musica/escucha`).
+    """
+    from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+    if not url:
+        return url or ""
+    partes = urlsplit(str(url))
+    if not partes.query:
+        return str(url)
+    quedan = [(k, v) for k, v in parse_qsl(partes.query, keep_blank_values=True)
+              if k.lower() not in ("from", "client_id")]
+    return urlunsplit(partes._replace(query=urlencode(quedan)))
+
+
 def _ficha_musica(track):
     info = track.get("musicinfo") or {}
     etiquetas = info.get("tags") or {}
@@ -418,8 +439,8 @@ def _ficha_musica(track):
         "titulo": track.get("name") or "",
         "artista": track.get("artist_name") or "",
         "duracion": float(track.get("duration") or 0),
-        "descarga": track.get("audiodownload") or "",
-        "escucha": track.get("audio") or track.get("audiodownload") or "",
+        "descarga": url_sin_clave(track.get("audiodownload") or ""),
+        "escucha": url_sin_clave(track.get("audio") or track.get("audiodownload") or ""),
         "licencia": track.get("license_ccurl") or "",
         "generos": list(etiquetas.get("genres") or []),
         "instrumentos": list(etiquetas.get("instruments") or [])[:6],
@@ -1236,8 +1257,20 @@ def traer(ficha, familia):
         claves = _claves()
         if claves.get("FREESOUND_API_KEY"):
             cabeceras["Authorization"] = "Token " + claves["FREESOUND_API_KEY"]
-    respuesta = requests.get(url, timeout=180, headers=cabeceras, stream=True)
-    respuesta.raise_for_status()
+    if ficha.get("fuente") == "jamendo" and "from=" not in url:
+        # LA ATRIBUCION, SOLO AQUI: la ficha que se guarda va sin la clave
+        # (`url_sin_clave`), y si Jamendo la quiere en la descarga se pone en
+        # la peticion que sale del servidor, como en la escucha
+        clave = _claves().get("JAMENDO_CLIENT_ID") or ""
+        if clave:
+            url += ("&" if "?" in url else "?") + f"from=app-{clave}"
+    # el error, sin la URL: ahora puede llevar la clave de Jamendo
+    try:
+        respuesta = requests.get(url, timeout=180, headers=cabeceras, stream=True)
+    except requests.RequestException as fallo:
+        raise RuntimeError(f"no se ha podido bajar ({type(fallo).__name__})") from None
+    if not respuesta.ok:
+        raise RuntimeError(f"la descarga ha contestado {respuesta.status_code}")
     temporal = destino + ".parcial"
     with open(temporal, "wb") as fh:
         for trozo in respuesta.iter_content(1 << 16):

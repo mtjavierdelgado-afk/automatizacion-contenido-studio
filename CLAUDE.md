@@ -253,13 +253,18 @@ La burbuja de abajo a la derecha es `pasos/asistente.py` más las rutas
   estado, los trabajos, la bitácora, cancelar un trabajo. Cada herramienta
   habla con la API del Estudio por HTTP (`ESTUDIO_API`, que pone `app.py` al
   arrancar), nunca importando código: lo que hace es lo que haría la
-  pantalla. Sin Bash, sin escribir, sin internet. `secretos/` queda
-  fuera por REGLA DE PERMISO del CLI (`Read(./secretos/**)`, en
-  `asistente.vetos_de_lectura`), y está medido: pedirle que lo abra devuelve
-  «File is in a directory that is denied by your permission settings». El
-  prompt de sistema también se lo dice, pero la regla es la que manda. Si
-  alguna vez las claves se guardan en otra carpeta DENTRO del repo, se añade a
-  `CARPETAS_VETADAS` antes que nada.
+  pantalla. Sin Bash, sin escribir, sin internet. **`Read` va acotado** a la
+  carpeta del Estudio y a la de proyectos (`asistente.herramientas_permitidas`):
+  `Read` a secas lo autorizaba en todo el disco, y en el VPS las claves NO están
+  dentro del código (`/opt/as-video-studio/datos/secretos`). Encima van los
+  vetos de `asistente.vetos_de_lectura`: `./secretos`, el almacén donde esté
+  (`ESTUDIO_SECRETOS`), la sesión del CLI (`~/.claude`, `CLAUDE_CONFIG_DIR`) y
+  `.env`, `claves.json` y `.credentials.json` por nombre en todo el disco
+  (`Read(//**/.env)`: la forma `**/.env` solo vale dentro del cwd). Está
+  medido con el CLI de verdad (13-10-2026): lee el código y los proyectos, y
+  niega las seis rutas con secretos. El prompt de sistema también se lo dice,
+  pero la regla es la que manda. Si alguna vez las claves se guardan en otra
+  carpeta, se añade a `carpetas_de_secretos` antes que nada.
 - **Contesta con sonnet/medium a propósito**, no con el defecto del canal
   (opus/xhigh): un chat pide segundos. No pasa por `cli_claude.por_defecto_de`,
   que subiría al defecto del canal. Se cambia con `ESTUDIO_ASISTENTE_MODELO` y

@@ -37,6 +37,7 @@ tarifas cambien despues.
 import contextlib
 import functools
 import json
+import math
 import os
 import re
 import threading
@@ -107,6 +108,7 @@ def guardar_tarifas(cambios):
     if not isinstance(cambios, dict):
         raise TypeError("las tarifas se actualizan con un dict")
     actual = json.loads(json.dumps(tarifas(refrescar=True)))
+    _validar_tarifas(cambios, actual)
     for bloque, valores in cambios.items():
         if isinstance(valores, dict) and isinstance(actual.get(bloque), dict):
             actual[bloque].update(valores)
@@ -117,6 +119,34 @@ def guardar_tarifas(cambios):
     _TARIFAS["datos"] = actual
     _TARIFAS["sello"] = _sello(RUTA_TARIFAS)
     return actual
+
+
+def _validar_tarifas(cambios, actual, ruta="", en_precio=False):
+    """Lanza ValueError si los cambios romperian la tabla. No devuelve nada.
+
+    Se guardaba lo que llegara: `{"usd_por_caracter": "abc"}` daba 200, y desde
+    ese momento el plan y el boton de generar de TODOS los videos caian con un
+    500 (`float('abc')`) hasta que alguien editara `tarifas.json` a mano (R1
+    del analisis del 13-10-2026). Dos reglas, las que la tabla necesita:
+    un bloque que es un objeto sigue siendo un objeto, y todo lo que cuelga de
+    una clave `usd_...` (menos su `nota`) es un numero >= 0, o `None` para
+    quitarlo.
+    """
+    for clave, valor in cambios.items():
+        nombre = f"{ruta}{clave}"
+        previo = actual.get(clave) if isinstance(actual, dict) else None
+        if isinstance(previo, dict) and not isinstance(valor, dict):
+            raise ValueError(f"«{nombre}» tiene que ser un objeto, como estaba")
+        precio = en_precio or str(clave).startswith("usd_")
+        if isinstance(valor, dict):
+            _validar_tarifas(valor, previo if isinstance(previo, dict) else {},
+                             f"{nombre}.", precio)
+        # `None` es «sin tarifa» (la pantalla lo manda para quitarla) y se lee
+        # como cero; lo que no vale es un texto, un booleano o un negativo
+        elif precio and clave != "nota" and valor is not None and (
+                _numero(valor) is None or not math.isfinite(_numero(valor))):
+            raise ValueError(f"«{nombre}» tiene que ser un número mayor o igual "
+                             f"que cero (llegó {valor!r})")
 
 
 def _numero(valor):

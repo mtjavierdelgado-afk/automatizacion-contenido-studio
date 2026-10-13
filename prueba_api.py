@@ -2754,6 +2754,189 @@ def probar_que_la_musica_no_tumba_el_montaje():
        f"y lo que el servicio repita de la clave se tacha: {[f['mensaje'] for f in fichas]}")
 
 
+def probar_lo_del_analisis_del_13_10():
+    """Lo que encontro el analisis a fondo del 13-10-2026 y se arreglo.
+
+    En proceso y con dobles: ni red, ni claves, ni una imagen pagada.
+      S2  la clave de Jamendo no viaja en el enlace de escucha
+      D1  «Generar» no se lanza mientras la cola de notas dibuja
+      D3  cuatro clics en una lamina lanzan UN trabajo
+      R1  una tarifa mal escrita no se guarda (dejaba sin «Generar» a todos)
+    """
+    seccion("ANALISIS DEL 13-10: CLAVES, PAGAR DOS VECES Y TARIFAS")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    sys.path.insert(0, os.path.join(RAIZ_ESTUDIO, "pasos"))
+    import threading as _hilos                                # noqa: PLC0415
+    import app as servidor                                    # noqa: PLC0415
+    import requests as _requests                              # noqa: PLC0415
+    import sonido                                             # noqa: PLC0415
+
+    # ---- S2: el client_id de Jamendo en `audio` (from=app-<id>) -------------
+    secreto = "c1a2v3e4"
+    ficha = sonido._ficha_musica({
+        "id": 7, "name": "tema", "duration": 60,
+        "audio": f"https://prod-1.storage.jamendo.com/?trackid=7&format=mp31&from=app-{secreto}",
+        "audiodownload": f"https://prod-1.storage.jamendo.com/download/track/7/mp32/?from=app-{secreto}"})
+    ok(secreto not in json.dumps(ficha),
+       f"la ficha de un tema ya no lleva la clave de Jamendo: {ficha['escucha']}")
+    ok("trackid=7" in ficha["escucha"], "y el enlace sigue sirviendo para escuchar")
+    pedidas = []
+
+    def get_falso(url, **_k):
+        pedidas.append(url)
+        raise _requests.ConnectionError(f"Max retries exceeded with url: {url}")
+
+    del_servidor = servidor._sonido()        # el MISMO modulo que usa la ruta
+    claves_reales, get_real = del_servidor._claves, _requests.get
+    del_servidor._claves = lambda: {"JAMENDO_CLIENT_ID": secreto}
+    _requests.get = get_falso
+    try:
+        servidor.escuchar_tema(ficha["escucha"])
+        ok(False, "sin red, escuchar contesta un error")
+    except servidor.ErrorApi as fallo:
+        igual(fallo.codigo, 502, "sin red, escuchar contesta 502")
+        ok(secreto not in fallo.mensaje, f"y el error no repite la URL con la clave: "
+                                         f"{fallo.mensaje}")
+    finally:
+        del_servidor._claves, _requests.get = claves_reales, get_real
+    ok(pedidas and f"from=app-{secreto}" in pedidas[0],
+       "la atribucion la pone el SERVIDOR en su propia peticion a Jamendo")
+
+    # ---- D1: «Generar» con la cola de notas dibujando -------------------------
+    lanzados = []
+
+    class _Gestor:
+        def __init__(self, dibujando):
+            self.dibujando = dibujando
+
+        def estado(self, tid):
+            return {"estado": "ejecutando" if (tid == "cola" and self.dibujando)
+                    else "listo", "id": tid}
+
+        def lanzar(self, nombre, *a, **k):
+            lanzados.append(nombre)
+            return "t-" + str(len(lanzados))
+
+        def listar(self, activos=False):
+            return []
+
+    class _Estado:
+        def estado_de(self, paso):
+            return "listo"
+
+    class _Bit:
+        def anotar(self, *a, **k):
+            pass
+
+    class _Ctx:
+        def __init__(self, dibujando):
+            self.id = "d1-prueba"
+            self.gestor = _Gestor(dibujando)
+            self.estado = _Estado()
+            self.bitacora = _Bit()
+
+    plan = {"tareas": 1, "impedimentos": [], "segundos": 1.0,
+            "coste": {"usd_total": 0.0, "usd_por_generar": 0.0, "imagenes_por_generar": 0},
+            "fases": [{"pestana": "video", "tareas": [{"id": "assets", "paso": "assets"}]}]}
+    sustitutos = {"contexto": None, "_con_origen": lambda ctx, p: p,
+                  "_trabajo_de_cadena": lambda ctx: None,
+                  "_trabajo_de_receta": lambda ctx, p: None,
+                  "_plan_de_generacion": lambda *a, **k: plan,
+                  "_apuntar_tanda": lambda *a, **k: None,
+                  "_registrar_trabajo": lambda *a, **k: None}
+    reales = {n: getattr(servidor, n) for n in sustitutos}
+    try:
+        for n, f in sustitutos.items():
+            if f is not None:
+                setattr(servidor, n, f)
+        for dibujando in (True, False):
+            ctx = _Ctx(dibujando)
+            servidor.contexto = lambda _pid, _c=ctx: _c
+            servidor._COLA_NOTAS[ctx.id] = {"cola": [], "trabajo": "cola"}
+            del lanzados[:]
+            try:
+                servidor.generar_video(ctx.id, {"tanda": "video"})
+                codigo = 202
+            except servidor.ErrorApi as fallo:
+                codigo = fallo.codigo
+            if dibujando:
+                igual(codigo, 409, "con la cola de notas dibujando, «Generar imágenes» da 409")
+                igual(lanzados, [], "y no lanza nada: dos trabajos de imágenes a la vez "
+                                    "repagaban planos o tapaban la imagen recién pagada")
+            else:
+                igual(len(lanzados), 1, "con la cola parada, se lanza como siempre")
+    finally:
+        for n, f in reales.items():
+            setattr(servidor, n, f)
+        servidor._COLA_NOTAS.pop("d1-prueba", None)
+
+    # ---- D3: cuatro clics en «Regenerar lamina» a la vez ----------------------
+    activos, lanzados_taller = [], []
+
+    class _GestorTaller:
+        def listar(self, activos=False):
+            return list(activos_lista)
+
+        def lanzar(self, nombre, *a, **k):
+            time.sleep(0.2)                  # lo que tarda en arrancar de verdad
+            lanzados_taller.append(nombre)
+            activos_lista.append({"id": nombre})
+            return "t"
+
+    activos_lista = activos
+
+    class _CtxTaller:
+        id = "d3-taller-prueba"
+        gestor = _GestorTaller()
+
+    respuestas = []
+
+    def clic():
+        try:
+            servidor._lanzar_en_taller(_CtxTaller(), "preset_light", lambda *a: None)
+            respuestas.append(202)
+        except servidor.ErrorApi:
+            respuestas.append(409)
+
+    hilos = [_hilos.Thread(target=clic) for _ in range(4)]
+    for h in hilos:
+        h.start()
+    for h in hilos:
+        h.join()
+    igual(len(lanzados_taller), 1, "cuatro clics a la vez lanzan UN trabajo de láminas "
+                                   "(antes: hasta tres, cada uno pagando su imagen)")
+    igual(sorted(respuestas), [202, 409, 409, 409], "y los otros tres dicen 409")
+
+    # ---- R1: una tarifa mal escrita ------------------------------------------
+    from nucleo import coste as _coste                        # noqa: PLC0415
+    carpeta = tempfile.mkdtemp(prefix="estudio_tarifas_")
+    copia = os.path.join(carpeta, "tarifas.json")
+    shutil.copy(os.path.join(RAIZ_ESTUDIO, "tarifas.json"), copia)
+    ruta_real = _coste.RUTA_TARIFAS
+    _coste.RUTA_TARIFAS = copia
+    _coste.tarifas(refrescar=True)
+    try:
+        for cuerpo in ({"usd_por_caracter": "abc"}, {"tarifas": {"tts": "x"}},
+                       {"tarifas": {"openai": {"usd_por_imagen": {"1024x1024": {"low": -1}}}}}):
+            try:
+                servidor.escribir_tarifas(cuerpo)
+                ok(False, f"{cuerpo} no se guarda")
+            except servidor.ErrorApi:
+                ok(True, f"{cuerpo} no se guarda: 400 con su motivo")
+        with open(copia, encoding="utf-8") as fh:
+            igual(json.load(fh)["tts"]["usd_por_caracter"],
+                  _coste.tarifas(refrescar=True)["tts"]["usd_por_caracter"],
+                  "y la tabla se queda como estaba")
+        servidor.escribir_tarifas({"usd_por_caracter": 0.00007})
+        igual(_coste.tarifa_caracter(), 0.00007, "un número de verdad sí se guarda")
+        servidor.escribir_tarifas({"usd_por_caracter": None})
+        ok(True, "y quitarla (la pantalla manda null) también")
+    finally:
+        _coste.RUTA_TARIFAS = ruta_real
+        _coste.tarifas(refrescar=True)
+        shutil.rmtree(carpeta, ignore_errors=True)
+
+
 def probar_el_mensaje_publico_de_una_tanda():
     """Una tanda dice por donde va DOS veces, y las dos a la vez.
 
@@ -4761,6 +4944,7 @@ def main():
         probar_el_avisador_y_los_tramos()
         probar_el_mensaje_publico_de_una_tanda()
         probar_que_la_musica_no_tumba_el_montaje()
+        probar_lo_del_analisis_del_13_10()
         probar_el_reloj_de_lo_que_queda_por_hacer()
         probar_que_la_barra_light_no_ensena_la_cocina()
         probar_value_de_los_textarea()

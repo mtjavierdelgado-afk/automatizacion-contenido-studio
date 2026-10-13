@@ -21,6 +21,11 @@ vídeos, estilos, claves y contraseña no se tocan.
   pusieron y cuántas tienes que corregir a mano (y esas se quedan a la vista).
   Y cada corrección va a su palabra: «esta → está» ya no cambia la «esta» de
   dentro de «estaba».
+- **Los ajustes de la voz de un estilo se guardan todos, y «Escuchar» suena
+  con ellos.** Si tocabas dos mandos seguidos (la velocidad y enseguida el
+  color), solo se guardaba el último. Y después de cambiar el ritmo, que mueve
+  el aire de la voz, «Escuchar» repetía la muestra de antes hasta recargar la
+  página.
 
 **Dos de tus notas de mejoras (13 de octubre)**
 - **«Un vídeo nuevo» empieza vacío** después de crear uno. Antes salía con el

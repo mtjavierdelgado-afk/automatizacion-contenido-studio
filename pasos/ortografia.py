@@ -1,7 +1,7 @@
 """El corrector de ORTOGRAFIA de lo que acaba escrito en pantalla: el guion
 (antes de grabar la voz) y los subtitulos (de un video ya hecho).
 
-    revisar({id: texto}, cwd=None) -> {id: {"texto": corregido, "cambios": [[mal, bien], ...]}}
+    revisar({id: texto}, cwd=None, informe=None) -> {id: {"texto": corregido, "cambios": [[mal, bien], ...]}}
 
 Solo vuelven los textos que cambian. Corrige ORTOGRAFIA y nada mas: tildes,
 letras cambiadas, mayusculas al empezar una frase, los signos de apertura ¿ ¡
@@ -36,8 +36,23 @@ except ImportError:                                   # corriendo desde pasos/
 MODELO = "sonnet"
 ESFUERZO = "low"
 #: Cuantos textos van en cada llamada: un video largo son cientos de planos y
-#: una sola llamada con todos tarda y se corta.
-POR_LLAMADA = 60
+#: una sola llamada con todos tarda y se corta. Eran 60; con 60 un JSON roto
+#: (una comilla sin escapar, una coma de mas) se llevaba por delante la
+#: revision de 60 textos, y cuanto mas larga la respuesta mas facil que salga
+#: rota. Con 20 se reintenta poco y se pierde poco (N6 de las notas de
+#: mejoras, 13-10-2026).
+POR_LLAMADA = 20
+#: Una tanda cuyo JSON no se puede leer se vuelve a pedir UNA vez: el modelo
+#: contesta distinto cada vez, y lo normal es que la segunda salga bien.
+REINTENTOS_JSON = 1
+
+#: Lo que lee la persona cuando NINGUNA tanda da un JSON legible. El detalle
+#: tecnico va aparte, despues de una linea en blanco: la pantalla
+#: (`partirError` en web/app.js) ensena el primer parrafo como titular y pliega
+#: el resto. Antes el titular era «la revision de ortografia no es un JSON
+#: legible: Expecting ',' delimiter…», tal cual.
+RESPUESTA_ROTA = ("El corrector devolvió una respuesta rota; pulsa «Revisar otra vez». "
+                  "No se ha cambiado nada.")
 MAX_TEXTO = 2000
 
 SISTEMA = ("Eres corrector ortografico de castellano. Corriges SOLO ortografia y "
@@ -93,23 +108,61 @@ def _lote(textos):
                      for i, t in textos)
 
 
-def revisar(textos, cwd=None):
-    """{id: texto} -> {id: {"texto", "cambios"}} solo de los que cambian."""
-    if not isinstance(textos, dict):
-        raise ErrorOrtografia("hacen falta los textos a revisar")
-    pares = [(str(k), str(v)) for k, v in textos.items() if str(v or "").strip()]
-    if not pares:
-        return {}
-    salida = {}
-    for desde in range(0, len(pares), POR_LLAMADA):
-        trozo = pares[desde:desde + POR_LLAMADA]
-        instruccion = INSTRUCCION.format(textos=_lote(trozo))
+class _JsonRoto(RuntimeError):
+    """Una tanda cuya respuesta no se ha podido leer ni a la segunda."""
+
+
+def _pedir_tanda(trozo, cwd):
+    """Las correcciones de una tanda, leidas del JSON del modelo. Si el JSON no
+    se puede leer se pide otra vez (`REINTENTOS_JSON`); si sigue roto, lanza
+    `_JsonRoto` con el detalle tecnico. Los fallos del CLI (sin cupo, sin
+    sesion, plazo vencido) NO se reintentan aqui: no los arregla preguntar otra
+    vez, y suben como siempre."""
+    instruccion = INSTRUCCION.format(textos=_lote(trozo))
+    ultimo = ""
+    for _intento in range(1 + REINTENTOS_JSON):
         respuesta, _sobre = cli_claude.ejecutar(
             instruccion, modelo=MODELO, esfuerzo=ESFUERZO, cwd=cwd,
             base_tiempo_s=180, sistema=SISTEMA,
             extra=["--no-session-persistence"], para="la revision de ortografia")
-        datos = comun.extraer_json(respuesta, "la revision de ortografia")
-        correcciones = (datos or {}).get("correcciones") if isinstance(datos, dict) else None
+        try:
+            datos = comun.extraer_json(respuesta, "la revision de ortografia")
+        except RuntimeError as fallo:
+            ultimo = str(fallo)
+            continue
+        return (datos or {}).get("correcciones") if isinstance(datos, dict) else None
+    raise _JsonRoto(ultimo)
+
+
+def revisar(textos, cwd=None, informe=None):
+    """{id: texto} -> {id: {"texto", "cambios"}} solo de los que cambian.
+
+    POR TANDAS, Y UNA TANDA ROTA NO SE LLEVA LAS DEMAS (N6 de las notas de
+    mejoras, 13-10-2026): antes un JSON roto en cualquier tanda lanzaba y se
+    perdia la revision ENTERA, tambien lo ya revisado. Ahora una tanda que no
+    se puede leer ni a la segunda se salta, y lo que salio bien vuelve. Si se
+    pasa un dict en `informe`, ahi se apunta `sin_revisar` (cuantos textos se
+    quedaron sin revisar) y `detalle` (el error tecnico de la ultima tanda
+    rota), para que la pantalla lo diga. Si no sale NINGUNA tanda, lanza
+    `ErrorOrtografia` con `RESPUESTA_ROTA` de titular."""
+    if not isinstance(textos, dict):
+        raise ErrorOrtografia("hacen falta los textos a revisar")
+    pares = [(str(k), str(v)) for k, v in textos.items() if str(v or "").strip()]
+    if informe is not None:
+        informe.update({"sin_revisar": 0, "detalle": ""})
+    if not pares:
+        return {}
+    salida = {}
+    sin_revisar, tandas_bien, detalle = 0, 0, ""
+    for desde in range(0, len(pares), POR_LLAMADA):
+        trozo = pares[desde:desde + POR_LLAMADA]
+        try:
+            correcciones = _pedir_tanda(trozo, cwd)
+        except _JsonRoto as fallo:
+            sin_revisar += len(trozo)
+            detalle = str(fallo)
+            continue
+        tandas_bien += 1
         originales = dict(trozo)
         for cid, ficha in (correcciones or {}).items():
             cid = str(cid)
@@ -122,6 +175,10 @@ def revisar(textos, cwd=None):
             cambios = [[str(a)[:80], str(b)[:80]] for a, b in
                        (c for c in (ficha.get("cambios") or []) if isinstance(c, (list, tuple)) and len(c) == 2)]
             salida[cid] = {"texto": nuevo, "cambios": cambios[:20]}
+    if not tandas_bien:
+        raise ErrorOrtografia(f"{RESPUESTA_ROTA}\n\n{detalle}")
+    if informe is not None:
+        informe.update({"sin_revisar": sin_revisar, "detalle": detalle})
     return salida
 
 

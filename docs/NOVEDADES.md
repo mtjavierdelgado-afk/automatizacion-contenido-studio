@@ -11,10 +11,12 @@ vídeos, estilos, claves y contraseña no se tocan.
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
 **Tres arreglos del informe de pruebas del modo foto (12 de octubre)**
-- **Si Jamendo no responde, el vídeo se monta igual, sin música**, y al
-  terminar te avisa de que ha salido sin ella. Antes «Montar el vídeo» se caía
+- **Si Jamendo o FreeSound no responden, el vídeo se monta igual, sin música
+  o sin efectos**, y al terminar te avisa. Antes «Montar el vídeo» se caía
   entero y el error enseñaba la clave de Jamendo. La próxima vez que montes,
-  vuelve a intentar la música sola; o móntala en «Música y efectos».
+  vuelve a intentarlo solo; o búscalos en «Música y efectos».
+- **«Probar» las claves ya no enseña la de Jamendo** cuando Jamendo no
+  responde, ni nada de una clave que repita el propio servicio en su error.
 - **Corregir el guion a mano ya no lo marca como «Guion obsoleto»**, y
   «Regenerar el guion» no reescribe encima de tu corrección. La voz sí queda
   por regrabar, como siempre: dice la frase de antes.

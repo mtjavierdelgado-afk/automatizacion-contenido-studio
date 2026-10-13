@@ -7350,41 +7350,74 @@ def _correr_banda(avisar, ctx, tramos):
     return {**ficha, "resumen": sonido.describir(ctx.estado.params("render") or {})}
 
 
-def _correr_banda_de_tanda(avisar, ctx):
-    """La banda sonora DENTRO de una tanda: si no sale, el video sigue sin ella.
+def _sonido_que_no_tumba(avisar, ctx, correr, clave, evento, avisos):
+    """Corre la musica o los efectos de una tanda sin dejar que tumben el MP4.
 
-    La musica es prescindible y el MP4 no. Con Jamendo caido (o sin su clave),
-    `_correr_banda` lanzaba, la excepcion cortaba la receta y «Montar el video»
-    se caia entero por algo que el video puede no llevar (A3 del informe de la
-    Etapa Foto A). Aqui el fallo se apunta, se avisa y la tanda sigue: el
-    render sin `musica` en params monta sin musica, como siempre.
+    La musica y los efectos son prescindibles y el MP4 no. Con Jamendo o
+    FreeSound caidos (o sin su clave), la tarea lanzaba, la excepcion cortaba la
+    receta y «Montar el video» se caia entero por algo que el video puede no
+    llevar (A3 del informe de la Etapa Foto A, y lo mismo con FreeSound). Aqui
+    el fallo se apunta en la bitacora, se avisa y la tanda sigue: el render sin
+    `musica`/`efectos` en params monta sin ellos, como siempre.
 
-    NO SE ESCRIBE NADA EN PARAMS: `musica` sigue vacia, asi que la tarea sigue
+    NO SE ESCRIBE NADA EN PARAMS: la clave sigue vacia, asi que la tarea sigue
     sin estar al dia (`_esta_al_dia`) y la proxima tanda vuelve a intentarlo
-    sola. Escribir un «sin musica» moveria la firma del render (regla 1).
+    sola. Escribir un «sin musica» moveria la firma del render (regla 1). Con
+    «Rehacer todo» se vuelve a pedir aunque ya hubiera, y si falla se queda lo
+    de antes: por eso el aviso mira si ya habia.
 
-    Cancelar SI corta: es una persona pidiendo parar, no un fallo de la musica.
-    El boton suelto de «Musica y efectos» sigue fallando a la vista, que ahi lo
-    que se ha pedido es justo la musica.
+    Cancelar SI corta: es una persona pidiendo parar, no un fallo del sonido.
+    Los botones sueltos de «Musica y efectos», el repaso y «volver a la
+    automatica» siguen fallando a la vista: ahi lo pedido es justo eso.
     """
     try:
-        return _correr_banda(avisar, ctx, None)
+        return correr()
     except Exception as fallo:                              # noqa: BLE001
         if type(fallo).__name__ == "Cancelado":
             raise
         motivo = str(fallo).strip() or type(fallo).__name__
-        ctx.bitacora.anotar("banda_sonora_fallida", "render", {"error": motivo[:300]})
-        # con «Rehacer todo» la banda se vuelve a montar aunque ya hubiera una,
-        # y si falla se queda la de antes: decir «sin música» seria mentir
-        tenia = bool(((ctx.estado.params("render") if ctx.estado else None)
-                      or {}).get("musica"))
-        aviso = ((f"No se ha podido montar otra música ({motivo}): el vídeo se "
-                  f"queda con la que ya tenía.") if tenia else
-                 (f"El vídeo sale sin música: {motivo}. Cuando se pueda, móntala "
-                  f"en «Música y efectos» y vuelve a montar el vídeo."))
+        ctx.bitacora.anotar(evento, "render", {"error": motivo[:300]})
+        # LO QUE SE ENSEÑA, corto y sin la peticion: el error crudo de requests
+        # (FreeSound sin red) es una linea de doscientos caracteres con la URL,
+        # y un 503 trae el HTML de la pagina de error
+        import requests                                     # noqa: PLC0415
+        if isinstance(fallo, requests.RequestException):
+            motivo = f"el servicio no responde ({type(fallo).__name__})"
+        elif len(motivo) > 160:
+            motivo = motivo[:160].rstrip() + "…"
+        # «ya tenia» es que habia algo de verdad: unos efectos que se buscaron y
+        # no trajeron nada quedan guardados como listas vacias
+        antes = ((ctx.estado.params("render") if ctx.estado else None) or {}).get(clave)
+        tenia = (any(antes.values()) if isinstance(antes, dict) and clave == "efectos"
+                 else bool(antes))
+        aviso = avisos[1].format(motivo=motivo) if tenia else avisos[0].format(motivo=motivo)
         avisar(None, f"AVISO: {aviso}")
-        return {"resumen": "música de antes" if tenia else "sin música",
-                "avisos": [aviso]}
+        return {"resumen": avisos[3] if tenia else avisos[2], "avisos": [aviso]}
+
+
+def _correr_banda_de_tanda(avisar, ctx):
+    """La banda sonora DENTRO de una tanda: si no sale, el video sigue sin ella."""
+    return _sonido_que_no_tumba(
+        avisar, ctx, lambda: _correr_banda(avisar, ctx, None), "musica",
+        "banda_sonora_fallida",
+        ("El vídeo sale sin música: {motivo}. Cuando se pueda, móntala en "
+         "«Música y efectos» y vuelve a montar el vídeo.",
+         "No se ha podido montar otra música ({motivo}): el vídeo se queda con "
+         "la que ya tenía.",
+         "sin música", "música de antes"))
+
+
+def _correr_efectos_de_tanda(avisar, ctx):
+    """Los efectos DENTRO de una tanda: si FreeSound no responde, sin ellos."""
+    return _sonido_que_no_tumba(
+        avisar, ctx,
+        lambda: _correr_surtir_efectos(avisar, ctx, list(_sonido().PAPELES), False),
+        "efectos", "efectos_fallidos",
+        ("El vídeo sale sin efectos de sonido: {motivo}. Cuando se pueda, "
+         "búscalos en «Música y efectos» y vuelve a montar el vídeo.",
+         "No se han podido buscar otros efectos ({motivo}): el vídeo se queda "
+         "con los que ya tenía.",
+         "sin efectos", "efectos de antes"))
 
 
 @app.get("/api/proyectos/{pid}/sonido/arco")
@@ -7911,18 +7944,18 @@ def _correr_assets_de_tanda(avisar, ctx, unidades, opciones):
 
 
 def _que_hace(tarea_id, ctx, receta, modo="pendientes", solo_montar=False,
-              musica_prescindible=False):
+              sonido_prescindible=False):
     """(funcion, args) de una tarea. Levanta si la tarea no se sabe hacer.
 
     `solo_montar` solo lo entiende la tarea del MP4, y es la diferencia entre
     volver a dibujar los 98 planos en un navegador y volver a mezclar el audio
     sobre los clips que ya hay. Ver `repaso.solo_mezcla`.
 
-    `musica_prescindible` solo lo entiende la banda sonora: en la tanda que
-    genera el video, si la musica no sale el video sigue sin ella
-    (`_correr_banda_de_tanda`). En el repaso y en «volver a la automatica» NO:
-    ahi lo que se ha pedido es justo la musica, y tragarse el fallo daria la
-    nota por aplicada sin musica nueva.
+    `sonido_prescindible` solo lo entienden la banda sonora y los efectos: en
+    la tanda que genera el video, si no salen el video sigue sin ellos
+    (`_sonido_que_no_tumba`). En el repaso y en «volver a la automatica» NO:
+    ahi lo que se ha pedido es justo eso, y tragarse el fallo daria la nota
+    por aplicada sin musica nueva.
     """
     if tarea_id == "ingesta":
         return _un_paso(ctx, "ingesta", modo)
@@ -7959,10 +7992,12 @@ def _que_hace(tarea_id, ctx, receta, modo="pendientes", solo_montar=False,
     if tarea_id == "callouts":
         return _un_paso(ctx, "callouts", modo)
     if tarea_id == "banda_sonora":
-        if musica_prescindible:
+        if sonido_prescindible:
             return _correr_banda_de_tanda, (ctx,)
         return _correr_banda, (ctx, None)
     if tarea_id == "efectos":
+        if sonido_prescindible:
+            return _correr_efectos_de_tanda, (ctx,)
         return _correr_surtir_efectos, (ctx, list(_sonido().PAPELES), False)
     if tarea_id == "render":
         return _un_paso(ctx, "render", modo,
@@ -8074,7 +8109,7 @@ def _tramos_por_tiempo(ctx, tandas, modo):
 
 def _correr_receta(avisar, ctx, pestana, receta, tareas, modo,
                    solo_montar=False, hechas_antes=0, total_global=0,
-                   musica_prescindible=False):
+                   sonido_prescindible=False):
     """Recorre la receta: tanda a tanda, y dentro de una tanda a la vez.
 
     El progreso es por TAREA y no por tanda: lo que se lee en pantalla es
@@ -8151,7 +8186,7 @@ def _correr_receta(avisar, ctx, pestana, receta, tareas, modo,
 
         avisar_tarea(0.0, "")
         funcion, args = _que_hace(tarea["id"], ctx, receta, modo, solo_montar,
-                                  musica_prescindible)
+                                  sonido_prescindible)
         arranque = time.time()
         resultado = funcion(avisar_tarea, *args)
         ficha = {"tarea": tarea["id"], "nombre": tarea["nombre"],
@@ -12635,12 +12670,12 @@ def _correr_cadena(avisar, ctx, pestanas, modo, datos, plan):
                    if t not in sin]
         if not recetas.orden_de(pestana, puestas):
             continue
-        # LA MUSICA ES PRESCINDIBLE AQUI: si no sale, el MP4 sale sin ella y
-        # el aviso viaja en `avisos` (ver `_correr_banda_de_tanda`)
+        # LA MUSICA Y LOS EFECTOS SON PRESCINDIBLES AQUI: si no salen, el MP4
+        # sale sin ellos y el aviso viaja en `avisos` (`_sonido_que_no_tumba`)
         hecho = _correr_receta(avisar_fase, ctx, pestana, receta, puestas, modo,
                                hechas_antes=hechas_antes,
                                total_global=total_publico,
-                               musica_prescindible=True)
+                               sonido_prescindible=True)
         # LAS QUE DE VERDAD HAN CORRIDO, no las que el plan preveia: entre
         # planificar y correr una tarea puede haber dejado de estar al dia, y
         # entonces el contador de la pestana siguiente arrancaria por debajo.

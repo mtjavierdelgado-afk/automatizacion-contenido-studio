@@ -2616,11 +2616,16 @@ def probar_que_la_musica_no_tumba_el_montaje():
         sonido.requests.get = original_get
 
     # ---- quien corre la banda: prescindible SOLO en la tanda del video
-    igual(servidor._que_hace("banda_sonora", None, {}, musica_prescindible=True)[0],
+    igual(servidor._que_hace("banda_sonora", None, {}, sonido_prescindible=True)[0],
           servidor._correr_banda_de_tanda,
           "en la tanda que monta el video, la banda va por el camino prescindible")
     igual(servidor._que_hace("banda_sonora", None, {})[0], servidor._correr_banda,
           "en el repaso y en «volver a la automatica», la de siempre: falla a la vista")
+    igual(servidor._que_hace("efectos", None, {}, sonido_prescindible=True)[0],
+          servidor._correr_efectos_de_tanda,
+          "y los efectos tambien: FreeSound caido no tumba el MP4")
+    igual(servidor._que_hace("efectos", None, {})[0], servidor._correr_surtir_efectos,
+          "fuera de esa tanda, los efectos fallan a la vista como siempre")
 
     anotado = []
 
@@ -2665,18 +2670,27 @@ def probar_que_la_musica_no_tumba_el_montaje():
         avisar_tarea(1.0, "montado")
         return {"resumen": "1 clip"}
 
+    def efectos_caidos(_avisar, _ctx, _papeles, _salteado):
+        # lo que lanza `sonido.buscar_efectos` con FreeSound devolviendo un 503
+        raise RuntimeError("Freesound 503: Service Unavailable")
+
     original_banda, original_que_hace = servidor._correr_banda, servidor._que_hace
+    original_efectos = servidor._correr_surtir_efectos
     servidor._correr_banda = banda_caida
+    servidor._correr_surtir_efectos = efectos_caidos
     servidor._que_hace = lambda tid, ctx, receta, modo="pendientes", solo_montar=False, \
-        musica_prescindible=False: (
-            original_que_hace(tid, ctx, receta, modo, solo_montar, musica_prescindible)
-            if tid == "banda_sonora" else (render_falso, ()))
+        sonido_prescindible=False: (
+            original_que_hace(tid, ctx, receta, modo, solo_montar, sonido_prescindible)
+            if tid in ("banda_sonora", "efectos") else (render_falso, ()))
     dichos = []
     try:
+        # LA MISMA FORMA QUE LA TANDA DE VERDAD: musica y efectos van a la vez
+        # (en una tanda del pool) y el render detras
         plan = {"segundos": 10.0, "fases": [
             {"pestana": "render", "desde": 0.0, "segundos": 10.0,
-             "pendientes": ["banda_sonora", "render"],
-             "tareas": [{"id": "banda_sonora"}, {"id": "render"}]}]}
+             "pendientes": ["banda_sonora", "efectos", "render"],
+             "tareas": [{"id": "banda_sonora"}, {"id": "efectos"},
+                        {"id": "render"}]}]}
         try:
             salida = servidor._correr_cadena(
                 lambda v, m="", p="": dichos.append(m), _Ctx(), ["render"],
@@ -2687,10 +2701,13 @@ def probar_que_la_musica_no_tumba_el_montaje():
         ok("error" not in salida,
            f"la tanda del MP4 NO se cae porque Jamendo no responda "
            f"({salida.get('error', 'sigue')})")
-        ok(montado, "y el vídeo se monta igual, sin música")
+        ok(montado, "y el vídeo se monta igual, sin música ni efectos")
         avisos = salida.get("avisos") or []
-        ok(avisos and "sin música" in avisos[0],
+        ok(any("sin música" in a for a in avisos),
            f"y el resultado de la tanda lo avisa, que la pantalla lo enseña: {avisos}")
+        ok(any("sin efectos" in a for a in avisos),
+           f"y avisa tambien de los efectos (FreeSound caido): {avisos}")
+        ok("efectos_fallidos" in anotado, "que tambien quedan en la bitácora")
         ok(not any(secreto in x for x in avisos + dichos),
            "sin la clave de Jamendo en el aviso ni en la barra")
         ok("banda_sonora_fallida" in anotado, "y queda apuntado en la bitácora")
@@ -2708,7 +2725,33 @@ def probar_que_la_musica_no_tumba_el_montaje():
             ok(True, "cancelar la tanda mientras monta la música la para")
     finally:
         servidor._correr_banda, servidor._que_hace = original_banda, original_que_hace
+        servidor._correr_surtir_efectos = original_efectos
         sonido.requests.get = original_get
+
+    # ---- «PROBAR» EN CONFIGURACION TAMPOCO ENSEÑA LA CLAVE --------------------
+    # `comprobar_claves._pedir` devolvia el texto de la excepcion de requests,
+    # con la URL dentro: con Jamendo sin red, la clave salia entera en
+    # Configuracion y en la herramienta del asistente.
+    import comprobar_claves                                   # noqa: PLC0415
+    original_request = _requests.request
+    _requests.request = caido
+    try:
+        ficha = comprobar_claves.probar_jamendo(secreto)
+    finally:
+        _requests.request = original_request
+    igual(ficha.get("estado"), "sin_red", "«Probar» con Jamendo sin red dice que no hay red")
+    ok(secreto not in json.dumps(ficha), f"y no enseña la clave: {ficha.get('mensaje')}")
+    # Y LO QUE REPITA EL PROPIO SERVICIO se tacha: un «Invalid client_id XXX»
+    fichas = comprobar_claves._tachar(
+        [{"proveedor": "jamendo", "estado": "mal",
+          "mensaje": f"Jamendo no acepta el Client ID (401): Invalid client_id {secreto}"},
+         {"proveedor": "openai", "estado": "mal",
+          "mensaje": "OpenAI contesta 401: Incorrect API key provided: sk-prueba-123456"}],
+        {"openai": [{"clave": "sk-prueba-123456"}], "jamendo": {"clave": secreto},
+         "cartesia": {"clave": ""}, "freesound": {"clave": None}})
+    ok(not any(secreto in f["mensaje"] or "sk-prueba-123456" in f["mensaje"]
+               for f in fichas),
+       f"y lo que el servicio repita de la clave se tacha: {[f['mensaje'] for f in fichas]}")
 
 
 def probar_el_mensaje_publico_de_una_tanda():

@@ -3240,7 +3240,7 @@ def escribir_tarifas(cuerpo: dict = Body(default=None)):
         cambios = {"tts": {"usd_por_caracter": cambios["usd_por_caracter"]}}
     try:
         tabla = COSTE.guardar_tarifas(cambios)
-    except (TypeError, OSError) as fallo:
+    except (TypeError, ValueError, OSError) as fallo:
         raise ErrorApi(400, f"no se han podido guardar las tarifas: {fallo}")
     return {"tarifas": tabla, "usd_por_caracter": COSTE.tarifa_caracter()}
 
@@ -5602,6 +5602,24 @@ def _otros_trabajos(ctx):
                  or str(f.get("nombre") or "").startswith(_TRABAJOS_QUE_ESPERA_LA_COLA))]
 
 
+#: Lo que una tanda no puede tocar mientras la cola de notas dibuja: las
+#: imagenes, y lo que se monta encima de ellas.
+_PASOS_QUE_DIBUJA_O_MONTA = ("assets", "callouts", "render")
+
+
+def _cola_dibujando(ctx):
+    """Si la cola de notas de este video tiene su trabajo en marcha. Con el
+    _COLA_LOCK tomado. La que solo ESPERA no cuenta: espera justo a que
+    acaben las tandas (`_lanzar_cuando_libre`)."""
+    trabajo = (_COLA_NOTAS.get(ctx.id) or {}).get("trabajo")
+    if not trabajo:
+        return False
+    try:
+        return ctx.gestor.estado(trabajo)["estado"] in ("pendiente", "ejecutando")
+    except KeyError:
+        return False
+
+
 def _que_se_espera(otros):
     """El nombre para la persona de lo que la cola esta esperando."""
     pasos = {f.get("paso") for f in otros}
@@ -6822,10 +6840,18 @@ def guardar_sonido(pid: str, cuerpo: dict = Body(default=None)):
             # Se BAJA aquí, al elegirlo, y no al renderizar: el render no sale a
             # la red, y enterarse de que el enlace ya no vale cuando llevas
             # veinte minutos de clips es la versión cara del mismo error.
+            # SIN LA CLAVE DE JAMENDO: una ficha que la pantalla tenia de antes
+            # puede traerla en sus enlaces, y aqui se guardaria en el proyecto
+            ficha = dict(ficha)
+            for campo in ("escucha", "descarga"):
+                if ficha.get(campo):
+                    ficha[campo] = sonido.url_sin_clave(ficha[campo])
             try:
                 sonido.traer(ficha, "musica")
             except Exception as fallo:
-                raise ErrorApi(502, f"no se ha podido bajar el tema: {fallo}")
+                # sin el texto de la excepcion: lleva la URL de la descarga
+                raise ErrorApi(502, f"no se ha podido bajar el tema "
+                                    f"({type(fallo).__name__})")
             cambios["musica"] = ficha
     if not cambios:
         raise ErrorApi(400, "hace falta 'musica', 'activo' o 'lufs'")
@@ -7235,11 +7261,26 @@ def escuchar_tema(url: str = Query(...)):
             host == d or host.endswith("." + d) for d in permitidos):
         raise ErrorApi(400, "solo se escuchan temas de Jamendo y sonidos de FreeSound")
     import requests
+    # LA ATRIBUCION LA PONE EL SERVIDOR. La ficha que tiene el navegador va sin
+    # la clave (`sonido.url_sin_clave`); Jamendo la quiere en `from`, asi que se
+    # añade aqui, en la peticion que sale del servidor, y no baja nunca.
+    pedir = str(url)
+    if host == "jamendo.com" or host.endswith(".jamendo.com"):
+        sonido = _sonido()
+        clave = (sonido._claves() or {}).get("JAMENDO_CLIENT_ID") or ""
+        pedir = sonido.url_sin_clave(pedir)
+        if clave:
+            pedir += ("&" if "?" in pedir else "?") + f"from=app-{clave}"
     try:
-        respuesta = requests.get(url, stream=True, timeout=30)
+        respuesta = requests.get(pedir, stream=True, timeout=30)
         respuesta.raise_for_status()
+    except requests.HTTPError as fallo:
+        raise ErrorApi(502, f"Jamendo no deja escuchar ese tema "
+                            f"({fallo.response.status_code})")
     except Exception as fallo:                              # noqa: BLE001
-        raise ErrorApi(502, f"Jamendo no deja escuchar ese tema: {fallo}")
+        # el texto de la excepcion lleva la URL, y la URL ahora lleva la clave
+        raise ErrorApi(502, f"no se puede escuchar ese tema ahora "
+                            f"({type(fallo).__name__})")
     return StreamingResponse(respuesta.iter_content(64 * 1024),
                              media_type=respuesta.headers.get("content-type") or "audio/mpeg")
 
@@ -7348,6 +7389,76 @@ def _correr_banda(avisar, ctx, tramos):
         "animos": [t["animo"] for t in ficha["tramos"]]})
     avisar(1.0, sonido.describir(ctx.estado.params("render") or {}))
     return {**ficha, "resumen": sonido.describir(ctx.estado.params("render") or {})}
+
+
+def _sonido_que_no_tumba(avisar, ctx, correr, clave, evento, avisos):
+    """Corre la musica o los efectos de una tanda sin dejar que tumben el MP4.
+
+    La musica y los efectos son prescindibles y el MP4 no. Con Jamendo o
+    FreeSound caidos (o sin su clave), la tarea lanzaba, la excepcion cortaba la
+    receta y «Montar el video» se caia entero por algo que el video puede no
+    llevar (A3 del informe de la Etapa Foto A, y lo mismo con FreeSound). Aqui
+    el fallo se apunta en la bitacora, se avisa y la tanda sigue: el render sin
+    `musica`/`efectos` en params monta sin ellos, como siempre.
+
+    NO SE ESCRIBE NADA EN PARAMS: la clave sigue vacia, asi que la tarea sigue
+    sin estar al dia (`_esta_al_dia`) y la proxima tanda vuelve a intentarlo
+    sola. Escribir un «sin musica» moveria la firma del render (regla 1). Con
+    «Rehacer todo» se vuelve a pedir aunque ya hubiera, y si falla se queda lo
+    de antes: por eso el aviso mira si ya habia.
+
+    Cancelar SI corta: es una persona pidiendo parar, no un fallo del sonido.
+    Los botones sueltos de «Musica y efectos», el repaso y «volver a la
+    automatica» siguen fallando a la vista: ahi lo pedido es justo eso.
+    """
+    try:
+        return correr()
+    except Exception as fallo:                              # noqa: BLE001
+        if type(fallo).__name__ == "Cancelado":
+            raise
+        motivo = str(fallo).strip() or type(fallo).__name__
+        ctx.bitacora.anotar(evento, "render", {"error": motivo[:300]})
+        # LO QUE SE ENSEÑA, corto y sin la peticion: el error crudo de requests
+        # (FreeSound sin red) es una linea de doscientos caracteres con la URL,
+        # y un 503 trae el HTML de la pagina de error
+        import requests                                     # noqa: PLC0415
+        if isinstance(fallo, requests.RequestException):
+            motivo = f"el servicio no responde ({type(fallo).__name__})"
+        elif len(motivo) > 160:
+            motivo = motivo[:160].rstrip() + "…"
+        # «ya tenia» es que habia algo de verdad: unos efectos que se buscaron y
+        # no trajeron nada quedan guardados como listas vacias
+        antes = ((ctx.estado.params("render") if ctx.estado else None) or {}).get(clave)
+        tenia = (any(antes.values()) if isinstance(antes, dict) and clave == "efectos"
+                 else bool(antes))
+        aviso = avisos[1].format(motivo=motivo) if tenia else avisos[0].format(motivo=motivo)
+        avisar(None, f"AVISO: {aviso}")
+        return {"resumen": avisos[3] if tenia else avisos[2], "avisos": [aviso]}
+
+
+def _correr_banda_de_tanda(avisar, ctx):
+    """La banda sonora DENTRO de una tanda: si no sale, el video sigue sin ella."""
+    return _sonido_que_no_tumba(
+        avisar, ctx, lambda: _correr_banda(avisar, ctx, None), "musica",
+        "banda_sonora_fallida",
+        ("El vídeo sale sin música: {motivo}. Cuando se pueda, móntala en "
+         "«Música y efectos» y vuelve a montar el vídeo.",
+         "No se ha podido montar otra música ({motivo}): el vídeo se queda con "
+         "la que ya tenía.",
+         "sin música", "música de antes"))
+
+
+def _correr_efectos_de_tanda(avisar, ctx):
+    """Los efectos DENTRO de una tanda: si FreeSound no responde, sin ellos."""
+    return _sonido_que_no_tumba(
+        avisar, ctx,
+        lambda: _correr_surtir_efectos(avisar, ctx, list(_sonido().PAPELES), False),
+        "efectos", "efectos_fallidos",
+        ("El vídeo sale sin efectos de sonido: {motivo}. Cuando se pueda, "
+         "búscalos en «Música y efectos» y vuelve a montar el vídeo.",
+         "No se han podido buscar otros efectos ({motivo}): el vídeo se queda "
+         "con los que ya tenía.",
+         "sin efectos", "efectos de antes"))
 
 
 @app.get("/api/proyectos/{pid}/sonido/arco")
@@ -7873,12 +7984,19 @@ def _correr_assets_de_tanda(avisar, ctx, unidades, opciones):
     return _correr_paso(avisar, ctx, "assets", unidades, opciones)
 
 
-def _que_hace(tarea_id, ctx, receta, modo="pendientes", solo_montar=False):
+def _que_hace(tarea_id, ctx, receta, modo="pendientes", solo_montar=False,
+              sonido_prescindible=False):
     """(funcion, args) de una tarea. Levanta si la tarea no se sabe hacer.
 
     `solo_montar` solo lo entiende la tarea del MP4, y es la diferencia entre
     volver a dibujar los 98 planos en un navegador y volver a mezclar el audio
     sobre los clips que ya hay. Ver `repaso.solo_mezcla`.
+
+    `sonido_prescindible` solo lo entienden la banda sonora y los efectos: en
+    la tanda que genera el video, si no salen el video sigue sin ellos
+    (`_sonido_que_no_tumba`). En el repaso y en «volver a la automatica» NO:
+    ahi lo que se ha pedido es justo eso, y tragarse el fallo daria la nota
+    por aplicada sin musica nueva.
     """
     if tarea_id == "ingesta":
         return _un_paso(ctx, "ingesta", modo)
@@ -7915,8 +8033,12 @@ def _que_hace(tarea_id, ctx, receta, modo="pendientes", solo_montar=False):
     if tarea_id == "callouts":
         return _un_paso(ctx, "callouts", modo)
     if tarea_id == "banda_sonora":
+        if sonido_prescindible:
+            return _correr_banda_de_tanda, (ctx,)
         return _correr_banda, (ctx, None)
     if tarea_id == "efectos":
+        if sonido_prescindible:
+            return _correr_efectos_de_tanda, (ctx,)
         return _correr_surtir_efectos, (ctx, list(_sonido().PAPELES), False)
     if tarea_id == "render":
         return _un_paso(ctx, "render", modo,
@@ -8027,7 +8149,8 @@ def _tramos_por_tiempo(ctx, tandas, modo):
 
 
 def _correr_receta(avisar, ctx, pestana, receta, tareas, modo,
-                   solo_montar=False, hechas_antes=0, total_global=0):
+                   solo_montar=False, hechas_antes=0, total_global=0,
+                   sonido_prescindible=False):
     """Recorre la receta: tanda a tanda, y dentro de una tanda a la vez.
 
     El progreso es por TAREA y no por tanda: lo que se lee en pantalla es
@@ -8069,7 +8192,7 @@ def _correr_receta(avisar, ctx, pestana, receta, tareas, modo,
     tramos = _tramos_por_tiempo(ctx, tandas, modo)
     hechas = {"n": 0}
     cerrojo = threading.Lock()
-    salida = {"tareas": [], "saltadas": [], "pestana": pestana,
+    salida = {"tareas": [], "saltadas": [], "avisos": [], "pestana": pestana,
               "receta": receta.get("nombre") or "Todo", "modo": modo}
 
     total_publico = total_global or total
@@ -8103,7 +8226,8 @@ def _correr_receta(avisar, ctx, pestana, receta, tareas, modo,
                    f" · {ultimo['frase']}")
 
         avisar_tarea(0.0, "")
-        funcion, args = _que_hace(tarea["id"], ctx, receta, modo, solo_montar)
+        funcion, args = _que_hace(tarea["id"], ctx, receta, modo, solo_montar,
+                                  sonido_prescindible)
         arranque = time.time()
         resultado = funcion(avisar_tarea, *args)
         ficha = {"tarea": tarea["id"], "nombre": tarea["nombre"],
@@ -8112,6 +8236,10 @@ def _correr_receta(avisar, ctx, pestana, receta, tareas, modo,
             ficha["resumen"] = str(resultado["resumen"])[:300]
         with cerrojo:
             salida["tareas"].append(ficha)
+            # lo que una tarea pide que se VEA al acabar (hoy: el video que
+            # sale sin musica, `_correr_banda_de_tanda`) sube con la tanda
+            if isinstance(resultado, dict) and resultado.get("avisos"):
+                salida["avisos"].extend(str(a) for a in resultado["avisos"])
         ctx.bitacora.anotar("receta_tarea", tarea["paso"],
                             {"pestana": pestana, "tarea": tarea["id"],
                              "segundos": ficha["segundos"]})
@@ -8317,9 +8445,16 @@ def generar_pestana(pid: str, pestana: str, cuerpo: dict = Body(default=None)):
             continue
         _que_hace(tarea["id"], ctx, receta, modo)
 
-    trabajo_id = ctx.gestor.lanzar(f"receta:{pestana}", _correr_receta, ctx,
-                                   pestana, receta, puestas, modo,
-                                   paso=orden[0]["paso"])
+    # lo mismo que en `generar_video`: nada que dibuje o monte con la cola de
+    # notas dibujando, y mirar y lanzar con el cerrojo de la cola tomado (D1)
+    with _COLA_LOCK:
+        if producidos & set(_PASOS_QUE_DIBUJA_O_MONTA) and _cola_dibujando(ctx):
+            raise ErrorApi(409, "se están rehaciendo imágenes con tus notas: "
+                                "espera a que terminen (o páralas) y vuelve a "
+                                "generar")
+        trabajo_id = ctx.gestor.lanzar(f"receta:{pestana}", _correr_receta, ctx,
+                                       pestana, receta, puestas, modo,
+                                       paso=orden[0]["paso"])
     _registrar_trabajo(trabajo_id, ctx.id)
     ctx.bitacora.anotar("receta_lanzada", orden[0]["paso"],
                         {"pestana": pestana, "modo": modo,
@@ -9671,6 +9806,66 @@ EXT_APORTADAS = (".png", ".jpg", ".jpeg", ".webp")
 #: que puede llenar el disco alguien que arrastre una carpeta entera.
 MAX_BYTES_APORTADA = 10 * 1024 * 1024
 
+#: Lado minimo, en pixeles, de una imagen de referencia. Por debajo no hay estilo
+#: que copiar: es un icono. Bajo a proposito -- esto para lo que no sirve, no
+#: juzga si una imagen es buena.
+MIN_LADO_APORTADA = 64
+
+#: Pixeles como mucho. Sobra para la foto de cualquier movil (50 MP) y pone
+#: techo a lo que cuesta en memoria abrirla para revisarla.
+MAX_PIXELES_APORTADA = 60_000_000
+
+
+def _motivo_para_no_aceptar(contenido, origen):
+    """Por que esta imagen NO vale como referencia de estilo, o None si vale.
+
+    SE MIRA AL SUBIRLA, que es cuando se puede decir. Antes solo se miraban la
+    extension y el peso: un «.jpg» que no era una imagen salia como miniatura
+    rota, el boton Generar se habilitaba, y el estilo trabajaba dos minutos con
+    Claude para caerse al 92 % con un `UnidentifiedImageError` -- perdiendo el
+    formulario y dejando un taller huerfano (M4 del informe de la Etapa Foto A).
+
+    Tres cosas, las tres medidas en ese informe: que se pueda ABRIR (de punta a
+    punta: `verify` solo mira la cabecera, y un fichero cortado pasa), que no
+    sea diminuta y que no sea de un solo color (toda negra, toda blanca). Sin
+    PIL no se mira nada: es lo de antes, y no se rompe la subida por ello.
+    """
+    try:
+        from PIL import Image, ImageStat  # noqa: PLC0415 - perezoso, como en las miniaturas
+    except ImportError:
+        return None
+    import io  # noqa: PLC0415
+    # SOLO LOS FORMATOS QUE SE ACEPTAN (EXT_APORTADAS): `Image.open` abriria
+    # cualquier cosa que PIL conozca, y alguno (EPS) llama a un programa externo
+    formatos = ["PNG", "JPEG", "WEBP"]
+    try:
+        with Image.open(io.BytesIO(contenido), formats=formatos) as imagen:
+            imagen.verify()
+        with Image.open(io.BytesIO(contenido), formats=formatos) as imagen:
+            ancho, alto = imagen.size
+            # ANTES de descomprimir: diez megas de PNG liso pueden ser cien
+            # millones de pixeles y casi un giga de memoria al abrirlos
+            if ancho * alto > MAX_PIXELES_APORTADA:
+                return (f"«{origen}» mide {ancho}×{alto} px: es demasiado grande "
+                        f"(como mucho {MAX_PIXELES_APORTADA // 1_000_000} "
+                        f"megapíxeles)")
+            if min(ancho, alto) < MIN_LADO_APORTADA:
+                return (f"«{origen}» mide {ancho}×{alto} px: es demasiado pequeña "
+                        f"para copiar un estilo de ella (mínimo "
+                        f"{MIN_LADO_APORTADA} px de lado)")
+            imagen.load()
+            # CON LA TRANSPARENCIA: un logo negro sobre fondo transparente tiene
+            # todo el dibujo en el canal alfa, y no es de un solo color
+            muestra = imagen.convert("RGBA")
+            muestra.thumbnail((256, 256))
+            if max(ImageStat.Stat(muestra).stddev) < 1.0:
+                return (f"«{origen}» es entera de un solo color: no hay nada "
+                        f"que copiar de ella")
+    except Exception:                                       # noqa: BLE001
+        return (f"«{origen}» no se puede abrir como imagen: el fichero está "
+                f"dañado o no es una imagen de verdad")
+    return None
+
 
 def _carpeta_aportadas():
     return os.path.join(raiz_proyectos(), CARPETA_APORTADAS)
@@ -9814,6 +10009,11 @@ async def subir_imagenes_light(peticion: Request):
             avisos.append(f"«{origen}» pesa "
                           f"{len(contenido) / 1024 / 1024:.1f} MB y el tope son "
                           f"{MAX_BYTES_APORTADA // 1024 // 1024}")
+            continue
+        # que de verdad sea una imagen que sirva, AHORA y no al 92 % del estilo
+        motivo = await asyncio.to_thread(_motivo_para_no_aceptar, contenido, origen)
+        if motivo:
+            avisos.append(motivo)
             continue
         # nombre propio: dos ficheros distintos pueden llamarse igual, y el
         # segundo se llevaria al primero por delante
@@ -10089,7 +10289,10 @@ def _correr_light_referencias(avisar, ctx, encargo):
             peticiones=peticiones, calidad=calidad,
             avisar=(avisar if not sueltas else
                     lambda v, m="": avisar(0.6 * float(v or 0), m)),
-            idioma=idioma, referencias=comun)
+            idioma=idioma, referencias=comun,
+            # pedirlas a proposito (la pantalla de laminas) es pedir otras:
+            # solo una pasada que repite la que fallo reutiliza lo ya pagado
+            reutilizar=not isinstance(solo, list))
         hecho["rutas"] += parcial["rutas"]
         hecho["ejes"] += parcial["ejes"]
         hecho["coste_usd"] += float(parcial.get("coste_usd") or 0.0)
@@ -10103,7 +10306,8 @@ def _correr_light_referencias(avisar, ctx, encargo):
             para_dibujar, destino, eje, descripcion,
             calidad=calidad, idioma=idioma,
             peticion=lam.peticion_de(eje, encargo, peticiones.get(eje, "")),
-            referencias=grupos.get(eje) or comun)
+            referencias=grupos.get(eje) or comun,
+            reutilizar=not isinstance(solo, list))
         hecho["rutas"].append(parcial["ruta"])
         hecho["ejes"].append(eje)
         hecho["coste_usd"] += parcial["coste_usd"]
@@ -10134,6 +10338,9 @@ def _correr_light_referencias(avisar, ctx, encargo):
             lista.append(previas[eje])
     bloque["referencias"] = lista[:lam.MAX_LAMINAS]
     ctx.estado.actualizar_params("assets", {"estilo": bloque})
+    # LA PASADA HA TERMINADO BIEN: lo apuntado para no repagar un reintento ya
+    # no es un intento a medias, y «Regenerar» tiene que dibujar otra de verdad
+    mod.olvidar_laminas_apuntadas(destino)
     ctx.bitacora.anotar("estilo_dibujado", "assets", {
         "ejes": hecho["ejes"], "coste_usd": hecho["coste_usd"],
         "pedidos": pedidos if not sin_dibujar else "ninguna (solo la lista)",
@@ -10181,7 +10388,26 @@ def _frase_del_estilo(encargo, antes, peticion):
     return ahora if ahora and ahora != antes_prompt else ""
 
 
-def _estado_del_estilo(ctx):
+def _laminas_para_el_reparto(encargo):
+    """{id: {titulo, que_se_ve}} de las laminas de ESTE estilo, en su orden:
+    las de fabrica que quedan (con lo que se les cambio, si se cambio) y las
+    añadidas con su descripcion."""
+    lam = _laminas()
+    mod = _moodboard()
+    salida = {}
+    for lamina in lam.ids_de(encargo):
+        propia = lam.descripcion_extra(lamina, encargo)
+        que = propia or (mod.EJES.get(lamina) or {}).get("prompt") or ""
+        titulo = lam.titulo_de(lamina, encargo)
+        if lamina not in mod.EJES and propia:
+            # todas las añadidas se titulan «Lámina añadida»: con dos, el
+            # resumen y la lista numerada no las distinguirian
+            titulo = f"{titulo}: {propia[:40]}"
+        salida[lamina] = {"titulo": titulo, "que_se_ve": que}
+    return salida
+
+
+def _estado_del_estilo(ctx, laminas=None):
     """Cómo está el canal ahora, para que el reparto no decida a ciegas.
 
     Y desde que se puede corregir UNA de las seis referencias sin tocar las
@@ -10212,7 +10438,8 @@ def _estado_del_estilo(ctx):
         trozos.append(f"trazo: {str(guia['trazo'])[:160]}")
     linea = " · ".join(trozos)
 
-    laminas = _laminas_por_eje(ctx)
+    nombres = laminas or {}
+    laminas = _laminas_por_eje(ctx, validos=set(nombres))
     if not laminas:
         return linea                    # todavía no hay nada dibujado
     rutas, _e = _referencias_de_estilo(ctx)
@@ -10221,7 +10448,8 @@ def _estado_del_estilo(ctx):
     for orden, (eje, _ruta) in enumerate(laminas, start=1):
         if not eje:
             continue                    # sin eje no se puede señalar
-        titulo = (mod.EJES.get(eje) or {}).get("titulo") or eje
+        titulo = ((nombres.get(eje) or {}).get("titulo")
+                  or (mod.EJES.get(eje) or {}).get("titulo") or eje)
         pedido = " ".join(str(peticiones.get(eje) or "").split())
         filas.append(f"  {orden}. {eje} — {titulo}"
                      + (f"  [ya se le pidió: «{pedido[:140]}»]" if pedido else ""))
@@ -10352,7 +10580,7 @@ def _correr_light_voz(avisar, ctx, encargo):
                 hueco_minimo=cambios["hueco_minimo"])
 
 
-def _laminas_por_eje(ctx):
+def _laminas_por_eje(ctx, validos=()):
     """Las referencias dibujadas, CON SU EJE y en el orden en que se ven.
 
     Son las MISMAS que copia cada plano del video, y por eso son las que se
@@ -10390,8 +10618,11 @@ def _laminas_por_eje(ctx):
     # SIN TOCAR EL ORDEN GUARDADO. Reordenarlo aqui no daria un error, daria
     # otras muestras: `presets_light._escena_muestra` decide POR INDICE cual de
     # las seis lleva cartela.
+    # `validos` añade las laminas AÑADIDAS de este estilo (`extra_1`...): se
+    # llaman como su id y sin esto salian sin eje, o sea sin poder señalarlas
+    conocidos = set(mod.EJES) | set(validos or ())
     return [(os.path.splitext(os.path.basename(r))[0]
-             if os.path.splitext(os.path.basename(r))[0] in mod.EJES else "", r)
+             if os.path.splitext(os.path.basename(r))[0] in conocidos else "", r)
             for r in rutas]
 
 
@@ -10787,20 +11018,29 @@ def crear_preset_light(cuerpo: dict = Body(default=None)):
         retomar = True
     else:
         ctx = _crear_taller(encargo)
-    if encargo.get("cliente"):
-        # para ensenar el intento a medias DENTRO de su proyecto
-        ctx.proyecto.config["cliente_del_taller"] = encargo["cliente"]
-        ctx.proyecto.guardar_config()
-    _sembrar_taller(ctx, encargo)
-    # ANTES de lanzar: la guia es la primera tarea que las mira, y retomar un
-    # taller no puede perderlas -- se vuelven a copiar y ya estaban.
-    aportadas = _sembrar_aportadas(ctx, encargo)
-    ctx.bitacora.anotar("preset_light_lanzado", None,
-                        {"nombre": encargo["nombre"], "idioma": encargo["idioma"],
-                         "ritmo": encargo.get("ritmo"), "retomado": retomar,
-                         "aportadas": len(aportadas)})
-    trabajo_id = ctx.gestor.lanzar("preset_light", _correr_preset_light, ctx,
-                                   encargo, None, None, retomar, paso="assets")
+    # RETOMAR, DE PRINCIPIO A FIN EN EL CERROJO DEL TALLER. Dos clics en
+    # «Reintentar» lanzaban dos trabajos que pagaban las mismas laminas, y el
+    # segundo ademas volvia a sembrar el taller por debajo del primero, que ya
+    # corria. Mirar que este libre, sembrar y lanzar van juntos (D3 del
+    # analisis del 13-10-2026). Un taller recien creado es de esta peticion y
+    # de nadie mas: no hace falta.
+    with (_cerrojo_de_cadena(ctx.id) if retomar else contextlib.nullcontext()):
+        if retomar:
+            _taller_libre(ctx)
+        if encargo.get("cliente"):
+            # para ensenar el intento a medias DENTRO de su proyecto
+            ctx.proyecto.config["cliente_del_taller"] = encargo["cliente"]
+            ctx.proyecto.guardar_config()
+        _sembrar_taller(ctx, encargo)
+        # ANTES de lanzar: la guia es la primera tarea que las mira, y retomar
+        # un taller no puede perderlas -- se vuelven a copiar y ya estaban.
+        aportadas = _sembrar_aportadas(ctx, encargo)
+        ctx.bitacora.anotar("preset_light_lanzado", None,
+                            {"nombre": encargo["nombre"], "idioma": encargo["idioma"],
+                             "ritmo": encargo.get("ritmo"), "retomado": retomar,
+                             "aportadas": len(aportadas)})
+        trabajo_id = ctx.gestor.lanzar("preset_light", _correr_preset_light, ctx,
+                                       encargo, None, None, retomar, paso="assets")
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "taller": ctx.id, "encargo": encargo,
             "retomado": retomar, "plan": _light().plan_de(encargo),
@@ -11113,9 +11353,15 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     if parte == "estilo" and not material:
         frase = _frase_del_estilo(encargo, antes, peticion)
         if frase:
+            # LAS LAMINAS DE ESTE ESTILO, no las seis de fabrica: con solo esas,
+            # una correccion para una lamina AÑADIDA no tenia a donde ir y se
+            # redibujaban todas (N2 de las notas de mejoras, 13-10-2026); y
+            # una QUITADA se aceptaba, se filtraba despues y tambien caia en
+            # todas
+            laminas = _laminas_para_el_reparto(encargo)
             reparto = _enrutar_estilo().repartir(
-                frase, estado=_estado_del_estilo(ctx), cwd=ctx.proyecto.raiz,
-                proyecto_id=ctx.id)
+                frase, estado=_estado_del_estilo(ctx, laminas), cwd=ctx.proyecto.raiz,
+                proyecto_id=ctx.id, laminas=laminas)
             # LOS PARAMS SE ESCRIBEN AQUI Y NO DENTRO DEL TRABAJO: asi el
             # grafismo que corre despues ya los encuentra puestos, y si el
             # trabajo se cancela lo elegido se queda.
@@ -11174,8 +11420,8 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
                 "aviso": (reparto or {}).get("resumen")
                          or "no hay nada que rehacer con eso"}
 
-    trabajo_id = ctx.gestor.lanzar(
-        "preset_light", _correr_preset_light, ctx, encargo,
+    trabajo_id = _lanzar_en_taller(
+        ctx, "preset_light", _correr_preset_light, ctx, encargo,
         list(tareas), preset_id, paso="assets")
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "taller": ctx.id, "parte": parte,
@@ -11230,6 +11476,22 @@ def _taller_libre(ctx):
     if ctx.gestor.listar(activos=True):
         raise ErrorApi(409, "este estilo se está generando: espera a que termine "
                             "para cambiar otra cosa")
+
+
+def _lanzar_en_taller(ctx, *args, **kwargs):
+    """`ctx.gestor.lanzar` en el taller de un estilo, mirando OTRA VEZ que este
+    libre y en el mismo cerrojo. -> trabajo_id
+
+    `_taller_libre` mira al principio de la peticion, y entre ese mirar y el
+    lanzar hay segundos de trabajo (leer el encargo, repartir la frase con
+    Claude): cuatro clics en «Regenerar lamina» pasaban los cuatro y lanzaban
+    hasta tres trabajos que pagaban cada uno su imagen (D3 del analisis del
+    13-10-2026). Con el cerrojo de la cadena de ese taller, el segundo ya ve
+    el primero en marcha.
+    """
+    with _cerrojo_de_cadena(ctx.id):
+        _taller_libre(ctx)
+        return ctx.gestor.lanzar(*args, **kwargs)
 
 
 def _taller_con_laminas(preset_id):
@@ -11422,8 +11684,8 @@ def cambiar_laminas(preset_id: str, cuerpo: dict = Body(default=None)):
     ctx.bitacora.anotar("laminas_estilo", None, {
         "preset": preset_id, "accion": accion, "lamina": lamina,
         "dibujar": dibujar, "texto": texto[:200]})
-    trabajo_id = ctx.gestor.lanzar(
-        "preset_light", _correr_preset_light, ctx, encargo,
+    trabajo_id = _lanzar_en_taller(
+        ctx, "preset_light", _correr_preset_light, ctx, encargo,
         ["referencias", "muestra"], preset_id, paso="assets")
     _registrar_trabajo(trabajo_id, ctx.id)
     plan = _plan_con_laminas(light.plan_de(encargo, ("referencias", "muestra")),
@@ -11693,8 +11955,8 @@ def editar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     origen["idioma"] = idioma
     encargo = _encargo_o_400(origen)
     _sembrar_taller(ctx, encargo)
-    trabajo_id = ctx.gestor.lanzar(
-        "preset_light", _correr_preset_light, ctx, encargo,
+    trabajo_id = _lanzar_en_taller(
+        ctx, "preset_light", _correr_preset_light, ctx, encargo,
         list(light.TAREAS_DE_IDIOMA), preset_id, False, paso="assets")
     _registrar_trabajo(trabajo_id, ctx.id)
     ctx.bitacora.anotar("preset_light_idioma", None,
@@ -12491,7 +12753,8 @@ def _correr_cadena(avisar, ctx, pestanas, modo, datos, plan):
     """
     recetas = _recetas()
     total = max(1.0, float(plan["segundos"]))
-    salida = {"pestanas": [], "modo": modo, "tareas": [], "saltadas": []}
+    salida = {"pestanas": [], "modo": modo, "tareas": [], "saltadas": [],
+              "avisos": []}
     # EL CONTADOR PUBLICO ES DE LA TANDA ENTERA, no de cada pestana, y cuenta lo
     # que SE VA A HACER. Contaba todas las tareas del plan --tambien las que se
     # iban a saltar-- y montar el MP4 de un video ya dibujado decia «11 de 11»
@@ -12517,9 +12780,12 @@ def _correr_cadena(avisar, ctx, pestanas, modo, datos, plan):
                    if t not in sin]
         if not recetas.orden_de(pestana, puestas):
             continue
+        # LA MUSICA Y LOS EFECTOS SON PRESCINDIBLES AQUI: si no salen, el MP4
+        # sale sin ellos y el aviso viaja en `avisos` (`_sonido_que_no_tumba`)
         hecho = _correr_receta(avisar_fase, ctx, pestana, receta, puestas, modo,
                                hechas_antes=hechas_antes,
-                               total_global=total_publico)
+                               total_global=total_publico,
+                               sonido_prescindible=True)
         # LAS QUE DE VERDAD HAN CORRIDO, no las que el plan preveia: entre
         # planificar y correr una tarea puede haber dejado de estar al dia, y
         # entonces el contador de la pestana siguiente arrancaria por debajo.
@@ -12527,6 +12793,7 @@ def _correr_cadena(avisar, ctx, pestanas, modo, datos, plan):
         salida["pestanas"].append(pestana)
         salida["tareas"].extend(hecho.get("tareas") or [])
         salida["saltadas"].extend(hecho.get("saltadas") or [])
+        salida["avisos"].extend(hecho.get("avisos") or [])
     salida["resumen"] = (f"{len(salida['tareas'])} tareas en "
                          f"{len(salida['pestanas'])} pestañas"
                          + (f", {len(salida['saltadas'])} ya estaban"
@@ -12718,10 +12985,24 @@ def generar_video(pid: str, cuerpo: dict = Body(default=None)):
                                         "ejecutar " + ", ".join(faltan),
                                    {"faltan": faltan, "tarea": tarea["id"]})
 
-        marca = uuid.uuid4().hex[:12]
-        trabajo_id = ctx.gestor.lanzar("generar:" + "+".join(elegidas),
-                                       _cadena_con_cuenta, ctx, marca, elegidas, modo, datos,
-                                       plan, paso=plan["fases"][0]["tareas"][0]["paso"])
+        # NI A LA VEZ QUE LA COLA DE NOTAS. La cola espera a las tandas
+        # (`_otros_trabajos`), pero al reves no se miraba: «Generar» con la cola
+        # dibujando lanzaba dos trabajos de imagenes sobre la MISMA carpeta
+        # `trabajo/` (regla 2), y se vio repagar planos ya hechos o sellar la
+        # imagen vieja encima de la que la nota acababa de pagar (D1 del
+        # analisis del 13-10-2026). Mirar y lanzar van con el cerrojo de la cola
+        # tomado: es el mismo con el que la cola mira si hay otra cosa en marcha,
+        # asi que ninguna de las dos puede colarse entre el mirar y el lanzar
+        # de la otra.
+        with _COLA_LOCK:
+            if producidos & set(_PASOS_QUE_DIBUJA_O_MONTA) and _cola_dibujando(ctx):
+                raise ErrorApi(409, "se están rehaciendo imágenes con tus notas: "
+                                    "espera a que terminen (o páralas) y vuelve a "
+                                    "generar")
+            marca = uuid.uuid4().hex[:12]
+            trabajo_id = ctx.gestor.lanzar("generar:" + "+".join(elegidas),
+                                           _cadena_con_cuenta, ctx, marca, elegidas, modo, datos,
+                                           plan, paso=plan["fases"][0]["tareas"][0]["paso"])
         _apuntar_tanda(ctx, {"marca": marca, "trabajo": trabajo_id, "tandas": elegidas,
                              "modo": modo, "lanzada": ahora(),
                              "prometido_usd": (plan.get("coste") or {}).get("usd_por_generar"),

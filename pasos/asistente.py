@@ -102,6 +102,48 @@ DOCUMENTOS = ("CLAUDE.md", "README.md", "docs/MANUAL.md", "docs/NOVEDADES.md",
 HERRAMIENTAS_PERMITIDAS = ("Read", "Grep", "Glob") + mcp_estudio.nombres_permitidos()
 
 
+def herramientas_permitidas(carpetas_extra=()):
+    """Las de arriba, con `Read` SOLO en la carpeta del Estudio y en las añadidas.
+
+    `Read` a secas lo pre-autoriza en TODO el disco, y en el VPS las claves no
+    estan dentro del codigo (`/opt/as-video-studio/datos/secretos`, fuera de
+    `app/`): el veto de `./secretos` no las cubria y el asistente leia enteros
+    `claves.json`, el `.env` y la sesion de Claude (S1 del analisis del
+    13-10-2026, medido con el CLI de verdad). Con la lectura acotada, un Read
+    fuera de estas carpetas es una pregunta de permiso, y en headless una
+    pregunta es una negativa. Los vetos de `vetos_de_lectura` siguen encima:
+    un veto gana a un permiso.
+    """
+    lectura = ["Read(./**)"]
+    for carpeta in tuple(carpetas_extra or ()) + carpetas_de_datos():
+        if carpeta and os.path.isdir(carpeta):
+            absoluta = os.path.abspath(carpeta).replace("\\", "/")
+            regla = f"Read(//{absoluta.lstrip('/')}/**)"
+            if regla not in lectura:
+                lectura.append(regla)
+    # GREP Y GLOB, ACOTADOS IGUAL QUE READ. A secas valian en TODO el disco:
+    # Grep leia `/proc/self/environ` (el token de la sesion si va en el
+    # entorno) y los ficheros de `datos/`. Y quitarlos de la lista no vale: el
+    # CLI deja de ofrecerlos («No such tool available»).
+    acotadas = []
+    for herramienta in ("Read", "Grep", "Glob"):
+        acotadas += [regla.replace("Read(", f"{herramienta}(", 1) for regla in lectura]
+    return tuple(acotadas) + tuple(h for h in HERRAMIENTAS_PERMITIDAS
+                                   if h not in ("Read", "Grep", "Glob"))
+
+
+def carpetas_de_datos():
+    """La carpeta de los datos del Estudio cuando NO esta dentro del codigo.
+
+    En el VPS (`instalar.sh`) tarifas, presets, ajustes y estadisticas viven en
+    `/opt/as-video-studio/datos`, fuera de `app/` y de los proyectos, y son
+    justo lo que el asistente lee para contestar «cuanto cuesta». Se deja leer
+    esa carpeta; `secretos/` va dentro, pero sus vetos ganan a este permiso.
+    """
+    tarifas = os.environ.get("ESTUDIO_TARIFAS")
+    return (os.path.dirname(os.path.abspath(tarifas)),) if tarifas else ()
+
+
 def api_del_estudio():
     """Donde escucha la API del Estudio, para las herramientas. Lo pone app.py
     al arrancar; sin el (una suite, el modulo suelto) no se cargan."""
@@ -230,6 +272,27 @@ def sistema():
         "contestar y tenlas en cuenta.")
 
 
+def carpetas_de_secretos():
+    """Donde hay claves o sesiones FUERA de la raiz del Estudio. -> [rutas]
+
+    El almacen (`ESTUDIO_SECRETOS`; en el VPS, `datos/secretos`, con las
+    sesiones de cada cuenta del CLI en `cli/`) y la sesion por defecto del CLI
+    (`~/.claude` o `CLAUDE_CONFIG_DIR`), que lleva el token de la cuenta.
+    """
+    carpetas = [os.environ.get("ESTUDIO_SECRETOS"),
+                os.environ.get("CLAUDE_CONFIG_DIR"),
+                os.path.join(os.path.expanduser("~"), ".claude")]
+    vistas, salida = set(), []
+    for carpeta in carpetas:
+        if not carpeta:
+            continue
+        absoluta = os.path.abspath(carpeta).replace("\\", "/").rstrip("/")
+        if absoluta and absoluta not in vistas:
+            vistas.add(absoluta)
+            salida.append(absoluta)
+    return salida
+
+
 def vetos_de_lectura(raiz=None):
     """Las reglas de permiso que dejan las claves fuera del alcance de Read.
 
@@ -237,6 +300,11 @@ def vetos_de_lectura(raiz=None):
     porque el CLI resuelve las relativas contra el cwd, y el cwd es la raiz
     del Estudio; la absoluta cubre el caso de que alguien mueva la carpeta de
     trabajo y se olvide de esto.
+
+    Y LAS QUE ESTAN FUERA DEL CODIGO, en absoluto (`carpetas_de_secretos`): en
+    el VPS el almacen no esta en `./secretos`. Los vetos por nombre van tambien
+    con `//` delante, porque la forma `**/.env` solo vale DENTRO de la carpeta
+    de trabajo (medido con el CLI: fuera, la leia).
     """
     raiz = os.path.abspath(raiz or RAIZ_ESTUDIO)
     reglas = []
@@ -244,8 +312,16 @@ def vetos_de_lectura(raiz=None):
         reglas.append(f"Read(./{carpeta}/**)")
         absoluta = os.path.join(raiz, carpeta).replace("\\", "/")
         reglas.append(f"Read(//{absoluta.lstrip('/')}/**)")
+    for carpeta in carpetas_de_secretos():
+        regla = f"Read(//{carpeta.lstrip('/')}/**)"
+        if regla not in reglas:
+            reglas.append(regla)
     for fichero in FICHEROS_VETADOS:
         reglas.append(f"Read({fichero})")
+        reglas.append(f"Read(//{fichero})")
+    # el entorno de los procesos: con la sesion por defecto, el token de la
+    # cuenta puede ir en una variable (`cli_claude.entorno`)
+    reglas.append("Read(//proc/**)")
     return reglas
 
 
@@ -366,7 +442,7 @@ def ejecutar_cli(mensaje, extra=(), avance=None, raiz=None, carpetas_extra=(),
         tiempo_max_s=TIEMPO_MAX_S, sistema=sistema(),
         herramientas_vetadas=vetadas, avance=avance, extra=orden_extra,
         para="contestar en el asistente",
-        herramientas_permitidas=HERRAMIENTAS_PERMITIDAS)
+        herramientas_permitidas=herramientas_permitidas(carpetas_extra))
 
 
 def ejecutar_simulado(mensaje, extra=(), avance=None, raiz=None,

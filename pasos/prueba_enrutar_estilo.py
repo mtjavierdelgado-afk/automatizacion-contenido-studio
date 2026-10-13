@@ -281,12 +281,53 @@ def prueba_la_lamina_llega_al_prompt():
     # descrito van en el orden de EJES, que no es el mismo.
     ok("def _laminas_por_eje" in fuente,
        "las láminas se leen con su eje y en el orden en que se ven")
-    ok("_laminas_por_eje(ctx)" in fuente.split("def _estado_del_estilo")[1][:2500],
+    ok("_laminas_por_eje(ctx" in fuente.split("def _estado_del_estilo")[1][:2500],
        "y el estado que ve el reparto las lleva numeradas: sin eso «la "
        "segunda» sería una adivinanza")
     ok(list(moodboard.EJES) != sorted(moodboard.EJES),
        "los dos órdenes de verdad son distintos, que es por lo que el número "
        "no puede estar escrito en el prompt")
+
+
+def prueba_las_laminas_de_este_estilo():
+    seccion("8b] el reparto conoce las láminas de ESTE estilo, también las añadidas")
+    # N2 de las notas de mejoras (13-10-2026): «al generar una lámina,
+    # regenera todas». El reparto solo conocía las seis de fábrica: una
+    # corrección para una lámina AÑADIDA (`extra_1`) no tenía a dónde ir y se
+    # redibujaban todas; y una QUITADA se aceptaba, se filtraba después y
+    # también acababa en todas.
+    encargo = {"laminas_quitadas": ["diagrama"],
+               "laminas_propias": {"extra_1": "un mapa del barrio con la tienda marcada"}}
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import app as servidor                                    # noqa: PLC0415
+    laminas = servidor._laminas_para_el_reparto(encargo)
+    ok("extra_1" in laminas and "diagrama" not in laminas,
+       f"las láminas del estilo: las de fábrica que quedan y la añadida ({list(laminas)})")
+    igual(laminas["extra_1"]["que_se_ve"], "un mapa del barrio con la tienda marcada",
+          "la añadida llega con lo que enseña, para poder señalarla por su contenido")
+    ok("un mapa del barrio" in er._legible(laminas),
+       "y el modelo la ve en la lista de láminas que puede elegir")
+
+    retoques, avisos = er._limpiar({"retoques": [
+        {"retoque": er.UNA_LAMINA, "eje": "extra_1",
+         "peticion": "que se vea también el parque"}]}, laminas)
+    igual([r.get("eje") for r in retoques], ["extra_1"],
+          "una corrección para la lámina añadida se acepta (antes: rehacer todas)")
+    igual(er.laminas_de(retoques), {"extra_1": "que se vea también el parque"},
+          "y se redibuja SOLO esa")
+    igual(er.imagenes_de(retoques), 1, "pagando una imagen, no seis")
+
+    retoques, avisos = er._limpiar({"retoques": [
+        {"retoque": er.UNA_LAMINA, "eje": "diagrama", "peticion": "más grande"}]}, laminas)
+    igual(retoques, [], "una lámina QUITADA no se acepta como destino")
+    ok(avisos, f"y se dice por qué: {avisos}")
+
+    retoques, _ = er._limpiar({"retoques": [
+        {"retoque": er.UNA_LAMINA, "eje": "cuerpos", "peticion": "ropa variada"}]})
+    igual([r.get("eje") for r in retoques], ["cuerpos"],
+          "sin pasar las láminas, las seis de fábrica como siempre")
+    ok("Para cambiar una sola lámina" in _fuente(os.path.join("web", "app.js")),
+       "y el «Regenerar» del pie avisa de que una lámina se cambia con su botón")
 
 
 def prueba_lo_que_devuelve_el_modelo_para_una_lamina():
@@ -367,6 +408,94 @@ def prueba_con_cli():
             ok(str(r["laminas"].get(eje) or "").strip(),
                f"    con algo escrito que cambiarle: "
                f"«{str(r['laminas'].get(eje) or '')[:70]}»")
+
+
+def prueba_un_reintento_no_repaga_las_laminas():
+    seccion("7c] reintentar unas láminas que fallaron NO vuelve a pagar las buenas")
+    # D2 del analisis del 13-10-2026: con una lamina rechazada por el filtro de
+    # seguridad, cada intento pagaba las cinco buenas otra vez (y si el rechazo
+    # se repite, nunca termina). Doble del motor que apunta cada imagen PAGADA.
+    import shutil
+    import tempfile
+    from PIL import Image
+
+    carpeta = tempfile.mkdtemp(prefix="prueba_reintento_")
+    pagadas = []
+    rechazar = {"diagrama"}
+
+    class ImagenFalsa:
+        @staticmethod
+        def normalizar(ruta, cache_dir, lado_max=1024):
+            return ruta
+
+        @staticmethod
+        def generar(prompt, referencias, **_):
+            for eje in rechazar:
+                if moodboard.EJES[eje]["prompt"][:40] in prompt:
+                    raise RuntimeError("rechazada por el filtro de seguridad")
+            pagadas.append(prompt)
+            return b"\x89PNG-falsa", {"coste": 0.05}
+
+    motor_real = moodboard.medios.motor
+    moodboard.medios.motor = (lambda nombre: ImagenFalsa if "imagen_openai" in nombre
+                              else motor_real(nombre))
+    try:
+        aportada = os.path.join(carpeta, "aportada.png")
+        Image.new("RGB", (64, 48), "red").save(aportada)
+        estilo = {"guia": {"guia": "Trazo grueso, paleta tierra."}}
+        destino = os.path.join(carpeta, "estilo", "dibujadas")
+        ejes = list(moodboard.EJES)
+
+        def intento():
+            try:
+                moodboard.dibujar_desde_guia(estilo, destino, ejes=ejes, calidad="low",
+                                             idioma="es", referencias=[aportada])
+                return None
+            except RuntimeError as fallo:
+                return str(fallo)
+
+        fallo = intento()
+        ok(fallo and "filtro" in fallo, f"la pasada con una rechazada falla: {fallo!r}")
+        primeras = len(pagadas)
+        igual(primeras, len(ejes) - 1, "y paga las buenas")
+        fallo = intento()
+        igual(len(pagadas), primeras,
+              "EL REINTENTO no vuelve a pagar ninguna de las buenas (antes: otras cinco)")
+        rechazar.clear()
+        fallo = intento()
+        igual(fallo, None, "cuando el filtro deja pasar la que faltaba, la pasada termina")
+        igual(len(pagadas), primeras + 1, "pagando SOLO la que faltaba")
+        # PEDIRLA A PROPOSITO (la pantalla de laminas) es pedir otra: no se
+        # reutiliza aunque haya una apuntada con la misma huella
+        moodboard.dibujar_desde_guia(estilo, destino, ejes=["cara"], calidad="low",
+                                     idioma="es", referencias=[aportada],
+                                     reutilizar=False)
+        igual(len(pagadas), primeras + 2,
+              "«Regenerar» una lámina a propósito dibuja otra aunque haya una apuntada")
+        # La pasada buena la cierra quien la pide (`_correr_light_referencias`):
+        # desde ahi, «Regenerar» dibuja otra de verdad
+        moodboard.olvidar_laminas_apuntadas(destino)
+        intento()
+        igual(len(pagadas), primeras + 2 + len(ejes),
+              "y despues de una pasada buena, regenerar dibuja (y paga) de nuevo: "
+              "la memoria es solo para reintentos")
+        # otra peticion para una lamina (una correccion) no reutiliza la vieja
+        moodboard.olvidar_laminas_apuntadas(destino)
+        antes = len(pagadas)
+        moodboard.dibujar_desde_guia(estilo, destino, ejes=["cara"], calidad="low",
+                                     idioma="es", referencias=[aportada])
+        moodboard.dibujar_desde_guia(estilo, destino, ejes=["cara"], calidad="low",
+                                     idioma="es", referencias=[aportada],
+                                     peticiones={"cara": "más sonriente"})
+        igual(len(pagadas), antes + 2,
+              "una correccion es otra peticion: se dibuja aunque haya una apuntada")
+    finally:
+        moodboard.medios.motor = motor_real
+        shutil.rmtree(carpeta, ignore_errors=True)
+
+    fuente = _fuente("app.py")
+    ok("olvidar_laminas_apuntadas(destino)" in fuente,
+       "y el taller olvida lo apuntado cuando las láminas terminan bien")
 
 
 def prueba_las_aportadas_llegan_al_dibujo():
@@ -456,7 +585,9 @@ def main():
     prueba_una_sola_referencia()
     prueba_la_lamina_llega_al_prompt()
     prueba_las_aportadas_llegan_al_dibujo()
+    prueba_un_reintento_no_repaga_las_laminas()
     prueba_lo_que_devuelve_el_modelo_para_una_lamina()
+    prueba_las_laminas_de_este_estilo()
     prueba_sin_frase()
     if "--con-cli" in sys.argv:
         prueba_con_cli()

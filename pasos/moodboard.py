@@ -60,6 +60,8 @@ solo eje de un moodboard ya aprobado se llevaba por delante los otros cinco
 de un estilo mezcla las dos carpetas: de cada eje manda la propuesta si la hay,
 que es lo ultimo dibujado y lo que esta pendiente de mirar.
 """
+import hashlib
+import json
 import math
 import os
 import shutil
@@ -725,9 +727,88 @@ def importar(carpeta, clave, raiz=None):
 # justo lo que la cabecera de este modulo dice que no se haga nunca: la guia sale
 # de las palabras del canal y las laminas salen de la guia, en ese orden.
 
+# ------------------------------------------- lo ya pagado no se vuelve a pagar
+#
+# UNA PASADA QUE FALLA A MEDIAS DEJA LAMINAS BUENAS EN EL DISCO, y el reintento
+# las volvia a pagar todas: con una lamina rechazada por el filtro de seguridad,
+# cada intento pagaba las cinco buenas otra vez y nunca terminaba (D2 del
+# analisis del 13-10-2026). Cada lamina dibujada se apunta con la HUELLA de lo
+# que se pidio (prompt, referencias y calidad); si la pasada siguiente pide
+# exactamente lo mismo, se reutiliza. Y la memoria se BORRA cuando la pasada
+# termina bien (`olvidar_laminas_apuntadas`): asi «Regenerar» despues de una
+# pasada buena dibuja otra de verdad, y solo un reintento tras un fallo
+# reutiliza.
+
+_CANDADO_HUELLAS = threading.Lock()
+
+
+def _fichero_huellas(destino):
+    carpeta = os.path.join(os.path.dirname(os.path.abspath(destino)),
+                           "_lamina_aportadas")
+    return os.path.join(carpeta, "pendientes.json")
+
+
+def huella_de_lamina(prompt, refs, calidad, tamano="apaisado"):
+    """Lo que identifica una lamina pedida: el prompt, la calidad y el CONTENIDO
+    de cada referencia (la hoja se rehace con el mismo nombre)."""
+    h = hashlib.sha256()
+    h.update(f"{prompt}\x00{calidad}\x00{tamano}".encode("utf-8"))
+    for ruta in refs or ():
+        try:
+            with open(ruta, "rb") as fh:
+                h.update(hashlib.sha256(fh.read()).digest())
+        except OSError:
+            h.update(b"?")
+    return h.hexdigest()
+
+
+def lamina_apuntada(destino, nombre, huella):
+    """La ruta de la lamina si una pasada que no termino ya la pago con esta
+    misma huella, o None."""
+    ruta = os.path.join(destino, f"{nombre}.png")
+    with _CANDADO_HUELLAS:
+        try:
+            with open(_fichero_huellas(destino), "r", encoding="utf-8") as fh:
+                apuntadas = json.load(fh)
+        except (OSError, ValueError):
+            return None
+    if (isinstance(apuntadas, dict) and apuntadas.get(nombre) == huella
+            and os.path.isfile(ruta) and os.path.getsize(ruta) > 0):
+        return ruta
+    return None
+
+
+def apuntar_lamina(destino, nombre, huella):
+    """Apunta que la lamina `nombre` ya esta pagada con esta huella."""
+    fichero = _fichero_huellas(destino)
+    with _CANDADO_HUELLAS:
+        try:
+            with open(fichero, "r", encoding="utf-8") as fh:
+                apuntadas = json.load(fh)
+            if not isinstance(apuntadas, dict):
+                apuntadas = {}
+        except (OSError, ValueError):
+            apuntadas = {}
+        apuntadas[nombre] = huella
+        os.makedirs(os.path.dirname(fichero), exist_ok=True)
+        temporal = fichero + ".tmp"
+        with open(temporal, "w", encoding="utf-8") as fh:
+            json.dump(apuntadas, fh)
+        os.replace(temporal, fichero)
+
+
+def olvidar_laminas_apuntadas(destino):
+    """La pasada ha terminado bien: lo apuntado ya no es un intento a medias."""
+    with _CANDADO_HUELLAS:
+        try:
+            os.remove(_fichero_huellas(destino))
+        except OSError:
+            pass
+
+
 def dibujar_desde_guia(estilo, destino, ejes=None, calidad="medium",
                        avisar=None, idioma="", peticiones=None,
-                       referencias=None):
+                       referencias=None, reutilizar=True):
     """Dibuja las laminas de un estilo DESCRITO. -> {rutas, ejes, coste_usd}.
 
     'referencias' son las imagenes que la persona ADJUNTO al describir el
@@ -814,12 +895,21 @@ def dibujar_desde_guia(estilo, destino, ejes=None, calidad="medium",
             # el idioma del canal, que llegaba hasta aqui y no se usaba: la
             # lamina «diagrama» de un canal en espanol salia rotulada en ingles
             idioma=idioma)
-        png, meta = imagen.generar(prompt, refs, quality=calidad,
-                                   tamano="apaisado")
-        ruta = os.path.join(destino, f"{eje}.png")
-        with open(ruta, "wb") as fh:
-            fh.write(png)
-        resultados[indice] = (eje, ruta, float(meta.get("coste") or 0.0))
+        huella = huella_de_lamina(prompt, refs, calidad)
+        # `reutilizar=False` cuando alguien pide ESA lamina a proposito: ahi
+        # lo pedido es una nueva, aunque una pasada fallida dejara una igual
+        ruta = lamina_apuntada(destino, eje, huella) if reutilizar else None
+        if ruta:
+            # pagada por una pasada que no termino, con lo mismo: no se repaga
+            resultados[indice] = (eje, ruta, 0.0)
+        else:
+            png, meta = imagen.generar(prompt, refs, quality=calidad,
+                                       tamano="apaisado")
+            ruta = os.path.join(destino, f"{eje}.png")
+            with open(ruta, "wb") as fh:
+                fh.write(png)
+            apuntar_lamina(destino, eje, huella)
+            resultados[indice] = (eje, ruta, float(meta.get("coste") or 0.0))
         with candado:
             hechas[0] += 1
             avisar(hechas[0] / max(1, len(pedidos)),

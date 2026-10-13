@@ -10,6 +10,45 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Dos de tus notas de mejoras (13 de octubre)**
+- **«Un vídeo nuevo» empieza vacío** después de crear uno. Antes salía con el
+  nombre, el material y las indicaciones del vídeo anterior, y se podía crear
+  otro vídeo con ellos sin darse cuenta.
+- **Corregir una lámina que añadiste ya no redibuja todas.** El «Regenerar»
+  del estilo reconoce tus láminas añadidas y cambia solo la que nombras. Y
+  avisa: para cambiar una sola lámina, lo directo es el «Regenerar» de esa
+  lámina, que dibuja solo esa.
+
+**Seguridad y no pagar dos veces (13 de octubre)**
+- **El asistente ya no puede leer tus claves.** Antes, en el servidor podía
+  abrir el fichero de claves, el `.env` y la sesión de Claude, porque están
+  fuera de la carpeta del código. Ahora solo lee el código y tus proyectos.
+- **La clave de Jamendo ya no viaja en el enlace para escuchar un tema** ni se
+  guarda en el vídeo al elegirlo.
+- **«Generar imágenes» espera a la cola de notas**: si se están rehaciendo
+  imágenes con tus notas, te pide que esperes en vez de lanzar otra tanda
+  encima (que repagaba planos o tapaba la imagen recién pagada).
+- **Reintentar las láminas de un estilo que falló no vuelve a pagar las que
+  ya salieron bien.** Y pulsar varias veces «Regenerar» en una lámina lanza un
+  solo trabajo.
+- **Una tarifa mal escrita en Configuración ya no se guarda** (dejaba sin
+  «Generar» a todos los vídeos): te dice qué valor no vale.
+
+**Tres arreglos del informe de pruebas del modo foto (12 de octubre)**
+- **Si Jamendo o FreeSound no responden, el vídeo se monta igual, sin música
+  o sin efectos**, y al terminar te avisa. Antes «Montar el vídeo» se caía
+  entero y el error enseñaba la clave de Jamendo. La próxima vez que montes,
+  vuelve a intentarlo solo; o búscalos en «Música y efectos».
+- **«Probar» las claves ya no enseña la de Jamendo** cuando Jamendo no
+  responde, ni nada de una clave que repita el propio servicio en su error.
+- **Corregir el guion a mano ya no lo marca como «Guion obsoleto»**, y
+  «Regenerar el guion» no reescribe encima de tu corrección. La voz sí queda
+  por regrabar, como siempre: dice la frase de antes.
+- **Las imágenes de un estilo se revisan al subirlas.** Un fichero dañado o
+  que no es una imagen, una imagen diminuta o una de un solo color (toda negra)
+  se rechaza en ese momento y te dice por qué. Antes se aceptaba y el estilo
+  fallaba al 92 %, después de dos minutos y perdiendo el formulario.
+
 **El coste de verdad, los efectos y descargar por partes (12 de octubre)**
 - **Pulsa el coste de arriba** y sale **todo lo gastado del vídeo, desglosado**:
   imágenes nuevas, rehechas y de personajes, la voz y sus regrabaciones, Claude

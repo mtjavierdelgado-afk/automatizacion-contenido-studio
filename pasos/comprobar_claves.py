@@ -69,12 +69,45 @@ def _ficha(proveedor, estado, mensaje, **extra):
 
 
 def _pedir(metodo, url, **kw):
-    """Una peticion con el tiempo puesto; los fallos de red salen como (None, texto)."""
+    """Una peticion con el tiempo puesto; los fallos de red salen como (None, texto).
+
+    EL TEXTO NO LLEVA LA PETICION. El de una excepcion de `requests` trae la
+    URL entera, y Jamendo lleva la clave (`client_id`) EN la URL: con Jamendo
+    sin red, «Probar» la enseñaba entera en Configuracion y al asistente. Se
+    dice que ha pasado, no a donde se pregunto.
+    """
     requests = _requests()
     try:
         return requests.request(metodo, url, timeout=TIEMPO_S, **kw), ""
+    except requests.Timeout:
+        return None, f"no contesta en {TIEMPO_S} s"
     except requests.RequestException as fallo:          # noqa: BLE001
-        return None, f"{type(fallo).__name__}: {fallo}"
+        return None, f"sin conexión ({type(fallo).__name__})"
+
+
+def _tachar(fichas, almacen):
+    """Ninguna clave del almacen sale en el mensaje de una ficha. -> fichas
+
+    Red de seguridad para lo que conteste el propio servicio (un «Invalid
+    client_id XXXX» repetido en su error) o la excepcion de una prueba: no se
+    sabe que repite cada uno, asi que se tacha todo valor del almacen. Desde
+    ocho caracteres (el Client ID de Jamendo): uno de prueba tipo «test»
+    tacharia trozos de palabras normales.
+    """
+    valores = []
+    for valor in (almacen or {}).values():
+        if isinstance(valor, dict):
+            valores.append(valor.get("clave"))
+        elif isinstance(valor, list):
+            valores.extend(v.get("clave") for v in valor if isinstance(v, dict))
+    valores = sorted({str(v) for v in valores if v and len(str(v)) >= 8},
+                     key=len, reverse=True)
+    for ficha in fichas:
+        mensaje = str(ficha.get("mensaje") or "")
+        for valor in valores:
+            mensaje = mensaje.replace(valor, "…")
+        ficha["mensaje"] = mensaje
+    return fichas
 
 
 def _texto_corto(respuesta):
@@ -228,7 +261,7 @@ def probar_todas(cuentas_claude=(), con_claude=True):
         except Exception as fallo:                     # noqa: BLE001
             fichas.append(_ficha("claude", "sin_red", f"la prueba ha fallado: "
                                                       f"{type(fallo).__name__}: {fallo}"))
-    return fichas
+    return _tachar(fichas, almacen)
 
 
 NOMBRES = {"openai": "OpenAI (imágenes)", "cartesia": "Cartesia (voz)",

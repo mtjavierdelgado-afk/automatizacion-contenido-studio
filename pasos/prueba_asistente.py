@@ -103,6 +103,47 @@ def prueba_prompt():
     comprobar(all("," not in v for v in vetos),
               "ninguna regla lleva comas: la orden las une con comas")
 
+    # LAS CLAVES FUERA DEL CODIGO (el VPS: /opt/as-video-studio/datos/secretos)
+    # y la sesion por defecto del CLI, vetadas en absoluto; y los nombres
+    # tambien con `//`, que la forma `**/.env` solo vale dentro del cwd
+    antes = {k: os.environ.get(k) for k in ("ESTUDIO_SECRETOS", "CLAUDE_CONFIG_DIR")}
+    os.environ["ESTUDIO_SECRETOS"] = "/opt/as-video-studio/datos/secretos"
+    os.environ["CLAUDE_CONFIG_DIR"] = "/opt/as-video-studio/home/.claude-x"
+    try:
+        vetos = asistente.vetos_de_lectura("/opt/as-video-studio/app")
+    finally:
+        for k, v in antes.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    comprobar("Read(//opt/as-video-studio/datos/secretos/**)" in vetos,
+              "veta el almacen de claves aunque este FUERA del codigo (el VPS)")
+    comprobar("Read(//opt/as-video-studio/home/.claude-x/**)" in vetos,
+              "y la carpeta de la sesion del CLI (CLAUDE_CONFIG_DIR)")
+    comprobar(any(v.endswith("/.claude/**)") for v in vetos),
+              "y ~/.claude, la sesion por defecto")
+    comprobar(all(f"Read(//**/{n})" in vetos for n in (".env", "claves.json", ".credentials.json")),
+              "y los nombres en todo el disco, no solo dentro del cwd")
+    comprobar("Read(//proc/**)" in vetos,
+              "y /proc: el entorno de un proceso puede llevar el token de la sesion")
+    # LOS DATOS DEL VPS (tarifas, presets, ajustes) viven en `datos/`, fuera del
+    # codigo y de los proyectos: se dejan leer para contestar «cuanto cuesta»
+    datos = tempfile.mkdtemp(prefix="asist_datos_")
+    antes_t = os.environ.get("ESTUDIO_TARIFAS")
+    os.environ["ESTUDIO_TARIFAS"] = os.path.join(datos, "tarifas.json")
+    try:
+        con_datos = asistente.herramientas_permitidas(())
+    finally:
+        if antes_t is None:
+            os.environ.pop("ESTUDIO_TARIFAS", None)
+        else:
+            os.environ["ESTUDIO_TARIFAS"] = antes_t
+        shutil.rmtree(datos, ignore_errors=True)
+    absoluta = os.path.abspath(datos).replace("\\", "/").lstrip("/")
+    comprobar(f"Read(//{absoluta}/**)" in con_datos,
+              "y la carpeta de datos del VPS (la de tarifas.json) se puede leer")
+
 
 def prueba_orden():
     seccion("2] lo que de verdad se le pasa a cli_claude")
@@ -127,9 +168,22 @@ def prueba_orden():
         cli_claude.ejecutar = original
     igual(texto, "hola", "devuelve lo que contesta el CLI")
     permitidas = tuple(recibido["herramientas_permitidas"])
-    igual(permitidas[:3], ("Read", "Grep", "Glob"), "puede LEER: Read, Grep y Glob")
-    comprobar(all(p.startswith("mcp__estudio__") for p in permitidas[3:]) and len(permitidas) > 3,
-              f"y las herramientas del Estudio, pre-autorizadas: {permitidas[3:]}")
+    # S1 (analisis del 13-10-2026): `Read` a secas lo autorizaba en TODO el
+    # disco, y en el VPS las claves estan fuera del codigo. Medido con el CLI
+    # de verdad: con estas reglas niega claves.json, .env y las sesiones.
+    absoluta = os.path.abspath(carpeta).replace("\\", "/").lstrip("/")
+    for herramienta in ("Read", "Grep", "Glob"):
+        comprobar(f"{herramienta}(./**)" in permitidas
+                  and f"{herramienta}(//{absoluta}/**)" in permitidas,
+                  f"{herramienta} solo en el Estudio y en la carpeta añadida")
+        comprobar(herramienta not in permitidas,
+                  f"{herramienta} a secas NO va: lo pre-autorizaria en todo el disco "
+                  f"(Grep llegaba a leer /proc/self/environ)")
+    comprobar(not any("no/existe" in p for p in permitidas),
+              "y la carpeta que no existe no se autoriza")
+    del_estudio = [p for p in permitidas if p.startswith("mcp__estudio__")]
+    comprobar(del_estudio and len(del_estudio) + 6 == len(permitidas),
+              f"y las herramientas del Estudio, pre-autorizadas: {del_estudio}")
     comprobar("--mcp-config" not in recibido["extra"],
               "sin ESTUDIO_API no se carga ningun servidor MCP")
     primera = dict(recibido)

@@ -6333,7 +6333,10 @@ async function reengancharTandaLight(pid) {
       APP.light.video.planDe = vivo.id;
     } catch (e) { /* sin previsto se pinta sin cuenta atrás */ }
     seguirTrabajo(CLAVE_VIDEO_LIGHT, vivo.id, async trabajo => {
-      if (trabajo.estado === 'listo') await cargarVideoLight(pid);
+      if (trabajo.estado === 'listo') {
+        avisosDeLaTanda(trabajo);
+        await cargarVideoLight(pid);
+      }
       pintarLight();
     }, () => {
       if (tanda === 'video') refrescarPlanosLight();
@@ -7364,6 +7367,7 @@ async function lanzarTandaLight(tanda, modo) {
     if (tanda === 'video') v.planos = [];
     seguirTrabajo(CLAVE_VIDEO_LIGHT, tid, async trabajo => {
       if (trabajo.estado === 'listo') {
+        avisosDeLaTanda(trabajo);
         await cargarVideoLight(pid);
         // LA TANDA DE VIDEO YA NO ACABA EN EL MP4, acaba en el
         // previsualizador: es la parada nueva y es lo que hay que mirar antes
@@ -7389,6 +7393,14 @@ async function lanzarTandaLight(tanda, modo) {
     else toast(`«${nombreDeVideoLight(pid)}»: ${err.message}`, true);
     pintarLight();
   }
+}
+
+/* Lo que la tanda pide que se VEA al acabar bien. Hoy, el vídeo que ha salido
+   sin música porque Jamendo no respondía (`_correr_banda_de_tanda` en app.py):
+   la tanda ya no se cae por la música, así que si esto no se enseña el vídeo
+   sale mudo sin que nadie lo diga. */
+function avisosDeLaTanda(trabajo) {
+  (((trabajo && trabajo.resultado) || {}).avisos || []).forEach(aviso => toast(aviso, true));
 }
 
 /* Los planos que hay generados AHORA. Es la única señal que existe mientras la

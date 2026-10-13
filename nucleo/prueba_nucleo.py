@@ -165,11 +165,37 @@ def prueba_corregir_no_deja_obsoleto_al_que_corriges(base):
         igual(estado.estado_de(paso_id), "obsoleto",
               f"{paso_id} SI queda obsoleto: se hizo leyendo el texto de antes")
 
+    # M3 (informe de la Etapa Foto A): `al_dia` es lo que mira la TANDA y el
+    # plan que enseña «Guion obsoleto». Seguia comparando la firma completa,
+    # asi que el guion corregido salia «no al dia» y «Regenerar el guion» lo
+    # reescribia encima de la correccion. Las dos preguntas, la misma regla.
+    comprobar(estado.al_dia("guion"),
+       "y al_dia dice lo mismo que estado_de: la tanda no rehace el guion "
+       "corregido (lo reescribiria encima de la correccion)")
+    comprobar(not estado.al_dia("voz"),
+       "pero la voz sigue sin estar al dia para la tanda: hay que regrabarla")
+
     # y lo que no es una correccion sigue invalidando al propio paso
     estado.actualizar_params("guion", {"prompt_general": "mas directo"})
     igual(estado.estado_de("guion"), "obsoleto",
           "un param que SI es una entrada del paso lo deja obsoleto, como "
           "siempre: la excepcion es solo para lo que corrige su salida")
+    comprobar(not estado.al_dia("guion"),
+       "y para al_dia tambien: ahi la tanda SI tiene que rehacerlo")
+
+    # Y LO QUE SE EDITA MIENTRAS EL GUION SE ESCRIBE sigue contando. `firma`
+    # sale de la foto del arranque; si la propia saliera del final, el cambio
+    # quedaria sellado como leido y `al_dia` (que en el guion mira la propia)
+    # daria por bueno un guion escrito con el encargo de antes.
+    estado.marcar_ejecutando("guion")
+    estado.actualizar_params("guion", {"prompt_general": "cambiado a mitad"})
+    estado.completar("guion", {"fichero": "guion.json"})
+    comprobar(not estado.al_dia("guion"),
+              "un cambio hecho MIENTRAS corria el guion lo deja por rehacer: "
+              "se escribio con lo de antes")
+    igual(estado.estado_de("guion"), "obsoleto", "y la pantalla lo dice igual")
+    estado.completar("guion", {"fichero": "guion.json"})
+    comprobar(estado.al_dia("guion"), "y rehecho con lo de ahora, vuelve a estar al dia")
 
 def prueba_rehacer_solo_s03(estado, proyecto):
     print("\n[4] rehacer solo lo afectado")

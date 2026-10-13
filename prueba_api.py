@@ -739,6 +739,16 @@ def probar_regrabar_y_estructura(cliente, carpeta):
           "editar a mano deja la voz obsoleta: dice la frase vieja")
     igual(_ficha_paso(cliente, pid, "guion").get("estado"), "listo",
           "pero no al guion: corregirlo no es pedir otro")
+    # M3 (informe de la Etapa Foto A): el PLAN de la tanda decia lo contrario
+    # que el estado. Con `al_dia: false` la pantalla del encargo pintaba
+    # «Guion obsoleto» y «Regenerar el guion» reescribia encima de la
+    # correccion recien hecha.
+    _r, plan = cliente.get(f"/api/proyectos/{pid}/generar?tanda=guion")
+    del_guion = [t for f in (plan or {}).get("fases") or [] for t in f["tareas"]
+                 if t["id"] == "guion"]
+    igual([t.get("al_dia") for t in del_guion], [True],
+          "y el plan de la tanda del guion tampoco lo da por viejo: "
+          "«Regenerar el guion» no borra la corrección")
     _r, previsto = cliente.get(f"/api/proyectos/{pid}/guion/bloques",
                                params={"seccion": "SB001"})
     regrabar = (previsto or {}).get("regrabar") or {}
@@ -2543,6 +2553,164 @@ def probar_el_avisador_y_los_tramos():
           "y la ultima llega al final: la barra no se queda a medias")
 
 
+def probar_que_la_musica_no_tumba_el_montaje():
+    """A3 del informe de la Etapa Foto A: Jamendo caido no tumba el MP4.
+
+    Lo que se vio: «Montar el video» sin acceso a api.jamendo.com y la tanda
+    entera se caia, con el error de Python crudo en pantalla -- y dentro, la URL
+    completa con el `client_id` de Jamendo. Dos cosas, las dos medidas aqui:
+
+      1. ningun fallo de Jamendo lleva la clave, ni en el texto ni en la traza
+      2. en la tanda que monta el video la musica es prescindible: el MP4 sale
+         sin ella y la tanda lo AVISA. En el repaso y en «volver a la
+         automatica» no: alli lo pedido es justo la musica.
+
+    En proceso y sin red: `requests.get` se sustituye por uno que falla.
+    """
+    seccion("JAMENDO CAIDO: EL VIDEO SALE SIN MUSICA Y SIN ENSENAR LA CLAVE")
+    import traceback as _traza                                # noqa: PLC0415
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    sys.path.insert(0, os.path.join(RAIZ_ESTUDIO, "pasos"))
+    import app as servidor                                    # noqa: PLC0415
+    import requests as _requests                              # noqa: PLC0415
+    import sonido                                             # noqa: PLC0415
+
+    secreto = "clavejamendo" + "9" * 10
+    url = (f"https://api.jamendo.com/v3.0/tracks/?client_id={secreto}"
+           f"&format=json&limit=24")
+
+    def caido(*_a, **_k):
+        raise _requests.ConnectionError(
+            f"HTTPSConnectionPool(host='api.jamendo.com', port=443): Max retries "
+            f"exceeded with url: {url} (Caused by NameResolutionError)")
+
+    class _Respuesta:
+        ok, status_code = False, 503
+
+        def json(self):
+            return {}
+
+    class _Rechazo(_Respuesta):
+        ok, status_code = True, 200
+
+        def json(self):
+            return {"headers": {"status": "failed",
+                                "error_message": f"Invalid client_id {secreto}"}}
+
+    original_get = sonido.requests.get
+    try:
+        for nombre, falso in (("sin red", caido),
+                              ("un 503", lambda *_a, **_k: _Respuesta()),
+                              ("un rechazo que repite la clave",
+                               lambda *_a, **_k: _Rechazo())):
+            sonido.requests.get = falso
+            try:
+                sonido._pedir_a_jamendo({"client_id": secreto, "format": "json"})
+                ok(False, f"Jamendo con {nombre} tiene que fallar")
+            except RuntimeError as fallo:
+                traza = "".join(_traza.format_exception(fallo))
+                ok("Jamendo" in str(fallo), f"con {nombre} dice que es Jamendo: {fallo}")
+                ok(secreto not in str(fallo) and secreto not in traza,
+                   f"y con {nombre} la clave no va ni en el mensaje ni en la traza")
+    finally:
+        sonido.requests.get = original_get
+
+    # ---- quien corre la banda: prescindible SOLO en la tanda del video
+    igual(servidor._que_hace("banda_sonora", None, {}, musica_prescindible=True)[0],
+          servidor._correr_banda_de_tanda,
+          "en la tanda que monta el video, la banda va por el camino prescindible")
+    igual(servidor._que_hace("banda_sonora", None, {})[0], servidor._correr_banda,
+          "en el repaso y en «volver a la automatica», la de siempre: falla a la vista")
+
+    anotado = []
+
+    class _Bitacora:
+        def anotar(self, evento, *_a, **_k):
+            anotado.append(evento)
+
+    class _Proyecto:
+        config = {}
+        id = "x"
+
+        @staticmethod
+        def version_activa(paso_id):
+            return None
+
+        @staticmethod
+        def ruta_paso(paso_id, version=None, crear=False):
+            return os.path.join(tempfile.gettempdir(), "tanda_que_no_existe")
+
+        @staticmethod
+        def ruta_trabajo(paso_id, crear=False):
+            return os.path.join(tempfile.gettempdir(), "tanda_que_no_existe")
+
+    class _Ctx:
+        id = "x"
+        bitacora = _Bitacora()
+        proyecto = _Proyecto()
+        estado = None
+
+    def banda_caida(_avisar, _ctx, _tramos):
+        # lo que de verdad lanza `montar_banda` con Jamendo caido, ya limpio
+        sonido.requests.get = caido
+        try:
+            return sonido._pedir_a_jamendo({"client_id": secreto})
+        finally:
+            sonido.requests.get = original_get
+
+    montado = []
+
+    def render_falso(avisar_tarea):
+        montado.append(True)
+        avisar_tarea(1.0, "montado")
+        return {"resumen": "1 clip"}
+
+    original_banda, original_que_hace = servidor._correr_banda, servidor._que_hace
+    servidor._correr_banda = banda_caida
+    servidor._que_hace = lambda tid, ctx, receta, modo="pendientes", solo_montar=False, \
+        musica_prescindible=False: (
+            original_que_hace(tid, ctx, receta, modo, solo_montar, musica_prescindible)
+            if tid == "banda_sonora" else (render_falso, ()))
+    dichos = []
+    try:
+        plan = {"segundos": 10.0, "fases": [
+            {"pestana": "render", "desde": 0.0, "segundos": 10.0,
+             "pendientes": ["banda_sonora", "render"],
+             "tareas": [{"id": "banda_sonora"}, {"id": "render"}]}]}
+        try:
+            salida = servidor._correr_cadena(
+                lambda v, m="", p="": dichos.append(m), _Ctx(), ["render"],
+                "todo", {}, plan)
+        except Exception as fallo:                          # noqa: BLE001
+            salida = {"error": f"{type(fallo).__name__}: {fallo}"}
+
+        ok("error" not in salida,
+           f"la tanda del MP4 NO se cae porque Jamendo no responda "
+           f"({salida.get('error', 'sigue')})")
+        ok(montado, "y el vídeo se monta igual, sin música")
+        avisos = salida.get("avisos") or []
+        ok(avisos and "sin música" in avisos[0],
+           f"y el resultado de la tanda lo avisa, que la pantalla lo enseña: {avisos}")
+        ok(not any(secreto in x for x in avisos + dichos),
+           "sin la clave de Jamendo en el aviso ni en la barra")
+        ok("banda_sonora_fallida" in anotado, "y queda apuntado en la bitácora")
+
+        # Y CANCELAR SI CORTA: es alguien pidiendo parar, no un fallo de musica
+        from nucleo.trabajos import Cancelado                 # noqa: PLC0415
+
+        def cancelada(*_a, **_k):
+            raise Cancelado()
+        servidor._correr_banda = cancelada
+        try:
+            servidor._correr_banda_de_tanda(lambda *_a, **_k: None, _Ctx())
+            ok(False, "cancelar la tanda mientras monta la música la para")
+        except Cancelado:
+            ok(True, "cancelar la tanda mientras monta la música la para")
+    finally:
+        servidor._correr_banda, servidor._que_hace = original_banda, original_que_hace
+        sonido.requests.get = original_get
+
+
 def probar_el_mensaje_publico_de_una_tanda():
     """Una tanda dice por donde va DOS veces, y las dos a la vez.
 
@@ -4107,11 +4275,26 @@ def probar_imagenes_de_apoyo(cliente):
     ok(isinstance(tope, int) and tope > 0,
        f"la galeria dice cuantas imagenes caben ({tope})")
 
-    png = (b"\x89PNG\r\n\x1a\n" + b"\x00" * 64)
+    # UNA IMAGEN DE VERDAD: un degradado que se abre entero. Lo que habia aqui
+    # --la cabecera de un PNG y ceros detras-- es justo lo que la subida tiene
+    # que rechazar (M4 del informe de la Etapa Foto A, mas abajo).
+    from PIL import Image                                    # noqa: PLC0415
+
+    def imagen(ancho, alto, color=None, formato="PNG"):
+        lienzo = Image.new("RGB", (ancho, alto), color or (0, 0, 0))
+        if color is None:
+            lienzo.putdata([(x * 255 // ancho, y * 255 // alto, 128)
+                            for y in range(alto) for x in range(ancho)])
+        crudo = io.BytesIO()
+        lienzo.save(crudo, formato)
+        return crudo.getvalue()
+
+    png = imagen(160, 120)
     respuesta, datos = cliente.pedir(
         "POST", "/api/presets-light/imagenes",
         files=[("imagenes", ("una.png", png, "image/png")),
-               ("imagenes", ("otra.jpg", png, "image/jpeg"))])
+               ("imagenes", ("otra.jpg", imagen(160, 120, formato="JPEG"),
+                             "image/jpeg"))])
     igual(respuesta.status_code, 201, "subir dos imagenes responde 201")
     subidas = datos.get("imagenes") or []
     igual(len(subidas), 2, "y las guarda las dos")
@@ -4130,6 +4313,37 @@ def probar_imagenes_de_apoyo(cliente):
         "POST", "/api/presets-light/imagenes",
         files=[("imagenes", ("apuntes.txt", b"no soy una imagen", "text/plain"))])
     igual(respuesta.status_code, 400, "un fichero que no es imagen da 400")
+
+    # M4: LO QUE SE LLAMA .jpg PERO NO SE PUEDE ABRIR se rechaza AL SUBIRLO.
+    # Antes se aceptaba, salia una miniatura rota y el estilo se caia al 92 %
+    # tras dos minutos con Claude (`UnidentifiedImageError`). Igual las
+    # diminutas y las de un solo color: no hay estilo que copiar de ellas.
+    malas = [
+        ("rota.jpg", b"esto no es un jpg aunque lo diga el nombre", "image/jpeg",
+         "dañado"),
+        ("cortada.png", png[: len(png) // 2], "image/png", "dañado"),
+        ("cabecera.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 64, "image/png", "dañado"),
+        ("mini.png", imagen(8, 8), "image/png", "pequeña"),
+        ("negra.png", imagen(400, 300, (0, 0, 0)), "image/png", "un solo color"),
+    ]
+    for origen, crudo, tipo, dice in malas:
+        respuesta, datos = cliente.pedir(
+            "POST", "/api/presets-light/imagenes",
+            files=[("imagenes", (origen, crudo, tipo))])
+        igual(respuesta.status_code, 400, f"«{origen}» se rechaza al subirla")
+        texto = json.dumps(datos, ensure_ascii=False)
+        ok(origen in texto and dice in texto,
+           f"y el motivo nombra el fichero y dice «{dice}»")
+    respuesta, datos = cliente.pedir(
+        "POST", "/api/presets-light/imagenes",
+        files=[("imagenes", ("buena.png", png, "image/png")),
+               ("imagenes", ("rota.jpg", b"basura", "image/jpeg"))])
+    igual(respuesta.status_code, 201, "una buena y una rota: se sube la buena")
+    igual([s.get("origen") for s in datos.get("imagenes") or []], ["buena.png"],
+          "y solo la buena queda en el buzón")
+    ok(any("rota.jpg" in a for a in datos.get("avisos") or []),
+       "y la rota vuelve como aviso, que la pantalla enseña en ese momento")
+    cliente.delete(f"/api/presets-light/imagenes/{datos['imagenes'][0]['nombre']}")
 
     nombres = [s["nombre"] for s in subidas]
     base = {"nombre": "Canal con imagenes", "idioma": "es",
@@ -4503,6 +4717,7 @@ def main():
         probar_lo_que_se_cuenta_en_publico()
         probar_el_avisador_y_los_tramos()
         probar_el_mensaje_publico_de_una_tanda()
+        probar_que_la_musica_no_tumba_el_montaje()
         probar_el_reloj_de_lo_que_queda_por_hacer()
         probar_que_la_barra_light_no_ensena_la_cocina()
         probar_value_de_los_textarea()

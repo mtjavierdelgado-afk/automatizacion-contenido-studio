@@ -287,13 +287,37 @@ NOMBRES_ANIMOS = [
 
 
 def _pedir_a_jamendo(params):
-    respuesta = requests.get("https://api.jamendo.com/v3.0/tracks/",
-                             params=params, timeout=45)
-    respuesta.raise_for_status()
-    datos = respuesta.json()
+    """Una consulta a Jamendo. Lo que falle se dice SIN la peticion.
+
+    EL FALLO NUNCA LLEVA LA URL. El texto de una excepcion de `requests` trae
+    la URL entera, y en Jamendo la clave (`client_id`) va EN la URL: con
+    Jamendo caido, ese texto llegaba tal cual a la pantalla y la clave bajaba
+    entera al navegador (A3 del informe de la Etapa Foto A). Se dice que ha
+    pasado, no a donde se pregunto; el `from None` es para que la traza que
+    guarda la bitacora tampoco arrastre la excepcion de dentro. Y lo que
+    conteste el propio Jamendo se tacha por si acaso: no se sabe que repite.
+    """
+    clave = str((params or {}).get("client_id") or "")
+    try:
+        respuesta = requests.get("https://api.jamendo.com/v3.0/tracks/",
+                                 params=params, timeout=45)
+    except requests.Timeout:
+        raise RuntimeError("Jamendo no contesta: se ha agotado el tiempo de "
+                           "espera") from None
+    except requests.RequestException as fallo:
+        raise RuntimeError(f"no se puede llegar a Jamendo "
+                           f"({type(fallo).__name__})") from None
+    if not respuesta.ok:
+        raise RuntimeError(f"Jamendo ha contestado con un error "
+                           f"{respuesta.status_code}")
+    try:
+        datos = respuesta.json()
+    except ValueError:
+        raise RuntimeError("Jamendo ha contestado algo que no se entiende") from None
     cabecera = datos.get("headers") or {}
     if cabecera.get("status") != "success":
-        raise RuntimeError(f"Jamendo: {cabecera.get('error_message') or cabecera}")
+        motivo = f"Jamendo: {cabecera.get('error_message') or cabecera}"
+        raise RuntimeError(motivo.replace(clave, "…") if clave else motivo)
     return datos.get("results") or []
 
 

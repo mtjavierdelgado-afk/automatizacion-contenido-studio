@@ -378,7 +378,24 @@ class Estado:
             return False
         if datos.get("activa") is None:
             return False
-        if datos.get("firma") != firma_actual:
+        # EN UN PASO CON CORRECCIONES A MANO (el guion), la firma PROPIA, como
+        # en `estado_de`: no cuenta lo corregido a mano (ver CORRECCIONES).
+        # Comparaba la completa, asi que corregir un bloque dejaba el guion «no
+        # al dia»: la pantalla enseñaba «Guion obsoleto» culpando al encargo, y
+        # «Regenerar el guion» lo reescribia ENCIMA de la correccion (M3 del
+        # informe de la Etapa Foto A). Lo de aguas abajo no cambia: su firma
+        # lleva la completa del guion, y la voz sigue quedando por regrabar.
+        #
+        # SOLO en esos pasos, y no en todos: en los demas `firma_propia` se
+        # refresca en sitios donde `firma` a proposito no (`retirar_unidades`
+        # con el paso ya obsoleto), y mirarla ahi daria por buenos planos
+        # viejos. Lo que se edite MIENTRAS el guion corre sigue contando:
+        # `completar` sella su firma propia con la foto del arranque.
+        propia = datos.get("firma_propia")
+        if paso_id in CORRECCIONES and propia is not None:
+            if propia != self._firma(paso_id, propias=False):
+                return False
+        elif datos.get("firma") != firma_actual:
             return False
         return not self._unidades_obsoletas(paso_id)
 
@@ -783,6 +800,8 @@ class Estado:
             "estado": "ejecutando",
             "mensaje": "",
             "firma": self._firma(paso_id),
+            # la propia tambien, del MISMO momento: ver `completar`
+            "firma_propia": self._firma(paso_id, propias=False),
             "fecha": ahora(),
             "params": copy.deepcopy(self._doc["pasos"][paso_id].get("params", {})),
             "unidades": {u: self._firma_unidad(paso_id, u)
@@ -1060,7 +1079,15 @@ class Estado:
             datos["invalidadas"] = sorted(set(datos.get("invalidadas", [])) - objetivo)
             datos["salidas"] = copy.deepcopy(salidas)
             datos["firma"] = arranque["firma"] if arranque else self._firma(paso_id)
-            datos["firma_propia"] = self._firma(paso_id, propias=False)
+            # EN UN PASO CON CORRECCIONES, la propia tambien sale del arranque,
+            # como `firma`: si no, un cambio del encargo hecho MIENTRAS se
+            # escribia el guion quedaria sellado como si el guion lo hubiera
+            # leido, y `al_dia` (que mira la propia en estos pasos, M3) lo daria
+            # por bueno. En los demas pasos no cambia nada.
+            if paso_id in CORRECCIONES and arranque and arranque.get("firma_propia"):
+                datos["firma_propia"] = arranque["firma_propia"]
+            else:
+                datos["firma_propia"] = self._firma(paso_id, propias=False)
             datos["activa"] = numero
             datos["marca"] = None
             datos.setdefault("versiones", []).append({

@@ -10,6 +10,19 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Tres arreglos del informe de pruebas del modo foto (12 de octubre)**
+- **Si Jamendo no responde, el vídeo se monta igual, sin música**, y al
+  terminar te avisa de que ha salido sin ella. Antes «Montar el vídeo» se caía
+  entero y el error enseñaba la clave de Jamendo. La próxima vez que montes,
+  vuelve a intentar la música sola; o móntala en «Música y efectos».
+- **Corregir el guion a mano ya no lo marca como «Guion obsoleto»**, y
+  «Regenerar el guion» no reescribe encima de tu corrección. La voz sí queda
+  por regrabar, como siempre: dice la frase de antes.
+- **Las imágenes de un estilo se revisan al subirlas.** Un fichero dañado o
+  que no es una imagen, una imagen diminuta o una de un solo color (toda negra)
+  se rechaza en ese momento y te dice por qué. Antes se aceptaba y el estilo
+  fallaba al 92 %, después de dos minutos y perdiendo el formulario.
+
 **El coste de verdad, los efectos y descargar por partes (12 de octubre)**
 - **Pulsa el coste de arriba** y sale **todo lo gastado del vídeo, desglosado**:
   imágenes nuevas, rehechas y de personajes, la voz y sus regrabaciones, Claude

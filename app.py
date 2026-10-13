@@ -7350,6 +7350,43 @@ def _correr_banda(avisar, ctx, tramos):
     return {**ficha, "resumen": sonido.describir(ctx.estado.params("render") or {})}
 
 
+def _correr_banda_de_tanda(avisar, ctx):
+    """La banda sonora DENTRO de una tanda: si no sale, el video sigue sin ella.
+
+    La musica es prescindible y el MP4 no. Con Jamendo caido (o sin su clave),
+    `_correr_banda` lanzaba, la excepcion cortaba la receta y «Montar el video»
+    se caia entero por algo que el video puede no llevar (A3 del informe de la
+    Etapa Foto A). Aqui el fallo se apunta, se avisa y la tanda sigue: el
+    render sin `musica` en params monta sin musica, como siempre.
+
+    NO SE ESCRIBE NADA EN PARAMS: `musica` sigue vacia, asi que la tarea sigue
+    sin estar al dia (`_esta_al_dia`) y la proxima tanda vuelve a intentarlo
+    sola. Escribir un «sin musica» moveria la firma del render (regla 1).
+
+    Cancelar SI corta: es una persona pidiendo parar, no un fallo de la musica.
+    El boton suelto de «Musica y efectos» sigue fallando a la vista, que ahi lo
+    que se ha pedido es justo la musica.
+    """
+    try:
+        return _correr_banda(avisar, ctx, None)
+    except Exception as fallo:                              # noqa: BLE001
+        if type(fallo).__name__ == "Cancelado":
+            raise
+        motivo = str(fallo).strip() or type(fallo).__name__
+        ctx.bitacora.anotar("banda_sonora_fallida", "render", {"error": motivo[:300]})
+        # con «Rehacer todo» la banda se vuelve a montar aunque ya hubiera una,
+        # y si falla se queda la de antes: decir «sin música» seria mentir
+        tenia = bool(((ctx.estado.params("render") if ctx.estado else None)
+                      or {}).get("musica"))
+        aviso = ((f"No se ha podido montar otra música ({motivo}): el vídeo se "
+                  f"queda con la que ya tenía.") if tenia else
+                 (f"El vídeo sale sin música: {motivo}. Cuando se pueda, móntala "
+                  f"en «Música y efectos» y vuelve a montar el vídeo."))
+        avisar(None, f"AVISO: {aviso}")
+        return {"resumen": "música de antes" if tenia else "sin música",
+                "avisos": [aviso]}
+
+
 @app.get("/api/proyectos/{pid}/sonido/arco")
 def leer_arco(pid: str):
     """El arco que sale del RITMO del montaje. Gratis, sin salir a la red.
@@ -7873,12 +7910,19 @@ def _correr_assets_de_tanda(avisar, ctx, unidades, opciones):
     return _correr_paso(avisar, ctx, "assets", unidades, opciones)
 
 
-def _que_hace(tarea_id, ctx, receta, modo="pendientes", solo_montar=False):
+def _que_hace(tarea_id, ctx, receta, modo="pendientes", solo_montar=False,
+              musica_prescindible=False):
     """(funcion, args) de una tarea. Levanta si la tarea no se sabe hacer.
 
     `solo_montar` solo lo entiende la tarea del MP4, y es la diferencia entre
     volver a dibujar los 98 planos en un navegador y volver a mezclar el audio
     sobre los clips que ya hay. Ver `repaso.solo_mezcla`.
+
+    `musica_prescindible` solo lo entiende la banda sonora: en la tanda que
+    genera el video, si la musica no sale el video sigue sin ella
+    (`_correr_banda_de_tanda`). En el repaso y en «volver a la automatica» NO:
+    ahi lo que se ha pedido es justo la musica, y tragarse el fallo daria la
+    nota por aplicada sin musica nueva.
     """
     if tarea_id == "ingesta":
         return _un_paso(ctx, "ingesta", modo)
@@ -7915,6 +7959,8 @@ def _que_hace(tarea_id, ctx, receta, modo="pendientes", solo_montar=False):
     if tarea_id == "callouts":
         return _un_paso(ctx, "callouts", modo)
     if tarea_id == "banda_sonora":
+        if musica_prescindible:
+            return _correr_banda_de_tanda, (ctx,)
         return _correr_banda, (ctx, None)
     if tarea_id == "efectos":
         return _correr_surtir_efectos, (ctx, list(_sonido().PAPELES), False)
@@ -8027,7 +8073,8 @@ def _tramos_por_tiempo(ctx, tandas, modo):
 
 
 def _correr_receta(avisar, ctx, pestana, receta, tareas, modo,
-                   solo_montar=False, hechas_antes=0, total_global=0):
+                   solo_montar=False, hechas_antes=0, total_global=0,
+                   musica_prescindible=False):
     """Recorre la receta: tanda a tanda, y dentro de una tanda a la vez.
 
     El progreso es por TAREA y no por tanda: lo que se lee en pantalla es
@@ -8069,7 +8116,7 @@ def _correr_receta(avisar, ctx, pestana, receta, tareas, modo,
     tramos = _tramos_por_tiempo(ctx, tandas, modo)
     hechas = {"n": 0}
     cerrojo = threading.Lock()
-    salida = {"tareas": [], "saltadas": [], "pestana": pestana,
+    salida = {"tareas": [], "saltadas": [], "avisos": [], "pestana": pestana,
               "receta": receta.get("nombre") or "Todo", "modo": modo}
 
     total_publico = total_global or total
@@ -8103,7 +8150,8 @@ def _correr_receta(avisar, ctx, pestana, receta, tareas, modo,
                    f" · {ultimo['frase']}")
 
         avisar_tarea(0.0, "")
-        funcion, args = _que_hace(tarea["id"], ctx, receta, modo, solo_montar)
+        funcion, args = _que_hace(tarea["id"], ctx, receta, modo, solo_montar,
+                                  musica_prescindible)
         arranque = time.time()
         resultado = funcion(avisar_tarea, *args)
         ficha = {"tarea": tarea["id"], "nombre": tarea["nombre"],
@@ -8112,6 +8160,10 @@ def _correr_receta(avisar, ctx, pestana, receta, tareas, modo,
             ficha["resumen"] = str(resultado["resumen"])[:300]
         with cerrojo:
             salida["tareas"].append(ficha)
+            # lo que una tarea pide que se VEA al acabar (hoy: el video que
+            # sale sin musica, `_correr_banda_de_tanda`) sube con la tanda
+            if isinstance(resultado, dict) and resultado.get("avisos"):
+                salida["avisos"].extend(str(a) for a in resultado["avisos"])
         ctx.bitacora.anotar("receta_tarea", tarea["paso"],
                             {"pestana": pestana, "tarea": tarea["id"],
                              "segundos": ficha["segundos"]})
@@ -9671,6 +9723,66 @@ EXT_APORTADAS = (".png", ".jpg", ".jpeg", ".webp")
 #: que puede llenar el disco alguien que arrastre una carpeta entera.
 MAX_BYTES_APORTADA = 10 * 1024 * 1024
 
+#: Lado minimo, en pixeles, de una imagen de referencia. Por debajo no hay estilo
+#: que copiar: es un icono. Bajo a proposito -- esto para lo que no sirve, no
+#: juzga si una imagen es buena.
+MIN_LADO_APORTADA = 64
+
+#: Pixeles como mucho. Sobra para la foto de cualquier movil (50 MP) y pone
+#: techo a lo que cuesta en memoria abrirla para revisarla.
+MAX_PIXELES_APORTADA = 60_000_000
+
+
+def _motivo_para_no_aceptar(contenido, origen):
+    """Por que esta imagen NO vale como referencia de estilo, o None si vale.
+
+    SE MIRA AL SUBIRLA, que es cuando se puede decir. Antes solo se miraban la
+    extension y el peso: un «.jpg» que no era una imagen salia como miniatura
+    rota, el boton Generar se habilitaba, y el estilo trabajaba dos minutos con
+    Claude para caerse al 92 % con un `UnidentifiedImageError` -- perdiendo el
+    formulario y dejando un taller huerfano (M4 del informe de la Etapa Foto A).
+
+    Tres cosas, las tres medidas en ese informe: que se pueda ABRIR (de punta a
+    punta: `verify` solo mira la cabecera, y un fichero cortado pasa), que no
+    sea diminuta y que no sea de un solo color (toda negra, toda blanca). Sin
+    PIL no se mira nada: es lo de antes, y no se rompe la subida por ello.
+    """
+    try:
+        from PIL import Image, ImageStat  # noqa: PLC0415 - perezoso, como en las miniaturas
+    except ImportError:
+        return None
+    import io  # noqa: PLC0415
+    # SOLO LOS FORMATOS QUE SE ACEPTAN (EXT_APORTADAS): `Image.open` abriria
+    # cualquier cosa que PIL conozca, y alguno (EPS) llama a un programa externo
+    formatos = ["PNG", "JPEG", "WEBP"]
+    try:
+        with Image.open(io.BytesIO(contenido), formats=formatos) as imagen:
+            imagen.verify()
+        with Image.open(io.BytesIO(contenido), formats=formatos) as imagen:
+            ancho, alto = imagen.size
+            # ANTES de descomprimir: diez megas de PNG liso pueden ser cien
+            # millones de pixeles y casi un giga de memoria al abrirlos
+            if ancho * alto > MAX_PIXELES_APORTADA:
+                return (f"«{origen}» mide {ancho}×{alto} px: es demasiado grande "
+                        f"(como mucho {MAX_PIXELES_APORTADA // 1_000_000} "
+                        f"megapíxeles)")
+            if min(ancho, alto) < MIN_LADO_APORTADA:
+                return (f"«{origen}» mide {ancho}×{alto} px: es demasiado pequeña "
+                        f"para copiar un estilo de ella (mínimo "
+                        f"{MIN_LADO_APORTADA} px de lado)")
+            imagen.load()
+            # CON LA TRANSPARENCIA: un logo negro sobre fondo transparente tiene
+            # todo el dibujo en el canal alfa, y no es de un solo color
+            muestra = imagen.convert("RGBA")
+            muestra.thumbnail((256, 256))
+            if max(ImageStat.Stat(muestra).stddev) < 1.0:
+                return (f"«{origen}» es entera de un solo color: no hay nada "
+                        f"que copiar de ella")
+    except Exception:                                       # noqa: BLE001
+        return (f"«{origen}» no se puede abrir como imagen: el fichero está "
+                f"dañado o no es una imagen de verdad")
+    return None
+
 
 def _carpeta_aportadas():
     return os.path.join(raiz_proyectos(), CARPETA_APORTADAS)
@@ -9814,6 +9926,11 @@ async def subir_imagenes_light(peticion: Request):
             avisos.append(f"«{origen}» pesa "
                           f"{len(contenido) / 1024 / 1024:.1f} MB y el tope son "
                           f"{MAX_BYTES_APORTADA // 1024 // 1024}")
+            continue
+        # que de verdad sea una imagen que sirva, AHORA y no al 92 % del estilo
+        motivo = await asyncio.to_thread(_motivo_para_no_aceptar, contenido, origen)
+        if motivo:
+            avisos.append(motivo)
             continue
         # nombre propio: dos ficheros distintos pueden llamarse igual, y el
         # segundo se llevaria al primero por delante
@@ -12491,7 +12608,8 @@ def _correr_cadena(avisar, ctx, pestanas, modo, datos, plan):
     """
     recetas = _recetas()
     total = max(1.0, float(plan["segundos"]))
-    salida = {"pestanas": [], "modo": modo, "tareas": [], "saltadas": []}
+    salida = {"pestanas": [], "modo": modo, "tareas": [], "saltadas": [],
+              "avisos": []}
     # EL CONTADOR PUBLICO ES DE LA TANDA ENTERA, no de cada pestana, y cuenta lo
     # que SE VA A HACER. Contaba todas las tareas del plan --tambien las que se
     # iban a saltar-- y montar el MP4 de un video ya dibujado decia «11 de 11»
@@ -12517,9 +12635,12 @@ def _correr_cadena(avisar, ctx, pestanas, modo, datos, plan):
                    if t not in sin]
         if not recetas.orden_de(pestana, puestas):
             continue
+        # LA MUSICA ES PRESCINDIBLE AQUI: si no sale, el MP4 sale sin ella y
+        # el aviso viaja en `avisos` (ver `_correr_banda_de_tanda`)
         hecho = _correr_receta(avisar_fase, ctx, pestana, receta, puestas, modo,
                                hechas_antes=hechas_antes,
-                               total_global=total_publico)
+                               total_global=total_publico,
+                               musica_prescindible=True)
         # LAS QUE DE VERDAD HAN CORRIDO, no las que el plan preveia: entre
         # planificar y correr una tarea puede haber dejado de estar al dia, y
         # entonces el contador de la pestana siguiente arrancaria por debajo.
@@ -12527,6 +12648,7 @@ def _correr_cadena(avisar, ctx, pestanas, modo, datos, plan):
         salida["pestanas"].append(pestana)
         salida["tareas"].extend(hecho.get("tareas") or [])
         salida["saltadas"].extend(hecho.get("saltadas") or [])
+        salida["avisos"].extend(hecho.get("avisos") or [])
     salida["resumen"] = (f"{len(salida['tareas'])} tareas en "
                          f"{len(salida['pestanas'])} pestañas"
                          + (f", {len(salida['saltadas'])} ya estaban"

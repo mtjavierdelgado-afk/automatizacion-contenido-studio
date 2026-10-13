@@ -167,8 +167,8 @@ RETOQUES = {
         "lo_lee": "p7_callouts.diseno_de, y de ahí todo el envoltorio del texto",
     },
     "una_referencia": {
-        "que_es": "UNA sola de las seis referencias dibujadas. Se redibuja ESA "
-                  "y las otras cinco se quedan exactamente como están, con la "
+        "que_es": "UNA sola de las láminas (referencias) dibujadas. Se redibuja "
+                  "ESA y las demás se quedan exactamente como están, con la "
                   "guía sin tocar. Hay que decir CUÁL (`eje`) y QUÉ cambiarle "
                   "(`peticion`).",
         "ejemplos": ["en la de los tres cuerpos, que vayan vestidos de formas "
@@ -262,8 +262,20 @@ def _imagenes(cuantas):
     return "imagen" if cuantas == 1 else "imágenes"
 
 
-def _ejes_legibles():
-    """Las seis láminas y QUÉ HAY DIBUJADO EN CADA UNA. -> str
+def laminas_por_defecto():
+    """Las seis de fabrica, en la forma que recibe `repartir(laminas=...)`."""
+    return {eje: {"titulo": ficha["titulo"], "que_se_ve": ficha["prompt"]}
+            for eje, ficha in EJES.items()}
+
+
+def _ejes_legibles(laminas=None):
+    """Las láminas de ESTE estilo y QUÉ HAY DIBUJADO EN CADA UNA. -> str
+
+    `laminas` es {id: {titulo, que_se_ve}}: las de fabrica que quedan y las
+    AÑADIDAS (`extra_1`...). Sin pasarla, las seis de fabrica de siempre. Con
+    solo las seis, una correccion para una añadida no tenia a donde ir y caia
+    en «rehacer el estilo entero»: seis imagenes por una (N2 de las notas de
+    mejoras, 13-10-2026).
 
     Con la descripción en crudo que se le pasó al generador, no solo el título:
     es lo único que permite que «la que salen tres monos» caiga en `cuerpos` sin
@@ -277,12 +289,13 @@ def _ejes_legibles():
     lámina de al lado. La numeración de verdad la trae el bloque de estado, que
     es el único que la sabe.
     """
+    laminas = laminas or laminas_por_defecto()
     return "\n".join(
-        f"      {eje}: {ficha['titulo']} — {ficha['prompt']}"
-        for eje, ficha in EJES.items())
+        f"      {eje}: {ficha.get('titulo') or eje} — {ficha.get('que_se_ve') or ''}"
+        for eje, ficha in laminas.items())
 
 
-def _legible():
+def _legible(laminas=None):
     """El vocabulario tal y como se le enseña al modelo."""
     lineas = []
     for rid, ficha in RETOQUES.items():
@@ -292,8 +305,10 @@ def _legible():
         if ficha.get("ojo"):
             lineas.append(f"    OJO: {ficha['ojo']}")
         if rid == UNA_LAMINA:
-            lineas.append("    `eje` es una de estas seis, y no hay más:")
-            lineas.append(_ejes_legibles())
+            cuantas = len(laminas or EJES)
+            lineas.append(f"    `eje` es una de estas {cuantas} (las de este "
+                          f"estilo), y no hay más:")
+            lineas.append(_ejes_legibles(laminas))
         if ficha["campos"]:
             lineas.append(f"    campos: {', '.join(ficha['campos'])}")
         if rid in VALORES:
@@ -408,7 +423,7 @@ DEVUELVE SOLO ESTE JSON
    {{"retoque": "uno de los ids de arriba",
      "valor": "solo si ese retoque lleva `valor`; para caja_subtitulo es un
                número de 0 a 1",
-     "eje": "solo para una_referencia: cuál de las seis láminas",
+     "eje": "solo para una_referencia: cuál de las láminas de la lista",
      "peticion": "solo para una_referencia: qué cambiarle a ESA lámina",
      "porque": "una frase corta: por qué ESTE y no otro. Para sin_mando, qué
                 es lo que no se puede tocar."}}
@@ -423,11 +438,12 @@ def _numero(valor):
         return None
 
 
-def _limpiar(datos):
+def _limpiar(datos, laminas=None):
     """Lo que devolvio el modelo, dejado en algo que se puede correr.
 
-    -> (retoques, avisos)
+    -> (retoques, avisos). `laminas`: las de este estilo (ver `_ejes_legibles`).
     """
+    validas = list(laminas or EJES)
     salida, avisos = [], []
     for cruda in (datos.get("retoques") or []):
         if not isinstance(cruda, dict):
@@ -460,10 +476,10 @@ def _limpiar(datos):
             entrada["valor"] = valor
         if "eje" in ficha["campos"]:
             eje = str(cruda.get("eje") or "").strip().lower()
-            if eje not in EJES:
+            if eje not in validas:
                 avisos.append(
-                    f"«{eje or 'nada'}» no es ninguna de las seis referencias "
-                    f"(son {', '.join(EJES)}): se rehace el estilo entero")
+                    f"«{eje or 'nada'}» no es ninguna de las referencias de este "
+                    f"estilo (son {', '.join(validas)}): se rehace el estilo entero")
                 return [], avisos
             entrada["eje"] = eje
         if "peticion" in ficha["campos"]:
@@ -571,8 +587,9 @@ def tareas_de(retoques, respaldo=None):
     return tuple(t for t in orden if t in pedidas)
 
 
-def resumen_de(retoques, avisos=None):
+def resumen_de(retoques, avisos=None, laminas=None):
     """Una linea para decir en pantalla que se ha decidido. -> str"""
+    laminas = laminas or laminas_por_defecto()
     if not retoques:
         return "se rehace el estilo gráfico entero"
     if len(retoques) == 1 and retoques[0]["retoque"] == "sin_mando":
@@ -581,7 +598,8 @@ def resumen_de(retoques, avisos=None):
     trozos = []
     for entrada in retoques:
         if entrada["retoque"] == UNA_LAMINA:
-            titulo = (EJES.get(entrada.get("eje")) or {}).get("titulo")                 or entrada.get("eje")
+            titulo = (laminas.get(entrada.get("eje")) or {}).get("titulo") \
+                or entrada.get("eje")
             trozos.append(f"solo la referencia «{titulo}»")
             continue
         nombre = entrada["retoque"].replace("_", " ")
@@ -594,7 +612,7 @@ def resumen_de(retoques, avisos=None):
 
 
 def repartir(frase, estado="", ajuste=None, avisar=None, cwd=None,
-             proyecto_id=None):
+             proyecto_id=None, laminas=None):
     """De la frase a lo que hay que rehacer. -> dict
 
     -> {"retoques": [...], "tareas": (...), "params": {...},
@@ -619,7 +637,7 @@ def repartir(frase, estado="", ajuste=None, avisar=None, cwd=None,
                                               defecto=ESFUERZO_POR_DEFECTO,
                                               estricto=False)
     instruccion = INSTRUCCION.format(frase=frase, estado=estado or "—",
-                                     retoques=_legible())
+                                     retoques=_legible(laminas))
     arranque = time.time()
     avisar(0.2, "leyendo la corrección para ver qué hace falta rehacer")
     try:
@@ -641,11 +659,11 @@ def repartir(frase, estado="", ajuste=None, avisar=None, cwd=None,
                            f"se rehace el estilo entero"],
                 "resumen": "se rehace el estilo gráfico entero"}
 
-    retoques, avisos = _limpiar(datos)
+    retoques, avisos = _limpiar(datos, laminas)
     return {"retoques": retoques, "tareas": tareas_de(retoques),
             "params": params_de(retoques), "laminas": laminas_de(retoques),
             "imagenes": imagenes_de(retoques), "avisos": avisos,
-            "resumen": resumen_de(retoques, avisos),
+            "resumen": resumen_de(retoques, avisos, laminas),
             "segundos": round(time.time() - arranque, 1)}
 
 

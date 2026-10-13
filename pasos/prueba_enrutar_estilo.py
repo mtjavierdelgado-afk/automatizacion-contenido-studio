@@ -281,12 +281,53 @@ def prueba_la_lamina_llega_al_prompt():
     # descrito van en el orden de EJES, que no es el mismo.
     ok("def _laminas_por_eje" in fuente,
        "las láminas se leen con su eje y en el orden en que se ven")
-    ok("_laminas_por_eje(ctx)" in fuente.split("def _estado_del_estilo")[1][:2500],
+    ok("_laminas_por_eje(ctx" in fuente.split("def _estado_del_estilo")[1][:2500],
        "y el estado que ve el reparto las lleva numeradas: sin eso «la "
        "segunda» sería una adivinanza")
     ok(list(moodboard.EJES) != sorted(moodboard.EJES),
        "los dos órdenes de verdad son distintos, que es por lo que el número "
        "no puede estar escrito en el prompt")
+
+
+def prueba_las_laminas_de_este_estilo():
+    seccion("8b] el reparto conoce las láminas de ESTE estilo, también las añadidas")
+    # N2 de las notas de mejoras (13-10-2026): «al generar una lámina,
+    # regenera todas». El reparto solo conocía las seis de fábrica: una
+    # corrección para una lámina AÑADIDA (`extra_1`) no tenía a dónde ir y se
+    # redibujaban todas; y una QUITADA se aceptaba, se filtraba después y
+    # también acababa en todas.
+    encargo = {"laminas_quitadas": ["diagrama"],
+               "laminas_propias": {"extra_1": "un mapa del barrio con la tienda marcada"}}
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    import app as servidor                                    # noqa: PLC0415
+    laminas = servidor._laminas_para_el_reparto(encargo)
+    ok("extra_1" in laminas and "diagrama" not in laminas,
+       f"las láminas del estilo: las de fábrica que quedan y la añadida ({list(laminas)})")
+    igual(laminas["extra_1"]["que_se_ve"], "un mapa del barrio con la tienda marcada",
+          "la añadida llega con lo que enseña, para poder señalarla por su contenido")
+    ok("un mapa del barrio" in er._legible(laminas),
+       "y el modelo la ve en la lista de láminas que puede elegir")
+
+    retoques, avisos = er._limpiar({"retoques": [
+        {"retoque": er.UNA_LAMINA, "eje": "extra_1",
+         "peticion": "que se vea también el parque"}]}, laminas)
+    igual([r.get("eje") for r in retoques], ["extra_1"],
+          "una corrección para la lámina añadida se acepta (antes: rehacer todas)")
+    igual(er.laminas_de(retoques), {"extra_1": "que se vea también el parque"},
+          "y se redibuja SOLO esa")
+    igual(er.imagenes_de(retoques), 1, "pagando una imagen, no seis")
+
+    retoques, avisos = er._limpiar({"retoques": [
+        {"retoque": er.UNA_LAMINA, "eje": "diagrama", "peticion": "más grande"}]}, laminas)
+    igual(retoques, [], "una lámina QUITADA no se acepta como destino")
+    ok(avisos, f"y se dice por qué: {avisos}")
+
+    retoques, _ = er._limpiar({"retoques": [
+        {"retoque": er.UNA_LAMINA, "eje": "cuerpos", "peticion": "ropa variada"}]})
+    igual([r.get("eje") for r in retoques], ["cuerpos"],
+          "sin pasar las láminas, las seis de fábrica como siempre")
+    ok("Para cambiar una sola lámina" in _fuente(os.path.join("web", "app.js")),
+       "y el «Regenerar» del pie avisa de que una lámina se cambia con su botón")
 
 
 def prueba_lo_que_devuelve_el_modelo_para_una_lamina():
@@ -546,6 +587,7 @@ def main():
     prueba_las_aportadas_llegan_al_dibujo()
     prueba_un_reintento_no_repaga_las_laminas()
     prueba_lo_que_devuelve_el_modelo_para_una_lamina()
+    prueba_las_laminas_de_este_estilo()
     prueba_sin_frase()
     if "--con-cli" in sys.argv:
         prueba_con_cli()

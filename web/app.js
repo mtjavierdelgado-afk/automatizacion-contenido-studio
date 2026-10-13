@@ -6865,6 +6865,12 @@ async function crearYGenerarLight(estilo) {
     const pid = (datos.proyecto || {}).id;
     if (!pid) throw new Error('el servidor no ha devuelto ningún proyecto');
     recordarVideoLight(pid);
+    /* EL FORMULARIO YA ES DE ESTE VÍDEO: el siguiente «Un vídeo nuevo» empieza
+       vacío. Se quedaba relleno (nombre, material, indicaciones, duración…) y
+       se podía crear otro vídeo con el material del anterior y pagar su guion y
+       su voz (N1 de las notas de mejoras, 13-10-2026). Volver sin crear sí
+       conserva el borrador: eso es un vídeo a medio escribir. */
+    APP.light.video.encargo = null;
     APP.light.video.nombre = (datos.proyecto || {}).nombre || pid;
     APP.light.video.estilo = estilo.id;
     (datos.avisos || []).forEach(a => toast(a, true));
@@ -12857,6 +12863,25 @@ function pieDeEstilo(ficha) {
         + 'sólo lo que haga falta. Si basta con el texto en pantalla —el '
         + 'tamaño del subtítulo, su caja, la familia de los rótulos— no se '
         + 'dibuja ninguna imagen.'));
+    }
+    /* UNA LÁMINA SE CAMBIA CON SU PROPIO BOTÓN. Este «Regenerar» lee lo que
+       has escrito y, si no ve a qué lámina va o has cambiado las imágenes o el
+       tipo de imagen, las redibuja TODAS: cinco imágenes de más por una (N2 de
+       las notas de mejoras, 13-10-2026). Se dice antes de pulsar. */
+    const origenDelEstilo = (ficha.datos || {}).origen || {};
+    if (pedidas.includes('estilo')
+        && origenDelEstilo.estilo_imagenes && origenDelEstilo.taller) {
+      // LO QUE DE VERDAD LO REHACE TODO, lo mismo que mira el servidor
+      // (`material` en regenerar_preset_light): imágenes nuevas o quitadas, o
+      // el tipo de imagen. Cambiar solo las indicaciones pasa por el reparto.
+      const f = APP.light.fuente || {};
+      const todas = f.preset === ficha.id && (modoCambiadoLight(ficha)
+        || (f.quitar || []).length > 0 || (f.estilo_imagenes || []).length > 0);
+      caja.appendChild(h('div', { clase: 'meta' },
+        todas
+          ? 'Con imágenes o tipo de imagen nuevos se redibujan todas las láminas.'
+          : 'Para cambiar una sola lámina, usa el «Regenerar» de esa lámina en '
+            + '«Las láminas de tu estilo»: dibuja solo esa.'));
     }
   } else {
     caja.appendChild(h('div', { clase: 'fila' },

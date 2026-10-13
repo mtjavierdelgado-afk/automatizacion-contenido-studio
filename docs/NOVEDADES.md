@@ -10,6 +10,15 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Dos de tus notas de mejoras (13 de octubre)**
+- **«Un vídeo nuevo» empieza vacío** después de crear uno. Antes salía con el
+  nombre, el material y las indicaciones del vídeo anterior, y se podía crear
+  otro vídeo con ellos sin darse cuenta.
+- **Corregir una lámina que añadiste ya no redibuja todas.** El «Regenerar»
+  del estilo reconoce tus láminas añadidas y cambia solo la que nombras. Y
+  avisa: para cambiar una sola lámina, lo directo es el «Regenerar» de esa
+  lámina, que dibuja solo esa.
+
 **Seguridad y no pagar dos veces (13 de octubre)**
 - **El asistente ya no puede leer tus claves.** Antes, en el servidor podía
   abrir el fichero de claves, el `.env` y la sesión de Claude, porque están

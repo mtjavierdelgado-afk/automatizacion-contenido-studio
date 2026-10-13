@@ -10388,7 +10388,26 @@ def _frase_del_estilo(encargo, antes, peticion):
     return ahora if ahora and ahora != antes_prompt else ""
 
 
-def _estado_del_estilo(ctx):
+def _laminas_para_el_reparto(encargo):
+    """{id: {titulo, que_se_ve}} de las laminas de ESTE estilo, en su orden:
+    las de fabrica que quedan (con lo que se les cambio, si se cambio) y las
+    añadidas con su descripcion."""
+    lam = _laminas()
+    mod = _moodboard()
+    salida = {}
+    for lamina in lam.ids_de(encargo):
+        propia = lam.descripcion_extra(lamina, encargo)
+        que = propia or (mod.EJES.get(lamina) or {}).get("prompt") or ""
+        titulo = lam.titulo_de(lamina, encargo)
+        if lamina not in mod.EJES and propia:
+            # todas las añadidas se titulan «Lámina añadida»: con dos, el
+            # resumen y la lista numerada no las distinguirian
+            titulo = f"{titulo}: {propia[:40]}"
+        salida[lamina] = {"titulo": titulo, "que_se_ve": que}
+    return salida
+
+
+def _estado_del_estilo(ctx, laminas=None):
     """Cómo está el canal ahora, para que el reparto no decida a ciegas.
 
     Y desde que se puede corregir UNA de las seis referencias sin tocar las
@@ -10419,7 +10438,8 @@ def _estado_del_estilo(ctx):
         trozos.append(f"trazo: {str(guia['trazo'])[:160]}")
     linea = " · ".join(trozos)
 
-    laminas = _laminas_por_eje(ctx)
+    nombres = laminas or {}
+    laminas = _laminas_por_eje(ctx, validos=set(nombres))
     if not laminas:
         return linea                    # todavía no hay nada dibujado
     rutas, _e = _referencias_de_estilo(ctx)
@@ -10428,7 +10448,8 @@ def _estado_del_estilo(ctx):
     for orden, (eje, _ruta) in enumerate(laminas, start=1):
         if not eje:
             continue                    # sin eje no se puede señalar
-        titulo = (mod.EJES.get(eje) or {}).get("titulo") or eje
+        titulo = ((nombres.get(eje) or {}).get("titulo")
+                  or (mod.EJES.get(eje) or {}).get("titulo") or eje)
         pedido = " ".join(str(peticiones.get(eje) or "").split())
         filas.append(f"  {orden}. {eje} — {titulo}"
                      + (f"  [ya se le pidió: «{pedido[:140]}»]" if pedido else ""))
@@ -10559,7 +10580,7 @@ def _correr_light_voz(avisar, ctx, encargo):
                 hueco_minimo=cambios["hueco_minimo"])
 
 
-def _laminas_por_eje(ctx):
+def _laminas_por_eje(ctx, validos=()):
     """Las referencias dibujadas, CON SU EJE y en el orden en que se ven.
 
     Son las MISMAS que copia cada plano del video, y por eso son las que se
@@ -10597,8 +10618,11 @@ def _laminas_por_eje(ctx):
     # SIN TOCAR EL ORDEN GUARDADO. Reordenarlo aqui no daria un error, daria
     # otras muestras: `presets_light._escena_muestra` decide POR INDICE cual de
     # las seis lleva cartela.
+    # `validos` añade las laminas AÑADIDAS de este estilo (`extra_1`...): se
+    # llaman como su id y sin esto salian sin eje, o sea sin poder señalarlas
+    conocidos = set(mod.EJES) | set(validos or ())
     return [(os.path.splitext(os.path.basename(r))[0]
-             if os.path.splitext(os.path.basename(r))[0] in mod.EJES else "", r)
+             if os.path.splitext(os.path.basename(r))[0] in conocidos else "", r)
             for r in rutas]
 
 
@@ -11329,9 +11353,15 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     if parte == "estilo" and not material:
         frase = _frase_del_estilo(encargo, antes, peticion)
         if frase:
+            # LAS LAMINAS DE ESTE ESTILO, no las seis de fabrica: con solo esas,
+            # una correccion para una lamina AÑADIDA no tenia a donde ir y se
+            # redibujaban todas (N2 de las notas de mejoras, 13-10-2026); y
+            # una QUITADA se aceptaba, se filtraba despues y tambien caia en
+            # todas
+            laminas = _laminas_para_el_reparto(encargo)
             reparto = _enrutar_estilo().repartir(
-                frase, estado=_estado_del_estilo(ctx), cwd=ctx.proyecto.raiz,
-                proyecto_id=ctx.id)
+                frase, estado=_estado_del_estilo(ctx, laminas), cwd=ctx.proyecto.raiz,
+                proyecto_id=ctx.id, laminas=laminas)
             # LOS PARAMS SE ESCRIBEN AQUI Y NO DENTRO DEL TRABAJO: asi el
             # grafismo que corre despues ya los encuentra puestos, y si el
             # trabajo se cancela lo elegido se queda.

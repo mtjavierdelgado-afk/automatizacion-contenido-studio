@@ -1325,6 +1325,18 @@ def video_nuevo_con_ajustes(navegador, datos):
         pg.pulsar(".error-cerrable button", "Cerrar")
         ok(not pg.visible(".error-cerrable"), "y el aviso se puede cerrar")
     pg.captura("19_video_nuevo_tras_generar")
+    # N1 de las notas de mejoras (13-10-2026): el SIGUIENTE vídeo nuevo salía
+    # con el nombre y el material del que se acababa de crear, y se podía
+    # crear otro vídeo con ellos y pagar su guion y su voz
+    pg.js("irAInicioLight();")
+    pg.p.wait_for_timeout(800)
+    pg.js(f"await cargarGaleriaLight(true); elegirEstiloLight(fichaLight('{datos['preset']}'));")
+    ok(pg.esperar("h2", "Un vídeo nuevo"), "después de crear uno, «Un vídeo nuevo» se vuelve a abrir")
+    nombre_otra_vez = pg.p.locator(".bloque-light").filter(has_text="El vídeo").locator("input").first.input_value()
+    material_otra_vez = pg.p.locator(".bloque-light").filter(has_text="El material").locator("textarea").first.input_value()
+    ok(nombre_otra_vez == "" and material_otra_vez == "",
+       f"y empieza VACÍO, sin el nombre ni el material del vídeo anterior "
+       f"(nombre={nombre_otra_vez!r}, material={material_otra_vez[:40]!r})")
     pg.sin_errores("el vídeo nuevo")
     pg.cerrar()
 

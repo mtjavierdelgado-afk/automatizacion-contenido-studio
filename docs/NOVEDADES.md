@@ -42,6 +42,15 @@ vídeos, estilos, claves y contraseña no se tocan.
   con material largo, donde la revisión a veces no reescribe el texto entero).
   Si el trozo ya no está en el campo, o está varias veces, te lo dice para que
   lo cambies a mano.
+- **La música, los efectos y los subtítulos, debajo del vídeo montado.** En la
+  pantalla **Vídeo** sale el bloque «Música, efectos y subtítulos» (el mismo
+  que había en el Encargo): cambiar la música, su volumen, los efectos o el
+  aspecto de los subtítulos vuelve a montar el vídeo sin redibujar ninguna
+  imagen ni regrabar la voz. Y dos cosas nuevas en la música: un **ajuste
+  fino del volumen** (un deslizador, de 1 en 1 dB, encima de Suave, Normal o
+  Alta) y **elegir el ánimo de la música automática** para todo el vídeo
+  (alegre, gamer, rock…): busca un tema de ese ánimo para cada tramo y vuelve
+  a mezclar.
 
 **Dos de tus notas de mejoras (13 de octubre)**
 - **«Un vídeo nuevo» empieza vacío** después de crear uno. Antes salía con el

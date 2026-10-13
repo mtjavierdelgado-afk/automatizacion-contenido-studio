@@ -6732,6 +6732,9 @@ def leer_sonido(pid: str):
         "hay_jamendo": hay_jamendo,
         "hay_freesound": hay_freesound,
         "lufs": render.get("musica_lufs", sonido.MUSICA_LUFS),
+        # EL VOLUMEN FINO, en dB sobre la presencia (N9 de las notas de
+        # mejoras, 13-10-2026): el deslizador de la pantalla lo lee de aquí.
+        "musica_db": _musica_db_de(render),
         "resumen": sonido.describir(render),
         # los créditos, en una lista lista para pegar en la descripción: los
         # temas son de Jamendo y varios piden atribución
@@ -6833,6 +6836,23 @@ def guardar_sonido(pid: str, cuerpo: dict = Body(default=None)):
         cambios["sonido"] = bool(datos["activo"])
     if isinstance(datos.get("lufs"), (int, float)):
         cambios["musica_lufs"] = max(-40.0, min(-10.0, float(datos["lufs"])))
+    # EL VOLUMEN FINO DE LA MÚSICA, en dB (N9 de las notas de mejoras,
+    # 13-10-2026). `musica_db` y no `lufs`: el `lufs` solo mueve el tema suelto
+    # y la música automática (la cama) lo ignora, y `musica_db` va en la misma
+    # suma que la presencia en las dos (`sonido.filtro_de_mezcla`). Es el mismo
+    # mando que el repaso («la música está alta») y con su mismo margen. Lo que
+    # ya suena no se escribe (regla 1): la firma del render no se mueve.
+    db_igual = False
+    if isinstance(datos.get("musica_db"), (int, float)) \
+            and not isinstance(datos.get("musica_db"), bool):
+        pedido = round(max(-12.0, min(6.0, float(datos["musica_db"]))), 1)
+        if pedido == _musica_db_de(ctx.estado.params("render") or {}):
+            db_igual = True
+        else:
+            cambios["musica_db"] = pedido
+    if db_igual and not cambios and "musica" not in datos and "activo" not in datos:
+        return {"guardado": [], "cambiado": False, "trabajo_id": None,
+                "estado": ctx.estado.estado_de("render")}
     if "musica" in datos:
         ficha = datos["musica"] or {}
         if not ficha:
@@ -6861,7 +6881,7 @@ def guardar_sonido(pid: str, cuerpo: dict = Body(default=None)):
                                     f"({type(fallo).__name__})")
             cambios["musica"] = ficha
     if not cambios:
-        raise ErrorApi(400, "hace falta 'musica', 'activo' o 'lufs'")
+        raise ErrorApi(400, "hace falta 'musica', 'activo', 'lufs' o 'musica_db'")
     al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
     ctx.estado.actualizar_params("render", cambios)
     # ELEGIR OTRO TEMA solo vuelve a mezclar el audio, si el video estaba
@@ -6878,11 +6898,26 @@ def guardar_sonido(pid: str, cuerpo: dict = Body(default=None)):
                                        ctx, ["banda_sonora", "render"], True,
                                        paso="render")
         _registrar_trabajo(trabajo_id, ctx.id)
+    elif datos.get("remontar") and "musica" not in cambios \
+            and ("musica_db" in cambios or "musica_lufs" in cambios):
+        # SUBIR O BAJAR LA MÚSICA: lo mismo que la presencia, solo mezclar
+        # (N9 de las notas de mejoras, 13-10-2026)
+        trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado,
+                                                "volver a mezclar la música")
     ctx.bitacora.anotar("sonido", "render", {
         "musica": (cambios.get("musica") or {}).get("titulo"),
-        "activo": cambios.get("sonido")})
-    return {"guardado": list(cambios), "estado": ctx.estado.estado_de("render"),
+        "activo": cambios.get("sonido"), "musica_db": cambios.get("musica_db")})
+    return {"guardado": list(cambios), "cambiado": True,
+            "estado": ctx.estado.estado_de("render"),
             "trabajo_id": trabajo_id, "montado": montado}
+
+
+def _musica_db_de(render):
+    """El volumen fino de la música guardado en el render, en dB (0 si no hay)."""
+    try:
+        return round(float((render or {}).get("musica_db") or 0.0), 1)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _antes_de_cambiar_el_montaje(ctx):
@@ -7476,7 +7511,12 @@ def leer_arco(pid: str):
     parte el vídeo, cuántos planos tiene cada uno y qué ánimo pide. Sirve para
     entender la decisión, no para tomarla.
     """
-    ctx = contexto(pid)
+    tramos, largo, planos = _arco_de(contexto(pid))
+    return {"tramos": tramos, "duracion": largo, "planos": planos}
+
+
+def _arco_de(ctx):
+    """(tramos, largo, planos) del arco que sale del ritmo del montaje."""
     sonido = _sonido()
     plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
     escenas = plan.get("escenas") or []
@@ -7484,8 +7524,63 @@ def leer_arco(pid: str):
     if not largo and escenas:
         largo = (float(escenas[-1].get("t_out") or 0)
                  - float(escenas[0].get("t_in") or 0))
-    return {"tramos": sonido.arco_del_video(escenas, largo),
-            "duracion": largo, "planos": len(escenas)}
+    return sonido.arco_del_video(escenas, largo), largo, len(escenas)
+
+
+@app.put("/api/proyectos/{pid}/musica/animo", status_code=202)
+def cambiar_animo_musica(pid: str, cuerpo: dict = Body(default=None)):
+    """Rehace la música AUTOMÁTICA con un ánimo para todo el vídeo, y remezcla.
+
+    N9 de las notas de mejoras (13-10-2026): «a la música cambiarle de tipo».
+    Los ánimos de la automática salían solos del ritmo (`sonido.arco_del_video`)
+    y no había forma de pedir, por ejemplo, una alegre. Es el MISMO camino que
+    «volver a la automática» —montar la banda y volver a mezclar con
+    `solo_montar`— y el ánimo viaja en los `tramos` que ya acepta
+    `sonido.montar_banda`: los del ritmo, con su `animo` cambiado (los cortes y
+    la velocidad siguen saliendo del montaje). Ni una imagen ni la voz.
+
+    NO SE ESCRIBE NADA AL PEDIRLO: la banda nueva entra en los params al
+    terminar de montarse. Con Jamendo caído el vídeo se queda con la música que
+    tenía, en vez de quedarse sin ninguna. Y no hace falta ningún param nuevo:
+    el ánimo queda apuntado en cada tramo de `render.musica`.
+    """
+    ctx = contexto(pid)
+    sonido = _sonido()
+    datos = _cuerpo(cuerpo)
+    animo = str(datos.get("animo") or "").strip().lower()
+    if animo not in sonido.ANIMOS:
+        raise ErrorApi(400, "«animo» tiene que ser uno de: " + ", ".join(sorted(sonido.ANIMOS)))
+    if not sonido.hay_claves()[0]:
+        raise ErrorApi(409, "falta la clave de Jamendo: ponla en Configuración")
+    al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
+    tramos, _largo, _planos = _arco_de(ctx)
+    if not tramos:
+        raise ErrorApi(409, "no hay planos todavía: la música se monta sobre el "
+                            "ritmo del montaje, así que primero hay que cortarlo")
+    nombre = dict(sonido.NOMBRES_ANIMOS).get(animo, animo)
+    tramos = [dict(t, animo=animo, por_que=f"elegido a mano: {nombre.lower()}")
+              for t in tramos]
+    # SOLO SE REMEZCLA SI EL MONTAJE ESTABA AL DÍA (`_remontar_si_estaba_al_dia`):
+    # con planos pendientes la banda se queda puesta y entra al montar el vídeo
+    remezclar = bool(al_dia and montado)
+    trabajo_id = ctx.gestor.lanzar("música con otro ánimo", _correr_banda_y_mezcla,
+                                   ctx, tramos, remezclar, paso="render")
+    _registrar_trabajo(trabajo_id, ctx.id)
+    ctx.bitacora.anotar("musica_animo", "render", {"animo": animo, "tramos": len(tramos)})
+    return {"animo": animo, "tramos": len(tramos), "trabajo_id": trabajo_id,
+            "remontando": remezclar, "montado": montado,
+            "trabajo": ctx.gestor.estado(trabajo_id)}
+
+
+def _correr_banda_y_mezcla(avisar, ctx, tramos, remezclar):
+    """La banda con los tramos dados y, si toca, el MP4 vuelto a MEZCLAR."""
+    ficha = _correr_banda(lambda v, m="", p="": avisar(0.6 * float(v or 0), m),
+                          ctx, tramos)
+    if remezclar:
+        _regenerar_tras_repaso(lambda v, m="", p="": avisar(0.6 + 0.4 * float(v or 0), m, p),
+                               ctx, ["render"], "pendientes", True)
+    return {"tramos": len(ficha.get("tramos") or []), "remezclado": bool(remezclar),
+            "resumen": ficha.get("resumen")}
 
 
 @app.post("/api/proyectos/{pid}/sonido/banda", status_code=202)

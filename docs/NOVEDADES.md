@@ -10,6 +10,12 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Más notas de mejoras (13 de octubre)**
+- **El dictado ya no repite palabras.** Con el dictado gratuito del navegador
+  (sin clave de OpenAI), en el móvil salía «hola que talhola que tal hola que
+  tal quiero un vídeo». Ahora queda lo que dijiste, una vez, y se respeta lo
+  que hubieras escrito antes de pulsar el micrófono.
+
 **Dos de tus notas de mejoras (13 de octubre)**
 - **«Un vídeo nuevo» empieza vacío** después de crear uno. Antes salía con el
   nombre, el material y las indicaciones del vídeo anterior, y se podía crear

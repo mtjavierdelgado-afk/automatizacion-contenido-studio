@@ -4413,6 +4413,70 @@ def prueba_musica_un_pelin_mas_alta():
        "la frase del sonido dice el nivel")
 
 
+def prueba_ortografia_por_tandas():
+    """N6 de las notas de mejoras (13-10-2026): «la revision de ortografia no
+    es un JSON legible» salia de titular y se perdia la revision entera por una
+    tanda con una comilla sin escapar. Ahora: tandas de 20, la rota se pide
+    otra vez, y si sigue rota las demas se conservan y se dice cuantas faltan.
+    Con un CLI doble: nada sale de la maquina."""
+    print("\n[ortografia: una tanda rota no se lleva las demas]")
+    import ortografia
+    original = cli_claude.ejecutar
+    roto = '{"correcciones": {"T000": {"texto": "dijo "hola"", "cambios": []}}'
+
+    def bueno(instruccion):
+        ids = re.findall(r'<t id="([^"]+)">([^<]*)</t>', instruccion)
+        return json.dumps({"correcciones": {i: {"texto": t.replace("mas", "más"),
+                                                "cambios": [["mas", "más"]]}
+                                            for i, t in ids if "mas" in t}})
+
+    def doble(respuestas):
+        llamadas = []
+
+        def ejecutar(instruccion, **_k):
+            llamadas.append(instruccion)
+            que = respuestas(len(llamadas), instruccion)
+            return (bueno(instruccion) if que == "bien" else roto), {}
+        return ejecutar, llamadas
+
+    textos = {f"T{i:03d}": f"esto es mas texto {i}" for i in range(50)}
+    try:
+        ok(ortografia.POR_LLAMADA <= 20, f"tandas de 20 como mucho ({ortografia.POR_LLAMADA})")
+        # 1) roto a la primera, bien a la segunda: se reintenta y sale entero
+        cli_claude.ejecutar, llamadas = doble(lambda n, _i: "roto" if n == 1 else "bien")
+        informe = {}
+        salida = ortografia.revisar({"A": "una vez mas"}, informe=informe)
+        ok(len(llamadas) == 2 and salida.get("A", {}).get("texto") == "una vez más",
+           f"un JSON roto se pide otra vez y la segunda vale ({len(llamadas)} llamadas, {salida})")
+        ok(informe.get("sin_revisar") == 0, f"y no queda nada sin revisar ({informe})")
+        # 2) una tanda rota siempre: las demas se conservan y se dice cuantas faltan
+        cli_claude.ejecutar, llamadas = doble(
+            lambda _n, ins: "roto" if '<t id="T020">' in ins else "bien")
+        informe = {}
+        salida = ortografia.revisar(textos, informe=informe)
+        rotos = [t for t in textos if 20 <= int(t[1:]) < 40]
+        ok(len(salida) == 30 and not any(t in salida for t in rotos),
+           f"las tandas buenas se conservan ({len(salida)} de 50 corregidos)")
+        ok(informe.get("sin_revisar") == 20 and "JSON" in (informe.get("detalle") or ""),
+           f"se apuntan los 20 textos sin revisar, con el detalle aparte ({informe.get('sin_revisar')})")
+        ok(len(llamadas) == 4, f"la tanda rota se reintenta UNA vez y no mas ({len(llamadas)} llamadas)")
+        # 3) rota en todas: error en castellano de titular, el tecnico detras
+        cli_claude.ejecutar, llamadas = doble(lambda _n, _i: "roto")
+        try:
+            ortografia.revisar(textos)
+            ok(False, "si no sale ninguna tanda, lanza")
+        except ortografia.ErrorOrtografia as fallo:
+            titular, _, detalle = str(fallo).partition("\n\n")
+            ok(titular.startswith("El corrector devolvió una respuesta rota")
+               and "Revisar" in titular and "JSON" not in titular,
+               f"el titular es para la persona ({titular!r})")
+            ok("JSON" in detalle, f"y el detalle técnico va aparte ({detalle[:60]!r})")
+        except RuntimeError as fallo:
+            ok(False, f"si no sale ninguna tanda, el error es para la persona ({fallo})")
+    finally:
+        cli_claude.ejecutar = original
+
+
 def _prohibir_pagar():
     """Deja el motor de imagen sin `generar`. Ver la cabecera del modulo.
 
@@ -4492,6 +4556,7 @@ def main():
     prueba_lo_que_la_receta_no_nombra()
     prueba_familias_de_receta()
     prueba_musica_un_pelin_mas_alta()
+    prueba_ortografia_por_tandas()
 
     print("\n" + "=" * 70)
     if _fallos:

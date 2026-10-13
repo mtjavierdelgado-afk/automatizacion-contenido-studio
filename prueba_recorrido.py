@@ -1846,6 +1846,58 @@ def ortografia_de_los_subtitulos(navegador, datos):
 
 
 @escenario
+def ortografia_por_palabra_entera(navegador, datos):
+    """N6 de las notas de mejoras (13-10-2026). Al poner una corrección en un
+    bloque con marcas de la voz, «esta → está» cambiaba la «esta» de dentro de
+    «estaba»; el aviso rojo de «corrígelo a mano» lo tapaba al instante el de
+    «puestas»; y lo que no se pudo revisar (una tanda con el JSON roto) no se
+    decía. Se llama a las funciones de la pantalla y se pinta el panel con
+    cada estado."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'video'; pintarLight();")
+    ok(pg.esperar(".panel-ortografia", "Ortografía", 15), "el panel de ortografía está")
+    r = pg.js("""return [
+      sustituirPalabra('estaba esta casa', 'esta', 'está'),
+      sustituirPalabra('estaba aqui', 'esta', 'está'),
+      sustituirPalabra('<break time="1s"/> time', 'time', 'tiempo'),
+      ortografiaSobreCrudo('Ella estaba <break time="900ms"/> y esta aqui',
+        { despues: 'Ella estaba y está aquí', cambios: [['esta', 'está'], ['aqui', 'aquí']] }),
+      ortografiaSobreCrudo('Ella estaba <break time="900ms"/> bien',
+        { despues: 'Ella estába bien', cambios: [['esta', 'está']] })];""")
+    ok(r[0] == "estaba está casa", f"«esta → está» no toca la de dentro de «estaba» ({r[0]!r})")
+    ok(r[1] is None, f"si solo está dentro de otra palabra, no se pone ({r[1]!r})")
+    ok(r[2] == '<break time="1s"/> tiempo', f"ni dentro de una marca de la voz ({r[2]!r})")
+    ok(r[3] == 'Ella estaba <break time="900ms"/> y está aquí',
+       f"con marcas, cada pareja va a su palabra y las pausas se quedan ({r[3]!r})")
+    ok(r[4] is None, f"lo que no encaja vuelve como «a mano» (null), no como puesto ({r[4]!r})")
+    # lo que se quedó sin revisar se dice, y «Sin faltas» no lo cuenta
+    pg.js(f"""ORTOGRAFIA_VIVA.set(claveOrtografia('{pid}', 'subtitulos'),
+      {{ estado: 'listo', revisados: 10, sin_revisar: 3, propuestas: [] }}); pintarLight();""")
+    texto = pg.p.locator(".panel-ortografia").last.inner_text()
+    ok("3 texto(s) se han quedado sin revisar" in texto and "Sin faltas en 7 textos" in texto,
+       f"los textos sin revisar se dicen y no cuentan como revisados ({texto[:220]!r})")
+    # la respuesta rota en todas las tandas: el titular es para la persona
+    pg.js(f"""ORTOGRAFIA_VIVA.set(claveOrtografia('{pid}', 'subtitulos'), {{ estado: 'error',
+      error: 'El corrector devolvió una respuesta rota; pulsa «Revisar otra vez». No se ha cambiado nada.\\n\\n'
+        + "la revision de ortografia no es un JSON legible: Expecting ',' delimiter" }}); pintarLight();""")
+    titular = pg.p.locator(".panel-ortografia .caja-error .titular").last.inner_text()
+    ok(titular.startswith("El corrector devolvió") and "JSON" not in titular,
+       f"el titular del error no es el texto técnico ({titular!r})")
+    # lo aplicado a medias: UN aviso con las dos cuentas, y lo de a mano a la vista
+    pg.js(f"""ORTOGRAFIA_VIVA.set(claveOrtografia('{pid}', 'subtitulos'), {{ estado: 'aplicada',
+      aviso: '2 corrección(es) puestas; 1 hay que corregirla(s) a mano (B003): llevan pausas',
+      aMano: [{{ id: 'B003', despues: 'Ella está bien', cambios: [['esta', 'está']] }}] }}); pintarLight();""")
+    texto = pg.p.locator(".panel-ortografia").last.inner_text()
+    ok("2 corrección(es) puestas; 1 hay que corregirla(s) a mano" in texto and "Ella está bien" in texto,
+       f"lo que queda a mano se queda en el panel con su texto ({texto[:220]!r})")
+    pg.js(f"ORTOGRAFIA_VIVA.delete(claveOrtografia('{pid}', 'subtitulos')); pintarLight();")
+    pg.sin_errores("la ortografía por palabra entera")
+    pg.cerrar()
+
+
+@escenario
 def reparar_estilo_perdido(navegador, datos):
     """«Capas de luz en baño»: un vídeo cuyo estilo se volvió a guardar antes
     del 09-10-2026 apunta a imágenes que ya no se llaman así. La portada lo

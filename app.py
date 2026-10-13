@@ -5962,9 +5962,16 @@ def revisar_ortografia(pid: str, cuerpo: dict = Body(default=None)):
 
     def correr():
         try:
-            propuestas = PASOS_MODULOS.ortografia.revisar(textos, cwd=RAIZ_ESTUDIO)
+            # `informe` trae cuantos textos se quedaron sin revisar porque su
+            # tanda devolvio un JSON roto ni a la segunda: lo demas se
+            # conserva y la pantalla lo dice (N6 de las notas de mejoras,
+            # 13-10-2026)
+            informe = {}
+            propuestas = PASOS_MODULOS.ortografia.revisar(textos, cwd=RAIZ_ESTUDIO, informe=informe)
             ficha = {"estado": "listo", "fuente": fuente, "proyecto": ctx.id,
                      "revisados": len(textos), "_anclas": anclas,
+                     "sin_revisar": int(informe.get("sin_revisar") or 0),
+                     "detalle": str(informe.get("detalle") or "")[:600],
                      "propuestas": [{"id": k, "antes": textos[k], "despues": v["texto"],
                                      "cambios": v.get("cambios") or []}
                                     for k, v in propuestas.items() if k in textos]}

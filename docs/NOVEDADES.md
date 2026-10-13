@@ -10,6 +10,18 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Más notas de mejoras (13 de octubre)**
+- **La revisión de ortografía ya no se cae por una respuesta rota.** A veces
+  el corrector contestaba con algo que no se podía leer y salía «no es un JSON
+  legible» y nada más. Ahora revisa por partes más pequeñas, la parte que
+  llega rota la vuelve a pedir, y si aun así no sale, te enseña lo demás y te
+  dice cuántos textos se quedaron sin revisar. Si no sale nada, el aviso dice
+  en claro que pulses «Revisar otra vez».
+- **Al aplicar las correcciones del guion, un solo aviso** con cuántas se
+  pusieron y cuántas tienes que corregir a mano (y esas se quedan a la vista).
+  Y cada corrección va a su palabra: «esta → está» ya no cambia la «esta» de
+  dentro de «estaba».
+
 **Dos de tus notas de mejoras (13 de octubre)**
 - **«Un vídeo nuevo» empieza vacío** después de crear uno. Antes salía con el
   nombre, el material y las indicaciones del vídeo anterior, y se podía crear

@@ -7205,10 +7205,34 @@ function panelOrtografia(fuente) {
     caja.appendChild(h('div', { clase: 'cargando' }, `revisando ${est.revisados || ''} textos… (puede tardar un minuto)`));
   } else if (est.estado === 'error') {
     caja.appendChild(cajaError(est.error || 'no se ha podido revisar'));
+  } else if (est.estado === 'aplicada') {
+    // lo que no se pudo poner solo se queda a la vista, con su texto, para
+    // corregirlo a mano (N6 de las notas de mejoras, 13-10-2026)
+    caja.appendChild(h('div', { clase: 'caja-aviso' }, est.aviso));
+    const lista = h('div', { clase: 'lista-ortografia' });
+    (est.aMano || []).forEach(p => {
+      lista.appendChild(h('div', { clase: 'fila-ortografia' },
+        h('span', { clase: 'id' }, p.id),
+        h('span', { clase: 'crece' },
+          h('span', { clase: 'despues' }, p.despues),
+          (p.cambios || []).length ? h('span', { clase: 'meta' },
+            ' · ' + p.cambios.map(c => `${c[0]} → ${c[1]}`).join(', ')) : null)));
+    });
+    caja.appendChild(lista);
   } else if (est.estado === 'listo') {
     const props = est.propuestas || [];
+    // UNA TANDA ROTA NO SE LLEVA LAS DEMÁS (pasos/ortografia.py): los textos
+    // cuya respuesta no se pudo leer se dicen aquí, y «Sin faltas» no los
+    // cuenta como revisados (N6 de las notas de mejoras, 13-10-2026)
+    const sinRevisar = Number(est.sin_revisar) || 0;
+    const revisados = Math.max(0, (est.revisados || 0) - sinRevisar);
+    if (sinRevisar) {
+      caja.appendChild(h('div', { clase: 'caja-aviso' },
+        `${sinRevisar} texto(s) se han quedado sin revisar: el corrector devolvió una respuesta rota `
+        + 'en esa parte. Lo demás está revisado; pulsa «Revisar otra vez» para repasarlos.'));
+    }
     if (!props.length) {
-      caja.appendChild(h('div', { clase: 'meta' }, `✓ Sin faltas en ${est.revisados || 0} textos.`));
+      caja.appendChild(h('div', { clase: 'meta' }, `✓ Sin faltas en ${revisados} textos.`));
     } else {
       est.marcadas = est.marcadas || new Set(props.map(p => p.id));
       const lista = h('div', { clase: 'lista-ortografia' });
@@ -7222,7 +7246,7 @@ function panelOrtografia(fuente) {
             (p.cambios || []).length ? h('span', { clase: 'meta' },
               ' · ' + p.cambios.map(c => `${c[0]} → ${c[1]}`).join(', ')) : null)));
       });
-      caja.appendChild(h('div', { clase: 'meta' }, `${props.length} con faltas de ${est.revisados || props.length} textos:`));
+      caja.appendChild(h('div', { clase: 'meta' }, `${props.length} con faltas de ${revisados || props.length} textos:`));
       caja.appendChild(lista);
       caja.appendChild(h('div', { clase: 'fila' },
         h('button', { clase: 'primario', disabled: !!trabajoVideoLight(),
@@ -7271,15 +7295,44 @@ async function revisarOrtografia(fuente) {
    el texto sin marcas y guardar su versión tal cual las borraba. Cada pareja
    (mal → bien) se sustituye en el crudo y se comprueba que el resultado, sin
    marcas, es exactamente la propuesta; si no cuadra y el bloque tenía marcas,
-   ese bloque no se toca (se avisa) antes que perder pausas sin decirlo. */
+   ese bloque no se toca (se avisa) antes que perder pausas sin decirlo.
+   LA PAREJA SE BUSCA COMO PALABRA ENTERA (N6 de las notas de mejoras,
+   13-10-2026): con `indexOf` a secas, «esta → está» cambiaba la primera
+   «esta» que hubiera, también la de dentro de «estaba», y tampoco miraba si
+   caía dentro de una marca (`<break …/>`). */
+function esLetraOrtografia(c) {
+  // letra con mayúscula y minúscula (todas las del castellano, con tildes) o cifra;
+  // sin \p{L}, que los tokenizadores de herramientas/ no leen
+  return !!c && (c.toLowerCase() !== c.toUpperCase() || /[0-9]/.test(c));
+}
+
+function sustituirPalabra(texto, mal, bien) {
+  const empiezaLetra = esLetraOrtografia(mal.charAt(0));
+  const acabaLetra = esLetraOrtografia(mal.charAt(mal.length - 1));
+  let desde = 0;
+  while (desde <= texto.length) {
+    const i = texto.indexOf(mal, desde);
+    if (i < 0) return null;
+    const fin = i + mal.length;
+    const dentroDeMarca = texto.lastIndexOf('<', i) > texto.lastIndexOf('>', i - 1);
+    const pegadaDelante = empiezaLetra && esLetraOrtografia(texto.charAt(i - 1));
+    const pegadaDetras = acabaLetra && esLetraOrtografia(texto.charAt(fin));
+    if (!dentroDeMarca && !pegadaDelante && !pegadaDetras) {
+      return texto.slice(0, i) + bien + texto.slice(fin);
+    }
+    desde = i + 1;
+  }
+  return null;
+}
+
 function ortografiaSobreCrudo(crudo, propuesta) {
   const igual = (a, b) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
   if (igual(textoVisibleLight(crudo), crudo)) return propuesta.despues;   // sin marcas
   let nuevo = crudo;
   (propuesta.cambios || []).forEach(([mal, bien]) => {
     if (!mal || mal === bien) return;
-    const i = nuevo.indexOf(mal);
-    if (i >= 0) nuevo = nuevo.slice(0, i) + bien + nuevo.slice(i + mal.length);
+    const puesto = sustituirPalabra(nuevo, mal, bien);
+    if (puesto !== null) nuevo = puesto;
   });
   return igual(textoVisibleLight(nuevo), propuesta.despues) ? nuevo : null;
 }
@@ -7292,33 +7345,42 @@ async function aplicarOrtografia(fuente) {
   const elegidas = (est.propuestas || []).filter(p => (est.marcadas || new Set()).has(p.id));
   if (!elegidas.length) { toast('No hay ninguna marcada', true); return; }
   let puestas = elegidas.length;
+  const aMano = [];
   try {
     if (fuente === 'guion') {
       // por el MISMO camino que escribir a mano en el bloque
       const porId = {};
       ((v.guion || {}).bloques || []).forEach(b => { porId[b.id] = b; });
-      const sinPoner = [];
       elegidas.forEach(p => {
         const b = porId[p.id];
-        if (!b) { sinPoner.push(p.id); return; }
+        if (!b) { aMano.push(p); return; }
         const nuevo = ortografiaSobreCrudo(textoDeBloqueLight(b), p);
-        if (nuevo === null) { sinPoner.push(p.id); return; }
+        if (nuevo === null) { aMano.push(p); return; }
         guardarBloqueLight(b.id, nuevo, b.insertado ? undefined : b.texto, !!b.insertado);
       });
-      puestas -= sinPoner.length;
+      puestas -= aMano.length;
       await guardarBloquesPendientesLight();
       await recargarVideoAbierto();
-      if (sinPoner.length) {
-        toast(`${sinPoner.join(', ')}: corrígelo a mano (lleva pausas o marcas de la voz y no se ha podido poner sin tocarlas)`, true);
-      }
     } else {
       const cambios = {};
       elegidas.forEach(p => { cambios[p.id] = p.despues; });
       await pedir(`${API.proyecto(pid)}/ortografia/aplicar`, { method: 'POST', cuerpo: { cambios, rid: est.rid } });
       await refrescarLoDibujado();
     }
-    if (puestas) toast(`${puestas} corrección(es) puestas`);
-    ORTOGRAFIA_VIVA.delete(clave);
+    /* UN SOLO AVISO con las dos cuentas (N6 de las notas de mejoras,
+       13-10-2026): antes salía el rojo de «corrígelo a mano» y el de
+       «N corrección(es) puestas» lo tapaba al instante. Lo que queda a mano,
+       además, se queda en el panel con su texto. */
+    if (aMano.length) {
+      const aviso = `${puestas} corrección(es) puestas; ${aMano.length} hay que corregirla(s) a mano `
+        + `(${aMano.map(p => p.id).join(', ')}): llevan pausas o marcas de la voz y no se han podido `
+        + 'poner sin tocarlas.';
+      toast(aviso, true);
+      ORTOGRAFIA_VIVA.set(clave, { estado: 'aplicada', aviso, aMano });
+    } else {
+      toast(`${puestas} corrección(es) puestas`);
+      ORTOGRAFIA_VIVA.delete(clave);
+    }
     if (videoAbierto().pid === pid) pintarLight();
   } catch (e) {
     toast(`no se han podido poner: ${e.message}`, true);

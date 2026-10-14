@@ -2608,6 +2608,21 @@ def atras_del_movil_dentro_del_studio(navegador, datos):
     pg.p.wait_for_timeout(1200)
     ok(pg.esperar(".light-cab button", "Volver al vídeo", 10),
        "y «adelante» vuelve al estilo con su «‹ Volver al vídeo»")
+    # DOS «ATRÁS» SEGUIDOS mientras el vídeo se abre: manda el último
+    pg.js("recordarVideoLight(''); irALight('galeria');")
+    pg.p.wait_for_timeout(500)
+    pg.js(f"volverAlSitio({{ vista: 'elegido', pid: '{pid}', sub: 'video', cliente: clienteElegido() }}); "
+          "volverAlSitio({ vista: 'galeria', cliente: clienteElegido() });")
+    pg.p.wait_for_timeout(3000)
+    ok(pg.p.evaluate("() => APP.light.vista === 'galeria'"),
+       "dos «atrás» seguidos mientras se abre un vídeo acaban donde dice el último")
+    # VOLVER A «CREAR» NO BORRA EL TALLER: sin él saldría «Generar» y se pagaría otra vez
+    pg.js("APP.light.taller = 'taller_de_prueba'; "
+          "volverAlSitio({ vista: 'crear', taller: '', cliente: clienteElegido() });")
+    pg.p.wait_for_timeout(800)
+    ok(pg.p.evaluate("() => APP.light.taller === 'taller_de_prueba'"),
+       "volver a la pantalla de crear conserva el intento a medias («Retomar», no «Generar»)")
+    pg.js("APP.light.taller = null; irALight('galeria');")
     pg.sin_errores("atrás del móvil dentro del Studio")
     pg.cerrar()
 

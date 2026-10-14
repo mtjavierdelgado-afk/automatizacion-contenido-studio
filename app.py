@@ -7270,12 +7270,15 @@ def _aplicar_subtitulos(ctx, datos):
         ctx.proyecto.guardar_config()
     quitar = [k for k, v in cambios.items() if v is None]
     if quitar:
-        # volver a «sin elegir» QUITA la clave (ver `_cambios_de_subtitulos`)
-        params = copy.deepcopy(ctx.estado.params("callouts") or {})
-        for clave in quitar:
-            params.pop(clave, None)
-        params.update({k: v for k, v in cambios.items() if v is not None})
-        ctx.estado.set_params("callouts", params)
+        # volver a «sin elegir» QUITA la clave (ver `_cambios_de_subtitulos`).
+        # Leer y escribir dentro del cerrojo (reentrante): un rótulo del repaso
+        # que se guarde en medio no se pierde.
+        with ctx.estado._lock:
+            params = copy.deepcopy(ctx.estado.params("callouts") or {})
+            for clave in quitar:
+                params.pop(clave, None)
+            params.update({k: v for k, v in cambios.items() if v is not None})
+            ctx.estado.set_params("callouts", params)
     else:
         ctx.estado.actualizar_params("callouts", cambios)
     ctx.bitacora.anotar("subtitulos_cambiados", "callouts", {"claves": sorted(cambios)})

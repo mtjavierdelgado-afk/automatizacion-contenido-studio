@@ -5105,7 +5105,10 @@ function pintarLight() {
  * La URL no cambia: el historial lleva el sitio en su `state`, y el `#` de
  * las pestañas viejas (`irA`) se queda como está.
  */
-const HISTORIA = { restaurando: false };
+/* `restaurando` CUENTA las vueltas en curso y `turno` dice cuál es la última:
+   dos «atrás» seguidos mientras un vídeo se abre no pueden acabar con la
+   primera vuelta, ya vieja, metiéndote otra vez en ese vídeo. */
+const HISTORIA = { restaurando: 0, turno: 0 };
 
 function sitioActual() {
   const L = APP.light;
@@ -5132,7 +5135,7 @@ function mismoSitio(a, b) {
 }
 
 function apuntarSitioEnHistoria() {
-  if (HISTORIA.restaurando) return;
+  if (HISTORIA.restaurando > 0) return;
   const sitio = sitioActual();
   if (!sitio) return;
   const ahora = (history.state || {}).light;
@@ -5144,7 +5147,8 @@ function apuntarSitioEnHistoria() {
 
 async function volverAlSitio(sitio) {
   if (!sitio) return;
-  HISTORIA.restaurando = true;
+  const mio = ++HISTORIA.turno;
+  HISTORIA.restaurando += 1;
   try {
     // lo escrito en un estilo se guarda antes de irse, como al pulsar «‹ Volver»
     if (APP.light.pendiente) volcarPresetLight();
@@ -5158,6 +5162,12 @@ async function volverAlSitio(sitio) {
         v.vista = '';
         irALight('elegido');
         await cargarVideoLight(sitio.pid);
+        // mientras se abría, otro «atrás» o «Inicio» ya llevó a otra parte
+        if (mio !== HISTORIA.turno || APP.light.vista !== 'elegido') return;
+        // un vídeo que ya no está no se queda apuntado para la próxima carga
+        if (v.error) {
+          try { localStorage.removeItem('estudio.light.video'); } catch (e) { /* sin almacén */ }
+        }
       }
       if (sitio.sub && v.pid === sitio.pid) v.vista = sitio.sub;
       // con el vídeo ya abierto (se vuelve desde su estilo) solo cambia la vista
@@ -5170,15 +5180,18 @@ async function volverAlSitio(sitio) {
     } else if (sitio.vista === 'preset') {
       irALight('preset', { abierto: sitio.abierto, desdeVideo: sitio.desdeVideo || '' });
     } else if (sitio.vista === 'crear') {
-      irALight('crear', { taller: sitio.taller || null });
+      /* EL TALLER NO SE BORRA AL VOLVER: con él la pantalla ofrece «Retomar»;
+         sin él, «Generar», que vuelve a pagar el estilo entero. */
+      irALight('crear', sitio.taller ? { taller: sitio.taller } : {});
     } else {
       // como «Inicio»: salir de un vídeo lo cierra
       if (saliaDeUnVideo) recordarVideoLight('');
       irALight('galeria');
     }
   } finally {
-    HISTORIA.restaurando = false;
+    HISTORIA.restaurando -= 1;
   }
+  if (mio !== HISTORIA.turno) return;
   // si el sitio ya no se puede reconstruir igual (un vídeo borrado), la
   // entrada se queda con lo que de verdad se ve
   const ahora = sitioActual();
@@ -15190,7 +15203,9 @@ function editorSubtitulos(modo, est, repintar) {
   caja.appendChild(filaDe('Fuente', FUENTES_SUB, actual.fuente || 'auto', 'fuente',
     'La del diseño es la de «Letra y forma». Elegir otra cambia solo la letra.'));
   caja.appendChild(filaDe('Dónde va', POSICIONES_SUB, actual.posicion || 'auto', 'posicion',
-    'Automática: abajo en horizontal y a un tercio desde abajo en vertical, donde no la tapan los controles del móvil.'));
+    actual.posicion === 'arriba'
+      ? 'Arriba, en horizontal, un renglón largo puede tocar un logo puesto arriba: si lo llevas, bájalo (Logo → Dónde).'
+      : 'Automática: abajo en horizontal y a un tercio desde abajo en vertical, donde no la tapan los controles del móvil.'));
   caja.appendChild(filaDe('Caja detrás del texto', CAJAS_SUB, actual.caja, 'caja'));
   const color = h('input', { type: 'color', value: actual.color || '#ffffff',
     onchange: ev => cambiar({ color: ev.target.value }) });

@@ -785,6 +785,13 @@ def capa_fija_de(escena, p, banda=None, salida=SALIDA):
     if p.get("subtitulo_fuente"):
         diseno = dict(diseno or {}, fuente=fuente_subtitulo(p, diseno))
     tam = tamano_subtitulo(p, salida)
+    if posicion_subtitulo(p) == "arriba":
+        # «ARRIBA» CON UN CUERPO MUY GRANDE NO SE SALE: el enrutador puede
+        # escribir hasta 120 px y dos renglones crecen hacia arriba desde el
+        # suelo. Con los tamaños de la pantalla (hasta 72) no cambia nada.
+        minimo = 24 + tam * 1.28 + tam * (0.82 + SUB_CAJA_AIRE[1])
+        if float(banda["suelo"]) < minimo:
+            banda = dict(banda, suelo=round(minimo, 1))
     trozos = subtitulos.de_escena(
         escena, idioma=p.get("idioma"),
         cap_linea=cap_subtitulo(tam, banda),

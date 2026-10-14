@@ -476,6 +476,19 @@ def prueba_callouts():
     alto_dos = 2 * p7_callouts.SUB_TAMANOS["enorme"] * 1.28
     ok(arriba["suelo"] - alto_dos > 0,
        "«arriba» con el cuerpo mas grande y dos renglones no se sale por arriba")
+    palabras = ("cuando llegamos al puerto nadie sabia nada de aquel cargamento "
+                "y el capitan miraba").split()
+    larga = {"id": "S009", "narracion": " ".join(palabras),
+             "marcas": [[i * 0.3, i * 0.3 + 0.25] for i in range(len(palabras))],
+             "t_in": 0.0, "t_out": len(palabras) * 0.3}
+    grande_svg, _ = p7_callouts.capa_fija_de(
+        larga, p7_callouts._con_defectos({"subtitulo_posicion": "arriba",
+                                          "subtitulo_tam": 120}))
+    ok(grande_svg.count("<text") > grande_svg.count("<rect"),
+       "(con un trozo de dos renglones, que es el que crece hacia arriba)")
+    cajas = [float(y) for y in re.findall(r'<rect [^>]*?y="(-?[0-9.]+)"', grande_svg)]
+    ok(cajas and min(cajas) >= 0,
+       f"«arriba» con un cuerpo de 120 px tampoco se sale ({min(cajas or [0]):.0f} px)")
     vertical = p7_callouts.banda_subtitulo((1080, 1920), {"subtitulo_posicion": "abajo"})
     ok(vertical["suelo"] > p7_callouts.banda_subtitulo((1080, 1920))["suelo"],
        "en vertical, «abajo» lo baja del tercio de siempre al pie")

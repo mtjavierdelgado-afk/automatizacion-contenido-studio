@@ -10,6 +10,18 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Subtítulos a tu gusto y el «atrás» del móvil (13 de octubre, noche)**
+- **La fuente y el sitio de los subtítulos se eligen.** En el editor de
+  subtítulos (en el Encargo y debajo del vídeo montado) hay dos filas nuevas:
+  **Fuente** (la del diseño, Verdana, Arial o Georgia) y **Dónde va**
+  (automática, abajo, a un tercio, en el centro o arriba). Con «Aplicar ahora»
+  se rehacen las capas de texto y el montaje: ni una imagen ni la voz se
+  vuelven a pagar. «La del diseño» y «Automática» lo dejan exactamente como
+  estaba.
+- **El botón «atrás» del móvil ya no te saca del Studio.** Vuelve a la
+  pantalla anterior: del Vídeo a la parada de antes, del estilo al vídeo y,
+  al final, a la portada. «Adelante» lo deshace.
+
 **Más notas de mejoras (13 de octubre)**
 - **La revisión de ortografía ya no se cae por una respuesta rota.** A veces
   el corrector contestaba con algo que no se podía leer y salía «no es un JSON

@@ -4176,6 +4176,32 @@ def probar_ronda_octubre(cliente, carpeta):
     _r, sub = cliente.get(f"{base}/subtitulos")
     igual((sub.get("tam"), sub.get("color"), sub.get("propios")),
           ("normal", "", False), "«automático» vuelve a los del estilo")
+    # --- la fuente y el sitio (N9, paso 4): se eligen, y «auto» QUITA la clave
+    _r, antes = cliente.get(f"{base}/pasos/callouts")
+    for cuerpo in ({"fuente": "Comic Sans"}, {"posicion": "volando"}):
+        respuesta, _d = cliente.put(f"{base}/subtitulos", cuerpo)
+        igual(respuesta.status_code, 400, f"{cuerpo} no existe: 400")
+    _r, datos = cliente.put(f"{base}/subtitulos", {"fuente": "georgia", "posicion": "arriba"})
+    igual(datos.get("cambiado"), True, "se eligen fuente y sitio")
+    _r, sub = cliente.get(f"{base}/subtitulos")
+    igual((sub.get("fuente"), sub.get("posicion")), ("Georgia", "arriba"),
+          "y se leen tal cual, con el nombre bien escrito")
+    ok("Georgia" in (sub.get("fuentes") or []) and "centro" in (sub.get("posiciones") or []),
+       "la pantalla recibe las fuentes y los sitios que se pueden elegir")
+    _r, paso = cliente.get(f"{base}/pasos/callouts")
+    igual(((paso.get("params") or {}).get("subtitulo_fuente"),
+           (paso.get("params") or {}).get("subtitulo_posicion")), ("Georgia", "arriba"),
+          "quedan en los params de callouts (rehacen capas y montaje, ni una imagen)")
+    _r, datos = cliente.put(f"{base}/subtitulos", {"fuente": "auto", "posicion": "auto"})
+    _r, paso = cliente.get(f"{base}/pasos/callouts")
+    ok("subtitulo_fuente" not in (paso.get("params") or {})
+       and "subtitulo_posicion" not in (paso.get("params") or {}),
+       "«auto» QUITA las claves, no escribe un valor que el vídeo nunca tuvo (regla 1)")
+    igual(paso.get("firma"), antes.get("firma"),
+          "y la firma de callouts vuelve a ser la de antes: lo hecho sigue al día")
+    _r, sub = cliente.get(f"{base}/subtitulos")
+    igual((sub.get("fuente"), sub.get("posicion")), ("", ""), "y se leen como sin elegir")
+    _r, datos = cliente.put(f"{base}/subtitulos", {"automatico": True})
     respuesta, _d = cliente.put(f"{base}/logo", {"posicion": "arriba_derecha"})
     igual(respuesta.status_code, 409, "colocar un logo que no se ha subido es un 409")
     png = io.BytesIO()

@@ -4502,7 +4502,9 @@ function arrancar() {
   // La pestana de la URL manda al arrancar, y el boton de atras la devuelve.
   const enLaUrl = PESTANAS_VIEJAS[location.hash.slice(1)] || location.hash.slice(1);
   if (PESTANAS.some(p => p.id === enLaUrl)) APP.activa = enLaUrl;
-  window.addEventListener('popstate', () => {
+  window.addEventListener('popstate', ev => {
+    // un sitio de la pantalla (ver `volverAlSitio`), no una pestaña
+    if (ev.state && ev.state.light) return;
     const pedida = location.hash.slice(1) || PESTANAS[0].id;
     if (PESTANAS.some(p => p.id === pedida) && pedida !== APP.activa) irA(pedida, true);
   });
@@ -5084,7 +5086,111 @@ function pintarLight() {
   } finally {
     devolverFoco(foco);
   }
+  apuntarSitioEnHistoria();
 }
+
+/* ==================================== EL BOTÓN «ATRÁS» DEL MÓVIL (N3, el resto)
+ *
+ * Sin historial propio, «atrás» en el teléfono SALÍA DEL STUDIO desde
+ * cualquier pantalla: el navegador no sabía que galería, estilo y vídeo eran
+ * sitios distintos. Ahora cada pintado apunta DÓNDE se está (`sitioActual`) y,
+ * si es otro sitio que el de la entrada actual del historial, añade una; al
+ * pulsar «atrás» (`popstate`) se vuelve a ese sitio sin añadir nada.
+ *
+ * Se apunta aquí, en `pintarLight`, porque es el único sitio por el que pasan
+ * TODAS las pantallas: apuntarlo en cada botón que navega sería olvidarse de
+ * uno. Lo que no es un sitio no se apunta: «generando» (es el camino de vuelta
+ * a la ficha) y un vídeo mientras se abre (todavía no se sabe en qué parada).
+ *
+ * La URL no cambia: el historial lleva el sitio en su `state`, y el `#` de
+ * las pestañas viejas (`irA`) se queda como está.
+ */
+const HISTORIA = { restaurando: false };
+
+function sitioActual() {
+  const L = APP.light;
+  const v = L.video || {};
+  if (!L.datos || L.cargando || L.error) return null;
+  if (L.vista === 'generando') return null;
+  const sitio = { vista: L.vista || 'galeria', cliente: clienteElegido() };
+  if (sitio.vista === 'preset') {
+    sitio.abierto = L.abierto || '';
+    sitio.desdeVideo = L.desdeVideo || '';
+  } else if (sitio.vista === 'crear') {
+    sitio.taller = L.taller || '';
+  } else if (sitio.vista === 'elegido') {
+    sitio.pid = v.pid || '';
+    if (sitio.pid && (v.cargando || !v.vista)) return null;
+    sitio.sub = v.vista || '';
+    if (!sitio.pid) sitio.abierto = L.abierto || '';
+  }
+  return sitio;
+}
+
+function mismoSitio(a, b) {
+  return !!a && !!b && JSON.stringify(a) === JSON.stringify(b);
+}
+
+function apuntarSitioEnHistoria() {
+  if (HISTORIA.restaurando) return;
+  const sitio = sitioActual();
+  if (!sitio) return;
+  const ahora = (history.state || {}).light;
+  try {
+    if (!ahora) history.replaceState(Object.assign({}, history.state, { light: sitio }), '');
+    else if (!mismoSitio(ahora, sitio)) history.pushState({ light: sitio }, '');
+  } catch (e) { /* un navegador sin historial: «atrás» sale, como antes */ }
+}
+
+async function volverAlSitio(sitio) {
+  if (!sitio) return;
+  HISTORIA.restaurando = true;
+  try {
+    // lo escrito en un estilo se guarda antes de irse, como al pulsar «‹ Volver»
+    if (APP.light.pendiente) volcarPresetLight();
+    pararPrevia();
+    const v = APP.light.video;
+    const saliaDeUnVideo = APP.light.vista === 'elegido' && v.pid;
+    if (sitio.cliente !== undefined && listaClientes().length) apuntarCliente(sitio.cliente);
+    if (sitio.vista === 'elegido' && sitio.pid) {
+      if (v.pid !== sitio.pid || v.error) {
+        recordarVideoLight(sitio.pid);
+        v.vista = '';
+        irALight('elegido');
+        await cargarVideoLight(sitio.pid);
+      }
+      if (sitio.sub && v.pid === sitio.pid) v.vista = sitio.sub;
+      // con el vídeo ya abierto (se vuelve desde su estilo) solo cambia la vista
+      irALight('elegido');
+    } else if (sitio.vista === 'elegido') {
+      if (sitio.abierto) localStorage.setItem('estudio.light.estilo', sitio.abierto);
+      recordarVideoLight('');
+      v.vista = sitio.sub || 'encargo';
+      irALight('elegido', { abierto: sitio.abierto || APP.light.abierto });
+    } else if (sitio.vista === 'preset') {
+      irALight('preset', { abierto: sitio.abierto, desdeVideo: sitio.desdeVideo || '' });
+    } else if (sitio.vista === 'crear') {
+      irALight('crear', { taller: sitio.taller || null });
+    } else {
+      // como «Inicio»: salir de un vídeo lo cierra
+      if (saliaDeUnVideo) recordarVideoLight('');
+      irALight('galeria');
+    }
+  } finally {
+    HISTORIA.restaurando = false;
+  }
+  // si el sitio ya no se puede reconstruir igual (un vídeo borrado), la
+  // entrada se queda con lo que de verdad se ve
+  const ahora = sitioActual();
+  if (ahora) {
+    try { history.replaceState({ light: ahora }, ''); } catch (e) { /* sin historial */ }
+  }
+}
+
+window.addEventListener('popstate', ev => {
+  const sitio = ev.state && ev.state.light;
+  if (sitio) volverAlSitio(sitio);
+});
 
 
 /* --------------------------------------------- lo que cambia solo, y solo eso
@@ -14460,6 +14566,12 @@ const ANIMOS_MUSICA = [
 ];
 const TAMANOS_SUB = [['pequeno', 'Pequeño'], ['normal', 'Normal'], ['grande', 'Grande'], ['enorme', 'Enorme']];
 const CAJAS_SUB = [['auto', 'La del estilo'], [0, 'Sin caja'], [0.45, 'Suave'], [0.85, 'Opaca']];
+/* La fuente y el sitio del subtítulo (N9, paso 4). «auto» es no elegir: el
+   servidor QUITA la clave y sale como siempre. Las fuentes son las que el
+   servidor mide y dibuja con el mismo fichero (p7_callouts.SUB_FUENTES). */
+const FUENTES_SUB = [['auto', 'La del diseño'], ['Verdana', 'Verdana'], ['Arial', 'Arial'], ['Georgia', 'Georgia']];
+const POSICIONES_SUB = [['auto', 'Automática'], ['abajo', 'Abajo'], ['tercio', 'A un tercio'],
+  ['centro', 'En el centro'], ['arriba', 'Arriba']];
 const ESQUINAS_LOGO = [['arriba_izquierda', '↖ Arriba izquierda'], ['arriba_derecha', '↗ Arriba derecha'],
   ['abajo_izquierda', '↙ Abajo izquierda'], ['abajo_derecha', '↘ Abajo derecha']];
 
@@ -14586,6 +14698,10 @@ function resumenAjuste(modo, est, cual) {
     if (sub.tam) partes.push(`tamaño ${(TAMANOS_SUB.find(t => t[0] === sub.tam) || [0, sub.tam])[1].toLowerCase()}`);
     if (sub.diseno) partes.push(sub.diseno);
     if (sub.color) partes.push(`color ${sub.color}`);
+    if (sub.fuente) partes.push(`en ${sub.fuente}`);
+    if (sub.posicion) {
+      partes.push(((POSICIONES_SUB.find(x => x[0] === sub.posicion) || [0, sub.posicion])[1]).toLowerCase());
+    }
     return `Personalizados: ${partes.join(', ') || 'a tu gusto'}`
       + (modo.tipo === 'video' && sub.pendiente ? ' · sin aplicar todavía' : '');
   }
@@ -15051,6 +15167,7 @@ function editorSubtitulos(modo, est, repintar) {
     if (borrador) {
       op.subtitulos = cambios.automatico ? {} : Object.assign({}, op.subtitulos || {}, cambios);
       if (cambios.color === '') delete op.subtitulos.color;
+      ['fuente', 'posicion'].forEach(k => { if (op.subtitulos[k] === 'auto') delete op.subtitulos[k]; });
       repintar();
       return;
     }
@@ -15070,6 +15187,10 @@ function editorSubtitulos(modo, est, repintar) {
   const elegido = disenos.find(d => d.id === actual.diseno);
   caja.appendChild(filaDe('Letra y forma', disenos.map(d => [d.id, d.nombre]), actual.diseno, 'diseno',
     elegido ? `${elegido.nombre}: ${elegido.descripcion}` : disenos.map(d => `${d.nombre}: ${d.descripcion}`).join(' · ')));
+  caja.appendChild(filaDe('Fuente', FUENTES_SUB, actual.fuente || 'auto', 'fuente',
+    'La del diseño es la de «Letra y forma». Elegir otra cambia solo la letra.'));
+  caja.appendChild(filaDe('Dónde va', POSICIONES_SUB, actual.posicion || 'auto', 'posicion',
+    'Automática: abajo en horizontal y a un tercio desde abajo en vertical, donde no la tapan los controles del móvil.'));
   caja.appendChild(filaDe('Caja detrás del texto', CAJAS_SUB, actual.caja, 'caja'));
   const color = h('input', { type: 'color', value: actual.color || '#ffffff',
     onchange: ev => cambiar({ color: ev.target.value }) });

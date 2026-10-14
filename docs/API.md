@@ -60,7 +60,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/proyectos/{pid}/repaso/{nid}` | Cambia el texto, el instante o las imágenes de una nota. |
 | `POST` | `/api/proyectos/{pid}/repaso/{nid}/sin-marcas` | Propone la nota reescrita sin marcas ni personajes: NO la guarda. |
 | `GET` | `/api/proyectos/{pid}/subtitulos` | Como son los subtitulos de este video, y si son los del estilo. |
-| `PUT` | `/api/proyectos/{pid}/subtitulos` | {tam?, caja? ("auto" o 0-1), diseno?, color? ("#rrggbb" o "")} o {automatico: true}. |
+| `PUT` | `/api/proyectos/{pid}/subtitulos` | {tam?, caja? ("auto" o 0-1), diseno?, color? ("#rrggbb" o ""), fuente? ("auto", Verdana, Arial, Georgia), posicion? ("auto", abajo, tercio, centro, arriba)} o {automatico: true}. «auto» quita la clave. |
 | `POST` | `/api/proyectos/{pid}/subtitulos/aplicar` | Rehace las capas de texto y vuelve a montar el video. Ni una imagen. |
 | `POST` | `/api/proyectos/{pid}/subtitulos/rehacer` | Rehace los subtitulos (y monta) de un video cuya voz llego con las |
 | `GET` | `/api/proyectos/{pid}/subtitulos/rotos` | {planos}: cuantos planos tienen los subtitulos dibujados con las tildes |

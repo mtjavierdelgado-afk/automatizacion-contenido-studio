@@ -446,6 +446,40 @@ def prueba_callouts():
     ok("Sin subtitulos" in p7_callouts.describir({"subtitulos": False}),
        "y el paso lo dice al describirse")
 
+    titulo("p7_callouts: la fuente y el sitio del subtitulo se eligen (N9, paso 4)")
+    # SIN ELEGIR, EXACTAMENTE LO DE ANTES: ni la banda ni el SVG cambian, que es
+    # lo que hace que un video ya montado no quede distinto al actualizar.
+    for salida in ((1920, 1080), (1080, 1920)):
+        igual(p7_callouts.banda_subtitulo(salida, {}), p7_callouts.banda_subtitulo(salida),
+              f"sin elegir, la banda de {salida[0]}x{salida[1]} es la de siempre")
+    base_svg, _ = p7_callouts.capa_fija_de(dict(escena_sub), p7_callouts._con_defectos({}))
+    raro_svg, _ = p7_callouts.capa_fija_de(
+        dict(escena_sub), p7_callouts._con_defectos({"subtitulo_fuente": "Comic Sans",
+                                                     "subtitulo_posicion": "volando"}))
+    igual(raro_svg, base_svg, "una fuente o un sitio que no existen se leen como sin elegir")
+    geo_svg, _ = p7_callouts.capa_fija_de(
+        dict(escena_sub), p7_callouts._con_defectos({"subtitulo_fuente": "georgia"}))
+    ok('font-family="Georgia"' in geo_svg and 'font-family="Georgia"' not in base_svg,
+       "con Georgia elegida el subtitulo se escribe en Georgia")
+    igual(p7_callouts.fuente_subtitulo({"subtitulo_fuente": "Georgia"}), "Georgia",
+          "y se MIDE con Georgia, no con la del diseno (la caja es la de su letra)")
+    def _y_del_texto(svg):
+        return [float(x) for x in re.findall(r'<text [^>]*?y="([0-9.]+)"', svg)]
+    abajo = _y_del_texto(base_svg)
+    for sitio in ("tercio", "centro", "arriba"):
+        svg_sitio, _ = p7_callouts.capa_fija_de(
+            dict(escena_sub), p7_callouts._con_defectos({"subtitulo_posicion": sitio}))
+        ys = _y_del_texto(svg_sitio)
+        ok(ys and abajo and max(ys) < max(abajo),
+           f"«{sitio}» sube el subtitulo ({max(ys or [0]):.0f} px frente a {max(abajo or [0]):.0f})")
+    arriba = p7_callouts.banda_subtitulo((1920, 1080), {"subtitulo_posicion": "arriba"})
+    alto_dos = 2 * p7_callouts.SUB_TAMANOS["enorme"] * 1.28
+    ok(arriba["suelo"] - alto_dos > 0,
+       "«arriba» con el cuerpo mas grande y dos renglones no se sale por arriba")
+    vertical = p7_callouts.banda_subtitulo((1080, 1920), {"subtitulo_posicion": "abajo"})
+    ok(vertical["suelo"] > p7_callouts.banda_subtitulo((1080, 1920))["suelo"],
+       "en vertical, «abajo» lo baja del tercio de siempre al pie")
+
     titulo("p8_render: la capa QUIETA va ENCIMA, y dicho, no deducido")
     # En una cabecera, el velo de la cartela cubre el cuadro entero y vive dentro
     # de #camara. Por orden del DOM la capa quieta ya quedaba encima --medido

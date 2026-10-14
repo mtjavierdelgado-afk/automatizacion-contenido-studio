@@ -10,6 +10,48 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Más notas de mejoras (13 de octubre)**
+- **La revisión de ortografía ya no se cae por una respuesta rota.** A veces
+  el corrector contestaba con algo que no se podía leer y salía «no es un JSON
+  legible» y nada más. Ahora revisa por partes más pequeñas, la parte que
+  llega rota la vuelve a pedir, y si aun así no sale, te enseña lo demás y te
+  dice cuántos textos se quedaron sin revisar. Si no sale nada, el aviso dice
+  en claro que pulses «Revisar otra vez».
+- **Al aplicar las correcciones del guion, un solo aviso** con cuántas se
+  pusieron y cuántas tienes que corregir a mano (y esas se quedan a la vista).
+  Y cada corrección va a su palabra: «esta → está» ya no cambia la «esta» de
+  dentro de «estaba».
+- **Los ajustes de la voz de un estilo se guardan todos, y «Escuchar» suena
+  con ellos.** Si tocabas dos mandos seguidos (la velocidad y enseguida el
+  color), solo se guardaba el último. Y después de cambiar el ritmo, que mueve
+  el aire de la voz, «Escuchar» repetía la muestra de antes hasta recargar la
+  página.
+- **Ir al estilo de un vídeo y volver ya no te saca al menú.** Desde el estilo
+  de un vídeo, «‹ Volver al vídeo» te devuelve a él (también después de
+  regenerar el estilo) y «Todos los estilos» abre los estilos del proyecto de
+  ese vídeo, no «Tus proyectos». Y si el estilo del vídeo ya no existe,
+  «Estilo» te lo dice en vez de sacarte del vídeo.
+- **El dictado ya no repite palabras.** Con el dictado gratuito del navegador
+  (sin clave de OpenAI), en el móvil salía «hola que talhola que tal hola que
+  tal quiero un vídeo». Ahora queda lo que dijiste, una vez, y se respeta lo
+  que hubieras escrito antes de pulsar el micrófono.
+- **«Revisar» en el Encargo siempre te deja aplicar lo que propone.** Cuando
+  la revisión decía «Sirve» pero listaba cosas a mejorar, no salía ningún
+  botón: ahora sale «Aplicar la versión sugerida». Y cada mejora trae su
+  propio **«Aplicar esta mejora»**, que cambia solo ese trozo del campo (útil
+  con material largo, donde la revisión a veces no reescribe el texto entero).
+  Si el trozo ya no está en el campo, o está varias veces, te lo dice para que
+  lo cambies a mano.
+- **La música, los efectos y los subtítulos, debajo del vídeo montado.** En la
+  pantalla **Vídeo** sale el bloque «Música, efectos y subtítulos» (el mismo
+  que había en el Encargo): cambiar la música, su volumen, los efectos o el
+  aspecto de los subtítulos vuelve a montar el vídeo sin redibujar ninguna
+  imagen ni regrabar la voz. Y dos cosas nuevas en la música: un **ajuste
+  fino del volumen** (un deslizador, de 1 en 1 dB, encima de Suave, Normal o
+  Alta) y **elegir el ánimo de la música automática** para todo el vídeo
+  (alegre, gamer, rock…): busca un tema de ese ánimo para cada tramo y vuelve
+  a mezclar.
+
 **Dos de tus notas de mejoras (13 de octubre)**
 - **«Un vídeo nuevo» empieza vacío** después de crear uno. Antes salía con el
   nombre, el material y las indicaciones del vídeo anterior, y se podía crear

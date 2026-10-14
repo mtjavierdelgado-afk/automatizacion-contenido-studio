@@ -3986,6 +3986,152 @@ def probar_presencia_musica(cliente, carpeta):
         servidor.contexto, servidor.lanzar_paso, servidor._ruta_de_version = guardado
 
 
+def probar_volumen_y_animo_de_la_musica():
+    """N9 de las notas de mejoras (13-10-2026): con el vídeo montado, subir o
+    bajar la música en dB y cambiarle el ánimo a la automática SIN redibujar ni
+    regrabar: el volumen solo remezcla (`solo_montar`) y el ánimo monta la
+    banda con los tramos del ritmo y su `animo` cambiado, y después remezcla.
+
+    En proceso, con un contexto de mentira y Jamendo doblado: sin red."""
+    seccion("N9: VOLUMEN FINO Y ÁNIMO DE LA MÚSICA, SIN DIBUJAR NI GRABAR")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    sonido = servidor._sonido()
+
+    class _Estado:
+        def __init__(self, estado, render=None):
+            self.render, self.estado = dict(render or {}), estado
+            self.escritos = []
+
+        def params(self, _paso):
+            return dict(self.render)
+
+        def estado_de(self, _paso):
+            return self.estado
+
+        def actualizar_params(self, paso, cambios):
+            self.escritos.append((paso, dict(cambios)))
+            self.render.update(cambios)
+
+    lanzados_gestor = []
+
+    class _Gestor:
+        def lanzar(self, nombre, funcion, *args, paso=None, **_kw):
+            lanzados_gestor.append((nombre, funcion, args, paso))
+            return "t-gestor"
+
+        def estado(self, tid):
+            return {"id": tid}
+
+        def listar(self, **_k):
+            return []
+
+    class _Ctx:
+        id = "x"
+        proyecto = None
+
+        def __init__(self, estado, render=None):
+            self.estado = _Estado(estado, render)
+            self.bitacora = type("B", (), {"anotar": lambda *_a, **_k: None})()
+            self.gestor = _Gestor()
+
+    # un montaje de cinco minutos con el ritmo de verdad: de ahí salen los tramos
+    escenas = [{"id": f"S{i:03d}", "t_in": i * 6.0, "t_out": (i + 1) * 6.0}
+               for i in range(50)]
+    lanzados = []
+    guardado = (servidor.contexto, servidor.lanzar_paso, servidor._ruta_de_version,
+                getattr(servidor, "_arco_de", None), servidor._registrar_trabajo,
+                servidor._regenerar_tras_repaso, sonido.hay_claves, sonido.buscar_musica, sonido.elegir_tema,
+                servidor.PASOS_MODULOS.p6_assets.plan_actual)
+    servidor.lanzar_paso = (lambda ctx, paso, unidades, **kw:
+                            lanzados.append((paso, kw.get("opciones"))) or "t-falso")
+    servidor._ruta_de_version = lambda ctx, paso, *partes: "pasos/render/v1/video.mp4"
+    servidor._registrar_trabajo = lambda *_a, **_k: None
+    try:
+        # ---- el volumen fino: `musica_db`, y solo remezcla
+        al_dia = _Ctx("listo")
+        servidor.contexto = lambda _pid: al_dia
+        datos = servidor.guardar_sonido("x", {"musica_db": -3, "remontar": True})
+        igual(al_dia.estado.render.get("musica_db"), -3.0,
+              "el volumen fino se guarda en `musica_db` (el que oye también la automática)")
+        igual(lanzados, [("render", {"solo_montar": True})],
+              "y montado y al día SOLO se vuelve a mezclar (`solo_montar`): ni imágenes ni voz")
+        igual(datos.get("trabajo_id"), "t-falso", "y devuelve el trabajo para seguirlo")
+        lanzados.clear()
+        escritos = len(al_dia.estado.escritos)
+        datos = servidor.guardar_sonido("x", {"musica_db": -3, "remontar": True})
+        igual((datos.get("cambiado"), len(al_dia.estado.escritos), lanzados),
+              (False, escritos, []),
+              "pedir el volumen que ya suena no escribe ni remezcla (regla 1)")
+        servidor.guardar_sonido("x", {"musica_db": 40, "remontar": True})
+        igual(al_dia.estado.render.get("musica_db"), 6.0, "y se queda en su margen (+6 dB)")
+        lanzados.clear()
+        pendiente = _Ctx("obsoleto")
+        servidor.contexto = lambda _pid: pendiente
+        servidor.guardar_sonido("x", {"musica_db": 2, "remontar": True})
+        igual((pendiente.estado.render.get("musica_db"), lanzados), (2.0, []),
+              "con planos pendientes se guarda y NO se mezcla sobre clips viejos")
+        servidor.contexto = lambda _pid: al_dia
+        igual(servidor.leer_sonido("x").get("musica_db"), 6.0,
+              "y GET /sonido lo devuelve para pintar el deslizador")
+
+        # ---- el ánimo de la automática
+        if not ok(hasattr(servidor, "cambiar_animo_musica"),
+                  "hay un PUT /musica/animo para cambiarle el ánimo a la automática"):
+            return
+        servidor._arco_de = lambda ctx: (sonido.arco_del_video(escenas, 300.0), 300.0, 50)
+        sonido.hay_claves = lambda: (True, True)
+        al_dia = _Ctx("listo", {"musica": {"tramos": [{"id": "viejo", "animo": "sobrio"}]}})
+        servidor.contexto = lambda _pid: al_dia
+        try:
+            servidor.cambiar_animo_musica("x", {"animo": "reguetonazo"})
+            ok(False, "un ánimo que no existe es un 400")
+        except servidor.ErrorApi as fallo:
+            igual(fallo.codigo, 400, "un ánimo que no existe es un 400")
+        datos = servidor.cambiar_animo_musica("x", {"animo": "alegre"})
+        ok(lanzados_gestor and lanzados_gestor[-1][1] is servidor._correr_banda_y_mezcla,
+           "el ánimo lanza la banda + la mezcla, en un trabajo")
+        _n, _f, args, paso = lanzados_gestor[-1]
+        tramos, remezclar = args[1], args[2]
+        arco = sonido.arco_del_video(escenas, 300.0)
+        igual([t["animo"] for t in tramos], ["alegre"] * len(arco),
+              f"con TODOS los tramos del ritmo ({len(arco)}) en el ánimo pedido")
+        igual([(t["desde"], t["velocidad"]) for t in tramos],
+              [(t["desde"], t["velocidad"]) for t in arco],
+              "y los cortes y la velocidad siguen saliendo del montaje")
+        igual((remezclar, paso, datos.get("remontando")), (True, "render", True),
+              "montado y al día: remezcla después, como trabajo del render")
+        igual(al_dia.estado.escritos, [],
+              "y al pedirlo no se escribe nada: si Jamendo falla, se queda la música de antes")
+        lanzados_gestor.clear()
+        servidor.contexto = lambda _pid: _Ctx("obsoleto")
+        datos = servidor.cambiar_animo_musica("x", {"animo": "rock"})
+        igual((lanzados_gestor[-1][2][2], datos.get("remontando")), (False, False),
+              "con planos pendientes monta la banda y NO mezcla sobre clips viejos")
+
+        # ---- el trabajo: la banda con ese ánimo y luego SOLO el render en `solo_montar`
+        pedidos, corridos = [], []
+        sonido.buscar_musica = lambda animo="", **kw: (pedidos.append(animo) or [
+            {"fuente": "jamendo", "id": f"{animo}-{len(pedidos)}", "titulo": animo}])
+        sonido.elegir_tema = lambda candidatos, evitar=(): candidatos[0]
+        servidor.PASOS_MODULOS.p6_assets.plan_actual = (
+            lambda *_a, **_k: {"escenas": escenas, "duracion_total": 300.0})
+        servidor._regenerar_tras_repaso = (
+            lambda avisar, ctx, tareas, modo, solo_montar=False:
+            corridos.append((list(tareas), modo, solo_montar)))
+        servidor._correr_banda_y_mezcla(lambda *_a, **_k: None, al_dia, tramos, True)
+        igual(pedidos, ["alegre"] * len(arco), "a Jamendo se le pide «alegre» en cada tramo")
+        igual([t.get("animo") for t in al_dia.estado.render["musica"]["tramos"]],
+              ["alegre"] * len(arco), "y la banda que queda en el render lleva ese ánimo")
+        igual(corridos, [(["render"], "pendientes", True)],
+              "y después solo se monta el MP4 (`solo_montar`): ni assets ni voz")
+    finally:
+        (servidor.contexto, servidor.lanzar_paso, servidor._ruta_de_version,
+         servidor._arco_de, servidor._registrar_trabajo, servidor._regenerar_tras_repaso,
+         sonido.hay_claves, sonido.buscar_musica, sonido.elegir_tema,
+         servidor.PASOS_MODULOS.p6_assets.plan_actual) = guardado
+
+
 def probar_ronda_octubre(cliente, carpeta):
     """Proyectos (clientes), subtítulos, logo, muestra de voz y revisar."""
     seccion("PROYECTOS, SUBTÍTULOS, LOGO, MUESTRA DE VOZ Y REVISAR")
@@ -4906,6 +5052,7 @@ def main():
         probar_regrabar_y_estructura(cliente, carpeta)
         probar_pausas(cliente, carpeta)
         probar_presencia_musica(cliente, carpeta)
+        probar_volumen_y_animo_de_la_musica()
         probar_ronda_octubre(cliente, carpeta)
         probar_bitacora(cliente, pid)
         probar_presets_canal(cliente)

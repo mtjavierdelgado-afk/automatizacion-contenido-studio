@@ -4973,12 +4973,23 @@ function navLight() {
       activa: APP.light.vista === 'preset',
       porque: dentro && fichaLight(v.estilo)
         ? `el estilo de este vídeo: «${fichaLight(v.estilo).nombre}»`
+        : dentro ? 'el estilo de este vídeo ya no está'
         : 'el estilo de un vídeo (abre uno); tus estilos están en Inicio',
       ir: () => {
         pararPrevia();
         if (dentro && fichaLight(v.estilo)) {
           const pid = v.pid;
+          apuntarClienteDe(clienteDe(v.estilo));
           irALight('preset', { abierto: v.estilo, feedback: {}, desdeVideo: pid });
+          return;
+        }
+        /* EL ESTILO DE ESTE VÍDEO YA NO ESTÁ (borrado, o de un proyecto con
+           clave sin abrir): se dice y te quedas en el vídeo. Antes te sacaba a
+           la galería sin una palabra (N3 de las notas de mejoras, 13-10-2026). */
+        if (dentro) {
+          toast(v.estilo
+            ? 'el estilo de este vídeo ya no está (borrado, o de un proyecto con clave sin abrir): el vídeo sigue igual'
+            : 'este vídeo no tiene un estilo apuntado', true);
           return;
         }
         recordarVideoLight('');
@@ -5233,7 +5244,11 @@ function migasDelVideoLight() {
     h('span', { clase: 'meta migas-nombre' }, v.pid ? `/ ${v.nombre || v.pid}` : '/ vídeo nuevo'),
     h('span', { clase: 'crece' }),
     estilo ? h('button', { clase: 'mini fantasma', title: 'Abrir el estilo con el que se hace este vídeo',
-      onclick: () => { pararPrevia(); irALight('preset', { abierto: v.estilo, feedback: {}, desdeVideo: v.pid }); } },
+      onclick: () => {
+        pararPrevia();
+        apuntarClienteDe(clienteDe(v.estilo));
+        irALight('preset', { abierto: v.estilo, feedback: {}, desdeVideo: v.pid });
+      } },
     `Estilo: ${estilo.nombre}`) : null);
 }
 
@@ -5302,10 +5317,24 @@ async function volverAVersionLight(paso, numero) {
 }
 
 function irALight(vista, extra) {
+  const desde = APP.light.desdeVideo || '';
+  const enFicha = ['preset', 'generando'].includes(APP.light.vista);
+  const abiertoAntes = APP.light.abierto;
   APP.light.vista = vista;
   // «‹ Volver al vídeo» solo vale para la ficha a la que se llegó desde él
   APP.light.desdeVideo = '';
   Object.assign(APP.light, extra || {});
+  /* ...Y SIGUE VALIENDO MIENTRAS SE CORRIGE ESE ESTILO: regenerarlo pasa por
+     «generando» y vuelve a la ficha, y ese ir y volver borraba el camino de
+     vuelta. La ficha se quedaba con un «‹ Volver» que caía en «Tus proyectos»
+     (N3 de las notas de mejoras, 13-10-2026). */
+  /* Solo para la MISMA ficha: duplicar o pasar a otro estilo no hereda el
+     camino de vuelta a un vídeo que no es suyo. */
+  const mismaFicha = !(extra && 'abierto' in extra) || extra.abierto === abiertoAntes;
+  if (desde && enFicha && mismaFicha && ['preset', 'generando'].includes(vista)
+      && !APP.light.desdeVideo) {
+    APP.light.desdeVideo = desde;
+  }
   $('#panel').scrollTop = 0;
   pintarLight();
 }
@@ -5376,8 +5405,21 @@ function clienteElegido() {
   return ficha && clienteAbierto(ficha) ? cid : '';
 }
 
-function elegirCliente(cid) {
+function apuntarCliente(cid) {
   try { localStorage.setItem(CLAVE_CLIENTE, cid || ''); } catch (e) { /* sin almacén */ }
+}
+
+/* EL PROYECTO DE LO QUE SE ABRE, apuntado como si se hubiera entrado en él.
+   Un vídeo abierto desde «Últimos vídeos» de la portada no pasaba por su
+   proyecto, y su «Todos los estilos» caía en «Tus proyectos» en vez de en los
+   estilos de ese cliente (N3 de las notas de mejoras, 13-10-2026). Sin
+   proyectos no hay nada que apuntar: la galería es la de siempre. */
+function apuntarClienteDe(cid) {
+  if (listaClientes().length) apuntarCliente(cid || '_sin');
+}
+
+function elegirCliente(cid) {
+  apuntarCliente(cid);
   $('#panel').scrollTop = 0;
   pintarLight();
 }
@@ -6166,6 +6208,19 @@ function urlDeVideoLight(paso, nombre) {
    guion o no, hay audio o no, hay MP4 o no. */
 async function cargarVideoLight(pid) {
   const v = APP.light.video;
+  /* LOS AJUSTES DEL MONTAJE DE ESTE VÍDEO, A RELEER. Se guardaban leídos una
+     vez por sesión, y desde que están en la pantalla Vídeo (N9) los cambia
+     también el repaso: el deslizador enseñaba el volumen de antes y, al
+     comparar con ese, no mandaba nada. Y lo que se quedó «montando la
+     música…» con otro vídeo abierto no se queda así para siempre: si ese
+     trabajo sigue, el servidor contesta 409 al segundo intento. */
+  const ajustes = (APP.light.ajustesMontaje || {})[`v:${pid}`];
+  if (ajustes) {
+    ajustes.cargado = false;
+    ajustes.montandoAnimo = false;
+    ajustes.animoPedido = '';
+    ajustes.dbEnVuelo = undefined;
+  }
   v.cargando = true;
   v.error = '';
   pintarLight();
@@ -6884,9 +6939,13 @@ async function crearYGenerarLight(estilo) {
 
 async function abrirVideoLight(pid) {
   recordarVideoLight(pid);
+  const video = videosLight().find(x => x.id === pid);
+  if (video) apuntarClienteDe(clienteDeVideo(video));
   APP.light.video.vista = '';
   irALight('elegido');
   await cargarVideoLight(pid);
+  // fuera de la lista (recién creado): el proyecto de su estilo
+  if (!video && APP.light.video.estilo) apuntarClienteDe(clienteDe(APP.light.video.estilo));
 }
 
 /* ============================================ EL ENCARGO DE UN VÍDEO YA EMPEZADO
@@ -7205,10 +7264,34 @@ function panelOrtografia(fuente) {
     caja.appendChild(h('div', { clase: 'cargando' }, `revisando ${est.revisados || ''} textos… (puede tardar un minuto)`));
   } else if (est.estado === 'error') {
     caja.appendChild(cajaError(est.error || 'no se ha podido revisar'));
+  } else if (est.estado === 'aplicada') {
+    // lo que no se pudo poner solo se queda a la vista, con su texto, para
+    // corregirlo a mano (N6 de las notas de mejoras, 13-10-2026)
+    caja.appendChild(h('div', { clase: 'caja-aviso' }, est.aviso));
+    const lista = h('div', { clase: 'lista-ortografia' });
+    (est.aMano || []).forEach(p => {
+      lista.appendChild(h('div', { clase: 'fila-ortografia' },
+        h('span', { clase: 'id' }, p.id),
+        h('span', { clase: 'crece' },
+          h('span', { clase: 'despues' }, p.despues),
+          (p.cambios || []).length ? h('span', { clase: 'meta' },
+            ' · ' + p.cambios.map(c => `${c[0]} → ${c[1]}`).join(', ')) : null)));
+    });
+    caja.appendChild(lista);
   } else if (est.estado === 'listo') {
     const props = est.propuestas || [];
+    // UNA TANDA ROTA NO SE LLEVA LAS DEMÁS (pasos/ortografia.py): los textos
+    // cuya respuesta no se pudo leer se dicen aquí, y «Sin faltas» no los
+    // cuenta como revisados (N6 de las notas de mejoras, 13-10-2026)
+    const sinRevisar = Number(est.sin_revisar) || 0;
+    const revisados = Math.max(0, (est.revisados || 0) - sinRevisar);
+    if (sinRevisar) {
+      caja.appendChild(h('div', { clase: 'caja-aviso' },
+        `${sinRevisar} texto(s) se han quedado sin revisar: el corrector devolvió una respuesta rota `
+        + 'en esa parte. Lo demás está revisado; pulsa «Revisar otra vez» para repasarlos.'));
+    }
     if (!props.length) {
-      caja.appendChild(h('div', { clase: 'meta' }, `✓ Sin faltas en ${est.revisados || 0} textos.`));
+      caja.appendChild(h('div', { clase: 'meta' }, `✓ Sin faltas en ${revisados} textos.`));
     } else {
       est.marcadas = est.marcadas || new Set(props.map(p => p.id));
       const lista = h('div', { clase: 'lista-ortografia' });
@@ -7222,7 +7305,7 @@ function panelOrtografia(fuente) {
             (p.cambios || []).length ? h('span', { clase: 'meta' },
               ' · ' + p.cambios.map(c => `${c[0]} → ${c[1]}`).join(', ')) : null)));
       });
-      caja.appendChild(h('div', { clase: 'meta' }, `${props.length} con faltas de ${est.revisados || props.length} textos:`));
+      caja.appendChild(h('div', { clase: 'meta' }, `${props.length} con faltas de ${revisados || props.length} textos:`));
       caja.appendChild(lista);
       caja.appendChild(h('div', { clase: 'fila' },
         h('button', { clase: 'primario', disabled: !!trabajoVideoLight(),
@@ -7271,15 +7354,44 @@ async function revisarOrtografia(fuente) {
    el texto sin marcas y guardar su versión tal cual las borraba. Cada pareja
    (mal → bien) se sustituye en el crudo y se comprueba que el resultado, sin
    marcas, es exactamente la propuesta; si no cuadra y el bloque tenía marcas,
-   ese bloque no se toca (se avisa) antes que perder pausas sin decirlo. */
+   ese bloque no se toca (se avisa) antes que perder pausas sin decirlo.
+   LA PAREJA SE BUSCA COMO PALABRA ENTERA (N6 de las notas de mejoras,
+   13-10-2026): con `indexOf` a secas, «esta → está» cambiaba la primera
+   «esta» que hubiera, también la de dentro de «estaba», y tampoco miraba si
+   caía dentro de una marca (`<break …/>`). */
+function esLetraOrtografia(c) {
+  // letra con mayúscula y minúscula (todas las del castellano, con tildes) o cifra;
+  // sin \p{L}, que los tokenizadores de herramientas/ no leen
+  return !!c && (c.toLowerCase() !== c.toUpperCase() || /[0-9]/.test(c));
+}
+
+function sustituirPalabra(texto, mal, bien) {
+  const empiezaLetra = esLetraOrtografia(mal.charAt(0));
+  const acabaLetra = esLetraOrtografia(mal.charAt(mal.length - 1));
+  let desde = 0;
+  while (desde <= texto.length) {
+    const i = texto.indexOf(mal, desde);
+    if (i < 0) return null;
+    const fin = i + mal.length;
+    const dentroDeMarca = texto.lastIndexOf('<', i) > texto.lastIndexOf('>', i - 1);
+    const pegadaDelante = empiezaLetra && esLetraOrtografia(texto.charAt(i - 1));
+    const pegadaDetras = acabaLetra && esLetraOrtografia(texto.charAt(fin));
+    if (!dentroDeMarca && !pegadaDelante && !pegadaDetras) {
+      return texto.slice(0, i) + bien + texto.slice(fin);
+    }
+    desde = i + 1;
+  }
+  return null;
+}
+
 function ortografiaSobreCrudo(crudo, propuesta) {
   const igual = (a, b) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
   if (igual(textoVisibleLight(crudo), crudo)) return propuesta.despues;   // sin marcas
   let nuevo = crudo;
   (propuesta.cambios || []).forEach(([mal, bien]) => {
     if (!mal || mal === bien) return;
-    const i = nuevo.indexOf(mal);
-    if (i >= 0) nuevo = nuevo.slice(0, i) + bien + nuevo.slice(i + mal.length);
+    const puesto = sustituirPalabra(nuevo, mal, bien);
+    if (puesto !== null) nuevo = puesto;
   });
   return igual(textoVisibleLight(nuevo), propuesta.despues) ? nuevo : null;
 }
@@ -7292,33 +7404,42 @@ async function aplicarOrtografia(fuente) {
   const elegidas = (est.propuestas || []).filter(p => (est.marcadas || new Set()).has(p.id));
   if (!elegidas.length) { toast('No hay ninguna marcada', true); return; }
   let puestas = elegidas.length;
+  const aMano = [];
   try {
     if (fuente === 'guion') {
       // por el MISMO camino que escribir a mano en el bloque
       const porId = {};
       ((v.guion || {}).bloques || []).forEach(b => { porId[b.id] = b; });
-      const sinPoner = [];
       elegidas.forEach(p => {
         const b = porId[p.id];
-        if (!b) { sinPoner.push(p.id); return; }
+        if (!b) { aMano.push(p); return; }
         const nuevo = ortografiaSobreCrudo(textoDeBloqueLight(b), p);
-        if (nuevo === null) { sinPoner.push(p.id); return; }
+        if (nuevo === null) { aMano.push(p); return; }
         guardarBloqueLight(b.id, nuevo, b.insertado ? undefined : b.texto, !!b.insertado);
       });
-      puestas -= sinPoner.length;
+      puestas -= aMano.length;
       await guardarBloquesPendientesLight();
       await recargarVideoAbierto();
-      if (sinPoner.length) {
-        toast(`${sinPoner.join(', ')}: corrígelo a mano (lleva pausas o marcas de la voz y no se ha podido poner sin tocarlas)`, true);
-      }
     } else {
       const cambios = {};
       elegidas.forEach(p => { cambios[p.id] = p.despues; });
       await pedir(`${API.proyecto(pid)}/ortografia/aplicar`, { method: 'POST', cuerpo: { cambios, rid: est.rid } });
       await refrescarLoDibujado();
     }
-    if (puestas) toast(`${puestas} corrección(es) puestas`);
-    ORTOGRAFIA_VIVA.delete(clave);
+    /* UN SOLO AVISO con las dos cuentas (N6 de las notas de mejoras,
+       13-10-2026): antes salía el rojo de «corrígelo a mano» y el de
+       «N corrección(es) puestas» lo tapaba al instante. Lo que queda a mano,
+       además, se queda en el panel con su texto. */
+    if (aMano.length) {
+      const aviso = `${puestas} corrección(es) puestas; ${aMano.length} hay que corregirla(s) a mano `
+        + `(${aMano.map(p => p.id).join(', ')}): llevan pausas o marcas de la voz y no se han podido `
+        + 'poner sin tocarlas.';
+      toast(aviso, true);
+      ORTOGRAFIA_VIVA.set(clave, { estado: 'aplicada', aviso, aMano });
+    } else {
+      toast(`${puestas} corrección(es) puestas`);
+      ORTOGRAFIA_VIVA.delete(clave);
+    }
     if (videoAbierto().pid === pid) pintarLight();
   } catch (e) {
     toast(`no se han podido poner: ${e.message}`, true);
@@ -9763,6 +9884,11 @@ function vistaVideoLight() {
   }
   caja.appendChild(marco);
 
+  /* LA MÚSICA, LOS EFECTOS Y LOS SUBTÍTULOS, justo debajo del vídeo montado
+     (N9 de las notas de mejoras, 13-10-2026): es donde se oye lo que se
+     quiere cambiar. Cada fila es una línea cerrada; no empuja el repaso. */
+  if (hayMp4Light() && !trabajoVideoLight()) caja.appendChild(ajustesEnElVideo());
+
   /* LA TIRA DE VINETAS SOLO MIENTRAS SE GENERA.
      Con el video ya montado esta pantalla es para VERLO y comentarlo, y
      cuarenta miniaturas debajo del reproductor empujan el repaso fuera de
@@ -11100,7 +11226,8 @@ function pintarRevision(panel, r, campo, gid) {
   if ((r.problemas || []).length) {
     panel.appendChild(h('ul', {}, ...(r.problemas || []).map(p => h('li', {},
       h('b', {}, p.que), p.por_que ? ` — ${p.por_que}` : '',
-      p.arreglo ? h('div', { clase: 'meta' }, `Mejor: ${p.arreglo}`) : null))));
+      p.arreglo ? h('div', { clase: 'meta' }, `Mejor: ${p.arreglo}`) : null,
+      mejoraAplicable(p, campo, gid)))));
   }
   if (r.sugerida) {
     panel.appendChild(h('details', { open: true },
@@ -11121,12 +11248,67 @@ function pintarRevision(panel, r, campo, gid) {
           toast('Puesta la versión sugerida: revísala y ajústala a tu gusto');
         },
       }, 'Aplicar la versión sugerida')));
-  } else if (r.veredicto && r.veredicto !== 'sirve') {
-    // sin versión propuesta, que lo diga: si no, parece que falta el botón
+  } else if ((r.veredicto && r.veredicto !== 'sirve') || (r.problemas || []).length) {
+    /* sin versión propuesta, que lo diga: si no, parece que falta el botón.
+       Y también con «Sirve» que trae problemas: ahí no salía NADA y se veían
+       mejoras sin forma de aplicarlas (N5 de las notas de mejoras, 13-10-2026). */
+    const sueltas = (r.problemas || []).some(p => p.original && p.mejor);
     panel.appendChild(h('div', { clase: 'meta' },
-      'La revisión no ha propuesto un texto entero: cambia lo de arriba a mano '
+      'La revisión no ha propuesto un texto entero corregido, así que no hay botón '
+      + 'para cambiarlo todo de una vez: '
+      + (sueltas ? 'aplica las mejoras de arriba con su «Aplicar» o cámbialas a mano, '
+        : 'cambia lo de arriba a mano ')
       + 'y vuelve a pulsar «Revisar».'));
   }
+}
+
+/* «APLICAR» UNA MEJORA SUELTA: cambia en el campo el trozo que cita el
+ * problema por su mejora, sin tocar el resto. Con material largo la revisión
+ * a menudo no reescribe el texto entero, y lo único aplicable eran estos
+ * «Mejor: …», que había que copiar a mano (N5 de las notas de mejoras,
+ * 13-10-2026). Solo si el trozo está UNA vez tal cual: si no está o está
+ * varias, cambiar «el que sea» sería adivinar, y se dice. Se guarda por el
+ * mismo camino que «Aplicar la versión sugerida» (el `input` del campo), que
+ * es una edición más y solo escribe ese campo. */
+function vecesEn(texto, trozo) {
+  let n = 0;
+  for (let i = texto.indexOf(trozo); i >= 0; i = texto.indexOf(trozo, i + trozo.length)) n += 1;
+  return n;
+}
+
+function mejoraAplicable(p, campo, gid) {
+  if (!p.original || !p.mejor) return null;
+  if (p.aplicada) return h('div', { clase: 'meta' }, '✓ Mejora aplicada en el campo');
+  const area = campo();
+  const veces = area ? vecesEn(area.value, p.original) : 0;
+  if (veces !== 1) {
+    return h('div', { clase: 'meta' }, veces > 1
+      ? `«${p.original}» aparece ${veces} veces en el campo: cambia a mano la que toque.`
+      : `«${p.original}» ya no está tal cual en el campo: cámbialo a mano.`);
+  }
+  return h('div', { clase: 'fila' },
+    h('button', {
+      clase: 'mini', type: 'button',
+      title: `Cambia «${p.original}» por «${p.mejor}» en el campo (se guarda como si lo hubieras escrito)`,
+      onclick: () => {
+        const ahora = campo();
+        if (!ahora) { toast('No encuentro el campo: vuelve a abrir esta pantalla', true); return; }
+        const n = vecesEn(ahora.value, p.original);
+        if (n !== 1) {
+          toast(n ? `Ese trozo aparece ${n} veces: cámbialo a mano`
+            : 'Ese trozo ya no está tal cual en el campo: cámbialo a mano', true);
+          repintarRevisiones(gid);
+          return;
+        }
+        const i = ahora.value.indexOf(p.original);
+        ahora.value = ahora.value.slice(0, i) + p.mejor + ahora.value.slice(i + p.original.length);
+        ahora.dispatchEvent(new Event('input', { bubbles: true }));
+        ahora.dispatchEvent(new Event('change', { bubbles: true }));
+        p.aplicada = true;
+        repintarRevisiones(gid);
+        toast('Mejora aplicada: revísala y ajústala a tu gusto');
+      },
+    }, 'Aplicar esta mejora'));
 }
 
 /* EL CAMPO AL QUE MIRAN «Guía» y «Revisar»: el marcado con `conGuia`, y si no
@@ -11641,7 +11823,9 @@ function vistaPresetLight() {
   const ficha = fichaLight(APP.light.abierto);
   if (!ficha) {
     return h('div', { clase: 'caja-info' }, 'ese estilo ya no está. ',
-      h('button', { clase: 'mini', onclick: () => irALight('galeria') }, 'Volver'));
+      APP.light.desdeVideo
+        ? h('button', { clase: 'mini', onclick: () => abrirVideoLight(APP.light.desdeVideo) }, '‹ Volver al vídeo')
+        : h('button', { clase: 'mini', onclick: () => irALight('galeria') }, 'Volver'));
   }
   const datos = ficha.datos || {};
   const origen = datos.origen || {};
@@ -12099,8 +12283,15 @@ function nombreIdiomaLight(codigo) {
    repintado, y elegir una voz y darle al play de abajo escuchaba la anterior.
    Lo que vuelva del servidor sustituye a esto en cuanto llegue. */
 function apuntarVozLight(ficha, cambios) {
-  ficha.datos = Object.assign({}, ficha.datos || {});
-  ficha.datos.voz = Object.assign({}, ficha.datos.voz || {}, cambios);
+  /* En la que pinta la pantalla Y en la vigente: tras el primer guardado,
+     `volcarPresetLight` cambia el estilo en memoria por el que devuelve el
+     servidor y los mandos siguen con el objeto de antes (N4 de las notas de
+     mejoras, 13-10-2026). */
+  const vigente = fichaLight(ficha.id);
+  [ficha, vigente].filter((f, i, todas) => f && todas.indexOf(f) === i).forEach(f => {
+    f.datos = Object.assign({}, f.datos || {});
+    f.datos.voz = Object.assign({}, f.datos.voz || {}, cambios);
+  });
   guardarPresetLight(ficha.id, { voz: cambios }, false);
 }
 
@@ -12449,7 +12640,15 @@ function botonEscuchaVoz(ficha, op) {
       return;
     }
     const vozId = op.voz ? op.voz() : '';
-    const clave = claveEscucha(ficha, vozId);
+    /* LA CLAVE, DE LO GUARDADO. Primero sale lo pendiente y luego se lee la
+       ficha VIGENTE —la que devolvió el servidor, no la que tenía este botón al
+       pintarse—: el servidor sintetiza con lo guardado, y una clave calculada
+       antes etiquetaba con los mandos nuevos una muestra hecha con los viejos,
+       que se seguía sirviendo hasta recargar (N4 de las notas de mejoras,
+       13-10-2026). */
+    if (!ficha.sinEstilo) await volcarPresetLight();
+    const vigente = (!ficha.sinEstilo && fichaLight(ficha.id)) || ficha;
+    const clave = claveEscucha(vigente, vozId);
     const guardada = (APP.light.escuchas || {})[clave];
     if (guardada) {
       sonador().src = guardada;
@@ -12464,7 +12663,7 @@ function botonEscuchaVoz(ficha, op) {
     pidiendo = true;
     pintar();
     try {
-      const url = await pedirEscuchaVoz(ficha, vozId);
+      const url = await pedirEscuchaVoz(vigente, vozId);
       APP.light.escuchas = Object.assign({}, APP.light.escuchas, { [clave]: url });
       sonador().src = url;
       audio.play().catch(() => { /* el navegador puede negarse; el botón queda listo */ });
@@ -12926,20 +13125,54 @@ async function regenerarPedidasLight(ficha, pedidas) {
    la interfaz. `volcarPresetLight` es lo que hace que el botón «Guardar» no sea
    decorativo: escribe YA lo que quedara sin escribir. */
 function guardarPresetLight(id, cambios, repintar) {
-  APP.light.pendiente = Object.assign({}, APP.light.pendiente, cambios, { id });
+  /* LO PENDIENTE ES DE UN SOLO ESTILO. Si lo que quedaba por escribir era de
+     otro, sale antes con SU id: mezclarlo mandaba los cambios de aquel a este
+     (N4 de las notas de mejoras, 13-10-2026). */
+  const previo = APP.light.pendiente;
+  if (previo && previo.id !== id) volcarPresetLight();
+  /* Y SE MEZCLA CAMPO A CAMPO dentro de cada bloque. Un `Object.assign` a secas
+     reemplazaba `voz` entera: tocar la velocidad y enseguida una emoción
+     mandaba solo la emoción, y la velocidad se perdía sin decir nada. El
+     servidor ya mezcla `voz` campo a campo con lo guardado; aquí se hace lo
+     mismo con lo que aún no ha salido. */
+  const base = (APP.light.pendiente && APP.light.pendiente.id === id)
+    ? APP.light.pendiente : {};
+  const mezcla = Object.assign({}, base);
+  Object.keys(cambios || {}).forEach(k => {
+    const nuevo = cambios[k];
+    const viejo = base[k];
+    mezcla[k] = (esBloqueObjeto(nuevo) && esBloqueObjeto(viejo))
+      ? Object.assign({}, viejo, nuevo) : nuevo;
+  });
+  mezcla.id = id;
+  APP.light.pendiente = mezcla;
   clearTimeout(APP.light.guardando);
   APP.light.guardando = setTimeout(() => volcarPresetLight(repintar), 900);
+}
+
+function esBloqueObjeto(x) {
+  return !!x && typeof x === 'object' && !Array.isArray(x);
 }
 
 async function volcarPresetLight(repintar) {
   clearTimeout(APP.light.guardando);
   const pendiente = APP.light.pendiente;
-  if (!pendiente) return;
+  /* SI EL GUARDADO YA HA SALIDO, se espera a que vuelva: «Escuchar» vuelca
+     antes de pedir la muestra (N4), y sin esto, con el PUT todavía en camino,
+     la muestra podía sintetizarse con la voz de antes. */
+  if (!pendiente) {
+    if (APP.light.volcando) { try { await APP.light.volcando; } catch (e) { /* ya avisó */ } }
+    return;
+  }
   APP.light.pendiente = null;
   const { id, ...cambios } = pendiente;
   try {
-    const datos = await pedir(API.presetLight(id),
-      { method: 'PUT', cuerpo: cambios });
+    const enCamino = pedir(API.presetLight(id), { method: 'PUT', cuerpo: cambios });
+    APP.light.volcando = enCamino;
+    let datos;
+    try { datos = await enCamino; } finally {
+      if (APP.light.volcando === enCamino) APP.light.volcando = null;
+    }
     const nueva = datos.preset;
     if (nueva && APP.light.datos) {
       APP.light.datos.presets = presetsLight().map(p => (p.id === id ? nueva : p));
@@ -14142,15 +14375,51 @@ function bloqueLlevaDelVideo() {
     caja.appendChild(ajustesDelMontaje({ tipo: 'video', pid: v.pid }, v.lleva));
   };
   const cargar = async () => {
-    try {
-      v.lleva = (await pedir(`${API.proyecto(v.pid)}/lleva`)).lleva;
-    } catch (e) {
-      v.lleva = { voz: true, subtitulos: true, musica: true, efectos: true };
-    }
+    await leerLlevaDelVideo(v);
     pintar();
   };
-  if (!v.lleva || v.llevaDe !== v.pid) { v.llevaDe = v.pid; v.lleva = null; cargar(); }
+  if (!v.lleva || v.llevaDe !== v.pid) cargar();
   pintar();
+  return caja;
+}
+
+/* Lo que lleva el vídeo abierto (voz, subtítulos, música, efectos), leído del
+   servidor. Lo usan el Encargo y la pantalla Vídeo: es el mismo `v.lleva`. */
+async function leerLlevaDelVideo(v) {
+  v.llevaDe = v.pid;
+  v.lleva = null;
+  try {
+    v.lleva = (await pedir(`${API.proyecto(v.pid)}/lleva`)).lleva;
+  } catch (e) {
+    v.lleva = { voz: true, subtitulos: true, musica: true, efectos: true };
+  }
+}
+
+/* LA MÚSICA, LOS EFECTOS Y LOS SUBTÍTULOS, DEBAJO DEL VÍDEO MONTADO (N9 de las
+   notas de mejoras, 13-10-2026: «que cuando el vídeo esté generado me pueda
+   mostrar la música, los efectos y los subtítulos para modificarlos»). Todo
+   existía en Encargo → «Qué lleva este vídeo», a dos pantallas del vídeo y sin
+   un enlace que lo dijera. Son los MISMOS ajustes (`ajustesDelMontaje`, con su
+   estado por vídeo), no una copia: lo que se cambia aquí se ve allí. */
+function ajustesEnElVideo() {
+  const v = videoAbierto();
+  const caja = h('div', { clase: 'ajustes-en-video' });
+  caja.appendChild(h('h3', {}, 'Música, efectos y subtítulos'));
+  caja.appendChild(h('div', { clase: 'pista' },
+    'Cambiar esto solo vuelve a mezclar el sonido o a rotular el texto y monta el MP4 otra vez: '
+    + 'no se redibuja ninguna imagen ni se regraba la voz.'));
+  if (!v.lleva || v.llevaDe !== v.pid) {
+    if (v.leyendoLleva !== v.pid) {
+      const pid = v.leyendoLleva = v.pid;
+      leerLlevaDelVideo(v).then(() => {
+        v.leyendoLleva = '';
+        if (videoAbierto().pid === pid) repintarVideo();
+      });
+    }
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+    return caja;
+  }
+  caja.appendChild(ajustesDelMontaje({ tipo: 'video', pid: v.pid }, v.lleva));
   return caja;
 }
 
@@ -14255,7 +14524,11 @@ async function cargarAjustesVideo(modo, est) {
     pedir(`${base}/subtitulos`).catch(() => null),
     pedir(`${base}/logo`).catch(() => null)]);
   est.musica = { presencia: presencia || { presencia: 'normal', elegida: false },
-    tema: sonido && sonido.musica && sonido.musica.id ? sonido.musica : null };
+    tema: sonido && sonido.musica && sonido.musica.id ? sonido.musica : null,
+    // N9 (13-10-2026): el volumen fino y los ánimos de la automática
+    db: sonido ? Number(sonido.musica_db) || 0 : 0,
+    tramos: (sonido && sonido.musica && sonido.musica.tramos) || [] };
+  est.hayJamendo = !!(sonido && sonido.hay_jamendo);
   est.efectos = (sonido && sonido.efectos) || {};
   est.efectosVolumen = (sonido && sonido.efectos_volumen) || 'normales';
   est.papeles = (sonido && sonido.papeles) || [];
@@ -14291,8 +14564,13 @@ function resumenAjuste(modo, est, cual) {
     const tema = op ? op.musica : (est.musica || {}).tema;
     const nivel = (PRESENCIAS_MUSICA.find(p => p.id === presencia) || {}).nombre || presencia;
     const deQuien = t => (t.fuente === 'propia' ? ' (tuya)' : ` de ${t.artista || '?'}`);
-    return (tema ? `«${tema.titulo || tema.id}»${deQuien(tema)}` : 'Automática (varios temas según el ritmo)')
-      + ` · se oye ${nivel.toLowerCase()}`;
+    const db = op ? 0 : Number((est.musica || {}).db) || 0;
+    const animo = op ? '' : animoUnicoDe(est);
+    const automatica = animo
+      ? `Automática, toda ${(ANIMOS_MUSICA.find(a => a[0] === animo) || [0, animo])[1].toLowerCase()}`
+      : 'Automática (varios temas según el ritmo)';
+    return (tema ? `«${tema.titulo || tema.id}»${deQuien(tema)}` : automatica)
+      + ` · se oye ${nivel.toLowerCase()}` + (db ? ` (${textoDb(db)})` : '');
   }
   if (cual === 'efectos') {
     const fijos = (est.fijos || []).length;
@@ -14365,6 +14643,7 @@ function editorMusica(modo, est, repintar) {
     !borrador && !elegida
       ? '. Si este vídeo se montó antes del 10 de octubre, sonó «Suave»: pulsa «Normal» para volver a mezclarlo.'
       : ''));
+  if (!borrador) caja.appendChild(volumenFinoMusica(modo, est, repintar));
 
   caja.appendChild(h('label', {}, 'Qué música'));
   caja.appendChild(h('div', { clase: 'herramientas' },
@@ -14377,6 +14656,7 @@ function editorMusica(modo, est, repintar) {
       + (tema.fuente === 'propia' ? ' (subido por ti)' : ` de ${tema.artista || '?'}`)
       + (tema.licencia_nombre ? ` · ${tema.licencia_nombre}` : '')
     : 'Automática: el vídeo se parte en tramos según su ritmo y cada uno lleva su tema de Jamendo.'));
+  if (!borrador) caja.appendChild(animoDeLaAutomatica(modo, est, repintar));
 
   if (est.busqueda.abierta || tema) caja.appendChild(buscadorDeTemas(modo, est, repintar, fijarTema, tema));
 
@@ -14396,6 +14676,117 @@ function editorMusica(modo, est, repintar) {
     } catch (e) { toast(e.message, true); }
     repintar();
   }
+  return caja;
+}
+
+/* «+2 dB», «−3 dB», «tal cual». */
+function textoDb(db) {
+  const n = Math.round(Number(db) * 10) / 10 || 0;
+  return n ? `${n > 0 ? '+' : '−'}${Math.abs(n)} dB` : 'tal cual';
+}
+
+/* El ánimo de la música automática si se eligió a mano para todo el vídeo, o
+   '' si cada tramo lleva el del ritmo. Lo dice el `por_que` que deja el
+   servidor (`cambiar_animo_musica`): con un solo tramo, el del ritmo también
+   es «uno para todo». */
+function animoUnicoDe(est) {
+  const tramos = (est.musica || {}).tramos || [];
+  if (!tramos.length || (est.musica || {}).tema) return '';
+  const aMano = tramos.every(t => String(t.por_que || '').indexOf('elegido a mano') === 0
+    && t.animo === tramos[0].animo);
+  return aMano ? tramos[0].animo : '';
+}
+
+/* EL VOLUMEN FINO DE LA MÚSICA (N9 de las notas de mejoras, 13-10-2026): entre
+   «Suave», «Normal» y «Alta» no había nada. Un deslizador en pasos de 1 dB que
+   escribe `musica_db` (el mando que ya movía el repaso) y solo VUELVE A
+   MEZCLAR, como la presencia. Se guarda al SOLTARLO, y solo si alguien lo toca
+   (regla 1); y con un respiro, para que las flechas del teclado no lancen una
+   mezcla por cada paso. */
+function volumenFinoMusica(modo, est, repintar) {
+  const guardado = Number((est.musica || {}).db) || 0;
+  const actual = est.dbEnVuelo !== undefined ? est.dbEnVuelo : guardado;
+  const etiqueta = h('span', { clase: 'meta' }, textoDb(actual));
+  const guardar = async valor => {
+    try {
+      const r = await pedir(`${API.proyecto(modo.pid)}/sonido`, {
+        method: 'PUT', cuerpo: { musica_db: valor, remontar: true } });
+      est.musica.db = valor;
+      if (r.cambiado !== false) avisoDeMontaje(r, 'Volumen de la música');
+    } catch (e) { toast(e.message, true); }
+    est.dbEnVuelo = undefined;
+    repintar();
+  };
+  return h('div', { clase: 'campo' },
+    h('label', {}, 'Ajuste fino'),
+    h('div', { clase: 'fila' },
+      h('input', {
+        type: 'range', min: -12, max: 6, step: 1, value: actual, clase: 'volumen-fino',
+        'aria-label': 'Ajuste fino del volumen de la música, en decibelios',
+        oninput: ev => { est.dbEnVuelo = Number(ev.target.value); etiqueta.textContent = textoDb(est.dbEnVuelo); },
+        onchange: ev => {
+          est.dbEnVuelo = Number(ev.target.value);
+          clearTimeout(est.relojDb);
+          est.relojDb = setTimeout(() => {
+            if (est.dbEnVuelo !== guardado) guardar(est.dbEnVuelo);
+            else { est.dbEnVuelo = undefined; repintar(); }
+          }, 600);
+        },
+      }),
+      etiqueta),
+    h('div', { clase: 'pista' }, 'Sube o baja la música por encima de lo elegido arriba, de 1 en 1 dB.'));
+}
+
+/* EL ÁNIMO DE LA MÚSICA AUTOMÁTICA (N9 de las notas de mejoras, 13-10-2026):
+   la automática elige un ánimo por tramo según el ritmo, y no había forma de
+   pedir «que sea alegre». Esto la vuelve a montar con UN ánimo en todos los
+   tramos (`PUT /musica/animo`) y vuelve a mezclar: no se dibuja nada. */
+function animoDeLaAutomatica(modo, est, repintar) {
+  const unico = animoUnicoDe(est);
+  const pedido = est.animoPedido || unico;
+  const caja = h('div', { clase: 'campo' });
+  caja.appendChild(h('label', {}, 'Automática con un ánimo para todo el vídeo'));
+  const montar = async () => {
+    /* UN TEMA ELEGIDO A MANO se sustituye por la automática: se dice antes. */
+    if ((est.musica || {}).tema && !window.confirm(
+      'Ahora suena un tema que elegiste tú. La música automática lo sustituye por '
+      + 'temas de este ánimo. ¿Seguir?')) return;
+    est.montandoAnimo = true; repintar();
+    try {
+      const r = await pedir(`${API.proyecto(modo.pid)}/musica/animo`, {
+        method: 'PUT', cuerpo: { animo: est.animoPedido } });
+      const nombre = ((ANIMOS_MUSICA.find(a => a[0] === r.animo) || [0, r.animo])[1]).toLowerCase();
+      toast(r.remontando
+        ? `Música: buscando temas «${nombre}» y volviendo a mezclar el vídeo, sin dibujar nada`
+        : `Música: buscando temas «${nombre}». Entrará al montar el vídeo`);
+      seguirTrabajo(CLAVE_VIDEO_LIGHT, r.trabajo_id, async () => {
+        est.montandoAnimo = false;
+        est.animoPedido = '';
+        try { await cargarAjustesVideo(modo, est); } catch (e) { /* se relee al volver */ }
+        est.repintar();
+        try { await recargarVideoAbierto(); } catch (e) { /* se relee al volver */ }
+      });
+    } catch (e) {
+      est.montandoAnimo = false;
+      toast(e.message, true);
+      repintar();
+    }
+  };
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('select', {
+      'aria-label': 'Ánimo de la música automática', clase: 'animo-automatica', value: pedido,
+      onchange: ev => { est.animoPedido = ev.target.value; repintar(); } },
+    h('option', { value: '' }, 'Según el ritmo (cada tramo el suyo)'),
+    ...ANIMOS_MUSICA.map(([id, nombre]) => h('option', { value: id }, nombre))),
+    h('button', {
+      clase: 'mini',
+      disabled: !est.animoPedido || est.montandoAnimo || !est.hayJamendo,
+      onclick: montar,
+    }, est.montandoAnimo ? 'montando la música…' : 'Montar la música con este ánimo')));
+  caja.appendChild(h('div', { clase: 'pista' }, !est.hayJamendo
+    ? 'Hace falta la clave de Jamendo (Configuración): los temas se buscan allí.'
+    : (unico ? 'Ahora suena toda con este ánimo. ' : '')
+      + 'Busca un tema de ese ánimo para cada tramo y vuelve a mezclar: no se dibuja nada.'));
   return caja;
 }
 
@@ -15504,6 +15895,36 @@ async function enviarDictado(tipo) {
   }
 }
 
+/* Junta lo que lleva oído el dictado del navegador, desde el primer resultado.
+ *
+ * N8 de las notas de mejoras, 13-10-2026: «repite palabras al dictar». Antes se
+ * sumaban los finales de cada evento a lo ya confirmado, y Chrome en Android
+ * (con `continuous`) vuelve a mandar los finales ya dados con `resultIndex` 0,
+ * y cada final nuevo trae la frase ACUMULADA: salía «hola que talhola que tal
+ * hola que tal quiero un video». Aquí se recorre la lista entera cada vez: los
+ * finales se unen con un espacio y, si uno EMPIEZA por lo ya juntado (el caso
+ * de Android), lo sustituye en vez de sumarse. En escritorio cada final es un
+ * trozo nuevo y sale lo mismo que antes. El provisional se trata igual. */
+function juntarDictado(resultados) {
+  const sumar = (junto, trozo) => {
+    if (!trozo) return junto;
+    if (!junto) return trozo;
+    const a = junto.toLowerCase();
+    const b = trozo.toLowerCase();
+    // empieza por lo ya junto, cortando por palabra: «hola» no se come «holanda»
+    if (b.startsWith(a) && (b.length === a.length || /\s/.test(b.charAt(a.length)))) return trozo;
+    return `${junto} ${trozo}`;
+  };
+  let firme = '';
+  let provisional = '';
+  for (let i = 0; i < resultados.length; i++) {
+    const trozo = String((resultados[i][0] || {}).transcript || '').trim();
+    if (resultados[i].isFinal) firme = sumar(firme, trozo);
+    else provisional = sumar(provisional, trozo);
+  }
+  return sumar(firme, provisional);
+}
+
 function dictarConNavegador(Reconocimiento) {
   const campo = $('#asistente-texto');
   const base = campo ? campo.value : '';
@@ -15511,15 +15932,9 @@ function dictarConNavegador(Reconocimiento) {
   rec.lang = /^es/i.test(navigator.language || '') ? navigator.language : 'es-419';
   rec.continuous = true;
   rec.interimResults = true;
-  let firme = '';
-  rec.onresult = ev => {
-    let provisional = '';
-    for (let i = ev.resultIndex; i < ev.results.length; i++) {
-      const trozo = ev.results[i][0].transcript;
-      if (ev.results[i].isFinal) firme += trozo; else provisional += trozo;
-    }
-    escribirDictado((firme + provisional).trim(), base);
-  };
+  // Se rehace el texto ENTERO en cada evento, sin acumular entre eventos: N8
+  // de las notas de mejoras, 13-10-2026 (el dictado repetía palabras).
+  rec.onresult = ev => escribirDictado(juntarDictado(ev.results), base);
   rec.onerror = ev => {
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') {
       toast('No hay permiso para el micrófono: dale permiso en el candado de la '

@@ -2975,6 +2975,12 @@ ul.inicio-como li { display: flex; gap: 10px; align-items: flex-start; line-heig
 .editor-ajuste > label, .editor-ajuste .campo > label { font-size: 12px; text-transform: uppercase;
   letter-spacing: .06em; color: var(--tenue); margin-top: 4px; }
 .editor-ajuste input[type=range] { width: 100%; max-width: 420px; }
+/* N9 (13-10-2026): los mismos ajustes, debajo del vídeo montado */
+.ajustes-en-video { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; }
+.ajustes-en-video > h3 { margin: 0; font-size: 15px; }
+.ajustes-en-video .ajustes-montaje { margin-top: 4px; }
+.editor-ajuste input[type=range].volumen-fino { flex: 1 1 200px; min-width: 0; }
+.editor-ajuste select.animo-automatica { max-width: 100%; }
 .buscador-temas { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--linea);
   border-radius: 10px; padding: 10px; }
 .tema-musica { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center;

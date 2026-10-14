@@ -632,6 +632,152 @@ def ficha_del_estilo(navegador, datos):
 
 
 @escenario
+def voz_del_estilo_se_guarda_entera(navegador, datos):
+    """N4 de las notas de mejoras (13-10-2026): «los ajustes de voz no están
+    sincronizando en la muestra en estilo». Dos fallos: tocar dos mandos de voz
+    seguidos (en menos de los 0,9 s del autoguardado) guardaba solo el último,
+    y la escucha se apuntaba con la clave de la ficha que tenía el botón al
+    pintarse, no con la que el servidor había guardado: tras cambiar el ritmo
+    (que mueve el aire de la voz) el play servía la muestra de antes."""
+    api = datos["api"]
+    pid = datos["preset"]
+
+    def voz_guardada():
+        return dict((ficha_guardada().get("datos") or {}).get("voz") or {})
+
+    def ficha_guardada():
+        _r, d = api.get("/api/presets-light")
+        return next((p for p in d.get("presets") or [] if p.get("id") == pid), {})
+
+    # EL ESTILO DE PRUEBA NO TRAE ni voz ni bloque de estilo, y uno de verdad
+    # lleva los dos: sin fotogramas el ritmo no se puede guardar. Se le ponen
+    # aquí y se le devuelve lo suyo al final, para no cambiar los demás escenarios.
+    original = ficha_guardada()
+    from PIL import Image                                    # noqa: PLC0415
+    fotogramas = []
+    for i in range(3):
+        ruta = os.path.join(datos["base"], f"fotograma_voz_{i}.png")
+        Image.new("RGB", (64, 48), (40 * i, 120, 200)).save(ruta)
+        fotogramas.append(ruta)
+    api.post("/api/presets-canal", {
+        "tipo": "canal", "nombre": original.get("nombre"), "id": pid,
+        "datos": dict(original.get("datos") or {},
+                      estilo={"referencias": fotogramas},
+                      voz={"voz_id": "voz-de-prueba"})})
+    pg = Pagina(navegador, datos)
+    escuchas = []
+
+    def al_pedir(peticion):
+        # en el momento en que la pantalla pide la muestra, lo que el servidor
+        # tiene guardado es con lo que la va a sintetizar
+        if peticion.method == "POST" and "/voz/previsualizar" in peticion.url:
+            escuchas.append(voz_guardada())
+
+    pg.p.on("request", al_pedir)
+    pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{pid}' }});")
+    ok(pg.esperar(".bloque-voz button.escuchar", "Escuchar"), "la ficha enseña la voz con su «Escuchar»")
+    pg.pulsar(".bloque-voz summary", "la velocidad")
+    velocidad = pg.p.locator(".bloque-voz select").filter(
+        has=pg.p.locator("option[value=fastest]")).first
+    # DOS MANDOS SEGUIDOS, y el play enseguida: todo dentro de los 0,9 s
+    velocidad.select_option("fastest")
+    pg.p.locator(".bloque-voz button.mini", has_text="surprise").first.click()
+    pg.p.locator(".bloque-voz button.escuchar", has_text="Escuchar").first.click()
+    pg.p.wait_for_timeout(2500)
+    guardada = voz_guardada()
+    ok(guardada.get("velocidad") == "fastest" and guardada.get("emociones") == ["surprise"],
+       f"tocar velocidad y color seguidos guarda LOS DOS (guardado: {guardada})")
+    ok(len(escuchas) == 1 and escuchas[0].get("velocidad") == "fastest"
+       and escuchas[0].get("emociones") == ["surprise"],
+       f"y la escucha se pide con los dos ya guardados ({escuchas})")
+    for _ in range(40):                         # que termine la síntesis
+        if pg.p.evaluate("() => Object.keys(APP.light.escuchas || {}).length > 0"):
+            break
+        pg.p.wait_for_timeout(500)
+    claves = pg.p.evaluate(f"() => [Object.keys(APP.light.escuchas || {{}}), "
+                           f"claveEscucha(fichaLight('{pid}'), '')]")
+    ok(claves[1] in claves[0],
+       f"la muestra queda apuntada con la clave de lo GUARDADO -- {claves}")
+
+    # EL RITMO MUEVE EL AIRE DE LA VOZ en el servidor, sin repintar la voz
+    antes = voz_guardada().get("hueco_minimo")
+    barra = pg.p.locator("input.ritmo").first
+    actual = int(barra.input_value())
+    maximo = int(barra.get_attribute("max") or 0)
+    otro = 0 if actual != 0 else maximo
+    barra.evaluate("(b, v) => { b.value = String(v); b.dispatchEvent(new Event('input')); }", otro)
+    despues = antes
+    for _ in range(30):                         # el PUT sale a los 0,9 s
+        pg.p.wait_for_timeout(500)
+        despues = voz_guardada().get("hueco_minimo")
+        if despues is not None and despues != antes:
+            break
+    ok(despues is not None and despues != antes,
+       f"cambiar el ritmo cambia el aire guardado de la voz ({antes} -> {despues})"
+       f" -- aviso: {pg.toast()[:150]!r}")
+    pg.p.locator(".bloque-voz button.escuchar", has_text="Escuchar").first.click()
+    pg.p.wait_for_timeout(2500)
+    ok(len(escuchas) == 2,
+       "y el «Escuchar» de después pide una muestra NUEVA, no sirve la de antes"
+       f" ({len(escuchas)} peticiones)")
+    pg.p.remove_listener("request", al_pedir)
+    api.post("/api/presets-canal", {"tipo": "canal", "nombre": original.get("nombre"),
+                                    "id": pid, "datos": original.get("datos") or {}})
+    pg.sin_errores("la voz del estilo")
+    pg.cerrar()
+
+
+@escenario
+def del_video_a_su_estilo_y_de_vuelta(navegador, datos):
+    """N3 de las notas de mejoras (13-10-2026): «cuando regreso a estilos en
+    proyecto avanzado me bota al menú». Un vídeo abierto desde «Últimos
+    vídeos» de la portada no apuntaba su proyecto: desde su estilo, «Todos
+    los estilos» caía en «Tus proyectos», y regenerar el estilo borraba el
+    «‹ Volver al vídeo». Y si el estilo ya no estaba, «Estilo» sacaba a la
+    galería sin decir nada."""
+    pid = datos["video"]
+    pg = Pagina(navegador, datos)
+    pg.js("await cargarGaleriaLight(true); elegirCliente(''); irALight('galeria');")
+    ok(pg.visible("h2", "Tus proyectos"), "se empieza en la portada de proyectos")
+    ok(pg.esperar(".video-light button.abrir", "Padres vs hijos"),
+       "el vídeo de prueba sale en «Últimos vídeos»")
+    pg.pulsar(".video-light button.abrir", "Padres vs hijos")
+    pg.esperar(".nav-light button", "Estilo")
+    pg.p.wait_for_timeout(1000)
+    pg.pulsar(".nav-light button", "Estilo")
+    ok(pg.esperar(".light-preset .light-cab h2", "Estado Play Matriz"),
+       "«Estilo» desde el vídeo abre su estilo")
+    pg.pulsar(".light-cab button", "Volver al vídeo")
+    pg.p.wait_for_timeout(1000)
+    ok(pg.p.evaluate(f"() => APP.light.vista === 'elegido' && APP.light.video.pid === '{pid}'"),
+       "«‹ Volver al vídeo» vuelve a ese vídeo")
+    pg.pulsar(".nav-light button", "Estilo")
+    pg.pulsar(".light-cab button", "Todos los estilos")
+    pg.p.wait_for_timeout(800)
+    ok(not pg.visible("h2", "Tus proyectos") and pg.visible("h2", "Estado Play"),
+       "«Todos los estilos» enseña los estilos del proyecto del vídeo, no «Tus proyectos»")
+    ok(pg.visible(".ficha-estilo", "Estado Play Matriz"),
+       "con el estilo del vídeo entre ellos")
+    pg.captura("05_todos_los_estilos_desde_un_video", entera=False)
+    # REGENERAR EL ESTILO pasa por «generando» y vuelve a la ficha: el camino
+    # de vuelta al vídeo tiene que seguir ahí (sin gastar: solo las vistas)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.pulsar(".nav-light button", "Estilo")
+    pg.js(f"irALight('generando', {{ plan: null, abierto: '{datos['preset']}' }}); "
+          f"irALight('preset', {{ abierto: '{datos['preset']}', taller: null, feedback: {{}} }});")
+    ok(pg.esperar(".light-cab button", "Volver al vídeo", 10),
+       "después de regenerar el estilo sigue «‹ Volver al vídeo»")
+    # UN ESTILO QUE YA NO ESTÁ: lo dice y te quedas en el vídeo
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.estilo = 'estilo_que_no_existe'; pintarLight();")
+    pg.pulsar(".nav-light button", "Estilo")
+    ok(pg.p.evaluate(f"() => APP.light.vista === 'elegido' && APP.light.video.pid === '{pid}'"),
+       "si el estilo del vídeo no está, «Estilo» no saca del vídeo")
+    ok(any("ya no está" in a for a in pg.avisos()), f"y lo dice ({pg.avisos()[-2:]})")
+    pg.sin_errores("del vídeo a su estilo y de vuelta")
+    pg.cerrar()
+
+
+@escenario
 def encargo_del_video(navegador, datos):
     pg = Pagina(navegador, datos)
     pg.js(f"await abrirVideoLight('{datos['video']}');")
@@ -1138,6 +1284,43 @@ def lo_que_se_vio_el_10_de_octubre(navegador, datos):
     ok("PENDIENTE" not in valor and "(revisado)" in valor,
        f"aplicarla cambia el material ({valor[-60:]!r})")
     pg.captura("13_revisar_en_el_encargo", entera=False)
+    # «SIRVE» CON PROBLEMAS (N5 de las notas de mejoras, 13-10-2026): la
+    # revision listaba mejoras y no salia ningun boton para aplicarlas
+    area = pg.p.locator(".bloque-light").filter(has_text="El material").first.locator("textarea").first
+    area.fill(original + " BORRADOR")
+    area.dispatch_event("input")
+    bloque = pg.p.locator(".bloque-light").filter(has_text="El material").first
+    bloque.locator("button", has_text="Revisar").first.click()
+    ok(pg.esperar(".bloque-light .revision-campo", "dos cosas que mejorar", 60),
+       "la revisión «Sirve» con problemas se pinta")
+    bloque = pg.p.locator(".bloque-light").filter(has_text="El material").first
+    ok(bloque.locator("button", has_text="Aplicar la versión sugerida").count() == 1,
+       "«Sirve» con problemas también ofrece aplicar la versión sugerida")
+    ok(bloque.locator("button", has_text="Aplicar esta mejora").count() == 1,
+       "y un «Aplicar» para la mejora cuyo trozo está en el campo")
+    ok(bloque.locator(".revision-campo", has_text="ya no está tal cual").count() == 1,
+       "y dice que el trozo de la otra mejora no está en el campo")
+    if bloque.locator("button", has_text="Aplicar esta mejora").count():
+        bloque.locator("button", has_text="Aplicar esta mejora").first.click()
+    pg.p.wait_for_timeout(2500)
+    bloque = pg.p.locator(".bloque-light").filter(has_text="El material").first
+    valor = bloque.locator("textarea").first.input_value()
+    ok("BORRADOR" not in valor and valor.endswith("versión final"),
+       f"aplicar la mejora cambia SOLO ese trozo del material ({valor[-60:]!r})")
+    ok(bloque.locator(".revision-campo", has_text="Mejora aplicada").count() == 1,
+       "y la mejora queda marcada como aplicada")
+    # SE GUARDA como cualquier edicion del encargo
+    _r, d = api.get(f"/api/proyectos/{pid}")
+    ok("versión final" in json.dumps(d, ensure_ascii=False),
+       "y la mejora aplicada queda guardada en el proyecto")
+    # SIN TEXTO ENTERO, QUE LO DIGA: la misma revision sin «sugerida»
+    pg.js("""REVISION_VIVA.forEach(v => { if (v.resultado && v.resultado.resumen
+               === 'Sirve, aunque hay dos cosas que mejorar.') v.resultado.sugerida = ''; });
+             pintarLight();""")
+    bloque = pg.p.locator(".bloque-light").filter(has_text="El material").first
+    ok(bloque.locator(".revision-campo", has_text="no ha propuesto un texto entero").count() == 1,
+       "con problemas y sin texto entero, dice que no hay versión entera que aplicar")
+    pg.captura("13b_sirve_con_problemas", entera=False)
     # se deja el material como estaba: lo que viene detras no tiene que verlo
     area = pg.p.locator(".bloque-light").filter(has_text="El material").first.locator("textarea").first
     area.fill(original)
@@ -1364,6 +1547,79 @@ def tema_claro_y_asistente(navegador, datos):
            "sin sesión de Claude, el asistente dice cómo entrar")
     pg.captura("21_asistente")
     pg.sin_errores("el tema y el asistente")
+    pg.cerrar()
+
+
+#: Un reconocimiento de voz FALSO que, al arrancar, emite la tanda de eventos
+#: que se le dé (cada uno: [resultIndex, [[texto, esFinal], ...]]) y termina.
+DICTADO_FALSO_JS = """(tanda) => {
+  window.__dictadoAcabado = false;
+  function Falso() {}
+  Falso.prototype.start = function () {
+    const yo = this;
+    let i = 0;
+    const siguiente = () => {
+      if (i >= tanda.length) { window.__dictadoAcabado = true; if (yo.onend) yo.onend(); return; }
+      const [indice, lista] = tanda[i++];
+      const results = lista.map(([texto, final]) => {
+        const r = [{ transcript: texto, confidence: 0.9 }]; r.isFinal = final; return r;
+      });
+      yo.onresult({ resultIndex: indice, results });
+      setTimeout(siguiente, 30);
+    };
+    setTimeout(siguiente, 30);
+  };
+  Falso.prototype.stop = function () {};
+  window.SpeechRecognition = Falso;
+  window.webkitSpeechRecognition = Falso;
+}"""
+
+#: Lo que manda Chrome de ESCRITORIO: cada final es un trozo nuevo y
+#: resultIndex apunta al primero que cambia.
+DICTADO_ESCRITORIO = [
+    [0, [["hola", False]]],
+    [0, [["hola que tal", True]]],
+    [1, [["hola que tal", True], [" quiero", False]]],
+    [1, [["hola que tal", True], [" quiero un video", True]]],
+]
+#: Lo que manda Chrome en ANDROID con `continuous`: vuelve a mandar los
+#: finales ya dados con resultIndex 0, y cada final trae la frase acumulada.
+DICTADO_ANDROID = [
+    [0, [["hola", False]]],
+    [0, [["hola que tal", True]]],
+    [0, [["hola que tal", True], ["hola que tal quiero", False]]],
+    [0, [["hola que tal", True], ["hola que tal quiero un video", True]]],
+]
+
+
+@escenario
+def dictado_del_navegador_sin_repetir(navegador, datos):
+    """N8 de las notas de mejoras, 13-10-2026: «el dictado repite palabras».
+    Sin clave de OpenAI se dicta con el navegador; en Android Chrome repite los
+    finales acumulados y salía «hola que talhola que tal…»."""
+    pg = Pagina(navegador, datos)
+    pg.js("await cargarGaleriaLight(true); irALight('galeria'); elegirCliente('');")
+    pg.pulsar("#burbuja-asistente")
+    pg.p.wait_for_timeout(800)
+    casos = [("escritorio", DICTADO_ESCRITORIO, "", "hola que tal quiero un video"),
+             ("Android", DICTADO_ANDROID, "", "hola que tal quiero un video"),
+             ("Android, con texto escrito antes", DICTADO_ANDROID, "Oye:",
+              "Oye: hola que tal quiero un video")]
+    for nombre, tanda, antes, esperado in casos:
+        pg.p.evaluate(DICTADO_FALSO_JS, tanda)
+        # con ESTUDIO_SIMULAR el servidor da el dictado de OpenAI por disponible:
+        # se deja como sin clave (o con «navegador» elegido en Configuración)
+        pg.p.evaluate("() => { if (ASISTENTE.estado) ASISTENTE.estado.dictado = false; }")
+        ok(pg.p.evaluate("() => motorDictado()") == "navegador",
+           f"dictado ({nombre}): sin clave de OpenAI va por el navegador")
+        pg.p.evaluate("(t) => { DICTADO.estado = ''; $('#asistente-texto').value = t; "
+                      "conmutarDictado(); }", antes)
+        pg.p.wait_for_function("() => window.__dictadoAcabado", timeout=10000)
+        texto = pg.p.evaluate("() => $('#asistente-texto').value")
+        ok(texto == esperado, f"dictado ({nombre}): el campo queda «{esperado}» "
+                              f"sin repetir (queda «{texto}»)")
+    pg.p.evaluate("() => { $('#asistente-texto').value = ''; }")
+    pg.sin_errores("el dictado del navegador")
     pg.cerrar()
 
 
@@ -1846,6 +2102,58 @@ def ortografia_de_los_subtitulos(navegador, datos):
 
 
 @escenario
+def ortografia_por_palabra_entera(navegador, datos):
+    """N6 de las notas de mejoras (13-10-2026). Al poner una corrección en un
+    bloque con marcas de la voz, «esta → está» cambiaba la «esta» de dentro de
+    «estaba»; el aviso rojo de «corrígelo a mano» lo tapaba al instante el de
+    «puestas»; y lo que no se pudo revisar (una tanda con el JSON roto) no se
+    decía. Se llama a las funciones de la pantalla y se pinta el panel con
+    cada estado."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'video'; pintarLight();")
+    ok(pg.esperar(".panel-ortografia", "Ortografía", 15), "el panel de ortografía está")
+    r = pg.js("""return [
+      sustituirPalabra('estaba esta casa', 'esta', 'está'),
+      sustituirPalabra('estaba aqui', 'esta', 'está'),
+      sustituirPalabra('<break time="1s"/> time', 'time', 'tiempo'),
+      ortografiaSobreCrudo('Ella estaba <break time="900ms"/> y esta aqui',
+        { despues: 'Ella estaba y está aquí', cambios: [['esta', 'está'], ['aqui', 'aquí']] }),
+      ortografiaSobreCrudo('Ella estaba <break time="900ms"/> bien',
+        { despues: 'Ella estába bien', cambios: [['esta', 'está']] })];""")
+    ok(r[0] == "estaba está casa", f"«esta → está» no toca la de dentro de «estaba» ({r[0]!r})")
+    ok(r[1] is None, f"si solo está dentro de otra palabra, no se pone ({r[1]!r})")
+    ok(r[2] == '<break time="1s"/> tiempo', f"ni dentro de una marca de la voz ({r[2]!r})")
+    ok(r[3] == 'Ella estaba <break time="900ms"/> y está aquí',
+       f"con marcas, cada pareja va a su palabra y las pausas se quedan ({r[3]!r})")
+    ok(r[4] is None, f"lo que no encaja vuelve como «a mano» (null), no como puesto ({r[4]!r})")
+    # lo que se quedó sin revisar se dice, y «Sin faltas» no lo cuenta
+    pg.js(f"""ORTOGRAFIA_VIVA.set(claveOrtografia('{pid}', 'subtitulos'),
+      {{ estado: 'listo', revisados: 10, sin_revisar: 3, propuestas: [] }}); pintarLight();""")
+    texto = pg.p.locator(".panel-ortografia").last.inner_text()
+    ok("3 texto(s) se han quedado sin revisar" in texto and "Sin faltas en 7 textos" in texto,
+       f"los textos sin revisar se dicen y no cuentan como revisados ({texto[:220]!r})")
+    # la respuesta rota en todas las tandas: el titular es para la persona
+    pg.js(f"""ORTOGRAFIA_VIVA.set(claveOrtografia('{pid}', 'subtitulos'), {{ estado: 'error',
+      error: 'El corrector devolvió una respuesta rota; pulsa «Revisar otra vez». No se ha cambiado nada.\\n\\n'
+        + "la revision de ortografia no es un JSON legible: Expecting ',' delimiter" }}); pintarLight();""")
+    titular = pg.p.locator(".panel-ortografia .caja-error .titular").last.inner_text()
+    ok(titular.startswith("El corrector devolvió") and "JSON" not in titular,
+       f"el titular del error no es el texto técnico ({titular!r})")
+    # lo aplicado a medias: UN aviso con las dos cuentas, y lo de a mano a la vista
+    pg.js(f"""ORTOGRAFIA_VIVA.set(claveOrtografia('{pid}', 'subtitulos'), {{ estado: 'aplicada',
+      aviso: '2 corrección(es) puestas; 1 hay que corregirla(s) a mano (B003): llevan pausas',
+      aMano: [{{ id: 'B003', despues: 'Ella está bien', cambios: [['esta', 'está']] }}] }}); pintarLight();""")
+    texto = pg.p.locator(".panel-ortografia").last.inner_text()
+    ok("2 corrección(es) puestas; 1 hay que corregirla(s) a mano" in texto and "Ella está bien" in texto,
+       f"lo que queda a mano se queda en el panel con su texto ({texto[:220]!r})")
+    pg.js(f"ORTOGRAFIA_VIVA.delete(claveOrtografia('{pid}', 'subtitulos')); pintarLight();")
+    pg.sin_errores("la ortografía por palabra entera")
+    pg.cerrar()
+
+
+@escenario
 def reparar_estilo_perdido(navegador, datos):
     """«Capas de luz en baño»: un vídeo cuyo estilo se volvió a guardar antes
     del 09-10-2026 apunta a imágenes que ya no se llaman así. La portada lo
@@ -2088,6 +2396,76 @@ def salir_y_cada_video_lo_suyo(navegador, datos):
     else:
         ok(False, f"el vídeo de prueba tiene al menos dos versiones de imágenes ({versiones})")
     pg.sin_errores("salir al inicio y cada vídeo lo suyo")
+    pg.cerrar()
+
+
+@escenario
+def musica_efectos_y_subtitulos_en_el_video(navegador, datos):
+    """N9 de las notas de mejoras (13-10-2026): «que cuando el vídeo esté
+    generado me pueda mostrar la música, los efectos y los subtítulos para
+    modificarlos, sin regenerar las imágenes ni la voz». Debajo del vídeo
+    montado salen los ajustes del montaje; el volumen fino guarda su valor y
+    lanza SOLO una remezcla; y el ánimo de la automática se ofrece (montarlo
+    pide Jamendo, que aquí no hay: lo de servidor va en prueba_api)."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    ok(_montar_desde_video(pg), "se parte de un vídeo montado al día")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.esperar(".ajustes-en-video h3", "Música, efectos y subtítulos", 15),
+       "debajo del vídeo montado sale «Música, efectos y subtítulos»")
+    ok(pg.visible(".ajustes-en-video .pista", "no se redibuja ninguna imagen"),
+       "y dice que cambiarlo no redibuja imágenes ni regraba la voz")
+    for fila in ("Música", "Efectos", "Subtítulos"):
+        ok(pg.esperar(".ajustes-en-video .fila-ajuste-cab", fila, 10),
+           f"con la fila de {fila.lower()} (la misma que en el Encargo)")
+    _r, antes = api.get(f"/api/trabajos?proyecto={pid}")
+    vistos = {t.get("id") for t in antes.get("trabajos") or []}
+    assets_antes = _version_de(datos, "assets", "").get("activa")
+    voz_antes = _version_de(datos, "voz", "").get("activa")
+    render_antes = _version_de(datos, "render", "").get("activa")
+    pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="Música").first \
+        .locator("button", has_text="Cambiar").click()
+    pg.p.wait_for_timeout(800)
+    ok(pg.visible(".ajustes-en-video input.volumen-fino"), "la música trae un ajuste fino del volumen")
+    ok(pg.visible(".ajustes-en-video select.animo-automatica"),
+       "y un selector del ánimo para la música automática")
+    ok(not pg.p.locator(".ajustes-en-video button", has_text="Montar la música con este ánimo")
+       .first.is_enabled(),
+       "que sin la clave de Jamendo no deja montarla (y lo dice)")
+    pg.captura("n9_ajustes_en_el_video", entera=False)
+    # EL VOLUMEN FINO: se suelta en −4 dB
+    pg.p.evaluate("""() => { const r = document.querySelector('.ajustes-en-video input.volumen-fino');
+      r.value = -4; r.dispatchEvent(new Event('input', { bubbles: true }));
+      r.dispatchEvent(new Event('change', { bubbles: true })); }""")
+    pg.p.wait_for_timeout(2500)
+    ok(api.libre(pid), "la remezcla termina")
+    pg.sin_trabajo(300)
+    _r, sonido = api.get(f"/api/proyectos/{pid}/sonido")
+    igual_db = sonido.get("musica_db") == -4.0
+    ok(igual_db, f"el volumen fino queda guardado en −4 dB ({sonido.get('musica_db')!r})")
+    _r, despues = api.get(f"/api/trabajos?proyecto={pid}")
+    nuevos = [t for t in despues.get("trabajos") or [] if t.get("id") not in vistos]
+    ok(nuevos and all(t.get("paso") == "render" and "mezclar" in (t.get("nombre") or "")
+                      for t in nuevos),
+       f"y lanza SOLO una remezcla del render ({[(t.get('nombre'), t.get('paso')) for t in nuevos]})")
+    ok(not any(t.get("paso") in ("assets", "voz", "callouts") for t in nuevos),
+       "ningún trabajo de imágenes, voz ni rótulos")
+    igual_versiones = (_version_de(datos, "assets", "").get("activa"),
+                       _version_de(datos, "voz", "").get("activa"))
+    ok(igual_versiones == (assets_antes, voz_antes),
+       f"las imágenes y la voz siguen en su versión ({(assets_antes, voz_antes)} → {igual_versiones})")
+    ok(_version_de(datos, "render", "").get("activa") != render_antes,
+       "y el MP4 se ha vuelto a montar")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.esperar(".ajustes-en-video .fila-ajuste-cab", "−4 dB", 15),
+       "y la fila de la música dice el ajuste (−4 dB)")
+    # se deja como estaba para quien venga detrás
+    api.put(f"/api/proyectos/{pid}/sonido", {"musica_db": 0, "remontar": True})
+    api.libre(pid)
+    pg.sin_errores("música, efectos y subtítulos en el vídeo")
     pg.cerrar()
 
 

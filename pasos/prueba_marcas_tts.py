@@ -301,6 +301,28 @@ comprobar("ni un <speed ratio=\"0.9\"/>",
 igual("y da ejemplos concretos para poder corregirlo",
       comun.revisar_cifras("May 2024 y el 2%")["ejemplos"], ["2024", "2%"])
 
+print("\n== una letra suelta se deletrea sola («Series S» no es «Series sur») ==")
+igual("«Xbox Series S» manda la S a deletrear",
+      m.sanear("Alquila la Xbox Series S para tu fiesta."),
+      "Alquila la Xbox Series <spell>S</spell> para tu fiesta.")
+igual("también con puntuación detrás y varias en la frase",
+      m.sanear("La Series X o la S, tú eliges."),
+      "La Series <spell>X</spell> o la <spell>S</spell>, tú eliges.")
+igual("A, E, O, U e Y son palabras en castellano: se dejan",
+      m.sanear("Y entonces A Coruña, O bien, E incluso, U otro"),
+      "Y entonces A Coruña, O bien, E incluso, U otro")
+igual("abreviaturas con punto o guion se dejan (S.A., EE. UU., T-shirt, X-Men, USB-C)",
+      m.sanear("S.A. y EE. UU. con una T-shirt de X-Men y USB-C"),
+      "S.A. y EE. UU. con una T-shirt de X-Men y USB-C")
+igual("la I tampoco (en inglés es una palabra)", m.sanear("la I y la J"),
+      "la I y la <spell>J</spell>")
+for frase in ("Es la S. Luego la T.", 'la <spell>FBI</spell> y la S',
+              '<speed ratio="0.9"/>Es la S. <break time="500ms"/>Luego'):
+    una = m.sanear(frase)
+    comprobar(f"sigue siendo idempotente: {frase!r}", m.sanear(una) == una)
+    comprobar(f"y lo que se OYE no cambia (subtítulos y reparto): {frase!r}",
+              m.limpiar(una) == m.limpiar(frase))
+
 print("\n== las instrucciones para el modelo ==")
 texto = m.instrucciones()
 comprobar("nombran el break", "break" in texto)

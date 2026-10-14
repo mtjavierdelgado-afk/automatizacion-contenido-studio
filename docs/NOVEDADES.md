@@ -10,6 +10,14 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**La voz (14 de octubre)**
+- **Una letra suelta ya no se lee como una abreviatura.** La voz decía «Xbox
+  Series sur» en vez de «Series ese»: en español, una «S» sola se tomaba por
+  «Sur». Ahora cada consonante mayúscula suelta (S, X, T, B…) se deletrea con
+  el nombre de la letra. «A», «E», «O», «U» e «Y» se siguen leyendo como
+  palabras, y «S.A.», «T-shirt» o «USB-C» no cambian. Se nota al volver a
+  grabar la voz; el subtítulo sigue diciendo «S».
+
 **Subtítulos a tu gusto y el «atrás» del móvil (13 de octubre, noche)**
 - **La fuente y el sitio de los subtítulos se eligen.** En el editor de
   subtítulos (en el Encargo y debajo del vídeo montado) hay dos filas nuevas:

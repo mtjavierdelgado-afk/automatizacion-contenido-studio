@@ -216,6 +216,24 @@ def _deletreable(pieza):
     """
     return [(token, es_inicialismo(token)) for token in str(pieza or "").split()]
 
+#: UNA LETRA SUELTA SE DELETREA SOLA (14-10-2026). Cartesia, en castellano, lee
+#: una consonante mayuscula suelta como la abreviatura que mas se le parece: en
+#: un video de consolas «Xbox Series S» se oyo «Series sur». Con <spell> dice el
+#: nombre de la letra («ese»), que es lo que se quiere en el 100 % de los casos
+#: medidos, y el redactor no lo marca porque para el es obvio.
+#:
+#: Solo CONSONANTES: «A», «E», «O», «U» e «Y» son tambien palabras en castellano
+#: («Y entonces...») y la «I» lo es en ingles. Y no si va pegada a un punto o a
+#: un guion con mas letras: «S.A.», «EE. UU.», «T-shirt» y «X-Men» se dejan.
+_LETRA_SUELTA = re.compile(
+    r"(?<![\w.\-'’])([BCDFGHJKLMNPQRSTVWXZ])(?![\w'’]|\.\w|-\w)")
+
+
+def deletrear_letras_sueltas(texto):
+    """Envuelve en <spell> las consonantes mayusculas sueltas. Ver arriba."""
+    return _LETRA_SUELTA.sub(lambda m: f"<spell>{m.group(1)}</spell>", str(texto or ""))
+
+
 #: Cualquier cosa con forma de etiqueta, valida o no. Se usa para BORRAR lo que
 #: no se reconozca, porque lo que no se reconoce se locuta (leccion 2).
 _ALGO_ASI = re.compile(r'<[^<>]*>')
@@ -360,7 +378,7 @@ def sanear(texto, avisos=None):
             if pieza.strip():
                 ultimo_break = None
             dicho += pieza
-            salida.append(pieza)
+            salida.append(deletrear_letras_sueltas(pieza))
 
         elif clase == "spell":
             # <spell> deletrea TODO lo que lleva dentro, espacios incluidos.

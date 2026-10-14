@@ -88,10 +88,16 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 
 | Rama abierta | Ficheros reservados | Desde |
 |---|---|---|
-| `v2-fase-3` | `pasos/p4_voz.py`, `pasos/p5_revision_audio.py`, `pasos/marcas_tts.py`, `pasos/cadencia.py` (la voz y el reloj del vídeo). Comparte con `arreglos-v2` `pasos/sonido.py`, `pasos/p8_render.py`, `pasos/subtitulos.py` y `web/app.js`: si los toca, se pone al día con lo que haya en `main` antes | 12-10-2026 |
+| `arreglos-voz` | La voz: letras sueltas leídas como abreviatura («S» → «sur»), palabras en inglés, ecos y bloques sin entonación (informe `pruebas/informe_analisis_arreglos_v2b.md` del Proyecto, apartado «La voz»): `pasos/p4_voz.py`, `pasos/p5_revision_audio.py`, `pasos/marcas_tts.py`, `pasos/cadencia.py` | 14-10-2026 |
 
 Quien abre una rama la apunta aquí (en `main`, regla 8); quien la une a `main`,
 la quita.
+
+**`v2-fase-3` (vídeos sin voz) está EN PAUSA desde el 14-10-2026, por decisión
+del dueño.** Sus ficheros dejan de estar reservados: los toma `arreglos-voz`.
+Quien la retome hace antes `git merge origin/main` (la voz habrá cambiado) y la
+vuelve a apuntar en la tabla. Mientras siga en pausa, `v2-fase-4b` sigue
+esperando, porque depende de ella.
 
 ### El orden acordado
 

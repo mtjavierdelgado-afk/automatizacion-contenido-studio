@@ -18,6 +18,11 @@ vídeos, estilos, claves y contraseña no se tocan.
   se rehacen las capas de texto y el montaje: ni una imagen ni la voz se
   vuelven a pagar. «La del diseño» y «Automática» lo dejan exactamente como
   estaba.
+- **El diseño «Realista» ya mide su letra con Georgia.** Dibujaba Georgia pero
+  medía con Verdana, que es un tercio más ancha: la caja del subtítulo salía de
+  más, los renglones se partían antes de tiempo y las cartelas salían más
+  pequeñas de lo que cabían. Se nota al volver a montar un vídeo con ese
+  diseño; los demás diseños salen igual que antes.
 - **El botón «atrás» del móvil ya no te saca del Studio.** Vuelve a la
   pantalla anterior: del Vídeo a la parada de antes, del estilo al vídeo y,
   al final, a la portada. «Adelante» lo deshace.

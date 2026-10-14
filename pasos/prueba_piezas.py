@@ -446,6 +446,18 @@ def prueba_callouts():
     ok("Sin subtitulos" in p7_callouts.describir({"subtitulos": False}),
        "y el paso lo dice al describirse")
 
+    titulo("tipografia: se mide con la letra que se dibuja, aunque venga en CSS")
+    frase = "Tu reunion, con las consolas ya montadas"
+    igual(tipografia.medir(frase, "Georgia, serif", 52, negrita=True),
+          tipografia.medir(frase, "Georgia", 52, negrita=True),
+          "«Georgia, serif» (el diseno Realista) se mide con Georgia, no con Verdana")
+    igual(tipografia.medir(frase, "Verdana, sans-serif", 52, negrita=True),
+          tipografia.medir(frase, "Verdana", 52, negrita=True),
+          "y «Verdana, sans-serif» sigue siendo Verdana (los otros disenos no cambian)")
+    ok(tipografia.medir(frase, "'Georgia', serif", 52)[0]
+       < tipografia.medir(frase, "Verdana", 52)[0],
+       "con comillas tambien, y Georgia mide menos que Verdana")
+
     titulo("p7_callouts: la fuente y el sitio del subtitulo se eligen (N9, paso 4)")
     # SIN ELEGIR, EXACTAMENTE LO DE ANTES: ni la banda ni el SVG cambian, que es
     # lo que hace que un video ya montado no quede distinto al actualizar.

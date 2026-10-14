@@ -89,7 +89,6 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 | Rama abierta | Ficheros reservados | Desde |
 |---|---|---|
 | `v2-fase-3` | `pasos/p4_voz.py`, `pasos/p5_revision_audio.py`, `pasos/marcas_tts.py`, `pasos/cadencia.py` (la voz y el reloj del vídeo). Comparte con `arreglos-v2` `pasos/sonido.py`, `pasos/p8_render.py`, `pasos/subtitulos.py` y `web/app.js`: si los toca, se pone al día con lo que haya en `main` antes | 12-10-2026 |
-| `arreglos-v2d` | Lo que queda de las notas de mejoras (informe `pruebas/informe_analisis_arreglos_v2b.md` del Proyecto): N9 paso 4, posición y fuente de los subtítulos (`pasos/p7_callouts.py`, `app.py`, `web/app.js`, `web/estilo.css`, `pasos/guias.py`), y N3, el botón «atrás» del móvil dentro del Studio (`web/app.js`). Rehace solo callouts y montaje, nunca imágenes ni voz. `web/app.js` lo comparte con `v2-fase-3`: la que se una segunda se pone al día con `main` antes | 13-10-2026 |
 
 Quien abre una rama la apunta aquí (en `main`, regla 8); quien la une a `main`,
 la quita.

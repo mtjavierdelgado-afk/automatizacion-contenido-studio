@@ -5166,11 +5166,11 @@ def _medidor_de_subtitulo(ctx, plan):
         # margen y su ancho maximo son constantes suyas, y `banda_fija` sin
         # ellos da otra caja. Se le piden a el, no se copian.
         salida = p7.salida_de(plan)
-        banda = p7.banda_subtitulo(salida)
         params_callouts = ctx.estado.params("callouts") or {}
+        banda = p7.banda_subtitulo(salida, params_callouts)
         _, ficha_diseno = p7.diseno_de(params_callouts)
         # el cuerpo de ESTA salida: en vertical es mas grande (p7.escala_subtitulo)
-        medir = p7._medidor((ficha_diseno or {}).get("fuente") or "Verdana",
+        medir = p7._medidor(p7.fuente_subtitulo(params_callouts, ficha_diseno),
                             p7.tamano_subtitulo(params_callouts, salida),
                             negrita=p7.SUB_PESO >= 600)
         return medir, banda
@@ -7150,7 +7150,12 @@ DISENOS_SUBTITULO = ("dibujo", "realista", "editorial")
 CONFIG_SUBTITULOS_ESTILO = "subtitulos_del_estilo"
 
 
-CLAVES_SUBTITULOS = ("subtitulo_tam", "subtitulo_caja", "diseno", "paleta")
+CLAVES_SUBTITULOS = ("subtitulo_tam", "subtitulo_caja", "diseno", "paleta",
+                     "subtitulo_fuente", "subtitulo_posicion")
+
+#: Donde puede ir el subtitulo, en el orden en que se ensena. «auto» es no
+#: elegir: la clave NO se escribe (regla 1) y va donde siempre.
+POSICIONES_SUBTITULO = ("abajo", "tercio", "centro", "arriba")
 
 
 def _subtitulos_de(params_callouts, config=None):
@@ -7162,6 +7167,11 @@ def _subtitulos_de(params_callouts, config=None):
             "caja": p.get("subtitulo_caja", "auto"),
             "diseno": p.get("diseno") or p7.PARAMS_POR_DEFECTO["diseno"],
             "color": ((paleta.get("fijados") or {}).get("texto") or ""),
+            # "" = sin elegir (la letra del diseno / donde siempre)
+            "fuente": p7.fuente_subtitulo(p) if p.get("subtitulo_fuente") else "",
+            "posicion": p7.posicion_subtitulo(p),
+            "fuentes": list(p7.SUB_FUENTES),
+            "posiciones": list(POSICIONES_SUBTITULO),
             "propios": bool((config or {}).get(CONFIG_SUBTITULOS_ESTILO)),
             "tamanos": list(TAMANOS_SUBTITULO),
             "disenos": [{"id": d, "nombre": (p7.SETS_DISENO.get(d) or {}).get("nombre") or d,
@@ -7202,6 +7212,27 @@ def _cambios_de_subtitulos(p, datos):
             fijados.pop("texto", None)
         paleta["fijados"] = fijados
         cambios["paleta"] = paleta
+    # FUENTE Y POSICION (N9 de las notas de mejoras, paso 4). «auto» o vacio es
+    # volver a no elegir: el cambio es None y `_aplicar_subtitulos` QUITA la
+    # clave -- escribir "auto" seria un param que el proyecto nunca tuvo, y
+    # moveria la firma de callouts sin cambiar nada (regla 1).
+    if "fuente" in datos:
+        fuente = str(datos["fuente"] or "").strip()
+        if fuente in ("", "auto"):
+            cambios["subtitulo_fuente"] = None
+        else:
+            buena = next((f for f in p7.SUB_FUENTES if f.lower() == fuente.lower()), "")
+            if not buena:
+                raise ErrorApi(400, "fuente: «auto», " + ", ".join(p7.SUB_FUENTES))
+            cambios["subtitulo_fuente"] = buena
+    if "posicion" in datos:
+        posicion = str(datos["posicion"] or "").strip().lower()
+        if posicion in ("", "auto"):
+            cambios["subtitulo_posicion"] = None
+        elif posicion not in POSICIONES_SUBTITULO:
+            raise ErrorApi(400, "posicion: «auto», " + ", ".join(POSICIONES_SUBTITULO))
+        else:
+            cambios["subtitulo_posicion"] = posicion
     return {k: v for k, v in cambios.items() if p.get(k) != v}
 
 
@@ -7237,7 +7268,19 @@ def _aplicar_subtitulos(ctx, datos):
         ctx.proyecto.config[CONFIG_SUBTITULOS_ESTILO] = {
             "valores": {k: copy.deepcopy(p[k]) for k in CLAVES_SUBTITULOS if k in p}}
         ctx.proyecto.guardar_config()
-    ctx.estado.actualizar_params("callouts", cambios)
+    quitar = [k for k, v in cambios.items() if v is None]
+    if quitar:
+        # volver a «sin elegir» QUITA la clave (ver `_cambios_de_subtitulos`).
+        # Leer y escribir dentro del cerrojo (reentrante): un rótulo del repaso
+        # que se guarde en medio no se pierde.
+        with ctx.estado._lock:
+            params = copy.deepcopy(ctx.estado.params("callouts") or {})
+            for clave in quitar:
+                params.pop(clave, None)
+            params.update({k: v for k, v in cambios.items() if v is not None})
+            ctx.estado.set_params("callouts", params)
+    else:
+        ctx.estado.actualizar_params("callouts", cambios)
     ctx.bitacora.anotar("subtitulos_cambiados", "callouts", {"claves": sorted(cambios)})
     return True
 
@@ -7254,7 +7297,9 @@ def leer_subtitulos(pid: str):
 
 @app.put("/api/proyectos/{pid}/subtitulos")
 def cambiar_subtitulos(pid: str, cuerpo: dict = Body(default=None)):
-    """{tam?, caja? ("auto" o 0-1), diseno?, color? ("#rrggbb" o "")} o {automatico: true}.
+    """{tam?, caja? ("auto" o 0-1), diseno?, color? ("#rrggbb" o ""),
+    fuente? ("auto" o Verdana/Arial/Georgia), posicion? ("auto", abajo, tercio,
+    centro, arriba)} o {automatico: true}.
 
     Cambiarlos deja pendientes las capas de texto y el montaje (no las
     imagenes). Se aplican con `POST .../subtitulos/aplicar` o al montar.

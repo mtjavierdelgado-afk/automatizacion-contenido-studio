@@ -501,14 +501,63 @@ SUB_ESCALA_VERTICAL_MAX = 1.35
 SUB_ALTURA_VERTICAL = 1.0 / 3.0
 
 
+#: DONDE VA EL SUBTITULO, si quien hace el video lo elige (N9 de las notas de
+#: mejoras, 13-10-2026). Sin elegir --la clave no esta-- va donde siempre: al
+#: pie en horizontal y a un tercio en vertical, y el SVG sale IDENTICO al de
+#: antes. Cada valor es la fraccion del alto donde queda la linea base del
+#: ULTIMO renglon (el bloque crece hacia arriba: ver `bloque_subtitulo`).
+#: «abajo» no tiene fraccion: es el suelo de `subtitulos.banda_fija`.
+SUB_POSICIONES = {
+    "abajo": None,
+    "tercio": 1.0 - SUB_ALTURA_VERTICAL,
+    # un renglon centrado a ojo: la linea base un poco por debajo de la mitad
+    "centro": 0.53,
+    # medido con el cuerpo mas grande («enorme», 72 px) y dos renglones en
+    # 1920x1080: la caja empieza a ~60 px del borde de arriba
+    "arriba": 0.22,
+}
+
+#: LAS FUENTES QUE SE PUEDEN ELEGIR PARA EL SUBTITULO, y solo estas. Son las
+#: tres que en el servidor son el MISMO fichero al medir y al dibujar (las de
+#: Microsoft que baja `instalar.sh`); Tahoma, Consolas y Segoe UI alli son
+#: DejaVu con otro nombre, y medir con una y dibujar con otra es el subtitulo
+#: que se sale de su caja (ver `_medidor`). Sin elegir, la del diseno.
+SUB_FUENTES = ("Verdana", "Arial", "Georgia")
+
+
+def posicion_subtitulo(p):
+    """La posicion ELEGIDA del subtitulo, o "" si nadie la eligio."""
+    valor = str((p or {}).get("subtitulo_posicion") or "").strip().lower()
+    return valor if valor in SUB_POSICIONES else ""
+
+
+def fuente_subtitulo(p, diseno=None):
+    """Con que letra va el subtitulo: la elegida o la del diseno. -> str"""
+    elegida = str((p or {}).get("subtitulo_fuente") or "").strip().lower()
+    for nombre in SUB_FUENTES:
+        if nombre.lower() == elegida:
+            return nombre
+    return (diseno or {}).get("fuente") or "Verdana"
+
+
 def es_vertical(salida=None):
     return bool(salida) and len(salida) >= 2 and float(salida[1] or 0) > float(salida[0] or 0)
 
 
-def banda_subtitulo(salida):
-    """La banda del subtitulo de ESTA salida: la de siempre, o a un tercio."""
+def banda_subtitulo(salida, p=None):
+    """La banda del subtitulo de ESTA salida: la de siempre, o a un tercio.
+
+    Con `p` manda la posicion elegida (`subtitulo_posicion`); sin elegir, lo de
+    siempre. Solo se mueve el SUELO: el ancho y el centro no cambian.
+    """
     banda = subtitulos.banda_fija(salida[0], salida[1], margen=SUB_MARGEN,
                                   ancho_maximo=SUB_ANCHO)
+    elegida = posicion_subtitulo(p)
+    if elegida:
+        fraccion = SUB_POSICIONES[elegida]
+        if fraccion is not None:
+            banda["suelo"] = round(float(salida[1]) * fraccion, 1)
+        return banda
     if es_vertical(salida):
         # solo sube el SUELO: el margen lateral (y con el, el ancho de la
         # banda) es el de siempre. Pasarle un tercio del alto como margen
@@ -572,7 +621,7 @@ def cap_trozo_subtitulo(cap_linea, salida):
 def cap_subtitulo_de(p, plan):
     """La misma cuenta que hace `capa_fija_de`, para quien solo tiene el plan."""
     salida = salida_de(plan)
-    return cap_subtitulo(tamano_subtitulo(p, salida), banda_subtitulo(salida))
+    return cap_subtitulo(tamano_subtitulo(p, salida), banda_subtitulo(salida, p))
 
 
 def _medidor(fuente_nombre, tam, negrita=False):
@@ -640,6 +689,7 @@ def bloque_subtitulo(trozo, banda, tam, paleta, diseno, opacidad=None,
     NUNCA EN VERSALES, aunque el set del grafismo las pida: una banda de sitio en
     mayusculas es un gesto de diseno y un subtitulo en mayusculas es ilegible.
     """
+    # la elegida para el subtitulo ya viene en `diseno` (ver `capa_fija_de`)
     fuente_nombre = (diseno or {}).get("fuente") or "Verdana"
     # SE MIDE CON LA MISMA FUENTE QUE SE DIBUJA. El SVG pide `font-weight` 600 y
     # Verdana no tiene un corte de 600: el navegador sube al siguiente que hay,
@@ -725,12 +775,23 @@ def capa_fija_de(escena, p, banda=None, salida=SALIDA):
     # siempre; solo un False escrito a proposito los quita.
     if p.get("subtitulos") is False:
         return _envoltorio_fijo("", salida), []
-    banda = banda or banda_subtitulo(salida)
+    banda = banda or banda_subtitulo(salida, p)
     paleta = paleta_de_guia((p.get("estilo") or {}).get("guia"), p.get("paleta"))
     # `diseno_de` devuelve (nombre, ficha): aqui interesa la ficha, que trae la
     # fuente
     _, diseno = diseno_de(p, (p.get("estilo") or {}).get("guia"))
+    # una fuente ELEGIDA para el subtitulo cambia solo la letra: las esquinas
+    # siguen siendo las del diseno. Sin elegir, la ficha tal cual.
+    if p.get("subtitulo_fuente"):
+        diseno = dict(diseno or {}, fuente=fuente_subtitulo(p, diseno))
     tam = tamano_subtitulo(p, salida)
+    if posicion_subtitulo(p) == "arriba":
+        # «ARRIBA» CON UN CUERPO MUY GRANDE NO SE SALE: el enrutador puede
+        # escribir hasta 120 px y dos renglones crecen hacia arriba desde el
+        # suelo. Con los tamaños de la pantalla (hasta 72) no cambia nada.
+        minimo = 24 + tam * 1.28 + tam * (0.82 + SUB_CAJA_AIRE[1])
+        if float(banda["suelo"]) < minimo:
+            banda = dict(banda, suelo=round(minimo, 1))
     trozos = subtitulos.de_escena(
         escena, idioma=p.get("idioma"),
         cap_linea=cap_subtitulo(tam, banda),
@@ -1455,7 +1516,7 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
     # aunque ya no dependa de ninguno: asi la vista previa y el repaso reciben
     # exactamente la misma, que es lo que sostiene que lo aprobado sea lo
     # renderizado.
-    banda = banda_subtitulo(salida)
+    banda = banda_subtitulo(salida, p)
 
     for indice, escena in enumerate(escenas):
         sid = escena["id"]

@@ -446,6 +446,65 @@ def prueba_callouts():
     ok("Sin subtitulos" in p7_callouts.describir({"subtitulos": False}),
        "y el paso lo dice al describirse")
 
+    titulo("tipografia: se mide con la letra que se dibuja, aunque venga en CSS")
+    frase = "Tu reunion, con las consolas ya montadas"
+    igual(tipografia.medir(frase, "Georgia, serif", 52, negrita=True),
+          tipografia.medir(frase, "Georgia", 52, negrita=True),
+          "«Georgia, serif» (el diseno Realista) se mide con Georgia, no con Verdana")
+    igual(tipografia.medir(frase, "Verdana, sans-serif", 52, negrita=True),
+          tipografia.medir(frase, "Verdana", 52, negrita=True),
+          "y «Verdana, sans-serif» sigue siendo Verdana (los otros disenos no cambian)")
+    ok(tipografia.medir(frase, "'Georgia', serif", 52)[0]
+       < tipografia.medir(frase, "Verdana", 52)[0],
+       "con comillas tambien, y Georgia mide menos que Verdana")
+
+    titulo("p7_callouts: la fuente y el sitio del subtitulo se eligen (N9, paso 4)")
+    # SIN ELEGIR, EXACTAMENTE LO DE ANTES: ni la banda ni el SVG cambian, que es
+    # lo que hace que un video ya montado no quede distinto al actualizar.
+    for salida in ((1920, 1080), (1080, 1920)):
+        igual(p7_callouts.banda_subtitulo(salida, {}), p7_callouts.banda_subtitulo(salida),
+              f"sin elegir, la banda de {salida[0]}x{salida[1]} es la de siempre")
+    base_svg, _ = p7_callouts.capa_fija_de(dict(escena_sub), p7_callouts._con_defectos({}))
+    raro_svg, _ = p7_callouts.capa_fija_de(
+        dict(escena_sub), p7_callouts._con_defectos({"subtitulo_fuente": "Comic Sans",
+                                                     "subtitulo_posicion": "volando"}))
+    igual(raro_svg, base_svg, "una fuente o un sitio que no existen se leen como sin elegir")
+    geo_svg, _ = p7_callouts.capa_fija_de(
+        dict(escena_sub), p7_callouts._con_defectos({"subtitulo_fuente": "georgia"}))
+    ok('font-family="Georgia"' in geo_svg and 'font-family="Georgia"' not in base_svg,
+       "con Georgia elegida el subtitulo se escribe en Georgia")
+    igual(p7_callouts.fuente_subtitulo({"subtitulo_fuente": "Georgia"}), "Georgia",
+          "y se MIDE con Georgia, no con la del diseno (la caja es la de su letra)")
+    def _y_del_texto(svg):
+        return [float(x) for x in re.findall(r'<text [^>]*?y="([0-9.]+)"', svg)]
+    abajo = _y_del_texto(base_svg)
+    for sitio in ("tercio", "centro", "arriba"):
+        svg_sitio, _ = p7_callouts.capa_fija_de(
+            dict(escena_sub), p7_callouts._con_defectos({"subtitulo_posicion": sitio}))
+        ys = _y_del_texto(svg_sitio)
+        ok(ys and abajo and max(ys) < max(abajo),
+           f"«{sitio}» sube el subtitulo ({max(ys or [0]):.0f} px frente a {max(abajo or [0]):.0f})")
+    arriba = p7_callouts.banda_subtitulo((1920, 1080), {"subtitulo_posicion": "arriba"})
+    alto_dos = 2 * p7_callouts.SUB_TAMANOS["enorme"] * 1.28
+    ok(arriba["suelo"] - alto_dos > 0,
+       "«arriba» con el cuerpo mas grande y dos renglones no se sale por arriba")
+    palabras = ("cuando llegamos al puerto nadie sabia nada de aquel cargamento "
+                "y el capitan miraba").split()
+    larga = {"id": "S009", "narracion": " ".join(palabras),
+             "marcas": [[i * 0.3, i * 0.3 + 0.25] for i in range(len(palabras))],
+             "t_in": 0.0, "t_out": len(palabras) * 0.3}
+    grande_svg, _ = p7_callouts.capa_fija_de(
+        larga, p7_callouts._con_defectos({"subtitulo_posicion": "arriba",
+                                          "subtitulo_tam": 120}))
+    ok(grande_svg.count("<text") > grande_svg.count("<rect"),
+       "(con un trozo de dos renglones, que es el que crece hacia arriba)")
+    cajas = [float(y) for y in re.findall(r'<rect [^>]*?y="(-?[0-9.]+)"', grande_svg)]
+    ok(cajas and min(cajas) >= 0,
+       f"«arriba» con un cuerpo de 120 px tampoco se sale ({min(cajas or [0]):.0f} px)")
+    vertical = p7_callouts.banda_subtitulo((1080, 1920), {"subtitulo_posicion": "abajo"})
+    ok(vertical["suelo"] > p7_callouts.banda_subtitulo((1080, 1920))["suelo"],
+       "en vertical, «abajo» lo baja del tercio de siempre al pie")
+
     titulo("p8_render: la capa QUIETA va ENCIMA, y dicho, no deducido")
     # En una cabecera, el velo de la cartela cubre el cuadro entero y vive dentro
     # de #camara. Por orden del DOM la capa quieta ya quedaba encima --medido

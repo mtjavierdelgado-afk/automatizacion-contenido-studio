@@ -46,11 +46,26 @@ FUENTES = {
 _fuentes = {}
 
 
+def familia(nombre):
+    """La familia que de verdad se dibuja: la PRIMERA de una lista CSS. -> str
+
+    Los disenos guardan la fuente como CSS («Georgia, serif»), porque asi va al
+    SVG y el navegador dibuja Georgia. Pero esa cadena entera no esta en
+    FUENTES, y se caia a Verdana: el diseno «Realista» se MEDIA con Verdana y se
+    DIBUJABA con Georgia, un 33 % mas estrecha (medido: 1270 px frente a 951 en
+    la misma frase). Caja del subtitulo de mas, renglones partidos antes de
+    tiempo y cartelas mas pequenas de lo que cabian (13-10-2026). Con Verdana no
+    se notaba porque caer a Verdana era acertar.
+    """
+    primera = str(nombre or "").split(",")[0].strip().strip("'\"").strip()
+    return primera.lower() or "verdana"
+
+
 def fuente(nombre, tam, negrita=False):
     """Fuente real del sistema, la misma que luego pinta el navegador."""
-    clave = (nombre.lower(), int(tam), bool(negrita))
+    clave = (familia(nombre), int(tam), bool(negrita))
     if clave not in _fuentes:
-        rutas = FUENTES.get(nombre.lower()) or FUENTES["verdana"]
+        rutas = FUENTES.get(clave[0]) or FUENTES["verdana"]
         _fuentes[clave] = ImageFont.truetype(rutas[1 if negrita else 0], int(tam))
     return _fuentes[clave]
 

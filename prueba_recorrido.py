@@ -2469,6 +2469,164 @@ def musica_efectos_y_subtitulos_en_el_video(navegador, datos):
     pg.cerrar()
 
 
+def _capas_fijas_del_video(datos):
+    """El texto de las capas quietas (los subtitulos) de la version activa."""
+    activa = _version_de(datos, "callouts", "").get("activa")
+    carpeta = os.path.join(datos["proyectos"], datos["video"], "pasos", "callouts",
+                           f"v{activa}", "capas_fijas")
+    textos = []
+    for nombre in sorted(os.listdir(carpeta)) if os.path.isdir(carpeta) else []:
+        if nombre.endswith(".svg"):
+            with open(os.path.join(carpeta, nombre), encoding="utf-8") as fh:
+                textos.append(fh.read())
+    return "".join(textos)
+
+
+@escenario
+def fuente_y_sitio_de_los_subtitulos(navegador, datos):
+    """N9 de las notas de mejoras, paso 4: «a los subtítulos corregir fuente,
+    estilos, color…, correcciones que no pasen por regenerar las imágenes ni
+    la voz». La fuente y el sitio se eligen en el editor de subtítulos, se
+    aplican rehaciendo SOLO las capas y el montaje, y «Automática» / «La del
+    diseño» quitan la elección: la firma vuelve a la de antes."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    ok(_montar_desde_video(pg), "se parte de un vídeo montado al día")
+    _r, antes = api.get(f"/api/proyectos/{pid}/pasos/callouts")
+    assets_antes = _version_de(datos, "assets", "").get("activa")
+    voz_antes = _version_de(datos, "voz", "").get("activa")
+    pg.p.wait_for_timeout(1500)
+    pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="Subtítulos").first \
+        .locator("button", has_text="Cambiar").click()
+    pg.p.wait_for_timeout(800)
+    for etiqueta in ("Fuente", "Dónde va"):
+        ok(pg.visible(".ajustes-en-video .editor-ajuste label", etiqueta),
+           f"el editor de subtítulos trae «{etiqueta}»")
+    fila = lambda texto: pg.p.locator(".ajustes-en-video .editor-ajuste .campo").filter(  # noqa: E731
+        has=pg.p.locator("label", has_text=texto)).first
+    ok(fila("Fuente").locator("button.activo", has_text="La del diseño").count() == 1,
+       "sin tocar, «La del diseño» está marcada")
+    ok(fila("Dónde va").locator("button.activo", has_text="Automática").count() == 1,
+       "y «Automática» también")
+    fila("Fuente").locator("button", has_text="Georgia").click()
+    pg.p.wait_for_timeout(1200)
+    fila("Dónde va").locator("button", has_text="Arriba").click()
+    pg.p.wait_for_timeout(1200)
+    _r, sub = api.get(f"/api/proyectos/{pid}/subtitulos")
+    ok((sub.get("fuente"), sub.get("posicion")) == ("Georgia", "arriba"),
+       f"Georgia y arriba quedan guardados ({sub.get('fuente')!r}, {sub.get('posicion')!r})")
+    ok(fila("Fuente").locator("button.activo", has_text="Georgia").count() == 1
+       and fila("Dónde va").locator("button.activo", has_text="Arriba").count() == 1,
+       "y se ven marcados")
+    ok(pg.visible(".ajustes-en-video .fila-ajuste", "en Georgia, arriba"),
+       "y el resumen de la fila lo dice («en Georgia, arriba»)")
+    pg.captura("n9_fuente_y_sitio_de_los_subtitulos", entera=False)
+    ok(pg.visible(".ajustes-en-video button", "Aplicar ahora"),
+       "con el vídeo montado ofrece «Aplicar ahora»")
+    pg.pulsar(".ajustes-en-video button", "Aplicar ahora")
+    pg.p.wait_for_timeout(2000)
+    ok(api.libre(pid), "rehacer capas y montaje termina")
+    pg.sin_trabajo(300)
+    capas = _capas_fijas_del_video(datos)
+    ok('font-family="Georgia"' in capas, "los subtítulos del vídeo ya van en Georgia")
+    ok((_version_de(datos, "assets", "").get("activa"), _version_de(datos, "voz", "").get("activa"))
+       == (assets_antes, voz_antes), "y las imágenes y la voz siguen en su versión: ni una se paga")
+    # VOLVER A SIN ELEGIR: las claves se van y la firma es la de antes
+    pg.p.wait_for_timeout(1200)
+    if not pg.visible(".ajustes-en-video .editor-ajuste label", "Fuente"):
+        pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="Subtítulos").first \
+            .locator("button", has_text="Cambiar").click()
+        pg.p.wait_for_timeout(800)
+    fila("Fuente").locator("button", has_text="La del diseño").click()
+    pg.p.wait_for_timeout(1200)
+    fila("Dónde va").locator("button", has_text="Automática").click()
+    pg.p.wait_for_timeout(1200)
+    _r, paso = api.get(f"/api/proyectos/{pid}/pasos/callouts")
+    params = paso.get("params") or {}
+    ok("subtitulo_fuente" not in params and "subtitulo_posicion" not in params,
+       "«La del diseño» y «Automática» quitan las claves (regla 1)")
+    ok(paso.get("firma") == antes.get("firma"),
+       "y la firma de los subtítulos vuelve a ser la de antes")
+    if pg.visible(".ajustes-en-video button", "Aplicar ahora"):
+        pg.pulsar(".ajustes-en-video button", "Aplicar ahora")
+        pg.p.wait_for_timeout(2000)
+    api.libre(pid)
+    pg.sin_trabajo(300)
+    pg.sin_errores("fuente y sitio de los subtítulos")
+    pg.cerrar()
+
+
+@escenario
+def atras_del_movil_dentro_del_studio(navegador, datos):
+    """N3 de las notas de mejoras, el resto: el «atrás» del teléfono salía del
+    Studio desde cualquier pantalla. Ahora vuelve a la pantalla anterior:
+    portada → estilo → portada, y vídeo → parada anterior → portada; y
+    «adelante» lo deshace."""
+    pid = datos["video"]
+    pg = Pagina(navegador, datos)
+    pg.js("await cargarGaleriaLight(true); elegirCliente(''); irALight('galeria');")
+    pg.p.wait_for_timeout(500)
+    ok(pg.visible("h2", "Tus proyectos"), "se empieza en la portada")
+    portada = pg.p.evaluate("() => history.length")
+    pg.pulsar(".video-light button.abrir", "Padres vs hijos")
+    pg.esperar(".nav-light button", "Vídeo")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.p.evaluate("() => history.length") > portada,
+       "abrir un vídeo deja una entrada en el historial del navegador")
+    pg.pulsar(".nav-light button", "Guion")
+    pg.p.wait_for_timeout(800)
+    pg.pulsar(".nav-light button", "Vídeo")
+    pg.p.wait_for_timeout(800)
+    pg.p.go_back()
+    pg.p.wait_for_timeout(1000)
+    ok(pg.p.evaluate(f"() => APP.light.vista === 'elegido' && APP.light.video.pid === '{pid}'"
+                     " && APP.light.video.vista === 'guion'"),
+       "«atrás» desde el Vídeo vuelve al Guion del mismo vídeo")
+    ok(pg.p.url.startswith(datos["url"]), "sin salir del Studio")
+    pg.p.go_back()
+    pg.p.wait_for_timeout(1000)
+    pg.p.go_back()
+    pg.p.wait_for_timeout(1200)
+    ok(pg.p.evaluate("() => APP.light.vista === 'galeria'") and pg.visible("h2", "Tus proyectos"),
+       "y otro «atrás» vuelve a la portada")
+    ok(pg.p.evaluate("() => !APP.light.video.pid"), "con el vídeo cerrado, como «Inicio»")
+    pg.p.go_forward()
+    pg.p.wait_for_timeout(2500)
+    ok(pg.p.evaluate(f"() => APP.light.vista === 'elegido' && APP.light.video.pid === '{pid}'"),
+       "«adelante» vuelve a abrir el vídeo")
+    # EL ESTILO: desde él, «atrás» vuelve al vídeo y conserva «‹ Volver al vídeo» al volver
+    pg.pulsar(".nav-light button", "Estilo")
+    ok(pg.esperar(".light-preset .light-cab h2", "Estado Play Matriz"), "se abre el estilo del vídeo")
+    pg.p.go_back()
+    pg.p.wait_for_timeout(1500)
+    ok(pg.p.evaluate(f"() => APP.light.vista === 'elegido' && APP.light.video.pid === '{pid}'"),
+       "«atrás» desde el estilo vuelve al vídeo")
+    pg.p.go_forward()
+    pg.p.wait_for_timeout(1200)
+    ok(pg.esperar(".light-cab button", "Volver al vídeo", 10),
+       "y «adelante» vuelve al estilo con su «‹ Volver al vídeo»")
+    # DOS «ATRÁS» SEGUIDOS mientras el vídeo se abre: manda el último
+    pg.js("recordarVideoLight(''); irALight('galeria');")
+    pg.p.wait_for_timeout(500)
+    pg.js(f"volverAlSitio({{ vista: 'elegido', pid: '{pid}', sub: 'video', cliente: clienteElegido() }}); "
+          "volverAlSitio({ vista: 'galeria', cliente: clienteElegido() });")
+    pg.p.wait_for_timeout(3000)
+    ok(pg.p.evaluate("() => APP.light.vista === 'galeria'"),
+       "dos «atrás» seguidos mientras se abre un vídeo acaban donde dice el último")
+    # VOLVER A «CREAR» NO BORRA EL TALLER: sin él saldría «Generar» y se pagaría otra vez
+    pg.js("APP.light.taller = 'taller_de_prueba'; "
+          "volverAlSitio({ vista: 'crear', taller: '', cliente: clienteElegido() });")
+    pg.p.wait_for_timeout(800)
+    ok(pg.p.evaluate("() => APP.light.taller === 'taller_de_prueba'"),
+       "volver a la pantalla de crear conserva el intento a medias («Retomar», no «Generar»)")
+    pg.js("APP.light.taller = null; irALight('galeria');")
+    pg.sin_errores("atrás del móvil dentro del Studio")
+    pg.cerrar()
+
+
 def main():
     ap = argparse.ArgumentParser(description="El recorrido de la pantalla")
     ap.add_argument("--solo", default="", help="un escenario por nombre")

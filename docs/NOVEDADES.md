@@ -10,6 +10,27 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**El dinero de las imágenes, revisado (15 de octubre)**
+- **Cambiar la calidad ya no promete lo que no hace.** «Traer el estilo» con
+  otra calidad decía «rehace las N imágenes» con su precio, y «Poner al día»
+  las conservaba sin redibujar ninguna. Ahora dice la verdad: lo ya dibujado
+  (también las hojas de reparto) se queda como está y la calidad nueva se
+  aplica a lo que se haga o rehaga. Nada se paga sin pulsar.
+- **En las diapositivas sale «N imágenes siguen en otra calidad»** con un
+  botón «¿Rehacerlas en media? ≈ X $». Pide confirmación con el precio y rehace
+  SOLO esas; las demás no se tocan. Las hojas de reparto se quedan como están
+  (rehacerlas obligaría a rehacer los planos que las usan).
+- **El $/min del deslizador de ritmo** sale con la calidad con la que nacerá
+  el vídeo: en un estilo de foto (que empieza en media) decía el de calidad
+  baja, un 43 % menos de lo real.
+- **El precio de antes de crear un vídeo** de foto respeta siempre el mínimo
+  de calidad media, aunque el estilo tenga «baja» guardada.
+- **«Lo que te han cobrado» cuenta solo imágenes de plano**, y por tipo de
+  imagen (foto o ilustración) cuando ya hay bastantes: las láminas de los
+  estilos se colaban y abarataban el precio de un plano de foto.
+- **Los vídeos verticales tienen su tarifa** cuando OpenAI no devuelve el
+  recuento de tokens (antes se apuntaban «sin tarifa»).
+
 **Copiar y pegar (15 de octubre)**
 - **Las imágenes se pegan con Ctrl+V** (⌘V en el Mac) en todas las zonas que
   suben imágenes: las de referencia de un estilo (nuevo o el que editas), las

@@ -4801,34 +4801,50 @@ function ritmoPorDefecto() {
   return (APP.light.datos || {}).ritmo_por_defecto || 'medio';
 }
 
+/* LA CALIDAD Y EL MODO DE LOS QUE SALE EL $/MIN: los del vídeo que nacería de
+   este estilo (`calidad_nuevo`, que calcula el servidor con la misma regla que
+   al crear el vídeo). Se enseñaba siempre el de calidad baja, y un estilo de
+   foto —que nace, como poco, en media— prometía 1,00 $/min y costaba 1,75. */
+function claveCosteRitmo(modo, calidadDelEstilo) {
+  const m = modo === 'foto' ? 'foto' : 'ilustracion';
+  const porModo = (APP.light.datos || {}).calidad_nuevo || {};
+  return `${calidadDelEstilo || porModo[m] || 'low'}|${m}`;
+}
+
 /* «Rápido · plano medio ~2,0 s · ~0,99 $/min» y nada más. */
-function resumenRitmo(ficha) {
+function resumenRitmo(ficha, clave) {
   if (!ficha) return '';
+  const tabla = ficha.usd_por_minuto_por_calidad || {};
+  const usd = clave && tabla[clave] !== undefined ? tabla[clave] : ficha.usd_por_minuto;
   // toFixed(1) y no el número pelado: «~2 s» y «~2,8 s» uno debajo del otro
   // saltan de ancho al mover el deslizador, y lo que se lee es una cifra que
   // cambia de forma además de de valor.
   return `${ficha.nombre} · plano medio ~${ficha.media_s.toFixed(1).replace('.', ',')} s`
-    + ` · ~${ficha.usd_por_minuto.toFixed(2).replace('.', ',')} $/min`;
+    + ` · ~${Number(usd || 0).toFixed(2).replace('.', ',')} $/min`;
 }
 
 /* El deslizador. Cinco posiciones y una sola línea debajo: sin números de
    mínimo, máximo ni umbral, que es lo que se pidió. Repinta SOLO su línea —no el
    formulario— porque arrastrar y que se repinte el panel entero suelta el
    deslizador a media pasada. */
-function sliderRitmo(valor, alCambiar) {
+function sliderRitmo(valor, alCambiar, claveCoste) {
   const lista = ritmosLight();
   if (!lista.length) return h('div', { clase: 'pista' }, 'cargando los ritmos…');
   const indice = Math.max(0, lista.findIndex(r => r.id === (valor || ritmoPorDefecto())));
-  const linea = h('div', { clase: 'ritmo-linea' }, resumenRitmo(lista[indice]));
+  const clave = () => (claveCoste ? claveCoste() : '');
+  const linea = h('div', { clase: 'ritmo-linea' }, resumenRitmo(lista[indice], clave()));
   const barra = h('input', {
     type: 'range', min: 0, max: lista.length - 1, step: 1, value: indice,
     clase: 'ritmo',
   });
-  const mover = () => {
+  const repintar = () => {
     const ficha = lista[Number(barra.value)] || lista[0];
-    vaciar(linea).append(resumenRitmo(ficha));
-    alCambiar(ficha.id);
+    vaciar(linea).append(resumenRitmo(ficha, clave()));
+    return ficha;
   };
+  const mover = () => { alCambiar(repintar().id); };
+  // cambiar el tipo de imagen del encargo mueve la calidad, y con ella el $/min
+  APP.light.repintarRitmo = repintar;
   barra.addEventListener('input', mover);
   return h('div', { clase: 'campo' }, barra,
     h('div', { clase: 'topes' }, ...lista.map((r, i) => h('span', {
@@ -7812,12 +7828,82 @@ function textoDelPlan(tanda) {
       ? `${coste.imagenes_por_generar} imágenes (${coste.imagenes_hechas} ya hechas)`
       : `${coste.imagenes} imágenes`);
   }
+  if ((coste.otra_calidad || {}).imagenes) {
+    partes.push(`${coste.otra_calidad.imagenes} siguen en otra calidad (no se rehacen solas)`);
+  }
   if (coste.usd_total) {
     partes.push(coste.imagenes_hechas
       ? `≈ ${Number(coste.usd_por_generar).toFixed(2)} $ · hasta ${Number(coste.usd_total).toFixed(2)} $ si hay que rehacerlas`
       : `≈ ${Number(coste.usd_total).toFixed(2)} $`);
   }
   return partes.join(' · ');
+}
+
+
+/* IMÁGENES QUE SIGUEN EN OTRA CALIDAD (D6, decisión del dueño: «que lo diga y
+   pregunte»). Cambiar la calidad de un vídeo con imágenes hechas —traer el
+   estilo, por ejemplo— no redibuja nada: lo hecho se conserva y la calidad
+   nueva se aplica a lo que se haga o rehaga. Aquí se dice cuántas se quedaron
+   en la otra, y se ofrece rehacer SOLO esas con el precio delante. Sin pulsar
+   no se lanza nada. El servidor sabe cuáles son (`otra_calidad` del plan de la
+   tanda de imágenes); las que no sabe en qué calidad se hicieron no se
+   ofrecen. */
+const NOMBRE_CALIDAD = { low: 'baja', medium: 'media', high: 'alta' };
+
+function avisoOtraCalidadLight() {
+  const v = videoAbierto();
+  if (!v.pid) return null;
+  refrescarPlanLight('video');
+  const otra = ((((v.planes || {}).video || {}).coste) || {}).otra_calidad;
+  if (!otra || !otra.imagenes) return null;
+  const nueva = NOMBRE_CALIDAD[otra.calidad] || otra.calidad;
+  const de = Object.entries(otra.por_calidad || {})
+    .map(([c, n]) => `${n} en ${NOMBRE_CALIDAD[c] || c}`);
+  const calidades = Object.keys(otra.por_calidad || {});
+  const enQue = calidades.length === 1
+    ? `en calidad ${NOMBRE_CALIDAD[calidades[0]] || calidades[0]}`
+    : `en otra calidad (${listaConY(de)})`;
+  const partes = [`${otra.imagenes} ${otra.imagenes === 1 ? 'imagen sigue' : 'imágenes siguen'} `
+    + `${enQue}; el vídeo está ahora en calidad ${nueva}.`];
+  if (otra.hojas) {
+    partes.push(`${otra.hojas === 1 ? 'La hoja' : `Las ${otra.hojas} hojas`} de reparto `
+      + 'se quedan como están: rehacerlas obligaría a rehacer los planos que las usan.');
+  }
+  const corriendo = !!trabajoVideoLight();
+  return h('div', { clase: 'caja-aviso otra-calidad' },
+    h('div', { clase: 'crece' }, partes.join(' ')),
+    h('button', {
+      clase: 'mini', disabled: corriendo,
+      onclick: () => rehacerEnLaCalidadDelVideo(otra),
+    }, `¿Rehacerlas en ${nueva}? ≈ ${usdCorto(otra.usd)}`));
+}
+
+async function rehacerEnLaCalidadDelVideo(otra) {
+  const v = videoAbierto();
+  const pid = v.pid;
+  const nueva = NOMBRE_CALIDAD[otra.calidad] || otra.calidad;
+  if (!confirm(`Rehacer ${otra.imagenes} ${otra.imagenes === 1 ? 'imagen' : 'imágenes'} `
+    + `en calidad ${nueva}: ≈ ${usdCorto(otra.usd)}.\n\nSolo esas; las demás no se `
+    + 'tocan. Después hay que volver a montar el vídeo.')) return;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(`${API.proyecto(pid)}/imagenes/calidad`, {
+      method: 'POST', cuerpo: { imagenes: otra.imagenes },
+    });
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') {
+        PREVIA.ficha = null;
+        await cargarVideoLight(pid);
+        refrescarPlanLight('video', true);
+      }
+      pintarLight();
+    }, () => { refrescarPlanosLight(); refrescarVivosLight(); }, pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    refrescarPlanLight('video', true);
+    pintarLight();
+  }
 }
 
 
@@ -7840,9 +7926,10 @@ async function refrescarPlanLight(tanda, forzar) {
     const plan = await pedir(`${API.proyecto(v.pid)}/generar?tanda=${tanda}`);
     /* Se repinta SOLO si el numero de tareas ha cambiado: repintar siempre
        desde aqui seria un bucle, porque esto se llama durante el pintado. */
-    const antes = (v.planes[tanda] || {}).tareas;
+    const huella = x => `${(x || {}).tareas}|${((((x || {}).coste || {}).otra_calidad) || {}).imagenes || 0}`;
+    const antes = huella(v.planes[tanda]);
     v.planes[tanda] = plan;
-    if (antes !== plan.tareas) setTimeout(pintarLight, 0);
+    if (antes !== huella(plan)) setTimeout(pintarLight, 0);
   } catch (e) { /* sin plan: los botones se quedan como estaban */ }
 }
 
@@ -9549,6 +9636,8 @@ function vistaPreviaLight() {
     obsoletasEnLaCabecera(escenas),
     h('span', { clase: 'crece' }),
     costeLight()));
+  const otraCalidad = avisoOtraCalidadLight();
+  if (otraCalidad) caja.appendChild(otraCalidad);
 
   if (PREVIA.error) { caja.appendChild(cajaError(PREVIA.error)); return caja; }
   if (!PREVIA.ficha) {
@@ -11323,7 +11412,8 @@ function vistaCrearLight() {
      decisión de la voz —«el montaje va a planos de 2 s»— y además le rellena la
      velocidad si tú no la pides. Decidirlo después sería decidirlo al revés. */
   cajas.appendChild(bloqueLight('⏱️ Ritmo', 'cada cuánto corta el vídeo',
-    sliderRitmo(e.ritmo, v => { e.ritmo = v; tocarEncargoLight(); })));
+    sliderRitmo(e.ritmo, v => { e.ritmo = v; tocarEncargoLight(); },
+      () => claveCosteRitmo(e.estilo_modo))));
 
   cajas.appendChild(bloqueLight('🎙️ Voz', 'quién lo locuta',
     conGuia(campoArea('', e.voz_prompt, v => { e.voz_prompt = v; tocarEncargoLight(); },
@@ -11631,7 +11721,10 @@ function camposEstiloLight() {
   const e = encargoLight();
   const caja = h('div', {});
   caja.appendChild(selectorTipoDeImagen(e.estilo_modo,
-    v => { e.estilo_modo = v; tocarEncargoLight(); }));
+    v => {
+      e.estilo_modo = v; tocarEncargoLight();
+      if (APP.light.repintarRitmo) APP.light.repintarRitmo();
+    }));
   caja.appendChild(imagenesDeApoyoLight(e, tocarEncargoLight));
   caja.appendChild(conGuia(campoArea('Indicaciones (opcional)', e.estilo_prompt,
     v => { e.estilo_prompt = v; tocarEncargoLight(); },
@@ -12150,7 +12243,8 @@ function vistaPresetLight() {
   // ⏱️ el ritmo: se cambia y ya, no rehace nada
   caja.appendChild(bloqueLight('⏱️ Ritmo', 'cada cuánto corta el vídeo',
     sliderRitmo((ficha.origen_ritmo || ritmoPorDefecto()),
-      v => guardarPresetLight(ficha.id, { ritmo: v }))));
+      v => guardarPresetLight(ficha.id, { ritmo: v }),
+      () => claveCosteRitmo(((ficha.datos || {}).estilo || {}).modo, ficha.calidad_nuevo))));
 
   // 🎙️ la voz, con su escucha
   const voz = h('div', {});
@@ -13857,7 +13951,8 @@ function tarjetaOpenAIInicio() {
   return [
     h('div', { clase: 'pista' },
       'Con esta clave se dibujan los planos: sin ella no hay vídeo. Cada imagen '
-      + 'se paga; un vídeo de cuatro minutos son unos 4,4 $ en calidad baja.'),
+      + 'se paga; un vídeo de cuatro minutos son unos 4 $ en calidad baja (unos 7 $ '
+      + 'en foto, que empieza en calidad media).'),
     h('ol', { clase: 'inicio-pasos' },
       h('li', {}, 'Entra en ', enlaceInicio('platform.openai.com', 'https://platform.openai.com/'),
         ' y crea una cuenta si no la tienes.'),
@@ -15702,7 +15797,7 @@ async function traerEstiloLight(partes, total) {
   const lista = partes.map(p => `• ${p.nombre}: ${p.rehace}`).join('\n');
   if (!confirm(`Traer del estilo:\n${lista}\n\n`
     + (total ? `Al volver a generar costará ≈ ${usdCorto(total)}. ` : '')
-    + 'Ahora no se genera nada: queda marcado lo que hay que rehacer.')) return;
+    + 'Ahora no se genera nada.')) return;
   try {
     const r = await pedir(`${API.proyecto(v.pid)}/estilo/traer`, {
       method: 'POST', cuerpo: { partes: partes.map(p => p.id) },

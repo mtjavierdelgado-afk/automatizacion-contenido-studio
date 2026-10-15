@@ -395,7 +395,7 @@ def ritmo_de(id_ritmo):
 USD_POR_IMAGEN = {"low": 0.033, "medium": 0.074, "high": 0.198}
 
 
-def usd_por_imagen(calidad="low"):
+def usd_por_imagen(calidad="low", modo=None):
     """El precio de UNA imagen, el mismo en todo el Studio (`ajustes.precio_por_imagen`:
     la mediana de lo que te han cobrado, o la tabla con las referencias). La
     tabla de arriba solo queda de respaldo si `ajustes` no se puede cargar."""
@@ -404,12 +404,12 @@ def usd_por_imagen(calidad="low"):
             from . import ajustes                       # noqa: PLC0415
         except ImportError:
             import ajustes                              # noqa: PLC0415
-        return float(ajustes.usd_por_imagen(str(calidad or "low")))
+        return float(ajustes.usd_por_imagen(str(calidad or "low"), modo=modo))
     except Exception:                                   # noqa: BLE001
         return USD_POR_IMAGEN.get(str(calidad or "low"), USD_POR_IMAGEN["low"])
 
 
-def coste_por_minuto(id_ritmo, calidad="low"):
+def coste_por_minuto(id_ritmo, calidad="low", modo=None):
     """Lo que cuesta un minuto de video a este ritmo. -> USD
 
     Es la unica cifra de dinero que este modo ensena, y por eso vale la pena
@@ -418,7 +418,7 @@ def coste_por_minuto(id_ritmo, calidad="low"):
     dibujadas y las muestras): eso ya se dice al crearlo.
     """
     ficha = ritmo_de(id_ritmo)
-    por_imagen = usd_por_imagen(calidad or "low")
+    por_imagen = usd_por_imagen(calidad or "low", modo)
     return round((60.0 / max(0.5, float(ficha["media_s"]))) * por_imagen, 3)
 
 
@@ -468,10 +468,21 @@ def contexto_de_ritmo(id_ritmo):
             f"media (ritmo «{ficha['nombre'].lower()}»).")
 
 
-def ficha_de_ritmo(id_ritmo, calidad="low"):
-    """El ritmo tal y como lo ensena la pantalla: solo dos cifras."""
+def ficha_de_ritmo(id_ritmo, calidad="low", por_calidad=False):
+    """El ritmo tal y como lo ensena la pantalla: solo dos cifras.
+
+    `usd_por_minuto` es el de `calidad`. Con `por_calidad` viaja ademas el
+    $/min de cada calidad y modo (`usd_por_minuto_por_calidad`, claves
+    «medium|foto»), y la pantalla ensena el de la calidad con la que NACERIA
+    un video del estilo que se esta mirando (`calidad_nuevo`). Antes salia
+    siempre el de `low`: un estilo de foto --que nace en medium-- prometia
+    1,00 $/min y costaba 1,75 (auditoria del 15-10-2026)."""
     ficha = dict(ritmo_de(id_ritmo))
     ficha["usd_por_minuto"] = coste_por_minuto(ficha["id"], calidad)
+    if por_calidad:
+        ficha["usd_por_minuto_por_calidad"] = {
+            f"{c}|{m}": coste_por_minuto(ficha["id"], c, m)
+            for c in ("low", "medium", "high") for m in ("ilustracion", "foto")}
     return ficha
 
 class ErrorEncargo(ValueError):

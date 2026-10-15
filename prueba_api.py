@@ -854,6 +854,118 @@ def probar_regrabar_y_estructura(cliente, carpeta):
           "y la voz vuelve a estar al dia")
 
 
+def probar_regrabar_a_medias(cliente, carpeta):
+    """F3 del informe de arreglos v2b: si falla una seccion, las de antes no se tiran.
+
+    Regrabar varias secciones las graba una detras de otra y solo registraba
+    la version al final: si fallaba la segunda de tres, la primera -- ya
+    pagada -- se perdia, y reintentar la volvia a grabar y a pagar. Aqui se
+    hace fallar la SEGUNDA de tres (en el proceso de la prueba, con la toma
+    simulada: no se llama a Cartesia) y se mira que la primera queda guardada,
+    que la voz sigue obsoleta, que lo editado no se pierde y que el reintento
+    graba SOLO las dos que faltan.
+    """
+    seccion("REGRABAR VARIAS SECCIONES: SI FALLA UNA, LAS DE ANTES SE GUARDAN")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo.estado import Estado                          # noqa: PLC0415
+    from nucleo.proyecto import Proyecto                      # noqa: PLC0415
+    _r, datos = cliente.post("/api/proyectos", {"nombre": "Regrabar a medias"})
+    pid = (datos.get("proyecto") or {}).get("id")
+    raiz = os.path.join(carpeta, pid)
+    sembrar(raiz)
+    _r, lanzado = cliente.post(f"/api/proyectos/{pid}/pasos/voz/ejecutar", {})
+    ficha = esperar_trabajo(cliente, lanzado.get("trabajo_id"))
+    igual(ficha.get("estado"), "listo", f"voz de partida ({ficha.get('error')})")
+
+    # TRES SECCIONES en la toma de partida (la simulada sale de una)
+    meta, ruta_meta = _meta_activa(carpeta, pid, cliente)
+    p4 = servidor.PASOS_MODULOS.p4_voz
+    tramos = {"SB001": range(1, 14), "SB002": range(14, 27), "SB003": range(27, 41)}
+    meta["secciones"] = p4._fichas_de_seccion(
+        [{"id": sid, "bloques": [f"B{n:03d}" for n in rango]}
+         for sid, rango in tramos.items()], meta["bloques"])
+    with open(ruta_meta, "w", encoding="utf-8") as fh:
+        json.dump(meta, fh, ensure_ascii=False)
+
+    # un cambio escrito a mano en cada seccion
+    nuevos = {"B002": "Texto nuevo de la primera seccion, escrito a mano.",
+              "B020": "Texto nuevo de la segunda seccion, escrito a mano.",
+              "B035": "Texto nuevo de la tercera seccion, escrito a mano."}
+    cliente.put(f"/api/proyectos/{pid}/pasos/guion/params",
+                {"params": {"bloques": {b: {"texto": t} for b, t in nuevos.items()}}})
+    _r, previsto = cliente.get(f"/api/proyectos/{pid}/guion/bloques",
+                               params={"seccion": "SB001"})
+    igual(((previsto or {}).get("regrabar") or {}).get("orden"),
+          ["SB001", "SB002", "SB003"], "lo previsto: las tres secciones")
+    version_antes = _ficha_paso(cliente, pid, "voz").get("version_activa")
+
+    grabadas = []
+    original = p4._toma_simulada
+    simular = os.environ.get("ESTUDIO_SIMULAR")
+
+    def toma_que_falla_la_segunda(texto, cfg):
+        grabadas.append(texto)
+        if len(grabadas) == 2:
+            raise RuntimeError("Cartesia WS: se ha cortado la conexion")
+        return original(texto, cfg)
+
+    def toma_que_cuenta(texto, cfg):
+        grabadas.append(texto)
+        return original(texto, cfg)
+
+    ctx = servidor.Contexto(raiz)
+    ctx.bitacora.ruta_global = os.path.join(carpeta, "bitacora_global.jsonl")
+    os.environ["ESTUDIO_SIMULAR"] = "1"
+    p4._toma_simulada = toma_que_falla_la_segunda
+    try:
+        fallo = None
+        try:
+            servidor._correr_regrabar(lambda *_a, **_k: None, ctx, "SB001", "", {})
+        except RuntimeError as error:
+            fallo = error
+        igual(len(grabadas), 2, "se graba SB001 y falla SB002")
+        ok(fallo is not None and "SB002" in str(fallo) and "SB001" in str(fallo),
+           f"y el error dice que falta y que se ha guardado ({fallo})")
+
+        voz = _ficha_paso(cliente, pid, "voz")
+        igual(voz.get("version_activa"), version_antes + 1,
+              "LO YA GRABADO (Y PAGADO) QUEDA GUARDADO como version de la voz")
+        igual(voz.get("estado"), "obsoleto",
+              "pero la voz sigue obsoleta: todavia no dice todo el guion")
+        meta, _ruta = _meta_activa(carpeta, pid, cliente)
+        textos = {b["id"]: b["texto"] for b in meta["bloques"]}
+        igual(textos.get("B002"), nuevos["B002"], "la version guardada trae SB001 nueva")
+        ok(textos.get("B020") != nuevos["B020"], "y SB002 todavia la de antes")
+        editado = (Estado(Proyecto(raiz)).params("guion") or {}).get("bloques") or {}
+        igual({b: (editado.get(b) or {}).get("texto") for b in nuevos}, nuevos,
+              "LO ESCRITO A MANO EN LAS QUE FALTAN NO SE PIERDE")
+        _r, previsto = cliente.get(f"/api/proyectos/{pid}/guion/bloques")
+        igual(((previsto or {}).get("regrabar") or {}).get("pendientes"),
+              ["SB002", "SB003"], "lo previsto ya no cuenta SB001: solo las que faltan")
+
+        # EL REINTENTO, como lo lanza la pantalla (la primera pendiente)
+        del grabadas[:]
+        p4._toma_simulada = toma_que_cuenta
+        resultado = servidor._correr_regrabar(lambda *_a, **_k: None, ctx,
+                                              "SB002", "", {})
+        igual(resultado.get("secciones"), ["SB002", "SB003"],
+              "EL REINTENTO GRABA SOLO LAS QUE FALTABAN")
+        igual(len(grabadas), 2, "dos tomas, no tres: SB001 no se paga otra vez")
+        igual(_ficha_paso(cliente, pid, "voz").get("estado"), "listo",
+              "y la voz queda al dia")
+        meta, _ruta = _meta_activa(carpeta, pid, cliente)
+        textos = {b["id"]: b["texto"] for b in meta["bloques"]}
+        igual({b: textos.get(b) for b in nuevos}, nuevos,
+              "con los tres cambios dentro de la toma")
+    finally:
+        p4._toma_simulada = original
+        if simular is None:
+            os.environ.pop("ESTUDIO_SIMULAR", None)
+        else:
+            os.environ["ESTUDIO_SIMULAR"] = simular
+
+
 def probar_pausas(cliente, carpeta):
     """Las pausas largas se cuentan con el texto DE AHORA y se quitan una a una.
 
@@ -5076,6 +5188,7 @@ def main():
         probar_feedback(cliente, pid)
         probar_voz(cliente, pid)
         probar_regrabar_y_estructura(cliente, carpeta)
+        probar_regrabar_a_medias(cliente, carpeta)
         probar_pausas(cliente, carpeta)
         probar_presencia_musica(cliente, carpeta)
         probar_volumen_y_animo_de_la_musica()

@@ -804,11 +804,32 @@ def _medir_toma_por_contexto(original):
     exactamente lo que se pinta cuando falta la tarifa por caracter.
 
     Se cuentan los caracteres que se ENVIARON, sumando las entradas del
-    contexto, y se anota DESPUES: si la llamada revienta no hay recuento
-    fiable, y un hueco es mejor que un numero inventado.
+    contexto, y se anota DESPUES: si la llamada revienta sin haber devuelto
+    nada no hay recuento fiable, y un hueco es mejor que un numero inventado.
+
+    PERO SI REVIENTA CON AUDIO YA RECIBIDO, SE ANOTA (D4 del informe de
+    arreglos v2b): Cartesia ya ha cobrado lo que genero, y no apuntarlo dejaba
+    fuera del medidor un gasto que si esta en la factura. La toma lo dice
+    levantando una excepcion con `cobrado` (`p4_voz.TomaCortada`), que trae
+    los caracteres que llego a enviar; se anota como `toma_cortada` y la
+    excepcion sigue su camino.
     """
     def medido(trozos, cfg, *args, **kwargs):
-        resultado = original(trozos, cfg, *args, **kwargs)
+        try:
+            resultado = original(trozos, cfg, *args, **kwargs)
+        except Exception as fallo:
+            if getattr(fallo, "cobrado", False):
+                ajustes = cfg if isinstance(cfg, dict) else {}
+                reportar_tts(int(getattr(fallo, "caracteres", 0) or 0),
+                             operacion="toma_cortada",
+                             detalle={"modelo": ajustes.get("modelo"),
+                                      "voz_id": ajustes.get("voz_id"),
+                                      "idioma": ajustes.get("idioma"),
+                                      "secciones": getattr(fallo, "secciones", None),
+                                      "audio_recibido_s": round(float(
+                                          getattr(fallo, "audio_s", 0) or 0), 2),
+                                      "cortada": True})
+            raise
         cfg = cfg if isinstance(cfg, dict) else {}
         piezas = list(trozos or [])
         reportar_tts(sum(len(str(t or "")) for t in piezas), operacion="toma",

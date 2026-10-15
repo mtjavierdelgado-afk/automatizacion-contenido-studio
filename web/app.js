@@ -8531,8 +8531,13 @@ async function regrabarPendientesLight(seccion) {
     v.editando = '';
     const tid = datos.trabajo_id || (datos.trabajo || {}).id;
     if (!tid) throw new Error('el servidor no ha devuelto ningún trabajo');
+    /* TAMBIÉN AL FALLAR: si se cae un tramo a mitad, lo ya grabado queda
+       guardado y lo previsto cambia (solo faltan los otros). Sin recargar, el
+       botón seguiría apuntando al primer tramo y lo volvería a pagar. */
     seguirTrabajo(CLAVE_VIDEO_LIGHT, tid, async trabajo => {
-      if (trabajo.estado === 'listo') await cargarVideoLight(v.pid);
+      if (trabajo.estado === 'listo' || trabajo.estado === 'error') {
+        await cargarVideoLight(v.pid);
+      }
       pintarLight();
     });
     pintarLight();
@@ -8809,8 +8814,13 @@ async function cambiarBloqueLight(bloque, sec, soloGrabar) {
     const tid = datos.trabajo_id || (datos.trabajo || {}).id;
     if (!tid) throw new Error('el servidor no ha devuelto ningún trabajo');
     v.prompts[bloque.id] = '';
+    /* TAMBIÉN AL FALLAR: si se cae un tramo a mitad, lo ya grabado queda
+       guardado y lo previsto cambia (solo faltan los otros). Sin recargar, el
+       botón seguiría apuntando al primer tramo y lo volvería a pagar. */
     seguirTrabajo(CLAVE_VIDEO_LIGHT, tid, async trabajo => {
-      if (trabajo.estado === 'listo') await cargarVideoLight(v.pid);
+      if (trabajo.estado === 'listo' || trabajo.estado === 'error') {
+        await cargarVideoLight(v.pid);
+      }
       pintarLight();
     });
     pintarLight();

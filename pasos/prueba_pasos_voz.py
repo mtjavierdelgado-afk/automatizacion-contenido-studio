@@ -749,6 +749,152 @@ def prueba_sse_en_utf8():
         p4_voz.requests.post, p4_voz.motor.cargar_api_key = original_post, original_clave
 
 
+class _WebsocketFalso:
+    """Lo minimo de `websocket-client` que usa `_toma_por_contexto`, sin red.
+
+    `cortar_tras` = cuantos eventos con audio llegan antes de que la conexion
+    se caiga; None = conexion rechazada al abrir (no llega nada).
+    """
+
+    def __init__(self, cortar_tras):
+        self.cortar_tras = cortar_tras
+        self.enviados = []
+        self.aperturas = 0
+
+    def create_connection(self, _url, timeout=None):
+        self.aperturas += 1
+        if self.cortar_tras is None:
+            raise ConnectionRefusedError("conexion rechazada")
+        modulo = self
+
+        class _Conexion:
+            def __init__(self):
+                self.recibidos = 0
+
+            def send(self, crudo):
+                modulo.enviados.append(json.loads(crudo)["transcript"])
+
+            def recv(self):
+                import base64 as b64                          # noqa: PLC0415
+                if self.recibidos >= modulo.cortar_tras:
+                    raise ConnectionResetError("la conexion se ha cortado")
+                self.recibidos += 1
+                return json.dumps({
+                    "data": b64.b64encode(b"\x01\x00" * 4800).decode(),
+                    "word_timestamps": {"words": ["Octubre", "de"],
+                                        "start": [0.0, 0.2], "end": [0.2, 0.3]}})
+
+            def close(self):
+                pass
+
+        return _Conexion()
+
+
+def prueba_toma_cortada_no_se_paga_dos_veces(base):
+    """D4 del informe de arreglos v2b: la voz se pagaba dos veces.
+
+    Si la conexion con Cartesia se cortaba A MITAD de la toma por contexto, se
+    caia al camino de una sola vez y volvia a grabar el texto ENTERO: Cartesia
+    ya habia cobrado lo que genero, la toma perdia sus secciones y el primer
+    gasto no quedaba apuntado. Todo con un websocket y un SSE FALSOS: no se
+    llama a Cartesia.
+    """
+    print("\n[d4] la toma que se corta a mitad no se paga dos veces")
+    sys.path.insert(0, os.path.dirname(AQUI))
+    from nucleo import coste                                  # noqa: PLC0415
+    os.makedirs(os.path.join(base, "toma_cortada"), exist_ok=True)
+    proyecto = Proyecto(os.path.join(base, "toma_cortada"))
+    # el historico global del gasto es el de verdad: a una copia
+    ruta_global = coste.RUTA_GLOBAL
+    coste.RUTA_GLOBAL = os.path.join(base, "coste_global.jsonl")
+    bloques = [dict(GUION[0]), dict(GUION[1], abre_seccion=True),
+               dict(GUION[2], abre_seccion=True)]
+    cfg = {"voz_id": "x", "modelo": "sonic-3.5", "idioma": "es"}
+    llamadas_sse = []
+
+    def sse_falso(texto, _cfg, _progreso):
+        llamadas_sse.append(texto)
+        return p4_voz.motor.wav_desde_pcm(b"\x00\x00" * 2400), 0.1, [
+            {"w": "Octubre", "s": 0.0, "e": 0.1}]
+
+    originales = (p4_voz._toma_real, p4_voz.motor.cargar_api_key,
+                  p4_voz._toma_por_contexto, sys.modules.get("websocket"),
+                  os.environ.get("ESTUDIO_SIMULAR"))
+    informe = {"enganchado": [], "ausente": []}
+    p4_voz._toma_real = sse_falso
+    p4_voz.motor.cargar_api_key = lambda *a, **k: "clave-falsa"
+    # el medidor DE VERDAD, sobre la toma por contexto de verdad: lo unico falso
+    # es la red
+    coste._envolver(p4_voz, "_toma_por_contexto", coste._medir_toma_por_contexto,
+                    informe, "voz.toma_por_contexto")
+    os.environ["ESTUDIO_SIMULAR"] = "0"
+    medidor = coste.Medidor(proyecto)
+    try:
+        # 1. SE CORTA CON AUDIO DENTRO
+        falso = _WebsocketFalso(cortar_tras=1)
+        sys.modules["websocket"] = falso
+        antes = len(medidor.eventos())
+        fallo = None
+        with coste.contexto(proyecto, "voz"):
+            try:
+                p4_voz.sintetizar_bloques(bloques, os.path.join(base, "toma_cortada",
+                                                                "trabajo"), cfg)
+            except RuntimeError as error:
+                fallo = error
+        igual(len(falso.enviados), 3, "las tres secciones se mandan en un contexto")
+        igual(llamadas_sse, [],
+              "CON AUDIO YA RECIBIDO NO SE GRABA OTRA VEZ DE UNA TIRADA (se pagaba dos veces)")
+        comprobar(fallo is not None and "Cartesia" in str(fallo)
+                  and "dos veces" in str(fallo),
+                  f"y se para con un mensaje claro para reintentar ({fallo})")
+        nuevos = medidor.eventos()[antes:]
+        igual([e.get("operacion") for e in nuevos], ["toma_cortada"],
+              "EL INTENTO CORTADO QUEDA APUNTADO EN EL GASTO")
+        if nuevos:
+            igual(nuevos[0]["cantidad"]["caracteres"], sum(len(t) for t in falso.enviados),
+                  "con los caracteres que se llegaron a mandar")
+            comprobar((nuevos[0].get("detalle") or {}).get("audio_recibido_s", 0) > 0,
+                      "y cuanto audio habia llegado")
+
+        # 2. SE CAE SIN HABER RECIBIDO NADA: no se ha cobrado, el respaldo vale
+        falso = _WebsocketFalso(cortar_tras=None)
+        sys.modules["websocket"] = falso
+        antes = len(medidor.eventos())
+        with coste.contexto(proyecto, "voz"):
+            salidas = p4_voz.sintetizar_bloques(
+                bloques, os.path.join(base, "toma_cortada", "trabajo2"), cfg)
+        igual(len(llamadas_sse), 1,
+              "sin nada recibido se sigue cayendo a la toma de una vez (no se ha cobrado nada)")
+        igual(medidor.eventos()[antes:], [],
+              "y no se apunta ningun gasto inventado por el intento que no llego a nada")
+        comprobar(bool(salidas.get("pista")), "y la voz sale")
+
+        # 3. REGRABAR UNA SECCION por el mismo camino: tambien se apunta
+        falso = _WebsocketFalso(cortar_tras=1)
+        sys.modules["websocket"] = falso
+        antes = len(medidor.eventos())
+        meta = {"secciones": [{"id": "SB001", "bloques": ["S01"], "t_in": 0.0,
+                               "t_out": 1.0}], "palabras": [], "bloques": []}
+        with coste.contexto(proyecto, "voz"):
+            try:
+                p4_voz.regrabar_seccion([dict(GUION[0])], "SB001", cfg, meta,
+                                        os.path.join(base, "toma_cortada", "trabajo"))
+                comprobar(False, "regrabar una seccion que se corta tiene que fallar")
+            except Exception:                               # noqa: BLE001
+                comprobar(True, "regrabar una seccion que se corta falla")
+        igual([e.get("operacion") for e in medidor.eventos()[antes:]], ["toma_cortada"],
+              "y su intento cortado tambien queda apuntado en el gasto")
+    finally:
+        (p4_voz._toma_real, p4_voz.motor.cargar_api_key, p4_voz._toma_por_contexto,
+         websocket_previo, simular) = originales
+        if websocket_previo is None:
+            sys.modules.pop("websocket", None)
+        else:
+            sys.modules["websocket"] = websocket_previo
+        os.environ["ESTUDIO_SIMULAR"] = simular if simular is not None else "1"
+        coste.RUTA_GLOBAL = ruta_global
+
+
 def main():
     con_red = "--sin-red" not in sys.argv
     con_claude = "--con-claude" in sys.argv
@@ -768,6 +914,9 @@ def main():
     # con ellas dentro pedir la voz 'slow' salia MAS rapida que 'normal'.
     # `cadencia.PALABRAS_MINIMAS_MEDIDA` lo defiende; esto lo evita de raiz.
     os.environ["ESTUDIO_ESTADISTICAS"] = os.path.join(base, "estadisticas.json")
+    # Y EL GASTO: la prueba de la toma cortada anota en el medidor, y el
+    # historico global es el gasto de verdad
+    os.environ["ESTUDIO_COSTE_GLOBAL"] = os.path.join(base, "coste_global.jsonl")
     print(f"proyectos de prueba en {base}")
     try:
         prueba_presets()
@@ -781,6 +930,7 @@ def main():
         prueba_pausas_en_el_montaje(base)
         prueba_cache_por_clave()
         prueba_sse_en_utf8()
+        prueba_toma_cortada_no_se_paga_dos_veces(base)
         prueba_catalogo_voces(con_red)
         if con_red:
             prueba_llamada_real(base)

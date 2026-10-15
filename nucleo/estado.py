@@ -73,6 +73,11 @@ CLAVE_UNIDADES = "unidades"
 #: (ver `pasos/estructura_guion.py`). Su texto vive en `bloques`.
 CORRECCIONES = {"guion": ("bloques", "insertados")}
 
+#: Prefijo de la firma de una version guardada A MEDIAS (`completar(a_medias=
+#: True)`): ninguna firma calculada empieza asi, de modo que el paso se ve
+#: obsoleto -- tambien si alguien revierte a esa version mas tarde --.
+FIRMA_A_MEDIAS = "a_medias:"
+
 # Los `id` son el contrato (carpetas, params, firmas): NO se renombran nunca.
 # El `nombre` es solo lo que se enseña, y va alineado con las pestañas de la
 # interfaz: `ingesta` se enseña como «Origen» y `callouts` como «Rotulos».
@@ -1014,8 +1019,17 @@ class Estado:
         """
         return copy.deepcopy(self._datos(paso_id).get("retirado", []))
 
-    def completar(self, paso_id, salidas, unidades=None):
-        """Crea una version nueva con las salidas del paso y la activa."""
+    def completar(self, paso_id, salidas, unidades=None, a_medias=False):
+        """Crea una version nueva con las salidas del paso y la activa.
+
+        `a_medias=True` guarda lo hecho SIN darlo por al dia: la version se
+        sella con una firma que no puede cuadrar nunca, asi que el paso queda
+        obsoleto (y lo de abajo tambien) hasta que alguien lo termine. Es para
+        un trabajo que ha PAGADO una parte y se ha roto en la siguiente --
+        regrabar varias secciones de la voz y que falle la tercera --: tirar las
+        dos primeras obligaba a pagarlas otra vez al reintentar, y sellarlas
+        como al dia haria que «listo» mintiera.
+        """
         self._validar(paso_id)
         if salidas is None:
             salidas = {}
@@ -1088,6 +1102,10 @@ class Estado:
                 datos["firma_propia"] = arranque["firma_propia"]
             else:
                 datos["firma_propia"] = self._firma(paso_id, propias=False)
+            if a_medias:
+                # las DOS: `estado_de` mira la propia antes que la completa
+                datos["firma"] = FIRMA_A_MEDIAS + str(datos["firma"])
+                datos["firma_propia"] = FIRMA_A_MEDIAS + str(datos["firma_propia"])
             datos["activa"] = numero
             datos["marca"] = None
             datos.setdefault("versiones", []).append({

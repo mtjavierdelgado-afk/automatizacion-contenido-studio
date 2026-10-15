@@ -88,7 +88,8 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 
 | Rama abierta | Ficheros reservados | Desde |
 |---|---|---|
-| `arreglos-voz` | La voz: letras sueltas leídas como abreviatura («S» → «sur»), palabras en inglés, ecos y bloques sin entonación (informe `pruebas/informe_analisis_arreglos_v2b.md` del Proyecto, apartado «La voz»): `pasos/p4_voz.py`, `pasos/p5_revision_audio.py`, `pasos/marcas_tts.py`, `pasos/cadencia.py` | 14-10-2026 |
+| `arreglos-voz` | La voz: letras sueltas leídas como abreviatura («S» → «sur»), palabras en inglés (lista «Cómo se pronuncia»), ecos y bloques sin entonación, y el dinero de la voz (D4, F3) (informe `pruebas/informe_analisis_arreglos_v2b.md` del Proyecto, apartado «La voz»): `pasos/p4_voz.py`, `pasos/p5_revision_audio.py`, `pasos/marcas_tts.py`, `pasos/cadencia.py`, `motores/voz_cartesia/voz.py`. Comparte `web/app.js` y `app.py` con `arreglos-v2e` (solo la lista de pronunciación en Configuración) | 14-10-2026 |
+| `arreglos-v2e` | Notas de mejoras nuevas (pegar imágenes del portapapeles, copiar las respuestas y los bloques de código del asistente) y la revisión del coste de las imágenes (previsto y final, calidad por modo): `pasos/p6_assets.py`, `pasos/ajustes.py`, `motores/imagen_openai/`, `web/app.js`, `web/estilo.css`, `app.py`. Comparte `web/app.js` y `app.py` con `arreglos-voz`: la que se una segunda se pone al día con `main` antes | 15-10-2026 |
 
 Quien abre una rama la apunta aquí (en `main`, regla 8); quien la une a `main`,
 la quita.

@@ -20,6 +20,7 @@ import re
 import struct
 import sys
 
+import numpy as np
 import requests
 
 API_SSE = "https://api.cartesia.ai/tts/sse"
@@ -211,54 +212,87 @@ def _pcm_de_wav(wav: bytes) -> bytes:
 FUNDIDO_MS = 12
 
 
+#: Lo MAS FUERTE que puede ser el fondo inventado, en amplitud de 16 bits:
+#: -66 dBFS. Una pausa de Cartesia limpia esta por debajo de -75 dBFS; si la
+#: parte mas tranquila de la pausa suena mas que esto, lo que hay ahi no es
+#: fondo, es una respiracion o la cola de una palabra, y no se copia.
+RELLENO_TECHO = 16.4
+
+#: El trozo de la pausa del que se saca el COLOR del fondo: el mas tranquilo.
+RELLENO_VENTANA_S = 0.03
+
+
+def _mediana_movil(valores, ancho):
+    """Mediana deslizante de un vector (ancho impar), con los bordes repetidos."""
+    ancho = max(1, int(ancho) | 1)
+    medio = ancho // 2
+    relleno = np.pad(np.asarray(valores, dtype=np.float64), medio, mode="edge")
+    return np.median(np.lib.stride_tricks.sliding_window_view(relleno, ancho), axis=1)
+
+
 def _relleno_de_sala(pcm, desde_seg, hasta_seg, duracion):
-    """Ruido de sala para rellenar un hueco, sacado de la PROPIA pausa.
+    """Fondo para alargar una pausa: con el COLOR de la pausa y sin repetir nada.
 
-    Antes se insertaban ceros. Una toma continua tiene su suelo de ruido, y
-    cortarlo a cero durante mas de un segundo se oye como un corte: el fondo
-    desaparece de golpe y vuelve. Con 88 bloques y 1,2 s de hueco eran 62 s de
-    vacio digital en un video de 15 minutos, uno en cada frontera de bloque.
+    Hasta el 15-10-2026 se copiaba un trozo de 200 ms del CENTRO de la pausa y
+    se repetia, alternandolo con su reverso. Medido en un video real (6 bloques):
+    las 5 pausas entre bloques eran ese mismo trozo una y otra vez (parecido con
+    su reverso de hasta 0,93), y como el centro de la pausa traia la cola de la
+    palabra o una respiracion, se oia como un murmullo que se repite: el «eco» y
+    los «sonidos raros de fondo» que reporto el dueno. Sonaban hasta 25 dB por
+    encima de las pausas limpias de la propia voz, y en una de ellas el trozo
+    traia un resto en 2048 Hz que, repetido un segundo entero, era un ZUMBIDO
+    fijo (+17 dB). En las pausas que Cartesia deja sola ese tono no existe:
+    medido, sale al nivel de cualquier frecuencia al azar.
 
-    La mejor muestra de ruido de sala es la de la pausa que se esta ensanchando,
-    asi que se toma de ahi y se repite. Se alterna con su reverso para que la
-    repeticion no cree un patron audible.
+    Ahora se busca el trozo MAS TRANQUILO de la pausa (30 ms), se le mide el
+    nivel y el color (su espectro, alisado para que un pitido no pase), y se
+    INVENTA un ruido con ese color: no repite nada y no lleva ni una silaba. Con
+    un techo de -66 dBFS. Si la pausa es silencio de verdad, el relleno tambien.
+
+    Ceros a secas sigue sin ser buena idea cuando la toma tiene fondo: el fondo
+    desaparece de golpe y vuelve, y eso se oye como un corte (ver el historial).
     """
     bytes_por_seg = SR * 2
     necesarios = int(duracion * bytes_por_seg) & ~1
     if necesarios <= 0:
         return b""
-    # semilla: el centro de la pausa natural, hasta 200 ms
+    silencio = b"\x00" * necesarios
     ancho = max(0.0, hasta_seg - desde_seg)
     if ancho < 0.04:
-        return b"\x00" * necesarios          # no hay pausa de la que sacar nada
-    toma = min(0.2, ancho * 0.8)
-    centro = (desde_seg + hasta_seg) / 2.0
-    ini = int((centro - toma / 2) * bytes_por_seg) & ~1
-    fin = (ini + (int(toma * bytes_por_seg) & ~1))
-    semilla = pcm[max(0, ini):min(len(pcm), fin)]
-    if len(semilla) < 4:
-        return b"\x00" * necesarios
+        return silencio                     # no hay pausa de la que sacar nada
+    todo = np.frombuffer(pcm[:len(pcm) & ~1], dtype="<i2")
+    pausa = todo[max(0, int(desde_seg * SR)):min(len(todo), int(hasta_seg * SR))]
+    ventana = int(RELLENO_VENTANA_S * SR)
+    if len(pausa) < ventana:
+        return silencio
+    pausa = pausa.astype(np.float64)
+    paso = max(1, int(0.005 * SR))
+    niveles = [(float(np.sqrt(np.mean(pausa[i:i + ventana] ** 2))), i)
+               for i in range(0, len(pausa) - ventana + 1, paso)]
+    nivel, inicio = min(niveles)
+    nivel = min(nivel, RELLENO_TECHO)
+    if nivel < 1.0:                         # por debajo de un escalon: silencio
+        return silencio
 
-    reverso = semilla[::-1]
-    # el reverso de un buffer de bytes invierte tambien los dos bytes de cada
-    # muestra: se rehace por pares para que siga siendo audio y no ruido blanco
-    reverso = b"".join(reverso[i:i + 2][::-1] for i in range(0, len(reverso) - 1, 2))
-    trozos, largo, vuelta = [], 0, 0
-    while largo < necesarios:
-        pieza = semilla if vuelta % 2 == 0 else reverso
-        trozos.append(pieza)
-        largo += len(pieza)
-        vuelta += 1
-    relleno = bytearray(b"".join(trozos)[:necesarios])
+    # el COLOR del fondo, alisado: un pitido estrecho no sobrevive a la mediana
+    trozo = pausa[inicio:inicio + ventana] * np.hanning(ventana)
+    color = _mediana_movil(np.abs(np.fft.rfft(trozo)), 2 * max(1, int(200 / (SR / ventana))) + 1)
 
-    # fundido de entrada y de salida sobre el relleno
-    muestras = FUNDIDO_MS * SR // 1000
-    for i in range(min(muestras, len(relleno) // 2)):
-        factor = i / muestras
-        for pos in (i * 2, len(relleno) - 2 - i * 2):
-            valor = int.from_bytes(relleno[pos:pos + 2], "little", signed=True)
-            relleno[pos:pos + 2] = int(valor * factor).to_bytes(2, "little", signed=True)
-    return bytes(relleno)
+    muestras = necesarios // 2
+    # siempre el mismo relleno para la misma pausa: regrabar no cambia el fondo
+    azar = np.random.default_rng(int(desde_seg * 1000) * 1009 + int(hasta_seg * 1000))
+    espectro = np.fft.rfft(azar.standard_normal(muestras))
+    forma = np.interp(np.linspace(0.0, 1.0, len(espectro)), np.linspace(0.0, 1.0, len(color)), color)
+    ruido = np.fft.irfft(espectro * forma, muestras)
+    ruido *= nivel / (float(np.sqrt(np.mean(ruido ** 2))) + 1e-12)
+
+    # fundido de entrada y de salida: sin el, el empalme suena a chasquido
+    rampa = min(FUNDIDO_MS * SR // 1000, muestras // 2)
+    if rampa > 0:
+        subida = np.arange(rampa) / float(rampa)
+        ruido[:rampa] *= subida
+        ruido[-rampa:] *= subida[::-1]
+    return np.clip(np.round(ruido), -32768, 32767).astype("<i2").tobytes()
 
 
 def espaciar(wav, palabras, reparto, escenas, hueco_minimo=1.0):

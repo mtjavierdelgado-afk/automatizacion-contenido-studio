@@ -11,6 +11,12 @@ vídeos, estilos, claves y contraseña no se tocan.
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
 **La voz (14 de octubre)**
+- **Adiós al «eco» y al zumbido entre bloques.** Cuando el Studio alargaba la
+  pausa entre dos bloques, repetía en bucle un trozo de esa pausa, y si el
+  trozo traía una respiración o el final de una palabra, se oía un murmullo
+  repetido o un zumbido de un segundo. Ahora rellena con un fondo suave
+  inventado con el mismo color que la pausa, sin repetir nada y sin copiar
+  sonidos de la voz. Se nota al volver a grabar la voz.
 - **Una letra suelta ya no se lee como una abreviatura.** La voz decía «Xbox
   Series sur» en vez de «Series ese»: en español, una «S» sola se tomaba por
   «Sur». Ahora cada consonante mayúscula suelta (S, X, T, B…) se deletrea con

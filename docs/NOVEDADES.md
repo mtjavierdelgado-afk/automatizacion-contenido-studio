@@ -10,6 +10,20 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Copiar y pegar (15 de octubre)**
+- **Las imágenes se pegan con Ctrl+V** (⌘V en el Mac) en todas las zonas que
+  suben imágenes: las de referencia de un estilo (nuevo o el que editas), las
+  de las notas del vídeo y de cada imagen, el logo (del vídeo y del proyecto)
+  y los adjuntos del asistente. Suben igual que si eligieras el fichero: los
+  mismos topes y los mismos avisos. Si hay varias zonas a la vista, la imagen
+  va a la última que hayas tocado. Pegar texto en un campo sigue igual.
+- Debajo de cada zona sale «o pega una imagen (Ctrl+V)»; pulsarlo también
+  pega, y en el móvil es «📋 Pegar una imagen» (el navegador pide permiso la
+  primera vez).
+- **«Copiar» en las respuestas del asistente**: cada bloque de código lleva el
+  suyo arriba a la derecha, y cada respuesta uno en el pie para copiarla
+  entera, en texto llano (sin asteriscos ni comillas del formato).
+
 **Subtítulos a tu gusto y el «atrás» del móvil (13 de octubre, noche)**
 - **La fuente y el sitio de los subtítulos se eligen.** En el editor de
   subtítulos (en el Encargo y debajo del vídeo montado) hay dos filas nuevas:

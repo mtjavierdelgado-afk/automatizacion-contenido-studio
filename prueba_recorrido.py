@@ -1623,6 +1623,212 @@ def dictado_del_navegador_sin_repetir(navegador, datos):
     pg.cerrar()
 
 
+#: Un pegado SINTÉTICO, como el de Ctrl+V: un ClipboardEvent con su
+#: DataTransfer (texto, una imagen PNG dibujada en un lienzo, o las dos) sobre
+#: `selector` (o el body). Devuelve si alguien lo atendió (defaultPrevented).
+PEGAR_JS = """async ({ selector, texto, color }) => {
+  const dt = new DataTransfer();
+  if (texto) dt.setData('text/plain', texto);
+  if (color) {
+    // de 320×240 y de dos colores: el servidor no acepta como referencia
+    // una imagen diminuta ni una lisa (`_motivo_para_no_aceptar`)
+    const c = document.createElement('canvas'); c.width = 320; c.height = 240;
+    const x = c.getContext('2d'); x.fillStyle = color; x.fillRect(0, 0, 320, 240);
+    x.fillStyle = '#ffffff'; x.fillRect(40, 40, 120, 90);
+    const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+    dt.items.add(new File([blob], 'image.png', { type: 'image/png' }));
+  }
+  const destino = selector ? document.querySelector(selector) : document.body;
+  if (selector && destino.focus) destino.focus();
+  const ev = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+  if (!ev.clipboardData) Object.defineProperty(ev, 'clipboardData', { value: dt });
+  destino.dispatchEvent(ev);
+  return ev.defaultPrevented;
+}"""
+
+
+def _subidas(pg):
+    """Apunta la ruta de cada POST de imágenes o logos que sale de la pestaña."""
+    lista = []
+    pg.p.on("request", lambda r: lista.append(r.url.split("?")[0])
+            if r.method == "POST" and ("/imagenes" in r.url or "/logos" in r.url) else None)
+    return lista
+
+
+def _png_dibujada(ruta, color):
+    """Como `_png`, pero con un recuadro blanco: las referencias de estilo
+    no pueden ser de un solo color."""
+    from PIL import Image, ImageDraw                         # noqa: PLC0415
+    imagen = Image.new("RGB", (320, 200), color)
+    ImageDraw.Draw(imagen).rectangle((40, 40, 160, 130), fill=(255, 255, 255))
+    imagen.save(ruta)
+    return ruta
+
+
+def _esperar_cuenta(pg, selector, n, segundos=15):
+    fin = time.time() + segundos
+    while time.time() < fin:
+        if pg.p.locator(selector).count() >= n:
+            return True
+        pg.p.wait_for_timeout(300)
+    return False
+
+
+@escenario
+def pegar_imagenes_del_portapapeles(navegador, datos):
+    """N10 de las notas de mejoras, 15-10-2026: «permitir copiar/pegar imágenes
+    directo del portapapeles». Pegar va por EL MISMO camino que elegir el
+    fichero (misma ruta, mismos topes) y no le roba el pegado al texto."""
+    pg = Pagina(navegador, datos)
+    pg.contexto.grant_permissions(["clipboard-read", "clipboard-write"], origin=datos["url"])
+    subidas = _subidas(pg)
+    pg.js("APP.light.encargo = null; irALight('crear', { taller: null });")
+    ok(pg.esperar(".zona-suelta"), "el estilo nuevo tiene su zona de imágenes de referencia")
+    ok(pg.visible("button.pista-pegar", "pega una imagen"),
+       "y debajo dice «o pega una imagen (Ctrl+V)»")
+    tira = ".campo.aportadas .tira-aportadas .aportada"
+    antes = pg.p.locator(tira).count()
+
+    # 1) PEGAR TEXTO en un campo de texto: el pegado de siempre, nada se sube
+    campo = pg.p.locator(".bloque-light textarea").first
+    campo.fill("")
+    campo.focus()
+    pg.p.evaluate("() => navigator.clipboard.writeText('texto copiado de otra parte')")
+    pg.p.keyboard.press("Control+V")
+    pg.p.wait_for_timeout(800)
+    ok("texto copiado de otra parte" in campo.input_value(),
+       f"pegar TEXTO en un campo lo escribe como siempre ({campo.input_value()[:40]!r})")
+    # y con texto Y una imagen a la vez (copiar de una web), el campo se queda el texto
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": ".bloque-light textarea",
+                                        "texto": "hola", "color": "#c03030"})
+    pg.p.wait_for_timeout(1200)
+    ok(not atendido, "con texto e imagen y el foco en un campo, el pegado no se toca")
+    ok(not subidas and pg.p.locator(tira).count() == antes,
+       f"y no se sube nada al pegar texto (subidas: {subidas})")
+
+    # 2) PEGAR UNA IMAGEN (Ctrl+V) con la única zona a la vista: se sube
+    pg.p.evaluate("() => document.activeElement && document.activeElement.blur()")
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#2060d0"})
+    ok(atendido, "pegar una imagen fuera de un campo lo atiende la zona de imágenes")
+    ok(_esperar_cuenta(pg, tira, antes + 1), "y la imagen pegada sale en la tira, como una elegida")
+    ok(subidas and subidas[-1].endswith("/api/presets-light/imagenes"),
+       f"por la MISMA ruta que el explorador ({subidas[-1:] if subidas else 'ninguna'})")
+    # la misma, por el explorador: la misma ruta y otra miniatura
+    pg.p.locator(".campo.aportadas input[type=file]").first.set_input_files(
+        _png_dibujada(os.path.join(datos["base"], "pegar_ref.png"), (200, 120, 40)))
+    ok(_esperar_cuenta(pg, tira, antes + 2), "elegir el fichero sigue funcionando")
+    ok(len(set(subidas)) == 1 and len(subidas) == 2,
+       f"pegar y elegir llaman a la misma ruta ({subidas})")
+    pg.captura("41_pegar_en_estilo_nuevo", entera=False)
+
+    # 3) EL ASISTENTE: con el foco dentro de su cajón la imagen va a sus
+    # adjuntos, aunque la zona del estilo siga a la vista detrás
+    pg.pulsar("#burbuja-asistente")
+    pg.p.wait_for_timeout(1200)
+    adj = "#asistente-adjuntos .adjunto"
+    pg.p.evaluate("() => $('#asistente-cuerpo').dispatchEvent("
+                  "new PointerEvent('pointerdown', { bubbles: true }))")
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#30a050"})
+    ok(atendido and _esperar_cuenta(pg, adj, 1),
+       "con el asistente tocado el último, la imagen pegada va a sus adjuntos")
+    ok(subidas[-1].endswith("/api/asistente/imagenes"),
+       f"por la ruta de los adjuntos del asistente ({subidas[-1]})")
+    ok(pg.p.locator(tira).count() == antes + 2, "y no a la zona del estilo de detrás")
+    if pg.p.locator("#asistente-texto").is_enabled():
+        pg.p.evaluate(PEGAR_JS, {"selector": "#asistente-texto", "texto": "", "color": "#a03090"})
+        ok(_esperar_cuenta(pg, adj, 2), "pegar con el foco en la caja del asistente también adjunta")
+    n_adj = pg.p.locator(adj).count()
+    pg.p.locator("#asistente-pie input[type=file]").set_input_files(
+        _png_dibujada(os.path.join(datos["base"], "pegar_adj.png"), (90, 90, 200)))
+    ok(_esperar_cuenta(pg, adj, n_adj + 1), "y el clip 📎 sigue adjuntando")
+    ok(subidas[-1] == subidas[-2], "pegar y el clip van a la misma ruta")
+    pg.captura("42_pegar_en_el_asistente", entera=False)
+    pg.p.evaluate("() => { ADJUNTOS_ASISTENTE.length = 0; pintarAdjuntosAsistente(); }")
+    pg.pulsar("#btn-cerrar-asistente")
+
+    # 4) LAS NOTAS DE UNA IMAGEN: la zona tocada la última recibe la imagen, y
+    # el texto de la nota se pega en la nota sin subir nada
+    pg.js(f"await abrirVideoLight('{datos['video']}');")
+    pg.pulsar(".nav-light button", "Imágenes")
+    ok(pg.esperar(".previa-feedback .zona-suelta"), "la nota de una imagen tiene su zona de imágenes")
+    n_subidas = len(subidas)
+    nota = pg.p.locator(".previa-feedback textarea").first
+    nota.fill("")
+    nota.focus()
+    pg.p.evaluate("() => navigator.clipboard.writeText('más luz a la izquierda')")
+    pg.p.keyboard.press("Control+V")
+    pg.p.wait_for_timeout(800)
+    ok("más luz a la izquierda" in nota.input_value(), "pegar texto en la nota lo escribe")
+    ok(len(subidas) == n_subidas, "y no sube nada")
+    nota.fill("")
+    nota.dispatch_event("input")
+    pg.p.evaluate("() => document.querySelector('.previa-feedback .zona-suelta').dispatchEvent("
+                  "new PointerEvent('pointerdown', { bubbles: true }))")
+    pg.p.evaluate("() => document.activeElement && document.activeElement.blur()")
+    pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#d0d030"})
+    ok(_esperar_cuenta(pg, ".previa-feedback .tira-aportadas .aportada", 1),
+       "pegar una imagen tras tocar la zona de la nota la adjunta a la nota")
+    ok(len(subidas) > n_subidas and subidas[-1].endswith("/repaso/imagenes"),
+       f"por la ruta de las imágenes de las notas ({subidas[-1:]})")
+    pg.captura("43_pegar_en_la_nota", entera=False)
+    pg.sin_errores("pegar imágenes")
+    pg.cerrar()
+
+
+#: Una respuesta del asistente con un bloque de código, como las de verdad.
+RESPUESTA_CON_CODIGO = ("Pon esto en **Indicaciones**:\n\n```\nluz cálida de tarde\nsin gente al fondo\n```\n"
+                        "Y luego pulsa `Regenerar`.")
+
+
+@escenario
+def copiar_respuestas_del_asistente(navegador, datos):
+    """N11 y N12 de las notas de mejoras: «Copiar» en los bloques de código de
+    las respuestas del asistente y en la respuesta entera."""
+    for ancho, alto, nombre in ((1300, 900, "ordenador"), (390, 844, "móvil")):
+        pg = Pagina(navegador, datos, ancho=ancho, alto=alto)
+        pg.p.evaluate("() => { window.__copiado = null; Object.defineProperty(navigator, 'clipboard', "
+                      "{ configurable: true, value: { writeText: t => { window.__copiado = t; "
+                      "return Promise.resolve(); } } }); }")
+        pg.pulsar("#burbuja-asistente")
+        pg.p.wait_for_timeout(1500)
+        pg.p.evaluate("(t) => { ASISTENTE.verHistorial = false; ASISTENTE.charla = { id: 'prueba-copiar', "
+                      "turnos: [{ quien: 'tu', texto: '¿qué pongo?' }, "
+                      "{ quien: 'asistente', estado: 'hecho', texto: t, segundos: 3 }] }; "
+                      "pintarAsistente(); }", RESPUESTA_CON_CODIGO)
+        ok(pg.esperar("#asistente .turno.asistente pre", "luz cálida"),
+           f"{nombre}: la respuesta con un bloque de código se pinta")
+        ok(pg.visible("#asistente .bloque-codigo button", "Copiar"),
+           f"{nombre}: el bloque de código lleva su «Copiar»")
+        ok(pg.visible("#asistente .turno.asistente .pie-turno button", "Copiar"),
+           f"{nombre}: y la respuesta entera también")
+        # que no los tape la burbuja
+        tapado = pg.p.evaluate("""() => [...document.querySelectorAll('#asistente .copiar-bloque, #asistente .copiar-turno')]
+          .some(b => { const r = b.getBoundingClientRect();
+                       const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                       return !e || !b.contains(e); })""")
+        ok(not tapado, f"{nombre}: nada tapa los «Copiar»")
+        # y el «Copiar» del bloque no tapa la primera línea del código
+        pisa = pg.p.evaluate("""() => { const b = document.querySelector('#asistente .copiar-bloque');
+          const pre = b.parentNode.querySelector('pre');
+          const texto = pre.getBoundingClientRect().top + parseFloat(getComputedStyle(pre).paddingTop);
+          return b.getBoundingClientRect().bottom > texto + 1; }""")
+        ok(not pisa, f"{nombre}: el «Copiar» del bloque no tapa la primera línea del código")
+        pg.pulsar("#asistente .bloque-codigo button", "Copiar")
+        copiado = pg.p.evaluate("() => window.__copiado")
+        ok(copiado == "luz cálida de tarde\nsin gente al fondo",
+           f"{nombre}: «Copiar» del bloque copia SOLO el código ({copiado!r})")
+        ok("copiado" in pg.avisos(), f"{nombre}: y dice «copiado»")
+        pg.pulsar("#asistente .pie-turno button", "Copiar")
+        copiado = pg.p.evaluate("() => window.__copiado") or ""
+        ok(copiado.startswith("Pon esto en Indicaciones:") and "luz cálida de tarde" in copiado
+           and copiado.endswith("Y luego pulsa Regenerar.") and "**" not in copiado
+           and "\x60" not in copiado,
+           f"{nombre}: «Copiar» de la respuesta la copia entera, en texto llano ({copiado!r})")
+        pg.captura(f"44_copiar_asistente_{nombre}", entera=False)
+        pg.sin_errores(f"copiar del asistente ({nombre})")
+        pg.cerrar()
+
+
 #: Lo que el recorrido de TODOS LOS BOTONES no pulsa: lo que lanza trabajos
 #: largos, borra o sale. Lo demás se pulsa todo (los confirm() se CANCELAN en
 #: este escenario, así que lo que pregunta antes no llega a hacer nada).

@@ -23,6 +23,18 @@ vídeos, estilos, claves y contraseña no se tocan.
   el nombre de la letra. «A», «E», «O», «U» e «Y» se siguen leyendo como
   palabras, y «S.A.», «T-shirt» o «USB-C» no cambian. Se nota al volver a
   grabar la voz; el subtítulo sigue diciendo «S».
+- **Si se corta Cartesia a mitad, la voz ya no se paga dos veces.** Antes, si
+  la conexión se caía con parte del audio ya llegado, el Studio volvía a grabar
+  la voz entera por otro camino sin avisar (y Cartesia cobraba las dos) y ese
+  primer intento no salía en el gasto. Ahora se para con un mensaje claro para
+  que lo reintentes tú, y lo que Cartesia llegó a cobrar queda apuntado en el
+  gasto del vídeo. Si no había llegado nada, sigue reintentándolo solo, como
+  antes.
+- **Regrabar varios tramos: si falla uno, los anteriores se guardan.** Al
+  regrabar lo que has escrito en varios tramos, si fallaba el segundo se
+  perdía el primero, ya pagado, y al reintentar se volvía a pagar. Ahora lo ya
+  grabado queda guardado (la voz sigue marcada como pendiente) y «Regrabar lo
+  que he escrito» graba solo los tramos que faltan.
 
 **Subtítulos a tu gusto y el «atrás» del móvil (13 de octubre, noche)**
 - **La fuente y el sitio de los subtítulos se eligen.** En el editor de

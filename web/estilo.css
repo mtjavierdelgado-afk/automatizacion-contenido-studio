@@ -1577,6 +1577,16 @@ body.modo-light #coste { display: none; }
 .zona-suelta .meta { margin-left: auto; }
 .zona-suelta.llena { opacity: .5; cursor: not-allowed; }
 .zona-suelta.llena:hover { border-color: var(--linea); color: var(--tenue); }
+/* «o pega una imagen (Ctrl+V)» bajo cada zona de imágenes (N10 de las notas):
+   pista, no botón grande; pulsarla lee el portapapeles (lo que en el móvil
+   hace las veces del Ctrl+V). */
+button.pista-pegar {
+  background: transparent; border: none; padding: 3px 2px; margin-top: 3px;
+  font-size: 12px; color: var(--tenue); text-decoration: underline dotted;
+  text-underline-offset: 3px; align-self: flex-start; text-align: left;
+}
+button.pista-pegar:hover:not(:disabled) { color: var(--texto); border: none; }
+.fila button.pista-pegar { margin-top: 0; }
 /* el doble que antes (76 px): con fotos de interiorismo parecidas no se
    distinguia una de otra. Pulsar una la abre en grande (verAportadaEnGrande). */
 .tira-aportadas {
@@ -2489,7 +2499,22 @@ button.avisa:hover:not(:disabled) { border-color: var(--aviso); }
   background: var(--boton); padding: 0 4px; border-radius: 4px;
 }
 .turno .md .titulo { font-weight: 600; margin: 6px 0 4px; }
-.turno .pie-turno { margin-top: 5px; color: var(--tenue2); font-size: 11px; }
+.turno .pie-turno {
+  margin-top: 5px; color: var(--tenue2); font-size: 11px;
+  display: flex; align-items: center; gap: 8px; justify-content: space-between;
+}
+/* «COPIAR» (N11 y N12 de las notas): en cada bloque de código, arriba a la
+   derecha y por encima del texto; y en el pie de cada respuesta, la entera.
+   El bloque deja sitio arriba para que el botón no tape la primera línea. */
+.bloque-codigo { position: relative; }
+.bloque-codigo pre, .turno .md .bloque-codigo pre { padding-top: 30px; }
+.bloque-codigo .copiar-bloque {
+  position: absolute; top: 5px; right: 6px;
+  background: var(--panel); color: var(--tenue); padding: 2px 8px; font-size: 11px;
+}
+.bloque-codigo .copiar-bloque:hover { color: var(--texto); }
+.turno .pie-turno .copiar-turno { padding: 2px 8px; font-size: 11px; color: var(--tenue); margin-left: auto; }
+.turno .pie-turno .copiar-turno:hover { color: var(--texto); }
 .asistente-vacio { color: var(--tenue); font-size: 13px; padding: 4px 2px; }
 .asistente-vacio .ejemplo {
   display: block; width: 100%; text-align: left; margin-top: 6px;

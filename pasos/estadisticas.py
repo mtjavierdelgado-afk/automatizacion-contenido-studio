@@ -730,7 +730,12 @@ def avisador(avisar):
         parametros = inspect.signature(avisar).parameters.values()
     except (TypeError, ValueError):          # un callable sin firma legible
         return lambda fraccion, mensaje="", unidades=None: avisar(fraccion, mensaje)
-    if (len(parametros) >= 3
+    # SE MIRA EL NOMBRE, NO CUANTOS HAY. El `avisar` del gestor de trabajos es
+    # (valor, mensaje, publico): con la cuenta de parametros pasaba tal cual y
+    # el contador (hechos, total) caia en `publico`, y la barra decia
+    # «· (44, 44)» al acabar el render (revision 16-10-2026).
+    parametros = list(parametros)
+    if (any(par.name == "unidades" for par in parametros)
             or any(par.kind in (par.VAR_POSITIONAL, par.VAR_KEYWORD)
                    for par in parametros)):
         return avisar

@@ -955,6 +955,10 @@ def probar_banda_sonora(proyecto, estado, params, plan):
         trabajo_cama = proyecto.ruta_trabajo("render", crear=False)
         cama = os.path.join(trabajo_cama, "cama.wav")
         ok(os.path.exists(cama), "se escribe la cama encadenada")
+        restos = [n for n in os.listdir(trabajo_cama)
+                  if re.match(r"(tramo|cadena)\d+\.wav$|_cama_", n)]
+        igual(restos, [], "los tramos y cadenas de la cama no se quedan en "
+                          "trabajo/ (se versionarian con el render)")
         if os.path.exists(cama):
             largo_cama = len(sonido._leer(cama)) / sonido.FRECUENCIA
             # LA COLA CUENTA. El vídeo cierra con unos segundos de negro
@@ -995,7 +999,23 @@ def _pista_de(mp4, trabajo, nombre):
 def probar_render(proyecto, estado, params):
     print("\n  PASO 8 · render a MP4")
     inicio = time.time()
-    resultado = p8_render.ejecutar(proyecto, params, avisador("p8"))
+    # LA COLA DE NEGRO SE CODIFICA CON LA CALIDAD DEL VIDEO. Leia un param
+    # `calidad` que el render no tiene y salia siempre en «media», igual que el
+    # logo, que recodificaba el MP4 entero por debajo de lo elegido (16-10).
+    calidades_cola = []
+    cola_original = p8_render._cola_negra
+
+    def cola_espia(clips, trabajo, fps, calidad, *a, **k):
+        calidades_cola.append(calidad)
+        return cola_original(clips, trabajo, fps, calidad, *a, **k)
+
+    p8_render._cola_negra = cola_espia
+    try:
+        resultado = p8_render.ejecutar(proyecto, params, avisador("p8"))
+    finally:
+        p8_render._cola_negra = cola_original
+    igual(calidades_cola, [params.get("calidad_video")],
+          "la cola de negro se codifica con la calidad_video del render")
     trabajo = proyecto.ruta_trabajo("render", crear=False)
     salidas = resultado["salidas"]
     mp4 = os.path.join(trabajo, salidas["mp4"])

@@ -103,8 +103,38 @@ _trabajos_activos() {
     | jq -r '.trabajos | length' 2>/dev/null || true
 }
 
+# Donde se instalan los dos mandos. Variable solo para poder probar
+# `actualizar` en una raiz falsa sin pisar los de verdad.
+BIN="${ASVS_BIN:-/usr/local/bin}"
+
+# El puerto del login, de su .env (3000 si no lo dice).
+_puerto_login() { sed -n 's/^PORT=//p' "$RAIZ/login/.env" 2>/dev/null | head -1; }
+
+# ¿Contestan los dos servicios? Espera hasta ~60 s: el estudio tarda en cargar
+# los pasos. Devuelve 0 si los dos estan en marcha y contestan.
+_contestan() {
+  local i puerto login
+  puerto="$(_puerto)"; login="$(_puerto_login)"
+  for i in $(seq 1 30); do
+    if systemctl is-active --quiet as-video-studio \
+       && systemctl is-active --quiet as-video-login \
+       && curl -fsS --max-time 5 "http://127.0.0.1:${puerto:-8110}/api/salud" >/dev/null 2>&1 \
+       && curl -fsS --max-time 5 "http://127.0.0.1:${login:-3000}/api/health" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+# Lo que se copia del codigo, en las dos direcciones (actualizar y deshacer).
+EXCLUIR_CODIGO=(--exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exclude='node_modules/'
+  --exclude='cache/' --exclude='proyectos/' --exclude='banco/' --exclude='secretos/'
+  --exclude='motores/reglas/reglas.json')
+EXCLUIR_LOGIN=(--exclude='datos' --exclude='.env')
+
 actualizar() {
-  local temporal forzar=0 activos
+  local temporal forzar=0 activos anterior
   [ "${1:-}" = "--forzar" ] && forzar=1
 
   # PARAR EL SERVICIO MATA LA TANDA QUE ESTE CORRIENDO, y una tanda son
@@ -119,45 +149,93 @@ actualizar() {
 
   temporal="$(mktemp -d)"
   echo "Bajando la ultima version de $REPO ($RAMA)..."
-  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$RAMA" -o "$temporal/c.tgz"
-  tar -xzf "$temporal/c.tgz" -C "$temporal" --strip-components=1
-  [ -f "$temporal/app.py" ] || { echo "lo bajado no es el estudio"; rm -rf "$temporal"; exit 1; }
+  curl -fsSL "https://codeload.github.com/$REPO/tar.gz/refs/heads/$RAMA" -o "$temporal/c.tgz" \
+    || { no "no se ha podido bajar el codigo"; rm -rf "$temporal"; exit 1; }
+  mkdir -p "$temporal/codigo"
+  tar -xzf "$temporal/c.tgz" -C "$temporal/codigo" --strip-components=1
+  [ -f "$temporal/codigo/app.py" ] || { echo "lo bajado no es el estudio"; rm -rf "$temporal"; exit 1; }
 
+  # LAS LIBRERIAS, ANTES DE TOCAR NADA (revision 16-10-2026). Iban despues de
+  # cambiar el codigo: un `pip install` sin red dejaba el codigo NUEVO con las
+  # librerias VIEJAS, el estudio no arrancaba y la web daba 502. Y el `npm
+  # install` del login se tragaba sus errores: un login que no arranca deja
+  # fuera a todo el mundo. Aqui, si algo falla, el servidor sigue como estaba.
+  echo "Instalando las librerias de Python..."
+  "$RAIZ/venv/bin/pip" install --quiet -r "$temporal/codigo/requirements.txt" \
+    || { no "pip no ha podido instalar las librerias: no se ha cambiado nada"; rm -rf "$temporal"; exit 1; }
+  echo "Instalando las librerias del acceso..."
+  # se parte de las que ya hay, para no bajarlas todas cada vez
+  if [ -d "$RAIZ/login/node_modules" ]; then
+    cp -a "$RAIZ/login/node_modules" "$temporal/codigo/despliegue/login/" 2>/dev/null || true
+  fi
+  ( cd "$temporal/codigo/despliegue/login" && npm install --omit=dev --no-audit --no-fund ) \
+    > "$temporal/npm.log" 2>&1 \
+    || { no "npm no ha podido instalar las librerias del acceso: no se ha cambiado nada"
+         tail -n 15 "$temporal/npm.log" | sed 's/^/    /'; rm -rf "$temporal"; exit 1; }
+
+  # LA COPIA DE LO QUE FUNCIONA, para poder volver. Fuera de app/ y sin la
+  # cache: es lo que se restaura si algo sale mal de aqui en adelante.
+  anterior="$RAIZ/anterior"
+  rm -rf "$anterior"; mkdir -p "$anterior/app" "$anterior/login"
+  rsync -a "${EXCLUIR_CODIGO[@]}" "$RAIZ/app/" "$anterior/app/"
+  rsync -a "${EXCLUIR_LOGIN[@]}" "$RAIZ/login/" "$anterior/login/"
+
+  # Y SI ALGO FALLA DE AQUI EN ADELANTE, se vuelve a lo que habia y se
+  # arranca. Antes solo se re-arrancaba, con el codigo a medio cambiar.
+  trap '_deshacer "$anterior"; rm -rf "$temporal"; exit 1' ERR
   # Se para antes de tocar nada: cambiar el codigo por debajo de una tanda que
   # esta corriendo es la forma mas rapida de perderla.
-  #
-  # Y SI ALGO FALLA DE AQUI EN ADELANTE, se vuelve a arrancar. Con `set -e`, un
-  # `pip install` sin red abortaba el script con el estudio PARADO y nadie que
-  # lo encendiera: la web daba un 502 hasta que alguien entraba a la consola.
-  trap 'echo; no "la actualizacion ha fallado a medias: vuelvo a arrancar lo que habia"; \
-        systemctl restart as-video-login as-video-studio || true; rm -rf "$temporal"' ERR
   systemctl stop as-video-studio
   # reglas.json va excluido a proposito: es lo unico del arbol de codigo que la
   # aplicacion reescribe (el destilador aprende de tu feedback y lo guarda ahi).
   # Sin excluirlo, actualizar borraria lo aprendido sin decir nada.
-  rsync -a --delete --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' \
-    --exclude='cache/' --exclude='proyectos/' --exclude='banco/' --exclude='secretos/' \
-    --exclude='motores/reglas/reglas.json' \
-    "$temporal/" "$RAIZ/app/"
+  rsync -a --delete "${EXCLUIR_CODIGO[@]}" "$temporal/codigo/" "$RAIZ/app/"
   [ -f "$RAIZ/app/motores/reglas/reglas.json" ] \
-    || cp "$temporal/motores/reglas/reglas.json" "$RAIZ/app/motores/reglas/reglas.json"
-  rsync -a --delete --exclude='node_modules' --exclude='datos' --exclude='.env' \
-    "$RAIZ/app/despliegue/login/" "$RAIZ/login/"
-  ( cd "$RAIZ/login" && npm install --omit=dev --no-audit --no-fund >/dev/null 2>&1 ) || true
-  "$RAIZ/venv/bin/pip" install --quiet -r "$RAIZ/app/requirements.txt"
-  install -m 755 "$RAIZ/app/despliegue/asvs" /usr/local/bin/asvs
-  install -m 755 "$RAIZ/app/despliegue/estudio-clave" /usr/local/bin/estudio-clave
+    || cp "$temporal/codigo/motores/reglas/reglas.json" "$RAIZ/app/motores/reglas/reglas.json"
+  rsync -a --delete "${EXCLUIR_LOGIN[@]}" "$temporal/codigo/despliegue/login/" "$RAIZ/login/"
   chown -R "$USUARIO:$USUARIO" "$RAIZ/app" "$RAIZ/login"
-  rm -rf "$temporal"
+  systemctl restart as-video-login as-video-studio
   trap - ERR
+
+  # QUE ARRANQUE DE VERDAD. Si en un minuto no contesta, se deshace.
+  if ! _contestan; then
+    no "la version nueva no arranca: vuelvo a la que habia"
+    _deshacer "$anterior"
+    rm -rf "$temporal"
+    exit 1
+  fi
+  rm -rf "$temporal"
+  # Los mandos, solo con la version nueva en marcha: si se deshace, se quedan
+  # los que iban con la vieja.
+  install -m 755 "$RAIZ/app/despliegue/asvs" "$BIN/asvs"
+  install -m 755 "$RAIZ/app/despliegue/estudio-clave" "$BIN/estudio-clave"
   # Se apunta de donde ha venido lo que acaba de instalarse: la proxima vez
   # se baja del mismo sitio aunque nadie pase ASVS_REPO.
   printf '%s\n' "$REPO" > "$FICHERO_REPO"
-
-  systemctl restart as-video-login as-video-studio
-  sleep 2
   echo
   estado
+}
+
+# Vuelve al codigo y al login de `anterior` y arranca. Las librerias de Python
+# NO se deshacen (pip no sabe): el codigo viejo con librerias nuevas arranca
+# en la practica, y al reves es lo que dejaba el servidor caido.
+_deshacer() {
+  local anterior="$1"
+  trap - ERR
+  echo
+  no "deshaciendo la actualizacion: vuelve el codigo que habia"
+  if [ -d "$anterior/app" ] && [ -f "$anterior/app/app.py" ]; then
+    systemctl stop as-video-studio || true
+    rsync -a --delete "${EXCLUIR_CODIGO[@]}" "$anterior/app/" "$RAIZ/app/" || true
+    rsync -a --delete "${EXCLUIR_LOGIN[@]}" "$anterior/login/" "$RAIZ/login/" || true
+    chown -R "$USUARIO:$USUARIO" "$RAIZ/app" "$RAIZ/login" || true
+  fi
+  systemctl restart as-video-login as-video-studio || true
+  if _contestan; then
+    si "el estudio vuelve a estar como antes de actualizar"
+  else
+    no "tampoco arranca la version anterior: mira  asvs registro"
+  fi
 }
 
 repositorio() {

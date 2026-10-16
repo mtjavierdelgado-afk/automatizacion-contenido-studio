@@ -592,7 +592,11 @@ async function pedir(url, opciones) {
   if (!respuesta.ok) {
     const detalle = (datos && (datos.error || datos.mensaje)) || crudo.slice(0, 400)
       || `HTTP ${respuesta.status}`;
-    throw new Error(detalle);
+    // con su código: quien pregunta por un trabajo distingue «no existe» (404)
+    // de «el servidor no contesta»
+    const fallo = new Error(detalle);
+    fallo.status = respuesta.status;
+    throw fallo;
   }
   if (datos && datos.error) throw new Error(datos.error);
   return datos === null ? {} : datos;
@@ -938,6 +942,10 @@ function arranqueDe(antes, tid) {
   return esDeEste ? previo : Date.now();
 }
 
+/* Cuántos «no existe» seguidos hacen falta para dar un trabajo por perdido
+   (uno por segundo de sondeo). */
+const SONDEOS_HASTA_PERDIDO = 8;
+
 function seguirTrabajo(paso, tid, alTerminar, alAvanzar, pidDelTrabajo) {
   soltarSeguimiento(paso);
   const seguimiento = {};
@@ -1053,11 +1061,28 @@ function seguirTrabajo(paso, tid, alTerminar, alAvanzar, pidDelTrabajo) {
   // Red de seguridad: si en 4 s el SSE no ha dicho nada, se sondea igualmente.
   setTimeout(() => { if (!vivo && APP.seguimientos[paso] === seguimiento) arrancarSondeo(); }, 4000);
 
+  /* UN TRABAJO QUE EL SERVIDOR YA NO CONOCE SE DA POR PERDIDO. Al reiniciar
+     el servicio (`asvs actualizar`) los trabajos en memoria se olvidan, y el
+     sondeo preguntaba por el suyo para siempre: la barra seguia «en marcha» y
+     los botones del video apagados hasta recargar. Unos pocos 404 seguidos se
+     toleran (recien lanzado puede no estar publicado); pasados esos, se cierra
+     con un error que dice lo que ha pasado. */
+  let desconocido = 0;
   function arrancarSondeo() {
     if (seguimiento.sondeo || APP.seguimientos[paso] !== seguimiento) return;
     seguimiento.sondeo = setInterval(async () => {
-      try { aplicar(await pedir(API.trabajo(tid))); }
-      catch (e) { /* el servidor puede tardar en publicar el trabajo */ }
+      try {
+        aplicar(await pedir(API.trabajo(tid)));
+        desconocido = 0;
+      } catch (e) {
+        if (e.status !== 404) return;   // el servidor puede tardar en publicarlo
+        desconocido += 1;
+        if (desconocido >= SONDEOS_HASTA_PERDIDO) {
+          aplicar({ estado: 'error',
+            error: 'el servidor ya no conoce este trabajo (se ha reiniciado o lo ha '
+              + 'olvidado): mira si lo hecho está guardado y vuelve a lanzarlo si hace falta' });
+        }
+      }
     }, 1000);
   }
 }
@@ -1433,9 +1458,7 @@ async function abrirProyecto(pid) {
   TANDA_EN_MARCHA.pestana = '';
   // las diapositivas y la cola de imagenes son de ESTE video: una nota en cola
   // de otro proyecto se dibujaria aqui
-  pararPrevia();
-  PREVIA.ficha = null;
-  PREVIA.i = 0;
+  reiniciarPrevia();
   olvidarCola();
   pintarCoste();
   await refrescarTodo();
@@ -5546,8 +5569,11 @@ async function volverAVersionLight(paso, numero) {
     await pedir(API.revertir(pid, paso), { method: 'POST', cuerpo: { version: numero } });
     toast(`Usando ${nombre} de la v${numero}`);
     if (videoAbierto().pid === pid) {
-      PREVIA.ficha = null;
+      reiniciarPrevia();
       await cargarVideoLight(pid);
+      /* LA TIRA DE PLANOS TAMBIEN: sus rutas son las de la version de antes,
+         y sin pedirlas otra vez la pantalla del video seguia con las otras. */
+      if (paso === 'assets') refrescarPlanosLight();
     }
   } catch (e) {
     toast(`no se ha podido volver: ${e.message}`, true);
@@ -6478,6 +6504,10 @@ async function cargarVideoLight(pid) {
       v.planos = [];
       v.firmaPlanos = '';
       v.subtitulosRotos = undefined;
+      /* Y LOS PLANES DE CADA TANDA: son los de OTRO video. Con ellos, el aviso
+         de «N imágenes en otra calidad» o el precio de regenerar eran los del
+         que acababas de cerrar hasta que llegaba el de este. */
+      v.planes = {};
     }
     v.cargadoDe = pid;
     v.pid = pid;
@@ -6497,8 +6527,8 @@ async function cargarVideoLight(pid) {
     // cifra de otro proyecto mientras llega la buena
     v.coste = null;
     // y las escenas del previsualizador, por lo mismo: son las de otro vídeo
-    pararPrevia();
-    PREVIA.ficha = null;
+    // (y si es el mismo, se vuelven a pedir y se vuelve a la escena que se miraba)
+    reiniciarPrevia();
     await reengancharTandaLight(pid);
     // La vista la decide LO QUE HAY, no lo que se pulsó: al volver de una
     // recarga, un vídeo con guion tiene que abrirse en el guion.
@@ -7744,7 +7774,7 @@ async function lanzarTandaLight(tanda, modo) {
         // LA TANDA DE VIDEO YA NO ACABA EN EL MP4, acaba en el
         // previsualizador: es la parada nueva y es lo que hay que mirar antes
         // de gastar el render (ver TANDAS_LIGHT en app.py).
-        if (tanda === 'video') { PREVIA.ficha = null; v.vista = 'previa'; }
+        if (tanda === 'video') { reiniciarPrevia(); v.vista = 'previa'; }
         else if (tanda === 'render') v.vista = 'video';
         // regenerado desde el encargo, lo que toca mirar es el guion nuevo;
         // desde cualquier otra pantalla no se mueve a nadie
@@ -7995,7 +8025,7 @@ async function rehacerEnLaCalidadDelVideo(otra) {
     });
     seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
       if (trabajo.estado === 'listo') {
-        PREVIA.ficha = null;
+        reiniciarPrevia();
         await cargarVideoLight(pid);
         refrescarPlanLight('video', true);
       }
@@ -8032,12 +8062,17 @@ async function refrescarPlanLight(tanda, forzar, modo) {
   const v = APP.light.video;
   if (!v.pid || !tanda) return;
   const guardado = clavePlanLight(tanda, modo);
-  const clave = `${v.pid}:${guardado}`;
+  const pid = v.pid;
+  const clave = `${pid}:${guardado}`;
   if (!forzar && Date.now() - (PLANES_LIGHT.ultima[clave] || 0) < 3000) return;
   PLANES_LIGHT.ultima[clave] = Date.now();
   try {
-    const plan = await pedir(`${API.proyecto(v.pid)}/generar?tanda=${tanda}`
+    const plan = await pedir(`${API.proyecto(pid)}/generar?tanda=${tanda}`
       + (guardado !== tanda ? `&modo=${encodeURIComponent(modo)}` : ''));
+    /* EL PLAN ES DEL VIDEO QUE LO PIDIO. Si mientras contestaba se abrio otro,
+       guardarlo aqui le ponia a ese el precio y el aviso de calidad del de
+       antes. */
+    if (APP.light.video.pid !== pid) return;
     /* Se repinta SOLO si ha cambiado lo que se ensena (las tareas, el precio
        o las imagenes en otra calidad): repintar siempre desde aqui seria un
        bucle, porque esto se llama durante el pintado. */
@@ -8640,7 +8675,10 @@ function parrafoKaraokeLight(bloque, conAudio, texto) {
       onclick: ev => {
         const s = Number(ev.target.dataset.s);
         const audio = $('#panel').querySelector('audio.light');
-        if (audio && s >= 0) { audio.currentTime = s; audio.play(); }
+        if (audio && s >= 0) {
+          audio.currentTime = s;
+          audio.play().catch(fallo => avisarAudioFallido(fallo));
+        }
       },
     }, palabra));
     parrafo.appendChild(document.createTextNode(' '));
@@ -9361,25 +9399,90 @@ const PREVIA = {
   guardando: false,
   borrador: {},       // id de escena -> lo escrito y sin enviar
   editando: '',       // id de la nota que se está corrigiendo, si hay alguna
+  pid: '',            // de qué vídeo es la ficha que hay
+  carga: 0,           // turno de la última carga: una más vieja no escribe
+  recordada: null,    // {pid, id}: la escena que se miraba antes de recargar
+  buscando: false,    // esperando a poder saltar al segundo de la escena (iOS)
 };
+
+/* TIRAR LA PREVIA, SIEMPRE POR AQUI (16-10-2026).
+ *
+ * Habia seis sitios que hacian `PREVIA.ficha = null` cada uno a su manera, y
+ * ninguno limpiaba `PREVIA.error`: la pantalla pinta el error ANTES de mirar si
+ * falta la ficha, asi que un solo fallo al pedirla --un microcorte, un 409
+ * mientras se generaba-- dejaba las diapositivas sin imagen y sin mandos hasta
+ * recargar la pagina. Ni volver a una version anterior lo arreglaba.
+ *
+ * Aqui se para el sonido, se olvidan la ficha, el error y los reproductores de
+ * la cama (son de la ficha vieja), y se invalida cualquier carga en vuelo. La
+ * escena que se miraba se apunta: si la ficha nueva la sigue teniendo, se
+ * vuelve a ella en vez de a la primera. */
+function reiniciarPrevia() {
+  pararPrevia();
+  const e = escenaPrevia();
+  if (PREVIA.ficha && e) PREVIA.recordada = { pid: PREVIA.pid, id: e.id };
+  PREVIA.ficha = null;
+  PREVIA.error = '';
+  PREVIA.i = 0;
+  PREVIA.t = 0;
+  PREVIA.cargando = false;
+  PREVIA.carga += 1;
+  for (const clave of ['musica', 'efectos']) {
+    if (PREVIA[clave]) {
+      PREVIA[clave].removeAttribute('src');
+      PREVIA[clave].load();
+    }
+    PREVIA[clave] = null;
+  }
+}
 
 async function cargarPreviaLight() {
   const v = videoAbierto();
   if (!v.pid || PREVIA.cargando) return;
+  const pid = v.pid;
+  PREVIA.carga += 1;
+  const turno = PREVIA.carga;
   PREVIA.cargando = true;
   PREVIA.error = '';
   repintarVideo();
+  /* UNA CARGA VIEJA NO ESCRIBE. Si mientras contestaba se cambio de video o
+     se tiro la previa (revertir, aplicar), lo que llega es de antes: pintarlo
+     ensenaria las imagenes de la otra version, o las del otro video. */
+  const vigente = () => turno === PREVIA.carga && videoAbierto().pid === pid;
   try {
-    PREVIA.ficha = await pedir(`${API.proyecto(v.pid)}/previsualizacion`);
-    PREVIA.i = 0;
+    const ficha = await pedir(`${API.proyecto(pid)}/previsualizacion`);
+    if (!vigente()) { soltarCargaVieja(turno); return; }
+    PREVIA.ficha = ficha;
+    PREVIA.pid = pid;
+    // la escena que se miraba, si sigue en el corte; si no, la primera
+    const antes = PREVIA.recordada;
+    const i = antes && antes.pid === pid
+      ? (ficha.escenas || []).findIndex(x => x.id === antes.id) : -1;
+    PREVIA.i = Math.max(0, i);
     PREVIA.t = 0;
+    PREVIA.recordada = null;
     await refrescarNotasPrevia();
+    if (!vigente()) { soltarCargaVieja(turno); return; }
     prebufferPrevia();
   } catch (err) {
+    if (!vigente()) { soltarCargaVieja(turno); return; }
     PREVIA.error = err.message;
   }
   PREVIA.cargando = false;
   repintarVideo();
+}
+
+/* Una carga que ya no vale suelta el «cargando» solo si nadie ha empezado otra
+   (cambio de vídeo sin tirar la previa): si no, se quedaba puesto y la
+   pantalla no volvía a pedir nada. */
+function soltarCargaVieja(turno) {
+  if (turno === PREVIA.carga) { PREVIA.cargando = false; repintarVideo(); }
+}
+
+/* Volver a pedirla después de un fallo: es el botón de la caja de error. */
+function reintentarPrevia() {
+  reiniciarPrevia();
+  cargarPreviaLight();
 }
 
 /* TODO LO QUE DEVUELVE EL REPASO SE GUARDA POR AQUI, Y SOLO POR AQUI.
@@ -9549,19 +9652,108 @@ function prebufferPrevia() {
 
 /* ------------------------------------------------------------- el sonido */
 
+/* La URL de una pista de la previa. Llegan de dos formas: una ruta DEL
+   PROYECTO (`pasos/voz/v3/narracion.wav`, va por /a/{pid}/...) o una ruta de
+   la API (`/api/musica/propia/...`, el tema subido sin montar todavia). */
+function urlDePistaPrevia(ruta) {
+  if (!ruta) return '';
+  const texto = String(ruta);
+  if (texto.startsWith('/api/')) return BASE + texto;
+  return API.archivo(videoAbierto().pid, texto);
+}
+
+/* UN FALLO DE SONIDO SE DICE. Antes cada `play()` acababa en un `.catch` que
+   no decia nada: el boton se pulsaba y no pasaba nada, que se lee como «no
+   funciona». */
+function avisarAudioFallido(fallo) {
+  const nombre = (fallo && fallo.name) || '';
+  if (nombre === 'AbortError') return;   // otro play() lo ha sustituido: no es un fallo
+  const texto = nombre === 'NotAllowedError'
+    ? 'el navegador no deja sonar el audio todavía: vuelve a pulsar'
+    : `no se puede reproducir el audio${fallo && fallo.message ? ` (${fallo.message})` : ''}`;
+  toast(texto, true);
+}
+
 function audioPrevia() {
   if (!PREVIA.audio) {
-    PREVIA.audio = new Audio();
+    PREVIA.audio = registrarReproductor(new Audio());
     PREVIA.audio.preload = 'auto';
     PREVIA.audio.addEventListener('timeupdate', alSonarPrevia);
     PREVIA.audio.addEventListener('ended', () => { pararPrevia(); repintarVideo(); });
+    PREVIA.audio.addEventListener('error', () => {
+      // sin src no hay nada que avisar: es que se ha vaciado a proposito
+      if (!PREVIA.audio.dataset.url) return;
+      pararPrevia();
+      repintarVideo();
+      toast('no se ha podido cargar la voz de este vídeo', true);
+    });
   }
-  const url = API.archivo(videoAbierto().pid, (PREVIA.ficha || {}).audio || '');
-  if ((PREVIA.ficha || {}).audio && PREVIA.audio.dataset.url !== url) {
+  const ruta = (PREVIA.ficha || {}).audio || '';
+  const url = urlDePistaPrevia(ruta);
+  /* SIN VOZ SE VACIA. Quedarse con el src anterior hacia sonar la voz de OTRO
+     video (o la de antes de regenerar) encima de estas imagenes. */
+  if (!ruta) {
+    if (PREVIA.audio.dataset.url) {
+      PREVIA.audio.dataset.url = '';
+      PREVIA.audio.removeAttribute('src');
+      PREVIA.audio.load();
+    }
+    return null;
+  }
+  if (PREVIA.audio.dataset.url !== url) {
     PREVIA.audio.src = url;
     PREVIA.audio.dataset.url = url;
   }
   return PREVIA.audio;
+}
+
+/* SALTAR AL SEGUNDO DE LA ESCENA Y SONAR, TAMBIEN EN EL IPHONE.
+ *
+ * Safari no deja mover `currentTime` hasta tener los metadatos (`readyState`
+ * 0): el salto se pierde y suena desde el principio, o no suena. Pero el
+ * `play()` tiene que salir DENTRO del toque, o iOS lo rechaza. Asi que se
+ * arranca ya, en silencio, y al llegar los metadatos se salta y se le da voz.
+ * `buscando` hace que el reloj no mueva nada mientras tanto. */
+function sonarDesdePrevia(audio, segundo, alSonar) {
+  const empezar = () => audio.play().then(alSonar).catch(fallo => {
+    PREVIA.buscando = false;
+    audio.muted = false;
+    PREVIA.sonando = false;
+    PREVIA.seguido = false;
+    pararCamaPrevia();
+    repintarVideo();
+    avisarAudioFallido(fallo);
+  });
+  if (audio.readyState >= 1) {
+    PREVIA.buscando = false;
+    audio.muted = false;
+    if (!avisarSiPasaDelFinal(audio, segundo)) { pararPrevia(); repintarVideo(); return; }
+    audio.currentTime = segundo;
+    empezar();
+    return;
+  }
+  PREVIA.buscando = true;
+  audio.muted = true;
+  audio.addEventListener('loadedmetadata', () => {
+    PREVIA.buscando = false;
+    audio.muted = false;
+    if (!avisarSiPasaDelFinal(audio, segundo)) { pararPrevia(); repintarVideo(); return; }
+    audio.currentTime = segundo;
+  }, { once: true });
+  empezar();
+}
+
+/* Una escena que empieza despues de que acabe la voz no puede sonar: el audio
+   salta al final y se para. Pasa si la voz se ha vuelto a grabar mas corta y
+   las imagenes siguen cortadas con la de antes. Se dice, en vez de callar. */
+function avisarSiPasaDelFinal(audio, segundo) {
+  const dura = Number(audio.duration);
+  if (Number.isFinite(dura) && dura > 0 && segundo >= dura - 0.05) {
+    toast('esta escena empieza después del final de la voz: la voz es más corta '
+      + 'que el corte de estas imágenes (regenera las imágenes)', true);
+    return false;
+  }
+  return true;
 }
 
 /* EL RELOJ MANDA SOBRE QUÉ ESCENA SE VE, y no al revés. Escena a escena el
@@ -9571,13 +9763,15 @@ function audioPrevia() {
 function alSonarPrevia() {
   const audio = PREVIA.audio;
   const e = escenaPrevia();
-  if (!audio || !e) return;
+  if (!audio || !e || PREVIA.buscando) return;
   PREVIA.t = audio.currentTime;
   if (!PREVIA.seguido) {
-    if (audio.currentTime >= e.t_out - 0.02) {
+    if (!audio.paused && audio.currentTime >= e.t_out - 0.02) {
       audio.pause();
       PREVIA.sonando = false;
       PREVIA.t = e.t_out;
+      // y el boton vuelve a decir «Oírla»: sin repintar se quedaba en «Parar»
+      repintarVideo();
     }
     return;
   }
@@ -9595,20 +9789,22 @@ function alSonarPrevia() {
 }
 
 
+const SIN_VOZ_PREVIA = 'este vídeo todavía no tiene voz: no hay nada que oír';
+
 function sonarEscenaPrevia() {
   const e = escenaPrevia();
   if (!e) return;
   const audio = audioPrevia();
+  if (!audio) { toast(SIN_VOZ_PREVIA, true); return; }
   PREVIA.seguido = false;
   pararCamaPrevia();
-  audio.currentTime = e.t_in;
   PREVIA.t = e.t_in;
-  audio.play().then(() => { PREVIA.sonando = true; repintarVideo(); })
-    .catch(() => { PREVIA.sonando = false; });
+  sonarDesdePrevia(audio, e.t_in, () => { PREVIA.sonando = true; repintarVideo(); });
 }
 
 function pararPrevia() {
-  if (PREVIA.audio) PREVIA.audio.pause();
+  if (PREVIA.audio) { PREVIA.audio.pause(); PREVIA.audio.muted = false; }
+  PREVIA.buscando = false;
   PREVIA.sonando = false;
   PREVIA.seguido = false;
   pararCamaPrevia();
@@ -9618,12 +9814,17 @@ function pararPrevia() {
    VOZ y nada más: lo que se está juzgando ahí es si la imagen cuadra con lo que
    se dice, y una cama debajo es justo lo que tapa esa pregunta. */
 function camaPrevia(clave) {
-  const ruta = (PREVIA.ficha || {})[clave];
-  if (!ruta) return null;
+  const url = urlDePistaPrevia((PREVIA.ficha || {})[clave]);
+  if (!url) return null;
   if (!PREVIA[clave]) {
-    PREVIA[clave] = new Audio(API.archivo(videoAbierto().pid, ruta));
+    PREVIA[clave] = new Audio();
     PREVIA[clave].preload = 'auto';
     PREVIA[clave].volume = clave === 'musica' ? 0.35 : 0.6;
+  }
+  // OTRA FICHA, OTRA PISTA: se creaba una vez y sonaba la del primer video
+  if (PREVIA[clave].dataset.url !== url) {
+    PREVIA[clave].src = url;
+    PREVIA[clave].dataset.url = url;
   }
   return PREVIA[clave];
 }
@@ -9635,17 +9836,37 @@ function pararCamaPrevia() {
 }
 
 function reproducirTodoPrevia() {
-  const audio = audioPrevia();
   const e = escenaPrevia();
   if (!e) return;
+  const audio = audioPrevia();
+  if (!audio) { toast(SIN_VOZ_PREVIA, true); return; }
   PREVIA.seguido = true;
-  audio.currentTime = e.t_in;
+  PREVIA.t = e.t_in;
+  /* La cama va por su cuenta y no se espera a ella: si no carga, se avisa y la
+     voz sigue sonando, que es lo que se esta mirando. */
   for (const clave of ['musica', 'efectos']) {
     const pista = camaPrevia(clave);
-    if (pista) { pista.currentTime = e.t_in; pista.play().catch(() => {}); }
+    if (!pista) continue;
+    const saltar = () => { try { pista.currentTime = e.t_in; } catch (fallo) { /* sin metadatos */ } };
+    if (pista.readyState >= 1) saltar();
+    else pista.addEventListener('loadedmetadata', saltar, { once: true });
+    pista.play().catch(fallo => {
+      if ((fallo || {}).name !== 'AbortError') {
+        toast(`no se ha podido poner ${clave === 'musica' ? 'la música' : 'los efectos'}`, true);
+      }
+    });
   }
-  audio.play().then(() => { PREVIA.sonando = true; repintarVideo(); })
-    .catch(() => { PREVIA.sonando = false; });
+  sonarDesdePrevia(audio, e.t_in, () => { PREVIA.sonando = true; repintarVideo(); });
+}
+
+/* Lo que de verdad suena en «Todo seguido». Los efectos solo existen cuando el
+   vídeo se ha montado (su banda la hace el render): prometerlos sin montaje
+   era prometer algo que no iba a sonar. */
+function tituloTodoSeguido() {
+  const f = PREVIA.ficha || {};
+  const con = [f.musica ? 'música' : '', f.efectos ? 'efectos' : ''].filter(Boolean);
+  return 'Todo seguido' + (con.length ? `, con ${con.join(' y ')}` : ', solo con la voz')
+    + ' (sin zoom ni transiciones)';
 }
 
 /* ------------------------------------------------------------ moverse */
@@ -9771,7 +9992,14 @@ function vistaPreviaLight() {
   const otraCalidad = avisoOtraCalidadLight();
   if (otraCalidad) caja.appendChild(otraCalidad);
 
-  if (PREVIA.error) { caja.appendChild(cajaError(PREVIA.error)); return caja; }
+  if (PREVIA.error) {
+    caja.appendChild(cajaError(PREVIA.error));
+    /* CON SU BOTON: el fallo puede ser de un momento (un microcorte, un 409
+       mientras se generaba), y sin reintentar solo quedaba recargar. */
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'primario', onclick: reintentarPrevia }, 'Reintentar')));
+    return caja;
+  }
   if (!PREVIA.ficha) {
     // SE PIDE DESPUES DE PINTAR, no en mitad del pintado: `cargarPreviaLight`
     // llama a `pintarLight` para enseñar el «cargando», y hacerlo desde dentro
@@ -9847,7 +10075,7 @@ function vistaPreviaLight() {
       clase: PREVIA.seguido ? 'mini peligro' : 'mini',
       onclick: () => (PREVIA.seguido ? (pararPrevia(), repintarVideo())
         : reproducirTodoPrevia()),
-      title: 'Todo seguido, con música y efectos (sin zoom ni transiciones)',
+      title: tituloTodoSeguido(),
     }, PREVIA.seguido ? '❚❚ Parar' : '▶ Todo seguido'),
     h('span', { clase: 'meta' },
       `${e.id} · ${e.duracion.toFixed(1)} s`
@@ -11524,7 +11752,7 @@ async function aplicarRepaso() {
            un plano, y si se aplica DESDE esa pantalla lo primero que se hace
            al terminar es mirarla: dejarla con la imagen de antes ensenaria la
            nota como aplicada encima del dibujo que la motivo. */
-        PREVIA.ficha = null;
+        reiniciarPrevia();
         await refrescarNotasPrevia();
         const ficha = trabajo.resultado || {};
         (ficha.avisos || []).forEach(aviso => toast(aviso, true));

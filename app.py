@@ -5287,17 +5287,56 @@ def _obsolescencia(ctx, escena):
     return {"obsoleta": True, "dibujada_para": ficha.get("narracion") or ""}
 
 def _audio_de_la_toma(ctx):
-    """El wav que se oye: el de la revision si la hay, y si no el de la voz.
+    """El wav que se oye: el de la VOZ, el mismo que monta el render.
 
-    En ese orden y no al reves: `revision_audio` es el paso que puede haber
-    regrabado una seccion, asi que su toma es la que de verdad va a sonar en el
-    MP4. Coger la de `voz` daria a escuchar algo que ya no existe.
+    Antes se preferia el de `revision_audio`, y era el equivocado. Los planos
+    se cortan contra las marcas de la voz (`p6_assets`, que lee el
+    `audio_meta.json` de `voz`) y el MP4 suena con el wav de la voz
+    (`p8_render`, `salida_de(proyecto, "voz", ...)`). La toma de la revision es
+    una RESINTESIS completa con su propio reloj, que nadie de aguas abajo usa:
+    los `t_in`/`t_out` de cada plano no son los suyos. Con ella delante, «Oírla»
+    sonaba otra frase, y en los planos que caen pasado su final no sonaba nada
+    --el audio saltaba al final y se paraba-- (16-10-2026). Con una revision
+    sellada (copia de la voz) daba igual; con una regrabada o vieja, no.
+
+    Se busca IGUAL que el render, y se devuelve relativa al proyecto, que es lo
+    que entiende `GET /a/{pid}/{ruta}`. Fuera del proyecto, None.
     """
-    for paso in ("revision_audio", "voz"):
-        ruta = _ruta_de_version(ctx, paso, "narracion.wav")
-        if ruta:
-            return ruta
-    return None
+    try:
+        ruta = PASOS_MODULOS.medios.salida_de(
+            ctx.proyecto, "voz", claves=("wav", "audio", "narracion"),
+            patrones=(r"narracion\.wav", r".*\.wav"), estado=ctx.estado)
+    except Exception:                                         # noqa: BLE001
+        ruta = None
+    if not ruta or not os.path.isfile(ruta):
+        return None
+    relativa = os.path.relpath(os.path.realpath(ruta),
+                               os.path.realpath(ctx.proyecto.raiz))
+    if relativa.startswith(".."):
+        return None
+    return relativa.replace(os.sep, "/")
+
+
+def _musica_de_la_previa(ctx, render):
+    """La musica que suena en «Todo seguido». -> url | ruta del proyecto | None
+
+    LA DE VERDAD, no una clave que nadie escribe (se leia `musica.pista`, que no
+    existe: la musica nunca sonaba). Por orden:
+
+      1. la cama que construyo el ultimo montaje (`render/vN/cama.wav`): es la
+         musica tal cual suena en el MP4, con sus tramos encadenados;
+      2. si no la hay, la escucha del propio tema (`muestra`, una ruta de la API
+         que sirve el banco: los temas subidos por ti).
+
+    Un tema de Jamendo sin montaje no suena aqui: escucharlo es salir a
+    Jamendo, y esta pantalla no sale a la red por mirar diapositivas.
+    """
+    cama = _ruta_de_version(ctx, "render", "cama.wav")
+    if cama:
+        return cama
+    ficha = render.get("musica") if isinstance(render.get("musica"), dict) else {}
+    muestra = str((ficha or {}).get("muestra") or "")
+    return muestra if muestra.startswith("/api/") else None
 
 
 def _medidor_de_subtitulo(ctx, plan):
@@ -5465,10 +5504,12 @@ def leer_previsualizacion(pid: str):
         # oye la VOZ y nada mas: lo que se esta juzgando ahi es si la imagen
         # cuadra con lo que se dice, y una cama de musica debajo es justo lo que
         # tapa esa pregunta.
-        "musica": (render.get("musica") or {}).get("pista") if isinstance(
-            render.get("musica"), dict) else None,
-        "efectos": (render.get("efectos") or {}).get("pista") if isinstance(
-            render.get("efectos"), dict) else None,
+        #
+        # Dos formas, y la pantalla las distingue: una ruta del proyecto (va por
+        # `/a/{pid}/...`) o una ruta de la API que empieza por `/api/`. Los
+        # efectos solo existen montados: su banda la construye el render.
+        "musica": _musica_de_la_previa(ctx, render),
+        "efectos": _ruta_de_version(ctx, "render", "efectos.wav"),
         "resolucion": plan.get("resolucion") or [1920, 1080],
         "formato": PASOS_MODULOS.comun.formato_de_plan(plan),
         "duracion_s": round(float(plan.get("duracion_total") or 0.0), 2),

@@ -5524,6 +5524,90 @@ def probar_revision_del_nucleo_v2f():
         BITACORA.RUTA_GLOBAL = global_antes
         shutil.rmtree(base, ignore_errors=True)
 
+def probar_audio_y_musica_de_la_previa(cliente, carpeta):
+    """Lo que suena en las diapositivas: la voz del corte, y la música de verdad.
+
+    16-10-2026. La previa servía la toma de `revision_audio` aunque los planos
+    se cortan contra la de `voz` y el MP4 suena con la de `voz`: con una
+    revisión regrabada «Oírla» sonaba otra frase, y pasado su final no sonaba
+    nada. Y la música leía `musica.pista`, una clave que nadie escribe: «Todo
+    seguido» no tuvo nunca música.
+    """
+    seccion("LO QUE SUENA EN LAS DIAPOSITIVAS")
+    import wave
+    from nucleo.estado import Estado
+    from nucleo.proyecto import Proyecto, escribir_json
+
+    def wav(ruta, segundos):
+        os.makedirs(os.path.dirname(ruta), exist_ok=True)
+        with wave.open(ruta, "wb") as fh:
+            fh.setnchannels(1)
+            fh.setsampwidth(2)
+            fh.setframerate(8000)
+            fh.writeframes(b"\x00\x00" * int(8000 * segundos))
+
+    _r, datos = cliente.post("/api/proyectos", {"nombre": "Lo que suena en la previa"})
+    pid = (datos.get("proyecto") or {}).get("id")
+    proyecto = Proyecto(os.path.join(carpeta, pid))
+    estado = Estado(proyecto)
+    # la voz (6 s) y una revision regrabada MAS CORTA (4 s), con su propio reloj
+    wav(os.path.join(proyecto.ruta_trabajo("voz"), "narracion.wav"), 6)
+    estado.completar("voz", {"archivo": "narracion.wav", "duracion": 6.0})
+    wav(os.path.join(proyecto.ruta_trabajo("revision_audio"), "narracion.wav"), 4)
+    estado.completar("revision_audio", {"archivo": "narracion.wav", "duracion": 4.0})
+    # el corte de los planos, hecho contra la voz: el ultimo empieza en el 5
+    escribir_json(os.path.join(proyecto.ruta_trabajo("assets"), "plan.json"), {
+        "escenas": [{"id": "S001", "t_in": 0.0, "t_out": 5.0, "duracion": 5.0,
+                     "narracion": "uno"},
+                    {"id": "S002", "t_in": 5.0, "t_out": 6.0, "duracion": 1.0,
+                     "narracion": "dos"}],
+        "duracion_total": 6.0})
+    estado.completar("assets", {"plan": "plan.json"})
+
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+
+    class _Ctx:
+        def __init__(self):
+            self.proyecto = Proyecto(os.path.join(carpeta, pid))
+            self.estado = Estado(self.proyecto)
+
+    guardado = servidor.contexto
+    servidor.contexto = lambda _pid: _Ctx()
+    try:
+        ficha = servidor.leer_previsualizacion(pid)
+        igual(ficha.get("audio"), "pasos/voz/v1/narracion.wav",
+              "la previa suena con la voz contra la que se cortaron los planos "
+              "(la del render), no con la revisión")
+        igual((ficha.get("musica"), ficha.get("efectos")), (None, None),
+              "sin música elegida ni montaje, la previa no promete cama")
+
+        # UN TEMA SUBIDO, SIN MONTAR: suena su escucha, que la API ya sirve
+        estado = Estado(proyecto)
+        estado.set_params("render", {"musica": {
+            "fuente": "propia", "id": "abc", "titulo": "tema",
+            "muestra": "/api/musica/propia/propia_abc.mp3"}})
+        ficha = servidor.leer_previsualizacion(pid)
+        igual(ficha.get("musica"), "/api/musica/propia/propia_abc.mp3",
+              "con un tema subido y sin montar, «Todo seguido» suena con él")
+        # uno de Jamendo sin montar no sale a la red desde aqui
+        estado.set_params("render", {"musica": {"fuente": "jamendo", "id": "9"}})
+        igual(servidor.leer_previsualizacion(pid).get("musica"), None,
+              "un tema de Jamendo sin montar no se pide a Jamendo desde la previa")
+
+        # MONTADO: la cama y los efectos tal cual suenan en el MP4
+        wav(os.path.join(proyecto.ruta_trabajo("render"), "cama.wav"), 6)
+        wav(os.path.join(proyecto.ruta_trabajo("render"), "efectos.wav"), 6)
+        estado.completar("render", {"video": "video.mp4"})
+        ficha = servidor.leer_previsualizacion(pid)
+        igual((ficha.get("musica"), ficha.get("efectos")),
+              ("pasos/render/v1/cama.wav", "pasos/render/v1/efectos.wav"),
+              "montado, suenan la cama y la banda de efectos del render")
+        _r, _d = cliente.get(f"/a/{pid}/pasos/render/v1/cama.wav")
+        igual(_r.status_code, 200, "y esa ruta se sirve por /a/{pid}/")
+    finally:
+        servidor.contexto = guardado
+
 
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
@@ -5568,6 +5652,7 @@ def main():
         probar_imagenes_de_apoyo(cliente)
         probar_laminas(cliente)
         probar_sonido_propio_y_cola(cliente)
+        probar_audio_y_musica_de_la_previa(cliente, carpeta)
         probar_taller_oculto(cliente)
         probar_cartelas_y_transiciones(cliente, pid, os.path.join(carpeta, pid))
         probar_direccion(cliente, pid)

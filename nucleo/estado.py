@@ -78,6 +78,25 @@ CORRECCIONES = {"guion": ("bloques", "insertados")}
 #: obsoleto -- tambien si alguien revierte a esa version mas tarde --.
 FIRMA_A_MEDIAS = "a_medias:"
 
+#: CUANTAS VERSIONES SE GUARDAN de los pasos que pesan. Cada montaje copia el
+#: video entero (clips, mp4, cama, efectos) en una `v<N>` nueva y nada se
+#: borraba: hubo un proyecto de 55 GB. Decision del dueno (16-10-2026): del
+#: video montado, las 5 ultimas. La ACTIVA no se borra nunca, aunque sea vieja
+#: (se puede haber vuelto a ella). Se cambia con ESTUDIO_VERSIONES_RENDER.
+VERSIONES_QUE_SE_GUARDAN = {"render": 5}
+
+
+def versiones_que_se_guardan(paso_id):
+    """Cuantas versiones guarda el paso, o None si las guarda todas."""
+    if paso_id == "render":
+        try:
+            n = int(os.environ.get("ESTUDIO_VERSIONES_RENDER") or 0)
+        except ValueError:
+            n = 0
+        if n > 0:
+            return n
+    return VERSIONES_QUE_SE_GUARDAN.get(paso_id)
+
 # Los `id` son el contrato (carpetas, params, firmas): NO se renombran nunca.
 # El `nombre` es solo lo que se enseña, y va alineado con las pestañas de la
 # interfaz: `ingesta` se enseña como «Origen» y `callouts` como «Rotulos».
@@ -1184,7 +1203,51 @@ class Estado:
             })
             self.proyecto.fijar_version_activa(paso_id, numero)
             self._guardar()
-            return numero
+        # LA PODA, DESPUES DE SELLAR Y FUERA DEL CERROJO: borrar gigas de clips
+        # no debe parar las peticiones, y un fallo al borrar no puede tumbar una
+        # version ya sellada.
+        try:
+            self.podar_versiones(paso_id)
+        except Exception as fallo:  # noqa: BLE001
+            print(f"[estado] no se han podido podar las versiones de {paso_id}: {fallo}")
+        return numero
+
+    def podar_versiones(self, paso_id):
+        """Deja solo las ultimas N versiones del paso (y la activa). -> [n borradas]
+
+        Primero se quitan del documento y se guarda: asi el estado nunca nombra
+        una version cuya carpeta ya no existe («Revertir» a ella daria 404, o
+        peor, el manifiesto que falta haria lanzar a `manifiesto_version`).
+        Despues se borran su carpeta `v<N>/` y su manifiesto. Si el borrado falla
+        a medias, lo que queda es una carpeta huerfana: no la nombra nadie y la
+        siguiente version usa un numero mayor, asi que no se pisa.
+        """
+        maximo = versiones_que_se_guardan(paso_id)
+        if not maximo:
+            return []
+        with self._lock:
+            self._sincronizar()
+            datos = self._doc["pasos"][paso_id]
+            versiones = datos.get("versiones", [])
+            if len(versiones) <= maximo:
+                return []
+            activa = datos.get("activa")
+            numeros = sorted(v.get("n", 0) for v in versiones)
+            guardar = set(numeros[-maximo:])
+            if activa is not None:
+                guardar.add(activa)
+            fuera = [n for n in numeros if n not in guardar]
+            if not fuera:
+                return []
+            datos["versiones"] = [v for v in versiones if v.get("n", 0) in guardar]
+            self._guardar()
+        for n in fuera:
+            shutil.rmtree(self.proyecto.ruta_paso(paso_id, n), ignore_errors=True)
+            try:
+                os.remove(self._ruta_manifiesto(paso_id, n))
+            except FileNotFoundError:
+                pass
+        return fuera
 
     def revertir(self, paso_id, version):
         """Activa una version anterior; nada se borra y aguas abajo se recalcula."""

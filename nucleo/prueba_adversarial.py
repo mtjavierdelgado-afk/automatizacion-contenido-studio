@@ -761,6 +761,61 @@ def t9_revision_v2f(base):
     shutil.rmtree(carpeta, ignore_errors=True)
 
 
+def t10_podar_render(base):
+    """Del video montado se guardan las 5 ultimas versiones (16-10-2026)."""
+    print("\n[10] el render guarda solo sus 5 ultimas versiones y nunca la activa")
+    carpeta = tempfile.mkdtemp(dir=base)
+    proyecto, e = grafo_completo(carpeta, "podar")
+    antes = len(e.versiones("render"))
+
+    def montar(etiqueta):
+        trabajo = proyecto.ruta_trabajo("render")
+        with open(os.path.join(trabajo, "video.mp4"), "w") as fh:
+            fh.write(etiqueta)
+        return e.completar("render", {"mp4": "video.mp4"})
+
+    hechas = [montar(f"montaje {i}") for i in range(7)]
+    quedan = [v["n"] for v in e.versiones("render")]
+    igual(len(quedan), 5, f"quedan 5 versiones del video (habia {antes} + 7)")
+    igual(quedan, hechas[-5:], "y son las 5 ultimas")
+    for n in range(1, min(quedan)):
+        ok(not os.path.exists(proyecto.ruta_paso("render", n)),
+           f"la carpeta de la v{n} ya no esta en disco")
+    for n in quedan:
+        ok(os.path.isfile(os.path.join(proyecto.ruta_paso("render", n), "video.mp4")),
+           f"la v{n} sigue entera")
+    igual(e.estado_de("render"), "listo", "el render sigue listo")
+
+    # la ACTIVA no se borra aunque sea vieja: se vuelve a la mas antigua que
+    # queda y se poda (como si otro proceso hubiera montado entretanto)
+    vieja = quedan[0]
+    e.revertir("render", vieja)
+    with e._lock:              # una sexta version que no paso por completar
+        extra = dict(e._doc["pasos"]["render"]["versiones"][-1], n=max(quedan) + 1)
+        e._doc["pasos"]["render"]["versiones"].append(extra)
+        e._guardar()
+    os.makedirs(proyecto.ruta_paso("render", extra["n"]), exist_ok=True)
+    e.podar_versiones("render")
+    igual(proyecto.version_activa("render"), vieja, "la activa sigue siendo la vieja")
+    ok(os.path.isdir(proyecto.ruta_paso("render", vieja)),
+       "y su carpeta no se ha borrado aunque ya no este entre las 5 ultimas")
+    ok(vieja in [v["n"] for v in e.versiones("render")], "ni su entrada")
+
+    # los demas pasos no se podan: sus versiones son pequenas y se revierten
+    for i in range(7):
+        e.completar("assets", {"total": 4}, {u: {"png": f"{i}"} for u in UNIDADES})
+    ok(len(e.versiones("assets")) >= 8, "las imagenes guardan todas sus versiones")
+
+    # y el numero se cambia por el entorno
+    os.environ["ESTUDIO_VERSIONES_RENDER"] = "2"
+    try:
+        montar("con dos")
+        igual(len(e.versiones("render")), 2, "con ESTUDIO_VERSIONES_RENDER=2 quedan 2")
+    finally:
+        os.environ.pop("ESTUDIO_VERSIONES_RENDER", None)
+    shutil.rmtree(carpeta, ignore_errors=True)
+
+
 def principal():
     base = tempfile.mkdtemp(prefix="romper_nucleo_")
     solo = sys.argv[1:] or None
@@ -769,7 +824,7 @@ def principal():
                ("5b", t5b_lectores_escritores_disco),
                ("5c", t5c_completar_con_params_cambiados), ("5d", t5d_procesos),
                ("6", t6_traversal), ("7", t7_varios), ("8", t8_no_borrar_estado),
-               ("9", t9_revision_v2f)]
+               ("9", t9_revision_v2f), ("10", t10_podar_render)]
     try:
         for clave, funcion in pruebas:
             if solo and clave not in solo:

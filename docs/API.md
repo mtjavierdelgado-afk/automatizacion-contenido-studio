@@ -80,6 +80,22 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 | | Ruta | Qué hace |
 |---|---|---|
+| `GET` | `/api/publicar/cola` | Los videos listos para publicar y los envios de la semana (hora de Lima). |
+| `GET` | `/api/publicar/estado` | Si hay clave de Upload-Post (y de donde sale). Nunca la clave. |
+| `POST` | `/api/publicar/probar` | Prueba la clave contra Upload-Post sin gastar ninguna subida. |
+| `GET` | `/api/publicar/proyectos` | Cada proyecto con lo fijo de publicar y sus cuentas (lo ultimo visto). |
+| `PUT` | `/api/publicar/proyectos/{cid}` | Lo fijo de un proyecto: {perfil, redes, hora, firma, hashtags, tono, |
+| `POST` | `/api/publicar/proyectos/{cid}/conectar` | El enlace (48 h) para conectar o reconectar las cuentas: {redes?, volver_a?}. |
+| `POST` | `/api/publicar/proyectos/{cid}/cuentas` | Pregunta a Upload-Post que cuentas tiene conectadas el perfil del proyecto. |
+| `POST` | `/api/publicar/proyectos/{cid}/perfil` | Crea el perfil del proyecto en Upload-Post ({perfil}, o el sugerido) y lo |
+| `POST` | `/api/publicar/refrescar` | Pregunta a Upload-Post por los envios que siguen en el aire. |
+| `GET` | `/api/publicar/videos/{pid}` | La ficha de publicar de un video: redes, textos, encaje, envios. |
+| `PUT` | `/api/publicar/videos/{pid}` | {redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?} |
+| `POST` | `/api/publicar/videos/{pid}/a-mano` | «Lo he subido yo»: {red, url?}. Queda en el historial. |
+| `POST` | `/api/publicar/videos/{pid}/enviar` | {redes, modo: ahora|programar|pendiente, cuando?, confirmado, repetir?} |
+| `POST` | `/api/publicar/videos/{pid}/envios/{eid}/cancelar` | Cancela lo programado (en Upload-Post) o lo que esperaba tu OK. |
+| `POST` | `/api/publicar/videos/{pid}/envios/{eid}/confirmar` | Un envio que esperaba tu OK sale: {confirmado, modo?, cuando?}. |
+| `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
 | `GET` | `/api/trabajos` | Trabajos conocidos, opcionalmente de un solo proyecto. |
 | `GET` | `/api/trabajos/{tid}` | Estado y progreso de un trabajo. |
 | `POST` | `/api/trabajos/{tid}/cancelar` | Pide la cancelacion cooperativa de un trabajo. |
@@ -332,4 +348,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**212 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**228 endpoints.** Escrito por `generar_api.py` desde `app.py`.

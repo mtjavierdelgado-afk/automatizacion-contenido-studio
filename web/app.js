@@ -10007,6 +10007,7 @@ function vistaVideoLight() {
      (N9 de las notas de mejoras, 13-10-2026): es donde se oye lo que se
      quiere cambiar. Cada fila es una línea cerrada; no empuja el repaso. */
   if (hayMp4Light() && !trabajoVideoLight()) caja.appendChild(ajustesEnElVideo());
+  meter(caja, [bloquePublicarEnVideo(v)]);  // Publicar en redes (rama publicar-redes-1)
 
   /* LA TIRA DE VINETAS SOLO MIENTRAS SE GENERA.
      Con el video ya montado esta pantalla es para VERLO y comentarlo, y
@@ -16132,6 +16133,871 @@ function minimizarBurbuja(si, sinGuardar) {
     try { localStorage.setItem('asistente.minimizado', si ? '1' : ''); } catch (e) { /* nada */ }
   }
 }
+
+/* ================================================================== PUBLICAR
+ *
+ * LOS MÓDULOS Y PUBLICAR (rama `publicar-redes-1`, 16-10-2026). Todo lo de
+ * esta sección es nuevo y vive aquí, al final, a propósito: otras ramas cambian
+ * el resto del fichero y esto no debe chocar con ellas. Lo único fuera de aquí
+ * es UNA línea en la pantalla Vídeo (`bloquePublicarEnVideo`).
+ *
+ *   - LA BARRA DE MÓDULOS (Inicio · Crear · Publicar · Automatizar) va debajo
+ *     de la cabecera. «Crear» es la pantalla de siempre (estilos y vídeos) sin
+ *     cambiar nada, y es la que sale al abrir.
+ *   - Los otros módulos se pintan en su propio contenedor (#modulo) y #panel
+ *     se esconde con una clase en <body>. NO se intercepta `pintarLight`: el
+ *     panel sigue pintándose escondido como siempre y al volver a «Crear» está
+ *     donde se dejó.
+ *   - Publicar habla con sus propias rutas (`rutaPublicar`), no con el objeto
+ *     API, y no toca Configuración: la clave de Upload-Post tendrá su casilla
+ *     cuando se una `arreglos-voz`. Mientras, se lee del .env del servidor.
+ *   - Nada sale sin confirmar: cada envío pide un OK con las redes y la hora
+ *     delante, y el servidor exige `confirmado: true`.
+ */
+const MODULOS = { actual: 'crear', montado: false };
+const PUB = {
+  seccion: 'cola', pid: '', cola: null, ficha: null, proyectos: null,
+  cargando: false, error: '', desde: '', reloj: null, borrador: {},
+  enviando: false, guardando: null, avisos: 0, repintar: false,
+  modoEnvio: '', cuandoEnvio: '',
+};
+const NOMBRES_RED = { tiktok: 'TikTok', instagram: 'Instagram Reels', youtube: 'YouTube', facebook: 'Facebook' };
+const CORTOS_RED = { tiktok: 'TikTok', instagram: 'Reels', youtube: 'YouTube', facebook: 'Facebook' };
+const ESTADOS_ENVIO = {
+  espera_ok: 'espera tu OK', enviando: 'subiendo', programado: 'programado',
+  publicando: 'publicándose', publicado: 'publicado', fallido: 'falló',
+  cancelado: 'cancelado', comprobar: 'comprobar', a_mano: 'subido a mano',
+};
+const CLASE_ESTADO = {
+  publicado: 'ok', a_mano: 'ok', programado: 'ejecutando', publicando: 'ejecutando',
+  enviando: 'ejecutando', espera_ok: 'aviso', fallido: 'error', comprobar: 'aviso',
+  cancelado: '',
+};
+
+function rutaPublicar(resto) { return `${BASE}/api/publicar${resto || ''}`; }
+
+function montarModulos() {
+  if (MODULOS.montado || !$('#cabecera') || !$('#cuerpo')) return;
+  MODULOS.montado = true;
+  /* ENLACES Y NO BOTONES: cambiar de módulo es navegar (como «Enviar a
+     Publicar»), y así el barrido de botones del recorrido, que pulsa cada
+     botón de una pantalla de Crear, no se va a otro módulo a mitad. Los
+     módulos se prueban en su propio tramo del recorrido. */
+  const barra = h('nav', { id: 'barra-modulos', clase: 'barra-modulos', 'aria-label': 'Módulos' });
+  $('#cabecera').insertAdjacentElement('afterend', barra);
+  $('#cuerpo').appendChild(h('main', { id: 'modulo',
+    onfocusout: () => setTimeout(() => {
+      if (PUB.repintar && !campoPublicarConFoco()) repintarPublicarSinPisar();
+    }, 60) }));
+  pintarBarraModulos();
+  window.addEventListener('popstate', ev => {
+    const estado = ev.state || {};
+    const destino = estado.modulo || 'crear';
+    if (estado.pub) Object.assign(PUB, { seccion: estado.pub.seccion || 'cola', pid: estado.pub.pid || '' });
+    if (destino !== MODULOS.actual || destino === 'publicar') irAModulo(destino, { sinHistoria: true });
+  });
+  // el aviso de la barra (fallidos, esperando tu OK): una vez al abrir
+  pedir(rutaPublicar('/cola')).then(c => { PUB.cola = c; contarAvisosPublicar(); }).catch(() => {});
+}
+
+function contarAvisosPublicar() {
+  const c = PUB.cola || {};
+  PUB.avisos = (c.esperan_ok || []).length + (c.fallidos || []).length;
+  pintarBarraModulos();
+}
+
+function pintarBarraModulos() {
+  const barra = $('#barra-modulos');
+  if (!barra) return;
+  vaciar(barra);
+  [['inicio', 'Inicio', 'Lo que pasa hoy y los tres módulos'],
+    ['crear', 'Crear', 'Tus estilos y tus vídeos'],
+    ['publicar', 'Publicar', 'Cola, calendario, textos por red y cuentas'],
+    ['automatizar', 'Automatizar', 'Parrilla de guiones y piloto automático (próximamente)']]
+    .forEach(([id, texto, ayuda]) => barra.appendChild(h('a', {
+      href: '#', clase: `boton-modulo${MODULOS.actual === id ? ' activo' : ''}`, title: ayuda,
+      'aria-current': MODULOS.actual === id ? 'page' : null,
+      datos: { modulo: id },
+      onclick: ev => { ev.preventDefault(); irAModulo(id); },
+    }, texto, id === 'publicar' && PUB.avisos
+      ? h('span', { clase: 'aviso-modulo', title: 'Envíos que fallaron o esperan tu OK' }, String(PUB.avisos))
+      : null)));
+}
+
+function irAModulo(nombre, opciones) {
+  const o = opciones || {};
+  const antes = MODULOS.actual;
+  MODULOS.actual = nombre;
+  if (!o.sinHistoria && (antes !== nombre || o.pub)) {
+    try {
+      history.pushState(Object.assign({}, history.state || {}, {
+        modulo: nombre, pub: nombre === 'publicar' ? { seccion: PUB.seccion, pid: PUB.pid } : null,
+      }), '');
+    } catch (e) { /* sin historial: «atrás» sale, como antes */ }
+  }
+  document.body.classList.toggle('en-modulo', nombre !== 'crear');
+  if (nombre !== 'publicar') pararRelojPublicar();
+  pintarBarraModulos();
+  if (nombre === 'crear') {
+    pintarLight();
+    return;
+  }
+  const m = $('#modulo');
+  if (m) m.scrollTop = 0;
+  if (nombre === 'publicar') cargarPublicar();
+  else if (nombre === 'inicio') cargarInicioModulos();
+  else pintarModulo();
+}
+
+function pintarModulo() {
+  const m = $('#modulo');
+  if (!m || MODULOS.actual === 'crear') return;
+  const foco = document.activeElement && document.activeElement.dataset
+    ? document.activeElement.dataset.foco : '';
+  vaciar(m);
+  const contenido = h('div', { clase: 'contenido modulo-contenido' });
+  m.appendChild(contenido);
+  try {
+    if (MODULOS.actual === 'inicio') contenido.appendChild(vistaInicioModulos());
+    else if (MODULOS.actual === 'publicar') contenido.appendChild(vistaPublicar());
+    else contenido.appendChild(vistaAutomatizar());
+  } catch (e) {
+    contenido.appendChild(cajaError(`fallo pintando el módulo: ${e.message}`));
+    console.error(e);
+  }
+  if (foco) {
+    const campo = m.querySelector(`[data-foco="${foco}"]`);
+    if (campo) campo.focus();
+  }
+}
+
+/* -------------------------------------------------------------- INICIO */
+
+async function cargarInicioModulos() {
+  pintarModulo();
+  try {
+    PUB.cola = await pedir(rutaPublicar('/cola'));
+    contarAvisosPublicar();
+  } catch (e) {
+    PUB.error = e.message;
+  }
+  if (MODULOS.actual === 'inicio') pintarModulo();
+}
+
+function vistaInicioModulos() {
+  const caja = h('div', { clase: 'inicio-modulos' });
+  caja.appendChild(h('div', { clase: 'light-cab' }, h('h2', {}, 'Inicio')));
+  const c = PUB.cola || {};
+  const tarjetas = h('div', { clase: 'tarjetas-modulo' });
+  [['crear', 'Crear', 'Estilos y vídeos: el encargo, el guion, la voz, las imágenes y el montaje.',
+    'Ir a Crear'],
+  ['publicar', 'Publicar', `${(c.listos || []).length} vídeo(s) listos · `
+    + `${(c.envios || []).filter(e => e.estado === 'programado').length} programado(s) esta semana.`,
+  'Ir a Publicar'],
+  ['automatizar', 'Automatizar', 'La Parrilla de guiones y el piloto automático llegan en la siguiente rama.',
+    'Ver qué será']].forEach(([id, titulo, texto, boton]) => tarjetas.appendChild(
+    h('div', { clase: 'tarjeta-modulo' },
+      h('h3', {}, titulo), h('p', { clase: 'meta' }, texto),
+      h('button', { clase: id === 'automatizar' ? 'mini' : 'primario mini', onclick: () => irAModulo(id) }, boton))));
+  caja.appendChild(tarjetas);
+  const hoy = h('div', { clase: 'bloque' }, h('h3', {}, 'Lo que pasa hoy'));
+  const deHoy = (c.de_hoy || []).concat((c.esperan_ok || []).filter(e => !(c.de_hoy || []).some(x => x.id === e.id)));
+  if (!PUB.cola) hoy.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+  else if (!deHoy.length && !(c.fallidos || []).length) {
+    hoy.appendChild(h('div', { clase: 'meta' }, 'Hoy no sale nada. Los envíos programados aparecerán aquí.'));
+  } else {
+    deHoy.concat((c.fallidos || []).filter(e => !deHoy.some(x => x.id === e.id)))
+      .forEach(e => hoy.appendChild(filaEnvioCola(e)));
+  }
+  caja.appendChild(hoy);
+  return caja;
+}
+
+/* --------------------------------------------------------- AUTOMATIZAR */
+
+function vistaAutomatizar() {
+  return h('div', { clase: 'automatizar' },
+    h('div', { clase: 'light-cab' }, h('h2', {}, 'Automatizar')),
+    h('div', { clase: 'caja-aviso' },
+      'Este módulo llega con la rama de la Parrilla. Mientras tanto, el Encargo se sigue llenando a mano '
+      + 'en Crear, y los vídeos montados se publican desde Publicar.'),
+    h('div', { clase: 'tarjetas-modulo' },
+      ...[['Parrilla', 'Matrices de guiones con su estado: pendiente, usado, publicado.'],
+        ['Añadir guiones', 'Subir un documento, pedírselos a Claude, o escribir o pegar uno.'],
+        ['Piloto automático', 'Una regla en forma de frase, el modo de aprobación, los topes de gasto y la línea del día.']]
+        .map(([t, d]) => h('div', { clase: 'tarjeta-modulo apagada' }, h('h3', {}, t), h('p', { clase: 'meta' }, d),
+          h('span', { clase: 'pastilla' }, 'próximamente')))));
+}
+
+/* ------------------------------------------------------------ PUBLICAR */
+
+async function cargarPublicar(silencio) {
+  if (!silencio) { PUB.cargando = true; pintarModulo(); }
+  PUB.error = '';
+  try {
+    if (PUB.seccion === 'ficha' && PUB.pid) {
+      PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`));
+      PUB.borrador = {};
+    } else if (PUB.seccion === 'cuentas') {
+      PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
+    } else {
+      PUB.cola = await pedir(rutaPublicar(`/cola${PUB.desde ? `?desde=${encodeURIComponent(PUB.desde)}` : ''}`));
+      contarAvisosPublicar();
+    }
+  } catch (e) {
+    PUB.error = e.message;
+  }
+  PUB.cargando = false;
+  if (MODULOS.actual === 'publicar') {
+    if (silencio) repintarPublicarSinPisar(); else pintarModulo();
+  }
+  programarRelojPublicar();
+}
+
+/* NO SE REPINTA DEBAJO DE QUIEN ESCRIBE: un repintado rehace los campos y se
+   llevaría el cursor (y lo que se esté tecleando). Se apunta y se repinta al
+   salir del campo. */
+function campoPublicarConFoco() {
+  const campo = document.activeElement;
+  const m = $('#modulo');
+  return !!(campo && m && m.contains(campo) && /^(INPUT|TEXTAREA|SELECT)$/.test(campo.tagName));
+}
+
+function repintarPublicarSinPisar() {
+  if (campoPublicarConFoco()) { PUB.repintar = true; return; }
+  PUB.repintar = false;
+  pintarModulo();
+}
+
+/* Lo que está en el aire (subiendo, publicándose, Claude escribiendo) se
+   vuelve a preguntar cada pocos segundos mientras se mira Publicar. */
+function programarRelojPublicar() {
+  pararRelojPublicar();
+  if (MODULOS.actual !== 'publicar') return;
+  const f = PUB.ficha;
+  const enElAire = (PUB.seccion === 'ficha' && f && (f.escribiendo
+    || (f.envios || []).some(e => ['enviando', 'publicando', 'comprobar'].includes(e.estado))))
+    || (PUB.seccion === 'cola' && PUB.cola && (PUB.cola.envios || []).some(e =>
+      ['enviando', 'publicando', 'comprobar'].includes(e.estado)));
+  if (!enElAire) return;
+  PUB.reloj = setTimeout(async () => {
+    try { await pedir(rutaPublicar('/refrescar'), { method: 'POST' }); } catch (e) { /* se reintenta */ }
+    if (Object.keys(PUB.borrador).length || PUB.guardando) { programarRelojPublicar(); return; }
+    cargarPublicar(true);
+  }, 4000);
+}
+
+function pararRelojPublicar() {
+  if (PUB.reloj) clearTimeout(PUB.reloj);
+  PUB.reloj = null;
+}
+
+function irASeccionPublicar(seccion, pid) {
+  PUB.seccion = seccion;
+  if (pid !== undefined) PUB.pid = pid;
+  if (seccion === 'ficha' && pid) PUB.ficha = PUB.ficha && PUB.ficha.pid === pid ? PUB.ficha : null;
+  irAModulo('publicar', { pub: true });
+}
+
+/* «Enviar a Publicar» desde la pantalla Vídeo de Crear */
+function abrirPublicarVideo(pid) {
+  if (!pid) return;
+  PUB.seccion = 'ficha';
+  PUB.pid = pid;
+  PUB.ficha = null;
+  irAModulo('publicar', { pub: true });
+}
+
+function vistaPublicar() {
+  const caja = h('div', { clase: 'publicar' });
+  const pestanas = h('div', { clase: 'pestanas-publicar', role: 'tablist' });
+  [['cola', 'Cola y calendario'], ['ficha', PUB.ficha && PUB.seccion === 'ficha' ? recortar(PUB.ficha.nombre, 28) : 'Ficha de un vídeo'],
+    ['cuentas', 'Cuentas y ajustes']].forEach(([id, texto]) => pestanas.appendChild(h('button', {
+    clase: `mini${PUB.seccion === id ? ' activo' : ' fantasma'}`, role: 'tab',
+    'aria-selected': PUB.seccion === id ? 'true' : 'false',
+    disabled: id === 'ficha' && !PUB.pid,
+    title: id === 'ficha' && !PUB.pid ? 'elige un vídeo en la cola' : '',
+    onclick: () => irASeccionPublicar(id),
+  }, texto)));
+  caja.appendChild(h('div', { clase: 'light-cab' }, h('h2', {}, 'Publicar'), h('span', { clase: 'crece' }),
+    pestanas));
+  if (PUB.error) caja.appendChild(cajaError(PUB.error));
+  if (PUB.cargando && !(PUB.seccion === 'cola' ? PUB.cola : PUB.seccion === 'ficha' ? PUB.ficha : PUB.proyectos)) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'cargando…'));
+    return caja;
+  }
+  if (PUB.seccion === 'ficha') caja.appendChild(seccionFichaPublicar());
+  else if (PUB.seccion === 'cuentas') caja.appendChild(seccionCuentasPublicar());
+  else caja.appendChild(seccionColaPublicar());
+  return caja;
+}
+
+function avisoClavePublicar(clave) {
+  if (!clave || clave.puesta) {
+    return clave && clave.simulado
+      ? h('div', { clase: 'caja-aviso' }, 'Upload-Post SIMULADO: nada sale de verdad a ninguna red.')
+      : null;
+  }
+  return h('div', { clase: 'caja-aviso' },
+    'Todavía no hay clave de Upload-Post. Puedes preparar los textos y publicar a mano (copiar y descargar el MP4). '
+    + 'Para publicar y programar desde aquí, pon la clave en el .env de secretos del servidor como '
+    + 'UPLOADPOST_API_KEY (nunca en un chat): la casilla de Configuración llega con la próxima versión.');
+}
+
+function cuandoLegible(iso) {
+  if (!iso) return '';
+  const [dia, hora] = String(iso).split('T');
+  const [a, m, d] = dia.split('-').map(Number);
+  const fecha = new Date(Date.UTC(a, (m || 1) - 1, d || 1));
+  const nombre = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'][fecha.getUTCDay()];
+  return `${nombre} ${d}/${m}${hora ? ` ${hora.slice(0, 5)}` : ''}`;
+}
+
+function pastillaEstadoEnvio(estado) {
+  return h('span', { clase: `pastilla ${CLASE_ESTADO[estado] || ''}` }, ESTADOS_ENVIO[estado] || estado);
+}
+
+function filaEnvioCola(e) {
+  return h('div', { clase: 'fila fila-envio' },
+    h('span', { clase: 'meta hora-envio' }, cuandoLegible(e.cuando)),
+    h('b', {}, CORTOS_RED[e.red] || e.red),
+    h('button', { clase: 'mini fantasma nombre-envio', title: 'Abrir la ficha de este vídeo',
+      onclick: () => irASeccionPublicar('ficha', e.pid) }, e.video || e.pid),
+    e.cliente_nombre ? h('span', { clase: 'meta' }, e.cliente_nombre) : null,
+    h('span', { clase: 'crece' }),
+    pastillaEstadoEnvio(e.estado),
+    e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver') : null);
+}
+
+function seccionColaPublicar() {
+  const c = PUB.cola || {};
+  const caja = h('div', { clase: 'cola-publicar' });
+  const aviso = avisoClavePublicar(c.clave);
+  if (aviso) caja.appendChild(aviso);
+
+  const atencion = (c.esperan_ok || []).concat(c.fallidos || []);
+  if (atencion.length) {
+    const b = h('div', { clase: 'bloque bloque-atencion' }, h('h3', {}, 'Te necesitan'));
+    atencion.forEach(e => b.appendChild(filaEnvioCola(e)));
+    caja.appendChild(b);
+  }
+
+  // LA SEMANA
+  const semana = h('div', { clase: 'bloque' });
+  const desde = c.desde || '';
+  const mover = dias => {
+    const base = new Date(`${desde}T12:00:00Z`);
+    base.setUTCDate(base.getUTCDate() + dias);
+    PUB.desde = base.toISOString().slice(0, 10);
+    cargarPublicar();
+  };
+  semana.appendChild(h('div', { clase: 'fila' },
+    h('h3', {}, 'La semana'), h('span', { clase: 'meta' }, 'hora de Lima'),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini fantasma', title: 'Semana anterior', onclick: () => mover(-7) }, '‹'),
+    h('button', { clase: 'mini fantasma', onclick: () => { PUB.desde = ''; cargarPublicar(); } }, 'Hoy'),
+    h('button', { clase: 'mini fantasma', title: 'Semana siguiente', onclick: () => mover(7) }, '›')));
+  const rejilla = h('div', { clase: 'calendario-publicar' });
+  (c.dias || []).forEach(dia => {
+    const columna = h('div', { clase: `dia-publicar${dia === c.hoy ? ' hoy' : ''}` },
+      h('div', { clase: 'dia-cab' }, cuandoLegible(dia)));
+    const delDia = (c.envios || []).filter(e => String(e.cuando || '').startsWith(dia) && e.estado !== 'cancelado');
+    if (!delDia.length) columna.appendChild(h('div', { clase: 'meta dia-vacio' }, '—'));
+    delDia.forEach(e => columna.appendChild(h('button', {
+      clase: `envio-dia ${CLASE_ESTADO[e.estado] || ''}`,
+      title: `${NOMBRES_RED[e.red]} · ${e.video} · ${ESTADOS_ENVIO[e.estado] || e.estado}`,
+      onclick: () => irASeccionPublicar('ficha', e.pid),
+    }, h('span', { clase: 'hora' }, String(e.cuando || '').slice(11, 16)),
+    ` ${CORTOS_RED[e.red]} · ${recortar(e.video || '', 22)}`)));
+    rejilla.appendChild(columna);
+  });
+  semana.appendChild(rejilla);
+  caja.appendChild(semana);
+
+  // LOS VÍDEOS LISTOS
+  const listos = h('div', { clase: 'bloque' }, h('h3', {}, 'Vídeos listos para publicar'));
+  if (!(c.listos || []).length) {
+    listos.appendChild(h('div', { clase: 'meta' },
+      'Todavía no hay ningún vídeo montado. Se hacen en Crear; desde la pantalla Vídeo, «Enviar a Publicar».'));
+  }
+  (c.listos || []).forEach(v => {
+    const redes = h('span', { clase: 'redes-video' });
+    Object.keys(NOMBRES_RED).forEach(r => {
+      const estado = (v.envios || {})[r];
+      redes.appendChild(h('span', {
+        clase: `pastilla red-mini ${estado ? CLASE_ESTADO[estado] || '' : 'apagada'}`,
+        title: `${NOMBRES_RED[r]}: ${estado ? ESTADOS_ENVIO[estado] : 'sin publicar'}`,
+      }, CORTOS_RED[r]));
+    });
+    listos.appendChild(h('div', { clase: 'fila fila-listo' },
+      h('b', { clase: 'nombre-listo' }, v.nombre || v.pid),
+      v.cliente_nombre ? h('span', { clase: 'meta' }, v.cliente_nombre) : null,
+      h('span', { clase: 'crece' }), redes,
+      h('button', { clase: 'primario mini', onclick: () => irASeccionPublicar('ficha', v.pid) },
+        v.textos ? 'Abrir' : 'Preparar')));
+  });
+  caja.appendChild(listos);
+  return caja;
+}
+
+/* -------------------------------------------------------------- LA FICHA */
+
+function textosDeFicha(red) {
+  const f = PUB.ficha || {};
+  const guardado = (f.textos || {})[red] || {};
+  const borrador = PUB.borrador[red] || {};
+  return Object.assign({ titulo: '', descripcion: '', cta: '', hashtags: [] }, guardado, borrador);
+}
+
+/* Lo escrito a mano se guarda solo al dejar de teclear, como en el resto del
+   Studio. Los textos no entran en ninguna firma: guardarlos no cuesta nada. */
+function editarTextoPublicar(red, campo, valor) {
+  PUB.borrador[red] = Object.assign({}, PUB.borrador[red] || {}, {
+    [campo]: campo === 'hashtags' ? String(valor).split(/[\s,]+/).filter(Boolean) : valor,
+  });
+  clearTimeout(PUB.guardando);
+  PUB.guardando = setTimeout(guardarTextosPublicar, 900);
+}
+
+async function guardarTextosPublicar() {
+  PUB.guardando = null;
+  const textos = PUB.borrador;
+  if (!Object.keys(textos).length || !PUB.pid) return;
+  PUB.borrador = {};
+  try {
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
+      method: 'PUT', cuerpo: { textos },
+    });
+    repintarPublicarSinPisar();
+  } catch (e) {
+    toast(`no se han podido guardar los textos: ${e.message}`, true);
+  }
+}
+
+async function cambiarRedesPublicar(red, puesta) {
+  const f = PUB.ficha;
+  const redes = new Set(f.redes || []);
+  if (puesta) redes.add(red); else redes.delete(red);
+  try {
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
+      method: 'PUT', cuerpo: { redes: Object.keys(NOMBRES_RED).filter(r => redes.has(r)) },
+    });
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function escribirTextosPublicar(redes) {
+  if (!redes.length) { toast('elige al menos una red', true); return; }
+  const f = PUB.ficha;
+  const hay = redes.some(r => ((f.textos || {})[r] || {}).descripcion);
+  if (hay && !confirm('Claude volverá a escribir los textos de: '
+    + redes.map(r => NOMBRES_RED[r]).join(', ') + '.\n\nLo que hayas cambiado a mano en esas redes se sustituye. '
+    + 'Va con tu suscripción de Claude (no se paga aparte).')) return;
+  try {
+    await guardarTextosPublicar();
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/textos`), { method: 'POST', cuerpo: { redes } });
+    toast('Claude está escribiendo los textos…');
+    cargarPublicar(true);
+  } catch (e) { toast(e.message, true); }
+}
+
+function seccionFichaPublicar() {
+  const f = PUB.ficha;
+  const caja = h('div', { clase: 'ficha-publicar' });
+  if (!f) {
+    caja.appendChild(h('div', { clase: 'meta' }, PUB.pid ? 'cargando…' : 'Elige un vídeo en la cola.'));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini fantasma', onclick: () => irASeccionPublicar('cola') }, '‹ La cola'),
+    h('b', { clase: 'crece nombre-ficha' }, f.nombre),
+    f.cliente_nombre ? h('span', { clase: 'pastilla' }, f.cliente_nombre) : null,
+    h('span', { clase: 'meta' }, `${f.formato} · ${mmss(f.duracion_s)}`)));
+  const aviso = avisoClavePublicar(f.clave);
+  if (aviso) caja.appendChild(aviso);
+  if (!f.montado) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      'Este vídeo todavía no está montado. Termínalo en Crear y vuelve: se publica el MP4.'));
+    return caja;
+  }
+  if (f.desactualizada) {
+    caja.appendChild(h('div', { clase: 'caja-aviso fila' },
+      h('span', { clase: 'crece' }, 'La ficha está desactualizada: el guion o el montaje han cambiado desde que se '
+        + 'escribieron los textos. Revísalos o pide otros.'),
+      h('button', { clase: 'mini', onclick: () => escribirTextosPublicar(f.redes || []) }, 'Escribirlos otra vez')));
+  }
+  if (f.programados_viejos) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      `${f.programados_viejos} envío(s) programado(s) llevan el MP4 de antes del último montaje. `
+      + 'Si quieres que salga el nuevo, cancélalo y vuelve a programarlo.'));
+  }
+
+  // LAS REDES
+  const redes = h('div', { clase: 'bloque' }, h('h3', {}, 'Redes'));
+  const fila = h('div', { clase: 'fila redes-ficha' });
+  Object.keys(NOMBRES_RED).forEach(r => {
+    const enc = (f.encaje || {})[r] || {};
+    const cuenta = (f.cuentas || {})[r];
+    fila.appendChild(h('label', { clase: `casilla-red${enc.nivel === 'error' ? ' apagada' : ''}`,
+      title: enc.texto || (cuenta ? `cuenta: ${cuenta.nombre}` : '') },
+    h('input', { type: 'checkbox', checked: (f.redes || []).includes(r), disabled: enc.nivel === 'error',
+      onchange: ev => cambiarRedesPublicar(r, ev.target.checked) }),
+    ` ${NOMBRES_RED[r]}`,
+    enc.tipo ? h('span', { clase: 'meta' }, ` · ${enc.tipo}`) : null,
+    enc.nivel === 'aviso' || enc.nivel === 'error'
+      ? h('span', { clase: `pastilla ${enc.nivel === 'error' ? 'error' : 'aviso'}` }, '!') : null));
+  });
+  redes.appendChild(fila);
+  Object.keys(NOMBRES_RED).filter(r => (f.redes || []).includes(r) && ((f.encaje || {})[r] || {}).texto)
+    .forEach(r => redes.appendChild(h('div', { clase: 'meta' }, `${NOMBRES_RED[r]}: ${f.encaje[r].texto}`)));
+  // las cuentas, si ya se miraron: una red sin cuenta no se deja enviar
+  const sinCuenta = (f.ajustes || {}).cuentas_vistas
+    ? (f.redes || []).filter(r => r in (f.cuentas || {}) && !(f.cuentas || {})[r]) : [];
+  if (sinCuenta.length) {
+    redes.appendChild(h('div', { clase: 'caja-aviso fila' },
+      h('span', { clase: 'crece' }, `${sinCuenta.map(r => NOMBRES_RED[r]).join(', ')}: sin cuenta conectada en `
+        + 'Upload-Post. Conéctala desde Cuentas y ajustes, o quítala de las redes.'),
+      h('button', { clase: 'mini', onclick: () => irASeccionPublicar('cuentas') }, 'Cuentas y ajustes')));
+  }
+  redes.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'primario mini', disabled: f.escribiendo || !(f.redes || []).length,
+      onclick: () => escribirTextosPublicar(f.redes || []) },
+    f.escribiendo ? 'Claude está escribiendo…' : 'Que Claude escriba los textos'),
+    h('span', { clase: 'meta' }, 'Desde el encargo, el guion final y la duración real, con las reglas de cada red.'),
+    h('span', { clase: 'crece' }),
+    h('a', { clase: 'boton-enlace mini', href: API.archivo(f.pid, f.mp4), download: `${f.pid}.mp4` }, 'Descargar MP4')));
+  if (f.error_textos) redes.appendChild(cajaError(f.error_textos));
+  caja.appendChild(redes);
+
+  // LOS TEXTOS POR RED
+  (f.redes || []).forEach(r => caja.appendChild(bloqueTextoRed(r)));
+
+  // CUÁNDO
+  if ((f.redes || []).length) caja.appendChild(bloqueCuandoPublicar());
+
+  // LOS ENVÍOS
+  caja.appendChild(bloqueEnviosFicha());
+  return caja;
+}
+
+function bloqueTextoRed(red) {
+  const f = PUB.ficha;
+  const t = textosDeFicha(red);
+  const compuesto = (f.compuestos || {})[red] || {};
+  const b = h('div', { clase: 'bloque texto-red', datos: { red } });
+  b.appendChild(h('div', { clase: 'fila' }, h('h3', {}, NOMBRES_RED[red]),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini', title: 'Copiar el texto tal como sale en la red',
+      onclick: () => copiarTexto(compuesto.texto || '') }, 'Copiar texto'),
+    compuesto.titulo ? h('button', { clase: 'mini', onclick: () => copiarTexto(compuesto.titulo) }, 'Copiar título') : null,
+    h('button', { clase: 'mini fantasma', title: 'Que Claude reescriba solo esta red',
+      disabled: f.escribiendo, onclick: () => escribirTextosPublicar([red]) }, 'Reescribir')));
+  if (red === 'youtube' || red === 'facebook') {
+    b.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Título'));
+    b.appendChild(h('input', { type: 'text', value: t.titulo || '', maxlength: red === 'youtube' ? 100 : 255,
+      datos: { foco: `${red}-titulo` }, oninput: ev => editarTextoPublicar(red, 'titulo', ev.target.value) }));
+  }
+  b.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Texto'));
+  b.appendChild(h('textarea', { rows: 4, value: t.descripcion || '', datos: { foco: `${red}-descripcion` },
+    oninput: ev => editarTextoPublicar(red, 'descripcion', ev.target.value) }));
+  const pie = h('div', { clase: 'fila campos-red' });
+  pie.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Llamada a la acción',
+    h('input', { type: 'text', value: t.cta || '', datos: { foco: `${red}-cta` },
+      oninput: ev => editarTextoPublicar(red, 'cta', ev.target.value) })));
+  pie.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Hashtags',
+    h('input', { type: 'text', value: (t.hashtags || []).map(x => `#${x}`).join(' '), datos: { foco: `${red}-hashtags` },
+      oninput: ev => editarTextoPublicar(red, 'hashtags', ev.target.value) })));
+  b.appendChild(pie);
+  if (red === 'youtube' && (f.capitulos || []).length) {
+    b.appendChild(h('div', { clase: 'meta' }, 'Capítulos: '
+      + f.capitulos.map(c => `${mmss(c.t)} ${c.titulo}`).join(' · ')));
+  }
+  b.appendChild(h('details', { clase: 'asi-sale' },
+    h('summary', {}, `Así sale (${(compuesto.texto || '').length} caracteres)`),
+    h('pre', { clase: 'texto-compuesto' }, compuesto.texto || '—')));
+  (compuesto.avisos || []).forEach(a => b.appendChild(h('div', { clase: 'meta aviso-red' }, `⚠ ${a}`)));
+  return b;
+}
+
+function bloqueCuandoPublicar() {
+  const f = PUB.ficha;
+  const b = h('div', { clase: 'bloque cuando-publicar' }, h('h3', {}, 'Cuándo'));
+  const elegido = PUB.modoEnvio || 'programar';
+  const opciones = h('div', { clase: 'fila' });
+  [['ahora', 'Publicar ahora'], ['programar', 'Programar'], ['mano', 'Solo a mano']].forEach(([id, texto]) =>
+    opciones.appendChild(h('label', { clase: 'casilla-red' },
+      h('input', { type: 'radio', name: 'modo-envio', checked: elegido === id,
+        onchange: () => { PUB.modoEnvio = id; pintarModulo(); } }), ` ${texto}`)));
+  b.appendChild(opciones);
+  if (elegido === 'programar') {
+    if (!PUB.cuandoEnvio) PUB.cuandoEnvio = f.hora_sugerida;
+    b.appendChild(h('div', { clase: 'fila' },
+      h('input', { type: 'datetime-local', value: PUB.cuandoEnvio, datos: { foco: 'cuando' },
+        onchange: ev => { PUB.cuandoEnvio = ev.target.value; } }),
+      h('span', { clase: 'meta' }, 'hora de Lima')));
+  }
+  if (elegido === 'mano') {
+    b.appendChild(h('div', { clase: 'meta' },
+      'Copia el texto de cada red, descarga el MP4 y súbelo tú. Después, márcalo como subido para que quede en el historial.'));
+    const fila = h('div', { clase: 'fila' });
+    (f.redes || []).forEach(r => fila.appendChild(h('button', { clase: 'mini',
+      onclick: () => marcarAManoPublicar(r) }, `Ya lo subí a ${CORTOS_RED[r]}`)));
+    b.appendChild(fila);
+    return b;
+  }
+  const perfil = (f.ajustes || {}).perfil;
+  if (!perfil) {
+    b.appendChild(h('div', { clase: 'caja-aviso fila' },
+      h('span', { clase: 'crece' }, 'Este proyecto no tiene perfil de Upload-Post todavía.'),
+      h('button', { clase: 'mini', onclick: () => irASeccionPublicar('cuentas') }, 'Cuentas y ajustes')));
+  }
+  b.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'primario', disabled: PUB.enviando || !perfil || !(f.clave || {}).puesta,
+      onclick: () => confirmarEnvioPublicar(elegido) },
+    elegido === 'ahora' ? 'Publicar ahora…' : 'Programar…'),
+    h('button', { clase: 'mini fantasma', disabled: PUB.enviando,
+      title: 'Lo deja preparado sin enviarlo: saldrá en «Te necesitan» hasta que des el OK',
+      onclick: () => dejarPendientePublicar(elegido) }, 'Dejar esperando mi OK')));
+  return b;
+}
+
+async function confirmarEnvioPublicar(modo, repetir) {
+  const f = PUB.ficha;
+  const redes = (f.redes || []).filter(r => ((f.encaje || {})[r] || {}).nivel !== 'error');
+  if (!redes.length) { toast('elige al menos una red', true); return; }
+  const cuando = modo === 'programar' ? PUB.cuandoEnvio : '';
+  if (modo === 'programar' && !cuando) { toast('elige el día y la hora', true); return; }
+  const lineas = redes.map(r => `• ${NOMBRES_RED[r]}${(f.encaje[r] || {}).tipo ? ` (${f.encaje[r].tipo})` : ''}`
+    + `${(f.cuentas || {})[r] ? ` → ${f.cuentas[r].nombre}` : ''}`).join('\n');
+  const texto = `${modo === 'ahora' ? 'Publicar AHORA' : `Programar para ${cuandoLegible(cuando)} (hora de Lima)`}`
+    + ` «${f.nombre}» en:\n\n${lineas}\n\nCon el perfil de Upload-Post «${(f.ajustes || {}).perfil}». `
+    + 'Una vez publicado no se puede deshacer desde aquí.';
+  if (!repetir && !confirm(texto)) return;
+  PUB.enviando = true;
+  pintarModulo();
+  try {
+    await guardarTextosPublicar();
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(f.pid)}/enviar`), {
+      method: 'POST', cuerpo: { redes, modo, cuando, confirmado: true, repetir: !!repetir },
+    });
+    toast(modo === 'ahora' ? 'Subiendo a Upload-Post…' : 'Programando…');
+  } catch (e) {
+    if (/ya está publicado o programado/.test(e.message) && !repetir) {
+      PUB.enviando = false;
+      if (confirm(`${e.message}\n\n¿Publicarlo otra vez de todas formas?`)) {
+        confirmarEnvioPublicar(modo, true);
+        return;
+      }
+    } else {
+      toast(e.message, true);
+    }
+  }
+  PUB.enviando = false;
+  cargarPublicar(true);
+}
+
+async function dejarPendientePublicar(modo) {
+  const f = PUB.ficha;
+  const redes = (f.redes || []).filter(r => ((f.encaje || {})[r] || {}).nivel !== 'error');
+  if (!redes.length) { toast('elige al menos una red', true); return; }
+  try {
+    await guardarTextosPublicar();
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(f.pid)}/enviar`), {
+      method: 'POST', cuerpo: { redes, modo: 'pendiente', cuando: modo === 'programar' ? PUB.cuandoEnvio : '' },
+    });
+    toast('Queda esperando tu OK');
+    cargarPublicar(true);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function confirmarPendientePublicar(envio) {
+  const texto = `¿Dar el OK a ${NOMBRES_RED[envio.red]}?\n\n`
+    + (envio.cuando && !String(envio.cuando).startsWith(PUB.ficha.ahora.slice(0, 10)) || envio.modo === 'programado'
+      ? `Saldrá ${cuandoLegible(envio.cuando)} (hora de Lima), o ahora si esa hora ya pasó y lo eliges abajo.`
+      : 'Saldrá ahora.');
+  if (!confirm(texto)) return;
+  const pasada = envio.cuando && envio.cuando.slice(0, 16) <= PUB.ficha.ahora.slice(0, 16);
+  try {
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/envios/${envio.id}/confirmar`), {
+      method: 'POST', cuerpo: pasada ? { confirmado: true, modo: 'ahora' } : { confirmado: true },
+    });
+    toast('Enviado');
+  } catch (e) { toast(e.message, true); }
+  cargarPublicar(true);
+}
+
+async function cancelarEnvioPublicar(envio) {
+  if (!confirm(`¿Cancelar ${NOMBRES_RED[envio.red]}${envio.estado === 'programado'
+    ? ' (y las demás redes que iban en el mismo envío programado)' : ''}?`)) return;
+  try {
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/envios/${envio.id}/cancelar`), { method: 'POST' });
+    toast('Cancelado');
+  } catch (e) { toast(e.message, true); }
+  cargarPublicar(true);
+}
+
+async function marcarAManoPublicar(red) {
+  const url = prompt(`Enlace del post en ${NOMBRES_RED[red]} (opcional):`, '');
+  if (url === null) return;
+  try {
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/a-mano`), { method: 'POST', cuerpo: { red, url } });
+    toast('Apuntado en el historial');
+  } catch (e) { toast(e.message, true); }
+  cargarPublicar(true);
+}
+
+function bloqueEnviosFicha() {
+  const f = PUB.ficha;
+  const b = h('div', { clase: 'bloque' }, h('h3', {}, 'Envíos'));
+  if (!(f.envios || []).length) {
+    b.appendChild(h('div', { clase: 'meta' }, 'Todavía no se ha publicado nada de este vídeo.'));
+    return b;
+  }
+  f.envios.forEach(e => {
+    b.appendChild(h('div', { clase: 'fila fila-envio' },
+      h('b', {}, CORTOS_RED[e.red] || e.red),
+      h('span', { clase: 'meta hora-envio' }, cuandoLegible(e.cuando)),
+      pastillaEstadoEnvio(e.estado),
+      h('span', { clase: 'crece meta motivo-envio' }, e.error || e.nota || ''),
+      e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver el post') : null,
+      e.estado === 'espera_ok' ? h('button', { clase: 'primario mini', onclick: () => confirmarPendientePublicar(e) }, 'Dar el OK') : null,
+      ['programado', 'espera_ok'].includes(e.estado)
+        ? h('button', { clase: 'mini peligro', onclick: () => cancelarEnvioPublicar(e) }, 'Cancelar') : null));
+  });
+  return b;
+}
+
+/* ---------------------------------------------------- CUENTAS Y AJUSTES */
+
+async function probarClavePublicar() {
+  try {
+    const r = await pedir(rutaPublicar('/probar'), { method: 'POST' });
+    toast(r.mensaje || (r.ok ? 'funciona' : 'no funciona'), !r.ok);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function accionProyectoPublicar(cid, accion, cuerpo) {
+  try {
+    const r = await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(cid)}/${accion}`), {
+      method: 'POST', cuerpo: cuerpo || {},
+    });
+    if (accion === 'conectar' && r.url) {
+      window.open(r.url, '_blank', 'noopener');
+      toast(`Enlace abierto (vale ${r.caduca || '48 h'}). Cuando termines de conectar, pulsa «Ver cuentas».`);
+    } else if (accion === 'cuentas' && r.existe === false) {
+      toast('Ese perfil no existe en Upload-Post: créalo con «Crear perfil».', true);
+    } else {
+      toast('Hecho');
+    }
+    PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function guardarAjustePublicar(cid, cambios) {
+  try {
+    await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(cid)}`), { method: 'PUT', cuerpo: cambios });
+    toast('Guardado');
+  } catch (e) { toast(e.message, true); }
+}
+
+function seccionCuentasPublicar() {
+  const datos = PUB.proyectos || {};
+  const caja = h('div', { clase: 'cuentas-publicar' });
+  const clave = datos.clave || {};
+  caja.appendChild(h('div', { clase: 'bloque' },
+    h('h3', {}, 'Upload-Post'),
+    h('div', { clase: 'fila' },
+      h('span', { clase: `pastilla ${clave.puesta ? 'ok' : 'aviso'}` },
+        clave.simulado ? 'simulado' : clave.puesta ? `clave puesta ${clave.cola || ''}` : 'sin clave'),
+      clave.origen && !clave.simulado ? h('span', { clase: 'meta' }, `(de ${clave.origen === 'env' ? 'el .env de secretos'
+        : clave.origen === 'entorno' ? 'el entorno del servicio' : 'el almacén de claves'})`) : null,
+      h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini', disabled: !clave.puesta, onclick: probarClavePublicar }, 'Probar')),
+    clave.puesta ? null : avisoClavePublicar(clave)));
+  (datos.proyectos || []).forEach(p => caja.appendChild(tarjetaProyectoPublicar(p)));
+  return caja;
+}
+
+function tarjetaProyectoPublicar(p) {
+  const a = p.ajustes || {};
+  const b = h('div', { clase: 'bloque proyecto-publicar' }, h('h3', {}, p.nombre));
+  const guardar = (campo, valor) => guardarAjustePublicar(p.id, { [campo]: valor });
+  b.appendChild(h('div', { clase: 'fila' },
+    h('label', { clase: 'etiqueta-campo' }, 'Perfil de Upload-Post',
+      h('input', { type: 'text', value: a.perfil || '', placeholder: p.perfil_sugerido || '',
+        onchange: ev => guardar('perfil', ev.target.value.trim()) })),
+    a.perfil ? null : h('button', { clase: 'mini', onclick: () => accionProyectoPublicar(p.id, 'perfil', {}) },
+      'Crear perfil'),
+    a.perfil ? h('button', { clase: 'mini', onclick: () => accionProyectoPublicar(p.id, 'cuentas') }, 'Ver cuentas') : null,
+    a.perfil ? h('button', { clase: 'mini primario', title: 'Abre la página de Upload-Post para conectar o volver a conectar las cuentas de este cliente',
+      onclick: () => accionProyectoPublicar(p.id, 'conectar', { volver_a: location.href }) }, 'Conectar') : null));
+  const cuentas = h('div', { clase: 'fila cuentas-proyecto' });
+  Object.keys(NOMBRES_RED).forEach(r => {
+    const c = (a.cuentas || {})[r];
+    cuentas.appendChild(h('span', { clase: `pastilla ${c ? (c.reconectar ? 'aviso' : 'ok') : 'apagada'}`,
+      title: c ? (c.reconectar ? 'hay que volver a conectarla' : c.nombre) : 'sin conectar' },
+    `${CORTOS_RED[r]}${c ? `: ${recortar(c.nombre, 18)}` : ''}`));
+  });
+  if (a.perfil) b.appendChild(cuentas);
+  const fijos = h('details', { clase: 'ajustes-fijos' }, h('summary', {}, 'Lo fijo de este proyecto'));
+  fijos.appendChild(h('div', { clase: 'fila' },
+    h('label', { clase: 'etiqueta-campo' }, 'Hora por defecto (Lima)',
+      h('input', { type: 'time', value: a.hora || '19:00', onchange: ev => guardar('hora', ev.target.value) })),
+    h('label', { clase: 'etiqueta-campo' }, 'YouTube',
+      h('select', { onchange: ev => guardar('privacidad_youtube', ev.target.value) },
+        ...[['public', 'público'], ['unlisted', 'oculto'], ['private', 'privado']].map(([v, t]) =>
+          h('option', { value: v, selected: a.privacidad_youtube === v }, t))))));
+  fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Firma (va al final de cada texto)',
+    h('input', { type: 'text', value: a.firma || '', onchange: ev => guardar('firma', ev.target.value) })));
+  fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Hashtags fijos',
+    h('input', { type: 'text', value: a.hashtags || '', placeholder: '#marca #ciudad',
+      onchange: ev => guardar('hashtags', ev.target.value) })));
+  fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Tono de los textos',
+    h('input', { type: 'text', value: a.tono || '', placeholder: 'cercano, con humor, de tú',
+      onchange: ev => guardar('tono', ev.target.value) })));
+  fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Página de Facebook (solo si hay más de una)',
+    h('input', { type: 'text', value: a.facebook_pagina || '', onchange: ev => guardar('facebook_pagina', ev.target.value) })));
+  const casillas = h('div', { clase: 'fila' });
+  [['marcar_ia', 'Marcar como hecho con IA'], ['avisar_youtube', 'Avisar a los suscriptores de YouTube']]
+    .forEach(([campo, texto]) => casillas.appendChild(h('label', { clase: 'casilla-red' },
+      h('input', { type: 'checkbox', checked: !!a[campo], onchange: ev => guardar(campo, ev.target.checked) }),
+      ` ${texto}`)));
+  casillas.appendChild(h('span', { clase: 'meta' }, 'La confirmación antes de enviar no se puede quitar.'));
+  fijos.appendChild(casillas);
+  const redes = h('div', { clase: 'fila' }, h('span', { clase: 'meta' }, 'Redes marcadas de fábrica:'));
+  Object.keys(NOMBRES_RED).forEach(r => redes.appendChild(h('label', { clase: 'casilla-red' },
+    h('input', { type: 'checkbox', checked: (a.redes || []).includes(r), onchange: ev => {
+      const lista = new Set(a.redes || []);
+      if (ev.target.checked) lista.add(r); else lista.delete(r);
+      a.redes = Object.keys(NOMBRES_RED).filter(x => lista.has(x));
+      guardar('redes', a.redes);
+    } }), ` ${CORTOS_RED[r]}`)));
+  fijos.appendChild(redes);
+  b.appendChild(fijos);
+  return b;
+}
+
+/* ----------------------------------------- en la pantalla Vídeo de Crear */
+
+/* El bloque «Publicar» debajo del vídeo montado: el botón para llevarlo a
+   Publicar y, si ya salió o está programado, en qué redes. Lo llama UNA línea
+   de `vistaVideoLight`; sin MP4 no enseña nada. */
+function bloquePublicarEnVideo(v) {
+  if (!v || !v.pid || !hayMp4Light() || trabajoVideoLight()) return null;
+  const caja = h('div', { clase: 'bloque-publicar-video fila' },
+    h('b', {}, 'Publicar'),
+    h('span', { clase: 'meta crece' }, 'Textos por red, programar y subir a TikTok, Reels, YouTube y Facebook.'));
+  const listo = ((PUB.cola || {}).listos || []).find(x => x.pid === v.pid);
+  Object.entries((listo || {}).envios || {}).forEach(([r, estado]) => caja.appendChild(h('span', {
+    clase: `pastilla ${CLASE_ESTADO[estado] || ''}`, title: `${NOMBRES_RED[r]}: ${ESTADOS_ENVIO[estado] || estado}`,
+  }, CORTOS_RED[r])));
+  caja.appendChild(h('a', { href: '#', clase: 'boton-enlace destacado',
+    onclick: ev => { ev.preventDefault(); abrirPublicarVideo(v.pid); } }, 'Enviar a Publicar'));
+  return caja;
+}
+
+montarModulos();
 
 /* ARRANCA AQUI, Y ESTA LINEA VA LA ULTIMA DEL FICHERO A PROPOSITO.
    `arrancar` lee el modo puesto, y el modo vive en `MODOS`, que es un

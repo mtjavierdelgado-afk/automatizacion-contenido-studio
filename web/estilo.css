@@ -3176,3 +3176,133 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 /* Descargar por partes (abrirDescargaPorPartes) */
 .partes-video { flex-wrap: wrap; gap: 6px 14px; }
 .casilla-parte { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+
+/* ================================================================ PUBLICAR
+   Rama `publicar-redes-1` (16-10-2026): la barra de módulos y el módulo
+   Publicar. Todo nuevo y aquí, al final, para no chocar con las otras ramas.
+   Ver la sección PUBLICAR al final de app.js. */
+
+/* La barra de módulos: una fila fina debajo de la cabecera. Cabe en un móvil
+   de 360 px; si no cupiera, se desliza de lado en vez de empujar la página. */
+.barra-modulos {
+  flex: 0 0 auto; display: flex; gap: 4px; align-items: center;
+  padding: 4px 12px; background: var(--panel); border-bottom: 1px solid var(--linea);
+  overflow-x: auto; scrollbar-width: none;
+}
+.barra-modulos::-webkit-scrollbar { display: none; }
+.boton-modulo {
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
+  padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 600;
+  color: var(--tenue); text-decoration: none; border: 1px solid transparent;
+}
+.boton-modulo:hover { color: var(--texto); border-color: var(--linea); }
+.boton-modulo:focus-visible { outline: 2px solid var(--acento); outline-offset: 1px; }
+.boton-modulo.activo { color: var(--sobre-acento); background: var(--degradado); }
+.aviso-modulo {
+  min-width: 18px; padding: 0 5px; border-radius: 999px; font-size: 11px; line-height: 18px;
+  text-align: center; background: var(--malo); color: var(--sobre-acento);
+}
+
+/* Fuera de «Crear», el panel de siempre se esconde (sigue vivo debajo) y
+   se ve el contenedor del módulo, que hace scroll igual que #panel. */
+#modulo {
+  display: none; flex: 1; min-width: 0; overflow-y: auto;
+  padding: 18px var(--margen-panel) 60px;
+  -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+}
+body.en-modulo #panel { display: none; }
+body.en-modulo #modulo { display: block; }
+.modulo-contenido { max-width: 1180px; margin: 0 auto; }
+
+/* Inicio y Automatizar: tarjetas */
+.tarjetas-modulo { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 12px 0 16px; }
+.tarjeta-modulo {
+  display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
+  background: var(--panel); border: 1px solid var(--linea); border-radius: 11px; padding: 14px 16px;
+}
+.tarjeta-modulo p { margin: 0; flex: 1; }
+.tarjeta-modulo.apagada { opacity: .7; }
+
+/* Las pestañas de Publicar */
+.pestanas-publicar { display: flex; gap: 4px; flex-wrap: wrap; }
+.pestanas-publicar button.activo { border-color: var(--acento); color: var(--texto); background: var(--marcado); }
+
+/* La cola: lo que te necesita, la semana y los vídeos listos */
+.bloque-atencion { border-color: var(--aviso-borde); }
+.fila-envio { gap: 8px; padding: 5px 0; border-top: 1px solid var(--linea-suave); min-width: 0; flex-wrap: wrap; }
+.fila-envio:first-of-type { border-top: 0; }
+.hora-envio { min-width: 92px; font-variant-numeric: tabular-nums; }
+.nombre-envio { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.motivo-envio { min-width: 0; overflow-wrap: anywhere; }
+.calendario-publicar {
+  display: grid; grid-template-columns: repeat(7, minmax(110px, 1fr)); gap: 6px;
+  margin-top: 10px; overflow-x: auto;
+}
+.dia-publicar {
+  background: var(--hueco); border: 1px solid var(--linea); border-radius: 9px;
+  padding: 6px; min-height: 90px; display: flex; flex-direction: column; gap: 4px;
+}
+.dia-publicar.hoy { border-color: var(--acento); }
+.dia-cab { font-size: 12px; font-weight: 600; color: var(--tenue); text-transform: capitalize; }
+.dia-vacio { text-align: center; }
+button.envio-dia {
+  text-align: left; font-size: 12px; padding: 4px 6px; border-radius: 6px; white-space: normal;
+  line-height: 1.3; border-left: 3px solid var(--linea);
+}
+button.envio-dia .hora { font-weight: 700; font-variant-numeric: tabular-nums; }
+button.envio-dia.ok { border-left-color: var(--ok); }
+button.envio-dia.ejecutando { border-left-color: var(--acento); }
+button.envio-dia.aviso { border-left-color: var(--aviso); }
+button.envio-dia.error { border-left-color: var(--malo); }
+.fila-listo { gap: 8px; padding: 6px 0; border-top: 1px solid var(--linea-suave); min-width: 0; }
+.nombre-listo { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.redes-video { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.pastilla.apagada { opacity: .45; }
+.pastilla.red-mini { font-size: 11px; }
+
+/* La ficha de un vídeo */
+.nombre-ficha { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.redes-ficha { gap: 8px 18px; }
+.casilla-red {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer; margin: 0;
+  font-size: 13px; text-transform: none; letter-spacing: normal; color: var(--texto);
+}
+.casilla-red.apagada { opacity: .55; cursor: not-allowed; }
+.texto-red input[type=text], .texto-red textarea, .proyecto-publicar input[type=text] { width: 100%; }
+.etiqueta-campo { display: flex; flex-direction: column; gap: 3px; margin-top: 8px; flex: 1; min-width: 180px; }
+.etiqueta-campo > input, .etiqueta-campo > select { text-transform: none; letter-spacing: normal; font-size: 14px; color: var(--texto); }
+.campos-red { align-items: flex-start; }
+.asi-sale { margin-top: 10px; }
+.asi-sale > summary { cursor: pointer; font-size: 13px; color: var(--tenue); }
+.texto-compuesto {
+  white-space: pre-wrap; overflow-wrap: anywhere; background: var(--hueco); border: 1px solid var(--linea);
+  border-radius: 8px; padding: 10px; font: inherit; font-size: 13px; margin: 6px 0 0;
+}
+.aviso-red { color: var(--aviso); }
+.cuando-publicar input[type=datetime-local] { max-width: 240px; }
+
+/* Un enlace que navega con aspecto de botón (Descargar MP4, Enviar a Publicar) */
+a.boton-enlace {
+  display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 6px; font-size: 12px;
+  border: 1px solid var(--linea); background: var(--boton); color: var(--texto); text-decoration: none;
+}
+a.boton-enlace:hover { border-color: var(--acento); }
+a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acento); border-color: transparent; font-weight: 600; }
+
+/* El bloque «Publicar» debajo del vídeo montado, en Crear */
+.bloque-publicar-video {
+  margin: 12px 0; padding: 10px 12px; border: 1px solid var(--linea); border-radius: 10px;
+  background: var(--panel); gap: 8px; min-width: 0;
+}
+
+/* Cuentas y ajustes */
+.cuentas-proyecto { gap: 6px; margin-top: 8px; }
+.ajustes-fijos { margin-top: 10px; }
+.ajustes-fijos > summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.ajustes-fijos .fila { margin-top: 6px; }
+
+@media (max-width: 600px) {
+  .boton-modulo { padding: 4px 9px; font-size: 12px; }
+  .hora-envio { min-width: 0; }
+  .calendario-publicar { grid-template-columns: repeat(7, minmax(120px, 1fr)); }
+}

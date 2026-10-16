@@ -10,6 +10,37 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Publicar en redes (16 de octubre)**
+- **Arriba hay una barra de módulos: Inicio · Crear · Publicar · Automatizar.**
+  «Crear» es lo de siempre (estilos y vídeos) y es lo que se abre. «Inicio»
+  enseña los tres módulos y lo que sale hoy. «Automatizar» (la Parrilla de
+  guiones y el piloto automático) llega en la próxima versión.
+- **Debajo de un vídeo montado, «Enviar a Publicar».** Abre su ficha: eliges
+  las redes (TikTok, Instagram Reels, YouTube, Facebook), Claude escribe el
+  texto de cada una desde el encargo, el guion final y la duración real (con
+  título y capítulos en YouTube), y lo corriges a mano si quieres; se guarda
+  solo. Cada red tiene «Copiar texto» y está «Descargar MP4» para subirlo tú.
+  Si el vídeo no encaja en una red (horizontal en TikTok, más de 3 minutos
+  como Short…), se avisa; si la red no lo acepta, no se deja enviar.
+- **Publicar ahora, programar (día y hora de Lima) o solo a mano.** Con
+  Upload-Post, siempre con una confirmación delante que no se puede quitar.
+  Cada red es su propio envío: si una falla, las demás siguen, y cada una
+  enseña su estado y el enlace al post. Lo programado se puede cancelar, y
+  un envío puede quedarse «esperando tu OK» hasta que lo confirmes. Volver a
+  publicar el mismo vídeo en la misma red pide confirmarlo.
+- **La cola y el calendario:** los vídeos listos, la semana con lo que sale
+  cada día y, arriba, lo que te necesita (lo que falló o espera tu OK).
+- **Cuentas y ajustes por proyecto:** el perfil de Upload-Post de cada
+  cliente, «Conectar» para que conecte sus cuentas, y lo fijo del proyecto
+  (hora por defecto, firma, hashtags, tono, marcar como hecho con IA, avisar a
+  los suscriptores de YouTube).
+- **La clave de Upload-Post todavía no tiene casilla en Configuración** (llega
+  en la próxima versión). Mientras, va en el `.env` de la carpeta de secretos
+  del servidor como `UPLOADPOST_API_KEY=…`; nunca en un chat. Sin clave se
+  puede preparar todo y publicar a mano.
+- Los textos para redes gastan tokens de tu suscripción de Claude y se apuntan
+  en el coste del vídeo. Nada de Publicar deja obsoleto el vídeo.
+
 **Subtítulos a tu gusto y el «atrás» del móvil (13 de octubre, noche)**
 - **La fuente y el sitio de los subtítulos se eligen.** En el editor de
   subtítulos (en el Encargo y debajo del vídeo montado) hay dos filas nuevas:

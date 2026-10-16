@@ -57,8 +57,11 @@ import io
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
+import tempfile
+import threading
 import time
 
 import numpy as np
@@ -842,48 +845,68 @@ def construir_cama(ficha, duracion_s, destino):
     carpeta = os.path.dirname(os.path.abspath(destino))
     os.makedirs(carpeta, exist_ok=True)
 
-    trozos, faltan = [], []
-    for tramo in tramos:
-        origen = banco("musica", _nombre_de(tramo))
-        if not os.path.exists(origen):
-            faltan.append(tramo.get("titulo") or tramo.get("id"))
-            continue
-        # el ultimo no necesita cola de cruce: no se encadena con nada
-        cola = cruce if tramo is not tramos[-1] else 0.0
-        quiere = max(1.0, total * float(tramo.get("fraccion") or 0) + cola)
-        trozo = os.path.join(carpeta, f"tramo{len(trozos)}.wav")
-        corto = float(tramo.get("duracion") or 0) < quiere + 1
-        orden = [medios.ffmpeg(), "-y", "-loglevel", "error"]
-        if corto:
-            orden += ["-stream_loop", "3"]
-        orden += ["-i", origen, "-t", f"{quiere:.2f}",
-                  "-af", f"loudnorm=I={MUSICA_LUFS:.0f}:TP=-2:LRA=11",
-                  "-ar", str(FRECUENCIA), "-ac", "2", trozo]
-        subprocess.run(orden, capture_output=True, text=True, timeout=600,
-                       check=True, **medios.SIN_VENTANA)
-        trozos.append(trozo)
-    if not trozos:
-        return None, faltan
+    # LOS TROZOS INTERMEDIOS, EN UNA CARPETA QUE SE BORRA. Iban sueltos al
+    # lado de `destino` (el trabajo/ del render): `tramoN.wav` y `cadenaN.wav`
+    # son WAV sin comprimir, se versionaban con el render y `sembrar_trabajo`
+    # los arrastraba a cada version siguiente, tambien los de una cama vieja
+    # con mas tramos (revision 16-10-2026).
+    temporal = tempfile.mkdtemp(prefix="_cama_", dir=carpeta)
+    try:
+        trozos, faltan = [], []
+        for tramo in tramos:
+            origen = banco("musica", _nombre_de(tramo))
+            if not os.path.exists(origen):
+                faltan.append(tramo.get("titulo") or tramo.get("id"))
+                continue
+            # el ultimo no necesita cola de cruce: no se encadena con nada
+            cola = cruce if tramo is not tramos[-1] else 0.0
+            quiere = max(1.0, total * float(tramo.get("fraccion") or 0) + cola)
+            trozo = os.path.join(temporal, f"tramo{len(trozos)}.wav")
+            corto = float(tramo.get("duracion") or 0) < quiere + 1
+            orden = [medios.ffmpeg(), "-y", "-loglevel", "error"]
+            if corto:
+                orden += ["-stream_loop", "3"]
+            orden += ["-i", origen, "-t", f"{quiere:.2f}",
+                      "-af", f"loudnorm=I={MUSICA_LUFS:.0f}:TP=-2:LRA=11",
+                      "-ar", str(FRECUENCIA), "-ac", "2", trozo]
+            _ffmpeg_cama(orden, f"el tramo «{tramo.get('titulo') or tramo.get('id')}»")
+            trozos.append(trozo)
+        if not trozos:
+            return None, faltan
 
-    cadena = trozos[0]
-    for indice in range(1, len(trozos)):
-        siguiente = os.path.join(carpeta, f"cadena{indice}.wav")
-        subprocess.run(
-            [medios.ffmpeg(), "-y", "-loglevel", "error",
-             "-i", cadena, "-i", trozos[indice], "-filter_complex",
-             f"[0:a][1:a]acrossfade=d={cruce:g}:c1=tri:c2=tri", siguiente],
-            capture_output=True, text=True, timeout=600, check=True,
-            **medios.SIN_VENTANA)
-        cadena = siguiente
-    salida = float(min(cruce, max(1.0, total * 0.05)))
-    subprocess.run(
-        [medios.ffmpeg(), "-y", "-loglevel", "error", "-i", cadena, "-af",
-         f"apad=whole_dur={total + 1:.2f},atrim=0:{total:.3f},"
-         f"afade=t=in:st=0:d=3,afade=t=out:st={max(0.0, total - salida):.2f}:d={salida:g}",
-         "-ar", str(FRECUENCIA), "-ac", "2", destino],
-        capture_output=True, text=True, timeout=600, check=True,
-        **medios.SIN_VENTANA)
-    return destino, faltan
+        cadena = trozos[0]
+        for indice in range(1, len(trozos)):
+            siguiente = os.path.join(temporal, f"cadena{indice}.wav")
+            _ffmpeg_cama(
+                [medios.ffmpeg(), "-y", "-loglevel", "error",
+                 "-i", cadena, "-i", trozos[indice], "-filter_complex",
+                 f"[0:a][1:a]acrossfade=d={cruce:g}:c1=tri:c2=tri", siguiente],
+                f"el cruce {indice}")
+            cadena = siguiente
+        salida = float(min(cruce, max(1.0, total * 0.05)))
+        _ffmpeg_cama(
+            [medios.ffmpeg(), "-y", "-loglevel", "error", "-i", cadena, "-af",
+             f"apad=whole_dur={total + 1:.2f},atrim=0:{total:.3f},"
+             f"afade=t=in:st=0:d=3,afade=t=out:st={max(0.0, total - salida):.2f}:d={salida:g}",
+             "-ar", str(FRECUENCIA), "-ac", "2", destino],
+            "el remate de la cama")
+        return destino, faltan
+    finally:
+        shutil.rmtree(temporal, ignore_errors=True)
+
+
+def _ffmpeg_cama(orden, que):
+    """Una pasada de ffmpeg de la cama; si falla, el error DICE por que.
+
+    Con `check=True` a secas salia un `CalledProcessError` con la orden y sin
+    una linea de lo que contesto ffmpeg, y eso despues de renderizar todos los
+    clips del video.
+    """
+    proceso = subprocess.run(orden, capture_output=True, text=True, timeout=600,
+                             **medios.SIN_VENTANA)
+    if proceso.returncode != 0:
+        raise RuntimeError(f"ffmpeg no pudo montar {que} de la banda sonora: "
+                           f"{(proceso.stderr or '').strip()[-400:] or 'sin mensaje'}")
 
 
 # ---------------------------------------------------------------- Freesound
@@ -1449,13 +1472,26 @@ def _a_wav(origen, destino=None):
     destino = destino or os.path.splitext(origen)[0] + f".{FRECUENCIA}.wav"
     if os.path.exists(destino) and os.path.getmtime(destino) >= os.path.getmtime(origen):
         return destino
-    proceso = subprocess.run(
-        [medios.ffmpeg(), "-y", "-loglevel", "error", "-i", origen,
-         "-ac", "2", "-ar", str(FRECUENCIA), "-c:a", "pcm_s16le", destino],
-        capture_output=True, text=True, timeout=300, **medios.SIN_VENTANA)
-    if proceso.returncode != 0 or not os.path.exists(destino):
-        raise RuntimeError(f"no se pudo decodificar {os.path.basename(origen)}: "
-                           f"{proceso.stderr[-200:]}")
+    # DE GOLPE: a un nombre propio y despues `os.replace`. Escrito encima, un
+    # ffmpeg cortado a medias (un reinicio del servicio, el plazo) dejaba un WAV
+    # truncado MAS NUEVO que el original, y la cache lo daba por bueno para
+    # siempre: ese efecto sonaba cortado en todos los videos. Y dos renders a
+    # la vez leian uno a medio escribir (revision 16-10-2026).
+    parcial = f"{destino}.{os.getpid()}.{threading.get_ident()}.parcial.wav"
+    try:
+        proceso = subprocess.run(
+            [medios.ffmpeg(), "-y", "-loglevel", "error", "-i", origen,
+             "-ac", "2", "-ar", str(FRECUENCIA), "-c:a", "pcm_s16le", parcial],
+            capture_output=True, text=True, timeout=300, **medios.SIN_VENTANA)
+        if proceso.returncode != 0 or not os.path.exists(parcial):
+            raise RuntimeError(f"no se pudo decodificar {os.path.basename(origen)}: "
+                               f"{proceso.stderr[-200:]}")
+        medios.reemplazar(parcial, destino)   # insiste si Windows lo tiene abierto
+    finally:
+        try:
+            os.remove(parcial)
+        except OSError:
+            pass
     return destino
 
 

@@ -29,9 +29,10 @@ doble por imagen y pierden el registro del gasto.
 
 **3. Un guardián calibrado sobre un fallo aprende a dar por bueno ese fallo.**
 `p6_assets._planos_repetidos` tumba la tanda si dos planos acaban con la MISMA
-imagen. Tiene dos excepciones —la cartela y la continuación de un plano largo—
-y las dos están explicadas en su docstring. Si añades una tercera, comprueba
-antes que lo que la justifica no es un bug.
+imagen. Tiene tres excepciones —la cartela, la continuación de un plano largo
+y los planos que copian el mismo mapa o gráfico (16-10-2026)— y las tres están
+explicadas en su docstring. Si añades una cuarta, comprueba antes que lo que la
+justifica no es un bug.
 
 ---
 
@@ -268,7 +269,9 @@ La burbuja de abajo a la derecha es `pasos/asistente.py` más las rutas
   vetos de `asistente.vetos_de_lectura`: `./secretos`, el almacén donde esté
   (`ESTUDIO_SECRETOS`), la sesión del CLI (`~/.claude`, `CLAUDE_CONFIG_DIR`) y
   `.env`, `claves.json` y `.credentials.json` por nombre en todo el disco
-  (`Read(//**/.env)`: la forma `**/.env` solo vale dentro del cwd). Está
+  (`Read(//**/.env)`: la forma `**/.env` solo vale dentro del cwd). Cada
+  veto sale también como `Grep(...)` y `Glob(...)` (16-10-2026): los vetos de
+  `Read` solo frenan a Grep «cuando pueden», y `datos/**` sí se puede buscar. Está
   medido con el CLI de verdad (13-10-2026): lee el código y los proyectos, y
   niega las seis rutas con secretos. El prompt de sistema también se lo dice,
   pero la regla es la que manda. Si alguna vez las claves se guardan en otra
@@ -478,3 +481,11 @@ Tres cosas que ahorran perseguir fallos que no existen:
   parte y lo dice. No es un fallo.
 - `prueba_login` llama al CLI de Claude de verdad. Es la única que comprueba que
   el CLI sigue dejando entrar sin terminal y sin abrir un navegador.
+- **Lo del despliegue no va en `pruebas.sh`**: si tocas `despliegue/asvs` o
+  `estudio-clave`, corre a mano `bash despliegue/prueba/prueba_actualizar.sh` y
+  `bash despliegue/prueba/prueba_estudio_clave.sh` (raíz falsa, no tocan nada).
+
+**Las diapositivas suenan con la toma de `voz`**, no con la de
+`revision_audio` (`_audio_de_la_toma`, 16-10-2026): los planos se cortan contra
+la voz y el render monta la voz; la revisión es una resíntesis con sus propios
+tiempos, y con ella «Oírla» saltaba al final del audio y se callaba.

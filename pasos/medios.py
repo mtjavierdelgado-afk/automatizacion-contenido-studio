@@ -1728,6 +1728,14 @@ def rasterizar(svg, destino, ancho, alto, transparente=True, espera_ms=1800):
     # Con el MISMO SVG el segundo intento va: si el SVG estuviera mal fallarian
     # los tres igual, asi que insistir no tapa un error de verdad -- solo
     # distingue "esto no se puede pintar" de "esta vez no salio".
+    # LO QUE HUBIERA EN `destino` SE QUITA ANTES. El exito se mide por que el
+    # PNG exista, y `trabajo/` llega sembrado con la version anterior: si Edge
+    # fallaba los tres intentos, el PNG VIEJO contaba como recien pintado (un
+    # fondo de cartela con la paleta de antes, sin un solo aviso). Si no se
+    # puede quitar, se dice: pintar encima no probaria nada (revision 16-10).
+    if os.path.exists(destino) and not borrar(destino):
+        raise RuntimeError(f"no se puede rehacer {destino}: el fichero anterior "
+                           f"sigue abierto por otro proceso")
     ultimo = ""
     for intento in range(1, INTENTOS_RASTERIZAR + 1):
         perfil = tempfile.mkdtemp(prefix="edge_ras_")

@@ -4032,6 +4032,16 @@ def _cadenas_por_set(escenas, orden):
     return sorted(grupos.values(), key=len, reverse=True)
 
 
+def _copiados_del_plan(escenas):
+    """Los planos que COPIAN su imagen a proposito, segun el plan. -> {ids}
+
+    La continuacion de una toma larga (`sigue_a`) y el plano de un mapa o un
+    grafico (`componente`). Es lo que `_planos_repetidos` no cuenta como
+    repetido; ver su docstring."""
+    return {e["id"] for e in escenas or []
+            if e.get("sigue_a") or e.get("componente")}
+
+
 def _planos_repetidos(resultados, trabajo, copiados=()):
     """Grupos de escenas que han acabado con un fichero identico.
 
@@ -4051,6 +4061,18 @@ def _planos_repetidos(resultados, trabajo, copiados=()):
                         imagen copiada: misma imagen, zoom partido, sin
                         transicion en medio. Es byte a byte identica porque
                         tiene que serlo.
+      el COMPONENTE     un mapa o un grafico (`escena["componente"]`) no se
+                        dibuja: se COPIA de `assets/componentes/<nombre>.png`,
+                        que se construye una vez por video con geometria real.
+                        Si dos planos nombran la misma ruta («zarpo de
+                        Shanghai» ... «llego a Manzanillo»),
+                        `_elegir_componente` les da a los dos el mismo mapa y
+                        sus PNG son la misma copia. No hay prompt ni cache de
+                        por medio, asi que no puede ser el fallo que esto
+                        busca. Y no era un aviso: tumbaba la tanda AL FINAL,
+                        con todos los planos ya pagados, y al reintentar el
+                        plan salia igual y volvia a tumbarla (revision del
+                        16-10-2026).
 
     El segundo caso salio el 22-08 y es una leccion de las buenas: hasta
     entonces la continuacion se quedaba con su imagen VIEJA, o sea que NO
@@ -4059,8 +4081,8 @@ def _planos_repetidos(resultados, trabajo, copiados=()):
     **Un guardian calibrado sobre un fallo aprende a dar por bueno ese fallo**:
     lo que lo mantenia callado no era su criterio, era el bug.
 
-    Quien dice quien es continuacion es el PLAN (`copiados`), NO la ficha en
-    disco. Y esto no es prudencia: al RETOMAR una tanda, un plano que ya tiene
+    Quien dice quien es continuacion o componente es el PLAN (`copiados`), NO
+    la ficha en disco (que solo se mira de respaldo). Y esto no es prudencia: al RETOMAR una tanda, un plano que ya tiene
     su imagen se conserva y su ficha pasa a decir `origen: "conservado"`, con lo
     que el rastro de por que compartia imagen se pierde. Con el plan delante,
     reanudar da lo mismo que empezar.
@@ -4071,8 +4093,9 @@ def _planos_repetidos(resultados, trabajo, copiados=()):
         if ficha.get("tipo") != "escena" or not ficha.get("png"):
             continue
         sid = ficha.get("id") or str(uid).split(":", 1)[-1]
-        if ficha.get("origen") in ("cartela", "sigue") \
-                or sid in copiados or ficha.get("sigue_a"):
+        if ficha.get("origen") in ("cartela", "sigue", "componente") \
+                or sid in copiados or ficha.get("sigue_a") \
+                or ficha.get("componente"):
             continue
         ruta = os.path.join(trabajo, ficha["png"])
         if not os.path.exists(ruta):
@@ -4734,7 +4757,8 @@ MOTOR_CAMBIOS = {
        "misma imagen, de principio a fin",
 }
 
-OPCIONES_EJECUCION = ("solo_assets", "replantear", "rehacer", "tipos")
+OPCIONES_EJECUCION = ("solo_assets", "replantear", "rehacer", "tipos",
+                      "conservar_piezas")
 
 
 def _anotar_tiempo(paso, arranque, hechas, detalle=None, proyecto=None):
@@ -4769,7 +4793,8 @@ def _anotar_tiempo(paso, arranque, hechas, detalle=None, proyecto=None):
 
 
 def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
-             replantear=False, rehacer=False, tipos=None, previo=None):
+             replantear=False, rehacer=False, tipos=None, previo=None,
+             conservar_piezas=False):
     """Construye assets y escenas. Si unidades no es None, solo esas.
 
     Con solo_assets se para despues de los assets (sets, reparto, mapas y
@@ -4849,6 +4874,14 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     # que cualquier pasada volviera a generar TODO. Ver la regla del canal en
     # `_generar_escenas`: un cambio en el audio no rehace lo dibujado.
     def pedido(unidad):
+        # LAS PIEZAS YA REHECHAS EN ESTA TANDA no se rehacen otra vez. En una
+        # receta 'todo', la tarea «piezas» rehace las hojas con `rehacer` y
+        # despues la tarea «assets» llega con el MISMO `rehacer` y sin
+        # unidades: volvia a pagar cada hoja, y la segunda salia distinta de
+        # la primera (revision del 16-10-2026). `conservar_piezas` lo pone
+        # quien sabe que la otra tarea ya corrio (`_que_hace` en app.py).
+        if conservar_piezas:
+            return False
         # La misma regla que en los planos: con unidades, solo ellas. Un
         # `rehacer` de una escena no puede arrastrar los assets del video.
         if pedidas is not None:
@@ -4874,8 +4907,15 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
                 # cara y los cuerpos, que es lo que esa hoja tiene que fijar
                 refs = [r["ruta"] for r in _referencias_estilo(
                     p, dirs["cache"], {"personajes": [ficha["nombre"]]})]
+                # SALTARSE EL BANCO SOLO SI SE HA PEDIDO REHACER. Ponia
+                # `rehacer or unidades is not None`: cualquier pasada dirigida
+                # a unidades --«regenerar lo obsoleto», retomar-- pagaba una
+                # hoja nueva aunque el banco tuviera la de ese mismo prompt, y
+                # una hoja nueva deja obsoletos (y por pagar) todos los planos
+                # que la usan. Es el mismo fallo que se quito de los planos el
+                # 31-08 (ver `_generar_escenas`); aqui se habia quedado.
                 meta = _producir_imagen(ficha["nombre"], prompt, refs, destino, p,
-                                        rehacer=((rehacer or unidades is not None)
+                                        rehacer=(bool(rehacer) and pedido(uid)
                                                  and os.path.exists(destino)))
                 resultados[uid] = {"tipo": "reparto",
                                    "png": os.path.relpath(destino, trabajo), **meta}
@@ -4961,10 +5001,11 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
 
     avisar(0.96, "comprobando que no hay planos repetidos")
     # Los que comparten imagen A PROPOSITO salen del PLAN: la segunda mitad de
-    # una toma que dura mas copia la del hogar, y tiene que ser identica.
+    # una toma que dura mas copia la del hogar, y tiene que ser identica; y un
+    # mapa (componente) es el mismo PNG copiado en cada plano que lo nombra.
     repetidos = _planos_repetidos(
         resultados, trabajo,
-        copiados={e["id"] for e in escenas if e.get("sigue_a")})
+        copiados=_copiados_del_plan(escenas))
     if repetidos:
         detalle = "; ".join(" = ".join(grupo) for grupo in repetidos)
         # Al generar, dos planos con la misma imagen siempre es un fallo: significa

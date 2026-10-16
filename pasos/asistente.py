@@ -322,6 +322,15 @@ def vetos_de_lectura(raiz=None):
     # el entorno de los procesos: con la sesion por defecto, el token de la
     # cuenta puede ir en una variable (`cli_claude.entorno`)
     reglas.append("Read(//proc/**)")
+    # Y CADA VETO TAMBIEN PARA GREP Y GLOB. `herramientas_permitidas` deja usar
+    # Grep y Glob en `datos/**` (la carpeta de tarifas en el VPS), y dentro esta
+    # `datos/secretos`. El CLI solo aplica los vetos de Read a Grep y Glob «en
+    # la medida de lo posible» (su documentacion): un Grep de «sk-» sobre
+    # `datos/` podia devolver la linea de claves.json. Con el veto escrito para
+    # cada herramienta no depende de esa aproximacion. (revision 16-10-2026)
+    lectura = list(reglas)
+    for herramienta in ("Grep", "Glob"):
+        reglas += [r.replace("Read(", f"{herramienta}(", 1) for r in lectura]
     return reglas
 
 
@@ -416,8 +425,12 @@ def fichero_mcp(proyecto=""):
         "env": {"ESTUDIO_API": api, "ESTUDIO_PROYECTO_ABIERTO": str(proyecto or ""),
                 "ESTUDIO_SECRETOS": os.environ.get("ESTUDIO_SECRETOS", "")},
     }}}
-    ruta = os.path.join(tempfile.gettempdir(), f"estudio_mcp_{os.getpid()}.json")
-    with open(ruta, "w", encoding="utf-8") as fh:
+    # UN FICHERO POR LLAMADA, no uno por proceso: con un nombre por PID, dos
+    # charlas contestando a la vez se pisaban el proyecto abierto y las
+    # herramientas de una miraban el video de la otra. Lo borra `ejecutar_cli`
+    # al acabar la llamada.
+    descriptor, ruta = tempfile.mkstemp(prefix="estudio_mcp_", suffix=".json")
+    with os.fdopen(descriptor, "w", encoding="utf-8") as fh:
         json.dump(config, fh)
     return ruta
 
@@ -437,12 +450,19 @@ def ejecutar_cli(mensaje, extra=(), avance=None, raiz=None, carpetas_extra=(),
         if carpeta and os.path.isdir(carpeta):
             orden_extra += ["--add-dir", os.path.abspath(carpeta)]
     vetadas = tuple(HERRAMIENTAS_VETADAS) + tuple(vetos_de_lectura(raiz))
-    return cli_claude.ejecutar(
-        mensaje, modelo=MODELO, esfuerzo=ESFUERZO, cwd=raiz,
-        tiempo_max_s=TIEMPO_MAX_S, sistema=sistema(),
-        herramientas_vetadas=vetadas, avance=avance, extra=orden_extra,
-        para="contestar en el asistente",
-        herramientas_permitidas=herramientas_permitidas(carpetas_extra))
+    try:
+        return cli_claude.ejecutar(
+            mensaje, modelo=MODELO, esfuerzo=ESFUERZO, cwd=raiz,
+            tiempo_max_s=TIEMPO_MAX_S, sistema=sistema(),
+            herramientas_vetadas=vetadas, avance=avance, extra=orden_extra,
+            para="contestar en el asistente",
+            herramientas_permitidas=herramientas_permitidas(carpetas_extra))
+    finally:
+        if mcp:
+            try:
+                os.remove(mcp)
+            except OSError:
+                pass
 
 
 def ejecutar_simulado(mensaje, extra=(), avance=None, raiz=None,

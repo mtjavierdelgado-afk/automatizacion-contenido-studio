@@ -2635,8 +2635,16 @@ def probar_el_avisador_y_los_tramos():
     # con (hechas, total) y quien escucha puede ser el servicio, el doble de una
     # suite --`lambda v, m="": v`, dos argumentos-- o nada.
     recogido = []
+    # quien sabe de unidades lo dice con el NOMBRE del parametro, como
+    # `avisar_tarea`; un tercero con otro nombre es el `publico` del gestor y
+    # el contador caia ahi («· (44, 44)» en la barra; revision 16-10-2026)
     de_tres = estadisticas.avisador(
-        lambda f, m="", u=None: recogido.append(("tres", f, m, u)))
+        lambda f, m="", unidades=None: recogido.append(("tres", f, m, unidades)))
+    de_publico = estadisticas.avisador(
+        lambda v, m="", publico="": recogido.append(("publico", v, m, publico)))
+    de_publico(1.0, "fin", (44, 44))
+    igual(recogido[-1], ("publico", 1.0, "fin", ""),
+          "el contador no cae en el texto publico del gestor")
     de_dos = estadisticas.avisador(lambda v, m="": recogido.append(("dos", v, m)))
     variadic = estadisticas.avisador(lambda *a, **k: recogido.append(("var", a)))
     de_nada = estadisticas.avisador(None)
@@ -3412,6 +3420,57 @@ def probar_que_la_receta_aplica():
        "ninguna tarea de paso llama a _correr_paso a pelo: todas por _un_paso")
     ok("_plan_de_ejecucion" in inspect.getsource(servidor._un_paso),
        "y _un_paso pide las unidades al mismo sitio que el boton de ejecutar")
+
+
+def probar_lo_de_la_revision_de_imagenes_16_10():
+    """La revision de la tuberia de imagenes del 16-10-2026, en proceso.
+
+    1. En una receta 'todo' con «piezas» puesta, la tarea «assets» pide a p6
+       que conserve las hojas: «piezas» ya las acaba de rehacer y pagar.
+    2. El precio de la cola de notas y el del panel de coste van con el MODO
+       del video: un plano de foto no cuesta lo que uno de ilustracion.
+    """
+    seccion("REVISION DE IMAGENES DEL 16-10")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                  # noqa: PLC0415
+    import inspect                                          # noqa: PLC0415
+
+    original = servidor._un_paso
+    servidor._un_paso = lambda ctx, paso, modo, extra=None: ("f", (paso, modo, extra or {}))
+    try:
+        con = {"tareas": {"piezas": True}}
+        sin = {"tareas": {"piezas": False}}
+        _, args = servidor._que_hace("assets", None, con, "todo")
+        igual(args[2].get("conservar_piezas"), True,
+              "'todo' con «piezas»: la tarea de los planos no vuelve a pagar las hojas")
+        _, args = servidor._que_hace("assets", None, sin, "todo")
+        ok("conservar_piezas" not in args[2],
+           "'todo' SIN «piezas»: las hojas las rehace la tarea de los planos")
+        _, args = servidor._que_hace("assets", None, con, "pendientes")
+        ok("conservar_piezas" not in args[2], "en 'pendientes' no cambia nada")
+    finally:
+        servidor._un_paso = original
+
+    class _Estado:
+        def params(self, _paso):
+            return {"calidad": "medium", "estilo": {"modo": "foto"}}
+
+    class _Ctx:
+        id = "x"
+        estado = _Estado()
+
+    pedidos = []
+    original = servidor.AJUSTES.usd_por_imagen
+    servidor.AJUSTES.usd_por_imagen = lambda calidad, tamano=None, modo=None: (
+        pedidos.append((calidad, modo)) or 0.1)
+    try:
+        servidor._usd_por_imagen(_Ctx())
+    finally:
+        servidor.AJUSTES.usd_por_imagen = original
+    igual(pedidos, [("medium", "foto")],
+          "el precio de la cola de notas es el de un plano de FOTO en un video de foto")
+    ok("precio_por_imagen(calidad, modo=" in inspect.getsource(servidor.coste_en_detalle),
+       "y el del panel de coste, tambien con su modo")
 
 
 def probar_que_la_api_esta_documentada():
@@ -5338,6 +5397,233 @@ def probar_sonido_propio_y_cola(cliente):
         os.environ.pop("ESTUDIO_IMAGEN_FALSA", None)
 
 
+def probar_revision_del_nucleo_v2f():
+    """La revision del nucleo del 16-10-2026, en lo que toca a app.py.
+
+    Corre en este proceso, con proyectos de verdad (nucleo real) y los modulos
+    de los pasos sustituidos por dobles: lo que se mira son las marcas, los 409
+    y el contexto, no lo que pinta un paso.
+    """
+    seccion("REVISION DEL NUCLEO (16-10): MARCAS, 409 Y CONTEXTO")
+    import threading                                          # noqa: PLC0415
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+
+    from nucleo import bitacora as BITACORA                   # noqa: PLC0415
+    raiz_antes = servidor.raiz_proyectos()
+    base = tempfile.mkdtemp(prefix="estudio_v2f_")
+    # el log global, a la carpeta de la prueba: no al de verdad
+    global_antes = BITACORA.RUTA_GLOBAL
+    BITACORA.RUTA_GLOBAL = os.path.join(base, "_bitacora_global.jsonl")
+    modulo_real = servidor.modulo_de
+    herramienta_real = servidor._herramienta
+    servidor.fijar_raiz_proyectos(base)
+
+    def proyecto_hecho(nombre):
+        proyecto = Proyecto.crear(base, nombre)
+        e = Estado(proyecto)
+        for paso in ("ingesta", "brief", "guion", "voz", "revision_audio"):
+            e.completar(paso, {"ok": 1})
+        e.set_params("assets", {"unidades": {"escena:S1": {"d": "a"},
+                                             "escena:S2": {"d": "b"}}})
+        e.completar("assets", {}, {"escena:S1": {"png": "1"}, "escena:S2": {"png": "2"}})
+        e.completar("callouts", {})
+        return proyecto.id
+
+    class _Paso:
+        """Doble de un modulo de paso: hace lo que se le diga."""
+        def __init__(self, hacer):
+            self.hacer = hacer
+
+        def ejecutar(self, proyecto, params, avisar, unidades=None, **_):
+            return self.hacer(params, unidades)
+
+        def propagar_dependencias(self, estado, dependencias=None):
+            return []
+
+    try:
+        # 1. LA RECETA ESCRIBE PARAMS DESPUES DE QUE EL GESTOR MARQUE: el paso
+        #    que corre despues se sella con SUS entradas, no con las del arranque
+        pid = proyecto_hecho("receta_marca")
+        ctx = servidor.contexto(pid)
+        ctx.estado.marcar_ejecutando("assets")        # la receta arranca
+        ctx.estado.actualizar_params(                  # la direccion decide S1
+            "assets", {"unidades": {"escena:S1": {"d": "a", "direccion": "x"}}})
+        servidor.modulo_de = lambda paso: _Paso(lambda params, unidades: {
+            "salidas": {}, "unidades": {"escena:S1": {"png": "1b"}}})
+        servidor._correr_paso(lambda *a, **k: None, ctx, "assets", ["escena:S1"])
+        igual(ctx.estado.estado_de("assets"), "listo",
+              "un plano dibujado con la direccion de la receta no sale obsoleto")
+
+        # 2. EL ERROR VA AL PASO QUE FALLA, no al registrado
+        def revienta(params, unidades):
+            raise RuntimeError("los subtitulos no salen")
+        servidor.modulo_de = lambda paso: _Paso(revienta)
+        try:
+            servidor._correr_paso(lambda *a, **k: None, ctx, "callouts", None)
+        except RuntimeError:
+            pass
+        igual(ctx.estado.estado_de("callouts"), "error", "el paso que falla queda en error")
+        igual(ctx.estado.estado_de("assets"), "listo", "y el de antes, completado, no")
+        ctx.estado.limpiar_marca("callouts")
+
+        # 3. NADA EN PARALELO CON UNA TANDA QUE YA CORRE ESE PASO
+        servidor.modulo_de = modulo_real
+        suelta = threading.Event()
+        tid = ctx.gestor.lanzar("receta:video", lambda avisar: suelta.wait(20),
+                                paso="assets", toca=["assets", "callouts"])
+        try:
+            servidor.lanzar_paso(ctx, "callouts", None)
+            ok(False, "ejecutar los subtitulos con la tanda del video en marcha deberia dar 409")
+        except servidor.ErrorApi as fallo:
+            igual(fallo.codigo, 409, "ejecutar un paso que corre dentro de una tanda: 409")
+        antes = ctx.estado.params("callouts")
+        try:
+            servidor.enviar_feedback(pid, {"paso": "callouts", "texto": "mas grande"})
+            ok(False, "el feedback con el paso en marcha deberia dar 409")
+        except servidor.ErrorApi as fallo:
+            igual(fallo.codigo, 409, "feedback con el paso en marcha: 409")
+        igual(ctx.estado.params("callouts"), antes, "y la nota NO se queda escrita")
+
+        # 4. REPARAR EL ESTILO: con CUALQUIER trabajo vivo, 409; y sin soltar el contexto
+        try:
+            servidor.reparar_estilo(pid, {"aplicar": True})
+            ok(False, "reparar el estilo con un trabajo en marcha deberia dar 409")
+        except servidor.ErrorApi as fallo:
+            igual(fallo.codigo, 409, "reparar el estilo con algo en marcha: 409")
+        suelta.set()
+        ctx.gestor.esperar(tid, 20)
+        sin_paso = threading.Event()
+        otro_tid = ctx.gestor.lanzar("exportar", lambda avisar: sin_paso.wait(20))
+        try:
+            servidor.reparar_estilo(pid, {"aplicar": True})
+            ok(False, "un trabajo sin paso tambien deberia frenar la reparacion")
+        except servidor.ErrorApi as fallo:
+            igual(fallo.codigo, 409, "tambien con un trabajo sin paso (una exportacion)")
+        sin_paso.set()
+        ctx.gestor.esperar(otro_tid, 20)
+
+        class _Diag:
+            @staticmethod
+            def revisar(raiz):
+                return [("assets", "estilo", "/viejo", "/nuevo")]
+
+        class _Mudar:
+            @staticmethod
+            def mudar_objetivo(*a, **k):
+                return 0
+        servidor._herramienta = lambda nombre: _Diag if nombre == "diagnostico_estilo" else _Mudar
+        respuesta = servidor.reparar_estilo(pid, {"aplicar": True})
+        ok(respuesta.get("reparado"), "sin nada en marcha, repara")
+        ok(servidor.contexto(pid) is ctx,
+           "y el contexto (con su gestor de trabajos) sigue siendo el mismo")
+
+        # 5. LAS MARCAS «EJECUTANDO» DE UN SERVICIO ANTERIOR
+        pid = proyecto_hecho("marca_huerfana")
+        Estado(Proyecto(os.path.join(base, pid))).marcar_ejecutando("callouts")
+        nuevo = servidor.contexto(pid)       # lo abre el servicio, como la pantalla
+        igual(nuevo.estado.estado_de("callouts"), "listo",
+              "al abrir el proyecto no queda un paso «ejecutando» sin trabajo")
+        # y la que pierde una apertura simultanea no toca nada: solo limpia la
+        # que queda registrada (la otra podia quitar la marca de un trabajo vivo)
+        nuevo.estado.marcar_ejecutando("callouts")
+        perdedora = servidor.Contexto(os.path.join(base, pid))
+        igual(perdedora.estado.estado_de("callouts"), "ejecutando",
+              "crear un contexto que no se registra no quita la marca de un trabajo vivo")
+        nuevo.estado.limpiar_marca("callouts")
+    finally:
+        servidor.modulo_de = modulo_real
+        servidor._herramienta = herramienta_real
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        BITACORA.RUTA_GLOBAL = global_antes
+        shutil.rmtree(base, ignore_errors=True)
+
+def probar_audio_y_musica_de_la_previa(cliente, carpeta):
+    """Lo que suena en las diapositivas: la voz del corte, y la música de verdad.
+
+    16-10-2026. La previa servía la toma de `revision_audio` aunque los planos
+    se cortan contra la de `voz` y el MP4 suena con la de `voz`: con una
+    revisión regrabada «Oírla» sonaba otra frase, y pasado su final no sonaba
+    nada. Y la música leía `musica.pista`, una clave que nadie escribe: «Todo
+    seguido» no tuvo nunca música.
+    """
+    seccion("LO QUE SUENA EN LAS DIAPOSITIVAS")
+    import wave
+    from nucleo.estado import Estado
+    from nucleo.proyecto import Proyecto, escribir_json
+
+    def wav(ruta, segundos):
+        os.makedirs(os.path.dirname(ruta), exist_ok=True)
+        with wave.open(ruta, "wb") as fh:
+            fh.setnchannels(1)
+            fh.setsampwidth(2)
+            fh.setframerate(8000)
+            fh.writeframes(b"\x00\x00" * int(8000 * segundos))
+
+    _r, datos = cliente.post("/api/proyectos", {"nombre": "Lo que suena en la previa"})
+    pid = (datos.get("proyecto") or {}).get("id")
+    proyecto = Proyecto(os.path.join(carpeta, pid))
+    estado = Estado(proyecto)
+    # la voz (6 s) y una revision regrabada MAS CORTA (4 s), con su propio reloj
+    wav(os.path.join(proyecto.ruta_trabajo("voz"), "narracion.wav"), 6)
+    estado.completar("voz", {"archivo": "narracion.wav", "duracion": 6.0})
+    wav(os.path.join(proyecto.ruta_trabajo("revision_audio"), "narracion.wav"), 4)
+    estado.completar("revision_audio", {"archivo": "narracion.wav", "duracion": 4.0})
+    # el corte de los planos, hecho contra la voz: el ultimo empieza en el 5
+    escribir_json(os.path.join(proyecto.ruta_trabajo("assets"), "plan.json"), {
+        "escenas": [{"id": "S001", "t_in": 0.0, "t_out": 5.0, "duracion": 5.0,
+                     "narracion": "uno"},
+                    {"id": "S002", "t_in": 5.0, "t_out": 6.0, "duracion": 1.0,
+                     "narracion": "dos"}],
+        "duracion_total": 6.0})
+    estado.completar("assets", {"plan": "plan.json"})
+
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+
+    class _Ctx:
+        def __init__(self):
+            self.proyecto = Proyecto(os.path.join(carpeta, pid))
+            self.estado = Estado(self.proyecto)
+
+    guardado = servidor.contexto
+    servidor.contexto = lambda _pid: _Ctx()
+    try:
+        ficha = servidor.leer_previsualizacion(pid)
+        igual(ficha.get("audio"), "pasos/voz/v1/narracion.wav",
+              "la previa suena con la voz contra la que se cortaron los planos "
+              "(la del render), no con la revisión")
+        igual((ficha.get("musica"), ficha.get("efectos")), (None, None),
+              "sin música elegida ni montaje, la previa no promete cama")
+
+        # UN TEMA SUBIDO, SIN MONTAR: suena su escucha, que la API ya sirve
+        estado = Estado(proyecto)
+        estado.set_params("render", {"musica": {
+            "fuente": "propia", "id": "abc", "titulo": "tema",
+            "muestra": "/api/musica/propia/propia_abc.mp3"}})
+        ficha = servidor.leer_previsualizacion(pid)
+        igual(ficha.get("musica"), "/api/musica/propia/propia_abc.mp3",
+              "con un tema subido y sin montar, «Todo seguido» suena con él")
+        # uno de Jamendo sin montar no sale a la red desde aqui
+        estado.set_params("render", {"musica": {"fuente": "jamendo", "id": "9"}})
+        igual(servidor.leer_previsualizacion(pid).get("musica"), None,
+              "un tema de Jamendo sin montar no se pide a Jamendo desde la previa")
+
+        # MONTADO: la cama y los efectos tal cual suenan en el MP4
+        wav(os.path.join(proyecto.ruta_trabajo("render"), "cama.wav"), 6)
+        wav(os.path.join(proyecto.ruta_trabajo("render"), "efectos.wav"), 6)
+        estado.completar("render", {"video": "video.mp4"})
+        ficha = servidor.leer_previsualizacion(pid)
+        igual((ficha.get("musica"), ficha.get("efectos")),
+              ("pasos/render/v1/cama.wav", "pasos/render/v1/efectos.wav"),
+              "montado, suenan la cama y la banda de efectos del render")
+        _r, _d = cliente.get(f"/a/{pid}/pasos/render/v1/cama.wav")
+        igual(_r.status_code, 200, "y esa ruta se sirve por /a/{pid}/")
+    finally:
+        servidor.contexto = guardado
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
     parser.add_argument("--conservar", action="store_true",
@@ -5381,6 +5667,7 @@ def main():
         probar_imagenes_de_apoyo(cliente)
         probar_laminas(cliente)
         probar_sonido_propio_y_cola(cliente)
+        probar_audio_y_musica_de_la_previa(cliente, carpeta)
         probar_taller_oculto(cliente)
         probar_cartelas_y_transiciones(cliente, pid, os.path.join(carpeta, pid))
         probar_direccion(cliente, pid)
@@ -5412,11 +5699,13 @@ def main():
         probar_value_de_los_textarea()
         probar_el_gemelo_de_las_marcas_tts()
         probar_que_la_receta_aplica()
+        probar_lo_de_la_revision_de_imagenes_16_10()
         probar_que_la_api_esta_documentada()
         probar_que_las_llamadas_a_los_pasos_encajan()
         probar_que_no_falta_ningun_nombre_en_la_pantalla()
         probar_que_no_falta_ningun_nombre_en_el_servidor()
         probar_el_reloj_de_un_trabajo()
+        probar_revision_del_nucleo_v2f()
     finally:
         parar(proceso)
         if not argumentos.conservar:

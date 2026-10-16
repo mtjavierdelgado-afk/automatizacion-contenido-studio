@@ -10,6 +10,45 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Revisión completa del Studio (16 de octubre, tarde)**
+- **Las diapositivas se ven y suenan después de volver a una versión
+  anterior**, y siguen en la misma escena. Si la carga falla una vez, sale
+  «Reintentar» en vez de quedarse la pantalla en blanco sin «Oírla» ni «Todo
+  seguido».
+- **«Oírla» y «Todo seguido» suenan con la voz con la que se cortaron las
+  imágenes** (la del vídeo), no con la de la revisión de audio, que tenía otros
+  tiempos y callaba los últimos planos. Si no pueden sonar, dicen por qué.
+  «Todo seguido» lleva por fin la música (y los efectos, con el vídeo montado).
+- **Pausas entre bloques que se oyen.** La pausa del gancho y de cada cambio de
+  tema se suma al aire entre bloques (~1,5 s frente a ~1 s), en vez de perderse
+  dentro de él. **Sin inicios cortados:** el silencio se mete en el punto más
+  tranquilo entre dos bloques, no en mitad de una respiración, con un fundido
+  corto a cada lado, y cada sección se manda a la voz con su espacio para que
+  no se peguen palabras. Se oye en las voces que se graben o regraben desde
+  ahora.
+- **Reintentar ya no rehace lo que salió bien.** Si una tanda falla a medias,
+  el error queda en la tarea que falló: la voz o el guion ya hechos no se
+  regraban ni se reescriben al reintentar. Volver a una versión ya no la enseña
+  «obsoleta» ni mezcla imágenes de la versión de la que se vuelve (lo que quedó
+  a medias se aparta en `_apartados/`). Un paso que cambiaste mientras corría
+  ya no dice «listo», no se pueden lanzar dos pasadas del mismo paso a la vez,
+  y tras reiniciar el servicio no quedan pasos «ejecutando» para siempre.
+- **Imágenes más seguras con el gasto.** Dos planos con el mismo mapa ya no
+  tumban la tanda al final. Si OpenAI no contesta a tiempo (502/504), la tanda
+  se para y lo dice en vez de repetir una imagen que quizá ya cobró. Las hojas
+  de personaje no se vuelven a pagar al «regenerar lo obsoleto» si no han
+  cambiado. El precio por imagen de la cola de notas y del panel de coste tiene
+  en cuenta el modo foto.
+- **Cancelar un render lo para de verdad**, navegadores incluidos. La barra ya
+  no dice «(44, 44)», el logo y la cola de negro salen en la calidad del vídeo,
+  y la música ya no deja WAV sueltos en cada versión del render.
+- **`asvs actualizar` instala las librerías antes de tocar nada** y, si la
+  versión nueva no arranca, vuelve sola a la anterior.
+- **El asistente ya no puede buscar dentro de las claves** (Grep/Glob), igual
+  que ya no podía leerlas.
+- Un trabajo que el servidor ya no conoce (tras reiniciarlo) se da por perdido
+  en vez de dejar los botones apagados.
+
 **Más arreglos de imágenes (16 de octubre)**
 - **Pegar una imagen ya no la manda al logo por sorpresa.** Con el cursor en
   un campo de texto (el nombre del vídeo, unas indicaciones), una imagen pegada

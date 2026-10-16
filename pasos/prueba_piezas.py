@@ -1553,6 +1553,67 @@ def prueba_espaciar():
                                                       hueco_minimo=1.5)[0]), dtype="<i2")
     ok(np.array_equal(otra, pcm2.astype("<i2")), "y para la misma pausa sale siempre el mismo relleno")
 
+    # LA PAUSA DEL BLOQUE SE SUMA AL HUECO (16-10-2026). Con max(hueco, pausa)
+    # un hueco de 1 s se tragaba la pausa de 0,9 s del gancho entera: «las
+    # pausas por bloque no figuran».
+    con_pausa = [{"id": "B01", "pausa_despues": 0.54}, {"id": "B02"}]
+    _n, d_pausa = voz.espaciar(wav, palabras, reparto, con_pausa, hueco_minimo=1.0)
+    ok(abs(d_pausa[0]["retardo"] - (0.75 + 0.54)) < 0.02,
+       f"la pausa se SUMA al hueco: 0,75 + 0,54 s ({d_pausa[0]['retardo']} s)")
+
+    # SE CORTA DONDE ESTA EL SILENCIO, NO EN EL CENTRO DEL HUECO (16-10-2026).
+    # Hueco de 1,0 a 1,3 s: cola de la palabra, silencio, y la respiracion con
+    # la que arranca el bloque siguiente. El centro (1,15 s) cae en la
+    # respiracion: la partia, la dejaba a un segundo de su palabra y el bloque
+    # arrancaba de golpe.
+    senal3 = azar.standard_normal(int(sr * 3)) * 6000
+    tramos = ((1.00, 1.05, 300), (1.05, 1.10, 3), (1.10, 1.30, 400))
+    for t0, t1, amplitud in tramos:
+        senal3[int(t0 * sr):int(t1 * sr)] = azar.standard_normal(int(t1 * sr) - int(t0 * sr)) * amplitud
+    wav3 = _wav([int(v) for v in np.clip(senal3, -32768, 32767)])
+    reparto3 = {"B01": [{"s": 0.0, "e": 1.0}], "B02": [{"s": 1.3, "e": 3.0}]}
+    nuevo3, d3 = voz.espaciar(wav3, palabras, reparto3, escenas, hueco_minimo=1.0)
+    corte = d3[0]["desde"]
+    ok(1.05 <= corte <= 1.10,
+       f"el silencio se mete en el trozo tranquilo (1,05-1,10 s), no en la respiracion ({corte:.3f} s)")
+    pcm3 = np.frombuffer(voz._pcm_de_wav(nuevo3), dtype="<i2").astype(float)
+    reanuda = int(round((corte + d3[0]["retardo"]) * sr))
+    salto = float(np.max(np.abs(np.diff(pcm3[reanuda - 90:reanuda + 90]))))
+    ok(salto < 100, f"y al volver la voz no hay escalon en el empalme (salto {salto:.0f})")
+
+    # LA VOZ SE FUNDE A LOS DOS LADOS DEL EMPALME. Con las marcas pegadas (sin
+    # hueco donde buscar) el corte cae en plena voz: antes se cortaba en seco.
+    reparto4 = {"B01": [{"s": 0.0, "e": 1.5}], "B02": [{"s": 1.5, "e": 3.0}]}
+    nuevo4, d4 = voz.espaciar(wav3, palabras, reparto4, escenas, hueco_minimo=1.0)
+    pcm4 = np.frombuffer(voz._pcm_de_wav(nuevo4), dtype="<i2").astype(float)
+    c4 = int(round(d4[0]["desde"] * sr))
+    r4 = c4 + int(round(d4[0]["retardo"] * sr))
+    bordes = max(abs(pcm4[c4 - 1]), abs(pcm4[r4]))
+    ok(bordes < 600, f"la voz llega al empalme fundida, no cortada en seco (borde {bordes:.0f}; la voz es 6000)")
+    ok(float(np.sqrt(np.mean(pcm4[c4 - 400:c4 - 300] ** 2))) > 3000,
+       "y el fundido es corto: 10 ms antes del empalme la voz suena entera")
+
+    # LAS MARCAS PEGADAS SE DESPEGAN (16-10-2026): sin espacio entre secciones
+    # Cartesia devolvia «remata.Primera» como UNA marca y la pausa de seccion
+    # caia despues de la primera palabra del bloque siguiente.
+    esc5 = [{"id": "B1", "narracion": "Hola a todos."},
+            {"id": "B2", "narracion": "Esto se remata."},
+            {"id": "B3", "narracion": "Primera frase nueva."}]
+    marcas5 = [{"w": w, "s": i * 0.5, "e": i * 0.5 + 0.4} for i, w in enumerate(
+        ["Hola", "a", "todos.", "Esto", "se", "remata.Primera", "frase", "nueva."])]
+    rep5 = voz._repartir_palabras(esc5, marcas5)
+    igual([p["w"] for p in rep5["B2"]], ["Esto", "se", "remata."],
+          "la marca pegada se parte: «remata.» se queda en su bloque")
+    igual([p["w"] for p in rep5["B3"]], ["Primera", "frase", "nueva."],
+          "y «Primera» abre el siguiente, que es donde va la pausa")
+    ok(rep5["B2"][-1]["e"] == rep5["B3"][0]["s"] and 2.5 < rep5["B3"][0]["s"] < 2.9,
+       "con el tiempo de la marca repartido entre las dos")
+    esc6 = [{"id": "B1", "narracion": "Llegaron de EE.UU. ayer."}]
+    rep6 = voz._repartir_palabras(esc6, [{"w": w, "s": 0, "e": 1} for w in
+                                         ["Llegaron", "de", "EE.UU.", "ayer."]])
+    igual([p["w"] for p in rep6["B1"]], ["Llegaron", "de", "EE.UU.", "ayer."],
+          "pero «EE.UU.» escrito junto en el guion no se parte")
+
 
 # --------------------------------------------------- 6. p6._capa_vectorial
 
@@ -4695,6 +4756,166 @@ def prueba_microcorte_de_red():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def prueba_revision_imagenes_16_10():
+    """La revision de la tuberia de imagenes del 16-10-2026. Sin red ni pago.
+
+      1. dos planos con el MISMO mapa no tumban la tanda por «repetidos»;
+      2. la copia normalizada de una referencia no sobrevive a un cambio de
+         contenido que llega con una fecha ANTERIOR (copy2 del banco, replace);
+      3. un 502/504 de la pasarela no se reintenta solo (puede estar cobrado);
+      6. si apuntar el gasto falla, la imagen pagada no se pierde.
+    """
+    import importlib.util                                   # noqa: PLC0415
+    import base64                                           # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_rev_imagen_")
+    try:
+        # ---------------------------------------------------------------- 1
+        titulo("p6: dos planos con el mismo mapa no son «planos repetidos»")
+        catalogo = {"sets": {"puerto": {"palabras": ["muelle"]}}, "reparto": {},
+                    "beats": [], "componentes": {"mapa_ruta": {
+                        "tipo": "mapa", "palabras": ["manzanillo", "shanghai"]}}}
+        escenas = [{"id": "S001", "narracion": "El barco zarpo de Shanghai rumbo a Manzanillo."},
+                   {"id": "S002", "narracion": "Trabajaban en el muelle de noche."},
+                   {"id": "S003", "narracion": "Tres semanas despues llego a Manzanillo."}]
+        p6_assets._asignar_sets(escenas, catalogo, {"semilla": 1})  # noqa: SLF001
+        con_mapa = [e["id"] for e in escenas if e.get("componente") == "mapa_ruta"]
+        igual(con_mapa, ["S001", "S003"], "los dos planos que nombran la ruta llevan el mapa")
+        os.makedirs(os.path.join(base, "escenas"))
+        mapa = os.path.join(base, "mapa_ruta.png")
+        Image.new("RGB", (16, 16), (9, 9, 9)).save(mapa)
+        resultados = {}
+        for sid in con_mapa:
+            medios.copiar(mapa, os.path.join(base, "escenas", f"{sid}.png"))
+            resultados[f"escena:{sid}"] = {"tipo": "escena", "id": sid,
+                                           "png": f"escenas/{sid}.png",
+                                           # al RETOMAR la ficha dice «conservado»
+                                           "origen": "conservado",
+                                           "componente": "mapa_ruta"}
+        igual(p6_assets._planos_repetidos(resultados, base,                # noqa: SLF001
+                                          copiados=p6_assets._copiados_del_plan(escenas)),
+              [], "el mismo mapa copiado en dos planos no tumba la tanda")
+        igual(p6_assets._planos_repetidos(resultados, base, copiados=()),  # noqa: SLF001
+              [], "ni aunque solo lo diga la ficha")
+        for sid in ("S010", "S011"):
+            medios.copiar(mapa, os.path.join(base, "escenas", f"{sid}.png"))
+            resultados[f"escena:{sid}"] = {"tipo": "escena", "id": sid,
+                                           "png": f"escenas/{sid}.png", "origen": "cache"}
+        igual(p6_assets._planos_repetidos(resultados, base,                # noqa: SLF001
+                                          copiados=p6_assets._copiados_del_plan(escenas)),
+              [["S010", "S011"]], "y dos planos DIBUJADOS iguales siguen tumbandola")
+
+        # ---------------------------------------------------------------- 2
+        titulo("imagen.normalizar: un cambio de contenido con fecha anterior se ve")
+        imagen = medios.motor("imagen_openai/imagen.py")
+        escenas_dir = os.path.join(base, "trabajo", "escenas")
+        os.makedirs(escenas_dir)
+        banco = os.path.join(base, "banco.png")
+        Image.new("RGB", (32, 32), (0, 0, 255)).save(banco)
+        hace_un_dia = time.time() - 86400
+        os.utime(banco, (hace_un_dia, hace_un_dia))
+        plano = os.path.join(escenas_dir, "S004.png")
+        Image.new("RGB", (32, 32), (255, 0, 0)).save(plano)
+        cache = os.path.join(base, "trabajo", "_refs")
+        primera = imagen.normalizar(plano, cache)
+        igual(Image.open(primera).convert("RGB").getpixel((1, 1)), (255, 0, 0),
+              "la primera copia es la del plano")
+        shutil.copy2(banco, plano)          # lo que hace medios.copiar del banco
+        segunda = imagen.normalizar(plano, cache)
+        igual(Image.open(segunda).convert("RGB").getpixel((1, 1)), (0, 0, 255),
+              "el plano sale del banco con fecha vieja: se adjunta el NUEVO contenido")
+        otro = os.path.join(escenas_dir, "S005.png")
+        Image.new("RGB", (32, 32), (0, 255, 0)).save(otro)
+        os.utime(otro, (hace_un_dia - 10, hace_un_dia - 10))
+        os.replace(otro, plano)             # lo que hace _recolocar_escenas
+        igual(Image.open(imagen.normalizar(plano, cache)).convert("RGB").getpixel((1, 1)),
+              (0, 255, 0), "y un dibujo recolocado de numero, tambien")
+        sello = os.stat(imagen.normalizar(plano, cache)).st_mtime_ns
+        igual(sello, os.stat(plano).st_mtime_ns,
+              "sin cambios, la copia se reutiliza (lleva la fecha de su origen)")
+
+        # ---------------------------------------------------------- 3 y 6
+        titulo("motor de imagen: 502/504 no se reintentan; 500/503 si")
+        import requests as requests_de_verdad                  # noqa: PLC0415
+        spec = importlib.util.spec_from_file_location(
+            "imagen_pasarela", os.path.join(RAIZ, "motores", "imagen_openai", "imagen.py"))
+        motor = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(motor)
+        falsa_antes = os.environ.pop("ESTUDIO_IMAGEN_FALSA", None)
+        crudo = io.BytesIO()
+        Image.new("RGB", (8, 8), (1, 2, 3)).save(crudo, "PNG")
+        png = crudo.getvalue()
+
+        class Resp:
+            def __init__(self, codigo):
+                self.status_code = codigo
+                self.headers = {}
+                self.text = "{}" if codigo == 200 else f"error {codigo}"
+
+            def json(self):
+                return {"data": [{"b64_json": base64.b64encode(png).decode("ascii")}],
+                        "usage": {}}
+
+        def red(codigos):
+            llamadas = []
+
+            class Red:
+                exceptions = requests_de_verdad.exceptions
+
+                @staticmethod
+                def post(*_a, **_k):
+                    llamadas.append(codigos[min(len(llamadas), len(codigos) - 1)])
+                    return Resp(llamadas[-1])
+            return Red, llamadas
+
+        dormir = motor.time.sleep
+        motor.time.sleep = lambda *_a: None
+        ref = os.path.join(base, "ref.png")
+        Image.new("RGB", (8, 8), (5, 5, 5)).save(ref)
+        try:
+            for codigo in (502, 504):
+                motor.requests, llamadas = red([codigo, 200])
+                fallo = None
+                try:
+                    motor.generar("x", [ref], api_key="sk-prueba-no-se-usa")
+                except Exception as error:                  # noqa: BLE001
+                    fallo = error
+                igual(len(llamadas), 1, f"un {codigo} no se reintenta: puede estar cobrada")
+                ok(type(fallo).__name__ == "CorteDeRed" and "cobrar" in str(fallo),
+                   f"y para como un corte de red, diciendolo ({fallo})")
+            for codigo in (500, 503):
+                motor.requests, llamadas = red([codigo, 200])
+                salida = motor.generar("x", [ref], api_key="sk-prueba-no-se-usa")
+                ok(salida[0] == png and len(llamadas) == 2,
+                   f"un {codigo} lo contesta la API sin hacer el trabajo: se reintenta")
+
+            titulo("medidor: si apuntar falla, la imagen pagada no se pierde")
+            envuelta = coste._medir_imagen(lambda *_a, **_k: (png, {"coste": 0.006}))  # noqa: SLF001
+            reportar = coste.reportar_openai
+
+            def revienta(*_a, **_k):
+                raise OSError(28, "No space left on device")
+            coste.reportar_openai = revienta
+            try:
+                salida, fallo = None, None
+                try:
+                    salida = envuelta("x", [ref], quality="low")
+                except Exception as error:                  # noqa: BLE001
+                    fallo = error
+            finally:
+                coste.reportar_openai = reportar
+            ok(fallo is None and salida and salida[0] == png,
+               f"el PNG ya pagado vuelve aunque el medidor reviente ({fallo!r})")
+            igual((salida or (None, {}))[1].get("coste"), 0.006,
+                  "con el importe de la tabla del motor")
+        finally:
+            motor.time.sleep = dormir
+            motor.requests = requests_de_verdad
+            if falsa_antes is not None:
+                os.environ["ESTUDIO_IMAGEN_FALSA"] = falsa_antes
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def _prohibir_pagar():
     """Deja el motor de imagen sin `generar`. Ver la cabecera del modulo.
 
@@ -4717,6 +4938,169 @@ def _prohibir_pagar():
             "dejado de acertar")
 
     motor.generar = no_se_paga
+
+
+# ------------------------------------------- revision del 16-10-2026 (render)
+
+def _ejecutable_falso(carpeta, nombre, cuerpo):
+    """Un script que hace de ffmpeg o de Edge y falla como se le diga."""
+    ruta = os.path.join(carpeta, nombre)
+    with open(ruta, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\n" + cuerpo + "\n")
+    os.chmod(ruta, 0o755)
+    return ruta
+
+
+def prueba_revision_16_10_render():
+    """Lo que encontro la revision del 16-10 en render y sonido."""
+    import estadisticas                                     # noqa: PLC0415
+    titulo("avisador: el contador no cae en el mensaje publico")
+    recibido = []
+
+    def del_gestor(valor, mensaje="", publico=""):          # nucleo.trabajos
+        recibido.append(publico)
+
+    estadisticas.avisador(del_gestor)(0.9, "44 de 44 planos", (44, 44))
+    igual(recibido, [""], "al avisar del gestor (valor, mensaje, publico) "
+                          "el contador (44, 44) NO llega como texto publico")
+    con_unidades = []
+
+    def del_modo_light(valor, mensaje="", unidades=None, publico=""):
+        con_unidades.append(unidades)
+
+    estadisticas.avisador(del_modo_light)(0.9, "x", (3, 7))
+    igual(con_unidades, [(3, 7)], "y a quien SI entiende `unidades` le llega")
+
+    if os.name == "nt":
+        print("  (lo que sigue usa scripts de shell: se salta en Windows)")
+        return
+    carpeta = tempfile.mkdtemp(prefix="rev1610_")
+    antes_ffmpeg = os.environ.get("ESTUDIO_FFMPEG")
+    antes_edges = medios.EDGES
+    puestos = []
+    try:
+        titulo("_a_wav: un ffmpeg cortado no deja un WAV truncado en la cache")
+        # escribe medio fichero en su ULTIMO argumento y muere, como un
+        # ffmpeg al que corta un reinicio del servicio
+        os.environ["ESTUDIO_FFMPEG"] = _ejecutable_falso(
+            carpeta, "ffmpeg_cortado",
+            'for a in "$@"; do ultimo="$a"; done; printf RIFFmedio > "$ultimo"; '
+            'echo BOOM-ffmpeg >&2; exit 1')
+        origen = os.path.join(carpeta, "efecto.mp3")
+        with open(origen, "wb") as fh:
+            fh.write(b"no es audio")
+        destino = os.path.join(carpeta, "efecto.48000.wav")
+        try:
+            sonido._a_wav(origen)
+            ok(False, "un ffmpeg que falla tiene que dar error")
+        except RuntimeError:
+            ok(True, "un ffmpeg que falla da error")
+        ok(not os.path.exists(destino),
+           "y NO deja el WAV a medias donde la cache lo daria por bueno")
+        ok(not [n for n in os.listdir(carpeta) if n.endswith(".parcial.wav")],
+           "ni el temporal")
+
+        titulo("la cama: sin restos en trabajo/ y con el error de ffmpeg dentro")
+        ficha = {"fuente": "prueba", "id": "rev1610"}
+        tema = sonido.banco("musica", sonido._nombre_de(ficha))
+        with open(tema, "wb") as fh:
+            fh.write(b"x" * 4000)
+        puestos.append(tema)
+        trabajo = os.path.join(carpeta, "trabajo")
+        os.makedirs(trabajo)
+        try:
+            sonido.construir_cama(
+                {"tramos": [dict(ficha, fraccion=1.0, duracion=30)]}, 10.0,
+                os.path.join(trabajo, "cama.wav"))
+            ok(False, "una cama cuyo ffmpeg falla tiene que dar error")
+        except RuntimeError as fallo:
+            ok("BOOM-ffmpeg" in str(fallo),
+               f"el error lleva lo que dijo ffmpeg: {str(fallo)[:120]}")
+        except Exception as fallo:                          # noqa: BLE001
+            ok(False, f"el error lleva lo que dijo ffmpeg (salio "
+                      f"{type(fallo).__name__}: {str(fallo)[:120]})")
+        ok(os.listdir(trabajo) == [],
+           f"y en trabajo/ no queda ningun tramo ni cadena: {os.listdir(trabajo)}")
+
+        titulo("rasterizar: un PNG viejo no cuenta como recien pintado")
+        medios.EDGES = (_ejecutable_falso(carpeta, "edge_roto", "exit 1"),)
+        viejo = os.path.join(carpeta, "fondo.png")
+        with open(viejo, "wb") as fh:
+            fh.write(b"PNG de la version anterior")
+        try:
+            medios.rasterizar("<svg xmlns='http://www.w3.org/2000/svg'/>", viejo,
+                              64, 64)
+            ok(False, "con Edge roto, rasterizar tiene que fallar aunque "
+                      "hubiera un PNG de antes")
+        except RuntimeError:
+            ok(True, "con Edge roto, rasterizar falla aunque hubiera un PNG de antes")
+
+        titulo("render: cancelar corta los lotes, con sus navegadores")
+        from nucleo.trabajos import Cancelado                # noqa: PLC0415
+
+        def orden_falsa(ficha):
+            # un «lote» que lanza un nieto (como el Edge de verdad) y espera
+            return ["/bin/sh", "-c", f'sleep 30 & echo $! > "{ficha}.nieto"; '
+                                     f'echo $$ > "{ficha}.pid"; wait']
+
+        llamadas = []
+
+        def avisar_cancelando(fraccion, mensaje="", unidades=None):
+            llamadas.append(mensaje)
+            if len(llamadas) > 1:       # la primera es el «arrancando»
+                raise Cancelado("cancelado")
+
+        trabajo_r = os.path.join(carpeta, "render")
+        clips_r = os.path.join(trabajo_r, "clips")
+        os.makedirs(clips_r)
+        lotes = [[{"id": "S001"}], [{"id": "S002"}]]
+        orden_original = p8_render._orden_lote
+        p8_render._orden_lote = orden_falsa
+        arranque = time.time()
+        salio = None
+        try:
+            p8_render._correr_lotes_en_procesos(
+                lotes, trabajo_r, avisar_cancelando, 2, dir_clips=clips_r,
+                desde=time.time())
+        except Cancelado:
+            salio = "cancelado"
+        except Exception as fallo:                          # noqa: BLE001
+            salio = f"{type(fallo).__name__}: {fallo}"
+        finally:
+            p8_render._orden_lote = orden_original
+        tardo = time.time() - arranque
+        igual(salio, "cancelado", "el render cancelado sale como Cancelado")
+        ok(tardo < 10, f"y en segundos, sin esperar a que acaben los lotes ({tardo:.1f} s)")
+
+        def vivo(pid):
+            try:
+                with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
+                    return fh.read().rsplit(")", 1)[1].split()[0] != "Z"
+            except (OSError, IndexError):
+                return False
+
+        pids = []
+        for numero in range(2):
+            for cola in (".pid", ".nieto"):
+                ruta = os.path.join(trabajo_r, "lotes", f"lote{numero:02d}.json{cola}")
+                try:
+                    with open(ruta, encoding="utf-8") as fh:
+                        pids.append(int(fh.read().strip()))
+                except (OSError, ValueError):
+                    pass
+        time.sleep(0.5)
+        ok(len(pids) == 4 and not [p for p in pids if vivo(p)],
+           f"y no queda vivo ni el lote ni su nieto: {[p for p in pids if vivo(p)]} "
+           f"de {pids}")
+    finally:
+        medios.EDGES = antes_edges
+        if antes_ffmpeg is None:
+            os.environ.pop("ESTUDIO_FFMPEG", None)
+        else:
+            os.environ["ESTUDIO_FFMPEG"] = antes_ffmpeg
+        for ruta in puestos:
+            medios.borrar(ruta)
+        shutil.rmtree(carpeta, ignore_errors=True)
 
 
 def main():
@@ -4776,6 +5160,8 @@ def main():
     prueba_musica_un_pelin_mas_alta()
     prueba_ortografia_por_tandas()
     prueba_microcorte_de_red()
+    prueba_revision_imagenes_16_10()
+    prueba_revision_16_10_render()
 
     print("\n" + "=" * 70)
     if _fallos:

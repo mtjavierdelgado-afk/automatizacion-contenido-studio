@@ -717,6 +717,74 @@ def _sin_marcas(prompt):
         return None
 
 
+class CorteDeRed(RuntimeError):
+    """La conexion con OpenAI se ha caido y no se sabe si la imagen se cobro.
+
+    No se reintenta solo A PROPOSITO: si la peticion llego a entrar, OpenAI
+    la dibuja y la cobra aunque la respuesta no vuelva, y repetirla seria
+    pagarla dos veces. Lo ya hecho de la tanda esta en disco y en el banco.
+    """
+
+
+#: Reintentos de un fallo de red que pasa ANTES de que la peticion salga
+#: (no se pudo conectar, el DNS no contesta): ahi no se ha cobrado nada.
+REINTENTOS_DE_RED = 2
+#: Espera antes de cada uno de esos reintentos, en segundos.
+ESPERAS_DE_RED = [2.0, 6.0]
+
+#: Lo que dice que la conexion ni siquiera se abrio. Por NOMBRE de clase y no
+#: importando urllib3: requests lo envuelve en ConnectionError/MaxRetryError y
+#: la causa de verdad va dentro (`reason`, `args`, `__cause__`).
+_SIN_CONECTAR = ("NewConnectionError", "NameResolutionError", "ConnectTimeoutError",
+                 "gaierror", "ConnectionRefusedError")
+
+
+def _causas(fallo, hondo=0):
+    """El fallo y todo lo que lleva dentro, hasta unos niveles."""
+    if fallo is None or hondo > 6:
+        return []
+    salida = [fallo]
+    dentro = [getattr(fallo, "reason", None), getattr(fallo, "__cause__", None),
+              getattr(fallo, "__context__", None)]
+    dentro += [a for a in (getattr(fallo, "args", None) or ()) if isinstance(a, BaseException)]
+    for otro in dentro:
+        if isinstance(otro, BaseException) and otro is not fallo:
+            salida += _causas(otro, hondo + 1)
+    return salida
+
+
+def _no_llego_a_salir(fallo):
+    """La peticion NO llego a OpenAI: se puede repetir sin pagar dos veces.
+
+    Solo lo que pasa al ABRIR la conexion (no conecta, el DNS no contesta, el
+    plazo de conectar vence). Una conexion cortada a mitad --reset, «Connection
+    aborted», la respuesta que no llega (ReadTimeout)-- puede haber pasado con
+    la peticion ya dentro y la imagen ya en marcha: esa no se repite. Es la
+    misma linea que traza urllib3 entre sus reintentos de conexion y de lectura.
+    """
+    if isinstance(fallo, requests.exceptions.ConnectTimeout):
+        return True
+    if isinstance(fallo, requests.exceptions.ReadTimeout):
+        return False
+    if not isinstance(fallo, requests.exceptions.ConnectionError):
+        return False
+    return any(type(c).__name__ in _SIN_CONECTAR for c in _causas(fallo))
+
+
+def _mensaje_de_red(fallo, antes_de_salir, intentos):
+    tipo = type(fallo).__name__
+    if antes_de_salir:
+        return (f"no se ha podido conectar con OpenAI ({tipo}) ni a la "
+                f"{intentos}.ª vez: mira la conexión a internet y vuelve a "
+                "lanzar la tanda. Esta imagen no ha llegado a pedirse, así que "
+                "no se ha cobrado, y lo ya hecho no se pierde ni se vuelve a "
+                "pagar.")
+    return (f"se ha cortado la conexión con OpenAI mientras dibujaba la imagen "
+            f"({tipo}). No se reintenta sola porque puede que OpenAI la llegara a "
+            "hacer y a cobrar. Vuelve a lanzar la tanda cuando la red esté bien: "
+            "lo ya hecho no se pierde ni se vuelve a pagar.")
+
+
 def generar(prompt, referencias, *, quality="low", tamano="apaisado",
             api_key=None, reintentos=6):
     # Sin referencias esta llamada NO se puede hacer, y hay que decirlo aqui.
@@ -745,6 +813,7 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
     original = prompt
     reescrito = None
     r = None
+    fallos_de_red = 0
 
     for intento in range(reintentos + 1):
         cuenta = cuenta_fija or _elegir_cuenta(len(referencias))
@@ -759,6 +828,7 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
             # el cubo del otro lado.
             _pedir_ficha(len(referencias), cuenta)
         abiertos, archivos = [], []
+        fallo_de_red = None
         try:
             for ruta in referencias:
                 fh = open(ruta, "rb")
@@ -770,13 +840,36 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
             if _modo_falso():
                 r = _llamada_falsa(prompt, tamano)
             else:
-                r = requests.post(API_URL,
-                                  headers={"Authorization": f"Bearer {cuenta.clave}"},
-                                  data=datos, files=archivos, timeout=600)
+                try:
+                    r = requests.post(API_URL,
+                                      headers={"Authorization": f"Bearer {cuenta.clave}"},
+                                      data=datos, files=archivos, timeout=(20, 600))
+                except requests.exceptions.RequestException as fallo:
+                    fallo_de_red = fallo
             segundos = time.time() - t0
         finally:
             for fh in abiertos:
                 fh.close()
+
+        # UN MICROCORTE DE RED (F2, 16-10-2026). Antes subia tal cual como un
+        # error de Python y tumbaba la tanda. Lo que pasa al ABRIR la conexion
+        # se reintenta un par de veces: ahi la peticion no ha salido y no se ha
+        # cobrado nada. Lo demas (la respuesta que no llega, la conexion que se
+        # cae a mitad) NO: la imagen puede estar hecha y cobrada, y repetirla
+        # seria pagarla dos veces. Se dice claro y se para. El gasto no se
+        # anota en ningun caso: el medidor solo anota lo que vuelve con imagen.
+        if fallo_de_red is not None:
+            antes_de_salir = _no_llego_a_salir(fallo_de_red)
+            if antes_de_salir and fallos_de_red < REINTENTOS_DE_RED and intento < reintentos:
+                espera = ESPERAS_DE_RED[min(fallos_de_red, len(ESPERAS_DE_RED) - 1)]
+                fallos_de_red += 1
+                print(f"[imagen] no se pudo conectar con OpenAI "
+                      f"({type(fallo_de_red).__name__}); se reintenta en "
+                      f"{espera:g} s ({fallos_de_red} de {REINTENTOS_DE_RED})", flush=True)
+                time.sleep(espera)
+                continue
+            raise CorteDeRed(_mensaje_de_red(fallo_de_red, antes_de_salir,
+                                             fallos_de_red + 1)) from fallo_de_red
 
         # se aprende de TODAS las respuestas, no solo de los errores: el sitio
         # donde la API dice cuanto queda es la respuesta buena
@@ -826,8 +919,8 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
                 "personaje conocido)"
                 + (" y ya se probó describiéndolo sin marcas"
                    if (reescrito or {}).get("cambios") else "")
-                + ". Cambia la nota para describir lo que se ve sin nombres "
-                "propios, o quita las imágenes adjuntas con logos.")
+                + ". Hay que describir lo que se ve sin nombres propios, o "
+                "quitar las imágenes adjuntas con logos.")
         # UNA CLAVE QUE NO VALE aparta SU cuenta y se sigue con las demas. Es el
         # gemelo del «sin credito» de abajo, y existe por un caso real: una de
         # tres claves rotada en OpenAI y cada tanda con un tercio de

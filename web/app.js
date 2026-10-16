@@ -9820,7 +9820,7 @@ function cuadroFeedbackEscena(escena) {
      la pantalla de repaso. */
   const mias = PREVIA.notas.filter(
     n => (n.plano || '') === escena.id && n.estado !== 'aplicado');
-  const caja = h('div', { clase: 'previa-feedback' });
+  const caja = agruparPegado(h('div', { clase: 'previa-feedback' }));
   caja.appendChild(campoArea(
     `¿Qué cambiarías de ${escena.id}?`,
     PREVIA.borrador[escena.id] || '',
@@ -10327,7 +10327,7 @@ function botonComentar() {
    la misma cosa: enseñar una referencia. */
 function cajaDeNota() {
   const r = estadoRepaso();
-  const caja = h('div', { clase: 'repaso-nueva' });
+  const caja = agruparPegado(h('div', { clase: 'repaso-nueva' }));
   caja.appendChild(h('div', { clase: 'meta' },
     `en ${mmss(r.t)}` + (r.plano ? ` · plano ${r.plano}` : '')));
 
@@ -10437,9 +10437,17 @@ function zonaDeImagenes(id, lista) {
  * siguen el explorador y el arrastre (mismo endpoint, mismos topes, mismos
  * avisos): pegar no es una tercera manera de subir, es otra manera de elegir.
  *
- * Un solo `paste` en el documento decide a qué zona va, por este orden: la que
- * tiene el foco dentro, la última que se tocó (si sigue a la vista) o la única
- * a la vista. Si hay varias y ninguna se ha tocado, no adivina: lo dice.
+ * Un solo `paste` en el documento decide a qué zona va, y NO ADIVINA (16-10:
+ * con el cursor en el nombre del vídeo, la imagen acababa en el logo por ser
+ * «la única zona a la vista»):
+ *  - con el foco en un campo de texto, la imagen solo va a la zona de ESE
+ *    campo: la que lo tiene dentro, o la que le hace de compañera (la nota de
+ *    una imagen y sus adjuntos: `agruparPegado`). Un campo de otra cosa nunca
+ *    manda la imagen a ninguna zona; lo dice y no sube nada.
+ *  - sin un campo con el foco, va a la zona que tiene el foco dentro o a la
+ *    última que se tocó, y solo si se ve DE VERDAD en la pantalla (dentro de
+ *    la ventana, no solo pintada más abajo). Tocar fuera de las zonas olvida
+ *    la última. Ninguna, ni el logo, la recibe por ser la única a la vista.
  * NO roba el pegado de texto: sin imágenes en el portapapeles no hace nada, y
  * con el foco en un campo de texto y texto en el portapapeles, tampoco (al
  * copiar de una web suelen ir las dos cosas y quien pega en un campo quiere
@@ -10458,8 +10466,23 @@ function aceptarPegado(zona, alSubir) {
   if (!PEGADO.escuchando) {
     PEGADO.escuchando = true;
     document.addEventListener('paste', alPegarEnLaPagina);
+    // tocar FUERA de toda zona olvida la última: «la última que se tocó» es
+    // la del último gesto, no la de hace tres pantallas
+    document.addEventListener('pointerdown', ev => {
+      const t = ev.target;
+      if (!(t && t.closest && t.closest('.acepta-pegado'))) PEGADO.ultima = null;
+    }, true);
   }
   return zona;
+}
+
+/* `caja` lleva dentro un campo de texto y una zona de imágenes que van juntos
+   (la nota de una imagen y sus adjuntos): con el foco en ese campo, la imagen
+   pegada va a esa zona. Sin esto, escribir la nota y pegar la captura no
+   adjuntaría nada. */
+function agruparPegado(caja) {
+  caja.dataset.pegadoAgrupa = '1';
+  return caja;
 }
 
 /* Las imágenes del portapapeles como ficheros. `files` es lo normal; algunos
@@ -10483,17 +10506,42 @@ function esCampoDeTexto(nodo) {
     && !/^(button|checkbox|radio|range|file|submit|reset|color|image)$/i.test(nodo.type || '');
 }
 
+function zonaPintada(z) {
+  return !!z.getClientRects().length && !z.closest('.plegado, [hidden]');
+}
+
+/* Se ve de verdad: pintada, sin plegar y con algún trozo dentro de la ventana. */
+function zonaEnPantalla(z) {
+  if (!zonaPintada(z)) return false;
+  const r = z.getBoundingClientRect();
+  const alto = window.innerHeight || document.documentElement.clientHeight;
+  const ancho = window.innerWidth || document.documentElement.clientWidth;
+  return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < alto && r.left < ancho;
+}
+
 function zonasDePegadoALaVista() {
-  return [...document.querySelectorAll('.acepta-pegado')]
-    .filter(z => z.getClientRects().length && !z.closest('.plegado, [hidden]'));
+  return [...document.querySelectorAll('.acepta-pegado')].filter(zonaEnPantalla);
+}
+
+/* La zona de un campo de texto: la que lo tiene dentro o su compañera. */
+function zonaDelCampo(campo, vivas) {
+  const dentro = vivas.find(z => z.contains(campo));
+  if (dentro) return dentro;
+  const grupo = campo.closest('[data-pegado-agrupa]');
+  return grupo ? (vivas.find(z => grupo.contains(z)) || null) : null;
 }
 
 function zonaQueRecibeElPegado(vivas) {
   const activo = document.activeElement;
+  // la zona del campo con el foco cuenta aunque asome por debajo: el foco ya
+  // dice dónde se está escribiendo
+  if (esCampoDeTexto(activo)) {
+    return zonaDelCampo(activo, [...document.querySelectorAll('.acepta-pegado')].filter(zonaPintada));
+  }
   const conFoco = vivas.find(z => activo && activo !== document.body && z.contains(activo));
   if (conFoco) return conFoco;
   if (PEGADO.ultima && vivas.includes(PEGADO.ultima)) return PEGADO.ultima;
-  return vivas.length === 1 ? vivas[0] : null;
+  return null;
 }
 
 function alPegarEnLaPagina(ev) {
@@ -10505,9 +10553,15 @@ function alPegarEnLaPagina(ev) {
   const zona = zonaQueRecibeElPegado(vivas);
   const activo = document.activeElement;
   const conTexto = [...((datos || {}).types || [])].includes('text/plain');
-  if (esCampoDeTexto(activo) && conTexto && !(zona && zona.contains(activo))) return;
+  if (esCampoDeTexto(activo) && !zona) {
+    // un campo que no es de imágenes: el texto se pega como siempre, y una
+    // imagen sola no se manda a ninguna zona
+    if (!conTexto && vivas.length) toast('Este campo no lleva imágenes: pulsa antes en la zona de imágenes y vuelve a pegar', true);
+    return;
+  }
+  if (esCampoDeTexto(activo) && conTexto && !zona.contains(activo)) return;
   if (!zona) {
-    if (vivas.length > 1) toast('Hay varias zonas de imágenes: pulsa antes en la que quieras y vuelve a pegar', true);
+    if (vivas.length) toast('Pulsa antes en la zona de imágenes donde va y vuelve a pegar', true);
     return;
   }
   ev.preventDefault();

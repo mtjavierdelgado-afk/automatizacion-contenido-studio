@@ -1803,10 +1803,41 @@ def pegar_imagenes_del_portapapeles(navegador, datos):
     ok(not subidas and pg.p.locator(tira).count() == antes,
        f"y no se sube nada al pegar texto (subidas: {subidas})")
 
-    # 2) PEGAR UNA IMAGEN (Ctrl+V) con la única zona a la vista: se sube
+    # 2) 16-10-2026: NO SE ADIVINA LA ZONA. Una imagen SOLA con el cursor en
+    # un campo que no es de imágenes no va a ninguna zona (iba a «la única a
+    # la vista», que podía ser el logo)
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": ".bloque-light textarea",
+                                        "texto": "", "color": "#2060d0"})
+    pg.p.wait_for_timeout(1200)
+    ok(not atendido and not subidas and pg.p.locator(tira).count() == antes,
+       f"una imagen pegada en un campo de texto que no es de imágenes no se sube (subidas: {subidas})")
+    ok("zona de imágenes" in pg.toast(), f"y dice que se pulse antes en la zona ({pg.toast()!r})")
+    # sin foco y sin haber tocado ninguna zona, tampoco: ni la única a la vista
     pg.p.evaluate("() => document.activeElement && document.activeElement.blur()")
     atendido = pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#2060d0"})
-    ok(atendido, "pegar una imagen fuera de un campo lo atiende la zona de imágenes")
+    pg.p.wait_for_timeout(1200)
+    ok(not atendido and not subidas,
+       f"sin tocar ninguna zona, una imagen pegada no va a «la única a la vista» (subidas: {subidas})")
+    # tocada pero FUERA de la ventana (pintada más abajo), tampoco
+    pg.p.evaluate("""() => { const z = document.querySelector('.zona-suelta');
+      const relleno = document.createElement('div'); relleno.id = 'relleno-pegado';
+      relleno.style.height = (window.innerHeight * 3) + 'px';
+      z.parentNode.insertBefore(relleno, z);
+      z.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); }""")
+    fuera = pg.p.evaluate("() => document.querySelector('.zona-suelta').getBoundingClientRect().top"
+                          " >= window.innerHeight")
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#2060d0"})
+    pg.p.wait_for_timeout(1200)
+    ok(fuera and not atendido and not subidas,
+       f"la zona tocada pero fuera de la ventana no recibe el pegado (fuera: {fuera}, subidas: {subidas})")
+    pg.p.evaluate("() => document.querySelector('#relleno-pegado').remove()")
+
+    # PEGAR UNA IMAGEN (Ctrl+V) tras tocar la zona, a la vista: se sube
+    pg.p.evaluate("() => document.querySelector('.zona-suelta').dispatchEvent("
+                  "new PointerEvent('pointerdown', { bubbles: true }))")
+    pg.p.evaluate("() => document.activeElement && document.activeElement.blur()")
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#2060d0"})
+    ok(atendido, "pegar una imagen tras tocar la zona lo atiende la zona de imágenes")
     ok(_esperar_cuenta(pg, tira, antes + 1), "y la imagen pegada sale en la tira, como una elegida")
     ok(subidas and subidas[-1].endswith("/api/presets-light/imagenes"),
        f"por la MISMA ruta que el explorador ({subidas[-1:] if subidas else 'ninguna'})")
@@ -1859,15 +1890,52 @@ def pegar_imagenes_del_portapapeles(navegador, datos):
     ok(len(subidas) == n_subidas, "y no sube nada")
     nota.fill("")
     nota.dispatch_event("input")
-    pg.p.evaluate("() => document.querySelector('.previa-feedback .zona-suelta').dispatchEvent("
-                  "new PointerEvent('pointerdown', { bubbles: true }))")
+    # se toca como lo toca una persona: a la vista (la zona de debajo de la
+    # ventana no recibe nada)
+    pg.p.evaluate("() => { const z = document.querySelector('.previa-feedback .zona-suelta');"
+                  " z.scrollIntoView({ block: 'center' });"
+                  " z.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); }")
     pg.p.evaluate("() => document.activeElement && document.activeElement.blur()")
     pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#d0d030"})
     ok(_esperar_cuenta(pg, ".previa-feedback .tira-aportadas .aportada", 1),
        "pegar una imagen tras tocar la zona de la nota la adjunta a la nota")
     ok(len(subidas) > n_subidas and subidas[-1].endswith("/repaso/imagenes"),
        f"por la ruta de las imágenes de las notas ({subidas[-1:]})")
+    # escribiendo la nota (foco en SU campo), la imagen va a SUS adjuntos
+    n_aportadas = pg.p.locator(".previa-feedback .tira-aportadas .aportada").count()
+    pg.p.evaluate(PEGAR_JS, {"selector": ".previa-feedback textarea", "texto": "", "color": "#30d0d0"})
+    ok(_esperar_cuenta(pg, ".previa-feedback .tira-aportadas .aportada", n_aportadas + 1),
+       "con el cursor en la nota, la imagen pegada va a los adjuntos de esa nota")
     pg.captura("43_pegar_en_la_nota", entera=False)
+
+    # 5) EL LOGO: solo recibe lo que se pega cuando se ha tocado. Con el cursor
+    # en el nombre del vídeo, o sin tocar nada, la imagen NO acaba en el logo
+    pg.js(f"await cargarGaleriaLight(true); elegirEstiloLight(fichaLight('{datos['preset']}'));")
+    ok(pg.esperar("h2", "Un vídeo nuevo"), "el vídeo nuevo, con su logo")
+    pg.p.locator(".fila-ajuste").filter(has_text="Logo").locator("button", has_text="Cambiar").click()
+    ok(pg.esperar(".editor-ajuste.acepta-pegado"), "el editor del logo es una zona de pegar")
+    pg.p.evaluate("() => document.querySelector('.editor-ajuste.acepta-pegado').scrollIntoView({ block: 'center' })")
+    pg.p.evaluate("""() => { const i = [...document.querySelectorAll('.bloque-light')]
+      .filter(b => /El vídeo/.test(b.innerText)).map(b => b.querySelector('input[type=text], input:not([type])'))
+      .find(Boolean); if (i) i.id = 'campo-prueba-pegado'; }""")
+    logos = [u for u in subidas if "/logos" in u]
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": "#campo-prueba-pegado", "texto": "", "color": "#e08020"})
+    pg.p.wait_for_timeout(1500)
+    ok(not atendido and [u for u in subidas if "/logos" in u] == logos,
+       f"con el cursor en el nombre del vídeo, la imagen pegada NO va al logo (subidas: {subidas[-2:]})")
+    pg.p.evaluate("() => document.activeElement && document.activeElement.blur()")
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#e08020"})
+    pg.p.wait_for_timeout(1500)
+    ok(not atendido and [u for u in subidas if "/logos" in u] == logos,
+       "sin tocar el logo, aunque sea la única zona a la vista, no lo recibe")
+    pg.p.evaluate("() => document.querySelector('.editor-ajuste.acepta-pegado').dispatchEvent("
+                  "new PointerEvent('pointerdown', { bubbles: true }))")
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#e08020"})
+    fin = time.time() + 15
+    while time.time() < fin and [u for u in subidas if "/logos" in u] == logos:
+        pg.p.wait_for_timeout(300)
+    ok(atendido and len([u for u in subidas if "/logos" in u]) == len(logos) + 1,
+       "tocado el logo, la imagen pegada sí es el logo")
     pg.sin_errores("pegar imágenes")
     pg.cerrar()
 

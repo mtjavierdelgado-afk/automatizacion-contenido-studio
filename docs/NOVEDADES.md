@@ -10,6 +10,28 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Más arreglos de imágenes (16 de octubre)**
+- **Pegar una imagen ya no la manda al logo por sorpresa.** Con el cursor en
+  un campo de texto (el nombre del vídeo, unas indicaciones), una imagen pegada
+  no va a ninguna zona: sale un aviso para que pulses antes en la zona de
+  imágenes. Sin cursor en un campo, va a la zona que hayas tocado la última y
+  que se vea en pantalla; ninguna, tampoco el logo, la recibe por ser «la
+  única a la vista». Escribiendo la nota de una imagen, lo que pegues va a los
+  adjuntos de esa nota.
+- **Si OpenAI rechaza un plano con su filtro de seguridad, la tanda sigue con
+  los demás** y al final dice cuál (o cuáles) fue, con su frase, y qué hacer:
+  cambiar su nota o, si no tenía, escribirle una describiendo lo que se ve sin
+  marcas. Antes se paraban todos los planos siguientes de ese sitio y el aviso
+  decía «Cambia la nota» aunque no hubiera ninguna. Lo dibujado no se vuelve a
+  pagar al relanzar.
+- **Un microcorte de red ya no tumba la tanda con un error de Python.** Si no
+  se pudo ni conectar con OpenAI, se reintenta solo un par de veces (no se ha
+  cobrado nada). Si la conexión se corta con la imagen ya pedida, no se repite
+  sola, porque puede estar cobrada: lo dice claro y lo hecho se conserva.
+- **Rehacer una imagen con nota conserva las caras.** La hoja de reparto de
+  cada personaje del plano va siempre al rehacerlo, aunque el corrector no la
+  eligiera. Las demás imágenes no se tocan ni quedan obsoletas.
+
 **El dinero de las imágenes, revisado (15 de octubre)**
 - **Cambiar la calidad ya no promete lo que no hace.** «Traer el estilo» con
   otra calidad decía «rehace las N imágenes» con su precio, y «Poner al día»

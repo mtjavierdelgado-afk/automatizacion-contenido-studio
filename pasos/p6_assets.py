@@ -3647,6 +3647,9 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
     # resultados, el coste acumulado y el contador de avance
     cerrojo = threading.Lock()
     estado = {"coste": 0.0, "hechas": 0}
+    # los planos que el filtro de seguridad de OpenAI no dibuja: se sigue con
+    # los demas y se dice al final cuales (F1, 16-10-2026)
+    rechazados = []
 
     def anunciar(sid):
         with cerrojo:
@@ -3807,11 +3810,25 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                     # generacion (frase_de_referencia); el corrector solo
                     # elige cuales y anade el detalle
                     motor_imagen = medios.motor("imagen_openai/imagen.py")
+                    elegidas = [dict(r, ruta=motor_imagen.normalizar(r["ruta"],
+                                                                     dirs["cache"]))
+                                for r in corregido["referencias"]]
+                    # LA HOJA DE CADA PERSONAJE DEL PLANO VA SIEMPRE (M5,
+                    # 16-10-2026). El corrector elige que adjuntar y a veces
+                    # soltaba la hoja de reparto: el plano rehecho salia con
+                    # otras caras que sus vecinos (en foto se nota mucho). Van
+                    # donde las pone la primera generacion, detras del estilo,
+                    # y solo las que el corrector no haya puesto ya. Es solo
+                    # este camino --un plano que alguien ha PEDIDO rehacer con
+                    # nota--: lo conservado no pasa por aqui y su firma no se
+                    # mueve.
+                    ya = {r.get("nombre") for r in elegidas
+                          if r.get("papel") == "reparto"}
                     referencias = (
                         list(_referencias_estilo(p, dirs["cache"], escena_final))
-                        + [dict(r, ruta=motor_imagen.normalizar(r["ruta"],
-                                                                dirs["cache"]))
-                           for r in corregido["referencias"]])
+                        + _hojas_del_plano(escena_final, plan, dirs,
+                                           dirs["cache"], ya)
+                        + elegidas)
                 prompt = _prompt_completo(
                     escena_final, referencias, p["estilo"],
                     feedback=nota_texto,
@@ -3830,20 +3847,40 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                 # 14 planos con la firma SIN cambiar y su PNG en el banco,
                 # 0,55 $. Es el ultimo resto de la deduccion vieja que el
                 # comentario de `_generar_escenas` da por retirada.
-                meta = _producir_imagen(sid, prompt,
-                                        [r["ruta"] for r in referencias],
-                                        destino, p,
-                                        # y para la que SI se ha pedido,
-                                        # saltarse la cache: con el mismo
-                                        # prompt devolveria la que se acaba de
-                                        # rechazar
-                                        rehacer=(pedida and forzar
-                                                 and os.path.exists(destino)),
-                                        # al tamano del formato del video: un
-                                        # plano vertical se PIDE vertical, no
-                                        # se recorta de uno apaisado
-                                        tamano=p2_brief.comun.ficha_formato(
-                                            plan.get("formato"))["tamano_imagen"])
+                try:
+                    meta = _producir_imagen(sid, prompt,
+                                            [r["ruta"] for r in referencias],
+                                            destino, p,
+                                            # y para la que SI se ha pedido,
+                                            # saltarse la cache: con el mismo
+                                            # prompt devolveria la que se acaba
+                                            # de rechazar
+                                            rehacer=(pedida and forzar
+                                                     and os.path.exists(destino)),
+                                            # al tamano del formato del video:
+                                            # un plano vertical se PIDE
+                                            # vertical, no se recorta de uno
+                                            # apaisado
+                                            tamano=p2_brief.comun.ficha_formato(
+                                                plan.get("formato"))["tamano_imagen"])
+                except Exception as fallo:                       # noqa: BLE001
+                    # EL FILTRO DE SEGURIDAD NO TUMBA LA CADENA (F1). Tumbaba
+                    # el sitio entero sin decir que plano era, y los planos
+                    # siguientes de ese sitio no se generaban nunca. Ahora se
+                    # apunta y se sigue: este plano no deja PNG ni ficha nueva
+                    # (no entra en la continuidad de los siguientes) y la tanda
+                    # falla AL FINAL con la lista. Lo dibujado mientras tanto
+                    # queda en trabajo/ y en el banco: al volver a lanzarla se
+                    # conserva y no se paga otra vez. Rechazado no se cobra.
+                    if type(fallo).__name__ != "RechazoSeguridad":
+                        if type(fallo).__name__ == "CorteDeRed":
+                            raise type(fallo)(f"plano {sid}: {fallo}") from fallo
+                        raise
+                    with cerrojo:
+                        rechazados.append({"id": sid, "escena": escena,
+                                           "nota": bool(nota_texto),
+                                           "fallo": fallo})
+                    continue
                 if corregido:
                     meta = dict(meta, corrector={
                         k: corregido.get(k) for k in
@@ -3886,6 +3923,7 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
     if cadenas <= 1:
         for grupo in grupos:
             una_cadena(grupo)
+        _fallar_por_rechazos(rechazados, orden)
         return estado["coste"]
 
     avisar(0.34, f"{len(grupos)} cadenas de planos, {cadenas} a la vez")
@@ -3895,7 +3933,54 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
     with ThreadPoolExecutor(max_workers=cadenas) as pool:
         for tarea in [pool.submit(una_cadena, g) for g in grupos]:
             tarea.result()
+    _fallar_por_rechazos(rechazados, orden)
     return estado["coste"]
+
+
+def _describir_plano(escena, largo=90):
+    """«S004 («lo que dice…»)»: el id y la frase, para que se encuentre."""
+    dice = " ".join(str((escena or {}).get("narracion") or "").split())
+    if len(dice) > largo:
+        dice = dice[:largo].rsplit(" ", 1)[0] + "…"
+    return f"{escena['id']} («{dice}»)" if dice else str(escena["id"])
+
+
+def _fallar_por_rechazos(rechazados, orden):
+    """Si el filtro de seguridad rechazo algun plano, la tanda falla AQUI.
+
+    Con el MISMO tipo de error que lanza el motor (`RechazoSeguridad`): la cola
+    de notas lo reconoce por el nombre para marcar la nota como «Rechazada».
+    El mensaje dice QUE planos, con su frase, y que hacer con cada uno: si
+    llevaba nota, cambiarla; si no, escribirle una. Antes decia «Cambia la
+    nota» aunque no hubiera ninguna, y no decia cual era el plano.
+    """
+    if not rechazados:
+        return
+    rechazados = sorted(rechazados, key=lambda r: orden.get(r["id"], 0))
+    lista = "; ".join(_describir_plano(r["escena"]) for r in rechazados)
+    ids = re.findall(r"req_[A-Za-z0-9]+", " ".join(str(r["fallo"]) for r in rechazados))
+    sin_marcas = any("sin marcas" in str(r["fallo"]) for r in rechazados)
+    con_nota = [r["id"] for r in rechazados if r["nota"]]
+    sin_nota = [r["id"] for r in rechazados if not r["nota"]]
+    que_hacer = []
+    if con_nota:
+        que_hacer.append(f"cambia la nota de {', '.join(con_nota)} para describir lo "
+                         "que se ve sin nombres propios, o quita las imágenes "
+                         "adjuntas con logos")
+    if sin_nota:
+        que_hacer.append(f"escribe una nota en {', '.join(sin_nota)} describiendo lo "
+                         "que se ve sin nombres propios (marcas, consolas, "
+                         "personajes conocidos) y rehazlo")
+    n = len(rechazados)
+    mensaje = (
+        f"OpenAI ha rechazado con su filtro de seguridad "
+        + (f"el plano {lista}" if n == 1 else f"{n} planos: {lista}")
+        + ". Suele ser por pedir marcas, logos o personajes con derechos"
+        + (" (ya se probó describiéndolo sin marcas)" if sin_marcas else "")
+        + ". Lo demás de la tanda está dibujado y no se vuelve a pagar. "
+          "Qué hacer: " + "; ".join(que_hacer) + "."
+        + (f" (id {', '.join(ids[:3])})" if ids else ""))
+    raise type(rechazados[0]["fallo"])(mensaje)
 
 
 #: Tope de llamadas simultaneas a la API de imagen. No es una regla del montaje
@@ -4281,6 +4366,38 @@ def continuidad_de(escena, anteriores, por_id, cuantos=1):
     return mismos[-cuantos:] if cuantos else mismos
 
 
+def _hojas_del_plano(escena, plan, dirs, cache, ya=()):
+    """La hoja de reparto de cada personaje del plano que tenga hoja dibujada.
+
+    La usan la primera generacion (`_referencias_escena`) y el camino del
+    corrector, que tiene que llevar EXACTAMENTE lo mismo: `ya` son los nombres
+    que ya van y no se repiten.
+    """
+    imagen = medios.motor("imagen_openai/imagen.py")
+    # La MISMA ficha con la que se dibujo la hoja (`_assets_necesarios`), que es
+    # la unica forma de que el plano y la hoja lean lo mismo: leerlo del catalogo
+    # por un lado y de los params por otro es como se acaba con una hoja
+    # enmascarada y unos planos que la destapan.
+    fichas_asset = (plan or {}).get("assets") or {}
+    salida = []
+    for personaje in escena.get("personajes") or []:
+        hoja = os.path.join(dirs["reparto"], f"{personaje}.png")
+        if personaje in ya or not os.path.exists(hoja):
+            continue
+        # SI LA HOJA VA CON LA CARA TAPADA, EL PLANO TIENE QUE SABERLO. Es
+        # el otro extremo de PENDIENTE 32: la hoja ya dibuja la mascara,
+        # pero el plano recibe «copy their faces exactly as drawn there» y
+        # ademas la regla de prompt_imagen le pide declarar la expresion
+        # facial de cada personaje. Con las dos cosas delante y sin decir
+        # nada, el generador tiene un motivo para destapar. Se dice.
+        ficha_q = fichas_asset.get(f"asset:{personaje}") or {}
+        salida.append({"papel": "reparto", "nombre": personaje,
+                       "tapada": tapa_la_cara(ficha_q.get("descripcion"),
+                                              ficha_q.get("feedback")),
+                       "ruta": imagen.normalizar(hoja, cache)})
+    return salida
+
+
 def _referencias_escena(escena, plan, dirs, p, cache, hechas, anteriores=None,
                         notas=None):
     """Estilo, estructura, reparto y continuidad, en ese orden fijo.
@@ -4294,25 +4411,7 @@ def _referencias_escena(escena, plan, dirs, p, cache, hechas, anteriores=None,
     """
     imagen = medios.motor("imagen_openai/imagen.py")
     referencias = list(_referencias_estilo(p, cache, escena))
-    # La MISMA ficha con la que se dibujo la hoja (`_assets_necesarios`), que es
-    # la unica forma de que el plano y la hoja lean lo mismo: leerlo del catalogo
-    # por un lado y de los params por otro es como se acaba con una hoja
-    # enmascarada y unos planos que la destapan.
-    fichas_asset = (plan or {}).get("assets") or {}
-    for personaje in escena.get("personajes") or []:
-        hoja = os.path.join(dirs["reparto"], f"{personaje}.png")
-        if os.path.exists(hoja):
-            # SI LA HOJA VA CON LA CARA TAPADA, EL PLANO TIENE QUE SABERLO. Es
-            # el otro extremo de PENDIENTE 32: la hoja ya dibuja la mascara,
-            # pero el plano recibe «copy their faces exactly as drawn there» y
-            # ademas la regla de prompt_imagen le pide declarar la expresion
-            # facial de cada personaje. Con las dos cosas delante y sin decir
-            # nada, el generador tiene un motivo para destapar. Se dice.
-            ficha_q = fichas_asset.get(f"asset:{personaje}") or {}
-            referencias.append({"papel": "reparto", "nombre": personaje,
-                                "tapada": tapa_la_cara(ficha_q.get("descripcion"),
-                                                       ficha_q.get("feedback")),
-                                "ruta": imagen.normalizar(hoja, cache)})
+    referencias += _hojas_del_plano(escena, plan, dirs, cache)
     for real in _referencias_reales(escena, p):
         referencias.append({"papel": "parecido", "ruta": imagen.normalizar(real["ruta"], cache),
                             "que_es": real.get("que_es", ""),

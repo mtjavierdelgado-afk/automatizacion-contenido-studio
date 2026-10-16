@@ -4555,6 +4555,117 @@ def prueba_ortografia_por_tandas():
         cli_claude.ejecutar = original
 
 
+def prueba_microcorte_de_red():
+    """F2 del analisis de octubre: un microcorte de red tumbaba la tanda con un
+    error de Python (`requests.exceptions.ConnectionError`) en mitad del plano.
+
+    Lo que pasa al ABRIR la conexion se reintenta: la peticion no ha salido y
+    no se ha cobrado. Lo que pasa DESPUES (la respuesta que no llega, la
+    conexion cortada a mitad) no, porque la imagen puede estar hecha y
+    cobrada: se para con un mensaje claro. `requests.post` es de mentira en
+    toda la prueba: no sale nada a la red y no se paga nada.
+    """
+    titulo("motor de imagen: un microcorte de red se reintenta solo si no salio")
+    import importlib.util                                   # noqa: PLC0415
+    import base64                                           # noqa: PLC0415
+    import requests as requests_de_verdad                   # noqa: PLC0415
+    from urllib3.exceptions import (MaxRetryError,          # noqa: PLC0415
+                                    NewConnectionError, ProtocolError)
+    # UNA COPIA PROPIA DEL MOTOR: la de `medios` tiene `generar` prohibido
+    spec = importlib.util.spec_from_file_location(
+        "imagen_microcorte", os.path.join(RAIZ, "motores", "imagen_openai", "imagen.py"))
+    imagen = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(imagen)
+    imagen.ESPERAS_DE_RED = [0.0, 0.0]
+    falsa_antes = os.environ.pop("ESTUDIO_IMAGEN_FALSA", None)
+    base = tempfile.mkdtemp(prefix="estudio_microcorte_")
+    ref = os.path.join(base, "ref.png")
+    Image.new("RGB", (32, 32), (10, 20, 30)).save(ref)
+    crudo = io.BytesIO()
+    Image.new("RGB", (16, 16), (200, 10, 10)).save(crudo, "PNG")
+    png = crudo.getvalue()
+
+    class Buena:
+        status_code = 200
+        headers = {}
+        text = "{}"
+
+        @staticmethod
+        def json():
+            return {"data": [{"b64_json": base64.b64encode(png).decode("ascii")}],
+                    "usage": {}}
+
+    def sin_conectar():
+        return requests_de_verdad.exceptions.ConnectionError(MaxRetryError(
+            None, "/v1/images/edits", NewConnectionError(
+                None, "Failed to establish a new connection: [Errno -3] "
+                      "Temporary failure in name resolution")))
+
+    def cortada():
+        return requests_de_verdad.exceptions.ConnectionError(ProtocolError(
+            "Connection aborted.", ConnectionResetError(104, "Connection reset by peer")))
+
+    def red(guion):
+        """Un `requests` cuyo post va dando lo que diga el guion, en orden."""
+        llamadas = []
+
+        class Red:
+            exceptions = requests_de_verdad.exceptions
+
+            @staticmethod
+            def post(*_a, **_k):
+                paso = guion[min(len(llamadas), len(guion) - 1)]
+                llamadas.append(paso)
+                if isinstance(paso, BaseException):
+                    raise paso
+                return Buena()
+        return Red, llamadas
+
+    def pedir(guion):
+        imagen.requests, llamadas = red(guion)
+        gasto = imagen._gasto["llamadas"]                   # noqa: SLF001
+        try:
+            salida = imagen.generar("un plano", [ref], quality="low",
+                                    api_key="sk-prueba-no-se-usa")
+            return salida, None, llamadas, imagen._gasto["llamadas"] - gasto  # noqa: SLF001
+        except Exception as fallo:                          # noqa: BLE001
+            return None, fallo, llamadas, imagen._gasto["llamadas"] - gasto  # noqa: SLF001
+
+    try:
+        salida, fallo, llamadas, pagadas = pedir([sin_conectar(), sin_conectar(), "bien"])
+        ok(fallo is None and salida and salida[0] == png,
+           f"dos fallos al CONECTAR y la tercera sale: la imagen llega ({fallo!r})")
+        igual(len(llamadas), 3, "se ha intentado tres veces")
+        igual(pagadas, 1, "y se anota UNA imagen pagada, no tres")
+
+        salida, fallo, llamadas, pagadas = pedir(
+            [requests_de_verdad.exceptions.ConnectTimeout("connect timeout"), "bien"])
+        ok(fallo is None and salida, "un plazo de CONECTAR vencido también se reintenta")
+
+        salida, fallo, llamadas, pagadas = pedir([sin_conectar()])
+        igual(len(llamadas), 1 + getattr(imagen, "REINTENTOS_DE_RED", 2),
+              "sin red, se insiste solo un par de veces")
+        ok(type(fallo).__name__ == "CorteDeRed" and "conectar con OpenAI" in str(fallo)
+           and "no se ha cobrado" in str(fallo),
+           f"y para con un mensaje en castellano, que dice que no se cobró ({fallo})")
+        igual(pagadas, 0, "sin anotar nada pagado")
+
+        for nombre, error in (("la respuesta que no llega (ReadTimeout)",
+                               requests_de_verdad.exceptions.ReadTimeout("read timed out")),
+                              ("la conexión cortada a mitad", cortada())):
+            salida, fallo, llamadas, pagadas = pedir([error, "bien"])
+            igual(len(llamadas), 1, f"{nombre}: NO se reintenta (puede estar cobrada)")
+            ok(type(fallo).__name__ == "CorteDeRed" and "puede que OpenAI" in str(fallo)
+               and "no se pierde" in str(fallo),
+               f"{nombre}: lo dice claro, sin un error de Python ({fallo})")
+            igual(pagadas, 0, f"{nombre}: y no se anota como pagada")
+    finally:
+        imagen.requests = requests_de_verdad
+        if falsa_antes is not None:
+            os.environ["ESTUDIO_IMAGEN_FALSA"] = falsa_antes
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def _prohibir_pagar():
     """Deja el motor de imagen sin `generar`. Ver la cabecera del modulo.
 
@@ -4635,6 +4746,7 @@ def main():
     prueba_familias_de_receta()
     prueba_musica_un_pelin_mas_alta()
     prueba_ortografia_por_tandas()
+    prueba_microcorte_de_red()
 
     print("\n" + "=" * 70)
     if _fallos:

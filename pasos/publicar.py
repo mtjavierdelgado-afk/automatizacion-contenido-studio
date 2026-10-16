@@ -1061,8 +1061,9 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
     cuando = envios[0]["cuando"] if envios[0].get("modo") == "programado" else None
     perfil = envios[0].get("perfil") or ajustes.get("perfil")
 
+    _SUBIENDO.add(lote)          # ANTES del hilo: /refrescar no lo da por huerfano
+
     def trabajo():
-        _SUBIENDO.add(lote)
         try:
             r = cliente(raiz).publicar(perfil, redes, info["mp4"], campos, cuando=cuando,
                                    zona=ZONA, id_propio=lote)
@@ -1130,9 +1131,14 @@ def reintentar(raiz, info, ajustes, eid, en_hilo=True):
             if momento and momento <= ahora_lima() + dt.timedelta(minutes=2):
                 raise ErrorPublicar("su hora ya pasó: mira en Upload-Post si salió, y si no, "
                                     "publícalo como envío nuevo", 409)
-    cliente(raiz)
-    _actualizar_lote(raiz, pid, envio["lote"], lambda e: e.update(
-        estado="enviando", error="", nota="reintentado con la misma clave"))
+        cliente(raiz)
+        # mirar y pasar a «enviando» bajo el MISMO cerrojo: dos clics, una subida
+        for e in datos["envios"]:
+            if e.get("lote") == envio["lote"]:
+                e.update(estado="enviando", error="", nota="reintentado con la misma clave",
+                         reintentado=_iso_lima(), actualizado=_iso_lima())
+        _escribir(_ruta_video(raiz, pid), datos)
+        _SUBIENDO.add(envio["lote"])
     _NO_LO_CONOCE.pop(envio["lote"], None)
     _subir_lote(raiz, info, ajustes, envio["lote"], en_hilo=en_hilo)
     return {"lote": envio["lote"]}
@@ -1165,14 +1171,16 @@ def cancelar(raiz, pid, eid):
                     e["actualizado"] = _iso_lima()
             _escribir(_ruta_video(raiz, pid), datos)
         return {"cancelados": [envio["red"]]}
-    if estado == "fallido":
-        # «Quitar de la lista»: un fallo ya visto no se queda en «Te necesitan»
+    if estado in ("fallido", "comprobar"):
+        # «Quitar de la lista»: un fallo ya visto (o un «comprobar» que ya se
+        # miro en Upload-Post) no se queda en «Te necesitan» para siempre
         with _lock(pid):
             datos = _leer_video(raiz, pid)
             for e in datos["envios"]:
                 if e.get("id") == eid:
+                    e["nota"] = ("fallo descartado" if estado == "fallido"
+                                 else "quitado de la lista tras mirarlo en Upload-Post")
                     e["estado"] = "cancelado"
-                    e["nota"] = "fallo descartado"
                     e["actualizado"] = _iso_lima()
             _escribir(_ruta_video(raiz, pid), datos)
         return {"cancelados": [envio["red"]]}
@@ -1210,8 +1218,22 @@ def _videos_con_ficha(raiz):
     return [n[:-5] for n in nombres if n.endswith(".json") and re.match(r"^[a-z0-9_]+\.json$", n)]
 
 
+_LOCK_REFRESCO = threading.Lock()
+
+
 def refrescar(raiz, limite=8):
-    """Pregunta a Upload-Post por lo que sigue en el aire. -> {consultados, cambios}"""
+    """Pregunta a Upload-Post por lo que sigue en el aire. -> {consultados, cambios}
+
+    De uno en uno: con dos pestañas abiertas, el segundo no pregunta lo mismo."""
+    if not _LOCK_REFRESCO.acquire(blocking=False):
+        return {"consultados": 0, "cambios": 0, "ocupado": True}
+    try:
+        return _refrescar(raiz, limite)
+    finally:
+        _LOCK_REFRESCO.release()
+
+
+def _refrescar(raiz, limite):
     pendientes = {}
     ahora = ahora_lima()
     for pid in _videos_con_ficha(raiz):
@@ -1222,7 +1244,7 @@ def refrescar(raiz, limite=8):
             if estado == "enviando":
                 if e["lote"] in _SUBIENDO:
                     continue
-                creado = _leer_momento(e.get("creado"))
+                creado = _leer_momento(e.get("reintentado") or e.get("creado"))
                 if creado and (ahora - creado).total_seconds() > HUERFANO_S:
                     _actualizar_lote(raiz, pid, e["lote"], lambda x: x.update(
                         estado="comprobar", error="la subida se cortó a medias (el "
@@ -1259,8 +1281,11 @@ def refrescar(raiz, limite=8):
                 _NO_LO_CONOCE[lote] = veces
                 creado = _leer_momento(e.get("creado"))
                 viejo = creado is None or (ahora - creado).total_seconds() > 1800
-                if veces >= VECES_NO_LO_CONOCE and viejo and e.get("estado") in (
-                        "comprobar", "publicando"):
+                # SOLO lo que era para «ya»: de una programada no esta claro que
+                # Upload-Post responda por request_id, y darla por no llegada
+                # dejaria publicarla otra vez mientras sigue programada alli
+                if veces >= VECES_NO_LO_CONOCE and viejo and e.get("modo") == "ahora" \
+                        and e.get("estado") in ("comprobar", "publicando"):
                     _actualizar_lote(raiz, pid, lote, lambda x: x.update(
                         estado="fallido", error="Upload-Post no conoce este envío: no llegó. "
                         "Puedes publicarlo otra vez."))

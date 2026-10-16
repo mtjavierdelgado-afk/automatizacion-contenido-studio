@@ -714,6 +714,16 @@ def prueba_envios_sueltos():
             P.refrescar(raiz)
         perdido = next(e for e in P._leer_video(raiz, "suelto")["envios"] if e["id"] == "perdido1")
         igual(perdido["estado"], "fallido", "un envío que Upload-Post no conoce acaba «fallido»")
+        datos = P._leer_video(raiz, "suelto")
+        datos["envios"].append({"id": "perdido2", "red": "youtube", "lote": "programado_perdido",
+                                "estado": "comprobar", "modo": "programado", "cuando": hace_una_hora,
+                                "creado": hace_una_hora, "mp4_huella": "h1"})
+        P._escribir(P._ruta_video(raiz, "suelto"), datos)
+        for _ in range(P.VECES_NO_LO_CONOCE + 1):
+            P.refrescar(raiz)
+        perdido = next(e for e in P._leer_video(raiz, "suelto")["envios"] if e["id"] == "perdido2")
+        igual(perdido["estado"], "comprobar",
+              "pero uno programado se queda en «comprobar»: puede seguir programado allí")
         c = P.cola(raiz, [{"pid": "suelto", "nombre": "Suelto", "montado": True}],
                    desde=(P.ahora_lima() + dt.timedelta(days=30)).strftime("%Y-%m-%d"))
         ok(any(e["id"] == "perdido1" for e in c["fallidos"]),

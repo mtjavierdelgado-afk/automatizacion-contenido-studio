@@ -16357,7 +16357,6 @@ async function cargarPublicar(silencio) {
   try {
     if (PUB.seccion === 'ficha' && PUB.pid) {
       PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`));
-      limpiarBorradorPublicar();
     } else if (PUB.seccion === 'cuentas') {
       PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
     } else {
@@ -16577,18 +16576,14 @@ function textosDeFicha(red) {
   return Object.assign({ titulo: '', descripcion: '', cta: '', hashtags: [] }, guardado, borrador);
 }
 
-/* Del borrador se quita SOLO lo que el servidor ya tiene igual: lo tecleado
-   mientras volvía una respuesta no se pierde. */
-function limpiarBorradorPublicar() {
-  const textos = (PUB.ficha || {}).textos || {};
-  Object.keys(PUB.borrador).forEach(red => {
+/* Tras un guardado bueno se quita del borrador LO QUE SE MANDÓ, si no se ha
+   vuelto a tocar mientras: lo tecleado entretanto se queda para el siguiente. */
+function limpiarBorradorPublicar(enviado) {
+  Object.keys(enviado).forEach(red => {
     const b = PUB.borrador[red];
-    const t = textos[red] || {};
-    Object.keys(b).forEach(campo => {
-      const igual = campo === 'hashtags'
-        ? (b[campo] || []).map(x => String(x).replace(/^#/, '')).join(' ') === (t.hashtags || []).join(' ')
-        : (b[campo] || '') === (t[campo] || '');
-      if (igual) delete b[campo];
+    if (!b) return;
+    Object.keys(enviado[red]).forEach(campo => {
+      if (JSON.stringify(b[campo]) === JSON.stringify(enviado[red][campo])) delete b[campo];
     });
     if (!Object.keys(b).length) delete PUB.borrador[red];
   });
@@ -16612,7 +16607,7 @@ async function guardarTextosPublicar() {
     PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
       method: 'PUT', cuerpo: { textos },
     });
-    limpiarBorradorPublicar();
+    limpiarBorradorPublicar(textos);
     repintarPublicarSinPisar();
   } catch (e) {
     toast(`no se han podido guardar los textos: ${e.message}`, true);
@@ -16816,16 +16811,19 @@ async function confirmarEnvioPublicar(modo, repetir) {
   /* LO QUE YA SALIÓ (o va a salir) SE QUITA, salvo que se diga: repetir no puede
      ser lo que pasa por defecto al volver a pulsar con todas las redes puestas. */
   const ya = redes.filter(r => (f.envios || []).some(e => e.red === r && VIVOS_PUBLICAR.includes(e.estado)));
+  /* Con alguna que falta: Aceptar envía SOLO a esas y Cancelar no envía nada.
+     Volver a publicar en una red donde ya salió es una decisión aparte: se
+     hace dejando marcadas solo esas redes. */
   if (ya.length && !repetir) {
     const faltan = redes.filter(r => !ya.includes(r));
     const nombres = ya.map(r => NOMBRES_RED[r]).join(', ');
-    if (faltan.length && confirm(`Ya está publicado o programado en ${nombres}.\n\n`
-      + `¿Enviar solo a ${faltan.map(r => NOMBRES_RED[r]).join(', ')}?`)) {
+    if (faltan.length) {
+      if (!confirm(`Ya está publicado o programado en ${nombres}: ahí no se vuelve a enviar.\n\n`
+        + `Aceptar: enviar solo a ${faltan.map(r => NOMBRES_RED[r]).join(', ')}. Cancelar: no enviar nada.`)) return;
       redes = faltan;
-    } else if (confirm(`¿Publicarlo OTRA VEZ en ${nombres}${faltan.length ? ' y en las demás' : ''}?`)) {
-      repetir = true;
     } else {
-      return;
+      if (!confirm(`Ya está publicado o programado en ${nombres}. ¿Publicarlo OTRA VEZ ahí?`)) return;
+      repetir = true;
     }
   }
   const cuando = modo === 'programar' ? PUB.cuandoEnvio : '';
@@ -16895,7 +16893,10 @@ async function reintentarEnvioPublicar(envio) {
 async function cancelarEnvioPublicar(envio) {
   const pregunta = envio.estado === 'fallido'
     ? `¿Quitar de la lista el fallo de ${NOMBRES_RED[envio.red]}?`
-    : `¿Cancelar ${NOMBRES_RED[envio.red]}${envio.estado === 'programado'
+    : envio.estado === 'comprobar'
+      ? `¿Ya miraste en Upload-Post si ${NOMBRES_RED[envio.red]} salió?\n\nQuitarlo de la lista deja `
+        + 'volver a publicarlo sin aviso: hazlo solo si allí no está.'
+      : `¿Cancelar ${NOMBRES_RED[envio.red]}${envio.estado === 'programado'
       ? ' (y las demás redes que iban en el mismo envío programado)' : ''}?`;
   if (!confirm(pregunta)) return;
   try {
@@ -16935,7 +16936,7 @@ function bloqueEnviosFicha() {
         onclick: () => reintentarEnvioPublicar(e) }, 'Reintentar') : null,
       ['programado', 'espera_ok'].includes(e.estado)
         ? h('button', { clase: 'mini peligro', onclick: () => cancelarEnvioPublicar(e) }, 'Cancelar') : null,
-      e.estado === 'fallido'
+      ['fallido', 'comprobar'].includes(e.estado)
         ? h('button', { clase: 'mini fantasma', title: 'Quitarlo de «Te necesitan» (no borra nada en la red)',
           onclick: () => cancelarEnvioPublicar(e) }, 'Quitar de la lista') : null));
   });

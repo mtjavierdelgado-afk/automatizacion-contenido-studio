@@ -14257,11 +14257,13 @@ def publicar_crear_perfil(cid: str, peticion: Request, cuerpo: dict = Body(defau
     except P.UP.ErrorUploadPost as fallo:
         if fallo.codigo != 409:
             raise ErrorApi(409 if fallo.codigo in (401, 403) else 502, str(fallo)) from None
-        # ya existia en Upload-Post y no es de ningun otro proyecto de aqui
-        hecho = {"perfil": perfil, "cuentas": {}}
+        # ya existia en Upload-Post y no es de ningun otro proyecto de aqui: sus
+        # cuentas no se saben hasta «Ver cuentas»
+        hecho = {"perfil": perfil, "cuentas": {}, "sin_mirar": True}
     ajustes = P.guardar_ajustes(raiz_proyectos(), cid, {"perfil": hecho["perfil"]},
                                 internos={"cuentas": hecho["cuentas"],
-                                          "cuentas_vistas": P._iso_lima()})
+                                          "cuentas_vistas": "" if hecho.get("sin_mirar")
+                                          else P._iso_lima()})
     return {"ajustes": ajustes}
 
 

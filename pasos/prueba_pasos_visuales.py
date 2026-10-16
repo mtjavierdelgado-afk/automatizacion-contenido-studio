@@ -1346,6 +1346,70 @@ def probar_rechazo_y_nota(proyecto, estado):
         shutil.copytree(copia, carpeta)
 
 
+def probar_hojas_y_banco(proyecto, estado):
+    """Las hojas de reparto no se vuelven a pagar si nadie ha pedido rehacerlas.
+
+    Revision del 16-10-2026, dos fallos de la misma linea de p6:
+
+      - `rehacer=(rehacer or unidades is not None)`: cualquier pasada dirigida
+        a unidades (regenerar lo obsoleto, retomar) se saltaba el banco y
+        pagaba una hoja nueva, y una hoja nueva deja por pagar todos sus planos;
+      - en una receta 'todo', la tarea «assets» volvia a rehacer las hojas que
+        la tarea «piezas» acababa de rehacer: cada hoja, pagada dos veces.
+
+    Sin red y sin pagar: el `generar` del motor es de mentira toda la prueba.
+    """
+    print("\n  [las hojas: el banco manda si no se pide rehacer · 'todo' no las paga dos veces]")
+    params = estado.params("assets")
+    plan = p6_assets.plan_actual(proyecto)
+    trabajo = medios.sembrar_trabajo(proyecto, "assets")
+    reparto = os.path.join(trabajo, "assets", "reparto")
+    hojas = sorted(u for u, f in (plan.get("assets") or {}).items()
+                   if f.get("tipo") == "reparto")
+    if not ok(hojas and os.path.isdir(reparto), "el video tiene hojas de reparto dibujadas"):
+        return
+    copia = os.path.join(CARPETA, "_reparto_antes_de_hojas")
+    shutil.rmtree(copia, ignore_errors=True)
+    shutil.copytree(reparto, copia)
+    estilo_h = _lamina(os.path.join(CARPETA, "_estilo_hojas.png"), 91)
+    p = dict(params, motor_imagen="openai", imagenes_previas=[],
+             estilo=dict(params.get("estilo") or {}, referencias=[estilo_h]))
+    motor = medios.motor("imagen_openai/imagen.py")
+    original_generar = motor.generar
+    original_producir = p6_assets._producir_imagen          # noqa: SLF001
+    llamadas = []
+    try:
+        p6_assets._producir_imagen, motor.generar = _motor_de_mentira(llamadas)
+        uid = hojas[0]
+        nombre = uid.split(":", 1)[-1]
+        # 1. pedida CON rehacer: se paga (y queda en el banco)
+        p6_assets.ejecutar(proyecto, p, avisador("p6"), unidades=[uid],
+                           rehacer=True, tipos=["reparto"])
+        igual(llamadas, [nombre], "una hoja pedida con «rehacer» se paga, ella sola")
+        # 2. la MISMA hoja pedida SIN rehacer (regenerar lo obsoleto): el
+        #    prompt no ha cambiado, el banco la tiene y no se paga otra vez
+        llamadas.clear()
+        p6_assets.ejecutar(proyecto, p, avisador("p6"), unidades=[uid],
+                           tipos=["reparto"])
+        igual(llamadas, [], "pedida sin «rehacer», sale del banco: no se paga otra vez")
+        # 3. 'todo': la tarea «assets» llega con rehacer y sin unidades, pero
+        #    detras de «piezas», que ya las rehizo (`conservar_piezas`)
+        llamadas.clear()
+        try:
+            p6_assets.ejecutar(proyecto, p, avisador("p6"), rehacer=True,
+                               tipos=["reparto"], conservar_piezas=True)
+        except TypeError as fallo:
+            llamadas.append(f"sin conservar_piezas: {fallo}")
+        igual(llamadas, [], "en 'todo', la segunda pasada no vuelve a pagar las hojas")
+        ok("conservar_piezas" in p6_assets.OPCIONES_EJECUCION,
+           "y la opcion viaja por invocacion, sin tocar la firma del paso")
+    finally:
+        p6_assets._producir_imagen = original_producir
+        motor.generar = original_generar
+        shutil.rmtree(reparto, ignore_errors=True)
+        shutil.copytree(copia, reparto)
+
+
 def probar_planificar_no_encoge(proyecto, params):
     """Planificar dos veces seguidas tiene que dar el MISMO video.
 
@@ -1673,6 +1737,7 @@ def main():
            f"{modulo.__name__} expone describir()")
 
     probar_rechazo_y_nota(proyecto, estado)
+    probar_hojas_y_banco(proyecto, estado)
 
     # va la ultima a proposito: deja en trabajo/ una pasada sin planos, y lo que
     # viene detras (p7, p8) lee de la version, no de trabajo

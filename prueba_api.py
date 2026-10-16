@@ -3414,6 +3414,57 @@ def probar_que_la_receta_aplica():
        "y _un_paso pide las unidades al mismo sitio que el boton de ejecutar")
 
 
+def probar_lo_de_la_revision_de_imagenes_16_10():
+    """La revision de la tuberia de imagenes del 16-10-2026, en proceso.
+
+    1. En una receta 'todo' con «piezas» puesta, la tarea «assets» pide a p6
+       que conserve las hojas: «piezas» ya las acaba de rehacer y pagar.
+    2. El precio de la cola de notas y el del panel de coste van con el MODO
+       del video: un plano de foto no cuesta lo que uno de ilustracion.
+    """
+    seccion("REVISION DE IMAGENES DEL 16-10")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                  # noqa: PLC0415
+    import inspect                                          # noqa: PLC0415
+
+    original = servidor._un_paso
+    servidor._un_paso = lambda ctx, paso, modo, extra=None: ("f", (paso, modo, extra or {}))
+    try:
+        con = {"tareas": {"piezas": True}}
+        sin = {"tareas": {"piezas": False}}
+        _, args = servidor._que_hace("assets", None, con, "todo")
+        igual(args[2].get("conservar_piezas"), True,
+              "'todo' con «piezas»: la tarea de los planos no vuelve a pagar las hojas")
+        _, args = servidor._que_hace("assets", None, sin, "todo")
+        ok("conservar_piezas" not in args[2],
+           "'todo' SIN «piezas»: las hojas las rehace la tarea de los planos")
+        _, args = servidor._que_hace("assets", None, con, "pendientes")
+        ok("conservar_piezas" not in args[2], "en 'pendientes' no cambia nada")
+    finally:
+        servidor._un_paso = original
+
+    class _Estado:
+        def params(self, _paso):
+            return {"calidad": "medium", "estilo": {"modo": "foto"}}
+
+    class _Ctx:
+        id = "x"
+        estado = _Estado()
+
+    pedidos = []
+    original = servidor.AJUSTES.usd_por_imagen
+    servidor.AJUSTES.usd_por_imagen = lambda calidad, tamano=None, modo=None: (
+        pedidos.append((calidad, modo)) or 0.1)
+    try:
+        servidor._usd_por_imagen(_Ctx())
+    finally:
+        servidor.AJUSTES.usd_por_imagen = original
+    igual(pedidos, [("medium", "foto")],
+          "el precio de la cola de notas es el de un plano de FOTO en un video de foto")
+    ok("precio_por_imagen(calidad, modo=" in inspect.getsource(servidor.coste_en_detalle),
+       "y el del panel de coste, tambien con su modo")
+
+
 def probar_que_la_api_esta_documentada():
     """docs/API.md tiene que nombrar TODAS las rutas que sirve app.py.
 
@@ -5412,6 +5463,7 @@ def main():
         probar_value_de_los_textarea()
         probar_el_gemelo_de_las_marcas_tts()
         probar_que_la_receta_aplica()
+        probar_lo_de_la_revision_de_imagenes_16_10()
         probar_que_la_api_esta_documentada()
         probar_que_las_llamadas_a_los_pasos_encajan()
         probar_que_no_falta_ningun_nombre_en_la_pantalla()

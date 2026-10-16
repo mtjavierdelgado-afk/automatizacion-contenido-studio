@@ -4757,7 +4757,8 @@ MOTOR_CAMBIOS = {
        "misma imagen, de principio a fin",
 }
 
-OPCIONES_EJECUCION = ("solo_assets", "replantear", "rehacer", "tipos")
+OPCIONES_EJECUCION = ("solo_assets", "replantear", "rehacer", "tipos",
+                      "conservar_piezas")
 
 
 def _anotar_tiempo(paso, arranque, hechas, detalle=None, proyecto=None):
@@ -4792,7 +4793,8 @@ def _anotar_tiempo(paso, arranque, hechas, detalle=None, proyecto=None):
 
 
 def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
-             replantear=False, rehacer=False, tipos=None, previo=None):
+             replantear=False, rehacer=False, tipos=None, previo=None,
+             conservar_piezas=False):
     """Construye assets y escenas. Si unidades no es None, solo esas.
 
     Con solo_assets se para despues de los assets (sets, reparto, mapas y
@@ -4872,6 +4874,14 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     # que cualquier pasada volviera a generar TODO. Ver la regla del canal en
     # `_generar_escenas`: un cambio en el audio no rehace lo dibujado.
     def pedido(unidad):
+        # LAS PIEZAS YA REHECHAS EN ESTA TANDA no se rehacen otra vez. En una
+        # receta 'todo', la tarea «piezas» rehace las hojas con `rehacer` y
+        # despues la tarea «assets» llega con el MISMO `rehacer` y sin
+        # unidades: volvia a pagar cada hoja, y la segunda salia distinta de
+        # la primera (revision del 16-10-2026). `conservar_piezas` lo pone
+        # quien sabe que la otra tarea ya corrio (`_que_hace` en app.py).
+        if conservar_piezas:
+            return False
         # La misma regla que en los planos: con unidades, solo ellas. Un
         # `rehacer` de una escena no puede arrastrar los assets del video.
         if pedidas is not None:
@@ -4897,8 +4907,15 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
                 # cara y los cuerpos, que es lo que esa hoja tiene que fijar
                 refs = [r["ruta"] for r in _referencias_estilo(
                     p, dirs["cache"], {"personajes": [ficha["nombre"]]})]
+                # SALTARSE EL BANCO SOLO SI SE HA PEDIDO REHACER. Ponia
+                # `rehacer or unidades is not None`: cualquier pasada dirigida
+                # a unidades --«regenerar lo obsoleto», retomar-- pagaba una
+                # hoja nueva aunque el banco tuviera la de ese mismo prompt, y
+                # una hoja nueva deja obsoletos (y por pagar) todos los planos
+                # que la usan. Es el mismo fallo que se quito de los planos el
+                # 31-08 (ver `_generar_escenas`); aqui se habia quedado.
                 meta = _producir_imagen(ficha["nombre"], prompt, refs, destino, p,
-                                        rehacer=((rehacer or unidades is not None)
+                                        rehacer=(bool(rehacer) and pedido(uid)
                                                  and os.path.exists(destino)))
                 resultados[uid] = {"tipo": "reparto",
                                    "png": os.path.relpath(destino, trabajo), **meta}

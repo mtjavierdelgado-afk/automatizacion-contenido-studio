@@ -1273,6 +1273,18 @@ def recortar_texto(bloques, segundos, velocidad=None):
     return texto if texto.endswith((".", "!", "?")) else texto + "."
 
 
+def texto_para_voz(texto, lista_pron=None):
+    """Lo que se MANDA a la voz para un texto ya limpio, igual que en el video.
+
+    Saneado (las letras sueltas van a <spell>) y con la lista «Como se
+    pronuncia» aplicada. Lo usan las ESCUCHAS: si la muestra se mandara a pelo,
+    lo que se oye en «Escuchar» no seria lo que luego dice el video (16-10-2026).
+    """
+    if lista_pron is None:
+        lista_pron = pronunciacion.cargar()
+    return pronunciacion.aplicar(marcas_tts.sanear(texto), lista_pron)
+
+
 def previsualizar(proyecto, params, segundos=20):
     """Sintetiza solo los primeros ~N segundos del guion para escuchar la voz.
 
@@ -1285,9 +1297,15 @@ def previsualizar(proyecto, params, segundos=20):
     if not texto:
         raise RuntimeError("el guion no tiene texto que previsualizar")
 
+    # La firma va sobre lo que se MANDA, no sobre lo escrito: cambiar la lista
+    # «Como se pronuncia» tiene que dar otra escucha, o seguiria sonando la vieja.
+    # Si no cambia nada, la firma es la de siempre y las escuchas ya pagadas valen.
+    lista_pron = pronunciacion.cargar()
+    para_voz = texto_para_voz(texto, lista_pron)
     firma = hashlib.sha256(json.dumps(
         [texto, cfg["modelo"], cfg["voz_id"], cfg["idioma"],
-         cfg["experimental_controls"], simulado()],
+         cfg["experimental_controls"], simulado()]
+        + ([para_voz] if para_voz != texto else []),
         sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:12]
     carpeta = proyecto.ruta("previsualizaciones")
     os.makedirs(carpeta, exist_ok=True)
@@ -1295,11 +1313,13 @@ def previsualizar(proyecto, params, segundos=20):
     if os.path.exists(ruta):
         return ruta
 
-    wav, duracion, palabras = sintetizar_toma(texto, cfg)
+    wav, duracion, palabras = sintetizar_toma(para_voz, cfg)
+    palabras = pronunciacion.devolver(palabras, lista_pron)
     with open(ruta, "wb") as fh:
         fh.write(wav)
     with open(ruta[:-4] + ".json", "w", encoding="utf-8") as fh:
-        json.dump({"texto": texto, "duracion": round(duracion, 3),
+        json.dump({"texto": texto, "mandado": para_voz,
+                   "duracion": round(duracion, 3),
                    "palabras": palabras, "controles": cfg,
                    "simulado": simulado()},
                   fh, ensure_ascii=False, indent=2)

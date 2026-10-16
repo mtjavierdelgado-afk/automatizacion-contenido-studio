@@ -235,13 +235,39 @@ _ANTES_DE_ROMANO = re.compile(
     r"(?:siglos?|cap[ií]tulos?|tomos?|partes?|fases?|actos?|vol[uú]men(?:es)?|"
     r"temporadas?|libros?|papa|rey|reina)\s+$", re.IGNORECASE)
 
+#: Ni detras del NOMBRE de un rey, un papa o un emperador: «Carlos V» es
+#: «Carlos quinto», no «Carlos uve» (16-10-2026). Va con mayuscula inicial y
+#: palabra entera: «Series X», «Galaxy S» o «Plan B» no son nombres de rey, y la
+#: B o la S ni siquiera son numeros romanos, asi que se siguen deletreando.
+_NOMBRES_DE_REY = (
+    "Carlos", "Felipe", "Fernando", "Enrique", "Alfonso", "Luis", "Juan",
+    "Pablo", "Pío", "Pio", "Benedicto", "Gregorio", "León", "Leon", "Jorge",
+    "Eduardo", "Isabel", "Pedro", "Jaime", "Sancho", "Ricardo", "Guillermo",
+    "Federico", "Clemente", "Inocencio", "Urbano", "Bonifacio", "Napoleón",
+    "Napoleon", "Alejandro", "Constantino", "Ramsés", "Ramses", "Francisco",
+    "Ramiro", "Martín", "Martin", "Nicolás", "Nicolas", "Sixto", "Adriano",
+    "Esteban", "Gustavo", "Amadeo", "Humberto", "Manuel", "Leopoldo",
+    "Rodolfo", "Maximiliano", "Tutmosis", "Ptolomeo", "Teodosio", "Iván",
+    "Ivan", "Juana", "Catalina", "Margarita")
+_TRAS_NOMBRE_DE_REY = re.compile(
+    r"(?<![\w'’])(?:" + "|".join(sorted(set(_NOMBRES_DE_REY), key=len, reverse=True))
+    + r")\s+$")
+
+
+def _es_romano_en_su_sitio(texto, m):
+    """¿La letra de `m` es un numero romano detras de quien los lleva?"""
+    if m.group(1) not in "VXLCDM":
+        return False
+    antes = texto[:m.start()]
+    return bool(_ANTES_DE_ROMANO.search(antes) or _TRAS_NOMBRE_DE_REY.search(antes))
+
 
 def deletrear_letras_sueltas(texto):
     """Envuelve en <spell> las consonantes mayusculas sueltas. Ver arriba."""
     texto = str(texto or "")
 
     def cambiar(m):
-        if m.group(1) in "VXLCDM" and _ANTES_DE_ROMANO.search(texto[:m.start()]):
+        if _es_romano_en_su_sitio(texto, m):
             return m.group(0)
         return f"<spell>{m.group(1)}</spell>"
     return _LETRA_SUELTA.sub(cambiar, texto)

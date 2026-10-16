@@ -41,6 +41,21 @@ vídeos, estilos, claves y contraseña no se tocan.
   perdía el primero, ya pagado, y al reintentar se volvía a pagar. Ahora lo ya
   grabado queda guardado (la voz sigue marcada como pendiente) y «Regrabar lo
   que he escrito» graba solo los tramos que faltan.
+- **«Carlos V» ya no se lee «Carlos uve».** Una V, X, L, C, D o M sola detrás
+  del nombre de un rey, un papa o un emperador (Carlos, Felipe, Pío, León,
+  Napoleón, Ramsés…) se deja como número romano, igual que ya pasaba detrás
+  de «siglo» o «capítulo». «Xbox Series X», «Galaxy S» o «Plan B» se siguen
+  deletreando.
+- **«Escuchar» suena como el vídeo.** La muestra de voz (la de un estilo, la
+  de elegir voz y la del vídeo) ahora pasa por la lista **Cómo se pronuncia**
+  y deletrea las letras sueltas, como la voz del vídeo. Si cambias la lista,
+  la siguiente escucha ya la recoge; si no cambias nada, se reutiliza la que
+  ya habías oído y no se vuelve a pagar.
+- **«Regenerar Audio» dice lo que cuesta.** Ese botón vuelve a grabar la voz
+  entera, y se paga entera aunque no hayas cambiado nada. Antes se apuntaba
+  como «prometido: 0 $» en «Cada vez que generaste» y la ayuda decía que lo
+  que no cambió salía gratis; ahora la ayuda del botón y lo prometido dicen el
+  precio de la voz entera.
 
 **Subtítulos a tu gusto y el «atrás» del móvil (13 de octubre, noche)**
 - **La fuente y el sitio de los subtítulos se eligen.** En el editor de

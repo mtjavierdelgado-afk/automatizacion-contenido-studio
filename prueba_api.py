@@ -707,6 +707,21 @@ def probar_regrabar_y_estructura(cliente, carpeta):
         ficha = esperar_trabajo(cliente, lanzado.get("trabajo_id"))
         igual(ficha.get("estado"), "listo", f"{paso} de partida ({ficha.get('error')})")
 
+    # D5 (16-10-2026): «Regenerar Audio» lanza en modo 'todo' y vuelve a
+    # sintetizar la voz entera, pero el plan la daba a 0 $ porque el coste no
+    # miraba el modo. Con la voz al dia: 'pendientes' no paga voz; 'todo', toda.
+    _r, plan = cliente.get(f"/api/proyectos/{pid}/generar?tanda=voz")
+    coste = (plan or {}).get("coste") or {}
+    igual(coste.get("usd_tts_por_generar"), 0.0,
+          "con la voz al día, en 'pendientes' la voz no se vuelve a pagar")
+    _r, plan = cliente.get(f"/api/proyectos/{pid}/generar?tanda=voz&modo=todo")
+    coste = (plan or {}).get("coste") or {}
+    ok((coste.get("usd_tts") or 0) > 0,
+       f"el precio de la voz entera se conoce ({coste.get('usd_tts')} $)")
+    igual(coste.get("usd_por_generar"), round(coste.get("usd_tts") or 0, 3),
+          "y en 'todo' se promete ENTERO: «Regenerar Audio» ya no enseña 0 $")
+    igual(coste.get("modo"), "todo", "el coste dice con qué modo se ha contado")
+
     # DOS SECCIONES: la toma simulada sale de una sola, y lo que se prueba
     # es justo lo que pasa entre secciones. Se parte su meta en el disco.
     meta, ruta_meta = _meta_activa(carpeta, pid, cliente)
@@ -4121,6 +4136,37 @@ def probar_pronunciaciones(cliente, carpeta):
     ok(os.path.exists(destino), "junto a los ajustes, fuera del codigo")
     _r, datos = cliente.get("/api/pronunciaciones")
     igual(len(datos.get("lista") or []), 1, "y se lee la guardada, no la de partida")
+
+    # «ESCUCHAR» UNA VOZ SUENA COMO EL VIDEO (16-10-2026): la muestra pasa por la
+    # lista, y cambiar la lista da otra muestra (si no, seguiria sonando la vieja)
+    voz = {"voz_id": "a0e99841-438c-4a64-b679-ae501e7d6091", "idioma": "es"}
+    respuesta, datos = cliente.post("/api/voces/muestra", voz)
+    igual(respuesta.status_code, 200, "la muestra de una voz se sintetiza (simulada)")
+    sin_lista = datos.get("ruta")
+    _r, _d = cliente.put("/api/pronunciaciones",
+                         {"lista": [{"escrito": "Meta Quest", "dicho": "Meta Cuést"},
+                                    {"escrito": "octubre", "dicho": "Octúbreh"}]})
+    _r, datos = cliente.post("/api/voces/muestra", voz)
+    con_lista = datos.get("ruta")
+    ok(con_lista and con_lista != sin_lista,
+       "con una palabra de la muestra en la lista, la muestra es OTRA (no la vieja)")
+    sys.path.insert(0, os.path.join(RAIZ_ESTUDIO, "pasos"))
+    anterior = os.environ.get("ESTUDIO_PRONUNCIACIONES")
+    os.environ["ESTUDIO_PRONUNCIACIONES"] = destino
+    try:
+        import p4_voz                                         # noqa: PLC0415
+        ok("Octúbreh" in p4_voz.texto_para_voz("Una tarde de octubre."),
+           "y lo que se le manda a la voz lleva la palabra como suena")
+    finally:
+        if anterior is None:
+            os.environ.pop("ESTUDIO_PRONUNCIACIONES", None)
+        else:
+            os.environ["ESTUDIO_PRONUNCIACIONES"] = anterior
+    _r, _d = cliente.put("/api/pronunciaciones",
+                         {"lista": [{"escrito": "Meta Quest", "dicho": "Meta Cuést"}]})
+    _r, datos = cliente.post("/api/voces/muestra", voz)
+    igual(datos.get("ruta"), sin_lista,
+          "y con la lista de antes vuelve la de antes, ya pagada")
 
 
 def probar_volumen_y_animo_de_la_musica():

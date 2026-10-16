@@ -93,7 +93,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/publicar/videos/{pid}` | {redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?} |
 | `POST` | `/api/publicar/videos/{pid}/a-mano` | «Lo he subido yo»: {red, url?}. Queda en el historial. |
 | `POST` | `/api/publicar/videos/{pid}/enviar` | {redes, modo: ahora|programar|pendiente, cuando?, confirmado, repetir?} |
-| `POST` | `/api/publicar/videos/{pid}/envios/{eid}/cancelar` | Cancela lo programado (en Upload-Post) o lo que esperaba tu OK. |
+| `POST` | `/api/publicar/videos/{pid}/envios/{eid}/cancelar` | Cancela lo programado (en Upload-Post) o lo que esperaba tu OK, y quita de la lista un envio que fallo. |
+| `POST` | `/api/publicar/videos/{pid}/envios/{eid}/reintentar` | Vuelve a mandar un envio que quedo en «comprobar», con su misma clave de idempotencia. |
 | `POST` | `/api/publicar/videos/{pid}/envios/{eid}/confirmar` | Un envio que esperaba tu OK sale: {confirmado, modo?, cuando?}. |
 | `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
 | `GET` | `/api/trabajos` | Trabajos conocidos, opcionalmente de un solo proyecto. |
@@ -348,4 +349,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**228 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**229 endpoints.** Escrito por `generar_api.py` desde `app.py`.

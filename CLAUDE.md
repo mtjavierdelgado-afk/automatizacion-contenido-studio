@@ -29,9 +29,10 @@ doble por imagen y pierden el registro del gasto.
 
 **3. Un guardián calibrado sobre un fallo aprende a dar por bueno ese fallo.**
 `p6_assets._planos_repetidos` tumba la tanda si dos planos acaban con la MISMA
-imagen. Tiene dos excepciones —la cartela y la continuación de un plano largo—
-y las dos están explicadas en su docstring. Si añades una tercera, comprueba
-antes que lo que la justifica no es un bug.
+imagen. Tiene tres excepciones —la cartela, la continuación de un plano largo
+y los planos que copian el mismo mapa o gráfico (16-10-2026)— y las tres están
+explicadas en su docstring. Si añades una cuarta, comprueba antes que lo que la
+justifica no es un bug.
 
 ---
 
@@ -90,8 +91,8 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 
 | Rama abierta | Ficheros reservados | Desde |
 |---|---|---|
-| `arreglos-v2f` | Notas del 16-10 (revertir imágenes que no se ven ni se oyen, «Todo seguido» y «Oírla» en las imágenes, la voz con ecos, inicios cortados y pausas entre bloques) y los fallos que salgan de la revisión completa del Studio. Toca lo que pida cada arreglo; si choca con una zona de `publicar-redes-1`, se dice antes | 16-10-2026 |
-| `publicar-redes-1` | Publicar en redes (TikTok, Reels, YouTube, Facebook) a mano y con Upload-Post, y programar; y en la misma rama, después (decisión del dueño, 16-10), las **métricas** de cada post y el resumen por proyecto (lo que el plan llamaba `publicar-redes-2`). La parte 1 sola queda marcada con la etiqueta `publicar-redes-1-parte1`. **Propios:** `pasos/publicar.py`, `motores/publicar_uploadpost/`, `pasos/prueba_publicar.py`. **Por zonas:** en `web/app.js` solo funciones nuevas en una sección al final, una línea en la pantalla Vídeo y una en `pintarConfig` (el bloque de la clave de Upload-Post; no toca `API`); en `app.py` solo rutas nuevas en un bloque al final; en `web/estilo.css` solo clases nuevas al final; en `pasos/claves.py` la clave `uploadpost` (añadida, espejada en el `.env` como `UPLOADPOST_API_KEY`); `docs/API.md`, `pruebas.sh`/`pruebas.ps1` (su suite) y un tramo al final de `prueba_recorrido.py`. `arreglos-v2e` y `arreglos-voz` ya están unidas: se pone al día con `main` antes de unirse | 16-10-2026 |
+| `podar-render` | Guardar como mucho 5 versiones del vídeo montado por proyecto (decisión del dueño, 16-10): `nucleo/estado.py` (poda de versiones), el sitio donde se completa el render en `app.py` o `pasos/p8_render.py`, y sus pruebas. Si `publicar-redes-1` guarda rutas a `pasos/render/v<N>/`, que lo diga: una versión podada deja de existir | 16-10-2026 |
+| `publicar-redes-1` | Publicar en redes (TikTok, Reels, YouTube, Facebook) a mano y con Upload-Post, y programar; y en la misma rama, después (decisión del dueño, 16-10), las **métricas** de cada post y el resumen por proyecto (lo que el plan llamaba `publicar-redes-2`). La parte 1 sola es el commit `af2dbc7` de la rama (para unir solo esa parte: `git merge af2dbc7`). **Propios:** `pasos/publicar.py`, `motores/publicar_uploadpost/`, `pasos/prueba_publicar.py`. **Por zonas:** en `web/app.js` solo funciones nuevas en una sección al final, una línea en la pantalla Vídeo y una en `pintarConfig` (el bloque de la clave de Upload-Post; no toca `API`); en `app.py` solo rutas nuevas en un bloque al final; en `web/estilo.css` solo clases nuevas al final; en `pasos/claves.py` la clave `uploadpost` (añadida, espejada en el `.env` como `UPLOADPOST_API_KEY`); `docs/API.md`, `pruebas.sh`/`pruebas.ps1` (su suite) y un tramo al final de `prueba_recorrido.py`. `arreglos-v2e` y `arreglos-voz` ya están unidas: se pone al día con `main` antes de unirse | 16-10-2026 |
 
 Quien abre una rama la apunta aquí (en `main`, regla 8); quien la une a `main`,
 la quita.
@@ -268,7 +269,9 @@ La burbuja de abajo a la derecha es `pasos/asistente.py` más las rutas
   vetos de `asistente.vetos_de_lectura`: `./secretos`, el almacén donde esté
   (`ESTUDIO_SECRETOS`), la sesión del CLI (`~/.claude`, `CLAUDE_CONFIG_DIR`) y
   `.env`, `claves.json` y `.credentials.json` por nombre en todo el disco
-  (`Read(//**/.env)`: la forma `**/.env` solo vale dentro del cwd). Está
+  (`Read(//**/.env)`: la forma `**/.env` solo vale dentro del cwd). Cada
+  veto sale también como `Grep(...)` y `Glob(...)` (16-10-2026): los vetos de
+  `Read` solo frenan a Grep «cuando pueden», y `datos/**` sí se puede buscar. Está
   medido con el CLI de verdad (13-10-2026): lee el código y los proyectos, y
   niega las seis rutas con secretos. El prompt de sistema también se lo dice,
   pero la regla es la que manda. Si alguna vez las claves se guardan en otra
@@ -478,3 +481,11 @@ Tres cosas que ahorran perseguir fallos que no existen:
   parte y lo dice. No es un fallo.
 - `prueba_login` llama al CLI de Claude de verdad. Es la única que comprueba que
   el CLI sigue dejando entrar sin terminal y sin abrir un navegador.
+- **Lo del despliegue no va en `pruebas.sh`**: si tocas `despliegue/asvs` o
+  `estudio-clave`, corre a mano `bash despliegue/prueba/prueba_actualizar.sh` y
+  `bash despliegue/prueba/prueba_estudio_clave.sh` (raíz falsa, no tocan nada).
+
+**Las diapositivas suenan con la toma de `voz`**, no con la de
+`revision_audio` (`_audio_de_la_toma`, 16-10-2026): los planos se cortan contra
+la voz y el render monta la voz; la revisión es una resíntesis con sus propios
+tiempos, y con ella «Oírla» saltaba al final del audio y se callaba.

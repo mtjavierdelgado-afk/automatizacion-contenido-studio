@@ -27,6 +27,9 @@ APP="${ESTUDIO_LOGIN_APP:-/opt/as-video-studio/login}"
 # a mano, sin pasarlo, se deduce del dueno de la carpeta de la aplicacion.
 USUARIO_APP="${ESTUDIO_USUARIO:-$(stat -c %U "$APP" 2>/dev/null || echo studio)}"
 CARPETA="${ESTUDIO_CLAVES:-/root/estudio}"
+# `sudo` por su ruta, fijada ANTES de leer el .env (ver `cargar_env`). La
+# prueba pone su doble con ESTUDIO_SUDO; el .env no puede cambiarla.
+readonly SUDO_BIN="${ESTUDIO_SUDO:-/usr/bin/sudo}"
 ALFABETO='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789@#%+=?'
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -79,6 +82,36 @@ mostrar() {
   echo "Con ella se entra en el Estudio. Para cambiarla: estudio-clave --nueva"
 }
 
+# El .env del login, LEIDO como KEY=VALUE y no ejecutado. Esto corre como
+# root y el .env es del usuario del servicio: con `. ./.env`, quien pudiera
+# escribir ahi (la propia aplicacion, si alguien la tomara) ejecutaba lo que
+# quisiera como root la proxima vez que se cambiara una contrasena
+# (revision 16-10-2026). Comentarios y lineas en blanco se saltan; unas
+# comillas que envuelvan el valor entero se quitan; nada mas se interpreta.
+cargar_env() {
+  local linea clave valor
+  while IFS= read -r linea || [ -n "$linea" ]; do
+    linea="${linea%$'\r'}"
+    case "$linea" in ''|'#'*) continue ;; esac
+    linea="${linea#export }"
+    clave="${linea%%=*}"
+    [ "$clave" != "$linea" ] || continue
+    [[ "$clave" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || continue
+    # NI LAS QUE CAMBIAN QUE SE EJECUTA: esta subshell es root, asi que un
+    # PATH propio elegia otro `sudo`, y un LD_PRELOAD se cargaba en el de
+    # verdad (lanzado por root no es «secure-exec»). Ninguna la necesita la app.
+    case "$clave" in
+      PATH|IFS|ENV|BASH_ENV|BASHOPTS|SHELLOPTS|PS4|GCONV_PATH|HOSTALIASES|\
+      NODE_OPTIONS|NODE_PATH|LD_*|SUDO_BIN|ESTUDIO_*) continue ;;
+    esac
+    valor="${linea#*=}"
+    if [[ "$valor" =~ ^\"(.*)\"$ ]] || [[ "$valor" =~ ^\'(.*)\'$ ]]; then
+      valor="${BASH_REMATCH[1]}"
+    fi
+    export "$clave=$valor"
+  done < "$1"
+}
+
 nueva() {
   local cuenta="${1:-}" lista pw=""
   if [ -z "$cuenta" ]; then
@@ -111,8 +144,8 @@ nueva() {
   # El hash, a la base de datos, con el mismo usuario y el mismo .env que la app.
   (
     cd "$APP"
-    set -a; . ./.env; set +a
-    printf '%s\n' "$pw" | sudo -u "$USUARIO_APP" -E node bin/user.js poner "$cuenta" --password-stdin >/dev/null
+    cargar_env ./.env
+    printf '%s\n' "$pw" | "$SUDO_BIN" -u "$USUARIO_APP" -E node bin/user.js poner "$cuenta" --password-stdin >/dev/null
   )
   # Y la copia, para poder volver a leerla desde aquí.
   printf '%s\n' "$pw" > "$CARPETA/clave-$cuenta.txt"

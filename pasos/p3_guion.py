@@ -180,8 +180,9 @@ PARAMS_POR_DEFECTO = {
     # tampoco depende de que el redactor se acuerde: la pone el motor en el
     # bloque que CIERRA cada tramo, o sea justo antes de cada 'abre_seccion'.
     #
-    # Se suma al hueco que la voz deja entre bloques (0,5 s de serie), asi que
-    # el corte real ronda el segundo y medio. 0 lo desactiva.
+    # Se suma al hueco que la voz deja entre bloques (1 s de serie) en la
+    # proporcion `cadencia.PARTE_DE_LA_PAUSA`, asi que el corte real ronda el
+    # segundo y medio. 0 lo desactiva.
     "pausa_seccion_ms": 900,
     # LA PRESENTACION Y LAS LLAMADAS A LA ACCION (`pasos/cta.py`): tres momentos,
     # cada uno con lo que se quiere que diga. Son params del guion porque el

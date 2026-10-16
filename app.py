@@ -69,6 +69,7 @@ from nucleo.proyecto import (Proyecto, ahora, escribir_json,  # noqa: E402
                              recolocar,
                              ruta_contenida)
 from nucleo.trabajos import GestorTrabajos  # noqa: E402
+from nucleo.trabajos import Cancelado as _Cancelado  # noqa: E402
 
 # Los pasos cargan los motores de `motores/` al importarse. Si uno falla, el
 # servicio tiene que seguir sirviendo el resto en vez de no arrancar: el error se
@@ -184,6 +185,23 @@ class Contexto:
         self.estado = Estado(self.proyecto)
         self.bitacora = Bitacora(self.proyecto)
         self.gestor = GestorTrabajos(estado=self.estado, bitacora=self.bitacora)
+        # LAS MARCAS «EJECUTANDO» DE UN SERVICIO ANTERIOR. Un contexto nuevo
+        # tiene el gestor vacio: ningun trabajo de este servicio corre en este
+        # proyecto, asi que una marca que diga «ejecutando» es de un trabajo
+        # que murio con el reinicio. Dejarla ensenaba el paso en marcha para
+        # siempre y hacia sellar al siguiente con la foto de aquel arranque.
+        # La llama `contexto()` SOLO en el que gana el registro: dos aperturas a
+        # la vez creaban dos, y la perdedora podia quitar la marca de un trabajo
+        # ya lanzado en la ganadora.
+
+    def limpiar_marcas_huerfanas(self):
+        try:
+            quitadas = self.estado.limpiar_marcas_en_marcha()
+            if quitadas:
+                self.bitacora.anotar("marcas_huerfanas_quitadas", None,
+                                     {"pasos": quitadas})
+        except Exception:  # noqa: BLE001 -- no impide abrir el proyecto
+            pass
 
     @property
     def id(self):
@@ -213,8 +231,12 @@ def contexto(pid):
     except Exception as fallo:  # noqa: BLE001
         raise ErrorApi(500, f"no se ha podido abrir el proyecto {clave}: {fallo}")
     with _LOCK:
-        _CONTEXTOS.setdefault(clave, ctx)
-        return _CONTEXTOS[clave]
+        ganador = _CONTEXTOS.setdefault(clave, ctx)
+        if ganador is ctx:
+            # bajo el cerrojo: hasta que esto vuelve nadie puede lanzar nada en
+            # este contexto, asi que lo que se quita es de un servicio anterior
+            ctx.limpiar_marcas_huerfanas()
+        return ganador
 
 
 def _registrar_trabajo(trabajo_id, pid):
@@ -387,6 +409,34 @@ def _correr_paso(avisar, ctx, paso_id, unidades, opciones=None):
     revienta un paso que no la conoce.
     """
     modulo = modulo_de(paso_id)
+    # EL PASO SE MARCA AQUI, con las entradas de AHORA. El gestor marca el paso
+    # en el que se registra el trabajo, y una receta o una tanda se registran en
+    # el primero: los demas corrian sin marca (sin foto de sus entradas) o con
+    # la de un arranque de minutos antes -- y lo que la propia receta escribia
+    # entretanto (el corte, las cartelas, la direccion) se sellaba como si el
+    # usuario lo hubiera cambiado a media pasada: planos recien hechos, obsoletos.
+    ctx.estado.marcar_ejecutando(paso_id)
+    try:
+        return _correr_paso_marcado(avisar, ctx, paso_id, modulo, unidades, opciones)
+    except BaseException as fallo:
+        # El error va al paso QUE HA FALLADO: el gestor solo marca el suyo si
+        # sigue en marcha (`marcar_error_si_en_marcha`). Cancelar no es un
+        # error: se quita la marca, como hace el gestor.
+        cancelado = (isinstance(fallo, _Cancelado)
+                     or not isinstance(fallo, Exception))
+        try:
+            if cancelado:
+                ctx.estado.limpiar_marca(paso_id)
+            else:
+                ctx.estado.marcar_error_si_en_marcha(
+                    paso_id, f"{type(fallo).__name__}: {fallo}")
+        except Exception:  # noqa: BLE001 -- el fallo de verdad es el de arriba
+            pass
+        raise
+
+
+def _correr_paso_marcado(avisar, ctx, paso_id, modulo, unidades, opciones):
+    """El cuerpo de `_correr_paso`, con el paso ya marcado."""
     params = ctx.estado.params(paso_id)
     admitidas = getattr(modulo, "OPCIONES_EJECUCION", ())
     extra = {k: v for k, v in (opciones or {}).items() if k in admitidas}
@@ -471,6 +521,21 @@ def _correr_paso(avisar, ctx, paso_id, unidades, opciones=None):
 def _trabajo_activo(ctx, paso_id):
     for ficha in ctx.gestor.listar(activos=True):
         if ficha.get("paso") == paso_id:
+            return ficha
+    return None
+
+
+def _trabajo_que_toca(ctx, pasos):
+    """El trabajo vivo que corre alguno de esos pasos, o None.
+
+    No basta `_trabajo_activo`: una receta o una tanda se registran en SU
+    PRIMER paso y corren varios (`toca`). Mirando solo el registrado, ejecutar
+    los subtitulos con la tanda del video en marcha lanzaba otra pasada sobre la
+    misma carpeta `trabajo/`, y la primera en sellar se llevaba la de la otra.
+    """
+    pasos = {pasos} if isinstance(pasos, str) else set(pasos or ())
+    for ficha in ctx.gestor.listar(activos=True):
+        if ficha.get("paso") in pasos or pasos & set(ficha.get("toca") or ()):
             return ficha
     return None
 
@@ -602,19 +667,27 @@ def lanzar_paso(ctx, paso_id, unidades, nombre=None, evento="paso_lanzado",
         if faltan:
             raise ErrorApi(409, f"'{paso_id}' está bloqueado: falta ejecutar "
                                 + ", ".join(faltan), {"faltan": faltan})
-    activo = _trabajo_activo(ctx, paso_id)
-    if activo is not None:
-        raise ErrorApi(409, f"'{paso_id}' ya se está ejecutando",
-                       {"trabajo_id": activo["id"], "progreso": activo["progreso"]})
-
-    trabajo_id = ctx.gestor.lanzar(nombre or paso_id, _correr_paso, ctx, paso_id,
-                                   unidades, opciones or {}, paso=paso_id,
-                                   unidades=unidades)
+    # MIRAR Y LANZAR CON EL CERROJO DEL PROYECTO (el mismo de las tandas, que
+    # es reentrante: la recalidad llama aqui con el ya tomado). Sin el, dos
+    # clics seguidos pasaban los dos la comprobacion.
+    with _cerrojo_de_cadena(ctx.id):
+        _sin_otra_pasada(ctx, paso_id)
+        trabajo_id = ctx.gestor.lanzar(nombre or paso_id, _correr_paso, ctx, paso_id,
+                                       unidades, opciones or {}, paso=paso_id,
+                                       unidades=unidades)
     _registrar_trabajo(trabajo_id, ctx.id)
     ficha = {"trabajo": trabajo_id, "unidades": unidades or "todas"}
     ficha.update(datos or {})
     ctx.bitacora.anotar(evento, paso_id, ficha)
     return trabajo_id
+
+
+def _sin_otra_pasada(ctx, paso_id):
+    """409 si algun trabajo vivo corre ya ese paso (suyo o dentro de una tanda)."""
+    activo = _trabajo_que_toca(ctx, paso_id)
+    if activo is not None:
+        raise ErrorApi(409, f"'{paso_id}' ya se está ejecutando",
+                       {"trabajo_id": activo["id"], "progreso": activo["progreso"]})
 
 
 # --------------------------------------------------------------------- fichas
@@ -1043,7 +1116,12 @@ def reparar_estilo(pid: str, cuerpo: dict = Body(default=None)):
     """
     ctx = contexto(pid)
     aplicar = bool(_cuerpo(cuerpo).get("aplicar"))
-    if any(f.get("paso") for f in ctx.gestor.listar(activos=True)):
+    # CUALQUIER trabajo, tenga paso o no (una exportacion, la cola de notas):
+    # la mudanza reescribe los JSON del proyecto debajo de lo que este leyendo
+    with _COLA_LOCK:
+        cola = _COLA_NOTAS.get(ctx.id) or {}
+        cola_viva = bool(cola.get("cola") or cola.get("trabajo"))
+    if cola_viva or ctx.gestor.listar(activos=True):
         raise ErrorApi(409, "este vídeo tiene algo en marcha: repáralo cuando termine")
     diag = _herramienta("diagnostico_estilo")
     rotas = diag.revisar(ctx.proyecto.raiz)
@@ -1057,17 +1135,24 @@ def reparar_estilo(pid: str, cuerpo: dict = Body(default=None)):
     import contextlib
     import io as _io
     salida = _io.StringIO()
-    with _LOCK:
+    # CON EL CERROJO DEL ESTADO DE ESTE PROYECTO, no con el global: el global
+    # paraba todas las peticiones de todos los videos mientras se mudaba. Y el
+    # contexto NO se suelta: con el se iba su gestor de trabajos, y los que
+    # acabaran de arrancar dejaban de verse (404 a su progreso, y otra pasada
+    # del mismo paso podia lanzarse encima). El estado se relee solo al cambiar
+    # en disco; la config del proyecto se relee aqui.
+    with _cerrojo_de_cadena(ctx.id), ctx.estado._lock:
+        # otra vez dentro: entre la comprobacion de arriba y aqui cabe un clic
+        if ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "este vídeo tiene algo en marcha: repáralo cuando termine")
         with contextlib.redirect_stdout(salida):
             mudar.mudar_objetivo(ctx.proyecto.raiz, reglas, aplicar, [])
-        if aplicar:
-            # el contexto en memoria leyo el estado de antes: se suelta y la
-            # siguiente peticion lo vuelve a abrir con el de ahora
-            _CONTEXTOS.pop(ctx.id, None)
     if aplicar:
+        config = leer_json(ctx.proyecto.ruta("proyecto.json"))
+        if isinstance(config, dict):
+            ctx.proyecto.config = config
         anotar_global("estilo_reparado", {"proyecto": ctx.id, "rutas": len(reglas)})
-        nuevo = contexto(pid)
-        estados = {p["id"]: nuevo.estado.estado_de(p["id"]) for p in PASOS}
+        estados = {p["id"]: ctx.estado.estado_de(p["id"]) for p in PASOS}
     else:
         estados = {}
     return {"reparado": aplicar, "reglas": [{"de": r, "a": c} for r, c in reglas],
@@ -1731,6 +1816,14 @@ def revertir_paso(pid: str, paso: str, cuerpo: dict = Body(default=None)):
         numero = int(datos["version"])
     except (TypeError, ValueError):
         raise ErrorApi(400, f"'version' debe ser un entero, no {datos['version']!r}")
+    # TODO BAJO EL CERROJO DEL PROYECTO, el que toman `lanzar_paso`, las recetas
+    # y las tandas: sin el, un lanzamiento podia colarse entre la comprobacion y
+    # `revertir`, que aparta `trabajo/` -- en mitad de una pasada ya sembrada.
+    with _cerrojo_de_cadena(ctx.id):
+        return _revertir_bajo_cerrojo(ctx, paso_id, numero)
+
+
+def _revertir_bajo_cerrojo(ctx, paso_id, numero):
     if _trabajo_activo(ctx, paso_id):
         raise ErrorApi(409, f"'{paso_id}' se está ejecutando: no se puede revertir ahora")
     # NI CON OTRA COSA DEL VIDEO EN MARCHA: volver al guion de antes con la voz
@@ -1743,10 +1836,15 @@ def revertir_paso(pid: str, paso: str, cuerpo: dict = Body(default=None)):
                         for f in ctx.gestor.listar(activos=True)):
         raise ErrorApi(409, "el vídeo está trabajando: vuelve a la versión anterior cuando termine")
     try:
-        ctx.estado.revertir(paso_id, numero)
+        hecho = ctx.estado.revertir(paso_id, numero) or {}
     except ValueError as fallo:
         raise ErrorApi(404, str(fallo))
     ctx.bitacora.anotar("revertido", paso_id, {"version": numero})
+    if hecho.get("trabajo_apartado"):
+        # lo que quedo de una pasada rota se aparta (no se borra) para que la
+        # siguiente no siembre encima la version de la que se acaba de volver
+        ctx.bitacora.anotar("trabajo_apartado", paso_id,
+                            {"version": numero, "a": hecho["trabajo_apartado"]})
     return {"paso": paso_id, "activa": ctx.proyecto.version_activa(paso_id),
             "estado": ctx.estado.estado_de(paso_id),
             "params": ctx.estado.params(paso_id),
@@ -1835,6 +1933,11 @@ def enviar_feedback(pid: str, cuerpo: dict = Body(default=None)):
     # fallar sin haber dejado el feedback escrito a medias
     ejecutar_despues = datos.get("ejecutar") is not False
     modulo = modulo_de(paso_id) if ejecutar_despues else None
+    # EL 409 ANTES DE ESCRIBIR LA NOTA: si el paso ya corre, `lanzar_paso`
+    # contestaba 409 con la nota YA guardada, y al reintentar se guardaba otra
+    # vez (dos notas iguales, y la firma movida dos veces).
+    if ejecutar_despues:
+        _sin_otra_pasada(ctx, paso_id)
 
     params = ctx.estado.params(paso_id)
     destino, historial = _historial(params, unidad)
@@ -2213,9 +2316,10 @@ def _correr_regrabar(avisar, ctx, seccion_id, peticion, ajuste):
         ctx, plan, seccion_id, peticion, linea, textos_ahora, grabados, hechas,
         salidas, destino)
 
-    # LA REVISION, si sale gratis. Nada depende de ella, pero el reproductor de
-    # vista previa prefiere SU toma (`_audio_de_la_toma`): dejarla en la
-    # anterior hacia sonar la frase vieja. Sellarla es copiar; si no se puede
+    # LA REVISION, si sale gratis. Nada depende de ella (desde el 16-10 ni la
+    # vista previa: `_audio_de_la_toma` sirve la voz, la toma contra la que se
+    # cortaron los planos), pero dejarla en la anterior la deja diciendo la
+    # frase vieja. Sellarla es copiar; si no se puede
     # sellar, ejecutarla resintetizaria la toma ENTERA, y eso no lo ha pedido
     # nadie desde un boton de un tramo: se queda en obsoleto y se dice.
     revision = "sin_tocar"
@@ -3123,7 +3227,8 @@ def coste_en_detalle(pid: str):
         "efectos": {"usd": 0.0, "cuantos": n_efectos, "fuente": "FreeSound o subidos por ti"},
         "estilo": estilo,
         "tandas": _tandas_de(ctx, eventos),
-        "precio_imagen": AJUSTES.precio_por_imagen(calidad),
+        "precio_imagen": AJUSTES.precio_por_imagen(calidad, modo=PASOS_MODULOS.p6_assets.modo_de(
+            (ctx.estado.params("assets") or {}).get("estilo"))),
         "tarifas": {"usd_por_caracter": COSTE.tarifa_caracter(),
                     "usd_por_token": COSTE.tarifa_tokens()},
     }
@@ -5200,17 +5305,56 @@ def _obsolescencia(ctx, escena):
     return {"obsoleta": True, "dibujada_para": ficha.get("narracion") or ""}
 
 def _audio_de_la_toma(ctx):
-    """El wav que se oye: el de la revision si la hay, y si no el de la voz.
+    """El wav que se oye: el de la VOZ, el mismo que monta el render.
 
-    En ese orden y no al reves: `revision_audio` es el paso que puede haber
-    regrabado una seccion, asi que su toma es la que de verdad va a sonar en el
-    MP4. Coger la de `voz` daria a escuchar algo que ya no existe.
+    Antes se preferia el de `revision_audio`, y era el equivocado. Los planos
+    se cortan contra las marcas de la voz (`p6_assets`, que lee el
+    `audio_meta.json` de `voz`) y el MP4 suena con el wav de la voz
+    (`p8_render`, `salida_de(proyecto, "voz", ...)`). La toma de la revision es
+    una RESINTESIS completa con su propio reloj, que nadie de aguas abajo usa:
+    los `t_in`/`t_out` de cada plano no son los suyos. Con ella delante, «Oírla»
+    sonaba otra frase, y en los planos que caen pasado su final no sonaba nada
+    --el audio saltaba al final y se paraba-- (16-10-2026). Con una revision
+    sellada (copia de la voz) daba igual; con una regrabada o vieja, no.
+
+    Se busca IGUAL que el render, y se devuelve relativa al proyecto, que es lo
+    que entiende `GET /a/{pid}/{ruta}`. Fuera del proyecto, None.
     """
-    for paso in ("revision_audio", "voz"):
-        ruta = _ruta_de_version(ctx, paso, "narracion.wav")
-        if ruta:
-            return ruta
-    return None
+    try:
+        ruta = PASOS_MODULOS.medios.salida_de(
+            ctx.proyecto, "voz", claves=("wav", "audio", "narracion"),
+            patrones=(r"narracion\.wav", r".*\.wav"), estado=ctx.estado)
+    except Exception:                                         # noqa: BLE001
+        ruta = None
+    if not ruta or not os.path.isfile(ruta):
+        return None
+    relativa = os.path.relpath(os.path.realpath(ruta),
+                               os.path.realpath(ctx.proyecto.raiz))
+    if relativa.startswith(".."):
+        return None
+    return relativa.replace(os.sep, "/")
+
+
+def _musica_de_la_previa(ctx, render):
+    """La musica que suena en «Todo seguido». -> url | ruta del proyecto | None
+
+    LA DE VERDAD, no una clave que nadie escribe (se leia `musica.pista`, que no
+    existe: la musica nunca sonaba). Por orden:
+
+      1. la cama que construyo el ultimo montaje (`render/vN/cama.wav`): es la
+         musica tal cual suena en el MP4, con sus tramos encadenados;
+      2. si no la hay, la escucha del propio tema (`muestra`, una ruta de la API
+         que sirve el banco: los temas subidos por ti).
+
+    Un tema de Jamendo sin montaje no suena aqui: escucharlo es salir a
+    Jamendo, y esta pantalla no sale a la red por mirar diapositivas.
+    """
+    cama = _ruta_de_version(ctx, "render", "cama.wav")
+    if cama:
+        return cama
+    ficha = render.get("musica") if isinstance(render.get("musica"), dict) else {}
+    muestra = str((ficha or {}).get("muestra") or "")
+    return muestra if muestra.startswith("/api/") else None
 
 
 def _medidor_de_subtitulo(ctx, plan):
@@ -5378,10 +5522,12 @@ def leer_previsualizacion(pid: str):
         # oye la VOZ y nada mas: lo que se esta juzgando ahi es si la imagen
         # cuadra con lo que se dice, y una cama de musica debajo es justo lo que
         # tapa esa pregunta.
-        "musica": (render.get("musica") or {}).get("pista") if isinstance(
-            render.get("musica"), dict) else None,
-        "efectos": (render.get("efectos") or {}).get("pista") if isinstance(
-            render.get("efectos"), dict) else None,
+        #
+        # Dos formas, y la pantalla las distingue: una ruta del proyecto (va por
+        # `/a/{pid}/...`) o una ruta de la API que empieza por `/api/`. Los
+        # efectos solo existen montados: su banda la construye el render.
+        "musica": _musica_de_la_previa(ctx, render),
+        "efectos": _ruta_de_version(ctx, "render", "efectos.wav"),
         "resolucion": plan.get("resolucion") or [1920, 1080],
         "formato": PASOS_MODULOS.comun.formato_de_plan(plan),
         "duracion_s": round(float(plan.get("duracion_total") or 0.0), 2),
@@ -5867,9 +6013,12 @@ def _correr_notas_imagenes(avisar, ctx):
 
 
 def _usd_por_imagen(ctx):
-    calidad = str((ctx.estado.params("assets") or {}).get("calidad") or "low")
+    assets = ctx.estado.params("assets") or {}
+    calidad = str(assets.get("calidad") or "low")
     try:
-        return round(float(AJUSTES.usd_por_imagen(calidad) or 0.0), 4)
+        # CON SU MODO: un plano de foto no cuesta lo que uno de ilustracion
+        return round(float(AJUSTES.usd_por_imagen(
+            calidad, modo=PASOS_MODULOS.p6_assets.modo_de(assets.get("estilo"))) or 0.0), 4)
     except Exception:                                       # noqa: BLE001
         return 0.0
 
@@ -8267,7 +8416,12 @@ def _que_hace(tarea_id, ctx, receta, modo="pendientes", solo_montar=False,
                         {"tipos": ["reparto", "mapa", "grafico", "cabecera"],
                          "replantear": False})
     if tarea_id == "assets":
-        return _un_paso(ctx, "assets", modo, {"replantear": False})
+        # en 'todo' las hojas ya las acaba de rehacer (y pagar) la tarea
+        # «piezas» de esta misma receta: aqui se conservan (p6 `pedido`)
+        conservar = modo == "todo" and "piezas" in _recetas().puestas_de("video", receta)
+        return _un_paso(ctx, "assets", modo, {"replantear": False,
+                                              **({"conservar_piezas": True}
+                                                 if conservar else {})})
     if tarea_id == "callouts":
         return _un_paso(ctx, "callouts", modo)
     if tarea_id == "banda_sonora":
@@ -8685,14 +8839,22 @@ def generar_pestana(pid: str, pestana: str, cuerpo: dict = Body(default=None)):
 
     # lo mismo que en `generar_video`: nada que dibuje o monte con la cola de
     # notas dibujando, y mirar y lanzar con el cerrojo de la cola tomado (D1)
-    with _COLA_LOCK:
+    # Y NADA QUE YA CORRA ALGUNO DE SUS PASOS (otra receta, una tanda, un
+    # «ejecutar» suelto): dos pasadas del mismo paso comparten `trabajo/`. Con
+    # el cerrojo del proyecto, que es el que toman las tandas y `lanzar_paso`.
+    with _cerrojo_de_cadena(ctx.id), _COLA_LOCK:
+        otro = _trabajo_que_toca(ctx, producidos)
+        if otro is not None:
+            raise ErrorApi(409, f"'{pestana}' no se puede generar ahora: "
+                                f"«{otro.get('nombre')}» está corriendo uno de sus pasos",
+                           {"trabajo_id": otro["id"], "progreso": otro["progreso"]})
         if producidos & set(_PASOS_QUE_DIBUJA_O_MONTA) and _cola_dibujando(ctx):
             raise ErrorApi(409, "se están rehaciendo imágenes con tus notas: "
                                 "espera a que terminen (o páralas) y vuelve a "
                                 "generar")
         trabajo_id = ctx.gestor.lanzar(f"receta:{pestana}", _correr_receta, ctx,
                                        pestana, receta, puestas, modo,
-                                       paso=orden[0]["paso"])
+                                       paso=orden[0]["paso"], toca=producidos)
     _registrar_trabajo(trabajo_id, ctx.id)
     ctx.bitacora.anotar("receta_lanzada", orden[0]["paso"],
                         {"pestana": pestana, "modo": modo,
@@ -13368,7 +13530,9 @@ _CERROJO_CERROJOS = threading.Lock()
 
 def _cerrojo_de_cadena(pid):
     with _CERROJO_CERROJOS:
-        return _CERROJOS_CADENA.setdefault(str(pid), threading.Lock())
+        # REENTRANTE: `lanzar_paso` lo toma, y hay rutas que lo llaman con el
+        # ya tomado (la recalidad de imagenes)
+        return _CERROJOS_CADENA.setdefault(str(pid), threading.RLock())
 
 
 @app.get("/api/proyectos/{pid}/generar")
@@ -13484,10 +13648,17 @@ def generar_video(pid: str, cuerpo: dict = Body(default=None)):
                 raise ErrorApi(409, "se están rehaciendo imágenes con tus notas: "
                                     "espera a que terminen (o páralas) y vuelve a "
                                     "generar")
+            # nada que ya corra alguno de sus pasos (ver `_trabajo_que_toca`)
+            otro = _trabajo_que_toca(ctx, producidos)
+            if otro is not None:
+                raise ErrorApi(409, f"«{otro.get('nombre')}» está corriendo uno de "
+                                    "los pasos de esta tanda: espera a que termine",
+                               {"trabajo_id": otro["id"], "progreso": otro["progreso"]})
             marca = uuid.uuid4().hex[:12]
             trabajo_id = ctx.gestor.lanzar("generar:" + "+".join(elegidas),
                                            _cadena_con_cuenta, ctx, marca, elegidas, modo, datos,
-                                           plan, paso=plan["fases"][0]["tareas"][0]["paso"])
+                                           plan, paso=plan["fases"][0]["tareas"][0]["paso"],
+                                           toca=producidos)
         _apuntar_tanda(ctx, {"marca": marca, "trabajo": trabajo_id, "tandas": elegidas,
                              "modo": modo, "lanzada": ahora(),
                              "prometido_usd": (plan.get("coste") or {}).get("usd_por_generar"),

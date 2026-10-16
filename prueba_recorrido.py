@@ -3076,6 +3076,222 @@ def regenerar_audio_dice_su_precio(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def revertir_y_oir_las_imagenes(navegador, datos):
+    """Lo que el dueño encontró el 16-10-2026: «cuando las imágenes regresan a
+    una versión anterior no se ven ni se escuchan; "Todo seguido" y "Oírla" no
+    funcionan».
+
+    - un solo fallo al pedir las diapositivas las dejaba sin imagen ni mandos
+      hasta recargar (ni revertir lo arreglaba): ahora hay «Reintentar»;
+    - volver a una versión vuelve a la escena que se miraba, se ve y suena;
+    - «Oírla» suena y vuelve a decir «Oírla» al acabar la escena;
+    - «Todo seguido» suena con la música de verdad (antes nunca la tuvo);
+    - sin voz, «Oírla» lo dice en vez de no hacer nada;
+    - una carga vieja no pisa a la nueva;
+    - los planes de un vídeo no se quedan en el siguiente;
+    - un trabajo que el servidor ya no conoce se da por perdido.
+    """
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    # dos versiones de imágenes, para poder volver a la anterior
+    _r, ficha = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    if len(ficha.get("versiones") or []) < 2:
+        r, d = api.post(f"/api/proyectos/{pid}/pasos/assets/ejecutar",
+                        {"unidades": ["escena:S002"], "rehacer": True})
+        api.esperar(d.get("trabajo_id"), 300)
+        _r, ficha = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    versiones = sorted(v.get("n") for v in ficha.get("versiones") or [])
+    activa = next((v.get("n") for v in ficha.get("versiones") or [] if v.get("activa")), None)
+    if not ok(len(versiones) >= 2 and activa,
+              f"el vídeo tiene dos versiones de imágenes ({versiones})"):
+        return
+    anterior = max((n for n in versiones if n < activa), default=None) or \
+        next(n for n in versiones if n != activa)
+
+    pg = Pagina(navegador, datos)
+    imagen_y_mandos = ("() => { const i = document.querySelector('.previa-marco img');"
+                       " return !!(i && i.complete && i.naturalWidth > 0)"
+                       " && !!document.querySelector('.previa-mandos'); }")
+
+    def esperar_js(expresion, segundos=20):
+        fin = time.time() + segundos
+        while time.time() < fin:
+            try:
+                if pg.p.evaluate(expresion):
+                    return True
+            except Exception:                                # noqa: BLE001
+                pass
+            pg.p.wait_for_timeout(300)
+        return False
+
+    # 1. UN FALLO AL PEDIRLAS, Y «REINTENTAR»
+    cortadas = {"n": 0}
+
+    def cortar_la_primera(ruta):
+        cortadas["n"] += 1
+        if cortadas["n"] == 1:
+            ruta.abort("connectionreset")
+        else:
+            ruta.continue_()
+    pg.p.route("**/previsualizacion", cortar_la_primera)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
+    ok(pg.esperar(".caja-error", None, 20), "un microcorte al pedir las imágenes se dice")
+    ok(pg.esperar(".light-previa button", "Reintentar", 5),
+       "y la caja del error trae «Reintentar»")
+    if pg.visible(".light-previa button", "Reintentar"):
+        pg.pulsar(".light-previa button", "Reintentar")
+    if not ok(esperar_js(imagen_y_mandos), "y al reintentar se ven la imagen y sus mandos"):
+        # sin el arreglo solo quedaba recargar la pagina: se recarga para poder
+        # mirar lo demas (cada cosa falla por lo suyo, no por arrastre)
+        pg.p.unroute("**/previsualizacion")
+        pg.p.reload()
+        pg.p.wait_for_function("() => typeof APP !== 'undefined' && APP.light && APP.light.datos",
+                               timeout=30000)
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
+        esperar_js(imagen_y_mandos)
+    pg.p.unroute("**/previsualizacion")
+
+    # 2. VOLVER A LA VERSIÓN ANTERIOR: se ve, suena y sigue en la misma escena
+    try:
+        pg.p.evaluate("() => { PREVIA.i = 2; repintarVideo(); }")
+        escena = pg.p.evaluate("() => escenaPrevia().id")
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'video'; pintarLight();"
+              " await refrescarPlanosLight();")
+        pg.js("APP.light.video.vista = 'previa'; pintarLight();")
+        esperar_js(imagen_y_mandos)
+        pg.p.evaluate(f"() => {{ PREVIA.i = PREVIA.ficha.escenas.findIndex(x => x.id === '{escena}'); "
+                      "repintarVideo(); }")
+        # se espia si la tira se vuelve a pedir: la carpeta que devuelve puede
+        # ser la de trabajo (una tanda cortada en otro escenario la deja)
+        pg.p.evaluate("() => { window.__tiras = 0; const pedirTira = refrescarPlanosLight; "
+                      "refrescarPlanosLight = function () { window.__tiras += 1; "
+                      "return pedirTira.apply(this, arguments); }; }")
+        pg.p.evaluate(f"async () => {{ await volverAVersionLight('assets', {anterior}); }}")
+        ok(esperar_js(imagen_y_mandos), "después de volver a la versión anterior se ve la imagen")
+        ok(pg.p.evaluate(f"() => ((PREVIA.ficha || {{}}).escenas || []).some(x => "
+                         f"String(x.imagen || '').includes('/v{anterior}/'))"),
+           f"y es la de la v{anterior}")
+        ok(pg.p.evaluate(f"() => (escenaPrevia() || {{}}).id === '{escena}'"),
+           f"y sigue en la escena que se miraba ({escena})")
+        pg.p.wait_for_timeout(1500)
+        rutas = pg.p.evaluate("() => (APP.light.video.planos || []).map(x => String(x.ruta || ''))")
+        ok(pg.p.evaluate("() => window.__tiras") >= 1 and rutas
+           and not any(f"/v{activa}/" in r for r in rutas),
+           f"y la tira de planos del vídeo se vuelve a pedir: ya no es la de la v{activa} ({rutas[:2]})")
+    except Exception as fallo:                               # noqa: BLE001
+        ok(False, f"2. VOLVER A LA VERSIÓN ANTERIOR: se ve, suena y sigue en la misma escena: se cortó ({type(fallo).__name__}: {str(fallo)[:160]})")
+
+    # 3. «OÍRLA» suena, y al acabar la escena el botón vuelve a decir «Oírla»
+    try:
+        pg.pulsar(".previa-mandos button", "Oírla")
+        ok(esperar_js("() => PREVIA.audio && !PREVIA.audio.paused && PREVIA.audio.currentTime > 0", 8),
+           "«Oírla» suena después de volver a la versión anterior")
+        ok(pg.p.evaluate("() => String(PREVIA.audio.src).includes('/pasos/voz/')"),
+           "con la voz del corte (la del render)")
+        dura = pg.p.evaluate("() => escenaPrevia().t_out - escenaPrevia().t_in")
+        pg.p.wait_for_timeout(int((dura + 1.5) * 1000))
+        ok(pg.p.evaluate("() => PREVIA.audio.paused"), "y se para al acabar su escena")
+        ok(pg.visible(".previa-mandos button", "Oírla") and not pg.visible(".previa-mandos button", "Parar"),
+           "y el botón vuelve a decir «Oírla», no «Parar»")
+    except Exception as fallo:                               # noqa: BLE001
+        ok(False, f"3. «OÍRLA» suena, y al acabar la escena el botón vuelve a decir «Oírla»: se cortó ({type(fallo).__name__}: {str(fallo)[:160]})")
+
+    # 4. «TODO SEGUIDO», con la música de verdad
+    try:
+        # DESDE UNA ESCENA DEL FINAL: el tema subido dura 20 s y el vídeo más,
+        # así que la música tiene que ir en bucle, como en el render
+        pg.p.evaluate("() => { PREVIA.i = Math.max(0, PREVIA.ficha.escenas.length - 2); "
+                      "repintarVideo(); }")
+        pg.pulsar(".previa-mandos button", "Todo seguido")
+        ok(esperar_js("() => PREVIA.seguido && PREVIA.audio && !PREVIA.audio.paused", 8),
+           "«Todo seguido» suena")
+        hay_musica = pg.p.evaluate("() => !!(PREVIA.ficha || {}).musica")
+        ok(hay_musica, "el vídeo de prueba, con su música subida, la lleva en «Todo seguido»")
+        if hay_musica:
+            ok(esperar_js("() => PREVIA.musica && !PREVIA.musica.paused && PREVIA.musica.currentTime > 0", 8),
+               "y la música suena debajo de la voz")
+        if pg.visible(".previa-mandos button", "Parar"):
+            pg.pulsar(".previa-mandos button", "Parar")
+        ok(pg.p.evaluate("() => PREVIA.audio.paused && (!PREVIA.musica || PREVIA.musica.paused)"),
+           "«Parar» lo para todo")
+    except Exception as fallo:                               # noqa: BLE001
+        ok(False, f"4. «TODO SEGUIDO», con la música de verdad: se cortó ({type(fallo).__name__}: {str(fallo)[:160]})")
+
+    # 5. SIN VOZ, LO DICE
+    try:
+        pg.p.evaluate("() => { PREVIA.ficha.audio = null; window.__avisos = []; }")
+        pg.pulsar(".previa-mandos button", "Oírla")
+        ok(any("no tiene voz" in a for a in pg.avisos()),
+           f"sin voz, «Oírla» dice que no hay nada que oír ({pg.avisos()[-1:]})")
+        ok(pg.p.evaluate("() => !PREVIA.audio.getAttribute('src')"),
+           "y no se queda con la voz de antes")
+    except Exception as fallo:                               # noqa: BLE001
+        ok(False, f"5. SIN VOZ, LO DICE: se cortó ({type(fallo).__name__}: {str(fallo)[:160]})")
+
+    # 6. UNA CARGA VIEJA NO PISA A LA NUEVA
+    try:
+        retenidas = []
+
+        def retener_la_primera(ruta):
+            if not retenidas:
+                retenidas.append(ruta)
+            else:
+                ruta.continue_()
+        pg.p.route("**/previsualizacion", retener_la_primera)
+        pg.p.evaluate("() => { PREVIA.ficha = null; PREVIA.cargando = false; cargarPreviaLight(); }")
+        pg.p.wait_for_timeout(800)
+        # otra carga mientras la primera sigue en el aire (lo que hace volver a una
+        # versión, o cambiar de vídeo): la de antes no vale ya
+        pg.p.evaluate("() => { PREVIA.ficha = null; PREVIA.cargando = false; cargarPreviaLight(); }")
+        esperar_js("() => !!PREVIA.ficha", 15)
+        if retenidas:
+            vieja = retenidas[0].fetch()
+            cuerpo = vieja.json()
+            for x in cuerpo.get("escenas") or []:
+                x["id"] = "VIEJA"
+            retenidas[0].fulfill(response=vieja, json=cuerpo)
+        pg.p.wait_for_timeout(2500)
+        ok(pg.p.evaluate("() => !((PREVIA.ficha || {}).escenas || []).some(x => x.id === 'VIEJA')"),
+           "una carga que llega tarde no pisa la de después")
+        pg.p.unroute("**/previsualizacion")
+    except Exception as fallo:                               # noqa: BLE001
+        ok(False, f"6. UNA CARGA VIEJA NO PISA A LA NUEVA: se cortó ({type(fallo).__name__}: {str(fallo)[:160]})")
+
+    # 7. LOS PLANES DE UN VÍDEO NO SE QUEDAN EN EL SIGUIENTE
+    try:
+        r, d = api.post(f"/api/presets-light/{datos['preset']}/video", {
+            "nombre": "Vídeo para cambiar", "duracion_objetivo_s": 30,
+            "material": "Un vídeo más, para comprobar que no hereda nada del anterior."})
+        otro = (d.get("proyecto") or {}).get("id") or ""
+        if ok(bool(otro), f"se crea otro vídeo ({r.status_code})"):
+            pg.p.evaluate("() => { APP.light.video.planes = { video: { coste: "
+                          "{ otra_calidad: { imagenes: 7, calidad: 'low' } } } }; }")
+            quedo = pg.p.evaluate(f"async () => {{ await cargarVideoLight('{otro}'); "
+                                  "const p = (APP.light.video.planes || {}).video || {}; "
+                                  "return (((p.coste || {}).otra_calidad) || {}).imagenes || 0; }")
+            ok(quedo != 7, "al abrir otro vídeo no hereda el aviso de calidad del anterior")
+    except Exception as fallo:                               # noqa: BLE001
+        ok(False, f"7. LOS PLANES DE UN VÍDEO NO SE QUEDAN EN EL SIGUIENTE: se cortó ({type(fallo).__name__}: {str(fallo)[:160]})")
+
+    # 8. UN TRABAJO QUE EL SERVIDOR YA NO CONOCE
+    try:
+        pg.p.evaluate("() => seguirTrabajo('prueba_perdido', 'no-existe-ya', async () => {})")
+        ok(esperar_js("() => (APP.trabajos.prueba_perdido || {}).estado === 'error'", 30),
+           "un trabajo que el servidor ya no conoce se da por perdido (no se queda «en marcha»)")
+        pg.p.evaluate("() => soltarSeguimiento('prueba_perdido')")
+        # el error de ese trabajo se dice tambien en la consola: es el que se busca
+        pg.errores[:] = [e for e in pg.errores if "ya no conoce este trabajo" not in e]
+    except Exception as fallo:                               # noqa: BLE001
+        ok(False, f"8. UN TRABAJO QUE EL SERVIDOR YA NO CONOCE: se cortó ({type(fallo).__name__}: {str(fallo)[:160]})")
+
+    pg.captura("revertir_y_oir_las_imagenes", entera=False)
+    pg.sin_errores("revertir y oír las imágenes")
+    pg.cerrar()
+    # y se deja como estaba, para lo que venga detrás
+    api.post(f"/api/proyectos/{pid}/pasos/assets/revertir", {"version": activa})
+
+
 def main():
     ap = argparse.ArgumentParser(description="El recorrido de la pantalla")
     ap.add_argument("--solo", default="", help="un escenario por nombre")

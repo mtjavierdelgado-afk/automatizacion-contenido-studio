@@ -127,6 +127,16 @@ def prueba_prompt():
               "y los nombres en todo el disco, no solo dentro del cwd")
     comprobar("Read(//proc/**)" in vetos,
               "y /proc: el entorno de un proceso puede llevar el token de la sesion")
+    # GREP Y GLOB: se permiten en `datos/**` y ahi dentro esta `datos/secretos`.
+    # Cada veto de Read tiene que existir tambien para ellas (revision 16-10).
+    de_read = [v for v in vetos if v.startswith("Read(")]
+    faltan = [v.replace("Read(", f"{h}(", 1) for v in de_read for h in ("Grep", "Glob")
+              if v.replace("Read(", f"{h}(", 1) not in vetos]
+    comprobar(de_read and not faltan,
+              f"cada veto de Read va tambien para Grep y Glob (faltan: {faltan[:4]})")
+    comprobar("Grep(//opt/as-video-studio/datos/secretos/**)" in vetos
+              and "Glob(//opt/as-video-studio/datos/secretos/**)" in vetos,
+              "en concreto, Grep y Glob no entran en el almacen de claves del VPS")
     # LOS DATOS DEL VPS (tarifas, presets, ajustes) viven en `datos/`, fuera del
     # codigo y de los proyectos: se dejan leer para contestar «cuanto cuesta»
     datos = tempfile.mkdtemp(prefix="asist_datos_")
@@ -152,6 +162,12 @@ def prueba_orden():
     def falso(instruccion, **kw):
         recibido.update(kw)
         recibido["instruccion"] = instruccion
+        # el fichero MCP se lee DURANTE la llamada: al acabar se borra
+        extra_kw = list(kw.get("extra") or [])
+        if "--mcp-config" in extra_kw:
+            ruta_mcp = extra_kw[extra_kw.index("--mcp-config") + 1]
+            with open(ruta_mcp, encoding="utf-8") as fh:
+                recibido["_mcp"] = (ruta_mcp, fh.read())
         return "hola", {"session_id": "s1", "usage": {}}
 
     original = cli_claude.ejecutar
@@ -191,6 +207,9 @@ def prueba_orden():
     cli_claude.ejecutar = falso
     try:
         asistente.ejecutar_cli("pregunta", raiz="C:/estudio", proyecto="p7")
+        ruta_p7, texto_mcp = recibido.get("_mcp") or ("", "{}")
+        asistente.ejecutar_cli("otra", raiz="C:/estudio", proyecto="p8")
+        ruta_p8, texto_p8 = recibido.get("_mcp") or ("", "{}")
     finally:
         cli_claude.ejecutar = original
         os.environ.pop("ESTUDIO_API", None)
@@ -199,8 +218,15 @@ def prueba_orden():
     recibido.clear()
     recibido.update(primera)
     comprobar("--mcp-config" in extra_mcp, "con ESTUDIO_API se carga el servidor estudio")
+    # UN FICHERO POR LLAMADA, borrado al acabar: con uno por proceso, dos
+    # charlas a la vez se pisaban el proyecto abierto (revision 16-10-2026)
+    comprobar(ruta_p7 and ruta_p8 and ruta_p7 != ruta_p8,
+              f"cada llamada tiene su propio fichero MCP: {ruta_p7} / {ruta_p8}")
+    comprobar(ruta_p7 and not os.path.exists(ruta_p7) and not os.path.exists(ruta_p8),
+              "y el fichero MCP se borra al acabar la llamada")
+    comprobar('"p8"' in texto_p8, "la segunda llamada lleva SU proyecto")
     import json as _json
-    config = _json.load(open(extra_mcp[extra_mcp.index("--mcp-config") + 1], encoding="utf-8"))
+    config = _json.loads(texto_mcp)
     servidor = config["mcpServers"]["estudio"]
     comprobar(servidor["args"][0].endswith("mcp_estudio.py")
               and servidor["env"]["ESTUDIO_API"] == "http://127.0.0.1:65000"

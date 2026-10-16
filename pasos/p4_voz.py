@@ -806,10 +806,18 @@ def _toma_por_contexto(trozos, cfg, progreso):
     pcm, palabras, enviados = [], [], []
     try:
         for indice, texto in enumerate(trozos):
+            sigue = indice < len(trozos) - 1
+            # CON UN ESPACIO DETRAS si viene otra entrada (16-10-2026): Cartesia
+            # junta las entradas de un contexto TAL CUAL («Transcripts are
+            # concatenated verbatim»), y sin el le llegaba «...remata.Primera...»
+            # en cada cambio de seccion: la primera palabra pegada a la ultima y
+            # la marca de palabra pegada, que corria la pausa de seccion a
+            # DESPUES de la primera palabra del bloque siguiente.
+            enviado = texto.rstrip() + " " if sigue else texto
             conexion.send(json.dumps({**base, "context_id": contexto,
-                                      "transcript": texto,
-                                      "continue": indice < len(trozos) - 1}))
-            enviados.append(texto)
+                                      "transcript": enviado,
+                                      "continue": sigue}))
+            enviados.append(enviado)
         ultimo_aviso = 0.0
         while True:
             # Un solo 'done' para TODO el contexto, no uno por entrada: esperar
@@ -1107,7 +1115,9 @@ def sintetizar_bloques(bloques, destino, cfg, avisar=None,
     hueco = float(cfg.get("hueco_minimo") or 0.0)
     silencio_anadido = 0.0
     for escena in escenas:
-        escena["pausa_despues"] = pausa_de.get(escena["id"], 0.0)
+        # se SUMA al hueco de la frontera, en la proporcion de la cadencia
+        escena["pausa_despues"] = (pausa_de.get(escena["id"], 0.0)
+                                   * cadencia.PARTE_DE_LA_PAUSA)
     if (hueco > 0 or any(pausa_de.values())) and len(anotados) > 1:
         wav, desplazamientos = motor.espaciar(wav, palabras, reparto, escenas, hueco)
         if desplazamientos:
@@ -1812,7 +1822,8 @@ def regrabar_seccion(bloques, seccion_id, cfg, meta, destino, peticion="",
         escenas_s, reparto_s = _reparto(
             [b for b in nuevos if b["id"] in dentro], marcas_nuevas)
         for escena in escenas_s:
-            escena["pausa_despues"] = pausa_de.get(escena["id"], 0.0)
+            escena["pausa_despues"] = (pausa_de.get(escena["id"], 0.0)
+                                       * cadencia.PARTE_DE_LA_PAUSA)
         wav_nuevo, desplazamientos = motor.espaciar(
             wav_nuevo, marcas_nuevas, reparto_s, escenas_s, hueco)
         if desplazamientos:

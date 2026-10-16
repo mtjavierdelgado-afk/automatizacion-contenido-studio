@@ -98,6 +98,17 @@ CALIBRE = 0.765
 #: es lo que mueve el mando de ritmo-- se note en la estimacion.
 PAUSA_ENTRE_BLOQUES = 0.54
 
+#: CUANTO DE LA PAUSA ESCRITA AL FINAL DE UN BLOQUE se suma a la frontera.
+#:
+#: Desde el 09-10 esa pausa no se le pide a la voz: la mete `motor.espaciar` al
+#: montar. Hasta el 16-10 se tomaba `max(hueco, pausa)`, asi que con el hueco de
+#: serie (1 s) la pausa de 0,9 s del gancho y de cada cambio de tema
+#: desaparecia: sonaba igual que cualquier otra frontera. Ahora SE SUMA, y en
+#: esta proporcion para que con lo de serie (hueco 1 s, pausa 0,9 s) el corte
+#: ronde el segundo y medio que promete `p3_guion` (1 + 0,9 x 0,6 = 1,54 s) y
+#: no casi dos segundos. Lo aplica `p4_voz` al pasarle la pausa a `espaciar`.
+PARTE_DE_LA_PAUSA = 0.6
+
 #: Muestras minimas para que el historial gane a la tabla. Con una sola toma
 #: rara --un guion de dos frases, una voz que se atasco-- la media se va, y aqui
 #: una cifra mala no se ve: sale como un guion mas largo de la cuenta.
@@ -308,18 +319,17 @@ def marcas_de(texto, factor=1.0, desde=0.0, calibre=None):
 def aire_de(textos, hueco_minimo=0.0):
     """Segundos que `motor.espaciar` va a insertar entre esos bloques.
 
-    Se cuenta costura a costura y no como `hueco x bloques`: un bloque que ya
-    termina con un <break> largo no recibe aire ninguno, y en un guion con
-    capitulos eso es la mitad de las costuras.
+    Se cuenta costura a costura y no como `hueco x bloques`: la pausa escrita
+    al final de un bloque ya no va a la voz (se hace al montar), asi que es
+    aire, y se SUMA al hueco en la proporcion `PARTE_DE_LA_PAUSA`, igual que
+    hace `p4_voz` con `motor.espaciar`.
     """
     hueco = max(0.0, float(hueco_minimo or 0.0))
-    if hueco <= 0:
-        return 0.0
     vivos = [t for t in textos if str(t or "").strip()]
     total = 0.0
     for texto in vivos[:-1]:
-        natural = PAUSA_ENTRE_BLOQUES + marcas_tts.silencio_final(texto) / 1000.0
-        total += max(0.0, hueco - natural)
+        pausa = marcas_tts.separar_pausa_final(texto)[1] / 1000.0
+        total += max(0.0, hueco - PAUSA_ENTRE_BLOQUES) + pausa * PARTE_DE_LA_PAUSA
     return round(total, 3)
 
 
@@ -341,7 +351,9 @@ def estimar(bloques, idioma=None, velocidad=None, hueco_minimo=0.0, voz=None):
     habla = 0.0
     palabras = 0
     for texto in textos:
-        _marcas, final = marcas_de(texto, factor, calibre=calibre)
+        # la pausa del FINAL no la dice la voz: es aire del montaje (aire_de)
+        _marcas, final = marcas_de(marcas_tts.separar_pausa_final(texto)[0],
+                                   factor, calibre=calibre)
         habla += final
         palabras += marcas_tts.contar_palabras(texto)
     aire = aire_de(textos, hueco_minimo)

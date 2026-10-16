@@ -34,13 +34,14 @@ import json
 import math
 import os
 import shutil
+import signal
 import socket
 import subprocess
 import sys
 import tempfile
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 import requests
 import websocket
@@ -1003,7 +1004,7 @@ def renderizar_plano(tarea, navegador=None):
             "origen": "renderizado"}
 
 
-def correr_lote(tareas, senal_vivo=None):
+def correr_lote(tareas, senal_vivo=None, al_plano=None):
     """Un tramo de planos con UN navegador. -> [ficha por plano].
 
     Arrancar Edge cuesta medio segundo y abrir su pagina otra decima; con un
@@ -1027,7 +1028,15 @@ def correr_lote(tareas, senal_vivo=None):
         except Exception:                                      # noqa: BLE001
             pass          # una barra que no avanza no puede tumbar un render
     try:
-        return [renderizar_plano(tarea, navegador) for tarea in tareas]
+        fichas = []
+        for tarea in tareas:
+            fichas.append(renderizar_plano(tarea, navegador))
+            # EN FILA, CANCELAR SE OYE ENTRE PLANO Y PLANO: `al_plano` es el
+            # `avisar` del paso, que lanza si alguien ha cancelado. Antes este
+            # camino no avisaba nada hasta acabar todos los planos.
+            if al_plano is not None:
+                al_plano(len(fichas), len(tareas))
+        return fichas
     finally:
         navegador.cerrar()
 
@@ -1039,7 +1048,7 @@ LATIDO_S = 1.0
 
 
 def _vigilar_avance(dir_lotes, dir_clips, ids, cuantos_lotes, desde, avisar,
-                    parar):
+                    parar, cancelado=None):
     """Cuenta lo que hay EN DISCO y mueve la barra. Corre en su propio hilo.
 
     POR QUE HACE FALTA, Y NO ES UN ADORNO. Se pulsaba «Generar el MP4» y la
@@ -1067,7 +1076,6 @@ def _vigilar_avance(dir_lotes, dir_clips, ids, cuantos_lotes, desde, avisar,
     clip -- lo sigue leyendo el padre del `.hecho` de su lote, que es el unico
     sitio donde esta.
     """
-    ultimo = None
     while not parar.is_set():
         try:
             vivos = len([n for n in os.listdir(dir_lotes) if n.endswith(".vivo")])
@@ -1092,10 +1100,49 @@ def _vigilar_avance(dir_lotes, dir_clips, ids, cuantos_lotes, desde, avisar,
             mensaje = (f"arrancando los navegadores: {vivos} de "
                        f"{cuantos_lotes} listos")
             fraccion = 0.02 + 0.03 * (vivos / max(1, cuantos_lotes))
-        if mensaje != ultimo:
+        # SE AVISA EN CADA LATIDO, cambie o no el mensaje: es tambien como se
+        # pregunta si han cancelado, y un plano largo deja el mensaje quieto
+        # minutos. Avisar es apuntar en memoria; no cuesta nada.
+        try:
             avisar(fraccion, mensaje)
-            ultimo = mensaje
+        except Exception as fallo:                     # noqa: BLE001
+            # CANCELAR SE OYE AQUI, y es el unico sitio donde se oye
+            # mientras corren los lotes: `avisar` lanza `Cancelado`. Antes
+            # la excepcion mataba este hilo en silencio, la barra se
+            # congelaba y los lotes seguian hasta acabar el video entero.
+            # Se apunta y se para: quien recoge la ve y corta los procesos.
+            # Cualquier otro fallo de la barra solo para la barra: no es
+            # motivo para tirar un render (se compara por NOMBRE porque
+            # este modulo no importa el nucleo).
+            if cancelado is not None and type(fallo).__name__ == "Cancelado":
+                cancelado.append(fallo)
+            return
         parar.wait(LATIDO_S)
+
+
+#: Cada lote en SU PROPIA SESION (grupo de procesos): asi se le puede matar
+#: entero, con sus navegadores, y no solo el python que los lanzo. En Windows
+#: no hay grupos POSIX: ahi se mata el proceso del lote y nada mas.
+_SESION_PROPIA = {"start_new_session": True} if os.name != "nt" else {}
+
+
+def _orden_lote(ficha):
+    """La orden que corre un lote. Aparte para que una suite la sustituya."""
+    return [_python(), os.path.abspath(__file__), "--lote", ficha]
+
+
+def _matar_lotes(procesos):
+    """Mata cada lote que siga vivo, con todo su grupo (Edge incluido)."""
+    for _, proceso in procesos:
+        if proceso.poll() is not None:
+            continue
+        try:
+            if _SESION_PROPIA:
+                os.killpg(proceso.pid, signal.SIGKILL)
+            else:
+                proceso.kill()
+        except (OSError, ProcessLookupError):
+            pass
 
 
 def _correr_lotes_en_procesos(lotes, trabajo, avisar, total_planos,
@@ -1114,9 +1161,10 @@ def _correr_lotes_en_procesos(lotes, trabajo, avisar, total_planos,
         ficha = os.path.join(dir_lotes, f"lote{numero:02d}.json")
         medios.escribir_json(ficha, {"tareas": tareas})
         procesos.append((ficha, subprocess.Popen(
-            [_python(), os.path.abspath(__file__), "--lote", ficha],
+            _orden_lote(ficha),
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            encoding="utf-8", errors="replace", **medios.SIN_VENTANA)))
+            encoding="utf-8", errors="replace", **_SESION_PROPIA,
+            **medios.SIN_VENTANA)))
     avisar(0.02, f"{total_planos} planos en {len(lotes)} procesos: "
                  f"arrancando los navegadores")
 
@@ -1125,11 +1173,13 @@ def _correr_lotes_en_procesos(lotes, trabajo, avisar, total_planos,
     # minutos de silencio al principio y saltos de tres planos despues.
     ids = [t["id"] for lote in lotes for t in lote]
     parar = threading.Event()
+    cancelado = []
     vigilante = None
     if dir_clips and desde is not None:
         vigilante = threading.Thread(
             target=_vigilar_avance,
-            args=(dir_lotes, dir_clips, ids, len(lotes), desde, avisar, parar),
+            args=(dir_lotes, dir_clips, ids, len(lotes), desde, avisar, parar,
+                  cancelado),
             daemon=True)
         vigilante.start()
 
@@ -1146,20 +1196,36 @@ def _correr_lotes_en_procesos(lotes, trabajo, avisar, total_planos,
         _, error = proceso.communicate()
         return ficha, proceso.returncode, error
 
+    terminado = False
     try:
         with ThreadPoolExecutor(max_workers=max(1, len(procesos))) as pool:
-            for tarea in as_completed([pool.submit(recoger, p) for p in procesos]):
-                ficha, codigo, error = tarea.result()
-                resultado = medios.leer_json(ficha + ".hecho", {})
-                if codigo != 0 or not resultado.get("planos"):
-                    fallos.append((error or "").strip()[-600:]
-                                  or f"el proceso del lote salio con {codigo}")
-                    continue
-                for plano in resultado["planos"]:
-                    salida[plano["id"]] = plano
-                    hechos += 1
+            pendientes = {pool.submit(recoger, p) for p in procesos}
+            while pendientes:
+                # SE MIRA CADA LATIDO SI ALGUIEN HA CANCELADO, en vez de
+                # esperar sin mas a que acaben todos: con la espera a secas,
+                # cancelar un render de media hora no paraba nada.
+                hechas, pendientes = wait(pendientes, timeout=LATIDO_S,
+                                          return_when=FIRST_COMPLETED)
+                if cancelado:
+                    _matar_lotes(procesos)
+                    raise cancelado[0]
+                for tarea in hechas:
+                    ficha, codigo, error = tarea.result()
+                    resultado = medios.leer_json(ficha + ".hecho", {})
+                    if codigo != 0 or not resultado.get("planos"):
+                        fallos.append((error or "").strip()[-600:]
+                                      or f"el proceso del lote salio con {codigo}")
+                        continue
+                    for plano in resultado["planos"]:
+                        salida[plano["id"]] = plano
+                        hechos += 1
+        terminado = True
     finally:
         parar.set()
+        if not terminado:
+            # salga como salga (cancelado, un fallo aqui), ningun lote se
+            # queda renderizando solo con sus navegadores
+            _matar_lotes(procesos)
         if vigilante:
             vigilante.join(timeout=2 * LATIDO_S)
     avisar(0.05 + 0.85 * (hechos / max(1, total_planos)),
@@ -1359,7 +1425,11 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
             # UN SOLO PLANO (o el modo en fila): no hace falta sacar un proceso
             # para lanzar un navegador. Es el mismo cuerpo, corriendo aqui.
             avisar(0.05, f"{len(tareas)} plano(s), en fila")
-            fichas = {f["id"]: f for f in correr_lote(lotes[0])}
+            fichas = {f["id"]: f for f in correr_lote(
+                lotes[0], al_plano=lambda hechos, total: avisar(
+                    0.05 + 0.85 * hechos / max(1, total),
+                    f"{hechos} de {total} planos renderizados",
+                    (hechos, total)))}
         else:
             fichas = _correr_lotes_en_procesos(
                 lotes, trabajo, avisar, len(tareas),
@@ -1434,7 +1504,7 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
     _concatenar(clips, destino, audio, desfase, trabajo, musica=pista_musica,
                 efectos=pista_efectos, duracion=largo_con_cola,
                 lufs=p.get("musica_lufs"), cama=cama, ajuste_db=ajuste_musica,
-                fps=fps, calidad=p.get("calidad") or "media",
+                fps=fps, calidad=p.get("calidad_video") or "media",
                 efectos_db=ajuste_efectos,
                 presencia=p.get("musica_presencia"))
     # EL LOGO, encima del video ya montado (ver `poner_logo`)
@@ -1444,7 +1514,7 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
                                  os.path.basename(str(ficha_logo["fichero"])))
         if os.path.exists(ruta_logo):
             avisar(0.97, "poniendo el logo")
-            poner_logo(destino, ruta_logo, ficha_logo, p.get("calidad") or "media")
+            poner_logo(destino, ruta_logo, ficha_logo, p.get("calidad_video") or "media")
     duracion = medios.duracion_media(destino)
 
     # los assets son unidades heredadas: no se renderizan, pero se sellan igual

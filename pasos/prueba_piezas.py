@@ -4719,6 +4719,169 @@ def _prohibir_pagar():
     motor.generar = no_se_paga
 
 
+# ------------------------------------------- revision del 16-10-2026 (render)
+
+def _ejecutable_falso(carpeta, nombre, cuerpo):
+    """Un script que hace de ffmpeg o de Edge y falla como se le diga."""
+    ruta = os.path.join(carpeta, nombre)
+    with open(ruta, "w", encoding="utf-8") as fh:
+        fh.write("#!/bin/sh\n" + cuerpo + "\n")
+    os.chmod(ruta, 0o755)
+    return ruta
+
+
+def prueba_revision_16_10_render():
+    """Lo que encontro la revision del 16-10 en render y sonido."""
+    import estadisticas                                     # noqa: PLC0415
+    titulo("avisador: el contador no cae en el mensaje publico")
+    recibido = []
+
+    def del_gestor(valor, mensaje="", publico=""):          # nucleo.trabajos
+        recibido.append(publico)
+
+    estadisticas.avisador(del_gestor)(0.9, "44 de 44 planos", (44, 44))
+    igual(recibido, [""], "al avisar del gestor (valor, mensaje, publico) "
+                          "el contador (44, 44) NO llega como texto publico")
+    con_unidades = []
+
+    def del_modo_light(valor, mensaje="", unidades=None, publico=""):
+        con_unidades.append(unidades)
+
+    estadisticas.avisador(del_modo_light)(0.9, "x", (3, 7))
+    igual(con_unidades, [(3, 7)], "y a quien SI entiende `unidades` le llega")
+
+    if os.name == "nt":
+        print("  (lo que sigue usa scripts de shell: se salta en Windows)")
+        return
+    carpeta = tempfile.mkdtemp(prefix="rev1610_")
+    antes_ffmpeg = os.environ.get("ESTUDIO_FFMPEG")
+    antes_edges = medios.EDGES
+    puestos = []
+    try:
+        titulo("_a_wav: un ffmpeg cortado no deja un WAV truncado en la cache")
+        # escribe medio fichero en su ULTIMO argumento y muere, como un
+        # ffmpeg al que corta un reinicio del servicio
+        os.environ["ESTUDIO_FFMPEG"] = _ejecutable_falso(
+            carpeta, "ffmpeg_cortado",
+            'for a in "$@"; do ultimo="$a"; done; printf RIFFmedio > "$ultimo"; '
+            'echo BOOM-ffmpeg >&2; exit 1')
+        origen = os.path.join(carpeta, "efecto.mp3")
+        with open(origen, "wb") as fh:
+            fh.write(b"no es audio")
+        destino = os.path.join(carpeta, "efecto.48000.wav")
+        try:
+            sonido._a_wav(origen)
+            ok(False, "un ffmpeg que falla tiene que dar error")
+        except RuntimeError:
+            ok(True, "un ffmpeg que falla da error")
+        ok(not os.path.exists(destino),
+           "y NO deja el WAV a medias donde la cache lo daria por bueno")
+        ok(not [n for n in os.listdir(carpeta) if n.endswith(".parcial.wav")],
+           "ni el temporal")
+
+        titulo("la cama: sin restos en trabajo/ y con el error de ffmpeg dentro")
+        ficha = {"fuente": "prueba", "id": "rev1610"}
+        tema = sonido.banco("musica", sonido._nombre_de(ficha))
+        with open(tema, "wb") as fh:
+            fh.write(b"x" * 4000)
+        puestos.append(tema)
+        trabajo = os.path.join(carpeta, "trabajo")
+        os.makedirs(trabajo)
+        try:
+            sonido.construir_cama(
+                {"tramos": [dict(ficha, fraccion=1.0, duracion=30)]}, 10.0,
+                os.path.join(trabajo, "cama.wav"))
+            ok(False, "una cama cuyo ffmpeg falla tiene que dar error")
+        except RuntimeError as fallo:
+            ok("BOOM-ffmpeg" in str(fallo),
+               f"el error lleva lo que dijo ffmpeg: {str(fallo)[:120]}")
+        except Exception as fallo:                          # noqa: BLE001
+            ok(False, f"el error lleva lo que dijo ffmpeg (salio "
+                      f"{type(fallo).__name__}: {str(fallo)[:120]})")
+        ok(os.listdir(trabajo) == [],
+           f"y en trabajo/ no queda ningun tramo ni cadena: {os.listdir(trabajo)}")
+
+        titulo("rasterizar: un PNG viejo no cuenta como recien pintado")
+        medios.EDGES = (_ejecutable_falso(carpeta, "edge_roto", "exit 1"),)
+        viejo = os.path.join(carpeta, "fondo.png")
+        with open(viejo, "wb") as fh:
+            fh.write(b"PNG de la version anterior")
+        try:
+            medios.rasterizar("<svg xmlns='http://www.w3.org/2000/svg'/>", viejo,
+                              64, 64)
+            ok(False, "con Edge roto, rasterizar tiene que fallar aunque "
+                      "hubiera un PNG de antes")
+        except RuntimeError:
+            ok(True, "con Edge roto, rasterizar falla aunque hubiera un PNG de antes")
+
+        titulo("render: cancelar corta los lotes, con sus navegadores")
+        from nucleo.trabajos import Cancelado                # noqa: PLC0415
+
+        def orden_falsa(ficha):
+            # un «lote» que lanza un nieto (como el Edge de verdad) y espera
+            return ["/bin/sh", "-c", f'sleep 30 & echo $! > "{ficha}.nieto"; '
+                                     f'echo $$ > "{ficha}.pid"; wait']
+
+        llamadas = []
+
+        def avisar_cancelando(fraccion, mensaje="", unidades=None):
+            llamadas.append(mensaje)
+            if len(llamadas) > 1:       # la primera es el «arrancando»
+                raise Cancelado("cancelado")
+
+        trabajo_r = os.path.join(carpeta, "render")
+        clips_r = os.path.join(trabajo_r, "clips")
+        os.makedirs(clips_r)
+        lotes = [[{"id": "S001"}], [{"id": "S002"}]]
+        orden_original = p8_render._orden_lote
+        p8_render._orden_lote = orden_falsa
+        arranque = time.time()
+        salio = None
+        try:
+            p8_render._correr_lotes_en_procesos(
+                lotes, trabajo_r, avisar_cancelando, 2, dir_clips=clips_r,
+                desde=time.time())
+        except Cancelado:
+            salio = "cancelado"
+        except Exception as fallo:                          # noqa: BLE001
+            salio = f"{type(fallo).__name__}: {fallo}"
+        finally:
+            p8_render._orden_lote = orden_original
+        tardo = time.time() - arranque
+        igual(salio, "cancelado", "el render cancelado sale como Cancelado")
+        ok(tardo < 10, f"y en segundos, sin esperar a que acaben los lotes ({tardo:.1f} s)")
+
+        def vivo(pid):
+            try:
+                with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
+                    return fh.read().rsplit(")", 1)[1].split()[0] != "Z"
+            except (OSError, IndexError):
+                return False
+
+        pids = []
+        for numero in range(2):
+            for cola in (".pid", ".nieto"):
+                ruta = os.path.join(trabajo_r, "lotes", f"lote{numero:02d}.json{cola}")
+                try:
+                    with open(ruta, encoding="utf-8") as fh:
+                        pids.append(int(fh.read().strip()))
+                except (OSError, ValueError):
+                    pass
+        time.sleep(0.5)
+        ok(len(pids) == 4 and not [p for p in pids if vivo(p)],
+           f"y no queda vivo ni el lote ni su nieto: {[p for p in pids if vivo(p)]} "
+           f"de {pids}")
+    finally:
+        medios.EDGES = antes_edges
+        if antes_ffmpeg is None:
+            os.environ.pop("ESTUDIO_FFMPEG", None)
+        else:
+            os.environ["ESTUDIO_FFMPEG"] = antes_ffmpeg
+        for ruta in puestos:
+            medios.borrar(ruta)
+        shutil.rmtree(carpeta, ignore_errors=True)
+
+
 def main():
     _prohibir_pagar()
     # EL HISTORICO DE TIEMPOS, A UNA COPIA. Guarda 30 muestras por paso, asi
@@ -4776,6 +4939,7 @@ def main():
     prueba_musica_un_pelin_mas_alta()
     prueba_ortografia_por_tandas()
     prueba_microcorte_de_red()
+    prueba_revision_16_10_render()
 
     print("\n" + "=" * 70)
     if _fallos:

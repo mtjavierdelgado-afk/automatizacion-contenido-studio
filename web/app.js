@@ -16813,20 +16813,26 @@ async function cargarPublicar(silencio) {
     } else if (PUB.seccion === 'cuentas') {
       PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
     } else if (PUB.seccion === 'resultados') {
-      if (!PUB.proyectos) PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
+      // la lista, cada vez: un proyecto con clave cerrado desde la última no sale
+      PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
       const lista = (PUB.proyectos.proyectos || []);
       if (!PUB.proyectoResultados || !lista.some(x => x.id === PUB.proyectoResultados)) {
         const conPerfil = lista.find(x => x.id !== '_sin' && (x.ajustes || {}).perfil);
         PUB.proyectoResultados = (conPerfil || lista[0] || { id: '_sin' }).id;
       }
-      PUB.resultados = await pedir(rutaPublicar(`/resultados?${consulta({
-        proyecto: PUB.proyectoResultados, dias: PUB.diasResultados || 30 })}`));
+      const pedido = PUB.proyectoResultados;
+      const dias = PUB.diasResultados || 30;
+      const r = await pedir(rutaPublicar(`/resultados?${consulta({ proyecto: pedido, dias })}`));
+      // si entretanto se eligió otro proyecto o periodo, esta respuesta ya no vale
+      if (pedido === PUB.proyectoResultados && dias === (PUB.diasResultados || 30)) PUB.resultados = r;
     } else {
       PUB.cola = await pedir(rutaPublicar(`/cola${PUB.desde ? `?desde=${encodeURIComponent(PUB.desde)}` : ''}`));
       contarAvisosPublicar();
     }
   } catch (e) {
     PUB.error = e.message;
+    // las cifras de otro proyecto no se quedan a la vista bajo el error
+    if (PUB.seccion === 'resultados') PUB.resultados = null;
   }
   PUB.cargando = false;
   if (MODULOS.actual === 'publicar') {
@@ -17485,9 +17491,14 @@ async function accionProyectoPublicar(cid, accion, cuerpo) {
   } catch (e) { toast(e.message, true); }
 }
 
+/* Lo guardado se queda TAMBIÉN en lo que pinta la pantalla: sin esto, un
+   repintado (al pulsar «Revisar», por ejemplo) volvía a enseñar el valor de
+   antes y «Aplicar» trabajaba sobre él. */
 async function guardarAjustePublicar(cid, cambios) {
   try {
-    await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(cid)}`), { method: 'PUT', cuerpo: cambios });
+    const r = await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(cid)}`), { method: 'PUT', cuerpo: cambios });
+    const fila = ((PUB.proyectos || {}).proyectos || []).find(x => x.id === cid);
+    if (fila && r.ajustes) fila.ajustes = Object.assign({}, fila.ajustes || {}, r.ajustes);
     toast('Guardado');
   } catch (e) { toast(e.message, true); }
 }
@@ -17531,7 +17542,11 @@ function tarjetaProyectoPublicar(p) {
     `${CORTOS_RED[r]}${c ? `: ${recortar(c.nombre, 18)}` : ''}`));
   });
   if (a.perfil) b.appendChild(cuentas);
-  const fijos = h('details', { clase: 'ajustes-fijos' }, h('summary', {}, 'Lo fijo de este proyecto'));
+  // abierto o cerrado, como lo dejaste: el bloque se rehace al repintar
+  PUB.fijosAbiertos = PUB.fijosAbiertos || {};
+  const fijos = h('details', { clase: 'ajustes-fijos', open: !!PUB.fijosAbiertos[p.id],
+    ontoggle: ev => { PUB.fijosAbiertos[p.id] = ev.currentTarget.open; } },
+  h('summary', {}, 'Lo fijo de este proyecto'));
   fijos.appendChild(h('div', { clase: 'fila' },
     h('label', { clase: 'etiqueta-campo' }, 'Hora por defecto (Lima)',
       h('input', { type: 'time', value: a.hora || '19:00', onchange: ev => guardar('hora', ev.target.value) })),
@@ -17556,8 +17571,13 @@ function tarjetaProyectoPublicar(p) {
     botonRevisarPublicar('tono_redes', p.id, campoTono)));
   fijos.appendChild(h('textarea', { rows: 3, value: a.tono || '', datos: { tono: p.id, foco: `tono-${p.id}` },
     placeholder: 'CÓMO SUENA: de tú, cercano… (pulsa «Guía» para ver la plantilla)',
-    oninput: ev => { clearTimeout(relojTono); const v = ev.target.value; relojTono = setTimeout(() => guardar('tono', v), 1200); },
-    onchange: ev => { clearTimeout(relojTono); guardar('tono', ev.target.value); } }));
+    oninput: ev => {
+      clearTimeout(relojTono);
+      const v = ev.target.value;
+      a.tono = v;
+      relojTono = setTimeout(() => guardar('tono', v), 1200);
+    },
+    onchange: ev => { clearTimeout(relojTono); a.tono = ev.target.value; guardar('tono', ev.target.value); } }));
   fijos.appendChild(panelRevisionPublicar('tono_redes', p.id, campoTono));
   fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Página de Facebook (solo si hay más de una)',
     h('input', { type: 'text', value: a.facebook_pagina || '', onchange: ev => guardar('facebook_pagina', ev.target.value) })));
@@ -17609,13 +17629,17 @@ async function actualizarResultadosPublicar() {
   PUB.midiendo = true;
   pintarModulo();
   try {
+    // sin forzar: lo mirado hace menos de 10 minutos no se vuelve a pedir
+    // (Upload-Post deja unas 100 consultas cada 5 minutos por cuenta)
     const r = await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(PUB.proyectoResultados)}/metricas`), {
-      method: 'POST', cuerpo: { forzar: true },
+      method: 'POST', cuerpo: {},
     });
     const avisos = [];
     if (r.pendientes) avisos.push(`quedan ${r.pendientes} envío(s): vuelve a pulsar en unos minutos`);
     if ((r.errores || []).length) avisos.push(r.errores[0]);
-    toast(avisos.length ? avisos.join(' · ') : `Cifras al día (${r.actualizados || 0})`, !!(r.errores || []).length);
+    toast(avisos.length ? avisos.join(' · ')
+      : r.consultados ? `Cifras al día (${r.actualizados || 0})`
+        : 'Ya estaban al día (se miraron hace menos de 10 minutos)', !!(r.errores || []).length);
   } catch (e) { toast(e.message, true); }
   PUB.midiendo = false;
   await cargarPublicar(true);
@@ -17626,9 +17650,9 @@ function seccionResultadosPublicar() {
   const caja = h('div', { clase: 'resultados-publicar' });
   const proyectos = ((PUB.proyectos || {}).proyectos || []);
   caja.appendChild(h('div', { clase: 'fila' },
-    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; cargarPublicar(); } },
+    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; PUB.resultados = null; cargarPublicar(); } },
       ...proyectos.map(x => h('option', { value: x.id, selected: x.id === PUB.proyectoResultados }, x.nombre))),
-    h('select', { onchange: ev => { PUB.diasResultados = Number(ev.target.value); cargarPublicar(); } },
+    h('select', { onchange: ev => { PUB.diasResultados = Number(ev.target.value); PUB.resultados = null; cargarPublicar(); } },
       ...[[7, 'últimos 7 días'], [30, 'últimos 30 días'], [90, 'últimos 90 días']].map(([v, t]) =>
         h('option', { value: v, selected: (PUB.diasResultados || 30) === v }, t))),
     h('span', { clase: 'crece' }),

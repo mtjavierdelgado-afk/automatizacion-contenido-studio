@@ -3241,6 +3241,14 @@ def publicar_en_redes(navegador, datos):
     pg.p.locator(".ajustes-fijos > summary").first.click()
     ok(pg.esperar(".ajustes-fijos .boton-guia", segundos=5), "el tono de los textos tiene su «✦ Guía»")
     ok(pg.visible(".ajustes-fijos button", "Revisar"), "y su «✓ Revisar»")
+    tono = pg.p.locator(".ajustes-fijos textarea[data-tono]").first
+    tono.fill("CÓMO SUENA: de tú, cercano. EMOJIS: uno.")
+    pg.p.wait_for_timeout(1600)
+    pg.p.locator(".ajustes-fijos button", has_text="Revisar").first.click()
+    ok(pg.esperar(".ajustes-fijos .revision-publicar", segundos=40),
+       "«Revisar» el tono: el bloque sigue abierto y enseña la revisión")
+    ok(pg.p.locator(".ajustes-fijos textarea[data-tono]").first.input_value().startswith("CÓMO SUENA: de tú"),
+       "y el tono escrito sigue ahí tras repintar")
     pg.captura("publicar_cuentas")
 
     # la clave, en Configuración

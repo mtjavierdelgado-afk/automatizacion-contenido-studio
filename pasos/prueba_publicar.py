@@ -873,6 +873,26 @@ def prueba_metricas():
         a = P.actualizar_seguidores(raiz, "")
         ok(a["seguidores"]["tiktok"]["seguidores"] > 0, "los seguidores de cada cuenta conectada")
         ok("instagram" not in a["seguidores"], "solo de las conectadas")
+        # un envío con request_id propio de Upload-Post se pregunta por ESE id
+        datos = P._leer_video(raiz, "medido")
+        igual(sorted(P._lotes_publicados(raiz, ["medido"])),
+              sorted({P._id_de_envio(e) for e in datos["envios"] if e.get("lote")}),
+              "las cifras se piden con el id que devolvió Upload-Post")
+        # dos a la vez: la segunda no gasta consultas
+        P._LOCK_METRICAS.acquire()
+        try:
+            igual(P.actualizar_metricas(raiz, ["medido"], forzar=True).get("ocupado"), True,
+                  "dos «Actualizar» a la vez: el segundo espera")
+        finally:
+            P._LOCK_METRICAS.release()
+        # el resumen: dos envíos a la misma red se suman también en el vídeo
+        datos["envios"].append(dict(next(e for e in datos["envios"] if e["red"] == "youtube"),
+                                    id="otro_yt", lote="otro_lote"))
+        P._escribir(P._ruta_video(raiz, "medido"), datos)
+        res = P.resultados(raiz, [{"pid": "medido", "nombre": "Medido", "cliente": ""}], "")
+        v = res["videos"][0]
+        igual(v["redes"]["youtube"]["vistas"] + v["redes"]["tiktok"]["vistas"], v["vistas"],
+              "el detalle por red de un vídeo cuadra con su suma")
     finally:
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 

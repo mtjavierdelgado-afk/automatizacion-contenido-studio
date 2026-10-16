@@ -750,7 +750,9 @@ def componer(red, textos_red, ajustes, info, capitulos=None):
     textos_red = textos_red or {}
     titulo = str(textos_red.get("titulo") or "").strip()
     extra = ""
-    if red == "youtube" and capitulos:
+    # los capitulos, solo en un video de YouTube de verdad: un Short no los usa
+    if red == "youtube" and capitulos and \
+            encaje(red, info.get("formato"), info.get("duracion_s")).get("tipo") == "vídeo":
         extra = "\n".join(f"{_marca_de_tiempo(c['t'])} {c['titulo']}" for c in capitulos)
     texto, tags = _texto_para(textos_red, ajustes, extra)
     limite = LIMITES[red]
@@ -1434,14 +1436,20 @@ LOTES_POR_VUELTA = 30
 RESPIRO_METRICAS_S = float(os.environ.get("ESTUDIO_METRICAS_RESPIRO") or 600)
 
 
+def _id_de_envio(e):
+    """Con que id se le pregunta a Upload-Post por un envio: el que DEVOLVIO al
+    subirlo, y si no devolvio ninguno, el que le mandamos (el lote)."""
+    return e.get("request_id") or e.get("lote") or ""
+
+
 def _lotes_publicados(raiz, pids):
-    """{lote: [(pid, envio)]} de lo publicado por Upload-Post (los «a mano» no
-    tienen numero de envio y no se pueden preguntar)."""
+    """{id del envio: [(pid, envio)]} de lo publicado por Upload-Post (los «a
+    mano» no tienen numero de envio y no se pueden preguntar)."""
     lotes = {}
     for pid in pids:
         for e in _leer_video(raiz, pid)["envios"]:
             if e.get("estado") == "publicado" and e.get("lote"):
-                lotes.setdefault(e["lote"], []).append((pid, e))
+                lotes.setdefault(_id_de_envio(e), []).append((pid, e))
     return lotes
 
 
@@ -1453,9 +1461,27 @@ def _mirado_hace(envios):
     return (ahora_lima() - min(momentos)).total_seconds()
 
 
+_LOCK_METRICAS = threading.Lock()
+#: Tope de tiempo de una vuelta: detras del proxy una peticion de mas de 60 s
+#: se corta. Lo que no de tiempo queda en `pendientes` para la siguiente.
+TOPE_VUELTA_S = float(os.environ.get("ESTUDIO_METRICAS_TOPE") or 40)
+
+
 def actualizar_metricas(raiz, pids, forzar=False, limite=LOTES_POR_VUELTA):
     """Pide a Upload-Post las cifras de lo publicado de estos videos.
-    -> {"consultados", "actualizados", "pendientes", "errores": [...]}"""
+    -> {"consultados", "actualizados", "pendientes", "errores": [...], "ocupado"?}
+
+    De una en una (dos pestañas no gastan el doble del cupo de consultas)."""
+    if not _LOCK_METRICAS.acquire(blocking=False):
+        return {"consultados": 0, "actualizados": 0, "pendientes": 0, "ocupado": True,
+                "errores": ["ya se están pidiendo las cifras: espera un momento"]}
+    try:
+        return _actualizar_metricas(raiz, pids, forzar, limite)
+    finally:
+        _LOCK_METRICAS.release()
+
+
+def _actualizar_metricas(raiz, pids, forzar, limite):
     lotes = _lotes_publicados(raiz, pids)
     candidatos = []
     for lote, envios in lotes.items():
@@ -1470,59 +1496,100 @@ def actualizar_metricas(raiz, pids, forzar=False, limite=LOTES_POR_VUELTA):
     cli = cliente(raiz)
     consultados = actualizados = 0
     errores = []
+    arranque = time.time()
     for _hace, lote, envios in candidatos[:limite]:
-        consultados += 1
+        if time.time() - arranque > TOPE_VUELTA_S:
+            break
         try:
             cifras = cli.metricas_post(lote)
         except UP.ErrorUploadPost as fallo:
             if fallo.codigo == 429:
                 errores.append("Upload-Post pide esperar unos minutos (demasiadas consultas)")
                 break
+            consultados += 1
             errores.append(str(fallo)[:200])
-            cifras = {}
-        al = _iso_lima()
-        por_pid = {}
-        for pid, e in envios:
-            por_pid.setdefault(pid, set()).add(e["id"])
-        for pid, ids in por_pid.items():
-            with _lock(pid):
-                datos = _leer_video(raiz, pid)
-                for e in datos["envios"]:
-                    if e.get("id") not in ids:
-                        continue
-                    propias = cifras.get(e["red"])
-                    if propias is None:
-                        e["metricas"] = dict(e.get("metricas") or {}, al=al,
-                                             error="Upload-Post no trae cifras de esta red")
-                        continue
-                    nuevas = {k: propias.get(k) for k in METRICAS + ("alcance",)}
-                    # una consulta sin cifras (TikTok las completa en horas) no
-                    # borra las que ya se sabian
-                    viejas = e.get("metricas") or {}
-                    for k in nuevas:
-                        if nuevas[k] is None and viejas.get(k) is not None:
-                            nuevas[k] = viejas[k]
-                    nuevas.update(al=al, error=propias.get("error") or "")
-                    e["metricas"] = nuevas
-                    if propias.get("url") and not e.get("url"):
-                        e["url"] = propias["url"]
-                    actualizados += 1
-                _escribir(_ruta_video(raiz, pid), datos)
+            # la consulta entera fallo: se apunta el motivo, pero NO la hora,
+            # para que el respiro no impida volver a intentarlo
+            _apuntar_metricas(raiz, envios, None, error=str(fallo)[:300])
+            if fallo.sin_respuesta:
+                break                       # Upload-Post no contesta: no seguir
+            continue
+        consultados += 1
+        actualizados += _apuntar_metricas(raiz, envios, cifras)
     return {"consultados": consultados, "actualizados": actualizados,
             "pendientes": max(0, len(candidatos) - consultados), "errores": errores[:5]}
 
 
+def _apuntar_metricas(raiz, envios, cifras, error=""):
+    """Guarda en cada envio lo que trae `cifras` (o solo el error). -> cuantos"""
+    al = _iso_lima()
+    por_pid = {}
+    for pid, e in envios:
+        por_pid.setdefault(pid, set()).add(e["id"])
+    hechos = 0
+    for pid, ids in por_pid.items():
+        with _lock(pid):
+            datos = _leer_video(raiz, pid)
+            for e in datos["envios"]:
+                if e.get("id") not in ids:
+                    continue
+                viejas = e.get("metricas") or {}
+                if cifras is None:
+                    e["metricas"] = dict(viejas, error=error)
+                    continue
+                propias = cifras.get(e["red"])
+                if propias is None:
+                    e["metricas"] = dict(viejas, al=al,
+                                         error="Upload-Post no trae cifras de esta red")
+                    continue
+                nuevas = {k: propias.get(k) for k in METRICAS + ("alcance",)}
+                # una consulta sin cifras (TikTok las completa en horas) no
+                # borra las que ya se sabian
+                for k in nuevas:
+                    if nuevas[k] is None and viejas.get(k) is not None:
+                        nuevas[k] = viejas[k]
+                nuevas.update(al=al, error=propias.get("error") or "")
+                e["metricas"] = nuevas
+                if propias.get("url") and not e.get("url"):
+                    e["url"] = propias["url"]
+                hechos += 1
+            _escribir(_ruta_video(raiz, pid), datos)
+    return hechos
+
+
 def actualizar_seguidores(raiz, cid):
-    """Seguidores, alcance y vistas de las cuentas del perfil del proyecto."""
+    """Seguidores, alcance y vistas de las cuentas del perfil del proyecto. Lo
+    que una red no de esta vez no borra lo ultimo que se supo de ella."""
     ajustes = ajustes_de(raiz, cid)
     perfil = ajustes.get("perfil")
     if not perfil:
         raise ErrorPublicar("este proyecto todavía no tiene perfil de Upload-Post", 409)
-    conectadas = [r for r, c in (ajustes.get("cuentas") or {}).items() if c] or list(REDES)
+    cuentas = ajustes.get("cuentas") or {}
+    if not ajustes.get("cuentas_vistas"):
+        raise ErrorPublicar("pulsa antes «Ver cuentas» en Cuentas y ajustes: así se sabe "
+                            "qué cuentas tiene conectadas", 409)
+    conectadas = [r for r in REDES if cuentas.get(r)]
+    pagina = ajustes.get("facebook_pagina") or None
+    if "facebook" in conectadas and not pagina:
+        conectadas.remove("facebook")      # Upload-Post pide la pagina para Facebook
+    if not conectadas:
+        return ajustes
     cifras = _por_upload_post(cliente(raiz).analiticas_perfil, perfil, conectadas,
-                              pagina_facebook=ajustes.get("facebook_pagina") or None)
-    return guardar_ajustes(raiz, cid, {}, internos={"seguidores": cifras,
-                                                     "seguidores_al": _iso_lima()})
+                              pagina_facebook=pagina)
+    with _lock("ajustes"):
+        ahora = ajustes_de(raiz, cid)
+        if ahora.get("perfil") != perfil:
+            return ahora                    # cambio el perfil mientras: no son suyas
+        juntas = dict(ahora.get("seguidores") or {})
+        for red, nuevo in cifras.items():
+            viejo = juntas.get(red) or {}
+            mezcla = dict(nuevo)
+            for k in ("seguidores", "alcance", "vistas"):
+                if mezcla.get(k) is None and viejo.get(k) is not None:
+                    mezcla[k] = viejo[k]
+            juntas[red] = mezcla
+        return guardar_ajustes(raiz, cid, {}, internos={"seguidores": juntas,
+                                                         "seguidores_al": _iso_lima()})
 
 
 def _suma(destino, metricas):
@@ -1561,8 +1628,12 @@ def resultados(raiz, videos, cid, dias=30):
             _suma(por_red[e["red"]], m)
             _suma(total, m)
             _suma(suma_video, m)
-            redes_video[e["red"]] = {k: m.get(k) for k in METRICAS}
-            redes_video[e["red"]]["url"] = e.get("url") or ""
+            # dos envios a la misma red (un reenvio, uno a mano) se SUMAN aqui
+            # igual que en el total: el detalle cuadra con la suma
+            propia = redes_video.setdefault(e["red"], {"url": ""})
+            _suma(propia, m)
+            if e.get("url"):
+                propia["url"] = e["url"]
             if not any(isinstance(m.get(k), (int, float)) for k in METRICAS):
                 sin_cifras += 1
             al = _leer_momento(m.get("al"))

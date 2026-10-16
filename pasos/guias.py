@@ -399,7 +399,8 @@ GUIAS = {
             "Que cuente lo mismo que el vídeo: si el vídeo cambia, el texto también.",
         ],
         "no": [
-            "Hashtags dentro del texto: van en su casilla (de 3 a 5 concretos).",
+            "Hashtags dentro del texto: van en su casilla (de 3 a 5 concretos; con "
+            "los fijos del proyecto, el Studio usa como mucho 15).",
             "La llamada a la acción ni la firma: tienen su casilla y la firma la "
             "pone el proyecto.",
             "Teléfonos, precios o enlaces que no estén en el encargo: en TikTok "
@@ -432,8 +433,8 @@ GUIAS = {
             "Es el pie del Reel. Instagram enseña solo la primera línea (o las "
             "dos primeras) hasta que se pulsa «más».",
             "Al enviarlo, el Studio le añade la llamada a la acción, la firma del "
-            "proyecto y los hashtags (máximo 30). Todo junto no puede pasar de "
-            "2.200 caracteres.",
+            "proyecto y los hashtags (como mucho 15, contando los fijos del "
+            "proyecto). Todo junto no puede pasar de 2.200 caracteres.",
         ],
         "si": [
             "Una primera línea que se entienda sola y den ganas de abrir el resto.",
@@ -472,8 +473,9 @@ GUIAS = {
             "Hay dos casillas: el TÍTULO (hasta 100 caracteres) y este TEXTO, que "
             "es la descripción. Un vídeo vertical de hasta 3 minutos sale como "
             "Short; el resto, como vídeo normal.",
-            "Al enviarlo, el Studio le añade a la descripción los capítulos (si "
-            "el vídeo es largo y los hay), la llamada a la acción, la firma y los "
+            "Al enviarlo, el Studio le añade a la descripción los capítulos (solo "
+            "si sale como vídeo, no como Short, y los hay), la llamada a la "
+            "acción, la firma y los "
             "hashtags. Los hashtags sirven también de etiquetas. YouTube no "
             "acepta «<» ni «>»: se quitan solos.",
             "Las dos primeras líneas son las que se ven en la búsqueda y debajo "

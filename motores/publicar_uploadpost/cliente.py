@@ -416,7 +416,8 @@ class ClienteUploadPost:
 
     #: nombre en el Studio -> nombres posibles en la respuesta de Upload-Post
     CAMPOS_METRICAS = {
-        "vistas": ("views", "video_views", "plays", "impressions"),
+        # NO «impressions»: en Facebook son impresiones, no reproducciones
+        "vistas": ("views", "video_views", "plays"),
         "me_gusta": ("likes", "like_count", "reactions"),
         "comentarios": ("comments", "comment_count"),
         "compartidos": ("shares", "share_count"),

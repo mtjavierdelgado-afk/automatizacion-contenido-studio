@@ -38,9 +38,12 @@ SESSION_SECRET="con comillas"
 TRAMPA=\$(touch $T/ejecutado_1)
 \`touch $T/ejecutado_2\`
 OTRA=1; touch $T/ejecutado_3
+PATH=$T/trampa
+LD_PRELOAD=$T/trampa.so
+SUDO_BIN=$T/trampa_sudo
 EOF
 
-PRUEBA="$T" PATH="$T/bin:$PATH" ESTUDIO_LOGIN_APP="$T/login" ESTUDIO_USUARIO=nadie \
+PRUEBA="$T" ESTUDIO_SUDO="$T/bin/sudo" ESTUDIO_LOGIN_APP="$T/login" ESTUDIO_USUARIO=nadie \
   ESTUDIO_CLAVES="$T/claves" bash "$CLAVE" --nueva prueba < /dev/null > "$T/salida" 2>&1
 codigo=$?
 
@@ -51,6 +54,8 @@ ok 'grep -qx "DATA_DIR=$T/login/datos" "$T/entorno_de_node"' "node recibe DATA_D
 ok 'grep -qx "SESSION_SECRET=con comillas" "$T/entorno_de_node"' "con las comillas quitadas"
 ok 'grep -qx "NODE_ENV=production" "$T/entorno_de_node"' "y el resto de variables"
 ok '[ -f "$T/claves/clave-prueba.txt" ]' "y guarda la copia de la contrasena"
+ok '! grep -q "^LD_PRELOAD=" "$T/entorno_de_node" && ! grep -q "^PATH=$T/trampa" "$T/entorno_de_node"' \
+   "ni PATH ni LD_PRELOAD del .env llegan a sudo (escalada a root)"
 
 echo
 if [ "$FALLOS" -gt 0 ]; then

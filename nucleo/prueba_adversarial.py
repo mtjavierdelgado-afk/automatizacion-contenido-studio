@@ -653,6 +653,18 @@ def t9_revision_v2f(base):
     igual(e.estado_de("voz"), "error", "si el paso registrado NO se completo, si es su error")
     e.limpiar_marca("voz")
 
+    # la receta SALTA la voz porque esta al dia y falla la tarea siguiente: el
+    # gestor no debe marcar su primer paso (lo marca `_correr_paso` en cada
+    # paso que corre de verdad). Lo vio la revision independiente del 16-10.
+    e.completar("voz", {"wav": "toma.wav"})
+
+    def receta_que_salta_la_voz(avisar):
+        raise RuntimeError("revision_audio: cupo agotado")
+    gestor.esperar(gestor.lanzar("receta:voz", receta_que_salta_la_voz, paso="voz",
+                                 toca=["voz", "revision_audio"]), 10)
+    igual(e.estado_de("voz"), "listo", "una voz que la receta salto no hereda el error")
+    ok(e.al_dia("voz"), "y sigue al dia: el reintento no la regraba ni la paga")
+
     print("\n[9b] si marcar o anotar revientan, el trabajo no se queda «ejecutando»")
     real = e.marcar_ejecutando
 

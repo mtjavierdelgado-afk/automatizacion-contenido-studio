@@ -1200,25 +1200,32 @@ def _correr_lotes_en_procesos(lotes, trabajo, avisar, total_planos,
     try:
         with ThreadPoolExecutor(max_workers=max(1, len(procesos))) as pool:
             pendientes = {pool.submit(recoger, p) for p in procesos}
-            while pendientes:
-                # SE MIRA CADA LATIDO SI ALGUIEN HA CANCELADO, en vez de
-                # esperar sin mas a que acaben todos: con la espera a secas,
-                # cancelar un render de media hora no paraba nada.
-                hechas, pendientes = wait(pendientes, timeout=LATIDO_S,
-                                          return_when=FIRST_COMPLETED)
-                if cancelado:
-                    _matar_lotes(procesos)
-                    raise cancelado[0]
-                for tarea in hechas:
-                    ficha, codigo, error = tarea.result()
-                    resultado = medios.leer_json(ficha + ".hecho", {})
-                    if codigo != 0 or not resultado.get("planos"):
-                        fallos.append((error or "").strip()[-600:]
-                                      or f"el proceso del lote salio con {codigo}")
-                        continue
-                    for plano in resultado["planos"]:
-                        salida[plano["id"]] = plano
-                        hechos += 1
+            try:
+                while pendientes:
+                    # SE MIRA CADA LATIDO SI ALGUIEN HA CANCELADO, en vez de
+                    # esperar sin mas a que acaben todos: con la espera a secas,
+                    # cancelar un render de media hora no paraba nada.
+                    hechas, pendientes = wait(pendientes, timeout=LATIDO_S,
+                                              return_when=FIRST_COMPLETED)
+                    if cancelado:
+                        _matar_lotes(procesos)
+                        raise cancelado[0]
+                    for tarea in hechas:
+                        ficha, codigo, error = tarea.result()
+                        resultado = medios.leer_json(ficha + ".hecho", {})
+                        if codigo != 0 or not resultado.get("planos"):
+                            fallos.append((error or "").strip()[-600:]
+                                          or f"el proceso del lote salio con {codigo}")
+                            continue
+                        for plano in resultado["planos"]:
+                            salida[plano["id"]] = plano
+                            hechos += 1
+            except BaseException:
+                # SE MATAN DENTRO DEL `with`: al salir de el, el pool espera a
+                # que acabe cada `recoger`, o sea, a que cada lote termine su
+                # render entero, y el `finally` de abajo llegaba tarde.
+                _matar_lotes(procesos)
+                raise
         terminado = True
     finally:
         parar.set()

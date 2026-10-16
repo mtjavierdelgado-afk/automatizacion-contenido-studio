@@ -209,6 +209,13 @@ class GestorTrabajos:
                 return
             registro["estado"] = "ejecutando"
             paso = registro["paso"]
+            # UNA RECETA O UNA TANDA (las que dicen `toca`) NO MARCAN SU PASO:
+            # cada paso que corren lo marca `_correr_paso` al arrancar, y su
+            # error tambien. Marcarlo aqui dejaba «ejecutando» un primer paso
+            # que la receta SALTABA por estar al dia; si luego fallaba otro, el
+            # error caia en ese -- la voz ya hecha pasaba a «error», dejaba de
+            # estar al dia, y el reintento la regrababa y la pagaba otra vez.
+            marca_su_paso = bool(paso) and not registro.get("toca")
             nombre = registro["nombre"]
             unidad = registro["unidad"]
 
@@ -220,7 +227,7 @@ class GestorTrabajos:
             # proceso que no suelta, un disco lleno), el hilo moria con el
             # trabajo en «ejecutando» para siempre -- el paso contestaba 409
             # hasta reiniciar y cancelar no hacia nada.
-            if paso and self.estado_grafo is not None:
+            if marca_su_paso and self.estado_grafo is not None:
                 self.estado_grafo.marcar_ejecutando(paso)
             if self.bitacora is not None:
                 self.bitacora.anotar("trabajo_lanzado", paso, {"trabajo": nombre,
@@ -229,7 +236,7 @@ class GestorTrabajos:
         except Cancelado:
             self._fijar(trabajo_id, estado="cancelado", fin=time.time(),
                         mensaje="cancelado", publico="cancelado")
-            if paso and self.estado_grafo is not None:
+            if marca_su_paso and self.estado_grafo is not None:
                 self.estado_grafo.limpiar_marca(paso)
             if self.bitacora is not None:
                 self.bitacora.anotar("trabajo_cancelado", paso,
@@ -245,7 +252,7 @@ class GestorTrabajos:
                 # ya se completo, el error es de otro (lo marca `_correr_paso`
                 # en el que fallo de verdad), y marcarlo aqui hacia que el
                 # reintento lo rehiciera y lo pagara otra vez.
-                if paso and self.estado_grafo is not None:
+                if marca_su_paso and self.estado_grafo is not None:
                     self.estado_grafo.marcar_error_si_en_marcha(
                         paso, f"{type(fallo).__name__}: {fallo}")
                 if self.bitacora is not None:
@@ -260,7 +267,7 @@ class GestorTrabajos:
                     resultado=resultado)
         # si la funcion no llamo a completar(), el paso se quedaria marcado
         # como ejecutando para siempre: se limpia la marca por si acaso
-        if paso and self.estado_grafo is not None:
+        if marca_su_paso and self.estado_grafo is not None:
             self.estado_grafo.limpiar_marca(paso)
         if self.bitacora is not None:
             self.bitacora.anotar("trabajo_terminado", paso,

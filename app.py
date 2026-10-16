@@ -190,6 +190,11 @@ class Contexto:
         # proyecto, asi que una marca que diga «ejecutando» es de un trabajo
         # que murio con el reinicio. Dejarla ensenaba el paso en marcha para
         # siempre y hacia sellar al siguiente con la foto de aquel arranque.
+        # La llama `contexto()` SOLO en el que gana el registro: dos aperturas a
+        # la vez creaban dos, y la perdedora podia quitar la marca de un trabajo
+        # ya lanzado en la ganadora.
+
+    def limpiar_marcas_huerfanas(self):
         try:
             quitadas = self.estado.limpiar_marcas_en_marcha()
             if quitadas:
@@ -226,8 +231,12 @@ def contexto(pid):
     except Exception as fallo:  # noqa: BLE001
         raise ErrorApi(500, f"no se ha podido abrir el proyecto {clave}: {fallo}")
     with _LOCK:
-        _CONTEXTOS.setdefault(clave, ctx)
-        return _CONTEXTOS[clave]
+        ganador = _CONTEXTOS.setdefault(clave, ctx)
+        if ganador is ctx:
+            # bajo el cerrojo: hasta que esto vuelve nadie puede lanzar nada en
+            # este contexto, asi que lo que se quita es de un servicio anterior
+            ctx.limpiar_marcas_huerfanas()
+        return ganador
 
 
 def _registrar_trabajo(trabajo_id, pid):
@@ -1807,6 +1816,14 @@ def revertir_paso(pid: str, paso: str, cuerpo: dict = Body(default=None)):
         numero = int(datos["version"])
     except (TypeError, ValueError):
         raise ErrorApi(400, f"'version' debe ser un entero, no {datos['version']!r}")
+    # TODO BAJO EL CERROJO DEL PROYECTO, el que toman `lanzar_paso`, las recetas
+    # y las tandas: sin el, un lanzamiento podia colarse entre la comprobacion y
+    # `revertir`, que aparta `trabajo/` -- en mitad de una pasada ya sembrada.
+    with _cerrojo_de_cadena(ctx.id):
+        return _revertir_bajo_cerrojo(ctx, paso_id, numero)
+
+
+def _revertir_bajo_cerrojo(ctx, paso_id, numero):
     if _trabajo_activo(ctx, paso_id):
         raise ErrorApi(409, f"'{paso_id}' se está ejecutando: no se puede revertir ahora")
     # NI CON OTRA COSA DEL VIDEO EN MARCHA: volver al guion de antes con la voz

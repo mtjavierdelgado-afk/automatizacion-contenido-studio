@@ -2635,8 +2635,16 @@ def probar_el_avisador_y_los_tramos():
     # con (hechas, total) y quien escucha puede ser el servicio, el doble de una
     # suite --`lambda v, m="": v`, dos argumentos-- o nada.
     recogido = []
+    # quien sabe de unidades lo dice con el NOMBRE del parametro, como
+    # `avisar_tarea`; un tercero con otro nombre es el `publico` del gestor y
+    # el contador caia ahi («· (44, 44)» en la barra; revision 16-10-2026)
     de_tres = estadisticas.avisador(
-        lambda f, m="", u=None: recogido.append(("tres", f, m, u)))
+        lambda f, m="", unidades=None: recogido.append(("tres", f, m, unidades)))
+    de_publico = estadisticas.avisador(
+        lambda v, m="", publico="": recogido.append(("publico", v, m, publico)))
+    de_publico(1.0, "fin", (44, 44))
+    igual(recogido[-1], ("publico", 1.0, "fin", ""),
+          "el contador no cae en el texto publico del gestor")
     de_dos = estadisticas.avisador(lambda v, m="": recogido.append(("dos", v, m)))
     variadic = estadisticas.avisador(lambda *a, **k: recogido.append(("var", a)))
     de_nada = estadisticas.avisador(None)
@@ -5514,9 +5522,16 @@ def probar_revision_del_nucleo_v2f():
         # 5. LAS MARCAS «EJECUTANDO» DE UN SERVICIO ANTERIOR
         pid = proyecto_hecho("marca_huerfana")
         Estado(Proyecto(os.path.join(base, pid))).marcar_ejecutando("callouts")
-        nuevo = servidor.Contexto(os.path.join(base, pid))
+        nuevo = servidor.contexto(pid)       # lo abre el servicio, como la pantalla
         igual(nuevo.estado.estado_de("callouts"), "listo",
               "al abrir el proyecto no queda un paso «ejecutando» sin trabajo")
+        # y la que pierde una apertura simultanea no toca nada: solo limpia la
+        # que queda registrada (la otra podia quitar la marca de un trabajo vivo)
+        nuevo.estado.marcar_ejecutando("callouts")
+        perdedora = servidor.Contexto(os.path.join(base, pid))
+        igual(perdedora.estado.estado_de("callouts"), "ejecutando",
+              "crear un contexto que no se registra no quita la marca de un trabajo vivo")
+        nuevo.estado.limpiar_marca("callouts")
     finally:
         servidor.modulo_de = modulo_real
         servidor._herramienta = herramienta_real

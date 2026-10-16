@@ -12594,6 +12594,12 @@ def rehacer_en_la_calidad_del_video(pid: str, cuerpo: dict = Body(default=None))
                 raise ErrorApi(409, f"ahora son {len(planos)} imágenes, no {vistas}: "
                                     "vuelve a mirarlo antes de confirmar",
                                {"imagenes": len(planos)})
+            # LA SEGUNDA MITAD DE UN PLANO LARGO (`sigue_a`) copia la primera:
+            # no se cobra, pero si no se pide, p6 la conserva con la imagen de
+            # antes y a mitad de toma se ve el salto de calidad (revision del
+            # 15-10-2026). Va con su plano, gratis.
+            planos = _con_sus_continuaciones(planos, PASOS_MODULOS.p6_assets.plan_actual(
+                ctx.proyecto, "assets", estado=ctx.estado) or {})
             trabajo_id = lanzar_paso(ctx, "assets", planos,
                                      nombre="calidad_imagenes",
                                      evento="imagenes_recalidad",
@@ -12697,6 +12703,17 @@ def _carpetas_de_assets(ctx):
     if version:
         carpetas.append(ctx.proyecto.ruta_paso("assets", version))
     return [c for c in carpetas if c and os.path.isdir(c)]
+
+
+def _con_sus_continuaciones(planos, plan):
+    """Los planos pedidos y, detras, la segunda mitad (`sigue_a`) de cada uno.
+    -> [uid]. La continuacion copia la imagen de su plano: no se paga, pero si
+    no se pide se queda con la de antes."""
+    elegidos = set(planos)
+    extra = sorted(f"escena:{e['id']}" for e in (plan.get("escenas") or [])
+                   if e.get("sigue_a") and f"escena:{e['sigue_a']}" in elegidos
+                   and f"escena:{e['id']}" not in elegidos)
+    return list(planos) + extra
 
 
 def _escenas_que_pagan(plan):

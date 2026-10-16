@@ -4490,6 +4490,23 @@ def probar_traer_estilo(cliente):
     igual(otra.get("traidas"), [], "traer otra vez lo mismo no cambia nada")
 
 
+def probar_continuaciones_en_otra_calidad():
+    """Rehacer en otra calidad lleva tambien la segunda mitad de cada plano
+    largo (`sigue_a`): sin ella, a mitad de toma se veia la imagen vieja
+    (revision independiente del 15-10-2026). Sin servidor."""
+    seccion("REHACER EN OTRA CALIDAD: CON LA SEGUNDA MITAD DE CADA PLANO LARGO")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    plan = {"escenas": [{"id": "S010"}, {"id": "S011", "sigue_a": "S010"},
+                        {"id": "S020"}, {"id": "S021", "sigue_a": "S020"}]}
+    igual(servidor._con_sus_continuaciones(["escena:S010"], plan),
+          ["escena:S010", "escena:S011"],
+          "rehacer S010 se lleva S011, que es su segunda mitad")
+    igual(servidor._con_sus_continuaciones(["escena:S010", "escena:S011"], plan),
+          ["escena:S010", "escena:S011"], "sin repetirla si ya iba")
+    igual(servidor._con_sus_continuaciones([], plan), [], "y nada si no se pide nada")
+
+
 def probar_el_coste_de_las_imagenes(cliente):
     """La auditoria del coste de las imagenes del 15-10-2026 (C1, C5 y C2).
 
@@ -5164,6 +5181,7 @@ def main():
         probar_pausas(cliente, carpeta)
         probar_presencia_musica(cliente, carpeta)
         probar_volumen_y_animo_de_la_musica()
+        probar_continuaciones_en_otra_calidad()
         probar_ronda_octubre(cliente, carpeta)
         probar_bitacora(cliente, pid)
         probar_presets_canal(cliente)

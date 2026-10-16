@@ -2998,6 +2998,84 @@ def atras_del_movil_dentro_del_studio(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def como_se_pronuncia(navegador, datos):
+    """«Cómo se pronuncia» (15-10-2026): la voz leía con acento español las
+    marcas en inglés del bloque de los extras («simrace con volante Logitech,
+    Meta Quest, Just Dance»). En Configuración hay una lista que se edita en
+    una copia y solo se guarda al pulsar «Guardar»."""
+    api = datos["api"]
+    pg = Pagina(navegador, datos)
+    pg.js("conmutarConfig(true);")
+    ok(pg.esperar("#config h3", "Cómo se pronuncia", 15), "Configuración trae «Cómo se pronuncia»")
+    pg.p.wait_for_timeout(800)
+    valores = pg.p.evaluate("""() => [...document.querySelectorAll('.fila-pronunciacion input')]
+      .map(i => i.value)""")
+    ok("Just Dance" in valores and "Yast Dans" in valores and "Logitech" in valores,
+       "ya viene con las marcas de los vídeos (Just Dance, Logitech…)")
+    ok(not pg.p.locator(".boton-guardar-pronunciacion").is_enabled(),
+       "sin tocar nada, «Guardar» está apagado")
+    _r, antes = api.get("/api/pronunciaciones")
+    pg.pulsar(".seccion-pronunciacion button", "Añadir una palabra")
+    pg.p.wait_for_timeout(300)
+    filas = pg.p.locator(".fila-pronunciacion")
+    ultima = filas.nth(filas.count() - 1)
+    ultima.locator("input").nth(0).fill("Call of Duty")
+    ultima.locator("input").nth(1).fill("Col of Diúti")
+    pg.p.wait_for_timeout(300)
+    _r, sin_guardar = api.get("/api/pronunciaciones")
+    ok(sin_guardar.get("lista") == antes.get("lista"), "escribir no guarda nada todavía")
+    ok(pg.p.locator(".boton-guardar-pronunciacion").is_enabled(), "y enciende «Guardar»")
+    pg.captura("como_se_pronuncia", entera=False)
+    pg.p.locator(".boton-guardar-pronunciacion").click()
+    pg.p.wait_for_timeout(1200)
+    _r, guardada = api.get("/api/pronunciaciones")
+    ok({"escrito": "Call of Duty", "dicho": "Col of Diúti"} in (guardada.get("lista") or []),
+       "al pulsar «Guardar» queda guardada")
+    ok(not pg.p.locator(".boton-guardar-pronunciacion").is_enabled(), "y «Guardar» se apaga")
+    # se deja como estaba para quien venga detrás
+    api.put("/api/pronunciaciones", {"lista": antes.get("lista")})
+    pg.sin_errores("cómo se pronuncia")
+    pg.cerrar()
+
+@escenario
+def regenerar_audio_dice_su_precio(navegador, datos):
+    """D5 (16-10-2026): «Regenerar Audio» vuelve a grabar la voz ENTERA (modo
+    'todo') y su precio salía del plan 'pendientes', que con la voz al día era
+    0 $. El botón pide el plan del modo con el que lanza, y lo dice."""
+    api, pid = datos["api"], datos["video"]
+    _r, plan = api.get(f"/api/proyectos/{pid}/generar?tanda=voz&modo=todo")
+    entera = float(((plan or {}).get("coste") or {}).get("usd_tts") or 0)
+    ok(entera > 0, f"la voz entera tiene precio ({entera} $)")
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'guion'; pintarLight();")
+    ok(pg.esperar(".pie-guion button", "Regenerar Audio", 15), "con audio, el botón es «Regenerar Audio»")
+    pg.p.wait_for_timeout(4500)
+    pg.js("pintarLight();")
+    pg.p.wait_for_timeout(800)
+    visto = pg.p.evaluate("""() => {
+      const p = (APP.light.video.planes || {})['voz:todo'] || null;
+      return p ? { modo: p.modo, usd: (p.coste || {}).usd_por_generar } : null; }""")
+    ok(visto and visto.get("modo") == "todo",
+       f"la pantalla pide el plan con el modo con el que lanza ('todo'): {visto}")
+    ok(visto and abs(float(visto.get("usd") or 0) - round(entera, 3)) < 1e-6,
+       f"y ese plan cobra la voz entera, no 0 $: {visto}")
+    # LO QUE SE LEE: con el botón encendido (algo que grabar en 'pendientes',
+    # sin tocar el vídeo de las demás escenas), el precio de la voz entera
+    pg.js("const v = APP.light.video; "
+          "v.planes.voz = Object.assign({}, v.planes.voz, { tareas: 2 }); "
+          "PLANES_LIGHT.ultima[v.pid + ':voz'] = Date.now() + 60000; pintarLight();")
+    pg.p.wait_for_timeout(500)
+    ayuda = pg.p.evaluate("""() => { const b = [...document.querySelectorAll('.pie-guion button')]
+      .find(x => x.textContent.trim() === 'Regenerar Audio');
+      const a = b && b.closest('.ayuda-de'); return a ? a.getAttribute('data-ayuda') : ''; }""")
+    precio = f"≈ {entera:.2f} $"
+    ok(precio in (ayuda or ""), f"la ayuda del botón dice {precio!r}: {ayuda!r}")
+    ok("cache" not in (ayuda or ""), "y ya no promete que lo que no cambió sale de la cache")
+    pg.sin_errores("regenerar audio dice su precio")
+    pg.cerrar()
+
+
 def main():
     ap = argparse.ArgumentParser(description="El recorrido de la pantalla")
     ap.add_argument("--solo", default="", help="un escenario por nombre")

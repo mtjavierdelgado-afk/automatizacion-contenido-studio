@@ -3204,3 +3204,8 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 /* Descargar por partes (abrirDescargaPorPartes) */
 .partes-video { flex-wrap: wrap; gap: 6px 14px; }
 .casilla-parte { display: inline-flex; align-items: center; gap: 4px; cursor: pointer; }
+
+/* Cómo se pronuncia (Configuración): dos casillas y «Quitar» por fila */
+.lista-pronunciacion { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.fila-pronunciacion { flex-wrap: nowrap; align-items: center; gap: 6px; }
+.fila-pronunciacion input { flex: 1 1 0; min-width: 0; }

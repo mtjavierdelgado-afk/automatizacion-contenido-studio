@@ -417,6 +417,7 @@ const API = {
   ajustesCLI: () => `${BASE}/api/ajustes-cli`,
   claves: () => `${BASE}/api/claves`,
   ajustes: () => `${BASE}/api/ajustes`,
+  pronunciaciones: () => `${BASE}/api/pronunciaciones`,
   cuentasCLI: refrescar => `${BASE}/api/claves/cli${refrescar ? '?refrescar=1' : ''}`,
   entrarCLI: cid => `${BASE}/api/claves/cli/${encodeURIComponent(cid)}/entrar`,
   codigoCLI: cid => `${BASE}/api/claves/cli/${encodeURIComponent(cid)}/codigo`,
@@ -2414,6 +2415,7 @@ function pintarConfig() {
   caja.appendChild(seccionDictado());
   caja.appendChild(seccionZonaHoraria());
   caja.appendChild(seccionCartesia(ficha));
+  caja.appendChild(seccionPronunciacion());
   caja.appendChild(seccionCLI());
   caja.appendChild(seccionOtrasClaves(ficha));
   caja.appendChild(h('div', { clase: 'fila' },
@@ -2518,6 +2520,107 @@ function seccionCalidadImagen() {
   return caja;
 }
 
+
+/* CÓMO SE PRONUNCIA (15-10-2026). La voz se graba en castellano, y las marcas en
+   inglés salían con fonética castellana («Just Dance», «Logitech»). Aquí se
+   escribe cada una como suena; el Studio se lo manda así a la voz y devuelve
+   las marcas de tiempo a la palabra escrita, así que el guion y los subtítulos
+   no cambian (pasos/pronunciacion.py). Se edita una COPIA y solo se guarda al
+   pulsar «Guardar»: abrir la pantalla no escribe nada. */
+function estadoPronunciacion() {
+  const vista = estadoConfig();
+  if (!vista.pron) vista.pron = { lista: null, borrador: null, cargando: false, error: '' };
+  return vista.pron;
+}
+
+async function cargarPronunciacion() {
+  const est = estadoPronunciacion();
+  est.cargando = true;
+  try {
+    const r = await pedir(API.pronunciaciones());
+    est.lista = r.lista || [];
+    est.inicial = r.inicial || [];
+    est.borrador = est.lista.map(f => ({ escrito: f.escrito, dicho: f.dicho }));
+    est.error = '';
+  } catch (e) {
+    est.error = e.message;
+  }
+  est.cargando = false;
+  repintarClaves();
+}
+
+function pronunciacionCambiada(est) {
+  return JSON.stringify((est.borrador || []).filter(f => f.escrito.trim() || f.dicho.trim()))
+    !== JSON.stringify(est.lista || []);
+}
+
+async function guardarPronunciacion() {
+  const est = estadoPronunciacion();
+  est.guardando = true;
+  repintarClaves();
+  try {
+    const r = await pedir(API.pronunciaciones(), { method: 'PUT', cuerpo: { lista: est.borrador } });
+    est.lista = r.lista || [];
+    est.borrador = est.lista.map(f => ({ escrito: f.escrito, dicho: f.dicho }));
+    est.error = '';
+    toast('Guardado: vale para las voces que grabes a partir de ahora');
+  } catch (e) {
+    est.error = e.message;
+  }
+  est.guardando = false;
+  repintarClaves();
+}
+
+function seccionPronunciacion() {
+  const est = estadoPronunciacion();
+  const caja = h('section', { clase: 'bloque-config seccion-pronunciacion' },
+    h('div', { clase: 'fila' }, h('h3', {}, 'Cómo se pronuncia')));
+  if (!est.lista && !est.cargando && !est.error) cargarPronunciacion();
+  caja.appendChild(h('div', { clase: 'meta' },
+    'La voz lee en español, así que las palabras en inglés salen con acento español. '
+    + 'Escribe aquí cómo suenan, con letras del español (la tilde marca dónde va la fuerza): '
+    + '«Just Dance» → «Yast Dans». El guion y los subtítulos siguen diciendo la palabra '
+    + 'escrita; solo cambia lo que se oye. Vale para las voces que grabes a partir de ahora.'));
+  if (est.error) caja.appendChild(h('div', { clase: 'error-cerrable' }, est.error));
+  if (!est.borrador) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo la lista…'));
+    return caja;
+  }
+  const filas = h('div', { clase: 'lista-pronunciacion' });
+  est.borrador.forEach((fila, i) => {
+    filas.appendChild(h('div', { clase: 'fila fila-pronunciacion' },
+      h('input', { type: 'text', value: fila.escrito, placeholder: 'Se escribe', maxlength: 60,
+        'aria-label': 'Cómo se escribe',
+        oninput: ev => { fila.escrito = ev.target.value; refrescarBotonPronunciacion(); } }),
+      h('span', { clase: 'meta' }, '→'),
+      h('input', { type: 'text', value: fila.dicho, placeholder: 'Suena', maxlength: 60,
+        'aria-label': 'Cómo suena',
+        oninput: ev => { fila.dicho = ev.target.value; refrescarBotonPronunciacion(); } }),
+      h('button', { clase: 'mini fantasma', title: 'Quitar esta palabra',
+        onclick: () => { est.borrador.splice(i, 1); repintarClaves(); } }, 'Quitar')));
+  });
+  caja.appendChild(filas);
+  const guardar = h('button', { clase: 'mini primario boton-guardar-pronunciacion',
+    disabled: est.guardando || !pronunciacionCambiada(est),
+    onclick: () => guardarPronunciacion() }, est.guardando ? 'guardando…' : 'Guardar');
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', onclick: () => { est.borrador.push({ escrito: '', dicho: '' }); repintarClaves(); } },
+      'Añadir una palabra'),
+    guardar,
+    pronunciacionCambiada(est)
+      ? h('button', { clase: 'mini fantasma', onclick: () => {
+        est.borrador = (est.lista || []).map(f => ({ escrito: f.escrito, dicho: f.dicho })); repintarClaves();
+      } }, 'Deshacer los cambios')
+      : null));
+  return caja;
+}
+
+/* Escribir en una casilla no repinta (se perdería el cursor): solo enciende
+   o apaga «Guardar». */
+function refrescarBotonPronunciacion() {
+  const boton = document.querySelector('.boton-guardar-pronunciacion');
+  if (boton) boton.disabled = !pronunciacionCambiada(estadoPronunciacion());
+}
 
 /* EL DICTADO DEL ASISTENTE: con OpenAI (si hay clave) o siempre el del
    navegador, que es gratis. Ver pasos/dictado.py. */
@@ -7916,19 +8019,34 @@ async function rehacerEnLaCalidadDelVideo(otra) {
 const PLANES_LIGHT = { ultima: {} };
 
 
-async function refrescarPlanLight(tanda, forzar) {
+/* CON `modo` SE PIDE EL PLAN DEL MODO CON EL QUE SE VA A LANZAR (D5,
+   16-10-2026). «Regenerar Audio» lanza en 'todo' --la voz entera otra vez--
+   y su precio salia del plan 'pendientes', que con la voz al dia era 0 $. Se
+   guarda aparte (`voz:todo`): el de 'pendientes' sigue diciendo si queda algo
+   por grabar, que es lo que apaga el boton y marca los bloques editados. */
+function clavePlanLight(tanda, modo) {
+  return modo && modo !== 'pendientes' ? `${tanda}:${modo}` : tanda;
+}
+
+async function refrescarPlanLight(tanda, forzar, modo) {
   const v = APP.light.video;
   if (!v.pid || !tanda) return;
-  const clave = `${v.pid}:${tanda}`;
+  const guardado = clavePlanLight(tanda, modo);
+  const clave = `${v.pid}:${guardado}`;
   if (!forzar && Date.now() - (PLANES_LIGHT.ultima[clave] || 0) < 3000) return;
   PLANES_LIGHT.ultima[clave] = Date.now();
   try {
-    const plan = await pedir(`${API.proyecto(v.pid)}/generar?tanda=${tanda}`);
-    /* Se repinta SOLO si el numero de tareas ha cambiado: repintar siempre
-       desde aqui seria un bucle, porque esto se llama durante el pintado. */
-    const huella = x => `${(x || {}).tareas}|${((((x || {}).coste || {}).otra_calidad) || {}).imagenes || 0}`;
-    const antes = huella(v.planes[tanda]);
-    v.planes[tanda] = plan;
+    const plan = await pedir(`${API.proyecto(v.pid)}/generar?tanda=${tanda}`
+      + (guardado !== tanda ? `&modo=${encodeURIComponent(modo)}` : ''));
+    /* Se repinta SOLO si ha cambiado lo que se ensena (las tareas, el precio
+       o las imagenes en otra calidad): repintar siempre desde aqui seria un
+       bucle, porque esto se llama durante el pintado. */
+    const huella = x => {
+      const coste = (x || {}).coste || {};
+      return `${(x || {}).tareas}|${coste.usd_por_generar}|${(coste.otra_calidad || {}).imagenes || 0}`;
+    };
+    const antes = huella(v.planes[guardado]);
+    v.planes[guardado] = plan;
     if (antes !== huella(plan)) setTimeout(pintarLight, 0);
   } catch (e) { /* sin plan: los botones se quedan como estaban */ }
 }
@@ -8625,8 +8743,13 @@ async function regrabarPendientesLight(seccion) {
     v.editando = '';
     const tid = datos.trabajo_id || (datos.trabajo || {}).id;
     if (!tid) throw new Error('el servidor no ha devuelto ningún trabajo');
+    /* TAMBIÉN AL FALLAR: si se cae un tramo a mitad, lo ya grabado queda
+       guardado y lo previsto cambia (solo faltan los otros). Sin recargar, el
+       botón seguiría apuntando al primer tramo y lo volvería a pagar. */
     seguirTrabajo(CLAVE_VIDEO_LIGHT, tid, async trabajo => {
-      if (trabajo.estado === 'listo') await cargarVideoLight(v.pid);
+      if (trabajo.estado === 'listo' || trabajo.estado === 'error') {
+        await cargarVideoLight(v.pid);
+      }
       pintarLight();
     });
     pintarLight();
@@ -8903,8 +9026,13 @@ async function cambiarBloqueLight(bloque, sec, soloGrabar) {
     const tid = datos.trabajo_id || (datos.trabajo || {}).id;
     if (!tid) throw new Error('el servidor no ha devuelto ningún trabajo');
     v.prompts[bloque.id] = '';
+    /* TAMBIÉN AL FALLAR: si se cae un tramo a mitad, lo ya grabado queda
+       guardado y lo previsto cambia (solo faltan los otros). Sin recargar, el
+       botón seguiría apuntando al primer tramo y lo volvería a pagar. */
     seguirTrabajo(CLAVE_VIDEO_LIGHT, tid, async trabajo => {
-      if (trabajo.estado === 'listo') await cargarVideoLight(v.pid);
+      if (trabajo.estado === 'listo' || trabajo.estado === 'error') {
+        await cargarVideoLight(v.pid);
+      }
       pintarLight();
     });
     pintarLight();
@@ -9039,8 +9167,8 @@ function ayudaAudio(hayAudio, queda) {
       + 'ediciones a mano. No queda nada que grabar.';
   }
   return hayAudio
-    ? 'Vuelve a grabar la toma con la voz del estilo. Se sintetiza el texto de '
-      + 'ahora; lo que no haya cambiado sale de la cache y no se vuelve a pagar.'
+    ? 'Vuelve a grabar la toma ENTERA con la voz del estilo y el texto de '
+      + 'ahora. Se paga toda la voz otra vez, también lo que no ha cambiado.'
     : 'Sintetiza la toma completa con la voz del estilo y la alinea con el '
       + 'texto, que es lo que después coloca los subtítulos.';
 }
@@ -9085,14 +9213,18 @@ function pieLight() {
      cada repintado no son dos peticiones por segundo. */
   refrescarPlanLight('voz');
   refrescarPlanLight('video');
+  /* EL PRECIO DEL BOTON, DEL MODO CON EL QUE LANZA (D5): con audio, 'todo'. */
+  const modoVoz = hayAudio ? 'todo' : 'pendientes';
+  refrescarPlanLight('voz', false, modoVoz);
   const quedaVoz = quedaTandaLight('voz');
   const quedaVideo = quedaTandaLight('video');
   return h('div', { clase: 'pie-guion' },
-    conAyuda(unirAyuda(ayudaAudio(hayAudio, quedaVoz), textoDelPlan('voz')),
+    conAyuda(unirAyuda(ayudaAudio(hayAudio, quedaVoz),
+      textoDelPlan(quedaVoz === false ? 'voz' : clavePlanLight('voz', modoVoz))),
       h('button', {
         clase: 'primario',
         disabled: corriendo || !hayGuion || quedaVoz === false,
-        onclick: () => lanzarTandaLight('voz', hayAudio ? 'todo' : 'pendientes'),
+        onclick: () => lanzarTandaLight('voz', modoVoz),
       }, hayAudio ? 'Regenerar Audio' : 'Generar Audio')),
     /* EN MEDIO Y A TODO EL HUECO QUE SOBRE: es lo unico de la barra que cambia
        solo, y entre los dos botones se ve sin buscarla. Cuando no corre nada no

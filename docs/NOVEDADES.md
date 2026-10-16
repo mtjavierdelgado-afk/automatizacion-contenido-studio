@@ -67,6 +67,53 @@ vídeos, estilos, claves y contraseña no se tocan.
   suyo arriba a la derecha, y cada respuesta uno en el pie para copiarla
   entera, en texto llano (sin asteriscos ni comillas del formato).
 
+**La voz (14 de octubre)**
+- **Las palabras en inglés, como suenan.** En Configuración → **Cómo se
+  pronuncia** hay una lista de palabras con cómo deben sonar («Just Dance» →
+  «Yast Dans», «Logitech» → «Lóyitec», «PlayStation» → «Pléi Estéishon»…). La
+  voz las dice así; el guion y los subtítulos siguen escritos como siempre. Ya
+  viene con las marcas de tus vídeos, y puedes añadir, cambiar o quitar las que
+  quieras. Vale para las voces que grabes a partir de ahora.
+- **Adiós al «eco» y al zumbido entre bloques.** Cuando el Studio alargaba la
+  pausa entre dos bloques, repetía en bucle un trozo de esa pausa, y si el
+  trozo traía una respiración o el final de una palabra, se oía un murmullo
+  repetido o un zumbido de un segundo. Ahora rellena con un fondo suave
+  inventado con el mismo color que la pausa, sin repetir nada y sin copiar
+  sonidos de la voz. Se nota al volver a grabar la voz.
+- **Una letra suelta ya no se lee como una abreviatura.** La voz decía «Xbox
+  Series sur» en vez de «Series ese»: en español, una «S» sola se tomaba por
+  «Sur». Ahora cada consonante mayúscula suelta (S, X, T, B…) se deletrea con
+  el nombre de la letra. «A», «E», «O», «U» e «Y» se siguen leyendo como
+  palabras, y «S.A.», «T-shirt» o «USB-C» no cambian. Se nota al volver a
+  grabar la voz; el subtítulo sigue diciendo «S».
+- **Si se corta Cartesia a mitad, la voz ya no se paga dos veces.** Antes, si
+  la conexión se caía con parte del audio ya llegado, el Studio volvía a grabar
+  la voz entera por otro camino sin avisar (y Cartesia cobraba las dos) y ese
+  primer intento no salía en el gasto. Ahora se para con un mensaje claro para
+  que lo reintentes tú, y lo que Cartesia llegó a cobrar queda apuntado en el
+  gasto del vídeo. Si no había llegado nada, sigue reintentándolo solo, como
+  antes.
+- **Regrabar varios tramos: si falla uno, los anteriores se guardan.** Al
+  regrabar lo que has escrito en varios tramos, si fallaba el segundo se
+  perdía el primero, ya pagado, y al reintentar se volvía a pagar. Ahora lo ya
+  grabado queda guardado (la voz sigue marcada como pendiente) y «Regrabar lo
+  que he escrito» graba solo los tramos que faltan.
+- **«Carlos V» ya no se lee «Carlos uve».** Una V, X, L, C, D o M sola detrás
+  del nombre de un rey, un papa o un emperador (Carlos, Felipe, Pío, León,
+  Napoleón, Ramsés…) se deja como número romano, igual que ya pasaba detrás
+  de «siglo» o «capítulo». «Xbox Series X», «Galaxy S» o «Plan B» se siguen
+  deletreando.
+- **«Escuchar» suena como el vídeo.** La muestra de voz (la de un estilo, la
+  de elegir voz y la del vídeo) ahora pasa por la lista **Cómo se pronuncia**
+  y deletrea las letras sueltas, como la voz del vídeo. Si cambias la lista,
+  la siguiente escucha ya la recoge; si no cambias nada, se reutiliza la que
+  ya habías oído y no se vuelve a pagar.
+- **«Regenerar Audio» dice lo que cuesta.** Ese botón vuelve a grabar la voz
+  entera, y se paga entera aunque no hayas cambiado nada. Antes se apuntaba
+  como «prometido: 0 $» en «Cada vez que generaste» y la ayuda decía que lo
+  que no cambió salía gratis; ahora la ayuda del botón y lo prometido dicen el
+  precio de la voz entera.
+
 **Subtítulos a tu gusto y el «atrás» del móvil (13 de octubre, noche)**
 - **La fuente y el sitio de los subtítulos se eligen.** En el editor de
   subtítulos (en el Encargo y debajo del vídeo montado) hay dos filas nuevas:

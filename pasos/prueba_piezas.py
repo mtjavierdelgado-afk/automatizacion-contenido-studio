@@ -1524,6 +1524,35 @@ def prueba_espaciar():
     igual(voz.espaciar(wav, palabras, sin_falta, escenas, 1.0)[1], [],
           "si la pausa ya es mayor que el minimo no se toca nada")
 
+    # EL RELLENO NO REPITE NI COPIA UNA RESPIRACION (15-10-2026). En un video
+    # real las pausas entre bloques eran un trozo de 200 ms del centro de la
+    # pausa repetido una y otra vez: con la respiracion que habia en ese centro,
+    # se oia un murmullo en bucle -- el «eco» que reporto el dueno --.
+    import numpy as np                                           # noqa: PLC0415
+    azar = np.random.default_rng(7)
+    senal = azar.standard_normal(int(sr * 4)) * 6000             # voz
+    a, b = int(1.0 * sr), int(1.4 * sr)
+    senal[a:b] = azar.standard_normal(b - a) * 8                 # fondo tranquilo
+    c, d = int(1.15 * sr), int(1.25 * sr)
+    senal[c:d] = azar.standard_normal(d - c) * 400               # una respiracion
+    wav2 = _wav([int(v) for v in np.clip(senal, -32768, 32767)])
+    reparto2 = {"B01": [{"s": 0.0, "e": 1.0}], "B02": [{"s": 1.4, "e": 4.0}]}
+    nuevo2, _d = voz.espaciar(wav2, palabras, reparto2, escenas, hueco_minimo=1.5)
+    pcm2 = np.frombuffer(voz._pcm_de_wav(nuevo2), dtype="<i2").astype(float)
+    metido = pcm2[int(1.25 * sr):int(2.25 * sr)]                 # dentro del relleno
+    nivel = float(np.sqrt(np.mean(metido ** 2)))
+    ok(nivel < 30, f"el relleno es el FONDO de la pausa, no la respiracion (RMS {nivel:.0f}; "
+                   f"la respiracion es 400 y el fondo 8)")
+    centrado = metido - metido.mean()
+    eco = np.correlate(centrado, centrado, "full")[len(centrado) - 1:]
+    eco = eco / (eco[0] + 1e-12)
+    repite = float(np.max(eco[int(0.03 * sr):int(0.4 * sr)]))
+    ok(repite < 0.3, f"y no repite ningun trozo: sin bucle no hay eco (parecido {repite:.2f})")
+    ok(float(np.mean(metido == 0)) < 0.2, "y no son ceros: el fondo no desaparece de golpe")
+    otra = np.frombuffer(voz._pcm_de_wav(voz.espaciar(wav2, palabras, reparto2, escenas,
+                                                      hueco_minimo=1.5)[0]), dtype="<i2")
+    ok(np.array_equal(otra, pcm2.astype("<i2")), "y para la misma pausa sale siempre el mismo relleno")
+
 
 # --------------------------------------------------- 6. p6._capa_vectorial
 

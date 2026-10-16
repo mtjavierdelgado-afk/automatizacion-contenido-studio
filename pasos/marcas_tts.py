@@ -216,6 +216,71 @@ def _deletreable(pieza):
     """
     return [(token, es_inicialismo(token)) for token in str(pieza or "").split()]
 
+#: UNA LETRA SUELTA SE DELETREA SOLA (14-10-2026). Cartesia, en castellano, lee
+#: una consonante mayuscula suelta como la abreviatura que mas se le parece: en
+#: un video de consolas «Xbox Series S» se oyo «Series sur». Con <spell> dice el
+#: nombre de la letra («ese»), que es lo que se quiere en el 100 % de los casos
+#: medidos, y el redactor no lo marca porque para el es obvio.
+#:
+#: Solo CONSONANTES: «A», «E», «O», «U» e «Y» son tambien palabras en castellano
+#: («Y entonces...») y la «I» lo es en ingles. Y no si va pegada a un punto o a
+#: un guion con mas letras: «S.A.», «EE. UU.», «T-shirt» y «X-Men» se dejan.
+_LETRA_SUELTA = re.compile(
+    r"(?<![\w.\-'’])([BCDFGHJKLMNPQRSTVWXZ])(?![\w'’]|\.\w|-\w)")
+
+
+#: Salvo un NUMERO ROMANO detras de las palabras que los llevan: «siglo X» es
+#: «siglo diez», no «siglo equis» (revision independiente del 15-10-2026).
+_ANTES_DE_ROMANO = re.compile(
+    r"(?:siglos?|cap[ií]tulos?|tomos?|partes?|fases?|actos?|vol[uú]men(?:es)?|"
+    r"temporadas?|libros?|papa|rey|reina)\s+$", re.IGNORECASE)
+
+#: Ni detras del NOMBRE de un rey, un papa o un emperador: «Carlos V» es
+#: «Carlos quinto», no «Carlos uve» (16-10-2026). Va con mayuscula inicial y
+#: palabra entera: «Series X», «Galaxy S» o «Plan B» no son nombres de rey, y la
+#: B o la S ni siquiera son numeros romanos, asi que se siguen deletreando.
+_NOMBRES_DE_REY = (
+    "Carlos", "Felipe", "Fernando", "Enrique", "Alfonso", "Luis", "Juan",
+    "Pablo", "Pío", "Pio", "Benedicto", "Gregorio", "León", "Leon", "Jorge",
+    "Eduardo", "Isabel", "Pedro", "Jaime", "Sancho", "Ricardo", "Guillermo",
+    "Federico", "Clemente", "Inocencio", "Urbano", "Bonifacio", "Napoleón",
+    "Napoleon", "Alejandro", "Constantino", "Ramsés", "Ramses", "Francisco",
+    "Ramiro", "Martín", "Martin", "Nicolás", "Nicolas", "Sixto", "Adriano",
+    "Esteban", "Gustavo", "Amadeo", "Humberto", "Manuel", "Leopoldo",
+    "Rodolfo", "Maximiliano", "Tutmosis", "Ptolomeo", "Teodosio", "Iván",
+    "Ivan", "Juana", "Catalina", "Margarita")
+_TRAS_NOMBRE_DE_REY = re.compile(
+    r"(?<![\w'’])(?:" + "|".join(sorted(set(_NOMBRES_DE_REY), key=len, reverse=True))
+    + r")\s+$")
+
+
+def _es_romano_en_su_sitio(texto, m):
+    """¿La letra de `m` es un numero romano detras de quien los lleva?"""
+    if m.group(1) not in "VXLCDM":
+        return False
+    antes = texto[:m.start()]
+    if _ANTES_DE_ROMANO.search(antes):
+        return True
+    # DETRAS DE UN NOMBRE, solo V y X y nunca con punto: «Carlos V» y «Pío X»
+    # son reyes y papas, pero «Carlos M. Pérez» o «Juan D. Robles» son
+    # iniciales, y una inicial suelta es justo lo que hay que deletrear (la
+    # voz lee «M.» como «metros»; revision independiente del 16-10-2026)
+    if m.group(1) not in "VX" or re.match(r"\.\s+[A-ZÁÉÍÓÚÑ]", texto[m.end():]):
+        return False
+    return bool(_TRAS_NOMBRE_DE_REY.search(antes))
+
+
+def deletrear_letras_sueltas(texto):
+    """Envuelve en <spell> las consonantes mayusculas sueltas. Ver arriba."""
+    texto = str(texto or "")
+
+    def cambiar(m):
+        if _es_romano_en_su_sitio(texto, m):
+            return m.group(0)
+        return f"<spell>{m.group(1)}</spell>"
+    return _LETRA_SUELTA.sub(cambiar, texto)
+
+
 #: Cualquier cosa con forma de etiqueta, valida o no. Se usa para BORRAR lo que
 #: no se reconozca, porque lo que no se reconoce se locuta (leccion 2).
 _ALGO_ASI = re.compile(r'<[^<>]*>')
@@ -360,7 +425,7 @@ def sanear(texto, avisos=None):
             if pieza.strip():
                 ultimo_break = None
             dicho += pieza
-            salida.append(pieza)
+            salida.append(deletrear_letras_sueltas(pieza))
 
         elif clase == "spell":
             # <spell> deletrea TODO lo que lleva dentro, espacios incluidos.

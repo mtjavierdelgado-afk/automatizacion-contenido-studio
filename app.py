@@ -2157,7 +2157,6 @@ def _correr_regrabar(avisar, ctx, seccion_id, peticion, ajuste):
     meta = plan["meta"]
     efectivos = plan["efectivos"]
     grabados = dict(plan["grabados"])
-    seccion_de = plan["seccion_de"]
     ficha_voz = ctx.estado.salidas("voz") or {}
     carpeta = ctx.proyecto.ruta_paso("voz")
     cfg = p4.resolver_params(p4.params_con_idioma(
@@ -2181,8 +2180,71 @@ def _correr_regrabar(avisar, ctx, seccion_id, peticion, ajuste):
     textos_ahora = {b["id"]: b["texto"] for b in efectivos}
 
     orden = plan["orden"]
-    hechas = []
-    salidas = None
+    # lo ya cosido, seccion a seccion: `_regrabar_en_orden` lo va apuntando
+    # aqui, asi que si una falla se sabe exactamente que se ha pagado
+    hecho = {"secciones": [], "salidas": None}
+    hechas = hecho["secciones"]
+    try:
+        _regrabar_en_orden(avisar, ctx, plan, seccion_id, peticion, ajuste, cfg,
+                           meta, destino, linea, textos_ahora, grabados, hecho)
+    except Exception as fallo:
+        # F3 (informe de arreglos v2b): SI FALLA UNA, LAS DE ANTES YA ESTAN
+        # PAGADAS. Se tiraban -- no habia `completar` -- y reintentar las volvia
+        # a grabar y a pagar. Ahora lo hecho se guarda como version de la voz,
+        # sellada A MEDIAS: la voz sigue obsoleta (no dice aun todo el guion),
+        # pero lo previsto deja de contar las secciones ya grabadas y el
+        # reintento solo graba las que faltan.
+        if not hechas:
+            raise
+        faltan = [sid for sid in orden if sid not in hechas]
+        version, _cambiados = _sellar_regrabado(
+            ctx, plan, seccion_id, peticion, linea, textos_ahora, grabados,
+            hechas, dict(hecho["salidas"]), destino, a_medias=True)
+        raise RuntimeError(
+            f"{', '.join(faltan)} no se ha podido regrabar ({fallo}). "
+            f"Lo ya grabado ({', '.join(hechas)}) queda guardado en la "
+            f"version {version} de la voz y no se vuelve a pagar: al "
+            f"reintentar solo se graba lo que falta.") from fallo
+    if hecho["salidas"] is None:
+        raise RuntimeError("no hay nada que regrabar: la toma ya dice el guion "
+                           "de ahora")
+    salidas = hecho["salidas"]
+    version, cambiados = _sellar_regrabado(
+        ctx, plan, seccion_id, peticion, linea, textos_ahora, grabados, hechas,
+        salidas, destino)
+
+    # LA REVISION, si sale gratis. Nada depende de ella, pero el reproductor de
+    # vista previa prefiere SU toma (`_audio_de_la_toma`): dejarla en la
+    # anterior hacia sonar la frase vieja. Sellarla es copiar; si no se puede
+    # sellar, ejecutarla resintetizaria la toma ENTERA, y eso no lo ha pedido
+    # nadie desde un boton de un tramo: se queda en obsoleto y se dice.
+    revision = "sin_tocar"
+    if ctx.estado.versiones("revision_audio"):
+        p5 = PASOS_MODULOS.p5_revision_audio
+        params_rev = ctx.estado.params("revision_audio") or {}
+        if p5.se_puede_sellar(ctx.proyecto, params_rev):
+            _correr_paso(lambda v, m="", publico="": avisar(0.9 + 0.1 * v, m, publico),
+                         ctx, "revision_audio", None)
+            revision = "sellada"
+        else:
+            revision = "obsoleta"
+    avisar(1.0, salidas["resumen"])
+    return {"version": version, "resumen": salidas["resumen"], "secciones": hechas,
+            "bloques_cambiados": cambiados, "revision_audio": revision,
+            "duracion": salidas.get("duracion")}
+
+
+def _regrabar_en_orden(avisar, ctx, plan, seccion_id, peticion, ajuste, cfg,
+                       meta, destino, linea, textos_ahora, grabados, hecho):
+    """Graba las secciones de `plan["orden"]` una a una sobre la toma.
+
+    Despues de CADA seccion cosida apunta en `hecho` cual es y las salidas que
+    deja (y en `grabados`, su texto): si la siguiente falla, quien llama sabe
+    exactamente que se ha pagado y lo puede guardar.
+    """
+    p4 = PASOS_MODULOS.p4_voz
+    orden = plan["orden"]
+    seccion_de = plan["seccion_de"]
     for numero, sid in enumerate(orden):
         dentro = {bid for s in plan["secciones"] if s["id"] == sid
                   for bid in s["bloques"]}
@@ -2216,11 +2278,21 @@ def _correr_regrabar(avisar, ctx, seccion_id, peticion, ajuste):
             if seccion_de.get(bid) == sid:
                 grabados.pop(bid, None)
         meta = dict(salidas)
-        hechas.append(sid)
+        hecho["salidas"] = salidas
+        hecho["secciones"].append(sid)
 
-    if salidas is None:
-        raise RuntimeError("no hay nada que regrabar: la toma ya dice el guion "
-                           "de ahora")
+
+def _sellar_regrabado(ctx, plan, seccion_id, peticion, linea, textos_ahora,
+                      grabados, hechas, salidas, destino, a_medias=False):
+    """Registra lo regrabado como version nueva de la voz.
+
+    -> (numero de version, bloques cambiados)
+
+    `a_medias`: lo hecho es solo una parte de lo previsto (fallo una seccion a
+    mitad); se guarda para no volver a pagarlo, pero la voz queda obsoleta.
+    """
+    p4 = PASOS_MODULOS.p4_voz
+    seccion_de = plan["seccion_de"]
     # lo que dice la toma, bloque a bloque: el 'antes' contra el que compara la
     # conservacion de planos (`conservar.guion_locutado`)
     locutado = [{"id": bid, "texto": grabados[bid]} for bid in linea if bid in grabados]
@@ -2231,7 +2303,13 @@ def _correr_regrabar(avisar, ctx, seccion_id, peticion, ajuste):
     # bebe todo lo de despues. Con la MISMA forma que escribe y lee la pantalla
     # ({"texto": ...}): se guardaba la cadena pelada, p3 la toleraba, pero la
     # interfaz leia `.texto`, no veia la edicion y la machacaba.
+    #
+    # SOLO LOS BLOQUES DE LAS SECCIONES YA GRABADAS: en una regrabacion a
+    # medias, los de las que faltan siguen con el texto VIEJO en `grabados`, y
+    # escribirlo aqui machacaria lo que el usuario acaba de editar.
+    grabadas = set(hechas)
     reescritos = [bid for bid in textos_ahora if bid in grabados
+                  and seccion_de.get(bid) in grabadas
                   and not p4._igual_que_grabado(textos_ahora[bid], grabados[bid])]
     if reescritos:
         ediciones = dict((ctx.estado.params("guion") or {}).get("bloques") or {})
@@ -2248,33 +2326,17 @@ def _correr_regrabar(avisar, ctx, seccion_id, peticion, ajuste):
                  if bid not in plan["grabados"] or bid not in grabados
                  or not p4._igual_que_grabado(grabados[bid], plan["grabados"][bid])]
     salidas["resumen"] = (f"{', '.join(hechas)} regrabada" + ("s" if len(hechas) > 1 else "")
-                          + f" ({len(cambiados)} bloque(s) cambiados)")
+                          + f" ({len(cambiados)} bloque(s) cambiados)"
+                          + (" · a medias: faltan "
+                             + ", ".join(s for s in plan["orden"] if s not in grabadas)
+                             if a_medias else ""))
     ligeras, _recortadas = _aligerar(salidas)
-    version = ctx.estado.completar("voz", ligeras)
+    version = ctx.estado.completar("voz", ligeras, a_medias=a_medias)
     ctx.bitacora.anotar("seccion_regrabada", "voz", {
         "seccion": seccion_id, "secciones": hechas, "version": version,
         "peticion": peticion[:200], "bloques_cambiados": cambiados,
-        "quitados": plan["quitados"]})
-
-    # LA REVISION, si sale gratis. Nada depende de ella, pero el reproductor de
-    # vista previa prefiere SU toma (`_audio_de_la_toma`): dejarla en la
-    # anterior hacia sonar la frase vieja. Sellarla es copiar; si no se puede
-    # sellar, ejecutarla resintetizaria la toma ENTERA, y eso no lo ha pedido
-    # nadie desde un boton de un tramo: se queda en obsoleto y se dice.
-    revision = "sin_tocar"
-    if ctx.estado.versiones("revision_audio"):
-        p5 = PASOS_MODULOS.p5_revision_audio
-        params_rev = ctx.estado.params("revision_audio") or {}
-        if p5.se_puede_sellar(ctx.proyecto, params_rev):
-            _correr_paso(lambda v, m="", publico="": avisar(0.9 + 0.1 * v, m, publico),
-                         ctx, "revision_audio", None)
-            revision = "sellada"
-        else:
-            revision = "obsoleta"
-    avisar(1.0, salidas["resumen"])
-    return {"version": version, "resumen": salidas["resumen"], "secciones": hechas,
-            "bloques_cambiados": cambiados, "revision_audio": revision,
-            "duracion": salidas.get("duracion")}
+        "quitados": plan["quitados"], "a_medias": bool(a_medias)})
+    return version, cambiados
 
 
 def medios_json(ruta):
@@ -7930,6 +7992,32 @@ def guardar_ajustes(cuerpo: dict = Body(default=None)):
             "zona": AJUSTES.zona_en_uso()}
 
 
+# ------------------------------------------------------- como se pronuncia
+
+@app.get("/api/pronunciaciones")
+def leer_pronunciaciones():
+    """Las palabras que la voz dice como se escriben aqui (sobre todo en ingles).
+
+    Solo cambia lo que OYE la voz: el guion y los subtitulos siguen diciendo la
+    palabra escrita (ver pasos/pronunciacion.py). Vale para las voces que se
+    graben a partir de ahora; las ya grabadas no se tocan.
+    """
+    pron = PASOS_MODULOS.pronunciacion
+    return {"lista": pron.cargar(), "inicial": pron.INICIAL, "maximo": pron.MAXIMO}
+
+
+@app.put("/api/pronunciaciones")
+def guardar_pronunciaciones(cuerpo: dict = Body(default=None)):
+    """{lista: [{escrito, dicho}]} -> la lista guardada. No graba nada ni paga nada."""
+    datos = _cuerpo(cuerpo)
+    try:
+        lista = PASOS_MODULOS.pronunciacion.guardar(datos.get("lista"))
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    anotar_global("pronunciaciones_guardadas", {"palabras": len(lista)})
+    return {"lista": lista}
+
+
 # ------------------------------------------------------------------ enlaces
 # -------------------------------------------------------------------- recetas
 #
@@ -11243,8 +11331,14 @@ def muestra_de_voz(cuerpo: dict = Body(default=None)):
     p4 = PASOS_MODULOS.p4_voz
     light = _light()
     texto = p4.recortar_texto(light.bloques_de_escucha(idioma), 12, None)
-    clave = hashlib.sha256(json.dumps([voz_id, idioma, texto, p4.simulado()],
-                                      ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+    # Lo que se MANDA lleva la lista «Cómo se pronuncia», como en el vídeo; y
+    # entra en la clave, o al cambiar la lista seguiría sonando la muestra vieja.
+    # Si no cambia nada, la clave es la de siempre y no se vuelve a pagar.
+    para_voz = p4.texto_para_voz(texto)
+    clave = hashlib.sha256(json.dumps(
+        [voz_id, idioma, texto, p4.simulado()]
+        + ([para_voz] if para_voz != texto else []),
+        ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
     carpeta = _carpeta_muestras_voz()
     nombre = f"voz_{clave}.wav"
     ruta = os.path.join(carpeta, nombre)
@@ -11253,7 +11347,7 @@ def muestra_de_voz(cuerpo: dict = Body(default=None)):
             os.makedirs(carpeta, exist_ok=True)
             try:
                 cfg = p4.resolver_params({"voz_id": voz_id, "idioma": idioma})
-                wav, _duracion, _palabras = p4.sintetizar_toma(texto, cfg)
+                wav, _duracion, _palabras = p4.sintetizar_toma(para_voz, cfg)
             except (Exception, SystemExit) as fallo:  # noqa: BLE001
                 raise ErrorApi(502, f"no se ha podido sintetizar la muestra: {fallo}")
             temporal = ruta + ".tmp"
@@ -12855,6 +12949,10 @@ def _coste_previsto(ctx, pestanas, modo="pendientes"):
     Se dice ANTES de pulsar, que es la unica forma de que sirva. Las dos partes
     caras del Estudio son las IMAGENES (una por plano) y el TTS (por caracter);
     todo lo que llama al CLI va por la suscripcion y no entra aqui.
+
+    EL MODO CUENTA (D5, 16-10-2026). La voz no tiene cache: en modo 'todo' se
+    vuelve a sintetizar ENTERA aunque estuviera al dia, y «Regenerar Audio» la
+    prometia a 0 $ porque aqui solo se miraba si estaba al dia.
     """
     light = PASOS_MODULOS.presets_light
     planos = _planos_previstos(ctx)
@@ -12893,8 +12991,9 @@ def _coste_previsto(ctx, pestanas, modo="pendientes"):
     imagenes += hojas
     usd_imagenes = round(imagenes * usd_imagen, 3)
     usd_tts = round(caracteres * usd_caracter, 4)
-    # la voz ya grabada y al dia no se vuelve a pagar en una tanda «pendientes»
-    voz_al_dia = ctx.estado.estado_de("voz") == "listo"
+    # la voz ya grabada y al dia no se vuelve a pagar en una tanda «pendientes»;
+    # en una 'todo' se graba otra vez entera, y se paga entera
+    voz_al_dia = modo == "pendientes" and ctx.estado.estado_de("voz") == "listo"
     usd_tts_por_generar = 0.0 if voz_al_dia else usd_tts
     # LO QUE YA ESTA HECHO VIAJA AL LADO DEL TECHO, no en su lugar. El total
     # sigue siendo lo que cuesta el video entero --que es lo que hay que pagar
@@ -12912,6 +13011,7 @@ def _coste_previsto(ctx, pestanas, modo="pendientes"):
              "imagenes_hechas": hechas, "imagenes_por_generar": por_generar,
              "usd_por_generar": round(por_generar * usd_imagen + usd_tts_por_generar, 3),
              "caracteres": caracteres, "usd_tts": usd_tts,
+             "usd_tts_por_generar": round(usd_tts_por_generar, 4), "modo": modo,
              "usd_total": round(usd_imagenes + usd_tts, 3),
              "planos": planos}
     # LO QUE SIGUE EN OTRA CALIDAD: no entra en lo que cuesta esta tanda (no se

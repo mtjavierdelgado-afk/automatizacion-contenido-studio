@@ -4032,6 +4032,16 @@ def _cadenas_por_set(escenas, orden):
     return sorted(grupos.values(), key=len, reverse=True)
 
 
+def _copiados_del_plan(escenas):
+    """Los planos que COPIAN su imagen a proposito, segun el plan. -> {ids}
+
+    La continuacion de una toma larga (`sigue_a`) y el plano de un mapa o un
+    grafico (`componente`). Es lo que `_planos_repetidos` no cuenta como
+    repetido; ver su docstring."""
+    return {e["id"] for e in escenas or []
+            if e.get("sigue_a") or e.get("componente")}
+
+
 def _planos_repetidos(resultados, trabajo, copiados=()):
     """Grupos de escenas que han acabado con un fichero identico.
 
@@ -4051,6 +4061,18 @@ def _planos_repetidos(resultados, trabajo, copiados=()):
                         imagen copiada: misma imagen, zoom partido, sin
                         transicion en medio. Es byte a byte identica porque
                         tiene que serlo.
+      el COMPONENTE     un mapa o un grafico (`escena["componente"]`) no se
+                        dibuja: se COPIA de `assets/componentes/<nombre>.png`,
+                        que se construye una vez por video con geometria real.
+                        Si dos planos nombran la misma ruta («zarpo de
+                        Shanghai» ... «llego a Manzanillo»),
+                        `_elegir_componente` les da a los dos el mismo mapa y
+                        sus PNG son la misma copia. No hay prompt ni cache de
+                        por medio, asi que no puede ser el fallo que esto
+                        busca. Y no era un aviso: tumbaba la tanda AL FINAL,
+                        con todos los planos ya pagados, y al reintentar el
+                        plan salia igual y volvia a tumbarla (revision del
+                        16-10-2026).
 
     El segundo caso salio el 22-08 y es una leccion de las buenas: hasta
     entonces la continuacion se quedaba con su imagen VIEJA, o sea que NO
@@ -4059,8 +4081,8 @@ def _planos_repetidos(resultados, trabajo, copiados=()):
     **Un guardian calibrado sobre un fallo aprende a dar por bueno ese fallo**:
     lo que lo mantenia callado no era su criterio, era el bug.
 
-    Quien dice quien es continuacion es el PLAN (`copiados`), NO la ficha en
-    disco. Y esto no es prudencia: al RETOMAR una tanda, un plano que ya tiene
+    Quien dice quien es continuacion o componente es el PLAN (`copiados`), NO
+    la ficha en disco (que solo se mira de respaldo). Y esto no es prudencia: al RETOMAR una tanda, un plano que ya tiene
     su imagen se conserva y su ficha pasa a decir `origen: "conservado"`, con lo
     que el rastro de por que compartia imagen se pierde. Con el plan delante,
     reanudar da lo mismo que empezar.
@@ -4071,8 +4093,9 @@ def _planos_repetidos(resultados, trabajo, copiados=()):
         if ficha.get("tipo") != "escena" or not ficha.get("png"):
             continue
         sid = ficha.get("id") or str(uid).split(":", 1)[-1]
-        if ficha.get("origen") in ("cartela", "sigue") \
-                or sid in copiados or ficha.get("sigue_a"):
+        if ficha.get("origen") in ("cartela", "sigue", "componente") \
+                or sid in copiados or ficha.get("sigue_a") \
+                or ficha.get("componente"):
             continue
         ruta = os.path.join(trabajo, ficha["png"])
         if not os.path.exists(ruta):
@@ -4961,10 +4984,11 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
 
     avisar(0.96, "comprobando que no hay planos repetidos")
     # Los que comparten imagen A PROPOSITO salen del PLAN: la segunda mitad de
-    # una toma que dura mas copia la del hogar, y tiene que ser identica.
+    # una toma que dura mas copia la del hogar, y tiene que ser identica; y un
+    # mapa (componente) es el mismo PNG copiado en cada plano que lo nombra.
     repetidos = _planos_repetidos(
         resultados, trabajo,
-        copiados={e["id"] for e in escenas if e.get("sigue_a")})
+        copiados=_copiados_del_plan(escenas))
     if repetidos:
         detalle = "; ".join(" = ".join(grupo) for grupo in repetidos)
         # Al generar, dos planos con la misma imagen siempre es un fallo: significa

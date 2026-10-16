@@ -925,8 +925,20 @@ def _medir_imagen(original):
                    "refs": meta.get("refs"),
                    "segundos": meta.get("segundos")}
         detalle.update(_detalle_en_vigor())
-        registro = reportar_openai(meta.get("usage"), calidad, tamano,
-                                   detalle=detalle)
+        # APUNTAR NO PUEDE PERDER LA IMAGEN (revision del 16-10-2026). Aqui la
+        # imagen ya esta PAGADA y todavia no esta en disco: si anotar revienta
+        # --el disco lleno al escribir el .jsonl, una tarifas.json mal
+        # formada-- la excepcion se llevaba el PNG por delante y la tanda lo
+        # volvia a pagar. Se avisa por la consola y el importe se queda en el
+        # de la tabla del motor (`meta["coste"]`).
+        try:
+            registro = reportar_openai(meta.get("usage"), calidad, tamano,
+                                       detalle=detalle)
+        except Exception as fallo:                          # noqa: BLE001
+            print(f"[coste] no se ha podido apuntar una imagen ya pagada "
+                  f"({type(fallo).__name__}: {fallo}); la imagen sigue",
+                  flush=True)
+            registro = None
         # Y EL IMPORTE DE VERDAD SE DEVUELVE, no solo se anota.
         #
         # El motor trae en `meta["coste"]` el precio de su TABLA POR IMAGEN

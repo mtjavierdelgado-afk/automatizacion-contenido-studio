@@ -350,8 +350,15 @@ class Estado:
             return "pendiente"
         # LA FIRMA PROPIA, que no cuenta las correcciones hechas a mano sobre su
         # salida. Los planes de antes no la traen: ahi manda la de siempre.
+        #
+        # SOLO EN LOS PASOS CON CORRECCIONES, como en `al_dia`. En los demas
+        # `completar` sella la propia con la firma de AHORA y la completa con
+        # la del ARRANQUE, asi que mirar la propia daba «listo» a una voz
+        # grabada con la voz A cuando el usuario ya habia elegido la B (y
+        # `al_dia`, que mira la completa, decia lo contrario: la tanda la
+        # volvia a pagar sin que la pantalla hubiera dicho nada).
         propia = datos.get("firma_propia")
-        if propia is not None:
+        if paso_id in CORRECCIONES and propia is not None:
             if propia != self._firma(paso_id, propias=False):
                 return "obsoleto"
         elif datos.get("firma") != firma_actual:
@@ -826,6 +833,55 @@ class Estado:
             }
             self._guardar()
 
+    def marcar_error_si_en_marcha(self, paso_id, mensaje):
+        """Marca el error SOLO si el paso sigue «ejecutando». -> bool
+
+        Es lo que usa el gestor de trabajos al fallar un trabajo. Un trabajo
+        de una receta o de una tanda se registra en UN paso (el primero), pero
+        corre varios: si ese primero ya se completo y lo que fallo fue otro, el
+        error no es suyo. Marcarlo dejaba `al_dia` en falso, y el reintento en
+        «pendientes» lo rehacia -- una version nueva, el sello cambiado y todo
+        lo de abajo obsoleto: la voz regrabada y pagada por un fallo de la
+        revision de audio, o el guion reescrito por uno de las imagenes.
+        """
+        self._validar(paso_id)
+        with self._lock:
+            self._sincronizar()
+            marca = self._doc["pasos"][paso_id].get("marca")
+            if not (isinstance(marca, dict) and marca.get("estado") == "ejecutando"):
+                return False
+            self._doc["pasos"][paso_id]["marca"] = {
+                "estado": "error",
+                "mensaje": str(mensaje),
+                "firma": self._firma(paso_id),
+                "fecha": ahora(),
+            }
+            self._guardar()
+            return True
+
+    def limpiar_marcas_en_marcha(self):
+        """Quita las marcas «ejecutando» que no tienen trabajo detras. -> [ids]
+
+        Los trabajos viven en la memoria del servicio y la marca en
+        estado.json: si el servicio se reinicia con un paso corriendo, la marca
+        se queda. El paso se ensenaba «ejecutando» para siempre, `set_params` la
+        conservaba como si fuera de un trabajo vivo, y el siguiente `completar`
+        que no marcase sellaba con la foto de aquel arranque. Solo la llama
+        quien sabe que no hay ningun trabajo vivo (al abrir el proyecto).
+        """
+        with self._lock:
+            self._sincronizar()
+            quitadas = []
+            for paso in PASOS:
+                datos = self._doc["pasos"][paso["id"]]
+                marca = datos.get("marca")
+                if isinstance(marca, dict) and marca.get("estado") == "ejecutando":
+                    datos["marca"] = None
+                    quitadas.append(paso["id"])
+            if quitadas:
+                self._guardar()
+            return quitadas
+
     def limpiar_marca(self, paso_id):
         """Quita la marca de ejecucion o error del paso."""
         self._validar(paso_id)
@@ -1042,7 +1098,6 @@ class Estado:
             datos = self._doc["pasos"][paso_id]
             numero = max([v.get("n", 0) for v in datos.get("versiones", [])] or [0]) + 1
             destino = self.proyecto.ruta_paso(paso_id, numero, crear=True)
-            self._recoger_trabajo(paso_id, destino)
 
             # si el trabajo arranco con marcar_ejecutando, lo que se guarda son
             # LAS ENTRADAS CON LAS QUE CORRIO, no las de ahora: asi un trabajo
@@ -1088,6 +1143,13 @@ class Estado:
             # Escribiendolo aqui, un fallo deja el documento vivo intacto: la
             # tanda se pierde, que es lo de siempre, pero el estado no miente.
             self._guardar_manifiesto(paso_id, numero, mapa)
+            # Y LA CARPETA DE TRABAJO DESPUES DEL MANIFIESTO, no antes. Recogerla
+            # la vacia: si el manifiesto fallaba despues, lo pagado quedaba en
+            # una v<N> que nadie nombra y `trabajo/` vacio, asi que «retomar» no
+            # encontraba nada y se volvia a pagar. Un manifiesto huerfano, en
+            # cambio, es inofensivo: la siguiente pasada usa el mismo numero y lo
+            # sobrescribe.
+            self._recoger_trabajo(paso_id, destino)
 
             datos["unidades"] = mapa
             datos["invalidadas"] = sorted(set(datos.get("invalidadas", [])) - objetivo)
@@ -1136,15 +1198,24 @@ class Estado:
                     elegida = candidata
             if elegida is None:
                 raise ValueError(f"{paso_id} no tiene version v{version}")
+            # lo que puede fallar, ANTES de tocar nada: el manifiesto (que lanza
+            # si falta) y apartar `trabajo/`. Un fallo aqui deja el paso como
+            # estaba, sin un revertido a medias en memoria.
+            manifiesto = self.manifiesto_version(paso_id, elegida)
+            apartado = self._apartar_trabajo(paso_id)
             # revertir tambien restaura los params de esa version: son parte de
             # la entrada con la que se produjo, y sin ellos la firma mentiria
             datos["params"] = copy.deepcopy(elegida.get("params", {}))
+            # LA CACHE DE FIRMAS ES DE LOS PARAMS DE ANTES: sin vaciarla, la
+            # propia de una version vieja (que no la guarda) se recalculaba con
+            # ellos y el paso salia «obsoleto» recien revertido.
+            self._cache = {}
             # el manifiesto puede estar en la entrada (formato viejo) o en su
             # fichero. `manifiesto_version` distingue los dos casos y LANZA si la
             # version dice tener unidades y el fichero no aparece: lo que aqui se
             # meta pasa a ser el mapa vivo, y meter {} por error dejaria las 240
             # unidades como «sin hacer», o sea, ofreciendo regenerar el video
-            datos[CLAVE_UNIDADES] = self.manifiesto_version(paso_id, elegida)
+            datos[CLAVE_UNIDADES] = manifiesto
             datos["salidas"] = copy.deepcopy(elegida.get("salidas", {}))
             datos["firma"] = elegida.get("firma")
             # una version de antes no guarda la propia: se recalcula, que es lo
@@ -1160,6 +1231,7 @@ class Estado:
             datos["marca"] = None
             self.proyecto.fijar_version_activa(paso_id, elegida.get("n"))
             self._guardar()
+            return {"version": elegida.get("n"), "trabajo_apartado": apartado}
 
     # --------------------------------------------------------------- interno
 
@@ -1184,6 +1256,33 @@ class Estado:
         # mismo fichero en la version nueva, asi que lo que sobrevive en
         # trabajo/ es byte a byte lo que se acaba de versionar.
         shutil.rmtree(origen, ignore_errors=True)
+
+    def _apartar_trabajo(self, paso_id):
+        """Aparta lo que quedo en `trabajo/` al revertir. -> ruta | None
+
+        Una pasada cancelada o rota deja `trabajo/` sembrado con la version que
+        estaba activa ENTONCES, y al sembrar lo de `trabajo/` gana. Revertir a
+        la v1 con restos de una pasada sobre la v2 hacia que la siguiente
+        pasada, aunque solo rehiciera un plano, sellara las imagenes de la v2
+        en la version nueva. No se borra (puede ser trabajo pagado): se aparta
+        a `pasos/<paso>/_apartados/trabajo_<fecha>`, que no empieza por «v».
+        """
+        origen = self.proyecto.ruta_trabajo(paso_id, crear=False)
+        if not os.path.isdir(origen):
+            return None
+        if not os.listdir(origen):
+            shutil.rmtree(origen, ignore_errors=True)
+            return None
+        marca = ahora().replace(":", "").replace("-", "")
+        destino = self.proyecto.ruta("pasos", paso_id, "_apartados",
+                                     f"trabajo_{marca}")
+        n = 2
+        while os.path.exists(destino):
+            destino = self.proyecto.ruta("pasos", paso_id, "_apartados",
+                                         f"trabajo_{marca}_{n}")
+            n += 1
+        recolocar(origen, destino)
+        return destino
 
     def _resumen_version(self, paso_id, salidas, objetivo):
         if isinstance(salidas, dict) and salidas.get("resumen"):

@@ -48,7 +48,7 @@ class GestorTrabajos:
         self._lock = threading.RLock()
 
     def lanzar(self, nombre, funcion, *args, paso=None, unidad=None,
-               unidades=None, **kwargs):
+               unidades=None, toca=None, **kwargs):
         """Arranca un trabajo en segundo plano y devuelve su identificador."""
         if not callable(funcion):
             raise TypeError("funcion debe ser invocable")
@@ -63,6 +63,11 @@ class GestorTrabajos:
             # el trabajo seguia corriendo en el servidor y la tarjeta volvia a
             # decir «Regenerar imagen», como si no hubiera nada en marcha.
             "unidades": [str(u) for u in (unidades or [])],
+            # LOS PASOS QUE VA A CORRER, ademas del suyo. Una receta o una tanda
+            # se registra en un paso pero corre varios: sin esto, «ejecutar» uno
+            # de los otros no veia nada en marcha y lanzaba una segunda pasada
+            # sobre la MISMA carpeta trabajo/.
+            "toca": sorted({str(p) for p in (toca or [])}),
             "estado": "pendiente",
             "progreso": 0.0,
             "mensaje": "",
@@ -161,6 +166,7 @@ class GestorTrabajos:
             "paso": registro["paso"],
             "unidad": registro["unidad"],
             "unidades": list(registro.get("unidades") or []),
+            "toca": list(registro.get("toca") or []),
             "estado": registro["estado"],
             "progreso": round(registro["progreso"], 4),
             "mensaje": registro["mensaje"],
@@ -206,16 +212,19 @@ class GestorTrabajos:
             nombre = registro["nombre"]
             unidad = registro["unidad"]
 
-        if paso and self.estado_grafo is not None:
-            self.estado_grafo.marcar_ejecutando(paso)
-        if self.bitacora is not None:
-            self.bitacora.anotar("trabajo_lanzado", paso, {"trabajo": nombre,
-                                                          "id": trabajo_id}, unidad)
-
         def avisar(valor, mensaje="", publico=""):
             return self.progreso(trabajo_id, valor, mensaje, publico)
 
         try:
+            # DENTRO del try: si marcar o anotar fallan (el cerrojo de otro
+            # proceso que no suelta, un disco lleno), el hilo moria con el
+            # trabajo en «ejecutando» para siempre -- el paso contestaba 409
+            # hasta reiniciar y cancelar no hacia nada.
+            if paso and self.estado_grafo is not None:
+                self.estado_grafo.marcar_ejecutando(paso)
+            if self.bitacora is not None:
+                self.bitacora.anotar("trabajo_lanzado", paso, {"trabajo": nombre,
+                                                              "id": trabajo_id}, unidad)
             resultado = funcion(avisar, *args, **kwargs)
         except Cancelado:
             self._fijar(trabajo_id, estado="cancelado", fin=time.time(),
@@ -230,12 +239,21 @@ class GestorTrabajos:
             detalle = traceback.format_exc(limit=6)
             self._fijar(trabajo_id, estado="error", fin=time.time(),
                         error=f"{type(fallo).__name__}: {fallo}", mensaje=str(fallo))
-            if paso and self.estado_grafo is not None:
-                self.estado_grafo.marcar_error(paso, f"{type(fallo).__name__}: {fallo}")
-            if self.bitacora is not None:
-                self.bitacora.anotar("trabajo_fallido", paso,
-                                     {"trabajo": nombre, "id": trabajo_id,
-                                      "error": str(fallo), "traza": detalle}, unidad)
+            try:
+                # SOLO SI EL PASO SIGUE EN MARCHA: un trabajo de receta o de
+                # tanda se registra en su primer paso pero corre varios. Si ese
+                # ya se completo, el error es de otro (lo marca `_correr_paso`
+                # en el que fallo de verdad), y marcarlo aqui hacia que el
+                # reintento lo rehiciera y lo pagara otra vez.
+                if paso and self.estado_grafo is not None:
+                    self.estado_grafo.marcar_error_si_en_marcha(
+                        paso, f"{type(fallo).__name__}: {fallo}")
+                if self.bitacora is not None:
+                    self.bitacora.anotar("trabajo_fallido", paso,
+                                         {"trabajo": nombre, "id": trabajo_id,
+                                          "error": str(fallo), "traza": detalle}, unidad)
+            except Exception:  # noqa: BLE001 -- el trabajo ya consta como error
+                pass
             return
 
         self._fijar(trabajo_id, estado="listo", fin=time.time(), progreso=1.0,

@@ -43,9 +43,10 @@ LO QUE NO SE NEGOCIA
    red con ese mismo MP4: repetirlo pide decirlo (`repetir`).
 3. **Si una red falla, las demas siguen.** Cada red es su propio envio, con su
    estado y su enlace.
-4. **La clave nunca baja a la pantalla.** Hasta que la Configuracion tenga su
-   casilla (cuando se una `arreglos-voz`), se lee del almacen si ya esta, de
-   `UPLOADPOST_API_KEY` en el entorno o del `.env` de `secretos/`.
+4. **La clave nunca baja a la pantalla.** Se pone en Configuracion → Publicar
+   en redes (el almacen de `pasos/claves.py`, espejada en el `.env` de
+   secretos como `UPLOADPOST_API_KEY`); la pantalla solo ve los cuatro
+   ultimos caracteres.
 """
 import datetime as dt
 import hashlib
@@ -192,23 +193,25 @@ def _leer_video(raiz, pid):
 # ---------------------------------------------------------------------- clave
 
 def clave():
-    """(clave, de donde sale). Nunca se devuelve por la API: solo el origen."""
+    """(clave, de donde sale). Nunca se devuelve por la API: solo el origen.
+
+    La casilla de Configuracion la guarda en el almacen de claves
+    (`pasos/claves.py`), que la espeja en el .env de secretos; una puesta a mano
+    en ese .env tambien vale. `UPLOADPOST_API_KEY` en el entorno del servicio,
+    la ultima."""
     try:
-        almacen = CLAVES._leer_json(CLAVES.FICHERO, {}) or {}
-        guardada = str(((almacen.get("uploadpost") or {}).get("clave")) or "").strip()
+        bruto = CLAVES._leer_json(CLAVES.FICHERO, {}) or {}
+        propia = str(((bruto.get("uploadpost") or {}).get("clave")) or "").strip()
+        if propia:
+            return propia, "almacen"
+        guardada = str(CLAVES.leer()["uploadpost"]["clave"] or "").strip()
         if guardada:
-            return guardada, "almacen"
+            return guardada, "env"
     except Exception:                                   # noqa: BLE001
         pass
     entorno = str(os.environ.get("UPLOADPOST_API_KEY") or "").strip()
     if entorno:
         return entorno, "entorno"
-    try:
-        del_env = str(CLAVES._valores_env().get("UPLOADPOST_API_KEY") or "").strip()
-    except Exception:                                   # noqa: BLE001
-        del_env = ""
-    if del_env:
-        return del_env, "env"
     return "", ""
 
 
@@ -232,10 +235,9 @@ def cliente(raiz=None):
     valor, _origen = clave()
     if not valor:
         raise ErrorPublicar(
-            "falta la clave de Upload-Post. Mientras la Configuración no tenga su "
-            "casilla, ponla en el .env de secretos como UPLOADPOST_API_KEY=… "
-            "(nunca en un chat). Sin clave puedes publicar a mano: copia los "
-            "textos y descarga el MP4.", 409)
+            "falta la clave de Upload-Post: ponla en Configuración → Publicar en "
+            "redes (nunca en un chat). Sin clave puedes publicar a mano: copia "
+            "los textos y descarga el MP4.", 409)
     return UP.ClienteUploadPost(valor)
 
 

@@ -3223,6 +3223,12 @@ def publicar_en_redes(navegador, datos):
     pg.p.locator(".ajustes-fijos > summary").first.click()
     pg.captura("publicar_cuentas")
 
+    # la clave, en Configuración
+    pg.js("conmutarConfig(true);")
+    ok(pg.esperar("#cuerpo-config h3", "Publicar en redes", 10),
+       "Configuración tiene la casilla de la clave de Upload-Post")
+    pg.js("conmutarConfig(false);")
+
     # Inicio y Automatizar
     pg.pulsar("#barra-modulos .boton-modulo", "Inicio")
     ok(pg.esperar(".tarjetas-modulo .tarjeta-modulo h3", "Publicar", 10), "Inicio: las tres tarjetas")

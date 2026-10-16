@@ -423,6 +423,24 @@ def prueba_studio():
               "con UPLOADPOST_API_KEY en el .env de secretos la ve")
         ok("up_secreta_del_env_987654" not in json.dumps(r), "y la clave no baja entera")
         igual(r["clave"]["cola"], "…7654", "solo los cuatro últimos")
+        c = s.get(base + "/api/claves").json()
+        igual((c.get("uploadpost") or {}).get("puesta"), True,
+              "Configuración la enseña como puesta (la del .env cuenta)")
+        ok("up_secreta_del_env_987654" not in json.dumps(c), "sin bajar entera")
+        s.put(base + "/api/claves", json={"jamendo": {"clave": "jamendo_de_prueba_1234"}})
+        with open(os.path.join(carpeta, "secretos", ".env"), encoding="utf-8") as fh:
+            env = fh.read()
+        ok("UPLOADPOST_API_KEY=up_secreta_del_env_987654" in env,
+           "guardar otra clave no borra la de Upload-Post del .env")
+        r = s.put(base + "/api/claves", json={"uploadpost": {"clave": "up_desde_configuracion_5555"}})
+        igual((r.json().get("uploadpost") or {}).get("cola"), "…5555", "se cambia desde Configuración")
+        r = s.get(base + "/api/publicar/estado").json()
+        igual(r["clave"]["origen"], "almacen", "y queda en el almacén de claves")
+        with open(os.path.join(carpeta, "secretos", ".env"), encoding="utf-8") as fh:
+            ok("UPLOADPOST_API_KEY=up_desde_configuracion_5555" in fh.read(), "espejada en el .env")
+        s.put(base + "/api/claves", json={"uploadpost": {"clave": ""}})
+        r = s.get(base + "/api/publicar/estado").json()
+        igual(r["clave"]["puesta"], False, "«Quitar» la quita de verdad (también del .env)")
     finally:
         proceso.terminate()
         proceso.wait(timeout=15)

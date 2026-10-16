@@ -2418,6 +2418,7 @@ function pintarConfig() {
   caja.appendChild(seccionPronunciacion());
   caja.appendChild(seccionCLI());
   caja.appendChild(seccionOtrasClaves(ficha));
+  caja.appendChild(seccionClaveUploadPost(ficha));  // Publicar en redes (rama publicar-redes-1)
   caja.appendChild(h('div', { clase: 'fila' },
     h('button', {
       clase: 'mini fantasma',
@@ -16916,10 +16917,11 @@ function avisoClavePublicar(clave) {
       ? h('div', { clase: 'caja-aviso' }, 'Upload-Post SIMULADO: nada sale de verdad a ninguna red.')
       : null;
   }
-  return h('div', { clase: 'caja-aviso' },
-    'Todavía no hay clave de Upload-Post. Puedes preparar los textos y publicar a mano (copiar y descargar el MP4). '
-    + 'Para publicar y programar desde aquí, pon la clave en el .env de secretos del servidor como '
-    + 'UPLOADPOST_API_KEY (nunca en un chat): la casilla de Configuración llega con la próxima versión.');
+  return h('div', { clase: 'caja-aviso fila' },
+    h('span', { clase: 'crece' }, 'Todavía no hay clave de Upload-Post. Puedes preparar los textos y publicar '
+      + 'a mano (copiar y descargar el MP4). Para publicar y programar desde aquí, pon la clave en '
+      + 'Configuración → Publicar en redes (nunca en un chat).'),
+    h('button', { clase: 'mini', onclick: () => conmutarConfig(true) }, 'Abrir Configuración'));
 }
 
 function cuandoLegible(iso) {
@@ -17438,7 +17440,7 @@ function seccionCuentasPublicar() {
       h('span', { clase: `pastilla ${clave.puesta ? 'ok' : 'aviso'}` },
         clave.simulado ? 'simulado' : clave.puesta ? `clave puesta ${clave.cola || ''}` : 'sin clave'),
       clave.origen && !clave.simulado ? h('span', { clase: 'meta' }, `(de ${clave.origen === 'env' ? 'el .env de secretos'
-        : clave.origen === 'entorno' ? 'el entorno del servicio' : 'el almacén de claves'})`) : null,
+        : clave.origen === 'entorno' ? 'el entorno del servicio' : 'Configuración'})`) : null,
       h('span', { clase: 'crece' }),
       h('button', { clase: 'mini', disabled: !clave.puesta, onclick: probarClavePublicar }, 'Probar')),
     clave.puesta ? null : avisoClavePublicar(clave)));
@@ -17522,6 +17524,34 @@ function bloquePublicarEnVideo(v) {
   caja.appendChild(h('a', { href: '#', clase: 'boton-enlace destacado',
     onclick: ev => { ev.preventDefault(); abrirPublicarVideo(v.pid); } }, 'Enviar a Publicar'));
   return caja;
+}
+
+/* LA CLAVE DE UPLOAD-POST EN CONFIGURACIÓN, como las de la música y los
+   efectos: se escribe aquí, se guarda en el almacén de claves (y en el .env de
+   secretos) y la pantalla solo ve sus cuatro últimos caracteres. Se prueba en
+   Publicar → Cuentas y ajustes («Probar»), sin subir nada. */
+
+function seccionClaveUploadPost(ficha) {
+  const up = (ficha && ficha.uploadpost) || {};
+  const puesta = !!up.puesta;
+  const campo = h('input', { type: 'password', placeholder: puesta ? `puesta (${up.cola || ''})` : 'sin poner' });
+  return h('section', { clase: 'bloque-config' },
+    h('h3', {}, 'Publicar en redes'),
+    h('div', { clase: 'pista' },
+      'La API key de upload-post.com (su panel → API Keys). Con ella, el módulo Publicar sube y programa en '
+      + 'TikTok, Reels, YouTube y Facebook (se prueba en Publicar → Cuentas y ajustes). '
+      + 'Sin ella se prepara todo y se publica a mano.'),
+    h('div', { clase: 'fila' },
+      h('b', {}, 'Upload-Post'), h('span', { clase: 'crece' }),
+      pastillaEstado(puesta ? 'ok' : 'vacio', puesta ? up.cola || '' : 'sin poner')),
+    h('div', { clase: 'fila-clave' }, campo,
+      h('button', { clase: 'mini', onclick: () => {
+        if (!campo.value.trim()) { toast('escribe la clave', true); return; }
+        guardarClaves({ uploadpost: { clave: campo.value.trim() } });
+        campo.value = '';
+      } }, 'Cambiar'),
+      puesta ? h('button', { clase: 'mini fantasma peligro',
+        onclick: () => guardarClaves({ uploadpost: { clave: '' } }) }, 'Quitar') : null));
 }
 
 montarModulos();

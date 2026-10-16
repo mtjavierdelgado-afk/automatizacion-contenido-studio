@@ -352,4 +352,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**229 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**238 endpoints.** Escrito por `generar_api.py` desde `app.py`.

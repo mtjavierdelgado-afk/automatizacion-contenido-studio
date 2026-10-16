@@ -34,10 +34,10 @@ vídeos, estilos, claves y contraseña no se tocan.
   cliente, «Conectar» para que conecte sus cuentas, y lo fijo del proyecto
   (hora por defecto, firma, hashtags, tono, marcar como hecho con IA, avisar a
   los suscriptores de YouTube).
-- **La clave de Upload-Post todavía no tiene casilla en Configuración** (llega
-  en la próxima versión). Mientras, va en el `.env` de la carpeta de secretos
-  del servidor como `UPLOADPOST_API_KEY=…`; nunca en un chat. Sin clave se
-  puede preparar todo y publicar a mano.
+- **La clave de Upload-Post va en Configuración → Publicar en redes**, como
+  las de la música y los efectos (nunca en un chat), y se prueba sin subir
+  nada en Publicar → Cuentas y ajustes. Sin clave se puede preparar todo y
+  publicar a mano.
 - Los textos para redes gastan tokens de tu suscripción de Claude y se apuntan
   en el coste del vídeo. Nada de Publicar deja obsoleto el vídeo.
 

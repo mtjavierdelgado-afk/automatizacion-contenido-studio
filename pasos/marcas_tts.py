@@ -259,7 +259,15 @@ def _es_romano_en_su_sitio(texto, m):
     if m.group(1) not in "VXLCDM":
         return False
     antes = texto[:m.start()]
-    return bool(_ANTES_DE_ROMANO.search(antes) or _TRAS_NOMBRE_DE_REY.search(antes))
+    if _ANTES_DE_ROMANO.search(antes):
+        return True
+    # DETRAS DE UN NOMBRE, solo V y X y nunca con punto: «Carlos V» y «Pío X»
+    # son reyes y papas, pero «Carlos M. Pérez» o «Juan D. Robles» son
+    # iniciales, y una inicial suelta es justo lo que hay que deletrear (la
+    # voz lee «M.» como «metros»; revision independiente del 16-10-2026)
+    if m.group(1) not in "VX" or re.match(r"\.\s+[A-ZÁÉÍÓÚÑ]", texto[m.end():]):
+        return False
+    return bool(_TRAS_NOMBRE_DE_REY.search(antes))
 
 
 def deletrear_letras_sueltas(texto):

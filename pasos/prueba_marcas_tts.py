@@ -316,12 +316,15 @@ igual("abreviaturas con punto o guion se dejan (S.A., EE. UU., T-shirt, X-Men, U
       "S.A. y EE. UU. con una T-shirt de X-Men y USB-C")
 igual("la I tampoco (en inglés es una palabra)", m.sanear("la I y la J"),
       "la I y la <spell>J</spell>")
+igual("pero una inicial detrás de un nombre sí («Carlos M. Pérez», «Juan D. Robles»)",
+      m.sanear("Carlos M. Pérez y Juan D. Robles"),
+      "Carlos <spell>M</spell>. Pérez y Juan <spell>D</spell>. Robles")
 igual("un número romano detrás de «siglo», «capítulo»… no se deletrea",
       m.sanear("En el siglo X y el capítulo V, la Series S."),
       "En el siglo X y el capítulo V, la Series <spell>S</spell>.")
 igual("detrás del nombre de un rey o un papa tampoco: «Carlos V» no es «Carlos uve»",
-      m.sanear("Carlos V, Felipe X, Pío X, León X, Ramsés C y Fernando D."),
-      "Carlos V, Felipe X, Pío X, León X, Ramsés C y Fernando D.")
+      m.sanear("Carlos V, Felipe X, Pío X, León X y el papa Pío X."),
+      "Carlos V, Felipe X, Pío X, León X y el papa Pío X.")
 igual("pero las consolas, los móviles y los planes se siguen deletreando",
       m.sanear("La Xbox Series X, el Galaxy S, el Plan B y la Series S."),
       "La Xbox Series <spell>X</spell>, el Galaxy <spell>S</spell>, "

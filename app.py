@@ -2299,9 +2299,10 @@ def _correr_regrabar(avisar, ctx, seccion_id, peticion, ajuste):
         ctx, plan, seccion_id, peticion, linea, textos_ahora, grabados, hechas,
         salidas, destino)
 
-    # LA REVISION, si sale gratis. Nada depende de ella, pero el reproductor de
-    # vista previa prefiere SU toma (`_audio_de_la_toma`): dejarla en la
-    # anterior hacia sonar la frase vieja. Sellarla es copiar; si no se puede
+    # LA REVISION, si sale gratis. Nada depende de ella (desde el 16-10 ni la
+    # vista previa: `_audio_de_la_toma` sirve la voz, la toma contra la que se
+    # cortaron los planos), pero dejarla en la anterior la deja diciendo la
+    # frase vieja. Sellarla es copiar; si no se puede
     # sellar, ejecutarla resintetizaria la toma ENTERA, y eso no lo ha pedido
     # nadie desde un boton de un tramo: se queda en obsoleto y se dice.
     revision = "sin_tocar"

@@ -9826,6 +9826,10 @@ function camaPrevia(clave) {
     PREVIA[clave].src = url;
     PREVIA[clave].dataset.url = url;
   }
+  /* UN TEMA SUELTO VA EN BUCLE, como en el render (`-stream_loop -1`): uno de
+     veinte segundos tiene que cubrir el vídeo entero. La cama ya trae el largo
+     del vídeo y no se repite. */
+  PREVIA[clave].loop = clave === 'musica' && !url.endsWith('/cama.wav');
   return PREVIA[clave];
 }
 
@@ -9847,7 +9851,11 @@ function reproducirTodoPrevia() {
   for (const clave of ['musica', 'efectos']) {
     const pista = camaPrevia(clave);
     if (!pista) continue;
-    const saltar = () => { try { pista.currentTime = e.t_in; } catch (fallo) { /* sin metadatos */ } };
+    const saltar = () => {
+      const dura = Number(pista.duration);
+      const segundo = pista.loop && Number.isFinite(dura) && dura > 0 ? e.t_in % dura : e.t_in;
+      try { pista.currentTime = segundo; } catch (fallo) { /* sin metadatos */ }
+    };
     if (pista.readyState >= 1) saltar();
     else pista.addEventListener('loadedmetadata', saltar, { once: true });
     pista.play().catch(fallo => {

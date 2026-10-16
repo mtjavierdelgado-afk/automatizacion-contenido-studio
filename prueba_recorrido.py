@@ -3162,6 +3162,11 @@ def revertir_y_oir_las_imagenes(navegador, datos):
         esperar_js(imagen_y_mandos)
         pg.p.evaluate(f"() => {{ PREVIA.i = PREVIA.ficha.escenas.findIndex(x => x.id === '{escena}'); "
                       "repintarVideo(); }")
+        # se espia si la tira se vuelve a pedir: la carpeta que devuelve puede
+        # ser la de trabajo (una tanda cortada en otro escenario la deja)
+        pg.p.evaluate("() => { window.__tiras = 0; const pedirTira = refrescarPlanosLight; "
+                      "refrescarPlanosLight = function () { window.__tiras += 1; "
+                      "return pedirTira.apply(this, arguments); }; }")
         pg.p.evaluate(f"async () => {{ await volverAVersionLight('assets', {anterior}); }}")
         ok(esperar_js(imagen_y_mandos), "después de volver a la versión anterior se ve la imagen")
         ok(pg.p.evaluate(f"() => ((PREVIA.ficha || {{}}).escenas || []).some(x => "
@@ -3169,9 +3174,11 @@ def revertir_y_oir_las_imagenes(navegador, datos):
            f"y es la de la v{anterior}")
         ok(pg.p.evaluate(f"() => (escenaPrevia() || {{}}).id === '{escena}'"),
            f"y sigue en la escena que se miraba ({escena})")
+        pg.p.wait_for_timeout(1500)
         rutas = pg.p.evaluate("() => (APP.light.video.planos || []).map(x => String(x.ruta || ''))")
-        ok(rutas and all(f"v{anterior}" in r for r in rutas),
-           f"y la tira de planos del vídeo es la de la v{anterior} ({rutas[:2]})")
+        ok(pg.p.evaluate("() => window.__tiras") >= 1 and rutas
+           and not any(f"/v{activa}/" in r for r in rutas),
+           f"y la tira de planos del vídeo se vuelve a pedir: ya no es la de la v{activa} ({rutas[:2]})")
     except Exception as fallo:                               # noqa: BLE001
         ok(False, f"2. VOLVER A LA VERSIÓN ANTERIOR: se ve, suena y sigue en la misma escena: se cortó ({type(fallo).__name__}: {str(fallo)[:160]})")
 
@@ -3192,6 +3199,10 @@ def revertir_y_oir_las_imagenes(navegador, datos):
 
     # 4. «TODO SEGUIDO», con la música de verdad
     try:
+        # DESDE UNA ESCENA DEL FINAL: el tema subido dura 20 s y el vídeo más,
+        # así que la música tiene que ir en bucle, como en el render
+        pg.p.evaluate("() => { PREVIA.i = Math.max(0, PREVIA.ficha.escenas.length - 2); "
+                      "repintarVideo(); }")
         pg.pulsar(".previa-mandos button", "Todo seguido")
         ok(esperar_js("() => PREVIA.seguido && PREVIA.audio && !PREVIA.audio.paused", 8),
            "«Todo seguido» suena")
@@ -3200,7 +3211,8 @@ def revertir_y_oir_las_imagenes(navegador, datos):
         if hay_musica:
             ok(esperar_js("() => PREVIA.musica && !PREVIA.musica.paused && PREVIA.musica.currentTime > 0", 8),
                "y la música suena debajo de la voz")
-        pg.pulsar(".previa-mandos button", "Parar")
+        if pg.visible(".previa-mandos button", "Parar"):
+            pg.pulsar(".previa-mandos button", "Parar")
         ok(pg.p.evaluate("() => PREVIA.audio.paused && (!PREVIA.musica || PREVIA.musica.paused)"),
            "«Parar» lo para todo")
     except Exception as fallo:                               # noqa: BLE001

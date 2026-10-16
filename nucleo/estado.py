@@ -1229,7 +1229,7 @@ class Estado:
             self._sincronizar()
             datos = self._doc["pasos"][paso_id]
             versiones = datos.get("versiones", [])
-            if len(versiones) <= maximo:
+            if not versiones:
                 return []
             activa = datos.get("activa")
             numeros = sorted(v.get("n", 0) for v in versiones)
@@ -1237,17 +1237,37 @@ class Estado:
             if activa is not None:
                 guardar.add(activa)
             fuera = [n for n in numeros if n not in guardar]
-            if not fuera:
-                return []
-            datos["versiones"] = [v for v in versiones if v.get("n", 0) in guardar]
-            self._guardar()
-        for n in fuera:
-            shutil.rmtree(self.proyecto.ruta_paso(paso_id, n), ignore_errors=True)
+            if fuera:
+                datos["versiones"] = [v for v in versiones if v.get("n", 0) in guardar]
+                self._guardar()
+        # Y LAS HUERFANAS DE UNA PODA ANTERIOR: en Windows un mp4 abierto (un
+        # reproductor, el antivirus) deja su carpeta a medias, y como ya no
+        # esta en el documento nadie la volvia a mirar. Solo POR DEBAJO de la
+        # mas vieja que se guarda: una por encima es de un `completar` roto, y
+        # la siguiente pasada reutiliza ese numero a proposito.
+        minimo = min(guardar)
+        carpeta = os.path.dirname(self.proyecto.ruta_paso(paso_id, minimo))
+        for nombre in os.listdir(carpeta):
+            if nombre.startswith("v") and nombre[1:].isdigit():
+                n = int(nombre[1:])
+                if n < minimo and n not in guardar and n not in fuera:
+                    fuera.append(n)
+        quedan = []
+        for n in sorted(fuera):
+            ruta = self.proyecto.ruta_paso(paso_id, n)
+            shutil.rmtree(ruta, ignore_errors=True)
+            if os.path.exists(ruta):
+                quedan.append(f"v{n}")
             try:
                 os.remove(self._ruta_manifiesto(paso_id, n))
             except FileNotFoundError:
                 pass
-        return fuera
+        if not fuera:
+            return []
+        print(f"[estado] {paso_id}: podadas {len(fuera)} versiones viejas"
+              + (f"; no se han podido borrar del todo {', '.join(quedan)} "
+                 "(se reintenta en la siguiente)" if quedan else ""))
+        return sorted(fuera)
 
     def revertir(self, paso_id, version):
         """Activa una version anterior; nada se borra y aguas abajo se recalcula."""

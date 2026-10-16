@@ -801,6 +801,14 @@ def t10_podar_render(base):
        "y su carpeta no se ha borrado aunque ya no este entre las 5 ultimas")
     ok(vieja in [v["n"] for v in e.versiones("render")], "ni su entrada")
 
+    # una carpeta que una poda anterior no pudo borrar (un mp4 abierto en
+    # Windows) se vuelve a intentar en la siguiente
+    huerfana = proyecto.ruta_paso("render", 1, crear=True)
+    with open(os.path.join(huerfana, "video.mp4"), "w") as fh:
+        fh.write("quedo a medias")
+    e.podar_versiones("render")
+    ok(not os.path.exists(huerfana), "la carpeta huerfana de una poda anterior se borra")
+
     # los demas pasos no se podan: sus versiones son pequenas y se revierten
     for i in range(7):
         e.completar("assets", {"total": 4}, {u: {"png": f"{i}"} for u in UNIDADES})

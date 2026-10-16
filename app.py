@@ -11311,8 +11311,14 @@ def muestra_de_voz(cuerpo: dict = Body(default=None)):
     p4 = PASOS_MODULOS.p4_voz
     light = _light()
     texto = p4.recortar_texto(light.bloques_de_escucha(idioma), 12, None)
-    clave = hashlib.sha256(json.dumps([voz_id, idioma, texto, p4.simulado()],
-                                      ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+    # Lo que se MANDA lleva la lista «Cómo se pronuncia», como en el vídeo; y
+    # entra en la clave, o al cambiar la lista seguiría sonando la muestra vieja.
+    # Si no cambia nada, la clave es la de siempre y no se vuelve a pagar.
+    para_voz = p4.texto_para_voz(texto)
+    clave = hashlib.sha256(json.dumps(
+        [voz_id, idioma, texto, p4.simulado()]
+        + ([para_voz] if para_voz != texto else []),
+        ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
     carpeta = _carpeta_muestras_voz()
     nombre = f"voz_{clave}.wav"
     ruta = os.path.join(carpeta, nombre)
@@ -11321,7 +11327,7 @@ def muestra_de_voz(cuerpo: dict = Body(default=None)):
             os.makedirs(carpeta, exist_ok=True)
             try:
                 cfg = p4.resolver_params({"voz_id": voz_id, "idioma": idioma})
-                wav, _duracion, _palabras = p4.sintetizar_toma(texto, cfg)
+                wav, _duracion, _palabras = p4.sintetizar_toma(para_voz, cfg)
             except (Exception, SystemExit) as fallo:  # noqa: BLE001
                 raise ErrorApi(502, f"no se ha podido sintetizar la muestra: {fallo}")
             temporal = ruta + ".tmp"
@@ -12720,12 +12726,16 @@ def _imagenes_ya_generadas(ctx, planos):
     return hechas
 
 
-def _coste_previsto(ctx, pestanas):
+def _coste_previsto(ctx, pestanas, modo="pendientes"):
     """Lo que va a costar esta tanda, en dolares y en imagenes.
 
     Se dice ANTES de pulsar, que es la unica forma de que sirva. Las dos partes
     caras del Estudio son las IMAGENES (una por plano) y el TTS (por caracter);
     todo lo que llama al CLI va por la suscripcion y no entra aqui.
+
+    EL MODO CUENTA (D5, 16-10-2026). La voz no tiene cache: en modo 'todo' se
+    vuelve a sintetizar ENTERA aunque estuviera al dia, y «Regenerar Audio» la
+    prometia a 0 $ porque aqui solo se miraba si estaba al dia.
     """
     light = PASOS_MODULOS.presets_light
     planos = _planos_previstos(ctx)
@@ -12761,8 +12771,9 @@ def _coste_previsto(ctx, pestanas):
     imagenes += hojas
     usd_imagenes = round(imagenes * usd_imagen, 3)
     usd_tts = round(caracteres * usd_caracter, 4)
-    # la voz ya grabada y al dia no se vuelve a pagar en una tanda «pendientes»
-    voz_al_dia = ctx.estado.estado_de("voz") == "listo"
+    # la voz ya grabada y al dia no se vuelve a pagar en una tanda «pendientes»;
+    # en una 'todo' se graba otra vez entera, y se paga entera
+    voz_al_dia = modo == "pendientes" and ctx.estado.estado_de("voz") == "listo"
     usd_tts_por_generar = 0.0 if voz_al_dia else usd_tts
     # LO QUE YA ESTA HECHO VIAJA AL LADO DEL TECHO, no en su lugar. El total
     # sigue siendo lo que cuesta el video entero --que es lo que hay que pagar
@@ -12780,6 +12791,7 @@ def _coste_previsto(ctx, pestanas):
             "imagenes_hechas": hechas, "imagenes_por_generar": por_generar,
             "usd_por_generar": round(por_generar * usd_imagen + usd_tts_por_generar, 3),
             "caracteres": caracteres, "usd_tts": usd_tts,
+            "usd_tts_por_generar": round(usd_tts_por_generar, 4), "modo": modo,
             "usd_total": round(usd_imagenes + usd_tts, 3),
             "planos": planos}
 
@@ -12940,7 +12952,7 @@ def _plan_de_generacion(ctx, pestanas, modo="pendientes", datos=None):
         "fases": fases,
         "segundos": round(total, 1),
         "tareas": sum(len(f["pendientes"]) for f in fases),
-        "coste": _coste_previsto(ctx, pestanas),
+        "coste": _coste_previsto(ctx, pestanas, modo),
         "impedimentos": [i for f in fases for i in f["impedimentos"]],
     }
 

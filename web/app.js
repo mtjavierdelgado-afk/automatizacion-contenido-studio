@@ -7926,19 +7926,34 @@ function textoDelPlan(tanda) {
 const PLANES_LIGHT = { ultima: {} };
 
 
-async function refrescarPlanLight(tanda, forzar) {
+/* CON `modo` SE PIDE EL PLAN DEL MODO CON EL QUE SE VA A LANZAR (D5,
+   16-10-2026). «Regenerar Audio» lanza en 'todo' --la voz entera otra vez--
+   y su precio salia del plan 'pendientes', que con la voz al dia era 0 $. Se
+   guarda aparte (`voz:todo`): el de 'pendientes' sigue diciendo si queda algo
+   por grabar, que es lo que apaga el boton y marca los bloques editados. */
+function clavePlanLight(tanda, modo) {
+  return modo && modo !== 'pendientes' ? `${tanda}:${modo}` : tanda;
+}
+
+async function refrescarPlanLight(tanda, forzar, modo) {
   const v = APP.light.video;
   if (!v.pid || !tanda) return;
-  const clave = `${v.pid}:${tanda}`;
+  const guardado = clavePlanLight(tanda, modo);
+  const clave = `${v.pid}:${guardado}`;
   if (!forzar && Date.now() - (PLANES_LIGHT.ultima[clave] || 0) < 3000) return;
   PLANES_LIGHT.ultima[clave] = Date.now();
   try {
-    const plan = await pedir(`${API.proyecto(v.pid)}/generar?tanda=${tanda}`);
-    /* Se repinta SOLO si el numero de tareas ha cambiado: repintar siempre
-       desde aqui seria un bucle, porque esto se llama durante el pintado. */
-    const antes = (v.planes[tanda] || {}).tareas;
-    v.planes[tanda] = plan;
-    if (antes !== plan.tareas) setTimeout(pintarLight, 0);
+    const plan = await pedir(`${API.proyecto(v.pid)}/generar?tanda=${tanda}`
+      + (guardado !== tanda ? `&modo=${encodeURIComponent(modo)}` : ''));
+    /* Se repinta SOLO si ha cambiado lo que se ensena (las tareas o el
+       precio): repintar siempre desde aqui seria un bucle, porque esto se
+       llama durante el pintado. */
+    const previo = v.planes[guardado] || {};
+    const antes = `${previo.tareas}|${(previo.coste || {}).usd_por_generar}`;
+    v.planes[guardado] = plan;
+    if (antes !== `${plan.tareas}|${(plan.coste || {}).usd_por_generar}`) {
+      setTimeout(pintarLight, 0);
+    }
   } catch (e) { /* sin plan: los botones se quedan como estaban */ }
 }
 
@@ -9058,8 +9073,8 @@ function ayudaAudio(hayAudio, queda) {
       + 'ediciones a mano. No queda nada que grabar.';
   }
   return hayAudio
-    ? 'Vuelve a grabar la toma con la voz del estilo. Se sintetiza el texto de '
-      + 'ahora; lo que no haya cambiado sale de la cache y no se vuelve a pagar.'
+    ? 'Vuelve a grabar la toma ENTERA con la voz del estilo y el texto de '
+      + 'ahora. Se paga toda la voz otra vez, también lo que no ha cambiado.'
     : 'Sintetiza la toma completa con la voz del estilo y la alinea con el '
       + 'texto, que es lo que después coloca los subtítulos.';
 }
@@ -9104,14 +9119,18 @@ function pieLight() {
      cada repintado no son dos peticiones por segundo. */
   refrescarPlanLight('voz');
   refrescarPlanLight('video');
+  /* EL PRECIO DEL BOTON, DEL MODO CON EL QUE LANZA (D5): con audio, 'todo'. */
+  const modoVoz = hayAudio ? 'todo' : 'pendientes';
+  refrescarPlanLight('voz', false, modoVoz);
   const quedaVoz = quedaTandaLight('voz');
   const quedaVideo = quedaTandaLight('video');
   return h('div', { clase: 'pie-guion' },
-    conAyuda(unirAyuda(ayudaAudio(hayAudio, quedaVoz), textoDelPlan('voz')),
+    conAyuda(unirAyuda(ayudaAudio(hayAudio, quedaVoz),
+      textoDelPlan(quedaVoz === false ? 'voz' : clavePlanLight('voz', modoVoz))),
       h('button', {
         clase: 'primario',
         disabled: corriendo || !hayGuion || quedaVoz === false,
-        onclick: () => lanzarTandaLight('voz', hayAudio ? 'todo' : 'pendientes'),
+        onclick: () => lanzarTandaLight('voz', modoVoz),
       }, hayAudio ? 'Regenerar Audio' : 'Generar Audio')),
     /* EN MEDIO Y A TODO EL HUECO QUE SOBRE: es lo unico de la barra que cambia
        solo, y entre los dos botones se ve sin buscarla. Cuando no corre nada no

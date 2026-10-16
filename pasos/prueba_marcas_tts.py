@@ -319,7 +319,17 @@ igual("la I tampoco (en inglés es una palabra)", m.sanear("la I y la J"),
 igual("un número romano detrás de «siglo», «capítulo»… no se deletrea",
       m.sanear("En el siglo X y el capítulo V, la Series S."),
       "En el siglo X y el capítulo V, la Series <spell>S</spell>.")
-for frase in ("Es la S. Luego la T.", 'la <spell>FBI</spell> y la S',
+igual("detrás del nombre de un rey o un papa tampoco: «Carlos V» no es «Carlos uve»",
+      m.sanear("Carlos V, Felipe X, Pío X, León X, Ramsés C y Fernando D."),
+      "Carlos V, Felipe X, Pío X, León X, Ramsés C y Fernando D.")
+igual("pero las consolas, los móviles y los planes se siguen deletreando",
+      m.sanear("La Xbox Series X, el Galaxy S, el Plan B y la Series S."),
+      "La Xbox Series <spell>X</spell>, el Galaxy <spell>S</spell>, "
+      "el Plan <spell>B</spell> y la Series <spell>S</spell>.")
+igual("el nombre tiene que ser palabra entera (Marcarlos no es Carlos)",
+      m.sanear("Marcarlos V y Juan S"),
+      "Marcarlos <spell>V</spell> y Juan <spell>S</spell>")
+for frase in ("Es la S. Luego la T.", "Carlos V y la Series S",'la <spell>FBI</spell> y la S',
               '<speed ratio="0.9"/>Es la S. <break time="500ms"/>Luego'):
     una = m.sanear(frase)
     comprobar(f"sigue siendo idempotente: {frase!r}", m.sanear(una) == una)

@@ -341,6 +341,49 @@ def prueba_previsualizacion(proyecto):
               "el recorte es mas corto que el guion entero")
 
 
+def prueba_escucha_pronunciada(proyecto, base):
+    """«ESCUCHAR» SUENA COMO EL VIDEO (16-10-2026): la previsualizacion manda el
+    texto saneado y con «Como se pronuncia», y la cache cambia con la lista."""
+    print("\n[5b] la escucha pasa por «Como se pronuncia» y por las letras sueltas")
+    import pronunciacion as pron  # noqa: PLC0415
+    params = {"preset": "divulgacion_cercana",
+              "bloques": [{"id": "M1", "texto": "Alquila la PlayStation y la Series S."}]}
+    mandado = []
+    original = p4_voz._toma_simulada
+
+    def espia(texto, cfg):
+        mandado.append(texto)
+        return original(texto, cfg)
+    antes = os.environ.get("ESTUDIO_PRONUNCIACIONES")
+    os.environ["ESTUDIO_PRONUNCIACIONES"] = os.path.join(base, "pron_escucha.json")
+    p4_voz._toma_simulada = espia
+    try:
+        pron.guardar([])
+        sin_lista = p4_voz.previsualizar(proyecto, params, segundos=8)
+        comprobar(mandado and "<spell>S</spell>" in mandado[-1],
+                  f"la letra suelta va a deletrear, como en el video ({mandado[-1:]!r})")
+        pron.guardar(pron.validar([{"escrito": "PlayStation", "dicho": "Pléi Estéishon"}]))
+        con_lista = p4_voz.previsualizar(proyecto, params, segundos=8)
+        comprobar("Pléi Estéishon" in mandado[-1] and "PlayStation" not in mandado[-1],
+                  f"a la voz le llega como suena ({mandado[-1]!r})")
+        comprobar(con_lista != sin_lista,
+                  "cambiar la lista da OTRA escucha: no sigue sonando la vieja")
+        with open(con_lista[:-4] + ".json", encoding="utf-8") as fh:
+            meta = json.load(fh)
+        comprobar("PlayStation" in " ".join(p["w"] for p in meta["palabras"]),
+                  "y sus marcas vuelven a la palabra escrita")
+        veces = len(mandado)
+        igual(p4_voz.previsualizar(proyecto, params, segundos=8), con_lista,
+              "con la misma lista se reutiliza la escucha")
+        igual(len(mandado), veces, "y no se vuelve a sintetizar (no se paga dos veces)")
+    finally:
+        p4_voz._toma_simulada = original
+        if antes is None:
+            os.environ.pop("ESTUDIO_PRONUNCIACIONES", None)
+        else:
+            os.environ["ESTUDIO_PRONUNCIACIONES"] = antes
+
+
 def prueba_trabajo_en_segundo_plano(base):
     print("\n[6] paso 4 dentro del gestor de trabajos")
     proyecto, estado = preparar_proyecto(base, "Con Gestor")
@@ -1017,6 +1060,7 @@ def main():
         prueba_lectura_guion(base)
         proyecto, estado, salidas = prueba_paso4(base)
         prueba_previsualizacion(proyecto)
+        prueba_escucha_pronunciada(proyecto, base)
         prueba_trabajo_en_segundo_plano(base)
         prueba_paso5(proyecto, estado, salidas)
         prueba_regrabacion_completa(proyecto)

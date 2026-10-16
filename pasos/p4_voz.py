@@ -76,8 +76,9 @@ import requests
 
 try:
     from . import (cadencia, cli_claude, comun, estadisticas, estructura_guion,
-                   marcas_tts, presets_voz)
+                   marcas_tts, presets_voz, pronunciacion)
 except ImportError:  # ejecutado con la carpeta pasos directamente en sys.path
+    import pronunciacion
     import cli_claude
     import estructura_guion
     import comun
@@ -751,11 +752,38 @@ def agrupar_secciones(bloques, umbral_ms=UMBRAL_SECCION_MS, maximo=MAX_SECCIONES
     return secciones
 
 
+class TomaCortada(RuntimeError):
+    """La toma por contexto se ha roto DESPUES de que llegara audio.
+
+    Lo que llego ya lo ha cobrado Cartesia, asi que quien la llamo no puede
+    tratarla como un fallo gratis: ni volver a grabarlo todo por otro camino
+    sin decir nada (se pagaria dos veces), ni dejar el intento sin apuntar en
+    el gasto. `cobrado` es la marca que lee el medidor (`nucleo/coste.py`).
+    """
+
+    cobrado = True
+
+    def __init__(self, mensaje, caracteres=0, secciones=0, audio_s=0.0,
+                 palabras=0):
+        super().__init__(mensaje)
+        self.caracteres = int(caracteres or 0)
+        self.secciones = int(secciones or 0)
+        self.audio_s = float(audio_s or 0.0)
+        self.palabras = int(palabras or 0)
+
+
 def _toma_por_contexto(trozos, cfg, progreso):
     """Una toma en varias entradas del MISMO contexto. (wav, dur, palabras).
 
     Suena como la toma unica porque la prosodia se mantiene entre entradas; lo
     que se gana es saber donde empieza y acaba cada seccion dentro del audio.
+
+    SI SE ROMPE CON AUDIO YA RECIBIDO lanza `TomaCortada` (D4 del informe de
+    arreglos v2b): Cartesia ya ha cobrado lo que genero, y la toma de una vez
+    que hacia de respaldo lo volvia a pagar entero, sin secciones y sin que el
+    primer gasto quedara apuntado. Si se rompe SIN haber recibido nada
+    (conexion rechazada, un error de Cartesia de entrada) lanza lo de siempre
+    y el respaldo sigue valiendo: no se ha cobrado nada.
     """
     import websocket  # websocket-client; solo hace falta por este camino
 
@@ -775,12 +803,13 @@ def _toma_por_contexto(trozos, cfg, progreso):
     contexto = f"estudio_{hashlib.sha256(str(trozos).encode()).hexdigest()[:12]}"
     previstas = max(1, sum(len(t.split()) for t in trozos))
     conexion = websocket.create_connection(url, timeout=600)
+    pcm, palabras, enviados = [], [], []
     try:
         for indice, texto in enumerate(trozos):
             conexion.send(json.dumps({**base, "context_id": contexto,
                                       "transcript": texto,
                                       "continue": indice < len(trozos) - 1}))
-        pcm, palabras = [], []
+            enviados.append(texto)
         ultimo_aviso = 0.0
         while True:
             # Un solo 'done' para TODO el contexto, no uno por entrada: esperar
@@ -805,6 +834,10 @@ def _toma_por_contexto(trozos, cfg, progreso):
                          f"{len(palabras)} de ~{previstas} palabras")
             if evento.get("type") == "done":
                 break
+    except Exception as fallo:  # noqa: BLE001
+        if not any(pcm):
+            raise
+        raise _cortada(fallo, enviados, pcm, palabras) from fallo
     finally:
         try:
             conexion.close()
@@ -815,9 +848,28 @@ def _toma_por_contexto(trozos, cfg, progreso):
     if not crudo:
         raise RuntimeError("Cartesia devolvio la toma sin audio")
     if not palabras:
-        raise RuntimeError("Cartesia devolvio audio sin marcas de palabra: "
-                           "sin marcas no se puede sincronizar el montaje")
+        # el audio ha llegado entero, asi que esta cobrado: tampoco es gratis
+        raise _cortada(RuntimeError("Cartesia devolvio audio sin marcas de "
+                                    "palabra: sin marcas no se puede "
+                                    "sincronizar el montaje"),
+                       enviados, pcm, palabras)
     return motor.wav_desde_pcm(crudo), len(crudo) / (SR * 2), palabras
+
+
+def _cortada(fallo, enviados, pcm, palabras):
+    """La `TomaCortada` de una toma por contexto que se rompio con audio dentro.
+
+    Los caracteres son los de las entradas que llegaron a ENVIARSE: es lo que
+    Cartesia pudo generar y cobrar. Puede que no las terminara todas, pero
+    apuntar de mas un intento roto es un aviso; apuntar de menos es el hueco
+    que habia.
+    """
+    segundos = len(b"".join(pcm)) / (SR * 2)
+    return TomaCortada(
+        f"la conexion con Cartesia se ha cortado con la toma a medias "
+        f"({segundos:.1f} s de audio recibidos): {fallo}",
+        caracteres=sum(len(t) for t in enviados), secciones=len(enviados),
+        audio_s=segundos, palabras=len(palabras))
 
 
 def _toma_real(texto, cfg, progreso):
@@ -975,6 +1027,11 @@ def sintetizar_bloques(bloques, destino, cfg, avisar=None,
     # guarda entero en la meta -- la revision compara contra el --; lo que se
     # le manda a la voz va sin la cola de silencio.
     pausa_de, para_voz = pausas_de_final(anotados)
+    # COMO SE PRONUNCIA (Configuracion): lo que se MANDA lleva cada palabra de
+    # la lista escrita como suena; las marcas que vuelven se devuelven a la
+    # palabra escrita antes de repartirlas (ver pasos/pronunciacion.py).
+    lista_pron = pronunciacion.cargar()
+    para_voz = [dict(b, texto=pronunciacion.aplicar(b["texto"], lista_pron)) for b in para_voz]
     texto = " ".join(b["texto"].strip() for b in para_voz)
 
     # Y todo lo demas trabaja sobre lo que se OYE. La cuenta de palabras, la
@@ -1021,15 +1078,30 @@ def sintetizar_bloques(bloques, destino, cfg, avisar=None,
         avisa(0.05, f"{len(trozos)} secciones en un solo contexto")
         try:
             wav, duracion, palabras = _toma_por_contexto(trozos, cfg, progreso)
+        except TomaCortada as fallo:
+            # CON AUDIO YA RECIBIDO NO HAY RESPALDO (D4): Cartesia ha cobrado
+            # lo que genero, y grabar el texto entero otra vez de una sola
+            # tirada lo pagaba dos veces -- y ademas sin secciones, asi que
+            # regrabar por tramos dejaba de funcionar en ese video --. Se para
+            # aqui y se dice; el gasto del intento ya lo ha apuntado el medidor.
+            raise RuntimeError(
+                f"La conexion con Cartesia se ha cortado a mitad de la voz "
+                f"(habian llegado {fallo.audio_s:.1f} s de audio). Lo que "
+                f"llego ya lo ha cobrado Cartesia y queda apuntado en el "
+                f"gasto; no se vuelve a grabar sola para no pagarla dos veces. "
+                f"Vuelve a generar la voz cuando quieras reintentarlo. "
+                f"({fallo})") from fallo
         except Exception as fallo:  # noqa: BLE001
-            # Que el camino nuevo falle no puede dejar sin voz al video: se cae
-            # al de siempre, que es el mismo texto de una sola vez.
+            # Que el camino nuevo falle SIN haber recibido nada (no se ha
+            # cobrado) no puede dejar sin voz al video: se cae al de siempre,
+            # que es el mismo texto de una sola vez.
             avisa(0.06, f"el contexto no ha ido ({fallo}); se graba de una vez")
             wav = None
     if wav is None:
         wav, duracion, palabras = sintetizar_toma(texto, cfg, progreso)
         secciones = [{"id": "SB001", "bloques": [b["id"] for b in anotados]}]
     avisa(0.88, "repartiendo palabras entre bloques")
+    palabras = pronunciacion.devolver(palabras, lista_pron)
     escenas, reparto = _reparto(anotados, palabras)
 
     hueco = float(cfg.get("hueco_minimo") or 0.0)
@@ -1201,6 +1273,18 @@ def recortar_texto(bloques, segundos, velocidad=None):
     return texto if texto.endswith((".", "!", "?")) else texto + "."
 
 
+def texto_para_voz(texto, lista_pron=None):
+    """Lo que se MANDA a la voz para un texto ya limpio, igual que en el video.
+
+    Saneado (las letras sueltas van a <spell>) y con la lista «Como se
+    pronuncia» aplicada. Lo usan las ESCUCHAS: si la muestra se mandara a pelo,
+    lo que se oye en «Escuchar» no seria lo que luego dice el video (16-10-2026).
+    """
+    if lista_pron is None:
+        lista_pron = pronunciacion.cargar()
+    return pronunciacion.aplicar(marcas_tts.sanear(texto), lista_pron)
+
+
 def previsualizar(proyecto, params, segundos=20):
     """Sintetiza solo los primeros ~N segundos del guion para escuchar la voz.
 
@@ -1213,9 +1297,15 @@ def previsualizar(proyecto, params, segundos=20):
     if not texto:
         raise RuntimeError("el guion no tiene texto que previsualizar")
 
+    # La firma va sobre lo que se MANDA, no sobre lo escrito: cambiar la lista
+    # «Como se pronuncia» tiene que dar otra escucha, o seguiria sonando la vieja.
+    # Si no cambia nada, la firma es la de siempre y las escuchas ya pagadas valen.
+    lista_pron = pronunciacion.cargar()
+    para_voz = texto_para_voz(texto, lista_pron)
     firma = hashlib.sha256(json.dumps(
         [texto, cfg["modelo"], cfg["voz_id"], cfg["idioma"],
-         cfg["experimental_controls"], simulado()],
+         cfg["experimental_controls"], simulado()]
+        + ([para_voz] if para_voz != texto else []),
         sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:12]
     carpeta = proyecto.ruta("previsualizaciones")
     os.makedirs(carpeta, exist_ok=True)
@@ -1223,11 +1313,13 @@ def previsualizar(proyecto, params, segundos=20):
     if os.path.exists(ruta):
         return ruta
 
-    wav, duracion, palabras = sintetizar_toma(texto, cfg)
+    wav, duracion, palabras = sintetizar_toma(para_voz, cfg)
+    palabras = pronunciacion.devolver(palabras, lista_pron)
     with open(ruta, "wb") as fh:
         fh.write(wav)
     with open(ruta[:-4] + ".json", "w", encoding="utf-8") as fh:
-        json.dump({"texto": texto, "duracion": round(duracion, 3),
+        json.dump({"texto": texto, "mandado": para_voz,
+                   "duracion": round(duracion, 3),
                    "palabras": palabras, "controles": cfg,
                    "simulado": simulado()},
                   fh, ensure_ascii=False, indent=2)
@@ -1689,6 +1781,9 @@ def regrabar_seccion(bloques, seccion_id, cfg, meta, destino, peticion="",
               else b for b in nuevos]
     # la pausa del final de cada bloque, al montaje, como en la toma entera
     pausa_de, para_voz = pausas_de_final([b for b in nuevos if b["id"] in dentro])
+    # como en la toma entera: lo que se manda, como suena (pasos/pronunciacion.py)
+    lista_pron = pronunciacion.cargar()
+    para_voz = [dict(b, texto=pronunciacion.aplicar(b["texto"], lista_pron)) for b in para_voz]
     trozo = " ".join(b["texto"].strip() for b in para_voz)
 
     def progreso(fraccion, mensaje=""):
@@ -1706,6 +1801,7 @@ def regrabar_seccion(bloques, seccion_id, cfg, meta, destino, peticion="",
         avisa(0.35, f"grabando {seccion_id} ({len(trozo.split())} palabras)")
         wav_nuevo, _dur, marcas_nuevas = _toma_por_contexto(
             [trozo], cfg, progreso)
+    marcas_nuevas = pronunciacion.devolver(marcas_nuevas, lista_pron)
 
     # 2b. EL AIRE ENTRE LOS BLOQUES DE LA SECCION. La toma entera lo recibe de
     # `motor.espaciar`; la seccion regrabada no lo recibia, y sus bloques

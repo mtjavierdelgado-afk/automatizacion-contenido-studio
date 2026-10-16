@@ -160,10 +160,21 @@ def _numero(valor):
     return numero if numero >= 0 else None
 
 
+#: Tamanos que OpenAI cobra igual que otro ya tarifado. El vertical cuesta lo
+#: mismo que el apaisado (es el mismo lienzo girado), y hace falta aqui y no
+#: solo en tarifas.json: en el servidor las tarifas viven en los DATOS
+#: (`instalar.sh` las copia una vez y `asvs actualizar` no las toca), asi que
+#: una fila nueva en el fichero del repo no llega nunca a una instalacion que
+#: ya existe. Sin esto un video vertical sin `usage` se anotaba «sin tarifa».
+TAMANO_EQUIVALENTE = {"1024x1536": "1536x1024"}
+
+
 def tarifa_imagen(tamano, calidad):
     """USD por imagen de ese tamano y calidad, o None si no esta tarifada."""
     tabla = (tarifas().get("openai") or {}).get("usd_por_imagen") or {}
     fila = tabla.get(str(tamano))
+    if not isinstance(fila, dict) and str(tamano) in TAMANO_EQUIVALENTE:
+        fila = tabla.get(TAMANO_EQUIVALENTE[str(tamano)])
     if not isinstance(fila, dict):
         return None
     return _numero(fila.get(str(calidad)))
@@ -804,11 +815,32 @@ def _medir_toma_por_contexto(original):
     exactamente lo que se pinta cuando falta la tarifa por caracter.
 
     Se cuentan los caracteres que se ENVIARON, sumando las entradas del
-    contexto, y se anota DESPUES: si la llamada revienta no hay recuento
-    fiable, y un hueco es mejor que un numero inventado.
+    contexto, y se anota DESPUES: si la llamada revienta sin haber devuelto
+    nada no hay recuento fiable, y un hueco es mejor que un numero inventado.
+
+    PERO SI REVIENTA CON AUDIO YA RECIBIDO, SE ANOTA (D4 del informe de
+    arreglos v2b): Cartesia ya ha cobrado lo que genero, y no apuntarlo dejaba
+    fuera del medidor un gasto que si esta en la factura. La toma lo dice
+    levantando una excepcion con `cobrado` (`p4_voz.TomaCortada`), que trae
+    los caracteres que llego a enviar; se anota como `toma_cortada` y la
+    excepcion sigue su camino.
     """
     def medido(trozos, cfg, *args, **kwargs):
-        resultado = original(trozos, cfg, *args, **kwargs)
+        try:
+            resultado = original(trozos, cfg, *args, **kwargs)
+        except Exception as fallo:
+            if getattr(fallo, "cobrado", False):
+                ajustes = cfg if isinstance(cfg, dict) else {}
+                reportar_tts(int(getattr(fallo, "caracteres", 0) or 0),
+                             operacion="toma_cortada",
+                             detalle={"modelo": ajustes.get("modelo"),
+                                      "voz_id": ajustes.get("voz_id"),
+                                      "idioma": ajustes.get("idioma"),
+                                      "secciones": getattr(fallo, "secciones", None),
+                                      "audio_recibido_s": round(float(
+                                          getattr(fallo, "audio_s", 0) or 0), 2),
+                                      "cortada": True})
+            raise
         cfg = cfg if isinstance(cfg, dict) else {}
         piezas = list(trozos or [])
         reportar_tts(sum(len(str(t or "")) for t in piezas), operacion="toma",
@@ -854,16 +886,47 @@ def _medir_cli(original):
     return medido
 
 
+@contextlib.contextmanager
+def detalle_activo(**campos):
+    """Lo que se sabe de la imagen que se va a pedir y el motor no sabe.
+
+    El motor de imagen no sabe si dibuja un plano de un video de FOTO o de
+    ilustracion; quien lo sabe es el paso que la encarga. Lo apuntado aqui
+    viaja en el `detalle` de la operacion `imagen` que se anote dentro, en este
+    mismo hilo (el motor dibuja en el hilo que lo llama). Sirve para que el
+    precio «lo que te han cobrado» (`ajustes.precio_por_imagen`) se pueda
+    mirar por modo: un plano de foto no cuesta lo que uno de ilustracion."""
+    pila = getattr(_LOCAL, "detalles", None)
+    if pila is None:
+        pila = []
+        _LOCAL.detalles = pila
+    pila.append({k: v for k, v in campos.items() if v is not None})
+    try:
+        yield
+    finally:
+        pila.pop()
+
+
+def _detalle_en_vigor():
+    pila = getattr(_LOCAL, "detalles", None) or []
+    salida = {}
+    for campos in pila:
+        salida.update(campos)
+    return salida
+
+
 def _medir_imagen(original):
     def medido(prompt, referencias, *args, **kwargs):
         png, meta = original(prompt, referencias, *args, **kwargs)
         meta = meta if isinstance(meta, dict) else {}
         calidad = kwargs.get("quality") or meta.get("quality") or "low"
         tamano = meta.get("tamano") or kwargs.get("tamano") or "apaisado"
+        detalle = {"modelo": meta.get("modelo"),
+                   "refs": meta.get("refs"),
+                   "segundos": meta.get("segundos")}
+        detalle.update(_detalle_en_vigor())
         registro = reportar_openai(meta.get("usage"), calidad, tamano,
-                                   detalle={"modelo": meta.get("modelo"),
-                                            "refs": meta.get("refs"),
-                                            "segundos": meta.get("segundos")})
+                                   detalle=detalle)
         # Y EL IMPORTE DE VERDAD SE DEVUELVE, no solo se anota.
         #
         # El motor trae en `meta["coste"]` el precio de su TABLA POR IMAGEN
@@ -896,7 +959,13 @@ def _medir_produccion_imagen(original):
     def medido(nombre, prompt, referencias, destino, *args, **kwargs):
         carpeta = os.path.basename(os.path.dirname(str(destino)))
         prefijo = "escena" if carpeta == "escenas" else "asset"
-        with unidad_activa(f"{prefijo}:{nombre}"):
+        # el modo del video (foto o ilustracion) viaja con la operacion: los
+        # params del paso son el primer argumento tras el destino
+        params = args[0] if args else kwargs.get("p")
+        estilo = params.get("estilo") if isinstance(params, dict) else None
+        modo = "foto" if isinstance(estilo, dict) and estilo.get("modo") == "foto" \
+            else "ilustracion"
+        with unidad_activa(f"{prefijo}:{nombre}"), detalle_activo(modo=modo):
             return original(nombre, prompt, referencias, destino, *args, **kwargs)
     return medido
 

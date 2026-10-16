@@ -198,6 +198,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/direccion/proponer` | Escribe qué se ve en cada plano, con TODOS los planos delante de una vez. |
 | `GET` | `/api/proyectos/{pid}/imagenes/cola` | La cola de notas de imagenes: cual se dibuja, cuanto lleva y que espera. |
 | `DELETE` | `/api/proyectos/{pid}/imagenes/cola/{nid}` | Saca una nota de la cola (la que ya se esta dibujando no se para). |
+| `POST` | `/api/proyectos/{pid}/imagenes/calidad` | Rehace SOLO las imagenes de plano que siguen en otra calidad que la del video: {imagenes: cuantas se confirmaron} (409 si ya no son esas o hay algo en marcha). |
 | `POST` | `/api/proyectos/{pid}/imagenes/rehacer` | Pone en la cola las notas de imagenes: {notas?: [ids], desde_cero?} (sin ids, todas). |
 
 ## Sonido y transiciones
@@ -275,6 +276,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 |---|---|---|
 | `GET` | `/api/ajustes` | Lo que hay puesto, y lo que cuesta cada calidad de imagen. |
 | `PUT` | `/api/ajustes` | Cambia ajustes. NO toca ningun proyecto: es el valor de los NUEVOS. |
+| `GET` | `/api/pronunciaciones` | Las palabras que la voz dice como se escriben aqui (sobre todo en ingles). |
+| `PUT` | `/api/pronunciaciones` | {lista: [{escrito, dicho}]} -> la lista guardada. No graba nada ni paga nada. |
 | `GET` | `/api/ajustes-cli` | Catalogo de modelos y esfuerzos, y en que pasos se puede elegir. |
 | `GET` | `/api/estadisticas` | Historico de tiempos reales, entre todos los proyectos. |
 | `POST` | `/api/estadisticas/valoracion` | Anota si el resultado de un ajuste gusto o no. |

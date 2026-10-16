@@ -41,6 +41,110 @@ vídeos, estilos, claves y contraseña no se tocan.
 - Los textos para redes gastan tokens de tu suscripción de Claude y se apuntan
   en el coste del vídeo. Nada de Publicar deja obsoleto el vídeo.
 
+**Más arreglos de imágenes (16 de octubre)**
+- **Pegar una imagen ya no la manda al logo por sorpresa.** Con el cursor en
+  un campo de texto (el nombre del vídeo, unas indicaciones), una imagen pegada
+  no va a ninguna zona: sale un aviso para que pulses antes en la zona de
+  imágenes. Sin cursor en un campo, va a la zona que hayas tocado la última y
+  que se vea en pantalla; ninguna, tampoco el logo, la recibe por ser «la
+  única a la vista». Escribiendo la nota de una imagen, lo que pegues va a los
+  adjuntos de esa nota.
+- **Si OpenAI rechaza un plano con su filtro de seguridad, la tanda sigue con
+  los demás** y al final dice cuál (o cuáles) fue, con su frase, y qué hacer:
+  cambiar su nota o, si no tenía, escribirle una describiendo lo que se ve sin
+  marcas. Antes se paraban todos los planos siguientes de ese sitio y el aviso
+  decía «Cambia la nota» aunque no hubiera ninguna. Lo dibujado no se vuelve a
+  pagar al relanzar.
+- **Un microcorte de red ya no tumba la tanda con un error de Python.** Si no
+  se pudo ni conectar con OpenAI, se reintenta solo un par de veces (no se ha
+  cobrado nada). Si la conexión se corta con la imagen ya pedida, no se repite
+  sola, porque puede estar cobrada: lo dice claro y lo hecho se conserva.
+- **Rehacer una imagen con nota conserva las caras.** La hoja de reparto de
+  cada personaje del plano va siempre al rehacerlo, aunque el corrector no la
+  eligiera. Las demás imágenes no se tocan ni quedan obsoletas.
+
+**El dinero de las imágenes, revisado (15 de octubre)**
+- **Cambiar la calidad ya no promete lo que no hace.** «Traer el estilo» con
+  otra calidad decía «rehace las N imágenes» con su precio, y «Poner al día»
+  las conservaba sin redibujar ninguna. Ahora dice la verdad: lo ya dibujado
+  (también las hojas de reparto) se queda como está y la calidad nueva se
+  aplica a lo que se haga o rehaga. Nada se paga sin pulsar.
+- **En las diapositivas sale «N imágenes siguen en otra calidad»** con un
+  botón «¿Rehacerlas en media? ≈ X $». Pide confirmación con el precio y rehace
+  SOLO esas; las demás no se tocan. Las hojas de reparto se quedan como están
+  (rehacerlas obligaría a rehacer los planos que las usan).
+- **El $/min del deslizador de ritmo** sale con la calidad con la que nacerá
+  el vídeo: en un estilo de foto (que empieza en media) decía el de calidad
+  baja, un 43 % menos de lo real.
+- **El precio de antes de crear un vídeo** de foto respeta siempre el mínimo
+  de calidad media, aunque el estilo tenga «baja» guardada.
+- **«Lo que te han cobrado» cuenta solo imágenes de plano**, y por tipo de
+  imagen (foto o ilustración) cuando ya hay bastantes: las láminas de los
+  estilos se colaban y abarataban el precio de un plano de foto.
+- **Los vídeos verticales tienen su tarifa** cuando OpenAI no devuelve el
+  recuento de tokens (antes se apuntaban «sin tarifa»).
+
+**Copiar y pegar (15 de octubre)**
+- **Las imágenes se pegan con Ctrl+V** (⌘V en el Mac) en todas las zonas que
+  suben imágenes: las de referencia de un estilo (nuevo o el que editas), las
+  de las notas del vídeo y de cada imagen, el logo (del vídeo y del proyecto)
+  y los adjuntos del asistente. Suben igual que si eligieras el fichero: los
+  mismos topes y los mismos avisos. Si hay varias zonas a la vista, la imagen
+  va a la última que hayas tocado. Pegar texto en un campo sigue igual.
+- Debajo de cada zona sale «o pega una imagen (Ctrl+V)»; pulsarlo también
+  pega, y en el móvil es «📋 Pegar una imagen» (el navegador pide permiso la
+  primera vez).
+- **«Copiar» en las respuestas del asistente**: cada bloque de código lleva el
+  suyo arriba a la derecha, y cada respuesta uno en el pie para copiarla
+  entera, en texto llano (sin asteriscos ni comillas del formato).
+
+**La voz (14 de octubre)**
+- **Las palabras en inglés, como suenan.** En Configuración → **Cómo se
+  pronuncia** hay una lista de palabras con cómo deben sonar («Just Dance» →
+  «Yast Dans», «Logitech» → «Lóyitec», «PlayStation» → «Pléi Estéishon»…). La
+  voz las dice así; el guion y los subtítulos siguen escritos como siempre. Ya
+  viene con las marcas de tus vídeos, y puedes añadir, cambiar o quitar las que
+  quieras. Vale para las voces que grabes a partir de ahora.
+- **Adiós al «eco» y al zumbido entre bloques.** Cuando el Studio alargaba la
+  pausa entre dos bloques, repetía en bucle un trozo de esa pausa, y si el
+  trozo traía una respiración o el final de una palabra, se oía un murmullo
+  repetido o un zumbido de un segundo. Ahora rellena con un fondo suave
+  inventado con el mismo color que la pausa, sin repetir nada y sin copiar
+  sonidos de la voz. Se nota al volver a grabar la voz.
+- **Una letra suelta ya no se lee como una abreviatura.** La voz decía «Xbox
+  Series sur» en vez de «Series ese»: en español, una «S» sola se tomaba por
+  «Sur». Ahora cada consonante mayúscula suelta (S, X, T, B…) se deletrea con
+  el nombre de la letra. «A», «E», «O», «U» e «Y» se siguen leyendo como
+  palabras, y «S.A.», «T-shirt» o «USB-C» no cambian. Se nota al volver a
+  grabar la voz; el subtítulo sigue diciendo «S».
+- **Si se corta Cartesia a mitad, la voz ya no se paga dos veces.** Antes, si
+  la conexión se caía con parte del audio ya llegado, el Studio volvía a grabar
+  la voz entera por otro camino sin avisar (y Cartesia cobraba las dos) y ese
+  primer intento no salía en el gasto. Ahora se para con un mensaje claro para
+  que lo reintentes tú, y lo que Cartesia llegó a cobrar queda apuntado en el
+  gasto del vídeo. Si no había llegado nada, sigue reintentándolo solo, como
+  antes.
+- **Regrabar varios tramos: si falla uno, los anteriores se guardan.** Al
+  regrabar lo que has escrito en varios tramos, si fallaba el segundo se
+  perdía el primero, ya pagado, y al reintentar se volvía a pagar. Ahora lo ya
+  grabado queda guardado (la voz sigue marcada como pendiente) y «Regrabar lo
+  que he escrito» graba solo los tramos que faltan.
+- **«Carlos V» ya no se lee «Carlos uve».** Una V, X, L, C, D o M sola detrás
+  del nombre de un rey, un papa o un emperador (Carlos, Felipe, Pío, León,
+  Napoleón, Ramsés…) se deja como número romano, igual que ya pasaba detrás
+  de «siglo» o «capítulo». «Xbox Series X», «Galaxy S» o «Plan B» se siguen
+  deletreando.
+- **«Escuchar» suena como el vídeo.** La muestra de voz (la de un estilo, la
+  de elegir voz y la del vídeo) ahora pasa por la lista **Cómo se pronuncia**
+  y deletrea las letras sueltas, como la voz del vídeo. Si cambias la lista,
+  la siguiente escucha ya la recoge; si no cambias nada, se reutiliza la que
+  ya habías oído y no se vuelve a pagar.
+- **«Regenerar Audio» dice lo que cuesta.** Ese botón vuelve a grabar la voz
+  entera, y se paga entera aunque no hayas cambiado nada. Antes se apuntaba
+  como «prometido: 0 $» en «Cada vez que generaste» y la ayuda decía que lo
+  que no cambió salía gratis; ahora la ayuda del botón y lo prometido dicen el
+  precio de la voz entera.
+
 **Subtítulos a tu gusto y el «atrás» del móvil (13 de octubre, noche)**
 - **La fuente y el sitio de los subtítulos se eligen.** En el editor de
   subtítulos (en el Encargo y debajo del vídeo montado) hay dos filas nuevas:

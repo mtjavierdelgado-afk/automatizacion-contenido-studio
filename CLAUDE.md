@@ -12,7 +12,9 @@ tarde averiguar.
 
 ## LO PRIMERO: aquí se paga por generar
 
-Una tanda de imágenes de un vídeo de cuatro minutos son ~126 imágenes y ~4,4 $.
+Una tanda de imágenes de un vídeo de cuatro minutos (ritmo medio) son ~86 planos
+más una hoja por personaje, y ~4 $ en calidad baja; en foto, que nace en media,
+~7 $ (`POST /api/estimacion`, 15-10-2026).
 No es un detalle de producto: es la razón de la mitad de las decisiones de este
 repo, y de estas tres reglas.
 
@@ -88,15 +90,14 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 
 | Rama abierta | Ficheros reservados | Desde |
 |---|---|---|
-| `arreglos-voz` | La voz: letras sueltas leídas como abreviatura («S» → «sur»), palabras en inglés (lista «Cómo se pronuncia»), ecos y bloques sin entonación, y el dinero de la voz (D4, F3) (informe `pruebas/informe_analisis_arreglos_v2b.md` del Proyecto, apartado «La voz»): `pasos/p4_voz.py`, `pasos/p5_revision_audio.py`, `pasos/marcas_tts.py`, `pasos/cadencia.py`, `motores/voz_cartesia/voz.py`. Comparte `web/app.js` y `app.py` con `arreglos-v2e` (solo la lista de pronunciación en Configuración) | 14-10-2026 |
-| `arreglos-v2e` | Notas de mejoras nuevas (pegar imágenes del portapapeles, copiar las respuestas y los bloques de código del asistente) y la revisión del coste de las imágenes (previsto y final, calidad por modo): `pasos/p6_assets.py`, `pasos/ajustes.py`, `motores/imagen_openai/`, `web/app.js`, `web/estilo.css`, `app.py`. Comparte `web/app.js` y `app.py` con `arreglos-voz`: la que se una segunda se pone al día con `main` antes | 15-10-2026 |
-| `publicar-redes-1` | Publicar en redes (TikTok, Reels, YouTube, Facebook) a mano y con Upload-Post, y programar. **Propios:** `pasos/publicar.py`, `motores/publicar_uploadpost/`, `pasos/prueba_publicar.py`. **Por zonas:** en `web/app.js` solo funciones nuevas en una sección al final y una línea en la pantalla Vídeo (no toca `API` ni `pintarConfig` hasta que se una `arreglos-voz`); en `app.py` solo rutas nuevas en un bloque al final; en `web/estilo.css` solo clases nuevas al final. Se une la última, tras `arreglos-voz` y `arreglos-v2e` | 16-10-2026 |
+| `arreglos-v2f` | Notas del 16-10 (revertir imágenes que no se ven ni se oyen, «Todo seguido» y «Oírla» en las imágenes, la voz con ecos, inicios cortados y pausas entre bloques) y los fallos que salgan de la revisión completa del Studio. Toca lo que pida cada arreglo; si choca con una zona de `publicar-redes-1`, se dice antes | 16-10-2026 |
+| `publicar-redes-1` | Publicar en redes (TikTok, Reels, YouTube, Facebook) a mano y con Upload-Post, y programar. **Propios:** `pasos/publicar.py`, `motores/publicar_uploadpost/`, `pasos/prueba_publicar.py`. **Por zonas:** en `web/app.js` solo funciones nuevas en una sección al final y una línea en la pantalla Vídeo (`arreglos-voz` ya está unida: se pone al día con `main` antes de tocar `API` o `pintarConfig`); en `app.py` solo rutas nuevas en un bloque al final; en `web/estilo.css` solo clases nuevas al final. `arreglos-v2e` y `arreglos-voz` ya están unidas: se pone al día con `main` antes de unirse | 16-10-2026 |
 
 Quien abre una rama la apunta aquí (en `main`, regla 8); quien la une a `main`,
 la quita.
 
 **`v2-fase-3` (vídeos sin voz) está EN PAUSA desde el 14-10-2026, por decisión
-del dueño.** Sus ficheros dejan de estar reservados: los toma `arreglos-voz`.
+del dueño.** Sus ficheros no están reservados (`arreglos-voz`, que los tomó, ya está unida).
 Quien la retome hace antes `git merge origin/main` (la voz habrá cambiado) y la
 vuelve a apuntar en la tabla. Mientras siga en pausa, `v2-fase-4b` sigue
 esperando, porque depende de ella.
@@ -400,6 +401,21 @@ NUEVOS**: se escribe en el param `calidad` de `assets` al crear el proyecto y no
 se lee al generar. A propósito — `calidad` entra en la firma de cada imagen, así
 que un defecto retroactivo dejaría obsoletas las imágenes de todos los proyectos
 que nunca la fijaron, y regenerarlas se paga.
+
+**Cambiar la calidad de un vídeo con imágenes hechas no redibuja nada** (traer
+el estilo, cambiar `calidad`): p6 conserva todo PNG que exista si nadie lo pide.
+Lo dice el aviso de «Traer el estilo» y, en las diapositivas, «N imágenes siguen
+en otra calidad» con su botón (`POST /imagenes/calidad`, que manda SOLO esas como
+unidades pedidas). La calidad de cada imagen va en su ficha (`calidad`, desde el
+15-10-2026); en las viejas se deduce de la firma (`p6_assets.calidad_de_ficha`) y
+si no se puede es «desconocida» y no se ofrece. **No cambies la forma de
+`_firma_imagen`**: es la clave del banco y lo que permite esa deducción.
+
+**El precio por imagen del cotizador** (`ajustes.precio_por_imagen`) es la
+mediana de lo cobrado en imágenes de PLANO (`escena:`), por calidad y, con 20
+muestras, por modo (foto/ilustración, que viaja en el `detalle` de cada
+operación `imagen`). Las láminas y las hojas de reparto no entran: llevan menos
+referencias y abarataban el precio de un plano. Sin muestras, la tabla de arriba.
 
 ---
 

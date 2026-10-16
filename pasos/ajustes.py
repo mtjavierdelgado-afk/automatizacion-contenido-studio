@@ -206,15 +206,24 @@ _MEDIDO = {"sello": None, "por_calidad": {}}
 
 
 def _imagenes_registradas():
-    """{calidad: [usd...]} de las imagenes de plano YA COBRADAS con su `usage`
-    (tarifa por tokens), las mas recientes al final. Lee el final del registro
-    global, que puede ser grande, y se recuerda mientras no cambie."""
+    """{clave: [usd...]} de las imagenes de PLANO ya cobradas con su `usage`
+    (tarifa por tokens), las mas recientes al final. La clave es la calidad
+    («medium») y, si la operacion lo apunto, tambien calidad y modo
+    («medium|foto»). Lee el final del registro global, que puede ser grande, y
+    se recuerda mientras no cambie.
+
+    SOLO PLANOS (unidad `escena:...`). Se mezclaba todo lo cobrado en esa
+    calidad, y en `medium` el cubo lo llenaban las LAMINAS de los estilos --que
+    se dibujan en medium y llevan menos referencias que un plano--: con tres o
+    cuatro estilos hechos, el precio de un plano de foto salia de las laminas y
+    prometia un 40 % menos de lo que se cobraba (auditoria del 15-10-2026). Las
+    hojas de reparto tampoco: son una por personaje, no una por plano."""
     ruta = COSTE.RUTA_GLOBAL
     try:
         estado = os.stat(ruta)
     except OSError:
         return {}
-    sello = (estado.st_mtime_ns, estado.st_size)
+    sello = (ruta, estado.st_mtime_ns, estado.st_size)
     if _MEDIDO["sello"] == sello:
         return _MEDIDO["por_calidad"]
     import json                                         # noqa: PLC0415
@@ -233,18 +242,33 @@ def _imagenes_registradas():
             r = json.loads(linea)
         except ValueError:
             continue
+        if not isinstance(r, dict):
+            continue
         detalle = r.get("detalle") or {}
         if (r.get("proveedor") != "openai" or r.get("operacion") != "imagen"
                 or r.get("usd") is None
+                or not str(r.get("unidad") or "").startswith("escena:")
                 or (detalle.get("coste") or {}).get("via") != "tokens"):
             continue
-        por_calidad.setdefault(str(detalle.get("calidad") or ""), []).append(float(r["usd"]))
+        calidad = str(detalle.get("calidad") or "")
+        por_calidad.setdefault(calidad, []).append(float(r["usd"]))
+        if detalle.get("modo") in MODOS:
+            por_calidad.setdefault(f"{calidad}|{detalle['modo']}", []).append(float(r["usd"]))
     _MEDIDO.update(sello=sello, por_calidad=por_calidad)
     return por_calidad
 
 
-def precio_por_imagen(calidad, tamano=TAMANO):
-    """LO QUE CUESTA UNA IMAGEN, con su procedencia. -> {usd, fuente, muestras}
+#: Los modos de imagen de un video (`p6_assets.modo_de`).
+MODOS = ("ilustracion", "foto")
+
+
+def _mediana_de(cobradas):
+    ordenadas = sorted(cobradas)
+    return ordenadas[len(ordenadas) // 2]
+
+
+def precio_por_imagen(calidad, tamano=TAMANO, modo=None):
+    """LO QUE CUESTA UNA IMAGEN DE PLANO, con su procedencia. -> {usd, fuente, muestras}
 
     EL UNICO PRECIO DEL COTIZADOR (11-10-2026). Habia dos: el boton de generar
     y la estimacion cotizaban con un 0,033 $ escrito a mano en presets_light, y
@@ -252,23 +276,33 @@ def precio_por_imagen(calidad, tamano=TAMANO):
     boton prometia un 30 % menos.
 
     Primero, lo que de verdad te han cobrado: la MEDIANA de tus ultimas 200
-    imagenes de esa calidad, tarifadas con el `usage` que devolvio OpenAI (asi
-    lleva dentro las referencias adjuntas de TU estudio). Sin bastantes,
+    imagenes de plano de esa calidad --y de ese MODO (foto o ilustracion), si
+    se pide y ya hay bastantes--, tarifadas con el `usage` que devolvio OpenAI
+    (asi lleva dentro las referencias adjuntas de TU estudio). Sin bastantes de
+    ese modo, las de esa calidad en cualquier modo; sin bastantes de ninguna,
     la cuenta de la tabla: imagen devuelta + la entrada medida."""
     calidad = str(calidad or "low").lower()
-    cobradas = (_imagenes_registradas().get(calidad) or [])[-200:]
+    registradas = _imagenes_registradas()
+    if modo in MODOS:
+        cobradas = (registradas.get(f"{calidad}|{modo}") or [])[-200:]
+        if len(cobradas) >= MUESTRAS_MINIMAS:
+            nombre = "foto" if modo == "foto" else "ilustración"
+            return {"usd": round(_mediana_de(cobradas), 4), "muestras": len(cobradas),
+                    "modo": modo,
+                    "fuente": f"lo que te han cobrado: mediana de tus últimas "
+                              f"{len(cobradas)} imágenes de plano en {nombre}"}
+    cobradas = (registradas.get(calidad) or [])[-200:]
     if len(cobradas) >= MUESTRAS_MINIMAS:
-        ordenadas = sorted(cobradas)
-        mediana = ordenadas[len(ordenadas) // 2]
-        return {"usd": round(mediana, 4), "muestras": len(cobradas),
-                "fuente": f"lo que te han cobrado: mediana de tus últimas {len(cobradas)} imágenes"}
+        return {"usd": round(_mediana_de(cobradas), 4), "muestras": len(cobradas),
+                "fuente": f"lo que te han cobrado: mediana de tus últimas "
+                          f"{len(cobradas)} imágenes de plano"}
     tabla = coste_por_imagen(calidad, tamano)
     return {"usd": tabla["usd_total"], "muestras": 0,
             "fuente": "tabla de OpenAI + las referencias medidas (aún no hay bastantes imágenes tuyas)"}
 
 
-def usd_por_imagen(calidad, tamano=TAMANO):
-    return precio_por_imagen(calidad, tamano)["usd"]
+def usd_por_imagen(calidad, tamano=TAMANO, modo=None):
+    return precio_por_imagen(calidad, tamano, modo)["usd"]
 
 
 def tabla_de_costes(tamano=TAMANO):

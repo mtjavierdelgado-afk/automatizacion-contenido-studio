@@ -341,6 +341,49 @@ def prueba_previsualizacion(proyecto):
               "el recorte es mas corto que el guion entero")
 
 
+def prueba_escucha_pronunciada(proyecto, base):
+    """«ESCUCHAR» SUENA COMO EL VIDEO (16-10-2026): la previsualizacion manda el
+    texto saneado y con «Como se pronuncia», y la cache cambia con la lista."""
+    print("\n[5b] la escucha pasa por «Como se pronuncia» y por las letras sueltas")
+    import pronunciacion as pron  # noqa: PLC0415
+    params = {"preset": "divulgacion_cercana",
+              "bloques": [{"id": "M1", "texto": "Alquila la PlayStation y la Series S."}]}
+    mandado = []
+    original = p4_voz._toma_simulada
+
+    def espia(texto, cfg):
+        mandado.append(texto)
+        return original(texto, cfg)
+    antes = os.environ.get("ESTUDIO_PRONUNCIACIONES")
+    os.environ["ESTUDIO_PRONUNCIACIONES"] = os.path.join(base, "pron_escucha.json")
+    p4_voz._toma_simulada = espia
+    try:
+        pron.guardar([])
+        sin_lista = p4_voz.previsualizar(proyecto, params, segundos=8)
+        comprobar(mandado and "<spell>S</spell>" in mandado[-1],
+                  f"la letra suelta va a deletrear, como en el video ({mandado[-1:]!r})")
+        pron.guardar(pron.validar([{"escrito": "PlayStation", "dicho": "Pléi Estéishon"}]))
+        con_lista = p4_voz.previsualizar(proyecto, params, segundos=8)
+        comprobar("Pléi Estéishon" in mandado[-1] and "PlayStation" not in mandado[-1],
+                  f"a la voz le llega como suena ({mandado[-1]!r})")
+        comprobar(con_lista != sin_lista,
+                  "cambiar la lista da OTRA escucha: no sigue sonando la vieja")
+        with open(con_lista[:-4] + ".json", encoding="utf-8") as fh:
+            meta = json.load(fh)
+        comprobar("PlayStation" in " ".join(p["w"] for p in meta["palabras"]),
+                  "y sus marcas vuelven a la palabra escrita")
+        veces = len(mandado)
+        igual(p4_voz.previsualizar(proyecto, params, segundos=8), con_lista,
+              "con la misma lista se reutiliza la escucha")
+        igual(len(mandado), veces, "y no se vuelve a sintetizar (no se paga dos veces)")
+    finally:
+        p4_voz._toma_simulada = original
+        if antes is None:
+            os.environ.pop("ESTUDIO_PRONUNCIACIONES", None)
+        else:
+            os.environ["ESTUDIO_PRONUNCIACIONES"] = antes
+
+
 def prueba_trabajo_en_segundo_plano(base):
     print("\n[6] paso 4 dentro del gestor de trabajos")
     proyecto, estado = preparar_proyecto(base, "Con Gestor")
@@ -749,6 +792,241 @@ def prueba_sse_en_utf8():
         p4_voz.requests.post, p4_voz.motor.cargar_api_key = original_post, original_clave
 
 
+class _WebsocketFalso:
+    """Lo minimo de `websocket-client` que usa `_toma_por_contexto`, sin red.
+
+    `cortar_tras` = cuantos eventos con audio llegan antes de que la conexion
+    se caiga; None = conexion rechazada al abrir (no llega nada).
+    """
+
+    def __init__(self, cortar_tras):
+        self.cortar_tras = cortar_tras
+        self.enviados = []
+        self.aperturas = 0
+
+    def create_connection(self, _url, timeout=None):
+        self.aperturas += 1
+        if self.cortar_tras is None:
+            raise ConnectionRefusedError("conexion rechazada")
+        modulo = self
+
+        class _Conexion:
+            def __init__(self):
+                self.recibidos = 0
+
+            def send(self, crudo):
+                modulo.enviados.append(json.loads(crudo)["transcript"])
+
+            def recv(self):
+                import base64 as b64                          # noqa: PLC0415
+                if self.recibidos >= modulo.cortar_tras:
+                    raise ConnectionResetError("la conexion se ha cortado")
+                self.recibidos += 1
+                return json.dumps({
+                    "data": b64.b64encode(b"\x01\x00" * 4800).decode(),
+                    "word_timestamps": {"words": ["Octubre", "de"],
+                                        "start": [0.0, 0.2], "end": [0.2, 0.3]}})
+
+            def close(self):
+                pass
+
+        return _Conexion()
+
+
+def prueba_toma_cortada_no_se_paga_dos_veces(base):
+    """D4 del informe de arreglos v2b: la voz se pagaba dos veces.
+
+    Si la conexion con Cartesia se cortaba A MITAD de la toma por contexto, se
+    caia al camino de una sola vez y volvia a grabar el texto ENTERO: Cartesia
+    ya habia cobrado lo que genero, la toma perdia sus secciones y el primer
+    gasto no quedaba apuntado. Todo con un websocket y un SSE FALSOS: no se
+    llama a Cartesia.
+    """
+    print("\n[d4] la toma que se corta a mitad no se paga dos veces")
+    sys.path.insert(0, os.path.dirname(AQUI))
+    from nucleo import coste                                  # noqa: PLC0415
+    os.makedirs(os.path.join(base, "toma_cortada"), exist_ok=True)
+    proyecto = Proyecto(os.path.join(base, "toma_cortada"))
+    # el historico global del gasto es el de verdad: a una copia
+    ruta_global = coste.RUTA_GLOBAL
+    coste.RUTA_GLOBAL = os.path.join(base, "coste_global.jsonl")
+    bloques = [dict(GUION[0]), dict(GUION[1], abre_seccion=True),
+               dict(GUION[2], abre_seccion=True)]
+    cfg = {"voz_id": "x", "modelo": "sonic-3.5", "idioma": "es"}
+    llamadas_sse = []
+
+    def sse_falso(texto, _cfg, _progreso):
+        llamadas_sse.append(texto)
+        return p4_voz.motor.wav_desde_pcm(b"\x00\x00" * 2400), 0.1, [
+            {"w": "Octubre", "s": 0.0, "e": 0.1}]
+
+    originales = (p4_voz._toma_real, p4_voz.motor.cargar_api_key,
+                  p4_voz._toma_por_contexto, sys.modules.get("websocket"),
+                  os.environ.get("ESTUDIO_SIMULAR"))
+    informe = {"enganchado": [], "ausente": []}
+    p4_voz._toma_real = sse_falso
+    p4_voz.motor.cargar_api_key = lambda *a, **k: "clave-falsa"
+    # el medidor DE VERDAD, sobre la toma por contexto de verdad: lo unico falso
+    # es la red
+    coste._envolver(p4_voz, "_toma_por_contexto", coste._medir_toma_por_contexto,
+                    informe, "voz.toma_por_contexto")
+    os.environ["ESTUDIO_SIMULAR"] = "0"
+    medidor = coste.Medidor(proyecto)
+    try:
+        # 1. SE CORTA CON AUDIO DENTRO
+        falso = _WebsocketFalso(cortar_tras=1)
+        sys.modules["websocket"] = falso
+        antes = len(medidor.eventos())
+        fallo = None
+        with coste.contexto(proyecto, "voz"):
+            try:
+                p4_voz.sintetizar_bloques(bloques, os.path.join(base, "toma_cortada",
+                                                                "trabajo"), cfg)
+            except RuntimeError as error:
+                fallo = error
+        igual(len(falso.enviados), 3, "las tres secciones se mandan en un contexto")
+        igual(llamadas_sse, [],
+              "CON AUDIO YA RECIBIDO NO SE GRABA OTRA VEZ DE UNA TIRADA (se pagaba dos veces)")
+        comprobar(fallo is not None and "Cartesia" in str(fallo)
+                  and "dos veces" in str(fallo),
+                  f"y se para con un mensaje claro para reintentar ({fallo})")
+        nuevos = medidor.eventos()[antes:]
+        igual([e.get("operacion") for e in nuevos], ["toma_cortada"],
+              "EL INTENTO CORTADO QUEDA APUNTADO EN EL GASTO")
+        if nuevos:
+            igual(nuevos[0]["cantidad"]["caracteres"], sum(len(t) for t in falso.enviados),
+                  "con los caracteres que se llegaron a mandar")
+            comprobar((nuevos[0].get("detalle") or {}).get("audio_recibido_s", 0) > 0,
+                      "y cuanto audio habia llegado")
+
+        # 2. SE CAE SIN HABER RECIBIDO NADA: no se ha cobrado, el respaldo vale
+        falso = _WebsocketFalso(cortar_tras=None)
+        sys.modules["websocket"] = falso
+        antes = len(medidor.eventos())
+        with coste.contexto(proyecto, "voz"):
+            salidas = p4_voz.sintetizar_bloques(
+                bloques, os.path.join(base, "toma_cortada", "trabajo2"), cfg)
+        igual(len(llamadas_sse), 1,
+              "sin nada recibido se sigue cayendo a la toma de una vez (no se ha cobrado nada)")
+        igual(medidor.eventos()[antes:], [],
+              "y no se apunta ningun gasto inventado por el intento que no llego a nada")
+        comprobar(bool(salidas.get("pista")), "y la voz sale")
+
+        # 3. REGRABAR UNA SECCION por el mismo camino: tambien se apunta
+        falso = _WebsocketFalso(cortar_tras=1)
+        sys.modules["websocket"] = falso
+        antes = len(medidor.eventos())
+        meta = {"secciones": [{"id": "SB001", "bloques": ["S01"], "t_in": 0.0,
+                               "t_out": 1.0}], "palabras": [], "bloques": []}
+        with coste.contexto(proyecto, "voz"):
+            try:
+                p4_voz.regrabar_seccion([dict(GUION[0])], "SB001", cfg, meta,
+                                        os.path.join(base, "toma_cortada", "trabajo"))
+                comprobar(False, "regrabar una seccion que se corta tiene que fallar")
+            except Exception:                               # noqa: BLE001
+                comprobar(True, "regrabar una seccion que se corta falla")
+        igual([e.get("operacion") for e in medidor.eventos()[antes:]], ["toma_cortada"],
+              "y su intento cortado tambien queda apuntado en el gasto")
+    finally:
+        (p4_voz._toma_real, p4_voz.motor.cargar_api_key, p4_voz._toma_por_contexto,
+         websocket_previo, simular) = originales
+        if websocket_previo is None:
+            sys.modules.pop("websocket", None)
+        else:
+            sys.modules["websocket"] = websocket_previo
+        os.environ["ESTUDIO_SIMULAR"] = simular if simular is not None else "1"
+        coste.RUTA_GLOBAL = ruta_global
+
+
+def prueba_pronunciacion(base):
+    """COMO SE PRONUNCIA (15-10-2026): lo que se manda va como suena, y lo que
+    vuelve se devuelve a la palabra escrita sin descuadrar nada."""
+    print("\n[pron] como se pronuncia: a la voz como suena, al guion como se escribe")
+    import pronunciacion as pron  # noqa: PLC0415
+    import marcas_tts  # noqa: PLC0415
+    lista = pron.validar([{"escrito": "PlayStation", "dicho": "Pléi Estéishon"},
+                          {"escrito": "Just Dance", "dicho": "Yast Dans"},
+                          {"escrito": "Nintendo Switch", "dicho": "Nintendo Suích"},
+                          {"escrito": "Switch", "dicho": "Suích"},
+                          {"escrito": "Logitech", "dicho": "Lóyitec"}])
+    igual(pron.aplicar("Alquila la playstation y Just Dance.", lista),
+          "Alquila la Pléi Estéishon y Yast Dans.",
+          "se cambia la palabra entera, sin mirar mayusculas")
+    igual(pron.aplicar("La Nintendo Switch o la Switch", lista),
+          "La Nintendo Suích o la Suích", "la mas larga primero, y la corta sigue valiendo")
+    igual(pron.aplicar("los Switches", lista), "los Switches",
+          "solo palabras enteras: «Switches» no es «Switch»")
+    igual(pron.aplicar('Logitech <break time="500ms"/> y <spell>PS</spell>', lista),
+          'Lóyitec <break time="500ms"/> y <spell>PS</spell>',
+          "nunca dentro de una etiqueta")
+    vuelven = [{"w": "la", "s": 0.0, "e": 0.2}, {"w": "Pléi", "s": 0.2, "e": 0.5},
+               {"w": "Estéishon,", "s": 0.5, "e": 1.0}, {"w": "y", "s": 1.0, "e": 1.1},
+               {"w": "Yast", "s": 1.1, "e": 1.4}, {"w": "dans.", "s": 1.4, "e": 1.9}]
+    devueltas = pron.devolver(vuelven, lista)
+    igual([p["w"] for p in devueltas], ["la", "PlayStation,", "y", "Just", "Dance."],
+          "las marcas vuelven a la palabra escrita, con su puntuacion")
+    igual((devueltas[1]["s"], devueltas[1]["e"]), (0.2, 1.0),
+          "y con el tiempo de toda la forma dicha")
+    igual((devueltas[3]["s"], devueltas[3]["e"], devueltas[4]["s"], devueltas[4]["e"]),
+          (1.1, 1.4, 1.4, 1.9),
+          "con las mismas palabras dichas que escritas, cada una conserva su tiempo real")
+    largas = pron.devolver([{"w": "Pléi", "s": 0.0, "e": 0.4}, {"w": "Estéishon,", "s": 0.4, "e": 1.0}],
+                           lista)
+    igual([(p["w"], p["s"], p["e"]) for p in largas], [("PlayStation,", 0.0, 1.0)],
+          "con más palabras dichas que escritas, la escrita se queda con todo el tramo")
+    # LO QUE VIO LA REVISION (15-10-2026): una entrada con letra suelta y una coma
+    con_letra = pron.validar([{"escrito": "Xbox Series X", "dicho": "Équis Box Síries Équis"},
+                              {"escrito": "Xbox", "dicho": "Équis Box"}])
+    igual(pron.aplicar(marcas_tts.sanear("La Xbox Series X es potente."), con_letra),
+          "La Équis Box Síries Équis es potente.",
+          "una entrada con letra suelta casa aunque la letra ya vaya a deletrearse")
+    igual([p["w"] for p in pron.devolver(
+        [{"w": "Nintendo,", "s": 0.0, "e": 0.4}, {"w": "Suích.", "s": 0.4, "e": 0.8}], lista)],
+        ["Nintendo,", "Switch."], "la coma de «Nintendo, Switch» no se pierde al devolver")
+    falla(lambda: pron.validar([{"escrito": "x<y", "dicho": "z"}]), "una etiqueta en la lista se rechaza",
+          ValueError)
+    falla(lambda: pron.validar([{"escrito": "Xbox", "dicho": ""}]), "una fila a medias se rechaza",
+          ValueError)
+
+    # DE PUNTA A PUNTA, con la toma simulada: que se MANDA y que se GUARDA
+    ruta = os.path.join(base, "pronunciaciones.json")
+    antes = os.environ.get("ESTUDIO_PRONUNCIACIONES")
+    os.environ["ESTUDIO_PRONUNCIACIONES"] = ruta
+    try:
+        pron.guardar(lista)
+        mandado = []
+        original = p4_voz._toma_simulada
+
+        def espia(texto, cfg):
+            mandado.append(texto)
+            return original(texto, cfg)
+        p4_voz._toma_simulada = espia
+        bloques = [{"id": "B01", "texto": "Alquila la PlayStation para tu fiesta."},
+                   {"id": "B02", "texto": "Y si buscas mas, Just Dance o Logitech."}]
+        cfg = {"voz_id": "x", "modelo": "sonic-3.5", "idioma": "es", "hueco_minimo": 0.0}
+        try:
+            salidas = p4_voz.sintetizar_bloques(bloques, os.path.join(base, "pron"), cfg)
+        finally:
+            p4_voz._toma_simulada = original
+        oido = " ".join(mandado)
+        comprobar("Pléi Estéishon" in oido and "Yast Dans" in oido and "Lóyitec" in oido,
+                  f"a la voz le llega como suena ({oido!r})")
+        comprobar("PlayStation" not in oido, "y no la palabra escrita")
+        escritas = [p["w"] for p in salidas["palabras"]]
+        igual(len(escritas), sum(len(b["texto"].split()) for b in bloques),
+              "una marca por palabra ESCRITA: los cortes de plano no se descuadran")
+        comprobar("PlayStation" in escritas and "Dance" in " ".join(escritas),
+                  "y las marcas dicen la palabra escrita (subtitulos y revision)")
+        por_bloque = {b["id"]: b for b in salidas["bloques"]}
+        comprobar(por_bloque["B01"]["t_out"] <= por_bloque["B02"]["t_in"] + 1e-6,
+                  "cada bloque conserva su tramo")
+    finally:
+        if antes is None:
+            os.environ.pop("ESTUDIO_PRONUNCIACIONES", None)
+        else:
+            os.environ["ESTUDIO_PRONUNCIACIONES"] = antes
+
+
 def main():
     con_red = "--sin-red" not in sys.argv
     con_claude = "--con-claude" in sys.argv
@@ -768,6 +1046,13 @@ def main():
     # con ellas dentro pedir la voz 'slow' salia MAS rapida que 'normal'.
     # `cadencia.PALABRAS_MINIMAS_MEDIDA` lo defiende; esto lo evita de raiz.
     os.environ["ESTUDIO_ESTADISTICAS"] = os.path.join(base, "estadisticas.json")
+    # Y EL GASTO: la prueba de la toma cortada anota en el medidor, y el
+    # historico global es el gasto de verdad
+    os.environ["ESTUDIO_COSTE_GLOBAL"] = os.path.join(base, "coste_global.jsonl")
+    # la lista de «Como se pronuncia» de la maquina no entra en las pruebas
+    os.environ["ESTUDIO_PRONUNCIACIONES"] = os.path.join(base, "sin_pronunciaciones.json")
+    with open(os.environ["ESTUDIO_PRONUNCIACIONES"], "w", encoding="utf-8") as fh:
+        fh.write('{"lista": []}')
     print(f"proyectos de prueba en {base}")
     try:
         prueba_presets()
@@ -775,12 +1060,15 @@ def main():
         prueba_lectura_guion(base)
         proyecto, estado, salidas = prueba_paso4(base)
         prueba_previsualizacion(proyecto)
+        prueba_escucha_pronunciada(proyecto, base)
         prueba_trabajo_en_segundo_plano(base)
         prueba_paso5(proyecto, estado, salidas)
         prueba_regrabacion_completa(proyecto)
         prueba_pausas_en_el_montaje(base)
         prueba_cache_por_clave()
         prueba_sse_en_utf8()
+        prueba_toma_cortada_no_se_paga_dos_veces(base)
+        prueba_pronunciacion(base)
         prueba_catalogo_voces(con_red)
         if con_red:
             prueba_llamada_real(base)

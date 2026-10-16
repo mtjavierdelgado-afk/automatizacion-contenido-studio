@@ -4098,6 +4098,31 @@ def probar_presencia_musica(cliente, carpeta):
         servidor.contexto, servidor.lanzar_paso, servidor._ruta_de_version = guardado
 
 
+def probar_pronunciaciones(cliente, carpeta):
+    """«Como se pronuncia» (15-10-2026): la lista se lee, se valida y se guarda
+    FUERA del codigo, junto a los ajustes. Abrirla no escribe nada."""
+    seccion("COMO SE PRONUNCIA")
+    destino = os.path.join(carpeta, "pronunciaciones.json")
+    respuesta, datos = cliente.get("/api/pronunciaciones")
+    igual(respuesta.status_code, 200, "la lista se lee")
+    ok(any(f.get("escrito") == "Just Dance" for f in datos.get("lista") or []),
+       "sin guardar ninguna, viene la de partida (con «Just Dance»)")
+    ok(not os.path.exists(destino), "y leerla no escribe ningun fichero")
+    respuesta, _d = cliente.put("/api/pronunciaciones", {"lista": [{"escrito": "Xbox", "dicho": ""}]})
+    igual(respuesta.status_code, 400, "una fila sin «cómo suena» es un 400")
+    respuesta, _d = cliente.put("/api/pronunciaciones",
+                                {"lista": [{"escrito": "a<b", "dicho": "c"}]})
+    igual(respuesta.status_code, 400, "y una etiqueta, otro (la voz la leeria en voz alta)")
+    _r, datos = cliente.put("/api/pronunciaciones",
+                            {"lista": [{"escrito": " Meta   Quest ", "dicho": "Meta Cuést"},
+                                       {"escrito": "", "dicho": ""}]})
+    igual(datos.get("lista"), [{"escrito": "Meta Quest", "dicho": "Meta Cuést"}],
+          "se guarda limpia (espacios y filas vacias fuera)")
+    ok(os.path.exists(destino), "junto a los ajustes, fuera del codigo")
+    _r, datos = cliente.get("/api/pronunciaciones")
+    igual(len(datos.get("lista") or []), 1, "y se lee la guardada, no la de partida")
+
+
 def probar_volumen_y_animo_de_la_musica():
     """N9 de las notas de mejoras (13-10-2026): con el vídeo montado, subir o
     bajar la música en dB y cambiarle el ánimo a la automática SIN redibujar ni
@@ -5192,6 +5217,7 @@ def main():
         probar_pausas(cliente, carpeta)
         probar_presencia_musica(cliente, carpeta)
         probar_volumen_y_animo_de_la_musica()
+        probar_pronunciaciones(cliente, carpeta)
         probar_ronda_octubre(cliente, carpeta)
         probar_bitacora(cliente, pid)
         probar_presets_canal(cliente)

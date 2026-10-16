@@ -895,6 +895,80 @@ def prueba_toma_cortada_no_se_paga_dos_veces(base):
         coste.RUTA_GLOBAL = ruta_global
 
 
+def prueba_pronunciacion(base):
+    """COMO SE PRONUNCIA (15-10-2026): lo que se manda va como suena, y lo que
+    vuelve se devuelve a la palabra escrita sin descuadrar nada."""
+    print("\n[pron] como se pronuncia: a la voz como suena, al guion como se escribe")
+    import pronunciacion as pron  # noqa: PLC0415
+    lista = pron.validar([{"escrito": "PlayStation", "dicho": "Pléi Estéishon"},
+                          {"escrito": "Just Dance", "dicho": "Yast Dans"},
+                          {"escrito": "Nintendo Switch", "dicho": "Nintendo Suích"},
+                          {"escrito": "Switch", "dicho": "Suích"},
+                          {"escrito": "Logitech", "dicho": "Lóyitec"}])
+    igual(pron.aplicar("Alquila la playstation y Just Dance.", lista),
+          "Alquila la Pléi Estéishon y Yast Dans.",
+          "se cambia la palabra entera, sin mirar mayusculas")
+    igual(pron.aplicar("La Nintendo Switch o la Switch", lista),
+          "La Nintendo Suích o la Suích", "la mas larga primero, y la corta sigue valiendo")
+    igual(pron.aplicar("los Switches", lista), "los Switches",
+          "solo palabras enteras: «Switches» no es «Switch»")
+    igual(pron.aplicar('Logitech <break time="500ms"/> y <spell>PS</spell>', lista),
+          'Lóyitec <break time="500ms"/> y <spell>PS</spell>',
+          "nunca dentro de una etiqueta")
+    vuelven = [{"w": "la", "s": 0.0, "e": 0.2}, {"w": "Pléi", "s": 0.2, "e": 0.5},
+               {"w": "Estéishon,", "s": 0.5, "e": 1.0}, {"w": "y", "s": 1.0, "e": 1.1},
+               {"w": "Yast", "s": 1.1, "e": 1.4}, {"w": "dans.", "s": 1.4, "e": 1.9}]
+    devueltas = pron.devolver(vuelven, lista)
+    igual([p["w"] for p in devueltas], ["la", "PlayStation,", "y", "Just", "Dance."],
+          "las marcas vuelven a la palabra escrita, con su puntuacion")
+    igual((devueltas[1]["s"], devueltas[1]["e"]), (0.2, 1.0),
+          "y con el tiempo de toda la forma dicha")
+    igual((devueltas[3]["s"], devueltas[3]["e"], devueltas[4]["s"], devueltas[4]["e"]),
+          (1.1, 1.5, 1.5, 1.9), "dos palabras escritas se reparten el tramo")
+    falla(lambda: pron.validar([{"escrito": "x<y", "dicho": "z"}]), "una etiqueta en la lista se rechaza",
+          ValueError)
+    falla(lambda: pron.validar([{"escrito": "Xbox", "dicho": ""}]), "una fila a medias se rechaza",
+          ValueError)
+
+    # DE PUNTA A PUNTA, con la toma simulada: que se MANDA y que se GUARDA
+    ruta = os.path.join(base, "pronunciaciones.json")
+    antes = os.environ.get("ESTUDIO_PRONUNCIACIONES")
+    os.environ["ESTUDIO_PRONUNCIACIONES"] = ruta
+    try:
+        pron.guardar(lista)
+        mandado = []
+        original = p4_voz._toma_simulada
+
+        def espia(texto, cfg):
+            mandado.append(texto)
+            return original(texto, cfg)
+        p4_voz._toma_simulada = espia
+        bloques = [{"id": "B01", "texto": "Alquila la PlayStation para tu fiesta."},
+                   {"id": "B02", "texto": "Y si buscas mas, Just Dance o Logitech."}]
+        cfg = {"voz_id": "x", "modelo": "sonic-3.5", "idioma": "es", "hueco_minimo": 0.0}
+        try:
+            salidas = p4_voz.sintetizar_bloques(bloques, os.path.join(base, "pron"), cfg)
+        finally:
+            p4_voz._toma_simulada = original
+        oido = " ".join(mandado)
+        comprobar("Pléi Estéishon" in oido and "Yast Dans" in oido and "Lóyitec" in oido,
+                  f"a la voz le llega como suena ({oido!r})")
+        comprobar("PlayStation" not in oido, "y no la palabra escrita")
+        escritas = [p["w"] for p in salidas["palabras"]]
+        igual(len(escritas), sum(len(b["texto"].split()) for b in bloques),
+              "una marca por palabra ESCRITA: los cortes de plano no se descuadran")
+        comprobar("PlayStation" in escritas and "Dance" in " ".join(escritas),
+                  "y las marcas dicen la palabra escrita (subtitulos y revision)")
+        por_bloque = {b["id"]: b for b in salidas["bloques"]}
+        comprobar(por_bloque["B01"]["t_out"] <= por_bloque["B02"]["t_in"] + 1e-6,
+                  "cada bloque conserva su tramo")
+    finally:
+        if antes is None:
+            os.environ.pop("ESTUDIO_PRONUNCIACIONES", None)
+        else:
+            os.environ["ESTUDIO_PRONUNCIACIONES"] = antes
+
+
 def main():
     con_red = "--sin-red" not in sys.argv
     con_claude = "--con-claude" in sys.argv
@@ -917,6 +991,10 @@ def main():
     # Y EL GASTO: la prueba de la toma cortada anota en el medidor, y el
     # historico global es el gasto de verdad
     os.environ["ESTUDIO_COSTE_GLOBAL"] = os.path.join(base, "coste_global.jsonl")
+    # la lista de «Como se pronuncia» de la maquina no entra en las pruebas
+    os.environ["ESTUDIO_PRONUNCIACIONES"] = os.path.join(base, "sin_pronunciaciones.json")
+    with open(os.environ["ESTUDIO_PRONUNCIACIONES"], "w", encoding="utf-8") as fh:
+        fh.write('{"lista": []}')
     print(f"proyectos de prueba en {base}")
     try:
         prueba_presets()
@@ -931,6 +1009,7 @@ def main():
         prueba_cache_por_clave()
         prueba_sse_en_utf8()
         prueba_toma_cortada_no_se_paga_dos_veces(base)
+        prueba_pronunciacion(base)
         prueba_catalogo_voces(con_red)
         if con_red:
             prueba_llamada_real(base)

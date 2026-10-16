@@ -76,8 +76,9 @@ import requests
 
 try:
     from . import (cadencia, cli_claude, comun, estadisticas, estructura_guion,
-                   marcas_tts, presets_voz)
+                   marcas_tts, presets_voz, pronunciacion)
 except ImportError:  # ejecutado con la carpeta pasos directamente en sys.path
+    import pronunciacion
     import cli_claude
     import estructura_guion
     import comun
@@ -1026,6 +1027,11 @@ def sintetizar_bloques(bloques, destino, cfg, avisar=None,
     # guarda entero en la meta -- la revision compara contra el --; lo que se
     # le manda a la voz va sin la cola de silencio.
     pausa_de, para_voz = pausas_de_final(anotados)
+    # COMO SE PRONUNCIA (Configuracion): lo que se MANDA lleva cada palabra de
+    # la lista escrita como suena; las marcas que vuelven se devuelven a la
+    # palabra escrita antes de repartirlas (ver pasos/pronunciacion.py).
+    lista_pron = pronunciacion.cargar()
+    para_voz = [dict(b, texto=pronunciacion.aplicar(b["texto"], lista_pron)) for b in para_voz]
     texto = " ".join(b["texto"].strip() for b in para_voz)
 
     # Y todo lo demas trabaja sobre lo que se OYE. La cuenta de palabras, la
@@ -1095,6 +1101,7 @@ def sintetizar_bloques(bloques, destino, cfg, avisar=None,
         wav, duracion, palabras = sintetizar_toma(texto, cfg, progreso)
         secciones = [{"id": "SB001", "bloques": [b["id"] for b in anotados]}]
     avisa(0.88, "repartiendo palabras entre bloques")
+    palabras = pronunciacion.devolver(palabras, lista_pron)
     escenas, reparto = _reparto(anotados, palabras)
 
     hueco = float(cfg.get("hueco_minimo") or 0.0)
@@ -1754,6 +1761,9 @@ def regrabar_seccion(bloques, seccion_id, cfg, meta, destino, peticion="",
               else b for b in nuevos]
     # la pausa del final de cada bloque, al montaje, como en la toma entera
     pausa_de, para_voz = pausas_de_final([b for b in nuevos if b["id"] in dentro])
+    # como en la toma entera: lo que se manda, como suena (pasos/pronunciacion.py)
+    lista_pron = pronunciacion.cargar()
+    para_voz = [dict(b, texto=pronunciacion.aplicar(b["texto"], lista_pron)) for b in para_voz]
     trozo = " ".join(b["texto"].strip() for b in para_voz)
 
     def progreso(fraccion, mensaje=""):
@@ -1771,6 +1781,7 @@ def regrabar_seccion(bloques, seccion_id, cfg, meta, destino, peticion="",
         avisa(0.35, f"grabando {seccion_id} ({len(trozo.split())} palabras)")
         wav_nuevo, _dur, marcas_nuevas = _toma_por_contexto(
             [trozo], cfg, progreso)
+    marcas_nuevas = pronunciacion.devolver(marcas_nuevas, lista_pron)
 
     # 2b. EL AIRE ENTRE LOS BLOQUES DE LA SECCION. La toma entera lo recibe de
     # `motor.espaciar`; la seccion regrabada no lo recibia, y sus bloques

@@ -7989,6 +7989,32 @@ def guardar_ajustes(cuerpo: dict = Body(default=None)):
             "zona": AJUSTES.zona_en_uso()}
 
 
+# ------------------------------------------------------- como se pronuncia
+
+@app.get("/api/pronunciaciones")
+def leer_pronunciaciones():
+    """Las palabras que la voz dice como se escriben aqui (sobre todo en ingles).
+
+    Solo cambia lo que OYE la voz: el guion y los subtitulos siguen diciendo la
+    palabra escrita (ver pasos/pronunciacion.py). Vale para las voces que se
+    graben a partir de ahora; las ya grabadas no se tocan.
+    """
+    pron = PASOS_MODULOS.pronunciacion
+    return {"lista": pron.cargar(), "inicial": pron.INICIAL, "maximo": pron.MAXIMO}
+
+
+@app.put("/api/pronunciaciones")
+def guardar_pronunciaciones(cuerpo: dict = Body(default=None)):
+    """{lista: [{escrito, dicho}]} -> la lista guardada. No graba nada ni paga nada."""
+    datos = _cuerpo(cuerpo)
+    try:
+        lista = PASOS_MODULOS.pronunciacion.guardar(datos.get("lista"))
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    anotar_global("pronunciaciones_guardadas", {"palabras": len(lista)})
+    return {"lista": lista}
+
+
 # ------------------------------------------------------------------ enlaces
 # -------------------------------------------------------------------- recetas
 #

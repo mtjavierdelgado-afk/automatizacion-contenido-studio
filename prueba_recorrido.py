@@ -2627,6 +2627,46 @@ def atras_del_movil_dentro_del_studio(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def como_se_pronuncia(navegador, datos):
+    """«Cómo se pronuncia» (15-10-2026): la voz leía con acento español las
+    marcas en inglés del bloque de los extras («simrace con volante Logitech,
+    Meta Quest, Just Dance»). En Configuración hay una lista que se edita en
+    una copia y solo se guarda al pulsar «Guardar»."""
+    api = datos["api"]
+    pg = Pagina(navegador, datos)
+    pg.js("conmutarConfig(true);")
+    ok(pg.esperar("#config h3", "Cómo se pronuncia", 15), "Configuración trae «Cómo se pronuncia»")
+    pg.p.wait_for_timeout(800)
+    valores = pg.p.evaluate("""() => [...document.querySelectorAll('.fila-pronunciacion input')]
+      .map(i => i.value)""")
+    ok("Just Dance" in valores and "Yast Dans" in valores and "Logitech" in valores,
+       "ya viene con las marcas de los vídeos (Just Dance, Logitech…)")
+    ok(not pg.p.locator(".boton-guardar-pronunciacion").is_enabled(),
+       "sin tocar nada, «Guardar» está apagado")
+    _r, antes = api.get("/api/pronunciaciones")
+    pg.pulsar(".seccion-pronunciacion button", "Añadir una palabra")
+    pg.p.wait_for_timeout(300)
+    filas = pg.p.locator(".fila-pronunciacion")
+    ultima = filas.nth(filas.count() - 1)
+    ultima.locator("input").nth(0).fill("Call of Duty")
+    ultima.locator("input").nth(1).fill("Col of Diúti")
+    pg.p.wait_for_timeout(300)
+    _r, sin_guardar = api.get("/api/pronunciaciones")
+    ok(sin_guardar.get("lista") == antes.get("lista"), "escribir no guarda nada todavía")
+    ok(pg.p.locator(".boton-guardar-pronunciacion").is_enabled(), "y enciende «Guardar»")
+    pg.captura("como_se_pronuncia", entera=False)
+    pg.p.locator(".boton-guardar-pronunciacion").click()
+    pg.p.wait_for_timeout(1200)
+    _r, guardada = api.get("/api/pronunciaciones")
+    ok({"escrito": "Call of Duty", "dicho": "Col of Diúti"} in (guardada.get("lista") or []),
+       "al pulsar «Guardar» queda guardada")
+    ok(not pg.p.locator(".boton-guardar-pronunciacion").is_enabled(), "y «Guardar» se apaga")
+    # se deja como estaba para quien venga detrás
+    api.put("/api/pronunciaciones", {"lista": antes.get("lista")})
+    pg.sin_errores("cómo se pronuncia")
+    pg.cerrar()
+
 def main():
     ap = argparse.ArgumentParser(description="El recorrido de la pantalla")
     ap.add_argument("--solo", default="", help="un escenario por nombre")

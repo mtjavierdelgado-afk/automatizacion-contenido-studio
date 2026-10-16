@@ -11,6 +11,12 @@ vídeos, estilos, claves y contraseña no se tocan.
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
 **La voz (14 de octubre)**
+- **Las palabras en inglés, como suenan.** En Configuración → **Cómo se
+  pronuncia** hay una lista de palabras con cómo deben sonar («Just Dance» →
+  «Yast Dans», «Logitech» → «Lóyitec», «PlayStation» → «Pléi Estéishon»…). La
+  voz las dice así; el guion y los subtítulos siguen escritos como siempre. Ya
+  viene con las marcas de tus vídeos, y puedes añadir, cambiar o quitar las que
+  quieras. Vale para las voces que grabes a partir de ahora.
 - **Adiós al «eco» y al zumbido entre bloques.** Cuando el Studio alargaba la
   pausa entre dos bloques, repetía en bucle un trozo de esa pausa, y si el
   trozo traía una respiración o el final de una palabra, se oía un murmullo

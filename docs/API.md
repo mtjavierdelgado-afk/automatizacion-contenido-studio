@@ -258,6 +258,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 |---|---|---|
 | `GET` | `/api/ajustes` | Lo que hay puesto, y lo que cuesta cada calidad de imagen. |
 | `PUT` | `/api/ajustes` | Cambia ajustes. NO toca ningun proyecto: es el valor de los NUEVOS. |
+| `GET` | `/api/pronunciaciones` | Las palabras que la voz dice como se escriben aqui (sobre todo en ingles). |
+| `PUT` | `/api/pronunciaciones` | {lista: [{escrito, dicho}]} -> la lista guardada. No graba nada ni paga nada. |
 | `GET` | `/api/ajustes-cli` | Catalogo de modelos y esfuerzos, y en que pasos se puede elegir. |
 | `GET` | `/api/estadisticas` | Historico de tiempos reales, entre todos los proyectos. |
 | `POST` | `/api/estadisticas/valoracion` | Anota si el resultado de un ajuste gusto o no. |

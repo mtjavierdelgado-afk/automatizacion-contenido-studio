@@ -417,6 +417,7 @@ const API = {
   ajustesCLI: () => `${BASE}/api/ajustes-cli`,
   claves: () => `${BASE}/api/claves`,
   ajustes: () => `${BASE}/api/ajustes`,
+  pronunciaciones: () => `${BASE}/api/pronunciaciones`,
   cuentasCLI: refrescar => `${BASE}/api/claves/cli${refrescar ? '?refrescar=1' : ''}`,
   entrarCLI: cid => `${BASE}/api/claves/cli/${encodeURIComponent(cid)}/entrar`,
   codigoCLI: cid => `${BASE}/api/claves/cli/${encodeURIComponent(cid)}/codigo`,
@@ -2414,6 +2415,7 @@ function pintarConfig() {
   caja.appendChild(seccionDictado());
   caja.appendChild(seccionZonaHoraria());
   caja.appendChild(seccionCartesia(ficha));
+  caja.appendChild(seccionPronunciacion());
   caja.appendChild(seccionCLI());
   caja.appendChild(seccionOtrasClaves(ficha));
   caja.appendChild(h('div', { clase: 'fila' },
@@ -2518,6 +2520,107 @@ function seccionCalidadImagen() {
   return caja;
 }
 
+
+/* CÓMO SE PRONUNCIA (15-10-2026). La voz se graba en castellano, y las marcas en
+   inglés salían con fonética castellana («Just Dance», «Logitech»). Aquí se
+   escribe cada una como suena; el Studio se lo manda así a la voz y devuelve
+   las marcas de tiempo a la palabra escrita, así que el guion y los subtítulos
+   no cambian (pasos/pronunciacion.py). Se edita una COPIA y solo se guarda al
+   pulsar «Guardar»: abrir la pantalla no escribe nada. */
+function estadoPronunciacion() {
+  const vista = estadoConfig();
+  if (!vista.pron) vista.pron = { lista: null, borrador: null, cargando: false, error: '' };
+  return vista.pron;
+}
+
+async function cargarPronunciacion() {
+  const est = estadoPronunciacion();
+  est.cargando = true;
+  try {
+    const r = await pedir(API.pronunciaciones());
+    est.lista = r.lista || [];
+    est.inicial = r.inicial || [];
+    est.borrador = est.lista.map(f => ({ escrito: f.escrito, dicho: f.dicho }));
+    est.error = '';
+  } catch (e) {
+    est.error = e.message;
+  }
+  est.cargando = false;
+  repintarClaves();
+}
+
+function pronunciacionCambiada(est) {
+  return JSON.stringify((est.borrador || []).filter(f => f.escrito.trim() || f.dicho.trim()))
+    !== JSON.stringify(est.lista || []);
+}
+
+async function guardarPronunciacion() {
+  const est = estadoPronunciacion();
+  est.guardando = true;
+  repintarClaves();
+  try {
+    const r = await pedir(API.pronunciaciones(), { method: 'PUT', cuerpo: { lista: est.borrador } });
+    est.lista = r.lista || [];
+    est.borrador = est.lista.map(f => ({ escrito: f.escrito, dicho: f.dicho }));
+    est.error = '';
+    toast('Guardado: vale para las voces que grabes a partir de ahora');
+  } catch (e) {
+    est.error = e.message;
+  }
+  est.guardando = false;
+  repintarClaves();
+}
+
+function seccionPronunciacion() {
+  const est = estadoPronunciacion();
+  const caja = h('section', { clase: 'bloque-config seccion-pronunciacion' },
+    h('div', { clase: 'fila' }, h('h3', {}, 'Cómo se pronuncia')));
+  if (!est.lista && !est.cargando && !est.error) cargarPronunciacion();
+  caja.appendChild(h('div', { clase: 'meta' },
+    'La voz lee en español, así que las palabras en inglés salen con acento español. '
+    + 'Escribe aquí cómo suenan, con letras del español (la tilde marca dónde va la fuerza): '
+    + '«Just Dance» → «Yast Dans». El guion y los subtítulos siguen diciendo la palabra '
+    + 'escrita; solo cambia lo que se oye. Vale para las voces que grabes a partir de ahora.'));
+  if (est.error) caja.appendChild(h('div', { clase: 'error-cerrable' }, est.error));
+  if (!est.borrador) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo la lista…'));
+    return caja;
+  }
+  const filas = h('div', { clase: 'lista-pronunciacion' });
+  est.borrador.forEach((fila, i) => {
+    filas.appendChild(h('div', { clase: 'fila fila-pronunciacion' },
+      h('input', { type: 'text', value: fila.escrito, placeholder: 'Se escribe', maxlength: 60,
+        'aria-label': 'Cómo se escribe',
+        oninput: ev => { fila.escrito = ev.target.value; refrescarBotonPronunciacion(); } }),
+      h('span', { clase: 'meta' }, '→'),
+      h('input', { type: 'text', value: fila.dicho, placeholder: 'Suena', maxlength: 60,
+        'aria-label': 'Cómo suena',
+        oninput: ev => { fila.dicho = ev.target.value; refrescarBotonPronunciacion(); } }),
+      h('button', { clase: 'mini fantasma', title: 'Quitar esta palabra',
+        onclick: () => { est.borrador.splice(i, 1); repintarClaves(); } }, 'Quitar')));
+  });
+  caja.appendChild(filas);
+  const guardar = h('button', { clase: 'mini primario boton-guardar-pronunciacion',
+    disabled: est.guardando || !pronunciacionCambiada(est),
+    onclick: () => guardarPronunciacion() }, est.guardando ? 'guardando…' : 'Guardar');
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', onclick: () => { est.borrador.push({ escrito: '', dicho: '' }); repintarClaves(); } },
+      'Añadir una palabra'),
+    guardar,
+    pronunciacionCambiada(est)
+      ? h('button', { clase: 'mini fantasma', onclick: () => {
+        est.borrador = (est.lista || []).map(f => ({ escrito: f.escrito, dicho: f.dicho })); repintarClaves();
+      } }, 'Deshacer los cambios')
+      : null));
+  return caja;
+}
+
+/* Escribir en una casilla no repinta (se perdería el cursor): solo enciende
+   o apaga «Guardar». */
+function refrescarBotonPronunciacion() {
+  const boton = document.querySelector('.boton-guardar-pronunciacion');
+  if (boton) boton.disabled = !pronunciacionCambiada(estadoPronunciacion());
+}
 
 /* EL DICTADO DEL ASISTENTE: con OpenAI (si hay clave) o siempre el del
    navegador, que es gratis. Ver pasos/dictado.py. */

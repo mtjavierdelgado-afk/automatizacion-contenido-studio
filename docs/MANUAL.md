@@ -12,7 +12,13 @@ pregúntale en la burbuja de abajo a la derecha.
 Primero se crea un **estilo** (cómo se ve, cómo se cuenta y cómo suena un
 canal). Después, con ese estilo, cada **vídeo** pasa por cuatro pantallas, en
 este orden: **Encargo → Guion → Imágenes → Vídeo**. La barra de abajo te lleva
-de una a otra.
+de una a otra. Con el vídeo montado, **Publicar** lo lleva a las redes.
+
+Arriba, debajo del nombre del Studio, está la **barra de módulos**:
+**Inicio** (lo que pasa hoy), **Crear** (estilos y vídeos: todo lo de esta
+guía hasta «Vídeo»), **Publicar** (las redes) y **Automatizar** (la Parrilla
+de guiones y el piloto automático, que llegan más adelante). Al abrir el
+Studio estás en Crear.
 
 ## Lo que cuesta dinero y lo que no
 
@@ -284,12 +290,76 @@ derechos: «Mario Kart», «Nintendo Switch»…):
 - **El coste** (arriba): púlsalo y sale todo lo gastado de verdad en el vídeo,
   desglosado, con lo que costó su estilo y lo prometido frente a lo gastado de
   cada vez que generaste.
+- **Enviar a Publicar** (debajo del vídeo montado): abre su ficha en Publicar.
+
+## Publicar
+
+Lleva un vídeo **ya montado** a TikTok, Instagram Reels, YouTube y Facebook:
+a mano (copias los textos y descargas el MP4) o con **Upload-Post**, que lo
+sube ya o a la hora que digas (hora de Lima). Nada de Publicar cambia el vídeo
+ni lo deja por rehacer.
+
+**Antes de la primera vez** (solo para publicar desde aquí; a mano no hace falta):
+1. Crea tu cuenta en upload-post.com y conecta tus redes (Instagram como cuenta
+   profesional). Haz una prueba desde su web y comprueba que sale **pública**.
+2. Copia tu API key de Upload-Post y pégala en **Configuración → Publicar en
+   redes**. Nunca la pegues en un chat.
+3. En **Publicar → Cuentas y ajustes**: «Probar» (comprueba la clave sin subir
+   nada) y, en cada proyecto, **Crear perfil** → **Conectar** (abre la página
+   donde el cliente conecta sus cuentas; vale 48 horas y se le puede mandar) →
+   **Ver cuentas** (para que el Studio sepa cuáles están conectadas). Un perfil
+   es de un solo proyecto: así los vídeos de un cliente nunca salen en las
+   cuentas de otro.
+
+**Cuentas y ajustes**, en cada proyecto, también tiene **lo fijo**: la hora
+por defecto al programar, la firma y los hashtags que van al final de todos
+los textos, el **tono de los textos** (con su ✦ Guía y ✓ Revisar), si se marca
+como hecho con IA, si YouTube avisa a los suscriptores, la privacidad en
+YouTube y las redes que salen marcadas de fábrica. La confirmación antes de
+enviar no se puede quitar.
+
+**La ficha de un vídeo** (desde «Enviar a Publicar» o desde la cola):
+1. **Redes**: marca dónde va. Si el vídeo no encaja (horizontal en TikTok, un
+   vertical largo que en YouTube no sale como Short) se avisa; si la red no lo
+   acepta (más de 10 minutos en TikTok), no se deja marcar. Una red sin cuenta
+   conectada se avisa y no se deja enviar.
+2. **«Que Claude escriba los textos»**: los escribe para cada red desde el
+   encargo, el guion final y la duración real (en YouTube, también el título y
+   los capítulos). Va con tu suscripción de Claude; se apunta en el coste del
+   vídeo como tokens, sin dólares.
+3. **Corrige a mano** lo que quieras: se guarda solo. Cada red tiene su
+   **✦ Guía** (qué poner y qué no) y **✓ Revisar** (comprueba el texto contra la
+   guía y propone una versión mejor que se pone con un botón), **Copiar texto**
+   y **Así sale** (el texto final, con la llamada a la acción, la firma y los
+   hashtags). **Reescribir** pide a Claude solo esa red.
+4. **Cuándo**: **Publicar ahora**, **Programar** (día y hora de Lima) o **Solo a
+   mano** («Ya lo subí a…» lo apunta en el historial, con el enlace si lo
+   pones). **Dejar esperando mi OK** lo deja preparado sin enviarlo.
+5. **Confirmas** en la ventana que enseña las redes, las cuentas y la hora.
+6. **Envíos**: cada red con su estado (subiendo, programado, publicándose,
+   publicado con su enlace, falló con su motivo). Si una red falla, las demás
+   siguen. Lo programado se puede **Cancelar**.
+
+Si el guion o el montaje cambian después de escribir los textos, la ficha
+sale **desactualizada**: revísalos o pide otros. Si un envío programado lleva
+el MP4 de antes, se avisa: cancélalo y prográmalo otra vez.
+
+**Si algo se corta** al subir (sin red, o Upload-Post no contesta), el envío
+queda en **«comprobar»** y **no se reenvía solo**, para no publicar dos veces.
+Mira en upload-post.com si llegó; si no, **Reintentar** lo manda con la misma
+clave (si a Upload-Post ya le había llegado, no se duplica). Y volver a publicar
+un vídeo en una red donde ya salió pide confirmarlo aparte.
+
+**La cola y el calendario**: arriba, **Te necesitan** (lo que falló y lo que
+espera tu OK); después la semana día a día con lo que sale cada día (‹ › para
+moverte), y los vídeos listos con el estado de cada red.
 
 ## Configuración (⚙)
 
 - **Las claves**: OpenAI (imágenes), Cartesia (voz), Claude (guion y asistente),
   Jamendo y FreeSound (música y efectos). **Comprobar que funcionan** las prueba
-  sin gastar.
+  sin gastar. La de **Upload-Post** (publicar en redes) va en **Publicar en
+  redes** y se prueba en Publicar → Cuentas y ajustes.
 - **Calidad de las imágenes**: el punto de partida de los vídeos nuevos.
 - **Dictado al asistente**: con OpenAI o con el del navegador.
 - **Hora de tu región**: para que el chat y los vídeos enseñen tu hora.

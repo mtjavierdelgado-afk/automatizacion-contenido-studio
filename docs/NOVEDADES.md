@@ -40,6 +40,10 @@ vídeos, estilos, claves y contraseña no se tocan.
   publicar a mano.
 - Los textos para redes gastan tokens de tu suscripción de Claude y se apuntan
   en el coste del vídeo. Nada de Publicar deja obsoleto el vídeo.
+- **Guías y «Revisar» también en Publicar.** El texto de cada red y el tono de
+  los textos del proyecto tienen su **✦ Guía** (qué poner y qué no, plantilla,
+  ejemplo y prompt para otra IA) y su **✓ Revisar**, como los campos de Crear.
+  Y el manual («?») explica el módulo Publicar paso a paso.
 
 **Más arreglos de imágenes (16 de octubre)**
 - **Pegar una imagen ya no la manda al logo por sorpresa.** Con el cursor en

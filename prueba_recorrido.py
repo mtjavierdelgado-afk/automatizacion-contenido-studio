@@ -3184,6 +3184,17 @@ def publicar_en_redes(navegador, datos):
     valor = pg.p.evaluate("() => (document.querySelector('.texto-red[data-red=tiktok] textarea') || {}).value || ''")
     ok(valor.startswith("[TikTok]"), f"con el texto que escribió Claude (el doble): {valor[:40]!r}")
     ok(pg.visible(".texto-red button", "Copiar texto"), "cada red con su «Copiar texto»")
+    # la guía y «Revisar» de cada red, como los campos de Crear
+    pg.p.locator('.texto-red[data-red="tiktok"] .boton-guia').first.click()
+    ok(pg.esperar("#ventana-guia h2", "Texto para TikTok", 10), "«✦ Guía» abre la guía de TikTok")
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    pg.p.locator('.texto-red[data-red="tiktok"] button', has_text="Revisar").first.click()
+    ok(pg.esperar('.texto-red[data-red="tiktok"] .revision-publicar', segundos=40),
+       "«✓ Revisar» enseña la revisión del texto contra su guía")
+    pg.p.wait_for_timeout(2500)
+    pg.p.locator('.texto-red[data-red="tiktok"]').first.scroll_into_view_if_needed()
+    pg.captura("publicar_revisar")
     ok(pg.visible(".ficha-publicar a.boton-enlace", "Descargar MP4"), "y «Descargar MP4»")
 
     # editar a mano se guarda solo
@@ -3221,6 +3232,8 @@ def publicar_en_redes(navegador, datos):
     ok(pg.esperar(".proyecto-publicar h3", segundos=10), "cada proyecto con su perfil y sus cuentas")
     ok(pg.visible(".cuentas-proyecto .pastilla", "TikTok"), "y qué cuentas tiene conectadas")
     pg.p.locator(".ajustes-fijos > summary").first.click()
+    ok(pg.esperar(".ajustes-fijos .boton-guia", segundos=5), "el tono de los textos tiene su «✦ Guía»")
+    ok(pg.visible(".ajustes-fijos button", "Revisar"), "y su «✓ Revisar»")
     pg.captura("publicar_cuentas")
 
     # la clave, en Configuración

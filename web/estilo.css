@@ -3351,3 +3351,9 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
     height: calc(100vh - var(--alto) - var(--alto-modulos) - var(--alto-nav) - var(--alto-pie) - 100px);
   }
 }
+
+/* Guía y «Revisar» en Publicar (textos por red y tono del proyecto) */
+.guia-y-revisar { gap: 6px; margin-top: 6px; }
+.etiqueta-tono { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--tenue); }
+.ajustes-fijos textarea[data-tono] { width: 100%; margin-top: 4px; }
+.revision-publicar { margin-top: 8px; }

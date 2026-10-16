@@ -17186,6 +17186,10 @@ function bloqueTextoRed(red) {
     compuesto.titulo ? h('button', { clase: 'mini', onclick: () => copiarTexto(compuesto.titulo) }, 'Copiar título') : null,
     h('button', { clase: 'mini fantasma', title: 'Que Claude reescriba solo esta red',
       disabled: f.escribiendo, onclick: () => escribirTextosPublicar([red]) }, 'Reescribir')));
+  const campoTexto = () => document.querySelector(`.texto-red[data-red="${red}"] textarea`);
+  b.appendChild(h('div', { clase: 'fila guia-y-revisar' },
+    botonGuia(`texto_${red}`, campoTexto),
+    botonRevisarPublicar(`texto_${red}`, f.pid, campoTexto)));
   if (red === 'youtube' || red === 'facebook') {
     b.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Título'));
     b.appendChild(h('input', { type: 'text', value: t.titulo || '', maxlength: red === 'youtube' ? 100 : 255,
@@ -17194,6 +17198,7 @@ function bloqueTextoRed(red) {
   b.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Texto'));
   b.appendChild(h('textarea', { rows: 4, value: t.descripcion || '', datos: { foco: `${red}-descripcion` },
     oninput: ev => editarTextoPublicar(red, 'descripcion', ev.target.value) }));
+  b.appendChild(panelRevisionPublicar(`texto_${red}`, f.pid, campoTexto));
   const pie = h('div', { clase: 'fila campos-red' });
   pie.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Llamada a la acción',
     h('input', { type: 'text', value: t.cta || '', datos: { foco: `${red}-cta` },
@@ -17482,9 +17487,21 @@ function tarjetaProyectoPublicar(p) {
   fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Hashtags fijos',
     h('input', { type: 'text', value: a.hashtags || '', placeholder: '#marca #ciudad',
       onchange: ev => guardar('hashtags', ev.target.value) })));
-  fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Tono de los textos',
-    h('input', { type: 'text', value: a.tono || '', placeholder: 'cercano, con humor, de tú',
-      onchange: ev => guardar('tono', ev.target.value) })));
+  /* EL TONO, CON SU GUÍA Y SU «REVISAR», como los campos de Crear. Se guarda
+     al salir del campo y también tras dejar de teclear: «Usar en el campo» y
+     «Aplicar la versión sugerida» escriben con un evento `input`. */
+  let relojTono = null;
+  const campoTono = () => document.querySelector(`textarea[data-tono="${p.id}"]`);
+  fijos.appendChild(h('div', { clase: 'fila guia-y-revisar' },
+    h('span', { clase: 'etiqueta-tono' }, 'Tono de los textos'),
+    h('span', { clase: 'crece' }),
+    botonGuia('tono_redes', campoTono),
+    botonRevisarPublicar('tono_redes', p.id, campoTono)));
+  fijos.appendChild(h('textarea', { rows: 3, value: a.tono || '', datos: { tono: p.id, foco: `tono-${p.id}` },
+    placeholder: 'CÓMO SUENA: de tú, cercano… (pulsa «Guía» para ver la plantilla)',
+    oninput: ev => { clearTimeout(relojTono); const v = ev.target.value; relojTono = setTimeout(() => guardar('tono', v), 1200); },
+    onchange: ev => { clearTimeout(relojTono); guardar('tono', ev.target.value); } }));
+  fijos.appendChild(panelRevisionPublicar('tono_redes', p.id, campoTono));
   fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Página de Facebook (solo si hay más de una)',
     h('input', { type: 'text', value: a.facebook_pagina || '', onchange: ev => guardar('facebook_pagina', ev.target.value) })));
   const casillas = h('div', { clase: 'fila' });
@@ -17524,6 +17541,135 @@ function bloquePublicarEnVideo(v) {
   caja.appendChild(h('a', { href: '#', clase: 'boton-enlace destacado',
     onclick: ev => { ev.preventDefault(); abrirPublicarVideo(v.pid); } }, 'Enviar a Publicar'));
   return caja;
+}
+
+/* «REVISAR» EN PUBLICAR: lo escrito contra su guía (`pasos/guias.py`), por
+   la misma ruta y la misma memoria que los campos de Crear
+   (`/api/sistema/guias/{gid}/revisar`). El estado vive en `PUB.revisiones`,
+   por guía y por vídeo o proyecto, y no en el bloque: la pantalla se repinta
+   mientras Claude revisa. Los botones buscan el campo AL PULSARLOS. */
+PUB.revisiones = {};
+
+function botonRevisarPublicar(gid, donde, campo) {
+  const clave = `${gid}|${donde}`;
+  const viva = PUB.revisiones[clave];
+  return h('button', {
+    clase: 'mini fantasma', type: 'button', disabled: !!(viva && viva.estado === 'pensando'),
+    title: 'Comprobar si lo escrito sirve como dice la guía (va con tu suscripción de Claude)',
+    onclick: async () => {
+      const area = campo();
+      const texto = area ? area.value.trim() : '';
+      if (!texto) { toast('Escribe algo en el campo y vuelve a revisar', true); return; }
+      const previa = PUB.revisiones[clave];
+      const anterior = previa && previa.estado === 'listo' ? previa.resultado : null;
+      PUB.revisiones[clave] = { estado: 'pensando' };
+      repintarPublicarSinPisar();
+      try {
+        const lanzada = await pedir(`${BASE}/api/sistema/guias/${gid}/revisar`,
+          { method: 'POST', cuerpo: { texto, anterior } });
+        let ficha = { estado: 'pensando' };
+        for (let i = 0; i < 80 && ficha.estado === 'pensando'; i += 1) {
+          if (i) await new Promise(r => setTimeout(r, 1500));
+          ficha = await pedir(`${BASE}/api/sistema/revisiones/${lanzada.id}`);
+        }
+        if (ficha.estado === 'error') throw new Error(ficha.error || 'no se ha podido revisar');
+        if (ficha.estado !== 'listo') {
+          throw new Error('la revisión ha tardado más de dos minutos: el CLI de Claude puede estar '
+            + 'ocupado o sin cupo. Vuelve a pulsar «Revisar» en un momento');
+        }
+        PUB.revisiones[clave] = { estado: 'listo', resultado: ficha.resultado || {} };
+      } catch (e) {
+        PUB.revisiones[clave] = { estado: 'error', error: e.message };
+      }
+      repintarPublicarSinPisar();
+    },
+  }, viva && viva.estado === 'pensando' ? 'revisando…' : '✓ Revisar');
+}
+
+function ponerEnCampoPublicar(campo, valor) {
+  const area = campo();
+  if (!area) { toast('No encuentro el campo: vuelve a abrir esta pantalla', true); return false; }
+  area.value = valor;
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  area.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+}
+
+function panelRevisionPublicar(gid, donde, campo) {
+  const clave = `${gid}|${donde}`;
+  const viva = PUB.revisiones[clave];
+  const panel = h('div', { clase: 'revision-campo revision-publicar' });
+  if (!viva || viva.cerrada) { panel.hidden = true; return panel; }
+  const cerrar = () => { viva.cerrada = true; repintarPublicarSinPisar(); };
+  if (viva.estado === 'pensando') {
+    panel.appendChild(h('div', { clase: 'cargando' }, 'revisando con la guía… (unos segundos)'));
+    return panel;
+  }
+  if (viva.estado === 'error') {
+    panel.appendChild(cajaError(viva.error));
+    panel.appendChild(h('div', { clase: 'fila' }, h('button', { clase: 'mini fantasma', onclick: cerrar }, 'Cerrar')));
+    return panel;
+  }
+  const r = viva.resultado || {};
+  const nombres = { sirve: '✅ Sirve', mejorable: '🟡 Mejorable', no_sirve: '🔴 No sirve así' };
+  panel.appendChild(h('div', { clase: 'fila' },
+    h('b', {}, nombres[r.veredicto] || r.veredicto || 'Revisado'),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini fantasma', onclick: cerrar }, 'Cerrar')));
+  if (r.resumen) panel.appendChild(h('div', {}, r.resumen));
+  if (r.de_memoria) {
+    panel.appendChild(h('div', { clase: 'meta' },
+      'Este texto ya se había revisado: es la misma respuesta (no gasta otra revisión).'));
+  }
+  if ((r.problemas || []).length) {
+    panel.appendChild(h('ul', {}, ...(r.problemas || []).map(pr => {
+      let aplicar = null;
+      if (pr.original && pr.mejor && !pr.aplicada) {
+        const area = campo();
+        const veces = area ? vecesEn(area.value, pr.original) : 0;
+        aplicar = veces === 1
+          ? h('div', { clase: 'fila' }, h('button', { clase: 'mini', type: 'button',
+            onclick: () => {
+              const ahora = campo();
+              if (!ahora || vecesEn(ahora.value, pr.original) !== 1) {
+                toast('Ese trozo ya no está tal cual (o está varias veces): cámbialo a mano', true);
+                return;
+              }
+              const i = ahora.value.indexOf(pr.original);
+              if (ponerEnCampoPublicar(campo, ahora.value.slice(0, i) + pr.mejor
+                + ahora.value.slice(i + pr.original.length))) {
+                pr.aplicada = true;
+                toast('Mejora aplicada: revísala y ajústala a tu gusto');
+                repintarPublicarSinPisar();
+              }
+            } }, 'Aplicar esta mejora'))
+          : h('div', { clase: 'meta' }, veces > 1
+            ? `«${pr.original}» aparece ${veces} veces en el campo: cambia a mano la que toque.`
+            : `«${pr.original}» ya no está tal cual en el campo: cámbialo a mano.`);
+      } else if (pr.aplicada) {
+        aplicar = h('div', { clase: 'meta' }, '✓ Mejora aplicada en el campo');
+      }
+      return h('li', {}, h('b', {}, pr.que), pr.por_que ? ` — ${pr.por_que}` : '',
+        pr.arreglo ? h('div', { clase: 'meta' }, `Mejor: ${pr.arreglo}`) : null, aplicar);
+    })));
+  }
+  if (r.sugerida) {
+    panel.appendChild(h('details', { open: true }, h('summary', {}, 'La versión sugerida'),
+      h('div', { clase: 'sugerida' }, r.sugerida)));
+    panel.appendChild(h('div', { clase: 'fila' }, h('button', {
+      clase: 'mini primario',
+      title: 'Pone la versión sugerida en el campo (se guarda como si la hubieras escrito)',
+      onclick: () => {
+        if (!window.confirm('¿Cambiar lo escrito por la versión sugerida?')) return;
+        if (ponerEnCampoPublicar(campo, r.sugerida)) {
+          viva.cerrada = true;
+          toast('Puesta la versión sugerida: revísala y ajústala a tu gusto');
+          repintarPublicarSinPisar();
+        }
+      },
+    }, 'Aplicar la versión sugerida')));
+  }
+  return panel;
 }
 
 /* LA CLAVE DE UPLOAD-POST EN CONFIGURACIÓN, como las de la música y los

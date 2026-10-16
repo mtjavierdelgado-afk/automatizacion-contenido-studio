@@ -2194,8 +2194,10 @@ def probar_sistema(cliente):
     respuesta, datos = cliente.get("/api/sistema/guias")
     igual(respuesta.status_code, 200, "GET /api/sistema/guias responde 200")
     ids = [g.get("id") for g in datos.get("guias") or []]
-    igual(ids, ["estilo_grafico", "tono", "voz", "material", "indicaciones", "cta"],
-          "estan las seis guias, en el orden de la pantalla")
+    igual(ids, ["estilo_grafico", "tono", "voz", "material", "indicaciones", "cta",
+                "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
+                "tono_redes"],
+          "estan las once guias (las seis de Crear y las cinco de Publicar), en orden")
     ok(all(g.get("plantilla") and g.get("prompt_ia") and g.get("que_hace")
            for g in datos.get("guias") or []),
        "cada guia trae plantilla, prompt para otra IA y que hace el sistema")

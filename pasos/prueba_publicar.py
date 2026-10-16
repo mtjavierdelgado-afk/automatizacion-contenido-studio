@@ -216,7 +216,9 @@ class _FalsoUploadPost(http.server.BaseHTTPRequestHandler):
                                   "access_url": "https://app.upload-post.com/connect?token=J",
                                   "duration": "48h"})
         elif self.path == "/api/upload":
-            if b'name="scheduled_date"' in cuerpo:
+            if b'name="user"\r\n\r\ncae' in cuerpo:
+                self._responder(524, {"success": False, "message": "A timeout occurred"})
+            elif b'name="scheduled_date"' in cuerpo:
                 self._responder(202, {"success": True, "job_id": "job_9",
                                       "scheduled_date": "2026-12-01T00:00:00Z"})
             else:
@@ -275,6 +277,11 @@ def prueba_cliente():
         igual(int(vista["cabeceras"].get("Content-Length")), len(cuerpo),
               "con su Content-Length exacto")
 
+        try:
+            cli.publicar("cae", ["tiktok"], mp4, {})
+            ok(False, "un 5xx en la subida falla")
+        except UP.ErrorUploadPost as fallo:
+            ok(fallo.sin_respuesta, "un 5xx en la subida (el 524 de Cloudflare) es «no se sabe», no «falló»")
         r = cli.publicar("studio_b", ["tiktok"], mp4, {}, cuando="2026-12-01T19:00:00")
         igual((r["modo"], r["job_id"]), ("programado", "job_9"), "programar: devuelve el job_id")
         cuerpo = _FalsoUploadPost.vistas[-1]["cuerpo"]
@@ -383,7 +390,7 @@ def _esperar(sesion, url, condicion, segundos=20):
 
 def prueba_studio():
     import requests
-    seccion("3] el Studio por HTTP, con Upload-Post simulado")
+    seccion("4] el Studio por HTTP, con Upload-Post simulado")
     carpeta = os.path.join(CARPETA, "studio")
     raiz = os.path.join(carpeta, "proyectos")
     os.makedirs(raiz)
@@ -629,6 +636,10 @@ def prueba_studio():
         # --- proyecto con clave
         r = s.post(base + "/api/clientes", json={"nombre": "Cliente secreto"})
         cid = r.json()["cliente"]["id"]
+        r = s.post(base + f"/api/publicar/proyectos/{cid}/perfil", json={"perfil": perfil})
+        igual(r.status_code, 409, "un proyecto no puede adoptar el perfil de otro")
+        igual(s.put(base + f"/api/publicar/proyectos/{cid}", json={"perfil": perfil}).status_code, 409,
+              "ni escribiéndolo a mano")
         s.put(base + f"/api/clientes/{cid}", json={"clave": "1234"})
         s.put(base + "/api/clientes/videos/fiesta", json={"cliente": cid})
         igual(s.get(base + "/api/publicar/videos/fiesta").status_code, 404,
@@ -649,14 +660,105 @@ def prueba_studio():
             proceso.kill()
 
 
+def prueba_envios_sueltos():
+    seccion("3] envíos: reintentar sin duplicar, no reconocidos, perfiles")
+    raiz = os.path.join(CARPETA, "sueltos")
+    os.makedirs(raiz)
+    simulador = os.path.join(CARPETA, "sim_sueltos.json")
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    try:
+        cli = P.cliente(raiz)
+        cli.crear_perfil("studio_x")
+        cli.enlace_conectar("studio_x", ["tiktok"])
+        mp4 = os.path.join(raiz, "v.mp4")
+        with open(mp4, "wb") as fh:
+            fh.write(b"0" * 2000)
+        info = dict(INFO, pid="suelto", mp4=mp4, mp4_huella="h1")
+        ajustes = dict(P.AJUSTES_DEFECTO, perfil="studio_x")
+        P.guardar_ficha(raiz, "suelto", {"textos": {"tiktok": {"descripcion": "Hola"}}})
+        nuevos = P.enviar(raiz, info, ajustes, {"redes": ["tiktok"], "modo": "ahora",
+                                                "confirmado": True}, en_hilo=False)
+        lote = nuevos[0]["lote"]
+        # como si la respuesta se hubiera perdido: el envío queda en «comprobar»
+        P._actualizar_lote(raiz, "suelto", lote, lambda e: e.update(estado="comprobar"))
+        with open(simulador, encoding="utf-8") as fh:
+            subidas_antes = len(json.load(fh)["subidas"])
+        P.reintentar(raiz, info, ajustes, nuevos[0]["id"], en_hilo=False)
+        with open(simulador, encoding="utf-8") as fh:
+            subidas = len(json.load(fh)["subidas"])
+        igual(subidas, subidas_antes, "reintentar con la misma clave NO sube el vídeo otra vez")
+        igual(P._leer_video(raiz, "suelto")["envios"][0]["estado"], "publicando",
+              "y el envío vuelve a seguirse")
+        try:
+            P.reintentar(raiz, info, ajustes, nuevos[0]["id"], en_hilo=False)
+            ok(False, "solo se reintenta lo que está en «comprobar»")
+        except P.ErrorPublicar:
+            ok(True, "solo se reintenta lo que está en «comprobar»")
+        try:
+            P.enviar(raiz, dict(info, mp4_huella="h2"), ajustes,
+                     {"redes": ["tiktok"], "modo": "ahora", "confirmado": True}, en_hilo=False)
+            ok(False, "otro montaje del mismo vídeo en la misma red también pide confirmarlo")
+        except P.ErrorPublicar as fallo:
+            ok("montaje anterior" in str(fallo),
+               f"otro montaje del mismo vídeo en la misma red también pide confirmarlo: {fallo}")
+
+        # un envío que Upload-Post no conoce acaba «fallido» (no se queda colgado)
+        P.RESPIRO_CONSULTA_S = 0
+        hace_una_hora = (P.ahora_lima() - dt.timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%S")
+        datos = P._leer_video(raiz, "suelto")
+        datos["envios"].append({"id": "perdido1", "red": "instagram", "lote": "nunca_llego",
+                                "estado": "comprobar", "modo": "ahora", "cuando": hace_una_hora,
+                                "creado": hace_una_hora, "mp4_huella": "h1"})
+        P._escribir(P._ruta_video(raiz, "suelto"), datos)
+        for _ in range(P.VECES_NO_LO_CONOCE):
+            P.refrescar(raiz)
+        perdido = next(e for e in P._leer_video(raiz, "suelto")["envios"] if e["id"] == "perdido1")
+        igual(perdido["estado"], "fallido", "un envío que Upload-Post no conoce acaba «fallido»")
+        c = P.cola(raiz, [{"pid": "suelto", "nombre": "Suelto", "montado": True}],
+                   desde=(P.ahora_lima() + dt.timedelta(days=30)).strftime("%Y-%m-%d"))
+        ok(any(e["id"] == "perdido1" for e in c["fallidos"]),
+           "lo que falló sale en «Te necesitan» aunque sea de otra semana")
+        P.cancelar(raiz, "suelto", "perdido1")
+        c = P.cola(raiz, [{"pid": "suelto", "nombre": "Suelto", "montado": True}])
+        ok(not any(e["id"] == "perdido1" for e in c["fallidos"]), "y se puede quitar de la lista")
+
+        # un perfil es un cliente
+        P.guardar_ajustes(raiz, "cl_a", {"perfil": "studio_a"})
+        try:
+            P.guardar_ajustes(raiz, "cl_b", {"perfil": "STUDIO_A"})
+            ok(False, "dos proyectos no comparten perfil")
+        except P.ErrorPublicar:
+            ok(True, "dos proyectos no comparten perfil de Upload-Post")
+        P.recordar_cuentas(raiz, "cl_a", {"tiktok": {"nombre": "A"}})
+        a = P.guardar_ajustes(raiz, "cl_a", {"perfil": "studio_a2"})
+        igual((a["cuentas"], a["cuentas_vistas"]), ({}, ""),
+              "cambiar de perfil olvida las cuentas del anterior")
+        P.recordar_cuentas(raiz, "cl_a", {"tiktok": {"nombre": "A", "reconectar": True}})
+        try:
+            P.enviar(raiz, dict(info, pid="otro"), P.ajustes_de(raiz, "cl_a"),
+                     {"redes": ["tiktok"], "modo": "ahora", "confirmado": True}, en_hilo=False)
+            ok(False, "una cuenta que pide reconectarse no cuenta como conectada")
+        except P.ErrorPublicar as fallo:
+            ok("no tiene cuenta" in str(fallo), "una cuenta que pide reconectarse no cuenta como conectada")
+        sin_aviso = P.componer("youtube", {"titulo": "T", "descripcion": "D"}, P.AJUSTES_DEFECTO, INFO)
+        ok("notifySubscribers" not in sin_aviso["campos"],
+           "avisar a los suscriptores (lo de fábrica) no manda ningún campo")
+        con = P.componer("youtube", {"titulo": "T", "descripcion": "D"},
+                         dict(P.AJUSTES_DEFECTO, avisar_youtube=False), INFO)
+        igual(con["campos"].get("notifySubscribers"), False, "no avisar sí lo manda")
+    finally:
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
+
 def main():
     print("PRUEBA DE PUBLICAR")
     prueba_piezas()
     prueba_cliente()
+    prueba_envios_sueltos()
     if shutil.which("ffmpeg"):
         prueba_studio()
     else:
-        print("\n[3] OMITIDA: falta ffmpeg para hacer un MP4 de prueba")
+        print("\n[4] OMITIDA: falta ffmpeg para hacer un MP4 de prueba")
     shutil.rmtree(CARPETA, ignore_errors=True)
     print("\n" + "=" * 70)
     if _fallos:

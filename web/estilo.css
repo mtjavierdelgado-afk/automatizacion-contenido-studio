@@ -3306,3 +3306,15 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
   .hora-envio { min-width: 0; }
   .calendario-publicar { grid-template-columns: repeat(7, minmax(120px, 1fr)); }
 }
+
+/* La barra de módulos come una fila arriba: el asistente, que se mide contra
+   el alto de la ventana, la descuenta para no montarse encima. */
+:root { --alto-modulos: 34px; }
+@media (min-width: 621px) {               /* en el móvil va a pantalla entera */
+  #asistente {
+    height: min(620px, calc(100vh - var(--alto) - var(--alto-modulos) - var(--alto-nav) - var(--alto-pie) - 100px));
+  }
+  #asistente.ampliado {
+    height: calc(100vh - var(--alto) - var(--alto-modulos) - var(--alto-nav) - var(--alto-pie) - 100px);
+  }
+}

@@ -20,7 +20,10 @@ Todo en `<proyectos>/_sistema/publicar/`, FUERA de la carpeta de cada video, a
 proposito:
 
   - nada de aqui entra en ninguna firma: escribir un texto para TikTok no
-    puede dejar obsoleto el render (regla 1 de CLAUDE.md);
+    puede dejar obsoleto el render (regla 1 de CLAUDE.md). Lo unico que toca
+    la carpeta del video son dos REGISTROS que ya existen para eso: los
+    tokens de Claude de los textos en su `coste.jsonl` (sin dolares: van
+    contra la suscripcion) y una linea en su bitacora por cada envio;
   - duplicar un video no duplica sus envios (una copia que «ya esta publicada»
     en TikTok seria mentira), y copiar su carpeta a mano tampoco (R4);
   - `asvs actualizar` no lo toca: son datos, como las notas.
@@ -103,6 +106,10 @@ _ESCRIBIENDO = {}              # pid -> {"desde", "redes"}
 _ERRORES_TEXTOS = {}           # pid -> mensaje del ultimo fallo
 _SUBIENDO = set()              # lotes con hilo vivo
 _ULTIMA_CONSULTA = {}          # lote -> time.time()
+_NO_LO_CONOCE = {}             # lote -> cuantas veces seguidas Upload-Post dijo 404
+#: Tras tantas consultas seguidas en las que Upload-Post no conoce un envio (y
+#: con media hora de margen desde que se creo), se da por no llegado.
+VECES_NO_LO_CONOCE = 5
 _ESTADO_CLAVE = {"probada": None}
 
 
@@ -333,14 +340,37 @@ def _validar_ajustes(cambios):
     return limpios
 
 
+def perfil_de_otro(raiz, perfil, cid):
+    """El proyecto (otro que `cid`) que ya usa ese perfil de Upload-Post, o ""."""
+    perfil = str(perfil or "").strip().lower()
+    if not perfil:
+        return ""
+    datos = leer_json(_ruta_ajustes(raiz), {}) or {}
+    for otro, ficha in (datos.get("proyectos") or {}).items():
+        if otro != _clave_proyecto(cid) and isinstance(ficha, dict) \
+                and str(ficha.get("perfil") or "").strip().lower() == perfil:
+            return otro
+    return ""
+
+
 def guardar_ajustes(raiz, cid, cambios, internos=None):
     limpios = _validar_ajustes(cambios)
     if internos:
         limpios.update(internos)
     with _lock("ajustes"):
+        # UN PERFIL ES UN CLIENTE: dos proyectos con el mismo perfil publicarian
+        # los videos de uno en las cuentas del otro
+        if limpios.get("perfil") and perfil_de_otro(raiz, limpios["perfil"], cid):
+            raise ErrorPublicar("ese perfil de Upload-Post ya es de otro proyecto: cada "
+                                "cliente necesita el suyo", 409)
         datos = leer_json(_ruta_ajustes(raiz), {}) or {}
         proyectos = datos.setdefault("proyectos", {})
         propio = proyectos.setdefault(_clave_proyecto(cid), {})
+        # otro perfil = otras cuentas: las vistas del anterior ya no valen
+        if "perfil" in limpios and limpios["perfil"] != propio.get("perfil") \
+                and "cuentas" not in limpios:
+            propio["cuentas"] = {}
+            propio["cuentas_vistas"] = ""
         propio.update(limpios)
         _escribir(_ruta_ajustes(raiz), datos)
     return ajustes_de(raiz, cid)
@@ -746,7 +776,10 @@ def componer(red, textos_red, ajustes, info, capitulos=None):
         if etiquetas:
             campos["tags[]"] = etiquetas
         campos["privacyStatus"] = ajustes.get("privacidad_youtube") or "public"
-        campos["notifySubscribers"] = bool(ajustes.get("avisar_youtube"))
+        # YouTube avisa de fabrica: solo se manda cuando NO se quiere (el campo
+        # no esta en la documentacion de Upload-Post que se leyo; ver NOVEDADES)
+        if not ajustes.get("avisar_youtube"):
+            campos["notifySubscribers"] = False
         if ia:
             campos["containsSyntheticMedia"] = True
         if not titulo.strip():
@@ -816,7 +849,7 @@ def guardar_ficha(raiz, pid, cambios):
 def _envio_publico(e):
     return {k: e.get(k) for k in (
         "id", "red", "estado", "modo", "cuando", "creado", "actualizado", "url",
-        "error", "lote", "perfil", "mp4_huella", "nota", "programado_para")}
+        "error", "lote", "perfil", "mp4_huella", "nota", "programado_para", "sin_hora")}
 
 
 def ficha(raiz, info, ajustes):
@@ -920,7 +953,8 @@ def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
     # Post la salta). Solo si ya se miraron las cuentas: sin mirar, no se sabe.
     cuentas = ajustes.get("cuentas") or {}
     if modo != "pendiente" and ajustes.get("cuentas_vistas"):
-        sin_cuenta = [NOMBRE_RED[r] for r in redes if r in cuentas and not cuentas.get(r)]
+        sin_cuenta = [NOMBRE_RED[r] for r in redes if r in cuentas and (
+            not cuentas.get(r) or (cuentas.get(r) or {}).get("reconectar"))]
         if sin_cuenta:
             raise ErrorPublicar(
                 ", ".join(sin_cuenta) + " no tiene cuenta conectada en Upload-Post. Conéctala "
@@ -928,13 +962,16 @@ def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
     with _lock(pid):
         datos = _leer_video(raiz, pid)
         if not cuerpo.get("repetir"):
-            repetidas = [NOMBRE_RED[e["red"]] for e in datos["envios"]
-                         if e.get("red") in redes and e.get("estado") in VIVOS
-                         and e.get("mp4_huella") == info.get("mp4_huella")]
-            if repetidas:
+            # CUALQUIER envio vivo de este video en esa red, sea cual sea el MP4:
+            # volver a montar (un subtitulo) cambia el fichero, no el video
+            vivos = [e for e in datos["envios"]
+                     if e.get("red") in redes and e.get("estado") in VIVOS]
+            if vivos:
+                nombres = ", ".join(sorted({NOMBRE_RED[e["red"]] for e in vivos}))
+                otro = any(e.get("mp4_huella") != info.get("mp4_huella") for e in vivos)
                 raise ErrorPublicar(
-                    "este mismo vídeo ya está publicado o programado en "
-                    + ", ".join(sorted(set(repetidas)))
+                    f"este vídeo ya está publicado o programado en {nombres}"
+                    + (" (con un montaje anterior)" if otro else "")
                     + ". Si de verdad quieres publicarlo otra vez, confírmalo.", 409)
         sin_texto = [NOMBRE_RED[r] for r in redes
                      if not str((datos["textos"].get(r) or {}).get("descripcion") or "").strip()]
@@ -1074,6 +1111,33 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
         trabajo()
 
 
+def reintentar(raiz, info, ajustes, eid, en_hilo=True):
+    """Vuelve a mandar un envío en «comprobar» CON SU MISMA clave de idempotencia:
+    si Upload-Post ya lo tenía, devuelve el mismo trabajo y no se publica dos veces."""
+    pid = info["pid"]
+    with _lock(pid):
+        datos = _leer_video(raiz, pid)
+        envio = next((e for e in datos["envios"] if e.get("id") == eid), None)
+        if envio is None:
+            raise ErrorPublicar("ese envío no existe", 404)
+        if envio.get("estado") != "comprobar" or not envio.get("lote"):
+            raise ErrorPublicar("solo se reintenta un envío que quedó sin confirmar "
+                                "(«comprobar»); lo demás se publica otra vez como envío nuevo", 409)
+        if envio["lote"] in _SUBIENDO:
+            raise ErrorPublicar("ese envío se está subiendo ahora mismo", 409)
+        if envio.get("modo") == "programado":
+            momento = _leer_momento(envio.get("cuando"))
+            if momento and momento <= ahora_lima() + dt.timedelta(minutes=2):
+                raise ErrorPublicar("su hora ya pasó: mira en Upload-Post si salió, y si no, "
+                                    "publícalo como envío nuevo", 409)
+    cliente(raiz)
+    _actualizar_lote(raiz, pid, envio["lote"], lambda e: e.update(
+        estado="enviando", error="", nota="reintentado con la misma clave"))
+    _NO_LO_CONOCE.pop(envio["lote"], None)
+    _subir_lote(raiz, info, ajustes, envio["lote"], en_hilo=en_hilo)
+    return {"lote": envio["lote"]}
+
+
 def cancelar(raiz, pid, eid):
     with _lock(pid):
         datos = _leer_video(raiz, pid)
@@ -1083,7 +1147,8 @@ def cancelar(raiz, pid, eid):
     estado = envio.get("estado")
     if estado == "programado":
         if not envio.get("job_id"):
-            raise ErrorPublicar("ese envío todavía se está subiendo: espera un momento", 409)
+            raise ErrorPublicar("Upload-Post todavía no le ha dado número de trabajo a este "
+                                "envío: espera un momento y vuelve a intentarlo", 409)
         hermanos = [e for e in datos["envios"] if e.get("lote") == envio.get("lote")
                     and e.get("estado") == "programado"]
         _por_upload_post(cliente(raiz).cancelar, envio["job_id"])
@@ -1100,7 +1165,19 @@ def cancelar(raiz, pid, eid):
                     e["actualizado"] = _iso_lima()
             _escribir(_ruta_video(raiz, pid), datos)
         return {"cancelados": [envio["red"]]}
-    raise ErrorPublicar("solo se cancela lo que está programado o esperando tu OK", 409)
+    if estado == "fallido":
+        # «Quitar de la lista»: un fallo ya visto no se queda en «Te necesitan»
+        with _lock(pid):
+            datos = _leer_video(raiz, pid)
+            for e in datos["envios"]:
+                if e.get("id") == eid:
+                    e["estado"] = "cancelado"
+                    e["nota"] = "fallo descartado"
+                    e["actualizado"] = _iso_lima()
+            _escribir(_ruta_video(raiz, pid), datos)
+        return {"cancelados": [envio["red"]]}
+    raise ErrorPublicar("solo se cancela lo que está programado o esperando tu OK "
+                        "(y un fallo se quita de la lista)", 409)
 
 
 def marcar_a_mano(raiz, info, red, url=""):
@@ -1151,7 +1228,7 @@ def refrescar(raiz, limite=8):
                         estado="comprobar", error="la subida se cortó a medias (el "
                         "servicio se reinició): no se reenvía sola; mira en Upload-Post"))
                 continue
-            if estado == "programado":
+            if estado == "programado" and e.get("job_id"):
                 momento = _leer_momento(e.get("cuando"))
                 if momento and momento > ahora:
                     continue
@@ -1162,10 +1239,13 @@ def refrescar(raiz, limite=8):
         cli = cliente(raiz)
     except ErrorPublicar:
         return {"consultados": 0, "cambios": 0, "sin_clave": True}
+    # EL RESPIRO ANTES DE CORTAR, y primero lo que hace mas que no se mira: con
+    # el corte primero, ocho envios atascados dejaban sin mirar a todos los demas
+    listos = [(lote, par) for lote, par in pendientes.items()
+              if time.time() - _ULTIMA_CONSULTA.get(lote, 0) >= RESPIRO_CONSULTA_S]
+    listos.sort(key=lambda x: _ULTIMA_CONSULTA.get(x[0], 0))
     consultados = cambios = 0
-    for lote, (pid, e) in list(pendientes.items())[:limite]:
-        if time.time() - _ULTIMA_CONSULTA.get(lote, 0) < RESPIRO_CONSULTA_S:
-            continue
+    for lote, (pid, e) in listos[:limite]:
         _ULTIMA_CONSULTA[lote] = time.time()
         consultados += 1
         try:
@@ -1174,23 +1254,44 @@ def refrescar(raiz, limite=8):
             else:
                 r = cli.estado(request_id=e.get("request_id") or lote)
         except UP.ErrorUploadPost as fallo:
-            if e.get("estado") == "comprobar":
-                continue
-            if fallo.codigo == 404 and e.get("estado") == "publicando":
-                continue                     # todavía no lo ha registrado
+            if fallo.codigo == 404:
+                veces = _NO_LO_CONOCE.get(lote, 0) + 1
+                _NO_LO_CONOCE[lote] = veces
+                creado = _leer_momento(e.get("creado"))
+                viejo = creado is None or (ahora - creado).total_seconds() > 1800
+                if veces >= VECES_NO_LO_CONOCE and viejo and e.get("estado") in (
+                        "comprobar", "publicando"):
+                    _actualizar_lote(raiz, pid, lote, lambda x: x.update(
+                        estado="fallido", error="Upload-Post no conoce este envío: no llegó. "
+                        "Puedes publicarlo otra vez."))
+                    _NO_LO_CONOCE.pop(lote, None)
+                    cambios += 1
             continue
+        _NO_LO_CONOCE.pop(lote, None)
         redes = r.get("redes") or {}
         general = r.get("estado") or ""
+        nuevo_job = r.get("job_id") or ""
 
-        def aplicar(x, redes=redes, general=general):
+        def aplicar(x, redes=redes, general=general, nuevo_job=nuevo_job):
+            if nuevo_job and not x.get("job_id"):
+                x["job_id"] = nuevo_job
             propio = redes.get(x["red"])
             if general in ("cancelled", "canceled"):
                 x["estado"] = "cancelado"
+                return
+            if general in ("scheduled", "pending", "queued") and x.get("modo") == "programado" \
+                    and x["estado"] in ("publicando", "comprobar"):
+                x["estado"] = "programado"
+                x["error"] = ""
                 return
             if propio:
                 nuevo = propio["estado"]
                 if nuevo == "procesando":
                     nuevo = "publicando"
+                if nuevo == "publicando" and x["estado"] == "programado":
+                    momento = _leer_momento(x.get("cuando"))
+                    if momento and momento > ahora:
+                        nuevo = "programado"        # aun no es su hora
                 if nuevo in ESTADOS and nuevo != x["estado"]:
                     x["estado"] = nuevo
                 if propio.get("url"):
@@ -1205,8 +1306,7 @@ def refrescar(raiz, limite=8):
             elif general == "failed":
                 x["estado"] = "fallido"
                 x["error"] = r.get("mensaje") or "Upload-Post dice que falló"
-            elif general in ("processing", "in_progress", "queued", "pending") \
-                    and x["estado"] == "comprobar":
+            elif general in ("processing", "in_progress") and x["estado"] == "comprobar":
                 x["estado"] = "publicando"
                 x["error"] = ""
 
@@ -1214,6 +1314,11 @@ def refrescar(raiz, limite=8):
         _actualizar_lote(raiz, pid, lote, aplicar)
         if json.dumps(_leer_video(raiz, pid)["envios"], sort_keys=True) != antes:
             cambios += 1
+    # las memorias de consulta no crecen sin fin
+    vivos = set(pendientes)
+    for memoria in (_ULTIMA_CONSULTA, _NO_LO_CONOCE):
+        for lote in [k for k in memoria if k not in vivos]:
+            memoria.pop(lote, None)
     return {"consultados": consultados, "cambios": cambios}
 
 
@@ -1241,13 +1346,15 @@ def cola(raiz, videos, desde=None, dias=7):
     for v in videos:
         datos = _leer_video(raiz, v["pid"]) if v["pid"] in con_ficha else None
         propios = (datos or {}).get("envios") or []
-        resumen = {}
-        for e in propios:
+        resumen, salio = {}, {}
+        for e in propios:                      # en orden: el ultimo manda
             if e.get("estado") == "cancelado":
                 continue
-            resumen.setdefault(e["red"], e.get("estado"))
+            resumen[e["red"]] = e.get("estado")
             if e.get("estado") in ("publicado", "a_mano"):
-                resumen[e["red"]] = e["estado"]
+                salio[e["red"]] = e["estado"]
+        resumen.update({r: est for r, est in salio.items()
+                        if resumen.get(r) not in ("programado", "enviando", "publicando")})
         if v.get("montado"):
             listos.append(dict(v, envios=resumen,
                                textos=bool(datos and any(
@@ -1257,7 +1364,8 @@ def cola(raiz, videos, desde=None, dias=7):
             momento = _leer_momento(e.get("cuando"))
             if momento is None:
                 continue
-            if inicio <= momento < fin or (e.get("estado") == "espera_ok"):
+            # lo que te necesita sale aunque sea de otra semana
+            if inicio <= momento < fin or e.get("estado") in ("espera_ok", "fallido", "comprobar"):
                 envios.append(dict(_envio_publico(e), pid=v["pid"],
                                    video=visibles[v["pid"]].get("nombre") or v["pid"],
                                    cliente=v.get("cliente") or "",

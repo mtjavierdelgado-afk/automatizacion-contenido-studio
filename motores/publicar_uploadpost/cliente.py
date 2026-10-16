@@ -36,6 +36,7 @@ Solo biblioteca estandar: el video se sube en streaming (`_Multipart`), sin
 cargarlo entero en memoria, para que un video de treinta minutos no sean
 cientos de megas de RAM en el VPS.
 """
+import http.client
 import io
 import json
 import mimetypes
@@ -213,9 +214,15 @@ class ClienteUploadPost:
                 cuerpo_error = json.loads(crudo.decode("utf-8", "replace") or "{}")
             except ValueError:
                 cuerpo_error = {"message": crudo.decode("utf-8", "replace")[:300]}
+            # UN 5xx NO DICE QUE NO HAYA LLEGADO: el servidor (o el Cloudflare de
+            # delante, con su 524 a los ~100 s) puede haber recibido el video y
+            # seguir procesandolo. Para una subida eso es «no se sabe», nunca
+            # «fallo»: reenviar podria publicarlo dos veces.
             raise ErrorUploadPost(_tachar(_mensaje_de(cuerpo_error, fallo.code), self.clave),
-                                  fallo.code, cuerpo_error) from None
-        except (urllib.error.URLError, OSError, TimeoutError) as fallo:
+                                  fallo.code, cuerpo_error,
+                                  sin_respuesta=fallo.code >= 500) from None
+        except (urllib.error.URLError, OSError, TimeoutError,
+                http.client.HTTPException) as fallo:
             motivo = getattr(fallo, "reason", fallo)
             raise ErrorUploadPost(
                 _tachar(f"Upload-Post no contesta ({motivo})", self.clave),
@@ -227,7 +234,7 @@ class ClienteUploadPost:
             respuesta = json.loads(crudo.decode("utf-8", "replace") or "{}")
         except ValueError:
             raise ErrorUploadPost("Upload-Post devolvió algo que no es JSON",
-                                  codigo) from None
+                                  codigo, sin_respuesta=True) from None
         if isinstance(respuesta, dict) and respuesta.get("success") is False:
             raise ErrorUploadPost(_tachar(_mensaje_de(respuesta, codigo), self.clave),
                                   codigo, respuesta)
@@ -331,8 +338,11 @@ class ClienteUploadPost:
         r = self._pedir("POST", "/api/upload", multipart=cuerpo,
                         cabeceras={"Idempotency-Key": id_propio},
                         plazo=PLAZO_SUBIDA_S)
+        # EL MODO LO DICE LO PEDIDO, no la respuesta: una subida de mas de 59 s
+        # pasa a segundo plano aunque fuera programada, y vuelve con request_id
+        # y sin job_id (el job_id llega despues, al preguntar por su estado).
         return {
-            "modo": "programado" if r.get("job_id") else (
+            "modo": "programado" if cuando else (
                 "en_cola" if r.get("request_id") else "hecho"),
             "request_id": str(r.get("request_id") or id_propio),
             "job_id": str(r.get("job_id") or ""),
@@ -387,6 +397,7 @@ class ClienteUploadPost:
                         consulta={"request_id": request_id, "job_id": job_id})
         general = str(r.get("status") or "").lower()
         return {"estado": general, "redes": self._resultados(r.get("results")),
+                "job_id": str(r.get("job_id") or ""),
                 "mensaje": str(r.get("message") or "")[:300]}
 
     def cancelar(self, job_id):

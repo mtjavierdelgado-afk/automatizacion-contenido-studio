@@ -13948,6 +13948,7 @@ except Exception as _fallo_publicar:  # noqa: BLE001
     ERROR_PUBLICAR = f"{type(_fallo_publicar).__name__}: {_fallo_publicar}"
 
 _MEDIDAS_MP4 = {}
+_MAX_MEDIDAS_MP4 = 500
 
 
 def _publicar():
@@ -14009,6 +14010,8 @@ def _info_para_publicar(ctx):
         medidas = _MEDIDAS_MP4.get((mp4, huella))
         if medidas is None:
             medidas = P.medir_mp4(mp4)
+            if len(_MEDIDAS_MP4) >= _MAX_MEDIDAS_MP4:
+                _MEDIDAS_MP4.clear()
             _MEDIDAS_MP4[(mp4, huella)] = medidas
     plan, bloques = {}, []
     if PASOS_MODULOS is not None:
@@ -14150,9 +14153,22 @@ def publicar_confirmar(pid: str, eid: str, peticion: Request,
     return {"envios": nuevos}
 
 
+@app.post("/api/publicar/videos/{pid}/envios/{eid}/reintentar", status_code=202)
+def publicar_reintentar(pid: str, eid: str, peticion: Request):
+    """Vuelve a mandar un envio que quedo en «comprobar», con su misma clave de
+    idempotencia (si Upload-Post ya lo tenia, no se publica dos veces)."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    ajustes = _publicar().ajustes_de(raiz_proyectos(), info["cliente"])
+    r = _por_publicar(_publicar().reintentar, raiz_proyectos(), info, ajustes, eid)
+    ctx.bitacora.anotar("publicar_reintento", "render", r)
+    return r
+
+
 @app.post("/api/publicar/videos/{pid}/envios/{eid}/cancelar")
 def publicar_cancelar(pid: str, eid: str, peticion: Request):
-    """Cancela lo programado (en Upload-Post) o lo que esperaba tu OK."""
+    """Cancela lo programado (en Upload-Post) o lo que esperaba tu OK, y quita
+    de la lista un envio que fallo."""
     ctx = _ctx_publicable(pid, peticion)
     r = _por_publicar(_publicar().cancelar, raiz_proyectos(), ctx.id, eid)
     ctx.bitacora.anotar("publicar_cancelado", "render", r)
@@ -14217,8 +14233,8 @@ def publicar_ver_cuentas(cid: str, peticion: Request):
     lista = _por_publicar(lambda: P._por_upload_post(P.cliente(raiz_proyectos()).perfiles))
     propio = next((p for p in lista["perfiles"] if p["perfil"] == ajustes["perfil"]), None)
     if propio is None:
-        return {"existe": False, "ajustes": ajustes,
-                "perfiles": [p["perfil"] for p in lista["perfiles"]]}
+        # sin la lista de perfiles de la cuenta: serian los de otros clientes
+        return {"existe": False, "ajustes": ajustes}
     return {"existe": True, "ajustes": P.recordar_cuentas(raiz_proyectos(), cid, propio["cuentas"])}
 
 
@@ -14232,11 +14248,16 @@ def publicar_crear_perfil(cid: str, peticion: Request, cuerpo: dict = Body(defau
     perfil = str(_cuerpo(cuerpo).get("perfil") or P.perfil_sugerido(cid, nombre)).strip()
     _por_publicar(P._validar_ajustes, {"perfil": perfil})
     cli = _por_publicar(P.cliente, raiz_proyectos())
+    # un perfil es UN cliente: si ya lo usa otro proyecto, ni se crea ni se adopta
+    if P.perfil_de_otro(raiz_proyectos(), perfil, cid):
+        raise ErrorApi(409, "ese perfil de Upload-Post ya es de otro proyecto: escribe "
+                            "otro nombre para este")
     try:
         hecho = cli.crear_perfil(perfil)
     except P.UP.ErrorUploadPost as fallo:
         if fallo.codigo != 409:
             raise ErrorApi(409 if fallo.codigo in (401, 403) else 502, str(fallo)) from None
+        # ya existia en Upload-Post y no es de ningun otro proyecto de aqui
         hecho = {"perfil": perfil, "cuentas": {}}
     ajustes = P.guardar_ajustes(raiz_proyectos(), cid, {"perfil": hecho["perfil"]},
                                 internos={"cuentas": hecho["cuentas"],

@@ -414,6 +414,14 @@ unidades pedidas). La calidad de cada imagen va en su ficha (`calidad`, desde el
 si no se puede es «desconocida» y no se ofrece. **No cambies la forma de
 `_firma_imagen`**: es la clave del banco y lo que permite esa deducción.
 
+**Del render se guardan las 5 últimas versiones** (y siempre la activa):
+`estado.VERSIONES_QUE_SE_GUARDAN`, decisión del dueño del 16-10-2026, y
+`ESTUDIO_VERSIONES_RENDER` para cambiarlo. Cada montaje copia el vídeo entero en
+una `v<N>` nueva. La poda la hace `completar()` al sellar: primero quita las
+entradas del documento y guarda, y después borra las carpetas y sus
+manifiestos, para que el estado nunca nombre una versión que ya no está. Los
+demás pasos guardan todas: son pequeños y la pantalla ofrece volver a ellas.
+
 **El precio por imagen del cotizador** (`ajustes.precio_por_imagen`) es la
 mediana de lo cobrado en imágenes de PLANO (`escena:`), por calidad y, con 20
 muestras, por modo (foto/ilustración, que viaja en el `detalle` de cada

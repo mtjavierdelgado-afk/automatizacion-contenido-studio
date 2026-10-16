@@ -17,7 +17,8 @@ de una a otra.
 ## Lo que cuesta dinero y lo que no
 
 - **Cuesta**: las imágenes (OpenAI) y la voz (Cartesia). Un vídeo de cuatro
-  minutos son unas 126 imágenes y ~4,4 $ en calidad baja.
+  minutos a ritmo medio son unas 90 imágenes (una por plano y una por personaje)
+  y ~4 $ en calidad baja; en foto, que empieza en calidad media, ~7 $.
 - **No cuesta** (va con tu suscripción de Claude): escribir el guion, la guía
   del estilo, los rótulos y el asistente.
 - **Es gratis**: montar el vídeo, cambiar la música, los subtítulos o los

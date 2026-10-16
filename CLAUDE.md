@@ -12,7 +12,9 @@ tarde averiguar.
 
 ## LO PRIMERO: aquí se paga por generar
 
-Una tanda de imágenes de un vídeo de cuatro minutos son ~126 imágenes y ~4,4 $.
+Una tanda de imágenes de un vídeo de cuatro minutos (ritmo medio) son ~86 planos
+más una hoja por personaje, y ~4 $ en calidad baja; en foto, que nace en media,
+~7 $ (`POST /api/estimacion`, 15-10-2026).
 No es un detalle de producto: es la razón de la mitad de las decisiones de este
 repo, y de estas tres reglas.
 
@@ -400,6 +402,21 @@ NUEVOS**: se escribe en el param `calidad` de `assets` al crear el proyecto y no
 se lee al generar. A propósito — `calidad` entra en la firma de cada imagen, así
 que un defecto retroactivo dejaría obsoletas las imágenes de todos los proyectos
 que nunca la fijaron, y regenerarlas se paga.
+
+**Cambiar la calidad de un vídeo con imágenes hechas no redibuja nada** (traer
+el estilo, cambiar `calidad`): p6 conserva todo PNG que exista si nadie lo pide.
+Lo dice el aviso de «Traer el estilo» y, en las diapositivas, «N imágenes siguen
+en otra calidad» con su botón (`POST /imagenes/calidad`, que manda SOLO esas como
+unidades pedidas). La calidad de cada imagen va en su ficha (`calidad`, desde el
+15-10-2026); en las viejas se deduce de la firma (`p6_assets.calidad_de_ficha`) y
+si no se puede es «desconocida» y no se ofrece. **No cambies la forma de
+`_firma_imagen`**: es la clave del banco y lo que permite esa deducción.
+
+**El precio por imagen del cotizador** (`ajustes.precio_por_imagen`) es la
+mediana de lo cobrado en imágenes de PLANO (`escena:`), por calidad y, con 20
+muestras, por modo (foto/ilustración, que viaja en el `detalle` de cada
+operación `imagen`). Las láminas y las hojas de reparto no entran: llevan menos
+referencias y abarataban el precio de un plano. Sin muestras, la tabla de arriba.
 
 ---
 

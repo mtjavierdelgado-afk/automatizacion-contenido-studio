@@ -467,6 +467,128 @@ def prueba_lo_que_se_perdia(proyecto, otro):
        "y el embudo del CLI está enganchado")
 
 
+def prueba_precio_de_las_imagenes(proyecto):
+    """La auditoria del coste de las imagenes (15-10-2026): C4, C6 y la
+    calidad de cada imagen en su ficha (C2/C3)."""
+    from nucleo import coste
+    import pasos
+    from pasos import ajustes
+
+    seccion("precio de las imagenes: modo, tamano vertical y mediana de planos")
+    # 1. EL MODO VIAJA CON LA OPERACION, y la calidad queda en la ficha
+    medidor = coste.Medidor(proyecto)
+    antes = len(medidor.eventos())
+    banco = os.path.join(proyecto.raiz, "banco")
+    with coste.contexto(proyecto, "assets"):
+        producida = pasos.p6_assets._producir_imagen(
+            "S002", "un plano de prueba en foto", [],
+            os.path.join(proyecto.raiz, "tmp", "escenas", "S002.png"),
+            {"calidad": "medium", "motor_imagen": "openai", "banco_imagenes": banco,
+             "imagenes_previas": [], "estilo": {"modo": "foto"}})
+        pasos.p6_assets._producir_imagen(
+            "S003", "un plano de prueba dibujado", [],
+            os.path.join(proyecto.raiz, "tmp", "escenas", "S003.png"),
+            {"calidad": "low", "motor_imagen": "openai", "banco_imagenes": banco,
+             "imagenes_previas": [], "estilo": {}})
+    eventos = medidor.eventos()[antes:]
+    igual([(e["detalle"].get("modo"), e["detalle"].get("calidad")) for e in eventos],
+          [("foto", "medium"), ("ilustracion", "low")],
+          "cada operacion imagen apunta el modo del video (foto o ilustracion)")
+    igual(producida.get("calidad"), "medium",
+          "y la imagen producida dice en que calidad quedo dibujada (va a su ficha)")
+
+    # 2. EL VERTICAL TIENE TARIFA aunque el tarifas.json del servidor sea viejo
+    tabla = coste.tarifas()
+    sin_vertical = json.loads(json.dumps(tabla))
+    sin_vertical["openai"]["usd_por_imagen"].pop("1024x1536", None)
+    ruta_vieja = os.path.join(proyecto.raiz, "tarifas_sin_vertical.json")
+    with open(ruta_vieja, "w", encoding="utf-8") as fh:
+        json.dump(sin_vertical, fh)
+    original = coste.RUTA_TARIFAS
+    coste.RUTA_TARIFAS = ruta_vieja
+    try:
+        for calidad in ("low", "medium", "high"):
+            igual(coste.tarifa_imagen("1024x1536", calidad),
+                  coste.tarifa_imagen("1536x1024", calidad),
+                  f"vertical {calidad}: cuesta lo mismo que el apaisado, con un tarifas.json "
+                  "sin su fila (el de los datos del servidor no se actualiza)")
+        usd, origen = coste.coste_openai({}, "1024x1536", "medium", 1, refs=7)
+        ok(usd is not None and origen.get("motivo") != "sin tarifa",
+           f"un plano vertical sin `usage` ya no se anota «sin tarifa» ({usd}, {origen})")
+    finally:
+        coste.RUTA_TARIFAS = original
+        coste.tarifas(refrescar=True)
+    with open(original, encoding="utf-8") as fh:
+        ok("1024x1536" in json.load(fh)["openai"]["usd_por_imagen"],
+           "y tarifas.json lleva su fila vertical")
+
+    # 3. LA MEDIANA «LO QUE TE HAN COBRADO» ES DE PLANOS, y por modo
+    def registro(usd, unidad, calidad, modo=None):
+        detalle = {"calidad": calidad, "tamano": "1536x1024", "coste": {"via": "tokens"}}
+        if modo:
+            detalle["modo"] = modo
+        return json.dumps({"proveedor": "openai", "operacion": "imagen", "usd": usd,
+                           "unidad": unidad, "detalle": detalle})
+    global_prueba = os.path.join(proyecto.raiz, "coste_global_mediana.jsonl")
+    with open(global_prueba, "w", encoding="utf-8") as fh:
+        for _ in range(24):          # las laminas de cuatro estilos, en medium
+            fh.write(registro(0.057, None, "medium") + "\n")
+        for _ in range(6):           # las hojas de reparto
+            fh.write(registro(0.050, "asset:reparto:ana", "medium") + "\n")
+        for i in range(25):          # los planos de foto, mas referencias
+            fh.write(registro(0.097, f"escena:S{i:03d}", "medium", "foto") + "\n")
+    original = coste.RUTA_GLOBAL
+    coste.RUTA_GLOBAL = global_prueba
+    try:
+        precio = ajustes.precio_por_imagen("medium")
+        igual(precio["usd"], 0.097, "la mediana de medium sale de los PLANOS, no de las "
+                                    "laminas ni de las hojas de reparto")
+        igual(precio["muestras"], 25, "y cuenta solo los planos")
+        with open(global_prueba, "a", encoding="utf-8") as fh:
+            for i in range(25):      # y otros tantos de ilustracion, mas baratos
+                fh.write(registro(0.070, f"escena:I{i:03d}", "medium", "ilustracion") + "\n")
+        igual(ajustes.precio_por_imagen("medium", modo="foto")["usd"], 0.097,
+              "con bastantes de foto, un video de foto se cotiza con las de foto")
+        igual(ajustes.precio_por_imagen("medium", modo="ilustracion")["usd"], 0.070,
+              "y uno de ilustracion con las de ilustracion")
+        igual(ajustes.precio_por_imagen("high", modo="foto")["muestras"], 0,
+              "sin muestras de esa calidad, la tabla")
+    finally:
+        coste.RUTA_GLOBAL = original
+
+    # 4. LA CALIDAD DE UNA IMAGEN VIEJA SE DEDUCE DE SU FIRMA, o no se sabe
+    p6 = pasos.p6_assets
+    carpeta = os.path.join(proyecto.raiz, "tmp", "deducir")
+    os.makedirs(os.path.join(carpeta, "_refs"), exist_ok=True)
+    os.makedirs(os.path.join(carpeta, "escenas"), exist_ok=True)
+    refs = []
+    for i in range(2):
+        ruta = os.path.join(carpeta, "_refs", f"ref{i}.png")
+        Image.new("RGB", (32, 32), (40 * i, 90, 120)).save(ruta)
+        refs.append(ruta)
+    huellas = [pasos.medios.huella_fichero(r) for r in refs]
+    ficha = {"prompt": "un plano viejo", "firma": p6._firma_imagen(
+        "un plano viejo", "low", "apaisado", huellas),
+        "referencias": [{"papel": "lamina", "ruta": r} for r in refs]}
+    ruta_ficha = os.path.join(carpeta, "escenas", "S001.json")
+    with open(ruta_ficha, "w", encoding="utf-8") as fh:
+        json.dump(ficha, fh)
+    igual(p6.calidad_de_ficha(ficha, "apaisado", ruta=ruta_ficha), "low",
+          "una ficha sin `calidad` la deduce de su firma")
+    igual(p6.calidad_de_ficha(dict(ficha, calidad="high")), "high",
+          "con `calidad` escrita, manda la escrita")
+    movida = dict(ficha, referencias=[{"papel": "lamina", "ruta": os.path.join(
+        proyecto.raiz, "trabajo_que_ya_no_esta", "_refs", os.path.basename(r))}
+        for r in refs])
+    igual(p6.calidad_de_ficha(movida, "apaisado", ruta=ruta_ficha), "low",
+          "con las referencias apuntando a la carpeta de trabajo (ya sellada), "
+          "las busca en `_refs` de su version")
+    igual(p6.calidad_de_ficha(dict(ficha, firma="otra"), "apaisado"), None,
+          "si ninguna calidad da su firma, no se sabe (y no se ofrece rehacerla)")
+    igual(p6.calidad_de_ficha(dict(ficha, referencias=[]), "apaisado"), None,
+          "sin referencias, tampoco")
+
+
 # ---------------------------------------------------------------- geometria
 
 def prueba_geometria():
@@ -1014,6 +1136,7 @@ def main():
         prueba_medidor(proyecto)
         prueba_instrumentacion(proyecto)
         prueba_lo_que_se_perdia(proyecto, sembrar(carpeta, "otro video que mide a la vez"))
+        prueba_precio_de_las_imagenes(proyecto)
         prueba_geometria()
         prueba_almacen(proyecto)
         prueba_aplicacion_render(proyecto)

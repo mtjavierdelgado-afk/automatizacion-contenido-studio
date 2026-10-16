@@ -144,12 +144,20 @@ def _tokens(texto):
 
 
 def _patron(escrito):
-    """La palabra (o frase) escrita, entera y sin distinguir mayusculas."""
-    partes = [re.escape(p) for p in escrito.split()]
+    """La palabra (o frase) escrita, entera y sin distinguir mayusculas.
+
+    Cada palabra puede venir ya envuelta en `<spell>`: `marcas_tts.sanear`
+    manda a deletrear las consonantes sueltas antes de que llegue aqui, y sin
+    esto «Xbox Series X» no casaba nunca con «Xbox Series <spell>X</spell>»
+    (revision independiente del 15-10-2026).
+    """
+    partes = [r"(?:<spell>\s*)?" + re.escape(p) + r"(?:\s*</spell>)?" for p in escrito.split()]
     return re.compile(r"(?<![\w])" + r"\s+".join(partes) + r"(?![\w])", re.IGNORECASE)
 
 
-_ETIQUETA = re.compile(r"(<spell>.*?</spell>|<[^<>]*>)", re.IGNORECASE | re.DOTALL)
+#: Las etiquetas que NO son <spell> se apartan mientras se busca: dentro de
+#: `<break time="500ms"/>` no hay palabras del guion.
+_OTRA_ETIQUETA = re.compile(r"<(?!/?spell>)[^<>]*>", re.IGNORECASE)
 
 
 def aplicar(texto, lista):
@@ -163,18 +171,21 @@ def aplicar(texto, lista):
     if not lista or not texto.strip():
         return texto
     orden = sorted(lista, key=lambda f: -len(f["escrito"]))
-    trozos = _ETIQUETA.split(texto)
-    for i in range(0, len(trozos), 2):                  # los pares son texto
-        trozo = trozos[i]
-        # se marca lo ya cambiado para que una palabra mas corta no lo vuelva a tocar
-        marcas = []
-        for fila in orden:
-            def poner(m, fila=fila):
-                marcas.append(fila["dicho"])
-                return f"\x00{len(marcas) - 1}\x00"
-            trozo = _patron(fila["escrito"]).sub(poner, trozo)
-        trozos[i] = re.sub(r"\x00(\d+)\x00", lambda m: marcas[int(m.group(1))], trozo)
-    return "".join(trozos)
+    apartadas = []
+
+    def apartar(m):
+        apartadas.append(m.group(0))
+        return f"\x01{len(apartadas) - 1}\x01"
+    trozo = _OTRA_ETIQUETA.sub(apartar, texto)
+    # se marca lo ya cambiado para que una palabra mas corta no lo vuelva a tocar
+    marcas = []
+    for fila in orden:
+        def poner(m, fila=fila):
+            marcas.append(fila["dicho"])
+            return f"\x00{len(marcas) - 1}\x00"
+        trozo = _patron(fila["escrito"]).sub(poner, trozo)
+    trozo = re.sub(r"\x00(\d+)\x00", lambda m: marcas[int(m.group(1))], trozo)
+    return re.sub(r"\x01(\d+)\x01", lambda m: apartadas[int(m.group(1))], trozo)
 
 
 # ------------------------------------------------------------------ devolver
@@ -217,6 +228,15 @@ def devolver(palabras, lista):
             i += 1
             continue
         m, escritas = encontrada
+        if m == len(escritas):
+            # palabra por palabra: cada una con SU tiempo y SU puntuacion
+            # («Nintendo, Suích» vuelve como «Nintendo, Switch», con la coma)
+            for k, escrita in enumerate(escritas):
+                dicha = palabras[i + k]
+                delante, detras = _puntuacion(dicha.get("w"))
+                salida.append(dict(dicha, w=delante + escrita + detras))
+            i += m
+            continue
         primera, ultima = palabras[i], palabras[i + m - 1]
         delante, _ = _puntuacion(primera.get("w"))
         _, detras = _puntuacion(ultima.get("w"))

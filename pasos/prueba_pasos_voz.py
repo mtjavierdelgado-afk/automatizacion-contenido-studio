@@ -900,6 +900,7 @@ def prueba_pronunciacion(base):
     vuelve se devuelve a la palabra escrita sin descuadrar nada."""
     print("\n[pron] como se pronuncia: a la voz como suena, al guion como se escribe")
     import pronunciacion as pron  # noqa: PLC0415
+    import marcas_tts  # noqa: PLC0415
     lista = pron.validar([{"escrito": "PlayStation", "dicho": "Pléi Estéishon"},
                           {"escrito": "Just Dance", "dicho": "Yast Dans"},
                           {"escrito": "Nintendo Switch", "dicho": "Nintendo Suích"},
@@ -924,7 +925,21 @@ def prueba_pronunciacion(base):
     igual((devueltas[1]["s"], devueltas[1]["e"]), (0.2, 1.0),
           "y con el tiempo de toda la forma dicha")
     igual((devueltas[3]["s"], devueltas[3]["e"], devueltas[4]["s"], devueltas[4]["e"]),
-          (1.1, 1.5, 1.5, 1.9), "dos palabras escritas se reparten el tramo")
+          (1.1, 1.4, 1.4, 1.9),
+          "con las mismas palabras dichas que escritas, cada una conserva su tiempo real")
+    largas = pron.devolver([{"w": "Pléi", "s": 0.0, "e": 0.4}, {"w": "Estéishon,", "s": 0.4, "e": 1.0}],
+                           lista)
+    igual([(p["w"], p["s"], p["e"]) for p in largas], [("PlayStation,", 0.0, 1.0)],
+          "con más palabras dichas que escritas, la escrita se queda con todo el tramo")
+    # LO QUE VIO LA REVISION (15-10-2026): una entrada con letra suelta y una coma
+    con_letra = pron.validar([{"escrito": "Xbox Series X", "dicho": "Équis Box Síries Équis"},
+                              {"escrito": "Xbox", "dicho": "Équis Box"}])
+    igual(pron.aplicar(marcas_tts.sanear("La Xbox Series X es potente."), con_letra),
+          "La Équis Box Síries Équis es potente.",
+          "una entrada con letra suelta casa aunque la letra ya vaya a deletrearse")
+    igual([p["w"] for p in pron.devolver(
+        [{"w": "Nintendo,", "s": 0.0, "e": 0.4}, {"w": "Suích.", "s": 0.4, "e": 0.8}], lista)],
+        ["Nintendo,", "Switch."], "la coma de «Nintendo, Switch» no se pierde al devolver")
     falla(lambda: pron.validar([{"escrito": "x<y", "dicho": "z"}]), "una etiqueta en la lista se rechaza",
           ValueError)
     falla(lambda: pron.validar([{"escrito": "Xbox", "dicho": ""}]), "una fila a medias se rechaza",

@@ -316,6 +316,9 @@ igual("abreviaturas con punto o guion se dejan (S.A., EE. UU., T-shirt, X-Men, U
       "S.A. y EE. UU. con una T-shirt de X-Men y USB-C")
 igual("la I tampoco (en inglés es una palabra)", m.sanear("la I y la J"),
       "la I y la <spell>J</spell>")
+igual("un número romano detrás de «siglo», «capítulo»… no se deletrea",
+      m.sanear("En el siglo X y el capítulo V, la Series S."),
+      "En el siglo X y el capítulo V, la Series <spell>S</spell>.")
 for frase in ("Es la S. Luego la T.", 'la <spell>FBI</spell> y la S',
               '<speed ratio="0.9"/>Es la S. <break time="500ms"/>Luego'):
     una = m.sanear(frase)

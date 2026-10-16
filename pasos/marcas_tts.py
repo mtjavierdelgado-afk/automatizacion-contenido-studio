@@ -229,9 +229,22 @@ _LETRA_SUELTA = re.compile(
     r"(?<![\w.\-'’])([BCDFGHJKLMNPQRSTVWXZ])(?![\w'’]|\.\w|-\w)")
 
 
+#: Salvo un NUMERO ROMANO detras de las palabras que los llevan: «siglo X» es
+#: «siglo diez», no «siglo equis» (revision independiente del 15-10-2026).
+_ANTES_DE_ROMANO = re.compile(
+    r"(?:siglos?|cap[ií]tulos?|tomos?|partes?|fases?|actos?|vol[uú]men(?:es)?|"
+    r"temporadas?|libros?|papa|rey|reina)\s+$", re.IGNORECASE)
+
+
 def deletrear_letras_sueltas(texto):
     """Envuelve en <spell> las consonantes mayusculas sueltas. Ver arriba."""
-    return _LETRA_SUELTA.sub(lambda m: f"<spell>{m.group(1)}</spell>", str(texto or ""))
+    texto = str(texto or "")
+
+    def cambiar(m):
+        if m.group(1) in "VXLCDM" and _ANTES_DE_ROMANO.search(texto[:m.start()]):
+            return m.group(0)
+        return f"<spell>{m.group(1)}</spell>"
+    return _LETRA_SUELTA.sub(cambiar, texto)
 
 
 #: Cualquier cosa con forma de etiqueta, valida o no. Se usa para BORRAR lo que

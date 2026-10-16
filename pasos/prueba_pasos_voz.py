@@ -554,11 +554,37 @@ def prueba_pausas_en_el_montaje(base):
               "la meta guarda el texto anotado entero (la revision compara contra el)")
     fichas = {b["id"]: b for b in salidas["bloques"]}
     hueco = fichas["B002"]["t_in"] - fichas["B001"]["t_out"]
-    comprobar(hueco >= 1.5,
-              f"y en el audio el corte de B001 dura la pausa pedida ({hueco:.2f} s)")
+    # la pausa se SUMA al aire entre bloques en la proporcion de la cadencia
+    # (desde el 16-10-2026; antes se tomaba el mayor de los dos)
+    pedida = 0.3 + 1.5 * p4_voz.cadencia.PARTE_DE_LA_PAUSA
+    comprobar(hueco >= pedida - 0.02,
+              f"y en el audio el corte de B001 lleva la pausa encima del aire "
+              f"({hueco:.2f} s, al menos {pedida:.2f})")
     otro = fichas["B003"]["t_in"] - fichas["B002"]["t_out"]
     comprobar(0.29 <= otro < 1.0,
               f"donde no habia pausa manda el aire entre bloques ({otro:.2f} s)")
+
+    # Y SE SUMA AL HUECO, no se lo traga (16-10-2026). Con el hueco de serie
+    # (1 s) y la pausa de 0,9 s del gancho, `max(hueco, pausa)` dejaba el corte
+    # del gancho igual que cualquier otro: «las pausas por bloque no figuran».
+    bloques = [{"id": "B001", "texto": 'Primera frase del gancho.<break time="900ms"/>'},
+               {"id": "B002", "texto": "Segunda frase, sin pausa al final."},
+               {"id": "B003", "texto": "Tercera frase y se acabo."}]
+    cfg = p4_voz.resolver_params({"hueco_minimo": 1.0})
+    salidas = p4_voz.sintetizar_bloques(bloques, os.path.join(base, "pausas_suma"), cfg)
+    fichas = {b["id"]: b for b in salidas["bloques"]}
+    gancho = fichas["B002"]["t_in"] - fichas["B001"]["t_out"]
+    normal = fichas["B003"]["t_in"] - fichas["B002"]["t_out"]
+    extra = 0.9 * p4_voz.cadencia.PARTE_DE_LA_PAUSA
+    comprobar(abs((gancho - normal) - extra) < 0.06,
+              f"el corte con pausa dura {extra:.2f} s MAS que uno normal "
+              f"({gancho:.2f} s frente a {normal:.2f} s)")
+    comprobar(1.3 <= gancho <= 1.8,
+              f"y ronda el segundo y medio que promete el guion ({gancho:.2f} s)")
+    estimado = p4_voz.cadencia.aire_de([b["texto"] for b in bloques], 1.0)
+    previsto = 2 * (1.0 - p4_voz.cadencia.PAUSA_ENTRE_BLOQUES) + extra
+    comprobar(abs(estimado - previsto) < 0.01,
+              f"y la estimacion de duracion cuenta ese aire igual ({estimado:.2f} s)")
 
 
 def prueba_cache_por_clave():

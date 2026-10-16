@@ -230,7 +230,7 @@ def _mediana_movil(valores, ancho):
     return np.median(np.lib.stride_tricks.sliding_window_view(relleno, ancho), axis=1)
 
 
-def _relleno_de_sala(pcm, desde_seg, hasta_seg, duracion):
+def _relleno_de_sala(pcm, desde_seg, hasta_seg, duracion, nivel_corte=None):
     """Fondo para alargar una pausa: con el COLOR de la pausa y sin repetir nada.
 
     Hasta el 15-10-2026 se copiaba un trozo de 200 ms del CENTRO de la pausa y
@@ -270,6 +270,11 @@ def _relleno_de_sala(pcm, desde_seg, hasta_seg, duracion):
     niveles = [(float(np.sqrt(np.mean(pausa[i:i + ventana] ** 2))), i)
                for i in range(0, len(pausa) - ventana + 1, paso)]
     nivel, inicio = min(niveles)
+    # EL NIVEL, EL DEL SITIO DONDE SE CORTA (16-10-2026): el relleno empalma con
+    # la voz justo ahi, y si sonara mas o menos que ese punto se oiria el escalon
+    # en el empalme. El COLOR sigue saliendo del trozo mas tranquilo de 30 ms.
+    if nivel_corte is not None:
+        nivel = float(nivel_corte)
     nivel = min(nivel, RELLENO_TECHO)
     if nivel < 1.0:                         # por debajo de un escalon: silencio
         return silencio
@@ -295,6 +300,43 @@ def _relleno_de_sala(pcm, desde_seg, hasta_seg, duracion):
     return np.clip(np.round(ruido), -32768, 32767).astype("<i2").tobytes()
 
 
+#: Milisegundos de fundido sobre la VOZ a cada lado de un empalme de espaciar.
+FUNDIDO_VOZ_MS = 15
+
+#: Ventana con la que se busca el punto mas tranquilo de una pausa.
+VENTANA_CORTE_S = 0.01
+
+
+def _punto_tranquilo(muestras, fin, inicio):
+    """(instante, nivel RMS) del trozo de 10 ms MAS TRANQUILO entre fin e inicio.
+
+    Ahi es donde se mete el silencio (16-10-2026). Antes se cortaba en el CENTRO
+    del hueco que dicen las marcas, sin mirar el audio, y en una toma corrida el
+    centro cae a menudo en la respiracion o en la fricativa con la que arranca
+    el bloque siguiente: la respiracion quedaba a un segundo de su palabra y la
+    palabra arrancaba a medias. En el punto mas tranquilo la cola de la frase
+    anterior ya ha caido y la respiracion de la siguiente aun no ha empezado.
+    Sin hueco donde buscar (marcas pegadas o cruzadas) se queda el centro.
+    """
+    centro = fin + (inicio - fin) / 2.0
+    ventana = max(1, int(VENTANA_CORTE_S * SR))
+    a = max(0, int(round(fin * SR)))
+    b = min(len(muestras), int(round(inicio * SR)))
+    if b - a < ventana:
+        c = int(round(centro * SR))
+        trozo = muestras[max(0, c - ventana // 2):c + ventana // 2].astype(np.float64)
+        return centro, (float(np.sqrt(np.mean(trozo ** 2))) if len(trozo) else 0.0)
+    tramo = muestras[a:b].astype(np.float64) ** 2
+    acumulada = np.concatenate(([0.0], np.cumsum(tramo)))
+    energia = (acumulada[ventana:] - acumulada[:-ventana]) / ventana
+    # a igualdad (silencio digital), el mas cercano al centro: no se mueve nada
+    # que no haga falta mover
+    posiciones = np.arange(len(energia))
+    medio = (len(tramo) - ventana) / 2.0
+    k = int(np.lexsort((np.abs(posiciones - medio), np.round(energia, 6)))[0])
+    return (a + k + ventana // 2) / float(SR), float(np.sqrt(energia[k]))
+
+
 def espaciar(wav, palabras, reparto, escenas, hueco_minimo=1.0):
     """Ensancha los silencios ENTRE escenas sin re-sintetizar nada.
 
@@ -315,33 +357,60 @@ def espaciar(wav, palabras, reparto, escenas, hueco_minimo=1.0):
     """
     pcm = _pcm_de_wav(wav)
     bytes_por_seg = SR * 2
+    muestras = np.frombuffer(pcm[:len(pcm) & ~1], dtype="<i2")
 
-    # Cortes: (instante original, silencio a insertar, pausa natural)
+    # Cortes: (instante original, silencio a insertar, pausa natural, nivel)
     cortes = []
     con_voz = [e for e in escenas if reparto.get(e["id"])]
     for anterior, siguiente in zip(con_voz, con_voz[1:]):
         fin = reparto[anterior["id"]][-1]["e"]
         inicio = reparto[siguiente["id"]][0]["s"]
         # LA PAUSA DEL FINAL DE ESA ESCENA, si la lleva (`pausa_despues`, en
-        # segundos): la que antes iba como <break> dentro de la toma y partia
-        # la generacion. Se suma a la pausa natural, que es lo que hacia el
-        # <break>; el hueco minimo sigue mandando si pide mas.
+        # segundos): la que antes iba como <break> dentro de la toma. SE SUMA
+        # al hueco de una frontera normal (16-10-2026). Con `max(hueco, pausa)`
+        # un hueco de 1 s se tragaba la pausa de 0,9 s entera: el gancho y los
+        # cambios de tema sonaban igual que cualquier otra frontera (medido en
+        # un video real: 4 de 5 fronteras a ~1,0 s y la «pausa» a 1,2 s).
         pausa = float(anterior.get("pausa_despues") or 0.0)
-        falta = max(hueco_minimo - (inicio - fin), pausa)
+        falta = max(hueco_minimo - (inicio - fin), 0.0) + pausa
         if falta > 0.01:
-            cortes.append((fin + (inicio - fin) / 2, falta, fin, inicio))
+            instante, nivel = _punto_tranquilo(muestras, fin, inicio)
+            cortes.append((instante, falta, fin, inicio, nivel))
 
     if not cortes:
         return wav, []
+
+    # EL FUNDIDO DE LA VOZ A LOS DOS LADOS DEL EMPALME. Antes solo se fundia el
+    # relleno y la voz se cortaba en seco: si en el corte habia una respiracion
+    # o el arranque de una fricativa, el audio saltaba de golpe (el «inicio
+    # cortado»). Se funde en la pausa, sin meterse en las palabras: hasta
+    # FUNDIDO_VOZ_MS, y nunca mas alla de `fin` ni de `inicio` (con 3 ms de
+    # minimo para que ni un corte entre dos palabras pegadas chasquee).
+    voz_fundida = muestras.astype(np.float64)
+    for instante, _silencio, desde, hasta, _nivel in cortes:
+        centro = int(round(instante * SR))
+        minimo = max(1, int(0.003 * SR))
+        maximo = int(FUNDIDO_VOZ_MS * SR / 1000)
+        antes = max(minimo, min(maximo, centro - int(desde * SR)))
+        despues = max(minimo, min(maximo, int(hasta * SR) - centro))
+        a = max(0, centro - antes)
+        if centro > a:
+            voz_fundida[a:centro] *= 0.5 + 0.5 * np.cos(np.linspace(0.0, np.pi, centro - a))
+        b = min(len(voz_fundida), centro + despues)
+        if b > centro:
+            voz_fundida[centro:b] *= 0.5 - 0.5 * np.cos(np.linspace(0.0, np.pi, b - centro))
+    pcm = np.clip(np.round(voz_fundida), -32768, 32767).astype("<i2").tobytes()
 
     trozos = []
     anterior_byte = 0
     acumulado = 0.0
     desplazamientos = []
-    for instante, silencio, desde, hasta in cortes:
-        corte_byte = int(instante * bytes_por_seg) & ~1        # alineado a muestra
+    for instante, silencio, desde, hasta, nivel in cortes:
+        corte_byte = int(round(instante * SR)) * 2             # alineado a muestra
         trozos.append(pcm[anterior_byte:corte_byte])
-        trozos.append(_relleno_de_sala(pcm, desde, hasta, silencio))
+        # el COLOR, de la pausa original (sin fundir); el NIVEL, el del corte
+        trozos.append(_relleno_de_sala(_pcm_de_wav(wav), desde, hasta, silencio,
+                                       nivel_corte=nivel))
         anterior_byte = corte_byte
         acumulado += silencio
         desplazamientos.append({"desde": instante, "retardo": round(acumulado, 3)})

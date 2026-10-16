@@ -1107,7 +1107,9 @@ def sintetizar_bloques(bloques, destino, cfg, avisar=None,
     hueco = float(cfg.get("hueco_minimo") or 0.0)
     silencio_anadido = 0.0
     for escena in escenas:
-        escena["pausa_despues"] = pausa_de.get(escena["id"], 0.0)
+        # se SUMA al hueco de la frontera, en la proporcion de la cadencia
+        escena["pausa_despues"] = (pausa_de.get(escena["id"], 0.0)
+                                   * cadencia.PARTE_DE_LA_PAUSA)
     if (hueco > 0 or any(pausa_de.values())) and len(anotados) > 1:
         wav, desplazamientos = motor.espaciar(wav, palabras, reparto, escenas, hueco)
         if desplazamientos:
@@ -1812,7 +1814,8 @@ def regrabar_seccion(bloques, seccion_id, cfg, meta, destino, peticion="",
         escenas_s, reparto_s = _reparto(
             [b for b in nuevos if b["id"] in dentro], marcas_nuevas)
         for escena in escenas_s:
-            escena["pausa_despues"] = pausa_de.get(escena["id"], 0.0)
+            escena["pausa_despues"] = (pausa_de.get(escena["id"], 0.0)
+                                       * cadencia.PARTE_DE_LA_PAUSA)
         wav_nuevo, desplazamientos = motor.espaciar(
             wav_nuevo, marcas_nuevas, reparto_s, escenas_s, hueco)
         if desplazamientos:

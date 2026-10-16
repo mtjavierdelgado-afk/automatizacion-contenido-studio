@@ -1553,6 +1553,46 @@ def prueba_espaciar():
                                                       hueco_minimo=1.5)[0]), dtype="<i2")
     ok(np.array_equal(otra, pcm2.astype("<i2")), "y para la misma pausa sale siempre el mismo relleno")
 
+    # LA PAUSA DEL BLOQUE SE SUMA AL HUECO (16-10-2026). Con max(hueco, pausa)
+    # un hueco de 1 s se tragaba la pausa de 0,9 s del gancho entera: «las
+    # pausas por bloque no figuran».
+    con_pausa = [{"id": "B01", "pausa_despues": 0.54}, {"id": "B02"}]
+    _n, d_pausa = voz.espaciar(wav, palabras, reparto, con_pausa, hueco_minimo=1.0)
+    ok(abs(d_pausa[0]["retardo"] - (0.75 + 0.54)) < 0.02,
+       f"la pausa se SUMA al hueco: 0,75 + 0,54 s ({d_pausa[0]['retardo']} s)")
+
+    # SE CORTA DONDE ESTA EL SILENCIO, NO EN EL CENTRO DEL HUECO (16-10-2026).
+    # Hueco de 1,0 a 1,3 s: cola de la palabra, silencio, y la respiracion con
+    # la que arranca el bloque siguiente. El centro (1,15 s) cae en la
+    # respiracion: la partia, la dejaba a un segundo de su palabra y el bloque
+    # arrancaba de golpe.
+    senal3 = azar.standard_normal(int(sr * 3)) * 6000
+    tramos = ((1.00, 1.05, 300), (1.05, 1.10, 3), (1.10, 1.30, 400))
+    for t0, t1, amplitud in tramos:
+        senal3[int(t0 * sr):int(t1 * sr)] = azar.standard_normal(int(t1 * sr) - int(t0 * sr)) * amplitud
+    wav3 = _wav([int(v) for v in np.clip(senal3, -32768, 32767)])
+    reparto3 = {"B01": [{"s": 0.0, "e": 1.0}], "B02": [{"s": 1.3, "e": 3.0}]}
+    nuevo3, d3 = voz.espaciar(wav3, palabras, reparto3, escenas, hueco_minimo=1.0)
+    corte = d3[0]["desde"]
+    ok(1.05 <= corte <= 1.10,
+       f"el silencio se mete en el trozo tranquilo (1,05-1,10 s), no en la respiracion ({corte:.3f} s)")
+    pcm3 = np.frombuffer(voz._pcm_de_wav(nuevo3), dtype="<i2").astype(float)
+    reanuda = int(round((corte + d3[0]["retardo"]) * sr))
+    salto = float(np.max(np.abs(np.diff(pcm3[reanuda - 90:reanuda + 90]))))
+    ok(salto < 100, f"y al volver la voz no hay escalon en el empalme (salto {salto:.0f})")
+
+    # LA VOZ SE FUNDE A LOS DOS LADOS DEL EMPALME. Con las marcas pegadas (sin
+    # hueco donde buscar) el corte cae en plena voz: antes se cortaba en seco.
+    reparto4 = {"B01": [{"s": 0.0, "e": 1.5}], "B02": [{"s": 1.5, "e": 3.0}]}
+    nuevo4, d4 = voz.espaciar(wav3, palabras, reparto4, escenas, hueco_minimo=1.0)
+    pcm4 = np.frombuffer(voz._pcm_de_wav(nuevo4), dtype="<i2").astype(float)
+    c4 = int(round(d4[0]["desde"] * sr))
+    r4 = c4 + int(round(d4[0]["retardo"] * sr))
+    bordes = max(abs(pcm4[c4 - 1]), abs(pcm4[r4]))
+    ok(bordes < 600, f"la voz llega al empalme fundida, no cortada en seco (borde {bordes:.0f}; la voz es 6000)")
+    ok(float(np.sqrt(np.mean(pcm4[c4 - 400:c4 - 300] ** 2))) > 3000,
+       "y el fundido es corto: 10 ms antes del empalme la voz suena entera")
+
 
 # --------------------------------------------------- 6. p6._capa_vectorial
 

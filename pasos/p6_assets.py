@@ -3280,6 +3280,101 @@ def _adoptar(nombre, p, firma=None, subcarpetas=("", "escenas", "storyboard", "r
     return None
 
 
+def _firma_imagen(prompt, calidad, tamano, huellas_refs):
+    """La firma de una imagen pedida: es la clave del banco y va en su ficha.
+
+    NO SE TOCA SU FORMA: cambiarla deja sin cache todo el banco y hace que
+    `calidad_de_ficha` no reconozca ninguna imagen vieja."""
+    return medios.huella({"prompt": prompt, "calidad": calidad,
+                          # el tamano entra en la firma: la misma escena en
+                          # vertical es otra imagen, y la cache no puede
+                          # devolver la apaisada
+                          "tamano": tamano if tamano != "apaisado" else None,
+                          "refs": list(huellas_refs)})
+
+
+#: {(ruta de la ficha, mtime, tamano): calidad deducida o None}. Deducir pide
+#: leer las referencias enteras, y la pantalla pregunta a menudo.
+_CALIDAD_DEDUCIDA = {}
+
+
+#: {(ruta, mtime, tamano): huella} de las referencias: las de un video son unas
+#: pocas (laminas, hojas, continuidad) repetidas en cientos de fichas.
+_HUELLAS = {}
+
+
+def _huella_recordada(ruta):
+    if not ruta:
+        return ""
+    try:
+        info = os.stat(ruta)
+    except OSError:
+        return ""
+    clave = (ruta, info.st_mtime_ns, info.st_size)
+    if clave not in _HUELLAS:
+        _HUELLAS[clave] = medios.huella_fichero(ruta)
+        while len(_HUELLAS) > 20000:
+            _HUELLAS.pop(next(iter(_HUELLAS)))
+    return _HUELLAS[clave]
+
+
+def calidad_de_ficha(ficha, tamano="apaisado", ruta=None):
+    """CON QUE CALIDAD SE DIBUJO ESTA IMAGEN. -> "low" | "medium" | "high" | None
+
+    Las fichas nuevas la llevan escrita (`calidad`, desde el 15-10-2026). Las
+    viejas no, y entonces se DEDUCE de su firma: la firma es la huella del
+    prompt, la calidad, el tamano y el contenido de las referencias, asi que si
+    con el prompt y las referencias guardados en la ficha solo UNA calidad da
+    esa misma firma, esa es -- sin margen de error. Si las referencias ya no
+    estan en el disco (o han cambiado), o no coincide ninguna, es None:
+    «no se sabe», y quien pregunta no la trata como de otra calidad."""
+    if not isinstance(ficha, dict):
+        return None
+    if ficha.get("calidad") in ("low", "medium", "high"):
+        return ficha["calidad"]
+    firma, prompt = ficha.get("firma"), ficha.get("prompt")
+    refs = [r.get("ruta") for r in (ficha.get("referencias") or [])
+            if isinstance(r, dict)]
+    if not firma or not prompt or not refs:
+        return None
+    clave = None
+    if ruta:
+        try:
+            info = os.stat(ruta)
+            clave = (ruta, info.st_mtime_ns, info.st_size, tamano)
+        except OSError:
+            clave = None
+    if clave is not None and clave in _CALIDAD_DEDUCIDA:
+        return _CALIDAD_DEDUCIDA[clave]
+    # las referencias se guardan con la ruta de la carpeta de TRABAJO, que al
+    # sellar pasa entera a la version: se buscan tambien en `_refs` de la
+    # carpeta donde vive la ficha (el nombre lleva su huella; y la firma lo
+    # confirma: un fichero distinto no daria la misma)
+    carpeta = os.path.dirname(os.path.dirname(ruta)) if ruta else ""
+
+    def localizar(r):
+        if r and os.path.exists(r):
+            return r
+        if carpeta and r:
+            otra = os.path.join(carpeta, "_refs", os.path.basename(str(r)))
+            if os.path.exists(otra):
+                return otra
+        return ""
+    huellas = [_huella_recordada(localizar(r)) for r in refs]
+    encontradas = set()
+    if all(huellas):
+        for calidad in ("low", "medium", "high"):
+            for forma in {tamano or "apaisado", "apaisado"}:
+                if _firma_imagen(prompt, calidad, forma, huellas) == firma:
+                    encontradas.add(calidad)
+    deducida = encontradas.pop() if len(encontradas) == 1 else None
+    if clave is not None:
+        _CALIDAD_DEDUCIDA[clave] = deducida
+        while len(_CALIDAD_DEDUCIDA) > 5000:
+            _CALIDAD_DEDUCIDA.pop(next(iter(_CALIDAD_DEDUCIDA)))
+    return deducida
+
+
 def _producir_imagen(nombre, prompt, referencias, destino, p, rehacer=False,
                      tamano=None):
     """Arte adoptado -> cache -> API. Devuelve como se resolvio y el coste.
@@ -3293,12 +3388,8 @@ def _producir_imagen(nombre, prompt, referencias, destino, p, rehacer=False,
     apaisadas, que es como se leen mejor como referencia.
     """
     tamano = tamano or "apaisado"
-    firma = medios.huella({"prompt": prompt, "calidad": p["calidad"],
-                           # el tamano entra en la firma: la misma escena en
-                           # vertical es otra imagen, y la cache no puede
-                           # devolver la apaisada
-                           "tamano": tamano if tamano != "apaisado" else None,
-                           "refs": [medios.huella_fichero(r) for r in referencias]})
+    firma = _firma_imagen(prompt, p["calidad"], tamano,
+                          [medios.huella_fichero(r) for r in referencias])
     cacheada = os.path.join(p["banco_imagenes"], f"{firma}.png")
     # En el modo explicito 'adoptar' el objetivo es no gastar, asi que se acepta
     # arte que solo coincide en nombre. El guardian de planos repetidos sigue
@@ -3312,14 +3403,18 @@ def _producir_imagen(nombre, prompt, referencias, destino, p, rehacer=False,
         medios.copiar(previa, destino)
         return {"origen": "adoptada", "firma": firma, "coste": 0.0,
                 "fuente": previa}
+    # LA CALIDAD CON LA QUE QUEDA DIBUJADA, en la ficha. Solo cuando se sabe:
+    # la adoptada por firma y la de la cache SI son de esta calidad (la calidad
+    # esta en la firma); la del modo «adoptar», que casa solo por nombre, no.
     if not rehacer:
         if previa:
             medios.copiar(previa, destino)
             return {"origen": "adoptada", "firma": firma, "coste": 0.0,
-                    "fuente": previa}
+                    "fuente": previa, "calidad": p["calidad"]}
         if os.path.exists(cacheada):
             medios.copiar(cacheada, destino)
-            return {"origen": "cache", "firma": firma, "coste": 0.0}
+            return {"origen": "cache", "firma": firma, "coste": 0.0,
+                    "calidad": p["calidad"]}
 
     imagen = medios.motor("imagen_openai/imagen.py")
     try:
@@ -3335,7 +3430,7 @@ def _producir_imagen(nombre, prompt, referencias, destino, p, rehacer=False,
         fh.write(png)
     medios.copiar(destino, cacheada)
     return {"origen": "generada", "firma": firma, "coste": meta["coste"],
-            "segundos": meta["segundos"]}
+            "segundos": meta["segundos"], "calidad": p["calidad"]}
 
 
 def _salidas_parciales(plan, resultados, inventario, necesarios, avisar):
@@ -4685,6 +4780,14 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
                                                  and os.path.exists(destino)))
                 resultados[uid] = {"tipo": "reparto",
                                    "png": os.path.relpath(destino, trabajo), **meta}
+                # LA CALIDAD DE LA HOJA, al lado del PNG y no en sus salidas: la
+                # hoja conservada se sella como `conservado` a secas (y cambiar
+                # esa forma moveria el sello de lo que cuelga de ella), asi que
+                # sin este fichero su calidad se perderia en la pasada siguiente
+                if meta.get("calidad"):
+                    medios.escribir_json(destino[:-4] + ".json",
+                                         {"calidad": meta["calidad"],
+                                          "firma": meta.get("firma")})
             else:
                 resultados[uid] = {"tipo": "reparto",
                                    "png": os.path.relpath(destino, trabajo),

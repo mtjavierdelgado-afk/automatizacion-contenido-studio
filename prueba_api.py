@@ -4490,6 +4490,91 @@ def probar_traer_estilo(cliente):
     igual(otra.get("traidas"), [], "traer otra vez lo mismo no cambia nada")
 
 
+def probar_el_coste_de_las_imagenes(cliente):
+    """La auditoria del coste de las imagenes del 15-10-2026 (C1, C5 y C2).
+
+    C1: el $/min del deslizador de ritmo salia siempre en calidad baja.
+    C5: la estimacion de un video nuevo cotizaba con la calidad que traia el
+        estilo sin pasar por el minimo de foto (medium), y nacia en medium.
+    C2: rehacer las imagenes en otra calidad solo con lo confirmado delante.
+    """
+    seccion("EL COSTE DE LAS IMAGENES: LA CALIDAD CON LA QUE NACE EL VIDEO")
+    _r, guardados = cliente.get("/api/ajustes")
+    calidad_antes = ((guardados or {}).get("ajustes") or {}).get("calidad_imagen") or "low"
+    cliente.put("/api/ajustes", {"calidad_imagen": "low"})
+    try:
+        # C5
+        for modo, del_estilo, esperada in (("foto", "low", "medium"),
+                                           ("foto", None, "medium"),
+                                           ("foto", "high", "high"),
+                                           ("ilustracion", None, "low"),
+                                           ("ilustracion", "medium", "medium")):
+            peticion = {"duracion_objetivo_s": 240, "nuevo": True, "modo": modo}
+            if del_estilo:
+                peticion["calidad"] = del_estilo
+            respuesta, datos = cliente.post("/api/estimacion", peticion)
+            igual((datos.get("coste") or {}).get("calidad"), esperada,
+                  f"un vídeo nuevo de {modo} con el estilo en {del_estilo}: se cotiza "
+                  f"en {esperada}, la calidad con la que va a nacer")
+        _r, baja = cliente.post("/api/estimacion", {"duracion_objetivo_s": 240,
+                                                    "nuevo": True, "modo": "ilustracion"})
+        _r, foto = cliente.post("/api/estimacion", {"duracion_objetivo_s": 240, "nuevo": True,
+                                                    "modo": "foto", "calidad": "low"})
+        ok(foto["coste"]["usd_imagenes"] > baja["coste"]["usd_imagenes"],
+           f"y la foto cuesta más ({foto['coste']['usd_imagenes']} $ frente a "
+           f"{baja['coste']['usd_imagenes']} $)")
+
+        # C1
+        respuesta, datos = cliente.get("/api/presets-light")
+        igual(datos.get("calidad_nuevo"), {"ilustracion": "low", "foto": "medium"},
+              "el listado dice con qué calidad nace un vídeo de cada modo")
+        ritmo = next((r for r in datos.get("ritmos") or [] if r["id"] == "medio"), {})
+        tabla = ritmo.get("usd_por_minuto_por_calidad") or {}
+        ok(tabla.get("medium|foto", 0) > tabla.get("low|ilustracion", 0) > 0,
+           f"cada ritmo trae su $/min por calidad y modo: {tabla}")
+        igual(ritmo.get("usd_por_minuto"), tabla.get("low|ilustracion"),
+              "y el de siempre es el de la calidad de Configuración")
+        from PIL import Image
+        carpeta_refs = tempfile.mkdtemp(prefix="estudio_refs_foto_")
+        refs = []
+        for i in range(3):
+            refs.append(os.path.join(carpeta_refs, f"foto{i}.png"))
+            Image.new("RGB", (320, 200), (60 * i, 120, 90)).save(refs[-1])
+        respuesta, creado = cliente.post("/api/presets-canal", {
+            "tipo": "canal", "nombre": "Estilo de fotos para el coste",
+            "datos": {"estilo": {"modo": "foto", "referencias": refs}}})
+        igual(respuesta.status_code, 200, f"se crea un estilo de foto: {creado}")
+        estilo_id = (creado.get("preset") or {}).get("id") or ""
+        _r, datos = cliente.get("/api/presets-light")
+        ficha = next((f for f in datos.get("presets") or [] if f.get("id") == estilo_id), {})
+        igual(ficha.get("calidad_nuevo"), "medium",
+              "un estilo de foto dice que sus vídeos nacen en medium (y el deslizador "
+              "enseña ese $/min, no el de low)")
+        js = open(os.path.join(RAIZ_ESTUDIO, "web", "app.js"), encoding="utf-8").read()
+        ok("usd_por_minuto_por_calidad" in js and "claveCosteRitmo(" in js,
+           "la pantalla elige el $/min por la calidad y el modo del estilo")
+
+        # C2: el boton de rehacer en otra calidad no lanza nada sin lo confirmado
+        respuesta, video = cliente.post(f"/api/presets-light/{estilo_id}/video", {
+            "nombre": "Vídeo para el coste", "duracion_objetivo_s": 60,
+            "material": "Un hecho."})
+        vid = (video.get("proyecto") or {}).get("id") or ""
+        _r, assets = cliente.get(f"/api/proyectos/{vid}/pasos/assets")
+        igual((assets.get("params") or {}).get("calidad"), "medium",
+              "el vídeo de foto nace en medium con Configuración en low")
+        respuesta, _d = cliente.post(f"/api/proyectos/{vid}/imagenes/calidad", {})
+        igual(respuesta.status_code, 400, "rehacer en otra calidad sin decir cuántas: 400")
+        respuesta, datos = cliente.post(f"/api/proyectos/{vid}/imagenes/calidad",
+                                        {"imagenes": 3})
+        igual(respuesta.status_code, 400,
+              f"sin imágenes en otra calidad no se lanza nada: {datos}")
+        respuesta, plan = cliente.get(f"/api/proyectos/{vid}/generar?tanda=video")
+        ok("otra_calidad" not in (plan.get("coste") or {}),
+           "y el plan no ofrece rehacer nada en un vídeo sin imágenes")
+    finally:
+        cliente.put("/api/ajustes", {"calidad_imagen": calidad_antes})
+
+
 def probar_planos_hechos(cliente, pid):
     """Los PNG que hay AHORA, y cuales son de este plan.
 
@@ -5086,6 +5171,7 @@ def main():
         probar_video_light(cliente)
         probar_traer_estilo(cliente)
         probar_estimacion(cliente)
+        probar_el_coste_de_las_imagenes(cliente)
         probar_planos_hechos(cliente, pid)
         probar_escucha_de_voz_light(cliente)
         probar_muestras_recuperadas(cliente)

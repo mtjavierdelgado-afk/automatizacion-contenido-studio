@@ -1195,6 +1195,103 @@ def rehacer_y_verlo_en_el_video(navegador, datos):
 
 
 @escenario
+def imagenes_en_otra_calidad(navegador, datos):
+    """D6 (auditoria del coste, 15-10-2026): cambiar la calidad de un video con
+    imagenes hechas NO las redibuja. Decision del dueño: «que lo diga y
+    pregunte». Las diapositivas dicen «N imágenes siguen en otra calidad» con
+    su precio; SIN PULSAR no se lanza nada (ni cancelando el confirm), y al
+    confirmar se rehacen SOLO esas, en la calidad nueva."""
+    pid = datos["video"]
+    api = datos["api"]
+
+    def igual(obtenido, esperado, mensaje):
+        return ok(obtenido == esperado, f"{mensaje} (esperaba {esperado!r}, llegó {obtenido!r})")
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    calidad = (ficha.get("params") or {}).get("calidad") or "low"
+    # C3: lo que queda por pagar cuenta lo que la tanda VA A REDIBUJAR. Con un
+    # plano sucio (su nota cambio) la tanda se lo pide a p6 y lo paga aunque
+    # su PNG exista; decia «0 imágenes por generar»
+    params_antes = ficha.get("params") or {}
+    unidades = dict(params_antes.get("unidades") or {})
+    unidades["escena:S002"] = dict(unidades.get("escena:S002") or {},
+                                   feedback="que se vea el puerto")
+    api.put(f"/api/proyectos/{pid}/pasos/assets/params", {"params": {"unidades": unidades}})
+    _r, plan = api.get(f"/api/proyectos/{pid}/generar?tanda=video")
+    coste = plan.get("coste") or {}
+    igual(coste.get("imagenes_por_generar"), 1,
+          "con UN plano sucio, «Poner al día» cuenta esa imagen por pagar")
+    api.put(f"/api/proyectos/{pid}/pasos/assets/params",
+            {"params": params_antes, "reemplazar": True})
+    _r, plan = api.get(f"/api/proyectos/{pid}/generar?tanda=video")
+    igual((plan.get("coste") or {}).get("imagenes_por_generar"), 0,
+          "y quitada la nota, ninguna")
+    nueva = "medium" if calidad != "medium" else "high"
+    r, _d = api.put(f"/api/proyectos/{pid}/pasos/assets/params", {"params": {"calidad": nueva}})
+    ok(r.status_code == 200, f"la calidad del vídeo pasa de {calidad} a {nueva}")
+    _r, plan = api.get(f"/api/proyectos/{pid}/generar?tanda=video")
+    otra = (plan.get("coste") or {}).get("otra_calidad") or {}
+    ok(otra.get("imagenes", 0) > 0 and otra.get("por_calidad", {}).get(calidad),
+       f"el plan de las imágenes dice cuántas siguen en {calidad}: {otra}")
+    ok(abs(float(otra.get("usd") or 0) - otra.get("imagenes", 0)
+           * float(plan["coste"]["usd_por_imagen"])) < 0.01,
+       "con su precio: cuántas por lo que cuesta una en la calidad nueva")
+    ruta_coste = os.path.join(datos["proyectos"], pid, "coste.jsonl")
+
+    def imagenes_pagadas():
+        try:
+            with open(ruta_coste, encoding="utf-8") as fh:
+                return [json.loads(l) for l in fh if '"openai"' in l]
+        except OSError:
+            return []
+    antes = len(imagenes_pagadas())
+    pg = Pagina(navegador, datos)
+    pedidas = []
+    pg.p.on("request", lambda q: pedidas.append(q.url)
+            if q.method == "POST" and ("/imagenes/calidad" in q.url or q.url.endswith("/generar"))
+            else None)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.pulsar(".nav-light button", "Imágenes")
+    ok(pg.esperar(".otra-calidad", "siguen en calidad", 15),
+       "las diapositivas dicen que hay imágenes en otra calidad")
+    boton = pg.p.locator(".otra-calidad button").first
+    ok(boton.count() == 1 and "$" in (boton.inner_text() or ""),
+       f"con un botón que dice lo que cuesta: «{boton.inner_text() if boton.count() else ''}»")
+    pg.captura("otra_calidad", entera=False)
+    pg.p.wait_for_timeout(3000)
+    igual(pedidas, [], "SIN PULSAR no se lanza nada")
+    pg.aceptar = False
+    pg.pulsar(".otra-calidad button")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.dialogos and "$" in pg.dialogos[-1],
+       f"pulsar pide confirmación con el precio: {pg.dialogos[-1:] }")
+    igual(pedidas, [], "y si se cancela, tampoco se lanza nada")
+    igual(len(imagenes_pagadas()), antes, "ni se paga ninguna imagen")
+    pg.aceptar = True
+    pg.pulsar(".otra-calidad button")
+    pg.p.wait_for_timeout(1500)
+    igual(len([u for u in pedidas if "/imagenes/calidad" in u]), 1,
+          "al confirmar se lanza UNA petición de rehacerlas")
+    ok(pg.sin_trabajo(400), "y se rehacen")
+    pg.p.wait_for_timeout(2000)
+    nuevas = imagenes_pagadas()[antes:]
+    unidades = sorted({e.get("unidad") for e in nuevas})
+    igual(len(nuevas), otra["imagenes"], f"se pagan exactamente las {otra['imagenes']} ofrecidas")
+    ok(all(str(u).startswith("escena:") for u in unidades),
+       f"todas de plano, ninguna hoja de reparto ({unidades[:4]}...)")
+    igual(sorted({(e.get("detalle") or {}).get("calidad") for e in nuevas}), [nueva],
+          f"y todas en {nueva}")
+    _r, plan = api.get(f"/api/proyectos/{pid}/generar?tanda=video")
+    ok(not (plan.get("coste") or {}).get("otra_calidad"),
+       "después ya no queda ninguna en otra calidad")
+    ok(not pg.esperar(".otra-calidad", None, 6), "y el aviso se va")
+    pg.sin_errores("imágenes en otra calidad")
+    # se deja el video montado al dia para los escenarios que vienen detras
+    ok(_montar_desde_video(pg), "el vídeo se vuelve a montar con las imágenes nuevas")
+    pg.cerrar()
+
+
+@escenario
 def lo_que_se_vio_el_10_de_octubre(navegador, datos):
     """Lo que encontro el dueno abriendo un video de verdad (10-10-2026), y que
     el recorrido no miraba: la referencia adjunta a una nota a tamano real,

@@ -3357,3 +3357,17 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 .etiqueta-tono { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--tenue); }
 .ajustes-fijos textarea[data-tono] { width: 100%; margin-top: 4px; }
 .revision-publicar { margin-top: 8px; }
+
+/* Resultados de Publicar (métricas) */
+.metricas-envio { font-size: 12px; color: var(--texto); font-variant-numeric: tabular-nums; }
+.cifras-publicar { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 12px 0; }
+.cifras-publicar .cifra {
+  display: flex; flex-direction: column; gap: 2px; padding: 10px 12px;
+  background: var(--panel); border: 1px solid var(--linea); border-radius: 10px;
+}
+.cifras-publicar .cifra b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.tabla-redes { display: flex; flex-direction: column; }
+.fila-red { gap: 8px; padding: 6px 0; border-top: 1px solid var(--linea-suave); min-width: 0; }
+.fila-red:first-child { border-top: 0; }
+.nombre-red { min-width: 130px; }
+.resultados-publicar select { max-width: 100%; }

@@ -13,6 +13,8 @@ programado en hora de Lima. Decidido por el dueño entre el 13 y el 16-10-2026
     enviar(...)                      prepara los envios y los sube (en un hilo)
     refrescar(raiz)                  pregunta a Upload-Post por lo pendiente
     cola(raiz, videos, desde, dias)  la cola y el calendario
+    actualizar_metricas(...)         las cifras de lo publicado (Upload-Post)
+    resultados(raiz, videos, cid)    el resumen por proyecto
 
 DONDE VIVE
 ----------
@@ -285,6 +287,8 @@ AJUSTES_DEFECTO = {
     "facebook_pagina": "",              # id de la pagina, si hay mas de una
     "cuentas": {},                      # lo ultimo que dijo Upload-Post del perfil
     "cuentas_vistas": "",
+    "seguidores": {},                   # lo ultimo que dijo de cada cuenta
+    "seguidores_al": "",
 }
 LARGOS = {"firma": 400, "hashtags": 400, "tono": 600, "perfil": 60,
           "facebook_pagina": 40}
@@ -312,7 +316,8 @@ def todos_los_ajustes(raiz):
 def _validar_ajustes(cambios):
     limpios = {}
     for k, v in (cambios or {}).items():
-        if k not in AJUSTES_DEFECTO or k in ("cuentas", "cuentas_vistas"):
+        if k not in AJUSTES_DEFECTO or k in ("cuentas", "cuentas_vistas",
+                                             "seguidores", "seguidores_al"):
             continue
         if k in ("marcar_ia", "avisar_youtube"):
             if not isinstance(v, bool):
@@ -373,6 +378,8 @@ def guardar_ajustes(raiz, cid, cambios, internos=None):
                 and "cuentas" not in limpios:
             propio["cuentas"] = {}
             propio["cuentas_vistas"] = ""
+            propio["seguidores"] = {}
+            propio["seguidores_al"] = ""
         propio.update(limpios)
         _escribir(_ruta_ajustes(raiz), datos)
     return ajustes_de(raiz, cid)
@@ -851,7 +858,8 @@ def guardar_ficha(raiz, pid, cambios):
 def _envio_publico(e):
     return {k: e.get(k) for k in (
         "id", "red", "estado", "modo", "cuando", "creado", "actualizado", "url",
-        "error", "lote", "perfil", "mp4_huella", "nota", "programado_para", "sin_hora")}
+        "error", "lote", "perfil", "mp4_huella", "nota", "programado_para", "sin_hora",
+        "metricas")}
 
 
 def ficha(raiz, info, ajustes):
@@ -1407,3 +1415,168 @@ def cola(raiz, videos, desde=None, dias=7):
             "esperan_ok": [e for e in envios if e.get("estado") == "espera_ok"],
             "fallidos": [e for e in envios if e.get("estado") in ("fallido", "comprobar")],
             "clave": estado_clave()}
+
+
+# ----------------------------------------------------------------- metricas
+#
+# LAS CIFRAS DE LO PUBLICADO (rama publicar-redes-1, segunda parte). Upload-Post
+# las pide EN VIVO a cada red y deja 100 consultas cada 5 minutos por cuenta,
+# asi que aqui se piden solo al pulsar «Actualizar», como mucho LOTES_POR_VUELTA
+# envios por vez, y un envio que se miro hace menos de RESPIRO_METRICAS_S no se
+# vuelve a pedir. Lo ultimo que se supo se guarda en el propio envio
+# (`metricas`, con su hora), y de ahi sale todo lo que se ensena: la ficha, el
+# resumen por proyecto y, mas adelante, la Parrilla y el piloto.
+#
+# Un numero que la red no da se queda en None: «no lo dice» no es «cero».
+
+METRICAS = ("vistas", "me_gusta", "comentarios", "compartidos", "guardados")
+LOTES_POR_VUELTA = 30
+RESPIRO_METRICAS_S = float(os.environ.get("ESTUDIO_METRICAS_RESPIRO") or 600)
+
+
+def _lotes_publicados(raiz, pids):
+    """{lote: [(pid, envio)]} de lo publicado por Upload-Post (los «a mano» no
+    tienen numero de envio y no se pueden preguntar)."""
+    lotes = {}
+    for pid in pids:
+        for e in _leer_video(raiz, pid)["envios"]:
+            if e.get("estado") == "publicado" and e.get("lote"):
+                lotes.setdefault(e["lote"], []).append((pid, e))
+    return lotes
+
+
+def _mirado_hace(envios):
+    momentos = [_leer_momento((e.get("metricas") or {}).get("al")) for _p, e in envios]
+    momentos = [m for m in momentos if m]
+    if len(momentos) < len(envios) or not momentos:
+        return None
+    return (ahora_lima() - min(momentos)).total_seconds()
+
+
+def actualizar_metricas(raiz, pids, forzar=False, limite=LOTES_POR_VUELTA):
+    """Pide a Upload-Post las cifras de lo publicado de estos videos.
+    -> {"consultados", "actualizados", "pendientes", "errores": [...]}"""
+    lotes = _lotes_publicados(raiz, pids)
+    candidatos = []
+    for lote, envios in lotes.items():
+        hace = _mirado_hace(envios)
+        if not forzar and hace is not None and hace < RESPIRO_METRICAS_S:
+            continue
+        candidatos.append((hace if hace is not None else float("inf"), lote, envios))
+    # primero lo que nunca se miro, despues lo que hace mas que no
+    candidatos.sort(key=lambda x: -x[0])
+    if not candidatos:
+        return {"consultados": 0, "actualizados": 0, "pendientes": 0, "errores": []}
+    cli = cliente(raiz)
+    consultados = actualizados = 0
+    errores = []
+    for _hace, lote, envios in candidatos[:limite]:
+        consultados += 1
+        try:
+            cifras = cli.metricas_post(lote)
+        except UP.ErrorUploadPost as fallo:
+            if fallo.codigo == 429:
+                errores.append("Upload-Post pide esperar unos minutos (demasiadas consultas)")
+                break
+            errores.append(str(fallo)[:200])
+            cifras = {}
+        al = _iso_lima()
+        por_pid = {}
+        for pid, e in envios:
+            por_pid.setdefault(pid, set()).add(e["id"])
+        for pid, ids in por_pid.items():
+            with _lock(pid):
+                datos = _leer_video(raiz, pid)
+                for e in datos["envios"]:
+                    if e.get("id") not in ids:
+                        continue
+                    propias = cifras.get(e["red"])
+                    if propias is None:
+                        e["metricas"] = dict(e.get("metricas") or {}, al=al,
+                                             error="Upload-Post no trae cifras de esta red")
+                        continue
+                    nuevas = {k: propias.get(k) for k in METRICAS + ("alcance",)}
+                    # una consulta sin cifras (TikTok las completa en horas) no
+                    # borra las que ya se sabian
+                    viejas = e.get("metricas") or {}
+                    for k in nuevas:
+                        if nuevas[k] is None and viejas.get(k) is not None:
+                            nuevas[k] = viejas[k]
+                    nuevas.update(al=al, error=propias.get("error") or "")
+                    e["metricas"] = nuevas
+                    if propias.get("url") and not e.get("url"):
+                        e["url"] = propias["url"]
+                    actualizados += 1
+                _escribir(_ruta_video(raiz, pid), datos)
+    return {"consultados": consultados, "actualizados": actualizados,
+            "pendientes": max(0, len(candidatos) - consultados), "errores": errores[:5]}
+
+
+def actualizar_seguidores(raiz, cid):
+    """Seguidores, alcance y vistas de las cuentas del perfil del proyecto."""
+    ajustes = ajustes_de(raiz, cid)
+    perfil = ajustes.get("perfil")
+    if not perfil:
+        raise ErrorPublicar("este proyecto todavía no tiene perfil de Upload-Post", 409)
+    conectadas = [r for r, c in (ajustes.get("cuentas") or {}).items() if c] or list(REDES)
+    cifras = _por_upload_post(cliente(raiz).analiticas_perfil, perfil, conectadas,
+                              pagina_facebook=ajustes.get("facebook_pagina") or None)
+    return guardar_ajustes(raiz, cid, {}, internos={"seguidores": cifras,
+                                                     "seguidores_al": _iso_lima()})
+
+
+def _suma(destino, metricas):
+    for k in METRICAS:
+        v = (metricas or {}).get(k)
+        if isinstance(v, (int, float)):
+            destino[k] = (destino.get(k) or 0) + int(v)
+
+
+def resultados(raiz, videos, cid, dias=30):
+    """El resumen de un proyecto: lo publicado en los ultimos `dias` dias, con
+    las cifras que se sepan. `videos` son los que quien pregunta puede ver."""
+    try:
+        dias = max(1, min(int(dias or 30), 365))
+    except (TypeError, ValueError):
+        dias = 30
+    desde = ahora_lima() - dt.timedelta(days=dias)
+    propios = [v for v in videos if (v.get("cliente") or SIN_PROYECTO) == (cid or SIN_PROYECTO)]
+    con_ficha = set(_videos_con_ficha(raiz))
+    por_red = {r: {"posts": 0} for r in REDES}
+    total = {"posts": 0}
+    filas, sin_cifras, mirado = [], 0, None
+    for v in propios:
+        if v["pid"] not in con_ficha:
+            continue
+        suma_video, redes_video = {}, {}
+        for e in _leer_video(raiz, v["pid"])["envios"]:
+            if e.get("estado") not in ("publicado", "a_mano"):
+                continue
+            momento = _leer_momento(e.get("cuando"))
+            if momento is None or momento < desde:
+                continue
+            m = e.get("metricas") or {}
+            por_red[e["red"]]["posts"] += 1
+            total["posts"] += 1
+            _suma(por_red[e["red"]], m)
+            _suma(total, m)
+            _suma(suma_video, m)
+            redes_video[e["red"]] = {k: m.get(k) for k in METRICAS}
+            redes_video[e["red"]]["url"] = e.get("url") or ""
+            if not any(isinstance(m.get(k), (int, float)) for k in METRICAS):
+                sin_cifras += 1
+            al = _leer_momento(m.get("al"))
+            if al and (mirado is None or al > mirado):
+                mirado = al
+        if redes_video:
+            filas.append({"pid": v["pid"], "nombre": v.get("nombre") or v["pid"],
+                          "redes": redes_video, **{k: suma_video.get(k) for k in METRICAS}})
+    filas.sort(key=lambda f: (f.get("vistas") or 0), reverse=True)
+    ajustes = ajustes_de(raiz, cid)
+    return {"proyecto": cid or SIN_PROYECTO, "dias": dias, "desde": desde.strftime("%Y-%m-%d"),
+            "total": total, "por_red": por_red, "videos": filas[:50],
+            "sin_cifras": sin_cifras, "mirado": mirado.strftime("%Y-%m-%dT%H:%M") if mirado else "",
+            "seguidores": ajustes.get("seguidores") or {},
+            "seguidores_al": ajustes.get("seguidores_al") or "",
+            "perfil": ajustes.get("perfil") or "", "clave": estado_clave()}
+

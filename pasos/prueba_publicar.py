@@ -191,6 +191,15 @@ class _FalsoUploadPost(http.server.BaseHTTPRequestHandler):
                     "tiktok": {"display_name": "A TikTok", "username": "atk",
                                "social_images": "https://img"},
                     "instagram": "", "youtube": None}}]})
+        elif ruta.path.startswith("/api/uploadposts/post-analytics/"):
+            self._responder(200, {"success": True, "platforms": {
+                "youtube": {"success": True, "post_url": "https://youtube.com/watch?v=V",
+                            "post_metrics": {"views": 5200, "likes": 120, "comments": 8, "favorites": 3}},
+                "tiktok": {"success": True, "post_metrics_error":
+                           "TikTok video not found (ID: 7). The token may need to be refreshed."}}})
+        elif ruta.path.startswith("/api/analytics/"):
+            self._responder(200, {"instagram": {"followers": 47, "reach": 1250, "views": 3400},
+                                  "facebook": {"followers": 0, "reach": 0, "impressions": 0}})
         elif ruta.path == "/api/uploadposts/status":
             q = urllib.parse.parse_qs(ruta.query)
             if q.get("job_id"):
@@ -298,6 +307,15 @@ def prueba_cliente():
         igual(cli.cancelar("job_9"), {"ok": True}, "cancelar")
         igual(_FalsoUploadPost.vistas[-1]["ruta"], "/api/uploadposts/schedule/job_9",
               "con DELETE a la ruta del trabajo")
+        m = cli.metricas_post("req_1")
+        igual(m["youtube"]["vistas"], 5200, "métricas: las vistas de YouTube")
+        igual(m["youtube"]["guardados"], 3, "«favorites» cuenta como guardados")
+        igual(m["youtube"]["compartidos"], None, "lo que no viene, None")
+        ok(m["tiktok"]["error"].startswith("TikTok video not found"), "y el error de la red que no las da")
+        a = cli.analiticas_perfil("studio_a", ["instagram", "facebook"], pagina_facebook="99")
+        igual(a["instagram"]["seguidores"], 47, "los seguidores de la cuenta")
+        igual(a["facebook"]["seguidores"], 0, "un cero de verdad se queda en cero")
+        ok("page_id=99" in _FalsoUploadPost.vistas[-1]["ruta"], "Facebook con su página")
 
         malo = UP.ClienteUploadPost("otra_clave_secreta_999", base=base)
         try:
@@ -390,7 +408,7 @@ def _esperar(sesion, url, condicion, segundos=20):
 
 def prueba_studio():
     import requests
-    seccion("4] el Studio por HTTP, con Upload-Post simulado")
+    seccion("5] el Studio por HTTP, con Upload-Post simulado")
     carpeta = os.path.join(CARPETA, "studio")
     raiz = os.path.join(carpeta, "proyectos")
     os.makedirs(raiz)
@@ -564,6 +582,20 @@ def prueba_studio():
         igual(por_red["instagram"]["estado"], "fallido", "Instagram falló…")
         igual(por_red["instagram"]["error"], "el vídeo no cumple las normas", "…con su motivo")
 
+        # --- métricas por HTTP
+        r = s.post(base + "/api/publicar/videos/fiesta/metricas", json={"forzar": True})
+        igual(r.status_code, 200, "pedir las cifras de lo publicado")
+        igual(r.json().get("consultados"), 1, "una consulta para el envío publicado")
+        ok(any(e.get("metricas") for e in r.json()["ficha"]["envios"]),
+           "y la ficha vuelve con las cifras")
+        res = s.get(base + "/api/publicar/resultados", params={"proyecto": P.SIN_PROYECTO}).json()
+        igual(res["total"]["posts"], 1, "el resumen del proyecto cuenta lo publicado")
+        r = s.post(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/metricas", json={})
+        igual(r.status_code, 200, "actualizar todo el proyecto")
+        res = s.get(base + "/api/publicar/resultados", params={"proyecto": P.SIN_PROYECTO}).json()
+        ok(res["seguidores"].get("tiktok", {}).get("seguidores"), "y trae los seguidores de las cuentas")
+        igual(s.get(base + "/api/publicar/resultados", params={"proyecto": "cl_no"}).status_code, 404,
+              "un proyecto que no existe, 404")
         r = s.post(base + "/api/publicar/videos/fiesta/enviar",
                    json={"redes": ["tiktok"], "modo": "ahora", "confirmado": True})
         igual(r.status_code, 409, "el mismo MP4 otra vez en TikTok pide confirmarlo")
@@ -666,6 +698,11 @@ def prueba_studio():
         ok(all(v["pid"] != "fiesta" for v in c["listos"]), "ni en la cola")
         ok(all(p["id"] != cid for p in s.get(base + "/api/publicar/proyectos").json()["proyectos"]),
            "ni sus ajustes")
+        igual(s.get(base + "/api/publicar/resultados", params={"proyecto": cid}).status_code, 404,
+              "ni sus resultados")
+        res = s.get(base + "/api/publicar/resultados", params={"proyecto": P.SIN_PROYECTO}).json()
+        ok(all(v["pid"] != "fiesta" for v in res["videos"]),
+           "y sus vídeos no salen en el resumen de otro proyecto")
         pase = s.post(base + f"/api/clientes/{cid}/abrir", json={"clave": "1234"}).json()["pase"]
         cab = {"X-Estudio-Abiertos": f"{cid}.{pase}"}
         igual(s.get(base + "/api/publicar/videos/fiesta", headers=cab).status_code, 200,
@@ -778,15 +815,78 @@ def prueba_envios_sueltos():
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 
 
+def prueba_metricas():
+    seccion("4] métricas: las cifras de lo publicado y el resumen por proyecto")
+    raiz = os.path.join(CARPETA, "metricas")
+    os.makedirs(raiz)
+    simulador = os.path.join(CARPETA, "sim_metricas.json")
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    try:
+        cli = P.cliente(raiz)
+        cli.crear_perfil("studio_m")
+        cli.enlace_conectar("studio_m", ["tiktok", "youtube"])
+        mp4 = os.path.join(raiz, "v.mp4")
+        with open(mp4, "wb") as fh:
+            fh.write(b"0" * 2000)
+        info = dict(INFO, pid="medido", mp4=mp4, mp4_huella="h1")
+        ajustes = dict(P.AJUSTES_DEFECTO, perfil="studio_m")
+        P.guardar_ficha(raiz, "medido", {"textos": {"tiktok": {"descripcion": "T"},
+                                                    "youtube": {"titulo": "Y", "descripcion": "Y"}}})
+        P.enviar(raiz, info, ajustes, {"redes": ["tiktok", "youtube"], "modo": "ahora",
+                                       "confirmado": True}, en_hilo=False)
+        r = P.actualizar_metricas(raiz, ["medido"])
+        igual(r["consultados"], 0, "lo que aún no está publicado no se mide")
+        P.RESPIRO_CONSULTA_S = 0
+        for _ in range(3):
+            P.refrescar(raiz)
+        estados = sorted(e["estado"] for e in P._leer_video(raiz, "medido")["envios"])
+        igual(estados, ["publicado", "publicado"], "publicado en las dos redes")
+        r = P.actualizar_metricas(raiz, ["medido"])
+        igual((r["consultados"], r["actualizados"]), (1, 2), "UNA consulta por envío trae las dos redes")
+        envios = {e["red"]: e for e in P._leer_video(raiz, "medido")["envios"]}
+        ok(envios["youtube"]["metricas"]["vistas"] > 0, "YouTube trae sus vistas")
+        igual(envios["youtube"]["metricas"]["guardados"], None,
+              "lo que la red no da se queda en None (no es cero)")
+        igual(envios["tiktok"]["metricas"]["vistas"], None, "TikTok aún sin cifras la primera vez")
+        ok(envios["tiktok"]["metricas"]["error"], "y lo dice")
+        r = P.actualizar_metricas(raiz, ["medido"])
+        igual(r["consultados"], 0, "lo mirado hace nada no se vuelve a pedir (respiro)")
+        vistas_antes = envios["youtube"]["metricas"]["vistas"]
+        r = P.actualizar_metricas(raiz, ["medido"], forzar=True)
+        envios = {e["red"]: e for e in P._leer_video(raiz, "medido")["envios"]}
+        ok(envios["tiktok"]["metricas"]["vistas"], "forzado, TikTok ya trae las suyas")
+        ok(envios["youtube"]["metricas"]["vistas"] > vistas_antes, "y las de YouTube crecen")
+        ficha = P.ficha(raiz, info, ajustes)
+        ok(all(e.get("metricas") for e in ficha["envios"]), "la ficha enseña las cifras de cada envío")
+        P.marcar_a_mano(raiz, info, "facebook", "")
+        res = P.resultados(raiz, [{"pid": "medido", "nombre": "Medido", "cliente": ""}], "")
+        igual(res["total"]["posts"], 3, "el resumen cuenta lo publicado (también a mano)")
+        igual(res["total"]["vistas"], envios["tiktok"]["metricas"]["vistas"]
+              + envios["youtube"]["metricas"]["vistas"], "y suma las vistas")
+        igual(res["sin_cifras"], 1, "la subida a mano no tiene cifras y se cuenta aparte")
+        igual(res["videos"][0]["pid"], "medido", "los vídeos, de más a menos vistos")
+        res = P.resultados(raiz, [{"pid": "medido", "nombre": "Medido", "cliente": "cl_otro"}], "")
+        igual(res["total"]["posts"], 0, "lo de otro proyecto no entra en el resumen")
+        P.guardar_ajustes(raiz, "", {"perfil": "studio_m"})
+        P.recordar_cuentas(raiz, "", {"tiktok": {"nombre": "t"}, "youtube": {"nombre": "y"},
+                                      "instagram": None, "facebook": None})
+        a = P.actualizar_seguidores(raiz, "")
+        ok(a["seguidores"]["tiktok"]["seguidores"] > 0, "los seguidores de cada cuenta conectada")
+        ok("instagram" not in a["seguidores"], "solo de las conectadas")
+    finally:
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
+
 def main():
     print("PRUEBA DE PUBLICAR")
     prueba_piezas()
     prueba_cliente()
     prueba_envios_sueltos()
+    prueba_metricas()
     if shutil.which("ffmpeg"):
         prueba_studio()
     else:
-        print("\n[4] OMITIDA: falta ffmpeg para hacer un MP4 de prueba")
+        print("\n[5] OMITIDA: falta ffmpeg para hacer un MP4 de prueba")
     shutil.rmtree(CARPETA, ignore_errors=True)
     print("\n" + "=" * 70)
     if _fallos:

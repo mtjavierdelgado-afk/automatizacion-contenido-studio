@@ -9,6 +9,8 @@
                                                    -> {"modo", "request_id"|"job_id", "resultados"}
     cli.estado(request_id=..., job_id=...)         -> {"estado", "redes": {red: {...}}}
     cli.cancelar(job_id)                           -> {"ok"}
+    cli.metricas_post(request_id)                  -> {red: {"vistas", "me_gusta", ..., "error"}}
+    cli.analiticas_perfil(perfil, redes)           -> {red: {"seguidores", "alcance", "vistas", "error"}}
 
 Por que un intermediario
 ------------------------
@@ -403,3 +405,76 @@ class ClienteUploadPost:
     def cancelar(self, job_id):
         self._pedir("DELETE", f"/api/uploadposts/schedule/{urllib.parse.quote(str(job_id))}")
         return {"ok": True}
+
+    # ------------------------------------------------------------- metricas
+    #
+    # Lo que cada red cuenta de un post y de una cuenta. Upload-Post las pide en
+    # vivo a la red (100 consultas cada 5 minutos por cuenta): quien llama se
+    # encarga de no pedir lo mismo dos veces seguidas. Cada red trae los campos
+    # que trae: lo que no viene se queda en None, no en 0 (no es lo mismo «no
+    # lo dice» que «nadie lo ha visto»).
+
+    #: nombre en el Studio -> nombres posibles en la respuesta de Upload-Post
+    CAMPOS_METRICAS = {
+        "vistas": ("views", "video_views", "plays", "impressions"),
+        "me_gusta": ("likes", "like_count", "reactions"),
+        "comentarios": ("comments", "comment_count"),
+        "compartidos": ("shares", "share_count"),
+        "guardados": ("saves", "saved", "favorites"),
+        "alcance": ("reach",),
+    }
+
+    @classmethod
+    def _numeros(cls, bruto):
+        bruto = bruto if isinstance(bruto, dict) else {}
+        salida = {}
+        for nuestro, suyos in cls.CAMPOS_METRICAS.items():
+            valor = None
+            for suyo in suyos:
+                if isinstance(bruto.get(suyo), (int, float)) and not isinstance(bruto.get(suyo), bool):
+                    valor = int(bruto[suyo])
+                    break
+            salida[nuestro] = valor
+        return salida
+
+    def metricas_post(self, request_id, red=None):
+        """Las cifras de un envio (todas sus redes, o una). -> {red: {...}}"""
+        r = self._pedir("GET", f"/api/uploadposts/post-analytics/{urllib.parse.quote(str(request_id))}",
+                        consulta={"platform": red} if red else None)
+        salida = {}
+        for nombre, ficha in (r.get("platforms") or {}).items():
+            if nombre not in REDES or not isinstance(ficha, dict):
+                continue
+            datos = self._numeros(ficha.get("post_metrics"))
+            url = str(ficha.get("post_url") or "")
+            datos["url"] = url if url.startswith("http") else ""
+            datos["error"] = str(ficha.get("post_metrics_error") or "")[:300]
+            salida[nombre] = datos
+        return salida
+
+    def analiticas_perfil(self, perfil, redes, pagina_facebook=None):
+        """Seguidores, alcance y vistas de cada cuenta del perfil. -> {red: {...}}"""
+        redes = [r for r in redes if r in REDES]
+        if not redes:
+            return {}
+        consulta = {"platforms": ",".join(redes)}
+        if pagina_facebook:
+            consulta["page_id"] = pagina_facebook
+        r = self._pedir("GET", f"/api/analytics/{urllib.parse.quote(str(perfil))}", consulta=consulta)
+        salida = {}
+        for red in redes:
+            ficha = r.get(red)
+            if not isinstance(ficha, dict):
+                salida[red] = {"seguidores": None, "alcance": None, "vistas": None,
+                               "error": str(ficha or "sin datos")[:300] if ficha else "sin datos"}
+                continue
+            numeros = self._numeros(ficha)
+            seguidores = ficha.get("followers")
+            salida[red] = {
+                "seguidores": int(seguidores) if isinstance(seguidores, (int, float))
+                and not isinstance(seguidores, bool) else None,
+                "alcance": numeros["alcance"], "vistas": numeros["vistas"],
+                "error": str(ficha.get("error") or ficha.get("message") or "")[:300],
+            }
+        return salida
+

@@ -14623,6 +14623,49 @@ def publicar_conectar(cid: str, peticion: Request, cuerpo: dict = Body(default=N
     return enlace
 
 
+# ------------------------------------------- publicar: las cifras de lo publicado
+# Se piden a Upload-Post solo al pulsar «Actualizar» (deja 100 consultas cada 5
+# minutos por cuenta). Lo ultimo que se supo vive en cada envio; ver
+# `publicar.actualizar_metricas`.
+
+@app.post("/api/publicar/videos/{pid}/metricas")
+def publicar_metricas_video(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Pide las cifras de lo publicado de este video: {forzar?}."""
+    ctx = _ctx_publicable(pid, peticion)
+    r = _por_publicar(_publicar().actualizar_metricas, raiz_proyectos(), [ctx.id],
+                      forzar=bool(_cuerpo(cuerpo).get("forzar")))
+    return dict(r, ficha=publicar_ficha(pid, peticion))
+
+
+@app.get("/api/publicar/resultados")
+def publicar_resultados(peticion: Request, proyecto: str = Query(default=""),
+                        dias: int = Query(default=30)):
+    """El resumen de un proyecto (lo que ya se sabe; no pregunta a nadie)."""
+    P = _publicar()
+    cid = _proyecto_publicable(proyecto or P.SIN_PROYECTO, peticion)
+    return P.resultados(raiz_proyectos(), _videos_para_publicar(peticion),
+                        "" if cid == P.SIN_PROYECTO else cid, dias=dias)
+
+
+@app.post("/api/publicar/proyectos/{cid}/metricas")
+def publicar_metricas_proyecto(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Pide las cifras de lo publicado del proyecto y los seguidores de sus
+    cuentas. -> {consultados, actualizados, pendientes, errores, seguidores?}"""
+    P = _publicar()
+    cid = _proyecto_publicable(cid, peticion)
+    clave = "" if cid == P.SIN_PROYECTO else cid
+    pids = [v["pid"] for v in _videos_para_publicar(peticion)
+            if (v.get("cliente") or "") == clave]
+    r = _por_publicar(P.actualizar_metricas, raiz_proyectos(), pids,
+                      forzar=bool(_cuerpo(cuerpo).get("forzar")))
+    if P.ajustes_de(raiz_proyectos(), cid).get("perfil"):
+        try:
+            P.actualizar_seguidores(raiz_proyectos(), cid)
+        except P.ErrorPublicar as fallo:
+            r.setdefault("errores", []).append(f"seguidores: {fallo}")
+    return r
+
+
 # ------------------------------------------------------------------------ main
 
 def main():

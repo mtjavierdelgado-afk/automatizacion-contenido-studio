@@ -87,8 +87,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/publicar/proyectos/{cid}` | Lo fijo de un proyecto: {perfil, redes, hora, firma, hashtags, tono, |
 | `POST` | `/api/publicar/proyectos/{cid}/conectar` | El enlace (48 h) para conectar o reconectar las cuentas: {redes?, volver_a?}. |
 | `POST` | `/api/publicar/proyectos/{cid}/cuentas` | Pregunta a Upload-Post que cuentas tiene conectadas el perfil del proyecto. |
+| `POST` | `/api/publicar/proyectos/{cid}/metricas` | Pide las cifras de lo publicado del proyecto y los seguidores de sus cuentas. |
 | `POST` | `/api/publicar/proyectos/{cid}/perfil` | Crea el perfil del proyecto en Upload-Post ({perfil}, o el sugerido) y lo |
 | `POST` | `/api/publicar/refrescar` | Pregunta a Upload-Post por los envios que siguen en el aire. |
+| `GET` | `/api/publicar/resultados` | El resumen de un proyecto (lo que ya se sabe; no pregunta a nadie). |
 | `GET` | `/api/publicar/videos/{pid}` | La ficha de publicar de un video: redes, textos, encaje, envios. |
 | `PUT` | `/api/publicar/videos/{pid}` | {redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?} |
 | `POST` | `/api/publicar/videos/{pid}/a-mano` | «Lo he subido yo»: {red, url?}. Queda en el historial. |
@@ -96,6 +98,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/videos/{pid}/envios/{eid}/cancelar` | Cancela lo programado (en Upload-Post) o lo que esperaba tu OK, y quita de la lista un envio que fallo. |
 | `POST` | `/api/publicar/videos/{pid}/envios/{eid}/reintentar` | Vuelve a mandar un envio que quedo en «comprobar», con su misma clave de idempotencia. |
 | `POST` | `/api/publicar/videos/{pid}/envios/{eid}/confirmar` | Un envio que esperaba tu OK sale: {confirmado, modo?, cuando?}. |
+| `POST` | `/api/publicar/videos/{pid}/metricas` | Pide las cifras de lo publicado de este video: {forzar?}. |
 | `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
 | `GET` | `/api/trabajos` | Trabajos conocidos, opcionalmente de un solo proyecto. |
 | `GET` | `/api/trabajos/{tid}` | Estado y progreso de un trabajo. |
@@ -352,4 +355,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**238 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**241 endpoints.** Escrito por `generar_api.py` desde `app.py`.

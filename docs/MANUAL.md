@@ -354,6 +354,16 @@ un vídeo en una red donde ya salió pide confirmarlo aparte.
 espera tu OK); después la semana día a día con lo que sale cada día (‹ › para
 moverte), y los vídeos listos con el estado de cada red.
 
+**Resultados**: elige el proyecto y el periodo (7, 30 o 90 días) y pulsa
+**Actualizar**: pide a Upload-Post las vistas, me gusta, comentarios y
+compartidos de lo publicado, y los seguidores de cada cuenta. Salen el total,
+cada red y los vídeos de más a menos vistos (pulsa uno para abrir su ficha).
+En la ficha de un vídeo, **Actualizar métricas** hace lo mismo solo con ese
+vídeo, y cada envío enseña sus cifras. No cuesta nada, pero Upload-Post deja
+unas 100 consultas cada 5 minutos: si hay muchos vídeos, vuelve a pulsar al
+rato. TikTok da las cifras unas horas después de publicar, y lo que subiste a
+mano no se puede medir desde aquí.
+
 ## Configuración (⚙)
 
 - **Las claves**: OpenAI (imágenes), Cartesia (voz), Claude (guion y asistente),

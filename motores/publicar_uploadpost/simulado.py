@@ -193,3 +193,53 @@ class SimuladoUploadPost:
             trabajo["cancelado"] = True
             self._escribir(datos)
         return {"ok": True}
+
+    # ------------------------------------------------------------- metricas
+
+    @staticmethod
+    def _semilla(*partes):
+        import hashlib
+        return int(hashlib.sha256("|".join(str(p) for p in partes).encode()).hexdigest()[:8], 16)
+
+    def metricas_post(self, request_id, red=None):
+        """Cifras que crecen con cada consulta, y TikTok que aun no las tiene la
+        primera vez (como pasa en las horas despues de publicar)."""
+        with _LOCK:
+            datos = self._leer()
+            trabajo = datos["trabajos"].get(request_id)
+            if trabajo is None:
+                raise ErrorUploadPost("Upload-Post no encuentra ese envío", 404)
+            trabajo["metricas_consultas"] = int(trabajo.get("metricas_consultas") or 0) + 1
+            vueltas = trabajo["metricas_consultas"]
+            self._escribir(datos)
+        salida = {}
+        for r in trabajo["redes"]:
+            if red and r != red:
+                continue
+            base = self._semilla(request_id, r) % 900 + 100
+            if r == "tiktok" and vueltas < 2:
+                salida[r] = {k: None for k in ClienteUploadPost.CAMPOS_METRICAS}
+                salida[r].update(url=f"https://{r}.example/{request_id[:10]}",
+                                 error="TikTok todavía no tiene las cifras de este post")
+                continue
+            salida[r] = {"vistas": base * vueltas, "me_gusta": base // 10 * vueltas,
+                         "comentarios": base // 100 + vueltas, "compartidos": base // 50,
+                         "guardados": None if r == "youtube" else base // 40, "alcance": None,
+                         "url": f"https://{r}.example/{request_id[:10]}", "error": ""}
+        return salida
+
+    def analiticas_perfil(self, perfil, redes, pagina_facebook=None):
+        with _LOCK:
+            datos = self._leer()
+        if perfil not in datos["perfiles"]:
+            raise ErrorUploadPost("Upload-Post no encuentra ese perfil", 404)
+        salida = {}
+        for r in redes:
+            if r == "facebook" and not pagina_facebook:
+                salida[r] = {"seguidores": None, "alcance": None, "vistas": None,
+                             "error": "Facebook pide el id de la página"}
+                continue
+            base = self._semilla(perfil, r) % 5000 + 200
+            salida[r] = {"seguidores": base, "alcance": base * 3, "vistas": base * 5, "error": ""}
+        return salida
+

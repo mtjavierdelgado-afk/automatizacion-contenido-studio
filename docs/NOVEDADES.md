@@ -44,6 +44,14 @@ vídeos, estilos, claves y contraseña no se tocan.
   los textos del proyecto tienen su **✦ Guía** (qué poner y qué no, plantilla,
   ejemplo y prompt para otra IA) y su **✓ Revisar**, como los campos de Crear.
   Y el manual («?») explica el módulo Publicar paso a paso.
+- **Resultados: lo que pasa con lo publicado.** En Publicar hay una pestaña
+  nueva, **Resultados**: por proyecto y periodo (7, 30 o 90 días), cuántas
+  publicaciones, vistas, me gusta, comentarios y compartidos, por red y con
+  los seguidores de cada cuenta, y los vídeos de más a menos vistos. En la
+  ficha de un vídeo, cada envío publicado enseña sus cifras y hay
+  **«Actualizar métricas»**. Las cifras se piden a Upload-Post solo al pulsar
+  «Actualizar» (deja unas 100 consultas cada 5 minutos); TikTok las da unas
+  horas después de publicar, y lo subido a mano no se puede medir desde aquí.
 
 **Más arreglos de imágenes (16 de octubre)**
 - **Pegar una imagen ya no la manda al logo por sorpresa.** Con el cursor en

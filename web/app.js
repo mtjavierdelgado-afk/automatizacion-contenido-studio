@@ -16612,6 +16612,7 @@ const PUB = {
   cargando: false, error: '', desde: '', reloj: null, borrador: {},
   enviando: false, guardando: null, avisos: 0, repintar: false,
   modoEnvio: '', cuandoEnvio: '',
+  resultados: null, proyectoResultados: '', diasResultados: 30, midiendo: false,
 };
 const NOMBRES_RED = { tiktok: 'TikTok', instagram: 'Instagram Reels', youtube: 'YouTube', facebook: 'Facebook' };
 const CORTOS_RED = { tiktok: 'TikTok', instagram: 'Reels', youtube: 'YouTube', facebook: 'Facebook' };
@@ -16811,6 +16812,15 @@ async function cargarPublicar(silencio) {
       PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`));
     } else if (PUB.seccion === 'cuentas') {
       PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
+    } else if (PUB.seccion === 'resultados') {
+      if (!PUB.proyectos) PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
+      const lista = (PUB.proyectos.proyectos || []);
+      if (!PUB.proyectoResultados || !lista.some(x => x.id === PUB.proyectoResultados)) {
+        const conPerfil = lista.find(x => x.id !== '_sin' && (x.ajustes || {}).perfil);
+        PUB.proyectoResultados = (conPerfil || lista[0] || { id: '_sin' }).id;
+      }
+      PUB.resultados = await pedir(rutaPublicar(`/resultados?${consulta({
+        proyecto: PUB.proyectoResultados, dias: PUB.diasResultados || 30 })}`));
     } else {
       PUB.cola = await pedir(rutaPublicar(`/cola${PUB.desde ? `?desde=${encodeURIComponent(PUB.desde)}` : ''}`));
       contarAvisosPublicar();
@@ -16891,7 +16901,7 @@ function vistaPublicar() {
   const caja = h('div', { clase: 'publicar' });
   const pestanas = h('div', { clase: 'pestanas-publicar', role: 'tablist' });
   [['cola', 'Cola y calendario'], ['ficha', PUB.ficha && PUB.seccion === 'ficha' ? recortar(PUB.ficha.nombre, 28) : 'Ficha de un vídeo'],
-    ['cuentas', 'Cuentas y ajustes']].forEach(([id, texto]) => pestanas.appendChild(h('button', {
+    ['resultados', 'Resultados'], ['cuentas', 'Cuentas y ajustes']].forEach(([id, texto]) => pestanas.appendChild(h('button', {
     clase: `mini${PUB.seccion === id ? ' activo' : ' fantasma'}`, role: 'tab',
     'aria-selected': PUB.seccion === id ? 'true' : 'false',
     disabled: id === 'ficha' && !PUB.pid,
@@ -16901,12 +16911,14 @@ function vistaPublicar() {
   caja.appendChild(h('div', { clase: 'light-cab' }, h('h2', {}, 'Publicar'), h('span', { clase: 'crece' }),
     pestanas));
   if (PUB.error) caja.appendChild(cajaError(PUB.error));
-  if (PUB.cargando && !(PUB.seccion === 'cola' ? PUB.cola : PUB.seccion === 'ficha' ? PUB.ficha : PUB.proyectos)) {
+  const yaHay = { cola: PUB.cola, ficha: PUB.ficha, cuentas: PUB.proyectos, resultados: PUB.resultados };
+  if (PUB.cargando && !yaHay[PUB.seccion]) {
     caja.appendChild(h('div', { clase: 'cargando' }, 'cargando…'));
     return caja;
   }
   if (PUB.seccion === 'ficha') caja.appendChild(seccionFichaPublicar());
   else if (PUB.seccion === 'cuentas') caja.appendChild(seccionCuentasPublicar());
+  else if (PUB.seccion === 'resultados') caja.appendChild(seccionResultadosPublicar());
   else caja.appendChild(seccionColaPublicar());
   return caja;
 }
@@ -17374,9 +17386,50 @@ async function marcarAManoPublicar(red) {
   cargarPublicar(true);
 }
 
+/* «1,2 mil vistas · 56 me gusta · 7 comentarios», con lo que la red diga. */
+function numeroCorto(n) {
+  const v = Number(n) || 0;
+  if (v >= 1e6) return `${(v / 1e6).toFixed(1).replace('.', ',')} M`;
+  if (v >= 1e4) return `${Math.round(v / 1e3)} mil`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1).replace('.', ',')} mil`;
+  return String(Math.round(v));
+}
+
+const NOMBRES_METRICA = {
+  vistas: 'vistas', me_gusta: 'me gusta', comentarios: 'comentarios',
+  compartidos: 'compartidos', guardados: 'guardados',
+};
+
+function textoMetricas(m) {
+  if (!m) return '';
+  return Object.keys(NOMBRES_METRICA)
+    .filter(k => typeof m[k] === 'number')
+    .map(k => `${numeroCorto(m[k])} ${NOMBRES_METRICA[k]}`).join(' · ');
+}
+
+async function actualizarMetricasVideo() {
+  PUB.midiendo = true;
+  pintarModulo();
+  try {
+    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/metricas`), {
+      method: 'POST', cuerpo: { forzar: true },
+    });
+    if (r.ficha) PUB.ficha = r.ficha;
+    toast((r.errores || []).length ? r.errores[0]
+      : r.consultados ? 'Cifras al día' : 'No hay nada publicado por Upload-Post que medir', !!(r.errores || []).length);
+  } catch (e) { toast(e.message, true); }
+  PUB.midiendo = false;
+  repintarPublicarSinPisar();
+}
+
 function bloqueEnviosFicha() {
   const f = PUB.ficha;
-  const b = h('div', { clase: 'bloque' }, h('h3', {}, 'Envíos'));
+  const hayPublicado = (f.envios || []).some(e => e.estado === 'publicado' && e.lote);
+  const b = h('div', { clase: 'bloque' }, h('div', { clase: 'fila' }, h('h3', {}, 'Envíos'),
+    h('span', { clase: 'crece' }),
+    hayPublicado ? h('button', { clase: 'mini', disabled: PUB.midiendo,
+      title: 'Pide a Upload-Post las vistas, me gusta y comentarios de lo publicado',
+      onclick: actualizarMetricasVideo }, PUB.midiendo ? 'pidiendo…' : 'Actualizar métricas') : null));
   if (!(f.envios || []).length) {
     b.appendChild(h('div', { clase: 'meta' }, 'Todavía no se ha publicado nada de este vídeo.'));
     return b;
@@ -17387,6 +17440,10 @@ function bloqueEnviosFicha() {
       h('span', { clase: 'meta hora-envio' }, cuandoLegible(e.cuando)),
       pastillaEstadoEnvio(e.estado),
       h('span', { clase: 'crece meta motivo-envio' }, e.error || e.nota || ''),
+      e.metricas && textoMetricas(e.metricas)
+        ? h('span', { clase: 'metricas-envio', title: `actualizado ${fechaCorta(e.metricas.al)}` },
+          textoMetricas(e.metricas))
+        : (e.metricas && e.metricas.error ? h('span', { clase: 'meta', title: e.metricas.error }, 'sin cifras todavía') : null),
       e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver el post') : null,
       e.estado === 'espera_ok' ? h('button', { clase: 'primario mini', onclick: () => confirmarPendientePublicar(e) }, 'Dar el OK') : null,
       e.estado === 'comprobar' ? h('button', { clase: 'mini',
@@ -17540,6 +17597,82 @@ function bloquePublicarEnVideo(v) {
   }, CORTOS_RED[r])));
   caja.appendChild(h('a', { href: '#', clase: 'boton-enlace destacado',
     onclick: ev => { ev.preventDefault(); abrirPublicarVideo(v.pid); } }, 'Enviar a Publicar'));
+  return caja;
+}
+
+/* ------------------------------------------------------------ RESULTADOS */
+
+/* Lo que se sabe de lo publicado por proyecto: lo guardado en cada envío
+   (`publicar.resultados`). Nada se pide a Upload-Post hasta pulsar
+   «Actualizar», que también trae los seguidores de cada cuenta. */
+async function actualizarResultadosPublicar() {
+  PUB.midiendo = true;
+  pintarModulo();
+  try {
+    const r = await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(PUB.proyectoResultados)}/metricas`), {
+      method: 'POST', cuerpo: { forzar: true },
+    });
+    const avisos = [];
+    if (r.pendientes) avisos.push(`quedan ${r.pendientes} envío(s): vuelve a pulsar en unos minutos`);
+    if ((r.errores || []).length) avisos.push(r.errores[0]);
+    toast(avisos.length ? avisos.join(' · ') : `Cifras al día (${r.actualizados || 0})`, !!(r.errores || []).length);
+  } catch (e) { toast(e.message, true); }
+  PUB.midiendo = false;
+  await cargarPublicar(true);
+}
+
+function seccionResultadosPublicar() {
+  const r = PUB.resultados || {};
+  const caja = h('div', { clase: 'resultados-publicar' });
+  const proyectos = ((PUB.proyectos || {}).proyectos || []);
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; cargarPublicar(); } },
+      ...proyectos.map(x => h('option', { value: x.id, selected: x.id === PUB.proyectoResultados }, x.nombre))),
+    h('select', { onchange: ev => { PUB.diasResultados = Number(ev.target.value); cargarPublicar(); } },
+      ...[[7, 'últimos 7 días'], [30, 'últimos 30 días'], [90, 'últimos 90 días']].map(([v, t]) =>
+        h('option', { value: v, selected: (PUB.diasResultados || 30) === v }, t))),
+    h('span', { clase: 'crece' }),
+    r.mirado ? h('span', { clase: 'meta' }, `cifras de ${fechaCorta(r.mirado)}`) : null,
+    h('button', { clase: 'primario mini', disabled: PUB.midiendo || !(r.clave || {}).puesta,
+      title: 'Pide a Upload-Post las cifras de lo publicado y los seguidores de cada cuenta',
+      onclick: actualizarResultadosPublicar }, PUB.midiendo ? 'pidiendo…' : 'Actualizar')));
+  if (!(r.clave || {}).puesta) caja.appendChild(avisoClavePublicar(r.clave));
+  const total = r.total || {};
+  caja.appendChild(h('div', { clase: 'cifras-publicar' },
+    ...[['posts', 'publicaciones'], ['vistas', 'vistas'], ['me_gusta', 'me gusta'],
+      ['comentarios', 'comentarios'], ['compartidos', 'compartidos']].map(([k, t]) =>
+      h('div', { clase: 'cifra' }, h('b', {}, typeof total[k] === 'number' ? numeroCorto(total[k]) : '—'),
+        h('span', { clase: 'meta' }, t)))));
+  if (r.sin_cifras) {
+    caja.appendChild(h('div', { clase: 'meta' }, `${r.sin_cifras} publicación(es) sin cifras todavía: `
+      + 'las subidas a mano no se pueden medir desde aquí, y TikTok tarda unas horas en darlas.'));
+  }
+  const redes = h('div', { clase: 'bloque' }, h('h3', {}, 'Por red'));
+  const tabla = h('div', { clase: 'tabla-redes' });
+  Object.keys(NOMBRES_RED).forEach(red => {
+    const pr = (r.por_red || {})[red] || {};
+    const seg = (r.seguidores || {})[red] || {};
+    tabla.appendChild(h('div', { clase: 'fila fila-red' },
+      h('b', { clase: 'nombre-red' }, NOMBRES_RED[red]),
+      h('span', { clase: 'meta' }, `${pr.posts || 0} publicación(es)`),
+      h('span', { clase: 'crece' }, textoMetricas(pr) || ''),
+      typeof seg.seguidores === 'number'
+        ? h('span', { clase: 'pastilla' }, `${numeroCorto(seg.seguidores)} seguidores`)
+        : (seg.error ? h('span', { clase: 'meta', title: seg.error }, 'sin seguidores') : null)));
+  });
+  redes.appendChild(tabla);
+  if (r.seguidores_al) redes.appendChild(h('div', { clase: 'meta' }, `seguidores a ${fechaCorta(r.seguidores_al)}`));
+  caja.appendChild(redes);
+  const videos = h('div', { clase: 'bloque' }, h('h3', {}, 'Los vídeos, de más a menos vistos'));
+  if (!(r.videos || []).length) {
+    videos.appendChild(h('div', { clase: 'meta' }, 'Nada publicado en este periodo.'));
+  }
+  (r.videos || []).forEach(v => videos.appendChild(h('div', { clase: 'fila fila-listo' },
+    h('button', { clase: 'mini fantasma nombre-envio', onclick: () => irASeccionPublicar('ficha', v.pid) }, v.nombre),
+    h('span', { clase: 'crece meta' }, textoMetricas(v) || 'sin cifras todavía'),
+    h('span', { clase: 'redes-video' }, ...Object.keys(v.redes || {}).map(red =>
+      h('span', { clase: 'pastilla red-mini ok', title: textoMetricas(v.redes[red]) || 'sin cifras' }, CORTOS_RED[red]))))));
+  caja.appendChild(videos);
   return caja;
 }
 

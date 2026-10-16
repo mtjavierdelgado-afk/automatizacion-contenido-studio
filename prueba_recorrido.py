@@ -3227,6 +3227,13 @@ def publicar_en_redes(navegador, datos):
     ok(pg.visible(".fila-listo", ""), "y los vídeos listos para publicar")
     pg.captura("publicar_cola")
 
+    # resultados (las métricas)
+    pg.pulsar(".pestanas-publicar button", "Resultados")
+    ok(pg.esperar(".cifras-publicar .cifra", segundos=10), "Resultados: las cifras del proyecto")
+    ok(pg.visible(".resultados-publicar button", "Actualizar"), "con su «Actualizar»")
+    ok(pg.visible(".tabla-redes .fila-red", "TikTok"), "y una fila por red")
+    pg.captura("publicar_resultados")
+
     # cuentas y ajustes
     pg.pulsar(".pestanas-publicar button", "Cuentas y ajustes")
     ok(pg.esperar(".proyecto-publicar h3", segundos=10), "cada proyecto con su perfil y sus cuentas")
@@ -3263,7 +3270,7 @@ def publicar_en_redes(navegador, datos):
 
     # en el móvil
     pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="publicar móvil")
-    for seccion_pub in ("cola", "cuentas"):
+    for seccion_pub in ("cola", "cuentas", "resultados"):
         pg.js(f"PUB.seccion = '{seccion_pub}'; irAModulo('publicar');")
         pg.p.wait_for_timeout(1500)
         ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")

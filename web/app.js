@@ -6515,6 +6515,8 @@ async function cargarVideoLight(pid) {
     v.estilo = ((proyecto.proyecto || {}).config || {}).estilo_light || '';
     v.fichas = {};
     for (const ficha of (proyecto.pasos || [])) v.fichas[ficha.id] = ficha;
+    // los bloques se vuelven a leer: lo de «cómo estaban al empezar» ya no vale
+    _bloquesAlEditarLight = {};
     // la copia del encargo se rehace de los params que acaban de llegar: lo
     // que haya cambiado por otro camino tiene que verse (ver pedidoDelVideoLight)
     v.pedido = null;
@@ -8692,22 +8694,62 @@ function parrafoKaraokeLight(bloque, conAudio, texto) {
    al audio sin volver a pedirle el guion entero al modelo. */
 let _guardadoBloqueLight = null;
 let _bloquesPorGuardarLight = null;
+
+/* LA PAUSA DEL FINAL DE UN BLOQUE, tal cual está escrita: los <break> que van
+   detrás de la última palabra (con las anotaciones de cola entre medias). Es
+   la que `marcas_tts.separar_pausa_final` saca de la toma y hace al montar;
+   la de sección o la del gancho, por ejemplo. '' si no la hay. */
+function pausaFinalTts(texto) {
+  const cola = String(texto || '').match(/(?:\s*<[^<>]*>)+\s*$/);
+  if (!cola) return '';
+  return (cola[0].match(/<break\b[^<>]*>/gi) || []).join('');
+}
+
+/* Cómo estaba cada bloque cuando se empezó a escribir en él: su entrada en
+   `params.guion.bloques` (o ninguna) y su texto efectivo. Se olvida al volver
+   a leer el vídeo (`cargarVideoLight`), que es cuando «Quitar pausa», partir o
+   reescribir han podido cambiarlo por otro camino. */
+let _bloquesAlEditarLight = {};
+
 function guardarBloqueLight(bid, texto, original, insertado) {
   const v = APP.light.video;
   const ficha = v.fichas.guion || {};
   ficha.params = ficha.params || {};
   ficha.params.bloques = ficha.params.bloques || {};
+  if (!(bid in _bloquesAlEditarLight)) {
+    const entrada = ficha.params.bloques[bid];
+    const guardado = entrada && typeof entrada === 'object' ? entrada.texto : entrada;
+    _bloquesAlEditarLight[bid] = {
+      entrada: entrada === undefined ? undefined : JSON.parse(JSON.stringify(entrada)),
+      efectivo: (typeof guardado === 'string' && guardado.trim()) ? guardado : (original || ''),
+    };
+  }
+  const inicio = _bloquesAlEditarLight[bid];
+  /* EDITAR A MANO CONSERVA LA PAUSA DEL FINAL (16-10-2026). El área enseña el
+     texto sin las anotaciones del TTS, y guardar lo escrito tal cual le quitaba
+     TODAS, también la pausa del final del bloque --la de sección, la del
+     gancho--, que no corta la voz (se hace al montar) y que nadie había pedido
+     quitar: la pastilla «⏸» desaparecía al corregir una coma. Las demás
+     anotaciones se siguen quitando (una frase reescrita ya no las tiene donde
+     las tenía); la del final es del BLOQUE, no de la frase. Quitarla es
+     «Quitar pausa», que va por su ruta. Se hace aquí y no en el servidor: allí
+     cambiaría el texto efectivo de bloques ya editados y grabados, y la voz
+     saldría obsoleta pidiendo una regrabación de pago. */
+  const pausa = pausaFinalTts(inicio.efectivo);
   /* SI NO HA CAMBIADO NADA, NO SE GUARDA NADA. Lo que se enseña es el texto sin
      las anotaciones del TTS, así que guardarlo tal cual por haber puesto el
-     cursor encima le quitaría sus pausas a un bloque que nadie ha tocado. Si de
-     verdad se edita sí se pierden, y eso es lo que se pidió: una frase
-     reescrita ya no tiene las pausas donde las tenía.
+     cursor encima le quitaría sus anotaciones a un bloque que nadie ha tocado:
+     volver a lo que había al empezar deja la entrada como estaba.
      Un bloque AÑADIDO no tiene texto de origen: su texto vive SOLO aquí, así
      que se guarda siempre y nunca se borra la entrada. */
-  if (!insertado && original !== undefined && texto === textoVisibleLight(original)) {
+  if (texto === textoVisibleLight(inicio.efectivo)) {
+    if (inicio.entrada === undefined) delete ficha.params.bloques[bid];
+    else ficha.params.bloques[bid] = JSON.parse(JSON.stringify(inicio.entrada));
+  } else if (!insertado && original !== undefined && texto === textoVisibleLight(original)
+      && pausaFinalTts(original) === pausa) {
     delete ficha.params.bloques[bid];
   } else {
-    ficha.params.bloques[bid] = { texto };
+    ficha.params.bloques[bid] = { texto: pausa ? `${texto}${pausa}` : texto };
   }
   _bloquesPorGuardarLight = ficha.params.bloques;
   clearTimeout(_guardadoBloqueLight);

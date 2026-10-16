@@ -806,10 +806,18 @@ def _toma_por_contexto(trozos, cfg, progreso):
     pcm, palabras, enviados = [], [], []
     try:
         for indice, texto in enumerate(trozos):
+            sigue = indice < len(trozos) - 1
+            # CON UN ESPACIO DETRAS si viene otra entrada (16-10-2026): Cartesia
+            # junta las entradas de un contexto TAL CUAL («Transcripts are
+            # concatenated verbatim»), y sin el le llegaba «...remata.Primera...»
+            # en cada cambio de seccion: la primera palabra pegada a la ultima y
+            # la marca de palabra pegada, que corria la pausa de seccion a
+            # DESPUES de la primera palabra del bloque siguiente.
+            enviado = texto.rstrip() + " " if sigue else texto
             conexion.send(json.dumps({**base, "context_id": contexto,
-                                      "transcript": texto,
-                                      "continue": indice < len(trozos) - 1}))
-            enviados.append(texto)
+                                      "transcript": enviado,
+                                      "continue": sigue}))
+            enviados.append(enviado)
         ultimo_aviso = 0.0
         while True:
             # Un solo 'done' para TODO el contexto, no uno por entrada: esperar

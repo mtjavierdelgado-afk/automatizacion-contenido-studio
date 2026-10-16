@@ -859,6 +859,39 @@ class _WebsocketFalso:
         return _Conexion()
 
 
+def prueba_espacio_entre_secciones():
+    """Las entradas de un contexto van con un espacio detras (16-10-2026).
+
+    Cartesia junta las entradas TAL CUAL: sin el espacio le llegaba
+    «...remata.Primera...» en cada cambio de seccion. Websocket falso: no se
+    llama a Cartesia.
+    """
+    print("\n[secciones] un espacio entre las entradas del contexto")
+    falso = _WebsocketFalso(cortar_tras=1)
+    originales = (sys.modules.get("websocket"), p4_voz.motor.cargar_api_key)
+    sys.modules["websocket"] = falso
+    p4_voz.motor.cargar_api_key = lambda *a, **k: "clave-falsa"
+    try:
+        try:
+            p4_voz._toma_por_contexto(["Hola a todos. Esto se remata.",
+                                       "Primera frase nueva. ", "Y el cierre."],
+                                      {"voz_id": "x", "modelo": "sonic-3.5",
+                                       "idioma": "es"}, lambda *a: None)
+        except p4_voz.TomaCortada:
+            pass                       # el falso corta tras el primer evento
+    finally:
+        if originales[0] is None:
+            sys.modules.pop("websocket", None)
+        else:
+            sys.modules["websocket"] = originales[0]
+        p4_voz.motor.cargar_api_key = originales[1]
+    igual(falso.enviados, ["Hola a todos. Esto se remata. ",
+                           "Primera frase nueva. ", "Y el cierre."],
+          "cada entrada que no es la ultima acaba en UN espacio")
+    comprobar("remata.Primera" not in "".join(falso.enviados),
+              "y juntas, como las junta Cartesia, no pegan dos palabras")
+
+
 def prueba_toma_cortada_no_se_paga_dos_veces(base):
     """D4 del informe de arreglos v2b: la voz se pagaba dos veces.
 
@@ -1093,6 +1126,7 @@ def main():
         prueba_pausas_en_el_montaje(base)
         prueba_cache_por_clave()
         prueba_sse_en_utf8()
+        prueba_espacio_entre_secciones()
         prueba_toma_cortada_no_se_paga_dos_veces(base)
         prueba_pronunciacion(base)
         prueba_catalogo_voces(con_red)

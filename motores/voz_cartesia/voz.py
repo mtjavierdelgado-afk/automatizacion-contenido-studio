@@ -166,6 +166,51 @@ def _normalizar(palabra):
     return re.sub(r"[^\wáéíóúüñ]", "", palabra.lower())
 
 
+#: Donde una marca puede venir con DOS palabras pegadas: un signo seguido de
+#: una letra («remata.Primera», «hola,¿que»).
+_PEGADA = re.compile(r"(?<=\w)[.,;:!?…»\"')]+(?=[¿¡«\"'(]*\w)")
+
+
+def _despegar(escenas, palabras):
+    """Parte las marcas que traen dos palabras del guion pegadas por un signo.
+
+    Pasaba en cada cambio de seccion de la toma por contexto: Cartesia junta
+    las entradas tal cual y, sin un espacio entre ellas, la ultima palabra de
+    una seccion y la primera de la siguiente volvian como UNA marca
+    («remata.Primera»). El reparto se la daba entera al bloque anterior y la
+    pausa de seccion acababa DESPUES de la primera palabra del bloque siguiente.
+
+    Solo se parte si las dos mitades son dos palabras SEGUIDAS del guion: asi
+    «EE.UU.» escrito junto sigue siendo una palabra. El tiempo se reparte en
+    proporcion a las letras de cada mitad.
+    """
+    planas = []
+    for escena in escenas:
+        planas.extend(n for n in (_normalizar(p) for p in
+                                  (escena.get("narracion") or "").split()) if n)
+    seguidas = set(zip(planas, planas[1:]))
+    if not seguidas:
+        return palabras
+    salida = []
+    for palabra in palabras:
+        texto = str(palabra.get("w") or "")
+        partida = None
+        for m in _PEGADA.finditer(texto):
+            izquierda, derecha = texto[:m.end()], texto[m.end():]
+            if (_normalizar(izquierda), _normalizar(derecha)) in seguidas:
+                partida = (izquierda, derecha)
+                break
+        if not partida:
+            salida.append(palabra)
+            continue
+        ini, fin = float(palabra.get("s") or 0.0), float(palabra.get("e") or 0.0)
+        letras = [max(1, len(_normalizar(t))) for t in partida]
+        medio = round(ini + (fin - ini) * letras[0] / float(sum(letras)), 3)
+        salida.append(dict(palabra, w=partida[0], e=medio))
+        salida.append(dict(palabra, w=partida[1], s=medio))
+    return salida
+
+
 def _repartir_palabras(escenas, palabras):
     """Asigna a cada escena el tramo de palabras que le corresponde.
 
@@ -174,6 +219,7 @@ def _repartir_palabras(escenas, palabras):
     devolver la puntuacion pegada o separada, y un desajuste de un token
     desplazaria todos los cortes siguientes.
     """
+    palabras = _despegar(escenas, palabras)
     reparto = {}
     i = 0
     for escena in escenas:

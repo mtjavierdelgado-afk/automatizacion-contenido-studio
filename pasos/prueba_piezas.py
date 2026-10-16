@@ -1593,6 +1593,27 @@ def prueba_espaciar():
     ok(float(np.sqrt(np.mean(pcm4[c4 - 400:c4 - 300] ** 2))) > 3000,
        "y el fundido es corto: 10 ms antes del empalme la voz suena entera")
 
+    # LAS MARCAS PEGADAS SE DESPEGAN (16-10-2026): sin espacio entre secciones
+    # Cartesia devolvia «remata.Primera» como UNA marca y la pausa de seccion
+    # caia despues de la primera palabra del bloque siguiente.
+    esc5 = [{"id": "B1", "narracion": "Hola a todos."},
+            {"id": "B2", "narracion": "Esto se remata."},
+            {"id": "B3", "narracion": "Primera frase nueva."}]
+    marcas5 = [{"w": w, "s": i * 0.5, "e": i * 0.5 + 0.4} for i, w in enumerate(
+        ["Hola", "a", "todos.", "Esto", "se", "remata.Primera", "frase", "nueva."])]
+    rep5 = voz._repartir_palabras(esc5, marcas5)
+    igual([p["w"] for p in rep5["B2"]], ["Esto", "se", "remata."],
+          "la marca pegada se parte: «remata.» se queda en su bloque")
+    igual([p["w"] for p in rep5["B3"]], ["Primera", "frase", "nueva."],
+          "y «Primera» abre el siguiente, que es donde va la pausa")
+    ok(rep5["B2"][-1]["e"] == rep5["B3"][0]["s"] and 2.5 < rep5["B3"][0]["s"] < 2.9,
+       "con el tiempo de la marca repartido entre las dos")
+    esc6 = [{"id": "B1", "narracion": "Llegaron de EE.UU. ayer."}]
+    rep6 = voz._repartir_palabras(esc6, [{"w": w, "s": 0, "e": 1} for w in
+                                         ["Llegaron", "de", "EE.UU.", "ayer."]])
+    igual([p["w"] for p in rep6["B1"]], ["Llegaron", "de", "EE.UU.", "ayer."],
+          "pero «EE.UU.» escrito junto en el guion no se parte")
+
 
 # --------------------------------------------------- 6. p6._capa_vectorial
 

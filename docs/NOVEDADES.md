@@ -10,6 +10,63 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Más arreglos de imágenes (16 de octubre)**
+- **Pegar una imagen ya no la manda al logo por sorpresa.** Con el cursor en
+  un campo de texto (el nombre del vídeo, unas indicaciones), una imagen pegada
+  no va a ninguna zona: sale un aviso para que pulses antes en la zona de
+  imágenes. Sin cursor en un campo, va a la zona que hayas tocado la última y
+  que se vea en pantalla; ninguna, tampoco el logo, la recibe por ser «la
+  única a la vista». Escribiendo la nota de una imagen, lo que pegues va a los
+  adjuntos de esa nota.
+- **Si OpenAI rechaza un plano con su filtro de seguridad, la tanda sigue con
+  los demás** y al final dice cuál (o cuáles) fue, con su frase, y qué hacer:
+  cambiar su nota o, si no tenía, escribirle una describiendo lo que se ve sin
+  marcas. Antes se paraban todos los planos siguientes de ese sitio y el aviso
+  decía «Cambia la nota» aunque no hubiera ninguna. Lo dibujado no se vuelve a
+  pagar al relanzar.
+- **Un microcorte de red ya no tumba la tanda con un error de Python.** Si no
+  se pudo ni conectar con OpenAI, se reintenta solo un par de veces (no se ha
+  cobrado nada). Si la conexión se corta con la imagen ya pedida, no se repite
+  sola, porque puede estar cobrada: lo dice claro y lo hecho se conserva.
+- **Rehacer una imagen con nota conserva las caras.** La hoja de reparto de
+  cada personaje del plano va siempre al rehacerlo, aunque el corrector no la
+  eligiera. Las demás imágenes no se tocan ni quedan obsoletas.
+
+**El dinero de las imágenes, revisado (15 de octubre)**
+- **Cambiar la calidad ya no promete lo que no hace.** «Traer el estilo» con
+  otra calidad decía «rehace las N imágenes» con su precio, y «Poner al día»
+  las conservaba sin redibujar ninguna. Ahora dice la verdad: lo ya dibujado
+  (también las hojas de reparto) se queda como está y la calidad nueva se
+  aplica a lo que se haga o rehaga. Nada se paga sin pulsar.
+- **En las diapositivas sale «N imágenes siguen en otra calidad»** con un
+  botón «¿Rehacerlas en media? ≈ X $». Pide confirmación con el precio y rehace
+  SOLO esas; las demás no se tocan. Las hojas de reparto se quedan como están
+  (rehacerlas obligaría a rehacer los planos que las usan).
+- **El $/min del deslizador de ritmo** sale con la calidad con la que nacerá
+  el vídeo: en un estilo de foto (que empieza en media) decía el de calidad
+  baja, un 43 % menos de lo real.
+- **El precio de antes de crear un vídeo** de foto respeta siempre el mínimo
+  de calidad media, aunque el estilo tenga «baja» guardada.
+- **«Lo que te han cobrado» cuenta solo imágenes de plano**, y por tipo de
+  imagen (foto o ilustración) cuando ya hay bastantes: las láminas de los
+  estilos se colaban y abarataban el precio de un plano de foto.
+- **Los vídeos verticales tienen su tarifa** cuando OpenAI no devuelve el
+  recuento de tokens (antes se apuntaban «sin tarifa»).
+
+**Copiar y pegar (15 de octubre)**
+- **Las imágenes se pegan con Ctrl+V** (⌘V en el Mac) en todas las zonas que
+  suben imágenes: las de referencia de un estilo (nuevo o el que editas), las
+  de las notas del vídeo y de cada imagen, el logo (del vídeo y del proyecto)
+  y los adjuntos del asistente. Suben igual que si eligieras el fichero: los
+  mismos topes y los mismos avisos. Si hay varias zonas a la vista, la imagen
+  va a la última que hayas tocado. Pegar texto en un campo sigue igual.
+- Debajo de cada zona sale «o pega una imagen (Ctrl+V)»; pulsarlo también
+  pega, y en el móvil es «📋 Pegar una imagen» (el navegador pide permiso la
+  primera vez).
+- **«Copiar» en las respuestas del asistente**: cada bloque de código lleva el
+  suyo arriba a la derecha, y cada respuesta uno en el pie para copiarla
+  entera, en texto llano (sin asteriscos ni comillas del formato).
+
 **La voz (14 de octubre)**
 - **Las palabras en inglés, como suenan.** En Configuración → **Cómo se
   pronuncia** hay una lista de palabras con cómo deben sonar («Just Dance» →

@@ -39,6 +39,7 @@ PNG cuando se lanza desde un shell sandboxeado, asi que la suite falla con
 
     powershell -NoProfile -Command "python pasos\\prueba_pasos_visuales.py"
 """
+import hashlib
 import io
 import json
 import os
@@ -1150,6 +1151,201 @@ def probar_rehacer_uno_rehace_uno(proyecto, estado, params):
     igual(len(selladas), len(plan["escenas"]),
           "sin unidades, rehacer sigue valiendo para el video entero")
 
+class RechazoSeguridad(RuntimeError):
+    """Como la del motor: p6 la reconoce por el NOMBRE de la clase."""
+
+
+def _motor_de_mentira(llamadas, rechaza=()):
+    """Un `generar` de mentira para el motor de imagen: no hay red ni dinero.
+
+    Se pone EN el motor (lo demas del motor --normalizar-- es el de verdad) y
+    `_producir_imagen` sigue siendo el de verdad, con su banco y su cache: asi
+    se ve que pasa con lo ya dibujado al volver a lanzar. Para saber de que
+    plano es cada llamada se envuelve `_producir_imagen`, que es quien lo sabe.
+    Rechaza como el filtro de seguridad de OpenAI los planos de `rechaza`.
+    """
+    actual = {"plano": None}
+    producir = p6_assets._producir_imagen                   # noqa: SLF001
+
+    def envuelto(nombre, *args, **kwargs):
+        actual["plano"] = nombre
+        return producir(nombre, *args, **kwargs)
+
+    def generar(prompt, referencias, quality="low", tamano="apaisado", **_kwargs):
+        llamadas.append(actual["plano"])
+        if actual["plano"] in rechaza:
+            raise RechazoSeguridad(
+                "OpenAI ha rechazado esta imagen con su filtro de seguridad (id "
+                "req_prueba1). Suele ser por pedir marcas, logos o personajes "
+                "con derechos. Hay que describir lo que se ve sin nombres propios.")
+        tono = hashlib.sha1(str(prompt).encode("utf-8")).digest()
+        crudo = io.BytesIO()
+        Image.new("RGB", (64, 36), tuple(tono[:3])).save(crudo, "PNG")
+        return crudo.getvalue(), {"coste": 0.05, "segundos": 0.1}
+    return envuelto, generar
+
+
+def probar_rechazo_y_nota(proyecto, estado):
+    """F1 y M5 del analisis de octubre. Sin red y sin pagar: el `generar` del
+    motor de imagen es de mentira durante toda la prueba.
+
+    F1: si el filtro de seguridad rechaza un plano, la cadena de su sitio
+    seguia muerta: los planos de detras no se generaban nunca y el error no
+    decia cual era. Ahora se sigue y se falla AL FINAL, nombrando el plano; lo
+    dibujado mientras tanto no se vuelve a pagar al relanzar.
+
+    M5: al rehacer un plano con nota, el corrector elige que adjuntar y podia
+    soltar la hoja de reparto; el plano salia con otras caras. Ahora la hoja de
+    cada personaje del plano va siempre, y lo demas no se mueve.
+    """
+    print("\n  [F1 · un plano rechazado no tumba los de detras · M5 · la nota lleva la hoja]")
+    params = estado.params("assets")
+    plan = p6_assets.plan_actual(proyecto)
+    # la carpeta de trabajo con la version activa sembrada, que es lo que hace
+    # p6 al empezar (despues de completar, trabajo/ puede no existir)
+    trabajo = medios.sembrar_trabajo(proyecto, "assets")
+    carpeta = os.path.join(trabajo, "escenas")
+    copia = os.path.join(CARPETA, "_escenas_antes_de_f1")
+    shutil.rmtree(copia, ignore_errors=True)
+    shutil.copytree(carpeta, copia)
+    # con motor de verdad p6 exige al menos una imagen de estilo
+    estilo_f1 = _lamina(os.path.join(CARPETA, "_estilo_f1.png"), 77)
+    p = dict(params, motor_imagen="openai", imagenes_previas=[],
+             estilo=dict(params.get("estilo") or {}, referencias=[estilo_f1]))
+    dibujables = [e for e in plan["escenas"]
+                  if not e.get("componente") and not e.get("sigue_a")
+                  and not cartelas.sin_imagen(e) and e.get("set")]
+    por_set = {}
+    for e in dibujables:
+        por_set.setdefault(e["set"], []).append(e)
+    pareja = next((v[:2] for v in por_set.values() if len(v) >= 2), None)
+    motor = medios.motor("imagen_openai/imagen.py")
+    original_generar = motor.generar
+    original_producir = p6_assets._producir_imagen          # noqa: SLF001
+    original_corregir = p6_assets._corregir_con_agente      # noqa: SLF001
+    try:
+        if ok(pareja, "hay dos planos dibujados en el mismo sitio"):
+            a, b = pareja
+            uids = [f"escena:{a['id']}", f"escena:{b['id']}"]
+            llamadas = []
+            p6_assets._producir_imagen, motor.generar = _motor_de_mentira(
+                llamadas, rechaza={a["id"]})
+            fallo = None
+            try:
+                p6_assets.ejecutar(proyecto, p, avisador("p6"), unidades=uids,
+                                   rehacer=True)
+            except Exception as error:                      # noqa: BLE001
+                fallo = error
+            ok(b["id"] in llamadas,
+               f"rechazado {a['id']}, se sigue con {b['id']}, que va detras en su "
+               f"sitio (se pidieron {llamadas})")
+            ok(fallo is not None and type(fallo).__name__ == "RechazoSeguridad",
+               f"y la tanda falla AL FINAL con el mismo tipo de error del motor "
+               f"({type(fallo).__name__ if fallo else 'sin error'})")
+            texto = str(fallo or "")
+            ok(a["id"] in texto and "filtro de seguridad" in texto,
+               f"el mensaje dice QUE plano es ({texto[:160]!r})")
+            dice = " ".join(str(a.get("narracion") or "").split())[:20]
+            ok(dice and dice in texto, "y con su frase, para encontrarlo")
+            ok("Cambia la nota" not in texto and "escribe una nota" in texto,
+               "sin nota, no manda a «cambiar la nota»: dice que se escriba una")
+            ok(b["id"] not in texto,
+               "y no nombra al que sí salió")
+            ficha_b = medios.leer_json(os.path.join(carpeta, f"{b['id']}.json"), {}) or {}
+            igual(ficha_b.get("origen"), "generada",
+                  f"lo dibujado mientras tanto ({b['id']}) queda en disco con su ficha")
+            # VOLVER A LANZAR LOS MISMOS PLANOS: el rechazado se vuelve a pedir
+            # (y se vuelve a rechazar), el otro sale del banco sin pagarse
+            llamadas.clear()
+            try:
+                p6_assets.ejecutar(proyecto, p, avisador("p6"), unidades=uids)
+            except Exception:                               # noqa: BLE001
+                pass
+            igual(llamadas, [a["id"]],
+                  f"al relanzar, {b['id']} no se vuelve a pedir ni a pagar")
+            ficha_b = medios.leer_json(os.path.join(carpeta, f"{b['id']}.json"), {}) or {}
+            igual(ficha_b.get("origen"), "cache", "sale del banco, gratis")
+        p6_assets._producir_imagen = original_producir
+        motor.generar = original_generar
+        shutil.rmtree(carpeta, ignore_errors=True)
+        shutil.copytree(copia, carpeta)
+
+        # ---- M5, en «adoptar» como el resto de la suite: no se dibuja nada,
+        # pero las referencias que se calculan quedan en la ficha del plano
+        con_gente = next((e for e in dibujables if e.get("personajes")
+                          and all(os.path.exists(os.path.join(trabajo, "assets", "reparto",
+                                                              f"{q}.png"))
+                                  for q in e["personajes"])), None)
+        if ok(con_gente, "hay un plano con personajes y sus hojas dibujadas"):
+            uid = f"escena:{con_gente['id']}"
+            antes = {n: open(os.path.join(carpeta, n), "rb").read()
+                     for n in sorted(os.listdir(carpeta)) if n.endswith(".json")}
+            unidades = dict(params.get("unidades") or {})
+            unidades[uid] = dict(unidades.get(uid) or {},
+                                 feedback="que se vean cuatro televisores en tripode")
+            con_nota = dict(params, unidades=unidades)
+            # el corrector elige SOLO la imagen actual: suelta la hoja de reparto
+            actual = os.path.join(carpeta, f"{con_gente['id']}.png")
+            p6_assets._corregir_con_agente = lambda escena, *_a, **_k: {
+                "alcance": "retoque", "personajes": list(escena.get("personajes") or []),
+                "escena": "the same shot, with four televisions on tripods",
+                "referencias": [{"papel": "rechazada", "ruta": actual,
+                                 "detalle": "keep everything"}]}
+            hecho = p6_assets.ejecutar(proyecto, con_nota, avisador("p6"),
+                                       unidades=[uid], rehacer=True)
+            ficha_c = medios.leer_json(os.path.join(carpeta, f"{con_gente['id']}.json"),
+                                       {}) or {}
+            ok(ficha_c.get("corrector"), "el plano se ha rehecho por el corrector")
+            hojas = [os.path.basename(r.get("ruta") or "")
+                     for r in ficha_c.get("referencias") or []
+                     if r.get("papel") == "reparto"]
+            for quien in con_gente["personajes"]:
+                ok(any(h.startswith(f"{quien}__") for h in hojas),
+                   f"rehecho con nota, {con_gente['id']} lleva la hoja de «{quien}» "
+                   f"aunque el corrector no la eligiera ({hojas})")
+            igual(len(hojas), len(con_gente["personajes"]),
+                  "una hoja por personaje, sin repetirla")
+            igual(sorted(u for u in hecho["unidades"] if u.startswith("escena:")), [uid],
+                  "y solo se sella ESE plano")
+            despues = {n: open(os.path.join(carpeta, n), "rb").read()
+                       for n in sorted(os.listdir(carpeta)) if n.endswith(".json")}
+            movidas = [n for n in antes if n != f"{con_gente['id']}.json"
+                       and antes[n] != despues.get(n)]
+            igual(movidas, [], "ninguna otra ficha (firma, referencias) se mueve")
+            igual(sorted(u for u, f in (hecho.get("todas") or {}).items()
+                         if u.startswith("escena:") and u != uid
+                         and f.get("origen") != "conservado"), [],
+                  "los demas planos se conservan tal cual, sin redibujarse")
+            # Y LA PRIMERA GENERACION NO CAMBIA: las hojas de un plano
+            # conservado, calculadas hoy, son las que guardo su ficha. Si el
+            # arreglo se colara en el camino normal, cambiaria su firma y la
+            # cache del banco dejaria de acertar al rehacerlo.
+            otro = next((e for e in dibujables if e["id"] != con_gente["id"]
+                         and e.get("personajes")), None)
+            if otro is not None:
+                ficha_o = medios.leer_json(os.path.join(carpeta, f"{otro['id']}.json"), {}) or {}
+                guardadas = [os.path.basename(r.get("ruta") or "")
+                             for r in ficha_o.get("referencias") or []
+                             if r.get("papel") == "reparto"]
+                dirs = {"reparto": os.path.join(trabajo, "assets", "reparto"),
+                        "escenas": carpeta}
+                hoy = [os.path.basename(r["ruta"])
+                       for r in p6_assets._referencias_escena(          # noqa: SLF001
+                           otro, plan, dirs, params, os.path.join(CARPETA, "_cache_f1"),
+                           {}, anteriores=[])
+                       if r.get("papel") == "reparto"]
+                ok(guardadas, f"{otro['id']} se dibujo con sus hojas")
+                igual(hoy, guardadas,
+                      f"las hojas de un plano normal ({otro['id']}) son las mismas que "
+                      f"guardo su ficha")
+    finally:
+        p6_assets._producir_imagen = original_producir
+        p6_assets._corregir_con_agente = original_corregir
+        motor.generar = original_generar
+        shutil.rmtree(carpeta, ignore_errors=True)
+        shutil.copytree(copia, carpeta)
+
+
 def probar_planificar_no_encoge(proyecto, params):
     """Planificar dos veces seguidas tiene que dar el MISMO video.
 
@@ -1475,6 +1671,8 @@ def main():
            f"{modulo.__name__} expone PARAMS_POR_DEFECTO")
         ok(isinstance(modulo.describir({}), str),
            f"{modulo.__name__} expone describir()")
+
+    probar_rechazo_y_nota(proyecto, estado)
 
     # va la ultima a proposito: deja en trabajo/ una pasada sin planos, y lo que
     # viene detras (p7, p8) lee de la version, no de trabajo

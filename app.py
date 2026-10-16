@@ -2752,13 +2752,16 @@ def estimar_video(cuerpo: dict = Body(default=None)):
     media = max(0.5, float(ficha_ritmo["media_s"]))
     planos = max(1, int(round(segundos / media)))
 
+    modo = "foto" if datos.get("modo") == "foto" else "ilustracion"
     calidad = str(datos.get("calidad") or "low").lower()
-    if not datos.get("calidad") and datos.get("nuevo"):
-        # un video que aun no existe: la calidad con la que va a nacer, la
-        # misma regla que `crear_video_light`
-        calidad = calidad_de_video_nuevo(
-            "foto" if datos.get("modo") == "foto" else "ilustracion")
-    usd_imagen = light.usd_por_imagen(calidad)
+    if datos.get("nuevo"):
+        # UN VIDEO QUE AUN NO EXISTE: la calidad con la que va a nacer, por la
+        # MISMA regla que `crear_video_light` -- tambien cuando el estilo trae
+        # la suya. Solo se miraba sin ella, y un estilo de foto con `low`
+        # guardado se cotizaba en low y nacia en medium (4,03 $ prometidos,
+        # 7,04 $ de verdad en cuatro minutos; auditoria del 15-10-2026).
+        calidad = calidad_de_video_nuevo(modo, datos.get("calidad"))
+    usd_imagen = light.usd_por_imagen(calidad, modo=modo)
 
     imagenes = max(1, planos)
 
@@ -11200,7 +11203,23 @@ def listar_presets_light(peticion: Request):
             raiz_proyectos(), f.get("id"), datos=asignaciones) not in cerrados]
     for ficha in fichas:
         _curar_muestras(ficha)
+        # LA CALIDAD CON LA QUE NACERIA UN VIDEO DE ESTE ESTILO, la misma regla
+        # que `crear_video_light`: con ella el deslizador de ritmo ensena el
+        # $/min de verdad (un estilo de foto nace, como poco, en medium)
+        bloque = ((ficha.get("datos") or {}).get("estilo") or {})
+        try:
+            ficha["calidad_nuevo"] = calidad_de_video_nuevo(
+                PASOS_MODULOS.p6_assets.modo_de(bloque), bloque.get("calidad"))
+        except Exception:                                   # noqa: BLE001
+            pass
+    try:
+        calidades_nuevo = {m: calidad_de_video_nuevo(m) for m in ("ilustracion", "foto")}
+    except Exception:                                       # noqa: BLE001
+        calidades_nuevo = {"ilustracion": "low", "foto": CALIDAD_MINIMA_FOTO}
     return {"presets": fichas,
+            # con la que nace un video nuevo de cada modo si su estilo no trae
+            # calidad (Configuracion, y en foto como poco medium)
+            "calidad_nuevo": calidades_nuevo,
             "idiomas": [{"valor": c, "nombre": presets.NOMBRES_IDIOMA.get(c, c)}
                         for c in light.IDIOMAS_PANTALLA],
             "partes": {k: v["nombre"] for k, v in light.PARTES.items()},
@@ -11213,7 +11232,8 @@ def listar_presets_light(peticion: Request):
             "max_imagenes_estilo": light.max_imagenes_estilo(),
             # El deslizador de ritmo, con las dos unicas cifras que ensena: el
             # plano medio y lo que cuesta un minuto de video a ese ritmo.
-            "ritmos": [light.ficha_de_ritmo(r["id"]) for r in light.RITMOS],
+            "ritmos": [light.ficha_de_ritmo(r["id"], calidades_nuevo["ilustracion"],
+                                            por_calidad=True) for r in light.RITMOS],
             "ritmo_por_defecto": light.RITMO_POR_DEFECTO,
             "sueltos": _talleres_sueltos(),
             "tareas": [{"id": t["id"], "nombre": t["nombre"],
@@ -12463,6 +12483,13 @@ def _que_rehace(ctx, parte, cambios):
     """Lo que habria que rehacer y lo que costaria, segun la etapa del video."""
     hechas = len([u for u in ctx.estado.unidades_producidas("assets")
                   if str(u).startswith("escena:")]) if ctx.estado.versiones("assets") else 0
+    hojas = 0
+    if hechas:
+        # las hojas de reparto tambien son imagenes dibujadas en su calidad
+        del_plan = (PASOS_MODULOS.p6_assets.plan_actual(
+            ctx.proyecto, "assets", estado=ctx.estado) or {}).get("assets") or {}
+        hojas = len([u for u in ctx.estado.unidades_producidas("assets")
+                     if (del_plan.get(u) or {}).get("tipo") == "reparto"])
     tarifa = COSTE.tarifa_caracter() or 0.0
     caracteres = 0
     if ctx.estado.versiones("voz"):
@@ -12472,9 +12499,12 @@ def _que_rehace(ctx, parte, cambios):
         except RuntimeError:
             caracteres = 0
     usd_voz = round(caracteres * tarifa, 3)
-    calidad = ((cambios.get("assets") or {}).get("calidad")
-               or (ctx.estado.params("assets") or {}).get("calidad") or "low")
-    usd_imagen = _light().usd_por_imagen(str(calidad))
+    calidad_antes = str((ctx.estado.params("assets") or {}).get("calidad") or "low")
+    calidad = ((cambios.get("assets") or {}).get("calidad") or calidad_antes)
+    estilo_nuevo = (cambios.get("assets") or {}).get("estilo") \
+        or (ctx.estado.params("assets") or {}).get("estilo")
+    usd_imagen = _light().usd_por_imagen(
+        str(calidad), modo=PASOS_MODULOS.p6_assets.modo_de(estilo_nuevo))
     if parte == "rotulos":
         return {"rehace": "rehace solo el montaje del vídeo", "usd": 0.0}
     if parte == "voz":
@@ -12492,8 +12522,36 @@ def _que_rehace(ctx, parte, cambios):
     if parte == "estilo":
         if not hechas:
             return {"rehace": "no rehace nada: aún no hay imágenes", "usd": 0.0}
-        return {"rehace": f"rehace las {hechas} imágenes del vídeo y el montaje",
-                "usd": round(hechas * usd_imagen, 2), "imagenes": hechas}
+        # LO QUE PASA DE VERDAD (D6, 15-10-2026). Decia «rehace las N imagenes»
+        # con su precio, y «Poner al dia» las conservaba y las sellaba sin
+        # redibujar ninguna: p6 no redibuja un plano que ya tiene su PNG si
+        # nadie lo pide. Eso es lo que se queda (decision del dueño: que lo diga
+        # y pregunte): se conservan, lo nuevo se aplica a lo que se haga o
+        # rehaga, y si cambia la calidad la pantalla del video ofrece despues
+        # rehacer las de la calidad vieja, con su precio delante.
+        imagenes = f"{hechas} {'imagen' if hechas == 1 else 'imágenes'}"
+        if hojas:
+            imagenes += f" y {hojas} {'hoja' if hojas == 1 else 'hojas'} de reparto"
+        nombres = {"low": "baja", "medium": "media", "high": "alta"}
+        cambia_calidad = str(calidad) != calidad_antes
+        lo_nuevo = (f"el estilo y la calidad {nombres.get(str(calidad), calidad)} se "
+                    "aplican" if cambia_calidad else "el estilo se aplica")
+        texto = (f"las {imagenes} que ya tiene se conservan como están"
+                 + (f" (en calidad {nombres.get(calidad_antes, calidad_antes)})"
+                    if cambia_calidad else "")
+                 + f"; {lo_nuevo} a las que se hagan o rehagan, y se vuelve a montar "
+                 "el vídeo")
+        ficha = {"rehace": texto, "usd": 0.0, "imagenes": 0,
+                 "conserva": hechas, "conserva_hojas": hojas,
+                 "usd_rehacer_todas": round(hechas * usd_imagen, 2)}
+        if cambia_calidad:
+            ficha["calidad_antes"] = calidad_antes
+            ficha["calidad"] = str(calidad)
+            usd_texto = f"{ficha['usd_rehacer_todas']:.2f}".replace(".", ",")
+            ficha["rehace"] += (". Después, el vídeo te ofrece rehacerlas en "
+                                f"calidad {nombres.get(str(calidad), calidad)} "
+                                f"(≈ {usd_texto} $)")
+        return ficha
     # el tono: el guion se reescribe con la cuenta de Claude (sin coste de API),
     # y detras la voz y las imagenes de los planos cuyo texto cambie, que no se
     # sabe cuantas son hasta reescribirlo: se da el tope
@@ -12592,6 +12650,60 @@ def traer_cambios_del_estilo(pid: str, cuerpo: dict = Body(default=None)):
             "pasos": [ficha_paso(ctx, p["id"]) for p in PASOS]}
 
 
+@app.post("/api/proyectos/{pid}/imagenes/calidad", status_code=202)
+def rehacer_en_la_calidad_del_video(pid: str, cuerpo: dict = Body(default=None)):
+    """REHACE LAS IMAGENES QUE SIGUEN EN OTRA CALIDAD, y solo esas.
+
+    Cambiar la calidad de un video con imagenes hechas no redibuja nada (p6
+    conserva lo dibujado): la pantalla lo dice y lo pregunta con el precio
+    delante («N imagenes siguen en low. ¿Rehacerlas en media?»). Esto es el
+    «si». Los planos van como unidades PEDIDAS, por el camino normal del paso,
+    en un solo trabajo y de uno en uno con el resto de tandas (regla 2: con
+    algo en marcha en el video, 409).
+
+    `imagenes` es cuantas ha visto quien confirma: si ya no son esas (otra
+    tanda ha rehecho alguna, ha cambiado la calidad), no se lanza nada y se
+    dice -- el precio que se confirmo ya no es el de lo que se haria."""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    try:
+        vistas = int(datos.get("imagenes"))
+    except (TypeError, ValueError):
+        raise ErrorApi(400, "hace falta 'imagenes': cuántas se confirmaron")
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo generándose en este vídeo: espera a que "
+                                "termine y vuelve a mirarlo")
+        with _COLA_LOCK:
+            if _cola_dibujando(ctx):
+                raise ErrorApi(409, "se están rehaciendo imágenes con tus notas: "
+                                    "espera a que terminen")
+            otra = imagenes_en_otra_calidad(ctx, _unidades_que_rehara(ctx))
+            planos = sorted(otra["planos"])
+            if not planos:
+                raise ErrorApi(400, "no hay imágenes en otra calidad que rehacer")
+            if len(planos) != vistas:
+                raise ErrorApi(409, f"ahora son {len(planos)} imágenes, no {vistas}: "
+                                    "vuelve a mirarlo antes de confirmar",
+                               {"imagenes": len(planos)})
+            # LA SEGUNDA MITAD DE UN PLANO LARGO (`sigue_a`) copia la primera:
+            # no se cobra, pero si no se pide, p6 la conserva con la imagen de
+            # antes y a mitad de toma se ve el salto de calidad (revision del
+            # 15-10-2026). Va con su plano, gratis.
+            planos = _con_sus_continuaciones(planos, PASOS_MODULOS.p6_assets.plan_actual(
+                ctx.proyecto, "assets", estado=ctx.estado) or {})
+            trabajo_id = lanzar_paso(ctx, "assets", planos,
+                                     nombre="calidad_imagenes",
+                                     evento="imagenes_recalidad",
+                                     datos={"calidad": otra["calidad"],
+                                            "de": otra["por_calidad"]})
+    return {"trabajo_id": trabajo_id, "unidades": planos, "calidad": otra["calidad"],
+            "trabajo": ctx.gestor.estado(trabajo_id),
+            "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
+
+
 @app.get("/api/proyectos/{pid}/lleva")
 def leer_lleva(pid: str):
     """Lo que lleva este video: voz, subtitulos, musica y efectos."""
@@ -12677,15 +12789,64 @@ def _planos_previstos(ctx):
             "origen": "estimado por la duración y el ritmo"}
 
 
-def _imagenes_ya_generadas(ctx, planos):
-    """Cuantos planos de los que PAGAN imagen la tienen ya en la carpeta.
+def _carpetas_de_assets(ctx):
+    """Donde estan las imagenes de este video: la carpeta de trabajo mientras
+    se genera y la version activa una vez sellada, en ese orden."""
+    carpetas = [ctx.proyecto.ruta_trabajo("assets", crear=False)]
+    version = ctx.proyecto.version_activa("assets")
+    if version:
+        carpetas.append(ctx.proyecto.ruta_paso("assets", version))
+    return [c for c in carpetas if c and os.path.isdir(c)]
 
-    Es un HECHO, no una prediccion: el PNG esta escrito y su firma quedo
-    guardada en el banco, asi que una tanda nueva lo recupera de la cache sin
-    pagarlo (`p6_assets._producir_imagen` con rehacer=False). Lo unico que tira
-    esa cache es que cambie el PROMPT o alguna referencia del plano -- y eso lo
-    delata el propio plan, porque entonces la tarea de arriba sale con
-    `al_dia: false`.
+
+def _con_sus_continuaciones(planos, plan):
+    """Los planos pedidos y, detras, la segunda mitad (`sigue_a`) de cada uno.
+    -> [uid]. La continuacion copia la imagen de su plano: no se paga, pero si
+    no se pide se queda con la de antes."""
+    elegidos = set(planos)
+    extra = sorted(f"escena:{e['id']}" for e in (plan.get("escenas") or [])
+                   if e.get("sigue_a") and f"escena:{e['sigue_a']}" in elegidos
+                   and f"escena:{e['id']}" not in elegidos)
+    return list(planos) + extra
+
+
+def _escenas_que_pagan(plan):
+    """Los planos del plan que PAGAN imagen: ni cartelas (no dejan PNG) ni la
+    segunda mitad de un plano largo (copia la primera)."""
+    cartelas = PASOS_MODULOS.cartelas
+    return [e for e in (plan.get("escenas") or [])
+            if not cartelas.sin_imagen(e) and not e.get("sigue_a")]
+
+
+def _unidades_que_rehara(ctx, modo="pendientes"):
+    """Las unidades de `assets` que una tanda en ese modo VOLVERA A DIBUJAR
+    aunque ya tengan su PNG. -> set, o None si son todas.
+
+    Es la misma cuenta que hace la tanda (`_plan_de_ejecucion` con el cuerpo
+    de `_un_paso`), y por eso vive aqui y no en una copia: con unas pocas
+    unidades sucias --la nota de un plano, un texto que cambio-- la tanda se las
+    pide a p6 una a una, y p6 las vuelve a dibujar (y a pagar) aunque su PNG
+    exista. Con todas sucias, o ninguna, no pide ninguna y p6 conserva lo
+    dibujado. En `todo`, se rehace todo."""
+    if modo == "todo":
+        return None
+    try:
+        unidades = _plan_de_ejecucion(ctx, "assets", {})
+    except Exception:                                       # noqa: BLE001
+        return set()
+    return set(unidades or ())
+
+
+def _imagenes_ya_generadas(ctx, planos, rehara=frozenset()):
+    """Cuantos planos de los que PAGAN imagen la tienen ya y la tanda no la
+    va a volver a dibujar.
+
+    Es un HECHO, no una prediccion: p6 CONSERVA el PNG de un plano que ya lo
+    tiene (`_generar_escenas`: «una imagen que ya existe se queda»), aunque su
+    firma haya cambiado -- un cambio de estilo o de CALIDAD tampoco lo redibuja.
+    Lo unico que hace que lo vuelva a dibujar, y a pagar, es que la tanda se lo
+    PIDA: las unidades de `rehara` (`_unidades_que_rehara`), que se descuentan
+    aqui. `rehara=None` es «todas» (modo `todo`): no queda nada hecho.
 
     Existe por un numero que asustaba con razon: una tanda cortada en el plano
     doscientos once de doscientos dieciseis volvia a ofrecerse como «216
@@ -12693,37 +12854,93 @@ def _imagenes_ya_generadas(ctx, planos):
     faltaba, asi que retomar parecia costar lo mismo que empezar de cero -- y
     con esa cifra delante lo razonable es no pulsar.
     """
-    if planos.get("origen") != "el plan de este video":
+    if rehara is None or planos.get("origen") != "el plan de este video":
         return 0
     plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
-    escenas = plan.get("escenas") or []
-    if not escenas:
-        return 0
+    escenas = _escenas_que_pagan(plan)
     # EN LA CARPETA DE TRABAJO MIENTRAS SE GENERA, Y EN LA VERSION UNA VEZ
     # SELLADA. Mirar solo la de trabajo daba CERO en cuanto el paso terminaba
     # --que es justo cuando hay 216 imagenes hechas-- y el boton volvia a pedir
-    # los 7,13 $ enteros. Se miran las dos, en ese orden: durante una tanda lo
-    # nuevo esta en trabajo y lo de antes en la version.
-    carpetas = [ctx.proyecto.ruta_trabajo("assets", crear=False)]
-    version = ctx.proyecto.version_activa("assets")
-    if version:
-        carpetas.append(ctx.proyecto.ruta_paso("assets", version))
-    carpetas = [os.path.join(c, "escenas") for c in carpetas
-                if c and os.path.isdir(os.path.join(c, "escenas"))]
-    if not carpetas:
+    # los 7,13 $ enteros.
+    carpetas = [os.path.join(c, "escenas") for c in _carpetas_de_assets(ctx)
+                if os.path.isdir(os.path.join(c, "escenas"))]
+    if not escenas or not carpetas:
         return 0
-    cartelas = PASOS_MODULOS.cartelas
-    hechas = 0
-    for escena in escenas:
-        # los mismos dos filtros que `_planos_previstos`, y a proposito: si
-        # aqui se contara una cartela --que nunca deja PNG-- el descuento seria
-        # de una imagen que nadie iba a pagar
-        if cartelas.sin_imagen(escena) or escena.get("sigue_a"):
+    return sum(1 for escena in escenas
+               if f"escena:{escena['id']}" not in rehara
+               and any(os.path.exists(os.path.join(c, f"{escena['id']}.png"))
+                       for c in carpetas))
+
+
+def imagenes_en_otra_calidad(ctx, rehara=frozenset()):
+    """LAS IMAGENES DE ESTE VIDEO DIBUJADAS EN OTRA CALIDAD que la suya.
+
+    -> {"calidad", "planos": [uid...], "por_calidad": {"low": n}, "hojas": n,
+        "desconocidas": n}
+
+    Pasa cuando cambia `assets.calidad` en un video con imagenes hechas (traer
+    el estilo, cambiarla a mano): p6 conserva lo dibujado y la calidad nueva
+    solo se aplica a lo que se haga o rehaga. Se dice y se pregunta; nada se
+    redibuja solo.
+
+    La calidad de cada imagen sale de su ficha (`p6_assets.calidad_de_ficha`):
+    escrita en las nuevas, deducida de la firma en las viejas cuando la firma lo
+    deja claro. Las que no se saben cuentan como `desconocidas` y NO se ofrecen:
+    ofrecer rehacer una imagen que quiza ya esta en esa calidad es cobrarla dos
+    veces. Las que la tanda va a rehacer de todos modos (`rehara`) tampoco: ya
+    saldran en la calidad nueva. Las hojas de reparto se cuentan pero no se
+    ofrecen: rehacer una hoja deja por rehacer todos los planos que la usan."""
+    p6 = PASOS_MODULOS.p6_assets
+    assets = ctx.estado.params("assets") or {}
+    calidad = str(assets.get("calidad") or "low").lower()
+    salida = {"calidad": calidad, "planos": [], "por_calidad": {}, "hojas": 0,
+              "desconocidas": 0}
+    if rehara is None:
+        return salida
+    plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    carpetas = _carpetas_de_assets(ctx)
+    if not carpetas:
+        return salida
+    try:
+        tamano = PASOS_MODULOS.comun.ficha_formato(plan.get("formato"))["tamano_imagen"]
+    except Exception:                                       # noqa: BLE001
+        tamano = "apaisado"
+    for escena in _escenas_que_pagan(plan):
+        if escena.get("componente"):
             continue
-        if any(os.path.exists(os.path.join(c, f"{escena['id']}.png"))
-               for c in carpetas):
-            hechas += 1
-    return hechas
+        uid = f"escena:{escena['id']}"
+        if uid in rehara:
+            continue
+        for carpeta in carpetas:
+            png = os.path.join(carpeta, "escenas", f"{escena['id']}.png")
+            if not os.path.exists(png):
+                continue
+            ruta = os.path.join(carpeta, "escenas", f"{escena['id']}.json")
+            try:
+                with open(ruta, encoding="utf-8") as fh:
+                    ficha = json.load(fh)
+            except (OSError, ValueError):
+                ficha = {}
+            suya = p6.calidad_de_ficha(ficha, tamano, ruta=ruta)
+            if suya is None:
+                salida["desconocidas"] += 1
+            elif suya != calidad:
+                salida["planos"].append(uid)
+                salida["por_calidad"][suya] = salida["por_calidad"].get(suya, 0) + 1
+            break
+    for clave, ficha in (plan.get("assets") or {}).items():
+        if not isinstance(ficha, dict) or ficha.get("tipo") != "reparto" or clave in rehara:
+            continue
+        nombre = str(ficha.get("nombre") or clave.split(":", 1)[-1])
+        for carpeta in carpetas:
+            if not os.path.exists(os.path.join(carpeta, "assets", "reparto", f"{nombre}.png")):
+                continue
+            hoja = PASOS_MODULOS.medios.leer_json(
+                os.path.join(carpeta, "assets", "reparto", f"{nombre}.json"), {}) or {}
+            if hoja.get("calidad") in AJUSTES.CALIDADES and hoja["calidad"] != calidad:
+                salida["hojas"] += 1
+            break
+    return salida
 
 
 def _coste_previsto(ctx, pestanas, modo="pendientes"):
@@ -12741,7 +12958,8 @@ def _coste_previsto(ctx, pestanas, modo="pendientes"):
     planos = _planos_previstos(ctx)
     assets = ctx.estado.params("assets") or {}
     calidad = str(assets.get("calidad") or "low").lower()
-    usd_imagen = light.usd_por_imagen(calidad)
+    modo_imagen = PASOS_MODULOS.p6_assets.modo_de(assets.get("estilo"))
+    usd_imagen = light.usd_por_imagen(calidad, modo=modo_imagen)
     tarifas = COSTE.tarifas()
     usd_caracter = float(((tarifas.get("tts") or {}).get("usd_por_caracter")) or 0.0)
 
@@ -12767,7 +12985,9 @@ def _coste_previsto(ctx, pestanas, modo="pendientes"):
     # LAS HOJAS DE PERSONAJES TAMBIEN SE PAGAN: una imagen por personaje del
     # reparto, antes de los planos. El cotizador solo contaba planos y se quedaba
     # corto en 1-3 imagenes por video con personajes (11-10-2026).
-    hojas, hojas_hechas = (_hojas_de_reparto(ctx) if "video" in pestanas else (0, 0))
+    rehara = _unidades_que_rehara(ctx, modo) if "video" in pestanas else frozenset()
+    hojas, hojas_hechas = (_hojas_de_reparto(ctx, rehara) if "video" in pestanas
+                           else (0, 0))
     imagenes += hojas
     usd_imagenes = round(imagenes * usd_imagen, 3)
     usd_tts = round(caracteres * usd_caracter, 4)
@@ -12780,37 +13000,55 @@ def _coste_previsto(ctx, pestanas, modo="pendientes"):
     # si algo aguas arriba cambia y la cache falla-- y `por_generar` es lo que
     # cuesta si nada cambia. Ensenar solo uno de los dos miente en un sentido o
     # en el otro: uno asusta al que retoma, el otro promete barato de mas.
-    hechas = (_imagenes_ya_generadas(ctx, planos) + hojas_hechas) if imagenes else 0
+    hechas = (_imagenes_ya_generadas(ctx, planos, rehara) + hojas_hechas) if imagenes else 0
     hechas = min(hechas, imagenes)
     por_generar = max(0, imagenes - hechas)
-    precio = AJUSTES.precio_por_imagen(calidad)
-    return {"imagenes": imagenes, "calidad": calidad,
-            "usd_por_imagen": usd_imagen, "usd_imagenes": usd_imagenes,
-            "precio_de": precio.get("fuente"),
-            "hojas_reparto": hojas,
-            "imagenes_hechas": hechas, "imagenes_por_generar": por_generar,
-            "usd_por_generar": round(por_generar * usd_imagen + usd_tts_por_generar, 3),
-            "caracteres": caracteres, "usd_tts": usd_tts,
-            "usd_tts_por_generar": round(usd_tts_por_generar, 4), "modo": modo,
-            "usd_total": round(usd_imagenes + usd_tts, 3),
-            "planos": planos}
+    precio = AJUSTES.precio_por_imagen(calidad, modo=modo_imagen)
+    ficha = {"imagenes": imagenes, "calidad": calidad,
+             "usd_por_imagen": usd_imagen, "usd_imagenes": usd_imagenes,
+             "precio_de": precio.get("fuente"),
+             "hojas_reparto": hojas,
+             "imagenes_hechas": hechas, "imagenes_por_generar": por_generar,
+             "usd_por_generar": round(por_generar * usd_imagen + usd_tts_por_generar, 3),
+             "caracteres": caracteres, "usd_tts": usd_tts,
+             "usd_tts_por_generar": round(usd_tts_por_generar, 4), "modo": modo,
+             "usd_total": round(usd_imagenes + usd_tts, 3),
+             "planos": planos}
+    # LO QUE SIGUE EN OTRA CALIDAD: no entra en lo que cuesta esta tanda (no se
+    # redibuja), viaja al lado para que la pantalla lo diga y lo pregunte
+    if "video" in pestanas:
+        try:
+            otra = imagenes_en_otra_calidad(ctx, rehara)
+        except Exception:                                   # noqa: BLE001
+            otra = None
+        # solo con PLANOS que ofrecer: las hojas se cuentan pero no se ofrecen
+        # (ver `imagenes_en_otra_calidad`), y un aviso sin boton que no se
+        # va nunca es ruido
+        if otra and otra["planos"]:
+            ficha["otra_calidad"] = {
+                "calidad": calidad, "imagenes": len(otra["planos"]),
+                "por_calidad": otra["por_calidad"], "hojas": otra["hojas"],
+                "desconocidas": otra["desconocidas"],
+                "usd": round(len(otra["planos"]) * usd_imagen, 3)}
+    return ficha
 
 
-def _hojas_de_reparto(ctx):
-    """(personajes del reparto en el plan, cuantos ya tienen su hoja dibujada)."""
+def _hojas_de_reparto(ctx, rehara=frozenset()):
+    """(personajes del reparto en el plan, cuantos ya tienen su hoja dibujada
+    y la tanda no la va a volver a dibujar)."""
     plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
-    reparto = [str(f.get("nombre") or k.split(":", 1)[-1])
+    reparto = [(k, str(f.get("nombre") or k.split(":", 1)[-1]))
                for k, f in (plan.get("assets") or {}).items()
                if isinstance(f, dict) and f.get("tipo") == "reparto"]
     if not reparto:
         return 0, 0
-    carpetas = [ctx.proyecto.ruta_trabajo("assets", crear=False)]
-    version = ctx.proyecto.version_activa("assets")
-    if version:
-        carpetas.append(ctx.proyecto.ruta_paso("assets", version))
-    hechas = sum(1 for nombre in reparto
-                 if any(c and os.path.exists(os.path.join(c, "assets", "reparto", f"{nombre}.png"))
-                        for c in carpetas))
+    if rehara is None:
+        return len(reparto), 0
+    carpetas = _carpetas_de_assets(ctx)
+    hechas = sum(1 for clave, nombre in reparto
+                 if clave not in rehara
+                 and any(os.path.exists(os.path.join(c, "assets", "reparto", f"{nombre}.png"))
+                         for c in carpetas))
     return len(reparto), hechas
 
 

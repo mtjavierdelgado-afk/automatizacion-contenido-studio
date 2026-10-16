@@ -1195,6 +1195,103 @@ def rehacer_y_verlo_en_el_video(navegador, datos):
 
 
 @escenario
+def imagenes_en_otra_calidad(navegador, datos):
+    """D6 (auditoria del coste, 15-10-2026): cambiar la calidad de un video con
+    imagenes hechas NO las redibuja. Decision del dueño: «que lo diga y
+    pregunte». Las diapositivas dicen «N imágenes siguen en otra calidad» con
+    su precio; SIN PULSAR no se lanza nada (ni cancelando el confirm), y al
+    confirmar se rehacen SOLO esas, en la calidad nueva."""
+    pid = datos["video"]
+    api = datos["api"]
+
+    def igual(obtenido, esperado, mensaje):
+        return ok(obtenido == esperado, f"{mensaje} (esperaba {esperado!r}, llegó {obtenido!r})")
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    calidad = (ficha.get("params") or {}).get("calidad") or "low"
+    # C3: lo que queda por pagar cuenta lo que la tanda VA A REDIBUJAR. Con un
+    # plano sucio (su nota cambio) la tanda se lo pide a p6 y lo paga aunque
+    # su PNG exista; decia «0 imágenes por generar»
+    params_antes = ficha.get("params") or {}
+    unidades = dict(params_antes.get("unidades") or {})
+    unidades["escena:S002"] = dict(unidades.get("escena:S002") or {},
+                                   feedback="que se vea el puerto")
+    api.put(f"/api/proyectos/{pid}/pasos/assets/params", {"params": {"unidades": unidades}})
+    _r, plan = api.get(f"/api/proyectos/{pid}/generar?tanda=video")
+    coste = plan.get("coste") or {}
+    igual(coste.get("imagenes_por_generar"), 1,
+          "con UN plano sucio, «Poner al día» cuenta esa imagen por pagar")
+    api.put(f"/api/proyectos/{pid}/pasos/assets/params",
+            {"params": params_antes, "reemplazar": True})
+    _r, plan = api.get(f"/api/proyectos/{pid}/generar?tanda=video")
+    igual((plan.get("coste") or {}).get("imagenes_por_generar"), 0,
+          "y quitada la nota, ninguna")
+    nueva = "medium" if calidad != "medium" else "high"
+    r, _d = api.put(f"/api/proyectos/{pid}/pasos/assets/params", {"params": {"calidad": nueva}})
+    ok(r.status_code == 200, f"la calidad del vídeo pasa de {calidad} a {nueva}")
+    _r, plan = api.get(f"/api/proyectos/{pid}/generar?tanda=video")
+    otra = (plan.get("coste") or {}).get("otra_calidad") or {}
+    ok(otra.get("imagenes", 0) > 0 and otra.get("por_calidad", {}).get(calidad),
+       f"el plan de las imágenes dice cuántas siguen en {calidad}: {otra}")
+    ok(abs(float(otra.get("usd") or 0) - otra.get("imagenes", 0)
+           * float(plan["coste"]["usd_por_imagen"])) < 0.01,
+       "con su precio: cuántas por lo que cuesta una en la calidad nueva")
+    ruta_coste = os.path.join(datos["proyectos"], pid, "coste.jsonl")
+
+    def imagenes_pagadas():
+        try:
+            with open(ruta_coste, encoding="utf-8") as fh:
+                return [json.loads(l) for l in fh if '"openai"' in l]
+        except OSError:
+            return []
+    antes = len(imagenes_pagadas())
+    pg = Pagina(navegador, datos)
+    pedidas = []
+    pg.p.on("request", lambda q: pedidas.append(q.url)
+            if q.method == "POST" and ("/imagenes/calidad" in q.url or q.url.endswith("/generar"))
+            else None)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.pulsar(".nav-light button", "Imágenes")
+    ok(pg.esperar(".otra-calidad", "siguen en calidad", 15),
+       "las diapositivas dicen que hay imágenes en otra calidad")
+    boton = pg.p.locator(".otra-calidad button").first
+    ok(boton.count() == 1 and "$" in (boton.inner_text() or ""),
+       f"con un botón que dice lo que cuesta: «{boton.inner_text() if boton.count() else ''}»")
+    pg.captura("otra_calidad", entera=False)
+    pg.p.wait_for_timeout(3000)
+    igual(pedidas, [], "SIN PULSAR no se lanza nada")
+    pg.aceptar = False
+    pg.pulsar(".otra-calidad button")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.dialogos and "$" in pg.dialogos[-1],
+       f"pulsar pide confirmación con el precio: {pg.dialogos[-1:] }")
+    igual(pedidas, [], "y si se cancela, tampoco se lanza nada")
+    igual(len(imagenes_pagadas()), antes, "ni se paga ninguna imagen")
+    pg.aceptar = True
+    pg.pulsar(".otra-calidad button")
+    pg.p.wait_for_timeout(1500)
+    igual(len([u for u in pedidas if "/imagenes/calidad" in u]), 1,
+          "al confirmar se lanza UNA petición de rehacerlas")
+    ok(pg.sin_trabajo(400), "y se rehacen")
+    pg.p.wait_for_timeout(2000)
+    nuevas = imagenes_pagadas()[antes:]
+    unidades = sorted({e.get("unidad") for e in nuevas})
+    igual(len(nuevas), otra["imagenes"], f"se pagan exactamente las {otra['imagenes']} ofrecidas")
+    ok(all(str(u).startswith("escena:") for u in unidades),
+       f"todas de plano, ninguna hoja de reparto ({unidades[:4]}...)")
+    igual(sorted({(e.get("detalle") or {}).get("calidad") for e in nuevas}), [nueva],
+          f"y todas en {nueva}")
+    _r, plan = api.get(f"/api/proyectos/{pid}/generar?tanda=video")
+    ok(not (plan.get("coste") or {}).get("otra_calidad"),
+       "después ya no queda ninguna en otra calidad")
+    ok(not pg.esperar(".otra-calidad", None, 6), "y el aviso se va")
+    pg.sin_errores("imágenes en otra calidad")
+    # se deja el video montado al dia para los escenarios que vienen detras
+    ok(_montar_desde_video(pg), "el vídeo se vuelve a montar con las imágenes nuevas")
+    pg.cerrar()
+
+
+@escenario
 def lo_que_se_vio_el_10_de_octubre(navegador, datos):
     """Lo que encontro el dueno abriendo un video de verdad (10-10-2026), y que
     el recorrido no miraba: la referencia adjunta a una nota a tamano real,
@@ -1621,6 +1718,280 @@ def dictado_del_navegador_sin_repetir(navegador, datos):
     pg.p.evaluate("() => { $('#asistente-texto').value = ''; }")
     pg.sin_errores("el dictado del navegador")
     pg.cerrar()
+
+
+#: Un pegado SINTÉTICO, como el de Ctrl+V: un ClipboardEvent con su
+#: DataTransfer (texto, una imagen PNG dibujada en un lienzo, o las dos) sobre
+#: `selector` (o el body). Devuelve si alguien lo atendió (defaultPrevented).
+PEGAR_JS = """async ({ selector, texto, color }) => {
+  const dt = new DataTransfer();
+  if (texto) dt.setData('text/plain', texto);
+  if (color) {
+    // de 320×240 y de dos colores: el servidor no acepta como referencia
+    // una imagen diminuta ni una lisa (`_motivo_para_no_aceptar`)
+    const c = document.createElement('canvas'); c.width = 320; c.height = 240;
+    const x = c.getContext('2d'); x.fillStyle = color; x.fillRect(0, 0, 320, 240);
+    x.fillStyle = '#ffffff'; x.fillRect(40, 40, 120, 90);
+    const blob = await new Promise(r => c.toBlob(r, 'image/png'));
+    dt.items.add(new File([blob], 'image.png', { type: 'image/png' }));
+  }
+  const destino = selector ? document.querySelector(selector) : document.body;
+  if (selector && destino.focus) destino.focus();
+  const ev = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+  if (!ev.clipboardData) Object.defineProperty(ev, 'clipboardData', { value: dt });
+  destino.dispatchEvent(ev);
+  return ev.defaultPrevented;
+}"""
+
+
+def _subidas(pg):
+    """Apunta la ruta de cada POST de imágenes o logos que sale de la pestaña."""
+    lista = []
+    pg.p.on("request", lambda r: lista.append(r.url.split("?")[0])
+            if r.method == "POST" and ("/imagenes" in r.url or "/logos" in r.url) else None)
+    return lista
+
+
+def _png_dibujada(ruta, color):
+    """Como `_png`, pero con un recuadro blanco: las referencias de estilo
+    no pueden ser de un solo color."""
+    from PIL import Image, ImageDraw                         # noqa: PLC0415
+    imagen = Image.new("RGB", (320, 200), color)
+    ImageDraw.Draw(imagen).rectangle((40, 40, 160, 130), fill=(255, 255, 255))
+    imagen.save(ruta)
+    return ruta
+
+
+def _esperar_cuenta(pg, selector, n, segundos=15):
+    fin = time.time() + segundos
+    while time.time() < fin:
+        if pg.p.locator(selector).count() >= n:
+            return True
+        pg.p.wait_for_timeout(300)
+    return False
+
+
+@escenario
+def pegar_imagenes_del_portapapeles(navegador, datos):
+    """N10 de las notas de mejoras, 15-10-2026: «permitir copiar/pegar imágenes
+    directo del portapapeles». Pegar va por EL MISMO camino que elegir el
+    fichero (misma ruta, mismos topes) y no le roba el pegado al texto."""
+    pg = Pagina(navegador, datos)
+    pg.contexto.grant_permissions(["clipboard-read", "clipboard-write"], origin=datos["url"])
+    subidas = _subidas(pg)
+    pg.js("APP.light.encargo = null; irALight('crear', { taller: null });")
+    ok(pg.esperar(".zona-suelta"), "el estilo nuevo tiene su zona de imágenes de referencia")
+    ok(pg.visible("button.pista-pegar", "pega una imagen"),
+       "y debajo dice «o pega una imagen (Ctrl+V)»")
+    tira = ".campo.aportadas .tira-aportadas .aportada"
+    antes = pg.p.locator(tira).count()
+
+    # 1) PEGAR TEXTO en un campo de texto: el pegado de siempre, nada se sube
+    campo = pg.p.locator(".bloque-light textarea").first
+    campo.fill("")
+    campo.focus()
+    pg.p.evaluate("() => navigator.clipboard.writeText('texto copiado de otra parte')")
+    pg.p.keyboard.press("Control+V")
+    pg.p.wait_for_timeout(800)
+    ok("texto copiado de otra parte" in campo.input_value(),
+       f"pegar TEXTO en un campo lo escribe como siempre ({campo.input_value()[:40]!r})")
+    # y con texto Y una imagen a la vez (copiar de una web), el campo se queda el texto
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": ".bloque-light textarea",
+                                        "texto": "hola", "color": "#c03030"})
+    pg.p.wait_for_timeout(1200)
+    ok(not atendido, "con texto e imagen y el foco en un campo, el pegado no se toca")
+    ok(not subidas and pg.p.locator(tira).count() == antes,
+       f"y no se sube nada al pegar texto (subidas: {subidas})")
+
+    # 2) 16-10-2026: NO SE ADIVINA LA ZONA. Una imagen SOLA con el cursor en
+    # un campo que no es de imágenes no va a ninguna zona (iba a «la única a
+    # la vista», que podía ser el logo)
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": ".bloque-light textarea",
+                                        "texto": "", "color": "#2060d0"})
+    pg.p.wait_for_timeout(1200)
+    ok(not atendido and not subidas and pg.p.locator(tira).count() == antes,
+       f"una imagen pegada en un campo de texto que no es de imágenes no se sube (subidas: {subidas})")
+    ok("zona de imágenes" in pg.toast(), f"y dice que se pulse antes en la zona ({pg.toast()!r})")
+    # sin foco y sin haber tocado ninguna zona, tampoco: ni la única a la vista
+    pg.p.evaluate("() => document.activeElement && document.activeElement.blur()")
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#2060d0"})
+    pg.p.wait_for_timeout(1200)
+    ok(not atendido and not subidas,
+       f"sin tocar ninguna zona, una imagen pegada no va a «la única a la vista» (subidas: {subidas})")
+    # tocada pero FUERA de la ventana (pintada más abajo), tampoco
+    pg.p.evaluate("""() => { const z = document.querySelector('.zona-suelta');
+      const relleno = document.createElement('div'); relleno.id = 'relleno-pegado';
+      relleno.style.height = (window.innerHeight * 3) + 'px';
+      z.parentNode.insertBefore(relleno, z);
+      z.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); }""")
+    fuera = pg.p.evaluate("() => document.querySelector('.zona-suelta').getBoundingClientRect().top"
+                          " >= window.innerHeight")
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#2060d0"})
+    pg.p.wait_for_timeout(1200)
+    ok(fuera and not atendido and not subidas,
+       f"la zona tocada pero fuera de la ventana no recibe el pegado (fuera: {fuera}, subidas: {subidas})")
+    pg.p.evaluate("() => document.querySelector('#relleno-pegado').remove()")
+
+    # PEGAR UNA IMAGEN (Ctrl+V) tras tocar la zona, a la vista: se sube
+    pg.p.evaluate("() => document.querySelector('.zona-suelta').dispatchEvent("
+                  "new PointerEvent('pointerdown', { bubbles: true }))")
+    pg.p.evaluate("() => document.activeElement && document.activeElement.blur()")
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#2060d0"})
+    ok(atendido, "pegar una imagen tras tocar la zona lo atiende la zona de imágenes")
+    ok(_esperar_cuenta(pg, tira, antes + 1), "y la imagen pegada sale en la tira, como una elegida")
+    ok(subidas and subidas[-1].endswith("/api/presets-light/imagenes"),
+       f"por la MISMA ruta que el explorador ({subidas[-1:] if subidas else 'ninguna'})")
+    # la misma, por el explorador: la misma ruta y otra miniatura
+    pg.p.locator(".campo.aportadas input[type=file]").first.set_input_files(
+        _png_dibujada(os.path.join(datos["base"], "pegar_ref.png"), (200, 120, 40)))
+    ok(_esperar_cuenta(pg, tira, antes + 2), "elegir el fichero sigue funcionando")
+    ok(len(set(subidas)) == 1 and len(subidas) == 2,
+       f"pegar y elegir llaman a la misma ruta ({subidas})")
+    pg.captura("41_pegar_en_estilo_nuevo", entera=False)
+
+    # 3) EL ASISTENTE: con el foco dentro de su cajón la imagen va a sus
+    # adjuntos, aunque la zona del estilo siga a la vista detrás
+    pg.pulsar("#burbuja-asistente")
+    pg.p.wait_for_timeout(1200)
+    adj = "#asistente-adjuntos .adjunto"
+    pg.p.evaluate("() => $('#asistente-cuerpo').dispatchEvent("
+                  "new PointerEvent('pointerdown', { bubbles: true }))")
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#30a050"})
+    ok(atendido and _esperar_cuenta(pg, adj, 1),
+       "con el asistente tocado el último, la imagen pegada va a sus adjuntos")
+    ok(subidas[-1].endswith("/api/asistente/imagenes"),
+       f"por la ruta de los adjuntos del asistente ({subidas[-1]})")
+    ok(pg.p.locator(tira).count() == antes + 2, "y no a la zona del estilo de detrás")
+    if pg.p.locator("#asistente-texto").is_enabled():
+        pg.p.evaluate(PEGAR_JS, {"selector": "#asistente-texto", "texto": "", "color": "#a03090"})
+        ok(_esperar_cuenta(pg, adj, 2), "pegar con el foco en la caja del asistente también adjunta")
+    n_adj = pg.p.locator(adj).count()
+    pg.p.locator("#asistente-pie input[type=file]").set_input_files(
+        _png_dibujada(os.path.join(datos["base"], "pegar_adj.png"), (90, 90, 200)))
+    ok(_esperar_cuenta(pg, adj, n_adj + 1), "y el clip 📎 sigue adjuntando")
+    ok(subidas[-1] == subidas[-2], "pegar y el clip van a la misma ruta")
+    pg.captura("42_pegar_en_el_asistente", entera=False)
+    pg.p.evaluate("() => { ADJUNTOS_ASISTENTE.length = 0; pintarAdjuntosAsistente(); }")
+    pg.pulsar("#btn-cerrar-asistente")
+
+    # 4) LAS NOTAS DE UNA IMAGEN: la zona tocada la última recibe la imagen, y
+    # el texto de la nota se pega en la nota sin subir nada
+    pg.js(f"await abrirVideoLight('{datos['video']}');")
+    pg.pulsar(".nav-light button", "Imágenes")
+    ok(pg.esperar(".previa-feedback .zona-suelta"), "la nota de una imagen tiene su zona de imágenes")
+    n_subidas = len(subidas)
+    nota = pg.p.locator(".previa-feedback textarea").first
+    nota.fill("")
+    nota.focus()
+    pg.p.evaluate("() => navigator.clipboard.writeText('más luz a la izquierda')")
+    pg.p.keyboard.press("Control+V")
+    pg.p.wait_for_timeout(800)
+    ok("más luz a la izquierda" in nota.input_value(), "pegar texto en la nota lo escribe")
+    ok(len(subidas) == n_subidas, "y no sube nada")
+    nota.fill("")
+    nota.dispatch_event("input")
+    # se toca como lo toca una persona: a la vista (la zona de debajo de la
+    # ventana no recibe nada)
+    pg.p.evaluate("() => { const z = document.querySelector('.previa-feedback .zona-suelta');"
+                  " z.scrollIntoView({ block: 'center' });"
+                  " z.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); }")
+    pg.p.evaluate("() => document.activeElement && document.activeElement.blur()")
+    pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#d0d030"})
+    ok(_esperar_cuenta(pg, ".previa-feedback .tira-aportadas .aportada", 1),
+       "pegar una imagen tras tocar la zona de la nota la adjunta a la nota")
+    ok(len(subidas) > n_subidas and subidas[-1].endswith("/repaso/imagenes"),
+       f"por la ruta de las imágenes de las notas ({subidas[-1:]})")
+    # escribiendo la nota (foco en SU campo), la imagen va a SUS adjuntos
+    n_aportadas = pg.p.locator(".previa-feedback .tira-aportadas .aportada").count()
+    pg.p.evaluate(PEGAR_JS, {"selector": ".previa-feedback textarea", "texto": "", "color": "#30d0d0"})
+    ok(_esperar_cuenta(pg, ".previa-feedback .tira-aportadas .aportada", n_aportadas + 1),
+       "con el cursor en la nota, la imagen pegada va a los adjuntos de esa nota")
+    pg.captura("43_pegar_en_la_nota", entera=False)
+
+    # 5) EL LOGO: solo recibe lo que se pega cuando se ha tocado. Con el cursor
+    # en el nombre del vídeo, o sin tocar nada, la imagen NO acaba en el logo
+    pg.js(f"await cargarGaleriaLight(true); elegirEstiloLight(fichaLight('{datos['preset']}'));")
+    ok(pg.esperar("h2", "Un vídeo nuevo"), "el vídeo nuevo, con su logo")
+    pg.p.locator(".fila-ajuste").filter(has_text="Logo").locator("button", has_text="Cambiar").click()
+    ok(pg.esperar(".editor-ajuste.acepta-pegado"), "el editor del logo es una zona de pegar")
+    pg.p.evaluate("() => document.querySelector('.editor-ajuste.acepta-pegado').scrollIntoView({ block: 'center' })")
+    pg.p.evaluate("""() => { const i = [...document.querySelectorAll('.bloque-light')]
+      .filter(b => /El vídeo/.test(b.innerText)).map(b => b.querySelector('input[type=text], input:not([type])'))
+      .find(Boolean); if (i) i.id = 'campo-prueba-pegado'; }""")
+    logos = [u for u in subidas if "/logos" in u]
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": "#campo-prueba-pegado", "texto": "", "color": "#e08020"})
+    pg.p.wait_for_timeout(1500)
+    ok(not atendido and [u for u in subidas if "/logos" in u] == logos,
+       f"con el cursor en el nombre del vídeo, la imagen pegada NO va al logo (subidas: {subidas[-2:]})")
+    pg.p.evaluate("() => document.activeElement && document.activeElement.blur()")
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#e08020"})
+    pg.p.wait_for_timeout(1500)
+    ok(not atendido and [u for u in subidas if "/logos" in u] == logos,
+       "sin tocar el logo, aunque sea la única zona a la vista, no lo recibe")
+    pg.p.evaluate("() => document.querySelector('.editor-ajuste.acepta-pegado').dispatchEvent("
+                  "new PointerEvent('pointerdown', { bubbles: true }))")
+    atendido = pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#e08020"})
+    fin = time.time() + 15
+    while time.time() < fin and [u for u in subidas if "/logos" in u] == logos:
+        pg.p.wait_for_timeout(300)
+    ok(atendido and len([u for u in subidas if "/logos" in u]) == len(logos) + 1,
+       "tocado el logo, la imagen pegada sí es el logo")
+    pg.sin_errores("pegar imágenes")
+    pg.cerrar()
+
+
+#: Una respuesta del asistente con un bloque de código, como las de verdad.
+RESPUESTA_CON_CODIGO = ("Pon esto en **Indicaciones**:\n\n```\nluz cálida de tarde\nsin gente al fondo\n```\n"
+                        "Y luego pulsa `Regenerar`.")
+
+
+@escenario
+def copiar_respuestas_del_asistente(navegador, datos):
+    """N11 y N12 de las notas de mejoras: «Copiar» en los bloques de código de
+    las respuestas del asistente y en la respuesta entera."""
+    for ancho, alto, nombre in ((1300, 900, "ordenador"), (390, 844, "móvil")):
+        pg = Pagina(navegador, datos, ancho=ancho, alto=alto)
+        pg.p.evaluate("() => { window.__copiado = null; Object.defineProperty(navigator, 'clipboard', "
+                      "{ configurable: true, value: { writeText: t => { window.__copiado = t; "
+                      "return Promise.resolve(); } } }); }")
+        pg.pulsar("#burbuja-asistente")
+        pg.p.wait_for_timeout(1500)
+        pg.p.evaluate("(t) => { ASISTENTE.verHistorial = false; ASISTENTE.charla = { id: 'prueba-copiar', "
+                      "turnos: [{ quien: 'tu', texto: '¿qué pongo?' }, "
+                      "{ quien: 'asistente', estado: 'hecho', texto: t, segundos: 3 }] }; "
+                      "pintarAsistente(); }", RESPUESTA_CON_CODIGO)
+        ok(pg.esperar("#asistente .turno.asistente pre", "luz cálida"),
+           f"{nombre}: la respuesta con un bloque de código se pinta")
+        ok(pg.visible("#asistente .bloque-codigo button", "Copiar"),
+           f"{nombre}: el bloque de código lleva su «Copiar»")
+        ok(pg.visible("#asistente .turno.asistente .pie-turno button", "Copiar"),
+           f"{nombre}: y la respuesta entera también")
+        # que no los tape la burbuja
+        tapado = pg.p.evaluate("""() => [...document.querySelectorAll('#asistente .copiar-bloque, #asistente .copiar-turno')]
+          .some(b => { const r = b.getBoundingClientRect();
+                       const e = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                       return !e || !b.contains(e); })""")
+        ok(not tapado, f"{nombre}: nada tapa los «Copiar»")
+        # y el «Copiar» del bloque no tapa la primera línea del código
+        pisa = pg.p.evaluate("""() => { const b = document.querySelector('#asistente .copiar-bloque');
+          const pre = b.parentNode.querySelector('pre');
+          const texto = pre.getBoundingClientRect().top + parseFloat(getComputedStyle(pre).paddingTop);
+          return b.getBoundingClientRect().bottom > texto + 1; }""")
+        ok(not pisa, f"{nombre}: el «Copiar» del bloque no tapa la primera línea del código")
+        pg.pulsar("#asistente .bloque-codigo button", "Copiar")
+        copiado = pg.p.evaluate("() => window.__copiado")
+        ok(copiado == "luz cálida de tarde\nsin gente al fondo",
+           f"{nombre}: «Copiar» del bloque copia SOLO el código ({copiado!r})")
+        ok("copiado" in pg.avisos(), f"{nombre}: y dice «copiado»")
+        pg.pulsar("#asistente .pie-turno button", "Copiar")
+        copiado = pg.p.evaluate("() => window.__copiado") or ""
+        ok(copiado.startswith("Pon esto en Indicaciones:") and "luz cálida de tarde" in copiado
+           and copiado.endswith("Y luego pulsa Regenerar.") and "**" not in copiado
+           and "\x60" not in copiado,
+           f"{nombre}: «Copiar» de la respuesta la copia entera, en texto llano ({copiado!r})")
+        pg.captura(f"44_copiar_asistente_{nombre}", entera=False)
+        pg.sin_errores(f"copiar del asistente ({nombre})")
+        pg.cerrar()
 
 
 #: Lo que el recorrido de TODOS LOS BOTONES no pulsa: lo que lanza trabajos

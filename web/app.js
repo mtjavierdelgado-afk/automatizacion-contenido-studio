@@ -4904,34 +4904,50 @@ function ritmoPorDefecto() {
   return (APP.light.datos || {}).ritmo_por_defecto || 'medio';
 }
 
+/* LA CALIDAD Y EL MODO DE LOS QUE SALE EL $/MIN: los del vídeo que nacería de
+   este estilo (`calidad_nuevo`, que calcula el servidor con la misma regla que
+   al crear el vídeo). Se enseñaba siempre el de calidad baja, y un estilo de
+   foto —que nace, como poco, en media— prometía 1,00 $/min y costaba 1,75. */
+function claveCosteRitmo(modo, calidadDelEstilo) {
+  const m = modo === 'foto' ? 'foto' : 'ilustracion';
+  const porModo = (APP.light.datos || {}).calidad_nuevo || {};
+  return `${calidadDelEstilo || porModo[m] || 'low'}|${m}`;
+}
+
 /* «Rápido · plano medio ~2,0 s · ~0,99 $/min» y nada más. */
-function resumenRitmo(ficha) {
+function resumenRitmo(ficha, clave) {
   if (!ficha) return '';
+  const tabla = ficha.usd_por_minuto_por_calidad || {};
+  const usd = clave && tabla[clave] !== undefined ? tabla[clave] : ficha.usd_por_minuto;
   // toFixed(1) y no el número pelado: «~2 s» y «~2,8 s» uno debajo del otro
   // saltan de ancho al mover el deslizador, y lo que se lee es una cifra que
   // cambia de forma además de de valor.
   return `${ficha.nombre} · plano medio ~${ficha.media_s.toFixed(1).replace('.', ',')} s`
-    + ` · ~${ficha.usd_por_minuto.toFixed(2).replace('.', ',')} $/min`;
+    + ` · ~${Number(usd || 0).toFixed(2).replace('.', ',')} $/min`;
 }
 
 /* El deslizador. Cinco posiciones y una sola línea debajo: sin números de
    mínimo, máximo ni umbral, que es lo que se pidió. Repinta SOLO su línea —no el
    formulario— porque arrastrar y que se repinte el panel entero suelta el
    deslizador a media pasada. */
-function sliderRitmo(valor, alCambiar) {
+function sliderRitmo(valor, alCambiar, claveCoste) {
   const lista = ritmosLight();
   if (!lista.length) return h('div', { clase: 'pista' }, 'cargando los ritmos…');
   const indice = Math.max(0, lista.findIndex(r => r.id === (valor || ritmoPorDefecto())));
-  const linea = h('div', { clase: 'ritmo-linea' }, resumenRitmo(lista[indice]));
+  const clave = () => (claveCoste ? claveCoste() : '');
+  const linea = h('div', { clase: 'ritmo-linea' }, resumenRitmo(lista[indice], clave()));
   const barra = h('input', {
     type: 'range', min: 0, max: lista.length - 1, step: 1, value: indice,
     clase: 'ritmo',
   });
-  const mover = () => {
+  const repintar = () => {
     const ficha = lista[Number(barra.value)] || lista[0];
-    vaciar(linea).append(resumenRitmo(ficha));
-    alCambiar(ficha.id);
+    vaciar(linea).append(resumenRitmo(ficha, clave()));
+    return ficha;
   };
+  const mover = () => { alCambiar(repintar().id); };
+  // cambiar el tipo de imagen del encargo mueve la calidad, y con ella el $/min
+  APP.light.repintarRitmo = repintar;
   barra.addEventListener('input', mover);
   return h('div', { clase: 'campo' }, barra,
     h('div', { clase: 'topes' }, ...lista.map((r, i) => h('span', {
@@ -6011,19 +6027,25 @@ function panelLogoProyecto(ficha) {
   const caja = h('div', { clase: 'panel-logo-proyecto' });
   const logo = ficha.logo;
   const id = `logo-proyecto-${ficha.id}`;
+  // elegir el fichero y pegarlo (Ctrl+V) acaban aquí: el mismo POST
+  const subirLogo = async ficheros => {
+    const fichero = (ficheros || [])[0];
+    if (!fichero) return;
+    const cuerpo = new FormData();
+    cuerpo.append('logo', fichero);
+    try {
+      const r = await pedir(`${BASE}/api/logos`, { method: 'POST', cuerpo });
+      await cambiarCliente(ficha, { logo: Object.assign({ posicion: 'arriba_derecha', tamano: 0.12, opacidad: 0.9 },
+        logo || {}, { fichero: r.nombre }) }, 'Logo del proyecto guardado');
+    } catch (e) { toast(e.message, true); }
+  };
   const entrada = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', clase: 'oculto', id,
-    onchange: async ev => {
-      const fichero = (ev.target.files || [])[0];
+    onchange: ev => {
+      const ficheros = [...(ev.target.files || [])];
       ev.target.value = '';
-      if (!fichero) return;
-      const cuerpo = new FormData();
-      cuerpo.append('logo', fichero);
-      try {
-        const r = await pedir(`${BASE}/api/logos`, { method: 'POST', cuerpo });
-        await cambiarCliente(ficha, { logo: Object.assign({ posicion: 'arriba_derecha', tamano: 0.12, opacidad: 0.9 },
-          logo || {}, { fichero: r.nombre }) }, 'Logo del proyecto guardado');
-      } catch (e) { toast(e.message, true); }
+      subirLogo(ficheros);
     } });
+  aceptarPegado(caja, subirLogo);
   caja.appendChild(h('div', { clase: 'pista' },
     'Los vídeos NUEVOS de los estilos de este proyecto lo llevarán solos (se puede cambiar o quitar en cada vídeo). '
     + 'Los que ya existen no cambian.'));
@@ -6031,6 +6053,7 @@ function panelLogoProyecto(ficha) {
   if (logo) caja.appendChild(vistaPreviaLogo(`${BASE}/api/logos/${encodeURIComponent(logo.fichero)}`, logo));
   caja.appendChild(h('div', { clase: 'fila' },
     h('label', { clase: 'boton mini', for: id }, logo ? 'Subir otro' : 'Subir el logo'),
+    pistaDePegado(subirLogo),
     logo ? h('button', { clase: 'mini fantasma peligro', onclick: () => cambiarCliente(ficha, { logo: null }, 'Logo quitado') }, 'Quitar') : null));
   if (logo) {
     caja.appendChild(h('div', { clase: 'herramientas' }, ...ESQUINAS_LOGO.map(([pos, nombre]) => h('button', {
@@ -7908,12 +7931,82 @@ function textoDelPlan(tanda) {
       ? `${coste.imagenes_por_generar} imágenes (${coste.imagenes_hechas} ya hechas)`
       : `${coste.imagenes} imágenes`);
   }
+  if ((coste.otra_calidad || {}).imagenes) {
+    partes.push(`${coste.otra_calidad.imagenes} siguen en otra calidad (no se rehacen solas)`);
+  }
   if (coste.usd_total) {
     partes.push(coste.imagenes_hechas
       ? `≈ ${Number(coste.usd_por_generar).toFixed(2)} $ · hasta ${Number(coste.usd_total).toFixed(2)} $ si hay que rehacerlas`
       : `≈ ${Number(coste.usd_total).toFixed(2)} $`);
   }
   return partes.join(' · ');
+}
+
+
+/* IMÁGENES QUE SIGUEN EN OTRA CALIDAD (D6, decisión del dueño: «que lo diga y
+   pregunte»). Cambiar la calidad de un vídeo con imágenes hechas —traer el
+   estilo, por ejemplo— no redibuja nada: lo hecho se conserva y la calidad
+   nueva se aplica a lo que se haga o rehaga. Aquí se dice cuántas se quedaron
+   en la otra, y se ofrece rehacer SOLO esas con el precio delante. Sin pulsar
+   no se lanza nada. El servidor sabe cuáles son (`otra_calidad` del plan de la
+   tanda de imágenes); las que no sabe en qué calidad se hicieron no se
+   ofrecen. */
+const NOMBRE_CALIDAD = { low: 'baja', medium: 'media', high: 'alta' };
+
+function avisoOtraCalidadLight() {
+  const v = videoAbierto();
+  if (!v.pid) return null;
+  refrescarPlanLight('video');
+  const otra = ((((v.planes || {}).video || {}).coste) || {}).otra_calidad;
+  if (!otra || !otra.imagenes) return null;
+  const nueva = NOMBRE_CALIDAD[otra.calidad] || otra.calidad;
+  const de = Object.entries(otra.por_calidad || {})
+    .map(([c, n]) => `${n} en ${NOMBRE_CALIDAD[c] || c}`);
+  const calidades = Object.keys(otra.por_calidad || {});
+  const enQue = calidades.length === 1
+    ? `en calidad ${NOMBRE_CALIDAD[calidades[0]] || calidades[0]}`
+    : `en otra calidad (${listaConY(de)})`;
+  const partes = [`${otra.imagenes} ${otra.imagenes === 1 ? 'imagen sigue' : 'imágenes siguen'} `
+    + `${enQue}; el vídeo está ahora en calidad ${nueva}.`];
+  if (otra.hojas) {
+    partes.push(`${otra.hojas === 1 ? 'La hoja' : `Las ${otra.hojas} hojas`} de reparto `
+      + 'se quedan como están: rehacerlas obligaría a rehacer los planos que las usan.');
+  }
+  const corriendo = !!trabajoVideoLight();
+  return h('div', { clase: 'caja-aviso otra-calidad' },
+    h('div', { clase: 'crece' }, partes.join(' ')),
+    h('button', {
+      clase: 'mini', disabled: corriendo,
+      onclick: () => rehacerEnLaCalidadDelVideo(otra),
+    }, `¿Rehacerlas en ${nueva}? ≈ ${usdCorto(otra.usd)}`));
+}
+
+async function rehacerEnLaCalidadDelVideo(otra) {
+  const v = videoAbierto();
+  const pid = v.pid;
+  const nueva = NOMBRE_CALIDAD[otra.calidad] || otra.calidad;
+  if (!confirm(`Rehacer ${otra.imagenes} ${otra.imagenes === 1 ? 'imagen' : 'imágenes'} `
+    + `en calidad ${nueva}: ≈ ${usdCorto(otra.usd)}.\n\nSolo esas; las demás no se `
+    + 'tocan. Después hay que volver a montar el vídeo.')) return;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(`${API.proyecto(pid)}/imagenes/calidad`, {
+      method: 'POST', cuerpo: { imagenes: otra.imagenes },
+    });
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') {
+        PREVIA.ficha = null;
+        await cargarVideoLight(pid);
+        refrescarPlanLight('video', true);
+      }
+      pintarLight();
+    }, () => { refrescarPlanosLight(); refrescarVivosLight(); }, pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    refrescarPlanLight('video', true);
+    pintarLight();
+  }
 }
 
 
@@ -7945,15 +8038,16 @@ async function refrescarPlanLight(tanda, forzar, modo) {
   try {
     const plan = await pedir(`${API.proyecto(v.pid)}/generar?tanda=${tanda}`
       + (guardado !== tanda ? `&modo=${encodeURIComponent(modo)}` : ''));
-    /* Se repinta SOLO si ha cambiado lo que se ensena (las tareas o el
-       precio): repintar siempre desde aqui seria un bucle, porque esto se
-       llama durante el pintado. */
-    const previo = v.planes[guardado] || {};
-    const antes = `${previo.tareas}|${(previo.coste || {}).usd_por_generar}`;
+    /* Se repinta SOLO si ha cambiado lo que se ensena (las tareas, el precio
+       o las imagenes en otra calidad): repintar siempre desde aqui seria un
+       bucle, porque esto se llama durante el pintado. */
+    const huella = x => {
+      const coste = (x || {}).coste || {};
+      return `${(x || {}).tareas}|${coste.usd_por_generar}|${(coste.otra_calidad || {}).imagenes || 0}`;
+    };
+    const antes = huella(v.planes[guardado]);
     v.planes[guardado] = plan;
-    if (antes !== `${plan.tareas}|${(plan.coste || {}).usd_por_generar}`) {
-      setTimeout(pintarLight, 0);
-    }
+    if (antes !== huella(plan)) setTimeout(pintarLight, 0);
   } catch (e) { /* sin plan: los botones se quedan como estaban */ }
 }
 
@@ -9674,6 +9768,8 @@ function vistaPreviaLight() {
     obsoletasEnLaCabecera(escenas),
     h('span', { clase: 'crece' }),
     costeLight()));
+  const otraCalidad = avisoOtraCalidadLight();
+  if (otraCalidad) caja.appendChild(otraCalidad);
 
   if (PREVIA.error) { caja.appendChild(cajaError(PREVIA.error)); return caja; }
   if (!PREVIA.ficha) {
@@ -9856,7 +9952,7 @@ function cuadroFeedbackEscena(escena) {
      la pantalla de repaso. */
   const mias = PREVIA.notas.filter(
     n => (n.plano || '') === escena.id && n.estado !== 'aplicado');
-  const caja = h('div', { clase: 'previa-feedback' });
+  const caja = agruparPegado(h('div', { clase: 'previa-feedback' }));
   caja.appendChild(campoArea(
     `¿Qué cambiarías de ${escena.id}?`,
     PREVIA.borrador[escena.id] || '',
@@ -10363,7 +10459,7 @@ function botonComentar() {
    la misma cosa: enseñar una referencia. */
 function cajaDeNota() {
   const r = estadoRepaso();
-  const caja = h('div', { clase: 'repaso-nueva' });
+  const caja = agruparPegado(h('div', { clase: 'repaso-nueva' }));
   caja.appendChild(h('div', { clase: 'meta' },
     `en ${mmss(r.t)}` + (r.plano ? ` · plano ${r.plano}` : '')));
 
@@ -10454,12 +10550,191 @@ function zonaDeImagenes(id, lista) {
     const ficheros = [...((evento.dataTransfer || {}).files || [])];
     if (ficheros.length) subir(ficheros);
   });
+  // pegar (Ctrl+V) va por el MISMO `subir` que elegir o soltar
+  aceptarPegado(suelta, subir);
 
   caja.appendChild(suelta);
+  caja.appendChild(pistaDePegado(subir));
   caja.appendChild(entrada);
   caja.appendChild(tira);
   pintar();
   return caja;
+}
+
+/* ================================================== PEGAR UNA IMAGEN (Ctrl+V)
+ *
+ * N10 de las notas de mejoras, 15-10-2026: «permitir copiar/pegar imágenes
+ * directo del portapapeles». Cada zona que sube imágenes se apunta con
+ * `aceptarPegado(zona, alSubir)`, donde `alSubir` es EL MISMO camino que ya
+ * siguen el explorador y el arrastre (mismo endpoint, mismos topes, mismos
+ * avisos): pegar no es una tercera manera de subir, es otra manera de elegir.
+ *
+ * Un solo `paste` en el documento decide a qué zona va, y NO ADIVINA (16-10:
+ * con el cursor en el nombre del vídeo, la imagen acababa en el logo por ser
+ * «la única zona a la vista»):
+ *  - con el foco en un campo de texto, la imagen solo va a la zona de ESE
+ *    campo: la que lo tiene dentro, o la que le hace de compañera (la nota de
+ *    una imagen y sus adjuntos: `agruparPegado`). Un campo de otra cosa nunca
+ *    manda la imagen a ninguna zona; lo dice y no sube nada.
+ *  - sin un campo con el foco, va a la zona que tiene el foco dentro o a la
+ *    última que se tocó, y solo si se ve DE VERDAD en la pantalla (dentro de
+ *    la ventana, no solo pintada más abajo). Tocar fuera de las zonas olvida
+ *    la última. Ninguna, ni el logo, la recibe por ser la única a la vista.
+ * NO roba el pegado de texto: sin imágenes en el portapapeles no hace nada, y
+ * con el foco en un campo de texto y texto en el portapapeles, tampoco (al
+ * copiar de una web suelen ir las dos cosas y quien pega en un campo quiere
+ * el texto).
+ *
+ * La zona guarda su camino en un objeto `pegado` con `subir` (y no en una
+ * lista aparte): las zonas se rehacen con cada repintado y una lista guardaría
+ * las viejas; así manda lo que hay en el DOM. */
+const PEGADO = { ultima: null, escuchando: false };
+
+function aceptarPegado(zona, alSubir) {
+  zona.classList.add('acepta-pegado');
+  zona.pegado = { subir: alSubir };
+  ['pointerdown', 'focusin', 'dragenter'].forEach(n =>
+    zona.addEventListener(n, () => { PEGADO.ultima = zona; }));
+  if (!PEGADO.escuchando) {
+    PEGADO.escuchando = true;
+    document.addEventListener('paste', alPegarEnLaPagina);
+    // tocar FUERA de toda zona olvida la última: «la última que se tocó» es
+    // la del último gesto, no la de hace tres pantallas
+    document.addEventListener('pointerdown', ev => {
+      const t = ev.target;
+      if (!(t && t.closest && t.closest('.acepta-pegado'))) PEGADO.ultima = null;
+    }, true);
+  }
+  return zona;
+}
+
+/* `caja` lleva dentro un campo de texto y una zona de imágenes que van juntos
+   (la nota de una imagen y sus adjuntos): con el foco en ese campo, la imagen
+   pegada va a esa zona. Sin esto, escribir la nota y pegar la captura no
+   adjuntaría nada. */
+function agruparPegado(caja) {
+  caja.dataset.pegadoAgrupa = '1';
+  return caja;
+}
+
+/* Las imágenes del portapapeles como ficheros. `files` es lo normal; algunos
+   navegadores solo las dan por `items`. */
+function imagenesDelPortapapeles(datos) {
+  if (!datos) return [];
+  let ficheros = [...(datos.files || [])];
+  if (!ficheros.length) {
+    ficheros = [...(datos.items || [])]
+      .filter(it => it.kind === 'file')
+      .map(it => it.getAsFile())
+      .filter(Boolean);
+  }
+  return ficheros.filter(f => /^image\//.test(f.type || ''));
+}
+
+function esCampoDeTexto(nodo) {
+  if (!nodo) return false;
+  if (nodo.isContentEditable || nodo.tagName === 'TEXTAREA') return true;
+  return nodo.tagName === 'INPUT'
+    && !/^(button|checkbox|radio|range|file|submit|reset|color|image)$/i.test(nodo.type || '');
+}
+
+function zonaPintada(z) {
+  return !!z.getClientRects().length && !z.closest('.plegado, [hidden]');
+}
+
+/* Se ve de verdad: pintada, sin plegar y con algún trozo dentro de la ventana. */
+function zonaEnPantalla(z) {
+  if (!zonaPintada(z)) return false;
+  const r = z.getBoundingClientRect();
+  const alto = window.innerHeight || document.documentElement.clientHeight;
+  const ancho = window.innerWidth || document.documentElement.clientWidth;
+  return r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 && r.top < alto && r.left < ancho;
+}
+
+function zonasDePegadoALaVista() {
+  return [...document.querySelectorAll('.acepta-pegado')].filter(zonaEnPantalla);
+}
+
+/* La zona de un campo de texto: la que lo tiene dentro o su compañera. */
+function zonaDelCampo(campo, vivas) {
+  const dentro = vivas.find(z => z.contains(campo));
+  if (dentro) return dentro;
+  const grupo = campo.closest('[data-pegado-agrupa]');
+  return grupo ? (vivas.find(z => grupo.contains(z)) || null) : null;
+}
+
+function zonaQueRecibeElPegado(vivas) {
+  const activo = document.activeElement;
+  // la zona del campo con el foco cuenta aunque asome por debajo: el foco ya
+  // dice dónde se está escribiendo
+  if (esCampoDeTexto(activo)) {
+    return zonaDelCampo(activo, [...document.querySelectorAll('.acepta-pegado')].filter(zonaPintada));
+  }
+  const conFoco = vivas.find(z => activo && activo !== document.body && z.contains(activo));
+  if (conFoco) return conFoco;
+  if (PEGADO.ultima && vivas.includes(PEGADO.ultima)) return PEGADO.ultima;
+  return null;
+}
+
+function alPegarEnLaPagina(ev) {
+  if (ev.defaultPrevented) return;              // ya lo atendió alguien más cerca
+  const datos = ev.clipboardData;
+  const imagenes = imagenesDelPortapapeles(datos);
+  if (!imagenes.length) return;                 // texto: el pegado de siempre
+  const vivas = zonasDePegadoALaVista();
+  const zona = zonaQueRecibeElPegado(vivas);
+  const activo = document.activeElement;
+  const conTexto = [...((datos || {}).types || [])].includes('text/plain');
+  if (esCampoDeTexto(activo) && !zona) {
+    // un campo que no es de imágenes: el texto se pega como siempre, y una
+    // imagen sola no se manda a ninguna zona
+    if (!conTexto && vivas.length) toast('Este campo no lleva imágenes: pulsa antes en la zona de imágenes y vuelve a pegar', true);
+    return;
+  }
+  if (esCampoDeTexto(activo) && conTexto && !zona.contains(activo)) return;
+  if (!zona) {
+    if (vivas.length) toast('Pulsa antes en la zona de imágenes donde va y vuelve a pegar', true);
+    return;
+  }
+  ev.preventDefault();
+  PEGADO.ultima = zona;
+  zona.pegado.subir(imagenes);
+}
+
+/* La pista junto a cada zona, y en el móvil (donde no hay Ctrl+V fuera de un
+   campo de texto) un botón que lee el portapapeles. Es un botón también en el
+   ordenador: pulsarlo hace lo mismo que Ctrl+V. */
+function pistaDePegado(alSubir) {
+  const tactil = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform || '');
+  return h('button', {
+    type: 'button', clase: 'pista-pegar',
+    title: 'Pega una imagen copiada: una captura, una imagen de otra página…',
+    onclick: ev => { ev.preventDefault(); pegarDesdeElBoton(alSubir); },
+  }, tactil ? '📋 Pegar una imagen' : `o pega una imagen (${mac ? '⌘V' : 'Ctrl+V'})`);
+}
+
+async function pegarDesdeElBoton(alSubir) {
+  if (!navigator.clipboard || !navigator.clipboard.read) {
+    toast('Este navegador no deja leer el portapapeles desde un botón: pega con Ctrl+V', true);
+    return;
+  }
+  const ficheros = [];
+  try {
+    const elementos = await navigator.clipboard.read();
+    for (const el of elementos) {
+      const tipo = (el.types || []).find(t => /^image\//.test(t));
+      if (!tipo) continue;
+      const blob = await el.getType(tipo);
+      const ext = (tipo.split('/')[1] || 'png').replace('jpeg', 'jpg');
+      ficheros.push(new window.File([blob], `pegada-${ficheros.length + 1}.${ext}`, { type: tipo }));
+    }
+  } catch (e) {
+    toast('No se ha podido leer el portapapeles: dale permiso, o pega con Ctrl+V', true);
+    return;
+  }
+  if (!ficheros.length) { toast('En el portapapeles no hay ninguna imagen', true); return; }
+  alSubir(ficheros);
 }
 
 /* Sube las imágenes de una nota y devuelve sus nombres en el servidor. */
@@ -11323,7 +11598,8 @@ function vistaCrearLight() {
      decisión de la voz —«el montaje va a planos de 2 s»— y además le rellena la
      velocidad si tú no la pides. Decidirlo después sería decidirlo al revés. */
   cajas.appendChild(bloqueLight('⏱️ Ritmo', 'cada cuánto corta el vídeo',
-    sliderRitmo(e.ritmo, v => { e.ritmo = v; tocarEncargoLight(); })));
+    sliderRitmo(e.ritmo, v => { e.ritmo = v; tocarEncargoLight(); },
+      () => claveCosteRitmo(e.estilo_modo))));
 
   cajas.appendChild(bloqueLight('🎙️ Voz', 'quién lo locuta',
     conGuia(campoArea('', e.voz_prompt, v => { e.voz_prompt = v; tocarEncargoLight(); },
@@ -11631,7 +11907,10 @@ function camposEstiloLight() {
   const e = encargoLight();
   const caja = h('div', {});
   caja.appendChild(selectorTipoDeImagen(e.estilo_modo,
-    v => { e.estilo_modo = v; tocarEncargoLight(); }));
+    v => {
+      e.estilo_modo = v; tocarEncargoLight();
+      if (APP.light.repintarRitmo) APP.light.repintarRitmo();
+    }));
   caja.appendChild(imagenesDeApoyoLight(e, tocarEncargoLight));
   caja.appendChild(conGuia(campoArea('Indicaciones (opcional)', e.estilo_prompt,
     v => { e.estilo_prompt = v; tocarEncargoLight(); },
@@ -11776,9 +12055,13 @@ function imagenesDeApoyoLight(e, alCambiar, idHueco, opciones) {
     const ficheros = [...((evento.dataTransfer || {}).files || [])];
     if (ficheros.length) subirFicherosLight(ficheros, e, tope, pintar, alCambiar, clave);
   });
+  // pegar (Ctrl+V) va por el mismo camino que soltar: mismos topes y avisos
+  const pegar = ficheros => subirFicherosLight(ficheros, e, tope, pintar, alCambiar, clave);
+  aceptarPegado(suelta, pegar);
 
   caja.appendChild(h('label', {}, op.etiqueta || 'Imágenes de referencia'));
   caja.appendChild(suelta);
+  caja.appendChild(pistaDePegado(pegar));
   caja.appendChild(entrada);
   caja.appendChild(tira);
   if (plegable) {
@@ -12146,7 +12429,8 @@ function vistaPresetLight() {
   // ⏱️ el ritmo: se cambia y ya, no rehace nada
   caja.appendChild(bloqueLight('⏱️ Ritmo', 'cada cuánto corta el vídeo',
     sliderRitmo((ficha.origen_ritmo || ritmoPorDefecto()),
-      v => guardarPresetLight(ficha.id, { ritmo: v }))));
+      v => guardarPresetLight(ficha.id, { ritmo: v }),
+      () => claveCosteRitmo(((ficha.datos || {}).estilo || {}).modo, ficha.calidad_nuevo))));
 
   // 🎙️ la voz, con su escucha
   const voz = h('div', {});
@@ -13853,7 +14137,8 @@ function tarjetaOpenAIInicio() {
   return [
     h('div', { clase: 'pista' },
       'Con esta clave se dibujan los planos: sin ella no hay vídeo. Cada imagen '
-      + 'se paga; un vídeo de cuatro minutos son unos 4,4 $ en calidad baja.'),
+      + 'se paga; un vídeo de cuatro minutos son unos 4 $ en calidad baja (unos 7 $ '
+      + 'en foto, que empieza en calidad media).'),
     h('ol', { clase: 'inicio-pasos' },
       h('li', {}, 'Entra en ', enlaceInicio('platform.openai.com', 'https://platform.openai.com/'),
         ' y crea una cuenta si no la tienes.'),
@@ -14479,9 +14764,28 @@ function burbujaDeTurno(turno) {
   const pie = [];
   if (turno.segundos) pie.push(`${turno.segundos} s`);
   if (turno.cuenta) pie.push(turno.cuenta);
+  // N11 de las notas: la respuesta entera se copia de un toque, en texto
+  // llano (sin los asteriscos ni las comillas del Markdown)
   return h('div', { clase: 'turno asistente' },
     textoConFormato(turno.texto),
-    pie.length ? h('div', { clase: 'pie-turno' }, pie.join(' · ')) : null);
+    h('div', { clase: 'pie-turno' },
+      h('span', {}, pie.join(' · ')),
+      h('button', {
+        type: 'button', clase: 'mini fantasma copiar-turno', title: 'Copiar toda la respuesta',
+        onclick: () => copiarTexto(textoLlanoDeRespuesta(turno.texto)),
+      }, 'Copiar')));
+}
+
+/* El texto de una respuesta sin las marcas de Markdown que pinta
+   `textoConFormato`: las vallas de los bloques, los #, las negritas y las
+   comillas del código en línea. Las listas se quedan con su guion. */
+function textoLlanoDeRespuesta(texto) {
+  return String(texto || '').replace(/\r/g, '').split('\n')
+    .filter(l => !/^\s*\x60\x60\x60/.test(l))
+    .map(l => l.replace(/^#{1,6}\s+/, '')
+      .replace(/\*\*([^*]+)\*\*/g, '$1')
+      .replace(/[\x60]([^\x60]+)[\x60]/g, '$1'))
+    .join('\n').trim();
 }
 
 /* Lo poco de Markdown que escribe un asistente —párrafos, listas, bloques de
@@ -14499,7 +14803,15 @@ function textoConFormato(texto) {
       i++;
       while (i < lineas.length && !/^\s*\x60\x60\x60/.test(lineas[i])) buf.push(lineas[i++]);
       i++;
-      salida.appendChild(h('pre', {}, buf.join('\n')));
+      // N12 de las notas: cada bloque con su «Copiar», que en el móvil
+      // seleccionar a mano un bloque largo es una pelea
+      const codigo = buf.join('\n');
+      salida.appendChild(h('div', { clase: 'bloque-codigo' },
+        h('button', {
+          type: 'button', clase: 'mini fantasma copiar-bloque', title: 'Copiar este bloque',
+          onclick: () => copiarTexto(codigo),
+        }, 'Copiar'),
+        h('pre', {}, codigo)));
       continue;
     }
     if (!linea.trim()) { i++; continue; }
@@ -15392,10 +15704,13 @@ function editorLogo(modo, est, repintar) {
   const entrada = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp',
     clase: 'oculto', id: idEntrada, onchange: ev => subir(ev.target) });
   caja.appendChild(entrada);
+  // pegar (Ctrl+V) va por el mismo `subirFichero` que elegir el fichero
+  aceptarPegado(caja, ficheros => subirFichero((ficheros || [])[0]));
 
   if (logo) caja.appendChild(vistaPreviaLogo(urlDe(logo), logo));
   caja.appendChild(h('div', { clase: 'fila' },
     h('label', { clase: 'boton mini', for: idEntrada }, logo ? 'Subir otro logo' : 'Subir un logo'),
+    pistaDePegado(ficheros => subirFichero((ficheros || [])[0])),
     delProyecto && (!logo || logo.fichero !== delProyecto.logo.fichero)
       ? h('button', { clase: 'mini', onclick: () => usarDelProyecto() }, `Usar el de «${delProyecto.proyecto}»`) : null,
     logo ? h('button', { clase: 'mini fantasma peligro', onclick: () => quitar() }, 'Sin logo') : null));
@@ -15420,9 +15735,13 @@ function editorLogo(modo, est, repintar) {
     : 'Ponerlo, moverlo o quitarlo solo vuelve a montar el vídeo.'));
   return caja;
 
-  async function subir(input) {
+  function subir(input) {
     const fichero = (input.files || [])[0];
     input.value = '';
+    return subirFichero(fichero);
+  }
+
+  async function subirFichero(fichero) {
     if (!fichero) return;
     const cuerpo = new FormData();
     cuerpo.append('logo', fichero);
@@ -15664,7 +15983,7 @@ async function traerEstiloLight(partes, total) {
   const lista = partes.map(p => `• ${p.nombre}: ${p.rehace}`).join('\n');
   if (!confirm(`Traer del estilo:\n${lista}\n\n`
     + (total ? `Al volver a generar costará ≈ ${usdCorto(total)}. ` : '')
-    + 'Ahora no se genera nada: queda marcado lo que hay que rehacer.')) return;
+    + 'Ahora no se genera nada.')) return;
   try {
     const r = await pedir(`${API.proyecto(v.pid)}/estilo/traer`, {
       method: 'POST', cuerpo: { partes: partes.map(p => p.id) },
@@ -15996,11 +16315,11 @@ function montarAdjuntosAsistente() {
   const mandos = pie.querySelector('.asistente-mandos');
   if (mandos) mandos.insertBefore(clip, mandos.firstChild);
   pie.appendChild(entrada);
-  campo.addEventListener('paste', ev => {
-    const ficheros = [...((ev.clipboardData || {}).files || [])];
-    if (ficheros.length) { ev.preventDefault(); adjuntarAlAsistente(ficheros); }
-  });
   const cajon = $('#asistente');
+  // pegar con el foco en el cajón (en el campo o no) lo atiende el pegado
+  // común de las zonas de imágenes: el foco dentro manda, así que gana a las
+  // zonas de la pantalla de detrás
+  aceptarPegado(cajon, adjuntarAlAsistente);
   ['dragenter', 'dragover'].forEach(n => cajon.addEventListener(n, ev => {
     if ([...((ev.dataTransfer || {}).types || [])].includes('Files')) {
       ev.preventDefault(); cajon.classList.add('soltando');

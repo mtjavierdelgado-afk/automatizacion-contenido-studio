@@ -53,6 +53,15 @@ vídeos, estilos, claves y contraseña no se tocan.
   «Actualizar» (deja unas 100 consultas cada 5 minutos); TikTok las da unas
   horas después de publicar, y lo subido a mano no se puede medir desde aquí.
 
+**El disco ya no crece sin límite (16 de octubre)**
+- **De cada vídeo se guardan sus 5 últimos montajes.** Cada vez que montas un
+  vídeo, el Studio guarda una copia entera (clips, música, efectos y el MP4);
+  antes no se borraba ninguna y un proyecto llegó a ocupar 55 GB. Ahora, al
+  terminar un montaje, se borran los más antiguos y quedan los 5 últimos. El
+  que estés usando no se borra nunca, aunque sea antiguo. Las imágenes, la voz
+  y el guion siguen guardando todas sus versiones. Los vídeos que ya tienes se
+  recortan la próxima vez que los montes.
+
 **Revisión completa del Studio (16 de octubre, tarde)**
 - **Las diapositivas se ven y suenan después de volver a una versión
   anterior**, y siguen en la misma escena. Si la carga falla una vez, sale

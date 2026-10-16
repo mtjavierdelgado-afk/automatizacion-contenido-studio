@@ -91,8 +91,7 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 
 | Rama abierta | Ficheros reservados | Desde |
 |---|---|---|
-| `podar-render` | Guardar como mucho 5 versiones del vídeo montado por proyecto (decisión del dueño, 16-10): `nucleo/estado.py` (poda de versiones), el sitio donde se completa el render en `app.py` o `pasos/p8_render.py`, y sus pruebas. Si `publicar-redes-1` guarda rutas a `pasos/render/v<N>/`, que lo diga: una versión podada deja de existir | 16-10-2026 |
-| `publicar-redes-1` | Publicar en redes (TikTok, Reels, YouTube, Facebook) a mano y con Upload-Post, y programar; y en la misma rama, después (decisión del dueño, 16-10), las **métricas** de cada post y el resumen por proyecto (lo que el plan llamaba `publicar-redes-2`). La parte 1 sola es el commit `af2dbc7` de la rama (para unir solo esa parte: `git merge af2dbc7`). **Para `podar-render`:** Publicar NO guarda rutas a `pasos/render/v<N>/`: lee el MP4 de la versión ACTIVA en el momento de subir y en cada envío solo apunta una huella (tamaño y fecha); lo programado ya está en Upload-Post. Lo único: no podar la versión activa mientras sube (un envío «subiendo»). **Propios:** `pasos/publicar.py`, `motores/publicar_uploadpost/`, `pasos/prueba_publicar.py`. **Por zonas:** en `web/app.js` solo funciones nuevas en una sección al final, una línea en la pantalla Vídeo y una en `pintarConfig` (el bloque de la clave de Upload-Post; no toca `API`); en `app.py` solo rutas nuevas en un bloque al final; en `web/estilo.css` solo clases nuevas al final; en `pasos/claves.py` la clave `uploadpost` (añadida, espejada en el `.env` como `UPLOADPOST_API_KEY`); `docs/API.md`, `pruebas.sh`/`pruebas.ps1` (su suite) y un tramo al final de `prueba_recorrido.py`. `arreglos-v2e` y `arreglos-voz` ya están unidas: se pone al día con `main` antes de unirse | 16-10-2026 |
+| `publicar-redes-1` | Publicar en redes (TikTok, Reels, YouTube, Facebook) a mano y con Upload-Post, y programar; y en la misma rama, después (decisión del dueño, 16-10), las **métricas** de cada post y el resumen por proyecto (lo que el plan llamaba `publicar-redes-2`). La parte 1 sola es el commit `af2dbc7` de la rama (para unir solo esa parte: `git merge af2dbc7`). **Sobre `podar-render` (ya unida: del render se guardan las 5 últimas versiones y nunca la activa):** Publicar NO guarda rutas a `pasos/render/v<N>/`: lee el MP4 de la versión ACTIVA en el momento de subir y en cada envío solo apunta una huella (tamaño y fecha); lo programado ya está en Upload-Post. Lo único: no podar la versión activa mientras sube (un envío «subiendo»). **Propios:** `pasos/publicar.py`, `motores/publicar_uploadpost/`, `pasos/prueba_publicar.py`. **Por zonas:** en `web/app.js` solo funciones nuevas en una sección al final, una línea en la pantalla Vídeo y una en `pintarConfig` (el bloque de la clave de Upload-Post; no toca `API`); en `app.py` solo rutas nuevas en un bloque al final; en `web/estilo.css` solo clases nuevas al final; en `pasos/claves.py` la clave `uploadpost` (añadida, espejada en el `.env` como `UPLOADPOST_API_KEY`); `docs/API.md`, `pruebas.sh`/`pruebas.ps1` (su suite) y un tramo al final de `prueba_recorrido.py`. `arreglos-v2e` y `arreglos-voz` ya están unidas: se pone al día con `main` antes de unirse | 16-10-2026 |
 
 Quien abre una rama la apunta aquí (en `main`, regla 8); quien la une a `main`,
 la quita.
@@ -413,6 +412,14 @@ unidades pedidas). La calidad de cada imagen va en su ficha (`calidad`, desde el
 15-10-2026); en las viejas se deduce de la firma (`p6_assets.calidad_de_ficha`) y
 si no se puede es «desconocida» y no se ofrece. **No cambies la forma de
 `_firma_imagen`**: es la clave del banco y lo que permite esa deducción.
+
+**Del render se guardan las 5 últimas versiones** (y siempre la activa):
+`estado.VERSIONES_QUE_SE_GUARDAN`, decisión del dueño del 16-10-2026, y
+`ESTUDIO_VERSIONES_RENDER` para cambiarlo. Cada montaje copia el vídeo entero en
+una `v<N>` nueva. La poda la hace `completar()` al sellar: primero quita las
+entradas del documento y guarda, y después borra las carpetas y sus
+manifiestos, para que el estado nunca nombre una versión que ya no está. Los
+demás pasos guardan todas: son pequeños y la pantalla ofrece volver a ellas.
 
 **El precio por imagen del cotizador** (`ajustes.precio_por_imagen`) es la
 mediana de lo cobrado en imágenes de PLANO (`escena:`), por calidad y, con 20

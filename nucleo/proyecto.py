@@ -249,6 +249,12 @@ def escribir_json(ruta, datos):
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as fh:
                 json.dump(datos, fh, ensure_ascii=False, indent=2)
+                # A DISCO ANTES DE SUSTITUIR. Sin esto, un corte de luz justo
+                # despues del os.replace puede dejar el fichero nuevo VACIO
+                # (NTFS y otros no garantizan el orden), y un estado.json vacio
+                # se aparta y el proyecto abre de cero.
+                fh.flush()
+                os.fsync(fh.fileno())
             _reemplazar(temporal, ruta)
         except BaseException:
             if os.path.exists(temporal):

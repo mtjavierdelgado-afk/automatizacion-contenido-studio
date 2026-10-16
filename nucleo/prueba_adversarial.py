@@ -630,6 +630,125 @@ def t7_varios(base):
     shutil.rmtree(carpeta, ignore_errors=True)
 
 
+def t9_revision_v2f(base):
+    """Los fallos de la revision del nucleo del 16-10-2026 (arreglos-v2f)."""
+    from nucleo.trabajos import GestorTrabajos
+    from nucleo import estado as MOD_ESTADO
+
+    print("\n[9a] un trabajo de varios pasos no marca error en el que YA se completo")
+    carpeta = tempfile.mkdtemp(dir=base)
+    proyecto, e = grafo_completo(carpeta, "v2f_error")
+    gestor = GestorTrabajos(estado=e)
+
+    def tanda_voz(avisar):
+        e.completar("voz", {"wav": "toma.wav"})           # grabada y pagada
+        raise RuntimeError("revision_audio: cupo agotado")  # falla la siguiente
+    gestor.esperar(gestor.lanzar("receta:voz", tanda_voz, paso="voz"), 10)
+    igual(e.estado_de("voz"), "listo", "la voz completada no hereda el error de otra tarea")
+    ok(e.al_dia("voz"), "y sigue al dia: el reintento no la regraba")
+
+    def falla_sin_completar(avisar):
+        raise RuntimeError("cartesia 500")
+    gestor.esperar(gestor.lanzar("voz", falla_sin_completar, paso="voz"), 10)
+    igual(e.estado_de("voz"), "error", "si el paso registrado NO se completo, si es su error")
+    e.limpiar_marca("voz")
+
+    print("\n[9b] si marcar o anotar revientan, el trabajo no se queda «ejecutando»")
+    real = e.marcar_ejecutando
+
+    def roto(paso):
+        raise TimeoutError("otro proceso no suelta el cerrojo")
+    e.marcar_ejecutando = roto
+    try:
+        ficha = gestor.esperar(gestor.lanzar("x", lambda avisar: 1, paso="voz"), 10)
+    finally:
+        e.marcar_ejecutando = real
+    igual(ficha["estado"], "error", "el trabajo acaba en error, no colgado")
+    igual(gestor.listar(activos=True), [], "y no queda nada activo")
+
+    print("\n[9c] revertir vacia la cache de firmas")
+    carpeta = tempfile.mkdtemp(dir=base)
+    proyecto, e = grafo_completo(carpeta, "v2f_cache")
+    e.set_params("guion", dict(e.params("guion"), tono="alegre"))
+    e.completar("guion", {"escenas": len(UNIDADES)})
+    with e._lock:     # la v1, como las de antes de que existiera firma_propia
+        e._doc["pasos"]["guion"]["versiones"][0].pop("firma_propia", None)
+        e._guardar()
+    e.estado_de("guion")       # la pantalla lee: la cache se llena
+    e.revertir("guion", 1)
+    igual(e.estado_de("guion"), "listo", "una version vieja revertida no sale obsoleta")
+
+    print("\n[9d] revertir aparta los restos de trabajo/ de una pasada rota")
+    carpeta = tempfile.mkdtemp(dir=base)
+    proyecto, e = grafo_completo(carpeta, "v2f_trabajo")
+    e.completar("assets", {"total": 4}, {u: {"png": "v2"} for u in UNIDADES})
+    trabajo = proyecto.ruta_trabajo("assets")      # pasada sobre la v2, cortada
+    with open(os.path.join(trabajo, "S02.png"), "w") as fh:
+        fh.write("imagen de la v2")
+    resultado = e.revertir("assets", 1)
+    ok(not os.path.exists(trabajo), "trabajo/ ya no esta al revertir")
+    apartado = (resultado or {}).get("trabajo_apartado") or ""
+    ok(os.path.isfile(os.path.join(apartado, "S02.png")),
+       f"se aparta, no se borra ({apartado})")
+    ok(not os.path.basename(os.path.dirname(apartado)).startswith("v"),
+       "y no donde p6 busca versiones")
+
+    print("\n[9e] estado_de no da «listo» a un paso editado mientras corria")
+    # un proyecto como los de verdad: sin bloque `unidades` en el guion (el de
+    # grafo_completo lo trae, y sus unidades heredadas taparian lo que se mira)
+    carpeta = tempfile.mkdtemp(dir=base)
+    proyecto = Proyecto.crear(carpeta, "v2f_propia")
+    e = Estado(proyecto)
+    for pid in ("ingesta", "brief"):
+        e.completar(pid, {"ok": 1})
+    e.set_params("guion", {"tono": "seco"})
+    e.completar("guion", {"escenas": 2})
+    e.set_params("voz", {"voz_id": "A"})
+    e.completar("voz", {"wav": "n.wav"})
+    e.marcar_ejecutando("voz")                     # se graba con la voz A
+    e.actualizar_params("voz", {"voz_id": "B"})    # el usuario cambia a media toma
+    e.completar("voz", {"wav": "n.wav"})
+    igual(e.estado_de("voz"), "obsoleto", "la voz grabada con la de antes sale obsoleta")
+    igual(e.estado_de("voz") == "listo", e.al_dia("voz"), "estado_de y al_dia dicen lo mismo")
+    e.completar("voz", {"wav": "n.wav"})           # se regraba con la B
+    # y el guion corregido a mano sigue «listo» (CORRECCIONES)
+    e.actualizar_params("guion", {"bloques": {"B1": {"texto": "corregido a mano"}}})
+    igual(e.estado_de("guion"), "listo", "una correccion a mano no deja el guion obsoleto")
+    igual(e.estado_de("voz"), "obsoleto", "pero si lo de abajo")
+
+    print("\n[9f] las marcas «ejecutando» de un servicio anterior se quitan")
+    carpeta = tempfile.mkdtemp(dir=base)
+    proyecto, e = grafo_completo(carpeta, "v2f_huerfana")
+    e.marcar_ejecutando("callouts")
+    otro = Estado(proyecto)               # el servicio se reinicia
+    igual(otro.limpiar_marcas_en_marcha(), ["callouts"], "se quita la que quedo")
+    igual(otro.estado_de("callouts"), "listo", "y el paso vuelve a su estado")
+    igual(otro.limpiar_marcas_en_marcha(), [], "sin marcas no escribe nada")
+
+    print("\n[9g] completar escribe el manifiesto ANTES de vaciar trabajo/")
+    carpeta = tempfile.mkdtemp(dir=base)
+    proyecto, e = grafo_completo(carpeta, "v2f_manifiesto")
+    trabajo = proyecto.ruta_trabajo("assets")
+    with open(os.path.join(trabajo, "S01.png"), "w") as fh:
+        fh.write("pagada")
+    real = e._guardar_manifiesto
+
+    def disco_lleno(*a, **k):
+        raise OSError(28, "No space left on device")
+    e._guardar_manifiesto = disco_lleno
+    try:
+        e.completar("assets", {}, {"S01": {"png": "S01.png"}})
+        ok(False, "completar deberia propagar el fallo del manifiesto")
+    except OSError:
+        pass
+    finally:
+        e._guardar_manifiesto = real
+    ok(os.path.isfile(os.path.join(trabajo, "S01.png")),
+       "lo pagado sigue en trabajo/ para poder retomar")
+    igual(e.estado_de("assets"), "listo", "y el estado no ha cambiado")
+    shutil.rmtree(carpeta, ignore_errors=True)
+
+
 def principal():
     base = tempfile.mkdtemp(prefix="romper_nucleo_")
     solo = sys.argv[1:] or None
@@ -637,7 +756,8 @@ def principal():
                ("4", t4_persistencia), ("4b", t4b_sello), ("5", t5_carreras),
                ("5b", t5b_lectores_escritores_disco),
                ("5c", t5c_completar_con_params_cambiados), ("5d", t5d_procesos),
-               ("6", t6_traversal), ("7", t7_varios), ("8", t8_no_borrar_estado)]
+               ("6", t6_traversal), ("7", t7_varios), ("8", t8_no_borrar_estado),
+               ("9", t9_revision_v2f)]
     try:
         for clave, funcion in pruebas:
             if solo and clave not in solo:

@@ -4695,6 +4695,166 @@ def prueba_microcorte_de_red():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def prueba_revision_imagenes_16_10():
+    """La revision de la tuberia de imagenes del 16-10-2026. Sin red ni pago.
+
+      1. dos planos con el MISMO mapa no tumban la tanda por «repetidos»;
+      2. la copia normalizada de una referencia no sobrevive a un cambio de
+         contenido que llega con una fecha ANTERIOR (copy2 del banco, replace);
+      3. un 502/504 de la pasarela no se reintenta solo (puede estar cobrado);
+      6. si apuntar el gasto falla, la imagen pagada no se pierde.
+    """
+    import importlib.util                                   # noqa: PLC0415
+    import base64                                           # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_rev_imagen_")
+    try:
+        # ---------------------------------------------------------------- 1
+        titulo("p6: dos planos con el mismo mapa no son «planos repetidos»")
+        catalogo = {"sets": {"puerto": {"palabras": ["muelle"]}}, "reparto": {},
+                    "beats": [], "componentes": {"mapa_ruta": {
+                        "tipo": "mapa", "palabras": ["manzanillo", "shanghai"]}}}
+        escenas = [{"id": "S001", "narracion": "El barco zarpo de Shanghai rumbo a Manzanillo."},
+                   {"id": "S002", "narracion": "Trabajaban en el muelle de noche."},
+                   {"id": "S003", "narracion": "Tres semanas despues llego a Manzanillo."}]
+        p6_assets._asignar_sets(escenas, catalogo, {"semilla": 1})  # noqa: SLF001
+        con_mapa = [e["id"] for e in escenas if e.get("componente") == "mapa_ruta"]
+        igual(con_mapa, ["S001", "S003"], "los dos planos que nombran la ruta llevan el mapa")
+        os.makedirs(os.path.join(base, "escenas"))
+        mapa = os.path.join(base, "mapa_ruta.png")
+        Image.new("RGB", (16, 16), (9, 9, 9)).save(mapa)
+        resultados = {}
+        for sid in con_mapa:
+            medios.copiar(mapa, os.path.join(base, "escenas", f"{sid}.png"))
+            resultados[f"escena:{sid}"] = {"tipo": "escena", "id": sid,
+                                           "png": f"escenas/{sid}.png",
+                                           # al RETOMAR la ficha dice «conservado»
+                                           "origen": "conservado",
+                                           "componente": "mapa_ruta"}
+        igual(p6_assets._planos_repetidos(resultados, base,                # noqa: SLF001
+                                          copiados=p6_assets._copiados_del_plan(escenas)),
+              [], "el mismo mapa copiado en dos planos no tumba la tanda")
+        igual(p6_assets._planos_repetidos(resultados, base, copiados=()),  # noqa: SLF001
+              [], "ni aunque solo lo diga la ficha")
+        for sid in ("S010", "S011"):
+            medios.copiar(mapa, os.path.join(base, "escenas", f"{sid}.png"))
+            resultados[f"escena:{sid}"] = {"tipo": "escena", "id": sid,
+                                           "png": f"escenas/{sid}.png", "origen": "cache"}
+        igual(p6_assets._planos_repetidos(resultados, base,                # noqa: SLF001
+                                          copiados=p6_assets._copiados_del_plan(escenas)),
+              [["S010", "S011"]], "y dos planos DIBUJADOS iguales siguen tumbandola")
+
+        # ---------------------------------------------------------------- 2
+        titulo("imagen.normalizar: un cambio de contenido con fecha anterior se ve")
+        imagen = medios.motor("imagen_openai/imagen.py")
+        escenas_dir = os.path.join(base, "trabajo", "escenas")
+        os.makedirs(escenas_dir)
+        banco = os.path.join(base, "banco.png")
+        Image.new("RGB", (32, 32), (0, 0, 255)).save(banco)
+        hace_un_dia = time.time() - 86400
+        os.utime(banco, (hace_un_dia, hace_un_dia))
+        plano = os.path.join(escenas_dir, "S004.png")
+        Image.new("RGB", (32, 32), (255, 0, 0)).save(plano)
+        cache = os.path.join(base, "trabajo", "_refs")
+        primera = imagen.normalizar(plano, cache)
+        igual(Image.open(primera).convert("RGB").getpixel((1, 1)), (255, 0, 0),
+              "la primera copia es la del plano")
+        shutil.copy2(banco, plano)          # lo que hace medios.copiar del banco
+        segunda = imagen.normalizar(plano, cache)
+        igual(Image.open(segunda).convert("RGB").getpixel((1, 1)), (0, 0, 255),
+              "el plano sale del banco con fecha vieja: se adjunta el NUEVO contenido")
+        otro = os.path.join(escenas_dir, "S005.png")
+        Image.new("RGB", (32, 32), (0, 255, 0)).save(otro)
+        os.utime(otro, (hace_un_dia - 10, hace_un_dia - 10))
+        os.replace(otro, plano)             # lo que hace _recolocar_escenas
+        igual(Image.open(imagen.normalizar(plano, cache)).convert("RGB").getpixel((1, 1)),
+              (0, 255, 0), "y un dibujo recolocado de numero, tambien")
+        sello = os.stat(imagen.normalizar(plano, cache)).st_mtime_ns
+        igual(sello, os.stat(plano).st_mtime_ns,
+              "sin cambios, la copia se reutiliza (lleva la fecha de su origen)")
+
+        # ---------------------------------------------------------- 3 y 6
+        titulo("motor de imagen: 502/504 no se reintentan; 500/503 si")
+        import requests as requests_de_verdad                  # noqa: PLC0415
+        spec = importlib.util.spec_from_file_location(
+            "imagen_pasarela", os.path.join(RAIZ, "motores", "imagen_openai", "imagen.py"))
+        motor = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(motor)
+        falsa_antes = os.environ.pop("ESTUDIO_IMAGEN_FALSA", None)
+        crudo = io.BytesIO()
+        Image.new("RGB", (8, 8), (1, 2, 3)).save(crudo, "PNG")
+        png = crudo.getvalue()
+
+        class Resp:
+            def __init__(self, codigo):
+                self.status_code = codigo
+                self.headers = {}
+                self.text = "{}" if codigo == 200 else f"error {codigo}"
+
+            def json(self):
+                return {"data": [{"b64_json": base64.b64encode(png).decode("ascii")}],
+                        "usage": {}}
+
+        def red(codigos):
+            llamadas = []
+
+            class Red:
+                exceptions = requests_de_verdad.exceptions
+
+                @staticmethod
+                def post(*_a, **_k):
+                    llamadas.append(codigos[min(len(llamadas), len(codigos) - 1)])
+                    return Resp(llamadas[-1])
+            return Red, llamadas
+
+        dormir = motor.time.sleep
+        motor.time.sleep = lambda *_a: None
+        ref = os.path.join(base, "ref.png")
+        Image.new("RGB", (8, 8), (5, 5, 5)).save(ref)
+        try:
+            for codigo in (502, 504):
+                motor.requests, llamadas = red([codigo, 200])
+                fallo = None
+                try:
+                    motor.generar("x", [ref], api_key="sk-prueba-no-se-usa")
+                except Exception as error:                  # noqa: BLE001
+                    fallo = error
+                igual(len(llamadas), 1, f"un {codigo} no se reintenta: puede estar cobrada")
+                ok(type(fallo).__name__ == "CorteDeRed" and "cobrar" in str(fallo),
+                   f"y para como un corte de red, diciendolo ({fallo})")
+            for codigo in (500, 503):
+                motor.requests, llamadas = red([codigo, 200])
+                salida = motor.generar("x", [ref], api_key="sk-prueba-no-se-usa")
+                ok(salida[0] == png and len(llamadas) == 2,
+                   f"un {codigo} lo contesta la API sin hacer el trabajo: se reintenta")
+
+            titulo("medidor: si apuntar falla, la imagen pagada no se pierde")
+            envuelta = coste._medir_imagen(lambda *_a, **_k: (png, {"coste": 0.006}))  # noqa: SLF001
+            reportar = coste.reportar_openai
+
+            def revienta(*_a, **_k):
+                raise OSError(28, "No space left on device")
+            coste.reportar_openai = revienta
+            try:
+                salida, fallo = None, None
+                try:
+                    salida = envuelta("x", [ref], quality="low")
+                except Exception as error:                  # noqa: BLE001
+                    fallo = error
+            finally:
+                coste.reportar_openai = reportar
+            ok(fallo is None and salida and salida[0] == png,
+               f"el PNG ya pagado vuelve aunque el medidor reviente ({fallo!r})")
+            igual((salida or (None, {}))[1].get("coste"), 0.006,
+                  "con el importe de la tabla del motor")
+        finally:
+            motor.time.sleep = dormir
+            motor.requests = requests_de_verdad
+            if falsa_antes is not None:
+                os.environ["ESTUDIO_IMAGEN_FALSA"] = falsa_antes
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def _prohibir_pagar():
     """Deja el motor de imagen sin `generar`. Ver la cabecera del modulo.
 
@@ -4776,6 +4936,7 @@ def main():
     prueba_musica_un_pelin_mas_alta()
     prueba_ortografia_por_tandas()
     prueba_microcorte_de_red()
+    prueba_revision_imagenes_16_10()
 
     print("\n" + "=" * 70)
     if _fallos:

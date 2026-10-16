@@ -3209,7 +3209,8 @@ def coste_en_detalle(pid: str):
         "efectos": {"usd": 0.0, "cuantos": n_efectos, "fuente": "FreeSound o subidos por ti"},
         "estilo": estilo,
         "tandas": _tandas_de(ctx, eventos),
-        "precio_imagen": AJUSTES.precio_por_imagen(calidad),
+        "precio_imagen": AJUSTES.precio_por_imagen(calidad, modo=PASOS_MODULOS.p6_assets.modo_de(
+            (ctx.estado.params("assets") or {}).get("estilo"))),
         "tarifas": {"usd_por_caracter": COSTE.tarifa_caracter(),
                     "usd_por_token": COSTE.tarifa_tokens()},
     }
@@ -5953,9 +5954,12 @@ def _correr_notas_imagenes(avisar, ctx):
 
 
 def _usd_por_imagen(ctx):
-    calidad = str((ctx.estado.params("assets") or {}).get("calidad") or "low")
+    assets = ctx.estado.params("assets") or {}
+    calidad = str(assets.get("calidad") or "low")
     try:
-        return round(float(AJUSTES.usd_por_imagen(calidad) or 0.0), 4)
+        # CON SU MODO: un plano de foto no cuesta lo que uno de ilustracion
+        return round(float(AJUSTES.usd_por_imagen(
+            calidad, modo=PASOS_MODULOS.p6_assets.modo_de(assets.get("estilo"))) or 0.0), 4)
     except Exception:                                       # noqa: BLE001
         return 0.0
 
@@ -8353,7 +8357,12 @@ def _que_hace(tarea_id, ctx, receta, modo="pendientes", solo_montar=False,
                         {"tipos": ["reparto", "mapa", "grafico", "cabecera"],
                          "replantear": False})
     if tarea_id == "assets":
-        return _un_paso(ctx, "assets", modo, {"replantear": False})
+        # en 'todo' las hojas ya las acaba de rehacer (y pagar) la tarea
+        # «piezas» de esta misma receta: aqui se conservan (p6 `pedido`)
+        conservar = modo == "todo" and "piezas" in _recetas().puestas_de("video", receta)
+        return _un_paso(ctx, "assets", modo, {"replantear": False,
+                                              **({"conservar_piezas": True}
+                                                 if conservar else {})})
     if tarea_id == "callouts":
         return _un_paso(ctx, "callouts", modo)
     if tarea_id == "banda_sonora":

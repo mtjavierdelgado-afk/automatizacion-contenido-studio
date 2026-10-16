@@ -537,6 +537,9 @@ def normalizar(ruta, cache_dir, lado_max=1024):
     os.close(descriptor)
     try:
         img.save(temporal, "PNG")
+        # EL SELLO: la copia normalizada lleva la fecha EXACTA de su origen
+        # (ver `_al_dia`), y `os.replace` la conserva
+        _sellar_como(temporal, ruta)
     except Exception:
         try:
             os.remove(temporal)
@@ -602,11 +605,29 @@ def _sustituir(temporal, destino, origen):
     raise fallo
 
 
+def _sellar_como(destino, origen):
+    """Pone a `destino` la fecha de modificacion exacta de `origen`."""
+    info = os.stat(origen)
+    os.utime(destino, ns=(info.st_atime_ns, info.st_mtime_ns))
+
+
 def _al_dia(destino, origen):
-    """El destino existe y no es mas viejo que su origen."""
+    """La copia normalizada es de ESTE origen: lleva su fecha exacta.
+
+    Comparaba «el destino no es mas viejo que el origen», y eso daba por buena
+    una copia de OTRO contenido (revision del 16-10-2026). Dos caminos ponen en
+    la misma ruta una imagen distinta CON UNA FECHA ANTERIOR: `medios.copiar`
+    (shutil.copy2, que conserva la fecha) cuando un plano sale del banco o se
+    adopta, y `os.replace` cuando `_recolocar_escenas` mueve los dibujos de
+    numero. La copia vieja era «mas nueva» que su origen, se adjuntaba la
+    imagen de antes como continuidad --o la hoja de reparto de antes-- y la
+    firma del plano se calculaba sobre esos bytes. Ahora la copia lleva el
+    `st_mtime_ns` exacto de su origen (`_sellar_como`) y solo vale si sigue
+    siendo IGUAL: cualquier otra fecha, mas nueva o mas vieja, la rehace.
+    """
     try:
         return (os.path.exists(destino)
-                and os.path.getmtime(destino) >= os.path.getmtime(origen))
+                and os.stat(destino).st_mtime_ns == os.stat(origen).st_mtime_ns)
     except OSError:
         return False
 
@@ -965,7 +986,21 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
             # ventana se renueve; el proximo intento puede elegir otra cuenta
             _frenar(_cuanto_esperar(r), _motivo_limite(r, cuenta), cuenta)
             continue
-        if r.status_code in (500, 502, 503, 504) and intento < reintentos:
+        # UN 502 O UN 504 NO SE REINTENTA SOLO (revision del 16-10-2026). Los
+        # pone la PASARELA que hay delante de OpenAI cuando el servidor de
+        # detras no contesta a tiempo o le corta: la peticion ya entro y la
+        # imagen puede estar dibujandose y cobrandose igual que en un corte de
+        # red a mitad (F2), y repetirla seria pagarla dos veces. Se para como
+        # ese corte. El 500 y el 503 si se reintentan: los contesta la propia
+        # API cuando NO ha hecho el trabajo (un fallo suyo, o «sobrecargado,
+        # vuelve luego»), y una peticion que acaba en error no se factura.
+        if r.status_code in (502, 504):
+            raise CorteDeRed(
+                f"OpenAI no ha contestado a tiempo mientras dibujaba la imagen "
+                f"(HTTP {r.status_code}). No se reintenta sola porque puede que "
+                "la llegara a hacer y a cobrar. Vuelve a lanzar la tanda en un "
+                "rato: lo ya hecho no se pierde ni se vuelve a pagar.")
+        if r.status_code in (500, 503) and intento < reintentos:
             time.sleep(min(3 * (intento + 1), 30))
             continue
         # UN 400 DE «IMAGEN INVALIDA» SE REINTENTA UNA VEZ, y solo ese. La causa

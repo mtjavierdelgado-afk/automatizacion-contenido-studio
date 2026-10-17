@@ -489,6 +489,10 @@ Tres cosas que ahorran perseguir fallos que no existen:
 - `prueba_pasos_visuales` reutiliza `%TEMP%\estudio_prueba_visual` entre
   ejecuciones; si una pasada se corta a medias, la siguiente falla por el estado
   sucio. `pruebas.ps1` la borra.
+- En `prueba_pasos_visuales`, «el vídeo sale idéntico se reparta en procesos o
+  corra en fila» **puede fallar en una máquina cargada** (2 núcleos con otra
+  suite o un recorrido a la vez: visto el 16-10 dos veces, siempre un plano).
+  Repetida sola, pasa. Si falla sola, entonces sí es de verdad.
 - `prueba_pasos_voz` sale a Cartesia de verdad **si hay clave**; si no, omite esa
   parte y lo dice. No es un fallo.
 - `prueba_login` llama al CLI de Claude de verdad. Es la única que comprueba que

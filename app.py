@@ -63,7 +63,7 @@ from starlette.exceptions import HTTPException as ErrorHTTP  # noqa: E402
 from nucleo.bitacora import (Bitacora, anotar_global,  # noqa: E402
                              RUTA_GLOBAL as RUTA_BITACORA_GLOBAL)
 from nucleo.estado import (PASOS, PASOS_POR_ID, Estado,  # noqa: E402
-                           descendientes_de)
+                           EstadoIlegible, descendientes_de)
 from nucleo.proyecto import (Proyecto, ahora, escribir_json,  # noqa: E402
                              identificador, leer_json, leer_jsonl, lock_de,
                              recolocar,
@@ -185,6 +185,14 @@ class Contexto:
         self.estado = Estado(self.proyecto)
         self.bitacora = Bitacora(self.proyecto)
         self.gestor = GestorTrabajos(estado=self.estado, bitacora=self.bitacora)
+        # SI estado.json NO SE PODIA LEER y se volvio a la ultima copia buena,
+        # queda dicho: lo que se hiciera en el ultimo guardado puede faltar
+        if self.estado.recuperacion:
+            try:
+                self.bitacora.anotar("estado_recuperado", None,
+                                     dict(self.estado.recuperacion))
+            except Exception:  # noqa: BLE001 -- no impide abrir el proyecto
+                pass
         # LAS MARCAS «EJECUTANDO» DE UN SERVICIO ANTERIOR. Un contexto nuevo
         # tiene el gestor vacio: ningun trabajo de este servicio corre en este
         # proyecto, asi que una marca que diga «ejecutando» es de un trabajo
@@ -228,6 +236,9 @@ def contexto(pid):
         raise ErrorApi(404, f"proyecto desconocido: {clave}")
     try:
         ctx = Contexto(raiz)
+    except EstadoIlegible as fallo:
+        # 503 y el porque, en castellano: la pantalla lo ensena tal cual
+        raise ErrorApi(503, str(fallo))
     except Exception as fallo:  # noqa: BLE001
         raise ErrorApi(500, f"no se ha podido abrir el proyecto {clave}: {fallo}")
     with _LOCK:

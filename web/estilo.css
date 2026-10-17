@@ -3394,3 +3394,30 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 .portada-mandos { display: flex; flex-direction: column; gap: 6px; min-width: 200px; }
 .portada-mandos input[type=range] { width: 100%; }
 .motivo-no-publicar { color: var(--aviso); flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+/* la cola con filtros y el mes */
+.filtros-cola { gap: 6px; flex-wrap: wrap; margin: 4px 0 10px; }
+.filtros-cola .buscar-cola { flex: 1 1 200px; min-width: 0; }
+.filtros-cola select { max-width: 200px; min-width: 0; }
+.titulo-calendario { text-transform: capitalize; }
+.vista-cal { display: inline-flex; }
+.calendario-mes { grid-template-columns: repeat(7, minmax(44px, 1fr)); gap: 4px; overflow-x: visible; }
+.calendario-mes .dia-publicar { min-height: 64px; padding: 4px; min-width: 0; }
+.calendario-mes button.envio-dia { font-size: 11px; padding: 2px 4px; overflow: hidden; text-overflow: ellipsis; }
+.calendario-mes .dia-cab { font-size: 11px; }
+.cab-semana { font-size: 11px; font-weight: 600; color: var(--tenue); text-align: center; text-transform: uppercase; }
+.dia-publicar.fuera-mes { opacity: .45; }
+.dia-publicar.abierto { border-color: var(--acento); }
+.mas-del-dia { font-size: 11px; padding: 1px 4px; }
+.dia-abierto { margin-top: 8px; border-top: 1px solid var(--linea); padding-top: 6px; }
+.grupo-listos { margin-top: 10px; }
+.cab-grupo { font-weight: 600; font-size: 13px; color: var(--tenue); padding: 4px 0; border-bottom: 1px solid var(--linea); }
+.estilo-listo { white-space: nowrap; }
+.resumen-publicado { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+.resumen-publicado .fila { gap: 6px; flex-wrap: wrap; }
+.resumen-publicado a.pastilla { text-decoration: none; }
+@media (max-width: 600px) {
+  .calendario-mes { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+  .calendario-mes button.envio-dia { font-size: 10px; }
+  .calendario-mes button.envio-dia .hora { display: none; }
+  .filtros-cola select { flex: 1 1 45%; max-width: none; }
+}

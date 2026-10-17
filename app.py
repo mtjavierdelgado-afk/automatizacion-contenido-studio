@@ -14560,6 +14560,12 @@ def _videos_para_publicar(peticion):
     cerrados = _cerrados(peticion)
     asignaciones = CLIENTES._leer(raiz_proyectos())
     nombres = _nombres_de_clientes()
+    # el nombre de cada estilo, para filtrar la cola por estilo
+    try:
+        estilos = {f.get("id"): f.get("nombre") or f.get("id") for f in
+                   ((_presets().listar().get("presets") or {}).get("canal") or [])}
+    except Exception:                                       # noqa: BLE001
+        estilos = {}
     salida = []
     for ficha in Proyecto.listar(raiz_proyectos()):
         if ficha.get(CONFIG_TALLER):
@@ -14574,6 +14580,9 @@ def _videos_para_publicar(peticion):
             mp4 = ""
         salida.append({"pid": ficha.get("id"), "nombre": ficha.get("nombre") or ficha.get("id"),
                        "cliente": cid, "cliente_nombre": nombres.get(cid, ""),
+                       "estilo": ficha.get(CONFIG_ESTILO_LIGHT) or "",
+                       "estilo_nombre": estilos.get(ficha.get(CONFIG_ESTILO_LIGHT) or "", "")
+                       or (ficha.get(CONFIG_ESTILO_LIGHT) or ""),
                        "montado": bool(mp4), "actualizado": ficha.get("actualizado") or ""})
     return salida
 

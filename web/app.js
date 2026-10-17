@@ -16976,7 +16976,11 @@ function pintarModulo() {
   }
   if (foco) {
     const campo = m.querySelector(`[data-foco="${foco}"]`);
-    if (campo) campo.focus();
+    if (campo) {
+      campo.focus();
+      // el cursor, al final: si no, buscar letra a letra escribía al revés
+      try { if (campo.setSelectionRange && /^(text|search)$/.test(campo.type)) campo.setSelectionRange(campo.value.length, campo.value.length); } catch (e) { /* no aplica */ }
+    }
   }
 }
 
@@ -17045,7 +17049,9 @@ async function cargarPublicar(silencio) {
   PUB.error = '';
   try {
     if (PUB.seccion === 'ficha' && PUB.pid) {
+      const antes = PUB.ficha;
       PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`));
+      avisarCambiosPublicar(antes, PUB.ficha);
     } else if (PUB.seccion === 'cuentas') {
       PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
     } else if (PUB.seccion === 'resultados') {
@@ -17062,7 +17068,7 @@ async function cargarPublicar(silencio) {
       // si entretanto se eligió otro proyecto o periodo, esta respuesta ya no vale
       if (pedido === PUB.proyectoResultados && dias === (PUB.diasResultados || 30)) PUB.resultados = r;
     } else {
-      PUB.cola = await pedir(rutaPublicar(`/cola${PUB.desde ? `?desde=${encodeURIComponent(PUB.desde)}` : ''}`));
+      PUB.cola = await pedir(rutaPublicar(`/cola?${consulta({ desde: PUB.desde || '', dias: PUB.vistaCal === 'mes' ? 42 : 7 })}`));
       contarAvisosPublicar();
     }
   } catch (e) {
@@ -17235,73 +17241,253 @@ function filaEnvioCola(e) {
     e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver') : null);
 }
 
+/* LA COLA, CON FILTROS (16-10-2026: con muchos vídeos la lista era un caos).
+   Buscador, proyecto, estilo, estado y fecha; se acuerdan en este navegador.
+   La semana o el mes, filtrados igual. */
+const FILTROS_COLA_DEFECTO = { texto: '', proyecto: '', estilo: '', estado: '', fecha: '', agrupar: false };
+
+function filtrosCola() {
+  if (!PUB.filtros) {
+    let guardados = {};
+    try { guardados = JSON.parse(localStorage.getItem('publicar.filtros') || '{}') || {}; } catch (e) { guardados = {}; }
+    PUB.filtros = Object.assign({}, FILTROS_COLA_DEFECTO, guardados, { texto: '' });
+  }
+  return PUB.filtros;
+}
+
+function cambiarFiltroCola(campo, valor) {
+  const f = filtrosCola();
+  f[campo] = valor;
+  PUB.verMasListos = 0;
+  try {
+    localStorage.setItem('publicar.filtros', JSON.stringify(Object.assign({}, f, { texto: '' })));
+  } catch (e) { /* sin almacenamiento: los filtros duran lo que la página */ }
+  if (campo === 'texto') {
+    clearTimeout(PUB.relojBuscar);
+    PUB.relojBuscar = setTimeout(pintarModulo, 200);
+  } else pintarModulo();
+}
+
+/* Sin publicar / a medias / programado / publicado en todas las elegidas. */
+function estadoDeListo(v) {
+  const estados = Object.values(v.envios || {});
+  if (!estados.length) return 'sin';
+  if (estados.some(e => ['programado', 'enviando', 'publicando', 'espera_ok'].includes(e))) return 'programado';
+  if (estados.some(e => ['fallido', 'comprobar'].includes(e))) return 'atencion';
+  const salieron = estados.filter(e => ['publicado', 'a_mano'].includes(e)).length;
+  return salieron >= 4 ? 'publicado' : 'medias';
+}
+
+function pasaFiltroCola(v) {
+  const f = filtrosCola();
+  const texto = normalizarBusqueda(f.texto);
+  if (texto && !normalizarBusqueda(`${v.nombre || ''} ${v.pid || ''} ${v.cliente_nombre || ''} ${v.estilo_nombre || ''}`).includes(texto)) return false;
+  if (f.proyecto && (v.cliente || '_sin') !== f.proyecto) return false;
+  if (f.estilo && (v.estilo || '') !== f.estilo) return false;
+  if (f.estado && estadoDeListo(v) !== f.estado) return false;
+  if (f.fecha) {
+    const t = Date.parse(v.actualizado || '');
+    if (!Number.isFinite(t) || Date.now() - t > Number(f.fecha) * 86400000) return false;
+  }
+  return true;
+}
+
+function normalizarBusqueda(texto) {
+  return String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+}
+
+function barraFiltrosCola(listos) {
+  const f = filtrosCola();
+  const unicos = (clave, nombre) => {
+    const vistos = new Map();
+    listos.forEach(v => { const id = v[clave] || (clave === 'cliente' ? '_sin' : ''); if (id && !vistos.has(id)) vistos.set(id, v[nombre] || (id === '_sin' ? 'Sin proyecto' : id)); });
+    return [...vistos.entries()].sort((x, y) => x[1].localeCompare(y[1], 'es'));
+  };
+  const selector = (campo, primera, opciones, etiqueta) => h('select', { 'aria-label': etiqueta, datos: { filtro: campo },
+    onchange: ev => cambiarFiltroCola(campo, ev.target.value) },
+  h('option', { value: '' }, primera),
+  ...opciones.map(([v, t]) => h('option', { value: v, selected: String(f[campo]) === String(v) }, t)));
+  return h('div', { clase: 'fila filtros-cola' },
+    h('input', { type: 'search', clase: 'buscar-cola', placeholder: 'Buscar un vídeo…', value: f.texto,
+      'aria-label': 'Buscar un vídeo', datos: { foco: 'buscar-cola' },
+      oninput: ev => cambiarFiltroCola('texto', ev.target.value) }),
+    selector('proyecto', 'Todos los proyectos', unicos('cliente', 'cliente_nombre'), 'Proyecto'),
+    selector('estilo', 'Todos los estilos', unicos('estilo', 'estilo_nombre'), 'Estilo'),
+    selector('estado', 'Cualquier estado', [['sin', 'Sin publicar'], ['medias', 'Publicado en algunas'],
+      ['publicado', 'Publicado en todas'], ['programado', 'Programado o subiendo'], ['atencion', 'Con algún fallo']], 'Estado'),
+    selector('fecha', 'Cualquier fecha', [['7', 'Últimos 7 días'], ['30', 'Últimos 30 días'], ['90', 'Últimos 3 meses']], 'Fecha'),
+    h('label', { clase: 'casilla-red' },
+      h('input', { type: 'checkbox', checked: !!f.agrupar, onchange: ev => cambiarFiltroCola('agrupar', ev.target.checked) }),
+      ' Agrupar por proyecto'),
+    Object.keys(FILTROS_COLA_DEFECTO).some(k => k !== 'agrupar' && f[k])
+      ? h('button', { clase: 'mini fantasma', onclick: () => {
+        PUB.filtros = Object.assign({}, FILTROS_COLA_DEFECTO, { agrupar: f.agrupar });
+        cambiarFiltroCola('texto', '');
+      } }, 'Quitar filtros') : null);
+}
+
+/* El primer día de la rejilla: el lunes de la semana pedida, o el lunes
+   anterior al día 1 del mes (6 semanas, como un calendario de pared). */
+function inicioCalendarioPublicar(vista, mes) {
+  if (vista !== 'mes') return PUB.desde || '';
+  const [a, m] = (mes || '').split('-').map(Number);
+  const uno = new Date(Date.UTC(a, (m || 1) - 1, 1, 12));
+  uno.setUTCDate(uno.getUTCDate() - ((uno.getUTCDay() + 6) % 7));
+  return uno.toISOString().slice(0, 10);
+}
+
+function mesDeHoyPublicar() {
+  const hoy = (PUB.cola || {}).hoy || new Date().toISOString().slice(0, 10);
+  return hoy.slice(0, 7);
+}
+
+function filaListoPublicar(v) {
+  const redes = h('span', { clase: 'redes-video' });
+  Object.keys(NOMBRES_RED).forEach(r => {
+    const estado = (v.envios || {})[r];
+    redes.appendChild(h('span', {
+      clase: `pastilla red-mini ${estado ? CLASE_ESTADO[estado] || '' : 'apagada'}`,
+      title: `${NOMBRES_RED[r]}: ${estado ? ESTADOS_ENVIO[estado] : 'sin publicar'}`,
+    }, CORTOS_RED[r]));
+  });
+  return h('div', { clase: 'fila fila-listo' },
+    h('b', { clase: 'nombre-listo' }, v.nombre || v.pid),
+    v.cliente_nombre ? h('span', { clase: 'meta' }, v.cliente_nombre) : null,
+    v.estilo_nombre ? h('span', { clase: 'meta estilo-listo' }, `· ${recortar(v.estilo_nombre, 24)}`) : null,
+    h('span', { clase: 'crece' }), redes,
+    h('button', { clase: 'primario mini', onclick: () => irASeccionPublicar('ficha', v.pid) },
+      v.textos ? 'Abrir' : 'Preparar'));
+}
+
 function seccionColaPublicar() {
   const c = PUB.cola || {};
   const caja = h('div', { clase: 'cola-publicar' });
   const aviso = avisoClavePublicar(c.clave);
   if (aviso) caja.appendChild(aviso);
+  const todos = c.listos || [];
+  const porPid = {};
+  todos.forEach(v => { porPid[v.pid] = v; });
+  const f = filtrosCola();
+  const filtrando = Object.keys(FILTROS_COLA_DEFECTO).some(k => k !== 'agrupar' && f[k]);
+  // un envío pasa si su vídeo pasa (o, si su vídeo no está en la lista, por el proyecto y el texto)
+  const pasaEnvio = e => {
+    const v = porPid[e.pid];
+    if (v) return pasaFiltroCola(Object.assign({}, v, { estado: '' })) && (!f.estado || pasaFiltroCola(v));
+    return pasaFiltroCola({ nombre: e.video, pid: e.pid, cliente: e.cliente, cliente_nombre: e.cliente_nombre, envios: {} });
+  };
 
-  const atencion = (c.esperan_ok || []).concat(c.fallidos || []);
+  if (todos.length) caja.appendChild(barraFiltrosCola(todos));
+
+  const atencion = (c.esperan_ok || []).concat(c.fallidos || []).filter(pasaEnvio);
   if (atencion.length) {
     const b = h('div', { clase: 'bloque bloque-atencion' }, h('h3', {}, 'Te necesitan'));
     atencion.forEach(e => b.appendChild(filaEnvioCola(e)));
     caja.appendChild(b);
   }
 
-  // LA SEMANA
-  const semana = h('div', { clase: 'bloque' });
+  // EL CALENDARIO: la semana o el mes
+  const vista = PUB.vistaCal === 'mes' ? 'mes' : 'semana';
+  const cal = h('div', { clase: 'bloque' });
   const desde = c.desde || '';
-  const mover = dias => {
-    const base = desde ? new Date(`${desde}T12:00:00Z`) : new Date();
-    base.setUTCDate(base.getUTCDate() + dias);
-    PUB.desde = base.toISOString().slice(0, 10);
+  const mover = paso => {
+    if (vista === 'mes') {
+      const [a, m] = (PUB.mes || mesDeHoyPublicar()).split('-').map(Number);
+      const otro = new Date(Date.UTC(a, m - 1 + paso, 1, 12));
+      PUB.mes = otro.toISOString().slice(0, 7);
+      PUB.desde = inicioCalendarioPublicar('mes', PUB.mes);
+    } else {
+      const base = desde ? new Date(`${desde}T12:00:00Z`) : new Date();
+      base.setUTCDate(base.getUTCDate() + paso * 7);
+      PUB.desde = base.toISOString().slice(0, 10);
+    }
     cargarPublicar();
   };
-  semana.appendChild(h('div', { clase: 'fila' },
-    h('h3', {}, 'La semana'), h('span', { clase: 'meta' }, 'hora de Lima'),
+  const cambiarVista = otra => {
+    PUB.vistaCal = otra;
+    PUB.diaAbierto = '';
+    if (otra === 'mes') { PUB.mes = PUB.mes || mesDeHoyPublicar(); PUB.desde = inicioCalendarioPublicar('mes', PUB.mes); } else PUB.desde = '';
+    cargarPublicar();
+  };
+  const titulo = vista === 'mes'
+    ? new Date(`${PUB.mes || mesDeHoyPublicar()}-15T12:00:00Z`).toLocaleDateString('es-PE', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+    : 'La semana';
+  cal.appendChild(h('div', { clase: 'fila' },
+    h('h3', { clase: 'titulo-calendario' }, titulo), h('span', { clase: 'meta' }, 'hora de Lima'),
     h('span', { clase: 'crece' }),
-    h('button', { clase: 'mini fantasma', title: 'Semana anterior', onclick: () => mover(-7) }, '‹'),
-    h('button', { clase: 'mini fantasma', onclick: () => { PUB.desde = ''; cargarPublicar(); } }, 'Hoy'),
-    h('button', { clase: 'mini fantasma', title: 'Semana siguiente', onclick: () => mover(7) }, '›')));
-  const rejilla = h('div', { clase: 'calendario-publicar' });
+    h('span', { clase: 'pestanas-publicar vista-cal' },
+      h('button', { clase: `mini${vista === 'semana' ? ' activo' : ''}`, onclick: () => cambiarVista('semana') }, 'Semana'),
+      h('button', { clase: `mini${vista === 'mes' ? ' activo' : ''}`, onclick: () => cambiarVista('mes') }, 'Mes')),
+    h('button', { clase: 'mini fantasma', title: vista === 'mes' ? 'Mes anterior' : 'Semana anterior', onclick: () => mover(-1) }, '‹'),
+    h('button', { clase: 'mini fantasma', onclick: () => {
+      PUB.mes = mesDeHoyPublicar(); PUB.desde = inicioCalendarioPublicar(vista, PUB.mes); if (vista !== 'mes') PUB.desde = ''; cargarPublicar();
+    } }, 'Hoy'),
+    h('button', { clase: 'mini fantasma', title: vista === 'mes' ? 'Mes siguiente' : 'Semana siguiente', onclick: () => mover(1) }, '›')));
+  const rejilla = h('div', { clase: `calendario-publicar${vista === 'mes' ? ' calendario-mes' : ''}` });
+  if (vista === 'mes') ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'].forEach(d => rejilla.appendChild(h('div', { clase: 'cab-semana' }, d)));
+  const mesActual = PUB.mes || mesDeHoyPublicar();
+  const enviosVisibles = (c.envios || []).filter(e => e.estado !== 'cancelado' && pasaEnvio(e));
+  const TOPE_DIA = vista === 'mes' ? 3 : 99;
   (c.dias || []).forEach(dia => {
-    const columna = h('div', { clase: `dia-publicar${dia === c.hoy ? ' hoy' : ''}` },
-      h('div', { clase: 'dia-cab' }, cuandoLegible(dia)));
-    const delDia = (c.envios || []).filter(e => String(e.cuando || '').startsWith(dia) && e.estado !== 'cancelado');
-    if (!delDia.length) columna.appendChild(h('div', { clase: 'meta dia-vacio' }, '—'));
-    delDia.forEach(e => columna.appendChild(h('button', {
+    const fuera = vista === 'mes' && !dia.startsWith(mesActual);
+    const columna = h('div', { clase: `dia-publicar${dia === c.hoy ? ' hoy' : ''}${fuera ? ' fuera-mes' : ''}${PUB.diaAbierto === dia ? ' abierto' : ''}` },
+      h('div', { clase: 'dia-cab' }, vista === 'mes' ? String(Number(dia.slice(8, 10))) : cuandoLegible(dia)));
+    const delDia = enviosVisibles.filter(e => String(e.cuando || '').startsWith(dia));
+    if (!delDia.length && vista !== 'mes') columna.appendChild(h('div', { clase: 'meta dia-vacio' }, '—'));
+    delDia.slice(0, TOPE_DIA).forEach(e => columna.appendChild(h('button', {
       clase: `envio-dia ${CLASE_ESTADO[e.estado] || ''}`,
       title: `${NOMBRES_RED[e.red]} · ${e.video} · ${ESTADOS_ENVIO[e.estado] || e.estado}`,
       onclick: () => irASeccionPublicar('ficha', e.pid),
     }, h('span', { clase: 'hora' }, String(e.cuando || '').slice(11, 16)),
-    ` ${CORTOS_RED[e.red]} · ${recortar(e.video || '', 22)}`)));
+    ` ${CORTOS_RED[e.red]} · ${recortar(e.video || '', vista === 'mes' ? 12 : 22)}`)));
+    if (delDia.length > TOPE_DIA) {
+      columna.appendChild(h('button', { clase: 'mini fantasma mas-del-dia',
+        onclick: () => { PUB.diaAbierto = PUB.diaAbierto === dia ? '' : dia; pintarModulo(); } },
+      `+${delDia.length - TOPE_DIA} más`));
+    }
     rejilla.appendChild(columna);
   });
-  semana.appendChild(rejilla);
-  caja.appendChild(semana);
+  cal.appendChild(rejilla);
+  if (PUB.diaAbierto) {
+    const delDia = enviosVisibles.filter(e => String(e.cuando || '').startsWith(PUB.diaAbierto));
+    const lista = h('div', { clase: 'dia-abierto' }, h('div', { clase: 'fila' },
+      h('b', { clase: 'crece' }, cuandoLegible(PUB.diaAbierto)),
+      h('button', { clase: 'mini fantasma', onclick: () => { PUB.diaAbierto = ''; pintarModulo(); } }, 'Cerrar')));
+    delDia.forEach(e => lista.appendChild(filaEnvioCola(e)));
+    cal.appendChild(lista);
+  }
+  caja.appendChild(cal);
 
-  // LOS VÍDEOS LISTOS
-  const listos = h('div', { clase: 'bloque' }, h('h3', {}, 'Vídeos listos para publicar'));
-  if (!(c.listos || []).length) {
+  // LOS VÍDEOS LISTOS, filtrados, agrupados si se pide y de 30 en 30
+  const visibles = todos.filter(pasaFiltroCola);
+  const listos = h('div', { clase: 'bloque' }, h('div', { clase: 'fila' },
+    h('h3', { clase: 'crece' }, 'Vídeos listos para publicar'),
+    todos.length ? h('span', { clase: 'meta' }, filtrando ? `${visibles.length} de ${todos.length}` : `${todos.length}`) : null));
+  if (!todos.length) {
     listos.appendChild(h('div', { clase: 'meta' },
       'Todavía no hay ningún vídeo montado. Se hacen en Crear; desde la pantalla Vídeo, «Enviar a Publicar».'));
+  } else if (!visibles.length) {
+    listos.appendChild(h('div', { clase: 'meta' }, 'Ningún vídeo cumple estos filtros.'));
   }
-  (c.listos || []).forEach(v => {
-    const redes = h('span', { clase: 'redes-video' });
-    Object.keys(NOMBRES_RED).forEach(r => {
-      const estado = (v.envios || {})[r];
-      redes.appendChild(h('span', {
-        clase: `pastilla red-mini ${estado ? CLASE_ESTADO[estado] || '' : 'apagada'}`,
-        title: `${NOMBRES_RED[r]}: ${estado ? ESTADOS_ENVIO[estado] : 'sin publicar'}`,
-      }, CORTOS_RED[r]));
+  const tope = 30 + (PUB.verMasListos || 0);
+  const mostrar = visibles.slice(0, tope);
+  if (f.agrupar) {
+    const grupos = new Map();
+    mostrar.forEach(v => {
+      const nombre = v.cliente_nombre || 'Sin proyecto';
+      if (!grupos.has(nombre)) grupos.set(nombre, []);
+      grupos.get(nombre).push(v);
     });
-    listos.appendChild(h('div', { clase: 'fila fila-listo' },
-      h('b', { clase: 'nombre-listo' }, v.nombre || v.pid),
-      v.cliente_nombre ? h('span', { clase: 'meta' }, v.cliente_nombre) : null,
-      h('span', { clase: 'crece' }), redes,
-      h('button', { clase: 'primario mini', onclick: () => irASeccionPublicar('ficha', v.pid) },
-        v.textos ? 'Abrir' : 'Preparar')));
-  });
+    [...grupos.entries()].sort((x, y) => x[0].localeCompare(y[0], 'es')).forEach(([nombre, lista]) => {
+      listos.appendChild(h('div', { clase: 'grupo-listos' }, h('div', { clase: 'cab-grupo' }, `${nombre} (${lista.length})`),
+        ...lista.map(filaListoPublicar)));
+    });
+  } else {
+    mostrar.forEach(v => listos.appendChild(filaListoPublicar(v)));
+  }
+  if (visibles.length > tope) {
+    listos.appendChild(h('button', { clase: 'mini', onclick: () => { PUB.verMasListos = (PUB.verMasListos || 0) + 30; pintarModulo(); } },
+      `Ver ${Math.min(30, visibles.length - tope)} más`));
+  }
   caja.appendChild(listos);
   return caja;
 }
@@ -17383,6 +17569,54 @@ async function escribirTextosPublicar(redes, reintento) {
   } catch (e) { toast(e.message, true); }
 }
 
+/* DESPUÉS DE PUBLICAR la ficha se queda donde estaba, para seguir con las otras
+   redes, y dice arriba en cuáles ya está (con su enlace) y en cuáles va a
+   salir. Cada red marca su último estado al lado de su casilla. */
+function ultimoEnvioPorRed(f) {
+  const salida = {};
+  // `envios` llega del más nuevo al más viejo
+  (f.envios || []).forEach(e => { if (e.estado !== 'cancelado' && !salida[e.red]) salida[e.red] = e; });
+  return salida;
+}
+
+function resumenPublicadoFicha(f) {
+  const ultimos = ultimoEnvioPorRed(f);
+  const publicadas = Object.values(ultimos).filter(e => ['publicado', 'a_mano'].includes(e.estado));
+  const enCamino = Object.values(ultimos).filter(e => ['programado', 'enviando', 'publicando', 'espera_ok', 'comprobar'].includes(e.estado));
+  if (!publicadas.length && !enCamino.length) return null;
+  const caja = h('div', { clase: 'caja-info resumen-publicado' });
+  if (publicadas.length) {
+    caja.appendChild(h('div', { clase: 'fila' }, h('b', {}, 'Ya publicado en:'),
+      ...publicadas.map(e => e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'pastilla ok' },
+        `${NOMBRES_RED[e.red]} ↗`) : h('span', { clase: 'pastilla ok' }, NOMBRES_RED[e.red]))));
+  }
+  if (enCamino.length) {
+    caja.appendChild(h('div', { clase: 'fila' }, h('b', {}, 'En camino:'),
+      ...enCamino.map(e => h('span', { clase: `pastilla ${CLASE_ESTADO[e.estado] || ''}` },
+        `${NOMBRES_RED[e.red]} · ${ESTADOS_ENVIO[e.estado] || e.estado}${e.estado === 'programado' ? ` ${cuandoLegible(e.cuando)}` : ''}`))));
+  }
+  const faltan = Object.keys(NOMBRES_RED).filter(r => !ultimos[r] || ['fallido'].includes(ultimos[r].estado));
+  if (faltan.length) {
+    caja.appendChild(h('div', { clase: 'meta' }, `Para seguir con ${faltan.map(r => NOMBRES_RED[r]).join(', ')}: márcalas en Redes, `
+      + 'revisa su texto y publica. Donde ya salió no se vuelve a enviar sin preguntarte.'));
+  }
+  return caja;
+}
+
+/* Lo que cambia de estado mientras se mira la ficha se avisa una vez:
+   «Publicado en Instagram», «Falló en TikTok». */
+function avisarCambiosPublicar(antes, despues) {
+  if (!antes || !despues || antes.pid !== despues.pid) return;
+  const previo = {};
+  (antes.envios || []).forEach(e => { previo[e.id] = e.estado; });
+  (despues.envios || []).forEach(e => {
+    if (!(e.id in previo) || previo[e.id] === e.estado) return;
+    if (e.estado === 'publicado') toast(`Publicado en ${NOMBRES_RED[e.red]}${e.url ? ': ya tiene su enlace en la lista de envíos' : ''}`);
+    else if (e.estado === 'programado' && previo[e.id] === 'enviando') toast(`Programado en ${NOMBRES_RED[e.red]} para ${cuandoLegible(e.cuando)}`);
+    else if (e.estado === 'fallido') toast(`Falló en ${NOMBRES_RED[e.red]}: ${e.error || 'mira el motivo en la lista de envíos'}`, true);
+  });
+}
+
 function seccionFichaPublicar() {
   const f = PUB.ficha;
   const caja = h('div', { clase: 'ficha-publicar' });
@@ -17413,8 +17647,11 @@ function seccionFichaPublicar() {
       `${f.programados_viejos} envío(s) programado(s) llevan el MP4 de antes del último montaje. `
       + 'Si quieres que salga el nuevo, cancélalo y vuelve a programarlo.'));
   }
+  const yaSalio = resumenPublicadoFicha(f);
+  if (yaSalio) caja.appendChild(yaSalio);
 
   // LAS REDES
+  const ultimos = ultimoEnvioPorRed(f);
   const redes = h('div', { clase: 'bloque' }, h('h3', {}, 'Redes'));
   const fila = h('div', { clase: 'fila redes-ficha' });
   Object.keys(NOMBRES_RED).forEach(r => {
@@ -17427,7 +17664,9 @@ function seccionFichaPublicar() {
     ` ${NOMBRES_RED[r]}`,
     enc.tipo ? h('span', { clase: 'meta' }, ` · ${enc.tipo}`) : null,
     enc.nivel === 'aviso' || enc.nivel === 'error'
-      ? h('span', { clase: `pastilla ${enc.nivel === 'error' ? 'error' : 'aviso'}` }, '!') : null));
+      ? h('span', { clase: `pastilla ${enc.nivel === 'error' ? 'error' : 'aviso'}` }, '!') : null,
+    ultimos[r] ? h('span', { clase: `pastilla red-mini ${CLASE_ESTADO[ultimos[r].estado] || ''}` },
+      ESTADOS_ENVIO[ultimos[r].estado] || ultimos[r].estado) : null));
   });
   redes.appendChild(fila);
   Object.keys(NOMBRES_RED).filter(r => (f.redes || []).includes(r) && ((f.encaje || {})[r] || {}).texto)

@@ -5103,6 +5103,168 @@ def prueba_revision_16_10_render():
         shutil.rmtree(carpeta, ignore_errors=True)
 
 
+# ------------------------------------- el render con enlaces duros (17-10-2026)
+
+def _huellas_de(carpeta):
+    """{ruta relativa: sha1} de todo lo que hay en una carpeta."""
+    import hashlib                                          # noqa: PLC0415
+    salida = {}
+    for raiz, _, ficheros in os.walk(carpeta):
+        for nombre in ficheros:
+            ruta = os.path.join(raiz, nombre)
+            with open(ruta, "rb") as fh:
+                salida[os.path.relpath(ruta, carpeta)] = hashlib.sha1(fh.read()).hexdigest()
+    return salida
+
+
+def _fotogramas(carpeta, color, cuantos=6, lado=(64, 36)):
+    os.makedirs(carpeta, exist_ok=True)
+    for numero in range(1, cuantos + 1):
+        Image.new("RGB", lado, color).save(os.path.join(carpeta, f"f{numero:05d}.png"))
+    return carpeta
+
+
+def prueba_enlaces_del_render():
+    """El render siembra trabajo/ con ENLACES DUROS a la version activa.
+
+    Un enlace duro es el MISMO fichero con dos nombres: cualquier escritura
+    ENCIMA de un fichero de trabajo/ cambiaria tambien la version anterior.
+    Aqui se monta una version de verdad (clips, video con musica y efectos,
+    cola, ultimo fotograma, logo), se siembra un trabajo/ con enlaces, se
+    vuelven a correr TODOS los escritores del render sobre el y se comprueba
+    que la version anterior sigue byte a byte igual.
+    """
+    titulo("render: enlaces duros en trabajo/ sin tocar la version anterior")
+    if os.name == "nt":
+        print("  (usa enlaces duros de POSIX en una carpeta temporal: se salta en Windows)")
+        return
+    base = tempfile.mkdtemp(prefix="enlaces_render_")
+    try:
+        v1 = os.path.join(base, "v1")
+        fps = 12
+        # --- la version 1, montada con los mismos escritores que el render
+        os.makedirs(os.path.join(v1, "clips"))
+        for sid, color in (("S001", (200, 30, 30)), ("S002", (30, 200, 30)),
+                           ("S003", (30, 30, 200))):
+            p8_render._codificar(_fotogramas(os.path.join(base, "f1", sid), color),
+                                 os.path.join(v1, "clips", f"{sid}.mp4"), fps, "baja")
+        os.makedirs(os.path.join(v1, "ultimo"), exist_ok=True)
+        p8_render._guardar_ultimo(os.path.join(base, "f1", "S002", "f00006.png"),
+                                  os.path.join(v1, "ultimo", "S002.png"))
+        voz = os.path.join(base, "voz.wav")
+        tono = np.sin(np.linspace(0, 440 * 2 * np.pi * 2, 96000)).astype(np.float32) * 0.2
+        sonido._escribir(voz, np.stack([tono, tono], axis=1))
+        sonido._escribir(os.path.join(v1, "efectos.wav"),
+                         np.stack([tono * 0.5, tono * 0.5], axis=1))
+        sonido._escribir(os.path.join(v1, "cama.wav"),
+                         np.stack([tono * 0.3, tono * 0.3], axis=1))
+        clips_v1 = [os.path.join(v1, "clips", f"S00{n}.mp4") for n in (1, 2, 3)]
+        p8_render._concatenar(clips_v1, os.path.join(v1, "video.mp4"), voz, 0.0, v1,
+                              musica=os.path.join(v1, "cama.wav"),
+                              efectos=os.path.join(v1, "efectos.wav"), duracion=1.5,
+                              cama=True, fps=fps, calidad="baja")
+        medios.escribir_texto(os.path.join(v1, "transicion.html"), "<p>v1</p>")
+        antes = _huellas_de(v1)
+        ok(len(antes) >= 9, f"la version 1 tiene sus ficheros ({len(antes)})")
+
+        # --- sembrar con enlaces
+        trabajo = os.path.join(base, "trabajo")
+        medios._sembrar_carpeta(v1, trabajo, True)
+        clip = os.path.join(trabajo, "clips", "S001.mp4")
+        ok(os.stat(clip).st_ino == os.stat(clips_v1[0]).st_ino
+           and os.stat(clip).st_nlink == 2,
+           "sembrar con enlaces: el clip de trabajo/ ES el de la version (mismo inodo)")
+
+        # --- y otro montaje encima: el ULTIMO plano nuevo (asi cambia tambien la
+        # cola de negro, que sale de el), otra musica, logo
+        nuevo = p8_render._codificar(_fotogramas(os.path.join(base, "f2", "S003"), (240, 240, 0)),
+                                     os.path.join(trabajo, "clips", "S003.mp4"), fps, "baja")
+        p8_render._guardar_ultimo(os.path.join(base, "f2", "S003", "f00006.png"),
+                                  os.path.join(trabajo, "ultimo", "S003.png"))
+        sonido._escribir(os.path.join(trabajo, "efectos.wav"),
+                         np.stack([tono * 0.1, tono * 0.1], axis=1))
+        sonido._escribir(os.path.join(trabajo, "cama.wav"),
+                         np.stack([tono * 0.05, tono * 0.05], axis=1))
+        clips_t = [os.path.join(trabajo, "clips", f"S00{n}.mp4") for n in (1, 2, 3)]
+        p8_render._concatenar(clips_t, os.path.join(trabajo, "video.mp4"), voz, 0.0, trabajo,
+                              musica=os.path.join(trabajo, "cama.wav"),
+                              efectos=os.path.join(trabajo, "efectos.wav"), duracion=1.5,
+                              cama=True, fps=fps, calidad="baja")
+        logo = os.path.join(base, "logo.png")
+        Image.new("RGBA", (16, 16), (255, 255, 255, 200)).save(logo)
+        p8_render.poner_logo(os.path.join(trabajo, "video.mp4"), logo, {}, "baja")
+        medios.escribir_texto(os.path.join(trabajo, "transicion.html"), "<p>v2</p>")
+        # copiar ENCIMA de un enlace (lo que hace _guardar_ultimo con su .parcial)
+        medios.copiar(logo, os.path.join(trabajo, "ultimo", "S002.png"))
+
+        despues = _huellas_de(v1)
+        cambiados = sorted(r for r in antes if despues.get(r) != antes[r])
+        igual(cambiados, [], "la version anterior sigue byte a byte igual despues de "
+                             "volver a montar encima de sus enlaces")
+        ok(os.stat(nuevo).st_ino != os.stat(clips_v1[2]).st_ino,
+           "el plano rehecho es un fichero NUEVO")
+        ok(os.stat(clips_t[0]).st_ino == os.stat(clips_v1[0]).st_ino
+           and os.stat(clips_t[1]).st_ino == os.stat(clips_v1[1]).st_ino,
+           "y los que no cambian siguen siendo los mismos (no ocupan otra vez)")
+
+        # --- cuanto ocupa: lo que la version 2 añade al disco
+        def _bytes(carpeta, solo_propios=False):
+            total = 0
+            for raiz, _, ficheros in os.walk(carpeta):
+                for nombre in ficheros:
+                    st = os.stat(os.path.join(raiz, nombre))
+                    if not solo_propios or st.st_nlink == 1:
+                        total += st.st_size
+            return total
+        print(f"  disco: la version 2 mide {_bytes(trabajo)} B y añade "
+              f"{_bytes(trabajo, solo_propios=True)} B (con copias añadiria {_bytes(trabajo)} B)")
+
+        # --- la poda: borrar la version 1 no se lleva lo que la 2 enlaza
+        shutil.rmtree(v1)
+        ok(os.path.exists(clips_t[0]) and os.stat(clips_t[0]).st_nlink == 1,
+           "podar la version anterior deja el clip compartido (y ya solo con un nombre: "
+           "al borrar este, se libera)")
+
+        # --- sin enlaces posibles (FAT, otro disco): se copia
+        otra = os.path.join(base, "otra")
+        enlace_original = os.link
+
+        def sin_enlaces(*_a, **_k):
+            raise OSError(18, "Invalid cross-device link")
+
+        os.link = sin_enlaces
+        try:
+            medios._sembrar_carpeta(trabajo, otra, True)
+        finally:
+            os.link = enlace_original
+        copia = os.path.join(otra, "clips", "S001.mp4")
+        ok(os.path.exists(copia) and os.stat(copia).st_nlink == 1
+           and _huellas_de(otra) == _huellas_de(trabajo),
+           "si no se puede enlazar, se copia: mismo contenido, fichero propio")
+
+        # --- y el render pide los enlaces de verdad
+        pedido = {}
+        sembrar_original = medios.sembrar_trabajo
+
+        def espia(proyecto, paso_id, **kw):
+            pedido.update(kw, paso=paso_id)
+            raise RuntimeError("basta")
+
+        medios.sembrar_trabajo = espia
+        try:
+            p8_render.ejecutar(type("P", (), {"raiz": base})(),
+                               {"plan": logo, "movimiento": logo, "audio": voz},
+                               lambda *a, **k: None)
+        except Exception:                                   # noqa: BLE001
+            pass
+        finally:
+            medios.sembrar_trabajo = sembrar_original
+        igual(pedido, {"paso": "render", "enlazar": True},
+              "el render siembra su trabajo/ con enlaces (fuera de Windows)")
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def main():
     _prohibir_pagar()
     # EL HISTORICO DE TIEMPOS, A UNA COPIA. Guarda 30 muestras por paso, asi
@@ -5162,6 +5324,7 @@ def main():
     prueba_microcorte_de_red()
     prueba_revision_imagenes_16_10()
     prueba_revision_16_10_render()
+    prueba_enlaces_del_render()
 
     print("\n" + "=" * 70)
     if _fallos:

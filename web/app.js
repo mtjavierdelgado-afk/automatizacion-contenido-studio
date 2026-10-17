@@ -8749,7 +8749,9 @@ function guardarBloqueLight(bid, texto, original, insertado) {
       && pausaFinalTts(original) === pausa) {
     delete ficha.params.bloques[bid];
   } else {
-    ficha.params.bloques[bid] = { texto: pausa ? `${texto}${pausa}` : texto };
+    /* El texto puede traer YA su pausa: la corrección de ortografía guarda el
+       texto con sus marcas, no el visible. Pegarle otra la duplicaba. */
+    ficha.params.bloques[bid] = { texto: pausa && !pausaFinalTts(texto) ? `${texto}${pausa}` : texto };
   }
   _bloquesPorGuardarLight = ficha.params.bloques;
   clearTimeout(_guardadoBloqueLight);

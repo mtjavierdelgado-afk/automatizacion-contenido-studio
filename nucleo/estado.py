@@ -258,6 +258,17 @@ class Estado:
                 f"No se abre para no enseñarlo vacío y ofrecer regenerarlo "
                 f"entero: pide ayuda al asistente para recuperarlo.")
         escribir_json(self.ruta, doc)
+        # LOS PUNTEROS `activa.json` DE CADA PASO, al estado recuperado: el
+        # guardado que se perdio pudo ser un `completar`, que ya habia movido
+        # el puntero a la vN nueva. Sin esto el puntero diria vN y el estado
+        # v(N-1), y la pantalla y el render leerian versiones distintas.
+        for paso_id, datos in (doc.get("pasos") or {}).items():
+            activa = datos.get("activa") if isinstance(datos, dict) else None
+            if isinstance(activa, int) and self.proyecto.version_activa(paso_id) != activa:
+                try:
+                    self.proyecto.fijar_version_activa(paso_id, activa)
+                except OSError:
+                    pass
         self.recuperacion = {"fecha": ahora(), "apartado": apartado,
                              "copia": anterior,
                              "copia_actualizada": doc.get("actualizado", "")}

@@ -3353,6 +3353,14 @@ def editar_a_mano_conserva_la_pausa(navegador, datos):
         despues = por_regrabar()
         ok(set(despues) <= set(antes) | {bid},
            f"y no deja por regrabar más bloques que antes ({antes} -> {despues})")
+        # LA CORRECCIÓN DE ORTOGRAFÍA guarda el texto CON sus marcas (la pausa
+        # ya va dentro): no se le pega otra (revisión independiente del 16-10)
+        pg.js(f"guardarBloqueLight('{bid}', {json.dumps(guardado.replace('corregido a mano', 'corregido por ortografía'))}, undefined, false);")
+        pg.p.wait_for_timeout(2000)
+        _r, guion = api.get(f"/api/proyectos/{pid}/pasos/guion")
+        orto = (((guion.get("params") or {}).get("bloques") or {}).get(bid) or {}).get("texto") or ""
+        ok("por ortografía" in orto and orto.count("<break") == 1,
+           f"corregir la ortografía no duplica la pausa: {orto[-90:]!r}")
         # «QUITAR PAUSA» LA SIGUE QUITANDO, y una edición después no la resucita
         pulsar_en_bloque("Quitar pausa")
         pg.p.wait_for_timeout(2500)

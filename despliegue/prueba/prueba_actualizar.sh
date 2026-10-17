@@ -55,6 +55,7 @@ mkdir -p "$T/bin"
 cat > "$T/bin/systemctl" <<'EOF'
 #!/bin/sh
 echo "systemctl $*" >> "$PRUEBA/llamadas"
+[ "$1" = "daemon-reload" ] && [ -f "$PRUEBA/daemon_roto" ] && exit 1
 exit 0
 EOF
 cat > "$T/bin/curl" <<'EOF'
@@ -118,7 +119,7 @@ tar -czf "$T/nuevo.tgz" -C "$T/fuente" repo-main
 montar() {
   local R="$T/raiz"
   rm -rf "$R" "$T/llamadas" "$T/npm_roto" "$T/nueva_rota" "$T/pip_roto" "$T/binarios" \
-         "$T/etc" "$T/nginx_roto" "$T/viejo"
+         "$T/etc" "$T/nginx_roto" "$T/viejo" "$T/daemon_roto"
   mkdir -p "$R/app/motores/reglas" "$R/app/cache" "$R/app/despliegue/login" \
            "$R/login/node_modules/viejo" "$R/login/datos" "$R/datos" "$R/venv/bin" "$T/binarios"
   echo "print('v1')" > "$R/app/app.py"
@@ -252,6 +253,19 @@ ok 'cmp -s "$T/etc/nginx/snippets/asvs-proxy-largo.conf" "$T/viejo/largo.conf"' 
 ok '! grep -q "systemctl reload nginx" "$T/llamadas"' "y nginx no se recarga"
 ok 'grep -q "nginx NO acepta" "$T/salida"' "y se dice claramente"
 ok 'cmp -s "$T/etc/nginx/sites-available/as-video-studio" "$T/viejo/sitio"' "el sitio, intacto"
+
+echo "[F] falla algo al poner la configuracion (daemon-reload): se deshace y el estudio vuelve"
+montar; touch "$T/daemon_roto"; correr; codigo=$?
+ok '[ $codigo -ne 0 ]' "sale con error"
+ok 'grep -q "v1" "$T/raiz/app/app.py"' "el codigo vuelve a ser el de antes"
+ok 'grep -q "systemctl restart" "$T/llamadas"' "y el estudio se vuelve a arrancar (no se queda parado)"
+ok 'cmp -s "$T/etc/systemd/system/as-video-studio.service" <(plantilla_unidad "$T/viejo/studio.service" "$T/raiz" studio)' \
+   "con la unidad de antes"
+
+echo "[G] no hay lanzador del navegador: se avisa y se sigue"
+montar; rm -f "$T/binarios/estudio-edge"; correr; codigo=$?
+ok '[ $codigo -eq 0 ]' "sale bien ($(tail -n 2 "$T/salida" | tr '\n' ' '))"
+ok 'grep -q "v2" "$T/raiz/app/app.py"' "con el codigo nuevo"
 
 echo
 if [ "$FALLOS" -gt 0 ]; then

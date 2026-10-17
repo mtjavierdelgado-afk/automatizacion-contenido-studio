@@ -16,7 +16,10 @@
 #      asvs probar       la prueba real: un video de 30 s con tus claves (~1 $), comprobado solo;
 #                        si la consola se corta sigue sola, y repetirlo la vuelve a enseñar o la retoma
 # -----------------------------------------------------------------------------
-set -euo pipefail
+# -E: la trampa ERR de `actualizar` (la que deshace) vale TAMBIEN dentro de
+# las funciones que llama. Sin ella, un fallo en `_configurar` salia por
+# `set -e` sin deshacer nada, con el estudio ya parado (revision 16-10-2026).
+set -Eeuo pipefail
 
 RAIZ="${ASVS_RAIZ:-/opt/as-video-studio}"
 # DE DONDE SE BAJA EL CODIGO, por este orden: ASVS_REPO si se pasa, lo que
@@ -219,7 +222,7 @@ _configurar() {
   fi
 
   # El lanzador del navegador, con el MISMO navegador que ya tiene puesto.
-  binario="$(sed -n 's/^exec \([^ ]*\) .*/\1/p' "$BIN/estudio-edge" 2>/dev/null | head -1)"
+  binario="$(sed -n 's/^exec \([^ ]*\) .*/\1/p' "$BIN/estudio-edge" 2>/dev/null | head -1 || true)"
   if [ -n "$binario" ]; then
     plantilla_edge "$fuente/estudio-edge" "$binario" > "$tmp"
     _poner "$tmp" "$BIN/estudio-edge" 755 "$copias" && si "lanzador del navegador al dia"

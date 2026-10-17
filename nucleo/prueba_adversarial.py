@@ -523,6 +523,17 @@ def t8_no_borrar_estado(base):
     ok(len(apartados) == 1, f"el estado corrupto se guarda a un lado ({apartados})")
     igual(Estado(proyecto).estado_de("render"), "listo", "y el recuperado ya se lee solo")
 
+    # SI LO PERDIDO FUE UN `completar`, el puntero activa.json ya decia la
+    # version nueva: al recuperar vuelve a la del estado (revision 16-10)
+    activa_buena = proyecto.version_activa("assets")
+    Estado(proyecto).set_params("brief", {"angulo": "una vez mas"})   # copia buena = esta
+    proyecto.fijar_version_activa("assets", activa_buena + 1)        # el completar perdido
+    with open(proyecto.ruta("estado.json"), "w", encoding="utf-8") as fh:
+        fh.write("{ roto tras completar")
+    Estado(proyecto)
+    igual(proyecto.version_activa("assets"), activa_buena,
+          "el puntero de version activa vuelve al del estado recuperado")
+
     # un fichero VACIO (lo que deja un corte de luz) es igual de roto
     with open(proyecto.ruta("estado.json"), "w", encoding="utf-8") as fh:
         fh.write("")

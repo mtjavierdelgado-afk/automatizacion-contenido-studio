@@ -42,6 +42,7 @@ Las unidades declaradas se heredan aguas abajo por el DAG, asi que "assets" no
 necesita repetirlas: sus unidades son las escenas que vienen del guion.
 """
 import copy
+import hashlib
 import os
 import shutil
 
@@ -53,6 +54,19 @@ except ImportError:  # ejecutado con la carpeta nucleo directamente en sys.path
                           huella as _huella, leer_json, lock_de, recolocar)
 
 NOMBRE_ESTADO = "estado.json"
+#: La ultima copia buena de estado.json: la de antes del ultimo guardado.
+#: Sin extension .json a proposito, para que nada que recorra los JSON del
+#: proyecto la tome por un fichero mas.
+NOMBRE_ANTERIOR = NOMBRE_ESTADO + ".anterior"
+
+
+class EstadoIlegible(ValueError):
+    """estado.json no se puede leer y no hay copia buena de la que volver.
+
+    Antes esto arrancaba DE CERO: el proyecto se abria con todo «pendiente» y
+    la pantalla ofrecia generarlo entero -- guion nuevo, voz y planos pagados
+    otra vez --. Un error que se ve es mejor que un video que miente.
+    """
 VERSION_FORMATO = 1
 CLAVE_UNIDADES = "unidades"
 
@@ -158,6 +172,8 @@ class Estado:
         self._sello = None
         self._cache = {}
         self._doc = None
+        #: si al abrir hubo que volver a la copia buena: {fecha, apartado, copia}
+        self.recuperacion = None
         with self._lock:
             self._cargar()
             if self._doc.get("_nuevo"):
@@ -166,17 +182,30 @@ class Estado:
 
     # ------------------------------------------------------------------ E/S
 
+    @staticmethod
+    def _valido(doc):
+        return isinstance(doc, dict) and isinstance(doc.get("pasos"), dict)
+
     def _cargar(self):
         # estricto: si el fichero esta ahi pero no se puede leer, se propaga el
         # fallo. Tragarselo y empezar de cero borraria todo el historico en el
         # siguiente guardado, y estado.json es el unico sitio donde vive.
+        #
+        # ILEGIBLE (JSON roto, un fichero vacio tras un corte de luz) NO ES «NO
+        # HAY»: se aparta una copia y se vuelve a la ultima buena
+        # (`NOMBRE_ANTERIOR`). Si tampoco la hay, EstadoIlegible: arrancar de
+        # cero ofrecia regenerar el video entero.
         try:
             doc = leer_json(self.ruta, estricto=True)
+            roto = doc is not None and not self._valido(doc)
         except ValueError:
-            doc = self._apartar_roto()
-        if doc is not None and (not isinstance(doc, dict)
-                                or not isinstance(doc.get("pasos"), dict)):
-            doc = self._apartar_roto()
+            doc, roto = None, True
+        if roto:
+            doc = self._recuperar(self._apartar_roto())
+        elif doc is None and os.path.exists(self.proyecto.ruta(NOMBRE_ANTERIOR)):
+            # sin estado.json pero CON copia: el proyecto tenia historia, asi
+            # que no es nuevo. Un proyecto nuevo nunca tiene copia.
+            doc = self._recuperar(None)
         nuevo = doc is None
         if nuevo:
             doc = {"version_formato": VERSION_FORMATO, "pasos": {}, "_nuevo": True}
@@ -196,14 +225,80 @@ class Estado:
         self._cache = {}
 
     def _apartar_roto(self):
-        """Guarda un estado.json ilegible a un lado en vez de sobreescribirlo."""
-        marca = ahora().replace(":", "").replace("-", "")
-        destino = self.proyecto.ruta(f"estado.roto.{marca}.json")
+        """Copia a un lado un estado.json ilegible. -> la ruta de la copia | None
+
+        COPIA, no mueve: si no hay de donde recuperar, el roto se queda en su
+        sitio y el proyecto sigue sin abrir (503) en cada intento. Movido, el
+        siguiente intento no encontraba estado.json y arrancaba de cero. La
+        copia se nombra por su contenido, asi que reintentar no la repite.
+        """
         try:
-            os.replace(self.ruta, destino)
+            with open(self.ruta, "rb") as fh:
+                huella = hashlib.sha1(fh.read()).hexdigest()[:10]
+            destino = self.proyecto.ruta(f"estado.roto.{huella}.json")
+            if not os.path.exists(destino):
+                shutil.copy2(self.ruta, destino)
+            return destino
         except OSError:
-            pass
-        return None
+            return None
+
+    def _recuperar(self, apartado):
+        """Vuelve a la ultima copia buena. -> doc. EstadoIlegible si no la hay."""
+        anterior = self.proyecto.ruta(NOMBRE_ANTERIOR)
+        try:
+            doc = leer_json(anterior, estricto=True)
+        except (ValueError, OSError):
+            doc = None
+        if not self._valido(doc):
+            donde = (f"; el fichero roto esta copiado en {apartado}" if apartado
+                     else "")
+            raise EstadoIlegible(
+                f"el estado del vídeo «{self.proyecto.id}» (estado.json) no se "
+                f"puede leer y no hay una copia buena de la que volver{donde}. "
+                f"No se abre para no enseñarlo vacío y ofrecer regenerarlo "
+                f"entero: pide ayuda al asistente para recuperarlo.")
+        escribir_json(self.ruta, doc)
+        # LOS PUNTEROS `activa.json` DE CADA PASO, al estado recuperado: el
+        # guardado que se perdio pudo ser un `completar`, que ya habia movido
+        # el puntero a la vN nueva. Sin esto el puntero diria vN y el estado
+        # v(N-1), y la pantalla y el render leerian versiones distintas.
+        for paso_id, datos in (doc.get("pasos") or {}).items():
+            activa = datos.get("activa") if isinstance(datos, dict) else None
+            if isinstance(activa, int) and self.proyecto.version_activa(paso_id) != activa:
+                try:
+                    self.proyecto.fijar_version_activa(paso_id, activa)
+                except OSError:
+                    pass
+        self.recuperacion = {"fecha": ahora(), "apartado": apartado,
+                             "copia": anterior,
+                             "copia_actualizada": doc.get("actualizado", "")}
+        return doc
+
+    def _guardar_anterior(self):
+        """Deja el estado.json de AHORA como la ultima copia buena.
+
+        Se llama justo antes de sustituirlo, y solo si es el mismo fichero que
+        esta instancia leyo o escribio (mismo sello): uno que ha cambiado por
+        debajo -- vaciado por un corte de luz -- no se toma por bueno. Con un
+        enlace duro no se copia ni un byte: tras el os.replace, la copia es el
+        fichero de antes. Si el disco no admite enlaces, se copia. Un fallo
+        aqui nunca impide guardar.
+        """
+        if not self._sello or not self._sello[1] or self._sello_disco() != self._sello:
+            return
+        anterior = self.proyecto.ruta(NOMBRE_ANTERIOR)
+        temporal = f"{anterior}.{os.getpid()}.tmp"
+        try:
+            try:
+                os.link(self.ruta, temporal)
+            except OSError:
+                shutil.copy2(self.ruta, temporal)
+            os.replace(temporal, anterior)
+        except OSError:
+            try:
+                os.remove(temporal)
+            except OSError:
+                pass
 
     def _sello_disco(self):
         # st_ino es imprescindible: la marca de tiempo de Windows avanza a
@@ -230,6 +325,7 @@ class Estado:
     def _guardar(self):
         self._doc["actualizado"] = ahora()
         limpio = {k: v for k, v in self._doc.items() if not k.startswith("_")}
+        self._guardar_anterior()
         escribir_json(self.ruta, limpio)
         self._sello = self._sello_disco()
         self._cache = {}

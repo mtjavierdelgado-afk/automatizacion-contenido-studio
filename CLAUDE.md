@@ -177,6 +177,10 @@ migración.
   carpeta de la versión activa a `trabajo/` y `_recoger_trabajo` la vuelca en la
   SIGUIENTE, así que un manifiesto dentro de `v21` acabaría dentro de `v22` con
   pinta de correcto.
+- **`estado.json.anterior` es la copia buena de antes del último guardado**
+  (enlace duro, sin coste). Un `estado.json` ilegible vuelve a ella y lo apunta
+  en la bitácora; sin ella, `EstadoIlegible` → 503. No se arranca de cero
+  nunca. Una mudanza no la reescribe: el siguiente guardado la renueva.
 - **No caches el manifiesto en el documento.** `_guardar` filtra las claves con
   guion bajo SOLO en la raíz, así que una cache anidada se escribiría dentro de
   `estado.json` y el fichero recuperaría sus 320 MB en silencio.
@@ -485,10 +489,22 @@ Tres cosas que ahorran perseguir fallos que no existen:
 - `prueba_pasos_visuales` reutiliza `%TEMP%\estudio_prueba_visual` entre
   ejecuciones; si una pasada se corta a medias, la siguiente falla por el estado
   sucio. `pruebas.ps1` la borra.
+- En `prueba_pasos_visuales`, «el vídeo sale idéntico se reparta en procesos o
+  corra en fila» **puede fallar en una máquina cargada** (2 núcleos con otra
+  suite o un recorrido a la vez: visto el 16-10 dos veces, siempre un plano).
+  Repetida sola, pasa. Si falla sola, entonces sí es de verdad.
 - `prueba_pasos_voz` sale a Cartesia de verdad **si hay clave**; si no, omite esa
   parte y lo dice. No es un fallo.
 - `prueba_login` llama al CLI de Claude de verdad. Es la única que comprueba que
   el CLI sigue dejando entrar sin terminal y sin abrir un navegador.
+- **Las plantillas de la configuración del servidor viven en
+  `despliegue/plantillas.sh`** y las usan `instalar.sh` y `asvs actualizar`. El
+  sitio de nginx NO está ahí a propósito: lo edita certbot. Lo nuevo de proxy va
+  en los snippets; una variable nueva del entorno se añade en
+  `plantilla_entorno` y `actualizar` la agrega sin pisar las que hay.
+- **En `app.py`, nada bloqueante dentro de una ruta `async def`**: va a
+  `_en_hilo` (run_in_threadpool). El bucle de eventos es uno para todo el
+  servicio.
 - **Lo del despliegue no va en `pruebas.sh`**: si tocas `despliegue/asvs` o
   `estudio-clave`, corre a mano `bash despliegue/prueba/prueba_actualizar.sh` y
   `bash despliegue/prueba/prueba_estudio_clave.sh` (raíz falsa, no tocan nada).

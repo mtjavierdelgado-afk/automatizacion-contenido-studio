@@ -109,6 +109,41 @@ PAUSA_ENTRE_BLOQUES = 0.54
 #: no casi dos segundos. Lo aplica `p4_voz` al pasarle la pausa a `espaciar`.
 PARTE_DE_LA_PAUSA = 0.6
 
+#: LA PAUSA DE BLOQUE QUE SE PREVE ANTES DE QUE EL GUION EXISTA, en segundos.
+#: Es la que pone `p3_guion` de serie en el gancho y al cerrar cada tramo
+#: (`pausa_gancho_ms` y `pausa_seccion_ms`, 900 ms; `prueba_p3` comprueba que
+#: siguen siendo la misma cifra). Aqui no se leen los params del guion: la
+#: horquilla la calcula el brief, que va antes y no depende de ellos.
+PAUSA_DE_BLOQUE_PREVISTA = 0.9
+
+
+def pausas_previstas(segundos, bloques):
+    """Cuantas pausas de bloque llevara un guion de esa duracion. -> int
+
+    Una por tramo del relato: la del gancho y la de cada cambio de tema (la del
+    gancho y la del primer tramo son la misma si coinciden). El redactor tiene
+    escrito cuantos tramos salen (regla 11 de `p3_guion`): «en un video de dos
+    minutos salen cuatro o cinco; en uno de quince, ocho o diez COMO MUCHO».
+    Eso es 3 + medio tramo por minuto, entre 1 y 10, y nunca mas que costuras.
+    """
+    minutos = max(0.0, float(segundos or 0.0)) / 60.0
+    tramos = max(1, min(10, int(round(3 + minutos / 2.0))))
+    return max(0, min(int(bloques) - 1, tramos))
+
+
+def _aire_previsto(segundos, bloques, hueco):
+    """El aire de un guion que aun no existe: costuras + pausas de bloque.
+
+    Lo mismo que cuenta `aire_de` sobre un guion escrito, con las pausas que se
+    preven. Sin las pausas, la horquilla se calculaba como si no hubiera
+    ninguna y el video salia unos segundos mas largo de lo pedido.
+    """
+    costuras = max(0, int(bloques) - 1)
+    por_costura = max(0.0, hueco - PAUSA_ENTRE_BLOQUES)
+    por_pausa = PAUSA_DE_BLOQUE_PREVISTA * PARTE_DE_LA_PAUSA
+    return por_costura * costuras + por_pausa * pausas_previstas(segundos, bloques)
+
+
 #: Muestras minimas para que el historial gane a la tabla. Con una sola toma
 #: rara --un guion de dos frases, una voz que se atasco-- la media se va, y aqui
 #: una cifra mala no se ve: sale como un guion mas largo de la cuenta.
@@ -388,20 +423,20 @@ def palabras_para(segundos, idioma=None, velocidad=None, hueco_minimo=0.0,
     cadencia, origen = cadencia_de(idioma, velocidad, voz)
     por_bloque = max(5, int(palabras_por_bloque or 30))
     hueco = max(0.0, float(hueco_minimo or 0.0))
-    # aire por costura si ningun bloque trae silencio escrito: es lo unico que
-    # se puede suponer antes de que el guion exista
-    por_costura = max(0.0, hueco - PAUSA_ENTRE_BLOQUES)
+    # el aire de las costuras y el de las pausas de bloque que se preven (el
+    # gancho y cada cambio de tema), contado igual que `aire_de` lo cuenta
+    # despues sobre el guion escrito
 
     palabras = int(round(total * cadencia))
     for _ in range(2):
         bloques = max(1, int(round(palabras / por_bloque)))
-        aire = por_costura * max(0, bloques - 1)
+        aire = _aire_previsto(total, bloques, hueco)
         palabras = max(1, int(round(max(0.0, total - aire) * cadencia)))
     bloques = max(1, int(round(palabras / por_bloque)))
     return {
         "palabras": palabras,
         "bloques": bloques,
-        "aire_s": round(por_costura * max(0, bloques - 1), 2),
+        "aire_s": round(_aire_previsto(total, bloques, hueco), 2),
         "cadencia_palabras_s": round(cadencia, 3),
         "cadencia_origen": origen,
         "idioma": _idioma(idioma),
@@ -417,8 +452,13 @@ def segundos_para(palabras, idioma=None, velocidad=None, hueco_minimo=0.0,
     cadencia, _origen = cadencia_de(idioma, velocidad, voz)
     por_bloque = max(5, int(palabras_por_bloque or 30))
     bloques = max(1, int(round(cuenta / por_bloque)))
-    aire = max(0.0, float(hueco_minimo or 0.0) - PAUSA_ENTRE_BLOQUES) * max(0, bloques - 1)
-    return round(cuenta / max(0.05, cadencia) + aire, 2)
+    habla = cuenta / max(0.05, cadencia)
+    hueco = max(0.0, float(hueco_minimo or 0.0))
+    # las pausas previstas dependen de la duracion, y la duracion del aire: dos
+    # pasadas, como en palabras_para
+    total = habla + _aire_previsto(habla, bloques, hueco)
+    total = habla + _aire_previsto(total, bloques, hueco)
+    return round(total, 2)
 
 
 # ------------------------------------------------------------------ medida

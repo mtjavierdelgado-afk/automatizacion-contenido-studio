@@ -10,6 +10,28 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Lo que quedó de la revisión (16 de octubre, noche)**
+- **`asvs actualizar` pone al día también el servidor**: las unidades de
+  systemd, los snippets de nginx, el lanzador del navegador y las variables
+  nuevas del entorno. Solo cambia lo que ha cambiado y guarda copia; si la
+  versión nueva no arranca, lo devuelve todo. El sitio de nginx (el que edita
+  certbot para el HTTPS) no se toca, y del entorno nunca se cambia un valor ya
+  puesto. **Tras esta actualización hay que correr `asvs actualizar` dos
+  veces**: la primera la hace todavía el `asvs` viejo.
+- **La duración pedida se cumple mejor.** Al calcular cuántas palabras caben
+  se cuentan también las pausas del gancho y de cada cambio de tema; antes el
+  vídeo salía de 2 a 5 segundos más largo. Solo en los vídeos nuevos: los que
+  ya tienes no se tocan ni quedan para regenerar.
+- **Corregir un bloque del guion a mano ya no le quita la pausa del final**
+  (la pastilla «⏸» se queda). La pausa solo se quita con «Quitar pausa».
+- **Un vídeo con el estado dañado ya no se abre vacío.** El Studio guarda la
+  copia buena anterior de su estado; si un corte de luz lo estropea, vuelve a
+  ella y lo apunta en la bitácora (se pierde, como mucho, el último cambio).
+  Si no hay copia, el vídeo no se abre y dice por qué, en vez de ofrecer
+  regenerarlo entero.
+- Subir imágenes, logos o capturas ya no deja parado el resto del Studio
+  mientras se guardan.
+
 **Publicar en redes (16 de octubre)**
 - **Arriba hay una barra de módulos: Inicio · Crear · Publicar · Automatizar.**
   «Crear» es lo de siempre (estilos y vídeos) y es lo que se abre. «Inicio»

@@ -296,7 +296,7 @@ navegador() {
     fi
   fi
 
-  sed "s|__NAVEGADOR__|$binario|" "$FUENTE_DESPLIEGUE/estudio-edge" > /usr/local/bin/estudio-edge
+  plantilla_edge "$FUENTE_DESPLIEGUE/estudio-edge" "$binario" > /usr/local/bin/estudio-edge
   chmod 755 /usr/local/bin/estudio-edge
   bien "$("$binario" --version 2>/dev/null | head -1)"
 }
@@ -416,33 +416,7 @@ entorno_python() {
   lotes="$(nproc)"
   [ "$lotes" -gt 16 ] && lotes=16
   if [ ! -f "$RAIZ/datos/entorno" ]; then
-    cat > "$RAIZ/datos/entorno" <<ENTORNO
-# El entorno del estudio. Cada variable manda una cosa a su sitio; los datos
-# viven fuera del codigo para que actualizar no los toque.
-PUERTO=$PUERTO_APP
-ESTUDIO_PROYECTOS=$RAIZ/datos/proyectos
-ESTUDIO_PRESETS=$RAIZ/datos/presets.json
-ESTUDIO_BANCO=$RAIZ/datos/banco
-ESTUDIO_BANCO_PRESETS=$RAIZ/datos/banco/presets
-ESTUDIO_SECRETOS=$RAIZ/datos/secretos
-ESTUDIO_ENV=$RAIZ/datos/secretos/.env
-ESTUDIO_RECETAS=$RAIZ/datos/recetas.json
-ESTUDIO_AJUSTES=$RAIZ/datos/ajustes.json
-ESTUDIO_TARIFAS=$RAIZ/datos/tarifas.json
-ESTUDIO_ESTADISTICAS=$RAIZ/datos/estadisticas.json
-ESTUDIO_COSTE_GLOBAL=$RAIZ/datos/coste_global.jsonl
-ESTUDIO_BITACORA_GLOBAL=$RAIZ/datos/bitacora_global.jsonl
-ESTUDIO_MOTORES=$RAIZ/app/motores
-# Las fuentes y el navegador son ficheros del sistema, no datos de nadie. Que
-# las fuentes sean LAS MISMAS con las que se midio es el invariante.
-ESTUDIO_FUENTES=$CARPETA_FUENTES
-ESTUDIO_EDGE=/usr/local/bin/estudio-edge
-HOME=$RAIZ/home
-# Cuantos planos se rasterizan a la vez. Medido en una maquina de 8 nucleos:
-# con 4 procesos van 6,75 fotogramas/s y con 8 van 10,40. La regla automatica
-# del estudio pide la mitad de los nucleos y deja media maquina parada.
-ESTUDIO_LOTES=$lotes
-ENTORNO
+    plantilla_entorno "$RAIZ" "$PUERTO_APP" "$CARPETA_FUENTES" "$lotes" > "$RAIZ/datos/entorno"
     bien "entorno escrito (ESTUDIO_LOTES=$lotes)"
   else
     nota "el entorno ya existia: no se toca"
@@ -510,10 +484,11 @@ ENV
 las_unidades() {
   paso "Los dos servicios"
 
-  sed "s|/opt/as-video-studio|$RAIZ|g; s|^User=studio|User=$USUARIO|; s|^Group=studio|Group=$USUARIO|" \
-    "$FUENTE_DESPLIEGUE/as-video-studio.service" > /etc/systemd/system/as-video-studio.service
-  sed "s|/opt/as-video-studio|$RAIZ|g; s|^User=studio|User=$USUARIO|; s|^Group=studio|Group=$USUARIO|" \
-    "$FUENTE_DESPLIEGUE/as-video-login.service" > /etc/systemd/system/as-video-login.service
+  local unidad
+  for unidad in $UNIDADES; do
+    plantilla_unidad "$FUENTE_DESPLIEGUE/$unidad.service" "$RAIZ" "$USUARIO" \
+      > "/etc/systemd/system/$unidad.service"
+  done
 
   systemctl daemon-reload
   systemctl enable --now as-video-login   >/dev/null 2>&1
@@ -537,10 +512,15 @@ las_unidades() {
 el_sitio_web() {
   paso "El servidor web"
 
-  install -m 644 "$FUENTE_DESPLIEGUE/asvs-proxy.conf"       /etc/nginx/snippets/asvs-proxy.conf
-  install -m 644 "$FUENTE_DESPLIEGUE/asvs-proxy-largo.conf" /etc/nginx/snippets/asvs-proxy-largo.conf
-  sed "s|__DOMINIO__|$DOMINIO|g; s|127\.0\.0\.1:8110|127.0.0.1:$PUERTO_APP|g; s|127\.0\.0\.1:3000|127.0.0.1:$PUERTO_LOGIN|g" \
-    "$FUENTE_DESPLIEGUE/nginx-sitio.conf" > /etc/nginx/sites-available/as-video-studio
+  local snippet
+  for snippet in $SNIPPETS_NGINX; do
+    install -m 644 "$FUENTE_DESPLIEGUE/$snippet" "/etc/nginx/snippets/$snippet"
+  done
+  # El sitio se escribe SOLO aqui, al instalar: despues certbot lo edita en su
+  # sitio (443, certificado, redireccion) y `asvs actualizar` no lo regenera
+  # (ver despliegue/plantillas.sh).
+  plantilla_sitio "$FUENTE_DESPLIEGUE/nginx-sitio.conf" "$DOMINIO" "$PUERTO_APP" "$PUERTO_LOGIN" \
+    > /etc/nginx/sites-available/as-video-studio
   ln -sf /etc/nginx/sites-available/as-video-studio /etc/nginx/sites-enabled/as-video-studio
   rm -f /etc/nginx/sites-enabled/default
 
@@ -801,6 +781,10 @@ usuario_y_carpetas
 descargar_codigo
 FUENTE_DESPLIEGUE="$RAIZ/app/despliegue"
 [ -d "$FUENTE_DESPLIEGUE" ] || fallo "falta la carpeta despliegue/ en el codigo."
+# Las plantillas de unidades, snippets, navegador y entorno: las mismas que usa
+# `asvs actualizar` para traer al dia un servidor ya instalado.
+# shellcheck source=despliegue/plantillas.sh
+. "$FUENTE_DESPLIEGUE/plantillas.sh"
 
 fuentes
 navegador

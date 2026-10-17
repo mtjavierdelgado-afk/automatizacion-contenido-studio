@@ -488,6 +488,13 @@ def mudar_objetivo(objetivo, reglas, aplicar, saltar, todo=False):
             total += n
             tocados += 1
     print(f"  rutas mudadas: {total}   ficheros con rutas: {tocados}")
+    # LA COPIA BUENA DEL ESTADO (estado.json.anterior) lleva las rutas de la
+    # maquina de antes y no es .json, asi que no se ha mudado: si alguna vez se
+    # recuperara de ella, volverian. Se borra; el siguiente guardado la renueva.
+    copia_vieja = os.path.join(objetivo, "estado.json.anterior")
+    if aplicar and total and os.path.exists(copia_vieja):
+        os.remove(copia_vieja)
+        print("  copia buena del estado (con las rutas de antes) borrada")
 
     if not hay_estado:
         print("  (sin estado.json: no hay firmas que re-sellar)")

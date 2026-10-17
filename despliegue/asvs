@@ -16,7 +16,10 @@
 #      asvs probar       la prueba real: un video de 30 s con tus claves (~1 $), comprobado solo;
 #                        si la consola se corta sigue sola, y repetirlo la vuelve a enseñar o la retoma
 # -----------------------------------------------------------------------------
-set -euo pipefail
+# -E: la trampa ERR de `actualizar` (la que deshace) vale TAMBIEN dentro de
+# las funciones que llama. Sin ella, un fallo en `_configurar` salia por
+# `set -e` sin deshacer nada, con el estudio ya parado (revision 16-10-2026).
+set -Eeuo pipefail
 
 RAIZ="${ASVS_RAIZ:-/opt/as-video-studio}"
 # DE DONDE SE BAJA EL CODIGO, por este orden: ASVS_REPO si se pasa, lo que
@@ -133,6 +136,129 @@ EXCLUIR_CODIGO=(--exclude='.git' --exclude='__pycache__' --exclude='*.pyc' --exc
   --exclude='motores/reglas/reglas.json')
 EXCLUIR_LOGIN=(--exclude='datos' --exclude='.env')
 
+# Donde vive la configuracion del sistema. Variables solo para poder probar en
+# una raiz falsa (despliegue/prueba/prueba_actualizar.sh) sin tocar /etc.
+SYSTEMD="${ASVS_SYSTEMD:-/etc/systemd/system}"
+NGINX="${ASVS_NGINX:-/etc/nginx}"
+CARPETA_FUENTES="${ASVS_FUENTES:-/usr/local/share/fonts/estudio}"
+
+# _poner <fichero nuevo> <destino> <permisos> <copias>
+# Instala el fichero SOLO si cambia, guardando antes el que habia en <copias>
+# y apuntandolo en <copias>/lista para poder volver. -> 0 si lo ha cambiado.
+_poner() {
+  local nuevo="$1" destino="$2" modo="$3" copias="$4" copia
+  if [ -f "$destino" ] && cmp -s "$nuevo" "$destino"; then
+    return 1
+  fi
+  mkdir -p "$copias"
+  if [ -e "$destino" ]; then
+    copia="$copias/$(printf '%s' "$destino" | tr '/' '_')"
+    cp -a "$destino" "$copia"
+    printf '%s\t%s\n' "$destino" "$copia" >> "$copias/lista"
+  else
+    printf '%s\t-\n' "$destino" >> "$copias/lista"
+  fi
+  mkdir -p "$(dirname "$destino")"
+  install -m "$modo" "$nuevo" "$destino"
+  return 0
+}
+
+# _devolver <copias> [patron]: deja cada fichero apuntado en <copias>/lista
+# como estaba (o lo quita, si no existia). Con patron, solo los que casen.
+_devolver() {
+  local copias="$1" patron="${2:-}" destino copia
+  [ -f "$copias/lista" ] || return 0
+  while IFS=$'\t' read -r destino copia; do
+    [ -n "$patron" ] && case "$destino" in $patron) ;; *) continue ;; esac
+    if [ "$copia" = "-" ]; then rm -f "$destino"; else cp -a "$copia" "$destino"; fi
+  done < <(tac "$copias/lista")
+}
+
+# LA CONFIGURACION DEL SERVIDOR, AL DIA (revision 16-10-2026). Antes
+# `actualizar` solo traia el codigo: una unidad de systemd, un snippet de
+# nginx o el lanzador del navegador nuevos no llegaban nunca a un servidor ya
+# instalado. Se rehacen con las MISMAS plantillas que el instalador
+# (despliegue/plantillas.sh) y solo se instala lo que cambia, con copia.
+#
+# LO QUE NO SE TOCA: el sitio de nginx. El instalador lo escribe una vez y
+# certbot (`--nginx`) lo edita en su sitio con el certificado y la
+# redireccion; regenerarlo los borraria. Lo que cambie de proxy va en los
+# snippets, que si son enteros nuestros. Y del entorno solo se AÑADEN las
+# variables que falten: un valor puesto (a mano o por el instalador) manda.
+#
+# _configurar <carpeta despliegue/ del codigo nuevo> <copias>
+_configurar() {
+  local fuente="$1" copias="$2" tmp unidad snippet binario lotes puerto
+  local unidades=0 snippets=0 nombre linea faltan=()
+  if [ ! -f "$fuente/plantillas.sh" ]; then
+    echo "  (este codigo no trae plantillas de configuracion: no se toca)"
+    return 0
+  fi
+  # shellcheck source=plantillas.sh
+  . "$fuente/plantillas.sh"
+  tmp="$(mktemp)"
+
+  for unidad in $UNIDADES; do
+    plantilla_unidad "$fuente/$unidad.service" "$RAIZ" "$USUARIO" > "$tmp"
+    if _poner "$tmp" "$SYSTEMD/$unidad.service" 644 "$copias"; then
+      si "unidad $unidad.service al dia"; unidades=1
+    fi
+  done
+  [ "$unidades" = 1 ] && systemctl daemon-reload
+
+  for snippet in $SNIPPETS_NGINX; do
+    if _poner "$fuente/$snippet" "$NGINX/snippets/$snippet" 644 "$copias"; then
+      si "snippet de nginx $snippet al dia"; snippets=1
+    fi
+  done
+  if [ "$snippets" = 1 ]; then
+    if nginx -t >/dev/null 2>&1; then
+      systemctl reload nginx || no "nginx no se ha podido recargar: mira  systemctl status nginx"
+    else
+      _devolver "$copias" "$NGINX/*"
+      no "nginx NO acepta los snippets nuevos: he dejado los de antes y nginx sigue como estaba"
+      echo "    (sin recargar; para ver por que:  nginx -t)"
+    fi
+  fi
+
+  # El lanzador del navegador, con el MISMO navegador que ya tiene puesto.
+  binario="$(sed -n 's/^exec \([^ ]*\) .*/\1/p' "$BIN/estudio-edge" 2>/dev/null | head -1 || true)"
+  if [ -n "$binario" ]; then
+    plantilla_edge "$fuente/estudio-edge" "$binario" > "$tmp"
+    _poner "$tmp" "$BIN/estudio-edge" 755 "$copias" && si "lanzador del navegador al dia"
+  else
+    no "no encuentro que navegador usa $BIN/estudio-edge: no lo toco"
+  fi
+
+  # El entorno: solo lo que FALTE.
+  lotes="$(nproc 2>/dev/null || echo 4)"; [ "$lotes" -gt 16 ] && lotes=16
+  puerto="$(_puerto)"
+  plantilla_entorno "$RAIZ" "${puerto:-8110}" "$CARPETA_FUENTES" "$lotes" > "$tmp"
+  while IFS= read -r linea; do
+    nombre="${linea%%=*}"
+    [[ "$linea" =~ ^[A-Z_][A-Z0-9_]*= ]] || continue
+    grep -q "^$nombre=" "$RAIZ/datos/entorno" 2>/dev/null || faltan+=("$linea")
+  done < "$tmp"
+  if [ "${#faltan[@]}" -gt 0 ]; then
+    cp "$RAIZ/datos/entorno" "$tmp"
+    { printf '\n# Añadidas por asvs actualizar (%s): no estaban\n' "$(date +%Y-%m-%d)"
+      printf '%s\n' "${faltan[@]}"; } >> "$tmp"
+    _poner "$tmp" "$RAIZ/datos/entorno" 600 "$copias"
+    si "entorno: ${#faltan[@]} variable(s) nueva(s) (${faltan[*]%%=*})"
+  fi
+  rm -f "$tmp"
+  return 0
+}
+
+# Lo contrario de _configurar: todo como estaba, y systemd y nginx enterados.
+_deshacer_config() {
+  local copias="$1"
+  [ -f "$copias/lista" ] || return 0
+  _devolver "$copias"
+  systemctl daemon-reload || true
+  if nginx -t >/dev/null 2>&1; then systemctl reload nginx || true; fi
+}
+
 actualizar() {
   local temporal forzar=0 activos anterior
   [ "${1:-}" = "--forzar" ] && forzar=1
@@ -194,6 +320,9 @@ actualizar() {
     || cp "$temporal/codigo/motores/reglas/reglas.json" "$RAIZ/app/motores/reglas/reglas.json"
   rsync -a --delete "${EXCLUIR_LOGIN[@]}" "$temporal/codigo/despliegue/login/" "$RAIZ/login/"
   chown -R "$USUARIO:$USUARIO" "$RAIZ/app" "$RAIZ/login"
+  # systemd, nginx, el navegador y el entorno, con copia en anterior/config
+  _configurar "$RAIZ/app/despliegue" "$anterior/config"
+  chown "$USUARIO:$USUARIO" "$RAIZ/datos/entorno"
   systemctl restart as-video-login as-video-studio
   trap - ERR
 
@@ -224,6 +353,9 @@ _deshacer() {
   trap - ERR
   echo
   no "deshaciendo la actualizacion: vuelve el codigo que habia"
+  # la configuracion primero: las unidades viejas tienen que estar puestas
+  # (y systemd enterado) antes de arrancar el codigo viejo
+  _deshacer_config "$anterior/config"
   if [ -d "$anterior/app" ] && [ -f "$anterior/app/app.py" ]; then
     systemctl stop as-video-studio || true
     rsync -a --delete "${EXCLUIR_CODIGO[@]}" "$anterior/app/" "$RAIZ/app/" || true

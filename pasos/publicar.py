@@ -97,6 +97,10 @@ VIVOS = ("enviando", "programado", "publicando", "publicado", "comprobar", "a_ma
 #: sonnet/low salían planos). Se cambia con ESTUDIO_PUBLICAR_MODELO/_ESFUERZO.
 MODELO = os.environ.get("ESTUDIO_PUBLICAR_MODELO") or "opus"
 ESFUERZO = os.environ.get("ESTUDIO_PUBLICAR_ESFUERZO") or "medium"
+#: Tope de UNA llamada para los textos. Sin el, opus/medium daba ~16 minutos
+#: de techo y un CLI colgado dejaba la ficha «escribiendo» todo ese rato. En el
+#: servidor tardan 10-20 s (17-10-2026).
+TECHO_TEXTOS_S = int(os.environ.get("ESTUDIO_PUBLICAR_TECHO_S") or 240)
 MAX_MATERIAL = 6000
 MAX_GUION = 9000
 #: Cada cuanto se puede volver a preguntar por el mismo envio, en segundos.
@@ -847,7 +851,9 @@ def _textos_simulados(info, redes, raiz=None):
     caps = info.get("capitulos_base") or []
     if caps:
         datos["capitulos"] = [f"Parte {i + 1}" for i in range(len(caps))]
-    time.sleep(0.3)
+    # con `_textos_lentos`, como el CLI de verdad (10-20 s en el servidor)
+    lento = raiz and os.path.exists(os.path.join(carpeta(raiz), "_textos_lentos"))
+    time.sleep(6 if lento else 0.3)
     return json.dumps(datos, ensure_ascii=False), {"usage": {}, "_coste_anotado": True}
 
 
@@ -867,7 +873,7 @@ def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd):
         def llamar():
             return cli_claude.ejecutar(
                 instruccion, modelo=MODELO, esfuerzo=ESFUERZO, cwd=cwd,
-                base_tiempo_s=180, sistema=SISTEMA,
+                base_tiempo_s=180, tiempo_max_s=TECHO_TEXTOS_S, sistema=SISTEMA,
                 extra=["--no-session-persistence"], para="los textos para redes")
 
         if _simular_todo():

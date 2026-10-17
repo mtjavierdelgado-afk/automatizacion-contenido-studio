@@ -163,11 +163,12 @@ def principal():
             "regenerar_desde_cero": True}, 900)
 
         print("\n[3] coherencia entre pasos")
-        # 90 s a 2,3 pal/s serian 207, menos el aire entre bloques: 201. Antes
-        # esto se subia a 600 s (1380 palabras)
+        # 90 s a 2,3 pal/s serian 207, menos el aire entre bloques y las pausas
+        # de bloque previstas: 196 (201 antes de contar las pausas, 16-10-2026).
+        # Antes esto se subia a 600 s (1380 palabras)
         # porque "un video del estudio dura al menos 10 minutos"; ese minimo era
         # linea editorial disfrazada de regla del sistema y se quito.
-        igual(brief["presupuesto_palabras"], 201,
+        igual(brief["presupuesto_palabras"], 196,
               "un video de 90 s se presupuesta como 90 s, sin subirlo a ningun minimo")
         comprobar(brief["brief"]["referencia"]["palabras_transcript"]
                   == ingesta["palabras"],

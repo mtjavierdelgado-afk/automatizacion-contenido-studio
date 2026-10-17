@@ -308,14 +308,15 @@ class ClienteUploadPost:
     # ---------------------------------------------------------------- publicar
 
     def publicar(self, perfil, redes, mp4, campos, cuando=None, zona="America/Lima",
-                 id_propio=None):
+                 id_propio=None, ficheros=None):
         """Sube el MP4 a las redes pedidas, ya o programado.
 
         `campos` son los campos de formulario de Upload-Post tal cual
         (tiktok_title, youtube_description, tags[] en lista...): los arma
         `pasos/publicar.py`, que es quien sabe de textos. `cuando` es
         «AAAA-MM-DDTHH:MM:SS» en la hora de `zona`; sin el, se sube ya en
-        segundo plano y se sigue con `estado(request_id=...)`.
+        segundo plano y se sigue con `estado(request_id=...)`. `ficheros` son
+        las imagenes de portada: [(campo, ruta)] (cover_image, thumbnail...).
         """
         redes = [r for r in redes if r in REDES]
         if not redes:
@@ -336,7 +337,8 @@ class ClienteUploadPost:
         else:
             pares.append(("async_upload", "true"))
         pares += [("request_id", id_propio), ("external_id", id_propio)]
-        cuerpo = _Multipart(pares, [("video", mp4)])
+        extra = [(c, r) for c, r in (ficheros or []) if r and os.path.isfile(r)]
+        cuerpo = _Multipart(pares, [("video", mp4)] + extra)
         r = self._pedir("POST", "/api/upload", multipart=cuerpo,
                         cabeceras={"Idempotency-Key": id_propio},
                         plazo=PLAZO_SUBIDA_S)

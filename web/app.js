@@ -17020,7 +17020,11 @@ function pintarModulo() {
   }
   if (foco) {
     const campo = m.querySelector(`[data-foco="${foco}"]`);
-    if (campo) campo.focus();
+    if (campo) {
+      campo.focus();
+      // el cursor, al final: si no, buscar letra a letra escribía al revés
+      try { if (campo.setSelectionRange && /^(text|search)$/.test(campo.type)) campo.setSelectionRange(campo.value.length, campo.value.length); } catch (e) { /* no aplica */ }
+    }
   }
 }
 
@@ -17089,7 +17093,9 @@ async function cargarPublicar(silencio) {
   PUB.error = '';
   try {
     if (PUB.seccion === 'ficha' && PUB.pid) {
+      const antes = PUB.ficha;
       PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`));
+      avisarCambiosPublicar(antes, PUB.ficha);
     } else if (PUB.seccion === 'cuentas') {
       PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
     } else if (PUB.seccion === 'resultados') {
@@ -17106,7 +17112,7 @@ async function cargarPublicar(silencio) {
       // si entretanto se eligió otro proyecto o periodo, esta respuesta ya no vale
       if (pedido === PUB.proyectoResultados && dias === (PUB.diasResultados || 30)) PUB.resultados = r;
     } else {
-      PUB.cola = await pedir(rutaPublicar(`/cola${PUB.desde ? `?desde=${encodeURIComponent(PUB.desde)}` : ''}`));
+      PUB.cola = await pedir(rutaPublicar(`/cola?${consulta({ desde: PUB.desde || '', dias: PUB.vistaCal === 'mes' ? 42 : 7 })}`));
       contarAvisosPublicar();
     }
   } catch (e) {
@@ -17117,8 +17123,40 @@ async function cargarPublicar(silencio) {
   PUB.cargando = false;
   if (MODULOS.actual === 'publicar') {
     if (silencio) repintarPublicarSinPisar(); else pintarModulo();
+    if (PUB.repintar) ponerAlDiaEstadoTextosPublicar();
   }
   programarRelojPublicar();
+}
+
+/* El estado de «Que Claude escriba los textos» (escribiendo, error con
+   «Reintentar») se cambia EN SU SITIO cuando no se puede repintar todo porque
+   alguien está escribiendo en un campo. */
+function ponerAlDiaEstadoTextosPublicar() {
+  const viejo = document.querySelector('#modulo .estado-textos');
+  if (!viejo || !PUB.ficha) return;
+  viejo.replaceWith(estadoTextosPublicar(PUB.ficha));
+}
+
+function estadoTextosPublicar(f) {
+  const caja = h('div', { clase: 'estado-textos' });
+  if (f.escribiendo) {
+    const redes = (f.escribiendo_redes || []).map(r => NOMBRES_RED[r] || r).join(', ');
+    // el servidor da la hora de Lima sin zona (Lima es UTC-5 todo el año)
+    const iso = f.escribiendo_desde || '';
+    const desde = Date.parse(/(Z|[+-]\d\d:\d\d)$/.test(iso) ? iso : `${iso}-05:00`);
+    const lleva = Number.isFinite(desde) ? Math.max(0, Math.round((Date.now() - desde) / 1000)) : 0;
+    caja.appendChild(h('div', { clase: 'caja-aviso fila escribiendo-textos' },
+      h('span', { clase: 'girando', 'aria-hidden': 'true' }),
+      h('span', { clase: 'crece' }, `Claude está escribiendo los textos${redes ? ` de ${redes}` : ''}…`
+        + `${lleva > 5 ? ` (lleva ${lleva} s; suele tardar uno o dos minutos)` : ''}`)));
+  } else if (f.error_textos) {
+    caja.appendChild(h('div', { clase: 'caja-error fila' },
+      h('span', { clase: 'crece' }, f.error_textos),
+      // solo las redes del intento que falló: las demás pueden estar corregidas a mano
+      h('button', { clase: 'mini', onclick: () => escribirTextosPublicar(
+        (f.error_redes || []).length ? f.error_redes : (f.redes || []), true) }, 'Reintentar')));
+  }
+  return caja;
 }
 
 /* NO SE REPINTA DEBAJO DE QUIEN ESCRIBE: un repintado rehace los campos y se
@@ -17149,7 +17187,9 @@ function programarRelojPublicar() {
   if (!enElAire) return;
   PUB.reloj = setTimeout(async () => {
     try { await pedir(rutaPublicar('/refrescar'), { method: 'POST' }); } catch (e) { /* se reintenta */ }
-    if (Object.keys(PUB.borrador).length || PUB.guardando) { programarRelojPublicar(); return; }
+    /* Se pide SIEMPRE: lo tecleado vive en PUB.borrador y se pinta encima de lo
+       que llegue (textosDeFicha). Antes, con algo en el borrador no se volvía a
+       pedir la ficha y «Claude está escribiendo» no acababa nunca (16-10). */
     cargarPublicar(true);
   }, 4000);
 }
@@ -17247,73 +17287,257 @@ function filaEnvioCola(e) {
     e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver') : null);
 }
 
+/* LA COLA, CON FILTROS (16-10-2026: con muchos vídeos la lista era un caos).
+   Buscador, proyecto, estilo, estado y fecha; se acuerdan en este navegador.
+   La semana o el mes, filtrados igual. */
+const FILTROS_COLA_DEFECTO = { texto: '', proyecto: '', estilo: '', estado: '', fecha: '', agrupar: false };
+
+function filtrosCola() {
+  if (!PUB.filtros) {
+    let guardados = {};
+    try { guardados = JSON.parse(localStorage.getItem('publicar.filtros') || '{}') || {}; } catch (e) { guardados = {}; }
+    PUB.filtros = Object.assign({}, FILTROS_COLA_DEFECTO, guardados, { texto: '' });
+  }
+  return PUB.filtros;
+}
+
+function cambiarFiltroCola(campo, valor) {
+  const f = filtrosCola();
+  f[campo] = valor;
+  PUB.verMasListos = 0;
+  try {
+    localStorage.setItem('publicar.filtros', JSON.stringify(Object.assign({}, f, { texto: '' })));
+  } catch (e) { /* sin almacenamiento: los filtros duran lo que la página */ }
+  if (campo === 'texto') {
+    clearTimeout(PUB.relojBuscar);
+    PUB.relojBuscar = setTimeout(pintarModulo, 200);
+  } else pintarModulo();
+}
+
+/* Sin publicar / a medias / programado / publicado en todas las elegidas. */
+function estadoDeListo(v) {
+  const estados = Object.values(v.envios || {});
+  if (!estados.length) return 'sin';
+  if (estados.some(e => ['programado', 'enviando', 'publicando', 'espera_ok'].includes(e))) return 'programado';
+  if (estados.some(e => ['fallido', 'comprobar'].includes(e))) return 'atencion';
+  // «en todas»: en todas las redes elegidas en su ficha (o, sin elegir, en
+  // todas las que se intentaron)
+  const elegidas = (v.redes_elegidas || []).length ? v.redes_elegidas : Object.keys(v.envios || {});
+  const todas = elegidas.every(r => ['publicado', 'a_mano'].includes((v.envios || {})[r]));
+  return todas ? 'publicado' : 'medias';
+}
+
+function pasaFiltroCola(v) {
+  const f = filtrosCola();
+  const texto = normalizarBusqueda(f.texto);
+  if (texto && !normalizarBusqueda(`${v.nombre || ''} ${v.pid || ''} ${v.cliente_nombre || ''} ${v.estilo_nombre || ''}`).includes(texto)) return false;
+  if (f.proyecto && (v.cliente || '_sin') !== f.proyecto) return false;
+  if (f.estilo && (v.estilo || '') !== f.estilo) return false;
+  if (f.estado && estadoDeListo(v) !== f.estado) return false;
+  if (f.fecha) {
+    const t = Date.parse(v.actualizado || '');
+    if (!Number.isFinite(t) || Date.now() - t > Number(f.fecha) * 86400000) return false;
+  }
+  return true;
+}
+
+function normalizarBusqueda(texto) {
+  return String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
+}
+
+function barraFiltrosCola(listos) {
+  const f = filtrosCola();
+  const unicos = (clave, nombre) => {
+    const vistos = new Map();
+    listos.forEach(v => { const id = v[clave] || (clave === 'cliente' ? '_sin' : ''); if (id && !vistos.has(id)) vistos.set(id, v[nombre] || (id === '_sin' ? 'Sin proyecto' : id)); });
+    return [...vistos.entries()].sort((x, y) => x[1].localeCompare(y[1], 'es'));
+  };
+  const selector = (campo, primera, opciones, etiqueta) => h('select', { 'aria-label': etiqueta, datos: { filtro: campo },
+    onchange: ev => cambiarFiltroCola(campo, ev.target.value) },
+  h('option', { value: '' }, primera),
+  ...opciones.map(([v, t]) => h('option', { value: v, selected: String(f[campo]) === String(v) }, t)));
+  return h('div', { clase: 'fila filtros-cola' },
+    h('input', { type: 'search', clase: 'buscar-cola', placeholder: 'Buscar un vídeo…', value: f.texto,
+      'aria-label': 'Buscar un vídeo', datos: { foco: 'buscar-cola' },
+      oninput: ev => cambiarFiltroCola('texto', ev.target.value) }),
+    selector('proyecto', 'Todos los proyectos', unicos('cliente', 'cliente_nombre'), 'Proyecto'),
+    selector('estilo', 'Todos los estilos', unicos('estilo', 'estilo_nombre'), 'Estilo'),
+    selector('estado', 'Cualquier estado', [['sin', 'Sin publicar'], ['medias', 'Publicado en algunas'],
+      ['publicado', 'Publicado en todas'], ['programado', 'Programado o subiendo'], ['atencion', 'Con algún fallo']], 'Estado'),
+    selector('fecha', 'Cualquier fecha', [['7', 'Últimos 7 días'], ['30', 'Últimos 30 días'], ['90', 'Últimos 3 meses']], 'Fecha'),
+    h('label', { clase: 'casilla-red' },
+      h('input', { type: 'checkbox', checked: !!f.agrupar, onchange: ev => cambiarFiltroCola('agrupar', ev.target.checked) }),
+      ' Agrupar por proyecto'),
+    Object.keys(FILTROS_COLA_DEFECTO).some(k => k !== 'agrupar' && f[k])
+      ? h('button', { clase: 'mini fantasma', onclick: () => {
+        PUB.filtros = Object.assign({}, FILTROS_COLA_DEFECTO, { agrupar: f.agrupar });
+        cambiarFiltroCola('texto', '');
+      } }, 'Quitar filtros') : null);
+}
+
+/* El primer día de la rejilla: el lunes de la semana pedida, o el lunes
+   anterior al día 1 del mes (6 semanas, como un calendario de pared). */
+function inicioCalendarioPublicar(vista, mes) {
+  if (vista !== 'mes') return PUB.desde || '';
+  const [a, m] = (mes || '').split('-').map(Number);
+  const uno = new Date(Date.UTC(a, (m || 1) - 1, 1, 12));
+  uno.setUTCDate(uno.getUTCDate() - ((uno.getUTCDay() + 6) % 7));
+  return uno.toISOString().slice(0, 10);
+}
+
+function mesDeHoyPublicar() {
+  const hoy = (PUB.cola || {}).hoy || new Date().toISOString().slice(0, 10);
+  return hoy.slice(0, 7);
+}
+
+function filaListoPublicar(v) {
+  const redes = h('span', { clase: 'redes-video' });
+  Object.keys(NOMBRES_RED).forEach(r => {
+    const estado = (v.envios || {})[r];
+    redes.appendChild(h('span', {
+      clase: `pastilla red-mini ${estado ? CLASE_ESTADO[estado] || '' : 'apagada'}`,
+      title: `${NOMBRES_RED[r]}: ${estado ? ESTADOS_ENVIO[estado] : 'sin publicar'}`,
+    }, CORTOS_RED[r]));
+  });
+  return h('div', { clase: 'fila fila-listo' },
+    h('b', { clase: 'nombre-listo' }, v.nombre || v.pid),
+    v.cliente_nombre ? h('span', { clase: 'meta' }, v.cliente_nombre) : null,
+    v.estilo_nombre ? h('span', { clase: 'meta estilo-listo' }, `· ${recortar(v.estilo_nombre, 24)}`) : null,
+    h('span', { clase: 'crece' }), redes,
+    h('button', { clase: 'primario mini', onclick: () => irASeccionPublicar('ficha', v.pid) },
+      v.textos ? 'Abrir' : 'Preparar'));
+}
+
 function seccionColaPublicar() {
   const c = PUB.cola || {};
   const caja = h('div', { clase: 'cola-publicar' });
   const aviso = avisoClavePublicar(c.clave);
   if (aviso) caja.appendChild(aviso);
+  const todos = c.listos || [];
+  const porPid = {};
+  todos.forEach(v => { porPid[v.pid] = v; });
+  const f = filtrosCola();
+  const filtrando = Object.keys(FILTROS_COLA_DEFECTO).some(k => k !== 'agrupar' && f[k]);
+  // un envío pasa si su vídeo pasa (o, si su vídeo no está en la lista, por el proyecto y el texto)
+  const pasaEnvio = e => {
+    const v = porPid[e.pid];
+    if (v) return pasaFiltroCola(v);
+    return pasaFiltroCola({ nombre: e.video, pid: e.pid, cliente: e.cliente, cliente_nombre: e.cliente_nombre, envios: {} });
+  };
 
-  const atencion = (c.esperan_ok || []).concat(c.fallidos || []);
+  if (todos.length) caja.appendChild(barraFiltrosCola(todos));
+
+  const atencion = (c.esperan_ok || []).concat(c.fallidos || []).filter(pasaEnvio);
   if (atencion.length) {
     const b = h('div', { clase: 'bloque bloque-atencion' }, h('h3', {}, 'Te necesitan'));
     atencion.forEach(e => b.appendChild(filaEnvioCola(e)));
     caja.appendChild(b);
   }
 
-  // LA SEMANA
-  const semana = h('div', { clase: 'bloque' });
+  // EL CALENDARIO: la semana o el mes
+  const vista = PUB.vistaCal === 'mes' ? 'mes' : 'semana';
+  const cal = h('div', { clase: 'bloque' });
   const desde = c.desde || '';
-  const mover = dias => {
-    const base = desde ? new Date(`${desde}T12:00:00Z`) : new Date();
-    base.setUTCDate(base.getUTCDate() + dias);
-    PUB.desde = base.toISOString().slice(0, 10);
+  const mover = paso => {
+    if (vista === 'mes') {
+      const [a, m] = (PUB.mes || mesDeHoyPublicar()).split('-').map(Number);
+      const otro = new Date(Date.UTC(a, m - 1 + paso, 1, 12));
+      PUB.mes = otro.toISOString().slice(0, 7);
+      PUB.desde = inicioCalendarioPublicar('mes', PUB.mes);
+    } else {
+      const base = desde ? new Date(`${desde}T12:00:00Z`) : new Date();
+      base.setUTCDate(base.getUTCDate() + paso * 7);
+      PUB.desde = base.toISOString().slice(0, 10);
+    }
     cargarPublicar();
   };
-  semana.appendChild(h('div', { clase: 'fila' },
-    h('h3', {}, 'La semana'), h('span', { clase: 'meta' }, 'hora de Lima'),
+  const cambiarVista = otra => {
+    PUB.vistaCal = otra;
+    PUB.diaAbierto = '';
+    if (otra === 'mes') { PUB.mes = PUB.mes || mesDeHoyPublicar(); PUB.desde = inicioCalendarioPublicar('mes', PUB.mes); } else PUB.desde = '';
+    cargarPublicar();
+  };
+  const titulo = vista === 'mes'
+    ? (t => t.charAt(0).toUpperCase() + t.slice(1))(new Date(`${PUB.mes || mesDeHoyPublicar()}-15T12:00:00Z`)
+      .toLocaleDateString('es-PE', { month: 'long', year: 'numeric', timeZone: 'UTC' }))
+    : 'La semana';
+  cal.appendChild(h('div', { clase: 'fila' },
+    h('h3', { clase: 'titulo-calendario' }, titulo), h('span', { clase: 'meta' }, 'hora de Lima'),
     h('span', { clase: 'crece' }),
-    h('button', { clase: 'mini fantasma', title: 'Semana anterior', onclick: () => mover(-7) }, '‹'),
-    h('button', { clase: 'mini fantasma', onclick: () => { PUB.desde = ''; cargarPublicar(); } }, 'Hoy'),
-    h('button', { clase: 'mini fantasma', title: 'Semana siguiente', onclick: () => mover(7) }, '›')));
-  const rejilla = h('div', { clase: 'calendario-publicar' });
+    h('span', { clase: 'pestanas-publicar vista-cal' },
+      h('button', { clase: `mini${vista === 'semana' ? ' activo' : ''}`, onclick: () => cambiarVista('semana') }, 'Semana'),
+      h('button', { clase: `mini${vista === 'mes' ? ' activo' : ''}`, onclick: () => cambiarVista('mes') }, 'Mes')),
+    h('button', { clase: 'mini fantasma', title: vista === 'mes' ? 'Mes anterior' : 'Semana anterior', onclick: () => mover(-1) }, '‹'),
+    h('button', { clase: 'mini fantasma', onclick: () => {
+      PUB.mes = mesDeHoyPublicar(); PUB.desde = inicioCalendarioPublicar(vista, PUB.mes); if (vista !== 'mes') PUB.desde = ''; cargarPublicar();
+    } }, 'Hoy'),
+    h('button', { clase: 'mini fantasma', title: vista === 'mes' ? 'Mes siguiente' : 'Semana siguiente', onclick: () => mover(1) }, '›')));
+  const rejilla = h('div', { clase: `calendario-publicar${vista === 'mes' ? ' calendario-mes' : ''}` });
+  if (vista === 'mes') ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'].forEach(d => rejilla.appendChild(h('div', { clase: 'cab-semana' }, d)));
+  const mesActual = PUB.mes || mesDeHoyPublicar();
+  const enviosVisibles = (c.envios || []).filter(e => e.estado !== 'cancelado' && pasaEnvio(e));
+  const TOPE_DIA = vista === 'mes' ? 3 : 99;
   (c.dias || []).forEach(dia => {
-    const columna = h('div', { clase: `dia-publicar${dia === c.hoy ? ' hoy' : ''}` },
-      h('div', { clase: 'dia-cab' }, cuandoLegible(dia)));
-    const delDia = (c.envios || []).filter(e => String(e.cuando || '').startsWith(dia) && e.estado !== 'cancelado');
-    if (!delDia.length) columna.appendChild(h('div', { clase: 'meta dia-vacio' }, '—'));
-    delDia.forEach(e => columna.appendChild(h('button', {
+    const fuera = vista === 'mes' && !dia.startsWith(mesActual);
+    const columna = h('div', { clase: `dia-publicar${dia === c.hoy ? ' hoy' : ''}${fuera ? ' fuera-mes' : ''}${PUB.diaAbierto === dia ? ' abierto' : ''}` },
+      h('div', { clase: 'dia-cab' }, vista === 'mes' ? String(Number(dia.slice(8, 10))) : cuandoLegible(dia)));
+    const delDia = enviosVisibles.filter(e => String(e.cuando || '').startsWith(dia));
+    if (!delDia.length && vista !== 'mes') columna.appendChild(h('div', { clase: 'meta dia-vacio' }, '—'));
+    delDia.slice(0, TOPE_DIA).forEach(e => columna.appendChild(h('button', {
       clase: `envio-dia ${CLASE_ESTADO[e.estado] || ''}`,
       title: `${NOMBRES_RED[e.red]} · ${e.video} · ${ESTADOS_ENVIO[e.estado] || e.estado}`,
       onclick: () => irASeccionPublicar('ficha', e.pid),
     }, h('span', { clase: 'hora' }, String(e.cuando || '').slice(11, 16)),
-    ` ${CORTOS_RED[e.red]} · ${recortar(e.video || '', 22)}`)));
+    ` ${CORTOS_RED[e.red]} · ${recortar(e.video || '', vista === 'mes' ? 12 : 22)}`)));
+    if (delDia.length > TOPE_DIA) {
+      columna.appendChild(h('button', { clase: 'mini fantasma mas-del-dia',
+        onclick: () => { PUB.diaAbierto = PUB.diaAbierto === dia ? '' : dia; pintarModulo(); } },
+      `+${delDia.length - TOPE_DIA} más`));
+    }
     rejilla.appendChild(columna);
   });
-  semana.appendChild(rejilla);
-  caja.appendChild(semana);
+  cal.appendChild(rejilla);
+  if (PUB.diaAbierto) {
+    const delDia = enviosVisibles.filter(e => String(e.cuando || '').startsWith(PUB.diaAbierto));
+    const lista = h('div', { clase: 'dia-abierto' }, h('div', { clase: 'fila' },
+      h('b', { clase: 'crece' }, cuandoLegible(PUB.diaAbierto)),
+      h('button', { clase: 'mini fantasma', onclick: () => { PUB.diaAbierto = ''; pintarModulo(); } }, 'Cerrar')));
+    delDia.forEach(e => lista.appendChild(filaEnvioCola(e)));
+    cal.appendChild(lista);
+  }
+  caja.appendChild(cal);
 
-  // LOS VÍDEOS LISTOS
-  const listos = h('div', { clase: 'bloque' }, h('h3', {}, 'Vídeos listos para publicar'));
-  if (!(c.listos || []).length) {
+  // LOS VÍDEOS LISTOS, filtrados, agrupados si se pide y de 30 en 30
+  const visibles = todos.filter(pasaFiltroCola);
+  const listos = h('div', { clase: 'bloque' }, h('div', { clase: 'fila' },
+    h('h3', { clase: 'crece' }, 'Vídeos listos para publicar'),
+    todos.length ? h('span', { clase: 'meta' }, filtrando ? `${visibles.length} de ${todos.length}` : `${todos.length}`) : null));
+  if (!todos.length) {
     listos.appendChild(h('div', { clase: 'meta' },
       'Todavía no hay ningún vídeo montado. Se hacen en Crear; desde la pantalla Vídeo, «Enviar a Publicar».'));
+  } else if (!visibles.length) {
+    listos.appendChild(h('div', { clase: 'meta' }, 'Ningún vídeo cumple estos filtros.'));
   }
-  (c.listos || []).forEach(v => {
-    const redes = h('span', { clase: 'redes-video' });
-    Object.keys(NOMBRES_RED).forEach(r => {
-      const estado = (v.envios || {})[r];
-      redes.appendChild(h('span', {
-        clase: `pastilla red-mini ${estado ? CLASE_ESTADO[estado] || '' : 'apagada'}`,
-        title: `${NOMBRES_RED[r]}: ${estado ? ESTADOS_ENVIO[estado] : 'sin publicar'}`,
-      }, CORTOS_RED[r]));
+  const tope = 30 + (PUB.verMasListos || 0);
+  const mostrar = visibles.slice(0, tope);
+  if (f.agrupar) {
+    const grupos = new Map();
+    mostrar.forEach(v => {
+      const nombre = v.cliente_nombre || 'Sin proyecto';
+      if (!grupos.has(nombre)) grupos.set(nombre, []);
+      grupos.get(nombre).push(v);
     });
-    listos.appendChild(h('div', { clase: 'fila fila-listo' },
-      h('b', { clase: 'nombre-listo' }, v.nombre || v.pid),
-      v.cliente_nombre ? h('span', { clase: 'meta' }, v.cliente_nombre) : null,
-      h('span', { clase: 'crece' }), redes,
-      h('button', { clase: 'primario mini', onclick: () => irASeccionPublicar('ficha', v.pid) },
-        v.textos ? 'Abrir' : 'Preparar')));
-  });
+    [...grupos.entries()].sort((x, y) => x[0].localeCompare(y[0], 'es')).forEach(([nombre, lista]) => {
+      listos.appendChild(h('div', { clase: 'grupo-listos' }, h('div', { clase: 'cab-grupo' }, `${nombre} (${lista.length})`),
+        ...lista.map(filaListoPublicar)));
+    });
+  } else {
+    mostrar.forEach(v => listos.appendChild(filaListoPublicar(v)));
+  }
+  if (visibles.length > tope) {
+    listos.appendChild(h('button', { clase: 'mini', onclick: () => { PUB.verMasListos = (PUB.verMasListos || 0) + 30; pintarModulo(); } },
+      `Ver ${Math.min(30, visibles.length - tope)} más`));
+  }
   caja.appendChild(listos);
   return caja;
 }
@@ -17377,19 +17601,70 @@ async function cambiarRedesPublicar(red, puesta) {
   } catch (e) { toast(e.message, true); }
 }
 
-async function escribirTextosPublicar(redes) {
+async function escribirTextosPublicar(redes, reintento) {
   if (!redes.length) { toast('elige al menos una red', true); return; }
   const f = PUB.ficha;
   const hay = redes.some(r => ((f.textos || {})[r] || {}).descripcion);
-  if (hay && !confirm('Claude volverá a escribir los textos de: '
+  if (hay && !reintento && !confirm('Claude volverá a escribir los textos de: '
     + redes.map(r => NOMBRES_RED[r]).join(', ') + '.\n\nLo que hayas cambiado a mano en esas redes se sustituye. '
     + 'Va con tu suscripción de Claude (no se paga aparte).')) return;
   try {
     await guardarTextosPublicar();
     await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/textos`), { method: 'POST', cuerpo: { redes } });
-    toast('Claude está escribiendo los textos…');
+    // se ve YA, sin esperar a la siguiente vuelta del reloj
+    Object.assign(PUB.ficha, { escribiendo: true, error_textos: '', escribiendo_redes: redes,
+      escribiendo_desde: new Date().toISOString() });
+    pintarModulo();
     cargarPublicar(true);
   } catch (e) { toast(e.message, true); }
+}
+
+/* DESPUÉS DE PUBLICAR la ficha se queda donde estaba, para seguir con las otras
+   redes, y dice arriba en cuáles ya está (con su enlace) y en cuáles va a
+   salir. Cada red marca su último estado al lado de su casilla. */
+function ultimoEnvioPorRed(f) {
+  const salida = {};
+  // `envios` llega del más nuevo al más viejo
+  (f.envios || []).forEach(e => { if (e.estado !== 'cancelado' && !salida[e.red]) salida[e.red] = e; });
+  return salida;
+}
+
+function resumenPublicadoFicha(f) {
+  const ultimos = ultimoEnvioPorRed(f);
+  const publicadas = Object.values(ultimos).filter(e => ['publicado', 'a_mano'].includes(e.estado));
+  const enCamino = Object.values(ultimos).filter(e => ['programado', 'enviando', 'publicando', 'espera_ok', 'comprobar'].includes(e.estado));
+  if (!publicadas.length && !enCamino.length) return null;
+  const caja = h('div', { clase: 'caja-info resumen-publicado' });
+  if (publicadas.length) {
+    caja.appendChild(h('div', { clase: 'fila' }, h('b', {}, 'Ya publicado en:'),
+      ...publicadas.map(e => e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'pastilla ok' },
+        `${NOMBRES_RED[e.red]} ↗`) : h('span', { clase: 'pastilla ok' }, NOMBRES_RED[e.red]))));
+  }
+  if (enCamino.length) {
+    caja.appendChild(h('div', { clase: 'fila' }, h('b', {}, 'En camino:'),
+      ...enCamino.map(e => h('span', { clase: `pastilla ${CLASE_ESTADO[e.estado] || ''}` },
+        `${NOMBRES_RED[e.red]} · ${ESTADOS_ENVIO[e.estado] || e.estado}${e.estado === 'programado' ? ` ${cuandoLegible(e.cuando)}` : ''}`))));
+  }
+  const faltan = Object.keys(NOMBRES_RED).filter(r => !ultimos[r] || ['fallido'].includes(ultimos[r].estado));
+  if (faltan.length) {
+    caja.appendChild(h('div', { clase: 'meta' }, `Para seguir con ${faltan.map(r => NOMBRES_RED[r]).join(', ')}: márcalas en Redes, `
+      + 'revisa su texto y publica. Donde ya salió no se vuelve a enviar sin preguntarte.'));
+  }
+  return caja;
+}
+
+/* Lo que cambia de estado mientras se mira la ficha se avisa una vez:
+   «Publicado en Instagram», «Falló en TikTok». */
+function avisarCambiosPublicar(antes, despues) {
+  if (!antes || !despues || antes.pid !== despues.pid) return;
+  const previo = {};
+  (antes.envios || []).forEach(e => { previo[e.id] = e.estado; });
+  (despues.envios || []).forEach(e => {
+    if (!(e.id in previo) || previo[e.id] === e.estado) return;
+    if (e.estado === 'publicado') toast(`Publicado en ${NOMBRES_RED[e.red]}${e.url ? ': ya tiene su enlace en la lista de envíos' : ''}`);
+    else if (e.estado === 'programado' && previo[e.id] === 'enviando') toast(`Programado en ${NOMBRES_RED[e.red]} para ${cuandoLegible(e.cuando)}`);
+    else if (e.estado === 'fallido') toast(`Falló en ${NOMBRES_RED[e.red]}: ${e.error || 'mira el motivo en la lista de envíos'}`, true);
+  });
 }
 
 function seccionFichaPublicar() {
@@ -17422,8 +17697,11 @@ function seccionFichaPublicar() {
       `${f.programados_viejos} envío(s) programado(s) llevan el MP4 de antes del último montaje. `
       + 'Si quieres que salga el nuevo, cancélalo y vuelve a programarlo.'));
   }
+  const yaSalio = resumenPublicadoFicha(f);
+  if (yaSalio) caja.appendChild(yaSalio);
 
   // LAS REDES
+  const ultimos = ultimoEnvioPorRed(f);
   const redes = h('div', { clase: 'bloque' }, h('h3', {}, 'Redes'));
   const fila = h('div', { clase: 'fila redes-ficha' });
   Object.keys(NOMBRES_RED).forEach(r => {
@@ -17436,7 +17714,9 @@ function seccionFichaPublicar() {
     ` ${NOMBRES_RED[r]}`,
     enc.tipo ? h('span', { clase: 'meta' }, ` · ${enc.tipo}`) : null,
     enc.nivel === 'aviso' || enc.nivel === 'error'
-      ? h('span', { clase: `pastilla ${enc.nivel === 'error' ? 'error' : 'aviso'}` }, '!') : null));
+      ? h('span', { clase: `pastilla ${enc.nivel === 'error' ? 'error' : 'aviso'}` }, '!') : null,
+    ultimos[r] ? h('span', { clase: `pastilla red-mini ${CLASE_ESTADO[ultimos[r].estado] || ''}` },
+      ESTADOS_ENVIO[ultimos[r].estado] || ultimos[r].estado) : null));
   });
   redes.appendChild(fila);
   Object.keys(NOMBRES_RED).filter(r => (f.redes || []).includes(r) && ((f.encaje || {})[r] || {}).texto)
@@ -17458,11 +17738,14 @@ function seccionFichaPublicar() {
     h('span', { clase: 'meta' }, 'Desde el encargo, el guion final y la duración real, con las reglas de cada red.'),
     h('span', { clase: 'crece' }),
     h('a', { clase: 'boton-enlace mini', href: API.archivo(f.pid, f.mp4), download: `${f.pid}.mp4` }, 'Descargar MP4')));
-  if (f.error_textos) redes.appendChild(cajaError(f.error_textos));
+  redes.appendChild(estadoTextosPublicar(f));
   caja.appendChild(redes);
 
   // LOS TEXTOS POR RED
   (f.redes || []).forEach(r => caja.appendChild(bloqueTextoRed(r)));
+
+  // LA PORTADA
+  if ((f.redes || []).length && f.mp4) caja.appendChild(bloquePortadaPublicar());
 
   // CUÁNDO
   if ((f.redes || []).length) caja.appendChild(bloqueCuandoPublicar());
@@ -17489,11 +17772,17 @@ function bloqueTextoRed(red) {
     botonGuia(`texto_${red}`, campoTexto),
     botonRevisarPublicar(`texto_${red}`, f.pid, campoTexto)));
   if (red === 'youtube' || red === 'facebook') {
-    b.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Título'));
+    const largo = (t.titulo || '').length;
+    b.appendChild(h('label', { clase: 'etiqueta-campo' },
+      red === 'youtube' ? `Título (${largo}/70: más largo se corta en el móvil)` : 'Título'));
     b.appendChild(h('input', { type: 'text', value: t.titulo || '', maxlength: red === 'youtube' ? 100 : 255,
       datos: { foco: `${red}-titulo` }, oninput: ev => editarTextoPublicar(red, 'titulo', ev.target.value) }));
   }
   b.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Texto'));
+  if (red === 'instagram' || red === 'tiktok') {
+    b.appendChild(h('div', { clase: 'meta' }, `${NOMBRES_RED[red]} no tiene título aparte: la PRIMERA LÍNEA del texto `
+      + `es lo que se ve sin pulsar «más», así que hace de título.`));
+  }
   b.appendChild(h('textarea', { rows: 4, value: t.descripcion || '', datos: { foco: `${red}-descripcion` },
     oninput: ev => editarTextoPublicar(red, 'descripcion', ev.target.value) }));
   b.appendChild(panelRevisionPublicar(`texto_${red}`, f.pid, campoTexto));
@@ -17513,6 +17802,121 @@ function bloqueTextoRed(red) {
     h('summary', {}, `Así sale (${(compuesto.texto || '').length} caracteres)`),
     h('pre', { clase: 'texto-compuesto' }, compuesto.texto || '—')));
   (compuesto.avisos || []).forEach(a => b.appendChild(h('div', { clase: 'meta aviso-red' }, `⚠ ${a}`)));
+  return b;
+}
+
+/* POR QUÉ NO SE PUEDE PUBLICAR TODAVÍA, dicho antes de pulsar (16-10: el botón
+   dejaba pulsar y fallaba después). Lo mismo que comprueba el servidor. */
+function motivoNoPublicar(f) {
+  if (!(f.clave || {}).puesta) return 'Falta la clave de Upload-Post (Configuración → Publicar en redes).';
+  if (!(f.ajustes || {}).perfil) return 'Falta el perfil de Upload-Post de este proyecto.';
+  const redes = (f.redes || []).filter(r => ((f.encaje || {})[r] || {}).nivel !== 'error');
+  if (!redes.length) return 'Elige al menos una red en la que se pueda publicar este vídeo.';
+  const faltas = [];
+  redes.forEach(r => {
+    const t = textosDeFicha(r);
+    // (sin título, YouTube sale con el nombre del vídeo: no se bloquea)
+    if (!String(t.descripcion || '').trim()) faltas.push(`el texto de ${NOMBRES_RED[r]}`);
+  });
+  if (faltas.length) return `Falta ${faltas.join(', ')}.`;
+  if ((f.ajustes || {}).cuentas_vistas) {
+    const sin = redes.filter(r => !(f.cuentas || {})[r]);
+    if (sin.length) return `${sin.map(r => NOMBRES_RED[r]).join(', ')} no tiene${sin.length > 1 ? 'n' : ''} cuenta conectada `
+      + 'en Upload-Post: quítala o conéctala en Cuentas y ajustes.';
+    const re = redes.filter(r => ((f.cuentas || {})[r] || {}).reconectar);
+    if (re.length) return `Hay que volver a conectar ${re.map(r => NOMBRES_RED[r]).join(', ')} (Cuentas y ajustes → Conectar).`;
+  }
+  return '';
+}
+
+/* UNA IMAGEN CON EL PASE DE LOS PROYECTOS CON CLAVE: un <img src> no manda
+   cabeceras, y sin la de los pases el servidor no enseña lo de un proyecto
+   con clave aunque esté abierto. Se pide con fetch y se pone como blob. */
+async function ponerImagenPublicar(img, url) {
+  const pases = typeof cabeceraDePases === 'function' ? cabeceraDePases() : '';
+  img.dataset.pedida = url;
+  try {
+    const r = await fetch(url, { headers: pases ? { 'X-Estudio-Abiertos': pases } : {} });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    if (img.dataset.pedida !== url) return;          // ya se pidió otra
+    if (img.dataset.blob) URL.revokeObjectURL(img.dataset.blob);
+    img.dataset.blob = URL.createObjectURL(blob);
+    // si la política del proxy no dejara pintar un blob, la dirección a pelo
+    // (vale en todo proyecto sin clave)
+    img.onerror = () => { img.onerror = null; img.src = url; };
+    img.src = img.dataset.blob;
+  } catch (e) {
+    img.alt = 'No se puede sacar esa imagen';
+    img.classList.add('sin-imagen');
+  }
+}
+
+/* LA PORTADA: un fotograma del vídeo (con un deslizador y su vista) o una
+   imagen subida. Sin elegir nada, cada red pone la suya. */
+function bloquePortadaPublicar() {
+  const f = PUB.ficha;
+  const p = f.portada || {};
+  // el último punto no tiene fotograma: el deslizador acaba 0,1 s antes
+  const dur = Math.max(100, Math.round((f.duracion_s || 1) * 1000) - 100);
+  const b = h('div', { clase: 'bloque portada-publicar' }, h('h3', {}, 'Portada'));
+  const msVista = Math.min(dur, PUB.portadaMs != null ? PUB.portadaMs : (p.ms != null ? p.ms : Math.min(1000, dur)));
+  const rutaVideo = `/videos/${encodeURIComponent(f.pid)}`;
+  const vista = h('img', { clase: 'vista-portada', alt: 'Vista de la portada' });
+  ponerImagenPublicar(vista, p.imagen ? rutaPublicar(`${rutaVideo}/portada.jpg?s=${p.imagen}`)
+    : rutaPublicar(`${rutaVideo}/fotograma?ms=${msVista}`));
+  const etiqueta = h('span', { clase: 'meta' }, p.imagen ? 'Imagen subida'
+    : p.ms != null ? `Fotograma del segundo ${(p.ms / 1000).toFixed(1)}` : 'Cada red elige la suya (no has elegido ninguna)');
+  let reloj = null;
+  const deslizador = h('input', { type: 'range', min: 0, max: dur, step: 100, value: msVista,
+    disabled: !!p.imagen, 'aria-label': 'Momento del vídeo para la portada',
+    oninput: ev => {
+      PUB.portadaMs = Number(ev.target.value);
+      etiqueta.textContent = `Segundo ${(PUB.portadaMs / 1000).toFixed(1)} (sin guardar)`;
+      clearTimeout(reloj);
+      reloj = setTimeout(() => ponerImagenPublicar(vista, rutaPublicar(`${rutaVideo}/fotograma?ms=${PUB.portadaMs}`)), 250);
+    } });
+  const guardarPortada = async cambios => {
+    try {
+      PUB.ficha = await pedir(rutaPublicar(rutaVideo), { method: 'PUT', cuerpo: { portada: cambios } });
+      PUB.portadaMs = null;
+      toast('Portada guardada');
+      pintarModulo();
+    } catch (e) { toast(e.message, true); }
+  };
+  const entrada = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', clase: 'oculto',
+    id: `portada-${f.pid}`, onchange: async ev => {
+      const fichero = (ev.target.files || [])[0];
+      ev.target.value = '';
+      if (!fichero) return;
+      const cuerpo = new FormData();
+      cuerpo.append('portada', fichero);
+      try {
+        PUB.ficha = await pedir(rutaPublicar(`${rutaVideo}/portada`), { method: 'POST', cuerpo });
+        toast('Imagen de portada guardada');
+        pintarModulo();
+      } catch (e) { toast(e.message, true); }
+    } });
+  b.appendChild(h('div', { clase: 'fila portada-fila' }, vista,
+    h('div', { clase: 'crece portada-mandos' },
+      etiqueta,
+      deslizador,
+      h('div', { clase: 'fila' },
+        h('button', { clase: 'mini', disabled: !!p.imagen, onclick: () => guardarPortada({ ms: Number(deslizador.value) }) },
+          'Usar este fotograma'),
+        h('label', { clase: 'boton mini', for: `portada-${f.pid}` }, 'Subir una imagen'), entrada,
+        p.imagen ? h('button', { clase: 'mini fantasma', onclick: () => guardarPortada({ quitar_imagen: true }) }, 'Quitar la imagen') : null,
+        (p.ms != null || p.imagen) ? h('button', { clase: 'mini fantasma',
+          onclick: () => guardarPortada({ ms: null, quitar_imagen: true }) }, 'Que cada red elija') : null),
+      h('div', { clase: 'fila' },
+        h('label', { clase: 'casilla-red', title: 'YouTube solo acepta miniaturas propias en canales verificados; en uno sin verificar puede fallar la subida' },
+          h('input', { type: 'checkbox', checked: !!p.youtube, onchange: ev => guardarPortada({ youtube: ev.target.checked }) }),
+          ' Mandarla también a YouTube (solo canales verificados)'),
+        p.imagen ? h('label', { clase: 'casilla-red', title: 'TikTok solo acepta una imagen propia si tu cuenta tiene esa función; si no, usa el fotograma' },
+          h('input', { type: 'checkbox', checked: !!p.tiktok_imagen, onchange: ev => guardarPortada({ tiktok_imagen: ev.target.checked }) }),
+          ' Usar la imagen también en TikTok') : null),
+      h('div', { clase: 'meta' }, 'Instagram y TikTok usan el fotograma elegido; Facebook, solo si sale como vídeo (no como Reel). '
+        + 'Una imagen subida va a Instagram y Facebook (y a YouTube o TikTok si lo marcas).'))));
   return b;
 }
 
@@ -17548,10 +17952,12 @@ function bloqueCuandoPublicar() {
       h('span', { clase: 'crece' }, 'Este proyecto no tiene perfil de Upload-Post todavía.'),
       h('button', { clase: 'mini', onclick: () => irASeccionPublicar('cuentas') }, 'Cuentas y ajustes')));
   }
+  const motivo = motivoNoPublicar(f);
   b.appendChild(h('div', { clase: 'fila' },
-    h('button', { clase: 'primario', disabled: PUB.enviando || !perfil || !(f.clave || {}).puesta,
+    h('button', { clase: 'primario', disabled: PUB.enviando || !!motivo, title: motivo || '',
       onclick: () => confirmarEnvioPublicar(elegido) },
     elegido === 'ahora' ? 'Publicar ahora…' : 'Programar…'),
+    motivo ? h('span', { clase: 'meta motivo-no-publicar' }, motivo) : null,
     h('button', { clase: 'mini fantasma', disabled: PUB.enviando,
       title: 'Lo deja preparado sin enviarlo: saldrá en «Te necesitan» hasta que des el OK',
       onclick: () => dejarPendientePublicar(elegido) }, 'Dejar esperando mi OK')));
@@ -17758,18 +18164,59 @@ async function accionProyectoPublicar(cid, accion, cuerpo) {
     const r = await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(cid)}/${accion}`), {
       method: 'POST', cuerpo: cuerpo || {},
     });
+    PUB.perfilNoExiste = PUB.perfilNoExiste || {};
     if (accion === 'conectar' && r.url) {
+      // al volver a esta pestaña se miran solas las cuentas (volverDeConectarPublicar)
+      PUB.conectando = cid;
       window.open(r.url, '_blank', 'noopener');
-      toast(`Enlace abierto (vale ${r.caduca || '48 h'}). Cuando termines de conectar, pulsa «Ver cuentas».`);
+      toast(`Enlace abierto (vale ${r.caduca || '48 h'}). Al volver aquí se miran solas las cuentas.`);
     } else if (accion === 'cuentas' && r.existe === false) {
-      toast('Ese perfil no existe en Upload-Post: créalo con «Crear perfil».', true);
+      PUB.perfilNoExiste[cid] = true;
+      toast('Ese perfil no está en Upload-Post: elige uno de la lista o créalo.', true);
+      cargarPerfilesCuentaPublicar(cid);
+    } else if (accion === 'cuentas') {
+      delete PUB.perfilNoExiste[cid];
+      const n = Object.values((r.ajustes || {}).cuentas || {}).filter(Boolean).length;
+      toast(n ? `Cuentas al día: ${n} conectada${n === 1 ? '' : 's'}` : 'El perfil existe, pero no tiene ninguna cuenta conectada todavía');
+    } else if (accion === 'perfil') {
+      delete PUB.perfilNoExiste[cid];
+      toast(r.como === 'creado' ? `Perfil «${r.ajustes.perfil}» creado en Upload-Post`
+        : `Perfil «${r.ajustes.perfil}» apuntado (ya existía en Upload-Post)`);
     } else {
       toast('Hecho');
     }
-    PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
-    pintarModulo();
+    await recargarProyectosPublicar();
   } catch (e) { toast(e.message, true); }
 }
+
+/* Lo que se ve de Cuentas y ajustes se vuelve a pedir y se repinta: sin esto,
+   «Ver cuentas» y «Conectar» no salían hasta recargar la página (16-10). */
+async function recargarProyectosPublicar() {
+  try { PUB.proyectos = await pedir(rutaPublicar('/proyectos')); } catch (e) { toast(e.message, true); }
+  pintarModulo();
+}
+
+/* Los perfiles que hay de verdad en Upload-Post, para el desplegable. */
+async function cargarPerfilesCuentaPublicar(cid) {
+  PUB.perfilesCuenta = PUB.perfilesCuenta || {};
+  PUB.perfilesCuenta[cid] = { cargando: true };
+  pintarModulo();
+  try {
+    PUB.perfilesCuenta[cid] = await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(cid)}/perfiles`));
+  } catch (e) {
+    PUB.perfilesCuenta[cid] = { error: e.message };
+  }
+  pintarModulo();
+}
+
+/* Vuelta de la página de Upload-Post donde se conectan las cuentas. */
+function volverDeConectarPublicar() {
+  if (document.visibilityState !== 'visible' || !PUB.conectando) return;
+  const cid = PUB.conectando;
+  PUB.conectando = '';
+  if (MODULOS.actual === 'publicar') accionProyectoPublicar(cid, 'cuentas');
+}
+document.addEventListener('visibilitychange', volverDeConectarPublicar);
 
 /* Lo guardado se queda TAMBIÉN en lo que pinta la pantalla: sin esto, un
    repintado (al pulsar «Revisar», por ejemplo) volvía a enseñar el valor de
@@ -17780,6 +18227,9 @@ async function guardarAjustePublicar(cid, cambios) {
     const fila = ((PUB.proyectos || {}).proyectos || []).find(x => x.id === cid);
     if (fila && r.ajustes) fila.ajustes = Object.assign({}, fila.ajustes || {}, r.ajustes);
     toast('Guardado');
+    // lo que cambia qué botones salen se repinta; el resto no, para no quitar
+    // el foco a quien sigue escribiendo
+    if ('usar_emojis' in cambios || 'perfil' in cambios) pintarModulo();
   } catch (e) { toast(e.message, true); }
 }
 
@@ -17801,19 +18251,74 @@ function seccionCuentasPublicar() {
   return caja;
 }
 
+/* El desplegable «Elegir un perfil que ya tengo en Upload-Post»: los de la
+   cuenta de verdad; los que ya usa otro proyecto salen y no se eligen. */
+function elegirPerfilPublicar(p, lista) {
+  const caja = h('div', { clase: 'elegir-perfil fila' });
+  if (lista.cargando) { caja.appendChild(h('span', { clase: 'meta' }, 'Pidiendo tus perfiles a Upload-Post…')); return caja; }
+  if (lista.error) { caja.appendChild(cajaError(lista.error)); return caja; }
+  const perfiles = lista.perfiles || [];
+  const limite = lista.limite ? ` de ${lista.limite}` : '';
+  if (!perfiles.length) {
+    caja.appendChild(h('span', { clase: 'meta' }, 'Tu cuenta de Upload-Post todavía no tiene perfiles: créalo con «Crear perfil».'));
+    return caja;
+  }
+  const sel = h('select', { datos: { elegirPerfil: p.id },
+    onchange: ev => {
+      if (!ev.target.value) return;
+      delete PUB.perfilesCuenta[p.id];
+      accionProyectoPublicar(p.id, 'perfil', { perfil: ev.target.value, crear: false });
+    } },
+  h('option', { value: '' }, 'Elegir un perfil que ya tengo en Upload-Post…'),
+  ...perfiles.map(x => h('option', { value: x.perfil, disabled: !!x.de_otro },
+    `${x.perfil}${x.redes && x.redes.length ? ` · ${x.redes.map(r => CORTOS_RED[r] || r).join(', ')}` : ' · sin cuentas'}`
+    + `${x.propio ? ' (el de este proyecto)' : ''}${x.de_otro ? ` (ya es de ${x.de_otro_nombre || 'otro proyecto'})` : ''}`)));
+  caja.appendChild(h('label', { clase: 'etiqueta-campo' }, `Tus perfiles en Upload-Post (${perfiles.length + (lista.ocultos || 0)}${limite} del plan)`, sel));
+  if (lista.ocultos) caja.appendChild(h('span', { clase: 'meta' }, `${lista.ocultos} más de proyectos con clave`));
+  caja.appendChild(h('button', { clase: 'mini', onclick: () => { delete PUB.perfilesCuenta[p.id]; pintarModulo(); } }, 'Cerrar'));
+  return caja;
+}
+
 function tarjetaProyectoPublicar(p) {
   const a = p.ajustes || {};
   const b = h('div', { clase: 'bloque proyecto-publicar' }, h('h3', {}, p.nombre));
   const guardar = (campo, valor) => guardarAjustePublicar(p.id, { [campo]: valor });
-  b.appendChild(h('div', { clase: 'fila' },
+  /* EL PERFIL. Se apunta con «Usar este perfil» o Enter (no al cambiar el
+     valor: guardar con onchange no repintaba y dependía de que cambiara), y
+     el servidor lo ADOPTA si ya existe en Upload-Post (sin mirar mayúsculas)
+     aunque el plan esté lleno. «Crear perfil» manda lo escrito. */
+  PUB.perfilEscrito = PUB.perfilEscrito || {};
+  const escrito = () => {
+    const c = document.querySelector(`input[data-perfil="${p.id}"]`);
+    return (c ? c.value : (PUB.perfilEscrito[p.id] || '')).trim();
+  };
+  const usar = crear => {
+    const valor = escrito() || (crear ? p.perfil_sugerido || '' : '');
+    if (!valor) { toast('Escribe el nombre del perfil o elígelo de la lista', true); return; }
+    delete PUB.perfilEscrito[p.id];
+    accionProyectoPublicar(p.id, 'perfil', { perfil: valor, crear });
+  };
+  const valorCampo = p.id in PUB.perfilEscrito ? PUB.perfilEscrito[p.id] : (a.perfil || '');
+  b.appendChild(h('div', { clase: 'fila fila-perfil' },
     h('label', { clase: 'etiqueta-campo' }, 'Perfil de Upload-Post',
-      h('input', { type: 'text', value: a.perfil || '', placeholder: p.perfil_sugerido || '',
-        onchange: ev => guardar('perfil', ev.target.value.trim()) })),
-    a.perfil ? null : h('button', { clase: 'mini', onclick: () => accionProyectoPublicar(p.id, 'perfil', {}) },
-      'Crear perfil'),
+      h('input', { type: 'text', value: valorCampo, placeholder: p.perfil_sugerido || '',
+        datos: { perfil: p.id, foco: `perfil-${p.id}` },
+        oninput: ev => { PUB.perfilEscrito[p.id] = ev.target.value; },
+        onkeydown: ev => { if (ev.key === 'Enter') { ev.preventDefault(); usar(false); } } })),
+    h('button', { clase: 'mini', title: 'Apunta este perfil si ya existe en Upload-Post',
+      onclick: () => usar(false) }, 'Usar este perfil'),
+    a.perfil ? null : h('button', { clase: 'mini', title: 'Lo crea en Upload-Post con el nombre escrito (o el sugerido)',
+      onclick: () => usar(true) }, 'Crear perfil'),
+    h('button', { clase: 'mini', onclick: () => cargarPerfilesCuentaPublicar(p.id) }, 'Elegir de mi cuenta'),
     a.perfil ? h('button', { clase: 'mini', onclick: () => accionProyectoPublicar(p.id, 'cuentas') }, 'Ver cuentas') : null,
     a.perfil ? h('button', { clase: 'mini primario', title: 'Abre la página de Upload-Post para conectar o volver a conectar las cuentas de este cliente',
       onclick: () => accionProyectoPublicar(p.id, 'conectar', { volver_a: location.href }) }, 'Conectar') : null));
+  if ((PUB.perfilNoExiste || {})[p.id]) {
+    b.appendChild(h('div', { clase: 'caja-aviso' },
+      `Upload-Post no tiene ningún perfil «${a.perfil}». Elige uno de los que tienes o pulsa «Crear perfil».`));
+  }
+  const lista = (PUB.perfilesCuenta || {})[p.id];
+  if (lista) b.appendChild(elegirPerfilPublicar(p, lista));
   const cuentas = h('div', { clase: 'fila cuentas-proyecto' });
   Object.keys(NOMBRES_RED).forEach(r => {
     const c = (a.cuentas || {})[r];
@@ -17862,7 +18367,8 @@ function tarjetaProyectoPublicar(p) {
   fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Página de Facebook (solo si hay más de una)',
     h('input', { type: 'text', value: a.facebook_pagina || '', onchange: ev => guardar('facebook_pagina', ev.target.value) })));
   const casillas = h('div', { clase: 'fila' });
-  [['marcar_ia', 'Marcar como hecho con IA'], ['avisar_youtube', 'Avisar a los suscriptores de YouTube']]
+  [['usar_emojis', 'Usar emojis en los textos'], ['marcar_ia', 'Marcar como hecho con IA'],
+    ['avisar_youtube', 'Avisar a los suscriptores de YouTube']]
     .forEach(([campo, texto]) => casillas.appendChild(h('label', { clase: 'casilla-red' },
       h('input', { type: 'checkbox', checked: !!a[campo], onchange: ev => guardar(campo, ev.target.checked) }),
       ` ${texto}`)));

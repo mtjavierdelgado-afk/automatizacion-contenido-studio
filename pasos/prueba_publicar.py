@@ -37,6 +37,8 @@ os.environ["ESTUDIO_SECRETOS"] = os.path.join(CARPETA, "secretos")
 os.environ.pop("UPLOADPOST_API_KEY", None)
 os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 os.environ.pop("ESTUDIO_SIMULAR", None)
+# lo que apunta Publicar en la bitacora global no va a la de verdad
+os.environ["ESTUDIO_BITACORA_GLOBAL"] = os.path.join(CARPETA, "bitacora_global.jsonl")
 
 import publicar as P  # noqa: E402
 from motores.publicar_uploadpost import cliente as UP  # noqa: E402
@@ -137,7 +139,7 @@ def prueba_piezas():
     ok(largo["avisos"], "y se avisa")
 
     for malo, campo in (({"hora": "25:00"}, "hora"), ({"redes": ["myspace"]}, "redes"),
-                        ({"marcar_ia": "si"}, "marcar_ia"), ({"perfil": "a b"}, "perfil"),
+                        ({"marcar_ia": "si"}, "marcar_ia"), ({"perfil": "a/b"}, "perfil"),
                         ({"privacidad_youtube": "todos"}, "privacidad")):
         try:
             P._validar_ajustes(malo)
@@ -517,6 +519,16 @@ def prueba_studio():
         ok(perfil.startswith("studio_"), f"con el nombre sugerido: {perfil}")
         r = s.post(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/perfil", json={})
         igual(r.status_code, 200, "si ya existe allí, solo se apunta")
+        igual(r.json().get("como"), "adoptado", "y dice que lo adoptó")
+        # lo escrito en el campo es lo que se manda (16-10: iba el cuerpo vacío)
+        r = s.post(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/perfil",
+                   json={"perfil": perfil.upper(), "crear": False})
+        igual((r.status_code, r.json()["ajustes"]["perfil"]), (200, perfil),
+              "«Usar este perfil» con otras mayúsculas apunta el de Upload-Post")
+        r = s.get(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/perfiles")
+        igual(r.status_code, 200, "la lista de perfiles de la cuenta, para el desplegable")
+        ok(any(x["perfil"] == perfil and x["propio"] for x in r.json()["perfiles"]),
+           "con el de este proyecto marcado")
         r = s.post(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/conectar",
                    json={"redes": ["tiktok", "instagram", "youtube"], "volver_a": "javascript:x"})
         ok(r.json().get("url", "").startswith("https://app.upload-post.com/connect"),
@@ -536,6 +548,35 @@ def prueba_studio():
         ok(f["compuestos"]["tiktok"]["texto"].endswith("#prueba #tiktok #estadoplay"),
            "la firma y los hashtags fijos entran en el texto")
         ok(f["hora_sugerida"].endswith("T20:30"), "y la hora de programar es la del proyecto")
+
+        # --- la portada: el fotograma, guardarlo, una imagen subida
+        r = s.get(base + "/api/publicar/videos/fiesta/fotograma?ms=1500")
+        igual((r.status_code, r.headers.get("content-type")), (200, "image/jpeg"),
+              "el fotograma del segundo 1,5 para la vista de la portada")
+        ok(r.content[:2] == b"\xff\xd8", "es un JPEG de verdad")
+        igual(s.get(base + "/api/publicar/videos/fiesta/fotograma?ms=999000").status_code, 400,
+              "un momento fuera del vídeo se dice")
+        f = s.put(base + "/api/publicar/videos/fiesta", json={"portada": {"ms": 1500}}).json()
+        igual(f["portada"]["ms"], 1500, "«Usar este fotograma» se guarda en la ficha")
+        igual(s.put(base + "/api/publicar/videos/fiesta", json={"portada": {"ms": -3}}).status_code,
+              400, "un fotograma negativo no")
+        png = os.path.join(carpeta, "portada.png")
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=1080x1920",
+                        "-frames:v", "1", png], check=True)
+        with open(png, "rb") as fh:
+            r = s.post(base + "/api/publicar/videos/fiesta/portada", files={"portada": ("p.png", fh, "image/png")})
+        igual(r.status_code, 200, "subir una imagen de portada")
+        ok(bool(r.json()["portada"]["imagen"]), "y queda en la ficha")
+        r = s.get(base + "/api/publicar/videos/fiesta/portada.jpg")
+        ok(r.status_code == 200 and r.content[:2] == b"\xff\xd8" and len(r.content) <= 2 * 1024 * 1024,
+           "pasada a JPEG de menos de 2 MB (la miniatura de YouTube)")
+        r = s.post(base + "/api/publicar/videos/fiesta/portada",
+                   files={"portada": ("p.gif", b"GIF89a", "image/gif")})
+        igual(r.status_code, 400, "un GIF no vale como portada")
+        f = s.put(base + "/api/publicar/videos/fiesta",
+                  json={"portada": {"quitar_imagen": True}}).json()
+        igual((f["portada"]["imagen"], f["portada"]["ms"]), ("", 1500),
+              "«Quitar la imagen» vuelve al fotograma elegido")
 
         # --- ya
         r = s.post(base + "/api/publicar/videos/fiesta/enviar",
@@ -571,6 +612,9 @@ def prueba_studio():
         ok(subida["campos"].get("instagram_title", "").startswith("Reel a mano"),
            "con el texto editado a mano")
         ok(subida["bytes"] > 1000, "y el MP4 de verdad")
+        igual((subida["campos"].get("thumb_offset"), subida["campos"].get("cover_timestamp")),
+              ("1500", 1500), "la portada: el fotograma elegido en Instagram y TikTok")
+        ok(subida["campos"].get("title"), f"y el «title» general: {subida['campos'].get('title')!r}")
         for _ in range(4):
             s.post(base + "/api/publicar/refrescar")
             f = s.get(base + "/api/publicar/videos/fiesta").json()
@@ -649,6 +693,10 @@ def prueba_studio():
         igual(pendiente["estado"], "espera_ok", "en «espera tu OK»")
         c = s.get(base + "/api/publicar/cola").json()
         ok(any(e["id"] == pendiente["id"] for e in c["esperan_ok"]), "la cola lo pone aparte")
+        ok(all("estilo" in v and "estilo_nombre" in v for v in c["listos"]),
+           "cada vídeo listo trae su estilo, para filtrar por estilo")
+        igual(s.get(base + "/api/publicar/cola", params={"dias": 42}).json()["dias"].__len__(), 42,
+              "la vista de mes pide seis semanas")
         r = s.post(base + f"/api/publicar/videos/largo/envios/{pendiente['id']}/confirmar", json={})
         igual(r.status_code, 400, "confirmar pide confirmado: true")
         r = s.post(base + f"/api/publicar/videos/largo/envios/{pendiente['id']}/confirmar",
@@ -690,8 +738,17 @@ def prueba_studio():
         igual(r.status_code, 409, "un proyecto no puede adoptar el perfil de otro")
         igual(s.put(base + f"/api/publicar/proyectos/{cid}", json={"perfil": perfil}).status_code, 409,
               "ni escribiéndolo a mano")
+        igual(s.post(base + f"/api/publicar/proyectos/{cid}/perfil",
+                     json={"perfil": "studio_secreto"}).status_code, 200, "el proyecto secreto con su perfil")
         s.put(base + f"/api/clientes/{cid}", json={"clave": "1234"})
         s.put(base + "/api/clientes/videos/fiesta", json={"cliente": cid})
+        lista = s.get(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/perfiles").json()
+        ok(all(x["perfil"] != "studio_secreto" for x in lista["perfiles"]) and lista["ocultos"] >= 1,
+           "el desplegable no enseña el perfil de un proyecto con clave cerrado (solo cuántos hay)")
+        ok(all(not isinstance(x.get("de_otro"), str) for x in lista["perfiles"]),
+           "ni el id de otro proyecto")
+        igual(s.get(base + "/api/publicar/videos/fiesta/fotograma?ms=500").status_code, 404,
+              "ni su fotograma")
         igual(s.get(base + "/api/publicar/videos/fiesta").status_code, 404,
               "un vídeo de un proyecto con clave no se ve sin abrirlo")
         c = s.get(base + "/api/publicar/cola").json()
@@ -707,6 +764,12 @@ def prueba_studio():
         cab = {"X-Estudio-Abiertos": f"{cid}.{pase}"}
         igual(s.get(base + "/api/publicar/videos/fiesta", headers=cab).status_code, 200,
               "con el proyecto abierto, sí")
+        igual(s.get(base + "/api/publicar/videos/fiesta/fotograma?ms=500", headers=cab).status_code, 200,
+              "y su fotograma, con el pase (la pantalla lo pide con fetch, no con <img src>)")
+        lista = s.get(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/perfiles", headers=cab).json()
+        fila = next((x for x in lista["perfiles"] if x["perfil"] == "studio_secreto"), {})
+        ok(fila.get("de_otro") is True and fila.get("de_otro_nombre") == "Cliente secreto",
+           "abierto, sale marcado como de su proyecto")
     finally:
         proceso.terminate()
         try:
@@ -897,12 +960,214 @@ def prueba_metricas():
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 
 
+def prueba_perfiles():
+    """Lo que salió en el servidor el 16-10: «Crear perfil» sin el nombre
+    escrito, el plan lleno con el perfil YA en Upload-Post, y «Suyu» frente
+    a «suyu» al ver las cuentas."""
+    seccion("6] perfiles: el nombre escrito, el plan lleno, mayúsculas")
+    raiz = os.path.join(CARPETA, "perfiles")
+    os.makedirs(raiz)
+    simulador = os.path.join(CARPETA, "sim_perfiles.json")
+    # el plan gratis, lleno: dos perfiles, «Suyu» (con Instagram) y otro
+    with open(simulador, "w", encoding="utf-8") as fh:
+        json.dump({"limite": 2, "perfiles": {
+            "Suyu": {"instagram": {"display_name": "Suyu IG", "username": "suyu"}},
+            "studio_otro": {}}}, fh)
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    try:
+        igual(P.norma_perfil(" Su yu "), "suyu", "comparar sin mayúsculas ni espacios")
+        ok(P.buscar_perfil([{"perfil": "Suyu"}], "suyu") is not None, "«suyu» encuentra «Suyu»")
+        ok(P.buscar_perfil([{"perfil": "Suyu"}], "suyu2") is None, "y no confunde otro nombre")
+        # adoptar con el plan lleno: no se intenta crear
+        ajustes, como = P.usar_perfil(raiz, "cl_suyu", "suyu")
+        igual(como, "adoptado", "con el plan lleno, un perfil que ya existe se adopta")
+        igual(ajustes["perfil"], "Suyu", "con el nombre exacto de Upload-Post")
+        ok(isinstance(ajustes["cuentas"].get("instagram"), dict), "y sus cuentas (Instagram)")
+        ok(bool(ajustes["cuentas_vistas"]), "ya miradas")
+        with open(simulador, encoding="utf-8") as fh:
+            igual(len(json.load(fh)["perfiles"]), 2, "sin crear ningún perfil nuevo")
+        # crear uno nuevo con el plan lleno: el mensaje en castellano, antes de pedirlo
+        try:
+            P.usar_perfil(raiz, "cl_nuevo", "studio_nuevo")
+            ok(False, "con el plan lleno no se crea")
+        except P.ErrorPublicar as fallo:
+            ok("Tu plan de Upload-Post ya tiene 2 perfiles" in str(fallo), f"plan lleno, en castellano: {fallo}")
+            igual(fallo.codigo, 409, "como 409")
+        # el mensaje de alli también se traduce (si la lista no trae el limite)
+        try:
+            raise P.UP.ErrorUploadPost("You have reached the limit of 2 profiles", 403)
+        except P.UP.ErrorUploadPost as fallo:
+            ok(P._PLAN_LLENO.search(str(fallo)) is not None, "reconoce el mensaje de Upload-Post")
+        igual(P.norma_perfil("Mi Cliente"), "micliente", "los espacios no cuentan al comparar")
+        ok(P.perfil_de_otro(raiz, "S U Y U", "cl_x") == "cl_suyu",
+           "y «S U Y U» también es el perfil de otro proyecto")
+        # usar sin crear un perfil que no existe: dice que no está
+        try:
+            P.usar_perfil(raiz, "cl_nuevo", "no_existe", crear=False)
+            ok(False, "«Usar este perfil» no crea nada")
+        except P.ErrorPublicar as fallo:
+            igual(fallo.codigo, 404, f"«Usar este perfil» con uno que no existe: {fallo}")
+        # otro proyecto no puede adoptar el mismo, ni escrito distinto
+        try:
+            P.usar_perfil(raiz, "cl_otro", "SUYU")
+            ok(False, "dos proyectos no comparten perfil")
+        except P.ErrorPublicar as fallo:
+            igual(fallo.codigo, 409, "«SUYU» ya es de otro proyecto")
+        # la lista para el desplegable marca de quién es cada uno
+        lista = P.perfiles_de_la_cuenta(raiz, "cl_otro")
+        nombres = {x["perfil"]: x for x in lista["perfiles"]}
+        igual(sorted(nombres), ["Suyu", "studio_otro"], "el desplegable trae los perfiles de verdad")
+        igual(nombres["Suyu"]["de_otro"], "cl_suyu", "marcando el que ya usa otro proyecto")
+        igual(nombres["Suyu"]["redes"], ["instagram"], "con sus redes conectadas")
+        igual(lista["limite"], 2, "y el límite del plan")
+        ok(P.perfiles_de_la_cuenta(raiz, "cl_suyu")["perfiles"][0]["propio"], "el propio sale marcado")
+        # «Ver cuentas» con el nombre guardado en otras mayúsculas
+        P.guardar_ajustes(raiz, "cl_minus", {"perfil": "studio_otro"})
+        P.guardar_ajustes(raiz, "cl_minus", {"perfil": "STUDIO_OTRO "})
+        visto = P.ver_cuentas(raiz, "cl_minus")
+        igual(visto["existe"], True, "«Ver cuentas» encuentra el perfil escrito en mayúsculas")
+        igual(visto["ajustes"]["perfil"], "studio_otro", "y apunta el nombre de Upload-Post")
+        # con sitio en el plan, «Crear perfil» crea el nombre escrito
+        with open(simulador, encoding="utf-8") as fh:
+            datos = json.load(fh)
+        datos["limite"] = 5
+        with open(simulador, "w", encoding="utf-8") as fh:
+            json.dump(datos, fh)
+        ajustes, como = P.usar_perfil(raiz, "cl_nuevo", "Mi_Cliente")
+        igual((como, ajustes["perfil"]), ("creado", "Mi_Cliente"), "crear usa el nombre escrito")
+    finally:
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
+
+def prueba_textos():
+    """«Que Claude escriba los textos»: el estado mientras escribe, el fallo que
+    se ve (y se apunta), y lo que se le pide (emojis, gancho, cada red)."""
+    seccion("7] textos: escribiendo, el fallo, los emojis")
+    raiz = os.path.join(CARPETA, "textos")
+    os.makedirs(raiz)
+    a = P.ajustes_de(raiz, "cl_t")
+    igual(a["usar_emojis"], True, "los emojis vienen puestos de fábrica")
+    igual(P.guardar_ajustes(raiz, "cl_t", {"usar_emojis": False})["usar_emojis"], False,
+          "y se pueden quitar")
+    try:
+        P.guardar_ajustes(raiz, "cl_t", {"usar_emojis": "no"})
+        ok(False, "«usar_emojis» es sí o no")
+    except P.ErrorPublicar:
+        ok(True, "«usar_emojis» es sí o no")
+    con = P.instruccion_textos(INFO, ["tiktok", "instagram", "youtube"], P.AJUSTES_DEFECTO)
+    sin = P.instruccion_textos(INFO, ["tiktok"], dict(P.AJUSTES_DEFECTO, usar_emojis=False))
+    ok("Emojis: sí" in con and "Instagram Reels, 3 a 6 emojis" in con, "con emojis: cuántos por red")
+    ok("NINGUNO" in sin and "Emojis: sí" not in sin, "sin emojis: se le dice que ninguno")
+    ok("gancho" in con and "70 caracteres" in con, "pide gancho y el título de YouTube de 70 como mucho")
+    ok("SIN SONIDO" not in con, "las reglas de Facebook solo si se pide Facebook")
+    ok(P.MODELO != "sonnet" or P.ESFUERZO != "low", f"más modelo que sonnet/low: {P.MODELO}/{P.ESFUERZO}")
+    # escribiendo: la ficha lo dice, con desde cuándo y qué redes
+    os.environ["ESTUDIO_SIMULAR"] = "1"
+    try:
+        P._ESCRIBIENDO["fiesta"] = {"desde": P._iso_lima(), "redes": ["tiktok"]}
+        f = P.ficha(raiz, INFO, P.AJUSTES_DEFECTO)
+        ok(f["escribiendo"] and f["escribiendo_desde"] and f["escribiendo_redes"] == ["tiktok"],
+           "mientras escribe, la ficha dice desde cuándo y qué redes")
+        P._ESCRIBIENDO.pop("fiesta", None)
+        # el fallo: se ve en la ficha y se apunta en la bitácora
+        os.makedirs(P.carpeta(raiz), exist_ok=True)
+        with open(os.path.join(P.carpeta(raiz), "_fallar_textos"), "w") as fh:
+            fh.write("1")
+        P.lanzar_textos(raiz, INFO, ["tiktok"], P.AJUSTES_DEFECTO, en_hilo=False)
+        f = P.ficha(raiz, INFO, P.AJUSTES_DEFECTO)
+        ok(not f["escribiendo"] and "no se han podido escribir" in f["error_textos"],
+           f"si falla, la ficha lo dice: {f['error_textos'][:60]}")
+        igual(f["error_redes"], ["tiktok"],
+              "y con qué redes: «Reintentar» no reescribe las que no se pidieron")
+        with open(os.environ["ESTUDIO_BITACORA_GLOBAL"], encoding="utf-8") as fh:
+            ok("publicar_textos_fallo" in fh.read(), "y queda apuntado en la bitácora")
+        # reintentar, ya sin fallo
+        os.remove(os.path.join(P.carpeta(raiz), "_fallar_textos"))
+        P.lanzar_textos(raiz, INFO, ["tiktok"], P.AJUSTES_DEFECTO, en_hilo=False)
+        f = P.ficha(raiz, INFO, P.AJUSTES_DEFECTO)
+        ok(not f["error_textos"] and f["textos"]["tiktok"]["descripcion"], "«Reintentar» los escribe")
+    finally:
+        os.environ.pop("ESTUDIO_SIMULAR", None)
+
+
+def prueba_portada():
+    """Qué campo de portada va a cada red según lo elegido."""
+    seccion("8] portada: qué va a cada red")
+    raiz = os.path.join(CARPETA, "portada")
+    os.makedirs(raiz)
+    mp4 = os.path.join(raiz, "v.mp4")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=640x360:d=3",
+                    "-pix_fmt", "yuv420p", mp4], check=True)
+    info = dict(INFO, mp4=mp4, formato="horizontal", duracion_s=3)
+    todas = ["tiktok", "instagram", "youtube", "facebook"]
+    campos, ficheros = P.campos_portada(raiz, info, {}, todas)
+    igual((campos, ficheros), ({}, []), "sin elegir nada no se manda nada: cada red pone la suya")
+    datos = {"portada": {"ms": 2000}}
+    campos, ficheros = P.campos_portada(raiz, info, datos, todas)
+    igual(campos, {"thumb_offset": "2000", "cover_timestamp": 2000},
+          "un fotograma: thumb_offset en Instagram y cover_timestamp en TikTok")
+    igual([c for c, _r in ficheros], ["facebook_thumbnail"],
+          "Facebook (como vídeo) recibe el fotograma; YouTube no sin marcarlo")
+    campos, _f = P.campos_portada(raiz, info, {"portada": {"ms": 40000}}, ["instagram", "tiktok"])
+    igual(campos, {"thumb_offset": "2900", "cover_timestamp": 2900},
+          "un momento pasado el final (se volvió a montar más corto) se recorta al vídeo")
+    datos["portada"]["youtube"] = True
+    _c, ficheros = P.campos_portada(raiz, info, datos, todas)
+    igual(sorted(c for c, _r in ficheros), ["facebook_thumbnail", "thumbnail"],
+          "con «también a YouTube», su miniatura")
+    vertical = dict(info, formato="vertical", duracion_s=3)
+    _c, ficheros = P.campos_portada(raiz, vertical, datos, ["facebook"])
+    igual(ficheros, [], "un Reel de Facebook no lleva miniatura")
+    for contenido, que in ((b"#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\nfile:///etc/passwd\n", "una lista HLS"),
+                           (b"no soy una imagen", "texto")):
+        try:
+            P.guardar_imagen_portada(raiz, "fiesta", contenido, ".png")
+            ok(False, f"{que} con nombre .png no pasa como portada")
+        except P.ErrorPublicar:
+            ok(True, f"{que} con nombre .png no pasa como portada (manda el contenido, no el nombre)")
+    sobras = [n for n in os.listdir(os.path.join(P.carpeta(raiz), "portadas"))
+              if "subida" in n or n.count(".") > 1] if os.path.isdir(os.path.join(P.carpeta(raiz), "portadas")) else []
+    igual(sobras, [], "y no deja ficheros a medias")
+    # una imagen subida
+    png = os.path.join(raiz, "p.png")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=800x800",
+                    "-frames:v", "1", png], check=True)
+    with open(png, "rb") as fh:
+        P.guardar_imagen_portada(raiz, "fiesta", fh.read(), ".png")
+    datos = P._leer_video(raiz, "fiesta")
+    datos["portada"]["ms"] = 2000
+    campos, ficheros = P.campos_portada(raiz, info, datos, todas)
+    nombres = sorted(c for c, _r in ficheros)
+    igual(nombres, ["cover_image", "facebook_thumbnail"],
+          "una imagen: cover_image en Instagram y Facebook")
+    igual(campos, {"cover_timestamp": 2000}, "y TikTok sigue con el fotograma si no se marca")
+    datos["portada"].update(tiktok_imagen=True, youtube=True)
+    campos, ficheros = P.campos_portada(raiz, info, datos, todas)
+    igual(sorted(c for c, _r in ficheros), ["cover_image", "facebook_thumbnail", "thumbnail",
+                                            "tiktok_cover_image"], "y a TikTok y YouTube si se marcan")
+    igual(campos, {}, "sin campos de momento cuando va la imagen")
+    # el cliente las manda en el multipart
+    cuerpo = UP._Multipart([("user", "x")], [("video", mp4), ("cover_image", png)])
+    todo = b""
+    while True:
+        trozo = cuerpo.read()
+        if not trozo:
+            break
+        todo += trozo
+    ok(b'name="cover_image"; filename="p.png"' in todo, "el multipart lleva la imagen con su campo")
+    igual(len(todo), cuerpo.longitud, "y su longitud cuadra")
+
+
 def main():
     print("PRUEBA DE PUBLICAR")
     prueba_piezas()
     prueba_cliente()
     prueba_envios_sueltos()
     prueba_metricas()
+    prueba_perfiles()
+    prueba_textos()
+    if shutil.which("ffmpeg"):
+        prueba_portada()
     if shutil.which("ffmpeg"):
         prueba_studio()
     else:

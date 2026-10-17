@@ -9573,7 +9573,11 @@ def revisar_campo_con_su_guia(gid: str, cuerpo: dict = Body(default=None)):
     if not texto.strip():
         raise ErrorApi(400, "el campo está vacío: escribe algo y vuelve a revisar")
     anterior = datos.get("anterior") if isinstance(datos.get("anterior"), dict) else None
-    clave = modulo.huella(gid, texto)
+    # LA DURACION DEL VIDEO, para el material y las indicaciones: el mismo
+    # texto sirve para cuatro minutos y no para treinta segundos (guion-cortos,
+    # 17-10-2026). Saneado alli: solo sus dos claves.
+    contexto = modulo.contexto_saneado(gid, datos.get("contexto"))
+    clave = modulo.huella(gid, texto, contexto)
     rid = uuid.uuid4().hex[:12]
     with _LOCK_REVISIONES:
         # se guardan las ultimas 50: es una ventanilla, no un archivo
@@ -9595,14 +9599,15 @@ def revisar_campo_con_su_guia(gid: str, cuerpo: dict = Body(default=None)):
 
     def correr():
         try:
-            resultado = modulo.revisar(gid, texto, cwd=RAIZ_ESTUDIO, anterior=anterior)
+            resultado = modulo.revisar(gid, texto, cwd=RAIZ_ESTUDIO, anterior=anterior,
+                                       contexto=contexto)
             ficha = {"estado": "listo", "guia": gid, "resultado": resultado}
             nuevas = {clave: {k: resultado.get(k) for k in
                               ("veredicto", "resumen", "problemas", "sugerida")}}
             if resultado.get("sugerida"):
                 # la que PROPONE la revision la da por buena la revision: si se
                 # pone tal cual y se vuelve a revisar, sale «sirve»
-                nuevas[modulo.huella(gid, resultado["sugerida"])] = \
+                nuevas[modulo.huella(gid, resultado["sugerida"], contexto)] = \
                     modulo.aprobada_por_la_revision()
             _guardar_revisiones(nuevas)
         except Exception as fallo:                          # noqa: BLE001

@@ -49,7 +49,7 @@ Fijate sobre todo en lo que la guia pone en «NO» (cosas que el sistema
 malinterpreta o ignora) y en lo que falta de «SI». No corrijas el estilo ni la
 ortografia salvo que confundan al sistema. No inventes requisitos que la guia
 no tenga.
-
+{contexto}
 EL LISTON ES FIJO, no se mueve en cada vuelta:
 - «sirve» = nada de lo escrito hara que el sistema se equivoque. Un texto que
   cumple la guia SIRVE aunque se pudiera pulir mas: no busques mejoras de gusto.
@@ -103,6 +103,109 @@ sistema, el veredicto es «sirve».
 """
 
 
+#: LO QUE EL CAMPO NO SABE POR SI SOLO: cuanto dura el video (17-10-2026).
+#:
+#: Sin esto, «Revisar» del material juzgaba el texto solo contra su guia, que
+#: dice «mas hechos dan mejor guion», y daba por bueno un material de dos o tres
+#: minutos para un video de treinta segundos. El redactor, con eso delante,
+#: solo puede resumir (ver `p3_guion.DURACION_CORTA_S`). Ahora, en el material y
+#: en las indicaciones, la revision sabe la duracion, las palabras que caben y,
+#: en el material, lo que piden las indicaciones.
+GUIAS_CON_DURACION = ("material", "indicaciones")
+
+#: Hasta aqui un video es corto: la misma cifra que usa el redactor.
+DURACION_CORTA_S = 90
+
+CONTEXTO = """
+LO QUE ESTE CAMPO NO DICE Y CAMBIA EL JUICIO: el video dura {segundos} s, y en
+ese tiempo caben unas {palabras} palabras de locucion en total.{corto}{extra}
+"""
+
+CONTEXTO_MATERIAL = """
+Comprueba tambien si el material CABE: si trae muchos mas hechos de los que se
+pueden contar bien en {palabras} palabras, el redactor tendra que elegir y
+el guion puede salir como un resumen que nombra todo y no explica nada. En ese
+caso es «mejorable»: dilo y, en la sugerida, NO borres hechos: marca con
+«IMPRESCINDIBLE:» los dos o tres que tienen que entrar si o si (los que empujan
+lo que piden las indicaciones) y deja el resto debajo. Si las indicaciones
+piden mostrar, medir o comparar algo y el material no trae los datos para
+hacerlo (medidas, tamanos, tiempos), dilo como problema y pide a la persona
+esos datos: no los inventes.{indicaciones}"""
+
+CONTEXTO_INDICACIONES = """
+Comprueba tambien que lo que piden quepa en ese tiempo: una sola idea en ENSENA
+y un ANGULO que sea una escena concreta que se pueda contar paso a paso (algo
+que se ve: meter, comparar, probar), no un tema general. Si el ANGULO es un
+tema y no una escena, es «mejorable»."""
+
+
+def contexto_saneado(gid, crudo):
+    """Lo que manda la pantalla, reducido a lo que se usa. -> dict ({} si nada)
+
+    Solo para el material y las indicaciones, y solo dos claves: la duracion
+    (segundos > 0, hasta cuatro horas) y, en el material, las indicaciones.
+    """
+    if gid not in GUIAS_CON_DURACION or not isinstance(crudo, dict):
+        return {}
+    try:
+        segundos = float(crudo.get("duracion_s") or 0)
+    except (TypeError, ValueError):
+        return {}
+    if not 0 < segundos <= 4 * 3600 or segundos != segundos:
+        return {}
+    contexto = {"duracion_s": segundos}
+    if gid == "material" and isinstance(crudo.get("indicaciones"), str):
+        contexto["indicaciones"] = crudo["indicaciones"][:4000]
+    return contexto
+
+
+def _contexto_como_texto(gid, contexto):
+    """El trozo de la instruccion con la duracion del video. -> str ("" si no aplica)"""
+    if gid not in GUIAS_CON_DURACION or not isinstance(contexto, dict):
+        return ""
+    try:
+        segundos = int(round(float(contexto.get("duracion_s") or 0)))
+    except (TypeError, ValueError):
+        return ""
+    if segundos <= 0:
+        return ""
+    try:
+        try:
+            from . import cadencia                    # noqa: PLC0415
+        except ImportError:
+            import cadencia                           # noqa: PLC0415
+        palabras = int(cadencia.palabras_para(segundos, idioma="es")["palabras"])
+    except Exception:                                 # noqa: BLE001
+        palabras = int(round(segundos * 2.3))
+    corto = (" Es un video CORTO: cabe UNA idea bien contada, no un repaso del "
+             "tema." if segundos <= DURACION_CORTA_S else "")
+    if gid == "material":
+        otras = " ".join(str(contexto.get("indicaciones") or "").split())[:1500]
+        extra = CONTEXTO_MATERIAL.format(
+            palabras=palabras,
+            indicaciones=(f"\nLas indicaciones de este video dicen: «{otras}»"
+                          if otras else ""))
+    else:
+        extra = CONTEXTO_INDICACIONES
+    return CONTEXTO.format(segundos=segundos, palabras=palabras, corto=corto,
+                           extra=extra)
+
+
+def _contexto_para_huella(gid, contexto):
+    """Lo del contexto que cambia la revision, en una linea estable."""
+    if gid not in GUIAS_CON_DURACION or not isinstance(contexto, dict):
+        return ""
+    try:
+        segundos = int(round(float(contexto.get("duracion_s") or 0)))
+    except (TypeError, ValueError):
+        segundos = 0
+    if segundos <= 0:
+        return ""
+    otras = " ".join(str(contexto.get("indicaciones") or "").split()) \
+        if gid == "material" else ""
+    return f"{segundos}|{otras}"
+
+
 def _anterior_como_texto(anterior):
     if not isinstance(anterior, dict):
         return ""
@@ -117,7 +220,7 @@ def _anterior_como_texto(anterior):
     return ANTERIOR.format(anterior="\n".join(lineas)) if lineas else ""
 
 
-def revisar(gid, texto, cwd=None, anterior=None):
+def revisar(gid, texto, cwd=None, anterior=None, contexto=None):
     if gid not in guias.GUIAS:
         raise ErrorRevision(f"no hay ninguna guia «{gid}»")
     texto = str(texto or "").strip()
@@ -127,7 +230,8 @@ def revisar(gid, texto, cwd=None, anterior=None):
         raise ErrorRevision(f"el texto pasa de {MAX_TEXTO} caracteres: revisalo por partes")
     instruccion = INSTRUCCION.format(titulo=guias.GUIAS[gid]["titulo"],
                                      guia=guias.como_texto(gid), texto=texto,
-                                     anterior=_anterior_como_texto(anterior))
+                                     anterior=_anterior_como_texto(anterior),
+                                     contexto=_contexto_como_texto(gid, contexto))
     respuesta, sobre = cli_claude.ejecutar(
         instruccion, modelo=MODELO, esfuerzo=ESFUERZO, cwd=cwd,
         base_tiempo_s=120, sistema=SISTEMA,
@@ -171,8 +275,12 @@ def normalizar(datos, sobre=None):
             "tokens": comun.tokens_de_cli(sobre) if sobre else {}}
 
 
-def huella(gid, texto):
-    """La misma revision para el mismo texto: se compara sin espacios de mas."""
+def huella(gid, texto, contexto=None):
+    """La misma revision para el mismo texto: se compara sin espacios de mas.
+
+    Con la duracion dentro en el material y las indicaciones: el mismo texto
+    puede servir para cuatro minutos y no para treinta segundos.
+    """
     import hashlib                                          # noqa: PLC0415
     llano = " ".join(str(texto or "").split())
     # CON LA GUIA DENTRO: si la guia cambia, lo revisado contra la vieja no vale
@@ -183,6 +291,10 @@ def huella(gid, texto):
     # Y CON LA INSTRUCCION: las revisiones guardadas con la de antes (que
     # dejaba la sugerida vacia a menudo) no se vuelven a servir
     sello = hashlib.sha1((guia + INSTRUCCION).encode("utf-8")).hexdigest()[:8]
+    extra = _contexto_para_huella(gid, contexto)
+    if extra:
+        sello = hashlib.sha1((sello + "\n" + extra + "\n" + CONTEXTO_MATERIAL
+                              + CONTEXTO_INDICACIONES).encode("utf-8")).hexdigest()[:8]
     return hashlib.sha1(f"{gid}\n{sello}\n{llano}".encode("utf-8")).hexdigest()[:20]
 
 

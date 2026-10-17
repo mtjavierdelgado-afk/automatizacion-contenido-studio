@@ -253,16 +253,26 @@ GUIAS = {
             "internet ni abre enlaces. Lo que no está aquí no puede salir.",
             "Si marcas «Esto ya es el guion», se respeta palabra por palabra y "
             "solo se divide en bloques.",
+            "En un vídeo corto (hasta 90 s) el redactor ELIGE: cuenta una sola "
+            "idea con un caso concreto y deja fuera lo que no cabe. No intenta "
+            "meterlo todo.",
         ],
         "si": [
             "Pega texto: notas, un artículo, datos, medidas, pasos, ejemplos.",
-            "Más hechos concretos dan mejor guion: cifras, causas, errores "
-            "frecuentes, soluciones.",
+            "Hechos concretos: cifras, causas, errores frecuentes, soluciones.",
             "Si tienes varias fuentes, pégalas todas: el redactor las ordena.",
+            "Para un vídeo corto, marca con «IMPRESCINDIBLE:» los dos o tres "
+            "hechos que tienen que entrar sí o sí; el resto se usa solo si cabe.",
+            "Si las indicaciones piden mostrar o comparar algo (meter una olla, "
+            "medir un hueco), pon aquí los datos para hacerlo: medidas, tamaños, "
+            "tiempos. Sin ellos el redactor no puede inventarlos y la "
+            "demostración se queda en abstracto.",
         ],
         "no": [
             "Solo enlaces: no se abren.",
             "Instrucciones de cómo contarlo: van en «Las indicaciones».",
+            "Un tema de tres minutos para un vídeo de treinta segundos: no cabe y "
+            "sale un resumen. Recórtalo o marca lo imprescindible.",
         ],
         "plantilla": (
             "TEMA: [de qué va, en una frase].\n"
@@ -301,32 +311,44 @@ GUIAS = {
             "Le dicen al redactor cómo contar ESTE vídeo en concreto: el ángulo, "
             "la única enseñanza, por dónde empezar. Se suman al tono del estilo, "
             "que es el de siempre.",
+            "Las etiquetas ENSEÑA, ÁNGULO, EMPIEZA POR y DEJA FUERA son órdenes: "
+            "mandan sobre la forma general en que el redactor estructura un "
+            "vídeo. ENSEÑA es la única idea; ÁNGULO se cuenta como una escena, "
+            "paso a paso y en el centro del vídeo; EMPIEZA POR es la primera "
+            "frase; DEJA FUERA no sale ni de pasada.",
         ],
         "si": [
             "Una frase o tres: qué enseñar, desde qué ángulo, qué dejar fuera.",
             "Si es un formato concreto, dilo: comparación A/B, antes y después, "
             "error y solución.",
+            "Escribe el ÁNGULO como algo que se VE pasar: «meter la misma olla en "
+            "los dos fregaderos y ver qué espacio queda», no «la diferencia de "
+            "tamaño».",
         ],
         "no": [
             "Repetir el tono del estilo: ya lo tiene.",
+            "Un ÁNGULO que es un tema general: el redactor lo nombrará y no lo "
+            "contará.",
             "Hechos nuevos: van en el material.",
             "El texto de la llamada a la acción: va en su apartado.",
         ],
         "plantilla": (
             "ENSEÑA: [la única idea del vídeo].\n"
-            "ÁNGULO: [desde dónde contarlo].\n"
+            "ÁNGULO: [la escena concreta que lo demuestra].\n"
             "EMPIEZA POR: [la situación o pregunta de arranque].\n"
             "DEJA FUERA: [lo que no debe entrar]."
         ),
         "ejemplo": (
             "ENSEÑA: que la iluminación del baño se piensa en tres capas.\n"
-            "ÁNGULO: el error de poner un solo foco en el techo.\n"
+            "ÁNGULO: encender una a una las tres capas en el mismo baño y ver qué "
+            "le pasa a la cara en el espejo.\n"
             "EMPIEZA POR: te miras al espejo y te salen sombras bajo los ojos.\n"
             "DEJA FUERA: marcas de lámparas y precios."
         ),
         "prompt_ia": (
             "Con estas notas, escríbeme las indicaciones de un vídeo corto en "
-            "4 líneas con estas etiquetas: ENSEÑA (una sola idea), ÁNGULO, "
+            "4 líneas con estas etiquetas: ENSEÑA (una sola idea), ÁNGULO (una "
+            "escena concreta que se pueda ver, no un tema), "
             "EMPIEZA POR, DEJA FUERA. Máximo 70 palabras. No incluyas datos "
             "nuevos ni la llamada a la acción.\n\nMIS NOTAS:\n[pega aquí]"
         ),

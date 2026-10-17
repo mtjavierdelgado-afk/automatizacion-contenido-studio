@@ -10,6 +10,27 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Guiones de vídeos cortos que no salen «a resumen» (17 de octubre)**
+- **Los vídeos de hasta 90 segundos tienen su propia forma de escribirse.**
+  Antes se escribían como un documental de varios minutos (cuatro a seis temas,
+  gancho de dos bloques), y en un minuto eso daba una frase por tema: el guion
+  nombraba todo y no explicaba nada. Ahora el redactor cuenta UNA idea con un
+  caso concreto (la mitad del vídeo, paso a paso), elige del material lo que la
+  empuja y no recorre las listas punto por punto. Los vídeos de más de 90 s se
+  escriben igual que siempre.
+- **Las etiquetas de «Las indicaciones» son órdenes.** ENSEÑA es la única
+  idea; ÁNGULO se cuenta como una escena que se ve pasar, no como una mención;
+  EMPIEZA POR es la primera frase, y DEJA FUERA no sale ni de pasada. Valen
+  en vídeos de cualquier duración. Sin etiquetas, todo sigue como antes.
+- **«Revisar» del material y de las indicaciones sabe cuánto dura el vídeo.**
+  Si el material no cabe, lo dice y propone marcar con «IMPRESCINDIBLE:» lo que
+  tiene que entrar; si las indicaciones piden demostrar algo y el material no
+  trae las medidas, te las pide. El redactor respeta lo marcado como
+  IMPRESCINDIBLE.
+- Las guías de «El material» y «Las indicaciones» explican todo esto.
+- Los guiones ya hechos no cambian ni quedan para regenerar: esto se nota al
+  escribir o reescribir un guion.
+
 **Lo que quedó de la revisión (16 de octubre, noche)**
 - **`asvs actualizar` pone al día también el servidor**: las unidades de
   systemd, los snippets de nginx, el lanzador del navegador y las variables

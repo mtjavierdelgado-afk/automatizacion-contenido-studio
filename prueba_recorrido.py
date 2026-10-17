@@ -3767,5 +3767,85 @@ def publicar_lo_del_16_de_octubre(navegador, datos):
     pg.cerrar()
 
 
+
+# publicar-redes-2 (17-10-2026): lo que faltaba de las métricas. La retención,
+# esta semana y este mes, «Lo que mejor funcionó» y la línea de Inicio. Todo se
+# lee de lo guardado: las cifras se piden solo con «Actualizar».
+@escenario
+def publicar_resultados_y_lo_mejor(navegador, datos):
+    """Publicar → Resultados enseña esta semana y este mes frente al anterior,
+    la retención (TikTok la da; Instagram no, y no sale «0 %»), «Lo que mejor
+    funcionó» con su orden, e Inicio una línea con lo mejor de la semana."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    # se sostiene solo (--solo): perfil con cuentas y algo publicado ya
+    api.post(f"/api/publicar/proyectos/{cid}/perfil", {})
+    api.post(f"/api/publicar/proyectos/{cid}/conectar", {"redes": ["tiktok", "youtube"]})
+    api.post(f"/api/publicar/proyectos/{cid}/cuentas")
+    publicados = lambda f: [e for e in f.get("envios", [])  # noqa: E731
+                            if e.get("estado") == "publicado" and e.get("lote")]
+    if not publicados(ficha):
+        api.put(f"/api/publicar/videos/{pid}", {"textos": {
+            "tiktok": {"descripcion": "TikTok de prueba"},
+            "youtube": {"titulo": "Vídeo de prueba", "descripcion": "YouTube de prueba"}}})
+        api.post(f"/api/publicar/videos/{pid}/enviar", {"redes": ["tiktok", "youtube"], "modo": "ahora",
+                                                         "confirmado": True, "repetir": True})
+        for _ in range(15):
+            time.sleep(4)
+            api.post("/api/publicar/refrescar")
+            _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+            if len(publicados(ficha)) >= 2:
+                break
+    ok(len(publicados(ficha)) >= 1, "se parte de algo publicado por Upload-Post (el simulado)")
+    # dos lecturas: TikTok no da cifras la primera vez
+    api.post(f"/api/publicar/videos/{pid}/metricas", {"forzar": True})
+    _r, r = api.post(f"/api/publicar/videos/{pid}/metricas", {"forzar": True})
+    tiktok = [e for e in (r.get("ficha") or {}).get("envios", []) if e.get("red") == "tiktok"
+              and (e.get("metricas") or {}).get("vista_entera") is not None]
+    ok(bool(tiktok), "TikTok trae la fracción que lo vio entero")
+    _r, lq = api.get("/api/publicar/lo-que-funciono?dias=7&cuantos=3")
+    ok(bool(lq.get("posts")) and all("dia" in p and "hora" in p for p in lq["posts"]),
+       "el punto de lectura «lo que funcionó» da los posts con su día y su hora")
+
+    pg = Pagina(navegador, datos)
+    pg.js("irAModulo('inicio');")
+    ok(pg.esperar(".linea-mejor-semana", "Lo mejor de la semana", 10), "Inicio: la línea de lo mejor de la semana")
+    ok(pg.esperar(".linea-mejor-semana button", segundos=10), "con el vídeo, que lleva a su ficha")
+    pg.captura("inicio_lo_mejor")
+    pg.js("PUB.seccion = 'resultados'; irAModulo('publicar');")
+    ok(pg.esperar(".periodos-publicar .tarjeta-periodo", "Esta semana", 10), "Resultados: esta semana")
+    ok(pg.visible(".periodos-publicar .tarjeta-periodo", "Este mes"), "y este mes, frente al anterior")
+    ok(pg.esperar(".mejores-publicar .fila-mejor", segundos=10), "«Lo que mejor funcionó», con sus posts")
+    ok(pg.visible(".resultados-publicar", "lo vio entero"), "la retención, donde la red la da")
+    ok(not pg.p.evaluate("() => /(^|[^0-9,])0 % lo vio entero/.test("
+                         "document.querySelector('.resultados-publicar').innerText)"),
+       "y nunca un «0 %» inventado")
+    pg.p.select_option(".mejores-publicar select", "vista_entera")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.esperar(".mejores-publicar select", segundos=5)
+       and pg.p.eval_on_selector(".mejores-publicar select", "s => s.value") == "vista_entera",
+       "se ordena por retención y el orden elegido se queda")
+    pg.captura("publicar_resultados_redes2")
+    pg.sin_errores("resultados y lo mejor")
+    pg.cerrar()
+
+    # en el móvil y con el tema claro
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="resultados móvil claro")
+    pg.js("document.documentElement.setAttribute('data-tema', 'claro');"
+          " PUB.seccion = 'resultados'; irAModulo('publicar');")
+    ok(pg.esperar(".periodos-publicar .tarjeta-periodo", segundos=10), "en el móvil también")
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    ok(ancho <= 2, f"Resultados cabe en un móvil ({ancho}px)")
+    pg.js("irAModulo('inicio');")
+    ok(pg.esperar(".linea-mejor-semana", segundos=10), "y la línea de Inicio")
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    ok(ancho <= 2, f"Inicio cabe en un móvil ({ancho}px)")
+    pg.captura("inicio_lo_mejor_movil")
+    pg.sin_errores("resultados en el móvil")
+    pg.cerrar()
+
 if __name__ == "__main__":
     sys.exit(main())

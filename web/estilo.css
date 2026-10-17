@@ -3420,3 +3420,20 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
   .calendario-mes button.envio-dia .hora { display: none; }
   .filtros-cola select { flex: 1 1 45%; max-width: none; }
 }
+
+/* publicar-redes-2 (17-10-2026): semana y mes, lo que mejor funcionó, Inicio */
+.periodos-publicar { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 8px 0; }
+.tarjeta-periodo {
+  display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; min-width: 0;
+  background: var(--panel); border: 1px solid var(--linea); border-radius: 10px;
+}
+.tarjeta-periodo h4 { margin: 0; font-size: 13px; color: var(--tenue); font-weight: 600; }
+.tarjeta-periodo .cifra { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.tarjeta-periodo .cifra b { font-size: 22px; font-variant-numeric: tabular-nums; }
+.tarjeta-periodo .pastilla { align-self: flex-start; }
+.mejores-publicar select { max-width: 100%; }
+.fila-mejor { gap: 8px; padding: 6px 0; border-top: 1px solid var(--linea-suave); min-width: 0; }
+.fila-mejor .puesto { min-width: 1.6em; font-variant-numeric: tabular-nums; }
+.fila-mejor .crece { min-width: 0; overflow-wrap: anywhere; }
+.linea-mejor-semana .fila { gap: 8px; min-width: 0; }
+.linea-mejor-semana .crece { min-width: 0; overflow-wrap: anywhere; }

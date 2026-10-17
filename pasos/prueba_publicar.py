@@ -193,6 +193,31 @@ class _FalsoUploadPost(http.server.BaseHTTPRequestHandler):
                     "tiktok": {"display_name": "A TikTok", "username": "atk",
                                "social_images": "https://img"},
                     "instagram": "", "youtube": None}}]})
+        elif ruta.path == "/api/uploadposts/post-analytics/cached":
+            # la lectura guardada: dos paginas con cursor (publicar-redes-2)
+            q = urllib.parse.parse_qs(ruta.query)
+            if q.get("cursor") == ["pag2"]:
+                self._responder(200, {"success": True, "source": "snapshot_cache", "posts": [
+                    {"post_id": "yt_9", "platform": "youtube", "captured_at": "2026-10-17T15:00:00Z",
+                     "post_url": "https://youtube.com/watch?v=9",
+                     "metrics": {"views": 900, "likes": 30, "average_view_percentage": 45.3,
+                                 "average_view_duration_seconds": 31}}],
+                    "has_more": False, "next_cursor": None})
+            else:
+                self._responder(200, {"success": True, "source": "snapshot_cache", "posts": [
+                    {"post_id": "tt_1", "platform": "tiktok", "captured_at": "2026-10-17T14:00:00Z",
+                     "post_url": "https://tiktok.com/v/1",
+                     "metrics": {"views": 1500, "full_video_watched_rate": 0.184,
+                                 "average_time_watched": 7.5}},
+                    {"post_id": "x", "platform": "myspace", "metrics": {"views": 1}}],
+                    "has_more": True, "next_cursor": "pag2"})
+        elif ruta.path == "/api/uploadposts/post-analytics/req_ret":
+            self._responder(200, {"success": True, "platforms": {
+                "tiktok": {"success": True, "platform_post_id": "tt_1",
+                           "post_url": "https://tiktok.com/v/1",
+                           "post_metrics": {"views": 1400, "likes": 90, "full_video_watched_rate": 0.21,
+                                            "average_time_watched": 8.25, "total_time_watched": 11550,
+                                            "retention": [{"second": "1", "percentage": 0.9}]}}}})
         elif ruta.path.startswith("/api/uploadposts/post-analytics/"):
             self._responder(200, {"success": True, "platforms": {
                 "youtube": {"success": True, "post_url": "https://youtube.com/watch?v=V",
@@ -314,6 +339,33 @@ def prueba_cliente():
         igual(m["youtube"]["guardados"], 3, "«favorites» cuenta como guardados")
         igual(m["youtube"]["compartidos"], None, "lo que no viene, None")
         ok(m["tiktok"]["error"].startswith("TikTok video not found"), "y el error de la red que no las da")
+        # la retencion y el id del post en la red (publicar-redes-2)
+        igual(m["youtube"]["vista_entera"], None, "YouTube no da retención en vivo: None")
+        m = cli.metricas_post("req_ret")
+        igual(m["tiktok"]["vista_entera"], 0.21, "TikTok: la fracción que lo vio entero")
+        igual(m["tiktok"]["tiempo_medio_s"], 8.2, "y el tiempo medio en segundos")
+        igual(m["tiktok"]["post_id"], "tt_1", "y el id del post en la red")
+        g = cli.metricas_guardadas("studio_a", desde="2026-10-10", hasta="2026-10-17")
+        primera = next(v for v in _FalsoUploadPost.vistas if "cached" in v["ruta"])
+        ok("user=studio_a" in primera["ruta"] and "limit=200" in primera["ruta"]
+           and "since=2026-10-10" in primera["ruta"],
+           f"la lectura guardada va con user, limit y since: {primera['ruta']}")
+        ok(any("cursor=pag2" in v["ruta"] for v in _FalsoUploadPost.vistas),
+           "y sigue el cursor a la página siguiente")
+        igual(g["completo"], True, "hasta que no hay más")
+        igual(sorted(p["red"] for p in g["posts"]), ["tiktok", "youtube"],
+              "solo las redes que el Studio conoce")
+        yt = next(p for p in g["posts"] if p["red"] == "youtube")
+        igual(yt["vista_entera"], 0.453, "el porcentaje de YouTube pasa a fracción")
+        igual(yt["tiempo_medio_s"], 31.0, "y su duración media")
+        igual((yt["post_id"], yt["al"]), ("yt_9", "2026-10-17T15:00:00Z"), "con su id y su hora")
+        g = cli.metricas_guardadas("studio_a", paginas=1)
+        igual(g["completo"], False, "con una sola página dice que no está completo")
+        igual(UP.ClienteUploadPost._retencion({"full_video_watched_rate": 18.4})["vista_entera"],
+              0.184, "una fracción que llega en tanto por cien se entiende")
+        igual(UP.ClienteUploadPost._retencion({"full_video_watched_rate": True,
+                                                "average_time_watched": "nan"}),
+              {"vista_entera": None, "tiempo_medio_s": None}, "lo que no es un número no cuenta")
         a = cli.analiticas_perfil("studio_a", ["instagram", "facebook"], pagina_facebook="99")
         igual(a["instagram"]["seguidores"], 47, "los seguidores de la cuenta")
         igual(a["facebook"]["seguidores"], 0, "un cero de verdad se queda en cero")
@@ -1158,12 +1210,134 @@ def prueba_portada():
     igual(len(todo), cuerpo.longitud, "y su longitud cuadra")
 
 
+def prueba_retencion_y_resumenes():
+    seccion("4b] retención, lectura guardada, semana y mes, lo que mejor funcionó")
+    raiz = os.path.join(CARPETA, "retencion")
+    os.makedirs(raiz)
+    simulador = os.path.join(CARPETA, "sim_retencion.json")
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    try:
+        cli = P.cliente(raiz)
+        cli.crear_perfil("studio_r")
+        cli.enlace_conectar("studio_r", ["tiktok", "youtube"])
+        mp4 = os.path.join(raiz, "v.mp4")
+        with open(mp4, "wb") as fh:
+            fh.write(b"0" * 2000)
+        info = dict(INFO, pid="ret", mp4=mp4, mp4_huella="h1")
+        ajustes = dict(P.AJUSTES_DEFECTO, perfil="studio_r")
+        P.guardar_ficha(raiz, "ret", {"textos": {"tiktok": {"descripcion": "Texto de TikTok"},
+                                                 "youtube": {"titulo": "Título YT", "descripcion": "Y"}}})
+        P.enviar(raiz, info, ajustes, {"redes": ["tiktok", "youtube"], "modo": "ahora",
+                                       "confirmado": True}, en_hilo=False)
+        P.RESPIRO_CONSULTA_S = 0
+        for _ in range(3):
+            P.refrescar(raiz)
+        P.actualizar_metricas(raiz, ["ret"])              # TikTok aún sin cifras
+        r = P.medir(raiz, ["ret"], forzar=True)
+        envios = {e["red"]: e for e in P._leer_video(raiz, "ret")["envios"]}
+        tt, yt = envios["tiktok"]["metricas"], envios["youtube"]["metricas"]
+        ok(isinstance(tt.get("vista_entera"), float) and 0 < tt["vista_entera"] < 1,
+           f"TikTok guarda la fracción que lo vio entero: {tt.get('vista_entera')}")
+        ok(tt.get("tiempo_medio_s"), "y el tiempo medio")
+        ok(envios["tiktok"].get("post_id") and envios["youtube"].get("post_id"),
+           "cada envío guarda el id de su post en la red")
+        ok(isinstance(yt.get("vista_entera"), float),
+           "la retención de YouTube llega por la lectura guardada")
+        ok(r["guardadas"] >= 1, f"«medir» hace también la lectura guardada: {r}")
+        igual(yt.get("guardada"), True, "y lo apunta")
+        # una lectura guardada MÁS VIEJA no pisa las cifras de la lectura en vivo
+        vistas = tt["vistas"]
+        datos_sim = json.load(open(simulador, encoding="utf-8"))
+        for trabajo in datos_sim["trabajos"].values():
+            for red, g in (trabajo.get("guardadas") or {}).items():
+                g.update(al="2020-01-01T00:00:00+00:00", vistas=1)
+        json.dump(datos_sim, open(simulador, "w", encoding="utf-8"))
+        P.leer_guardadas(raiz, ["ret"])
+        igual(P._leer_video(raiz, "ret")["envios"][0]["metricas"].get("vistas") in (vistas, yt["vistas"]),
+              True, "una lectura guardada vieja no pisa lo que se sabe")
+        envios = {e["red"]: e for e in P._leer_video(raiz, "ret")["envios"]}
+        igual(envios["tiktok"]["metricas"]["vistas"], vistas, "las vistas de TikTok siguen igual")
+        # una lectura guardada sin perfil en el envío no se pide
+        igual(P.leer_guardadas(raiz, ["no_existe_aun"]), {"leidos": 0, "actualizados": 0, "errores": []},
+              "sin nada publicado no se pregunta a nadie")
+
+        # el resumen: la retención se PROMEDIA y lo que no la da no cuenta como cero
+        P.marcar_a_mano(raiz, info, "facebook", "")
+        res = P.resultados(raiz, [{"pid": "ret", "nombre": "Ret", "cliente": ""}], "")
+        esperada = round((envios["tiktok"]["metricas"]["vista_entera"]
+                          + envios["youtube"]["metricas"]["vista_entera"]) / 2, 4)
+        igual(res["total"]["vista_entera"], esperada, "la retención del total es la media de quien la da")
+        igual(res["total"]["vista_entera_posts"], 2, "de dos posts (el subido a mano no cuenta)")
+        igual(res["por_red"]["facebook"]["vista_entera"], None, "una red sin retención: None, no 0")
+        ok("_n_vista_entera" not in res["total"], "sin restos de la cuenta interna")
+        igual(res["videos"][0]["vista_entera"], esperada, "y el vídeo, igual")
+
+        # semana y mes, con envíos en fechas conocidas
+        ahora = P._leer_momento("2026-10-15T12:00")            # jueves
+        datos = P._leer_video(raiz, "ret")
+        base = dict(datos["envios"][0])
+        datos["envios"] = []
+        for i, (cuando, vistas_x) in enumerate((("2026-10-13T10:00", 100), ("2026-10-15T09:00", 50),
+                                                ("2026-10-08T10:00", 70), ("2026-10-01T08:00", 40),
+                                                ("2026-09-20T08:00", 500), ("2026-08-31T08:00", 9))):
+            datos["envios"].append(dict(base, id=f"e{i}", red="tiktok", estado="publicado",
+                                        cuando=cuando, metricas={"vistas": vistas_x, "me_gusta": 1}))
+        P._escribir(P._ruta_video(raiz, "ret"), datos)
+        videos = [{"pid": "ret", "nombre": "Ret", "cliente": ""}]
+        per = P.periodos(raiz, videos, "", ahora=ahora)
+        igual(per["semana"]["desde"], "2026-10-12", "la semana empieza el lunes")
+        igual((per["semana"]["actual"]["posts"], per["semana"]["actual"]["vistas"]), (2, 150),
+              "esta semana: lo publicado desde el lunes")
+        igual((per["semana"]["anterior"]["posts"], per["semana"]["anterior"]["vistas"]), (1, 70),
+              "la semana pasada entera")
+        igual((per["mes"]["actual"]["posts"], per["mes"]["actual"]["vistas"]), (4, 260),
+              "este mes, desde el día 1")
+        igual((per["mes"]["anterior"]["posts"], per["mes"]["anterior"]["vistas"]), (1, 500),
+              "el mes pasado entero (sin lo de agosto)")
+        igual(P.periodos(raiz, videos, "cl_otro", ahora=ahora)["mes"]["actual"]["posts"], 0,
+              "lo de otro proyecto no entra")
+
+        # lo que mejor funcionó: el punto de lectura para la Parrilla y el piloto
+        hoy = P.ahora_lima()
+        datos["envios"] = []
+        filas = [("tiktok", 1, {"vistas": 1000, "me_gusta": 10, "comentarios": 0, "vista_entera": 0.1}),
+                 ("tiktok", 2, {"vistas": 200, "me_gusta": 60, "comentarios": 20, "vista_entera": 0.5}),
+                 ("youtube", 3, {"vistas": 20, "me_gusta": 19, "vista_entera": 0.9}),
+                 ("youtube", 40, {"vistas": 99999, "me_gusta": 1}),
+                 ("instagram", 4, {"vistas": None, "me_gusta": 3})]
+        for i, (red, hace, m) in enumerate(filas):
+            datos["envios"].append(dict(base, id=f"m{i}", red=red, estado="publicado",
+                                        cuando=P._iso_lima(hoy - dt.timedelta(days=hace)), metricas=m))
+        P._escribir(P._ruta_video(raiz, "ret"), datos)
+        lq = P.lo_que_funciono(raiz, videos, None, dias=30)
+        igual([p["metricas"]["vistas"] for p in lq["posts"]], [1000, 200, 20],
+              "por vistas, de más a menos, sin lo de hace más de 30 días ni lo que no tiene vistas")
+        primero = lq["posts"][0]
+        igual((primero["red"], primero["descripcion"]), ("tiktok", "Texto de TikTok"),
+              "cada post trae su red y el texto con que salió")
+        ok(primero["dia"] in P._DIAS_SEMANA and len(primero["hora"]) == 5, "y el día y la hora de Lima")
+        lq = P.lo_que_funciono(raiz, videos, None, por="interaccion")
+        igual([p["metricas"]["vistas"] for p in lq["posts"]], [200, 1000],
+              "por interacción: la proporción manda, y con menos de 50 vistas no entra")
+        igual(lq["posts"][0]["interaccion"], 0.4, "la interacción es (me gusta + comentarios…)/vistas")
+        lq = P.lo_que_funciono(raiz, videos, None, por="vista_entera")
+        igual([p["metricas"]["vista_entera"] for p in lq["posts"]], [0.5, 0.1], "por retención")
+        igual(len(P.lo_que_funciono(raiz, videos, None, red="youtube")["posts"]), 1, "filtrado por red")
+        igual(len(P.lo_que_funciono(raiz, videos, "cl_otro")["posts"]), 0, "y por proyecto")
+        igual(len(P.lo_que_funciono(raiz, videos, None, cuantos=1)["posts"]), 1, "y cuántos")
+        igual(P.lo_que_funciono(raiz, videos, None, por="raro", cuantos="x", dias="y")["por"], "vistas",
+              "lo que no se entiende vuelve a lo de siempre")
+    finally:
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
+
 def main():
     print("PRUEBA DE PUBLICAR")
     prueba_piezas()
     prueba_cliente()
     prueba_envios_sueltos()
     prueba_metricas()
+    prueba_retencion_y_resumenes()
     prueba_perfiles()
     prueba_textos()
     if shutil.which("ffmpeg"):

@@ -400,6 +400,15 @@ unas 100 consultas cada 5 minutos: si hay muchos vídeos, vuelve a pulsar al
 rato. TikTok da las cifras unas horas después de publicar, y lo que subiste a
 mano no se puede medir desde aquí.
 
+Debajo del total salen **Esta semana y este mes** (lo publicado desde el lunes
+y desde el día 1, frente a la semana y el mes anteriores) y **Lo que mejor
+funcionó**: los cinco posts del periodo, ordenados por vistas, por interacción
+o por cuántos lo vieron enteros, con el día y la hora en que salieron. Donde la
+red lo da (TikTok, y YouTube cuando su informe está listo) las cifras dicen qué
+parte lo vio **entero** y cuántos segundos de media; Instagram y Facebook no lo
+dan. En **Inicio** hay una línea con lo mejor de la semana. Nada de esto
+pregunta a Upload-Post: sale de lo que se pidió con el último «Actualizar».
+
 ## Configuración (⚙)
 
 - **Las claves**: OpenAI (imágenes), Cartesia (voz), Claude (guion y asistente),

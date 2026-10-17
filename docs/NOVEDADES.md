@@ -10,6 +10,25 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Publicar: los resultados, más completos (17 de octubre)**
+- **Cuánto se ve de cada vídeo.** Donde la red lo da, las cifras traen el
+  porcentaje de gente que lo vio **entero** y los **segundos de media**:
+  TikTok siempre, y YouTube cuando su informe está listo. Instagram y Facebook
+  no lo dan: ahí no sale nada (nunca un «0 %» inventado).
+- **Esta semana y este mes** en Publicar → Resultados: lo publicado desde el
+  lunes y desde el día 1, frente a la semana y el mes anteriores.
+- **Lo que mejor funcionó:** los cinco posts del periodo de más a menos
+  vistas, por interacción (me gusta, comentarios, compartidos y guardados
+  entre vistas) o por cuántos lo vieron enteros, con la red, el día y la hora
+  en que salieron. Por proporción solo cuentan los que tienen 50 vistas o más.
+- **En Inicio, una línea con lo mejor de la semana**, que lleva a su ficha.
+- **Las cifras se siguen pidiendo solo al pulsar «Actualizar»**, como hasta
+  ahora. Además, cada «Actualizar» trae lo que Upload-Post ya tiene guardado,
+  que no gasta de las 100 consultas cada 5 minutos: así llega la retención de
+  YouTube y lo que hayas mirado desde la web de Upload-Post.
+- Si la carga de Resultados fallaba, la pantalla se quedaba rota en vez de
+  decir el motivo: ahora sale el error.
+
 **Publicar: lo que salió probándolo en el servidor (16 de octubre, tarde)**
 - **El perfil de Upload-Post se apunta con lo que escribes.** «Crear perfil»
   manda el nombre del campo; **«Usar este perfil»** (o Enter) apunta uno que ya

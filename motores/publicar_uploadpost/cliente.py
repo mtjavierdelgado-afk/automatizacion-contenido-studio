@@ -10,6 +10,7 @@
     cli.estado(request_id=..., job_id=...)         -> {"estado", "redes": {red: {...}}}
     cli.cancelar(job_id)                           -> {"ok"}
     cli.metricas_post(request_id)                  -> {red: {"vistas", "me_gusta", ..., "error"}}
+    cli.metricas_guardadas(perfil)                 -> {"posts": [{red, post_id, url, al, cifras}], "completo"}
     cli.analiticas_perfil(perfil, redes)           -> {red: {"seguidores", "alcance", "vistas", "error"}}
 
 Por que un intermediario
@@ -427,6 +428,55 @@ class ClienteUploadPost:
         "alcance": ("reach",),
     }
 
+    #: LA RETENCION (publicar-redes-2, 17-10-2026). Solo la dan TikTok (en la
+    #: lectura en vivo) y YouTube (solo en la guardada, y cuando YouTube Analytics
+    #: tiene el informe). Instagram y Facebook no dan ninguna: se quedan en None.
+    #: `vista_entera` va siempre como FRACCION (0,184 = 18,4 %): TikTok la manda
+    #: asi, y el `average_view_percentage` de YouTube viene en tanto por cien.
+    CAMPOS_FRACCION = ("full_video_watched_rate",)
+    CAMPOS_PORCENTAJE = ("average_view_percentage",)
+    CAMPOS_TIEMPO_MEDIO = ("average_time_watched", "average_view_duration_seconds")
+
+    @staticmethod
+    def _numero(valor):
+        if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+            try:
+                valor = float(str(valor).strip()) if isinstance(valor, str) and valor.strip() else None
+            except ValueError:
+                return None
+        if valor is None or valor != valor or valor in (float("inf"), float("-inf")):
+            return None
+        return float(valor)
+
+    @classmethod
+    def _retencion(cls, bruto):
+        """{"vista_entera": fraccion|None, "tiempo_medio_s": s|None}"""
+        bruto = bruto if isinstance(bruto, dict) else {}
+        entera = None
+        for suyo in cls.CAMPOS_FRACCION + cls.CAMPOS_PORCENTAJE:
+            v = cls._numero(bruto.get(suyo))
+            if v is None:
+                continue
+            # una fraccion que llega como «18.4» tambien es un tanto por cien
+            if suyo in cls.CAMPOS_PORCENTAJE or v > 1:
+                v = v / 100
+            if 0 <= v <= 1:
+                entera = round(v, 4)
+                break
+        medio = None
+        for suyo in cls.CAMPOS_TIEMPO_MEDIO:
+            v = cls._numero(bruto.get(suyo))
+            if v is not None and 0 <= v < 86400:
+                medio = round(v, 1)
+                break
+        return {"vista_entera": entera, "tiempo_medio_s": medio}
+
+    @classmethod
+    def _cifras(cls, bruto):
+        datos = cls._numeros(bruto)
+        datos.update(cls._retencion(bruto))
+        return datos
+
     @classmethod
     def _numeros(cls, bruto):
         bruto = bruto if isinstance(bruto, dict) else {}
@@ -448,12 +498,51 @@ class ClienteUploadPost:
         for nombre, ficha in (r.get("platforms") or {}).items():
             if nombre not in REDES or not isinstance(ficha, dict):
                 continue
-            datos = self._numeros(ficha.get("post_metrics"))
+            datos = self._cifras(ficha.get("post_metrics"))
             url = str(ficha.get("post_url") or "")
             datos["url"] = url if url.startswith("http") else ""
+            # el id del post EN LA RED: con el se reconoce en la lectura guardada
+            datos["post_id"] = str(ficha.get("platform_post_id") or "")[:120]
             datos["error"] = str(ficha.get("post_metrics_error") or "")[:300]
             salida[nombre] = datos
         return salida
+
+    #: La lectura guardada: Upload-Post deja hasta 200 posts por pagina; mas de
+    #: PAGINAS_GUARDADAS paginas no se piden en una vuelta (la peticion de la
+    #: pantalla se corta a los 60 s detras del proxy).
+    POR_PAGINA_GUARDADAS = 200
+    PAGINAS_GUARDADAS = 3
+
+    def metricas_guardadas(self, perfil, red=None, desde=None, hasta=None,
+                           paginas=PAGINAS_GUARDADAS, plazo=PLAZO_CONSULTA_S):
+        """Lo ultimo que Upload-Post leyo EN VIVO de cada post del perfil, sin
+        volver a preguntar a las redes: NO gasta del limite de 100 consultas
+        cada 5 minutos. Solo trae posts que se leyeron en vivo alguna vez, y
+        para YouTube es el unico sitio con la retencion.
+        -> {"posts": [{"red", "post_id", "url", "al", vistas…}], "completo": bool}"""
+        consulta = {"user": perfil, "limit": self.POR_PAGINA_GUARDADAS,
+                    "platform": red if red in REDES else None,
+                    "since": desde or None, "until": hasta or None}
+        posts, cursor, completo = [], None, False
+        for _ in range(max(1, int(paginas))):
+            if cursor:
+                consulta["cursor"] = cursor
+            r = self._pedir("GET", "/api/uploadposts/post-analytics/cached", consulta=consulta,
+                            plazo=plazo)
+            for item in r.get("posts") or []:
+                if not isinstance(item, dict) or item.get("platform") not in REDES:
+                    continue
+                datos = self._cifras(item.get("metrics"))
+                url = str(item.get("post_url") or "")
+                datos.update(red=item["platform"], post_id=str(item.get("post_id") or "")[:120],
+                             url=url if url.startswith("http") else "",
+                             al=str(item.get("captured_at") or "")[:40])
+                posts.append(datos)
+            cursor = r.get("next_cursor")
+            if not r.get("has_more") or not cursor:
+                completo = True
+                break
+        return {"posts": posts, "completo": completo}
 
     def analiticas_perfil(self, perfil, redes, pagina_facebook=None):
         """Seguidores, alcance y vistas de cada cuenta del perfil. -> {red: {...}}"""

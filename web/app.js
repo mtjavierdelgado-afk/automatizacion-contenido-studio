@@ -16893,6 +16893,7 @@ const PUB = {
   enviando: false, guardando: null, avisos: 0, repintar: false,
   modoEnvio: '', cuandoEnvio: '',
   resultados: null, proyectoResultados: '', diasResultados: 30, midiendo: false,
+  mejorSemana: null, mejores: null, porMejores: 'vistas',
 };
 const NOMBRES_RED = { tiktok: 'TikTok', instagram: 'Instagram Reels', youtube: 'YouTube', facebook: 'Facebook' };
 const CORTOS_RED = { tiktok: 'TikTok', instagram: 'Reels', youtube: 'YouTube', facebook: 'Facebook' };
@@ -17038,6 +17039,13 @@ async function cargarInicioModulos() {
   } catch (e) {
     PUB.error = e.message;
   }
+  // lo mejor de la semana: solo lee lo guardado, no pregunta a Upload-Post
+  try {
+    const r = await pedir(rutaPublicar(`/lo-que-funciono?${consulta({ dias: 7, cuantos: 1 })}`));
+    PUB.mejorSemana = (r.posts || [])[0] || false;
+  } catch (e) {
+    PUB.mejorSemana = false;
+  }
   if (MODULOS.actual === 'inicio') pintarModulo();
 }
 
@@ -17057,6 +17065,7 @@ function vistaInicioModulos() {
       h('h3', {}, titulo), h('p', { clase: 'meta' }, texto),
       h('button', { clase: id === 'automatizar' ? 'mini' : 'primario mini', onclick: () => irAModulo(id) }, boton))));
   caja.appendChild(tarjetas);
+  caja.appendChild(lineaMejorSemana());
   const hoy = h('div', { clase: 'bloque' }, h('h3', {}, 'Lo que pasa hoy'));
   const deHoy = (c.de_hoy || []).concat((c.esperan_ok || []).filter(e => !(c.de_hoy || []).some(x => x.id === e.id)));
   if (!PUB.cola) hoy.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
@@ -17108,9 +17117,16 @@ async function cargarPublicar(silencio) {
       }
       const pedido = PUB.proyectoResultados;
       const dias = PUB.diasResultados || 30;
-      const r = await pedir(rutaPublicar(`/resultados?${consulta({ proyecto: pedido, dias })}`));
+      const por = PUB.porMejores || 'vistas';
+      const [r, mejores] = await Promise.all([
+        pedir(rutaPublicar(`/resultados?${consulta({ proyecto: pedido, dias })}`)),
+        pedir(rutaPublicar(`/lo-que-funciono?${consulta({ proyecto: pedido, dias, por, cuantos: 5 })}`)),
+      ]);
       // si entretanto se eligió otro proyecto o periodo, esta respuesta ya no vale
-      if (pedido === PUB.proyectoResultados && dias === (PUB.diasResultados || 30)) PUB.resultados = r;
+      if (pedido === PUB.proyectoResultados && dias === (PUB.diasResultados || 30)) {
+        PUB.resultados = r;
+        if (por === (PUB.porMejores || 'vistas')) PUB.mejores = mejores;
+      }
     } else {
       PUB.cola = await pedir(rutaPublicar(`/cola?${consulta({ desde: PUB.desde || '', dias: PUB.vistaCal === 'mes' ? 42 : 7 })}`));
       contarAvisosPublicar();
@@ -17118,7 +17134,7 @@ async function cargarPublicar(silencio) {
   } catch (e) {
     PUB.error = e.message;
     // las cifras de otro proyecto no se quedan a la vista bajo el error
-    if (PUB.seccion === 'resultados') PUB.resultados = null;
+    if (PUB.seccion === 'resultados') { PUB.resultados = null; PUB.mejores = null; }
   }
   PUB.cargando = false;
   if (MODULOS.actual === 'publicar') {
@@ -18096,7 +18112,24 @@ function textoMetricas(m) {
   if (!m) return '';
   return Object.keys(NOMBRES_METRICA)
     .filter(k => typeof m[k] === 'number')
-    .map(k => `${numeroCorto(m[k])} ${NOMBRES_METRICA[k]}`).join(' · ');
+    .map(k => `${numeroCorto(m[k])} ${NOMBRES_METRICA[k]}`)
+    .concat(textoRetencion(m) ? [textoRetencion(m)] : []).join(' · ');
+}
+
+/* La retención (publicar-redes-2): solo la dan TikTok y YouTube. Lo que no
+   llega no se escribe (nunca «0 %»: sería mentir). */
+function porcentaje(fraccion) {
+  return `${(Number(fraccion) * 100).toFixed(Number(fraccion) < 0.1 ? 1 : 0).replace('.', ',')} %`;
+}
+
+function textoRetencion(m) {
+  if (!m) return '';
+  const partes = [];
+  if (typeof m.vista_entera === 'number') partes.push(`${porcentaje(m.vista_entera)} lo vio entero`);
+  if (typeof m.tiempo_medio_s === 'number') {
+    partes.push(`${String(Math.round(m.tiempo_medio_s * 10) / 10).replace('.', ',')} s de media`);
+  }
+  return partes.join(' · ');
 }
 
 async function actualizarMetricasVideo() {
@@ -18436,9 +18469,9 @@ function seccionResultadosPublicar() {
   const caja = h('div', { clase: 'resultados-publicar' });
   const proyectos = ((PUB.proyectos || {}).proyectos || []);
   caja.appendChild(h('div', { clase: 'fila' },
-    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; PUB.resultados = null; cargarPublicar(); } },
+    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; PUB.resultados = null; PUB.mejores = null; cargarPublicar(); } },
       ...proyectos.map(x => h('option', { value: x.id, selected: x.id === PUB.proyectoResultados }, x.nombre))),
-    h('select', { onchange: ev => { PUB.diasResultados = Number(ev.target.value); PUB.resultados = null; cargarPublicar(); } },
+    h('select', { onchange: ev => { PUB.diasResultados = Number(ev.target.value); PUB.resultados = null; PUB.mejores = null; cargarPublicar(); } },
       ...[[7, 'últimos 7 días'], [30, 'últimos 30 días'], [90, 'últimos 90 días']].map(([v, t]) =>
         h('option', { value: v, selected: (PUB.diasResultados || 30) === v }, t))),
     h('span', { clase: 'crece' }),
@@ -18446,7 +18479,11 @@ function seccionResultadosPublicar() {
     h('button', { clase: 'primario mini', disabled: PUB.midiendo || !(r.clave || {}).puesta,
       title: 'Pide a Upload-Post las cifras de lo publicado y los seguidores de cada cuenta',
       onclick: actualizarResultadosPublicar }, PUB.midiendo ? 'pidiendo…' : 'Actualizar')));
-  if (!(r.clave || {}).puesta) caja.appendChild(avisoClavePublicar(r.clave));
+  /* sin `r.clave` (la carga falló y el error ya está arriba) no hay aviso que
+     poner: `avisoClavePublicar` devuelve null y appendChild(null) rompía la
+     pantalla entera («fallo pintando el módulo») tapando el error de verdad */
+  const avisoClave = (r.clave && !r.clave.puesta) ? avisoClavePublicar(r.clave) : null;
+  if (avisoClave) caja.appendChild(avisoClave);
   const total = r.total || {};
   caja.appendChild(h('div', { clase: 'cifras-publicar' },
     ...[['posts', 'publicaciones'], ['vistas', 'vistas'], ['me_gusta', 'me gusta'],
@@ -18457,6 +18494,8 @@ function seccionResultadosPublicar() {
     caja.appendChild(h('div', { clase: 'meta' }, `${r.sin_cifras} publicación(es) sin cifras todavía: `
       + 'las subidas a mano no se pueden medir desde aquí, y TikTok tarda unas horas en darlas.'));
   }
+  if (r.periodos) caja.appendChild(bloquePeriodosPublicar(r.periodos));
+  caja.appendChild(bloqueMejoresPublicar());
   const redes = h('div', { clase: 'bloque' }, h('h3', {}, 'Por red'));
   const tabla = h('div', { clase: 'tabla-redes' });
   Object.keys(NOMBRES_RED).forEach(red => {
@@ -18651,3 +18690,100 @@ montarModulos();
    access 'MODOS' before initialization» y deja la pantalla en blanco.
    Las funciones se izan; los const no. */
 arrancar();
+
+/* ----------------------------------------- PUBLICAR · RESULTADOS (redes-2)
+ *
+ * Lo que añadió `publicar-redes-2` (17-10-2026): esta semana y este mes frente
+ * al anterior, «Lo que mejor funcionó» y la línea de Inicio. Todo sale de lo
+ * que YA se sabe (`/resultados`, `/lo-que-funciono`): nada de esto pregunta a
+ * Upload-Post ni gasta consultas; las cifras se piden solo con «Actualizar».
+ */
+
+function lineaMejorSemana() {
+  const m = PUB.mejorSemana;
+  const caja = h('div', { clase: 'bloque linea-mejor-semana' });
+  if (m === null) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Lo mejor de la semana: cargando…'));
+    return caja;
+  }
+  if (!m) {
+    caja.appendChild(h('div', { clase: 'meta' },
+      'Lo mejor de la semana: todavía no hay cifras de esta semana. '
+      + 'Se piden en Publicar → Resultados, con «Actualizar».'));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('span', { clase: 'meta' }, 'Lo mejor de la semana:'),
+    h('button', { clase: 'mini fantasma nombre-envio', onclick: () => irASeccionPublicar('ficha', m.pid) }, m.nombre),
+    h('span', { clase: 'pastilla red-mini ok' }, CORTOS_RED[m.red] || m.red),
+    h('span', { clase: 'crece meta' }, textoMetricas(m.metricas) || '')));
+  return caja;
+}
+
+function variacion(actual, anterior) {
+  if (typeof actual !== 'number' || typeof anterior !== 'number' || anterior <= 0) return '';
+  const cambio = Math.round(((actual - anterior) / anterior) * 100);
+  if (cambio === 0) return 'igual';
+  return `${cambio > 0 ? '+' : '−'}${Math.abs(cambio)} %`;
+}
+
+function tarjetaPeriodo(titulo, previo, frente, p) {
+  const a = (p || {}).actual || {};
+  const b = (p || {}).anterior || {};
+  const cambio = variacion(a.vistas, b.vistas);
+  return h('div', { clase: 'tarjeta-periodo' },
+    h('h4', {}, titulo),
+    h('div', { clase: 'cifra' }, h('b', {}, typeof a.vistas === 'number' ? numeroCorto(a.vistas) : '—'),
+      h('span', { clase: 'meta' }, `vistas · ${a.posts || 0} publicación(es)`)),
+    cambio ? h('span', { clase: `pastilla ${cambio.startsWith('+') ? 'ok' : (cambio === 'igual' ? '' : 'aviso')}`,
+      title: `vistas ${frente}` }, `${cambio} ${frente}`) : null,
+    textoRetencion(a) ? h('div', { clase: 'meta' }, textoRetencion(a)) : null,
+    h('div', { clase: 'meta' }, `${previo}: ${typeof b.vistas === 'number' ? numeroCorto(b.vistas) : '—'} vistas · `
+      + `${b.posts || 0} publicación(es)`));
+}
+
+function bloquePeriodosPublicar(periodos) {
+  const b = h('div', { clase: 'bloque' }, h('h3', {}, 'Esta semana y este mes'));
+  b.appendChild(h('div', { clase: 'periodos-publicar' },
+    tarjetaPeriodo('Esta semana (desde el lunes)', 'la semana pasada', 'frente a la semana pasada', periodos.semana),
+    tarjetaPeriodo('Este mes', 'el mes pasado', 'frente al mes pasado', periodos.mes)));
+  b.appendChild(h('div', { clase: 'meta' },
+    'Cuenta lo PUBLICADO en cada periodo, con sus cifras de la última vez que se pidieron.'));
+  return b;
+}
+
+const ORDENES_MEJORES = {
+  vistas: 'más vistas', interaccion: 'más interacción', vista_entera: 'más vistos enteros',
+};
+
+function bloqueMejoresPublicar() {
+  const r = PUB.mejores;
+  const b = h('div', { clase: 'bloque mejores-publicar' }, h('div', { clase: 'fila' },
+    h('h3', {}, 'Lo que mejor funcionó'), h('span', { clase: 'crece' }),
+    h('select', { title: 'Por qué ordenar', onchange: ev => {
+      PUB.porMejores = ev.target.value; PUB.mejores = null; cargarPublicar(true);
+    } }, ...Object.keys(ORDENES_MEJORES).map(k =>
+      h('option', { value: k, selected: (PUB.porMejores || 'vistas') === k }, ORDENES_MEJORES[k])))));
+  if (!r) {
+    b.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return b;
+  }
+  if (!(r.posts || []).length) {
+    b.appendChild(h('div', { clase: 'meta' }, r.minimo_vistas
+      ? `Ninguna publicación con ${r.minimo_vistas} vistas o más en este periodo: con menos, la proporción no dice nada.`
+      : 'Ninguna publicación con cifras en este periodo.'));
+    return b;
+  }
+  r.posts.forEach((p, i) => b.appendChild(h('div', { clase: 'fila fila-mejor' },
+    h('b', { clase: 'puesto' }, `${i + 1}.`),
+    h('button', { clase: 'mini fantasma nombre-envio', onclick: () => irASeccionPublicar('ficha', p.pid) }, p.nombre),
+    h('span', { clase: 'pastilla red-mini ok' }, CORTOS_RED[p.red] || p.red),
+    h('span', { clase: 'meta' }, `${p.dia} ${fechaCorta(p.cuando).slice(0, 16)}`),
+    h('span', { clase: 'crece meta' }, textoMetricas(p.metricas)
+      + (typeof p.interaccion === 'number' ? ` · ${porcentaje(p.interaccion)} de interacción` : '')),
+    p.url ? h('a', { href: p.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver el post') : null)));
+  if (r.minimo_vistas) {
+    b.appendChild(h('div', { clase: 'meta' }, `Solo publicaciones con ${r.minimo_vistas} vistas o más.`));
+  }
+  return b;
+}

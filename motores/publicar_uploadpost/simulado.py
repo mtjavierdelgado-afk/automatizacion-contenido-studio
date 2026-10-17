@@ -149,7 +149,7 @@ class SimuladoUploadPost:
                 "imagenes": {c: os.path.getsize(r) for c, r in (ficheros or [])
                              if r and os.path.isfile(r)}})
             datos["trabajos"][id_propio] = {
-                "redes": redes, "cuando_utc": cuando_utc, "consultas": 0,
+                "perfil": perfil, "redes": redes, "cuando_utc": cuando_utc, "consultas": 0,
                 "cancelado": False,
                 "sin_cuenta": [r for r in redes if not cuentas.get(r)]}
             self._escribir(datos)
@@ -210,7 +210,9 @@ class SimuladoUploadPost:
 
     def metricas_post(self, request_id, red=None):
         """Cifras que crecen con cada consulta, y TikTok que aun no las tiene la
-        primera vez (como pasa en las horas despues de publicar)."""
+        primera vez (como pasa en las horas despues de publicar). TikTok trae su
+        retencion en vivo; YouTube no (solo en la lectura guardada). Cada lectura
+        en vivo queda guardada, como hace Upload-Post."""
         with _LOCK:
             datos = self._leer()
             trabajo = datos["trabajos"].get(request_id)
@@ -218,22 +220,52 @@ class SimuladoUploadPost:
                 raise ErrorUploadPost("Upload-Post no encuentra ese envío", 404)
             trabajo["metricas_consultas"] = int(trabajo.get("metricas_consultas") or 0) + 1
             vueltas = trabajo["metricas_consultas"]
+            salida = {}
+            for r in trabajo["redes"]:
+                if red and r != red:
+                    continue
+                base = self._semilla(request_id, r) % 900 + 100
+                post_id = f"{r[:2]}{self._semilla(request_id, r, 'id') % 10**9}"
+                if r == "tiktok" and vueltas < 2:
+                    salida[r] = {k: None for k in ClienteUploadPost.CAMPOS_METRICAS}
+                    salida[r].update(url=f"https://{r}.example/{request_id[:10]}", post_id=post_id,
+                                     vista_entera=None, tiempo_medio_s=None,
+                                     error="TikTok todavía no tiene las cifras de este post")
+                    continue
+                salida[r] = {"vistas": base * vueltas, "me_gusta": base // 10 * vueltas,
+                             "comentarios": base // 100 + vueltas, "compartidos": base // 50,
+                             "guardados": None if r == "youtube" else base // 40, "alcance": None,
+                             "vista_entera": round((base % 40 + 10) / 100, 4) if r == "tiktok" else None,
+                             "tiempo_medio_s": float(base % 20 + 3) if r == "tiktok" else None,
+                             "url": f"https://{r}.example/{request_id[:10]}", "post_id": post_id,
+                             "error": ""}
+                guardadas = trabajo.setdefault("guardadas", {})
+                guardadas[r] = dict(salida[r], al=dt.datetime.now(dt.timezone.utc).isoformat())
             self._escribir(datos)
-        salida = {}
-        for r in trabajo["redes"]:
-            if red and r != red:
-                continue
-            base = self._semilla(request_id, r) % 900 + 100
-            if r == "tiktok" and vueltas < 2:
-                salida[r] = {k: None for k in ClienteUploadPost.CAMPOS_METRICAS}
-                salida[r].update(url=f"https://{r}.example/{request_id[:10]}",
-                                 error="TikTok todavía no tiene las cifras de este post")
-                continue
-            salida[r] = {"vistas": base * vueltas, "me_gusta": base // 10 * vueltas,
-                         "comentarios": base // 100 + vueltas, "compartidos": base // 50,
-                         "guardados": None if r == "youtube" else base // 40, "alcance": None,
-                         "url": f"https://{r}.example/{request_id[:10]}", "error": ""}
         return salida
+
+    def metricas_guardadas(self, perfil, red=None, desde=None, hasta=None, paginas=3, plazo=None):
+        """Lo ultimo leido en vivo de cada post del perfil. YouTube trae aqui su
+        retencion (como el informe de YouTube Analytics de Upload-Post)."""
+        with _LOCK:
+            datos = self._leer()
+        if perfil not in datos["perfiles"]:
+            raise ErrorUploadPost("Upload-Post no encuentra ese perfil", 404)
+        posts = []
+        for rid, trabajo in datos["trabajos"].items():
+            if trabajo.get("perfil") != perfil:
+                continue
+            for r, guardada in (trabajo.get("guardadas") or {}).items():
+                if red and r != red:
+                    continue
+                item = dict(guardada, red=r)
+                item.pop("error", None)
+                if r == "youtube":
+                    base = self._semilla(rid, r) % 900 + 100
+                    item.update(vista_entera=round((base % 50 + 20) / 100, 4),
+                                tiempo_medio_s=float(base % 40 + 10))
+                posts.append(item)
+        return {"posts": posts, "completo": True}
 
     def analiticas_perfil(self, perfil, redes, pagina_facebook=None):
         with _LOCK:

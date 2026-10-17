@@ -82,6 +82,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 |---|---|---|
 | `GET` | `/api/publicar/cola` | Los videos listos para publicar y los envios de la semana (hora de Lima). |
 | `GET` | `/api/publicar/estado` | Si hay clave de Upload-Post (y de donde sale). Nunca la clave. |
+| `GET` | `/api/publicar/lo-que-funciono` | Los posts que mejor fueron: {proyecto?, dias, red?, por, cuantos}. |
 | `POST` | `/api/publicar/probar` | Prueba la clave contra Upload-Post sin gastar ninguna subida. |
 | `GET` | `/api/publicar/proyectos` | Cada proyecto con lo fijo de publicar y sus cuentas (lo ultimo visto). |
 | `PUT` | `/api/publicar/proyectos/{cid}` | Lo fijo de un proyecto: {perfil, redes, hora, firma, hashtags, tono, |

@@ -888,7 +888,10 @@ def notas_de_imagenes(navegador, datos):
         "button", has_text="Rehacer esta imagen").click()
     ok(pg.esperar(".nota-imagen .pastilla", "Rechazada", 120),
        "si OpenAI la rechaza también sin marcas, la nota lo dice")
-    ok(pg.visible(".nota-imagen .nota-error", "filtro de seguridad"), "con el motivo en claro")
+    # ESPERANDO, no mirando en el instante: la pastilla y el motivo llegan en
+    # repintados distintos, y con la máquina cargada el motivo tardaba un
+    # poco más (falló así una vez el 17-10; repetida sola, pasaba)
+    ok(pg.esperar(".nota-imagen .nota-error", "filtro de seguridad", 15), "con el motivo en claro")
     ok(pg.p.locator(".nota-imagen").filter(has_text="Imagen S001").count() == 1,
        "y las notas de la MISMA imagen van en UNA tarjeta (no se repite la imagen)")
     ok(pg.visible(".nota-imagen button", "Hacerla sin marcas"), "y ofrece hacerla sin marcas")

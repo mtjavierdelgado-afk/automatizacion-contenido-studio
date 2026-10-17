@@ -37,6 +37,8 @@ os.environ["ESTUDIO_SECRETOS"] = os.path.join(CARPETA, "secretos")
 os.environ.pop("UPLOADPOST_API_KEY", None)
 os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 os.environ.pop("ESTUDIO_SIMULAR", None)
+# lo que apunta Publicar en la bitacora global no va a la de verdad
+os.environ["ESTUDIO_BITACORA_GLOBAL"] = os.path.join(CARPETA, "bitacora_global.jsonl")
 
 import publicar as P  # noqa: E402
 from motores.publicar_uploadpost import cliente as UP  # noqa: E402
@@ -517,6 +519,16 @@ def prueba_studio():
         ok(perfil.startswith("studio_"), f"con el nombre sugerido: {perfil}")
         r = s.post(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/perfil", json={})
         igual(r.status_code, 200, "si ya existe allí, solo se apunta")
+        igual(r.json().get("como"), "adoptado", "y dice que lo adoptó")
+        # lo escrito en el campo es lo que se manda (16-10: iba el cuerpo vacío)
+        r = s.post(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/perfil",
+                   json={"perfil": perfil.upper(), "crear": False})
+        igual((r.status_code, r.json()["ajustes"]["perfil"]), (200, perfil),
+              "«Usar este perfil» con otras mayúsculas apunta el de Upload-Post")
+        r = s.get(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/perfiles")
+        igual(r.status_code, 200, "la lista de perfiles de la cuenta, para el desplegable")
+        ok(any(x["perfil"] == perfil and x["propio"] for x in r.json()["perfiles"]),
+           "con el de este proyecto marcado")
         r = s.post(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/conectar",
                    json={"redes": ["tiktok", "instagram", "youtube"], "volver_a": "javascript:x"})
         ok(r.json().get("url", "").startswith("https://app.upload-post.com/connect"),
@@ -897,12 +909,89 @@ def prueba_metricas():
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 
 
+def prueba_perfiles():
+    """Lo que salió en el servidor el 16-10: «Crear perfil» sin el nombre
+    escrito, el plan lleno con el perfil YA en Upload-Post, y «Suyu» frente
+    a «suyu» al ver las cuentas."""
+    seccion("6] perfiles: el nombre escrito, el plan lleno, mayúsculas")
+    raiz = os.path.join(CARPETA, "perfiles")
+    os.makedirs(raiz)
+    simulador = os.path.join(CARPETA, "sim_perfiles.json")
+    # el plan gratis, lleno: dos perfiles, «Suyu» (con Instagram) y otro
+    with open(simulador, "w", encoding="utf-8") as fh:
+        json.dump({"limite": 2, "perfiles": {
+            "Suyu": {"instagram": {"display_name": "Suyu IG", "username": "suyu"}},
+            "studio_otro": {}}}, fh)
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    try:
+        igual(P.norma_perfil(" Su yu "), "suyu", "comparar sin mayúsculas ni espacios")
+        ok(P.buscar_perfil([{"perfil": "Suyu"}], "suyu") is not None, "«suyu» encuentra «Suyu»")
+        ok(P.buscar_perfil([{"perfil": "Suyu"}], "suyu2") is None, "y no confunde otro nombre")
+        # adoptar con el plan lleno: no se intenta crear
+        ajustes, como = P.usar_perfil(raiz, "cl_suyu", "suyu")
+        igual(como, "adoptado", "con el plan lleno, un perfil que ya existe se adopta")
+        igual(ajustes["perfil"], "Suyu", "con el nombre exacto de Upload-Post")
+        ok(isinstance(ajustes["cuentas"].get("instagram"), dict), "y sus cuentas (Instagram)")
+        ok(bool(ajustes["cuentas_vistas"]), "ya miradas")
+        with open(simulador, encoding="utf-8") as fh:
+            igual(len(json.load(fh)["perfiles"]), 2, "sin crear ningún perfil nuevo")
+        # crear uno nuevo con el plan lleno: el mensaje en castellano, antes de pedirlo
+        try:
+            P.usar_perfil(raiz, "cl_nuevo", "studio_nuevo")
+            ok(False, "con el plan lleno no se crea")
+        except P.ErrorPublicar as fallo:
+            ok("Tu plan de Upload-Post ya tiene 2 perfiles" in str(fallo), f"plan lleno, en castellano: {fallo}")
+            igual(fallo.codigo, 409, "como 409")
+        # el mensaje de alli también se traduce (si la lista no trae el limite)
+        try:
+            raise P.UP.ErrorUploadPost("You have reached the limit of 2 profiles", 403)
+        except P.UP.ErrorUploadPost as fallo:
+            ok(P._PLAN_LLENO.search(str(fallo)) is not None, "reconoce el mensaje de Upload-Post")
+        # usar sin crear un perfil que no existe: dice que no está
+        try:
+            P.usar_perfil(raiz, "cl_nuevo", "no_existe", crear=False)
+            ok(False, "«Usar este perfil» no crea nada")
+        except P.ErrorPublicar as fallo:
+            igual(fallo.codigo, 404, f"«Usar este perfil» con uno que no existe: {fallo}")
+        # otro proyecto no puede adoptar el mismo, ni escrito distinto
+        try:
+            P.usar_perfil(raiz, "cl_otro", "SUYU")
+            ok(False, "dos proyectos no comparten perfil")
+        except P.ErrorPublicar as fallo:
+            igual(fallo.codigo, 409, "«SUYU» ya es de otro proyecto")
+        # la lista para el desplegable marca de quién es cada uno
+        lista = P.perfiles_de_la_cuenta(raiz, "cl_otro")
+        nombres = {x["perfil"]: x for x in lista["perfiles"]}
+        igual(sorted(nombres), ["Suyu", "studio_otro"], "el desplegable trae los perfiles de verdad")
+        igual(nombres["Suyu"]["de_otro"], "cl_suyu", "marcando el que ya usa otro proyecto")
+        igual(nombres["Suyu"]["redes"], ["instagram"], "con sus redes conectadas")
+        igual(lista["limite"], 2, "y el límite del plan")
+        ok(P.perfiles_de_la_cuenta(raiz, "cl_suyu")["perfiles"][0]["propio"], "el propio sale marcado")
+        # «Ver cuentas» con el nombre guardado en otras mayúsculas
+        P.guardar_ajustes(raiz, "cl_minus", {"perfil": "studio_otro"})
+        P.guardar_ajustes(raiz, "cl_minus", {"perfil": "STUDIO_OTRO "})
+        visto = P.ver_cuentas(raiz, "cl_minus")
+        igual(visto["existe"], True, "«Ver cuentas» encuentra el perfil escrito en mayúsculas")
+        igual(visto["ajustes"]["perfil"], "studio_otro", "y apunta el nombre de Upload-Post")
+        # con sitio en el plan, «Crear perfil» crea el nombre escrito
+        with open(simulador, encoding="utf-8") as fh:
+            datos = json.load(fh)
+        datos["limite"] = 5
+        with open(simulador, "w", encoding="utf-8") as fh:
+            json.dump(datos, fh)
+        ajustes, como = P.usar_perfil(raiz, "cl_nuevo", "Mi_Cliente")
+        igual((como, ajustes["perfil"]), ("creado", "Mi_Cliente"), "crear usa el nombre escrito")
+    finally:
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
+
 def main():
     print("PRUEBA DE PUBLICAR")
     prueba_piezas()
     prueba_cliente()
     prueba_envios_sueltos()
     prueba_metricas()
+    prueba_perfiles()
     if shutil.which("ffmpeg"):
         prueba_studio()
     else:

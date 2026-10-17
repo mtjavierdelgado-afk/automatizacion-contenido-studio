@@ -14733,47 +14733,41 @@ def publicar_guardar_ajustes(cid: str, peticion: Request, cuerpo: dict = Body(de
 
 @app.post("/api/publicar/proyectos/{cid}/cuentas")
 def publicar_ver_cuentas(cid: str, peticion: Request):
-    """Pregunta a Upload-Post que cuentas tiene conectadas el perfil del proyecto."""
+    """Pregunta a Upload-Post que cuentas tiene conectadas el perfil del proyecto
+    (sin mirar mayusculas ni espacios en el nombre)."""
     P = _publicar()
     cid = _proyecto_publicable(cid, peticion)
-    ajustes = P.ajustes_de(raiz_proyectos(), cid)
-    if not ajustes.get("perfil"):
-        raise ErrorApi(409, "este proyecto todavía no tiene perfil de Upload-Post")
-    lista = _por_publicar(lambda: P._por_upload_post(P.cliente(raiz_proyectos()).perfiles))
-    propio = next((p for p in lista["perfiles"] if p["perfil"] == ajustes["perfil"]), None)
-    if propio is None:
-        # sin la lista de perfiles de la cuenta: serian los de otros clientes
-        return {"existe": False, "ajustes": ajustes}
-    return {"existe": True, "ajustes": P.recordar_cuentas(raiz_proyectos(), cid, propio["cuentas"])}
+    return _por_publicar(P.ver_cuentas, raiz_proyectos(), cid)
+
+
+@app.get("/api/publicar/proyectos/{cid}/perfiles")
+def publicar_perfiles_de_la_cuenta(cid: str, peticion: Request):
+    """Los perfiles que hay de verdad en Upload-Post, para elegir uno: los que
+    ya usa otro proyecto de aqui salen marcados (con su nombre) y no se eligen."""
+    P = _publicar()
+    cid = _proyecto_publicable(cid, peticion)
+    datos = _por_publicar(P.perfiles_de_la_cuenta, raiz_proyectos(), cid)
+    nombres = _nombres_de_clientes()
+    for p in datos["perfiles"]:
+        otro = p.get("de_otro") or ""
+        p["de_otro_nombre"] = (nombres.get(otro) or ("Sin proyecto" if otro == "_sin" else otro)) \
+            if otro else ""
+    return datos
 
 
 @app.post("/api/publicar/proyectos/{cid}/perfil")
 def publicar_crear_perfil(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """Crea el perfil del proyecto en Upload-Post ({perfil}, o el sugerido) y lo
-    apunta. Si ya existia alli, solo lo apunta."""
+    """Apunta el perfil de Upload-Post del proyecto: {perfil, crear?}. Si ya
+    existe alli (aunque el plan este lleno) lo adopta; si no y `crear` (por
+    defecto), lo crea. Sin {perfil}, el sugerido."""
     P = _publicar()
     cid = _proyecto_publicable(cid, peticion)
+    datos = _cuerpo(cuerpo)
     nombre = _nombres_de_clientes().get(cid, "sin_proyecto")
-    perfil = str(_cuerpo(cuerpo).get("perfil") or P.perfil_sugerido(cid, nombre)).strip()
-    _por_publicar(P._validar_ajustes, {"perfil": perfil})
-    cli = _por_publicar(P.cliente, raiz_proyectos())
-    # un perfil es UN cliente: si ya lo usa otro proyecto, ni se crea ni se adopta
-    if P.perfil_de_otro(raiz_proyectos(), perfil, cid):
-        raise ErrorApi(409, "ese perfil de Upload-Post ya es de otro proyecto: escribe "
-                            "otro nombre para este")
-    try:
-        hecho = cli.crear_perfil(perfil)
-    except P.UP.ErrorUploadPost as fallo:
-        if fallo.codigo != 409:
-            raise ErrorApi(409 if fallo.codigo in (401, 403) else 502, str(fallo)) from None
-        # ya existia en Upload-Post y no es de ningun otro proyecto de aqui: sus
-        # cuentas no se saben hasta «Ver cuentas»
-        hecho = {"perfil": perfil, "cuentas": {}, "sin_mirar": True}
-    ajustes = P.guardar_ajustes(raiz_proyectos(), cid, {"perfil": hecho["perfil"]},
-                                internos={"cuentas": hecho["cuentas"],
-                                          "cuentas_vistas": "" if hecho.get("sin_mirar")
-                                          else P._iso_lima()})
-    return {"ajustes": ajustes}
+    perfil = str(datos.get("perfil") or P.perfil_sugerido(cid, nombre)).strip()
+    ajustes, como = _por_publicar(P.usar_perfil, raiz_proyectos(), cid, perfil,
+                                  crear=datos.get("crear") is not False)
+    return {"ajustes": ajustes, "como": como}
 
 
 @app.post("/api/publicar/proyectos/{cid}/conectar")

@@ -267,9 +267,13 @@ def _por_upload_post(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
     except UP.ErrorUploadPost as fallo:
-        codigo = 502 if fallo.codigo in (0, 500, 502, 503) else (
-            409 if fallo.codigo in (401, 403, 429) else 400)
-        raise ErrorPublicar(str(fallo), codigo) from None
+        raise _convertir(fallo) from None
+
+
+def _convertir(fallo):
+    codigo = 502 if fallo.codigo in (0, 500, 502, 503) else (
+        409 if fallo.codigo in (401, 403, 429) else 400)
+    return ErrorPublicar(str(fallo), codigo)
 
 
 # -------------------------------------------------------------------- ajustes
@@ -393,6 +397,143 @@ def perfil_sugerido(cid, nombre):
 def recordar_cuentas(raiz, cid, cuentas):
     return guardar_ajustes(raiz, cid, {}, internos={
         "cuentas": cuentas or {}, "cuentas_vistas": _iso_lima()})
+
+
+# ------------------------------------------------- los perfiles de Upload-Post
+#
+# Lo que salio en el servidor (16-10-2026): «Crear perfil» mandaba el cuerpo
+# vacio, con el plan gratis lleno (2/2) Upload-Post decia «You have reached the
+# limit of 2 profiles» aunque el perfil escrito YA existia alli, y «Ver cuentas»
+# comparaba el nombre con == y daba por inexistente «Suyu» guardado como «suyu».
+# Ahora: se lista antes de crear, se compara sin mayusculas ni espacios, y lo
+# que exista se ADOPTA (con su nombre exacto de alli) en vez de crearse.
+
+_PLAN_LLENO = re.compile(r"limit\s+of\s+(\d+)\s+profiles?", re.I)
+
+
+def norma_perfil(nombre):
+    """El nombre de un perfil para comparar: sin mayusculas ni espacios."""
+    return re.sub(r"\s+", "", str(nombre or "")).lower()
+
+
+def buscar_perfil(lista, nombre):
+    """El perfil de `lista` (los de `cliente.perfiles()`) que es `nombre`, o None."""
+    buscado = norma_perfil(nombre)
+    if not buscado:
+        return None
+    return next((p for p in lista or [] if norma_perfil(p.get("perfil")) == buscado), None)
+
+
+def mensaje_plan_lleno(n):
+    return (f"Tu plan de Upload-Post ya tiene {n} perfiles; usa uno existente "
+            "o mejora el plan")
+
+
+def _log(evento, datos):
+    """A la salida del servicio (journalctl -u as-video-studio) y a la bitacora."""
+    try:
+        print(f"[publicar] {evento} {json.dumps(datos, ensure_ascii=False)}",
+              file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        pass
+    try:
+        from nucleo.bitacora import anotar_global
+        anotar_global(f"publicar_{evento}", datos)
+    except Exception:  # noqa: BLE001 - la bitacora nunca tumba una peticion
+        pass
+
+
+def _redes_conectadas(cuentas):
+    return [r for r in REDES if isinstance((cuentas or {}).get(r), dict)]
+
+
+def perfiles_de_la_cuenta(raiz, cid):
+    """Los perfiles que hay de verdad en Upload-Post, para el desplegable:
+    {perfiles: [{perfil, redes, de_otro, propio}], limite, plan}. `de_otro` es
+    el proyecto de aqui que ya lo usa (no se puede elegir)."""
+    lista = _por_upload_post(cliente(raiz).perfiles)
+    _log("perfiles_vistos", {"proyecto": _clave_proyecto(cid),
+                             "nombres": [p["perfil"] for p in lista["perfiles"]]})
+    propio = norma_perfil(ajustes_de(raiz, cid).get("perfil"))
+    salida = []
+    for p in lista["perfiles"]:
+        salida.append({"perfil": p["perfil"], "redes": _redes_conectadas(p["cuentas"]),
+                       "de_otro": perfil_de_otro(raiz, p["perfil"], cid),
+                       "propio": bool(propio) and norma_perfil(p["perfil"]) == propio})
+    return {"perfiles": salida, "limite": lista.get("limite"), "plan": lista.get("plan") or ""}
+
+
+def usar_perfil(raiz, cid, perfil, crear=True):
+    """Apunta `perfil` como el de este proyecto: si ya existe en Upload-Post (sin
+    mirar mayusculas ni espacios) lo adopta con su nombre exacto y sus cuentas;
+    si no, y `crear`, lo crea. Devuelve (ajustes, "adoptado"|"creado")."""
+    perfil = _validar_ajustes({"perfil": perfil}).get("perfil") or ""
+    if not perfil:
+        raise ErrorPublicar("escribe el nombre del perfil de Upload-Post")
+    cli = cliente(raiz)
+    lista = None
+    try:
+        lista = cli.perfiles()
+    except UP.ErrorUploadPost as fallo:
+        if fallo.codigo in (401, 403):
+            raise ErrorPublicar(str(fallo), 409) from None
+        # sin lista se intenta crear igual: un 409 de alli dira si ya existia
+    if lista is not None:
+        _log("perfiles_vistos", {"proyecto": _clave_proyecto(cid), "buscado": perfil,
+                                 "nombres": [p["perfil"] for p in lista["perfiles"]]})
+        hallado = buscar_perfil(lista["perfiles"], perfil)
+        if hallado:
+            if perfil_de_otro(raiz, hallado["perfil"], cid):
+                raise ErrorPublicar("ese perfil de Upload-Post ya es de otro proyecto: "
+                                    "elige otro para este", 409)
+            return guardar_ajustes(raiz, cid, {"perfil": hallado["perfil"]}, internos={
+                "cuentas": hallado["cuentas"], "cuentas_vistas": _iso_lima()}), "adoptado"
+        if not crear:
+            raise ErrorPublicar(f"Upload-Post no tiene ningún perfil «{perfil}»: elige uno "
+                                "de la lista o pulsa «Crear perfil»", 404)
+        limite = lista.get("limite")
+        if isinstance(limite, int) and limite > 0 and len(lista["perfiles"]) >= limite:
+            raise ErrorPublicar(mensaje_plan_lleno(len(lista["perfiles"])), 409)
+    elif not crear:
+        raise ErrorPublicar("no he podido pedir la lista de perfiles a Upload-Post; "
+                            "prueba otra vez en un momento", 502)
+    if perfil_de_otro(raiz, perfil, cid):
+        raise ErrorPublicar("ese perfil de Upload-Post ya es de otro proyecto: "
+                            "escribe otro nombre para este", 409)
+    try:
+        hecho = cli.crear_perfil(perfil)
+    except UP.ErrorUploadPost as fallo:
+        lleno = _PLAN_LLENO.search(str(fallo))
+        if lleno:
+            raise ErrorPublicar(mensaje_plan_lleno(lleno.group(1)), 409) from None
+        if fallo.codigo != 409:
+            raise _convertir(fallo) from None
+        # ya existia alli (y la lista no lo traia): sus cuentas, con «Ver cuentas»
+        return guardar_ajustes(raiz, cid, {"perfil": perfil}, internos={
+            "cuentas": {}, "cuentas_vistas": ""}), "adoptado"
+    _log("perfil_creado", {"proyecto": _clave_proyecto(cid), "perfil": hecho["perfil"]})
+    return guardar_ajustes(raiz, cid, {"perfil": hecho["perfil"]}, internos={
+        "cuentas": hecho["cuentas"], "cuentas_vistas": _iso_lima()}), "creado"
+
+
+def ver_cuentas(raiz, cid):
+    """Pregunta a Upload-Post por las cuentas del perfil del proyecto. Si alli
+    se escribe distinto (mayusculas), se apunta el nombre de alli."""
+    ajustes = ajustes_de(raiz, cid)
+    if not ajustes.get("perfil"):
+        raise ErrorPublicar("este proyecto todavía no tiene perfil de Upload-Post", 409)
+    lista = _por_upload_post(cliente(raiz).perfiles)
+    nombres = [p["perfil"] for p in lista["perfiles"]]
+    _log("ver_cuentas", {"proyecto": _clave_proyecto(cid), "buscado": ajustes["perfil"],
+                         "nombres": nombres})
+    propio = buscar_perfil(lista["perfiles"], ajustes["perfil"])
+    if propio is None:
+        return {"existe": False, "ajustes": ajustes}
+    if propio["perfil"] != ajustes["perfil"]:
+        return {"existe": True, "ajustes": guardar_ajustes(
+            raiz, cid, {"perfil": propio["perfil"]},
+            internos={"cuentas": propio["cuentas"], "cuentas_vistas": _iso_lima()})}
+    return {"existe": True, "ajustes": recordar_cuentas(raiz, cid, propio["cuentas"])}
 
 
 # ---------------------------------------------------------------- el video

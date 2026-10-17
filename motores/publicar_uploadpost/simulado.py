@@ -85,13 +85,18 @@ class SimuladoUploadPost:
             datos = self._leer()
         return {"perfiles": [{"perfil": p, "cuentas": ClienteUploadPost._cuentas(c)}
                              for p, c in sorted(datos["perfiles"].items())],
-                "limite": 25, "plan": "simulado"}
+                "limite": datos.get("limite") or 25, "plan": "simulado"}
 
     def crear_perfil(self, perfil):
         with _LOCK:
             datos = self._leer()
             if perfil in datos["perfiles"]:
                 raise ErrorUploadPost("ese perfil ya existe en Upload-Post", 409)
+            # el plan lleno, con el mensaje de alli (16-10-2026, plan gratis 2/2)
+            limite = datos.get("limite") or 25
+            if len(datos["perfiles"]) >= limite:
+                raise ErrorUploadPost(f"You have reached the limit of {limite} profiles "
+                                      "for your plan", 403)
             datos["perfiles"][perfil] = {}
             self._escribir(datos)
         return {"perfil": perfil, "cuentas": ClienteUploadPost._cuentas({})}

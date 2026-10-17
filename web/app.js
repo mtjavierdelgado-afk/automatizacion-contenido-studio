@@ -17714,18 +17714,59 @@ async function accionProyectoPublicar(cid, accion, cuerpo) {
     const r = await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(cid)}/${accion}`), {
       method: 'POST', cuerpo: cuerpo || {},
     });
+    PUB.perfilNoExiste = PUB.perfilNoExiste || {};
     if (accion === 'conectar' && r.url) {
+      // al volver a esta pestaña se miran solas las cuentas (volverDeConectarPublicar)
+      PUB.conectando = cid;
       window.open(r.url, '_blank', 'noopener');
-      toast(`Enlace abierto (vale ${r.caduca || '48 h'}). Cuando termines de conectar, pulsa «Ver cuentas».`);
+      toast(`Enlace abierto (vale ${r.caduca || '48 h'}). Al volver aquí se miran solas las cuentas.`);
     } else if (accion === 'cuentas' && r.existe === false) {
-      toast('Ese perfil no existe en Upload-Post: créalo con «Crear perfil».', true);
+      PUB.perfilNoExiste[cid] = true;
+      toast('Ese perfil no está en Upload-Post: elige uno de la lista o créalo.', true);
+      cargarPerfilesCuentaPublicar(cid);
+    } else if (accion === 'cuentas') {
+      delete PUB.perfilNoExiste[cid];
+      const n = Object.values((r.ajustes || {}).cuentas || {}).filter(Boolean).length;
+      toast(n ? `Cuentas al día: ${n} conectada${n === 1 ? '' : 's'}` : 'El perfil existe, pero no tiene ninguna cuenta conectada todavía');
+    } else if (accion === 'perfil') {
+      delete PUB.perfilNoExiste[cid];
+      toast(r.como === 'creado' ? `Perfil «${r.ajustes.perfil}» creado en Upload-Post`
+        : `Perfil «${r.ajustes.perfil}» apuntado (ya existía en Upload-Post)`);
     } else {
       toast('Hecho');
     }
-    PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
-    pintarModulo();
+    await recargarProyectosPublicar();
   } catch (e) { toast(e.message, true); }
 }
+
+/* Lo que se ve de Cuentas y ajustes se vuelve a pedir y se repinta: sin esto,
+   «Ver cuentas» y «Conectar» no salían hasta recargar la página (16-10). */
+async function recargarProyectosPublicar() {
+  try { PUB.proyectos = await pedir(rutaPublicar('/proyectos')); } catch (e) { toast(e.message, true); }
+  pintarModulo();
+}
+
+/* Los perfiles que hay de verdad en Upload-Post, para el desplegable. */
+async function cargarPerfilesCuentaPublicar(cid) {
+  PUB.perfilesCuenta = PUB.perfilesCuenta || {};
+  PUB.perfilesCuenta[cid] = { cargando: true };
+  pintarModulo();
+  try {
+    PUB.perfilesCuenta[cid] = await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(cid)}/perfiles`));
+  } catch (e) {
+    PUB.perfilesCuenta[cid] = { error: e.message };
+  }
+  pintarModulo();
+}
+
+/* Vuelta de la página de Upload-Post donde se conectan las cuentas. */
+function volverDeConectarPublicar() {
+  if (document.visibilityState !== 'visible' || !PUB.conectando) return;
+  const cid = PUB.conectando;
+  PUB.conectando = '';
+  if (MODULOS.actual === 'publicar') accionProyectoPublicar(cid, 'cuentas');
+}
+document.addEventListener('visibilitychange', volverDeConectarPublicar);
 
 /* Lo guardado se queda TAMBIÉN en lo que pinta la pantalla: sin esto, un
    repintado (al pulsar «Revisar», por ejemplo) volvía a enseñar el valor de
@@ -17736,6 +17777,9 @@ async function guardarAjustePublicar(cid, cambios) {
     const fila = ((PUB.proyectos || {}).proyectos || []).find(x => x.id === cid);
     if (fila && r.ajustes) fila.ajustes = Object.assign({}, fila.ajustes || {}, r.ajustes);
     toast('Guardado');
+    // lo que cambia qué botones salen se repinta; el resto no, para no quitar
+    // el foco a quien sigue escribiendo
+    if ('usar_emojis' in cambios || 'perfil' in cambios) pintarModulo();
   } catch (e) { toast(e.message, true); }
 }
 
@@ -17757,19 +17801,73 @@ function seccionCuentasPublicar() {
   return caja;
 }
 
+/* El desplegable «Elegir un perfil que ya tengo en Upload-Post»: los de la
+   cuenta de verdad; los que ya usa otro proyecto salen y no se eligen. */
+function elegirPerfilPublicar(p, lista) {
+  const caja = h('div', { clase: 'elegir-perfil fila' });
+  if (lista.cargando) { caja.appendChild(h('span', { clase: 'meta' }, 'Pidiendo tus perfiles a Upload-Post…')); return caja; }
+  if (lista.error) { caja.appendChild(cajaError(lista.error)); return caja; }
+  const perfiles = lista.perfiles || [];
+  const limite = lista.limite ? ` de ${lista.limite}` : '';
+  if (!perfiles.length) {
+    caja.appendChild(h('span', { clase: 'meta' }, 'Tu cuenta de Upload-Post todavía no tiene perfiles: créalo con «Crear perfil».'));
+    return caja;
+  }
+  const sel = h('select', { datos: { elegirPerfil: p.id },
+    onchange: ev => {
+      if (!ev.target.value) return;
+      delete PUB.perfilesCuenta[p.id];
+      accionProyectoPublicar(p.id, 'perfil', { perfil: ev.target.value, crear: false });
+    } },
+  h('option', { value: '' }, 'Elegir un perfil que ya tengo en Upload-Post…'),
+  ...perfiles.map(x => h('option', { value: x.perfil, disabled: !!x.de_otro, selected: false },
+    `${x.perfil}${x.redes && x.redes.length ? ` · ${x.redes.map(r => CORTOS_RED[r] || r).join(', ')}` : ' · sin cuentas'}`
+    + `${x.propio ? ' (el de este proyecto)' : ''}${x.de_otro ? ` (ya es de ${x.de_otro_nombre || 'otro proyecto'})` : ''}`)));
+  caja.appendChild(h('label', { clase: 'etiqueta-campo' }, `Tus perfiles en Upload-Post (${perfiles.length}${limite} del plan)`, sel));
+  caja.appendChild(h('button', { clase: 'mini', onclick: () => { delete PUB.perfilesCuenta[p.id]; pintarModulo(); } }, 'Cerrar'));
+  return caja;
+}
+
 function tarjetaProyectoPublicar(p) {
   const a = p.ajustes || {};
   const b = h('div', { clase: 'bloque proyecto-publicar' }, h('h3', {}, p.nombre));
   const guardar = (campo, valor) => guardarAjustePublicar(p.id, { [campo]: valor });
-  b.appendChild(h('div', { clase: 'fila' },
+  /* EL PERFIL. Se apunta con «Usar este perfil» o Enter (no al cambiar el
+     valor: guardar con onchange no repintaba y dependía de que cambiara), y
+     el servidor lo ADOPTA si ya existe en Upload-Post (sin mirar mayúsculas)
+     aunque el plan esté lleno. «Crear perfil» manda lo escrito. */
+  PUB.perfilEscrito = PUB.perfilEscrito || {};
+  const escrito = () => {
+    const c = document.querySelector(`input[data-perfil="${p.id}"]`);
+    return (c ? c.value : (PUB.perfilEscrito[p.id] || '')).trim();
+  };
+  const usar = crear => {
+    const valor = escrito() || (crear ? p.perfil_sugerido || '' : '');
+    if (!valor) { toast('Escribe el nombre del perfil o elígelo de la lista', true); return; }
+    delete PUB.perfilEscrito[p.id];
+    accionProyectoPublicar(p.id, 'perfil', { perfil: valor, crear });
+  };
+  const valorCampo = p.id in PUB.perfilEscrito ? PUB.perfilEscrito[p.id] : (a.perfil || '');
+  b.appendChild(h('div', { clase: 'fila fila-perfil' },
     h('label', { clase: 'etiqueta-campo' }, 'Perfil de Upload-Post',
-      h('input', { type: 'text', value: a.perfil || '', placeholder: p.perfil_sugerido || '',
-        onchange: ev => guardar('perfil', ev.target.value.trim()) })),
-    a.perfil ? null : h('button', { clase: 'mini', onclick: () => accionProyectoPublicar(p.id, 'perfil', {}) },
-      'Crear perfil'),
+      h('input', { type: 'text', value: valorCampo, placeholder: p.perfil_sugerido || '',
+        datos: { perfil: p.id, foco: `perfil-${p.id}` },
+        oninput: ev => { PUB.perfilEscrito[p.id] = ev.target.value; },
+        onkeydown: ev => { if (ev.key === 'Enter') { ev.preventDefault(); usar(false); } } })),
+    h('button', { clase: 'mini', title: 'Apunta este perfil si ya existe en Upload-Post',
+      onclick: () => usar(false) }, 'Usar este perfil'),
+    a.perfil ? null : h('button', { clase: 'mini', title: 'Lo crea en Upload-Post con el nombre escrito (o el sugerido)',
+      onclick: () => usar(true) }, 'Crear perfil'),
+    h('button', { clase: 'mini', onclick: () => cargarPerfilesCuentaPublicar(p.id) }, 'Elegir de mi cuenta'),
     a.perfil ? h('button', { clase: 'mini', onclick: () => accionProyectoPublicar(p.id, 'cuentas') }, 'Ver cuentas') : null,
     a.perfil ? h('button', { clase: 'mini primario', title: 'Abre la página de Upload-Post para conectar o volver a conectar las cuentas de este cliente',
       onclick: () => accionProyectoPublicar(p.id, 'conectar', { volver_a: location.href }) }, 'Conectar') : null));
+  if ((PUB.perfilNoExiste || {})[p.id]) {
+    b.appendChild(h('div', { clase: 'caja-aviso' },
+      `Upload-Post no tiene ningún perfil «${a.perfil}». Elige uno de los que tienes o pulsa «Crear perfil».`));
+  }
+  const lista = (PUB.perfilesCuenta || {})[p.id];
+  if (lista) b.appendChild(elegirPerfilPublicar(p, lista));
   const cuentas = h('div', { clase: 'fila cuentas-proyecto' });
   Object.keys(NOMBRES_RED).forEach(r => {
     const c = (a.cuentas || {})[r];

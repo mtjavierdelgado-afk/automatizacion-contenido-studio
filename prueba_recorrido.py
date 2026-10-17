@@ -3603,5 +3603,169 @@ def publicar_en_redes(navegador, datos):
     pg.cerrar()
 
 
+# Lo que salió probando Publicar en el servidor el 16-10-2026 (rama
+# `publicar-arreglos-1`): cada fallo, como comprobación.
+@escenario
+def publicar_lo_del_16_de_octubre(navegador, datos):
+    """El perfil se apunta con lo escrito y la tarjeta se repinta sola (sin F5
+    salían igual «Crear perfil» y nada de «Ver cuentas»); «Que Claude escriba
+    los textos» enseña que escribe y su fallo con «Reintentar»; «Publicar»
+    dice por qué no se puede; la portada; dónde ya salió; y la cola con
+    filtros y mes."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    # se sostiene solo (--solo): perfil con cuentas, tres redes y algo programado
+    api.post(f"/api/publicar/proyectos/{cid}/perfil", {})
+    api.post(f"/api/publicar/proyectos/{cid}/conectar", {"redes": ["tiktok", "instagram", "youtube"]})
+    api.post(f"/api/publicar/proyectos/{cid}/cuentas")
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["tiktok", "instagram", "youtube"]})
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    if not any(e.get("estado") == "programado" for e in ficha.get("envios", [])):
+        api.put(f"/api/publicar/videos/{pid}", {"textos": {
+            "tiktok": {"descripcion": "TikTok de prueba"}, "instagram": {"descripcion": "Reel de prueba"},
+            "youtube": {"titulo": "Vídeo de prueba", "descripcion": "YouTube de prueba"}}})
+        api.post(f"/api/publicar/videos/{pid}/enviar", {"redes": ["tiktok"], "modo": "programar",
+                                                         "cuando": ficha.get("hora_sugerida"), "confirmado": True})
+        time.sleep(2)
+    original = (ficha.get("ajustes") or {}).get("perfil") or ""
+    ok(bool(original), f"se parte de un proyecto con perfil ({original})")
+    pg = Pagina(navegador, datos)
+
+    # --- el perfil, sin recargar
+    api.put(f"/api/publicar/proyectos/{cid}", {"perfil": ""})
+    pg.js("PUB.seccion = 'cuentas'; irAModulo('publicar');")
+    pg.p.wait_for_timeout(1500)
+    tarjeta = f'.proyecto-publicar:has(input[data-perfil="{cid}"])'
+    ok(pg.esperar(f"{tarjeta} button", "Crear perfil", 10), "sin perfil: «Crear perfil»")
+    ok(not pg.visible(f"{tarjeta} button", "Ver cuentas"), "y todavía sin «Ver cuentas»")
+    pg.p.locator(f'input[data-perfil="{cid}"]').fill("Recorrido_Perfil")
+    pg.pulsar(f"{tarjeta} button", "Crear perfil")
+    ok(pg.esperar(f"{tarjeta} button", "Ver cuentas", 10),
+       "«Crear perfil» con el nombre escrito: «Ver cuentas» sale SIN recargar")
+    ok(pg.visible(f"{tarjeta} button", "Conectar"), "y «Conectar» también")
+    _r, ajustes = api.get("/api/publicar/proyectos")
+    fila = next((x for x in ajustes.get("proyectos", []) if x["id"] == cid), {})
+    ok((fila.get("ajustes") or {}).get("perfil") == "Recorrido_Perfil",
+       "se creó con lo escrito en el campo (no el cuerpo vacío)")
+    # elegir el de antes del desplegable de la cuenta
+    pg.pulsar(f"{tarjeta} button", "Elegir de mi cuenta")
+    ok(pg.esperar(f"{tarjeta} select[data-elegir-perfil]", segundos=10),
+       "«Elegir de mi cuenta»: el desplegable con los perfiles de Upload-Post")
+    pg.p.locator(f"{tarjeta} select[data-elegir-perfil]").select_option(original)
+    pg.p.wait_for_timeout(1500)
+    ok(pg.p.locator(f'input[data-perfil="{cid}"]').input_value() == original,
+       "elegir uno lo apunta y la tarjeta se repinta con él")
+    ok(pg.esperar(f"{tarjeta} .cuentas-proyecto .pastilla", "TikTok", 10), "con sus cuentas, ya miradas")
+    # escrito en mayúsculas y con Enter: lo encuentra
+    campo = pg.p.locator(f'input[data-perfil="{cid}"]')
+    campo.fill(original.upper())
+    campo.press("Enter")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.p.locator(f'input[data-perfil="{cid}"]').input_value() == original,
+       "«Usar este perfil» (Enter) en mayúsculas encuentra el de Upload-Post")
+    pg.p.locator(f"{tarjeta} .ajustes-fijos > summary").first.click()
+    ok(pg.esperar(f"{tarjeta} .ajustes-fijos .casilla-red", "Usar emojis", 5),
+       "en lo fijo, el interruptor «Usar emojis en los textos»")
+    pg.captura("publicar_perfil")
+
+    # --- los textos: escribiendo y el fallo con «Reintentar»
+    marca = os.path.join(datos["proyectos"], "_sistema", "publicar", "_fallar_textos")
+    os.makedirs(os.path.dirname(marca), exist_ok=True)
+    with open(marca, "w", encoding="utf-8") as fh:
+        fh.write("1")
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    ok(pg.esperar(".ficha-publicar .nombre-ficha", segundos=15), "la ficha del vídeo")
+    pg.pulsar(".ficha-publicar button", "Que Claude escriba los textos")
+    ok(pg.esperar(".estado-textos .escribiendo-textos", "Claude está escribiendo", 5),
+       "mientras escribe, se ve «Claude está escribiendo los textos…»")
+    ok(pg.esperar(".estado-textos .caja-error", "no se han podido escribir", 20),
+       "si falla, el motivo se ve…")
+    ok(pg.visible(".estado-textos button", "Reintentar"), "…con «Reintentar»")
+    os.remove(marca)
+    pg.pulsar(".estado-textos button", "Reintentar")
+    fin = time.time() + 20
+    while time.time() < fin and (pg.visible(".estado-textos .caja-error")
+                                 or pg.visible(".estado-textos .escribiendo-textos")):
+        pg.p.wait_for_timeout(500)
+    ok(not pg.visible(".estado-textos .caja-error") and not pg.visible(".estado-textos .escribiendo-textos"),
+       "«Reintentar» los escribe y el aviso se va")
+    ok(pg.visible(".texto-red .meta", "PRIMERA LÍNEA"),
+       "Instagram y TikTok explican que su «título» es la primera línea")
+
+    # --- «Publicar» dice por qué no, antes de pulsar
+    pg.p.locator(".cuando-publicar input[type=radio]").first.check()
+    pg.p.wait_for_timeout(600)
+    caja = pg.p.locator(".texto-red[data-red=instagram] textarea").first
+    caja.fill("")
+    pg.p.locator(".ficha-publicar h3").first.click()
+    pg.p.wait_for_timeout(1800)
+    ok(pg.esperar(".motivo-no-publicar", "Falta el texto de Instagram", 5),
+       "sin texto de Instagram, el motivo se ve al lado del botón")
+    ok(pg.p.locator(".cuando-publicar button.primario").first.is_disabled(),
+       "y «Publicar ahora» está desactivado")
+    caja = pg.p.locator(".texto-red[data-red=instagram] textarea").first
+    caja.fill("Reel otra vez escrito")
+    pg.p.locator(".ficha-publicar h3").first.click()
+    pg.p.wait_for_timeout(1800)
+    ok(not pg.visible(".motivo-no-publicar", "Instagram"), "con el texto, el motivo se va")
+
+    # --- la portada
+    ok(pg.esperar(".portada-publicar img.vista-portada", segundos=10), "la portada, con su vista")
+    cargada = pg.p.evaluate("() => new Promise(ok => { const i = document.querySelector('.vista-portada'); "
+                            "if (i.complete) ok(i.naturalWidth); else { i.onload = () => ok(i.naturalWidth); "
+                            "i.onerror = () => ok(0); } })")
+    ok(cargada > 0, f"la vista es un fotograma de verdad ({cargada}px)")
+    pg.p.evaluate("() => { const r = document.querySelector('.portada-publicar input[type=range]'); "
+                  "r.value = 1000; r.dispatchEvent(new Event('input')); }")
+    pg.pulsar(".portada-publicar button", "Usar este fotograma")
+    pg.p.wait_for_timeout(1200)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    ok((ficha.get("portada") or {}).get("ms") == 1000, "«Usar este fotograma» lo guarda")
+    ok(pg.visible(".portada-publicar .meta", "Fotograma del segundo 1.0"), "y lo dice")
+
+    # --- dónde ya salió (lo programado en el tramo de antes)
+    ok(pg.esperar(".resumen-publicado", "En camino", 10),
+       "la ficha dice arriba lo que ya va a salir y en qué redes")
+    ok(pg.visible(".redes-ficha .pastilla", "programado"), "y cada red, su último estado al lado")
+    pg.captura("publicar_ficha_arreglos")
+
+    # --- la cola: filtros, buscador y mes
+    pg.pulsar(".pestanas-publicar button", "Cola y calendario")
+    ok(pg.esperar(".filtros-cola input.buscar-cola", segundos=10), "la cola tiene buscador")
+    ok(pg.visible(".filtros-cola select", ""), "y filtros por proyecto, estilo, estado y fecha")
+    pg.p.locator(".filtros-cola input.buscar-cola").fill("zzzz-no-existe")
+    pg.p.wait_for_timeout(900)
+    ok(pg.esperar(".cola-publicar .meta", "Ningún vídeo cumple", 5), "buscar algo que no hay lo dice")
+    ok(pg.p.evaluate("() => document.activeElement && document.activeElement.classList.contains('buscar-cola')"),
+       "y se puede seguir escribiendo (el buscador no pierde el foco)")
+    pg.p.locator(".filtros-cola input.buscar-cola").fill("")
+    pg.p.wait_for_timeout(900)
+    ok(pg.esperar(".fila-listo", segundos=5), "al borrar, vuelven los vídeos")
+    pg.pulsar(".vista-cal button", "Mes")
+    ok(pg.esperar(".calendario-mes .cab-semana", segundos=10), "la vista de mes")
+    n = pg.p.locator(".calendario-mes .dia-publicar").count()
+    ok(n == 42, f"seis semanas, como un calendario de pared ({n} días)")
+    ok(pg.esperar(".calendario-mes .envio-dia", segundos=5), "con lo programado en su día")
+    pg.captura("publicar_mes")
+    pg.pulsar(".vista-cal button", "Semana")
+    ok(pg.esperar(".calendario-publicar:not(.calendario-mes) .dia-publicar", segundos=10), "y de vuelta a la semana")
+    pg.sin_errores("lo del 16 de octubre")
+    pg.cerrar()
+
+    # el mes en el móvil
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="publicar mes móvil")
+    pg.js("PUB.seccion = 'cola'; PUB.vistaCal = 'mes'; PUB.mes = ''; PUB.desde = ''; irAModulo('publicar');")
+    pg.p.wait_for_timeout(1500)
+    pg.js("PUB.mes = mesDeHoyPublicar(); PUB.desde = inicioCalendarioPublicar('mes', PUB.mes); await cargarPublicar();")
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    ok(ancho <= 2, f"el mes cabe en un móvil ({ancho}px)")
+    pg.js("PUB.vistaCal = 'semana'; PUB.desde = '';")
+    pg.sin_errores("el mes en el móvil")
+    pg.cerrar()
+
+
 if __name__ == "__main__":
     sys.exit(main())

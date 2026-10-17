@@ -14599,6 +14599,12 @@ def _videos_para_publicar(peticion):
     cerrados = _cerrados(peticion)
     asignaciones = CLIENTES._leer(raiz_proyectos())
     nombres = _nombres_de_clientes()
+    # el nombre de cada estilo, para filtrar la cola por estilo
+    try:
+        estilos = {f.get("id"): f.get("nombre") or f.get("id") for f in
+                   ((_presets().listar().get("presets") or {}).get("canal") or [])}
+    except Exception:                                       # noqa: BLE001
+        estilos = {}
     salida = []
     for ficha in Proyecto.listar(raiz_proyectos()):
         if ficha.get(CONFIG_TALLER):
@@ -14613,6 +14619,9 @@ def _videos_para_publicar(peticion):
             mp4 = ""
         salida.append({"pid": ficha.get("id"), "nombre": ficha.get("nombre") or ficha.get("id"),
                        "cliente": cid, "cliente_nombre": nombres.get(cid, ""),
+                       "estilo": ficha.get(CONFIG_ESTILO_LIGHT) or "",
+                       "estilo_nombre": estilos.get(ficha.get(CONFIG_ESTILO_LIGHT) or "", "")
+                       or (ficha.get(CONFIG_ESTILO_LIGHT) or ""),
                        "montado": bool(mp4), "actualizado": ficha.get("actualizado") or ""})
     return salida
 
@@ -14659,6 +14668,59 @@ def publicar_guardar_ficha(pid: str, peticion: Request, cuerpo: dict = Body(defa
     ctx = _ctx_publicable(pid, peticion)
     _por_publicar(_publicar().guardar_ficha, raiz_proyectos(), ctx.id, _cuerpo(cuerpo))
     return publicar_ficha(pid, peticion)
+
+
+@app.get("/api/publicar/videos/{pid}/fotograma")
+def publicar_fotograma(pid: str, peticion: Request, ms: int = 0):
+    """El fotograma del momento `ms` (vista pequeña), para elegir la portada."""
+    ctx = _ctx_publicable(pid, peticion)
+    mp4, _rel = _mp4_del_video(ctx.proyecto)
+    P = _publicar()
+    destino = os.path.join(P.carpeta(raiz_proyectos()), "portadas",
+                           f"_vista_{ctx.id}_{uuid.uuid4().hex[:6]}.jpg")
+    _por_publicar(P.fotograma, mp4, max(0, int(ms)), destino, 360, 5)
+    try:
+        with open(destino, "rb") as fh:
+            contenido = fh.read()
+    finally:
+        try:
+            os.remove(destino)
+        except OSError:
+            pass
+    return Response(contenido, media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=300"})
+
+
+@app.get("/api/publicar/videos/{pid}/portada.jpg")
+def publicar_portada_imagen(pid: str, peticion: Request):
+    """La imagen de portada subida para este vídeo."""
+    ctx = _ctx_publicable(pid, peticion)
+    ruta = _por_publicar(_publicar().ruta_portada, raiz_proyectos(), ctx.id)
+    if not os.path.isfile(ruta):
+        raise ErrorApi(404, "este vídeo no tiene imagen de portada")
+    return FileResponse(ruta, media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/api/publicar/videos/{pid}/portada")
+async def publicar_subir_portada(pid: str, peticion: Request):
+    """Sube una imagen de portada (multipart, campo «portada»)."""
+    ctx = await _en_hilo(_ctx_publicable, pid, peticion)
+    try:
+        formulario = await peticion.form()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(400, f"multipart ilegible: {fallo}")
+    fichero = formulario.get("portada")
+    if not hasattr(fichero, "read"):
+        raise ErrorApi(400, "manda la imagen en el campo «portada»")
+    extension = os.path.splitext(str(getattr(fichero, "filename", "") or ""))[1].lower()
+    P = _publicar()
+    tam = getattr(fichero, "size", None)
+    if isinstance(tam, int) and tam > P.MAX_BYTES_PORTADA:
+        raise ErrorApi(400, "la portada tiene que pesar menos de 15 MB")
+    contenido = await fichero.read(P.MAX_BYTES_PORTADA + 1)
+    await _en_hilo(_por_publicar, P.guardar_imagen_portada, raiz_proyectos(),
+                   ctx.id, contenido, extension)
+    return await _en_hilo(publicar_ficha, pid, peticion)
 
 
 @app.post("/api/publicar/videos/{pid}/textos", status_code=202)
@@ -14772,47 +14834,51 @@ def publicar_guardar_ajustes(cid: str, peticion: Request, cuerpo: dict = Body(de
 
 @app.post("/api/publicar/proyectos/{cid}/cuentas")
 def publicar_ver_cuentas(cid: str, peticion: Request):
-    """Pregunta a Upload-Post que cuentas tiene conectadas el perfil del proyecto."""
+    """Pregunta a Upload-Post que cuentas tiene conectadas el perfil del proyecto
+    (sin mirar mayusculas ni espacios en el nombre)."""
     P = _publicar()
     cid = _proyecto_publicable(cid, peticion)
-    ajustes = P.ajustes_de(raiz_proyectos(), cid)
-    if not ajustes.get("perfil"):
-        raise ErrorApi(409, "este proyecto todavía no tiene perfil de Upload-Post")
-    lista = _por_publicar(lambda: P._por_upload_post(P.cliente(raiz_proyectos()).perfiles))
-    propio = next((p for p in lista["perfiles"] if p["perfil"] == ajustes["perfil"]), None)
-    if propio is None:
-        # sin la lista de perfiles de la cuenta: serian los de otros clientes
-        return {"existe": False, "ajustes": ajustes}
-    return {"existe": True, "ajustes": P.recordar_cuentas(raiz_proyectos(), cid, propio["cuentas"])}
+    return _por_publicar(P.ver_cuentas, raiz_proyectos(), cid)
+
+
+@app.get("/api/publicar/proyectos/{cid}/perfiles")
+def publicar_perfiles_de_la_cuenta(cid: str, peticion: Request):
+    """Los perfiles que hay de verdad en Upload-Post, para elegir uno: los que
+    ya usa otro proyecto de aqui salen marcados (con su nombre) y no se eligen."""
+    P = _publicar()
+    cid = _proyecto_publicable(cid, peticion)
+    datos = _por_publicar(P.perfiles_de_la_cuenta, raiz_proyectos(), cid)
+    nombres = _nombres_de_clientes()
+    cerrados = _cerrados(peticion) or set()
+    visibles = []
+    for p in datos["perfiles"]:
+        otro = p.pop("de_otro", "") or ""
+        # EL PERFIL DE UN PROYECTO CON CLAVE no se enseña a quien no lo ha
+        # abierto: su nombre (studio_<cliente>) ya dice de quién es
+        if otro and otro in cerrados:
+            continue
+        p["de_otro"] = bool(otro)
+        p["de_otro_nombre"] = (nombres.get(otro) or ("Sin proyecto" if otro == "_sin" else "otro proyecto")) \
+            if otro else ""
+        visibles.append(p)
+    datos["ocultos"] = len(datos["perfiles"]) - len(visibles)
+    datos["perfiles"] = visibles
+    return datos
 
 
 @app.post("/api/publicar/proyectos/{cid}/perfil")
 def publicar_crear_perfil(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """Crea el perfil del proyecto en Upload-Post ({perfil}, o el sugerido) y lo
-    apunta. Si ya existia alli, solo lo apunta."""
+    """Apunta el perfil de Upload-Post del proyecto: {perfil, crear?}. Si ya
+    existe alli (aunque el plan este lleno) lo adopta; si no y `crear` (por
+    defecto), lo crea. Sin {perfil}, el sugerido."""
     P = _publicar()
     cid = _proyecto_publicable(cid, peticion)
+    datos = _cuerpo(cuerpo)
     nombre = _nombres_de_clientes().get(cid, "sin_proyecto")
-    perfil = str(_cuerpo(cuerpo).get("perfil") or P.perfil_sugerido(cid, nombre)).strip()
-    _por_publicar(P._validar_ajustes, {"perfil": perfil})
-    cli = _por_publicar(P.cliente, raiz_proyectos())
-    # un perfil es UN cliente: si ya lo usa otro proyecto, ni se crea ni se adopta
-    if P.perfil_de_otro(raiz_proyectos(), perfil, cid):
-        raise ErrorApi(409, "ese perfil de Upload-Post ya es de otro proyecto: escribe "
-                            "otro nombre para este")
-    try:
-        hecho = cli.crear_perfil(perfil)
-    except P.UP.ErrorUploadPost as fallo:
-        if fallo.codigo != 409:
-            raise ErrorApi(409 if fallo.codigo in (401, 403) else 502, str(fallo)) from None
-        # ya existia en Upload-Post y no es de ningun otro proyecto de aqui: sus
-        # cuentas no se saben hasta «Ver cuentas»
-        hecho = {"perfil": perfil, "cuentas": {}, "sin_mirar": True}
-    ajustes = P.guardar_ajustes(raiz_proyectos(), cid, {"perfil": hecho["perfil"]},
-                                internos={"cuentas": hecho["cuentas"],
-                                          "cuentas_vistas": "" if hecho.get("sin_mirar")
-                                          else P._iso_lima()})
-    return {"ajustes": ajustes}
+    perfil = str(datos.get("perfil") or P.perfil_sugerido(cid, nombre)).strip()
+    ajustes, como = _por_publicar(P.usar_perfil, raiz_proyectos(), cid, perfil,
+                                  crear=datos.get("crear") is not False)
+    return {"ajustes": ajustes, "como": como}
 
 
 @app.post("/api/publicar/proyectos/{cid}/conectar")

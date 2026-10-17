@@ -73,6 +73,7 @@ $suites = @(
   'pasos\prueba_piezas.py', 'pasos\prueba_conservar.py',
   'pasos\prueba_encuadres.py', 'pasos\prueba_presets.py',
   'pasos\prueba_presets_light.py', 'pasos\prueba_modo_foto.py',
+  'pasos\prueba_publicar.py',
   'prueba_recorrido.py'
 )
 

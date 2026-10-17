@@ -371,9 +371,243 @@ GUIAS = {
             "[qué quieres que haga quien vea el vídeo]"
         ),
     },
+    # ------------------------------------------------------------- publicar
+    # Los textos con los que sale un vídeo en cada red (módulo Publicar). Los
+    # escribe Claude con `publicar.instruccion_textos` y se corrigen a mano;
+    # al enviar, `publicar.componer` los junta así: texto + capítulos (YouTube)
+    # + llamada a la acción + firma del proyecto + hashtags del vídeo y del
+    # proyecto. Lo que estas guías dicen sale de ahí: si cambia, se revisan.
+    "texto_tiktok": {
+        "titulo": "Texto para TikTok",
+        "donde": "Publicar → ficha de un vídeo → TikTok",
+        "usa": "pasos/publicar.py (REGLAS_RED, componer)",
+        "que_hace": [
+            "Es el pie del vídeo en TikTok: TikTok no tiene título aparte, así "
+            "que este texto hace de título y de descripción a la vez.",
+            "Al enviarlo, el Studio le añade debajo la llamada a la acción, la "
+            "firma del proyecto y los hashtags (los del vídeo y los fijos del "
+            "proyecto, sin repetir). Todo junto no puede pasar de 2.200 "
+            "caracteres: lo que sobre se corta.",
+            "TikTok busca por las palabras del texto y de la voz: lo que no se "
+            "nombra, no se encuentra.",
+        ],
+        "si": [
+            "Una primera línea que enganche: la promesa del vídeo o la pregunta "
+            "que resuelve.",
+            "Frases cortas, con las palabras clave del tema dichas con "
+            "naturalidad («alquiler de consolas para fiestas en Lima»).",
+            "Que cuente lo mismo que el vídeo: si el vídeo cambia, el texto también.",
+        ],
+        "no": [
+            "Hashtags dentro del texto: van en su casilla (de 3 a 5 concretos; con "
+            "los fijos del proyecto, el Studio usa como mucho 15).",
+            "La llamada a la acción ni la firma: tienen su casilla y la firma la "
+            "pone el proyecto.",
+            "Teléfonos, precios o enlaces que no estén en el encargo: en TikTok "
+            "los enlaces del pie no se pueden pulsar, mejor «link en bio».",
+        ],
+        "plantilla": (
+            "[Gancho: la promesa o la pregunta, en una línea]\n"
+            "[Una o dos frases con lo que se ve en el vídeo y sus palabras clave]"
+        ),
+        "ejemplo": (
+            "¿Fiesta en casa y nadie quiere irse? 🎮\n"
+            "Llevamos la consola, los mandos y los juegos para que la "
+            "competencia dure toda la noche, en cualquier distrito de Lima."
+        ),
+        "prompt_ia": (
+            "Escríbeme el pie de un vídeo de TikTok (no hay título aparte). "
+            "Primera línea: un gancho con la promesa del vídeo. Después una o "
+            "dos frases cortas con las palabras clave del tema dichas con "
+            "naturalidad. SIN hashtags, SIN llamada a la acción y SIN firma "
+            "(van aparte). No inventes teléfonos, precios ni enlaces. Máximo "
+            "400 caracteres.\n\nDE QUÉ VA EL VÍDEO:\n[pega aquí el guion o "
+            "un resumen]"
+        ),
+    },
+    "texto_instagram": {
+        "titulo": "Texto para Instagram Reels",
+        "donde": "Publicar → ficha de un vídeo → Instagram Reels",
+        "usa": "pasos/publicar.py (REGLAS_RED, componer)",
+        "que_hace": [
+            "Es el pie del Reel. Instagram enseña solo la primera línea (o las "
+            "dos primeras) hasta que se pulsa «más».",
+            "Al enviarlo, el Studio le añade la llamada a la acción, la firma del "
+            "proyecto y los hashtags (como mucho 15, contando los fijos del "
+            "proyecto). Todo junto no puede pasar de 2.200 caracteres.",
+        ],
+        "si": [
+            "Una primera línea que se entienda sola y den ganas de abrir el resto.",
+            "Párrafos cortos, separados por una línea en blanco.",
+            "Algo que invite a guardar o compartir: una lista corta, un consejo.",
+        ],
+        "no": [
+            "Hashtags dentro del texto: van en su casilla (de 3 a 8).",
+            "La llamada a la acción ni la firma: tienen su casilla.",
+            "Enlaces: en el pie no se pueden pulsar; la llamada a la acción puede "
+            "decir «link en bio» o «escríbenos por DM».",
+        ],
+        "plantilla": (
+            "[Primera línea: el gancho, que se entienda sola]\n\n"
+            "[Párrafo corto con lo que aporta el vídeo]\n\n"
+            "[Opcional: una lista corta o un consejo para guardar]"
+        ),
+        "ejemplo": (
+            "Tu próxima reunión no necesita playlist: necesita un torneo. 🏆\n\n"
+            "Te llevamos la consola, cuatro mandos y los juegos que más ríen. "
+            "Lo instalamos y lo recogemos nosotros."
+        ),
+        "prompt_ia": (
+            "Escríbeme el pie de un Reel de Instagram. Primera línea: un gancho "
+            "que se entienda sola. Después uno o dos párrafos cortos separados "
+            "por línea en blanco. SIN hashtags, SIN llamada a la acción y SIN "
+            "firma (van aparte). Sin enlaces. Máximo 600 caracteres.\n\nDE "
+            "QUÉ VA EL VÍDEO:\n[pega aquí el guion o un resumen]"
+        ),
+    },
+    "texto_youtube": {
+        "titulo": "Texto para YouTube",
+        "donde": "Publicar → ficha de un vídeo → YouTube",
+        "usa": "pasos/publicar.py (REGLAS_RED, componer)",
+        "que_hace": [
+            "Hay dos casillas: el TÍTULO (hasta 100 caracteres) y este TEXTO, que "
+            "es la descripción. Un vídeo vertical de hasta 3 minutos sale como "
+            "Short; el resto, como vídeo normal.",
+            "Al enviarlo, el Studio le añade a la descripción los capítulos (solo "
+            "si sale como vídeo, no como Short, y los hay), la llamada a la "
+            "acción, la firma y los "
+            "hashtags. Los hashtags sirven también de etiquetas. YouTube no "
+            "acepta «<» ni «>»: se quitan solos.",
+            "Las dos primeras líneas son las que se ven en la búsqueda y debajo "
+            "del vídeo sin desplegar.",
+        ],
+        "si": [
+            "En las dos primeras líneas, qué va a aprender o ver quien lo abra.",
+            "Después el detalle, con las palabras que alguien buscaría.",
+            "Aquí sí puedes poner un enlace si está en el encargo (web, "
+            "WhatsApp): en YouTube se puede pulsar.",
+        ],
+        "no": [
+            "El título dentro de la descripción: tiene su casilla.",
+            "Los capítulos a mano: los pone el Studio con sus horas.",
+            "Hashtags, llamada a la acción o firma dentro del texto: van aparte.",
+            "Datos que no estén en el encargo ni en el guion.",
+        ],
+        "plantilla": (
+            "[Línea 1-2: la promesa del vídeo, lo que se va a ver]\n\n"
+            "[Detalle: 2-4 frases con las palabras que alguien buscaría]\n\n"
+            "[Opcional: enlace del encargo]"
+        ),
+        "ejemplo": (
+            "Cómo organizar un torneo de videojuegos en una fiesta sin que nadie "
+            "se quede mirando.\n\n"
+            "Te contamos cuántos mandos hacen falta, qué juegos funcionan con "
+            "grupos grandes y cómo armar las rondas para que todos jueguen."
+        ),
+        "prompt_ia": (
+            "Escríbeme la DESCRIPCIÓN de un vídeo de YouTube (el título va "
+            "aparte). Las dos primeras líneas dicen qué va a ver o aprender quien "
+            "lo abra. Después 2-4 frases con las palabras que alguien buscaría. "
+            "SIN hashtags, SIN capítulos, SIN llamada a la acción y SIN firma "
+            "(van aparte). Sin «<» ni «>». No inventes datos.\n\nDE QUÉ VA EL "
+            "VÍDEO:\n[pega aquí el guion o un resumen]"
+        ),
+    },
+    "texto_facebook": {
+        "titulo": "Texto para Facebook",
+        "donde": "Publicar → ficha de un vídeo → Facebook",
+        "usa": "pasos/publicar.py (REGLAS_RED, componer)",
+        "que_hace": [
+            "Hay dos casillas: el TÍTULO (corto) y este TEXTO, que es la "
+            "descripción. Un vídeo vertical de hasta 90 segundos sale como Reel; "
+            "el resto, como vídeo.",
+            "Al enviarlo, el Studio le añade la llamada a la acción, la firma y "
+            "los hashtags.",
+            "En Facebook mucha gente ve el vídeo sin sonido: el texto tiene que "
+            "explicar de qué va sin oírlo.",
+        ],
+        "si": [
+            "Un gancho al principio y una frase que cuente el vídeo sin sonido.",
+            "Un tono cercano, como hablando con un cliente.",
+            "Si el encargo lo trae, cómo contactar (la llamada a la acción puede "
+            "pedir que envíen un mensaje o llamen).",
+        ],
+        "no": [
+            "Hashtags, llamada a la acción o firma dentro del texto: van aparte "
+            "(2 a 4 hashtags bastan).",
+            "Repetir el título en la primera línea.",
+            "Datos que no estén en el encargo ni en el guion.",
+        ],
+        "plantilla": (
+            "[Gancho en una línea]\n"
+            "[Qué se ve en el vídeo, para quien lo ve sin sonido]"
+        ),
+        "ejemplo": (
+            "La parte de la fiesta que todos recuerdan.\n"
+            "Consola, pantalla y mandos listos en tu casa o en tu oficina: tú "
+            "pones a la gente, nosotros el juego."
+        ),
+        "prompt_ia": (
+            "Escríbeme la DESCRIPCIÓN de un vídeo de Facebook (el título va "
+            "aparte). Un gancho al principio y una frase que explique el vídeo a "
+            "quien lo ve sin sonido. Tono cercano. SIN hashtags, SIN llamada a la "
+            "acción y SIN firma (van aparte). No inventes datos.\n\nDE QUÉ VA "
+            "EL VÍDEO:\n[pega aquí el guion o un resumen]"
+        ),
+    },
+    "tono_redes": {
+        "titulo": "Tono de los textos para redes",
+        "donde": "Publicar → Cuentas y ajustes → un proyecto → Lo fijo de este proyecto",
+        "usa": "pasos/publicar.py (instruccion_textos)",
+        "que_hace": [
+            "Se le pasa a Claude cada vez que escribe los textos de un vídeo de "
+            "este proyecto, en todas las redes. Sin él, usa el tono del guion.",
+            "Vale para TODOS los vídeos del proyecto: tiene que servir para "
+            "cualquier tema.",
+            "La firma y los hashtags fijos tienen su casilla y los añade el "
+            "Studio al final de cada texto: no hace falta pedirlos aquí.",
+        ],
+        "si": [
+            "Cómo suena la marca en redes: de tú o de usted, con o sin humor, "
+            "con o sin emojis y cuántos.",
+            "Palabras o expresiones de la marca que conviene usar.",
+            "Lo que se evita (sonar a anuncio, mayúsculas, ciertas palabras).",
+        ],
+        "no": [
+            "Temas, ofertas o precios concretos: cambian de un vídeo a otro y van "
+            "en el encargo.",
+            "La firma o los hashtags: tienen su casilla.",
+            "Reglas de cada red (largo, número de hashtags): el Studio ya las "
+            "aplica.",
+        ],
+        "plantilla": (
+            "CÓMO SUENA: [tú/usted], [cercano/formal], [humor sí/no].\n"
+            "EMOJIS: [ninguno / uno o dos / libres].\n"
+            "PALABRAS DE LA MARCA: [las que conviene usar].\n"
+            "EVITAR: [lo que nunca debe hacer]."
+        ),
+        "ejemplo": (
+            "CÓMO SUENA: de tú, cercano y con humor ligero.\n"
+            "EMOJIS: uno o dos, de juego o fiesta.\n"
+            "PALABRAS DE LA MARCA: «la consola la llevamos nosotros», «tú pones "
+            "a la gente».\n"
+            "EVITAR: sonar a anuncio, mayúsculas, «¡no te lo pierdas!»."
+        ),
+        "prompt_ia": (
+            "Voy a configurar el TONO de los textos con que mi marca publica "
+            "vídeos en redes (TikTok, Instagram, YouTube, Facebook). Se usará en "
+            "todos los vídeos, de cualquier tema. Con mis notas, escríbelo con "
+            "estas etiquetas: CÓMO SUENA, EMOJIS, PALABRAS DE LA MARCA, EVITAR. "
+            "Máximo 500 caracteres. Sin temas, ofertas ni precios concretos, y "
+            "sin firma ni hashtags.\n\nMIS NOTAS:\n[cómo habla tu marca]"
+        ),
+    },
 }
 
-ORDEN = ("estilo_grafico", "tono", "voz", "material", "indicaciones", "cta")
+ORDEN = ("estilo_grafico", "tono", "voz", "material", "indicaciones", "cta",
+         "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
+         "tono_redes")
+
 
 
 def listar():

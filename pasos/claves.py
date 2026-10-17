@@ -108,6 +108,9 @@ def _vacio():
         # dice; no impide montar el video.
         "jamendo": {"clave": ""},
         "freesound": {"clave": ""},
+        # Publicar en redes (rama publicar-redes-1): sin ella se prepara todo y
+        # se publica a mano; no para nada del video.
+        "uploadpost": {"clave": ""},
         "claude_cli": {"cuentas": []},
     }
 
@@ -127,7 +130,13 @@ def leer():
         datos = _leer_json(FICHERO, None)
         if datos is None:
             datos = adoptar_env()
-        return _normalizar(datos)
+        datos = _normalizar(datos)
+        # LA DE UPLOAD-POST PUESTA A MANO EN EL .env (como se pidio mientras la
+        # Configuracion no tenia su casilla) cuenta como guardada: sin esto,
+        # guardar cualquier otra clave reescribia el .env y la borraba.
+        if not datos["uploadpost"]["clave"]:
+            datos["uploadpost"]["clave"] = _valores_env().get("UPLOADPOST_API_KEY", "") or ""
+        return datos
 
 
 def _normalizar(datos):
@@ -156,7 +165,7 @@ def _normalizar(datos):
     elif isinstance(cartesia, str):
         base["cartesia"]["clave"] = cartesia.strip()
 
-    for suelta in ("jamendo", "freesound"):
+    for suelta in ("jamendo", "freesound", "uploadpost"):
         cruda = datos.get(suelta)
         if isinstance(cruda, dict):
             base[suelta]["clave"] = str(cruda.get("clave") or "").strip()
@@ -243,6 +252,7 @@ def adoptar_env():
     datos["cartesia"]["clave"] = valores.get("CARTESIA_API_KEY", "") or ""
     datos["jamendo"]["clave"] = valores.get("JAMENDO_CLIENT_ID", "") or ""
     datos["freesound"]["clave"] = valores.get("FREESOUND_API_KEY", "") or ""
+    datos["uploadpost"]["clave"] = valores.get("UPLOADPOST_API_KEY", "") or ""
     return datos
 
 
@@ -329,7 +339,7 @@ def _fusionar(actual, peticion):
     # es la que ya habia. Sin eso, editar la de Jamendo borraria la de Cartesia,
     # porque la clave de verdad no baja al navegador NUNCA y la pantalla manda
     # el centinela en su lugar.
-    for suelta in ("cartesia", "jamendo", "freesound"):
+    for suelta in ("cartesia", "jamendo", "freesound", "uploadpost"):
         if suelta in peticion:
             ficha = peticion.get(suelta)
             clave = ficha.get("clave") if isinstance(ficha, dict) else ficha
@@ -473,11 +483,13 @@ def espejar_env(datos=None):
         nuestras["JAMENDO_CLIENT_ID"] = datos["jamendo"]["clave"]
     if datos["freesound"]["clave"]:
         nuestras["FREESOUND_API_KEY"] = datos["freesound"]["clave"]
+    if datos["uploadpost"]["clave"]:
+        nuestras["UPLOADPOST_API_KEY"] = datos["uploadpost"]["clave"]
 
     # Los nombres que ESTA pantalla escribe. Lo que no este aqui se conserva tal
     # cual y en su orden: un .env puede tener cosas que nadie de aqui gestiona.
     gestionadas = {"OPENAI_API_KEY", "CARTESIA_API_KEY",
-                   "JAMENDO_CLIENT_ID", "FREESOUND_API_KEY"} | {
+                   "JAMENDO_CLIENT_ID", "FREESOUND_API_KEY", "UPLOADPOST_API_KEY"} | {
         f"OPENAI_API_KEY_{i}" for i in range(2, MAX_OPENAI + 1)}
 
     lineas, puestas = [], set()
@@ -549,6 +561,10 @@ def resumen(datos=None):
         "freesound": {
             "puesta": bool(datos["freesound"]["clave"]),
             "cola": tapar(datos["freesound"]["clave"]),
+        },
+        "uploadpost": {
+            "puesta": bool(datos["uploadpost"]["clave"]),
+            "cola": tapar(datos["uploadpost"]["clave"]),
         },
         "fichero": FICHERO,
         "max_openai": MAX_OPENAI,

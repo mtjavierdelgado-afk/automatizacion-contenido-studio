@@ -3292,6 +3292,95 @@ def revertir_y_oir_las_imagenes(navegador, datos):
     api.post(f"/api/proyectos/{pid}/pasos/assets/revertir", {"version": activa})
 
 
+@escenario
+def editar_a_mano_conserva_la_pausa(navegador, datos):
+    """Nota del 16-10-2026: corregir a mano un bloque le quitaba la pausa del
+    final (la pastilla «⏸» y su marca: la de sección, la del gancho). Editar
+    conserva esa pausa y quita las demás anotaciones, como antes; «Quitar
+    pausa» la sigue quitando. Y no deja por regrabar más bloques que antes."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    _r, guion = api.get(f"/api/proyectos/{pid}/pasos/guion")
+    params_antes = guion.get("params") or {}
+    bid = "B004"
+    _r, est = api.get(f"/api/proyectos/{pid}/guion/bloques")
+    texto_de = {b.get("id"): b for b in (est.get("bloques") or [])}
+    if not ok(bid in texto_de, f"el vídeo de prueba tiene el bloque {bid}"):
+        return
+    # EL BLOQUE CON SU PAUSA DE FINAL, como sale del redactor en un cambio de
+    # tramo: el texto efectivo de ahora más el silencio de cola
+    pausa = '<break time="900ms"/>'
+    carpeta_voz = os.path.join(datos["proyectos"], pid, "pasos", "voz")
+    with open(os.path.join(carpeta_voz, "activa.json"), encoding="utf-8") as fh:
+        activa = json.load(fh)["activa"]
+    meta = os.path.join(carpeta_voz, f"v{activa}", "audio_meta.json")
+    with open(meta, encoding="utf-8") as fh:
+        grabado = next(b.get("texto") for b in json.load(fh).get("bloques") or []
+                       if b.get("id") == bid)
+    bloques = dict((params_antes.get("bloques") or {}))
+    bloques[bid] = {"texto": f"{grabado}{pausa}"}
+    api.put(f"/api/proyectos/{pid}/pasos/guion/params", {"params": {"bloques": bloques}})
+
+    def por_regrabar():
+        _r, e = api.get(f"/api/proyectos/{pid}/guion/bloques")
+        cambiados = ((e.get("regrabar") or {}).get("cambiados")) or {}
+        return sorted({b for lista in cambiados.values() for b in lista})
+
+    antes = por_regrabar()
+    pg = Pagina(navegador, datos)
+    try:
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'guion'; pintarLight();")
+        tarjeta = f'.parrafo-guion[data-bloque="{bid}"]'
+
+        def pulsar_en_bloque(texto):
+            # los botones del bloque salen al pasar por encima, como con el ratón
+            pg.p.locator(tarjeta).first.hover()
+            pg.pulsar(f"{tarjeta} button", texto)
+        ok(pg.esperar(f"{tarjeta} .pastilla.pausa", "al final", 20),
+           f"{bid} enseña su pausa del final antes de tocarlo")
+        pulsar_en_bloque("Editar a mano")
+        area = pg.p.locator(f"{tarjeta} textarea").first
+        area.fill(area.input_value().rstrip(".") + ", corregido a mano.")
+        pg.p.wait_for_timeout(1200)
+        pulsar_en_bloque("Hecho")
+        pg.p.wait_for_timeout(1500)
+        ok(pg.esperar(f"{tarjeta} .pastilla.pausa", "al final", 15),
+           "después de editar a mano, el bloque conserva la pastilla de su pausa del final")
+        _r, guion = api.get(f"/api/proyectos/{pid}/pasos/guion")
+        guardado = (((guion.get("params") or {}).get("bloques") or {}).get(bid) or {}).get("texto") or ""
+        ok("corregido a mano" in guardado and guardado.endswith(pausa),
+           f"y lo guardado es lo escrito más esa pausa: {guardado[-80:]!r}")
+        despues = por_regrabar()
+        ok(set(despues) <= set(antes) | {bid},
+           f"y no deja por regrabar más bloques que antes ({antes} -> {despues})")
+        # LA CORRECCIÓN DE ORTOGRAFÍA guarda el texto CON sus marcas (la pausa
+        # ya va dentro): no se le pega otra (revisión independiente del 16-10)
+        pg.js(f"guardarBloqueLight('{bid}', {json.dumps(guardado.replace('corregido a mano', 'corregido por ortografía'))}, undefined, false);")
+        pg.p.wait_for_timeout(2000)
+        _r, guion = api.get(f"/api/proyectos/{pid}/pasos/guion")
+        orto = (((guion.get("params") or {}).get("bloques") or {}).get(bid) or {}).get("texto") or ""
+        ok("por ortografía" in orto and orto.count("<break") == 1,
+           f"corregir la ortografía no duplica la pausa: {orto[-90:]!r}")
+        # «QUITAR PAUSA» LA SIGUE QUITANDO, y una edición después no la resucita
+        pulsar_en_bloque("Quitar pausa")
+        pg.p.wait_for_timeout(2500)
+        ok(not pg.visible(f"{tarjeta} .pastilla.pausa"), "«Quitar pausa» la quita")
+        pulsar_en_bloque("Editar a mano")
+        area = pg.p.locator(f"{tarjeta} textarea").first
+        area.fill(area.input_value() + " Otra vez.")
+        pg.p.wait_for_timeout(1200)
+        pulsar_en_bloque("Hecho")
+        pg.p.wait_for_timeout(1500)
+        ok(not pg.visible(f"{tarjeta} .pastilla.pausa"),
+           "y editar después no la vuelve a poner")
+        pg.sin_errores("editar a mano conserva la pausa")
+    finally:
+        pg.cerrar()
+        # se deja el guion como estaba, para lo que venga detrás
+        api.put(f"/api/proyectos/{pid}/pasos/guion/params",
+                {"params": params_antes, "reemplazar": True})
+
+
 def main():
     ap = argparse.ArgumentParser(description="El recorrido de la pantalla")
     ap.add_argument("--solo", default="", help="un escenario por nombre")

@@ -95,10 +95,12 @@ def prueba_idiomas():
               < p2_brief.palabras_por_segundo("es", "fast"),
               "la velocidad ordena la cadencia")
 
-    # Sin aire entre bloques la cuenta es la de siempre: duracion x cadencia.
-    igual(p2_brief.presupuesto_de(180, "es"), 414, "180 s en espanol = 414 palabras")
-    igual(p2_brief.presupuesto_de(180, "en"), 460, "180 s en ingles = 460 palabras")
-    igual(p2_brief.presupuesto_de(60, "en"), 153, "60 s en ingles = 153 palabras")
+    # Sin aire entre bloques solo descuentan las PAUSAS DE BLOQUE que se preven
+    # (la del gancho y la de cada cambio de tema: 0,9 s x 0,6 cada una), que la
+    # voz mete igual con hueco 0. Antes del 16-10 no se contaban: 414, 460 y 153.
+    igual(p2_brief.presupuesto_de(180, "es"), 409, "180 s en espanol = 409 palabras")
+    igual(p2_brief.presupuesto_de(180, "en"), 454, "180 s en ingles = 454 palabras")
+    igual(p2_brief.presupuesto_de(60, "en"), 148, "60 s en ingles = 148 palabras")
 
     # Y CON AIRE CABEN MENOS: el silencio entre bloques son segundos que no dice
     # nadie. Con 1 s de hueco y bloques de 30 palabras, 180 s pierden unos 6 s.
@@ -178,8 +180,9 @@ def prueba_params():
 
     resumen = p2_brief.describir({"instrucciones": "mas centrado en las cifras",
                                   "idioma_salida": "es", "duracion_objetivo_s": 900})
-    # 2070 antes de que la cuenta descontara el aire entre bloques.
-    comprobar("\n" not in resumen and "2000" in resumen,
+    # 2070 antes de que la cuenta descontara el aire entre bloques, y 2000
+    # antes de que contara tambien las pausas de bloque (16-10-2026).
+    comprobar("\n" not in resumen and "1989" in resumen,
               f"describir da una linea con el presupuesto: {resumen}")
 
 
@@ -192,10 +195,11 @@ def prueba_sin_ingesta(base):
 
     # 180 s a 2,3 pal/s serian 414 palabras, pero el paso descuenta el AIRE que
     # se inserta entre bloques (hueco_minimo 1,0 s de fabrica): con 13 bloques
-    # son unos 6 s que no dice nadie, o sea 401 palabras. Antes esto se subia a
-    # 600 s y devolvia 1380 palabras para un video pedido de tres minutos.
-    igual(salidas["presupuesto_palabras"], 401,
-          "180 s en espanol son 401 palabras con el aire descontado")
+    # son unos 6 s, y las 4 pausas de bloque previstas otros 2 s, que no dice
+    # nadie: 396 palabras (401 antes de contar las pausas, el 16-10-2026). Antes
+    # esto se subia a 600 s y devolvia 1380 palabras para un video de 3 minutos.
+    igual(salidas["presupuesto_palabras"], 396,
+          "180 s en espanol son 396 palabras con el aire descontado")
     igual(salidas["brief"]["velocidad"], "normal", "la velocidad queda escrita")
     comprobar(salidas["brief"]["aire_s"] > 0, "y el aire descontado, tambien")
     comprobar(not any("suelo tecnico" in aviso for aviso in salidas["brief"]["avisos"]),
@@ -222,11 +226,11 @@ def prueba_con_ingesta(base):
     brief = salidas["brief"]
     igual(sorted(k for k in ("brief", "presupuesto_palabras") if k in salidas),
           ["brief", "presupuesto_palabras"], "las salidas traen las claves del contrato")
-    igual(salidas["presupuesto_palabras"], 1335,
-          "600 s en espanol = 1335 palabras (1380 menos el aire entre bloques)")
-    igual(brief["margen"], {"minimo": 934, "maximo": 1736, "tolerancia": 0.30},
+    igual(salidas["presupuesto_palabras"], 1325,
+          "600 s en espanol = 1325 palabras (1380 menos el aire y las pausas de bloque)")
+    igual(brief["margen"], {"minimo": 927, "maximo": 1722, "tolerancia": 0.30},
           "la horquilla es el presupuesto mas menos el 30%")
-    igual([brief["palabras_minimo"], brief["palabras_maximo"]], [934, 1736],
+    igual([brief["palabras_minimo"], brief["palabras_maximo"]], [927, 1722],
           "el minimo y el maximo de palabras van sueltos en el brief")
     igual(brief["bloques_estimados"], 44, "bloques estimados a 30 palabras por bloque")
     # LA HORQUILLA, DE VUELTA EN SEGUNDOS. Es lo que se le ensena a quien pidio
@@ -248,7 +252,7 @@ def prueba_con_ingesta(base):
 
     with open(os.path.join(proyecto.ruta_trabajo("brief", crear=False), "brief.json"),
               "r", encoding="utf-8") as fh:
-        igual(json.load(fh)["presupuesto_palabras"], 1335,
+        igual(json.load(fh)["presupuesto_palabras"], 1325,
               "brief.json en disco coincide con las salidas")
 
     print("\n[5] integracion con el nucleo")
@@ -263,6 +267,97 @@ def prueba_con_ingesta(base):
     igual(estado.estado_de("brief"), "obsoleto", "cambiar el brief lo deja obsoleto")
 
 
+def _guion_al_presupuesto(segundos, ficha):
+    """Un guion escrito al presupuesto de `ficha`, con las pausas de bloque que
+    pone `p3_guion` (la del gancho y una por tramo, 900 ms) repartidas."""
+    import cadencia                                           # noqa: PLC0415
+    bloques, palabras = ficha["bloques"], ficha["palabras"]
+    pausas = cadencia.pausas_previstas(segundos, bloques)
+    con_pausa = {round(i * (bloques - 1) / max(1, pausas)) for i in range(pausas)}
+    textos = []
+    for i in range(bloques):
+        cuantas = palabras // bloques + (1 if i < palabras % bloques else 0)
+        texto = " ".join(["palabra"] * cuantas) + "."
+        if i in con_pausa and i < bloques - 1:
+            texto += '<break time="900ms"/>'
+        textos.append(texto)
+    return textos
+
+
+def prueba_pausas_en_la_horquilla():
+    """El presupuesto cuenta las pausas de bloque (16-10-2026).
+
+    Desde que la pausa del gancho y de cada cambio de tema se SUMA al aire entre
+    bloques (0,9 s x `PARTE_DE_LA_PAUSA`), `estimar` y `aire_de` la contaban y
+    `palabras_para` no: el guion se escribia para pausas mas cortas y el video
+    salia unos segundos mas largo de lo pedido.
+    """
+    print("\n[6] la horquilla cuenta las pausas de bloque")
+    import cadencia                                           # noqa: PLC0415
+    import p3_guion                                           # noqa: PLC0415
+    for segundos in (120, 240, 600):
+        ficha = cadencia.palabras_para(segundos, "es", "normal", 1.0, 30)
+        textos = _guion_al_presupuesto(segundos, ficha)
+        habla = ficha["palabras"] / ficha["cadencia_palabras_s"]
+        dura = habla + cadencia.aire_de(textos, 1.0)
+        comprobar(abs(dura - segundos) < 1.0,
+                  f"un guion de {segundos} s escrito al presupuesto dura {dura:.1f} s "
+                  f"({ficha['palabras']} palabras, "
+                  f"{cadencia.pausas_previstas(segundos, ficha['bloques'])} pausas)")
+        vuelta = cadencia.segundos_para(ficha["palabras"], "es", "normal", 1.0, 30)
+        comprobar(abs(vuelta - segundos) < 1.0,
+                  f"y segundos_para, la inversa, devuelve {vuelta:.1f} s")
+    igual(cadencia.pausas_previstas(120, 9), 4, "dos minutos: cuatro tramos (regla 11)")
+    igual(cadencia.pausas_previstas(900, 66), 10, "quince minutos: diez, el tope")
+    igual(cadencia.pausas_previstas(60, 2), 1, "nunca mas pausas que costuras")
+    defecto = p3_guion.PARAMS_POR_DEFECTO
+    igual([defecto["pausa_gancho_ms"], defecto["pausa_seccion_ms"]],
+          [int(cadencia.PAUSA_DE_BLOQUE_PREVISTA * 1000)] * 2,
+          "la pausa prevista es la que pone el guion de serie")
+
+
+def prueba_proyecto_viejo_sigue_listo(base):
+    """LO DE ANTES NO SE QUEDA VIEJO. Cambiar la cuenta no puede dejar obsoleto
+    el brief ni el guion de un video ya hecho: el guion se volveria a pedir y
+    la voz y las imagenes detras. Las firmas miran los params, no el codigo, y
+    el brief no se recalcula solo; esto lo comprueba con un proyecto completo
+    hecho con la cuenta de antes."""
+    print("\n[7] un proyecto hecho con la cuenta de antes sigue listo")
+    import cadencia                                           # noqa: PLC0415
+    proyecto = Proyecto.crear(base, "Hecho Antes")
+    estado = Estado(proyecto)
+    fabricar_ingesta(proyecto, estado)
+    nueva = cadencia._aire_previsto
+
+    def vieja(_segundos, bloques, hueco):
+        return max(0.0, hueco - cadencia.PAUSA_ENTRE_BLOQUES) * max(0, int(bloques) - 1)
+    params = {"instrucciones": "igual", "idioma_salida": "es", "duracion_objetivo_s": 240}
+    estado.set_params("brief", params)
+    cadencia._aire_previsto = vieja
+    try:
+        salidas = p2_brief.ejecutar(proyecto, params, sin_progreso)
+    finally:
+        cadencia._aire_previsto = nueva
+    estado.completar("brief", salidas)
+    estado.set_params("guion", {"prompt_general": "seco"})
+    trabajo = comun.preparar_trabajo(proyecto, "guion")
+    comun.escribir_json(os.path.join(trabajo, "guion.json"), {"guion": [
+        {"id": "B001", "texto": 'Hola.<break time="900ms"/>'}, {"id": "B002", "texto": "Adios."}]})
+    estado.completar("guion", {"resumen": "guion de antes"})
+    estado.set_params("voz", {"velocidad": "normal"})
+    estado.completar("voz", {"resumen": "voz de antes"})
+
+    otra = Estado(Proyecto(proyecto.raiz))           # como al abrirlo despues
+    for paso in ("ingesta", "brief", "guion", "voz"):
+        igual(otra.estado_de(paso), "listo", f"{paso} sigue listo con la cuenta nueva")
+        comprobar(otra.al_dia(paso), f"y «Generar lo pendiente» no rehace {paso}")
+    guardado = comun.leer_salida(proyecto, "brief", "brief.json")["presupuesto_palabras"]
+    ahora = p2_brief.presupuesto_de(240, "es", "normal", 1.0, 30)
+    comprobar(ahora < guardado,
+              f"aunque la cuenta de ahora da menos palabras ({ahora} frente a las "
+              f"{guardado} guardadas): solo cambia lo que se genere a partir de ahora")
+
+
 def principal():
     base = tempfile.mkdtemp(prefix="prueba_p2_")
     # el historico de tiempos de verdad no se toca: aqui los pasos corren
@@ -274,6 +369,8 @@ def principal():
         prueba_params()
         prueba_sin_ingesta(base)
         prueba_con_ingesta(base)
+        prueba_pausas_en_la_horquilla()
+        prueba_proyecto_viejo_sigue_listo(base)
     finally:
         if conservar:
             print(f"\nproyectos temporales conservados en {base}")

@@ -17089,6 +17089,7 @@ function vistaAutomatizar() {
 /* ------------------------------------------------------------ PUBLICAR */
 
 async function cargarPublicar(silencio) {
+  let terminoDeEscribir = false;
   if (!silencio) { PUB.cargando = true; pintarModulo(); }
   PUB.error = '';
   try {
@@ -17096,6 +17097,14 @@ async function cargarPublicar(silencio) {
       const antes = PUB.ficha;
       PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`));
       avisarCambiosPublicar(antes, PUB.ficha);
+      /* CLAUDE ACABA DE ESCRIBIR: se pinta YA, aunque haya un campo con el
+         cursor (sus textos son justo los que llegan). Antes se esperaba a
+         salir del campo y los textos no aparecían (17-10, en el servidor). */
+      if (antes && antes.pid === PUB.ficha.pid && antes.escribiendo && !PUB.ficha.escribiendo) {
+        terminoDeEscribir = true;
+        if (PUB.ficha.error_textos) toast(PUB.ficha.error_textos, true);
+        else toast('Textos listos: revísalos antes de publicar');
+      }
     } else if (PUB.seccion === 'cuentas') {
       PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
     } else if (PUB.seccion === 'resultados') {
@@ -17122,7 +17131,7 @@ async function cargarPublicar(silencio) {
   }
   PUB.cargando = false;
   if (MODULOS.actual === 'publicar') {
-    if (silencio) repintarPublicarSinPisar(); else pintarModulo();
+    if (silencio && !terminoDeEscribir) repintarPublicarSinPisar(); else pintarModulo();
     if (PUB.repintar) ponerAlDiaEstadoTextosPublicar();
   }
   programarRelojPublicar();
@@ -17148,7 +17157,7 @@ function estadoTextosPublicar(f) {
     caja.appendChild(h('div', { clase: 'caja-aviso fila escribiendo-textos' },
       h('span', { clase: 'girando', 'aria-hidden': 'true' }),
       h('span', { clase: 'crece' }, `Claude está escribiendo los textos${redes ? ` de ${redes}` : ''}…`
-        + `${lleva > 5 ? ` (lleva ${lleva} s; suele tardar uno o dos minutos)` : ''}`)));
+        + ` (lleva ${lleva} s; suele tardar menos de un minuto)`)));
   } else if (f.error_textos) {
     caja.appendChild(h('div', { clase: 'caja-error fila' },
       h('span', { clase: 'crece' }, f.error_textos),
@@ -17185,8 +17194,16 @@ function programarRelojPublicar() {
     || (PUB.seccion === 'cola' && PUB.cola && (PUB.cola.envios || []).some(e =>
       ['enviando', 'publicando', 'comprobar'].includes(e.estado)));
   if (!enElAire) return;
+  // solo se pregunta a Upload-Post si hay envíos en el aire, y SIN esperarlo:
+  // una consulta lenta allí no puede retrasar que se vean los textos
+  const hayEnvios = (PUB.seccion === 'ficha' && f && (f.envios || []).some(e =>
+    ['enviando', 'publicando', 'comprobar'].includes(e.estado))) || PUB.seccion === 'cola';
   PUB.reloj = setTimeout(async () => {
-    try { await pedir(rutaPublicar('/refrescar'), { method: 'POST' }); } catch (e) { /* se reintenta */ }
+    if (hayEnvios) {
+      const refresco = pedir(rutaPublicar('/refrescar'), { method: 'POST' }).catch(() => null);
+      // como mucho 8 s esperándolo; si tarda más, la ficha se pide igual
+      await Promise.race([refresco, new Promise(ok => setTimeout(ok, 8000))]);
+    }
     /* Se pide SIEMPRE: lo tecleado vive en PUB.borrador y se pinta encima de lo
        que llegue (textosDeFicha). Antes, con algo en el borrador no se volvía a
        pedir la ficha y «Claude está escribiendo» no acababa nunca (16-10). */
@@ -17763,7 +17780,8 @@ function bloqueTextoRed(red) {
   b.appendChild(h('div', { clase: 'fila' }, h('h3', {}, NOMBRES_RED[red]),
     h('span', { clase: 'crece' }),
     h('button', { clase: 'mini', title: 'Copiar el texto tal como sale en la red',
-      onclick: () => copiarTexto(compuesto.texto || '') }, 'Copiar texto'),
+      onclick: () => (String(textosDeFicha(red).descripcion || '').trim()
+        ? copiarTexto(compuesto.texto || '') : toast('Todavía no hay texto que copiar en esta red', true)) }, 'Copiar texto'),
     compuesto.titulo ? h('button', { clase: 'mini', onclick: () => copiarTexto(compuesto.titulo) }, 'Copiar título') : null,
     h('button', { clase: 'mini fantasma', title: 'Que Claude reescriba solo esta red',
       disabled: f.escribiendo, onclick: () => escribirTextosPublicar([red]) }, 'Reescribir')));

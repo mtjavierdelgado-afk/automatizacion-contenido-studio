@@ -16,6 +16,21 @@ vídeos, estilos, claves y contraseña no se tocan.
   los clips en disco (el MP4 final y la música sí se escriben nuevos). Las versiones anteriores quedan intactas y «Revertir»
   funciona igual. (En un servidor Windows se sigue copiando.)
 
+**Publicar: los textos de Claude ya no salen vacíos (17 de octubre, madrugada)**
+- A veces Claude contestaba llamando a la red por su nombre («Instagram
+  Reels») y el Studio solo buscaba «instagram»: decía «Textos listos» con las
+  casillas vacías. Ahora entiende las dos formas, a Claude se le dicen las
+  claves exactas, y si una red llega sin texto se dice («Claude no ha devuelto
+  el texto de Instagram Reels») con «Reintentar» solo de esa; lo que ya había
+  escrito no se borra. «Copiar texto» sin texto avisa en vez de decir «copiado».
+
+**Publicar: los textos de Claude se ven al terminar (17 de octubre)**
+- Si mientras Claude escribía los textos el cursor estaba en una casilla de
+  texto, los textos se guardaban pero la ficha seguía vacía hasta salir de la
+  casilla o recargar. Ahora aparecen en cuanto terminan, con un aviso «Textos
+  listos». El aviso de «escribiendo» dice desde el principio cuánto lleva, y
+  si Claude no contesta, el fallo sale a los 4 minutos (antes podía tardar 16).
+
 **Publicar: lo que salió probándolo en el servidor (16 de octubre, tarde)**
 - **El perfil de Upload-Post se apunta con lo que escribes.** «Crear perfil»
   manda el nombre del campo; **«Usar este perfil»** (o Enter) apunta uno que ya

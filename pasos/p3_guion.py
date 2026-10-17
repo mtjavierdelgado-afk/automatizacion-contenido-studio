@@ -471,8 +471,9 @@ REGLA_GUION_PROPIO = (
 #: fregaderos: el angulo pedido («meter la misma olla en los dos») se quedo
 #: en una mencion y la lista de revision del material se recorrio entera, una
 #: frase por punto. Los videos de mas de esto reciben las mismas
-#: instrucciones de siempre.
-DURACION_CORTA_S = 90
+#: instrucciones de siempre. Era 90 s; el dueno lo subio a 120 el 17-10-2026
+#: (sus videos rondan el minuto y alguno se va a dos).
+DURACION_CORTA_S = 120
 
 
 def _segundos_pedidos(brief):

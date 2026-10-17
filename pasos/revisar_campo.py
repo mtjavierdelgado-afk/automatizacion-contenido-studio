@@ -116,7 +116,7 @@ GUIAS_CON_DURACION = ("material", "indicaciones")
 #: Hasta aqui un video es corto: LA MISMA cifra que usa el redactor
 #: (`p3_guion.DURACION_CORTA_S`; lo comprueba prueba_piezas). No se importa
 #: de alli para no cargar el paso entero en una revision de un campo.
-DURACION_CORTA_S = 90
+DURACION_CORTA_S = 120
 
 CONTEXTO = """
 LO QUE ESTE CAMPO NO DICE Y CAMBIA EL JUICIO: el video dura {segundos} s, y en

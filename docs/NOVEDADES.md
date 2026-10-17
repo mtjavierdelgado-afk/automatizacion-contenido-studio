@@ -11,12 +11,12 @@ vídeos, estilos, claves y contraseña no se tocan.
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
 **Guiones de vídeos cortos que no salen «a resumen» (17 de octubre)**
-- **Los vídeos de hasta 90 segundos tienen su propia forma de escribirse.**
+- **Los vídeos de hasta 2 minutos tienen su propia forma de escribirse.**
   Antes se escribían como un documental de varios minutos (cuatro a seis temas,
   gancho de dos bloques), y en un minuto eso daba una frase por tema: el guion
   nombraba todo y no explicaba nada. Ahora el redactor cuenta UNA idea con un
   caso concreto (la mitad del vídeo, paso a paso), elige del material lo que la
-  empuja y no recorre las listas punto por punto. Los vídeos de más de 90 s se
+  empuja y no recorre las listas punto por punto. Los vídeos de más de 2 minutos se
   escriben igual que siempre.
 - **Las etiquetas de «Las indicaciones» son órdenes.** ENSEÑA es la única
   idea; ÁNGULO se cuenta como una escena que se ve pasar, no como una mención;

@@ -253,7 +253,7 @@ GUIAS = {
             "internet ni abre enlaces. Lo que no está aquí no puede salir.",
             "Si marcas «Esto ya es el guion», se respeta palabra por palabra y "
             "solo se divide en bloques.",
-            "En un vídeo corto (hasta 90 s) el redactor ELIGE: cuenta una sola "
+            "En un vídeo corto (hasta 2 minutos) el redactor ELIGE: cuenta una sola "
             "idea con un caso concreto y deja fuera lo que no cabe. No intenta "
             "meterlo todo.",
         ],

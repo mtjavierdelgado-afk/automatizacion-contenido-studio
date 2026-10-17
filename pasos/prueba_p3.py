@@ -346,7 +346,7 @@ def prueba_videos_cortos():
         return brief
 
     # cuando es corto
-    for segundos, esperado in ((30, True), (60, True), (90, True), (91, False),
+    for segundos, esperado in ((30, True), (60, True), (90, True), (120, True), (121, False),
                                (240, False), (None, False), ("raro", False), (0, False)):
         igual(p3_guion.es_corto(brief_de(segundos)), esperado,
               f"un video de {segundos!r} s {'es' if esperado else 'no es'} corto")

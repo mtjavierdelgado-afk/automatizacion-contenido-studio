@@ -17126,7 +17126,9 @@ async function cargarPublicar(silencio) {
       // si entretanto se eligió otro proyecto o periodo, esta respuesta ya no vale
       if (pedido === PUB.proyectoResultados && dias === (PUB.diasResultados || 30)) {
         if (mej.status === 'fulfilled' && por === (PUB.porMejores || 'vistas')) PUB.mejores = mej.value;
-        else if (mej.status === 'rejected') PUB.mejores = { posts: [], error: mej.reason.message };
+        else if (mej.status === 'rejected' && por === (PUB.porMejores || 'vistas')) {
+          PUB.mejores = { posts: [], error: mej.reason.message };
+        }
         if (res.status === 'rejected') throw res.reason;
         PUB.resultados = res.value;
       }

@@ -1256,6 +1256,18 @@ def prueba_retencion_y_resumenes():
         ok(yt2["media_vista"] != primera,
            f"un segundo «Actualizar» trae la retención nueva de YouTube ({primera} → {yt2['media_vista']})")
         ok(yt2.get("guardada_al"), "con su propio reloj, aparte del de las cifras")
+        # (2.ª revisión) una lectura EN VIVO no borra ese reloj: si lo borrara,
+        # una lectura guardada más vieja volvería a pisar la retención
+        P.actualizar_metricas(raiz, ["ret"], forzar=True)
+        yt3 = {e["red"]: e for e in P._leer_video(raiz, "ret")["envios"]}["youtube"]["metricas"]
+        igual(yt3.get("guardada_al"), yt2["guardada_al"], "la lectura en vivo conserva el reloj de la guardada")
+        envio_yt = next(e for e in P._leer_video(raiz, "ret")["envios"] if e["red"] == "youtube")
+        indice = {("youtube", "id", envio_yt["post_id"]): {
+            "red": "youtube", "post_id": envio_yt["post_id"], "media_vista": 0.01,
+            "al": "2020-01-01T00:00:00+00:00"}}
+        P._apuntar_guardadas(raiz, [("ret", envio_yt)], indice)
+        yt4 = {e["red"]: e for e in P._leer_video(raiz, "ret")["envios"]}["youtube"]["metricas"]
+        igual(yt4["media_vista"], yt3["media_vista"], "una lectura guardada más vieja no pisa la retención")
         ok(r["guardadas"] >= 1, f"«medir» hace también la lectura guardada: {r}")
         igual(yt.get("guardada"), True, "y lo apunta")
         # una lectura guardada MÁS VIEJA no pisa las cifras de la lectura en vivo
@@ -1288,6 +1300,12 @@ def prueba_retencion_y_resumenes():
         P._suma(acum, {"vistas": 50, "vista_entera": 0.9})
         igual(round(P._medias(acum)["vista_entera"], 3), 0.1,
               "la retención media se pondera por vistas (un post de 50 no pesa como uno de 100.000)")
+        acum = {}
+        P._suma(acum, {"vistas": 1000, "vista_entera": 0.1})
+        P._suma(acum, {"vista_entera": 0.9})
+        cerrado = P._medias(acum)
+        igual((cerrado["vista_entera"], cerrado["vista_entera_posts"]), (0.1, 1),
+              "el número de posts cuadra con los que entran en la media")
 
         # semana y mes, con envíos en fechas conocidas
         ahora = P._leer_momento("2026-10-15T12:00")            # jueves

@@ -501,10 +501,10 @@ class ClienteUploadPost:
             salida[nuestro] = valor
         return salida
 
-    def metricas_post(self, request_id, red=None):
+    def metricas_post(self, request_id, red=None, plazo=PLAZO_CONSULTA_S):
         """Las cifras de un envio (todas sus redes, o una). -> {red: {...}}"""
         r = self._pedir("GET", f"/api/uploadposts/post-analytics/{urllib.parse.quote(str(request_id))}",
-                        consulta={"platform": red} if red else None)
+                        consulta={"platform": red} if red else None, plazo=plazo)
         salida = {}
         for nombre, ficha in (r.get("platforms") or {}).items():
             if nombre not in REDES or not isinstance(ficha, dict):

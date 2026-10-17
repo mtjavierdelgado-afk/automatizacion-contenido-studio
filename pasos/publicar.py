@@ -1892,6 +1892,10 @@ _LOCK_METRICAS = threading.Lock()
 #: Tope de tiempo de una vuelta: detras del proxy una peticion de mas de 60 s
 #: se corta. Lo que no de tiempo queda en `pendientes` para la siguiente.
 TOPE_VUELTA_S = float(os.environ.get("ESTUDIO_METRICAS_TOPE") or 40)
+#: Plazo de cada consulta en vivo: una consulta no se EMPIEZA si no cabe entera
+#: dentro del tope (antes una empezada a los 39 s con plazo de 30 llegaba a ~70 s
+#: y el proxy cortaba la peticion de la pantalla a los 60).
+PLAZO_METRICAS_S = 15
 
 
 def actualizar_metricas(raiz, pids, forzar=False, limite=LOTES_POR_VUELTA):
@@ -1925,10 +1929,10 @@ def _actualizar_metricas(raiz, pids, forzar, limite):
     errores = []
     arranque = time.time()
     for _hace, lote, envios in candidatos[:limite]:
-        if time.time() - arranque > TOPE_VUELTA_S:
+        if time.time() - arranque > TOPE_VUELTA_S - PLAZO_METRICAS_S:
             break
         try:
-            cifras = cli.metricas_post(lote)
+            cifras = cli.metricas_post(lote, plazo=PLAZO_METRICAS_S)
         except UP.ErrorUploadPost as fallo:
             if fallo.codigo == 429:
                 errores.append("Upload-Post pide esperar unos minutos (demasiadas consultas)")
@@ -1976,6 +1980,12 @@ def _apuntar_metricas(raiz, envios, cifras, error=""):
                     if nuevas[k] is None and viejas.get(k) is not None:
                         nuevas[k] = viejas[k]
                 nuevas.update(al=al, error=propias.get("error") or "")
+                # el reloj de la lectura guardada es suyo: una lectura en vivo no
+                # lo borra (sin el, una guardada MAS VIEJA volvia a pisar la
+                # retencion de YouTube)
+                for k in ("guardada_al", "guardada"):
+                    if k in viejas:
+                        nuevas[k] = viejas[k]
                 e["metricas"] = nuevas
                 if propias.get("url") and not e.get("url"):
                     e["url"] = propias["url"]
@@ -2214,6 +2224,8 @@ def _suma(destino, metricas):
             # la media ponderada por vistas; sin vistas, la media simple
             destino[f"_ps_{k}"] = (destino.get(f"_ps_{k}") or 0) + float(v) * peso
             destino[f"_p_{k}"] = (destino.get(f"_p_{k}") or 0) + peso
+            if peso:
+                destino[f"_pn_{k}"] = (destino.get(f"_pn_{k}") or 0) + 1
 
 
 def _medias(destino):
@@ -2224,9 +2236,12 @@ def _medias(destino):
         suma = destino.pop(f"_s_{k}", 0)
         suma_pesada = destino.pop(f"_ps_{k}", 0)
         pesos = destino.pop(f"_p_{k}", 0)
+        con_peso = destino.pop(f"_pn_{k}", 0)
         valor = (suma_pesada / pesos) if pesos else (suma / n if n else None)
         destino[k] = round(valor, 1 if k == "tiempo_medio_s" else 4) if valor is not None else None
-        destino[f"{k}_posts"] = n
+        # cuantos posts entran DE VERDAD en esa media: con vistas, solo los que
+        # pesan; sin ninguna vista, todos
+        destino[f"{k}_posts"] = con_peso if pesos else n
     return destino
 
 

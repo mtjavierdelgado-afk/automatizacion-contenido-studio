@@ -208,7 +208,7 @@ class SimuladoUploadPost:
         import hashlib
         return int(hashlib.sha256("|".join(str(p) for p in partes).encode()).hexdigest()[:8], 16)
 
-    def metricas_post(self, request_id, red=None):
+    def metricas_post(self, request_id, red=None, plazo=None):
         """Cifras que crecen con cada consulta, y TikTok que aun no las tiene la
         primera vez (como pasa en las horas despues de publicar). TikTok trae su
         retencion en vivo; YouTube no (solo en la lectura guardada). Cada lectura

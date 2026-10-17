@@ -884,6 +884,7 @@ def construir_cama(ficha, duracion_s, destino):
                 f"el cruce {indice}")
             cadena = siguiente
         salida = float(min(cruce, max(1.0, total * 0.05)))
+        medios.romper_enlace(destino)   # puede ser el de la version anterior
         _ffmpeg_cama(
             [medios.ffmpeg(), "-y", "-loglevel", "error", "-i", cadena, "-af",
              f"apad=whole_dur={total + 1:.2f},atrim=0:{total:.3f},"
@@ -1511,6 +1512,7 @@ def _leer(ruta):
 
 def _escribir(ruta, muestras):
     import wave                                        # noqa: PLC0415
+    medios.romper_enlace(ruta)      # puede ser el de la version anterior
     pcm = np.clip(muestras, -1.0, 1.0) * 32767.0
     with wave.open(ruta, "wb") as fh:
         fh.setnchannels(2)

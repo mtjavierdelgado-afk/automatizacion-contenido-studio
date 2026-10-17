@@ -153,7 +153,7 @@ def poner_logo(destino, ruta_logo, ficha, calidad="media"):
     (va copiado), asi que cambiar el logo cuesta minutos de maquina, no dinero.
     """
     ajustes = CALIDADES.get(calidad) or CALIDADES["media"]
-    temporal = destino + ".logo.mp4"
+    temporal = medios.romper_enlace(destino + ".logo.mp4")
     try:
         sonda = subprocess.run(
             [medios.ffprobe(), "-v", "error", "-select_streams", "v:0",
@@ -173,6 +173,11 @@ def poner_logo(destino, ruta_logo, ficha, calidad="media"):
         raise RuntimeError(f"ffmpeg no pudo poner el logo: {proceso.stderr[-400:]}")
     os.replace(temporal, destino)
     return destino
+
+
+#: Sembrar `trabajo/` con enlaces duros a la version activa en vez de copias
+#: (17-10-2026). Solo fuera de Windows: ver `ejecutar`.
+ENLAZAR_TRABAJO = os.name != "nt"
 
 
 CALIDADES = {
@@ -351,6 +356,7 @@ class Navegador:
     def capturar(self, destino):
         datos = self.llamar("Page.captureScreenshot", format="png",
                             captureBeyondViewport=False)
+        medios.romper_enlace(destino)
         with open(destino, "wb") as fh:
             fh.write(base64.b64decode(datos["data"]))
         return destino
@@ -507,6 +513,8 @@ def _pagina_de(escena, mov, capa_svg, hyper, p, destino, capa_fija="", fps=30):
 
 def _codificar(dir_frames, destino, fps, calidad):
     ajustes = CALIDADES.get(calidad) or CALIDADES["media"]
+    # el clip puede ser el MISMO fichero que el de la version anterior
+    medios.romper_enlace(destino)
     orden = [medios.ffmpeg(), "-y", "-loglevel", "error",
              "-framerate", str(fps), "-i", os.path.join(dir_frames, "f%05d.png"),
              "-c:v", "libx264", "-preset", ajustes["preset"], "-crf", ajustes["crf"],
@@ -599,6 +607,8 @@ def _cola_negra(clips, trabajo, fps, calidad, segundos=COLA_NEGRO_S):
     ajustes = CALIDADES.get(calidad) or CALIDADES["media"]
     entrada = min(ENTRADA_NEGRO_S, segundos)
     try:
+        medios.romper_enlace(fotograma)
+        medios.romper_enlace(negro)
         # el ultimo fotograma del ultimo clip
         sacar = subprocess.run(
             [medios.ffmpeg(), "-y", "-loglevel", "error", "-sseof", "-0.2",
@@ -639,7 +649,8 @@ def _concatenar(clips, destino, audio, desfase, trabajo, musica=None,
     # depende del ORDEN: es el final del VIDEO, no el de una escena, y hasta
     # que no estan todos no se sabe cual es el ultimo.
     clips = _cola_negra(clips, trabajo, fps, calidad)
-    lista = os.path.join(trabajo, "clips.txt")
+    lista = medios.romper_enlace(os.path.join(trabajo, "clips.txt"))
+    medios.romper_enlace(destino)
     with open(lista, "w", encoding="utf-8") as fh:
         for clip in clips:
             fh.write("file '" + clip.replace("\\", "/") + "'\n")
@@ -1280,7 +1291,13 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
         proyecto, "voz", claves=("wav", "audio", "narracion"),
         patrones=(r"narracion\.wav", r".*\.wav"))
 
-    trabajo = medios.sembrar_trabajo(proyecto, "render")
+    # CON ENLACES DUROS, NO COPIAS (17-10-2026): los clips y el video que no
+    # cambian no se duplican en cada montaje. Todo lo que escribe aqui dentro
+    # pasa antes por `medios.romper_enlace`, o cambiaria la version anterior.
+    # EN WINDOWS NO: alli no se puede soltar un nombre de un fichero que otro
+    # proceso tiene abierto (la pantalla reproduciendo el video), y romper el
+    # enlace tumbaria el montaje. El servidor es Linux, que es donde se ahorra.
+    trabajo = medios.sembrar_trabajo(proyecto, "render", enlazar=ENLAZAR_TRABAJO)
     # DESPUES de sembrar, y eso es lo que lo hace robusto: todo lo que aparezca
     # en trabajo/ a partir de aqui lo ha escrito ESTE render. `sembrar_trabajo`
     # copia con copy2 y conserva la fecha original, asi que tomandolo antes

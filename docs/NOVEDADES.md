@@ -10,6 +10,12 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**El vídeo montado ocupa menos (17 de octubre)**
+- Cada montaje ya no copia los clips que no cambian: la versión nueva los
+  comparte con la anterior. Cambiar la música o el logo ya no duplica el vídeo
+  entero en disco. Las versiones anteriores quedan intactas y «Revertir»
+  funciona igual. (En un servidor Windows se sigue copiando.)
+
 **Lo que quedó de la revisión (16 de octubre, noche)**
 - **`asvs actualizar` pone al día también el servidor**: las unidades de
   systemd, los snippets de nginx, el lanzador del navegador y las variables

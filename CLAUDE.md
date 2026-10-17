@@ -426,6 +426,15 @@ entradas del documento y guarda, y después borra las carpetas y sus
 manifiestos, para que el estado nunca nombre una versión que ya no está. Los
 demás pasos guardan todas: son pequeños y la pantalla ofrece volver a ellas.
 
+**`trabajo/` del render va con enlaces duros a la versión activa**
+(`sembrar_trabajo(..., enlazar=True)`, fuera de Windows, 17-10-2026): un fichero
+de `trabajo/` puede ser EL MISMO que el de `v<N>`. Nada escribe encima de una
+ruta de ahí sin `medios.romper_enlace(ruta)` antes (o `os.replace`):
+`open(..,"w")`, `ffmpeg -y` y `shutil.copy2` sobre un destino que existe
+cambiarían la versión anterior sin ningún error. Lo comprueba
+`prueba_piezas.prueba_enlaces_del_render`; **si añades un escritor nuevo al
+render, añádelo ahí**. Assets y callouts siguen copiando a propósito.
+
 **El precio por imagen del cotizador** (`ajustes.precio_por_imagen`) es la
 mediana de lo cobrado en imágenes de PLANO (`escena:`), por calidad y, con 20
 muestras, por modo (foto/ilustración, que viaja en el `detalle` de cada

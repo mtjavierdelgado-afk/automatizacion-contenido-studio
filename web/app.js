@@ -17780,7 +17780,8 @@ function bloqueTextoRed(red) {
   b.appendChild(h('div', { clase: 'fila' }, h('h3', {}, NOMBRES_RED[red]),
     h('span', { clase: 'crece' }),
     h('button', { clase: 'mini', title: 'Copiar el texto tal como sale en la red',
-      onclick: () => copiarTexto(compuesto.texto || '') }, 'Copiar texto'),
+      onclick: () => (String(textosDeFicha(red).descripcion || '').trim()
+        ? copiarTexto(compuesto.texto || '') : toast('Todavía no hay texto que copiar en esta red', true)) }, 'Copiar texto'),
     compuesto.titulo ? h('button', { clase: 'mini', onclick: () => copiarTexto(compuesto.titulo) }, 'Copiar título') : null,
     h('button', { clase: 'mini fantasma', title: 'Que Claude reescriba solo esta red',
       disabled: f.escribiendo, onclick: () => escribirTextosPublicar([red]) }, 'Reescribir')));

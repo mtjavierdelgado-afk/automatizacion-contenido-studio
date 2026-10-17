@@ -14439,6 +14439,404 @@ def fichero_web(fichero: str, peticion: Request):
     return servir_fichero(peticion, destino)
 
 
+# =================================================================== PUBLICAR
+# Publicar en redes (rama `publicar-redes-1`, 16-10-2026). TODO lo de aqui es
+# nuevo y vive en un bloque propio al final para no chocar con las ramas que
+# cambian el resto del fichero: las rutas solo arman lo que sabe el video
+# (encargo, guion, MP4) y llaman a `pasos/publicar.py`, que es quien decide.
+# Ver la cabecera de ese modulo (donde vive cada cosa y lo que no se negocia).
+#
+# Van DETRAS de `/{fichero}` sin problema: esa ruta solo casa un nombre suelto
+# y todas estas llevan varias barras.
+
+try:
+    import publicar as PUBLICAR  # noqa: E402  (pasos/ ya esta en sys.path)
+    ERROR_PUBLICAR = ""
+except Exception as _fallo_publicar:  # noqa: BLE001
+    PUBLICAR = None
+    ERROR_PUBLICAR = f"{type(_fallo_publicar).__name__}: {_fallo_publicar}"
+
+_MEDIDAS_MP4 = {}
+_MAX_MEDIDAS_MP4 = 500
+
+
+def _publicar():
+    if PUBLICAR is None:
+        raise ErrorApi(503, f"el módulo de publicar no se ha podido cargar: {ERROR_PUBLICAR}")
+    return PUBLICAR
+
+
+def _por_publicar(fn, *args, **kwargs):
+    """Llama a pasos/publicar.py y convierte su fallo en un ErrorApi."""
+    try:
+        return fn(*args, **kwargs)
+    except PUBLICAR.ErrorPublicar as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+
+
+def _mp4_del_video(proyecto):
+    """(ruta absoluta, ruta para /a/) del MP4 activo, o ("", "")."""
+    version = proyecto.version_activa("render")
+    if not version:
+        return "", ""
+    ruta = os.path.join(proyecto.ruta_paso("render", version), "video.mp4")
+    if not os.path.isfile(ruta):
+        return "", ""
+    return ruta, f"pasos/render/v{int(version)}/video.mp4"
+
+
+def _nombres_de_clientes():
+    try:
+        return {c["id"]: c["nombre"] for c in CLIENTES.listar(raiz_proyectos())["clientes"]}
+    except Exception:                                       # noqa: BLE001
+        return {}
+
+
+def _cliente_del_video(proyecto, datos_clientes=None):
+    return CLIENTES.cliente_de(raiz_proyectos(),
+                               (proyecto.config or {}).get(CONFIG_ESTILO_LIGHT) or "",
+                               proyecto.id, datos=datos_clientes)
+
+
+def _ctx_publicable(pid, peticion):
+    """El contexto del video, o 404 si es de un proyecto con clave sin abrir."""
+    ctx = contexto(pid)
+    if (ctx.proyecto.config or {}).get(CONFIG_TALLER):
+        raise ErrorApi(404, "eso no es un vídeo")
+    cerrados = _cerrados(peticion)
+    if cerrados and _cliente_del_video(ctx.proyecto) in cerrados:
+        raise ErrorApi(404, f"proyecto desconocido: {pid}")
+    return ctx
+
+
+def _info_para_publicar(ctx):
+    """Lo que publicar.py necesita saber de un video, leido de lo que ya hay."""
+    P = _publicar()
+    mp4, mp4_rel = _mp4_del_video(ctx.proyecto)
+    huella = P.huella_mp4(mp4) if mp4 else ""
+    medidas = {}
+    if mp4:
+        medidas = _MEDIDAS_MP4.get((mp4, huella))
+        if medidas is None:
+            medidas = P.medir_mp4(mp4)
+            if len(_MEDIDAS_MP4) >= _MAX_MEDIDAS_MP4:
+                _MEDIDAS_MP4.clear()
+            _MEDIDAS_MP4[(mp4, huella)] = medidas
+    plan, bloques = {}, []
+    if PASOS_MODULOS is not None:
+        try:
+            plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets",
+                                                       estado=ctx.estado) or {}
+        except Exception:                                   # noqa: BLE001
+            plan = {}
+        try:
+            bloques = _bloques_del_guion(ctx)
+        except Exception:                                   # noqa: BLE001
+            bloques = []
+    if medidas.get("ancho") and medidas.get("alto"):
+        formato = "vertical" if medidas["alto"] > medidas["ancho"] else "horizontal"
+    else:
+        formato = str(plan.get("formato") or "horizontal")
+        formato = "vertical" if formato == "vertical" else "horizontal"
+    duracion = float(medidas.get("duracion") or plan.get("duracion_total") or 0.0)
+    cid = _cliente_del_video(ctx.proyecto)
+    ingesta = ctx.estado.params("ingesta") or {}
+    return {
+        "pid": ctx.id, "nombre": (ctx.proyecto.config or {}).get("nombre") or ctx.id,
+        "cliente": cid, "cliente_nombre": _nombres_de_clientes().get(cid, ""),
+        "montado": bool(mp4), "mp4": mp4, "mp4_rel": mp4_rel, "mp4_huella": huella,
+        "formato": formato, "duracion_s": round(duracion, 1),
+        "titulo": str(ingesta.get("titulo") or ""),
+        "material": str(ingesta.get("texto") or ""),
+        "instrucciones": str((ctx.estado.params("brief") or {}).get("instrucciones") or ""),
+        "cta": (ctx.estado.params("guion") or {}).get("cta") or {},
+        "guion": bloques,
+        "capitulos_base": P.capitulos_base(plan.get("escenas") or [], duracion),
+    }
+
+
+def _videos_para_publicar(peticion):
+    """Los videos que quien pregunta puede ver, sin abrir el estado de ninguno."""
+    cerrados = _cerrados(peticion)
+    asignaciones = CLIENTES._leer(raiz_proyectos())
+    nombres = _nombres_de_clientes()
+    salida = []
+    for ficha in Proyecto.listar(raiz_proyectos()):
+        if ficha.get(CONFIG_TALLER):
+            continue
+        cid = CLIENTES.cliente_de(raiz_proyectos(), ficha.get(CONFIG_ESTILO_LIGHT) or "",
+                                  ficha.get("id"), datos=asignaciones)
+        if cerrados and cid in cerrados:
+            continue
+        try:
+            mp4, _rel = _mp4_del_video(Proyecto(ficha["raiz"]))
+        except Exception:                                   # noqa: BLE001
+            mp4 = ""
+        salida.append({"pid": ficha.get("id"), "nombre": ficha.get("nombre") or ficha.get("id"),
+                       "cliente": cid, "cliente_nombre": nombres.get(cid, ""),
+                       "montado": bool(mp4), "actualizado": ficha.get("actualizado") or ""})
+    return salida
+
+
+@app.get("/api/publicar/estado")
+def publicar_estado():
+    """Si hay clave de Upload-Post (y de donde sale). Nunca la clave."""
+    return {"clave": _publicar().estado_clave(), "redes": list(_publicar().REDES),
+            "zona": _publicar().ZONA, "ahora": _publicar()._iso_lima()}
+
+
+@app.post("/api/publicar/probar")
+def publicar_probar():
+    """Prueba la clave contra Upload-Post sin gastar ninguna subida."""
+    return _por_publicar(_publicar().probar_clave, raiz_proyectos())
+
+
+@app.get("/api/publicar/cola")
+def publicar_cola(peticion: Request, desde: str = Query(default=""),
+                  dias: int = Query(default=7)):
+    """Los videos listos para publicar y los envios de la semana (hora de Lima)."""
+    return _publicar().cola(raiz_proyectos(), _videos_para_publicar(peticion),
+                            desde=desde or None, dias=dias)
+
+
+@app.post("/api/publicar/refrescar")
+def publicar_refrescar():
+    """Pregunta a Upload-Post por los envios que siguen en el aire."""
+    return _publicar().refrescar(raiz_proyectos())
+
+
+@app.get("/api/publicar/videos/{pid}")
+def publicar_ficha(pid: str, peticion: Request):
+    """La ficha de publicar de un video: redes, textos, encaje, envios."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    ajustes = _publicar().ajustes_de(raiz_proyectos(), info["cliente"])
+    return _publicar().ficha(raiz_proyectos(), info, ajustes)
+
+
+@app.put("/api/publicar/videos/{pid}")
+def publicar_guardar_ficha(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?}"""
+    ctx = _ctx_publicable(pid, peticion)
+    _por_publicar(_publicar().guardar_ficha, raiz_proyectos(), ctx.id, _cuerpo(cuerpo))
+    return publicar_ficha(pid, peticion)
+
+
+@app.post("/api/publicar/videos/{pid}/textos", status_code=202)
+def publicar_escribir_textos(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Claude escribe los textos de las redes pedidas: {redes}. Se sigue
+    preguntando por la ficha (`escribiendo`)."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    ajustes = _publicar().ajustes_de(raiz_proyectos(), info["cliente"])
+    redes = _cuerpo(cuerpo).get("redes")
+    _por_publicar(_publicar().lanzar_textos, raiz_proyectos(), info, redes, ajustes,
+                  proyecto=ctx.proyecto, cwd=ctx.proyecto.raiz)
+    anotar_global("publicar_textos", {"proyecto": ctx.id, "redes": redes})
+    return {"escribiendo": True}
+
+
+@app.post("/api/publicar/videos/{pid}/enviar", status_code=202)
+def publicar_enviar(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{redes, modo: ahora|programar|pendiente, cuando?, confirmado, repetir?}"""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    ajustes = _publicar().ajustes_de(raiz_proyectos(), info["cliente"])
+    nuevos = _por_publicar(_publicar().enviar, raiz_proyectos(), info, ajustes,
+                           _cuerpo(cuerpo))
+    ctx.bitacora.anotar("publicar_envio", "render", {
+        "redes": [e["red"] for e in nuevos], "modo": _cuerpo(cuerpo).get("modo"),
+        "cuando": nuevos[0]["cuando"] if nuevos else ""})
+    return {"envios": nuevos}
+
+
+@app.post("/api/publicar/videos/{pid}/envios/{eid}/confirmar", status_code=202)
+def publicar_confirmar(pid: str, eid: str, peticion: Request,
+                       cuerpo: dict = Body(default=None)):
+    """Un envio que esperaba tu OK sale: {confirmado, modo?, cuando?}."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    ajustes = _publicar().ajustes_de(raiz_proyectos(), info["cliente"])
+    nuevos = _por_publicar(_publicar().confirmar, raiz_proyectos(), info, ajustes,
+                           eid, _cuerpo(cuerpo))
+    return {"envios": nuevos}
+
+
+@app.post("/api/publicar/videos/{pid}/envios/{eid}/reintentar", status_code=202)
+def publicar_reintentar(pid: str, eid: str, peticion: Request):
+    """Vuelve a mandar un envio que quedo en «comprobar», con su misma clave de
+    idempotencia (si Upload-Post ya lo tenia, no se publica dos veces)."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    ajustes = _publicar().ajustes_de(raiz_proyectos(), info["cliente"])
+    r = _por_publicar(_publicar().reintentar, raiz_proyectos(), info, ajustes, eid)
+    ctx.bitacora.anotar("publicar_reintento", "render", r)
+    return r
+
+
+@app.post("/api/publicar/videos/{pid}/envios/{eid}/cancelar")
+def publicar_cancelar(pid: str, eid: str, peticion: Request):
+    """Cancela lo programado (en Upload-Post) o lo que esperaba tu OK, y quita
+    de la lista un envio que fallo."""
+    ctx = _ctx_publicable(pid, peticion)
+    r = _por_publicar(_publicar().cancelar, raiz_proyectos(), ctx.id, eid)
+    ctx.bitacora.anotar("publicar_cancelado", "render", r)
+    return r
+
+
+@app.post("/api/publicar/videos/{pid}/a-mano")
+def publicar_a_mano(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«Lo he subido yo»: {red, url?}. Queda en el historial."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    datos = _cuerpo(cuerpo)
+    envio = _por_publicar(_publicar().marcar_a_mano, raiz_proyectos(), info,
+                          datos.get("red"), datos.get("url") or "")
+    return {"envio": envio}
+
+
+def _proyecto_publicable(cid, peticion):
+    """El id del proyecto (cliente) o SIN_PROYECTO; 404 si no existe o esta cerrado."""
+    cid = str(cid or "")
+    if cid == _publicar().SIN_PROYECTO:
+        return cid
+    if cid not in _nombres_de_clientes() or cid in _cerrados(peticion):
+        raise ErrorApi(404, f"no hay ningún proyecto «{cid}»")
+    return cid
+
+
+@app.get("/api/publicar/proyectos")
+def publicar_proyectos(peticion: Request):
+    """Cada proyecto con lo fijo de publicar y sus cuentas (lo ultimo visto)."""
+    P = _publicar()
+    cerrados = _cerrados(peticion)
+    filas = [{"id": P.SIN_PROYECTO, "nombre": "Vídeos sin proyecto",
+              "ajustes": P.ajustes_de(raiz_proyectos(), P.SIN_PROYECTO)}]
+    for cid, nombre in _nombres_de_clientes().items():
+        if cid in cerrados:
+            continue
+        filas.append({"id": cid, "nombre": nombre,
+                      "ajustes": P.ajustes_de(raiz_proyectos(), cid),
+                      "perfil_sugerido": P.perfil_sugerido(cid, nombre)})
+    filas[0]["perfil_sugerido"] = P.perfil_sugerido("", "sin_proyecto")
+    return {"proyectos": filas, "clave": P.estado_clave()}
+
+
+@app.put("/api/publicar/proyectos/{cid}")
+def publicar_guardar_ajustes(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Lo fijo de un proyecto: {perfil, redes, hora, firma, hashtags, tono,
+    marcar_ia, avisar_youtube, privacidad_youtube, facebook_pagina}."""
+    cid = _proyecto_publicable(cid, peticion)
+    ajustes = _por_publicar(_publicar().guardar_ajustes, raiz_proyectos(), cid, _cuerpo(cuerpo))
+    return {"ajustes": ajustes}
+
+
+@app.post("/api/publicar/proyectos/{cid}/cuentas")
+def publicar_ver_cuentas(cid: str, peticion: Request):
+    """Pregunta a Upload-Post que cuentas tiene conectadas el perfil del proyecto."""
+    P = _publicar()
+    cid = _proyecto_publicable(cid, peticion)
+    ajustes = P.ajustes_de(raiz_proyectos(), cid)
+    if not ajustes.get("perfil"):
+        raise ErrorApi(409, "este proyecto todavía no tiene perfil de Upload-Post")
+    lista = _por_publicar(lambda: P._por_upload_post(P.cliente(raiz_proyectos()).perfiles))
+    propio = next((p for p in lista["perfiles"] if p["perfil"] == ajustes["perfil"]), None)
+    if propio is None:
+        # sin la lista de perfiles de la cuenta: serian los de otros clientes
+        return {"existe": False, "ajustes": ajustes}
+    return {"existe": True, "ajustes": P.recordar_cuentas(raiz_proyectos(), cid, propio["cuentas"])}
+
+
+@app.post("/api/publicar/proyectos/{cid}/perfil")
+def publicar_crear_perfil(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Crea el perfil del proyecto en Upload-Post ({perfil}, o el sugerido) y lo
+    apunta. Si ya existia alli, solo lo apunta."""
+    P = _publicar()
+    cid = _proyecto_publicable(cid, peticion)
+    nombre = _nombres_de_clientes().get(cid, "sin_proyecto")
+    perfil = str(_cuerpo(cuerpo).get("perfil") or P.perfil_sugerido(cid, nombre)).strip()
+    _por_publicar(P._validar_ajustes, {"perfil": perfil})
+    cli = _por_publicar(P.cliente, raiz_proyectos())
+    # un perfil es UN cliente: si ya lo usa otro proyecto, ni se crea ni se adopta
+    if P.perfil_de_otro(raiz_proyectos(), perfil, cid):
+        raise ErrorApi(409, "ese perfil de Upload-Post ya es de otro proyecto: escribe "
+                            "otro nombre para este")
+    try:
+        hecho = cli.crear_perfil(perfil)
+    except P.UP.ErrorUploadPost as fallo:
+        if fallo.codigo != 409:
+            raise ErrorApi(409 if fallo.codigo in (401, 403) else 502, str(fallo)) from None
+        # ya existia en Upload-Post y no es de ningun otro proyecto de aqui: sus
+        # cuentas no se saben hasta «Ver cuentas»
+        hecho = {"perfil": perfil, "cuentas": {}, "sin_mirar": True}
+    ajustes = P.guardar_ajustes(raiz_proyectos(), cid, {"perfil": hecho["perfil"]},
+                                internos={"cuentas": hecho["cuentas"],
+                                          "cuentas_vistas": "" if hecho.get("sin_mirar")
+                                          else P._iso_lima()})
+    return {"ajustes": ajustes}
+
+
+@app.post("/api/publicar/proyectos/{cid}/conectar")
+def publicar_conectar(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """El enlace (48 h) para conectar o reconectar las cuentas: {redes?, volver_a?}."""
+    P = _publicar()
+    cid = _proyecto_publicable(cid, peticion)
+    ajustes = P.ajustes_de(raiz_proyectos(), cid)
+    if not ajustes.get("perfil"):
+        raise ErrorApi(409, "crea antes el perfil de Upload-Post de este proyecto")
+    datos = _cuerpo(cuerpo)
+    redes = datos.get("redes") if isinstance(datos.get("redes"), list) else None
+    volver = str(datos.get("volver_a") or "")
+    if not re.match(r"^https?://[^\s]{3,1900}$", volver):
+        volver = None
+    enlace = _por_publicar(lambda: P._por_upload_post(
+        P.cliente(raiz_proyectos()).enlace_conectar, ajustes["perfil"], redes=redes, volver_a=volver))
+    return enlace
+
+
+# ------------------------------------------- publicar: las cifras de lo publicado
+# Se piden a Upload-Post solo al pulsar «Actualizar» (deja 100 consultas cada 5
+# minutos por cuenta). Lo ultimo que se supo vive en cada envio; ver
+# `publicar.actualizar_metricas`.
+
+@app.post("/api/publicar/videos/{pid}/metricas")
+def publicar_metricas_video(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Pide las cifras de lo publicado de este video: {forzar?}."""
+    ctx = _ctx_publicable(pid, peticion)
+    r = _por_publicar(_publicar().actualizar_metricas, raiz_proyectos(), [ctx.id],
+                      forzar=bool(_cuerpo(cuerpo).get("forzar")))
+    return dict(r, ficha=publicar_ficha(pid, peticion))
+
+
+@app.get("/api/publicar/resultados")
+def publicar_resultados(peticion: Request, proyecto: str = Query(default=""),
+                        dias: int = Query(default=30)):
+    """El resumen de un proyecto (lo que ya se sabe; no pregunta a nadie)."""
+    P = _publicar()
+    cid = _proyecto_publicable(proyecto or P.SIN_PROYECTO, peticion)
+    return P.resultados(raiz_proyectos(), _videos_para_publicar(peticion),
+                        "" if cid == P.SIN_PROYECTO else cid, dias=dias)
+
+
+@app.post("/api/publicar/proyectos/{cid}/metricas")
+def publicar_metricas_proyecto(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Pide las cifras de lo publicado del proyecto y los seguidores de sus
+    cuentas. -> {consultados, actualizados, pendientes, errores, seguidores?}"""
+    P = _publicar()
+    cid = _proyecto_publicable(cid, peticion)
+    clave = "" if cid == P.SIN_PROYECTO else cid
+    pids = [v["pid"] for v in _videos_para_publicar(peticion)
+            if (v.get("cliente") or "") == clave]
+    r = _por_publicar(P.actualizar_metricas, raiz_proyectos(), pids,
+                      forzar=bool(_cuerpo(cuerpo).get("forzar")))
+    if P.ajustes_de(raiz_proyectos(), cid).get("perfil"):
+        try:
+            P.actualizar_seguidores(raiz_proyectos(), cid)
+        except P.ErrorPublicar as fallo:
+            r.setdefault("errores", []).append(f"seguidores: {fallo}")
+    return r
+
+
 # ------------------------------------------------------------------------ main
 
 def main():

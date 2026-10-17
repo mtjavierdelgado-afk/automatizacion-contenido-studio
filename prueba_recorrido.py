@@ -3348,5 +3348,171 @@ def main():
     return 0
 
 
+# ======================================================================
+# PUBLICAR (rama `publicar-redes-1`, 16-10-2026). Tramo propio y al final,
+# para no chocar con las otras ramas que tocan este fichero. El servidor del
+# recorrido corre con ESTUDIO_SIMULAR=1: Upload-Post es el SIMULADO y los
+# textos los escribe el doble de Claude, así que nada sale a ninguna red.
+
+@escenario
+def publicar_en_redes(navegador, datos):
+    """La barra de módulos (Crear sigue siendo lo que se abre), «Enviar a
+    Publicar» debajo del vídeo montado, la ficha con los textos por red,
+    programar con su confirmación delante, la cola y el calendario, las
+    cuentas, y volver a Crear donde se dejó. Y en el móvil, que cabe."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    ok(pg.esperar("#barra-modulos .boton-modulo", "Publicar"), "arriba sale la barra de módulos")
+    ok(pg.visible("#barra-modulos .boton-modulo.activo", "Crear"),
+       "y se abre en Crear, la pantalla de siempre")
+    pg.js(f"await abrirVideoLight('{pid}');")
+    ok(_montar_desde_video(pg), "se parte de un vídeo montado")
+    ok(pg.esperar(".bloque-publicar-video a", "Enviar a Publicar", 15),
+       "debajo del vídeo montado sale «Enviar a Publicar»")
+    pg.pulsar(".bloque-publicar-video a", "Enviar a Publicar")
+    ok(pg.esperar(".ficha-publicar .nombre-ficha", segundos=15), "abre la ficha del vídeo en Publicar")
+    ok(not pg.visible("#panel"), "y el panel de Crear queda escondido detrás")
+    ok(pg.visible("#barra-modulos .boton-modulo.activo", "Publicar"), "con «Publicar» marcado")
+    ok(pg.visible(".caja-aviso", "SIMULADO"), "avisa de que Upload-Post es el simulado")
+
+    # el perfil del proyecto del vídeo, por la API (Cuentas y ajustes se mira abajo)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    r, _d = api.post(f"/api/publicar/proyectos/{cid}/perfil", {})
+    ok(r.status_code == 200, f"el proyecto del vídeo tiene perfil de Upload-Post ({r.status_code})")
+    api.post(f"/api/publicar/proyectos/{cid}/conectar", {"redes": ["tiktok", "instagram", "youtube"]})
+    api.post(f"/api/publicar/proyectos/{cid}/cuentas")
+    pg.js("await cargarPublicar();")
+    ok(pg.esperar(".ficha-publicar .caja-aviso", "sin cuenta conectada", 10),
+       "una red sin cuenta conectada (Facebook) se avisa")
+    pg.p.locator(".casilla-red", has_text="Facebook").locator("input").first.uncheck()
+    pg.p.wait_for_timeout(1200)
+
+    pg.pulsar(".ficha-publicar button", "Que Claude escriba los textos")
+    fin = time.time() + 25
+    while time.time() < fin and not pg.p.evaluate(
+            "() => !!(PUB.ficha && !PUB.ficha.escribiendo && PUB.ficha.textos && PUB.ficha.textos.tiktok)"):
+        pg.p.wait_for_timeout(500)
+    pg.p.wait_for_timeout(800)
+    ok(pg.esperar(".texto-red h3", "TikTok", 10), "un bloque de texto por red elegida")
+    valor = pg.p.evaluate("() => (document.querySelector('.texto-red[data-red=tiktok] textarea') || {}).value || ''")
+    ok(valor.startswith("[TikTok]"), f"con el texto que escribió Claude (el doble): {valor[:40]!r}")
+    ok(pg.visible(".texto-red button", "Copiar texto"), "cada red con su «Copiar texto»")
+    # la guía y «Revisar» de cada red, como los campos de Crear
+    pg.p.locator('.texto-red[data-red="tiktok"] .boton-guia').first.click()
+    ok(pg.esperar("#ventana-guia h2", "Texto para TikTok", 10), "«✦ Guía» abre la guía de TikTok")
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    pg.p.locator('.texto-red[data-red="tiktok"] button', has_text="Revisar").first.click()
+    ok(pg.esperar('.texto-red[data-red="tiktok"] .revision-publicar', segundos=40),
+       "«✓ Revisar» enseña la revisión del texto contra su guía")
+    pg.p.wait_for_timeout(2500)
+    pg.p.locator('.texto-red[data-red="tiktok"]').first.scroll_into_view_if_needed()
+    pg.captura("publicar_revisar")
+    ok(pg.visible(".ficha-publicar a.boton-enlace", "Descargar MP4"), "y «Descargar MP4»")
+
+    # editar a mano se guarda solo
+    caja = pg.p.locator(".texto-red[data-red=instagram] textarea").first
+    caja.fill("Reel escrito a mano para la prueba")
+    pg.p.locator(".ficha-publicar h3").first.click()
+    pg.p.wait_for_timeout(2000)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    ok((ficha.get("textos", {}).get("instagram") or {}).get("descripcion") == "Reel escrito a mano para la prueba",
+       "lo escrito a mano se guarda solo")
+
+    # programar, con la confirmación delante
+    manana = pg.p.evaluate("() => PUB.ficha.hora_sugerida")
+    ok(bool(manana), f"propone la hora por defecto del proyecto: {manana}")
+    antes = len(pg.dialogos)
+    pg.pulsar(".cuando-publicar button", "Programar")
+    ok(len(pg.dialogos) > antes and "hora de Lima" in pg.dialogos[-1],
+       "antes de enviar pide confirmarlo, con las redes y la hora de Lima")
+    fin = time.time() + 20
+    while time.time() < fin and not pg.visible(".ficha-publicar .fila-envio .pastilla", "programado"):
+        pg.p.wait_for_timeout(500)
+    ok(pg.visible(".ficha-publicar .fila-envio .pastilla", "programado"), "y queda programado en la lista de envíos")
+    ok(pg.visible(".ficha-publicar .fila-envio button", "Cancelar"), "con su «Cancelar»")
+    pg.captura("publicar_ficha")
+
+    # la cola y el calendario
+    pg.pulsar(".pestanas-publicar button", "Cola y calendario")
+    ok(pg.esperar(".calendario-publicar .dia-publicar", segundos=10), "la semana, día a día")
+    ok(pg.esperar(".calendario-publicar .envio-dia", segundos=10), "con lo programado en su día")
+    ok(pg.visible(".fila-listo", ""), "y los vídeos listos para publicar")
+    pg.captura("publicar_cola")
+
+    # resultados (las métricas)
+    pg.pulsar(".pestanas-publicar button", "Resultados")
+    ok(pg.esperar(".cifras-publicar .cifra", segundos=10), "Resultados: las cifras del proyecto")
+    ok(pg.visible(".resultados-publicar button", "Actualizar"), "con su «Actualizar»")
+    ok(pg.visible(".tabla-redes .fila-red", "TikTok"), "y una fila por red")
+    pg.captura("publicar_resultados")
+
+    # cuentas y ajustes
+    pg.pulsar(".pestanas-publicar button", "Cuentas y ajustes")
+    ok(pg.esperar(".proyecto-publicar h3", segundos=10), "cada proyecto con su perfil y sus cuentas")
+    ok(pg.visible(".cuentas-proyecto .pastilla", "TikTok"), "y qué cuentas tiene conectadas")
+    pg.p.locator(".ajustes-fijos > summary").first.click()
+    ok(pg.esperar(".ajustes-fijos .boton-guia", segundos=5), "el tono de los textos tiene su «✦ Guía»")
+    ok(pg.visible(".ajustes-fijos button", "Revisar"), "y su «✓ Revisar»")
+    tono = pg.p.locator(".ajustes-fijos textarea[data-tono]").first
+    tono.fill("CÓMO SUENA: de tú, cercano. EMOJIS: uno.")
+    pg.p.wait_for_timeout(1600)
+    pg.p.locator(".ajustes-fijos button", has_text="Revisar").first.click()
+    ok(pg.esperar(".ajustes-fijos .revision-publicar", segundos=40),
+       "«Revisar» el tono: el bloque sigue abierto y enseña la revisión")
+    ok(pg.p.locator(".ajustes-fijos textarea[data-tono]").first.input_value().startswith("CÓMO SUENA: de tú"),
+       "y el tono escrito sigue ahí tras repintar")
+    pg.captura("publicar_cuentas")
+
+    # la clave, en Configuración
+    pg.js("conmutarConfig(true);")
+    ok(pg.esperar("#cuerpo-config h3", "Publicar en redes", 10),
+       "Configuración tiene la casilla de la clave de Upload-Post")
+    pg.js("conmutarConfig(false);")
+
+    # Inicio y Automatizar
+    pg.pulsar("#barra-modulos .boton-modulo", "Inicio")
+    ok(pg.esperar(".tarjetas-modulo .tarjeta-modulo h3", "Publicar", 10), "Inicio: las tres tarjetas")
+    ok(pg.esperar(".inicio-modulos h3", "Lo que pasa hoy", 10), "y «lo que pasa hoy»")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    ok(pg.esperar(".automatizar .pastilla", "próximamente", 10), "Automatizar sale, y dice que llega después")
+
+    # de vuelta a Crear, donde se dejó
+    pg.pulsar("#barra-modulos .boton-modulo", "Crear")
+    ok(pg.esperar(".bloque-publicar-video", segundos=10), "volver a Crear deja el vídeo donde estaba")
+    ok(pg.p.evaluate("() => (APP.light.video || {}).pid") == pid, "con el mismo vídeo abierto")
+
+    # «atrás» del móvil vuelve a Publicar
+    pg.p.go_back()
+    pg.p.wait_for_timeout(1200)
+    ok(pg.p.evaluate("() => MODULOS.actual") != "crear", "«atrás» vuelve al módulo de antes")
+    pg.sin_errores("publicar en redes")
+    pg.cerrar()
+
+    # en el móvil
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="publicar móvil")
+    for seccion_pub in ("cola", "cuentas", "resultados"):
+        pg.js(f"PUB.seccion = '{seccion_pub}'; irAModulo('publicar');")
+        pg.p.wait_for_timeout(1500)
+        ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        ok(ancho <= 2, f"Publicar ({seccion_pub}) cabe en un móvil sin salirse por los lados ({ancho}px)")
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    pg.p.wait_for_timeout(2000)
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    ok(ancho <= 2, f"y la ficha de un vídeo también ({ancho}px)")
+    caja = pg.p.evaluate("() => { const b = document.querySelector('#barra-modulos'); "
+                         "return b ? [b.scrollWidth, b.clientWidth] : [0, 0]; }")
+    ok(caja[0] <= caja[1] + 2, f"la barra de módulos cabe entera en 390 px ({caja})")
+    pg.captura("publicar_movil", entera=False)
+    texto = pg.p.evaluate("() => document.querySelector('#modulo').innerText")
+    malos = sorted(set(x.group(0) for x in TEXTOS_MALOS.finditer(texto)))
+    ok(not malos, f"sin «undefined», «NaN» ni «null» en Publicar ({malos})")
+    pg.sin_errores("publicar en el móvil")
+    pg.cerrar()
+
+
 if __name__ == "__main__":
     sys.exit(main())

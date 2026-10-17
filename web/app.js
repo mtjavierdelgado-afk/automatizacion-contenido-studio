@@ -2441,6 +2441,7 @@ function pintarConfig() {
   caja.appendChild(seccionPronunciacion());
   caja.appendChild(seccionCLI());
   caja.appendChild(seccionOtrasClaves(ficha));
+  caja.appendChild(seccionClaveUploadPost(ficha));  // Publicar en redes (rama publicar-redes-1)
   caja.appendChild(h('div', { clase: 'fila' },
     h('button', {
       clase: 'mini fantasma',
@@ -10471,6 +10472,7 @@ function vistaVideoLight() {
      (N9 de las notas de mejoras, 13-10-2026): es donde se oye lo que se
      quiere cambiar. Cada fila es una línea cerrada; no empuja el repaso. */
   if (hayMp4Light() && !trabajoVideoLight()) caja.appendChild(ajustesEnElVideo());
+  meter(caja, [bloquePublicarEnVideo(v)]);  // Publicar en redes (rama publicar-redes-1)
 
   /* LA TIRA DE VINETAS SOLO MIENTRAS SE GENERA.
      Con el video ya montado esta pantalla es para VERLO y comentarlo, y
@@ -16819,6 +16821,1279 @@ function minimizarBurbuja(si, sinGuardar) {
     try { localStorage.setItem('asistente.minimizado', si ? '1' : ''); } catch (e) { /* nada */ }
   }
 }
+
+/* ================================================================== PUBLICAR
+ *
+ * LOS MÓDULOS Y PUBLICAR (rama `publicar-redes-1`, 16-10-2026). Todo lo de
+ * esta sección es nuevo y vive aquí, al final, a propósito: otras ramas cambian
+ * el resto del fichero y esto no debe chocar con ellas. Lo único fuera de aquí
+ * es UNA línea en la pantalla Vídeo (`bloquePublicarEnVideo`).
+ *
+ *   - LA BARRA DE MÓDULOS (Inicio · Crear · Publicar · Automatizar) va debajo
+ *     de la cabecera. «Crear» es la pantalla de siempre (estilos y vídeos) sin
+ *     cambiar nada, y es la que sale al abrir.
+ *   - Los otros módulos se pintan en su propio contenedor (#modulo) y #panel
+ *     se esconde con una clase en <body>. NO se intercepta `pintarLight`: el
+ *     panel sigue pintándose escondido como siempre y al volver a «Crear» está
+ *     donde se dejó.
+ *   - Publicar habla con sus propias rutas (`rutaPublicar`), no con el objeto
+ *     API, y no toca Configuración: la clave de Upload-Post tendrá su casilla
+ *     cuando se una `arreglos-voz`. Mientras, se lee del .env del servidor.
+ *   - Nada sale sin confirmar: cada envío pide un OK con las redes y la hora
+ *     delante, y el servidor exige `confirmado: true`.
+ */
+const MODULOS = { actual: 'crear', montado: false };
+const PUB = {
+  seccion: 'cola', pid: '', cola: null, ficha: null, proyectos: null,
+  cargando: false, error: '', desde: '', reloj: null, borrador: {},
+  enviando: false, guardando: null, avisos: 0, repintar: false,
+  modoEnvio: '', cuandoEnvio: '',
+  resultados: null, proyectoResultados: '', diasResultados: 30, midiendo: false,
+};
+const NOMBRES_RED = { tiktok: 'TikTok', instagram: 'Instagram Reels', youtube: 'YouTube', facebook: 'Facebook' };
+const CORTOS_RED = { tiktok: 'TikTok', instagram: 'Reels', youtube: 'YouTube', facebook: 'Facebook' };
+const ESTADOS_ENVIO = {
+  espera_ok: 'espera tu OK', enviando: 'subiendo', programado: 'programado',
+  publicando: 'publicándose', publicado: 'publicado', fallido: 'falló',
+  cancelado: 'cancelado', comprobar: 'comprobar', a_mano: 'subido a mano',
+};
+const CLASE_ESTADO = {
+  publicado: 'ok', a_mano: 'ok', programado: 'ejecutando', publicando: 'ejecutando',
+  enviando: 'ejecutando', espera_ok: 'aviso', fallido: 'error', comprobar: 'aviso',
+  cancelado: '',
+};
+
+function rutaPublicar(resto) { return `${BASE}/api/publicar${resto || ''}`; }
+
+function montarModulos() {
+  if (MODULOS.montado || !$('#cabecera') || !$('#cuerpo')) return;
+  MODULOS.montado = true;
+  /* ENLACES Y NO BOTONES: cambiar de módulo es navegar (como «Enviar a
+     Publicar»), y así el barrido de botones del recorrido, que pulsa cada
+     botón de una pantalla de Crear, no se va a otro módulo a mitad. Los
+     módulos se prueban en su propio tramo del recorrido. */
+  const barra = h('nav', { id: 'barra-modulos', clase: 'barra-modulos', 'aria-label': 'Módulos' });
+  $('#cabecera').insertAdjacentElement('afterend', barra);
+  $('#cuerpo').appendChild(h('main', { id: 'modulo',
+    onfocusout: () => setTimeout(() => {
+      if (PUB.repintar && !campoPublicarConFoco()) repintarPublicarSinPisar();
+    }, 60) }));
+  pintarBarraModulos();
+  window.addEventListener('popstate', ev => {
+    const estado = ev.state || {};
+    const destino = estado.modulo || 'crear';
+    if (estado.pub) Object.assign(PUB, { seccion: estado.pub.seccion || 'cola', pid: estado.pub.pid || '' });
+    if (destino !== MODULOS.actual || destino === 'publicar') irAModulo(destino, { sinHistoria: true });
+    if (destino !== 'crear') setTimeout(sellarHistoriaModulo, 1500);
+  });
+  // el aviso de la barra (fallidos, esperando tu OK): una vez al abrir
+  pedir(rutaPublicar('/cola')).then(c => { PUB.cola = c; contarAvisosPublicar(); }).catch(() => {});
+}
+
+function contarAvisosPublicar() {
+  const c = PUB.cola || {};
+  PUB.avisos = (c.esperan_ok || []).length + (c.fallidos || []).length;
+  pintarBarraModulos();
+}
+
+function pintarBarraModulos() {
+  const barra = $('#barra-modulos');
+  if (!barra) return;
+  vaciar(barra);
+  [['inicio', 'Inicio', 'Lo que pasa hoy y los tres módulos'],
+    ['crear', 'Crear', 'Tus estilos y tus vídeos'],
+    ['publicar', 'Publicar', 'Cola, calendario, textos por red y cuentas'],
+    ['automatizar', 'Automatizar', 'Parrilla de guiones y piloto automático (próximamente)']]
+    .forEach(([id, texto, ayuda]) => barra.appendChild(h('a', {
+      href: '#', clase: `boton-modulo${MODULOS.actual === id ? ' activo' : ''}`, title: ayuda,
+      'aria-current': MODULOS.actual === id ? 'page' : null,
+      datos: { modulo: id },
+      onclick: ev => { ev.preventDefault(); irAModulo(id); },
+    }, texto, id === 'publicar' && PUB.avisos
+      ? h('span', { clase: 'aviso-modulo', title: 'Envíos que fallaron o esperan tu OK' }, String(PUB.avisos))
+      : null)));
+}
+
+function irAModulo(nombre, opciones) {
+  const o = opciones || {};
+  const antes = MODULOS.actual;
+  MODULOS.actual = nombre;
+  /* LA ENTRADA DE UN MÓDULO NO LLEVA EL SITIO DE CREAR (`light`): con él,
+     volver a ella hacía que Crear la restaurase y la reescribiera sin la marca
+     del módulo. Volver a Crear es volver a la entrada de antes, que sí lo lleva. */
+  if (!o.sinHistoria && (antes !== nombre || o.pub)) {
+    try {
+      history.pushState(nombre === 'crear' ? {} : {
+        modulo: nombre, pub: nombre === 'publicar' ? { seccion: PUB.seccion, pid: PUB.pid } : null,
+      }, '');
+    } catch (e) { /* sin historial: «atrás» sale, como antes */ }
+  }
+  document.body.classList.toggle('en-modulo', nombre !== 'crear');
+  if (nombre !== 'publicar') pararRelojPublicar();
+  pintarBarraModulos();
+  if (nombre === 'crear') {
+    pintarLight();
+    return;
+  }
+  const m = $('#modulo');
+  if (m) m.scrollTop = 0;
+  if (nombre === 'publicar') cargarPublicar();
+  else if (nombre === 'inicio') cargarInicioModulos();
+  else pintarModulo();
+}
+
+/* Crear apunta su sitio en la entrada del historial en la que esté (también
+   con su panel escondido) y al restaurar la reescribe sin la marca del módulo:
+   se vuelve a poner. */
+function sellarHistoriaModulo() {
+  if (MODULOS.actual === 'crear') return;
+  const estado = history.state || {};
+  if (estado.modulo === MODULOS.actual && !estado.light) return;
+  try {
+    history.replaceState({
+      modulo: MODULOS.actual,
+      pub: MODULOS.actual === 'publicar' ? { seccion: PUB.seccion, pid: PUB.pid } : null,
+    }, '');
+  } catch (e) { /* sin historial */ }
+}
+
+function pintarModulo() {
+  const m = $('#modulo');
+  if (!m || MODULOS.actual === 'crear') return;
+  sellarHistoriaModulo();
+  const foco = document.activeElement && document.activeElement.dataset
+    ? document.activeElement.dataset.foco : '';
+  vaciar(m);
+  const contenido = h('div', { clase: 'contenido modulo-contenido' });
+  m.appendChild(contenido);
+  try {
+    if (MODULOS.actual === 'inicio') contenido.appendChild(vistaInicioModulos());
+    else if (MODULOS.actual === 'publicar') contenido.appendChild(vistaPublicar());
+    else contenido.appendChild(vistaAutomatizar());
+  } catch (e) {
+    contenido.appendChild(cajaError(`fallo pintando el módulo: ${e.message}`));
+    console.error(e);
+  }
+  if (foco) {
+    const campo = m.querySelector(`[data-foco="${foco}"]`);
+    if (campo) campo.focus();
+  }
+}
+
+/* -------------------------------------------------------------- INICIO */
+
+async function cargarInicioModulos() {
+  pintarModulo();
+  try {
+    PUB.cola = await pedir(rutaPublicar('/cola'));
+    contarAvisosPublicar();
+  } catch (e) {
+    PUB.error = e.message;
+  }
+  if (MODULOS.actual === 'inicio') pintarModulo();
+}
+
+function vistaInicioModulos() {
+  const caja = h('div', { clase: 'inicio-modulos' });
+  caja.appendChild(h('div', { clase: 'light-cab' }, h('h2', {}, 'Inicio')));
+  const c = PUB.cola || {};
+  const tarjetas = h('div', { clase: 'tarjetas-modulo' });
+  [['crear', 'Crear', 'Estilos y vídeos: el encargo, el guion, la voz, las imágenes y el montaje.',
+    'Ir a Crear'],
+  ['publicar', 'Publicar', `${(c.listos || []).length} vídeo(s) listos · `
+    + `${(c.envios || []).filter(e => e.estado === 'programado').length} programado(s) esta semana.`,
+  'Ir a Publicar'],
+  ['automatizar', 'Automatizar', 'La Parrilla de guiones y el piloto automático llegan en la siguiente rama.',
+    'Ver qué será']].forEach(([id, titulo, texto, boton]) => tarjetas.appendChild(
+    h('div', { clase: 'tarjeta-modulo' },
+      h('h3', {}, titulo), h('p', { clase: 'meta' }, texto),
+      h('button', { clase: id === 'automatizar' ? 'mini' : 'primario mini', onclick: () => irAModulo(id) }, boton))));
+  caja.appendChild(tarjetas);
+  const hoy = h('div', { clase: 'bloque' }, h('h3', {}, 'Lo que pasa hoy'));
+  const deHoy = (c.de_hoy || []).concat((c.esperan_ok || []).filter(e => !(c.de_hoy || []).some(x => x.id === e.id)));
+  if (!PUB.cola) hoy.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+  else if (!deHoy.length && !(c.fallidos || []).length) {
+    hoy.appendChild(h('div', { clase: 'meta' }, 'Hoy no sale nada. Los envíos programados aparecerán aquí.'));
+  } else {
+    deHoy.concat((c.fallidos || []).filter(e => !deHoy.some(x => x.id === e.id)))
+      .forEach(e => hoy.appendChild(filaEnvioCola(e)));
+  }
+  caja.appendChild(hoy);
+  return caja;
+}
+
+/* --------------------------------------------------------- AUTOMATIZAR */
+
+function vistaAutomatizar() {
+  return h('div', { clase: 'automatizar' },
+    h('div', { clase: 'light-cab' }, h('h2', {}, 'Automatizar')),
+    h('div', { clase: 'caja-aviso' },
+      'Este módulo llega con la rama de la Parrilla. Mientras tanto, el Encargo se sigue llenando a mano '
+      + 'en Crear, y los vídeos montados se publican desde Publicar.'),
+    h('div', { clase: 'tarjetas-modulo' },
+      ...[['Parrilla', 'Matrices de guiones con su estado: pendiente, usado, publicado.'],
+        ['Añadir guiones', 'Subir un documento, pedírselos a Claude, o escribir o pegar uno.'],
+        ['Piloto automático', 'Una regla en forma de frase, el modo de aprobación, los topes de gasto y la línea del día.']]
+        .map(([t, d]) => h('div', { clase: 'tarjeta-modulo apagada' }, h('h3', {}, t), h('p', { clase: 'meta' }, d),
+          h('span', { clase: 'pastilla' }, 'próximamente')))));
+}
+
+/* ------------------------------------------------------------ PUBLICAR */
+
+async function cargarPublicar(silencio) {
+  if (!silencio) { PUB.cargando = true; pintarModulo(); }
+  PUB.error = '';
+  try {
+    if (PUB.seccion === 'ficha' && PUB.pid) {
+      PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`));
+    } else if (PUB.seccion === 'cuentas') {
+      PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
+    } else if (PUB.seccion === 'resultados') {
+      // la lista, cada vez: un proyecto con clave cerrado desde la última no sale
+      PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
+      const lista = (PUB.proyectos.proyectos || []);
+      if (!PUB.proyectoResultados || !lista.some(x => x.id === PUB.proyectoResultados)) {
+        const conPerfil = lista.find(x => x.id !== '_sin' && (x.ajustes || {}).perfil);
+        PUB.proyectoResultados = (conPerfil || lista[0] || { id: '_sin' }).id;
+      }
+      const pedido = PUB.proyectoResultados;
+      const dias = PUB.diasResultados || 30;
+      const r = await pedir(rutaPublicar(`/resultados?${consulta({ proyecto: pedido, dias })}`));
+      // si entretanto se eligió otro proyecto o periodo, esta respuesta ya no vale
+      if (pedido === PUB.proyectoResultados && dias === (PUB.diasResultados || 30)) PUB.resultados = r;
+    } else {
+      PUB.cola = await pedir(rutaPublicar(`/cola${PUB.desde ? `?desde=${encodeURIComponent(PUB.desde)}` : ''}`));
+      contarAvisosPublicar();
+    }
+  } catch (e) {
+    PUB.error = e.message;
+    // las cifras de otro proyecto no se quedan a la vista bajo el error
+    if (PUB.seccion === 'resultados') PUB.resultados = null;
+  }
+  PUB.cargando = false;
+  if (MODULOS.actual === 'publicar') {
+    if (silencio) repintarPublicarSinPisar(); else pintarModulo();
+  }
+  programarRelojPublicar();
+}
+
+/* NO SE REPINTA DEBAJO DE QUIEN ESCRIBE: un repintado rehace los campos y se
+   llevaría el cursor (y lo que se esté tecleando). Se apunta y se repinta al
+   salir del campo. */
+function campoPublicarConFoco() {
+  const campo = document.activeElement;
+  const m = $('#modulo');
+  return !!(campo && m && m.contains(campo) && /^(INPUT|TEXTAREA|SELECT)$/.test(campo.tagName));
+}
+
+function repintarPublicarSinPisar() {
+  if (campoPublicarConFoco()) { PUB.repintar = true; return; }
+  PUB.repintar = false;
+  pintarModulo();
+}
+
+/* Lo que está en el aire (subiendo, publicándose, Claude escribiendo) se
+   vuelve a preguntar cada pocos segundos mientras se mira Publicar. */
+function programarRelojPublicar() {
+  pararRelojPublicar();
+  if (MODULOS.actual !== 'publicar') return;
+  const f = PUB.ficha;
+  const enElAire = (PUB.seccion === 'ficha' && f && (f.escribiendo
+    || (f.envios || []).some(e => ['enviando', 'publicando', 'comprobar'].includes(e.estado))))
+    || (PUB.seccion === 'cola' && PUB.cola && (PUB.cola.envios || []).some(e =>
+      ['enviando', 'publicando', 'comprobar'].includes(e.estado)));
+  if (!enElAire) return;
+  PUB.reloj = setTimeout(async () => {
+    try { await pedir(rutaPublicar('/refrescar'), { method: 'POST' }); } catch (e) { /* se reintenta */ }
+    if (Object.keys(PUB.borrador).length || PUB.guardando) { programarRelojPublicar(); return; }
+    cargarPublicar(true);
+  }, 4000);
+}
+
+function pararRelojPublicar() {
+  if (PUB.reloj) clearTimeout(PUB.reloj);
+  PUB.reloj = null;
+}
+
+function olvidarEnvioPublicar() {
+  PUB.modoEnvio = '';
+  PUB.cuandoEnvio = '';
+  PUB.borrador = {};
+}
+
+function irASeccionPublicar(seccion, pid) {
+  PUB.seccion = seccion;
+  if (pid !== undefined && pid !== PUB.pid) olvidarEnvioPublicar();
+  if (pid !== undefined) PUB.pid = pid;
+  if (seccion === 'ficha' && pid) PUB.ficha = PUB.ficha && PUB.ficha.pid === pid ? PUB.ficha : null;
+  irAModulo('publicar', { pub: true });
+}
+
+/* «Enviar a Publicar» desde la pantalla Vídeo de Crear */
+function abrirPublicarVideo(pid) {
+  if (!pid) return;
+  if (pid !== PUB.pid) olvidarEnvioPublicar();
+  PUB.seccion = 'ficha';
+  PUB.pid = pid;
+  PUB.ficha = null;
+  irAModulo('publicar', { pub: true });
+}
+
+function vistaPublicar() {
+  const caja = h('div', { clase: 'publicar' });
+  const pestanas = h('div', { clase: 'pestanas-publicar', role: 'tablist' });
+  [['cola', 'Cola y calendario'], ['ficha', PUB.ficha && PUB.seccion === 'ficha' ? recortar(PUB.ficha.nombre, 28) : 'Ficha de un vídeo'],
+    ['resultados', 'Resultados'], ['cuentas', 'Cuentas y ajustes']].forEach(([id, texto]) => pestanas.appendChild(h('button', {
+    clase: `mini${PUB.seccion === id ? ' activo' : ' fantasma'}`, role: 'tab',
+    'aria-selected': PUB.seccion === id ? 'true' : 'false',
+    disabled: id === 'ficha' && !PUB.pid,
+    title: id === 'ficha' && !PUB.pid ? 'elige un vídeo en la cola' : '',
+    onclick: () => irASeccionPublicar(id),
+  }, texto)));
+  caja.appendChild(h('div', { clase: 'light-cab' }, h('h2', {}, 'Publicar'), h('span', { clase: 'crece' }),
+    pestanas));
+  if (PUB.error) caja.appendChild(cajaError(PUB.error));
+  const yaHay = { cola: PUB.cola, ficha: PUB.ficha, cuentas: PUB.proyectos, resultados: PUB.resultados };
+  if (PUB.cargando && !yaHay[PUB.seccion]) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'cargando…'));
+    return caja;
+  }
+  if (PUB.seccion === 'ficha') caja.appendChild(seccionFichaPublicar());
+  else if (PUB.seccion === 'cuentas') caja.appendChild(seccionCuentasPublicar());
+  else if (PUB.seccion === 'resultados') caja.appendChild(seccionResultadosPublicar());
+  else caja.appendChild(seccionColaPublicar());
+  return caja;
+}
+
+function avisoClavePublicar(clave) {
+  if (!clave || clave.puesta) {
+    return clave && clave.simulado
+      ? h('div', { clase: 'caja-aviso' }, 'Upload-Post SIMULADO: nada sale de verdad a ninguna red.')
+      : null;
+  }
+  return h('div', { clase: 'caja-aviso fila' },
+    h('span', { clase: 'crece' }, 'Todavía no hay clave de Upload-Post. Puedes preparar los textos y publicar '
+      + 'a mano (copiar y descargar el MP4). Para publicar y programar desde aquí, pon la clave en '
+      + 'Configuración → Publicar en redes (nunca en un chat).'),
+    h('button', { clase: 'mini', onclick: () => conmutarConfig(true) }, 'Abrir Configuración'));
+}
+
+function cuandoLegible(iso) {
+  if (!iso) return '';
+  const [dia, hora] = String(iso).split('T');
+  const [a, m, d] = dia.split('-').map(Number);
+  const fecha = new Date(Date.UTC(a, (m || 1) - 1, d || 1));
+  const nombre = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'][fecha.getUTCDay()];
+  return `${nombre} ${d}/${m}${hora ? ` ${hora.slice(0, 5)}` : ''}`;
+}
+
+function pastillaEstadoEnvio(estado) {
+  return h('span', { clase: `pastilla ${CLASE_ESTADO[estado] || ''}` }, ESTADOS_ENVIO[estado] || estado);
+}
+
+function filaEnvioCola(e) {
+  return h('div', { clase: 'fila fila-envio' },
+    h('span', { clase: 'meta hora-envio' }, cuandoLegible(e.cuando)),
+    h('b', {}, CORTOS_RED[e.red] || e.red),
+    h('button', { clase: 'mini fantasma nombre-envio', title: 'Abrir la ficha de este vídeo',
+      onclick: () => irASeccionPublicar('ficha', e.pid) }, e.video || e.pid),
+    e.cliente_nombre ? h('span', { clase: 'meta' }, e.cliente_nombre) : null,
+    h('span', { clase: 'crece' }),
+    pastillaEstadoEnvio(e.estado),
+    e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver') : null);
+}
+
+function seccionColaPublicar() {
+  const c = PUB.cola || {};
+  const caja = h('div', { clase: 'cola-publicar' });
+  const aviso = avisoClavePublicar(c.clave);
+  if (aviso) caja.appendChild(aviso);
+
+  const atencion = (c.esperan_ok || []).concat(c.fallidos || []);
+  if (atencion.length) {
+    const b = h('div', { clase: 'bloque bloque-atencion' }, h('h3', {}, 'Te necesitan'));
+    atencion.forEach(e => b.appendChild(filaEnvioCola(e)));
+    caja.appendChild(b);
+  }
+
+  // LA SEMANA
+  const semana = h('div', { clase: 'bloque' });
+  const desde = c.desde || '';
+  const mover = dias => {
+    const base = desde ? new Date(`${desde}T12:00:00Z`) : new Date();
+    base.setUTCDate(base.getUTCDate() + dias);
+    PUB.desde = base.toISOString().slice(0, 10);
+    cargarPublicar();
+  };
+  semana.appendChild(h('div', { clase: 'fila' },
+    h('h3', {}, 'La semana'), h('span', { clase: 'meta' }, 'hora de Lima'),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini fantasma', title: 'Semana anterior', onclick: () => mover(-7) }, '‹'),
+    h('button', { clase: 'mini fantasma', onclick: () => { PUB.desde = ''; cargarPublicar(); } }, 'Hoy'),
+    h('button', { clase: 'mini fantasma', title: 'Semana siguiente', onclick: () => mover(7) }, '›')));
+  const rejilla = h('div', { clase: 'calendario-publicar' });
+  (c.dias || []).forEach(dia => {
+    const columna = h('div', { clase: `dia-publicar${dia === c.hoy ? ' hoy' : ''}` },
+      h('div', { clase: 'dia-cab' }, cuandoLegible(dia)));
+    const delDia = (c.envios || []).filter(e => String(e.cuando || '').startsWith(dia) && e.estado !== 'cancelado');
+    if (!delDia.length) columna.appendChild(h('div', { clase: 'meta dia-vacio' }, '—'));
+    delDia.forEach(e => columna.appendChild(h('button', {
+      clase: `envio-dia ${CLASE_ESTADO[e.estado] || ''}`,
+      title: `${NOMBRES_RED[e.red]} · ${e.video} · ${ESTADOS_ENVIO[e.estado] || e.estado}`,
+      onclick: () => irASeccionPublicar('ficha', e.pid),
+    }, h('span', { clase: 'hora' }, String(e.cuando || '').slice(11, 16)),
+    ` ${CORTOS_RED[e.red]} · ${recortar(e.video || '', 22)}`)));
+    rejilla.appendChild(columna);
+  });
+  semana.appendChild(rejilla);
+  caja.appendChild(semana);
+
+  // LOS VÍDEOS LISTOS
+  const listos = h('div', { clase: 'bloque' }, h('h3', {}, 'Vídeos listos para publicar'));
+  if (!(c.listos || []).length) {
+    listos.appendChild(h('div', { clase: 'meta' },
+      'Todavía no hay ningún vídeo montado. Se hacen en Crear; desde la pantalla Vídeo, «Enviar a Publicar».'));
+  }
+  (c.listos || []).forEach(v => {
+    const redes = h('span', { clase: 'redes-video' });
+    Object.keys(NOMBRES_RED).forEach(r => {
+      const estado = (v.envios || {})[r];
+      redes.appendChild(h('span', {
+        clase: `pastilla red-mini ${estado ? CLASE_ESTADO[estado] || '' : 'apagada'}`,
+        title: `${NOMBRES_RED[r]}: ${estado ? ESTADOS_ENVIO[estado] : 'sin publicar'}`,
+      }, CORTOS_RED[r]));
+    });
+    listos.appendChild(h('div', { clase: 'fila fila-listo' },
+      h('b', { clase: 'nombre-listo' }, v.nombre || v.pid),
+      v.cliente_nombre ? h('span', { clase: 'meta' }, v.cliente_nombre) : null,
+      h('span', { clase: 'crece' }), redes,
+      h('button', { clase: 'primario mini', onclick: () => irASeccionPublicar('ficha', v.pid) },
+        v.textos ? 'Abrir' : 'Preparar')));
+  });
+  caja.appendChild(listos);
+  return caja;
+}
+
+/* -------------------------------------------------------------- LA FICHA */
+
+function textosDeFicha(red) {
+  const f = PUB.ficha || {};
+  const guardado = (f.textos || {})[red] || {};
+  const borrador = PUB.borrador[red] || {};
+  return Object.assign({ titulo: '', descripcion: '', cta: '', hashtags: [] }, guardado, borrador);
+}
+
+/* Tras un guardado bueno se quita del borrador LO QUE SE MANDÓ, si no se ha
+   vuelto a tocar mientras: lo tecleado entretanto se queda para el siguiente. */
+function limpiarBorradorPublicar(enviado) {
+  Object.keys(enviado).forEach(red => {
+    const b = PUB.borrador[red];
+    if (!b) return;
+    Object.keys(enviado[red]).forEach(campo => {
+      if (JSON.stringify(b[campo]) === JSON.stringify(enviado[red][campo])) delete b[campo];
+    });
+    if (!Object.keys(b).length) delete PUB.borrador[red];
+  });
+}
+
+/* Lo escrito a mano se guarda solo al dejar de teclear, como en el resto del
+   Studio. Los textos no entran en ninguna firma: guardarlos no cuesta nada. */
+function editarTextoPublicar(red, campo, valor) {
+  PUB.borrador[red] = Object.assign({}, PUB.borrador[red] || {}, {
+    [campo]: campo === 'hashtags' ? String(valor).split(/[\s,]+/).filter(Boolean) : valor,
+  });
+  clearTimeout(PUB.guardando);
+  PUB.guardando = setTimeout(guardarTextosPublicar, 900);
+}
+
+async function guardarTextosPublicar() {
+  PUB.guardando = null;
+  const textos = JSON.parse(JSON.stringify(PUB.borrador));
+  if (!Object.keys(textos).length || !PUB.pid) return;
+  try {
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
+      method: 'PUT', cuerpo: { textos },
+    });
+    limpiarBorradorPublicar(textos);
+    repintarPublicarSinPisar();
+  } catch (e) {
+    toast(`no se han podido guardar los textos: ${e.message}`, true);
+  }
+}
+
+async function cambiarRedesPublicar(red, puesta) {
+  const f = PUB.ficha;
+  const redes = new Set(f.redes || []);
+  if (puesta) redes.add(red); else redes.delete(red);
+  try {
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
+      method: 'PUT', cuerpo: { redes: Object.keys(NOMBRES_RED).filter(r => redes.has(r)) },
+    });
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function escribirTextosPublicar(redes) {
+  if (!redes.length) { toast('elige al menos una red', true); return; }
+  const f = PUB.ficha;
+  const hay = redes.some(r => ((f.textos || {})[r] || {}).descripcion);
+  if (hay && !confirm('Claude volverá a escribir los textos de: '
+    + redes.map(r => NOMBRES_RED[r]).join(', ') + '.\n\nLo que hayas cambiado a mano en esas redes se sustituye. '
+    + 'Va con tu suscripción de Claude (no se paga aparte).')) return;
+  try {
+    await guardarTextosPublicar();
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/textos`), { method: 'POST', cuerpo: { redes } });
+    toast('Claude está escribiendo los textos…');
+    cargarPublicar(true);
+  } catch (e) { toast(e.message, true); }
+}
+
+function seccionFichaPublicar() {
+  const f = PUB.ficha;
+  const caja = h('div', { clase: 'ficha-publicar' });
+  if (!f) {
+    caja.appendChild(h('div', { clase: 'meta' }, PUB.pid ? 'cargando…' : 'Elige un vídeo en la cola.'));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini fantasma', onclick: () => irASeccionPublicar('cola') }, '‹ La cola'),
+    h('b', { clase: 'crece nombre-ficha' }, f.nombre),
+    f.cliente_nombre ? h('span', { clase: 'pastilla' }, f.cliente_nombre) : null,
+    h('span', { clase: 'meta' }, `${f.formato} · ${mmss(f.duracion_s)}`)));
+  const aviso = avisoClavePublicar(f.clave);
+  if (aviso) caja.appendChild(aviso);
+  if (!f.montado) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      'Este vídeo todavía no está montado. Termínalo en Crear y vuelve: se publica el MP4.'));
+    return caja;
+  }
+  if (f.desactualizada) {
+    caja.appendChild(h('div', { clase: 'caja-aviso fila' },
+      h('span', { clase: 'crece' }, 'La ficha está desactualizada: el guion o el montaje han cambiado desde que se '
+        + 'escribieron los textos. Revísalos o pide otros.'),
+      h('button', { clase: 'mini', onclick: () => escribirTextosPublicar(f.redes || []) }, 'Escribirlos otra vez')));
+  }
+  if (f.programados_viejos) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      `${f.programados_viejos} envío(s) programado(s) llevan el MP4 de antes del último montaje. `
+      + 'Si quieres que salga el nuevo, cancélalo y vuelve a programarlo.'));
+  }
+
+  // LAS REDES
+  const redes = h('div', { clase: 'bloque' }, h('h3', {}, 'Redes'));
+  const fila = h('div', { clase: 'fila redes-ficha' });
+  Object.keys(NOMBRES_RED).forEach(r => {
+    const enc = (f.encaje || {})[r] || {};
+    const cuenta = (f.cuentas || {})[r];
+    fila.appendChild(h('label', { clase: `casilla-red${enc.nivel === 'error' ? ' apagada' : ''}`,
+      title: enc.texto || (cuenta ? `cuenta: ${cuenta.nombre}` : '') },
+    h('input', { type: 'checkbox', checked: (f.redes || []).includes(r), disabled: enc.nivel === 'error',
+      onchange: ev => cambiarRedesPublicar(r, ev.target.checked) }),
+    ` ${NOMBRES_RED[r]}`,
+    enc.tipo ? h('span', { clase: 'meta' }, ` · ${enc.tipo}`) : null,
+    enc.nivel === 'aviso' || enc.nivel === 'error'
+      ? h('span', { clase: `pastilla ${enc.nivel === 'error' ? 'error' : 'aviso'}` }, '!') : null));
+  });
+  redes.appendChild(fila);
+  Object.keys(NOMBRES_RED).filter(r => (f.redes || []).includes(r) && ((f.encaje || {})[r] || {}).texto)
+    .forEach(r => redes.appendChild(h('div', { clase: 'meta' }, `${NOMBRES_RED[r]}: ${f.encaje[r].texto}`)));
+  // las cuentas, si ya se miraron: una red sin cuenta no se deja enviar
+  const sinCuenta = (f.ajustes || {}).cuentas_vistas
+    ? (f.redes || []).filter(r => r in (f.cuentas || {})
+      && (!(f.cuentas || {})[r] || (f.cuentas[r] || {}).reconectar)) : [];
+  if (sinCuenta.length) {
+    redes.appendChild(h('div', { clase: 'caja-aviso fila' },
+      h('span', { clase: 'crece' }, `${sinCuenta.map(r => NOMBRES_RED[r]).join(', ')}: sin cuenta conectada en `
+        + 'Upload-Post. Conéctala desde Cuentas y ajustes, o quítala de las redes.'),
+      h('button', { clase: 'mini', onclick: () => irASeccionPublicar('cuentas') }, 'Cuentas y ajustes')));
+  }
+  redes.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'primario mini', disabled: f.escribiendo || !(f.redes || []).length,
+      onclick: () => escribirTextosPublicar(f.redes || []) },
+    f.escribiendo ? 'Claude está escribiendo…' : 'Que Claude escriba los textos'),
+    h('span', { clase: 'meta' }, 'Desde el encargo, el guion final y la duración real, con las reglas de cada red.'),
+    h('span', { clase: 'crece' }),
+    h('a', { clase: 'boton-enlace mini', href: API.archivo(f.pid, f.mp4), download: `${f.pid}.mp4` }, 'Descargar MP4')));
+  if (f.error_textos) redes.appendChild(cajaError(f.error_textos));
+  caja.appendChild(redes);
+
+  // LOS TEXTOS POR RED
+  (f.redes || []).forEach(r => caja.appendChild(bloqueTextoRed(r)));
+
+  // CUÁNDO
+  if ((f.redes || []).length) caja.appendChild(bloqueCuandoPublicar());
+
+  // LOS ENVÍOS
+  caja.appendChild(bloqueEnviosFicha());
+  return caja;
+}
+
+function bloqueTextoRed(red) {
+  const f = PUB.ficha;
+  const t = textosDeFicha(red);
+  const compuesto = (f.compuestos || {})[red] || {};
+  const b = h('div', { clase: 'bloque texto-red', datos: { red } });
+  b.appendChild(h('div', { clase: 'fila' }, h('h3', {}, NOMBRES_RED[red]),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini', title: 'Copiar el texto tal como sale en la red',
+      onclick: () => copiarTexto(compuesto.texto || '') }, 'Copiar texto'),
+    compuesto.titulo ? h('button', { clase: 'mini', onclick: () => copiarTexto(compuesto.titulo) }, 'Copiar título') : null,
+    h('button', { clase: 'mini fantasma', title: 'Que Claude reescriba solo esta red',
+      disabled: f.escribiendo, onclick: () => escribirTextosPublicar([red]) }, 'Reescribir')));
+  const campoTexto = () => document.querySelector(`.texto-red[data-red="${red}"] textarea`);
+  b.appendChild(h('div', { clase: 'fila guia-y-revisar' },
+    botonGuia(`texto_${red}`, campoTexto),
+    botonRevisarPublicar(`texto_${red}`, f.pid, campoTexto)));
+  if (red === 'youtube' || red === 'facebook') {
+    b.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Título'));
+    b.appendChild(h('input', { type: 'text', value: t.titulo || '', maxlength: red === 'youtube' ? 100 : 255,
+      datos: { foco: `${red}-titulo` }, oninput: ev => editarTextoPublicar(red, 'titulo', ev.target.value) }));
+  }
+  b.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Texto'));
+  b.appendChild(h('textarea', { rows: 4, value: t.descripcion || '', datos: { foco: `${red}-descripcion` },
+    oninput: ev => editarTextoPublicar(red, 'descripcion', ev.target.value) }));
+  b.appendChild(panelRevisionPublicar(`texto_${red}`, f.pid, campoTexto));
+  const pie = h('div', { clase: 'fila campos-red' });
+  pie.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Llamada a la acción',
+    h('input', { type: 'text', value: t.cta || '', datos: { foco: `${red}-cta` },
+      oninput: ev => editarTextoPublicar(red, 'cta', ev.target.value) })));
+  pie.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Hashtags',
+    h('input', { type: 'text', value: (t.hashtags || []).map(x => `#${x}`).join(' '), datos: { foco: `${red}-hashtags` },
+      oninput: ev => editarTextoPublicar(red, 'hashtags', ev.target.value) })));
+  b.appendChild(pie);
+  if (red === 'youtube' && (f.capitulos || []).length) {
+    b.appendChild(h('div', { clase: 'meta' }, 'Capítulos: '
+      + f.capitulos.map(c => `${mmss(c.t)} ${c.titulo}`).join(' · ')));
+  }
+  b.appendChild(h('details', { clase: 'asi-sale' },
+    h('summary', {}, `Así sale (${(compuesto.texto || '').length} caracteres)`),
+    h('pre', { clase: 'texto-compuesto' }, compuesto.texto || '—')));
+  (compuesto.avisos || []).forEach(a => b.appendChild(h('div', { clase: 'meta aviso-red' }, `⚠ ${a}`)));
+  return b;
+}
+
+function bloqueCuandoPublicar() {
+  const f = PUB.ficha;
+  const b = h('div', { clase: 'bloque cuando-publicar' }, h('h3', {}, 'Cuándo'));
+  const elegido = PUB.modoEnvio || 'programar';
+  const opciones = h('div', { clase: 'fila' });
+  [['ahora', 'Publicar ahora'], ['programar', 'Programar'], ['mano', 'Solo a mano']].forEach(([id, texto]) =>
+    opciones.appendChild(h('label', { clase: 'casilla-red' },
+      h('input', { type: 'radio', name: 'modo-envio', checked: elegido === id,
+        onchange: () => { PUB.modoEnvio = id; pintarModulo(); } }), ` ${texto}`)));
+  b.appendChild(opciones);
+  if (elegido === 'programar') {
+    if (!PUB.cuandoEnvio) PUB.cuandoEnvio = f.hora_sugerida;
+    b.appendChild(h('div', { clase: 'fila' },
+      h('input', { type: 'datetime-local', value: PUB.cuandoEnvio, datos: { foco: 'cuando' },
+        onchange: ev => { PUB.cuandoEnvio = ev.target.value; } }),
+      h('span', { clase: 'meta' }, 'hora de Lima')));
+  }
+  if (elegido === 'mano') {
+    b.appendChild(h('div', { clase: 'meta' },
+      'Copia el texto de cada red, descarga el MP4 y súbelo tú. Después, márcalo como subido para que quede en el historial.'));
+    const fila = h('div', { clase: 'fila' });
+    (f.redes || []).forEach(r => fila.appendChild(h('button', { clase: 'mini',
+      onclick: () => marcarAManoPublicar(r) }, `Ya lo subí a ${CORTOS_RED[r]}`)));
+    b.appendChild(fila);
+    return b;
+  }
+  const perfil = (f.ajustes || {}).perfil;
+  if (!perfil) {
+    b.appendChild(h('div', { clase: 'caja-aviso fila' },
+      h('span', { clase: 'crece' }, 'Este proyecto no tiene perfil de Upload-Post todavía.'),
+      h('button', { clase: 'mini', onclick: () => irASeccionPublicar('cuentas') }, 'Cuentas y ajustes')));
+  }
+  b.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'primario', disabled: PUB.enviando || !perfil || !(f.clave || {}).puesta,
+      onclick: () => confirmarEnvioPublicar(elegido) },
+    elegido === 'ahora' ? 'Publicar ahora…' : 'Programar…'),
+    h('button', { clase: 'mini fantasma', disabled: PUB.enviando,
+      title: 'Lo deja preparado sin enviarlo: saldrá en «Te necesitan» hasta que des el OK',
+      onclick: () => dejarPendientePublicar(elegido) }, 'Dejar esperando mi OK')));
+  return b;
+}
+
+const VIVOS_PUBLICAR = ['enviando', 'programado', 'publicando', 'publicado', 'comprobar', 'a_mano'];
+
+async function confirmarEnvioPublicar(modo, repetir) {
+  const f = PUB.ficha;
+  let redes = (f.redes || []).filter(r => ((f.encaje || {})[r] || {}).nivel !== 'error');
+  if (!redes.length) { toast('elige al menos una red', true); return; }
+  /* LO QUE YA SALIÓ (o va a salir) SE QUITA, salvo que se diga: repetir no puede
+     ser lo que pasa por defecto al volver a pulsar con todas las redes puestas. */
+  const ya = redes.filter(r => (f.envios || []).some(e => e.red === r && VIVOS_PUBLICAR.includes(e.estado)));
+  /* Con alguna que falta: Aceptar envía SOLO a esas y Cancelar no envía nada.
+     Volver a publicar en una red donde ya salió es una decisión aparte: se
+     hace dejando marcadas solo esas redes. */
+  if (ya.length && !repetir) {
+    const faltan = redes.filter(r => !ya.includes(r));
+    const nombres = ya.map(r => NOMBRES_RED[r]).join(', ');
+    if (faltan.length) {
+      if (!confirm(`Ya está publicado o programado en ${nombres}: ahí no se vuelve a enviar.\n\n`
+        + `Aceptar: enviar solo a ${faltan.map(r => NOMBRES_RED[r]).join(', ')}. Cancelar: no enviar nada.`)) return;
+      redes = faltan;
+    } else {
+      if (!confirm(`Ya está publicado o programado en ${nombres}. ¿Publicarlo OTRA VEZ ahí?`)) return;
+      repetir = true;
+    }
+  }
+  const cuando = modo === 'programar' ? PUB.cuandoEnvio : '';
+  if (modo === 'programar' && !cuando) { toast('elige el día y la hora', true); return; }
+  const lineas = redes.map(r => `• ${NOMBRES_RED[r]}${(f.encaje[r] || {}).tipo ? ` (${f.encaje[r].tipo})` : ''}`
+    + `${(f.cuentas || {})[r] ? ` → ${f.cuentas[r].nombre}` : ''}`).join('\n');
+  const texto = `${modo === 'ahora' ? 'Publicar AHORA' : `Programar para ${cuandoLegible(cuando)} (hora de Lima)`}`
+    + ` «${f.nombre}» en:\n\n${lineas}\n\nCon el perfil de Upload-Post «${(f.ajustes || {}).perfil}». `
+    + 'Una vez publicado no se puede deshacer desde aquí.';
+  if (!confirm(texto)) return;
+  PUB.enviando = true;
+  pintarModulo();
+  try {
+    await guardarTextosPublicar();
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(f.pid)}/enviar`), {
+      method: 'POST', cuerpo: { redes, modo, cuando, confirmado: true, repetir: !!repetir },
+    });
+    toast(modo === 'ahora' ? 'Subiendo a Upload-Post…' : 'Programando…');
+  } catch (e) {
+    toast(e.message, true);
+  }
+  PUB.enviando = false;
+  cargarPublicar(true);
+}
+
+async function dejarPendientePublicar(modo) {
+  const f = PUB.ficha;
+  const redes = (f.redes || []).filter(r => ((f.encaje || {})[r] || {}).nivel !== 'error');
+  if (!redes.length) { toast('elige al menos una red', true); return; }
+  try {
+    await guardarTextosPublicar();
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(f.pid)}/enviar`), {
+      method: 'POST', cuerpo: { redes, modo: 'pendiente', cuando: modo === 'programar' ? PUB.cuandoEnvio : '' },
+    });
+    toast('Queda esperando tu OK');
+    cargarPublicar(true);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function confirmarPendientePublicar(envio) {
+  const pasada = !envio.sin_hora && envio.cuando
+    && envio.cuando.slice(0, 16) <= PUB.ficha.ahora.slice(0, 16);
+  const texto = `¿Dar el OK a ${NOMBRES_RED[envio.red]}?\n\n`
+    + (envio.sin_hora ? 'Saldrá ahora.'
+      : pasada ? `Su hora (${cuandoLegible(envio.cuando)}) ya pasó: saldrá ahora.`
+        : `Saldrá ${cuandoLegible(envio.cuando)} (hora de Lima).`);
+  if (!confirm(texto)) return;
+  try {
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/envios/${envio.id}/confirmar`), {
+      method: 'POST', cuerpo: pasada ? { confirmado: true, modo: 'ahora' } : { confirmado: true },
+    });
+    toast('Enviado');
+  } catch (e) { toast(e.message, true); }
+  cargarPublicar(true);
+}
+
+async function reintentarEnvioPublicar(envio) {
+  if (!confirm(`¿Volver a mandar ${NOMBRES_RED[envio.red]}?\n\nVa con la misma clave que la primera vez: `
+    + 'si a Upload-Post ya le llegó, no se publica otra vez.')) return;
+  try {
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/envios/${envio.id}/reintentar`), { method: 'POST' });
+    toast('Reintentando…');
+  } catch (e) { toast(e.message, true); }
+  cargarPublicar(true);
+}
+
+async function cancelarEnvioPublicar(envio) {
+  const pregunta = envio.estado === 'fallido'
+    ? `¿Quitar de la lista el fallo de ${NOMBRES_RED[envio.red]}?`
+    : envio.estado === 'comprobar'
+      ? `¿Ya miraste en Upload-Post si ${NOMBRES_RED[envio.red]} salió?\n\nQuitarlo de la lista deja `
+        + 'volver a publicarlo sin aviso: hazlo solo si allí no está.'
+      : `¿Cancelar ${NOMBRES_RED[envio.red]}${envio.estado === 'programado'
+      ? ' (y las demás redes que iban en el mismo envío programado)' : ''}?`;
+  if (!confirm(pregunta)) return;
+  try {
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/envios/${envio.id}/cancelar`), { method: 'POST' });
+    toast('Cancelado');
+  } catch (e) { toast(e.message, true); }
+  cargarPublicar(true);
+}
+
+async function marcarAManoPublicar(red) {
+  const url = prompt(`Enlace del post en ${NOMBRES_RED[red]} (opcional):`, '');
+  if (url === null) return;
+  try {
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/a-mano`), { method: 'POST', cuerpo: { red, url } });
+    toast('Apuntado en el historial');
+  } catch (e) { toast(e.message, true); }
+  cargarPublicar(true);
+}
+
+/* «1,2 mil vistas · 56 me gusta · 7 comentarios», con lo que la red diga. */
+function numeroCorto(n) {
+  const v = Number(n) || 0;
+  if (v >= 1e6) return `${(v / 1e6).toFixed(1).replace('.', ',')} M`;
+  if (v >= 1e4) return `${Math.round(v / 1e3)} mil`;
+  if (v >= 1e3) return `${(v / 1e3).toFixed(1).replace('.', ',')} mil`;
+  return String(Math.round(v));
+}
+
+const NOMBRES_METRICA = {
+  vistas: 'vistas', me_gusta: 'me gusta', comentarios: 'comentarios',
+  compartidos: 'compartidos', guardados: 'guardados',
+};
+
+function textoMetricas(m) {
+  if (!m) return '';
+  return Object.keys(NOMBRES_METRICA)
+    .filter(k => typeof m[k] === 'number')
+    .map(k => `${numeroCorto(m[k])} ${NOMBRES_METRICA[k]}`).join(' · ');
+}
+
+async function actualizarMetricasVideo() {
+  PUB.midiendo = true;
+  pintarModulo();
+  try {
+    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/metricas`), {
+      method: 'POST', cuerpo: { forzar: true },
+    });
+    if (r.ficha) PUB.ficha = r.ficha;
+    toast((r.errores || []).length ? r.errores[0]
+      : r.consultados ? 'Cifras al día' : 'No hay nada publicado por Upload-Post que medir', !!(r.errores || []).length);
+  } catch (e) { toast(e.message, true); }
+  PUB.midiendo = false;
+  repintarPublicarSinPisar();
+}
+
+function bloqueEnviosFicha() {
+  const f = PUB.ficha;
+  const hayPublicado = (f.envios || []).some(e => e.estado === 'publicado' && e.lote);
+  const b = h('div', { clase: 'bloque' }, h('div', { clase: 'fila' }, h('h3', {}, 'Envíos'),
+    h('span', { clase: 'crece' }),
+    hayPublicado ? h('button', { clase: 'mini', disabled: PUB.midiendo,
+      title: 'Pide a Upload-Post las vistas, me gusta y comentarios de lo publicado',
+      onclick: actualizarMetricasVideo }, PUB.midiendo ? 'pidiendo…' : 'Actualizar métricas') : null));
+  if (!(f.envios || []).length) {
+    b.appendChild(h('div', { clase: 'meta' }, 'Todavía no se ha publicado nada de este vídeo.'));
+    return b;
+  }
+  f.envios.forEach(e => {
+    b.appendChild(h('div', { clase: 'fila fila-envio' },
+      h('b', {}, CORTOS_RED[e.red] || e.red),
+      h('span', { clase: 'meta hora-envio' }, cuandoLegible(e.cuando)),
+      pastillaEstadoEnvio(e.estado),
+      h('span', { clase: 'crece meta motivo-envio' }, e.error || e.nota || ''),
+      e.metricas && textoMetricas(e.metricas)
+        ? h('span', { clase: 'metricas-envio', title: `actualizado ${fechaCorta(e.metricas.al)}` },
+          textoMetricas(e.metricas))
+        : (e.metricas && e.metricas.error ? h('span', { clase: 'meta', title: e.metricas.error }, 'sin cifras todavía') : null),
+      e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver el post') : null,
+      e.estado === 'espera_ok' ? h('button', { clase: 'primario mini', onclick: () => confirmarPendientePublicar(e) }, 'Dar el OK') : null,
+      e.estado === 'comprobar' ? h('button', { clase: 'mini',
+        title: 'Lo vuelve a mandar con la misma clave: si Upload-Post ya lo tenía, no se publica dos veces',
+        onclick: () => reintentarEnvioPublicar(e) }, 'Reintentar') : null,
+      ['programado', 'espera_ok'].includes(e.estado)
+        ? h('button', { clase: 'mini peligro', onclick: () => cancelarEnvioPublicar(e) }, 'Cancelar') : null,
+      ['fallido', 'comprobar'].includes(e.estado)
+        ? h('button', { clase: 'mini fantasma', title: 'Quitarlo de «Te necesitan» (no borra nada en la red)',
+          onclick: () => cancelarEnvioPublicar(e) }, 'Quitar de la lista') : null));
+  });
+  return b;
+}
+
+/* ---------------------------------------------------- CUENTAS Y AJUSTES */
+
+async function probarClavePublicar() {
+  try {
+    const r = await pedir(rutaPublicar('/probar'), { method: 'POST' });
+    toast(r.mensaje || (r.ok ? 'funciona' : 'no funciona'), !r.ok);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function accionProyectoPublicar(cid, accion, cuerpo) {
+  try {
+    const r = await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(cid)}/${accion}`), {
+      method: 'POST', cuerpo: cuerpo || {},
+    });
+    if (accion === 'conectar' && r.url) {
+      window.open(r.url, '_blank', 'noopener');
+      toast(`Enlace abierto (vale ${r.caduca || '48 h'}). Cuando termines de conectar, pulsa «Ver cuentas».`);
+    } else if (accion === 'cuentas' && r.existe === false) {
+      toast('Ese perfil no existe en Upload-Post: créalo con «Crear perfil».', true);
+    } else {
+      toast('Hecho');
+    }
+    PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* Lo guardado se queda TAMBIÉN en lo que pinta la pantalla: sin esto, un
+   repintado (al pulsar «Revisar», por ejemplo) volvía a enseñar el valor de
+   antes y «Aplicar» trabajaba sobre él. */
+async function guardarAjustePublicar(cid, cambios) {
+  try {
+    const r = await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(cid)}`), { method: 'PUT', cuerpo: cambios });
+    const fila = ((PUB.proyectos || {}).proyectos || []).find(x => x.id === cid);
+    if (fila && r.ajustes) fila.ajustes = Object.assign({}, fila.ajustes || {}, r.ajustes);
+    toast('Guardado');
+  } catch (e) { toast(e.message, true); }
+}
+
+function seccionCuentasPublicar() {
+  const datos = PUB.proyectos || {};
+  const caja = h('div', { clase: 'cuentas-publicar' });
+  const clave = datos.clave || {};
+  caja.appendChild(h('div', { clase: 'bloque' },
+    h('h3', {}, 'Upload-Post'),
+    h('div', { clase: 'fila' },
+      h('span', { clase: `pastilla ${clave.puesta ? 'ok' : 'aviso'}` },
+        clave.simulado ? 'simulado' : clave.puesta ? `clave puesta ${clave.cola || ''}` : 'sin clave'),
+      clave.origen && !clave.simulado ? h('span', { clase: 'meta' }, `(de ${clave.origen === 'env' ? 'el .env de secretos'
+        : clave.origen === 'entorno' ? 'el entorno del servicio' : 'Configuración'})`) : null,
+      h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini', disabled: !clave.puesta, onclick: probarClavePublicar }, 'Probar')),
+    clave.puesta ? null : avisoClavePublicar(clave)));
+  (datos.proyectos || []).forEach(p => caja.appendChild(tarjetaProyectoPublicar(p)));
+  return caja;
+}
+
+function tarjetaProyectoPublicar(p) {
+  const a = p.ajustes || {};
+  const b = h('div', { clase: 'bloque proyecto-publicar' }, h('h3', {}, p.nombre));
+  const guardar = (campo, valor) => guardarAjustePublicar(p.id, { [campo]: valor });
+  b.appendChild(h('div', { clase: 'fila' },
+    h('label', { clase: 'etiqueta-campo' }, 'Perfil de Upload-Post',
+      h('input', { type: 'text', value: a.perfil || '', placeholder: p.perfil_sugerido || '',
+        onchange: ev => guardar('perfil', ev.target.value.trim()) })),
+    a.perfil ? null : h('button', { clase: 'mini', onclick: () => accionProyectoPublicar(p.id, 'perfil', {}) },
+      'Crear perfil'),
+    a.perfil ? h('button', { clase: 'mini', onclick: () => accionProyectoPublicar(p.id, 'cuentas') }, 'Ver cuentas') : null,
+    a.perfil ? h('button', { clase: 'mini primario', title: 'Abre la página de Upload-Post para conectar o volver a conectar las cuentas de este cliente',
+      onclick: () => accionProyectoPublicar(p.id, 'conectar', { volver_a: location.href }) }, 'Conectar') : null));
+  const cuentas = h('div', { clase: 'fila cuentas-proyecto' });
+  Object.keys(NOMBRES_RED).forEach(r => {
+    const c = (a.cuentas || {})[r];
+    cuentas.appendChild(h('span', { clase: `pastilla ${c ? (c.reconectar ? 'aviso' : 'ok') : 'apagada'}`,
+      title: c ? (c.reconectar ? 'hay que volver a conectarla' : c.nombre) : 'sin conectar' },
+    `${CORTOS_RED[r]}${c ? `: ${recortar(c.nombre, 18)}` : ''}`));
+  });
+  if (a.perfil) b.appendChild(cuentas);
+  // abierto o cerrado, como lo dejaste: el bloque se rehace al repintar
+  PUB.fijosAbiertos = PUB.fijosAbiertos || {};
+  const fijos = h('details', { clase: 'ajustes-fijos', open: !!PUB.fijosAbiertos[p.id],
+    ontoggle: ev => { PUB.fijosAbiertos[p.id] = ev.currentTarget.open; } },
+  h('summary', {}, 'Lo fijo de este proyecto'));
+  fijos.appendChild(h('div', { clase: 'fila' },
+    h('label', { clase: 'etiqueta-campo' }, 'Hora por defecto (Lima)',
+      h('input', { type: 'time', value: a.hora || '19:00', onchange: ev => guardar('hora', ev.target.value) })),
+    h('label', { clase: 'etiqueta-campo' }, 'YouTube',
+      h('select', { onchange: ev => guardar('privacidad_youtube', ev.target.value) },
+        ...[['public', 'público'], ['unlisted', 'oculto'], ['private', 'privado']].map(([v, t]) =>
+          h('option', { value: v, selected: a.privacidad_youtube === v }, t))))));
+  fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Firma (va al final de cada texto)',
+    h('input', { type: 'text', value: a.firma || '', onchange: ev => guardar('firma', ev.target.value) })));
+  fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Hashtags fijos',
+    h('input', { type: 'text', value: a.hashtags || '', placeholder: '#marca #ciudad',
+      onchange: ev => guardar('hashtags', ev.target.value) })));
+  /* EL TONO, CON SU GUÍA Y SU «REVISAR», como los campos de Crear. Se guarda
+     al salir del campo y también tras dejar de teclear: «Usar en el campo» y
+     «Aplicar la versión sugerida» escriben con un evento `input`. */
+  let relojTono = null;
+  const campoTono = () => document.querySelector(`textarea[data-tono="${p.id}"]`);
+  fijos.appendChild(h('div', { clase: 'fila guia-y-revisar' },
+    h('span', { clase: 'etiqueta-tono' }, 'Tono de los textos'),
+    h('span', { clase: 'crece' }),
+    botonGuia('tono_redes', campoTono),
+    botonRevisarPublicar('tono_redes', p.id, campoTono)));
+  fijos.appendChild(h('textarea', { rows: 3, value: a.tono || '', datos: { tono: p.id, foco: `tono-${p.id}` },
+    placeholder: 'CÓMO SUENA: de tú, cercano… (pulsa «Guía» para ver la plantilla)',
+    oninput: ev => {
+      clearTimeout(relojTono);
+      const v = ev.target.value;
+      a.tono = v;
+      relojTono = setTimeout(() => guardar('tono', v), 1200);
+    },
+    onchange: ev => { clearTimeout(relojTono); a.tono = ev.target.value; guardar('tono', ev.target.value); } }));
+  fijos.appendChild(panelRevisionPublicar('tono_redes', p.id, campoTono));
+  fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Página de Facebook (solo si hay más de una)',
+    h('input', { type: 'text', value: a.facebook_pagina || '', onchange: ev => guardar('facebook_pagina', ev.target.value) })));
+  const casillas = h('div', { clase: 'fila' });
+  [['marcar_ia', 'Marcar como hecho con IA'], ['avisar_youtube', 'Avisar a los suscriptores de YouTube']]
+    .forEach(([campo, texto]) => casillas.appendChild(h('label', { clase: 'casilla-red' },
+      h('input', { type: 'checkbox', checked: !!a[campo], onchange: ev => guardar(campo, ev.target.checked) }),
+      ` ${texto}`)));
+  casillas.appendChild(h('span', { clase: 'meta' }, 'La confirmación antes de enviar no se puede quitar.'));
+  fijos.appendChild(casillas);
+  const redes = h('div', { clase: 'fila' }, h('span', { clase: 'meta' }, 'Redes marcadas de fábrica:'));
+  Object.keys(NOMBRES_RED).forEach(r => redes.appendChild(h('label', { clase: 'casilla-red' },
+    h('input', { type: 'checkbox', checked: (a.redes || []).includes(r), onchange: ev => {
+      const lista = new Set(a.redes || []);
+      if (ev.target.checked) lista.add(r); else lista.delete(r);
+      a.redes = Object.keys(NOMBRES_RED).filter(x => lista.has(x));
+      guardar('redes', a.redes);
+    } }), ` ${CORTOS_RED[r]}`)));
+  fijos.appendChild(redes);
+  b.appendChild(fijos);
+  return b;
+}
+
+/* ----------------------------------------- en la pantalla Vídeo de Crear */
+
+/* El bloque «Publicar» debajo del vídeo montado: el botón para llevarlo a
+   Publicar y, si ya salió o está programado, en qué redes. Lo llama UNA línea
+   de `vistaVideoLight`; sin MP4 no enseña nada. */
+function bloquePublicarEnVideo(v) {
+  if (!v || !v.pid || !hayMp4Light() || trabajoVideoLight()) return null;
+  const caja = h('div', { clase: 'bloque-publicar-video fila' },
+    h('b', {}, 'Publicar'),
+    h('span', { clase: 'meta crece' }, 'Textos por red, programar y subir a TikTok, Reels, YouTube y Facebook.'));
+  const listo = ((PUB.cola || {}).listos || []).find(x => x.pid === v.pid);
+  Object.entries((listo || {}).envios || {}).forEach(([r, estado]) => caja.appendChild(h('span', {
+    clase: `pastilla ${CLASE_ESTADO[estado] || ''}`, title: `${NOMBRES_RED[r]}: ${ESTADOS_ENVIO[estado] || estado}`,
+  }, CORTOS_RED[r])));
+  caja.appendChild(h('a', { href: '#', clase: 'boton-enlace destacado',
+    onclick: ev => { ev.preventDefault(); abrirPublicarVideo(v.pid); } }, 'Enviar a Publicar'));
+  return caja;
+}
+
+/* ------------------------------------------------------------ RESULTADOS */
+
+/* Lo que se sabe de lo publicado por proyecto: lo guardado en cada envío
+   (`publicar.resultados`). Nada se pide a Upload-Post hasta pulsar
+   «Actualizar», que también trae los seguidores de cada cuenta. */
+async function actualizarResultadosPublicar() {
+  PUB.midiendo = true;
+  pintarModulo();
+  try {
+    // sin forzar: lo mirado hace menos de 10 minutos no se vuelve a pedir
+    // (Upload-Post deja unas 100 consultas cada 5 minutos por cuenta)
+    const r = await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(PUB.proyectoResultados)}/metricas`), {
+      method: 'POST', cuerpo: {},
+    });
+    const avisos = [];
+    if (r.pendientes) avisos.push(`quedan ${r.pendientes} envío(s): vuelve a pulsar en unos minutos`);
+    if ((r.errores || []).length) avisos.push(r.errores[0]);
+    toast(avisos.length ? avisos.join(' · ')
+      : r.consultados ? `Cifras al día (${r.actualizados || 0})`
+        : 'Ya estaban al día (se miraron hace menos de 10 minutos)', !!(r.errores || []).length);
+  } catch (e) { toast(e.message, true); }
+  PUB.midiendo = false;
+  await cargarPublicar(true);
+}
+
+function seccionResultadosPublicar() {
+  const r = PUB.resultados || {};
+  const caja = h('div', { clase: 'resultados-publicar' });
+  const proyectos = ((PUB.proyectos || {}).proyectos || []);
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; PUB.resultados = null; cargarPublicar(); } },
+      ...proyectos.map(x => h('option', { value: x.id, selected: x.id === PUB.proyectoResultados }, x.nombre))),
+    h('select', { onchange: ev => { PUB.diasResultados = Number(ev.target.value); PUB.resultados = null; cargarPublicar(); } },
+      ...[[7, 'últimos 7 días'], [30, 'últimos 30 días'], [90, 'últimos 90 días']].map(([v, t]) =>
+        h('option', { value: v, selected: (PUB.diasResultados || 30) === v }, t))),
+    h('span', { clase: 'crece' }),
+    r.mirado ? h('span', { clase: 'meta' }, `cifras de ${fechaCorta(r.mirado)}`) : null,
+    h('button', { clase: 'primario mini', disabled: PUB.midiendo || !(r.clave || {}).puesta,
+      title: 'Pide a Upload-Post las cifras de lo publicado y los seguidores de cada cuenta',
+      onclick: actualizarResultadosPublicar }, PUB.midiendo ? 'pidiendo…' : 'Actualizar')));
+  if (!(r.clave || {}).puesta) caja.appendChild(avisoClavePublicar(r.clave));
+  const total = r.total || {};
+  caja.appendChild(h('div', { clase: 'cifras-publicar' },
+    ...[['posts', 'publicaciones'], ['vistas', 'vistas'], ['me_gusta', 'me gusta'],
+      ['comentarios', 'comentarios'], ['compartidos', 'compartidos']].map(([k, t]) =>
+      h('div', { clase: 'cifra' }, h('b', {}, typeof total[k] === 'number' ? numeroCorto(total[k]) : '—'),
+        h('span', { clase: 'meta' }, t)))));
+  if (r.sin_cifras) {
+    caja.appendChild(h('div', { clase: 'meta' }, `${r.sin_cifras} publicación(es) sin cifras todavía: `
+      + 'las subidas a mano no se pueden medir desde aquí, y TikTok tarda unas horas en darlas.'));
+  }
+  const redes = h('div', { clase: 'bloque' }, h('h3', {}, 'Por red'));
+  const tabla = h('div', { clase: 'tabla-redes' });
+  Object.keys(NOMBRES_RED).forEach(red => {
+    const pr = (r.por_red || {})[red] || {};
+    const seg = (r.seguidores || {})[red] || {};
+    tabla.appendChild(h('div', { clase: 'fila fila-red' },
+      h('b', { clase: 'nombre-red' }, NOMBRES_RED[red]),
+      h('span', { clase: 'meta' }, `${pr.posts || 0} publicación(es)`),
+      h('span', { clase: 'crece' }, textoMetricas(pr) || ''),
+      typeof seg.seguidores === 'number'
+        ? h('span', { clase: 'pastilla' }, `${numeroCorto(seg.seguidores)} seguidores`)
+        : (seg.error ? h('span', { clase: 'meta', title: seg.error }, 'sin seguidores') : null)));
+  });
+  redes.appendChild(tabla);
+  if (r.seguidores_al) redes.appendChild(h('div', { clase: 'meta' }, `seguidores a ${fechaCorta(r.seguidores_al)}`));
+  caja.appendChild(redes);
+  const videos = h('div', { clase: 'bloque' }, h('h3', {}, 'Los vídeos, de más a menos vistos'));
+  if (!(r.videos || []).length) {
+    videos.appendChild(h('div', { clase: 'meta' }, 'Nada publicado en este periodo.'));
+  }
+  (r.videos || []).forEach(v => videos.appendChild(h('div', { clase: 'fila fila-listo' },
+    h('button', { clase: 'mini fantasma nombre-envio', onclick: () => irASeccionPublicar('ficha', v.pid) }, v.nombre),
+    h('span', { clase: 'crece meta' }, textoMetricas(v) || 'sin cifras todavía'),
+    h('span', { clase: 'redes-video' }, ...Object.keys(v.redes || {}).map(red =>
+      h('span', { clase: 'pastilla red-mini ok', title: textoMetricas(v.redes[red]) || 'sin cifras' }, CORTOS_RED[red]))))));
+  caja.appendChild(videos);
+  return caja;
+}
+
+/* «REVISAR» EN PUBLICAR: lo escrito contra su guía (`pasos/guias.py`), por
+   la misma ruta y la misma memoria que los campos de Crear
+   (`/api/sistema/guias/{gid}/revisar`). El estado vive en `PUB.revisiones`,
+   por guía y por vídeo o proyecto, y no en el bloque: la pantalla se repinta
+   mientras Claude revisa. Los botones buscan el campo AL PULSARLOS. */
+PUB.revisiones = {};
+
+function botonRevisarPublicar(gid, donde, campo) {
+  const clave = `${gid}|${donde}`;
+  const viva = PUB.revisiones[clave];
+  return h('button', {
+    clase: 'mini fantasma', type: 'button', disabled: !!(viva && viva.estado === 'pensando'),
+    title: 'Comprobar si lo escrito sirve como dice la guía (va con tu suscripción de Claude)',
+    onclick: async () => {
+      const area = campo();
+      const texto = area ? area.value.trim() : '';
+      if (!texto) { toast('Escribe algo en el campo y vuelve a revisar', true); return; }
+      const previa = PUB.revisiones[clave];
+      const anterior = previa && previa.estado === 'listo' ? previa.resultado : null;
+      PUB.revisiones[clave] = { estado: 'pensando' };
+      repintarPublicarSinPisar();
+      try {
+        const lanzada = await pedir(`${BASE}/api/sistema/guias/${gid}/revisar`,
+          { method: 'POST', cuerpo: { texto, anterior } });
+        let ficha = { estado: 'pensando' };
+        for (let i = 0; i < 80 && ficha.estado === 'pensando'; i += 1) {
+          if (i) await new Promise(r => setTimeout(r, 1500));
+          ficha = await pedir(`${BASE}/api/sistema/revisiones/${lanzada.id}`);
+        }
+        if (ficha.estado === 'error') throw new Error(ficha.error || 'no se ha podido revisar');
+        if (ficha.estado !== 'listo') {
+          throw new Error('la revisión ha tardado más de dos minutos: el CLI de Claude puede estar '
+            + 'ocupado o sin cupo. Vuelve a pulsar «Revisar» en un momento');
+        }
+        PUB.revisiones[clave] = { estado: 'listo', resultado: ficha.resultado || {} };
+      } catch (e) {
+        PUB.revisiones[clave] = { estado: 'error', error: e.message };
+      }
+      repintarPublicarSinPisar();
+    },
+  }, viva && viva.estado === 'pensando' ? 'revisando…' : '✓ Revisar');
+}
+
+function ponerEnCampoPublicar(campo, valor) {
+  const area = campo();
+  if (!area) { toast('No encuentro el campo: vuelve a abrir esta pantalla', true); return false; }
+  area.value = valor;
+  area.dispatchEvent(new Event('input', { bubbles: true }));
+  area.dispatchEvent(new Event('change', { bubbles: true }));
+  return true;
+}
+
+function panelRevisionPublicar(gid, donde, campo) {
+  const clave = `${gid}|${donde}`;
+  const viva = PUB.revisiones[clave];
+  const panel = h('div', { clase: 'revision-campo revision-publicar' });
+  if (!viva || viva.cerrada) { panel.hidden = true; return panel; }
+  const cerrar = () => { viva.cerrada = true; repintarPublicarSinPisar(); };
+  if (viva.estado === 'pensando') {
+    panel.appendChild(h('div', { clase: 'cargando' }, 'revisando con la guía… (unos segundos)'));
+    return panel;
+  }
+  if (viva.estado === 'error') {
+    panel.appendChild(cajaError(viva.error));
+    panel.appendChild(h('div', { clase: 'fila' }, h('button', { clase: 'mini fantasma', onclick: cerrar }, 'Cerrar')));
+    return panel;
+  }
+  const r = viva.resultado || {};
+  const nombres = { sirve: '✅ Sirve', mejorable: '🟡 Mejorable', no_sirve: '🔴 No sirve así' };
+  panel.appendChild(h('div', { clase: 'fila' },
+    h('b', {}, nombres[r.veredicto] || r.veredicto || 'Revisado'),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini fantasma', onclick: cerrar }, 'Cerrar')));
+  if (r.resumen) panel.appendChild(h('div', {}, r.resumen));
+  if (r.de_memoria) {
+    panel.appendChild(h('div', { clase: 'meta' },
+      'Este texto ya se había revisado: es la misma respuesta (no gasta otra revisión).'));
+  }
+  if ((r.problemas || []).length) {
+    panel.appendChild(h('ul', {}, ...(r.problemas || []).map(pr => {
+      let aplicar = null;
+      if (pr.original && pr.mejor && !pr.aplicada) {
+        const area = campo();
+        const veces = area ? vecesEn(area.value, pr.original) : 0;
+        aplicar = veces === 1
+          ? h('div', { clase: 'fila' }, h('button', { clase: 'mini', type: 'button',
+            onclick: () => {
+              const ahora = campo();
+              if (!ahora || vecesEn(ahora.value, pr.original) !== 1) {
+                toast('Ese trozo ya no está tal cual (o está varias veces): cámbialo a mano', true);
+                return;
+              }
+              const i = ahora.value.indexOf(pr.original);
+              if (ponerEnCampoPublicar(campo, ahora.value.slice(0, i) + pr.mejor
+                + ahora.value.slice(i + pr.original.length))) {
+                pr.aplicada = true;
+                toast('Mejora aplicada: revísala y ajústala a tu gusto');
+                repintarPublicarSinPisar();
+              }
+            } }, 'Aplicar esta mejora'))
+          : h('div', { clase: 'meta' }, veces > 1
+            ? `«${pr.original}» aparece ${veces} veces en el campo: cambia a mano la que toque.`
+            : `«${pr.original}» ya no está tal cual en el campo: cámbialo a mano.`);
+      } else if (pr.aplicada) {
+        aplicar = h('div', { clase: 'meta' }, '✓ Mejora aplicada en el campo');
+      }
+      return h('li', {}, h('b', {}, pr.que), pr.por_que ? ` — ${pr.por_que}` : '',
+        pr.arreglo ? h('div', { clase: 'meta' }, `Mejor: ${pr.arreglo}`) : null, aplicar);
+    })));
+  }
+  if (r.sugerida) {
+    panel.appendChild(h('details', { open: true }, h('summary', {}, 'La versión sugerida'),
+      h('div', { clase: 'sugerida' }, r.sugerida)));
+    panel.appendChild(h('div', { clase: 'fila' }, h('button', {
+      clase: 'mini primario',
+      title: 'Pone la versión sugerida en el campo (se guarda como si la hubieras escrito)',
+      onclick: () => {
+        if (!window.confirm('¿Cambiar lo escrito por la versión sugerida?')) return;
+        if (ponerEnCampoPublicar(campo, r.sugerida)) {
+          viva.cerrada = true;
+          toast('Puesta la versión sugerida: revísala y ajústala a tu gusto');
+          repintarPublicarSinPisar();
+        }
+      },
+    }, 'Aplicar la versión sugerida')));
+  }
+  return panel;
+}
+
+/* LA CLAVE DE UPLOAD-POST EN CONFIGURACIÓN, como las de la música y los
+   efectos: se escribe aquí, se guarda en el almacén de claves (y en el .env de
+   secretos) y la pantalla solo ve sus cuatro últimos caracteres. Se prueba en
+   Publicar → Cuentas y ajustes («Probar»), sin subir nada. */
+
+function seccionClaveUploadPost(ficha) {
+  const up = (ficha && ficha.uploadpost) || {};
+  const puesta = !!up.puesta;
+  const campo = h('input', { type: 'password', placeholder: puesta ? `puesta (${up.cola || ''})` : 'sin poner' });
+  return h('section', { clase: 'bloque-config' },
+    h('h3', {}, 'Publicar en redes'),
+    h('div', { clase: 'pista' },
+      'La API key de upload-post.com (su panel → API Keys). Con ella, el módulo Publicar sube y programa en '
+      + 'TikTok, Reels, YouTube y Facebook (se prueba en Publicar → Cuentas y ajustes). '
+      + 'Sin ella se prepara todo y se publica a mano.'),
+    h('div', { clase: 'fila' },
+      h('b', {}, 'Upload-Post'), h('span', { clase: 'crece' }),
+      pastillaEstado(puesta ? 'ok' : 'vacio', puesta ? up.cola || '' : 'sin poner')),
+    h('div', { clase: 'fila-clave' }, campo,
+      h('button', { clase: 'mini', onclick: () => {
+        if (!campo.value.trim()) { toast('escribe la clave', true); return; }
+        guardarClaves({ uploadpost: { clave: campo.value.trim() } });
+        campo.value = '';
+      } }, 'Cambiar'),
+      puesta ? h('button', { clase: 'mini fantasma peligro',
+        onclick: () => guardarClaves({ uploadpost: { clave: '' } }) }, 'Quitar') : null));
+}
+
+montarModulos();
 
 /* ARRANCA AQUI, Y ESTA LINEA VA LA ULTIMA DEL FICHERO A PROPOSITO.
    `arrancar` lee el modo puesto, y el modo vive en `MODOS`, que es un

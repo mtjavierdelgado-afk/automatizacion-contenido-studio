@@ -10,6 +10,49 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Publicar en redes (16 de octubre)**
+- **Arriba hay una barra de módulos: Inicio · Crear · Publicar · Automatizar.**
+  «Crear» es lo de siempre (estilos y vídeos) y es lo que se abre. «Inicio»
+  enseña los tres módulos y lo que sale hoy. «Automatizar» (la Parrilla de
+  guiones y el piloto automático) llega en la próxima versión.
+- **Debajo de un vídeo montado, «Enviar a Publicar».** Abre su ficha: eliges
+  las redes (TikTok, Instagram Reels, YouTube, Facebook), Claude escribe el
+  texto de cada una desde el encargo, el guion final y la duración real (con
+  título y capítulos en YouTube), y lo corriges a mano si quieres; se guarda
+  solo. Cada red tiene «Copiar texto» y está «Descargar MP4» para subirlo tú.
+  Si el vídeo no encaja en una red (horizontal en TikTok, más de 3 minutos
+  como Short…), se avisa; si la red no lo acepta, no se deja enviar.
+- **Publicar ahora, programar (día y hora de Lima) o solo a mano.** Con
+  Upload-Post, siempre con una confirmación delante que no se puede quitar.
+  Cada red es su propio envío: si una falla, las demás siguen, y cada una
+  enseña su estado y el enlace al post. Lo programado se puede cancelar, y
+  un envío puede quedarse «esperando tu OK» hasta que lo confirmes. Volver a
+  publicar el mismo vídeo en la misma red pide confirmarlo.
+- **La cola y el calendario:** los vídeos listos, la semana con lo que sale
+  cada día y, arriba, lo que te necesita (lo que falló o espera tu OK).
+- **Cuentas y ajustes por proyecto:** el perfil de Upload-Post de cada
+  cliente, «Conectar» para que conecte sus cuentas, y lo fijo del proyecto
+  (hora por defecto, firma, hashtags, tono, marcar como hecho con IA, avisar a
+  los suscriptores de YouTube).
+- **La clave de Upload-Post va en Configuración → Publicar en redes**, como
+  las de la música y los efectos (nunca en un chat), y se prueba sin subir
+  nada en Publicar → Cuentas y ajustes. Sin clave se puede preparar todo y
+  publicar a mano.
+- Los textos para redes gastan tokens de tu suscripción de Claude y se apuntan
+  en el coste del vídeo. Nada de Publicar deja obsoleto el vídeo.
+- **Guías y «Revisar» también en Publicar.** El texto de cada red y el tono de
+  los textos del proyecto tienen su **✦ Guía** (qué poner y qué no, plantilla,
+  ejemplo y prompt para otra IA) y su **✓ Revisar**, como los campos de Crear.
+  Y el manual («?») explica el módulo Publicar paso a paso.
+- **Resultados: lo que pasa con lo publicado.** En Publicar hay una pestaña
+  nueva, **Resultados**: por proyecto y periodo (7, 30 o 90 días), cuántas
+  publicaciones, vistas, me gusta, comentarios y compartidos, por red y con
+  los seguidores de cada cuenta, y los vídeos de más a menos vistos. En la
+  ficha de un vídeo, cada envío publicado enseña sus cifras y hay
+  **«Actualizar métricas»**. Las cifras se piden a Upload-Post solo al pulsar
+  «Actualizar» (deja unas 100 consultas cada 5 minutos); TikTok las da unas
+  horas después de publicar, y lo subido a mano no se puede medir desde aquí.
+
 **El disco ya no crece sin límite (16 de octubre)**
 - **De cada vídeo se guardan sus 5 últimos montajes.** Cada vez que montas un
   vídeo, el Studio guarda una copia entera (clips, música, efectos y el MP4);

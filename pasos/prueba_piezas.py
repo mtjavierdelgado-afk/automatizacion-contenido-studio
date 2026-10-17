@@ -2554,6 +2554,53 @@ def prueba_logo_y_revision():
        and '"original"' in revisar_campo.INSTRUCCION,
        "el prompt pide la sugerida si hay problemas, y el trozo exacto de cada uno")
 
+    # LA DURACION DEL VIDEO en la revision del material y las indicaciones
+    # (guion-cortos, 17-10-2026): sin ella, un material de tres minutos para un
+    # video de treinta segundos salia «sirve» y el guion, un resumen.
+    titulo("revisar: el material y las indicaciones saben cuanto dura el video")
+    igual(revisar_campo.contexto_saneado("material", {"duracion_s": "60", "indicaciones": "ENSEÑA: x",
+                                                      "otra": "no"}),
+          {"duracion_s": 60.0, "indicaciones": "ENSEÑA: x"}, "solo sus dos claves, saneadas")
+    igual(revisar_campo.contexto_saneado("indicaciones", {"duracion_s": 30, "indicaciones": "x"}),
+          {"duracion_s": 30.0}, "en las indicaciones, solo la duracion")
+    for malo in ({"duracion_s": -5}, {"duracion_s": "nan"}, {"duracion_s": 99999}, "texto", None):
+        igual(revisar_campo.contexto_saneado("material", malo), {},
+              f"un contexto raro no cuenta ({malo!r})")
+    igual(revisar_campo.contexto_saneado("tono", {"duracion_s": 60}), {},
+          "las demas guias no lo usan")
+    ok(revisar_campo.huella("material", "x") != revisar_campo.huella("material", "x", {"duracion_s": 30})
+       and revisar_campo.huella("material", "x", {"duracion_s": 30})
+       != revisar_campo.huella("material", "x", {"duracion_s": 240}),
+       "el mismo material con otra duracion es otra revision (no se sirve la guardada)")
+    igual(revisar_campo.huella("material", "x"), revisar_campo.huella("material", "x", {}),
+          "sin duracion, la huella de siempre")
+    igual(revisar_campo.huella("tono", "x"), revisar_campo.huella("tono", "x", {"duracion_s": 30}),
+          "y en las demas guias no cambia nada")
+    igual(revisar_campo.contexto_saneado("material", {"duracion_s": True}), {},
+          "un booleano no es una duracion")
+    import p3_guion                                           # noqa: PLC0415
+    igual(revisar_campo.DURACION_CORTA_S, p3_guion.DURACION_CORTA_S,
+          "la revision y el redactor llaman corto a lo mismo")
+    ok("{contexto}" not in revisar_campo.INSTRUCCION.replace("{contexto}", "")
+       and revisar_campo.INSTRUCCION.count("{contexto}") == 1,
+       "la instruccion solo gana el hueco del contexto (la huella lo quita)")
+    ok("IMPRESCINDIBLE" not in revisar_campo._contexto_como_texto("material", {"duracion_s": 240}),
+       "en un video largo no se pide marcar IMPRESCINDIBLE: ese redactor no lo lee")
+    vistos = []
+    original = revisar_campo.cli_claude.ejecutar
+    revisar_campo.cli_claude.ejecutar = lambda instruccion, **_k: (
+        vistos.append(instruccion) or ('{"veredicto": "sirve", "problemas": []}', {}))
+    try:
+        revisar_campo.revisar("material", "TEMA: fregaderos", contexto={
+            "duracion_s": 30, "indicaciones": "ÁNGULO: meter la olla"})
+        revisar_campo.revisar("tono", "cercano", contexto={"duracion_s": 30})
+    finally:
+        revisar_campo.cli_claude.ejecutar = original
+    ok("el video dura 30 s" in vistos[0] and "video CORTO" in vistos[0]
+       and "IMPRESCINDIBLE:" in vistos[0] and "ÁNGULO: meter la olla" in vistos[0],
+       "la revision del material recibe la duracion, que es corto y las indicaciones")
+    ok("el video dura" not in vistos[1], "la del tono no")
+
 
 def prueba_rehacer_de_verdad():
     """«Rehacer todo» no puede devolver lo mismo sacado de la cache.

@@ -327,6 +327,132 @@ def prueba_copias():
               "un guion sin un solo diacritico si obliga a rehacerlo")
 
 
+def prueba_videos_cortos():
+    """El guion de un video corto no puede salir como un resumen (17-10-2026).
+
+    Visto en un Reel real de 60 s sobre fregaderos: las instrucciones de un
+    documental (cuatro a seis paradas, gancho en dos bloques) sobre unas 130
+    palabras daban una frase por tema, el angulo pedido se quedaba en una
+    mencion y la lista de revision del material se recorria entera.
+    """
+    print("\n[5b] videos cortos y etiquetas de las indicaciones")
+    transcript = [{"t_in": 0, "t_out": 4, "texto": "hechos del material"}]
+
+    def brief_de(segundos):
+        brief = {"instrucciones": "x", "presupuesto_palabras": 130,
+                 "margen": {"minimo": 117, "maximo": 143}, "palabras_por_bloque": 30}
+        if segundos is not None:
+            brief["duracion_objetivo_s"] = segundos
+        return brief
+
+    # cuando es corto
+    for segundos, esperado in ((30, True), (60, True), (90, True), (120, True), (121, False),
+                               (240, False), (None, False), ("raro", False), (0, False)):
+        igual(p3_guion.es_corto(brief_de(segundos)), esperado,
+              f"un video de {segundos!r} s {'es' if esperado else 'no es'} corto")
+
+    # las etiquetas, como las escribe la guia (con tildes, varias lineas, comillas)
+    indicaciones = ("ENSEÑA: que simple o doble se decide por dentro.\n\n"
+                    "ÁNGULO: meter la misma olla en los dos\ny ver el hueco.\n"
+                    "EMPIEZA POR: “Los dos miden casi lo mismo por fuera.”\n"
+                    "- DEJA FUERA: marcas y acabados.")
+    etiquetas = p3_guion.etiquetas_de(indicaciones)
+    igual(sorted(etiquetas), ["angulo", "deja_fuera", "empieza", "ensena"],
+          "salen las cuatro etiquetas, con tilde y con guion delante")
+    igual(etiquetas["angulo"], "meter la misma olla en los dos y ver el hueco.",
+          "una etiqueta puede ocupar varias lineas")
+    igual(p3_guion.etiquetas_de("empieza por el final, sin rodeos"), {},
+          "sin dos puntos no es una etiqueta: una indicacion corriente no se toca")
+    igual(p3_guion.etiquetas_de("ENSENA: algo\nENSEÑA: otra"), {"ensena": "algo"},
+          "repetida, se queda la primera")
+
+    # LO QUE NO ES UNA ETIQUETA, o se la come otra (revision independiente)
+    igual(p3_guion.etiquetas_de("Ángulo: no me convence el de antes, prueba otro tono"), {},
+          "una nota en minusculas no es una orden, aunque empiece por «Ángulo:»")
+    igual(p3_guion.etiquetas_de("ENSEÑA: la idea\n\nAdemas quiero el tono serio.\nCambia el B004."),
+          {"ensena": "la idea"}, "una etiqueta acaba en la primera linea en blanco")
+    igual(p3_guion.etiquetas_de("ENSEÑA: X. ÁNGULO: Y. EMPIEZA POR: Z. DEJA FUERA: W"),
+          {"ensena": "X.", "angulo": "Y.", "empieza": "Z.", "deja_fuera": "W"},
+          "las cuatro en una sola linea, separadas por puntos")
+    igual(sorted(p3_guion.etiquetas_de("1. **ÁNGULO:** meter la olla\n2) ENSEÑA: una idea")),
+          ["angulo", "ensena"], "con numero o negrita delante")
+    igual(p3_guion._citar("«Los dos miden lo mismo».") + p3_guion._citar("“Hola.”"),
+          "«Los dos miden lo mismo»«Hola»", "las comillas y el punto se quitan en cualquier orden")
+    igual(p3_guion.es_corto({"duracion_objetivo_s": True}), False, "un booleano no es una duracion")
+    comprobar("CORTO: 60 s" in p3_guion._instruccion(
+        transcript, {}, dict(brief_de(None), duracion_objetivo_s="60"), None,
+        p3_guion._normalizar({}), [], "es"), "una duracion escrita como texto no rompe nada")
+
+    def instruccion(segundos, prompt_general="", propio=False):
+        opciones = p3_guion._normalizar({"prompt_general": prompt_general,
+                                         "guion_propio": propio})
+        return p3_guion._instruccion(transcript, {}, brief_de(segundos), None,
+                                     opciones, [], "es")
+
+    corto = instruccion(60, indicaciones)
+    comprobar("CORTO: 60 s" in corto and "ELIGE, NO RESUMAS" in corto,
+              "un video de 60 s lleva la estructura de los cortos")
+    comprobar("POCOS TEMAS" not in corto and "cuatro o seis" not in corto,
+              "y no la de cuatro a seis paradas del documental")
+    comprobar("NUNCA recorras una lista del material punto por punto" in corto,
+              "prohibe recorrer las listas del material")
+    comprobar("usa en el primer bloque" in corto and "los dos primeros bloques" not in corto,
+              "el gancho es un bloque, no dos (regla 13)")
+    comprobar("dos o tres COMO MUCHO" in corto and "ocho o diez" not in corto,
+              "y las secciones son dos o tres (regla 11)")
+    comprobar("desarrolla el caso que lo demuestra" in corto,
+              "si se queda corto, desarrolla el caso, no mas temas")
+    comprobar("LO QUE PIDE ESTE VIDEO (MANDA SOBRE LA ESTRUCTURA)" in corto,
+              "las etiquetas van como ordenes que mandan")
+    comprobar("se cuenta como una ESCENA" in corto
+              and "«meter la misma olla en los dos y ver el hueco»" in corto,
+              "el ANGULO se pide como escena, con su texto")
+    comprobar("«Los dos miden casi lo mismo por fuera»" in corto,
+              "EMPIEZA POR va sin sus comillas ni su punto")
+    comprobar(corto.index("LO QUE PIDE ESTE VIDEO") > corto.index("INSTRUCCION DE ESTA ITERACION")
+              and corto.index("LO QUE PIDE ESTE VIDEO") < corto.index("== REGLAS =="),
+              "y van entre la instruccion y las reglas")
+    comprobar("¿el angulo pedido esta contado como escena" in corto
+              and corto.index("Y RELEE") > corto.index("ANTES DE ENTREGAR, CUENTA"),
+              "y se comprueba al final, que es lo que mas pesa")
+
+    comprobar("Y ELIGES TU" in corto and "mismo ritmo de capitulos" not in corto,
+              "la regla 1 de los cortos no manda seguir el orden del material")
+    comprobar("y aqui empieza el caso." in corto and "documental." not in corto.split(
+        "== FORMATO DE SALIDA ==")[1], "y el ejemplo no habla de documental")
+    motivos = p3_guion._problemas([{"id": "B001", "texto": "corto"}], 40, dict(brief_de(60), margen={
+        "minimo": 117, "maximo": 143}), p3_guion._normalizar({}), "es")
+    comprobar(any("desarrolla mas el caso" in m for m in motivos)
+              and not any("hechos del material" in m for m in motivos),
+              "el reintento de un corto pide mas caso, no mas hechos")
+
+    largo = instruccion(240)
+    comprobar("POCOS TEMAS" in largo and "CORTO:" not in largo
+              and "LO QUE PIDE ESTE VIDEO" not in largo and "Y RELEE" not in largo,
+              "un video largo sin etiquetas lleva las instrucciones de siempre")
+    comprobar("canal de video documental" in largo and "Reels" not in largo,
+              "y la presentacion de siempre")
+    largo_con = instruccion(240, indicaciones)
+    comprobar("POCOS TEMAS" in largo_con and "LO QUE PIDE ESTE VIDEO" in largo_con,
+              "un video largo con etiquetas: la estructura de siempre y las etiquetas como ordenes")
+
+    # «REGENERAR EL GUION» CON UNA INSTRUCCION se suma a las indicaciones, no
+    # las pisa: antes escribia en el mismo param y ENSENA/ANGULO desaparecian
+    vuelta = p3_guion._instruccion(transcript, {}, brief_de(60), None, p3_guion._normalizar(
+        {"prompt_general": indicaciones, "instruccion_vuelta": "mas directo"}), [], "es")
+    comprobar("Y EN ESTA VUELTA, ADEMAS" in vuelta and "mas directo" in vuelta
+              and "se cuenta como una ESCENA" in vuelta,
+              "la instruccion de la vuelta va sumada y las etiquetas siguen mandando")
+    comprobar("EN ESTA VUELTA" not in instruccion(240),
+              "sin instruccion de vuelta, nada cambia")
+    igual(p3_guion.PARAMS_POR_DEFECTO["instruccion_vuelta"], "",
+          "y por defecto esta vacia (no se escribe sola)")
+
+    propio = instruccion(60, indicaciones, propio=True)
+    comprobar("CORTO:" not in propio and "LO QUE PIDE ESTE VIDEO" not in propio,
+              "un guion de la casa se respeta: ni estructura de corto ni etiquetas")
+
+
 def prueba_instruccion():
     print("\n[5] instruccion que se le manda al CLI")
     transcript = [{"t_in": i * 4, "t_out": i * 4 + 4, "texto": t}
@@ -725,6 +851,7 @@ def principal():
         prueba_aire()
         prueba_copias()
         prueba_instruccion()
+        prueba_videos_cortos()
         prueba_fallos_cli()
         prueba_reintento()
         # La redaccion REAL es opt-in, con el mismo flag que prueba_pasos_voz:

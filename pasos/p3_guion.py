@@ -134,6 +134,14 @@ UMBRAL_REINTENTO_BASE_S = 120
 
 PARAMS_POR_DEFECTO = {
     "prompt_general": "",
+    # LO QUE SE PIDE AL REGENERAR desde la pantalla Guion («mas directo»,
+    # «empieza por el robo»), APARTE de las indicaciones del Encargo
+    # (`prompt_general`). Hasta el 17-10-2026 esa caja escribia en
+    # `prompt_general` y se llevaba por delante las indicaciones: tras un
+    # «Regenerar el guion» con «mas directo», ENSENA y ANGULO desaparecian del
+    # Encargo y del prompt. Se escribe solo al usar esa caja, nunca por defecto
+    # (regla 1 de CLAUDE.md), y se SUMA a las indicaciones.
+    "instruccion_vuelta": "",
     "regenerar_desde_cero": False,
     # El ajuste por defecto de cada fase vive en cli_claude.POR_FASE, elegido
     # por la complejidad de la tarea y con las fuentes anotadas alli.
@@ -216,7 +224,8 @@ SISTEMA = ("Responde exclusivamente con el objeto JSON pedido, sin texto "
 def describir(params):
     """Resumen de una linea de la configuracion del paso, para la bitacora."""
     opciones = _normalizar(params, estricto=False)
-    texto = " ".join(opciones["prompt_general"].split())
+    texto = " ".join(" · ".join(x for x in (opciones["prompt_general"],
+                                             opciones["instruccion_vuelta"]) if x).split())
     if len(texto) > 60:
         texto = texto[:57] + "..."
     origen = "desde cero" if opciones["regenerar_desde_cero"] else "sobre el guion anterior"
@@ -256,6 +265,7 @@ def _normalizar(params, estricto=True):
             opciones[clave] = valor
 
     opciones["prompt_general"] = str(opciones.get("prompt_general") or "").strip()
+    opciones["instruccion_vuelta"] = str(opciones.get("instruccion_vuelta") or "").strip()
     opciones["regenerar_desde_cero"] = bool(opciones.get("regenerar_desde_cero"))
     opciones["anotaciones_voz"] = bool(opciones.get("anotaciones_voz"))
     opciones["emocion_en_voz"] = bool(opciones.get("emocion_en_voz"))
@@ -431,6 +441,16 @@ REGLA_REDACCION_DOSIER = (
     "dosier salen los hechos; del orden que tu elijas sale el video. Las frases "
     "son tuyas: no copies ni parafrasees ficha a ficha.")
 
+#: Y LA DE LOS CORTOS. La de arriba manda seguir «el mismo orden y el mismo
+#: ritmo de capitulos» del material, y en un video de un minuto eso es
+#: exactamente recorrer el material: lo contrario de «elige, no resumas».
+REGLA_REDACCION_CORTA = (
+    "REDACTA DE NUEVO, Y ELIGES TU. El material que va arriba es DOCUMENTACION: "
+    "de ahi salen los hechos, pero cuales entran y en que orden lo decides tu "
+    "para contar la idea de este video (ver COMO SE ESTRUCTURA ESTE VIDEO). No "
+    "sigas su orden ni sus apartados, no copies ninguna frase y no la "
+    "parafrasees frase a frase.")
+
 REGLA_GUION_PROPIO = (
     "ESTE GUION YA ESTA ESCRITO Y ES DE LA CASA. El material que va arriba no es "
     "documentacion: es el guion, escrito por quien te lo pide. Conservalo palabra "
@@ -438,6 +458,180 @@ REGLA_GUION_PROPIO = (
     "bloques, ajustarlo a la horquilla de palabras si se sale, escribir las "
     "cifras con letras y colocar las anotaciones de voz. No lo 'mejores', no lo "
     "reescribas con tus palabras y no le cambies el tono.")
+
+
+#: HASTA AQUI UN VIDEO ES CORTO, en segundos de duracion pedida (17-10-2026).
+#:
+#: Las instrucciones de estructura de abajo nacieron para documentales de
+#: varios minutos: cuatro a seis paradas con varios bloques cada una, y el
+#: gancho en los dos primeros bloques. En un Reel de un minuto (unas 130
+#: palabras en cuatro bloques) esa aritmetica no cierra: a cada parada le
+#: toca media frase, y el guion sale como un resumen del material -- todos los
+#: temas nombrados, ninguno contado. Visto en un video real de 60 s sobre
+#: fregaderos: el angulo pedido («meter la misma olla en los dos») se quedo
+#: en una mencion y la lista de revision del material se recorrio entera, una
+#: frase por punto. Los videos de mas de esto reciben las mismas
+#: instrucciones de siempre. Era 90 s; el dueno lo subio a 120 el 17-10-2026
+#: (sus videos rondan el minuto y alguno se va a dos).
+DURACION_CORTA_S = 120
+
+
+def _segundos_pedidos(brief):
+    """La duracion pedida del brief, en segundos (0.0 si no hay o es rara)."""
+    crudo = (brief or {}).get("duracion_objetivo_s")
+    if isinstance(crudo, bool):
+        return 0.0
+    try:
+        segundos = float(crudo or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return segundos if segundos == segundos and segundos != float("inf") else 0.0
+
+
+def es_corto(brief):
+    """Si el video es corto (hasta DURACION_CORTA_S). -> bool
+
+    Solo mira la duracion PEDIDA del brief. Sin ella (briefs de antes de que
+    existiera, pruebas) se trata como largo, que es lo de siempre.
+    """
+    return 0 < _segundos_pedidos(brief) <= DURACION_CORTA_S
+
+
+#: LAS ETIQUETAS DE LAS INDICACIONES, que la guia de «Las indicaciones» ensena
+#: a escribir (`pasos/guias.py`). Hasta el 17-10-2026 iban enteras como
+#: «instruccion de esta iteracion», debajo de las reglas de estructura, y el
+#: modelo las leia como una nota mas: respetaba EMPIEZA POR y DEJA FUERA, que
+#: son faciles de comprobar, y el ANGULO se quedaba en una mencion. Ahora se
+#: separan y cada una va como una orden con su significado dicho.
+#:
+#: SOLO EN MAYUSCULAS, que es como las ensena la guia: «Angulo: no me convence
+#: el de antes» es una nota corriente y no puede volverse una orden. Valen al
+#: empezar una linea (con guion, vineta, numero o negrita delante) o detras de
+#: un punto o un punto y coma en la misma linea. El texto de cada una acaba en
+#: la siguiente etiqueta o en la primera linea en blanco: lo que venga despues
+#: son otras notas, no parte de la etiqueta.
+_ETIQUETA = re.compile(
+    r"(?m)(?:^[ \t]*(?:[-*•]|\d+[.)])?[ \t]*|(?<=[.;])[ \t]+)(?:\*\*)?"
+    r"(ENSE[ÑN]AR?|[ÁA]NGULO|EMPIEZA[ \t]+POR|DEJA[ \t]+FUERA)"
+    r"(?:\*\*)?[ \t]*:(?:\*\*)?[ \t]*")
+_LINEA_EN_BLANCO = re.compile(r"\n[ \t]*\n")
+
+_CLAVE_DE_ETIQUETA = {"ENSENA": "ensena", "ENSENAR": "ensena", "ANGULO": "angulo",
+                      "EMPIEZA POR": "empieza", "DEJA FUERA": "deja_fuera"}
+
+
+def etiquetas_de(indicaciones):
+    """Las etiquetas que traen las indicaciones. -> {clave: texto}
+
+    Claves: 'ensena', 'angulo', 'empieza', 'deja_fuera'. Cada texto va desde
+    su etiqueta hasta la siguiente (puede ocupar varias lineas). Una etiqueta
+    repetida se queda con la primera; una vacia no cuenta.
+    """
+    texto = str(indicaciones or "")
+    marcas = list(_ETIQUETA.finditer(texto))
+    encontradas = {}
+    for i, marca in enumerate(marcas):
+        nombre = " ".join(marca.group(1).upper().replace("Ñ", "N")
+                          .replace("Á", "A").split())
+        clave = _CLAVE_DE_ETIQUETA.get(nombre)
+        fin = marcas[i + 1].start() if i + 1 < len(marcas) else len(texto)
+        blanco = _LINEA_EN_BLANCO.search(texto, marca.end(), fin)
+        if blanco and texto[marca.end():blanco.start()].strip():
+            fin = blanco.start()
+        valor = " ".join(texto[marca.end():fin].split())
+        if clave and valor and clave not in encontradas:
+            encontradas[clave] = valor
+    return encontradas
+
+
+def _citar(valor):
+    """El texto de una etiqueta entre comillas, sin sus comillas ni su punto."""
+    limpio = str(valor or "").strip()
+    for _ in range(2):  # «x». -> quita el punto, las comillas y otra vez el punto
+        if limpio.endswith(".") and not limpio.endswith(".."):
+            limpio = limpio[:-1].rstrip()
+        limpio = limpio.strip("\"'“”«»").strip()
+    return f"«{limpio}»"
+
+
+def _seccion_lo_que_pide(etiquetas):
+    """El trozo del prompt con las etiquetas como ordenes. -> [lineas]"""
+    if not etiquetas:
+        return []
+    etiquetas = {clave: _citar(valor) for clave, valor in etiquetas.items()}
+    lineas = [
+        "",
+        "== LO QUE PIDE ESTE VIDEO (MANDA SOBRE LA ESTRUCTURA) ==",
+        "Las indicaciones de arriba traen etiquetas. Cada una es una ORDEN, no "
+        "una sugerencia, y cuando choquen con la forma general de estructurar un "
+        "video, mandan ellas:",
+    ]
+    if "ensena" in etiquetas:
+        lineas.append(
+            f"  - ENSENA: {etiquetas['ensena']}. Es la UNICA idea del video. Al "
+            "terminar, quien mira tiene que poder decirla con sus palabras. Lo "
+            "que no empuja esa idea se queda fuera aunque sea cierto y util.")
+    if "angulo" in etiquetas:
+        lineas.append(
+            f"  - ANGULO: {etiquetas['angulo']}. Es COMO se cuenta, y se cuenta "
+            "como una ESCENA: algo que se ve pasar delante de quien mira, "
+            "desarrollado paso a paso en varios bloques seguidos y en el centro "
+            "del video. Si pide mostrar, meter, comparar o probar algo, el guion "
+            "lo HACE: dice que se coge, donde se pone y que se ve que pasa. Una "
+            "frase que solo lo nombra no lo cumple.")
+    if "empieza" in etiquetas:
+        lineas.append(
+            f"  - EMPIEZA POR: {etiquetas['empieza']}. El primer bloque arranca "
+            "asi. Puedes retocar una palabra para que suene natural dicho en voz "
+            "alta, pero no cambies la idea ni la pongas mas tarde.")
+    if "deja_fuera" in etiquetas:
+        lineas.append(
+            f"  - DEJA FUERA: {etiquetas['deja_fuera']}. No sale en ninguna "
+            "forma: ni de pasada, ni para negarlo, ni como ejemplo.")
+    return lineas
+
+
+#: LA ESTRUCTURA DE UN VIDEO CORTO, en lugar de la de cuatro a seis paradas.
+#: Ver DURACION_CORTA_S: con un minuto no caben cinco temas, cabe uno bien
+#: contado, y la forma que lo consigue es enseñarlo con un caso concreto.
+def _estructura_corta(segundos, presupuesto):
+    return [
+        "",
+        f"== COMO SE ESTRUCTURA ESTE VIDEO (CORTO: {int(round(segundos))} s, "
+        f"unas {presupuesto} palabras) ==",
+        "Un video corto NO es un resumen del material: es UNA idea contada de "
+        "forma que se vea. Con este numero de palabras no caben cinco temas; "
+        "cabe uno, bien contado.",
+        "",
+        "  - UNA SOLA IDEA. Antes de escribir, decide que es lo unico que quien "
+        "mira tiene que llevarse. Todo el guion empuja esa idea.",
+        "  - ENSENALA CON UN CASO CONCRETO. Mas o menos la mitad del guion es "
+        "una situacion que se pueda ver: un objeto, una accion, una comparacion "
+        "lado a lado, un antes y un despues. Cuentala paso a paso, como si quien "
+        "mira la estuviera viendo. Usa los datos del material que la hacen "
+        "concreta (medidas, cifras, tiempos); si no los trae, describe el caso "
+        "con objetos cotidianos y sin inventar ninguna cifra.",
+        "  - ELIGE, NO RESUMAS. El material trae mas de lo que cabe, a "
+        "proposito. Entra solo lo que empuja la idea, y lo demas se queda fuera "
+        "aunque sea cierto. Si el material marca algo como IMPRESCINDIBLE, eso "
+        "entra. NUNCA recorras una lista del material punto por punto («revisa "
+        "esto, lo otro y lo de mas alla»): si una lista importa, quedate con uno "
+        "o dos puntos y explica por que.",
+        "  - CADA FRASE EXPLICA O MUESTRA. Mejor una afirmacion con su porque "
+        "que tres afirmaciones sueltas. Una frase que solo nombra un tema, sin "
+        "explicarlo ni mostrarlo, sobra.",
+        "  - LA FORMA: el gancho (un bloque) -> el caso que lo demuestra (el "
+        "centro del video) -> el cierre: lo que significa para quien mira, "
+        "dicho como una regla practica para decidir. Son esas tres paradas como "
+        "mucho, contando el gancho; nunca cuatro.",
+        "",
+        "Decide la idea, el caso y esas paradas ANTES de escribir.",
+        "",
+        "Y ESAS PARADAS SON LAS SECCIONES DEL GUION: el bloque que abre cada "
+        "una lleva \"abre_seccion\": true (regla 11). Lo que no puede pasar es "
+        "cambiar de parada sin abrir seccion, porque ahi es donde el motor pone "
+        "el silencio que deja respirar el video.",
+    ]
 
 
 def _instruccion(transcript, metadatos, brief, anterior, opciones, correcciones,
@@ -461,18 +655,29 @@ def _instruccion(transcript, metadatos, brief, anterior, opciones, correcciones,
         1, int(round(presupuesto / max(1, por_bloque))))
 
     propio = bool(opciones.get("guion_propio"))
+    # CORTO Y CON ETIQUETAS solo cuando se redacta: un guion de la casa se
+    # respeta tal cual, y ahi ni la estructura ni el angulo son del redactor
+    # (ver DURACION_CORTA_S y etiquetas_de).
+    corto = es_corto(brief) and not propio
+    etiquetas = {} if propio else etiquetas_de(opciones.get("prompt_general"))
     # QUE REGLA DE REDACCION TOCA lo decide de donde viene el material, que es un
     # dato y no una adivinanza: un dosier no tiene orden que seguir.
     if propio:
         regla_redaccion = REGLA_GUION_PROPIO
+    elif corto:
+        regla_redaccion = REGLA_REDACCION_CORTA
     elif origen and (origen[0] if origen else None):
         regla_redaccion = REGLA_REDACCION_DOSIER
     else:
         regla_redaccion = REGLA_REDACCION
     partes = [
-        "Eres el guionista de un canal de video documental. Escribes la "
-        "narracion en off que se va a locutar: frases pensadas para el oido, "
-        "claras y con ritmo, sin adornos de texto escrito.",
+        ("Eres el guionista de videos cortos de divulgacion practica para redes "
+         "(Reels, TikTok, Shorts). Escribes la narracion en off que se va a "
+         "locutar: frases pensadas para el oido, claras y con ritmo, sin adornos "
+         "de texto escrito." if corto else
+         "Eres el guionista de un canal de video documental. Escribes la "
+         "narracion en off que se va a locutar: frases pensadas para el oido, "
+         "claras y con ritmo, sin adornos de texto escrito."),
         "",
         ("== EL GUION QUE YA ESTA ESCRITO ==" if propio
          else "== MATERIAL DE PARTIDA (documentacion, NO texto para copiar) =="),
@@ -613,7 +818,7 @@ def _instruccion(transcript, metadatos, brief, anterior, opciones, correcciones,
     # Va como seccion propia y pegada a la instruccion de la iteracion porque no
     # es una comprobacion que se pasa al final: es lo primero que hay que
     # decidir, antes de escribir la primera frase.
-    partes.extend([
+    estructura_larga = [
         "",
         "== COMO SE ESTRUCTURA ESTE VIDEO ==",
         "Un video no es una lista de datos buenos: es UN RELATO con unas pocas "
@@ -650,10 +855,25 @@ def _instruccion(transcript, metadatos, brief, anterior, opciones, correcciones,
         "partirse en dos secciones; lo que no puede pasar es cambiar de parada "
         "sin abrir seccion, porque ahi es donde el motor pone el silencio que "
         "deja respirar el video.",
+    ]
+    partes.extend(_estructura_corta(_segundos_pedidos(brief), presupuesto)
+                  if corto else estructura_larga)
+    partes.extend([
         "",
         "== INSTRUCCION DE ESTA ITERACION ==",
         opciones["prompt_general"] or
         "Redacta el guion siguiendo el brief, sin indicaciones adicionales.",
+    ])
+    if opciones.get("instruccion_vuelta"):
+        partes.extend([
+            "",
+            "== Y EN ESTA VUELTA, ADEMAS ==",
+            opciones["instruccion_vuelta"],
+            "Esto se SUMA a las indicaciones de arriba, no las sustituye: lo "
+            "que piden ellas sigue valiendo.",
+        ])
+    partes.extend(_seccion_lo_que_pide(etiquetas))
+    partes.extend([
         "",
         "== REGLAS ==",
         f"1. {regla_redaccion}",
@@ -768,10 +988,13 @@ def _instruccion(transcript, metadatos, brief, anterior, opciones, correcciones,
         "que decidiste arriba (COMO SE ESTRUCTURA ESTE VIDEO). Se cambia de "
         "seccion cuando se cambia de asunto, no cuando se cambia de frase. El "
         "primer bloque siempre la lleva. Piensa en "
-        "capitulos de un documental: el gancho, la entrada, quien lo hizo, que "
-        "se llevaron, las consecuencias, el cierre. En un video de dos minutos "
-        "salen cuatro o cinco; en uno de quince, ocho o diez COMO MUCHO. "
-        "Pasarse es peor que quedarse corto. Y ESE CORTE SE OYE: el motor deja "
+        + ("tramos de un video corto: el gancho, el caso y, si hace falta, el "
+           "cierre. En este video salen dos o tres COMO MUCHO. "
+           if corto else
+           "capitulos de un documental: el gancho, la entrada, quien lo hizo, que "
+           "se llevaron, las consecuencias, el cierre. En un video de dos minutos "
+           "salen cuatro o cinco; en uno de quince, ocho o diez COMO MUCHO. ")
+        + "Pasarse es peor que quedarse corto. Y ESE CORTE SE OYE: el motor deja "
         "un silencio al final del bloque anterior, asi que ese bloque tiene que "
         "REMATAR el tema que cierra, no enlazar con el siguiente.",
         # LA REGLA DEL RELATO QUE AVANZA. Nacio de un video real: pasado el
@@ -790,8 +1013,11 @@ def _instruccion(transcript, metadatos, brief, anterior, opciones, correcciones,
         "algo por primera vez.",
         "13. EL GANCHO ES UNO Y VA AL PRINCIPIO. El tono de entrada --la "
         "promesa, la sorpresa, el «esto es mas grande de lo que parece»-- se "
-        "usa en los dos primeros bloques y no vuelve a aparecer. A mitad de "
-        "video ese tono no promete nada: repite, y se nota.",
+        + ("usa en el primer bloque y no vuelve a aparecer: en un video corto "
+           "lo siguiente ya es el caso (o la presentacion, si la hay). "
+           if corto else
+           "usa en los dos primeros bloques y no vuelve a aparecer. ")
+        + "A mitad de video ese tono no promete nada: repite, y se nota.",
         "14. El titulo es para el video, no para el guion: corto y concreto.",
     ])
 
@@ -850,6 +1076,10 @@ def _instruccion(transcript, metadatos, brief, anterior, opciones, correcciones,
                    '{"id": "B002", "texto": "Soy Nombre y en este video te voy a '
                    'contar...", "personaje": true, "abre_seccion": true}, '
                    '{"id": "B003", "texto": "y aqui sigue el documental."}]}')
+    if corto:
+        # el ejemplo tambien se copia antes que la regla: en un corto, despues
+        # del gancho no empieza un documental, empieza el caso
+        ejemplo = ejemplo.replace("el documental.", "el caso.")
     # LA CUENTA, OTRA VEZ Y AL FINAL. No es repetir la regla 3 por insistir: la
     # ULTIMA parte de un prompt es la que mas pesa --esta medido en este repo
     # con el feedback de un plano-- y la longitud es lo unico
@@ -866,9 +1096,23 @@ def _instruccion(transcript, metadatos, brief, anterior, opciones, correcciones,
         f"{minimo} y {maximo}, en unos {bloques_previstos} bloques de unas "
         f"{por_bloque}. Si te has pasado, RECORTA antes de responder: quita "
         f"frases enteras que no aporten un hecho nuevo, no acortes todas un "
-        f"poco. Si te has quedado corto, desarrolla los hechos del material. "
-        f"Esta cuenta manda sobre cualquier otra cosa que te apetezca contar.",
+        + (f"poco. Si te has quedado corto, desarrolla el caso que lo demuestra: "
+           f"mas paso a paso, no mas temas. " if corto else
+           f"poco. Si te has quedado corto, desarrolla los hechos del material. ")
+        + f"Esta cuenta manda sobre cualquier otra cosa que te apetezca contar.",
     ])
+    # Y LO QUE SE PIDIO, COMPROBADO AL FINAL por la misma razon que la cuenta:
+    # lo ultimo del prompt es lo que mas pesa, y el fallo que esto arregla
+    # (el angulo nombrado y no contado) se ve releyendo, no escribiendo.
+    if corto or "angulo" in etiquetas:
+        partes.append("")
+        partes.append("Y RELEE ANTES DE ENTREGAR: "
+                      + ("¿el angulo pedido esta contado como escena, paso a "
+                         "paso, o solo nombrado? " if "angulo" in etiquetas else "")
+                      + ("¿hay alguna lista del material recorrida punto por "
+                         "punto, o algun tema nombrado sin explicar? "
+                         if corto else "")
+                      + "Si es asi, reescribe esos bloques antes de responder.")
     partes.extend([
         "",
         "== FORMATO DE SALIDA ==",
@@ -1113,14 +1357,23 @@ def _problemas(bloques, palabras, brief, opciones, idioma):
         1, int(round((presupuesto or maximo or 1) / max(1, por_bloque))))
     reparto = (f"; son unos {previstos} bloques de unas {por_bloque} palabras y "
                f"has escrito {len(bloques)}")
+    # EN UN CORTO, crecer es contar mas despacio el caso y recortar es quitar
+    # lo que no empuja la idea: «desarrolla mas los hechos» devolvia el segundo
+    # intento al resumen que la estructura corta existe para evitar
+    corto = es_corto(brief) and not opciones.get("guion_propio")
     if minimo and palabras < minimo:
         motivos.append(f"el guion se queda en {palabras} palabras y el minimo de "
-                       f"la horquilla son {minimo}: desarrolla mas los hechos "
-                       f"del material{reparto}")
+                       f"la horquilla son {minimo}: "
+                       + ("desarrolla mas el caso que lo demuestra, paso a paso, "
+                          "sin anadir temas" if corto else
+                          "desarrolla mas los hechos del material")
+                       + reparto)
     if maximo and palabras > maximo:
         motivos.append(f"el guion se va a {palabras} palabras y el maximo de la "
-                       f"horquilla son {maximo}: recorta sin perder "
-                       f"hechos{reparto}")
+                       f"horquilla son {maximo}: "
+                       + ("recorta quitando lo que no empuja la idea, no el caso"
+                          if corto else "recorta sin perder hechos")
+                       + reparto)
 
     # Pasarse de pausas no se ve bloque a bloque, solo mirando el guion entero,
     # y estropea justo lo que se queria mejorar: cada <break> parte la
@@ -1501,6 +1754,7 @@ def _redactar(proyecto, params, avisar):
         "esfuerzo": opciones["esfuerzo"],
         "intentos": intentos,
         "prompt_general": opciones["prompt_general"],
+        "instruccion_vuelta": opciones["instruccion_vuelta"],
         "regenerado_desde_cero": opciones["regenerar_desde_cero"],
         "partia_de": (anterior or {}).get("titulo", "") if anterior else "",
         "bloques_editados": editados,

@@ -8514,8 +8514,11 @@ async function reescribirGuionLight() {
   const texto = String(v.promptGeneral || '').trim();
   if (!texto) { toast('escribe qué cambiarías', true); return; }
   try {
+    /* EN SU PROPIO CAJÓN, no en `prompt_general`: ahí viven las indicaciones
+       del Encargo (ENSEÑA, ÁNGULO…), y escribir aquí las borraba (17-10-2026).
+       El redactor la recibe sumada a ellas (`p3_guion`, «instruccion_vuelta»). */
     await pedir(API.params(v.pid, 'guion'), {
-      method: 'PUT', cuerpo: { params: { prompt_general: texto } },
+      method: 'PUT', cuerpo: { params: { instruccion_vuelta: texto } },
     });
     v.promptGeneral = '';
     // 'pendientes' y no 'todo': REHACER UNA COSA REHACE ESA COSA. Escribir el
@@ -11969,6 +11972,26 @@ function repintarRevisiones(gid) {
   });
 }
 
+/* LA DURACIÓN DEL VÍDEO para «Revisar» del material y de las indicaciones
+   (guion-cortos, 17-10-2026). Sin ella, la revisión daba por bueno un material
+   de tres minutos para un vídeo de treinta segundos, y el guion salía como un
+   resumen. Se lee del encargo que está en pantalla: el del vídeo nuevo o la
+   copia editable del vídeo abierto. Fuera de esas dos pantallas, nada. */
+function contextoDeRevision(gid) {
+  if (gid !== 'material' && gid !== 'indicaciones') return null;
+  const l = APP.light;
+  const v = l.video || {};
+  if (l.vista !== 'elegido') return null;
+  let copia = null;
+  if (v.vista === 'encargo' && v.encargo) copia = v.encargo;
+  else if (v.vista === 'encargo_video' && v.pid) copia = pedidoDelVideoLight().copia;
+  const segundos = copia ? Number(copia.duracion_objetivo_s) || 0 : 0;
+  if (!(segundos > 0)) return null;
+  const contexto = { duracion_s: segundos };
+  if (gid === 'material') contexto.indicaciones = String(copia.indicaciones || '');
+  return contexto;
+}
+
 function botonRevisar(gid, campo) {
   return h('button', {
     clase: 'mini fantasma', type: 'button',
@@ -11994,8 +12017,9 @@ function botonRevisar(gid, campo) {
         boton.disabled = false;
       };
       try {
+        const contexto = contextoDeRevision(gid);
         const lanzada = await pedir(`${BASE}/api/sistema/guias/${gid}/revisar`,
-          { method: 'POST', cuerpo: { texto, anterior } });
+          { method: 'POST', cuerpo: contexto ? { texto, anterior, contexto } : { texto, anterior } });
         // se pide SIEMPRE una vez: aunque venga «listo» (ya revisado), el
         // resultado está en su ficha y no en la respuesta del lanzamiento
         let ficha = { estado: 'pensando' };

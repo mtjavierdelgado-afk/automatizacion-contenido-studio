@@ -92,6 +92,7 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 | Rama abierta | Ficheros reservados | Desde |
 |---|---|---|
 | `publicar-redes-2` | Lo que faltaba de las métricas (decisión del dueño, 16-10): retención de TikTok y YouTube, la lectura «guardada» de Upload-Post (no gasta el límite de 100 consultas cada 5 min), el resumen de esta semana y este mes frente al anterior, «lo que mejor funcionó» (función y ruta para la Parrilla y el piloto) y una línea con lo mejor de la semana en Inicio. Las cifras se siguen pidiendo SOLO al pulsar. **Propios:** `pasos/publicar.py` (sección de métricas), `motores/publicar_uploadpost/`, `pasos/prueba_publicar.py`. **Por zonas:** solo la sección PUBLICAR al final de `web/app.js`, el bloque PUBLICAR al final de `app.py` y las clases de Publicar al final de `web/estilo.css`; `docs/API.md` y un tramo al final de `prueba_recorrido.py`. Después, en la misma conversación, `publicar-redes-3` (aprobación del cliente) | 17-10-2026 |
+| `parrilla` | Módulo Automatizar → Parrilla: matrices de guiones por proyecto (pendiente / usado / publicado), «Añadir guiones» (subir Word, PDF o Excel; pedir a Claude; escribir o pegar), todo al formato único del guion con «Uso: exacto \| adaptar», ficha editable y «Pasar al Encargo». Opcional: el Encargo a mano no cambia. Sin piloto automático. **Propios:** `pasos/parrilla.py`, `pasos/prueba_parrilla.py`. **Por zonas — COMPARTE `web/app.js` y `app.py` con `publicar-redes-2`:** en `web/app.js` solo la pestaña Automatizar y funciones nuevas al final (sección PARRILLA, después de la de PUBLICAR); en `app.py` rutas nuevas en un bloque PARRILLA al final; clases nuevas al final de `web/estilo.css`. También `pasos/guias.py` (guías nuevas), `docs/NOVEDADES.md`, `pruebas.sh` (una línea) y un tramo al final de `prueba_recorrido.py` | 17-10-2026 |
 
 Quien abre una rama la apunta aquí (en `main`, regla 8); quien la une a `main`,
 la quita.
@@ -103,6 +104,11 @@ vuelve a apuntar en la tabla. Mientras siga en pausa, `v2-fase-4b` sigue
 esperando, porque depende de ella.
 
 ### El orden acordado
+
+**PRIORIDAD (17-10-2026, decisión del dueño): la rama `parrilla` va primero.
+No se abre ninguna rama nueva hasta que `parrilla` se una a `main`.** Las que
+ya estaban abiertas (`publicar-redes-2`) siguen; `publicar-redes-3` y
+cualquier otra esperan. Lo de abajo es el plan de fondo y se retoma después.
 
 1. **Ahora, en paralelo (las tres ramas del máximo)**: la Etapa Foto A, la V2.0
    fase 3 y la V2.0 fase 4a (esta, con ficheros nuevos; ver abajo).

@@ -549,6 +549,35 @@ def prueba_studio():
            "la firma y los hashtags fijos entran en el texto")
         ok(f["hora_sugerida"].endswith("T20:30"), "y la hora de programar es la del proyecto")
 
+        # --- la portada: el fotograma, guardarlo, una imagen subida
+        r = s.get(base + "/api/publicar/videos/fiesta/fotograma?ms=1500")
+        igual((r.status_code, r.headers.get("content-type")), (200, "image/jpeg"),
+              "el fotograma del segundo 1,5 para la vista de la portada")
+        ok(r.content[:2] == b"\xff\xd8", "es un JPEG de verdad")
+        igual(s.get(base + "/api/publicar/videos/fiesta/fotograma?ms=999000").status_code, 400,
+              "un momento fuera del vídeo se dice")
+        f = s.put(base + "/api/publicar/videos/fiesta", json={"portada": {"ms": 1500}}).json()
+        igual(f["portada"]["ms"], 1500, "«Usar este fotograma» se guarda en la ficha")
+        igual(s.put(base + "/api/publicar/videos/fiesta", json={"portada": {"ms": -3}}).status_code,
+              400, "un fotograma negativo no")
+        png = os.path.join(carpeta, "portada.png")
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=1080x1920",
+                        "-frames:v", "1", png], check=True)
+        with open(png, "rb") as fh:
+            r = s.post(base + "/api/publicar/videos/fiesta/portada", files={"portada": ("p.png", fh, "image/png")})
+        igual(r.status_code, 200, "subir una imagen de portada")
+        ok(bool(r.json()["portada"]["imagen"]), "y queda en la ficha")
+        r = s.get(base + "/api/publicar/videos/fiesta/portada.jpg")
+        ok(r.status_code == 200 and r.content[:2] == b"\xff\xd8" and len(r.content) <= 2 * 1024 * 1024,
+           "pasada a JPEG de menos de 2 MB (la miniatura de YouTube)")
+        r = s.post(base + "/api/publicar/videos/fiesta/portada",
+                   files={"portada": ("p.gif", b"GIF89a", "image/gif")})
+        igual(r.status_code, 400, "un GIF no vale como portada")
+        f = s.put(base + "/api/publicar/videos/fiesta",
+                  json={"portada": {"quitar_imagen": True}}).json()
+        igual((f["portada"]["imagen"], f["portada"]["ms"]), ("", 1500),
+              "«Quitar la imagen» vuelve al fotograma elegido")
+
         # --- ya
         r = s.post(base + "/api/publicar/videos/fiesta/enviar",
                    json={"redes": ["tiktok", "instagram", "facebook"], "modo": "ahora",
@@ -583,6 +612,9 @@ def prueba_studio():
         ok(subida["campos"].get("instagram_title", "").startswith("Reel a mano"),
            "con el texto editado a mano")
         ok(subida["bytes"] > 1000, "y el MP4 de verdad")
+        igual((subida["campos"].get("thumb_offset"), subida["campos"].get("cover_timestamp")),
+              ("1500", 1500), "la portada: el fotograma elegido en Instagram y TikTok")
+        ok(subida["campos"].get("title"), f"y el «title» general: {subida['campos'].get('title')!r}")
         for _ in range(4):
             s.post(base + "/api/publicar/refrescar")
             f = s.get(base + "/api/publicar/videos/fiesta").json()
@@ -1034,6 +1066,61 @@ def prueba_textos():
         os.environ.pop("ESTUDIO_SIMULAR", None)
 
 
+def prueba_portada():
+    """Qué campo de portada va a cada red según lo elegido."""
+    seccion("8] portada: qué va a cada red")
+    raiz = os.path.join(CARPETA, "portada")
+    os.makedirs(raiz)
+    mp4 = os.path.join(raiz, "v.mp4")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=blue:s=640x360:d=3",
+                    "-pix_fmt", "yuv420p", mp4], check=True)
+    info = dict(INFO, mp4=mp4, formato="horizontal", duracion_s=3)
+    todas = ["tiktok", "instagram", "youtube", "facebook"]
+    campos, ficheros = P.campos_portada(raiz, info, {}, todas)
+    igual((campos, ficheros), ({}, []), "sin elegir nada no se manda nada: cada red pone la suya")
+    datos = {"portada": {"ms": 2000}}
+    campos, ficheros = P.campos_portada(raiz, info, datos, todas)
+    igual(campos, {"thumb_offset": "2000", "cover_timestamp": 2000},
+          "un fotograma: thumb_offset en Instagram y cover_timestamp en TikTok")
+    igual([c for c, _r in ficheros], ["facebook_thumbnail"],
+          "Facebook (como vídeo) recibe el fotograma; YouTube no sin marcarlo")
+    datos["portada"]["youtube"] = True
+    _c, ficheros = P.campos_portada(raiz, info, datos, todas)
+    igual(sorted(c for c, _r in ficheros), ["facebook_thumbnail", "thumbnail"],
+          "con «también a YouTube», su miniatura")
+    vertical = dict(info, formato="vertical", duracion_s=3)
+    _c, ficheros = P.campos_portada(raiz, vertical, datos, ["facebook"])
+    igual(ficheros, [], "un Reel de Facebook no lleva miniatura")
+    # una imagen subida
+    png = os.path.join(raiz, "p.png")
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=800x800",
+                    "-frames:v", "1", png], check=True)
+    with open(png, "rb") as fh:
+        P.guardar_imagen_portada(raiz, "fiesta", fh.read(), ".png")
+    datos = P._leer_video(raiz, "fiesta")
+    datos["portada"]["ms"] = 2000
+    campos, ficheros = P.campos_portada(raiz, info, datos, todas)
+    nombres = sorted(c for c, _r in ficheros)
+    igual(nombres, ["cover_image", "facebook_thumbnail"],
+          "una imagen: cover_image en Instagram y Facebook")
+    igual(campos, {"cover_timestamp": 2000}, "y TikTok sigue con el fotograma si no se marca")
+    datos["portada"].update(tiktok_imagen=True, youtube=True)
+    campos, ficheros = P.campos_portada(raiz, info, datos, todas)
+    igual(sorted(c for c, _r in ficheros), ["cover_image", "facebook_thumbnail", "thumbnail",
+                                            "tiktok_cover_image"], "y a TikTok y YouTube si se marcan")
+    igual(campos, {}, "sin campos de momento cuando va la imagen")
+    # el cliente las manda en el multipart
+    cuerpo = UP._Multipart([("user", "x")], [("video", mp4), ("cover_image", png)])
+    todo = b""
+    while True:
+        trozo = cuerpo.read()
+        if not trozo:
+            break
+        todo += trozo
+    ok(b'name="cover_image"; filename="p.png"' in todo, "el multipart lleva la imagen con su campo")
+    igual(len(todo), cuerpo.longitud, "y su longitud cuadra")
+
+
 def main():
     print("PRUEBA DE PUBLICAR")
     prueba_piezas()
@@ -1042,6 +1129,8 @@ def main():
     prueba_metricas()
     prueba_perfiles()
     prueba_textos()
+    if shutil.which("ffmpeg"):
+        prueba_portada()
     if shutil.which("ffmpeg"):
         prueba_studio()
     else:

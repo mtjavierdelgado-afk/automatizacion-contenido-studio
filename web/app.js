@@ -17455,6 +17455,9 @@ function seccionFichaPublicar() {
   // LOS TEXTOS POR RED
   (f.redes || []).forEach(r => caja.appendChild(bloqueTextoRed(r)));
 
+  // LA PORTADA
+  if ((f.redes || []).length && f.mp4) caja.appendChild(bloquePortadaPublicar());
+
   // CUÁNDO
   if ((f.redes || []).length) caja.appendChild(bloqueCuandoPublicar());
 
@@ -17480,11 +17483,17 @@ function bloqueTextoRed(red) {
     botonGuia(`texto_${red}`, campoTexto),
     botonRevisarPublicar(`texto_${red}`, f.pid, campoTexto)));
   if (red === 'youtube' || red === 'facebook') {
-    b.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Título'));
+    const largo = (t.titulo || '').length;
+    b.appendChild(h('label', { clase: 'etiqueta-campo' },
+      red === 'youtube' ? `Título (${largo}/70: más largo se corta en el móvil)` : 'Título'));
     b.appendChild(h('input', { type: 'text', value: t.titulo || '', maxlength: red === 'youtube' ? 100 : 255,
       datos: { foco: `${red}-titulo` }, oninput: ev => editarTextoPublicar(red, 'titulo', ev.target.value) }));
   }
   b.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Texto'));
+  if (red === 'instagram' || red === 'tiktok') {
+    b.appendChild(h('div', { clase: 'meta' }, `${NOMBRES_RED[red]} no tiene título aparte: la PRIMERA LÍNEA del texto `
+      + `es lo que se ve sin pulsar «más», así que hace de título.`));
+  }
   b.appendChild(h('textarea', { rows: 4, value: t.descripcion || '', datos: { foco: `${red}-descripcion` },
     oninput: ev => editarTextoPublicar(red, 'descripcion', ev.target.value) }));
   b.appendChild(panelRevisionPublicar(`texto_${red}`, f.pid, campoTexto));
@@ -17504,6 +17513,97 @@ function bloqueTextoRed(red) {
     h('summary', {}, `Así sale (${(compuesto.texto || '').length} caracteres)`),
     h('pre', { clase: 'texto-compuesto' }, compuesto.texto || '—')));
   (compuesto.avisos || []).forEach(a => b.appendChild(h('div', { clase: 'meta aviso-red' }, `⚠ ${a}`)));
+  return b;
+}
+
+/* POR QUÉ NO SE PUEDE PUBLICAR TODAVÍA, dicho antes de pulsar (16-10: el botón
+   dejaba pulsar y fallaba después). Lo mismo que comprueba el servidor. */
+function motivoNoPublicar(f) {
+  if (!(f.clave || {}).puesta) return 'Falta la clave de Upload-Post (Configuración → Publicar en redes).';
+  if (!(f.ajustes || {}).perfil) return 'Falta el perfil de Upload-Post de este proyecto.';
+  const redes = (f.redes || []).filter(r => ((f.encaje || {})[r] || {}).nivel !== 'error');
+  if (!redes.length) return 'Elige al menos una red en la que se pueda publicar este vídeo.';
+  const faltas = [];
+  redes.forEach(r => {
+    const t = textosDeFicha(r);
+    if (!String(t.descripcion || '').trim()) faltas.push(`el texto de ${NOMBRES_RED[r]}`);
+    if (r === 'youtube' && !String(t.titulo || '').trim()) faltas.push('el título de YouTube');
+  });
+  if (faltas.length) return `Falta ${faltas.join(', ')}.`;
+  if ((f.ajustes || {}).cuentas_vistas) {
+    const sin = redes.filter(r => !(f.cuentas || {})[r]);
+    if (sin.length) return `${sin.map(r => NOMBRES_RED[r]).join(', ')} no tiene${sin.length > 1 ? 'n' : ''} cuenta conectada `
+      + 'en Upload-Post: quítala o conéctala en Cuentas y ajustes.';
+    const re = redes.filter(r => ((f.cuentas || {})[r] || {}).reconectar);
+    if (re.length) return `Hay que volver a conectar ${re.map(r => NOMBRES_RED[r]).join(', ')} (Cuentas y ajustes → Conectar).`;
+  }
+  return '';
+}
+
+/* LA PORTADA: un fotograma del vídeo (con un deslizador y su vista) o una
+   imagen subida. Sin elegir nada, cada red pone la suya. */
+function bloquePortadaPublicar() {
+  const f = PUB.ficha;
+  const p = f.portada || {};
+  const dur = Math.max(1, Math.round((f.duracion_s || 1) * 1000));
+  const b = h('div', { clase: 'bloque portada-publicar' }, h('h3', {}, 'Portada'));
+  const msVista = PUB.portadaMs != null ? PUB.portadaMs : (p.ms != null ? p.ms : Math.min(1000, dur));
+  const rutaVideo = `/videos/${encodeURIComponent(f.pid)}`;
+  const vista = h('img', { clase: 'vista-portada', alt: 'Vista de la portada',
+    src: p.imagen ? rutaPublicar(`${rutaVideo}/portada.jpg?s=${p.imagen}`)
+      : rutaPublicar(`${rutaVideo}/fotograma?ms=${msVista}`) });
+  const etiqueta = h('span', { clase: 'meta' }, p.imagen ? 'Imagen subida'
+    : p.ms != null ? `Fotograma del segundo ${(p.ms / 1000).toFixed(1)}` : 'Cada red elige la suya (no has elegido ninguna)');
+  let reloj = null;
+  const deslizador = h('input', { type: 'range', min: 0, max: dur, step: 100, value: msVista,
+    disabled: !!p.imagen, 'aria-label': 'Momento del vídeo para la portada',
+    oninput: ev => {
+      PUB.portadaMs = Number(ev.target.value);
+      etiqueta.textContent = `Segundo ${(PUB.portadaMs / 1000).toFixed(1)} (sin guardar)`;
+      clearTimeout(reloj);
+      reloj = setTimeout(() => { vista.src = rutaPublicar(`${rutaVideo}/fotograma?ms=${PUB.portadaMs}`); }, 250);
+    } });
+  const guardarPortada = async cambios => {
+    try {
+      PUB.ficha = await pedir(rutaPublicar(rutaVideo), { method: 'PUT', cuerpo: { portada: cambios } });
+      PUB.portadaMs = null;
+      toast('Portada guardada');
+      pintarModulo();
+    } catch (e) { toast(e.message, true); }
+  };
+  const entrada = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp', clase: 'oculto',
+    id: `portada-${f.pid}`, onchange: async ev => {
+      const fichero = (ev.target.files || [])[0];
+      ev.target.value = '';
+      if (!fichero) return;
+      const cuerpo = new FormData();
+      cuerpo.append('portada', fichero);
+      try {
+        PUB.ficha = await pedir(rutaPublicar(`${rutaVideo}/portada`), { method: 'POST', cuerpo });
+        toast('Imagen de portada guardada');
+        pintarModulo();
+      } catch (e) { toast(e.message, true); }
+    } });
+  b.appendChild(h('div', { clase: 'fila portada-fila' }, vista,
+    h('div', { clase: 'crece portada-mandos' },
+      etiqueta,
+      deslizador,
+      h('div', { clase: 'fila' },
+        h('button', { clase: 'mini', disabled: !!p.imagen, onclick: () => guardarPortada({ ms: Number(deslizador.value) }) },
+          'Usar este fotograma'),
+        h('label', { clase: 'boton mini', for: `portada-${f.pid}` }, 'Subir una imagen'), entrada,
+        p.imagen ? h('button', { clase: 'mini fantasma', onclick: () => guardarPortada({ quitar_imagen: true }) }, 'Quitar la imagen') : null,
+        (p.ms != null || p.imagen) ? h('button', { clase: 'mini fantasma',
+          onclick: () => guardarPortada({ ms: null, quitar_imagen: true }) }, 'Que cada red elija') : null),
+      h('div', { clase: 'fila' },
+        h('label', { clase: 'casilla-red', title: 'YouTube solo acepta miniaturas propias en canales verificados; en uno sin verificar puede fallar la subida' },
+          h('input', { type: 'checkbox', checked: !!p.youtube, onchange: ev => guardarPortada({ youtube: ev.target.checked }) }),
+          ' Mandarla también a YouTube (solo canales verificados)'),
+        p.imagen ? h('label', { clase: 'casilla-red', title: 'TikTok solo acepta una imagen propia si tu cuenta tiene esa función; si no, usa el fotograma' },
+          h('input', { type: 'checkbox', checked: !!p.tiktok_imagen, onchange: ev => guardarPortada({ tiktok_imagen: ev.target.checked }) }),
+          ' Usar la imagen también en TikTok') : null),
+      h('div', { clase: 'meta' }, 'Instagram y TikTok usan el fotograma elegido; Facebook, solo si sale como vídeo (no como Reel). '
+        + 'Una imagen subida va a Instagram y Facebook (y a YouTube o TikTok si lo marcas).'))));
   return b;
 }
 
@@ -17539,10 +17639,12 @@ function bloqueCuandoPublicar() {
       h('span', { clase: 'crece' }, 'Este proyecto no tiene perfil de Upload-Post todavía.'),
       h('button', { clase: 'mini', onclick: () => irASeccionPublicar('cuentas') }, 'Cuentas y ajustes')));
   }
+  const motivo = motivoNoPublicar(f);
   b.appendChild(h('div', { clase: 'fila' },
-    h('button', { clase: 'primario', disabled: PUB.enviando || !perfil || !(f.clave || {}).puesta,
+    h('button', { clase: 'primario', disabled: PUB.enviando || !!motivo, title: motivo || '',
       onclick: () => confirmarEnvioPublicar(elegido) },
     elegido === 'ahora' ? 'Publicar ahora…' : 'Programar…'),
+    motivo ? h('span', { clase: 'meta motivo-no-publicar' }, motivo) : null,
     h('button', { clase: 'mini fantasma', disabled: PUB.enviando,
       title: 'Lo deja preparado sin enviarlo: saldrá en «Te necesitan» hasta que des el OK',
       onclick: () => dejarPendientePublicar(elegido) }, 'Dejar esperando mi OK')));

@@ -3385,3 +3385,12 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
   animation: girar-publicar 0.9s linear infinite;
 }
 @keyframes girar-publicar { to { transform: rotate(360deg); } }
+/* la portada y por qué no se puede publicar todavía */
+.portada-fila { align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.vista-portada {
+  width: 140px; max-width: 40vw; max-height: 250px; object-fit: contain;
+  border: 1px solid var(--linea); border-radius: 8px; background: var(--hueco);
+}
+.portada-mandos { display: flex; flex-direction: column; gap: 6px; min-width: 200px; }
+.portada-mandos input[type=range] { width: 100%; }
+.motivo-no-publicar { color: var(--aviso); flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }

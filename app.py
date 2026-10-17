@@ -14622,6 +14622,56 @@ def publicar_guardar_ficha(pid: str, peticion: Request, cuerpo: dict = Body(defa
     return publicar_ficha(pid, peticion)
 
 
+@app.get("/api/publicar/videos/{pid}/fotograma")
+def publicar_fotograma(pid: str, peticion: Request, ms: int = 0):
+    """El fotograma del momento `ms` (vista pequeña), para elegir la portada."""
+    ctx = _ctx_publicable(pid, peticion)
+    mp4, _rel = _mp4_del_video(ctx.proyecto)
+    P = _publicar()
+    destino = os.path.join(P.carpeta(raiz_proyectos()), "portadas",
+                           f"_vista_{ctx.id}_{uuid.uuid4().hex[:6]}.jpg")
+    _por_publicar(P.fotograma, mp4, max(0, int(ms)), destino, 360, 5)
+    try:
+        with open(destino, "rb") as fh:
+            contenido = fh.read()
+    finally:
+        try:
+            os.remove(destino)
+        except OSError:
+            pass
+    return Response(contenido, media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=300"})
+
+
+@app.get("/api/publicar/videos/{pid}/portada.jpg")
+def publicar_portada_imagen(pid: str, peticion: Request):
+    """La imagen de portada subida para este vídeo."""
+    ctx = _ctx_publicable(pid, peticion)
+    ruta = _por_publicar(_publicar().ruta_portada, raiz_proyectos(), ctx.id)
+    if not os.path.isfile(ruta):
+        raise ErrorApi(404, "este vídeo no tiene imagen de portada")
+    return FileResponse(ruta, media_type="image/jpeg", headers={"Cache-Control": "no-cache"})
+
+
+@app.post("/api/publicar/videos/{pid}/portada")
+async def publicar_subir_portada(pid: str, peticion: Request):
+    """Sube una imagen de portada (multipart, campo «portada»)."""
+    ctx = _ctx_publicable(pid, peticion)
+    try:
+        formulario = await peticion.form()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(400, f"multipart ilegible: {fallo}")
+    fichero = formulario.get("portada")
+    if not hasattr(fichero, "read"):
+        raise ErrorApi(400, "manda la imagen en el campo «portada»")
+    extension = os.path.splitext(str(getattr(fichero, "filename", "") or ""))[1].lower()
+    contenido = await fichero.read()
+    P = _publicar()
+    await asyncio.to_thread(_por_publicar, P.guardar_imagen_portada, raiz_proyectos(),
+                            ctx.id, contenido, extension)
+    return publicar_ficha(pid, peticion)
+
+
 @app.post("/api/publicar/videos/{pid}/textos", status_code=202)
 def publicar_escribir_textos(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
     """Claude escribe los textos de las redes pedidas: {redes}. Se sigue

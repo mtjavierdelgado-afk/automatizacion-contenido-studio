@@ -1047,8 +1047,172 @@ def guardar_ficha(raiz, pid, cambios):
                     except (TypeError, ValueError):
                         raise ErrorPublicar("cada capítulo lleva su segundo y su título") from None
             ficha["capitulos"] = limpios
+        if "portada" in cambios:
+            ficha["portada"] = _validar_portada(cambios["portada"], ficha.get("portada"))
+            if cambios["portada"].get("quitar_imagen"):
+                try:
+                    os.remove(ruta_portada(raiz, pid))
+                except OSError:
+                    pass
+                ficha["portada"]["imagen"] = ""
         _escribir(_ruta_video(raiz, pid), ficha)
     return ficha
+
+
+# ------------------------------------------------------------------ la portada
+#
+# Lo que cada red acepta (docs de Upload-Post, 16-10-2026):
+#   Instagram: thumb_offset (ms) o cover_image (JPEG, 8 MB)
+#   TikTok:    cover_timestamp (ms) o tiktok_cover_image (solo con la funcion
+#              «cover_image» en la cuenta: por eso va aparte y apagado)
+#   YouTube:   thumbnail (2 MB; solo canales VERIFICADOS: aparte y apagado)
+#   Facebook:  facebook_thumbnail (10 MB), solo si sale como VIDEO, no Reel
+# Sin nada elegido no se manda nada y cada red pone la suya.
+
+PORTADA_DEFECTO = {"ms": None, "imagen": "", "youtube": False, "tiktok_imagen": False}
+MAX_BYTES_PORTADA = 15 * 1024 * 1024
+#: YouTube no acepta una miniatura de mas de 2 MB.
+MAX_BYTES_MINIATURA = 2 * 1024 * 1024
+
+
+def portada_de(datos):
+    salida = dict(PORTADA_DEFECTO)
+    if isinstance((datos or {}).get("portada"), dict):
+        salida.update({k: v for k, v in datos["portada"].items() if k in PORTADA_DEFECTO})
+    return salida
+
+
+def _validar_portada(cambios, actual):
+    if not isinstance(cambios, dict):
+        raise ErrorPublicar("«portada» va como {ms, youtube, tiktok_imagen}")
+    salida = portada_de({"portada": actual})
+    if "ms" in cambios:
+        ms = cambios["ms"]
+        if ms is None or ms == "":
+            salida["ms"] = None
+        else:
+            try:
+                ms = int(ms)
+            except (TypeError, ValueError):
+                raise ErrorPublicar("el fotograma de la portada va en milisegundos") from None
+            if ms < 0 or ms > 4 * 3600 * 1000:
+                raise ErrorPublicar("ese fotograma no está en el vídeo")
+            salida["ms"] = ms
+    for k in ("youtube", "tiktok_imagen"):
+        if k in cambios:
+            if not isinstance(cambios[k], bool):
+                raise ErrorPublicar(f"«{k}» es sí o no")
+            salida[k] = cambios[k]
+    return salida
+
+
+def ruta_portada(raiz, pid, cual="imagen"):
+    _ruta_video(raiz, pid)                         # valida el pid
+    nombre = f"{pid}.jpg" if cual == "imagen" else f"{pid}_fotograma.jpg"
+    return os.path.join(carpeta(raiz), "portadas", nombre)
+
+
+def _ffmpeg():
+    ruta = shutil.which("ffmpeg")
+    if not ruta:
+        raise ErrorPublicar("falta ffmpeg en el servidor", 500)
+    return ruta
+
+
+def fotograma(mp4, ms, destino, ancho=0, calidad=3):
+    """Saca el fotograma del segundo ms/1000 a un JPEG. Devuelve `destino`."""
+    if not mp4 or not os.path.isfile(mp4):
+        raise ErrorPublicar("no encuentro el MP4 del vídeo", 404)
+    os.makedirs(os.path.dirname(destino), exist_ok=True)
+    temporal = f"{destino}.{uuid.uuid4().hex[:6]}.jpg"
+    orden = [_ffmpeg(), "-v", "error", "-y", "-ss", f"{max(0, int(ms or 0)) / 1000:.3f}",
+             "-i", mp4, "-frames:v", "1"]
+    if ancho:
+        orden += ["-vf", f"scale={int(ancho)}:-2"]
+    orden += ["-q:v", str(calidad), temporal]
+    try:
+        subprocess.run(orden, capture_output=True, timeout=40, check=False)
+    except (OSError, subprocess.SubprocessError) as fallo:
+        raise ErrorPublicar(f"no he podido sacar el fotograma: {fallo}", 500) from None
+    if not os.path.isfile(temporal) or os.path.getsize(temporal) == 0:
+        # pasado el final: el ultimo fotograma que haya
+        raise ErrorPublicar("ese momento está fuera del vídeo", 400)
+    os.replace(temporal, destino)
+    return destino
+
+
+def guardar_imagen_portada(raiz, pid, contenido, extension):
+    """La imagen subida, pasada a JPEG de 1920 px como mucho y menos de 2 MB
+    (lo mas estricto: la miniatura de YouTube)."""
+    if extension not in (".jpg", ".jpeg", ".png", ".webp"):
+        raise ErrorPublicar("la portada tiene que ser JPG, PNG o WebP")
+    if not contenido or len(contenido) > MAX_BYTES_PORTADA:
+        raise ErrorPublicar("la portada tiene que pesar menos de 15 MB")
+    destino = ruta_portada(raiz, pid)
+    os.makedirs(os.path.dirname(destino), exist_ok=True)
+    original = f"{destino}.subida{extension}"
+    with open(original, "wb") as fh:
+        fh.write(contenido)
+    try:
+        for calidad in (3, 6, 10, 16):
+            temporal = f"{destino}.{uuid.uuid4().hex[:6]}.jpg"
+            subprocess.run([_ffmpeg(), "-v", "error", "-y", "-i", original, "-frames:v", "1",
+                            "-vf", "scale='min(1920,iw)':-2", "-q:v", str(calidad), temporal],
+                           capture_output=True, timeout=40, check=False)
+            if not os.path.isfile(temporal) or not os.path.getsize(temporal):
+                raise ErrorPublicar("esa imagen no se puede leer")
+            if os.path.getsize(temporal) <= MAX_BYTES_MINIATURA or calidad == 16:
+                os.replace(temporal, destino)
+                break
+            os.remove(temporal)
+    except (OSError, subprocess.SubprocessError) as fallo:
+        raise ErrorPublicar(f"no he podido guardar la portada: {fallo}", 500) from None
+    finally:
+        try:
+            os.remove(original)
+        except OSError:
+            pass
+    sello = hashlib.sha1(contenido).hexdigest()[:10]
+    with _lock(pid):
+        ficha = _leer_video(raiz, pid)
+        ficha["portada"] = dict(portada_de(ficha), imagen=sello)
+        _escribir(_ruta_video(raiz, pid), ficha)
+    return ficha["portada"]
+
+
+def campos_portada(raiz, info, datos, redes):
+    """(campos, ficheros) de la portada para Upload-Post, segun lo elegido."""
+    portada = portada_de(datos)
+    campos, ficheros = {}, []
+    imagen = ruta_portada(raiz, info["pid"]) if portada["imagen"] else ""
+    if imagen and not os.path.isfile(imagen):
+        imagen = ""
+    ms = portada["ms"]
+    if not imagen and ms is None:
+        return campos, ficheros
+    foto = imagen
+    if not foto and (("youtube" in redes and portada["youtube"]) or "facebook" in redes):
+        try:
+            foto = fotograma(info.get("mp4"), ms, ruta_portada(raiz, info["pid"], "fotograma"))
+        except ErrorPublicar:
+            foto = ""            # sin el fotograma, cada red pone la suya
+    if "instagram" in redes:
+        if imagen:
+            ficheros.append(("cover_image", imagen))
+        else:
+            campos["thumb_offset"] = str(ms)
+    if "tiktok" in redes:
+        if imagen and portada["tiktok_imagen"]:
+            ficheros.append(("tiktok_cover_image", imagen))
+        elif ms is not None:
+            campos["cover_timestamp"] = int(ms)
+    if "youtube" in redes and portada["youtube"] and foto \
+            and os.path.getsize(foto) <= MAX_BYTES_MINIATURA:
+        ficheros.append(("thumbnail", foto))
+    if "facebook" in redes and foto and \
+            encaje("facebook", info.get("formato"), info.get("duracion_s")).get("tipo") != "Reel":
+        ficheros.append(("facebook_thumbnail", foto))
+    return campos, ficheros
 
 
 # -------------------------------------------------------------- la ficha
@@ -1090,6 +1254,7 @@ def ficha(raiz, info, ajustes):
         "encaje": {r: encaje(r, info.get("formato"), info.get("duracion_s")) for r in REDES},
         "desactualizada": desactualizada, "escritos": datos.get("escritos") or "",
         "editado": bool(datos.get("editado")),
+        "portada": portada_de(datos),
         "escribiendo": pid in _ESCRIBIENDO, "error_textos": _ERRORES_TEXTOS.get(pid, ""),
         "escribiendo_desde": (_ESCRIBIENDO.get(pid) or {}).get("desde", ""),
         "escribiendo_redes": (_ESCRIBIENDO.get(pid) or {}).get("redes", []),
@@ -1267,7 +1432,17 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
         campos.update(comp["campos"])
         if comp.get("titulo") and not titulo_general:
             titulo_general = comp["titulo"]
-    campos["title"] = titulo_general or (info.get("nombre") or "Vídeo")[:100]
+    if not titulo_general:
+        # sin YouTube ni Facebook: la primera línea del texto (en Instagram y
+        # TikTok el «título» es eso), o el nombre del vídeo
+        for e in envios:
+            primera = str((datos["textos"].get(e["red"]) or {}).get("descripcion") or "").strip()
+            if primera:
+                titulo_general = primera.splitlines()[0].strip()
+                break
+    campos["title"] = (titulo_general or info.get("nombre") or "Vídeo")[:100]
+    extra, ficheros = campos_portada(raiz, info, datos, redes)
+    campos.update(extra)
     cuando = envios[0]["cuando"] if envios[0].get("modo") == "programado" else None
     perfil = envios[0].get("perfil") or ajustes.get("perfil")
 
@@ -1276,7 +1451,7 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
     def trabajo():
         try:
             r = cliente(raiz).publicar(perfil, redes, info["mp4"], campos, cuando=cuando,
-                                   zona=ZONA, id_propio=lote)
+                                       zona=ZONA, id_propio=lote, ficheros=ficheros)
         except UP.ErrorUploadPost as fallo:
             mensaje = str(fallo)
             if fallo.sin_respuesta:

@@ -16,6 +16,41 @@ vídeos, estilos, claves y contraseña no se tocan.
   los clips en disco (el MP4 final y la música sí se escriben nuevos). Las versiones anteriores quedan intactas y «Revertir»
   funciona igual. (En un servidor Windows se sigue copiando.)
 
+**Publicar: lo que salió probándolo en el servidor (16 de octubre, tarde)**
+- **El perfil de Upload-Post se apunta con lo que escribes.** «Crear perfil»
+  manda el nombre del campo; **«Usar este perfil»** (o Enter) apunta uno que ya
+  tengas, y **«Elegir de mi cuenta»** enseña tus perfiles de verdad en un
+  desplegable (los de otro proyecto salen marcados). Da igual cómo escribas las
+  mayúsculas: «suyu» encuentra «Suyu». Un perfil que ya existe se adopta
+  aunque el plan esté lleno; si hay que crear uno y el plan está lleno, se
+  dice en castellano antes de intentarlo. La tarjeta se pone al día sola:
+  «Ver cuentas» y «Conectar» salen sin recargar, y al volver de la página de
+  Conectar las cuentas se miran solas.
+- **«Que Claude escriba los textos» enseña que está escribiendo** y, si
+  falla, el motivo con **Reintentar** (y queda apuntado en el registro del
+  servidor). Antes podía quedarse colgado sin decir nada.
+- **Textos más atractivos:** gancho en la primera línea, frases cortas, una
+  sola llamada a la acción y hashtags que mezclan amplios con otros de nicho o
+  de la zona; reglas propias de cada red (TikTok corto con las palabras que se
+  dicen, Reels con la primera línea fuerte, YouTube con título de 70 caracteres
+  y descripción para el buscador, Facebook que se entienda sin sonido). Claude
+  los escribe con un modelo mayor. Y **emojis** bien puestos, con un
+  interruptor «Usar emojis en los textos» en lo fijo de cada proyecto
+  (encendido de fábrica).
+- **Portada:** elige un fotograma con un deslizador (lo ves al lado) o sube
+  una imagen. Va a cada red por su campo: Instagram y TikTok el fotograma,
+  Facebook cuando sale como vídeo, y YouTube o TikTok con imagen propia si lo
+  marcas.
+- **Título solo donde existe** (YouTube y Facebook); en Instagram y TikTok se
+  explica que la primera línea hace de título.
+- **«Publicar ahora» se apaga con su motivo** («Falta el texto de Instagram»)
+  en vez de fallar al pulsarlo.
+- **Después de publicar** la ficha dice dónde ya salió (con el enlace) y qué
+  está en camino, cada red enseña su último estado, y avisa cuando una red se
+  publica mientras miras.
+- **La cola, con buscador y filtros** (proyecto, estilo, estado y fecha),
+  agrupar por proyecto y **vista de mes**.
+
 **Lo que quedó de la revisión (16 de octubre, noche)**
 - **`asvs actualizar` pone al día también el servidor**: las unidades de
   systemd, los snippets de nginx, el lanzador del navegador y las variables
@@ -37,6 +72,7 @@ vídeos, estilos, claves y contraseña no se tocan.
   regenerarlo entero.
 - Subir imágenes, logos o capturas ya no deja parado el resto del Studio
   mientras se guardan.
+
 
 **Publicar en redes (16 de octubre)**
 - **Arriba hay una barra de módulos: Inicio · Crear · Publicar · Automatizar.**

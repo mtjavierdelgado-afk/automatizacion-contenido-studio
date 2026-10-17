@@ -305,15 +305,25 @@ ni lo deja por rehacer.
 2. Copia tu API key de Upload-Post y pégala en **Configuración → Publicar en
    redes**. Nunca la pegues en un chat.
 3. En **Publicar → Cuentas y ajustes**: «Probar» (comprueba la clave sin subir
-   nada) y, en cada proyecto, **Crear perfil** → **Conectar** (abre la página
-   donde el cliente conecta sus cuentas; vale 48 horas y se le puede mandar) →
-   **Ver cuentas** (para que el Studio sepa cuáles están conectadas). Un perfil
-   es de un solo proyecto: así los vídeos de un cliente nunca salen en las
-   cuentas de otro.
+   nada) y, en cada proyecto, el perfil de Upload-Post:
+   - si **ya lo tienes** en Upload-Post, **Elegir de mi cuenta** (un desplegable
+     con tus perfiles de verdad; los que ya usa otro proyecto salen y no se
+     eligen) o escribe su nombre y pulsa **Usar este perfil** (o Enter). Da
+     igual cómo lo escribas de mayúsculas: se apunta como está allí, y se
+     adopta aunque tu plan ya esté lleno;
+   - si **no**, escribe el nombre y **Crear perfil** (vacío, usa el sugerido).
+     Con el plan lleno te lo dice antes: usa uno que ya tengas o mejora el plan.
+
+   Después **Conectar** (abre la página donde el cliente conecta sus cuentas;
+   vale 48 horas y se le puede mandar; al volver a esta pestaña las cuentas se
+   miran solas) y **Ver cuentas** cuando quieras ponerlas al día. Un perfil es
+   de un solo proyecto: así los vídeos de un cliente nunca salen en las cuentas
+   de otro.
 
 **Cuentas y ajustes**, en cada proyecto, también tiene **lo fijo**: la hora
 por defecto al programar, la firma y los hashtags que van al final de todos
-los textos, el **tono de los textos** (con su ✦ Guía y ✓ Revisar), si se marca
+los textos, el **tono de los textos** (con su ✦ Guía y ✓ Revisar), **usar
+emojis en los textos** (de fábrica sí; quítalo y Claude no pone ninguno), si se marca
 como hecho con IA, si YouTube avisa a los suscriptores, la privacidad en
 YouTube y las redes que salen marcadas de fábrica. La confirmación antes de
 enviar no se puede quitar.
@@ -325,20 +335,42 @@ enviar no se puede quitar.
    conectada se avisa y no se deja enviar.
 2. **«Que Claude escriba los textos»**: los escribe para cada red desde el
    encargo, el guion final y la duración real (en YouTube, también el título y
-   los capítulos). Va con tu suscripción de Claude; se apunta en el coste del
-   vídeo como tokens, sin dólares.
+   los capítulos), con un gancho en la primera línea, frases cortas, una sola
+   llamada a la acción y hashtags que mezclan amplios con otros de nicho o de
+   la zona. Mientras escribe se ve **«Claude está escribiendo…»** (suele tardar
+   uno o dos minutos); si falla, sale el motivo con **Reintentar**. Va con tu
+   suscripción de Claude; se apunta en el coste del vídeo como tokens, sin
+   dólares. **Título** solo hay en YouTube (máximo 70 caracteres para que no se
+   corte en el móvil) y Facebook: en Instagram y TikTok la primera línea del
+   texto hace de título.
 3. **Corrige a mano** lo que quieras: se guarda solo. Cada red tiene su
    **✦ Guía** (qué poner y qué no) y **✓ Revisar** (comprueba el texto contra la
    guía y propone una versión mejor que se pone con un botón), **Copiar texto**
    y **Así sale** (el texto final, con la llamada a la acción, la firma y los
    hashtags). **Reescribir** pide a Claude solo esa red.
-4. **Cuándo**: **Publicar ahora**, **Programar** (día y hora de Lima) o **Solo a
+4. **Portada** (opcional): mueve el deslizador para elegir un **fotograma** del
+   vídeo (se ve al lado) y pulsa **Usar este fotograma**, o **Sube una imagen**
+   (JPG, PNG o WebP; se pasa a JPEG de menos de 2 MB). El fotograma va a
+   Instagram y TikTok; a Facebook solo si sale como vídeo (no como Reel). Una
+   imagen va a Instagram y Facebook, y a TikTok o YouTube si lo marcas (TikTok
+   solo si tu cuenta lo permite; YouTube, solo canales verificados). Sin elegir
+   nada, cada red pone la suya.
+5. **Cuándo**: **Publicar ahora**, **Programar** (día y hora de Lima) o **Solo a
    mano** («Ya lo subí a…» lo apunta en el historial, con el enlace si lo
-   pones). **Dejar esperando mi OK** lo deja preparado sin enviarlo.
-5. **Confirmas** en la ventana que enseña las redes, las cuentas y la hora.
-6. **Envíos**: cada red con su estado (subiendo, programado, publicándose,
+   pones). **Dejar esperando mi OK** lo deja preparado sin enviarlo. Si todavía
+   no se puede publicar, el botón está apagado y dice por qué al lado («Falta
+   el texto de Instagram», «TikTok no tiene cuenta conectada»…).
+6. **Confirmas** en la ventana que enseña las redes, las cuentas y la hora.
+7. **Envíos**: cada red con su estado (subiendo, programado, publicándose,
    publicado con su enlace, falló con su motivo). Si una red falla, las demás
    siguen. Lo programado se puede **Cancelar**.
+
+**Después de publicar** la ficha se queda donde estaba, para seguir con las
+otras redes: arriba dice **Ya publicado en** (con el enlace a cada post) y
+**En camino** (lo programado o subiendo), y al lado de cada red su último
+estado. Cuando una red termina mientras miras, sale un aviso («Publicado en
+Instagram»). Para seguir, marca otra red, revisa su texto y publica: donde ya
+salió no se vuelve a enviar sin preguntarte.
 
 Si el guion o el montaje cambian después de escribir los textos, la ficha
 sale **desactualizada**: revísalos o pide otros. Si un envío programado lleva
@@ -350,9 +382,13 @@ Mira en upload-post.com si llegó; si no, **Reintentar** lo manda con la misma
 clave (si a Upload-Post ya le había llegado, no se duplica). Y volver a publicar
 un vídeo en una red donde ya salió pide confirmarlo aparte.
 
-**La cola y el calendario**: arriba, **Te necesitan** (lo que falló y lo que
-espera tu OK); después la semana día a día con lo que sale cada día (‹ › para
-moverte), y los vídeos listos con el estado de cada red.
+**La cola y el calendario**: arriba, un **buscador** y filtros por **proyecto**,
+**estilo**, **estado** (sin publicar, en algunas, en todas, programado, con
+algún fallo) y **fecha**, más **Agrupar por proyecto**; se acuerdan en este
+navegador y valen también para el calendario. Después **Te necesitan** (lo que
+falló y lo que espera tu OK), el calendario por **Semana** o por **Mes** (‹ ›
+para moverte; en el mes, «+N más» abre los del día) y los vídeos listos, de 30
+en 30, con el estado de cada red.
 
 **Resultados**: elige el proyecto y el periodo (7, 30 o 90 días) y pulsa
 **Actualizar**: pide a Upload-Post las vistas, me gusta, comentarios y

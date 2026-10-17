@@ -93,8 +93,10 @@ PENDIENTES = ("enviando", "programado", "publicando", "comprobar")
 #: Los que cuentan como «ya va a salir o salio» para no repetir sin querer.
 VIVOS = ("enviando", "programado", "publicando", "publicado", "comprobar", "a_mano")
 
-MODELO = "sonnet"
-ESFUERZO = "low"
+#: Los textos son lo que se lee del vídeo: van con opus/medium (16-10-2026; con
+#: sonnet/low salían planos). Se cambia con ESTUDIO_PUBLICAR_MODELO/_ESFUERZO.
+MODELO = os.environ.get("ESTUDIO_PUBLICAR_MODELO") or "opus"
+ESFUERZO = os.environ.get("ESTUDIO_PUBLICAR_ESFUERZO") or "medium"
 MAX_MATERIAL = 6000
 MAX_GUION = 9000
 #: Cada cuanto se puede volver a preguntar por el mismo envio, en segundos.
@@ -107,6 +109,7 @@ _LOCKS = {}
 _LOCK_LOCKS = threading.Lock()
 _ESCRIBIENDO = {}              # pid -> {"desde", "redes"}
 _ERRORES_TEXTOS = {}           # pid -> mensaje del ultimo fallo
+_REDES_FALLIDAS = {}           # pid -> las redes de ese intento (para «Reintentar»)
 _SUBIENDO = set()              # lotes con hilo vivo
 _ULTIMA_CONSULTA = {}          # lote -> time.time()
 _NO_LO_CONOCE = {}             # lote -> cuantas veces seguidas Upload-Post dijo 404
@@ -267,9 +270,13 @@ def _por_upload_post(fn, *args, **kwargs):
     try:
         return fn(*args, **kwargs)
     except UP.ErrorUploadPost as fallo:
-        codigo = 502 if fallo.codigo in (0, 500, 502, 503) else (
-            409 if fallo.codigo in (401, 403, 429) else 400)
-        raise ErrorPublicar(str(fallo), codigo) from None
+        raise _convertir(fallo) from None
+
+
+def _convertir(fallo):
+    codigo = 502 if fallo.codigo in (0, 500, 502, 503) else (
+        409 if fallo.codigo in (401, 403, 429) else 400)
+    return ErrorPublicar(str(fallo), codigo)
 
 
 # -------------------------------------------------------------------- ajustes
@@ -282,6 +289,7 @@ AJUSTES_DEFECTO = {
     "hashtags": "",                     # los fijos del proyecto
     "tono": "",                         # como escribe los textos Claude
     "marcar_ia": True,                  # avisar en cada red de que es IA
+    "usar_emojis": True,                # que Claude ponga emojis en los textos
     "avisar_youtube": True,             # notificar a los suscriptores
     "privacidad_youtube": "public",
     "facebook_pagina": "",              # id de la pagina, si hay mas de una
@@ -319,7 +327,7 @@ def _validar_ajustes(cambios):
         if k not in AJUSTES_DEFECTO or k in ("cuentas", "cuentas_vistas",
                                              "seguidores", "seguidores_al"):
             continue
-        if k in ("marcar_ia", "avisar_youtube"):
+        if k in ("marcar_ia", "avisar_youtube", "usar_emojis"):
             if not isinstance(v, bool):
                 raise ErrorPublicar(f"«{k}» es sí o no")
             limpios[k] = v
@@ -341,21 +349,21 @@ def _validar_ajustes(cambios):
             v = v.strip()
             if len(v) > LARGOS.get(k, 400):
                 raise ErrorPublicar(f"«{k}» pasa de {LARGOS.get(k, 400)} caracteres")
-            if k == "perfil" and v and not re.match(r"^[A-Za-z0-9_.\-]+$", v):
-                raise ErrorPublicar("el perfil lleva letras, números, «_», «-» o «.»")
+            if k == "perfil" and v and not re.match(r"^[A-Za-z0-9_.\- ]+$", v):
+                raise ErrorPublicar("el perfil lleva letras, números, espacios, «_», «-» o «.»")
             limpios[k] = v
     return limpios
 
 
 def perfil_de_otro(raiz, perfil, cid):
     """El proyecto (otro que `cid`) que ya usa ese perfil de Upload-Post, o ""."""
-    perfil = str(perfil or "").strip().lower()
+    perfil = norma_perfil(perfil)
     if not perfil:
         return ""
     datos = leer_json(_ruta_ajustes(raiz), {}) or {}
     for otro, ficha in (datos.get("proyectos") or {}).items():
         if otro != _clave_proyecto(cid) and isinstance(ficha, dict) \
-                and str(ficha.get("perfil") or "").strip().lower() == perfil:
+                and norma_perfil(ficha.get("perfil")) == perfil:
             return otro
     return ""
 
@@ -393,6 +401,143 @@ def perfil_sugerido(cid, nombre):
 def recordar_cuentas(raiz, cid, cuentas):
     return guardar_ajustes(raiz, cid, {}, internos={
         "cuentas": cuentas or {}, "cuentas_vistas": _iso_lima()})
+
+
+# ------------------------------------------------- los perfiles de Upload-Post
+#
+# Lo que salio en el servidor (16-10-2026): «Crear perfil» mandaba el cuerpo
+# vacio, con el plan gratis lleno (2/2) Upload-Post decia «You have reached the
+# limit of 2 profiles» aunque el perfil escrito YA existia alli, y «Ver cuentas»
+# comparaba el nombre con == y daba por inexistente «Suyu» guardado como «suyu».
+# Ahora: se lista antes de crear, se compara sin mayusculas ni espacios, y lo
+# que exista se ADOPTA (con su nombre exacto de alli) en vez de crearse.
+
+_PLAN_LLENO = re.compile(r"limit\s+of\s+(\d+)\s+profiles?", re.I)
+
+
+def norma_perfil(nombre):
+    """El nombre de un perfil para comparar: sin mayusculas ni espacios."""
+    return re.sub(r"\s+", "", str(nombre or "")).lower()
+
+
+def buscar_perfil(lista, nombre):
+    """El perfil de `lista` (los de `cliente.perfiles()`) que es `nombre`, o None."""
+    buscado = norma_perfil(nombre)
+    if not buscado:
+        return None
+    return next((p for p in lista or [] if norma_perfil(p.get("perfil")) == buscado), None)
+
+
+def mensaje_plan_lleno(n):
+    return (f"Tu plan de Upload-Post ya tiene {n} perfiles; usa uno existente "
+            "o mejora el plan")
+
+
+def _log(evento, datos):
+    """A la salida del servicio (journalctl -u as-video-studio) y a la bitacora."""
+    try:
+        print(f"[publicar] {evento} {json.dumps(datos, ensure_ascii=False)}",
+              file=sys.stderr, flush=True)
+    except (OSError, ValueError):
+        pass
+    try:
+        from nucleo.bitacora import anotar_global
+        anotar_global(f"publicar_{evento}", datos)
+    except Exception:  # noqa: BLE001 - la bitacora nunca tumba una peticion
+        pass
+
+
+def _redes_conectadas(cuentas):
+    return [r for r in REDES if isinstance((cuentas or {}).get(r), dict)]
+
+
+def perfiles_de_la_cuenta(raiz, cid):
+    """Los perfiles que hay de verdad en Upload-Post, para el desplegable:
+    {perfiles: [{perfil, redes, de_otro, propio}], limite, plan}. `de_otro` es
+    el proyecto de aqui que ya lo usa (no se puede elegir)."""
+    lista = _por_upload_post(cliente(raiz).perfiles)
+    _log("perfiles_vistos", {"proyecto": _clave_proyecto(cid),
+                             "nombres": [p["perfil"] for p in lista["perfiles"]]})
+    propio = norma_perfil(ajustes_de(raiz, cid).get("perfil"))
+    salida = []
+    for p in lista["perfiles"]:
+        salida.append({"perfil": p["perfil"], "redes": _redes_conectadas(p["cuentas"]),
+                       "de_otro": perfil_de_otro(raiz, p["perfil"], cid),
+                       "propio": bool(propio) and norma_perfil(p["perfil"]) == propio})
+    return {"perfiles": salida, "limite": lista.get("limite"), "plan": lista.get("plan") or ""}
+
+
+def usar_perfil(raiz, cid, perfil, crear=True):
+    """Apunta `perfil` como el de este proyecto: si ya existe en Upload-Post (sin
+    mirar mayusculas ni espacios) lo adopta con su nombre exacto y sus cuentas;
+    si no, y `crear`, lo crea. Devuelve (ajustes, "adoptado"|"creado")."""
+    perfil = _validar_ajustes({"perfil": perfil}).get("perfil") or ""
+    if not perfil:
+        raise ErrorPublicar("escribe el nombre del perfil de Upload-Post")
+    cli = cliente(raiz)
+    lista = None
+    try:
+        lista = cli.perfiles()
+    except UP.ErrorUploadPost as fallo:
+        if fallo.codigo in (401, 403):
+            raise ErrorPublicar(str(fallo), 409) from None
+        # sin lista se intenta crear igual: un 409 de alli dira si ya existia
+    if lista is not None:
+        _log("perfiles_vistos", {"proyecto": _clave_proyecto(cid), "buscado": perfil,
+                                 "nombres": [p["perfil"] for p in lista["perfiles"]]})
+        hallado = buscar_perfil(lista["perfiles"], perfil)
+        if hallado:
+            if perfil_de_otro(raiz, hallado["perfil"], cid):
+                raise ErrorPublicar("ese perfil de Upload-Post ya es de otro proyecto: "
+                                    "elige otro para este", 409)
+            return guardar_ajustes(raiz, cid, {"perfil": hallado["perfil"]}, internos={
+                "cuentas": hallado["cuentas"], "cuentas_vistas": _iso_lima()}), "adoptado"
+        if not crear:
+            raise ErrorPublicar(f"Upload-Post no tiene ningún perfil «{perfil}»: elige uno "
+                                "de la lista o pulsa «Crear perfil»", 404)
+        limite = lista.get("limite")
+        if isinstance(limite, int) and limite > 0 and len(lista["perfiles"]) >= limite:
+            raise ErrorPublicar(mensaje_plan_lleno(len(lista["perfiles"])), 409)
+    elif not crear:
+        raise ErrorPublicar("no he podido pedir la lista de perfiles a Upload-Post; "
+                            "prueba otra vez en un momento", 502)
+    if perfil_de_otro(raiz, perfil, cid):
+        raise ErrorPublicar("ese perfil de Upload-Post ya es de otro proyecto: "
+                            "escribe otro nombre para este", 409)
+    try:
+        hecho = cli.crear_perfil(perfil)
+    except UP.ErrorUploadPost as fallo:
+        lleno = _PLAN_LLENO.search(str(fallo))
+        if lleno:
+            raise ErrorPublicar(mensaje_plan_lleno(lleno.group(1)), 409) from None
+        if fallo.codigo != 409:
+            raise _convertir(fallo) from None
+        # ya existia alli (y la lista no lo traia): sus cuentas, con «Ver cuentas»
+        return guardar_ajustes(raiz, cid, {"perfil": perfil}, internos={
+            "cuentas": {}, "cuentas_vistas": ""}), "adoptado"
+    _log("perfil_creado", {"proyecto": _clave_proyecto(cid), "perfil": hecho["perfil"]})
+    return guardar_ajustes(raiz, cid, {"perfil": hecho["perfil"]}, internos={
+        "cuentas": hecho["cuentas"], "cuentas_vistas": _iso_lima()}), "creado"
+
+
+def ver_cuentas(raiz, cid):
+    """Pregunta a Upload-Post por las cuentas del perfil del proyecto. Si alli
+    se escribe distinto (mayusculas), se apunta el nombre de alli."""
+    ajustes = ajustes_de(raiz, cid)
+    if not ajustes.get("perfil"):
+        raise ErrorPublicar("este proyecto todavía no tiene perfil de Upload-Post", 409)
+    lista = _por_upload_post(cliente(raiz).perfiles)
+    nombres = [p["perfil"] for p in lista["perfiles"]]
+    _log("ver_cuentas", {"proyecto": _clave_proyecto(cid), "buscado": ajustes["perfil"],
+                         "nombres": nombres})
+    propio = buscar_perfil(lista["perfiles"], ajustes["perfil"])
+    if propio is None:
+        return {"existe": False, "ajustes": ajustes}
+    if propio["perfil"] != ajustes["perfil"]:
+        return {"existe": True, "ajustes": guardar_ajustes(
+            raiz, cid, {"perfil": propio["perfil"]},
+            internos={"cuentas": propio["cuentas"], "cuentas_vistas": _iso_lima()})}
+    return {"existe": True, "ajustes": recordar_cuentas(raiz, cid, propio["cuentas"])}
 
 
 # ---------------------------------------------------------------- el video
@@ -515,27 +660,54 @@ def _marca_de_tiempo(segundos):
 # ---------------------------------------------------------------- los textos
 
 REGLAS_RED = {
-    "tiktok": ("Pie de TikTok (no hay título aparte). Gancho en la primera línea, "
-               "frases cortas, las palabras clave del tema dichas con naturalidad "
-               "(TikTok busca por ellas). CTA corto: comenta, guárdalo, link en bio, "
-               "escríbenos. 3 a 5 hashtags concretos."),
-    "instagram": ("Pie de un Reel (no hay título aparte). La primera línea es la que "
-                  "se ve sin pulsar «más»: tiene que enganchar. Párrafos cortos. CTA: "
-                  "guárdalo, compártelo, escríbenos por DM, link en bio. 3 a 8 hashtags."),
-    "youtube": ("YouTube: TÍTULO de 40 a 70 caracteres (máximo 100), claro y buscable, "
-                "sin clickbait engañoso y sin «<» ni «>». DESCRIPCIÓN: las dos primeras "
-                "líneas resumen la promesa del vídeo; después el detalle. CTA: suscribirse "
-                "o el enlace de la descripción. 3 a 6 hashtags (sirven también de etiquetas)."),
+    "tiktok": ("Pie de TikTok (no hay título aparte: la primera línea hace de título). "
+               "CORTO: 1 a 3 líneas, máximo unos 300 caracteres antes de los hashtags. "
+               "La primera línea es un gancho que para el dedo (una pregunta, un dato "
+               "que sorprende, una promesa concreta). Usa las palabras clave que se "
+               "DICEN en el vídeo, tal cual: TikTok busca por lo que se dice y por lo "
+               "que se escribe. CTA corto y directo (comenta, guárdalo, link en bio, "
+               "escríbenos). Hashtags: 3 a 5, mezclando 1-2 amplios del tema y 2-3 de "
+               "nicho o de la ciudad/zona si el material la nombra."),
+    "instagram": ("Pie de un Reel (no hay título aparte: la primera línea hace de "
+                  "título). La PRIMERA LÍNEA es lo único que se ve sin pulsar «más»: "
+                  "tiene que enganchar sola, en menos de 125 caracteres. Después, 2 a 4 "
+                  "párrafos muy cortos separados por una línea en blanco, con frases "
+                  "cortas que se lean de un vistazo (puedes usar viñetas con emoji). "
+                  "CTA claro: guárdalo, compártelo con quien lo necesita, escríbenos por "
+                  "DM, link en bio. Hashtags: 5 a 8, mezclando amplios, de nicho y "
+                  "locales si el material nombra la zona."),
+    "youtube": ("YouTube: TÍTULO de 40 a 70 caracteres (nunca más de 70: se corta en "
+                "el móvil), con la palabra clave principal al principio, claro y "
+                "buscable, sin clickbait engañoso y sin «<» ni «>». DESCRIPCIÓN pensada "
+                "para el buscador: las dos primeras líneas repiten la palabra clave y "
+                "resumen la promesa del vídeo (es lo que sale en los resultados); "
+                "después 1 a 3 párrafos cortos con las palabras clave secundarias "
+                "dichas con naturalidad. CTA: suscribirse o el enlace de la "
+                "descripción. Hashtags: 3 a 5 (los tres primeros salen encima del "
+                "título)."),
     "facebook": ("Facebook: TÍTULO corto (hasta 80 caracteres) y DESCRIPCIÓN que se "
-                 "entienda sin sonido. Gancho temprano. CTA: enviar mensaje o llamar. "
-                 "2 a 4 hashtags."),
+                 "entienda SIN SONIDO (mucha gente lo ve en silencio): di en el texto "
+                 "lo que pasa en el vídeo. Gancho en la primera línea, párrafos cortos "
+                 "y fáciles de leer, tono cercano. CTA: enviar mensaje, llamar o "
+                 "comentar. Hashtags: 2 a 4."),
+}
+#: Cuántos emojis y cómo, por red, cuando el proyecto los quiere.
+EMOJIS_RED = {
+    "tiktok": "1 a 3 emojis, en el gancho o al final de la línea; nunca en lugar de palabras clave",
+    "instagram": "3 a 6 emojis: uno en el gancho, como viñetas de los párrafos y en el CTA",
+    "youtube": "en la descripción, 1 a 3 como viñetas; en el TÍTULO, ninguno o uno como mucho",
+    "facebook": "1 a 3 emojis que acompañen, sin recargar",
 }
 LIMITES = {"tiktok": 2200, "instagram": 2200, "youtube": 5000, "facebook": 5000}
 
-SISTEMA = ("Escribes los textos con los que se publica un vídeo en redes sociales. "
-           "Escribes en el idioma del guion, con el tono pedido, sin inventar datos "
-           "(teléfonos, precios, enlaces, fechas) que no estén en el material. "
-           "Contestas únicamente con el JSON pedido.")
+SISTEMA = ("Eres un redactor de redes sociales con oficio: escribes los textos con "
+           "los que se publica un vídeo para que la gente pare, lo vea entero y haga "
+           "algo. Escribes en el idioma del guion, con el tono pedido, con frases "
+           "cortas y saltos de línea que se lean en el móvil. Cada red tiene su "
+           "texto: no copies el mismo con otro formato. Nunca inventas datos "
+           "(teléfonos, precios, enlaces, fechas, direcciones) que no estén en el "
+           "material, y no prometes lo que el vídeo no enseña. Contestas únicamente "
+           "con el JSON pedido.")
 
 INSTRUCCION = """Este vídeo ya está montado y hay que publicarlo en: {redes}.
 
@@ -562,6 +734,15 @@ Tono de los textos: {tono}
 (La firma y los hashtags fijos del proyecto los añade el Studio después: no los repitas.)
 </proyecto>
 
+CÓMO SE ESCRIBE (todas las redes)
+- La primera línea es el gancho: lo que hace parar. Nada de «En este vídeo…».
+- Frases cortas. Una idea por línea. Línea en blanco entre bloques (en el JSON, "\\n\\n").
+- Un solo CTA, claro, con verbo: qué tiene que hacer quien lo ve.
+- Hashtags sin almohadilla, mezclando amplios del tema con otros de nicho o de
+  la zona (si el material la nombra). Nada de hashtags genéricos vacíos
+  («viral», «fyp», «parati») salvo que el tono lo pida.
+- {emojis}
+
 REGLAS POR RED
 {reglas}
 
@@ -571,7 +752,7 @@ Devuelve SOLO este JSON (una clave por red pedida):
 {{
   "<red>": {{
     "titulo": "solo YouTube y Facebook; vacío en las demás",
-    "descripcion": "el texto principal, sin hashtags ni CTA",
+    "descripcion": "el texto principal (gancho en la primera línea), sin hashtags ni CTA",
     "cta": "una frase de llamada a la acción",
     "hashtags": ["sin almohadilla", "..."]
   }}{capitulos_json}
@@ -607,6 +788,10 @@ def instruccion_textos(info, redes, ajustes):
         material=(info.get("material") or "—")[:MAX_MATERIAL],
         guion=guion[:MAX_GUION] or "—",
         tono=ajustes.get("tono") or "el del guion",
+        emojis=("Emojis: sí, bien usados (que aporten, no que decoren): "
+                + "; ".join(f"{NOMBRE_RED[r]}, {EMOJIS_RED[r]}" for r in redes) + "."
+                if ajustes.get("usar_emojis", True) else
+                "Emojis: NINGUNO (el proyecto no los quiere), ni en el título ni en el texto."),
         reglas="\n".join(f"- {NOMBRE_RED[r]}: {REGLAS_RED[r]}" for r in redes),
         capitulos=capitulos,
         capitulos_json=(',\n  "capitulos": ["título del tramo 1", "..."]' if con_caps else ""))
@@ -644,9 +829,13 @@ def normalizar_textos(datos, redes, caps_base=None):
     return textos, capitulos
 
 
-def _textos_simulados(info, redes):
+def _textos_simulados(info, redes, raiz=None):
     """El doble de Claude con ESTUDIO_SIMULAR=1: textos fijos sacados del guion,
-    con la misma forma que la respuesta de verdad. Ni CLI ni tokens."""
+    con la misma forma que la respuesta de verdad. Ni CLI ni tokens. Con el
+    fichero `_sistema/publicar/_fallar_textos` falla, como el CLI sin cupo."""
+    if raiz and os.path.exists(os.path.join(carpeta(raiz), "_fallar_textos")):
+        time.sleep(2)             # que se vea «Claude está escribiendo» antes del fallo
+        raise RuntimeError("el CLI de Claude no ha contestado (simulado)")
     primera = ((info.get("guion") or [{}])[0].get("texto") or info.get("nombre") or "")
     datos = {}
     for red in redes:
@@ -665,6 +854,7 @@ def _textos_simulados(info, redes):
 def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd):
     """El hilo que habla con Claude. Apunta los tokens en el vídeo."""
     pid = info["pid"]
+    inicio = time.time()
     try:
         coste = None
         try:
@@ -681,7 +871,7 @@ def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd):
                 extra=["--no-session-persistence"], para="los textos para redes")
 
         if _simular_todo():
-            llamar = lambda: _textos_simulados(info, redes)  # noqa: E731
+            llamar = lambda: _textos_simulados(info, redes, raiz)  # noqa: E731
         if coste is not None and proyecto is not None:
             with coste.contexto(proyecto, "render"):
                 respuesta, sobre = llamar()
@@ -702,9 +892,17 @@ def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd):
             ficha["editado"] = False
             _escribir(_ruta_video(raiz, pid), ficha)
         _ERRORES_TEXTOS.pop(pid, None)
+        _log("textos_escritos", {"video": pid, "redes": redes, "modelo": MODELO,
+                                 "segundos": round(time.time() - inicio, 1)})
     except Exception as fallo:                              # noqa: BLE001
+        # SE APUNTA: el 16-10 fallo en el servidor sin dejar rastro en ningun log
+        import traceback                                    # noqa: PLC0415
+        _log("textos_fallo", {"video": pid, "redes": redes, "modelo": MODELO,
+                              "tipo": type(fallo).__name__, "error": str(fallo)[:800],
+                              "traza": traceback.format_exc()[-1500:]})
         _ERRORES_TEXTOS[pid] = (f"no se han podido escribir los textos: "
                                 f"{str(fallo)[:400]}")
+        _REDES_FALLIDAS[pid] = list(redes)
     finally:
         _ESCRIBIENDO.pop(pid, None)
 
@@ -851,8 +1049,203 @@ def guardar_ficha(raiz, pid, cambios):
                     except (TypeError, ValueError):
                         raise ErrorPublicar("cada capítulo lleva su segundo y su título") from None
             ficha["capitulos"] = limpios
+        if "portada" in cambios:
+            ficha["portada"] = _validar_portada(cambios["portada"], ficha.get("portada"))
+            if cambios["portada"].get("quitar_imagen"):
+                try:
+                    os.remove(ruta_portada(raiz, pid))
+                except OSError:
+                    pass
+                ficha["portada"]["imagen"] = ""
         _escribir(_ruta_video(raiz, pid), ficha)
     return ficha
+
+
+# ------------------------------------------------------------------ la portada
+#
+# Lo que cada red acepta (docs de Upload-Post, 16-10-2026):
+#   Instagram: thumb_offset (ms) o cover_image (JPEG, 8 MB)
+#   TikTok:    cover_timestamp (ms) o tiktok_cover_image (solo con la funcion
+#              «cover_image» en la cuenta: por eso va aparte y apagado)
+#   YouTube:   thumbnail (2 MB; solo canales VERIFICADOS: aparte y apagado)
+#   Facebook:  facebook_thumbnail (10 MB), solo si sale como VIDEO, no Reel
+# Sin nada elegido no se manda nada y cada red pone la suya.
+
+PORTADA_DEFECTO = {"ms": None, "imagen": "", "youtube": False, "tiktok_imagen": False}
+MAX_BYTES_PORTADA = 15 * 1024 * 1024
+#: YouTube no acepta una miniatura de mas de 2 MB.
+MAX_BYTES_MINIATURA = 2 * 1024 * 1024
+
+
+def portada_de(datos):
+    salida = dict(PORTADA_DEFECTO)
+    if isinstance((datos or {}).get("portada"), dict):
+        salida.update({k: v for k, v in datos["portada"].items() if k in PORTADA_DEFECTO})
+    return salida
+
+
+def _validar_portada(cambios, actual):
+    if not isinstance(cambios, dict):
+        raise ErrorPublicar("«portada» va como {ms, youtube, tiktok_imagen}")
+    salida = portada_de({"portada": actual})
+    if "ms" in cambios:
+        ms = cambios["ms"]
+        if ms is None or ms == "":
+            salida["ms"] = None
+        else:
+            try:
+                ms = int(ms)
+            except (TypeError, ValueError):
+                raise ErrorPublicar("el fotograma de la portada va en milisegundos") from None
+            if ms < 0 or ms > 4 * 3600 * 1000:
+                raise ErrorPublicar("ese fotograma no está en el vídeo")
+            salida["ms"] = ms
+    for k in ("youtube", "tiktok_imagen"):
+        if k in cambios:
+            if not isinstance(cambios[k], bool):
+                raise ErrorPublicar(f"«{k}» es sí o no")
+            salida[k] = cambios[k]
+    return salida
+
+
+def ruta_portada(raiz, pid, cual="imagen"):
+    """`cual`: "imagen" (la subida) o el lote cuyo fotograma se manda: cada
+    lote el suyo, para que dos envios a la vez no se pisen."""
+    _ruta_video(raiz, pid)                         # valida el pid
+    nombre = f"{pid}.jpg" if cual == "imagen" else \
+        f"{pid}_fotograma_{re.sub(r'[^a-z0-9]', '', str(cual).lower())[:16]}.jpg"
+    return os.path.join(carpeta(raiz), "portadas", nombre)
+
+
+def _ffmpeg():
+    ruta = shutil.which("ffmpeg")
+    if not ruta:
+        raise ErrorPublicar("falta ffmpeg en el servidor", 500)
+    return ruta
+
+
+def fotograma(mp4, ms, destino, ancho=0, calidad=3):
+    """Saca el fotograma del segundo ms/1000 a un JPEG. Devuelve `destino`."""
+    if not mp4 or not os.path.isfile(mp4):
+        raise ErrorPublicar("no encuentro el MP4 del vídeo", 404)
+    os.makedirs(os.path.dirname(destino), exist_ok=True)
+    temporal = f"{destino}.{uuid.uuid4().hex[:6]}.jpg"
+    orden = [_ffmpeg(), "-v", "error", "-y", "-ss", f"{max(0, int(ms or 0)) / 1000:.3f}",
+             "-i", mp4, "-frames:v", "1"]
+    if ancho:
+        orden += ["-vf", f"scale={int(ancho)}:-2"]
+    orden += ["-q:v", str(calidad), temporal]
+    try:
+        subprocess.run(orden, capture_output=True, timeout=40, check=False)
+        if not os.path.isfile(temporal) or os.path.getsize(temporal) == 0:
+            # pasado el final ffmpeg no saca nada
+            raise ErrorPublicar("ese momento está fuera del vídeo", 400)
+        os.replace(temporal, destino)
+    except (OSError, subprocess.SubprocessError) as fallo:
+        raise ErrorPublicar(f"no he podido sacar el fotograma: {fallo}", 500) from None
+    finally:
+        _quitar(temporal)
+    return destino
+
+
+def _quitar(ruta):
+    try:
+        os.remove(ruta)
+    except OSError:
+        pass
+
+
+def guardar_imagen_portada(raiz, pid, contenido, extension):
+    """La imagen subida, pasada a JPEG de 1920 px como mucho y menos de 2 MB
+    (lo mas estricto: la miniatura de YouTube)."""
+    if extension not in (".jpg", ".jpeg", ".png", ".webp"):
+        raise ErrorPublicar("la portada tiene que ser JPG, PNG o WebP")
+    if not contenido or len(contenido) > MAX_BYTES_PORTADA:
+        raise ErrorPublicar("la portada tiene que pesar menos de 15 MB")
+    # EL FORMATO LO DICEN LOS BYTES, y ffmpeg lo lee SOLO como imagen: si
+    # adivinara, un «.png» que fuera una lista HLS podria leer ficheros del
+    # servidor y devolverlos en la portada.
+    if contenido[:8] == b"\x89PNG\r\n\x1a\n":
+        lector = "png_pipe"
+    elif contenido[:3] == b"\xff\xd8\xff":
+        lector = "jpeg_pipe"
+    elif contenido[:4] == b"RIFF" and contenido[8:12] == b"WEBP":
+        lector = "webp_pipe"
+    else:
+        raise ErrorPublicar("esa imagen no es un JPG, PNG o WebP de verdad")
+    destino = ruta_portada(raiz, pid)
+    os.makedirs(os.path.dirname(destino), exist_ok=True)
+    original = f"{destino}.{uuid.uuid4().hex[:8]}.subida"
+    with open(original, "wb") as fh:
+        fh.write(contenido)
+    try:
+        for calidad in (3, 6, 10, 16):
+            temporal = f"{destino}.{uuid.uuid4().hex[:6]}.jpg"
+            subprocess.run([_ffmpeg(), "-v", "error", "-y", "-f", lector, "-i", original,
+                            "-frames:v", "1",
+                            "-vf", "scale='min(1920,iw)':-2", "-q:v", str(calidad), temporal],
+                           capture_output=True, timeout=40, check=False)
+            try:
+                if not os.path.isfile(temporal) or not os.path.getsize(temporal):
+                    raise ErrorPublicar("esa imagen no se puede leer")
+                if os.path.getsize(temporal) <= MAX_BYTES_MINIATURA or calidad == 16:
+                    os.replace(temporal, destino)
+                    break
+            finally:
+                _quitar(temporal)
+    except (OSError, subprocess.SubprocessError) as fallo:
+        raise ErrorPublicar(f"no he podido guardar la portada: {fallo}", 500) from None
+    finally:
+        _quitar(original)
+    sello = hashlib.sha1(contenido).hexdigest()[:10]
+    with _lock(pid):
+        ficha = _leer_video(raiz, pid)
+        ficha["portada"] = dict(portada_de(ficha), imagen=sello)
+        _escribir(_ruta_video(raiz, pid), ficha)
+    return ficha["portada"]
+
+
+def campos_portada(raiz, info, datos, redes, lote="vista"):
+    """(campos, ficheros) de la portada para Upload-Post, segun lo elegido."""
+    portada = portada_de(datos)
+    campos, ficheros = {}, []
+    imagen = ruta_portada(raiz, info["pid"]) if portada["imagen"] else ""
+    if imagen and not os.path.isfile(imagen):
+        imagen = ""
+    ms = portada["ms"]
+    if not imagen and ms is None:
+        return campos, ficheros
+    # SIEMPRE DENTRO DEL VIDEO: si se volvio a montar mas corto, el momento
+    # elegido podria caer fuera y la red rechazar la subida
+    try:
+        duracion_ms = int(float(info.get("duracion_s") or 0) * 1000)
+    except (TypeError, ValueError):
+        duracion_ms = 0
+    if ms is not None and duracion_ms > 0:
+        ms = max(0, min(int(ms), duracion_ms - 100))
+    foto = imagen
+    if not foto and (("youtube" in redes and portada["youtube"]) or "facebook" in redes):
+        try:
+            foto = fotograma(info.get("mp4"), ms, ruta_portada(raiz, info["pid"], lote))
+        except ErrorPublicar:
+            foto = ""            # sin el fotograma, cada red pone la suya
+    if "instagram" in redes:
+        if imagen:
+            ficheros.append(("cover_image", imagen))
+        else:
+            campos["thumb_offset"] = str(ms)
+    if "tiktok" in redes:
+        if imagen and portada["tiktok_imagen"]:
+            ficheros.append(("tiktok_cover_image", imagen))
+        elif ms is not None:
+            campos["cover_timestamp"] = int(ms)
+    if "youtube" in redes and portada["youtube"] and foto \
+            and os.path.getsize(foto) <= MAX_BYTES_MINIATURA:
+        ficheros.append(("thumbnail", foto))
+    if "facebook" in redes and foto and \
+            encaje("facebook", info.get("formato"), info.get("duracion_s")).get("tipo") != "Reel":
+        ficheros.append(("facebook_thumbnail", foto))
+    return campos, ficheros
 
 
 # -------------------------------------------------------------- la ficha
@@ -894,7 +1287,11 @@ def ficha(raiz, info, ajustes):
         "encaje": {r: encaje(r, info.get("formato"), info.get("duracion_s")) for r in REDES},
         "desactualizada": desactualizada, "escritos": datos.get("escritos") or "",
         "editado": bool(datos.get("editado")),
+        "portada": portada_de(datos),
         "escribiendo": pid in _ESCRIBIENDO, "error_textos": _ERRORES_TEXTOS.get(pid, ""),
+        "error_redes": _REDES_FALLIDAS.get(pid, []) if pid in _ERRORES_TEXTOS else [],
+        "escribiendo_desde": (_ESCRIBIENDO.get(pid) or {}).get("desde", ""),
+        "escribiendo_redes": (_ESCRIBIENDO.get(pid) or {}).get("redes", []),
         "envios": sorted(envios, key=lambda e: str(e.get("cuando") or ""), reverse=True),
         "programados_viejos": len(viejos),
         "ajustes": {k: v for k, v in ajustes.items() if k != "cuentas"},
@@ -1069,7 +1466,22 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
         campos.update(comp["campos"])
         if comp.get("titulo") and not titulo_general:
             titulo_general = comp["titulo"]
-    campos["title"] = titulo_general or (info.get("nombre") or "Vídeo")[:100]
+    if not titulo_general:
+        # sin YouTube ni Facebook: la primera línea del texto (en Instagram y
+        # TikTok el «título» es eso), o el nombre del vídeo
+        for e in envios:
+            primera = str((datos["textos"].get(e["red"]) or {}).get("descripcion") or "").strip()
+            if primera:
+                titulo_general = primera.splitlines()[0].strip()
+                break
+    campos["title"] = (titulo_general or info.get("nombre") or "Vídeo")[:100]
+    try:
+        extra, ficheros = campos_portada(raiz, info, datos, redes, lote)
+    except Exception as fallo:                              # noqa: BLE001
+        # la portada nunca deja un envio colgado: sale sin ella
+        _log("portada_fallo", {"video": pid, "error": str(fallo)[:300]})
+        extra, ficheros = {}, []
+    campos.update(extra)
     cuando = envios[0]["cuando"] if envios[0].get("modo") == "programado" else None
     perfil = envios[0].get("perfil") or ajustes.get("perfil")
 
@@ -1078,7 +1490,7 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
     def trabajo():
         try:
             r = cliente(raiz).publicar(perfil, redes, info["mp4"], campos, cuando=cuando,
-                                   zona=ZONA, id_propio=lote)
+                                       zona=ZONA, id_propio=lote, ficheros=ficheros)
         except UP.ErrorUploadPost as fallo:
             mensaje = str(fallo)
             if fallo.sin_respuesta:
@@ -1099,6 +1511,9 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
             return
         finally:
             _SUBIENDO.discard(lote)
+            for _campo, ruta in ficheros:
+                if os.path.basename(ruta).startswith(f"{pid}_fotograma_"):
+                    _quitar(ruta)
         resultados = r.get("resultados") or {}
 
         def aplicar(e):
@@ -1394,6 +1809,8 @@ def cola(raiz, videos, desde=None, dias=7):
                         if resumen.get(r) not in ("programado", "enviando", "publicando")})
         if v.get("montado"):
             listos.append(dict(v, envios=resumen,
+                               redes_elegidas=(datos or {}).get("redes")
+                               if (datos or {}).get("redes_puestas") else None,
                                textos=bool(datos and any(
                                    (datos.get("textos") or {}).get(r, {}).get("descripcion")
                                    for r in REDES))))

@@ -85,13 +85,18 @@ class SimuladoUploadPost:
             datos = self._leer()
         return {"perfiles": [{"perfil": p, "cuentas": ClienteUploadPost._cuentas(c)}
                              for p, c in sorted(datos["perfiles"].items())],
-                "limite": 25, "plan": "simulado"}
+                "limite": datos.get("limite") or 25, "plan": "simulado"}
 
     def crear_perfil(self, perfil):
         with _LOCK:
             datos = self._leer()
             if perfil in datos["perfiles"]:
                 raise ErrorUploadPost("ese perfil ya existe en Upload-Post", 409)
+            # el plan lleno, con el mensaje de alli (16-10-2026, plan gratis 2/2)
+            limite = datos.get("limite") or 25
+            if len(datos["perfiles"]) >= limite:
+                raise ErrorUploadPost(f"You have reached the limit of {limite} profiles "
+                                      "for your plan", 403)
             datos["perfiles"][perfil] = {}
             self._escribir(datos)
         return {"perfil": perfil, "cuentas": ClienteUploadPost._cuentas({})}
@@ -113,7 +118,7 @@ class SimuladoUploadPost:
     # ---------------------------------------------------------- publicar
 
     def publicar(self, perfil, redes, mp4, campos, cuando=None, zona="America/Lima",
-                 id_propio=None):
+                 id_propio=None, ficheros=None):
         redes = [r for r in redes if r in REDES]
         if not redes:
             raise ErrorUploadPost("no hay ninguna red que publicar", 400)
@@ -140,7 +145,9 @@ class SimuladoUploadPost:
             datos["subidas"].append({
                 "id": id_propio, "perfil": perfil, "redes": redes,
                 "campos": campos, "cuando": cuando, "zona": zona,
-                "fichero": os.path.basename(mp4), "bytes": os.path.getsize(mp4)})
+                "fichero": os.path.basename(mp4), "bytes": os.path.getsize(mp4),
+                "imagenes": {c: os.path.getsize(r) for c, r in (ficheros or [])
+                             if r and os.path.isfile(r)}})
             datos["trabajos"][id_propio] = {
                 "redes": redes, "cuando_utc": cuando_utc, "consultas": 0,
                 "cancelado": False,

@@ -86,19 +86,23 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/publicar/proyectos` | Cada proyecto con lo fijo de publicar y sus cuentas (lo ultimo visto). |
 | `PUT` | `/api/publicar/proyectos/{cid}` | Lo fijo de un proyecto: {perfil, redes, hora, firma, hashtags, tono, |
 | `POST` | `/api/publicar/proyectos/{cid}/conectar` | El enlace (48 h) para conectar o reconectar las cuentas: {redes?, volver_a?}. |
-| `POST` | `/api/publicar/proyectos/{cid}/cuentas` | Pregunta a Upload-Post que cuentas tiene conectadas el perfil del proyecto. |
-| `POST` | `/api/publicar/proyectos/{cid}/metricas` | Pide las cifras de lo publicado del proyecto y los seguidores de sus cuentas. |
-| `POST` | `/api/publicar/proyectos/{cid}/perfil` | Crea el perfil del proyecto en Upload-Post ({perfil}, o el sugerido) y lo |
+| `POST` | `/api/publicar/proyectos/{cid}/cuentas` | Pregunta a Upload-Post que cuentas tiene conectadas el perfil del proyecto |
+| `POST` | `/api/publicar/proyectos/{cid}/metricas` | Pide las cifras de lo publicado del proyecto y los seguidores de sus |
+| `POST` | `/api/publicar/proyectos/{cid}/perfil` | Apunta el perfil de Upload-Post del proyecto: {perfil, crear?}. Si ya |
+| `GET` | `/api/publicar/proyectos/{cid}/perfiles` | Los perfiles que hay de verdad en Upload-Post, para elegir uno: los que |
 | `POST` | `/api/publicar/refrescar` | Pregunta a Upload-Post por los envios que siguen en el aire. |
 | `GET` | `/api/publicar/resultados` | El resumen de un proyecto (lo que ya se sabe; no pregunta a nadie). |
 | `GET` | `/api/publicar/videos/{pid}` | La ficha de publicar de un video: redes, textos, encaje, envios. |
 | `PUT` | `/api/publicar/videos/{pid}` | {redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?} |
 | `POST` | `/api/publicar/videos/{pid}/a-mano` | «Lo he subido yo»: {red, url?}. Queda en el historial. |
 | `POST` | `/api/publicar/videos/{pid}/enviar` | {redes, modo: ahora|programar|pendiente, cuando?, confirmado, repetir?} |
-| `POST` | `/api/publicar/videos/{pid}/envios/{eid}/cancelar` | Cancela lo programado (en Upload-Post) o lo que esperaba tu OK, y quita de la lista un envio que fallo. |
-| `POST` | `/api/publicar/videos/{pid}/envios/{eid}/reintentar` | Vuelve a mandar un envio que quedo en «comprobar», con su misma clave de idempotencia. |
+| `POST` | `/api/publicar/videos/{pid}/envios/{eid}/cancelar` | Cancela lo programado (en Upload-Post) o lo que esperaba tu OK, y quita |
 | `POST` | `/api/publicar/videos/{pid}/envios/{eid}/confirmar` | Un envio que esperaba tu OK sale: {confirmado, modo?, cuando?}. |
+| `POST` | `/api/publicar/videos/{pid}/envios/{eid}/reintentar` | Vuelve a mandar un envio que quedo en «comprobar», con su misma clave de |
+| `GET` | `/api/publicar/videos/{pid}/fotograma` | El fotograma del momento `ms` (vista pequeña), para elegir la portada. |
 | `POST` | `/api/publicar/videos/{pid}/metricas` | Pide las cifras de lo publicado de este video: {forzar?}. |
+| `POST` | `/api/publicar/videos/{pid}/portada` | Sube una imagen de portada (multipart, campo «portada»). |
+| `GET` | `/api/publicar/videos/{pid}/portada.jpg` | La imagen de portada subida para este vídeo. |
 | `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
 | `GET` | `/api/trabajos` | Trabajos conocidos, opcionalmente de un solo proyecto. |
 | `GET` | `/api/trabajos/{tid}` | Estado y progreso de un trabajo. |

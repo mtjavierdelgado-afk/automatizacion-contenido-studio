@@ -752,7 +752,8 @@ REGLAS POR RED
 
 {capitulos}
 
-Devuelve SOLO este JSON (una clave por red pedida):
+Devuelve SOLO este JSON, con EXACTAMENTE estas claves de red, en minúsculas y
+tal cual: {claves}
 {{
   "<red>": {{
     "titulo": "solo YouTube y Facebook; vacío en las demás",
@@ -798,6 +799,7 @@ def instruccion_textos(info, redes, ajustes):
                 "Emojis: NINGUNO (el proyecto no los quiere), ni en el título ni en el texto."),
         reglas="\n".join(f"- {NOMBRE_RED[r]}: {REGLAS_RED[r]}" for r in redes),
         capitulos=capitulos,
+        claves=", ".join(f'"{r}"' for r in redes),
         capitulos_json=(',\n  "capitulos": ["título del tramo 1", "..."]' if con_caps else ""))
 
 
@@ -810,17 +812,59 @@ def _limpiar_hashtags(lista):
     return salida[:15]
 
 
+#: Como puede llamar Claude a cada red y a cada campo. EL 17-10, EN EL
+#: SERVIDOR: «textos_escritos» en el log y la ficha vacía. Claude contestaba con
+#: la clave «Instagram Reels» (el nombre que lee en la instrucción) en vez de
+#: «instagram», y aquí se buscaba solo la exacta: todo salía vacío sin error.
+_ALIAS_RED = {"tiktok": ("tiktok", "tik tok"),
+              "instagram": ("instagram", "instagramreels", "instagram reels", "reels", "ig"),
+              "youtube": ("youtube", "youtubeshorts", "youtube shorts", "shorts", "yt"),
+              "facebook": ("facebook", "fb", "facebookreels")}
+_ALIAS_CAMPO = {"titulo": ("titulo", "título", "title"),
+                "descripcion": ("descripcion", "descripción", "description", "texto",
+                                "caption", "pie", "copy", "text"),
+                "cta": ("cta", "llamada", "llamada_a_la_accion", "call_to_action"),
+                "hashtags": ("hashtags", "etiquetas", "tags")}
+
+
+def _clave_suelta(texto):
+    return re.sub(r"[^a-z0-9]", "", str(texto or "").lower()
+                  .translate(str.maketrans("áéíóú", "aeiou")))
+
+
+def _bloque_de_red(datos, red):
+    # tambien si viene envuelto: {"textos": {...}} o {"redes": {...}}
+    for envoltorio in ("textos", "redes", "networks"):
+        if isinstance(datos.get(envoltorio), dict) and not any(
+                isinstance(datos.get(r), dict) for r in REDES):
+            datos = datos[envoltorio]
+            break
+    buscadas = {_clave_suelta(a) for a in _ALIAS_RED[red]}
+    for clave, valor in datos.items():
+        if isinstance(valor, dict) and _clave_suelta(clave) in buscadas:
+            return valor
+    return {}
+
+
+def _campo(bruto, campo):
+    buscadas = {_clave_suelta(a) for a in _ALIAS_CAMPO[campo]}
+    for clave, valor in bruto.items():
+        if _clave_suelta(clave) in buscadas and valor not in (None, ""):
+            return valor
+    return ""
+
+
 def normalizar_textos(datos, redes, caps_base=None):
     datos = datos if isinstance(datos, dict) else {}
     textos = {}
     for red in redes:
-        bruto = datos.get(red) if isinstance(datos.get(red), dict) else {}
+        bruto = _bloque_de_red(datos, red)
         textos[red] = {
-            "titulo": " ".join(str(bruto.get("titulo") or "").split())[:100]
+            "titulo": " ".join(str(_campo(bruto, "titulo") or "").split())[:100]
             if red in ("youtube", "facebook") else "",
-            "descripcion": str(bruto.get("descripcion") or "").strip()[:LIMITES[red]],
-            "cta": " ".join(str(bruto.get("cta") or "").split())[:300],
-            "hashtags": _limpiar_hashtags(bruto.get("hashtags")),
+            "descripcion": str(_campo(bruto, "descripcion") or "").strip()[:LIMITES[red]],
+            "cta": " ".join(str(_campo(bruto, "cta") or "").split())[:300],
+            "hashtags": _limpiar_hashtags(_campo(bruto, "hashtags")),
         }
     capitulos = []
     titulos = datos.get("capitulos") if isinstance(datos.get("capitulos"), list) else []
@@ -888,6 +932,17 @@ def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd):
             respuesta, sobre = llamar()
         datos = comun.extraer_json(respuesta, "los textos para redes")
         textos, capitulos = normalizar_textos(datos, redes, info.get("capitulos_base"))
+        # LO QUE VINO VACÍO NO PISA NADA, y si no vino nada es un fallo que se
+        # ve (con «Reintentar»), no un «escritos» con la ficha en blanco
+        vacias = [r for r in redes if not textos[r]["descripcion"]]
+        claves = sorted(datos.keys())[:12] if isinstance(datos, dict) else []
+        if vacias:
+            _log("textos_incompletos", {"video": pid, "vacias": vacias, "claves": claves,
+                                         "respuesta": str(respuesta)[:600]})
+        textos = {r: t for r, t in textos.items() if t["descripcion"]}
+        if not textos:
+            raise RuntimeError("Claude ha contestado sin ningún texto que se pueda usar "
+                               f"(vino con: {', '.join(map(str, claves)) or 'nada'})")
         with _lock(pid):
             ficha = _leer_video(raiz, pid)
             ficha["textos"].update(textos)
@@ -898,7 +953,13 @@ def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd):
             ficha["editado"] = False
             _escribir(_ruta_video(raiz, pid), ficha)
         _ERRORES_TEXTOS.pop(pid, None)
-        _log("textos_escritos", {"video": pid, "redes": redes, "modelo": MODELO,
+        if vacias:
+            # unas sí y otras no: lo que falta se dice, con «Reintentar» solo de esas
+            _ERRORES_TEXTOS[pid] = ("Claude no ha devuelto el texto de "
+                                    + ", ".join(NOMBRE_RED[r] for r in vacias)
+                                    + ": pulsa «Reintentar»")
+            _REDES_FALLIDAS[pid] = vacias
+        _log("textos_escritos", {"video": pid, "redes": list(textos), "modelo": MODELO,
                                  "segundos": round(time.time() - inicio, 1)})
     except Exception as fallo:                              # noqa: BLE001
         # SE APUNTA: el 16-10 fallo en el servidor sin dejar rastro en ningun log

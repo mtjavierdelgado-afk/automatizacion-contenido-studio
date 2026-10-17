@@ -38,6 +38,14 @@ vídeos, estilos, claves y contraseña no se tocan.
 - Los guiones ya hechos no cambian ni quedan para regenerar: esto se nota al
   escribir o reescribir un guion.
 
+**Publicar: los textos de Claude ya no salen vacíos (17 de octubre, madrugada)**
+- A veces Claude contestaba llamando a la red por su nombre («Instagram
+  Reels») y el Studio solo buscaba «instagram»: decía «Textos listos» con las
+  casillas vacías. Ahora entiende las dos formas, a Claude se le dicen las
+  claves exactas, y si una red llega sin texto se dice («Claude no ha devuelto
+  el texto de Instagram Reels») con «Reintentar» solo de esa; lo que ya había
+  escrito no se borra. «Copiar texto» sin texto avisa en vez de decir «copiado».
+
 **Publicar: los textos de Claude se ven al terminar (17 de octubre)**
 - Si mientras Claude escribía los textos el cursor estaba en una casilla de
   texto, los textos se guardaban pero la ficha seguía vacía hasta salir de la

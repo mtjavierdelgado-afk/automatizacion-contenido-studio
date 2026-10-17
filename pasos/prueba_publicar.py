@@ -1086,6 +1086,35 @@ def prueba_textos():
         P.lanzar_textos(raiz, INFO, ["tiktok"], P.AJUSTES_DEFECTO, en_hilo=False)
         f = P.ficha(raiz, INFO, P.AJUSTES_DEFECTO)
         ok(not f["error_textos"] and f["textos"]["tiktok"]["descripcion"], "«Reintentar» los escribe")
+        # 17-10, en el servidor: Claude contestó con «Instagram Reels» de clave
+        t, _c = P.normalizar_textos({"Instagram Reels": {"description": "Hola IG", "Hashtags": ["a"]},
+                                     "TikTok": {"texto": "Hola TT"}}, ["instagram", "tiktok"])
+        igual((t["instagram"]["descripcion"], t["tiktok"]["descripcion"], t["instagram"]["hashtags"]),
+              ("Hola IG", "Hola TT", ["a"]), "las claves con el nombre de la red y otros nombres de campo valen")
+        t, _c = P.normalizar_textos({"textos": {"youtube": {"title": "T", "descripcion": "D"}}}, ["youtube"])
+        igual((t["youtube"]["titulo"], t["youtube"]["descripcion"]), ("T", "D"), "y envueltas en «textos»")
+        ok("\"instagram\"" in P.instruccion_textos(INFO, ["instagram"], P.AJUSTES_DEFECTO),
+           "la instrucción dice las claves exactas")
+        # una respuesta sin textos: fallo que se ve, y lo que había no se pisa
+        original = P._textos_simulados
+        P._textos_simulados = lambda info, redes, raiz=None: (json.dumps({"Otra cosa": {}}), {"_coste_anotado": True})
+        try:
+            P.lanzar_textos(raiz, INFO, ["tiktok"], P.AJUSTES_DEFECTO, en_hilo=False)
+        finally:
+            P._textos_simulados = original
+        f2 = P.ficha(raiz, INFO, P.AJUSTES_DEFECTO)
+        ok("sin ningún texto" in f2["error_textos"], f"sin textos, se dice: {f2['error_textos'][:50]}")
+        igual(f2["textos"]["tiktok"]["descripcion"], f["textos"]["tiktok"]["descripcion"],
+              "y el texto que había sigue ahí")
+        P._textos_simulados = lambda info, redes, raiz=None: (json.dumps({"tiktok": {"descripcion": "Solo TT"}}),
+                                                               {"_coste_anotado": True})
+        try:
+            P.lanzar_textos(raiz, INFO, ["tiktok", "instagram"], P.AJUSTES_DEFECTO, en_hilo=False)
+        finally:
+            P._textos_simulados = original
+        f3 = P.ficha(raiz, INFO, P.AJUSTES_DEFECTO)
+        ok(f3["textos"]["tiktok"]["descripcion"] == "Solo TT" and "Instagram" in f3["error_textos"]
+           and f3["error_redes"] == ["instagram"], "a medias: lo que vino se guarda y lo que falta se dice")
     finally:
         os.environ.pop("ESTUDIO_SIMULAR", None)
 

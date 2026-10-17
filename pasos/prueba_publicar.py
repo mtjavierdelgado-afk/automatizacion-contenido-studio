@@ -985,6 +985,55 @@ def prueba_perfiles():
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 
 
+def prueba_textos():
+    """«Que Claude escriba los textos»: el estado mientras escribe, el fallo que
+    se ve (y se apunta), y lo que se le pide (emojis, gancho, cada red)."""
+    seccion("7] textos: escribiendo, el fallo, los emojis")
+    raiz = os.path.join(CARPETA, "textos")
+    os.makedirs(raiz)
+    a = P.ajustes_de(raiz, "cl_t")
+    igual(a["usar_emojis"], True, "los emojis vienen puestos de fábrica")
+    igual(P.guardar_ajustes(raiz, "cl_t", {"usar_emojis": False})["usar_emojis"], False,
+          "y se pueden quitar")
+    try:
+        P.guardar_ajustes(raiz, "cl_t", {"usar_emojis": "no"})
+        ok(False, "«usar_emojis» es sí o no")
+    except P.ErrorPublicar:
+        ok(True, "«usar_emojis» es sí o no")
+    con = P.instruccion_textos(INFO, ["tiktok", "instagram", "youtube"], P.AJUSTES_DEFECTO)
+    sin = P.instruccion_textos(INFO, ["tiktok"], dict(P.AJUSTES_DEFECTO, usar_emojis=False))
+    ok("Emojis: sí" in con and "Instagram Reels, 3 a 6 emojis" in con, "con emojis: cuántos por red")
+    ok("NINGUNO" in sin and "Emojis: sí" not in sin, "sin emojis: se le dice que ninguno")
+    ok("gancho" in con and "70 caracteres" in con, "pide gancho y el título de YouTube de 70 como mucho")
+    ok("SIN SONIDO" not in con, "las reglas de Facebook solo si se pide Facebook")
+    ok(P.MODELO != "sonnet" or P.ESFUERZO != "low", f"más modelo que sonnet/low: {P.MODELO}/{P.ESFUERZO}")
+    # escribiendo: la ficha lo dice, con desde cuándo y qué redes
+    os.environ["ESTUDIO_SIMULAR"] = "1"
+    try:
+        P._ESCRIBIENDO["fiesta"] = {"desde": P._iso_lima(), "redes": ["tiktok"]}
+        f = P.ficha(raiz, INFO, P.AJUSTES_DEFECTO)
+        ok(f["escribiendo"] and f["escribiendo_desde"] and f["escribiendo_redes"] == ["tiktok"],
+           "mientras escribe, la ficha dice desde cuándo y qué redes")
+        P._ESCRIBIENDO.pop("fiesta", None)
+        # el fallo: se ve en la ficha y se apunta en la bitácora
+        os.makedirs(P.carpeta(raiz), exist_ok=True)
+        with open(os.path.join(P.carpeta(raiz), "_fallar_textos"), "w") as fh:
+            fh.write("1")
+        P.lanzar_textos(raiz, INFO, ["tiktok"], P.AJUSTES_DEFECTO, en_hilo=False)
+        f = P.ficha(raiz, INFO, P.AJUSTES_DEFECTO)
+        ok(not f["escribiendo"] and "no se han podido escribir" in f["error_textos"],
+           f"si falla, la ficha lo dice: {f['error_textos'][:60]}")
+        with open(os.environ["ESTUDIO_BITACORA_GLOBAL"], encoding="utf-8") as fh:
+            ok("publicar_textos_fallo" in fh.read(), "y queda apuntado en la bitácora")
+        # reintentar, ya sin fallo
+        os.remove(os.path.join(P.carpeta(raiz), "_fallar_textos"))
+        P.lanzar_textos(raiz, INFO, ["tiktok"], P.AJUSTES_DEFECTO, en_hilo=False)
+        f = P.ficha(raiz, INFO, P.AJUSTES_DEFECTO)
+        ok(not f["error_textos"] and f["textos"]["tiktok"]["descripcion"], "«Reintentar» los escribe")
+    finally:
+        os.environ.pop("ESTUDIO_SIMULAR", None)
+
+
 def main():
     print("PRUEBA DE PUBLICAR")
     prueba_piezas()
@@ -992,6 +1041,7 @@ def main():
     prueba_envios_sueltos()
     prueba_metricas()
     prueba_perfiles()
+    prueba_textos()
     if shutil.which("ffmpeg"):
         prueba_studio()
     else:

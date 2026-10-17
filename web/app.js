@@ -17073,8 +17073,38 @@ async function cargarPublicar(silencio) {
   PUB.cargando = false;
   if (MODULOS.actual === 'publicar') {
     if (silencio) repintarPublicarSinPisar(); else pintarModulo();
+    if (PUB.repintar) ponerAlDiaEstadoTextosPublicar();
   }
   programarRelojPublicar();
+}
+
+/* El estado de «Que Claude escriba los textos» (escribiendo, error con
+   «Reintentar») se cambia EN SU SITIO cuando no se puede repintar todo porque
+   alguien está escribiendo en un campo. */
+function ponerAlDiaEstadoTextosPublicar() {
+  const viejo = document.querySelector('#modulo .estado-textos');
+  if (!viejo || !PUB.ficha) return;
+  viejo.replaceWith(estadoTextosPublicar(PUB.ficha));
+}
+
+function estadoTextosPublicar(f) {
+  const caja = h('div', { clase: 'estado-textos' });
+  if (f.escribiendo) {
+    const redes = (f.escribiendo_redes || []).map(r => NOMBRES_RED[r] || r).join(', ');
+    // el servidor da la hora de Lima sin zona (Lima es UTC-5 todo el año)
+    const iso = f.escribiendo_desde || '';
+    const desde = Date.parse(/(Z|[+-]\d\d:\d\d)$/.test(iso) ? iso : `${iso}-05:00`);
+    const lleva = Number.isFinite(desde) ? Math.max(0, Math.round((Date.now() - desde) / 1000)) : 0;
+    caja.appendChild(h('div', { clase: 'caja-aviso fila escribiendo-textos' },
+      h('span', { clase: 'girando', 'aria-hidden': 'true' }),
+      h('span', { clase: 'crece' }, `Claude está escribiendo los textos${redes ? ` de ${redes}` : ''}…`
+        + `${lleva > 5 ? ` (lleva ${lleva} s; suele tardar uno o dos minutos)` : ''}`)));
+  } else if (f.error_textos) {
+    caja.appendChild(h('div', { clase: 'caja-error fila' },
+      h('span', { clase: 'crece' }, f.error_textos),
+      h('button', { clase: 'mini', onclick: () => escribirTextosPublicar(f.redes || [], true) }, 'Reintentar')));
+  }
+  return caja;
 }
 
 /* NO SE REPINTA DEBAJO DE QUIEN ESCRIBE: un repintado rehace los campos y se
@@ -17105,7 +17135,9 @@ function programarRelojPublicar() {
   if (!enElAire) return;
   PUB.reloj = setTimeout(async () => {
     try { await pedir(rutaPublicar('/refrescar'), { method: 'POST' }); } catch (e) { /* se reintenta */ }
-    if (Object.keys(PUB.borrador).length || PUB.guardando) { programarRelojPublicar(); return; }
+    /* Se pide SIEMPRE: lo tecleado vive en PUB.borrador y se pinta encima de lo
+       que llegue (textosDeFicha). Antes, con algo en el borrador no se volvía a
+       pedir la ficha y «Claude está escribiendo» no acababa nunca (16-10). */
     cargarPublicar(true);
   }, 4000);
 }
@@ -17333,17 +17365,20 @@ async function cambiarRedesPublicar(red, puesta) {
   } catch (e) { toast(e.message, true); }
 }
 
-async function escribirTextosPublicar(redes) {
+async function escribirTextosPublicar(redes, reintento) {
   if (!redes.length) { toast('elige al menos una red', true); return; }
   const f = PUB.ficha;
   const hay = redes.some(r => ((f.textos || {})[r] || {}).descripcion);
-  if (hay && !confirm('Claude volverá a escribir los textos de: '
+  if (hay && !reintento && !confirm('Claude volverá a escribir los textos de: '
     + redes.map(r => NOMBRES_RED[r]).join(', ') + '.\n\nLo que hayas cambiado a mano en esas redes se sustituye. '
     + 'Va con tu suscripción de Claude (no se paga aparte).')) return;
   try {
     await guardarTextosPublicar();
     await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/textos`), { method: 'POST', cuerpo: { redes } });
-    toast('Claude está escribiendo los textos…');
+    // se ve YA, sin esperar a la siguiente vuelta del reloj
+    Object.assign(PUB.ficha, { escribiendo: true, error_textos: '', escribiendo_redes: redes,
+      escribiendo_desde: new Date().toISOString() });
+    pintarModulo();
     cargarPublicar(true);
   } catch (e) { toast(e.message, true); }
 }
@@ -17414,7 +17449,7 @@ function seccionFichaPublicar() {
     h('span', { clase: 'meta' }, 'Desde el encargo, el guion final y la duración real, con las reglas de cada red.'),
     h('span', { clase: 'crece' }),
     h('a', { clase: 'boton-enlace mini', href: API.archivo(f.pid, f.mp4), download: `${f.pid}.mp4` }, 'Descargar MP4')));
-  if (f.error_textos) redes.appendChild(cajaError(f.error_textos));
+  redes.appendChild(estadoTextosPublicar(f));
   caja.appendChild(redes);
 
   // LOS TEXTOS POR RED
@@ -17916,7 +17951,8 @@ function tarjetaProyectoPublicar(p) {
   fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Página de Facebook (solo si hay más de una)',
     h('input', { type: 'text', value: a.facebook_pagina || '', onchange: ev => guardar('facebook_pagina', ev.target.value) })));
   const casillas = h('div', { clase: 'fila' });
-  [['marcar_ia', 'Marcar como hecho con IA'], ['avisar_youtube', 'Avisar a los suscriptores de YouTube']]
+  [['usar_emojis', 'Usar emojis en los textos'], ['marcar_ia', 'Marcar como hecho con IA'],
+    ['avisar_youtube', 'Avisar a los suscriptores de YouTube']]
     .forEach(([campo, texto]) => casillas.appendChild(h('label', { clase: 'casilla-red' },
       h('input', { type: 'checkbox', checked: !!a[campo], onchange: ev => guardar(campo, ev.target.checked) }),
       ` ${texto}`)));

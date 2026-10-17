@@ -3371,3 +3371,17 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 .fila-red:first-child { border-top: 0; }
 .nombre-red { min-width: 130px; }
 .resultados-publicar select { max-width: 100%; }
+
+/* publicar-arreglos-1 (16-10-2026): el perfil, el estado de los textos */
+.fila-perfil { align-items: flex-end; flex-wrap: wrap; gap: 6px; }
+.elegir-perfil { align-items: flex-end; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.elegir-perfil select { max-width: 100%; }
+.estado-textos:empty { display: none; }
+.estado-textos { margin-top: 8px; }
+.escribiendo-textos { gap: 8px; align-items: center; }
+.girando {
+  width: 14px; height: 14px; flex: 0 0 14px; border-radius: 50%;
+  border: 2px solid var(--linea); border-top-color: var(--acento);
+  animation: girar-publicar 0.9s linear infinite;
+}
+@keyframes girar-publicar { to { transform: rotate(360deg); } }

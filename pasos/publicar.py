@@ -93,8 +93,10 @@ PENDIENTES = ("enviando", "programado", "publicando", "comprobar")
 #: Los que cuentan como «ya va a salir o salio» para no repetir sin querer.
 VIVOS = ("enviando", "programado", "publicando", "publicado", "comprobar", "a_mano")
 
-MODELO = "sonnet"
-ESFUERZO = "low"
+#: Los textos son lo que se lee del vídeo: van con opus/medium (16-10-2026; con
+#: sonnet/low salían planos). Se cambia con ESTUDIO_PUBLICAR_MODELO/_ESFUERZO.
+MODELO = os.environ.get("ESTUDIO_PUBLICAR_MODELO") or "opus"
+ESFUERZO = os.environ.get("ESTUDIO_PUBLICAR_ESFUERZO") or "medium"
 MAX_MATERIAL = 6000
 MAX_GUION = 9000
 #: Cada cuanto se puede volver a preguntar por el mismo envio, en segundos.
@@ -286,6 +288,7 @@ AJUSTES_DEFECTO = {
     "hashtags": "",                     # los fijos del proyecto
     "tono": "",                         # como escribe los textos Claude
     "marcar_ia": True,                  # avisar en cada red de que es IA
+    "usar_emojis": True,                # que Claude ponga emojis en los textos
     "avisar_youtube": True,             # notificar a los suscriptores
     "privacidad_youtube": "public",
     "facebook_pagina": "",              # id de la pagina, si hay mas de una
@@ -323,7 +326,7 @@ def _validar_ajustes(cambios):
         if k not in AJUSTES_DEFECTO or k in ("cuentas", "cuentas_vistas",
                                              "seguidores", "seguidores_al"):
             continue
-        if k in ("marcar_ia", "avisar_youtube"):
+        if k in ("marcar_ia", "avisar_youtube", "usar_emojis"):
             if not isinstance(v, bool):
                 raise ErrorPublicar(f"«{k}» es sí o no")
             limpios[k] = v
@@ -656,27 +659,54 @@ def _marca_de_tiempo(segundos):
 # ---------------------------------------------------------------- los textos
 
 REGLAS_RED = {
-    "tiktok": ("Pie de TikTok (no hay título aparte). Gancho en la primera línea, "
-               "frases cortas, las palabras clave del tema dichas con naturalidad "
-               "(TikTok busca por ellas). CTA corto: comenta, guárdalo, link en bio, "
-               "escríbenos. 3 a 5 hashtags concretos."),
-    "instagram": ("Pie de un Reel (no hay título aparte). La primera línea es la que "
-                  "se ve sin pulsar «más»: tiene que enganchar. Párrafos cortos. CTA: "
-                  "guárdalo, compártelo, escríbenos por DM, link en bio. 3 a 8 hashtags."),
-    "youtube": ("YouTube: TÍTULO de 40 a 70 caracteres (máximo 100), claro y buscable, "
-                "sin clickbait engañoso y sin «<» ni «>». DESCRIPCIÓN: las dos primeras "
-                "líneas resumen la promesa del vídeo; después el detalle. CTA: suscribirse "
-                "o el enlace de la descripción. 3 a 6 hashtags (sirven también de etiquetas)."),
+    "tiktok": ("Pie de TikTok (no hay título aparte: la primera línea hace de título). "
+               "CORTO: 1 a 3 líneas, máximo unos 300 caracteres antes de los hashtags. "
+               "La primera línea es un gancho que para el dedo (una pregunta, un dato "
+               "que sorprende, una promesa concreta). Usa las palabras clave que se "
+               "DICEN en el vídeo, tal cual: TikTok busca por lo que se dice y por lo "
+               "que se escribe. CTA corto y directo (comenta, guárdalo, link en bio, "
+               "escríbenos). Hashtags: 3 a 5, mezclando 1-2 amplios del tema y 2-3 de "
+               "nicho o de la ciudad/zona si el material la nombra."),
+    "instagram": ("Pie de un Reel (no hay título aparte: la primera línea hace de "
+                  "título). La PRIMERA LÍNEA es lo único que se ve sin pulsar «más»: "
+                  "tiene que enganchar sola, en menos de 125 caracteres. Después, 2 a 4 "
+                  "párrafos muy cortos separados por una línea en blanco, con frases "
+                  "cortas que se lean de un vistazo (puedes usar viñetas con emoji). "
+                  "CTA claro: guárdalo, compártelo con quien lo necesita, escríbenos por "
+                  "DM, link en bio. Hashtags: 5 a 8, mezclando amplios, de nicho y "
+                  "locales si el material nombra la zona."),
+    "youtube": ("YouTube: TÍTULO de 40 a 70 caracteres (nunca más de 70: se corta en "
+                "el móvil), con la palabra clave principal al principio, claro y "
+                "buscable, sin clickbait engañoso y sin «<» ni «>». DESCRIPCIÓN pensada "
+                "para el buscador: las dos primeras líneas repiten la palabra clave y "
+                "resumen la promesa del vídeo (es lo que sale en los resultados); "
+                "después 1 a 3 párrafos cortos con las palabras clave secundarias "
+                "dichas con naturalidad. CTA: suscribirse o el enlace de la "
+                "descripción. Hashtags: 3 a 5 (los tres primeros salen encima del "
+                "título)."),
     "facebook": ("Facebook: TÍTULO corto (hasta 80 caracteres) y DESCRIPCIÓN que se "
-                 "entienda sin sonido. Gancho temprano. CTA: enviar mensaje o llamar. "
-                 "2 a 4 hashtags."),
+                 "entienda SIN SONIDO (mucha gente lo ve en silencio): di en el texto "
+                 "lo que pasa en el vídeo. Gancho en la primera línea, párrafos cortos "
+                 "y fáciles de leer, tono cercano. CTA: enviar mensaje, llamar o "
+                 "comentar. Hashtags: 2 a 4."),
+}
+#: Cuántos emojis y cómo, por red, cuando el proyecto los quiere.
+EMOJIS_RED = {
+    "tiktok": "1 a 3 emojis, en el gancho o al final de la línea; nunca en lugar de palabras clave",
+    "instagram": "3 a 6 emojis: uno en el gancho, como viñetas de los párrafos y en el CTA",
+    "youtube": "en la descripción, 1 a 3 como viñetas; en el TÍTULO, ninguno o uno como mucho",
+    "facebook": "1 a 3 emojis que acompañen, sin recargar",
 }
 LIMITES = {"tiktok": 2200, "instagram": 2200, "youtube": 5000, "facebook": 5000}
 
-SISTEMA = ("Escribes los textos con los que se publica un vídeo en redes sociales. "
-           "Escribes en el idioma del guion, con el tono pedido, sin inventar datos "
-           "(teléfonos, precios, enlaces, fechas) que no estén en el material. "
-           "Contestas únicamente con el JSON pedido.")
+SISTEMA = ("Eres un redactor de redes sociales con oficio: escribes los textos con "
+           "los que se publica un vídeo para que la gente pare, lo vea entero y haga "
+           "algo. Escribes en el idioma del guion, con el tono pedido, con frases "
+           "cortas y saltos de línea que se lean en el móvil. Cada red tiene su "
+           "texto: no copies el mismo con otro formato. Nunca inventas datos "
+           "(teléfonos, precios, enlaces, fechas, direcciones) que no estén en el "
+           "material, y no prometes lo que el vídeo no enseña. Contestas únicamente "
+           "con el JSON pedido.")
 
 INSTRUCCION = """Este vídeo ya está montado y hay que publicarlo en: {redes}.
 
@@ -703,6 +733,15 @@ Tono de los textos: {tono}
 (La firma y los hashtags fijos del proyecto los añade el Studio después: no los repitas.)
 </proyecto>
 
+CÓMO SE ESCRIBE (todas las redes)
+- La primera línea es el gancho: lo que hace parar. Nada de «En este vídeo…».
+- Frases cortas. Una idea por línea. Línea en blanco entre bloques (en el JSON, "\\n\\n").
+- Un solo CTA, claro, con verbo: qué tiene que hacer quien lo ve.
+- Hashtags sin almohadilla, mezclando amplios del tema con otros de nicho o de
+  la zona (si el material la nombra). Nada de hashtags genéricos vacíos
+  («viral», «fyp», «parati») salvo que el tono lo pida.
+- {emojis}
+
 REGLAS POR RED
 {reglas}
 
@@ -712,7 +751,7 @@ Devuelve SOLO este JSON (una clave por red pedida):
 {{
   "<red>": {{
     "titulo": "solo YouTube y Facebook; vacío en las demás",
-    "descripcion": "el texto principal, sin hashtags ni CTA",
+    "descripcion": "el texto principal (gancho en la primera línea), sin hashtags ni CTA",
     "cta": "una frase de llamada a la acción",
     "hashtags": ["sin almohadilla", "..."]
   }}{capitulos_json}
@@ -748,6 +787,10 @@ def instruccion_textos(info, redes, ajustes):
         material=(info.get("material") or "—")[:MAX_MATERIAL],
         guion=guion[:MAX_GUION] or "—",
         tono=ajustes.get("tono") or "el del guion",
+        emojis=("Emojis: sí, bien usados (que aporten, no que decoren): "
+                + "; ".join(f"{NOMBRE_RED[r]}, {EMOJIS_RED[r]}" for r in redes) + "."
+                if ajustes.get("usar_emojis", True) else
+                "Emojis: NINGUNO (el proyecto no los quiere), ni en el título ni en el texto."),
         reglas="\n".join(f"- {NOMBRE_RED[r]}: {REGLAS_RED[r]}" for r in redes),
         capitulos=capitulos,
         capitulos_json=(',\n  "capitulos": ["título del tramo 1", "..."]' if con_caps else ""))
@@ -785,9 +828,13 @@ def normalizar_textos(datos, redes, caps_base=None):
     return textos, capitulos
 
 
-def _textos_simulados(info, redes):
+def _textos_simulados(info, redes, raiz=None):
     """El doble de Claude con ESTUDIO_SIMULAR=1: textos fijos sacados del guion,
-    con la misma forma que la respuesta de verdad. Ni CLI ni tokens."""
+    con la misma forma que la respuesta de verdad. Ni CLI ni tokens. Con el
+    fichero `_sistema/publicar/_fallar_textos` falla, como el CLI sin cupo."""
+    if raiz and os.path.exists(os.path.join(carpeta(raiz), "_fallar_textos")):
+        time.sleep(0.3)
+        raise RuntimeError("el CLI de Claude no ha contestado (simulado)")
     primera = ((info.get("guion") or [{}])[0].get("texto") or info.get("nombre") or "")
     datos = {}
     for red in redes:
@@ -806,6 +853,7 @@ def _textos_simulados(info, redes):
 def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd):
     """El hilo que habla con Claude. Apunta los tokens en el vídeo."""
     pid = info["pid"]
+    inicio = time.time()
     try:
         coste = None
         try:
@@ -822,7 +870,7 @@ def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd):
                 extra=["--no-session-persistence"], para="los textos para redes")
 
         if _simular_todo():
-            llamar = lambda: _textos_simulados(info, redes)  # noqa: E731
+            llamar = lambda: _textos_simulados(info, redes, raiz)  # noqa: E731
         if coste is not None and proyecto is not None:
             with coste.contexto(proyecto, "render"):
                 respuesta, sobre = llamar()
@@ -843,7 +891,14 @@ def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd):
             ficha["editado"] = False
             _escribir(_ruta_video(raiz, pid), ficha)
         _ERRORES_TEXTOS.pop(pid, None)
+        _log("textos_escritos", {"video": pid, "redes": redes, "modelo": MODELO,
+                                 "segundos": round(time.time() - inicio, 1)})
     except Exception as fallo:                              # noqa: BLE001
+        # SE APUNTA: el 16-10 fallo en el servidor sin dejar rastro en ningun log
+        import traceback                                    # noqa: PLC0415
+        _log("textos_fallo", {"video": pid, "redes": redes, "modelo": MODELO,
+                              "tipo": type(fallo).__name__, "error": str(fallo)[:800],
+                              "traza": traceback.format_exc()[-1500:]})
         _ERRORES_TEXTOS[pid] = (f"no se han podido escribir los textos: "
                                 f"{str(fallo)[:400]}")
     finally:
@@ -1036,6 +1091,8 @@ def ficha(raiz, info, ajustes):
         "desactualizada": desactualizada, "escritos": datos.get("escritos") or "",
         "editado": bool(datos.get("editado")),
         "escribiendo": pid in _ESCRIBIENDO, "error_textos": _ERRORES_TEXTOS.get(pid, ""),
+        "escribiendo_desde": (_ESCRIBIENDO.get(pid) or {}).get("desde", ""),
+        "escribiendo_redes": (_ESCRIBIENDO.get(pid) or {}).get("redes", []),
         "envios": sorted(envios, key=lambda e: str(e.get("cuando") or ""), reverse=True),
         "programados_viejos": len(viejos),
         "ajustes": {k: v for k, v in ajustes.items() if k != "cuentas"},

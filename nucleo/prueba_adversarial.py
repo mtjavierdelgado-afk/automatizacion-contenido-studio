@@ -502,13 +502,46 @@ def t8_no_borrar_estado(base):
     igual([v["n"] for v in otro.versiones("assets")], [1], "el historico sigue intacto")
     igual(otro.estado_de("render"), "listo", "el grafo sigue en pie")
 
-    # corrupto de verdad: se aparta, no se pierde
+    # corrupto de verdad: se aparta una copia y se vuelve a la ULTIMA BUENA,
+    # que es la de antes del ultimo guardado. Arrancar de cero ofrecia generar
+    # el video entero otra vez.
+    anterior = getattr(MODULO, "NOMBRE_ANTERIOR", "estado.json.anterior")
+    ilegible_error = getattr(MODULO, "EstadoIlegible", LookupError)
+    otro.set_params("brief", {"angulo": "el ultimo"})      # el ultimo guardado
+    ok(os.path.isfile(proyecto.ruta(anterior)),
+       "cada guardado deja la copia buena anterior")
     with open(proyecto.ruta("estado.json"), "w", encoding="utf-8") as fh:
         fh.write("{ roto")
     tercero = Estado(proyecto)
-    igual(tercero.estado_de("ingesta"), "pendiente", "arranca de cero si esta corrupto")
+    igual(tercero.estado_de("render"), "listo", "vuelve a la copia buena, no a cero")
+    igual([v["n"] for v in tercero.versiones("assets")], [1], "con su historico")
+    igual(tercero.params("brief"), {"angulo": "a"},
+          "la copia es la de ANTES del ultimo guardado (lo ultimo se pierde, y se dice)")
+    recuperacion = getattr(tercero, "recuperacion", None)
+    ok(bool(recuperacion), f"y deja constancia ({recuperacion})")
     apartados = [n for n in os.listdir(proyecto.raiz) if n.startswith("estado.roto")]
     ok(len(apartados) == 1, f"el estado corrupto se guarda a un lado ({apartados})")
+    igual(Estado(proyecto).estado_de("render"), "listo", "y el recuperado ya se lee solo")
+
+    # un fichero VACIO (lo que deja un corte de luz) es igual de roto
+    with open(proyecto.ruta("estado.json"), "w", encoding="utf-8") as fh:
+        fh.write("")
+    igual(Estado(proyecto).estado_de("render"), "listo", "un estado.json vacio tambien se recupera")
+
+    # sin copia buena: NO arranca de cero, lo dice (y sigue sin abrir)
+    if os.path.exists(proyecto.ruta(anterior)):
+        os.remove(proyecto.ruta(anterior))
+    with open(proyecto.ruta("estado.json"), "w", encoding="utf-8") as fh:
+        fh.write("{ roto otra vez")
+    for intento in (1, 2):
+        try:
+            Estado(proyecto)
+            ok(False, "sin copia buena deberia lanzar EstadoIlegible")
+        except ilegible_error as fallo:
+            ok("estado.roto." in str(fallo),
+               f"intento {intento}: sin copia buena lanza y nombra el fichero apartado")
+    with open(proyecto.ruta("estado.json"), encoding="utf-8") as fh:
+        igual(fh.read(), "{ roto otra vez", "el roto se queda en su sitio: no se abre vacio")
     shutil.rmtree(carpeta, ignore_errors=True)
 
 
@@ -609,7 +642,8 @@ def t7_varios(base):
     try:
         e2 = Estado(proyecto)
         ok(True, "un estado.json corrupto no impide abrir el proyecto")
-        igual(e2.estado_de("ingesta"), "pendiente", "arranca de cero si esta corrupto")
+        # no arranca de cero: vuelve a la copia buena (ver [8])
+        igual(e2.estado_de("ingesta"), "listo", "vuelve a la copia buena si esta corrupto")
     except Exception as fallo:
         ok(False, f"estado.json corrupto revienta: {type(fallo).__name__}: {fallo}")
     escribir_json(ruta, copia)

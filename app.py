@@ -63,7 +63,7 @@ from starlette.exceptions import HTTPException as ErrorHTTP  # noqa: E402
 from nucleo.bitacora import (Bitacora, anotar_global,  # noqa: E402
                              RUTA_GLOBAL as RUTA_BITACORA_GLOBAL)
 from nucleo.estado import (PASOS, PASOS_POR_ID, Estado,  # noqa: E402
-                           descendientes_de)
+                           EstadoIlegible, descendientes_de)
 from nucleo.proyecto import (Proyecto, ahora, escribir_json,  # noqa: E402
                              identificador, leer_json, leer_jsonl, lock_de,
                              recolocar,
@@ -185,6 +185,14 @@ class Contexto:
         self.estado = Estado(self.proyecto)
         self.bitacora = Bitacora(self.proyecto)
         self.gestor = GestorTrabajos(estado=self.estado, bitacora=self.bitacora)
+        # SI estado.json NO SE PODIA LEER y se volvio a la ultima copia buena,
+        # queda dicho: lo que se hiciera en el ultimo guardado puede faltar
+        if self.estado.recuperacion:
+            try:
+                self.bitacora.anotar("estado_recuperado", None,
+                                     dict(self.estado.recuperacion))
+            except Exception:  # noqa: BLE001 -- no impide abrir el proyecto
+                pass
         # LAS MARCAS «EJECUTANDO» DE UN SERVICIO ANTERIOR. Un contexto nuevo
         # tiene el gestor vacio: ningun trabajo de este servicio corre en este
         # proyecto, asi que una marca que diga «ejecutando» es de un trabajo
@@ -228,6 +236,9 @@ def contexto(pid):
         raise ErrorApi(404, f"proyecto desconocido: {clave}")
     try:
         ctx = Contexto(raiz)
+    except EstadoIlegible as fallo:
+        # 503 y el porque, en castellano: la pantalla lo ensena tal cual
+        raise ErrorApi(503, str(fallo))
     except Exception as fallo:  # noqa: BLE001
         raise ErrorApi(500, f"no se ha podido abrir el proyecto {clave}: {fallo}")
     with _LOCK:
@@ -960,6 +971,20 @@ async def _manejar_imprevisto(peticion, fallo):
 
 def _cuerpo(crudo):
     return crudo if isinstance(crudo, dict) else {}
+
+
+# LAS RUTAS `async def` CORREN EN EL BUCLE DE EVENTOS, que es UNO para todo el
+# servicio: cualquier cosa que bloquee ahi -- abrir un proyecto (leer y validar
+# estado.json), un cerrojo de fichero que espera hasta 30 s, escribir una
+# imagen de 20 MB -- para TODAS las peticiones y todas las barras de progreso a
+# la vez. Las `def` normales ya van al pool de hilos; en las async (las que
+# leen un multipart o emiten SSE) lo pesado se manda al pool con esto.
+_en_hilo = run_in_threadpool
+
+
+def _escribir_bytes(ruta, contenido):
+    with open(ruta, "wb") as fh:
+        fh.write(contenido)
 
 
 # ------------------------------------------------------------------ proyectos
@@ -2048,7 +2073,7 @@ def _sse(evento, datos):
 @app.get("/api/trabajos/{tid}/eventos")
 async def eventos_trabajo(tid: str, peticion: Request):
     """Progreso del trabajo en vivo por Server-Sent Events."""
-    ctx = contexto_de_trabajo(tid)
+    ctx = await _en_hilo(contexto_de_trabajo, tid)
     try:
         ctx.gestor.estado(tid)
     except KeyError:
@@ -3341,7 +3366,7 @@ def eventos_coste(pid: str, proveedor: str = Query(default=None),
 @app.get("/api/proyectos/{pid}/coste/flujo")
 async def flujo_coste(pid: str, peticion: Request):
     """Coste en vivo por SSE, para que la cabecera se mueva mientras corre un paso."""
-    ctx = contexto(pid)
+    ctx = await _en_hilo(contexto, pid)
     contador = medidor(ctx)
 
     async def flujo():
@@ -3354,7 +3379,8 @@ async def flujo_coste(pid: str, peticion: Request):
             if actual != sello:
                 sello = actual
                 ultimo_latido = time.time()
-                yield _sse("coste", contador.total())
+                # el total relee coste.jsonl entero: al pool, no al bucle
+                yield _sse("coste", await _en_hilo(contador.total))
             if time.time() - ultimo_latido > LATIDO_SSE:
                 ultimo_latido = time.time()
                 yield ": latido\n\n"
@@ -6413,7 +6439,7 @@ async def subir_imagenes_repaso(pid: str, peticion: Request):
     Van a la carpeta del PROYECTO y no a un buzón: una nota del repaso pertenece
     a este vídeo y tiene que seguir ahí cuando se abra mañana.
     """
-    ctx = contexto(pid)
+    ctx = await _en_hilo(contexto, pid)
     tipo = (peticion.headers.get("content-type") or "").lower()
     if not tipo.startswith("multipart/"):
         raise ErrorApi(400, "manda las imágenes como multipart")
@@ -6421,7 +6447,7 @@ async def subir_imagenes_repaso(pid: str, peticion: Request):
         formulario = await peticion.form()
     except Exception as fallo:                              # noqa: BLE001
         raise ErrorApi(400, f"multipart ilegible: {fallo}")
-    carpeta = _repaso().carpeta_imagenes(ctx.proyecto, crear=True)
+    carpeta = await _en_hilo(lambda: _repaso().carpeta_imagenes(ctx.proyecto, crear=True))
     guardadas, avisos = [], []
     for _clave, valor in formulario.multi_items():
         if not hasattr(valor, "read"):
@@ -6439,8 +6465,7 @@ async def subir_imagenes_repaso(pid: str, peticion: Request):
                           f"{MAX_BYTES_REPASO // 1024 // 1024}")
             continue
         nombre = f"{uuid.uuid4().hex[:12]}{extension}"
-        with open(os.path.join(carpeta, nombre), "wb") as fh:
-            fh.write(contenido)
+        await _en_hilo(_escribir_bytes, os.path.join(carpeta, nombre), contenido)
         guardadas.append({"nombre": nombre, "origen": origen,
                           "bytes": len(contenido)})
     if not guardadas and avisos:
@@ -7205,10 +7230,12 @@ async def _leer_logo_subido(peticion):
 async def subir_logo_suelto(peticion: Request):
     """Guarda un logo sin video todavia: el de un borrador o el de un proyecto."""
     contenido, extension = await _leer_logo_subido(peticion)
-    os.makedirs(_carpeta_logos(), exist_ok=True)
     nombre = f"logo_{hashlib.sha1(contenido).hexdigest()[:10]}{extension}"
-    with open(os.path.join(_carpeta_logos(), nombre), "wb") as fh:
-        fh.write(contenido)
+
+    def guardar():
+        os.makedirs(_carpeta_logos(), exist_ok=True)
+        _escribir_bytes(os.path.join(_carpeta_logos(), nombre), contenido)
+    await _en_hilo(guardar)
     return {"nombre": nombre}
 
 
@@ -7273,7 +7300,7 @@ async def subir_logo(pid: str, peticion: Request):
     Cambiarlo, moverlo o quitarlo SOLO vuelve a montar el MP4 (`poner_logo`):
     ni una imagen ni un clip.
     """
-    ctx = contexto(pid)
+    ctx = await _en_hilo(contexto, pid)
     try:
         formulario = await peticion.form()
     except Exception as fallo:                              # noqa: BLE001
@@ -7288,12 +7315,16 @@ async def subir_logo(pid: str, peticion: Request):
     if not contenido or len(contenido) > MAX_BYTES_LOGO:
         raise ErrorApi(400, f"el logo tiene que pesar menos de "
                             f"{MAX_BYTES_LOGO // 1024 // 1024} MB")
+    return await _en_hilo(_poner_logo_subido, ctx, contenido, extension)
+
+
+def _poner_logo_subido(ctx, contenido, extension):
+    """Lo de `subir_logo` que toca disco y estado, fuera del bucle de eventos."""
     carpeta = _carpeta_logo(ctx)
     os.makedirs(carpeta, exist_ok=True)
     # nombre nuevo cada vez: es lo que hace que la firma cambie al cambiar de logo
     nombre = f"logo_{hashlib.sha1(contenido).hexdigest()[:10]}{extension}"
-    with open(os.path.join(carpeta, nombre), "wb") as fh:
-        fh.write(contenido)
+    _escribir_bytes(os.path.join(carpeta, nombre), contenido)
     al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
     ficha = dict((ctx.estado.params("render") or {}).get("logo") or {})
     ficha.update({"fichero": nombre})
@@ -7870,7 +7901,7 @@ def montar_banda_sonora(pid: str, cuerpo: dict = Body(default=None)):
 @app.post("/api/sonido/subir", status_code=201)
 async def subir_audio_propio(peticion: Request, familia: str = Query(default="musica")):
     """Sube un audio tuyo (MP3, WAV, M4A, OGG) para la música o un efecto."""
-    sonido = _sonido()
+    sonido = await _en_hilo(_sonido)
     if familia not in ("musica", "efectos"):
         raise ErrorApi(400, "familia: «musica» o «efectos»")
     tipo = (peticion.headers.get("content-type") or "").lower()
@@ -7892,8 +7923,8 @@ async def subir_audio_propio(peticion: Request, familia: str = Query(default="mu
             raise ErrorApi(400, str(fallo))
         ficha["muestra"] = (f"/api/efectos/{sonido._nombre_de(ficha)}" if familia == "efectos"
                             else f"/api/musica/propia/{sonido._nombre_de(ficha)}")
-        anotar_global("audio_propio", {"familia": familia, "id": ficha["id"],
-                                       "titulo": ficha["titulo"]})
+        await _en_hilo(anotar_global, "audio_propio",
+                       {"familia": familia, "id": ficha["id"], "titulo": ficha["titulo"]})
         return {"ficha": ficha}
     raise ErrorApi(400, "no ha llegado ningún audio")
 
@@ -9807,8 +9838,8 @@ async def subir_imagenes_asistente(peticion: Request):
         formulario = await peticion.form()
     except Exception as fallo:                              # noqa: BLE001
         raise ErrorApi(400, f"multipart ilegible: {fallo}")
-    _barrer_imagenes_asistente()
-    carpeta = _carpeta_imagenes_asistente(crear=True)
+    await _en_hilo(_barrer_imagenes_asistente)
+    carpeta = await _en_hilo(_carpeta_imagenes_asistente, crear=True)
     guardadas, avisos = [], []
     for _clave, valor in formulario.multi_items():
         if not hasattr(valor, "read"):
@@ -9827,8 +9858,7 @@ async def subir_imagenes_asistente(peticion: Request):
                           f"tope son {MAX_BYTES_REPASO // 1024 // 1024}")
             continue
         nombre = f"{uuid.uuid4().hex[:12]}{extension}"
-        with open(os.path.join(carpeta, nombre), "wb") as fh:
-            fh.write(contenido)
+        await _en_hilo(_escribir_bytes, os.path.join(carpeta, nombre), contenido)
         guardadas.append({"nombre": nombre, "origen": origen, "bytes": len(contenido)})
     if not guardadas and avisos:
         raise ErrorApi(400, "no se ha podido guardar ninguna: " + "; ".join(avisos))
@@ -9845,7 +9875,7 @@ async def dictar_al_asistente(peticion: Request):
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
     dictado = PASOS_MODULOS.dictado
-    if AJUSTES.leer().get("dictado") == "navegador":
+    if (await _en_hilo(AJUSTES.leer)).get("dictado") == "navegador":
         raise ErrorApi(409, "en Configuración está elegido el dictado del navegador: "
                             "no se manda el audio a OpenAI")
     tipo = (peticion.headers.get("content-type") or "").lower()
@@ -9866,9 +9896,9 @@ async def dictar_al_asistente(peticion: Request):
             getattr(fichero, "content_type", "") or "audio/webm", idioma)
     except dictado.ErrorDictado as fallo:
         raise ErrorApi(400, str(fallo))
-    anotar_global("asistente_dictado", {"bytes": resultado.get("bytes"),
-                                        "modelo": resultado.get("modelo"),
-                                        "segundos": resultado.get("segundos")})
+    await _en_hilo(anotar_global, "asistente_dictado",
+                   {"bytes": resultado.get("bytes"), "modelo": resultado.get("modelo"),
+                    "segundos": resultado.get("segundos")})
     return resultado
 
 
@@ -10393,7 +10423,7 @@ async def subir_imagenes_light(peticion: Request):
         raise ErrorApi(400, f"multipart ilegible: {fallo}")
 
     carpeta = _carpeta_aportadas()
-    os.makedirs(carpeta, exist_ok=True)
+    await _en_hilo(os.makedirs, carpeta, exist_ok=True)
     guardadas, avisos = [], []
     for _clave, valor in formulario.multi_items():
         if not hasattr(valor, "read"):
@@ -10419,14 +10449,13 @@ async def subir_imagenes_light(peticion: Request):
         # segundo se llevaria al primero por delante
         sello = uuid.uuid4().hex[:12]
         nombre = f"{sello}{extension}"
-        with open(os.path.join(carpeta, nombre), "wb") as fh:
-            fh.write(contenido)
+        await _en_hilo(_escribir_bytes, os.path.join(carpeta, nombre), contenido)
         guardadas.append({"nombre": nombre, "origen": origen,
                           "bytes": len(contenido)})
     if not guardadas and avisos:
         raise ErrorApi(400, "no se ha podido guardar ninguna: " + "; ".join(avisos))
     return {"imagenes": guardadas, "avisos": avisos,
-            "tope": _light().max_imagenes_estilo()}
+            "tope": await _en_hilo(lambda: _light().max_imagenes_estilo())}
 
 
 @app.get("/api/presets-light/imagenes/{nombre}")
@@ -14014,8 +14043,13 @@ async def crear_captura(pid: str, peticion: Request):
     Acepta multipart (imagen + metadatos) y tambien JSON con 'imagen_b64', que
     es lo comodo para un cliente que ya tiene el dataURL del canvas.
     """
-    ctx = contexto(pid)
+    ctx = await _en_hilo(contexto, pid)
     datos, imagen = await _cuerpo_captura(peticion)
+    return await _en_hilo(_guardar_captura, ctx, datos, imagen)
+
+
+def _guardar_captura(ctx, datos, imagen):
+    """Lo de `crear_captura` que lee planos, mira el estado y escribe: en el pool."""
     if imagen is None:
         raise ErrorApi(400, "falta el PNG de la captura ('imagen' en multipart "
                             "o 'imagen_b64' en JSON)")

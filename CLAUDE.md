@@ -91,7 +91,6 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 
 | Rama abierta | Ficheros reservados | Desde |
 |---|---|---|
-| `enlazar-render` | Cada montaje enlaza (enlace duro) los ficheros de la versión anterior en vez de copiarlos, y nada del render escribe encima de un fichero enlazado: `pasos/medios.py` (`sembrar_trabajo`), `pasos/p8_render.py`, `pasos/sonido.py`, `pasos/p7_callouts.py` (solo dónde escriben), y sus pruebas. No toca las zonas de Publicar | 16-10-2026 |
 | `publicar-redes-2` | Lo que faltaba de las métricas (decisión del dueño, 16-10): retención de TikTok y YouTube, la lectura «guardada» de Upload-Post (no gasta el límite de 100 consultas cada 5 min), el resumen de esta semana y este mes frente al anterior, «lo que mejor funcionó» (función y ruta para la Parrilla y el piloto) y una línea con lo mejor de la semana en Inicio. Las cifras se siguen pidiendo SOLO al pulsar. **Propios:** `pasos/publicar.py` (sección de métricas), `motores/publicar_uploadpost/`, `pasos/prueba_publicar.py`. **Por zonas:** solo la sección PUBLICAR al final de `web/app.js`, el bloque PUBLICAR al final de `app.py` y las clases de Publicar al final de `web/estilo.css`; `docs/API.md` y un tramo al final de `prueba_recorrido.py`. Después, en la misma conversación, `publicar-redes-3` (aprobación del cliente) | 17-10-2026 |
 
 Quien abre una rama la apunta aquí (en `main`, regla 8); quien la une a `main`,

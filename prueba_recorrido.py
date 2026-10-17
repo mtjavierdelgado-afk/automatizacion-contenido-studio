@@ -3767,5 +3767,45 @@ def publicar_lo_del_16_de_octubre(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def publicar_textos_con_el_cursor_en_un_campo(navegador, datos):
+    """17-10, en el servidor: Claude escribió los textos (lo dice el log) y la
+    ficha siguió vacía con «Claude está escribiendo…». Con el cursor en un
+    campo de texto mientras escribe, los textos tienen que aparecer igual."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    api.post(f"/api/publicar/proyectos/{cid}/perfil", {})
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["tiktok", "instagram"], "textos": {
+        "tiktok": {"descripcion": ""}, "instagram": {"descripcion": ""}}})
+    marca = os.path.join(datos["proyectos"], "_sistema", "publicar", "_textos_lentos")
+    os.makedirs(os.path.dirname(marca), exist_ok=True)
+    with open(marca, "w", encoding="utf-8") as fh:
+        fh.write("1")
+    pg = Pagina(navegador, datos)
+    try:
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        ok(pg.esperar(".ficha-publicar .nombre-ficha", segundos=15), "la ficha del vídeo")
+        pg.pulsar(".ficha-publicar button", "Que Claude escriba los textos")
+        ok(pg.esperar(".escribiendo-textos", "lleva", 5), "«escribiendo», con cuánto lleva desde el principio")
+        # el cursor en el texto de Instagram mientras Claude escribe
+        pg.p.locator(".texto-red[data-red=instagram] textarea").first.click()
+        fin = time.time() + 25
+        valor = ""
+        while time.time() < fin:
+            valor = pg.p.evaluate("() => (document.querySelector('.texto-red[data-red=tiktok] textarea') || {}).value || ''")
+            if valor:
+                break
+            pg.p.wait_for_timeout(500)
+        ok(valor.startswith("[TikTok]"), f"los textos aparecen aunque haya un campo con el cursor: {valor[:30]!r}")
+        ok(not pg.visible(".escribiendo-textos"), "y el aviso de «escribiendo» se va")
+        pg.sin_errores("textos con el cursor en un campo")
+    finally:
+        os.remove(marca)
+        pg.cerrar()
+
+
 if __name__ == "__main__":
     sys.exit(main())

@@ -10,6 +10,13 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Publicar: los textos de Claude se ven al terminar (17 de octubre)**
+- Si mientras Claude escribía los textos el cursor estaba en una casilla de
+  texto, los textos se guardaban pero la ficha seguía vacía hasta salir de la
+  casilla o recargar. Ahora aparecen en cuanto terminan, con un aviso «Textos
+  listos». El aviso de «escribiendo» dice desde el principio cuánto lleva, y
+  si Claude no contesta, el fallo sale a los 4 minutos (antes podía tardar 16).
+
 **Publicar: lo que salió probándolo en el servidor (16 de octubre, tarde)**
 - **El perfil de Upload-Post se apunta con lo que escribes.** «Crear perfil»
   manda el nombre del campo; **«Usar este perfil»** (o Enter) apunta uno que ya

@@ -2576,6 +2576,16 @@ def prueba_logo_y_revision():
           "sin duracion, la huella de siempre")
     igual(revisar_campo.huella("tono", "x"), revisar_campo.huella("tono", "x", {"duracion_s": 30}),
           "y en las demas guias no cambia nada")
+    igual(revisar_campo.contexto_saneado("material", {"duracion_s": True}), {},
+          "un booleano no es una duracion")
+    import p3_guion                                           # noqa: PLC0415
+    igual(revisar_campo.DURACION_CORTA_S, p3_guion.DURACION_CORTA_S,
+          "la revision y el redactor llaman corto a lo mismo")
+    ok("{contexto}" not in revisar_campo.INSTRUCCION.replace("{contexto}", "")
+       and revisar_campo.INSTRUCCION.count("{contexto}") == 1,
+       "la instruccion solo gana el hueco del contexto (la huella lo quita)")
+    ok("IMPRESCINDIBLE" not in revisar_campo._contexto_como_texto("material", {"duracion_s": 240}),
+       "en un video largo no se pide marcar IMPRESCINDIBLE: ese redactor no lo lee")
     vistos = []
     original = revisar_campo.cli_claude.ejecutar
     revisar_campo.cli_claude.ejecutar = lambda instruccion, **_k: (

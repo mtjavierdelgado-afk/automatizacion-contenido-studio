@@ -23,10 +23,13 @@ vídeos, estilos, claves y contraseña no se tocan.
   EMPIEZA POR es la primera frase, y DEJA FUERA no sale ni de pasada. Valen
   en vídeos de cualquier duración. Sin etiquetas, todo sigue como antes.
 - **«Revisar» del material y de las indicaciones sabe cuánto dura el vídeo.**
-  Si el material no cabe, lo dice y propone marcar con «IMPRESCINDIBLE:» lo que
-  tiene que entrar; si las indicaciones piden demostrar algo y el material no
-  trae las medidas, te las pide. El redactor respeta lo marcado como
-  IMPRESCINDIBLE.
+  Si el material no cabe, lo dice; en un vídeo corto propone marcar con
+  «IMPRESCINDIBLE:» lo que tiene que entrar, y el redactor de los cortos lo
+  respeta. Si las indicaciones piden demostrar algo y el material no trae las
+  medidas, te las pide.
+- Las etiquetas se reconocen en MAYÚSCULAS, como las enseña la guía (una nota
+  como «Ángulo: no me convence el de antes» sigue siendo una nota), y cada una
+  acaba en la siguiente etiqueta o en una línea en blanco.
 - Las guías de «El material» y «Las indicaciones» explican todo esto.
 - Los guiones ya hechos no cambian ni quedan para regenerar: esto se nota al
   escribir o reescribir un guion.

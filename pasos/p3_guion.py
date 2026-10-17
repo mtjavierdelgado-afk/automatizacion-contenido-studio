@@ -431,6 +431,16 @@ REGLA_REDACCION_DOSIER = (
     "dosier salen los hechos; del orden que tu elijas sale el video. Las frases "
     "son tuyas: no copies ni parafrasees ficha a ficha.")
 
+#: Y LA DE LOS CORTOS. La de arriba manda seguir «el mismo orden y el mismo
+#: ritmo de capitulos» del material, y en un video de un minuto eso es
+#: exactamente recorrer el material: lo contrario de «elige, no resumas».
+REGLA_REDACCION_CORTA = (
+    "REDACTA DE NUEVO, Y ELIGES TU. El material que va arriba es DOCUMENTACION: "
+    "de ahi salen los hechos, pero cuales entran y en que orden lo decides tu "
+    "para contar la idea de este video (ver COMO SE ESTRUCTURA ESTE VIDEO). No "
+    "sigas su orden ni sus apartados, no copies ninguna frase y no la "
+    "parafrasees frase a frase.")
+
 REGLA_GUION_PROPIO = (
     "ESTE GUION YA ESTA ESCRITO Y ES DE LA CASA. El material que va arriba no es "
     "documentacion: es el guion, escrito por quien te lo pide. Conservalo palabra "
@@ -455,17 +465,25 @@ REGLA_GUION_PROPIO = (
 DURACION_CORTA_S = 90
 
 
+def _segundos_pedidos(brief):
+    """La duracion pedida del brief, en segundos (0.0 si no hay o es rara)."""
+    crudo = (brief or {}).get("duracion_objetivo_s")
+    if isinstance(crudo, bool):
+        return 0.0
+    try:
+        segundos = float(crudo or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return segundos if segundos == segundos and segundos != float("inf") else 0.0
+
+
 def es_corto(brief):
     """Si el video es corto (hasta DURACION_CORTA_S). -> bool
 
     Solo mira la duracion PEDIDA del brief. Sin ella (briefs de antes de que
     existiera, pruebas) se trata como largo, que es lo de siempre.
     """
-    try:
-        segundos = float((brief or {}).get("duracion_objetivo_s") or 0)
-    except (TypeError, ValueError):
-        return False
-    return 0 < segundos <= DURACION_CORTA_S
+    return 0 < _segundos_pedidos(brief) <= DURACION_CORTA_S
 
 
 #: LAS ETIQUETAS DE LAS INDICACIONES, que la guia de «Las indicaciones» ensena
@@ -474,9 +492,18 @@ def es_corto(brief):
 #: modelo las leia como una nota mas: respetaba EMPIEZA POR y DEJA FUERA, que
 #: son faciles de comprobar, y el ANGULO se quedaba en una mencion. Ahora se
 #: separan y cada una va como una orden con su significado dicho.
+#:
+#: SOLO EN MAYUSCULAS, que es como las ensena la guia: «Angulo: no me convence
+#: el de antes» es una nota corriente y no puede volverse una orden. Valen al
+#: empezar una linea (con guion, vineta, numero o negrita delante) o detras de
+#: un punto o un punto y coma en la misma linea. El texto de cada una acaba en
+#: la siguiente etiqueta o en la primera linea en blanco: lo que venga despues
+#: son otras notas, no parte de la etiqueta.
 _ETIQUETA = re.compile(
-    r"(?im)^[ \t]*[-*•]?[ \t]*(ENSE[ÑN]AR?|[ÁA]NGULO|EMPIEZA[ \t]+POR|DEJA[ \t]+FUERA)"
-    r"[ \t]*:[ \t]*")
+    r"(?m)(?:^[ \t]*(?:[-*•]|\d+[.)])?[ \t]*|(?<=[.;])[ \t]+)(?:\*\*)?"
+    r"(ENSE[ÑN]AR?|[ÁA]NGULO|EMPIEZA[ \t]+POR|DEJA[ \t]+FUERA)"
+    r"(?:\*\*)?[ \t]*:(?:\*\*)?[ \t]*")
+_LINEA_EN_BLANCO = re.compile(r"\n[ \t]*\n")
 
 _CLAVE_DE_ETIQUETA = {"ENSENA": "ensena", "ENSENAR": "ensena", "ANGULO": "angulo",
                       "EMPIEZA POR": "empieza", "DEJA FUERA": "deja_fuera"}
@@ -497,6 +524,9 @@ def etiquetas_de(indicaciones):
                           .replace("Á", "A").split())
         clave = _CLAVE_DE_ETIQUETA.get(nombre)
         fin = marcas[i + 1].start() if i + 1 < len(marcas) else len(texto)
+        blanco = _LINEA_EN_BLANCO.search(texto, marca.end(), fin)
+        if blanco and texto[marca.end():blanco.start()].strip():
+            fin = blanco.start()
         valor = " ".join(texto[marca.end():fin].split())
         if clave and valor and clave not in encontradas:
             encontradas[clave] = valor
@@ -505,9 +535,11 @@ def etiquetas_de(indicaciones):
 
 def _citar(valor):
     """El texto de una etiqueta entre comillas, sin sus comillas ni su punto."""
-    limpio = str(valor or "").strip().strip("\"'“”«»").strip()
-    if limpio.endswith(".") and not limpio.endswith(".."):
-        limpio = limpio[:-1].rstrip()
+    limpio = str(valor or "").strip()
+    for _ in range(2):  # «x». -> quita el punto, las comillas y otra vez el punto
+        if limpio.endswith(".") and not limpio.endswith(".."):
+            limpio = limpio[:-1].rstrip()
+        limpio = limpio.strip("\"'“”«»").strip()
     return f"«{limpio}»"
 
 
@@ -578,9 +610,9 @@ def _estructura_corta(segundos, presupuesto):
         "que tres afirmaciones sueltas. Una frase que solo nombra un tema, sin "
         "explicarlo ni mostrarlo, sobra.",
         "  - LA FORMA: el gancho (un bloque) -> el caso que lo demuestra (el "
-        "centro del video) -> lo que significa para quien mira -> el cierre con "
-        "una regla practica para decidir. Son dos o tres paradas en total, "
-        "contando el gancho; nunca cuatro.",
+        "centro del video) -> el cierre: lo que significa para quien mira, "
+        "dicho como una regla practica para decidir. Son esas tres paradas como "
+        "mucho, contando el gancho; nunca cuatro.",
         "",
         "Decide la idea, el caso y esas paradas ANTES de escribir.",
         "",
@@ -621,6 +653,8 @@ def _instruccion(transcript, metadatos, brief, anterior, opciones, correcciones,
     # dato y no una adivinanza: un dosier no tiene orden que seguir.
     if propio:
         regla_redaccion = REGLA_GUION_PROPIO
+    elif corto:
+        regla_redaccion = REGLA_REDACCION_CORTA
     elif origen and (origen[0] if origen else None):
         regla_redaccion = REGLA_REDACCION_DOSIER
     else:
@@ -811,7 +845,7 @@ def _instruccion(transcript, metadatos, brief, anterior, opciones, correcciones,
         "sin abrir seccion, porque ahi es donde el motor pone el silencio que "
         "deja respirar el video.",
     ]
-    partes.extend(_estructura_corta(brief.get("duracion_objetivo_s"), presupuesto)
+    partes.extend(_estructura_corta(_segundos_pedidos(brief), presupuesto)
                   if corto else estructura_larga)
     partes.extend([
         "",
@@ -961,7 +995,7 @@ def _instruccion(transcript, metadatos, brief, anterior, opciones, correcciones,
         "13. EL GANCHO ES UNO Y VA AL PRINCIPIO. El tono de entrada --la "
         "promesa, la sorpresa, el «esto es mas grande de lo que parece»-- se "
         + ("usa en el primer bloque y no vuelve a aparecer: en un video corto "
-           "el segundo bloque ya es el caso. "
+           "lo siguiente ya es el caso (o la presentacion, si la hay). "
            if corto else
            "usa en los dos primeros bloques y no vuelve a aparecer. ")
         + "A mitad de video ese tono no promete nada: repite, y se nota.",
@@ -1023,6 +1057,10 @@ def _instruccion(transcript, metadatos, brief, anterior, opciones, correcciones,
                    '{"id": "B002", "texto": "Soy Nombre y en este video te voy a '
                    'contar...", "personaje": true, "abre_seccion": true}, '
                    '{"id": "B003", "texto": "y aqui sigue el documental."}]}')
+    if corto:
+        # el ejemplo tambien se copia antes que la regla: en un corto, despues
+        # del gancho no empieza un documental, empieza el caso
+        ejemplo = ejemplo.replace("el documental.", "el caso.")
     # LA CUENTA, OTRA VEZ Y AL FINAL. No es repetir la regla 3 por insistir: la
     # ULTIMA parte de un prompt es la que mas pesa --esta medido en este repo
     # con el feedback de un plano-- y la longitud es lo unico
@@ -1300,14 +1338,23 @@ def _problemas(bloques, palabras, brief, opciones, idioma):
         1, int(round((presupuesto or maximo or 1) / max(1, por_bloque))))
     reparto = (f"; son unos {previstos} bloques de unas {por_bloque} palabras y "
                f"has escrito {len(bloques)}")
+    # EN UN CORTO, crecer es contar mas despacio el caso y recortar es quitar
+    # lo que no empuja la idea: «desarrolla mas los hechos» devolvia el segundo
+    # intento al resumen que la estructura corta existe para evitar
+    corto = es_corto(brief) and not opciones.get("guion_propio")
     if minimo and palabras < minimo:
         motivos.append(f"el guion se queda en {palabras} palabras y el minimo de "
-                       f"la horquilla son {minimo}: desarrolla mas los hechos "
-                       f"del material{reparto}")
+                       f"la horquilla son {minimo}: "
+                       + ("desarrolla mas el caso que lo demuestra, paso a paso, "
+                          "sin anadir temas" if corto else
+                          "desarrolla mas los hechos del material")
+                       + reparto)
     if maximo and palabras > maximo:
         motivos.append(f"el guion se va a {palabras} palabras y el maximo de la "
-                       f"horquilla son {maximo}: recorta sin perder "
-                       f"hechos{reparto}")
+                       f"horquilla son {maximo}: "
+                       + ("recorta quitando lo que no empuja la idea, no el caso"
+                          if corto else "recorta sin perder hechos")
+                       + reparto)
 
     # Pasarse de pausas no se ve bloque a bloque, solo mirando el guion entero,
     # y estropea justo lo que se queria mejorar: cada <break> parte la

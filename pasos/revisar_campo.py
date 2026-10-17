@@ -113,7 +113,9 @@ sistema, el veredicto es «sirve».
 #: en el material, lo que piden las indicaciones.
 GUIAS_CON_DURACION = ("material", "indicaciones")
 
-#: Hasta aqui un video es corto: la misma cifra que usa el redactor.
+#: Hasta aqui un video es corto: LA MISMA cifra que usa el redactor
+#: (`p3_guion.DURACION_CORTA_S`; lo comprueba prueba_piezas). No se importa
+#: de alli para no cargar el paso entero en una revision de un campo.
 DURACION_CORTA_S = 90
 
 CONTEXTO = """
@@ -125,9 +127,8 @@ CONTEXTO_MATERIAL = """
 Comprueba tambien si el material CABE: si trae muchos mas hechos de los que se
 pueden contar bien en {palabras} palabras, el redactor tendra que elegir y
 el guion puede salir como un resumen que nombra todo y no explica nada. En ese
-caso es «mejorable»: dilo y, en la sugerida, NO borres hechos: marca con
-«IMPRESCINDIBLE:» los dos o tres que tienen que entrar si o si (los que empujan
-lo que piden las indicaciones) y deja el resto debajo. Si las indicaciones
+caso es «mejorable»: dilo y, en la sugerida, NO borres hechos: {como_elegir}
+Si las indicaciones
 piden mostrar, medir o comparar algo y el material no trae los datos para
 hacerlo (medidas, tamanos, tiempos), dilo como problema y pide a la persona
 esos datos: no los inventes.{indicaciones}"""
@@ -146,6 +147,8 @@ def contexto_saneado(gid, crudo):
     (segundos > 0, hasta cuatro horas) y, en el material, las indicaciones.
     """
     if gid not in GUIAS_CON_DURACION or not isinstance(crudo, dict):
+        return {}
+    if isinstance(crudo.get("duracion_s"), bool):
         return {}
     try:
         segundos = float(crudo.get("duracion_s") or 0)
@@ -181,8 +184,15 @@ def _contexto_como_texto(gid, contexto):
              "tema." if segundos <= DURACION_CORTA_S else "")
     if gid == "material":
         otras = " ".join(str(contexto.get("indicaciones") or "").split())[:1500]
+        # «IMPRESCINDIBLE:» solo lo lee el redactor de los cortos
+        como_elegir = (
+            "marca con «IMPRESCINDIBLE:» los dos o tres que tienen que entrar si "
+            "o si (los que empujan lo que piden las indicaciones) y deja el resto "
+            "debajo." if segundos <= DURACION_CORTA_S else
+            "deja los hechos como estan y di en el resumen que conviene alargar "
+            "el video o recortar el material a lo que pide este video.")
         extra = CONTEXTO_MATERIAL.format(
-            palabras=palabras,
+            palabras=palabras, como_elegir=como_elegir,
             indicaciones=(f"\nLas indicaciones de este video dicen: «{otras}»"
                           if otras else ""))
     else:
@@ -290,7 +300,11 @@ def huella(gid, texto, contexto=None):
         guia = ""
     # Y CON LA INSTRUCCION: las revisiones guardadas con la de antes (que
     # dejaba la sugerida vacia a menudo) no se vuelven a servir
-    sello = hashlib.sha1((guia + INSTRUCCION).encode("utf-8")).hexdigest()[:8]
+    # SIN EL HUECO DEL CONTEXTO: es la instruccion de siempre, y con el hueco
+    # dentro la huella de TODAS las guias cambiaba y ninguna revision guardada
+    # se volvia a servir (revision independiente de guion-cortos)
+    sello = hashlib.sha1((guia + INSTRUCCION.replace("{contexto}", ""))
+                         .encode("utf-8")).hexdigest()[:8]
     extra = _contexto_para_huella(gid, contexto)
     if extra:
         sello = hashlib.sha1((sello + "\n" + extra + "\n" + CONTEXTO_MATERIAL

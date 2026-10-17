@@ -390,12 +390,17 @@ GUIAS = {
             "caracteres: lo que sobre se corta.",
             "TikTok busca por las palabras del texto y de la voz: lo que no se "
             "nombra, no se encuentra.",
+            "Si el proyecto tiene puesto «Usar emojis en los textos» (Lo fijo del "
+            "proyecto), Claude pone 1 a 3; si no, ninguno.",
         ],
         "si": [
             "Una primera línea que enganche: la promesa del vídeo o la pregunta "
-            "que resuelve.",
-            "Frases cortas, con las palabras clave del tema dichas con "
-            "naturalidad («alquiler de consolas para fiestas en Lima»).",
+            "que resuelve. Es lo que hace de título.",
+            "Corto: 1 a 3 líneas. Frases cortas, con las palabras clave que se "
+            "DICEN en el vídeo, tal cual («alquiler de consolas para fiestas en "
+            "Lima»).",
+            "Hashtags que mezclen uno o dos amplios del tema con otros de nicho o "
+            "de la ciudad.",
             "Que cuente lo mismo que el vídeo: si el vídeo cambia, el texto también.",
         ],
         "no": [
@@ -430,8 +435,11 @@ GUIAS = {
         "donde": "Publicar → ficha de un vídeo → Instagram Reels",
         "usa": "pasos/publicar.py (REGLAS_RED, componer)",
         "que_hace": [
-            "Es el pie del Reel. Instagram enseña solo la primera línea (o las "
-            "dos primeras) hasta que se pulsa «más».",
+            "Es el pie del Reel. Instagram no tiene título aparte: enseña solo la "
+            "primera línea (unos 125 caracteres) hasta que se pulsa «más», así "
+            "que esa línea hace de título.",
+            "Con «Usar emojis en los textos» puesto en el proyecto, Claude usa "
+            "3 a 6 (en el gancho, como viñetas y en la llamada a la acción).",
             "Al enviarlo, el Studio le añade la llamada a la acción, la firma del "
             "proyecto y los hashtags (como mucho 15, contando los fijos del "
             "proyecto). Todo junto no puede pasar de 2.200 caracteres.",
@@ -442,7 +450,8 @@ GUIAS = {
             "Algo que invite a guardar o compartir: una lista corta, un consejo.",
         ],
         "no": [
-            "Hashtags dentro del texto: van en su casilla (de 3 a 8).",
+            "Hashtags dentro del texto: van en su casilla (de 5 a 8, mezclando "
+            "amplios, de nicho y de la zona).",
             "La llamada a la acción ni la firma: tienen su casilla.",
             "Enlaces: en el pie no se pueden pulsar; la llamada a la acción puede "
             "decir «link en bio» o «escríbenos por DM».",
@@ -470,9 +479,10 @@ GUIAS = {
         "donde": "Publicar → ficha de un vídeo → YouTube",
         "usa": "pasos/publicar.py (REGLAS_RED, componer)",
         "que_hace": [
-            "Hay dos casillas: el TÍTULO (hasta 100 caracteres) y este TEXTO, que "
-            "es la descripción. Un vídeo vertical de hasta 3 minutos sale como "
-            "Short; el resto, como vídeo normal.",
+            "Hay dos casillas: el TÍTULO y este TEXTO, que es la descripción. "
+            "El título admite 100 caracteres, pero en el móvil se corta hacia el "
+            "70: la palabra clave, al principio. Un vídeo vertical de hasta 3 "
+            "minutos sale como Short; el resto, como vídeo normal.",
             "Al enviarlo, el Studio le añade a la descripción los capítulos (solo "
             "si sale como vídeo, no como Short, y los hay), la llamada a la "
             "acción, la firma y los "
@@ -482,7 +492,8 @@ GUIAS = {
             "del vídeo sin desplegar.",
         ],
         "si": [
-            "En las dos primeras líneas, qué va a aprender o ver quien lo abra.",
+            "En las dos primeras líneas, la palabra clave y qué va a aprender o "
+            "ver quien lo abra (es lo que sale en la búsqueda).",
             "Después el detalle, con las palabras que alguien buscaría.",
             "Aquí sí puedes poner un enlace si está en el encargo (web, "
             "WhatsApp): en YouTube se puede pulsar.",
@@ -527,7 +538,9 @@ GUIAS = {
             "explicar de qué va sin oírlo.",
         ],
         "si": [
-            "Un gancho al principio y una frase que cuente el vídeo sin sonido.",
+            "Un gancho al principio y una frase que cuente el vídeo sin sonido: "
+            "di con palabras lo que pasa en él.",
+            "Párrafos cortos y fáciles de leer.",
             "Un tono cercano, como hablando con un cliente.",
             "Si el encargo lo trae, cómo contactar (la llamada a la acción puede "
             "pedir que envíen un mensaje o llamen).",
@@ -566,6 +579,8 @@ GUIAS = {
             "cualquier tema.",
             "La firma y los hashtags fijos tienen su casilla y los añade el "
             "Studio al final de cada texto: no hace falta pedirlos aquí.",
+            "Los emojis se encienden o apagan con «Usar emojis en los textos», "
+            "justo debajo; aquí puedes afinar cuáles y cuántos.",
         ],
         "si": [
             "Cómo suena la marca en redes: de tú o de usted, con o sin humor, "

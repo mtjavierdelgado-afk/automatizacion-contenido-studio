@@ -17118,14 +17118,17 @@ async function cargarPublicar(silencio) {
       const pedido = PUB.proyectoResultados;
       const dias = PUB.diasResultados || 30;
       const por = PUB.porMejores || 'vistas';
-      const [r, mejores] = await Promise.all([
+      // por separado: si «lo que mejor funcionó» falla, el resto de Resultados sigue
+      const [res, mej] = await Promise.allSettled([
         pedir(rutaPublicar(`/resultados?${consulta({ proyecto: pedido, dias })}`)),
         pedir(rutaPublicar(`/lo-que-funciono?${consulta({ proyecto: pedido, dias, por, cuantos: 5 })}`)),
       ]);
       // si entretanto se eligió otro proyecto o periodo, esta respuesta ya no vale
       if (pedido === PUB.proyectoResultados && dias === (PUB.diasResultados || 30)) {
-        PUB.resultados = r;
-        if (por === (PUB.porMejores || 'vistas')) PUB.mejores = mejores;
+        if (mej.status === 'fulfilled' && por === (PUB.porMejores || 'vistas')) PUB.mejores = mej.value;
+        else if (mej.status === 'rejected') PUB.mejores = { posts: [], error: mej.reason.message };
+        if (res.status === 'rejected') throw res.reason;
+        PUB.resultados = res.value;
       }
     } else {
       PUB.cola = await pedir(rutaPublicar(`/cola?${consulta({ desde: PUB.desde || '', dias: PUB.vistaCal === 'mes' ? 42 : 7 })}`));
@@ -18125,7 +18128,8 @@ function porcentaje(fraccion) {
 function textoRetencion(m) {
   if (!m) return '';
   const partes = [];
-  if (typeof m.vista_entera === 'number') partes.push(`${porcentaje(m.vista_entera)} lo vio entero`);
+  if (typeof m.vista_entera === 'number') partes.push(`${porcentaje(m.vista_entera)} lo vio hasta el final`);
+  if (typeof m.media_vista === 'number') partes.push(`${porcentaje(m.media_vista)} visto de media`);
   if (typeof m.tiempo_medio_s === 'number') {
     partes.push(`${String(Math.round(m.tiempo_medio_s * 10) / 10).replace('.', ',')} s de media`);
   }
@@ -18703,17 +18707,17 @@ function lineaMejorSemana() {
   const m = PUB.mejorSemana;
   const caja = h('div', { clase: 'bloque linea-mejor-semana' });
   if (m === null) {
-    caja.appendChild(h('div', { clase: 'meta' }, 'Lo mejor de la semana: cargando…'));
+    caja.appendChild(h('div', { clase: 'meta' }, 'Lo mejor de los últimos 7 días: cargando…'));
     return caja;
   }
   if (!m) {
     caja.appendChild(h('div', { clase: 'meta' },
-      'Lo mejor de la semana: todavía no hay cifras de esta semana. '
+      'Lo mejor de los últimos 7 días: todavía no hay cifras. '
       + 'Se piden en Publicar → Resultados, con «Actualizar».'));
     return caja;
   }
   caja.appendChild(h('div', { clase: 'fila' },
-    h('span', { clase: 'meta' }, 'Lo mejor de la semana:'),
+    h('span', { clase: 'meta' }, 'Lo mejor de los últimos 7 días:'),
     h('button', { clase: 'mini fantasma nombre-envio', onclick: () => irASeccionPublicar('ficha', m.pid) }, m.nombre),
     h('span', { clase: 'pastilla red-mini ok' }, CORTOS_RED[m.red] || m.red),
     h('span', { clase: 'crece meta' }, textoMetricas(m.metricas) || '')));
@@ -18745,15 +18749,18 @@ function tarjetaPeriodo(titulo, previo, frente, p) {
 function bloquePeriodosPublicar(periodos) {
   const b = h('div', { clase: 'bloque' }, h('h3', {}, 'Esta semana y este mes'));
   b.appendChild(h('div', { clase: 'periodos-publicar' },
-    tarjetaPeriodo('Esta semana (desde el lunes)', 'la semana pasada', 'frente a la semana pasada', periodos.semana),
-    tarjetaPeriodo('Este mes', 'el mes pasado', 'frente al mes pasado', periodos.mes)));
+    tarjetaPeriodo('Esta semana (desde el lunes)', 'la semana pasada hasta hoy',
+      'frente a la semana pasada', periodos.semana),
+    tarjetaPeriodo('Este mes', 'el mes pasado hasta hoy', 'frente al mes pasado', periodos.mes)));
   b.appendChild(h('div', { clase: 'meta' },
-    'Cuenta lo PUBLICADO en cada periodo, con sus cifras de la última vez que se pidieron.'));
+    'Cuenta lo PUBLICADO en cada periodo, con sus cifras de la última vez que se pidieron, y lo '
+    + 'compara con el mismo tramo del periodo anterior (un jueves, con la semana pasada hasta el jueves).'));
   return b;
 }
 
 const ORDENES_MEJORES = {
-  vistas: 'más vistas', interaccion: 'más interacción', vista_entera: 'más vistos enteros',
+  vistas: 'más vistas', interaccion: 'más interacción',
+  vista_entera: 'más vistos hasta el final (TikTok)', media_vista: 'más visto de media (YouTube)',
 };
 
 function bloqueMejoresPublicar() {
@@ -18761,11 +18768,21 @@ function bloqueMejoresPublicar() {
   const b = h('div', { clase: 'bloque mejores-publicar' }, h('div', { clase: 'fila' },
     h('h3', {}, 'Lo que mejor funcionó'), h('span', { clase: 'crece' }),
     h('select', { title: 'Por qué ordenar', onchange: ev => {
-      PUB.porMejores = ev.target.value; PUB.mejores = null; cargarPublicar(true);
+      PUB.porMejores = ev.target.value; PUB.mejores = null;
+      /* fuera el foco antes de cargar: con el desplegable enfocado, el repintado
+         en silencio de al volver la respuesta se salta (para no pisar lo que se
+         escribe) y la lista se quedaba en el orden de antes */
+      ev.target.blur();
+      pintarModulo();
+      cargarPublicar(true);
     } }, ...Object.keys(ORDENES_MEJORES).map(k =>
       h('option', { value: k, selected: (PUB.porMejores || 'vistas') === k }, ORDENES_MEJORES[k])))));
   if (!r) {
     b.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return b;
+  }
+  if (r.error) {
+    b.appendChild(h('div', { clase: 'meta' }, `No se ha podido leer: ${r.error}`));
     return b;
   }
   if (!(r.posts || []).length) {

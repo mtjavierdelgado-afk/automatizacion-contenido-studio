@@ -356,7 +356,8 @@ def prueba_cliente():
         igual(sorted(p["red"] for p in g["posts"]), ["tiktok", "youtube"],
               "solo las redes que el Studio conoce")
         yt = next(p for p in g["posts"] if p["red"] == "youtube")
-        igual(yt["vista_entera"], 0.453, "el porcentaje de YouTube pasa a fracción")
+        igual((yt["vista_entera"], yt["media_vista"]), (None, 0.453),
+              "el porcentaje medio de YouTube va aparte (no es «hasta el final») y en fracción")
         igual(yt["tiempo_medio_s"], 31.0, "y su duración media")
         igual((yt["post_id"], yt["al"]), ("yt_9", "2026-10-17T15:00:00Z"), "con su id y su hora")
         g = cli.metricas_guardadas("studio_a", paginas=1)
@@ -365,7 +366,10 @@ def prueba_cliente():
               0.184, "una fracción que llega en tanto por cien se entiende")
         igual(UP.ClienteUploadPost._retencion({"full_video_watched_rate": True,
                                                 "average_time_watched": "nan"}),
-              {"vista_entera": None, "tiempo_medio_s": None}, "lo que no es un número no cuenta")
+              {"vista_entera": None, "media_vista": None, "tiempo_medio_s": None},
+              "lo que no es un número no cuenta")
+        igual(UP.ClienteUploadPost._retencion({"average_view_percentage": 135})["media_vista"], 1.35,
+              "un Short visto más de una vez (más del 100 %) se guarda, no se tira")
         a = cli.analiticas_perfil("studio_a", ["instagram", "facebook"], pagina_facebook="99")
         igual(a["instagram"]["seguidores"], 47, "los seguidores de la cuenta")
         igual(a["facebook"]["seguidores"], 0, "un cero de verdad se queda en cero")
@@ -1241,20 +1245,27 @@ def prueba_retencion_y_resumenes():
         ok(tt.get("tiempo_medio_s"), "y el tiempo medio")
         ok(envios["tiktok"].get("post_id") and envios["youtube"].get("post_id"),
            "cada envío guarda el id de su post en la red")
-        ok(isinstance(yt.get("vista_entera"), float),
-           "la retención de YouTube llega por la lectura guardada")
+        ok(isinstance(yt.get("media_vista"), float) and yt.get("vista_entera") is None,
+           "la retención de YouTube (lo visto de media) llega por la lectura guardada, en su campo")
+        # EL FALLO DE LA REVISIÓN: Upload-Post sella su lectura un momento ANTES
+        # que la nuestra; comparada con nuestra hora, la retención de YouTube no
+        # cambiaba nunca después de la primera. Un segundo «Actualizar» la mueve.
+        primera = yt["media_vista"]
+        P.medir(raiz, ["ret"], forzar=True)
+        yt2 = {e["red"]: e for e in P._leer_video(raiz, "ret")["envios"]}["youtube"]["metricas"]
+        ok(yt2["media_vista"] != primera,
+           f"un segundo «Actualizar» trae la retención nueva de YouTube ({primera} → {yt2['media_vista']})")
+        ok(yt2.get("guardada_al"), "con su propio reloj, aparte del de las cifras")
         ok(r["guardadas"] >= 1, f"«medir» hace también la lectura guardada: {r}")
         igual(yt.get("guardada"), True, "y lo apunta")
         # una lectura guardada MÁS VIEJA no pisa las cifras de la lectura en vivo
-        vistas = tt["vistas"]
+        vistas = {e["red"]: e for e in P._leer_video(raiz, "ret")["envios"]}["tiktok"]["metricas"]["vistas"]
         datos_sim = json.load(open(simulador, encoding="utf-8"))
         for trabajo in datos_sim["trabajos"].values():
             for red, g in (trabajo.get("guardadas") or {}).items():
                 g.update(al="2020-01-01T00:00:00+00:00", vistas=1)
         json.dump(datos_sim, open(simulador, "w", encoding="utf-8"))
         P.leer_guardadas(raiz, ["ret"])
-        igual(P._leer_video(raiz, "ret")["envios"][0]["metricas"].get("vistas") in (vistas, yt["vistas"]),
-              True, "una lectura guardada vieja no pisa lo que se sabe")
         envios = {e["red"]: e for e in P._leer_video(raiz, "ret")["envios"]}
         igual(envios["tiktok"]["metricas"]["vistas"], vistas, "las vistas de TikTok siguen igual")
         # una lectura guardada sin perfil en el envío no se pide
@@ -1264,13 +1275,19 @@ def prueba_retencion_y_resumenes():
         # el resumen: la retención se PROMEDIA y lo que no la da no cuenta como cero
         P.marcar_a_mano(raiz, info, "facebook", "")
         res = P.resultados(raiz, [{"pid": "ret", "nombre": "Ret", "cliente": ""}], "")
-        esperada = round((envios["tiktok"]["metricas"]["vista_entera"]
-                          + envios["youtube"]["metricas"]["vista_entera"]) / 2, 4)
-        igual(res["total"]["vista_entera"], esperada, "la retención del total es la media de quien la da")
-        igual(res["total"]["vista_entera_posts"], 2, "de dos posts (el subido a mano no cuenta)")
+        igual(res["total"]["vista_entera"], envios["tiktok"]["metricas"]["vista_entera"],
+              "«hasta el final» solo lo da TikTok: no se mezcla con lo de YouTube")
+        igual(res["total"]["media_vista"], envios["youtube"]["metricas"]["media_vista"],
+              "y lo visto de media, solo YouTube")
+        igual(res["total"]["vista_entera_posts"], 1, "de un post (ni YouTube ni el subido a mano)")
         igual(res["por_red"]["facebook"]["vista_entera"], None, "una red sin retención: None, no 0")
-        ok("_n_vista_entera" not in res["total"], "sin restos de la cuenta interna")
-        igual(res["videos"][0]["vista_entera"], esperada, "y el vídeo, igual")
+        ok(not any(k.startswith("_") for k in res["total"]), "sin restos de la cuenta interna")
+        # la media pondera por vistas: 100k vistas pesan más que 50
+        acum = {}
+        P._suma(acum, {"vistas": 100000, "vista_entera": 0.1})
+        P._suma(acum, {"vistas": 50, "vista_entera": 0.9})
+        igual(round(P._medias(acum)["vista_entera"], 3), 0.1,
+              "la retención media se pondera por vistas (un post de 50 no pesa como uno de 100.000)")
 
         # semana y mes, con envíos en fechas conocidas
         ahora = P._leer_momento("2026-10-15T12:00")            # jueves
@@ -1279,7 +1296,7 @@ def prueba_retencion_y_resumenes():
         datos["envios"] = []
         for i, (cuando, vistas_x) in enumerate((("2026-10-13T10:00", 100), ("2026-10-15T09:00", 50),
                                                 ("2026-10-08T10:00", 70), ("2026-10-01T08:00", 40),
-                                                ("2026-09-20T08:00", 500), ("2026-08-31T08:00", 9))):
+                                                ("2026-09-10T08:00", 500), ("2026-08-31T08:00", 9))):
             datos["envios"].append(dict(base, id=f"e{i}", red="tiktok", estado="publicado",
                                         cuando=cuando, metricas={"vistas": vistas_x, "me_gusta": 1}))
         P._escribir(P._ruta_video(raiz, "ret"), datos)
@@ -1289,11 +1306,20 @@ def prueba_retencion_y_resumenes():
         igual((per["semana"]["actual"]["posts"], per["semana"]["actual"]["vistas"]), (2, 150),
               "esta semana: lo publicado desde el lunes")
         igual((per["semana"]["anterior"]["posts"], per["semana"]["anterior"]["vistas"]), (1, 70),
-              "la semana pasada entera")
+              "la semana pasada hasta el mismo momento (el miércoles 8 entra)")
+        tarde = P._leer_momento("2026-10-13T08:00")       # martes temprano
+        per_lunes = P.periodos(raiz, videos, "", ahora=tarde)
+        igual(per_lunes["semana"]["anterior"]["posts"], 0,
+              "un martes temprano no se compara con la semana pasada ENTERA (el miércoles 8 no entra)")
         igual((per["mes"]["actual"]["posts"], per["mes"]["actual"]["vistas"]), (4, 260),
               "este mes, desde el día 1")
         igual((per["mes"]["anterior"]["posts"], per["mes"]["anterior"]["vistas"]), (1, 500),
-              "el mes pasado entero (sin lo de agosto)")
+              "el mes pasado hasta el día 15 (sin lo de agosto)")
+        igual(P.periodos(raiz, videos, "", ahora=P._leer_momento("2026-10-05T12:00"))["mes"]["anterior"]["posts"],
+              0, "el día 5 se compara con el 1–5 del mes pasado (el 10 no entra)")
+        fin_de_mes = P.periodos(raiz, videos, "", ahora=P._leer_momento("2026-10-31T12:00"))
+        igual(fin_de_mes["mes"]["anterior_hasta"], "2026-10-01T00:00:00",
+              "el 31 frente a un mes de 30 días: el mes pasado entero, sin pasarse")
         igual(P.periodos(raiz, videos, "cl_otro", ahora=ahora)["mes"]["actual"]["posts"], 0,
               "lo de otro proyecto no entra")
 

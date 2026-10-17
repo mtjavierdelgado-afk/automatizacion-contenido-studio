@@ -11,17 +11,23 @@ vídeos, estilos, claves y contraseña no se tocan.
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
 **Publicar: los resultados, más completos (17 de octubre)**
-- **Cuánto se ve de cada vídeo.** Donde la red lo da, las cifras traen el
-  porcentaje de gente que lo vio **entero** y los **segundos de media**:
-  TikTok siempre, y YouTube cuando su informe está listo. Instagram y Facebook
-  no lo dan: ahí no sale nada (nunca un «0 %» inventado).
+- **Cuánto se ve de cada vídeo.** TikTok dice qué parte de la gente lo vio
+  **hasta el final** y los **segundos de media**; YouTube, cuando su informe
+  está listo, qué parte del vídeo se ve **de media** (en un Short puede pasar
+  del 100 % si se vuelve a ver). Son medidas distintas y no se mezclan.
+  Instagram y Facebook no dan ninguna: ahí no sale nada (nunca un «0 %»
+  inventado). Las medias pesan por vistas: un post de 50 vistas no cuenta
+  como uno de 100.000.
 - **Esta semana y este mes** en Publicar → Resultados: lo publicado desde el
-  lunes y desde el día 1, frente a la semana y el mes anteriores.
-- **Lo que mejor funcionó:** los cinco posts del periodo de más a menos
-  vistas, por interacción (me gusta, comentarios, compartidos y guardados
-  entre vistas) o por cuántos lo vieron enteros, con la red, el día y la hora
-  en que salieron. Por proporción solo cuentan los que tienen 50 vistas o más.
-- **En Inicio, una línea con lo mejor de la semana**, que lleva a su ficha.
+  lunes y desde el día 1, frente al mismo tramo del periodo anterior (un
+  jueves, con la semana pasada hasta el jueves).
+- **Lo que mejor funcionó:** los cinco posts del periodo por vistas, por
+  interacción (me gusta, comentarios, compartidos y guardados entre vistas),
+  por cuántos lo vieron hasta el final (TikTok) o por cuánto se ve de media
+  (YouTube), con la red, el día y la hora en que salieron. Por proporción solo
+  cuentan los que tienen 50 vistas o más.
+- **En Inicio, una línea con lo mejor de los últimos 7 días**, que lleva a su
+  ficha.
 - **Las cifras se siguen pidiendo solo al pulsar «Actualizar»**, como hasta
   ahora. Además, cada «Actualizar» trae lo que Upload-Post ya tiene guardado,
   que no gasta de las 100 consultas cada 5 minutos: así llega la retención de

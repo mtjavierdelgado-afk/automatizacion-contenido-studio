@@ -3805,29 +3805,35 @@ def publicar_resultados_y_lo_mejor(navegador, datos):
     _r, r = api.post(f"/api/publicar/videos/{pid}/metricas", {"forzar": True})
     tiktok = [e for e in (r.get("ficha") or {}).get("envios", []) if e.get("red") == "tiktok"
               and (e.get("metricas") or {}).get("vista_entera") is not None]
-    ok(bool(tiktok), "TikTok trae la fracción que lo vio entero")
+    ok(bool(tiktok), "TikTok trae la fracción que lo vio hasta el final")
     _r, lq = api.get("/api/publicar/lo-que-funciono?dias=7&cuantos=3")
     ok(bool(lq.get("posts")) and all("dia" in p and "hora" in p for p in lq["posts"]),
        "el punto de lectura «lo que funcionó» da los posts con su día y su hora")
 
     pg = Pagina(navegador, datos)
     pg.js("irAModulo('inicio');")
-    ok(pg.esperar(".linea-mejor-semana", "Lo mejor de la semana", 10), "Inicio: la línea de lo mejor de la semana")
+    ok(pg.esperar(".linea-mejor-semana", "Lo mejor de los últimos 7 días", 10),
+       "Inicio: la línea de lo mejor de los últimos 7 días")
     ok(pg.esperar(".linea-mejor-semana button", segundos=10), "con el vídeo, que lleva a su ficha")
     pg.captura("inicio_lo_mejor")
     pg.js("PUB.seccion = 'resultados'; irAModulo('publicar');")
     ok(pg.esperar(".periodos-publicar .tarjeta-periodo", "Esta semana", 10), "Resultados: esta semana")
     ok(pg.visible(".periodos-publicar .tarjeta-periodo", "Este mes"), "y este mes, frente al anterior")
     ok(pg.esperar(".mejores-publicar .fila-mejor", segundos=10), "«Lo que mejor funcionó», con sus posts")
-    ok(pg.visible(".resultados-publicar", "lo vio entero"), "la retención, donde la red la da")
-    ok(not pg.p.evaluate("() => /(^|[^0-9,])0 % lo vio entero/.test("
+    ok(pg.visible(".resultados-publicar", "lo vio hasta el final"), "la retención, donde la red la da")
+    ok(not pg.p.evaluate("() => /(^|[^0-9,])0 % (lo vio hasta el final|visto de media)/.test("
                          "document.querySelector('.resultados-publicar').innerText)"),
        "y nunca un «0 %» inventado")
     pg.p.select_option(".mejores-publicar select", "vista_entera")
-    pg.p.wait_for_timeout(1500)
-    ok(pg.esperar(".mejores-publicar select", segundos=5)
-       and pg.p.eval_on_selector(".mejores-publicar select", "s => s.value") == "vista_entera",
-       "se ordena por retención y el orden elegido se queda")
+    pg.p.wait_for_timeout(2500)
+    filas = pg.p.locator(".mejores-publicar .fila-mejor").all_inner_texts()
+    # LA LISTA SE REPINTA (fallo visto en la revisión: con el desplegable
+    # enfocado se quedaba en el orden de antes): por «hasta el final» solo
+    # salen posts que lo dan, y de más a menos
+    ok(filas and all("hasta el final" in f for f in filas),
+       f"al ordenar por «hasta el final», la lista cambia de verdad ({len(filas)} fila(s))")
+    ok(pg.p.eval_on_selector(".mejores-publicar select", "s => s.value") == "vista_entera",
+       "y el orden elegido se queda")
     pg.captura("publicar_resultados_redes2")
     pg.sin_errores("resultados y lo mejor")
     pg.cerrar()

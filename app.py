@@ -14905,6 +14905,7 @@ def publicar_metricas_video(pid: str, peticion: Request, cuerpo: dict = Body(def
     ctx = _ctx_publicable(pid, peticion)
     r = _por_publicar(_publicar().medir, raiz_proyectos(), [ctx.id],
                       forzar=bool(_cuerpo(cuerpo).get("forzar")))
+    r.pop("arranque", None)
     return dict(r, ficha=publicar_ficha(pid, peticion))
 
 
@@ -14932,11 +14933,18 @@ def publicar_metricas_proyecto(cid: str, peticion: Request, cuerpo: dict = Body(
             if (v.get("cliente") or "") == clave]
     r = _por_publicar(P.medir, raiz_proyectos(), pids,
                       forzar=bool(_cuerpo(cuerpo).get("forzar")))
+    arranque = r.pop("arranque", None) or time.time()
     if P.ajustes_de(raiz_proyectos(), cid).get("perfil"):
-        try:
-            P.actualizar_seguidores(raiz_proyectos(), cid)
-        except P.ErrorPublicar as fallo:
-            r.setdefault("errores", []).append(f"seguidores: {fallo}")
+        # detras del proxy la peticion se corta a los 60 s: los seguidores (una
+        # consulta de hasta 30 s) solo si da tiempo; si no, en la siguiente
+        if time.time() - arranque > P.TOPE_SEGUIDORES_S:
+            r.setdefault("errores", []).append(
+                "seguidores: no dio tiempo esta vez; vuelve a pulsar «Actualizar»")
+        else:
+            try:
+                P.actualizar_seguidores(raiz_proyectos(), cid)
+            except P.ErrorPublicar as fallo:
+                r.setdefault("errores", []).append(f"seguidores: {fallo}")
     return r
 
 

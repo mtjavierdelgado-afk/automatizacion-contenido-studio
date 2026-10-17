@@ -229,13 +229,14 @@ class SimuladoUploadPost:
                 if r == "tiktok" and vueltas < 2:
                     salida[r] = {k: None for k in ClienteUploadPost.CAMPOS_METRICAS}
                     salida[r].update(url=f"https://{r}.example/{request_id[:10]}", post_id=post_id,
-                                     vista_entera=None, tiempo_medio_s=None,
+                                     vista_entera=None, media_vista=None, tiempo_medio_s=None,
                                      error="TikTok todavía no tiene las cifras de este post")
                     continue
                 salida[r] = {"vistas": base * vueltas, "me_gusta": base // 10 * vueltas,
                              "comentarios": base // 100 + vueltas, "compartidos": base // 50,
                              "guardados": None if r == "youtube" else base // 40, "alcance": None,
                              "vista_entera": round((base % 40 + 10) / 100, 4) if r == "tiktok" else None,
+                             "media_vista": None,
                              "tiempo_medio_s": float(base % 20 + 3) if r == "tiktok" else None,
                              "url": f"https://{r}.example/{request_id[:10]}", "post_id": post_id,
                              "error": ""}
@@ -261,9 +262,11 @@ class SimuladoUploadPost:
                 item = dict(guardada, red=r)
                 item.pop("error", None)
                 if r == "youtube":
+                    # la retencion de YouTube cambia con cada lectura, como la real
                     base = self._semilla(rid, r) % 900 + 100
-                    item.update(vista_entera=round((base % 50 + 20) / 100, 4),
-                                tiempo_medio_s=float(base % 40 + 10))
+                    vueltas = int(trabajo.get("metricas_consultas") or 1)
+                    item.update(media_vista=round((base % 50 + 20 + vueltas) / 100, 4),
+                                tiempo_medio_s=float(base % 40 + 10 + vueltas))
                 posts.append(item)
         return {"posts": posts, "completo": True}
 

@@ -428,14 +428,19 @@ class ClienteUploadPost:
         "alcance": ("reach",),
     }
 
-    #: LA RETENCION (publicar-redes-2, 17-10-2026). Solo la dan TikTok (en la
-    #: lectura en vivo) y YouTube (solo en la guardada, y cuando YouTube Analytics
-    #: tiene el informe). Instagram y Facebook no dan ninguna: se quedan en None.
-    #: `vista_entera` va siempre como FRACCION (0,184 = 18,4 %): TikTok la manda
-    #: asi, y el `average_view_percentage` de YouTube viene en tanto por cien.
+    #: LA RETENCION (publicar-redes-2, 17-10-2026). Son DOS medidas distintas y
+    #: van en campos distintos, porque no se pueden comparar ni promediar juntas:
+    #:   - `vista_entera`: la FRACCION de quien vio el video HASTA EL FINAL. La da
+    #:     TikTok (`full_video_watched_rate`, ya en fraccion: 0,184 = 18,4 %).
+    #:   - `media_vista`: QUE PARTE del video se ve de media. La da YouTube solo en
+    #:     la lectura guardada (`average_view_percentage`, en tanto por cien), y en
+    #:     un Short pasa del 100 % cuando se vuelve a ver: se guarda tal cual (1,3).
+    #: Instagram y Facebook no dan ninguna: se quedan en None.
     CAMPOS_FRACCION = ("full_video_watched_rate",)
     CAMPOS_PORCENTAJE = ("average_view_percentage",)
     CAMPOS_TIEMPO_MEDIO = ("average_time_watched", "average_view_duration_seconds")
+    #: Mas de 10 veces el video de media no es una cifra, es un error
+    TOPE_MEDIA_VISTA = 10.0
 
     @staticmethod
     def _numero(valor):
@@ -450,18 +455,24 @@ class ClienteUploadPost:
 
     @classmethod
     def _retencion(cls, bruto):
-        """{"vista_entera": fraccion|None, "tiempo_medio_s": s|None}"""
+        """{"vista_entera": fraccion|None, "media_vista": fraccion|None,
+        "tiempo_medio_s": s|None}"""
         bruto = bruto if isinstance(bruto, dict) else {}
         entera = None
-        for suyo in cls.CAMPOS_FRACCION + cls.CAMPOS_PORCENTAJE:
+        for suyo in cls.CAMPOS_FRACCION:
             v = cls._numero(bruto.get(suyo))
             if v is None:
                 continue
-            # una fraccion que llega como «18.4» tambien es un tanto por cien
-            if suyo in cls.CAMPOS_PORCENTAJE or v > 1:
+            if v > 1:                      # una fraccion que llega como «18.4»
                 v = v / 100
             if 0 <= v <= 1:
                 entera = round(v, 4)
+                break
+        media = None
+        for suyo in cls.CAMPOS_PORCENTAJE:
+            v = cls._numero(bruto.get(suyo))
+            if v is not None and 0 <= v / 100 <= cls.TOPE_MEDIA_VISTA:
+                media = round(v / 100, 4)
                 break
         medio = None
         for suyo in cls.CAMPOS_TIEMPO_MEDIO:
@@ -469,7 +480,7 @@ class ClienteUploadPost:
             if v is not None and 0 <= v < 86400:
                 medio = round(v, 1)
                 break
-        return {"vista_entera": entera, "tiempo_medio_s": medio}
+        return {"vista_entera": entera, "media_vista": media, "tiempo_medio_s": medio}
 
     @classmethod
     def _cifras(cls, bruto):

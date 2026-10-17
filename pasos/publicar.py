@@ -1853,9 +1853,12 @@ def cola(raiz, videos, desde=None, dias=7):
 # Un numero que la red no da se queda en None: «no lo dice» no es «cero».
 
 METRICAS = ("vistas", "me_gusta", "comentarios", "compartidos", "guardados")
-#: La retencion (publicar-redes-2): no se suma, se promedia. `vista_entera` es
-#: la fraccion que vio el video entero; `tiempo_medio_s`, cuanto se vio de media.
-RETENCION = ("vista_entera", "tiempo_medio_s")
+#: La retencion (publicar-redes-2): no se suma, se promedia PONDERADA POR VISTAS
+#: (un post de 50 vistas no pesa lo mismo que uno de 100.000). Son tres medidas
+#: distintas que no se mezclan (ver el cliente): `vista_entera` (TikTok: la
+#: fraccion que lo vio hasta el final), `media_vista` (YouTube: que parte se ve
+#: de media; pasa de 1 si se vuelve a ver) y `tiempo_medio_s`.
+RETENCION = ("vista_entera", "media_vista", "tiempo_medio_s")
 LOTES_POR_VUELTA = 30
 RESPIRO_METRICAS_S = float(os.environ.get("ESTUDIO_METRICAS_RESPIRO") or 600)
 
@@ -2007,11 +2010,16 @@ def _momento_utc(texto):
     return momento.astimezone(_zona()).replace(microsecond=0)
 
 
-def leer_guardadas(raiz, pids, dias=90, paginas=None, plazo=None):
+def leer_guardadas(raiz, pids, dias=90, paginas=None, plazo=None, hasta_momento=None):
     """Completa las cifras de lo publicado con la lectura guardada de Upload-Post.
-    -> {"leidos", "actualizados", "errores"}. No gasta consultas del limite."""
+    -> {"leidos", "actualizados", "errores", "ocupado"?}. No gasta consultas del
+    limite. `hasta_momento` (time.time()): no se empieza otro perfil despues.
+
+    Sin `until` a proposito: Upload-Post filtra por el dia de captura (en UTC) y
+    desde las 19:00 de Lima ya es mañana alli; con «hoy en Lima» se quedaba fuera
+    justo la lectura que se acababa de hacer."""
     if not _LOCK_GUARDADAS.acquire(blocking=False):
-        return {"leidos": 0, "actualizados": 0, "errores": []}
+        return {"leidos": 0, "actualizados": 0, "errores": [], "ocupado": True}
     try:
         por_perfil = {}
         for pid in pids:
@@ -2023,14 +2031,18 @@ def leer_guardadas(raiz, pids, dias=90, paginas=None, plazo=None):
             return {"leidos": 0, "actualizados": 0, "errores": []}
         cli = cliente(raiz)
         hoy = ahora_lima()
-        desde = (hoy - dt.timedelta(days=dias)).strftime("%Y-%m-%d")
+        # un dia de mas: el filtro de Upload-Post va por el dia en UTC
+        desde = (hoy - dt.timedelta(days=dias + 1)).strftime("%Y-%m-%d")
         leidos = actualizados = 0
         errores = []
         for perfil, envios in por_perfil.items():
+            if hasta_momento is not None and time.time() >= hasta_momento:
+                errores.append("lectura guardada: no dio tiempo a todos los perfiles; "
+                               "vuelve a pulsar «Actualizar»")
+                break
             try:
                 extra = {k: v for k, v in (("paginas", paginas), ("plazo", plazo)) if v}
-                r = cli.metricas_guardadas(perfil, desde=desde, hasta=hoy.strftime("%Y-%m-%d"),
-                                           **extra)
+                r = cli.metricas_guardadas(perfil, desde=desde, **extra)
             except UP.ErrorUploadPost as fallo:
                 errores.append(f"lectura guardada: {str(fallo)[:200]}")
                 if fallo.sin_respuesta:
@@ -2075,23 +2087,39 @@ def _apuntar_guardadas(raiz, envios, indice):
                     continue
                 viejas = e.get("metricas") or {}
                 cuando = _momento_utc(post.get("al"))
+                if cuando is None:
+                    continue
+                # DOS RELOJES. Las cifras (vistas, me gusta…) tambien llegan en
+                # vivo: lo guardado solo las pisa si es MAS NUEVO que nuestra
+                # ultima lectura (`al`). La retencion de YouTube solo llega por
+                # aqui, y Upload-Post sella su lectura un momento ANTES de que
+                # nosotros apuntemos la nuestra: comparada con `al` nunca seria
+                # «mas nueva» y se quedaria para siempre en la primera cifra. Lleva
+                # su propio reloj (`guardada_al`): manda la lectura guardada mas
+                # reciente.
                 sabido = _leer_momento(viejas.get("al"))
-                mas_nueva = cuando is not None and (sabido is None or cuando > sabido)
+                cifras_nuevas = sabido is None or cuando > sabido
+                guardada = _leer_momento(viejas.get("guardada_al"))
+                retencion_nueva = guardada is None or cuando >= guardada
                 nuevas = dict(viejas)
                 tocado = False
                 for k in METRICAS + ("alcance",) + RETENCION:
                     valor = post.get(k)
                     if valor is None:
                         continue
-                    # lo mas nuevo manda; lo que solo esta aqui (la retencion de
-                    # YouTube) se pone aunque la lectura sea algo mas vieja
-                    if mas_nueva or viejas.get(k) is None:
-                        if nuevas.get(k) != valor:
-                            nuevas[k] = valor
-                            tocado = True
+                    manda = retencion_nueva if k in RETENCION else cifras_nuevas
+                    # lo que no sabiamos se pone, aunque la lectura sea mas vieja
+                    if (manda or viejas.get(k) is None) and nuevas.get(k) != valor:
+                        nuevas[k] = valor
+                        tocado = True
+                if retencion_nueva and nuevas.get("guardada_al") != _iso_lima(cuando):
+                    nuevas["guardada_al"] = _iso_lima(cuando)
                 if not tocado:
+                    if nuevas != viejas:
+                        e["metricas"] = nuevas      # solo el reloj: sin contarlo
+                        cambio = True
                     continue
-                if mas_nueva:
+                if cifras_nuevas:
                     nuevas["al"] = _iso_lima(cuando)
                     nuevas["error"] = ""
                 nuevas["guardada"] = True
@@ -2110,6 +2138,9 @@ def _apuntar_guardadas(raiz, envios, indice):
 #: los ultimos dias: lo recien leido en vivo esta ahi con fecha de hoy.
 MARGEN_GUARDADAS_S = 15
 PLAZO_GUARDADAS_S = 12
+#: Los seguidores (ruta del proyecto) se piden solo si no han pasado mas de
+#: estos segundos: su consulta puede tardar 30 y el proxy corta a los 60.
+TOPE_SEGUIDORES_S = 20
 
 
 def medir(raiz, pids, forzar=False):
@@ -2119,11 +2150,15 @@ def medir(raiz, pids, forzar=False):
     arranque = time.time()
     r = actualizar_metricas(raiz, pids, forzar=forzar)
     r["guardadas"] = 0
+    r["arranque"] = arranque
     if r.get("ocupado"):
         return r
     if time.time() - arranque > TOPE_VUELTA_S - MARGEN_GUARDADAS_S:
         return r
-    g = leer_guardadas(raiz, pids, dias=7, paginas=1, plazo=PLAZO_GUARDADAS_S)
+    # el tope cuenta tambien la ultima consulta: se empieza un perfil solo si
+    # da tiempo a esperarlo entero
+    g = leer_guardadas(raiz, pids, dias=7, paginas=1, plazo=PLAZO_GUARDADAS_S,
+                       hasta_momento=arranque + TOPE_VUELTA_S - PLAZO_GUARDADAS_S)
     r["guardadas"] = g["actualizados"]
     r["errores"] = (r.get("errores") or []) + g["errores"]
     return r
@@ -2169,11 +2204,16 @@ def _suma(destino, metricas):
         v = (metricas or {}).get(k)
         if isinstance(v, (int, float)):
             destino[k] = (destino.get(k) or 0) + int(v)
+    vistas = (metricas or {}).get("vistas")
+    peso = float(vistas) if isinstance(vistas, (int, float)) and vistas > 0 else 0.0
     for k in RETENCION:
         v = (metricas or {}).get(k)
         if isinstance(v, (int, float)) and not isinstance(v, bool):
             destino[f"_n_{k}"] = (destino.get(f"_n_{k}") or 0) + 1
             destino[f"_s_{k}"] = (destino.get(f"_s_{k}") or 0) + float(v)
+            # la media ponderada por vistas; sin vistas, la media simple
+            destino[f"_ps_{k}"] = (destino.get(f"_ps_{k}") or 0) + float(v) * peso
+            destino[f"_p_{k}"] = (destino.get(f"_p_{k}") or 0) + peso
 
 
 def _medias(destino):
@@ -2182,7 +2222,10 @@ def _medias(destino):
     for k in RETENCION:
         n = destino.pop(f"_n_{k}", 0)
         suma = destino.pop(f"_s_{k}", 0)
-        destino[k] = round(suma / n, 4 if k == "vista_entera" else 1) if n else None
+        suma_pesada = destino.pop(f"_ps_{k}", 0)
+        pesos = destino.pop(f"_p_{k}", 0)
+        valor = (suma_pesada / pesos) if pesos else (suma / n if n else None)
+        destino[k] = round(valor, 1 if k == "tiempo_medio_s" else 4) if valor is not None else None
         destino[f"{k}_posts"] = n
     return destino
 
@@ -2286,21 +2329,28 @@ def _inicio_mes(momento):
 
 
 def periodos(raiz, videos, cid, ahora=None):
-    """Esta semana (desde el lunes) y este mes, frente a la semana y el mes
-    anteriores ENTEROS, en hora de Lima. -> {"semana": {...}, "mes": {...}}"""
+    """Esta semana (desde el lunes) y este mes (desde el dia 1), frente al MISMO
+    TRAMO del periodo anterior, en hora de Lima: un jueves a mediodia se compara
+    con la semana pasada hasta el jueves a mediodia, no con la semana entera
+    (comparado con la entera, cada lunes salia «−80 %»). -> {"semana", "mes"}"""
     ahora = ahora or ahora_lima()
     propios = _de_proyecto(videos, cid)
     salida = {}
     semana = _inicio_semana(ahora)
     mes = _inicio_mes(ahora)
     mes_antes = _inicio_mes(mes - dt.timedelta(days=1))
-    for nombre, desde, antes in (("semana", semana, semana - dt.timedelta(days=7)),
-                                 ("mes", mes, mes_antes)):
+    # el mismo dia del mes pasado (el 31 de un mes de 30 dias se queda en su ultimo)
+    dias_mes_antes = (mes - mes_antes).days
+    tope_mes = mes_antes + min(ahora - mes, dt.timedelta(days=dias_mes_antes))
+    for nombre, desde, antes, tope in (
+            ("semana", semana, semana - dt.timedelta(days=7), ahora - dt.timedelta(days=7)),
+            ("mes", mes, mes_antes, tope_mes)):
         pares = _publicados(raiz, propios, antes)
         este = [(v, e) for v, e in pares if _leer_momento(e.get("cuando")) >= desde]
-        previo = [(v, e) for v, e in pares if _leer_momento(e.get("cuando")) < desde]
+        previo = [(v, e) for v, e in pares if _leer_momento(e.get("cuando")) < min(desde, tope)]
         salida[nombre] = {"desde": desde.strftime("%Y-%m-%d"),
                           "anterior_desde": antes.strftime("%Y-%m-%d"),
+                          "anterior_hasta": _iso_lima(min(desde, tope)),
                           "actual": _totales(este), "anterior": _totales(previo)}
     return salida
 
@@ -2309,7 +2359,7 @@ def periodos(raiz, videos, cid, ahora=None):
 #: comentarios + compartidos + guardados) / vistas; con pocas vistas no dice nada,
 #: asi que un post entra en esa lista (y en la de retencion) solo con
 #: MIN_VISTAS_PROPORCION vistas o mas.
-ORDENES = ("vistas", "interaccion", "vista_entera")
+ORDENES = ("vistas", "interaccion", "vista_entera", "media_vista")
 MIN_VISTAS_PROPORCION = 50
 _DIAS_SEMANA = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 
@@ -2358,7 +2408,7 @@ def lo_que_funciono(raiz, videos, cid=None, dias=30, red=None, por="vistas", cua
         if por != "vistas" and vistas < MIN_VISTAS_PROPORCION:
             continue
         valor = vistas if por == "vistas" else (interaccion if por == "interaccion"
-                                               else m.get("vista_entera"))
+                                               else m.get(por))
         if not isinstance(valor, (int, float)):
             continue
         if v["pid"] not in textos_de:

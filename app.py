@@ -14674,8 +14674,11 @@ async def publicar_subir_portada(pid: str, peticion: Request):
     if not hasattr(fichero, "read"):
         raise ErrorApi(400, "manda la imagen en el campo «portada»")
     extension = os.path.splitext(str(getattr(fichero, "filename", "") or ""))[1].lower()
-    contenido = await fichero.read()
     P = _publicar()
+    tam = getattr(fichero, "size", None)
+    if isinstance(tam, int) and tam > P.MAX_BYTES_PORTADA:
+        raise ErrorApi(400, "la portada tiene que pesar menos de 15 MB")
+    contenido = await fichero.read(P.MAX_BYTES_PORTADA + 1)
     await asyncio.to_thread(_por_publicar, P.guardar_imagen_portada, raiz_proyectos(),
                             ctx.id, contenido, extension)
     return publicar_ficha(pid, peticion)
@@ -14807,10 +14810,20 @@ def publicar_perfiles_de_la_cuenta(cid: str, peticion: Request):
     cid = _proyecto_publicable(cid, peticion)
     datos = _por_publicar(P.perfiles_de_la_cuenta, raiz_proyectos(), cid)
     nombres = _nombres_de_clientes()
+    cerrados = _cerrados(peticion) or set()
+    visibles = []
     for p in datos["perfiles"]:
-        otro = p.get("de_otro") or ""
-        p["de_otro_nombre"] = (nombres.get(otro) or ("Sin proyecto" if otro == "_sin" else otro)) \
+        otro = p.pop("de_otro", "") or ""
+        # EL PERFIL DE UN PROYECTO CON CLAVE no se enseña a quien no lo ha
+        # abierto: su nombre (studio_<cliente>) ya dice de quién es
+        if otro and otro in cerrados:
+            continue
+        p["de_otro"] = bool(otro)
+        p["de_otro_nombre"] = (nombres.get(otro) or ("Sin proyecto" if otro == "_sin" else "otro proyecto")) \
             if otro else ""
+        visibles.append(p)
+    datos["ocultos"] = len(datos["perfiles"]) - len(visibles)
+    datos["perfiles"] = visibles
     return datos
 
 

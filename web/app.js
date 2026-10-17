@@ -17108,7 +17108,9 @@ function estadoTextosPublicar(f) {
   } else if (f.error_textos) {
     caja.appendChild(h('div', { clase: 'caja-error fila' },
       h('span', { clase: 'crece' }, f.error_textos),
-      h('button', { clase: 'mini', onclick: () => escribirTextosPublicar(f.redes || [], true) }, 'Reintentar')));
+      // solo las redes del intento que falló: las demás pueden estar corregidas a mano
+      h('button', { clase: 'mini', onclick: () => escribirTextosPublicar(
+        (f.error_redes || []).length ? f.error_redes : (f.redes || []), true) }, 'Reintentar')));
   }
   return caja;
 }
@@ -17274,8 +17276,11 @@ function estadoDeListo(v) {
   if (!estados.length) return 'sin';
   if (estados.some(e => ['programado', 'enviando', 'publicando', 'espera_ok'].includes(e))) return 'programado';
   if (estados.some(e => ['fallido', 'comprobar'].includes(e))) return 'atencion';
-  const salieron = estados.filter(e => ['publicado', 'a_mano'].includes(e)).length;
-  return salieron >= 4 ? 'publicado' : 'medias';
+  // «en todas»: en todas las redes elegidas en su ficha (o, sin elegir, en
+  // todas las que se intentaron)
+  const elegidas = (v.redes_elegidas || []).length ? v.redes_elegidas : Object.keys(v.envios || {});
+  const todas = elegidas.every(r => ['publicado', 'a_mano'].includes((v.envios || {})[r]));
+  return todas ? 'publicado' : 'medias';
 }
 
 function pasaFiltroCola(v) {
@@ -17372,7 +17377,7 @@ function seccionColaPublicar() {
   // un envío pasa si su vídeo pasa (o, si su vídeo no está en la lista, por el proyecto y el texto)
   const pasaEnvio = e => {
     const v = porPid[e.pid];
-    if (v) return pasaFiltroCola(Object.assign({}, v, { estado: '' })) && (!f.estado || pasaFiltroCola(v));
+    if (v) return pasaFiltroCola(v);
     return pasaFiltroCola({ nombre: e.video, pid: e.pid, cliente: e.cliente, cliente_nombre: e.cliente_nombre, envios: {} });
   };
 
@@ -17766,8 +17771,8 @@ function motivoNoPublicar(f) {
   const faltas = [];
   redes.forEach(r => {
     const t = textosDeFicha(r);
+    // (sin título, YouTube sale con el nombre del vídeo: no se bloquea)
     if (!String(t.descripcion || '').trim()) faltas.push(`el texto de ${NOMBRES_RED[r]}`);
-    if (r === 'youtube' && !String(t.titulo || '').trim()) faltas.push('el título de YouTube');
   });
   if (faltas.length) return `Falta ${faltas.join(', ')}.`;
   if ((f.ajustes || {}).cuentas_vistas) {
@@ -17780,18 +17785,42 @@ function motivoNoPublicar(f) {
   return '';
 }
 
+/* UNA IMAGEN CON EL PASE DE LOS PROYECTOS CON CLAVE: un <img src> no manda
+   cabeceras, y sin la de los pases el servidor no enseña lo de un proyecto
+   con clave aunque esté abierto. Se pide con fetch y se pone como blob. */
+async function ponerImagenPublicar(img, url) {
+  const pases = typeof cabeceraDePases === 'function' ? cabeceraDePases() : '';
+  img.dataset.pedida = url;
+  try {
+    const r = await fetch(url, { headers: pases ? { 'X-Estudio-Abiertos': pases } : {} });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    if (img.dataset.pedida !== url) return;          // ya se pidió otra
+    if (img.dataset.blob) URL.revokeObjectURL(img.dataset.blob);
+    img.dataset.blob = URL.createObjectURL(blob);
+    // si la política del proxy no dejara pintar un blob, la dirección a pelo
+    // (vale en todo proyecto sin clave)
+    img.onerror = () => { img.onerror = null; img.src = url; };
+    img.src = img.dataset.blob;
+  } catch (e) {
+    img.alt = 'No se puede sacar esa imagen';
+    img.classList.add('sin-imagen');
+  }
+}
+
 /* LA PORTADA: un fotograma del vídeo (con un deslizador y su vista) o una
    imagen subida. Sin elegir nada, cada red pone la suya. */
 function bloquePortadaPublicar() {
   const f = PUB.ficha;
   const p = f.portada || {};
-  const dur = Math.max(1, Math.round((f.duracion_s || 1) * 1000));
+  // el último punto no tiene fotograma: el deslizador acaba 0,1 s antes
+  const dur = Math.max(100, Math.round((f.duracion_s || 1) * 1000) - 100);
   const b = h('div', { clase: 'bloque portada-publicar' }, h('h3', {}, 'Portada'));
-  const msVista = PUB.portadaMs != null ? PUB.portadaMs : (p.ms != null ? p.ms : Math.min(1000, dur));
+  const msVista = Math.min(dur, PUB.portadaMs != null ? PUB.portadaMs : (p.ms != null ? p.ms : Math.min(1000, dur)));
   const rutaVideo = `/videos/${encodeURIComponent(f.pid)}`;
-  const vista = h('img', { clase: 'vista-portada', alt: 'Vista de la portada',
-    src: p.imagen ? rutaPublicar(`${rutaVideo}/portada.jpg?s=${p.imagen}`)
-      : rutaPublicar(`${rutaVideo}/fotograma?ms=${msVista}`) });
+  const vista = h('img', { clase: 'vista-portada', alt: 'Vista de la portada' });
+  ponerImagenPublicar(vista, p.imagen ? rutaPublicar(`${rutaVideo}/portada.jpg?s=${p.imagen}`)
+    : rutaPublicar(`${rutaVideo}/fotograma?ms=${msVista}`));
   const etiqueta = h('span', { clase: 'meta' }, p.imagen ? 'Imagen subida'
     : p.ms != null ? `Fotograma del segundo ${(p.ms / 1000).toFixed(1)}` : 'Cada red elige la suya (no has elegido ninguna)');
   let reloj = null;
@@ -17801,7 +17830,7 @@ function bloquePortadaPublicar() {
       PUB.portadaMs = Number(ev.target.value);
       etiqueta.textContent = `Segundo ${(PUB.portadaMs / 1000).toFixed(1)} (sin guardar)`;
       clearTimeout(reloj);
-      reloj = setTimeout(() => { vista.src = rutaPublicar(`${rutaVideo}/fotograma?ms=${PUB.portadaMs}`); }, 250);
+      reloj = setTimeout(() => ponerImagenPublicar(vista, rutaPublicar(`${rutaVideo}/fotograma?ms=${PUB.portadaMs}`)), 250);
     } });
   const guardarPortada = async cambios => {
     try {
@@ -18197,10 +18226,11 @@ function elegirPerfilPublicar(p, lista) {
       accionProyectoPublicar(p.id, 'perfil', { perfil: ev.target.value, crear: false });
     } },
   h('option', { value: '' }, 'Elegir un perfil que ya tengo en Upload-Post…'),
-  ...perfiles.map(x => h('option', { value: x.perfil, disabled: !!x.de_otro, selected: false },
+  ...perfiles.map(x => h('option', { value: x.perfil, disabled: !!x.de_otro },
     `${x.perfil}${x.redes && x.redes.length ? ` · ${x.redes.map(r => CORTOS_RED[r] || r).join(', ')}` : ' · sin cuentas'}`
     + `${x.propio ? ' (el de este proyecto)' : ''}${x.de_otro ? ` (ya es de ${x.de_otro_nombre || 'otro proyecto'})` : ''}`)));
-  caja.appendChild(h('label', { clase: 'etiqueta-campo' }, `Tus perfiles en Upload-Post (${perfiles.length}${limite} del plan)`, sel));
+  caja.appendChild(h('label', { clase: 'etiqueta-campo' }, `Tus perfiles en Upload-Post (${perfiles.length + (lista.ocultos || 0)}${limite} del plan)`, sel));
+  if (lista.ocultos) caja.appendChild(h('span', { clase: 'meta' }, `${lista.ocultos} más de proyectos con clave`));
   caja.appendChild(h('button', { clase: 'mini', onclick: () => { delete PUB.perfilesCuenta[p.id]; pintarModulo(); } }, 'Cerrar'));
   return caja;
 }

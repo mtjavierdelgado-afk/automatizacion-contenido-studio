@@ -139,7 +139,7 @@ def prueba_piezas():
     ok(largo["avisos"], "y se avisa")
 
     for malo, campo in (({"hora": "25:00"}, "hora"), ({"redes": ["myspace"]}, "redes"),
-                        ({"marcar_ia": "si"}, "marcar_ia"), ({"perfil": "a b"}, "perfil"),
+                        ({"marcar_ia": "si"}, "marcar_ia"), ({"perfil": "a/b"}, "perfil"),
                         ({"privacidad_youtube": "todos"}, "privacidad")):
         try:
             P._validar_ajustes(malo)
@@ -738,8 +738,17 @@ def prueba_studio():
         igual(r.status_code, 409, "un proyecto no puede adoptar el perfil de otro")
         igual(s.put(base + f"/api/publicar/proyectos/{cid}", json={"perfil": perfil}).status_code, 409,
               "ni escribiéndolo a mano")
+        igual(s.post(base + f"/api/publicar/proyectos/{cid}/perfil",
+                     json={"perfil": "studio_secreto"}).status_code, 200, "el proyecto secreto con su perfil")
         s.put(base + f"/api/clientes/{cid}", json={"clave": "1234"})
         s.put(base + "/api/clientes/videos/fiesta", json={"cliente": cid})
+        lista = s.get(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/perfiles").json()
+        ok(all(x["perfil"] != "studio_secreto" for x in lista["perfiles"]) and lista["ocultos"] >= 1,
+           "el desplegable no enseña el perfil de un proyecto con clave cerrado (solo cuántos hay)")
+        ok(all(not isinstance(x.get("de_otro"), str) for x in lista["perfiles"]),
+           "ni el id de otro proyecto")
+        igual(s.get(base + "/api/publicar/videos/fiesta/fotograma?ms=500").status_code, 404,
+              "ni su fotograma")
         igual(s.get(base + "/api/publicar/videos/fiesta").status_code, 404,
               "un vídeo de un proyecto con clave no se ve sin abrirlo")
         c = s.get(base + "/api/publicar/cola").json()
@@ -755,6 +764,12 @@ def prueba_studio():
         cab = {"X-Estudio-Abiertos": f"{cid}.{pase}"}
         igual(s.get(base + "/api/publicar/videos/fiesta", headers=cab).status_code, 200,
               "con el proyecto abierto, sí")
+        igual(s.get(base + "/api/publicar/videos/fiesta/fotograma?ms=500", headers=cab).status_code, 200,
+              "y su fotograma, con el pase (la pantalla lo pide con fetch, no con <img src>)")
+        lista = s.get(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/perfiles", headers=cab).json()
+        fila = next((x for x in lista["perfiles"] if x["perfil"] == "studio_secreto"), {})
+        ok(fila.get("de_otro") is True and fila.get("de_otro_nombre") == "Cliente secreto",
+           "abierto, sale marcado como de su proyecto")
     finally:
         proceso.terminate()
         try:
@@ -983,6 +998,9 @@ def prueba_perfiles():
             raise P.UP.ErrorUploadPost("You have reached the limit of 2 profiles", 403)
         except P.UP.ErrorUploadPost as fallo:
             ok(P._PLAN_LLENO.search(str(fallo)) is not None, "reconoce el mensaje de Upload-Post")
+        igual(P.norma_perfil("Mi Cliente"), "micliente", "los espacios no cuentan al comparar")
+        ok(P.perfil_de_otro(raiz, "S U Y U", "cl_x") == "cl_suyu",
+           "y «S U Y U» también es el perfil de otro proyecto")
         # usar sin crear un perfil que no existe: dice que no está
         try:
             P.usar_perfil(raiz, "cl_nuevo", "no_existe", crear=False)
@@ -1059,6 +1077,8 @@ def prueba_textos():
         f = P.ficha(raiz, INFO, P.AJUSTES_DEFECTO)
         ok(not f["escribiendo"] and "no se han podido escribir" in f["error_textos"],
            f"si falla, la ficha lo dice: {f['error_textos'][:60]}")
+        igual(f["error_redes"], ["tiktok"],
+              "y con qué redes: «Reintentar» no reescribe las que no se pidieron")
         with open(os.environ["ESTUDIO_BITACORA_GLOBAL"], encoding="utf-8") as fh:
             ok("publicar_textos_fallo" in fh.read(), "y queda apuntado en la bitácora")
         # reintentar, ya sin fallo
@@ -1088,6 +1108,9 @@ def prueba_portada():
           "un fotograma: thumb_offset en Instagram y cover_timestamp en TikTok")
     igual([c for c, _r in ficheros], ["facebook_thumbnail"],
           "Facebook (como vídeo) recibe el fotograma; YouTube no sin marcarlo")
+    campos, _f = P.campos_portada(raiz, info, {"portada": {"ms": 40000}}, ["instagram", "tiktok"])
+    igual(campos, {"thumb_offset": "2900", "cover_timestamp": 2900},
+          "un momento pasado el final (se volvió a montar más corto) se recorta al vídeo")
     datos["portada"]["youtube"] = True
     _c, ficheros = P.campos_portada(raiz, info, datos, todas)
     igual(sorted(c for c, _r in ficheros), ["facebook_thumbnail", "thumbnail"],
@@ -1095,6 +1118,16 @@ def prueba_portada():
     vertical = dict(info, formato="vertical", duracion_s=3)
     _c, ficheros = P.campos_portada(raiz, vertical, datos, ["facebook"])
     igual(ficheros, [], "un Reel de Facebook no lleva miniatura")
+    for contenido, que in ((b"#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\nfile:///etc/passwd\n", "una lista HLS"),
+                           (b"no soy una imagen", "texto")):
+        try:
+            P.guardar_imagen_portada(raiz, "fiesta", contenido, ".png")
+            ok(False, f"{que} con nombre .png no pasa como portada")
+        except P.ErrorPublicar:
+            ok(True, f"{que} con nombre .png no pasa como portada (manda el contenido, no el nombre)")
+    sobras = [n for n in os.listdir(os.path.join(P.carpeta(raiz), "portadas"))
+              if "subida" in n or n.count(".") > 1] if os.path.isdir(os.path.join(P.carpeta(raiz), "portadas")) else []
+    igual(sobras, [], "y no deja ficheros a medias")
     # una imagen subida
     png = os.path.join(raiz, "p.png")
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=800x800",

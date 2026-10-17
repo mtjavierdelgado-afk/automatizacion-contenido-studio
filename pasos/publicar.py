@@ -109,6 +109,7 @@ _LOCKS = {}
 _LOCK_LOCKS = threading.Lock()
 _ESCRIBIENDO = {}              # pid -> {"desde", "redes"}
 _ERRORES_TEXTOS = {}           # pid -> mensaje del ultimo fallo
+_REDES_FALLIDAS = {}           # pid -> las redes de ese intento (para «Reintentar»)
 _SUBIENDO = set()              # lotes con hilo vivo
 _ULTIMA_CONSULTA = {}          # lote -> time.time()
 _NO_LO_CONOCE = {}             # lote -> cuantas veces seguidas Upload-Post dijo 404
@@ -348,21 +349,21 @@ def _validar_ajustes(cambios):
             v = v.strip()
             if len(v) > LARGOS.get(k, 400):
                 raise ErrorPublicar(f"«{k}» pasa de {LARGOS.get(k, 400)} caracteres")
-            if k == "perfil" and v and not re.match(r"^[A-Za-z0-9_.\-]+$", v):
-                raise ErrorPublicar("el perfil lleva letras, números, «_», «-» o «.»")
+            if k == "perfil" and v and not re.match(r"^[A-Za-z0-9_.\- ]+$", v):
+                raise ErrorPublicar("el perfil lleva letras, números, espacios, «_», «-» o «.»")
             limpios[k] = v
     return limpios
 
 
 def perfil_de_otro(raiz, perfil, cid):
     """El proyecto (otro que `cid`) que ya usa ese perfil de Upload-Post, o ""."""
-    perfil = str(perfil or "").strip().lower()
+    perfil = norma_perfil(perfil)
     if not perfil:
         return ""
     datos = leer_json(_ruta_ajustes(raiz), {}) or {}
     for otro, ficha in (datos.get("proyectos") or {}).items():
         if otro != _clave_proyecto(cid) and isinstance(ficha, dict) \
-                and str(ficha.get("perfil") or "").strip().lower() == perfil:
+                and norma_perfil(ficha.get("perfil")) == perfil:
             return otro
     return ""
 
@@ -901,6 +902,7 @@ def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd):
                               "traza": traceback.format_exc()[-1500:]})
         _ERRORES_TEXTOS[pid] = (f"no se han podido escribir los textos: "
                                 f"{str(fallo)[:400]}")
+        _REDES_FALLIDAS[pid] = list(redes)
     finally:
         _ESCRIBIENDO.pop(pid, None)
 
@@ -1107,8 +1109,11 @@ def _validar_portada(cambios, actual):
 
 
 def ruta_portada(raiz, pid, cual="imagen"):
+    """`cual`: "imagen" (la subida) o el lote cuyo fotograma se manda: cada
+    lote el suyo, para que dos envios a la vez no se pisen."""
     _ruta_video(raiz, pid)                         # valida el pid
-    nombre = f"{pid}.jpg" if cual == "imagen" else f"{pid}_fotograma.jpg"
+    nombre = f"{pid}.jpg" if cual == "imagen" else \
+        f"{pid}_fotograma_{re.sub(r'[^a-z0-9]', '', str(cual).lower())[:16]}.jpg"
     return os.path.join(carpeta(raiz), "portadas", nombre)
 
 
@@ -1132,13 +1137,22 @@ def fotograma(mp4, ms, destino, ancho=0, calidad=3):
     orden += ["-q:v", str(calidad), temporal]
     try:
         subprocess.run(orden, capture_output=True, timeout=40, check=False)
+        if not os.path.isfile(temporal) or os.path.getsize(temporal) == 0:
+            # pasado el final ffmpeg no saca nada
+            raise ErrorPublicar("ese momento está fuera del vídeo", 400)
+        os.replace(temporal, destino)
     except (OSError, subprocess.SubprocessError) as fallo:
         raise ErrorPublicar(f"no he podido sacar el fotograma: {fallo}", 500) from None
-    if not os.path.isfile(temporal) or os.path.getsize(temporal) == 0:
-        # pasado el final: el ultimo fotograma que haya
-        raise ErrorPublicar("ese momento está fuera del vídeo", 400)
-    os.replace(temporal, destino)
+    finally:
+        _quitar(temporal)
     return destino
+
+
+def _quitar(ruta):
+    try:
+        os.remove(ruta)
+    except OSError:
+        pass
 
 
 def guardar_imagen_portada(raiz, pid, contenido, extension):
@@ -1148,30 +1162,41 @@ def guardar_imagen_portada(raiz, pid, contenido, extension):
         raise ErrorPublicar("la portada tiene que ser JPG, PNG o WebP")
     if not contenido or len(contenido) > MAX_BYTES_PORTADA:
         raise ErrorPublicar("la portada tiene que pesar menos de 15 MB")
+    # EL FORMATO LO DICEN LOS BYTES, y ffmpeg lo lee SOLO como imagen: si
+    # adivinara, un «.png» que fuera una lista HLS podria leer ficheros del
+    # servidor y devolverlos en la portada.
+    if contenido[:8] == b"\x89PNG\r\n\x1a\n":
+        lector = "png_pipe"
+    elif contenido[:3] == b"\xff\xd8\xff":
+        lector = "jpeg_pipe"
+    elif contenido[:4] == b"RIFF" and contenido[8:12] == b"WEBP":
+        lector = "webp_pipe"
+    else:
+        raise ErrorPublicar("esa imagen no es un JPG, PNG o WebP de verdad")
     destino = ruta_portada(raiz, pid)
     os.makedirs(os.path.dirname(destino), exist_ok=True)
-    original = f"{destino}.subida{extension}"
+    original = f"{destino}.{uuid.uuid4().hex[:8]}.subida"
     with open(original, "wb") as fh:
         fh.write(contenido)
     try:
         for calidad in (3, 6, 10, 16):
             temporal = f"{destino}.{uuid.uuid4().hex[:6]}.jpg"
-            subprocess.run([_ffmpeg(), "-v", "error", "-y", "-i", original, "-frames:v", "1",
+            subprocess.run([_ffmpeg(), "-v", "error", "-y", "-f", lector, "-i", original,
+                            "-frames:v", "1",
                             "-vf", "scale='min(1920,iw)':-2", "-q:v", str(calidad), temporal],
                            capture_output=True, timeout=40, check=False)
-            if not os.path.isfile(temporal) or not os.path.getsize(temporal):
-                raise ErrorPublicar("esa imagen no se puede leer")
-            if os.path.getsize(temporal) <= MAX_BYTES_MINIATURA or calidad == 16:
-                os.replace(temporal, destino)
-                break
-            os.remove(temporal)
+            try:
+                if not os.path.isfile(temporal) or not os.path.getsize(temporal):
+                    raise ErrorPublicar("esa imagen no se puede leer")
+                if os.path.getsize(temporal) <= MAX_BYTES_MINIATURA or calidad == 16:
+                    os.replace(temporal, destino)
+                    break
+            finally:
+                _quitar(temporal)
     except (OSError, subprocess.SubprocessError) as fallo:
         raise ErrorPublicar(f"no he podido guardar la portada: {fallo}", 500) from None
     finally:
-        try:
-            os.remove(original)
-        except OSError:
-            pass
+        _quitar(original)
     sello = hashlib.sha1(contenido).hexdigest()[:10]
     with _lock(pid):
         ficha = _leer_video(raiz, pid)
@@ -1180,7 +1205,7 @@ def guardar_imagen_portada(raiz, pid, contenido, extension):
     return ficha["portada"]
 
 
-def campos_portada(raiz, info, datos, redes):
+def campos_portada(raiz, info, datos, redes, lote="vista"):
     """(campos, ficheros) de la portada para Upload-Post, segun lo elegido."""
     portada = portada_de(datos)
     campos, ficheros = {}, []
@@ -1190,10 +1215,18 @@ def campos_portada(raiz, info, datos, redes):
     ms = portada["ms"]
     if not imagen and ms is None:
         return campos, ficheros
+    # SIEMPRE DENTRO DEL VIDEO: si se volvio a montar mas corto, el momento
+    # elegido podria caer fuera y la red rechazar la subida
+    try:
+        duracion_ms = int(float(info.get("duracion_s") or 0) * 1000)
+    except (TypeError, ValueError):
+        duracion_ms = 0
+    if ms is not None and duracion_ms > 0:
+        ms = max(0, min(int(ms), duracion_ms - 100))
     foto = imagen
     if not foto and (("youtube" in redes and portada["youtube"]) or "facebook" in redes):
         try:
-            foto = fotograma(info.get("mp4"), ms, ruta_portada(raiz, info["pid"], "fotograma"))
+            foto = fotograma(info.get("mp4"), ms, ruta_portada(raiz, info["pid"], lote))
         except ErrorPublicar:
             foto = ""            # sin el fotograma, cada red pone la suya
     if "instagram" in redes:
@@ -1256,6 +1289,7 @@ def ficha(raiz, info, ajustes):
         "editado": bool(datos.get("editado")),
         "portada": portada_de(datos),
         "escribiendo": pid in _ESCRIBIENDO, "error_textos": _ERRORES_TEXTOS.get(pid, ""),
+        "error_redes": _REDES_FALLIDAS.get(pid, []) if pid in _ERRORES_TEXTOS else [],
         "escribiendo_desde": (_ESCRIBIENDO.get(pid) or {}).get("desde", ""),
         "escribiendo_redes": (_ESCRIBIENDO.get(pid) or {}).get("redes", []),
         "envios": sorted(envios, key=lambda e: str(e.get("cuando") or ""), reverse=True),
@@ -1441,7 +1475,12 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
                 titulo_general = primera.splitlines()[0].strip()
                 break
     campos["title"] = (titulo_general or info.get("nombre") or "Vídeo")[:100]
-    extra, ficheros = campos_portada(raiz, info, datos, redes)
+    try:
+        extra, ficheros = campos_portada(raiz, info, datos, redes, lote)
+    except Exception as fallo:                              # noqa: BLE001
+        # la portada nunca deja un envio colgado: sale sin ella
+        _log("portada_fallo", {"video": pid, "error": str(fallo)[:300]})
+        extra, ficheros = {}, []
     campos.update(extra)
     cuando = envios[0]["cuando"] if envios[0].get("modo") == "programado" else None
     perfil = envios[0].get("perfil") or ajustes.get("perfil")
@@ -1472,6 +1511,9 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
             return
         finally:
             _SUBIENDO.discard(lote)
+            for _campo, ruta in ficheros:
+                if os.path.basename(ruta).startswith(f"{pid}_fotograma_"):
+                    _quitar(ruta)
         resultados = r.get("resultados") or {}
 
         def aplicar(e):
@@ -1767,6 +1809,8 @@ def cola(raiz, videos, desde=None, dias=7):
                         if resumen.get(r) not in ("programado", "enviando", "publicando")})
         if v.get("montado"):
             listos.append(dict(v, envios=resumen,
+                               redes_elegidas=(datos or {}).get("redes")
+                               if (datos or {}).get("redes_puestas") else None,
                                textos=bool(datos and any(
                                    (datos.get("textos") or {}).get(r, {}).get("descripcion")
                                    for r in REDES))))

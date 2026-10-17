@@ -134,6 +134,14 @@ UMBRAL_REINTENTO_BASE_S = 120
 
 PARAMS_POR_DEFECTO = {
     "prompt_general": "",
+    # LO QUE SE PIDE AL REGENERAR desde la pantalla Guion («mas directo»,
+    # «empieza por el robo»), APARTE de las indicaciones del Encargo
+    # (`prompt_general`). Hasta el 17-10-2026 esa caja escribia en
+    # `prompt_general` y se llevaba por delante las indicaciones: tras un
+    # «Regenerar el guion» con «mas directo», ENSENA y ANGULO desaparecian del
+    # Encargo y del prompt. Se escribe solo al usar esa caja, nunca por defecto
+    # (regla 1 de CLAUDE.md), y se SUMA a las indicaciones.
+    "instruccion_vuelta": "",
     "regenerar_desde_cero": False,
     # El ajuste por defecto de cada fase vive en cli_claude.POR_FASE, elegido
     # por la complejidad de la tarea y con las fuentes anotadas alli.
@@ -216,7 +224,8 @@ SISTEMA = ("Responde exclusivamente con el objeto JSON pedido, sin texto "
 def describir(params):
     """Resumen de una linea de la configuracion del paso, para la bitacora."""
     opciones = _normalizar(params, estricto=False)
-    texto = " ".join(opciones["prompt_general"].split())
+    texto = " ".join(" · ".join(x for x in (opciones["prompt_general"],
+                                             opciones["instruccion_vuelta"]) if x).split())
     if len(texto) > 60:
         texto = texto[:57] + "..."
     origen = "desde cero" if opciones["regenerar_desde_cero"] else "sobre el guion anterior"
@@ -256,6 +265,7 @@ def _normalizar(params, estricto=True):
             opciones[clave] = valor
 
     opciones["prompt_general"] = str(opciones.get("prompt_general") or "").strip()
+    opciones["instruccion_vuelta"] = str(opciones.get("instruccion_vuelta") or "").strip()
     opciones["regenerar_desde_cero"] = bool(opciones.get("regenerar_desde_cero"))
     opciones["anotaciones_voz"] = bool(opciones.get("anotaciones_voz"))
     opciones["emocion_en_voz"] = bool(opciones.get("emocion_en_voz"))
@@ -853,6 +863,14 @@ def _instruccion(transcript, metadatos, brief, anterior, opciones, correcciones,
         opciones["prompt_general"] or
         "Redacta el guion siguiendo el brief, sin indicaciones adicionales.",
     ])
+    if opciones.get("instruccion_vuelta"):
+        partes.extend([
+            "",
+            "== Y EN ESTA VUELTA, ADEMAS ==",
+            opciones["instruccion_vuelta"],
+            "Esto se SUMA a las indicaciones de arriba, no las sustituye: lo "
+            "que piden ellas sigue valiendo.",
+        ])
     partes.extend(_seccion_lo_que_pide(etiquetas))
     partes.extend([
         "",
@@ -1735,6 +1753,7 @@ def _redactar(proyecto, params, avisar):
         "esfuerzo": opciones["esfuerzo"],
         "intentos": intentos,
         "prompt_general": opciones["prompt_general"],
+        "instruccion_vuelta": opciones["instruccion_vuelta"],
         "regenerado_desde_cero": opciones["regenerar_desde_cero"],
         "partia_de": (anterior or {}).get("titulo", "") if anterior else "",
         "bloques_editados": editados,

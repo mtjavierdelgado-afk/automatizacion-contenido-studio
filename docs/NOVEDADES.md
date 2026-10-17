@@ -30,6 +30,10 @@ vídeos, estilos, claves y contraseña no se tocan.
 - Las etiquetas se reconocen en MAYÚSCULAS, como las enseña la guía (una nota
   como «Ángulo: no me convence el de antes» sigue siendo una nota), y cada una
   acaba en la siguiente etiqueta o en una línea en blanco.
+- **«Regenerar el guion» con una instrucción ya no borra tus indicaciones.**
+  Lo que escribes en «Qué cambiarías del guion» («más directo») se suma a las
+  indicaciones del Encargo; antes las sustituía y ENSEÑA y ÁNGULO se perdían.
+  Si ya te pasó en algún vídeo, vuelve a escribirlas en su Encargo.
 - Las guías de «El material» y «Las indicaciones» explican todo esto.
 - Los guiones ya hechos no cambian ni quedan para regenerar: esto se nota al
   escribir o reescribir un guion.

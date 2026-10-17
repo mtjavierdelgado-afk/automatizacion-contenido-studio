@@ -436,6 +436,18 @@ def prueba_videos_cortos():
     comprobar("POCOS TEMAS" in largo_con and "LO QUE PIDE ESTE VIDEO" in largo_con,
               "un video largo con etiquetas: la estructura de siempre y las etiquetas como ordenes")
 
+    # «REGENERAR EL GUION» CON UNA INSTRUCCION se suma a las indicaciones, no
+    # las pisa: antes escribia en el mismo param y ENSENA/ANGULO desaparecian
+    vuelta = p3_guion._instruccion(transcript, {}, brief_de(60), None, p3_guion._normalizar(
+        {"prompt_general": indicaciones, "instruccion_vuelta": "mas directo"}), [], "es")
+    comprobar("Y EN ESTA VUELTA, ADEMAS" in vuelta and "mas directo" in vuelta
+              and "se cuenta como una ESCENA" in vuelta,
+              "la instruccion de la vuelta va sumada y las etiquetas siguen mandando")
+    comprobar("EN ESTA VUELTA" not in instruccion(240),
+              "sin instruccion de vuelta, nada cambia")
+    igual(p3_guion.PARAMS_POR_DEFECTO["instruccion_vuelta"], "",
+          "y por defecto esta vacia (no se escribe sola)")
+
     propio = instruccion(60, indicaciones, propio=True)
     comprobar("CORTO:" not in propio and "LO QUE PIDE ESTE VIDEO" not in propio,
               "un guion de la casa se respeta: ni estructura de corto ni etiquetas")

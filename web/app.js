@@ -8514,8 +8514,11 @@ async function reescribirGuionLight() {
   const texto = String(v.promptGeneral || '').trim();
   if (!texto) { toast('escribe qué cambiarías', true); return; }
   try {
+    /* EN SU PROPIO CAJÓN, no en `prompt_general`: ahí viven las indicaciones
+       del Encargo (ENSEÑA, ÁNGULO…), y escribir aquí las borraba (17-10-2026).
+       El redactor la recibe sumada a ellas (`p3_guion`, «instruccion_vuelta»). */
     await pedir(API.params(v.pid, 'guion'), {
-      method: 'PUT', cuerpo: { params: { prompt_general: texto } },
+      method: 'PUT', cuerpo: { params: { instruccion_vuelta: texto } },
     });
     v.promptGeneral = '';
     // 'pendientes' y no 'todo': REHACER UNA COSA REHACE ESA COSA. Escribir el

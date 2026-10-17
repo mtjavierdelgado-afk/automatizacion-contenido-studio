@@ -1805,8 +1805,9 @@ def probar_trabajos_y_errores(cliente, pid, tid, virgen):
     igual(respuesta.status_code, 404, "una ruta inexistente da 404")
     ok("error" in (datos or {}), "tambien en forma de {'error': ...}")
 
-    # un proyecto con el estado corrupto no puede tumbar el servicio: el nucleo
-    # aparta el fichero ilegible (no lo pisa) y el proyecto se abre en blanco
+    # un proyecto con el estado corrupto no puede tumbar el servicio. Antes se
+    # abria EN BLANCO (y ofrecia generarlo entero); ahora, sin copia buena de
+    # la que volver, contesta 503 con el porque y el fichero roto se queda
     roto = os.path.join(cliente.carpeta, "roto")
     os.makedirs(roto, exist_ok=True)
     with open(os.path.join(roto, "proyecto.json"), "w", encoding="utf-8") as fh:
@@ -1814,11 +1815,14 @@ def probar_trabajos_y_errores(cliente, pid, tid, virgen):
     with open(os.path.join(roto, "estado.json"), "w", encoding="utf-8") as fh:
         json.dump({"pasos": "esto deberia ser un objeto"}, fh)
     respuesta, datos = cliente.get("/api/proyectos/roto")
-    igual(respuesta.status_code, 200, "un proyecto corrupto se abre igualmente")
-    igual([p["estado"] for p in datos["pasos"]][0], "pendiente",
-          "y arranca de cero, con la ingesta pendiente")
+    igual(respuesta.status_code, 503, "un proyecto corrupto sin copia buena da 503")
+    ok("no se puede leer" in (datos or {}).get("error", ""),
+       "con un mensaje que dice por que, no en blanco")
     ok(any(n.startswith("estado.roto.") for n in os.listdir(roto)),
        "el estado ilegible se guarda a un lado en vez de sobreescribirse")
+    with open(os.path.join(roto, "estado.json"), encoding="utf-8") as fh:
+        ok("esto deberia ser un objeto" in fh.read(),
+           "y el roto se queda en su sitio: el siguiente intento no lo abre vacio")
 
     respuesta, datos = cliente.get("/api/salud")
     igual(respuesta.status_code, 200, "y el servicio sigue en pie despues")
@@ -5624,6 +5628,79 @@ def probar_audio_y_musica_de_la_previa(cliente, carpeta):
         servidor.contexto = guardado
 
 
+def probar_que_lo_lento_no_para_el_servicio():
+    """Una ruta async que bloquea paraba TODAS las peticiones (16-10-2026).
+
+    El bucle de eventos es uno: abrir un proyecto (leer estado.json, un cerrojo
+    que espera) dentro de una ruta `async def` dejaba sin contestar a todas las
+    demas, tambien a las barras de progreso. Se arranca el servicio EN ESTE
+    proceso, se hace lento `contexto()` y se mira que otra peticion no espera.
+    Y de paso, el 503 de un proyecto cuyo estado.json no se puede recuperar.
+    """
+    seccion("LO LENTO NO PARA EL SERVICIO, Y UN ESTADO ILEGIBLE DA 503")
+    import threading                                          # noqa: PLC0415
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import uvicorn                                            # noqa: PLC0415
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    from nucleo import bitacora as BITACORA                   # noqa: PLC0415
+
+    raiz_antes = servidor.raiz_proyectos()
+    base = tempfile.mkdtemp(prefix="estudio_lento_")
+    global_antes = BITACORA.RUTA_GLOBAL
+    BITACORA.RUTA_GLOBAL = os.path.join(base, "_bitacora_global.jsonl")
+    contexto_real = servidor.contexto
+    servidor.fijar_raiz_proyectos(base)
+    puerto = puerto_libre()
+    motor = uvicorn.Server(uvicorn.Config(servidor.app, host="127.0.0.1", port=puerto,
+                                          log_level="error", lifespan="off"))
+    hilo = threading.Thread(target=motor.run, daemon=True)
+    hilo.start()
+    url = f"http://127.0.0.1:{puerto}"
+    try:
+        for _ in range(100):
+            try:
+                requests.get(f"{url}/api/salud", timeout=2)
+                break
+            except requests.RequestException:
+                time.sleep(0.1)
+        Proyecto.crear(base, "lento")
+
+        def lento(pid):
+            if pid == "lento":
+                time.sleep(2.0)            # un cerrojo de otro proceso, un estado enorme
+            return contexto_real(pid)
+        servidor.contexto = lento
+        lanzada = threading.Thread(target=lambda: requests.post(
+            f"{url}/api/proyectos/lento/capturas", json={"paso": "callouts"}, timeout=20))
+        lanzada.start()
+        time.sleep(0.3)
+        antes = time.time()
+        requests.get(f"{url}/api/salud", timeout=20)
+        espera = time.time() - antes
+        lanzada.join(20)
+        ok(espera < 1.0, f"otra peticion contesta mientras una captura abre el proyecto "
+                         f"({espera:.2f} s; antes, ~1,7 s)")
+        servidor.contexto = contexto_real
+
+        # un estado.json roto y sin copia buena: 503, con el porque
+        proyecto = Proyecto.crear(base, "roto")
+        Estado(proyecto)
+        with open(proyecto.ruta("estado.json"), "w", encoding="utf-8") as fh:
+            fh.write("{ roto")
+        respuesta = requests.get(f"{url}/api/proyectos/roto", timeout=20)
+        igual(respuesta.status_code, 503, "un estado.json ilegible sin copia: 503")
+        ok("estado.roto." in (respuesta.json() or {}).get("error", ""),
+           "y el mensaje dice donde ha quedado el fichero roto")
+    finally:
+        servidor.contexto = contexto_real
+        motor.should_exit = True
+        hilo.join(10)
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        BITACORA.RUTA_GLOBAL = global_antes
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
     parser.add_argument("--conservar", action="store_true",
@@ -5706,6 +5783,7 @@ def main():
         probar_que_no_falta_ningun_nombre_en_el_servidor()
         probar_el_reloj_de_un_trabajo()
         probar_revision_del_nucleo_v2f()
+        probar_que_lo_lento_no_para_el_servicio()
     finally:
         parar(proceso)
         if not argumentos.conservar:

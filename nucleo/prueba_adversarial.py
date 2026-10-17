@@ -642,7 +642,8 @@ def t7_varios(base):
     try:
         e2 = Estado(proyecto)
         ok(True, "un estado.json corrupto no impide abrir el proyecto")
-        igual(e2.estado_de("ingesta"), "pendiente", "arranca de cero si esta corrupto")
+        # no arranca de cero: vuelve a la copia buena (ver [8])
+        igual(e2.estado_de("ingesta"), "listo", "vuelve a la copia buena si esta corrupto")
     except Exception as fallo:
         ok(False, f"estado.json corrupto revienta: {type(fallo).__name__}: {fallo}")
     escribir_json(ruta, copia)

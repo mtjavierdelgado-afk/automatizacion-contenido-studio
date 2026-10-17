@@ -833,7 +833,7 @@ def _textos_simulados(info, redes, raiz=None):
     con la misma forma que la respuesta de verdad. Ni CLI ni tokens. Con el
     fichero `_sistema/publicar/_fallar_textos` falla, como el CLI sin cupo."""
     if raiz and os.path.exists(os.path.join(carpeta(raiz), "_fallar_textos")):
-        time.sleep(0.3)
+        time.sleep(2)             # que se vea «Claude está escribiendo» antes del fallo
         raise RuntimeError("el CLI de Claude no ha contestado (simulado)")
     primera = ((info.get("guion") or [{}])[0].get("texto") or info.get("nombre") or "")
     datos = {}

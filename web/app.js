@@ -17409,7 +17409,8 @@ function seccionColaPublicar() {
     cargarPublicar();
   };
   const titulo = vista === 'mes'
-    ? new Date(`${PUB.mes || mesDeHoyPublicar()}-15T12:00:00Z`).toLocaleDateString('es-PE', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+    ? (t => t.charAt(0).toUpperCase() + t.slice(1))(new Date(`${PUB.mes || mesDeHoyPublicar()}-15T12:00:00Z`)
+      .toLocaleDateString('es-PE', { month: 'long', year: 'numeric', timeZone: 'UTC' }))
     : 'La semana';
   cal.appendChild(h('div', { clase: 'fila' },
     h('h3', { clase: 'titulo-calendario' }, titulo), h('span', { clase: 'meta' }, 'hora de Lima'),

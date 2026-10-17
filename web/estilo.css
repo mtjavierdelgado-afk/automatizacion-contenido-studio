@@ -3398,7 +3398,6 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 .filtros-cola { gap: 6px; flex-wrap: wrap; margin: 4px 0 10px; }
 .filtros-cola .buscar-cola { flex: 1 1 200px; min-width: 0; }
 .filtros-cola select { max-width: 200px; min-width: 0; }
-.titulo-calendario { text-transform: capitalize; }
 .vista-cal { display: inline-flex; }
 .calendario-mes { grid-template-columns: repeat(7, minmax(44px, 1fr)); gap: 4px; overflow-x: visible; }
 .calendario-mes .dia-publicar { min-height: 64px; padding: 4px; min-width: 0; }

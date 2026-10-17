@@ -693,6 +693,10 @@ def prueba_studio():
         igual(pendiente["estado"], "espera_ok", "en «espera tu OK»")
         c = s.get(base + "/api/publicar/cola").json()
         ok(any(e["id"] == pendiente["id"] for e in c["esperan_ok"]), "la cola lo pone aparte")
+        ok(all("estilo" in v and "estilo_nombre" in v for v in c["listos"]),
+           "cada vídeo listo trae su estilo, para filtrar por estilo")
+        igual(s.get(base + "/api/publicar/cola", params={"dias": 42}).json()["dias"].__len__(), 42,
+              "la vista de mes pide seis semanas")
         r = s.post(base + f"/api/publicar/videos/largo/envios/{pendiente['id']}/confirmar", json={})
         igual(r.status_code, 400, "confirmar pide confirmado: true")
         r = s.post(base + f"/api/publicar/videos/largo/envios/{pendiente['id']}/confirmar",

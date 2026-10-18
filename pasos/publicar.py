@@ -916,6 +916,7 @@ def _textos_simulados(info, redes, raiz=None):
     caps = info.get("capitulos_base") or []
     if caps:
         datos["capitulos"] = [f"Parte {i + 1}" for i in range(len(caps))]
+    datos["palabra_clave"] = "consolas para fiestas en casa"
     # con `_textos_lentos`, como el CLI de verdad (10-20 s en el servidor)
     lento = raiz and os.path.exists(os.path.join(carpeta(raiz), "_textos_lentos"))
     time.sleep(6 if lento else 0.3)
@@ -995,7 +996,14 @@ def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd, aprendido=None, 
         # «Optimizar SEO al escribir los textos»: la segunda pasada, ya aplicada
         # (los textos son los que Claude acaba de escribir: no hay nada a mano)
         if ajustes.get("optimizar_al_escribir"):
-            _optimizar(raiz, info, list(textos), ajustes, proyecto, cwd, aplicar=True)
+            # su fallo es SUYO: los textos ya están escritos y no se piden otra vez
+            try:
+                _optimizar(raiz, info, list(textos), ajustes, proyecto, cwd, aplicar=True)
+            except Exception as fallo:                      # noqa: BLE001
+                _log("seo_optimizar_fallo", {"clave": pid, "error": str(fallo)[:600]})
+                _SEO_ERRORES[("optimizar", pid)] = (
+                    f"los textos están escritos, pero la revisión SEO falló: {str(fallo)[:300]}",
+                    time.time())
     except Exception as fallo:                              # noqa: BLE001
         # SE APUNTA: el 16-10 fallo en el servidor sin dejar rastro en ningun log
         import traceback                                    # noqa: PLC0415
@@ -1041,7 +1049,19 @@ def lanzar_textos(raiz, info, redes, ajustes, proyecto=None, cwd=None, en_hilo=T
 # acepta alguien.
 
 _SEO_TRABAJANDO = {}           # (tipo, clave) -> {"desde", ...}
-_SEO_ERRORES = {}              # (tipo, clave) -> mensaje
+_SEO_ERRORES = {}              # (tipo, clave) -> (mensaje, cuándo)
+#: Un fallo de una pasada SEO se enseña este rato (o hasta volver a lanzarla).
+CADUCA_ERROR_SEO_S = 900
+
+
+def _error_seo(tipo, clave):
+    dato = _SEO_ERRORES.get((tipo, clave))
+    if not dato:
+        return ""
+    if time.time() - dato[1] > CADUCA_ERROR_SEO_S:
+        _SEO_ERRORES.pop((tipo, clave), None)
+        return ""
+    return dato[0]
 
 
 def _hablar_con_claude(instruccion, sistema, proyecto, cwd, para, simulado):
@@ -1083,7 +1103,7 @@ def _lanzar_seo(tipo, clave, fn, en_hilo):
             import traceback                                # noqa: PLC0415
             _log(f"seo_{tipo}_fallo", {"clave": clave, "error": str(fallo)[:600],
                                        "traza": traceback.format_exc()[-1200:]})
-            _SEO_ERRORES[(tipo, clave)] = f"{str(fallo)[:400]}"
+            _SEO_ERRORES[(tipo, clave)] = (f"{str(fallo)[:400]}", time.time())
         finally:
             _SEO_TRABAJANDO.pop((tipo, clave), None)
     if en_hilo:
@@ -1138,12 +1158,19 @@ def _optimizar(raiz, info, redes, ajustes, proyecto, cwd, aplicar=False):
         raise RuntimeError("Claude no ha devuelto ninguna revisión que se pueda usar")
     with _lock(pid):
         ficha = _leer_video(raiz, pid)
-        # los textos de partida, para saber luego si alguien los cambió a mano
+        # «ANTES» ES LO QUE SE LE MANDÓ A CLAUDE, no lo que hay ahora: si alguien
+        # retocó un campo mientras Claude revisaba, aceptar ese campo da 409 y
+        # no pisa el retoque (revisión del 18-10)
+        tocados = {}
         for red, p in propuesta.items():
-            p["antes"] = {k: (ficha["textos"].get(red) or {}).get(k) for k in p["campos"]}
+            p["antes"] = {k: (textos.get(red) or {}).get(k) for k in p["campos"]}
+            actual = ficha["textos"].get(red) or {}
+            tocados[red] = [k for k in p["campos"]
+                            if (actual.get(k) or None) != (p["antes"][k] or None)]
         ficha["seo_propuesta"] = {"al": _iso_lima(), "redes": propuesta}
         if aplicar:
-            _aceptar_seo(ficha, {r: list(p["campos"]) for r, p in propuesta.items()})
+            _aceptar_seo(ficha, {r: [k for k in p["campos"] if k not in tocados[r]]
+                                 for r, p in propuesta.items()})
         _escribir(_ruta_video(raiz, pid), ficha)
     _log("seo_optimizado", {"video": pid, "redes": list(propuesta), "aplicado": aplicar})
 
@@ -1179,6 +1206,8 @@ def lanzar_optimizar(raiz, info, redes, ajustes, proyecto=None, cwd=None, en_hil
     redes = [r for r in (redes or []) if r in REDES]
     if not redes:
         raise ErrorPublicar("elige al menos una red")
+    if info["pid"] in _ESCRIBIENDO:
+        raise ErrorPublicar("Claude todavía está escribiendo los textos: espera a que acabe", 409)
     _en_marcha("optimizar", info["pid"], {"redes": redes})
     _lanzar_seo("optimizar", info["pid"],
                 lambda: _optimizar(raiz, info, redes, ajustes, proyecto, cwd), en_hilo)
@@ -1220,10 +1249,9 @@ def usar_gancho(raiz, pid, red, indice):
     with _lock(pid):
         ficha = _leer_video(raiz, pid)
         ganchos = (ficha.get("ganchos") or {}).get(red) or []
-        try:
-            gancho = ganchos[int(indice)]
-        except (TypeError, ValueError, IndexError):
-            raise ErrorPublicar("ese gancho ya no está") from None
+        if isinstance(indice, bool) or not isinstance(indice, int) or not 0 <= indice < len(ganchos):
+            raise ErrorPublicar("ese gancho ya no está")
+        gancho = ganchos[indice]
         actual = dict(ficha["textos"].get(red) or {})
         lineas = str(actual.get("descripcion") or "").split("\n")
         resto = "\n".join(lineas[1:]).lstrip("\n") if lineas and lineas[0].strip() else \
@@ -1232,6 +1260,13 @@ def usar_gancho(raiz, pid, red, indice):
         ficha["textos"][red] = actual
         ficha["editado"] = True
         ficha.get("ganchos", {}).pop(red, None)
+        # la propuesta SEO de ese texto era sobre el de antes del gancho
+        propuesta = ((ficha.get("seo_propuesta") or {}).get("redes")) or {}
+        ((propuesta.get(red) or {}).get("campos") or {}).pop("descripcion", None)
+        if red in propuesta and not propuesta[red].get("campos"):
+            del propuesta[red]
+        if not propuesta:
+            ficha.pop("seo_propuesta", None)
         _escribir(_ruta_video(raiz, pid), ficha)
     return ficha
 
@@ -1288,7 +1323,7 @@ def lanzar_palabras(raiz, cid, nombre, marca, contexto, proyecto=None, cwd=None,
 def estado_palabras(cid):
     clave = _clave_proyecto(cid)
     return {"trabajando": ("palabras", clave) in _SEO_TRABAJANDO,
-            "error": _SEO_ERRORES.get(("palabras", clave), "")}
+            "error": _error_seo("palabras", clave)}
 
 
 def hashtags_recientes(raiz, pids, sin_pid=None, cuantos=5):
@@ -1724,7 +1759,8 @@ def ficha(raiz, info, ajustes):
             "notas": notas_seo, "propuesta": datos.get("seo_propuesta") or {},
             "ganchos": datos.get("ganchos") or {},
             "trabajando": {t: dict(v) for (t, c), v in list(_SEO_TRABAJANDO.items()) if c == pid},
-            "errores": {t: m for (t, c), m in list(_SEO_ERRORES.items()) if c == pid},
+            "errores": {t: _error_seo(t, c) for (t, c) in list(_SEO_ERRORES) if c == pid
+                        and _error_seo(t, c)},
             "nombre_fichero": SEO.nombre_fichero(palabra, info.get("nombre"), pid),
         },
         "escribiendo": pid in _ESCRIBIENDO, "error_textos": _ERRORES_TEXTOS.get(pid, ""),

@@ -308,10 +308,9 @@ def normalizar_optimizacion(datos, redes):
         if not bruto:
             continue
         campos = {}
-        for campo, cambio in (bruto.get("campos") or {}).items():
+        brutos = bruto.get("campos") if isinstance(bruto.get("campos"), dict) else {}
+        for campo, cambio in brutos.items():
             campo = sin_tildes(campo).replace(" ", "_")
-            if campo == "descripción":
-                campo = "descripcion"
             if campo not in CAMPOS_OPTIMIZABLES or not isinstance(cambio, dict):
                 continue
             if campo == "titulo" and red not in ("youtube", "facebook"):
@@ -335,9 +334,10 @@ def normalizar_optimizacion(datos, redes):
             nota = max(0, min(100, int(bruto.get("nota"))))
         except (TypeError, ValueError):
             nota = None
+        fallos = bruto.get("fallos")
+        fallos = [fallos] if isinstance(fallos, str) else (fallos if isinstance(fallos, list) else [])
         salida[red] = {"nota": nota, "campos": campos,
-                       "fallos": [" ".join(str(f).split())[:200] for f in (bruto.get("fallos") or [])
-                                  if str(f).strip()][:8]}
+                       "fallos": [" ".join(str(f).split())[:200] for f in fallos if str(f).strip()][:8]}
     return salida
 
 
@@ -471,9 +471,8 @@ def nota(red, textos_red, compuesto, ajustes, datos_video, info, palabra):
               + ("" if len(primera) <= tope else f" (se corta a los {tope}: «más»)"), 10)
     minimo, maximo = RANGO_HASHTAGS[red]
     n = len(tags)
-    punto(minimo <= n <= max(maximo, 15 if red == "instagram" else maximo + 3),
-          f"{n} hashtags" + ("" if minimo <= n <= maximo else f" (en {red} van de {minimo} a {maximo})"),
-          10)
+    en_rango = minimo <= n <= maximo
+    punto(en_rango, f"{n} hashtags" + ("" if en_rango else f" (en {red} van de {minimo} a {maximo})"), 10)
     vacios = sorted({t for t in tags if sin_tildes(t) in HASHTAGS_VACIOS})
     punto(not vacios, "sin hashtags vacíos" if not vacios else
           "hashtags que no posicionan: " + ", ".join(f"#{v}" for v in vacios), 5)
@@ -490,9 +489,6 @@ def nota(red, textos_red, compuesto, ajustes, datos_video, info, palabra):
     if red == "instagram":
         punto(bool(ajustes.get("ig_ubicacion")), "ubicación puesta" if ajustes.get("ig_ubicacion")
               else "sin ubicación de Instagram (Lo fijo → SEO)", 5)
-    if red == "youtube":
-        punto(bool(ajustes.get("yt_categoria")) and bool(ajustes.get("yt_idioma")),
-              "categoría e idioma puestos", 5)
     portada = (datos_video.get("portada") or {})
     punto(portada.get("ms") is not None or bool(portada.get("imagen")),
           "portada elegida" if (portada.get("ms") is not None or portada.get("imagen"))

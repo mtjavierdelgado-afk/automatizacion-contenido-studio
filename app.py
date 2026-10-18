@@ -15257,8 +15257,9 @@ def publicar_proponer_palabras(cid: str, peticion: Request):
                       f"Material: {info.get('material', '')[:800]}\nGuion: {guion[:1200]}")
     if not trozos:
         raise ErrorApi(409, "este proyecto todavía no tiene vídeos de los que sacar palabras clave")
-    _por_publicar(P.lanzar_palabras, raiz_proyectos(), cid, nombre, nombre, "\n\n".join(trozos),
-                  proyecto=None, cwd=cwd)
+    # el coste se apunta en el vídeo más reciente del proyecto (el primero leído)
+    _por_publicar(P.lanzar_palabras, raiz_proyectos(), cid, nombre, "", "\n\n".join(trozos),
+                  proyecto=proyecto, cwd=cwd)
     return {"trabajando": True}
 
 

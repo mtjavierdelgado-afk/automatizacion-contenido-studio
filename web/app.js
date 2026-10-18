@@ -17639,6 +17639,7 @@ function pararRelojPublicar() {
 }
 
 function olvidarEnvioPublicar() {
+  PUB.seoBorrador = {};
   PUB.modoEnvio = '';
   PUB.cuandoEnvio = '';
   PUB.borrador = {};
@@ -18013,18 +18014,23 @@ function editarTextoPublicar(red, campo, valor) {
   PUB.guardando = setTimeout(guardarTextosPublicar, 900);
 }
 
+/* Devuelve si quedó guardado: quien sigue después (optimizar, aceptar, pedir
+   ganchos) no puede seguir sobre el texto viejo del servidor. */
 async function guardarTextosPublicar() {
+  clearTimeout(PUB.guardando);
   PUB.guardando = null;
   const textos = JSON.parse(JSON.stringify(PUB.borrador));
-  if (!Object.keys(textos).length || !PUB.pid) return;
+  if (!Object.keys(textos).length || !PUB.pid) return true;
   try {
     PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
       method: 'PUT', cuerpo: { textos },
     });
     limpiarBorradorPublicar(textos);
     repintarPublicarSinPisar();
+    return true;
   } catch (e) {
     toast(`no se han podido guardar los textos: ${e.message}`, true);
+    return false;
   }
 }
 
@@ -19257,8 +19263,10 @@ function bloqueSeoVideo() {
   const campo = () => document.querySelector('input[data-foco="seo-palabra-video"]');
   b.appendChild(h('div', { clase: 'fila campos-seo' },
     h('label', { clase: 'etiqueta-campo' }, 'Palabra clave de este vídeo',
-      h('input', { type: 'text', value: seo.palabra_propia || '', placeholder: proyecto || 'la del proyecto (Cuentas y ajustes → SEO)',
-        datos: { foco: 'seo-palabra-video' }, onchange: ev => guardarSeoVideoPublicar({ palabra_clave: ev.target.value }) })),
+      h('input', { type: 'text', value: 'palabra_clave' in (PUB.seoBorrador || {}) ? PUB.seoBorrador.palabra_clave : (seo.palabra_propia || ''),
+        placeholder: proyecto || 'la del proyecto (Cuentas y ajustes → SEO)', datos: { foco: 'seo-palabra-video' },
+        oninput: ev => { PUB.seoBorrador = Object.assign(PUB.seoBorrador || {}, { palabra_clave: ev.target.value }); },
+        onchange: async ev => { await guardarSeoVideoPublicar({ palabra_clave: ev.target.value }); delete PUB.seoBorrador.palabra_clave; } })),
     botonGuia('palabra_clave', campo)));
   if (seo.palabra_propuesta && seo.palabra_propuesta !== seo.palabra) {
     b.appendChild(h('div', { clase: 'fila' },
@@ -19277,7 +19285,7 @@ function bloqueSeoVideo() {
 
 async function guardarSeoVideoPublicar(cambios) {
   try {
-    await guardarTextosPublicar();
+    if (!(await guardarTextosPublicar())) return;
     PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), { method: 'PUT', cuerpo: cambios });
     toast('Guardado');
     pintarModulo();
@@ -19289,7 +19297,7 @@ async function optimizarSeoPublicar() {
   const redes = (f.redes || []).filter(r => String(textosDeFicha(r).descripcion || '').trim());
   if (!redes.length) { toast('Antes hacen falta los textos: pídeselos a Claude o escríbelos', true); return; }
   try {
-    await guardarTextosPublicar();
+    if (!(await guardarTextosPublicar())) return;
     await pedir(rutaPublicar(`/videos/${encodeURIComponent(f.pid)}/optimizar`), { method: 'POST', cuerpo: { redes } });
     f.seo = Object.assign({}, f.seo, { trabajando: Object.assign({}, (f.seo || {}).trabajando, { optimizar: {} }) });
     pintarModulo();
@@ -19332,7 +19340,7 @@ function propuestaSeoPublicar(propuesta) {
 async function aceptarSeoPublicar(aceptar) {
   // lo que se esté tecleando va antes: si no, el servidor compararía con lo viejo
   try {
-    await guardarTextosPublicar();
+    if (!(await guardarTextosPublicar())) return;
     PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
       method: 'PUT', cuerpo: { aceptar_seo: aceptar } });
     toast('Aceptado');
@@ -19347,6 +19355,22 @@ async function dejarMioSeoPublicar(red, campo) {
       method: 'PUT', cuerpo: { rechazar_seo: { [red]: [campo] } } });
     pintarModulo();
   } catch (e) { toast(e.message, true); }
+}
+
+/* Un campo SEO del vídeo que se guarda al salir de él. Lo tecleado vive en
+   PUB.seoBorrador hasta guardarse: un repintado (al acabar un trabajo de
+   Claude) no se lo lleva. */
+function campoSeoVideo(campo, etiqueta, ejemplo) {
+  const seo = (PUB.ficha || {}).seo || {};
+  PUB.seoBorrador = PUB.seoBorrador || {};
+  const valor = campo in PUB.seoBorrador ? PUB.seoBorrador[campo] : (seo[campo] || '');
+  return h('label', { clase: 'etiqueta-campo' }, etiqueta,
+    h('input', { type: 'text', value: valor, placeholder: ejemplo || '', datos: { foco: `seo-${campo}` },
+      oninput: ev => { PUB.seoBorrador[campo] = ev.target.value; },
+      onchange: async ev => {
+        await guardarSeoVideoPublicar({ [campo]: ev.target.value });
+        delete PUB.seoBorrador[campo];
+      } }));
 }
 
 /* Por red: la nota SEO (sin Claude), el primer comentario, lo de Instagram
@@ -19374,12 +19398,8 @@ function seoDeRedPublicar(red) {
       oninput: ev => editarTextoPublicar(red, 'primer_comentario', ev.target.value) })));
   if (red === 'instagram') {
     caja.appendChild(h('div', { clase: 'fila campos-seo' },
-      h('label', { clase: 'etiqueta-campo' }, 'Colaboradores (hasta 3 cuentas, separadas por comas)',
-        h('input', { type: 'text', value: seo.colaboradores || '', placeholder: '@cuenta1, @cuenta2',
-          onchange: ev => guardarSeoVideoPublicar({ colaboradores: ev.target.value }) })),
-      h('label', { clase: 'etiqueta-campo' }, 'Etiquetar cuentas (separadas por comas)',
-        h('input', { type: 'text', value: seo.etiquetas || '', placeholder: '@cuenta',
-          onchange: ev => guardarSeoVideoPublicar({ etiquetas: ev.target.value }) }))));
+      campoSeoVideo('colaboradores', 'Colaboradores (hasta 3 cuentas, separadas por comas)', '@cuenta1, @cuenta2'),
+      campoSeoVideo('etiquetas', 'Etiquetar cuentas (separadas por comas)', '@cuenta')));
     caja.appendChild(h('div', { clase: 'meta' }, 'Instagram no admite texto alternativo a través de Upload-Post.'));
   }
   const trabajando = !!((seo.trabajando || {})[`ganchos_${red}`]);
@@ -19397,7 +19417,7 @@ function seoDeRedPublicar(red) {
 
 async function pedirGanchosPublicar(red) {
   try {
-    await guardarTextosPublicar();
+    if (!(await guardarTextosPublicar())) return;
     await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/ganchos`), { method: 'POST', cuerpo: { red } });
     const f = PUB.ficha;
     f.seo = Object.assign({}, f.seo, { trabajando: Object.assign({}, (f.seo || {}).trabajando, { [`ganchos_${red}`]: {} }) });
@@ -19408,7 +19428,7 @@ async function pedirGanchosPublicar(red) {
 
 async function usarGanchoPublicar(red, indice) {
   try {
-    await guardarTextosPublicar();
+    if (!(await guardarTextosPublicar())) return;
     PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/ganchos/usar`), {
       method: 'POST', cuerpo: { red, indice } });
     toast('Gancho puesto en la primera línea');
@@ -19419,16 +19439,26 @@ async function usarGanchoPublicar(red, indice) {
 /* En el Encargo (Crear): la palabra clave del proyecto como sugerencia, para
    que el guion la diga en los 3 primeros segundos y salga en pantalla. Solo
    se enseña: no toca el encargo ni el guion (ni sus firmas). */
+const PISTAS_PALABRA = {};
 function pistaPalabraClaveEncargo(v) {
   const caja = h('div', { clase: 'pista-palabra-clave' });
   if (!v || !v.estilo) return caja;
-  pedir(`${BASE}/api/publicar/palabra-clave?${consulta({ estilo: v.estilo })}`).then(r => {
+  // en memoria por estilo: el Encargo se repinta a menudo y la caja parpadeaba
+  const pintar = r => {
     if (!r || !r.palabra) return;
     meter(caja, [h('div', { clase: 'caja-info fila' },
       h('span', { clase: 'crece' }, `SEO: la palabra clave de este proyecto es «${r.palabra}»${r.zona ? ` (${r.zona})` : ''}. `
         + 'Si el guion la dice en los 3 primeros segundos y sale en pantalla, las redes lo encuentran mejor.'),
       h('button', { clase: 'mini', onclick: () => copiarTexto(`Di «${r.palabra}» en los 3 primeros segundos y que salga en pantalla.`) },
         'Copiar como indicación'))]);
+  };
+  if (v.estilo in PISTAS_PALABRA) {
+    pintar(PISTAS_PALABRA[v.estilo]);
+    return caja;
+  }
+  pedir(`${BASE}/api/publicar/palabra-clave?${consulta({ estilo: v.estilo })}`).then(r => {
+    PISTAS_PALABRA[v.estilo] = r;
+    pintar(r);
   }).catch(() => null);
   return caja;
 }

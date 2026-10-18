@@ -1490,6 +1490,9 @@ def prueba_seo():
     ok(puntos.get("palabra clave al principio del título") and puntos.get("palabra clave en la primera línea"),
        f"la nota ve la palabra clave en el título y en la primera línea ({n['nota']}/100)")
     ok(any(not v and "portada" in k for k, v in puntos.items()), "y que falta la portada")
+    n7 = S.nota("tiktok", dict(textos, hashtags=["a", "b", "c", "d", "e", "f", "g"]), {}, ajustes, {}, INFO, "")
+    ok(not next(x for x in n7["puntos"] if "hashtags (" in x["texto"])["ok"],
+       "7 hashtags en TikTok no suman: están fuera de rango")
     malo = dict(textos, titulo="Una fiesta increíble", descripcion="Hola\nadiós", cta="",
                 hashtags=["fyp", "viral"])
     n2 = S.nota("youtube", malo, P.componer("youtube", malo, ajustes, INFO, None, {}), ajustes, {}, INFO,
@@ -1522,10 +1525,49 @@ def prueba_seo():
         igual(f["textos"]["instagram"]["primer_comentario"], "¿Cuál elegirías tú?", "aceptar un campo lo pone")
         P.guardar_ficha(raiz, "seo1", {"rechazar_seo": {"instagram": ["descripcion"]}})
         igual(P.ficha(raiz, info, ajustes)["seo"]["propuesta"], {}, "«Dejar el mío» lo quita de la propuesta")
+        # revisión del 18-10: lo que se retoca MIENTRAS Claude revisa no se pisa
+        original = P._optimizar_simulado
+
+        vueltas = []
+
+        def tocando(datos_video, redes):
+            vueltas.append(1)
+            P.guardar_ficha(raiz, "seo1", {"textos": {"instagram": {
+                "descripcion": f"Retocado mientras {len(vueltas)}"}}})
+            return original(datos_video, redes)
+        P._optimizar_simulado = tocando
+        try:
+            P.lanzar_optimizar(raiz, info, ["instagram"], ajustes, en_hilo=False)
+            try:
+                P.guardar_ficha(raiz, "seo1", {"aceptar_seo": {"instagram": ["descripcion"]}})
+                ok(False, "aceptar no pisa lo retocado mientras Claude revisaba")
+            except P.ErrorPublicar as fallo:
+                igual(fallo.codigo, 409, "aceptar no pisa lo retocado mientras Claude revisaba")
+            P.guardar_ficha(raiz, "seo1", {"descartar_seo": True})
+            P._optimizar(raiz, info, ["instagram"], ajustes, None, None, aplicar=True)
+            igual(P.ficha(raiz, info, ajustes)["textos"]["instagram"]["descripcion"], "Retocado mientras 2",
+                  "ni con «optimizar al escribir»")
+        finally:
+            P._optimizar_simulado = original
+        P.guardar_ficha(raiz, "seo1", {"descartar_seo": True})
+        P._ESCRIBIENDO["seo1"] = {"desde": P._iso_lima(), "redes": ["instagram"]}
+        try:
+            P.lanzar_optimizar(raiz, info, ["instagram"], ajustes, en_hilo=False)
+            ok(False, "no se optimiza mientras Claude escribe los textos")
+        except P.ErrorPublicar as fallo:
+            igual(fallo.codigo, 409, "no se optimiza mientras Claude escribe los textos")
+        finally:
+            P._ESCRIBIENDO.pop("seo1", None)
         # ganchos
         P.lanzar_ganchos(raiz, info, "instagram", ajustes, en_hilo=False)
         ganchos = P.ficha(raiz, info, ajustes)["seo"]["ganchos"]["instagram"]
         igual(len(ganchos), 3, "«Dame 3 ganchos» deja tres")
+        for malo in (-1, True, "1", 9):
+            try:
+                P.usar_gancho(raiz, "seo1", "instagram", malo)
+                ok(False, f"un gancho {malo!r} no existe")
+            except P.ErrorPublicar:
+                ok(True, f"un gancho {malo!r} no existe")
         f = P.usar_gancho(raiz, "seo1", "instagram", 1)
         ok(f["textos"]["instagram"]["descripcion"].startswith(ganchos[1]) and "cambiado" not in
            f["textos"]["instagram"]["descripcion"].splitlines()[0],
@@ -1549,8 +1591,19 @@ def prueba_seo():
         f = P.ficha(raiz, info2, ajustes)
         ok(f["textos"]["instagram"]["descripcion"].startswith("[SEO]") and not f["seo"]["propuesta"],
            "«Optimizar SEO al escribir»: la revisión queda aplicada sola")
-        ok(f["seo"]["palabra_propuesta"] == "" or isinstance(f["seo"]["palabra_propuesta"], str),
-           "la palabra propuesta es un texto")
+        igual(f["seo"]["palabra_propuesta"], "consolas para fiestas en casa",
+              "Claude propone una palabra clave para este vídeo")
+        # si la segunda pasada falla, los textos siguen escritos y se dice aparte
+        info3 = dict(INFO, pid="seo3")
+        P._optimizar_simulado = lambda d, r: (_ for _ in ()).throw(RuntimeError("sin cupo"))
+        try:
+            P.lanzar_textos(raiz, info3, ["instagram"], dict(ajustes, optimizar_al_escribir=True), en_hilo=False)
+        finally:
+            P._optimizar_simulado = original
+        f = P.ficha(raiz, info3, ajustes)
+        ok(f["textos"]["instagram"]["descripcion"] and not f["error_textos"]
+           and "revisión SEO falló" in f["seo"]["errores"].get("optimizar", ""),
+           "si falla la revisión SEO automática, los textos quedan y el fallo es solo de la revisión")
         # el nombre del fichero en la subida
         cli = P.cliente(raiz)
         cli.crear_perfil("studio_seo")

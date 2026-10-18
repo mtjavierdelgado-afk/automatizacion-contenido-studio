@@ -134,7 +134,21 @@ def palabras_y_ganchos(raiz, videos, cid=None, dias=90, cuantos=10, desde=None, 
         palabras.append(g)
     # por la mediana: un post viral no hace buena a una palabra con diez flojos
     palabras.sort(key=lambda g: (g["palabra"] == SIN_PALABRA, -g["mediana"], -g["posts"]))
+    # la misma primera línea en varias redes es UN gancho: se queda la que más
+    # vistas trajo y se apunta en cuántas salió
     ganchos.sort(key=lambda x: -x["vistas"])
+    unicos = {}
+    for g in ganchos:
+        clave_g = " ".join(P.SEO.sin_tildes(g["gancho"]).lower().split())
+        if clave_g in unicos:
+            primero = unicos[clave_g]
+            primero["veces"] += 1
+            primero["vistas_total"] += g["vistas"]
+            if g["red"] not in primero["redes"]:
+                primero["redes"].append(g["red"])
+            continue
+        unicos[clave_g] = dict(g, veces=1, vistas_total=g["vistas"], redes=[g["red"]])
+    ganchos = list(unicos.values())
     return {"dias": dias, "desde": desde.strftime("%Y-%m-%d"),
             "palabras": palabras[:cuantos * 2], "ganchos": ganchos[:cuantos],
             "minimo_vistas": MIN_VISTAS}
@@ -220,12 +234,20 @@ def meses_con_publicaciones(raiz, videos, cid):
 def informe_mensual(raiz, videos, cid, mes=None, nombre=""):
     """El mes de un proyecto. -> {mes, total, anterior, por_red, mejores,
     palabras, ganchos, horario, seguidores, resumen (texto para copiar)}"""
-    mes = mes or P.ahora_lima().strftime("%Y-%m")
+    ahora = P.ahora_lima()
+    mes = mes or ahora.strftime("%Y-%m")
     inicio, fin = _limites_mes(mes)
     antes, _ = _limites_mes((inicio - dt.timedelta(days=1)).strftime("%Y-%m"))
+    # EL MES EN CURSO se compara con el MISMO TRAMO del anterior (el día 5, con
+    # el 1 al 5 del mes pasado): contra el mes entero salía «−85 %» cada
+    # principio de mes, y eso se copia al cliente
+    en_curso = inicio <= ahora < fin
+    tope_antes = inicio
+    if en_curso:
+        tope_antes = min(inicio, antes + (ahora - inicio))
     propios = P._de_proyecto(videos, cid)
     pares = P._publicados(raiz, propios, inicio, fin)
-    previos = P._publicados(raiz, propios, antes, inicio)
+    previos = P._publicados(raiz, propios, antes, tope_antes)
     total = P._totales(pares)
     anterior = P._totales(previos)
     por_red = {}
@@ -253,6 +275,8 @@ def informe_mensual(raiz, videos, cid, mes=None, nombre=""):
         "nombre": nombre, "desde": inicio.strftime("%Y-%m-%d"),
         "hasta": (fin - dt.timedelta(days=1)).strftime("%Y-%m-%d"),
         "total": total, "anterior": anterior, "por_red": por_red,
+        "en_curso": en_curso, "anterior_desde": antes.strftime("%Y-%m-%d"),
+        "anterior_hasta": P._iso_lima(tope_antes)[:16],
         "videos": len({v["pid"] for v, _e in pares}),
         "dias_con_publicacion": len({str(e.get("cuando") or "")[:10] for _v, e in pares}),
         "sin_cifras": sum(1 for _v, e in pares
@@ -281,24 +305,27 @@ def _num(n):
     return f"{int(n):,}".replace(",", ".")
 
 
-def _cambio(actual, previo):
+def _cambio(actual, previo, frente="frente al mes anterior"):
     if not isinstance(actual, (int, float)) or not isinstance(previo, (int, float)) or not previo:
         return ""
     pct = round((actual - previo) * 100 / previo)
-    return f" ({'+' if pct >= 0 else ''}{pct} % frente al mes anterior)"
+    return f" ({'+' if pct >= 0 else ''}{pct} % {frente})"
 
 
 def resumen(inf):
     """El informe en texto llano, para pegarlo en un correo o un mensaje."""
     t, a = inf["total"], inf["anterior"]
-    lineas = [f"Resultados de {inf['nombre'] or 'redes'}: {inf['nombre_mes']}", ""]
+    frente = ("frente a los mismos días del mes anterior" if inf.get("en_curso")
+              else "frente al mes anterior")
+    lineas = [f"Resultados de {inf['nombre'] or 'redes'}: {inf['nombre_mes']}"
+              + (" (mes en curso)" if inf.get("en_curso") else ""), ""]
     lineas.append(f"• Publicaciones: {t.get('posts', 0)} ({inf['videos']} vídeo(s), "
                   f"{inf['dias_con_publicacion']} día(s) con publicación)"
-                  + _cambio(t.get("posts"), a.get("posts")))
+                  + _cambio(t.get("posts"), a.get("posts"), frente))
     for k, nombre in (("vistas", "Vistas"), ("me_gusta", "Me gusta"),
                       ("comentarios", "Comentarios"), ("compartidos", "Compartidos")):
         if isinstance(t.get(k), (int, float)):
-            lineas.append(f"• {nombre}: {_num(t[k])}" + _cambio(t.get(k), a.get(k)))
+            lineas.append(f"• {nombre}: {_num(t[k])}" + _cambio(t.get(k), a.get(k), frente))
     if inf["por_red"]:
         lineas += ["", "Por red:"]
         for red, f in inf["por_red"].items():

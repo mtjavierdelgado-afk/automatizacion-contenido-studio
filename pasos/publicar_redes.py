@@ -184,7 +184,9 @@ def campos(red, texto, titulo, textos_red, ajustes, info, marcar_ia):
         if titulo:
             c["linkedin_title"] = titulo[:TITULOS["linkedin"]]
         c["linkedin_description"] = texto
-        c["visibility"] = ajustes.get("linkedin_visibilidad") or "PUBLIC"
+        # con su prefijo: «visibility» a secas es el campo general de la subida
+        # y van otras redes en ella (Upload-Post acepta los dos nombres)
+        c["linkedin_visibility"] = ajustes.get("linkedin_visibilidad") or "PUBLIC"
         if ajustes.get("linkedin_pagina"):
             c["target_linkedin_page_id"] = ajustes["linkedin_pagina"]
     elif red == "x":

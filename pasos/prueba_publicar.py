@@ -1115,7 +1115,7 @@ def prueba_metricas_auto():
             for e in datos["envios"]:
                 e["metricas"] = {}
             P._escribir(P._ruta_video(raiz, pid), datos)
-        lotes, _pids = A._publicados(raiz)
+        lotes = A._publicados(raiz)
         nuevo = lotes[0][1]
         ok(any(e.get("lote") == nuevo or e.get("request_id") == nuevo
                for e in P._leer_video(raiz, "auto_c")["envios"]), "el más nuevo va primero")
@@ -1128,20 +1128,73 @@ def prueba_metricas_auto():
         ok(not P._leer_video(raiz, "auto_a")["envios"][0].get("metricas", {}).get("al"),
            "el viejo se queda para otra")
         A.POSTS = A.POSTS[:-1]
-        # una vuelta a medias (el servicio se cayó) no bloquea para siempre
+        # una vuelta a medias (el servicio se reinició) no bloquea nada
         datos = A._leer(raiz)
-        datos["ultima"] = {"empezo": P._iso_lima(P.ahora_lima() - dt.timedelta(hours=2))}
+        datos["ultima"] = {"empezo": P._iso_lima(), "motivo": "programada"}
         P._escribir(A._ruta(raiz), datos)
-        ok(not A.leer(raiz)["corriendo"], "una vuelta muerta no cuenta como en marcha")
-        datos["ultima"] = {"empezo": P._iso_lima()}
-        P._escribir(A._ruta(raiz), datos)
-        ok(A.leer(raiz)["corriendo"], "una recién empezada sí")
+        leida = A.leer(raiz)
+        ok(not leida["corriendo"] and leida["ultima"].get("cortada"),
+           "una vuelta sin terminar y sin nadie haciéndola: cortada, no «en marcha»")
+        historial_antes = len(leida["historial"])
+        A.correr(raiz, "tras reinicio")
+        leida = A.leer(raiz)
+        ok(any(x.get("cortada") for x in leida["historial"]) and
+           len(leida["historial"]) == historial_antes + 2, "y la cortada pasa al historial marcada")
+        # en marcha en este proceso
+        A._LOCK.acquire()
         try:
-            A.correr_ya(raiz)
-            ok(False, "«Pedirlas ahora» con una vuelta en marcha: 409")
-        except P.ErrorPublicar as fallo:
-            igual(fallo.codigo, 409, "«Pedirlas ahora» con una vuelta en marcha: 409")
-        igual(A.correr(raiz).get("ocupado"), True, "y la programada tampoco la pisa")
+            ok(A.leer(raiz)["corriendo"], "con una vuelta en marcha, lo dice")
+            try:
+                A.correr_ya(raiz)
+                ok(False, "«Pedirlas ahora» con una vuelta en marcha: 409")
+            except P.ErrorPublicar as fallo:
+                igual(fallo.codigo, 409, "«Pedirlas ahora» con una vuelta en marcha: 409")
+            igual(A.correr(raiz).get("ocupado"), True, "y la programada tampoco la pisa")
+        finally:
+            A._LOCK.release()
+        # en marcha en OTRO proceso (dos servicios con la misma carpeta)
+        if A.fcntl is not None:
+            import fcntl
+            fh = open(A._ruta_cerrojo(raiz), "a+")
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                ok(A.en_marcha(raiz), "la de otro proceso también cuenta")
+                igual(A.correr(raiz).get("ocupado"), True, "y no se hace dos veces")
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+                fh.close()
+        # apagarlas a mitad: la programada se para antes de gastar
+        for pid in ("auto_a", "auto_b", "auto_c"):
+            datos = P._leer_video(raiz, pid)
+            for e in datos["envios"]:
+                e["metricas"] = {}
+            P._escribir(P._ruta_video(raiz, pid), datos)
+        A.guardar(raiz, {"frecuencia": "apagada"})
+        r = A.correr(raiz, "programada")
+        igual(r["consultados"], 0, "apagadas mientras corre: la programada no gasta más")
+        ok(any("apagaron" in A._texto_aviso(e) for e in r["errores"]), "y lo dice")
+        # la manual sí corre aunque estén apagadas; la programada de justo
+        # después no repite lo que pidió la manual (respiro de media vuelta)
+        respiro, P.RESPIRO_METRICAS_S = P.RESPIRO_METRICAS_S, 0
+        try:
+            A.guardar(raiz, {"posts": 10})
+            r = A.correr(raiz, "a mano")
+            igual(r["consultados"], 3, "«Pedirlas ahora» corre con ellas apagadas")
+            A.guardar(raiz, {"frecuencia": "diaria"})
+            r = A.correr(raiz, "programada")
+            igual(r["consultados"], 0, "la programada justo después no repite lo que pidió la manual")
+        finally:
+            P.RESPIRO_METRICAS_S = respiro
+        # lo que no puede ver quien pregunta no sale
+        datos = A._leer(raiz)
+        datos["ultima"]["errores"] = [{"texto": "seguidores de cl_secreto: algo", "proyecto": "cl_secreto"},
+                                      "Upload-Post: el perfil studio_a no responde"]
+        P._escribir(A._ruta(raiz), datos)
+        tapada = A.leer(raiz, ocultar={"cl_secreto", ""})
+        textos = [A._texto_aviso(e) for e in tapada["ultima"]["errores"]]
+        ok(not any("cl_secreto" in t for t in textos), "el aviso de un proyecto cerrado no sale")
+        ok(textos and "studio_a" not in textos[0] and "proyecto con clave" in textos[0],
+           f"y su perfil se tapa en los demás ({textos})")
         # apagarlas
         A.guardar(raiz, {"frecuencia": "apagada"})
         ok(not A.toca(raiz, P.ahora_lima() + dt.timedelta(days=30)), "apagadas no corren nunca")
@@ -1177,6 +1230,11 @@ def prueba_redes_nuevas():
         ok("bluesky" in vis and "discord" in vis, "una red marcada en el vídeo o con envío no desaparece")
         igual(vis, [r for r in P.REDES if r in vis], "en el orden de la pantalla")
         try:
+            P.guardar_ajustes(raiz, "cl_r", {"redes_visibles": []})
+            ok(False, "sin ninguna red a la vista no se deja")
+        except P.ErrorPublicar:
+            ok(True, "sin ninguna red a la vista no se deja")
+        try:
             P.guardar_ajustes(raiz, "cl_r", {"redes_visibles": ["reddit"]})
             ok(False, "Reddit no se deja poner")
         except P.ErrorPublicar:
@@ -1187,7 +1245,7 @@ def prueba_redes_nuevas():
                   linkedin_visibilidad="CONNECTIONS", gbp_cta="BOOK", gbp_cta_url="https://x.pe")
         t = {"descripcion": "Hola mundo", "titulo": "Título LinkedIn", "alt": "Una persona  juega."}
         c = P.componer("linkedin", t, aj, info, [], {})["campos"]
-        igual((c.get("linkedin_title"), c.get("visibility")), ("Título LinkedIn", "CONNECTIONS"),
+        igual((c.get("linkedin_title"), c.get("linkedin_visibility")), ("Título LinkedIn", "CONNECTIONS"),
               "LinkedIn: título y quién lo ve")
         ok(c.get("linkedin_description", "").startswith("Hola mundo"), "y su texto")
         c = P.componer("pinterest", t, aj, info, [], {})["campos"]
@@ -1282,6 +1340,8 @@ def prueba_informe():
     igual((fi["posts"], fi["mediana"]), (5, 3000), "con sus publicaciones y su mediana")
     ok(abs(fi["interaccion"] - 0.1) < 0.01, f"y su interacción ({fi['interaccion']})")
     igual(pg["ganchos"][0]["gancho"], "¿Tu hijo cumple años?", "el gancho con más vistas, primero")
+    igual(pg["ganchos"][0]["veces"], 4, "la misma primera línea cuenta una vez (salió 4 veces)")
+    igual(len({g["gancho"] for g in pg["ganchos"]}), len(pg["ganchos"]), "sin ganchos repetidos")
     hor = I.horarios(raiz, videos, "")
     tt = hor["redes"]["tiktok"]
     ok(tt["propios"], "TikTok tiene datos propios (8 publicaciones)")
@@ -1305,6 +1365,18 @@ def prueba_informe():
     ok("Fiestas Suyu" in inf["resumen"] and inf["nombre_mes"] in inf["resumen"], "el resumen para copiar")
     ok("undefined" not in inf["resumen"] and "None" not in inf["resumen"], "sin huecos raros en el resumen")
     ok(mes in inf["meses"], "y el mes sale en la lista para elegir")
+    # el mes en curso, frente a los MISMOS días del anterior
+    hoy_mes = ahora.strftime("%Y-%m")
+    ini_mes = ahora.replace(day=1, hour=0, minute=0, second=0)
+    antes_ini = (ini_mes - dt.timedelta(days=1)).replace(day=1)
+    tarde = antes_ini + (ahora - ini_mes) + dt.timedelta(hours=2)    # después del mismo tramo
+    temprano = antes_ini + dt.timedelta(hours=1)
+    P._escribir(P._ruta_video(raiz, "inf2"), {"envios": [
+        envio("youtube", temprano, 100), envio("youtube", tarde, 5000)] if tarde.month == antes_ini.month
+        else [envio("youtube", temprano, 100)], "textos": {}, "redes": []})
+    inf = I.informe_mensual(raiz, [{"pid": "inf2", "nombre": "B", "cliente": ""}], "", mes=hoy_mes, nombre="B")
+    ok(inf["en_curso"], "el mes de hoy sale como en curso")
+    igual(inf["anterior"]["posts"], 1, "y se compara con el mismo tramo del mes anterior, no con el entero")
     vacio = I.informe_mensual(raiz, videos, "", mes="2020-01", nombre="X")
     igual(vacio["total"]["posts"], 0, "un mes sin nada: cero, sin fallar")
     try:

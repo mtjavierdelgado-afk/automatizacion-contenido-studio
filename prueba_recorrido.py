@@ -4269,8 +4269,9 @@ def publicar_mas(navegador, datos):
     ok(pg.esperar(f"{tarjeta} .redes-proyecto .aviso-red", "tablero", 10), "Pinterest avisa de que falta el tablero")
     ok(pg.visible(f"{tarjeta} .redes-proyecto .ajustes-red b", "LinkedIn"), "y LinkedIn enseña su página y quién lo ve")
     pg.pulsar(f"{tarjeta} .redes-proyecto button", "Elegir tablero")
-    ok(pg.esperar(f'{tarjeta} select[data-tablero] option', "Fiestas", 10),
-       "«Elegir tablero»: los tableros de la cuenta de Pinterest")
+    ok(pg.esperar(f"{tarjeta} select[data-tablero]", segundos=10) and
+       "Fiestas" in pg.p.locator(f"{tarjeta} select[data-tablero]").inner_text(),
+       f"«Elegir tablero»: los tableros de la cuenta de Pinterest ({pg.toast()[:60]!r})")
     pg.p.locator(f"{tarjeta} select[data-tablero]").select_option("1001")
     pg.p.wait_for_timeout(1200)
     _r, proyectos = api.get("/api/publicar/proyectos")

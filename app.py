@@ -15199,10 +15199,11 @@ def _publicar_auto():
 
 
 @app.get("/api/publicar/metricas-auto")
-def publicar_metricas_auto():
-    """La configuracion, la ultima vuelta, la proxima y lo que gasta."""
+def publicar_metricas_auto(peticion: Request):
+    """La configuracion, la ultima vuelta, la proxima y lo que gasta. Los avisos
+    de un proyecto con clave cerrado no salen."""
     A = _publicar_auto()
-    r = A.leer(raiz_proyectos())
+    r = A.leer(raiz_proyectos(), ocultar=_cerrados(peticion))
     r["coste"] = _por_publicar(A.coste, raiz_proyectos())
     r["opciones"] = {"frecuencias": [{"id": k, "nombre": v} for k, v in A.NOMBRE_FRECUENCIA.items()],
                      "posts": list(A.POSTS), "sugerido": A.SUGERIDO}
@@ -15217,11 +15218,11 @@ def publicar_metricas_auto_coste(cuerpo: dict = Body(default=None)):
 
 
 @app.put("/api/publicar/metricas-auto")
-def publicar_metricas_auto_guardar(cuerpo: dict = Body(default=None)):
+def publicar_metricas_auto_guardar(peticion: Request, cuerpo: dict = Body(default=None)):
     """Guarda la eleccion (tras confirmar el coste en pantalla)."""
     A = _publicar_auto()
     _por_publicar(A.guardar, raiz_proyectos(), _cuerpo(cuerpo))
-    return publicar_metricas_auto()
+    return publicar_metricas_auto(peticion)
 
 
 @app.post("/api/publicar/metricas-auto/ahora")

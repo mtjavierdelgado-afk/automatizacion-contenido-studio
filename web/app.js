@@ -18503,7 +18503,9 @@ async function confirmarEnvioPublicar(modo, repetir) {
     + `${(f.cuentas || {})[r] ? ` → ${f.cuentas[r].nombre}` : ''}`).join('\n');
   const texto = `${modo === 'ahora' ? 'Publicar AHORA' : `Programar para ${cuandoLegible(cuando)} (hora de Lima)`}`
     + ` «${f.nombre}» en:\n\n${lineas}\n\nCon el perfil de Upload-Post «${(f.ajustes || {}).perfil}». `
-    + 'Una vez publicado no se puede deshacer desde aquí.';
+    + 'Una vez publicado no se puede deshacer desde aquí.'
+    + (redes.includes('google_business') && redes.length > 1
+      ? '\n\nGoogle Business va en una subida aparte: gasta 2 subidas del mes de Upload-Post.' : '');
   if (!confirm(texto)) return;
   PUB.enviando = true;
   pintarModulo();
@@ -18771,7 +18773,7 @@ async function cargarMetricasAutoPublicar() {
     PUB.metricasAuto = await pedir(rutaPublicar('/metricas-auto'));
     if (antes && antes.corriendo && !PUB.metricasAuto.corriendo) {
       const u = PUB.metricasAuto.ultima || {};
-      toast((u.errores || []).length ? `Cifras automáticas: ${u.errores[0]}`
+      toast((u.errores || []).length ? `Cifras automáticas: ${textoAvisoAuto(u.errores[0])}`
         : `Cifras automáticas al día (${u.actualizados || 0} publicaciones)`, !!(u.errores || []).length);
     }
   } catch (e) { PUB.metricasAuto = { error: e.message }; }
@@ -18836,8 +18838,11 @@ async function correrAutoPublicar() {
   await cargarMetricasAutoPublicar();
 }
 
+function textoAvisoAuto(a) { return a && typeof a === 'object' ? (a.texto || '') : String(a || ''); }
+
 function textoUltimaAutoPublicar(u) {
   if (!u) return 'Todavía no ha corrido ninguna vuelta.';
+  if (u.cortada) return `La vuelta del ${fechaCorta(u.empezo).slice(0, 16)} se cortó (se reinició el servicio): la próxima sigue.`;
   if (!u.fin) return `Pidiendo las cifras desde ${fechaCorta(u.empezo).slice(0, 16)}…`;
   const partes = [`Última vuelta: ${fechaCorta(u.fin).slice(0, 16)} (${u.motivo || 'programada'})`,
     `${u.actualizados || 0} publicación(es) al día`];
@@ -18877,8 +18882,10 @@ function bloqueMetricasAutoPublicar() {
       h('select', { onchange: ev => { soltar(ev); elegirAutoPublicar({ frecuencia: ev.target.value }); } },
         ...(op.frecuencias || []).map(x => h('option', { value: x.id, selected: e.frecuencia === x.id }, x.nombre)))),
     h('label', {}, 'Hora ',
-      h('input', { type: 'time', value: e.hora, disabled: e.frecuencia === 'apagada',
-        onchange: ev => { soltar(ev); elegirAutoPublicar({ hora: ev.target.value }); } })),
+      /* al salir del campo, no en cada cambio: el reloj del navegador cambia
+         al escribir la hora y se perdían los minutos */
+      h('input', { type: 'time', value: e.hora, disabled: e.frecuencia === 'apagada', datos: { foco: 'hora-auto' },
+        onblur: ev => { if (ev.target.value && ev.target.value !== e.hora) elegirAutoPublicar({ hora: ev.target.value }); } })),
     h('label', {}, 'Posts ',
       h('select', { disabled: e.frecuencia === 'apagada',
         onchange: ev => { soltar(ev); elegirAutoPublicar({ posts: Number(ev.target.value) }); } },
@@ -18896,7 +18903,7 @@ function bloqueMetricasAutoPublicar() {
   }
   b.appendChild(h('div', { clase: 'meta ultima-auto' }, textoUltimaAutoPublicar(m.ultima)));
   if (m.ultima && (m.ultima.errores || []).length) {
-    b.appendChild(h('div', { clase: 'meta aviso-auto' }, `Avisos: ${m.ultima.errores.slice(0, 3).join(' · ')}`));
+    b.appendChild(h('div', { clase: 'meta aviso-auto' }, `Avisos: ${m.ultima.errores.slice(0, 3).map(textoAvisoAuto).join(' · ')}`));
   }
   return b;
 }
@@ -18981,6 +18988,7 @@ function bloqueRedesProyectoPublicar(p) {
       onchange: ev => {
         const lista = new Set(redesVisiblesPublicar(a));
         if (ev.target.checked) lista.add(r); else lista.delete(r);
+        if (!lista.size) { ev.target.checked = true; toast('Deja al menos una red en este proyecto', true); return; }
         a.redes_visibles = Object.keys(NOMBRES_RED).filter(x => lista.has(x));
         guardar({ redes_visibles: a.redes_visibles });
       } }), ` ${NOMBRES_RED[r]}`)));
@@ -21576,7 +21584,8 @@ function bloquePalabrasGanchosPublicar() {
     r.ganchos.forEach((g, i) => b.appendChild(h('div', { clase: 'fila fila-gancho' },
       h('b', { clase: 'puesto' }, `${i + 1}.`),
       h('span', { clase: 'crece gancho-texto' }, `«${g.gancho}»`),
-      h('span', { clase: 'pastilla red-mini ok' }, CORTOS_RED[g.red] || g.red),
+      h('span', { clase: 'pastilla red-mini ok', title: (g.redes || [g.red]).map(x => NOMBRES_RED[x] || x).join(', ') },
+        (g.redes || []).length > 1 ? `${CORTOS_RED[g.red] || g.red} +${g.redes.length - 1}` : (CORTOS_RED[g.red] || g.red)),
       h('span', { clase: 'meta' }, `${numeroCorto(g.vistas)} vistas`
         + (typeof g.interaccion === 'number' ? ` · ${porcentaje(g.interaccion)}` : '')),
       h('button', { clase: 'mini fantasma', title: 'Copiar el gancho', onclick: () => copiarTexto(g.gancho) }, 'Copiar'))));
@@ -21625,7 +21634,7 @@ function seccionInformePublicar() {
     h('button', { clase: 'mini primario', disabled: !r || !!r.error, onclick: () => window.print() }, 'Imprimir o guardar en PDF')));
   if (!r) { caja.appendChild(h('div', { clase: 'meta' }, 'cargando…')); return caja; }
   if (r.error) { caja.appendChild(h('div', { clase: 'meta' }, `No se ha podido leer: ${r.error}`)); return caja; }
-  caja.appendChild(h('h2', { clase: 'titulo-informe' }, `${r.nombre}: ${r.nombre_mes}`));
+  caja.appendChild(h('h2', { clase: 'titulo-informe' }, `${r.nombre}: ${r.nombre_mes}${r.en_curso ? ' (en curso)' : ''}`));
   caja.appendChild(h('div', { clase: 'meta' }, `Del ${r.desde} al ${r.hasta} · hecho el ${fechaCorta(r.hecho).slice(0, 16)} `
     + '· cifras de la última vez que se pidieron a cada red'));
   const t = r.total || {};
@@ -21636,7 +21645,7 @@ function seccionInformePublicar() {
       const cambio = variacion(t[k], a[k]);
       return h('div', { clase: 'cifra' }, h('b', {}, typeof t[k] === 'number' ? numeroCorto(t[k]) : '—'),
         h('span', { clase: 'meta' }, nombre),
-        cambio ? h('span', { clase: 'meta' }, `${cambio} vs. mes anterior`) : null);
+        cambio ? h('span', { clase: 'meta' }, `${cambio} vs. ${r.en_curso ? 'los mismos días del mes anterior' : 'mes anterior'}`) : null);
     })));
   caja.appendChild(h('div', { clase: 'meta' }, `${r.videos} vídeo(s) · ${r.dias_con_publicacion} día(s) con publicación`
     + (r.sin_cifras ? ` · ${r.sin_cifras} sin cifras (a mano o redes que no las dan)` : '')));

@@ -364,6 +364,8 @@ def _validar_ajustes(cambios):
         elif k in ("redes", "redes_visibles"):
             if not isinstance(v, list) or any(r not in REDES for r in v):
                 raise ErrorPublicar("las redes son: " + ", ".join(REDES))
+            if k == "redes_visibles" and not v:
+                raise ErrorPublicar("deja al menos una red en «Redes de este proyecto»")
             limpios[k] = [r for r in REDES if r in v]
         elif k == "hora":
             if not isinstance(v, str) or not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", v):
@@ -2463,7 +2465,7 @@ PLAZO_METRICAS_S = 15
 
 
 def actualizar_metricas(raiz, pids, forzar=False, limite=LOTES_POR_VUELTA,
-                        solo=None, tope=None, espacio_s=0.0):
+                        solo=None, tope=None, espacio_s=0.0, respiro_s=None):
     """Pide a Upload-Post las cifras de lo publicado de estos videos.
     -> {"consultados", "actualizados", "pendientes", "errores": [...], "ocupado"?}
 
@@ -2476,20 +2478,22 @@ def actualizar_metricas(raiz, pids, forzar=False, limite=LOTES_POR_VUELTA,
                 "errores": ["ya se están pidiendo las cifras: espera un momento"]}
     try:
         return _actualizar_metricas(raiz, pids, forzar, limite, solo=solo,
-                                    tope=tope, espacio_s=espacio_s)
+                                    tope=tope, espacio_s=espacio_s, respiro_s=respiro_s)
     finally:
         _LOCK_METRICAS.release()
 
 
-def _actualizar_metricas(raiz, pids, forzar, limite, solo=None, tope=None, espacio_s=0.0):
+def _actualizar_metricas(raiz, pids, forzar, limite, solo=None, tope=None, espacio_s=0.0,
+                         respiro_s=None):
     tope = float(tope or TOPE_VUELTA_S)
+    respiro = RESPIRO_METRICAS_S if respiro_s is None else float(respiro_s)
     lotes = _lotes_publicados(raiz, pids)
     candidatos = []
     for lote, envios in lotes.items():
         if solo is not None and lote not in solo:
             continue
         hace = _mirado_hace(envios)
-        if not forzar and hace is not None and hace < RESPIRO_METRICAS_S:
+        if not forzar and hace is not None and hace < respiro:
             continue
         candidatos.append((hace if hace is not None else float("inf"), lote, envios))
     # primero lo que nunca se miro, despues lo que hace mas que no

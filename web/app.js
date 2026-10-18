@@ -16074,10 +16074,21 @@ function editorMontaje(modo, est, repintar) {
   const borrador = modo.tipo === 'borrador';
   const op = borrador ? opcionesBorrador(modo.e) : null;
   if (!est.datosMontaje || (!borrador && !est.montaje)) {
+    // Se pide UNA vez y un fallo se queda a la vista: repintar sin haber
+    // conseguido nada volvería a entrar aquí y daría vueltas sin fin.
+    if (est.errorMontaje) {
+      caja.appendChild(cajaError(est.errorMontaje));
+      caja.appendChild(h('button', { clase: 'mini', onclick: () => { est.errorMontaje = null; repintar(); } },
+        'Reintentar'));
+      return caja;
+    }
     caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
-    datosMontaje().then(d => { est.datosMontaje = d; repintar(); }).catch(err => {
-      vaciar(caja).appendChild(cajaError(err.message));
-    });
+    Promise.all([
+      est.datosMontaje ? Promise.resolve(est.datosMontaje) : datosMontaje(),
+      (borrador || est.montaje) ? Promise.resolve(est.montaje) : pedir(`${API.proyecto(modo.pid)}/montaje`),
+    ]).then(([d, m]) => { est.datosMontaje = d; if (!borrador) est.montaje = m; })
+      .catch(err => { est.errorMontaje = err.message || 'no se ha podido leer el montaje'; })
+      .then(() => repintar());
     return caja;
   }
   const datos = est.datosMontaje;
@@ -16191,7 +16202,11 @@ function selectorTransiciones(modo, est, elegidas, guardar) {
         h('input', { type: 'checkbox', checked: marcada, onchange: ev => {
           const lista = puestas.filter(x => x !== t.id);
           if (ev.target.checked) lista.push(t.id);
-          if (!lista.length) { toast('Deja al menos una: sin ninguna van las de fábrica', true); }
+          if (!lista.length) {
+            ev.target.checked = true;
+            toast('Deja al menos una transición marcada', true);
+            return;
+          }
           const iguales = lista.length === fabrica.length && lista.every(x => fabrica.includes(x));
           guardar(iguales || !lista.length ? [] : lista);
         } }),

@@ -1920,7 +1920,7 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
             trayecto = camara.trayecto_de(
                 escena, indice, montaje, semilla=semilla,
                 cifras=[c["palabra"] for c in cifras],
-                gancho=montaje["gancho"])
+                gancho=montaje["gancho"], base=entrada)
             if trayecto:
                 entrada["trayecto"] = trayecto
         if cartelas.sobre_imagen(escena):

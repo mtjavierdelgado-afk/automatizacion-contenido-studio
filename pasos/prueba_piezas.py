@@ -5348,6 +5348,17 @@ def prueba_montaje_movimiento():
     igual(camara.trayecto_de(larga, 1, siempre, gancho=True), None,
           "y el gancho es solo del primer plano")
 
+    base = {"ventana_ini": [0.1, 0.2, 0.7, 0.7], "ventana_fin": [0.15, 0.25, 0.6, 0.6],
+            "centro": [0.45, 0.55], "origen_centro": "ancla"}
+    tray = camara.trayecto_de(larga, 0, siempre, gancho=True, base=base)
+    igual(tray["tramos"][-1]["fin"], base["ventana_fin"],
+          "sobrio con gancho acaba en el encuadre de siempre del plano (su ancla)")
+    vivo_base = camara.trayecto_de(larga, 3, camara.normalizar_montaje({"movimiento": "vivo"}),
+                                   base=base)
+    caja = vivo_base["tramos"][0]["ini"]
+    ok(abs(caja[0] + caja[2] / 2 - 0.45) < 0.2 and abs(caja[1] + caja[3] / 2 - 0.55) < 0.2,
+       "en vivo, un plano con ancla se mueve alrededor de su sujeto")
+
     titulo("montaje: vivo y dinamico dan trayectos sanos y deterministas")
     for nivel in ("vivo", "dinamico"):
         montaje = camara.normalizar_montaje({"movimiento": nivel})
@@ -5391,6 +5402,18 @@ def prueba_montaje_movimiento():
        f"«veintitrés y veinticinco» no se suma: {textos}")
     igual(p7_callouts.cifras_clave(escena_de("tiene dos cubetas iguales"), "es"), [],
           "una cifra pequeña sin unidad no sale en pantalla")
+    def lee(frase):
+        llanas = [medios.normalizar_texto(x) for x in frase.split()]
+        return [v for _i, _n, v in medios.numeros_dichos(llanas, None)]
+    igual(lee("entre dos mil y tres mil euros"), [2000.0, 3000.0],
+          "«dos mil y tres mil» son dos cifras, no 5000 (revisión 18-10)")
+    igual(lee("dos millones y medio de personas"), [2500000.0],
+          "«dos millones y medio» es 2,5 millones")
+    for frase, valor in (("two hundred and five", 205.0), ("mil y una noches", 1001.0),
+                         ("treinta y un millones", 31000000.0),
+                         ("uno y medio por ciento", 1.5),
+                         ("two thousand and twenty four", 2024.0)):
+        igual(lee(frase), [valor], f"«{frase}» sigue leyéndose como antes")
     for c in p7_callouts.cifras_clave(ochenta, "es"):
         ok(0 <= c["desde"] <= c["hasta"], "la cifra lleva su tiempo dentro del plano")
 

@@ -33,6 +33,8 @@ vídeos, estilos, claves y contraseña no se tocan.
 - Cambiar el movimiento, los subtítulos, las cifras, la barra o las
   transiciones de un vídeo hecho **no redibuja ninguna imagen**: se rehacen
   las capas y el montaje («Aplicar ahora»), que son gratis.
+- La descarga «sin subtítulos» sale también sin las cifras clave ni la barra:
+  van en la misma capa que los subtítulos, que es la que se quita.
 
 **La Parrilla de guiones, en Automatizar (17 de octubre)**
 - **Automatizar ya no está vacío: abre la Parrilla.** Cada proyecto tiene sus

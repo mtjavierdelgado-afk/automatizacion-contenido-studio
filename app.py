@@ -7588,10 +7588,15 @@ def datos_del_montaje():
     return ficha
 
 
+_CERROJO_MONTAJE = threading.Lock()
+
+
 @app.get("/api/proyectos/{pid}/montaje")
 def leer_montaje(pid: str):
     """El montaje de este video, las transiciones elegidas y si esta aplicado."""
     ctx = contexto(pid)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
     camara = PASOS_MODULOS.camara
     callouts = ctx.estado.params("callouts") or {}
     render = ctx.estado.params("render") or {}
@@ -7614,7 +7619,9 @@ def cambiar_montaje(pid: str, cuerpo: dict = Body(default=None)):
     """
     ctx = contexto(pid)
     camara = PASOS_MODULOS.camara
-    if _trabajo_activo(ctx, "callouts") or _trabajo_activo(ctx, "render"):
+    # _trabajo_que_toca y no _trabajo_activo: una tanda se registra en su
+    # PRIMER paso y corre tambien las capas y el montaje (`toca`).
+    if _trabajo_que_toca(ctx, ("callouts", "render")):
         raise ErrorApi(409, "el vídeo se está montando ahora: cámbialo cuando termine")
     datos = _cuerpo(cuerpo)
     cambiado = False
@@ -7659,10 +7666,15 @@ def aplicar_montaje(pid: str):
     ctx = contexto(pid)
     if not _ruta_de_version(ctx, "render", "video.mp4"):
         raise ErrorApi(409, "este vídeo todavía no está montado: se aplicará al montarlo")
-    if _trabajo_activo(ctx, "callouts") or _trabajo_activo(ctx, "render"):
-        raise ErrorApi(409, "el vídeo ya se está montando")
-    trabajo_id = ctx.gestor.lanzar("montaje", _correr_rehacer_montaje, ctx,
-                                   ["callouts", "render"], paso="render")
+    # Mirar y lanzar bajo el mismo cerrojo: un doble clic no lanza dos montajes.
+    # Y con _trabajo_que_toca: la tanda del video corre las capas sin estar
+    # registrada en ellas, y dos pasadas sobre `trabajo/` se pisan al sellar.
+    with _CERROJO_MONTAJE:
+        if _trabajo_que_toca(ctx, ("callouts", "render")):
+            raise ErrorApi(409, "el vídeo ya se está montando")
+        trabajo_id = ctx.gestor.lanzar("montaje", _correr_rehacer_montaje, ctx,
+                                       ["callouts", "render"], paso="render",
+                                       toca=["callouts", "render"])
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id)}
 

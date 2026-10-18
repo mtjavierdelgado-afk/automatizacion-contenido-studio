@@ -359,13 +359,19 @@ def _con_entrada(tramos):
              dict(primero, t0=round(entrada, 3))] + list(tramos[1:]))
 
 
-def trayecto_de(escena, indice, montaje, semilla=0, cifras=None, gancho=False):
+def trayecto_de(escena, indice, montaje, semilla=0, cifras=None, gancho=False,
+                base=None):
     """El trayecto de camara de un plano, o None si va el movimiento de siempre.
 
     `indice` es su posicion en el video (decide el patron, alternando).
     `cifras` son los indices de palabra donde empieza una cifra dicha (las
     pone p7, que ya las calcula para pintarlas). `gancho` marca el primer plano
     de un video con gancho: entra con un zoom rapido desde muy cerca.
+    `base` es el movimiento de siempre del plano (`movimiento.calcular`): sus
+    ventanas y su centro, que puede venir de un ancla o del plan. Con el
+    gancho en sobrio se usan TAL CUAL, y en vivo y dinamico un centro que no
+    sea el de por defecto manda sobre el de la alternancia: el plano sigue
+    encuadrando a su sujeto.
 
     Devuelve None con el montaje de siempre, y tambien en los planos donde el
     movimiento no se puede tocar sin romper algo (cartelas y cabeceras, cuyo
@@ -384,17 +390,25 @@ def trayecto_de(escena, indice, montaje, semilla=0, cifras=None, gancho=False):
         # planos no llevan trayecto y salen exactamente como antes.
         if not (gancho and int(indice) == 0):
             return None
-        zoom = escena.get("zoom") or {}
-        try:
-            de, a = float(zoom.get("de", 1.0)), float(zoom.get("a", 1.0))
-        except (TypeError, ValueError):
-            de, a = 1.0, 1.0
-        tramos = [{"t0": 0.0, "t1": round(duracion, 3), "ini": _caja((0.5, 0.5), de),
-                   "fin": _caja((0.5, 0.5), a), "curva": "suave"}]
+        if base and base.get("ventana_ini") and base.get("ventana_fin"):
+            ini, fin = list(base["ventana_ini"]), list(base["ventana_fin"])
+        else:
+            zoom = escena.get("zoom") or {}
+            try:
+                de, a = float(zoom.get("de", 1.0)), float(zoom.get("a", 1.0))
+            except (TypeError, ValueError):
+                de, a = 1.0, 1.0
+            ini, fin = _caja((0.5, 0.5), de), _caja((0.5, 0.5), a)
+        tramos = [{"t0": 0.0, "t1": round(duracion, 3), "ini": ini,
+                   "fin": fin, "curva": "suave"}]
         return {"tramos": _con_entrada(tramos), "golpes": []}
     paso = (int(indice) + int(semilla or 0)) % len(_PATRONES)
     patron = _PATRONES[paso]
     centro = _CENTROS[(int(indice) * 5 + int(semilla or 0)) % len(_CENTROS)]
+    propio = (base or {}).get("centro")
+    if (propio and (base or {}).get("origen_centro") not in (None, "por_defecto")
+            and len(propio) == 2 and all(es_finito(v) for v in propio)):
+        centro = (float(propio[0]), float(propio[1]))
     zoom = float(ajustes["zoom"])
     curva_nombre = ajustes["curva"]
 

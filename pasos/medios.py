@@ -535,7 +535,7 @@ def numeros_dichos(palabras_llanas, idioma=None, cortes=None):
             return True
         return any(list(palabras[j:j + len(cola)]) == list(cola) for cola in colas)
 
-    def _enlace_suma(antes, sigue):
+    def _enlace_suma(antes, sigue, tras=""):
         """¿Este «y»/«and» une las dos cifras o separa dos? -> bool
 
         SOLO UNE DETRAS DE UNA DECENA REDONDA o de un multiplicador: «treinta y
@@ -547,6 +547,10 @@ def numeros_dichos(palabras_llanas, idioma=None, cortes=None):
         """
         despues = numero(sigue)
         if antes in multiplos:
+            # «entre dos mil Y TRES MIL»: lo que sigue lleva su propio
+            # multiplicador del mismo orden, asi que es OTRA cifra (no 5000).
+            if tras in multiplos and multiplos[tras] >= multiplos[antes]:
+                return False
             return (despues is not None and despues < multiplos[antes]) \
                 or sigue in multiplos
         valor = numero(antes)
@@ -577,10 +581,16 @@ def numeros_dichos(palabras_llanas, idioma=None, cortes=None):
                     # «uno y MEDIO por ciento» son 1,5 %. Sin esto el tramo se
                     # cerraba en el «uno», la cola se quedaba huerfana y
                     # «ciento» se leia como el 100 suelto.
-                    actual += 0.5
+                    previa = palabras[j - 1]
+                    if previa in multiplos and multiplos[previa] >= 1000:
+                        # «dos millones y medio» es medio MILLON, no 0,5
+                        total += multiplos[previa] * 0.5
+                    else:
+                        actual += 0.5
                     j += salto
                     continue
-                if visto and _enlace_suma(palabras[j - 1], sigue):
+                tras = palabras[j + 2] if j + 2 < len(palabras) else ""
+                if visto and _enlace_suma(palabras[j - 1], sigue, tras):
                     j += 1
                     continue
                 break

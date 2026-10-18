@@ -105,6 +105,33 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/videos/{pid}/portada` | Sube una imagen de portada (multipart, campo «portada»). |
 | `GET` | `/api/publicar/videos/{pid}/portada.jpg` | La imagen de portada subida para este vídeo. |
 | `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
+| `GET` | `/api/parrilla/cuentas` | Las cuentas ya leídas, las conexiones (sin claves) y el gasto del mes. |
+| `PUT` | `/api/parrilla/cuentas/conexiones` | {youtube_clave?, meta_token?, ig_id?, apify_token?, pago?, tope_usd?} ("" quita una). |
+| `POST` | `/api/parrilla/cuentas/conexiones/instagram` | Con el token de Meta puesto: tu cuenta profesional (se guarda si es una). |
+| `POST` | `/api/parrilla/cuentas/leer` | {texto, red?, cuantos?, forzar?, pagar?} -> el trabajo (se sigue preguntando). |
+| `POST` | `/api/parrilla/cuentas/plan` | {texto, red?, cuantos?} -> qué vía se usaría y cuánto costaría. |
+| `GET` | `/api/parrilla/cuentas/trabajos/{tid}` | — |
+| `DELETE` | `/api/parrilla/cuentas/{red}/{usuario}` | — |
+| `GET` | `/api/parrilla/cuentas/{red}/{usuario}` | — |
+| `POST` | `/api/parrilla/cuentas/{red}/{usuario}/analizar` | Claude dice qué le funciona a esa cuenta -> el trabajo. |
+| `GET` | `/api/parrilla/proyectos/{cid}/chats` | Las conversaciones del proyecto, la más nueva primero. |
+| `POST` | `/api/parrilla/proyectos/{cid}/chats` | Una conversación nueva: {modelo?}. No se guarda hasta el primer mensaje. |
+| `DELETE` | `/api/parrilla/proyectos/{cid}/chats/{chid}` | — |
+| `GET` | `/api/parrilla/proyectos/{cid}/chats/{chid}` | — |
+| `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/cancelar` | — |
+| `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/guardar` | Los guiones de una respuesta a la Parrilla: {turno, indices?, matriz?, nombre?}. |
+| `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/mensajes` | Un mensaje (multipart): «texto», «web» (1/0), «resultados» (1/0), «modelo» |
+| `POST` | `/api/parrilla/proyectos/{cid}/desde-cuenta` | Guiones para ESTE proyecto con lo que le funciona a una cuenta ajena: |
+| `POST` | `/api/parrilla/proyectos/{cid}/desde-resultados` | Claude escribe guiones a partir de lo que mejor funcionó: {claves?, dias?, |
+| `POST` | `/api/parrilla/proyectos/{cid}/guiones/{gid}/marca` | «Usar su marca para el proyecto»: {pisar?} -> {marca, cambiados}. |
+| `GET` | `/api/parrilla/proyectos/{cid}/marca` | La marca del cliente guardada en el proyecto, con sus campos. |
+| `PUT` | `/api/parrilla/proyectos/{cid}/marca` | {quien?, mostrar?, evitar?, tono?, cta?, otras?} -> la marca. |
+| `GET` | `/api/parrilla/proyectos/{cid}/resultados` | Lo que mejor funcionó en el proyecto (solo lo guardado). |
+| `GET` | `/api/publicar/palabra-clave` | La palabra clave y la zona del proyecto de un estilo, para sugerirlas en |
+| `POST` | `/api/publicar/proyectos/{cid}/palabras` | Claude propone la palabra clave principal, las secundarias y la zona del |
+| `POST` | `/api/publicar/videos/{pid}/ganchos` | Tres ganchos para la primera línea de una red: {red}. |
+| `POST` | `/api/publicar/videos/{pid}/ganchos/usar` | Pone el gancho elegido como primera línea: {red, indice}. |
+| `POST` | `/api/publicar/videos/{pid}/optimizar` | Claude revisa el SEO de los textos: {redes}. Deja una PROPUESTA campo a |
 | `GET` | `/api/parrilla/plantilla` | Un guion en blanco en el formato del Studio, para «Escribir uno». |
 | `GET` | `/api/parrilla/proyectos` | Los proyectos que se pueden ver, con cuántos guiones tiene cada uno, y |
 | `GET` | `/api/parrilla/proyectos/{cid}` | Las matrices del proyecto y sus guiones, con el estado al día. |

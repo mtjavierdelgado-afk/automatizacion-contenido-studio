@@ -5960,6 +5960,45 @@ def probar_lo_de_v2h():
         igual(len(set(hechos)), 8, "R6: ocho creaciones a la vez dan ocho ids distintos")
         igual(len([n for n in os.listdir(base) if n.startswith("r6_mismo")]), 8,
               "R6: y ocho carpetas")
+
+        # R8 · LAS DOS RUTAS MUERTAS QUE SIEMPRE DABAN 500
+        pid = Proyecto.crear(base, "r8 muertas").id
+        Estado(servidor.contexto(pid).proyecto)
+        codigo, _d = pedir("GET", f"/api/proyectos/{pid}/estilo")
+        ok(codigo in (404, 405), f"R8: GET /estilo ya no existe (no es un 500: {codigo})")
+        codigo, datos = pedir("PUT", f"/api/proyectos/{pid}/callouts/plan",
+                              json={"arquetipos": []})
+        igual(codigo, 400, "R8: mandar 'arquetipos' al plan del grafismo da 400, no 500")
+
+        # R9 · SIN EL CLI DE CLAUDE, EL ASISTENTE DICE QUE NO ESTA (no un 500)
+        from pasos import cli_claude as CLI                   # noqa: PLC0415
+        localizar_real = CLI.localizar
+
+        def sin_cli(*_a, **_k):
+            raise RuntimeError("no se encuentra el CLI de claude")
+        CLI.localizar = sin_cli
+        try:
+            codigo, datos = pedir("GET", "/api/asistente")
+            igual(codigo, 200, "R9: GET /api/asistente sin el CLI responde 200")
+            ok((datos or {}).get("listo") is False, f"R9: y dice que no está listo: {datos}")
+        finally:
+            CLI.localizar = localizar_real
+        # y un 500 de verdad no enseña la traza con las rutas del servidor
+        cambiar("_sonido", lambda: (_ for _ in ()).throw(KeyError("roto")))
+        codigo, datos = pedir("GET", f"/api/proyectos/{pid}/sonido")
+        igual(codigo, 500, "R9: un fallo imprevisto sigue siendo un 500")
+        ok("traza" not in (datos or {}) and RAIZ_ESTUDIO not in json.dumps(datos or {}),
+           "R9: pero sin la traza ni rutas del servidor")
+        ok(bool((datos or {}).get("marca")), "R9: con una marca para buscarlo en el registro")
+        setattr(servidor, "_sonido", reales.pop("_sonido"))
+
+        # S3 · UNA CLAVE CORTA NO SE ENSEÑA A MEDIAS (el Client ID de Jamendo
+        # tiene 8 caracteres y se enseñaban 4)
+        from pasos import claves as CLAVES                    # noqa: PLC0415
+        igual(CLAVES.tapar("abcd1234"), "…34", "S3: de una clave de 8 se enseñan 2")
+        igual(CLAVES.tapar("abcde"), "…", "S3: de una de 5, nada")
+        igual(CLAVES.tapar("sk-" + "a" * 37 + "wxyz"), "…wxyz",
+              "S3: de una larga, los cuatro últimos, como siempre")
     finally:
         motor.should_exit = True
         hilo.join(10)

@@ -965,8 +965,14 @@ async def _manejar_validacion(peticion, fallo):
 
 @app.exception_handler(Exception)
 async def _manejar_imprevisto(peticion, fallo):
+    # LA TRAZA VA AL REGISTRO DEL SERVICIO, NO A LA RESPUESTA (R9 del analisis
+    # del 13-10-2026): llevaba rutas del servidor a cualquiera que provocara un
+    # 500, y la pantalla no la lee. La respuesta lleva una marca para buscarla.
+    marca = uuid.uuid4().hex[:8]
+    print(f"[500 {marca}] {peticion.method} {peticion.url.path}\n"
+          + traceback.format_exc(limit=8), file=sys.stderr, flush=True)
     return _respuesta_error(500, f"{type(fallo).__name__}: {fallo}",
-                            {"traza": traceback.format_exc(limit=8)})
+                            {"marca": marca})
 
 
 def _cuerpo(crudo):
@@ -3605,20 +3611,6 @@ def _correr_tono(avisar, ctx, urls, ajuste):
     return ficha
 
 
-@app.get("/api/proyectos/{pid}/estilo")
-def leer_estilo(pid: str):
-    """Fotogramas ya extraidos y cuales estan elegidos ahora mismo."""
-    ctx = contexto(pid)
-    estilo = _estilo()
-    ficha = estilo.ficha(ctx.proyecto) or {"total": 0, "candidatos": []}
-    elegidas = ((ctx.estado.params("assets") or {}).get("estilo") or {}).get("referencias") or []
-    for candidato in ficha.get("candidatos", []):
-        candidato["url"] = url_de(ctx.id, candidato["ruta"], ctx.proyecto.raiz)
-        candidato["elegida"] = candidato["ruta"] in elegidas
-    ficha["elegidas"] = elegidas
-    return ficha
-
-
 @app.put("/api/proyectos/{pid}/estilo/seleccion")
 def elegir_estilo(pid: str, cuerpo: dict = Body(default=None)):
     """Guarda las imagenes de estilo elegidas en los params de assets."""
@@ -4444,15 +4436,12 @@ def guardar_plan_callouts(pid: str, cuerpo: dict = Body(default=None)):
             raise ErrorApi(400, f"set de diseño desconocido: {datos['diseno']}. "
                                 f"Los sets son: {', '.join(p7.SETS_DISENO)}")
         cambios["diseno"] = datos["diseno"]
-    if isinstance(datos.get("arquetipos"), list):
-        # contra los VIGENTES: los cinco jubilados el 19-08-2026 se siguen
-        # dibujando para los planes ya guardados, pero no se pueden elegir
-        vigentes = p7.vigentes()
-        desconocidos = [a for a in datos["arquetipos"] if a not in vigentes]
-        if desconocidos:
-            raise ErrorApi(400, f"arquetipos no disponibles: {', '.join(desconocidos)}. "
-                                f"Los que hay son: {', '.join(vigentes)}")
-        cambios["arquetipos"] = datos["arquetipos"]
+    if "arquetipos" in datos:
+        # LOS ARQUETIPOS YA NO SE ELIGEN (R8 del analisis del 13-10-2026): se
+        # retiraron con `p7.vigentes()`, y esta rama era un 500 con cualquier
+        # valor. La pantalla no los manda; quien los mande se entera con un 400.
+        raise ErrorApi(400, "los arquetipos ya no se eligen: el grafismo se "
+                            "decide solo con el diseño y la paleta")
     if isinstance(datos.get("paleta"), dict):
         # Los colores elegidos a mano viajan en 'fijados' DENTRO de la paleta,
         # no sueltos: paleta_de_guia necesita distinguir "esto lo puso alguien"

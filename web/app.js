@@ -445,7 +445,6 @@ const API = {
   papeleraFicha: carpeta => `${BASE}/api/proyectos/papelera/${encodeURIComponent(carpeta)}`,
   restaurar: carpeta => `${BASE}/api/proyectos/papelera/${encodeURIComponent(carpeta)}/restaurar`,
   tono: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/tono`,
-  estilo: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/estilo`,
   estiloExtraer: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/estilo/extraer`,
   estiloSeleccion: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/estilo/seleccion`,
   estiloGuia: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/estilo/guia`,

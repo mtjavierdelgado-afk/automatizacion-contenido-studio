@@ -1639,6 +1639,10 @@ CLAVES_AJUSTE = {
 
 
 
+#: Params que el codigo lee SIEMPRE como objeto (o None), en cualquier paso.
+CLAVES_OBJETO = ("unidades", "estilo", "paleta", "musica", "efectos", "logo")
+
+
 def _validar_params(paso_id, nuevos, ctx=None):
     """Rechaza un ajuste del CLI imposible AL GUARDARLO, no al ejecutar.
 
@@ -1654,6 +1658,26 @@ def _validar_params(paso_id, nuevos, ctx=None):
     guardar un brief a medias mientras se escribe. Guardar y ejecutar son dos
     momentos distintos y solo el segundo exige que este todo.
     """
+    # LAS CLAVES ESTRUCTURALES, POR TIPO (R2 del analisis del 13-10-2026). Una
+    # docena de pantallas leen `params["estilo"]`, `["unidades"]`, `["musica"]`...
+    # como objetos; guardar un texto ahi devolvia 200 y a partir de entonces esas
+    # pantallas daban 500 para siempre, sin ningun boton para deshacerlo. `None`
+    # sigue valiendo: es "sin valor" y todos los lectores lo tratan como {}.
+    for clave in CLAVES_OBJETO:
+        if clave not in (nuevos or {}):
+            continue
+        valor = nuevos[clave]
+        if valor is not None and not isinstance(valor, dict):
+            raise ErrorApi(400, f"'{clave}' tiene que ser un objeto, "
+                                f"llegó {type(valor).__name__}")
+    bloque = (nuevos or {}).get("unidades")
+    if isinstance(bloque, dict):
+        malas = [str(u) for u, v in bloque.items()
+                 if v is not None and not isinstance(v, dict)]
+        if malas:
+            raise ErrorApi(400, "'unidades' lleva un objeto por unidad; no lo "
+                                "son: " + ", ".join(malas[:5]))
+
     for clave, es_modelo in CLAVES_AJUSTE.items():
         if clave not in (nuevos or {}):
             continue
@@ -13747,6 +13771,9 @@ def generar_video(pid: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
+    if datos.get("params") is not None and not isinstance(datos.get("params"), dict):
+        raise ErrorApi(400, "'params' debe ser un objeto con los params de cada paso")
+    nuevos_params = []
     for paso_id, valores in (datos.get("params") or {}).items():
         if paso_id not in PASOS_POR_ID:
             raise ErrorApi(400, f"'{paso_id}' no es un paso: no tiene params")
@@ -13755,7 +13782,7 @@ def generar_video(pid: str, cuerpo: dict = Body(default=None)):
         # `_validar_params` VALIDA y no devuelve nada: lo que se guarda es lo
         # que llego. Encadenarlas escribiria None y no guardaria nada.
         _validar_params(paso_id, valores, ctx)
-        ctx.estado.actualizar_params(paso_id, valores)
+        nuevos_params.append((paso_id, valores))
 
     modo = str(datos.get("modo") or "pendientes").strip().lower()
     if modo not in ("todo", "pendientes"):
@@ -13773,6 +13800,28 @@ def generar_video(pid: str, cuerpo: dict = Body(default=None)):
         for pestana in elegidas:
             if _trabajo_de_receta(ctx, pestana) is not None:
                 raise ErrorApi(409, f"la pestaña '{pestana}' ya se está generando")
+
+        # LOS PARAMS SE GUARDAN AQUI, NO ANTES (R2 del analisis del 13-10-2026).
+        # Escritos antes del cerrojo, un segundo clic que acaba en 409 cambiaba
+        # igualmente los params del video que se estaba generando: la firma se
+        # movia debajo del trabajo vivo. Se siguen guardando ANTES de planificar
+        # (el plan cuenta con lo escrito en pantalla), pero solo si nada esta
+        # corriendo ya esos pasos.
+        if nuevos_params:
+            pasos_tocados = {p for p, _v in nuevos_params}
+            otro = _trabajo_que_toca(ctx, pasos_tocados)
+            if otro is not None:
+                raise ErrorApi(409, f"«{otro.get('nombre')}» está corriendo: espera "
+                                    "a que termine para cambiar sus ajustes",
+                               {"trabajo_id": otro["id"], "progreso": otro["progreso"]})
+            with _COLA_LOCK:
+                if (pasos_tocados & set(_PASOS_QUE_DIBUJA_O_MONTA)
+                        and _cola_dibujando(ctx)):
+                    raise ErrorApi(409, "se están rehaciendo imágenes con tus "
+                                        "notas: espera a que terminen (o páralas) "
+                                        "y vuelve a generar")
+                for paso_id, valores in nuevos_params:
+                    ctx.estado.actualizar_params(paso_id, valores)
 
         plan = _plan_de_generacion(ctx, elegidas, modo, datos)
         if not plan["tareas"]:

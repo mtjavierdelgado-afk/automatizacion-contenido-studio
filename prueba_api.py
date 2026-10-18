@@ -5797,6 +5797,80 @@ def probar_que_lo_lento_no_para_el_servicio():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def _llamar(funcion, *args, **kwargs):
+    """Llama a una ruta de app.py en este proceso. -> (codigo, respuesta|mensaje)."""
+    import app as servidor                                    # noqa: PLC0415
+    try:
+        return 200, funcion(*args, **kwargs)
+    except servidor.ErrorApi as fallo:
+        return fallo.codigo, fallo.mensaje
+    except Exception as fallo:  # noqa: BLE001  -- lo que el servicio da como 500
+        return 500, f"{type(fallo).__name__}: {fallo}"
+
+
+def probar_lo_de_v2h():
+    """Los pendientes del analisis del 13-10 que seguian en el codigo (18-10-2026).
+
+    En este proceso, contra proyectos de verdad (nucleo real): lo que se mira es
+    lo que la API acepta, rechaza y deja escrito.
+    """
+    seccion("ARREGLOS V2H: PARAMS, SUBIDAS, IDS Y ERRORES")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    from nucleo import bitacora as BITACORA                   # noqa: PLC0415
+
+    raiz_antes = servidor.raiz_proyectos()
+    base = tempfile.mkdtemp(prefix="estudio_v2h_")
+    global_antes = BITACORA.RUTA_GLOBAL
+    BITACORA.RUTA_GLOBAL = os.path.join(base, "_bitacora_global.jsonl")
+    servidor.fijar_raiz_proyectos(base)
+    reales = {}
+
+    def cambiar(nombre, valor):
+        reales.setdefault(nombre, getattr(servidor, nombre))
+        setattr(servidor, nombre, valor)
+
+    try:
+        # R2 · LOS PARAMS ESTRUCTURALES SE VALIDAN POR TIPO. Antes devolvian 200
+        # y una docena de pantallas del video daban 500 para siempre.
+        pid = Proyecto.crear(base, "r2 tipos").id
+        for paso, params in (("assets", {"estilo": "x"}), ("assets", {"unidades": "x"}),
+                             ("assets", {"unidades": {"escena:S1": "x"}}),
+                             ("render", {"musica": "x"}), ("render", {"logo": "x"}),
+                             ("render", {"efectos": ["x"]}), ("callouts", {"paleta": 3})):
+            codigo, _m = _llamar(servidor.fijar_params, pid, paso, {"params": params})
+            clave = next(iter(params))
+            igual(codigo, 400, f"R2: guardar {paso}.{clave}={params[clave]!r} da 400")
+            ok(clave not in (servidor.contexto(pid).estado.params(paso) or {}),
+               f"R2: y no deja {paso}.{clave} escrito")
+        codigo, _r = _llamar(servidor.fijar_params, pid, "assets",
+                             {"params": {"estilo": {"modo": "foto"}, "logo": None,
+                                         "unidades": {"escena:S1": {"d": "a"}}}})
+        igual(codigo, 200, "R2: un objeto (o null) sigue valiendo")
+        codigo, _m = _llamar(servidor.generar_video, pid,
+                             {"params": {"assets": {"estilo": "x"}}})
+        igual(codigo, 400, "R2: /generar valida los params igual que el PUT")
+        codigo, _m = _llamar(servidor.generar_video, pid, {"params": ["assets"]})
+        igual(codigo, 400, "R2: /generar con 'params' que no es un objeto da 400, no 500")
+
+        # R2 · UN /generar RECHAZADO POR 409 NO ESCRIBE SUS PARAMS: antes los
+        # guardaba antes del cerrojo y la firma se movia bajo el trabajo vivo.
+        cambiar("_trabajo_de_cadena", lambda ctx: {"id": "vivo", "progreso": 0.4})
+        codigo, _m = _llamar(servidor.generar_video, pid,
+                             {"params": {"brief": {"duracion_s": 77}}})
+        igual(codigo, 409, "R2: /generar con el video generandose da 409")
+        ok((servidor.contexto(pid).estado.params("brief") or {}).get("duracion_s") != 77,
+           "R2: y el 409 no deja escritos los params que traia")
+        setattr(servidor, "_trabajo_de_cadena", reales.pop("_trabajo_de_cadena"))
+    finally:
+        for nombre, valor in reales.items():
+            setattr(servidor, nombre, valor)
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        BITACORA.RUTA_GLOBAL = global_antes
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
     parser.add_argument("--conservar", action="store_true",
@@ -5881,6 +5955,7 @@ def main():
         probar_el_reloj_de_un_trabajo()
         probar_revision_del_nucleo_v2f()
         probar_que_lo_lento_no_para_el_servicio()
+        probar_lo_de_v2h()
     finally:
         parar(proceso)
         if not argumentos.conservar:

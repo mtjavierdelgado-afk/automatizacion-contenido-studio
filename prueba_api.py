@@ -2200,8 +2200,8 @@ def probar_sistema(cliente):
     ids = [g.get("id") for g in datos.get("guias") or []]
     igual(ids, ["estilo_grafico", "tono", "voz", "material", "indicaciones", "cta",
                 "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
-                "tono_redes", "guion_parrilla", "pedir_guiones"],
-          "estan las trece guias (seis de Crear, cinco de Publicar y dos de la Parrilla), en orden")
+                "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente", "chat_guiones"],
+          "estan las quince guias (seis de Crear, cinco de Publicar y cuatro de la Parrilla), en orden")
     ok(all(g.get("plantilla") and g.get("prompt_ia") and g.get("que_hace")
            for g in datos.get("guias") or []),
        "cada guia trae plantilla, prompt para otra IA y que hace el sistema")

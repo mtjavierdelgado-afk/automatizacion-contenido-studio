@@ -238,10 +238,14 @@ def _contexto_texto(contexto):
         lineas.append(f"- Duración: {int(c['duracion_s'])} s")
     if c.get("notas"):
         lineas.append(f"- Notas de quien lo sube: {str(c['notas'])[:1500]}")
-    if not lineas:
-        return ""
-    return ("DATOS QUE YA SE SABEN (úsalos si el original no dice otra cosa)\n"
-            + "\n".join(lineas) + "\n\n")
+    marca = str(c.get("marca") or "").strip()
+    salida = ""
+    if lineas:
+        salida += ("DATOS QUE YA SE SABEN (úsalos si el original no dice otra cosa)\n"
+                   + "\n".join(lineas) + "\n\n")
+    if marca:
+        salida += marca + "\n\n"
+    return salida
 
 
 def instruccion_convertir(texto, modo, contexto=None):
@@ -285,6 +289,65 @@ def instruccion_pedir(peticion, cuantos, modo, contexto=None, ya=None, desde=1):
             f"- Los ID, correlativos desde G{int(desde):02d}.\n\n"
             + _contexto_texto(contexto) + ya_escritos
             + "PETICIÓN:\n" + str(peticion or "").strip())
+
+
+def resumen_de_posts(posts, maximo=15):
+    """Los vídeos que mejor funcionaron, en texto para Claude (lo usan «Desde mis
+    resultados» y el chat). Solo cifras guardadas: no se pregunta a nadie."""
+    nombres = {"tiktok": "TikTok", "instagram": "Instagram Reels", "youtube": "YouTube",
+               "facebook": "Facebook"}
+    lineas = []
+    for i, p in enumerate((posts or [])[:maximo], 1):
+        m = p.get("metricas") or {}
+        cifras = []
+        for clave, nombre in (("vistas", "vistas"), ("me_gusta", "me gusta"),
+                              ("comentarios", "comentarios"), ("compartidos", "compartidos"),
+                              ("guardados", "guardados")):
+            if isinstance(m.get(clave), (int, float)):
+                cifras.append(f"{int(m[clave])} {nombre}")
+        if isinstance(p.get("interaccion"), (int, float)):
+            cifras.append(f"interacción {p['interaccion'] * 100:.1f} %")
+        if isinstance(m.get("hasta_el_final"), (int, float)):
+            cifras.append(f"vieron hasta el final {m['hasta_el_final'] * 100:.0f} %")
+        if isinstance(m.get("visto_medio"), (int, float)):
+            cifras.append(f"visto de media {m['visto_medio'] * 100:.0f} %")
+        cuando = " ".join(x for x in (p.get("dia"), p.get("hora")) if x)
+        cabeza = (f"{i}. «{p.get('nombre') or p.get('pid')}» — {nombres.get(p.get('red'), p.get('red') or '?')}"
+                  + (f", publicado {cuando}" if cuando else "") + (": " + ", ".join(cifras) if cifras else ""))
+        lineas.append(cabeza)
+        if p.get("titulo"):
+            lineas.append(f"   Título: {str(p['titulo'])[:200]}")
+        if p.get("descripcion"):
+            lineas.append(f"   Texto de la publicación: {' '.join(str(p['descripcion']).split())[:400]}")
+        if p.get("material"):
+            lineas.append(f"   De qué iba (material del vídeo): {' '.join(str(p['material']).split())[:600]}")
+    return "\n".join(lineas)
+
+
+def instruccion_resultados(posts, cuantos, modo, contexto=None, peticion="", ya=None, desde=1):
+    """[[TAREA:resultados]] Guiones nuevos a partir de lo que mejor funcionó."""
+    modo = modo if modo in USOS else "adaptar"
+    ya_escritos = ""
+    if ya:
+        ya_escritos = ("\nYA ESCRITOS EN ESTA TANDA (no los repitas ni te parezcas a ellos):\n"
+                       + "\n".join(f"- {t}" for t in ya[:60]) + "\n")
+    extra = str(peticion or "").strip()
+    return ("[[TAREA:resultados]]\n"
+            "Estos son los vídeos de este proyecto que MEJOR funcionaron en redes, con sus cifras "
+            "reales. Mira qué tienen en común (el tema, el gancho de los primeros segundos, el "
+            "ángulo, la duración, la red, el día y la hora) y escribe "
+            f"{int(cuantos)} guion(es) NUEVOS que repitan lo que funciona sin copiarlos: otro "
+            "tema u otro ángulo con la misma fórmula. Cada uno, distinto de los demás.\n"
+            "En la línea «Objetivo:» de cada guion di en qué vídeo de la lista se inspira y qué "
+            "repite de él (por ejemplo: «inspirado en el 2: mismo gancho de pregunta»). No "
+            "inventes cifras: usa solo las de la lista.\n\n"
+            f"Uso: {modo} (como lo tratará el Studio). Escribe la locución final, completa.\n\n"
+            "LO QUE MEJOR FUNCIONÓ\n" + resumen_de_posts(posts) + "\n\n"
+            + _REGLAS + "\n\n" + _AJUSTE_RED + "\n\n" + _FORMATO_SALIDA + "\n\n"
+            + _SALIDA_STUDIO + "\n"
+            f"- Los ID, correlativos desde G{int(desde):02d}.\n\n"
+            + _contexto_texto(contexto) + ya_escritos
+            + ("LO QUE PIDE ADEMÁS QUIEN LO ENCARGA:\n" + extra if extra else ""))
 
 
 SISTEMA = ("Eres el editor de guiones del Studio: conviertes y escribes guiones de vídeo "
@@ -721,6 +784,96 @@ def _leer(raiz, cid):
 
 def _guardar(raiz, cid, datos):
     escribir_json(_ruta(raiz, cid), datos)
+
+
+# ============================================================ LA MARCA
+#
+# LA MARCA DEL CLIENTE se apunta UNA vez por proyecto (decisión del dueño,
+# 18-10-2026) y se le da a Claude en todo lo que escribe o convierte para ese
+# proyecto: subir, pegar, pedir, «Desde mis resultados» y el chat. Así no hay
+# que repetir en cada guion qué se enseña, qué se evita o el CTA de siempre.
+# Vive con las matrices, en el mismo fichero del proyecto.
+
+CAMPOS_MARCA = (
+    ("quien", "Quién es", "a qué se dedica, dónde, a quién vende"),
+    ("mostrar", "Mostrar", "lo que debe salir: productos, lugares, gente"),
+    ("evitar", "Evitar", "lo que no debe salir nunca"),
+    ("tono", "Tono", "cómo habla la marca"),
+    ("cta", "CTA de siempre", "lo que se pide al final si el guion no dice otra cosa"),
+    ("otras", "Otras reglas", "colores, frases de marca, lo que haga falta"),
+)
+MAX_CAMPO_MARCA = 1500
+
+
+def marca_de(raiz, cid):
+    """La marca guardada del proyecto: {quien, mostrar, evitar, tono, cta, otras, al}."""
+    m = _leer(raiz, cid).get("marca") or {}
+    salida = {c: str(m.get(c) or "") for c, _n, _a in CAMPOS_MARCA}
+    salida["al"] = str(m.get("al") or "")
+    return salida
+
+
+def guardar_marca(raiz, cid, cambios):
+    """Cambia los campos que vengan ({quien?, mostrar?, ...}). -> la marca."""
+    c = cambios if isinstance(cambios, dict) else {}
+    nuevos = {}
+    for campo, nombre, _ayuda in CAMPOS_MARCA:
+        if campo in c:
+            valor = str(c.get(campo) or "").strip()
+            if len(valor) > MAX_CAMPO_MARCA:
+                raise ErrorParrilla(f"«{nombre}» pasa de {MAX_CAMPO_MARCA} caracteres: resúmelo")
+            nuevos[campo] = valor
+    if not nuevos:
+        raise ErrorParrilla("no hay nada que guardar en la marca")
+    with _lock(_cid(cid)):
+        datos = _leer(raiz, cid)
+        marca = dict(datos.get("marca") or {})
+        marca.update(nuevos)
+        marca["al"] = ahora()
+        datos["marca"] = marca
+        _guardar(raiz, cid, datos)
+    return marca_de(raiz, cid)
+
+
+def _vacio_de_marca(valor):
+    v = str(valor or "").strip().strip(".").lower()
+    return v in ("", "ninguna", "ninguno", "…", "...", "-")
+
+
+def marca_texto(marca):
+    """La marca como bloque para Claude, o "" si no hay nada apuntado."""
+    lineas = [f"- {nombre}: {' '.join(str(marca.get(campo) or '').split())}"
+              for campo, nombre, _a in CAMPOS_MARCA if not _vacio_de_marca(marca.get(campo))]
+    if not lineas:
+        return ""
+    return ("MARCA DEL CLIENTE (la tiene guardada el proyecto: respétala en cada guion y "
+            "cópiala en su sección MARCA DEL CLIENTE; si el guion no trae CTA, usa el «CTA de "
+            "siempre» en vez de [FALTA CTA])\n" + "\n".join(lineas))
+
+
+def marca_desde_guion(raiz, cid, gid, pisar=False):
+    """«Usar su marca para el proyecto»: copia la MARCA DEL CLIENTE del guion
+    (y su tono y su CTA) a la del proyecto. Sin `pisar`, solo rellena lo vacío.
+    -> (la marca, [campos cambiados])"""
+    datos = _leer(raiz, cid)
+    _m, g = _guion(datos, gid)
+    leido = g.get("leido") or leer_guion(g.get("texto"))
+    traida = {"mostrar": leido["marca"].get("mostrar"), "evitar": leido["marca"].get("evitar"),
+              "otras": leido["marca"].get("otras"), "tono": leido.get("tono"),
+              "cta": leido.get("cta") if "FALTA CTA" not in str(leido.get("cta") or "").upper() else ""}
+    actual = marca_de(raiz, cid)
+    cambios = {}
+    for campo, valor in traida.items():
+        if _vacio_de_marca(valor):
+            continue
+        valor = str(valor).strip()[:MAX_CAMPO_MARCA]
+        if valor == str(actual.get(campo) or "").strip():
+            continue
+        if pisar or _vacio_de_marca(actual.get(campo)):
+            cambios[campo] = valor
+    if not cambios:
+        return actual, []
+    return guardar_marca(raiz, cid, cambios), sorted(cambios)
 
 
 def _matriz(datos, mid):
@@ -1388,11 +1541,12 @@ def _claude_simulado(instruccion, para, cwd=None):
             guiones.append({"id": f"S{i:02d}", "titulo": trozo.split("\n")[0][:60],
                             "primera_linea": trozo.split("\n")[0][:80]})
         return json.dumps({"guiones": guiones}, ensure_ascii=False)
-    if tarea == "pedir":
-        cuantos = int((re.search(r"Escribe (\d+) guion", instruccion) or [0, 1])[1])
+    if tarea in ("pedir", "resultados"):
+        cuantos = int((re.search(r"Escribe (\d+) guion", instruccion, re.I) or [0, 1])[1])
         desde = int((re.search(r"desde G(\d+)", instruccion) or [0, 1])[1])
         modo = "exacto" if "Uso: exacto" in instruccion else "adaptar"
-        peticion = instruccion.split("PETICIÓN:\n", 1)[-1].strip()[:80]
+        peticion = (instruccion.split("PETICIÓN:\n", 1)[-1].strip()[:80] if tarea == "pedir"
+                    else "lo que mejor funcionó")
         return "\n".join(f"{SEPARADOR}\n" + _guion_simulado(desde + i, f"Idea {desde + i}: {peticion}",
                                                             f"Guion {desde + i} sobre {peticion}.", modo)
                          for i in range(cuantos))
@@ -1503,10 +1657,12 @@ def lanzar(raiz, cid, tipo, datos, en_hilo=True):
     tipo «subir»: {ruta, nombre_fichero, modo, matriz?, nombre?, contexto?}
     tipo «pegar»: {texto, modo, matriz?, nombre?, contexto?}
     tipo «pedir»: {peticion, cuantos, modo, matriz?, nombre?, contexto?}
-    Un trabajo por proyecto a la vez: un doble clic no convierte dos veces."""
+    tipo «resultados»: {posts, cuantos, modo, peticion?, matriz?, nombre?, contexto?}
+    Un trabajo por proyecto a la vez: un doble clic no convierte dos veces.
+    La marca guardada del proyecto entra sola en el contexto."""
     cid = _cid(cid)
     d = datos if isinstance(datos, dict) else {}
-    if tipo not in ("subir", "pegar", "pedir"):
+    if tipo not in ("subir", "pegar", "pedir", "resultados"):
         raise ErrorParrilla("no sé hacer eso")
     modo = d.get("modo") if d.get("modo") in USOS else ""
     if not modo:
@@ -1515,8 +1671,13 @@ def lanzar(raiz, cid, tipo, datos, en_hilo=True):
         raise ErrorParrilla("pega el guion (o la matriz) que hay que convertir")
     if tipo == "pegar" and len(str(d.get("texto"))) > MAX_TEXTO:
         raise ErrorParrilla("es demasiado texto: súbelo como documento o pártelo")
-    if tipo == "pedir":
-        if not str(d.get("peticion") or "").strip():
+    if tipo == "resultados":
+        posts = [p for p in (d.get("posts") or []) if isinstance(p, dict)]
+        if not posts:
+            raise ErrorParrilla("elige al menos un vídeo de tus resultados")
+        d["posts"] = posts[:15]
+    if tipo in ("pedir", "resultados"):
+        if tipo == "pedir" and not str(d.get("peticion") or "").strip():
             raise ErrorParrilla("di qué guiones quieres: el tema, el cliente, la idea…")
         try:
             cuantos = int(d.get("cuantos") or 0)
@@ -1554,7 +1715,12 @@ def lanzar(raiz, cid, tipo, datos, en_hilo=True):
 
 def _trabajar(raiz, cid, tid, tipo, d):
     modo = d["modo"]
-    contexto = d.get("contexto") if isinstance(d.get("contexto"), dict) else {}
+    contexto = dict(d.get("contexto")) if isinstance(d.get("contexto"), dict) else {}
+    if "marca" not in contexto:
+        try:
+            contexto["marca"] = marca_texto(marca_de(raiz, cid))
+        except ErrorParrilla:
+            contexto["marca"] = ""
     cwd = carpeta(raiz)
     os.makedirs(cwd, exist_ok=True)
     origen = {"tipo": tipo, "modo": modo}
@@ -1572,21 +1738,32 @@ def _trabajar(raiz, cid, tid, tipo, d):
         _apuntar(tid, **cambios)
 
     try:
-        if tipo == "pedir":
+        if tipo in ("pedir", "resultados"):
             cuantos = d["cuantos"]
             ya = []
             lotes = [min(POR_LOTE_PEDIR, cuantos - i) for i in range(0, cuantos, POR_LOTE_PEDIR)]
             for n, cuantos_lote in enumerate(lotes):
                 avance(f"Claude está escribiendo los guiones {len(textos) + 1}–"
                        f"{len(textos) + cuantos_lote} de {cuantos}", len(textos), cuantos)
-                respuesta = _claude(instruccion_pedir(d["peticion"], cuantos_lote, modo, contexto,
-                                                      ya, desde=len(textos) + 1),
-                                    "escribir guiones para la Parrilla", cwd=cwd)
+                if tipo == "pedir":
+                    instruccion = instruccion_pedir(d["peticion"], cuantos_lote, modo, contexto,
+                                                    ya, desde=len(textos) + 1)
+                else:
+                    instruccion = instruccion_resultados(d["posts"], cuantos_lote, modo, contexto,
+                                                         d.get("peticion") or "", ya,
+                                                         desde=len(textos) + 1)
+                respuesta = _claude(instruccion, "escribir guiones para la Parrilla", cwd=cwd)
                 nuevos = separar(respuesta)[:cuantos_lote]
                 textos += nuevos
                 ya += [" — ".join(x for x in (leer_guion(t)["codigo"], leer_guion(t)["titulo"]) if x)
                        for t in nuevos]
-            origen["peticion"] = str(d["peticion"])[:300]
+            if tipo == "pedir":
+                origen["peticion"] = str(d["peticion"])[:300]
+            else:
+                origen["inspirado"] = [str(p.get("nombre") or p.get("pid") or "")[:80]
+                                       for p in d["posts"][:15]]
+                if d.get("peticion"):
+                    origen["peticion"] = str(d["peticion"])[:300]
         else:
             if tipo == "subir":
                 avance("leyendo el documento")

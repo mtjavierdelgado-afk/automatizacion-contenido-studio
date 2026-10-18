@@ -40,6 +40,30 @@ vídeos, estilos, claves y contraseña no se tocan.
   transición cerraba la lista. Ahora se ven todas, la lista se queda abierta y
   el texto ya no sale en mayúsculas.
 
+**La Parrilla: conversar con Claude, la marca del cliente y «Desde mis resultados» (18 de octubre)**
+- **Conversar con Claude** (Automatizar → Añadir guiones): un chat como el de
+  claude.ai para preparar guiones hablando. Recuerda la conversación, conoce la
+  marca del proyecto y el formato del guion, y cada guion que escribe sale con
+  **«Guardar en la Parrilla»**. Puedes:
+  - pegar **capturas** (📎). Para analizar una cuenta de Instagram o TikTok, haz
+    capturas de su perfil o de sus reels con las vistas: esas redes no dejan ver
+    los reels sin iniciar sesión, así que Claude no puede entrar por su cuenta;
+  - encender **«🌐 Buscar en internet»** en un mensaje (viene apagado). Lo que
+    saque de fuera lleva su fuente y un aviso ⚠ para confirmarlo;
+  - encender **«📊 Con mis resultados»** para que vea tus vídeos que mejor
+    funcionaron;
+  - elegir **Opus** (como en claude.ai) o **Sonnet** (contesta antes).
+- **La marca del cliente** (Automatizar → Marca del cliente): quién es, qué
+  mostrar, qué evitar, el tono y el CTA de siempre, apuntados **una vez por
+  proyecto**. Claude la usa en todo lo que escribe para ese proyecto. Desde la
+  ficha de un guion, **«Usar su marca para el proyecto»** la rellena con la de
+  ese guion.
+- **Desde mis resultados** (Añadir guiones): eliges tus vídeos que mejor
+  funcionaron (con sus vistas, interacción y retención) y Claude escribe guiones
+  nuevos que repiten lo que funcionó, diciendo en cuál se inspira cada uno. Usa
+  las cifras que ya tiene Publicar: no gasta consultas.
+- Dos guías nuevas: «La marca del cliente» y «Conversar con Claude».
+
 **La Parrilla de guiones, en Automatizar (17 de octubre)**
 - **Automatizar ya no está vacío: abre la Parrilla.** Cada proyecto tiene sus
   matrices de guiones, y cada guion su estado: **pendiente**, **usado** (se

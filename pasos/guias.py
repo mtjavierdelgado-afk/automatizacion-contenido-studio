@@ -873,11 +873,114 @@ GUIAS = {
             "MIS NOTAS:\n[pega aquí tus notas]"
         ),
     },
+    "marca_cliente": {
+        "titulo": "La marca del cliente (Parrilla)",
+        "donde": "Automatizar → Marca del cliente",
+        "usa": "pasos/parrilla.py (marca_de, marca_texto: va en el contexto de convertir, "
+               "pedir y «Desde mis resultados») y pasos/guionista.py (el chat)",
+        "que_hace": [
+            "Se apunta UNA vez por proyecto y Claude la recibe en todo lo que escribe o "
+            "convierte para él: subir un documento, pegar, pedir guiones, «Desde mis "
+            "resultados» y la conversación.",
+            "Claude la copia en la sección MARCA DEL CLIENTE de cada guion y la respeta en "
+            "las escenas (lo que se muestra y lo que se evita).",
+            "El «CTA de siempre» se usa cuando el guion no trae uno: en vez de [FALTA CTA].",
+            "No toca el estilo ni ningún vídeo: es solo para escribir guiones. Lo que va en la "
+            "imagen se sigue decidiendo en el estilo.",
+        ],
+        "si": [
+            "Quién es en una o dos frases: a qué se dedica, dónde, a quién vende.",
+            "Mostrar y Evitar, concretos: «consolas y mandos reales», «nada de marcas ajenas».",
+            "El tono en palabras sencillas: «de tú, cercano, con humor ligero».",
+            "El CTA tal como se dice: «Escríbenos por WhatsApp para reservar».",
+        ],
+        "no": [
+            "Precios u ofertas que caducan: ponlos en la petición de cada tanda.",
+            "Instrucciones de imagen detalladas (luz, encuadre): son del estilo.",
+            "Copiar aquí un guion entero: es lo de siempre de la marca, no un vídeo.",
+        ],
+        "plantilla": (
+            "QUIÉN ES: [a qué se dedica, dónde, a quién vende].\n"
+            "MOSTRAR: [productos, lugares, gente que debe salir].\n"
+            "EVITAR: [lo que no debe salir nunca].\n"
+            "TONO: [cómo habla la marca].\n"
+            "CTA DE SIEMPRE: [lo que se pide al final].\n"
+            "OTRAS REGLAS: [colores, frases de marca…]."
+        ),
+        "ejemplo": (
+            "QUIÉN ES: EstadoPlay, alquiler de consolas para fiestas y eventos en Lima.\n"
+            "MOSTRAR: consolas, mandos y pantallas reales; gente jugando en casa o en una oficina.\n"
+            "EVITAR: marcas de videojuegos en primer plano; precios.\n"
+            "TONO: de tú, cercano y con humor ligero.\n"
+            "CTA DE SIEMPRE: Escríbenos por WhatsApp para reservar.\n"
+            "OTRAS REGLAS: «la consola la llevamos nosotros» como frase de marca."
+        ),
+        "prompt_ia": (
+            "Voy a apuntar la MARCA de un cliente para que una IA escriba sus guiones de vídeo. "
+            "Con mis notas, escríbela con estas etiquetas: QUIÉN ES, MOSTRAR, EVITAR, TONO, "
+            "CTA DE SIEMPRE, OTRAS REGLAS. Frases cortas. Sin precios ni ofertas que caduquen. "
+            "No inventes nada: si falta algo, escribe «[confirmar]».\n\n"
+            "MIS NOTAS:\n[pega aquí lo que sabes del cliente]"
+        ),
+    },
+    "chat_guiones": {
+        "titulo": "Conversar con Claude (Parrilla)",
+        "donde": "Automatizar → Añadir guiones → Conversar con Claude",
+        "usa": "pasos/guionista.py",
+        "que_hace": [
+            "Es un chat con Claude, como el de claude.ai: recuerda lo que habláis en esa "
+            "conversación y conoce la marca del proyecto y el formato del guion del Studio.",
+            "Cada guion completo que escribe sale con el botón «Guardar en la Parrilla» (queda "
+            "pendiente, como los demás). Si le pides cambios, lo devuelve entero otra vez.",
+            "📎 Capturas: lee imágenes. Para analizar una cuenta de Instagram o TikTok, haz "
+            "capturas del perfil o de los reels con las vistas a la vista y pégalas.",
+            "🌐 Buscar en internet (por mensaje, apagado de fábrica): busca y abre páginas. "
+            "Instagram y TikTok no enseñan los reels sin iniciar sesión, así que ahí pedirá "
+            "capturas. Lo que saque de fuera lleva su fuente y un aviso ⚠ para confirmarlo.",
+            "📊 Con mis resultados: le pasa tus vídeos de este proyecto que mejor funcionaron, "
+            "con las cifras guardadas en Publicar.",
+            "Opus escribe como en claude.ai; Sonnet contesta antes. Usa tokens de la "
+            "suscripción, sin coste en dólares.",
+        ],
+        "si": [
+            "Empieza contándole el cliente, el objetivo y la red.",
+            "Pídele primero ideas y luego el guion de la que te guste.",
+            "Corrige como a una persona: «más corto», «el gancho más directo», «sin precios».",
+            "Para copiar lo que funciona a otra cuenta: capturas con sus vistas + «¿qué les funciona?».",
+        ],
+        "no": [
+            "Pedirle que entre en Instagram o TikTok: no puede sin iniciar sesión.",
+            "Dar por buenos datos de internet sin mirarlos: confírmalos antes de grabar.",
+            "Una matriz de 50 guiones por el chat: para eso, «Subir un documento».",
+        ],
+        "plantilla": (
+            "CLIENTE: [quién es].\n"
+            "QUIERO: [ideas / un guion / cambiar este guion].\n"
+            "RED Y DURACIÓN: [TikTok 30 s, YouTube 3 min…].\n"
+            "OBJETIVO: [qué tiene que conseguir].\n"
+            "LO QUE SÉ: [datos, ofertas, lo que no se puede decir]."
+        ),
+        "ejemplo": (
+            "CLIENTE: EstadoPlay, alquiler de consolas para fiestas en Lima.\n"
+            "QUIERO: cinco ideas de reels para empresas (fiestas de fin de año), y luego el "
+            "guion de la mejor.\n"
+            "RED Y DURACIÓN: Instagram Reels, 30 s.\n"
+            "OBJETIVO: que escriban por WhatsApp para reservar.\n"
+            "LO QUE SÉ: llevamos y montamos todo; hay karaoke y simulador; sin precios."
+        ),
+        "prompt_ia": (
+            "Ayúdame a escribir el primer mensaje para un chat con una IA que escribe guiones de "
+            "vídeo. Con mis notas, escríbelo con estas etiquetas: CLIENTE, QUIERO, RED Y "
+            "DURACIÓN, OBJETIVO, LO QUE SÉ. Frases cortas y sin inventar datos.\n\n"
+            "MIS NOTAS:\n[lo que quieres pedir]"
+        ),
+    },
 }
 
 ORDEN = ("estilo_grafico", "tono", "voz", "material", "indicaciones", "cta",
          "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
-         "tono_redes", "guion_parrilla", "pedir_guiones")
+         "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente",
+         "chat_guiones")
 
 
 

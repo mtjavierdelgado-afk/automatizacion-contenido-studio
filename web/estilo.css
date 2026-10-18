@@ -3477,3 +3477,45 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
   .proyecto-parrilla select, .pasar-encargo select { max-width: 100%; flex: 1 1 100%; }
   .fila-guion .crece { display: none; }
 }
+
+/* ------------------------------------------- PARRILLA 2 (18-10-2026)
+   La marca del cliente, «Desde mis resultados» y el chat de guiones. */
+.marca-parrilla .campo-marca { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; min-width: 0; }
+.marca-parrilla textarea { width: 100%; box-sizing: border-box; }
+.post-parrilla { text-transform: none; letter-spacing: normal; font-size: 13px; color: var(--texto); gap: 8px; padding: 6px 0; border-top: 1px solid var(--linea-suave); flex-wrap: wrap; min-width: 0; align-items: center; }
+.post-parrilla .nombre-post { min-width: 0; overflow-wrap: anywhere; }
+.anadir-parrilla .post-parrilla + textarea { margin-top: 10px; width: 100%; box-sizing: border-box; }
+.chat-parrilla { display: flex; flex-direction: column; gap: 10px; }
+.cab-chat { gap: 8px; flex-wrap: wrap; align-items: center; }
+.cab-chat h3 { margin: 0; }
+.cab-chat select { max-width: 280px; min-width: 0; }
+.chat-mensajes {
+  display: flex; flex-direction: column; gap: 10px; max-height: 60vh; min-height: 180px; overflow-y: auto;
+  padding: 10px; background: var(--hueco); border: 1px solid var(--linea); border-radius: 10px;
+}
+.chat-vacio p { margin: 4px 0 8px; }
+.chat-turno { max-width: 88%; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--linea); min-width: 0; }
+.chat-turno.tuyo { align-self: flex-end; background: var(--marcado); }
+.chat-turno.de-claude { align-self: flex-start; background: var(--panel); }
+.chat-turno .quien-chat { margin-bottom: 4px; }
+.texto-chat { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.guion-en-chat {
+  margin: 8px 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 340px; overflow-y: auto;
+  background: var(--hueco); border: 1px dashed var(--acento); border-radius: 8px; padding: 8px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
+}
+.guardar-chat { gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
+.guardar-chat button { white-space: normal; text-align: left; }
+.entrada-chat { display: flex; flex-direction: column; gap: 6px; }
+.entrada-chat textarea { width: 100%; box-sizing: border-box; }
+.mandos-chat { gap: 8px; flex-wrap: wrap; align-items: center; }
+.mandos-chat select { max-width: 200px; min-width: 0; }
+.interruptor-chat { white-space: nowrap; }
+.capturas-chat { gap: 6px; flex-wrap: wrap; }
+.capturas-chat .pastilla button { margin-left: 4px; padding: 0 4px; }
+.oculto-chat { display: none; }
+@media (max-width: 600px) {
+  .chat-turno { max-width: 100%; }
+  .cab-chat select, .mandos-chat select { max-width: 100%; flex: 1 1 100%; }
+  .interruptor-chat { white-space: normal; }
+}

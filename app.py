@@ -15511,6 +15511,241 @@ def parrilla_pasar_al_encargo(cid: str, gid: str, peticion: Request,
     return {"encargo": encargo}
 
 
+# ------------------------------------------- PARRILLA 2: marca, resultados y chat
+# (rama `parrilla-2`, 18-10-2026). La marca del cliente por proyecto, «Desde
+# mis resultados» y «Conversar con Claude» (`pasos/guionista.py`). Lo de
+# resultados LEE lo guardado por Publicar y no pregunta a Upload-Post: usa
+# `publicar.lo_que_funciono` si esta (rama `publicar-redes-2`) y si no, el
+# resumen de Resultados que ya habia.
+
+try:
+    import guionista as GUIONISTA  # noqa: E402  (pasos/ ya esta en sys.path)
+    ERROR_GUIONISTA = ""
+except Exception as _fallo_guionista:  # noqa: BLE001
+    GUIONISTA = None
+    ERROR_GUIONISTA = f"{type(_fallo_guionista).__name__}: {_fallo_guionista}"
+
+
+def _guionista():
+    if GUIONISTA is None:
+        raise ErrorApi(503, f"el chat de guiones no se ha podido cargar: {ERROR_GUIONISTA}")
+    return GUIONISTA
+
+
+def _por_guionista(fn, *args, **kwargs):
+    G = _guionista()
+    try:
+        return fn(*args, **kwargs)
+    except G.ErrorGuionista as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+    except PARRILLA.ErrorParrilla as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+
+
+ORDENES_PARRILLA = ("vistas", "interaccion", "hasta_el_final", "visto_medio")
+
+
+def _posts_de_parrilla(cid, peticion, dias=30, por="vistas", cuantos=10):
+    """Lo que mejor funciono en el proyecto: {disponible, fuente, posts, motivo}."""
+    if PUBLICAR is None:
+        return {"disponible": False, "fuente": "", "posts": [],
+                "motivo": "el módulo de Publicar no se ha podido cargar"}
+    try:
+        dias = max(1, min(int(dias or 30), 365))
+    except (TypeError, ValueError):
+        dias = 30
+    por = por if por in ORDENES_PARRILLA else "vistas"
+    videos = [v for v in _videos_para_publicar(peticion)
+              if (v.get("cliente") or PARRILLA.SIN_PROYECTO) == cid]
+    # por nombre: hasta que se una `publicar-redes-2`, `main` no la tiene
+    lo_que_funciono = getattr(PUBLICAR, "lo_que_funciono", None)
+    fuente = "lo_que_funciono" if callable(lo_que_funciono) else "resumen"
+    posts = []
+    if fuente == "lo_que_funciono":
+        r = lo_que_funciono(raiz_proyectos(), videos, None, dias, None, por, cuantos)
+        posts = list(r.get("posts") or [])
+    else:
+        # SIN `publicar-redes-2`: el resumen de Resultados, ordenado por vistas
+        r = PUBLICAR.resultados(raiz_proyectos(), videos, cid, dias)
+        for fila in r.get("videos") or []:
+            for red, datos in (fila.get("redes") or {}).items():
+                metricas = {k: datos.get(k) for k in PUBLICAR.METRICAS}
+                if not isinstance(metricas.get("vistas"), (int, float)):
+                    continue
+                posts.append({"pid": fila["pid"], "nombre": fila.get("nombre") or fila["pid"],
+                              "red": red, "url": datos.get("url") or "", "metricas": metricas})
+        posts.sort(key=lambda p: p["metricas"].get("vistas") or 0, reverse=True)
+        posts = posts[:cuantos]
+        por = "vistas"
+    materiales = {}
+    for p in posts:
+        if p["pid"] not in materiales:
+            try:
+                materiales[p["pid"]] = str((contexto(p["pid"]).estado.params("ingesta") or {})
+                                           .get("texto") or "")[:800]
+            except Exception:                               # noqa: BLE001
+                materiales[p["pid"]] = ""
+        p["material"] = materiales[p["pid"]]
+        p["clave"] = f"{p['pid']}:{p.get('red') or ''}"
+    motivo = "" if posts else ("todavía no hay cifras de este proyecto: publica algún vídeo y "
+                               "pulsa «Actualizar» en Publicar → Resultados")
+    return {"disponible": bool(posts), "fuente": fuente, "por": por, "dias": dias,
+            "posts": posts, "motivo": motivo}
+
+
+@app.get("/api/parrilla/proyectos/{cid}/marca")
+def parrilla_marca(cid: str, peticion: Request):
+    """La marca del cliente guardada en el proyecto, con sus campos."""
+    P = _parrilla()
+    cid = _proyecto_parrilla(cid, peticion)
+    return {"marca": _por_parrilla(P.marca_de, raiz_proyectos(), cid),
+            "campos": [{"id": c, "nombre": n, "ayuda": a} for c, n, a in P.CAMPOS_MARCA]}
+
+
+@app.put("/api/parrilla/proyectos/{cid}/marca")
+def parrilla_guardar_marca(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{quien?, mostrar?, evitar?, tono?, cta?, otras?} -> la marca."""
+    cid = _proyecto_parrilla(cid, peticion)
+    return {"marca": _por_parrilla(_parrilla().guardar_marca, raiz_proyectos(), cid, _cuerpo(cuerpo))}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/guiones/{gid}/marca")
+def parrilla_marca_desde_guion(cid: str, gid: str, peticion: Request,
+                               cuerpo: dict = Body(default=None)):
+    """«Usar su marca para el proyecto»: {pisar?} -> {marca, cambiados}."""
+    cid = _proyecto_parrilla(cid, peticion)
+    marca, cambiados = _por_parrilla(_parrilla().marca_desde_guion, raiz_proyectos(), cid, gid,
+                                     bool(_cuerpo(cuerpo).get("pisar")))
+    return {"marca": marca, "cambiados": cambiados}
+
+
+@app.get("/api/parrilla/proyectos/{cid}/resultados")
+def parrilla_resultados(cid: str, peticion: Request, dias: int = Query(default=30),
+                        por: str = Query(default="vistas")):
+    """Lo que mejor funcionó en el proyecto (solo lo guardado)."""
+    cid = _proyecto_parrilla(cid, peticion)
+    return _posts_de_parrilla(cid, peticion, dias, por)
+
+
+@app.post("/api/parrilla/proyectos/{cid}/desde-resultados", status_code=202)
+def parrilla_desde_resultados(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Claude escribe guiones a partir de lo que mejor funcionó: {claves?, dias?,
+    por?, cuantos, modo, peticion?, matriz?, nombre?}. Las cifras se vuelven a
+    leer aquí: no se fía de las que mande la pantalla."""
+    cid = _proyecto_parrilla(cid, peticion)
+    d = _cuerpo(cuerpo)
+    r = _posts_de_parrilla(cid, peticion, d.get("dias") or 30, d.get("por") or "vistas", 15)
+    claves = [str(x) for x in (d.get("claves") or []) if x]
+    posts = [p for p in r["posts"] if not claves or p["clave"] in claves]
+    if not posts:
+        raise ErrorApi(409, r["motivo"] or "elige al menos un vídeo de tus resultados")
+    datos = {"posts": posts, "cuantos": d.get("cuantos"), "modo": d.get("modo"),
+             "peticion": str(d.get("peticion") or "")[:3000], "matriz": str(d.get("matriz") or ""),
+             "nombre": d.get("nombre") or "Desde mis resultados",
+             "contexto": _contexto_parrilla(cid, d)}
+    t = _por_parrilla(_parrilla().lanzar, raiz_proyectos(), cid, "resultados", datos)
+    anotar_global("parrilla_desde_resultados", {"proyecto": cid, "posts": len(posts),
+                                                "cuantos": d.get("cuantos")})
+    return t
+
+
+@app.get("/api/parrilla/proyectos/{cid}/chats")
+def parrilla_chats(cid: str, peticion: Request):
+    """Las conversaciones del proyecto, la más nueva primero."""
+    cid = _proyecto_parrilla(cid, peticion)
+    G = _guionista()
+    return {"chats": _por_guionista(G.listar, raiz_proyectos(), cid),
+            "modelos": list(G.MODELOS), "modelo": G.MODELO if G.MODELO in G.MODELOS else "opus",
+            "max_capturas": G.MAX_IMAGENES}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/chats", status_code=201)
+def parrilla_chat_nuevo(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Una conversación nueva: {modelo?}. No se guarda hasta el primer mensaje."""
+    cid = _proyecto_parrilla(cid, peticion)
+    chat = _por_guionista(_guionista().nueva, raiz_proyectos(), cid, _cuerpo(cuerpo).get("modelo"))
+    return chat.ver()
+
+
+@app.get("/api/parrilla/proyectos/{cid}/chats/{chid}")
+def parrilla_chat(cid: str, chid: str, peticion: Request):
+    cid = _proyecto_parrilla(cid, peticion)
+    return _por_guionista(_guionista().obtener, raiz_proyectos(), cid, chid).ver()
+
+
+@app.post("/api/parrilla/proyectos/{cid}/chats/{chid}/mensajes", status_code=202)
+async def parrilla_chat_mensaje(cid: str, chid: str, peticion: Request):
+    """Un mensaje (multipart): «texto», «web» (1/0), «resultados» (1/0), «modelo»
+    y las capturas en «capturas». Contesta en un hilo: se sigue preguntando."""
+    cid = await _en_hilo(_proyecto_parrilla, cid, peticion)
+    G = _guionista()
+    try:
+        formulario = await peticion.form()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(400, f"multipart ilegible: {fallo}")
+    try:
+        campos, imagenes = {}, []
+        for clave, valor in formulario.multi_items():
+            if hasattr(valor, "read"):
+                if clave == "capturas":
+                    if len(imagenes) >= G.MAX_IMAGENES:
+                        raise ErrorApi(400, f"como mucho {G.MAX_IMAGENES} capturas por mensaje")
+                    imagenes.append((str(getattr(valor, "filename", "") or "captura"),
+                                     await valor.read(G.MAX_BYTES_IMAGEN + 1)))
+            else:
+                campos[clave] = str(valor)
+    finally:
+        await formulario.close()
+    return await _en_hilo(_parrilla_chat_mensaje_en_hilo, cid, chid, campos, imagenes, peticion)
+
+
+def _parrilla_chat_mensaje_en_hilo(cid, chid, campos, imagenes, peticion):
+    G = _guionista()
+    chat = _por_guionista(G.obtener, raiz_proyectos(), cid, chid)
+    resultados = ""
+    if campos.get("resultados") == "1":
+        r = _posts_de_parrilla(cid, peticion, 30, "vistas", 10)
+        resultados = (PARRILLA.resumen_de_posts(r["posts"]) if r["posts"]
+                      else f"(no hay: {r['motivo']})")
+    vista = _por_guionista(chat.escribir, campos.get("texto") or "", web=campos.get("web") == "1",
+                           resultados_texto=resultados, imagenes=imagenes,
+                           modelo=campos.get("modelo") or None)
+    anotar_global("parrilla_chat", {"proyecto": cid, "chat": chat.id,
+                                    "web": campos.get("web") == "1", "capturas": len(imagenes)})
+    return vista
+
+
+@app.post("/api/parrilla/proyectos/{cid}/chats/{chid}/cancelar")
+def parrilla_chat_cancelar(cid: str, chid: str, peticion: Request):
+    cid = _proyecto_parrilla(cid, peticion)
+    chat = _por_guionista(_guionista().obtener, raiz_proyectos(), cid, chid)
+    return {"cancelado": chat.cancelar(), "conversacion": chat.ver()}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/chats/{chid}/guardar")
+def parrilla_chat_guardar(cid: str, chid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Los guiones de una respuesta a la Parrilla: {turno, indices?, matriz?, nombre?}."""
+    cid = _proyecto_parrilla(cid, peticion)
+    d = _cuerpo(cuerpo)
+    chat = _por_guionista(_guionista().obtener, raiz_proyectos(), cid, chid)
+    try:
+        turno = int(d.get("turno") or 0)
+    except (TypeError, ValueError):
+        raise ErrorApi(400, "¿qué respuesta?") from None
+    indices = d.get("indices")
+    if indices is not None and not isinstance(indices, list):
+        raise ErrorApi(400, "«indices» es una lista")
+    return _por_guionista(chat.guardar_guiones, turno, indices, str(d.get("matriz") or ""),
+                          str(d.get("nombre") or ""))
+
+
+@app.delete("/api/parrilla/proyectos/{cid}/chats/{chid}")
+def parrilla_chat_borrar(cid: str, chid: str, peticion: Request):
+    cid = _proyecto_parrilla(cid, peticion)
+    _por_guionista(_guionista().borrar, raiz_proyectos(), cid, chid)
+    return {"ok": True}
+
+
 # ------------------------------------------------------------------------ main
 
 def main():

@@ -38,6 +38,7 @@ os.environ["ESTUDIO_BITACORA_GLOBAL"] = os.path.join(CARPETA, "bitacora_global.j
 os.environ.pop("ESTUDIO_SIMULAR", None)
 
 import guias  # noqa: E402
+import guionista as G  # noqa: E402
 import parrilla as P  # noqa: E402
 
 _ok = 0
@@ -67,7 +68,7 @@ def lanza(fn, *args, **kwargs):
     """El ErrorParrilla que lanza fn, o None."""
     try:
         fn(*args, **kwargs)
-    except P.ErrorParrilla as fallo:
+    except (P.ErrorParrilla, G.ErrorGuionista) as fallo:
         return fallo
     return None
 
@@ -684,6 +685,70 @@ def prueba_studio():
         igual(s.delete(base + f"/api/parrilla/proyectos/{cid}/matrices/{mid}").status_code, 200, "borrar una matriz")
         guias_api = [x["id"] for x in s.get(base + "/api/sistema/guias").json()["guias"]]
         ok("guion_parrilla" in guias_api and "pedir_guiones" in guias_api, "las guías salen en /api/sistema/guias")
+        ok("marca_cliente" in guias_api and "chat_guiones" in guias_api, "y las de la marca y el chat")
+
+        # --- parrilla-2: la marca, desde mis resultados y el chat
+        r = s.get(base + f"/api/parrilla/proyectos/{cid}/marca").json()
+        igual([c["id"] for c in r["campos"]], [c for c, _n, _a in P.CAMPOS_MARCA], "la marca trae sus campos")
+        r = s.put(base + f"/api/parrilla/proyectos/{cid}/marca", json={"quien": "Cocinas Lima", "cta": "Llámanos"})
+        igual(r.json()["marca"]["quien"], "Cocinas Lima", "PUT de la marca")
+        igual(s.put(base + f"/api/parrilla/proyectos/{secreto}/marca", json={"quien": "x"}).status_code, 404,
+              "la marca de un proyecto con clave sin abrir, 404")
+        r = s.get(base + f"/api/parrilla/proyectos/{cid}/resultados").json()
+        igual(r["disponible"], False, "sin nada publicado, «Desde mis resultados» lo dice")
+        ok("Actualizar" in r["motivo"], "con qué hacer")
+        igual(s.post(base + f"/api/parrilla/proyectos/{cid}/desde-resultados",
+                     json={"cuantos": 2, "modo": "adaptar"}).status_code, 409, "y no lanza nada")
+        # un vídeo publicado con cifras guardadas
+        with open(os.path.join(carpeta_pub, f"{video.id}.json"), "w", encoding="utf-8") as fh:
+            json.dump({"textos": {"tiktok": {"descripcion": "Fregadero en TikTok"}},
+                       "envios": [{"id": "e1", "red": "tiktok", "estado": "publicado",
+                                   "cuando": time.strftime("%Y-%m-%dT%H:%M"),
+                                   "metricas": {"vistas": 1500, "me_gusta": 90, "al": time.strftime("%Y-%m-%dT%H:%M")}}]}, fh)
+        s.put(base + f"/api/clientes/videos/{video.id}", json={"cliente": cid})
+        r = s.get(base + f"/api/parrilla/proyectos/{cid}/resultados").json()
+        ok(r["disponible"] and r["posts"][0]["pid"] == video.id, f"con un vídeo publicado sale en sus resultados ({r.get('fuente')})")
+        ok("Por fuera" in r["posts"][0].get("material", ""), "con el material de ese vídeo")
+        r = s.post(base + f"/api/parrilla/proyectos/{cid}/desde-resultados",
+                   json={"claves": [r["posts"][0]["clave"]], "cuantos": 2, "modo": "adaptar"})
+        igual(r.status_code, 202, "«Desde mis resultados» lanza un trabajo")
+        t = _esperar(s, base + f"/api/parrilla/trabajos/{r.json()['id']}")
+        igual((t["estado"], len(t["guiones"])), ("listo", 2), "y escribe los guiones pedidos")
+
+        r = s.post(base + f"/api/parrilla/proyectos/{cid}/chats", json={})
+        igual(r.status_code, 201, "una conversación nueva")
+        chid = r.json()["id"]
+        png = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+        r = s.post(base + f"/api/parrilla/proyectos/{cid}/chats/{chid}/mensajes",
+                   data={"texto": "hazme un guion de fregaderos", "web": "1", "resultados": "1"},
+                   files=[("capturas", ("perfil.png", png, "image/png"))])
+        igual(r.status_code, 202, "un mensaje con una captura, internet y resultados")
+        fin = time.time() + 20
+        conv = {}
+        while time.time() < fin:
+            conv = s.get(base + f"/api/parrilla/proyectos/{cid}/chats/{chid}").json()
+            if not conv.get("ocupada"):
+                break
+            time.sleep(0.3)
+        ultimo = conv["turnos"][-1]
+        igual(ultimo["estado"], "listo", "Claude (el doble) contesta")
+        ok("Internet: sí" in ultimo["texto"] and "Capturas: sí" in ultimo["texto"],
+           "con internet y la captura en ese turno")
+        igual(len(ultimo["guiones"]), 1, "su guion se detecta")
+        r = s.post(base + f"/api/parrilla/proyectos/{cid}/chats/{chid}/guardar", json={"turno": ultimo["n"]})
+        igual(r.status_code, 200, "«Guardar en la Parrilla»")
+        igual(s.post(base + f"/api/parrilla/proyectos/{cid}/chats/{chid}/guardar",
+                     json={"turno": ultimo["n"]}).status_code, 400, "el mismo guion no se guarda dos veces")
+        r = s.post(base + f"/api/parrilla/proyectos/{cid}/chats/{chid}/mensajes",
+                   data={"texto": "x"}, files=[("capturas", ("falsa.png", b"no es png", "image/png"))])
+        igual(r.status_code, 400, "una «captura» que no es una imagen, 400")
+        lista = s.get(base + f"/api/parrilla/proyectos/{cid}/chats").json()["chats"]
+        ok(any(c["id"] == chid for c in lista), "la conversación sale en la lista")
+        igual(s.get(base + f"/api/parrilla/proyectos/{secreto}/chats").status_code, 404,
+              "las conversaciones de un proyecto con clave sin abrir, 404")
+        igual(s.get(base + f"/api/parrilla/proyectos/{cid}/chats/zzz").status_code, 404,
+              "una conversación que no existe, 404")
+        igual(s.delete(base + f"/api/parrilla/proyectos/{cid}/chats/{chid}").status_code, 200, "borrarla")
     finally:
         proceso.terminate()
         proceso.wait(timeout=15)
@@ -819,6 +884,199 @@ def prueba_revision():
     ok(not os.path.exists(vistos["cwd"]), "la carpeta aislada se borra al acabar")
 
 
+def prueba_parrilla_2():
+    """La marca del cliente, «Desde mis resultados» y el chat (18-10-2026)."""
+    seccion("7] la marca del cliente")
+    raiz = os.path.join(CARPETA, "p2")
+    os.makedirs(raiz)
+    igual(P.marca_texto(P.marca_de(raiz, "c1")), "", "sin marca, nada que decirle a Claude")
+    m = P.guardar_marca(raiz, "c1", {"quien": " EstadoPlay, consolas en Lima ", "cta": "Escríbenos por WhatsApp",
+                                     "evitar": "ninguna"})
+    igual(m["quien"], "EstadoPlay, consolas en Lima", "se guarda sin espacios de más")
+    texto = P.marca_texto(m)
+    ok("- Quién es: EstadoPlay" in texto and "- CTA de siempre: Escríbenos" in texto, "y va a Claude como bloque")
+    ok("Evitar" not in texto, "«ninguna» no se le pasa")
+    ok(lanza(P.guardar_marca, raiz, "c1", {"quien": "x" * (P.MAX_CAMPO_MARCA + 1)}) is not None, "ni un campo enorme")
+    ok(lanza(P.guardar_marca, raiz, "c1", {"otro": "x"}) is not None, "ni un campo que no existe")
+    P.guardar_marca(raiz, "c1", {"tono": "cercano"})
+    igual(P.marca_de(raiz, "c1")["quien"], "EstadoPlay, consolas en Lima", "cambiar un campo no borra los demás")
+    _m, gids = P.anadir_en_formato(raiz, "c1", "", GUION)
+    marca, cambiados = P.marca_desde_guion(raiz, "c1", gids[0])
+    igual(cambiados, ["evitar", "mostrar"], "«Usar su marca» rellena solo lo vacío")
+    igual((marca["mostrar"], marca["tono"]), ("acero", "cercano"), "y no pisa lo que ya había")
+    P.guardar_marca(raiz, "c1", {"cta": "Llámanos"})
+    _marca, cambiados = P.marca_desde_guion(raiz, "c1", gids[0])
+    igual(cambiados, [], "sin «pisar», un CTA ya puesto no se toca")
+    _marca, cambiados = P.marca_desde_guion(raiz, "c1", gids[0], pisar=True)
+    igual(cambiados, ["cta"], "con «pisar», cambia solo lo distinto (el tono era el mismo)")
+
+    pedidos = []
+    P.LLAMAR_CLAUDE = lambda i, para: pedidos.append(i) or (f"{P.SEPARADOR}\n" + guion_simple("M1", "x"))
+    try:
+        P.lanzar(raiz, "c1", "pegar", {"texto": "uno", "modo": "adaptar"}, en_hilo=False)
+        P.lanzar(raiz, "c1", "pedir", {"peticion": "fiestas", "cuantos": 1, "modo": "adaptar"}, en_hilo=False)
+        ok(all("MARCA DEL CLIENTE (la tiene guardada el proyecto" in x and "EstadoPlay" in x for x in pedidos),
+           "la marca va en convertir y en pedir")
+        pedidos.clear()
+        P.lanzar(raiz, "otro", "pedir", {"peticion": "fiestas", "cuantos": 1, "modo": "adaptar"}, en_hilo=False)
+        ok("EstadoPlay" not in pedidos[0], "y la de un proyecto no va a otro")
+
+        seccion("8] desde mis resultados")
+        posts = [{"pid": "v1", "nombre": "Cumple con consola", "red": "tiktok", "dia": "sábado", "hora": "19:00",
+                  "metricas": {"vistas": 15000, "me_gusta": 900, "hasta_el_final": 0.42},
+                  "interaccion": 0.07, "descripcion": "Así fue el cumple", "material": "Un cumple con FIFA"},
+                 {"pid": "v2", "nombre": "Karaoke", "red": "youtube", "metricas": {"vistas": 300}}]
+        texto = P.resumen_de_posts(posts)
+        ok("1. «Cumple con consola» — TikTok, publicado sábado 19:00: 15000 vistas" in texto, "cada vídeo, con sus cifras")
+        ok("interacción 7.0 %" in texto and "vieron hasta el final 42 %" in texto, "interacción y retención")
+        ok("De qué iba (material del vídeo): Un cumple con FIFA" in texto, "y de qué iba")
+        pedidos.clear()
+        ok(lanza(P.lanzar, raiz, "c1", "resultados", {"posts": [], "cuantos": 2, "modo": "adaptar"}) is not None,
+           "sin vídeos elegidos no se lanza")
+        t = P.lanzar(raiz, "c1", "resultados", {"posts": posts, "cuantos": 7, "modo": "exacto",
+                                                 "peticion": "para Navidad"}, en_hilo=False)
+        igual(t["estado"], "listo", "«Desde mis resultados» escribe")
+        igual(len(pedidos), 2, "de cinco en cinco (siete: dos llamadas)")
+        ok("[[TAREA:resultados]]" in pedidos[0] and "LO QUE MEJOR FUNCIONÓ" in pedidos[0]
+           and "para Navidad" in pedidos[0] and "EstadoPlay" in pedidos[0],
+           "con los vídeos, lo pedido y la marca")
+        ok("en qué vídeo de la lista se inspira" in pedidos[0], "y pide decir en cuál se inspira")
+        m = [x for x in P.listar(raiz, "c1")["matrices"] if x["id"] == t["matriz"]][0]
+        igual(m["origen"].get("inspirado"), ["Cumple con consola", "Karaoke"], "la matriz recuerda de qué vídeos salió")
+    finally:
+        P.LLAMAR_CLAUDE = None
+
+    seccion("9] conversar con Claude")
+    llamadas = []
+
+    def doble(mensaje, extra, cwd, permitidas, vetadas, modelo, avance=None):
+        llamadas.append({"mensaje": mensaje, "extra": list(extra), "cwd": cwd, "permitidas": permitidas,
+                         "vetadas": vetadas, "modelo": modelo, "contenido": sorted(os.listdir(cwd))})
+        if "falla" in mensaje:
+            raise RuntimeError("sin cupo")
+        if "--resume" in extra and "sesion-rota" in extra:
+            raise RuntimeError("no such session")
+        respuesta = "Te propongo esto:\n" + G.INICIO + "\n" + guion_simple("C1", "Uno") + "\n" + G.FIN
+        if "dos" in mensaje:
+            respuesta += "\nY otro:\n" + G.INICIO + "\n" + guion_simple("C2", "Dos") + "\n" + G.FIN + "\n¿Vale?"
+        return respuesta, {"session_id": "sesion-1", "usage": {"input_tokens": 10, "output_tokens": 5}}
+
+    G.EJECUTAR = doble
+    try:
+        chat = G.nueva(raiz, "c1", "sonnet")
+        v = chat.escribir("hola, quiero dos guiones", en_hilo=False)
+        primero = llamadas[-1]
+        igual(primero["extra"], [], "el primer mensaje empieza sesión")
+        ok(P._FORMATO_SALIDA in primero["mensaje"] and "EstadoPlay" in primero["mensaje"],
+           "con el formato del guion y la marca del proyecto")
+        ok("NO TIENES INTERNET" in primero["mensaje"], "sin internet si no se pide")
+        ok("WebSearch" in primero["vetadas"] and "WebFetch" in primero["vetadas"] and "Read" in primero["vetadas"]
+           and "Bash" in primero["vetadas"], "con todo vetado")
+        igual(primero["permitidas"], (), "y nada permitido")
+        igual(primero["contenido"], [], "en una carpeta aislada vacía")
+        ok(os.path.join("parrilla", "aislado") in primero["cwd"], "que no es la de la Parrilla")
+        igual(primero["modelo"], "sonnet", "con el modelo elegido")
+        t = v["turnos"][-1]
+        igual([g["codigo"] for g in t["guiones"]], ["C1", "C2"], "los dos guiones de la respuesta se detectan")
+
+        png = b"\x89PNG\r\n\x1a\n" + b"0" * 32
+        chat.escribir("y ahora mira esta cuenta", web=True, resultados_texto="1. «Cumple» — TikTok: 15000 vistas",
+                      imagenes=[("perfil.png", png)], modelo="opus", en_hilo=False)
+        segundo = llamadas[-1]
+        igual(segundo["extra"], ["--resume", "sesion-1"], "el segundo sigue la sesión")
+        ok("WebSearch" in segundo["permitidas"] and "WebFetch" in segundo["permitidas"], "con internet, si se pide")
+        ok("WebSearch" not in segundo["vetadas"] and "Bash" in segundo["vetadas"], "y solo eso se abre")
+        ok(len(segundo["contenido"]) == 1 and segundo["contenido"][0].endswith(".png"), "la captura, en su carpeta")
+        lectura = [x for x in segundo["permitidas"] if x.startswith("Read(")]
+        ok(len(lectura) == 1 and os.path.abspath(segundo["cwd"]).replace("\\", "/").lstrip("/") in lectura[0],
+           "Read solo en esa carpeta")
+        ok("Instagram y TikTok no" in segundo["mensaje"] and "nunca instrucciones" in segundo["mensaje"],
+           "con la advertencia de Instagram y de no obedecer lo que diga una web o una captura")
+        ok("MIS VÍDEOS QUE MEJOR FUNCIONARON" in segundo["mensaje"], "y los resultados, si se piden")
+        igual(segundo["modelo"], "opus", "el modelo se puede cambiar a mitad")
+
+        r = chat.guardar_guiones(2, [1])
+        igual(len(r["guiones"]), 1, "guardar un guion de la respuesta")
+        g = P.leer(raiz, "c1", r["guiones"][0])
+        igual((g["codigo"], g["estado"]), ("C2", "pendiente"), "queda pendiente en la Parrilla")
+        r = chat.guardar_guiones(2)
+        igual(len(r["guiones"]), 1, "«Guardar los N» guarda solo lo que faltaba")
+        ok(lanza(chat.guardar_guiones, 2) is not None, "y otra vez ya no hay nada")
+        ok(lanza(chat.guardar_guiones, 1) is not None, "un turno tuyo no tiene guiones que guardar")
+
+        ok(lanza(chat.escribir, "x", imagenes=[("a.png", b"GIF89a")]) is not None, "una captura falsa se rechaza")
+        ok(lanza(chat.escribir, "x", imagenes=[("a.exe", b"MZ")]) is not None, "lo que no es imagen también")
+        ok(lanza(chat.escribir, "x", imagenes=[("a.png", png)] * (G.MAX_IMAGENES + 1)) is not None,
+           f"y más de {G.MAX_IMAGENES} capturas")
+        ok(lanza(chat.escribir, "  ") is not None, "un mensaje vacío no")
+
+        v = chat.escribir("esto falla", en_hilo=False)
+        igual(v["turnos"][-1]["estado"], "error", "un fallo del CLI se ve en su turno")
+        ok("sin cupo" in v["turnos"][-1]["texto"], "con su motivo")
+
+        chat.session_id = "sesion-rota"
+        n = len(llamadas)
+        chat.escribir("¿seguimos?", en_hilo=False)
+        igual(len(llamadas) - n, 2, "si reanudar falla, vuelve a empezar")
+        ok("LO QUE LLEVAMOS HABLADO" in llamadas[-1]["mensaje"] and "quiero dos guiones" in llamadas[-1]["mensaje"],
+           "con lo hablado pegado")
+
+        G._CHATS.clear()
+        de_disco = G.obtener(raiz, "c1", chat.id)
+        igual(len(de_disco.turnos), len(chat.turnos), "la conversación se lee del disco")
+        ok(len(de_disco.turnos[1]["guardados"]) == 2, "los dos guiones guardados siguen marcados")
+        igual([c["id"] for c in G.listar(raiz, "c1")], [chat.id], "sale en la lista de su proyecto")
+        igual(G.listar(raiz, "otro"), [], "y no en la de otro")
+        ok(lanza(G.obtener, raiz, "c1", "../../x") is not None, "un id raro no abre nada")
+
+        lento = []
+
+        def doble_lento(*args, **kwargs):
+            lento.append(1)
+            time.sleep(0.6)
+            return doble(*args, **kwargs)
+        G.EJECUTAR = doble_lento
+        otro = G.nueva(raiz, "c1")
+        otro.escribir("uno")
+        fallo = lanza(otro.escribir, "dos")
+        ok(fallo is not None and fallo.codigo == 409, "mientras contesta, otro mensaje da 409")
+        fin = time.time() + 5
+        while otro.ocupada() and time.time() < fin:
+            time.sleep(0.1)
+        ok(not otro.ocupada(), "y acaba")
+
+        aislada = chat.aislada()
+        ok(os.path.isdir(aislada), "la conversación tiene su carpeta con las capturas")
+        G.borrar(raiz, "c1", chat.id)
+        ok(not os.path.exists(aislada) and not os.path.exists(chat.ruta()), "borrarla se lleva sus capturas")
+
+        G.EJECUTAR = doble
+        antes = G.MAX_CHATS
+        G.MAX_CHATS = 3
+        try:
+            for i in range(5):
+                c = G.nueva(raiz, "poda")
+                c.escribir(f"hola {i}", en_hilo=False)
+                time.sleep(0.02)
+            igual(len(G.listar(raiz, "poda")), 3, "solo se guardan las últimas conversaciones")
+        finally:
+            G.MAX_CHATS = antes
+    finally:
+        G.EJECUTAR = None
+
+    textos = G.guiones_en("hola\n=== GUION ===\n" + guion_simple("A", "a") + "\n=== GUION ===\n"
+                          + guion_simple("B", "b") + "\n=== FIN ===\nfin\n=== GUION ===\nsin formato")
+    igual([g["codigo"] for _t, g in textos], ["A", "B"], "guiones_en: sin FIN, hasta el siguiente; lo que no es guion no cuenta")
+
+    os.environ["ESTUDIO_SIMULAR"] = "1"
+    try:
+        c = G.nueva(raiz, "sim")
+        v = c.escribir("hazme un guion", web=True, en_hilo=False)
+        ok(v["turnos"][-1]["guiones"] and "Internet: sí" in v["turnos"][-1]["texto"], "el doble del recorrido escribe un guion")
+    finally:
+        os.environ.pop("ESTUDIO_SIMULAR", None)
+
+
 def main():
     print("PRUEBA DE LA PARRILLA")
     prueba_lector()
@@ -826,6 +1084,7 @@ def main():
     prueba_datos()
     prueba_trabajos()
     prueba_revision()
+    prueba_parrilla_2()
     try:
         import fastapi  # noqa: F401
         import requests  # noqa: F401

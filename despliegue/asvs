@@ -458,7 +458,10 @@ comparar_guion() {
   carpeta="$(grep -m1 '^ESTUDIO_PROYECTOS=' "$RAIZ/datos/entorno" 2>/dev/null | cut -d= -f2- || true)"
   carpeta="${carpeta:-$RAIZ/datos/proyectos}/_sistema/comparar_guion"
   # cada argumento citado: un nombre con espacios llega entero al bash de abajo
-  args="$(printf '%q ' "$@")"
+  # sin argumentos, NADA: printf '%q' de una lista vacia da '' y Python
+  # recibia un video llamado «» que encajaba con todos (revision 18-10)
+  args=""
+  if [ $# -gt 0 ]; then args="$(printf '%q ' "$@")"; fi
   registro="$carpeta/registro.log"
   pidf="$carpeta/proceso.pid"
   sudo -u "$USUARIO" mkdir -p "$carpeta"

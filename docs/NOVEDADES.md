@@ -43,7 +43,8 @@ vídeos, estilos, claves y contraseña no se tocan.
 - **`asvs comparar-guion`**, en la consola del servidor: escribe el guion de un
   vídeo tuyo con sonnet y con opus, con el mismo material y las mismas
   indicaciones, y te los enseña como «A» y «B» sin decir cuál es cuál.
-  `asvs comparar-guion revelar` lo dice después de elegir. No toca el vídeo y
+  `asvs comparar-guion revelar` lo dice después de elegir (y cuál es el que
+  usa hoy ese vídeo: por defecto, opus con esfuerzo muy alto). No toca el vídeo y
   no gasta dólares, solo tokens de la suscripción. Sin nada detrás, enseña la
   lista de vídeos que se pueden comparar.
 

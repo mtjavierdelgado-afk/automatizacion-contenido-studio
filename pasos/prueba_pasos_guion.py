@@ -137,9 +137,18 @@ def prueba_comparar_guion(base, proyecto):
     """`herramientas/comparar_guion.py` (18-10-2026): escribe el guion con dos
     modelos en una COPIA. El proyecto de verdad no puede cambiar ni un byte, y
     cada pasada tiene que ir con su modelo y desde cero."""
-    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                    "herramientas"))
-    import comparar_guion                                     # noqa: PLC0415
+    carpeta_herramientas = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "herramientas")
+    sys.path.insert(0, carpeta_herramientas)
+    try:
+        import comparar_guion                                 # noqa: PLC0415
+    finally:
+        sys.path.remove(carpeta_herramientas)
+    # un retoque a mano en el guion del video: no puede entrar en A ni en B
+    params = dict(Estado(proyecto).params("guion") or {})
+    params["bloques"] = {"B001": {"texto": "Texto corregido a mano."}}
+    params["insertados"] = [{"id": "B001A", "despues_de": "B001"}]
+    Estado(proyecto).set_params("guion", params)
     antes = _huella_de_carpeta(proyecto.raiz)
     firma_antes = Estado(proyecto).resumen()
     vistos = []
@@ -170,8 +179,10 @@ def prueba_comparar_guion(base, proyecto):
           "una pasada con cada modelo")
     comprobar(all(p.get("regenerar_desde_cero") for p in vistos),
               "las dos desde cero: el guion que ya hay no entra como base")
-    comprobar(all(p.get("prompt_general") == vistos[0].get("prompt_general") for p in vistos),
-              "con las mismas indicaciones")
+    comprobar(all(p.get("prompt_general") == params.get("prompt_general") for p in vistos),
+              "con las indicaciones del vídeo")
+    comprobar(not any(p.get("bloques") or p.get("insertados") for p in vistos),
+              "sin los retoques a mano: la comparación es del modelo")
     video = (resultado.get("videos") or [{}])[0]
     igual(sorted((video.get("letras") or {}).values()), ["opus", "sonnet"],
           "A y B son los dos modelos, y se guarda cuál es cuál")

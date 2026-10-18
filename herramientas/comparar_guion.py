@@ -7,10 +7,12 @@ proyecto de verdad no cambia: ni un param, ni una firma, ni nada obsoleto.
 
 Solo gasta tokens de la suscripcion de Claude (el CLI), ningun dolar.
 
-Para que (18-10-2026, decision del dueno): saber si opus escribe mejores guiones
-que sonnet --el defecto del paso, `cli_claude.POR_FASE["guion"]`-- con encargos
-reales, antes de cambiar el defecto. Cambiarlo despues es una linea, y en
-Configuracion ya se puede elegir el modelo del guion.
+Para que (18-10-2026, decision del dueno): saber si el guion sale mejor con opus
+o con sonnet, con encargos reales. OJO: el guion YA corre por defecto con el
+defecto del canal (opus, esfuerzo xhigh: `cli_claude.por_defecto_de`), salvo que
+el video o su estilo fijen otro; `POR_FASE["guion"]` (sonnet/medium) es solo la
+recomendacion. Los dos guiones van con el MISMO esfuerzo, el del video, salvo
+--esfuerzo. Al revelar se dice cual es el que el video usa hoy.
 
 A CIEGAS: los dos guiones salen como «A» y «B» en un orden al azar; cual es cual
 se guarda aparte y se ensena con --revelar, despues de elegir.
@@ -44,7 +46,8 @@ for camino in (RAIZ, os.path.join(RAIZ, "pasos")):
 
 #: Lo que NO hace falta para escribir un guion, y pesa: se queda fuera de la copia.
 PASOS_QUE_NO_SE_COPIAN = ("voz", "revision_audio", "assets", "callouts", "render")
-EXTENSIONES_PESADAS = (".mp4", ".wav", ".mp3", ".png", ".jpg", ".jpeg", ".webp")
+EXTENSIONES_PESADAS = (".mp4", ".mov", ".webm", ".wav", ".mp3", ".m4a", ".ogg",
+                       ".flac", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".pdf")
 
 
 def raiz_proyectos():
@@ -125,11 +128,18 @@ def escribir_con(origen, modelo, esfuerzo, carpeta_tmp, avisar=print):
     if esfuerzo:
         params["esfuerzo"] = esfuerzo
     params.pop("instruccion_vuelta", None)
+    # LOS RETOQUES A MANO, FUERA: `p3_guion` pone encima de lo que escribe el
+    # modelo los bloques corregidos y los anadidos a mano, aunque vaya desde
+    # cero. Con ellos, A y B llevarian el mismo texto humano en esos bloques y
+    # la comparacion no seria del modelo (revision 18-10).
+    params.pop("bloques", None)
+    params.pop("insertados", None)
     arranque = time.time()
     p3_guion.ejecutar(proyecto, params, lambda f, m="": avisar(f"  [{modelo}] {int(f * 100)} % {m}"))
     segundos_tardo = time.time() - arranque
-    documento = json.load(open(os.path.join(proyecto.ruta_trabajo("guion", crear=False),
-                                            "guion.json"), encoding="utf-8"))
+    with open(os.path.join(proyecto.ruta_trabajo("guion", crear=False), "guion.json"),
+              encoding="utf-8") as fh:
+        documento = json.load(fh)
     bloques = [b for b in (documento.get("guion") or []) if str(b.get("texto") or "").strip()]
     brief = estado.params("brief") or {}
     voz = estado.params("voz") or {}
@@ -141,6 +151,19 @@ def escribir_con(origen, modelo, esfuerzo, carpeta_tmp, avisar=print):
             "pedido_s": brief.get("duracion_objetivo_s"),
             "bloques": [{"id": b.get("id"), "texto": b.get("texto"),
                          "abre_seccion": bool(b.get("abre_seccion"))} for b in bloques]}
+
+
+def _modelo_actual(origen):
+    """El modelo con el que el video escribe su guion hoy (el guardado o el
+    defecto). -> str"""
+    import p3_guion                                           # noqa: PLC0415
+    from nucleo.estado import Estado                         # noqa: PLC0415
+    from nucleo.proyecto import Proyecto                     # noqa: PLC0415
+    try:
+        params = Estado(Proyecto(origen)).params("guion") or {}
+    except Exception:                                         # noqa: BLE001
+        params = {}
+    return str(params.get("modelo") or p3_guion.PARAMS_POR_DEFECTO["modelo"])
 
 
 def _limpio(texto):
@@ -162,9 +185,12 @@ def imprimir(letra, ficha):
 
 def comparar(pedidos, modelos, esfuerzo, salida):
     os.makedirs(salida, exist_ok=True)
-    # el historico de tiempos, a una copia: estas pasadas no son de un video
-    os.environ.setdefault("ESTUDIO_ESTADISTICAS",
-                          os.path.join(tempfile.gettempdir(), "comparar_guion_estadisticas.json"))
+    # EL HISTORICO DE TIEMPOS, A UNA COPIA, siempre: estas pasadas no son de un
+    # video. En el servidor `datos/entorno` ya trae ESTUDIO_ESTADISTICAS, asi que
+    # un setdefault no hacia nada y se anotaban en las de verdad (revision 18-10).
+    # `estadisticas` lee la variable en cada llamada, asi que llega a tiempo.
+    os.environ["ESTUDIO_ESTADISTICAS"] = os.path.join(
+        tempfile.gettempdir(), "comparar_guion_estadisticas.json")
     sello = datetime.datetime.now().strftime("%Y%m%d_%H%M")
     resultado = {"fecha": sello, "modelos": modelos, "videos": []}
     for pedido in pedidos:
@@ -181,6 +207,7 @@ def comparar(pedidos, modelos, esfuerzo, salida):
         if len(fichas) < 2:
             print("  no hay dos guiones que comparar en este video")
             continue
+        actual = _modelo_actual(origen)
         orden = list(range(len(fichas)))
         random.shuffle(orden)
         letras = {}
@@ -188,7 +215,8 @@ def comparar(pedidos, modelos, esfuerzo, salida):
             letras[letra] = fichas[indice]["modelo"]
             imprimir(letra, fichas[indice])
         resultado["videos"].append({"video": os.path.basename(origen),
-                                    "letras": letras, "guiones": fichas})
+                                    "letras": letras, "actual": actual,
+                                    "guiones": fichas})
     ruta = os.path.join(salida, f"comparacion_{sello}.json")
     with open(ruta, "w", encoding="utf-8") as fh:
         json.dump(resultado, fh, ensure_ascii=False, indent=2)
@@ -204,9 +232,13 @@ def revelar(salida):
     if not os.path.exists(ruta):
         print("todavía no hay ninguna comparación")
         return None
-    datos = json.load(open(ruta, encoding="utf-8"))
+    with open(ruta, encoding="utf-8") as fh:
+        datos = json.load(fh)
     for video in datos.get("videos") or []:
-        print(f"{video['video']}: " + ", ".join(f"{l} = {m}" for l, m in sorted(video["letras"].items())))
+        actual = video.get("actual")
+        print(f"{video['video']}: " + ", ".join(
+            f"{l} = {m}" + (" (el que usa hoy)" if m == actual else "")
+            for l, m in sorted(video["letras"].items())))
     return datos
 
 
@@ -219,6 +251,7 @@ def main(argv=None):
     ap.add_argument("--revelar", action="store_true")
     args = ap.parse_args(argv)
     salida = carpeta_salida(args.salida or None)
+    args.videos = [v for v in args.videos if v.strip()]
     if args.revelar or args.videos == ["revelar"]:
         revelar(salida)
         return 0

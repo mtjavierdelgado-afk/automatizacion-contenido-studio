@@ -334,6 +334,17 @@ def prueba_pausas_en_la_horquilla():
         comprobar(abs(dura - segundos) < 0.35,
                   f"un corto de {segundos} s con sus {pausas} pausas reales dura "
                   f"{dura:.2f} s")
+    # LOS SEGUNDOS DE LA HORQUILLA van con la estructura de lo PEDIDO, no con
+    # la de lo que sale: el minimo de un video de 130 s (largo) no puede contar
+    # las pausas de un corto por quedarse por debajo de 120 (revision 18-10).
+    ficha = cadencia.palabras_para(130, "es", "normal", 1.0, 30)
+    minimo = int(ficha["palabras"] * 0.7)
+    igual(cadencia.segundos_para(minimo, "es", "normal", 1.0, 30, objetivo_s=130),
+          cadencia.segundos_para(minimo, "es", "normal", 1.0, 30, objetivo_s=900),
+          "el mínimo de un vídeo de 130 s se cuenta como el de un largo")
+    comprobar(cadencia.segundos_para(minimo, "es", "normal", 1.0, 30, objetivo_s=130)
+              != cadencia.segundos_para(minimo, "es", "normal", 1.0, 30, objetivo_s=60),
+              "y no como el de un corto")
     defecto = p3_guion.PARAMS_POR_DEFECTO
     igual([defecto["pausa_gancho_ms"], defecto["pausa_seccion_ms"]],
           [int(cadencia.PAUSA_DE_BLOQUE_PREVISTA * 1000)] * 2,
@@ -353,7 +364,7 @@ def prueba_proyecto_viejo_sigue_listo(base):
     fabricar_ingesta(proyecto, estado)
     nueva = cadencia._aire_previsto
 
-    def vieja(_segundos, bloques, hueco):
+    def vieja(_segundos, bloques, hueco, _corto=None):
         return max(0.0, hueco - cadencia.PAUSA_ENTRE_BLOQUES) * max(0, int(bloques) - 1)
     params = {"instrucciones": "igual", "idioma_salida": "es", "duracion_objetivo_s": 240}
     estado.set_params("brief", params)

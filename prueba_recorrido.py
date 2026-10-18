@@ -3654,7 +3654,8 @@ def publicar_en_redes(navegador, datos):
     ok(pg.esperar(".tarjetas-modulo .tarjeta-modulo h3", "Publicar", 10), "Inicio: las tres tarjetas")
     ok(pg.esperar(".inicio-modulos h3", "Lo que pasa hoy", 10), "y «lo que pasa hoy»")
     pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
-    ok(pg.esperar(".automatizar .pastilla", "próximamente", 10), "Automatizar sale, y dice que llega después")
+    # desde la rama `parrilla` (17-10), Automatizar es la Parrilla de guiones
+    ok(pg.esperar(".automatizar.parrilla", segundos=10), "Automatizar abre la Parrilla")
 
     # de vuelta a Crear, donde se dejó
     pg.pulsar("#barra-modulos .boton-modulo", "Crear")

@@ -10,6 +10,29 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Un revisor de imágenes que mira cada plano con su guion (18 de octubre)**
+- En **Imágenes**, debajo del cuadro de notas, el panel **Revisor de
+  imágenes**: «Revisar imágenes» mira cada imagen con lo que dice la voz en
+  ese plano, el bloque del guion, las indicaciones del estilo y del Encargo y
+  las reglas de la casa, y deja una **nota por plano** en las que no cuadran
+  (el equipo mal montado, mandos de otro color, gente que no mira a la
+  pantalla, manos o mandos fundidos, otro estilo). Sus notas salen en la lista
+  de siempre con la etiqueta **revisor · alta/media/baja** y se cambian o se
+  quitan como las tuyas.
+- **«Rehacer las marcadas»** las manda a la cola de siempre: las de retoque
+  parten de la imagen de ahora y las que piden otra imagen se dibujan desde
+  cero. Cada plano marcado tiene su «✕» para decir «está bien así».
+- Revisar **no gasta en imágenes** (usa tu cuenta de Claude) y una imagen ya
+  revisada no se vuelve a mirar mientras no cambie. Lo que cuesta es rehacer.
+- **Tres modos**, en Configuración → Revisor de imágenes: **manual** (solo con
+  el botón; es el de fábrica), **autónomo** (al acabar cada tanda de imágenes
+  revisa las nuevas y rehace solo lo grave, una vez) y **automático** (también
+  al generar el vídeo entero: rehace todo lo marcado y lo vuelve a revisar,
+  hasta el número de vueltas que elijas, antes de montar). En los dos últimos,
+  con **topes**: imágenes como mucho por tanda y gasto como mucho por vídeo; y
+  una misma imagen no se rehace sola más de dos veces.
+- Revisar no cambia nada del vídeo: no deja ningún paso obsoleto.
+
 **Vídeos con más movimiento, sobre todo los cortos (18 de octubre)**
 - **Movimiento de cámara en tres niveles**, en el Encargo y en el vídeo
   (Ajustes del montaje → 🎬 Movimiento y efectos): **sobrio** (lo de siempre:

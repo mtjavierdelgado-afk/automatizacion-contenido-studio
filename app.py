@@ -14942,6 +14942,363 @@ def publicar_metricas_proyecto(cid: str, peticion: Request, cuerpo: dict = Body(
     return r
 
 
+# =================================================================== PARRILLA
+# Automatizar → Parrilla (rama `parrilla`, 17-10-2026): matrices de guiones por
+# proyecto, en el formato unico del anexo, y «Pasar al Encargo». Bloque propio
+# al final, como PUBLICAR, para no chocar con las ramas que cambian el resto.
+# Quien decide es `pasos/parrilla.py`; aqui solo se mira que el proyecto se
+# pueda ver (los de clave cerrada no existen para quien no los abrio) y se le
+# dice que videos hay, para enlazar un guion «usado» con su video y saber si
+# ya se publico. NADA de aqui escribe params de ningun video (regla 1).
+
+try:
+    import parrilla as PARRILLA  # noqa: E402  (pasos/ ya esta en sys.path)
+    ERROR_PARRILLA = ""
+except Exception as _fallo_parrilla:  # noqa: BLE001
+    PARRILLA = None
+    ERROR_PARRILLA = f"{type(_fallo_parrilla).__name__}: {_fallo_parrilla}"
+
+
+def _parrilla():
+    if PARRILLA is None:
+        raise ErrorApi(503, f"la Parrilla no se ha podido cargar: {ERROR_PARRILLA}")
+    return PARRILLA
+
+
+def _por_parrilla(fn, *args, **kwargs):
+    """Llama a pasos/parrilla.py y convierte su fallo en un ErrorApi."""
+    try:
+        return fn(*args, **kwargs)
+    except PARRILLA.ErrorParrilla as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+
+
+def _proyecto_parrilla(cid, peticion):
+    """El id del proyecto o «_sin»; 404 si no existe o tiene clave sin abrir."""
+    P = _parrilla()
+    cid = str(cid or "")
+    if cid == P.SIN_PROYECTO:
+        return cid
+    if cid not in _nombres_de_clientes() or cid in _cerrados(peticion):
+        raise ErrorApi(404, f"no hay ningún proyecto «{cid}»")
+    return cid
+
+
+def _estilos_para_parrilla(peticion):
+    """[{id, nombre, cliente}] de los estilos que quien pregunta puede ver."""
+    cerrados = _cerrados(peticion)
+    asignaciones = CLIENTES._leer(raiz_proyectos())
+    try:
+        fichas = ((_presets().listar().get("presets") or {}).get("canal")) or []
+    except Exception:                                       # noqa: BLE001
+        fichas = []
+    salida = []
+    for f in fichas:
+        cid = CLIENTES.cliente_de(raiz_proyectos(), f.get("id") or "", datos=asignaciones)
+        if cerrados and cid in cerrados:
+            continue
+        salida.append({"id": f.get("id"), "nombre": f.get("nombre") or f.get("id"),
+                       "cliente": cid or _parrilla().SIN_PROYECTO})
+    return salida
+
+
+#: pid -> (sello de su estado.json, huella del material). Leer el material de
+#: un vídeo abre su estado: se hace una vez por cambio, no en cada lista.
+_HUELLAS_DE_VIDEO = {}
+_MAX_HUELLAS_DE_VIDEO = 2000
+
+
+def _huella_de_video(ficha):
+    P = _parrilla()
+    ruta = os.path.join(ficha["raiz"], "estado.json")
+    try:
+        sello = os.stat(ruta).st_mtime_ns
+    except OSError:
+        return ""
+    guardada = _HUELLAS_DE_VIDEO.get(ficha["id"])
+    if guardada and guardada[0] == sello:
+        return guardada[1]
+    try:
+        texto = (contexto(ficha["id"]).estado.params("ingesta") or {}).get("texto") or ""
+    except Exception:                                       # noqa: BLE001
+        return ""
+    if len(_HUELLAS_DE_VIDEO) >= _MAX_HUELLAS_DE_VIDEO:
+        _HUELLAS_DE_VIDEO.clear()
+    huella = P.huella_material(texto)
+    _HUELLAS_DE_VIDEO[ficha["id"]] = (sello, huella)
+    return huella
+
+
+def _buscador_de_videos(peticion):
+    """La funcion que `parrilla.poner_al_dia` usa para encontrar el video de un
+    guion: (huella, desde) -> (pid, nombre). La lista de videos se lee UNA vez
+    por llamada, y los de un proyecto con clave sin abrir no cuentan (su nombre
+    saldria en la Parrilla de otro proyecto)."""
+    estado = {"lista": None}
+    cerrados = _cerrados(peticion)
+
+    def buscar(huella, desde):
+        if estado["lista"] is None:
+            asignaciones = CLIENTES._leer(raiz_proyectos())
+            lista = []
+            for ficha in Proyecto.listar(raiz_proyectos()):
+                if ficha.get(CONFIG_TALLER):
+                    continue
+                if cerrados and CLIENTES.cliente_de(
+                        raiz_proyectos(), ficha.get(CONFIG_ESTILO_LIGHT) or "",
+                        ficha.get("id"), datos=asignaciones) in cerrados:
+                    continue
+                lista.append(ficha)
+            lista.sort(key=lambda f: str(f.get("creado") or ""))
+            estado["lista"] = lista
+        candidatos = [f for f in estado["lista"] if str(f.get("creado") or "") >= str(desde or "")]
+        for ficha in candidatos[:40]:
+            if _huella_de_video(ficha) == huella:
+                return ficha["id"], ficha.get("nombre") or ficha["id"]
+        return "", ""
+
+    return buscar
+
+
+def _video_publicado(pid):
+    """Si el video tiene algun envio publicado (o subido a mano) en Publicar."""
+    if PUBLICAR is None:
+        return False
+    try:
+        datos = PUBLICAR._leer_video(raiz_proyectos(), pid)
+    except Exception:                                       # noqa: BLE001
+        return False
+    return any((e or {}).get("estado") in ("publicado", "a_mano")
+               for e in (datos or {}).get("envios") or [])
+
+
+def _contexto_parrilla(cid, datos):
+    """Lo que Claude sabe del proyecto al convertir o escribir."""
+    d = datos if isinstance(datos, dict) else {}
+    contexto_claude = {"cliente": _nombres_de_clientes().get(cid, "")}
+    for clave in ("red", "formato", "notas"):
+        if str(d.get(clave) or "").strip():
+            contexto_claude[clave] = str(d.get(clave)).strip()[:1500]
+    try:
+        duracion = int(d.get("duracion_s") or 0)
+    except (TypeError, ValueError):
+        duracion = 0
+    if duracion > 0:
+        contexto_claude["duracion_s"] = min(duracion, 3600)
+    return contexto_claude
+
+
+@app.get("/api/parrilla/proyectos")
+def parrilla_proyectos(peticion: Request):
+    """Los proyectos que se pueden ver, con cuántos guiones tiene cada uno, y
+    los estilos (para elegir con cuál se pasa un guion al Encargo)."""
+    P = _parrilla()
+    cerrados = _cerrados(peticion)
+    try:
+        lista = [c for c in CLIENTES.listar(raiz_proyectos())["clientes"]
+                 if c["id"] not in cerrados]
+    except Exception:                                       # noqa: BLE001
+        lista = []
+    salida = []
+    for c in lista + [{"id": P.SIN_PROYECTO, "nombre": "Sin proyecto"}]:
+        try:
+            cuentas = P.listar(raiz_proyectos(), c["id"])["cuentas"]
+        except P.ErrorParrilla:
+            continue
+        salida.append({"id": c["id"], "nombre": c.get("nombre") or c["id"], "cuentas": cuentas})
+    return {"proyectos": salida, "estilos": _estilos_para_parrilla(peticion),
+            "usos": list(P.USOS), "estados": list(P.ESTADOS), "max_pedir": P.MAX_PEDIR}
+
+
+@app.get("/api/parrilla/proyectos/{cid}")
+def parrilla_listar(cid: str, peticion: Request):
+    """Las matrices del proyecto y sus guiones, con el estado al día."""
+    P = _parrilla()
+    cid = _proyecto_parrilla(cid, peticion)
+    try:
+        P.poner_al_dia(raiz_proyectos(), cid, _buscador_de_videos(peticion), _video_publicado)
+    except Exception as fallo:                              # noqa: BLE001
+        print(f"[parrilla] no se ha podido poner al día {cid}: {fallo}", flush=True)
+    return _por_parrilla(P.listar, raiz_proyectos(), cid)
+
+
+@app.get("/api/parrilla/plantilla")
+def parrilla_plantilla(peticion: Request, proyecto: str = Query(default="")):
+    """Un guion en blanco en el formato del Studio, para «Escribir uno»."""
+    P = _parrilla()
+    cid = _proyecto_parrilla(proyecto or P.SIN_PROYECTO, peticion)
+    return {"texto": P.plantilla_vacia(_nombres_de_clientes().get(cid, ""))}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/matrices", status_code=201)
+def parrilla_crear_matriz(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{nombre} -> {id}"""
+    cid = _proyecto_parrilla(cid, peticion)
+    mid = _por_parrilla(_parrilla().crear_matriz, raiz_proyectos(), cid,
+                        _cuerpo(cuerpo).get("nombre"), {"tipo": "vacia"})
+    return {"id": mid}
+
+
+@app.put("/api/parrilla/proyectos/{cid}/matrices/{mid}")
+def parrilla_cambiar_matriz(cid: str, mid: str, peticion: Request,
+                            cuerpo: dict = Body(default=None)):
+    """{nombre}"""
+    cid = _proyecto_parrilla(cid, peticion)
+    _por_parrilla(_parrilla().cambiar_matriz, raiz_proyectos(), cid, mid,
+                  _cuerpo(cuerpo).get("nombre"))
+    return {"ok": True}
+
+
+@app.delete("/api/parrilla/proyectos/{cid}/matrices/{mid}")
+def parrilla_borrar_matriz(cid: str, mid: str, peticion: Request):
+    cid = _proyecto_parrilla(cid, peticion)
+    _por_parrilla(_parrilla().borrar_matriz, raiz_proyectos(), cid, mid)
+    anotar_global("parrilla_matriz_borrada", {"proyecto": cid, "matriz": mid})
+    return {"ok": True}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/guiones", status_code=201)
+def parrilla_anadir_en_formato(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Sin Claude: {texto (ya en el formato), matriz?, nombre?} -> {matriz, guiones}"""
+    cid = _proyecto_parrilla(cid, peticion)
+    d = _cuerpo(cuerpo)
+    mid, gids = _por_parrilla(_parrilla().anadir_en_formato, raiz_proyectos(), cid,
+                              str(d.get("matriz") or ""), d.get("texto"),
+                              nombre=d.get("nombre") or "")
+    return {"matriz": mid, "guiones": gids}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/convertir", status_code=202)
+def parrilla_convertir(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Claude convierte lo pegado al formato: {texto, modo, matriz?, nombre?,
+    red?, formato?, duracion_s?, notas?} -> el trabajo (se sigue preguntando)."""
+    cid = _proyecto_parrilla(cid, peticion)
+    d = _cuerpo(cuerpo)
+    datos = {"texto": d.get("texto"), "modo": d.get("modo"), "matriz": str(d.get("matriz") or ""),
+             "nombre": d.get("nombre") or "", "contexto": _contexto_parrilla(cid, d)}
+    t = _por_parrilla(_parrilla().lanzar, raiz_proyectos(), cid, "pegar", datos)
+    anotar_global("parrilla_convertir", {"proyecto": cid, "caracteres": len(str(d.get("texto") or ""))})
+    return t
+
+
+@app.post("/api/parrilla/proyectos/{cid}/pedir", status_code=202)
+def parrilla_pedir(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Claude escribe guiones nuevos: {peticion, cuantos, modo, matriz?, nombre?,
+    red?, formato?, duracion_s?} -> el trabajo."""
+    cid = _proyecto_parrilla(cid, peticion)
+    d = _cuerpo(cuerpo)
+    datos = {"peticion": d.get("peticion"), "cuantos": d.get("cuantos"), "modo": d.get("modo"),
+             "matriz": str(d.get("matriz") or ""), "nombre": d.get("nombre") or "",
+             "contexto": _contexto_parrilla(cid, d)}
+    t = _por_parrilla(_parrilla().lanzar, raiz_proyectos(), cid, "pedir", datos)
+    anotar_global("parrilla_pedir", {"proyecto": cid, "cuantos": d.get("cuantos")})
+    return t
+
+
+@app.post("/api/parrilla/proyectos/{cid}/subir", status_code=202)
+async def parrilla_subir(cid: str, peticion: Request):
+    """Una matriz en Word, Excel, PDF o texto (multipart: «documento», «modo»,
+    y opcionales «matriz», «nombre», «red», «formato», «duracion_s», «notas»)."""
+    cid = await _en_hilo(_proyecto_parrilla, cid, peticion)
+    P = _parrilla()
+    try:
+        formulario = await peticion.form()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(400, f"multipart ilegible: {fallo}")
+    fichero = formulario.get("documento")
+    if not hasattr(fichero, "read"):
+        raise ErrorApi(400, "manda el documento en el campo «documento»")
+    tam = getattr(fichero, "size", None)
+    if isinstance(tam, int) and tam > P.MAX_BYTES_DOCUMENTO:
+        raise ErrorApi(400, "el documento tiene que pesar menos de 20 MB")
+    try:
+        contenido = await fichero.read(P.MAX_BYTES_DOCUMENTO + 1)
+        nombre_fichero = os.path.basename(str(getattr(fichero, "filename", "") or "documento"))
+        campos = {k: (v if isinstance(v, str) else "") for k, v in formulario.multi_items()
+                  if not hasattr(v, "read")}
+    finally:
+        # los temporales del multipart, ya: no al pasar el recolector
+        await formulario.close()
+    return await _en_hilo(_parrilla_subir_en_hilo, cid, nombre_fichero, contenido, campos)
+
+
+def _parrilla_subir_en_hilo(cid, nombre_fichero, contenido, campos):
+    """Lo de disco de `parrilla_subir`, fuera del bucle de eventos."""
+    P = _parrilla()
+    ruta = _por_parrilla(P.guardar_subida, raiz_proyectos(), nombre_fichero, contenido)
+    datos = {"ruta": ruta, "nombre_fichero": nombre_fichero, "modo": campos.get("modo"),
+             "matriz": campos.get("matriz") or "",
+             "nombre": campos.get("nombre") or os.path.splitext(nombre_fichero)[0],
+             "contexto": _contexto_parrilla(cid, campos)}
+    try:
+        t = _por_parrilla(P.lanzar, raiz_proyectos(), cid, "subir", datos)
+    except ErrorApi:
+        try:
+            os.remove(ruta)
+        except OSError:
+            pass
+        raise
+    anotar_global("parrilla_subir", {"proyecto": cid, "fichero": nombre_fichero,
+                                     "bytes": len(contenido)})
+    return t
+
+
+@app.get("/api/parrilla/trabajos/{tid}")
+def parrilla_trabajo(tid: str, peticion: Request):
+    """Cómo va una conversión: {estado: trabajando|listo|error, avance, ...}."""
+    t = _parrilla().trabajo(tid)
+    if not t or (t["cid"] != _parrilla().SIN_PROYECTO and t["cid"] in _cerrados(peticion)):
+        raise ErrorApi(404, "ese trabajo ya no existe (¿se reinició el servicio?)")
+    return t
+
+
+@app.delete("/api/parrilla/trabajos/{tid}")
+def parrilla_olvidar_trabajo(tid: str, peticion: Request):
+    """Quita de la pantalla un trabajo terminado (el aviso de listo o de error)."""
+    t = _parrilla().trabajo(tid)
+    if t and (t["cid"] == _parrilla().SIN_PROYECTO or t["cid"] not in _cerrados(peticion)):
+        _parrilla().olvidar_trabajo(tid)
+    return {"ok": True}
+
+
+@app.get("/api/parrilla/proyectos/{cid}/guiones/{gid}")
+def parrilla_guion(cid: str, gid: str, peticion: Request):
+    """Un guion entero: el texto, lo leído y lo que iría al Encargo."""
+    cid = _proyecto_parrilla(cid, peticion)
+    return _por_parrilla(_parrilla().leer, raiz_proyectos(), cid, gid)
+
+
+@app.put("/api/parrilla/proyectos/{cid}/guiones/{gid}")
+def parrilla_guardar_guion(cid: str, gid: str, peticion: Request,
+                           cuerpo: dict = Body(default=None)):
+    """{texto?, uso?, formato?, duracion_s?, estado?} -> el guion."""
+    cid = _proyecto_parrilla(cid, peticion)
+    return _por_parrilla(_parrilla().guardar_guion, raiz_proyectos(), cid, gid, _cuerpo(cuerpo))
+
+
+@app.delete("/api/parrilla/proyectos/{cid}/guiones/{gid}")
+def parrilla_borrar_guion(cid: str, gid: str, peticion: Request):
+    cid = _proyecto_parrilla(cid, peticion)
+    _por_parrilla(_parrilla().borrar_guion, raiz_proyectos(), cid, gid)
+    return {"ok": True}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/guiones/{gid}/encargo")
+def parrilla_pasar_al_encargo(cid: str, gid: str, peticion: Request,
+                              cuerpo: dict = Body(default=None)):
+    """{indice?, estilo?} -> lo que la pantalla pone en «Un vídeo nuevo». El
+    guion pasa a «usado». No crea ningún vídeo ni escribe ningún param."""
+    cid = _proyecto_parrilla(cid, peticion)
+    d = _cuerpo(cuerpo)
+    estilo = str(d.get("estilo") or "")
+    if estilo and estilo not in {e["id"] for e in _estilos_para_parrilla(peticion)}:
+        raise ErrorApi(404, "ese estilo ya no existe")
+    encargo = _por_parrilla(_parrilla().pasar_al_encargo, raiz_proyectos(), cid, gid,
+                            d.get("indice") or 0, estilo)
+    anotar_global("parrilla_al_encargo", {"proyecto": cid, "guion": gid, "estilo": estilo})
+    return {"encargo": encargo}
+
+
 # ------------------------------------------------------------------------ main
 
 def main():

@@ -317,6 +317,55 @@ def _limpiar(crudo, validos):
                  "alcance": alcance if alcance in repaso.ALCANCES else "retoque"}
 
 
+RECORDATORIO_JSON = ("\n\nOJO: tu respuesta anterior no se pudo leer. Contesta "
+                     "SOLO con UN objeto JSON {\"planos\": [...]}, con una "
+                     "entrada por plano, sin nada antes ni despues.")
+
+
+class RespuestaIlegible(RuntimeError):
+    """La respuesta del revisor no trae ninguna entrada de plano legible."""
+
+
+def entradas_de(texto):
+    """Las entradas de plano de una respuesta, la traiga como la traiga. -> [dict]
+
+    Lo pedido es {"planos": [...]}, pero el modelo a veces devuelve ese objeto
+    y algo mas detras, un objeto por plano seguidos, o una lista suelta. Se
+    leen TODOS los valores JSON del texto, uno detras de otro, y se recogen las
+    entradas que tengan "id". Si no hay ninguna, RespuestaIlegible."""
+    texto = str(texto or "")
+    decodificador = json.JSONDecoder()
+    entradas, i = [], 0
+
+    def recoger(valor):
+        if isinstance(valor, dict):
+            if isinstance(valor.get("planos"), list):
+                for v in valor["planos"]:
+                    recoger(v)
+            elif valor.get("id"):
+                entradas.append(valor)
+        elif isinstance(valor, list):
+            for v in valor:
+                recoger(v)
+
+    while i < len(texto):
+        siguiente = min([p for p in (texto.find("{", i), texto.find("[", i)) if p >= 0],
+                        default=-1)
+        if siguiente < 0:
+            break
+        try:
+            valor, fin = decodificador.raw_decode(texto, siguiente)
+        except ValueError:
+            i = siguiente + 1
+            continue
+        recoger(valor)
+        i = fin
+    if not entradas:
+        raise RespuestaIlegible("la respuesta del revisor no trae ningún plano "
+                                "legible: " + " ".join(texto.split())[:200])
+    return entradas
+
+
 def revisar(proyecto, plan, imagenes, planos, estilo=None, encargo="",
             reglas="", guia="", formato="", ajuste=None, avisar=None):
     """Mira esos planos y devuelve {plano: ficha}. Los que no se pudieron mirar
@@ -358,14 +407,25 @@ def revisar(proyecto, plan, imagenes, planos, estilo=None, encargo="",
             f"revisando {ids[0]}–{ids[-1]}")
         avance.arrancar()
         try:
-            texto, _sobre = cli_claude.ejecutar(
-                instruccion, modelo=modelo, esfuerzo=esfuerzo, cwd=proyecto.raiz,
-                tiempo_max_s=0, base_tiempo_s=TIEMPO_BASE_S, sistema=SISTEMA,
-                herramientas_vetadas=HERRAMIENTAS_VETADAS,
-                herramientas_permitidas=HERRAMIENTAS_PERMITIDAS,
-                extra=["--no-session-persistence"], avance=avance,
-                para=f"el revisor de imágenes ({ids[0]}–{ids[-1]})")
-            datos = comun.extraer_json(texto, "la respuesta del revisor")
+            crudas = None
+            for intento in range(2):
+                # UNA SEGUNDA VEZ si la respuesta no se pudo leer: el 18-10 la
+                # primera prueba de verdad devolvio el JSON y algo mas detras
+                # («Extra data»), y se perdio la tanda entera
+                texto, _sobre = cli_claude.ejecutar(
+                    instruccion if intento == 0 else instruccion + RECORDATORIO_JSON,
+                    modelo=modelo, esfuerzo=esfuerzo, cwd=proyecto.raiz,
+                    tiempo_max_s=0, base_tiempo_s=TIEMPO_BASE_S, sistema=SISTEMA,
+                    herramientas_vetadas=HERRAMIENTAS_VETADAS,
+                    herramientas_permitidas=HERRAMIENTAS_PERMITIDAS,
+                    extra=["--no-session-persistence"], avance=avance,
+                    para=f"el revisor de imágenes ({ids[0]}–{ids[-1]})")
+                try:
+                    crudas = entradas_de(texto)
+                    break
+                except RespuestaIlegible:
+                    if intento == 1:
+                        raise
         except Exception as fallo:                               # noqa: BLE001
             if type(fallo).__name__ == "Cancelado":
                 raise
@@ -378,8 +438,7 @@ def revisar(proyecto, plan, imagenes, planos, estilo=None, encargo="",
             continue
         finally:
             avance.parar()
-        crudas = datos.get("planos") if isinstance(datos, dict) else datos
-        for cruda in crudas if isinstance(crudas, list) else []:
+        for cruda in crudas:
             sid, ficha = _limpiar(cruda, set(ids))
             if sid and sid not in salida:
                 ficha["huella"] = huella(imagenes[sid])

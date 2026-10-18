@@ -85,6 +85,8 @@ class Doble:
         respuesta = self.respuestas.pop(0)
         if isinstance(respuesta, Exception):
             raise respuesta
+        if isinstance(respuesta, str):
+            return respuesta, {}
         return json.dumps(respuesta), {}
 
 
@@ -210,6 +212,27 @@ def prueba_revisar_y_apuntar(doble):
     igual(len(s1s), 1, "sigue habiendo una sola nota del revisor en S001")
     igual(s1s[0]["texto"], "Mandos DualSense blancos, no negros.", "con el texto nuevo")
     igual(s1s[0]["alcance"], "retoque", "y el alcance nuevo")
+
+    seccion("una respuesta con algo detras del JSON se lee igual")
+    _png(imagenes["S002"], "orange")
+    doble.respuestas = [json.dumps({"planos": [_veredicto("S002")]})
+                        + " He revisado el plano y está bien."]
+    igual(sorted(rev.revisar(proyecto, plan, imagenes, ["S002"])), ["S002"],
+          "el «Extra data» del 18-10 ya no tumba la tanda")
+    doble.respuestas = ['{"id": "S002", "veredicto": "bien"}{"id": "S001", "veredicto": "bien"}']
+    igual(sorted(rev.revisar(proyecto, plan, imagenes, ["S001", "S002"])), ["S001", "S002"],
+          "un objeto por plano, seguidos, tambien")
+    llamadas = len(doble.llamadas)
+    doble.respuestas = ["No puedo abrir las imágenes.",
+                        {"planos": [_veredicto("S002")]}]
+    igual(sorted(rev.revisar(proyecto, plan, imagenes, ["S002"])), ["S002"],
+          "si no se puede leer, se pide otra vez")
+    igual(len(doble.llamadas) - llamadas, 2, "una sola vez mas")
+    ok(rev.RECORDATORIO_JSON in doble.llamadas[-1]["instruccion"],
+       "y la segunda vez se le recuerda la forma")
+    doble.respuestas = ["nada", "nada otra vez"]
+    ok(rev.revisar(proyecto, plan, imagenes, ["S002"]).get("_fallos"),
+       "dos respuestas ilegibles: fallo apuntado, sin tercera llamada")
 
     seccion("si el agente falla, no se marca nada como revisado")
     _png(imagenes["S002"], "white")

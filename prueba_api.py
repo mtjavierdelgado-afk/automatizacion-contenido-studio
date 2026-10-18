@@ -6021,6 +6021,29 @@ def probar_lo_de_v2h():
                            headers={"Content-Type": "multipart/form-data; boundary=xx"})
         igual(codigo, 400, "R7: un multipart roto al subir un audio da 400, no 500")
 
+        # D8 · «APLICAR» DEL REPASO NO LANZA DOS MONTAJES A LA VEZ
+        pid = Proyecto.crear(base, "d8 repaso").id
+        Estado(servidor.contexto(pid).proyecto)
+        suelta = threading.Event()
+        cambiar("_correr_repaso", lambda avisar, ctx, *a, **k: suelta.wait(20) and {})
+        try:
+            primero, _r = _llamar(servidor.aplicar_repaso, pid, {})
+            segundo, _m = _llamar(servidor.aplicar_repaso, pid, {})
+            igual(primero, 200, "D8: el primer «Aplicar» lanza el repaso")
+            igual(segundo, 409, "D8: el segundo, con el primero corriendo, da 409")
+        finally:
+            suelta.set()
+        for _ in range(100):
+            if not servidor.contexto(pid).gestor.listar(activos=True):
+                break
+            time.sleep(0.05)
+        cambiar("_trabajo_de_cadena", lambda ctx: {"id": "vivo", "nombre": "La tanda",
+                                                     "progreso": 0.3})
+        codigo, _m = _llamar(servidor.aplicar_repaso, pid, {})
+        igual(codigo, 409, "D8: y con la tanda del vídeo corriendo, también 409")
+        setattr(servidor, "_trabajo_de_cadena", reales.pop("_trabajo_de_cadena"))
+        setattr(servidor, "_correr_repaso", reales.pop("_correr_repaso"))
+
         # S3 · UNA CLAVE CORTA NO SE ENSEÑA A MEDIAS (el Client ID de Jamendo
         # tiene 8 caracteres y se enseñaban 4)
         from pasos import claves as CLAVES                    # noqa: PLC0415

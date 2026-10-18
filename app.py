@@ -6897,8 +6897,25 @@ def aplicar_repaso(pid: str, cuerpo: dict = Body(default=None)):
     # diapositivas, donde lo que se quiere es MIRAR lo arreglado; la del video
     # no lo manda, porque alli aplicar y montar son el mismo gesto.
     sin_montar = bool(datos.get("sin_montar"))
-    trabajo_id = ctx.gestor.lanzar("repaso", _correr_repaso, ctx, ajuste, modo,
-                                   sin_montar, paso="render")
+    # NI DOS A LA VEZ NI ENCIMA DE OTRA COSA (D8 del analisis del 13-10-2026):
+    # dos clics lanzaban dos repasos que montaban a la vez sobre la misma
+    # carpeta `trabajo/`, y tambien con la tanda del video corriendo. Mirar y
+    # lanzar van con los mismos cerrojos que `/generar`, y el trabajo declara
+    # los pasos que puede tocar para que los demas lo vean (`_trabajo_que_toca`).
+    todos = [p["id"] for p in PASOS]
+    with _cerrojo_de_cadena(ctx.id):
+        otro = _trabajo_de_cadena(ctx) or _trabajo_que_toca(ctx, todos)
+        if otro is not None:
+            raise ErrorApi(409, f"«{otro.get('nombre')}» está corriendo en este "
+                                "vídeo: espera a que termine para aplicar las notas",
+                           {"trabajo_id": otro["id"], "progreso": otro["progreso"]})
+        with _COLA_LOCK:
+            if _cola_dibujando(ctx):
+                raise ErrorApi(409, "se están rehaciendo imágenes con tus notas: "
+                                    "espera a que terminen (o páralas) y vuelve a "
+                                    "aplicar")
+            trabajo_id = ctx.gestor.lanzar("repaso", _correr_repaso, ctx, ajuste, modo,
+                                           sin_montar, paso="render", toca=todos)
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "ajuste": ajuste,
             "trabajo": ctx.gestor.estado(trabajo_id),

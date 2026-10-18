@@ -66,7 +66,7 @@ import math
 import os
 import shutil
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_EXCEPTION, ThreadPoolExecutor, wait
 
 import medios
 
@@ -75,15 +75,26 @@ def en_paralelo(cadenas, funcion, argumentos):
     """`funcion(*a)` para cada `a` con `cadenas` hilos, y el primer fallo sube.
 
     AL PRIMER FALLO --una cancelacion es un fallo: avisar() lanza `Cancelado`--
-    SE TIRA LO QUE QUEDA EN COLA (`cancel_futures`). Con el `with` de siempre la
-    salida del pool esperaba a TODAS las tareas, tambien a las que aun no habian
-    empezado: cancelar a media tanda pagaba las seis laminas igual (medido: 6
-    de 6, dos de ellas empezadas DESPUES de cancelar). Las que ya estan en
-    vuelo se dejan acabar: esas ya se estan pagando, y lo pagado se guarda.
+    SE TIRA LO QUE QUEDA EN COLA, sea cual sea la tarea que falle (se espera con
+    FIRST_EXCEPTION, no en el orden en que se encargaron: si fallaba la tercera
+    mientras la primera seguia dibujando, la cola seguia arrancando). Con el
+    `with` de siempre la salida del pool esperaba a TODAS las tareas, tambien
+    a las que aun no habian empezado: cancelar a media tanda pagaba las seis
+    laminas igual (medido: 6 de 6, dos de ellas empezadas DESPUES de cancelar).
+    Las que ya estan en vuelo se dejan acabar: esas ya se estan pagando, y lo
+    pagado se guarda.
     """
     pool = ThreadPoolExecutor(max_workers=max(1, int(cadenas)))
     futuros = [pool.submit(funcion, *a) for a in argumentos]
     try:
+        hechos, _pendientes = wait(futuros, return_when=FIRST_EXCEPTION)
+        fallido = next((f for f in futuros if f in hechos and not f.cancelled()
+                        and f.exception() is not None), None)
+        if fallido is not None:
+            for futuro in futuros:
+                futuro.cancel()          # lo que no ha arrancado, fuera
+            pool.shutdown(wait=True, cancel_futures=True)
+            raise fallido.exception()
         for futuro in futuros:
             futuro.result()
     except BaseException:

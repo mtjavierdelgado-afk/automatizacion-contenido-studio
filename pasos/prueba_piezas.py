@@ -5035,6 +5035,27 @@ def prueba_cancelar_no_paga_lo_que_queda():
             ok(len(encargadas) <= p6_assets.MAX_CADENAS,
                f"se pagan solo las que ya estaban en vuelo: {len(encargadas)} de "
                f"{len(moodboard.EJES)}")
+        titulo("en_paralelo tira la cola al PRIMER fallo, sea de la tarea que sea")
+        empezadas = []
+
+        def tarea(indice):
+            with candado:
+                empezadas.append(indice)
+            if indice == 0:
+                time.sleep(1.0)         # la primera sigue dibujando...
+            elif indice == 1:
+                raise RuntimeError("cancelado")   # ...cuando falla la segunda
+            else:
+                time.sleep(0.05)
+
+        try:
+            moodboard.en_paralelo(2, tarea, [(i,) for i in range(6)])
+            ok(False, "tenia que subir el fallo")
+        except RuntimeError:
+            ok(True, "el fallo de la segunda sube")
+        ok(len(empezadas) <= 3, f"y lo que quedaba en cola no arranca: empezaron "
+                                f"{sorted(empezadas)} de 6 (antes: las seis, "
+                                f"porque se esperaba a la primera)")
         titulo("lo pagado antes de parar queda apuntado para no repagarlo")
         huella = moodboard.huella_de_lamina("dibuja", [rutas[0]], "low")
         apuntadas = [e for e in moodboard.EJES

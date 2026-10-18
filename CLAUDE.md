@@ -440,6 +440,17 @@ cambiarían la versión anterior sin ningún error. Lo comprueba
 `prueba_piezas.prueba_enlaces_del_render`; **si añades un escritor nuevo al
 render, añádelo ahí**. Assets y callouts siguen copiando a propósito.
 
+**Cancelar es en el acto, y se hereda** (18-10-2026). `GestorTrabajos` pone
+`avisar.al_cancelar(fn)` y `cancelar()` llama a `fn` al momento: quien espera a
+un subproceso se registra ahí (`estadisticas.Avance` lo hace solo). Quien
+envuelva `avisar` en otra función copia el atributo, o se queda con el latido de
+2 s. En Linux el CLI va en su propio grupo (`cli_claude.GRUPO_PROPIO`) y
+`matar_arbol` mata el grupo; nunca hagas `killpg` a un proceso sin su grupo
+propio, que comparte el del servicio. Ninguna tanda de imágenes paga sin
+preguntar antes a `avisar`, y los pools van por `moodboard.en_paralelo` (tira la
+cola al primer fallo). En el taller, `_taller_reservado` sostiene el cerrojo de
+la cadena durante el reparto con Claude: no lo tomes sin tope desde otra ruta.
+
 **El precio por imagen del cotizador** (`ajustes.precio_por_imagen`) es la
 mediana de lo cobrado en imágenes de PLANO (`escena:`), por calidad y, con 20
 muestras, por modo (foto/ilustración, que viaja en el `detalle` de cada

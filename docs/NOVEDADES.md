@@ -10,6 +10,16 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Cancelar de verdad en el taller de estilos (18 de octubre)**
+- **«Cancelar» un «Rehacer» para en el acto**: corta la llamada a Claude y no
+  encarga ninguna lámina más (las que ya se estaban dibujando se acaban y se
+  guardan, para no pagarlas otra vez). Mientras termina, la pantalla dice
+  «Cancelando…» con el botón apagado, y acaba con «cancelado», no con un error.
+- Si vuelves a pulsar mientras tanto, te dice qué está pasando y te lleva a ello.
+- **«Regenerar» ya no se pulsa dos veces**: mientras Claude lee tu corrección
+  dice «Leyendo tu corrección…», y un segundo toque no gasta nada.
+- Escuchar una voz ya no impide rehacer el estilo.
+
 **Vídeos con más movimiento, sobre todo los cortos (18 de octubre)**
 - **Movimiento de cámara en tres niveles**, en el Encargo y en el vídeo
   (Ajustes del montaje → 🎬 Movimiento y efectos): **sobrio** (lo de siempre:

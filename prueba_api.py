@@ -6044,6 +6044,34 @@ def probar_lo_de_v2h():
         setattr(servidor, "_trabajo_de_cadena", reales.pop("_trabajo_de_cadena"))
         setattr(servidor, "_correr_repaso", reales.pop("_correr_repaso"))
 
+        # D7 · UN RETOQUE HECHO MIENTRAS CORRE LA TANDA NO QUEDA SELLADO COMO
+        # HECHO aunque la tanda escriba en sus params (la huella de una hoja)
+        proyecto = Proyecto.crear(base, "d7 retoque")
+        sembrar(proyecto.raiz)
+        e = Estado(proyecto)
+        for paso in ("voz", "revision_audio"):
+            e.completar(paso, {"x": 1})
+        unidades = {"escena:S010": {"prompt": "a"}, "escena:S020": {"prompt": "b"}}
+        e.set_params("assets", {"unidades": unidades})
+        e.completar("assets", {}, unidades={k: {"f": k} for k in unidades})
+        e.marcar_ejecutando("assets")                          # arranca la tanda
+        e.actualizar_params("assets", {"unidades": {          # el usuario retoca S010
+            "escena:S010": {"prompt": "a", "feedback": "retoque del usuario"}}})
+        e.actualizar_params("assets", {"unidades": {          # la tanda: su huella
+            "escena:S020": {"prompt": "b", "huella_assets": "nueva"}}}, del_propio_paso=True)
+        e.completar("assets", {}, unidades={"escena:S010": {"f": "con el prompt viejo"},
+                                            "escena:S020": {"f": "nueva"}})
+        obsoletas = e.unidades_obsoletas("assets")
+        ok("escena:S010" in obsoletas,
+           f"D7: el plano retocado durante la tanda queda por rehacer ({obsoletas})")
+        ok("escena:S020" not in obsoletas,
+           "D7: y el que la tanda cambió ella misma sigue al día")
+        params_version = (e.versiones("assets") or [{}])[-1].get("params") or {}
+        ok("retoque del usuario" not in json.dumps(params_version),
+           "D7: y la versión no apunta el retoque como usado")
+        ok("nueva" in json.dumps(params_version),
+           "D7: pero sí lo que la propia tanda escribió")
+
         # S3 · UNA CLAVE CORTA NO SE ENSEÑA A MEDIAS (el Client ID de Jamendo
         # tiene 8 caracteres y se enseñaban 4)
         from pasos import claves as CLAVES                    # noqa: PLC0415

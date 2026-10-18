@@ -20,6 +20,31 @@ vídeos, estilos, claves y contraseña no se tocan.
   dice «Leyendo tu corrección…», y un segundo toque no gasta nada.
 - Escuchar una voz ya no impide rehacer el estilo.
 
+**Publicar: los resultados, más completos (17 de octubre)**
+- **Cuánto se ve de cada vídeo.** TikTok dice qué parte de la gente lo vio
+  **hasta el final** y los **segundos de media**; YouTube, cuando su informe
+  está listo, qué parte del vídeo se ve **de media** (en un Short puede pasar
+  del 100 % si se vuelve a ver). Son medidas distintas y no se mezclan.
+  Instagram y Facebook no dan ninguna: ahí no sale nada (nunca un «0 %»
+  inventado). Las medias pesan por vistas: un post de 50 vistas no cuenta
+  como uno de 100.000.
+- **Esta semana y este mes** en Publicar → Resultados: lo publicado desde el
+  lunes y desde el día 1, frente al mismo tramo del periodo anterior (un
+  jueves, con la semana pasada hasta el jueves).
+- **Lo que mejor funcionó:** los cinco posts del periodo por vistas, por
+  interacción (me gusta, comentarios, compartidos y guardados entre vistas),
+  por cuántos lo vieron hasta el final (TikTok) o por cuánto se ve de media
+  (YouTube), con la red, el día y la hora en que salieron. Por proporción solo
+  cuentan los que tienen 50 vistas o más.
+- **En Inicio, una línea con lo mejor de los últimos 7 días**, que lleva a su
+  ficha.
+- **Las cifras se siguen pidiendo solo al pulsar «Actualizar»**, como hasta
+  ahora. Además, cada «Actualizar» trae lo que Upload-Post ya tiene guardado,
+  que no gasta de las 100 consultas cada 5 minutos: así llega la retención de
+  YouTube y lo que hayas mirado desde la web de Upload-Post.
+- Si la carga de Resultados fallaba, la pantalla se quedaba rota en vez de
+  decir el motivo: ahora sale el error.
+
 **Vídeos con más movimiento, sobre todo los cortos (18 de octubre)**
 - **Movimiento de cámara en tres niveles**, en el Encargo y en el vídeo
   (Ajustes del montaje → 🎬 Movimiento y efectos): **sobrio** (lo de siempre:

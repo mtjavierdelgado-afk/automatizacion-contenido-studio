@@ -15278,8 +15278,9 @@ def publicar_conectar(cid: str, peticion: Request, cuerpo: dict = Body(default=N
 def publicar_metricas_video(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
     """Pide las cifras de lo publicado de este video: {forzar?}."""
     ctx = _ctx_publicable(pid, peticion)
-    r = _por_publicar(_publicar().actualizar_metricas, raiz_proyectos(), [ctx.id],
+    r = _por_publicar(_publicar().medir, raiz_proyectos(), [ctx.id],
                       forzar=bool(_cuerpo(cuerpo).get("forzar")))
+    r.pop("arranque", None)
     return dict(r, ficha=publicar_ficha(pid, peticion))
 
 
@@ -15289,8 +15290,11 @@ def publicar_resultados(peticion: Request, proyecto: str = Query(default=""),
     """El resumen de un proyecto (lo que ya se sabe; no pregunta a nadie)."""
     P = _publicar()
     cid = _proyecto_publicable(proyecto or P.SIN_PROYECTO, peticion)
-    return P.resultados(raiz_proyectos(), _videos_para_publicar(peticion),
-                        "" if cid == P.SIN_PROYECTO else cid, dias=dias)
+    videos = _videos_para_publicar(peticion)
+    clave = "" if cid == P.SIN_PROYECTO else cid
+    r = P.resultados(raiz_proyectos(), videos, clave, dias=dias)
+    r["periodos"] = P.periodos(raiz_proyectos(), videos, clave)
+    return r
 
 
 @app.post("/api/publicar/proyectos/{cid}/metricas")
@@ -15302,15 +15306,40 @@ def publicar_metricas_proyecto(cid: str, peticion: Request, cuerpo: dict = Body(
     clave = "" if cid == P.SIN_PROYECTO else cid
     pids = [v["pid"] for v in _videos_para_publicar(peticion)
             if (v.get("cliente") or "") == clave]
-    r = _por_publicar(P.actualizar_metricas, raiz_proyectos(), pids,
+    r = _por_publicar(P.medir, raiz_proyectos(), pids,
                       forzar=bool(_cuerpo(cuerpo).get("forzar")))
+    arranque = r.pop("arranque", None) or time.time()
     if P.ajustes_de(raiz_proyectos(), cid).get("perfil"):
-        try:
-            P.actualizar_seguidores(raiz_proyectos(), cid)
-        except P.ErrorPublicar as fallo:
-            r.setdefault("errores", []).append(f"seguidores: {fallo}")
+        # detras del proxy la peticion se corta a los 60 s: los seguidores (una
+        # consulta de hasta 30 s) solo si da tiempo; si no, en la siguiente
+        if time.time() - arranque > P.TOPE_SEGUIDORES_S:
+            r.setdefault("errores", []).append(
+                "seguidores: no dio tiempo esta vez; vuelve a pulsar «Actualizar»")
+        else:
+            try:
+                P.actualizar_seguidores(raiz_proyectos(), cid)
+            except P.ErrorPublicar as fallo:
+                r.setdefault("errores", []).append(f"seguidores: {fallo}")
     return r
 
+
+@app.get("/api/publicar/lo-que-funciono")
+def publicar_lo_que_funciono(peticion: Request, proyecto: str = Query(default=""),
+                             dias: int = Query(default=30), red: str = Query(default=""),
+                             por: str = Query(default="vistas"), cuantos: int = Query(default=10)):
+    """Los posts que mejor fueron: {proyecto?, dias, red?, por, cuantos}.
+
+    EL PUNTO DE LECTURA de los resultados (publicar-redes-2), de un proyecto o
+    de todos los que se pueden ver. Para la
+    pantalla, la línea de Inicio y, más adelante, la Parrilla y el piloto. Solo
+    lee lo guardado: no pregunta a Upload-Post ni gasta consultas."""
+    P = _publicar()
+    cid = None
+    if proyecto:
+        cid = _proyecto_publicable(proyecto, peticion)
+        cid = "" if cid == P.SIN_PROYECTO else cid
+    return P.lo_que_funciono(raiz_proyectos(), _videos_para_publicar(peticion), cid,
+                             dias=dias, red=red, por=por, cuantos=cuantos)
 
 # =================================================================== PARRILLA
 # Automatizar → Parrilla (rama `parrilla`, 17-10-2026): matrices de guiones por

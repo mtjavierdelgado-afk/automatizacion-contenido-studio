@@ -10,6 +10,7 @@
     cli.estado(request_id=..., job_id=...)         -> {"estado", "redes": {red: {...}}}
     cli.cancelar(job_id)                           -> {"ok"}
     cli.metricas_post(request_id)                  -> {red: {"vistas", "me_gusta", ..., "error"}}
+    cli.metricas_guardadas(perfil)                 -> {"posts": [{red, post_id, url, al, cifras}], "completo"}
     cli.analiticas_perfil(perfil, redes)           -> {red: {"seguidores", "alcance", "vistas", "error"}}
 
 Por que un intermediario
@@ -427,6 +428,66 @@ class ClienteUploadPost:
         "alcance": ("reach",),
     }
 
+    #: LA RETENCION (publicar-redes-2, 17-10-2026). Son DOS medidas distintas y
+    #: van en campos distintos, porque no se pueden comparar ni promediar juntas:
+    #:   - `vista_entera`: la FRACCION de quien vio el video HASTA EL FINAL. La da
+    #:     TikTok (`full_video_watched_rate`, ya en fraccion: 0,184 = 18,4 %).
+    #:   - `media_vista`: QUE PARTE del video se ve de media. La da YouTube solo en
+    #:     la lectura guardada (`average_view_percentage`, en tanto por cien), y en
+    #:     un Short pasa del 100 % cuando se vuelve a ver: se guarda tal cual (1,3).
+    #: Instagram y Facebook no dan ninguna: se quedan en None.
+    CAMPOS_FRACCION = ("full_video_watched_rate",)
+    CAMPOS_PORCENTAJE = ("average_view_percentage",)
+    CAMPOS_TIEMPO_MEDIO = ("average_time_watched", "average_view_duration_seconds")
+    #: Mas de 10 veces el video de media no es una cifra, es un error
+    TOPE_MEDIA_VISTA = 10.0
+
+    @staticmethod
+    def _numero(valor):
+        if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+            try:
+                valor = float(str(valor).strip()) if isinstance(valor, str) and valor.strip() else None
+            except ValueError:
+                return None
+        if valor is None or valor != valor or valor in (float("inf"), float("-inf")):
+            return None
+        return float(valor)
+
+    @classmethod
+    def _retencion(cls, bruto):
+        """{"vista_entera": fraccion|None, "media_vista": fraccion|None,
+        "tiempo_medio_s": s|None}"""
+        bruto = bruto if isinstance(bruto, dict) else {}
+        entera = None
+        for suyo in cls.CAMPOS_FRACCION:
+            v = cls._numero(bruto.get(suyo))
+            if v is None:
+                continue
+            if v > 1:                      # una fraccion que llega como «18.4»
+                v = v / 100
+            if 0 <= v <= 1:
+                entera = round(v, 4)
+                break
+        media = None
+        for suyo in cls.CAMPOS_PORCENTAJE:
+            v = cls._numero(bruto.get(suyo))
+            if v is not None and 0 <= v / 100 <= cls.TOPE_MEDIA_VISTA:
+                media = round(v / 100, 4)
+                break
+        medio = None
+        for suyo in cls.CAMPOS_TIEMPO_MEDIO:
+            v = cls._numero(bruto.get(suyo))
+            if v is not None and 0 <= v < 86400:
+                medio = round(v, 1)
+                break
+        return {"vista_entera": entera, "media_vista": media, "tiempo_medio_s": medio}
+
+    @classmethod
+    def _cifras(cls, bruto):
+        datos = cls._numeros(bruto)
+        datos.update(cls._retencion(bruto))
+        return datos
+
     @classmethod
     def _numeros(cls, bruto):
         bruto = bruto if isinstance(bruto, dict) else {}
@@ -440,20 +501,59 @@ class ClienteUploadPost:
             salida[nuestro] = valor
         return salida
 
-    def metricas_post(self, request_id, red=None):
+    def metricas_post(self, request_id, red=None, plazo=PLAZO_CONSULTA_S):
         """Las cifras de un envio (todas sus redes, o una). -> {red: {...}}"""
         r = self._pedir("GET", f"/api/uploadposts/post-analytics/{urllib.parse.quote(str(request_id))}",
-                        consulta={"platform": red} if red else None)
+                        consulta={"platform": red} if red else None, plazo=plazo)
         salida = {}
         for nombre, ficha in (r.get("platforms") or {}).items():
             if nombre not in REDES or not isinstance(ficha, dict):
                 continue
-            datos = self._numeros(ficha.get("post_metrics"))
+            datos = self._cifras(ficha.get("post_metrics"))
             url = str(ficha.get("post_url") or "")
             datos["url"] = url if url.startswith("http") else ""
+            # el id del post EN LA RED: con el se reconoce en la lectura guardada
+            datos["post_id"] = str(ficha.get("platform_post_id") or "")[:120]
             datos["error"] = str(ficha.get("post_metrics_error") or "")[:300]
             salida[nombre] = datos
         return salida
+
+    #: La lectura guardada: Upload-Post deja hasta 200 posts por pagina; mas de
+    #: PAGINAS_GUARDADAS paginas no se piden en una vuelta (la peticion de la
+    #: pantalla se corta a los 60 s detras del proxy).
+    POR_PAGINA_GUARDADAS = 200
+    PAGINAS_GUARDADAS = 3
+
+    def metricas_guardadas(self, perfil, red=None, desde=None, hasta=None,
+                           paginas=PAGINAS_GUARDADAS, plazo=PLAZO_CONSULTA_S):
+        """Lo ultimo que Upload-Post leyo EN VIVO de cada post del perfil, sin
+        volver a preguntar a las redes: NO gasta del limite de 100 consultas
+        cada 5 minutos. Solo trae posts que se leyeron en vivo alguna vez, y
+        para YouTube es el unico sitio con la retencion.
+        -> {"posts": [{"red", "post_id", "url", "al", vistas…}], "completo": bool}"""
+        consulta = {"user": perfil, "limit": self.POR_PAGINA_GUARDADAS,
+                    "platform": red if red in REDES else None,
+                    "since": desde or None, "until": hasta or None}
+        posts, cursor, completo = [], None, False
+        for _ in range(max(1, int(paginas))):
+            if cursor:
+                consulta["cursor"] = cursor
+            r = self._pedir("GET", "/api/uploadposts/post-analytics/cached", consulta=consulta,
+                            plazo=plazo)
+            for item in r.get("posts") or []:
+                if not isinstance(item, dict) or item.get("platform") not in REDES:
+                    continue
+                datos = self._cifras(item.get("metrics"))
+                url = str(item.get("post_url") or "")
+                datos.update(red=item["platform"], post_id=str(item.get("post_id") or "")[:120],
+                             url=url if url.startswith("http") else "",
+                             al=str(item.get("captured_at") or "")[:40])
+                posts.append(datos)
+            cursor = r.get("next_cursor")
+            if not r.get("has_more") or not cursor:
+                completo = True
+                break
+        return {"posts": posts, "completo": completo}
 
     def analiticas_perfil(self, perfil, redes, pagina_facebook=None):
         """Seguidores, alcance y vistas de cada cuenta del perfil. -> {red: {...}}"""

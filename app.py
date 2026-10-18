@@ -5884,7 +5884,8 @@ def _que_se_espera(otros):
 def _lanzar_cola(ctx):
     """Lanza el trabajo de la cola. Con el _COLA_LOCK tomado."""
     estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
-    trabajo_id = ctx.gestor.lanzar("notas_imagenes", _correr_notas_imagenes,
+    # con el revisor detras (modos autonomo y automatico): ver el bloque REVISOR
+    trabajo_id = ctx.gestor.lanzar("notas_imagenes", _correr_notas_y_revisar,
                                    ctx, paso="assets")
     estado["trabajo"] = trabajo_id
     _registrar_trabajo(trabajo_id, ctx.id)
@@ -6439,6 +6440,9 @@ def sacar_de_la_cola(pid: str, nid: str):
 
 #: {pid: trabajo_id} del «Revisar imágenes» a mano en marcha.
 _REVISOR = {}
+#: {pid: {"desde", "mensaje"}} mientras el revisor trabaja SOLO, al final de una
+#: tanda o de la cola de notas: la pantalla lo ensena en su panel.
+_REVISOR_AUTO = {}
 _REVISOR_LOCK = threading.Lock()
 
 
@@ -6559,7 +6563,10 @@ def _rehacer_en_linea(avisar, ctx, retoque, sustituye):
         return {"hechas": [], "rechazadas": [], "fallidas": [], "sin_trabajo": True}
     while True:
         with _COLA_LOCK:
-            if not _cola_dibujando(ctx):
+            # la cola «dibujando» con ESTE mismo trabajo (el de la cola de notas,
+            # que revisa al final) no es otra tanda: es esta
+            propia = (_COLA_NOTAS.get(ctx.id) or {}).get("trabajo") == mio
+            if propia or not _cola_dibujando(ctx):
                 estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
                 ya = set(estado["cola"]) | set((estado.get("actual") or {}).get("notas") or ())
                 estado["cola"].extend(i for i in ids if i not in ya)
@@ -6661,13 +6668,72 @@ def _revisor_tras_tanda(avisar, ctx, antes):
                 pass
 
         def tramo(valor, mensaje="", publico=""):
+            if mensaje:
+                with _REVISOR_LOCK:
+                    if ctx.id in _REVISOR_AUTO:
+                        _REVISOR_AUTO[ctx.id]["mensaje"] = str(mensaje)[:200]
             return avisar(0.99, mensaje, publico)
-        return _revisar_y_corregir(tramo, ctx, modo, ajustes, planos=cambiados)
+        with _REVISOR_LOCK:
+            _REVISOR_AUTO[ctx.id] = {"desde": time.time(), "modo": modo,
+                                     "planos": len(cambiados), "mensaje": "",
+                                     "trabajo": _mi_trabajo(ctx)}
+        try:
+            return _revisar_y_corregir(tramo, ctx, modo, ajustes, planos=cambiados)
+        finally:
+            with _REVISOR_LOCK:
+                _REVISOR_AUTO.pop(ctx.id, None)
     except _Cancelado:
         raise
     except Exception as fallo:                               # noqa: BLE001
         ctx.bitacora.anotar("revisor_fallo", "assets", {"error": str(fallo)[:400]})
         return None
+
+
+def _correr_notas_y_revisar(avisar, ctx):
+    """El trabajo de la cola de notas, con el revisor detras.
+
+    Lo que acaba de dibujar la cola (las notas de una persona, o «Rehacer las
+    marcadas») lo mira el revisor si su modo no es «manual»: es justo el caso de
+    «la rehice y sigue mal». Mientras revisa, ESTE trabajo sigue siendo el de la
+    cola: una nota que llegue entra aqui y se dibuja al final, en vez de lanzar
+    otra tanda a la vez (regla 2). Los redibujos del propio revisor no pasan por
+    aqui (`_rehacer_en_linea` llama a `_correr_notas_imagenes`), asi que no se
+    revisa a si mismo en bucle."""
+    if AJUSTES.leer().get("revisor_modo") not in ("autonomo", "automatico"):
+        return _correr_notas_imagenes(avisar, ctx)
+    antes = _huellas_de_planos(ctx)
+    resultado = _correr_notas_imagenes(avisar, ctx)
+    mio = _mi_trabajo(ctx)
+    if not mio:
+        return resultado
+    # YA, antes de mirar que cambio: la pantalla pregunta en cuanto la cola se
+    # vacia, y tiene que saber que el revisor viene detras
+    with _REVISOR_LOCK:
+        _REVISOR_AUTO[ctx.id] = {"desde": time.time(), "modo": AJUSTES.leer().get("revisor_modo"),
+                                 "planos": 0, "mensaje": "comprobando qué imágenes cambiaron",
+                                 "trabajo": mio}
+    try:
+        while True:
+            with _COLA_LOCK:
+                _COLA_NOTAS.setdefault(ctx.id, {"cola": []})["trabajo"] = mio
+            informe = _revisor_tras_tanda(avisar, ctx, antes)
+            if informe and isinstance(resultado, dict):
+                resultado = dict(resultado, revisor=informe)
+            with _COLA_LOCK:
+                estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+                if not estado.get("cola"):
+                    break
+            # llegaron notas mientras revisaba: se dibujan, y se revisa eso
+            antes = _huellas_de_planos(ctx)
+            _correr_notas_imagenes(avisar, ctx)
+    finally:
+        with _REVISOR_LOCK:
+            _REVISOR_AUTO.pop(ctx.id, None)
+        with _COLA_LOCK:
+            estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+            if estado.get("trabajo") == mio:
+                estado["trabajo"] = None
+    return resultado
 
 
 def _correr_assets_y_revisar(avisar, ctx, paso_id, unidades, opciones=None):
@@ -6743,6 +6809,10 @@ def revision_de_imagenes(pid: str):
     except KeyError:
         ficha["trabajo"] = None
     ajustes = AJUSTES.leer()
+    with _REVISOR_LOCK:
+        auto = dict(_REVISOR_AUTO.get(ctx.id) or {})
+    ficha["automatico"] = (dict(auto, segundos=round(time.time() - auto["desde"], 1))
+                           if auto else None)
     ficha.update({"modo": ajustes["revisor_modo"],
                   "max_imagenes": ajustes["revisor_max_imagenes"],
                   "max_usd": ajustes["revisor_max_usd"],

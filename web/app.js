@@ -10226,7 +10226,8 @@ function vistaPreviaLight() {
  * notas entran en la MISMA lista que las tuyas, marcadas «revisor». Rehacerlas
  * va por la misma cola. Aquí se pide la revisión y se ve lo que dejó; el modo
  * (manual, autónomo, automático) se elige en Configuración. */
-const REVISOR = { pid: '', ficha: null, cargando: false, error: '', sondeo: null, leido: 0 };
+const REVISOR = { pid: '', ficha: null, cargando: false, error: '', sondeo: null, leido: 0,
+  cancelando: false, aviso: '', aplicando: false };
 
 /* Literales y no `gravedad-${...}`: así `css_sin_usar` las encuentra. */
 const CLASE_GRAVEDAD = { alta: 'gravedad-alta', media: 'gravedad-media', baja: 'gravedad-baja' };
@@ -10260,6 +10261,36 @@ async function cargarRevisor(pid) {
   REVISOR.cargando = false;
   const trabajo = (REVISOR.ficha || {}).trabajo;
   if (trabajo && ['pendiente', 'ejecutando'].includes(trabajo.estado)) vigilarRevisor(pid);
+  else if ((REVISOR.ficha || {}).automatico) vigilarRevisorSolo(pid);
+}
+
+/* MIENTRAS EL REVISOR TRABAJA SOLO (modos autónomo y automático, al final de
+   una tanda o de la cola de notas) se relee la ficha cada tres segundos, para
+   que el panel lo diga y, al acabar, salgan sus notas. */
+function vigilarRevisorSolo(pid) {
+  if (REVISOR.sondeo) return;
+  REVISOR.sondeo = setInterval(async () => {
+    if (videoAbierto().pid !== pid || REVISOR.pid !== pid) {
+      clearInterval(REVISOR.sondeo);
+      REVISOR.sondeo = null;
+      return;
+    }
+    let ficha = null;
+    try { ficha = await pedir(`${API.colaImagenes(pid)}/revision`); } catch (e) { return; }
+    if (REVISOR.pid !== pid) return;
+    REVISOR.ficha = ficha;
+    REVISOR.leido = Date.now();
+    if (ficha.automatico) { refrescarVivosLight(); return; }
+    clearInterval(REVISOR.sondeo);
+    REVISOR.sondeo = null;
+    if (REVISOR.cancelando) {
+      REVISOR.cancelando = false;
+      REVISOR.aviso = 'El revisor se paró: lo que ya estaba revisado sigue igual.';
+      toast('Revisor parado');
+    }
+    await recargarNotas();
+    repintarVideo();
+  }, 3000);
 }
 
 /* MIRA EL TRABAJO del «Revisar imágenes» cada tres segundos; al acabar relee
@@ -10282,7 +10313,17 @@ function vigilarRevisor(pid) {
     }
     clearInterval(REVISOR.sondeo);
     REVISOR.sondeo = null;
+    REVISOR.cancelando = false;
     if (ficha && ficha.estado === 'error') toast(`la revisión falló: ${ficha.error || ''}`, true);
+    /* CANCELADA, DICHO: sin esto el panel volvía a su estado de antes y no se
+       sabía si había parado o terminado. */
+    if (ficha && ficha.estado === 'cancelado') {
+      REVISOR.aviso = 'La última revisión se canceló: lo que ya estaba revisado sigue igual, '
+        + 'y lo que faltaba se mira la próxima vez.';
+      toast('Revisión cancelada');
+    } else if (ficha && ficha.estado === 'listo') {
+      REVISOR.aviso = '';
+    }
     await recargarNotas();
     await cargarRevisor(pid);
     repintarVideo();
@@ -10296,6 +10337,7 @@ async function pedirRevision(forzar) {
     const r = await pedir(`${API.colaImagenes(pid)}/revisar`,
                           { method: 'POST', cuerpo: forzar ? { forzar: true } : {} });
     REVISOR.pid = pid;
+    REVISOR.aviso = '';
     REVISOR.ficha = { ...(REVISOR.ficha || {}), trabajo: r.trabajo };
     vigilarRevisor(pid);
   } catch (err) {
@@ -10307,18 +10349,21 @@ async function pedirRevision(forzar) {
 async function cancelarRevision() {
   const trabajo = (REVISOR.ficha || {}).trabajo;
   if (!trabajo) return;
+  REVISOR.cancelando = true;
+  refrescarVivosLight();
   try { await pedir(API.cancelar(trabajo.id), { method: 'POST' }); } catch (e) { /* ya acabó */ }
-  toast('cancelando la revisión…');
 }
 
 async function aplicarRevision() {
   const v = videoAbierto();
   const ficha = REVISOR.ficha || {};
-  const pendientes = ficha.pendientes || [];
+  const pendientes = pendientesDelRevisor(ficha).libres;
   const n = pendientes.length;
-  if (!v.pid || !n) return;
+  if (!v.pid || !n || REVISOR.aplicando) return;
   const precio = usdCorto(n * Number(ficha.usd_por_imagen || 0));
   if (!window.confirm(`¿Rehacer las ${n} imágenes que marcó el revisor? (≈ ${precio})`)) return;
+  REVISOR.aplicando = true;
+  refrescarVivosLight();
   try {
     /* CON SUS IDS: se rehacen las que se han confirmado y ninguna más, aunque
        mientras tanto el revisor haya marcado otras. */
@@ -10331,7 +10376,25 @@ async function aplicarRevision() {
   } catch (err) {
     toast(`no se ha podido poner en cola: ${err.message}`, true);
   }
+  REVISOR.aplicando = false;
   repintarVideo();
+}
+
+/* LAS MARCADAS, PARTIDAS EN DOS: las que ya están en la cola (dibujándose o
+   esperando) y las que no. Se mira la cola de AHORA y el estado de cada nota en
+   la lista, que se relee sola mientras la cola dibuja: así el panel dice lo que
+   pasa sin esperar a releer su ficha. */
+function pendientesDelRevisor(ficha) {
+  const enCola = new Set([...(COLA_IMG.cola || []), ...((COLA_IMG.actual || {}).notas || [])]);
+  const dibujando = new Set((COLA_IMG.actual || {}).notas || []);
+  const hechas = new Set((estadoRepaso().notas || [])
+    .filter(n => n.estado === 'aplicado').map(n => n.id));
+  const vivas = ((ficha || {}).pendientes || []).filter(p => !hechas.has(p.nota));
+  return {
+    libres: vivas.filter(p => !enCola.has(p.nota)),
+    enCola: vivas.filter(p => enCola.has(p.nota)),
+    dibujando: vivas.filter(p => dibujando.has(p.nota)).map(p => p.plano),
+  };
 }
 
 async function descartarRevision(plano) {
@@ -10387,11 +10450,40 @@ function panelRevisor() {
     if (revisando) {
       caja.appendChild(h('div', { clase: 'fila' },
         h('span', { clase: 'pastilla estado-corriendo' },
-          `Revisando… ${trabajo.mensaje || ''}`.trim()),
+          REVISOR.cancelando ? 'Cancelando la revisión…'
+            : `Revisando… ${trabajo.mensaje || ''}`.trim()),
         h('span', { clase: 'crece' }),
-        h('button', { clase: 'mini fantasma', onclick: cancelarRevision }, 'Cancelar')));
+        h('button', {
+          clase: 'mini fantasma', disabled: REVISOR.cancelando, onclick: cancelarRevision,
+        }, REVISOR.cancelando ? 'Cancelando…' : 'Cancelar')));
       return caja;
     }
+    if (ficha.automatico) {
+      const a = ficha.automatico;
+      const cuantas = a.planos === 1 ? 'la imagen recién hecha'
+        : a.planos > 1 ? `las ${a.planos} imágenes recién hechas` : 'las imágenes recién hechas';
+      caja.appendChild(h('div', { clase: 'fila' },
+        h('span', { clase: 'pastilla estado-corriendo' },
+          REVISOR.cancelando ? 'Cancelando…'
+            : `El revisor está mirando ${cuantas} (modo ${NOMBRE_MODO_REVISOR[a.modo] || a.modo})…`),
+        h('span', { clase: 'meta' }, a.mensaje || ''),
+        h('span', { clase: 'crece' }),
+        a.trabajo ? h('button', {
+          clase: 'mini fantasma', disabled: REVISOR.cancelando,
+          title: 'Para el trabajo entero en el que va el revisor (si es la tanda del vídeo, '
+            + 'también la tanda). Lo ya dibujado se queda.',
+          onclick: async () => {
+            if (!window.confirm('¿Parar el revisor? Si va dentro de una tanda, se para la tanda.')) return;
+            REVISOR.cancelando = true;
+            refrescarVivosLight();
+            try { await pedir(API.cancelar(a.trabajo), { method: 'POST' }); } catch (e) { /* ya acabó */ }
+          },
+        }, 'Cancelar') : null));
+      caja.appendChild(h('div', { clase: 'meta' },
+        'Si encuentra algo grave lo rehace solo, dentro de los topes; lo demás lo deja como nota.'));
+      return caja;
+    }
+    if (REVISOR.aviso) caja.appendChild(h('div', { clase: 'meta revisor-fallo' }, REVISOR.aviso));
     const ultima = ficha.ultima || {};
     caja.appendChild(h('div', { clase: 'meta' },
       ultima.fecha
@@ -10402,8 +10494,19 @@ function panelRevisor() {
           + 'nota en las que no cuadran. No rehace nada hasta que tú lo pidas'
           + (modo === 'manual' ? '.' : ' (o hasta que acabe una tanda, en este modo).')));
     (ultima.fallos || []).forEach(f => caja.appendChild(
-      h('div', { clase: 'meta revisor-fallo' }, `no se pudo revisar ${f}`)));
-    const pendientes = ficha.pendientes || [];
+      h('div', { clase: 'meta revisor-fallo' }, `⚠ ${f}`)));
+    const partes = pendientesDelRevisor(ficha);
+    const pendientes = partes.libres;
+    /* LO QUE SE ESTÁ REHACIENDO, AQUÍ MISMO: antes solo se veía en la tarjeta
+       de cada imagen, y si quedaba abajo parecía que el botón no había hecho
+       nada y se pulsaba otra vez. */
+    if (partes.enCola.length) {
+      caja.appendChild(h('div', { clase: 'fila' },
+        h('span', { clase: 'pastilla estado-corriendo' },
+          `Rehaciendo ${partes.enCola.length} ${partes.enCola.length === 1 ? 'imagen marcada' : 'imágenes marcadas'}`
+          + (partes.dibujando.length ? ` · dibujando ${partes.dibujando.join(', ')}` : ' · en cola')),
+        h('span', { clase: 'meta' }, partes.enCola.map(p => p.plano).join(', '))));
+    }
     if (pendientes.length) {
       const chips = h('div', { clase: 'revisor-pendientes' });
       pendientes.forEach(p => chips.appendChild(h('span', { clase: 'revisor-chip' },
@@ -10428,10 +10531,12 @@ function panelRevisor() {
         clase: pendientes.length ? 'mini' : 'mini primario',
         disabled: nuevas === 0,
         onclick: () => pedirRevision(false),
-      }, nuevas === 0 ? 'Todo revisado' : 'Revisar imágenes')));
+      }, nuevas === 0 ? 'Todo revisado'
+        : ultima.fecha ? `Revisar las nuevas (${nuevas})` : 'Revisar imágenes')));
     if (ultima.fecha) {
       fila.appendChild(h('button', {
-        clase: 'mini fantasma', title: 'Vuelve a mirar todas, también las ya revisadas',
+        clase: 'mini fantasma',
+        title: 'Vuelve a mirar TODAS las imágenes, también las que ya revisó y no han cambiado',
         onclick: () => {
           if (window.confirm('¿Revisar otra vez TODAS las imágenes?')) pedirRevision(true);
         },
@@ -10441,9 +10546,11 @@ function panelRevisor() {
     if (pendientes.length) {
       fila.appendChild(h('button', {
         clase: 'mini avisa',
+        disabled: REVISOR.aplicando,
         title: 'Las de retoque parten de la imagen de ahora; las que piden otra imagen, desde cero',
         onclick: aplicarRevision,
-      }, `Rehacer las marcadas (${pendientes.length}, ≈ `
+      }, REVISOR.aplicando ? 'Poniendo en cola…'
+        : `Rehacer las marcadas (${pendientes.length}, ≈ `
         + `${usdCorto(pendientes.length * Number(ficha.usd_por_imagen || 0))})`));
     }
     caja.appendChild(fila);
@@ -11549,6 +11656,9 @@ function vigilarCola(deQuien) {
       if (vacia) {
         clearInterval(sondeo);
         if (COLA_IMG.sondeo === sondeo) COLA_IMG.sondeo = null;
+        /* EN LOS MODOS AUTÓNOMO Y AUTOMÁTICO el revisor mira lo recién hecho
+           al acabar la cola: se pregunta ya, para que el panel lo diga. */
+        cargarRevisor(pid).then(repintarVideo);
       }
     } finally {
       enVuelo = false;

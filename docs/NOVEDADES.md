@@ -28,8 +28,9 @@ vídeos, estilos, claves y contraseña no se tocan.
 - Revisar **no gasta en imágenes** (usa tu cuenta de Claude) y una imagen ya
   revisada no se vuelve a mirar mientras no cambie. Lo que cuesta es rehacer.
 - **Tres modos**, en Configuración → Revisor de imágenes: **manual** (solo con
-  el botón; es el de fábrica), **autónomo** (al acabar cada tanda de imágenes
-  revisa las nuevas y rehace solo lo grave, una vez) y **automático** (también
+  el botón; es el de fábrica), **autónomo** (al acabar cada tanda de imágenes, o
+  al rehacer imágenes con tus notas, revisa las nuevas y rehace solo lo grave,
+  una vez) y **automático** (también
   al generar el vídeo entero: rehace todo lo marcado y lo vuelve a revisar,
   hasta el número de vueltas que elijas, antes de montar). En los dos últimos,
   con **topes**: imágenes como mucho por tanda y gasto como mucho por vídeo; y

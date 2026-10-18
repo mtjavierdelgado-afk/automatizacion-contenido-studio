@@ -475,6 +475,13 @@ def revisar(proyecto, plan, imagenes, planos, estilo=None, encargo="",
             if sid and sid not in salida:
                 ficha["huella"] = huella(imagenes[sid])
                 salida[sid] = ficha
+        # LAS QUE SE CALLO se dicen: si no, «Última revisión: 3 imágenes» en un
+        # grupo de 7 no explicaba por que las otras cuatro seguian sin mirar
+        calladas = [sid for sid in ids if sid not in salida]
+        if calladas:
+            fallos.append(f"{', '.join(calladas)}: no dijo nada de "
+                          f"{'ella' if len(calladas) == 1 else 'ellas'}; "
+                          f"se miran en la próxima revisión")
     if fallos:
         salida["_fallos"] = fallos
     return salida

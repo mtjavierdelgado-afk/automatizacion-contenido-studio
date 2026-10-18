@@ -1685,17 +1685,26 @@ def _validar_params(paso_id, nuevos, ctx=None):
     # como objetos; guardar un texto ahi devolvia 200 y a partir de entonces esas
     # pantallas daban 500 para siempre, sin ningun boton para deshacerlo. `None`
     # sigue valiendo: es "sin valor" y todos los lectores lo tratan como {}.
+    # SOLO LO QUE CAMBIA: el modo editor manda el borrador ENTERO del paso en
+    # cada guardado, y un valor antiguo que ya estaba guardado no puede dejar
+    # el paso sin poder guardarse nunca mas (la misma regla que los params
+    # sueltos por unidad del nucleo).
+    try:
+        guardados = (ctx.estado.params(paso_id) or {}) if ctx is not None else {}
+    except Exception:  # noqa: BLE001
+        guardados = {}
     for clave in CLAVES_OBJETO:
-        if clave not in (nuevos or {}):
+        if clave not in (nuevos or {}) or nuevos[clave] == guardados.get(clave):
             continue
         valor = nuevos[clave]
         if valor is not None and not isinstance(valor, dict):
             raise ErrorApi(400, f"'{clave}' tiene que ser un objeto, "
                                 f"llegó {type(valor).__name__}")
     bloque = (nuevos or {}).get("unidades")
+    previas = guardados.get("unidades") if isinstance(guardados.get("unidades"), dict) else {}
     if isinstance(bloque, dict):
         malas = [str(u) for u, v in bloque.items()
-                 if v is not None and not isinstance(v, dict)]
+                 if v is not None and not isinstance(v, dict) and v != previas.get(u)]
         if malas:
             raise ErrorApi(400, "'unidades' lleva un objeto por unidad; no lo "
                                 "son: " + ", ".join(malas[:5]))
@@ -1760,7 +1769,7 @@ def fijar_params(pid: str, paso: str, cuerpo: dict = Body(default=None)):
     else:
         nuevos = {k: v for k, v in datos.items() if k != "reemplazar"}
 
-    _validar_params(paso_id, nuevos)
+    _validar_params(paso_id, nuevos, ctx)
 
     antes = {p["id"]: ctx.estado.estado_de(p["id"]) for p in PASOS}
     try:
@@ -1779,7 +1788,7 @@ def fijar_params(pid: str, paso: str, cuerpo: dict = Body(default=None)):
     # usan si se vuelve a propagar la huella de dependencias
     if paso_id == "assets" and cambiado and PASOS_MODULOS is not None:
         try:
-            PASOS_MODULOS.p6_assets.propagar_dependencias(ctx.estado)
+            PASOS_MODULOS.p6_assets.propagar_dependencias(ctx.estado, del_propio_paso=False)
         except Exception as fallo:  # noqa: BLE001
             ctx.bitacora.anotar("aviso", paso_id,
                                 {"propagar_dependencias": str(fallo)})
@@ -1819,10 +1828,11 @@ def ejecutar_paso(pid: str, paso: str, cuerpo: dict = Body(default=None)):
     paso_id = _validar_paso(paso)
     datos = _cuerpo(cuerpo)
     if isinstance(datos.get("params"), dict):
+        _validar_params(paso_id, datos["params"], ctx)     # como el PUT (R2)
         ctx.estado.actualizar_params(paso_id, datos["params"])
         if paso_id == "assets" and PASOS_MODULOS is not None:
             try:
-                PASOS_MODULOS.p6_assets.propagar_dependencias(ctx.estado)
+                PASOS_MODULOS.p6_assets.propagar_dependencias(ctx.estado, del_propio_paso=False)
             except Exception as fallo:  # noqa: BLE001
                 ctx.bitacora.anotar("aviso", paso_id,
                                     {"propagar_dependencias": str(fallo)})
@@ -2027,7 +2037,7 @@ def enviar_feedback(pid: str, cuerpo: dict = Body(default=None)):
 
     if paso_id == "assets" and PASOS_MODULOS is not None:
         try:
-            PASOS_MODULOS.p6_assets.propagar_dependencias(ctx.estado)
+            PASOS_MODULOS.p6_assets.propagar_dependencias(ctx.estado, del_propio_paso=False)
         except Exception as fallo:  # noqa: BLE001
             ctx.bitacora.anotar("aviso", paso_id, {"propagar_dependencias": str(fallo)})
 
@@ -13914,17 +13924,21 @@ def generar_video(pid: str, cuerpo: dict = Body(default=None)):
         # igualmente los params del video que se estaba generando: la firma se
         # movia debajo del trabajo vivo. Se siguen guardando ANTES de planificar
         # (el plan cuenta con lo escrito en pantalla), pero solo si nada esta
-        # corriendo ya esos pasos.
+        # corriendo en el video: NINGUN trabajo, no solo los de esos pasos. Lo
+        # que corre la tanda (`producidos`) no se sabe hasta planificar, y
+        # planificar necesita los params ya escritos; con un trabajo vivo de
+        # cualquier paso, los mas adelante darian 409 con los params ya movidos
+        # (revision de arreglos-v2h). Los 409 que quedan detras (impedimentos,
+        # dependencias) no son de algo corriendo: dejar escrito lo de la
+        # pantalla ahi es lo de siempre.
         if nuevos_params:
-            pasos_tocados = {p for p, _v in nuevos_params}
-            otro = _trabajo_que_toca(ctx, pasos_tocados)
+            otro = _trabajo_que_toca(ctx, [p["id"] for p in PASOS])
             if otro is not None:
-                raise ErrorApi(409, f"«{otro.get('nombre')}» está corriendo: espera "
-                                    "a que termine para cambiar sus ajustes",
+                raise ErrorApi(409, f"«{otro.get('nombre')}» está corriendo en este "
+                                    "vídeo: espera a que termine para generar",
                                {"trabajo_id": otro["id"], "progreso": otro["progreso"]})
             with _COLA_LOCK:
-                if (pasos_tocados & set(_PASOS_QUE_DIBUJA_O_MONTA)
-                        and _cola_dibujando(ctx)):
+                if _cola_dibujando(ctx):
                     raise ErrorApi(409, "se están rehaciendo imágenes con tus "
                                         "notas: espera a que terminen (o páralas) "
                                         "y vuelve a generar")

@@ -6125,6 +6125,45 @@ def probar_lo_de_v2h():
             shutil.rmtree(apartadas, ignore_errors=True)
             servidor._COLA_NOTAS.pop(ctx.id, None)
 
+        # D7 (revisión) · TOCAR A MANO LA HOJA DE UN ASSET CON LA TANDA CORRIENDO
+        # deja obsoleto el plano que la usa: la cascada es del usuario, no de la tanda
+        p6 = servidor.PASOS_MODULOS.p6_assets
+        proyecto = Proyecto.crear(base, "d7 hoja")
+        e = Estado(proyecto)
+        for paso in ("ingesta", "brief", "guion", "voz", "revision_audio"):
+            e.completar(paso, {"x": 1})
+        deps = {"escena:S05": ["asset:X"]}
+        e.set_params("assets", {"unidades": {"asset:X": {"d": "hoja"}, "escena:S05": {"d": "plano"}}})
+        p6.propagar_dependencias(e, deps)
+        e.completar("assets", {}, {"asset:X": {"p": 1}, "escena:S05": {"p": 1}})
+        e.marcar_ejecutando("assets")                           # arranca una tanda
+        e.actualizar_params("assets", {"unidades": {"asset:X": {"d": "hoja", "feedback": "más alto"}}})
+        try:                                                    # lo que hace fijar_params
+            p6.propagar_dependencias(e, deps, del_propio_paso=False)
+        except TypeError:
+            p6.propagar_dependencias(e, deps)
+        p6.propagar_dependencias(e, deps)                       # la tanda, antes de sellar
+        e.completar("assets", {}, {"asset:X": {"p": 1}, "escena:S05": {"p": 1}})
+        obsoletas = e.unidades_obsoletas("assets")
+        ok("escena:S05" in obsoletas,
+           f"D7: el plano que usa una hoja retocada durante la tanda queda por rehacer ({obsoletas})")
+
+        # R2 (revisión) · un valor ANTIGUO ya guardado no impide guardar el paso
+        pid = Proyecto.crear(base, "r2 antiguo").id
+        servidor.contexto(pid).estado.set_params("assets", {"estilo": "cartoon", "calidad": "low"})
+        codigo, _m = _llamar(servidor.fijar_params, pid, "assets",
+                             {"params": {"estilo": "cartoon", "calidad": "medium"}})
+        igual(codigo, 200, "R2: el borrador entero con un valor antiguo sin tocar se guarda")
+        # R2 (revisión) · /generar no escribe params con CUALQUIER trabajo del vídeo vivo
+        cambiar("_trabajo_que_toca", lambda ctx, pasos: {"id": "m", "nombre": "montaje",
+                                                          "progreso": 0.5}
+                if "render" in set([pasos] if isinstance(pasos, str) else pasos) else None)
+        codigo, _m = _llamar(servidor.generar_video, pid, {"params": {"brief": {"duracion_s": 55}}})
+        igual(codigo, 409, "R2: /generar con un montaje corriendo da 409")
+        ok((servidor.contexto(pid).estado.params("brief") or {}).get("duracion_s") != 55,
+           "R2: y no deja sus params escritos")
+        setattr(servidor, "_trabajo_que_toca", reales.pop("_trabajo_que_toca"))
+
         # S3 · UNA CLAVE CORTA NO SE ENSEÑA A MEDIAS (el Client ID de Jamendo
         # tiene 8 caracteres y se enseñaban 4)
         from pasos import claves as CLAVES                    # noqa: PLC0415

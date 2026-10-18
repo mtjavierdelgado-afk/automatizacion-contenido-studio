@@ -4107,7 +4107,7 @@ def parrilla_analizar_una_cuenta(navegador, datos):
     ok(pg.esperar(".conexion-cuenta .pastilla", "1234", 10), "el token de Apify, puesto (solo sus 4 últimos)")
     pg.p.locator("[data-foco=conexion-meta_token]").fill("EAABrecorrido5678")
     pg.p.locator(".conexion-cuenta").nth(1).locator("button", has_text="Guardar").click()
-    ok(pg.esperar(".conexion-cuenta .meta", "estadoplay", 10), "el token de Meta encuentra tu Instagram")
+    ok(pg.esperar(".conexion-cuenta .meta", "micuenta_studio", 10), "el token de Meta encuentra tu Instagram")
 
     pg.p.locator("[data-foco=cuenta-texto]").fill("https://www.instagram.com/personal_lucia/")
     pg.dialogos.clear()

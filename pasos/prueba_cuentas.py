@@ -45,6 +45,7 @@ _ok = 0
 _fallos = []
 CLAVE_YT = "AIzaSyCLAVEDEPRUEBA1234567890"
 TOKEN_META = "EAABTOKENDEPRUEBA0987654321"
+TOKEN_META_STUDIO = "EAABTOKENDELSTUDIO1122334455"
 TOKEN_APIFY = "apify_api_TOKENDEPRUEBA5555"
 
 
@@ -162,8 +163,11 @@ class Falso(http.server.BaseHTTPRequestHandler):
                                                                   "commentCount": "1"},
                                                    "contentDetails": {"duration": "PT45S"}} for n, i in enumerate(ids)]})
         if url.path.startswith("/meta/"):
-            if q.get("access_token") != TOKEN_META:
+            if q.get("access_token") not in (TOKEN_META, TOKEN_META_STUDIO):
                 return self._json(400, {"error": {"code": 190, "message": f"Invalid OAuth token {q.get('access_token')}"}})
+            if url.path.endswith("/me/accounts") and q.get("access_token") == TOKEN_META_STUDIO:
+                return self._json(200, {"data": [{"name": "Studio", "instagram_business_account":
+                                                  {"id": "178419999", "username": "studio_mirador"}}]})
             if url.path.endswith("/me/accounts"):
                 return self._json(200, {"data": [{"name": "EstadoPlay", "instagram_business_account":
                                                   {"id": "178414000", "username": "estadoplay"}}]})
@@ -282,6 +286,17 @@ def prueba_orden(bases):
         cuentas = C.buscar_mi_instagram()
         igual((cuentas[0]["usuario"], C.claves_publicas()["meta"]["ig_id"]), ("estadoplay", "178414000"),
               "«Buscar mi cuenta» guarda tu id si hay una sola")
+        # No queda atado a una cuenta: el dueño cambiará la de EstadoPlay por una del Studio.
+        C.guardar_claves({"meta_token": TOKEN_META_STUDIO})
+        igual(C.claves_publicas()["meta"]["ig_id"], "", "un token nuevo olvida la cuenta de antes")
+        cuentas = C.buscar_mi_instagram()
+        igual((cuentas[0]["usuario"], C.claves_publicas()["meta"]["ig_id"]), ("studio_mirador", "178419999"),
+              "y «Volver a buscar» encuentra la nueva: cambiar de cuenta es pegar otro token")
+        d = C.leer(raiz, "instagram", "competencia", 10)
+        igual(d["fuente"], "instagram_oficial", "la cuenta nueva mira igual que la vieja")
+        C.borrar(raiz, "instagram", "competencia")
+        C.guardar_claves({"meta_token": TOKEN_META})
+        C.buscar_mi_instagram()
         ok(lanza(C.guardar_claves, {"ig_id": "abc"}) is not None, "un id de Instagram con letras, no")
         ok(lanza(C.guardar_claves, {"tope_usd": 9999}) is not None, "un tope absurdo, no")
 

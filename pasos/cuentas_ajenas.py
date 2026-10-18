@@ -144,10 +144,14 @@ def guardar_claves(cambios):
             valor = re.sub(r"\s+", "", str(c.get(campo) or ""))
             if len(valor) > 600:
                 raise ErrorCuentas("esa clave es demasiado larga: ¿se ha pegado algo más?")
+            anterior = datos.get(campo) or ""
             datos[campo] = valor
             if campo == "meta_token":
                 datos["meta_token_al"] = ahora() if valor else ""
-                if not valor:
+                # Un token distinto puede ser de OTRA cuenta (la del Studio en
+                # vez de la de EstadoPlay): la de antes se olvida y la pantalla
+                # vuelve a buscar sola al guardar.
+                if valor != anterior:
                     datos["ig_id"], datos["ig_usuario"] = "", ""
     if "ig_id" in c:
         ig = str(c.get("ig_id") or "").strip()
@@ -171,10 +175,15 @@ def guardar_claves(cambios):
 
 def buscar_mi_instagram():
     """Con el token puesto, las cuentas profesionales a las que llega. Si hay
-    una sola, se guarda su id."""
+    una sola, se guarda su id.
+
+    NO VA ATADO A NINGUNA CUENTA (el dueño usa ahora la de EstadoPlay y tendrá
+    una propia para el Studio, 18-10-2026): lo único guardado es el token y el
+    id de la cuenta «ventana». Cambiarla es pegar otro token y volver a buscar;
+    las cuentas analizadas no dependen de ella."""
     c = _claves()
     if _simular():
-        cuentas = [{"id": "17841400000000000", "usuario": "estadoplay", "pagina": "EstadoPlay"}]
+        cuentas = [{"id": "17841400000000000", "usuario": "micuenta_studio", "pagina": "Mi Página"}]
     else:
         try:
             cuentas = F.instagram_mi_cuenta(c.get("meta_token"), _version_meta(), _bases())

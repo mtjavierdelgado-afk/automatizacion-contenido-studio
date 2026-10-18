@@ -20398,10 +20398,11 @@ function bloqueConexionesCuentas() {
   const meta = c.meta || {};
   detalles.appendChild(fila('YouTube (gratis)', 'Una clave de API de Google Cloud con «YouTube Data API v3» activada. Da '
     + 'vistas, likes y comentarios de cualquier canal público.', 'youtube_clave', c.youtube || {}));
-  detalles.appendChild(fila('Instagram (gratis, vía oficial de Meta)', 'Un token de tu app de Meta. Tu Instagram tiene que ser '
-    + 'profesional y estar vinculado a tu Página de Facebook. Solo ve cuentas profesionales (la mayoría de negocios).',
+  detalles.appendChild(fila('Instagram (gratis, vía oficial de Meta)', 'Un token de tu app de Meta para UNA cuenta tuya, la de '
+    + 'tu negocio o una solo para el Studio: tiene que ser profesional y estar vinculada a una Página de Facebook. Para '
+    + 'cambiar de cuenta, pega el token nuevo y pulsa «Volver a buscar». Solo ve cuentas profesionales (la mayoría de negocios).',
   'meta_token', meta, meta.puesta ? h('div', { clase: 'fila' },
-    meta.ig_id ? h('span', { clase: 'meta' }, `Tu cuenta: @${meta.ig_usuario || meta.ig_id}`) : h('span', { clase: 'meta' }, 'Falta saber cuál es tu cuenta'),
+    meta.ig_id ? h('span', { clase: 'meta' }, `Se mira desde: @${meta.ig_usuario || meta.ig_id}`) : h('span', { clase: 'meta' }, 'Falta saber desde qué cuenta se mira'),
     h('button', { clase: 'mini', onclick: () => buscarMiInstagramCuentas() }, meta.ig_id ? 'Volver a buscar' : 'Buscar mi cuenta'),
     meta.caduca ? h('span', { clase: meta.caducando ? 'pastilla obsoleto' : 'meta' }, `el token caduca hacia el ${meta.caduca}`) : null) : null));
   detalles.appendChild(fila('Apify (de pago, de respaldo)', 'El token de tu cuenta de apify.com. El plan gratis trae 5 $ '

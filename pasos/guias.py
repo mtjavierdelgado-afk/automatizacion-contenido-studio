@@ -1032,8 +1032,10 @@ GUIAS = {
             "proyecto, entra en «APIs y servicios → Biblioteca», activa «YouTube Data API v3» y en "
             "«Credenciales» crea una «Clave de API». Da 10.000 unidades al día gratis; leer una cuenta "
             "usa 3.",
-            "INSTAGRAM (gratis): tu Instagram de EstadoPlay tiene que ser PROFESIONAL (Empresa o "
-            "Creador) y estar vinculado a tu Página de Facebook. En developers.facebook.com crea una "
+            "INSTAGRAM (gratis): se usa UNA cuenta tuya de Instagram como «ventana» para mirar las "
+            "demás. Puede ser la de tu negocio o una creada solo para el Studio: lo único que pide "
+            "Meta es que sea PROFESIONAL (Empresa o Creador) y esté vinculada a una Página de "
+            "Facebook que administres. Mirar otras cuentas no publica ni cambia nada en la tuya. En developers.facebook.com crea una "
             "app de tipo «Empresa», añade el producto de Instagram, y en el «Explorador de la API "
             "Graph» genera un token con instagram_basic, pages_show_list, pages_read_engagement e "
             "instagram_manage_insights. Pásalo por el «Depurador de tokens» → «Ampliar» para que dure "
@@ -1048,6 +1050,9 @@ GUIAS = {
         ],
         "si": [
             "Empieza por YouTube: es lo más rápido y es gratis.",
+            "Para CAMBIAR de cuenta de Instagram (por ejemplo, a una nueva solo para el Studio): "
+            "hazla profesional, vincúlala a una Página de Facebook, saca su token, pégalo en "
+            "«Cambiar» y pulsa «Volver a buscar». Las cuentas ya analizadas se quedan.",
             "Usa una app de Meta solo para esto, a tu nombre: no hace falta pasar la revisión de Meta "
             "si solo la usa tu negocio.",
             "Renueva el token de Meta cuando el Studio lo avise.",
@@ -1064,7 +1069,7 @@ GUIAS = {
         ),
         "ejemplo": (
             "YOUTUBE: AIza… (puesta).\n"
-            "INSTAGRAM: EAAB… → tu cuenta: @estadoplay.\n"
+            "INSTAGRAM: EAAB… → tu cuenta: @micuenta_studio.\n"
             "APIFY: apify_api_… · tope al mes: 5 $."
         ),
         "prompt_ia": (

@@ -6487,11 +6487,24 @@ async def subir_imagenes_repaso(pid: str, peticion: Request):
             avisos.append(f"«{origen or 'sin nombre'}» no es una imagen "
                           f"({', '.join(EXT_REPASO)})")
             continue
+        # UNA NOTA LLEVA COMO MUCHO `repaso.MAX_IMAGENES` (R3 del analisis del
+        # 13-10-2026): lo que pase de ahi la nota lo tiraria igual, y sin tope
+        # una sola peticion podia llenar el disco del proyecto.
+        if len(guardadas) >= _repaso().MAX_IMAGENES:
+            avisos.append(f"«{origen}» no se ha subido: una nota lleva como "
+                          f"mucho {_repaso().MAX_IMAGENES} imágenes")
+            continue
         contenido = await valor.read()
         if len(contenido) > MAX_BYTES_REPASO:
             avisos.append(f"«{origen}» pesa "
                           f"{len(contenido) / 1024 / 1024:.1f} MB y el tope son "
                           f"{MAX_BYTES_REPASO // 1024 // 1024}")
+            continue
+        # LA MISMA REVISION QUE LAS REFERENCIAS DEL ESTILO (M4): una imagen rota
+        # se aceptaba y el agente del repaso se encontraba con ella al aplicar
+        motivo = await _en_hilo(_motivo_para_no_aceptar, contenido, origen, False)
+        if motivo:
+            avisos.append(motivo)
             continue
         nombre = f"{uuid.uuid4().hex[:12]}{extension}"
         await _en_hilo(_escribir_bytes, os.path.join(carpeta, nombre), contenido)
@@ -7254,6 +7267,14 @@ async def _leer_logo_subido(peticion):
     if not contenido or len(contenido) > MAX_BYTES_LOGO:
         raise ErrorApi(400, f"el logo tiene que pesar menos de "
                             f"{MAX_BYTES_LOGO // 1024 // 1024} MB")
+    # LA MISMA REVISION QUE LAS REFERENCIAS DEL ESTILO (M4, R3 del analisis del
+    # 13-10-2026): un logo roto se aceptaba y el montaje reventaba al 97 %,
+    # dejando un MP4 de 0 bytes
+    motivo = await _en_hilo(_motivo_para_no_aceptar, contenido,
+                            os.path.basename(str(getattr(fichero, "filename", "") or "logo")),
+                            False)
+    if motivo:
+        raise ErrorApi(400, motivo)
     return contenido, extension
 
 
@@ -7332,20 +7353,8 @@ async def subir_logo(pid: str, peticion: Request):
     ni una imagen ni un clip.
     """
     ctx = await _en_hilo(contexto, pid)
-    try:
-        formulario = await peticion.form()
-    except Exception as fallo:                              # noqa: BLE001
-        raise ErrorApi(400, f"multipart ilegible: {fallo}")
-    fichero = formulario.get("logo")
-    if not hasattr(fichero, "read"):
-        raise ErrorApi(400, "manda la imagen en el campo «logo»")
-    extension = os.path.splitext(str(getattr(fichero, "filename", "") or ""))[1].lower()
-    if extension not in EXT_LOGO:
-        raise ErrorApi(400, f"el logo tiene que ser {', '.join(EXT_LOGO)}")
-    contenido = await fichero.read()
-    if not contenido or len(contenido) > MAX_BYTES_LOGO:
-        raise ErrorApi(400, f"el logo tiene que pesar menos de "
-                            f"{MAX_BYTES_LOGO // 1024 // 1024} MB")
+    # la MISMA lectura que el logo suelto: eran dos copias, y solo una revisaba
+    contenido, extension = await _leer_logo_subido(peticion)
     return await _en_hilo(_poner_logo_subido, ctx, contenido, extension)
 
 
@@ -10398,8 +10407,13 @@ MIN_LADO_APORTADA = 64
 MAX_PIXELES_APORTADA = 60_000_000
 
 
-def _motivo_para_no_aceptar(contenido, origen):
+def _motivo_para_no_aceptar(contenido, origen, de_estilo=True):
     """Por que esta imagen NO vale como referencia de estilo, o None si vale.
+
+    `de_estilo=False` (el logo y las imagenes del repaso, R3 del analisis del
+    13-10-2026) mira solo lo que rompe algo: que se pueda abrir de punta a punta
+    y que no sea gigante. Un logo de texto de 200×40 o una muestra de un solo
+    color («este rojo») son legitimos ahi, aunque no sirvan para copiar un estilo.
 
     SE MIRA AL SUBIRLA, que es cuando se puede decir. Antes solo se miraban la
     extension y el peso: un «.jpg» que no era una imagen salia como miniatura
@@ -10431,11 +10445,13 @@ def _motivo_para_no_aceptar(contenido, origen):
                 return (f"«{origen}» mide {ancho}×{alto} px: es demasiado grande "
                         f"(como mucho {MAX_PIXELES_APORTADA // 1_000_000} "
                         f"megapíxeles)")
-            if min(ancho, alto) < MIN_LADO_APORTADA:
+            if de_estilo and min(ancho, alto) < MIN_LADO_APORTADA:
                 return (f"«{origen}» mide {ancho}×{alto} px: es demasiado pequeña "
                         f"para copiar un estilo de ella (mínimo "
                         f"{MIN_LADO_APORTADA} px de lado)")
             imagen.load()
+            if not de_estilo:
+                return None
             # CON LA TRANSPARENCIA: un logo negro sobre fondo transparente tiene
             # todo el dibujo en el canal alfa, y no es de un solo color
             muestra = imagen.convert("RGBA")

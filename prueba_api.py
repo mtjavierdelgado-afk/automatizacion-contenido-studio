@@ -5826,6 +5826,37 @@ def probar_lo_de_v2h():
     BITACORA.RUTA_GLOBAL = os.path.join(base, "_bitacora_global.jsonl")
     servidor.fijar_raiz_proyectos(base)
     reales = {}
+    import threading                                          # noqa: PLC0415
+    import uvicorn                                            # noqa: PLC0415
+    puerto = puerto_libre()
+    motor = uvicorn.Server(uvicorn.Config(servidor.app, host="127.0.0.1", port=puerto,
+                                          log_level="error", lifespan="off"))
+    hilo = threading.Thread(target=motor.run, daemon=True)
+    hilo.start()
+    url = f"http://127.0.0.1:{puerto}"
+    for _ in range(100):
+        try:
+            requests.get(f"{url}/api/salud", timeout=2)
+            break
+        except requests.RequestException:
+            time.sleep(0.1)
+
+    def pedir(metodo, ruta, **extra):
+        # una conexion por peticion: tras un 500 sin capturar el servidor corta
+        # la conexion y la siguiente peticion de la sesion saldria «reset»
+        extra.setdefault("headers", {})["Connection"] = "close"
+        respuesta = requests.request(metodo, url + ruta, timeout=60, **extra)
+        try:
+            return respuesta.status_code, respuesta.json()
+        except ValueError:
+            return respuesta.status_code, None
+
+    from PIL import Image                                     # noqa: PLC0415
+
+    def png(tam=(200, 40), color=(255, 0, 0, 255)):
+        crudo = io.BytesIO()
+        Image.new("RGBA", tam, color).save(crudo, "PNG")
+        return crudo.getvalue()
 
     def cambiar(nombre, valor):
         reales.setdefault(nombre, getattr(servidor, nombre))
@@ -5863,7 +5894,38 @@ def probar_lo_de_v2h():
         ok((servidor.contexto(pid).estado.params("brief") or {}).get("duracion_s") != 77,
            "R2: y el 409 no deja escritos los params que traia")
         setattr(servidor, "_trabajo_de_cadena", reales.pop("_trabajo_de_cadena"))
+
+        # R3 · EL LOGO Y LAS IMAGENES DEL REPASO SE REVISAN AL SUBIRLOS. Un logo
+        # roto se aceptaba y el montaje reventaba al 97 % con un MP4 de 0 bytes.
+        pid = Proyecto.crear(base, "r3 subidas").id
+        Estado(servidor.contexto(pid).proyecto)
+        roto = png()[:60]                                # una PNG cortada
+        codigo, datos = pedir("POST", f"/api/proyectos/{pid}/logo",
+                              files={"logo": ("logo.png", roto, "image/png")})
+        igual(codigo, 400, "R3: un logo que no se puede abrir da 400 al subirlo")
+        ok(not (servidor.contexto(pid).estado.params("render") or {}).get("logo"),
+           "R3: y no queda puesto en el video")
+        codigo, datos = pedir("POST", "/api/logos",
+                              files={"logo": ("logo.png", b"no soy una imagen", "image/png")})
+        igual(codigo, 400, "R3: el logo suelto (borrador) se revisa igual")
+        codigo, datos = pedir("POST", "/api/logos",
+                              files={"logo": ("logo.png", png((200, 40)), "image/png")})
+        igual(codigo, 201, "R3: un logo de texto, ancho y bajo, de un color, sigue valiendo")
+        codigo, datos = pedir("POST", f"/api/proyectos/{pid}/repaso/imagenes",
+                              files={"f": ("nota.png", roto, "image/png")})
+        igual(codigo, 400, "R3: una imagen rota en una nota del repaso da 400")
+        maximo = servidor._repaso().MAX_IMAGENES
+        codigo, datos = pedir("POST", f"/api/proyectos/{pid}/repaso/imagenes",
+                              files=[("f", (f"n{i}.png", png((300, 200), (i * 20, 90, 90, 255)),
+                                            "image/png")) for i in range(maximo + 3)])
+        igual(codigo, 201, "R3: una tanda de imagenes del repaso se sube")
+        igual(len((datos or {}).get("imagenes") or []), maximo,
+              f"R3: pero como mucho {maximo}, las que caben en una nota")
+        ok(any("como mucho" in a for a in (datos or {}).get("avisos") or []),
+           "R3: y dice por que no subio las demas")
     finally:
+        motor.should_exit = True
+        hilo.join(10)
         for nombre, valor in reales.items():
             setattr(servidor, nombre, valor)
         servidor.fijar_raiz_proyectos(raiz_antes)

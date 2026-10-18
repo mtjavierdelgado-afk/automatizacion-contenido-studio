@@ -15542,7 +15542,9 @@ def _por_guionista(fn, *args, **kwargs):
         raise ErrorApi(fallo.codigo, str(fallo)) from None
 
 
-ORDENES_PARRILLA = ("vistas", "interaccion", "hasta_el_final", "visto_medio")
+#: Los de `publicar.ORDENES` (rama publicar-redes-2): «vista_entera» (TikTok, hasta
+#: el final) y «media_vista» (YouTube, visto de media).
+ORDENES_PARRILLA = ("vistas", "interaccion", "vista_entera", "media_vista")
 
 
 def _posts_de_parrilla(cid, peticion, dias=30, por="vistas", cuantos=10):
@@ -15564,6 +15566,7 @@ def _posts_de_parrilla(cid, peticion, dias=30, por="vistas", cuantos=10):
     if fuente == "lo_que_funciono":
         r = lo_que_funciono(raiz_proyectos(), videos, None, dias, None, por, cuantos)
         posts = list(r.get("posts") or [])
+        por = r.get("por") or por     # el que de verdad se usó
     else:
         # SIN `publicar-redes-2`: el resumen de Resultados, ordenado por vistas
         r = PUBLICAR.resultados(raiz_proyectos(), videos, cid, dias)
@@ -15777,6 +15780,9 @@ def main():
             PASOS_MODULOS.login_cli.olvidar_todos()
             # y una charla a medias deja otro node contestando a nadie
             PASOS_MODULOS.asistente.olvidar_todas()
+        # y las conversaciones de la Parrilla (parrilla-2)
+        if GUIONISTA is not None:
+            GUIONISTA.olvidar_todos()
 
 
 if __name__ == "__main__":

@@ -35,6 +35,8 @@ sys.path.insert(0, os.path.join(RAIZ, "pasos"))
 CARPETA = tempfile.mkdtemp(prefix="parrilla_prueba_")
 os.environ["ESTUDIO_SECRETOS"] = os.path.join(CARPETA, "secretos")
 os.environ["ESTUDIO_BITACORA_GLOBAL"] = os.path.join(CARPETA, "bitacora_global.jsonl")
+# las carpetas aisladas del chat, dentro de la de la prueba (no en el /tmp de verdad)
+os.environ["ESTUDIO_GUIONISTA_AISLADO"] = os.path.join(CARPETA, "aislado_chat")
 os.environ.pop("ESTUDIO_SIMULAR", None)
 
 import guias  # noqa: E402
@@ -923,12 +925,13 @@ def prueba_parrilla_2():
 
         seccion("8] desde mis resultados")
         posts = [{"pid": "v1", "nombre": "Cumple con consola", "red": "tiktok", "dia": "sábado", "hora": "19:00",
-                  "metricas": {"vistas": 15000, "me_gusta": 900, "hasta_el_final": 0.42},
+                  "metricas": {"vistas": 15000, "me_gusta": 900, "vista_entera": 0.42, "media_vista": 0.8},
                   "interaccion": 0.07, "descripcion": "Así fue el cumple", "material": "Un cumple con FIFA"},
                  {"pid": "v2", "nombre": "Karaoke", "red": "youtube", "metricas": {"vistas": 300}}]
         texto = P.resumen_de_posts(posts)
         ok("1. «Cumple con consola» — TikTok, publicado sábado 19:00: 15000 vistas" in texto, "cada vídeo, con sus cifras")
-        ok("interacción 7.0 %" in texto and "vieron hasta el final 42 %" in texto, "interacción y retención")
+        ok("interacción 7.0 %" in texto and "vieron hasta el final 42 %" in texto and "visto de media 80 %" in texto,
+           "interacción y retención, con los nombres de publicar-redes-2 (vista_entera, media_vista)")
         ok("De qué iba (material del vídeo): Un cumple con FIFA" in texto, "y de qué iba")
         pedidos.clear()
         ok(lanza(P.lanzar, raiz, "c1", "resultados", {"posts": [], "cuantos": 2, "modo": "adaptar"}) is not None,
@@ -974,7 +977,8 @@ def prueba_parrilla_2():
            and "Bash" in primero["vetadas"], "con todo vetado")
         igual(primero["permitidas"], (), "y nada permitido")
         igual(primero["contenido"], [], "en una carpeta aislada vacía")
-        ok(os.path.join("parrilla", "aislado") in primero["cwd"], "que no es la de la Parrilla")
+        ok(not os.path.abspath(primero["cwd"]).startswith(os.path.abspath(raiz)),
+           "fuera de los proyectos (el CLI no carga ningún CLAUDE.md de arriba)")
         igual(primero["modelo"], "sonnet", "con el modelo elegido")
         t = v["turnos"][-1]
         igual([g["codigo"] for g in t["guiones"]], ["C1", "C2"], "los dos guiones de la respuesta se detectan")
@@ -986,6 +990,10 @@ def prueba_parrilla_2():
         igual(segundo["extra"], ["--resume", "sesion-1"], "el segundo sigue la sesión")
         ok("WebSearch" in segundo["permitidas"] and "WebFetch" in segundo["permitidas"], "con internet, si se pide")
         ok("WebSearch" not in segundo["vetadas"] and "Bash" in segundo["vetadas"], "y solo eso se abre")
+        ok("WebFetch(domain:127.0.0.1)" in segundo["vetadas"] and "WebFetch(domain:localhost)" in segundo["vetadas"],
+           "con el propio servidor vetado a WebFetch (su API no pide login desde dentro)")
+        ok("Read(//proc/**)" in segundo["vetadas"] and any("claves.json" in v for v in segundo["vetadas"]),
+           "y con capturas, los vetos de secretos del asistente")
         ok(len(segundo["contenido"]) == 1 and segundo["contenido"][0].endswith(".png"), "la captura, en su carpeta")
         lectura = [x for x in segundo["permitidas"] if x.startswith("Read(")]
         ok(len(lectura) == 1 and os.path.abspath(segundo["cwd"]).replace("\\", "/").lstrip("/") in lectura[0],
@@ -1004,7 +1012,8 @@ def prueba_parrilla_2():
         ok(lanza(chat.guardar_guiones, 2) is not None, "y otra vez ya no hay nada")
         ok(lanza(chat.guardar_guiones, 1) is not None, "un turno tuyo no tiene guiones que guardar")
 
-        ok(lanza(chat.escribir, "x", imagenes=[("a.png", b"GIF89a")]) is not None, "una captura falsa se rechaza")
+        ok(lanza(chat.escribir, "x", imagenes=[("a.webp", b"RIFF0000WAVEfmt ")]) is not None,
+           "un WAV llamado .webp se rechaza (el tipo se mira en los bytes)")
         ok(lanza(chat.escribir, "x", imagenes=[("a.exe", b"MZ")]) is not None, "lo que no es imagen también")
         ok(lanza(chat.escribir, "x", imagenes=[("a.png", png)] * (G.MAX_IMAGENES + 1)) is not None,
            f"y más de {G.MAX_IMAGENES} capturas")
@@ -1061,12 +1070,84 @@ def prueba_parrilla_2():
             igual(len(G.listar(raiz, "poda")), 3, "solo se guardan las últimas conversaciones")
         finally:
             G.MAX_CHATS = antes
+
+        seccion("9b] lo de la revisión independiente del chat")
+        # la marca cambiada a mitad de la conversación se le vuelve a dar
+        c = G.nueva(raiz, "c1")
+        c.escribir("hola", en_hilo=False)
+        c.escribir("sigo", en_hilo=False)
+        ok("HA CAMBIADO" not in llamadas[-1]["mensaje"], "con la misma marca, no se repite")
+        time.sleep(1.1)
+        P.guardar_marca(raiz, "c1", {"tono": "serio"})
+        c.escribir("y ahora", en_hilo=False)
+        ok("LA MARCA DEL PROYECTO HA CAMBIADO" in llamadas[-1]["mensaje"] and "serio" in llamadas[-1]["mensaje"],
+           "si se cambia a mitad, la nueva va en el siguiente mensaje")
+
+        # una conversación borrada mientras contesta no vuelve
+        def doble_espera(*args, **kwargs):
+            time.sleep(0.5)
+            return doble(*args, **kwargs)
+        G.EJECUTAR = doble_espera
+        b = G.nueva(raiz, "borrar")
+        b.escribir("hola")
+        G.borrar(raiz, "borrar", b.id)
+        time.sleep(1)
+        ok(not os.path.exists(b.ruta()), "una conversación borrada mientras contesta no vuelve al acabar")
+        G.EJECUTAR = doble
+
+        # doble clic en «Guardar»: una sola vez
+        d = G.nueva(raiz, "c1")
+        d.escribir("quiero dos", en_hilo=False)
+        n_turno = d.turnos[-1]["n"]
+        original = P._anadir_textos
+
+        def lento(*a, **k):
+            time.sleep(0.3)
+            return original(*a, **k)
+        P._anadir_textos = lento
+        import threading as _hilos
+        resultados_hilos = []
+
+        def guardar():
+            try:
+                resultados_hilos.append(len(d.guardar_guiones(n_turno, [0])["guiones"]))
+            except G.ErrorGuionista:
+                resultados_hilos.append("ya")
+        try:
+            hilos = [_hilos.Thread(target=guardar) for _ in range(2)]
+            [h.start() for h in hilos]
+            [h.join() for h in hilos]
+        finally:
+            P._anadir_textos = original
+        igual(sorted(map(str, resultados_hilos)), ["1", "ya"], "dos «Guardar» a la vez guardan el guion una sola vez")
+
+        # la memoria no crece sin fin
+        antes_olvidar = G.OLVIDAR_QUIETA_S
+        G.OLVIDAR_QUIETA_S = 0
+        try:
+            vacia = G.nueva(raiz, "c1")
+            time.sleep(0.05)
+            G.nueva(raiz, "c1")
+            with G._LOCK:
+                ok((vacia.cid, vacia.id) not in G._CHATS, "las conversaciones vacías o quietas se sueltan de la memoria")
+        finally:
+            G.OLVIDAR_QUIETA_S = antes_olvidar
+        with G._LOCK:
+            G._CHATS.clear()
+        G.listar(raiz, "c1")
+        with G._LOCK:
+            igual(len(G._CHATS), 0, "listar no las mete todas en memoria")
     finally:
         G.EJECUTAR = None
 
     textos = G.guiones_en("hola\n=== GUION ===\n" + guion_simple("A", "a") + "\n=== GUION ===\n"
                           + guion_simple("B", "b") + "\n=== FIN ===\nfin\n=== GUION ===\nsin formato")
-    igual([g["codigo"] for _t, g in textos], ["A", "B"], "guiones_en: sin FIN, hasta el siguiente; lo que no es guion no cuenta")
+    igual([g["codigo"] for _t, g, _b in textos], ["A", "B"], "guiones_en: sin FIN, hasta el siguiente; lo que no es guion no cuenta")
+    textos = G.guiones_en("=== GUION ===\nEsquema: 1) gancho 2) prueba\n=== FIN ===\n=== GUION ===\n"
+                          + guion_simple("Z", "z") + "\n=== FIN ===")
+    igual([(g["codigo"], b) for _t, g, b in textos], [("Z", 1)],
+          "un esquema entre marcas no es guion, y el guion sabe que es el bloque 2 (para su botón)")
+    igual(G.tipo_de_imagen(b"\xff\xd8\xff\xe0"), ".jpg", "una JPEG se reconoce por sus bytes aunque se llame .png")
 
     os.environ["ESTUDIO_SIMULAR"] = "1"
     try:

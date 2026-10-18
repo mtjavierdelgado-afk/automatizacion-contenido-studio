@@ -307,10 +307,13 @@ def resumen_de_posts(posts, maximo=15):
                 cifras.append(f"{int(m[clave])} {nombre}")
         if isinstance(p.get("interaccion"), (int, float)):
             cifras.append(f"interacción {p['interaccion'] * 100:.1f} %")
-        if isinstance(m.get("hasta_el_final"), (int, float)):
-            cifras.append(f"vieron hasta el final {m['hasta_el_final'] * 100:.0f} %")
-        if isinstance(m.get("visto_medio"), (int, float)):
-            cifras.append(f"visto de media {m['visto_medio'] * 100:.0f} %")
+        # los nombres de `publicar.RETENCION` (rama publicar-redes-2)
+        if isinstance(m.get("vista_entera"), (int, float)):
+            cifras.append(f"vieron hasta el final {m['vista_entera'] * 100:.0f} %")
+        if isinstance(m.get("media_vista"), (int, float)):
+            cifras.append(f"visto de media {m['media_vista'] * 100:.0f} %")
+        if isinstance(m.get("tiempo_medio_s"), (int, float)):
+            cifras.append(f"tiempo medio visto {m['tiempo_medio_s']:.1f} s")
         cuando = " ".join(x for x in (p.get("dia"), p.get("hora")) if x)
         cabeza = (f"{i}. «{p.get('nombre') or p.get('pid')}» — {nombres.get(p.get('red'), p.get('red') or '?')}"
                   + (f", publicado {cuando}" if cuando else "") + (": " + ", ".join(cifras) if cifras else ""))

@@ -19072,7 +19072,7 @@ const PAR = {
   resultados: null, resultadosCargando: false, resultadosElegidos: null, resultadosDias: 30,
   resultadosPor: 'vistas', resultadosPeticion: '',
   chat: null, chats: null, chatTexto: '', chatWeb: false, chatResultados: false, chatModelo: '',
-  chatCapturas: [], chatReloj: null, chatEnviando: false, chatsInfo: null,
+  chatCapturas: [], chatReloj: null, chatEnviando: false, chatsInfo: null, chatScroll: null,
 };
 const ESTADOS_GUION = { pendiente: 'pendiente', usado: 'usado', publicado: 'publicado' };
 const CLASE_GUION = { pendiente: '', usado: 'ejecutando', publicado: 'ok' };
@@ -19158,7 +19158,8 @@ function elegirProyectoParrilla(cid) {
   // lo de parrilla-2 es de cada proyecto: se vuelve a pedir
   pararChatParrilla();
   Object.assign(PAR, { marca: null, marcaBorrador: null, resultados: null, resultadosElegidos: null,
-    chat: null, chats: null, chatTexto: '', chatCapturas: [] });
+    chat: null, chats: null, chatTexto: '', chatCapturas: [], marcaCargando: false,
+    resultadosCargando: false, chatScroll: null });
   if (PAR.seccion === 'ficha') PAR.seccion = 'parrilla';
   try { localStorage.setItem('estudio.parrilla.proyecto', cid); } catch (e) { /* sin almacén */ }
   cargarParrilla();
@@ -19350,7 +19351,8 @@ function seccionListaParrilla() {
     const bloque = h('div', { clase: 'bloque matriz-parrilla' });
     const origen = m.origen || {};
     const deDonde = { subir: origen.fichero ? `de «${origen.fichero}»` : 'de un documento', pegar: 'pegada',
-      pedir: 'escrita por Claude', escribir: 'escrita a mano', vacia: '' }[origen.tipo] || '';
+      pedir: 'escrita por Claude', escribir: 'escrita a mano', vacia: '',
+      chat: 'de una conversación con Claude', resultados: 'desde tus resultados' }[origen.tipo] || '';
     bloque.appendChild(h('div', { clase: 'fila cab-matriz' },
       h('h3', {}, m.nombre),
       h('span', { clase: 'meta' }, `${cuantosGuiones((m.guiones || []).length)}${deDonde ? ` · ${deDonde}` : ''}`
@@ -19846,10 +19848,16 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
 async function cargarMarcaParrilla() {
   if (PAR.marcaCargando) return;
   PAR.marcaCargando = true;
+  /* LA DE OTRO PROYECTO NO SE QUEDA: si se cambia de proyecto mientras llega,
+     «Guardar la marca» escribía la del cliente A en el B (revisión 18-10). */
+  const cid = PAR.cid;
   try {
-    PAR.marca = await pedir(rutaProyectoParrilla('/marca'));
+    const marca = await pedir(rutaProyectoParrilla('/marca'));
+    if (cid !== PAR.cid) return;
+    PAR.marca = marca;
     PAR.marcaBorrador = Object.assign({}, PAR.marca.marca || {});
   } catch (e) {
+    if (cid !== PAR.cid) return;
     toast(`no se ha podido leer la marca: ${e.message}`, true);
     PAR.marca = { marca: {}, campos: [] };
     PAR.marcaBorrador = {};
@@ -19922,12 +19930,16 @@ async function marcaDesdeGuionParrilla(g) {
 async function cargarResultadosParrilla() {
   if (PAR.resultadosCargando) return;
   PAR.resultadosCargando = true;
+  const cid = PAR.cid;
   try {
-    PAR.resultados = await pedir(`${rutaProyectoParrilla('/resultados')}?${consulta({
+    const resultados = await pedir(`${rutaProyectoParrilla('/resultados')}?${consulta({
       dias: PAR.resultadosDias, por: PAR.resultadosPor })}`);
+    if (cid !== PAR.cid) return;
+    PAR.resultados = resultados;
     // de fábrica, los cinco primeros
     PAR.resultadosElegidos = new Set((PAR.resultados.posts || []).slice(0, 5).map(p => p.clave));
   } catch (e) {
+    if (cid !== PAR.cid) return;
     PAR.resultados = { disponible: false, posts: [], motivo: e.message };
     PAR.resultadosElegidos = new Set();
   }
@@ -19956,8 +19968,8 @@ function bloqueResultadosParrilla(bloque) {
   const orden = h('select', { 'aria-label': 'Ordenar por', disabled: r.fuente === 'resumen' ? true : null,
     title: r.fuente === 'resumen' ? 'Ordenar por interacción o retención llega con la rama publicar-redes-2' : '',
     onchange: ev => { PAR.resultadosPor = ev.target.value; PAR.resultados = null; pintarModulo(); } },
-  [['vistas', 'por vistas'], ['interaccion', 'por interacción'], ['hasta_el_final', 'por «hasta el final» (TikTok)'],
-    ['visto_medio', 'por «visto de media» (YouTube)']]
+  [['vistas', 'por vistas'], ['interaccion', 'por interacción'], ['vista_entera', 'por «hasta el final» (TikTok)'],
+    ['media_vista', 'por «visto de media» (YouTube)']]
     .map(([v, t]) => h('option', { value: v, selected: PAR.resultadosPor === v ? true : null }, t)));
   bloque.appendChild(h('div', { clase: 'fila filtros-parrilla' }, periodo, orden));
   if (!r.disponible) {
@@ -19972,7 +19984,8 @@ function bloqueResultadosParrilla(bloque) {
     const m = p.metricas || {};
     const datos = [`${cifraCorta(m.vistas)} vistas`];
     if (Number.isFinite(p.interaccion)) datos.push(`interacción ${(p.interaccion * 100).toFixed(1)} %`);
-    if (Number.isFinite(m.hasta_el_final)) datos.push(`hasta el final ${Math.round(m.hasta_el_final * 100)} %`);
+    if (Number.isFinite(m.vista_entera)) datos.push(`hasta el final ${Math.round(m.vista_entera * 100)} %`);
+    if (Number.isFinite(m.media_vista)) datos.push(`visto de media ${Math.round(m.media_vista * 100)} %`);
     if (p.dia || p.hora) datos.push([p.dia, p.hora].filter(Boolean).join(' '));
     bloque.appendChild(h('label', { clase: 'plano fila post-parrilla' },
       h('input', { type: 'checkbox', checked: elegidos.has(p.clave) ? true : null,
@@ -20000,15 +20013,20 @@ function rutaChatParrilla(resto) {
 }
 
 async function cargarChatsParrilla() {
+  const cid = PAR.cid;
   try {
     const r = await pedir(rutaChatParrilla());
+    if (cid !== PAR.cid) return;
     PAR.chats = r.chats || [];
     PAR.chatsInfo = r;
     if (!PAR.chatModelo) PAR.chatModelo = r.modelo || 'opus';
     if (!PAR.chat && PAR.chats.length) {
-      PAR.chat = await pedir(rutaChatParrilla(`/${encodeURIComponent(PAR.chats[0].id)}`));
+      const chat = await pedir(rutaChatParrilla(`/${encodeURIComponent(PAR.chats[0].id)}`));
+      if (cid !== PAR.cid || PAR.chat) return;
+      PAR.chat = chat;
     }
   } catch (e) {
+    if (cid !== PAR.cid) return;
     PAR.chats = [];
     toast(`no se han podido leer las conversaciones: ${e.message}`, true);
   }
@@ -20092,15 +20110,17 @@ function mensajesChatParrilla() {
           burbuja.appendChild(h('div', { clase: 'texto-chat' }, trozo.texto));
           return;
         }
-        const info = (t.guiones || [])[n];
-        const i = n;
+        /* POR SU BLOQUE, no por orden: un esquema entre marcas no es guion
+           y el botón salía debajo de él (revisión 18-10). */
+        const info = (t.guiones || []).find(x => (Number.isInteger(x.bloque) ? x.bloque : x.i) === n);
         n += 1;
+        const i = info ? info.i : -1;
         const guardado = info && (t.guardados || {})[String(i)];
         burbuja.appendChild(h('pre', { clase: 'guion-en-chat' }, trozo.texto));
         if (info) {
           burbuja.appendChild(h('div', { clase: 'fila guardar-chat' },
             guardado
-              ? h('span', { clase: 'pastilla ok' }, '✓ en la Parrilla')
+              ? h('span', { clase: 'pastilla ok' }, guardado === '…' ? 'guardando…' : '✓ en la Parrilla')
               : h('button', { clase: 'mini primario', onclick: () => guardarGuionesChatParrilla(t.n, [i]) },
                 `Guardar «${recortar([info.codigo, info.titulo].filter(Boolean).join(' — ') || 'el guion', 40)}» en la Parrilla`),
             h('span', { clase: 'meta' }, [info.uso, info.formato, info.duracion_s ? `${info.duracion_s} s` : '',
@@ -20115,8 +20135,15 @@ function mensajesChatParrilla() {
     }
     caja.appendChild(burbuja);
   });
-  // abajo del todo, como un chat
-  setTimeout(() => { caja.scrollTop = caja.scrollHeight; }, 0);
+  /* ABAJO DEL TODO, como un chat, salvo que se haya subido a leer: entonces
+     se queda donde estaba aunque llegue algo (antes saltaba cada 1,5 s). */
+  caja.addEventListener('scroll', () => {
+    PAR.chatScroll = { abajo: caja.scrollHeight - caja.scrollTop - caja.clientHeight < 40, top: caja.scrollTop };
+  });
+  setTimeout(() => {
+    const s = PAR.chatScroll;
+    caja.scrollTop = !s || s.abajo ? caja.scrollHeight : s.top;
+  }, 0);
   return caja;
 }
 
@@ -20198,9 +20225,12 @@ async function enviarChatParrilla() {
     datos.append('resultados', PAR.chatResultados ? '1' : '0');
     datos.append('modelo', PAR.chatModelo || 'opus');
     PAR.chatCapturas.forEach(c => datos.append('capturas', c, c.name || 'captura.png'));
+    const enviadas = PAR.chatCapturas.slice();
     PAR.chat = await pedir(rutaChatParrilla(`/${encodeURIComponent(PAR.chat.id)}/mensajes`), { method: 'POST', cuerpo: datos });
-    PAR.chatTexto = '';
-    PAR.chatCapturas = [];
+    // lo escrito o adjuntado MIENTRAS se subía se queda para el siguiente
+    if (PAR.chatTexto.trim() === texto) PAR.chatTexto = '';
+    PAR.chatCapturas = PAR.chatCapturas.filter(c => !enviadas.includes(c));
+    PAR.chatScroll = null;
     if (!(PAR.chats || []).some(c => c.id === PAR.chat.id)) {
       PAR.chats = [{ id: PAR.chat.id, titulo: PAR.chat.titulo, tocada: PAR.chat.tocada }].concat(PAR.chats || []);
     }

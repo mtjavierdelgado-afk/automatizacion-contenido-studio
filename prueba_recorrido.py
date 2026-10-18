@@ -1658,6 +1658,65 @@ def cancelar_y_doble_toque_en_el_taller(navegador, datos):
        "con el aviso «cancelado», no un error")
     pg.p.unroute("**/api/presets-light/*/regenerar")
     pg.js("APP.light.feedback = {};")
+
+    # ---- las láminas: un 409 se queda en la ficha, y se avisa UNA vez
+    avisos_antes = len(pg.p.evaluate("() => window.__avisos || []"))
+    pg.p.route("**/api/presets-light/*/laminas", lambda ruta: ruta.fulfill(
+        status=409, content_type="application/json", body=_json.dumps({
+            "error": "ya se está preparando un cambio de este estilo",
+            "trabajo_id": "", "preparando": True}))
+        if ruta.request.method == "POST" else ruta.fallback())
+    pg.js(f"await accionLaminas(fichaLight('{preset}'), {{ accion: 'quitar', lamina: 'cara' }});")
+    avisos = pg.p.evaluate("() => window.__avisos || []")[avisos_antes:]
+    igual(sum(1 for a in avisos if "preparando un cambio" in a), 1,
+          "un 409 de las láminas sin trabajo avisa UNA vez (antes: dos)")
+    pg.p.unroute("**/api/presets-light/*/laminas")
+    sondeos["n"] = 0
+    pg.p.route("**/api/presets-light/*/laminas", lambda ruta: ruta.fulfill(
+        status=409, content_type="application/json", body=_json.dumps({
+            "error": "este estilo se está generando", "trabajo_id": "falso",
+            "cancelando": False, "segundos": 3}))
+        if ruta.request.method == "POST" else ruta.fallback())
+    pg.js(f"APP.trabajos[CLAVE_LIGHT] = null; soltarSeguimiento(CLAVE_LIGHT);"
+          f"await accionLaminas(fichaLight('{preset}'), {{ accion: 'quitar', lamina: 'cara' }});")
+    igual(pg.p.evaluate("() => APP.light.vista"), "preset",
+          "un 409 de las láminas con su trabajo NO salta a «generando»: se sigue ahí")
+    igual(pg.p.evaluate("() => (APP.light.trabajoLaminas || {}).id || ''"), "falso",
+          "y se sigue en las propias láminas")
+    pg.p.unroute("**/api/presets-light/*/laminas")
+    fin = time.time() + 20
+    while time.time() < fin and pg.p.evaluate("() => !!APP.light.trabajoLaminas"):
+        pg.p.wait_for_timeout(400)
+
+    # ---- con una lámina en camino, el botón no dice «Leyendo tu corrección…»
+    pg.js(f"irALight('preset', {{ abierto: '{preset}' }});"
+          "APP.light.feedback = { tono: 'más cercano' }; APP.light.lanzando = 'laminas';"
+          "repintarPieDeEstilo();")
+    ok(not pg.visible(".pie-light button", "Leyendo tu corrección"),
+       "con una lámina en camino, «Regenerar» no dice «Leyendo tu corrección…»")
+    ok(pg.p.evaluate("() => !!document.querySelector('.pie-light button.primario').disabled"),
+       "pero sí está apagado")
+
+    # ---- la parte encadenada no se pierde si había una petición en camino
+    encadenadas = []
+
+    def regenerar_encadenada(ruta):
+        encadenadas.append(1)
+        ruta.fulfill(status=200, content_type="application/json",
+                     body=_json.dumps({"trabajo_id": "", "sin_cambios": True,
+                                       "aviso": "nada que rehacer"}))
+    pg.p.route("**/api/presets-light/*/regenerar", regenerar_encadenada)
+    pg.p.evaluate(f"() => {{ APP.light.cola = ['tono'];"
+                  f" alTerminarLight({{ estado: 'listo', resultado: {{ preset: '{preset}' }} }}); }}")
+    pg.p.wait_for_timeout(1500)
+    pg.p.evaluate("() => { APP.light.lanzando = null; }")
+    fin = time.time() + 10
+    while time.time() < fin and not encadenadas:
+        pg.p.wait_for_timeout(300)
+    igual(len(encadenadas), 1, "la parte que quedaba en cola se lanza al quedar libre "
+                               "(antes: se descartaba en silencio)")
+    pg.p.unroute("**/api/presets-light/*/regenerar")
+    pg.js("APP.light.feedback = {}; APP.light.lanzando = null;")
     pg.sin_errores("cancelar y doble toque en el taller")
     pg.cerrar()
 

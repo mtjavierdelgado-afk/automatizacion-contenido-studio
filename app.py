@@ -5970,6 +5970,8 @@ def _correr_notas_imagenes(avisar, ctx):
                 return avisar((hechos + min(1.0, max(0.0, float(valor or 0)))) / total,
                               f"{etiqueta} — {mensaje}" if mensaje else "",
                               publico or "")
+            # la cancelacion en el acto llega tambien a traves de este envoltorio
+            avisar_plano.al_cancelar = getattr(avisar, "al_cancelar", None)
             try:
                 _correr_paso(avisar_plano, ctx, "assets", [uid], {"rehacer": True})
             except Cancelado:
@@ -8771,6 +8773,8 @@ def _correr_receta(avisar, ctx, pestana, receta, tareas, modo,
                    f" de {max(total_publico, hechas_antes + indice)}"
                    f" · {ultimo['frase']}")
 
+        # la cancelacion en el acto llega tambien a traves de este envoltorio
+        avisar_tarea.al_cancelar = getattr(avisar, "al_cancelar", None)
         avisar_tarea(0.0, "")
         funcion, args = _que_hace(tarea["id"], ctx, receta, modo, solo_montar,
                                   sonido_prescindible)
@@ -11310,7 +11314,7 @@ def _correr_preset_light(avisar, ctx, encargo, solo, preset_id, retomar=False,
     """
     try:
         return _correr_preset_light_dentro(avisar, ctx, encargo, solo, preset_id,
-                                           retomar)
+                                           retomar, deshacer)
     except _Cancelado:
         _deshacer_params(ctx, deshacer)
         raise
@@ -11355,7 +11359,8 @@ def _deshacer_params(ctx, deshacer):
     return vueltos
 
 
-def _correr_preset_light_dentro(avisar, ctx, encargo, solo, preset_id, retomar):
+def _correr_preset_light_dentro(avisar, ctx, encargo, solo, preset_id, retomar,
+                                deshacer=None):
     """El cuerpo de `_correr_preset_light`."""
     light = _light()
     presets = _presets()
@@ -11409,6 +11414,11 @@ def _correr_preset_light_dentro(avisar, ctx, encargo, solo, preset_id, retomar):
 
     avisar(0.99, "guardando el preset", "Guardando tu estilo")
     ficha = _congelar_preset(ctx, encargo, preset_id)
+    # GUARDADO: lo que escribio el reparto ya esta en el preset. Una
+    # cancelacion que llegue ahora (el avisar del final la lanza) no puede
+    # devolver el taller a lo de antes: quedarian distintos al reves.
+    if deshacer:
+        deshacer.clear()
     salida["preset"] = ficha["id"]
     # EL PROYECTO (cliente) en el que se creo, si se creo dentro de uno. Solo
     # al crear: rehacer una parte no lo mueve de donde este.
@@ -11658,9 +11668,9 @@ def crear_preset_light(cuerpo: dict = Body(default=None)):
     # corria. Mirar que este libre, sembrar y lanzar van juntos (D3 del
     # analisis del 13-10-2026). Un taller recien creado es de esta peticion y
     # de nadie mas: no hace falta.
-    with (_cerrojo_de_cadena(ctx.id) if retomar else contextlib.nullcontext()):
-        if retomar:
-            _taller_libre(ctx)
+    # Con la misma espera corta que «Regenerar» (`_taller_reservado`): si otra
+    # peticion lo tiene, 409 en un segundo, no un boton colgado sin respuesta.
+    with (_taller_reservado(ctx) if retomar else contextlib.nullcontext()):
         if encargo.get("cliente"):
             # para ensenar el intento a medias DENTRO de su proyecto
             ctx.proyecto.config["cliente_del_taller"] = encargo["cliente"]

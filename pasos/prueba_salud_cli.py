@@ -15,6 +15,7 @@ herramientas del asistente. Sin red y sin CLI: dobles en los tres sitios.
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -235,11 +236,20 @@ def prueba_cancelar_corta_el_cli():
         except OSError:
             return []
 
+    avances = []
+    senales = []                       # (instante, grupo, senal) de verdad
+    killpg_real = os.killpg
+
+    def killpg_espia(grupo, senal):
+        senales.append((time.time(), grupo, senal))
+        return killpg_real(grupo, senal)
+
     def guia(avisar):
         # lo mismo que `estilo.generar_guia`; el latido, a proposito MUY lento:
         # lo que tiene que cortar es la cancelacion en el acto, no el latido
         avance = estadisticas.Avance(avisar, 0.05, 0.9, {"segundos": 60},
                                      "mirando", cadencia=30)
+        avances.append(avance)
         avance.arrancar()
         try:
             return cli_claude.ejecutar("hola", modelo="sonnet", esfuerzo="low",
@@ -248,6 +258,7 @@ def prueba_cancelar_corta_el_cli():
         finally:
             avance.parar()
 
+    os.killpg = killpg_espia
     try:
         gestor = GestorTrabajos()
         tid = gestor.lanzar("preset_light", guia)
@@ -272,6 +283,28 @@ def prueba_cancelar_corta_el_cli():
                   "el hijo que tenia la salida tambien muere (todo el grupo)")
         igual(salud_cli.de(dict(cli_claude.POR_DEFECTO)), salud_antes,
               "una cancelacion no apunta nada en la salud de la cuenta")
+
+        # NINGUNA SENAL A UN PROCESO QUE YA ACABO (revision del 18-10): el
+        # SIGKILL de la gracia y el latido no pueden ir a un pid ya recogido,
+        # que puede ser de otro
+        fin_trabajo = time.time()
+        time.sleep(cli_claude.GRACIA_SIGTERM_S + 0.8)
+        tardias = [x for x in senales if x[0] > fin_trabajo]
+        igual(tardias, [], "acabado el CLI, no se le manda ninguna senal mas "
+                           "(ni el SIGKILL de la gracia)")
+        igual([x[2] for x in senales], [signal.SIGTERM],
+              "solo el SIGTERM al grupo: el SIGKILL sobra si ya se fue")
+        avance = avances[0]
+        igual(avance.al_cancelar, None,
+              "y el avance ya no sabe matarlo: se suelta al volver communicate()")
+        comprobar(not (avance._hilo and avance._hilo.is_alive()),
+                  "el latido se para con la cancelacion")
+        hecho = subprocess.Popen(["true"], **cli_claude.GRUPO_PROPIO)
+        hecho.wait()
+        hecho._grupo_propio = True
+        antes_n = len(senales)
+        cli_claude.matar_arbol(hecho)
+        igual(len(senales), antes_n, "matar un proceso ya recogido no manda nada")
 
         # EL PLAZO VENCIDO SIGUE CORTANDO, y tambien con sus hijos
         with open(pids, "w", encoding="utf-8"):
@@ -306,7 +339,43 @@ def prueba_cancelar_corta_el_cli():
         cli_claude.matar_arbol(Quieto())
         comprobar(time.time() - antes < 0.5 and Quieto.matado,
                   "sin grupo propio se mata solo el proceso (nunca el grupo del Estudio)")
+
+        # LA CANCELACION EN EL ACTO ATRAVIESA LOS ENVOLTORIOS: `avisador`
+        # cambia la firma de avisar y se quedaba sin `al_cancelar`
+        def del_gestor(valor, mensaje="", publico=""):
+            return valor
+        del_gestor.al_cancelar = lambda fn: None
+        envuelto = estadisticas.avisador(del_gestor)
+        comprobar(envuelto is not del_gestor
+                  and envuelto.al_cancelar is del_gestor.al_cancelar,
+                  "estadisticas.avisador conserva el al_cancelar del gestor")
+
+        # UN DOBLE NUNCA RECIBE UNA SENAL DE GRUPO: su pid es inventado (999,
+        # o -1, que para killpg es «todos»). Lo que devuelva un Popen sustituido
+        # no se marca, y aunque viniera marcado no se le hace killpg.
+        class Doble:
+            pid = -1
+            _grupo_propio = True
+            matado = False
+
+            def poll(self):
+                return None
+
+            def kill(self):
+                Doble.matado = True
+        antes_n = len(senales)
+        cli_claude.matar_arbol(Doble())
+        igual(len(senales), antes_n, "a un doble (pid -1) no se le hace killpg")
+        comprobar(Doble.matado, "se le pide kill(), como antes")
+        original_popen = subprocess.Popen
+        subprocess.Popen = lambda *a, **k: Doble()
+        try:
+            igual(cli_claude._es_proceso_real(subprocess.Popen()), False,
+                  "lo que da un Popen sustituido no cuenta como proceso real")
+        finally:
+            subprocess.Popen = original_popen
     finally:
+        os.killpg = killpg_real
         cli_claude.localizar = original_localizar
 
 

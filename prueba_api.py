@@ -5845,7 +5845,9 @@ def probar_cancelar_en_el_taller():
 
     def guia(avisar, ctx, encargo):
         avisar(0.0, "")
-        if modo["guia"] == "cli":
+        if modo["guia"] == "rapida":
+            pass
+        elif modo["guia"] == "cli":
             # como el CLI: se registra para que lo corten, y no vuelve a avisar
             # hasta que «contesta»
             evento = threading.Event()
@@ -5963,6 +5965,51 @@ def probar_cancelar_en_el_taller():
         ctxb.gestor.esperar(escucha, 10)
         for t in ctxb.gestor.listar(activos=True) + ctxa.gestor.listar(activos=True):
             servidor.cancelar_trabajo(t["id"])
+        for t in ctxb.gestor.listar(activos=False):
+            ctxb.gestor.esperar(t["id"], 10)
+
+        # ---- cancelado DESPUES de guardar el preset: lo guardado se queda
+        ctxb.estado.actualizar_params("callouts", {"diseno": "clasico"})
+        modo["guia"] = "rapida"
+
+        def congelar_y_cancelar(ctx, encargo, preset_id=None):
+            for t in ctx.gestor.listar(activos=True):
+                ctx.gestor.cancelar(t["id"])      # llega justo tras guardar
+            return {"id": preset_id, "nombre": "x"}
+        servidor._congelar_preset = congelar_y_cancelar
+        respuestas = {}
+        pulsar(pb, respuestas, "tarde")
+        igual(ctxb.gestor.esperar(respuestas["tarde"][1], 10)["estado"], "cancelado",
+              "una cancelacion que llega tras guardar el preset acaba «cancelado»")
+        igual(ctxb.estado.params("callouts").get("diseno"), "sobrio",
+              "y NO deshace lo que el preset ya guardo (taller y preset iguales)")
+        servidor._congelar_preset = guardado["congelar"]
+
+        # ---- «Reintentar» tampoco espera sin tope al cerrojo del taller
+        cogido, soltar_cerrojo = threading.Event(), threading.Event()
+
+        def ocupar():
+            with servidor._cerrojo_de_cadena(ctxb.id):
+                cogido.set()
+                soltar_cerrojo.wait(10)
+        ocupa = threading.Thread(target=ocupar)
+        ocupa.start()
+        cogido.wait(5)
+        antes = time.time()
+        try:
+            servidor.crear_preset_light({
+                "nombre": "Estilo B", "idioma": "es", "estilo_prompt": "dibujo plano",
+                "estilo_imagenes": ["01_a.png", "02_b.png", "03_c.png"],
+                "tono_prompt": "serio pero cercano", "voz_prompt": "grave y pausada",
+                "taller": ctxb.id})
+            codigo = 202
+        except servidor.ErrorApi as fallo:
+            codigo = fallo.codigo
+        tarda = time.time() - antes
+        soltar_cerrojo.set()
+        ocupa.join(10)
+        igual(codigo, 409, "«Reintentar» con el taller ocupado contesta 409")
+        ok(tarda < 3.0, f"en un segundo, no esperando sin tope ({tarda:.1f} s)")
     finally:
         for evento in list(soltar.values()):
             evento.set()

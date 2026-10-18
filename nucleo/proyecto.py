@@ -394,6 +394,16 @@ def _mudar_rutas(dato, desde, hasta):
     return dato
 
 
+#: La forma de un id de proyecto: la que produce `identificador` (y la unica que
+#: `contexto()` de app.py acepta en una URL).
+ID_DE_CARPETA = re.compile(r"^[a-z0-9_]+$")
+
+#: Lo que mide como mucho un id nuevo (R5): con nombres de 250 caracteres la
+#: carpeta se creaba, pero «copia_<id>» y «<id>__<fecha>» pasaban de los 255
+#: que admite el sistema de ficheros y no se podia duplicar ni apartar.
+LARGO_MAXIMO_ID = 60
+
+
 def identificador(texto):
     """Convierte un nombre libre en un id de carpeta seguro y sin tildes."""
     plano = unicodedata.normalize("NFKD", str(texto))
@@ -422,6 +432,16 @@ class Proyecto:
             }
             escribir_json(self.ruta(NOMBRE_CONFIG), self.config)
         self.config.setdefault("id", identificador(os.path.basename(self.raiz)))
+        # EL ID ES LA CARPETA (R4 del analisis del 13-10-2026). Toda la API llega
+        # a un proyecto por su carpeta (`contexto(pid)` = raiz/pid); con el id
+        # leido de proyecto.json, una carpeta copiada a mano se listaba con el
+        # id del original, abria el original, servia sus imagenes y apartarla
+        # apartaba el original. Solo cuando el nombre de la carpeta es un id
+        # valido: si no lo es, no hay URL que llegue a ella de todas formas.
+        carpeta = os.path.basename(self.raiz)
+        if ID_DE_CARPETA.match(carpeta) and self.config["id"] != carpeta:
+            self.config.setdefault("id_anterior", self.config["id"])
+            self.config["id"] = carpeta
         self.config.setdefault("nombre", self.config["id"])
         self.id = self.config["id"]
 
@@ -489,6 +509,8 @@ class Proyecto:
             ficha = dict(config)
             ficha["raiz"] = carpeta
             ficha.setdefault("id", identificador(nombre))
+            if ID_DE_CARPETA.match(nombre):
+                ficha["id"] = nombre             # el id es la carpeta (R4)
             ficha.setdefault("nombre", ficha["id"])
             encontrados.append(ficha)
         encontrados.sort(key=lambda f: str(f.get("actualizado", "")), reverse=True)
@@ -656,13 +678,20 @@ class Proyecto:
         """Crea la carpeta del proyecto con un id unico y devuelve el Proyecto."""
         base = os.path.abspath(raiz_base)
         os.makedirs(base, exist_ok=True)
-        semilla = identificador(nombre)
+        semilla = identificador(nombre)[:LARGO_MAXIMO_ID].strip("_") or "proyecto"
         id_final = semilla
         contador = 2
-        while os.path.exists(os.path.join(base, id_final)):
-            id_final = f"{semilla}_{contador}"
-            contador += 1
-        raiz = os.path.join(base, id_final)
+        # LA CARPETA SE RESERVA CON `mkdir`, que falla si ya existe (R6): mirar
+        # con `exists` y crear despues dejaba que dos peticiones a la vez se
+        # quedaran con el mismo numero (8 «creado» y 6 carpetas, medido)
+        while True:
+            raiz = os.path.join(base, id_final)
+            try:
+                os.mkdir(raiz)
+                break
+            except FileExistsError:
+                id_final = f"{semilla}_{contador}"
+                contador += 1
         os.makedirs(os.path.join(raiz, "pasos"), exist_ok=True)
         escribir_json(os.path.join(raiz, NOMBRE_CONFIG), {
             "id": id_final,

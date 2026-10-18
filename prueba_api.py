@@ -5923,6 +5923,43 @@ def probar_lo_de_v2h():
               f"R3: pero como mucho {maximo}, las que caben en una nota")
         ok(any("como mucho" in a for a in (datos or {}).get("avisos") or []),
            "R3: y dice por que no subio las demas")
+
+        # R4 · UNA CARPETA COPIADA A MANO NO ES UN GEMELO DEL ORIGINAL. El id
+        # salia de proyecto.json: la copia se listaba y se abria como el original.
+        original = Proyecto.crear(base, "r4 original")
+        shutil.copytree(original.raiz, os.path.join(base, "r4_copia_a_mano"))
+        igual(Proyecto(os.path.join(base, "r4_copia_a_mano")).id, "r4_copia_a_mano",
+              "R4: la copia a mano tiene el id de SU carpeta")
+        ids = [f["id"] for f in Proyecto.listar(base) if f["id"].startswith("r4")]
+        igual(sorted(ids), ["r4_copia_a_mano", "r4_original"],
+              "R4: y la lista no enseña dos veces el original")
+        codigo, datos = pedir("GET", "/api/proyectos/r4_copia_a_mano")
+        igual(((datos or {}).get("proyecto") or datos or {}).get("id"), "r4_copia_a_mano",
+              "R4: y abrirla abre la copia, no el original")
+
+        # R5 · UN NOMBRE LARGUISIMO: antes 500 al crear (>255) o un video que no
+        # se podia duplicar ni apartar (250)
+        for largo in (260, 250):
+            codigo, datos = pedir("POST", "/api/proyectos", json={"nombre": "a" * largo})
+            igual(codigo, 201, f"R5: un video de {largo} caracteres de nombre se crea")
+            nuevo = ((datos or {}).get("proyecto") or {}).get("id") or ""
+            ok(0 < len(nuevo) <= 60, f"R5: con un id corto ({len(nuevo)} caracteres)")
+            codigo, _d = pedir("POST", f"/api/proyectos/{nuevo}/duplicar", json={})
+            igual(codigo, 201, f"R5: y se puede duplicar ({largo})")
+            codigo, _d = pedir("DELETE", f"/api/proyectos/{nuevo}")
+            ok(codigo in (200, 204), f"R5: y apartar ({largo}: {codigo})")
+
+        # R6 · CREAR A LA VEZ NO REPITE IDS (8 «creado» y 6 carpetas, medido)
+        hechos = []
+        hilos = [threading.Thread(target=lambda: hechos.append(
+            Proyecto.crear(base, "r6 mismo").id)) for _ in range(8)]
+        for h in hilos:
+            h.start()
+        for h in hilos:
+            h.join()
+        igual(len(set(hechos)), 8, "R6: ocho creaciones a la vez dan ocho ids distintos")
+        igual(len([n for n in os.listdir(base) if n.startswith("r6_mismo")]), 8,
+              "R6: y ocho carpetas")
     finally:
         motor.should_exit = True
         hilo.join(10)

@@ -148,6 +148,28 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/parrilla/proyectos/{cid}/subir` | Una matriz en Word, Excel, PDF o texto (multipart: «documento», «modo», |
 | `DELETE` | `/api/parrilla/trabajos/{tid}` | Quita de la pantalla un trabajo terminado (el aviso de listo o de error). |
 | `GET` | `/api/parrilla/trabajos/{tid}` | Cómo va una conversión: {estado: trabajando|listo|error, avance, ...}. |
+| `GET` | `/api/parrilla/cuentas` | Las cuentas ya leídas, las conexiones (sin claves) y el gasto del mes. |
+| `PUT` | `/api/parrilla/cuentas/conexiones` | {youtube_clave?, meta_token?, ig_id?, apify_token?, pago?, tope_usd?} ("" quita una). |
+| `POST` | `/api/parrilla/cuentas/conexiones/instagram` | Con el token de Meta puesto: tu cuenta profesional (se guarda si es una). |
+| `POST` | `/api/parrilla/cuentas/leer` | {texto, red?, cuantos?, forzar?, pagar?} -> el trabajo (se sigue preguntando). |
+| `POST` | `/api/parrilla/cuentas/plan` | {texto, red?, cuantos?} -> qué vía se usaría y cuánto costaría. |
+| `GET` | `/api/parrilla/cuentas/trabajos/{tid}` | — |
+| `DELETE` | `/api/parrilla/cuentas/{red}/{usuario}` | — |
+| `GET` | `/api/parrilla/cuentas/{red}/{usuario}` | — |
+| `POST` | `/api/parrilla/cuentas/{red}/{usuario}/analizar` | Claude dice qué le funciona a esa cuenta -> el trabajo. |
+| `GET` | `/api/parrilla/proyectos/{cid}/chats` | Las conversaciones del proyecto, la más nueva primero. |
+| `POST` | `/api/parrilla/proyectos/{cid}/chats` | Una conversación nueva: {modelo?}. No se guarda hasta el primer mensaje. |
+| `DELETE` | `/api/parrilla/proyectos/{cid}/chats/{chid}` | — |
+| `GET` | `/api/parrilla/proyectos/{cid}/chats/{chid}` | — |
+| `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/cancelar` | — |
+| `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/guardar` | Los guiones de una respuesta a la Parrilla: {turno, indices?, matriz?, nombre?}. |
+| `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/mensajes` | Un mensaje (multipart): «texto», «web» (1/0), «resultados» (1/0), «modelo» |
+| `POST` | `/api/parrilla/proyectos/{cid}/desde-cuenta` | Guiones para ESTE proyecto con lo que le funciona a una cuenta ajena: |
+| `POST` | `/api/parrilla/proyectos/{cid}/desde-resultados` | Claude escribe guiones a partir de lo que mejor funcionó: {claves?, dias?, |
+| `POST` | `/api/parrilla/proyectos/{cid}/guiones/{gid}/marca` | «Usar su marca para el proyecto»: {pisar?} -> {marca, cambiados}. |
+| `GET` | `/api/parrilla/proyectos/{cid}/marca` | La marca del cliente guardada en el proyecto, con sus campos. |
+| `PUT` | `/api/parrilla/proyectos/{cid}/marca` | {quien?, mostrar?, evitar?, tono?, cta?, otras?} -> la marca. |
+| `GET` | `/api/parrilla/proyectos/{cid}/resultados` | Lo que mejor funcionó en el proyecto (solo lo guardado). |
 | `GET` | `/api/trabajos` | Trabajos conocidos, opcionalmente de un solo proyecto. |
 | `GET` | `/api/trabajos/{tid}` | Estado y progreso de un trabajo. |
 | `POST` | `/api/trabajos/{tid}/cancelar` | Pide la cancelacion cooperativa de un trabajo. |

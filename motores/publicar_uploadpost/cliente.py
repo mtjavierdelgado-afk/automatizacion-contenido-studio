@@ -55,7 +55,13 @@ BASE_POR_DEFECTO = "https://api.upload-post.com"
 
 #: Las redes que el Studio sabe publicar hoy, con el nombre que les da
 #: Upload-Post. El orden es el de la pantalla.
-REDES = ("tiktok", "instagram", "youtube", "facebook")
+REDES = ("tiktok", "instagram", "youtube", "facebook",
+         # publicar-mas (18-10-2026): las demás que acepta Upload-Post (sin Reddit,
+         # que da 503, ni WordPress, que no es una red)
+         "linkedin", "x", "threads", "pinterest", "bluesky", "discord", "telegram",
+         "mastodon", "google_business")
+#: Las de siempre: las que salen marcadas y a la vista en un proyecto nuevo.
+REDES_CLASICAS = ("tiktok", "instagram", "youtube", "facebook")
 
 #: Para hablar con Upload-Post. La subida en si puede tardar: un MP4 de 200 MB
 #: por la linea del VPS son minutos, y el plazo es por operacion de socket, no

@@ -80,12 +80,16 @@ if RAIZ_ESTUDIO not in sys.path:
 from motores.publicar_uploadpost import cliente as UP  # noqa: E402
 from motores.publicar_uploadpost import simulado as UP_SIMULADO  # noqa: E402
 import publicar_seo as SEO                                     # noqa: E402
+import publicar_redes as RD                                    # noqa: E402
 from nucleo.proyecto import escribir_json, leer_json  # noqa: E402
 
 ZONA = "America/Lima"
 REDES = UP.REDES
 NOMBRE_RED = {"tiktok": "TikTok", "instagram": "Instagram Reels",
-              "youtube": "YouTube", "facebook": "Facebook"}
+              "youtube": "YouTube", "facebook": "Facebook", **RD.NOMBRE}
+REDES_CLASICAS = UP.REDES_CLASICAS
+#: Las que tienen TÍTULO además del texto.
+CON_TITULO = ("youtube", "facebook") + tuple(RD.TITULOS)
 
 #: Clave de los ajustes de los videos que no estan en ningun proyecto.
 SIN_PROYECTO = "_sin"
@@ -292,7 +296,8 @@ def _convertir(fallo):
 
 AJUSTES_DEFECTO = {
     "perfil": "",                       # el perfil de Upload-Post de este proyecto
-    "redes": list(REDES),               # las que salen marcadas en un video nuevo
+    "redes": list(REDES_CLASICAS),      # las que salen marcadas en un video nuevo
+    "redes_visibles": list(REDES_CLASICAS),  # las que se enseñan en este proyecto
     "hora": "19:00",                    # hora de Lima por defecto al programar
     "firma": "",                        # se añade al final de cada texto
     "hashtags": "",                     # los fijos del proyecto
@@ -309,6 +314,7 @@ AJUSTES_DEFECTO = {
     "propuesta_palabras": {},           # lo que propuso Claude (publicar-seo)
 }
 AJUSTES_DEFECTO.update(SEO.AJUSTES_SEO)
+AJUSTES_DEFECTO.update(RD.AJUSTES_REDES)
 LARGOS = {"firma": 400, "hashtags": 400, "tono": 600, "perfil": 60,
           "facebook_pagina": 40}
 
@@ -345,11 +351,17 @@ def _validar_ajustes(cambios):
             except SEO.ErrorSeo as fallo:
                 raise ErrorPublicar(str(fallo)) from None
             continue
+        if k in RD.AJUSTES_REDES:
+            try:
+                limpios[k] = RD.validar(k, v)
+            except RD.ErrorRedes as fallo:
+                raise ErrorPublicar(str(fallo)) from None
+            continue
         if k in ("marcar_ia", "avisar_youtube", "usar_emojis"):
             if not isinstance(v, bool):
                 raise ErrorPublicar(f"«{k}» es sí o no")
             limpios[k] = v
-        elif k == "redes":
+        elif k in ("redes", "redes_visibles"):
             if not isinstance(v, list) or any(r not in REDES for r in v):
                 raise ErrorPublicar("las redes son: " + ", ".join(REDES))
             limpios[k] = [r for r in REDES if r in v]
@@ -635,6 +647,8 @@ def encaje(red, formato, duracion):
             return {"tipo": "Reel", "nivel": "ok", "texto": ""}
         return {"tipo": "vídeo", "nivel": "aviso" if vertical else "ok",
                 "texto": "pasa de 90 s: sale como vídeo, no como Reel" if vertical else ""}
+    if red in RD.REDES:
+        return RD.encaje(red, formato, duracion)
     return {"tipo": "", "nivel": "error", "texto": "red desconocida"}
 
 
@@ -716,7 +730,9 @@ EMOJIS_RED = {
     "youtube": "en la descripción, 1 a 3 como viñetas; en el TÍTULO, ninguno o uno como mucho",
     "facebook": "1 a 3 emojis que acompañen, sin recargar",
 }
-LIMITES = {"tiktok": 2200, "instagram": 2200, "youtube": 5000, "facebook": 5000}
+LIMITES = {"tiktok": 2200, "instagram": 2200, "youtube": 5000, "facebook": 5000, **RD.LIMITES}
+REGLAS_RED.update(RD.REGLAS)
+EMOJIS_RED.update(RD.EMOJIS)
 
 SISTEMA = ("Eres un redactor de redes sociales con oficio: escribes los textos con "
            "los que se publica un vídeo para que la gente pare, lo vea entero y haga "
@@ -772,11 +788,12 @@ Devuelve SOLO este JSON, con EXACTAMENTE estas claves de red, en minúsculas y
 tal cual: {claves}
 {{
   "<red>": {{
-    "titulo": "solo YouTube y Facebook; vacío en las demás",
+    "titulo": "solo YouTube, Facebook, LinkedIn y Pinterest; vacío en las demás",
     "descripcion": "el texto principal (gancho en la primera línea), sin hashtags ni CTA",
     "cta": "una frase de llamada a la acción",
     "hashtags": ["sin almohadilla", "..."],
-    "primer_comentario": "opcional: una pregunta o un dato extra, corto"
+    "primer_comentario": "opcional: una pregunta o un dato extra, corto",
+    "alt": "solo en X, Threads, Pinterest, Bluesky, Discord y Mastodon: lo que SE VE en el vídeo, en una o dos frases, para quien no puede verlo"
   }}{palabra_json}{capitulos_json}
 }}
 """
@@ -835,7 +852,7 @@ def _limpiar_hashtags(lista):
 #: SERVIDOR: «textos_escritos» en el log y la ficha vacía. Claude contestaba con
 #: la clave «Instagram Reels» (el nombre que lee en la instrucción) en vez de
 #: «instagram», y aquí se buscaba solo la exacta: todo salía vacío sin error.
-_ALIAS_RED = {"tiktok": ("tiktok", "tik tok"),
+_ALIAS_RED = {**RD.ALIAS, "tiktok": ("tiktok", "tik tok"),
               "instagram": ("instagram", "instagramreels", "instagram reels", "reels", "ig"),
               "youtube": ("youtube", "youtubeshorts", "youtube shorts", "shorts", "yt"),
               "facebook": ("facebook", "fb", "facebookreels")}
@@ -844,7 +861,8 @@ _ALIAS_CAMPO = {"titulo": ("titulo", "título", "title"),
                                 "caption", "pie", "copy", "text"),
                 "cta": ("cta", "llamada", "llamada_a_la_accion", "call_to_action"),
                 "hashtags": ("hashtags", "etiquetas", "tags"),
-                "primer_comentario": ("primer_comentario", "first_comment", "comentario")}
+                "primer_comentario": ("primer_comentario", "first_comment", "comentario"),
+                "alt": ("alt", "alt_text", "texto_alternativo", "alttext")}
 
 
 def _clave_suelta(texto):
@@ -881,11 +899,12 @@ def normalizar_textos(datos, redes, caps_base=None):
         bruto = _bloque_de_red(datos, red)
         textos[red] = {
             "titulo": " ".join(str(_campo(bruto, "titulo") or "").split())[:100]
-            if red in ("youtube", "facebook") else "",
+            if red in CON_TITULO else "",
             "descripcion": str(_campo(bruto, "descripcion") or "").strip()[:LIMITES[red]],
             "cta": " ".join(str(_campo(bruto, "cta") or "").split())[:300],
             "hashtags": _limpiar_hashtags(_campo(bruto, "hashtags")),
             "primer_comentario": " ".join(str(_campo(bruto, "primer_comentario") or "").split())[:500],
+            "alt": " ".join(str(_campo(bruto, "alt") or "").split())[:1000] if red in RD.ALT else "",
         }
     capitulos = []
     titulos = datos.get("capitulos") if isinstance(datos.get("capitulos"), list) else []
@@ -909,7 +928,8 @@ def _textos_simulados(info, redes, raiz=None):
     datos = {}
     for red in redes:
         datos[red] = {"titulo": (info.get("nombre") or "Vídeo")[:90]
-                      if red in ("youtube", "facebook") else "",
+                      if red in CON_TITULO else "",
+                      "alt": "Una persona juega en el salón." if red in RD.ALT else "",
                       "descripcion": f"[{NOMBRE_RED[red]}] {primera}"[:500],
                       "cta": "Escríbenos para reservar.",
                       "hashtags": ["prueba", red]}
@@ -1138,7 +1158,7 @@ def _optimizar(raiz, info, redes, ajustes, proyecto, cwd, aplicar=False):
         comp = componer(red, t, ajustes, info, datos.get("capitulos"), datos)
         notas[red] = SEO.nota(red, t, comp, ajustes, datos, info, palabra)
         textos[red] = {k: t.get(k) for k in SEO.CAMPOS_OPTIMIZABLES
-                       if k != "titulo" or red in ("youtube", "facebook")}
+                       if k != "titulo" or red in CON_TITULO}
     if not textos:
         raise ErrorPublicar("no hay textos que optimizar: pide antes los textos a Claude o escríbelos")
     instruccion = SEO.INSTRUCCION_OPTIMIZAR.format(
@@ -1426,6 +1446,10 @@ def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
             campos["containsSyntheticMedia"] = True
         if not titulo.strip():
             avisos.append("YouTube necesita título")
+    elif red in RD.REDES:
+        extra, avisos_red = RD.campos(red, texto, titulo, textos_red, ajustes, info, ia)
+        campos.update(extra)
+        avisos += avisos_red
     elif red == "facebook":
         campos["facebook_title"] = titulo[:255]
         campos["facebook_description"] = texto
@@ -1439,7 +1463,7 @@ def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
     avisos += avisos_seo
     if not str(textos_red.get("descripcion") or "").strip():
         avisos.append("sin texto todavía")
-    return {"texto": texto, "titulo": titulo if red in ("youtube", "facebook") else "",
+    return {"texto": texto, "titulo": titulo if red in CON_TITULO else "",
             "campos": campos, "avisos": avisos, "tags": tags}
 
 
@@ -1470,6 +1494,10 @@ def guardar_ficha(raiz, pid, cambios):
                         actual[campo] = valor[campo][:LIMITES[red]]
                 if "hashtags" in valor:
                     actual["hashtags"] = _limpiar_hashtags(valor["hashtags"])
+                if "alt" in valor:
+                    if not isinstance(valor["alt"], str):
+                        raise ErrorPublicar("«alt» es un texto")
+                    actual["alt"] = " ".join(valor["alt"].split())[:1000]
                 if "primer_comentario" in valor:
                     if not isinstance(valor["primer_comentario"], str):
                         raise ErrorPublicar("«primer_comentario» es un texto")
@@ -1831,6 +1859,7 @@ def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
     errores = [f"{NOMBRE_RED[r]}: {encaje(r, info.get('formato'), info.get('duracion_s'))['texto']}"
                for r in redes
                if encaje(r, info.get("formato"), info.get("duracion_s"))["nivel"] == "error"]
+    errores += [f"{NOMBRE_RED[r]}: {RD.falta(r, ajustes)}" for r in redes if RD.falta(r, ajustes)]
     if errores:
         raise ErrorPublicar("; ".join(errores))
     # UNA RED SIN CUENTA CONECTADA gastaria una subida del mes para nada (Upload-
@@ -1862,11 +1891,15 @@ def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
         if sin_texto and modo != "pendiente":
             raise ErrorPublicar("falta el texto de " + ", ".join(sin_texto)
                                 + ": escríbelo o pide que lo escriba Claude", 409)
+        # GOOGLE BUSINESS VA EN SU PROPIA SUBIDA: su texto es el «title» común de
+        # Upload-Post, y en una subida con otras redes ese «title» es otro
         lote = uuid.uuid4().hex[:20]
+        lote_gbp = uuid.uuid4().hex[:20]
         nuevos = []
         for red in redes:
             nuevos.append({
-                "id": uuid.uuid4().hex[:12], "red": red, "lote": lote, "perfil": perfil,
+                "id": uuid.uuid4().hex[:12], "red": red, "perfil": perfil,
+                "lote": lote_gbp if red == "google_business" else lote,
                 "estado": "espera_ok" if modo == "pendiente" else "enviando",
                 "modo": "ahora" if modo == "ahora" else "programado",
                 "cuando": cuando or _iso_lima(), "creado": _iso_lima(),
@@ -1877,7 +1910,8 @@ def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
         datos["envios"].extend(nuevos)
         _escribir(_ruta_video(raiz, pid), datos)
     if modo != "pendiente":
-        _subir_lote(raiz, info, ajustes, lote, en_hilo=en_hilo)
+        for cual in sorted({e["lote"] for e in nuevos}):
+            _subir_lote(raiz, info, ajustes, cual, en_hilo=en_hilo)
     return [_envio_publico(e) for e in nuevos]
 
 
@@ -1950,6 +1984,11 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
                 titulo_general = primera.splitlines()[0].strip()
                 break
     campos["title"] = (titulo_general or info.get("nombre") or "Vídeo")[:100]
+    if redes == ["google_business"]:
+        # su texto ES el «title» (hasta 1.500): ver enviar()
+        gbp = componer("google_business", datos["textos"].get("google_business"), ajustes,
+                       info, None, datos)
+        campos["title"] = gbp["texto"][:RD.LIMITES["google_business"]]
     try:
         extra, ficheros = campos_portada(raiz, info, datos, redes, lote)
     except Exception as fallo:                              # noqa: BLE001

@@ -295,7 +295,7 @@ def prueba_cliente():
         mp4 = os.path.join(CARPETA, "v.mp4")
         with open(mp4, "wb") as fh:
             fh.write(os.urandom(300_000))
-        r = cli.publicar("studio_b", ["tiktok", "youtube", "x"], mp4,
+        r = cli.publicar("studio_b", ["tiktok", "youtube", "reddit"], mp4,
                          {"tiktok_title": "Hola ñ", "tags[]": ["a", "b"], "is_aigc": True},
                          id_propio="lote123")
         igual(r["modo"], "en_cola", "subir ya: en segundo plano")
@@ -530,7 +530,7 @@ def prueba_studio():
         igual(f["formato"], "vertical", "y su formato, medido en el MP4")
         ok(3.5 <= f["duracion_s"] <= 4.5, f"y su duración real: {f['duracion_s']}")
         igual(f["encaje"]["youtube"]["tipo"], "Short", "en YouTube sale como Short")
-        igual(f["redes"], list(P.REDES), "de fábrica, las cuatro redes")
+        igual(f["redes"], list(P.REDES_CLASICAS), "de fábrica, las cuatro redes de siempre")
         ok(f["mp4"].endswith("video.mp4"), "con la ruta del MP4 para descargarlo")
         igual(s.get(base + "/api/publicar/videos/sin_montar").json()["montado"], False,
               "un vídeo sin montar lo dice")

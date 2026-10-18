@@ -72,6 +72,18 @@ GRUPO_PROPIO = {} if os.name == "nt" else {"start_new_session": True}
 #: Cuanto se deja al CLI para salir con SIGTERM antes del SIGKILL.
 GRACIA_SIGTERM_S = 2.0
 
+#: La clase de verdad, tomada al importar: las suites sustituyen
+#: `subprocess.Popen` por dobles, y a un doble no se le manda una senal de
+#: grupo (su `pid` es inventado: 999, o -1, que para killpg es «todos»).
+_POPEN_REAL = subprocess.Popen
+
+
+def _es_proceso_real(proceso):
+    try:
+        return isinstance(proceso, _POPEN_REAL)
+    except TypeError:              # `_POPEN_REAL` ya era un doble al importar
+        return False
+
 MODELOS = ("haiku", "sonnet", "opus")
 
 # Un id completo tambien vale: el catalogo cambia mas rapido que este fichero.
@@ -620,21 +632,41 @@ def matar_arbol(proceso):
                            capture_output=True, timeout=30, **SIN_VENTANA)
         except Exception:  # noqa: BLE001
             pass
-    elif getattr(proceso, "_grupo_propio", False):
+    elif (getattr(proceso, "_grupo_propio", False) is True
+          and _es_proceso_real(proceso)
+          and isinstance(proceso.pid, int) and proceso.pid > 1):
+        # YA ACABO (y quiza ya se recogio): su pid puede ser de otro, y su
+        # grupo tambien. No se le manda nada.
+        if proceso.poll() is not None:
+            return
         grupo = proceso.pid
         try:
             os.killpg(grupo, signal.SIGTERM)
-        except Exception:  # noqa: BLE001 -- ya no estaba
+        except Exception:  # noqa: BLE001 -- sin grupo: se mata el proceso
+            _matar_solo(proceso)
             return
 
         def rematar():
             time.sleep(GRACIA_SIGTERM_S)
+            # se fue con el SIGTERM: nada mas que mandar
+            if proceso.poll() is not None:
+                return
             try:
                 os.killpg(grupo, signal.SIGKILL)
-            except Exception:  # noqa: BLE001 -- ya se fueron con el SIGTERM
-                pass
+            except Exception:  # noqa: BLE001
+                _matar_solo(proceso)
         threading.Thread(target=rematar, daemon=True, name="rematar-cli").start()
         return
+    _matar_solo(proceso)
+
+
+def _matar_solo(proceso):
+    """SIGKILL al proceso, y solo a el. Si ya acabo, nada."""
+    try:
+        if proceso.poll() is not None:
+            return
+    except Exception:  # noqa: BLE001 -- un doble sin poll(): se intenta igual
+        pass
     try:
         proceso.kill()
     except Exception:  # noqa: BLE001
@@ -763,6 +795,14 @@ def _una_pasada(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tiempo_s,
     return resultado
 
 
+def _soltar_avance(avance):
+    if avance is not None:
+        try:
+            avance.al_cancelar = None
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _subir_cancelacion(avance, para):
     """Lanza lo que corresponde a una llamada cancelada.
 
@@ -800,11 +840,8 @@ def _una_pasada_cruda(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tie
     except OSError as fallo:
         raise RuntimeError(
             f"no se ha podido lanzar el CLI de claude: {fallo}") from fallo
-    if GRUPO_PROPIO:
-        try:
-            proceso._grupo_propio = True
-        except Exception:  # noqa: BLE001 -- un doble que no admite atributos
-            pass
+    if GRUPO_PROPIO and _es_proceso_real(proceso):
+        proceso._grupo_propio = True
 
     if avance is not None:
         avance.al_cancelar = lambda: matar_arbol(proceso)
@@ -819,6 +856,7 @@ def _una_pasada_cruda(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tie
             (instruccion or "").encode("utf-8"), timeout=techo)
     except subprocess.TimeoutExpired as fallo:
         matar_arbol(proceso)
+        _soltar_avance(avance)
         consejos = list(consejos_extra or [])
         if esfuerzo != "low":
             consejos.insert(0, f"baja 'esfuerzo' de '{esfuerzo}' a 'low': es lo "
@@ -831,6 +869,9 @@ def _una_pasada_cruda(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tie
             f"{para} (se ha matado el proceso y sus hijos). Que probar: "
             + "; ".join(consejos) + ".") from fallo
 
+    # YA CONTESTO (o lo mataron): un latido o una cancelacion que lleguen
+    # ahora no tienen a quien matar, y su pid puede ser ya de otro proceso
+    _soltar_avance(avance)
     segundos = time.time() - arranque
     if avance is not None and getattr(avance, "cancelado", False):
         _subir_cancelacion(avance, para)

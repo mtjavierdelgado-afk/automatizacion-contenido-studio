@@ -604,8 +604,9 @@ def validar_encargo(crudo):
 
     nombre = " ".join(str(datos.get("nombre") or "").split())
     if not nombre:
-        raise ErrorEncargo("ponle un nombre al canal: es lo que se lee en la "
-                           "tarjeta y lo único que distingue un preset de otro")
+        # U5 (13-10-2026): decia «canal» y «preset», palabras de antes
+        raise ErrorEncargo("ponle un nombre al estilo: es lo que se lee en "
+                           "su tarjeta y lo que lo distingue de los demás")
     limpio["nombre"] = nombre[:80]
 
     idioma, variante = separar_idioma(datos.get("idioma"))

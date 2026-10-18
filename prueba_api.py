@@ -2061,7 +2061,11 @@ def probar_asistente(cliente):
                                      "pantalla": {"pestana": "encargo"}})
     igual(respuesta.status_code, 202, f"una pregunta responde 202: {ficha}")
     igual(len(ficha.get("turnos") or []), 2, "con el turno de la persona y el del asistente")
-    igual(ficha["turnos"][1]["estado"], "pensando", "que empieza pensando")
+    # «pensando» O YA «listo» (B12, 10-10-2026): la pregunta arranca un hilo y
+    # devuelve la ficha; el asistente SIMULADO contesta tan rapido que a veces
+    # gana la carrera, y la prueba fallaba sola y bajo carga
+    ok(ficha["turnos"][1]["estado"] in ("pensando", "listo"),
+       f"que empieza pensando (o ya contestó): {ficha['turnos'][1]['estado']!r}")
 
     def esperar_respuesta(segundos=20):
         limite = time.time() + segundos

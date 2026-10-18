@@ -1242,8 +1242,24 @@ function legibleCorto(texto) {
   return t.length > 24 ? `${t.slice(0, 23)}…` : t;
 }
 
-function pintarFaro() {
+/* UN TRABAJO, UNA VEZ (B9, 10-10-2026): al recargar, la tanda de un vídeo se
+   reengancha en la ranura de la receta Y en la del vídeo, y la cabecera decía
+   «El vídeo 8 % · La tanda 8 %» del MISMO trabajo. Se queda la del vídeo, que
+   dice cuál es y lleva a él. */
+function trabajosDelFaro() {
   const activos = Object.entries(APP.trabajos).filter(([paso]) => trabajando(paso));
+  activos.sort(([a], [b]) => (b === CLAVE_VIDEO_LIGHT) - (a === CLAVE_VIDEO_LIGHT));
+  const vistos = new Set();
+  return activos.filter(([, t]) => {
+    if (!t || t.id == null) return true;
+    if (vistos.has(t.id)) return false;
+    vistos.add(t.id);
+    return true;
+  });
+}
+
+function pintarFaro() {
+  const activos = trabajosDelFaro();
   const faro = vaciar($('#faro'));
   if (!activos.length) return;
   faro.append('⏳ ');
@@ -4997,7 +5013,10 @@ async function cargarCuenta() {
     const nombre = ((d || {}).user || {}).username;
     if (!nombre) return;
     $('#cuenta-nombre').textContent = nombre;
-    $('#cuenta').classList.remove('oculto');
+    // `hidden` y no la clase `.oculto` (U2, 13-10-2026): `.cuenta` pone
+    // display:flex detras de la primera `.oculto`, y la segunda solo lo encoge
+    // a 1 px: «Salir» seguia ahi y se llegaba a el con el tabulador sin login
+    $('#cuenta').hidden = false;
   } catch (e) { /* sin login delante: nada que ensenar */ }
 }
 
@@ -5092,6 +5111,10 @@ const BARRA_INFERIOR = { nodo: null };
 function navLight() {
   const v = APP.light.video;
   const dentro = APP.light.vista === 'elegido' && !!v.pid;
+  // «UN VIDEO NUEVO»: el formulario de un encargo que aun no es un video. Lo
+  // decia el comentario del Encargo y no lo hacia el codigo: ninguna parada
+  // salia activa (B4, 10-10-2026)
+  const nuevo = APP.light.vista === 'elegido' && !v.pid;
   const sub = dentro ? v.vista : '';
   const hayGuion = dentro && !!v.guion;
   const hayPlanos = dentro && !!versionDe(v.fichas.assets || {});
@@ -5144,9 +5167,10 @@ function navLight() {
        formulario de crear uno es otra pantalla, `vistaElegidoLight`). Cuenta
        como «aquí» también en ese formulario: es el encargo de un vídeo que
        todavía no existe, y la barra tiene que decir en qué parada estás. */
-    { id: 'encargo', texto: 'Encargo', puede: dentro,
-      activa: dentro && (sub === 'encargo_video' || sub === 'encargo'),
+    { id: 'encargo', texto: 'Encargo', puede: dentro || nuevo,
+      activa: nuevo || (dentro && (sub === 'encargo_video' || sub === 'encargo')),
       porque: dentro ? 'lo que se pidió para el guion: se lee y se cambia aquí'
+        : nuevo ? 'el encargo del vídeo nuevo: es esta pantalla'
         : 'abre un vídeo primero',
       ir: () => { pararPrevia(); v.vista = 'encargo_video'; pintarLight(); } },
     /* Antes, sin guion, este botón caía en el formulario de crear un vídeo
@@ -6777,6 +6801,14 @@ function urlMp4Light() {
 /* El TEXTO que se enseña de un bloque: el editado a mano si lo hay, y el del
    guion si no. Las dos cosas viven donde ya vivían (`params.guion.bloques` y
    `guion.json`), así que una edición hecha aquí se ve igual en el modo editor. */
+/* LAS PALABRAS DEL GUION COMO ESTA AHORA (U4, 13-10-2026): `guion.palabras`
+ * es lo que conto el redactor al escribirlo, y no se movia al corregir un bloque
+ * a mano (llego a decir «0 palabras»). Se cuentan con lo editado delante. */
+function palabrasDelGuionLight(v) {
+  return ((v.guion || {}).bloques || [])
+    .reduce((n, b) => n + palabrasDe(textoDeBloqueLight(b) || ''), 0);
+}
+
 function textoDeBloqueLight(bloque) {
   const editados = ((APP.light.video.fichas.guion || {}).params || {}).bloques || {};
   const ficha = editados[bloque.id];
@@ -6857,7 +6889,7 @@ function vistaElegidoLight() {
     campoTexto('Nombre', e.nombre,
       v => { e.nombre = v; },
       { pista: 'La crisis del agua en el sur', ayuda: 'Es el nombre del proyecto y '
-        + 'lo que el documentalista lee como «de qué va este vídeo».' }),
+        + 'lo que el redactor lee como «de qué va este vídeo».' }),
     duracionLight(e),
     selectorFormato(e.formato, v => { e.formato = v; })));
 
@@ -7028,7 +7060,9 @@ function duracionLight(e, estilo) {
   return h('div', { clase: 'campo duracion' },
     h('label', {}, 'Duración objetivo'),
     h('div', { clase: 'duracion-cabeza' }, grande,
-      h('span', { clase: 'meta' }, `de ${DURACION_MIN_S} s a ${DURACION_MAX_S / 60} min`)),
+      // B5: el rótulo dice el mínimo DE VERDAD (decía «de 1 s»); por debajo se
+      // deja escribir igual y avisa, como explica la cabecera de las constantes
+      h('span', { clase: 'meta' }, `de ${DURACION_MIN_REAL_S} s a ${DURACION_MAX_S / 60} min`)),
     barra,
     h('div', { clase: 'duracion-campos' },
       minutos, h('span', { clase: 'meta' }, 'min'),
@@ -7938,7 +7972,16 @@ function restanteTandaLight(trabajo, avance) {
   if (!v.planDe || v.planDe !== trabajo.id) return '';
   const previsto = Number((v.plan || {}).segundos) || 0;
   if (!previsto || !trabajo.inicio || avance >= 1) return '';
-  const restante = previsto - (Date.now() - trabajo.inicio) / 1000;
+  const transcurrido = (Date.now() - trabajo.inicio) / 1000;
+  let restante = previsto - transcurrido;
+  // PERO NUNCA MAS DE LO QUE DICE EL AVANCE, pasado el 10 % (B1, 10-10-2026):
+  // sin historico el previsto puede ir muy desviado, y se vio «quedan ~12 min»
+  // con la barra al 99 % y un guion previsto en 27 min que tardo 27 s. Solo
+  // como techo: el avance no sube la cifra, por lo dicho arriba del reloj
+  // sintetico; la baja cuando lo hecho ya dice que el previsto se paso.
+  if (avance > 0.1) {
+    restante = Math.min(restante, transcurrido * (1 - avance) / avance);
+  }
   return restante > 5 ? `quedan ~${duracionCorta(restante)}` : '';
 }
 
@@ -8435,7 +8478,7 @@ function vistaGuionLight() {
   caja.appendChild(h('div', { clase: 'light-cab' },
     h('h2', {}, (v.guion || {}).titulo || v.nombre || 'El guion'),
     h('span', { clase: 'meta' }, v.guion
-      ? `${v.guion.bloques.length} bloques · ${miles(v.guion.palabras)} palabras`
+      ? `${v.guion.bloques.length} bloques · ${miles(palabrasDelGuionLight(v))} palabras`
       : ''),
     h('span', { clase: 'crece' }),
     costeLight()));
@@ -8873,8 +8916,10 @@ function barraPausasLight() {
      voz se graba de corrido. Las que cuentan son las de DENTRO de una frase. */
   const finalesTexto = finales.length
     ? `${finales.length === 1 ? 'La pausa' : `Las ${finales.length} pausas`} al final de `
-      + `${finales.length === 1 ? 'bloque' : 'bloques'} (${finales.join(', ')}) se hacen al `
-      + 'montar el vídeo y no cortan la voz. '
+      + `${finales.length === 1 ? 'bloque' : 'bloques'} (${finales.join(', ')}) `
+      // B8: con una sola, «se hace» y «no corta» (decía «La pausa... se hacen»)
+      + `${finales.length === 1 ? 'se hace' : 'se hacen'} al montar el vídeo y `
+      + `${finales.length === 1 ? 'no corta' : 'no cortan'} la voz. `
     : '';
   if (!sobra) {
     return h('div', { clase: 'caja-info barra-pausas' },
@@ -9269,8 +9314,9 @@ function ayudaAudio(hayAudio, queda) {
 
 function ayudaDiapositivas(hayVideo, obsoleto, queda) {
   if (queda === false) {
-    return 'Las diapositivas ya recogen el guion y el audio de ahora. Para '
-      + 'verlas, «Diapositivas» en la barra de abajo: no cuesta nada.';
+    // U3: la parada de la barra se llama «Imágenes» (antes «Diapositivas»)
+    return 'Las imágenes ya recogen el guion y el audio de ahora. Para '
+      + 'verlas, «Imágenes» en la barra de abajo: no cuesta nada.';
   }
   if (hayVideo && obsoleto) {
     return 'Vuelve a partir los subtítulos con los tiempos del audio de ahora y '
@@ -9279,7 +9325,7 @@ function ayudaDiapositivas(hayVideo, obsoleto, queda) {
       + 'lo hace. No monta el MP4: eso es «Montar el vídeo», después de mirarlo.';
   }
   return 'Dibuja los planos, les monta los subtítulos y las cartelas y prepara '
-    + 'la música. Para ahí, en las diapositivas, para que lo mires antes de '
+    + 'la música. Para ahí, en Imágenes, para que lo mires antes de '
     + 'gastar el render: no monta ningún MP4.';
 }
 
@@ -12223,6 +12269,7 @@ function camposEstiloLight() {
     v => {
       e.estilo_modo = v; tocarEncargoLight();
       if (APP.light.repintarRitmo) APP.light.repintarRitmo();
+      avisoTipoDeImagen(v, (e.estilo_imagenes || []).length > 0);
     }));
   caja.appendChild(imagenesDeApoyoLight(e, tocarEncargoLight));
   caja.appendChild(conGuia(campoArea('Indicaciones (opcional)', e.estilo_prompt,
@@ -12243,6 +12290,21 @@ const TIPOS_DE_IMAGEN = [
   { valor: 'ilustracion', nombre: 'Ilustración' },
   { valor: 'foto', nombre: 'Foto realista' },
 ];
+
+/* EL TIPO DE IMAGEN Y LAS REFERENCIAS TIENEN QUE DECIR LO MISMO (M2 del informe
+ * de la Etapa Foto A): con referencias que son fotos y el tipo en Ilustración,
+ * la guía que escribe Claude mirándolas pide «foto de verdad» y la cabecera
+ * pide «dibujo», y la imagen sale a medio camino, con aspecto falso. La
+ * pantalla no puede saber si una imagen «es» una foto; lo que sí puede es
+ * decirlo en el momento de cambiar el tipo con imágenes ya puestas. */
+function avisoTipoDeImagen(modo, hayImagenes) {
+  if (!hayImagenes) return;
+  toast(modo === 'foto'
+    ? 'Has elegido Foto realista: tus imágenes de referencia deberían ser fotos. '
+      + 'Si son dibujos, la guía pedirá foto y dibujo a la vez y saldrá a medio camino.'
+    : 'Has elegido Ilustración: tus imágenes de referencia deberían ser dibujos. '
+      + 'Si son fotos, la guía pedirá foto y dibujo a la vez y saldrá a medio camino.');
+}
 
 function selectorTipoDeImagen(valor, alCambiar) {
   return campoSelect('Tipo de imagen', valor === 'foto' ? 'foto' : 'ilustracion',
@@ -12493,6 +12555,10 @@ async function quitarImagenLight(e, ficha, pintar, alCambiar, clave) {
    porque nadie repintaba el pie. Repintar el formulario entero tampoco vale
    —tira el foco del campo donde estás escribiendo—, así que lo que se repinta
    es el pie y nada más. */
+/* El mismo texto que el servidor (`presets_light.validar_encargo`), U5. */
+const NOMBRE_DEL_ESTILO_FALTA = 'ponle un nombre al estilo: es lo que se lee en '
+  + 'su tarjeta y lo que lo distingue de los demás';
+
 function pieDeCreacion() {
   const caja = h('div', { clase: 'pie-light' });
   const aMedias = APP.light.taller;
@@ -12523,6 +12589,14 @@ function pieDeCreacion() {
   }
 
   const comprobar = () => {
+    // SIN NOMBRE NO SE PREGUNTA (B3, 10-10-2026): abrir «Un estilo nuevo»
+    // mandaba dos peticiones que volvian 400 antes de tocar nada, y otra por
+    // cada tecla. Lo que falta se dice aqui mismo.
+    if (!String(encargoParaServidor().nombre || '').trim()) {
+      boton.disabled = true;
+      vaciar(nota).append(h('span', { clase: 'aviso' }, NOMBRE_DEL_ESTILO_FALTA));
+      return;
+    }
     pedir(API.presetLightPlan(), { method: 'POST', cuerpo: encargoParaServidor() })
       .then(datos => {
         const plan = datos.plan || {};
@@ -13599,7 +13673,10 @@ function fuenteDeEstiloLight(ficha) {
      contrato del tipo nuevo) y las láminas con las MISMAS imágenes, y deja el
      tono, la voz y el ritmo. */
   caja.appendChild(selectorTipoDeImagen(f.modo,
-    v => { f.modo = v; repintarPieDeEstilo(); }));
+    v => {
+      f.modo = v; repintarPieDeEstilo();
+      avisoTipoDeImagen(v, (f.existentes || []).length + (f.estilo_imagenes || []).length > 0);
+    }));
   caja.appendChild(imagenesDelEstilo(ficha, f));
   caja.appendChild(h('div', { clase: 'meta' },
     'Añadir imágenes nuevas (se suman a las de arriba). Añadir o quitar imágenes, '

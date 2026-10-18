@@ -77,6 +77,10 @@ class GestorTrabajos:
             "inicio": time.time(),
             "fin": None,
             "cancelar": False,
+            # QUIEN HAY QUE AVISAR AL CANCELAR, en el acto: el que espera a un
+            # subproceso (el CLI de claude) no llama a avisar() hasta que este
+            # contesta, y sin esto la cancelacion esperaba a su latido.
+            "al_cancelar": [],
         }
         with self._lock:
             self._trabajos[trabajo_id] = registro
@@ -135,7 +139,14 @@ class GestorTrabajos:
         return fichas
 
     def cancelar(self, trabajo_id):
-        """Pide la cancelacion cooperativa del trabajo."""
+        """Pide la cancelacion cooperativa del trabajo.
+
+        Ademas de la marca (que avisar() convierte en Cancelado), llama EN EL
+        ACTO a lo que el trabajo haya registrado con `avisar.al_cancelar(fn)`:
+        es lo que corta un subproceso que no va a volver a llamar a avisar()
+        hasta que termine. Fuera del cerrojo, y cada uno en su try: una
+        limpieza que falla no puede impedir cancelar.
+        """
         with self._lock:
             registro = self._trabajos.get(trabajo_id)
             if registro is None:
@@ -146,7 +157,38 @@ class GestorTrabajos:
             if registro["estado"] == "pendiente":
                 registro["estado"] = "cancelado"
                 registro["fin"] = time.time()
-            return True
+            avisados = list(registro.get("al_cancelar") or [])
+        for funcion in avisados:
+            try:
+                funcion()
+            except Exception:  # noqa: BLE001 -- es limpieza
+                pass
+        return True
+
+    def al_cancelar(self, trabajo_id, funcion):
+        """Registra `funcion()` para cuando se cancele el trabajo. -> quitar()
+
+        Si ya se pidio cancelar, se llama ahora mismo: quien se registra tarde
+        (el CLI que arranca justo despues del clic) tambien se entera. Tiene
+        que volver enseguida: corre en la peticion que cancela.
+        """
+        with self._lock:
+            registro = self._trabajos.get(trabajo_id)
+            ya = registro is not None and registro["cancelar"]
+            if registro is not None and not ya:
+                registro.setdefault("al_cancelar", []).append(funcion)
+        if ya:
+            try:
+                funcion()
+            except Exception:  # noqa: BLE001 -- es limpieza
+                pass
+
+        def quitar():
+            with self._lock:
+                lista = (self._trabajos.get(trabajo_id) or {}).get("al_cancelar")
+                if lista and funcion in lista:
+                    lista.remove(funcion)
+        return quitar
 
     def esperar(self, trabajo_id, tiempo_max=None):
         """Bloquea hasta que el trabajo acabe y devuelve su ficha final."""
@@ -168,6 +210,11 @@ class GestorTrabajos:
             "unidades": list(registro.get("unidades") or []),
             "toca": list(registro.get("toca") or []),
             "estado": registro["estado"],
+            # PEDIDA Y TODAVIA EN MARCHA: lo que ya se estaba pagando se acaba
+            # y se guarda, y mientras tanto la pantalla dice «Cancelando…» en
+            # vez de dejar el boton vivo como si no se hubiera pulsado
+            "cancelando": bool(registro["cancelar"])
+                          and registro["estado"] in ("pendiente", "ejecutando"),
             "progreso": round(registro["progreso"], 4),
             "mensaje": registro["mensaje"],
             "publico": registro["publico"],
@@ -222,6 +269,11 @@ class GestorTrabajos:
         def avisar(valor, mensaje="", publico=""):
             return self.progreso(trabajo_id, valor, mensaje, publico)
 
+        # para que quien espera a algo de fuera (un subproceso) se registre y
+        # lo corten al cancelar (ver `cancelar`). Quien envuelva avisar en otra
+        # funcion tiene que pasarle este atributo, o se queda con el latido.
+        avisar.al_cancelar = lambda funcion: self.al_cancelar(trabajo_id, funcion)
+
         try:
             # DENTRO del try: si marcar o anotar fallan (el cerrojo de otro
             # proceso que no suelta, un disco lleno), el hilo moria con el
@@ -235,7 +287,7 @@ class GestorTrabajos:
             resultado = funcion(avisar, *args, **kwargs)
         except Cancelado:
             self._fijar(trabajo_id, estado="cancelado", fin=time.time(),
-                        mensaje="cancelado", publico="cancelado")
+                        mensaje="cancelado", publico="cancelado", al_cancelar=[])
             if marca_su_paso and self.estado_grafo is not None:
                 self.estado_grafo.limpiar_marca(paso)
             if self.bitacora is not None:
@@ -245,7 +297,8 @@ class GestorTrabajos:
         except Exception as fallo:
             detalle = traceback.format_exc(limit=6)
             self._fijar(trabajo_id, estado="error", fin=time.time(),
-                        error=f"{type(fallo).__name__}: {fallo}", mensaje=str(fallo))
+                        error=f"{type(fallo).__name__}: {fallo}", mensaje=str(fallo),
+                        al_cancelar=[])
             try:
                 # SOLO SI EL PASO SIGUE EN MARCHA: un trabajo de receta o de
                 # tanda se registra en su primer paso pero corre varios. Si ese
@@ -264,7 +317,7 @@ class GestorTrabajos:
             return
 
         self._fijar(trabajo_id, estado="listo", fin=time.time(), progreso=1.0,
-                    resultado=resultado)
+                    resultado=resultado, al_cancelar=[])
         # si la funcion no llamo a completar(), el paso se quedaria marcado
         # como ejecutando para siempre: se limpia la marca por si acaso
         if marca_su_paso and self.estado_grafo is not None:

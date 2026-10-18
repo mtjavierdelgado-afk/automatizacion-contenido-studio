@@ -1550,6 +1550,119 @@ def laminas_a_mano(navegador, datos):
 
 
 @escenario
+def cancelar_y_doble_toque_en_el_taller(navegador, datos):
+    """Lo que vio el dueño el 18-10-2026: cancelar un «Rehacer» y, al volver a
+    pulsar, «este estilo se está generando». Tres cosas de pantalla:
+
+      - «Regenerar» con la petición en camino se apaga y dice «Leyendo tu
+        corrección…»: el segundo toque no sale (antes salían dos peticiones);
+      - «Cancelar» pasa a «Cancelando…», apagado, EN EL ACTO;
+      - un 409 que trae el trabajo que ocupa el taller se engancha a él.
+
+    El servidor se sustituye con `route`: lo que se mira es la pantalla (el
+    servidor lo comprueba `prueba_api.probar_cancelar_en_el_taller`)."""
+    import json as _json                                      # noqa: PLC0415
+    pg = Pagina(navegador, datos)
+    preset = datos["preset"]
+    pedidas = []
+
+    def regenerar(ruta):
+        pedidas.append(ruta.request.url)
+        ruta.fulfill(status=409, content_type="application/json",
+                     body=_json.dumps({"error": "ya se está preparando un cambio de "
+                                                "este estilo", "trabajo_id": "",
+                                       "preparando": True}))
+    pg.p.route("**/api/presets-light/*/regenerar", regenerar)
+    pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{preset}' }});"
+          "APP.light.feedback = { tono: 'más cercano' }; repintarPieDeEstilo();")
+    ok(pg.esperar(".pie-light button", "Regenerar"), "con algo pedido sale «Regenerar»")
+    # la petición tarda (Claude lee la frase): se retiene un momento
+    pg.p.unroute("**/api/presets-light/*/regenerar")
+
+    def regenerar_lento(ruta):
+        pedidas.append(ruta.request.url)
+        estado["retenida"] = ruta
+    estado = {}
+    pg.p.route("**/api/presets-light/*/regenerar", regenerar_lento)
+    pg.p.evaluate("() => { const b = document.querySelector('.pie-light button.primario');"
+                  " b.click(); b.click(); }")
+    pg.p.wait_for_timeout(400)
+    igual = (lambda a, b, m: ok(a == b, f"{m} (obtenido {a!r}, esperado {b!r})"))
+    igual(len(pedidas), 1, "dos toques en «Regenerar» mandan UNA petición")
+    ok(pg.visible(".pie-light button", "Leyendo tu corrección"),
+       "y mientras va, el botón dice «Leyendo tu corrección…»")
+    ok(pg.p.evaluate("() => !!document.querySelector('.pie-light button.primario').disabled"),
+       "y está apagado")
+    if estado.get("retenida"):
+        estado["retenida"].fulfill(status=409, content_type="application/json",
+                                   body=_json.dumps({"error": "ya se está preparando un "
+                                                     "cambio de este estilo",
+                                                     "trabajo_id": "", "preparando": True}))
+    pg.p.wait_for_timeout(600)
+    ok(pg.visible(".pie-light button", "Regenerar"), "al contestar, vuelve a «Regenerar»")
+    pg.p.unroute("**/api/presets-light/*/regenerar")
+
+    # ---- «Cancelando…» en el acto
+    sondeos = {"n": 0}
+
+    def cancelar(ruta):
+        estado["cancelar"] = ruta              # el servidor tarda en contestar
+
+    def ficha_falsa(ruta):
+        sondeos["n"] += 1
+        fin = sondeos["n"] > 6
+        ruta.fulfill(status=200, content_type="application/json", body=_json.dumps({
+            "id": "falso", "nombre": "preset_light", "estado": "cancelado" if fin else "ejecutando",
+            "cancelando": not fin, "progreso": 0.3, "mensaje": "", "publico": "",
+            "segundos": 12}))
+    pg.p.route("**/api/trabajos/falso/cancelar", cancelar)
+    pg.p.route("**/api/trabajos/falso/eventos", lambda ruta: ruta.abort())
+    pg.p.route("**/api/trabajos/falso", ficha_falsa)
+    pg.js(f"APP.trabajos[CLAVE_LIGHT] = {{ id: 'falso', estado: 'ejecutando', progreso: 0.3,"
+          f" inicio: Date.now() - 82000 }};"
+          f"irALight('generando', {{ plan: {{ segundos: 284, tareas: [] }}, abierto: '{preset}' }});")
+    ok(pg.esperar(".light-generando button", "Cancelar"), "la pantalla de rehacer tiene «Cancelar»")
+    pg.p.evaluate("() => document.querySelector('.light-generando button.peligro').click()")
+    pg.p.wait_for_timeout(300)
+    ok(pg.visible(".light-generando h2", "Cancelando"),
+       "al pulsar, el título dice «Cancelando…» sin esperar al servidor")
+    ok(pg.p.evaluate("() => { const b = document.querySelector('.light-generando button.peligro');"
+                     " return !!b && b.disabled && b.textContent.includes('Cancelando'); }"),
+       "y el botón se apaga con «Cancelando…» (no se puede volver a pedir)")
+    pg.captura("16b_cancelando")
+    if estado.get("cancelar"):
+        estado["cancelar"].fulfill(status=200, content_type="application/json",
+                                   body=_json.dumps({"trabajo_id": "falso",
+                                                     "cancelacion_pedida": True,
+                                                     "estado": "ejecutando"}))
+    pg.p.wait_for_timeout(500)
+
+    # ---- un 409 que trae el trabajo: la pantalla se engancha a él
+    sondeos["n"] = 0
+    pg.js(f"APP.trabajos[CLAVE_LIGHT] = null; soltarSeguimiento(CLAVE_LIGHT);"
+          f"irALight('preset', {{ abierto: '{preset}' }});"
+          "APP.light.feedback = { tono: 'más cercano' }; repintarPieDeEstilo();")
+    pg.p.route("**/api/presets-light/*/regenerar", lambda ruta: ruta.fulfill(
+        status=409, content_type="application/json", body=_json.dumps({
+            "error": "se está cancelando lo anterior: termina en unos segundos",
+            "trabajo_id": "falso", "cancelando": True, "segundos": 30})))
+    pg.pulsar(".pie-light button", "Regenerar")
+    ok(pg.esperar(".light-generando h2", "Cancelando", 5),
+       "un 409 con su trabajo lleva a ese trabajo, diciendo «Cancelando…»")
+    fin = time.time() + 30
+    while time.time() < fin and pg.p.evaluate("() => APP.light.vista") == "generando":
+        pg.p.wait_for_timeout(500)
+    ok(pg.p.evaluate("() => APP.light.vista") == "preset",
+       "y cuando el trabajo acaba cancelado, vuelve a la ficha")
+    ok(any("cancelado" in a for a in pg.p.evaluate("() => window.__avisos || []")),
+       "con el aviso «cancelado», no un error")
+    pg.p.unroute("**/api/presets-light/*/regenerar")
+    pg.js("APP.light.feedback = {};")
+    pg.sin_errores("cancelar y doble toque en el taller")
+    pg.cerrar()
+
+
+@escenario
 def estilo_nuevo(navegador, datos):
     """El formulario de un estilo nuevo, y qué pasa si la creación falla."""
     pg = Pagina(navegador, datos)

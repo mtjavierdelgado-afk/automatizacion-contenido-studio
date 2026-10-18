@@ -175,6 +175,141 @@ def prueba_una_pasada():
         cli_claude.localizar = original_localizar
 
 
+# ------------------------------------------------------- cancelar corta el CLI
+
+CLI_LENTO = """#!{python}
+# Doble del CLI: lee la instruccion, lanza un HIJO que hereda la salida (como
+# una herramienta del CLI) y tarda. Apunta el pid del hijo para poder mirarlo.
+import os, subprocess, sys, time
+sys.stdin.read()
+hijo = subprocess.Popen(["sleep", "30"])
+with open({pids!r}, "a") as fh:
+    fh.write(f"{{hijo.pid}}\\n")
+time.sleep(30)
+print('{{"result": "tarde", "is_error": false}}')
+"""
+
+
+def _vivo(pid):
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    try:                                     # un zombi ya no hace nada
+        with open(f"/proc/{pid}/stat", "r", encoding="utf-8") as fh:
+            return fh.read().split(")")[-1].split()[0] != "Z"
+    except OSError:
+        return True
+
+
+def prueba_cancelar_corta_el_cli():
+    """CANCELAR CORTA EL CLI, CON SUS HIJOS, Y EN EL ACTO (18-10-2026).
+
+    Con un «Rehacer estilo» esperando al CLI, cancelar mataba solo el padre (en
+    Linux no hay taskkill) y `communicate()` seguia esperando al hijo que tenia
+    la salida: el trabajo seguia vivo lo que tardara el CLI (37 s con este
+    doble), el taller contestaba 409 y al final acababa en ERROR, no cancelado.
+    """
+    seccion("2b] cancelar corta el CLI y sus hijos, y acaba «cancelado»")
+    if os.name == "nt":
+        print("  (en Windows esto lo hace taskkill /T: se omite)")
+        return
+    import time                                               # noqa: PLC0415
+    import estadisticas                                       # noqa: PLC0415
+    from nucleo.trabajos import GestorTrabajos                # noqa: PLC0415
+    carpeta = os.path.join(CARPETA, "cli_lento")
+    os.makedirs(carpeta, exist_ok=True)
+    pids = os.path.join(carpeta, "pids.txt")
+    script = os.path.join(carpeta, "claude")
+    with open(script, "w", encoding="utf-8") as fh:
+        fh.write(CLI_LENTO.format(python=sys.executable, pids=pids))
+    os.chmod(script, 0o755)
+    original_localizar = cli_claude.localizar
+    cli_claude.localizar = lambda *a, **k: script
+    salud_antes = salud_cli.de(dict(cli_claude.POR_DEFECTO))
+
+    def hijos():
+        try:
+            with open(pids, "r", encoding="utf-8") as fh:
+                return [int(x) for x in fh.read().split()]
+        except OSError:
+            return []
+
+    def guia(avisar):
+        # lo mismo que `estilo.generar_guia`; el latido, a proposito MUY lento:
+        # lo que tiene que cortar es la cancelacion en el acto, no el latido
+        avance = estadisticas.Avance(avisar, 0.05, 0.9, {"segundos": 60},
+                                     "mirando", cadencia=30)
+        avance.arrancar()
+        try:
+            return cli_claude.ejecutar("hola", modelo="sonnet", esfuerzo="low",
+                                       cwd=carpeta, avance=avance,
+                                       para="la guia de estilo")
+        finally:
+            avance.parar()
+
+    try:
+        gestor = GestorTrabajos()
+        tid = gestor.lanzar("preset_light", guia)
+        limite = time.time() + 10
+        while not hijos() and time.time() < limite:
+            time.sleep(0.05)
+        comprobar(bool(hijos()), "el doble del CLI ha arrancado su hijo")
+        antes = time.time()
+        gestor.cancelar(tid)
+        while gestor.listar(activos=True) and time.time() - antes < 40:
+            time.sleep(0.05)
+        tarda = time.time() - antes
+        comprobar(tarda < 3.0, f"el trabajo se para en {tarda:.1f} s tras cancelar "
+                               f"(antes: lo que tardara el CLI, 37 s con este doble)")
+        ficha = gestor.estado(tid)
+        igual(ficha["estado"], "cancelado",
+              "y acaba CANCELADO, no en error (su paso no se marca fallido)")
+        limite = time.time() + 5
+        while any(_vivo(p) for p in hijos()) and time.time() < limite:
+            time.sleep(0.1)
+        comprobar(not any(_vivo(p) for p in hijos()),
+                  "el hijo que tenia la salida tambien muere (todo el grupo)")
+        igual(salud_cli.de(dict(cli_claude.POR_DEFECTO)), salud_antes,
+              "una cancelacion no apunta nada en la salud de la cuenta")
+
+        # EL PLAZO VENCIDO SIGUE CORTANDO, y tambien con sus hijos
+        with open(pids, "w", encoding="utf-8"):
+            pass
+        minimo = cli_claude.TIEMPO_MINIMO_S
+        cli_claude.TIEMPO_MINIMO_S = 1
+        antes = time.time()
+        try:
+            cli_claude.ejecutar("hola", modelo="sonnet", esfuerzo="low", cwd=carpeta,
+                                tiempo_max_s=1, para="la prueba del plazo")
+            comprobar(False, "tenia que lanzar TiempoAgotado")
+        except cli_claude.TiempoAgotado:
+            comprobar(time.time() - antes < 5, "un plazo vencido sigue lanzando "
+                                               "TiempoAgotado, a su hora")
+        finally:
+            cli_claude.TIEMPO_MINIMO_S = minimo
+        limite = time.time() + 5
+        while any(_vivo(p) for p in hijos()) and time.time() < limite:
+            time.sleep(0.1)
+        comprobar(hijos() and not any(_vivo(p) for p in hijos()),
+                  "y mata tambien al hijo, no solo al padre")
+
+        # MATAR NO ESPERA: lo llama la peticion que cancela
+        class Quieto:
+            pid = os.getpid()
+            _grupo_propio = False
+            matado = False
+
+            def kill(self):
+                Quieto.matado = True
+        antes = time.time()
+        cli_claude.matar_arbol(Quieto())
+        comprobar(time.time() - antes < 0.5 and Quieto.matado,
+                  "sin grupo propio se mata solo el proceso (nunca el grupo del Estudio)")
+    finally:
+        cli_claude.localizar = original_localizar
+
+
 # ------------------------------------------------------------------ claves
 
 class RespuestaFalsa:
@@ -351,6 +486,7 @@ def main():
     try:
         prueba_salud()
         prueba_una_pasada()
+        prueba_cancelar_corta_el_cli()
         prueba_claves()
         prueba_mcp()
     finally:

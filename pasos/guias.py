@@ -1007,11 +1007,217 @@ GUIAS = {
             "niños»? Explícame por qué.\n\nEL VÍDEO:\n[de qué va y a quién se dirige]"
         ),
     },
+    "marca_cliente": {
+        "titulo": "La marca del cliente (Parrilla)",
+        "donde": "Automatizar → Marca del cliente",
+        "usa": "pasos/parrilla.py (marca_de, marca_texto: va en el contexto de convertir, "
+               "pedir y «Desde mis resultados») y pasos/guionista.py (el chat)",
+        "que_hace": [
+            "Se apunta UNA vez por proyecto y Claude la recibe en todo lo que escribe o "
+            "convierte para él: subir un documento, pegar, pedir guiones, «Desde mis "
+            "resultados» y la conversación.",
+            "Claude la copia en la sección MARCA DEL CLIENTE de cada guion y la respeta en "
+            "las escenas (lo que se muestra y lo que se evita).",
+            "El «CTA de siempre» se usa cuando el guion no trae uno: en vez de [FALTA CTA].",
+            "No toca el estilo ni ningún vídeo: es solo para escribir guiones. Lo que va en la "
+            "imagen se sigue decidiendo en el estilo.",
+        ],
+        "si": [
+            "Quién es en una o dos frases: a qué se dedica, dónde, a quién vende.",
+            "Mostrar y Evitar, concretos: «consolas y mandos reales», «nada de marcas ajenas».",
+            "El tono en palabras sencillas: «de tú, cercano, con humor ligero».",
+            "El CTA tal como se dice: «Escríbenos por WhatsApp para reservar».",
+        ],
+        "no": [
+            "Precios u ofertas que caducan: ponlos en la petición de cada tanda.",
+            "Instrucciones de imagen detalladas (luz, encuadre): son del estilo.",
+            "Copiar aquí un guion entero: es lo de siempre de la marca, no un vídeo.",
+        ],
+        "plantilla": (
+            "QUIÉN ES: [a qué se dedica, dónde, a quién vende].\n"
+            "MOSTRAR: [productos, lugares, gente que debe salir].\n"
+            "EVITAR: [lo que no debe salir nunca].\n"
+            "TONO: [cómo habla la marca].\n"
+            "CTA DE SIEMPRE: [lo que se pide al final].\n"
+            "OTRAS REGLAS: [colores, frases de marca…]."
+        ),
+        "ejemplo": (
+            "QUIÉN ES: EstadoPlay, alquiler de consolas para fiestas y eventos en Lima.\n"
+            "MOSTRAR: consolas, mandos y pantallas reales; gente jugando en casa o en una oficina.\n"
+            "EVITAR: marcas de videojuegos en primer plano; precios.\n"
+            "TONO: de tú, cercano y con humor ligero.\n"
+            "CTA DE SIEMPRE: Escríbenos por WhatsApp para reservar.\n"
+            "OTRAS REGLAS: «la consola la llevamos nosotros» como frase de marca."
+        ),
+        "prompt_ia": (
+            "Voy a apuntar la MARCA de un cliente para que una IA escriba sus guiones de vídeo. "
+            "Con mis notas, escríbela con estas etiquetas: QUIÉN ES, MOSTRAR, EVITAR, TONO, "
+            "CTA DE SIEMPRE, OTRAS REGLAS. Frases cortas. Sin precios ni ofertas que caduquen. "
+            "No inventes nada: si falta algo, escribe «[confirmar]».\n\n"
+            "MIS NOTAS:\n[pega aquí lo que sabes del cliente]"
+        ),
+    },
+    "chat_guiones": {
+        "titulo": "Conversar con Claude (Parrilla)",
+        "donde": "Automatizar → Añadir guiones → Conversar con Claude",
+        "usa": "pasos/guionista.py",
+        "que_hace": [
+            "Es un chat con Claude, como el de claude.ai: recuerda lo que habláis en esa "
+            "conversación y conoce la marca del proyecto y el formato del guion del Studio.",
+            "Cada guion completo que escribe sale con el botón «Guardar en la Parrilla» (queda "
+            "pendiente, como los demás). Si le pides cambios, lo devuelve entero otra vez.",
+            "📎 Capturas: lee imágenes. Para analizar una cuenta de Instagram o TikTok, haz "
+            "capturas del perfil o de los reels con las vistas a la vista y pégalas.",
+            "🌐 Buscar en internet (por mensaje, apagado de fábrica): busca y abre páginas. "
+            "Instagram y TikTok no enseñan los reels sin iniciar sesión, así que ahí pedirá "
+            "capturas. Lo que saque de fuera lleva su fuente y un aviso ⚠ para confirmarlo.",
+            "📊 Con mis resultados: le pasa tus vídeos de este proyecto que mejor funcionaron, "
+            "con las cifras guardadas en Publicar.",
+            "Opus escribe como en claude.ai; Sonnet contesta antes. Usa tokens de la "
+            "suscripción, sin coste en dólares.",
+        ],
+        "si": [
+            "Empieza contándole el cliente, el objetivo y la red.",
+            "Pídele primero ideas y luego el guion de la que te guste.",
+            "Corrige como a una persona: «más corto», «el gancho más directo», «sin precios».",
+            "Para copiar lo que funciona a otra cuenta: capturas con sus vistas + «¿qué les funciona?».",
+        ],
+        "no": [
+            "Pedirle que entre en Instagram o TikTok: no puede sin iniciar sesión.",
+            "Dar por buenos datos de internet sin mirarlos: confírmalos antes de grabar.",
+            "Una matriz de 50 guiones por el chat: para eso, «Subir un documento».",
+        ],
+        "plantilla": (
+            "CLIENTE: [quién es].\n"
+            "QUIERO: [ideas / un guion / cambiar este guion].\n"
+            "RED Y DURACIÓN: [TikTok 30 s, YouTube 3 min…].\n"
+            "OBJETIVO: [qué tiene que conseguir].\n"
+            "LO QUE SÉ: [datos, ofertas, lo que no se puede decir]."
+        ),
+        "ejemplo": (
+            "CLIENTE: EstadoPlay, alquiler de consolas para fiestas en Lima.\n"
+            "QUIERO: cinco ideas de reels para empresas (fiestas de fin de año), y luego el "
+            "guion de la mejor.\n"
+            "RED Y DURACIÓN: Instagram Reels, 30 s.\n"
+            "OBJETIVO: que escriban por WhatsApp para reservar.\n"
+            "LO QUE SÉ: llevamos y montamos todo; hay karaoke y simulador; sin precios."
+        ),
+        "prompt_ia": (
+            "Ayúdame a escribir el primer mensaje para un chat con una IA que escribe guiones de "
+            "vídeo. Con mis notas, escríbelo con estas etiquetas: CLIENTE, QUIERO, RED Y "
+            "DURACIÓN, OBJETIVO, LO QUE SÉ. Frases cortas y sin inventar datos.\n\n"
+            "MIS NOTAS:\n[lo que quieres pedir]"
+        ),
+    },
+    "analizar_cuenta": {
+        "titulo": "Analizar una cuenta (Parrilla)",
+        "donde": "Automatizar → Analizar una cuenta",
+        "usa": "pasos/cuentas_ajenas.py y motores/lectura_redes/lectores.py",
+        "que_hace": [
+            "Trae los vídeos públicos de una cuenta de TikTok, Instagram o YouTube que NO es tuya "
+            "(competencia, un creador que te guste), con sus vistas, likes, comentarios, duración, "
+            "fecha y texto.",
+            "Primero por la vía gratis: YouTube con su API oficial e Instagram con la vía oficial de "
+            "Meta (solo cuentas profesionales). Si no sirve —TikTok siempre, o una cuenta de Instagram "
+            "personal— y lo tienes permitido, por Apify, que es de pago: unos céntimos por cuenta, con "
+            "un tope al mes. Antes de pagar te dice cuánto costará.",
+            "Una cuenta leída se guarda 24 h: volver a abrirla no paga otra vez.",
+            "«Que Claude la analice» compara sus vídeos con más y con menos vistas y dice qué le "
+            "funciona: temas, ganchos, duración, cuándo publica e ideas para ti.",
+            "«Escribir guiones con lo que le funciona» los escribe para TU proyecto, con tu marca, "
+            "inspirados y sin copiar sus frases ni sus datos. Van a la Parrilla, pendientes.",
+            "«Hablar de ella en el chat» la pasa a «Conversar con Claude».",
+        ],
+        "si": [
+            "Pega el enlace del PERFIL (no el de un vídeo) o escribe el @usuario y elige la red.",
+            "Empieza con 30 vídeos: da para ver qué funciona y cuesta poco.",
+            "Analiza antes de pedir guiones: los guiones usan el análisis.",
+            "Pide en «algo más» lo que necesites: «para Navidad», «sin precios».",
+        ],
+        "no": [
+            "Cuentas privadas: no se pueden leer por ninguna vía.",
+            "Copiar sus frases o su marca: los guiones se inspiran en la fórmula.",
+            "«Volver a traer» la misma cuenta cada rato: con Apify, cada lectura se paga.",
+        ],
+        "plantilla": (
+            "RED: [TikTok / Instagram / YouTube].\n"
+            "CUENTA: [@usuario o enlace del perfil].\n"
+            "QUÉ QUIERO SACAR: [ideas de temas / ganchos / formato].\n"
+            "PARA: [mi proyecto y mi objetivo]."
+        ),
+        "ejemplo": (
+            "RED: TikTok.\n"
+            "CUENTA: https://www.tiktok.com/@unafiestaenlima\n"
+            "QUÉ QUIERO SACAR: qué ganchos usan sus vídeos más vistos.\n"
+            "PARA: EstadoPlay, reels de cumpleaños infantiles."
+        ),
+        "prompt_ia": (
+            "Voy a analizar la cuenta de redes de un competidor para aprender qué le funciona. "
+            "Con mis notas, dime en una lista corta qué debería fijarme (temas, ganchos, duración, "
+            "horarios) y qué NO debería copiar.\n\nMIS NOTAS:\n[la cuenta y lo que quieres sacar]"
+        ),
+    },
+    "conexiones_cuentas": {
+        "titulo": "Conexiones para analizar cuentas",
+        "donde": "Automatizar → Analizar una cuenta → Conexiones",
+        "usa": "pasos/cuentas_ajenas.py (las claves van en <secretos>/lectura_redes.json)",
+        "que_hace": [
+            "YOUTUBE (gratis): una clave de API de Google. En console.cloud.google.com crea un "
+            "proyecto, entra en «APIs y servicios → Biblioteca», activa «YouTube Data API v3» y en "
+            "«Credenciales» crea una «Clave de API». Da 10.000 unidades al día gratis; leer una cuenta "
+            "usa 3.",
+            "INSTAGRAM (gratis): se usa UNA cuenta tuya de Instagram como «ventana» para mirar las "
+            "demás. Puede ser la de tu negocio o una creada solo para el Studio: lo único que pide "
+            "Meta es que sea PROFESIONAL (Empresa o Creador) y esté vinculada a una Página de "
+            "Facebook que administres. Mirar otras cuentas no publica ni cambia nada en la tuya. En developers.facebook.com crea una "
+            "app de tipo «Empresa», añade el producto de Instagram, y en el «Explorador de la API "
+            "Graph» genera un token con instagram_basic, pages_show_list, pages_read_engagement e "
+            "instagram_manage_insights. Pásalo por el «Depurador de tokens» → «Ampliar» para que dure "
+            "~60 días, pégalo aquí y pulsa «Buscar mi cuenta». El Studio avisa cuando va a caducar.",
+            "APIFY (de pago, de respaldo): crea una cuenta en apify.com (el plan gratis trae 5 $ al "
+            "mes) y copia tu token de «Settings → API & Integrations». Se usa para TikTok y para las "
+            "cuentas de Instagram que no son profesionales.",
+            "El TOPE AL MES para Apify viene en 5 $ (lo del plan gratis). Al llegar, no se lee nada "
+            "más de pago hasta el mes siguiente o hasta que lo subas.",
+            "Las claves se guardan en el servidor y nunca bajan a la pantalla: solo sus 4 últimos "
+            "caracteres. Nunca las pegues en un chat.",
+        ],
+        "si": [
+            "Empieza por YouTube: es lo más rápido y es gratis.",
+            "Para CAMBIAR de cuenta de Instagram (por ejemplo, a una nueva solo para el Studio): "
+            "hazla profesional, vincúlala a una Página de Facebook, saca su token, pégalo en "
+            "«Cambiar» y pulsa «Volver a buscar». Las cuentas ya analizadas se quedan.",
+            "Usa una app de Meta solo para esto, a tu nombre: no hace falta pasar la revisión de Meta "
+            "si solo la usa tu negocio.",
+            "Renueva el token de Meta cuando el Studio lo avise.",
+        ],
+        "no": [
+            "Iniciar sesión con cuentas falsas para mirar perfiles: lo prohíben Instagram y TikTok y "
+            "acaba en bloqueos.",
+            "Compartir el token de Apify: con él se gasta tu crédito.",
+        ],
+        "plantilla": (
+            "YOUTUBE: [clave de API de Google].\n"
+            "INSTAGRAM: [token largo de Meta] → «Buscar mi cuenta».\n"
+            "APIFY: [token] · tope al mes: [5] $."
+        ),
+        "ejemplo": (
+            "YOUTUBE: AIza… (puesta).\n"
+            "INSTAGRAM: EAAB… → tu cuenta: @micuenta_studio.\n"
+            "APIFY: apify_api_… · tope al mes: 5 $."
+        ),
+        "prompt_ia": (
+            "Guíame paso a paso, con capturas si puedes, para [crear una clave de API de YouTube Data "
+            "API v3 / crear una app de Meta y un token largo con instagram_basic y pages_show_list / "
+            "sacar mi token de Apify]. Estoy en [ordenador / móvil]."
+        ),
+    },
 }
 
 ORDEN = ("estilo_grafico", "tono", "voz", "material", "indicaciones", "cta",
          "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
-         "tono_redes", "guion_parrilla", "pedir_guiones",
+         "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente",
+         "chat_guiones", "analizar_cuenta", "conexiones_cuentas",
          "palabra_clave", "ubicacion_instagram", "categoria_youtube", "hecho_para_ninos")
 
 

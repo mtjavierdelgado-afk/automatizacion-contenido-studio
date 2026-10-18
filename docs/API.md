@@ -105,6 +105,22 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/videos/{pid}/portada` | Sube una imagen de portada (multipart, campo «portada»). |
 | `GET` | `/api/publicar/videos/{pid}/portada.jpg` | La imagen de portada subida para este vídeo. |
 | `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
+| `GET` | `/api/parrilla/plantilla` | Un guion en blanco en el formato del Studio, para «Escribir uno». |
+| `GET` | `/api/parrilla/proyectos` | Los proyectos que se pueden ver, con cuántos guiones tiene cada uno, y |
+| `GET` | `/api/parrilla/proyectos/{cid}` | Las matrices del proyecto y sus guiones, con el estado al día. |
+| `POST` | `/api/parrilla/proyectos/{cid}/convertir` | Claude convierte lo pegado al formato: {texto, modo, matriz?, nombre?, |
+| `POST` | `/api/parrilla/proyectos/{cid}/guiones` | Sin Claude: {texto (ya en el formato), matriz?, nombre?} -> {matriz, guiones} |
+| `DELETE` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | — |
+| `GET` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | Un guion entero: el texto, lo leído y lo que iría al Encargo. |
+| `PUT` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | {texto?, uso?, formato?, duracion_s?, estado?} -> el guion. |
+| `POST` | `/api/parrilla/proyectos/{cid}/guiones/{gid}/encargo` | {indice?, estilo?} -> lo que la pantalla pone en «Un vídeo nuevo». El |
+| `POST` | `/api/parrilla/proyectos/{cid}/matrices` | {nombre} -> {id} |
+| `DELETE` | `/api/parrilla/proyectos/{cid}/matrices/{mid}` | — |
+| `PUT` | `/api/parrilla/proyectos/{cid}/matrices/{mid}` | {nombre} |
+| `POST` | `/api/parrilla/proyectos/{cid}/pedir` | Claude escribe guiones nuevos: {peticion, cuantos, modo, matriz?, nombre?, |
+| `POST` | `/api/parrilla/proyectos/{cid}/subir` | Una matriz en Word, Excel, PDF o texto (multipart: «documento», «modo», |
+| `DELETE` | `/api/parrilla/trabajos/{tid}` | Quita de la pantalla un trabajo terminado (el aviso de listo o de error). |
+| `GET` | `/api/parrilla/trabajos/{tid}` | Cómo va una conversión: {estado: trabajando|listo|error, avance, ...}. |
 | `GET` | `/api/trabajos` | Trabajos conocidos, opcionalmente de un solo proyecto. |
 | `GET` | `/api/trabajos/{tid}` | Estado y progreso de un trabajo. |
 | `POST` | `/api/trabajos/{tid}/cancelar` | Pide la cancelacion cooperativa de un trabajo. |

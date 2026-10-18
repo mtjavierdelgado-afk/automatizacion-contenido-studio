@@ -3810,5 +3810,141 @@ def publicar_textos_con_el_cursor_en_un_campo(navegador, datos):
         pg.cerrar()
 
 
+# ======================================================================
+# PARRILLA (rama `parrilla`, 17-10-2026). Tramo propio y al final, como el
+# de Publicar. El servidor corre con ESTUDIO_SIMULAR=1: los guiones los
+# convierte y los escribe el doble de Claude (`parrilla._claude_simulado`).
+
+def _docx_de_prueba(ruta, parrafos):
+    import zipfile                                           # noqa: PLC0415
+    w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    cuerpo = "".join(f"<w:p><w:r><w:t>{x}</w:t></w:r></w:p>" for x in parrafos)
+    with zipfile.ZipFile(ruta, "w") as z:
+        z.writestr("[Content_Types].xml", "<Types/>")
+        z.writestr("word/document.xml", f'<w:document xmlns:w="{w}"><w:body>{cuerpo}</w:body></w:document>')
+
+
+@escenario
+def parrilla_de_guiones(navegador, datos):
+    """Automatizar → Parrilla: escribir uno con la plantilla, pedir guiones a
+    Claude, subir un Word, la ficha (cambiar el uso, la guía) y «Pasar al
+    Encargo», que llena «Un vídeo nuevo» en Crear sin crear nada. Y en el
+    móvil con el tema claro, que cabe."""
+    api = datos["api"]
+    cid = datos["cliente"]
+    _r, antes = api.get("/api/proyectos")
+    n_antes = len((antes or {}).get("proyectos") or [])
+    pg = Pagina(navegador, datos)
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    ok(pg.esperar(".parrilla h2", "Automatizar"), "Automatizar abre la Parrilla (ya no es una pestaña vacía)")
+    ok(pg.visible(".parrilla .pestanas-publicar button", "Piloto automático"),
+       "el piloto automático sale como «próximamente»")
+    ok(pg.visible(".parrilla-opcional", "opcional"), "y dice que la Parrilla es opcional")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    pg.p.wait_for_timeout(800)
+    ok(pg.esperar(".vacio-parrilla h3", "Todavía no hay guiones"), "un proyecto sin guiones lo dice")
+
+    # escribir uno con la plantilla, sin Claude
+    pg.pulsar(".vacio-parrilla button", "Añadir guiones")
+    pg.pulsar(".origen-parrilla button", "Escribir o pegar")
+    pg.pulsar(".anadir-parrilla button", "Escribir uno con la plantilla")
+    valor = pg.p.evaluate("() => (document.querySelector('#modulo [data-foco=parrilla-pegar]') || {}).value || ''")
+    ok(valor.startswith("G01 — [Título]"), f"la plantilla del formato en la caja: {valor[:24]!r}")
+    ok(pg.p.locator(".anadir-parrilla input[type=checkbox]").first.is_checked(),
+       "y marcado «Ya está en el formato»")
+    guion = ("EP01 — Fregadero simple o doble\nCliente / proyecto: Cocinas\nUso: exacto\nRed: TikTok\n"
+             "Formato: vertical\nDuración: 45 s\nObjetivo: medidas\nCTA: Escríbenos\nTono: cercano\n\n"
+             "ESCENA 1\nVisual: una bandeja\nVoz: «Por fuera miden igual.»\n\n"
+             "PARA EL ENCARGO\n- Material: Por fuera miden igual. Por dentro, no.\n"
+             "- Indicaciones: una sola idea\n- Llamadas a la acción: Escríbenos\n"
+             "- Duración: 45 s · Formato: vertical\n\nAVISOS\n- ninguno")
+    pg.p.locator("#modulo [data-foco=parrilla-pegar]").fill(guion)
+    pg.p.locator(".anadir-parrilla input[data-foco=parrilla-nombre]").fill("Octubre")
+    pg.pulsar(".anadir-parrilla button.primario", "Guardar en la Parrilla")
+    ok(pg.esperar(".fila-guion .titulo-guion", "EP01 — Fregadero simple o doble", 10),
+       "guardado en la Parrilla, en su matriz")
+    ok(pg.visible(".cab-matriz h3", "Octubre"), "con el nombre de la matriz")
+    ok(pg.visible(".fila-guion .pastilla", "pendiente"), "pendiente")
+
+    # pedir a Claude (el doble)
+    pg.pulsar(".filtros-parrilla button", "Añadir guiones")
+    pg.pulsar(".origen-parrilla button", "Pedir a Claude")
+    pg.p.locator("#modulo [data-foco=parrilla-peticion]").fill("ideas de alquiler de consolas para fiestas")
+    pg.p.locator("#modulo [data-foco=parrilla-cuantos]").fill("3")
+    pg.pulsar(".anadir-parrilla button.primario", "Pedir a Claude")
+    ok(pg.esperar(".trabajo-parrilla", "guardados", 25), "Claude los escribe y lo dice")
+    ok(pg.p.locator(".fila-guion").count() >= 4, "salen en la Parrilla")
+
+    # subir un Word
+    docx = os.path.join(datos["base"], "matriz_parrilla.docx")
+    _docx_de_prueba(docx, ["Cumpleaños con consola", "---", "Karaoke en casa"])
+    pg.pulsar(".filtros-parrilla button", "Añadir guiones")
+    pg.pulsar(".origen-parrilla button", "Subir un documento")
+    pg.p.set_input_files(".anadir-parrilla input[type=file]", docx)
+    pg.p.wait_for_timeout(400)
+    ok(pg.visible(".anadir-parrilla .meta", "matriz_parrilla.docx"), "el Word elegido se ve")
+    pg.pulsar(".anadir-parrilla button.primario", "Subir y convertir")
+    ok(pg.esperar(".cab-matriz h3", "matriz_parrilla", 25), "convertido, en una matriz con el nombre del fichero")
+    pg.captura("parrilla_lista")
+
+    # la ficha
+    pg.pulsar(".fila-guion .titulo-guion", "EP01")
+    ok(pg.esperar(".ficha-parrilla h3", "EP01"), "la ficha del guion")
+    ok(pg.visible(".encargo-parrilla .material-parrilla", "Por dentro, no."), "con lo que irá al Encargo")
+    ok(pg.visible(".encargo-parrilla .pista", "Esto YA es el guion"), "uso exacto: «Esto YA es el guion»")
+    pg.p.locator(".ficha-parrilla .rejilla-parrilla select").first.select_option("adaptar")
+    pg.p.wait_for_timeout(1200)
+    texto = pg.p.evaluate("() => (document.querySelector('#modulo [data-foco=parrilla-texto]') || {}).value || ''")
+    ok("Uso: adaptar" in texto, "cambiar el uso cambia su línea en el texto")
+    ok(pg.visible(".encargo-parrilla .dato-encargo", "Escríbenos"), "y la llamada a la acción pasa a ir «al final»")
+    pg.p.locator(".ficha-parrilla .boton-guia").first.click()
+    ok(pg.esperar("#ventana-guia h2", "El formato del guion", 10), "«✦ Guía» abre la guía del formato")
+    ok(pg.visible("#ventana-guia pre", "GUION ORIGINAL"), "con el prompt del anexo para otra IA")
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(300)
+    pg.captura("parrilla_ficha")
+
+    # pasar al Encargo: llena «Un vídeo nuevo» y no crea nada
+    pg.p.locator(".pasar-encargo select").first.select_option(datos["preset"])
+    pg.pulsar(".pasar-encargo button", "Pasar al Encargo")
+    fin = time.time() + 10
+    while time.time() < fin and not pg.p.evaluate("() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"):
+        pg.p.wait_for_timeout(300)
+    ok(pg.p.evaluate("() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"),
+       "lleva a Crear → «Un vídeo nuevo»")
+    material = pg.p.evaluate("() => (document.querySelector('[data-foco=encargo-material]') || {}).value || ''")
+    ok(material == "Por fuera miden igual. Por dentro, no.", f"con el material del guion: {material[:40]!r}")
+    ok(pg.p.evaluate("() => APP.light.video.encargo.duracion_objetivo_s") == 45, "la duración")
+    ok(pg.p.evaluate("() => APP.light.video.encargo.formato") == "vertical", "el formato")
+    ok(pg.p.evaluate("() => APP.light.video.encargo.cta.cta_final.puesto"), "y la llamada a la acción al final")
+    ok(any("Encargo lleno" in a for a in pg.avisos()), "y lo dice")
+    _r, despues = api.get("/api/proyectos")
+    ok(len((despues or {}).get("proyectos") or []) == n_antes, "sin crear ningún vídeo")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    ok(pg.esperar(".ficha-parrilla .pastilla", "usado", 10) or pg.esperar(".fila-guion .pastilla", "usado", 10),
+       "el guion queda «usado»")
+    pg.sin_errores("la Parrilla")
+    pg.cerrar()
+
+    # el móvil, con el tema claro
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="movil")
+    pg.js("document.documentElement.dataset.tema = 'claro';")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    ok(pg.esperar(".fila-guion", segundos=10), "en el móvil se ven los guiones")
+    for seccion_ in ("parrilla", "anadir"):
+        pg.js(f"irASeccionParrilla('{seccion_}');")
+        ancho = pg.p.evaluate("() => document.documentElement.scrollWidth")
+        ok(ancho <= 391, f"«{seccion_}» cabe a lo ancho en el móvil ({ancho} px)")
+    pg.pulsar(".pestanas-publicar button", "Parrilla")
+    pg.pulsar(".fila-guion button", "Abrir")
+    ok(pg.esperar(".ficha-parrilla", segundos=10), "la ficha en el móvil")
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth")
+    ok(ancho <= 391, f"y cabe ({ancho} px)")
+    pg.captura("parrilla_movil")
+    pg.sin_errores("la Parrilla en el móvil")
+    pg.cerrar()
+
+
 if __name__ == "__main__":
     sys.exit(main())

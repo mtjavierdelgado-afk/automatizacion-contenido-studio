@@ -639,11 +639,245 @@ GUIAS = {
             "sin firma ni hashtags.\n\nMIS NOTAS:\n[cómo habla tu marca]"
         ),
     },
+    # ------------------------------------------------------------- parrilla
+    "guion_parrilla": {
+        "titulo": "El formato del guion (Parrilla)",
+        "donde": "Automatizar → Añadir guiones, y la ficha de un guion",
+        "usa": "pasos/parrilla.py (leer_guion, encargo_de, el prompt de conversión) y "
+               "«Pasar al Encargo» en web/app.js",
+        "que_hace": [
+            "Todo guion de la Parrilla vive en ESTE formato, venga de un Word, un PDF, "
+            "un Excel, de Claude o pegado. Lo que subes o pegas lo convierte Claude; "
+            "si ya está en el formato, marca «Ya está en el formato» y se guarda tal cual.",
+            "«Uso: exacto» respeta la locución palabra por palabra (solo ortografía): al "
+            "pasarlo al Encargo se marca «Esto YA es el guion» y el redactor no la "
+            "reescribe. «Uso: adaptar» toma el original como guía y la locución se "
+            "escribe para la red; el redactor del Studio la vuelve a contar con el tono "
+            "del estilo.",
+            "«Pasar al Encargo» lee la sección PARA EL ENCARGO: el Material va al "
+            "material, las Indicaciones a las indicaciones, la Llamada a la acción a "
+            "«al final» (solo en «adaptar»: en «exacto» ya va dentro de la locución), "
+            "y la Duración y el Formato a los suyos. Si falta algo, se avisa.",
+            "Si PARA EL ENCARGO trae varios «- Material:», son varios vídeos (por "
+            "ejemplo, uno vertical y uno horizontal): la ficha deja elegir cuál pasas.",
+            "Cambiar Uso, Formato o Duración en la ficha cambia su línea en el texto "
+            "(y en PARA EL ENCARGO si hay uno solo).",
+        ],
+        "si": [
+            "Una línea de cabecera por dato: «Uso:», «Formato:», «Duración:»…",
+            "«Voz» solo con lo que se oye; «Visual» con una imagen fija concreta.",
+            "La locución completa y seguida en «- Material:» de PARA EL ENCARGO.",
+            "Las reglas fijas del cliente en MARCA DEL CLIENTE, no en cada escena.",
+            "«Duración: la elijo en el Encargo» si el original no la dice.",
+        ],
+        "no": [
+            "Diálogos entre personajes: el Studio narra con UNA voz (en «exacto» "
+            "se marcan con ⚠ y se propone la versión en voz en off).",
+            "Inventar teléfonos, precios o enlaces: si falta el CTA, «[FALTA CTA]».",
+            "Configuración técnica (cámara, modelo, aspect ratio): se ignora.",
+            "Cambiar los nombres de las etiquetas: el programa las busca tal cual.",
+        ],
+        "plantilla": (
+            "G01 — [Título]\n"
+            "Cliente / proyecto: [cliente]\n"
+            "Uso: adaptar\n"
+            "Red: [TikTok / Reels / Shorts / YouTube / Facebook, o sin definir]\n"
+            "Formato: vertical\n"
+            "Duración: la elijo en el Encargo\n"
+            "Locución estimada: … palabras ≈ … s\n"
+            "Objetivo: [qué tiene que conseguir]\n"
+            "CTA: [qué se pide al final]\n"
+            "Tono: [cómo suena]\n"
+            "\n"
+            "ESCENA 1\n"
+            "Visual: [una imagen fija: quién, dónde, qué hace]\n"
+            "Voz: «[lo que se oye]»\n"
+            "Texto en pantalla: [si lo hay]\n"
+            "\n"
+            "ESCENA 2\n"
+            "Visual: …\n"
+            "Voz: «…»\n"
+            "Texto en pantalla: …\n"
+            "\n"
+            "MARCA DEL CLIENTE\n"
+            "- Mostrar: ninguna\n"
+            "- Evitar: ninguna\n"
+            "- Otras reglas: ninguna\n"
+            "\n"
+            "PARA EL ENCARGO\n"
+            "- Material: [la locución completa seguida]\n"
+            "- Indicaciones: [tono + objetivo + notas visuales clave]\n"
+            "- Llamadas a la acción: [la del CTA]\n"
+            "- Duración: elegir en el Encargo · Formato: vertical\n"
+            "\n"
+            "AVISOS\n"
+            "- ninguno"
+        ),
+        "ejemplo": (
+            "EP01 — Simple o doble: la bandeja manda\n"
+            "Cliente / proyecto: Cocinas Lima\n"
+            "Uso: adaptar\n"
+            "Red: TikTok\n"
+            "Formato: vertical\n"
+            "Duración: 45 s\n"
+            "Locución estimada: 105 palabras ≈ 42 s\n"
+            "Objetivo: que pidan la medida de su fregadero\n"
+            "CTA: Escríbenos por WhatsApp con la medida\n"
+            "Tono: cercano, práctico\n"
+            "\n"
+            "ESCENA 1\n"
+            "Visual: dos fregaderos de acero lado a lado en una encimera blanca\n"
+            "Voz: «Por fuera miden casi lo mismo. Por dentro, la historia cambia.»\n"
+            "Texto en pantalla: ¿Simple o doble?\n"
+            "\n"
+            "ESCENA 2\n"
+            "Visual: unas manos meten una bandeja de horno grande en el fregadero simple\n"
+            "Voz: «Coge la bandeja más grande que lavas y métela en el simple: entra tumbada.»\n"
+            "\n"
+            "MARCA DEL CLIENTE\n"
+            "- Mostrar: acero inoxidable, cocinas reales\n"
+            "- Evitar: marcas ajenas\n"
+            "- Otras reglas: ninguna\n"
+            "\n"
+            "PARA EL ENCARGO\n"
+            "- Material: Por fuera miden casi lo mismo. Por dentro, la historia cambia. Coge la bandeja más grande que lavas y métela en el simple: entra tumbada.\n"
+            "- Indicaciones: cercano y práctico; una sola idea (la bandeja manda); mostrar la bandeja entrando en cada fregadero.\n"
+            "- Llamadas a la acción: Escríbenos por WhatsApp con la medida\n"
+            "- Duración: 45 s · Formato: vertical\n"
+            "\n"
+            "AVISOS\n"
+            "- ninguno"
+        ),
+        # EL PROMPT DEL ANEXO del dueño, tal cual: es el mismo que usa
+        # pasos/parrilla.py al convertir (lo comprueba pasos/prueba_parrilla.py).
+        "prompt_ia": (
+            "Convierte el guion que pego al final al formato del Studio.\n"
+            "\n"
+            "MODO: [exacto | adaptar]\n"
+            "- exacto: la locución del original se respeta palabra por palabra. Solo corriges ortografía y puntuación. No inventas frases.\n"
+            "- adaptar: el original es una guía de ideas. Escribe la locución final respetando el orden, el tono, el objetivo y el CTA, y ajustándola a la red.\n"
+            "\n"
+            "REGLAS GENERALES\n"
+            "1. El Studio narra con UNA sola voz sobre imágenes fijas.\n"
+            "   - Diálogos entre personajes → en \"exacto\", márcalos con ⚠ y propone debajo una versión en voz en off. En \"adaptar\", pásalos directamente a voz en off.\n"
+            "   - Ignora la configuración técnica (modelo, cámara, aspect ratio, audio).\n"
+            "2. \"Voz\" solo lleva lo que se oye, sin acotaciones ni emojis.\n"
+            "3. \"Visual\" describe una imagen fija concreta: quién, dónde, qué hace, qué se ve. Si una escena tiene varios momentos, usa varias líneas Visual.\n"
+            "4. Duración:\n"
+            "   - Si el original la indica, úsala. En \"exacto\" avisa con ⚠ si la locución no cabe (sin recortar); en \"adaptar\", ajústala.\n"
+            "   - Si no la indica, pon \"Duración: la elijo en el Encargo\".\n"
+            "   - Siempre calcula la locución estimada (unas 2,5 palabras por segundo).\n"
+            "5. Tiempos por escena solo si el original los trae; si no, numera las escenas.\n"
+            "6. Las reglas fijas del cliente (qué mostrar, qué evitar, colores, frases de marca) van a MARCA DEL CLIENTE, no dentro de las escenas.\n"
+            "7. No inventes datos: teléfonos, precios o enlaces solo si están en el original. Si falta el CTA, pon [FALTA CTA].\n"
+            "\n"
+            "AJUSTE POR RED (en \"adaptar\" aplícalo; en \"exacto\" solo avisa con ⚠ si algo no encaja)\n"
+            "- TikTok / Reels / Shorts: vertical. Gancho en los primeros 2–3 s. Un cambio de plano cada 1–3 s. Texto en pantalla frecuente y grande, que refuerce la voz. CTA corto (comenta, guárdalo, link en bio, escríbenos). En TikTok, las palabras clave del tema dichas en la voz.\n"
+            "- YouTube largo: horizontal. En los primeros 15–30 s, la promesa de qué se va a ver. Ritmo más pausado, con bloques que puedan ser capítulos. Poco texto en pantalla, solo datos clave. CTA: suscribirse o enlace en la descripción.\n"
+            "- Facebook: vertical u horizontal. Gancho temprano. Que se entienda sin sonido, con texto en pantalla. CTA: enviar mensaje o llamar.\n"
+            "- Si no se indica red, no ajustes nada y pon \"Red: sin definir\".\n"
+            "\n"
+            "FORMATO DE SALIDA (exactamente así)\n"
+            "\n"
+            "ID — Título\n"
+            "Cliente / proyecto: …\n"
+            "Uso: exacto | adaptar\n"
+            "Red: …\n"
+            "Formato: vertical | horizontal\n"
+            "Duración: … s | la elijo en el Encargo\n"
+            "Locución estimada: … palabras ≈ … s\n"
+            "Objetivo: …\n"
+            "CTA: …\n"
+            "Tono: …\n"
+            "\n"
+            "ESCENA 1 (tiempo, si lo hay)\n"
+            "Visual: …\n"
+            "Voz: «…»\n"
+            "Texto en pantalla: …\n"
+            "\n"
+            "(…resto de escenas…)\n"
+            "\n"
+            "CIERRE DE MARCA: … (si lo hay)\n"
+            "\n"
+            "MARCA DEL CLIENTE (va una vez en su estilo, no en cada vídeo)\n"
+            "- Mostrar: …\n"
+            "- Evitar: …\n"
+            "- Otras reglas: …\n"
+            "(Si el guion no trae nada: \"ninguna\")\n"
+            "\n"
+            "VERSIONES POR RED (solo si hay más de una red)\n"
+            "- Para cada red: qué cambia en el gancho, el texto en pantalla y el CTA.\n"
+            "- Indica qué redes pueden compartir el mismo vídeo (mismo formato y duración) y cuáles necesitan su propio vídeo en el Studio.\n"
+            "\n"
+            "PARA EL ENCARGO (uno por cada vídeo distinto que haga falta)\n"
+            "- Material: [locución completa seguida]\n"
+            "- Indicaciones: [tono + objetivo + notas visuales clave, en 3–5 líneas]\n"
+            "- Llamadas a la acción: …\n"
+            "- Duración: … | elegir en el Encargo · Formato: vertical | horizontal\n"
+            "\n"
+            "AVISOS\n"
+            "- [lista de ⚠, o \"ninguno\"]\n"
+            "\n"
+            "GUION ORIGINAL:\n"
+            "<pega aquí>"
+        ),
+    },
+    "pedir_guiones": {
+        "titulo": "Pedir guiones a Claude (Parrilla)",
+        "donde": "Automatizar → Añadir guiones → Pedir a Claude",
+        "usa": "pasos/parrilla.py (instruccion_pedir)",
+        "que_hace": [
+            "Claude escribe guiones NUEVOS directamente en el formato del Studio, de "
+            "cinco en cinco y sin repetir ideas dentro de la misma tanda.",
+            "Usa solo lo que escribes aquí y los datos de la caja (red, formato, "
+            "duración, notas): no busca en internet ni inventa teléfonos, precios o "
+            "enlaces. Si falta el CTA, lo deja como [FALTA CTA].",
+            "Cada guion queda «pendiente» en la Parrilla: revísalo en su ficha antes "
+            "de pasarlo al Encargo.",
+        ],
+        "si": [
+            "Di el cliente, el tema, a quién va y qué tiene que conseguir.",
+            "Los datos que tienen que salir (servicios, zonas, oferta vigente).",
+            "El CTA exacto (WhatsApp, enlace en bio, llamar).",
+            "Ángulos o series que quieras («errores frecuentes», «antes y después»).",
+        ],
+        "no": [
+            "Pedir 30 sin decir de qué: salen genéricos y parecidos.",
+            "Precios o datos que no confirmas: los usará tal cual.",
+        ],
+        "plantilla": (
+            "CLIENTE: [nombre y a qué se dedica].\n"
+            "PÚBLICO: [a quién va].\n"
+            "OBJETIVO: [qué tiene que conseguir cada vídeo].\n"
+            "TEMAS O ÁNGULOS: [ideas o series].\n"
+            "DATOS QUE PUEDEN SALIR: [servicios, zonas, oferta].\n"
+            "CTA: [lo que se pide al final].\n"
+            "EVITAR: [lo que no debe salir]."
+        ),
+        "ejemplo": (
+            "CLIENTE: EstadoPlay, alquiler de consolas para fiestas en Lima.\n"
+            "PÚBLICO: padres que organizan cumpleaños de niños de 6 a 12 años.\n"
+            "OBJETIVO: que escriban por WhatsApp para reservar.\n"
+            "TEMAS O ÁNGULOS: errores al organizar un cumpleaños; qué juegos funcionan "
+            "con muchos niños; cómo se monta todo en una hora.\n"
+            "DATOS QUE PUEDEN SALIR: llevamos y montamos la consola, el televisor y los "
+            "mandos; también karaoke y simulador.\n"
+            "CTA: escríbenos por WhatsApp.\n"
+            "EVITAR: precios."
+        ),
+        "prompt_ia": (
+            "Voy a pedir guiones de vídeo corto a un sistema que los escribe en un "
+            "formato fijo. Con mis notas, escribe la petición con estas etiquetas: "
+            "CLIENTE, PÚBLICO, OBJETIVO, TEMAS O ÁNGULOS, DATOS QUE PUEDEN SALIR, CTA, "
+            "EVITAR. Sin inventar datos: si falta algo, escribe «[confirmar]».\n\n"
+            "MIS NOTAS:\n[pega aquí tus notas]"
+        ),
+    },
 }
 
 ORDEN = ("estilo_grafico", "tono", "voz", "material", "indicaciones", "cta",
          "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
-         "tono_redes")
+         "tono_redes", "guion_parrilla", "pedir_guiones")
 
 
 

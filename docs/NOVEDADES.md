@@ -10,6 +10,34 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**La Parrilla de guiones, en Automatizar (17 de octubre)**
+- **Automatizar ya no está vacío: abre la Parrilla.** Cada proyecto tiene sus
+  matrices de guiones, y cada guion su estado: **pendiente**, **usado** (se
+  pasó al Encargo) o **publicado** (su vídeo ya salió en Publicar). El paso de
+  usado a publicado es solo: en cuanto creas el vídeo con ese guion queda
+  enlazado, y cuando lo publicas pasa a publicado. También se puede marcar a
+  mano, o volver a pendiente.
+- **Añadir guiones**, de tres formas: **subir una matriz** en Word (.docx),
+  Excel (.xlsx), PDF o texto; **pedírselos a Claude** (de 1 a 30, de cinco en
+  cinco y sin repetir ideas); o **escribir o pegar** uno o varios. Todo se
+  convierte al **formato único del guion** (el del prompt de conversión), con
+  «Uso: exacto» (la locución se respeta palabra por palabra) o «Uso: adaptar»
+  (el original es una guía y la locución se escribe para la red). Si lo pegado
+  ya está en el formato, se guarda tal cual, sin Claude. Una matriz larga se
+  convierte guion a guion.
+- **La ficha de un guion**: su texto entero, editable; uso, formato y
+  duración a mano; sus avisos ⚠; y **lo que irá al Encargo**, tal como saldrá.
+- **«Pasar al Encargo»** llena «Un vídeo nuevo» en Crear —nombre, material,
+  indicaciones, llamada a la acción, duración y formato— con el estilo que
+  elijas, y marca el guion como usado. Con «exacto» marca «Esto YA es el
+  guion». No crea ningún vídeo ni gasta nada: el vídeo lo creas tú con
+  «Generar el guion», como siempre.
+- **Es opcional**: el Encargo se sigue llenando a mano igual que antes.
+- Dos guías nuevas: **«El formato del guion»** (con el prompt de conversión
+  para pegarlo en otra IA) y **«Pedir guiones a Claude»**.
+- Convertir y escribir guiones usa Claude (tokens de la suscripción, sin
+  coste en dólares). El piloto automático todavía no está: llega más adelante.
+
 **El vídeo montado ocupa menos (17 de octubre)**
 - Cada montaje ya no copia los clips de los planos que no cambian: la versión
   nueva los comparte con la anterior. Cambiar la música o el logo ya no duplica

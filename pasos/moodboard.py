@@ -70,6 +70,27 @@ from concurrent.futures import ThreadPoolExecutor
 
 import medios
 
+
+def en_paralelo(cadenas, funcion, argumentos):
+    """`funcion(*a)` para cada `a` con `cadenas` hilos, y el primer fallo sube.
+
+    AL PRIMER FALLO --una cancelacion es un fallo: avisar() lanza `Cancelado`--
+    SE TIRA LO QUE QUEDA EN COLA (`cancel_futures`). Con el `with` de siempre la
+    salida del pool esperaba a TODAS las tareas, tambien a las que aun no habian
+    empezado: cancelar a media tanda pagaba las seis laminas igual (medido: 6
+    de 6, dos de ellas empezadas DESPUES de cancelar). Las que ya estan en
+    vuelo se dejan acabar: esas ya se estan pagando, y lo pagado se guarda.
+    """
+    pool = ThreadPoolExecutor(max_workers=max(1, int(cadenas)))
+    futuros = [pool.submit(funcion, *a) for a in argumentos]
+    try:
+        for futuro in futuros:
+            futuro.result()
+    except BaseException:
+        pool.shutdown(wait=True, cancel_futures=True)
+        raise
+    pool.shutdown(wait=True)
+
 PASO = "moodboard"
 PROPUESTAS = "_propuestas"
 
@@ -549,6 +570,11 @@ def generar(referencias, estilo, ejes=None, peticiones=None, calidad="medium",
     candado = threading.Lock()
 
     def dibujar(indice, eje):
+        # ANTES DE PAGAR, la pregunta de si sigue en pie: avisar() lanza
+        # `Cancelado` si se pidio parar, y esta imagen no se encarga
+        with candado:
+            avisar(hechas[0] / max(1, len(pedidos)),
+                   f"{hechas[0]} de {len(pedidos)} referencias dibujadas")
         prompt = prompt_de_eje(eje, estilo, peticiones.get(eje), guia, bloque,
                                idioma=idioma)
         png, meta = imagen.generar(prompt, refs, quality=calidad,
@@ -571,10 +597,7 @@ def generar(referencias, estilo, ejes=None, peticiones=None, calidad="medium",
     else:
         # se recoge el resultado de cada hilo para que un fallo vuelva a
         # levantarse aqui en vez de quedarse tragado dentro de su hilo
-        with ThreadPoolExecutor(max_workers=cadenas) as pool:
-            for tarea in [pool.submit(dibujar, i, e)
-                          for i, e in enumerate(pedidos)]:
-                tarea.result()
+        en_paralelo(cadenas, dibujar, list(enumerate(pedidos)))
 
     hechos, gasto = [], 0.0
     for par in resultados:
@@ -899,6 +922,11 @@ def dibujar_desde_guia(estilo, destino, ejes=None, calidad="medium",
         # `reutilizar=False` cuando alguien pide ESA lamina a proposito: ahi
         # lo pedido es una nueva, aunque una pasada fallida dejara una igual
         ruta = lamina_apuntada(destino, eje, huella) if reutilizar else None
+        if not ruta:
+            # ANTES DE PAGAR: si se cancelo, avisar() lanza y esta no se encarga
+            with candado:
+                avisar(hechas[0] / max(1, len(pedidos)),
+                       f"{hechas[0]} de {len(pedidos)} referencias dibujadas")
         if ruta:
             # pagada por una pasada que no termino, con lo mismo: no se repaga
             resultados[indice] = (eje, ruta, 0.0)
@@ -922,10 +950,7 @@ def dibujar_desde_guia(estilo, destino, ejes=None, calidad="medium",
         for indice, eje in enumerate(pedidos):
             dibujar(indice, eje)
     else:
-        with ThreadPoolExecutor(max_workers=cadenas) as pool:
-            for tarea in [pool.submit(dibujar, i, e)
-                          for i, e in enumerate(pedidos)]:
-                tarea.result()
+        en_paralelo(cadenas, dibujar, list(enumerate(pedidos)))
 
     rutas, hechos, gasto = [], [], 0.0
     for trio in resultados:

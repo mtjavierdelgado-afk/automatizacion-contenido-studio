@@ -2874,8 +2874,13 @@ def estimar_video(cuerpo: dict = Body(default=None)):
     # CUANTOS PLANOS: la duracion entre la duracion media de un plano, que esta
     # MEDIDA por ritmo. El modo light manda su ritmo; el editor manda la
     # horquilla que tenga escrita en assets y aqui se busca el ritmo parecido.
-    if datos.get("ritmo"):
-        ficha_ritmo = light.ritmo_de(datos.get("ritmo"))
+    # UN VIDEO CORTO NUEVO nace en ritmo rapido si su estilo va mas lento
+    # (`presets_light.ritmo_para_video_nuevo`): con `ritmo_corto` la pantalla
+    # pregunta por el video que va a nacer, no por el estilo.
+    corto = (light.ritmo_para_video_nuevo(segundos, datos.get("max_s"))
+             if datos.get("ritmo_corto") and not datos.get("ritmo") else None)
+    if datos.get("ritmo") or corto:
+        ficha_ritmo = light.ritmo_de(datos.get("ritmo") or corto)
     else:
         ficha_ritmo = light.ritmo_parecido(datos.get("min_s"), datos.get("max_s"))
     media = max(0.5, float(ficha_ritmo["media_s"]))
@@ -6904,7 +6909,9 @@ def leer_transiciones(pid: str):
     # copias del mismo texto.
     plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
     escenas = plan.get("escenas") or []
-    reparto = trans.resolver(escenas, render, semilla=(plan.get("semilla") or 0))
+    reparto = trans.resolver(escenas, render, semilla=(plan.get("semilla") or 0),
+                             montaje=PASOS_MODULOS.camara.normalizar_montaje(
+                                 (ctx.estado.params("callouts") or {}).get("montaje")))
     ficha["reparto"] = {sid: {k: v for k, v in corte.items() if k != "shader"}
                         for sid, corte in reparto.items()}
     return ficha
@@ -7554,6 +7561,122 @@ def cambiar_subtitulos(pid: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(409, "el vídeo se está montando ahora: cámbialo cuando termine")
     cambiado = _aplicar_subtitulos(ctx, _cuerpo(cuerpo))
     return {"cambiado": cambiado, "estado": ctx.estado.estado_de("callouts")}
+
+
+# ------------------------------------------------- el montaje (18-10-2026)
+# Movimiento de camara, subtitulos de redes, gancho, cifras y barra
+# (`callouts.montaje`, ver pasos/camara.py) y las transiciones que entran
+# (`render.transiciones`). Nada de esto toca una imagen: cambiarlo deja
+# pendientes las capas y el montaje, que se rehacen gratis.
+
+@app.get("/api/montaje")
+def datos_del_montaje():
+    """Lo que la pantalla necesita para elegir el montaje antes de que exista
+    el video: el de los cortos, el de siempre, hasta cuanto es corto y el
+    catalogo de transiciones con su GLSL para las muestras."""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    camara = PASOS_MODULOS.camara
+    trans = PASOS_MODULOS.transiciones
+    ficha = trans.catalogo_para_pantalla(None)
+    ficha.update({
+        "montaje_cortos": camara.normalizar_montaje(camara.MONTAJE_CORTOS),
+        "montaje_siempre": dict(camara.MONTAJE_DE_SIEMPRE),
+        "duracion_corta_s": camara.DURACION_CORTA_S,
+        "niveles": list(camara.NIVELES),
+        "acento": trans.acentos(None)})
+    return ficha
+
+
+_CERROJO_MONTAJE = threading.Lock()
+
+
+@app.get("/api/proyectos/{pid}/montaje")
+def leer_montaje(pid: str):
+    """El montaje de este video, las transiciones elegidas y si esta aplicado."""
+    ctx = contexto(pid)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    camara = PASOS_MODULOS.camara
+    callouts = ctx.estado.params("callouts") or {}
+    render = ctx.estado.params("render") or {}
+    return {"montaje": camara.normalizar_montaje(callouts.get("montaje")),
+            "elegido": bool(callouts.get("montaje")),
+            "transiciones": list(render.get("transiciones") or []),
+            "niveles": list(camara.NIVELES),
+            "montado": bool(_ruta_de_version(ctx, "render", "video.mp4")),
+            "pendiente": (ctx.estado.estado_de("callouts") == "obsoleto"
+                          or ctx.estado.estado_de("render") == "obsoleto")}
+
+
+@app.put("/api/proyectos/{pid}/montaje")
+def cambiar_montaje(pid: str, cuerpo: dict = Body(default=None)):
+    """{montaje?: {movimiento, subtitulos, gancho, cifras, barra}, transiciones?: [..]}
+
+    Solo se escribe lo que cambia, y lo que vuelve a ser lo de siempre QUITA la
+    clave (regla 1). Deja pendientes las capas y el montaje; se aplica con
+    `POST .../montaje/aplicar` o al montar.
+    """
+    ctx = contexto(pid)
+    camara = PASOS_MODULOS.camara
+    # _trabajo_que_toca y no _trabajo_activo: una tanda se registra en su
+    # PRIMER paso y corre tambien las capas y el montaje (`toca`).
+    if _trabajo_que_toca(ctx, ("callouts", "render")):
+        raise ErrorApi(409, "el vídeo se está montando ahora: cámbialo cuando termine")
+    datos = _cuerpo(cuerpo)
+    cambiado = False
+    if datos.get("montaje") is not None:
+        try:
+            pedido = camara.normalizar_montaje(
+                dict(camara.normalizar_montaje((ctx.estado.params("callouts") or {}).get("montaje")),
+                     **datos["montaje"]) if isinstance(datos["montaje"], dict) else datos["montaje"],
+                estricto=True)
+        except ValueError as fallo:
+            raise ErrorApi(400, f"montaje: {fallo}")
+        guardar = camara.para_guardar(pedido)
+        with ctx.estado._lock:
+            params = copy.deepcopy(ctx.estado.params("callouts") or {})
+            if params.get("montaje") != guardar:
+                if guardar:
+                    params["montaje"] = guardar
+                else:
+                    params.pop("montaje", None)
+                ctx.estado.set_params("callouts", params)
+                cambiado = True
+    if datos.get("transiciones") is not None:
+        nuevas = _transiciones_validas(datos["transiciones"])
+        with ctx.estado._lock:
+            params = copy.deepcopy(ctx.estado.params("render") or {})
+            if list(params.get("transiciones") or []) != nuevas:
+                if nuevas:
+                    params["transiciones"] = nuevas
+                else:
+                    params.pop("transiciones", None)
+                ctx.estado.set_params("render", params)
+                cambiado = True
+    if cambiado:
+        ctx.bitacora.anotar("montaje_cambiado", "callouts", {
+            "montaje": datos.get("montaje"), "transiciones": datos.get("transiciones")})
+    return dict(leer_montaje(pid), cambiado=cambiado)
+
+
+@app.post("/api/proyectos/{pid}/montaje/aplicar", status_code=202)
+def aplicar_montaje(pid: str):
+    """Rehace las capas y vuelve a montar el video con el montaje nuevo. Ni una imagen."""
+    ctx = contexto(pid)
+    if not _ruta_de_version(ctx, "render", "video.mp4"):
+        raise ErrorApi(409, "este vídeo todavía no está montado: se aplicará al montarlo")
+    # Mirar y lanzar bajo el mismo cerrojo: un doble clic no lanza dos montajes.
+    # Y con _trabajo_que_toca: la tanda del video corre las capas sin estar
+    # registrada en ellas, y dos pasadas sobre `trabajo/` se pisan al sellar.
+    with _CERROJO_MONTAJE:
+        if _trabajo_que_toca(ctx, ("callouts", "render")):
+            raise ErrorApi(409, "el vídeo ya se está montando")
+        trabajo_id = ctx.gestor.lanzar("montaje", _correr_rehacer_montaje, ctx,
+                                       ["callouts", "render"], paso="render",
+                                       toca=["callouts", "render"])
+    _registrar_trabajo(trabajo_id, ctx.id)
+    return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id)}
 
 
 def _correr_rehacer_montaje(avisar, ctx, tareas, solo_montar=False):
@@ -9573,7 +9696,11 @@ def revisar_campo_con_su_guia(gid: str, cuerpo: dict = Body(default=None)):
     if not texto.strip():
         raise ErrorApi(400, "el campo está vacío: escribe algo y vuelve a revisar")
     anterior = datos.get("anterior") if isinstance(datos.get("anterior"), dict) else None
-    clave = modulo.huella(gid, texto)
+    # LA DURACION DEL VIDEO, para el material y las indicaciones: el mismo
+    # texto sirve para cuatro minutos y no para treinta segundos (guion-cortos,
+    # 17-10-2026). Saneado alli: solo sus dos claves.
+    contexto = modulo.contexto_saneado(gid, datos.get("contexto"))
+    clave = modulo.huella(gid, texto, contexto)
     rid = uuid.uuid4().hex[:12]
     with _LOCK_REVISIONES:
         # se guardan las ultimas 50: es una ventanilla, no un archivo
@@ -9595,14 +9722,15 @@ def revisar_campo_con_su_guia(gid: str, cuerpo: dict = Body(default=None)):
 
     def correr():
         try:
-            resultado = modulo.revisar(gid, texto, cwd=RAIZ_ESTUDIO, anterior=anterior)
+            resultado = modulo.revisar(gid, texto, cwd=RAIZ_ESTUDIO, anterior=anterior,
+                                       contexto=contexto)
             ficha = {"estado": "listo", "guia": gid, "resultado": resultado}
             nuevas = {clave: {k: resultado.get(k) for k in
                               ("veredicto", "resumen", "problemas", "sugerida")}}
             if resultado.get("sugerida"):
                 # la que PROPONE la revision la da por buena la revision: si se
                 # pone tal cual y se vuelve a revisar, sale «sirve»
-                nuevas[modulo.huella(gid, resultado["sugerida"])] = \
+                nuevas[modulo.huella(gid, resultado["sugerida"], contexto)] = \
                     modulo.aprobada_por_la_revision()
             _guardar_revisiones(nuevas)
         except Exception as fallo:                          # noqa: BLE001
@@ -12649,6 +12777,14 @@ NOMBRES_PARTE = {"estilo": "Estilo gráfico", "tono": "Tono del guion",
 #: claves que el preset escribe pero que en un video ya creado son SUYAS
 PROPIAS_DEL_VIDEO = {"brief": ("duracion_objetivo_s", "formato")}
 
+#: Un corto nace en ritmo rapido aunque su estilo vaya mas lento
+#: (`_montaje_al_crear`), y lo apunta en la config. Esas claves son entonces
+#: del VIDEO: sin esto el estilo diria «tiene cambios» en cada corto nuevo y
+#: «Traer» le devolveria el ritmo lento sin que nadie lo pidiera.
+CONFIG_RITMO_DEL_VIDEO = "ritmo_del_video"
+CLAVES_DEL_RITMO = {"assets": ("min_s", "max_s", "min_s_rotulos"),
+                    "voz": ("hueco_minimo",)}
+
 
 def _cambios_de_parte(ctx, ficha, parte):
     """{paso: {clave: valor}} con SOLO lo que de verdad cambiaria."""
@@ -12663,6 +12799,8 @@ def _cambios_de_parte(ctx, ficha, parte):
     cambios = {}
     for paso, valores in crudos.items():
         fuera = PROPIAS_DEL_VIDEO.get(paso, ())
+        if ctx.proyecto.config.get(CONFIG_RITMO_DEL_VIDEO):
+            fuera = tuple(fuera) + CLAVES_DEL_RITMO.get(paso, ())
         distintos = {k: v for k, v in valores.items()
                      if k not in fuera and (actuales.get(paso) or {}).get(k) != v}
         if distintos:
@@ -13764,6 +13902,8 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     # LO QUE LLEVA, validado ANTES de crear nada: un «lleva» que no vale se
     # dice ahora, y no con el video ya creado a medias
     lleva = _normalizar_lleva(datos["lleva"]) if datos.get("lleva") is not None else {}
+    # Y EL MONTAJE (movimiento, subtitulos de redes...), por lo mismo
+    montaje_pedido = _montaje_pedido_al_crear(datos)
 
     nombre = str(datos.get("nombre") or "").strip()
     if not nombre:
@@ -13805,6 +13945,7 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     if lleva:
         _aplicar_lleva(ctx, lleva, al_crear=True)
     avisos += _opciones_al_crear(ctx, preset_id, datos.get("opciones") or {})
+    avisos += _montaje_al_crear(ctx, datos, montaje_pedido)
     ctx.bitacora.anotar("video_light_creado", None, {
         "preset": preset_id, "estilo": ficha_preset.get("nombre"),
         "nombre": nombre, "avisos": avisos})
@@ -13813,6 +13954,82 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
             "aplicado": aplicado.get("pasos") or [],
             "avisos": avisos,
             "pasos": [ficha_paso(ctx, p["id"]) for p in PASOS]}
+
+
+def _montaje_pedido_al_crear(datos):
+    """El montaje y las transiciones que pide el encargo, validados. -> dict
+
+    {"montaje": dict|None, "transiciones": [..]|None, "ritmo": "estilo"|None}.
+    `montaje` None es «no ha dicho nada»: un video corto nace entonces con el
+    de los cortos (`camara.MONTAJE_CORTOS`) y uno largo con el de siempre.
+    """
+    camara = PASOS_MODULOS.camara
+    opciones = datos.get("opciones") if isinstance(datos.get("opciones"), dict) else {}
+    salida = {"montaje": None, "transiciones": None, "ritmo": None}
+    if opciones.get("montaje") is not None:
+        try:
+            salida["montaje"] = camara.normalizar_montaje(opciones["montaje"], estricto=True)
+        except ValueError as fallo:
+            raise ErrorApi(400, f"montaje: {fallo}")
+    if opciones.get("transiciones") is not None:
+        salida["transiciones"] = _transiciones_validas(opciones["transiciones"])
+    ritmo = str(opciones.get("ritmo") or "").strip().lower()
+    if ritmo and ritmo not in ("estilo", "rapido"):
+        raise ErrorApi(400, "ritmo: «estilo» o «rapido»")
+    salida["ritmo"] = ritmo or None
+    return salida
+
+
+def _transiciones_validas(lista):
+    """Las transiciones pedidas, contra el catalogo. -> [ids] (vacia = las de fabrica)"""
+    if not isinstance(lista, list):
+        raise ErrorApi(400, "transiciones: una lista de nombres")
+    catalogo = PASOS_MODULOS.transiciones.CATALOGO
+    malas = [str(x) for x in lista if str(x) not in catalogo or str(x) == "corte"]
+    if malas:
+        raise ErrorApi(400, "transiciones que no existen: " + ", ".join(malas[:5]))
+    vistas = []
+    for nombre in lista:
+        if str(nombre) not in vistas:
+            vistas.append(str(nombre))
+    return vistas
+
+
+def _montaje_al_crear(ctx, datos, pedido):
+    """El montaje de un video NUEVO, escrito al nacer. -> avisos
+
+    Un video de hasta 2 minutos nace con el montaje de los cortos (movimiento
+    vivo, subtitulos de redes, gancho, cifras y barra) y en ritmo rapido si su
+    estilo va mas lento, salvo que el encargo diga otra cosa. Uno largo, con lo
+    de siempre. Es un video nuevo: escribir aqui no deja nada obsoleto, y lo
+    que es igual a lo de siempre NO se escribe (regla 1).
+    """
+    camara = PASOS_MODULOS.camara
+    light = _light()
+    avisos = []
+    segundos = datos.get("duracion_objetivo_s")
+    try:
+        corto = 0 < float(segundos or 0) <= camara.DURACION_CORTA_S
+    except (TypeError, ValueError):
+        corto = False
+    montaje = pedido.get("montaje")
+    if montaje is None and corto:
+        montaje = camara.normalizar_montaje(camara.MONTAJE_CORTOS)
+    guardar = camara.para_guardar(montaje) if montaje is not None else None
+    if guardar:
+        ctx.estado.actualizar_params("callouts", {"montaje": guardar})
+    if pedido.get("transiciones"):
+        ctx.estado.actualizar_params("render", {"transiciones": pedido["transiciones"]})
+    if corto and pedido.get("ritmo") != "estilo":
+        assets = ctx.estado.params("assets") or {}
+        ritmo = light.ritmo_para_video_nuevo(segundos, assets.get("max_s"))
+        if ritmo:
+            for paso, valores in light.params_de_ritmo(ritmo).items():
+                ctx.estado.actualizar_params(paso, valores)
+            ctx.proyecto.config[CONFIG_RITMO_DEL_VIDEO] = ritmo
+            ctx.proyecto.guardar_config()
+            ctx.bitacora.anotar("ritmo_de_corto", "assets", {"ritmo": ritmo})
+    return avisos
 
 
 def _opciones_al_crear(ctx, preset_id, opciones):
@@ -14965,6 +15182,362 @@ def publicar_lo_que_funciono(peticion: Request, proyecto: str = Query(default=""
         cid = "" if cid == P.SIN_PROYECTO else cid
     return P.lo_que_funciono(raiz_proyectos(), _videos_para_publicar(peticion), cid,
                              dias=dias, red=red, por=por, cuantos=cuantos)
+
+# =================================================================== PARRILLA
+# Automatizar → Parrilla (rama `parrilla`, 17-10-2026): matrices de guiones por
+# proyecto, en el formato unico del anexo, y «Pasar al Encargo». Bloque propio
+# al final, como PUBLICAR, para no chocar con las ramas que cambian el resto.
+# Quien decide es `pasos/parrilla.py`; aqui solo se mira que el proyecto se
+# pueda ver (los de clave cerrada no existen para quien no los abrio) y se le
+# dice que videos hay, para enlazar un guion «usado» con su video y saber si
+# ya se publico. NADA de aqui escribe params de ningun video (regla 1).
+
+try:
+    import parrilla as PARRILLA  # noqa: E402  (pasos/ ya esta en sys.path)
+    ERROR_PARRILLA = ""
+except Exception as _fallo_parrilla:  # noqa: BLE001
+    PARRILLA = None
+    ERROR_PARRILLA = f"{type(_fallo_parrilla).__name__}: {_fallo_parrilla}"
+
+
+def _parrilla():
+    if PARRILLA is None:
+        raise ErrorApi(503, f"la Parrilla no se ha podido cargar: {ERROR_PARRILLA}")
+    return PARRILLA
+
+
+def _por_parrilla(fn, *args, **kwargs):
+    """Llama a pasos/parrilla.py y convierte su fallo en un ErrorApi."""
+    try:
+        return fn(*args, **kwargs)
+    except PARRILLA.ErrorParrilla as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+
+
+def _proyecto_parrilla(cid, peticion):
+    """El id del proyecto o «_sin»; 404 si no existe o tiene clave sin abrir."""
+    P = _parrilla()
+    cid = str(cid or "")
+    if cid == P.SIN_PROYECTO:
+        return cid
+    if cid not in _nombres_de_clientes() or cid in _cerrados(peticion):
+        raise ErrorApi(404, f"no hay ningún proyecto «{cid}»")
+    return cid
+
+
+def _estilos_para_parrilla(peticion):
+    """[{id, nombre, cliente}] de los estilos que quien pregunta puede ver."""
+    cerrados = _cerrados(peticion)
+    asignaciones = CLIENTES._leer(raiz_proyectos())
+    try:
+        fichas = ((_presets().listar().get("presets") or {}).get("canal")) or []
+    except Exception:                                       # noqa: BLE001
+        fichas = []
+    salida = []
+    for f in fichas:
+        cid = CLIENTES.cliente_de(raiz_proyectos(), f.get("id") or "", datos=asignaciones)
+        if cerrados and cid in cerrados:
+            continue
+        salida.append({"id": f.get("id"), "nombre": f.get("nombre") or f.get("id"),
+                       "cliente": cid or _parrilla().SIN_PROYECTO})
+    return salida
+
+
+#: pid -> (sello de su estado.json, huella del material). Leer el material de
+#: un vídeo abre su estado: se hace una vez por cambio, no en cada lista.
+_HUELLAS_DE_VIDEO = {}
+_MAX_HUELLAS_DE_VIDEO = 2000
+
+
+def _huella_de_video(ficha):
+    P = _parrilla()
+    ruta = os.path.join(ficha["raiz"], "estado.json")
+    try:
+        sello = os.stat(ruta).st_mtime_ns
+    except OSError:
+        return ""
+    guardada = _HUELLAS_DE_VIDEO.get(ficha["id"])
+    if guardada and guardada[0] == sello:
+        return guardada[1]
+    try:
+        texto = (contexto(ficha["id"]).estado.params("ingesta") or {}).get("texto") or ""
+    except Exception:                                       # noqa: BLE001
+        return ""
+    if len(_HUELLAS_DE_VIDEO) >= _MAX_HUELLAS_DE_VIDEO:
+        _HUELLAS_DE_VIDEO.clear()
+    huella = P.huella_material(texto)
+    _HUELLAS_DE_VIDEO[ficha["id"]] = (sello, huella)
+    return huella
+
+
+def _buscador_de_videos(peticion):
+    """La funcion que `parrilla.poner_al_dia` usa para encontrar el video de un
+    guion: (huella, desde) -> (pid, nombre). La lista de videos se lee UNA vez
+    por llamada, y los de un proyecto con clave sin abrir no cuentan (su nombre
+    saldria en la Parrilla de otro proyecto)."""
+    estado = {"lista": None}
+    cerrados = _cerrados(peticion)
+
+    def buscar(huella, desde):
+        if estado["lista"] is None:
+            asignaciones = CLIENTES._leer(raiz_proyectos())
+            lista = []
+            for ficha in Proyecto.listar(raiz_proyectos()):
+                if ficha.get(CONFIG_TALLER):
+                    continue
+                if cerrados and CLIENTES.cliente_de(
+                        raiz_proyectos(), ficha.get(CONFIG_ESTILO_LIGHT) or "",
+                        ficha.get("id"), datos=asignaciones) in cerrados:
+                    continue
+                lista.append(ficha)
+            lista.sort(key=lambda f: str(f.get("creado") or ""))
+            estado["lista"] = lista
+        candidatos = [f for f in estado["lista"] if str(f.get("creado") or "") >= str(desde or "")]
+        for ficha in candidatos[:40]:
+            if _huella_de_video(ficha) == huella:
+                return ficha["id"], ficha.get("nombre") or ficha["id"]
+        return "", ""
+
+    return buscar
+
+
+def _video_publicado(pid):
+    """Si el video tiene algun envio publicado (o subido a mano) en Publicar."""
+    if PUBLICAR is None:
+        return False
+    try:
+        datos = PUBLICAR._leer_video(raiz_proyectos(), pid)
+    except Exception:                                       # noqa: BLE001
+        return False
+    return any((e or {}).get("estado") in ("publicado", "a_mano")
+               for e in (datos or {}).get("envios") or [])
+
+
+def _contexto_parrilla(cid, datos):
+    """Lo que Claude sabe del proyecto al convertir o escribir."""
+    d = datos if isinstance(datos, dict) else {}
+    contexto_claude = {"cliente": _nombres_de_clientes().get(cid, "")}
+    for clave in ("red", "formato", "notas"):
+        if str(d.get(clave) or "").strip():
+            contexto_claude[clave] = str(d.get(clave)).strip()[:1500]
+    try:
+        duracion = int(d.get("duracion_s") or 0)
+    except (TypeError, ValueError):
+        duracion = 0
+    if duracion > 0:
+        contexto_claude["duracion_s"] = min(duracion, 3600)
+    return contexto_claude
+
+
+@app.get("/api/parrilla/proyectos")
+def parrilla_proyectos(peticion: Request):
+    """Los proyectos que se pueden ver, con cuántos guiones tiene cada uno, y
+    los estilos (para elegir con cuál se pasa un guion al Encargo)."""
+    P = _parrilla()
+    cerrados = _cerrados(peticion)
+    try:
+        lista = [c for c in CLIENTES.listar(raiz_proyectos())["clientes"]
+                 if c["id"] not in cerrados]
+    except Exception:                                       # noqa: BLE001
+        lista = []
+    salida = []
+    for c in lista + [{"id": P.SIN_PROYECTO, "nombre": "Sin proyecto"}]:
+        try:
+            cuentas = P.listar(raiz_proyectos(), c["id"])["cuentas"]
+        except P.ErrorParrilla:
+            continue
+        salida.append({"id": c["id"], "nombre": c.get("nombre") or c["id"], "cuentas": cuentas})
+    return {"proyectos": salida, "estilos": _estilos_para_parrilla(peticion),
+            "usos": list(P.USOS), "estados": list(P.ESTADOS), "max_pedir": P.MAX_PEDIR}
+
+
+@app.get("/api/parrilla/proyectos/{cid}")
+def parrilla_listar(cid: str, peticion: Request):
+    """Las matrices del proyecto y sus guiones, con el estado al día."""
+    P = _parrilla()
+    cid = _proyecto_parrilla(cid, peticion)
+    try:
+        P.poner_al_dia(raiz_proyectos(), cid, _buscador_de_videos(peticion), _video_publicado)
+    except Exception as fallo:                              # noqa: BLE001
+        print(f"[parrilla] no se ha podido poner al día {cid}: {fallo}", flush=True)
+    return _por_parrilla(P.listar, raiz_proyectos(), cid)
+
+
+@app.get("/api/parrilla/plantilla")
+def parrilla_plantilla(peticion: Request, proyecto: str = Query(default="")):
+    """Un guion en blanco en el formato del Studio, para «Escribir uno»."""
+    P = _parrilla()
+    cid = _proyecto_parrilla(proyecto or P.SIN_PROYECTO, peticion)
+    return {"texto": P.plantilla_vacia(_nombres_de_clientes().get(cid, ""))}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/matrices", status_code=201)
+def parrilla_crear_matriz(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """{nombre} -> {id}"""
+    cid = _proyecto_parrilla(cid, peticion)
+    mid = _por_parrilla(_parrilla().crear_matriz, raiz_proyectos(), cid,
+                        _cuerpo(cuerpo).get("nombre"), {"tipo": "vacia"})
+    return {"id": mid}
+
+
+@app.put("/api/parrilla/proyectos/{cid}/matrices/{mid}")
+def parrilla_cambiar_matriz(cid: str, mid: str, peticion: Request,
+                            cuerpo: dict = Body(default=None)):
+    """{nombre}"""
+    cid = _proyecto_parrilla(cid, peticion)
+    _por_parrilla(_parrilla().cambiar_matriz, raiz_proyectos(), cid, mid,
+                  _cuerpo(cuerpo).get("nombre"))
+    return {"ok": True}
+
+
+@app.delete("/api/parrilla/proyectos/{cid}/matrices/{mid}")
+def parrilla_borrar_matriz(cid: str, mid: str, peticion: Request):
+    cid = _proyecto_parrilla(cid, peticion)
+    _por_parrilla(_parrilla().borrar_matriz, raiz_proyectos(), cid, mid)
+    anotar_global("parrilla_matriz_borrada", {"proyecto": cid, "matriz": mid})
+    return {"ok": True}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/guiones", status_code=201)
+def parrilla_anadir_en_formato(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Sin Claude: {texto (ya en el formato), matriz?, nombre?} -> {matriz, guiones}"""
+    cid = _proyecto_parrilla(cid, peticion)
+    d = _cuerpo(cuerpo)
+    mid, gids = _por_parrilla(_parrilla().anadir_en_formato, raiz_proyectos(), cid,
+                              str(d.get("matriz") or ""), d.get("texto"),
+                              nombre=d.get("nombre") or "")
+    return {"matriz": mid, "guiones": gids}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/convertir", status_code=202)
+def parrilla_convertir(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Claude convierte lo pegado al formato: {texto, modo, matriz?, nombre?,
+    red?, formato?, duracion_s?, notas?} -> el trabajo (se sigue preguntando)."""
+    cid = _proyecto_parrilla(cid, peticion)
+    d = _cuerpo(cuerpo)
+    datos = {"texto": d.get("texto"), "modo": d.get("modo"), "matriz": str(d.get("matriz") or ""),
+             "nombre": d.get("nombre") or "", "contexto": _contexto_parrilla(cid, d)}
+    t = _por_parrilla(_parrilla().lanzar, raiz_proyectos(), cid, "pegar", datos)
+    anotar_global("parrilla_convertir", {"proyecto": cid, "caracteres": len(str(d.get("texto") or ""))})
+    return t
+
+
+@app.post("/api/parrilla/proyectos/{cid}/pedir", status_code=202)
+def parrilla_pedir(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Claude escribe guiones nuevos: {peticion, cuantos, modo, matriz?, nombre?,
+    red?, formato?, duracion_s?} -> el trabajo."""
+    cid = _proyecto_parrilla(cid, peticion)
+    d = _cuerpo(cuerpo)
+    datos = {"peticion": d.get("peticion"), "cuantos": d.get("cuantos"), "modo": d.get("modo"),
+             "matriz": str(d.get("matriz") or ""), "nombre": d.get("nombre") or "",
+             "contexto": _contexto_parrilla(cid, d)}
+    t = _por_parrilla(_parrilla().lanzar, raiz_proyectos(), cid, "pedir", datos)
+    anotar_global("parrilla_pedir", {"proyecto": cid, "cuantos": d.get("cuantos")})
+    return t
+
+
+@app.post("/api/parrilla/proyectos/{cid}/subir", status_code=202)
+async def parrilla_subir(cid: str, peticion: Request):
+    """Una matriz en Word, Excel, PDF o texto (multipart: «documento», «modo»,
+    y opcionales «matriz», «nombre», «red», «formato», «duracion_s», «notas»)."""
+    cid = await _en_hilo(_proyecto_parrilla, cid, peticion)
+    P = _parrilla()
+    try:
+        formulario = await peticion.form()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(400, f"multipart ilegible: {fallo}")
+    fichero = formulario.get("documento")
+    if not hasattr(fichero, "read"):
+        raise ErrorApi(400, "manda el documento en el campo «documento»")
+    tam = getattr(fichero, "size", None)
+    if isinstance(tam, int) and tam > P.MAX_BYTES_DOCUMENTO:
+        raise ErrorApi(400, "el documento tiene que pesar menos de 20 MB")
+    try:
+        contenido = await fichero.read(P.MAX_BYTES_DOCUMENTO + 1)
+        nombre_fichero = os.path.basename(str(getattr(fichero, "filename", "") or "documento"))
+        campos = {k: (v if isinstance(v, str) else "") for k, v in formulario.multi_items()
+                  if not hasattr(v, "read")}
+    finally:
+        # los temporales del multipart, ya: no al pasar el recolector
+        await formulario.close()
+    return await _en_hilo(_parrilla_subir_en_hilo, cid, nombre_fichero, contenido, campos)
+
+
+def _parrilla_subir_en_hilo(cid, nombre_fichero, contenido, campos):
+    """Lo de disco de `parrilla_subir`, fuera del bucle de eventos."""
+    P = _parrilla()
+    ruta = _por_parrilla(P.guardar_subida, raiz_proyectos(), nombre_fichero, contenido)
+    datos = {"ruta": ruta, "nombre_fichero": nombre_fichero, "modo": campos.get("modo"),
+             "matriz": campos.get("matriz") or "",
+             "nombre": campos.get("nombre") or os.path.splitext(nombre_fichero)[0],
+             "contexto": _contexto_parrilla(cid, campos)}
+    try:
+        t = _por_parrilla(P.lanzar, raiz_proyectos(), cid, "subir", datos)
+    except ErrorApi:
+        try:
+            os.remove(ruta)
+        except OSError:
+            pass
+        raise
+    anotar_global("parrilla_subir", {"proyecto": cid, "fichero": nombre_fichero,
+                                     "bytes": len(contenido)})
+    return t
+
+
+@app.get("/api/parrilla/trabajos/{tid}")
+def parrilla_trabajo(tid: str, peticion: Request):
+    """Cómo va una conversión: {estado: trabajando|listo|error, avance, ...}."""
+    t = _parrilla().trabajo(tid)
+    if not t or (t["cid"] != _parrilla().SIN_PROYECTO and t["cid"] in _cerrados(peticion)):
+        raise ErrorApi(404, "ese trabajo ya no existe (¿se reinició el servicio?)")
+    return t
+
+
+@app.delete("/api/parrilla/trabajos/{tid}")
+def parrilla_olvidar_trabajo(tid: str, peticion: Request):
+    """Quita de la pantalla un trabajo terminado (el aviso de listo o de error)."""
+    t = _parrilla().trabajo(tid)
+    if t and (t["cid"] == _parrilla().SIN_PROYECTO or t["cid"] not in _cerrados(peticion)):
+        _parrilla().olvidar_trabajo(tid)
+    return {"ok": True}
+
+
+@app.get("/api/parrilla/proyectos/{cid}/guiones/{gid}")
+def parrilla_guion(cid: str, gid: str, peticion: Request):
+    """Un guion entero: el texto, lo leído y lo que iría al Encargo."""
+    cid = _proyecto_parrilla(cid, peticion)
+    return _por_parrilla(_parrilla().leer, raiz_proyectos(), cid, gid)
+
+
+@app.put("/api/parrilla/proyectos/{cid}/guiones/{gid}")
+def parrilla_guardar_guion(cid: str, gid: str, peticion: Request,
+                           cuerpo: dict = Body(default=None)):
+    """{texto?, uso?, formato?, duracion_s?, estado?} -> el guion."""
+    cid = _proyecto_parrilla(cid, peticion)
+    return _por_parrilla(_parrilla().guardar_guion, raiz_proyectos(), cid, gid, _cuerpo(cuerpo))
+
+
+@app.delete("/api/parrilla/proyectos/{cid}/guiones/{gid}")
+def parrilla_borrar_guion(cid: str, gid: str, peticion: Request):
+    cid = _proyecto_parrilla(cid, peticion)
+    _por_parrilla(_parrilla().borrar_guion, raiz_proyectos(), cid, gid)
+    return {"ok": True}
+
+
+@app.post("/api/parrilla/proyectos/{cid}/guiones/{gid}/encargo")
+def parrilla_pasar_al_encargo(cid: str, gid: str, peticion: Request,
+                              cuerpo: dict = Body(default=None)):
+    """{indice?, estilo?} -> lo que la pantalla pone en «Un vídeo nuevo». El
+    guion pasa a «usado». No crea ningún vídeo ni escribe ningún param."""
+    cid = _proyecto_parrilla(cid, peticion)
+    d = _cuerpo(cuerpo)
+    estilo = str(d.get("estilo") or "")
+    if estilo and estilo not in {e["id"] for e in _estilos_para_parrilla(peticion)}:
+        raise ErrorApi(404, "ese estilo ya no existe")
+    encargo = _por_parrilla(_parrilla().pasar_al_encargo, raiz_proyectos(), cid, gid,
+                            d.get("indice") or 0, estilo)
+    anotar_global("parrilla_al_encargo", {"proyecto": cid, "guion": gid, "estilo": estilo})
+    return {"encargo": encargo}
 
 
 # ------------------------------------------------------------------------ main

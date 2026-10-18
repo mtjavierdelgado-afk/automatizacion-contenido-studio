@@ -2200,8 +2200,8 @@ def probar_sistema(cliente):
     ids = [g.get("id") for g in datos.get("guias") or []]
     igual(ids, ["estilo_grafico", "tono", "voz", "material", "indicaciones", "cta",
                 "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
-                "tono_redes"],
-          "estan las once guias (las seis de Crear y las cinco de Publicar), en orden")
+                "tono_redes", "guion_parrilla", "pedir_guiones"],
+          "estan las trece guias (seis de Crear, cinco de Publicar y dos de la Parrilla), en orden")
     ok(all(g.get("plantilla") and g.get("prompt_ia") and g.get("que_hace")
            for g in datos.get("guias") or []),
        "cada guia trae plantilla, prompt para otra IA y que hace el sistema")
@@ -4670,6 +4670,99 @@ def probar_turno_y_notas_de_otro_texto():
     igual(sin_nada.escrito, [], "ni que escribir")
 
 
+def probar_montaje(cliente):
+    """El montaje (rama montaje-movimiento, 18-10-2026).
+
+    Un corto NUEVO nace con el montaje de los cortos y en ritmo rapido; uno
+    largo, con lo de siempre y sin una clave escrita (regla 1). El ritmo del
+    corto no cuenta como «el estilo tiene cambios». Cambiar el montaje solo
+    escribe lo que difiere de siempre, y volver a lo de siempre quita la clave.
+    """
+    seccion("EL MONTAJE: MOVIMIENTO, SUBTÍTULOS, GANCHO, CIFRAS Y BARRA")
+    respuesta, datos = cliente.get("/api/montaje")
+    igual(respuesta.status_code, 200, "GET /api/montaje responde 200")
+    igual((datos.get("montaje_cortos") or {}).get("movimiento"), "vivo",
+          "los cortos nacen en vivo")
+    igual(datos.get("duracion_corta_s"), 120, "y es corto hasta 2 minutos")
+    ok(datos.get("catalogo") or datos.get("transiciones"),
+       "con el catálogo de transiciones para elegir")
+
+    respuesta, preset = cliente.post("/api/presets-canal", {
+        "tipo": "canal", "nombre": "Estilo para montaje",
+        "datos": {"guion": {"idioma_salida": "es", "instrucciones": "Claro."},
+                  "voz": {"voz_id": "v-de-prueba", "idioma": "es",
+                          "velocidad": "normal"},
+                  "origen": {"tono_prompt": "serio", "estilo_prompt": "plano"}}})
+    estilo_id = (preset.get("preset") or {}).get("id") or ""
+
+    def crear(nombre, segundos, opciones=None):
+        cuerpo = {"nombre": nombre, "duracion_objetivo_s": segundos,
+                  "material": "Un hecho.\n\nY otro."}
+        if opciones is not None:
+            cuerpo["opciones"] = opciones
+        respuesta, creado = cliente.post(f"/api/presets-light/{estilo_id}/video", cuerpo)
+        return respuesta, (creado.get("proyecto") or {}).get("id") or ""
+
+    respuesta, corto = crear("Corto con montaje", 60)
+    igual(respuesta.status_code, 201, "se crea un corto")
+    _r, callouts = cliente.get(f"/api/proyectos/{corto}/pasos/callouts")
+    igual((callouts.get("params") or {}).get("montaje"),
+          {"movimiento": "vivo", "subtitulos": "redes", "gancho": True,
+           "cifras": True, "barra": True},
+          "un corto nuevo nace con el montaje de los cortos")
+    _r, assets = cliente.get(f"/api/proyectos/{corto}/pasos/assets")
+    igual((assets.get("params") or {}).get("max_s"), 5.0,
+          "y en ritmo rápido (planos de hasta 5 s)")
+    _r, cambios = cliente.get(f"/api/proyectos/{corto}/estilo/cambios")
+    ok(cambios.get("al_dia") is True,
+       f"y el ritmo del corto NO cuenta como «el estilo tiene cambios»: {cambios}")
+
+    respuesta, largo = crear("Largo de siempre", 240)
+    _r, callouts = cliente.get(f"/api/proyectos/{largo}/pasos/callouts")
+    ok("montaje" not in (callouts.get("params") or {}),
+       "un vídeo largo nace sin la clave montaje (regla 1)")
+    _r, assets = cliente.get(f"/api/proyectos/{largo}/pasos/assets")
+    ok((assets.get("params") or {}).get("max_s") != 5.0,
+       "ni el ritmo de los cortos")
+
+    respuesta, sobrio = crear("Corto sobrio", 60, {
+        "montaje": {"movimiento": "sobrio", "subtitulos": "clasicos",
+                    "gancho": False, "cifras": False, "barra": False},
+        "ritmo": "estilo"})
+    _r, callouts = cliente.get(f"/api/proyectos/{sobrio}/pasos/callouts")
+    ok("montaje" not in (callouts.get("params") or {}),
+       "un corto encargado «como siempre» no escribe la clave")
+    _r, assets = cliente.get(f"/api/proyectos/{sobrio}/pasos/assets")
+    ok((assets.get("params") or {}).get("max_s") != 5.0,
+       "y con «ritmo del estilo» no se toca el ritmo")
+    respuesta, _d = crear("Corto malo", 60, {"montaje": {"movimiento": "loco"}})
+    igual(respuesta.status_code, 400, "un montaje que no existe da 400 al crear")
+
+    base = f"/api/proyectos/{largo}/montaje"
+    _r, antes = cliente.get(f"/api/proyectos/{largo}/pasos/callouts")
+    respuesta, leido = cliente.get(base)
+    igual(respuesta.status_code, 200, "GET .../montaje responde 200")
+    igual(leido.get("elegido"), False, "el largo no tiene montaje elegido")
+    respuesta, puesto = cliente.put(base, {"montaje": {"movimiento": "dinamico"}})
+    igual(respuesta.status_code, 200, f"PUT .../montaje responde 200: {puesto}")
+    ok(puesto.get("cambiado") is True, "y dice que cambió")
+    _r, callouts = cliente.get(f"/api/proyectos/{largo}/pasos/callouts")
+    igual((callouts.get("params") or {}).get("montaje"), {"movimiento": "dinamico"},
+          "se guarda SOLO lo que difiere de siempre")
+    respuesta, puesto = cliente.put(base, {"montaje": {"movimiento": "sobrio"}})
+    _r, callouts = cliente.get(f"/api/proyectos/{largo}/pasos/callouts")
+    ok("montaje" not in (callouts.get("params") or {}),
+       "volver a lo de siempre QUITA la clave")
+    igual(callouts.get("firma"), antes.get("firma"),
+          "y la firma de las capas vuelve a la de antes")
+    respuesta, otra = cliente.put(base, {"montaje": {"movimiento": "sobrio"}})
+    ok(otra.get("cambiado") is False, "poner lo que ya está no cambia nada")
+    respuesta, _d = cliente.put(base, {"transiciones": ["inventada"]})
+    igual(respuesta.status_code, 400, "una transición que no existe da 400")
+    respuesta, _d = cliente.post(f"{base}/aplicar", {})
+    igual(respuesta.status_code, 409, "aplicar sin vídeo montado da 409")
+
+
 def probar_traer_estilo(cliente):
     """Un video se queda con la copia del estilo; esto la trae cuando se pide.
 
@@ -5738,6 +5831,7 @@ def main():
         probar_modo_light(cliente)
         probar_video_light(cliente)
         probar_traer_estilo(cliente)
+        probar_montaje(cliente)
         probar_estimacion(cliente)
         probar_el_coste_de_las_imagenes(cliente)
         probar_planos_hechos(cliente, pid)

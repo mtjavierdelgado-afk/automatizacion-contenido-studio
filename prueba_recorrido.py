@@ -783,7 +783,7 @@ def encargo_del_video(navegador, datos):
     pg.js(f"await abrirVideoLight('{datos['video']}');")
     pg.pulsar(".nav-light button", "Encargo")
     ok(pg.esperar(".ajustes-montaje"), "el Encargo enseña los ajustes del montaje")
-    for nombre in ("Música", "Subtítulos", "Logo", "Efectos"):
+    for nombre in ("Música", "Subtítulos", "Logo", "Efectos", "Movimiento y efectos"):
         ok(pg.visible(".fila-ajuste", nombre), f"con su fila de {nombre}")
     ok(not pg.visible(".error-cerrable"), "y sin ningún error arrastrado de otra pantalla")
     # MUSICA
@@ -888,7 +888,10 @@ def notas_de_imagenes(navegador, datos):
         "button", has_text="Rehacer esta imagen").click()
     ok(pg.esperar(".nota-imagen .pastilla", "Rechazada", 120),
        "si OpenAI la rechaza también sin marcas, la nota lo dice")
-    ok(pg.visible(".nota-imagen .nota-error", "filtro de seguridad"), "con el motivo en claro")
+    # ESPERANDO, no mirando en el instante: la pastilla y el motivo llegan en
+    # repintados distintos, y con la máquina cargada el motivo tardaba un
+    # poco más (falló así una vez el 17-10; repetida sola, pasaba)
+    ok(pg.esperar(".nota-imagen .nota-error", "filtro de seguridad", 15), "con el motivo en claro")
     ok(pg.p.locator(".nota-imagen").filter(has_text="Imagen S001").count() == 1,
        "y las notas de la MISMA imagen van en UNA tarjeta (no se repite la imagen)")
     ok(pg.visible(".nota-imagen button", "Hacerla sin marcas"), "y ofrece hacerla sin marcas")
@@ -2854,6 +2857,90 @@ def _capas_fijas_del_video(datos):
 
 
 @escenario
+def movimiento_y_efectos_en_el_video(navegador, datos):
+    """Rama montaje-movimiento (18-10-2026): debajo del vídeo montado sale
+    «Movimiento y efectos»; pasar a dinámico guarda SOLO lo que cambia,
+    «Aplicar ahora» rehace las capas y el MP4 con trayectos de cámara, y ni
+    las imágenes ni la voz se mueven. Se deja como estaba."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    ok(_montar_desde_video(pg), "se parte de un vídeo montado al día")
+    pg.p.wait_for_timeout(1500)
+    fila = pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="Movimiento y efectos").first
+    ok(fila.count() > 0, "debajo del vídeo sale la fila «Movimiento y efectos»")
+    fila.locator("button", has_text="Cambiar").click()
+    pg.p.wait_for_timeout(1200)
+    ok(pg.visible(".editor-montaje label", "Movimiento de cámara"),
+       "con el movimiento de cámara para elegir")
+    ok(pg.visible(".editor-montaje .casilla", "Barra de progreso"),
+       "los interruptores (gancho, cifras, barra)")
+    ok(pg.visible(".editor-montaje summary", "Transiciones"), "y las transiciones")
+    assets_antes = _version_de(datos, "assets", "").get("activa")
+    voz_antes = _version_de(datos, "voz", "").get("activa")
+    render_antes = _version_de(datos, "render", "").get("activa")
+    pg.p.locator(".editor-montaje button", has_text="Dinámico").first.click()
+    pg.p.wait_for_timeout(1500)
+    _r, montaje = api.get(f"/api/proyectos/{pid}/montaje")
+    _r, callouts = api.get(f"/api/proyectos/{pid}/pasos/callouts")
+    ok(((callouts.get("params") or {}).get("montaje") or {}).get("movimiento") == "dinamico",
+       f"pulsar «Dinámico» lo guarda ({(callouts.get('params') or {}).get('montaje')})")
+    ok(montaje.get("pendiente"), "y queda pendiente de aplicar")
+    ok(pg.esperar(".editor-montaje button", "Aplicar ahora", 10), "con su «Aplicar ahora»")
+    pg.captura("montaje_dinamico", entera=False)
+    pg.p.locator(".editor-montaje button", has_text="Aplicar ahora").first.click()
+    pg.p.wait_for_timeout(2500)
+    ok(api.libre(pid, 600), "el montaje termina")
+    pg.sin_trabajo(600)
+    activa = _version_de(datos, "callouts", "").get("activa")
+    ruta_mov = os.path.join(datos["proyectos"], pid, "pasos", "callouts",
+                            f"v{activa}", "movimiento.json")
+    try:
+        with open(ruta_mov, encoding="utf-8") as fh:
+            mov = json.load(fh)
+    except (OSError, ValueError):
+        mov = {}
+    movs = mov.get("movimientos") or {}
+    movs = list(movs.values()) if isinstance(movs, dict) else list(movs)
+    con_trayecto = [e for e in movs if isinstance(e, dict) and e.get("trayecto")]
+    ok(con_trayecto, "las capas nuevas llevan trayectos de cámara")
+    ok((_version_de(datos, "assets", "").get("activa"),
+        _version_de(datos, "voz", "").get("activa")) == (assets_antes, voz_antes),
+       "ni una imagen ni la voz se han rehecho")
+    ok(_version_de(datos, "render", "").get("activa") != render_antes,
+       "y el MP4 se ha vuelto a montar")
+    # LAS TRANSICIONES (18-10, visto en el móvil): marcar una no cierra la
+    # lista, y las muestras se pintan todas (antes, una WebGL por tarjeta y el
+    # navegador tiraba las viejas: carita triste en vez de la muestra).
+    pg.p.locator(".editor-montaje summary", has_text="Transiciones").first.click()
+    pg.p.wait_for_timeout(800)
+    pg.p.locator(".tarjeta-transicion input").first.click()
+    pg.p.wait_for_timeout(1500)
+    ok(pg.p.evaluate("() => !!(document.querySelector('.transiciones-montaje') || {}).open"),
+       "marcar una transición no cierra la lista")
+    vacias = pg.p.evaluate("""() => [...document.querySelectorAll('canvas.muestra-transicion')]
+      .slice(0, 4).filter(c => { c.scrollIntoView(); return false; }).length""")
+    pg.p.wait_for_timeout(1200)
+    pintadas = pg.p.evaluate("""() => [...document.querySelectorAll('canvas.muestra-transicion')]
+      .slice(0, 4).filter(c => { const d = c.getContext('2d').getImageData(0, 0, 160, 90).data;
+        let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n > 1000; }).length""")
+    ok(pintadas >= 1 and vacias == 0, f"las muestras de las transiciones se pintan ({pintadas})")
+    # se deja como estaba para quien venga detrás
+    api.put(f"/api/proyectos/{pid}/montaje", {"transiciones": []})
+    # se deja como estaba para quien venga detrás
+    api.put(f"/api/proyectos/{pid}/montaje", {"montaje": {"movimiento": "sobrio"}})
+    _r, callouts = api.get(f"/api/proyectos/{pid}/pasos/callouts")
+    ok("montaje" not in (callouts.get("params") or {}),
+       "volver a sobrio quita la clave (regla 1)")
+    api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})
+    api.libre(pid, 600)
+    pg.sin_errores("movimiento y efectos en el vídeo")
+    pg.cerrar()
+
+
+@escenario
 def fuente_y_sitio_de_los_subtitulos(navegador, datos):
     """N9 de las notas de mejoras, paso 4: «a los subtítulos corregir fuente,
     estilos, color…, correcciones que no pasen por regenerar las imágenes ni
@@ -3767,6 +3854,181 @@ def publicar_lo_del_16_de_octubre(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def publicar_textos_con_el_cursor_en_un_campo(navegador, datos):
+    """17-10, en el servidor: Claude escribió los textos (lo dice el log) y la
+    ficha siguió vacía con «Claude está escribiendo…». Con el cursor en un
+    campo de texto mientras escribe, los textos tienen que aparecer igual."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    api.post(f"/api/publicar/proyectos/{cid}/perfil", {})
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["tiktok", "instagram"], "textos": {
+        "tiktok": {"descripcion": ""}, "instagram": {"descripcion": ""}}})
+    marca = os.path.join(datos["proyectos"], "_sistema", "publicar", "_textos_lentos")
+    os.makedirs(os.path.dirname(marca), exist_ok=True)
+    with open(marca, "w", encoding="utf-8") as fh:
+        fh.write("1")
+    pg = Pagina(navegador, datos)
+    try:
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        ok(pg.esperar(".ficha-publicar .nombre-ficha", segundos=15), "la ficha del vídeo")
+        pg.pulsar(".ficha-publicar button", "Que Claude escriba los textos")
+        ok(pg.esperar(".escribiendo-textos", "lleva", 5), "«escribiendo», con cuánto lleva desde el principio")
+        # el cursor en el texto de Instagram mientras Claude escribe
+        pg.p.locator(".texto-red[data-red=instagram] textarea").first.click()
+        fin = time.time() + 25
+        valor = ""
+        while time.time() < fin:
+            valor = pg.p.evaluate("() => (document.querySelector('.texto-red[data-red=tiktok] textarea') || {}).value || ''")
+            if valor:
+                break
+            pg.p.wait_for_timeout(500)
+        ok(valor.startswith("[TikTok]"), f"los textos aparecen aunque haya un campo con el cursor: {valor[:30]!r}")
+        ok(not pg.visible(".escribiendo-textos"), "y el aviso de «escribiendo» se va")
+        pg.sin_errores("textos con el cursor en un campo")
+    finally:
+        os.remove(marca)
+        pg.cerrar()
+
+
+# ======================================================================
+# PARRILLA (rama `parrilla`, 17-10-2026). Tramo propio y al final, como el
+# de Publicar. El servidor corre con ESTUDIO_SIMULAR=1: los guiones los
+# convierte y los escribe el doble de Claude (`parrilla._claude_simulado`).
+
+def _docx_de_prueba(ruta, parrafos):
+    import zipfile                                           # noqa: PLC0415
+    w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    cuerpo = "".join(f"<w:p><w:r><w:t>{x}</w:t></w:r></w:p>" for x in parrafos)
+    with zipfile.ZipFile(ruta, "w") as z:
+        z.writestr("[Content_Types].xml", "<Types/>")
+        z.writestr("word/document.xml", f'<w:document xmlns:w="{w}"><w:body>{cuerpo}</w:body></w:document>')
+
+
+@escenario
+def parrilla_de_guiones(navegador, datos):
+    """Automatizar → Parrilla: escribir uno con la plantilla, pedir guiones a
+    Claude, subir un Word, la ficha (cambiar el uso, la guía) y «Pasar al
+    Encargo», que llena «Un vídeo nuevo» en Crear sin crear nada. Y en el
+    móvil con el tema claro, que cabe."""
+    api = datos["api"]
+    cid = datos["cliente"]
+    _r, antes = api.get("/api/proyectos")
+    n_antes = len((antes or {}).get("proyectos") or [])
+    pg = Pagina(navegador, datos)
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    ok(pg.esperar(".parrilla h2", "Automatizar"), "Automatizar abre la Parrilla (ya no es una pestaña vacía)")
+    ok(pg.visible(".parrilla .pestanas-publicar button", "Piloto automático"),
+       "el piloto automático sale como «próximamente»")
+    ok(pg.visible(".parrilla-opcional", "opcional"), "y dice que la Parrilla es opcional")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    pg.p.wait_for_timeout(800)
+    ok(pg.esperar(".vacio-parrilla h3", "Todavía no hay guiones"), "un proyecto sin guiones lo dice")
+
+    # escribir uno con la plantilla, sin Claude
+    pg.pulsar(".vacio-parrilla button", "Añadir guiones")
+    pg.pulsar(".origen-parrilla button", "Escribir o pegar")
+    pg.pulsar(".anadir-parrilla button", "Escribir uno con la plantilla")
+    valor = pg.p.evaluate("() => (document.querySelector('#modulo [data-foco=parrilla-pegar]') || {}).value || ''")
+    ok(valor.startswith("G01 — [Título]"), f"la plantilla del formato en la caja: {valor[:24]!r}")
+    ok(pg.p.locator(".anadir-parrilla input[type=checkbox]").first.is_checked(),
+       "y marcado «Ya está en el formato»")
+    guion = ("EP01 — Fregadero simple o doble\nCliente / proyecto: Cocinas\nUso: exacto\nRed: TikTok\n"
+             "Formato: vertical\nDuración: 45 s\nObjetivo: medidas\nCTA: Escríbenos\nTono: cercano\n\n"
+             "ESCENA 1\nVisual: una bandeja\nVoz: «Por fuera miden igual.»\n\n"
+             "PARA EL ENCARGO\n- Material: Por fuera miden igual. Por dentro, no.\n"
+             "- Indicaciones: una sola idea\n- Llamadas a la acción: Escríbenos\n"
+             "- Duración: 45 s · Formato: vertical\n\nAVISOS\n- ninguno")
+    pg.p.locator("#modulo [data-foco=parrilla-pegar]").fill(guion)
+    pg.p.locator(".anadir-parrilla input[data-foco=parrilla-nombre]").fill("Octubre")
+    pg.pulsar(".anadir-parrilla button.primario", "Guardar en la Parrilla")
+    ok(pg.esperar(".fila-guion .titulo-guion", "EP01 — Fregadero simple o doble", 10),
+       "guardado en la Parrilla, en su matriz")
+    ok(pg.visible(".cab-matriz h3", "Octubre"), "con el nombre de la matriz")
+    ok(pg.visible(".fila-guion .pastilla", "pendiente"), "pendiente")
+
+    # pedir a Claude (el doble)
+    pg.pulsar(".filtros-parrilla button", "Añadir guiones")
+    pg.pulsar(".origen-parrilla button", "Pedir a Claude")
+    pg.p.locator("#modulo [data-foco=parrilla-peticion]").fill("ideas de alquiler de consolas para fiestas")
+    pg.p.locator("#modulo [data-foco=parrilla-cuantos]").fill("3")
+    pg.pulsar(".anadir-parrilla button.primario", "Pedir a Claude")
+    ok(pg.esperar(".trabajo-parrilla", "guardados", 25), "Claude los escribe y lo dice")
+    ok(pg.p.locator(".fila-guion").count() >= 4, "salen en la Parrilla")
+
+    # subir un Word
+    docx = os.path.join(datos["base"], "matriz_parrilla.docx")
+    _docx_de_prueba(docx, ["Cumpleaños con consola", "---", "Karaoke en casa"])
+    pg.pulsar(".filtros-parrilla button", "Añadir guiones")
+    pg.pulsar(".origen-parrilla button", "Subir un documento")
+    pg.p.set_input_files(".anadir-parrilla input[type=file]", docx)
+    pg.p.wait_for_timeout(400)
+    ok(pg.visible(".anadir-parrilla .meta", "matriz_parrilla.docx"), "el Word elegido se ve")
+    pg.pulsar(".anadir-parrilla button.primario", "Subir y convertir")
+    ok(pg.esperar(".cab-matriz h3", "matriz_parrilla", 25), "convertido, en una matriz con el nombre del fichero")
+    pg.captura("parrilla_lista")
+
+    # la ficha
+    pg.pulsar(".fila-guion .titulo-guion", "EP01")
+    ok(pg.esperar(".ficha-parrilla h3", "EP01"), "la ficha del guion")
+    ok(pg.visible(".encargo-parrilla .material-parrilla", "Por dentro, no."), "con lo que irá al Encargo")
+    ok(pg.visible(".encargo-parrilla .pista", "Esto YA es el guion"), "uso exacto: «Esto YA es el guion»")
+    pg.p.locator(".ficha-parrilla .rejilla-parrilla select").first.select_option("adaptar")
+    pg.p.wait_for_timeout(1200)
+    texto = pg.p.evaluate("() => (document.querySelector('#modulo [data-foco=parrilla-texto]') || {}).value || ''")
+    ok("Uso: adaptar" in texto, "cambiar el uso cambia su línea en el texto")
+    ok(pg.visible(".encargo-parrilla .dato-encargo", "Escríbenos"), "y la llamada a la acción pasa a ir «al final»")
+    pg.p.locator(".ficha-parrilla .boton-guia").first.click()
+    ok(pg.esperar("#ventana-guia h2", "El formato del guion", 10), "«✦ Guía» abre la guía del formato")
+    ok(pg.visible("#ventana-guia pre", "GUION ORIGINAL"), "con el prompt del anexo para otra IA")
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(300)
+    pg.captura("parrilla_ficha")
+
+    # pasar al Encargo: llena «Un vídeo nuevo» y no crea nada
+    pg.p.locator(".pasar-encargo select").first.select_option(datos["preset"])
+    pg.pulsar(".pasar-encargo button", "Pasar al Encargo")
+    fin = time.time() + 10
+    while time.time() < fin and not pg.p.evaluate("() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"):
+        pg.p.wait_for_timeout(300)
+    ok(pg.p.evaluate("() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"),
+       "lleva a Crear → «Un vídeo nuevo»")
+    material = pg.p.evaluate("() => (document.querySelector('[data-foco=encargo-material]') || {}).value || ''")
+    ok(material == "Por fuera miden igual. Por dentro, no.", f"con el material del guion: {material[:40]!r}")
+    ok(pg.p.evaluate("() => APP.light.video.encargo.duracion_objetivo_s") == 45, "la duración")
+    ok(pg.p.evaluate("() => APP.light.video.encargo.formato") == "vertical", "el formato")
+    ok(pg.p.evaluate("() => APP.light.video.encargo.cta.cta_final.puesto"), "y la llamada a la acción al final")
+    ok(any("Encargo lleno" in a for a in pg.avisos()), "y lo dice")
+    _r, despues = api.get("/api/proyectos")
+    ok(len((despues or {}).get("proyectos") or []) == n_antes, "sin crear ningún vídeo")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    ok(pg.esperar(".ficha-parrilla .pastilla", "usado", 10) or pg.esperar(".fila-guion .pastilla", "usado", 10),
+       "el guion queda «usado»")
+    pg.sin_errores("la Parrilla")
+    pg.cerrar()
+
+    # el móvil, con el tema claro
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="movil")
+    pg.js("document.documentElement.dataset.tema = 'claro';")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    ok(pg.esperar(".fila-guion", segundos=10), "en el móvil se ven los guiones")
+    for seccion_ in ("parrilla", "anadir"):
+        pg.js(f"irASeccionParrilla('{seccion_}');")
+        ancho = pg.p.evaluate("() => document.documentElement.scrollWidth")
+        ok(ancho <= 391, f"«{seccion_}» cabe a lo ancho en el móvil ({ancho} px)")
+    pg.pulsar(".pestanas-publicar button", "Parrilla")
+    pg.pulsar(".fila-guion button", "Abrir")
+    ok(pg.esperar(".ficha-parrilla", segundos=10), "la ficha en el móvil")
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth")
+    ok(ancho <= 391, f"y cabe ({ancho} px)")
+    pg.captura("parrilla_movil")
+    pg.sin_errores("la Parrilla en el móvil")
+    pg.cerrar()
+
 
 # publicar-redes-2 (17-10-2026): lo que faltaba de las métricas. La retención,
 # esta semana y este mes, «Lo que mejor funcionó» y la línea de Inicio. Todo se
@@ -3852,6 +4114,7 @@ def publicar_resultados_y_lo_mejor(navegador, datos):
     pg.captura("inicio_lo_mejor_movil")
     pg.sin_errores("resultados en el móvil")
     pg.cerrar()
+
 
 if __name__ == "__main__":
     sys.exit(main())

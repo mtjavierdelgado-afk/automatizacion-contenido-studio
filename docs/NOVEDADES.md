@@ -35,6 +35,113 @@ vídeos, estilos, claves y contraseña no se tocan.
 - Si la carga de Resultados fallaba, la pantalla se quedaba rota en vez de
   decir el motivo: ahora sale el error.
 
+**Vídeos con más movimiento, sobre todo los cortos (18 de octubre)**
+- **Movimiento de cámara en tres niveles**, en el Encargo y en el vídeo
+  (Ajustes del montaje → 🎬 Movimiento y efectos): **sobrio** (lo de siempre:
+  un acercamiento o alejamiento suave por plano), **vivo** (acercamientos,
+  paneos y alejamientos que se alternan, y los planos largos se reencuadran a
+  mitad, en una pausa de la voz) y **dinámico** (más recorrido, un golpe de
+  zoom en la palabra clave y cortes secos entre planos, salvo en los acentos).
+- **Gancho del primer segundo**: el primer plano entra con un zoom rápido y la
+  primera frase sale grande en el centro.
+- **Subtítulos de redes**: palabras grandes, con borde, y la palabra que se
+  está diciendo resaltada en el color del vídeo.
+- **Cifras clave en pantalla**: «ochenta y cuatro centímetros» sale arriba,
+  grande, como «84 cm»; un rango, como «23–25 cm».
+- **Barra de progreso** fina arriba del vídeo.
+- **Elegir las transiciones** que entran, cada una con su muestra animada.
+- **Los vídeos NUEVOS de hasta 2 minutos nacen con todo esto puesto** (en
+  vivo) y en **ritmo rápido** (planos de 1,5 a 5 s) si su estilo iba más
+  lento. Ojo: el ritmo rápido son más planos, y un 30-40 % más de imágenes que
+  pagar; el Encargo lo dice en el coste y deja elegir «Ritmo del estilo». Los
+  vídeos largos y **los que ya existen no cambian** si nadie lo pide.
+- Cambiar el movimiento, los subtítulos, las cifras, la barra o las
+  transiciones de un vídeo hecho **no redibuja ninguna imagen**: se rehacen
+  las capas y el montaje («Aplicar ahora»), que son gratis.
+- La descarga «sin subtítulos» sale también sin las cifras clave ni la barra:
+  van en la misma capa que los subtítulos, que es la que se quita.
+- Arreglado el mismo día: en el móvil, varias muestras de transición salían
+  con una carita triste en vez de la animación, y marcar o quitar una
+  transición cerraba la lista. Ahora se ven todas, la lista se queda abierta y
+  el texto ya no sale en mayúsculas.
+
+**La Parrilla de guiones, en Automatizar (17 de octubre)**
+- **Automatizar ya no está vacío: abre la Parrilla.** Cada proyecto tiene sus
+  matrices de guiones, y cada guion su estado: **pendiente**, **usado** (se
+  pasó al Encargo) o **publicado** (su vídeo ya salió en Publicar). El paso de
+  usado a publicado es solo: en cuanto creas el vídeo con ese guion queda
+  enlazado, y cuando lo publicas pasa a publicado. También se puede marcar a
+  mano, o volver a pendiente.
+- **Añadir guiones**, de tres formas: **subir una matriz** en Word (.docx),
+  Excel (.xlsx), PDF o texto; **pedírselos a Claude** (de 1 a 30, de cinco en
+  cinco y sin repetir ideas); o **escribir o pegar** uno o varios. Todo se
+  convierte al **formato único del guion** (el del prompt de conversión), con
+  «Uso: exacto» (la locución se respeta palabra por palabra) o «Uso: adaptar»
+  (el original es una guía y la locución se escribe para la red). Si lo pegado
+  ya está en el formato, se guarda tal cual, sin Claude. Una matriz larga se
+  convierte guion a guion.
+- **La ficha de un guion**: su texto entero, editable; uso, formato y
+  duración a mano; sus avisos ⚠; y **lo que irá al Encargo**, tal como saldrá.
+- **«Pasar al Encargo»** llena «Un vídeo nuevo» en Crear —nombre, material,
+  indicaciones, llamada a la acción, duración y formato— con el estilo que
+  elijas, y marca el guion como usado. Con «exacto» marca «Esto YA es el
+  guion». No crea ningún vídeo ni gasta nada: el vídeo lo creas tú con
+  «Generar el guion», como siempre.
+- **Es opcional**: el Encargo se sigue llenando a mano igual que antes.
+- Dos guías nuevas: **«El formato del guion»** (con el prompt de conversión
+  para pegarlo en otra IA) y **«Pedir guiones a Claude»**.
+- Convertir y escribir guiones usa Claude (tokens de la suscripción, sin
+  coste en dólares). El piloto automático todavía no está: llega más adelante.
+
+**El vídeo montado ocupa menos (17 de octubre)**
+- Cada montaje ya no copia los clips de los planos que no cambian: la versión
+  nueva los comparte con la anterior. Cambiar la música o el logo ya no duplica
+  los clips en disco (el MP4 final y la música sí se escriben nuevos). Las versiones anteriores quedan intactas y «Revertir»
+  funciona igual. (En un servidor Windows se sigue copiando.)
+
+**Guiones de vídeos cortos que no salen «a resumen» (17 de octubre)**
+- **Los vídeos de hasta 2 minutos tienen su propia forma de escribirse.**
+  Antes se escribían como un documental de varios minutos (cuatro a seis temas,
+  gancho de dos bloques), y en un minuto eso daba una frase por tema: el guion
+  nombraba todo y no explicaba nada. Ahora el redactor cuenta UNA idea con un
+  caso concreto (la mitad del vídeo, paso a paso), elige del material lo que la
+  empuja y no recorre las listas punto por punto. Los vídeos de más de 2 minutos se
+  escriben igual que siempre.
+- **Las etiquetas de «Las indicaciones» son órdenes.** ENSEÑA es la única
+  idea; ÁNGULO se cuenta como una escena que se ve pasar, no como una mención;
+  EMPIEZA POR es la primera frase, y DEJA FUERA no sale ni de pasada. Valen
+  en vídeos de cualquier duración. Sin etiquetas, todo sigue como antes.
+- **«Revisar» del material y de las indicaciones sabe cuánto dura el vídeo.**
+  Si el material no cabe, lo dice; en un vídeo corto propone marcar con
+  «IMPRESCINDIBLE:» lo que tiene que entrar, y el redactor de los cortos lo
+  respeta. Si las indicaciones piden demostrar algo y el material no trae las
+  medidas, te las pide.
+- Las etiquetas se reconocen en MAYÚSCULAS, como las enseña la guía (una nota
+  como «Ángulo: no me convence el de antes» sigue siendo una nota), y cada una
+  acaba en la siguiente etiqueta o en una línea en blanco.
+- **«Regenerar el guion» con una instrucción ya no borra tus indicaciones.**
+  Lo que escribes en «Qué cambiarías del guion» («más directo») se suma a las
+  indicaciones del Encargo; antes las sustituía y ENSEÑA y ÁNGULO se perdían.
+  Si ya te pasó en algún vídeo, vuelve a escribirlas en su Encargo.
+- Las guías de «El material» y «Las indicaciones» explican todo esto.
+- Los guiones ya hechos no cambian ni quedan para regenerar: esto se nota al
+  escribir o reescribir un guion.
+
+**Publicar: los textos de Claude ya no salen vacíos (17 de octubre, madrugada)**
+- A veces Claude contestaba llamando a la red por su nombre («Instagram
+  Reels») y el Studio solo buscaba «instagram»: decía «Textos listos» con las
+  casillas vacías. Ahora entiende las dos formas, a Claude se le dicen las
+  claves exactas, y si una red llega sin texto se dice («Claude no ha devuelto
+  el texto de Instagram Reels») con «Reintentar» solo de esa; lo que ya había
+  escrito no se borra. «Copiar texto» sin texto avisa en vez de decir «copiado».
+
+**Publicar: los textos de Claude se ven al terminar (17 de octubre)**
+- Si mientras Claude escribía los textos el cursor estaba en una casilla de
+  texto, los textos se guardaban pero la ficha seguía vacía hasta salir de la
+  casilla o recargar. Ahora aparecen en cuanto terminan, con un aviso «Textos
+  listos». El aviso de «escribiendo» dice desde el principio cuánto lleva, y
+  si Claude no contesta, el fallo sale a los 4 minutos (antes podía tardar 16).
+
 **Publicar: lo que salió probándolo en el servidor (16 de octubre, tarde)**
 - **El perfil de Upload-Post se apunta con lo que escribes.** «Crear perfil»
   manda el nombre del campo; **«Usar este perfil»** (o Enter) apunta uno que ya

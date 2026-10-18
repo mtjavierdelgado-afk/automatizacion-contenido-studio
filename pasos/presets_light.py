@@ -422,6 +422,35 @@ def coste_por_minuto(id_ritmo, calidad="low", modo=None):
     return round((60.0 / max(0.5, float(ficha["media_s"]))) * por_imagen, 3)
 
 
+#: EL RITMO DE LOS VIDEOS CORTOS NUEVOS (decision del dueno, 18-10-2026): un
+#: video de hasta 2 minutos nace en «rapido» si su estilo va mas lento. Planos
+#: de 1,5 a 5 s en vez de 2,5 a 6: mas cortes, y mas imagenes que pagar (un 30-
+#: 40 % mas). Solo al CREAR el video: uno que ya existe no cambia.
+RITMO_CORTOS = "rapido"
+DURACION_CORTA_S = 120
+
+
+def ritmo_para_video_nuevo(segundos, max_s_estilo=None):
+    """El ritmo con el que nace un video nuevo, o None si va el del estilo.
+
+    `max_s_estilo` es el plano mas largo que admite el estilo (`assets.max_s`):
+    si ya es tan rapido como «rapido» --o mas--, se respeta.
+    """
+    try:
+        segundos = float(segundos or 0)
+    except (TypeError, ValueError):
+        return None
+    if not 0 < segundos <= DURACION_CORTA_S:
+        return None
+    try:
+        tope = float(max_s_estilo) if max_s_estilo is not None else None
+    except (TypeError, ValueError):
+        tope = None
+    if tope is not None and tope <= RITMOS_POR_ID[RITMO_CORTOS]["max_s"]:
+        return None
+    return RITMO_CORTOS
+
+
 def params_de_ritmo(id_ritmo):
     """Que se escribe en los params de cada paso. -> {paso: {clave: valor}}
 

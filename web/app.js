@@ -6889,7 +6889,7 @@ function vistaElegidoLight() {
     'cuándo se presenta y qué le pides a quien lo ve',
     bloqueCTA(e.cta, { repintar: pintarLight })));
 
-  const aviso = h('div', { clase: 'pista' });
+  const aviso = h('div', { clase: 'pista coste-del-encargo' });
   const boton = h('button', {
     clase: 'primario grande',
     onclick: () => crearYGenerarLight(ficha),
@@ -7056,6 +7056,8 @@ async function refrescarEstimacionLight(e, nodo, estiloDado) {
       min_s: (datos.estilo || {}).min_s,
       max_s: (datos.estilo || {}).max_s,
       calidad: (datos.estilo || {}).calidad,
+      /* un corto NUEVO nace en ritmo rápido si su estilo va más lento */
+      ritmo_corto: e === APP.light.video.encargo && (e.opciones || {}).ritmo !== 'estilo',
     });
     APP.light.video.estimacion = ficha;
     vaciar(nodo).append(textoDeEstimacion(ficha));
@@ -7092,6 +7094,7 @@ async function pintarCosteDelEncargoLight(e, nodo) {
          va a nacer */
       nuevo: true,
       modo: (datos.estilo || {}).modo === 'foto' ? 'foto' : 'ilustracion',
+      ritmo_corto: (e.opciones || {}).ritmo !== 'estilo',
     });
     vaciar(nodo).append(`El vídeo entero: ${textoDeCoste(ficha)}. `
       + 'Puede salir algo más corto o más largo que el objetivo.');
@@ -7169,6 +7172,11 @@ function opcionesParaCrear(e) {
   if (op.subtitulos && Object.keys(op.subtitulos).length) salida.subtitulos = op.subtitulos;
   if (op.logo === false) salida.logo = false;
   else if (op.logo && op.logo.fichero) salida.logo = op.logo;
+  /* el montaje: solo si se tocó (sin tocar, el servidor pone el de los cortos
+     o el de siempre según la duración) */
+  if (op.montaje) salida.montaje = op.montaje;
+  if (op.transiciones && op.transiciones.length) salida.transiciones = op.transiciones;
+  if (op.ritmo) salida.ritmo = op.ritmo;
   return salida;
 }
 
@@ -8514,8 +8522,11 @@ async function reescribirGuionLight() {
   const texto = String(v.promptGeneral || '').trim();
   if (!texto) { toast('escribe qué cambiarías', true); return; }
   try {
+    /* EN SU PROPIO CAJÓN, no en `prompt_general`: ahí viven las indicaciones
+       del Encargo (ENSEÑA, ÁNGULO…), y escribir aquí las borraba (17-10-2026).
+       El redactor la recibe sumada a ellas (`p3_guion`, «instruccion_vuelta»). */
     await pedir(API.params(v.pid, 'guion'), {
-      method: 'PUT', cuerpo: { params: { prompt_general: texto } },
+      method: 'PUT', cuerpo: { params: { instruccion_vuelta: texto } },
     });
     v.promptGeneral = '';
     // 'pendientes' y no 'todo': REHACER UNA COSA REHACE ESA COSA. Escribir el
@@ -11969,6 +11980,26 @@ function repintarRevisiones(gid) {
   });
 }
 
+/* LA DURACIÓN DEL VÍDEO para «Revisar» del material y de las indicaciones
+   (guion-cortos, 17-10-2026). Sin ella, la revisión daba por bueno un material
+   de tres minutos para un vídeo de treinta segundos, y el guion salía como un
+   resumen. Se lee del encargo que está en pantalla: el del vídeo nuevo o la
+   copia editable del vídeo abierto. Fuera de esas dos pantallas, nada. */
+function contextoDeRevision(gid) {
+  if (gid !== 'material' && gid !== 'indicaciones') return null;
+  const l = APP.light;
+  const v = l.video || {};
+  if (l.vista !== 'elegido') return null;
+  let copia = null;
+  if (v.vista === 'encargo' && v.encargo) copia = v.encargo;
+  else if (v.vista === 'encargo_video' && v.pid) copia = pedidoDelVideoLight().copia;
+  const segundos = copia ? Number(copia.duracion_objetivo_s) || 0 : 0;
+  if (!(segundos > 0)) return null;
+  const contexto = { duracion_s: segundos };
+  if (gid === 'material') contexto.indicaciones = String(copia.indicaciones || '');
+  return contexto;
+}
+
 function botonRevisar(gid, campo) {
   return h('button', {
     clase: 'mini fantasma', type: 'button',
@@ -11994,8 +12025,9 @@ function botonRevisar(gid, campo) {
         boton.disabled = false;
       };
       try {
+        const contexto = contextoDeRevision(gid);
         const lanzada = await pedir(`${BASE}/api/sistema/guias/${gid}/revisar`,
-          { method: 'POST', cuerpo: { texto, anterior } });
+          { method: 'POST', cuerpo: contexto ? { texto, anterior, contexto } : { texto, anterior } });
         // se pide SIEMPRE una vez: aunque venga «listo» (ya revisado), el
         // resultado está en su ficha y no en la respuesta del lanzamiento
         let ficha = { estado: 'pensando' };
@@ -15351,6 +15383,7 @@ function ajustesDelMontaje(modo, lleva) {
     if (lleva.subtitulos !== false) caja.appendChild(filaAjuste(modo, est, 'subtitulos', pintar));
     caja.appendChild(filaAjuste(modo, est, 'logo', pintar));
     if (lleva.efectos !== false && modo.tipo === 'video') caja.appendChild(filaAjuste(modo, est, 'efectos', pintar));
+    caja.appendChild(filaAjuste(modo, est, 'montaje', pintar));
   };
   // LA LECTURA PINTA EN LOS QUE ESTÉN EN PANTALLA: la pantalla puede pintar
   // este bloque más de una vez mientras se lee (y alguna copia no llega a
@@ -15369,11 +15402,15 @@ function ajustesDelMontaje(modo, lleva) {
 
 async function cargarAjustesVideo(modo, est) {
   const base = API.proyecto(modo.pid);
-  const [presencia, sonido, subtitulos, logo] = await Promise.all([
+  const [presencia, sonido, subtitulos, logo, montaje, datosM] = await Promise.all([
     pedir(`${base}/musica/presencia`).catch(() => null),
     pedir(`${base}/sonido`).catch(() => null),
     pedir(`${base}/subtitulos`).catch(() => null),
-    pedir(`${base}/logo`).catch(() => null)]);
+    pedir(`${base}/logo`).catch(() => null),
+    pedir(`${base}/montaje`).catch(() => null),
+    datosMontaje().catch(() => null)]);
+  est.montaje = montaje;
+  est.datosMontaje = datosM;
   est.musica = { presencia: presencia || { presencia: 'normal', elegida: false },
     tema: sonido && sonido.musica && sonido.musica.id ? sonido.musica : null,
     // N9 (13-10-2026): el volumen fino y los ánimos de la automática
@@ -15389,9 +15426,31 @@ async function cargarAjustesVideo(modo, est) {
   est.leido = true;
 }
 
+/* El montaje en una línea: «Vivo · subtítulos de redes · gancho, cifras y barra». */
+function resumenMontaje(modo, est) {
+  const datos = est.datosMontaje;
+  if (!datos) {
+    datosMontaje().then(d => { est.datosMontaje = d; if (est.repintar) est.repintar(); }).catch(() => {});
+    return 'leyendo…';
+  }
+  const borrador = modo.tipo === 'borrador';
+  const op = borrador ? opcionesBorrador(modo.e) : null;
+  if (!borrador && !est.montaje) return 'no se ha podido leer';
+  const m = borrador ? (op.montaje || montajeAutomatico(modo.e, datos)) : est.montaje.montaje;
+  const nivel = (NIVELES_MOVIMIENTO.find(n => n[0] === m.movimiento) || ['', m.movimiento])[1];
+  const extras = INTERRUPTORES_MONTAJE.filter(([c]) => m[c]).map(([, n]) => n.split(' ')[0].toLowerCase());
+  const partes = [nivel, m.subtitulos === 'redes' ? 'subtítulos de redes' : 'subtítulos clásicos'];
+  if (extras.length) partes.push(extras.join(', '));
+  if (borrador && !op.montaje) partes.push('automático');
+  if (borrador && op.ritmo === 'estilo') partes.push('ritmo del estilo');
+  return partes.join(' · ')
+    + (!borrador && est.montaje.pendiente && est.montaje.montado ? ' · sin aplicar todavía' : '');
+}
+
 /* UNA FILA: el resumen en una línea y, desplegada, su editor. */
 function filaAjuste(modo, est, cual, repintar) {
-  const nombres = { musica: '🎵 Música', subtitulos: '💬 Subtítulos', logo: '🏷️ Logo', efectos: '✨ Efectos' };
+  const nombres = { musica: '🎵 Música', subtitulos: '💬 Subtítulos', logo: '🏷️ Logo', efectos: '✨ Efectos',
+    montaje: '🎬 Movimiento y efectos' };
   const abierta = est.abierta === cual;
   const fila = h('div', { clase: 'fila-ajuste' + (abierta ? ' abierta' : '') });
   fila.appendChild(h('div', { clase: 'fila-ajuste-cab' },
@@ -15401,7 +15460,7 @@ function filaAjuste(modo, est, cual, repintar) {
       abierta ? 'Cerrar' : 'Cambiar')));
   if (abierta) {
     const editor = { musica: editorMusica, subtitulos: editorSubtitulos, logo: editorLogo,
-      efectos: editorEfectos }[cual];
+      efectos: editorEfectos, montaje: editorMontaje }[cual];
     fila.appendChild(editor(modo, est, repintar));
   }
   return fila;
@@ -15409,6 +15468,7 @@ function filaAjuste(modo, est, cual, repintar) {
 
 function resumenAjuste(modo, est, cual) {
   if (modo.tipo === 'video' && !est.leido) return 'leyendo…';
+  if (cual === 'montaje') return resumenMontaje(modo, est);
   if (cual === 'musica') {
     const op = modo.tipo === 'borrador' ? opcionesBorrador(modo.e) : null;
     const presencia = op ? (op.presencia || 'normal') : ((est.musica || {}).presencia || {}).presencia || 'normal';
@@ -15967,6 +16027,331 @@ function editorSubtitulos(modo, est, repintar) {
   }
   caja.appendChild(pie);
   return caja;
+}
+
+/* ------------------------------------------------ movimiento y efectos
+ * EL MONTAJE (18-10-2026): cuánto se mueve la cámara, cómo son los subtítulos,
+ * el gancho del primer segundo, las cifras clave, la barra de progreso y qué
+ * transiciones entran. Vive en `callouts.montaje` y `render.transiciones`
+ * (ver pasos/camara.py). Nada de esto paga imágenes: rehace capas y montaje.
+ *
+ * Lo que vale cada cosa por defecto lo dice el SERVIDOR (`GET /api/montaje`),
+ * no una tabla de aquí: el montaje de los cortos y hasta cuántos segundos es
+ * corto viven en un solo sitio. */
+const NIVELES_MOVIMIENTO = [
+  ['sobrio', 'Sobrio', 'Lo de siempre: un acercamiento lento, casi quieto.'],
+  ['vivo', 'Vivo', 'El zoom se nota, hay paneos y los planos largos cambian de encuadre a mitad.'],
+  ['dinamico', 'Dinámico', 'Como vivo, más un golpe de zoom en la palabra clave y cortes secos entre planos.']];
+const ESTILOS_SUB_MONTAJE = [
+  ['clasicos', 'Clásicos', 'Los de siempre: abajo, en su caja.'],
+  ['redes', 'De redes', 'Grandes, de dos a cuatro palabras, con la palabra que se dice resaltada en el color del estilo.']];
+const INTERRUPTORES_MONTAJE = [
+  ['gancho', 'Gancho del primer segundo', 'El primer plano entra con un zoom rápido y la primera frase sale grande en el centro.'],
+  ['cifras', 'Cifras clave en pantalla', 'Cuando la voz dice una cifra con su unidad («ochenta y cuatro centímetros»), sale grande: «84 cm».'],
+  ['barra', 'Barra de progreso', 'Una línea fina arriba que avanza con el vídeo.']];
+
+let DATOS_MONTAJE = null;
+function datosMontaje() {
+  if (!DATOS_MONTAJE) {
+    DATOS_MONTAJE = pedir(`${BASE}/api/montaje`).catch(err => { DATOS_MONTAJE = null; throw err; });
+  }
+  return DATOS_MONTAJE;
+}
+
+/* El montaje que tendría un vídeo NUEVO si no tocas nada: el de los cortos o
+   el de siempre, según la duración del encargo. */
+function montajeAutomatico(e, datos) {
+  const corto = Number(e.duracion_objetivo_s) <= Number(datos.duracion_corta_s || 0);
+  return Object.assign({}, corto ? datos.montaje_cortos : datos.montaje_siempre);
+}
+
+function esCortoElEncargo(e, datos) {
+  return Number(e.duracion_objetivo_s) <= Number((datos || {}).duracion_corta_s || 0);
+}
+
+function editorMontaje(modo, est, repintar) {
+  const caja = h('div', { clase: 'editor-ajuste editor-montaje' });
+  const borrador = modo.tipo === 'borrador';
+  const op = borrador ? opcionesBorrador(modo.e) : null;
+  if (!est.datosMontaje || (!borrador && !est.montaje)) {
+    // Se pide UNA vez y un fallo se queda a la vista: repintar sin haber
+    // conseguido nada volvería a entrar aquí y daría vueltas sin fin.
+    if (est.errorMontaje) {
+      caja.appendChild(cajaError(est.errorMontaje));
+      caja.appendChild(h('button', { clase: 'mini', onclick: () => { est.errorMontaje = null; repintar(); } },
+        'Reintentar'));
+      return caja;
+    }
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+    Promise.all([
+      est.datosMontaje ? Promise.resolve(est.datosMontaje) : datosMontaje(),
+      (borrador || est.montaje) ? Promise.resolve(est.montaje) : pedir(`${API.proyecto(modo.pid)}/montaje`),
+    ]).then(([d, m]) => { est.datosMontaje = d; if (!borrador) est.montaje = m; })
+      .catch(err => { est.errorMontaje = err.message || 'no se ha podido leer el montaje'; })
+      .then(() => repintar());
+    return caja;
+  }
+  const datos = est.datosMontaje;
+  const actual = borrador ? (op.montaje || montajeAutomatico(modo.e, datos))
+    : (est.montaje.montaje || datos.montaje_siempre);
+  const elegidas = borrador ? (op.transiciones || []) : (est.montaje.transiciones || []);
+  const cambiar = async (cambios, transiciones) => {
+    if (borrador) {
+      if (cambios) op.montaje = Object.assign({}, actual, cambios);
+      if (transiciones) op.transiciones = transiciones;
+      repintar();
+      return;
+    }
+    try {
+      const cuerpo = {};
+      if (cambios) cuerpo.montaje = cambios;
+      if (transiciones) cuerpo.transiciones = transiciones;
+      est.montaje = await pedir(`${API.proyecto(modo.pid)}/montaje`, { method: 'PUT', cuerpo });
+    } catch (err) { toast(err.message, true); }
+    repintar();
+  };
+  const botones = (lista, valor, clave) => h('div', { clase: 'herramientas' },
+    ...lista.map(([id, nombre]) => h('button', {
+      clase: 'mini' + (valor === id ? ' activo' : ''), onclick: () => cambiar({ [clave]: id }) }, nombre)));
+  const nivel = NIVELES_MOVIMIENTO.find(n => n[0] === actual.movimiento) || NIVELES_MOVIMIENTO[0];
+  caja.appendChild(h('div', { clase: 'campo' }, h('label', {}, 'Movimiento de cámara'),
+    botones(NIVELES_MOVIMIENTO, actual.movimiento, 'movimiento'),
+    h('div', { clase: 'pista' }, nivel[2])));
+  const sub = ESTILOS_SUB_MONTAJE.find(s => s[0] === actual.subtitulos) || ESTILOS_SUB_MONTAJE[0];
+  caja.appendChild(h('div', { clase: 'campo' }, h('label', {}, 'Estilo de los subtítulos'),
+    botones(ESTILOS_SUB_MONTAJE, actual.subtitulos, 'subtitulos'),
+    h('div', { clase: 'pista' }, sub[2])));
+  INTERRUPTORES_MONTAJE.forEach(([clave, nombre, ayuda]) => {
+    caja.appendChild(h('label', { clase: 'casilla' },
+      h('input', { type: 'checkbox', checked: !!actual[clave],
+        onchange: ev => cambiar({ [clave]: ev.target.checked }) }),
+      ` ${nombre}`, h('span', { clase: 'meta' }, ` · ${ayuda}`)));
+  });
+  if (borrador && esCortoElEncargo(modo.e, datos)) {
+    const ritmo = op.ritmo === 'estilo' ? 'estilo' : 'rapido';
+    caja.appendChild(h('div', { clase: 'campo' }, h('label', {}, 'Ritmo de los planos'),
+      h('div', { clase: 'herramientas' },
+        h('button', { clase: 'mini' + (ritmo === 'rapido' ? ' activo' : ''),
+          onclick: () => { delete op.ritmo; repintar(); refrescarCosteDelEncargo(); } }, 'Rápido (recomendado en cortos)'),
+        h('button', { clase: 'mini' + (ritmo === 'estilo' ? ' activo' : ''),
+          onclick: () => { op.ritmo = 'estilo'; repintar(); refrescarCosteDelEncargo(); } }, 'El del estilo')),
+      h('div', { clase: 'pista' }, ritmo === 'rapido'
+        ? 'Planos de 1,5 a 5 s si el estilo va más lento: más cortes, y más imágenes que pagar (el coste de abajo ya lo cuenta).'
+        : 'Los planos duran lo que diga el estilo.')));
+  }
+  caja.appendChild(selectorTransiciones(modo, est, elegidas, lista => cambiar(null, lista)));
+  if (actual.movimiento === 'dinamico') {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'En dinámico los cambios de plano van en seco: las transiciones solo salen en los acentos, cada pocos planos.'));
+  }
+  const pie = h('div', { clase: 'fila' });
+  if (borrador) {
+    if (op.montaje || op.transiciones || op.ritmo) {
+      pie.appendChild(h('button', { clase: 'mini fantasma', onclick: () => {
+        delete op.montaje; delete op.transiciones; delete op.ritmo; repintar(); refrescarCosteDelEncargo();
+      } }, 'Volver a lo automático'));
+    }
+    pie.appendChild(h('span', { clase: 'meta' }, esCortoElEncargo(modo.e, datos)
+      ? 'Automático en un vídeo de hasta 2 minutos: vivo, subtítulos de redes, gancho, cifras y barra.'
+      : 'Automático en un vídeo largo: lo de siempre.'));
+  } else if (est.montaje.montado && est.montaje.pendiente) {
+    pie.appendChild(h('button', {
+      clase: 'mini primario',
+      onclick: async () => {
+        try {
+          const r = await pedir(`${API.proyecto(modo.pid)}/montaje/aplicar`, { method: 'POST' });
+          avisoDeMontaje(r, 'Movimiento y efectos');
+          est.montaje.pendiente = false;
+        } catch (err) { toast(err.message, true); }
+        repintar();
+      },
+    }, 'Aplicar ahora'));
+    pie.appendChild(h('span', { clase: 'meta' },
+      'rehace las capas y vuelve a montar el vídeo: unos minutos, ninguna imagen'));
+  } else {
+    pie.appendChild(h('span', { clase: 'meta' },
+      est.montaje.montado ? 'aplicado' : 'se aplicará al montar el vídeo'));
+  }
+  caja.appendChild(pie);
+  return caja;
+}
+
+/* El coste del encargo se vuelve a pedir cuando cambia algo que lo mueve (el
+   ritmo de los planos de un corto). */
+function refrescarCosteDelEncargo() {
+  const nodo = document.querySelector('.coste-del-encargo');
+  if (nodo) pintarCosteDelEncargoLight(encargoVideoLight(), nodo);
+}
+
+/* LAS TRANSICIONES, MIRÁNDOLAS. Cada una con una muestra que corre EL MISMO
+   shader que el render (el GLSL viene del servidor) sobre dos dibujos de
+   ejemplo. Vacío = las de fábrica. */
+function selectorTransiciones(modo, est, elegidas, guardar) {
+  const datos = est.datosMontaje || {};
+  const catalogo = datos.transiciones || [];
+  const fabrica = datos.por_defecto || [];
+  const puestas = elegidas.length ? elegidas : fabrica;
+  const caja = h('details', { clase: 'transiciones-montaje' },
+    h('summary', {}, `Transiciones · ${elegidas.length ? `${elegidas.length} elegidas` : 'las de fábrica'}`));
+  // ABIERTA SE QUEDA ABIERTA: marcar una casilla guarda y repinta, y sin esto
+  // la lista se cerraba a cada toque y había que volver a abrirla.
+  if (est.transicionesAbiertas) caja.open = true;
+  caja.addEventListener('toggle', () => { est.transicionesAbiertas = caja.open; });
+  const rejilla = h('div', { clase: 'rejilla-transiciones' });
+  catalogo.forEach(t => {
+    const marcada = puestas.includes(t.id);
+    rejilla.appendChild(h('label', { clase: 'tarjeta-transicion' + (marcada ? ' puesta' : '') },
+      muestraTransicion(t, datos),
+      h('div', { clase: 'fila' },
+        h('input', { type: 'checkbox', checked: marcada, onchange: ev => {
+          const lista = puestas.filter(x => x !== t.id);
+          if (ev.target.checked) lista.push(t.id);
+          if (!lista.length) {
+            ev.target.checked = true;
+            toast('Deja al menos una transición marcada', true);
+            return;
+          }
+          const iguales = lista.length === fabrica.length && lista.every(x => fabrica.includes(x));
+          guardar(iguales || !lista.length ? [] : lista);
+        } }),
+        h('b', {}, t.nombre)),
+      h('div', { clase: 'meta' }, t.descripcion)));
+  });
+  caja.appendChild(rejilla);
+  if (elegidas.length) {
+    caja.appendChild(h('button', { clase: 'mini fantasma', onclick: () => guardar([]) }, 'Volver a las de fábrica'));
+  }
+  return caja;
+}
+
+/* LAS MUESTRAS VAN POR UN SOLO WEBGL. Un lienzo WebGL por tarjeta eran
+   catorce contextos a la vez, y el navegador (en el móvil, antes) tira los más
+   viejos sin avisar: salía la carita triste del gráfico perdido en vez de la
+   muestra. Ahora hay UN contexto fuera de pantalla que pinta cada muestra y la
+   copia a un lienzo 2D normal, y solo se anima lo que está a la vista. */
+const MUESTRAS_TRANS = { gl: null, lienzo: null, programas: new Map(), visibles: new Set(),
+  observador: null, corriendo: false, inicio: 0 };
+
+function glDeMuestras(vert) {
+  const m = MUESTRAS_TRANS;
+  if (m.gl && !m.gl.isContextLost()) return m.gl;
+  m.programas.clear();
+  m.lienzo = document.createElement('canvas');
+  m.lienzo.width = 160; m.lienzo.height = 90;
+  m.lienzo.addEventListener('webglcontextlost', ev => { ev.preventDefault(); m.gl = null; });
+  const gl = m.lienzo.getContext('webgl', { antialias: false, preserveDrawingBuffer: true });
+  if (!gl) return null;
+  const quad = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  const textura = (img, unidad) => {
+    const tx = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0 + unidad); gl.bindTexture(gl.TEXTURE_2D, tx);
+    [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T].forEach(p => gl.texParameteri(gl.TEXTURE_2D, p, gl.CLAMP_TO_EDGE));
+    [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER].forEach(p => gl.texParameteri(gl.TEXTURE_2D, p, gl.LINEAR));
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
+  };
+  textura(dibujoDeMuestra('#3c5a7a', '#a9c6e0', 1), 0);
+  textura(dibujoDeMuestra('#7a4f3c', '#e8c39e', 2), 1);
+  m.gl = gl;
+  m.vert = vert;
+  return gl;
+}
+
+function programaDeMuestra(gl, frag, vert, acento) {
+  const m = MUESTRAS_TRANS;
+  if (m.programas.has(frag)) return m.programas.get(frag);
+  const compilar = (tipo, fuente) => {
+    const s = gl.createShader(tipo); gl.shaderSource(s, fuente); gl.compileShader(s);
+    return gl.getShaderParameter(s, gl.COMPILE_STATUS) ? s : null;
+  };
+  const vs = compilar(gl.VERTEX_SHADER, vert), fs = compilar(gl.FRAGMENT_SHADER, frag);
+  let pr = null;
+  if (vs && fs) {
+    pr = gl.createProgram();
+    gl.attachShader(pr, vs); gl.attachShader(pr, fs);
+    gl.bindAttribLocation(pr, 0, 'a_pos'); gl.linkProgram(pr);
+    if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) pr = null;
+  }
+  if (pr) {
+    gl.useProgram(pr);
+    const u = n => gl.getUniformLocation(pr, n);
+    gl.uniform1i(u('u_from'), 0); gl.uniform1i(u('u_to'), 1);
+    gl.uniform2f(u('u_resolution'), 160, 90);
+    const ac = acento || {};
+    const rgb = v => (Array.isArray(v) ? v : [0.85, 0.65, 0.34]);
+    gl.uniform3fv(u('u_accent'), rgb(ac.acento));
+    gl.uniform3fv(u('u_accent_dark'), rgb(ac.oscuro));
+    gl.uniform3fv(u('u_accent_bright'), rgb(ac.claro));
+    pr.progreso = u('u_progress');
+  }
+  m.programas.set(frag, pr);
+  return pr;
+}
+
+function pintarMuestras(ahora) {
+  const m = MUESTRAS_TRANS;
+  if (!m.visibles.size) { m.corriendo = false; return; }
+  const ciclo = ((ahora - m.inicio) / 1800) % 1;
+  const progreso = Math.min(1, Math.max(0, (ciclo - 0.2) / 0.6));
+  for (const lienzo of [...m.visibles]) {
+    if (!lienzo.isConnected) {
+      m.visibles.delete(lienzo);
+      if (m.observador) m.observador.unobserve(lienzo);
+      continue;
+    }
+    const d = lienzo.muestra || {};
+    const gl = glDeMuestras(d.vert);
+    if (!gl) continue;
+    const pr = programaDeMuestra(gl, d.frag, d.vert, d.acento);
+    if (!pr) continue;
+    gl.useProgram(pr);
+    gl.uniform1f(pr.progreso, progreso);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    const ctx = lienzo.getContext('2d');
+    if (ctx) ctx.drawImage(m.lienzo, 0, 0, lienzo.width, lienzo.height);
+  }
+  requestAnimationFrame(pintarMuestras);
+}
+
+function verMuestra(lienzo, visible) {
+  const m = MUESTRAS_TRANS;
+  if (visible) m.visibles.add(lienzo); else m.visibles.delete(lienzo);
+  if (m.visibles.size && !m.corriendo) {
+    m.corriendo = true;
+    m.inicio = m.inicio || performance.now();
+    requestAnimationFrame(pintarMuestras);
+  }
+}
+
+function muestraTransicion(t, datos) {
+  const lienzo = h('canvas', { clase: 'muestra-transicion', width: 160, height: 90 });
+  lienzo.muestra = { frag: t.frag, vert: datos.vertices, acento: datos.acento };
+  if (!t.frag || !datos.vertices) return lienzo;
+  if ('IntersectionObserver' in window) {
+    const m = MUESTRAS_TRANS;
+    if (!m.observador) {
+      m.observador = new IntersectionObserver(entradas => {
+        entradas.forEach(e => verMuestra(e.target, e.isIntersecting));
+      });
+    }
+    m.observador.observe(lienzo);
+  } else {
+    verMuestra(lienzo, true);
+  }
+  return lienzo;
+}
+
+function dibujoDeMuestra(color, otro, n) {
+  const c = document.createElement('canvas');
+  c.width = 160; c.height = 90;
+  const x = c.getContext('2d');
+  x.fillStyle = color; x.fillRect(0, 0, 160, 90);
+  x.fillStyle = otro;
+  for (let i = 0; i < 5; i += 1) x.fillRect(10 + i * 30, 20 + ((i * n) % 3) * 15, 18, 40);
+  return c;
 }
 
 /* --------------------------------------------------------------- el logo */
@@ -16948,7 +17333,7 @@ function pintarBarraModulos() {
   [['inicio', 'Inicio', 'Lo que pasa hoy y los tres módulos'],
     ['crear', 'Crear', 'Tus estilos y tus vídeos'],
     ['publicar', 'Publicar', 'Cola, calendario, textos por red y cuentas'],
-    ['automatizar', 'Automatizar', 'Parrilla de guiones y piloto automático (próximamente)']]
+    ['automatizar', 'Automatizar', 'La Parrilla de guiones (el piloto automático, próximamente)']]
     .forEach(([id, texto, ayuda]) => barra.appendChild(h('a', {
       href: '#', clase: `boton-modulo${MODULOS.actual === id ? ' activo' : ''}`, title: ayuda,
       'aria-current': MODULOS.actual === id ? 'page' : null,
@@ -17059,8 +17444,8 @@ function vistaInicioModulos() {
   ['publicar', 'Publicar', `${(c.listos || []).length} vídeo(s) listos · `
     + `${(c.envios || []).filter(e => e.estado === 'programado').length} programado(s) esta semana.`,
   'Ir a Publicar'],
-  ['automatizar', 'Automatizar', 'La Parrilla de guiones y el piloto automático llegan en la siguiente rama.',
-    'Ver qué será']].forEach(([id, titulo, texto, boton]) => tarjetas.appendChild(
+  ['automatizar', 'Automatizar', 'La Parrilla: matrices de guiones por proyecto, listas para pasar al Encargo.',
+    'Ir a la Parrilla']].forEach(([id, titulo, texto, boton]) => tarjetas.appendChild(
     h('div', { clase: 'tarjeta-modulo' },
       h('h3', {}, titulo), h('p', { clase: 'meta' }, texto),
       h('button', { clase: id === 'automatizar' ? 'mini' : 'primario mini', onclick: () => irAModulo(id) }, boton))));
@@ -17082,22 +17467,16 @@ function vistaInicioModulos() {
 /* --------------------------------------------------------- AUTOMATIZAR */
 
 function vistaAutomatizar() {
-  return h('div', { clase: 'automatizar' },
-    h('div', { clase: 'light-cab' }, h('h2', {}, 'Automatizar')),
-    h('div', { clase: 'caja-aviso' },
-      'Este módulo llega con la rama de la Parrilla. Mientras tanto, el Encargo se sigue llenando a mano '
-      + 'en Crear, y los vídeos montados se publican desde Publicar.'),
-    h('div', { clase: 'tarjetas-modulo' },
-      ...[['Parrilla', 'Matrices de guiones con su estado: pendiente, usado, publicado.'],
-        ['Añadir guiones', 'Subir un documento, pedírselos a Claude, o escribir o pegar uno.'],
-        ['Piloto automático', 'Una regla en forma de frase, el modo de aprobación, los topes de gasto y la línea del día.']]
-        .map(([t, d]) => h('div', { clase: 'tarjeta-modulo apagada' }, h('h3', {}, t), h('p', { clase: 'meta' }, d),
-          h('span', { clase: 'pastilla' }, 'próximamente')))));
+  /* LA PARRILLA (rama `parrilla`, 17-10-2026): todo vive en la sección
+     PARRILLA del final del fichero; aquí solo se entra. El piloto automático
+     sigue «próximamente» (rama `lala-2`). */
+  return vistaParrilla();
 }
 
 /* ------------------------------------------------------------ PUBLICAR */
 
 async function cargarPublicar(silencio) {
+  let terminoDeEscribir = false;
   if (!silencio) { PUB.cargando = true; pintarModulo(); }
   PUB.error = '';
   try {
@@ -17105,6 +17484,14 @@ async function cargarPublicar(silencio) {
       const antes = PUB.ficha;
       PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`));
       avisarCambiosPublicar(antes, PUB.ficha);
+      /* CLAUDE ACABA DE ESCRIBIR: se pinta YA, aunque haya un campo con el
+         cursor (sus textos son justo los que llegan). Antes se esperaba a
+         salir del campo y los textos no aparecían (17-10, en el servidor). */
+      if (antes && antes.pid === PUB.ficha.pid && antes.escribiendo && !PUB.ficha.escribiendo) {
+        terminoDeEscribir = true;
+        if (PUB.ficha.error_textos) toast(PUB.ficha.error_textos, true);
+        else toast('Textos listos: revísalos antes de publicar');
+      }
     } else if (PUB.seccion === 'cuentas') {
       PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
     } else if (PUB.seccion === 'resultados') {
@@ -17143,7 +17530,7 @@ async function cargarPublicar(silencio) {
   }
   PUB.cargando = false;
   if (MODULOS.actual === 'publicar') {
-    if (silencio) repintarPublicarSinPisar(); else pintarModulo();
+    if (silencio && !terminoDeEscribir) repintarPublicarSinPisar(); else pintarModulo();
     if (PUB.repintar) ponerAlDiaEstadoTextosPublicar();
   }
   programarRelojPublicar();
@@ -17169,7 +17556,7 @@ function estadoTextosPublicar(f) {
     caja.appendChild(h('div', { clase: 'caja-aviso fila escribiendo-textos' },
       h('span', { clase: 'girando', 'aria-hidden': 'true' }),
       h('span', { clase: 'crece' }, `Claude está escribiendo los textos${redes ? ` de ${redes}` : ''}…`
-        + `${lleva > 5 ? ` (lleva ${lleva} s; suele tardar uno o dos minutos)` : ''}`)));
+        + ` (lleva ${lleva} s; suele tardar menos de un minuto)`)));
   } else if (f.error_textos) {
     caja.appendChild(h('div', { clase: 'caja-error fila' },
       h('span', { clase: 'crece' }, f.error_textos),
@@ -17206,8 +17593,16 @@ function programarRelojPublicar() {
     || (PUB.seccion === 'cola' && PUB.cola && (PUB.cola.envios || []).some(e =>
       ['enviando', 'publicando', 'comprobar'].includes(e.estado)));
   if (!enElAire) return;
+  // solo se pregunta a Upload-Post si hay envíos en el aire, y SIN esperarlo:
+  // una consulta lenta allí no puede retrasar que se vean los textos
+  const hayEnvios = (PUB.seccion === 'ficha' && f && (f.envios || []).some(e =>
+    ['enviando', 'publicando', 'comprobar'].includes(e.estado))) || PUB.seccion === 'cola';
   PUB.reloj = setTimeout(async () => {
-    try { await pedir(rutaPublicar('/refrescar'), { method: 'POST' }); } catch (e) { /* se reintenta */ }
+    if (hayEnvios) {
+      const refresco = pedir(rutaPublicar('/refrescar'), { method: 'POST' }).catch(() => null);
+      // como mucho 8 s esperándolo; si tarda más, la ficha se pide igual
+      await Promise.race([refresco, new Promise(ok => setTimeout(ok, 8000))]);
+    }
     /* Se pide SIEMPRE: lo tecleado vive en PUB.borrador y se pinta encima de lo
        que llegue (textosDeFicha). Antes, con algo en el borrador no se volvía a
        pedir la ficha y «Claude está escribiendo» no acababa nunca (16-10). */
@@ -17784,7 +18179,8 @@ function bloqueTextoRed(red) {
   b.appendChild(h('div', { clase: 'fila' }, h('h3', {}, NOMBRES_RED[red]),
     h('span', { clase: 'crece' }),
     h('button', { clase: 'mini', title: 'Copiar el texto tal como sale en la red',
-      onclick: () => copiarTexto(compuesto.texto || '') }, 'Copiar texto'),
+      onclick: () => (String(textosDeFicha(red).descripcion || '').trim()
+        ? copiarTexto(compuesto.texto || '') : toast('Todavía no hay texto que copiar en esta red', true)) }, 'Copiar texto'),
     compuesto.titulo ? h('button', { clase: 'mini', onclick: () => copiarTexto(compuesto.titulo) }, 'Copiar título') : null,
     h('button', { clase: 'mini fantasma', title: 'Que Claude reescriba solo esta red',
       disabled: f.escribiendo, onclick: () => escribirTextosPublicar([red]) }, 'Reescribir')));
@@ -18686,6 +19082,767 @@ function seccionClaveUploadPost(ficha) {
       } }, 'Cambiar'),
       puesta ? h('button', { clase: 'mini fantasma peligro',
         onclick: () => guardarClaves({ uploadpost: { clave: '' } }) }, 'Quitar') : null));
+}
+
+/* ================================================================== PARRILLA
+ *
+ * AUTOMATIZAR → PARRILLA (rama `parrilla`, 17-10-2026). Todo lo de esta
+ * sección es nuevo y vive aquí, al final, como PUBLICAR: fuera de aquí solo se
+ * tocó `vistaAutomatizar` (que entra aquí) y dos textos de la barra y de
+ * Inicio. El servidor es `pasos/parrilla.py` y las rutas `/api/parrilla/*`.
+ *
+ *   - ES OPCIONAL. El Encargo se sigue llenando a mano en Crear. «Pasar al
+ *     Encargo» solo RELLENA el formulario de «Un vídeo nuevo» (el borrador del
+ *     navegador, `encargoVideoLight`) y lleva a Crear: el vídeo lo crea la
+ *     persona con su botón de siempre. No se escribe ningún param (regla 1).
+ *   - Tres secciones: la Parrilla (matrices y guiones con su estado), Añadir
+ *     guiones (subir un Word, PDF o Excel; pedírselos a Claude; escribir o
+ *     pegar) y la ficha de un guion (su texto en el formato del Studio, lo que
+ *     irá al Encargo y «Pasar al Encargo»).
+ *   - Lo que hace Claude va en un hilo del servidor: la pantalla pregunta por el
+ *     trabajo cada dos segundos (detrás del proxy, una petición larga se corta).
+ *   - El piloto automático NO está: sale como «próximamente».
+ */
+const PAR = {
+  seccion: 'parrilla', cid: '', proyectos: null, estilos: [], datos: null, guion: null,
+  cargando: false, cargadoAl: 0, maxPedir: 30, error: '', filtro: 'todos', buscar: '', reloj: null, trabajo: null,
+  borradorTexto: null, guardando: false, estiloElegido: '', encargoIndice: 0, turno: 0, repintar: false,
+  form: {
+    origen: 'subir', modo: 'adaptar', matriz: '', nombre: '', red: '', formato: '',
+    duracion_s: '', notas: '', texto: '', yaFormato: false, peticion: '', cuantos: 5,
+    fichero: null,
+  },
+};
+const ESTADOS_GUION = { pendiente: 'pendiente', usado: 'usado', publicado: 'publicado' };
+const CLASE_GUION = { pendiente: '', usado: 'ejecutando', publicado: 'ok' };
+
+function cuantosGuiones(n) { return `${n} ${n === 1 ? 'guion' : 'guiones'}`; }
+
+function rutaParrilla(resto) { return `${BASE}/api/parrilla${resto || ''}`; }
+function rutaProyectoParrilla(resto) {
+  return rutaParrilla(`/proyectos/${encodeURIComponent(PAR.cid)}${resto || ''}`);
+}
+
+async function cargarParrilla(silencio) {
+  /* UNA RESPUESTA VIEJA NO PISA A LA NUEVA: cambiar de proyecto con una carga
+     en camino podía dejar a la vista las matrices del anterior con el selector
+     en el nuevo (y sus botones mandaban ids a un proyecto que no los tiene). */
+  const turno = (PAR.turno = (PAR.turno || 0) + 1);
+  if (!silencio) { PAR.cargando = true; pintarModulo(); }
+  PAR.error = '';
+  try {
+    const p = await pedir(rutaParrilla('/proyectos'));
+    PAR.proyectos = p.proyectos || [];
+    PAR.estilos = p.estilos || [];
+    PAR.maxPedir = p.max_pedir || 30;
+    const guardado = (() => { try { return localStorage.getItem('estudio.parrilla.proyecto') || ''; } catch (e) { return ''; } })();
+    if (!PAR.cid || !PAR.proyectos.some(x => x.id === PAR.cid)) {
+      const elegido = PAR.proyectos.find(x => x.id === guardado)
+        || PAR.proyectos.find(x => x.id !== '_sin') || PAR.proyectos[0];
+      PAR.cid = elegido ? elegido.id : '_sin';
+    }
+    const datos = await pedir(rutaProyectoParrilla());
+    if (turno !== PAR.turno) return;
+    PAR.datos = datos;
+    // uno en marcha se sigue (se recargó la página); uno ya acabado no se vuelve a anunciar
+    if (PAR.datos.trabajo && PAR.datos.trabajo.estado === 'trabajando' && !PAR.trabajo) PAR.trabajo = PAR.datos.trabajo;
+    if (PAR.seccion === 'ficha' && PAR.guion) {
+      const guion = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(PAR.guion.id)}`));
+      if (turno !== PAR.turno) return;
+      PAR.guion = guion;
+    }
+  } catch (e) {
+    if (turno !== PAR.turno) return;
+    PAR.error = e.message;
+    if (e.status === 404 && PAR.seccion === 'ficha') { PAR.seccion = 'parrilla'; PAR.guion = null; }
+  }
+  PAR.cargando = false;
+  PAR.cargadoAl = Date.now();
+  if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
+  vigilarTrabajoParrilla();
+}
+
+/* Lo que pasa en el servidor se pinta sin llevarse el cursor de quien escribe:
+   si hay un campo con el foco, solo se cambia el aviso del trabajo. */
+function repintarParrillaSinPisar() {
+  if (campoPublicarConFoco()) {
+    const viejo = document.querySelector('#modulo .trabajo-parrilla-hueco');
+    if (viejo) viejo.replaceWith(avisoTrabajoParrilla());
+    /* ...y el resto, al salir del campo: si el trabajo acabó, la sección
+       cambió y el formulario se vació, y eso tiene que verse. */
+    if (!PAR.repintar) {
+      PAR.repintar = true;
+      const m = $('#modulo');
+      if (m) {
+        m.addEventListener('focusout', () => setTimeout(() => {
+          if (!PAR.repintar || MODULOS.actual !== 'automatizar') { PAR.repintar = false; return; }
+          if (campoPublicarConFoco()) { PAR.repintar = false; repintarParrillaSinPisar(); return; }
+          PAR.repintar = false;
+          pintarModulo();
+        }, 60), { once: true });
+      }
+    }
+    return;
+  }
+  PAR.repintar = false;
+  pintarModulo();
+}
+
+function elegirProyectoParrilla(cid) {
+  PAR.cid = cid;
+  PAR.datos = null;
+  PAR.guion = null;
+  PAR.trabajo = null;
+  PAR.form.matriz = '';
+  if (PAR.seccion === 'ficha') PAR.seccion = 'parrilla';
+  try { localStorage.setItem('estudio.parrilla.proyecto', cid); } catch (e) { /* sin almacén */ }
+  cargarParrilla();
+}
+
+function irASeccionParrilla(seccion) {
+  PAR.seccion = seccion;
+  const m = $('#modulo');
+  if (m) m.scrollTop = 0;
+  pintarModulo();
+}
+
+function vistaParrilla() {
+  /* Se carga al entrar, y otra vez si lo que hay tiene más de un minuto: un
+     guion usado se enlaza con su vídeo (y pasa a publicado) mientras se está
+     en Crear o en Publicar. */
+  if (!PAR.cargando && !PAR.error && (!PAR.proyectos || !PAR.datos)) setTimeout(() => cargarParrilla(), 0);
+  else if (!PAR.cargando && PAR.datos && Date.now() - (PAR.cargadoAl || 0) > 60000) {
+    PAR.cargadoAl = Date.now();
+    setTimeout(() => cargarParrilla(true), 0);
+  }
+  // al volver a Automatizar con una conversión en marcha, se vuelve a preguntar
+  if (PAR.trabajo && PAR.trabajo.estado === 'trabajando' && !PAR.reloj) setTimeout(vigilarTrabajoParrilla, 0);
+  const caja = h('div', { clase: 'automatizar parrilla' });
+  const pestanas = h('div', { clase: 'pestanas-publicar', role: 'tablist' });
+  [['parrilla', 'Parrilla'], ['anadir', 'Añadir guiones'],
+    ['ficha', PAR.guion ? recortar(PAR.guion.titulo || PAR.guion.codigo || 'Guion', 26) : 'Ficha de un guion']]
+    .forEach(([id, texto]) => pestanas.appendChild(h('button', {
+      clase: `mini${PAR.seccion === id ? ' activo' : ' fantasma'}`, role: 'tab',
+      'aria-selected': PAR.seccion === id ? 'true' : 'false',
+      disabled: id === 'ficha' && !PAR.guion,
+      title: id === 'ficha' && !PAR.guion ? 'abre un guion de la Parrilla' : '',
+      onclick: () => irASeccionParrilla(id),
+    }, texto)));
+  pestanas.appendChild(h('button', {
+    clase: 'mini fantasma', disabled: true, title: 'Llega en una rama posterior (lala-2)',
+  }, 'Piloto automático · próximamente'));
+  caja.appendChild(h('div', { clase: 'light-cab' }, h('h2', {}, 'Automatizar'), h('span', { clase: 'crece' }), pestanas));
+
+  if (PAR.proyectos && PAR.proyectos.length) {
+    const sel = h('select', { 'aria-label': 'Proyecto', onchange: ev => elegirProyectoParrilla(ev.target.value) },
+      PAR.proyectos.map(p => {
+        const c = p.cuentas || {};
+        const total = (c.pendiente || 0) + (c.usado || 0) + (c.publicado || 0);
+        return h('option', { value: p.id, selected: p.id === PAR.cid ? true : null },
+          `${p.nombre}${total ? ` · ${cuantosGuiones(total)}` : ''}`);
+      }));
+    caja.appendChild(h('div', { clase: 'fila proyecto-parrilla' }, h('b', {}, 'Proyecto'), sel,
+      h('span', { clase: 'meta crece' }, 'Cada proyecto tiene sus matrices de guiones.')));
+  }
+  caja.appendChild(h('div', { clase: 'pista parrilla-opcional' },
+    'La Parrilla es opcional: el Encargo de un vídeo se sigue pudiendo llenar a mano en Crear.'));
+  if (PAR.error) {
+    caja.appendChild(cajaError(PAR.error));
+    caja.appendChild(h('button', { clase: 'mini', onclick: () => cargarParrilla() }, 'Reintentar'));
+  }
+  caja.appendChild(avisoTrabajoParrilla());
+  if (PAR.cargando && !PAR.datos) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'cargando…'));
+    return caja;
+  }
+  if (PAR.seccion === 'anadir') caja.appendChild(seccionAnadirParrilla());
+  else if (PAR.seccion === 'ficha' && PAR.guion) caja.appendChild(seccionFichaParrilla());
+  else caja.appendChild(seccionListaParrilla());
+  return caja;
+}
+
+/* ---------------------------------------------------- el trabajo de Claude */
+
+function avisoTrabajoParrilla() {
+  const hueco = h('div', { clase: 'trabajo-parrilla-hueco' });
+  const t = PAR.trabajo;
+  if (!t || t.cid !== PAR.cid) return hueco;
+  const quitar = h('button', { clase: 'mini fantasma', title: 'Quitar este aviso', onclick: () => olvidarTrabajoParrilla() }, '✕');
+  if (t.estado === 'trabajando') {
+    const parte = t.total > 1 ? ` (${t.hechos} de ${t.total})` : '';
+    hueco.appendChild(h('div', { clase: 'caja-aviso fila trabajo-parrilla' },
+      h('span', { clase: 'girando', 'aria-hidden': 'true' }),
+      h('span', { clase: 'crece' }, `${t.avance || 'trabajando'}${parte}… Suele tardar uno o dos minutos `
+        + 'por cada cinco guiones; puedes seguir con otra cosa.')));
+  } else if (t.estado === 'error') {
+    hueco.appendChild(h('div', { clase: 'caja-error fila trabajo-parrilla' },
+      h('span', { clase: 'crece' }, t.error || 'ha fallado'), quitar));
+  } else {
+    const n = (t.guiones || []).length;
+    hueco.appendChild(h('div', { clase: 'caja-info fila trabajo-parrilla' },
+      h('span', { clase: 'crece' }, `${cuantosGuiones(n)} guardados en la Parrilla. Revísalos antes de pasarlos al Encargo.`
+        + (t.aviso ? ` Ojo: ${t.aviso}` : '')),
+      h('button', { clase: 'mini', onclick: () => { olvidarTrabajoParrilla(); irASeccionParrilla('parrilla'); } }, 'Verlos'),
+      quitar));
+  }
+  return hueco;
+}
+
+function vigilarTrabajoParrilla() {
+  clearTimeout(PAR.reloj);
+  PAR.reloj = null;
+  const t = PAR.trabajo;
+  if (!t || t.estado !== 'trabajando' || MODULOS.actual !== 'automatizar') return;
+  PAR.reloj = setTimeout(async () => {
+    PAR.reloj = null;
+    if (MODULOS.actual !== 'automatizar' || !PAR.trabajo) return;
+    try {
+      const nuevo = await pedir(rutaParrilla(`/trabajos/${encodeURIComponent(PAR.trabajo.id)}`));
+      const acabo = PAR.trabajo.estado === 'trabajando' && nuevo.estado !== 'trabajando';
+      PAR.trabajo = nuevo;
+      if (acabo) {
+        if (nuevo.estado === 'listo') {
+          toast(`${cuantosGuiones((nuevo.guiones || []).length)} en la Parrilla`);
+          vaciarFormParrilla();
+          PAR.seccion = 'parrilla';
+        } else {
+          toast(nuevo.error || 'no se han podido convertir', true);
+        }
+        await cargarParrilla(true);
+        return;
+      }
+    } catch (e) {
+      if (e.status === 404) {
+        PAR.trabajo = { ...PAR.trabajo, estado: 'error',
+          error: 'el servidor ya no conoce ese trabajo (¿se reinició?). Vuelve a lanzarlo.' };
+      }
+    }
+    repintarParrillaSinPisar();
+    vigilarTrabajoParrilla();
+  }, 2000);
+}
+
+async function olvidarTrabajoParrilla() {
+  const t = PAR.trabajo;
+  PAR.trabajo = null;
+  pintarModulo();
+  if (t && t.id) {
+    try { await pedir(rutaParrilla(`/trabajos/${encodeURIComponent(t.id)}`), { method: 'DELETE' }); } catch (e) { /* ya no está */ }
+  }
+}
+
+/* ----------------------------------------------------------- la Parrilla */
+
+function pastillaGuion(estado) {
+  return h('span', { clase: `pastilla ${CLASE_GUION[estado] || ''}`.trim() }, ESTADOS_GUION[estado] || estado);
+}
+
+function datosGuionCorto(g) {
+  const trozos = [];
+  if (g.uso) trozos.push(g.uso);
+  if (g.red) trozos.push(g.red);
+  if (g.formato) trozos.push(g.formato);
+  trozos.push(g.duracion_s ? `${g.duracion_s} s` : 'duración en el Encargo');
+  if (g.escenas) trozos.push(`${g.escenas} escena(s)`);
+  return trozos.join(' · ');
+}
+
+function seccionListaParrilla() {
+  const caja = h('div', { clase: 'seccion-parrilla' });
+  const d = PAR.datos;
+  if (!d) return caja;
+  const c = d.cuentas || {};
+  const total = (c.pendiente || 0) + (c.usado || 0) + (c.publicado || 0);
+  if (!(d.matrices || []).length) {
+    caja.appendChild(h('div', { clase: 'bloque vacio-parrilla' },
+      h('h3', {}, 'Todavía no hay guiones en este proyecto'),
+      h('p', { clase: 'meta' }, 'Sube una matriz (Word, PDF o Excel), pídele guiones a Claude o pega uno. '
+        + 'Todo se convierte al formato del Studio y queda aquí, listo para pasar al Encargo.'),
+      h('button', { clase: 'primario', onclick: () => irASeccionParrilla('anadir') }, 'Añadir guiones')));
+    return caja;
+  }
+  const filtros = h('div', { clase: 'fila filtros-parrilla' });
+  [['todos', `Todos (${total})`], ['pendiente', `Pendientes (${c.pendiente || 0})`],
+    ['usado', `Usados (${c.usado || 0})`], ['publicado', `Publicados (${c.publicado || 0})`]]
+    .forEach(([id, texto]) => filtros.appendChild(h('button', {
+      clase: `mini${PAR.filtro === id ? ' activo' : ' fantasma'}`,
+      onclick: () => { PAR.filtro = id; pintarModulo(); },
+    }, texto)));
+  const buscar = h('input', {
+    type: 'search', clase: 'buscar-parrilla', placeholder: 'Buscar por título o ID',
+    value: PAR.buscar, oninput: ev => { PAR.buscar = ev.target.value; pintarModulo(); },
+  });
+  buscar.dataset.foco = 'parrilla-buscar';
+  filtros.appendChild(buscar);
+  filtros.appendChild(h('button', { clase: 'mini primario', onclick: () => irASeccionParrilla('anadir') }, '+ Añadir guiones'));
+  caja.appendChild(filtros);
+
+  const texto = PAR.buscar.trim().toLowerCase();
+  (d.matrices || []).forEach(m => {
+    const guiones = (m.guiones || []).filter(g => (PAR.filtro === 'todos' || g.estado === PAR.filtro)
+      && (!texto || `${g.codigo} ${g.titulo}`.toLowerCase().includes(texto)));
+    const bloque = h('div', { clase: 'bloque matriz-parrilla' });
+    const origen = m.origen || {};
+    const deDonde = { subir: origen.fichero ? `de «${origen.fichero}»` : 'de un documento', pegar: 'pegada',
+      pedir: 'escrita por Claude', escribir: 'escrita a mano', vacia: '' }[origen.tipo] || '';
+    bloque.appendChild(h('div', { clase: 'fila cab-matriz' },
+      h('h3', {}, m.nombre),
+      h('span', { clase: 'meta' }, `${cuantosGuiones((m.guiones || []).length)}${deDonde ? ` · ${deDonde}` : ''}`
+        + `${m.creada ? ` · ${m.creada.slice(0, 10)}` : ''}`),
+      h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini fantasma', onclick: () => renombrarMatrizParrilla(m) }, 'Renombrar'),
+      h('button', { clase: 'mini fantasma peligro', onclick: () => borrarMatrizParrilla(m) }, 'Borrar')));
+    if (!guiones.length) {
+      bloque.appendChild(h('div', { clase: 'meta' }, (m.guiones || []).length
+        ? 'Ninguno con este filtro.' : 'Vacía: añade guiones desde «Añadir guiones».'));
+    }
+    guiones.forEach(g => bloque.appendChild(filaGuionParrilla(g)));
+    caja.appendChild(bloque);
+  });
+  return caja;
+}
+
+function filaGuionParrilla(g) {
+  return h('div', { clase: 'fila fila-guion' },
+    h('button', { clase: 'mini fantasma titulo-guion', title: 'Abrir la ficha de este guion', onclick: () => abrirGuionParrilla(g.id) },
+      [g.codigo, g.titulo].filter(Boolean).join(' — ') || 'Guion sin título'),
+    h('span', { clase: 'meta datos-guion' }, datosGuionCorto(g)),
+    g.avisos ? h('span', { clase: 'pastilla obsoleto', title: 'Avisos ⚠ del guion: míralos en la ficha' }, `⚠ ${g.avisos}`) : null,
+    g.video_nombre ? h('span', { clase: 'meta video-guion', title: 'El vídeo que se hizo con este guion' }, `▸ ${g.video_nombre}`) : null,
+    h('span', { clase: 'crece' }),
+    pastillaGuion(g.estado),
+    h('button', { clase: 'mini', onclick: () => abrirGuionParrilla(g.id) }, 'Abrir'));
+}
+
+async function abrirGuionParrilla(gid) {
+  try {
+    PAR.guion = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(gid)}`));
+    PAR.borradorTexto = null;
+    PAR.encargoIndice = 0;
+    PAR.estiloElegido = PAR.guion.estilo || '';
+    irASeccionParrilla('ficha');
+  } catch (e) {
+    toast(`no se ha podido abrir el guion: ${e.message}`, true);
+  }
+}
+
+async function renombrarMatrizParrilla(m) {
+  const nombre = prompt('Nombre de la matriz', m.nombre);
+  if (nombre === null || !nombre.trim() || nombre.trim() === m.nombre) return;
+  try {
+    await pedir(rutaProyectoParrilla(`/matrices/${encodeURIComponent(m.id)}`), { method: 'PUT', cuerpo: { nombre } });
+    await cargarParrilla(true);
+  } catch (e) { toast(`no se ha podido renombrar: ${e.message}`, true); }
+}
+
+async function borrarMatrizParrilla(m) {
+  const n = (m.guiones || []).length;
+  if (!confirm(`¿Borrar la matriz «${m.nombre}»${n ? ` y sus ${cuantosGuiones(n)}` : ''}? No se puede deshacer `
+    + '(los vídeos que ya se hicieron con ellos no se tocan).')) return;
+  try {
+    await pedir(rutaProyectoParrilla(`/matrices/${encodeURIComponent(m.id)}`), { method: 'DELETE' });
+    if (PAR.guion && PAR.guion.matriz === m.id) PAR.guion = null;
+    toast('matriz borrada');
+    await cargarParrilla(true);
+  } catch (e) { toast(`no se ha podido borrar: ${e.message}`, true); }
+}
+
+/* ------------------------------------------------------- añadir guiones */
+
+function seccionAnadirParrilla() {
+  const f = PAR.form;
+  const caja = h('div', { clase: 'seccion-parrilla anadir-parrilla' });
+  const enMarcha = PAR.trabajo && PAR.trabajo.estado === 'trabajando' && PAR.trabajo.cid === PAR.cid;
+
+  const origenes = h('div', { clase: 'tira-modos origen-parrilla' });
+  [['subir', 'Subir un documento', 'Una matriz en Word, PDF o Excel'],
+    ['pedir', 'Pedir a Claude', 'Claude escribe guiones nuevos'],
+    ['pegar', 'Escribir o pegar', 'Un guion (o varios) escrito o pegado']]
+    .forEach(([id, texto, ayuda]) => origenes.appendChild(h('button', {
+      clase: `mini${f.origen === id ? ' activo' : ''}`, title: ayuda,
+      onclick: () => { f.origen = id; pintarModulo(); },
+    }, texto)));
+  caja.appendChild(h('div', { clase: 'bloque' }, h('h3', {}, 'De dónde salen'), origenes));
+
+  const bloque = h('div', { clase: 'bloque' });
+  if (f.origen === 'subir') {
+    const input = h('input', {
+      type: 'file', accept: '.docx,.xlsx,.pdf,.txt,.md',
+      onchange: ev => { f.fichero = ev.target.files && ev.target.files[0] ? ev.target.files[0] : null; pintarModulo(); },
+    });
+    bloque.appendChild(h('h3', {}, 'El documento'));
+    bloque.appendChild(h('div', { clase: 'fila' }, input,
+      f.fichero ? h('span', { clase: 'meta' }, `${f.fichero.name} · ${Math.max(1, Math.round(f.fichero.size / 1024))} KB`) : null));
+    bloque.appendChild(h('div', { clase: 'pista' },
+      'Word (.docx), Excel (.xlsx), PDF o texto, de hasta 20 MB. Puede traer muchos guiones: se convierten '
+      + 'todos, uno por uno, al formato del Studio. Los .doc y .xls antiguos, guárdalos antes como .docx o .xlsx.'));
+  } else if (f.origen === 'pedir') {
+    const area = h('textarea', {
+      rows: 6, placeholder: 'De qué quieres los guiones: el tema, el cliente, la idea, a quién van dirigidos, '
+        + 'qué hay que decir sí o sí…',
+      oninput: ev => { f.peticion = ev.target.value; },
+    });
+    area.value = f.peticion;
+    area.dataset.foco = 'parrilla-peticion';
+    bloque.appendChild(h('div', { clase: 'fila' }, h('h3', {}, 'Qué guiones quieres'), h('span', { clase: 'crece' }),
+      botonGuia('pedir_guiones', () => document.querySelector('#modulo [data-foco="parrilla-peticion"]'))));
+    bloque.appendChild(area);
+    const cuantos = h('input', {
+      type: 'number', min: 1, max: PAR.maxPedir || 30, value: f.cuantos, clase: 'numero-corto',
+      oninput: ev => { f.cuantos = ev.target.value; },
+    });
+    cuantos.dataset.foco = 'parrilla-cuantos';
+    bloque.appendChild(h('div', { clase: 'fila' }, h('label', {}, 'Cuántos'), cuantos,
+      h('span', { clase: 'meta' }, `de 1 a ${PAR.maxPedir || 30}. Claude los escribe de cinco en cinco.`)));
+  } else {
+    const area = h('textarea', {
+      rows: 12, clase: 'texto-guion',
+      placeholder: 'Pega aquí el guion (o la matriz entera). Si ya está en el formato del Studio, marca la casilla.',
+      oninput: ev => { f.texto = ev.target.value; },
+    });
+    area.value = f.texto;
+    area.dataset.foco = 'parrilla-pegar';
+    bloque.appendChild(h('div', { clase: 'fila' }, h('h3', {}, 'El guion'), h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini', onclick: () => usarPlantillaParrilla() }, 'Escribir uno con la plantilla'),
+      botonGuia('guion_parrilla', () => document.querySelector('#modulo [data-foco="parrilla-pegar"]'))));
+    bloque.appendChild(area);
+    bloque.appendChild(h('label', { clase: 'plano' },
+      h('input', { type: 'checkbox', checked: f.yaFormato ? true : null,
+        onchange: ev => { f.yaFormato = ev.target.checked; pintarModulo(); } }),
+      h('span', {}, 'Ya está en el formato del Studio: guárdalo tal cual, sin pasar por Claude')));
+  }
+  caja.appendChild(bloque);
+
+  const sinClaude = f.origen === 'pegar' && f.yaFormato;
+  if (!sinClaude) {
+    const usos = h('div', { clase: 'tira-modos' });
+    [['adaptar', 'Adaptar', 'El original es una guía de ideas: la locución se escribe para la red'],
+      ['exacto', 'Exacto', 'La locución del original se respeta palabra por palabra']]
+      .forEach(([id, texto, ayuda]) => usos.appendChild(h('button', {
+        clase: `mini${f.modo === id ? ' activo' : ''}`, title: ayuda,
+        onclick: () => { f.modo = id; pintarModulo(); },
+      }, texto)));
+    const datos = h('div', { clase: 'bloque' }, h('h3', {}, 'Cómo se usa'), usos,
+      h('div', { clase: 'pista' }, f.modo === 'exacto'
+        ? 'Exacto: la locución se respeta palabra por palabra (solo ortografía). Al pasarlo al Encargo se marca '
+          + '«Esto YA es el guion» y el redactor no lo reescribe.'
+        : 'Adaptar: el original es una guía. Claude escribe la locución final ajustada a la red, y el redactor del '
+          + 'Studio la vuelve a contar con el tono del estilo.'));
+    const red = h('select', { onchange: ev => { f.red = ev.target.value; } },
+      [['', 'la que diga el guion'], ['TikTok', 'TikTok'], ['Reels', 'Instagram Reels'], ['Shorts', 'YouTube Shorts'],
+        ['YouTube largo', 'YouTube largo'], ['Facebook', 'Facebook']]
+        .map(([v, t]) => h('option', { value: v, selected: f.red === v ? true : null }, t)));
+    const formato = h('select', { onchange: ev => { f.formato = ev.target.value; } },
+      [['', 'el que diga el guion'], ['vertical', 'vertical'], ['horizontal', 'horizontal']]
+        .map(([v, t]) => h('option', { value: v, selected: f.formato === v ? true : null }, t)));
+    const duracion = h('input', { type: 'number', min: 0, max: 3600, placeholder: 's', value: f.duracion_s,
+      clase: 'numero-corto', oninput: ev => { f.duracion_s = ev.target.value; } });
+    duracion.dataset.foco = 'parrilla-duracion';
+    const notas = h('input', { type: 'text', value: f.notas, placeholder: 'algo que Claude deba saber (opcional)',
+      oninput: ev => { f.notas = ev.target.value; } });
+    notas.dataset.foco = 'parrilla-notas';
+    datos.appendChild(h('div', { clase: 'rejilla-parrilla' },
+      h('label', {}, 'Red', red), h('label', {}, 'Formato', formato),
+      h('label', {}, 'Duración (s)', duracion), h('label', { clase: 'ancha' }, 'Notas', notas)));
+    datos.appendChild(h('div', { clase: 'pista' }, 'Solo se usan si el guion no dice otra cosa.'));
+    caja.appendChild(datos);
+  }
+
+  const matrices = (PAR.datos && PAR.datos.matrices) || [];
+  const destino = h('select', { onchange: ev => { f.matriz = ev.target.value; pintarModulo(); } },
+    [h('option', { value: '', selected: !f.matriz ? true : null }, 'Una matriz nueva')]
+      .concat(matrices.map(m => h('option', { value: m.id, selected: f.matriz === m.id ? true : null },
+        `${m.nombre} (${(m.guiones || []).length})`))));
+  const nombre = h('input', { type: 'text', value: f.nombre, placeholder: f.origen === 'subir' && f.fichero
+    ? f.fichero.name.replace(/\.[^.]+$/, '') : 'Matriz de octubre', oninput: ev => { f.nombre = ev.target.value; } });
+  nombre.dataset.foco = 'parrilla-nombre';
+  caja.appendChild(h('div', { clase: 'bloque' }, h('h3', {}, 'Dónde se guardan'),
+    h('div', { clase: 'rejilla-parrilla' }, h('label', {}, 'Matriz', destino),
+      !f.matriz ? h('label', { clase: 'ancha' }, 'Nombre de la matriz nueva', nombre) : null)));
+
+  const etiqueta = f.origen === 'subir' ? 'Subir y convertir'
+    : f.origen === 'pedir' ? 'Pedir a Claude' : sinClaude ? 'Guardar en la Parrilla' : 'Convertir con Claude';
+  caja.appendChild(h('div', { clase: 'fila cierre' },
+    h('button', { clase: 'primario', disabled: enMarcha ? true : null, onclick: () => lanzarParrilla() }, etiqueta),
+    h('span', { clase: 'pista' }, enMarcha ? 'Espera a que acabe la conversión en marcha.'
+      : sinClaude ? 'No usa Claude.' : 'Usa Claude (tokens de la suscripción, sin coste en dólares).')));
+  return caja;
+}
+
+/* Lo de UNA tanda se vacía al acabar bien: el nombre de la matriz nueva y la
+   matriz elegida tampoco se arrastran (el Word de después acababa en otra
+   matriz «Octubre», hallazgo 2 de la revisión). El uso, la red y el formato sí
+   se quedan: suelen ser los mismos para todo el proyecto. */
+function vaciarFormParrilla() {
+  Object.assign(PAR.form, { texto: '', peticion: '', fichero: null, nombre: '', matriz: '', yaFormato: false });
+}
+
+async function usarPlantillaParrilla() {
+  if (PAR.form.texto.trim() && !confirm('El campo ya tiene texto. ¿Lo reemplazo por la plantilla?')) return;
+  try {
+    const r = await pedir(`${rutaParrilla('/plantilla')}?${consulta({ proyecto: PAR.cid })}`);
+    PAR.form.texto = r.texto || '';
+    PAR.form.yaFormato = true;
+    pintarModulo();
+    toast('cambia lo que está entre corchetes');
+  } catch (e) { toast(`no se ha podido traer la plantilla: ${e.message}`, true); }
+}
+
+async function lanzarParrilla() {
+  const f = PAR.form;
+  const comunes = { modo: f.modo, matriz: f.matriz, nombre: f.nombre.trim(), red: f.red, formato: f.formato,
+    duracion_s: f.duracion_s, notas: f.notas };
+  try {
+    if (f.origen === 'pegar' && f.yaFormato) {
+      if (!f.texto.trim()) { toast('escribe o pega el guion', true); return; }
+      const r = await pedir(rutaProyectoParrilla('/guiones'), { method: 'POST',
+        cuerpo: { texto: f.texto, matriz: f.matriz, nombre: f.nombre.trim() } });
+      toast(`${cuantosGuiones((r.guiones || []).length)} guardados`);
+      vaciarFormParrilla();
+      PAR.seccion = 'parrilla';
+      await cargarParrilla(true);
+      return;
+    }
+    let t;
+    if (f.origen === 'subir') {
+      if (!f.fichero) { toast('elige el documento', true); return; }
+      const datos = new FormData();
+      datos.append('documento', f.fichero, f.fichero.name);
+      Object.entries(comunes).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') datos.append(k, String(v)); });
+      t = await pedir(rutaProyectoParrilla('/subir'), { method: 'POST', cuerpo: datos });
+    } else if (f.origen === 'pedir') {
+      if (!f.peticion.trim()) { toast('di qué guiones quieres', true); return; }
+      t = await pedir(rutaProyectoParrilla('/pedir'), { method: 'POST',
+        cuerpo: Object.assign({ peticion: f.peticion, cuantos: Number(f.cuantos) || 0 }, comunes) });
+    } else {
+      if (!f.texto.trim()) { toast('pega el guion que hay que convertir', true); return; }
+      t = await pedir(rutaProyectoParrilla('/convertir'), { method: 'POST',
+        cuerpo: Object.assign({ texto: f.texto }, comunes) });
+    }
+    PAR.trabajo = t;
+    pintarModulo();
+    vigilarTrabajoParrilla();
+  } catch (e) {
+    toast(e.message, true);
+  }
+}
+
+/* ------------------------------------------------------ la ficha de un guion */
+
+function seccionFichaParrilla() {
+  const g = PAR.guion;
+  const caja = h('div', { clase: 'seccion-parrilla ficha-parrilla' });
+  caja.appendChild(h('div', { clase: 'fila cab-ficha-parrilla' },
+    h('button', { clase: 'mini fantasma', onclick: () => irASeccionParrilla('parrilla') }, '‹ Parrilla'),
+    h('h3', { clase: 'crece' }, [g.codigo, g.titulo].filter(Boolean).join(' — ') || 'Guion sin título'),
+    pastillaGuion(g.estado)));
+  caja.appendChild(h('div', { clase: 'meta' }, `En «${g.matriz_nombre}»`
+    + (g.video_nombre ? ` · vídeo: ${g.video_nombre}` : '')
+    + (g.usado_al ? ` · pasado al Encargo el ${g.usado_al.replace('T', ' ').slice(0, 16)}` : '')));
+
+  // Lo rápido: uso, formato y duración (cambian la línea del texto). Con el
+  // texto a medio editar se apagan: se aplicarían al texto GUARDADO y «Guardar
+  // el texto» los desharía después sin decir nada.
+  const borradorPendiente = PAR.borradorTexto !== null && PAR.borradorTexto !== g.texto;
+  const uso = h('select', { clase: 'rapido-guion', disabled: borradorPendiente ? true : null,
+    onchange: ev => guardarGuionParrilla({ uso: ev.target.value }) },
+    (g.uso ? [] : [h('option', { value: '', selected: true }, 'sin decir')])
+      .concat(['adaptar', 'exacto'].map(v => h('option', { value: v, selected: g.uso === v ? true : null }, v))));
+  const formato = h('select', { clase: 'rapido-guion', disabled: borradorPendiente ? true : null,
+    onchange: ev => guardarGuionParrilla({ formato: ev.target.value }) },
+    (g.formato ? [] : [h('option', { value: '', selected: true }, 'sin decir')])
+      .concat(['vertical', 'horizontal'].map(v => h('option', { value: v, selected: g.formato === v ? true : null }, v))));
+  const duracion = h('input', { type: 'number', min: 0, max: 3600, clase: 'numero-corto rapido-guion',
+    disabled: borradorPendiente ? true : null, value: g.duracion_s || '',
+    placeholder: 'en el Encargo', onchange: ev => guardarGuionParrilla({ duracion_s: ev.target.value ? Number(ev.target.value) : null }) });
+  duracion.dataset.foco = 'parrilla-ficha-duracion';
+  caja.appendChild(h('div', { clase: 'bloque' },
+    h('div', { clase: 'rejilla-parrilla' }, h('label', {}, 'Uso', uso), h('label', {}, 'Formato', formato),
+      h('label', {}, 'Duración (s)', duracion)),
+    h('div', { clase: 'pista' }, borradorPendiente
+      ? 'Guarda o descarta antes los cambios del texto.'
+      : 'Cambiar esto cambia su línea en el texto de abajo (y en «Para el Encargo» si hay uno solo).')));
+
+  // El texto entero: es la verdad del guion
+  const texto = PAR.borradorTexto !== null ? PAR.borradorTexto : g.texto;
+  const cambiado = PAR.borradorTexto !== null && PAR.borradorTexto !== g.texto;
+  const area = h('textarea', { rows: 18, clase: 'texto-guion',
+    /* SIN REPINTAR mientras se escribe (se llevaría el cursor): solo se
+       encienden «Guardar» y «Descartar», y se apaga «Pasar al Encargo», que
+       pasaría el texto GUARDADO y no el que se ve. */
+    oninput: ev => {
+      PAR.borradorTexto = ev.target.value;
+      const sinCambios = PAR.borradorTexto === g.texto;
+      document.querySelectorAll('#modulo .guardar-texto-guion, #modulo .descartar-texto-guion')
+        .forEach(b => { b.disabled = sinCambios; });
+      document.querySelectorAll('#modulo .rapido-guion').forEach(c => { c.disabled = !sinCambios; });
+      const pasar = document.querySelector('#modulo .boton-pasar-encargo');
+      if (pasar) {
+        pasar.disabled = !sinCambios || pasar.dataset.sinMaterial === '1';
+        pasar.title = sinCambios ? '' : 'Guarda antes el texto';
+      }
+    } });
+  area.value = texto;
+  area.dataset.foco = 'parrilla-texto';
+  caja.appendChild(h('div', { clase: 'bloque' },
+    h('div', { clase: 'fila' }, h('h3', {}, 'El guion'), h('span', { clase: 'crece' }),
+      botonGuia('guion_parrilla', () => document.querySelector('#modulo [data-foco="parrilla-texto"]')),
+      h('button', { clase: 'mini', onclick: () => copiarTexto(PAR.borradorTexto !== null ? PAR.borradorTexto : g.texto) }, 'Copiar')),
+    area,
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'primario mini guardar-texto-guion', disabled: cambiado ? null : true,
+        onclick: () => guardarGuionParrilla({ texto: PAR.borradorTexto }) }, 'Guardar el texto'),
+      h('button', { clase: 'mini fantasma descartar-texto-guion', disabled: cambiado ? null : true,
+        onclick: () => { PAR.borradorTexto = null; pintarModulo(); } }, 'Descartar cambios'),
+      h('span', { clase: 'pista' }, 'En el formato del Studio. Lo que va al Encargo se lee de «PARA EL ENCARGO».'))));
+
+  const avisos = (g.leido || {}).avisos || [];
+  if (avisos.length) {
+    caja.appendChild(h('div', { clase: 'caja-aviso avisos-guion' }, h('b', {}, 'Avisos del guion'),
+      h('ul', {}, avisos.map(a => h('li', {}, a)))));
+  }
+
+  caja.appendChild(bloqueEncargoParrilla(g, cambiado));
+
+  const estados = h('div', { clase: 'fila' });
+  if (g.estado !== 'pendiente') {
+    estados.appendChild(h('button', { clase: 'mini', onclick: () => guardarGuionParrilla({ estado: 'pendiente' }) }, 'Volver a pendiente'));
+  }
+  if (g.estado !== 'publicado') {
+    estados.appendChild(h('button', { clase: 'mini fantasma', onclick: () => guardarGuionParrilla({ estado: 'publicado' }) }, 'Marcar como publicado'));
+  }
+  estados.appendChild(h('span', { clase: 'crece' }));
+  estados.appendChild(h('button', { clase: 'mini fantasma peligro', onclick: () => borrarGuionParrilla(g) }, 'Borrar el guion'));
+  caja.appendChild(h('div', { clase: 'bloque' }, h('h3', {}, 'Estado'),
+    h('div', { clase: 'pista' }, 'Pendiente: nadie lo ha usado. Usado: se pasó al Encargo (y se enlaza solo con el vídeo '
+      + 'que se cree con él). Publicado: ese vídeo ya salió en Publicar.'), estados));
+  return caja;
+}
+
+function bloqueEncargoParrilla(g, sinGuardar) {
+  const encargos = g.encargo || [];
+  const i = Math.min(PAR.encargoIndice || 0, Math.max(0, encargos.length - 1));
+  const e = encargos[i] || {};
+  const bloque = h('div', { clase: 'bloque encargo-parrilla' }, h('h3', {}, 'Lo que irá al Encargo'));
+  if (encargos.length > 1) {
+    const tira = h('div', { clase: 'tira-modos' });
+    encargos.forEach((x, n) => tira.appendChild(h('button', {
+      clase: `mini${n === i ? ' activo' : ''}`, onclick: () => { PAR.encargoIndice = n; pintarModulo(); },
+    }, `Vídeo ${n + 1}${x.formato ? ` · ${x.formato}` : ''}`)));
+    bloque.appendChild(h('div', { clase: 'pista' }, 'Este guion pide más de un vídeo: elige cuál pasas ahora.'));
+    bloque.appendChild(tira);
+  }
+  const fila = (etiqueta, valor) => h('div', { clase: 'dato-encargo' }, h('span', { clase: 'meta' }, etiqueta),
+    valor ? h('div', { clase: 'valor' }, valor) : h('div', { clase: 'meta' }, '—'));
+  bloque.appendChild(fila('Nombre', e.nombre));
+  bloque.appendChild(fila('Duración y formato', `${e.duracion_objetivo_s ? `${e.duracion_objetivo_s} s` : 'la eliges en el Encargo'}`
+    + ` · ${e.formato || 'lo eliges en el Encargo'}`));
+  bloque.appendChild(fila('El material', e.material ? h('pre', { clase: 'material-parrilla' }, e.material) : ''));
+  if (e.guion_propio) bloque.appendChild(h('div', { clase: 'pista' }, '✓ Con «Esto YA es el guion» marcado (uso exacto): el redactor no lo reescribe.'));
+  bloque.appendChild(fila('Las indicaciones', e.indicaciones));
+  bloque.appendChild(fila('Llamada a la acción al final', e.cta ? e.llamadas
+    : e.guion_propio && e.llamadas ? 'ya va dentro de la locución' : ''));
+  if ((e.avisos || []).length) {
+    bloque.appendChild(h('ul', { clase: 'avisos-encargo' }, e.avisos.map(a => h('li', { clase: 'meta' }, a))));
+  }
+  // con qué estilo: los del proyecto primero; si no tiene, todos
+  const propios = PAR.estilos.filter(x => x.cliente === PAR.cid);
+  const lista = propios.length ? propios : PAR.estilos;
+  if (!PAR.estiloElegido || !lista.some(x => x.id === PAR.estiloElegido)) {
+    PAR.estiloElegido = (lista[0] || {}).id || '';
+  }
+  const estilo = h('select', { onchange: ev => { PAR.estiloElegido = ev.target.value; } },
+    lista.map(x => h('option', { value: x.id, selected: x.id === PAR.estiloElegido ? true : null }, x.nombre)));
+  bloque.appendChild(h('div', { clase: 'fila pasar-encargo' },
+    lista.length ? h('label', {}, 'Con el estilo ', estilo) : h('span', { clase: 'meta' }, 'No hay ningún estilo: crea uno en Crear.'),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'primario boton-pasar-encargo', disabled: !lista.length || !e.material || sinGuardar ? true : null,
+      datos: { sinMaterial: !lista.length || !e.material ? '1' : '0' },
+      title: sinGuardar ? 'Guarda antes el texto' : !e.material ? 'El guion no tiene material' : '',
+      onclick: () => pasarAlEncargoParrilla(g, i, PAR.estiloElegido) }, 'Pasar al Encargo')));
+  bloque.appendChild(h('div', { clase: 'pista' }, 'Llena «Un vídeo nuevo» en Crear (nombre, material, indicaciones, llamadas '
+    + 'a la acción, duración y formato) y marca el guion como usado. No se crea nada ni se gasta nada hasta que pulses '
+    + '«Generar el guion» allí.'));
+  return bloque;
+}
+
+async function guardarGuionParrilla(cambios) {
+  if (PAR.guardando) {
+    // el desplegable no se queda enseñando un valor que no se guardó
+    toast('espera a que acabe de guardar', true);
+    pintarModulo();
+    return;
+  }
+  PAR.guardando = true;
+  try {
+    if ('estado' in cambios && cambios.estado === 'pendiente' && PAR.guion.video
+      && !confirm('Vuelve a pendiente y se olvida el vídeo con el que se enlazó (el vídeo no se toca). ¿Sigo?')) return;
+    PAR.guion = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(PAR.guion.id)}`),
+      { method: 'PUT', cuerpo: cambios });
+    if ('texto' in cambios) PAR.borradorTexto = null;
+    toast('guardado');
+    await cargarParrilla(true);
+  } catch (e) {
+    toast(`no se ha podido guardar: ${e.message}`, true);
+  } finally {
+    PAR.guardando = false;
+  }
+}
+
+async function borrarGuionParrilla(g) {
+  if (!confirm(`¿Borrar «${[g.codigo, g.titulo].filter(Boolean).join(' — ') || 'este guion'}»? No se puede deshacer.`)) return;
+  try {
+    await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(g.id)}`), { method: 'DELETE' });
+    PAR.guion = null;
+    PAR.seccion = 'parrilla';
+    toast('guion borrado');
+    await cargarParrilla(true);
+  } catch (e) { toast(`no se ha podido borrar: ${e.message}`, true); }
+}
+
+/* PASAR AL ENCARGO: se pregunta ANTES de marcar nada si el formulario de «Un
+   vídeo nuevo» ya tiene un borrador (sería pisar un vídeo a medio escribir), y
+   se rellena con lo que dice el servidor. Lo demás del formulario (qué lleva,
+   ajustes del montaje) se queda como estaba. */
+async function pasarAlEncargoParrilla(g, indice, estiloId) {
+  if (!estiloId) { toast('elige con qué estilo', true); return; }
+  if (PAR.borradorTexto !== null && PAR.borradorTexto !== g.texto) {
+    toast('guarda antes el texto del guion (o descarta los cambios)', true);
+    return;
+  }
+  if (!fichaLight(estiloId)) {
+    try { await cargarGaleriaLight(true); } catch (e) { /* se dice abajo */ }
+  }
+  const ficha = fichaLight(estiloId);
+  if (!ficha) { toast('ese estilo no está en Crear: recarga la página', true); return; }
+  const actual = APP.light.video.encargo;
+  if (actual && (String(actual.material || '').trim() || String(actual.indicaciones || '').trim())
+    && !confirm('Ya tienes un vídeo nuevo a medio escribir en Crear. ¿Lo reemplazo por este guion?')) return;
+  let datos;
+  try {
+    datos = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(g.id)}/encargo`),
+      { method: 'POST', cuerpo: { indice, estilo: estiloId } });
+  } catch (e) {
+    toast(`no se ha podido pasar al Encargo: ${e.message}`, true);
+    return;
+  }
+  const r = datos.encargo || {};
+  /* Se rellena el borrador que haya: lo del guion se pone y lo demás («Qué
+     lleva este vídeo», los ajustes del montaje) se queda como estaba. */
+  const e = encargoVideoLight();
+  e.nombre = r.nombre || '';
+  e.material = r.material || '';
+  e.guion_propio = !!r.guion_propio;
+  e.indicaciones = r.indicaciones || '';
+  e.cta = r.cta || ctaPorDefecto();
+  if (r.duracion_objetivo_s) e.duracion_objetivo_s = r.duracion_objetivo_s;
+  if (r.formato === 'vertical' || r.formato === 'horizontal') e.formato = r.formato;
+  PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
+  PAR.datos = null;
+  irAModulo('crear');
+  elegirEstiloLight(ficha);
+  toast(`Encargo lleno con «${recortar(r.nombre || 'el guion', 40)}»: revísalo y pulsa «Generar el guion»`);
+  (r.avisos || []).slice(0, 2).forEach(a => setTimeout(() => toast(a, true), 3200));
 }
 
 montarModulos();

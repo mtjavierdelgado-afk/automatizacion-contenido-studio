@@ -91,9 +91,8 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 
 | Rama abierta | Ficheros reservados | Desde |
 |---|---|---|
-| `enlazar-render` | Cada montaje enlaza (enlace duro) los ficheros de la versión anterior en vez de copiarlos, y nada del render escribe encima de un fichero enlazado: `pasos/medios.py` (`sembrar_trabajo`), `pasos/p8_render.py`, `pasos/sonido.py`, `pasos/p7_callouts.py` (solo dónde escriben), y sus pruebas. No toca las zonas de Publicar | 16-10-2026 |
-| `guion-cortos` | El guion de los vídeos cortos (hasta ~90 s) deja de salir «a resumen»: estructura propia para cortos, las etiquetas de las indicaciones (ENSEÑA, ÁNGULO, EMPIEZA POR, DEJA FUERA) como reglas que mandan, y «Revisar» del material y de las indicaciones sabiendo la duración. **Propios:** `pasos/p3_guion.py` (solo `_instruccion` y lo que la rodea), `pasos/revisar_campo.py`, guías `material` e `indicaciones` de `pasos/guias.py`, `pasos/prueba_p3.py`. **Por zonas:** en `app.py` solo la ruta `/api/sistema/guias/{gid}/revisar`; en `web/app.js` solo `botonRevisar` y lo de su alrededor; un tramo en `prueba_api.py`. No toca el render, la voz, las imágenes ni Publicar. Los vídeos largos (más de 90 s) reciben las mismas instrucciones que hoy | 17-10-2026 |
 | `publicar-redes-2` | Lo que faltaba de las métricas (decisión del dueño, 16-10): retención de TikTok y YouTube, la lectura «guardada» de Upload-Post (no gasta el límite de 100 consultas cada 5 min), el resumen de esta semana y este mes frente al anterior, «lo que mejor funcionó» (función y ruta para la Parrilla y el piloto) y una línea con lo mejor de la semana en Inicio. Las cifras se siguen pidiendo SOLO al pulsar. **Propios:** `pasos/publicar.py` (sección de métricas), `motores/publicar_uploadpost/`, `pasos/prueba_publicar.py`. **Por zonas:** solo la sección PUBLICAR al final de `web/app.js`, el bloque PUBLICAR al final de `app.py` y las clases de Publicar al final de `web/estilo.css`; `docs/API.md` y un tramo al final de `prueba_recorrido.py`. Después, en la misma conversación, `publicar-redes-3` (aprobación del cliente) | 17-10-2026 |
+| `parrilla-2` | Más Parrilla (decisión del dueño, 18-10): **marca del cliente por proyecto** (se da a Claude al convertir, pedir y conversar), **«Desde mis resultados»** (guiones a partir de lo que mejor funcionó: usa `publicar.lo_que_funciono` de `publicar-redes-2` si está unida, y si no el resumen de Resultados de `main`; NO toca `pasos/publicar.py`) y **«Conversar con Claude»**, un chat de guiones con capturas e interruptor «Buscar en internet» (apagado de fábrica). **Propios:** `pasos/parrilla.py`, `pasos/guionista.py` (nuevo), `pasos/prueba_parrilla.py`. **Por zonas — COMPARTE `web/app.js` y `app.py` con `publicar-redes-2`:** solo la sección PARRILLA al final de `web/app.js`, el bloque PARRILLA al final de `app.py` y las clases de la Parrilla al final de `web/estilo.css`; también `pasos/guias.py` (guías nuevas), `docs/NOVEDADES.md` y el tramo PARRILLA al final de `prueba_recorrido.py` | 18-10-2026 |
 
 Quien abre una rama la apunta aquí (en `main`, regla 8); quien la une a `main`,
 la quita.
@@ -105,6 +104,9 @@ vuelve a apuntar en la tabla. Mientras siga en pausa, `v2-fase-4b` sigue
 esperando, porque depende de ella.
 
 ### El orden acordado
+
+`parrilla` (Automatizar → Parrilla) se unió a `main` el 17-10-2026: ya se
+pueden abrir ramas nuevas. Lo de abajo es el plan de fondo.
 
 1. **Ahora, en paralelo (las tres ramas del máximo)**: la Etapa Foto A, la V2.0
    fase 3 y la V2.0 fase 4a (esta, con ficheros nuevos; ver abajo).
@@ -426,6 +428,15 @@ una `v<N>` nueva. La poda la hace `completar()` al sellar: primero quita las
 entradas del documento y guarda, y después borra las carpetas y sus
 manifiestos, para que el estado nunca nombre una versión que ya no está. Los
 demás pasos guardan todas: son pequeños y la pantalla ofrece volver a ellas.
+
+**`trabajo/` del render va con enlaces duros a la versión activa**
+(`sembrar_trabajo(..., enlazar=True)`, fuera de Windows, 17-10-2026): un fichero
+de `trabajo/` puede ser EL MISMO que el de `v<N>`. Nada escribe encima de una
+ruta de ahí sin `medios.romper_enlace(ruta)` antes (o `os.replace`):
+`open(..,"w")`, `ffmpeg -y` y `shutil.copy2` sobre un destino que existe
+cambiarían la versión anterior sin ningún error. Lo comprueba
+`prueba_piezas.prueba_enlaces_del_render`; **si añades un escritor nuevo al
+render, añádelo ahí**. Assets y callouts siguen copiando a propósito.
 
 **El precio por imagen del cotizador** (`ajustes.precio_por_imagen`) es la
 mediana de lo cobrado en imágenes de PLANO (`escena:`), por calidad y, con 20

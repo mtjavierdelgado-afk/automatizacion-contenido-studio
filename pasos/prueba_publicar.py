@@ -1034,6 +1034,127 @@ def prueba_metricas():
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 
 
+def prueba_metricas_auto():
+    seccion("4c] cifras automáticas: frecuencia, coste antes de confirmar, apagadas de fábrica")
+    import publicar_auto as A
+    raiz = os.path.join(CARPETA, "auto")
+    os.makedirs(raiz)
+    simulador = os.path.join(CARPETA, "sim_auto.json")
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    espacio, A.ESPACIO_S = A.ESPACIO_S, 0
+    try:
+        c0 = A.leer(raiz)
+        igual(c0["frecuencia"], "apagada", "apagadas de fábrica")
+        igual(c0["proxima"], "", "apagadas no tienen próxima vuelta")
+        ok(not os.path.exists(A._ruta(raiz)), "leer no escribe nada (regla 1)")
+        igual(A.coste(raiz)["consultas_vuelta"], 0, "sin nada publicado no gasta")
+        ok("no se gasta nada" in A.coste(raiz)["texto"], "apagadas: lo dice")
+        for malo in ({"frecuencia": "cada rato"}, {"posts": 7}, {"hora": "25:00"}):
+            try:
+                A.guardar(raiz, malo)
+                ok(False, f"rechaza {malo}")
+            except P.ErrorPublicar:
+                ok(True, f"rechaza {malo}")
+        cli = P.cliente(raiz)
+        cli.crear_perfil("studio_a")
+        cli.enlace_conectar("studio_a", ["tiktok", "youtube"])
+        mp4 = os.path.join(raiz, "v.mp4")
+        with open(mp4, "wb") as fh:
+            fh.write(b"0" * 2000)
+        ajustes = dict(P.AJUSTES_DEFECTO, perfil="studio_a")
+        P.RESPIRO_CONSULTA_S = 0
+        for i, pid in enumerate(("auto_a", "auto_b", "auto_c")):
+            info = dict(INFO, pid=pid, mp4=mp4, mp4_huella=f"h{i}")
+            P.guardar_ficha(raiz, pid, {"textos": {"tiktok": {"descripcion": "T"}}})
+            P.enviar(raiz, info, ajustes, {"redes": ["tiktok"], "modo": "ahora",
+                                           "confirmado": True}, en_hilo=False)
+            for _ in range(3):
+                P.refrescar(raiz)
+            datos = P._leer_video(raiz, pid)
+            for e in datos["envios"]:
+                e["cuando"] = f"2026-10-1{i}T10:00:00"     # auto_c, el más nuevo
+            P._escribir(P._ruta_video(raiz, pid), datos)
+        P.guardar_ajustes(raiz, "", {"perfil": "studio_a"})
+        P.recordar_cuentas(raiz, "", {"tiktok": {"nombre": "t"}, "youtube": {"nombre": "y"},
+                                      "instagram": None, "facebook": None})
+        c = A.coste(raiz, {"frecuencia": "diaria", "posts": 10})
+        igual((c["publicados"], c["en_vivo"], c["perfiles"]), (3, 3, 1),
+              "el coste cuenta lo publicado y los proyectos con cuentas")
+        igual(c["consultas_vuelta"], 4, "una consulta por envío y una de seguidores")
+        igual(c["consultas_dia"], 4, "diaria: una vuelta al día")
+        igual(A.coste(raiz, {"frecuencia": "6h", "posts": 10})["consultas_dia"], 16,
+              "cada 6 horas: cuatro vueltas")
+        igual(c["dinero"], 0, "sin coste en dinero")
+        ok("0 $" in c["texto"] and "100 consultas" in c["texto"], "y el texto lo explica con el cupo")
+        ok(not os.path.exists(A._ruta(raiz)), "calcular el coste no guarda nada")
+        g = A.guardar(raiz, {"frecuencia": "diaria", "hora": "04:00", "posts": 10})
+        igual(g["frecuencia"], "diaria", "se guarda la frecuencia")
+        ok(g["activada_al"] and g["proxima"], "y se calcula la próxima vuelta")
+        ok(not A.toca(raiz), "recién encendida no corre ya: espera a su hora")
+        manana = P._leer_momento(g["proxima"]) + dt.timedelta(minutes=1)
+        ok(A.toca(raiz, manana), "a su hora, toca")
+        # una vuelta: solo los últimos N
+        r = A.correr(raiz, "prueba")
+        igual(r["consultados"], 3, "la vuelta pide los tres envíos")
+        ok(r["fin"] and not r["errores"], f"y termina sin avisos ({r.get('errores')})")
+        igual(r["seguidores"], 1, "y los seguidores del proyecto")
+        ok(all(e.get("metricas", {}).get("al") for pid in ("auto_a", "auto_b", "auto_c")
+               for e in P._leer_video(raiz, pid)["envios"]), "las cifras quedan en cada envío")
+        leida = A.leer(raiz)
+        igual(leida["ultima"]["motivo"], "prueba", "la última vuelta queda apuntada")
+        igual(len(leida["historial"]), 1, "y en el historial")
+        ok(P._leer_momento(leida["proxima"]) > P._leer_momento(leida["ultima"]["empezo"]),
+           "la próxima es después de la última")
+        # con posts=10 pero respiro: no repite lo recién mirado
+        r = A.correr(raiz, "otra")
+        igual(r["consultados"], 0, "lo recién mirado no se vuelve a pedir")
+        # solo los últimos N: con 1, solo el más nuevo
+        for pid in ("auto_a", "auto_b", "auto_c"):
+            datos = P._leer_video(raiz, pid)
+            for e in datos["envios"]:
+                e["metricas"] = {}
+            P._escribir(P._ruta_video(raiz, pid), datos)
+        lotes, _pids = A._publicados(raiz)
+        nuevo = lotes[0][1]
+        ok(any(e.get("lote") == nuevo or e.get("request_id") == nuevo
+               for e in P._leer_video(raiz, "auto_c")["envios"]), "el más nuevo va primero")
+        A.POSTS = A.POSTS + (1,)
+        A.guardar(raiz, {"posts": 1})
+        r = A.correr(raiz, "uno")
+        igual(r["consultados"], 1, "con «los últimos 1», una sola consulta")
+        ok(P._leer_video(raiz, "auto_c")["envios"][0].get("metricas", {}).get("al"),
+           "y es la del post más nuevo")
+        ok(not P._leer_video(raiz, "auto_a")["envios"][0].get("metricas", {}).get("al"),
+           "el viejo se queda para otra")
+        A.POSTS = A.POSTS[:-1]
+        # una vuelta a medias (el servicio se cayó) no bloquea para siempre
+        datos = A._leer(raiz)
+        datos["ultima"] = {"empezo": P._iso_lima(P.ahora_lima() - dt.timedelta(hours=2))}
+        P._escribir(A._ruta(raiz), datos)
+        ok(not A.leer(raiz)["corriendo"], "una vuelta muerta no cuenta como en marcha")
+        datos["ultima"] = {"empezo": P._iso_lima()}
+        P._escribir(A._ruta(raiz), datos)
+        ok(A.leer(raiz)["corriendo"], "una recién empezada sí")
+        try:
+            A.correr_ya(raiz)
+            ok(False, "«Pedirlas ahora» con una vuelta en marcha: 409")
+        except P.ErrorPublicar as fallo:
+            igual(fallo.codigo, 409, "«Pedirlas ahora» con una vuelta en marcha: 409")
+        igual(A.correr(raiz).get("ocupado"), True, "y la programada tampoco la pisa")
+        # apagarlas
+        A.guardar(raiz, {"frecuencia": "apagada"})
+        ok(not A.toca(raiz, P.ahora_lima() + dt.timedelta(days=30)), "apagadas no corren nunca")
+        # el reloj: no arranca con ESTUDIO_METRICAS_AUTO=0
+        os.environ["ESTUDIO_METRICAS_AUTO"] = "0"
+        igual(A.arrancar(lambda: raiz), None, "con ESTUDIO_METRICAS_AUTO=0 el reloj no arranca")
+        os.environ.pop("ESTUDIO_METRICAS_AUTO", None)
+        ok(not any(k in json.dumps(A.leer(raiz)) for k in ("api_key", "Apikey")),
+           "nada de la clave en lo que se enseña")
+    finally:
+        A.ESPACIO_S = espacio
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
+
 def prueba_perfiles():
     """Lo que salió en el servidor el 16-10: «Crear perfil» sin el nombre
     escrito, el plan lleno con el perfil YA en Upload-Post, y «Suyu» frente
@@ -1629,6 +1750,7 @@ def main():
     prueba_cliente()
     prueba_envios_sueltos()
     prueba_metricas()
+    prueba_metricas_auto()
     prueba_retencion_y_resumenes()
     prueba_perfiles()
     prueba_textos()

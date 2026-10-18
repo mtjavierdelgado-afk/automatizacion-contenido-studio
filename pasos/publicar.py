@@ -2412,24 +2412,32 @@ TOPE_VUELTA_S = float(os.environ.get("ESTUDIO_METRICAS_TOPE") or 40)
 PLAZO_METRICAS_S = 15
 
 
-def actualizar_metricas(raiz, pids, forzar=False, limite=LOTES_POR_VUELTA):
+def actualizar_metricas(raiz, pids, forzar=False, limite=LOTES_POR_VUELTA,
+                        solo=None, tope=None, espacio_s=0.0):
     """Pide a Upload-Post las cifras de lo publicado de estos videos.
     -> {"consultados", "actualizados", "pendientes", "errores": [...], "ocupado"?}
 
-    De una en una (dos pestañas no gastan el doble del cupo de consultas)."""
+    De una en una (dos pestañas no gastan el doble del cupo de consultas).
+    `solo` (ids de envio), `tope` (segundos) y `espacio_s` (pausa entre
+    consultas) son para las cifras automaticas (`publicar_auto`), que no corren
+    detras del proxy y no deben comerse el cupo de quien pulsa «Actualizar»."""
     if not _LOCK_METRICAS.acquire(blocking=False):
         return {"consultados": 0, "actualizados": 0, "pendientes": 0, "ocupado": True,
                 "errores": ["ya se están pidiendo las cifras: espera un momento"]}
     try:
-        return _actualizar_metricas(raiz, pids, forzar, limite)
+        return _actualizar_metricas(raiz, pids, forzar, limite, solo=solo,
+                                    tope=tope, espacio_s=espacio_s)
     finally:
         _LOCK_METRICAS.release()
 
 
-def _actualizar_metricas(raiz, pids, forzar, limite):
+def _actualizar_metricas(raiz, pids, forzar, limite, solo=None, tope=None, espacio_s=0.0):
+    tope = float(tope or TOPE_VUELTA_S)
     lotes = _lotes_publicados(raiz, pids)
     candidatos = []
     for lote, envios in lotes.items():
+        if solo is not None and lote not in solo:
+            continue
         hace = _mirado_hace(envios)
         if not forzar and hace is not None and hace < RESPIRO_METRICAS_S:
             continue
@@ -2442,8 +2450,10 @@ def _actualizar_metricas(raiz, pids, forzar, limite):
     consultados = actualizados = 0
     errores = []
     arranque = time.time()
-    for _hace, lote, envios in candidatos[:limite]:
-        if time.time() - arranque > TOPE_VUELTA_S - PLAZO_METRICAS_S:
+    for i, (_hace, lote, envios) in enumerate(candidatos[:limite]):
+        if i and espacio_s:
+            time.sleep(espacio_s)
+        if time.time() - arranque > tope - PLAZO_METRICAS_S:
             break
         try:
             cifras = cli.metricas_post(lote, plazo=PLAZO_METRICAS_S)

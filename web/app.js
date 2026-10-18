@@ -17505,6 +17505,7 @@ async function cargarPublicar(silencio) {
       }
     } else if (PUB.seccion === 'cuentas') {
       const antes = PUB.proyectos;
+      cargarMetricasAutoPublicar();
       PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
       // terminó «Proponer palabras clave»: se pinta aunque haya un campo con el cursor
       ((antes || {}).proyectos || []).forEach(x => {
@@ -17516,6 +17517,7 @@ async function cargarPublicar(silencio) {
         }
       });
     } else if (PUB.seccion === 'resultados') {
+      cargarMetricasAutoPublicar();
       // la lista, cada vez: un proyecto con clave cerrado desde la última no sale
       PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
       const lista = (PUB.proyectos.proyectos || []);
@@ -17611,6 +17613,7 @@ function programarRelojPublicar() {
   const f = PUB.ficha;
   const enElAire = (PUB.seccion === 'ficha' && f && Object.keys((f.seo || {}).trabajando || {}).length)
     || (PUB.seccion === 'cuentas' && ((PUB.proyectos || {}).proyectos || []).some(x => (x.palabras || {}).trabajando))
+    || (['cuentas', 'resultados'].includes(PUB.seccion) && (PUB.metricasAuto || {}).corriendo)
     || (PUB.seccion === 'ficha' && f && (f.escribiendo
     || (f.envios || []).some(e => ['enviando', 'publicando', 'comprobar'].includes(e.estado))))
     || (PUB.seccion === 'cola' && PUB.cola && (PUB.cola.envios || []).some(e =>
@@ -18701,6 +18704,159 @@ async function guardarAjustePublicar(cid, cambios) {
   } catch (e) { toast(e.message, true); }
 }
 
+/* LAS CIFRAS AUTOMÁTICAS (publicar-mas): pedir las cifras solas, con la
+   frecuencia que se elija. Apagadas de fábrica. Se edita una COPIA
+   (`PUB.eleccionAuto`) y su coste se pide al servidor sin guardar; solo
+   «Guardar» escribe, y antes enseña lo que gasta y pide confirmarlo. */
+async function cargarMetricasAutoPublicar() {
+  try {
+    const antes = PUB.metricasAuto;
+    PUB.metricasAuto = await pedir(rutaPublicar('/metricas-auto'));
+    if (antes && antes.corriendo && !PUB.metricasAuto.corriendo) {
+      const u = PUB.metricasAuto.ultima || {};
+      toast((u.errores || []).length ? `Cifras automáticas: ${u.errores[0]}`
+        : `Cifras automáticas al día (${u.actualizados || 0} publicaciones)`, !!(u.errores || []).length);
+    }
+  } catch (e) { PUB.metricasAuto = { error: e.message }; }
+  if (MODULOS.actual === 'publicar' && ['cuentas', 'resultados'].includes(PUB.seccion)) {
+    repintarPublicarSinPisar();
+    programarRelojPublicar();
+  }
+}
+
+function eleccionAutoPublicar() {
+  const m = PUB.metricasAuto || {};
+  return PUB.eleccionAuto || { frecuencia: m.frecuencia || 'apagada', hora: m.hora || '04:00', posts: m.posts || 30 };
+}
+
+async function elegirAutoPublicar(cambios) {
+  PUB.eleccionAuto = Object.assign({}, eleccionAutoPublicar(), cambios);
+  PUB.costeAuto = null;
+  pintarModulo();
+  const pedida = PUB.eleccionAuto;
+  try {
+    const c = await pedir(rutaPublicar('/metricas-auto/coste'), { method: 'POST', cuerpo: pedida });
+    if (PUB.eleccionAuto === pedida) PUB.costeAuto = c;
+  } catch (e) { if (PUB.eleccionAuto === pedida) PUB.costeAuto = { error: e.message }; }
+  pintarModulo();
+}
+
+function autoCambiadaPublicar() {
+  const m = PUB.metricasAuto || {};
+  const e = eleccionAutoPublicar();
+  return !!PUB.eleccionAuto && (e.frecuencia !== m.frecuencia || e.hora !== m.hora
+    || Number(e.posts) !== Number(m.posts));
+}
+
+async function guardarAutoPublicar() {
+  const e = eleccionAutoPublicar();
+  let coste = PUB.costeAuto;
+  try {
+    if (!coste || coste.error) coste = await pedir(rutaPublicar('/metricas-auto/coste'), { method: 'POST', cuerpo: e });
+  } catch (err) { toast(err.message, true); return; }
+  // la confirmación con lo que gasta va SIEMPRE antes de guardar
+  if (!confirm(`${e.frecuencia === 'apagada' ? 'Apagar las cifras automáticas' : 'Cifras automáticas'}\n\n`
+    + `${coste.texto}\n\n¿Guardar?`)) return;
+  try {
+    PUB.metricasAuto = await pedir(rutaPublicar('/metricas-auto'), { method: 'PUT', cuerpo: e });
+    PUB.eleccionAuto = null;
+    PUB.costeAuto = null;
+    toast(e.frecuencia === 'apagada' ? 'Cifras automáticas apagadas'
+      : `Guardado: la primera vuelta, ${fechaCorta(PUB.metricasAuto.proxima).slice(0, 16)}`);
+  } catch (err) { toast(err.message, true); }
+  pintarModulo();
+}
+
+async function correrAutoPublicar() {
+  const c = (PUB.metricasAuto || {}).coste || {};
+  if (!confirm('Pedir las cifras ahora, en segundo plano.\n\n'
+    + `Gasta ${c.consultas_vuelta != null ? c.consultas_vuelta : 'unas'} consulta(s) del cupo de Upload-Post `
+    + `(0 $: van incluidas en su plan) y tarda unos ${Math.max(1, Math.round(c.minutos_vuelta || 1))} min.\n\n¿Seguir?`)) return;
+  try {
+    await pedir(rutaPublicar('/metricas-auto/ahora'), { method: 'POST' });
+    toast('Pidiendo las cifras en segundo plano: puedes seguir con otra cosa');
+  } catch (err) { toast(err.message, true); }
+  await cargarMetricasAutoPublicar();
+}
+
+function textoUltimaAutoPublicar(u) {
+  if (!u) return 'Todavía no ha corrido ninguna vuelta.';
+  if (!u.fin) return `Pidiendo las cifras desde ${fechaCorta(u.empezo).slice(0, 16)}…`;
+  const partes = [`Última vuelta: ${fechaCorta(u.fin).slice(0, 16)} (${u.motivo || 'programada'})`,
+    `${u.actualizados || 0} publicación(es) al día`];
+  if (u.guardadas) partes.push(`${u.guardadas} de lo guardado`);
+  if (u.seguidores) partes.push(`seguidores de ${u.seguidores} proyecto(s)`);
+  if (u.pendientes) partes.push(`${u.pendientes} para la siguiente`);
+  return partes.join(' · ');
+}
+
+function bloqueMetricasAutoPublicar() {
+  const m = PUB.metricasAuto;
+  const b = h('div', { clase: 'bloque metricas-auto' }, h('h3', {}, 'Cifras automáticas'));
+  if (!m) { b.appendChild(h('div', { clase: 'meta' }, 'cargando…')); return b; }
+  if (m.error) { b.appendChild(h('div', { clase: 'meta' }, `No se ha podido leer: ${m.error}`)); return b; }
+  const op = m.opciones || {};
+  const e = eleccionAutoPublicar();
+  const nombreFrec = id => ((op.frecuencias || []).find(x => x.id === id) || {}).nombre || id;
+  b.appendChild(h('div', { clase: 'meta' },
+    'Pide solas a Upload-Post las cifras de lo publicado (y los seguidores de cada proyecto), '
+    + 'sin tener que pulsar «Actualizar». Apagadas, solo se piden al pulsarlo.'));
+  b.appendChild(h('div', { clase: 'fila' },
+    h('span', { clase: `pastilla ${m.frecuencia === 'apagada' ? '' : 'ok'}` },
+      m.frecuencia === 'apagada' ? 'apagadas' : `${nombreFrec(m.frecuencia)} · ${m.hora} · últimos ${m.posts}`),
+    m.proxima ? h('span', { clase: 'meta' }, `próxima: ${fechaCorta(m.proxima).slice(0, 16)}`) : null,
+    h('span', { clase: 'crece' }),
+    m.frecuencia === 'apagada' && !PUB.eleccionAuto && op.sugerido
+      ? h('button', { clase: 'mini', onclick: () => elegirAutoPublicar(op.sugerido) },
+        'Encender: una vez al día, últimos 30')
+      : null,
+    h('button', { clase: 'mini', disabled: !!m.corriendo || !(m.coste || {}).en_vivo,
+      title: (m.coste || {}).en_vivo ? 'Una vuelta ya, en segundo plano'
+        : 'Todavía no hay nada publicado por Upload-Post',
+      onclick: correrAutoPublicar }, m.corriendo ? 'pidiendo…' : 'Pedirlas ahora')));
+  const soltar = ev => ev.target.blur();
+  b.appendChild(h('div', { clase: 'fila eleccion-auto' },
+    h('label', {}, 'Frecuencia ',
+      h('select', { onchange: ev => { soltar(ev); elegirAutoPublicar({ frecuencia: ev.target.value }); } },
+        ...(op.frecuencias || []).map(x => h('option', { value: x.id, selected: e.frecuencia === x.id }, x.nombre)))),
+    h('label', {}, 'Hora ',
+      h('input', { type: 'time', value: e.hora, disabled: e.frecuencia === 'apagada',
+        onchange: ev => { soltar(ev); elegirAutoPublicar({ hora: ev.target.value }); } })),
+    h('label', {}, 'Posts ',
+      h('select', { disabled: e.frecuencia === 'apagada',
+        onchange: ev => { soltar(ev); elegirAutoPublicar({ posts: Number(ev.target.value) }); } },
+        ...(op.posts || [30]).map(n => h('option', { value: n, selected: Number(e.posts) === n }, `los últimos ${n}`))))));
+  const c = PUB.eleccionAuto ? PUB.costeAuto : m.coste;
+  b.appendChild(h('div', { clase: 'coste-auto meta' },
+    !c ? 'calculando lo que gasta…' : c.error ? `No se ha podido calcular: ${c.error}`
+      : `${PUB.eleccionAuto ? 'Si guardas: ' : 'Lo que gasta: '}${c.texto}`));
+  if (autoCambiadaPublicar()) {
+    b.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'primario mini', disabled: !c || !!c.error, onclick: guardarAutoPublicar }, 'Guardar'),
+      h('button', { clase: 'mini fantasma', onclick: () => {
+        PUB.eleccionAuto = null; PUB.costeAuto = null; pintarModulo();
+      } }, 'Deshacer')));
+  }
+  b.appendChild(h('div', { clase: 'meta ultima-auto' }, textoUltimaAutoPublicar(m.ultima)));
+  if (m.ultima && (m.ultima.errores || []).length) {
+    b.appendChild(h('div', { clase: 'meta aviso-auto' }, `Avisos: ${m.ultima.errores.slice(0, 3).join(' · ')}`));
+  }
+  return b;
+}
+
+/* En Resultados, una línea: si las cifras se piden solas y cuándo fue la última. */
+function lineaMetricasAutoPublicar() {
+  const m = PUB.metricasAuto || {};
+  if (!m.frecuencia) return h('span', {});
+  return h('div', { clase: 'fila linea-auto' },
+    h('span', { clase: 'meta crece' }, m.frecuencia === 'apagada'
+      ? 'Cifras automáticas apagadas: se piden al pulsar «Actualizar».'
+      : `Cifras automáticas: ${textoUltimaAutoPublicar(m.ultima)}`
+        + `${m.proxima ? ` · próxima ${fechaCorta(m.proxima).slice(0, 16)}` : ''}`),
+    h('button', { clase: 'mini fantasma', onclick: () => irASeccionPublicar('cuentas') },
+      m.frecuencia === 'apagada' ? 'Encenderlas' : 'Cambiar'));
+}
+
 function seccionCuentasPublicar() {
   const datos = PUB.proyectos || {};
   const caja = h('div', { clase: 'cuentas-publicar' });
@@ -18715,6 +18871,7 @@ function seccionCuentasPublicar() {
       h('span', { clase: 'crece' }),
       h('button', { clase: 'mini', disabled: !clave.puesta, onclick: probarClavePublicar }, 'Probar')),
     clave.puesta ? null : avisoClavePublicar(clave)));
+  caja.appendChild(bloqueMetricasAutoPublicar());
   (datos.proyectos || []).forEach(p => caja.appendChild(tarjetaProyectoPublicar(p)));
   return caja;
 }
@@ -18920,6 +19077,7 @@ function seccionResultadosPublicar() {
      pantalla entera («fallo pintando el módulo») tapando el error de verdad */
   const avisoClave = (r.clave && !r.clave.puesta) ? avisoClavePublicar(r.clave) : null;
   if (avisoClave) caja.appendChild(avisoClave);
+  caja.appendChild(lineaMetricasAutoPublicar());
   const total = r.total || {};
   caja.appendChild(h('div', { clase: 'cifras-publicar' },
     ...[['posts', 'publicaciones'], ['vistas', 'vistas'], ['me_gusta', 'me gusta'],

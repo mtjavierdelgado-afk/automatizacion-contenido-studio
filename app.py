@@ -15177,6 +15177,48 @@ def publicar_metricas_proyecto(cid: str, peticion: Request, cuerpo: dict = Body(
     return r
 
 
+# Las cifras automaticas (publicar-mas): apagadas de fabrica; la pantalla
+# enseña lo que gasta la eleccion ANTES de guardarla. Ver `publicar_auto`.
+
+def _publicar_auto():
+    _publicar()
+    import publicar_auto  # noqa: E402  (pasos/ ya esta en sys.path)
+    return publicar_auto
+
+
+@app.get("/api/publicar/metricas-auto")
+def publicar_metricas_auto():
+    """La configuracion, la ultima vuelta, la proxima y lo que gasta."""
+    A = _publicar_auto()
+    r = A.leer(raiz_proyectos())
+    r["coste"] = _por_publicar(A.coste, raiz_proyectos())
+    r["opciones"] = {"frecuencias": [{"id": k, "nombre": v} for k, v in A.NOMBRE_FRECUENCIA.items()],
+                     "posts": list(A.POSTS), "sugerido": A.SUGERIDO}
+    return r
+
+
+@app.post("/api/publicar/metricas-auto/coste")
+def publicar_metricas_auto_coste(cuerpo: dict = Body(default=None)):
+    """Lo que gastaria una eleccion SIN guardarla: {frecuencia?, hora?, posts?}."""
+    A = _publicar_auto()
+    return _por_publicar(A.coste, raiz_proyectos(), _cuerpo(cuerpo))
+
+
+@app.put("/api/publicar/metricas-auto")
+def publicar_metricas_auto_guardar(cuerpo: dict = Body(default=None)):
+    """Guarda la eleccion (tras confirmar el coste en pantalla)."""
+    A = _publicar_auto()
+    _por_publicar(A.guardar, raiz_proyectos(), _cuerpo(cuerpo))
+    return publicar_metricas_auto()
+
+
+@app.post("/api/publicar/metricas-auto/ahora")
+def publicar_metricas_auto_ahora():
+    """Una vuelta ya, en segundo plano (puede tardar minutos)."""
+    A = _publicar_auto()
+    return _por_publicar(A.correr_ya, raiz_proyectos())
+
+
 @app.get("/api/publicar/lo-que-funciono")
 def publicar_lo_que_funciono(peticion: Request, proyecto: str = Query(default=""),
                              dias: int = Query(default=30), red: str = Query(default=""),
@@ -16033,6 +16075,13 @@ def main():
     os.environ.setdefault("ESTUDIO_API", f"http://127.0.0.1:{argumentos.puerto}")
 
     import uvicorn
+    # las cifras automaticas de Publicar (apagadas de fabrica: el hilo solo mira)
+    if PUBLICAR is not None:
+        try:
+            import publicar_auto  # noqa: E402
+            publicar_auto.arrancar(raiz_proyectos)
+        except Exception as fallo:                          # noqa: BLE001
+            print(f"AVISO: las cifras automáticas no arrancan -> {fallo}")
     print(f"Estudio de Video en http://{argumentos.host}:{argumentos.puerto}")
     print(f"proyectos en {raiz_proyectos()}")
     if ERROR_PASOS:

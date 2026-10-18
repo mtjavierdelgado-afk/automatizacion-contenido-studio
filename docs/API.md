@@ -236,6 +236,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/proyectos/{pid}/capturas/{cid}` | Borra una captura y su PNG. |
 | `GET` | `/api/proyectos/{pid}/montaje/notas` | Lo escrito sobre el vídeo terminado. No toca ninguna firma. |
 | `PUT` | `/api/proyectos/{pid}/montaje/notas` | Guarda la nota del vídeo entero. Autoguardado, como todo lo demás. |
+| `GET` | `/api/montaje` | Lo que hace falta para elegir el montaje antes de que exista el vídeo: el de los cortos, el de siempre, hasta cuántos segundos es corto y el catálogo de transiciones con su GLSL. |
+| `GET` | `/api/proyectos/{pid}/montaje` | El montaje del vídeo (movimiento, subtítulos, gancho, cifras, barra), las transiciones elegidas y si está pendiente de aplicar. |
+| `PUT` | `/api/proyectos/{pid}/montaje` | Cambia el montaje o las transiciones. Solo guarda lo que difiere de siempre; volver a lo de siempre quita la clave. 409 mientras se monta. |
+| `POST` | `/api/proyectos/{pid}/montaje/aplicar` | Rehace las capas y vuelve a montar el vídeo con el montaje nuevo. Ni una imagen. 409 si aún no está montado. |
 
 ## Presets del canal
 

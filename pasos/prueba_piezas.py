@@ -5312,6 +5312,141 @@ def prueba_enlaces_del_render():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def prueba_montaje_movimiento():
+    """La rama montaje-movimiento (18-10-2026): camara en tres niveles, cifras,
+    barra, cortes del dinamico y el ritmo de los cortos nuevos."""
+    import camara
+    import presets_light
+
+    def escena_de(texto, t_in=10.0, paso=0.4):
+        palabras = texto.split()
+        marcas = [[t_in + k * paso, t_in + k * paso + paso * 0.8]
+                  for k in range(len(palabras))]
+        return {"id": "S001", "t_in": t_in, "t_out": t_in + len(palabras) * paso + 0.2,
+                "narracion": texto, "marcas": marcas,
+                "zoom": {"de": 1.0, "a": 1.08}}
+
+    titulo("montaje: lo de siempre NO se guarda (regla 1)")
+    igual(camara.para_guardar(None), None, "sin montaje no hay nada que guardar")
+    igual(camara.para_guardar(dict(camara.MONTAJE_DE_SIEMPRE)), None,
+          "el montaje de siempre tampoco se escribe")
+    igual(camara.para_guardar({"movimiento": "vivo"}), {"movimiento": "vivo"},
+          "solo se guarda lo que difiere de siempre")
+    ok(camara.es_de_siempre(p7_callouts.montaje_de({})),
+       "unos params sin montaje leen el de siempre")
+    igual(camara.normalizar_montaje({"movimiento": "loco"})["movimiento"], "sobrio",
+          "un nivel desconocido se lee como sobrio, no revienta")
+
+    titulo("montaje: en sobrio ningun plano lleva trayecto (sale como antes)")
+    larga = escena_de("Coge la bandeja más grande que lavas en casa. Primero, métela "
+                      "en el fregadero simple: entra tumbada y el grifo te deja sitio.")
+    siempre = camara.normalizar_montaje(None)
+    ok(all(camara.trayecto_de(larga, i, siempre) is None for i in range(8)),
+       "sobrio sin gancho: ni un trayecto")
+    con_gancho = camara.trayecto_de(larga, 0, siempre, gancho=True)
+    ok(con_gancho and con_gancho["tramos"], "sobrio con gancho: el primer plano entra")
+    igual(camara.trayecto_de(larga, 1, siempre, gancho=True), None,
+          "y el gancho es solo del primer plano")
+
+    base = {"ventana_ini": [0.1, 0.2, 0.7, 0.7], "ventana_fin": [0.15, 0.25, 0.6, 0.6],
+            "centro": [0.45, 0.55], "origen_centro": "ancla"}
+    tray = camara.trayecto_de(larga, 0, siempre, gancho=True, base=base)
+    igual(tray["tramos"][-1]["fin"], base["ventana_fin"],
+          "sobrio con gancho acaba en el encuadre de siempre del plano (su ancla)")
+    vivo_base = camara.trayecto_de(larga, 3, camara.normalizar_montaje({"movimiento": "vivo"}),
+                                   base=base)
+    caja = vivo_base["tramos"][0]["ini"]
+    ok(abs(caja[0] + caja[2] / 2 - 0.45) < 0.2 and abs(caja[1] + caja[3] / 2 - 0.55) < 0.2,
+       "en vivo, un plano con ancla se mueve alrededor de su sujeto")
+
+    titulo("montaje: vivo y dinamico dan trayectos sanos y deterministas")
+    for nivel in ("vivo", "dinamico"):
+        montaje = camara.normalizar_montaje({"movimiento": nivel})
+        duracion = larga["t_out"] - larga["t_in"]
+        for indice in range(6):
+            tray = camara.trayecto_de(larga, indice, montaje, semilla=3)
+            igual(tray, camara.trayecto_de(larga, indice, montaje, semilla=3),
+                  f"{nivel}/{indice}: el mismo plano da el mismo trayecto")
+            tramos = tray["tramos"]
+            ok(abs(tramos[0]["t0"]) < 1e-6 and abs(tramos[-1]["t1"] - duracion) < 0.01,
+               f"{nivel}/{indice}: los tramos cubren el plano entero")
+            for k in range(20):
+                t = duracion * k / 19
+                x0, y0, x1, y1 = camara.ventana_en_t({"trayecto": tray}, t,
+                                                     (1024, 1536), 9 / 16)
+                ok(all(camara.es_finito(v) for v in (x0, y0, x1, y1)) and x0 >= -0.5
+                   and y0 >= -0.5 and x1 <= 1024.5 and y1 <= 1536.5 and x1 > x0,
+                   f"{nivel}/{indice} t={t:.2f}: la ventana cae dentro de la imagen")
+        ok(len(camara.trayecto_de(larga, 0, montaje)["tramos"]) == 2,
+           f"{nivel}: un plano largo se reencuadra en dos encuadres")
+    dinamico = camara.normalizar_montaje({"movimiento": "dinamico"})
+    golpes = [g for i in range(6)
+              for g in camara.trayecto_de(larga, i, dinamico)["golpes"]]
+    ok(golpes, "dinamico: lleva golpe de zoom en la palabra clave")
+    ok(all(0.3 <= g["t"] <= larga["t_out"] - larga["t_in"] - 0.5 for g in golpes),
+       "y nunca pegado a los bordes del plano")
+    vivo = camara.normalizar_montaje({"movimiento": "vivo"})
+    ok(not any(camara.trayecto_de(larga, i, vivo)["golpes"] for i in range(6)),
+       "vivo: sin golpes")
+
+    titulo("cifras: «y» solo une un numero tras una decena redonda o un multiplo")
+    ochenta = escena_de("miden ochenta y cuatro centímetros de ancho")
+    igual([c["texto"] for c in p7_callouts.cifras_clave(ochenta, "es")], ["84 cm"],
+          "«ochenta y cuatro centímetros» es 84 cm")
+    rango = escena_de("de veintitrés a veinticinco centímetros de fondo")
+    igual([c["texto"] for c in p7_callouts.cifras_clave(rango, "es")], ["23–25 cm"],
+          "un rango con unidad sale junto")
+    pareja = escena_de("veintitrés y veinticinco centímetros")
+    textos = [c["texto"] for c in p7_callouts.cifras_clave(pareja, "es")]
+    ok("48 cm" not in textos and "48" not in " ".join(textos),
+       f"«veintitrés y veinticinco» no se suma: {textos}")
+    igual(p7_callouts.cifras_clave(escena_de("tiene dos cubetas iguales"), "es"), [],
+          "una cifra pequeña sin unidad no sale en pantalla")
+    def lee(frase):
+        llanas = [medios.normalizar_texto(x) for x in frase.split()]
+        return [v for _i, _n, v in medios.numeros_dichos(llanas, None)]
+    igual(lee("entre dos mil y tres mil euros"), [2000.0, 3000.0],
+          "«dos mil y tres mil» son dos cifras, no 5000 (revisión 18-10)")
+    igual(lee("dos millones y medio de personas"), [2500000.0],
+          "«dos millones y medio» es 2,5 millones")
+    for frase, valor in (("two hundred and five", 205.0), ("mil y una noches", 1001.0),
+                         ("treinta y un millones", 31000000.0),
+                         ("uno y medio por ciento", 1.5),
+                         ("two thousand and twenty four", 2024.0)):
+        igual(lee(frase), [valor], f"«{frase}» sigue leyéndose como antes")
+    for c in p7_callouts.cifras_clave(ochenta, "es"):
+        ok(0 <= c["desde"] <= c["hasta"], "la cifra lleva su tiempo dentro del plano")
+
+    titulo("barra: va de lo pasado a lo pasado al acabar el plano")
+    barra = p7_callouts.fragmento_barra(0.25, 0.5, 4.0, (1080, 1920), {})
+    ok('from="270.0"' in barra and 'to="540.0"' in barra and 'dur="4.000s"' in barra,
+       "la barra crece del 25 % al 50 % en lo que dura el plano")
+
+    titulo("transiciones: el dinamico corta seco salvo en los acentos")
+    escenas = [{"id": f"S{i:03d}", "duracion": 5.0,
+                "transicion": ["corte", "suave", "acento"][i % 3]}
+               for i in range(1, 16)]
+    normal = transiciones.resolver(escenas, {})
+    seco = transiciones.resolver(escenas, {}, montaje={"movimiento": "dinamico"})
+    igual(transiciones.resolver(escenas, {}, montaje={"movimiento": "vivo"}), normal,
+          "vivo no toca las transiciones")
+    for e in escenas[1:]:
+        if normal[e["id"]]["ranura"] == "acento":
+            ok(seco[e["id"]]["tipo"] != "corte", f"{e['id']}: el acento sigue encadenando")
+            ok(seco[e["id"]]["duracion"] <= normal[e["id"]]["duracion"] + 1e-9,
+               f"{e['id']}: y mas corto")
+        else:
+            igual(seco[e["id"]]["tipo"], "corte", f"{e['id']}: corte seco")
+
+    titulo("ritmo: solo los cortos nuevos con un estilo mas lento van a rapido")
+    igual(presets_light.ritmo_para_video_nuevo(60, 7.5), "rapido", "corto y estilo lento")
+    igual(presets_light.ritmo_para_video_nuevo(120, None), "rapido", "hasta 2 minutos")
+    igual(presets_light.ritmo_para_video_nuevo(121, 7.5), None, "uno largo, el del estilo")
+    igual(presets_light.ritmo_para_video_nuevo(60, 5.0), None,
+          "un estilo que ya va rapido se respeta")
+    igual(presets_light.ritmo_para_video_nuevo(60, 4.0), None, "y uno mas rapido tambien")
+
+
 def main():
     _prohibir_pagar()
     # EL HISTORICO DE TIEMPOS, A UNA COPIA. Guarda 30 muestras por paso, asi
@@ -5372,6 +5507,7 @@ def main():
     prueba_revision_imagenes_16_10()
     prueba_revision_16_10_render()
     prueba_enlaces_del_render()
+    prueba_montaje_movimiento()
 
     print("\n" + "=" * 70)
     if _fallos:

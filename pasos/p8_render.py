@@ -472,9 +472,62 @@ function ventana(u){
   return [px, py, pw];
 }
 
+// EL TRAYECTO DEL MONTAJE (18-10-2026): la camara por tramos, con saltos entre
+// ellos (un reencuadre dentro del plano) y golpes de zoom encima. La MISMA
+// cuenta que `pasos/camara.py` (`ventana_cruda_en` + `recorte`), con las mismas
+// operaciones en el mismo orden. Sin trayecto no se usa nada de esto y el plano
+// se pinta con `ventana(u)`, exactamente como siempre.
+function curva(nombre, u){
+  u = Math.min(1, Math.max(0, u));
+  if (nombre === 'salida') return 1 - Math.pow(1 - u, 3);
+  if (nombre === 'lineal') return u;
+  return u*u*(3-2*u);
+}
+function empuje(g, t){
+  const ini = g.t, esc = g.escala || 1, sube = Math.max(0.01, g.sube || 0.08),
+        baja = Math.max(0.01, g.baja || 0.6);
+  if (t < ini || esc <= 1) return 1;
+  let e;
+  if (t < ini + sube) e = curva('salida', (t - ini) / sube);
+  else if (t < ini + sube + baja) e = 1 - curva('suave', (t - ini - sube) / baja);
+  else return 1;
+  return 1 + (esc - 1) * e;
+}
+function ventanaTrayecto(t){
+  const tramos = MOV.trayecto.tramos;
+  let tramo = tramos[tramos.length - 1];
+  for (const c of tramos) { if (c.t0 <= t && t < c.t1) { tramo = c; break; } }
+  if (t < tramos[0].t0) tramo = tramos[0];
+  const largo = Math.max(1e-6, tramo.t1 - tramo.t0);
+  const e = curva(tramo.curva || 'suave', (t - tramo.t0) / largo);
+  const a = tramo.ini, b = tramo.fin;
+  let x = a[0] + (b[0]-a[0])*e, y = a[1] + (b[1]-a[1])*e;
+  let w = a[2] + (b[2]-a[2])*e, h = a[3] + (b[3]-a[3])*e;
+  let f = 1;
+  for (const g of (MOV.trayecto.golpes || [])) f *= empuje(g, t);
+  if (f > 1) {
+    const ccx = x + w/2, ccy = y + h/2;
+    w = w / f; h = h / f; x = ccx - w/2; y = ccy - h/2;
+  }
+  const cx = (x + w/2) * HW, cy = (y + h/2) * HH;
+  let pw, ph;
+  if (W / H >= HW / HH) {
+    pw = w * HW; ph = pw * H / W;
+    if (ph > HH) { ph = HH; pw = ph * W / H; }
+  } else {
+    ph = h * HH; pw = ph * W / H;
+    if (pw > HW) { pw = HW; ph = pw * H / W; }
+  }
+  let px = Math.min(Math.max(cx - pw/2, 0), HW - pw);
+  let py = Math.min(Math.max(cy - ph/2, 0), HH - ph);
+  return [px, py, pw];
+}
+
 function pintar(t){
   const u = DUR > 0 ? Math.min(1, Math.max(0, t/DUR)) : 0;
-  const v = ventana(u), s = W / v[2];
+  const v = (MOV.trayecto && MOV.trayecto.tramos && MOV.trayecto.tramos.length)
+    ? ventanaTrayecto(t) : ventana(u);
+  const s = W / v[2];
   camara.style.transform =
     'translate(' + (-v[0]*s).toFixed(3) + 'px,' + (-v[1]*s).toFixed(3) +
     'px) scale(' + s.toFixed(6) + ')';
@@ -502,8 +555,9 @@ def _pagina_de(escena, mov, capa_svg, hyper, p, destino, capa_fija="", fps=30):
             .replace("__FONDO__", _url_local(hyper))
             .replace("__CAPA__", capa_svg)
             .replace("__CAPAFIJA__", capa_fija or "")
-            .replace("__MOV__", json.dumps({"ventana_ini": mov["ventana_ini"],
-                                            "ventana_fin": mov["ventana_fin"]}))
+            .replace("__MOV__", json.dumps(dict(
+                {"ventana_ini": mov["ventana_ini"], "ventana_fin": mov["ventana_fin"]},
+                **({"trayecto": mov["trayecto"]} if mov.get("trayecto") else {}))))
             .replace("__FPS__", str(int(fps)))
             .replace("__DUR__", f"{duracion:.4f}"))
     return medios.escribir_texto(destino, html)
@@ -1315,8 +1369,13 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
     # QUE transicion concreta lleva cada plano. El plan solo trae la RANURA
     # (corte / suave / acento), que es una decision del corte; cual la ocupa se
     # resuelve aqui, al renderizar, contra la paleta elegida en esta pantalla.
+    # Y CON EL MONTAJE delante: con movimiento dinamico los cambios de plano
+    # van en seco y solo los acentos llevan transicion. Lo deja callouts en
+    # movimiento.json; un movimiento.json de antes no lo trae y es lo de siempre.
+    montaje_video = (medios.leer_json(ruta_mov, {}) or {}).get("montaje")
     cortes = transiciones.resolver(escenas, p,
-                                   semilla=(plan.get("semilla") or 0))
+                                   semilla=(plan.get("semilla") or 0),
+                                   montaje=montaje_video)
     pedidas = set(unidades) if unidades is not None else None
     arrastrados = []
     if pedidas is not None:
@@ -1406,9 +1465,12 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
         tareas.append({
             "id": sid, "escena": {"id": sid, "t_in": escena["t_in"],
                                   "t_out": escena["t_out"]},
-            "mov": {"ventana_ini": mov["ventana_ini"],
-                    "ventana_fin": mov["ventana_fin"],
-                    "hyperframe_px": mov.get("hyperframe_px")},
+            "mov": dict({"ventana_ini": mov["ventana_ini"],
+                         "ventana_fin": mov["ventana_fin"],
+                         "hyperframe_px": mov.get("hyperframe_px")},
+                        # el trayecto del montaje, si lo hay (ver PAGINA)
+                        **({"trayecto": mov["trayecto"]}
+                           if mov.get("trayecto") else {})),
             "capa": svg, "capa_fija": fija,
             "hyper": hyper, "frames": total, "fps": fps,
             "resolucion": [ancho, alto], "calidad": p["calidad_video"],

@@ -535,6 +535,28 @@ def numeros_dichos(palabras_llanas, idioma=None, cortes=None):
             return True
         return any(list(palabras[j:j + len(cola)]) == list(cola) for cola in colas)
 
+    def _enlace_suma(antes, sigue, tras=""):
+        """¿Este «y»/«and» une las dos cifras o separa dos? -> bool
+
+        SOLO UNE DETRAS DE UNA DECENA REDONDA o de un multiplicador: «treinta y
+        cuatro» es 34 y «two hundred and five» es 205. Detras de cualquier otra
+        cosa la conjuncion separa DOS numeros: «entre veintitres y veinticinco
+        centimetros» salia «entre 48 centimetros» en el subtitulo (18-10-2026),
+        porque se sumaban. Una decena va con una unidad (1-9); un multiplicador,
+        con lo que quede por debajo de el.
+        """
+        despues = numero(sigue)
+        if antes in multiplos:
+            # «entre dos mil Y TRES MIL»: lo que sigue lleva su propio
+            # multiplicador del mismo orden, asi que es OTRA cifra (no 5000).
+            if tras in multiplos and multiplos[tras] >= multiplos[antes]:
+                return False
+            return (despues is not None and despues < multiplos[antes]) \
+                or sigue in multiplos
+        valor = numero(antes)
+        return (valor is not None and despues is not None and valor >= 20
+                and valor % 10 == 0 and valor < 100 and 1 <= despues <= 9)
+
     salida, i = [], 0
     while i < len(palabras):
         if palabras[i] in _DEBILES and not empieza_la_debil(i):
@@ -559,10 +581,16 @@ def numeros_dichos(palabras_llanas, idioma=None, cortes=None):
                     # «uno y MEDIO por ciento» son 1,5 %. Sin esto el tramo se
                     # cerraba en el «uno», la cola se quedaba huerfana y
                     # «ciento» se leia como el 100 suelto.
-                    actual += 0.5
+                    previa = palabras[j - 1]
+                    if previa in multiplos and multiplos[previa] >= 1000:
+                        # «dos millones y medio» es medio MILLON, no 0,5
+                        total += multiplos[previa] * 0.5
+                    else:
+                        actual += 0.5
                     j += salto
                     continue
-                if visto and (numero(sigue) is not None or sigue in multiplos):
+                tras = palabras[j + 2] if j + 2 < len(palabras) else ""
+                if visto and _enlace_suma(palabras[j - 1], sigue, tras):
                     j += 1
                     continue
                 break

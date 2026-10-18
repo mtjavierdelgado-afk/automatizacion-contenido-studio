@@ -6889,7 +6889,7 @@ function vistaElegidoLight() {
     'cuándo se presenta y qué le pides a quien lo ve',
     bloqueCTA(e.cta, { repintar: pintarLight })));
 
-  const aviso = h('div', { clase: 'pista' });
+  const aviso = h('div', { clase: 'pista coste-del-encargo' });
   const boton = h('button', {
     clase: 'primario grande',
     onclick: () => crearYGenerarLight(ficha),
@@ -7056,6 +7056,8 @@ async function refrescarEstimacionLight(e, nodo, estiloDado) {
       min_s: (datos.estilo || {}).min_s,
       max_s: (datos.estilo || {}).max_s,
       calidad: (datos.estilo || {}).calidad,
+      /* un corto NUEVO nace en ritmo rápido si su estilo va más lento */
+      ritmo_corto: e === APP.light.video.encargo && (e.opciones || {}).ritmo !== 'estilo',
     });
     APP.light.video.estimacion = ficha;
     vaciar(nodo).append(textoDeEstimacion(ficha));
@@ -7092,6 +7094,7 @@ async function pintarCosteDelEncargoLight(e, nodo) {
          va a nacer */
       nuevo: true,
       modo: (datos.estilo || {}).modo === 'foto' ? 'foto' : 'ilustracion',
+      ritmo_corto: (e.opciones || {}).ritmo !== 'estilo',
     });
     vaciar(nodo).append(`El vídeo entero: ${textoDeCoste(ficha)}. `
       + 'Puede salir algo más corto o más largo que el objetivo.');
@@ -7169,6 +7172,11 @@ function opcionesParaCrear(e) {
   if (op.subtitulos && Object.keys(op.subtitulos).length) salida.subtitulos = op.subtitulos;
   if (op.logo === false) salida.logo = false;
   else if (op.logo && op.logo.fichero) salida.logo = op.logo;
+  /* el montaje: solo si se tocó (sin tocar, el servidor pone el de los cortos
+     o el de siempre según la duración) */
+  if (op.montaje) salida.montaje = op.montaje;
+  if (op.transiciones && op.transiciones.length) salida.transiciones = op.transiciones;
+  if (op.ritmo) salida.ritmo = op.ritmo;
   return salida;
 }
 
@@ -15375,6 +15383,7 @@ function ajustesDelMontaje(modo, lleva) {
     if (lleva.subtitulos !== false) caja.appendChild(filaAjuste(modo, est, 'subtitulos', pintar));
     caja.appendChild(filaAjuste(modo, est, 'logo', pintar));
     if (lleva.efectos !== false && modo.tipo === 'video') caja.appendChild(filaAjuste(modo, est, 'efectos', pintar));
+    caja.appendChild(filaAjuste(modo, est, 'montaje', pintar));
   };
   // LA LECTURA PINTA EN LOS QUE ESTÉN EN PANTALLA: la pantalla puede pintar
   // este bloque más de una vez mientras se lee (y alguna copia no llega a
@@ -15393,11 +15402,15 @@ function ajustesDelMontaje(modo, lleva) {
 
 async function cargarAjustesVideo(modo, est) {
   const base = API.proyecto(modo.pid);
-  const [presencia, sonido, subtitulos, logo] = await Promise.all([
+  const [presencia, sonido, subtitulos, logo, montaje, datosM] = await Promise.all([
     pedir(`${base}/musica/presencia`).catch(() => null),
     pedir(`${base}/sonido`).catch(() => null),
     pedir(`${base}/subtitulos`).catch(() => null),
-    pedir(`${base}/logo`).catch(() => null)]);
+    pedir(`${base}/logo`).catch(() => null),
+    pedir(`${base}/montaje`).catch(() => null),
+    datosMontaje().catch(() => null)]);
+  est.montaje = montaje;
+  est.datosMontaje = datosM;
   est.musica = { presencia: presencia || { presencia: 'normal', elegida: false },
     tema: sonido && sonido.musica && sonido.musica.id ? sonido.musica : null,
     // N9 (13-10-2026): el volumen fino y los ánimos de la automática
@@ -15413,9 +15426,31 @@ async function cargarAjustesVideo(modo, est) {
   est.leido = true;
 }
 
+/* El montaje en una línea: «Vivo · subtítulos de redes · gancho, cifras y barra». */
+function resumenMontaje(modo, est) {
+  const datos = est.datosMontaje;
+  if (!datos) {
+    datosMontaje().then(d => { est.datosMontaje = d; if (est.repintar) est.repintar(); }).catch(() => {});
+    return 'leyendo…';
+  }
+  const borrador = modo.tipo === 'borrador';
+  const op = borrador ? opcionesBorrador(modo.e) : null;
+  if (!borrador && !est.montaje) return 'no se ha podido leer';
+  const m = borrador ? (op.montaje || montajeAutomatico(modo.e, datos)) : est.montaje.montaje;
+  const nivel = (NIVELES_MOVIMIENTO.find(n => n[0] === m.movimiento) || ['', m.movimiento])[1];
+  const extras = INTERRUPTORES_MONTAJE.filter(([c]) => m[c]).map(([, n]) => n.split(' ')[0].toLowerCase());
+  const partes = [nivel, m.subtitulos === 'redes' ? 'subtítulos de redes' : 'subtítulos clásicos'];
+  if (extras.length) partes.push(extras.join(', '));
+  if (borrador && !op.montaje) partes.push('automático');
+  if (borrador && op.ritmo === 'estilo') partes.push('ritmo del estilo');
+  return partes.join(' · ')
+    + (!borrador && est.montaje.pendiente && est.montaje.montado ? ' · sin aplicar todavía' : '');
+}
+
 /* UNA FILA: el resumen en una línea y, desplegada, su editor. */
 function filaAjuste(modo, est, cual, repintar) {
-  const nombres = { musica: '🎵 Música', subtitulos: '💬 Subtítulos', logo: '🏷️ Logo', efectos: '✨ Efectos' };
+  const nombres = { musica: '🎵 Música', subtitulos: '💬 Subtítulos', logo: '🏷️ Logo', efectos: '✨ Efectos',
+    montaje: '🎬 Movimiento y efectos' };
   const abierta = est.abierta === cual;
   const fila = h('div', { clase: 'fila-ajuste' + (abierta ? ' abierta' : '') });
   fila.appendChild(h('div', { clase: 'fila-ajuste-cab' },
@@ -15425,7 +15460,7 @@ function filaAjuste(modo, est, cual, repintar) {
       abierta ? 'Cerrar' : 'Cambiar')));
   if (abierta) {
     const editor = { musica: editorMusica, subtitulos: editorSubtitulos, logo: editorLogo,
-      efectos: editorEfectos }[cual];
+      efectos: editorEfectos, montaje: editorMontaje }[cual];
     fila.appendChild(editor(modo, est, repintar));
   }
   return fila;
@@ -15433,6 +15468,7 @@ function filaAjuste(modo, est, cual, repintar) {
 
 function resumenAjuste(modo, est, cual) {
   if (modo.tipo === 'video' && !est.leido) return 'leyendo…';
+  if (cual === 'montaje') return resumenMontaje(modo, est);
   if (cual === 'musica') {
     const op = modo.tipo === 'borrador' ? opcionesBorrador(modo.e) : null;
     const presencia = op ? (op.presencia || 'normal') : ((est.musica || {}).presencia || {}).presencia || 'normal';
@@ -15991,6 +16027,260 @@ function editorSubtitulos(modo, est, repintar) {
   }
   caja.appendChild(pie);
   return caja;
+}
+
+/* ------------------------------------------------ movimiento y efectos
+ * EL MONTAJE (18-10-2026): cuánto se mueve la cámara, cómo son los subtítulos,
+ * el gancho del primer segundo, las cifras clave, la barra de progreso y qué
+ * transiciones entran. Vive en `callouts.montaje` y `render.transiciones`
+ * (ver pasos/camara.py). Nada de esto paga imágenes: rehace capas y montaje.
+ *
+ * Lo que vale cada cosa por defecto lo dice el SERVIDOR (`GET /api/montaje`),
+ * no una tabla de aquí: el montaje de los cortos y hasta cuántos segundos es
+ * corto viven en un solo sitio. */
+const NIVELES_MOVIMIENTO = [
+  ['sobrio', 'Sobrio', 'Lo de siempre: un acercamiento lento, casi quieto.'],
+  ['vivo', 'Vivo', 'El zoom se nota, hay paneos y los planos largos cambian de encuadre a mitad.'],
+  ['dinamico', 'Dinámico', 'Como vivo, más un golpe de zoom en la palabra clave y cortes secos entre planos.']];
+const ESTILOS_SUB_MONTAJE = [
+  ['clasicos', 'Clásicos', 'Los de siempre: abajo, en su caja.'],
+  ['redes', 'De redes', 'Grandes, de dos a cuatro palabras, con la palabra que se dice resaltada en el color del estilo.']];
+const INTERRUPTORES_MONTAJE = [
+  ['gancho', 'Gancho del primer segundo', 'El primer plano entra con un zoom rápido y la primera frase sale grande en el centro.'],
+  ['cifras', 'Cifras clave en pantalla', 'Cuando la voz dice una cifra con su unidad («ochenta y cuatro centímetros»), sale grande: «84 cm».'],
+  ['barra', 'Barra de progreso', 'Una línea fina arriba que avanza con el vídeo.']];
+
+let DATOS_MONTAJE = null;
+function datosMontaje() {
+  if (!DATOS_MONTAJE) {
+    DATOS_MONTAJE = pedir(`${BASE}/api/montaje`).catch(err => { DATOS_MONTAJE = null; throw err; });
+  }
+  return DATOS_MONTAJE;
+}
+
+/* El montaje que tendría un vídeo NUEVO si no tocas nada: el de los cortos o
+   el de siempre, según la duración del encargo. */
+function montajeAutomatico(e, datos) {
+  const corto = Number(e.duracion_objetivo_s) <= Number(datos.duracion_corta_s || 0);
+  return Object.assign({}, corto ? datos.montaje_cortos : datos.montaje_siempre);
+}
+
+function esCortoElEncargo(e, datos) {
+  return Number(e.duracion_objetivo_s) <= Number((datos || {}).duracion_corta_s || 0);
+}
+
+function editorMontaje(modo, est, repintar) {
+  const caja = h('div', { clase: 'editor-ajuste editor-montaje' });
+  const borrador = modo.tipo === 'borrador';
+  const op = borrador ? opcionesBorrador(modo.e) : null;
+  if (!est.datosMontaje || (!borrador && !est.montaje)) {
+    // Se pide UNA vez y un fallo se queda a la vista: repintar sin haber
+    // conseguido nada volvería a entrar aquí y daría vueltas sin fin.
+    if (est.errorMontaje) {
+      caja.appendChild(cajaError(est.errorMontaje));
+      caja.appendChild(h('button', { clase: 'mini', onclick: () => { est.errorMontaje = null; repintar(); } },
+        'Reintentar'));
+      return caja;
+    }
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+    Promise.all([
+      est.datosMontaje ? Promise.resolve(est.datosMontaje) : datosMontaje(),
+      (borrador || est.montaje) ? Promise.resolve(est.montaje) : pedir(`${API.proyecto(modo.pid)}/montaje`),
+    ]).then(([d, m]) => { est.datosMontaje = d; if (!borrador) est.montaje = m; })
+      .catch(err => { est.errorMontaje = err.message || 'no se ha podido leer el montaje'; })
+      .then(() => repintar());
+    return caja;
+  }
+  const datos = est.datosMontaje;
+  const actual = borrador ? (op.montaje || montajeAutomatico(modo.e, datos))
+    : (est.montaje.montaje || datos.montaje_siempre);
+  const elegidas = borrador ? (op.transiciones || []) : (est.montaje.transiciones || []);
+  const cambiar = async (cambios, transiciones) => {
+    if (borrador) {
+      if (cambios) op.montaje = Object.assign({}, actual, cambios);
+      if (transiciones) op.transiciones = transiciones;
+      repintar();
+      return;
+    }
+    try {
+      const cuerpo = {};
+      if (cambios) cuerpo.montaje = cambios;
+      if (transiciones) cuerpo.transiciones = transiciones;
+      est.montaje = await pedir(`${API.proyecto(modo.pid)}/montaje`, { method: 'PUT', cuerpo });
+    } catch (err) { toast(err.message, true); }
+    repintar();
+  };
+  const botones = (lista, valor, clave) => h('div', { clase: 'herramientas' },
+    ...lista.map(([id, nombre]) => h('button', {
+      clase: 'mini' + (valor === id ? ' activo' : ''), onclick: () => cambiar({ [clave]: id }) }, nombre)));
+  const nivel = NIVELES_MOVIMIENTO.find(n => n[0] === actual.movimiento) || NIVELES_MOVIMIENTO[0];
+  caja.appendChild(h('div', { clase: 'campo' }, h('label', {}, 'Movimiento de cámara'),
+    botones(NIVELES_MOVIMIENTO, actual.movimiento, 'movimiento'),
+    h('div', { clase: 'pista' }, nivel[2])));
+  const sub = ESTILOS_SUB_MONTAJE.find(s => s[0] === actual.subtitulos) || ESTILOS_SUB_MONTAJE[0];
+  caja.appendChild(h('div', { clase: 'campo' }, h('label', {}, 'Estilo de los subtítulos'),
+    botones(ESTILOS_SUB_MONTAJE, actual.subtitulos, 'subtitulos'),
+    h('div', { clase: 'pista' }, sub[2])));
+  INTERRUPTORES_MONTAJE.forEach(([clave, nombre, ayuda]) => {
+    caja.appendChild(h('label', { clase: 'casilla' },
+      h('input', { type: 'checkbox', checked: !!actual[clave],
+        onchange: ev => cambiar({ [clave]: ev.target.checked }) }),
+      ` ${nombre}`, h('span', { clase: 'meta' }, ` · ${ayuda}`)));
+  });
+  if (borrador && esCortoElEncargo(modo.e, datos)) {
+    const ritmo = op.ritmo === 'estilo' ? 'estilo' : 'rapido';
+    caja.appendChild(h('div', { clase: 'campo' }, h('label', {}, 'Ritmo de los planos'),
+      h('div', { clase: 'herramientas' },
+        h('button', { clase: 'mini' + (ritmo === 'rapido' ? ' activo' : ''),
+          onclick: () => { delete op.ritmo; repintar(); refrescarCosteDelEncargo(); } }, 'Rápido (recomendado en cortos)'),
+        h('button', { clase: 'mini' + (ritmo === 'estilo' ? ' activo' : ''),
+          onclick: () => { op.ritmo = 'estilo'; repintar(); refrescarCosteDelEncargo(); } }, 'El del estilo')),
+      h('div', { clase: 'pista' }, ritmo === 'rapido'
+        ? 'Planos de 1,5 a 5 s si el estilo va más lento: más cortes, y más imágenes que pagar (el coste de abajo ya lo cuenta).'
+        : 'Los planos duran lo que diga el estilo.')));
+  }
+  caja.appendChild(selectorTransiciones(modo, est, elegidas, lista => cambiar(null, lista)));
+  if (actual.movimiento === 'dinamico') {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'En dinámico los cambios de plano van en seco: las transiciones solo salen en los acentos, cada pocos planos.'));
+  }
+  const pie = h('div', { clase: 'fila' });
+  if (borrador) {
+    if (op.montaje || op.transiciones || op.ritmo) {
+      pie.appendChild(h('button', { clase: 'mini fantasma', onclick: () => {
+        delete op.montaje; delete op.transiciones; delete op.ritmo; repintar(); refrescarCosteDelEncargo();
+      } }, 'Volver a lo automático'));
+    }
+    pie.appendChild(h('span', { clase: 'meta' }, esCortoElEncargo(modo.e, datos)
+      ? 'Automático en un vídeo de hasta 2 minutos: vivo, subtítulos de redes, gancho, cifras y barra.'
+      : 'Automático en un vídeo largo: lo de siempre.'));
+  } else if (est.montaje.montado && est.montaje.pendiente) {
+    pie.appendChild(h('button', {
+      clase: 'mini primario',
+      onclick: async () => {
+        try {
+          const r = await pedir(`${API.proyecto(modo.pid)}/montaje/aplicar`, { method: 'POST' });
+          avisoDeMontaje(r, 'Movimiento y efectos');
+          est.montaje.pendiente = false;
+        } catch (err) { toast(err.message, true); }
+        repintar();
+      },
+    }, 'Aplicar ahora'));
+    pie.appendChild(h('span', { clase: 'meta' },
+      'rehace las capas y vuelve a montar el vídeo: unos minutos, ninguna imagen'));
+  } else {
+    pie.appendChild(h('span', { clase: 'meta' },
+      est.montaje.montado ? 'aplicado' : 'se aplicará al montar el vídeo'));
+  }
+  caja.appendChild(pie);
+  return caja;
+}
+
+/* El coste del encargo se vuelve a pedir cuando cambia algo que lo mueve (el
+   ritmo de los planos de un corto). */
+function refrescarCosteDelEncargo() {
+  const nodo = document.querySelector('.coste-del-encargo');
+  if (nodo) pintarCosteDelEncargoLight(encargoVideoLight(), nodo);
+}
+
+/* LAS TRANSICIONES, MIRÁNDOLAS. Cada una con una muestra que corre EL MISMO
+   shader que el render (el GLSL viene del servidor) sobre dos dibujos de
+   ejemplo. Vacío = las de fábrica. */
+function selectorTransiciones(modo, est, elegidas, guardar) {
+  const datos = est.datosMontaje || {};
+  const catalogo = datos.transiciones || [];
+  const fabrica = datos.por_defecto || [];
+  const puestas = elegidas.length ? elegidas : fabrica;
+  const caja = h('details', { clase: 'transiciones-montaje' },
+    h('summary', {}, `Transiciones · ${elegidas.length ? `${elegidas.length} elegidas` : 'las de fábrica'}`));
+  const rejilla = h('div', { clase: 'rejilla-transiciones' });
+  catalogo.forEach(t => {
+    const marcada = puestas.includes(t.id);
+    rejilla.appendChild(h('label', { clase: 'tarjeta-transicion' + (marcada ? ' puesta' : '') },
+      muestraTransicion(t, datos),
+      h('div', { clase: 'fila' },
+        h('input', { type: 'checkbox', checked: marcada, onchange: ev => {
+          const lista = puestas.filter(x => x !== t.id);
+          if (ev.target.checked) lista.push(t.id);
+          if (!lista.length) {
+            ev.target.checked = true;
+            toast('Deja al menos una transición marcada', true);
+            return;
+          }
+          const iguales = lista.length === fabrica.length && lista.every(x => fabrica.includes(x));
+          guardar(iguales || !lista.length ? [] : lista);
+        } }),
+        h('b', {}, t.nombre)),
+      h('div', { clase: 'meta' }, t.descripcion)));
+  });
+  caja.appendChild(rejilla);
+  if (elegidas.length) {
+    caja.appendChild(h('button', { clase: 'mini fantasma', onclick: () => guardar([]) }, 'Volver a las de fábrica'));
+  }
+  return caja;
+}
+
+function muestraTransicion(t, datos) {
+  const lienzo = h('canvas', { clase: 'muestra-transicion', width: 160, height: 90 });
+  requestAnimationFrame(() => animarTransicion(lienzo, t.frag, datos.vertices, datos.acento));
+  return lienzo;
+}
+
+function dibujoDeMuestra(color, otro, n) {
+  const c = document.createElement('canvas');
+  c.width = 160; c.height = 90;
+  const x = c.getContext('2d');
+  x.fillStyle = color; x.fillRect(0, 0, 160, 90);
+  x.fillStyle = otro;
+  for (let i = 0; i < 5; i += 1) x.fillRect(10 + i * 30, 20 + ((i * n) % 3) * 15, 18, 40);
+  return c;
+}
+
+function animarTransicion(lienzo, frag, vert, acento) {
+  const gl = lienzo.getContext('webgl', { antialias: false });
+  if (!gl || !frag || !vert) return;
+  const compilar = (tipo, fuente) => {
+    const s = gl.createShader(tipo); gl.shaderSource(s, fuente); gl.compileShader(s);
+    return gl.getShaderParameter(s, gl.COMPILE_STATUS) ? s : null;
+  };
+  const vs = compilar(gl.VERTEX_SHADER, vert), fs = compilar(gl.FRAGMENT_SHADER, frag);
+  if (!vs || !fs) return;
+  const pr = gl.createProgram();
+  gl.attachShader(pr, vs); gl.attachShader(pr, fs);
+  gl.bindAttribLocation(pr, 0, 'a_pos'); gl.linkProgram(pr);
+  if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) return;
+  gl.useProgram(pr);
+  const quad = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  const textura = (img, unidad) => {
+    const tx = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0 + unidad); gl.bindTexture(gl.TEXTURE_2D, tx);
+    [gl.TEXTURE_WRAP_S, gl.TEXTURE_WRAP_T].forEach(p => gl.texParameteri(gl.TEXTURE_2D, p, gl.CLAMP_TO_EDGE));
+    [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER].forEach(p => gl.texParameteri(gl.TEXTURE_2D, p, gl.LINEAR));
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img);
+  };
+  textura(dibujoDeMuestra('#3c5a7a', '#a9c6e0', 1), 0);
+  textura(dibujoDeMuestra('#7a4f3c', '#e8c39e', 2), 1);
+  const u = n => gl.getUniformLocation(pr, n);
+  gl.uniform1i(u('u_from'), 0); gl.uniform1i(u('u_to'), 1);
+  gl.uniform2f(u('u_resolution'), 160, 90);
+  const ac = (acento || {});
+  const rgb = v => (Array.isArray(v) ? v : [0.85, 0.65, 0.34]);
+  gl.uniform3fv(u('u_accent'), rgb(ac.acento));
+  gl.uniform3fv(u('u_accent_dark'), rgb(ac.oscuro));
+  gl.uniform3fv(u('u_accent_bright'), rgb(ac.claro));
+  const inicio = performance.now();
+  const paso = ahora => {
+    if (!lienzo.isConnected) return;
+    const ciclo = ((ahora - inicio) / 1800) % 1;
+    gl.uniform1f(u('u_progress'), Math.min(1, Math.max(0, (ciclo - 0.2) / 0.6)));
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    requestAnimationFrame(paso);
+  };
+  requestAnimationFrame(paso);
 }
 
 /* --------------------------------------------------------------- el logo */

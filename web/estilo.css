@@ -3210,6 +3210,18 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .fila-pronunciacion { flex-wrap: nowrap; align-items: center; gap: 6px; }
 .fila-pronunciacion input { flex: 1 1 0; min-width: 0; }
 
+/* Movimiento y efectos (rama montaje-movimiento, 18-10-2026): el editor del
+   montaje y el selector de transiciones con su muestra animada */
+.editor-montaje .casilla { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+.transiciones-montaje summary { cursor: pointer; padding: 4px 0; font-weight: 600; }
+.rejilla-transiciones { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px; margin: 8px 0; }
+.tarjeta-transicion { display: flex; flex-direction: column; gap: 4px; padding: 6px;
+  border: 1px solid var(--linea); border-radius: 8px; cursor: pointer; }
+.tarjeta-transicion.puesta { border-color: var(--acento); background: var(--marcado); }
+.muestra-transicion { width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 4px;
+  background: var(--lienzo); display: block; }
+
 /* ================================================================ PUBLICAR
    Rama `publicar-redes-1` (16-10-2026): la barra de módulos y el módulo
    Publicar. Todo nuevo y aquí, al final, para no chocar con las otras ramas.

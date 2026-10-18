@@ -31,6 +31,7 @@ Salidas por escena: capas/<id>.svg, movimiento/<id>.json, hyper/<id>.png y
 previo/<id>.png (plano + capa compuestos para la pantalla de revision).
 """
 import os
+import re
 import sys
 import time
 
@@ -43,6 +44,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # pisara al sujeto. Un subtitulo no flota, asi que no hay
 # nada que colocar -- ni un pixel que mirar.
 
+import camara  # noqa: E402
 import cartelas  # noqa: E402
 import comun  # noqa: E402
 import estadisticas  # noqa: E402
@@ -328,6 +330,12 @@ def ventana_en(mov, fraccion, tamano=TAMANO, aspecto=16 / 9):
     mismo centro. Tiene que serlo, o una captura tomada en el segundo 2,2 no
     coincidiria con lo que el video ensena en el segundo 2,2.
     """
+    # CON TRAYECTO (montaje vivo o dinamico, 18-10-2026) la camara va por
+    # tramos y golpes: la cuenta es la de `camara`, la misma de la pagina del
+    # render. Sin trayecto, la de siempre, tal cual estaba.
+    if (mov or {}).get("trayecto"):
+        return camara.ventana_en_t(mov, float(fraccion) * camara.duracion_de(mov),
+                                   tamano, aspecto)
     ancho, alto = tamano
     ini, fin = mov["ventana_ini"], mov["ventana_fin"]
     e = suavizar(fraccion)
@@ -360,8 +368,14 @@ def region_segura(mov, tamano, aspecto):
     rotulo colocado mirando solo la imagen completa acaba cortado por el borde.
     Se interseca la ventana inicial con la final y ahi dentro se coloca.
     """
-    cajas = [ventana_en(mov, 0.0, tamano, aspecto),
-             ventana_en(mov, 1.0, tamano, aspecto)]
+    instantes = [0.0, 1.0]
+    duracion = camara.duracion_de(mov) if (mov or {}).get("trayecto") else 0.0
+    if duracion > 0:
+        # con trayecto, cada tramo empieza y acaba en un sitio distinto
+        for tramo in mov["trayecto"].get("tramos") or []:
+            for borde in (tramo["t0"], max(tramo["t0"], tramo["t1"] - 0.001)):
+                instantes.append(min(1.0, max(0.0, float(borde) / duracion)))
+    cajas = [ventana_en(mov, f, tamano, aspecto) for f in instantes]
     return (max(c[0] for c in cajas), max(c[1] for c in cajas),
             min(c[2] for c in cajas), min(c[3] for c in cajas))
 
@@ -745,7 +759,7 @@ def bloque_subtitulo(trozo, banda, tam, paleta, diseno, opacidad=None,
     return f'<g opacity="0">{"".join(piezas)}{entrada}</g>'
 
 
-def capa_fija_de(escena, p, banda=None, salida=SALIDA):
+def capa_fija_de(escena, p, banda=None, salida=SALIDA, extras="", gancho=False):
     """La capa QUIETA de un plano: sus subtitulos. -> (svg, fichas)
 
     Vive aparte de `capa_de_escena` porque la necesitan las tres clases de plano
@@ -767,14 +781,27 @@ def capa_fija_de(escena, p, banda=None, salida=SALIDA):
     Lo que se acepta a cambio, dicho para que no sorprenda: un tramo con
     cabecera fundida --hasta tres planos-- se queda sin subtitulo. Es el
     agujero que la decision del 23 venia a tapar, y se asume a sabiendas.
+
+    `extras` es lo que el MONTAJE pone encima (cifras clave, barra de
+    progreso): va dentro de la misma capa quieta, detras del subtitulo. Vacio
+    --lo de siempre-- la capa sale identica a la de antes. Y con el montaje
+    «de redes» el subtitulo es otro (`subtitulos_redes`).
     """
     if cartelas.es_cartela(escena) or escena.get("capitulo_svg"):
-        return _envoltorio_fijo("", salida), []
+        return _envoltorio_fijo(extras, salida), []
     # UN VIDEO SIN SUBTITULOS (lo decide quien lo crea, «Que lleva este video»).
     # `is False` y no `not`: un proyecto que nunca tuvo la clave los lleva, como
     # siempre; solo un False escrito a proposito los quita.
     if p.get("subtitulos") is False:
-        return _envoltorio_fijo("", salida), []
+        return _envoltorio_fijo(extras, salida), []
+    if montaje_de(p)["subtitulos"] == "redes":
+        paleta_r = paleta_de_guia((p.get("estilo") or {}).get("guia"), p.get("paleta"))
+        _, diseno_r = diseno_de(p, (p.get("estilo") or {}).get("guia"))
+        if p.get("subtitulo_fuente"):
+            diseno_r = dict(diseno_r or {}, fuente=fuente_subtitulo(p, diseno_r))
+        fragmento, fichas = subtitulos_redes(escena, p, salida, paleta_r, diseno_r,
+                                             gancho=gancho)
+        return _envoltorio_fijo(extras + fragmento, salida), fichas
     banda = banda or banda_subtitulo(salida, p)
     paleta = paleta_de_guia((p.get("estilo") or {}).get("guia"), p.get("paleta"))
     # `diseno_de` devuelve (nombre, ficha): aqui interesa la ficha, que trae la
@@ -805,11 +832,297 @@ def capa_fija_de(escena, p, banda=None, salida=SALIDA):
               for x in trozos]
     fichas = [{"tipo": "subtitulo", "texto": x["texto"],
                "desde": x["desde"], "hasta": x["hasta"]} for x in trozos]
-    return _envoltorio_fijo("".join(x for x in piezas if x), salida), fichas
+    return _envoltorio_fijo(extras + "".join(x for x in piezas if x), salida), fichas
+
+
+# ------------------------------------------------------------ el montaje
+#
+# Lo que el MONTAJE pone encima de la imagen (18-10-2026, rama
+# montaje-movimiento): los subtitulos «de redes», las cifras clave y la barra
+# de progreso. Se decide en `p["montaje"]` (ver `camara.normalizar_montaje`) y,
+# sin esa clave, nada de esto existe: la capa sale identica a la de siempre.
+
+def montaje_de(p):
+    """El montaje de este video, completo (lo que falte vale lo de siempre)."""
+    return camara.normalizar_montaje((p or {}).get("montaje"))
+
+
+#: Cuanto mas grande va el subtitulo de redes que el de siempre. Se lee de un
+#: vistazo en un movil y es lo que hace que el video se «oiga» sin sonido.
+REDES_ESCALA = 1.3
+
+#: Donde va en vertical si nadie eligio sitio: un poco por debajo de la mitad.
+#: A un tercio desde abajo (lo de siempre) se lo comen los botones de las redes.
+REDES_ALTURA_VERTICAL = 0.66
+
+#: Lo que cabe en un renglon de redes: dos, tres o cuatro palabras.
+REDES_CAP = {"vertical": 18, "horizontal": 26}
+
+#: El titular del gancho: la primera frase del video, mas grande y al centro.
+GANCHO_ESCALA = 1.45
+GANCHO_ALTURA = 0.44
+
+
+def _partir_por_frases(trozos):
+    """Un trozo de redes no cruza un punto: «fuera. Por» son dos frases.
+
+    `subtitulos.tramos` reagrupa lo que cabe en un renglon y no mira los puntos
+    (en los subtitulos de siempre, de dos renglones, no se nota); con trozos de
+    tres palabras que aparecen de golpe, juntar el final de una frase con el
+    principio de otra se lee como una sola idea.
+    """
+    salida = []
+    for trozo in trozos:
+        palabras = trozo.get("palabras")
+        if not palabras:
+            salida.append(trozo)
+            continue
+        actual = []
+        for palabra in palabras:
+            actual.append(palabra)
+            if re.search(r"[.!?…]$", palabra["texto"]) and palabra is not palabras[-1]:
+                salida.append(_trozo_de(actual))
+                actual = []
+        if actual:
+            salida.append(_trozo_de(actual))
+    return salida
+
+
+def _trozo_de(palabras):
+    return {"texto": " ".join(x["texto"] for x in palabras),
+            "desde": palabras[0]["desde"], "hasta": palabras[-1]["hasta"],
+            "palabras": list(palabras)}
+
+
+def _fin_de_primera_frase(escena):
+    """Cuando acaba la primera frase del plano, en s del plano (o None)."""
+    palabras = str(escena.get("narracion") or "").split()
+    marcas = escena.get("marcas") or []
+    if not palabras or len(palabras) != len(marcas):
+        return None
+    t_in = float(escena.get("t_in") or 0.0)
+    for palabra, marca in zip(palabras, marcas):
+        if re.search(r"[.!?…]$", palabra):
+            try:
+                return float(marca[1]) - t_in
+            except (TypeError, ValueError, IndexError):
+                return None
+    return None
+
+
+def _pop(centro_x, centro_y, inicio, interior, escala_ini=0.86):
+    """Un grupo que aparece con un pequeno salto de escala sobre su centro."""
+    return (f'<g transform="translate({centro_x:.0f},{centro_y:.0f})"><g>'
+            f'<animateTransform attributeName="transform" type="scale" '
+            f'values="{escala_ini:g};1.06;1" keyTimes="0;0.6;1" dur="0.18s" '
+            f'begin="{inicio:.2f}s" fill="freeze"/>'
+            f'<g transform="translate({-centro_x:.0f},{-centro_y:.0f})">{interior}</g>'
+            f'</g></g>')
+
+
+def subtitulos_redes(escena, p, salida, paleta, diseno, gancho=False):
+    """Los subtitulos «de redes» de un plano. -> (fragmento svg, fichas)
+
+    Dos, tres o cuatro palabras de golpe, grandes, sin caja y con perfilado
+    oscuro, y LA PALABRA QUE SE ESTA DICIENDO en el color de acento del video.
+    Cada trozo entra con un pequeno salto. En el primer plano de un video con
+    gancho, la primera frase va como titular: mas grande y en el centro.
+    """
+    banda = banda_subtitulo(salida, p)
+    vertical = es_vertical(salida)
+    if not posicion_subtitulo(p) and vertical:
+        banda = dict(banda, suelo=round(float(salida[1]) * REDES_ALTURA_VERTICAL, 1))
+    tam = int(round(tamano_subtitulo(p, salida) * REDES_ESCALA))
+    cap = min(cap_subtitulo(tam, banda),
+              REDES_CAP["vertical" if vertical else "horizontal"])
+    trozos = subtitulos.de_escena(
+        escena, idioma=p.get("idioma"), cap_linea=cap, cap_trozo=cap,
+        texto=texto_subtitulo_de(p, f"escena:{escena.get('id')}"),
+        ancla=ancla_subtitulo_de(p, f"escena:{escena.get('id')}"),
+        con_palabras=True)
+    trozos = _partir_por_frases(trozos)
+    fuente = (diseno or {}).get("fuente") or "Verdana"
+    color = (paleta or {}).get("texto") or "#ffffff"
+    acento = (paleta or {}).get("linea") or (paleta or {}).get("acento") or "#ffd84d"
+    fin_titular = None
+    if gancho:
+        # la primera frase del video; si no acaba en este plano, el plano
+        # entero es titular (el gancho no se corta a media frase)
+        fin_titular = _fin_de_primera_frase(escena)
+        if fin_titular is None:
+            try:
+                fin_titular = float(escena["t_out"]) - float(escena["t_in"])
+            except (KeyError, TypeError, ValueError):
+                fin_titular = None
+    centro = float(banda["centro"])
+    piezas, fichas = [], []
+    for trozo in trozos:
+        titular = fin_titular is not None and trozo["desde"] < fin_titular - 0.01
+        cuerpo = int(round(tam * (GANCHO_ESCALA if titular else 1.0)))
+        medir = _medidor(fuente, cuerpo, negrita=True)
+        ancho = medir(trozo["texto"])
+        if ancho > float(banda["ancho"]) and ancho > 0:
+            # lo que no cabe se encoge, no se parte: un titular en dos
+            # renglones que aparecen a la vez ya no es «de un vistazo»
+            cuerpo = max(18, int(cuerpo * float(banda["ancho"]) / ancho))
+        base = (float(salida[1]) * GANCHO_ALTURA) if titular else float(banda["suelo"])
+        trazo = max(3, int(round(cuerpo * 0.16)))
+        palabras = trozo.get("palabras") or []
+        if palabras:
+            tramos = []
+            for indice, palabra in enumerate(palabras):
+                hueco = " " if indice else ""
+                duracion = max(0.05, float(palabra["hasta"]) - float(palabra["desde"]))
+                tramos.append(
+                    f'<tspan>{hueco}{tipografia.escapar(palabra["texto"])}'
+                    f'<set attributeName="fill" to="{acento}" '
+                    f'begin="{float(palabra["desde"]):.2f}s" dur="{duracion:.2f}s"/>'
+                    f'</tspan>')
+            interior = "".join(tramos)
+        else:
+            interior = tipografia.escapar(trozo["texto"])
+        texto = (f'<text x="{centro:.0f}" y="{base:.0f}" font-family="{fuente}" '
+                 f'font-size="{cuerpo}" font-weight="800" text-anchor="middle" '
+                 f'fill="{color}" stroke="#000000" stroke-width="{trazo}" '
+                 f'stroke-linejoin="round" paint-order="stroke">{interior}</text>')
+        alto = cuerpo * 0.35
+        grupo = _pop(centro, base - alto, trozo["desde"], texto)
+        piezas.append(f'<g opacity="0">{grupo}'
+                      f'{_corte_seco(trozo["desde"], trozo["hasta"])}</g>')
+        fichas.append({"tipo": "subtitulo", "texto": trozo["texto"],
+                       "desde": trozo["desde"], "hasta": trozo["hasta"],
+                       "estilo": "titular" if titular else "redes"})
+    return "".join(piezas), fichas
+
+
+#: Las unidades que acompanan a una cifra y como se escriben en pantalla. La
+#: clave es la palabra DICHA normalizada (sin tildes); el valor, el sufijo.
+UNIDADES_CIFRA = {
+    "centimetros": " cm", "centimetro": " cm", "milimetros": " mm",
+    "milimetro": " mm", "metros": " m", "metro": " m", "kilometros": " km",
+    "kilometro": " km", "kilos": " kg", "kilogramos": " kg", "kilo": " kg",
+    "gramos": " g", "litros": " L", "litro": " L", "grados": "°",
+    "minutos": " min", "minuto": " min", "segundos": " s", "horas": " h",
+    "hora": " h", "dias": " días", "anos": " años", "meses": " meses",
+    "euros": " €", "euro": " €", "soles": " soles", "pesos": " pesos",
+    "dolares": " $", "dolar": " $",
+    "centimeters": " cm", "meters": " m", "kilometers": " km", "inches": " in",
+    "feet": " ft", "pounds": " lb", "minutes": " min", "hours": " h",
+    "days": " days", "years": " years", "dollars": " $", "euros_en": " €",
+}
+
+#: Las palabras que unen dos cifras en un rango: «de veintitres A veinticinco».
+_UNEN_RANGO = {"a", "y", "o", "hasta", "to", "and", "or"}
+
+
+def cifras_clave(escena, idioma=None):
+    """Las cifras que se dicen en un plano, para ponerlas grandes. -> [ficha]
+
+    [{"texto": "84 cm", "desde", "hasta"}] en s del plano. Salen de la MISMA
+    lectura que convierte las cifras del subtitulo (`medios.cifras_en`), mas la
+    unidad que se dice detras y los rangos («23-25 cm»). Una cifra pequena sin
+    unidad ni porcentaje (un «dos cubetas») no merece pantalla y no sale.
+    """
+    palabras = str(escena.get("narracion") or "").split()
+    marcas = escena.get("marcas") or []
+    if not palabras or len(palabras) != len(marcas):
+        return []
+    t_in = float(escena.get("t_in") or 0.0)
+    llanas = [medios.normalizar_texto(x) for x in palabras]
+    try:
+        tramos = medios.cifras_en(llanas, idioma, subtitulos._cortes_de(palabras))
+    except Exception:                                       # noqa: BLE001
+        return []
+
+    def unidad_tras(fin):
+        siguiente = llanas[fin] if fin < len(llanas) else ""
+        siguiente = re.sub(r"[^a-z]", "", siguiente)
+        return UNIDADES_CIFRA.get(siguiente, ""), (1 if siguiente in UNIDADES_CIFRA else 0)
+
+    salida, k = [], 0
+    while k < len(tramos):
+        inicio, cuantas, texto = tramos[k]
+        fin = inicio + cuantas
+        texto = str(texto)
+        # un rango: cifra, «a»/«y», cifra con la misma unidad
+        if k + 1 < len(tramos):
+            otro_inicio, otro_cuantas, otro_texto = tramos[k + 1]
+            puente = llanas[fin:otro_inicio]
+            if len(puente) == 1 and re.sub(r"[^a-z]", "", puente[0]) in _UNEN_RANGO:
+                unidad, usa = unidad_tras(otro_inicio + otro_cuantas)
+                if unidad:
+                    texto = f"{texto}–{otro_texto}"
+                    fin = otro_inicio + otro_cuantas
+                    k += 1
+        unidad, usa = unidad_tras(fin)
+        k += 1
+        if unidad.strip() == "$":
+            texto, unidad = "$" + texto, ""
+        try:
+            valor = float(re.sub(r"[^0-9.]", "", texto.split("–")[0].replace(",", ".")) or 0)
+        except ValueError:
+            valor = 0.0
+        if not unidad and "%" not in texto and valor < 10:
+            continue
+        try:
+            desde = float(marcas[inicio][0]) - t_in
+            hasta = float(marcas[fin + usa - 1][1]) - t_in
+        except (TypeError, ValueError, IndexError):
+            continue
+        salida.append({"texto": texto + unidad, "desde": round(desde, 3),
+                       "hasta": round(max(desde, hasta), 3),
+                       "palabra": inicio})
+    return salida
+
+
+#: Cuanto se queda una cifra en pantalla como minimo, y despues de decirla.
+CIFRA_MINIMO_S = 1.3
+CIFRA_DESPUES_S = 0.5
+
+
+def fragmento_cifras(cifras, salida, paleta, diseno, duracion):
+    """Las cifras clave dibujadas: grandes, arriba, con un salto al entrar."""
+    if not cifras:
+        return ""
+    vertical = es_vertical(salida)
+    cuerpo = int(round(float(salida[1]) * (0.075 if vertical else 0.11)))
+    fuente = (diseno or {}).get("fuente") or "Verdana"
+    acento = (paleta or {}).get("linea") or (paleta or {}).get("acento") or "#ffd84d"
+    x = float(salida[0]) / 2.0
+    y = float(salida[1]) * (0.26 if vertical else 0.24)
+    piezas = []
+    for indice, cifra in enumerate(cifras):
+        desde = max(0.0, float(cifra["desde"]) - 0.05)
+        hasta = max(desde + CIFRA_MINIMO_S, float(cifra["hasta"]) + CIFRA_DESPUES_S)
+        if indice + 1 < len(cifras):
+            hasta = min(hasta, float(cifras[indice + 1]["desde"]) - 0.05)
+        hasta = min(hasta, max(desde + 0.3, float(duracion) - 0.05))
+        texto = (f'<text x="{x:.0f}" y="{y:.0f}" font-family="{fuente}" '
+                 f'font-size="{cuerpo}" font-weight="800" text-anchor="middle" '
+                 f'fill="{acento}" stroke="#000000" '
+                 f'stroke-width="{max(4, int(cuerpo * 0.1))}" stroke-linejoin="round" '
+                 f'paint-order="stroke">{tipografia.escapar(cifra["texto"])}</text>')
+        piezas.append(f'<g opacity="0">{_pop(x, y - cuerpo * 0.35, desde, texto, 0.55)}'
+                      f'{_corte_seco(desde, hasta)}</g>')
+    return "".join(piezas)
+
+
+def fragmento_barra(desde_frac, hasta_frac, duracion, salida, paleta):
+    """La barra de progreso de un plano: la parte del video que ya ha pasado."""
+    ancho = float(salida[0])
+    alto = max(6, int(round(float(salida[1]) * (0.006 if es_vertical(salida) else 0.007))))
+    acento = (paleta or {}).get("linea") or (paleta or {}).get("acento") or "#ffd84d"
+    w0 = max(0.0, min(1.0, float(desde_frac))) * ancho
+    w1 = max(0.0, min(1.0, float(hasta_frac))) * ancho
+    return (f'<rect x="0" y="0" width="{ancho:.0f}" height="{alto}" '
+            f'fill="#000000" opacity="0.35"/>'
+            f'<rect x="0" y="0" width="{w0:.1f}" height="{alto}" fill="{acento}">'
+            f'<animate attributeName="width" from="{w0:.1f}" to="{w1:.1f}" '
+            f'begin="0s" dur="{max(0.05, float(duracion)):.3f}s" fill="freeze"/></rect>')
 
 
 def capa_de_escena(escena, p, mov=None, banda=None, aspecto=16 / 9,
-                   lienzo=TAMANO, salida=SALIDA):
+                   lienzo=TAMANO, salida=SALIDA, extras="", gancho=False):
     """Las DOS capas de un plano y sus fichas. -> (svg_movil, svg_fijo, fichas)
 
     DOS Y NO UNA, y esa es la firma del cambio del 23-08 (PENDIENTE 38):
@@ -838,7 +1151,8 @@ def capa_de_escena(escena, p, mov=None, banda=None, aspecto=16 / 9,
     que se podria deducir aqui; entra igual por parametro para que quien componga
     fuera (la vista previa, el repaso) use exactamente la misma.
     """
-    fija, fichas = capa_fija_de(escena, p, banda, salida)
+    fija, fichas = capa_fija_de(escena, p, banda, salida, extras=extras,
+                                gancho=gancho)
     if escena.get("capitulo_svg"):
         # Una cabecera de capitulo es una portada a cuadro completo: se incrusta
         # tal cual y va CON la imagen. Su subtitulo, como el de cualquier otro
@@ -1518,6 +1832,33 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
     # renderizado.
     banda = banda_subtitulo(salida, p)
 
+    # EL MONTAJE (18-10-2026): camara, subtitulos de redes, cifras y barra. Con
+    # el de siempre no se calcula nada de esto y cada plano sale como antes.
+    montaje = montaje_de(p)
+    con_montaje = not camara.es_de_siempre(montaje)
+    semilla = _semilla_de(plan)
+    origen = float(escenas[0]["t_in"]) if escenas else 0.0
+    total = (float(escenas[-1]["t_out"]) - origen) if escenas else 0.0
+
+    def extras_de(escena, cifras):
+        """Lo que el montaje pone en la capa quieta de este plano. -> svg"""
+        piezas = []
+        if montaje["barra"] and total > 0:
+            piezas.append(fragmento_barra(
+                (float(escena["t_in"]) - origen) / total,
+                (float(escena["t_out"]) - origen) / total,
+                float(escena["t_out"]) - float(escena["t_in"]), salida, paleta_video))
+        if cifras:
+            piezas.append(fragmento_cifras(
+                cifras, salida, paleta_video, ficha_diseno,
+                float(escena["t_out"]) - float(escena["t_in"])))
+        return "".join(piezas)
+
+    def fija_vacia(escena):
+        """La capa quieta de un plano sin subtitulo: vacia, o con la barra."""
+        piezas = extras_de(escena, [])
+        return _envoltorio_fijo(piezas, salida) if piezas else capa_fija_vacia(salida)
+
     for indice, escena in enumerate(escenas):
         sid = escena["id"]
         uid = f"escena:{sid}"
@@ -1554,7 +1895,7 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
             resultados[uid] = _capa_de_cartela(
                 escena, paleta_video, ficha_diseno, dirs, trabajo, svg_ruta,
                 mov_ruta, ficha_ruta, plan, fija_ruta,
-                capa_fija_vacia(salida), [], lienzo=lienzo, salida=salida)
+                fija_vacia(escena), [], lienzo=lienzo, salida=salida)
             continue
 
         png = os.path.join(dir_escenas, f"{sid}.png")
@@ -1568,6 +1909,20 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
                                       int(p["escala_hyper"]))[0]
         evitar = _zonas_de_unidad(p, uid)
         apagada = _sin_callout(p, uid)
+        cifras = (cifras_clave(escena, p.get("idioma"))
+                  if montaje["cifras"] and not cartelas.es_cartela(escena)
+                  and not escena.get("capitulo_svg") else [])
+        if (con_montaje and not cartelas.sobre_imagen(escena)
+                and not escena.get("capitulo_svg")):
+            # LA CAMARA DEL MONTAJE. No en las cartelas sobre imagen ni en las
+            # cabeceras: su texto viaja DENTRO del zoom, y un reencuadre o un
+            # golpe lo moverian por la pantalla. Esas llevan lo de siempre.
+            trayecto = camara.trayecto_de(
+                escena, indice, montaje, semilla=semilla,
+                cifras=[c["palabra"] for c in cifras],
+                gancho=montaje["gancho"], base=entrada)
+            if trayecto:
+                entrada["trayecto"] = trayecto
         if cartelas.sobre_imagen(escena):
             # el plano se ha rodado y tiene su zoom; encima va el velo y el
             # texto de la cartela, no los rotulos de siempre
@@ -1602,14 +1957,20 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
             # escrito, a tamano de titular y en el centro, y ponerle debajo la
             # misma frase en pequeno son dos textos compitiendo por la misma
             # atencion. Decision del 31-08.
-            fija, fichas = capa_fija_vacia(salida), []
+            fija, fichas = fija_vacia(escena), []
         elif apagada:
             # el movimiento SI se calcula: el plano sigue teniendo su zoom y su
             # transicion, lo unico que se va es el texto
-            svg, fija, fichas = capa_vacia(lienzo), capa_fija_vacia(salida), []
+            svg, fija, fichas = capa_vacia(lienzo), fija_vacia(escena), []
         else:
-            svg, fija, fichas = capa_de_escena(escena, p, entrada, banda, aspecto,
-                                               lienzo, salida)
+            svg, fija, fichas = capa_de_escena(
+                escena, p, entrada, banda, aspecto, lienzo, salida,
+                extras=extras_de(escena, cifras),
+                gancho=montaje["gancho"] and indice == 0)
+            if cifras:
+                fichas = list(fichas) + [{"tipo": "cifra", "texto": c["texto"],
+                                          "desde": c["desde"], "hasta": c["hasta"]}
+                                         for c in cifras]
         medios.escribir_texto(svg_ruta, svg)
         medios.escribir_texto(fija_ruta, fija)
         entrada["capa"] = os.path.relpath(svg_ruta, trabajo)
@@ -1664,6 +2025,10 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
                 # video. p8 no puede derivarla -- la guia esta en los params de
                 # assets-- y quien la tiene resuelta es este paso.
                 "paleta": paleta_video,
+                # y el montaje, que el render tambien lee: con movimiento
+                # dinamico los cambios de plano van en seco (ver
+                # `transiciones.resolver`). Solo si no es el de siempre.
+                **({"montaje": montaje} if con_montaje else {}),
                 "movimientos": [medios.leer_json(
                     os.path.join(dirs["movimiento"], f"{e['id']}.json"), {})
                     for e in escenas]}
@@ -1688,8 +2053,10 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
     # paso-- y los planos que no llevan ninguno, que son las cartelas y los
     # planos cuyas marcas no cuadraban con su texto (`subtitulos.de_escena`
     # devuelve [] antes que fingir una sincronia).
-    trozos = sum(len(r.get("elementos") or []) for r in resultados.values())
-    con_texto = sum(1 for r in resultados.values() if r.get("elementos"))
+    def _subs(r):
+        return [e for e in (r.get("elementos") or []) if e.get("tipo", "subtitulo") == "subtitulo"]
+    trozos = sum(len(_subs(r)) for r in resultados.values())
+    con_texto = sum(1 for r in resultados.values() if _subs(r))
     salidas = {"movimiento": "movimiento.json", "capas": "capas",
                "capas_fijas": "capas_fijas",
                "hyperframes": "hyper", "previos": "previo",

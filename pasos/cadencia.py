@@ -117,6 +117,18 @@ PARTE_DE_LA_PAUSA = 0.6
 PAUSA_DE_BLOQUE_PREVISTA = 0.9
 
 
+#: Hasta aqui un video es CORTO y su guion lleva otra estructura (la misma
+#: cifra que `p3_guion.DURACION_CORTA_S`; `prueba_p2` comprueba que coinciden).
+DURACION_CORTA_S = 120
+
+#: Las pausas de un corto: su guion tiene como mucho tres paradas contando el
+#: gancho (gancho -> caso -> cierre, ver `p3_guion._estructura_corta`), asi que
+#: hay DOS cambios de parada. Con la regla de los largos se preveian tres o
+#: cuatro, el guion se pedia mas corto de la cuenta y el video salia medio
+#: segundo o un segundo por debajo de lo pedido (18-10-2026).
+PAUSAS_DE_UN_CORTO = 2
+
+
 def pausas_previstas(segundos, bloques):
     """Cuantas pausas de bloque llevara un guion de esa duracion. -> int
 
@@ -125,9 +137,14 @@ def pausas_previstas(segundos, bloques):
     escrito cuantos tramos salen (regla 11 de `p3_guion`): «en un video de dos
     minutos salen cuatro o cinco; en uno de quince, ocho o diez COMO MUCHO».
     Eso es 3 + medio tramo por minuto, entre 1 y 10, y nunca mas que costuras.
+    Un corto (hasta DURACION_CORTA_S) lleva su propia estructura y sus pausas:
+    PAUSAS_DE_UN_CORTO.
     """
-    minutos = max(0.0, float(segundos or 0.0)) / 60.0
+    total = max(0.0, float(segundos or 0.0))
+    minutos = total / 60.0
     tramos = max(1, min(10, int(round(3 + minutos / 2.0))))
+    if 0 < total <= DURACION_CORTA_S:
+        tramos = PAUSAS_DE_UN_CORTO
     return max(0, min(int(bloques) - 1, tramos))
 
 

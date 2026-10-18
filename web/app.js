@@ -12610,7 +12610,14 @@ async function alTerminarLight(datos) {
   if ((datos || {}).estado === 'listo' && cola.length) {
     const ficha = fichaLight(nuevo || APP.light.abierto);
     APP.light.cola = cola.slice(1);
-    if (ficha) { await regenerarParteLight(ficha, cola[0]); return; }
+    /* LA SIGUIENTE PARTE NO SE PIERDE: si hay otra petición del taller en
+       camino (una lámina), se espera a que conteste; `regenerarParteLight`
+       la descartaría en silencio. */
+    if (ficha && await esperarSinLanzarLight()) {
+      await regenerarParteLight(ficha, cola[0]);
+      return;
+    }
+    if (ficha) toast(`no se ha podido lanzar ${cola.join(' y ')}: vuelve a pulsar «Regenerar»`, true);
   }
   APP.light.cola = [];
   if ((datos || {}).estado === 'listo') {
@@ -13028,18 +13035,7 @@ async function accionLaminasYa(ficha, cuerpo) {
     const datos = await pedir(API.presetLightLaminas(ficha.id), { method: 'POST', cuerpo });
     APP.light.laminas = null;
     if (datos.trabajo_id) {
-      /* SE QUEDA EN LA FICHA, con el progreso en las propias láminas. Antes
-         saltaba a la pantalla de «generando» (la de crear un estilo entero)
-         para quitar o devolver una lámina, que dura segundos (11-10-2026). */
-      APP.light.trabajoLaminas = { id: datos.trabajo_id, preset: ficha.id, accion: cuerpo.accion };
-      seguirTrabajo(CLAVE_LIGHT, datos.trabajo_id, async trabajo => {
-        APP.light.trabajoLaminas = null;
-        APP.light.laminas = null;
-        if (trabajo.estado === 'listo') toast('Láminas al día');
-        else if (trabajo.estado === 'error') toast(`no se ha podido: ${trabajo.error || 'falló'}`, true);
-        await cargarGaleriaLight(true);
-      }, () => refrescarVivosLight());
-      pintarLight();
+      seguirTrabajoLaminas(ficha, datos.trabajo_id, cuerpo.accion);
       return;
     }
     if (datos.preset && APP.light.datos) {
@@ -13048,9 +13044,35 @@ async function accionLaminasYa(ficha, cuerpo) {
     toast('guardado');
     pintarLight();
   } catch (e) {
-    if (e.status === 409 && engancharAlTallerLight(ficha, e.datos, e.message)) return;
     toast(e.status === 409 ? e.message : `no se ha podido: ${e.message}`, true);
+    /* UN 409 CON SU TRABAJO: se sigue AQUÍ, en las láminas, sin saltar a la
+       pantalla de «generando» (la misma razón que el 11-10-2026). */
+    const tid = e.status === 409 ? (e.datos || {}).trabajo_id : '';
+    const ya = APP.trabajos[CLAVE_LIGHT];
+    if (tid && !(ya && ya.id === tid && APP.seguimientos[CLAVE_LIGHT])) {
+      APP.trabajos[CLAVE_LIGHT] = {
+        id: tid, estado: 'ejecutando', progreso: 0, mensaje: '',
+        cancelando: !!e.datos.cancelando,
+        inicio: Date.now() - (Number(e.datos.segundos) || 0) * 1000,
+      };
+      seguirTrabajoLaminas(ficha, tid, 'otro');
+    }
   }
+}
+
+/* SE QUEDA EN LA FICHA, con el progreso en las propias láminas. Antes saltaba
+   a la pantalla de «generando» (la de crear un estilo entero) para quitar o
+   devolver una lámina, que dura segundos (11-10-2026). */
+function seguirTrabajoLaminas(ficha, tid, accion) {
+  APP.light.trabajoLaminas = { id: tid, preset: ficha.id, accion };
+  seguirTrabajo(CLAVE_LIGHT, tid, async trabajo => {
+    APP.light.trabajoLaminas = null;
+    APP.light.laminas = null;
+    if (trabajo.estado === 'listo') toast('Láminas al día');
+    else if (trabajo.estado === 'error') toast(`no se ha podido: ${trabajo.error || 'falló'}`, true);
+    await cargarGaleriaLight(true);
+  }, () => refrescarVivosLight());
+  pintarLight();
 }
 
 /* Una fila de imágenes servidas desde la carpeta del estilo. El sello del
@@ -13936,12 +13958,15 @@ function pieDeEstilo(ficha) {
   const caja = h('div', { clase: 'pie-light' });
   if (pedidas.length) {
     const plan = imagenesDePartes(pedidas);
+    // apagado con cualquier petición del taller en camino; «Leyendo tu
+    // corrección…» solo si es la de rehacer (no la de una lámina)
     const lanzando = !!APP.light.lanzando;
+    const leyendo = lanzando && APP.light.lanzando !== 'laminas';
     caja.appendChild(h('div', { clase: 'fila' },
       h('button', {
         clase: 'primario', disabled: lanzando,
         onclick: () => regenerarPedidasLight(ficha, pedidas),
-      }, lanzando ? 'Leyendo tu corrección…' : 'Regenerar'),
+      }, leyendo ? 'Leyendo tu corrección…' : 'Regenerar'),
       h('span', { clase: 'meta' },
         `${pedidas.map(p => partes[p] || p).join(' y ')} · ${plan}`
         + ((fuenteCambiadaLight(ficha) || fuenteTonoCambiadaLight(ficha))
@@ -14094,9 +14119,9 @@ async function volcarPresetLight(repintar) {
    aviso, la pantalla se engancha a él y lo enseña (con «Cancelando…» si es uno
    que se está parando). */
 function engancharAlTallerLight(ficha, datos, mensaje) {
-  toast(mensaje, true);
   const tid = (datos || {}).trabajo_id;
-  if (!tid) return false;
+  if (!tid) return false;          // sin trabajo, el aviso lo da quien llama
+  toast(mensaje, true);
   const ya = APP.trabajos[CLAVE_LIGHT];
   if (!(ya && ya.id === tid && APP.seguimientos[CLAVE_LIGHT])) {
     APP.trabajos[CLAVE_LIGHT] = {
@@ -14108,6 +14133,16 @@ function engancharAlTallerLight(ficha, datos, mensaje) {
   }
   irALight('generando', { plan: null, abierto: ficha.id });
   return true;
+}
+
+/* Espera (hasta un minuto) a que no haya ninguna petición del taller en
+   camino. -> true si quedó libre */
+async function esperarSinLanzarLight() {
+  const fin = Date.now() + 60000;
+  while (APP.light.lanzando && Date.now() < fin) {
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return !APP.light.lanzando;
 }
 
 /* Repinta solo la caja de las láminas (sin tirar el foco del resto). */
@@ -14173,7 +14208,7 @@ async function regenerarParteLightYa(ficha, parte) {
     seguirTrabajo(CLAVE_LIGHT, datos.trabajo_id, alTerminarLight, () => pintarLight());
   } catch (e) {
     if (e.status === 409 && engancharAlTallerLight(ficha, e.datos, e.message)) return;
-    if (e.status !== 409) toast(`no se ha podido rehacer: ${e.message}`, true);
+    toast(e.status === 409 ? e.message : `no se ha podido rehacer: ${e.message}`, true);
   }
 }
 

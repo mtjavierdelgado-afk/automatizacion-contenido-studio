@@ -113,7 +113,7 @@ LAS INDICACIONES DEL ENCARGO (las del video):
 LAS REGLAS DE LA CASA:
 {reglas}
 
-LOS PLANOS (abre cada imagen con Read; van en orden de video):
+{referencia}LOS PLANOS (abre cada imagen con Read; van en orden de video):
 {planos}
 
 QUE BUSCAR, y en este orden:
@@ -277,6 +277,37 @@ def _planos_legibles(proyecto, escenas, imagenes, bloques):
     return "\n".join(lineas)
 
 
+#: Lo que se le dice del plano de REFERENCIA: el que va justo antes del primero
+#: de la tanda. Solo para comparar la continuidad, nunca para juzgarlo.
+REFERENCIA = """EL PLANO DE ANTES, SOLO COMO REFERENCIA (abrelo con Read, pero NO lo
+juzgues ni lo pongas en tu respuesta: ya se reviso o se revisa aparte). Sirve
+para ver si el primer plano de la lista mantiene el mismo sitio, la misma
+estacion, los mismos mandos y la misma gente que venia de antes:
+{plano}
+
+"""
+
+
+def _referencia_de(proyecto, plan, primero, imagenes, bloques):
+    """El texto del plano que va justo antes de `primero` en el video, o "".
+
+    Los grupos se miran por separado, y sin esto el ultimo plano de un grupo y
+    el primero del siguiente no se comparaban nunca: justo donde la estacion
+    podia cambiar sin que nadie lo viera. Vale tambien cuando se revisa un plano
+    suelto (el que acaba de rehacer una tanda): se compara con el de antes."""
+    anterior = None
+    for escena in plan.get("escenas") or []:
+        sid = str(escena.get("id"))
+        if sid == primero:
+            break
+        if sid in imagenes and os.path.isfile(imagenes[sid]):
+            anterior = escena
+    if anterior is None:
+        return ""
+    return REFERENCIA.format(
+        plano=_planos_legibles(proyecto, [anterior], imagenes, bloques))
+
+
 def _ajuste(ajuste):
     ajuste = dict(ajuste or {})
     defecto = cli_claude.por_defecto_de(FASE)
@@ -396,6 +427,7 @@ def revisar(proyecto, plan, imagenes, planos, estilo=None, encargo="",
             guia=guia or "(sin guia escrita)",
             encargo=_texto(encargo, 3000) or "(sin indicaciones)",
             reglas=reglas or "(sin reglas)",
+            referencia=_referencia_de(proyecto, plan, ids[0], imagenes, bloques),
             planos=_planos_legibles(proyecto, tanda, imagenes, bloques),
             tipos=" | ".join(TIPOS))
         # CON SU AVANCE: es lo que corta la llamada al CLI si alguien cancela

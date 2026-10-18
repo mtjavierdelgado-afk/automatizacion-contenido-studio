@@ -22,6 +22,9 @@ vídeos, estilos, claves y contraseña no se tocan.
 - **«Rehacer las marcadas»** las manda a la cola de siempre: las de retoque
   parten de la imagen de ahora y las que piden otra imagen se dibujan desde
   cero. Cada plano marcado tiene su «✕» para decir «está bien así».
+- Mira las imágenes en grupos de 8 seguidas, para ver si el sitio, el equipo y
+  la gente se mantienen de un plano a otro; cada grupo ve además la última
+  imagen del anterior, para que el salto entre grupos tampoco se escape.
 - Revisar **no gasta en imágenes** (usa tu cuenta de Claude) y una imagen ya
   revisada no se vuelve a mirar mientras no cambie. Lo que cuesta es rehacer.
 - **Tres modos**, en Configuración → Revisor de imágenes: **manual** (solo con

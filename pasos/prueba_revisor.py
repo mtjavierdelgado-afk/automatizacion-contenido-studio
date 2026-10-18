@@ -245,6 +245,38 @@ def prueba_revisar_y_apuntar(doble):
     return proyecto, plan, imagenes
 
 
+def prueba_referencia(doble):
+    seccion("cada grupo ve el plano de antes, solo como referencia")
+    proyecto, plan, imagenes = _montar()
+    doble.respuestas = [{"planos": [_veredicto("S001")]}]
+    rev.revisar(proyecto, plan, imagenes, ["S001"])
+    ok("EL PLANO DE ANTES" not in doble.llamadas[-1]["instruccion"],
+       "el primer plano del video no tiene referencia")
+    # el modelo contesta tambien de la referencia: se ignora
+    doble.respuestas = [{"planos": [_veredicto("S001", "corregir", "alta", "x", "retoque"),
+                                    _veredicto("S002")]}]
+    veredictos = rev.revisar(proyecto, plan, imagenes, ["S002"])
+    instruccion = doble.llamadas[-1]["instruccion"]
+    ok("EL PLANO DE ANTES" in instruccion and "revisor/S001.jpg" in instruccion,
+       "un plano suelto se compara con el de antes")
+    igual(sorted(veredictos), ["S002"], "lo que diga de la referencia no cuenta")
+    original = rev.POR_LLAMADA
+    rev.POR_LLAMADA = 2
+    try:
+        llamadas = len(doble.llamadas)
+        doble.respuestas = [{"planos": [_veredicto("S001"), _veredicto("S002")]},
+                            {"planos": [_veredicto("S003")]}]
+        veredictos = rev.revisar(proyecto, plan, imagenes, ["S001", "S002", "S003"])
+        igual(len(doble.llamadas) - llamadas, 2, "dos grupos")
+        segunda = doble.llamadas[-1]["instruccion"]
+        cabeza, _, lista = segunda.partition("LOS PLANOS (abre")
+        ok("revisor/S002.jpg" in cabeza and "revisor/S002.jpg" not in lista,
+           "el segundo grupo ve el ultimo del primero como referencia, no en la lista")
+        igual(sorted(veredictos), ["S001", "S002", "S003"], "y se juzgan los tres")
+    finally:
+        rev.POR_LLAMADA = original
+
+
 def prueba_elegir(proyecto):
     seccion("elegir que se rehace solo")
     # deja dos notas del revisor: S001 alta (sustituye) y S003 media (retoque)
@@ -334,6 +366,7 @@ def main():
     try:
         proyecto, _plan, _imagenes = prueba_revisar_y_apuntar(doble)
         prueba_elegir(proyecto)
+        prueba_referencia(doble)
         prueba_ajustes()
     finally:
         rev.cli_claude.ejecutar = original

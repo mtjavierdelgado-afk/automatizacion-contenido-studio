@@ -1376,6 +1376,14 @@ def hashtags_recientes(raiz, pids, sin_pid=None, cuantos=5):
     return vistos[:30]
 
 
+def primera_linea(texto):
+    """La primera línea con algo (el gancho), recortada."""
+    for linea in str(texto or "").splitlines():
+        if linea.strip():
+            return " ".join(linea.split())[:200]
+    return ""
+
+
 def aprendido_de_resultados(raiz, videos, cid):
     """Las primeras líneas de los posts que mejor fueron, con sus vistas, para
     dárselas a Claude como ejemplo (publicar-redes-2: `lo_que_funciono`)."""
@@ -1936,6 +1944,11 @@ def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
                 "actualizado": _iso_lima(), "url": "", "error": "",
                 "mp4_huella": info.get("mp4_huella") or "",
                 "sin_hora": modo == "pendiente" and not cuando,
+                # con qué palabra clave y qué primera línea salió (publicar-mas):
+                # la tabla de «lo que funcionó» no cambia si después se edita
+                "palabra": SEO.palabra_del_video(datos, ajustes)[:80],
+                "primera_linea": primera_linea(
+                    (datos["textos"].get(red) or {}).get("descripcion")),
             })
         datos["envios"].extend(nuevos)
         _escribir(_ruta_video(raiz, pid), datos)

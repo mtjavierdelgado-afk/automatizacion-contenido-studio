@@ -1249,6 +1249,71 @@ def prueba_redes_nuevas():
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 
 
+def prueba_informe():
+    seccion("4e] palabras y ganchos, horarios por red e informe del mes")
+    import publicar_informe as I
+    raiz = os.path.join(CARPETA, "informe")
+    os.makedirs(raiz)
+    ahora = P.ahora_lima()
+    lunes = (ahora - dt.timedelta(days=ahora.weekday() + 7)).replace(hour=19, minute=10, second=0)
+
+    def envio(red, cuando, vistas, palabra="", linea="", me_gusta=None):
+        return {"id": f"e{red}{cuando.strftime('%m%d%H')}{vistas}", "red": red, "estado": "publicado",
+                "lote": "l", "cuando": P._iso_lima(cuando), "palabra": palabra,
+                "primera_linea": linea,
+                "metricas": {"vistas": vistas, "me_gusta": me_gusta, "al": P._iso_lima()}}
+    envios = []
+    # TikTok: los lunes a las 19 h van el triple que el resto
+    for i in range(4):
+        envios.append(envio("tiktok", lunes - dt.timedelta(days=7 * i), 3000, "fiesta infantil",
+                            "¿Tu hijo cumple años?", me_gusta=300))
+    for i in range(4):
+        envios.append(envio("tiktok", lunes - dt.timedelta(days=7 * i - 2, hours=10), 1000,
+                            "decoración", "Mira esta decoración", me_gusta=20))
+    envios.append(envio("instagram", lunes, 500, "fiesta infantil", "Otra cosa"))
+    P._escribir(P._ruta_video(raiz, "inf1"), {"envios": envios, "textos": {}, "redes": []})
+    videos = [{"pid": "inf1", "nombre": "Fiesta", "cliente": ""}]
+    pg = I.palabras_y_ganchos(raiz, videos, "", dias=60)
+    igual([p["palabra"] for p in pg["palabras"]][:2], ["fiesta infantil", "decoración"],
+          "la palabra que mejor fue, primero (por la mediana)")
+    fi = pg["palabras"][0]
+    igual((fi["posts"], fi["mediana"]), (5, 3000), "con sus publicaciones y su mediana")
+    ok(abs(fi["interaccion"] - 0.1) < 0.01, f"y su interacción ({fi['interaccion']})")
+    igual(pg["ganchos"][0]["gancho"], "¿Tu hijo cumple años?", "el gancho con más vistas, primero")
+    hor = I.horarios(raiz, videos, "")
+    tt = hor["redes"]["tiktok"]
+    ok(tt["propios"], "TikTok tiene datos propios (8 publicaciones)")
+    igual((tt["mejores"][0]["dia"], tt["mejores"][0]["franja"]), (0, "18–21 h"),
+          "el mejor hueco de TikTok: lunes de 18 a 21 h")
+    igual(tt["mejores"][0]["hora"], "19:00", "y la hora que se propone")
+    prox = P._leer_momento(tt["mejores"][0]["proxima"])
+    ok(prox > ahora and prox.weekday() == 0 and prox.hour == 19, "«Usar» lleva al próximo lunes a las 19:00")
+    ok(all(m["indice"] > 1 for m in tt["mejores"]), "solo huecos por encima de lo normal")
+    ig = hor["redes"]["instagram"]
+    ok(not ig["propios"] and ig["faltan"] == 5, "Instagram con una sola: no se inventa nada y dice cuántas faltan")
+    ok(ig["general"]["texto"] and P._leer_momento(ig["general"]["proxima"]) > ahora,
+       "y da el punto de partida general")
+    # informe del mes
+    mes = lunes.strftime("%Y-%m")
+    inf = I.informe_mensual(raiz, videos, "", mes=mes, nombre="Fiestas Suyu")
+    del_mes = [e for e in envios if e["cuando"].startswith(mes)]
+    igual(inf["total"]["posts"], len(del_mes), "el informe cuenta lo publicado ese mes")
+    igual(inf["total"]["vistas"], sum(e["metricas"]["vistas"] for e in del_mes), "y suma sus vistas")
+    ok(inf["mejores"][0]["metricas"]["vistas"] == 3000, "lo mejor del mes, primero")
+    ok("Fiestas Suyu" in inf["resumen"] and inf["nombre_mes"] in inf["resumen"], "el resumen para copiar")
+    ok("undefined" not in inf["resumen"] and "None" not in inf["resumen"], "sin huecos raros en el resumen")
+    ok(mes in inf["meses"], "y el mes sale en la lista para elegir")
+    vacio = I.informe_mensual(raiz, videos, "", mes="2020-01", nombre="X")
+    igual(vacio["total"]["posts"], 0, "un mes sin nada: cero, sin fallar")
+    try:
+        I.informe_mensual(raiz, videos, "", mes="octubre")
+        ok(False, "un mes mal escrito: error claro")
+    except P.ErrorPublicar:
+        ok(True, "un mes mal escrito: error claro")
+    otro = I.palabras_y_ganchos(raiz, [dict(videos[0], cliente="cl_otro")], "", dias=60)
+    igual(otro["palabras"], [], "lo de otro proyecto no entra")
+
+
 def prueba_perfiles():
     """Lo que salió en el servidor el 16-10: «Crear perfil» sin el nombre
     escrito, el plan lleno con el perfil YA en Upload-Post, y «Suyu» frente
@@ -1846,6 +1911,7 @@ def main():
     prueba_metricas()
     prueba_metricas_auto()
     prueba_redes_nuevas()
+    prueba_informe()
     prueba_retencion_y_resumenes()
     prueba_perfiles()
     prueba_textos()

@@ -17504,6 +17504,7 @@ async function cargarPublicar(silencio) {
     if (PUB.seccion === 'ficha' && PUB.pid) {
       const antes = PUB.ficha;
       PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`));
+      cargarHorariosPublicar(PUB.ficha.cliente || '_sin');
       avisarCambiosPublicar(antes, PUB.ficha);
       /* CLAUDE ACABA DE ESCRIBIR: se pinta YA, aunque haya un campo con el
          cursor (sus textos son justo los que llegan). Antes se esperaba a
@@ -17549,10 +17550,22 @@ async function cargarPublicar(silencio) {
       const dias = PUB.diasResultados || 30;
       const por = PUB.porMejores || 'vistas';
       // por separado: si «lo que mejor funcionó» falla, el resto de Resultados sigue
-      const [res, mej] = await Promise.allSettled([
+      const mes = PUB.mesInforme || '';
+      const [res, mej, pyg, hor, inf] = await Promise.allSettled([
         pedir(rutaPublicar(`/resultados?${consulta({ proyecto: pedido, dias })}`)),
         pedir(rutaPublicar(`/lo-que-funciono?${consulta({ proyecto: pedido, dias, por, cuantos: 5 })}`)),
+        pedir(rutaPublicar(`/palabras-y-ganchos?${consulta({ proyecto: pedido, dias: Math.max(dias, 30) })}`)),
+        pedir(rutaPublicar(`/horarios?${consulta({ proyecto: pedido })}`)),
+        PUB.verInforme ? pedir(rutaPublicar(`/informe?${consulta({ proyecto: pedido, mes })}`)) : Promise.resolve(null),
       ]);
+      if (pedido === PUB.proyectoResultados) {
+        PUB.palabrasGanchos = pyg.status === 'fulfilled' ? pyg.value : { error: pyg.reason.message };
+        PUB.horarios = hor.status === 'fulfilled' ? hor.value : { error: hor.reason.message };
+        if (hor.status === 'fulfilled') (PUB.horariosDe = PUB.horariosDe || {})[pedido] = { datos: hor.value, al: Date.now() };
+        if (PUB.verInforme && mes === (PUB.mesInforme || '')) {
+          PUB.informe = inf.status === 'fulfilled' ? inf.value : { error: inf.reason.message };
+        }
+      }
       // si entretanto se eligió otro proyecto o periodo, esta respuesta ya no vale
       if (pedido === PUB.proyectoResultados && dias === (PUB.diasResultados || 30)) {
         if (mej.status === 'fulfilled' && por === (PUB.porMejores || 'vistas')) PUB.mejores = mej.value;
@@ -18431,6 +18444,7 @@ function bloqueCuandoPublicar() {
       h('input', { type: 'datetime-local', value: PUB.cuandoEnvio, datos: { foco: 'cuando' },
         onchange: ev => { PUB.cuandoEnvio = ev.target.value; } }),
       h('span', { clase: 'meta' }, 'hora de Lima')));
+    b.appendChild(sugerenciasCuandoPublicar(f));
   }
   if (elegido === 'mano') {
     b.appendChild(h('div', { clase: 'meta' },
@@ -19163,6 +19177,7 @@ async function actualizarResultadosPublicar() {
 }
 
 function seccionResultadosPublicar() {
+  if (PUB.verInforme) return seccionInformePublicar();
   const r = PUB.resultados || {};
   const caja = h('div', { clase: 'resultados-publicar' });
   const proyectos = ((PUB.proyectos || {}).proyectos || []);
@@ -19174,6 +19189,8 @@ function seccionResultadosPublicar() {
         h('option', { value: v, selected: (PUB.diasResultados || 30) === v }, t))),
     h('span', { clase: 'crece' }),
     r.mirado ? h('span', { clase: 'meta' }, `cifras de ${fechaCorta(r.mirado)}`) : null,
+    h('button', { clase: 'mini', title: 'El mes de este proyecto, para enseñárselo al cliente (imprimible)',
+      onclick: () => { PUB.verInforme = true; PUB.informe = null; cargarPublicar(); } }, 'Informe del mes'),
     h('button', { clase: 'primario mini', disabled: PUB.midiendo || !(r.clave || {}).puesta,
       title: 'Pide a Upload-Post las cifras de lo publicado y los seguidores de cada cuenta',
       onclick: actualizarResultadosPublicar }, PUB.midiendo ? 'pidiendo…' : 'Actualizar')));
@@ -19195,6 +19212,8 @@ function seccionResultadosPublicar() {
   }
   if (r.periodos) caja.appendChild(bloquePeriodosPublicar(r.periodos));
   caja.appendChild(bloqueMejoresPublicar());
+  caja.appendChild(bloquePalabrasGanchosPublicar());
+  caja.appendChild(bloqueHorariosPublicar());
   const redes = h('div', { clase: 'bloque' }, h('h3', {}, 'Por red'));
   const tabla = h('div', { clase: 'tabla-redes' });
   // las del proyecto, más cualquiera con publicaciones o seguidores
@@ -21465,6 +21484,185 @@ function tarjetaPeriodo(titulo, previo, frente, p) {
     textoRetencion(a) ? h('div', { clase: 'meta' }, textoRetencion(a)) : null,
     h('div', { clase: 'meta' }, `${previo}: ${typeof b.vistas === 'number' ? numeroCorto(b.vistas) : '—'} vistas · `
       + `${b.posts || 0} publicación(es)`));
+}
+
+/* LO QUE SE LEE DE LOS RESULTADOS (publicar-mas): palabras clave y ganchos,
+   horarios por red y el informe del mes. Todo con las cifras ya guardadas
+   (`pasos/publicar_informe.py`): no gasta consultas. */
+async function cargarHorariosPublicar(cid) {
+  PUB.horariosDe = PUB.horariosDe || {};
+  const ya = PUB.horariosDe[cid];
+  if (ya && (ya.cargando || Date.now() - ya.al < 10 * 60 * 1000)) return;
+  PUB.horariosDe[cid] = Object.assign({}, ya || {}, { cargando: true, al: Date.now() });
+  try {
+    const datos = await pedir(rutaPublicar(`/horarios?${consulta({ proyecto: cid })}`));
+    PUB.horariosDe[cid] = { datos, al: Date.now() };
+    if (MODULOS.actual === 'publicar' && PUB.seccion === 'ficha') repintarPublicarSinPisar();
+  } catch (e) { PUB.horariosDe[cid] = { datos: null, al: Date.now() }; }
+}
+
+function usarHoraPublicar(proxima) {
+  PUB.cuandoEnvio = proxima;
+  toast(`Programado para ${proxima.replace('T', ' ')} (aún sin enviar)`);
+  pintarModulo();
+}
+
+function sugerenciasCuandoPublicar(f) {
+  const hor = ((PUB.horariosDe || {})[f.cliente || '_sin'] || {}).datos;
+  const caja = h('div', { clase: 'sugerencias-cuando' });
+  if (!hor || !(f.redes || []).length) return caja;
+  caja.appendChild(h('div', { clase: 'meta' }, 'Buenas horas para publicar:'));
+  (f.redes || []).forEach(red => {
+    const x = (hor.redes || {})[red];
+    if (!x) return;
+    const mejor = (x.mejores || [])[0];
+    const g = x.general || {};
+    caja.appendChild(h('div', { clase: 'fila sugerencia-hora' },
+      h('b', {}, CORTOS_RED[red]),
+      h('span', { clase: 'crece meta' }, mejor
+        ? `${mejor.dia_nombre} hacia las ${mejor.hora} (${mejor.franja}: ${mejor.indice}× lo normal, ${mejor.posts} publicaciones)`
+        : `${g.texto} — punto de partida general, no sale de tus datos`
+          + (x.faltan ? ` (faltan ${x.faltan} publicación(es) con cifras para sugerir con las tuyas)` : '')),
+      h('button', { clase: 'mini', onclick: () => usarHoraPublicar(mejor ? mejor.proxima : g.proxima) }, 'Usar')));
+  });
+  return caja;
+}
+
+function bloquePalabrasGanchosPublicar() {
+  const r = PUB.palabrasGanchos;
+  const b = h('div', { clase: 'bloque palabras-ganchos' }, h('h3', {}, 'Palabras clave y ganchos que funcionaron'));
+  if (!r) { b.appendChild(h('div', { clase: 'meta' }, 'cargando…')); return b; }
+  if (r.error) { b.appendChild(h('div', { clase: 'meta' }, `No se ha podido leer: ${r.error}`)); return b; }
+  if (!(r.palabras || []).length) {
+    b.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay publicaciones con cifras en este periodo.'));
+    return b;
+  }
+  const tabla = h('table', { clase: 'tabla-palabras' },
+    h('thead', {}, h('tr', {}, ...['Palabra clave', 'Publicaciones', 'Vistas (mediana)', 'Vistas en total',
+      'Interacción', 'Redes'].map(t => h('th', {}, t)))));
+  const cuerpo = h('tbody', {});
+  r.palabras.forEach(p => cuerpo.appendChild(h('tr', {},
+    h('td', {}, p.palabra),
+    h('td', {}, String(p.posts)),
+    h('td', {}, numeroCorto(p.mediana)),
+    h('td', {}, numeroCorto(p.vistas)),
+    h('td', {}, typeof p.interaccion === 'number' ? porcentaje(p.interaccion) : '—'),
+    h('td', {}, (p.redes || []).map(x => CORTOS_RED[x] || x).join(', ')))));
+  tabla.appendChild(cuerpo);
+  b.appendChild(h('div', { clase: 'tabla-desliza' }, tabla));
+  b.appendChild(h('div', { clase: 'meta' }, 'Ordenadas por la mediana de vistas: un post que se hizo viral no hace '
+    + `buena a una palabra con diez flojos. La interacción cuenta solo publicaciones con ${r.minimo_vistas} vistas o más.`));
+  if ((r.ganchos || []).length) {
+    b.appendChild(h('h4', {}, 'Las primeras líneas (ganchos) que más vistas trajeron'));
+    r.ganchos.forEach((g, i) => b.appendChild(h('div', { clase: 'fila fila-gancho' },
+      h('b', { clase: 'puesto' }, `${i + 1}.`),
+      h('span', { clase: 'crece gancho-texto' }, `«${g.gancho}»`),
+      h('span', { clase: 'pastilla red-mini ok' }, CORTOS_RED[g.red] || g.red),
+      h('span', { clase: 'meta' }, `${numeroCorto(g.vistas)} vistas`
+        + (typeof g.interaccion === 'number' ? ` · ${porcentaje(g.interaccion)}` : '')),
+      h('button', { clase: 'mini fantasma', title: 'Copiar el gancho', onclick: () => copiarTexto(g.gancho) }, 'Copiar'))));
+  }
+  return b;
+}
+
+function bloqueHorariosPublicar() {
+  const r = PUB.horarios;
+  const b = h('div', { clase: 'bloque horarios-publicar' }, h('h3', {}, 'Cuándo publicar'));
+  if (!r) { b.appendChild(h('div', { clase: 'meta' }, 'cargando…')); return b; }
+  if (r.error) { b.appendChild(h('div', { clase: 'meta' }, `No se ha podido leer: ${r.error}`)); return b; }
+  const delProyecto = ((PUB.proyectos || {}).proyectos || []).find(x => x.id === PUB.proyectoResultados) || {};
+  const redes = Object.keys(NOMBRES_RED).filter(red => redesVisiblesPublicar(delProyecto.ajustes).includes(red)
+    || ((r.redes || {})[red] || {}).posts);
+  redes.forEach(red => {
+    const x = (r.redes || {})[red] || {};
+    const fila = h('div', { clase: 'fila fila-horario' }, h('b', { clase: 'nombre-red' }, NOMBRES_RED[red]));
+    if ((x.mejores || []).length) {
+      fila.appendChild(h('span', { clase: 'crece' }, x.mejores.map(m =>
+        `${m.dia_nombre} ${m.franja} (${m.indice}×, ${m.posts})`).join(' · ')));
+    } else {
+      fila.appendChild(h('span', { clase: 'crece meta' }, `${(x.general || {}).texto || ''} — general`
+        + (x.faltan ? `; con ${x.faltan} publicación(es) más con cifras se sugiere con las tuyas` : '')));
+    }
+    b.appendChild(fila);
+  });
+  b.appendChild(h('div', { clase: 'meta' }, `Con las cifras de los últimos ${r.dias} días, en hora de Lima. «2×» es el doble de `
+    + `vistas que lo normal en esa red. Hace falta un mínimo de ${r.minimo} publicaciones con cifras por red y `
+    + `${r.minimo_hueco} en el mismo día y franja. En la ficha de cada vídeo, «Cuándo» lo propone con «Usar».`));
+  return b;
+}
+
+function seccionInformePublicar() {
+  const r = PUB.informe;
+  const caja = h('div', { clase: 'informe-publicar' });
+  const proyectos = ((PUB.proyectos || {}).proyectos || []);
+  caja.appendChild(h('div', { clase: 'fila no-imprimir' },
+    h('button', { clase: 'mini fantasma', onclick: () => { PUB.verInforme = false; pintarModulo(); } }, '← Resultados'),
+    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; PUB.informe = null; PUB.resultados = null; cargarPublicar(); } },
+      ...proyectos.map(x => h('option', { value: x.id, selected: x.id === PUB.proyectoResultados }, x.nombre))),
+    r && (r.meses || []).length ? h('select', { onchange: ev => { PUB.mesInforme = ev.target.value; PUB.informe = null; cargarPublicar(); } },
+      ...r.meses.map(m => h('option', { value: m, selected: m === r.mes }, m))) : null,
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini', disabled: !r || !!r.error, onclick: () => copiarTexto(r.resumen) }, 'Copiar resumen'),
+    h('button', { clase: 'mini primario', disabled: !r || !!r.error, onclick: () => window.print() }, 'Imprimir o guardar en PDF')));
+  if (!r) { caja.appendChild(h('div', { clase: 'meta' }, 'cargando…')); return caja; }
+  if (r.error) { caja.appendChild(h('div', { clase: 'meta' }, `No se ha podido leer: ${r.error}`)); return caja; }
+  caja.appendChild(h('h2', { clase: 'titulo-informe' }, `${r.nombre}: ${r.nombre_mes}`));
+  caja.appendChild(h('div', { clase: 'meta' }, `Del ${r.desde} al ${r.hasta} · hecho el ${fechaCorta(r.hecho).slice(0, 16)} `
+    + '· cifras de la última vez que se pidieron a cada red'));
+  const t = r.total || {};
+  const a = r.anterior || {};
+  caja.appendChild(h('div', { clase: 'cifras-publicar' },
+    ...[['posts', 'publicaciones'], ['vistas', 'vistas'], ['me_gusta', 'me gusta'],
+      ['comentarios', 'comentarios'], ['compartidos', 'compartidos']].map(([k, nombre]) => {
+      const cambio = variacion(t[k], a[k]);
+      return h('div', { clase: 'cifra' }, h('b', {}, typeof t[k] === 'number' ? numeroCorto(t[k]) : '—'),
+        h('span', { clase: 'meta' }, nombre),
+        cambio ? h('span', { clase: 'meta' }, `${cambio} vs. mes anterior`) : null);
+    })));
+  caja.appendChild(h('div', { clase: 'meta' }, `${r.videos} vídeo(s) · ${r.dias_con_publicacion} día(s) con publicación`
+    + (r.sin_cifras ? ` · ${r.sin_cifras} sin cifras (a mano o redes que no las dan)` : '')));
+  const redes = Object.keys(r.por_red || {});
+  if (redes.length) {
+    const tabla = h('table', { clase: 'tabla-palabras' },
+      h('thead', {}, h('tr', {}, ...['Red', 'Publicaciones', 'Vistas', 'Me gusta', 'Comentarios', 'Seguidores']
+        .map(x => h('th', {}, x)))));
+    const cuerpo = h('tbody', {});
+    redes.forEach(red => {
+      const f = r.por_red[red];
+      const seg = (r.seguidores || {})[red] || {};
+      cuerpo.appendChild(h('tr', {}, h('td', {}, NOMBRES_RED[red] || red), h('td', {}, String(f.posts || 0)),
+        ...['vistas', 'me_gusta', 'comentarios'].map(k => h('td', {}, typeof f[k] === 'number' ? numeroCorto(f[k]) : '—')),
+        h('td', {}, typeof seg.seguidores === 'number' ? numeroCorto(seg.seguidores) : '—')));
+    });
+    tabla.appendChild(cuerpo);
+    caja.appendChild(h('div', { clase: 'bloque' }, h('h3', {}, 'Por red'), h('div', { clase: 'tabla-desliza' }, tabla)));
+  } else {
+    caja.appendChild(h('div', { clase: 'bloque meta' }, 'Nada publicado este mes.'));
+  }
+  if ((r.mejores || []).length) {
+    const b = h('div', { clase: 'bloque' }, h('h3', {}, 'Lo que mejor funcionó'));
+    r.mejores.forEach((p, i) => b.appendChild(h('div', { clase: 'fila fila-mejor' },
+      h('b', { clase: 'puesto' }, `${i + 1}.`), h('span', { clase: 'crece' }, p.nombre),
+      h('span', { clase: 'pastilla red-mini ok' }, CORTOS_RED[p.red] || p.red),
+      h('span', { clase: 'meta' }, textoMetricas(p.metricas)),
+      p.url ? h('a', { href: p.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver') : null)));
+    caja.appendChild(b);
+  }
+  const conPalabra = (r.palabras || []).filter(p => p.palabra !== '(sin palabra clave)');
+  if (conPalabra.length || (r.ganchos || []).length || (r.horario || []).length) {
+    const b = h('div', { clase: 'bloque' }, h('h3', {}, 'Lo que aprendimos'));
+    if (conPalabra.length) b.appendChild(h('div', {}, 'Palabras clave: ' + conPalabra.slice(0, 3)
+      .map(p => `${p.palabra} (${numeroCorto(p.mediana)} vistas de mediana)`).join(' · ')));
+    (r.ganchos || []).slice(0, 3).forEach(g => b.appendChild(h('div', { clase: 'gancho-texto' },
+      `«${g.gancho}» — ${numeroCorto(g.vistas)} vistas en ${CORTOS_RED[g.red] || g.red}`)));
+    if ((r.horario || []).length) {
+      b.appendChild(h('div', {}, `Mejor momento para publicar: ${r.horario[0].dia_nombre} hacia las ${r.horario[0].hora}.`));
+    }
+    caja.appendChild(b);
+  }
+  caja.appendChild(h('details', { clase: 'asi-sale no-imprimir' }, h('summary', {}, 'El resumen en texto (para un correo)'),
+    h('pre', { clase: 'texto-compuesto' }, r.resumen || '')));
+  return caja;
 }
 
 function bloquePeriodosPublicar(periodos) {

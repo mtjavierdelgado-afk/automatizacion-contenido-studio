@@ -15242,6 +15242,56 @@ def publicar_lo_que_funciono(peticion: Request, proyecto: str = Query(default=""
     return P.lo_que_funciono(raiz_proyectos(), _videos_para_publicar(peticion), cid,
                              dias=dias, red=red, por=por, cuantos=cuantos)
 
+# Lo que se lee de los resultados (publicar-mas): palabras y ganchos, horarios
+# y el informe del mes. Solo leen lo guardado; ver `publicar_informe`.
+
+def _publicar_informe():
+    _publicar()
+    import publicar_informe  # noqa: E402  (pasos/ ya esta en sys.path)
+    return publicar_informe
+
+
+def _proyecto_de_lectura(proyecto, peticion):
+    """None (todos los que se pueden ver) o el cid del proyecto ("" = sin proyecto)."""
+    if not proyecto:
+        return None
+    P = _publicar()
+    cid = _proyecto_publicable(proyecto, peticion)
+    return "" if cid == P.SIN_PROYECTO else cid
+
+
+@app.get("/api/publicar/palabras-y-ganchos")
+def publicar_palabras_y_ganchos(peticion: Request, proyecto: str = Query(default=""),
+                                dias: int = Query(default=90)):
+    """Qué palabras clave y qué primeras líneas fueron mejor. No pregunta a nadie."""
+    I = _publicar_informe()
+    cid = _proyecto_de_lectura(proyecto, peticion)
+    return _por_publicar(I.palabras_y_ganchos, raiz_proyectos(), _videos_para_publicar(peticion),
+                         cid, dias=max(7, min(int(dias or 90), 365)))
+
+
+@app.get("/api/publicar/horarios")
+def publicar_horarios(peticion: Request, proyecto: str = Query(default="")):
+    """El mejor día y hora de cada red con lo propio (o el punto de partida
+    general si aún no hay bastante). No pregunta a nadie."""
+    I = _publicar_informe()
+    cid = _proyecto_de_lectura(proyecto, peticion)
+    return _por_publicar(I.horarios, raiz_proyectos(), _videos_para_publicar(peticion), cid)
+
+
+@app.get("/api/publicar/informe")
+def publicar_informe_mensual(peticion: Request, proyecto: str = Query(default=""),
+                             mes: str = Query(default="")):
+    """El informe del mes de un proyecto, para el cliente: {proyecto, mes}."""
+    P = _publicar()
+    I = _publicar_informe()
+    cid = _proyecto_publicable(proyecto or P.SIN_PROYECTO, peticion)
+    nombre = "Vídeos sin proyecto" if cid == P.SIN_PROYECTO else _nombres_de_clientes().get(cid, cid)
+    clave = "" if cid == P.SIN_PROYECTO else cid
+    return _por_publicar(I.informe_mensual, raiz_proyectos(), _videos_para_publicar(peticion),
+                         clave, mes=mes or None, nombre=nombre)
+
+
 # ------------------------------------------------------- PUBLICAR: el SEO
 # Rama `publicar-seo` (18-10-2026): «Optimizar SEO», «Dame 3 ganchos»,
 # «Proponer palabras clave» y la palabra clave para el Encargo. Las tres

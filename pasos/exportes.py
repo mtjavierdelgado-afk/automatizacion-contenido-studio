@@ -221,7 +221,8 @@ def _planos_sin_subtitulos(proyecto, m, trabajo, avisar, estado=None):
     movimientos = {x["id"]: x for x in datos_mov.get("movimientos", []) if x.get("id")}
     escenas = m["escenas"]
     fps = m["fps"]
-    cortes = p8_render.transiciones.resolver(escenas, p, semilla=(m["plan"].get("semilla") or 0))
+    cortes = p8_render.transiciones.resolver(escenas, p, semilla=(m["plan"].get("semilla") or 0),
+                                             montaje=datos_mov.get("montaje"))
     ancho, alto = [int(v) for v in (m["plan"].get("resolucion") or p["resolucion"])]
     dir_clips = os.path.join(trabajo, "clips")
     dir_ultimo = os.path.join(trabajo, "ultimo")
@@ -249,8 +250,10 @@ def _planos_sin_subtitulos(proyecto, m, trabajo, avisar, estado=None):
                 svg = fh.read()
         tareas.append({
             "id": sid, "escena": {"id": sid, "t_in": escena["t_in"], "t_out": escena["t_out"]},
-            "mov": {"ventana_ini": mov["ventana_ini"], "ventana_fin": mov["ventana_fin"],
-                    "hyperframe_px": mov.get("hyperframe_px")},
+            "mov": dict({"ventana_ini": mov["ventana_ini"], "ventana_fin": mov["ventana_fin"],
+                         "hyperframe_px": mov.get("hyperframe_px")},
+                        # el trayecto del montaje (camara por tramos), si lo hay
+                        **({"trayecto": mov["trayecto"]} if mov.get("trayecto") else {})),
             # la cartela y la cabecera se quedan (son contenido); el subtitulo no
             "capa": svg, "capa_fija": "",
             "hyper": hyper,

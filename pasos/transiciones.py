@@ -246,7 +246,12 @@ def _sin_repetir_familia(bolsa, arranque, familias_recientes):
     return (libres or orden)[0]
 
 
-def resolver(escenas, params=None, semilla=0):
+#: Con movimiento DINAMICO las transiciones que quedan (los acentos) van mas
+#: cortas: en un montaje a cortes secos, un encadenado de medio segundo frena.
+FACTOR_DINAMICO = 0.75
+
+
+def resolver(escenas, params=None, semilla=0, montaje=None):
     """Que transicion concreta lleva cada plano. Determinista.
 
     Devuelve {id_de_plano: {"tipo","shader","duracion","ranura"}}. El primer
@@ -255,11 +260,19 @@ def resolver(escenas, params=None, semilla=0):
     Determinista igual que el reparto de cartas: rehacer el render de un plano
     suelto no puede cambiarle la transicion a otro, o el video se descuadra por
     haber tocado algo que estaba bien.
+
+    `montaje` es el del video (`camara.normalizar_montaje`, lo deja callouts en
+    movimiento.json). Con movimiento DINAMICO los cambios de plano van EN SECO
+    --como se monta un Reel-- y solo los acentos (cada pocos planos, en un
+    final de frase) llevan transicion, mas corta. Sin montaje, lo de siempre.
     """
     p = params or {}
     elegidas = elegidas_de(p)
     suaves, acentos = _bolsas(elegidas)
     base = float(p.get("duracion_transicion") or 0.4)
+    secos = str((montaje or {}).get("movimiento") or "") == "dinamico"
+    if secos:
+        base *= FACTOR_DINAMICO
 
     salida, familias = {}, []
     for indice, escena in enumerate(escenas or []):
@@ -285,7 +298,7 @@ def resolver(escenas, params=None, semilla=0):
             if isinstance(escena.get("cartela"), dict) else False)
         # El primer plano si es un corte, y no por gusto: no hay nada de lo que
         # venir. Eso no es una transicion retirada, es la ausencia de una.
-        if indice == 0 or sigue:
+        if indice == 0 or sigue or (secos and ranura != "acento"):
             salida[sid] = {"tipo": "corte", "shader": None, "duracion": 0.0,
                            "ranura": "corte"}
             continue

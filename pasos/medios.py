@@ -535,6 +535,24 @@ def numeros_dichos(palabras_llanas, idioma=None, cortes=None):
             return True
         return any(list(palabras[j:j + len(cola)]) == list(cola) for cola in colas)
 
+    def _enlace_suma(antes, sigue):
+        """¿Este «y»/«and» une las dos cifras o separa dos? -> bool
+
+        SOLO UNE DETRAS DE UNA DECENA REDONDA o de un multiplicador: «treinta y
+        cuatro» es 34 y «two hundred and five» es 205. Detras de cualquier otra
+        cosa la conjuncion separa DOS numeros: «entre veintitres y veinticinco
+        centimetros» salia «entre 48 centimetros» en el subtitulo (18-10-2026),
+        porque se sumaban. Una decena va con una unidad (1-9); un multiplicador,
+        con lo que quede por debajo de el.
+        """
+        despues = numero(sigue)
+        if antes in multiplos:
+            return (despues is not None and despues < multiplos[antes]) \
+                or sigue in multiplos
+        valor = numero(antes)
+        return (valor is not None and despues is not None and valor >= 20
+                and valor % 10 == 0 and valor < 100 and 1 <= despues <= 9)
+
     salida, i = [], 0
     while i < len(palabras):
         if palabras[i] in _DEBILES and not empieza_la_debil(i):
@@ -562,7 +580,7 @@ def numeros_dichos(palabras_llanas, idioma=None, cortes=None):
                     actual += 0.5
                     j += salto
                     continue
-                if visto and (numero(sigue) is not None or sigue in multiplos):
+                if visto and _enlace_suma(palabras[j - 1], sigue):
                     j += 1
                     continue
                 break

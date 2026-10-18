@@ -2874,8 +2874,13 @@ def estimar_video(cuerpo: dict = Body(default=None)):
     # CUANTOS PLANOS: la duracion entre la duracion media de un plano, que esta
     # MEDIDA por ritmo. El modo light manda su ritmo; el editor manda la
     # horquilla que tenga escrita en assets y aqui se busca el ritmo parecido.
-    if datos.get("ritmo"):
-        ficha_ritmo = light.ritmo_de(datos.get("ritmo"))
+    # UN VIDEO CORTO NUEVO nace en ritmo rapido si su estilo va mas lento
+    # (`presets_light.ritmo_para_video_nuevo`): con `ritmo_corto` la pantalla
+    # pregunta por el video que va a nacer, no por el estilo.
+    corto = (light.ritmo_para_video_nuevo(segundos, datos.get("max_s"))
+             if datos.get("ritmo_corto") and not datos.get("ritmo") else None)
+    if datos.get("ritmo") or corto:
+        ficha_ritmo = light.ritmo_de(datos.get("ritmo") or corto)
     else:
         ficha_ritmo = light.ritmo_parecido(datos.get("min_s"), datos.get("max_s"))
     media = max(0.5, float(ficha_ritmo["media_s"]))
@@ -6904,7 +6909,9 @@ def leer_transiciones(pid: str):
     # copias del mismo texto.
     plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
     escenas = plan.get("escenas") or []
-    reparto = trans.resolver(escenas, render, semilla=(plan.get("semilla") or 0))
+    reparto = trans.resolver(escenas, render, semilla=(plan.get("semilla") or 0),
+                             montaje=PASOS_MODULOS.camara.normalizar_montaje(
+                                 (ctx.estado.params("callouts") or {}).get("montaje")))
     ficha["reparto"] = {sid: {k: v for k, v in corte.items() if k != "shader"}
                         for sid, corte in reparto.items()}
     return ficha
@@ -7554,6 +7561,110 @@ def cambiar_subtitulos(pid: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(409, "el vídeo se está montando ahora: cámbialo cuando termine")
     cambiado = _aplicar_subtitulos(ctx, _cuerpo(cuerpo))
     return {"cambiado": cambiado, "estado": ctx.estado.estado_de("callouts")}
+
+
+# ------------------------------------------------- el montaje (18-10-2026)
+# Movimiento de camara, subtitulos de redes, gancho, cifras y barra
+# (`callouts.montaje`, ver pasos/camara.py) y las transiciones que entran
+# (`render.transiciones`). Nada de esto toca una imagen: cambiarlo deja
+# pendientes las capas y el montaje, que se rehacen gratis.
+
+@app.get("/api/montaje")
+def datos_del_montaje():
+    """Lo que la pantalla necesita para elegir el montaje antes de que exista
+    el video: el de los cortos, el de siempre, hasta cuanto es corto y el
+    catalogo de transiciones con su GLSL para las muestras."""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    camara = PASOS_MODULOS.camara
+    trans = PASOS_MODULOS.transiciones
+    ficha = trans.catalogo_para_pantalla(None)
+    ficha.update({
+        "montaje_cortos": camara.normalizar_montaje(camara.MONTAJE_CORTOS),
+        "montaje_siempre": dict(camara.MONTAJE_DE_SIEMPRE),
+        "duracion_corta_s": camara.DURACION_CORTA_S,
+        "niveles": list(camara.NIVELES),
+        "acento": trans.acentos(None)})
+    return ficha
+
+
+@app.get("/api/proyectos/{pid}/montaje")
+def leer_montaje(pid: str):
+    """El montaje de este video, las transiciones elegidas y si esta aplicado."""
+    ctx = contexto(pid)
+    camara = PASOS_MODULOS.camara
+    callouts = ctx.estado.params("callouts") or {}
+    render = ctx.estado.params("render") or {}
+    return {"montaje": camara.normalizar_montaje(callouts.get("montaje")),
+            "elegido": bool(callouts.get("montaje")),
+            "transiciones": list(render.get("transiciones") or []),
+            "niveles": list(camara.NIVELES),
+            "montado": bool(_ruta_de_version(ctx, "render", "video.mp4")),
+            "pendiente": (ctx.estado.estado_de("callouts") == "obsoleto"
+                          or ctx.estado.estado_de("render") == "obsoleto")}
+
+
+@app.put("/api/proyectos/{pid}/montaje")
+def cambiar_montaje(pid: str, cuerpo: dict = Body(default=None)):
+    """{montaje?: {movimiento, subtitulos, gancho, cifras, barra}, transiciones?: [..]}
+
+    Solo se escribe lo que cambia, y lo que vuelve a ser lo de siempre QUITA la
+    clave (regla 1). Deja pendientes las capas y el montaje; se aplica con
+    `POST .../montaje/aplicar` o al montar.
+    """
+    ctx = contexto(pid)
+    camara = PASOS_MODULOS.camara
+    if _trabajo_activo(ctx, "callouts") or _trabajo_activo(ctx, "render"):
+        raise ErrorApi(409, "el vídeo se está montando ahora: cámbialo cuando termine")
+    datos = _cuerpo(cuerpo)
+    cambiado = False
+    if datos.get("montaje") is not None:
+        try:
+            pedido = camara.normalizar_montaje(
+                dict(camara.normalizar_montaje((ctx.estado.params("callouts") or {}).get("montaje")),
+                     **datos["montaje"]) if isinstance(datos["montaje"], dict) else datos["montaje"],
+                estricto=True)
+        except ValueError as fallo:
+            raise ErrorApi(400, f"montaje: {fallo}")
+        guardar = camara.para_guardar(pedido)
+        with ctx.estado._lock:
+            params = copy.deepcopy(ctx.estado.params("callouts") or {})
+            if params.get("montaje") != guardar:
+                if guardar:
+                    params["montaje"] = guardar
+                else:
+                    params.pop("montaje", None)
+                ctx.estado.set_params("callouts", params)
+                cambiado = True
+    if datos.get("transiciones") is not None:
+        nuevas = _transiciones_validas(datos["transiciones"])
+        with ctx.estado._lock:
+            params = copy.deepcopy(ctx.estado.params("render") or {})
+            if list(params.get("transiciones") or []) != nuevas:
+                if nuevas:
+                    params["transiciones"] = nuevas
+                else:
+                    params.pop("transiciones", None)
+                ctx.estado.set_params("render", params)
+                cambiado = True
+    if cambiado:
+        ctx.bitacora.anotar("montaje_cambiado", "callouts", {
+            "montaje": datos.get("montaje"), "transiciones": datos.get("transiciones")})
+    return dict(leer_montaje(pid), cambiado=cambiado)
+
+
+@app.post("/api/proyectos/{pid}/montaje/aplicar", status_code=202)
+def aplicar_montaje(pid: str):
+    """Rehace las capas y vuelve a montar el video con el montaje nuevo. Ni una imagen."""
+    ctx = contexto(pid)
+    if not _ruta_de_version(ctx, "render", "video.mp4"):
+        raise ErrorApi(409, "este vídeo todavía no está montado: se aplicará al montarlo")
+    if _trabajo_activo(ctx, "callouts") or _trabajo_activo(ctx, "render"):
+        raise ErrorApi(409, "el vídeo ya se está montando")
+    trabajo_id = ctx.gestor.lanzar("montaje", _correr_rehacer_montaje, ctx,
+                                   ["callouts", "render"], paso="render")
+    _registrar_trabajo(trabajo_id, ctx.id)
+    return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id)}
 
 
 def _correr_rehacer_montaje(avisar, ctx, tareas, solo_montar=False):
@@ -12654,6 +12765,14 @@ NOMBRES_PARTE = {"estilo": "Estilo gráfico", "tono": "Tono del guion",
 #: claves que el preset escribe pero que en un video ya creado son SUYAS
 PROPIAS_DEL_VIDEO = {"brief": ("duracion_objetivo_s", "formato")}
 
+#: Un corto nace en ritmo rapido aunque su estilo vaya mas lento
+#: (`_montaje_al_crear`), y lo apunta en la config. Esas claves son entonces
+#: del VIDEO: sin esto el estilo diria «tiene cambios» en cada corto nuevo y
+#: «Traer» le devolveria el ritmo lento sin que nadie lo pidiera.
+CONFIG_RITMO_DEL_VIDEO = "ritmo_del_video"
+CLAVES_DEL_RITMO = {"assets": ("min_s", "max_s", "min_s_rotulos"),
+                    "voz": ("hueco_minimo",)}
+
 
 def _cambios_de_parte(ctx, ficha, parte):
     """{paso: {clave: valor}} con SOLO lo que de verdad cambiaria."""
@@ -12668,6 +12787,8 @@ def _cambios_de_parte(ctx, ficha, parte):
     cambios = {}
     for paso, valores in crudos.items():
         fuera = PROPIAS_DEL_VIDEO.get(paso, ())
+        if ctx.proyecto.config.get(CONFIG_RITMO_DEL_VIDEO):
+            fuera = tuple(fuera) + CLAVES_DEL_RITMO.get(paso, ())
         distintos = {k: v for k, v in valores.items()
                      if k not in fuera and (actuales.get(paso) or {}).get(k) != v}
         if distintos:
@@ -13769,6 +13890,8 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     # LO QUE LLEVA, validado ANTES de crear nada: un «lleva» que no vale se
     # dice ahora, y no con el video ya creado a medias
     lleva = _normalizar_lleva(datos["lleva"]) if datos.get("lleva") is not None else {}
+    # Y EL MONTAJE (movimiento, subtitulos de redes...), por lo mismo
+    montaje_pedido = _montaje_pedido_al_crear(datos)
 
     nombre = str(datos.get("nombre") or "").strip()
     if not nombre:
@@ -13810,6 +13933,7 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     if lleva:
         _aplicar_lleva(ctx, lleva, al_crear=True)
     avisos += _opciones_al_crear(ctx, preset_id, datos.get("opciones") or {})
+    avisos += _montaje_al_crear(ctx, datos, montaje_pedido)
     ctx.bitacora.anotar("video_light_creado", None, {
         "preset": preset_id, "estilo": ficha_preset.get("nombre"),
         "nombre": nombre, "avisos": avisos})
@@ -13818,6 +13942,82 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
             "aplicado": aplicado.get("pasos") or [],
             "avisos": avisos,
             "pasos": [ficha_paso(ctx, p["id"]) for p in PASOS]}
+
+
+def _montaje_pedido_al_crear(datos):
+    """El montaje y las transiciones que pide el encargo, validados. -> dict
+
+    {"montaje": dict|None, "transiciones": [..]|None, "ritmo": "estilo"|None}.
+    `montaje` None es «no ha dicho nada»: un video corto nace entonces con el
+    de los cortos (`camara.MONTAJE_CORTOS`) y uno largo con el de siempre.
+    """
+    camara = PASOS_MODULOS.camara
+    opciones = datos.get("opciones") if isinstance(datos.get("opciones"), dict) else {}
+    salida = {"montaje": None, "transiciones": None, "ritmo": None}
+    if opciones.get("montaje") is not None:
+        try:
+            salida["montaje"] = camara.normalizar_montaje(opciones["montaje"], estricto=True)
+        except ValueError as fallo:
+            raise ErrorApi(400, f"montaje: {fallo}")
+    if opciones.get("transiciones") is not None:
+        salida["transiciones"] = _transiciones_validas(opciones["transiciones"])
+    ritmo = str(opciones.get("ritmo") or "").strip().lower()
+    if ritmo and ritmo not in ("estilo", "rapido"):
+        raise ErrorApi(400, "ritmo: «estilo» o «rapido»")
+    salida["ritmo"] = ritmo or None
+    return salida
+
+
+def _transiciones_validas(lista):
+    """Las transiciones pedidas, contra el catalogo. -> [ids] (vacia = las de fabrica)"""
+    if not isinstance(lista, list):
+        raise ErrorApi(400, "transiciones: una lista de nombres")
+    catalogo = PASOS_MODULOS.transiciones.CATALOGO
+    malas = [str(x) for x in lista if str(x) not in catalogo or str(x) == "corte"]
+    if malas:
+        raise ErrorApi(400, "transiciones que no existen: " + ", ".join(malas[:5]))
+    vistas = []
+    for nombre in lista:
+        if str(nombre) not in vistas:
+            vistas.append(str(nombre))
+    return vistas
+
+
+def _montaje_al_crear(ctx, datos, pedido):
+    """El montaje de un video NUEVO, escrito al nacer. -> avisos
+
+    Un video de hasta 2 minutos nace con el montaje de los cortos (movimiento
+    vivo, subtitulos de redes, gancho, cifras y barra) y en ritmo rapido si su
+    estilo va mas lento, salvo que el encargo diga otra cosa. Uno largo, con lo
+    de siempre. Es un video nuevo: escribir aqui no deja nada obsoleto, y lo
+    que es igual a lo de siempre NO se escribe (regla 1).
+    """
+    camara = PASOS_MODULOS.camara
+    light = _light()
+    avisos = []
+    segundos = datos.get("duracion_objetivo_s")
+    try:
+        corto = 0 < float(segundos or 0) <= camara.DURACION_CORTA_S
+    except (TypeError, ValueError):
+        corto = False
+    montaje = pedido.get("montaje")
+    if montaje is None and corto:
+        montaje = camara.normalizar_montaje(camara.MONTAJE_CORTOS)
+    guardar = camara.para_guardar(montaje) if montaje is not None else None
+    if guardar:
+        ctx.estado.actualizar_params("callouts", {"montaje": guardar})
+    if pedido.get("transiciones"):
+        ctx.estado.actualizar_params("render", {"transiciones": pedido["transiciones"]})
+    if corto and pedido.get("ritmo") != "estilo":
+        assets = ctx.estado.params("assets") or {}
+        ritmo = light.ritmo_para_video_nuevo(segundos, assets.get("max_s"))
+        if ritmo:
+            for paso, valores in light.params_de_ritmo(ritmo).items():
+                ctx.estado.actualizar_params(paso, valores)
+            ctx.proyecto.config[CONFIG_RITMO_DEL_VIDEO] = ritmo
+            ctx.proyecto.guardar_config()
+            ctx.bitacora.anotar("ritmo_de_corto", "assets", {"ritmo": ritmo})
+    return avisos
 
 
 def _opciones_al_crear(ctx, preset_id, opciones):

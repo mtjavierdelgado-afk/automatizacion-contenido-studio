@@ -512,6 +512,8 @@ GUIAS = {
             "acepta «<» ni «>»: se quitan solos.",
             "Las dos primeras líneas son las que se ven en la búsqueda y debajo "
             "del vídeo sin desplegar.",
+            "Las etiquetas de YouTube las pone el Studio: la palabra clave del vídeo, "
+            "la del proyecto y las secundarias (SEO de este proyecto), y los hashtags.",
         ],
         "si": [
             "En las dos primeras líneas, la palabra clave y qué va a aprender o "
@@ -873,11 +875,144 @@ GUIAS = {
             "MIS NOTAS:\n[pega aquí tus notas]"
         ),
     },
+    # El SEO de Publicar (rama `publicar-seo`, 18-10-2026). Lo usan
+    # `pasos/publicar_seo.py` (bloque_instruccion, nota, campos_extra) y
+    # `publicar.componer`: si cambia lo que hacen estos campos, se revisan.
+    "palabra_clave": {
+        "titulo": "Palabra clave (SEO)",
+        "donde": "Publicar → Cuentas y ajustes → SEO de este proyecto, y la ficha de cada vídeo",
+        "usa": "pasos/publicar_seo.py (bloque_instruccion, nota, etiquetas_youtube, nombre_fichero)",
+        "que_hace": [
+            "Es la frase por la que quieres que te ENCUENTREN. Claude la pone en la "
+            "primera línea de cada red, al principio del título de YouTube y "
+            "Facebook y otra vez en las dos primeras líneas de la descripción de "
+            "YouTube.",
+            "La del proyecto vale para todos sus vídeos; la de un vídeo (en su ficha) "
+            "manda sobre ella. Al escribir los textos, Claude propone una más "
+            "concreta para ese vídeo, y tú la aceptas o no.",
+            "También va en las etiquetas de YouTube y en el nombre con el que se sube "
+            "el MP4. La nota SEO de cada red mira si está donde tiene que estar.",
+        ],
+        "si": [
+            "Una frase de 2 a 6 palabras, como la escribiría tu cliente en el "
+            "buscador: «alquiler de consolas en Lima».",
+            "Las secundarias, de 2 a 8: los servicios o los momentos concretos "
+            "(«fiestas infantiles», «eventos corporativos»).",
+            "La zona tal como la busca la gente: ciudad, país y distritos si importan.",
+        ],
+        "no": [
+            "Una sola palabra suelta («consolas»): compite con todo el mundo.",
+            "Frases que nadie escribe («soluciones lúdicas integrales»).",
+            "Repetir la misma palabra clave en todos los vídeos si cada uno va de "
+            "otra cosa: para eso está la de cada vídeo.",
+        ],
+        "plantilla": (
+            "PRINCIPAL: [lo que haces] en [ciudad]\n"
+            "SECUNDARIAS: [servicio 1], [servicio 2], [momento o público]\n"
+            "ZONA: [ciudad, país (distritos)]"
+        ),
+        "ejemplo": (
+            "PRINCIPAL: alquiler de consolas en Lima\n"
+            "SECUNDARIAS: fiestas infantiles, eventos corporativos, simulador de "
+            "carreras, karaoke para fiestas\n"
+            "ZONA: Lima, Perú (Miraflores, Surco, San Borja)"
+        ),
+        "prompt_ia": (
+            "Quiero las palabras clave SEO de mi negocio para vídeos en TikTok, "
+            "Instagram, YouTube y Facebook. Dame: una PRINCIPAL (2 a 6 palabras, "
+            "como la escribiría mi cliente en el buscador), de 3 a 8 SECUNDARIAS y la "
+            "ZONA. Sin inventar servicios que no ofrezco.\n\nMI NEGOCIO:\n[qué "
+            "haces, para quién y dónde]"
+        ),
+    },
+    "ubicacion_instagram": {
+        "titulo": "Ubicación de Instagram",
+        "donde": "Publicar → Cuentas y ajustes → SEO de este proyecto → Instagram",
+        "usa": "pasos/publicar_seo.py (campos_extra: location_id)",
+        "que_hace": [
+            "Instagram etiqueta el Reel con un lugar: sale en la búsqueda de ese sitio "
+            "y ayuda a que lo vea gente de la zona.",
+            "Upload-Post pide el NÚMERO del lugar (el id de un Lugar o de una Página "
+            "de Facebook), no su nombre. El nombre de al lado es solo para leerlo "
+            "aquí.",
+        ],
+        "si": [
+            "Busca el lugar en Facebook (tu propia Página de empresa con dirección, "
+            "o la ciudad). En su página, «Información» o la dirección de la web: el "
+            "número largo es el id (facebook.com/…-106042326099451).",
+            "Pega solo las cifras.",
+        ],
+        "no": [
+            "El nombre del lugar o el enlace entero: solo el número.",
+            "Una ubicación que no es donde trabajas.",
+        ],
+        "plantilla": "[solo cifras, de 5 a 25]",
+        "ejemplo": "106042326099451",
+        "prompt_ia": (
+            "¿Cómo encuentro el id numérico de la Página de Facebook de mi empresa (o "
+            "de mi ciudad) para usarlo como ubicación de Instagram en una API? "
+            "Explícamelo paso a paso desde el navegador.\n\nMI PÁGINA O CIUDAD:\n[nombre]"
+        ),
+    },
+    "categoria_youtube": {
+        "titulo": "Categoría e idioma en YouTube",
+        "donde": "Publicar → Cuentas y ajustes → SEO de este proyecto → YouTube",
+        "usa": "pasos/publicar_seo.py (campos_extra: categoryId, defaultLanguage, defaultAudioLanguage)",
+        "que_hace": [
+            "La categoría le dice a YouTube con qué vídeos se parece el tuyo: ayuda a "
+            "que lo recomiende al lado de los parecidos.",
+            "El idioma del título y la descripción y el del audio le dicen a quién "
+            "enseñarlo. «Español de Latinoamérica» es el de Perú.",
+        ],
+        "si": [
+            "La categoría de lo que se VE en el vídeo: un alquiler para fiestas es "
+            "«Entretenimiento» o «Viajes y eventos»; un tutorial, «Consejos y estilo» "
+            "o «Educación»; partidas de videojuegos, «Videojuegos».",
+            "El audio en «Español de Latinoamérica» si la voz es de aquí.",
+        ],
+        "no": [
+            "Cambiar la categoría en cada vídeo sin motivo: el canal se lee mejor si es "
+            "constante.",
+        ],
+        "plantilla": "CATEGORÍA: [la más parecida] · IDIOMA: es · AUDIO: es-419",
+        "ejemplo": "CATEGORÍA: Entretenimiento · IDIOMA: es · AUDIO: es-419",
+        "prompt_ia": (
+            "¿Qué categoría de YouTube encaja mejor con un canal que publica estos "
+            "vídeos? Dame una y por qué.\n\nMIS VÍDEOS:\n[de qué van]"
+        ),
+    },
+    "hecho_para_ninos": {
+        "titulo": "«Hecho para niños» en YouTube",
+        "donde": "Publicar → Cuentas y ajustes → SEO de este proyecto → YouTube",
+        "usa": "pasos/publicar_seo.py (campos_extra: selfDeclaredMadeForKids)",
+        "que_hace": [
+            "Es una declaración legal: el vídeo está pensado PARA que lo vean niños. "
+            "YouTube le quita los comentarios, las notificaciones, la lista de "
+            "reproducción final y casi toda la publicidad personalizada, y le baja "
+            "mucho el alcance.",
+            "Viene apagado de fábrica.",
+        ],
+        "si": [
+            "Márcalo solo si quien va a VER el vídeo es un niño (dibujos, canciones "
+            "infantiles, juegos para niños).",
+        ],
+        "no": [
+            "Un vídeo para PADRES que contratan una fiesta infantil NO es para niños: "
+            "va a adultos aunque salgan niños o se hable de cumpleaños.",
+        ],
+        "plantilla": "¿Lo ve un niño? sí → marcar · no (padres, empresas) → no marcar",
+        "ejemplo": "Alquiler de consolas para cumpleaños, dirigido a padres → NO marcar",
+        "prompt_ia": (
+            "Según la normativa de YouTube (COPPA), ¿este vídeo es «hecho para "
+            "niños»? Explícame por qué.\n\nEL VÍDEO:\n[de qué va y a quién se dirige]"
+        ),
+    },
 }
 
 ORDEN = ("estilo_grafico", "tono", "voz", "material", "indicaciones", "cta",
          "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
-         "tono_redes", "guion_parrilla", "pedir_guiones")
+         "tono_redes", "guion_parrilla", "pedir_guiones",
+         "palabra_clave", "ubicacion_instagram", "categoria_youtube", "hecho_para_ninos")
 
 
 

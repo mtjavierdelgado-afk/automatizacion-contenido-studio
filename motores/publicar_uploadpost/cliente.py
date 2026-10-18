@@ -123,9 +123,12 @@ class _Multipart:
                 (f"--{self.limite}\r\n"
                  f'Content-Disposition: form-data; name="{nombre}"\r\n\r\n'
                  f"{valor}\r\n").encode("utf-8"))
-        for nombre, ruta in ficheros:
+        for fichero in ficheros:
+            # (campo, ruta) o (campo, ruta, nombre con el que se sube)
+            nombre, ruta = fichero[0], fichero[1]
+            subido = fichero[2] if len(fichero) > 2 and fichero[2] else os.path.basename(ruta)
             tipo = mimetypes.guess_type(ruta)[0] or "application/octet-stream"
-            base = os.path.basename(ruta).replace('"', "")
+            base = re.sub(r'["\r\n\\]', "", str(subido))[:120] or "video.mp4"
             self._partes.append(
                 (f"--{self.limite}\r\n"
                  f'Content-Disposition: form-data; name="{nombre}"; filename="{base}"\r\n'
@@ -309,7 +312,7 @@ class ClienteUploadPost:
     # ---------------------------------------------------------------- publicar
 
     def publicar(self, perfil, redes, mp4, campos, cuando=None, zona="America/Lima",
-                 id_propio=None, ficheros=None):
+                 id_propio=None, ficheros=None, nombre_video=None):
         """Sube el MP4 a las redes pedidas, ya o programado.
 
         `campos` son los campos de formulario de Upload-Post tal cual
@@ -339,7 +342,7 @@ class ClienteUploadPost:
             pares.append(("async_upload", "true"))
         pares += [("request_id", id_propio), ("external_id", id_propio)]
         extra = [(c, r) for c, r in (ficheros or []) if r and os.path.isfile(r)]
-        cuerpo = _Multipart(pares, [("video", mp4)] + extra)
+        cuerpo = _Multipart(pares, [("video", mp4, nombre_video)] + extra)
         r = self._pedir("POST", "/api/upload", multipart=cuerpo,
                         cabeceras={"Idempotency-Key": id_propio},
                         plazo=PLAZO_SUBIDA_S)

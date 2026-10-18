@@ -365,6 +365,26 @@ enviar no se puede quitar.
    publicado con su enlace, falló con su motivo). Si una red falla, las demás
    siguen. Lo programado se puede **Cancelar**.
 
+**El SEO** (que te encuentren):
+- En **Cuentas y ajustes → SEO de este proyecto**: la **palabra clave
+  principal**, las **secundarias**, la **zona**, las palabras a evitar y el
+  **banco de hashtags** (amplios, de nicho y locales). **Proponer palabras
+  clave** te las sugiere Claude con su porqué; tú eliges cuáles usar. Ahí van
+  también la **ubicación de Instagram** (el número del Lugar o la Página de
+  Facebook: mira su ✦ Guía), la **categoría e idiomas de YouTube**, **Hecho
+  para niños** (apagado salvo que el vídeo sea PARA niños), la ubicación de
+  TikTok y si tu cuenta de TikTok tiene las funciones de ubicación y de
+  comentarios (sin ellas no se mandan).
+- En la **ficha**, el bloque **SEO**: la **palabra clave de este vídeo** (si
+  la dejas vacía vale la del proyecto; Claude propone una y la pones con
+  «Usarla»), el nombre con el que se sube el MP4 y **Optimizar SEO con
+  Claude**: su propuesta sale campo a campo con el antes y el después;
+  **Aceptar**, **Aceptar todo** o **Dejar el mío**. Si cambias un texto
+  después de pedirla, ese campo no se pisa: vuelve a pedirla.
+- En cada red, la **nota SEO** (de 0 a 100, con lo que está bien y lo que no),
+  el **primer comentario**, **Dame 3 ganchos** (tres primeras líneas para
+  elegir) y, en Instagram, **colaboradores** y **etiquetas**.
+
 **Después de publicar** la ficha se queda donde estaba, para seguir con las
 otras redes: arriba dice **Ya publicado en** (con el enlace a cada post) y
 **En camino** (lo programado o subiendo), y al lado de cada red su último

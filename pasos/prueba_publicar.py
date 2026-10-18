@@ -787,6 +787,24 @@ def prueba_studio():
         ok(os.path.isfile(os.path.join(raiz, "_sistema", "publicar", "videos", "fiesta.json")),
            "vive en _sistema/publicar")
 
+        # --- SEO por HTTP
+        p = s.get(base + "/api/publicar/proyectos").json()
+        ok(("24", "Entretenimiento") in [tuple(x) for x in p["seo_opciones"]["categorias"]],
+           "las categorías de YouTube, con su nombre en castellano")
+        igual(s.put(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}", json={"ig_ubicacion": "Lima"}).status_code,
+              400, "una ubicación de Instagram que no es un número se rechaza por HTTP")
+        s.put(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}", json={"palabra_clave": "consolas en Lima"})
+        r = s.post(base + "/api/publicar/videos/fiesta/optimizar", json={"redes": ["tiktok"]})
+        igual(r.status_code, 202, "«Optimizar SEO con Claude» se lanza")
+        f = _esperar(s, base + "/api/publicar/videos/fiesta",
+                     lambda d: not d["seo"]["trabajando"].get("optimizar"))
+        ok("tiktok" in f["seo"]["propuesta"].get("redes", {}), "y deja su propuesta en la ficha")
+        ok(f["seo"]["notas"]["tiktok"]["puntos"], "la ficha trae la nota SEO de cada red")
+        igual(s.post(base + "/api/publicar/videos/fiesta/ganchos", json={"red": "tiktok"}).status_code, 202,
+              "«Dame 3 ganchos» se lanza")
+        r = s.post(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/palabras")
+        igual(r.status_code, 202, "«Proponer palabras clave» se lanza")
+
         # --- proyecto con clave
         r = s.post(base + "/api/clientes", json={"nombre": "Cliente secreto"})
         cid = r.json()["cliente"]["id"]
@@ -1404,6 +1422,154 @@ def prueba_retencion_y_resumenes():
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 
 
+def prueba_seo():
+    """publicar-seo (18-10-2026): la palabra clave, los campos que van a cada
+    red, la nota SEO, y que «Optimizar» no pise lo editado."""
+    seccion("9] SEO: palabra clave, campos por red, nota y optimizar")
+    S = P.SEO
+    raiz = os.path.join(CARPETA, "seo")
+    os.makedirs(raiz)
+    ajustes = dict(P.AJUSTES_DEFECTO, palabra_clave="alquiler de consolas en Lima",
+                   secundarias="fiestas infantiles, eventos corporativos", zona="Lima, Perú",
+                   ig_ubicacion="106042326099451", tt_ubicacion_id="lima123",
+                   tt_ubicacion_nombre="Lima", yt_categoria="24")
+    # --- ajustes
+    for malo, que in (({"ig_ubicacion": "Lima"}, "una ubicación de Instagram que no es un número"),
+                      ({"yt_categoria": "99"}, "una categoría de YouTube que no existe"),
+                      ({"yt_para_ninos": "no"}, "«hecho para niños» que no es sí o no")):
+        try:
+            P.guardar_ajustes(raiz, "cl_s", malo)
+            ok(False, f"{que} se rechaza")
+        except P.ErrorPublicar:
+            ok(True, f"{que} se rechaza")
+    a = P.guardar_ajustes(raiz, "cl_s", {"palabra_clave": " alquiler de  consolas en Lima ",
+                                         "ig_ubicacion": "106042326099451"})
+    igual(a["palabra_clave"], "alquiler de consolas en Lima", "la palabra clave se guarda limpia")
+    igual((a["yt_categoria"], a["yt_idioma_audio"], a["yt_para_ninos"]), ("22", "es-419", False),
+          "de fábrica: Gente y blogs, español de Latinoamérica y NO hecho para niños")
+    # --- lo que se pide a Claude
+    bloque = S.bloque_instruccion(ajustes, "consolas para cumpleaños", ["instagram"],
+                                  recientes=["gaming"], aprendido=["Instagram, 900 vistas: «¿Fiesta?»"])
+    ok("consolas para cumpleaños" in bloque and "PRIMERA LÍNEA" in bloque and "Lima, Perú" in bloque,
+       "la instrucción lleva la palabra del vídeo, dónde ponerla y la zona")
+    ok("gaming" in bloque and "900 vistas" in bloque, "y lo ya usado y lo que mejor funcionó")
+    igual(S.bloque_instruccion(P.AJUSTES_DEFECTO, "", ["instagram"]), "",
+          "sin palabra clave ni zona, la instrucción es la de antes")
+    inst = P.instruccion_textos(INFO, ["instagram"], ajustes, bloque)
+    ok("primer_comentario" in inst and "palabra_clave" in inst, "el JSON pide primer comentario y palabra")
+    t, _c = P.normalizar_textos({"instagram": {"descripcion": "x", "first_comment": "¿Y tú?"}}, ["instagram"])
+    igual(t["instagram"]["primer_comentario"], "¿Y tú?", "el primer comentario se entiende")
+    # --- lo que va a cada red
+    textos = {"titulo": "Alquiler de consolas en Lima para tu fiesta", "descripcion":
+              "Alquiler de consolas en Lima: la fiesta que no acaba\nTe lo llevamos.",
+              "cta": "Escríbenos", "hashtags": ["lima", "fiestas", "gaming", "consolas", "cumple"],
+              "primer_comentario": "¿Cuál juego elegirías?"}
+    datos = {"colaboradores": "@marca1, @marca2", "etiquetas": "@cliente"}
+    c = P.componer("instagram", textos, ajustes, INFO, None, datos)["campos"]
+    igual((c.get("location_id"), c.get("collaborators"), c.get("user_tags"), c.get("instagram_first_comment")),
+          ("106042326099451", "marca1,marca2", "cliente", "¿Cuál juego elegirías?"),
+          "Instagram: ubicación, colaboradores, etiquetas y primer comentario")
+    c = P.componer("youtube", textos, ajustes, dict(INFO, formato="horizontal", duracion_s=300), None, {})["campos"]
+    igual((c.get("categoryId"), c.get("defaultLanguage"), c.get("defaultAudioLanguage"),
+           c.get("selfDeclaredMadeForKids")), ("24", "es", "es-419", False), "YouTube: categoría, idiomas, no niños")
+    ok(c.get("tags[]", [None])[0] == "alquiler de consolas en Lima" and "fiestas infantiles" in c["tags[]"],
+       f"YouTube: las etiquetas empiezan por la palabra clave: {c.get('tags[]')}")
+    r = P.componer("tiktok", textos, ajustes, INFO, None, {})
+    ok("tiktok_location_id" not in r["campos"] and "tiktok_first_comment" not in r["campos"]
+       and len(r["avisos"]) >= 2, "TikTok sin las funciones de la cuenta: ni ubicación ni comentario, y se avisa")
+    c = P.componer("tiktok", textos, dict(ajustes, tt_ubicacion_puede=True, tt_comentarios_puede=True),
+                   INFO, None, {})["campos"]
+    igual((c.get("tiktok_location_id"), c.get("tiktok_location_name"), c.get("tiktok_first_comment")),
+          ("lima123", "Lima", "¿Cuál juego elegirías?"), "con ellas, sí")
+    igual(S.nombre_fichero("alquiler de consolas en Lima", "Fiesta en casa", "fiesta"),
+          "alquiler-de-consolas-en-lima-fiesta-en-casa.mp4", "el MP4 se sube con la palabra clave en el nombre")
+    # --- la nota SEO, sin Claude
+    comp = P.componer("youtube", textos, ajustes, INFO, None, {})
+    n = S.nota("youtube", textos, comp, ajustes, {}, INFO, "alquiler de consolas en Lima")
+    puntos = {x["texto"]: x["ok"] for x in n["puntos"]}
+    ok(puntos.get("palabra clave al principio del título") and puntos.get("palabra clave en la primera línea"),
+       f"la nota ve la palabra clave en el título y en la primera línea ({n['nota']}/100)")
+    ok(any(not v and "portada" in k for k, v in puntos.items()), "y que falta la portada")
+    malo = dict(textos, titulo="Una fiesta increíble", descripcion="Hola\nadiós", cta="",
+                hashtags=["fyp", "viral"])
+    n2 = S.nota("youtube", malo, P.componer("youtube", malo, ajustes, INFO, None, {}), ajustes, {}, INFO,
+                "alquiler de consolas en Lima")
+    textos_malos = " | ".join(x["texto"] for x in n2["puntos"] if not x["ok"])
+    ok(n2["nota"] < n["nota"] and "fyp" in textos_malos and "llamada a la acción" in textos_malos,
+       f"un texto flojo saca menos y dice por qué: {n2['nota']} — {textos_malos[:120]}")
+    # --- optimizar, ganchos y palabras (con el doble de Claude)
+    os.environ["ESTUDIO_SIMULAR"] = "1"
+    simulador = os.path.join(CARPETA, "sim_seo.json")
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    try:
+        info = dict(INFO, pid="seo1")
+        P.guardar_ficha(raiz, "seo1", {"textos": {"instagram": {"descripcion": "Texto mío", "cta": "Ven"}}})
+        P.lanzar_optimizar(raiz, info, ["instagram"], ajustes, en_hilo=False)
+        f = P.ficha(raiz, info, ajustes)
+        prop = f["seo"]["propuesta"]["redes"]["instagram"]
+        ok("descripcion" in prop["campos"] and f["textos"]["instagram"]["descripcion"] == "Texto mío",
+           "«Optimizar» deja una propuesta y NO toca el texto")
+        P.guardar_ficha(raiz, "seo1", {"textos": {"instagram": {"descripcion": "Texto mío cambiado"}}})
+        try:
+            P.guardar_ficha(raiz, "seo1", {"aceptar_seo": {"instagram": ["descripcion"]}})
+            ok(False, "aceptar no pisa lo editado después de pedir la revisión")
+        except P.ErrorPublicar as fallo:
+            igual(fallo.codigo, 409, f"aceptar no pisa lo editado después de pedir la revisión: {fallo}")
+        f = P.ficha(raiz, info, ajustes)
+        igual(f["textos"]["instagram"]["descripcion"], "Texto mío cambiado", "y lo editado sigue ahí")
+        P.guardar_ficha(raiz, "seo1", {"aceptar_seo": {"instagram": ["primer_comentario"]}})
+        f = P.ficha(raiz, info, ajustes)
+        igual(f["textos"]["instagram"]["primer_comentario"], "¿Cuál elegirías tú?", "aceptar un campo lo pone")
+        P.guardar_ficha(raiz, "seo1", {"rechazar_seo": {"instagram": ["descripcion"]}})
+        igual(P.ficha(raiz, info, ajustes)["seo"]["propuesta"], {}, "«Dejar el mío» lo quita de la propuesta")
+        # ganchos
+        P.lanzar_ganchos(raiz, info, "instagram", ajustes, en_hilo=False)
+        ganchos = P.ficha(raiz, info, ajustes)["seo"]["ganchos"]["instagram"]
+        igual(len(ganchos), 3, "«Dame 3 ganchos» deja tres")
+        f = P.usar_gancho(raiz, "seo1", "instagram", 1)
+        ok(f["textos"]["instagram"]["descripcion"].startswith(ganchos[1]) and "cambiado" not in
+           f["textos"]["instagram"]["descripcion"].splitlines()[0],
+           "«Usar este» lo pone de primera línea y quita la que había")
+        # palabras clave del proyecto
+        P.lanzar_palabras(raiz, "cl_s", "EstadoPlay", "EstadoPlay", "Encargo: fiestas", en_hilo=False)
+        pr = P.ajustes_de(raiz, "cl_s")["propuesta_palabras"]
+        ok(pr["principal"]["frase"] and pr["principal"]["porque"] and pr["internet"] is True
+           and pr["principal"].get("sugerencias"), "«Proponer palabras clave»: principal con su porqué y sugerencias")
+        igual(P.ajustes_de(raiz, "cl_s")["palabra_clave"], "alquiler de consolas en Lima",
+              "proponer no cambia la palabra clave: la elige la persona")
+        try:
+            P.guardar_ajustes(raiz, "cl_s", {"propuesta_palabras": {"principal": "x"}})
+            ok(P.ajustes_de(raiz, "cl_s")["propuesta_palabras"]["principal"] != "x",
+               "la propuesta no se escribe desde fuera")
+        except P.ErrorPublicar:
+            ok(True, "la propuesta no se escribe desde fuera")
+        # optimizar al escribir: las dos pasadas seguidas, aplicadas
+        info2 = dict(INFO, pid="seo2")
+        P.lanzar_textos(raiz, info2, ["instagram"], dict(ajustes, optimizar_al_escribir=True), en_hilo=False)
+        f = P.ficha(raiz, info2, ajustes)
+        ok(f["textos"]["instagram"]["descripcion"].startswith("[SEO]") and not f["seo"]["propuesta"],
+           "«Optimizar SEO al escribir»: la revisión queda aplicada sola")
+        ok(f["seo"]["palabra_propuesta"] == "" or isinstance(f["seo"]["palabra_propuesta"], str),
+           "la palabra propuesta es un texto")
+        # el nombre del fichero en la subida
+        cli = P.cliente(raiz)
+        cli.crear_perfil("studio_seo")
+        cli.enlace_conectar("studio_seo", ["instagram"])
+        mp4 = os.path.join(raiz, "v.mp4")
+        with open(mp4, "wb") as fh:
+            fh.write(b"0" * 2000)
+        P.enviar(raiz, dict(info2, mp4=mp4, nombre="Fiesta en casa"), dict(ajustes, perfil="studio_seo"),
+                 {"redes": ["instagram"], "modo": "ahora", "confirmado": True}, en_hilo=False)
+        with open(simulador, encoding="utf-8") as fh:
+            subida = json.load(fh)["subidas"][-1]
+        igual(subida["fichero"], "alquiler-de-consolas-en-lima-fiesta-en-casa.mp4",
+              "el MP4 se sube con el nombre de la palabra clave")
+        igual(subida["campos"].get("location_id"), "106042326099451", "y con la ubicación de Instagram")
+    finally:
+        os.environ.pop("ESTUDIO_SIMULAR", None)
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
+
 def main():
     print("PRUEBA DE PUBLICAR")
     prueba_piezas()
@@ -1413,6 +1579,7 @@ def main():
     prueba_retencion_y_resumenes()
     prueba_perfiles()
     prueba_textos()
+    prueba_seo()
     if shutil.which("ffmpeg"):
         prueba_portada()
     if shutil.which("ffmpeg"):

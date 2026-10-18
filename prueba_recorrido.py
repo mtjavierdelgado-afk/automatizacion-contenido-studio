@@ -807,7 +807,7 @@ def encargo_del_video(navegador, datos):
     pg.captura("05_encargo_musica")
     ok(pg.sin_trabajo(), "volver a mezclar la música termina")
     # EFECTOS
-    pg.p.locator(".fila-ajuste").filter(has_text="Efectos").locator("button", has_text="Cambiar").click()
+    fila_de_ajuste(pg, "Efectos").locator("button", has_text="Cambiar").click()
     ok(pg.esperar(".papel-efecto"), "los efectos se enseñan por papel")
     ok(pg.p.locator(".papel-efecto").count() >= 4, "los cuatro papeles")
     pg.p.locator(".papel-efecto").first.locator("input[type=file]").set_input_files(mp3)
@@ -1018,7 +1018,7 @@ def lo_que_sale_a_veces(navegador, datos):
     # EL COLOR DEL SUBTITULO
     pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; pintarLight();")
     pg.p.wait_for_timeout(1500)
-    pg.p.locator(".fila-ajuste").filter(has_text="Subtítulos").locator("button", has_text="Cambiar").click()
+    fila_de_ajuste(pg, "Subtítulos").locator("button", has_text="Cambiar").click()
     pg.p.wait_for_timeout(800)
     color = pg.p.locator(".editor-ajuste input[type=color]").first
     ok(color.count() == 1, "los subtítulos dejan elegir el color")
@@ -1685,7 +1685,7 @@ def video_nuevo_con_ajustes(navegador, datos):
     pg.js(f"await cargarGaleriaLight(true); elegirEstiloLight(fichaLight('{datos['preset']}'));")
     ok(pg.esperar("h2", "Un vídeo nuevo"), "elegir el estilo abre el vídeo nuevo")
     ok(pg.esperar(".ajustes-montaje"), "con los ajustes del montaje ya al crearlo")
-    pg.p.locator(".fila-ajuste").filter(has_text="Subtítulos").locator("button", has_text="Cambiar").click()
+    fila_de_ajuste(pg, "Subtítulos").locator("button", has_text="Cambiar").click()
     pg.pulsar(".editor-ajuste button", "Grande")
     ok(pg.visible(".fila-ajuste", "tamaño grande"), "se eligen los subtítulos (grandes)")
     pg.p.locator(".fila-ajuste").filter(has_text="Logo").locator("button", has_text="Cambiar").click()
@@ -3579,6 +3579,15 @@ def editar_a_mano_conserva_la_pausa(navegador, datos):
         # se deja el guion como estaba, para lo que venga detrás
         api.put(f"/api/proyectos/{pid}/pasos/guion/params",
                 {"params": params_antes, "reemplazar": True})
+
+
+def fila_de_ajuste(pg, titulo):
+    """La fila de ajustes cuyo TÍTULO es ese («✨ Efectos»), no cualquiera que lo
+    mencione: desde el 18-10 hay una fila «🎬 Movimiento y efectos» cuyo título
+    y resumen también dicen «efectos» y «subtítulos», y el filtro por texto
+    encontraba dos filas."""
+    return pg.p.locator(".fila-ajuste").filter(
+        has=pg.p.locator(".fila-ajuste-cab > b", has_text=re.compile(r"\s" + re.escape(titulo) + r"$")))
 
 
 def main():

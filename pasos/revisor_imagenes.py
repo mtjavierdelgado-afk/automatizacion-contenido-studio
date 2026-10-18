@@ -308,6 +308,11 @@ def _referencia_de(proyecto, plan, primero, imagenes, bloques):
         plano=_planos_legibles(proyecto, [anterior], imagenes, bloques))
 
 
+def _rango(ids):
+    """«S001» o «S001–S008»."""
+    return ids[0] if len(ids) == 1 else f"{ids[0]}–{ids[-1]}"
+
+
 def _ajuste(ajuste):
     ajuste = dict(ajuste or {})
     defecto = cli_claude.por_defecto_de(FASE)
@@ -418,7 +423,7 @@ def revisar(proyecto, plan, imagenes, planos, estilo=None, encargo="",
     tandas = [escenas[i:i + POR_LLAMADA] for i in range(0, len(escenas), POR_LLAMADA)]
     for n, tanda in enumerate(tandas):
         ids = [str(e.get("id")) for e in tanda]
-        avisar(n / len(tandas), f"revisando {ids[0]}–{ids[-1]}",
+        avisar(n / len(tandas), f"revisando {_rango(ids)}",
                f"Revisando las imágenes · {n + 1} de {len(tandas)}")
         instruccion = INSTRUCCION.format(
             n=len(tanda), titulo=_texto(plan.get("titulo"), 120) or "sin titulo",
@@ -436,7 +441,7 @@ def revisar(proyecto, plan, imagenes, planos, estilo=None, encargo="",
         avance = estadisticas.Avance(
             avisar, n / len(tandas), (n + 1) / len(tandas),
             {"segundos": 30.0 * len(tanda), "origen": "estimacion"},
-            f"revisando {ids[0]}–{ids[-1]}")
+            f"revisando {_rango(ids)}")
         avance.arrancar()
         try:
             crudas = None

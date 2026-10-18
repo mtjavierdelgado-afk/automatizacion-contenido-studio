@@ -10410,6 +10410,12 @@ async function descartarRevision(plano) {
   repintarVideo();
 }
 
+/* «revisando S001–S008; 22 s de 30 s (estimacion…)» → «revisando S001–S008»:
+   la cuenta del reloj es de casa, no de la pantalla. */
+function mensajeDelRevisor(texto) {
+  return String(texto || '').split(';')[0].trim();
+}
+
 function irAPlanoDelRevisor(plano) {
   irAlMomentoDeLaNota({ plano });
 }
@@ -10451,7 +10457,7 @@ function panelRevisor() {
       caja.appendChild(h('div', { clase: 'fila' },
         h('span', { clase: 'pastilla estado-corriendo' },
           REVISOR.cancelando ? 'Cancelando la revisión…'
-            : `Revisando… ${trabajo.mensaje || ''}`.trim()),
+            : `Revisando… ${mensajeDelRevisor(trabajo.mensaje)}`.trim()),
         h('span', { clase: 'crece' }),
         h('button', {
           clase: 'mini fantasma', disabled: REVISOR.cancelando, onclick: cancelarRevision,
@@ -10466,7 +10472,7 @@ function panelRevisor() {
         h('span', { clase: 'pastilla estado-corriendo' },
           REVISOR.cancelando ? 'Cancelando…'
             : `El revisor está mirando ${cuantas} (modo ${NOMBRE_MODO_REVISOR[a.modo] || a.modo})…`),
-        h('span', { clase: 'meta' }, a.mensaje || ''),
+        h('span', { clase: 'meta' }, mensajeDelRevisor(a.mensaje)),
         h('span', { clase: 'crece' }),
         a.trabajo ? h('button', {
           clase: 'mini fantasma', disabled: REVISOR.cancelando,
@@ -10487,9 +10493,10 @@ function panelRevisor() {
     const ultima = ficha.ultima || {};
     caja.appendChild(h('div', { clase: 'meta' },
       ultima.fecha
-        ? `Última revisión: ${ultima.revisados || 0} imágenes, `
+        ? `Última revisión: ${ultima.revisados || 0} ${(ultima.revisados || 0) === 1 ? 'imagen' : 'imágenes'}, `
           + `${(ultima.marcadas || []).length} con nota.`
-          + (ficha.sin_revisar ? ` Quedan ${ficha.sin_revisar} sin revisar.` : '')
+          + (ficha.sin_revisar === 1 ? ' Queda 1 sin revisar.'
+            : ficha.sin_revisar ? ` Quedan ${ficha.sin_revisar} sin revisar.` : '')
         : 'Mira cada imagen con su trozo de guion, el estilo y la marca, y deja una '
           + 'nota en las que no cuadran. No rehace nada hasta que tú lo pidas'
           + (modo === 'manual' ? '.' : ' (o hasta que acabe una tanda, en este modo).')));

@@ -19074,7 +19074,7 @@ const PAR = {
   chat: null, chats: null, chatTexto: '', chatWeb: false, chatResultados: false, chatModelo: '',
   chatCapturas: [], chatReloj: null, chatEnviando: false, chatsInfo: null, chatScroll: null,
   // analizar-cuentas (18-10-2026): las cuentas leídas son de todo el Studio
-  cuentas: null, cuentaAbierta: null, cuentaTrabajo: null, cuentaReloj: null, cuentaPendiente: null,
+  cuentas: null, cuentaAbierta: null, cuentaTrabajo: null, cuentaReloj: null, cuentasCargando: false, cuentaPedida: null,
   cuentaForm: { red: 'tiktok', texto: '', cuantos: 30 }, cuentaGuiones: { cuantos: 5, modo: 'adaptar', peticion: '' },
   chatCuenta: '', conexionesAbiertas: null,
 };
@@ -19269,7 +19269,7 @@ function vigilarTrabajoParrilla() {
     PAR.reloj = null;
     if (MODULOS.actual !== 'automatizar' || !PAR.trabajo) return;
     try {
-      const nuevo = await pedir(rutaParrilla(`/trabajos/${encodeURIComponent(PAR.trabajo.id)}`));
+      const nuevo = await pedirTrabajoParrilla(rutaParrilla(`/trabajos/${encodeURIComponent(PAR.trabajo.id)}`));
       const acabo = PAR.trabajo.estado === 'trabajando' && nuevo.estado !== 'trabajando';
       PAR.trabajo = nuevo;
       if (acabo) {
@@ -20334,10 +20334,14 @@ const NOMBRE_RED_CUENTA = { tiktok: 'TikTok', instagram: 'Instagram', youtube: '
 function rutaCuentas(resto) { return `${BASE}/api/parrilla/cuentas${resto || ''}`; }
 
 async function cargarCuentasParrilla() {
+  if (PAR.cuentasCargando) return;
+  PAR.cuentasCargando = true;
   try {
     PAR.cuentas = await pedir(rutaCuentas());
   } catch (e) {
     PAR.cuentas = { cuentas: [], conexiones: null, error: e.message };
+  } finally {
+    PAR.cuentasCargando = false;
   }
   if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
 }
@@ -20485,8 +20489,9 @@ function bloqueTraerCuenta() {
   return bloque;
 }
 
-async function traerCuentaParrilla(forzar) {
-  const f = PAR.cuentaForm;
+async function traerCuentaParrilla(forzar, pagar, pedida) {
+  // `pedida`: la misma cuenta otra vez (tras decir que sí al precio), aunque el formulario haya cambiado
+  const f = pedida || { texto: PAR.cuentaForm.texto, red: PAR.cuentaForm.red, cuantos: PAR.cuentaForm.cuantos };
   if (!String(f.texto || '').trim()) { toast('escribe el @usuario o pega el enlace', true); return; }
   try {
     const plan = await pedir(rutaCuentas('/plan'), { method: 'POST', cuerpo: { texto: f.texto, red: f.red, cuantos: f.cuantos } });
@@ -20495,15 +20500,18 @@ async function traerCuentaParrilla(forzar) {
       toast(`no hay ninguna vía para leer esta cuenta: ${(plan.vias || []).map(v => `${v.nombre} (${v.motivo})`).join('; ')}`, true);
       return;
     }
-    const enCache = plan.guardada && plan.guardada.fresca && !forzar;
-    if (!enCache && !listas[0].gratis) {
+    // el mismo criterio que el servidor: de hoy Y con al menos tantos vídeos pedidos
+    const enCache = plan.guardada && plan.guardada.sirve && !forzar;
+    if (!enCache && !listas[0].gratis && !pagar) {
       const v = listas[0];
       if (!confirm(`Esta cuenta se lee con ${v.nombre}: costará unos ${Number(v.coste_usd || 0).toFixed(2)} $.\n`
         + `Gastado este mes: ${Number(plan.gasto_mes || 0).toFixed(2)} $ de ${Number(plan.tope_usd || 0).toFixed(2)} $. ¿Seguir?`)) return;
+      pagar = true;
     }
-    PAR.cuentaTrabajo = await pedir(rutaCuentas('/leer'), { method: 'POST',
-      cuerpo: { texto: f.texto, red: f.red, cuantos: f.cuantos, forzar: !!forzar } });
-    PAR.cuentaPendiente = { red: plan.red, usuario: plan.usuario };
+    // sin «pagar», si lo gratis no sirve el trabajo acaba pidiendo permiso (`pide_pago`)
+    PAR.cuentaPedida = { texto: f.texto, red: f.red, cuantos: f.cuantos, plan };
+    PAR.cuentaTrabajo = await pedirTrabajoParrilla(rutaCuentas('/leer'),
+      { texto: f.texto, red: f.red, cuantos: f.cuantos, forzar: !!forzar, pagar: !!pagar });
     pintarModulo();
     vigilarCuentaParrilla();
   } catch (e) { toast(e.message, true); }
@@ -20513,28 +20521,76 @@ function vigilarCuentaParrilla() {
   clearTimeout(PAR.cuentaReloj);
   PAR.cuentaReloj = null;
   const t = PAR.cuentaTrabajo;
-  if (!t || t.estado !== 'trabajando' || MODULOS.actual !== 'automatizar') return;
+  if (!t || MODULOS.actual !== 'automatizar') return;
+  // un trabajo corto puede volver ya acabado en la misma respuesta que lo lanza
+  if (t.estado !== 'trabajando') { if (!t.visto) trabajoCuentaAcabado(t); return; }
   PAR.cuentaReloj = setTimeout(async () => {
     PAR.cuentaReloj = null;
     try {
-      const nuevo = await pedir(rutaCuentas(`/trabajos/${encodeURIComponent(t.id)}`));
-      const acabo = nuevo.estado !== 'trabajando';
+      const nuevo = await pedirTrabajoParrilla(rutaCuentas(`/trabajos/${encodeURIComponent(t.id)}`));
       PAR.cuentaTrabajo = nuevo;
-      if (acabo && nuevo.estado === 'listo') {
-        if (nuevo.de_cache) toast('ya estaba leída hoy: no se ha vuelto a pagar');
-        else if (nuevo.coste_usd) toast(`leída con Apify (≈${Number(nuevo.coste_usd).toFixed(2)} $)`);
-        else toast(nuevo.tipo === 'analizar' ? 'análisis listo' : 'cuenta leída');
-        PAR.cuentas = null;
-        await cargarCuentasParrilla();
-        await abrirCuentaParrilla(nuevo.red, nuevo.usuario);
-        return;
-      }
+      if (nuevo.estado !== 'trabajando') { await trabajoCuentaAcabado(nuevo); return; }
     } catch (e) {
-      if (e.status === 404) PAR.cuentaTrabajo = Object.assign({}, t, { estado: 'error', error: 'el servidor ya no conoce ese trabajo: vuelve a lanzarlo' });
+      if (e.status === 404) PAR.cuentaTrabajo = Object.assign({}, t, { estado: 'error', visto: true, error: 'el servidor ya no conoce ese trabajo: vuelve a lanzarlo' });
     }
     repintarParrillaSinPisar();
     vigilarCuentaParrilla();
   }, 2000);
+}
+
+/* EL ESTADO DE UN TRABAJO, CON SU ERROR DENTRO. `pedir` lanza si la respuesta
+   trae `error`, aunque sea un 200, y un trabajo que acaba mal es justo eso:
+   {estado: 'error', error: '…'}. Con `pedir`, la pantalla nunca se enteraba
+   y seguía preguntando con la rueda girando (visto el 18-10-2026). */
+async function pedirTrabajoParrilla(url, cuerpo) {
+  // con `cuerpo`, lanza el trabajo (POST): uno corto puede volver ya acabado, con su error
+  const pases = typeof cabeceraDePases === 'function' ? cabeceraDePases() : '';
+  const cabeceras = pases ? { 'X-Estudio-Abiertos': pases } : {};
+  const cfg = { headers: cabeceras };
+  if (cuerpo !== undefined) {
+    Object.assign(cfg, { method: 'POST', body: JSON.stringify(cuerpo) });
+    cabeceras['Content-Type'] = 'application/json';
+  }
+  let respuesta;
+  try {
+    respuesta = await fetch(url, cfg);
+  } catch (e) {
+    throw new Error(`no hay respuesta del servidor (${url}): ${e.message}`);
+  }
+  let datos = null;
+  try { datos = await respuesta.json(); } catch (e) { datos = null; }
+  if (!respuesta.ok) {
+    const fallo = new Error((datos && (datos.error || datos.mensaje)) || `HTTP ${respuesta.status}`);
+    fallo.status = respuesta.status;
+    throw fallo;
+  }
+  return datos || {};
+}
+
+async function trabajoCuentaAcabado(nuevo) {
+  PAR.cuentaTrabajo = Object.assign({}, nuevo, { visto: true });
+  if (nuevo.estado === 'listo') {
+    if (nuevo.de_cache) toast('ya estaba leída hoy: no se ha vuelto a pagar');
+    else if (nuevo.coste_usd) toast(`leída con Apify (≈${Number(nuevo.coste_usd).toFixed(2)} $)`);
+    else toast(nuevo.tipo === 'analizar' ? 'análisis listo' : 'cuenta leída');
+    PAR.cuentas = null;
+    await cargarCuentasParrilla();
+    await abrirCuentaParrilla(nuevo.red, nuevo.usuario);
+    return;
+  }
+  if (nuevo.pide_pago) {
+    const p = nuevo.pide_pago;
+    const pedida = PAR.cuentaPedida || { texto: `@${nuevo.usuario}`, red: nuevo.red, cuantos: PAR.cuentaForm.cuantos };
+    const plan = pedida.plan || {};
+    if (confirm(`${nuevo.error}\n\nGastado este mes: ${Number(plan.gasto_mes || 0).toFixed(2)} $ de `
+      + `${Number(plan.tope_usd || 0).toFixed(2)} $. ¿Pagar ≈${Number(p.coste_usd || 0).toFixed(2)} $ y seguir?`)) {
+      PAR.cuentaTrabajo = null;
+      await traerCuentaParrilla(false, true, pedida);
+      return;
+    }
+    PAR.cuentaTrabajo = Object.assign({}, PAR.cuentaTrabajo, { error: 'no se ha pagado: lo gratis no sirvió para esta cuenta' });
+  }
+  repintarParrillaSinPisar();
 }
 
 async function abrirCuentaParrilla(red, usuario) {
@@ -20609,8 +20665,7 @@ function bloqueCuentaAbierta(d) {
 
 async function analizarCuentaParrilla(d) {
   try {
-    PAR.cuentaTrabajo = await pedir(rutaCuentas(`/${encodeURIComponent(d.red)}/${encodeURIComponent(d.usuario)}/analizar`),
-      { method: 'POST', cuerpo: {} });
+    PAR.cuentaTrabajo = await pedirTrabajoParrilla(rutaCuentas(`/${encodeURIComponent(d.red)}/${encodeURIComponent(d.usuario)}/analizar`), {});
     pintarModulo();
     vigilarCuentaParrilla();
   } catch (e) { toast(e.message, true); }
@@ -20622,6 +20677,7 @@ async function borrarCuentaParrilla(d) {
     await pedir(rutaCuentas(`/${encodeURIComponent(d.red)}/${encodeURIComponent(d.usuario)}`), { method: 'DELETE' });
     PAR.cuentaAbierta = null;
     PAR.cuentas = null;
+    if (PAR.chatCuenta === `${d.red}:${d.usuario}`) PAR.chatCuenta = '';
     toast('cuenta olvidada');
   } catch (e) { toast(e.message, true); }
   pintarModulo();
@@ -20648,8 +20704,10 @@ function chatConCuentaParrilla(d) {
 
 /* En el chat: «📈 Con una cuenta analizada». Las cuentas se piden una vez. */
 function selectorCuentaChat() {
-  if (!PAR.cuentas) setTimeout(cargarCuentasParrilla, 0);
+  if (!PAR.cuentas && !PAR.cuentasCargando) setTimeout(cargarCuentasParrilla, 0);
   const lista = ((PAR.cuentas || {}).cuentas) || [];
+  // una cuenta olvidada (aquí o en otra pestaña) deja de mandarse al chat
+  if (PAR.cuentas && PAR.chatCuenta && !lista.some(c => `${c.red}:${c.usuario}` === PAR.chatCuenta)) PAR.chatCuenta = '';
   if (!lista.length && !PAR.chatCuenta) return null;
   return h('select', { 'aria-label': 'Con una cuenta analizada', clase: 'cuenta-chat',
     title: 'Le pasa a Claude los vídeos (y el análisis) de una cuenta que hayas analizado',

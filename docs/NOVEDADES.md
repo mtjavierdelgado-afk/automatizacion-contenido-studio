@@ -47,10 +47,16 @@ vídeos, estilos, claves y contraseña no se tocan.
   texto, de más a menos vistas.
 - **Primero gratis**: YouTube por su API oficial e Instagram por la vía oficial
   de Meta (solo cuentas profesionales). **Si no sirve** (TikTok, o una cuenta de
-  Instagram personal), por **Apify**, de pago: unos céntimos por cuenta. Antes
-  de pagar te dice cuánto costará, hay un **tope al mes** (5 $, lo que regala
-  el plan gratis de Apify) y una cuenta leída se guarda 24 h para no volver a
-  pagarla.
+  Instagram personal), por **Apify**, de pago: unos céntimos por cuenta. **Antes
+  de pagar siempre pregunta**, con el precio, también cuando lo gratis falla a
+  medias; hay un **tope al mes** (5 $, lo que regala el plan gratis de Apify)
+  que cuenta incluso lo que Apify cobra cuando una lectura sale mal, y una
+  cuenta leída se guarda 24 h para no volver a pagarla.
+- Una **clave gratis que no vale** (o el token de Meta caducado) no pasa al
+  servicio de pago: te dice que la arregles en Conexiones.
+- La conexión de Instagram **no queda atada a una cuenta**: sirve la de tu
+  negocio o una creada solo para el Studio. Para cambiarla, pegas el token de
+  la nueva y el Studio la encuentra solo; lo ya analizado se queda.
 - **«Que Claude la analice»**: qué temas, ganchos, duración y horarios le
   funcionan, comparando sus vídeos con más y con menos vistas, e ideas para ti.
 - **«Escribir guiones con lo que le funciona»**: para tu proyecto, con tu

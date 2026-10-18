@@ -15829,13 +15829,17 @@ def parrilla_cuentas_plan(cuerpo: dict = Body(default=None)):
 
 @app.post("/api/parrilla/cuentas/leer", status_code=202)
 def parrilla_cuentas_leer(cuerpo: dict = Body(default=None)):
-    """{texto, red?, cuantos?, forzar?} -> el trabajo (se sigue preguntando)."""
+    """{texto, red?, cuantos?, forzar?, pagar?} -> el trabajo (se sigue preguntando).
+
+    `pagar` es el «sí» de la persona al precio: sin él, si lo gratis no sirve,
+    el trabajo acaba con `pide_pago` y la pantalla pregunta antes de pagar."""
     C = _cuentas()
     d = _cuerpo(cuerpo)
     red, usuario = _por_cuentas(C.entender, d.get("texto"), d.get("red") or "")
+    forzar, pagar = d.get("forzar") is True, d.get("pagar") is True
     t = _por_cuentas(C.lanzar_lectura, raiz_proyectos(), red, usuario, d.get("cuantos") or 30,
-                     bool(d.get("forzar")))
-    anotar_global("cuenta_leer", {"red": red, "usuario": usuario, "forzar": bool(d.get("forzar"))})
+                     forzar, pagar=pagar)
+    anotar_global("cuenta_leer", {"red": red, "usuario": usuario, "forzar": forzar, "pagar": pagar})
     return t
 
 

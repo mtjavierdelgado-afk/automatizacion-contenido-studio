@@ -35,6 +35,7 @@ LOS CAMPOS DE APIFY NO ESTÁN MEDIDOS con una clave de verdad (18-10-2026): los
 nombres salen de la documentación de cada actor, y el mapeo (`_primero`) prueba
 varios nombres por campo. Si un actor cambia de nombres, se arregla aquí.
 """
+import http.client
 import json
 import re
 import socket
@@ -61,9 +62,16 @@ BASE_APIFY = "https://api.apify.com/v2"
 
 
 class ErrorLectura(RuntimeError):
-    def __init__(self, mensaje, motivo="red"):
+    """`cobrado`: en Apify, si el fallo llega DESPUÉS de que el actor corriera
+    (un plazo vencido, un 5xx, resultados sin ningún vídeo): Apify ya ha
+    cobrado y el gasto se tiene que apuntar igual. Solo un token malo o sin
+    crédito no cobra."""
+
+    def __init__(self, mensaje, motivo="red", cobrado=False, resultados=0):
         super().__init__(mensaje)
         self.motivo = motivo
+        self.cobrado = cobrado
+        self.resultados = resultados
 
 
 def _tachar(texto, *claves):
@@ -76,10 +84,14 @@ def _tachar(texto, *claves):
     return texto
 
 
-def _pedir(url, metodo="GET", cuerpo=None, plazo=PLAZO_S, claves=(), bases=None):
-    """-> (codigo, json). Los errores HTTP devuelven su cuerpo; la red lanza."""
+def _pedir(url, metodo="GET", cuerpo=None, plazo=PLAZO_S, claves=(), bases=None, cabeceras_extra=None):
+    """-> (codigo, json). Los errores HTTP devuelven su cuerpo; la red lanza.
+
+    Las claves van en CABECERAS (`cabeceras_extra`), no en la URL: una URL
+    acaba en los registros de cualquier proxy por el que pase."""
     datos = None
     cabeceras = {"Accept": "application/json", "User-Agent": "AutomatizacionContenidoStudio/1"}
+    cabeceras.update(cabeceras_extra or {})
     if cuerpo is not None:
         datos = json.dumps(cuerpo).encode("utf-8")
         cabeceras["Content-Type"] = "application/json"
@@ -95,7 +107,8 @@ def _pedir(url, metodo="GET", cuerpo=None, plazo=PLAZO_S, claves=(), bases=None)
     except urllib.error.HTTPError as fallo:
         crudo = fallo.read() or b""
         codigo = fallo.code
-    except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError) as fallo:
+    except (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError,
+            http.client.HTTPException, OSError) as fallo:
         raise ErrorLectura(_tachar(f"no se ha podido hablar con el servicio: {fallo}", *claves), "red") from None
     try:
         return codigo, json.loads(crudo.decode("utf-8") or "null")
@@ -163,30 +176,33 @@ def youtube(clave, usuario, cuantos=30, bases=None):
         raise ErrorLectura("falta la clave de YouTube", "sin_clave")
     usuario = str(usuario or "").strip()
     cuantos = max(1, min(int(cuantos or 30), 50))
-    parametros = {"part": "snippet,statistics,contentDetails", "key": clave}
+    parametros = {"part": "snippet,statistics,contentDetails"}
+    cab = {"X-Goog-Api-Key": clave}
     if re.fullmatch(r"UC[\w-]{22}", usuario):
         parametros["id"] = usuario
     else:
         parametros["forHandle"] = "@" + usuario.lstrip("@")
     codigo, datos = _pedir(f"{BASE_YOUTUBE}/channels?{urllib.parse.urlencode(parametros)}",
-                           claves=(clave,), bases=bases)
+                           claves=(clave,), bases=bases, cabeceras_extra=cab)
     _error_google(codigo, datos, clave)
     canales = (datos or {}).get("items") or []
     if not canales:
         raise ErrorLectura(f"no hay ningún canal de YouTube «{usuario}»", "no_encontrada")
     canal = canales[0]
     subidas = (((canal.get("contentDetails") or {}).get("relatedPlaylists") or {}).get("uploads"))
+    if not subidas:
+        raise ErrorLectura(f"el canal «{usuario}» no tiene vídeos subidos", "no_encontrada")
     codigo, datos = _pedir(f"{BASE_YOUTUBE}/playlistItems?" + urllib.parse.urlencode(
-        {"part": "contentDetails", "playlistId": subidas, "maxResults": cuantos, "key": clave}),
-        claves=(clave,), bases=bases)
+        {"part": "contentDetails", "playlistId": subidas, "maxResults": cuantos}),
+        claves=(clave,), bases=bases, cabeceras_extra=cab)
     _error_google(codigo, datos, clave)
     ids = [((i.get("contentDetails") or {}).get("videoId")) for i in (datos or {}).get("items") or []]
     ids = [i for i in ids if i]
     videos = []
     if ids:
         codigo, datos = _pedir(f"{BASE_YOUTUBE}/videos?" + urllib.parse.urlencode(
-            {"part": "snippet,statistics,contentDetails", "id": ",".join(ids), "key": clave}),
-            claves=(clave,), bases=bases)
+            {"part": "snippet,statistics,contentDetails", "id": ",".join(ids)}),
+            claves=(clave,), bases=bases, cabeceras_extra=cab)
         _error_google(codigo, datos, clave)
         for v in (datos or {}).get("items") or []:
             sn, st = v.get("snippet") or {}, v.get("statistics") or {}
@@ -229,8 +245,8 @@ def instagram(token, ig_id, usuario, cuantos=30, version=VERSION_META, bases=Non
               f"media.limit({cuantos}){{id,caption,like_count,comments_count,view_count,timestamp,"
               f"permalink,media_type,media_product_type}}}}")
     url = (f"{BASE_META}/{version}/{urllib.parse.quote(str(ig_id))}?"
-           + urllib.parse.urlencode({"fields": campos, "access_token": token}))
-    codigo, datos = _pedir(url, claves=(token,), bases=bases)
+           + urllib.parse.urlencode({"fields": campos}))
+    codigo, datos = _pedir(url, claves=(token,), bases=bases, cabeceras_extra={"Authorization": f"Bearer {token}"})
     if codigo >= 400 or (isinstance(datos, dict) and datos.get("error")):
         error = (datos or {}).get("error") or {}
         mensaje = _tachar(str(error.get("message") or datos)[:300], token)
@@ -260,8 +276,8 @@ def instagram_mi_cuenta(token, version=VERSION_META, bases=None):
     if not token:
         raise ErrorLectura("falta el token de Meta", "sin_clave")
     url = (f"{BASE_META}/{version}/me/accounts?" + urllib.parse.urlencode(
-        {"fields": "name,instagram_business_account{id,username}", "access_token": token}))
-    codigo, datos = _pedir(url, claves=(token,), bases=bases)
+        {"fields": "name,instagram_business_account{id,username}"}))
+    codigo, datos = _pedir(url, claves=(token,), bases=bases, cabeceras_extra={"Authorization": f"Bearer {token}"})
     if codigo >= 400 or (isinstance(datos, dict) and datos.get("error")):
         mensaje = _tachar(str(((datos or {}).get("error") or {}).get("message") or datos)[:300], token)
         raise ErrorLectura(f"Meta no acepta ese token: {mensaje}", "clave")
@@ -280,8 +296,7 @@ def entrada_apify(red, usuario, cuantos):
     usuario = str(usuario or "").strip().lstrip("@")
     if red == "tiktok":
         return {"profiles": [usuario], "resultsPerPage": cuantos, "profileScrapeSections": ["videos"],
-                "shouldDownloadVideos": False, "shouldDownloadCovers": False,
-                "shouldDownloadSubtitles": False}
+                "shouldDownloadVideos": False, "shouldDownloadCovers": False}
     if red == "instagram":
         return {"username": [usuario], "resultsLimit": cuantos}
     if red == "youtube":
@@ -323,6 +338,8 @@ def leer_items_apify(red, usuario, items):
                                  _primero(it, "viewCount", "views"), _primero(it, "likes", "likeCount"),
                                  _primero(it, "commentsCount", "commentCount"), None,
                                  _duracion(it.get("duration"))))
+    # un resultado sin id ni enlace es que el actor ha cambiado de nombres: no es un vídeo
+    videos = [v for v in videos if v["id"] or v["url"]]
     return {"red": red, "usuario": str(usuario).lstrip("@"), "nombre": nombre or str(usuario).lstrip("@"),
             "seguidores": seguidores, "fuente": "apify", "videos": videos}
 
@@ -333,31 +350,43 @@ def coste_apify(red, resultados):
     return round(max(1, resultados) * por_mil / 1000.0, 4)
 
 
-def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S):
-    """Ejecuta el actor de esa red y espera sus resultados (de pago)."""
+def apify(token, red, usuario, cuantos=30, bases=None, plazo=PLAZO_APIFY_S, max_usd=None):
+    """Ejecuta el actor de esa red y espera sus resultados (de pago).
+
+    `maxItems` y `maxTotalChargeUsd` son el techo DEL LADO DE APIFY: aunque el
+    actor quisiera devolver más (el de YouTube cuenta vídeos y Shorts por
+    separado), no cobra más de `cuantos` resultados ni más de `max_usd`."""
     if not token:
         raise ErrorLectura("falta el token de Apify", "sin_clave")
     if red not in ACTORES:
         raise ErrorLectura(f"el servicio de pago no lee {red}", "no_encontrada")
     cuantos = max(1, min(int(cuantos or 30), 50))
     actor, _p = ACTORES[red]
-    url = (f"{BASE_APIFY}/acts/{actor}/run-sync-get-dataset-items?"
-           + urllib.parse.urlencode({"token": token, "timeout": plazo - 20, "clean": "true"}))
-    codigo, datos = _pedir(url, "POST", entrada_apify(red, usuario, cuantos), plazo=plazo,
-                           claves=(token,), bases=bases)
+    parametros = {"timeout": plazo - 20, "clean": "true", "maxItems": cuantos}
+    if max_usd is not None:
+        parametros["maxTotalChargeUsd"] = f"{max(0.01, float(max_usd)):.2f}"
+    url = f"{BASE_APIFY}/acts/{actor}/run-sync-get-dataset-items?" + urllib.parse.urlencode(parametros)
+    try:
+        codigo, datos = _pedir(url, "POST", entrada_apify(red, usuario, cuantos), plazo=plazo,
+                               claves=(token,), bases=bases,
+                               cabeceras_extra={"Authorization": f"Bearer {token}"})
+    except ErrorLectura as fallo:
+        fallo.cobrado = True               # el actor pudo correr: se apunta igual
+        raise
     if codigo in (401, 403):
         raise ErrorLectura("el token de Apify no vale", "clave")
     if codigo == 402:
         raise ErrorLectura("Apify: se ha acabado el crédito de la cuenta", "limite")
     if codigo == 408:
-        raise ErrorLectura("Apify ha tardado demasiado: prueba con menos vídeos", "red")
+        raise ErrorLectura("Apify ha tardado demasiado: prueba con menos vídeos", "red", cobrado=True)
     if codigo >= 400:
         mensaje = _tachar(str(((datos or {}).get("error") or {}).get("message") or datos)[:300], token)
-        raise ErrorLectura(f"Apify ha contestado {codigo}: {mensaje}", "red")
+        raise ErrorLectura(f"Apify ha contestado {codigo}: {mensaje}", "red", cobrado=codigo >= 500)
     items = datos if isinstance(datos, list) else []
     salida = leer_items_apify(red, usuario, items)
     if not salida["videos"]:
         raise ErrorLectura(f"no se ha encontrado ningún vídeo público de «{usuario}» en {red} "
-                           "(¿existe?, ¿es privada?)", "no_encontrada")
+                           "(¿existe?, ¿es privada?)", "no_encontrada", cobrado=bool(items),
+                           resultados=len(items))
     salida["coste_usd"] = coste_apify(red, len(items))
     return salida

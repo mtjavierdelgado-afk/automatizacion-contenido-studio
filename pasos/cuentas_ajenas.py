@@ -78,13 +78,25 @@ MAX_VIDEOS = 50
 DIAS_TOKEN_META = 60
 
 _LOCK = threading.Lock()
+_LOCK_GASTO = threading.Lock()
 _TRABAJOS = {}
 
 
 class ErrorCuentas(ValueError):
-    def __init__(self, mensaje, codigo=400):
+    """`pide_pago`: {coste_usd, via} cuando lo gratis no ha servido y para seguir
+    hay que pagar: la pantalla pregunta y vuelve a lanzar con `pagar`."""
+
+    def __init__(self, mensaje, codigo=400, pide_pago=None):
         super().__init__(mensaje)
         self.codigo = int(codigo)
+        self.pide_pago = pide_pago
+
+
+def _entero(valor, defecto):
+    try:
+        return int(float(valor))
+    except (TypeError, ValueError):
+        return defecto
 
 
 def _simular():
@@ -230,11 +242,56 @@ def gasto_del_mes(raiz, mes=None):
     return round(total, 4)
 
 
-def _apuntar_gasto(raiz, red, usuario, usd, resultados):
+def _apuntar_gasto(raiz, red, usuario, usd, resultados, **extra):
     os.makedirs(_carpeta(raiz), exist_ok=True)
     with open(_ruta_gasto(raiz), "a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"cuando": ahora(), "red": red, "usuario": usuario, "usd": usd,
-                             "resultados": resultados}, ensure_ascii=False) + "\n")
+        fh.write(json.dumps(dict({"cuando": ahora(), "red": red, "usuario": usuario, "usd": usd,
+                                  "resultados": resultados}, **extra), ensure_ascii=False) + "\n")
+
+
+class _CerrojoGasto:
+    """Comprobar el tope y apuntar la reserva, de una vez: dos lecturas a la
+    vez (en hilos o en procesos del servicio) no pasan las dos por el mismo
+    hueco. En Linux, además del cerrojo del proceso, uno de fichero."""
+
+    def __init__(self, raiz):
+        self.raiz = raiz
+        self.fh = None
+
+    def __enter__(self):
+        _LOCK_GASTO.acquire()
+        try:
+            import fcntl
+            os.makedirs(_carpeta(self.raiz), exist_ok=True)
+            self.fh = open(os.path.join(_carpeta(self.raiz), ".gasto.lock"), "a")
+            fcntl.flock(self.fh, fcntl.LOCK_EX)
+        except (ImportError, OSError):
+            self.fh = None
+        return self
+
+    def __exit__(self, *_):
+        if self.fh:
+            self.fh.close()
+        _LOCK_GASTO.release()
+
+
+def _reservar(raiz, red, usuario, coste, tope):
+    """Apunta lo que costará ANTES de llamar a Apify. -> (id, lo que queda bajo
+    el tope antes de reservar) o None si no cabe."""
+    with _CerrojoGasto(raiz):
+        gastado = gasto_del_mes(raiz)
+        if gastado + coste > tope + 1e-9:
+            return None, gastado
+        rid = "r" + uuid.uuid4().hex[:10]
+        _apuntar_gasto(raiz, red, usuario, coste, 0, reserva=rid)
+        return rid, gastado
+
+
+def _ajustar(raiz, red, usuario, rid, reservado, real, resultados):
+    """Corrige la reserva con lo que de verdad se ha cobrado (puede ser 0)."""
+    real = round(float(real or 0), 4)
+    if abs(real - reservado) > 1e-9 or resultados:
+        _apuntar_gasto(raiz, red, usuario, round(real - reservado, 4), resultados, ajuste=rid)
 
 
 # -------------------------------------------------------------- la cuenta
@@ -247,7 +304,8 @@ def entender(texto, red=""):
     m = re.search(r"tiktok\.com/@([A-Za-z0-9._]+)", t)
     if m:
         return "tiktok", m.group(1)
-    m = re.search(r"instagram\.com/(?!p/|reel/|reels/|stories/)([A-Za-z0-9._]+)", t)
+    m = re.search(r"instagram\.com/(?!(?:p|reel|reels|stories|explore|accounts|tv|direct|about)(?:/|$|\?))"
+                  r"([A-Za-z0-9._]+)", t)
     if m:
         return "instagram", m.group(1)
     m = re.search(r"youtube\.com/channel/(UC[\w-]{22})", t)
@@ -256,6 +314,11 @@ def entender(texto, red=""):
     m = re.search(r"youtube\.com/@([\w.\-]+)", t)
     if m:
         return "youtube", m.group(1)
+    if re.search(r"youtube\.com/(?:c|user)/", t):
+        raise ErrorCuentas("ese enlace de YouTube es de los antiguos (/c/ o /user/): abre el canal y pega "
+                           "el enlace que lleva @ (youtube.com/@nombre)")
+    if re.search(r"vm\.tiktok\.com|vt\.tiktok\.com", t):
+        raise ErrorCuentas("ese es un enlace corto de TikTok: ábrelo y pega el del perfil (tiktok.com/@usuario)")
     if re.search(r"https?://", t):
         raise ErrorCuentas("ese enlace no es de un perfil de TikTok, Instagram o YouTube (pega el del "
                            "perfil, no el de un vídeo)")
@@ -310,7 +373,8 @@ def cuentas(raiz):
 
 def plan(raiz, red, usuario, cuantos=30):
     """Las vías que se probarán, en orden: [{fuente, nombre, gratis, coste_usd, motivo?}],
-    y si la caché la ahorra."""
+    y si la caché la ahorra (`guardada.sirve`, el mismo criterio que `leer`)."""
+    cuantos = max(5, min(_entero(cuantos, 30), MAX_VIDEOS))
     c = _claves()
     pub = claves_publicas()
     vias = []
@@ -333,13 +397,20 @@ def plan(raiz, red, usuario, cuantos=30):
     guardada = None
     try:
         d = cuenta(raiz, red, usuario)
-        guardada = {"traida": d.get("traida"), "fresca": _fresca(d), "videos": len(d.get("videos") or [])}
+        guardada = {"traida": d.get("traida"), "fresca": _fresca(d), "videos": len(d.get("videos") or []),
+                    "pedidos": int(d.get("pedidos") or 0), "sirve": _sirve(d, cuantos)}
     except ErrorCuentas:
         pass
     gastado = gasto_del_mes(raiz)
     return {"red": red, "usuario": usuario, "vias": vias, "guardada": guardada,
             "gasto_mes": gastado, "tope_usd": pub["tope_usd"],
             "queda_usd": round(max(0.0, pub["tope_usd"] - gastado), 4)}
+
+
+def _sirve(datos, cuantos):
+    """La copia guardada vale si es de hoy y se pidieron al menos tantos (una
+    cuenta con menos vídeos de los pedidos no se vuelve a pagar por eso)."""
+    return _fresca(datos) and int(datos.get("pedidos") or 0) >= cuantos
 
 
 def _fresca(datos):
@@ -349,17 +420,20 @@ def _fresca(datos):
         return False
 
 
-def leer(raiz, red, usuario, cuantos=30, forzar=False, avance=None):
-    """Trae la cuenta por la primera vía que pueda. -> lo guardado."""
+def leer(raiz, red, usuario, cuantos=30, forzar=False, avance=None, pagar=False):
+    """Trae la cuenta por la primera vía que pueda. -> lo guardado.
+
+    `pagar`: la persona ya ha dicho que sí al precio. Sin él, si hay que llegar
+    a Apify, se para con `ErrorCuentas(pide_pago=…)` y la pantalla pregunta.
+    Una clave gratis que NO VALE (o un token de Meta caducado) para aquí: es
+    algo que arreglar, no un motivo para pagar."""
     if red not in REDES:
         raise ErrorCuentas("esa red todavía no se puede analizar (TikTok, Instagram o YouTube)")
-    cuantos = max(5, min(int(cuantos or 30), MAX_VIDEOS))
+    cuantos = max(5, min(_entero(cuantos, 30), MAX_VIDEOS))
     if not forzar:
         try:
             d = cuenta(raiz, red, usuario)
-            # vale si es de hoy y se pidieron al menos tantos (una cuenta con
-            # menos vídeos de los pedidos no se vuelve a pagar por eso)
-            if _fresca(d) and int(d.get("pedidos") or 0) >= cuantos:
+            if _sirve(d, cuantos):
                 d["de_cache"] = True
                 return d
         except ErrorCuentas:
@@ -374,13 +448,20 @@ def leer(raiz, red, usuario, cuantos=30, forzar=False, avance=None):
         if not via["lista"]:
             intentos.append(f"{via['nombre']}: {via['motivo']}")
             continue
+        rid = None
         if fuente == "apify":
             coste = F.coste_apify(red, cuantos)
-            gastado = gasto_del_mes(raiz)
-            if gastado + coste > pub["tope_usd"] + 1e-9:
+            if not pagar:
+                raise ErrorCuentas(
+                    "lo gratis no ha servido" + (":\n- " + "\n- ".join(intentos) if intentos else "")
+                    + f"\nSeguir con {via['nombre']} costará como mucho {coste:.2f} $.", 402,
+                    pide_pago={"coste_usd": coste, "via": via["nombre"], "intentos": intentos})
+            rid, gastado = _reservar(raiz, red, usuario, coste, pub["tope_usd"])
+            if rid is None:
                 intentos.append(f"{via['nombre']}: llegaría al tope del mes ({gastado:.2f} $ de "
                                 f"{pub['tope_usd']:.2f} $ gastados); súbelo en «Conexiones» si quieres seguir")
                 continue
+            queda = pub["tope_usd"] - gastado
         if avance:
             avance(f"leyendo por {via['nombre']}")
         try:
@@ -392,14 +473,25 @@ def leer(raiz, red, usuario, cuantos=30, forzar=False, avance=None):
                 resultado = F.instagram(c.get("meta_token"), c.get("ig_id"), usuario, cuantos,
                                         _version_meta(), bases=bases)
             else:
-                resultado = F.apify(c.get("apify_token"), red, usuario, cuantos, bases=bases)
-        except F.ErrorLectura as fallo:
+                resultado = F.apify(c.get("apify_token"), red, usuario, cuantos, bases=bases, max_usd=queda)
+        except Exception as fallo:                     # noqa: BLE001 - se apunta y se dice
+            if not isinstance(fallo, F.ErrorLectura):
+                fallo = F.ErrorLectura(f"fallo inesperado: {str(fallo)[:200]}", "red", cobrado=True)
+            if rid:
+                # si el actor llegó a correr, Apify ha cobrado: la reserva se queda
+                real = (F.coste_apify(red, fallo.resultados) if fallo.resultados
+                        else coste if fallo.cobrado else 0)
+                _ajustar(raiz, red, usuario, rid, coste, real, fallo.resultados)
             intentos.append(f"{via['nombre']}: {fallo}")
             if fallo.motivo == "no_encontrada":
                 break                  # no existe: no se paga por comprobarlo otra vez
+            if fallo.motivo == "clave" and fuente != "apify":
+                raise ErrorCuentas("no se ha podido traer la cuenta:\n- " + "\n- ".join(intentos)
+                                   + "\nArregla esa clave en «Conexiones» (no se ha pasado al servicio "
+                                   "de pago por eso).", 409) from None
             continue
-        if fuente == "apify":
-            _apuntar_gasto(raiz, red, usuario, resultado.get("coste_usd") or 0, len(resultado["videos"]))
+        if rid:
+            _ajustar(raiz, red, usuario, rid, coste, resultado.get("coste_usd") or 0, len(resultado["videos"]))
         break
     if resultado is None:
         raise ErrorCuentas("no se ha podido traer la cuenta:\n- " + "\n- ".join(intentos), 409)
@@ -535,12 +627,13 @@ def _correr(tid, fn):
                                    "de_cache": bool(r.get("de_cache"))})
     except Exception as fallo:                             # noqa: BLE001 - va a la pantalla
         with _LOCK:
-            _TRABAJOS[tid].update({"estado": "error", "error": str(fallo)[:1500], "reloj": time.time()})
+            _TRABAJOS[tid].update({"estado": "error", "error": str(fallo)[:1500], "reloj": time.time(),
+                                   "pide_pago": getattr(fallo, "pide_pago", None)})
 
 
-def lanzar_lectura(raiz, red, usuario, cuantos=30, forzar=False, en_hilo=True):
+def lanzar_lectura(raiz, red, usuario, cuantos=30, forzar=False, en_hilo=True, pagar=False):
     tid = _nuevo_trabajo("leer", red, usuario)
-    fn = lambda avance: leer(raiz, red, usuario, cuantos, forzar, avance)  # noqa: E731
+    fn = lambda avance: leer(raiz, red, usuario, cuantos, forzar, avance, pagar)  # noqa: E731
     if en_hilo:
         threading.Thread(target=_correr, args=(tid, fn), daemon=True, name=f"cuenta-{tid}").start()
     else:

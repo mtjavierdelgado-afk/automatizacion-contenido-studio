@@ -4114,6 +4114,8 @@ def parrilla_analizar_una_cuenta(navegador, datos):
     pg.pulsar(".traer-cuenta button.primario", "Traer sus vídeos")
     ok(pg.esperar(".cab-cuenta h3", "@personal_lucia", 20), "trae la cuenta")
     ok(pg.visible(".cuenta-abierta > .meta", "Apify"), "por Apify (no es profesional)")
+    ok(any("Pagar" in d and "$" in d for d in pg.dialogos),
+       f"y antes de pagar PREGUNTÓ, con el precio (revisión del 18-10): {pg.dialogos[-1:]}")
     ok(pg.esperar(".video-cuenta", segundos=5), "con sus vídeos")
     pg.pulsar(".analisis-cuenta button", "Que Claude la analice")
     ok(pg.esperar(".texto-analisis", "QUÉ LE FUNCIONA", 20), "el análisis")

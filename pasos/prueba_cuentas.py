@@ -83,6 +83,9 @@ def prueba_piezas():
     igual(C.entender("https://www.tiktok.com/@unafiesta.lima?lang=es"), ("tiktok", "unafiesta.lima"),
           "un enlace de TikTok")
     igual(C.entender("https://www.instagram.com/estadoplay/"), ("instagram", "estadoplay"), "uno de Instagram")
+    for raro in ("https://www.instagram.com/explore/tags/fiesta/", "https://www.instagram.com/accounts/login/",
+                 "https://www.youtube.com/c/Canal", "https://vm.tiktok.com/ZMabc/"):
+        ok(lanza(C.entender, raro) is not None, f"no se toma por un perfil: {raro}")
     igual(C.entender("https://www.youtube.com/@MrBeast/videos"), ("youtube", "MrBeast"), "uno de YouTube (@)")
     igual(C.entender("https://youtube.com/channel/UCX6OQ3DkcsbYNE6H8uQQuVA"),
           ("youtube", "UCX6OQ3DkcsbYNE6H8uQQuVA"), "uno de YouTube (canal)")
@@ -137,13 +140,19 @@ class Falso(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(cuerpo)
 
+    caminos = []                        # las URL tal cual: ninguna clave puede ir en ellas
+
+    def _portador(self):
+        return (self.headers.get("Authorization") or "").replace("Bearer ", "", 1)
+
     def do_GET(self):
         url = urllib.parse.urlparse(self.path)
         q = dict(urllib.parse.parse_qsl(url.query))
         Falso.vistas.append(("GET", url.path, q))
+        Falso.caminos.append(self.path)
         if url.path.startswith("/yt/"):
-            if q.get("key") != CLAVE_YT:
-                return self._json(400, {"error": {"message": f"API key not valid: {q.get('key')}",
+            if self.headers.get("X-Goog-Api-Key") != CLAVE_YT:
+                return self._json(400, {"error": {"message": f"API key not valid: {self.headers.get('X-Goog-Api-Key')}",
                                                   "errors": [{"reason": "badRequest"}]}})
             if url.path.endswith("/channels"):
                 if q.get("forHandle") == "@noexiste":
@@ -163,9 +172,9 @@ class Falso(http.server.BaseHTTPRequestHandler):
                                                                   "commentCount": "1"},
                                                    "contentDetails": {"duration": "PT45S"}} for n, i in enumerate(ids)]})
         if url.path.startswith("/meta/"):
-            if q.get("access_token") not in (TOKEN_META, TOKEN_META_STUDIO):
-                return self._json(400, {"error": {"code": 190, "message": f"Invalid OAuth token {q.get('access_token')}"}})
-            if url.path.endswith("/me/accounts") and q.get("access_token") == TOKEN_META_STUDIO:
+            if self._portador() not in (TOKEN_META, TOKEN_META_STUDIO):
+                return self._json(400, {"error": {"code": 190, "message": f"Invalid OAuth token {self._portador()}"}})
+            if url.path.endswith("/me/accounts") and self._portador() == TOKEN_META_STUDIO:
                 return self._json(200, {"data": [{"name": "Studio", "instagram_business_account":
                                                   {"id": "178419999", "username": "studio_mirador"}}]})
             if url.path.endswith("/me/accounts"):
@@ -187,12 +196,17 @@ class Falso(http.server.BaseHTTPRequestHandler):
         largo = int(self.headers.get("Content-Length") or 0)
         cuerpo = json.loads(self.rfile.read(largo) or b"{}")
         Falso.vistas.append(("POST", url.path, q, cuerpo))
+        Falso.caminos.append(self.path)
         if url.path.startswith("/apify/"):
-            if q.get("token") != TOKEN_APIFY:
-                return self._json(401, {"error": {"message": f"token {q.get('token')} no vale"}})
+            if self._portador() != TOKEN_APIFY:
+                return self._json(401, {"error": {"message": f"token {self._portador()} no vale"}})
             usuario = (cuerpo.get("profiles") or cuerpo.get("username") or ["?"])[0]
             if usuario == "sincredito":
                 return self._json(402, {"error": {"message": "Not enough credit"}})
+            if usuario == "tarda":
+                return self._json(408, {"error": {"message": "Run timed out"}})
+            if usuario == "camposraros":       # el actor cambió de nombres: cobra y no se entiende nada
+                return self._json(201, [{"loQueSea": i} for i in range(6)])
             if usuario.startswith("noexiste"):
                 return self._json(201, [])
             if "tiktok" in url.path:
@@ -304,16 +318,29 @@ def prueba_orden(bases):
         igual((d["fuente"], C.gasto_del_mes(raiz)), ("youtube_api", 0.0), "YouTube va por la API gratis")
         d = C.leer(raiz, "instagram", "competencia", 10)
         igual((d["fuente"], C.gasto_del_mes(raiz)), ("instagram_oficial", 0.0), "una cuenta profesional, por la vía oficial")
-        d = C.leer(raiz, "instagram", "personal_ana", 10)
-        igual(d["fuente"], "apify", "una cuenta personal pasa a Apify")
+        n = len([v for v in Falso.vistas if v[0] == "POST"])
+        f = lanza(C.leer, raiz, "instagram", "personal_ana", 10)
+        ok(f is not None and f.codigo == 402 and f.pide_pago and f.pide_pago["coste_usd"] == F.coste_apify("instagram", 10),
+           "si lo gratis no sirve, PREGUNTA antes de pagar (con el precio)")
+        ok(len([v for v in Falso.vistas if v[0] == "POST"]) == n and C.gasto_del_mes(raiz) == 0,
+           "y sin el «sí» no se llama a Apify")
+        d = C.leer(raiz, "instagram", "personal_ana", 10, pagar=True)
+        igual(d["fuente"], "apify", "con el «sí», una cuenta personal pasa a Apify")
+        q = [v for v in Falso.vistas if v[0] == "POST"][-1][2]
+        igual((q.get("maxItems"), "maxTotalChargeUsd" in q), ("10", True),
+              "con techo del lado de Apify: tantos resultados y lo que queda del tope")
         ok(any("profesional" in x for x in d["intentos"]), "y dice por qué")
         gasto = C.gasto_del_mes(raiz)
         ok(gasto > 0, f"lo gastado se apunta ({gasto} $)")
         d = C.leer(raiz, "instagram", "personal_ana", 10)
         ok(d.get("de_cache") and C.gasto_del_mes(raiz) == gasto, "la misma cuenta, el mismo día: de la caché, sin pagar")
-        d = C.leer(raiz, "instagram", "personal_ana", 10, forzar=True)
+        d = C.leer(raiz, "instagram", "personal_ana", 10, forzar=True, pagar=True)
         ok(C.gasto_del_mes(raiz) > gasto, "«Volver a traer» sí paga")
-        d = C.leer(raiz, "tiktok", "ana", 10)
+        ok(not C.plan(raiz, "instagram", "personal_ana", 30)["guardada"]["sirve"],
+           "pedir más vídeos de los guardados hoy: la copia no sirve (y la pantalla preguntará)")
+        ok(C.plan(raiz, "instagram", "personal_ana", 10)["guardada"]["sirve"], "los mismos, sí")
+        ok(C.plan(raiz, "tiktok", "x", "50")["vias"], "un «cuántos» escrito como texto no rompe el plan")
+        d = C.leer(raiz, "tiktok", "ana", 10, pagar=True)
         igual(d["fuente"], "apify", "TikTok, por Apify")
         igual([v["vistas"] for v in d["videos"]], [900, 899, 898, 897], "los vídeos, de más a menos vistas")
         n = len([v for v in Falso.vistas if v[0] == "POST"])
@@ -321,13 +348,50 @@ def prueba_orden(bases):
         ok(f is not None and len([v for v in Falso.vistas if v[0] == "POST"]) == n,
            "una cuenta que no existe no se intenta pagando")
 
+        # lo que Apify cobra aunque falle también cuenta para el tope
+        antes = C.gasto_del_mes(raiz)
+        lanza(C.leer, raiz, "tiktok", "tarda", 10, pagar=True)
+        igual(round(C.gasto_del_mes(raiz) - antes, 4), F.coste_apify("tiktok", 10),
+              "un actor que se pasa de tiempo: lo reservado se queda apuntado")
+        antes = C.gasto_del_mes(raiz)
+        f = lanza(C.leer, raiz, "tiktok", "camposraros", 10, pagar=True)
+        ok(f is not None, "resultados que no se entienden: no hay cuenta")
+        igual(round(C.gasto_del_mes(raiz) - antes, 4), F.coste_apify("tiktok", 6),
+              "pero los 6 resultados cobrados se apuntan")
+        antes = C.gasto_del_mes(raiz)
+        C.guardar_claves({"apify_token": "apify_api_malo_000000"})
+        lanza(C.leer, raiz, "tiktok", "otra", 10, pagar=True)
+        igual(C.gasto_del_mes(raiz), antes, "un token de Apify malo no cobra: la reserva se devuelve")
+        C.guardar_claves({"apify_token": TOKEN_APIFY})
+
+        # una clave gratis que no vale no es motivo para pagar
+        C.guardar_claves({"youtube_clave": "AIzaMALA0000000000"})
+        n = len([v for v in Falso.vistas if v[0] == "POST"])
+        f = lanza(C.leer, raiz, "youtube", "pepe", 10, pagar=True)
+        ok(f is not None and "Arregla" in str(f) and len([v for v in Falso.vistas if v[0] == "POST"]) == n,
+           "una clave de YouTube mala para y lo dice: no pasa a Apify")
+        C.guardar_claves({"youtube_clave": CLAVE_YT})
+
+        # dos lecturas a la vez cerca del tope: solo cabe una
+        gastado = C.gasto_del_mes(raiz)
+        C.guardar_claves({"tope_usd": round(gastado + F.coste_apify("tiktok", 10) * 1.5, 2)})
+        salidas = []
+        hilos = [threading.Thread(target=lambda u=u: salidas.append(lanza(C.leer, raiz, "tiktok", u, 10, pagar=True)))
+                 for u in ("par_uno", "par_dos")]
+        [h.start() for h in hilos]
+        [h.join() for h in hilos]
+        igual(sum(1 for x in salidas if x is None), 1, "dos lecturas a la vez cerca del tope: solo pasa una")
+        ok(C.gasto_del_mes(raiz) <= C.claves_publicas()["tope_usd"] + 1e-9, "y el tope no se pasa")
+
         C.guardar_claves({"tope_usd": 0})
-        f = lanza(C.leer, raiz, "tiktok", "otra", 10)
+        f = lanza(C.leer, raiz, "tiktok", "otra", 10, pagar=True)
         ok(f is not None and "tope" in str(f), "con el tope gastado, no se paga y se dice")
         C.guardar_claves({"tope_usd": 5, "pago": False})
-        f = lanza(C.leer, raiz, "tiktok", "otra", 10)
+        f = lanza(C.leer, raiz, "tiktok", "otra", 10, pagar=True)
         ok(f is not None and "apagado" in str(f), "con el pago apagado, tampoco")
         C.guardar_claves({"pago": True})
+        ok(Falso.caminos and not any(k in c for c in Falso.caminos for k in (CLAVE_YT, TOKEN_META, TOKEN_APIFY)),
+           "ninguna clave va en una URL (van en cabeceras)")
         plan = C.plan(raiz, "tiktok", "otra", 30)
         ok(plan["vias"][0]["fuente"] == "apify" and plan["vias"][0]["coste_usd"] == F.coste_apify("tiktok", 30),
            "el plan dice que irá por Apify y cuánto costará")
@@ -360,7 +424,7 @@ def prueba_claude(bases):
         d = C.cuenta(raiz, "tiktok", "ana")
         igual(d["analisis"], "QUÉ LE FUNCIONA\n- preguntas", "y se guarda con la cuenta")
         ok("tiktok 0" in pedidos[-1], "con sus vídeos dentro")
-        C.leer(raiz, "tiktok", "ana", 10, forzar=True)
+        C.leer(raiz, "tiktok", "ana", 10, forzar=True, pagar=True)
         d = C.cuenta(raiz, "tiktok", "ana")
         ok(d.get("analisis") and d.get("analisis_viejo"), "volver a traerla conserva el análisis, marcado como viejo")
         t = C.lanzar_lectura(raiz, "tiktok", "ana", 10, en_hilo=False)
@@ -397,7 +461,7 @@ def prueba_claude(bases):
     try:
         r2 = os.path.join(CARPETA, "sim")
         os.makedirs(r2)
-        d = C.leer(r2, "instagram", "personal_x", 10)
+        d = C.leer(r2, "instagram", "personal_x", 10, pagar=True)
         igual(d["fuente"], "apify", "simulado: una cuenta personal también pasa a Apify")
         d = C.analizar(r2, "instagram", "personal_x")
         ok("QUÉ LE FUNCIONA" in d["analisis"], "simulado: el análisis")
@@ -474,6 +538,11 @@ def prueba_studio():
         igual(s.post(base + "/api/parrilla/cuentas/plan", json={"texto": "https://x.com/ana"}).status_code, 400,
               "un enlace de otra web, 400")
         r = s.post(base + "/api/parrilla/cuentas/leer", json={"texto": "@ana", "red": "tiktok", "cuantos": 10})
+        t = _esperar(s, base + f"/api/parrilla/cuentas/trabajos/{r.json()['id']}")
+        ok(t["estado"] == "error" and (t.get("pide_pago") or {}).get("coste_usd"),
+           "sin «pagar», el trabajo acaba pidiendo permiso con el precio")
+        r = s.post(base + "/api/parrilla/cuentas/leer", json={"texto": "@ana", "red": "tiktok", "cuantos": 10,
+                                                             "forzar": "false", "pagar": True})
         igual(r.status_code, 202, "leer una cuenta: 202 y un trabajo")
         t = _esperar(s, base + f"/api/parrilla/cuentas/trabajos/{r.json()['id']}")
         igual(t["estado"], "listo", "y acaba")

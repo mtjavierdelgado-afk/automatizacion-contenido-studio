@@ -10,6 +10,30 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Vídeos con más movimiento, sobre todo los cortos (18 de octubre)**
+- **Movimiento de cámara en tres niveles**, en el Encargo y en el vídeo
+  (Ajustes del montaje → 🎬 Movimiento y efectos): **sobrio** (lo de siempre:
+  un acercamiento o alejamiento suave por plano), **vivo** (acercamientos,
+  paneos y alejamientos que se alternan, y los planos largos se reencuadran a
+  mitad, en una pausa de la voz) y **dinámico** (más recorrido, un golpe de
+  zoom en la palabra clave y cortes secos entre planos, salvo en los acentos).
+- **Gancho del primer segundo**: el primer plano entra con un zoom rápido y la
+  primera frase sale grande en el centro.
+- **Subtítulos de redes**: palabras grandes, con borde, y la palabra que se
+  está diciendo resaltada en el color del vídeo.
+- **Cifras clave en pantalla**: «ochenta y cuatro centímetros» sale arriba,
+  grande, como «84 cm»; un rango, como «23–25 cm».
+- **Barra de progreso** fina arriba del vídeo.
+- **Elegir las transiciones** que entran, cada una con su muestra animada.
+- **Los vídeos NUEVOS de hasta 2 minutos nacen con todo esto puesto** (en
+  vivo) y en **ritmo rápido** (planos de 1,5 a 5 s) si su estilo iba más
+  lento. Ojo: el ritmo rápido son más planos, y un 30-40 % más de imágenes que
+  pagar; el Encargo lo dice en el coste y deja elegir «Ritmo del estilo». Los
+  vídeos largos y **los que ya existen no cambian** si nadie lo pide.
+- Cambiar el movimiento, los subtítulos, las cifras, la barra o las
+  transiciones de un vídeo hecho **no redibuja ninguna imagen**: se rehacen
+  las capas y el montaje («Aplicar ahora»), que son gratis.
+
 **La Parrilla de guiones, en Automatizar (17 de octubre)**
 - **Automatizar ya no está vacío: abre la Parrilla.** Cada proyecto tiene sus
   matrices de guiones, y cada guion su estado: **pendiente**, **usado** (se

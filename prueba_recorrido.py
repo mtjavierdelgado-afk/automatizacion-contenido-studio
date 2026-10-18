@@ -783,7 +783,7 @@ def encargo_del_video(navegador, datos):
     pg.js(f"await abrirVideoLight('{datos['video']}');")
     pg.pulsar(".nav-light button", "Encargo")
     ok(pg.esperar(".ajustes-montaje"), "el Encargo enseña los ajustes del montaje")
-    for nombre in ("Música", "Subtítulos", "Logo", "Efectos"):
+    for nombre in ("Música", "Subtítulos", "Logo", "Efectos", "Movimiento y efectos"):
         ok(pg.visible(".fila-ajuste", nombre), f"con su fila de {nombre}")
     ok(not pg.visible(".error-cerrable"), "y sin ningún error arrastrado de otra pantalla")
     # MUSICA
@@ -2854,6 +2854,72 @@ def _capas_fijas_del_video(datos):
             with open(os.path.join(carpeta, nombre), encoding="utf-8") as fh:
                 textos.append(fh.read())
     return "".join(textos)
+
+
+@escenario
+def movimiento_y_efectos_en_el_video(navegador, datos):
+    """Rama montaje-movimiento (18-10-2026): debajo del vídeo montado sale
+    «Movimiento y efectos»; pasar a dinámico guarda SOLO lo que cambia,
+    «Aplicar ahora» rehace las capas y el MP4 con trayectos de cámara, y ni
+    las imágenes ni la voz se mueven. Se deja como estaba."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    ok(_montar_desde_video(pg), "se parte de un vídeo montado al día")
+    pg.p.wait_for_timeout(1500)
+    fila = pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="Movimiento y efectos").first
+    ok(fila.count() > 0, "debajo del vídeo sale la fila «Movimiento y efectos»")
+    fila.locator("button", has_text="Cambiar").click()
+    pg.p.wait_for_timeout(1200)
+    ok(pg.visible(".editor-montaje label", "Movimiento de cámara"),
+       "con el movimiento de cámara para elegir")
+    ok(pg.visible(".editor-montaje .casilla", "Barra de progreso"),
+       "los interruptores (gancho, cifras, barra)")
+    ok(pg.visible(".editor-montaje summary", "Transiciones"), "y las transiciones")
+    assets_antes = _version_de(datos, "assets", "").get("activa")
+    voz_antes = _version_de(datos, "voz", "").get("activa")
+    render_antes = _version_de(datos, "render", "").get("activa")
+    pg.p.locator(".editor-montaje button", has_text="Dinámico").first.click()
+    pg.p.wait_for_timeout(1500)
+    _r, montaje = api.get(f"/api/proyectos/{pid}/montaje")
+    _r, callouts = api.get(f"/api/proyectos/{pid}/pasos/callouts")
+    ok(((callouts.get("params") or {}).get("montaje") or {}).get("movimiento") == "dinamico",
+       f"pulsar «Dinámico» lo guarda ({(callouts.get('params') or {}).get('montaje')})")
+    ok(montaje.get("pendiente"), "y queda pendiente de aplicar")
+    ok(pg.esperar(".editor-montaje button", "Aplicar ahora", 10), "con su «Aplicar ahora»")
+    pg.captura("montaje_dinamico", entera=False)
+    pg.p.locator(".editor-montaje button", has_text="Aplicar ahora").first.click()
+    pg.p.wait_for_timeout(2500)
+    ok(api.libre(pid, 600), "el montaje termina")
+    pg.sin_trabajo(600)
+    activa = _version_de(datos, "callouts", "").get("activa")
+    ruta_mov = os.path.join(datos["proyectos"], pid, "pasos", "callouts",
+                            f"v{activa}", "movimiento.json")
+    try:
+        with open(ruta_mov, encoding="utf-8") as fh:
+            mov = json.load(fh)
+    except (OSError, ValueError):
+        mov = {}
+    movs = mov.get("movimientos") or {}
+    movs = list(movs.values()) if isinstance(movs, dict) else list(movs)
+    con_trayecto = [e for e in movs if isinstance(e, dict) and e.get("trayecto")]
+    ok(con_trayecto, "las capas nuevas llevan trayectos de cámara")
+    ok((_version_de(datos, "assets", "").get("activa"),
+        _version_de(datos, "voz", "").get("activa")) == (assets_antes, voz_antes),
+       "ni una imagen ni la voz se han rehecho")
+    ok(_version_de(datos, "render", "").get("activa") != render_antes,
+       "y el MP4 se ha vuelto a montar")
+    # se deja como estaba para quien venga detrás
+    api.put(f"/api/proyectos/{pid}/montaje", {"montaje": {"movimiento": "sobrio"}})
+    _r, callouts = api.get(f"/api/proyectos/{pid}/pasos/callouts")
+    ok("montaje" not in (callouts.get("params") or {}),
+       "volver a sobrio quita la clave (regla 1)")
+    api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})
+    api.libre(pid, 600)
+    pg.sin_errores("movimiento y efectos en el vídeo")
+    pg.cerrar()
 
 
 @escenario

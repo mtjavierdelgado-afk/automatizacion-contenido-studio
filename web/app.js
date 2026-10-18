@@ -16193,6 +16193,10 @@ function selectorTransiciones(modo, est, elegidas, guardar) {
   const puestas = elegidas.length ? elegidas : fabrica;
   const caja = h('details', { clase: 'transiciones-montaje' },
     h('summary', {}, `Transiciones · ${elegidas.length ? `${elegidas.length} elegidas` : 'las de fábrica'}`));
+  // ABIERTA SE QUEDA ABIERTA: marcar una casilla guarda y repinta, y sin esto
+  // la lista se cerraba a cada toque y había que volver a abrirla.
+  if (est.transicionesAbiertas) caja.open = true;
+  caja.addEventListener('toggle', () => { est.transicionesAbiertas = caja.open; });
   const rejilla = h('div', { clase: 'rejilla-transiciones' });
   catalogo.forEach(t => {
     const marcada = puestas.includes(t.id);
@@ -16220,36 +16224,23 @@ function selectorTransiciones(modo, est, elegidas, guardar) {
   return caja;
 }
 
-function muestraTransicion(t, datos) {
-  const lienzo = h('canvas', { clase: 'muestra-transicion', width: 160, height: 90 });
-  requestAnimationFrame(() => animarTransicion(lienzo, t.frag, datos.vertices, datos.acento));
-  return lienzo;
-}
+/* LAS MUESTRAS VAN POR UN SOLO WEBGL. Un lienzo WebGL por tarjeta eran
+   catorce contextos a la vez, y el navegador (en el móvil, antes) tira los más
+   viejos sin avisar: salía la carita triste del gráfico perdido en vez de la
+   muestra. Ahora hay UN contexto fuera de pantalla que pinta cada muestra y la
+   copia a un lienzo 2D normal, y solo se anima lo que está a la vista. */
+const MUESTRAS_TRANS = { gl: null, lienzo: null, programas: new Map(), visibles: new Set(),
+  observador: null, corriendo: false, inicio: 0 };
 
-function dibujoDeMuestra(color, otro, n) {
-  const c = document.createElement('canvas');
-  c.width = 160; c.height = 90;
-  const x = c.getContext('2d');
-  x.fillStyle = color; x.fillRect(0, 0, 160, 90);
-  x.fillStyle = otro;
-  for (let i = 0; i < 5; i += 1) x.fillRect(10 + i * 30, 20 + ((i * n) % 3) * 15, 18, 40);
-  return c;
-}
-
-function animarTransicion(lienzo, frag, vert, acento) {
-  const gl = lienzo.getContext('webgl', { antialias: false });
-  if (!gl || !frag || !vert) return;
-  const compilar = (tipo, fuente) => {
-    const s = gl.createShader(tipo); gl.shaderSource(s, fuente); gl.compileShader(s);
-    return gl.getShaderParameter(s, gl.COMPILE_STATUS) ? s : null;
-  };
-  const vs = compilar(gl.VERTEX_SHADER, vert), fs = compilar(gl.FRAGMENT_SHADER, frag);
-  if (!vs || !fs) return;
-  const pr = gl.createProgram();
-  gl.attachShader(pr, vs); gl.attachShader(pr, fs);
-  gl.bindAttribLocation(pr, 0, 'a_pos'); gl.linkProgram(pr);
-  if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) return;
-  gl.useProgram(pr);
+function glDeMuestras(vert) {
+  const m = MUESTRAS_TRANS;
+  if (m.gl && !m.gl.isContextLost()) return m.gl;
+  m.programas.clear();
+  m.lienzo = document.createElement('canvas');
+  m.lienzo.width = 160; m.lienzo.height = 90;
+  m.lienzo.addEventListener('webglcontextlost', ev => { ev.preventDefault(); m.gl = null; });
+  const gl = m.lienzo.getContext('webgl', { antialias: false, preserveDrawingBuffer: true });
+  if (!gl) return null;
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
@@ -16264,23 +16255,103 @@ function animarTransicion(lienzo, frag, vert, acento) {
   };
   textura(dibujoDeMuestra('#3c5a7a', '#a9c6e0', 1), 0);
   textura(dibujoDeMuestra('#7a4f3c', '#e8c39e', 2), 1);
-  const u = n => gl.getUniformLocation(pr, n);
-  gl.uniform1i(u('u_from'), 0); gl.uniform1i(u('u_to'), 1);
-  gl.uniform2f(u('u_resolution'), 160, 90);
-  const ac = (acento || {});
-  const rgb = v => (Array.isArray(v) ? v : [0.85, 0.65, 0.34]);
-  gl.uniform3fv(u('u_accent'), rgb(ac.acento));
-  gl.uniform3fv(u('u_accent_dark'), rgb(ac.oscuro));
-  gl.uniform3fv(u('u_accent_bright'), rgb(ac.claro));
-  const inicio = performance.now();
-  const paso = ahora => {
-    if (!lienzo.isConnected) return;
-    const ciclo = ((ahora - inicio) / 1800) % 1;
-    gl.uniform1f(u('u_progress'), Math.min(1, Math.max(0, (ciclo - 0.2) / 0.6)));
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    requestAnimationFrame(paso);
+  m.gl = gl;
+  m.vert = vert;
+  return gl;
+}
+
+function programaDeMuestra(gl, frag, vert, acento) {
+  const m = MUESTRAS_TRANS;
+  if (m.programas.has(frag)) return m.programas.get(frag);
+  const compilar = (tipo, fuente) => {
+    const s = gl.createShader(tipo); gl.shaderSource(s, fuente); gl.compileShader(s);
+    return gl.getShaderParameter(s, gl.COMPILE_STATUS) ? s : null;
   };
-  requestAnimationFrame(paso);
+  const vs = compilar(gl.VERTEX_SHADER, vert), fs = compilar(gl.FRAGMENT_SHADER, frag);
+  let pr = null;
+  if (vs && fs) {
+    pr = gl.createProgram();
+    gl.attachShader(pr, vs); gl.attachShader(pr, fs);
+    gl.bindAttribLocation(pr, 0, 'a_pos'); gl.linkProgram(pr);
+    if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) pr = null;
+  }
+  if (pr) {
+    gl.useProgram(pr);
+    const u = n => gl.getUniformLocation(pr, n);
+    gl.uniform1i(u('u_from'), 0); gl.uniform1i(u('u_to'), 1);
+    gl.uniform2f(u('u_resolution'), 160, 90);
+    const ac = acento || {};
+    const rgb = v => (Array.isArray(v) ? v : [0.85, 0.65, 0.34]);
+    gl.uniform3fv(u('u_accent'), rgb(ac.acento));
+    gl.uniform3fv(u('u_accent_dark'), rgb(ac.oscuro));
+    gl.uniform3fv(u('u_accent_bright'), rgb(ac.claro));
+    pr.progreso = u('u_progress');
+  }
+  m.programas.set(frag, pr);
+  return pr;
+}
+
+function pintarMuestras(ahora) {
+  const m = MUESTRAS_TRANS;
+  if (!m.visibles.size) { m.corriendo = false; return; }
+  const ciclo = ((ahora - m.inicio) / 1800) % 1;
+  const progreso = Math.min(1, Math.max(0, (ciclo - 0.2) / 0.6));
+  for (const lienzo of [...m.visibles]) {
+    if (!lienzo.isConnected) {
+      m.visibles.delete(lienzo);
+      if (m.observador) m.observador.unobserve(lienzo);
+      continue;
+    }
+    const d = lienzo.muestra || {};
+    const gl = glDeMuestras(d.vert);
+    if (!gl) continue;
+    const pr = programaDeMuestra(gl, d.frag, d.vert, d.acento);
+    if (!pr) continue;
+    gl.useProgram(pr);
+    gl.uniform1f(pr.progreso, progreso);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    const ctx = lienzo.getContext('2d');
+    if (ctx) ctx.drawImage(m.lienzo, 0, 0, lienzo.width, lienzo.height);
+  }
+  requestAnimationFrame(pintarMuestras);
+}
+
+function verMuestra(lienzo, visible) {
+  const m = MUESTRAS_TRANS;
+  if (visible) m.visibles.add(lienzo); else m.visibles.delete(lienzo);
+  if (m.visibles.size && !m.corriendo) {
+    m.corriendo = true;
+    m.inicio = m.inicio || performance.now();
+    requestAnimationFrame(pintarMuestras);
+  }
+}
+
+function muestraTransicion(t, datos) {
+  const lienzo = h('canvas', { clase: 'muestra-transicion', width: 160, height: 90 });
+  lienzo.muestra = { frag: t.frag, vert: datos.vertices, acento: datos.acento };
+  if (!t.frag || !datos.vertices) return lienzo;
+  if ('IntersectionObserver' in window) {
+    const m = MUESTRAS_TRANS;
+    if (!m.observador) {
+      m.observador = new IntersectionObserver(entradas => {
+        entradas.forEach(e => verMuestra(e.target, e.isIntersecting));
+      });
+    }
+    m.observador.observe(lienzo);
+  } else {
+    verMuestra(lienzo, true);
+  }
+  return lienzo;
+}
+
+function dibujoDeMuestra(color, otro, n) {
+  const c = document.createElement('canvas');
+  c.width = 160; c.height = 90;
+  const x = c.getContext('2d');
+  x.fillStyle = color; x.fillRect(0, 0, 160, 90);
+  x.fillStyle = otro;
+  for (let i = 0; i < 5; i += 1) x.fillRect(10 + i * 30, 20 + ((i * n) % 3) * 15, 18, 40);
+  return c;
 }
 
 /* --------------------------------------------------------------- el logo */

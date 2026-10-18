@@ -2911,6 +2911,24 @@ def movimiento_y_efectos_en_el_video(navegador, datos):
        "ni una imagen ni la voz se han rehecho")
     ok(_version_de(datos, "render", "").get("activa") != render_antes,
        "y el MP4 se ha vuelto a montar")
+    # LAS TRANSICIONES (18-10, visto en el móvil): marcar una no cierra la
+    # lista, y las muestras se pintan todas (antes, una WebGL por tarjeta y el
+    # navegador tiraba las viejas: carita triste en vez de la muestra).
+    pg.p.locator(".editor-montaje summary", has_text="Transiciones").first.click()
+    pg.p.wait_for_timeout(800)
+    pg.p.locator(".tarjeta-transicion input").first.click()
+    pg.p.wait_for_timeout(1500)
+    ok(pg.p.evaluate("() => !!(document.querySelector('.transiciones-montaje') || {}).open"),
+       "marcar una transición no cierra la lista")
+    vacias = pg.p.evaluate("""() => [...document.querySelectorAll('canvas.muestra-transicion')]
+      .slice(0, 4).filter(c => { c.scrollIntoView(); return false; }).length""")
+    pg.p.wait_for_timeout(1200)
+    pintadas = pg.p.evaluate("""() => [...document.querySelectorAll('canvas.muestra-transicion')]
+      .slice(0, 4).filter(c => { const d = c.getContext('2d').getImageData(0, 0, 160, 90).data;
+        let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n > 1000; }).length""")
+    ok(pintadas >= 1 and vacias == 0, f"las muestras de las transiciones se pintan ({pintadas})")
+    # se deja como estaba para quien venga detrás
+    api.put(f"/api/proyectos/{pid}/montaje", {"transiciones": []})
     # se deja como estaba para quien venga detrás
     api.put(f"/api/proyectos/{pid}/montaje", {"montaje": {"movimiento": "sobrio"}})
     _r, callouts = api.get(f"/api/proyectos/{pid}/pasos/callouts")

@@ -3221,6 +3221,11 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .tarjeta-transicion.puesta { border-color: var(--acento); background: var(--marcado); }
 .muestra-transicion { width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 4px;
   background: var(--lienzo); display: block; }
+/* la tarjeta es un <label> (toda ella marca la casilla), pero no un rótulo:
+   sin esto heredaba las mayúsculas pequeñas de los label de formulario */
+.tarjeta-transicion { text-transform: none; letter-spacing: normal; font-size: 13px;
+  color: var(--texto); margin-bottom: 0; }
+.tarjeta-transicion .fila { align-items: center; gap: 8px; }
 
 /* ================================================================ PUBLICAR
    Rama `publicar-redes-1` (16-10-2026): la barra de módulos y el módulo

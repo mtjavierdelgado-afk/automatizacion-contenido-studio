@@ -6601,7 +6601,11 @@ def _revisar_y_corregir(avisar, ctx, modo, ajustes, planos=None):
             break
         retoque, sustituye, porque = revisor.elegir(
             ctx.proyecto, modo, cupo - informe["mandadas"],
-            float(ajustes.get("revisor_max_usd") or 0.0), usd, planos=objetivo)
+            float(ajustes.get("revisor_max_usd") or 0.0), usd,
+            # SOLO lo que ESTA vuelta acaba de mirar y marcar: una nota vieja de
+            # un plano cuya imagen nueva no se pudo revisar (cupo, tiempo) es de
+            # la imagen de antes, y rehacerla seria pagar a ciegas
+            planos={m["plano"] for m in resumen.get("marcadas") or []} & objetivo)
         informe["porque"] = porque
         informe["vueltas"].append({"revisados": resumen.get("revisados", 0),
                                    "marcadas": len(resumen.get("marcadas") or []),

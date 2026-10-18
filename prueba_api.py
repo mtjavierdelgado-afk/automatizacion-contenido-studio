@@ -5992,6 +5992,35 @@ def probar_lo_de_v2h():
         ok(bool((datos or {}).get("marca")), "R9: con una marca para buscarlo en el registro")
         setattr(servidor, "_sonido", reales.pop("_sonido"))
 
+        # R7 · UN CUERPO CON UN TIPO EQUIVOCADO ES UN 400, NO UN 500
+        pid = Proyecto.crear(base, "r7 tipos").id
+        sembrar(os.path.join(base, pid))
+        p = f"/api/proyectos/{pid}"
+        for metodo, ruta, cuerpo in (
+                ("POST", p + "/guion/bloques/reescribir", {"bloques": 5, "peticion": "x"}),
+                ("POST", p + "/guion/pausas/quitar", {"bloques": 5}),
+                ("POST", p + "/exportar", {"que": "video", "partes": 5}),
+                ("POST", p + "/estilo/traer", {"partes": 5}),
+                ("PUT", p + "/estilo/seleccion", {"referencias": 5}),
+                ("POST", p + "/estilo/guia", {"referencias": 5}),
+                ("POST", p + "/repaso", {"texto": "hola", "t": 1, "imagenes": 5}),
+                ("POST", p + "/capturas/aplicar", {"capturas": 5}),
+                ("POST", p + "/sonido/efectos", {"papeles": 5}),
+                ("POST", p + "/sonido/efectos", {"papeles": [[1]]}),
+                ("POST", "/api/estimacion", {"duracion_objetivo_s": 60, "min_s": "a"}),
+                ("PUT", p + "/sonido", {"musica": "x"}),
+                ("PUT", p + "/callouts/plan", {"diseno": [1]}),
+                ("PUT", p + "/callouts/plan", {"paleta": {"fijados": 5}}),
+                ("PUT", p + "/cartelas", {"plantillas": [[1]]})):
+            codigo, datos = pedir(metodo, ruta, json=cuerpo)
+            igual(codigo, 400, f"R7: {metodo} {ruta.replace(p, '')} {json.dumps(cuerpo)} da 400")
+        codigo, _d = pedir("GET", p + "/exportes/a%00b")
+        igual(codigo, 404, "R7: un nulo en la ruta de un exporte da 404, no 500")
+        codigo, _d = pedir("POST", "/api/sonido/subir", data=b"--xx\r\nbasura sin dos puntos"
+                           b"\r\n\r\nabc\r\n--xx--\r\n",
+                           headers={"Content-Type": "multipart/form-data; boundary=xx"})
+        igual(codigo, 400, "R7: un multipart roto al subir un audio da 400, no 500")
+
         # S3 · UNA CLAVE CORTA NO SE ENSEÑA A MEDIAS (el Client ID de Jamendo
         # tiene 8 caracteres y se enseñaban 4)
         from pasos import claves as CLAVES                    # noqa: PLC0415

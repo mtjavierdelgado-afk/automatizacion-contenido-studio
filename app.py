@@ -979,6 +979,22 @@ def _cuerpo(crudo):
     return crudo if isinstance(crudo, dict) else {}
 
 
+def _lista_de_textos(datos, clave):
+    """`datos[clave]` como lista de textos sueltos, o None si no viene.
+
+    Un tipo equivocado (un numero, un objeto, listas dentro de la lista) es un
+    400 que lo dice, y no un 500 con un TypeError al recorrerlo o al buscarlo
+    en un catalogo (R7 del analisis del 13-10-2026).
+    """
+    valor = (datos or {}).get(clave)
+    if valor is None:
+        return None
+    if not isinstance(valor, list) or any(
+            isinstance(v, (list, dict)) or v is None for v in valor):
+        raise ErrorApi(400, f"'{clave}' tiene que ser una lista de textos")
+    return valor
+
+
 # LAS RUTAS `async def` CORREN EN EL BUCLE DE EVENTOS, que es UNO para todo el
 # servicio: cualquier cosa que bloquee ahi -- abrir un proyecto (leer y validar
 # estado.json), un cerrojo de fichero que espera hasta 30 s, escribir una
@@ -2564,7 +2580,8 @@ def reescribir_bloques_guion(pid: str, cuerpo: dict = Body(default=None)):
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
     datos = _cuerpo(cuerpo)
-    crudos = datos.get("bloques") or ([datos["bloque"]] if datos.get("bloque") else [])
+    crudos = (_lista_de_textos(datos, "bloques")
+              or ([datos["bloque"]] if datos.get("bloque") else []))
     ids = [str(b).strip().upper() for b in crudos if str(b).strip()]
     if not ids:
         raise ErrorApi(400, "hace falta 'bloque' o 'bloques' con los ids a reescribir")
@@ -2783,6 +2800,7 @@ def quitar_pausas_guion(pid: str, cuerpo: dict = Body(default=None)):
     """
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
+    _lista_de_textos(datos, "bloques")       # R7: un numero aqui era un 500
     marcas = PASOS_MODULOS.marcas_tts if PASOS_MODULOS else None
 
     def hacer(params, bloques, _grabados):
@@ -2907,6 +2925,12 @@ def estimar_video(cuerpo: dict = Body(default=None)):
     # UN VIDEO CORTO NUEVO nace en ritmo rapido si su estilo va mas lento
     # (`presets_light.ritmo_para_video_nuevo`): con `ritmo_corto` la pantalla
     # pregunta por el video que va a nacer, no por el estilo.
+    for clave in ("min_s", "max_s"):          # R7: un texto aqui era un 500
+        if datos.get(clave) not in (None, ""):
+            try:
+                float(datos[clave])
+            except (TypeError, ValueError):
+                raise ErrorApi(400, f"'{clave}' tiene que ser un número de segundos")
     corto = (light.ritmo_para_video_nuevo(segundos, datos.get("max_s"))
              if datos.get("ritmo_corto") and not datos.get("ritmo") else None)
     if datos.get("ritmo") or corto:
@@ -3341,7 +3365,8 @@ def exportar_por_partes(pid: str, cuerpo: dict = Body(default=None)):
     que = str(datos.get("que") or "video")
     if que not in ("video", "audio", "zip"):
         raise ErrorApi(400, "«que» tiene que ser video, audio o zip")
-    partes = [str(x) for x in (datos.get("partes") or []) if str(x) in ("voz", "musica", "efectos")]
+    partes = [str(x) for x in (_lista_de_textos(datos, "partes") or [])
+              if str(x) in ("voz", "musica", "efectos")]
     pedido = {"que": que, "partes": partes, "parte": str(datos.get("parte") or ""),
               "subtitulos": datos.get("subtitulos", True) is not False,
               "logo": datos.get("logo", True) is not False}
@@ -3371,6 +3396,8 @@ def exportar_por_partes(pid: str, cuerpo: dict = Body(default=None)):
 def descargar_exporte(pid: str, ruta: str):
     """Un fichero preparado por /exportar, para descargar con su nombre."""
     ctx = contexto(pid)
+    if "\x00" in ruta:                    # R7: un nulo en la ruta era un 500
+        raise ErrorApi(404, "ese fichero no está preparado: vuelve a pedirlo")
     base = os.path.realpath(os.path.join(ctx.proyecto.raiz, "exportes"))
     destino = os.path.realpath(os.path.join(base, ruta))
     if not destino.startswith(base + os.sep) or not os.path.isfile(destino):
@@ -3617,6 +3644,7 @@ def elegir_estilo(pid: str, cuerpo: dict = Body(default=None)):
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
     estilo = _estilo()
+    _lista_de_textos(datos, "referencias")
     try:
         rutas = estilo.validar_seleccion(datos.get("referencias"))
     except ValueError as fallo:
@@ -3679,7 +3707,7 @@ def escribir_guia_estilo(pid: str, cuerpo: dict = Body(default=None)):
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
     estilo = _estilo()
-    rutas = datos.get("referencias")
+    rutas = _lista_de_textos(datos, "referencias")
     if not rutas:
         rutas = ((ctx.estado.params("assets") or {}).get("estilo") or {}).get("referencias")
     try:
@@ -4432,7 +4460,7 @@ def guardar_plan_callouts(pid: str, cuerpo: dict = Body(default=None)):
         cambios["subtitulo_tam"] = nombre
         hecho.append("subtitulo_tam")
     if datos.get("diseno"):
-        if datos["diseno"] not in p7.SETS_DISENO:
+        if not isinstance(datos["diseno"], str) or datos["diseno"] not in p7.SETS_DISENO:
             raise ErrorApi(400, f"set de diseño desconocido: {datos['diseno']}. "
                                 f"Los sets son: {', '.join(p7.SETS_DISENO)}")
         cambios["diseno"] = datos["diseno"]
@@ -4446,8 +4474,10 @@ def guardar_plan_callouts(pid: str, cuerpo: dict = Body(default=None)):
         # Los colores elegidos a mano viajan en 'fijados' DENTRO de la paleta,
         # no sueltos: paleta_de_guia necesita distinguir "esto lo puso alguien"
         # de "esto se derivo", o al volver a derivar se los lleva por delante.
-        fijados = {papel: str(color) for papel, color in
-                   (datos["paleta"].get("fijados") or {}).items()
+        crudos = datos["paleta"].get("fijados") or {}
+        if not isinstance(crudos, dict):      # R7: un numero aqui era un 500
+            raise ErrorApi(400, "'paleta.fijados' tiene que ser un objeto papel → color")
+        fijados = {papel: str(color) for papel, color in crudos.items()
                    if papel in p7.PARAMS_POR_DEFECTO["paleta"] and color}
         actual = dict((ctx.estado.params("callouts") or {}).get("paleta")
                       or p7.PARAMS_POR_DEFECTO["paleta"])
@@ -4955,6 +4985,7 @@ def guardar_cartelas(pid: str, cuerpo: dict = Body(default=None)):
         _guardar_cartelas_por_unidad(ctx, cartelas, datos["plan"])
         hecho.append("plan")
     if isinstance(datos.get("plantillas"), list):
+        _lista_de_textos(datos, "plantillas")
         desconocidas = [t for t in datos["plantillas"]
                         if t not in cartelas.PLANTILLAS]
         if desconocidas:
@@ -5692,7 +5723,7 @@ def anadir_nota_repaso(pid: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(400, "hace falta 't', el segundo del vídeo")
     plano = str(datos.get("plano") or "") or repaso.plano_en(
         _cortes_del_mp4(ctx), segundo)
-    imagenes = [str(i) for i in (datos.get("imagenes") or [])]
+    imagenes = [str(i) for i in (_lista_de_textos(datos, "imagenes") or [])]
     try:
         # DE QUE PANTALLA VIENE. Imagenes y Video no comparten cuaderno: en una
         # se anota sobre el dibujo y en la otra sobre lo que se monta encima.
@@ -7127,6 +7158,8 @@ def guardar_sonido(pid: str, cuerpo: dict = Body(default=None)):
                 "estado": ctx.estado.estado_de("render")}
     if "musica" in datos:
         ficha = datos["musica"] or {}
+        if not isinstance(ficha, dict):       # R7: un texto aqui era un 500
+            raise ErrorApi(400, "'musica' tiene que ser la ficha de un tema (o null)")
         if not ficha:
             cambios["musica"] = {}
         else:
@@ -8052,7 +8085,10 @@ async def subir_audio_propio(peticion: Request, familia: str = Query(default="mu
     tipo = (peticion.headers.get("content-type") or "").lower()
     if not tipo.startswith("multipart/"):
         raise ErrorApi(400, "manda el audio como multipart")
-    formulario = await peticion.form()
+    try:
+        formulario = await peticion.form()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(400, f"multipart ilegible: {fallo}")
     for _clave, valor in formulario.multi_items():
         if not hasattr(valor, "read"):
             continue
@@ -8269,7 +8305,7 @@ def surtir_efectos(pid: str, cuerpo: dict = Body(default=None)):
     ctx = contexto(pid)
     sonido = _sonido()
     datos = _cuerpo(cuerpo)
-    pedidos = datos.get("papeles") or list(sonido.PAPELES)
+    pedidos = _lista_de_textos(datos, "papeles") or list(sonido.PAPELES)
     desconocidos = [p for p in pedidos if p not in sonido.PAPELES]
     if desconocidos:
         raise ErrorApi(400, f"papeles desconocidos: {', '.join(desconocidos)}. "
@@ -12968,7 +13004,7 @@ def traer_cambios_del_estilo(pid: str, cuerpo: dict = Body(default=None)):
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
     datos = _cuerpo(cuerpo)
-    pedidas = [str(p).strip().lower() for p in (datos.get("partes") or [])]
+    pedidas = [str(p).strip().lower() for p in (_lista_de_textos(datos, "partes") or [])]
     malas = [p for p in pedidas if p not in PARTES_ESTILO]
     if not pedidas or malas:
         raise ErrorApi(400, "hace falta 'partes' con alguna de: "
@@ -14598,6 +14634,8 @@ def aplicar_capturas(pid: str, cuerpo: dict = Body(default=None)):
     pedidas = datos.get("capturas")
     if isinstance(pedidas, str):
         pedidas = [pedidas]
+    else:
+        pedidas = _lista_de_textos(datos, "capturas")
     if pedidas:
         fichas = guardadas.obtener_varias(pedidas)
     else:

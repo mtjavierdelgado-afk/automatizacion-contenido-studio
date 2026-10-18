@@ -3519,3 +3519,33 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
   .cab-chat select, .mandos-chat select { max-width: 100%; flex: 1 1 100%; }
   .interruptor-chat { white-space: normal; }
 }
+
+/* ------------------------------------ ANALIZAR UNA CUENTA (18-10-2026) */
+.conexiones-cuentas summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.conexion-cuenta { border-top: 1px solid var(--linea-suave); padding: 10px 0; min-width: 0; }
+.conexion-cuenta .fila { gap: 8px; flex-wrap: wrap; align-items: center; }
+.conexion-cuenta .fila-clave input { min-width: 0; flex: 1 1 200px; }
+.pago-cuentas { gap: 8px; flex-wrap: wrap; align-items: center; border-top: 1px solid var(--linea-suave); padding-top: 10px; }
+.traer-cuenta { gap: 8px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+.traer-cuenta input { flex: 1 1 220px; min-width: 0; }
+.traer-cuenta select { min-width: 0; max-width: 180px; }
+.cuentas-guardadas { gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.texto-error-cuenta { white-space: pre-wrap; overflow-wrap: anywhere; }
+.cab-cuenta { gap: 8px; flex-wrap: wrap; align-items: center; }
+.cab-cuenta h3 { margin: 0; overflow-wrap: anywhere; min-width: 0; }
+.intentos-cuenta ul { margin: 4px 0; padding-left: 18px; }
+.analisis-cuenta, .guiones-cuenta { border-top: 1px solid var(--linea-suave); margin-top: 10px; padding-top: 10px; }
+.analisis-cuenta h4, .guiones-cuenta h4 { margin: 0 0 6px; }
+.texto-analisis { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.55; background: var(--hueco);
+  border: 1px solid var(--linea); border-radius: 8px; padding: 10px 12px; max-height: 420px; overflow-y: auto; }
+.guiones-cuenta .fila { gap: 8px; flex-wrap: wrap; align-items: center; margin: 6px 0; }
+.guiones-cuenta input[type=text] { flex: 1 1 220px; min-width: 0; }
+.lista-videos-cuenta { border-top: 1px solid var(--linea-suave); margin-top: 10px; padding-top: 8px; }
+.lista-videos-cuenta summary { cursor: pointer; }
+.video-cuenta { gap: 10px; padding: 6px 0; border-top: 1px solid var(--linea-suave); align-items: center; min-width: 0; }
+.video-cuenta .numero-video { color: var(--tenue); font-variant-numeric: tabular-nums; min-width: 22px; text-align: right; }
+.video-cuenta .texto-video { min-width: 0; overflow-wrap: anywhere; }
+.cuenta-chat { max-width: 240px; min-width: 0; }
+@media (max-width: 600px) {
+  .traer-cuenta select, .cuenta-chat { max-width: 100%; flex: 1 1 45%; }
+}

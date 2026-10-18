@@ -19073,6 +19073,10 @@ const PAR = {
   resultadosPor: 'vistas', resultadosPeticion: '',
   chat: null, chats: null, chatTexto: '', chatWeb: false, chatResultados: false, chatModelo: '',
   chatCapturas: [], chatReloj: null, chatEnviando: false, chatsInfo: null, chatScroll: null,
+  // analizar-cuentas (18-10-2026): las cuentas leídas son de todo el Studio
+  cuentas: null, cuentaAbierta: null, cuentaTrabajo: null, cuentaReloj: null, cuentaPendiente: null,
+  cuentaForm: { red: 'tiktok', texto: '', cuantos: 30 }, cuentaGuiones: { cuantos: 5, modo: 'adaptar', peticion: '' },
+  chatCuenta: '', conexionesAbiertas: null,
 };
 const ESTADOS_GUION = { pendiente: 'pendiente', usado: 'usado', publicado: 'publicado' };
 const CLASE_GUION = { pendiente: '', usado: 'ejecutando', publicado: 'ok' };
@@ -19185,7 +19189,7 @@ function vistaParrilla() {
   if (PAR.trabajo && PAR.trabajo.estado === 'trabajando' && !PAR.reloj) setTimeout(vigilarTrabajoParrilla, 0);
   const caja = h('div', { clase: 'automatizar parrilla' });
   const pestanas = h('div', { clase: 'pestanas-publicar', role: 'tablist' });
-  [['parrilla', 'Parrilla'], ['anadir', 'Añadir guiones'], ['marca', 'Marca del cliente'],
+  [['parrilla', 'Parrilla'], ['anadir', 'Añadir guiones'], ['cuentas', 'Analizar una cuenta'], ['marca', 'Marca del cliente'],
     ['ficha', PAR.guion ? recortar(PAR.guion.titulo || PAR.guion.codigo || 'Guion', 26) : 'Ficha de un guion']]
     .forEach(([id, texto]) => pestanas.appendChild(h('button', {
       clase: `mini${PAR.seccion === id ? ' activo' : ' fantasma'}`, role: 'tab',
@@ -19223,6 +19227,7 @@ function vistaParrilla() {
   }
   if (PAR.seccion === 'anadir') caja.appendChild(seccionAnadirParrilla());
   else if (PAR.seccion === 'marca') caja.appendChild(seccionMarcaParrilla());
+  else if (PAR.seccion === 'cuentas') caja.appendChild(seccionCuentasParrilla());
   else if (PAR.seccion === 'ficha' && PAR.guion) caja.appendChild(seccionFichaParrilla());
   else caja.appendChild(seccionListaParrilla());
   return caja;
@@ -19352,7 +19357,8 @@ function seccionListaParrilla() {
     const origen = m.origen || {};
     const deDonde = { subir: origen.fichero ? `de «${origen.fichero}»` : 'de un documento', pegar: 'pegada',
       pedir: 'escrita por Claude', escribir: 'escrita a mano', vacia: '',
-      chat: 'de una conversación con Claude', resultados: 'desde tus resultados' }[origen.tipo] || '';
+      chat: 'de una conversación con Claude', resultados: 'desde tus resultados',
+      cuenta: origen.cuenta ? `con lo que le funciona a ${origen.cuenta}` : 'desde una cuenta analizada' }[origen.tipo] || '';
     bloque.appendChild(h('div', { clase: 'fila cab-matriz' },
       h('h3', {}, m.nombre),
       h('span', { clase: 'meta' }, `${cuantosGuiones((m.guiones || []).length)}${deDonde ? ` · ${deDonde}` : ''}`
@@ -20091,6 +20097,7 @@ function mensajesChatParrilla() {
     const marcas = [];
     if (tuyo && t.web) marcas.push('🌐 con internet');
     if (tuyo && t.resultados) marcas.push('📊 con mis resultados');
+    if (tuyo && t.cuenta) marcas.push(`📈 con ${t.cuenta}`);
     if (tuyo && (t.imagenes || []).length) marcas.push(`📎 ${t.imagenes.length} captura(s)`);
     if (!tuyo && t.estado === 'listo' && t.segundos) marcas.push(`${Math.round(t.segundos)} s`);
     burbuja.appendChild(h('div', { clase: 'meta quien-chat' }, tuyo ? 'Tú' : 'Claude',
@@ -20176,6 +20183,7 @@ function entradaChatParrilla() {
         + 'fuera llevan su fuente y un aviso ⚠ para confirmarlos.'),
       interruptor('chatResultados', '📊 Con mis resultados', 'Le pasa a Claude tus vídeos que mejor funcionaron '
         + 'en este proyecto (cifras guardadas en Publicar).'),
+      selectorCuentaChat(),
       modelos, h('span', { clase: 'crece' }),
       h('button', { clase: 'primario', disabled: ocupada ? true : null, onclick: () => enviarChatParrilla() },
         ocupada ? 'Contestando…' : 'Enviar')));
@@ -20223,6 +20231,7 @@ async function enviarChatParrilla() {
     datos.append('texto', texto);
     datos.append('web', PAR.chatWeb ? '1' : '0');
     datos.append('resultados', PAR.chatResultados ? '1' : '0');
+    if (PAR.chatCuenta) datos.append('cuenta', PAR.chatCuenta);
     datos.append('modelo', PAR.chatModelo || 'opus');
     PAR.chatCapturas.forEach(c => datos.append('capturas', c, c.name || 'captura.png'));
     const enviadas = PAR.chatCapturas.slice();
@@ -20311,6 +20320,342 @@ async function borrarChatParrilla() {
     toast('conversación borrada');
   } catch (e) { toast(`no se ha podido borrar: ${e.message}`, true); }
   pintarModulo();
+}
+
+/* ------------------------------------- ANALIZAR UNA CUENTA (18-10-2026)
+ *
+ * Rama `analizar-cuentas`. Los vídeos públicos de una cuenta ajena (TikTok,
+ * Instagram, YouTube), por la vía gratis si se puede y por Apify si no, con
+ * tope al mes (`pasos/cuentas_ajenas.py`). Luego Claude la analiza y escribe
+ * guiones para el proyecto. Las cuentas leídas son de todo el Studio.
+ */
+const NOMBRE_RED_CUENTA = { tiktok: 'TikTok', instagram: 'Instagram', youtube: 'YouTube' };
+
+function rutaCuentas(resto) { return `${BASE}/api/parrilla/cuentas${resto || ''}`; }
+
+async function cargarCuentasParrilla() {
+  try {
+    PAR.cuentas = await pedir(rutaCuentas());
+  } catch (e) {
+    PAR.cuentas = { cuentas: [], conexiones: null, error: e.message };
+  }
+  if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
+}
+
+function seccionCuentasParrilla() {
+  const caja = h('div', { clase: 'seccion-parrilla cuentas-parrilla' });
+  if (!PAR.cuentas) {
+    setTimeout(cargarCuentasParrilla, 0);
+    caja.appendChild(h('div', { clase: 'cargando' }, 'cargando…'));
+    return caja;
+  }
+  if (PAR.cuentas.error) caja.appendChild(cajaError(PAR.cuentas.error));
+  if (PAR.cuentaTrabajo && PAR.cuentaTrabajo.estado === 'trabajando' && !PAR.cuentaReloj) {
+    setTimeout(vigilarCuentaParrilla, 0);
+  }
+  caja.appendChild(bloqueConexionesCuentas());
+  caja.appendChild(bloqueTraerCuenta());
+  if (PAR.cuentaAbierta) caja.appendChild(bloqueCuentaAbierta(PAR.cuentaAbierta));
+  return caja;
+}
+
+/* ------------------------------------------------------------ conexiones */
+
+function bloqueConexionesCuentas() {
+  const c = PAR.cuentas.conexiones || {};
+  const gasto = Number(PAR.cuentas.gasto_mes || 0);
+  const topeUsd = Number(c.tope_usd || 0);
+  const algunaGratis = (c.youtube || {}).puesta || ((c.meta || {}).puesta && (c.meta || {}).ig_id);
+  // ABIERTO o cerrado como se dejó: al guardar una clave no se cierra solo
+  if (PAR.conexionesAbiertas === null) PAR.conexionesAbiertas = !algunaGratis && !(c.apify || {}).puesta;
+  const detalles = h('details', { clase: 'bloque conexiones-cuentas', open: PAR.conexionesAbiertas ? true : null,
+    ontoggle: ev => { PAR.conexionesAbiertas = ev.target.open; } });
+  detalles.appendChild(h('summary', {}, h('b', {}, 'Conexiones'),
+    h('span', { clase: 'meta' }, ` · YouTube ${(c.youtube || {}).puesta ? '✓' : '—'} · Instagram ${(c.meta || {}).ig_id ? '✓' : '—'}`
+      + ` · Apify ${(c.apify || {}).puesta ? '✓' : '—'} · gastado este mes ${gasto.toFixed(2)} $ de ${topeUsd.toFixed(2)} $`)));
+  if (c.simulado) detalles.appendChild(h('div', { clase: 'caja-aviso' }, 'Modo SIMULADO: no se lee ninguna red ni se paga nada.'));
+  detalles.appendChild(h('div', { clase: 'pista' }, 'Primero se usan las vías gratis (YouTube y la oficial de Instagram). '
+    + 'Apify, de pago, solo cuando esas no sirven: TikTok siempre, y las cuentas de Instagram que no son profesionales. '
+    + 'Las claves se guardan en el servidor y aquí solo se ven sus cuatro últimos caracteres.'));
+
+  const fila = (titulo, ayuda, campo, estado, extra) => {
+    const input = h('input', { type: 'password', placeholder: estado.puesta ? `puesta (${estado.cola || ''})` : 'sin poner',
+      autocomplete: 'off' });
+    input.dataset.foco = `conexion-${campo}`;
+    return h('div', { clase: 'conexion-cuenta' },
+      h('div', { clase: 'fila' }, h('b', {}, titulo), h('span', { clase: 'crece' }),
+        pastillaEstado(estado.puesta ? 'ok' : 'vacio', estado.puesta ? estado.cola || 'puesta' : 'sin poner'),
+        botonGuia('conexiones_cuentas', null)),
+      h('div', { clase: 'pista' }, ayuda),
+      h('div', { clase: 'fila-clave' }, input,
+        h('button', { clase: 'mini', onclick: () => {
+          if (!input.value.trim()) { toast('pega la clave', true); return; }
+          guardarConexionCuentas({ [campo]: input.value.trim() });
+        } }, estado.puesta ? 'Cambiar' : 'Guardar'),
+        estado.puesta ? h('button', { clase: 'mini fantasma peligro', onclick: () => guardarConexionCuentas({ [campo]: '' }) }, 'Quitar') : null),
+      extra || null);
+  };
+  const meta = c.meta || {};
+  detalles.appendChild(fila('YouTube (gratis)', 'Una clave de API de Google Cloud con «YouTube Data API v3» activada. Da '
+    + 'vistas, likes y comentarios de cualquier canal público.', 'youtube_clave', c.youtube || {}));
+  detalles.appendChild(fila('Instagram (gratis, vía oficial de Meta)', 'Un token de tu app de Meta. Tu Instagram tiene que ser '
+    + 'profesional y estar vinculado a tu Página de Facebook. Solo ve cuentas profesionales (la mayoría de negocios).',
+  'meta_token', meta, meta.puesta ? h('div', { clase: 'fila' },
+    meta.ig_id ? h('span', { clase: 'meta' }, `Tu cuenta: @${meta.ig_usuario || meta.ig_id}`) : h('span', { clase: 'meta' }, 'Falta saber cuál es tu cuenta'),
+    h('button', { clase: 'mini', onclick: () => buscarMiInstagramCuentas() }, meta.ig_id ? 'Volver a buscar' : 'Buscar mi cuenta'),
+    meta.caduca ? h('span', { clase: meta.caducando ? 'pastilla obsoleto' : 'meta' }, `el token caduca hacia el ${meta.caduca}`) : null) : null));
+  detalles.appendChild(fila('Apify (de pago, de respaldo)', 'El token de tu cuenta de apify.com. El plan gratis trae 5 $ '
+    + 'al mes; leer una cuenta cuesta unos céntimos.', 'apify_token', c.apify || {}));
+  const tope = h('input', { type: 'number', min: 0, max: 500, step: 0.5, value: c.tope_usd, clase: 'numero-corto' });
+  tope.dataset.foco = 'conexion-tope';
+  detalles.appendChild(h('div', { clase: 'fila pago-cuentas' },
+    h('label', { clase: 'plano' }, h('input', { type: 'checkbox', checked: c.pago ? true : null,
+      onchange: ev => guardarConexionCuentas({ pago: ev.target.checked }) }),
+    h('span', {}, 'Usar el servicio de pago cuando lo gratis no sirva')),
+    h('label', {}, 'Tope al mes ($)'), tope,
+    h('button', { clase: 'mini', onclick: () => guardarConexionCuentas({ tope_usd: tope.value }) }, 'Guardar tope'),
+    h('span', { clase: 'meta' }, `gastado este mes: ${gasto.toFixed(2)} $`)));
+  return detalles;
+}
+
+async function guardarConexionCuentas(cambios) {
+  try {
+    const r = await pedir(rutaCuentas('/conexiones'), { method: 'PUT', cuerpo: cambios });
+    PAR.cuentas = Object.assign({}, PAR.cuentas, { conexiones: r.conexiones });
+    toast('guardado');
+    if (cambios.meta_token) await buscarMiInstagramCuentas(true);
+  } catch (e) { toast(e.message, true); }
+  pintarModulo();
+}
+
+async function buscarMiInstagramCuentas(callado) {
+  try {
+    const r = await pedir(rutaCuentas('/conexiones/instagram'), { method: 'POST', cuerpo: {} });
+    PAR.cuentas = Object.assign({}, PAR.cuentas, { conexiones: r.conexiones });
+    const lista = r.cuentas || [];
+    if (lista.length === 1) toast(`tu Instagram: @${lista[0].usuario}`);
+    else if (lista.length > 1) {
+      const elegida = prompt(`Ese token llega a ${lista.length} cuentas. Escribe cuál es la tuya:\n`
+        + lista.map(x => `@${x.usuario} (${x.pagina})`).join('\n'), lista[0].usuario);
+      const cuenta = lista.find(x => x.usuario === String(elegida || '').replace(/^@/, ''));
+      if (cuenta) await guardarConexionCuentas({ ig_id: cuenta.id, ig_usuario: cuenta.usuario });
+    }
+  } catch (e) { if (!callado) toast(e.message, true); else toast(`token guardado, pero: ${e.message}`, true); }
+  pintarModulo();
+}
+
+/* ------------------------------------------------------- traer una cuenta */
+
+function bloqueTraerCuenta() {
+  const f = PAR.cuentaForm;
+  const bloque = h('div', { clase: 'bloque' }, h('div', { clase: 'fila' }, h('h3', {}, 'Analizar una cuenta'),
+    h('span', { clase: 'crece' }), botonGuia('analizar_cuenta', null)));
+  bloque.appendChild(h('div', { clase: 'pista' }, 'De la competencia o de un creador que te guste: se traen sus vídeos '
+    + 'públicos con sus cifras, Claude dice qué le funciona y te escribe guiones con esa fórmula para tu marca.'));
+  const red = h('select', { 'aria-label': 'Red', onchange: ev => { f.red = ev.target.value; } },
+    Object.entries(NOMBRE_RED_CUENTA).map(([v, t]) => h('option', { value: v, selected: f.red === v ? true : null }, t)));
+  const texto = h('input', { type: 'text', placeholder: '@usuario o el enlace de su perfil', value: f.texto,
+    oninput: ev => {
+      f.texto = ev.target.value;
+      const m = /(tiktok|instagram|youtube)\.com/.exec(f.texto);
+      if (m && f.red !== m[1]) { f.red = m[1]; red.value = m[1]; }
+    },
+    onkeydown: ev => { if (ev.key === 'Enter') traerCuentaParrilla(false); } });
+  texto.dataset.foco = 'cuenta-texto';
+  const cuantos = h('select', { 'aria-label': 'Cuántos vídeos', onchange: ev => { f.cuantos = Number(ev.target.value); } },
+    [10, 20, 30, 50].map(n => h('option', { value: n, selected: f.cuantos === n ? true : null }, `${n} vídeos`)));
+  const ocupado = PAR.cuentaTrabajo && PAR.cuentaTrabajo.estado === 'trabajando';
+  bloque.appendChild(h('div', { clase: 'fila traer-cuenta' }, red, texto, cuantos,
+    h('button', { clase: 'primario', disabled: ocupado ? true : null, onclick: () => traerCuentaParrilla(false) }, 'Traer sus vídeos')));
+  const t = PAR.cuentaTrabajo;
+  if (t && t.estado === 'trabajando') {
+    bloque.appendChild(h('div', { clase: 'caja-aviso fila' }, h('span', { clase: 'girando', 'aria-hidden': 'true' }),
+      h('span', { clase: 'crece' }, `${t.avance || 'trabajando'}… (con el servicio de pago puede tardar uno o dos minutos)`)));
+  } else if (t && t.estado === 'error') {
+    bloque.appendChild(h('div', { clase: 'caja-error texto-error-cuenta' }, t.error));
+  }
+  const lista = (PAR.cuentas.cuentas || []);
+  if (lista.length) {
+    bloque.appendChild(h('div', { clase: 'fila cuentas-guardadas' }, h('span', { clase: 'meta' }, 'Ya leídas:'),
+      lista.slice(0, 20).map(c => h('button', { clase: `mini${PAR.cuentaAbierta && PAR.cuentaAbierta.usuario === c.usuario
+        && PAR.cuentaAbierta.red === c.red ? ' activo' : ' fantasma'}`, title: `${c.videos} vídeos · ${c.traida.replace('T', ' ').slice(0, 16)}`,
+      onclick: () => abrirCuentaParrilla(c.red, c.usuario) }, `${NOMBRE_RED_CUENTA[c.red] || c.red} · @${c.usuario}${c.analizada ? ' ✓' : ''}`))));
+  }
+  return bloque;
+}
+
+async function traerCuentaParrilla(forzar) {
+  const f = PAR.cuentaForm;
+  if (!String(f.texto || '').trim()) { toast('escribe el @usuario o pega el enlace', true); return; }
+  try {
+    const plan = await pedir(rutaCuentas('/plan'), { method: 'POST', cuerpo: { texto: f.texto, red: f.red, cuantos: f.cuantos } });
+    const listas = (plan.vias || []).filter(v => v.lista);
+    if (!listas.length) {
+      toast(`no hay ninguna vía para leer esta cuenta: ${(plan.vias || []).map(v => `${v.nombre} (${v.motivo})`).join('; ')}`, true);
+      return;
+    }
+    const enCache = plan.guardada && plan.guardada.fresca && !forzar;
+    if (!enCache && !listas[0].gratis) {
+      const v = listas[0];
+      if (!confirm(`Esta cuenta se lee con ${v.nombre}: costará unos ${Number(v.coste_usd || 0).toFixed(2)} $.\n`
+        + `Gastado este mes: ${Number(plan.gasto_mes || 0).toFixed(2)} $ de ${Number(plan.tope_usd || 0).toFixed(2)} $. ¿Seguir?`)) return;
+    }
+    PAR.cuentaTrabajo = await pedir(rutaCuentas('/leer'), { method: 'POST',
+      cuerpo: { texto: f.texto, red: f.red, cuantos: f.cuantos, forzar: !!forzar } });
+    PAR.cuentaPendiente = { red: plan.red, usuario: plan.usuario };
+    pintarModulo();
+    vigilarCuentaParrilla();
+  } catch (e) { toast(e.message, true); }
+}
+
+function vigilarCuentaParrilla() {
+  clearTimeout(PAR.cuentaReloj);
+  PAR.cuentaReloj = null;
+  const t = PAR.cuentaTrabajo;
+  if (!t || t.estado !== 'trabajando' || MODULOS.actual !== 'automatizar') return;
+  PAR.cuentaReloj = setTimeout(async () => {
+    PAR.cuentaReloj = null;
+    try {
+      const nuevo = await pedir(rutaCuentas(`/trabajos/${encodeURIComponent(t.id)}`));
+      const acabo = nuevo.estado !== 'trabajando';
+      PAR.cuentaTrabajo = nuevo;
+      if (acabo && nuevo.estado === 'listo') {
+        if (nuevo.de_cache) toast('ya estaba leída hoy: no se ha vuelto a pagar');
+        else if (nuevo.coste_usd) toast(`leída con Apify (≈${Number(nuevo.coste_usd).toFixed(2)} $)`);
+        else toast(nuevo.tipo === 'analizar' ? 'análisis listo' : 'cuenta leída');
+        PAR.cuentas = null;
+        await cargarCuentasParrilla();
+        await abrirCuentaParrilla(nuevo.red, nuevo.usuario);
+        return;
+      }
+    } catch (e) {
+      if (e.status === 404) PAR.cuentaTrabajo = Object.assign({}, t, { estado: 'error', error: 'el servidor ya no conoce ese trabajo: vuelve a lanzarlo' });
+    }
+    repintarParrillaSinPisar();
+    vigilarCuentaParrilla();
+  }, 2000);
+}
+
+async function abrirCuentaParrilla(red, usuario) {
+  try {
+    PAR.cuentaAbierta = await pedir(rutaCuentas(`/${encodeURIComponent(red)}/${encodeURIComponent(usuario)}`));
+  } catch (e) { toast(e.message, true); }
+  pintarModulo();
+}
+
+/* ------------------------------------------------------- la cuenta leída */
+
+function bloqueCuentaAbierta(d) {
+  const bloque = h('div', { clase: 'bloque cuenta-abierta' });
+  const ocupado = PAR.cuentaTrabajo && PAR.cuentaTrabajo.estado === 'trabajando';
+  bloque.appendChild(h('div', { clase: 'fila cab-cuenta' },
+    h('h3', {}, `@${d.usuario}`), h('span', { clase: 'pastilla' }, NOMBRE_RED_CUENTA[d.red] || d.red),
+    d.nombre && d.nombre !== d.usuario ? h('span', { clase: 'meta' }, d.nombre) : null,
+    d.seguidores ? h('span', { clase: 'meta' }, `${cifraCorta(d.seguidores)} seguidores`) : null,
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini fantasma', disabled: ocupado ? true : null, title: 'Vuelve a leerla aunque sea de hoy (con Apify, se paga otra vez)',
+      onclick: () => { PAR.cuentaForm.texto = `@${d.usuario}`; PAR.cuentaForm.red = d.red; traerCuentaParrilla(true); } }, 'Volver a traer'),
+    h('button', { clase: 'mini fantasma peligro', onclick: () => borrarCuentaParrilla(d) }, 'Olvidar')));
+  bloque.appendChild(h('div', { clase: 'meta' }, `Leída el ${String(d.traida || '').replace('T', ' ').slice(0, 16)} por `
+    + `${d.fuente_nombre || d.fuente}${d.coste_usd ? ` (≈${Number(d.coste_usd).toFixed(2)} $)` : ''} · ${(d.videos || []).length} vídeos`));
+  if ((d.intentos || []).length) {
+    bloque.appendChild(h('details', { clase: 'intentos-cuenta' }, h('summary', { clase: 'meta' }, 'Por qué esta vía'),
+      h('ul', {}, d.intentos.map(x => h('li', { clase: 'meta' }, x)))));
+  }
+
+  const analisis = h('div', { clase: 'analisis-cuenta' }, h('div', { clase: 'fila' }, h('h4', {}, 'Qué le funciona'),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: d.analisis ? 'mini' : 'mini primario', disabled: ocupado ? true : null,
+      onclick: () => analizarCuentaParrilla(d) }, d.analisis ? 'Volver a analizar' : 'Que Claude la analice')));
+  if (d.analisis) {
+    if (d.analisis_viejo) analisis.appendChild(h('div', { clase: 'pista' }, 'Este análisis es de una lectura anterior: vuelve a analizar para usar los vídeos nuevos.'));
+    analisis.appendChild(h('div', { clase: 'texto-analisis' }, d.analisis));
+  } else {
+    analisis.appendChild(h('div', { clase: 'pista' }, 'Claude compara sus vídeos con más y con menos vistas: temas, ganchos, duración, cuándo publica e ideas para ti.'));
+  }
+  bloque.appendChild(analisis);
+
+  const g = PAR.cuentaGuiones;
+  const cuantos = h('input', { type: 'number', min: 1, max: PAR.maxPedir || 30, value: g.cuantos, clase: 'numero-corto',
+    oninput: ev => { g.cuantos = ev.target.value; } });
+  cuantos.dataset.foco = 'cuenta-cuantos';
+  const peticion = h('input', { type: 'text', value: g.peticion, placeholder: 'Opcional: algo más («para Navidad», «sin precios»…)',
+    oninput: ev => { g.peticion = ev.target.value; } });
+  peticion.dataset.foco = 'cuenta-peticion';
+  const uso = h('select', { 'aria-label': 'Uso', onchange: ev => { g.modo = ev.target.value; } },
+    [['adaptar', 'adaptar'], ['exacto', 'exacto']].map(([v, t]) => h('option', { value: v, selected: g.modo === v ? true : null }, t)));
+  bloque.appendChild(h('div', { clase: 'guiones-cuenta' }, h('h4', {}, 'Para tu proyecto'),
+    h('div', { clase: 'fila' }, h('label', {}, 'Guiones'), cuantos, h('label', {}, 'Uso'), uso, peticion),
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'primario', onclick: () => guionesDesdeCuentaParrilla(d) }, 'Escribir guiones con lo que le funciona'),
+      h('button', { clase: 'mini', onclick: () => chatConCuentaParrilla(d) }, 'Hablar de ella en el chat'),
+      h('span', { clase: 'pista' }, `Van a la Parrilla de ${((PAR.proyectos || []).find(p => p.id === PAR.cid) || {}).nombre || 'este proyecto'}, con tu marca. Se inspiran, no copian.`))));
+
+  const tabla = h('div', { clase: 'videos-cuenta' });
+  (d.videos || []).forEach((v, i) => {
+    const cifras = [v.vistas != null ? `${cifraCorta(v.vistas)} vistas` : 'sin vistas',
+      v.me_gusta != null ? `${cifraCorta(v.me_gusta)} ♥` : '', v.comentarios != null ? `${cifraCorta(v.comentarios)} 💬` : '',
+      v.duracion_s ? `${Math.round(v.duracion_s)} s` : '', String(v.fecha || '').slice(0, 10)].filter(Boolean).join(' · ');
+    tabla.appendChild(h('div', { clase: 'fila video-cuenta' },
+      h('span', { clase: 'numero-video' }, String(i + 1)),
+      h('div', { clase: 'crece texto-video' }, h('div', {}, recortar(v.texto || '(sin texto)', 160)), h('div', { clase: 'meta' }, cifras)),
+      v.url ? h('a', { clase: 'mini fantasma', href: v.url, target: '_blank', rel: 'noopener noreferrer' }, 'Ver') : null));
+  });
+  bloque.appendChild(h('details', { clase: 'lista-videos-cuenta', open: true },
+    h('summary', {}, h('b', {}, 'Sus vídeos'), h('span', { clase: 'meta' }, ' · de más a menos vistas')), tabla));
+  return bloque;
+}
+
+async function analizarCuentaParrilla(d) {
+  try {
+    PAR.cuentaTrabajo = await pedir(rutaCuentas(`/${encodeURIComponent(d.red)}/${encodeURIComponent(d.usuario)}/analizar`),
+      { method: 'POST', cuerpo: {} });
+    pintarModulo();
+    vigilarCuentaParrilla();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function borrarCuentaParrilla(d) {
+  if (!confirm(`¿Olvidar @${d.usuario}? Se borran sus vídeos leídos y su análisis (los guiones que ya escribiste se quedan).`)) return;
+  try {
+    await pedir(rutaCuentas(`/${encodeURIComponent(d.red)}/${encodeURIComponent(d.usuario)}`), { method: 'DELETE' });
+    PAR.cuentaAbierta = null;
+    PAR.cuentas = null;
+    toast('cuenta olvidada');
+  } catch (e) { toast(e.message, true); }
+  pintarModulo();
+}
+
+async function guionesDesdeCuentaParrilla(d) {
+  const g = PAR.cuentaGuiones;
+  try {
+    const t = await pedir(rutaProyectoParrilla('/desde-cuenta'), { method: 'POST', cuerpo: {
+      red: d.red, usuario: d.usuario, cuantos: Number(g.cuantos) || 0, modo: g.modo, peticion: g.peticion } });
+    PAR.trabajo = t;
+    toast('Claude está escribiendo los guiones: aparecerán en la Parrilla');
+    pintarModulo();
+    vigilarTrabajoParrilla();
+  } catch (e) { toast(e.message, true); }
+}
+
+function chatConCuentaParrilla(d) {
+  PAR.chatCuenta = `${d.red}:${d.usuario}`;
+  PAR.form.origen = 'chat';
+  if (!PAR.chatTexto.trim()) PAR.chatTexto = `¿Qué le funciona a @${d.usuario} y qué podría hacer yo con eso?`;
+  irASeccionParrilla('anadir');
+}
+
+/* En el chat: «📈 Con una cuenta analizada». Las cuentas se piden una vez. */
+function selectorCuentaChat() {
+  if (!PAR.cuentas) setTimeout(cargarCuentasParrilla, 0);
+  const lista = ((PAR.cuentas || {}).cuentas) || [];
+  if (!lista.length && !PAR.chatCuenta) return null;
+  return h('select', { 'aria-label': 'Con una cuenta analizada', clase: 'cuenta-chat',
+    title: 'Le pasa a Claude los vídeos (y el análisis) de una cuenta que hayas analizado',
+    onchange: ev => { PAR.chatCuenta = ev.target.value; } },
+  [h('option', { value: '' }, '📈 sin cuenta de referencia')].concat(lista.map(c => h('option', {
+    value: `${c.red}:${c.usuario}`, selected: PAR.chatCuenta === `${c.red}:${c.usuario}` ? true : null },
+  `📈 @${c.usuario} (${NOMBRE_RED_CUENTA[c.red] || c.red})`))));
 }
 
 montarModulos();

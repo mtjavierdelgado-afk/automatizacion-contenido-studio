@@ -975,12 +975,110 @@ GUIAS = {
             "MIS NOTAS:\n[lo que quieres pedir]"
         ),
     },
+    "analizar_cuenta": {
+        "titulo": "Analizar una cuenta (Parrilla)",
+        "donde": "Automatizar → Analizar una cuenta",
+        "usa": "pasos/cuentas_ajenas.py y motores/lectura_redes/lectores.py",
+        "que_hace": [
+            "Trae los vídeos públicos de una cuenta de TikTok, Instagram o YouTube que NO es tuya "
+            "(competencia, un creador que te guste), con sus vistas, likes, comentarios, duración, "
+            "fecha y texto.",
+            "Primero por la vía gratis: YouTube con su API oficial e Instagram con la vía oficial de "
+            "Meta (solo cuentas profesionales). Si no sirve —TikTok siempre, o una cuenta de Instagram "
+            "personal— y lo tienes permitido, por Apify, que es de pago: unos céntimos por cuenta, con "
+            "un tope al mes. Antes de pagar te dice cuánto costará.",
+            "Una cuenta leída se guarda 24 h: volver a abrirla no paga otra vez.",
+            "«Que Claude la analice» compara sus vídeos con más y con menos vistas y dice qué le "
+            "funciona: temas, ganchos, duración, cuándo publica e ideas para ti.",
+            "«Escribir guiones con lo que le funciona» los escribe para TU proyecto, con tu marca, "
+            "inspirados y sin copiar sus frases ni sus datos. Van a la Parrilla, pendientes.",
+            "«Hablar de ella en el chat» la pasa a «Conversar con Claude».",
+        ],
+        "si": [
+            "Pega el enlace del PERFIL (no el de un vídeo) o escribe el @usuario y elige la red.",
+            "Empieza con 30 vídeos: da para ver qué funciona y cuesta poco.",
+            "Analiza antes de pedir guiones: los guiones usan el análisis.",
+            "Pide en «algo más» lo que necesites: «para Navidad», «sin precios».",
+        ],
+        "no": [
+            "Cuentas privadas: no se pueden leer por ninguna vía.",
+            "Copiar sus frases o su marca: los guiones se inspiran en la fórmula.",
+            "«Volver a traer» la misma cuenta cada rato: con Apify, cada lectura se paga.",
+        ],
+        "plantilla": (
+            "RED: [TikTok / Instagram / YouTube].\n"
+            "CUENTA: [@usuario o enlace del perfil].\n"
+            "QUÉ QUIERO SACAR: [ideas de temas / ganchos / formato].\n"
+            "PARA: [mi proyecto y mi objetivo]."
+        ),
+        "ejemplo": (
+            "RED: TikTok.\n"
+            "CUENTA: https://www.tiktok.com/@unafiestaenlima\n"
+            "QUÉ QUIERO SACAR: qué ganchos usan sus vídeos más vistos.\n"
+            "PARA: EstadoPlay, reels de cumpleaños infantiles."
+        ),
+        "prompt_ia": (
+            "Voy a analizar la cuenta de redes de un competidor para aprender qué le funciona. "
+            "Con mis notas, dime en una lista corta qué debería fijarme (temas, ganchos, duración, "
+            "horarios) y qué NO debería copiar.\n\nMIS NOTAS:\n[la cuenta y lo que quieres sacar]"
+        ),
+    },
+    "conexiones_cuentas": {
+        "titulo": "Conexiones para analizar cuentas",
+        "donde": "Automatizar → Analizar una cuenta → Conexiones",
+        "usa": "pasos/cuentas_ajenas.py (las claves van en <secretos>/lectura_redes.json)",
+        "que_hace": [
+            "YOUTUBE (gratis): una clave de API de Google. En console.cloud.google.com crea un "
+            "proyecto, entra en «APIs y servicios → Biblioteca», activa «YouTube Data API v3» y en "
+            "«Credenciales» crea una «Clave de API». Da 10.000 unidades al día gratis; leer una cuenta "
+            "usa 3.",
+            "INSTAGRAM (gratis): tu Instagram de EstadoPlay tiene que ser PROFESIONAL (Empresa o "
+            "Creador) y estar vinculado a tu Página de Facebook. En developers.facebook.com crea una "
+            "app de tipo «Empresa», añade el producto de Instagram, y en el «Explorador de la API "
+            "Graph» genera un token con instagram_basic, pages_show_list, pages_read_engagement e "
+            "instagram_manage_insights. Pásalo por el «Depurador de tokens» → «Ampliar» para que dure "
+            "~60 días, pégalo aquí y pulsa «Buscar mi cuenta». El Studio avisa cuando va a caducar.",
+            "APIFY (de pago, de respaldo): crea una cuenta en apify.com (el plan gratis trae 5 $ al "
+            "mes) y copia tu token de «Settings → API & Integrations». Se usa para TikTok y para las "
+            "cuentas de Instagram que no son profesionales.",
+            "El TOPE AL MES para Apify viene en 5 $ (lo del plan gratis). Al llegar, no se lee nada "
+            "más de pago hasta el mes siguiente o hasta que lo subas.",
+            "Las claves se guardan en el servidor y nunca bajan a la pantalla: solo sus 4 últimos "
+            "caracteres. Nunca las pegues en un chat.",
+        ],
+        "si": [
+            "Empieza por YouTube: es lo más rápido y es gratis.",
+            "Usa una app de Meta solo para esto, a tu nombre: no hace falta pasar la revisión de Meta "
+            "si solo la usa tu negocio.",
+            "Renueva el token de Meta cuando el Studio lo avise.",
+        ],
+        "no": [
+            "Iniciar sesión con cuentas falsas para mirar perfiles: lo prohíben Instagram y TikTok y "
+            "acaba en bloqueos.",
+            "Compartir el token de Apify: con él se gasta tu crédito.",
+        ],
+        "plantilla": (
+            "YOUTUBE: [clave de API de Google].\n"
+            "INSTAGRAM: [token largo de Meta] → «Buscar mi cuenta».\n"
+            "APIFY: [token] · tope al mes: [5] $."
+        ),
+        "ejemplo": (
+            "YOUTUBE: AIza… (puesta).\n"
+            "INSTAGRAM: EAAB… → tu cuenta: @estadoplay.\n"
+            "APIFY: apify_api_… · tope al mes: 5 $."
+        ),
+        "prompt_ia": (
+            "Guíame paso a paso, con capturas si puedes, para [crear una clave de API de YouTube Data "
+            "API v3 / crear una app de Meta y un token largo con instagram_basic y pages_show_list / "
+            "sacar mi token de Apify]. Estoy en [ordenador / móvil]."
+        ),
+    },
 }
 
 ORDEN = ("estilo_grafico", "tono", "voz", "material", "indicaciones", "cta",
          "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
          "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente",
-         "chat_guiones")
+         "chat_guiones", "analizar_cuenta", "conexiones_cuentas")
 
 
 

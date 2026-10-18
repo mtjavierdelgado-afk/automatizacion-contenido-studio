@@ -15710,9 +15710,21 @@ def _parrilla_chat_mensaje_en_hilo(cid, chid, campos, imagenes, peticion):
         r = _posts_de_parrilla(cid, peticion, 30, "vistas", 10)
         resultados = (PARRILLA.resumen_de_posts(r["posts"]) if r["posts"]
                       else f"(no hay: {r['motivo']})")
+    cuenta_texto, cuenta_nombre = "", ""
+    if campos.get("cuenta") and CUENTAS is not None:
+        red_c, _sep, usuario_c = campos["cuenta"].partition(":")
+        try:
+            red_c, usuario_c = CUENTAS.entender(usuario_c, red_c)
+            datos_c = CUENTAS.cuenta(raiz_proyectos(), red_c, usuario_c)
+            cuenta_texto = CUENTAS.resumen_para_claude(datos_c) + (
+                "\n\nLO QUE YA SE ANALIZÓ:\n" + datos_c["analisis"][:5000] if datos_c.get("analisis") else "")
+            cuenta_nombre = f"@{datos_c.get('usuario')} ({CUENTAS.NOMBRE_RED.get(red_c, red_c)})"
+        except CUENTAS.ErrorCuentas as fallo:
+            raise ErrorApi(fallo.codigo, str(fallo)) from None
     vista = _por_guionista(chat.escribir, campos.get("texto") or "", web=campos.get("web") == "1",
                            resultados_texto=resultados, imagenes=imagenes,
-                           modelo=campos.get("modelo") or None)
+                           modelo=campos.get("modelo") or None, cuenta_texto=cuenta_texto,
+                           cuenta=cuenta_nombre)
     anotar_global("parrilla_chat", {"proyecto": cid, "chat": chat.id,
                                     "web": campos.get("web") == "1", "capturas": len(imagenes)})
     return vista
@@ -15747,6 +15759,136 @@ def parrilla_chat_borrar(cid: str, chid: str, peticion: Request):
     cid = _proyecto_parrilla(cid, peticion)
     _por_guionista(_guionista().borrar, raiz_proyectos(), cid, chid)
     return {"ok": True}
+
+
+# ------------------------------------- PARRILLA: analizar una cuenta ajena
+# (rama `analizar-cuentas`, 18-10-2026). Quien decide la vía y el gasto es
+# `pasos/cuentas_ajenas.py`; las cuentas leídas son datos públicos y se
+# guardan para todo el Studio (no son de ningún proyecto). Lo único de un
+# proyecto son los guiones que se escriben con ellas (`desde-cuenta`).
+
+try:
+    import cuentas_ajenas as CUENTAS  # noqa: E402  (pasos/ ya esta en sys.path)
+    ERROR_CUENTAS = ""
+except Exception as _fallo_cuentas:  # noqa: BLE001
+    CUENTAS = None
+    ERROR_CUENTAS = f"{type(_fallo_cuentas).__name__}: {_fallo_cuentas}"
+
+
+def _cuentas():
+    if CUENTAS is None:
+        raise ErrorApi(503, f"«Analizar una cuenta» no se ha podido cargar: {ERROR_CUENTAS}")
+    return CUENTAS
+
+
+def _por_cuentas(fn, *args, **kwargs):
+    C = _cuentas()
+    try:
+        return fn(*args, **kwargs)
+    except C.ErrorCuentas as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+
+
+def _cuenta_pedida(red, usuario):
+    """(red, usuario) de la URL, comprobados con el mismo criterio que lo escrito."""
+    return _por_cuentas(_cuentas().entender, usuario, red)
+
+
+@app.get("/api/parrilla/cuentas")
+def parrilla_cuentas():
+    """Las cuentas ya leídas, las conexiones (sin claves) y el gasto del mes."""
+    C = _cuentas()
+    return {"cuentas": C.cuentas(raiz_proyectos()), "conexiones": C.claves_publicas(),
+            "gasto_mes": C.gasto_del_mes(raiz_proyectos()), "redes": list(C.REDES),
+            "fuentes": C.FUENTES}
+
+
+@app.put("/api/parrilla/cuentas/conexiones")
+def parrilla_cuentas_conexiones(cuerpo: dict = Body(default=None)):
+    """{youtube_clave?, meta_token?, ig_id?, apify_token?, pago?, tope_usd?} ("" quita una)."""
+    conexiones = _por_cuentas(_cuentas().guardar_claves, _cuerpo(cuerpo))
+    anotar_global("cuentas_conexiones", {"campos": sorted(_cuerpo(cuerpo))})
+    return {"conexiones": conexiones}
+
+
+@app.post("/api/parrilla/cuentas/conexiones/instagram")
+def parrilla_cuentas_mi_instagram():
+    """Con el token de Meta puesto: tu cuenta profesional (se guarda si es una)."""
+    C = _cuentas()
+    return {"cuentas": _por_cuentas(C.buscar_mi_instagram), "conexiones": C.claves_publicas()}
+
+
+@app.post("/api/parrilla/cuentas/plan")
+def parrilla_cuentas_plan(cuerpo: dict = Body(default=None)):
+    """{texto, red?, cuantos?} -> qué vía se usaría y cuánto costaría."""
+    C = _cuentas()
+    d = _cuerpo(cuerpo)
+    red, usuario = _por_cuentas(C.entender, d.get("texto"), d.get("red") or "")
+    return _por_cuentas(C.plan, raiz_proyectos(), red, usuario, d.get("cuantos") or 30)
+
+
+@app.post("/api/parrilla/cuentas/leer", status_code=202)
+def parrilla_cuentas_leer(cuerpo: dict = Body(default=None)):
+    """{texto, red?, cuantos?, forzar?} -> el trabajo (se sigue preguntando)."""
+    C = _cuentas()
+    d = _cuerpo(cuerpo)
+    red, usuario = _por_cuentas(C.entender, d.get("texto"), d.get("red") or "")
+    t = _por_cuentas(C.lanzar_lectura, raiz_proyectos(), red, usuario, d.get("cuantos") or 30,
+                     bool(d.get("forzar")))
+    anotar_global("cuenta_leer", {"red": red, "usuario": usuario, "forzar": bool(d.get("forzar"))})
+    return t
+
+
+@app.get("/api/parrilla/cuentas/trabajos/{tid}")
+def parrilla_cuentas_trabajo(tid: str):
+    t = _cuentas().trabajo(tid)
+    if not t:
+        raise ErrorApi(404, "ese trabajo ya no existe (¿se reinició el servicio?)")
+    return t
+
+
+@app.get("/api/parrilla/cuentas/{red}/{usuario}")
+def parrilla_cuenta(red: str, usuario: str):
+    red, usuario = _cuenta_pedida(red, usuario)
+    return _por_cuentas(_cuentas().cuenta, raiz_proyectos(), red, usuario)
+
+
+@app.delete("/api/parrilla/cuentas/{red}/{usuario}")
+def parrilla_cuenta_borrar(red: str, usuario: str):
+    red, usuario = _cuenta_pedida(red, usuario)
+    _por_cuentas(_cuentas().borrar, raiz_proyectos(), red, usuario)
+    return {"ok": True}
+
+
+@app.post("/api/parrilla/cuentas/{red}/{usuario}/analizar", status_code=202)
+def parrilla_cuenta_analizar(red: str, usuario: str):
+    """Claude dice qué le funciona a esa cuenta -> el trabajo."""
+    red, usuario = _cuenta_pedida(red, usuario)
+    t = _por_cuentas(_cuentas().lanzar_analisis, raiz_proyectos(), red, usuario)
+    anotar_global("cuenta_analizar", {"red": red, "usuario": usuario})
+    return t
+
+
+@app.post("/api/parrilla/proyectos/{cid}/desde-cuenta", status_code=202)
+def parrilla_desde_cuenta(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Guiones para ESTE proyecto con lo que le funciona a una cuenta ajena:
+    {red, usuario, cuantos, modo, peticion?, matriz?, nombre?}."""
+    cid = _proyecto_parrilla(cid, peticion)
+    C = _cuentas()
+    d = _cuerpo(cuerpo)
+    red, usuario = _por_cuentas(C.entender, d.get("usuario"), d.get("red") or "")
+    datos = _por_cuentas(C.cuenta, raiz_proyectos(), red, usuario)
+    posts = C.posts_de_cuenta(datos, 15)
+    if not posts:
+        raise ErrorApi(409, "esa cuenta no tiene vídeos con los que trabajar")
+    ajena = f"@{datos.get('usuario')} en {C.NOMBRE_RED.get(red, red)}"
+    trabajo_ = _por_parrilla(_parrilla().lanzar, raiz_proyectos(), cid, "resultados", {
+        "posts": posts, "cuantos": d.get("cuantos"), "modo": d.get("modo"),
+        "peticion": str(d.get("peticion") or "")[:3000], "matriz": str(d.get("matriz") or ""),
+        "nombre": d.get("nombre") or f"Como {ajena}", "ajena": ajena,
+        "analisis": datos.get("analisis") or "", "contexto": _contexto_parrilla(cid, d)})
+    anotar_global("parrilla_desde_cuenta", {"proyecto": cid, "red": red, "usuario": usuario})
+    return trabajo_
 
 
 # ------------------------------------------------------------------------ main

@@ -327,9 +327,30 @@ def resumen_de_posts(posts, maximo=15):
     return "\n".join(lineas)
 
 
-def instruccion_resultados(posts, cuantos, modo, contexto=None, peticion="", ya=None, desde=1):
-    """[[TAREA:resultados]] Guiones nuevos a partir de lo que mejor funcionó."""
+def instruccion_resultados(posts, cuantos, modo, contexto=None, peticion="", ya=None, desde=1,
+                           ajena="", analisis=""):
+    """[[TAREA:resultados]] Guiones nuevos a partir de lo que mejor funcionó.
+    Con `ajena` («@x en TikTok») los vídeos son de una cuenta de referencia
+    (rama analizar-cuentas): se aprende de ella, no se copia."""
     modo = modo if modo in USOS else "adaptar"
+    if ajena:
+        return ("[[TAREA:resultados]]\n"
+                f"Estos son los vídeos de {ajena}, una cuenta de referencia que NO es mía, con sus "
+                "cifras reales. Aprende lo que le funciona (tema, gancho, ángulo, duración, ritmo) y "
+                f"escribe {int(cuantos)} guion(es) NUEVOS para MI marca con esa fórmula: nunca copies "
+                "sus frases, su marca ni sus datos. Cada uno, distinto de los demás.\n"
+                "En la línea «Objetivo:» de cada guion di qué fórmula de la cuenta repite (por ejemplo: "
+                "«como su vídeo 2: pregunta en el gancho»). No inventes cifras.\n\n"
+                f"Uso: {modo} (como lo tratará el Studio). Escribe la locución final, completa.\n\n"
+                "SUS VÍDEOS\n" + resumen_de_posts(posts) + "\n\n"
+                + (("LO QUE YA SE ANALIZÓ DE ESA CUENTA\n" + str(analisis)[:5000] + "\n\n") if analisis else "")
+                + _REGLAS + "\n\n" + _AJUSTE_RED + "\n\n" + _FORMATO_SALIDA + "\n\n"
+                + _SALIDA_STUDIO + "\n"
+                f"- Los ID, correlativos desde G{int(desde):02d}.\n\n"
+                + _contexto_texto(contexto)
+                + ("\nYA ESCRITOS EN ESTA TANDA (no los repitas):\n" + "\n".join(f"- {t}" for t in (ya or [])[:60]) + "\n"
+                   if ya else "")
+                + ("LO QUE PIDE ADEMÁS QUIEN LO ENCARGA:\n" + str(peticion).strip() if str(peticion or "").strip() else ""))
     ya_escritos = ""
     if ya:
         ya_escritos = ("\nYA ESCRITOS EN ESTA TANDA (no los repitas ni te parezcas a ellos):\n"
@@ -1754,7 +1775,9 @@ def _trabajar(raiz, cid, tid, tipo, d):
                 else:
                     instruccion = instruccion_resultados(d["posts"], cuantos_lote, modo, contexto,
                                                          d.get("peticion") or "", ya,
-                                                         desde=len(textos) + 1)
+                                                         desde=len(textos) + 1,
+                                                         ajena=d.get("ajena") or "",
+                                                         analisis=d.get("analisis") or "")
                 respuesta = _claude(instruccion, "escribir guiones para la Parrilla", cwd=cwd)
                 nuevos = separar(respuesta)[:cuantos_lote]
                 textos += nuevos
@@ -1765,6 +1788,9 @@ def _trabajar(raiz, cid, tid, tipo, d):
             else:
                 origen["inspirado"] = [str(p.get("nombre") or p.get("pid") or "")[:80]
                                        for p in d["posts"][:15]]
+                if d.get("ajena"):
+                    origen["tipo"] = "cuenta"
+                    origen["cuenta"] = str(d["ajena"])[:80]
                 if d.get("peticion"):
                     origen["peticion"] = str(d["peticion"])[:300]
         else:

@@ -5860,6 +5860,42 @@ def _devolver_unidad(ctx, uid, previo):
         ctx.bitacora.anotar("aviso", "assets", {"devolver_unidad": str(fallo)})
 
 
+def _apartar_imagen_de_nota(ctx, plano, desde):
+    """Aparta la imagen que una nota dejo en `trabajo/` sin llegar a sellar. -> ruta | None
+
+    F5 del analisis del 13-10-2026: si la nota se cancela o falla DESPUES de
+    pagar la imagen, el PNG nuevo se quedaba en `pasos/assets/trabajo/escenas/`
+    y, como al sembrar lo de `trabajo/` gana, la siguiente tanda lo sellaba sin
+    que nadie lo hubiera visto ni aceptado. No se borra (esta pagada): se aparta
+    a `pasos/assets/_apartados/`, que no empieza por «v» y nada siembra de ahi.
+    Solo lo escrito en ESTE intento (`desde`): lo que ya habia es la copia de la
+    version activa, y esa no se toca.
+    """
+    carpeta = os.path.join(ctx.proyecto.ruta_trabajo("assets", crear=False), "escenas")
+    png = os.path.join(carpeta, f"{plano}.png")
+    try:
+        if not os.path.isfile(png) or os.path.getmtime(png) < desde - 1:
+            return None
+        activa = _ruta_de_version(ctx, "assets", "escenas", f"{plano}.png")
+        activa = os.path.join(ctx.proyecto.raiz, activa) if activa else ""
+        if activa and os.path.isfile(activa):
+            import filecmp                                  # noqa: PLC0415
+            if filecmp.cmp(png, activa, shallow=False):
+                return None                # la copia de la activa: nada nuevo
+        marca = time.strftime("%Y%m%dT%H%M%S")
+        destino = ctx.proyecto.ruta("pasos", "assets", "_apartados",
+                                    f"nota_{plano}_{marca}")
+        os.makedirs(destino, exist_ok=True)
+        for extension in (".png", ".json"):
+            origen = os.path.join(carpeta, f"{plano}{extension}")
+            if os.path.isfile(origen):
+                os.replace(origen, os.path.join(destino, f"{plano}{extension}"))
+        return os.path.relpath(destino, ctx.proyecto.raiz)
+    except OSError as fallo:
+        ctx.bitacora.anotar("aviso", "assets", {"apartar_imagen_de_nota": str(fallo)})
+        return None
+
+
 def _siguiente_plano(ctx, cola):
     """(plano, [notas]) del primero de la cola, con TODAS sus notas en cola."""
     vivas = {n["id"]: n for n in _notas_de_imagenes(ctx)}
@@ -6018,6 +6054,15 @@ def _correr_notas_imagenes(avisar, ctx):
                 _correr_paso(avisar_plano, ctx, "assets", [uid], {"rehacer": True})
             except Cancelado:
                 _devolver_unidad(ctx, uid, previo)
+                apartada = _apartar_imagen_de_nota(ctx, plano, arranque)
+                if apartada:
+                    for nota in notas:
+                        try:
+                            repaso.editar(ctx.proyecto, nota["id"], error="", aviso=(
+                                "parado a mitad: la imagen nueva ya se había pagado y "
+                                f"no se ha puesto; está guardada aparte en {apartada}"))
+                        except (KeyError, ValueError):
+                            pass
                 raise
             except Exception as fallo:                           # noqa: BLE001
                 ctx.estado.limpiar_marca("assets")
@@ -6025,11 +6070,16 @@ def _correr_notas_imagenes(avisar, ctx):
                 # obsoleto y la proxima «regenerar lo obsoleto» lo volveria a
                 # pedir (y a pagar, o a que lo rechacen)
                 _devolver_unidad(ctx, uid, previo)
+                apartada = _apartar_imagen_de_nota(ctx, plano, arranque)
                 rechazo = type(fallo).__name__ == "RechazoSeguridad"
                 motivo = str(fallo)
+                aviso_apartada = (f"la imagen nueva ya se había pagado y no se ha "
+                                  f"puesto; está guardada aparte en {apartada}"
+                                  if apartada else "")
                 for nota in notas:
                     try:
-                        repaso.editar(ctx.proyecto, nota["id"], error=motivo, aviso="")
+                        repaso.editar(ctx.proyecto, nota["id"], error=motivo,
+                                      aviso=aviso_apartada)
                     except (KeyError, ValueError):
                         pass
                 (rechazadas if rechazo else fallidas).append(plano)

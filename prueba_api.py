@@ -6072,6 +6072,55 @@ def probar_lo_de_v2h():
         ok("nueva" in json.dumps(params_version),
            "D7: pero sí lo que la propia tanda escribió")
 
+        # F5 · UNA NOTA DE IMAGEN QUE FALLA O SE CANCELA DESPUES DE PAGAR no deja
+        # la imagen nueva escondida en trabajo/ para que la selle la siguiente tanda
+        from nucleo.trabajos import Cancelado                 # noqa: PLC0415
+        from pasos import medios as MEDIOS                    # noqa: PLC0415
+        pid = Proyecto.crear(base, "f5 nota pagada").id
+        sembrar(os.path.join(base, pid))
+        ctx = servidor.contexto(pid)
+        for paso in ("voz", "revision_audio"):
+            ctx.estado.completar(paso, {"x": 1})
+        trab = ctx.proyecto.ruta_trabajo("assets", crear=True)
+        os.makedirs(os.path.join(trab, "escenas"), exist_ok=True)
+        with open(os.path.join(trab, "escenas", "S010.png"), "wb") as fh:
+            fh.write(b"VIEJA")
+        ctx.estado.set_params("assets", {"unidades": {"escena:S010": {"prompt": "a"}}})
+        ctx.estado.completar("assets", {}, unidades={"escena:S010": {"png": "escenas/S010.png"}})
+        rep = servidor._repaso()
+        for modo in ("fallo", "cancelado"):
+            nota = rep.anadir(ctx.proyecto, "pon un perro", 1.0, plano="S010",
+                              imagenes=[], pantalla="imagenes", ancla="")
+
+            def paso_falso(avisar, ctx, paso_id, unidades, opciones=None, modo=modo):
+                carpeta = MEDIOS.sembrar_trabajo(ctx.proyecto, "assets")
+                with open(os.path.join(carpeta, "escenas", "S010.png"), "wb") as fh:
+                    fh.write(b"NUEVA_PAGADA")                # ya pagada
+                if modo == "fallo":
+                    raise RuntimeError("fallo al sellar")
+                raise Cancelado("cancelado")
+            cambiar("_correr_paso", paso_falso)
+            servidor._COLA_NOTAS[ctx.id] = {"cola": [nota["id"]]}
+            try:
+                servidor._correr_notas_imagenes(lambda *a, **k: None, ctx)
+            except Cancelado:
+                pass
+            setattr(servidor, "_correr_paso", reales.pop("_correr_paso"))
+            carpeta = MEDIOS.sembrar_trabajo(ctx.proyecto, "assets")   # la siguiente tanda
+            with open(os.path.join(carpeta, "escenas", "S010.png"), "rb") as fh:
+                visto = fh.read()
+            igual(visto, b"VIEJA", f"F5 ({modo}): la siguiente tanda no ve la imagen "
+                                   "de la nota que no se puso")
+            apartadas = os.path.join(ctx.proyecto.raiz, "pasos", "assets", "_apartados")
+            ok(any(os.path.isfile(os.path.join(apartadas, d, "S010.png"))
+                   for d in (os.listdir(apartadas) if os.path.isdir(apartadas) else [])),
+               f"F5 ({modo}): la imagen pagada queda apartada, no borrada")
+            ficha = next(n for n in rep.leer(ctx.proyecto)["notas"] if n["id"] == nota["id"])
+            ok("aparte" in str(ficha.get("aviso") or ""),
+               f"F5 ({modo}): y la nota lo dice: {ficha.get('aviso')!r}")
+            shutil.rmtree(apartadas, ignore_errors=True)
+            servidor._COLA_NOTAS.pop(ctx.id, None)
+
         # S3 · UNA CLAVE CORTA NO SE ENSEÑA A MEDIAS (el Client ID de Jamendo
         # tiene 8 caracteres y se enseñaban 4)
         from pasos import claves as CLAVES                    # noqa: PLC0415

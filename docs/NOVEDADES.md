@@ -10,6 +10,37 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Arreglos pendientes de los análisis del 10 y 13 de octubre (18 de octubre)**
+- **Ajustes guardados con un tipo equivocado** (un texto donde va un objeto, en
+  el estilo, la música, el logo…) se rechazan al guardarlos: antes se aceptaban
+  y varias pantallas del vídeo daban error para siempre. Y un segundo clic en
+  «Generar» con el vídeo ya generándose no cambia sus ajustes a mitad.
+- **El logo y las imágenes de una nota del repaso se revisan al subirlos**: un
+  fichero roto se rechaza ahí, en vez de romper el montaje al 97 %. Una nota
+  sube como mucho sus 4 imágenes.
+- **Copiar a mano la carpeta de un vídeo** ya no crea un «gemelo» que abre el
+  original. Nombres de vídeo larguísimos y vídeos creados a la vez ya no dan
+  problemas.
+- **«Aplicar» del repaso** no lanza dos montajes con dos clics, ni encima de
+  la tanda del vídeo: avisa de que espere.
+- **Un retoque de una imagen hecho mientras corre la tanda** ya no se da por
+  hecho sin dibujarlo.
+- **Si una nota de imagen se para o falla después de pagar la imagen**, esa
+  imagen se guarda aparte (no se pierde) y la nota lo dice; antes la siguiente
+  tanda la metía sin avisar.
+- Sin el programa de Claude instalado, el asistente dice que no está (antes un
+  error), y los errores ya no enseñan rutas del servidor. Las claves cortas
+  (como el Client ID de Jamendo) enseñan 2 caracteres, no la mitad.
+- **En la pantalla:** en el móvil, el «–» de la burbuja ya no tapa el chat
+  abierto, y la burbuja ya no pisa «Siguiente ›» en Imágenes; «Un vídeo nuevo»
+  marca «Encargo» en la barra y la duración dice «de 10 s a 30 min»; «Un estilo
+  nuevo» pide el nombre del estilo sin errores de fondo; cambiar el tipo de
+  imagen con referencias puestas avisa de que deben ser fotos (o dibujos); el
+  recuento de palabras del guion cuenta lo corregido a mano; el tiempo que
+  queda no promete minutos con la barra casi llena; la cabecera ya no enseña
+  dos veces el mismo trabajo; y textos corregidos («Imágenes» en vez de
+  «Diapositivas», «el redactor», «La pausa… se hace»).
+
 **Publicar: los resultados, más completos (17 de octubre)**
 - **Cuánto se ve de cada vídeo.** TikTok dice qué parte de la gente lo vio
   **hasta el final** y los **segundos de media**; YouTube, cuando su informe

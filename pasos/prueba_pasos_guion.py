@@ -122,6 +122,66 @@ monopoly had.
 """.strip()] * 1)
 
 
+def _huella_de_carpeta(raiz):
+    """{ruta relativa: (tamano, mtime)} de todo lo que hay en la carpeta."""
+    salida = {}
+    for carpeta, _subs, ficheros in os.walk(raiz):
+        for nombre in ficheros:
+            ruta = os.path.join(carpeta, nombre)
+            info = os.stat(ruta)
+            salida[os.path.relpath(ruta, raiz)] = (info.st_size, info.st_mtime_ns)
+    return salida
+
+
+def prueba_comparar_guion(base, proyecto):
+    """`herramientas/comparar_guion.py` (18-10-2026): escribe el guion con dos
+    modelos en una COPIA. El proyecto de verdad no puede cambiar ni un byte, y
+    cada pasada tiene que ir con su modelo y desde cero."""
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                    "herramientas"))
+    import comparar_guion                                     # noqa: PLC0415
+    antes = _huella_de_carpeta(proyecto.raiz)
+    firma_antes = Estado(proyecto).resumen()
+    vistos = []
+    original = p3_guion.ejecutar
+
+    def doble(copia, params, avisar):
+        comprobar(os.path.abspath(copia.raiz) != os.path.abspath(proyecto.raiz),
+                  "el guion se escribe en una copia, no en el vídeo")
+        vistos.append(dict(params))
+        trabajo = copia.ruta_trabajo("guion")
+        with open(os.path.join(trabajo, "guion.json"), "w", encoding="utf-8") as fh:
+            json.dump({"guion": [{"id": "B001", "texto": f"Escrito con {params['modelo']}.",
+                                  "abre_seccion": True}]}, fh)
+        return {"salidas": {"guion": "guion.json"}}
+    p3_guion.ejecutar = doble
+    antes_raiz = os.environ.get("ESTUDIO_PROYECTOS")
+    os.environ["ESTUDIO_PROYECTOS"] = base
+    try:
+        salida = os.path.join(base, "_comparar")
+        resultado = comparar_guion.comparar([proyecto.id], ["sonnet", "opus"], None, salida)
+    finally:
+        p3_guion.ejecutar = original
+        if antes_raiz is None:
+            os.environ.pop("ESTUDIO_PROYECTOS", None)
+        else:
+            os.environ["ESTUDIO_PROYECTOS"] = antes_raiz
+    igual(sorted(p["modelo"] for p in vistos), ["opus", "sonnet"],
+          "una pasada con cada modelo")
+    comprobar(all(p.get("regenerar_desde_cero") for p in vistos),
+              "las dos desde cero: el guion que ya hay no entra como base")
+    comprobar(all(p.get("prompt_general") == vistos[0].get("prompt_general") for p in vistos),
+              "con las mismas indicaciones")
+    video = (resultado.get("videos") or [{}])[0]
+    igual(sorted((video.get("letras") or {}).values()), ["opus", "sonnet"],
+          "A y B son los dos modelos, y se guarda cuál es cuál")
+    comprobar(os.path.exists(os.path.join(salida, "ultima.json")),
+              "la comparación queda guardada para revelarla después")
+    igual(_huella_de_carpeta(proyecto.raiz), antes,
+          "el vídeo de verdad no cambia ni un fichero")
+    igual(Estado(proyecto).resumen(), firma_antes, "ni su estado")
+
+
 def material():
     """Se queda como funcion para no tocar a quien la llama."""
     return MATERIAL
@@ -227,6 +287,9 @@ def principal():
         igual(len(bitacora.leer(paso="guion")), 4, "cuatro eventos del paso guion")
         comprobar("guion" in bitacora.resumen_para_llm(),
                   "el resumen para el LLM incluye el guion")
+
+        print("\n[9] comparar el guion con dos modelos no toca el proyecto")
+        prueba_comparar_guion(base, proyecto)
 
         print("\n  --- guion producido -----------------------------------------")
         print(f"  {guion['titulo']}")

@@ -15,6 +15,8 @@
 #      asvs repositorio  de donde se baja el codigo (y cambiarlo: asvs repositorio usuario/repo)
 #      asvs probar       la prueba real: un video de 30 s con tus claves (~1 $), comprobado solo;
 #                        si la consola se corta sigue sola, y repetirlo la vuelve a enseñar o la retoma
+#      asvs comparar-guion  el guion de un video escrito con sonnet y con opus, a ciegas
+#                        (sin tocar el video; solo tokens de la suscripcion). Sin nada: la lista
 # -----------------------------------------------------------------------------
 # -E: la trampa ERR de `actualizar` (la que deshace) vale TAMBIEN dentro de
 # las funciones que llama. Sin ella, un fallo en `_configurar` salia por
@@ -447,6 +449,44 @@ probar() {
   tail -n +1 -f --pid="${pid:-1}" "$registro" 2>/dev/null || true
 }
 
+# COMPARAR EL GUION CON DOS MODELOS (herramientas/comparar_guion.py). La lista
+# y «revelar» son al momento; la comparacion tarda minutos (dos guiones por
+# video), asi que va DESLIGADA de la consola como la prueba real: si la consola
+# se corta, sigue sola, y `asvs comparar-guion ver` vuelve a enseñarla.
+comparar_guion() {
+  local carpeta registro pidf pid args
+  carpeta="$(grep -m1 '^ESTUDIO_PROYECTOS=' "$RAIZ/datos/entorno" 2>/dev/null | cut -d= -f2- || true)"
+  carpeta="${carpeta:-$RAIZ/datos/proyectos}/_sistema/comparar_guion"
+  # cada argumento citado: un nombre con espacios llega entero al bash de abajo
+  args="$(printf '%q ' "$@")"
+  registro="$carpeta/registro.log"
+  pidf="$carpeta/proceso.pid"
+  sudo -u "$USUARIO" mkdir -p "$carpeta"
+  case "${1:-}" in
+    ""|revelar|--revelar)
+      sudo -u "$USUARIO" bash -c "set -a; . '$RAIZ/datos/entorno'; set +a; cd '$RAIZ/app' && \
+        '$RAIZ/venv/bin/python' herramientas/comparar_guion.py $args"
+      return ;;
+    ver) ;;
+    *)
+      pid="$(cat "$pidf" 2>/dev/null || true)"
+      if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        echo "Ya hay una comparación en marcha (proceso $pid). Te enseño cómo va."
+      else
+        echo "Escribe el guion de cada vídeo con sonnet y con opus (unos minutos por vídeo)."
+        echo "No toca tus vídeos y no gasta dólares: solo tokens de la suscripción."
+        echo "Corre APARTE de esta consola: si se corta, sigue sola. Para volver a verla:  asvs comparar-guion ver"
+        sudo -u "$USUARIO" bash -c "set -a; . '$RAIZ/datos/entorno'; set +a; cd '$RAIZ/app' && \
+          setsid nohup '$RAIZ/venv/bin/python' -u herramientas/comparar_guion.py $args \
+          > '$registro' 2>&1 < /dev/null & echo \$! > '$pidf'"
+        sleep 1
+      fi ;;
+  esac
+  pid="$(cat "$pidf" 2>/dev/null || true)"
+  echo
+  tail -n +1 -f --pid="${pid:-1}" "$registro" 2>/dev/null || true
+}
+
 case "${1:-estado}" in
   estado|"")   estado ;;
   registro)    registro "${2:-60}" ;;
@@ -456,6 +496,7 @@ case "${1:-estado}" in
   https)       https ;;
   repositorio) repositorio "${2:-}" ;;
   probar)      shift; probar "$@" ;;
-  -h|--help|ayuda) sed -n '5,17p' "$0" | sed 's/^#  \{0,1\}//' ;;
+  comparar-guion) shift; comparar_guion "$@" ;;
+  -h|--help|ayuda) sed -n '5,19p' "$0" | sed 's/^#  \{0,1\}//' ;;
   *) echo "No entiendo «$1». Prueba:  asvs ayuda"; exit 1 ;;
 esac

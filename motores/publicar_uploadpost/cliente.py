@@ -62,6 +62,16 @@ REDES = ("tiktok", "instagram", "youtube", "facebook",
          "mastodon", "google_business")
 #: Las de siempre: las que salen marcadas y a la vista en un proyecto nuevo.
 REDES_CLASICAS = ("tiktok", "instagram", "youtube", "facebook")
+#: Las que dan seguidores en /api/analytics (docs.upload-post.com/api/get-analytics,
+#: 18-10-2026). Esa ruta no tiene limite ni coste. Discord, Telegram y Mastodon
+#: no dan cifras de ningun tipo.
+CON_SEGUIDORES = ("tiktok", "instagram", "youtube", "facebook", "linkedin", "x",
+                  "threads", "pinterest", "bluesky", "google_business")
+#: Las que dan cifras POR POST. Preguntar por un envio que solo fue a otras
+#: gasta una consulta del cupo (100 cada 5 minutos) para nada. Google Business
+#: no sale en la lista de cifras por post.
+CON_CIFRAS_POST = ("tiktok", "instagram", "youtube", "facebook", "linkedin", "x",
+                   "threads", "pinterest", "bluesky")
 
 #: Para hablar con Upload-Post. La subida en si puede tardar: un MP4 de 200 MB
 #: por la linea del VPS son minutos, y el plazo es por operacion de socket, no

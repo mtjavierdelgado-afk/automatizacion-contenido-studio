@@ -17281,8 +17281,28 @@ const PUB = {
   resultados: null, proyectoResultados: '', diasResultados: 30, midiendo: false,
   mejorSemana: null, mejores: null, porMejores: 'vistas',
 };
-const NOMBRES_RED = { tiktok: 'TikTok', instagram: 'Instagram Reels', youtube: 'YouTube', facebook: 'Facebook' };
-const CORTOS_RED = { tiktok: 'TikTok', instagram: 'Reels', youtube: 'YouTube', facebook: 'Facebook' };
+/* Las redes, en el orden de la pantalla. Las cuatro primeras son las de
+   siempre; las demás (publicar-mas) salen en un proyecto cuando se marcan en
+   «Redes de este proyecto» (Cuentas y ajustes) o cuando ya tienen algo. */
+const NOMBRES_RED = {
+  tiktok: 'TikTok', instagram: 'Instagram Reels', youtube: 'YouTube', facebook: 'Facebook',
+  linkedin: 'LinkedIn', x: 'X (Twitter)', threads: 'Threads', pinterest: 'Pinterest',
+  bluesky: 'Bluesky', discord: 'Discord', telegram: 'Telegram', mastodon: 'Mastodon',
+  google_business: 'Google Business',
+};
+const CORTOS_RED = {
+  tiktok: 'TikTok', instagram: 'Reels', youtube: 'YouTube', facebook: 'Facebook',
+  linkedin: 'LinkedIn', x: 'X', threads: 'Threads', pinterest: 'Pinterest',
+  bluesky: 'Bluesky', discord: 'Discord', telegram: 'Telegram', mastodon: 'Mastodon',
+  google_business: 'Google',
+};
+const REDES_CLASICAS_PUB = ['tiktok', 'instagram', 'youtube', 'facebook'];
+/* Las redes que se enseñan de un vídeo o proyecto: las que dice el servidor
+   (`redes_visibles`), y si no lo dice, las de siempre. */
+function redesVisiblesPublicar(x) {
+  const lista = (x && x.redes_visibles) || REDES_CLASICAS_PUB;
+  return Object.keys(NOMBRES_RED).filter(r => lista.includes(r));
+}
 const ESTADOS_ENVIO = {
   espera_ok: 'espera tu OK', enviando: 'subiendo', programado: 'programado',
   publicando: 'publicándose', publicado: 'publicado', fallido: 'falló',
@@ -17835,7 +17855,7 @@ function mesDeHoyPublicar() {
 
 function filaListoPublicar(v) {
   const redes = h('span', { clase: 'redes-video' });
-  Object.keys(NOMBRES_RED).forEach(r => {
+  redesVisiblesPublicar(v).forEach(r => {
     const estado = (v.envios || {})[r];
     redes.appendChild(h('span', {
       clase: `pastilla red-mini ${estado ? CLASE_ESTADO[estado] || '' : 'apagada'}`,
@@ -18093,7 +18113,7 @@ function resumenPublicadoFicha(f) {
       ...enCamino.map(e => h('span', { clase: `pastilla ${CLASE_ESTADO[e.estado] || ''}` },
         `${NOMBRES_RED[e.red]} · ${ESTADOS_ENVIO[e.estado] || e.estado}${e.estado === 'programado' ? ` ${cuandoLegible(e.cuando)}` : ''}`))));
   }
-  const faltan = Object.keys(NOMBRES_RED).filter(r => !ultimos[r] || ['fallido'].includes(ultimos[r].estado));
+  const faltan = redesVisiblesPublicar(f).filter(r => !ultimos[r] || ['fallido'].includes(ultimos[r].estado));
   if (faltan.length) {
     caja.appendChild(h('div', { clase: 'meta' }, `Para seguir con ${faltan.map(r => NOMBRES_RED[r]).join(', ')}: márcalas en Redes, `
       + 'revisa su texto y publica. Donde ya salió no se vuelve a enviar sin preguntarte.'));
@@ -18152,7 +18172,7 @@ function seccionFichaPublicar() {
   const ultimos = ultimoEnvioPorRed(f);
   const redes = h('div', { clase: 'bloque' }, h('h3', {}, 'Redes'));
   const fila = h('div', { clase: 'fila redes-ficha' });
-  Object.keys(NOMBRES_RED).forEach(r => {
+  redesVisiblesPublicar(f).forEach(r => {
     const enc = (f.encaje || {})[r] || {};
     const cuenta = (f.cuentas || {})[r];
     fila.appendChild(h('label', { clase: `casilla-red${enc.nivel === 'error' ? ' apagada' : ''}`,
@@ -18169,6 +18189,17 @@ function seccionFichaPublicar() {
   redes.appendChild(fila);
   Object.keys(NOMBRES_RED).filter(r => (f.redes || []).includes(r) && ((f.encaje || {})[r] || {}).texto)
     .forEach(r => redes.appendChild(h('div', { clase: 'meta' }, `${NOMBRES_RED[r]}: ${f.encaje[r].texto}`)));
+  // lo que falta en los ajustes del proyecto (el tablero de Pinterest…)
+  const faltaAjuste = (f.redes || []).filter(r => ((f.formato_redes || {})[r] || {}).falta);
+  if (faltaAjuste.length) {
+    redes.appendChild(h('div', { clase: 'caja-aviso fila' },
+      h('span', { clase: 'crece' }, faltaAjuste.map(r => `${NOMBRES_RED[r]}: ${f.formato_redes[r].falta}`).join(' · ')),
+      h('button', { clase: 'mini', onclick: () => irASeccionPublicar('cuentas') }, 'Cuentas y ajustes')));
+  }
+  if (redesVisiblesPublicar(f).length <= REDES_CLASICAS_PUB.length) {
+    redes.appendChild(h('div', { clase: 'meta' }, 'LinkedIn, X, Threads, Pinterest, Bluesky, Discord, Telegram, '
+      + 'Mastodon y Google Business se añaden en Cuentas y ajustes → Redes de este proyecto.'));
+  }
   // las cuentas, si ya se miraron: una red sin cuenta no se deja enviar
   const sinCuenta = (f.ajustes || {}).cuentas_vistas
     ? (f.redes || []).filter(r => r in (f.cuentas || {})
@@ -18223,21 +18254,30 @@ function bloqueTextoRed(red) {
   b.appendChild(h('div', { clase: 'fila guia-y-revisar' },
     botonGuia(`texto_${red}`, campoTexto),
     botonRevisarPublicar(`texto_${red}`, f.pid, campoTexto)));
-  if (red === 'youtube' || red === 'facebook') {
+  const formato = (f.formato_redes || {})[red] || {};
+  const maxTitulo = formato.titulo || (red === 'youtube' ? 100 : red === 'facebook' ? 255 : 0);
+  if (maxTitulo) {
     const largo = (t.titulo || '').length;
     b.appendChild(h('label', { clase: 'etiqueta-campo' },
-      red === 'youtube' ? `Título (${largo}/70: más largo se corta en el móvil)` : 'Título'));
-    b.appendChild(h('input', { type: 'text', value: t.titulo || '', maxlength: red === 'youtube' ? 100 : 255,
+      red === 'youtube' ? `Título (${largo}/70: más largo se corta en el móvil)`
+        : red === 'facebook' ? 'Título' : `Título (${largo}/${maxTitulo})`));
+    b.appendChild(h('input', { type: 'text', value: t.titulo || '', maxlength: maxTitulo,
       datos: { foco: `${red}-titulo` }, oninput: ev => editarTextoPublicar(red, 'titulo', ev.target.value) }));
   }
-  b.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Texto'));
-  if (red === 'instagram' || red === 'tiktok') {
+  b.appendChild(h('label', { clase: 'etiqueta-campo' },
+    formato.limite && formato.limite < 1000 ? `Texto (hasta ${formato.limite} caracteres con todo)` : 'Texto'));
+  if (!maxTitulo && !['discord', 'telegram'].includes(red)) {
     b.appendChild(h('div', { clase: 'meta' }, `${NOMBRES_RED[red]} no tiene título aparte: la PRIMERA LÍNEA del texto `
       + `es lo que se ve sin pulsar «más», así que hace de título.`));
   }
   b.appendChild(h('textarea', { rows: 4, value: t.descripcion || '', datos: { foco: `${red}-descripcion` },
     oninput: ev => editarTextoPublicar(red, 'descripcion', ev.target.value) }));
   b.appendChild(panelRevisionPublicar(`texto_${red}`, f.pid, campoTexto));
+  if (formato.alt) {
+    b.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Texto alternativo (lo que se ve en el vídeo, para quien no puede verlo)',
+      h('input', { type: 'text', value: t.alt || '', maxlength: formato.alt, datos: { foco: `${red}-alt` },
+        oninput: ev => editarTextoPublicar(red, 'alt', ev.target.value) })));
+  }
   const pie = h('div', { clase: 'fila campos-red' });
   pie.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Llamada a la acción',
     h('input', { type: 'text', value: t.cta || '', datos: { foco: `${red}-cta` },
@@ -18272,6 +18312,8 @@ function motivoNoPublicar(f) {
     if (!String(t.descripcion || '').trim()) faltas.push(`el texto de ${NOMBRES_RED[r]}`);
   });
   if (faltas.length) return `Falta ${faltas.join(', ')}.`;
+  const ajuste = redes.find(r => ((f.formato_redes || {})[r] || {}).falta);
+  if (ajuste) return `${NOMBRES_RED[ajuste]}: ${f.formato_redes[ajuste].falta}.`;
   if ((f.ajustes || {}).cuentas_vistas) {
     const sin = redes.filter(r => !(f.cuentas || {})[r]);
     if (sin.length) return `${sin.map(r => NOMBRES_RED[r]).join(', ')} no tiene${sin.length > 1 ? 'n' : ''} cuenta conectada `
@@ -18700,7 +18742,8 @@ async function guardarAjustePublicar(cid, cambios) {
     toast('Guardado');
     // lo que cambia qué botones salen se repinta; el resto no, para no quitar
     // el foco a quien sigue escribiendo
-    if (['usar_emojis', 'perfil', 'yt_para_ninos', 'palabra_clave'].some(k => k in cambios)) pintarModulo();
+    if (['usar_emojis', 'perfil', 'yt_para_ninos', 'palabra_clave', 'redes', 'redes_visibles',
+      'pinterest_tablero', 'gbp_cta'].some(k => k in cambios)) pintarModulo();
   } catch (e) { toast(e.message, true); }
 }
 
@@ -18904,6 +18947,66 @@ function elegirPerfilPublicar(p, lista) {
   return caja;
 }
 
+/* «REDES DE ESTE PROYECTO» (publicar-mas): qué redes se enseñan en sus
+   vídeos y, de las nuevas, lo que cada una necesita (el tablero de Pinterest es
+   obligatorio; el botón de Google Business pide su enlace). Se guarda al
+   marcar, como el resto de lo fijo; nada de esto entra en el vídeo. */
+function bloqueRedesProyectoPublicar(p) {
+  const a = p.ajustes || {};
+  const op = (PUB.proyectos || {}).redes_opciones || {};
+  const guardar = cambios => guardarAjustePublicar(p.id, cambios);
+  PUB.redesAbiertas = PUB.redesAbiertas || {};
+  const caja = h('details', { clase: 'ajustes-fijos redes-proyecto', open: !!PUB.redesAbiertas[p.id],
+    ontoggle: ev => { PUB.redesAbiertas[p.id] = ev.currentTarget.open; } },
+  h('summary', {}, `Redes de este proyecto (${redesVisiblesPublicar(a).length})`));
+  caja.appendChild(h('div', { clase: 'meta' }, 'Las que se enseñan en sus vídeos. Cada una necesita su cuenta '
+    + 'conectada en Upload-Post (botón «Conectar»). Reddit no está: Upload-Post la tiene caída.'));
+  const fila = h('div', { clase: 'fila redes-de-proyecto' });
+  Object.keys(NOMBRES_RED).forEach(r => fila.appendChild(h('label', { clase: 'casilla-red' },
+    h('input', { type: 'checkbox', checked: redesVisiblesPublicar(a).includes(r), datos: { red: r },
+      onchange: ev => {
+        const lista = new Set(redesVisiblesPublicar(a));
+        if (ev.target.checked) lista.add(r); else lista.delete(r);
+        a.redes_visibles = Object.keys(NOMBRES_RED).filter(x => lista.has(x));
+        guardar({ redes_visibles: a.redes_visibles });
+      } }), ` ${NOMBRES_RED[r]}`)));
+  caja.appendChild(fila);
+  const visibles = redesVisiblesPublicar(a);
+  const texto = (campo, etiqueta, ayuda) => h('label', { clase: 'etiqueta-campo' }, etiqueta,
+    h('input', { type: 'text', value: a[campo] || '', placeholder: ayuda || '', datos: { foco: `${campo}-${p.id}` },
+      onchange: ev => guardar({ [campo]: ev.target.value }) }));
+  const elegir = (campo, etiqueta, opciones) => h('label', { clase: 'etiqueta-campo' }, etiqueta,
+    h('select', { onchange: ev => guardar({ [campo]: ev.target.value }) },
+      ...(opciones || []).map(([v, t]) => h('option', { value: v, selected: (a[campo] || '') === v }, t))));
+  if (visibles.includes('pinterest')) {
+    caja.appendChild(h('div', { clase: 'fila ajustes-red' }, h('b', {}, 'Pinterest'),
+      texto('pinterest_tablero', 'Tablero (obligatorio)', 'id del tablero'),
+      texto('pinterest_enlace', 'Enlace del pin', 'https://…')));
+    if (!a.pinterest_tablero) caja.appendChild(h('div', { clase: 'meta aviso-red' }, '⚠ Sin tablero no se puede publicar en Pinterest.'));
+  }
+  if (visibles.includes('linkedin')) {
+    caja.appendChild(h('div', { clase: 'fila ajustes-red' }, h('b', {}, 'LinkedIn'),
+      texto('linkedin_pagina', 'Página de empresa', 'vacío: tu perfil personal'),
+      elegir('linkedin_visibilidad', 'Quién lo ve', op.visibilidad_linkedin)));
+  }
+  if (visibles.includes('google_business')) {
+    caja.appendChild(h('div', { clase: 'fila ajustes-red' }, h('b', {}, 'Google Business'),
+      elegir('gbp_cta', 'Botón', op.cta_gbp),
+      texto('gbp_cta_url', 'Enlace del botón', 'https://…'),
+      texto('gbp_ubicacion', 'Ubicación', 'vacío: la única que haya')));
+    caja.appendChild(h('div', { clase: 'meta' }, 'Google Business solo acepta vídeos de hasta 30 segundos.'));
+  }
+  if (visibles.includes('mastodon')) {
+    caja.appendChild(h('div', { clase: 'fila ajustes-red' }, h('b', {}, 'Mastodon'),
+      elegir('mastodon_visibilidad', 'Quién lo ve', op.visibilidad_mastodon)));
+  }
+  if (visibles.includes('threads')) {
+    caja.appendChild(h('div', { clase: 'fila ajustes-red' }, h('b', {}, 'Threads'),
+      texto('threads_tema', 'Tema', 'una palabra, sin #')));
+  }
+  return caja;
+}
+
 function tarjetaProyectoPublicar(p) {
   const a = p.ajustes || {};
   const b = h('div', { clase: 'bloque proyecto-publicar' }, h('h3', {}, p.nombre));
@@ -18945,7 +19048,8 @@ function tarjetaProyectoPublicar(p) {
   const lista = (PUB.perfilesCuenta || {})[p.id];
   if (lista) b.appendChild(elegirPerfilPublicar(p, lista));
   const cuentas = h('div', { clase: 'fila cuentas-proyecto' });
-  Object.keys(NOMBRES_RED).forEach(r => {
+  // las redes de este proyecto, y las que tengan cuenta conectada aunque no estén
+  Object.keys(NOMBRES_RED).filter(r => redesVisiblesPublicar(a).includes(r) || (a.cuentas || {})[r]).forEach(r => {
     const c = (a.cuentas || {})[r];
     cuentas.appendChild(h('span', { clase: `pastilla ${c ? (c.reconectar ? 'aviso' : 'ok') : 'apagada'}`,
       title: c ? (c.reconectar ? 'hay que volver a conectarla' : c.nombre) : 'sin conectar' },
@@ -18999,8 +19103,9 @@ function tarjetaProyectoPublicar(p) {
       ` ${texto}`)));
   casillas.appendChild(h('span', { clase: 'meta' }, 'La confirmación antes de enviar no se puede quitar.'));
   fijos.appendChild(casillas);
+  b.appendChild(bloqueRedesProyectoPublicar(p));
   const redes = h('div', { clase: 'fila' }, h('span', { clase: 'meta' }, 'Redes marcadas de fábrica:'));
-  Object.keys(NOMBRES_RED).forEach(r => redes.appendChild(h('label', { clase: 'casilla-red' },
+  redesVisiblesPublicar(a).forEach(r => redes.appendChild(h('label', { clase: 'casilla-red' },
     h('input', { type: 'checkbox', checked: (a.redes || []).includes(r), onchange: ev => {
       const lista = new Set(a.redes || []);
       if (ev.target.checked) lista.add(r); else lista.delete(r);
@@ -19092,7 +19197,10 @@ function seccionResultadosPublicar() {
   caja.appendChild(bloqueMejoresPublicar());
   const redes = h('div', { clase: 'bloque' }, h('h3', {}, 'Por red'));
   const tabla = h('div', { clase: 'tabla-redes' });
-  Object.keys(NOMBRES_RED).forEach(red => {
+  // las del proyecto, más cualquiera con publicaciones o seguidores
+  const delProyecto = ((PUB.proyectos || {}).proyectos || []).find(x => x.id === PUB.proyectoResultados) || {};
+  Object.keys(NOMBRES_RED).filter(red => redesVisiblesPublicar(delProyecto.ajustes).includes(red)
+    || ((r.por_red || {})[red] || {}).posts || (r.seguidores || {})[red]).forEach(red => {
     const pr = (r.por_red || {})[red] || {};
     const seg = (r.seguidores || {})[red] || {};
     tabla.appendChild(h('div', { clase: 'fila fila-red' },

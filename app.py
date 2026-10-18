@@ -15044,7 +15044,12 @@ def publicar_proyectos(peticion: Request):
         fila["palabras"] = P.estado_palabras(fila["id"])
     return {"proyectos": filas, "clave": P.estado_clave(), "seo_opciones": {
         "categorias": P.SEO.CATEGORIAS_YOUTUBE, "idiomas": P.SEO.IDIOMAS,
-        "idiomas_audio": P.SEO.IDIOMAS_AUDIO}}
+        "idiomas_audio": P.SEO.IDIOMAS_AUDIO},
+        # publicar-mas: los desplegables de «Redes de este proyecto»
+        "redes_opciones": {"redes": list(P.REDES), "clasicas": list(P.REDES_CLASICAS),
+                           "cta_gbp": P.RD.CTA_GBP,
+                           "visibilidad_linkedin": P.RD.VISIBILIDAD_LINKEDIN,
+                           "visibilidad_mastodon": P.RD.VISIBILIDAD_MASTODON}}
 
 
 @app.put("/api/publicar/proyectos/{cid}")

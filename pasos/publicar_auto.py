@@ -10,8 +10,8 @@ Que gasta, y por eso se enseña antes de confirmar (`coste`):
 - **Dinero: nada.** Las consultas de cifras de Upload-Post van incluidas en sus
   planes de pago; no gastan subidas ni llaman a Claude.
 - **Consultas del cupo de Upload-Post** (100 cada 5 minutos por cuenta): una por
-  envio en vivo (los ultimos N), una por proyecto para los seguidores, y la
-  lectura guardada, que no gasta del cupo. Para no comerse el cupo de quien
+  envio en vivo (los ultimos N). Los seguidores (una por proyecto) y la lectura
+  guardada no gastan del cupo (docs.upload-post.com/api/get-analytics). Para no comerse el cupo de quien
   pulse «Actualizar» a la vez, las consultas van separadas ESPACIO_S segundos
   (como mucho 60 de las 100 en cada 5 minutos).
 
@@ -207,7 +207,8 @@ def coste(raiz, config=None):
     perfiles = len(_proyectos_con_cuentas(raiz))
     horas = FRECUENCIAS[config["frecuencia"]]
     en_vivo = min(int(config["posts"]), len(publicados))
-    por_vuelta = en_vivo + perfiles
+    # los seguidores no cuentan en el cupo, pero se enseñan aparte
+    por_vuelta = en_vivo
     vueltas_dia = (24 / horas) if horas else 0
     minutos = (en_vivo * (ESPACIO_S + TARDA_CONSULTA_S) + perfiles * 10) / 60
     salida = {
@@ -232,10 +233,12 @@ def texto_coste(c):
         return ("Apagadas: no se gasta nada. Las cifras se piden solo al pulsar "
                 "«Actualizar» en Resultados.")
     partes = [
-        f"Cada vuelta: {c['consultas_vuelta']} consulta(s) a Upload-Post "
-        f"({c['en_vivo']} de los últimos {c['posts']} posts"
-        + (f", de {c['publicados']} publicados" if c["publicados"] < c["posts"] else "")
-        + (f", y {c['perfiles']} de seguidores" if c["perfiles"] else "") + ").",
+        f"Cada vuelta: {c['consultas_vuelta']} consulta(s) del cupo de Upload-Post "
+        f"(los últimos {c['posts']} posts"
+        + (f"; hoy hay {c['publicados']} con cifras que pedir" if c["publicados"] < c["posts"] else "")
+        + ")"
+        + (f", más los seguidores de {c['perfiles']} proyecto(s), que no gastan cupo"
+           if c["perfiles"] else "") + ".",
         f"{NOMBRE_FRECUENCIA[c['frecuencia']].capitalize()}: unas {c['consultas_dia']:g} "
         f"consultas al día, {c['consultas_mes']} al mes.",
         f"Dinero: 0 $. Van incluidas en el plan de pago de Upload-Post; no gastan "

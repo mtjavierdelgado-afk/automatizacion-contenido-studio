@@ -1080,12 +1080,13 @@ def prueba_metricas_auto():
         c = A.coste(raiz, {"frecuencia": "diaria", "posts": 10})
         igual((c["publicados"], c["en_vivo"], c["perfiles"]), (3, 3, 1),
               "el coste cuenta lo publicado y los proyectos con cuentas")
-        igual(c["consultas_vuelta"], 4, "una consulta por envío y una de seguidores")
-        igual(c["consultas_dia"], 4, "diaria: una vuelta al día")
-        igual(A.coste(raiz, {"frecuencia": "6h", "posts": 10})["consultas_dia"], 16,
+        igual(c["consultas_vuelta"], 3, "una consulta del cupo por envío (los seguidores no gastan cupo)")
+        igual(c["consultas_dia"], 3, "diaria: una vuelta al día")
+        igual(A.coste(raiz, {"frecuencia": "6h", "posts": 10})["consultas_dia"], 12,
               "cada 6 horas: cuatro vueltas")
         igual(c["dinero"], 0, "sin coste en dinero")
         ok("0 $" in c["texto"] and "100 consultas" in c["texto"], "y el texto lo explica con el cupo")
+        ok("no gastan cupo" in c["texto"], "y dice que los seguidores no gastan cupo")
         ok(not os.path.exists(A._ruta(raiz)), "calcular el coste no guarda nada")
         g = A.guardar(raiz, {"frecuencia": "diaria", "hora": "04:00", "posts": 10})
         igual(g["frecuencia"], "diaria", "se guarda la frecuencia")
@@ -1152,6 +1153,99 @@ def prueba_metricas_auto():
            "nada de la clave en lo que se enseña")
     finally:
         A.ESPACIO_S = espacio
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
+
+def prueba_redes_nuevas():
+    seccion("4d] las redes nuevas: a la vista por proyecto, campos, texto alternativo y Google Business")
+    import publicar_redes as RD
+    raiz = os.path.join(CARPETA, "redes_nuevas")
+    os.makedirs(raiz)
+    simulador = os.path.join(CARPETA, "sim_redes.json")
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    try:
+        a = P.ajustes_de(raiz, "cl_r")
+        igual(a["redes_visibles"], list(P.REDES_CLASICAS), "un proyecto nuevo enseña las cuatro de siempre")
+        igual(P.redes_visibles(a), list(P.REDES_CLASICAS), "y nada más")
+        a = P.guardar_ajustes(raiz, "cl_r", {"redes_visibles": ["tiktok", "linkedin", "pinterest",
+                                                                "google_business", "x"]})
+        igual(a["redes"], ["tiktok"], "quitar una red de la vista la quita de las marcadas de fábrica")
+        a = P.guardar_ajustes(raiz, "cl_r", {"redes": ["tiktok", "threads"]})
+        ok("threads" in a["redes_visibles"], "marcar una de fábrica la pone a la vista")
+        datos = {"redes": ["bluesky"], "redes_puestas": True, "envios": [{"red": "discord"}]}
+        vis = P.redes_visibles(a, datos)
+        ok("bluesky" in vis and "discord" in vis, "una red marcada en el vídeo o con envío no desaparece")
+        igual(vis, [r for r in P.REDES if r in vis], "en el orden de la pantalla")
+        try:
+            P.guardar_ajustes(raiz, "cl_r", {"redes_visibles": ["reddit"]})
+            ok(False, "Reddit no se deja poner")
+        except P.ErrorPublicar:
+            ok(True, "Reddit no se deja poner")
+        # campos de cada red
+        info = dict(INFO, pid="redes1", nombre="El vídeo")
+        aj = dict(P.AJUSTES_DEFECTO, perfil="studio_r", pinterest_tablero="123",
+                  linkedin_visibilidad="CONNECTIONS", gbp_cta="BOOK", gbp_cta_url="https://x.pe")
+        t = {"descripcion": "Hola mundo", "titulo": "Título LinkedIn", "alt": "Una persona  juega."}
+        c = P.componer("linkedin", t, aj, info, [], {})["campos"]
+        igual((c.get("linkedin_title"), c.get("visibility")), ("Título LinkedIn", "CONNECTIONS"),
+              "LinkedIn: título y quién lo ve")
+        ok(c.get("linkedin_description", "").startswith("Hola mundo"), "y su texto")
+        c = P.componer("pinterest", t, aj, info, [], {})["campos"]
+        igual((c.get("pinterest_board_id"), c.get("pinterest_alt_text")), ("123", "Una persona juega."),
+              "Pinterest: tablero y texto alternativo limpio")
+        c = P.componer("x", dict(t, descripcion="ver https://a.pe"), aj, info, [], {})
+        ok(any("enlaces" in x for x in c["avisos"]), "X avisa de que quita los enlaces")
+        c = P.componer("google_business", t, aj, info, [], {})["campos"]
+        igual((c.get("gbp_cta_type"), c.get("gbp_cta_url")), ("BOOK", "https://x.pe"),
+              "Google Business: botón con su enlace")
+        ok("linkedin_title" not in P.componer("tiktok", t, aj, info, [], {})["campos"],
+           "lo de una red no se cuela en otra")
+        igual(RD.falta("pinterest", dict(aj, pinterest_tablero="")) != "", True,
+              "Pinterest sin tablero: falta")
+        igual(P.encaje("google_business", "vertical", 45)["nivel"], "error",
+              "Google Business no acepta más de 30 s")
+        # ficha: lo que la pantalla necesita
+        ok(P.LIMITES["x"] == 280 and P.LIMITES["bluesky"] == 300, "los límites de X y Bluesky")
+        # el envío: Google Business en su propia subida, y Pinterest sin tablero no sale
+        cli = P.cliente(raiz)
+        cli.crear_perfil("studio_r")
+        cli.enlace_conectar("studio_r", ["linkedin", "google_business", "pinterest", "discord"])
+        mp4 = os.path.join(raiz, "v.mp4")
+        with open(mp4, "wb") as fh:
+            fh.write(b"0" * 2000)
+        info = dict(info, mp4=mp4, mp4_huella="hr", duracion_s=20, formato="vertical")
+        P.guardar_ficha(raiz, "redes1", {"textos": {r: {"descripcion": f"Texto {r}", "alt": "Se ve algo"}
+                                                     for r in ("linkedin", "google_business",
+                                                               "pinterest", "discord")}})
+        try:
+            P.enviar(raiz, info, dict(aj, pinterest_tablero=""),
+                     {"redes": ["pinterest"], "modo": "ahora", "confirmado": True}, en_hilo=False)
+            ok(False, "Pinterest sin tablero no se envía")
+        except P.ErrorPublicar as fallo:
+            ok("tablero" in str(fallo), "Pinterest sin tablero no se envía, y dice por qué")
+        P.enviar(raiz, info, aj, {"redes": ["linkedin", "google_business", "discord"], "modo": "ahora",
+                                  "confirmado": True}, en_hilo=False)
+        subidas = json.load(open(simulador))["subidas"]
+        igual(len(subidas), 2, "Google Business va en su propia subida")
+        gbp = next(x for x in subidas if "google_business" in x["redes"])
+        otra = next(x for x in subidas if "google_business" not in x["redes"])
+        igual(gbp["redes"], ["google_business"], "sola")
+        ok(str(gbp["campos"].get("title", "")).startswith("Texto google_business"),
+           "con su texto en el «title» común")
+        igual(sorted(otra["redes"]), ["discord", "linkedin"], "las otras, juntas")
+        ok(otra["campos"].get("discord_alt_text") == "Se ve algo", "Discord lleva su texto alternativo")
+        # cifras: un envío que solo fue a Discord no gasta consultas
+        for _ in range(3):
+            P.refrescar(raiz)
+        lotes = P._lotes_publicados(raiz, ["redes1"])
+        redes_medidas = sorted({e["red"] for envs in lotes.values() for _p, e in envs})
+        igual(redes_medidas, ["linkedin"], "Discord y Google Business no se preguntan por cifras por post")
+        P.guardar_ajustes(raiz, "cl_r", {"perfil": "studio_r"})
+        P.recordar_cuentas(raiz, "cl_r", {r: {"nombre": r} for r in
+                                          ("linkedin", "google_business", "discord")})
+        seg = P.actualizar_seguidores(raiz, "cl_r")["seguidores"]
+        ok("discord" not in seg, "Discord no da seguidores: no se pregunta")
+    finally:
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 
 
@@ -1751,6 +1845,7 @@ def main():
     prueba_envios_sueltos()
     prueba_metricas()
     prueba_metricas_auto()
+    prueba_redes_nuevas()
     prueba_retencion_y_resumenes()
     prueba_perfiles()
     prueba_textos()

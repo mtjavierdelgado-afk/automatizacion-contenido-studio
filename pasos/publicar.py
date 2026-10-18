@@ -418,6 +418,14 @@ def guardar_ajustes(raiz, cid, cambios, internos=None):
             propio["cuentas_vistas"] = ""
             propio["seguidores"] = {}
             propio["seguidores_al"] = ""
+        # una red que se quita de «Redes de este proyecto» deja de salir marcada
+        # en los videos nuevos; una que se marca por defecto pasa a verse
+        if "redes_visibles" in limpios and "redes" not in limpios:
+            actuales = propio.get("redes", AJUSTES_DEFECTO["redes"])
+            limpios["redes"] = [r for r in actuales if r in limpios["redes_visibles"]]
+        if "redes" in limpios and "redes_visibles" not in limpios:
+            vistas = set(propio.get("redes_visibles", AJUSTES_DEFECTO["redes_visibles"]))
+            limpios["redes_visibles"] = [r for r in REDES if r in vistas | set(limpios["redes"])]
         propio.update(limpios)
         _escribir(_ruta_ajustes(raiz), datos)
     return ajustes_de(raiz, cid)
@@ -1744,6 +1752,20 @@ def _envio_publico(e):
         "metricas")}
 
 
+def redes_visibles(ajustes, datos=None):
+    """Las redes que se enseñan en un proyecto (publicar-mas): las que se
+    eligieron en «Redes de este proyecto», mas las que ya se usan (marcadas por
+    defecto, marcadas en el video o con algun envio): una red con un envio no
+    desaparece de la pantalla por quitarla de la lista."""
+    datos = datos or {}
+    puestas = set(ajustes.get("redes_visibles") or REDES_CLASICAS)
+    puestas |= set(ajustes.get("redes") or [])
+    if datos.get("redes_puestas"):
+        puestas |= set(datos.get("redes") or [])
+    puestas |= {e.get("red") for e in datos.get("envios") or []}
+    return [r for r in REDES if r in puestas]
+
+
 def ficha(raiz, info, ajustes):
     """Todo lo que la pantalla de un vídeo necesita para publicarlo."""
     pid = info["pid"]
@@ -1773,6 +1795,14 @@ def ficha(raiz, info, ajustes):
         "formato": info.get("formato") or "horizontal",
         "duracion_s": info.get("duracion_s") or 0,
         "redes": redes, "textos": datos["textos"], "capitulos": datos.get("capitulos") or [],
+        "redes_visibles": redes_visibles(ajustes, datos),
+        # lo que la pantalla necesita saber de cada red para pintar sus campos
+        "formato_redes": {r: {"titulo": (100 if r == "youtube" else 255 if r == "facebook"
+                                         else RD.TITULOS.get(r, 0)),
+                              "alt": RD.ALT.get(r, 0), "limite": LIMITES.get(r, 0),
+                              "falta": RD.falta(r, ajustes) if r in RD.REDES else "",
+                              "cifras": r in UP.CON_CIFRAS_POST}
+                          for r in REDES},
         "capitulos_posibles": len(info.get("capitulos_base") or []),
         "compuestos": compuestos,
         "encaje": {r: encaje(r, info.get("formato"), info.get("duracion_s")) for r in REDES},
@@ -2313,8 +2343,11 @@ def cola(raiz, videos, desde=None, dias=7):
     visibles = {v["pid"]: v for v in videos}
     con_ficha = set(_videos_con_ficha(raiz))
     listos, envios = [], []
+    ajustes_por = {}
     for v in videos:
         datos = _leer_video(raiz, v["pid"]) if v["pid"] in con_ficha else None
+        if v.get("cliente", "") not in ajustes_por:
+            ajustes_por[v.get("cliente", "")] = ajustes_de(raiz, v.get("cliente", ""))
         propios = (datos or {}).get("envios") or []
         resumen, salio = {}, {}
         for e in propios:                      # en orden: el ultimo manda
@@ -2327,6 +2360,7 @@ def cola(raiz, videos, desde=None, dias=7):
                         if resumen.get(r) not in ("programado", "enviando", "publicando")})
         if v.get("montado"):
             listos.append(dict(v, envios=resumen,
+                               redes_visibles=redes_visibles(ajustes_por[v.get("cliente", "")], datos),
                                redes_elegidas=(datos or {}).get("redes")
                                if (datos or {}).get("redes_puestas") else None,
                                textos=bool(datos and any(
@@ -2389,7 +2423,10 @@ def _lotes_publicados(raiz, pids):
     lotes = {}
     for pid in pids:
         for e in _leer_video(raiz, pid)["envios"]:
-            if e.get("estado") == "publicado" and e.get("lote"):
+            # Discord, Telegram, Mastodon y Google Business no dan cifras por
+            # post: preguntar por ellas gastaria del cupo para nada
+            if e.get("estado") == "publicado" and e.get("lote") \
+                    and e.get("red") in UP.CON_CIFRAS_POST:
                 lotes.setdefault(_id_de_envio(e), []).append((pid, e))
     return lotes
 
@@ -2709,7 +2746,7 @@ def actualizar_seguidores(raiz, cid):
     if not ajustes.get("cuentas_vistas"):
         raise ErrorPublicar("pulsa antes «Ver cuentas» en Cuentas y ajustes: así se sabe "
                             "qué cuentas tiene conectadas", 409)
-    conectadas = [r for r in REDES if cuentas.get(r)]
+    conectadas = [r for r in REDES if cuentas.get(r) and r in UP.CON_SEGUIDORES]
     pagina = ajustes.get("facebook_pagina") or None
     if "facebook" in conectadas and not pagina:
         conectadas.remove("facebook")      # Upload-Post pide la pagina para Facebook

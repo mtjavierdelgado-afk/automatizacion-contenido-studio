@@ -807,7 +807,7 @@ def encargo_del_video(navegador, datos):
     pg.captura("05_encargo_musica")
     ok(pg.sin_trabajo(), "volver a mezclar la música termina")
     # EFECTOS
-    pg.p.locator(".fila-ajuste").filter(has_text="Efectos").locator("button", has_text="Cambiar").click()
+    pg.p.locator(".fila-ajuste").filter(has_text="✨ Efectos").locator("button", has_text="Cambiar").click()
     ok(pg.esperar(".papel-efecto"), "los efectos se enseñan por papel")
     ok(pg.p.locator(".papel-efecto").count() >= 4, "los cuatro papeles")
     pg.p.locator(".papel-efecto").first.locator("input[type=file]").set_input_files(mp3)
@@ -1018,7 +1018,7 @@ def lo_que_sale_a_veces(navegador, datos):
     # EL COLOR DEL SUBTITULO
     pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; pintarLight();")
     pg.p.wait_for_timeout(1500)
-    pg.p.locator(".fila-ajuste").filter(has_text="Subtítulos").locator("button", has_text="Cambiar").click()
+    pg.p.locator(".fila-ajuste").filter(has_text="💬 Subtítulos").locator("button", has_text="Cambiar").click()
     pg.p.wait_for_timeout(800)
     color = pg.p.locator(".editor-ajuste input[type=color]").first
     ok(color.count() == 1, "los subtítulos dejan elegir el color")
@@ -1572,7 +1572,7 @@ def video_nuevo_con_ajustes(navegador, datos):
     pg.js(f"await cargarGaleriaLight(true); elegirEstiloLight(fichaLight('{datos['preset']}'));")
     ok(pg.esperar("h2", "Un vídeo nuevo"), "elegir el estilo abre el vídeo nuevo")
     ok(pg.esperar(".ajustes-montaje"), "con los ajustes del montaje ya al crearlo")
-    pg.p.locator(".fila-ajuste").filter(has_text="Subtítulos").locator("button", has_text="Cambiar").click()
+    pg.p.locator(".fila-ajuste").filter(has_text="💬 Subtítulos").locator("button", has_text="Cambiar").click()
     pg.pulsar(".editor-ajuste button", "Grande")
     ok(pg.visible(".fila-ajuste", "tamaño grande"), "se eligen los subtítulos (grandes)")
     pg.p.locator(".fila-ajuste").filter(has_text="Logo").locator("button", has_text="Cambiar").click()
@@ -2957,7 +2957,7 @@ def fuente_y_sitio_de_los_subtitulos(navegador, datos):
     assets_antes = _version_de(datos, "assets", "").get("activa")
     voz_antes = _version_de(datos, "voz", "").get("activa")
     pg.p.wait_for_timeout(1500)
-    pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="Subtítulos").first \
+    pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="💬 Subtítulos").first \
         .locator("button", has_text="Cambiar").click()
     pg.p.wait_for_timeout(800)
     for etiqueta in ("Fuente", "Dónde va"):
@@ -2995,7 +2995,7 @@ def fuente_y_sitio_de_los_subtitulos(navegador, datos):
     # VOLVER A SIN ELEGIR: las claves se van y la firma es la de antes
     pg.p.wait_for_timeout(1200)
     if not pg.visible(".ajustes-en-video .editor-ajuste label", "Fuente"):
-        pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="Subtítulos").first \
+        pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="💬 Subtítulos").first \
             .locator("button", has_text="Cambiar").click()
         pg.p.wait_for_timeout(800)
     fila("Fuente").locator("button", has_text="La del diseño").click()

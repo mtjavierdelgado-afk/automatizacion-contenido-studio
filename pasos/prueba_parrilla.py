@@ -553,13 +553,14 @@ def _arrancar(carpeta):
     proceso = subprocess.Popen(
         [sys.executable, os.path.join(RAIZ, "app.py"), "--puerto", str(puerto),
          "--proyectos", os.path.join(carpeta, "proyectos")],
-        cwd=RAIZ, env=entorno, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, encoding="utf-8", errors="replace")
+        cwd=RAIZ, env=entorno, stdout=open(os.path.join(carpeta, "servidor.log"), "w"),
+        stderr=subprocess.STDOUT)
     base = f"http://127.0.0.1:{puerto}"
     limite = time.time() + 90
     while time.time() < limite:
         if proceso.poll() is not None:
-            raise RuntimeError("el servidor murió al arrancar:\n" + proceso.stdout.read())
+            with open(os.path.join(carpeta, "servidor.log"), encoding="utf-8", errors="replace") as fh:
+                raise RuntimeError("el servidor murió al arrancar:\n" + fh.read()[-3000:])
         try:
             if requests.get(base + "/api/salud", timeout=2).status_code == 200:
                 return proceso, base
@@ -688,12 +689,143 @@ def prueba_studio():
         proceso.wait(timeout=15)
 
 
+def prueba_revision():
+    """Lo que encontró la revisión independiente del 17-10-2026. Cada una
+    falla con el código de antes del arreglo."""
+    seccion("6] lo de la revisión independiente")
+    # 1. una respuesta de UN guion con su separador delante
+    uno = P.separar(f"{P.SEPARADOR}\n" + guion_simple("EP07", "Uno solo"))
+    igual(len(uno), 1, "un solo guion con «=== GUION ===» delante: un guion")
+    igual(P.leer_guion(uno[0])["codigo"], "EP07", "y su ID no es el separador")
+    ok(P.SEPARADOR not in uno[0], "el separador no se queda en el texto guardado")
+    # título con guion normal
+    g = P.leer_guion("Fregadero simple - doble\nUso: adaptar")
+    igual((g["codigo"], g["titulo"]), ("", "Fregadero simple - doble"),
+          "«Fregadero simple - doble» es todo título (sin ID)")
+    g = P.leer_guion("G05 - Karaoke\nUso: adaptar")
+    igual((g["codigo"], g["titulo"]), ("G05", "Karaoke"), "«G05 - Karaoke» sí lleva ID")
+    igual(P.segundos("60 s (1 min)"), 60, "«60 s (1 min)» son 60 s, no 120")
+    t = P.cambiar_cabecera("\n\nQ1 — Título\nTono: x", "uso", "exacto")
+    g = P.leer_guion(t)
+    igual((g["codigo"], g["titulo"], g["uso"]), ("Q1", "Título", "exacto"),
+          "con líneas en blanco delante, la cabecera nueva va detrás del título")
+
+    raiz = os.path.join(CARPETA, "revision")
+    os.makedirs(raiz)
+    # 4. un fichero ilegible no se pisa con una Parrilla vacía
+    P.anadir_en_formato(raiz, "roto", "", guion_simple("R1", "x"))
+    ruta = P._ruta(raiz, "roto")
+    with open(ruta, "w", encoding="utf-8") as fh:
+        fh.write('{"matrices": [ roto')
+    fallo = lanza(P.anadir_en_formato, raiz, "roto", "", guion_simple("R2", "y"))
+    ok(fallo is not None and fallo.codigo == 503, "un fichero corrupto da 503 al guardar")
+    with open(ruta, encoding="utf-8") as fh:
+        ok(fh.read() == '{"matrices": [ roto', "y no se escribe encima (no se pierde nada)")
+    ok(lanza(P.listar, raiz, "roto") is not None, "ni se enseña como si estuviera vacío")
+
+    # matriz borrada mientras Claude convierte: va a una nueva
+    mid = P.crear_matriz(raiz, "c1", "Destino")
+
+    def claude_que_borra(instruccion, para):
+        P.borrar_matriz(raiz, "c1", mid)
+        return f"{P.SEPARADOR}\n" + guion_simple("M1", "salvado")
+    P.LLAMAR_CLAUDE = claude_que_borra
+    try:
+        t = P.lanzar(raiz, "c1", "pegar", {"texto": "x", "modo": "adaptar", "matriz": mid}, en_hilo=False)
+    finally:
+        P.LLAMAR_CLAUDE = None
+    igual(t["estado"], "listo", "si borran la matriz de destino a mitad, lo convertido no se pierde")
+    ok(t["matriz"] != mid and len(t["guiones"]) == 1, "va a una matriz nueva")
+
+    # 5. buscar el vídeo fuera del cerrojo, y no para siempre
+    _m, gids = P.anadir_en_formato(raiz, "c2", "", guion_simple("B1", "x") + f"\n{P.SEPARADOR}\n"
+                                   + guion_simple("B2", "y", material="Otro material."))
+    P.pasar_al_encargo(raiz, "c2", gids[0])
+    P.pasar_al_encargo(raiz, "c2", gids[1])
+    datos = P._leer(raiz, "c2")
+    datos["matrices"][0]["guiones"][1]["usado_al"] = "2020-01-01T00:00:00"
+    P._guardar(raiz, "c2", datos)
+    import threading as _hilos
+    buscados, bloqueado = [], []
+
+    def buscar(huella, desde):
+        buscados.append(desde)
+        otro = _hilos.Thread(target=P.crear_matriz, args=(raiz, "c2", "desde otro hilo"))
+        otro.start()
+        otro.join(3)
+        bloqueado.append(otro.is_alive())
+        return "", ""
+    P.poner_al_dia(raiz, "c2", buscar, lambda pid: False)
+    igual(len(buscados), 1, f"un guion usado hace más de {P.DIAS_BUSCANDO_VIDEO} días ya no se busca")
+    igual(bloqueado, [False], "mientras se busca el vídeo, el proyecto se puede guardar (sin cerrojo)")
+
+    # documentos: Excel sin «r», Word con controles y tablas anidadas, bomba zip
+    d = os.path.join(CARPETA, "docs_rev")
+    os.makedirs(d)
+    xs = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+    xr = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    with zipfile.ZipFile(os.path.join(d, "sin_r.xlsx"), "w") as z:
+        z.writestr("xl/workbook.xml", f'<workbook xmlns="{xs}" xmlns:r="{xr}"><sheets>'
+                   '<sheet name="H" sheetId="1" r:id="rId1"/></sheets></workbook>')
+        z.writestr("xl/_rels/workbook.xml.rels",
+                   '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+                   '<Relationship Id="rId1" Target="worksheets/sheet1.xml"/></Relationships>')
+        z.writestr("xl/worksheets/sheet1.xml", f'<worksheet xmlns="{xs}"><sheetData>'
+                   '<row><c t="inlineStr"><is><t>ID</t></is></c><c t="inlineStr"><is><t>Guion</t></is></c></row>'
+                   '<row><c t="inlineStr"><is><t>G1</t></is></c><c t="inlineStr"><is><t>Voz uno</t></is></c></row>'
+                   '</sheetData></worksheet>')
+    ok("ID: G1\nGuion: Voz uno" in P.leer_documento(os.path.join(d, "sin_r.xlsx")),
+       "un Excel sin «r» en las celdas no las amontona en la columna A")
+    w = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    celda = lambda t: f"<w:tc><w:p><w:r><w:t>{t}</w:t></w:r></w:p></w:tc>"  # noqa: E731
+    interna = f"<w:tbl><w:tr>{celda('anidada')}</w:tr></w:tbl>"
+    cuerpo = (f"<w:sdt><w:sdtContent><w:p><w:r><w:t>Texto en un control</w:t></w:r></w:p></w:sdtContent></w:sdt>"
+              f"<w:tbl><w:tr>{celda('fuera')}<w:tc>{interna}</w:tc></w:tr></w:tbl>")
+    with zipfile.ZipFile(os.path.join(d, "control.docx"), "w") as z:
+        z.writestr("word/document.xml", f'<w:document xmlns:w="{w}"><w:body>{cuerpo}</w:body></w:document>')
+    texto = P.leer_documento(os.path.join(d, "control.docx"))
+    ok("Texto en un control" in texto, "Word: el texto de un control de contenido se lee")
+    igual(texto.count("anidada"), 1, "Word: una tabla dentro de otra se lee una vez")
+    with zipfile.ZipFile(os.path.join(d, "bomba.docx"), "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("word/document.xml", b"\0" * (P.MAX_PARTE_ZIP + 1024))
+    ok(lanza(P.leer_documento, os.path.join(d, "bomba.docx")) is not None,
+       "una «bomba zip» se rechaza sin descomprimirla")
+
+    # 3. el PDF lo lee Claude en una carpeta con el PDF y nada más
+    pdf = os.path.join(d, "m.pdf")
+    with open(pdf, "wb") as fh:
+        fh.write(b"%PDF-1.4\n% sin texto\n")
+    vistos = {}
+
+    def claude_pdf(instruccion, para, cwd=None, permitidas=(), vetadas=None):
+        vistos.update(cwd=cwd, contenido=sorted(os.listdir(cwd)), permitidas=permitidas,
+                      vetadas=vetadas, instruccion=instruccion)
+        return "texto del pdf"
+    antes_which, antes_claude = P.shutil.which, P._claude
+    P.shutil.which = lambda nombre: None
+    P._claude = claude_pdf
+    try:
+        texto = P.leer_pdf(pdf, cwd=P.carpeta(raiz))
+    finally:
+        P.shutil.which, P._claude = antes_which, antes_claude
+    igual(texto, "texto del pdf", "sin pdftotext, el PDF lo lee Claude")
+    igual(vistos["contenido"], ["documento.pdf"], "en una carpeta donde solo está ese PDF")
+    ok(not vistos["cwd"].startswith(os.path.join(P.carpeta(raiz), "proyectos")) and
+       os.path.join("parrilla", "proyectos") not in vistos["cwd"], "lejos de las matrices de los proyectos")
+    ok(len(vistos["permitidas"]) == 1 and vistos["permitidas"][0].endswith("/documento.pdf)"),
+       "Read solo para ese fichero")
+    ok("Read" not in vistos["vetadas"] and "Bash" in vistos["vetadas"] and "WebFetch" in vistos["vetadas"],
+       "y ninguna otra herramienta")
+    ok(not os.path.exists(vistos["cwd"]), "la carpeta aislada se borra al acabar")
+
+
 def main():
     print("PRUEBA DE LA PARRILLA")
     prueba_lector()
     prueba_documentos()
     prueba_datos()
     prueba_trabajos()
+    prueba_revision()
     try:
         import fastapi  # noqa: F401
         import requests  # noqa: F401

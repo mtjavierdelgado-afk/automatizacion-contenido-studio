@@ -15002,25 +15002,62 @@ def _estilos_para_parrilla(peticion):
     return salida
 
 
-def _buscar_video_de_guion(huella, desde):
-    """(pid, nombre) del video creado desde `desde` cuyo material tiene esa huella."""
+#: pid -> (sello de su estado.json, huella del material). Leer el material de
+#: un vídeo abre su estado: se hace una vez por cambio, no en cada lista.
+_HUELLAS_DE_VIDEO = {}
+_MAX_HUELLAS_DE_VIDEO = 2000
+
+
+def _huella_de_video(ficha):
     P = _parrilla()
-    candidatos = []
-    for ficha in Proyecto.listar(raiz_proyectos()):
-        if ficha.get(CONFIG_TALLER):
-            continue
-        if str(ficha.get("creado") or "") < str(desde or ""):
-            continue
-        candidatos.append(ficha)
-    candidatos.sort(key=lambda f: str(f.get("creado") or ""))
-    for ficha in candidatos[:40]:
-        try:
-            texto = (contexto(ficha["id"]).estado.params("ingesta") or {}).get("texto") or ""
-        except Exception:                                   # noqa: BLE001
-            continue
-        if P.huella_material(texto) == huella:
-            return ficha["id"], ficha.get("nombre") or ficha["id"]
-    return "", ""
+    ruta = os.path.join(ficha["raiz"], "estado.json")
+    try:
+        sello = os.stat(ruta).st_mtime_ns
+    except OSError:
+        return ""
+    guardada = _HUELLAS_DE_VIDEO.get(ficha["id"])
+    if guardada and guardada[0] == sello:
+        return guardada[1]
+    try:
+        texto = (contexto(ficha["id"]).estado.params("ingesta") or {}).get("texto") or ""
+    except Exception:                                       # noqa: BLE001
+        return ""
+    if len(_HUELLAS_DE_VIDEO) >= _MAX_HUELLAS_DE_VIDEO:
+        _HUELLAS_DE_VIDEO.clear()
+    huella = P.huella_material(texto)
+    _HUELLAS_DE_VIDEO[ficha["id"]] = (sello, huella)
+    return huella
+
+
+def _buscador_de_videos(peticion):
+    """La funcion que `parrilla.poner_al_dia` usa para encontrar el video de un
+    guion: (huella, desde) -> (pid, nombre). La lista de videos se lee UNA vez
+    por llamada, y los de un proyecto con clave sin abrir no cuentan (su nombre
+    saldria en la Parrilla de otro proyecto)."""
+    estado = {"lista": None}
+    cerrados = _cerrados(peticion)
+
+    def buscar(huella, desde):
+        if estado["lista"] is None:
+            asignaciones = CLIENTES._leer(raiz_proyectos())
+            lista = []
+            for ficha in Proyecto.listar(raiz_proyectos()):
+                if ficha.get(CONFIG_TALLER):
+                    continue
+                if cerrados and CLIENTES.cliente_de(
+                        raiz_proyectos(), ficha.get(CONFIG_ESTILO_LIGHT) or "",
+                        ficha.get("id"), datos=asignaciones) in cerrados:
+                    continue
+                lista.append(ficha)
+            lista.sort(key=lambda f: str(f.get("creado") or ""))
+            estado["lista"] = lista
+        candidatos = [f for f in estado["lista"] if str(f.get("creado") or "") >= str(desde or "")]
+        for ficha in candidatos[:40]:
+            if _huella_de_video(ficha) == huella:
+                return ficha["id"], ficha.get("nombre") or ficha["id"]
+        return "", ""
+
+    return buscar
 
 
 def _video_publicado(pid):
@@ -15079,7 +15116,7 @@ def parrilla_listar(cid: str, peticion: Request):
     P = _parrilla()
     cid = _proyecto_parrilla(cid, peticion)
     try:
-        P.poner_al_dia(raiz_proyectos(), cid, _buscar_video_de_guion, _video_publicado)
+        P.poner_al_dia(raiz_proyectos(), cid, _buscador_de_videos(peticion), _video_publicado)
     except Exception as fallo:                              # noqa: BLE001
         print(f"[parrilla] no se ha podido poner al día {cid}: {fallo}", flush=True)
     return _por_parrilla(P.listar, raiz_proyectos(), cid)
@@ -15174,18 +15211,27 @@ async def parrilla_subir(cid: str, peticion: Request):
     tam = getattr(fichero, "size", None)
     if isinstance(tam, int) and tam > P.MAX_BYTES_DOCUMENTO:
         raise ErrorApi(400, "el documento tiene que pesar menos de 20 MB")
-    contenido = await fichero.read(P.MAX_BYTES_DOCUMENTO + 1)
-    nombre_fichero = os.path.basename(str(getattr(fichero, "filename", "") or "documento"))
-    campos = {k: (v if isinstance(v, str) else "") for k, v in formulario.multi_items()
-              if not hasattr(v, "read")}
-    ruta = await _en_hilo(_por_parrilla, P.guardar_subida, raiz_proyectos(),
-                          nombre_fichero, contenido)
+    try:
+        contenido = await fichero.read(P.MAX_BYTES_DOCUMENTO + 1)
+        nombre_fichero = os.path.basename(str(getattr(fichero, "filename", "") or "documento"))
+        campos = {k: (v if isinstance(v, str) else "") for k, v in formulario.multi_items()
+                  if not hasattr(v, "read")}
+    finally:
+        # los temporales del multipart, ya: no al pasar el recolector
+        await formulario.close()
+    return await _en_hilo(_parrilla_subir_en_hilo, cid, nombre_fichero, contenido, campos)
+
+
+def _parrilla_subir_en_hilo(cid, nombre_fichero, contenido, campos):
+    """Lo de disco de `parrilla_subir`, fuera del bucle de eventos."""
+    P = _parrilla()
+    ruta = _por_parrilla(P.guardar_subida, raiz_proyectos(), nombre_fichero, contenido)
     datos = {"ruta": ruta, "nombre_fichero": nombre_fichero, "modo": campos.get("modo"),
              "matriz": campos.get("matriz") or "",
              "nombre": campos.get("nombre") or os.path.splitext(nombre_fichero)[0],
              "contexto": _contexto_parrilla(cid, campos)}
     try:
-        t = await _en_hilo(_por_parrilla, P.lanzar, raiz_proyectos(), cid, "subir", datos)
+        t = _por_parrilla(P.lanzar, raiz_proyectos(), cid, "subir", datos)
     except ErrorApi:
         try:
             os.remove(ruta)

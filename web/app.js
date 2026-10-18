@@ -18700,7 +18700,7 @@ function seccionClaveUploadPost(ficha) {
 const PAR = {
   seccion: 'parrilla', cid: '', proyectos: null, estilos: [], datos: null, guion: null,
   cargando: false, cargadoAl: 0, maxPedir: 30, error: '', filtro: 'todos', buscar: '', reloj: null, trabajo: null,
-  borradorTexto: null, guardando: false, estiloElegido: '', encargoIndice: 0,
+  borradorTexto: null, guardando: false, estiloElegido: '', encargoIndice: 0, turno: 0, repintar: false,
   form: {
     origen: 'subir', modo: 'adaptar', matriz: '', nombre: '', red: '', formato: '',
     duracion_s: '', notas: '', texto: '', yaFormato: false, peticion: '', cuantos: 5,
@@ -18718,6 +18718,10 @@ function rutaProyectoParrilla(resto) {
 }
 
 async function cargarParrilla(silencio) {
+  /* UNA RESPUESTA VIEJA NO PISA A LA NUEVA: cambiar de proyecto con una carga
+     en camino podía dejar a la vista las matrices del anterior con el selector
+     en el nuevo (y sus botones mandaban ids a un proyecto que no los tiene). */
+  const turno = (PAR.turno = (PAR.turno || 0) + 1);
   if (!silencio) { PAR.cargando = true; pintarModulo(); }
   PAR.error = '';
   try {
@@ -18731,13 +18735,18 @@ async function cargarParrilla(silencio) {
         || PAR.proyectos.find(x => x.id !== '_sin') || PAR.proyectos[0];
       PAR.cid = elegido ? elegido.id : '_sin';
     }
-    PAR.datos = await pedir(rutaProyectoParrilla());
+    const datos = await pedir(rutaProyectoParrilla());
+    if (turno !== PAR.turno) return;
+    PAR.datos = datos;
     // uno en marcha se sigue (se recargó la página); uno ya acabado no se vuelve a anunciar
     if (PAR.datos.trabajo && PAR.datos.trabajo.estado === 'trabajando' && !PAR.trabajo) PAR.trabajo = PAR.datos.trabajo;
     if (PAR.seccion === 'ficha' && PAR.guion) {
-      PAR.guion = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(PAR.guion.id)}`));
+      const guion = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(PAR.guion.id)}`));
+      if (turno !== PAR.turno) return;
+      PAR.guion = guion;
     }
   } catch (e) {
+    if (turno !== PAR.turno) return;
     PAR.error = e.message;
     if (e.status === 404 && PAR.seccion === 'ficha') { PAR.seccion = 'parrilla'; PAR.guion = null; }
   }
@@ -18753,8 +18762,23 @@ function repintarParrillaSinPisar() {
   if (campoPublicarConFoco()) {
     const viejo = document.querySelector('#modulo .trabajo-parrilla-hueco');
     if (viejo) viejo.replaceWith(avisoTrabajoParrilla());
+    /* ...y el resto, al salir del campo: si el trabajo acabó, la sección
+       cambió y el formulario se vació, y eso tiene que verse. */
+    if (!PAR.repintar) {
+      PAR.repintar = true;
+      const m = $('#modulo');
+      if (m) {
+        m.addEventListener('focusout', () => setTimeout(() => {
+          if (!PAR.repintar || MODULOS.actual !== 'automatizar') { PAR.repintar = false; return; }
+          if (campoPublicarConFoco()) { PAR.repintar = false; repintarParrillaSinPisar(); return; }
+          PAR.repintar = false;
+          pintarModulo();
+        }, 60), { once: true });
+      }
+    }
     return;
   }
+  PAR.repintar = false;
   pintarModulo();
 }
 
@@ -18785,6 +18809,8 @@ function vistaParrilla() {
     PAR.cargadoAl = Date.now();
     setTimeout(() => cargarParrilla(true), 0);
   }
+  // al volver a Automatizar con una conversión en marcha, se vuelve a preguntar
+  if (PAR.trabajo && PAR.trabajo.estado === 'trabajando' && !PAR.reloj) setTimeout(vigilarTrabajoParrilla, 0);
   const caja = h('div', { clase: 'automatizar parrilla' });
   const pestanas = h('div', { clase: 'pestanas-publicar', role: 'tablist' });
   [['parrilla', 'Parrilla'], ['anadir', 'Añadir guiones'],
@@ -18871,9 +18897,7 @@ function vigilarTrabajoParrilla() {
       if (acabo) {
         if (nuevo.estado === 'listo') {
           toast(`${cuantosGuiones((nuevo.guiones || []).length)} en la Parrilla`);
-          PAR.form.texto = '';
-          PAR.form.peticion = '';
-          PAR.form.fichero = null;
+          vaciarFormParrilla();
           PAR.seccion = 'parrilla';
         } else {
           toast(nuevo.error || 'no se han podido convertir', true);
@@ -19139,6 +19163,14 @@ function seccionAnadirParrilla() {
   return caja;
 }
 
+/* Lo de UNA tanda se vacía al acabar bien: el nombre de la matriz nueva y la
+   matriz elegida tampoco se arrastran (el Word de después acababa en otra
+   matriz «Octubre», hallazgo 2 de la revisión). El uso, la red y el formato sí
+   se quedan: suelen ser los mismos para todo el proyecto. */
+function vaciarFormParrilla() {
+  Object.assign(PAR.form, { texto: '', peticion: '', fichero: null, nombre: '', matriz: '', yaFormato: false });
+}
+
 async function usarPlantillaParrilla() {
   if (PAR.form.texto.trim() && !confirm('El campo ya tiene texto. ¿Lo reemplazo por la plantilla?')) return;
   try {
@@ -19160,7 +19192,7 @@ async function lanzarParrilla() {
       const r = await pedir(rutaProyectoParrilla('/guiones'), { method: 'POST',
         cuerpo: { texto: f.texto, matriz: f.matriz, nombre: f.nombre.trim() } });
       toast(`${cuantosGuiones((r.guiones || []).length)} guardados`);
-      f.texto = '';
+      vaciarFormParrilla();
       PAR.seccion = 'parrilla';
       await cargarParrilla(true);
       return;
@@ -19202,20 +19234,28 @@ function seccionFichaParrilla() {
     + (g.video_nombre ? ` · vídeo: ${g.video_nombre}` : '')
     + (g.usado_al ? ` · pasado al Encargo el ${g.usado_al.replace('T', ' ').slice(0, 16)}` : '')));
 
-  // Lo rápido: uso, formato y duración (cambian la línea del texto)
-  const uso = h('select', { onchange: ev => guardarGuionParrilla({ uso: ev.target.value }) },
+  // Lo rápido: uso, formato y duración (cambian la línea del texto). Con el
+  // texto a medio editar se apagan: se aplicarían al texto GUARDADO y «Guardar
+  // el texto» los desharía después sin decir nada.
+  const borradorPendiente = PAR.borradorTexto !== null && PAR.borradorTexto !== g.texto;
+  const uso = h('select', { clase: 'rapido-guion', disabled: borradorPendiente ? true : null,
+    onchange: ev => guardarGuionParrilla({ uso: ev.target.value }) },
     (g.uso ? [] : [h('option', { value: '', selected: true }, 'sin decir')])
       .concat(['adaptar', 'exacto'].map(v => h('option', { value: v, selected: g.uso === v ? true : null }, v))));
-  const formato = h('select', { onchange: ev => guardarGuionParrilla({ formato: ev.target.value }) },
+  const formato = h('select', { clase: 'rapido-guion', disabled: borradorPendiente ? true : null,
+    onchange: ev => guardarGuionParrilla({ formato: ev.target.value }) },
     (g.formato ? [] : [h('option', { value: '', selected: true }, 'sin decir')])
       .concat(['vertical', 'horizontal'].map(v => h('option', { value: v, selected: g.formato === v ? true : null }, v))));
-  const duracion = h('input', { type: 'number', min: 0, max: 3600, clase: 'numero-corto', value: g.duracion_s || '',
+  const duracion = h('input', { type: 'number', min: 0, max: 3600, clase: 'numero-corto rapido-guion',
+    disabled: borradorPendiente ? true : null, value: g.duracion_s || '',
     placeholder: 'en el Encargo', onchange: ev => guardarGuionParrilla({ duracion_s: ev.target.value ? Number(ev.target.value) : null }) });
   duracion.dataset.foco = 'parrilla-ficha-duracion';
   caja.appendChild(h('div', { clase: 'bloque' },
     h('div', { clase: 'rejilla-parrilla' }, h('label', {}, 'Uso', uso), h('label', {}, 'Formato', formato),
       h('label', {}, 'Duración (s)', duracion)),
-    h('div', { clase: 'pista' }, 'Cambiar esto cambia su línea en el texto de abajo (y en «Para el Encargo» si hay uno solo).')));
+    h('div', { clase: 'pista' }, borradorPendiente
+      ? 'Guarda o descarta antes los cambios del texto.'
+      : 'Cambiar esto cambia su línea en el texto de abajo (y en «Para el Encargo» si hay uno solo).')));
 
   // El texto entero: es la verdad del guion
   const texto = PAR.borradorTexto !== null ? PAR.borradorTexto : g.texto;
@@ -19229,6 +19269,7 @@ function seccionFichaParrilla() {
       const sinCambios = PAR.borradorTexto === g.texto;
       document.querySelectorAll('#modulo .guardar-texto-guion, #modulo .descartar-texto-guion')
         .forEach(b => { b.disabled = sinCambios; });
+      document.querySelectorAll('#modulo .rapido-guion').forEach(c => { c.disabled = !sinCambios; });
       const pasar = document.querySelector('#modulo .boton-pasar-encargo');
       if (pasar) {
         pasar.disabled = !sinCambios || pasar.dataset.sinMaterial === '1';
@@ -19320,7 +19361,12 @@ function bloqueEncargoParrilla(g, sinGuardar) {
 }
 
 async function guardarGuionParrilla(cambios) {
-  if (PAR.guardando) return;
+  if (PAR.guardando) {
+    // el desplegable no se queda enseñando un valor que no se guardó
+    toast('espera a que acabe de guardar', true);
+    pintarModulo();
+    return;
+  }
   PAR.guardando = true;
   try {
     if ('estado' in cambios && cambios.estado === 'pendiente' && PAR.guion.video
@@ -19375,7 +19421,8 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
     return;
   }
   const r = datos.encargo || {};
-  APP.light.video.encargo = null;
+  /* Se rellena el borrador que haya: lo del guion se pone y lo demás («Qué
+     lleva este vídeo», los ajustes del montaje) se queda como estaba. */
   const e = encargoVideoLight();
   e.nombre = r.nombre || '';
   e.material = r.material || '';
@@ -19384,7 +19431,6 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   e.cta = r.cta || ctaPorDefecto();
   if (r.duracion_objetivo_s) e.duracion_objetivo_s = r.duracion_objetivo_s;
   if (r.formato === 'vertical' || r.formato === 'horizontal') e.formato = r.formato;
-  e.desdeParrilla = { proyecto: PAR.cid, guion: g.id };
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.datos = null;
   irAModulo('crear');

@@ -4089,5 +4089,59 @@ def parrilla_marca_chat_y_resultados(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def parrilla_analizar_una_cuenta(navegador, datos):
+    """analizar-cuentas (18-10-2026), con las fuentes simuladas: poner las
+    conexiones, traer una cuenta de Instagram personal (pasa a Apify, que
+    pregunta antes de pagar), analizarla, escribir guiones con ella y llevarla
+    al chat. Y en el móvil."""
+    cid = datos["cliente"]
+    pg = Pagina(navegador, datos)
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    pg.pulsar(".pestanas-publicar button", "Analizar una cuenta")
+    ok(pg.esperar(".conexiones-cuentas", segundos=10), "la pestaña con sus Conexiones")
+    ok(pg.visible(".conexiones-cuentas .caja-aviso", "SIMULADO"), "avisa de que es simulado")
+    pg.p.locator("[data-foco=conexion-apify_token]").fill("apify_api_recorrido_1234")
+    pg.p.locator(".conexion-cuenta").nth(2).locator("button", has_text="Guardar").click()
+    ok(pg.esperar(".conexion-cuenta .pastilla", "1234", 10), "el token de Apify, puesto (solo sus 4 últimos)")
+    pg.p.locator("[data-foco=conexion-meta_token]").fill("EAABrecorrido5678")
+    pg.p.locator(".conexion-cuenta").nth(1).locator("button", has_text="Guardar").click()
+    ok(pg.esperar(".conexion-cuenta .meta", "estadoplay", 10), "el token de Meta encuentra tu Instagram")
+
+    pg.p.locator("[data-foco=cuenta-texto]").fill("https://www.instagram.com/personal_lucia/")
+    pg.dialogos.clear()
+    pg.pulsar(".traer-cuenta button.primario", "Traer sus vídeos")
+    ok(pg.esperar(".cab-cuenta h3", "@personal_lucia", 20), "trae la cuenta")
+    ok(pg.visible(".cuenta-abierta > .meta", "Apify"), "por Apify (no es profesional)")
+    ok(pg.esperar(".video-cuenta", segundos=5), "con sus vídeos")
+    pg.pulsar(".analisis-cuenta button", "Que Claude la analice")
+    ok(pg.esperar(".texto-analisis", "QUÉ LE FUNCIONA", 20), "el análisis")
+    pg.captura("cuenta_analizada")
+    pg.pulsar(".guiones-cuenta button.primario", "Escribir guiones")
+    ok(pg.esperar(".cab-matriz .meta", "con lo que le funciona a @personal_lucia", 25),
+       "los guiones van a la Parrilla, diciendo de qué cuenta salen")
+    pg.pulsar(".pestanas-publicar button", "Analizar una cuenta")
+    pg.pulsar(".cuentas-guardadas button", "personal_lucia")
+    pg.pulsar(".guiones-cuenta button", "Hablar de ella en el chat")
+    ok(pg.esperar(".chat-parrilla", segundos=10), "«Hablar de ella en el chat» abre el chat")
+    ok(pg.p.evaluate("() => (document.querySelector('.cuenta-chat') || {}).value") == "instagram:personal_lucia",
+       "con la cuenta elegida")
+    pg.sin_errores("analizar una cuenta")
+    pg.cerrar()
+
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="movil")
+    pg.js("document.documentElement.dataset.tema = 'claro';")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js("irASeccionParrilla('cuentas');")
+    ok(pg.esperar(".cuentas-guardadas button", segundos=10), "en el móvil")
+    pg.pulsar(".cuentas-guardadas button", "personal_lucia")
+    pg.p.wait_for_timeout(800)
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth")
+    ok(ancho <= 391, f"la cuenta cabe a lo ancho en el móvil ({ancho} px)")
+    pg.sin_errores("analizar una cuenta en el móvil")
+    pg.cerrar()
+
+
 if __name__ == "__main__":
     sys.exit(main())

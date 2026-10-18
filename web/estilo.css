@@ -3549,3 +3549,4 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 @media (max-width: 600px) {
   .traer-cuenta select, .cuenta-chat { max-width: 100%; flex: 1 1 45%; }
 }
+.pago-cuentas label { text-transform: none; letter-spacing: normal; font-size: 13px; color: var(--texto); }

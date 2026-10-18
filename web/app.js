@@ -10253,6 +10253,9 @@ async function cargarRevisor(pid) {
     REVISOR.leido = Date.now();
   } catch (err) {
     if (REVISOR.pid === pid) REVISOR.error = err.message;
+    /* TAMBIÉN AL FALLAR: si no, con el servidor reiniciándose la ficha seguía
+       «vieja» y cada repintado volvía a pedirla, sin parar. */
+    REVISOR.leido = Date.now();
   }
   REVISOR.cargando = false;
   const trabajo = (REVISOR.ficha || {}).trabajo;
@@ -10311,13 +10314,16 @@ async function cancelarRevision() {
 async function aplicarRevision() {
   const v = videoAbierto();
   const ficha = REVISOR.ficha || {};
-  const n = (ficha.pendientes || []).length;
+  const pendientes = ficha.pendientes || [];
+  const n = pendientes.length;
   if (!v.pid || !n) return;
   const precio = usdCorto(n * Number(ficha.usd_por_imagen || 0));
   if (!window.confirm(`¿Rehacer las ${n} imágenes que marcó el revisor? (≈ ${precio})`)) return;
   try {
+    /* CON SUS IDS: se rehacen las que se han confirmado y ninguna más, aunque
+       mientras tanto el revisor haya marcado otras. */
     aplicarCola(await pedir(`${API.colaImagenes(v.pid)}/revision/aplicar`,
-                            { method: 'POST', cuerpo: {} }));
+                            { method: 'POST', cuerpo: { notas: pendientes.map(p => p.nota) } }));
     COLA_IMG.pid = v.pid;
     await recargarNotas();
     await cargarRevisor(v.pid);
@@ -12079,17 +12085,22 @@ function botonAplicarRepaso() {
   if (cuadernoDeAhora() === 'imagenes') {
     const ocupadas = new Set([...(COLA_IMG.cola || []),
       ...((COLA_IMG.actual || {}).notas || [])]);
-    const planos = new Set(notasDeAhora()
-      .filter(n => n.estado !== 'aplicado' && n.plano && !ocupadas.has(n.id))
-      .map(n => n.plano));
+    const vivas = notasDeAhora()
+      .filter(n => n.estado !== 'aplicado' && n.plano && !ocupadas.has(n.id));
+    const planos = new Set(vivas.map(n => n.plano));
     if (!planos.size) return null;
     const n = planos.size;
+    /* LAS DEL REVISOR VAN DENTRO, y se dice: después de «Revisar imágenes»,
+       quien escribió una nota veía «Rehacer 16 imágenes» sin saber por qué. */
+    const delRevisor = new Set(vivas.filter(x => x.autor === 'revisor').map(x => x.plano)).size;
     return conAyuda(
       'Rehace las imágenes de todas las notas pendientes, una detrás de otra. '
       + 'Si hay varias notas para la misma imagen, se juntan y se paga una sola. '
       + 'Si OpenAI rechaza una, las demás siguen y esa nota te dice por qué.',
       h('button', { clase: 'avisa', onclick: encolarTodasLasImagenes },
-        `Rehacer ${n} ${n === 1 ? 'imagen' : 'imágenes'} · ≈ ${usdCorto(n * COLA_IMG.usdPorImagen)}`
+        `Rehacer ${n} ${n === 1 ? 'imagen' : 'imágenes'}`
+        + (delRevisor ? ` (${delRevisor} del revisor)` : '')
+        + ` · ≈ ${usdCorto(n * COLA_IMG.usdPorImagen)}`
         + ` · ~${mmss(n * COLA_IMG.segundosPorImagen)}`));
   }
   const corriendo = !!trabajoVideoLight();

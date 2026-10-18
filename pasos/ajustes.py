@@ -83,8 +83,9 @@ POR_DEFECTO = {
     # EL REVISOR DE IMAGENES (pasos/revisor_imagenes.py). «manual»: solo con
     # el boton. «autonomo»: tras cada tanda revisa lo nuevo y rehace solo lo
     # grave, una vuelta. «automatico»: rehace todo lo marcado y vuelve a
-    # revisar, hasta `revisor_vueltas`. Los topes son por video y cuentan solo
-    # lo que el revisor manda rehacer SOLO: lo que pide una persona no.
+    # revisar, hasta `revisor_vueltas`. Los topes cuentan solo lo que el
+    # revisor manda rehacer SOLO (lo que pide una persona no):
+    # `revisor_max_imagenes` por tanda y `revisor_max_usd` por video.
     "revisor_modo": "manual",
     "revisor_max_imagenes": 10,
     "revisor_max_usd": 1.0,

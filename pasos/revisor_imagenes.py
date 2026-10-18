@@ -46,10 +46,11 @@ import threading
 import time
 
 try:
-    from . import cli_claude, comun, repaso
+    from . import cli_claude, comun, estadisticas, repaso
 except ImportError:  # ejecutado con la carpeta pasos directamente en sys.path
     import cli_claude
     import comun
+    import estadisticas
     import repaso
 
 FASE = "revisor_imagenes"
@@ -190,13 +191,26 @@ def guardar_estado(proyecto, datos):
     return datos
 
 
+#: {(ruta, mtime_ns, tamano): huella}. La pantalla pregunta cuantas faltan
+#: por revisar cada medio minuto y leer ochenta PNG cada vez no es gratis.
+_HUELLAS = {}
+
+
 def huella(ruta):
     """sha1 del fichero, o "" si no se puede leer."""
     try:
+        datos = os.stat(ruta)
+        clave = (os.path.abspath(ruta), datos.st_mtime_ns, datos.st_size)
+        if clave in _HUELLAS:
+            return _HUELLAS[clave]
         with open(ruta, "rb") as fh:
-            return hashlib.sha1(fh.read()).hexdigest()[:16]
+            valor = hashlib.sha1(fh.read()).hexdigest()[:16]
     except OSError:
         return ""
+    if len(_HUELLAS) > 5000:
+        _HUELLAS.clear()
+    _HUELLAS[clave] = valor
+    return valor
 
 
 def sin_revisar(proyecto, imagenes, forzar=False):
@@ -335,20 +349,35 @@ def revisar(proyecto, plan, imagenes, planos, estilo=None, encargo="",
             reglas=reglas or "(sin reglas)",
             planos=_planos_legibles(proyecto, tanda, imagenes, bloques),
             tipos=" | ".join(TIPOS))
+        # CON SU AVANCE: es lo que corta la llamada al CLI si alguien cancela
+        # el trabajo (lo mata `cli_claude` desde `al_cancelar`). Sin el, cancelar
+        # esperaba a que acabara la tanda de ocho, que pueden ser siete minutos.
+        avance = estadisticas.Avance(
+            avisar, n / len(tandas), (n + 1) / len(tandas),
+            {"segundos": 30.0 * len(tanda), "origen": "estimacion"},
+            f"revisando {ids[0]}–{ids[-1]}")
+        avance.arrancar()
         try:
             texto, _sobre = cli_claude.ejecutar(
                 instruccion, modelo=modelo, esfuerzo=esfuerzo, cwd=proyecto.raiz,
                 tiempo_max_s=0, base_tiempo_s=TIEMPO_BASE_S, sistema=SISTEMA,
                 herramientas_vetadas=HERRAMIENTAS_VETADAS,
                 herramientas_permitidas=HERRAMIENTAS_PERMITIDAS,
-                extra=["--no-session-persistence"],
+                extra=["--no-session-persistence"], avance=avance,
                 para=f"el revisor de imágenes ({ids[0]}–{ids[-1]})")
             datos = comun.extraer_json(texto, "la respuesta del revisor")
         except Exception as fallo:                               # noqa: BLE001
             if type(fallo).__name__ == "Cancelado":
                 raise
+            if avance.cancelado:
+                # el corte llego por el avance: `avisar` lanza Cancelado
+                avance.parar()
+                avisar(n / len(tandas), "cancelado")
+                raise
             fallos.append(f"{ids[0]}–{ids[-1]}: {type(fallo).__name__}: {fallo}"[:300])
             continue
+        finally:
+            avance.parar()
         crudas = datos.get("planos") if isinstance(datos, dict) else datos
         for cruda in crudas if isinstance(crudas, list) else []:
             sid, ficha = _limpiar(cruda, set(ids))
@@ -429,13 +458,20 @@ def apuntar(proyecto, plan, veredictos):
     return estado["ultima"]
 
 
-def elegir(proyecto, modo, max_imagenes, max_usd, usd_por_imagen):
+def elegir(proyecto, modo, max_imagenes, max_usd, usd_por_imagen, planos=None):
     """Que notas del revisor se rehacen SOLAS en este modo. -> (retoque, sustituye, porque)
 
     `retoque` y `sustituye` son listas de ids de nota. En «manual» ninguna. En
     «autonomo» solo las de gravedad alta; en «automatico», todas. Siempre
     dentro de los topes: imagenes por pasada, dolares por video (lo ya gastado
     por el revisor cuenta) e intentos por plano.
+
+    `planos` acota a las notas de esos planos: tras una tanda, SOLO las de lo
+    que esa tanda dibujo. Sin acotar, una tanda de un plano rehacia notas
+    viejas de otros que la persona habia decidido no aplicar.
+
+    Sin precio (`usd_por_imagen` 0: no se ha podido saber) no se rehace nada
+    solo: un tope de dolares que no se puede medir no es un tope.
     """
     if modo not in ("autonomo", "automatico"):
         return [], [], "modo manual: el revisor solo apunta"
@@ -444,13 +480,18 @@ def elegir(proyecto, modo, max_imagenes, max_usd, usd_por_imagen):
                         key=lambda n: (GRAVEDADES.index(n.get("gravedad") or "media")
                                        if (n.get("gravedad") or "media") in GRAVEDADES
                                        else 1, float(n.get("t") or 0.0)))
+    if planos is not None:
+        acotar = {str(p) for p in planos}
+        candidatas = [n for n in candidatas if str(n.get("plano")) in acotar]
     if modo == "autonomo":
         candidatas = [n for n in candidatas if n.get("gravedad") == "alta"]
-    cupo = max(0, int(max_imagenes or 0))
     precio = max(0.0, float(usd_por_imagen or 0.0))
-    if precio > 0:
-        restante = max(0.0, float(max_usd or 0.0) - estado["gastado_usd"])
-        cupo = min(cupo, int(restante / precio + 1e-9))
+    if precio <= 0:
+        return [], [], ("no se sabe lo que cuesta una imagen: el revisor no rehace "
+                        "nada solo")
+    cupo = max(0, int(max_imagenes or 0))
+    restante = max(0.0, float(max_usd or 0.0) - estado["gastado_usd"])
+    cupo = min(cupo, int(restante / precio + 1e-9))
     elegidas, topadas, agotadas = [], 0, 0
     for nota in candidatas:
         plano = str(nota["plano"])

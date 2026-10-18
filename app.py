@@ -6550,6 +6550,13 @@ def _rehacer_en_linea(avisar, ctx, retoque, sustituye):
     ids = list(retoque) + list(sustituye)
     if not ids:
         return {"hechas": [], "rechazadas": [], "fallidas": []}
+    mio = _mi_trabajo(ctx)
+    if not mio:
+        # SIN TRABAJO AL QUE COLGARLO no se dibuja: la cola apuntaria «nadie
+        # dibuja» y otra tanda podria arrancar a la vez (regla 2). Las notas
+        # se quedan para rehacerlas a mano.
+        ctx.bitacora.anotar("revisor_sin_trabajo", "assets", {"notas": ids})
+        return {"hechas": [], "rechazadas": [], "fallidas": [], "sin_trabajo": True}
     while True:
         with _COLA_LOCK:
             if not _cola_dibujando(ctx):
@@ -6561,7 +6568,7 @@ def _rehacer_en_linea(avisar, ctx, retoque, sustituye):
                 cero.difference_update(retoque)
                 # ESTE trabajo es ahora el de la cola: una nota que llegue
                 # mientras tanto se suma aqui en vez de lanzar otra tanda
-                estado["trabajo"] = _mi_trabajo(ctx)
+                estado["trabajo"] = mio
                 estado.pop("esperando", None)
                 break
         avisar(0.99, "el revisor espera a que acaben las imágenes en marcha")
@@ -6579,29 +6586,45 @@ def _revisar_y_corregir(avisar, ctx, modo, ajustes, planos=None):
     vueltas = 1 if modo == "autonomo" else max(1, int(ajustes.get("revisor_vueltas") or 1))
     usd = _usd_por_imagen(ctx)
     cupo = max(0, int(ajustes.get("revisor_max_imagenes") or 0))
-    informe = {"modo": modo, "vueltas": [], "rehechas": 0, "porque": ""}
+    informe = {"modo": modo, "vueltas": [], "rehechas": 0, "mandadas": 0, "porque": ""}
+    # LO QUE ESTA TANDA DIBUJO, y nada mas: se mira y se rehace solo eso. Sin
+    # acotar, en un video de antes del revisor (o revisado a mano) una tanda de
+    # un plano revisaba los ochenta y rehacia notas que nadie habia pedido.
+    objetivo = {str(p) for p in (planos or ())}
     for vuelta in range(vueltas + 1):
-        resumen = _revisar_y_apuntar(avisar, ctx, planos=planos)
-        # en las vueltas de despues solo se mira lo rehecho: lo demas ya esta
-        # revisado con su huella y `sin_revisar` no lo devuelve
-        planos = None
+        # en cada vuelta se pide lo mismo; `sin_revisar` deja fuera lo que no
+        # cambio desde que se miro, asi que en la segunda solo entra lo rehecho
+        resumen = _revisar_y_apuntar(avisar, ctx, planos=sorted(objetivo))
         if vuelta == vueltas:
             informe["vueltas"].append({"revisados": resumen.get("revisados", 0),
                                        "marcadas": len(resumen.get("marcadas") or [])})
             break
         retoque, sustituye, porque = revisor.elegir(
-            ctx.proyecto, modo, cupo - informe["rehechas"],
-            float(ajustes.get("revisor_max_usd") or 0.0), usd)
+            ctx.proyecto, modo, cupo - informe["mandadas"],
+            float(ajustes.get("revisor_max_usd") or 0.0), usd, planos=objetivo)
         informe["porque"] = porque
         informe["vueltas"].append({"revisados": resumen.get("revisados", 0),
                                    "marcadas": len(resumen.get("marcadas") or []),
                                    "a_rehacer": len(retoque) + len(sustituye)})
         if not retoque and not sustituye:
             break
-        revisor.contar_intento(ctx.proyecto, retoque + sustituye, usd)
+        if not _mi_trabajo(ctx):
+            # sin trabajo al que colgar el dibujo no se dibuja (ver
+            # `_rehacer_en_linea`), y tampoco se apunta como intento ni gasto
+            informe["porque"] = "no se pudo colgar del trabajo: quedan como nota"
+            ctx.bitacora.anotar("revisor_sin_trabajo", "assets",
+                                {"notas": retoque + sustituye})
+            break
+        # EL TOPE CUENTA LO MANDADO, no lo que salio: un redibujo que falla
+        # tambien pudo cobrarse, y las notas de una persona que se dibujen en la
+        # misma cola no son del revisor
+        informe["mandadas"] += revisor.contar_intento(ctx.proyecto, retoque + sustituye, usd)
         avisar(0.99, f"el revisor rehace {len(retoque) + len(sustituye)} imágenes",
                "Corrigiendo las imágenes")
         hecho = _rehacer_en_linea(avisar, ctx, retoque, sustituye)
+        if hecho.get("sin_trabajo"):
+            informe["porque"] = "no se pudo colgar del trabajo: quedan como nota"
+            break
         informe["rehechas"] += len(hecho.get("hechas") or [])
     ctx.bitacora.anotar("revisor_corrige", "assets", informe)
     return informe
@@ -6620,6 +6643,18 @@ def _revisor_tras_tanda(avisar, ctx, antes):
         cambiados = [p for p, h in despues.items() if h and antes.get(p) != h]
         if not cambiados:
             return None
+        # CON UN «Revisar imágenes» A MANO EN MARCHA no se revisa otra vez lo
+        # mismo a la vez: se pagaria dos veces la lectura y las dos escribirian
+        # las mismas copias. Lo de esta tanda queda sin revisar y lo coge el
+        # siguiente «Revisar imágenes».
+        with _REVISOR_LOCK:
+            manual = _REVISOR.get(ctx.id)
+        if manual:
+            try:
+                if ctx.gestor.estado(manual)["estado"] in ("pendiente", "ejecutando"):
+                    return None
+            except KeyError:
+                pass
 
         def tramo(valor, mensaje="", publico=""):
             return avisar(0.99, mensaje, publico)

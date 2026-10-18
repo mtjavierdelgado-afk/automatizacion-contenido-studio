@@ -248,7 +248,14 @@ def prueba_elegir(proyecto):
           "tope de dolares: 0,06 $ dan para una imagen de 0,05 $")
     igual(rev.elegir(proyecto, "automatico", 0, 1.0, 0.05)[:2], ([], []),
           "tope cero: nada")
-    rev.contar_intento(proyecto, [ids["S001"]], 0.05)
+    igual(rev.elegir(proyecto, "automatico", 10, 1.0, 0.05, planos=["S003"])[:2],
+          ([ids["S003"]], []), "acotado a lo que dibujo la tanda: las demas no")
+    igual(rev.elegir(proyecto, "automatico", 10, 1.0, 0.05, planos=[])[:2], ([], []),
+          "una tanda que no dibujo nada marcado no rehace nada")
+    retoque, sustituye, porque = rev.elegir(proyecto, "automatico", 10, 1.0, 0.0)
+    igual((retoque, sustituye), ([], []), "sin precio conocido no se rehace nada solo")
+    ok("no se sabe" in porque, "y se dice por que")
+    igual(rev.contar_intento(proyecto, [ids["S001"]], 0.05), 1, "cuenta un plano")
     estado = rev.leer_estado(proyecto)
     igual(estado["intentos"].get("S001"), 1, "se cuenta el intento")
     igual(estado["gastado_usd"], 0.05, "y su coste")

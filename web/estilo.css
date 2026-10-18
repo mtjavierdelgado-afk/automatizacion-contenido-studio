@@ -3210,6 +3210,23 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .fila-pronunciacion { flex-wrap: nowrap; align-items: center; gap: 6px; }
 .fila-pronunciacion input { flex: 1 1 0; min-width: 0; }
 
+/* Movimiento y efectos (rama montaje-movimiento, 18-10-2026): el editor del
+   montaje y el selector de transiciones con su muestra animada */
+.editor-montaje .casilla { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; }
+.transiciones-montaje summary { cursor: pointer; padding: 4px 0; font-weight: 600; }
+.rejilla-transiciones { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px; margin: 8px 0; }
+.tarjeta-transicion { display: flex; flex-direction: column; gap: 4px; padding: 6px;
+  border: 1px solid var(--linea); border-radius: 8px; cursor: pointer; }
+.tarjeta-transicion.puesta { border-color: var(--acento); background: var(--marcado); }
+.muestra-transicion { width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 4px;
+  background: var(--lienzo); display: block; }
+/* la tarjeta es un <label> (toda ella marca la casilla), pero no un rótulo:
+   sin esto heredaba las mayúsculas pequeñas de los label de formulario */
+.tarjeta-transicion { text-transform: none; letter-spacing: normal; font-size: 13px;
+  color: var(--texto); margin-bottom: 0; }
+.tarjeta-transicion .fila { align-items: center; gap: 8px; }
+
 /* ================================================================ PUBLICAR
    Rama `publicar-redes-1` (16-10-2026): la barra de módulos y el módulo
    Publicar. Todo nuevo y aquí, al final, para no chocar con las otras ramas.
@@ -3437,3 +3454,44 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 .fila-mejor .crece { min-width: 0; overflow-wrap: anywhere; }
 .linea-mejor-semana .fila { gap: 8px; min-width: 0; }
 .linea-mejor-semana .crece { min-width: 0; overflow-wrap: anywhere; }
+
+
+/* ================================================= AUTOMATIZAR → PARRILLA
+   (rama `parrilla`, 17-10-2026). Todo lo de la Parrilla, aquí al final. */
+.proyecto-parrilla { gap: 8px; flex-wrap: wrap; margin: 4px 0 6px; }
+.proyecto-parrilla select { max-width: 320px; min-width: 0; flex: 0 1 auto; }
+.parrilla-opcional { margin: 0 0 10px; }
+.trabajo-parrilla { gap: 8px; margin: 8px 0; align-items: center; min-width: 0; overflow-wrap: anywhere; }
+.filtros-parrilla { gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
+.filtros-parrilla .buscar-parrilla { flex: 1 1 180px; min-width: 0; }
+.matriz-parrilla { margin-bottom: 12px; }
+.cab-matriz { gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.cab-matriz h3 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.fila-guion { gap: 8px; padding: 6px 0; border-top: 1px solid var(--linea-suave); flex-wrap: wrap; min-width: 0; }
+.fila-guion .titulo-guion { max-width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; font-weight: 600; }
+.fila-guion .datos-guion, .fila-guion .video-guion { min-width: 0; overflow-wrap: anywhere; }
+.vacio-parrilla p { margin: 6px 0 12px; }
+.origen-parrilla { flex-wrap: wrap; }
+.anadir-parrilla textarea, .ficha-parrilla textarea { width: 100%; box-sizing: border-box; }
+.texto-guion { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.5; }
+.numero-corto { width: 90px; }
+.rejilla-parrilla { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 8px 0 4px; }
+.rejilla-parrilla label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--tenue); min-width: 0; }
+.rejilla-parrilla label.ancha { grid-column: 1 / -1; }
+.rejilla-parrilla select, .rejilla-parrilla input { min-width: 0; max-width: 100%; }
+.cab-ficha-parrilla { gap: 8px; align-items: center; flex-wrap: wrap; }
+.cab-ficha-parrilla h3 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.avisos-guion ul, .avisos-encargo { margin: 6px 0 0; padding-left: 18px; }
+.encargo-parrilla .dato-encargo { display: flex; flex-direction: column; gap: 2px; margin: 8px 0; min-width: 0; }
+.encargo-parrilla .dato-encargo .valor { white-space: pre-wrap; overflow-wrap: anywhere; }
+.material-parrilla {
+  margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 220px; overflow-y: auto;
+  background: var(--hueco); border: 1px solid var(--linea); border-radius: 8px; padding: 8px 10px; font: inherit;
+}
+.pasar-encargo { gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; }
+.pasar-encargo label { display: flex; gap: 6px; align-items: center; min-width: 0; flex-wrap: wrap; }
+.pasar-encargo select { max-width: 260px; min-width: 0; }
+@media (max-width: 600px) {
+  .proyecto-parrilla select, .pasar-encargo select { max-width: 100%; flex: 1 1 100%; }
+  .fila-guion .crece { display: none; }
+}

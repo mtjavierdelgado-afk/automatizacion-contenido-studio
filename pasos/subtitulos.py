@@ -383,7 +383,7 @@ def _palabras_llanas(texto):
 
 
 def de_escena(escena, cap_linea=CAP_LINEA, idioma=None, texto="",
-              cap_trozo=None, ancla=""):
+              cap_trozo=None, ancla="", con_palabras=False):
     """[{"texto", "desde", "hasta"}] en el reloj DEL PLANO, o [] si no cuadra.
 
     `desde`/`hasta` salen de la primera y la ultima marca del rango, menos el
@@ -395,6 +395,13 @@ def de_escena(escena, cap_linea=CAP_LINEA, idioma=None, texto="",
     y vuelve a grabar la voz -- para cambiar «un uno por 100» por «1%», eso es
     absurdo. Entra AQUI y no antes de trocear, que es lo unico que importa:
     despues del troceo el texto puede encoger sin que nada se mueva.
+
+    `con_palabras` (18-10-2026, subtitulos «de redes») anade a cada trozo
+    `palabras`: [{"texto", "desde", "hasta"}], lo que se DIBUJA palabra a
+    palabra con su tiempo, para resaltar la que se esta diciendo. Una cifra
+    dicha en varias palabras es UNA palabra dibujada («ochenta y cuatro» -> «84»)
+    con el tiempo de todas. Si el texto va escrito a mano no se puede saber que
+    palabra es cual, y entonces el trozo va sin `palabras`.
 
     `ancla` es la narracion del plano cuando se escribio `texto` (la pone el
     corrector de ortografia). Si lo que dice ahora la narracion ya no es eso --se regrabo
@@ -432,8 +439,12 @@ def de_escena(escena, cap_linea=CAP_LINEA, idioma=None, texto="",
             # un trozo que se queda sin texto no se dibuja: el override puede
             # ser mas corto que lo que sustituye
             continue
-        salida.append({"texto": escrito,
-                       "desde": round(desde, 3), "hasta": round(hasta, 3)})
+        trozo = {"texto": escrito,
+                 "desde": round(desde, 3), "hasta": round(hasta, 3)}
+        if con_palabras and not texto:
+            trozo["palabras"] = _palabras_dibujadas(palabras[a:b], marcas[a:b],
+                                                    t_in, idioma)
+        salida.append(trozo)
     # los huecos cortos se cierran: ver HUECO_SIN_SUBTITULO
     for anterior, siguiente in zip(salida, salida[1:]):
         if 0 <= siguiente["desde"] - anterior["hasta"] < HUECO_SIN_SUBTITULO:
@@ -446,6 +457,45 @@ def de_escena(escena, cap_linea=CAP_LINEA, idioma=None, texto="",
         fin_plano = None
     if salida and fin_plano is not None             and 0 <= fin_plano - salida[-1]["hasta"] < HUECO_SIN_SUBTITULO:
         salida[-1]["hasta"] = round(fin_plano, 3)
+    return salida
+
+
+def _palabras_dibujadas(palabras, marcas, t_in, idioma=None):
+    """Las palabras de un trozo tal y como se dibujan, cada una con su tiempo.
+
+    Lo mismo que `limpiar_texto` --las cifras dichas se escriben en numero--,
+    pero sin juntarlas en una cadena: cada palabra dibujada sabe cuando se dice.
+    """
+    try:
+        from . import medios                                   # noqa: PLC0415
+    except ImportError:                                        # pragma: no cover
+        import medios                                          # noqa: PLC0415
+    llanas = [medios.normalizar_texto(p) for p in palabras]
+    try:
+        tramos_cifra = medios.cifras_en(llanas, idioma, _cortes_de(palabras))
+    except Exception:                                          # noqa: BLE001
+        tramos_cifra = []
+    por_indice = {t[0]: t for t in tramos_cifra}
+    salida, i = [], 0
+    while i < len(palabras):
+        tramo = por_indice.get(i)
+        cuantas = tramo[1] if tramo else 1
+        if tramo:
+            primero, ultimo = str(palabras[i]), str(palabras[i + cuantas - 1])
+            izquierda = _PEGADO_IZQUIERDA.search(primero)
+            derecha = _PEGADO_DERECHA.search(ultimo)
+            dibujo = ((izquierda.group(0) if izquierda else "") + tramo[2]
+                      + (derecha.group(0) if derecha else ""))
+        else:
+            dibujo = str(palabras[i])
+        try:
+            desde = float(marcas[i][0]) - t_in
+            hasta = float(marcas[i + cuantas - 1][1]) - t_in
+        except (TypeError, ValueError, IndexError):
+            return []
+        salida.append({"texto": dibujo, "desde": round(desde, 3),
+                       "hasta": round(max(desde, hasta), 3)})
+        i += cuantas
     return salida
 
 

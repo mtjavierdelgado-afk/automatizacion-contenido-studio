@@ -990,10 +990,34 @@ def probar_banda_sonora(proyecto, estado, params, plan):
 
 def _pista_de(mp4, trabajo, nombre):
     destino = os.path.join(trabajo, nombre)
+    medios.romper_enlace(destino)        # trabajo/ va enlazado a la version
     subprocess.run([medios.ffmpeg(), "-y", "-loglevel", "error", "-i", mp4,
                     "-ac", "2", "-ar", "48000", "-c:a", "pcm_s16le", destino],
                    capture_output=True, timeout=300, **medios.SIN_VENTANA)
     return sonido._leer(destino)
+
+
+def _huellas_de_carpeta(carpeta):
+    """{ruta relativa: sha1} de todos los ficheros de una carpeta."""
+    salida = {}
+    for raiz, _, ficheros in os.walk(carpeta):
+        for nombre in ficheros:
+            ruta = os.path.join(raiz, nombre)
+            with open(ruta, "rb") as fh:
+                salida[os.path.relpath(ruta, carpeta).replace(os.sep, "/")] = \
+                    hashlib.sha1(fh.read()).hexdigest()
+    return salida
+
+
+def _inodos_de(carpeta):
+    """{ruta relativa: (dispositivo, inodo)}: dos rutas con el mismo son UN fichero."""
+    salida = {}
+    for raiz, _, ficheros in os.walk(carpeta):
+        for nombre in ficheros:
+            ruta = os.path.join(raiz, nombre)
+            st = os.stat(ruta)
+            salida[os.path.relpath(ruta, carpeta).replace(os.sep, "/")] = (st.st_dev, st.st_ino)
+    return salida
 
 
 def probar_render(proyecto, estado, params):
@@ -1093,6 +1117,14 @@ def probar_render(proyecto, estado, params):
           "repartir es una palanca de velocidad, no de imagen")
     estado.completar("render", en_fila["salidas"], en_fila["unidades"])
 
+    # LA VERSION SELLADA NO SE TOCA AL VOLVER A MONTAR (17-10-2026). El render
+    # siembra su trabajo/ con ENLACES DUROS a la version activa: el mismo
+    # fichero con dos nombres. Si algo escribiera ENCIMA en trabajo/, cambiaria
+    # tambien esta version, y «Revertir» volveria a un video que no es el suyo.
+    v_sellada = proyecto.ruta_paso("render")
+    huellas_selladas = _huellas_de_carpeta(v_sellada)
+    inodos_sellada = _inodos_de(v_sellada)
+
     # rehacer un plano no rehace el video entero
     print("      re-render de un solo plano")
     objetivo = plan["escenas"][1]["id"]
@@ -1117,6 +1149,19 @@ def probar_render(proyecto, estado, params):
     ok(os.path.exists(os.path.join(nuevo, "video.mp4")),
        "el MP4 se vuelve a montar con el clip nuevo")
     estado.completar("render", parcial["salidas"], parcial["unidades"])
+    v_nueva = proyecto.ruta_paso("render")
+    inodos_nueva = _inodos_de(v_nueva)
+    compartidos = [r for r in inodos_nueva if r.startswith("clips/")
+                   and inodos_nueva[r] == inodos_sellada.get(r)]
+    ok(len(compartidos) >= len(otros) - 1,
+       f"los clips que no cambian son el MISMO fichero en las dos versiones "
+       f"(enlaces, no copias): {len(compartidos)} de {len(otros) + 1}")
+    nuevos = sum(os.path.getsize(os.path.join(v_nueva, r)) for r in inodos_nueva
+                 if inodos_nueva[r] not in set(inodos_sellada.values()))
+    total = sum(os.path.getsize(os.path.join(v_nueva, r)) for r in inodos_nueva)
+    print(f"      disco: la version nueva mide {total} B y solo ocupa {nuevos} B "
+          f"nuevos (con copias serian {total} B)")
+    huellas_nueva = _huellas_de_carpeta(v_nueva)
 
     # LA BANDA SONORA VA LA ULTIMA, y no es capricho: vuelve a ejecutar el paso
     # entero, y `sembrar_trabajo` recopia la version activa al trabajo -- o sea
@@ -1124,6 +1169,20 @@ def probar_render(proyecto, estado, params):
     # que rehacer un plano no recodifica los demas media una fecha que habia
     # movido esta prueba, no el render.
     probar_banda_sonora(proyecto, estado, params, plan)
+    # y un montaje con LOGO encima de todo: recodifica el MP4 entero
+    marca = os.path.join(proyecto.raiz, p8_render.CARPETA_LOGO)
+    os.makedirs(marca, exist_ok=True)
+    Image.new("RGBA", (40, 40), (255, 255, 255, 220)).save(os.path.join(marca, "logo.png"))
+    p8_render.ejecutar(proyecto, dict(params, logo={"fichero": "logo.png"}),
+                       avisador("p8"), solo_montar=True)
+    cambiadas = sorted(r for r, h in huellas_selladas.items()
+                       if _huellas_de_carpeta(v_sellada).get(r) != h)
+    igual(cambiadas, [], "la version anterior sigue byte a byte igual despues de "
+                         "rehacer un plano, montar musica y efectos y poner logo")
+    cambiadas = sorted(r for r, h in huellas_nueva.items()
+                       if _huellas_de_carpeta(v_nueva).get(r) != h)
+    igual(cambiadas, [], "y la recien sellada, tambien (el trabajo de despues "
+                         "esta enlazado a ella)")
     probar_transicion_no_coge_la_vieja(proyecto)
     probar_imagen_sigue_a_su_frase()
     probar_el_corte_no_se_mueve_solo()

@@ -535,6 +535,28 @@ def numeros_dichos(palabras_llanas, idioma=None, cortes=None):
             return True
         return any(list(palabras[j:j + len(cola)]) == list(cola) for cola in colas)
 
+    def _enlace_suma(antes, sigue, tras=""):
+        """¿Este «y»/«and» une las dos cifras o separa dos? -> bool
+
+        SOLO UNE DETRAS DE UNA DECENA REDONDA o de un multiplicador: «treinta y
+        cuatro» es 34 y «two hundred and five» es 205. Detras de cualquier otra
+        cosa la conjuncion separa DOS numeros: «entre veintitres y veinticinco
+        centimetros» salia «entre 48 centimetros» en el subtitulo (18-10-2026),
+        porque se sumaban. Una decena va con una unidad (1-9); un multiplicador,
+        con lo que quede por debajo de el.
+        """
+        despues = numero(sigue)
+        if antes in multiplos:
+            # «entre dos mil Y TRES MIL»: lo que sigue lleva su propio
+            # multiplicador del mismo orden, asi que es OTRA cifra (no 5000).
+            if tras in multiplos and multiplos[tras] >= multiplos[antes]:
+                return False
+            return (despues is not None and despues < multiplos[antes]) \
+                or sigue in multiplos
+        valor = numero(antes)
+        return (valor is not None and despues is not None and valor >= 20
+                and valor % 10 == 0 and valor < 100 and 1 <= despues <= 9)
+
     salida, i = [], 0
     while i < len(palabras):
         if palabras[i] in _DEBILES and not empieza_la_debil(i):
@@ -559,10 +581,16 @@ def numeros_dichos(palabras_llanas, idioma=None, cortes=None):
                     # «uno y MEDIO por ciento» son 1,5 %. Sin esto el tramo se
                     # cerraba en el «uno», la cola se quedaba huerfana y
                     # «ciento» se leia como el 100 suelto.
-                    actual += 0.5
+                    previa = palabras[j - 1]
+                    if previa in multiplos and multiplos[previa] >= 1000:
+                        # «dos millones y medio» es medio MILLON, no 0,5
+                        total += multiplos[previa] * 0.5
+                    else:
+                        actual += 0.5
                     j += salto
                     continue
-                if visto and (numero(sigue) is not None or sigue in multiplos):
+                tras = palabras[j + 2] if j + 2 < len(palabras) else ""
+                if visto and _enlace_suma(palabras[j - 1], sigue, tras):
                     j += 1
                     continue
                 break
@@ -1280,6 +1308,7 @@ def desempatar(*partes):
 
 def escribir_texto(ruta, texto):
     os.makedirs(os.path.dirname(os.path.abspath(ruta)), exist_ok=True)
+    romper_enlace(ruta)
     with open(ruta, "w", encoding="utf-8") as fh:
         fh.write(texto)
     return ruta
@@ -1430,6 +1459,7 @@ def copiar(origen, destino):
     if os.path.isdir(origen):
         copiar_carpeta(origen, destino)
     else:
+        romper_enlace(destino)
         _, fallo = _insistiendo(lambda: shutil.copy2(origen, destino))
         if fallo is not None:
             raise PermissionError(
@@ -1454,6 +1484,7 @@ def copiar_carpeta(origen, destino):
         for nombre in nombres:
             desde = os.path.join(raiz, nombre)
             hasta = os.path.join(carpeta, nombre)
+            romper_enlace(hasta)
             _, fallo = _insistiendo(lambda d=desde, h=hasta: shutil.copy2(d, h))
             if fallo is not None:
                 raise PermissionError(
@@ -1481,7 +1512,42 @@ def _retirar_sobrantes(origen, destino):
     return sobrantes
 
 
-def _sembrar_carpeta(origen, destino):
+def romper_enlace(ruta):
+    """Si `ruta` es un ENLACE DURO, lo quita para que se escriba un fichero nuevo.
+
+    -> ruta. LA REGLA DE `trabajo/` DEL RENDER (17-10-2026): se siembra con
+    enlaces duros a la version activa (`sembrar_trabajo(..., enlazar=True)`), y
+    un enlace duro es EL MISMO fichero en las dos carpetas. Escribir encima
+    --`open(..., "w")`, `ffmpeg -y` sobre una salida que existe, `shutil.copy2`
+    sobre un destino que existe-- cambiaria tambien la version anterior, sin un
+    solo error: el «Revertir» volveria a un video que ya no es el suyo.
+
+    Por eso todo lo que escribe en esa carpeta pasa por aqui antes: un fichero
+    con mas de un nombre (st_nlink > 1) se desengancha; uno que solo esta aqui
+    se deja, y se escribe encima como siempre. `os.replace` no necesita esto:
+    cambia la entrada de la carpeta y deja el fichero viejo donde estaba.
+    """
+    try:
+        if os.stat(ruta).st_nlink <= 1:
+            return ruta
+    except OSError:
+        return ruta
+    if not borrar(ruta):
+        raise RuntimeError(
+            f"no se puede rehacer {ruta}: es compartido con una version anterior y "
+            f"no se ha podido soltar (sigue abierto por otro proceso)")
+    return ruta
+
+
+def _enlazar_o_copiar(origen, destino):
+    """Enlace duro si se puede; si no (FAT, otro disco), una copia."""
+    try:
+        os.link(origen, destino)
+    except OSError:
+        shutil.copy2(origen, destino)
+
+
+def _sembrar_carpeta(origen, destino, enlazar=False):
     """Trae de `origen` lo que falte en `destino`, sin pisar nada de lo que hay.
 
     FICHERO A FICHERO Y NO CARPETA A CARPETA, y la diferencia costo dinero.
@@ -1504,20 +1570,30 @@ def _sembrar_carpeta(origen, destino):
         uno = os.path.join(origen, nombre)
         otro = os.path.join(destino, nombre)
         if os.path.isdir(uno):
-            _sembrar_carpeta(uno, otro)
+            _sembrar_carpeta(uno, otro, enlazar)
         elif not os.path.exists(otro):
-            shutil.copy2(uno, otro)
+            if enlazar:
+                _enlazar_o_copiar(uno, otro)
+            else:
+                shutil.copy2(uno, otro)
 
 
-def sembrar_trabajo(proyecto, paso_id):
-    """Copia la version activa dentro de trabajo/ para no perder lo no rehecho."""
+def sembrar_trabajo(proyecto, paso_id, enlazar=False):
+    """Copia la version activa dentro de trabajo/ para no perder lo no rehecho.
+
+    Con `enlazar` (solo el render, 17-10-2026) no copia: hace ENLACES DUROS, y
+    cada montaje deja de duplicar en disco los clips y el video que no cambian.
+    La condicion es que nadie escriba ENCIMA de nada de `trabajo/`: ver
+    `romper_enlace`. Las imagenes (assets) siguen copiandose a proposito: sus
+    PNG se reescriben en muchos sitios y se pagan.
+    """
     trabajo = proyecto.ruta_trabajo(paso_id, crear=True)
     if proyecto.version_activa(paso_id) is None:
         return trabajo
     activa = proyecto.ruta_paso(paso_id)
     if not os.path.isdir(activa) or os.path.abspath(activa) == os.path.abspath(trabajo):
         return trabajo
-    _sembrar_carpeta(activa, trabajo)
+    _sembrar_carpeta(activa, trabajo, enlazar)
     return trabajo
 
 

@@ -2554,6 +2554,53 @@ def prueba_logo_y_revision():
        and '"original"' in revisar_campo.INSTRUCCION,
        "el prompt pide la sugerida si hay problemas, y el trozo exacto de cada uno")
 
+    # LA DURACION DEL VIDEO en la revision del material y las indicaciones
+    # (guion-cortos, 17-10-2026): sin ella, un material de tres minutos para un
+    # video de treinta segundos salia «sirve» y el guion, un resumen.
+    titulo("revisar: el material y las indicaciones saben cuanto dura el video")
+    igual(revisar_campo.contexto_saneado("material", {"duracion_s": "60", "indicaciones": "ENSEÑA: x",
+                                                      "otra": "no"}),
+          {"duracion_s": 60.0, "indicaciones": "ENSEÑA: x"}, "solo sus dos claves, saneadas")
+    igual(revisar_campo.contexto_saneado("indicaciones", {"duracion_s": 30, "indicaciones": "x"}),
+          {"duracion_s": 30.0}, "en las indicaciones, solo la duracion")
+    for malo in ({"duracion_s": -5}, {"duracion_s": "nan"}, {"duracion_s": 99999}, "texto", None):
+        igual(revisar_campo.contexto_saneado("material", malo), {},
+              f"un contexto raro no cuenta ({malo!r})")
+    igual(revisar_campo.contexto_saneado("tono", {"duracion_s": 60}), {},
+          "las demas guias no lo usan")
+    ok(revisar_campo.huella("material", "x") != revisar_campo.huella("material", "x", {"duracion_s": 30})
+       and revisar_campo.huella("material", "x", {"duracion_s": 30})
+       != revisar_campo.huella("material", "x", {"duracion_s": 240}),
+       "el mismo material con otra duracion es otra revision (no se sirve la guardada)")
+    igual(revisar_campo.huella("material", "x"), revisar_campo.huella("material", "x", {}),
+          "sin duracion, la huella de siempre")
+    igual(revisar_campo.huella("tono", "x"), revisar_campo.huella("tono", "x", {"duracion_s": 30}),
+          "y en las demas guias no cambia nada")
+    igual(revisar_campo.contexto_saneado("material", {"duracion_s": True}), {},
+          "un booleano no es una duracion")
+    import p3_guion                                           # noqa: PLC0415
+    igual(revisar_campo.DURACION_CORTA_S, p3_guion.DURACION_CORTA_S,
+          "la revision y el redactor llaman corto a lo mismo")
+    ok("{contexto}" not in revisar_campo.INSTRUCCION.replace("{contexto}", "")
+       and revisar_campo.INSTRUCCION.count("{contexto}") == 1,
+       "la instruccion solo gana el hueco del contexto (la huella lo quita)")
+    ok("IMPRESCINDIBLE" not in revisar_campo._contexto_como_texto("material", {"duracion_s": 240}),
+       "en un video largo no se pide marcar IMPRESCINDIBLE: ese redactor no lo lee")
+    vistos = []
+    original = revisar_campo.cli_claude.ejecutar
+    revisar_campo.cli_claude.ejecutar = lambda instruccion, **_k: (
+        vistos.append(instruccion) or ('{"veredicto": "sirve", "problemas": []}', {}))
+    try:
+        revisar_campo.revisar("material", "TEMA: fregaderos", contexto={
+            "duracion_s": 30, "indicaciones": "ÁNGULO: meter la olla"})
+        revisar_campo.revisar("tono", "cercano", contexto={"duracion_s": 30})
+    finally:
+        revisar_campo.cli_claude.ejecutar = original
+    ok("el video dura 30 s" in vistos[0] and "video CORTO" in vistos[0]
+       and "IMPRESCINDIBLE:" in vistos[0] and "ÁNGULO: meter la olla" in vistos[0],
+       "la revision del material recibe la duracion, que es corto y las indicaciones")
+    ok("el video dura" not in vistos[1], "la del tono no")
+
 
 def prueba_rehacer_de_verdad():
     """«Rehacer todo» no puede devolver lo mismo sacado de la cache.
@@ -5103,6 +5150,303 @@ def prueba_revision_16_10_render():
         shutil.rmtree(carpeta, ignore_errors=True)
 
 
+# ------------------------------------- el render con enlaces duros (17-10-2026)
+
+def _huellas_de(carpeta):
+    """{ruta relativa: sha1} de todo lo que hay en una carpeta."""
+    import hashlib                                          # noqa: PLC0415
+    salida = {}
+    for raiz, _, ficheros in os.walk(carpeta):
+        for nombre in ficheros:
+            ruta = os.path.join(raiz, nombre)
+            with open(ruta, "rb") as fh:
+                salida[os.path.relpath(ruta, carpeta)] = hashlib.sha1(fh.read()).hexdigest()
+    return salida
+
+
+def _fotogramas(carpeta, color, cuantos=6, lado=(64, 36)):
+    os.makedirs(carpeta, exist_ok=True)
+    for numero in range(1, cuantos + 1):
+        Image.new("RGB", lado, color).save(os.path.join(carpeta, f"f{numero:05d}.png"))
+    return carpeta
+
+
+def prueba_enlaces_del_render():
+    """El render siembra trabajo/ con ENLACES DUROS a la version activa.
+
+    Un enlace duro es el MISMO fichero con dos nombres: cualquier escritura
+    ENCIMA de un fichero de trabajo/ cambiaria tambien la version anterior.
+    Aqui se monta una version de verdad (clips, video con musica y efectos,
+    cola, ultimo fotograma, logo), se siembra un trabajo/ con enlaces, se
+    vuelven a correr TODOS los escritores del render sobre el y se comprueba
+    que la version anterior sigue byte a byte igual.
+    """
+    titulo("render: enlaces duros en trabajo/ sin tocar la version anterior")
+    if os.name == "nt":
+        print("  (usa enlaces duros de POSIX en una carpeta temporal: se salta en Windows)")
+        return
+    base = tempfile.mkdtemp(prefix="enlaces_render_")
+    try:
+        v1 = os.path.join(base, "v1")
+        fps = 12
+        # --- la version 1, montada con los mismos escritores que el render
+        os.makedirs(os.path.join(v1, "clips"))
+        for sid, color in (("S001", (200, 30, 30)), ("S002", (30, 200, 30)),
+                           ("S003", (30, 30, 200))):
+            p8_render._codificar(_fotogramas(os.path.join(base, "f1", sid), color),
+                                 os.path.join(v1, "clips", f"{sid}.mp4"), fps, "baja")
+        os.makedirs(os.path.join(v1, "ultimo"), exist_ok=True)
+        p8_render._guardar_ultimo(os.path.join(base, "f1", "S002", "f00006.png"),
+                                  os.path.join(v1, "ultimo", "S002.png"))
+        voz = os.path.join(base, "voz.wav")
+        tono = np.sin(np.linspace(0, 440 * 2 * np.pi * 2, 96000)).astype(np.float32) * 0.2
+        sonido._escribir(voz, np.stack([tono, tono], axis=1))
+        sonido._escribir(os.path.join(v1, "efectos.wav"),
+                         np.stack([tono * 0.5, tono * 0.5], axis=1))
+        sonido._escribir(os.path.join(v1, "cama.wav"),
+                         np.stack([tono * 0.3, tono * 0.3], axis=1))
+        clips_v1 = [os.path.join(v1, "clips", f"S00{n}.mp4") for n in (1, 2, 3)]
+        p8_render._concatenar(clips_v1, os.path.join(v1, "video.mp4"), voz, 0.0, v1,
+                              musica=os.path.join(v1, "cama.wav"),
+                              efectos=os.path.join(v1, "efectos.wav"), duracion=1.5,
+                              cama=True, fps=fps, calidad="baja")
+        medios.escribir_texto(os.path.join(v1, "transicion.html"), "<p>v1</p>")
+        antes = _huellas_de(v1)
+        ok(len(antes) >= 9, f"la version 1 tiene sus ficheros ({len(antes)})")
+
+        # --- sembrar con enlaces
+        trabajo = os.path.join(base, "trabajo")
+        medios._sembrar_carpeta(v1, trabajo, True)
+        clip = os.path.join(trabajo, "clips", "S001.mp4")
+        ok(os.stat(clip).st_ino == os.stat(clips_v1[0]).st_ino
+           and os.stat(clip).st_nlink == 2,
+           "sembrar con enlaces: el clip de trabajo/ ES el de la version (mismo inodo)")
+
+        # --- y otro montaje encima: el ULTIMO plano nuevo (asi cambia tambien la
+        # cola de negro, que sale de el), otra musica, logo
+        nuevo = p8_render._codificar(_fotogramas(os.path.join(base, "f2", "S003"), (240, 240, 0)),
+                                     os.path.join(trabajo, "clips", "S003.mp4"), fps, "baja")
+        p8_render._guardar_ultimo(os.path.join(base, "f2", "S003", "f00006.png"),
+                                  os.path.join(trabajo, "ultimo", "S003.png"))
+        sonido._escribir(os.path.join(trabajo, "efectos.wav"),
+                         np.stack([tono * 0.1, tono * 0.1], axis=1))
+        sonido._escribir(os.path.join(trabajo, "cama.wav"),
+                         np.stack([tono * 0.05, tono * 0.05], axis=1))
+        clips_t = [os.path.join(trabajo, "clips", f"S00{n}.mp4") for n in (1, 2, 3)]
+        p8_render._concatenar(clips_t, os.path.join(trabajo, "video.mp4"), voz, 0.0, trabajo,
+                              musica=os.path.join(trabajo, "cama.wav"),
+                              efectos=os.path.join(trabajo, "efectos.wav"), duracion=1.5,
+                              cama=True, fps=fps, calidad="baja")
+        logo = os.path.join(base, "logo.png")
+        Image.new("RGBA", (16, 16), (255, 255, 255, 200)).save(logo)
+        p8_render.poner_logo(os.path.join(trabajo, "video.mp4"), logo, {}, "baja")
+        medios.escribir_texto(os.path.join(trabajo, "transicion.html"), "<p>v2</p>")
+        # copiar ENCIMA de un enlace (lo que hace _guardar_ultimo con su .parcial)
+        medios.copiar(logo, os.path.join(trabajo, "ultimo", "S002.png"))
+
+        despues = _huellas_de(v1)
+        cambiados = sorted(r for r in antes if despues.get(r) != antes[r])
+        igual(cambiados, [], "la version anterior sigue byte a byte igual despues de "
+                             "volver a montar encima de sus enlaces")
+        ok(os.stat(nuevo).st_ino != os.stat(clips_v1[2]).st_ino,
+           "el plano rehecho es un fichero NUEVO")
+        ok(os.stat(clips_t[0]).st_ino == os.stat(clips_v1[0]).st_ino
+           and os.stat(clips_t[1]).st_ino == os.stat(clips_v1[1]).st_ino,
+           "y los que no cambian siguen siendo los mismos (no ocupan otra vez)")
+
+        # --- cuanto ocupa: lo que la version 2 añade al disco
+        def _bytes(carpeta, solo_propios=False):
+            total = 0
+            for raiz, _, ficheros in os.walk(carpeta):
+                for nombre in ficheros:
+                    st = os.stat(os.path.join(raiz, nombre))
+                    if not solo_propios or st.st_nlink == 1:
+                        total += st.st_size
+            return total
+        print(f"  disco: la version 2 mide {_bytes(trabajo)} B y añade "
+              f"{_bytes(trabajo, solo_propios=True)} B (con copias añadiria {_bytes(trabajo)} B)")
+
+        # --- la poda: borrar la version 1 no se lleva lo que la 2 enlaza
+        shutil.rmtree(v1)
+        ok(os.path.exists(clips_t[0]) and os.stat(clips_t[0]).st_nlink == 1,
+           "podar la version anterior deja el clip compartido (y ya solo con un nombre: "
+           "al borrar este, se libera)")
+
+        # --- sin enlaces posibles (FAT, otro disco): se copia
+        otra = os.path.join(base, "otra")
+        enlace_original = os.link
+
+        def sin_enlaces(*_a, **_k):
+            raise OSError(18, "Invalid cross-device link")
+
+        os.link = sin_enlaces
+        try:
+            medios._sembrar_carpeta(trabajo, otra, True)
+        finally:
+            os.link = enlace_original
+        copia = os.path.join(otra, "clips", "S001.mp4")
+        ok(os.path.exists(copia) and os.stat(copia).st_nlink == 1
+           and _huellas_de(otra) == _huellas_de(trabajo),
+           "si no se puede enlazar, se copia: mismo contenido, fichero propio")
+
+        # --- y el render pide los enlaces de verdad
+        pedido = {}
+        sembrar_original = medios.sembrar_trabajo
+
+        def espia(proyecto, paso_id, **kw):
+            pedido.update(kw, paso=paso_id)
+            raise RuntimeError("basta")
+
+        medios.sembrar_trabajo = espia
+        try:
+            p8_render.ejecutar(type("P", (), {"raiz": base})(),
+                               {"plan": logo, "movimiento": logo, "audio": voz},
+                               lambda *a, **k: None)
+        except Exception:                                   # noqa: BLE001
+            pass
+        finally:
+            medios.sembrar_trabajo = sembrar_original
+        igual(pedido, {"paso": "render", "enlazar": True},
+              "el render siembra su trabajo/ con enlaces (fuera de Windows)")
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def prueba_montaje_movimiento():
+    """La rama montaje-movimiento (18-10-2026): camara en tres niveles, cifras,
+    barra, cortes del dinamico y el ritmo de los cortos nuevos."""
+    import camara
+    import presets_light
+
+    def escena_de(texto, t_in=10.0, paso=0.4):
+        palabras = texto.split()
+        marcas = [[t_in + k * paso, t_in + k * paso + paso * 0.8]
+                  for k in range(len(palabras))]
+        return {"id": "S001", "t_in": t_in, "t_out": t_in + len(palabras) * paso + 0.2,
+                "narracion": texto, "marcas": marcas,
+                "zoom": {"de": 1.0, "a": 1.08}}
+
+    titulo("montaje: lo de siempre NO se guarda (regla 1)")
+    igual(camara.para_guardar(None), None, "sin montaje no hay nada que guardar")
+    igual(camara.para_guardar(dict(camara.MONTAJE_DE_SIEMPRE)), None,
+          "el montaje de siempre tampoco se escribe")
+    igual(camara.para_guardar({"movimiento": "vivo"}), {"movimiento": "vivo"},
+          "solo se guarda lo que difiere de siempre")
+    ok(camara.es_de_siempre(p7_callouts.montaje_de({})),
+       "unos params sin montaje leen el de siempre")
+    igual(camara.normalizar_montaje({"movimiento": "loco"})["movimiento"], "sobrio",
+          "un nivel desconocido se lee como sobrio, no revienta")
+
+    titulo("montaje: en sobrio ningun plano lleva trayecto (sale como antes)")
+    larga = escena_de("Coge la bandeja más grande que lavas en casa. Primero, métela "
+                      "en el fregadero simple: entra tumbada y el grifo te deja sitio.")
+    siempre = camara.normalizar_montaje(None)
+    ok(all(camara.trayecto_de(larga, i, siempre) is None for i in range(8)),
+       "sobrio sin gancho: ni un trayecto")
+    con_gancho = camara.trayecto_de(larga, 0, siempre, gancho=True)
+    ok(con_gancho and con_gancho["tramos"], "sobrio con gancho: el primer plano entra")
+    igual(camara.trayecto_de(larga, 1, siempre, gancho=True), None,
+          "y el gancho es solo del primer plano")
+
+    base = {"ventana_ini": [0.1, 0.2, 0.7, 0.7], "ventana_fin": [0.15, 0.25, 0.6, 0.6],
+            "centro": [0.45, 0.55], "origen_centro": "ancla"}
+    tray = camara.trayecto_de(larga, 0, siempre, gancho=True, base=base)
+    igual(tray["tramos"][-1]["fin"], base["ventana_fin"],
+          "sobrio con gancho acaba en el encuadre de siempre del plano (su ancla)")
+    vivo_base = camara.trayecto_de(larga, 3, camara.normalizar_montaje({"movimiento": "vivo"}),
+                                   base=base)
+    caja = vivo_base["tramos"][0]["ini"]
+    ok(abs(caja[0] + caja[2] / 2 - 0.45) < 0.2 and abs(caja[1] + caja[3] / 2 - 0.55) < 0.2,
+       "en vivo, un plano con ancla se mueve alrededor de su sujeto")
+
+    titulo("montaje: vivo y dinamico dan trayectos sanos y deterministas")
+    for nivel in ("vivo", "dinamico"):
+        montaje = camara.normalizar_montaje({"movimiento": nivel})
+        duracion = larga["t_out"] - larga["t_in"]
+        for indice in range(6):
+            tray = camara.trayecto_de(larga, indice, montaje, semilla=3)
+            igual(tray, camara.trayecto_de(larga, indice, montaje, semilla=3),
+                  f"{nivel}/{indice}: el mismo plano da el mismo trayecto")
+            tramos = tray["tramos"]
+            ok(abs(tramos[0]["t0"]) < 1e-6 and abs(tramos[-1]["t1"] - duracion) < 0.01,
+               f"{nivel}/{indice}: los tramos cubren el plano entero")
+            for k in range(20):
+                t = duracion * k / 19
+                x0, y0, x1, y1 = camara.ventana_en_t({"trayecto": tray}, t,
+                                                     (1024, 1536), 9 / 16)
+                ok(all(camara.es_finito(v) for v in (x0, y0, x1, y1)) and x0 >= -0.5
+                   and y0 >= -0.5 and x1 <= 1024.5 and y1 <= 1536.5 and x1 > x0,
+                   f"{nivel}/{indice} t={t:.2f}: la ventana cae dentro de la imagen")
+        ok(len(camara.trayecto_de(larga, 0, montaje)["tramos"]) == 2,
+           f"{nivel}: un plano largo se reencuadra en dos encuadres")
+    dinamico = camara.normalizar_montaje({"movimiento": "dinamico"})
+    golpes = [g for i in range(6)
+              for g in camara.trayecto_de(larga, i, dinamico)["golpes"]]
+    ok(golpes, "dinamico: lleva golpe de zoom en la palabra clave")
+    ok(all(0.3 <= g["t"] <= larga["t_out"] - larga["t_in"] - 0.5 for g in golpes),
+       "y nunca pegado a los bordes del plano")
+    vivo = camara.normalizar_montaje({"movimiento": "vivo"})
+    ok(not any(camara.trayecto_de(larga, i, vivo)["golpes"] for i in range(6)),
+       "vivo: sin golpes")
+
+    titulo("cifras: «y» solo une un numero tras una decena redonda o un multiplo")
+    ochenta = escena_de("miden ochenta y cuatro centímetros de ancho")
+    igual([c["texto"] for c in p7_callouts.cifras_clave(ochenta, "es")], ["84 cm"],
+          "«ochenta y cuatro centímetros» es 84 cm")
+    rango = escena_de("de veintitrés a veinticinco centímetros de fondo")
+    igual([c["texto"] for c in p7_callouts.cifras_clave(rango, "es")], ["23–25 cm"],
+          "un rango con unidad sale junto")
+    pareja = escena_de("veintitrés y veinticinco centímetros")
+    textos = [c["texto"] for c in p7_callouts.cifras_clave(pareja, "es")]
+    ok("48 cm" not in textos and "48" not in " ".join(textos),
+       f"«veintitrés y veinticinco» no se suma: {textos}")
+    igual(p7_callouts.cifras_clave(escena_de("tiene dos cubetas iguales"), "es"), [],
+          "una cifra pequeña sin unidad no sale en pantalla")
+    def lee(frase):
+        llanas = [medios.normalizar_texto(x) for x in frase.split()]
+        return [v for _i, _n, v in medios.numeros_dichos(llanas, None)]
+    igual(lee("entre dos mil y tres mil euros"), [2000.0, 3000.0],
+          "«dos mil y tres mil» son dos cifras, no 5000 (revisión 18-10)")
+    igual(lee("dos millones y medio de personas"), [2500000.0],
+          "«dos millones y medio» es 2,5 millones")
+    for frase, valor in (("two hundred and five", 205.0), ("mil y una noches", 1001.0),
+                         ("treinta y un millones", 31000000.0),
+                         ("uno y medio por ciento", 1.5),
+                         ("two thousand and twenty four", 2024.0)):
+        igual(lee(frase), [valor], f"«{frase}» sigue leyéndose como antes")
+    for c in p7_callouts.cifras_clave(ochenta, "es"):
+        ok(0 <= c["desde"] <= c["hasta"], "la cifra lleva su tiempo dentro del plano")
+
+    titulo("barra: va de lo pasado a lo pasado al acabar el plano")
+    barra = p7_callouts.fragmento_barra(0.25, 0.5, 4.0, (1080, 1920), {})
+    ok('from="270.0"' in barra and 'to="540.0"' in barra and 'dur="4.000s"' in barra,
+       "la barra crece del 25 % al 50 % en lo que dura el plano")
+
+    titulo("transiciones: el dinamico corta seco salvo en los acentos")
+    escenas = [{"id": f"S{i:03d}", "duracion": 5.0,
+                "transicion": ["corte", "suave", "acento"][i % 3]}
+               for i in range(1, 16)]
+    normal = transiciones.resolver(escenas, {})
+    seco = transiciones.resolver(escenas, {}, montaje={"movimiento": "dinamico"})
+    igual(transiciones.resolver(escenas, {}, montaje={"movimiento": "vivo"}), normal,
+          "vivo no toca las transiciones")
+    for e in escenas[1:]:
+        if normal[e["id"]]["ranura"] == "acento":
+            ok(seco[e["id"]]["tipo"] != "corte", f"{e['id']}: el acento sigue encadenando")
+            ok(seco[e["id"]]["duracion"] <= normal[e["id"]]["duracion"] + 1e-9,
+               f"{e['id']}: y mas corto")
+        else:
+            igual(seco[e["id"]]["tipo"], "corte", f"{e['id']}: corte seco")
+
+    titulo("ritmo: solo los cortos nuevos con un estilo mas lento van a rapido")
+    igual(presets_light.ritmo_para_video_nuevo(60, 7.5), "rapido", "corto y estilo lento")
+    igual(presets_light.ritmo_para_video_nuevo(120, None), "rapido", "hasta 2 minutos")
+    igual(presets_light.ritmo_para_video_nuevo(121, 7.5), None, "uno largo, el del estilo")
+    igual(presets_light.ritmo_para_video_nuevo(60, 5.0), None,
+          "un estilo que ya va rapido se respeta")
+    igual(presets_light.ritmo_para_video_nuevo(60, 4.0), None, "y uno mas rapido tambien")
+
+
 def main():
     _prohibir_pagar()
     # EL HISTORICO DE TIEMPOS, A UNA COPIA. Guarda 30 muestras por paso, asi
@@ -5162,6 +5506,8 @@ def main():
     prueba_microcorte_de_red()
     prueba_revision_imagenes_16_10()
     prueba_revision_16_10_render()
+    prueba_enlaces_del_render()
+    prueba_montaje_movimiento()
 
     print("\n" + "=" * 70)
     if _fallos:

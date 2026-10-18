@@ -305,6 +305,13 @@ class ClienteUploadPost:
                                "cuentas": self._cuentas(p.get("social_accounts"))})
         return {"perfiles": salida, "limite": r.get("limit"), "plan": r.get("plan") or ""}
 
+    def tableros_pinterest(self, perfil):
+        """Los tableros de la cuenta de Pinterest del perfil. -> [{"id", "nombre"}]
+        (docs.upload-post.com/api/get-pinterest-boards)"""
+        r = self._pedir("GET", "/api/uploadposts/pinterest/boards", consulta={"profile": perfil})
+        return [{"id": str(b["id"])[:80], "nombre": str(b.get("name") or b["id"])[:120]}
+                for b in (r.get("boards") or []) if isinstance(b, dict) and b.get("id")]
+
     def crear_perfil(self, perfil):
         r = self._pedir("POST", "/api/uploadposts/users", cuerpo={"username": perfil})
         ficha = r.get("profile") if isinstance(r.get("profile"), dict) else {}

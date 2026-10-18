@@ -18206,7 +18206,7 @@ function seccionFichaPublicar() {
   const faltaAjuste = (f.redes || []).filter(r => ((f.formato_redes || {})[r] || {}).falta);
   if (faltaAjuste.length) {
     redes.appendChild(h('div', { clase: 'caja-aviso fila' },
-      h('span', { clase: 'crece' }, faltaAjuste.map(r => `${NOMBRES_RED[r]}: ${f.formato_redes[r].falta}`).join(' · ')),
+      h('span', { clase: 'crece' }, faltaAjuste.map(r => f.formato_redes[r].falta).join(' · ')),
       h('button', { clase: 'mini', onclick: () => irASeccionPublicar('cuentas') }, 'Cuentas y ajustes')));
   }
   if (redesVisiblesPublicar(f).length <= REDES_CLASICAS_PUB.length) {
@@ -18326,7 +18326,7 @@ function motivoNoPublicar(f) {
   });
   if (faltas.length) return `Falta ${faltas.join(', ')}.`;
   const ajuste = redes.find(r => ((f.formato_redes || {})[r] || {}).falta);
-  if (ajuste) return `${NOMBRES_RED[ajuste]}: ${f.formato_redes[ajuste].falta}.`;
+  if (ajuste) return `${f.formato_redes[ajuste].falta.replace(/^./, c => c.toUpperCase())}.`;
   if ((f.ajustes || {}).cuentas_vistas) {
     const sin = redes.filter(r => !(f.cuentas || {})[r]);
     if (sin.length) return `${sin.map(r => NOMBRES_RED[r]).join(', ')} no tiene${sin.length > 1 ? 'n' : ''} cuenta conectada `
@@ -18993,8 +18993,27 @@ function bloqueRedesProyectoPublicar(p) {
     h('select', { onchange: ev => guardar({ [campo]: ev.target.value }) },
       ...(opciones || []).map(([v, t]) => h('option', { value: v, selected: (a[campo] || '') === v }, t))));
   if (visibles.includes('pinterest')) {
+    PUB.tableros = PUB.tableros || {};
+    const tableros = PUB.tableros[p.id];
+    const campoTablero = Array.isArray(tableros) && tableros.length
+      ? h('label', { clase: 'etiqueta-campo' }, 'Tablero (obligatorio)',
+        h('select', { datos: { tablero: p.id }, onchange: ev => guardar({ pinterest_tablero: ev.target.value }) },
+          h('option', { value: '', selected: !a.pinterest_tablero }, 'elige un tablero'),
+          ...tableros.map(t => h('option', { value: t.id, selected: a.pinterest_tablero === t.id }, t.nombre)),
+          a.pinterest_tablero && !tableros.some(t => t.id === a.pinterest_tablero)
+            ? h('option', { value: a.pinterest_tablero, selected: true }, a.pinterest_tablero) : null))
+      : texto('pinterest_tablero', 'Tablero (obligatorio)', 'id del tablero');
     caja.appendChild(h('div', { clase: 'fila ajustes-red' }, h('b', {}, 'Pinterest'),
-      texto('pinterest_tablero', 'Tablero (obligatorio)', 'id del tablero'),
+      campoTablero,
+      h('button', { clase: 'mini', disabled: !a.perfil, title: a.perfil ? 'Los tableros de la cuenta de Pinterest conectada'
+        : 'Primero el perfil de Upload-Post', onclick: async () => {
+        try {
+          const r = await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(p.id)}/tableros`));
+          PUB.tableros[p.id] = r.tableros || [];
+          if (!PUB.tableros[p.id].length) toast('Esa cuenta de Pinterest no tiene tableros: crea uno en Pinterest', true);
+        } catch (e) { toast(e.message, true); }
+        pintarModulo();
+      } }, 'Elegir tablero'),
       texto('pinterest_enlace', 'Enlace del pin', 'https://…')));
     if (!a.pinterest_tablero) caja.appendChild(h('div', { clase: 'meta aviso-red' }, '⚠ Sin tablero no se puede publicar en Pinterest.'));
   }
@@ -21503,7 +21522,7 @@ async function cargarHorariosPublicar(cid) {
 
 function usarHoraPublicar(proxima) {
   PUB.cuandoEnvio = proxima;
-  toast(`Programado para ${proxima.replace('T', ' ')} (aún sin enviar)`);
+  toast(`Hora puesta: ${proxima.replace('T', ' ')}. Todavía no se ha programado nada: pulsa «Programar…»`);
   pintarModulo();
 }
 

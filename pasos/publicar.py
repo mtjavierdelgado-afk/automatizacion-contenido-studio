@@ -2748,6 +2748,14 @@ def medir(raiz, pids, forzar=False):
     return r
 
 
+def tableros_pinterest(raiz, cid):
+    """Los tableros de Pinterest del perfil del proyecto, para elegir uno."""
+    perfil = ajustes_de(raiz, cid).get("perfil")
+    if not perfil:
+        raise ErrorPublicar("este proyecto todavía no tiene perfil de Upload-Post", 409)
+    return {"tableros": _por_upload_post(cliente(raiz).tableros_pinterest, perfil)}
+
+
 def actualizar_seguidores(raiz, cid):
     """Seguidores, alcance y vistas de las cuentas del perfil del proyecto. Lo
     que una red no de esta vez no borra lo ultimo que se supo de ella."""

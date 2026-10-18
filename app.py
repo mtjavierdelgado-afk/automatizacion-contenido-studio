@@ -15070,6 +15070,13 @@ def publicar_ver_cuentas(cid: str, peticion: Request):
     return _por_publicar(P.ver_cuentas, raiz_proyectos(), cid)
 
 
+@app.get("/api/publicar/proyectos/{cid}/tableros")
+def publicar_tableros_pinterest(cid: str, peticion: Request):
+    """Los tableros de Pinterest del perfil del proyecto: [{id, nombre}]."""
+    cid = _proyecto_publicable(cid, peticion)
+    return _por_publicar(_publicar().tableros_pinterest, raiz_proyectos(), cid)
+
+
 @app.get("/api/publicar/proyectos/{cid}/perfiles")
 def publicar_perfiles_de_la_cuenta(cid: str, peticion: Request):
     """Los perfiles que hay de verdad en Upload-Post, para elegir uno: los que

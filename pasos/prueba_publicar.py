@@ -1243,6 +1243,8 @@ def prueba_redes_nuevas():
         P.guardar_ajustes(raiz, "cl_r", {"perfil": "studio_r"})
         P.recordar_cuentas(raiz, "cl_r", {r: {"nombre": r} for r in
                                           ("linkedin", "google_business", "discord")})
+        igual([t["id"] for t in P.tableros_pinterest(raiz, "cl_r")["tableros"]], ["1001", "1002"],
+              "los tableros de Pinterest del perfil")
         seg = P.actualizar_seguidores(raiz, "cl_r")["seguidores"]
         ok("discord" not in seg, "Discord no da seguidores: no se pregunta")
     finally:

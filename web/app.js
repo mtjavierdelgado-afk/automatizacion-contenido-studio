@@ -17605,6 +17605,7 @@ const PUB = {
   enviando: false, guardando: null, avisos: 0, repintar: false,
   modoEnvio: '', cuandoEnvio: '',
   resultados: null, proyectoResultados: '', diasResultados: 30, midiendo: false,
+  mejorSemana: null, mejores: null, porMejores: 'vistas',
 };
 const NOMBRES_RED = { tiktok: 'TikTok', instagram: 'Instagram Reels', youtube: 'YouTube', facebook: 'Facebook' };
 const CORTOS_RED = { tiktok: 'TikTok', instagram: 'Reels', youtube: 'YouTube', facebook: 'Facebook' };
@@ -17750,6 +17751,13 @@ async function cargarInicioModulos() {
   } catch (e) {
     PUB.error = e.message;
   }
+  // lo mejor de la semana: solo lee lo guardado, no pregunta a Upload-Post
+  try {
+    const r = await pedir(rutaPublicar(`/lo-que-funciono?${consulta({ dias: 7, cuantos: 1 })}`));
+    PUB.mejorSemana = (r.posts || [])[0] || false;
+  } catch (e) {
+    PUB.mejorSemana = false;
+  }
   if (MODULOS.actual === 'inicio') pintarModulo();
 }
 
@@ -17769,6 +17777,7 @@ function vistaInicioModulos() {
       h('h3', {}, titulo), h('p', { clase: 'meta' }, texto),
       h('button', { clase: id === 'automatizar' ? 'mini' : 'primario mini', onclick: () => irAModulo(id) }, boton))));
   caja.appendChild(tarjetas);
+  caja.appendChild(lineaMejorSemana());
   const hoy = h('div', { clase: 'bloque' }, h('h3', {}, 'Lo que pasa hoy'));
   const deHoy = (c.de_hoy || []).concat((c.esperan_ok || []).filter(e => !(c.de_hoy || []).some(x => x.id === e.id)));
   if (!PUB.cola) hoy.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
@@ -17822,9 +17831,21 @@ async function cargarPublicar(silencio) {
       }
       const pedido = PUB.proyectoResultados;
       const dias = PUB.diasResultados || 30;
-      const r = await pedir(rutaPublicar(`/resultados?${consulta({ proyecto: pedido, dias })}`));
+      const por = PUB.porMejores || 'vistas';
+      // por separado: si «lo que mejor funcionó» falla, el resto de Resultados sigue
+      const [res, mej] = await Promise.allSettled([
+        pedir(rutaPublicar(`/resultados?${consulta({ proyecto: pedido, dias })}`)),
+        pedir(rutaPublicar(`/lo-que-funciono?${consulta({ proyecto: pedido, dias, por, cuantos: 5 })}`)),
+      ]);
       // si entretanto se eligió otro proyecto o periodo, esta respuesta ya no vale
-      if (pedido === PUB.proyectoResultados && dias === (PUB.diasResultados || 30)) PUB.resultados = r;
+      if (pedido === PUB.proyectoResultados && dias === (PUB.diasResultados || 30)) {
+        if (mej.status === 'fulfilled' && por === (PUB.porMejores || 'vistas')) PUB.mejores = mej.value;
+        else if (mej.status === 'rejected' && por === (PUB.porMejores || 'vistas')) {
+          PUB.mejores = { posts: [], error: mej.reason.message };
+        }
+        if (res.status === 'rejected') throw res.reason;
+        PUB.resultados = res.value;
+      }
     } else {
       PUB.cola = await pedir(rutaPublicar(`/cola?${consulta({ desde: PUB.desde || '', dias: PUB.vistaCal === 'mes' ? 42 : 7 })}`));
       contarAvisosPublicar();
@@ -17832,7 +17853,7 @@ async function cargarPublicar(silencio) {
   } catch (e) {
     PUB.error = e.message;
     // las cifras de otro proyecto no se quedan a la vista bajo el error
-    if (PUB.seccion === 'resultados') PUB.resultados = null;
+    if (PUB.seccion === 'resultados') { PUB.resultados = null; PUB.mejores = null; }
   }
   PUB.cargando = false;
   if (MODULOS.actual === 'publicar') {
@@ -18819,7 +18840,25 @@ function textoMetricas(m) {
   if (!m) return '';
   return Object.keys(NOMBRES_METRICA)
     .filter(k => typeof m[k] === 'number')
-    .map(k => `${numeroCorto(m[k])} ${NOMBRES_METRICA[k]}`).join(' · ');
+    .map(k => `${numeroCorto(m[k])} ${NOMBRES_METRICA[k]}`)
+    .concat(textoRetencion(m) ? [textoRetencion(m)] : []).join(' · ');
+}
+
+/* La retención (publicar-redes-2): solo la dan TikTok y YouTube. Lo que no
+   llega no se escribe (nunca «0 %»: sería mentir). */
+function porcentaje(fraccion) {
+  return `${(Number(fraccion) * 100).toFixed(Number(fraccion) < 0.1 ? 1 : 0).replace('.', ',')} %`;
+}
+
+function textoRetencion(m) {
+  if (!m) return '';
+  const partes = [];
+  if (typeof m.vista_entera === 'number') partes.push(`${porcentaje(m.vista_entera)} lo vio hasta el final`);
+  if (typeof m.media_vista === 'number') partes.push(`${porcentaje(m.media_vista)} visto de media`);
+  if (typeof m.tiempo_medio_s === 'number') {
+    partes.push(`${String(Math.round(m.tiempo_medio_s * 10) / 10).replace('.', ',')} s de media`);
+  }
+  return partes.join(' · ');
 }
 
 async function actualizarMetricasVideo() {
@@ -19159,9 +19198,9 @@ function seccionResultadosPublicar() {
   const caja = h('div', { clase: 'resultados-publicar' });
   const proyectos = ((PUB.proyectos || {}).proyectos || []);
   caja.appendChild(h('div', { clase: 'fila' },
-    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; PUB.resultados = null; cargarPublicar(); } },
+    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; PUB.resultados = null; PUB.mejores = null; cargarPublicar(); } },
       ...proyectos.map(x => h('option', { value: x.id, selected: x.id === PUB.proyectoResultados }, x.nombre))),
-    h('select', { onchange: ev => { PUB.diasResultados = Number(ev.target.value); PUB.resultados = null; cargarPublicar(); } },
+    h('select', { onchange: ev => { PUB.diasResultados = Number(ev.target.value); PUB.resultados = null; PUB.mejores = null; cargarPublicar(); } },
       ...[[7, 'últimos 7 días'], [30, 'últimos 30 días'], [90, 'últimos 90 días']].map(([v, t]) =>
         h('option', { value: v, selected: (PUB.diasResultados || 30) === v }, t))),
     h('span', { clase: 'crece' }),
@@ -19169,7 +19208,11 @@ function seccionResultadosPublicar() {
     h('button', { clase: 'primario mini', disabled: PUB.midiendo || !(r.clave || {}).puesta,
       title: 'Pide a Upload-Post las cifras de lo publicado y los seguidores de cada cuenta',
       onclick: actualizarResultadosPublicar }, PUB.midiendo ? 'pidiendo…' : 'Actualizar')));
-  if (!(r.clave || {}).puesta) caja.appendChild(avisoClavePublicar(r.clave));
+  /* sin `r.clave` (la carga falló y el error ya está arriba) no hay aviso que
+     poner: `avisoClavePublicar` devuelve null y appendChild(null) rompía la
+     pantalla entera («fallo pintando el módulo») tapando el error de verdad */
+  const avisoClave = (r.clave && !r.clave.puesta) ? avisoClavePublicar(r.clave) : null;
+  if (avisoClave) caja.appendChild(avisoClave);
   const total = r.total || {};
   caja.appendChild(h('div', { clase: 'cifras-publicar' },
     ...[['posts', 'publicaciones'], ['vistas', 'vistas'], ['me_gusta', 'me gusta'],
@@ -19180,6 +19223,8 @@ function seccionResultadosPublicar() {
     caja.appendChild(h('div', { clase: 'meta' }, `${r.sin_cifras} publicación(es) sin cifras todavía: `
       + 'las subidas a mano no se pueden medir desde aquí, y TikTok tarda unas horas en darlas.'));
   }
+  if (r.periodos) caja.appendChild(bloquePeriodosPublicar(r.periodos));
+  caja.appendChild(bloqueMejoresPublicar());
   const redes = h('div', { clase: 'bloque' }, h('h3', {}, 'Por red'));
   const tabla = h('div', { clase: 'tabla-redes' });
   Object.keys(NOMBRES_RED).forEach(red => {
@@ -19394,6 +19439,16 @@ const PAR = {
     duracion_s: '', notas: '', texto: '', yaFormato: false, peticion: '', cuantos: 5,
     fichero: null,
   },
+  // parrilla-2 (18-10-2026): la marca del proyecto, «Desde mis resultados» y el chat
+  marca: null, marcaBorrador: null, marcaCargando: false,
+  resultados: null, resultadosCargando: false, resultadosElegidos: null, resultadosDias: 30,
+  resultadosPor: 'vistas', resultadosPeticion: '',
+  chat: null, chats: null, chatTexto: '', chatWeb: false, chatResultados: false, chatModelo: '',
+  chatCapturas: [], chatReloj: null, chatEnviando: false, chatsInfo: null, chatScroll: null,
+  // analizar-cuentas (18-10-2026): las cuentas leídas son de todo el Studio
+  cuentas: null, cuentaAbierta: null, cuentaTrabajo: null, cuentaReloj: null, cuentasCargando: false, cuentaPedida: null,
+  cuentaForm: { red: 'tiktok', texto: '', cuantos: 30 }, cuentaGuiones: { cuantos: 5, modo: 'adaptar', peticion: '' },
+  chatCuenta: '', conexionesAbiertas: null,
 };
 const ESTADOS_GUION = { pendiente: 'pendiente', usado: 'usado', publicado: 'publicado' };
 const CLASE_GUION = { pendiente: '', usado: 'ejecutando', publicado: 'ok' };
@@ -19476,6 +19531,11 @@ function elegirProyectoParrilla(cid) {
   PAR.guion = null;
   PAR.trabajo = null;
   PAR.form.matriz = '';
+  // lo de parrilla-2 es de cada proyecto: se vuelve a pedir
+  pararChatParrilla();
+  Object.assign(PAR, { marca: null, marcaBorrador: null, resultados: null, resultadosElegidos: null,
+    chat: null, chats: null, chatTexto: '', chatCapturas: [], marcaCargando: false,
+    resultadosCargando: false, chatScroll: null });
   if (PAR.seccion === 'ficha') PAR.seccion = 'parrilla';
   try { localStorage.setItem('estudio.parrilla.proyecto', cid); } catch (e) { /* sin almacén */ }
   cargarParrilla();
@@ -19501,7 +19561,7 @@ function vistaParrilla() {
   if (PAR.trabajo && PAR.trabajo.estado === 'trabajando' && !PAR.reloj) setTimeout(vigilarTrabajoParrilla, 0);
   const caja = h('div', { clase: 'automatizar parrilla' });
   const pestanas = h('div', { clase: 'pestanas-publicar', role: 'tablist' });
-  [['parrilla', 'Parrilla'], ['anadir', 'Añadir guiones'],
+  [['parrilla', 'Parrilla'], ['anadir', 'Añadir guiones'], ['cuentas', 'Analizar una cuenta'], ['marca', 'Marca del cliente'],
     ['ficha', PAR.guion ? recortar(PAR.guion.titulo || PAR.guion.codigo || 'Guion', 26) : 'Ficha de un guion']]
     .forEach(([id, texto]) => pestanas.appendChild(h('button', {
       clase: `mini${PAR.seccion === id ? ' activo' : ' fantasma'}`, role: 'tab',
@@ -19538,6 +19598,8 @@ function vistaParrilla() {
     return caja;
   }
   if (PAR.seccion === 'anadir') caja.appendChild(seccionAnadirParrilla());
+  else if (PAR.seccion === 'marca') caja.appendChild(seccionMarcaParrilla());
+  else if (PAR.seccion === 'cuentas') caja.appendChild(seccionCuentasParrilla());
   else if (PAR.seccion === 'ficha' && PAR.guion) caja.appendChild(seccionFichaParrilla());
   else caja.appendChild(seccionListaParrilla());
   return caja;
@@ -19579,7 +19641,7 @@ function vigilarTrabajoParrilla() {
     PAR.reloj = null;
     if (MODULOS.actual !== 'automatizar' || !PAR.trabajo) return;
     try {
-      const nuevo = await pedir(rutaParrilla(`/trabajos/${encodeURIComponent(PAR.trabajo.id)}`));
+      const nuevo = await pedirTrabajoParrilla(rutaParrilla(`/trabajos/${encodeURIComponent(PAR.trabajo.id)}`));
       const acabo = PAR.trabajo.estado === 'trabajando' && nuevo.estado !== 'trabajando';
       PAR.trabajo = nuevo;
       if (acabo) {
@@ -19666,7 +19728,9 @@ function seccionListaParrilla() {
     const bloque = h('div', { clase: 'bloque matriz-parrilla' });
     const origen = m.origen || {};
     const deDonde = { subir: origen.fichero ? `de «${origen.fichero}»` : 'de un documento', pegar: 'pegada',
-      pedir: 'escrita por Claude', escribir: 'escrita a mano', vacia: '' }[origen.tipo] || '';
+      pedir: 'escrita por Claude', escribir: 'escrita a mano', vacia: '',
+      chat: 'de una conversación con Claude', resultados: 'desde tus resultados',
+      cuenta: origen.cuenta ? `con lo que le funciona a ${origen.cuenta}` : 'desde una cuenta analizada' }[origen.tipo] || '';
     bloque.appendChild(h('div', { clase: 'fila cab-matriz' },
       h('h3', {}, m.nombre),
       h('span', { clase: 'meta' }, `${cuantosGuiones((m.guiones || []).length)}${deDonde ? ` · ${deDonde}` : ''}`
@@ -19738,16 +19802,26 @@ function seccionAnadirParrilla() {
 
   const origenes = h('div', { clase: 'tira-modos origen-parrilla' });
   [['subir', 'Subir un documento', 'Una matriz en Word, PDF o Excel'],
-    ['pedir', 'Pedir a Claude', 'Claude escribe guiones nuevos'],
+    ['pedir', 'Pedir a Claude', 'Claude escribe guiones nuevos de una vez'],
+    ['chat', 'Conversar con Claude', 'Un chat para preparar guiones hablando, con capturas y, si quieres, internet'],
+    ['resultados', 'Desde mis resultados', 'Guiones nuevos a partir de tus vídeos que mejor funcionaron'],
     ['pegar', 'Escribir o pegar', 'Un guion (o varios) escrito o pegado']]
     .forEach(([id, texto, ayuda]) => origenes.appendChild(h('button', {
       clase: `mini${f.origen === id ? ' activo' : ''}`, title: ayuda,
       onclick: () => { f.origen = id; pintarModulo(); },
     }, texto)));
   caja.appendChild(h('div', { clase: 'bloque' }, h('h3', {}, 'De dónde salen'), origenes));
+  // EL CHAT ocupa la sección entera: sus guiones se guardan uno a uno desde
+  // cada respuesta, así que no lleva «Cómo se usa» ni «Dónde se guardan»
+  if (f.origen === 'chat') {
+    caja.appendChild(panelChatParrilla());
+    return caja;
+  }
 
   const bloque = h('div', { clase: 'bloque' });
-  if (f.origen === 'subir') {
+  if (f.origen === 'resultados') {
+    bloqueResultadosParrilla(bloque);
+  } else if (f.origen === 'subir') {
     const input = h('input', {
       type: 'file', accept: '.docx,.xlsx,.pdf,.txt,.md',
       onchange: ev => { f.fichero = ev.target.files && ev.target.files[0] ? ev.target.files[0] : null; pintarModulo(); },
@@ -19843,7 +19917,8 @@ function seccionAnadirParrilla() {
       !f.matriz ? h('label', { clase: 'ancha' }, 'Nombre de la matriz nueva', nombre) : null)));
 
   const etiqueta = f.origen === 'subir' ? 'Subir y convertir'
-    : f.origen === 'pedir' ? 'Pedir a Claude' : sinClaude ? 'Guardar en la Parrilla' : 'Convertir con Claude';
+    : f.origen === 'pedir' ? 'Pedir a Claude'
+      : f.origen === 'resultados' ? 'Escribir desde mis resultados' : sinClaude ? 'Guardar en la Parrilla' : 'Convertir con Claude';
   caja.appendChild(h('div', { clase: 'fila cierre' },
     h('button', { clase: 'primario', disabled: enMarcha ? true : null, onclick: () => lanzarParrilla() }, etiqueta),
     h('span', { clase: 'pista' }, enMarcha ? 'Espera a que acabe la conversión en marcha.'
@@ -19892,6 +19967,12 @@ async function lanzarParrilla() {
       datos.append('documento', f.fichero, f.fichero.name);
       Object.entries(comunes).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') datos.append(k, String(v)); });
       t = await pedir(rutaProyectoParrilla('/subir'), { method: 'POST', cuerpo: datos });
+    } else if (f.origen === 'resultados') {
+      const elegidos = [...(PAR.resultadosElegidos || [])];
+      if (!elegidos.length) { toast('elige al menos un vídeo de tus resultados', true); return; }
+      t = await pedir(rutaProyectoParrilla('/desde-resultados'), { method: 'POST',
+        cuerpo: Object.assign({ claves: elegidos, dias: PAR.resultadosDias, por: PAR.resultadosPor,
+          cuantos: Number(f.cuantos) || 0, peticion: PAR.resultadosPeticion }, comunes) });
     } else if (f.origen === 'pedir') {
       if (!f.peticion.trim()) { toast('di qué guiones quieres', true); return; }
       t = await pedir(rutaProyectoParrilla('/pedir'), { method: 'POST',
@@ -19992,6 +20073,12 @@ function seccionFichaParrilla() {
   }
   if (g.estado !== 'publicado') {
     estados.appendChild(h('button', { clase: 'mini fantasma', onclick: () => guardarGuionParrilla({ estado: 'publicado' }) }, 'Marcar como publicado'));
+  }
+  const marcaDelGuion = (g.leido || {}).marca || {};
+  if (['mostrar', 'evitar', 'otras'].some(k => String(marcaDelGuion[k] || '').trim()
+    && !/^ningun[oa]?\.?$/i.test(String(marcaDelGuion[k]).trim()))) {
+    estados.appendChild(h('button', { clase: 'mini fantasma', title: 'Copia su MARCA DEL CLIENTE, su tono y su CTA a la marca '
+      + 'del proyecto (solo lo que esté vacío)', onclick: () => marcaDesdeGuionParrilla(g) }, 'Usar su marca para el proyecto'));
   }
   estados.appendChild(h('span', { clase: 'crece' }));
   estados.appendChild(h('button', { clase: 'mini fantasma peligro', onclick: () => borrarGuionParrilla(g) }, 'Borrar el guion'));
@@ -20127,6 +20214,881 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   (r.avisos || []).slice(0, 2).forEach(a => setTimeout(() => toast(a, true), 3200));
 }
 
+/* ------------------------------------------- PARRILLA 2 (18-10-2026)
+ *
+ * La marca del cliente por proyecto, «Desde mis resultados» y «Conversar con
+ * Claude» (`pasos/guionista.py`). Todo lo que sale de aquí habla con
+ * `/api/parrilla/proyectos/<cid>/...`.
+ */
+
+/* ---------------------------------------------------- la marca del cliente */
+
+async function cargarMarcaParrilla() {
+  if (PAR.marcaCargando) return;
+  PAR.marcaCargando = true;
+  /* LA DE OTRO PROYECTO NO SE QUEDA: si se cambia de proyecto mientras llega,
+     «Guardar la marca» escribía la del cliente A en el B (revisión 18-10). */
+  const cid = PAR.cid;
+  try {
+    const marca = await pedir(rutaProyectoParrilla('/marca'));
+    if (cid !== PAR.cid) return;
+    PAR.marca = marca;
+    PAR.marcaBorrador = Object.assign({}, PAR.marca.marca || {});
+  } catch (e) {
+    if (cid !== PAR.cid) return;
+    toast(`no se ha podido leer la marca: ${e.message}`, true);
+    PAR.marca = { marca: {}, campos: [] };
+    PAR.marcaBorrador = {};
+  }
+  PAR.marcaCargando = false;
+  if (MODULOS.actual === 'automatizar' && PAR.seccion === 'marca') repintarParrillaSinPisar();
+}
+
+function seccionMarcaParrilla() {
+  const caja = h('div', { clase: 'seccion-parrilla marca-parrilla' });
+  if (!PAR.marca) {
+    setTimeout(cargarMarcaParrilla, 0);
+    caja.appendChild(h('div', { clase: 'cargando' }, 'cargando…'));
+    return caja;
+  }
+  const b = PAR.marcaBorrador || {};
+  const guardada = PAR.marca.marca || {};
+  const cambiada = (PAR.marca.campos || []).some(c => (b[c.id] || '') !== (guardada[c.id] || ''));
+  const bloque = h('div', { clase: 'bloque' },
+    h('div', { clase: 'fila' }, h('h3', {}, 'La marca del cliente'), h('span', { clase: 'crece' }),
+      botonGuia('marca_cliente', null)),
+    h('div', { clase: 'pista' }, 'Se apunta una vez para todo el proyecto y Claude la usa en todo lo que escribe '
+      + 'o convierte para él: subir, pegar, pedir, «Desde mis resultados» y la conversación. Así no hay que repetirla '
+      + 'en cada guion.'));
+  (PAR.marca.campos || []).forEach(c => {
+    const area = h('textarea', { rows: c.id === 'quien' || c.id === 'otras' ? 3 : 2, placeholder: c.ayuda,
+      oninput: ev => {
+        b[c.id] = ev.target.value;
+        const boton = document.querySelector('#modulo .guardar-marca');
+        if (boton) boton.disabled = !(PAR.marca.campos || []).some(x => (b[x.id] || '') !== (guardada[x.id] || ''));
+      } });
+    area.value = b[c.id] || '';
+    area.dataset.foco = `marca-${c.id}`;
+    bloque.appendChild(h('label', { clase: 'campo-marca' }, h('span', { clase: 'meta' }, c.nombre), area));
+  });
+  bloque.appendChild(h('div', { clase: 'fila cierre' },
+    h('button', { clase: 'primario guardar-marca', disabled: cambiada ? null : true,
+      onclick: () => guardarMarcaParrilla() }, 'Guardar la marca'),
+    h('span', { clase: 'pista' }, guardada.al ? `guardada el ${guardada.al.replace('T', ' ').slice(0, 16)}`
+      : 'todavía sin guardar')));
+  caja.appendChild(bloque);
+  return caja;
+}
+
+async function guardarMarcaParrilla() {
+  try {
+    const r = await pedir(rutaProyectoParrilla('/marca'), { method: 'PUT', cuerpo: PAR.marcaBorrador || {} });
+    PAR.marca = Object.assign({}, PAR.marca, { marca: r.marca });
+    PAR.marcaBorrador = Object.assign({}, r.marca);
+    toast('marca guardada: Claude la usará en este proyecto');
+    pintarModulo();
+  } catch (e) { toast(`no se ha podido guardar la marca: ${e.message}`, true); }
+}
+
+async function marcaDesdeGuionParrilla(g) {
+  try {
+    const r = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(g.id)}/marca`),
+      { method: 'POST', cuerpo: {} });
+    PAR.marca = null;
+    if ((r.cambiados || []).length) {
+      toast(`marca del proyecto: ${r.cambiados.length} campo(s) rellenados desde este guion`);
+    } else {
+      toast('la marca del proyecto ya tenía esos campos: cámbialos en «Marca del cliente»', true);
+    }
+  } catch (e) { toast(`no se ha podido copiar la marca: ${e.message}`, true); }
+}
+
+/* ------------------------------------------------- desde mis resultados */
+
+async function cargarResultadosParrilla() {
+  if (PAR.resultadosCargando) return;
+  PAR.resultadosCargando = true;
+  const cid = PAR.cid;
+  try {
+    const resultados = await pedir(`${rutaProyectoParrilla('/resultados')}?${consulta({
+      dias: PAR.resultadosDias, por: PAR.resultadosPor })}`);
+    if (cid !== PAR.cid) return;
+    PAR.resultados = resultados;
+    // de fábrica, los cinco primeros
+    PAR.resultadosElegidos = new Set((PAR.resultados.posts || []).slice(0, 5).map(p => p.clave));
+  } catch (e) {
+    if (cid !== PAR.cid) return;
+    PAR.resultados = { disponible: false, posts: [], motivo: e.message };
+    PAR.resultadosElegidos = new Set();
+  }
+  PAR.resultadosCargando = false;
+  if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
+}
+
+function cifraCorta(n) {
+  if (!Number.isFinite(n)) return '—';
+  return n >= 10000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)} mil` : String(Math.round(n));
+}
+
+function bloqueResultadosParrilla(bloque) {
+  const f = PAR.form;
+  bloque.appendChild(h('h3', {}, 'Tus vídeos que mejor funcionaron'));
+  if (!PAR.resultados) {
+    setTimeout(cargarResultadosParrilla, 0);
+    bloque.appendChild(h('div', { clase: 'cargando' }, 'cargando…'));
+    return;
+  }
+  const r = PAR.resultados;
+  const periodo = h('select', { 'aria-label': 'Periodo', onchange: ev => {
+    PAR.resultadosDias = Number(ev.target.value); PAR.resultados = null; pintarModulo(); } },
+  [[7, 'últimos 7 días'], [30, 'últimos 30 días'], [90, 'últimos 90 días'], [365, 'último año']]
+    .map(([v, t]) => h('option', { value: v, selected: PAR.resultadosDias === v ? true : null }, t)));
+  const orden = h('select', { 'aria-label': 'Ordenar por', disabled: r.fuente === 'resumen' ? true : null,
+    title: r.fuente === 'resumen' ? 'Ordenar por interacción o retención llega con la rama publicar-redes-2' : '',
+    onchange: ev => { PAR.resultadosPor = ev.target.value; PAR.resultados = null; pintarModulo(); } },
+  [['vistas', 'por vistas'], ['interaccion', 'por interacción'], ['vista_entera', 'por «hasta el final» (TikTok)'],
+    ['media_vista', 'por «visto de media» (YouTube)']]
+    .map(([v, t]) => h('option', { value: v, selected: PAR.resultadosPor === v ? true : null }, t)));
+  bloque.appendChild(h('div', { clase: 'fila filtros-parrilla' }, periodo, orden));
+  if (!r.disponible) {
+    bloque.appendChild(h('div', { clase: 'caja-aviso' }, r.motivo || 'todavía no hay cifras de este proyecto'));
+    return;
+  }
+  bloque.appendChild(h('div', { clase: 'pista' }, 'Son las cifras que ya tiene Publicar (no se pregunta a nadie). Marca los '
+    + 'que quieras usar: Claude mira qué tienen en común y escribe guiones nuevos con esa fórmula.'));
+  const elegidos = PAR.resultadosElegidos || new Set();
+  const nombresRed = { tiktok: 'TikTok', instagram: 'Reels', youtube: 'YouTube', facebook: 'Facebook' };
+  (r.posts || []).forEach(p => {
+    const m = p.metricas || {};
+    const datos = [`${cifraCorta(m.vistas)} vistas`];
+    if (Number.isFinite(p.interaccion)) datos.push(`interacción ${(p.interaccion * 100).toFixed(1)} %`);
+    if (Number.isFinite(m.vista_entera)) datos.push(`hasta el final ${Math.round(m.vista_entera * 100)} %`);
+    if (Number.isFinite(m.media_vista)) datos.push(`visto de media ${Math.round(m.media_vista * 100)} %`);
+    if (p.dia || p.hora) datos.push([p.dia, p.hora].filter(Boolean).join(' '));
+    bloque.appendChild(h('label', { clase: 'plano fila post-parrilla' },
+      h('input', { type: 'checkbox', checked: elegidos.has(p.clave) ? true : null,
+        onchange: ev => { if (ev.target.checked) elegidos.add(p.clave); else elegidos.delete(p.clave); } }),
+      h('b', { clase: 'nombre-post' }, p.nombre),
+      h('span', { clase: 'pastilla' }, nombresRed[p.red] || p.red || '?'),
+      h('span', { clase: 'meta' }, datos.join(' · '))));
+  });
+  const peticion = h('textarea', { rows: 3, placeholder: 'Opcional: lo que quieras además («para la campaña de '
+    + 'Navidad», «sin repetir el tema del karaoke»…)', oninput: ev => { PAR.resultadosPeticion = ev.target.value; } });
+  peticion.value = PAR.resultadosPeticion || '';
+  peticion.dataset.foco = 'parrilla-resultados-peticion';
+  bloque.appendChild(peticion);
+  const cuantos = h('input', { type: 'number', min: 1, max: PAR.maxPedir || 30, value: f.cuantos, clase: 'numero-corto',
+    oninput: ev => { f.cuantos = ev.target.value; } });
+  cuantos.dataset.foco = 'parrilla-resultados-cuantos';
+  bloque.appendChild(h('div', { clase: 'fila' }, h('label', {}, 'Cuántos guiones'), cuantos,
+    h('span', { clase: 'meta' }, `de 1 a ${PAR.maxPedir || 30}`)));
+}
+
+/* --------------------------------------------- conversar con Claude */
+
+function rutaChatParrilla(resto) {
+  return rutaProyectoParrilla(`/chats${resto || ''}`);
+}
+
+async function cargarChatsParrilla() {
+  const cid = PAR.cid;
+  try {
+    const r = await pedir(rutaChatParrilla());
+    if (cid !== PAR.cid) return;
+    PAR.chats = r.chats || [];
+    PAR.chatsInfo = r;
+    if (!PAR.chatModelo) PAR.chatModelo = r.modelo || 'opus';
+    if (!PAR.chat && PAR.chats.length) {
+      const chat = await pedir(rutaChatParrilla(`/${encodeURIComponent(PAR.chats[0].id)}`));
+      if (cid !== PAR.cid || PAR.chat) return;
+      PAR.chat = chat;
+    }
+  } catch (e) {
+    if (cid !== PAR.cid) return;
+    PAR.chats = [];
+    toast(`no se han podido leer las conversaciones: ${e.message}`, true);
+  }
+  if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
+  vigilarChatParrilla();
+}
+
+function panelChatParrilla() {
+  const caja = h('div', { clase: 'bloque chat-parrilla' });
+  if (PAR.chats === null) {
+    PAR.chats = [];
+    setTimeout(cargarChatsParrilla, 0);
+  }
+  if (PAR.chat && PAR.chat.ocupada && !PAR.chatReloj) setTimeout(vigilarChatParrilla, 0);
+  const lista = h('select', { 'aria-label': 'Conversaciones', onchange: ev => abrirChatParrilla(ev.target.value) },
+    [h('option', { value: '' }, PAR.chat && !PAR.chats.some(c => c.id === PAR.chat.id)
+      ? 'Conversación nueva' : 'Elige una conversación')]
+      .concat((PAR.chats || []).map(c => h('option', { value: c.id, selected: PAR.chat && PAR.chat.id === c.id ? true : null },
+        `${c.titulo} · ${c.tocada}`))));
+  caja.appendChild(h('div', { clase: 'fila cab-chat' },
+    h('h3', {}, 'Conversar con Claude'), h('span', { clase: 'crece' }),
+    (PAR.chats || []).length ? lista : null,
+    h('button', { clase: 'mini', onclick: () => nuevoChatParrilla() }, '+ Nueva'),
+    PAR.chat && (PAR.chat.turnos || []).length
+      ? h('button', { clase: 'mini fantasma peligro', onclick: () => borrarChatParrilla() }, 'Borrar') : null,
+    botonGuia('chat_guiones', () => document.querySelector('#modulo [data-foco="parrilla-chat"]'))));
+  caja.appendChild(mensajesChatParrilla());
+  caja.appendChild(entradaChatParrilla());
+  return caja;
+}
+
+/* Lo que se escribe entre «=== GUION ===» y «=== FIN ===» se ve como guion; lo
+   demás, como conversación. */
+function trozosDeRespuesta(texto) {
+  const trozos = [];
+  const partes = String(texto || '').split(/^\s*={2,}\s*GUI[OÓ]N\s*={2,}\s*$/mi);
+  if (partes[0].trim()) trozos.push({ tipo: 'texto', texto: partes[0].trim() });
+  partes.slice(1).forEach(p => {
+    const [guion, ...resto] = p.split(/^\s*={2,}\s*FIN\s*={2,}\s*$/mi);
+    if (guion.trim()) trozos.push({ tipo: 'guion', texto: guion.trim() });
+    const despues = resto.join('\n').trim();
+    if (despues) trozos.push({ tipo: 'texto', texto: despues });
+  });
+  return trozos;
+}
+
+function mensajesChatParrilla() {
+  const caja = h('div', { clase: 'chat-mensajes', 'aria-live': 'polite' });
+  const turnos = (PAR.chat && PAR.chat.turnos) || [];
+  if (!turnos.length) {
+    caja.appendChild(h('div', { clase: 'chat-vacio' },
+      h('p', {}, 'Habla con Claude como en un chat: cuéntale el cliente, pídele ideas, que te escriba un guion, que '
+        + 'lo cambie… Cada guion que escriba en el formato del Studio sale con su botón «Guardar en la Parrilla».'),
+      h('p', { clase: 'meta' }, 'Puedes pegar capturas (por ejemplo, de una cuenta de Instagram con sus vistas) y, '
+        + 'si lo enciendes, que busque en internet. Instagram y TikTok no dejan ver los reels sin iniciar sesión: '
+        + 'para analizar una cuenta, mejor capturas.')));
+    return caja;
+  }
+  turnos.forEach(t => {
+    const tuyo = t.quien === 'tu';
+    const burbuja = h('div', { clase: `chat-turno ${tuyo ? 'tuyo' : 'de-claude'} ${t.estado || ''}` });
+    const marcas = [];
+    if (tuyo && t.web) marcas.push('🌐 con internet');
+    if (tuyo && t.resultados) marcas.push('📊 con mis resultados');
+    if (tuyo && t.cuenta) marcas.push(`📈 con ${t.cuenta}`);
+    if (tuyo && (t.imagenes || []).length) marcas.push(`📎 ${t.imagenes.length} captura(s)`);
+    if (!tuyo && t.estado === 'listo' && t.segundos) marcas.push(`${Math.round(t.segundos)} s`);
+    burbuja.appendChild(h('div', { clase: 'meta quien-chat' }, tuyo ? 'Tú' : 'Claude',
+      marcas.length ? ` · ${marcas.join(' · ')}` : ''));
+    if (t.estado === 'pensando') {
+      burbuja.appendChild(h('div', { clase: 'fila' }, h('span', { clase: 'girando', 'aria-hidden': 'true' }),
+        h('span', { clase: 'crece' }, 'Claude está escribiendo…'),
+        h('button', { clase: 'mini fantasma', onclick: () => cancelarChatParrilla() }, 'Parar')));
+    } else if (t.estado === 'error' || t.estado === 'cancelado') {
+      burbuja.appendChild(h('div', { clase: t.estado === 'error' ? 'caja-error' : 'meta' }, t.texto));
+    } else if (tuyo) {
+      burbuja.appendChild(h('div', { clase: 'texto-chat' }, t.texto));
+    } else {
+      let n = 0;
+      trozosDeRespuesta(t.texto).forEach(trozo => {
+        if (trozo.tipo === 'texto') {
+          burbuja.appendChild(h('div', { clase: 'texto-chat' }, trozo.texto));
+          return;
+        }
+        /* POR SU BLOQUE, no por orden: un esquema entre marcas no es guion
+           y el botón salía debajo de él (revisión 18-10). */
+        const info = (t.guiones || []).find(x => (Number.isInteger(x.bloque) ? x.bloque : x.i) === n);
+        n += 1;
+        const i = info ? info.i : -1;
+        const guardado = info && (t.guardados || {})[String(i)];
+        burbuja.appendChild(h('pre', { clase: 'guion-en-chat' }, trozo.texto));
+        if (info) {
+          burbuja.appendChild(h('div', { clase: 'fila guardar-chat' },
+            guardado
+              ? h('span', { clase: 'pastilla ok' }, guardado === '…' ? 'guardando…' : '✓ en la Parrilla')
+              : h('button', { clase: 'mini primario', onclick: () => guardarGuionesChatParrilla(t.n, [i]) },
+                `Guardar «${recortar([info.codigo, info.titulo].filter(Boolean).join(' — ') || 'el guion', 40)}» en la Parrilla`),
+            h('span', { clase: 'meta' }, [info.uso, info.formato, info.duracion_s ? `${info.duracion_s} s` : '',
+              info.avisos ? `⚠ ${info.avisos}` : ''].filter(Boolean).join(' · '))));
+        }
+      });
+      const sinGuardar = (t.guiones || []).filter(x => !(t.guardados || {})[String(x.i)]);
+      if (sinGuardar.length > 1) {
+        burbuja.appendChild(h('button', { clase: 'mini', onclick: () => guardarGuionesChatParrilla(t.n, null) },
+          `Guardar los ${sinGuardar.length} en la Parrilla`));
+      }
+    }
+    caja.appendChild(burbuja);
+  });
+  /* ABAJO DEL TODO, como un chat, salvo que se haya subido a leer: entonces
+     se queda donde estaba aunque llegue algo (antes saltaba cada 1,5 s). */
+  caja.addEventListener('scroll', () => {
+    PAR.chatScroll = { abajo: caja.scrollHeight - caja.scrollTop - caja.clientHeight < 40, top: caja.scrollTop };
+  });
+  setTimeout(() => {
+    const s = PAR.chatScroll;
+    caja.scrollTop = !s || s.abajo ? caja.scrollHeight : s.top;
+  }, 0);
+  return caja;
+}
+
+function entradaChatParrilla() {
+  const ocupada = !!(PAR.chat && PAR.chat.ocupada) || PAR.chatEnviando;
+  const area = h('textarea', { rows: 3, placeholder: 'Escribe aquí… (Ctrl+Enter para enviar; puedes pegar capturas)',
+    oninput: ev => { PAR.chatTexto = ev.target.value; },
+    onkeydown: ev => { if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); enviarChatParrilla(); } },
+    onpaste: ev => {
+      const imagenes = [...((ev.clipboardData || {}).files || [])].filter(x => /^image\//.test(x.type));
+      if (imagenes.length) { ev.preventDefault(); anadirCapturasChat(imagenes); }
+    } });
+  area.value = PAR.chatTexto;
+  area.dataset.foco = 'parrilla-chat';
+  const ficheros = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/gif', multiple: true,
+    clase: 'oculto-chat', onchange: ev => { anadirCapturasChat([...(ev.target.files || [])]); ev.target.value = ''; } });
+  const capturas = h('div', { clase: 'fila capturas-chat' }, PAR.chatCapturas.map((c, i) => h('span', { clase: 'pastilla' },
+    `📎 ${recortar(c.name || 'captura', 24)}`,
+    h('button', { clase: 'mini fantasma', title: 'Quitar', onclick: () => { PAR.chatCapturas.splice(i, 1); pintarModulo(); } }, '×'))));
+  const interruptor = (clave, texto, ayuda) => h('label', { clase: 'plano interruptor-chat', title: ayuda },
+    h('input', { type: 'checkbox', checked: PAR[clave] ? true : null, onchange: ev => { PAR[clave] = ev.target.checked; } }),
+    h('span', {}, texto));
+  const modelos = h('select', { 'aria-label': 'Modelo', onchange: ev => { PAR.chatModelo = ev.target.value; } },
+    [['opus', 'Opus (como aquí)'], ['sonnet', 'Sonnet (más rápido)']]
+      .map(([v, t]) => h('option', { value: v, selected: (PAR.chatModelo || 'opus') === v ? true : null }, t)));
+  return h('div', { clase: 'entrada-chat' }, area, capturas,
+    h('div', { clase: 'fila mandos-chat' },
+      h('button', { clase: 'mini', onclick: () => ficheros.click() }, '📎 Capturas'), ficheros,
+      interruptor('chatWeb', '🌐 Buscar en internet', 'Este mensaje puede buscar y abrir páginas web. Los datos de '
+        + 'fuera llevan su fuente y un aviso ⚠ para confirmarlos.'),
+      interruptor('chatResultados', '📊 Con mis resultados', 'Le pasa a Claude tus vídeos que mejor funcionaron '
+        + 'en este proyecto (cifras guardadas en Publicar).'),
+      selectorCuentaChat(),
+      modelos, h('span', { clase: 'crece' }),
+      h('button', { clase: 'primario', disabled: ocupada ? true : null, onclick: () => enviarChatParrilla() },
+        ocupada ? 'Contestando…' : 'Enviar')));
+}
+
+function anadirCapturasChat(lista) {
+  const maximo = (PAR.chatsInfo && PAR.chatsInfo.max_capturas) || 6;
+  const validas = lista.filter(x => /^image\/(png|jpeg|webp|gif)$/.test(x.type) && x.size <= 10 * 1024 * 1024);
+  if (validas.length < lista.length) toast('solo imágenes PNG, JPG, WEBP o GIF de menos de 10 MB', true);
+  PAR.chatCapturas = PAR.chatCapturas.concat(validas).slice(0, maximo);
+  if (PAR.chatCapturas.length === maximo) toast(`como mucho ${maximo} capturas por mensaje`);
+  pintarModulo();
+}
+
+async function nuevoChatParrilla() {
+  pararChatParrilla();
+  try {
+    PAR.chat = await pedir(rutaChatParrilla(), { method: 'POST', cuerpo: { modelo: PAR.chatModelo || 'opus' } });
+    PAR.chatTexto = '';
+    PAR.chatCapturas = [];
+    pintarModulo();
+    const campo = document.querySelector('#modulo [data-foco="parrilla-chat"]');
+    if (campo) campo.focus();
+  } catch (e) { toast(`no se ha podido empezar la conversación: ${e.message}`, true); }
+}
+
+async function abrirChatParrilla(id) {
+  if (!id) return;
+  pararChatParrilla();
+  try {
+    PAR.chat = await pedir(rutaChatParrilla(`/${encodeURIComponent(id)}`));
+    pintarModulo();
+    vigilarChatParrilla();
+  } catch (e) { toast(`no se ha podido abrir la conversación: ${e.message}`, true); }
+}
+
+async function enviarChatParrilla() {
+  if (PAR.chatEnviando) return;
+  const texto = PAR.chatTexto.trim();
+  if (!texto && !PAR.chatCapturas.length) { toast('escribe algo', true); return; }
+  PAR.chatEnviando = true;
+  try {
+    if (!PAR.chat) PAR.chat = await pedir(rutaChatParrilla(), { method: 'POST', cuerpo: { modelo: PAR.chatModelo || 'opus' } });
+    const datos = new FormData();
+    datos.append('texto', texto);
+    datos.append('web', PAR.chatWeb ? '1' : '0');
+    datos.append('resultados', PAR.chatResultados ? '1' : '0');
+    if (PAR.chatCuenta) datos.append('cuenta', PAR.chatCuenta);
+    datos.append('modelo', PAR.chatModelo || 'opus');
+    PAR.chatCapturas.forEach(c => datos.append('capturas', c, c.name || 'captura.png'));
+    const enviadas = PAR.chatCapturas.slice();
+    PAR.chat = await pedir(rutaChatParrilla(`/${encodeURIComponent(PAR.chat.id)}/mensajes`), { method: 'POST', cuerpo: datos });
+    // lo escrito o adjuntado MIENTRAS se subía se queda para el siguiente
+    if (PAR.chatTexto.trim() === texto) PAR.chatTexto = '';
+    PAR.chatCapturas = PAR.chatCapturas.filter(c => !enviadas.includes(c));
+    PAR.chatScroll = null;
+    if (!(PAR.chats || []).some(c => c.id === PAR.chat.id)) {
+      PAR.chats = [{ id: PAR.chat.id, titulo: PAR.chat.titulo, tocada: PAR.chat.tocada }].concat(PAR.chats || []);
+    }
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    PAR.chatEnviando = false;
+  }
+  pintarModulo();
+  vigilarChatParrilla();
+}
+
+/* Mientras Claude contesta se pregunta cada segundo y medio. Si hay un campo
+   con el cursor (se está escribiendo el siguiente mensaje), solo se cambian
+   los mensajes: el campo no se toca. */
+function vigilarChatParrilla() {
+  pararChatParrilla();
+  if (!PAR.chat || !PAR.chat.ocupada || MODULOS.actual !== 'automatizar') return;
+  PAR.chatReloj = setTimeout(async () => {
+    PAR.chatReloj = null;
+    if (MODULOS.actual !== 'automatizar' || !PAR.chat) return;
+    const id = PAR.chat.id;
+    try {
+      const nuevo = await pedir(rutaChatParrilla(`/${encodeURIComponent(id)}`));
+      if (!PAR.chat || PAR.chat.id !== id) return;
+      PAR.chat = nuevo;
+    } catch (e) {
+      if (e.status === 404) { PAR.chat = null; pintarModulo(); return; }
+    }
+    if (campoPublicarConFoco()) {
+      const viejo = document.querySelector('#modulo .chat-mensajes');
+      if (viejo) viejo.replaceWith(mensajesChatParrilla());
+      const boton = document.querySelector('#modulo .mandos-chat button.primario');
+      if (boton && !PAR.chat.ocupada) { boton.disabled = false; boton.textContent = 'Enviar'; }
+    } else {
+      pintarModulo();
+    }
+    vigilarChatParrilla();
+  }, 1500);
+}
+
+function pararChatParrilla() {
+  clearTimeout(PAR.chatReloj);
+  PAR.chatReloj = null;
+}
+
+async function cancelarChatParrilla() {
+  if (!PAR.chat) return;
+  try {
+    const r = await pedir(rutaChatParrilla(`/${encodeURIComponent(PAR.chat.id)}/cancelar`), { method: 'POST', cuerpo: {} });
+    PAR.chat = r.conversacion || PAR.chat;
+  } catch (e) { toast(`no se ha podido parar: ${e.message}`, true); }
+  pintarModulo();
+  vigilarChatParrilla();
+}
+
+async function guardarGuionesChatParrilla(turno, indices) {
+  if (!PAR.chat) return;
+  try {
+    const r = await pedir(rutaChatParrilla(`/${encodeURIComponent(PAR.chat.id)}/guardar`),
+      { method: 'POST', cuerpo: { turno, indices } });
+    PAR.chat = r.conversacion || PAR.chat;
+    toast(`${cuantosGuiones((r.guiones || []).length)} en la Parrilla, pendientes`);
+    PAR.datos = null;
+    cargarParrilla(true);
+  } catch (e) { toast(`no se ha podido guardar: ${e.message}`, true); }
+  pintarModulo();
+}
+
+async function borrarChatParrilla() {
+  if (!PAR.chat || !confirm('¿Borrar esta conversación? Los guiones que guardaste en la Parrilla se quedan.')) return;
+  const id = PAR.chat.id;
+  pararChatParrilla();
+  try {
+    await pedir(rutaChatParrilla(`/${encodeURIComponent(id)}`), { method: 'DELETE' });
+    PAR.chat = null;
+    PAR.chats = (PAR.chats || []).filter(c => c.id !== id);
+    toast('conversación borrada');
+  } catch (e) { toast(`no se ha podido borrar: ${e.message}`, true); }
+  pintarModulo();
+}
+
+/* ------------------------------------- ANALIZAR UNA CUENTA (18-10-2026)
+ *
+ * Rama `analizar-cuentas`. Los vídeos públicos de una cuenta ajena (TikTok,
+ * Instagram, YouTube), por la vía gratis si se puede y por Apify si no, con
+ * tope al mes (`pasos/cuentas_ajenas.py`). Luego Claude la analiza y escribe
+ * guiones para el proyecto. Las cuentas leídas son de todo el Studio.
+ */
+const NOMBRE_RED_CUENTA = { tiktok: 'TikTok', instagram: 'Instagram', youtube: 'YouTube' };
+
+function rutaCuentas(resto) { return `${BASE}/api/parrilla/cuentas${resto || ''}`; }
+
+async function cargarCuentasParrilla() {
+  if (PAR.cuentasCargando) return;
+  PAR.cuentasCargando = true;
+  try {
+    PAR.cuentas = await pedir(rutaCuentas());
+  } catch (e) {
+    PAR.cuentas = { cuentas: [], conexiones: null, error: e.message };
+  } finally {
+    PAR.cuentasCargando = false;
+  }
+  if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
+}
+
+function seccionCuentasParrilla() {
+  const caja = h('div', { clase: 'seccion-parrilla cuentas-parrilla' });
+  if (!PAR.cuentas) {
+    setTimeout(cargarCuentasParrilla, 0);
+    caja.appendChild(h('div', { clase: 'cargando' }, 'cargando…'));
+    return caja;
+  }
+  if (PAR.cuentas.error) caja.appendChild(cajaError(PAR.cuentas.error));
+  if (PAR.cuentaTrabajo && PAR.cuentaTrabajo.estado === 'trabajando' && !PAR.cuentaReloj) {
+    setTimeout(vigilarCuentaParrilla, 0);
+  }
+  caja.appendChild(bloqueConexionesCuentas());
+  caja.appendChild(bloqueTraerCuenta());
+  if (PAR.cuentaAbierta) caja.appendChild(bloqueCuentaAbierta(PAR.cuentaAbierta));
+  return caja;
+}
+
+/* ------------------------------------------------------------ conexiones */
+
+function bloqueConexionesCuentas() {
+  const c = PAR.cuentas.conexiones || {};
+  const gasto = Number(PAR.cuentas.gasto_mes || 0);
+  const topeUsd = Number(c.tope_usd || 0);
+  const algunaGratis = (c.youtube || {}).puesta || ((c.meta || {}).puesta && (c.meta || {}).ig_id);
+  // ABIERTO o cerrado como se dejó: al guardar una clave no se cierra solo
+  if (PAR.conexionesAbiertas === null) PAR.conexionesAbiertas = !algunaGratis && !(c.apify || {}).puesta;
+  const detalles = h('details', { clase: 'bloque conexiones-cuentas', open: PAR.conexionesAbiertas ? true : null,
+    ontoggle: ev => { PAR.conexionesAbiertas = ev.target.open; } });
+  detalles.appendChild(h('summary', {}, h('b', {}, 'Conexiones'),
+    h('span', { clase: 'meta' }, ` · YouTube ${(c.youtube || {}).puesta ? '✓' : '—'} · Instagram ${(c.meta || {}).ig_id ? '✓' : '—'}`
+      + ` · Apify ${(c.apify || {}).puesta ? '✓' : '—'} · gastado este mes ${gasto.toFixed(2)} $ de ${topeUsd.toFixed(2)} $`)));
+  if (c.simulado) detalles.appendChild(h('div', { clase: 'caja-aviso' }, 'Modo SIMULADO: no se lee ninguna red ni se paga nada.'));
+  detalles.appendChild(h('div', { clase: 'pista' }, 'Primero se usan las vías gratis (YouTube y la oficial de Instagram). '
+    + 'Apify, de pago, solo cuando esas no sirven: TikTok siempre, y las cuentas de Instagram que no son profesionales. '
+    + 'Las claves se guardan en el servidor y aquí solo se ven sus cuatro últimos caracteres.'));
+
+  const fila = (titulo, ayuda, campo, estado, extra) => {
+    const input = h('input', { type: 'password', placeholder: estado.puesta ? `puesta (${estado.cola || ''})` : 'sin poner',
+      autocomplete: 'off' });
+    input.dataset.foco = `conexion-${campo}`;
+    return h('div', { clase: 'conexion-cuenta' },
+      h('div', { clase: 'fila' }, h('b', {}, titulo), h('span', { clase: 'crece' }),
+        pastillaEstado(estado.puesta ? 'ok' : 'vacio', estado.puesta ? estado.cola || 'puesta' : 'sin poner'),
+        botonGuia('conexiones_cuentas', null)),
+      h('div', { clase: 'pista' }, ayuda),
+      h('div', { clase: 'fila-clave' }, input,
+        h('button', { clase: 'mini', onclick: () => {
+          if (!input.value.trim()) { toast('pega la clave', true); return; }
+          guardarConexionCuentas({ [campo]: input.value.trim() });
+        } }, estado.puesta ? 'Cambiar' : 'Guardar'),
+        estado.puesta ? h('button', { clase: 'mini fantasma peligro', onclick: () => guardarConexionCuentas({ [campo]: '' }) }, 'Quitar') : null),
+      extra || null);
+  };
+  const meta = c.meta || {};
+  detalles.appendChild(fila('YouTube (gratis)', 'Una clave de API de Google Cloud con «YouTube Data API v3» activada. Da '
+    + 'vistas, likes y comentarios de cualquier canal público.', 'youtube_clave', c.youtube || {}));
+  detalles.appendChild(fila('Instagram (gratis, vía oficial de Meta)', 'Un token de tu app de Meta para UNA cuenta tuya, la de '
+    + 'tu negocio o una solo para el Studio: tiene que ser profesional y estar vinculada a una Página de Facebook. Para '
+    + 'cambiar de cuenta, pega el token nuevo y pulsa «Volver a buscar». Solo ve cuentas profesionales (la mayoría de negocios).',
+  'meta_token', meta, meta.puesta ? h('div', { clase: 'fila' },
+    meta.ig_id ? h('span', { clase: 'meta' }, `Se mira desde: @${meta.ig_usuario || meta.ig_id}`) : h('span', { clase: 'meta' }, 'Falta saber desde qué cuenta se mira'),
+    h('button', { clase: 'mini', onclick: () => buscarMiInstagramCuentas() }, meta.ig_id ? 'Volver a buscar' : 'Buscar mi cuenta'),
+    meta.caduca ? h('span', { clase: meta.caducando ? 'pastilla obsoleto' : 'meta' }, `el token caduca hacia el ${meta.caduca}`) : null) : null));
+  detalles.appendChild(fila('Apify (de pago, de respaldo)', 'El token de tu cuenta de apify.com. El plan gratis trae 5 $ '
+    + 'al mes; leer una cuenta cuesta unos céntimos.', 'apify_token', c.apify || {}));
+  const tope = h('input', { type: 'number', min: 0, max: 500, step: 0.5, value: c.tope_usd, clase: 'numero-corto' });
+  tope.dataset.foco = 'conexion-tope';
+  detalles.appendChild(h('div', { clase: 'fila pago-cuentas' },
+    h('label', { clase: 'plano' }, h('input', { type: 'checkbox', checked: c.pago ? true : null,
+      onchange: ev => guardarConexionCuentas({ pago: ev.target.checked }) }),
+    h('span', {}, 'Usar el servicio de pago cuando lo gratis no sirva')),
+    h('label', {}, 'Tope al mes ($)'), tope,
+    h('button', { clase: 'mini', onclick: () => guardarConexionCuentas({ tope_usd: tope.value }) }, 'Guardar tope'),
+    h('span', { clase: 'meta' }, `gastado este mes: ${gasto.toFixed(2)} $`)));
+  return detalles;
+}
+
+async function guardarConexionCuentas(cambios) {
+  try {
+    const r = await pedir(rutaCuentas('/conexiones'), { method: 'PUT', cuerpo: cambios });
+    PAR.cuentas = Object.assign({}, PAR.cuentas, { conexiones: r.conexiones });
+    toast('guardado');
+    if (cambios.meta_token) await buscarMiInstagramCuentas(true);
+  } catch (e) { toast(e.message, true); }
+  pintarModulo();
+}
+
+async function buscarMiInstagramCuentas(callado) {
+  try {
+    const r = await pedir(rutaCuentas('/conexiones/instagram'), { method: 'POST', cuerpo: {} });
+    PAR.cuentas = Object.assign({}, PAR.cuentas, { conexiones: r.conexiones });
+    const lista = r.cuentas || [];
+    if (lista.length === 1) toast(`tu Instagram: @${lista[0].usuario}`);
+    else if (lista.length > 1) {
+      const elegida = prompt(`Ese token llega a ${lista.length} cuentas. Escribe cuál es la tuya:\n`
+        + lista.map(x => `@${x.usuario} (${x.pagina})`).join('\n'), lista[0].usuario);
+      const cuenta = lista.find(x => x.usuario === String(elegida || '').replace(/^@/, ''));
+      if (cuenta) await guardarConexionCuentas({ ig_id: cuenta.id, ig_usuario: cuenta.usuario });
+    }
+  } catch (e) { if (!callado) toast(e.message, true); else toast(`token guardado, pero: ${e.message}`, true); }
+  pintarModulo();
+}
+
+/* ------------------------------------------------------- traer una cuenta */
+
+function bloqueTraerCuenta() {
+  const f = PAR.cuentaForm;
+  const bloque = h('div', { clase: 'bloque' }, h('div', { clase: 'fila' }, h('h3', {}, 'Analizar una cuenta'),
+    h('span', { clase: 'crece' }), botonGuia('analizar_cuenta', null)));
+  bloque.appendChild(h('div', { clase: 'pista' }, 'De la competencia o de un creador que te guste: se traen sus vídeos '
+    + 'públicos con sus cifras, Claude dice qué le funciona y te escribe guiones con esa fórmula para tu marca.'));
+  const red = h('select', { 'aria-label': 'Red', onchange: ev => { f.red = ev.target.value; } },
+    Object.entries(NOMBRE_RED_CUENTA).map(([v, t]) => h('option', { value: v, selected: f.red === v ? true : null }, t)));
+  const texto = h('input', { type: 'text', placeholder: '@usuario o el enlace de su perfil', value: f.texto,
+    oninput: ev => {
+      f.texto = ev.target.value;
+      const m = /(tiktok|instagram|youtube)\.com/.exec(f.texto);
+      if (m && f.red !== m[1]) { f.red = m[1]; red.value = m[1]; }
+    },
+    onkeydown: ev => { if (ev.key === 'Enter') traerCuentaParrilla(false); } });
+  texto.dataset.foco = 'cuenta-texto';
+  const cuantos = h('select', { 'aria-label': 'Cuántos vídeos', onchange: ev => { f.cuantos = Number(ev.target.value); } },
+    [10, 20, 30, 50].map(n => h('option', { value: n, selected: f.cuantos === n ? true : null }, `${n} vídeos`)));
+  const ocupado = PAR.cuentaTrabajo && PAR.cuentaTrabajo.estado === 'trabajando';
+  bloque.appendChild(h('div', { clase: 'fila traer-cuenta' }, red, texto, cuantos,
+    h('button', { clase: 'primario', disabled: ocupado ? true : null, onclick: () => traerCuentaParrilla(false) }, 'Traer sus vídeos')));
+  const t = PAR.cuentaTrabajo;
+  if (t && t.estado === 'trabajando') {
+    bloque.appendChild(h('div', { clase: 'caja-aviso fila' }, h('span', { clase: 'girando', 'aria-hidden': 'true' }),
+      h('span', { clase: 'crece' }, `${t.avance || 'trabajando'}… (con el servicio de pago puede tardar uno o dos minutos)`)));
+  } else if (t && t.estado === 'error') {
+    bloque.appendChild(h('div', { clase: 'caja-error texto-error-cuenta' }, t.error));
+  }
+  const lista = (PAR.cuentas.cuentas || []);
+  if (lista.length) {
+    bloque.appendChild(h('div', { clase: 'fila cuentas-guardadas' }, h('span', { clase: 'meta' }, 'Ya leídas:'),
+      lista.slice(0, 20).map(c => h('button', { clase: `mini${PAR.cuentaAbierta && PAR.cuentaAbierta.usuario === c.usuario
+        && PAR.cuentaAbierta.red === c.red ? ' activo' : ' fantasma'}`, title: `${c.videos} vídeos · ${c.traida.replace('T', ' ').slice(0, 16)}`,
+      onclick: () => abrirCuentaParrilla(c.red, c.usuario) }, `${NOMBRE_RED_CUENTA[c.red] || c.red} · @${c.usuario}${c.analizada ? ' ✓' : ''}`))));
+  }
+  return bloque;
+}
+
+async function traerCuentaParrilla(forzar, pagar, pedida) {
+  // `pedida`: la misma cuenta otra vez (tras decir que sí al precio), aunque el formulario haya cambiado
+  const f = pedida || { texto: PAR.cuentaForm.texto, red: PAR.cuentaForm.red, cuantos: PAR.cuentaForm.cuantos };
+  if (!String(f.texto || '').trim()) { toast('escribe el @usuario o pega el enlace', true); return; }
+  try {
+    const plan = await pedir(rutaCuentas('/plan'), { method: 'POST', cuerpo: { texto: f.texto, red: f.red, cuantos: f.cuantos } });
+    const listas = (plan.vias || []).filter(v => v.lista);
+    if (!listas.length) {
+      toast(`no hay ninguna vía para leer esta cuenta: ${(plan.vias || []).map(v => `${v.nombre} (${v.motivo})`).join('; ')}`, true);
+      return;
+    }
+    // el mismo criterio que el servidor: de hoy Y con al menos tantos vídeos pedidos
+    const enCache = plan.guardada && plan.guardada.sirve && !forzar;
+    if (!enCache && !listas[0].gratis && !pagar) {
+      const v = listas[0];
+      if (!confirm(`Esta cuenta se lee con ${v.nombre}: costará unos ${Number(v.coste_usd || 0).toFixed(2)} $.\n`
+        + `Gastado este mes: ${Number(plan.gasto_mes || 0).toFixed(2)} $ de ${Number(plan.tope_usd || 0).toFixed(2)} $. ¿Seguir?`)) return;
+      pagar = true;
+    }
+    // sin «pagar», si lo gratis no sirve el trabajo acaba pidiendo permiso (`pide_pago`)
+    PAR.cuentaPedida = { texto: f.texto, red: f.red, cuantos: f.cuantos, plan };
+    PAR.cuentaTrabajo = await pedirTrabajoParrilla(rutaCuentas('/leer'),
+      { texto: f.texto, red: f.red, cuantos: f.cuantos, forzar: !!forzar, pagar: !!pagar });
+    pintarModulo();
+    vigilarCuentaParrilla();
+  } catch (e) { toast(e.message, true); }
+}
+
+function vigilarCuentaParrilla() {
+  clearTimeout(PAR.cuentaReloj);
+  PAR.cuentaReloj = null;
+  const t = PAR.cuentaTrabajo;
+  if (!t || MODULOS.actual !== 'automatizar') return;
+  // un trabajo corto puede volver ya acabado en la misma respuesta que lo lanza
+  if (t.estado !== 'trabajando') { if (!t.visto) trabajoCuentaAcabado(t); return; }
+  PAR.cuentaReloj = setTimeout(async () => {
+    PAR.cuentaReloj = null;
+    try {
+      const nuevo = await pedirTrabajoParrilla(rutaCuentas(`/trabajos/${encodeURIComponent(t.id)}`));
+      PAR.cuentaTrabajo = nuevo;
+      if (nuevo.estado !== 'trabajando') { await trabajoCuentaAcabado(nuevo); return; }
+    } catch (e) {
+      if (e.status === 404) PAR.cuentaTrabajo = Object.assign({}, t, { estado: 'error', visto: true, error: 'el servidor ya no conoce ese trabajo: vuelve a lanzarlo' });
+    }
+    repintarParrillaSinPisar();
+    vigilarCuentaParrilla();
+  }, 2000);
+}
+
+/* EL ESTADO DE UN TRABAJO, CON SU ERROR DENTRO. `pedir` lanza si la respuesta
+   trae `error`, aunque sea un 200, y un trabajo que acaba mal es justo eso:
+   {estado: 'error', error: '…'}. Con `pedir`, la pantalla nunca se enteraba
+   y seguía preguntando con la rueda girando (visto el 18-10-2026). */
+async function pedirTrabajoParrilla(url, cuerpo) {
+  // con `cuerpo`, lanza el trabajo (POST): uno corto puede volver ya acabado, con su error
+  const pases = typeof cabeceraDePases === 'function' ? cabeceraDePases() : '';
+  const cabeceras = pases ? { 'X-Estudio-Abiertos': pases } : {};
+  const cfg = { headers: cabeceras };
+  if (cuerpo !== undefined) {
+    Object.assign(cfg, { method: 'POST', body: JSON.stringify(cuerpo) });
+    cabeceras['Content-Type'] = 'application/json';
+  }
+  let respuesta;
+  try {
+    respuesta = await fetch(url, cfg);
+  } catch (e) {
+    throw new Error(`no hay respuesta del servidor (${url}): ${e.message}`);
+  }
+  let datos = null;
+  try { datos = await respuesta.json(); } catch (e) { datos = null; }
+  if (!respuesta.ok) {
+    const fallo = new Error((datos && (datos.error || datos.mensaje)) || `HTTP ${respuesta.status}`);
+    fallo.status = respuesta.status;
+    throw fallo;
+  }
+  return datos || {};
+}
+
+async function trabajoCuentaAcabado(nuevo) {
+  PAR.cuentaTrabajo = Object.assign({}, nuevo, { visto: true });
+  if (nuevo.estado === 'listo') {
+    if (nuevo.de_cache) toast('ya estaba leída hoy: no se ha vuelto a pagar');
+    else if (nuevo.coste_usd) toast(`leída con Apify (≈${Number(nuevo.coste_usd).toFixed(2)} $)`);
+    else toast(nuevo.tipo === 'analizar' ? 'análisis listo' : 'cuenta leída');
+    PAR.cuentas = null;
+    await cargarCuentasParrilla();
+    await abrirCuentaParrilla(nuevo.red, nuevo.usuario);
+    return;
+  }
+  if (nuevo.pide_pago) {
+    const p = nuevo.pide_pago;
+    const pedida = PAR.cuentaPedida || { texto: `@${nuevo.usuario}`, red: nuevo.red, cuantos: PAR.cuentaForm.cuantos };
+    const plan = pedida.plan || {};
+    if (confirm(`${nuevo.error}\n\nGastado este mes: ${Number(plan.gasto_mes || 0).toFixed(2)} $ de `
+      + `${Number(plan.tope_usd || 0).toFixed(2)} $. ¿Pagar ≈${Number(p.coste_usd || 0).toFixed(2)} $ y seguir?`)) {
+      PAR.cuentaTrabajo = null;
+      await traerCuentaParrilla(false, true, pedida);
+      return;
+    }
+    PAR.cuentaTrabajo = Object.assign({}, PAR.cuentaTrabajo, { error: 'no se ha pagado: lo gratis no sirvió para esta cuenta' });
+  }
+  repintarParrillaSinPisar();
+}
+
+async function abrirCuentaParrilla(red, usuario) {
+  try {
+    PAR.cuentaAbierta = await pedir(rutaCuentas(`/${encodeURIComponent(red)}/${encodeURIComponent(usuario)}`));
+  } catch (e) { toast(e.message, true); }
+  pintarModulo();
+}
+
+/* ------------------------------------------------------- la cuenta leída */
+
+function bloqueCuentaAbierta(d) {
+  const bloque = h('div', { clase: 'bloque cuenta-abierta' });
+  const ocupado = PAR.cuentaTrabajo && PAR.cuentaTrabajo.estado === 'trabajando';
+  bloque.appendChild(h('div', { clase: 'fila cab-cuenta' },
+    h('h3', {}, `@${d.usuario}`), h('span', { clase: 'pastilla' }, NOMBRE_RED_CUENTA[d.red] || d.red),
+    d.nombre && d.nombre !== d.usuario ? h('span', { clase: 'meta' }, d.nombre) : null,
+    d.seguidores ? h('span', { clase: 'meta' }, `${cifraCorta(d.seguidores)} seguidores`) : null,
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini fantasma', disabled: ocupado ? true : null, title: 'Vuelve a leerla aunque sea de hoy (con Apify, se paga otra vez)',
+      onclick: () => { PAR.cuentaForm.texto = `@${d.usuario}`; PAR.cuentaForm.red = d.red; traerCuentaParrilla(true); } }, 'Volver a traer'),
+    h('button', { clase: 'mini fantasma peligro', onclick: () => borrarCuentaParrilla(d) }, 'Olvidar')));
+  bloque.appendChild(h('div', { clase: 'meta' }, `Leída el ${String(d.traida || '').replace('T', ' ').slice(0, 16)} por `
+    + `${d.fuente_nombre || d.fuente}${d.coste_usd ? ` (≈${Number(d.coste_usd).toFixed(2)} $)` : ''} · ${(d.videos || []).length} vídeos`));
+  if ((d.intentos || []).length) {
+    bloque.appendChild(h('details', { clase: 'intentos-cuenta' }, h('summary', { clase: 'meta' }, 'Por qué esta vía'),
+      h('ul', {}, d.intentos.map(x => h('li', { clase: 'meta' }, x)))));
+  }
+
+  const analisis = h('div', { clase: 'analisis-cuenta' }, h('div', { clase: 'fila' }, h('h4', {}, 'Qué le funciona'),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: d.analisis ? 'mini' : 'mini primario', disabled: ocupado ? true : null,
+      onclick: () => analizarCuentaParrilla(d) }, d.analisis ? 'Volver a analizar' : 'Que Claude la analice')));
+  if (d.analisis) {
+    if (d.analisis_viejo) analisis.appendChild(h('div', { clase: 'pista' }, 'Este análisis es de una lectura anterior: vuelve a analizar para usar los vídeos nuevos.'));
+    analisis.appendChild(h('div', { clase: 'texto-analisis' }, d.analisis));
+  } else {
+    analisis.appendChild(h('div', { clase: 'pista' }, 'Claude compara sus vídeos con más y con menos vistas: temas, ganchos, duración, cuándo publica e ideas para ti.'));
+  }
+  bloque.appendChild(analisis);
+
+  const g = PAR.cuentaGuiones;
+  const cuantos = h('input', { type: 'number', min: 1, max: PAR.maxPedir || 30, value: g.cuantos, clase: 'numero-corto',
+    oninput: ev => { g.cuantos = ev.target.value; } });
+  cuantos.dataset.foco = 'cuenta-cuantos';
+  const peticion = h('input', { type: 'text', value: g.peticion, placeholder: 'Opcional: algo más («para Navidad», «sin precios»…)',
+    oninput: ev => { g.peticion = ev.target.value; } });
+  peticion.dataset.foco = 'cuenta-peticion';
+  const uso = h('select', { 'aria-label': 'Uso', onchange: ev => { g.modo = ev.target.value; } },
+    [['adaptar', 'adaptar'], ['exacto', 'exacto']].map(([v, t]) => h('option', { value: v, selected: g.modo === v ? true : null }, t)));
+  bloque.appendChild(h('div', { clase: 'guiones-cuenta' }, h('h4', {}, 'Para tu proyecto'),
+    h('div', { clase: 'fila' }, h('label', {}, 'Guiones'), cuantos, h('label', {}, 'Uso'), uso, peticion),
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'primario', onclick: () => guionesDesdeCuentaParrilla(d) }, 'Escribir guiones con lo que le funciona'),
+      h('button', { clase: 'mini', onclick: () => chatConCuentaParrilla(d) }, 'Hablar de ella en el chat'),
+      h('span', { clase: 'pista' }, `Van a la Parrilla de ${((PAR.proyectos || []).find(p => p.id === PAR.cid) || {}).nombre || 'este proyecto'}, con tu marca. Se inspiran, no copian.`))));
+
+  const tabla = h('div', { clase: 'videos-cuenta' });
+  (d.videos || []).forEach((v, i) => {
+    const cifras = [v.vistas != null ? `${cifraCorta(v.vistas)} vistas` : 'sin vistas',
+      v.me_gusta != null ? `${cifraCorta(v.me_gusta)} ♥` : '', v.comentarios != null ? `${cifraCorta(v.comentarios)} 💬` : '',
+      v.duracion_s ? `${Math.round(v.duracion_s)} s` : '', String(v.fecha || '').slice(0, 10)].filter(Boolean).join(' · ');
+    tabla.appendChild(h('div', { clase: 'fila video-cuenta' },
+      h('span', { clase: 'numero-video' }, String(i + 1)),
+      h('div', { clase: 'crece texto-video' }, h('div', {}, recortar(v.texto || '(sin texto)', 160)), h('div', { clase: 'meta' }, cifras)),
+      v.url ? h('a', { clase: 'mini fantasma', href: v.url, target: '_blank', rel: 'noopener noreferrer' }, 'Ver') : null));
+  });
+  bloque.appendChild(h('details', { clase: 'lista-videos-cuenta', open: true },
+    h('summary', {}, h('b', {}, 'Sus vídeos'), h('span', { clase: 'meta' }, ' · de más a menos vistas')), tabla));
+  return bloque;
+}
+
+async function analizarCuentaParrilla(d) {
+  try {
+    PAR.cuentaTrabajo = await pedirTrabajoParrilla(rutaCuentas(`/${encodeURIComponent(d.red)}/${encodeURIComponent(d.usuario)}/analizar`), {});
+    pintarModulo();
+    vigilarCuentaParrilla();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function borrarCuentaParrilla(d) {
+  if (!confirm(`¿Olvidar @${d.usuario}? Se borran sus vídeos leídos y su análisis (los guiones que ya escribiste se quedan).`)) return;
+  try {
+    await pedir(rutaCuentas(`/${encodeURIComponent(d.red)}/${encodeURIComponent(d.usuario)}`), { method: 'DELETE' });
+    PAR.cuentaAbierta = null;
+    PAR.cuentas = null;
+    if (PAR.chatCuenta === `${d.red}:${d.usuario}`) PAR.chatCuenta = '';
+    toast('cuenta olvidada');
+  } catch (e) { toast(e.message, true); }
+  pintarModulo();
+}
+
+async function guionesDesdeCuentaParrilla(d) {
+  const g = PAR.cuentaGuiones;
+  try {
+    const t = await pedir(rutaProyectoParrilla('/desde-cuenta'), { method: 'POST', cuerpo: {
+      red: d.red, usuario: d.usuario, cuantos: Number(g.cuantos) || 0, modo: g.modo, peticion: g.peticion } });
+    PAR.trabajo = t;
+    toast('Claude está escribiendo los guiones: aparecerán en la Parrilla');
+    pintarModulo();
+    vigilarTrabajoParrilla();
+  } catch (e) { toast(e.message, true); }
+}
+
+function chatConCuentaParrilla(d) {
+  PAR.chatCuenta = `${d.red}:${d.usuario}`;
+  PAR.form.origen = 'chat';
+  if (!PAR.chatTexto.trim()) PAR.chatTexto = `¿Qué le funciona a @${d.usuario} y qué podría hacer yo con eso?`;
+  irASeccionParrilla('anadir');
+}
+
+/* En el chat: «📈 Con una cuenta analizada». Las cuentas se piden una vez. */
+function selectorCuentaChat() {
+  if (!PAR.cuentas && !PAR.cuentasCargando) setTimeout(cargarCuentasParrilla, 0);
+  const lista = ((PAR.cuentas || {}).cuentas) || [];
+  // una cuenta olvidada (aquí o en otra pestaña) deja de mandarse al chat
+  if (PAR.cuentas && PAR.chatCuenta && !lista.some(c => `${c.red}:${c.usuario}` === PAR.chatCuenta)) PAR.chatCuenta = '';
+  if (!lista.length && !PAR.chatCuenta) return null;
+  return h('select', { 'aria-label': 'Con una cuenta analizada', clase: 'cuenta-chat',
+    title: 'Le pasa a Claude los vídeos (y el análisis) de una cuenta que hayas analizado',
+    onchange: ev => { PAR.chatCuenta = ev.target.value; } },
+  [h('option', { value: '' }, '📈 sin cuenta de referencia')].concat(lista.map(c => h('option', {
+    value: `${c.red}:${c.usuario}`, selected: PAR.chatCuenta === `${c.red}:${c.usuario}` ? true : null },
+  `📈 @${c.usuario} (${NOMBRE_RED_CUENTA[c.red] || c.red})`))));
+}
+
 montarModulos();
 
 /* ARRANCA AQUI, Y ESTA LINEA VA LA ULTIMA DEL FICHERO A PROPOSITO.
@@ -20135,3 +21097,113 @@ montarModulos();
    access 'MODOS' before initialization» y deja la pantalla en blanco.
    Las funciones se izan; los const no. */
 arrancar();
+
+/* ----------------------------------------- PUBLICAR · RESULTADOS (redes-2)
+ *
+ * Lo que añadió `publicar-redes-2` (17-10-2026): esta semana y este mes frente
+ * al anterior, «Lo que mejor funcionó» y la línea de Inicio. Todo sale de lo
+ * que YA se sabe (`/resultados`, `/lo-que-funciono`): nada de esto pregunta a
+ * Upload-Post ni gasta consultas; las cifras se piden solo con «Actualizar».
+ */
+
+function lineaMejorSemana() {
+  const m = PUB.mejorSemana;
+  const caja = h('div', { clase: 'bloque linea-mejor-semana' });
+  if (m === null) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Lo mejor de los últimos 7 días: cargando…'));
+    return caja;
+  }
+  if (!m) {
+    caja.appendChild(h('div', { clase: 'meta' },
+      'Lo mejor de los últimos 7 días: todavía no hay cifras. '
+      + 'Se piden en Publicar → Resultados, con «Actualizar».'));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('span', { clase: 'meta' }, 'Lo mejor de los últimos 7 días:'),
+    h('button', { clase: 'mini fantasma nombre-envio', onclick: () => irASeccionPublicar('ficha', m.pid) }, m.nombre),
+    h('span', { clase: 'pastilla red-mini ok' }, CORTOS_RED[m.red] || m.red),
+    h('span', { clase: 'crece meta' }, textoMetricas(m.metricas) || '')));
+  return caja;
+}
+
+function variacion(actual, anterior) {
+  if (typeof actual !== 'number' || typeof anterior !== 'number' || anterior <= 0) return '';
+  const cambio = Math.round(((actual - anterior) / anterior) * 100);
+  if (cambio === 0) return 'igual';
+  return `${cambio > 0 ? '+' : '−'}${Math.abs(cambio)} %`;
+}
+
+function tarjetaPeriodo(titulo, previo, frente, p) {
+  const a = (p || {}).actual || {};
+  const b = (p || {}).anterior || {};
+  const cambio = variacion(a.vistas, b.vistas);
+  return h('div', { clase: 'tarjeta-periodo' },
+    h('h4', {}, titulo),
+    h('div', { clase: 'cifra' }, h('b', {}, typeof a.vistas === 'number' ? numeroCorto(a.vistas) : '—'),
+      h('span', { clase: 'meta' }, `vistas · ${a.posts || 0} publicación(es)`)),
+    cambio ? h('span', { clase: `pastilla ${cambio.startsWith('+') ? 'ok' : (cambio === 'igual' ? '' : 'aviso')}`,
+      title: `vistas ${frente}` }, `${cambio} ${frente}`) : null,
+    textoRetencion(a) ? h('div', { clase: 'meta' }, textoRetencion(a)) : null,
+    h('div', { clase: 'meta' }, `${previo}: ${typeof b.vistas === 'number' ? numeroCorto(b.vistas) : '—'} vistas · `
+      + `${b.posts || 0} publicación(es)`));
+}
+
+function bloquePeriodosPublicar(periodos) {
+  const b = h('div', { clase: 'bloque' }, h('h3', {}, 'Esta semana y este mes'));
+  b.appendChild(h('div', { clase: 'periodos-publicar' },
+    tarjetaPeriodo('Esta semana (desde el lunes)', 'la semana pasada hasta hoy',
+      'frente a la semana pasada', periodos.semana),
+    tarjetaPeriodo('Este mes', 'el mes pasado hasta hoy', 'frente al mes pasado', periodos.mes)));
+  b.appendChild(h('div', { clase: 'meta' },
+    'Cuenta lo PUBLICADO en cada periodo, con sus cifras de la última vez que se pidieron, y lo '
+    + 'compara con el mismo tramo del periodo anterior (un jueves, con la semana pasada hasta el jueves).'));
+  return b;
+}
+
+const ORDENES_MEJORES = {
+  vistas: 'más vistas', interaccion: 'más interacción',
+  vista_entera: 'más vistos hasta el final (TikTok)', media_vista: 'más visto de media (YouTube)',
+};
+
+function bloqueMejoresPublicar() {
+  const r = PUB.mejores;
+  const b = h('div', { clase: 'bloque mejores-publicar' }, h('div', { clase: 'fila' },
+    h('h3', {}, 'Lo que mejor funcionó'), h('span', { clase: 'crece' }),
+    h('select', { title: 'Por qué ordenar', onchange: ev => {
+      PUB.porMejores = ev.target.value; PUB.mejores = null;
+      /* fuera el foco antes de cargar: con el desplegable enfocado, el repintado
+         en silencio de al volver la respuesta se salta (para no pisar lo que se
+         escribe) y la lista se quedaba en el orden de antes */
+      ev.target.blur();
+      pintarModulo();
+      cargarPublicar(true);
+    } }, ...Object.keys(ORDENES_MEJORES).map(k =>
+      h('option', { value: k, selected: (PUB.porMejores || 'vistas') === k }, ORDENES_MEJORES[k])))));
+  if (!r) {
+    b.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return b;
+  }
+  if (r.error) {
+    b.appendChild(h('div', { clase: 'meta' }, `No se ha podido leer: ${r.error}`));
+    return b;
+  }
+  if (!(r.posts || []).length) {
+    b.appendChild(h('div', { clase: 'meta' }, r.minimo_vistas
+      ? `Ninguna publicación con ${r.minimo_vistas} vistas o más en este periodo: con menos, la proporción no dice nada.`
+      : 'Ninguna publicación con cifras en este periodo.'));
+    return b;
+  }
+  r.posts.forEach((p, i) => b.appendChild(h('div', { clase: 'fila fila-mejor' },
+    h('b', { clase: 'puesto' }, `${i + 1}.`),
+    h('button', { clase: 'mini fantasma nombre-envio', onclick: () => irASeccionPublicar('ficha', p.pid) }, p.nombre),
+    h('span', { clase: 'pastilla red-mini ok' }, CORTOS_RED[p.red] || p.red),
+    h('span', { clase: 'meta' }, `${p.dia} ${fechaCorta(p.cuando).slice(0, 16)}`),
+    h('span', { clase: 'crece meta' }, textoMetricas(p.metricas)
+      + (typeof p.interaccion === 'number' ? ` · ${porcentaje(p.interaccion)} de interacción` : '')),
+    p.url ? h('a', { href: p.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver el post') : null)));
+  if (r.minimo_vistas) {
+    b.appendChild(h('div', { clase: 'meta' }, `Solo publicaciones con ${r.minimo_vistas} vistas o más.`));
+  }
+  return b;
+}

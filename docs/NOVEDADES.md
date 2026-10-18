@@ -33,6 +33,31 @@ vídeos, estilos, claves y contraseña no se tocan.
   una misma imagen no se rehace sola más de dos veces.
 - Revisar no cambia nada del vídeo: no deja ningún paso obsoleto.
 
+**Publicar: los resultados, más completos (17 de octubre)**
+- **Cuánto se ve de cada vídeo.** TikTok dice qué parte de la gente lo vio
+  **hasta el final** y los **segundos de media**; YouTube, cuando su informe
+  está listo, qué parte del vídeo se ve **de media** (en un Short puede pasar
+  del 100 % si se vuelve a ver). Son medidas distintas y no se mezclan.
+  Instagram y Facebook no dan ninguna: ahí no sale nada (nunca un «0 %»
+  inventado). Las medias pesan por vistas: un post de 50 vistas no cuenta
+  como uno de 100.000.
+- **Esta semana y este mes** en Publicar → Resultados: lo publicado desde el
+  lunes y desde el día 1, frente al mismo tramo del periodo anterior (un
+  jueves, con la semana pasada hasta el jueves).
+- **Lo que mejor funcionó:** los cinco posts del periodo por vistas, por
+  interacción (me gusta, comentarios, compartidos y guardados entre vistas),
+  por cuántos lo vieron hasta el final (TikTok) o por cuánto se ve de media
+  (YouTube), con la red, el día y la hora en que salieron. Por proporción solo
+  cuentan los que tienen 50 vistas o más.
+- **En Inicio, una línea con lo mejor de los últimos 7 días**, que lleva a su
+  ficha.
+- **Las cifras se siguen pidiendo solo al pulsar «Actualizar»**, como hasta
+  ahora. Además, cada «Actualizar» trae lo que Upload-Post ya tiene guardado,
+  que no gasta de las 100 consultas cada 5 minutos: así llega la retención de
+  YouTube y lo que hayas mirado desde la web de Upload-Post.
+- Si la carga de Resultados fallaba, la pantalla se quedaba rota en vez de
+  decir el motivo: ahora sale el error.
+
 **Vídeos con más movimiento, sobre todo los cortos (18 de octubre)**
 - **Movimiento de cámara en tres niveles**, en el Encargo y en el vídeo
   (Ajustes del montaje → 🎬 Movimiento y efectos): **sobrio** (lo de siempre:
@@ -62,6 +87,58 @@ vídeos, estilos, claves y contraseña no se tocan.
   con una carita triste en vez de la animación, y marcar o quitar una
   transición cerraba la lista. Ahora se ven todas, la lista se queda abierta y
   el texto ya no sale en mayúsculas.
+
+**Analizar una cuenta de la competencia (18 de octubre)**
+- **Automatizar → Analizar una cuenta**: escribes el @usuario o pegas el enlace
+  de un perfil de **TikTok, Instagram o YouTube** que no es tuyo, y el Studio
+  trae sus vídeos públicos con vistas, likes, comentarios, duración, fecha y
+  texto, de más a menos vistas.
+- **Primero gratis**: YouTube por su API oficial e Instagram por la vía oficial
+  de Meta (solo cuentas profesionales). **Si no sirve** (TikTok, o una cuenta de
+  Instagram personal), por **Apify**, de pago: unos céntimos por cuenta. **Antes
+  de pagar siempre pregunta**, con el precio, también cuando lo gratis falla a
+  medias; hay un **tope al mes** (5 $, lo que regala el plan gratis de Apify)
+  que cuenta incluso lo que Apify cobra cuando una lectura sale mal, y una
+  cuenta leída se guarda 24 h para no volver a pagarla.
+- Una **clave gratis que no vale** (o el token de Meta caducado) no pasa al
+  servicio de pago: te dice que la arregles en Conexiones.
+- La conexión de Instagram **no queda atada a una cuenta**: sirve la de tu
+  negocio o una creada solo para el Studio. Para cambiarla, pegas el token de
+  la nueva y el Studio la encuentra solo; lo ya analizado se queda.
+- **«Que Claude la analice»**: qué temas, ganchos, duración y horarios le
+  funcionan, comparando sus vídeos con más y con menos vistas, e ideas para ti.
+- **«Escribir guiones con lo que le funciona»**: para tu proyecto, con tu
+  marca, inspirados y sin copiar. Van a la Parrilla.
+- En **Conversar con Claude**, el selector **«📈 Con una cuenta»** le pasa sus
+  vídeos y su análisis.
+- Las claves (Google, Meta y Apify) se ponen en **Conexiones**, dentro de esa
+  misma pestaña, con su guía paso a paso.
+- Iniciar sesión con cuentas propias para mirar perfiles **no** se hace: lo
+  prohíben Instagram y TikTok y acaba en bloqueos.
+
+**La Parrilla: conversar con Claude, la marca del cliente y «Desde mis resultados» (18 de octubre)**
+- **Conversar con Claude** (Automatizar → Añadir guiones): un chat como el de
+  claude.ai para preparar guiones hablando. Recuerda la conversación, conoce la
+  marca del proyecto y el formato del guion, y cada guion que escribe sale con
+  **«Guardar en la Parrilla»**. Puedes:
+  - pegar **capturas** (📎). Para analizar una cuenta de Instagram o TikTok, haz
+    capturas de su perfil o de sus reels con las vistas: esas redes no dejan ver
+    los reels sin iniciar sesión, así que Claude no puede entrar por su cuenta;
+  - encender **«🌐 Buscar en internet»** en un mensaje (viene apagado). Lo que
+    saque de fuera lleva su fuente y un aviso ⚠ para confirmarlo;
+  - encender **«📊 Con mis resultados»** para que vea tus vídeos que mejor
+    funcionaron;
+  - elegir **Opus** (como en claude.ai) o **Sonnet** (contesta antes).
+- **La marca del cliente** (Automatizar → Marca del cliente): quién es, qué
+  mostrar, qué evitar, el tono y el CTA de siempre, apuntados **una vez por
+  proyecto**. Claude la usa en todo lo que escribe para ese proyecto. Desde la
+  ficha de un guion, **«Usar su marca para el proyecto»** la rellena con la de
+  ese guion.
+- **Desde mis resultados** (Añadir guiones): eliges tus vídeos que mejor
+  funcionaron (con sus vistas, interacción y retención) y Claude escribe guiones
+  nuevos que repiten lo que funcionó, diciendo en cuál se inspira cada uno. Usa
+  las cifras que ya tiene Publicar: no gasta consultas.
+- Dos guías nuevas: «La marca del cliente» y «Conversar con Claude».
 
 **La Parrilla de guiones, en Automatizar (17 de octubre)**
 - **Automatizar ya no está vacío: abre la Parrilla.** Cada proyecto tiene sus
@@ -196,7 +273,6 @@ vídeos, estilos, claves y contraseña no se tocan.
   regenerarlo entero.
 - Subir imágenes, logos o capturas ya no deja parado el resto del Studio
   mientras se guardan.
-
 
 **Publicar en redes (16 de octubre)**
 - **Arriba hay una barra de módulos: Inicio · Crear · Publicar · Automatizar.**
@@ -782,7 +858,6 @@ los derechos de la música, la voz y los efectos.
 - «Empezar de cero» ahora explica qué hace: olvida el intento a medias y lo
   genera todo otra vez (se vuelve a pagar); «Retomar» aprovecha lo ya hecho.
   Pide confirmación.
-
 
 **Corregido: la música no se oía aunque estuviera marcada**
 - La música sí iba en el vídeo, pero se agachaba tanto bajo la voz (unos

@@ -42,7 +42,9 @@ llama, el historico se queda ciego justo en la variable que mas mueve el tiempo.
 import os
 import re
 import shutil
+import signal
 import subprocess
+import threading
 import time
 
 # ------------------------------------------------------------------ catalogo
@@ -59,6 +61,16 @@ import time
 SIN_VENTANA = {}
 if os.name == "nt":
     SIN_VENTANA = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
+
+#: EN LINUX EL CLI VA EN SU PROPIO GRUPO DE PROCESOS, para poder matarlo con
+#: todo lo que haya lanzado (`matar_arbol`). Sin esto se mataba solo al padre,
+#: y un hijo que heredara la salida mantenia `communicate()` esperando: una
+#: cancelacion tardaba lo que tardara el CLI en acabar solo (medido con un
+#: doble: 37 s en vez de 1). En Windows no aplica: alli esta taskkill /T.
+GRUPO_PROPIO = {} if os.name == "nt" else {"start_new_session": True}
+
+#: Cuanto se deja al CLI para salir con SIGTERM antes del SIGKILL.
+GRACIA_SIGTERM_S = 2.0
 
 MODELOS = ("haiku", "sonnet", "opus")
 
@@ -588,19 +600,41 @@ def nombre_de(cuenta, indice=None):
 
 
 def matar_arbol(proceso):
-    """Mata el proceso Y sus hijos.
+    """Mata el proceso Y sus hijos. Vuelve enseguida: lo llama tambien la
+    peticion que cancela, y no puede quedarse esperando.
 
     En Windows el CLI se lanza a traves de claude.cmd, que arranca un node
     aparte: matar solo el padre deja el node vivo consumiendo y esperando, que es
-    justo lo que se veia colgando de las llamadas que vencian.
+    justo lo que se veia colgando de las llamadas que vencian. Ahi va taskkill /T.
+
+    En Linux, si se lanzo en su propio grupo (`GRUPO_PROPIO`, lo marca
+    `_grupo_propio`), SIGTERM a todo el grupo y, pasada la gracia, SIGKILL. Solo
+    al grupo SUYO: un proceso sin grupo propio comparte el del servicio, y un
+    killpg ahi mataria el Estudio entero.
     """
-    # esto es limpieza: si taskkill no esta, no puede o falla, lo que importa
-    # sigue siendo el error que provoco la limpieza, no el de matar
-    try:
-        subprocess.run(["taskkill", "/T", "/F", "/PID", str(proceso.pid)],
-                       capture_output=True, timeout=30, **SIN_VENTANA)
-    except Exception:  # noqa: BLE001
-        pass
+    # esto es limpieza: si no se puede o falla, lo que importa sigue siendo el
+    # error que provoco la limpieza, no el de matar
+    if os.name == "nt":
+        try:
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proceso.pid)],
+                           capture_output=True, timeout=30, **SIN_VENTANA)
+        except Exception:  # noqa: BLE001
+            pass
+    elif getattr(proceso, "_grupo_propio", False):
+        grupo = proceso.pid
+        try:
+            os.killpg(grupo, signal.SIGTERM)
+        except Exception:  # noqa: BLE001 -- ya no estaba
+            return
+
+        def rematar():
+            time.sleep(GRACIA_SIGTERM_S)
+            try:
+                os.killpg(grupo, signal.SIGKILL)
+            except Exception:  # noqa: BLE001 -- ya se fueron con el SIGTERM
+                pass
+        threading.Thread(target=rematar, daemon=True, name="rematar-cli").start()
+        return
     try:
         proceso.kill()
     except Exception:  # noqa: BLE001
@@ -729,6 +763,20 @@ def _una_pasada(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tiempo_s,
     return resultado
 
 
+def _subir_cancelacion(avance, para):
+    """Lanza lo que corresponde a una llamada cancelada.
+
+    El `Cancelado` del gestor de trabajos si el avance lo sabe dar
+    (`estadisticas.Avance.relanzar_cancelacion`): el trabajo acaba «cancelado»
+    y no en error, y su paso no se marca como fallido. Si no (el asistente, una
+    prueba), el RuntimeError de siempre, que es lo que esos esperan.
+    """
+    relanzar = getattr(avance, "relanzar_cancelacion", None)
+    if callable(relanzar):
+        relanzar(para)
+    raise RuntimeError(f"{para} se cancelo mientras esperaba al CLI de claude")
+
+
 def _una_pasada_cruda(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tiempo_s,
                       sistema, herramientas_vetadas, permisos, extra, avance,
                       consejos_extra, para, cuenta, herramientas_permitidas=()):
@@ -739,17 +787,31 @@ def _una_pasada_cruda(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tie
                             herramientas_vetadas=herramientas_vetadas,
                             permisos=permisos, extra=extra,
                             herramientas_permitidas=herramientas_permitidas)
+    # cancelado antes de lanzar (el clic llego mientras se preparaba): no se
+    # arranca un CLI que habria que matar
+    if avance is not None and getattr(avance, "cancelado", False):
+        _subir_cancelacion(avance, para)
     try:
         proceso = subprocess.Popen(orden, stdin=subprocess.PIPE,
                                    stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE,
-                                   cwd=cwd, env=entorno(cuenta), **SIN_VENTANA)
+                                   cwd=cwd, env=entorno(cuenta), **SIN_VENTANA,
+                                   **GRUPO_PROPIO)
     except OSError as fallo:
         raise RuntimeError(
             f"no se ha podido lanzar el CLI de claude: {fallo}") from fallo
+    if GRUPO_PROPIO:
+        try:
+            proceso._grupo_propio = True
+        except Exception:  # noqa: BLE001 -- un doble que no admite atributos
+            pass
 
     if avance is not None:
         avance.al_cancelar = lambda: matar_arbol(proceso)
+        # y si se cancelo justo entre la comprobacion de arriba y aqui, nadie
+        # mas lo va a matar
+        if getattr(avance, "cancelado", False):
+            matar_arbol(proceso)
 
     arranque = time.time()
     try:
@@ -771,7 +833,7 @@ def _una_pasada_cruda(instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tie
 
     segundos = time.time() - arranque
     if avance is not None and getattr(avance, "cancelado", False):
-        raise RuntimeError(f"{para} se cancelo mientras esperaba al CLI de claude")
+        _subir_cancelacion(avance, para)
 
     salida = crudo.decode("utf-8", errors="replace")
     error = error_crudo.decode("utf-8", errors="replace").strip()

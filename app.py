@@ -8124,6 +8124,9 @@ def datos_del_montaje():
         "duracion_corta_s": camara.DURACION_CORTA_S,
         "niveles": list(camara.NIVELES),
         "acento": trans.acentos(None)})
+    # la profundidad 2.5D necesita su modelo: la pantalla lo dice si falta
+    si, por_que = PASOS_MODULOS.profundidad.disponible()
+    ficha["profundidad"] = {"disponible": si, "por_que": por_que}
     return ficha
 
 

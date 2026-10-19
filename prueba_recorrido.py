@@ -3615,6 +3615,10 @@ def publicar_en_redes(navegador, datos):
     # la cola y el calendario
     pg.pulsar(".pestanas-publicar button", "Cola y calendario")
     ok(pg.esperar(".calendario-publicar .dia-publicar", segundos=10), "la semana, día a día")
+    # un domingo después de la hora del proyecto, lo programado cae el lunes:
+    # en la semana SIGUIENTE (fallaba solo los domingos por la noche, 18-10)
+    if not pg.esperar(".calendario-publicar .envio-dia", segundos=5):
+        pg.pulsar('button[title="Semana siguiente"]')
     ok(pg.esperar(".calendario-publicar .envio-dia", segundos=10), "con lo programado en su día")
     ok(pg.visible(".fila-listo", ""), "y los vídeos listos para publicar")
     pg.captura("publicar_cola")

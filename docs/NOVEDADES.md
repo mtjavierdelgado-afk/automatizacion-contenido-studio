@@ -29,6 +29,32 @@ vídeos, estilos, claves y contraseña no se tocan.
   corto. Era el ruido del «Torneo de 8» (segundo 22,7). Para quitarlo de un
   vídeo ya hecho, regraba esa sección otra vez.
 
+**Publicar: una sola nota SEO, guardar con señal y fallos que se quitan (19 de octubre)**
+- **Una sola nota SEO**: la de cada red (la del Studio, sin Claude). La revisión
+  de Claude ya no pone la suya («80/100 según Claude»); enseña cuánto subiría
+  la nota con sus cambios («con estos cambios: 57 → 72») y no repite lo que la
+  nota ya dice. Sin cambios que aceptar, no sale «Aceptar todo».
+- **Cada punto que resta tiene su botón**: sin palabra clave, **Escribir
+  palabra clave** (o **Usar «…»** si Claude propone una); sin portada,
+  **Elegir portada**; sin ubicación de Instagram, un enlace que abre **SEO de
+  este proyecto** con el cursor en su campo y la pista de qué poner (el número
+  del Lugar de Facebook, no el nombre); y los demás llevan al título, al
+  texto, a los hashtags o a la llamada a la acción. Todo dice el sitio con su
+  nombre de verdad: **Cuentas y ajustes → SEO de este proyecto**.
+- **Hashtags**: ya no se cortan a 15 sin decir nada. Cada red admite los suyos
+  (Instagram 30, YouTube 60, las demás 30, contando los fijos del proyecto) y
+  los que no caben se dicen debajo del texto («5 hashtags no caben en
+  Instagram y no se mandan»).
+- **Guardar los textos**: una pastilla encima de los textos dice **Sin
+  guardar…**, **Guardando…**, **✓ Guardado** con la hora, o **No se ha
+  guardado** con **Reintentar**. Cambiar de vídeo, de pestaña o de módulo
+  espera a que se guarde lo último (antes, cambiar de vídeo enseguida lo
+  perdía), y cerrar la pestaña con algo sin guardar lo pregunta.
+- **Fallos**: en la cola, en **Inicio → Lo que pasa hoy** y en **Te
+  necesitan**, cada fallo trae **Quitar de la lista**. Un fallo que volviste a
+  mandar y salió en esa red ya no cuenta (ni en el número de la barra). En la
+  ficha, lo cancelado o quitado va plegado en **N descartados**.
+
 **El movimiento y la profundidad 2.5D de cada imagen (19 de octubre)**
 - En **Imágenes**, cada diapositiva trae **🎬 Esta imagen**: su movimiento
   (**Quieta**, Sobrio, Vivo o Dinámico) y su **2.5D** (sí o no). De partida

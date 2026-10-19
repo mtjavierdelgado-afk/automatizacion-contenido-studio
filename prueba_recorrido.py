@@ -2648,6 +2648,68 @@ def ortografia_de_los_subtitulos(navegador, datos):
 
 
 @escenario
+def ortografia_en_el_guion_y_en_los_campos(navegador, datos):
+    """18-10-2026, lo que pidió el dueño tras ver el corrector con error en
+    Vídeo: «debería estar activo para revisar el guion, no cuando ya todo está
+    montado», y «también en todos los campos con texto que se publica o se ve».
+
+      - el panel del guion sale también con la voz grabada, y lo dice;
+      - sin voz, el guion se revisa SOLO al quedarse quieto;
+      - lo ya revisado no vuelve a Claude: el proyecto lo recuerda;
+      - un campo suelto (CTA, Parrilla…) se revisa con su botón y «Poner las
+        correcciones» lo cambia por el mismo camino que escribir, línea a línea."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'guion'; pintarLight();")
+    ok(pg.esperar(".panel-ortografia", "Ortografía del guion", 15),
+       "el guion tiene su panel de ortografía también con la voz grabada")
+    ok(pg.visible(".panel-ortografia", "la voz ya está grabada"),
+       "y dice que la voz ya está grabada")
+    pg.p.wait_for_timeout(5000)
+    ok(pg.js(f"return !ORTOGRAFIA_VIVA.get(claveOrtografia('{pid}', 'guion'));"),
+       "con la voz grabada NO se revisa sola (corregir ahí es regrabar)")
+    # SIN VOZ: se revisa sola. La voz se quita solo en la pantalla (el vídeo
+    # de prueba la tiene grabada); se vuelve a abrir al acabar.
+    pg.js(f"""ORTOGRAFIA_SOLA.clear(); ORTOGRAFIA_VIVA.delete(claveOrtografia('{pid}', 'guion'));
+      APP.light.video.audio = null; pintarLight();""")
+    ok(pg.esperar(".panel-ortografia", "se revisa sola", 10), "sin voz, el panel dice que se revisa sola")
+    fin = time.time() + 60
+    estado = None
+    while time.time() < fin:
+        estado = pg.js(f"APP.light.video.audio = null; return (ORTOGRAFIA_VIVA.get(claveOrtografia('{pid}', 'guion')) || {{}}).estado;")
+        if estado in ("listo", "error"):
+            break
+        pg.p.wait_for_timeout(700)
+    ok(estado == "listo", f"el guion se ha revisado solo, sin pulsar nada ({estado})")
+    memoria = os.path.join(datos["proyectos"], pid, "ortografia.json")
+    ok(os.path.isfile(memoria), "y lo revisado queda apuntado en el proyecto (ortografia.json)")
+    pg.js(f"""ORTOGRAFIA_VIVA.delete(claveOrtografia('{pid}', 'guion'));""")
+    pg.js("APP.light.video.audio = null; await revisarOrtografia('guion');")
+    ficha = pg.js(f"return ORTOGRAFIA_VIVA.get(claveOrtografia('{pid}', 'guion')) || {{}};")
+    ok(ficha.get("estado") == "listo" and ficha.get("de_memoria", 0) >= 1
+       and ficha.get("de_memoria") == ficha.get("revisados"),
+       f"la segunda vez todo sale de la memoria, sin preguntar a Claude ({ficha.get('de_memoria')} de {ficha.get('revisados')})")
+    pg.js(f"ORTOGRAFIA_VIVA.delete(claveOrtografia('{pid}', 'guion')); await abrirVideoLight('{pid}');")
+    # UN CAMPO SUELTO: la pieza común, montada en la pantalla
+    pg.js("""window.__puesto = null;
+      const caja = ortografiaDeCampo('prueba-recorrido', { leer: () => 'Una vez mas\\nsegunda linea bien',
+        poner: t => { window.__puesto = t; } });
+      caja.classList.add('ortografia-de-prueba');
+      document.body.appendChild(caja);""")
+    ok(pg.esperar(".ortografia-de-prueba button", "Revisar ortografía", 10), "el campo trae «Revisar ortografía»")
+    pg.pulsar(".ortografia-de-prueba button", "Revisar ortografía")
+    ok(pg.esperar(".ortografia-de-prueba button", "Poner las correcciones", 60), "propone la corrección del campo")
+    ok(pg.visible(".ortografia-de-prueba", "más"), "con la tilde que faltaba")
+    pg.pulsar(".ortografia-de-prueba button", "Poner las correcciones")
+    puesto = pg.js("return window.__puesto;")
+    ok(puesto == "Una vez más\nsegunda linea bien",
+       f"y la pone por el camino del campo, con los saltos de línea donde estaban ({puesto!r})")
+    pg.sin_errores("la ortografía en el guion y en los campos")
+    pg.cerrar()
+
+
+@escenario
 def ortografia_por_palabra_entera(navegador, datos):
     """N6 de las notas de mejoras (13-10-2026). Al poner una corrección en un
     bloque con marcas de la voz, «esta → está» cambiaba la «esta» de dentro de

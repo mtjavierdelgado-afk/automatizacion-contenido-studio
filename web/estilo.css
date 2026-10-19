@@ -3174,6 +3174,11 @@ textarea.autoalto, textarea.crece.autoalto { max-height: 60vh; overflow-y: auto;
 .fila-ortografia { display: flex; gap: 8px; align-items: baseline; font-size: 13px; cursor: pointer; }
 .fila-ortografia .id { color: var(--tenue); font-variant-numeric: tabular-nums; min-width: 42px; }
 .fila-ortografia .despues { color: var(--texto); }
+/* la ortografía de un campo suelto (CTA, Parrilla…): debajo del campo, discreta */
+.ortografia-campo { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; align-items: flex-start; }
+.ortografia-campo > .fila { gap: 8px; flex-wrap: wrap; }
+.ortografia-campo .lista-ortografia { width: 100%; }
+.ortografia-campo .fila-ortografia { cursor: default; }
 
 /* El logo lleva al inicio (irAInicioLight) */
 #cabecera .marca { cursor: pointer; }

@@ -6192,7 +6192,8 @@ def _narracion_por_plano(ctx):
 def revisar_ortografia(pid: str, cuerpo: dict = Body(default=None)):
     """Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de
     {fuente: "guion", textos: {bloque: texto}}. -> {id}; el resultado, en GET.
-    No cambia nada: propone."""
+    No cambia nada: propone. Lo ya revisado sale de la memoria del proyecto
+    (pasos/ortografia.py) y no vuelve al CLI."""
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
     fuente = str(datos.get("fuente") or "subtitulos")
@@ -6207,12 +6208,17 @@ def revisar_ortografia(pid: str, cuerpo: dict = Body(default=None)):
             raise ErrorApi(400, "manda los textos del guion a revisar")
     else:
         raise ErrorApi(400, "fuente: «subtitulos» o «guion»")
-    rid = uuid.uuid4().hex[:12]
-    with _LOCK_ORTOGRAFIA:
-        for viejo in list(_ORTOGRAFIA)[:-19]:
-            _ORTOGRAFIA.pop(viejo, None)
-        _ORTOGRAFIA[rid] = {"estado": "pensando", "fuente": fuente, "proyecto": ctx.id}
+    rid = _nueva_revision_ortografia(fuente, ctx.id)
     anclas = _narracion_por_plano(ctx) if fuente == "subtitulos" else {}
+    _lanzar_ortografia(rid, textos, fuente, ctx.id, ctx.proyecto.raiz, anclas)
+    return {"id": rid, "estado": "pensando", "revisados": len(textos)}
+
+
+def _lanzar_ortografia(rid, textos, fuente, dueno, memoria, anclas=None):
+    """Revisa `textos` en un hilo y deja la ficha en `_ORTOGRAFIA[rid]`. `dueno`
+    es el proyecto (o «_textos» para los campos sueltos) y `memoria` la carpeta
+    donde se recuerda lo revisado."""
+    anclas = anclas or {}
 
     def correr():
         try:
@@ -6221,22 +6227,79 @@ def revisar_ortografia(pid: str, cuerpo: dict = Body(default=None)):
             # conserva y la pantalla lo dice (N6 de las notas de mejoras,
             # 13-10-2026)
             informe = {}
-            propuestas = PASOS_MODULOS.ortografia.revisar(textos, cwd=RAIZ_ESTUDIO, informe=informe)
-            ficha = {"estado": "listo", "fuente": fuente, "proyecto": ctx.id,
+            propuestas = PASOS_MODULOS.ortografia.revisar_con_memoria(
+                textos, memoria, cwd=RAIZ_ESTUDIO, informe=informe)
+            ficha = {"estado": "listo", "fuente": fuente, "proyecto": dueno,
                      "revisados": len(textos), "_anclas": anclas,
+                     "de_memoria": int(informe.get("de_memoria") or 0),
                      "sin_revisar": int(informe.get("sin_revisar") or 0),
                      "detalle": str(informe.get("detalle") or "")[:600],
                      "propuestas": [{"id": k, "antes": textos[k], "despues": v["texto"],
                                      "cambios": v.get("cambios") or []}
                                     for k, v in propuestas.items() if k in textos]}
         except Exception as fallo:                          # noqa: BLE001
-            ficha = {"estado": "error", "fuente": fuente, "proyecto": ctx.id,
-                     "error": str(fallo)[:600]}
+            error = str(fallo)[:600]
+            if CLI_CLAUDE.es_pasajero(fallo):
+                # la sesion de Claude renovandose en otro proceso, y ya se ha
+                # repetido dos veces (cli_claude): el titular es para la persona
+                error = ("La sesión de Claude se estaba renovando y no ha contestado. "
+                         "Pulsa «Revisar otra vez» en un minuto; no se ha cambiado nada."
+                         f"\n\n{error}")
+            ficha = {"estado": "error", "fuente": fuente, "proyecto": dueno,
+                     "error": error}
         with _LOCK_ORTOGRAFIA:
             _ORTOGRAFIA[rid] = ficha
 
     threading.Thread(target=correr, daemon=True, name=f"ortografia-{rid}").start()
+
+
+def _nueva_revision_ortografia(fuente, dueno):
+    rid = uuid.uuid4().hex[:12]
+    with _LOCK_ORTOGRAFIA:
+        for viejo in list(_ORTOGRAFIA)[:-19]:
+            _ORTOGRAFIA.pop(viejo, None)
+        _ORTOGRAFIA[rid] = {"estado": "pensando", "fuente": fuente, "proyecto": dueno}
+    return rid
+
+
+#: Dueño de las revisiones de campos sueltos (no son de ningun proyecto).
+_DUENO_TEXTOS = "_textos"
+
+
+def _memoria_textos():
+    return os.path.join(raiz_proyectos(), "_sistema", "ortografia")
+
+
+@app.post("/api/ortografia/textos", status_code=202)
+def revisar_ortografia_textos(cuerpo: dict = Body(default=None)):
+    """Revisa la ortografia de campos sueltos que se ven o se publican: {textos:
+    {campo: texto}}. -> {id}; el resultado, en GET. No cambia nada: propone, y
+    quien lo pide pone lo que se acepte en su campo por su camino de siempre."""
+    textos = _cuerpo(cuerpo).get("textos")
+    textos = textos if isinstance(textos, dict) else {}
+    textos = {str(k)[:120]: str(v)[:PASOS_MODULOS.ortografia.MAX_TEXTO * 3]
+              for k, v in list(textos.items())[:60] if str(v or "").strip()}
+    if not textos:
+        raise ErrorApi(400, "manda {textos: {campo: texto}}")
+    rid = _nueva_revision_ortografia("textos", _DUENO_TEXTOS)
+    _lanzar_ortografia(rid, textos, "textos", _DUENO_TEXTOS, _memoria_textos())
     return {"id": rid, "estado": "pensando", "revisados": len(textos)}
+
+
+@app.get("/api/ortografia/textos/{rid}")
+def leer_ortografia_textos(rid: str):
+    """Como va la revision de unos campos sueltos, y lo que propone al terminar."""
+    with _LOCK_ORTOGRAFIA:
+        ficha = _ORTOGRAFIA.get(rid)
+    if not ficha or ficha.get("proyecto") != _DUENO_TEXTOS:
+        raise ErrorApi(404, "esa revisión de ortografía ya no está: vuelve a pedirla")
+    return {k: v for k, v in ficha.items() if not k.startswith("_")}
+
+
+@app.post("/api/ortografia/textos/descartar")
+def descartar_ortografia_textos(cuerpo: dict = Body(default=None)):
+    """Lo que se deja como estaba: {rid, ids: [...]}. No se vuelve a proponer."""
+    return _descartar_ortografia(_DUENO_TEXTOS, _memoria_textos(), cuerpo)
 
 
 @app.get("/api/proyectos/{pid}/ortografia/{rid}")
@@ -6247,6 +6310,30 @@ def leer_ortografia(pid: str, rid: str):
     if not ficha or ficha.get("proyecto") != pid:
         raise ErrorApi(404, "esa revisión de ortografía ya no está: vuelve a pedirla")
     return {k: v for k, v in ficha.items() if not k.startswith("_")}
+
+
+@app.post("/api/proyectos/{pid}/ortografia/descartar")
+def descartar_ortografia(pid: str, cuerpo: dict = Body(default=None)):
+    """Lo que se deja SIN marcar al aplicar: {rid, ids: [...]}. Esos textos se
+    apuntan como buenos en la memoria del proyecto y no se vuelven a proponer
+    mientras no cambien. No toca ningun param."""
+    ctx = contexto(pid)
+    return _descartar_ortografia(ctx.id, ctx.proyecto.raiz, cuerpo)
+
+
+def _descartar_ortografia(dueno, memoria, cuerpo):
+    datos = _cuerpo(cuerpo)
+    ids = datos.get("ids")
+    if not isinstance(ids, list):
+        raise ErrorApi(400, "manda {rid, ids: [...]}")
+    with _LOCK_ORTOGRAFIA:
+        ficha = _ORTOGRAFIA.get(str(datos.get("rid") or ""))
+    if not ficha or ficha.get("proyecto") != dueno or ficha.get("estado") != "listo":
+        raise ErrorApi(409, "esa revisión de ortografía ya no está: vuelve a pedirla")
+    antes = {str(p["id"]): p.get("antes") for p in ficha.get("propuestas") or []}
+    textos = [antes[str(i)] for i in ids if antes.get(str(i))]
+    PASOS_MODULOS.ortografia.descartar(memoria, textos)
+    return {"descartados": len(textos)}
 
 
 @app.post("/api/proyectos/{pid}/ortografia/aplicar")

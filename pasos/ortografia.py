@@ -1,5 +1,8 @@
-"""El corrector de ORTOGRAFIA de lo que acaba escrito en pantalla: el guion
-(antes de grabar la voz) y los subtitulos (de un video ya hecho).
+"""El corrector de ORTOGRAFIA de lo que acaba escrito en pantalla o publicado:
+el guion (antes de grabar la voz), los subtitulos (de un video ya hecho) y
+cualquier campo de texto que se vea o se publique (`fuente: "textos"`: las
+llamadas a la accion, la ficha de la Parrilla y, cuando se una `publicar-mas`,
+los textos de cada red).
 
     revisar({id: texto}, cwd=None, informe=None) -> {id: {"texto": corregido, "cambios": [[mal, bien], ...]}}
 
@@ -19,12 +22,22 @@ Por que dos sitios y no uno
   el repaso). Deja obsoleto SOLO el rotulo de ese plano: volver a montar no
   dibuja imagenes ni graba voz, no cuesta dinero.
 
+LA MEMORIA (`revisar_con_memoria`, 18-10-2026): lo revisado se apunta en
+`<proyecto>/ortografia.json` por la huella de cada texto, fuera de toda firma.
+Un texto que ya se reviso no vuelve al CLI: la pantalla del guion puede
+revisar SOLA cada vez que cambia el guion y solo se pregunta por los bloques
+que cambiaron. Lo que la persona deja sin marcar al aplicar se apunta como
+bueno (`descartar`) y no se vuelve a proponer.
+
 Va por SUSCRIPCION (el CLI de Claude), con sonnet y poco esfuerzo, igual que
 «Revisar». Si el modelo devuelve algo que no es una correccion ortografica
 --otra frase, palabras de mas o de menos-- se descarta (`_es_ortografia`).
 """
+import hashlib
 import json
+import os
 import re
+import threading
 import unicodedata
 
 try:
@@ -69,6 +82,8 @@ EXACTAMENTE lo que se oye, asi que:
   NO cambies el estilo, el registro ni las cifras. Los nombres propios y las
   marcas se quedan como estan.
 - «guion» y «solo» sin tilde son correctos.
+- Algunos textos son para publicar en redes: los #hashtags, las @menciones,
+  los enlaces, los emojis y los saltos de linea se quedan tal cual.
 
 <textos>
 {textos}
@@ -154,12 +169,14 @@ def revisar(textos, cwd=None, informe=None):
         return {}
     salida = {}
     sin_revisar, tandas_bien, detalle = 0, 0, ""
+    ids_sin_revisar = []
     for desde in range(0, len(pares), POR_LLAMADA):
         trozo = pares[desde:desde + POR_LLAMADA]
         try:
             correcciones = _pedir_tanda(trozo, cwd)
         except _JsonRoto as fallo:
             sin_revisar += len(trozo)
+            ids_sin_revisar.extend(k for k, _t in trozo)
             detalle = str(fallo)
             continue
         tandas_bien += 1
@@ -178,7 +195,109 @@ def revisar(textos, cwd=None, informe=None):
     if not tandas_bien:
         raise ErrorOrtografia(f"{RESPUESTA_ROTA}\n\n{detalle}")
     if informe is not None:
-        informe.update({"sin_revisar": sin_revisar, "detalle": detalle})
+        informe.update({"sin_revisar": sin_revisar, "detalle": detalle,
+                        "ids_sin_revisar": ids_sin_revisar})
+    return salida
+
+
+# ------------------------------------------------------------------ la memoria
+
+FICHERO_MEMORIA = "ortografia.json"
+#: Cambia cuando cambia lo que se le pide al corrector: lo apuntado con otra
+#: instruccion no vale (vuelve a revisarse).
+VERSION_MEMORIA = 2
+#: Cuantos textos se recuerdan por proyecto. Un video largo son ~300 planos y
+#: ~60 bloques; con cada edicion entra uno nuevo. Se quitan los mas viejos.
+MAX_MEMORIA = 4000
+
+_LOCK_MEMORIA = threading.Lock()
+
+
+def huella(texto):
+    """La clave de un texto en la memoria: el texto con los espacios juntados."""
+    llano = " ".join(str(texto or "").split())
+    return hashlib.sha1(f"{VERSION_MEMORIA}|{llano}".encode("utf-8")).hexdigest()[:20]
+
+
+def _ruta_memoria(carpeta):
+    return os.path.join(carpeta, FICHERO_MEMORIA)
+
+
+def leer_memoria(carpeta):
+    """{huella: {"texto": corregido o "", "cambios": [...]}}. Nunca lanza: una
+    memoria ilegible es una memoria vacia (se vuelve a revisar, nada mas)."""
+    if not carpeta:
+        return {}
+    try:
+        with open(_ruta_memoria(carpeta), encoding="utf-8") as fh:
+            datos = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    textos = datos.get("textos") if isinstance(datos, dict) else None
+    return textos if isinstance(textos, dict) else {}
+
+
+def apuntar(carpeta, nuevas):
+    """Suma `nuevas` ({huella: ficha}) a la memoria, de forma atomica."""
+    if not carpeta or not nuevas:
+        return
+    with _LOCK_MEMORIA:
+        memoria = leer_memoria(carpeta)
+        for clave in nuevas:
+            memoria.pop(clave, None)              # lo nuevo, al final (lo ultimo en irse)
+        memoria.update(nuevas)
+        if len(memoria) > MAX_MEMORIA:
+            memoria = dict(list(memoria.items())[-MAX_MEMORIA:])
+        ruta = _ruta_memoria(carpeta)
+        temporal = f"{ruta}.{os.getpid()}.{threading.get_ident()}.tmp"
+        try:
+            os.makedirs(carpeta, exist_ok=True)
+            with open(temporal, "w", encoding="utf-8") as fh:
+                json.dump({"version": VERSION_MEMORIA, "textos": memoria}, fh, ensure_ascii=False)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(temporal, ruta)
+        except OSError:
+            try:
+                os.remove(temporal)
+            except OSError:
+                pass
+
+
+def descartar(carpeta, textos):
+    """Apunta como BUENOS estos textos (lo que la persona dejo sin marcar al
+    aplicar): no se vuelven a proponer mientras no cambien."""
+    apuntar(carpeta, {huella(t): {"texto": "", "cambios": []}
+                      for t in textos if str(t or "").strip()})
+
+
+def revisar_con_memoria(textos, carpeta, cwd=None, informe=None):
+    """Como `revisar`, pero lo ya revisado sale de la memoria y solo va al CLI
+    lo nuevo. Lo que se reviso bien se apunta (tambien lo que no tenia faltas);
+    lo que se quedo sin revisar (una tanda rota) no. En `informe` va ademas
+    `de_memoria`: cuantos textos no han hecho falta preguntar."""
+    if not isinstance(textos, dict):
+        raise ErrorOrtografia("hacen falta los textos a revisar")
+    pares = {str(k): str(v) for k, v in textos.items() if str(v or "").strip()}
+    memoria = leer_memoria(carpeta)
+    salida, nuevos = {}, {}
+    for cid, texto in pares.items():
+        ficha = memoria.get(huella(texto))
+        if not isinstance(ficha, dict):
+            nuevos[cid] = texto
+        elif ficha.get("texto"):
+            salida[cid] = {"texto": ficha["texto"], "cambios": ficha.get("cambios") or []}
+    propio = {}
+    if nuevos:
+        corregidos = revisar(nuevos, cwd=cwd, informe=propio)
+        rotos = set(propio.get("ids_sin_revisar") or ())
+        apuntar(carpeta, {huella(t): (corregidos.get(cid) or {"texto": "", "cambios": []})
+                          for cid, t in nuevos.items() if cid not in rotos})
+        salida.update(corregidos)
+    if informe is not None:
+        informe.update({"sin_revisar": int(propio.get("sin_revisar") or 0),
+                        "detalle": str(propio.get("detalle") or ""),
+                        "de_memoria": len(pares) - len(nuevos)})
     return salida
 
 

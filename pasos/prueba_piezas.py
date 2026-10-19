@@ -4628,6 +4628,77 @@ def prueba_musica_un_pelin_mas_alta():
        "la frase del sonido dice el nivel")
 
 
+def prueba_ortografia_con_memoria():
+    """18-10-2026: la pantalla del guion revisa SOLA cada vez que cambia el
+    guion. Para que eso no sea preguntar a Claude por todo el guion en cada
+    edicion, lo revisado se recuerda por texto: solo va al CLI lo nuevo, lo
+    dejado como estaba no se vuelve a proponer y una tanda rota no se recuerda."""
+    print("\n[ortografia: lo revisado se recuerda y solo se pregunta lo nuevo]")
+    import ortografia
+    original = cli_claude.ejecutar
+    carpeta = tempfile.mkdtemp(prefix="orto_memoria_")
+    preguntados = []
+
+    def ejecutar(instruccion, **_k):
+        ids = re.findall(r'<t id="([^"]+)">([^<]*)</t>', instruccion)
+        preguntados.extend(i for i, _t in ids)
+        if any("ROTO" in t for _i, t in ids):
+            return '{"correcciones": {"x": "sin cerrar', {}
+        return json.dumps({"correcciones": {i: {"texto": t.replace("mas", "más"),
+                                                "cambios": [["mas", "más"]]}
+                                            for i, t in ids if "mas" in t}}), {}
+    try:
+        cli_claude.ejecutar = ejecutar
+        textos = {"B1": "una vez mas", "B2": "todo bien", "B3": "otra mas"}
+        informe = {}
+        salida = ortografia.revisar_con_memoria(textos, carpeta, informe=informe)
+        ok(sorted(salida) == ["B1", "B3"] and salida["B1"]["texto"] == "una vez más",
+           f"la primera vez propone lo que tiene faltas ({sorted(salida)})")
+        ok(sorted(preguntados) == ["B1", "B2", "B3"] and informe.get("de_memoria") == 0,
+           f"y pregunta por los tres ({preguntados}, {informe})")
+        ok(os.path.isfile(os.path.join(carpeta, ortografia.FICHERO_MEMORIA)),
+           "lo apunta en ortografia.json del proyecto")
+        preguntados.clear()
+        textos["B2"] = "todo bien, ya"
+        informe = {}
+        salida = ortografia.revisar_con_memoria(textos, carpeta, informe=informe)
+        ok(preguntados == ["B2"], f"la segunda vez solo pregunta por el bloque que cambio ({preguntados})")
+        ok(sorted(salida) == ["B1", "B3"] and informe.get("de_memoria") == 2,
+           f"y lo ya revisado sale de la memoria, propuestas incluidas ({sorted(salida)}, {informe})")
+        ortografia.descartar(carpeta, [textos["B3"]])
+        preguntados.clear()
+        salida = ortografia.revisar_con_memoria(textos, carpeta)
+        ok(sorted(salida) == ["B1"] and not preguntados,
+           f"lo dejado como estaba no se vuelve a proponer ni a preguntar ({sorted(salida)}, {preguntados})")
+        preguntados.clear()
+        informe = {}
+        try:
+            ortografia.revisar_con_memoria({"R": "esto ROTO mas"}, carpeta, informe=informe)
+        except ortografia.ErrorOrtografia:
+            pass
+        preguntados.clear()
+        try:
+            ortografia.revisar_con_memoria({"R": "esto ROTO mas"}, carpeta)
+        except ortografia.ErrorOrtografia:
+            pass
+        ok(preguntados, "una tanda rota NO se recuerda: la siguiente vez se vuelve a preguntar")
+        preguntados.clear()
+        informe = {}
+        largo = "palabra mas " * (ortografia.MAX_TEXTO // 6)
+        salida = ortografia.revisar_con_memoria({"L": largo, "C": "corto mas"}, carpeta, informe=informe)
+        ok(preguntados == ["C"] and "L" not in salida and informe.get("sin_revisar") == 1,
+           f"un texto de mas de {ortografia.MAX_TEXTO} caracteres no se manda (se cortaria): "
+           f"cuenta como sin revisar ({preguntados}, {informe.get('sin_revisar')})")
+        with open(os.path.join(carpeta, ortografia.FICHERO_MEMORIA), "w", encoding="utf-8") as fh:
+            fh.write("{roto")
+        preguntados.clear()
+        salida = ortografia.revisar_con_memoria({"B1": "una vez mas"}, carpeta)
+        ok(salida.get("B1") and preguntados == ["B1"], "una memoria ilegible es una memoria vacia, sin fallar")
+    finally:
+        cli_claude.ejecutar = original
+        shutil.rmtree(carpeta, ignore_errors=True)
+
+
 def prueba_ortografia_por_tandas():
     """N6 de las notas de mejoras (13-10-2026): «la revision de ortografia no
     es un JSON legible» salia de titular y se perdia la revision entera por una
@@ -5713,6 +5784,7 @@ def main():
     prueba_familias_de_receta()
     prueba_musica_un_pelin_mas_alta()
     prueba_ortografia_por_tandas()
+    prueba_ortografia_con_memoria()
     prueba_microcorte_de_red()
     prueba_revision_imagenes_16_10()
     prueba_revision_16_10_render()

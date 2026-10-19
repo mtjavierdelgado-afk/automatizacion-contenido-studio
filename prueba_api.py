@@ -5818,6 +5818,27 @@ def probar_que_lo_lento_no_para_el_servicio():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_ortografia_de_campos(cliente, pid):
+    """El corrector de campos sueltos (18-10-2026): lo que se ve o se publica
+    fuera del guion y los subtitulos. Solo lo que NO llega al CLI (aqui no hay
+    CLI falso: una revision de verdad saldria a Claude)."""
+    seccion("LA ORTOGRAFIA DE LOS CAMPOS SUELTOS")
+    r, _d = cliente.post("/api/ortografia/textos", {"textos": {}})
+    igual(r.status_code, 400, "sin textos: 400")
+    r, _d = cliente.post("/api/ortografia/textos", {"textos": {"a": "   "}})
+    igual(r.status_code, 400, "con textos vacios: 400")
+    r, _d = cliente.post("/api/ortografia/textos", {"textos": {f"L{i}": "hola" for i in range(401)}})
+    igual(r.status_code, 400, "mas de 400 lineas: 400, no un recorte callado")
+    r, _d = cliente.get("/api/ortografia/textos/noexiste")
+    igual(r.status_code, 404, "una revision que no existe: 404")
+    r, _d = cliente.post("/api/ortografia/textos/descartar", {"rid": "noexiste", "ids": ["L0"]})
+    igual(r.status_code, 409, "descartar de una revision que no existe: 409")
+    r, _d = cliente.post("/api/ortografia/textos/descartar", {"rid": "x"})
+    igual(r.status_code, 400, "descartar sin ids: 400")
+    r, _d = cliente.post(f"/api/proyectos/{pid}/ortografia/descartar", {"rid": "noexiste", "ids": ["B001"]})
+    igual(r.status_code, 409, "descartar en un video con una revision que no existe: 409")
+
+
 def _llamar(funcion, *args, **kwargs):
     """Llama a una ruta de app.py en este proceso. -> (codigo, respuesta|mensaje)."""
     import app as servidor                                    # noqa: PLC0415
@@ -6560,6 +6581,7 @@ def main():
         probar_el_reloj_de_un_trabajo()
         probar_revision_del_nucleo_v2f()
         probar_que_lo_lento_no_para_el_servicio()
+        probar_ortografia_de_campos(cliente, pid)
         probar_lo_de_v2h()
         probar_cancelar_en_el_taller()
     finally:

@@ -55,6 +55,32 @@ vídeos, estilos, claves y contraseña no se tocan.
   y el **informe del mes** de cada proyecto, imprimible y con un resumen para
   copiar.
 
+**El corrector de ortografía, en el guion y en los campos que se ven (18 de octubre)**
+- **El guion se revisa solo**: en la pantalla del guion, sin la voz grabada,
+  el panel **Ortografía del guion** revisa el texto unos segundos después de
+  que deje de cambiar (un guion nuevo, un bloque editado) y propone las
+  tildes, letras y signos que faltan. Antes había que acordarse de pulsarlo, y
+  muchas veces se veía ya en Vídeo, con todo montado.
+- **Con la voz ya grabada el panel sigue ahí** y lo dice: corregir el guion
+  deja la voz de esos bloques por regrabar (se paga), y antes de hacerlo te lo
+  pregunta. Para que solo se lea bien, la **Ortografía de los subtítulos** de
+  Vídeo sigue funcionando igual (gratis).
+- **No se pregunta dos veces lo mismo**: lo revisado se recuerda en cada
+  vídeo, así que al editar un bloque solo se revisa ese. Lo que dejes sin
+  marcar al aplicar no se vuelve a proponer.
+- **«Revisar ortografía» en los campos de texto que se ven**: los textos de
+  las llamadas a la acción y el guion de la ficha de la Parrilla. Propone las
+  correcciones y «Poner las correcciones» las escribe en el campo, con los
+  saltos de línea donde estaban; «Dejarlo como está» no las vuelve a proponer.
+  En **Publicar**, cada red trae su «Revisar ortografía», que mira juntos el
+  título, el texto, la llamada a la acción, el texto alternativo y el primer
+  comentario, y dice de qué campo es cada corrección (los hashtags no).
+- **El error «Failed to refresh OAuth token: another Claude Code process is
+  refreshing it…»** ya no corta el corrector (ni nada que hable con Claude):
+  pasa cuando dos llamadas arrancan mientras la sesión se renueva, y ahora se
+  espera y se repite solo. Tampoco marca la cuenta como «sin sesión».
+
+
 **Cancelar de verdad en el taller de estilos (18 de octubre)**
 - **«Cancelar» un «Rehacer» para en el acto**: corta la llamada a Claude y no
   encarga ninguna lámina más (las que ya se estaban dibujando se acaban y se

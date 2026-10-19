@@ -277,8 +277,11 @@ derechos: «Mario Kart», «Nintendo Switch»…):
 - **Ortografía de los subtítulos**: «Revisar la ortografía» propone las tildes,
   letras y signos que faltan en lo que se lee. Marca las que quieras y «Aplicar
   las marcadas»: cambia solo el texto del subtítulo (ni voz ni imágenes) y
-  «Regenerar Vídeo» lo monta, gratis. En el **Guion**, antes de grabar la voz,
-  hay el mismo corrector para el texto.
+  «Regenerar Vídeo» lo monta, gratis. En el **Guion** está el mismo corrector:
+  sin la voz grabada se revisa solo cuando el guion deja de cambiar; con la voz
+  grabada avisa de que corregir es regrabar. Y los campos de texto que se ven
+  o se publican (llamadas a la acción, la ficha de la Parrilla, cada red en
+  Publicar) traen su botón «Revisar ortografía».
 - Si la voz de un vídeo llegó con las tildes rotas («TÃº»), sale el aviso
   **Arreglar los subtítulos**: los vuelve a dibujar y monta, sin pagar nada.
 - **El repaso**: escribe notas sobre el vídeo («la música está alta», «este

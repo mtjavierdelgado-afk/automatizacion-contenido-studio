@@ -1815,6 +1815,8 @@ function bloqueCTA(ficha, opciones) {
     if (ranura.puesto) {
       tarjeta.appendChild(campoArea(m.etiqueta, ranura.texto,
         v => { ranura.texto = v; alCambiar(); }, m.ejemplo, `cta-${m.id}`));
+      tarjeta.appendChild(ortografiaDeCampo(`cta-${m.id}`, { leer: () => ranura.texto,
+        poner: nuevo => { ranura.texto = nuevo; alCambiar(); repintar(); } }));
       if (m.ayuda) tarjeta.appendChild(h('div', { clase: 'pista' }, m.ayuda));
     }
     caja.appendChild(tarjeta);
@@ -7594,16 +7596,22 @@ function panelOrtografia(fuente) {
   const v = APP.light.video;
   const est = ORTOGRAFIA_VIVA.get(claveOrtografia(v.pid, fuente)) || {};
   const titulo = fuente === 'guion' ? 'Ortografía del guion' : 'Ortografía de los subtítulos';
+  // CON LA VOZ YA GRABADA el guion se sigue pudiendo revisar (18-10-2026: el
+  // corrector solo salía en Vídeo, con todo montado), pero corregirlo aquí es
+  // regrabar esos bloques; para que solo se LEA bien, están los subtítulos
+  const conVoz = fuente === 'guion' && !!v.audio;
   const caja = h('div', { clase: 'panel-ortografia' });
   const cab = h('div', { clase: 'fila' },
     h('b', {}, titulo),
     h('span', { clase: 'meta crece' }, fuente === 'guion'
-      ? 'tildes, letras y signos, antes de grabar la voz (gratis)'
+      ? (conVoz ? 'tildes, letras y signos; la voz ya está grabada'
+        : 'tildes, letras y signos, antes de grabar la voz (gratis); se revisa sola al cambiar el guion')
       : 'tildes, letras y signos de lo que se lee; corregir solo vuelve a montar (gratis)'),
     h('button', { clase: 'mini', disabled: est.estado === 'pensando' || !!trabajoVideoLight(),
       onclick: () => revisarOrtografia(fuente) },
     est.estado === 'pensando' ? 'Revisando…' : (est.estado ? 'Revisar otra vez' : 'Revisar la ortografía')));
   caja.appendChild(cab);
+  if (fuente === 'guion') programarOrtografiaGuion();
   if (est.estado === 'pensando') {
     caja.appendChild(h('div', { clase: 'cargando' }, `revisando ${est.revisados || ''} textos… (puede tardar un minuto)`));
   } else if (est.estado === 'error') {
@@ -7624,6 +7632,12 @@ function panelOrtografia(fuente) {
     caja.appendChild(lista);
   } else if (est.estado === 'listo') {
     const props = est.propuestas || [];
+    if (fuente === 'guion' && est.huella && props.length
+      && est.huella !== huellaTextosOrtografia(textosGuionOrtografia(v))) {
+      caja.appendChild(h('div', { clase: 'caja-aviso' },
+        'El guion ha cambiado desde esta revisión: los bloques editados no se tocan al aplicar. '
+        + (conVoz ? 'Pulsa «Revisar otra vez» para revisarlo como está.' : 'Se vuelve a revisar solo en unos segundos.')));
+    }
     // UNA TANDA ROTA NO SE LLEVA LAS DEMÁS (pasos/ortografia.py): los textos
     // cuya respuesta no se pudo leer se dicen aquí, y «Sin faltas» no los
     // cuenta como revisados (N6 de las notas de mejoras, 13-10-2026)
@@ -7655,11 +7669,73 @@ function panelOrtografia(fuente) {
         h('button', { clase: 'primario', disabled: !!trabajoVideoLight(),
           onclick: () => aplicarOrtografia(fuente) }, 'Aplicar las marcadas'),
         h('span', { clase: 'meta' }, fuente === 'guion'
-          ? 'se guardan en el guion; la voz se graba después con ellas'
+          ? (conVoz ? 'se guardan en el guion y la voz de esos bloques queda por regrabar (se paga); '
+            + 'para que solo se lea bien, corrige los subtítulos en Vídeo (gratis)'
+            : 'se guardan en el guion; la voz se graba después con ellas')
           : 'se quedan como texto del subtítulo de cada plano: «Regenerar Vídeo» las monta')));
     }
   }
   return caja;
+}
+
+/* Los textos del guion tal y como se leen (sin las marcas de la voz), por
+   bloque, y su huella: si la huella no ha cambiado no hay nada nuevo que
+   revisar. */
+function textosGuionOrtografia(v) {
+  const textos = {};
+  ((v.guion || {}).bloques || []).forEach(b => {
+    const t = textoVisibleLight(textoDeBloqueLight(b));
+    if (String(t || '').trim()) textos[b.id] = t;
+  });
+  return textos;
+}
+
+function huellaTextosOrtografia(textos) {
+  return Object.keys(textos).sort().map(k => `${k}\u0001${textos[k]}`).join('\u0002');
+}
+
+/* LA REVISIÓN SOLA DEL GUION (18-10-2026): «el corrector debería estar activo
+   para revisar el guion». Con el guion en pantalla y SIN voz grabada, cada vez
+   que su texto cambia (un guion nuevo, un bloque editado) se revisa solo, unos
+   segundos después de quedarse quieto. No gasta de más: el servidor recuerda
+   lo revisado por texto (pasos/ortografia.py) y solo pregunta a Claude por los
+   bloques que cambiaron. Con la voz grabada no se lanza sola: corregir ahí es
+   regrabar, y eso lo decide la persona con el botón. Una huella se intenta una
+   vez por sesión (`ORTOGRAFIA_SOLA`), salga bien o mal: un fallo no se repite
+   en bucle. */
+const ORTOGRAFIA_SOLA = new Map();
+let temporizadorOrtografiaSola = null;
+
+/* Lo que haría falta revisar solo ahora mismo: la huella del guion en
+   pantalla, o '' si no toca (sin guion, con voz, con un trabajo en marcha, ya
+   revisada o ya intentada). */
+function huellaPendienteOrtografia() {
+  const v = APP.light.video;
+  if (!v || !v.pid || v.vista !== 'guion' || v.audio || trabajoVideoLight()) return '';
+  const textos = textosGuionOrtografia(v);
+  if (!Object.keys(textos).length) return '';
+  const huella = huellaTextosOrtografia(textos);
+  const est = ORTOGRAFIA_VIVA.get(claveOrtografia(v.pid, 'guion')) || {};
+  if (est.estado === 'pensando' || est.estado === 'aplicada' || est.huella === huella) return '';
+  if (ORTOGRAFIA_SOLA.get(v.pid) === huella) return '';
+  return huella;
+}
+
+/* SE ESPERA A QUE EL TEXTO SE QUEDE QUIETO: si al cumplirse el plazo la huella
+   no es la de cuando se programó (se sigue escribiendo), se vuelve a esperar.
+   Un temporizador a la vez: los repintados no lo reinician (la pantalla se
+   repinta sola y lo aplazarían para siempre). */
+function programarOrtografiaGuion() {
+  if (temporizadorOrtografiaSola) return;
+  const programada = huellaPendienteOrtografia();
+  if (!programada) return;
+  temporizadorOrtografiaSola = setTimeout(() => {
+    temporizadorOrtografiaSola = null;
+    const ahora = huellaPendienteOrtografia();
+    if (!ahora) return;
+    if (ahora !== programada) { programarOrtografiaGuion(); return; }
+    revisarOrtografia('guion');
+  }, 4000);
 }
 
 async function revisarOrtografia(fuente) {
@@ -7667,28 +7743,29 @@ async function revisarOrtografia(fuente) {
   const pid = v.pid;
   const clave = claveOrtografia(pid, fuente);
   const cuerpo = { fuente };
+  let huella = '';
   if (fuente === 'guion') {
-    cuerpo.textos = {};
-    ((v.guion || {}).bloques || []).forEach(b => {
-      cuerpo.textos[b.id] = textoVisibleLight(textoDeBloqueLight(b));
-    });
+    cuerpo.textos = textosGuionOrtografia(v);
+    huella = huellaTextosOrtografia(cuerpo.textos);
+    ORTOGRAFIA_SOLA.set(pid, huella);
   }
-  const est = { estado: 'pensando' };
+  const est = { estado: 'pensando', huella };
   ORTOGRAFIA_VIVA.set(clave, est);
   pintarLight();
   try {
     const lanzada = await pedir(`${API.proyecto(pid)}/ortografia/revisar`, { method: 'POST', cuerpo });
     est.revisados = lanzada.revisados;
     let ficha = { estado: 'pensando' };
-    for (let i = 0; i < 160 && ficha.estado === 'pensando'; i += 1) {
+    for (let i = 0; i < 400 && ficha.estado === 'pensando'; i += 1) {
       await new Promise(r => setTimeout(r, 1500));
       ficha = await pedir(`${API.proyecto(pid)}/ortografia/${lanzada.id}`);
     }
     if (ficha.estado === 'pensando') throw new Error('la revisión tarda demasiado: vuelve a pedirla en un momento');
     ficha.rid = lanzada.id;
+    ficha.huella = huella;
     if (ORTOGRAFIA_VIVA.get(clave) === est) ORTOGRAFIA_VIVA.set(clave, ficha);
   } catch (e) {
-    if (ORTOGRAFIA_VIVA.get(clave) === est) ORTOGRAFIA_VIVA.set(clave, { estado: 'error', error: e.message });
+    if (ORTOGRAFIA_VIVA.get(clave) === est) ORTOGRAFIA_VIVA.set(clave, { estado: 'error', error: e.message, huella });
   }
   if (videoAbierto().pid === pid) pintarLight();
 }
@@ -7747,6 +7824,16 @@ async function aplicarOrtografia(fuente) {
   const est = ORTOGRAFIA_VIVA.get(clave) || {};
   const elegidas = (est.propuestas || []).filter(p => (est.marcadas || new Set()).has(p.id));
   if (!elegidas.length) { toast('No hay ninguna marcada', true); return; }
+  if (fuente === 'guion' && v.audio && !window.confirm(
+    `La voz ya está grabada: corregir ${elegidas.length} bloque(s) del guion deja su voz por regrabar, `
+    + 'y regrabar se paga. Para que solo se lea bien, cancela y corrige los subtítulos en la pantalla '
+    + 'Vídeo (gratis). ¿Corregimos el guion?')) return;
+  // LO QUE SE DEJA SIN MARCAR no se vuelve a proponer (lo recuerda el servidor)
+  const dejadas = (est.propuestas || []).filter(p => !(est.marcadas || new Set()).has(p.id)).map(p => p.id);
+  if (dejadas.length && est.rid) {
+    pedir(`${API.proyecto(pid)}/ortografia/descartar`, { method: 'POST', cuerpo: { rid: est.rid, ids: dejadas } })
+      .catch(() => {});
+  }
   let puestas = elegidas.length;
   const aMano = [];
   try {
@@ -7754,9 +7841,13 @@ async function aplicarOrtografia(fuente) {
       // por el MISMO camino que escribir a mano en el bloque
       const porId = {};
       ((v.guion || {}).bloques || []).forEach(b => { porId[b.id] = b; });
+      const llano = t => String(t || '').split(/\s+/).filter(Boolean).join(' ');
       elegidas.forEach(p => {
         const b = porId[p.id];
         if (!b) { aMano.push(p); return; }
+        // EL BLOQUE HA CAMBIADO desde la revisión (se editó a mano): poner la
+        // propuesta lo devolvería al texto de antes. Se deja a mano.
+        if (llano(textoVisibleLight(textoDeBloqueLight(b))) !== llano(p.antes)) { aMano.push(p); return; }
         const nuevo = ortografiaSobreCrudo(textoDeBloqueLight(b), p);
         if (nuevo === null) { aMano.push(p); return; }
         guardarBloqueLight(b.id, nuevo, b.insertado ? undefined : b.texto, !!b.insertado);
@@ -7776,8 +7867,8 @@ async function aplicarOrtografia(fuente) {
        además, se queda en el panel con su texto. */
     if (aMano.length) {
       const aviso = `${puestas} corrección(es) puestas; ${aMano.length} hay que corregirla(s) a mano `
-        + `(${aMano.map(p => p.id).join(', ')}): llevan pausas o marcas de la voz y no se han podido `
-        + 'poner sin tocarlas.';
+        + `(${aMano.map(p => p.id).join(', ')}): llevan pausas o marcas de la voz, o el bloque ha `
+        + 'cambiado desde la revisión, y no se han podido poner sin tocarlo.';
       toast(aviso, true);
       ORTOGRAFIA_VIVA.set(clave, { estado: 'aplicada', aviso, aMano });
     } else {
@@ -7788,6 +7879,144 @@ async function aplicarOrtografia(fuente) {
   } catch (e) {
     toast(`no se han podido poner: ${e.message}`, true);
   }
+}
+
+/* LA ORTOGRAFÍA DE UN CAMPO SUELTO (18-10-2026): «el corrector también debe
+   estar en todos los campos que incluyen texto que será publicado, visible o
+   producto final». Un botón pequeño al lado del campo; revisa su texto
+   (`/api/ortografia/textos`), enseña lo que propone y lo pone con el MISMO
+   camino que escribir a mano. El texto se manda POR LÍNEAS: así los saltos de
+   línea se quedan donde estaban y un texto largo no se corta.
+   `campo` es {leer, poner} para un campo, o {partes, ponerPartes, etiquetas}
+   para varios que se revisan juntos (los de una red en Publicar: título,
+   texto, llamada a la acción…): `partes()` da {nombre: texto} y
+   `ponerPartes({nombre: texto})` pone solo los que cambian.
+   El estado vive fuera del campo (`ORTOGRAFIA_CAMPOS`, por `clave`) para que
+   un repintado no lo pierda. */
+const ORTOGRAFIA_CAMPOS = new Map();
+
+function lineasOrtografia(texto) {
+  const lineas = String(texto || '').split('\n');
+  const textos = {};
+  lineas.forEach((l, i) => { if (/[A-Za-zÀ-ÿ]/.test(l)) textos[`L${i}`] = l; });
+  return { lineas, textos };
+}
+
+function partesOrtografia(campo) {
+  const crudas = campo.partes ? (campo.partes() || {}) : { '': campo.leer() };
+  const partes = {};
+  Object.keys(crudas).forEach(k => { partes[k] = String(crudas[k] || ''); });
+  return partes;
+}
+
+/* Las líneas de todas las partes, con un id que dice de qué parte y línea son
+   («descripcion|L3»; en un campo solo, «L3»). */
+function textosOrtografia(partes) {
+  const textos = {};
+  Object.keys(partes).forEach(k => {
+    const porLinea = lineasOrtografia(partes[k]).textos;
+    Object.keys(porLinea).forEach(l => { textos[k ? `${k}|${l}` : l] = porLinea[l]; });
+  });
+  return textos;
+}
+
+function ortografiaDeCampo(clave, campo) {
+  const caja = h('div', { clase: 'ortografia-campo' });
+  const pintar = () => {
+    caja.replaceChildren();
+    const est = ORTOGRAFIA_CAMPOS.get(clave) || {};
+    const partes = partesOrtografia(campo);
+    const huella = JSON.stringify(partes);
+    const hayTexto = Object.keys(partes).some(k => partes[k].trim());
+    const viejo = est.huella !== undefined && est.huella !== huella;
+    caja.appendChild(h('button', { clase: 'mini fantasma', type: 'button',
+      disabled: est.estado === 'pensando' || !hayTexto,
+      title: 'Revisa tildes, letras y signos de este texto (gratis)',
+      onclick: () => revisarCampoOrtografia(clave, campo, pintar) },
+    est.estado === 'pensando' ? 'Revisando…' : 'Revisar ortografía'));
+    if (viejo || !est.estado || est.estado === 'pensando') return;
+    if (est.estado === 'error') {
+      caja.appendChild(cajaError(est.error || 'no se ha podido revisar'));
+      return;
+    }
+    const props = est.propuestas || [];
+    if (!props.length) {
+      caja.appendChild(h('span', { clase: 'meta' }, '✓ Sin faltas'));
+      return;
+    }
+    const etiquetas = campo.etiquetas || {};
+    const lista = h('div', { clase: 'lista-ortografia' });
+    props.forEach(p => {
+      const parte = String(p.id).includes('|') ? String(p.id).split('|')[0] : '';
+      lista.appendChild(h('div', { clase: 'fila-ortografia' },
+        parte ? h('span', { clase: 'id' }, etiquetas[parte] || parte) : null,
+        h('span', { clase: 'crece' }, h('span', { clase: 'despues' }, p.despues),
+          (p.cambios || []).length ? h('span', { clase: 'meta' },
+            ' · ' + p.cambios.map(c => `${c[0]} → ${c[1]}`).join(', ')) : null)));
+    });
+    caja.appendChild(lista);
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'mini primario', type: 'button', onclick: () => {
+        // SE VUELVE A LEER EL CAMPO: si se ha seguido escribiendo después de
+        // revisar, poner lo propuesto se llevaría lo escrito. Se revisa otra vez.
+        if (JSON.stringify(partesOrtografia(campo)) !== huella) {
+          toast('El texto ha cambiado desde la revisión: se revisa otra vez');
+          revisarCampoOrtografia(clave, campo, pintar);
+          return;
+        }
+        const lineasDe = {};
+        props.forEach(p => {
+          const id = String(p.id);
+          const parte = id.includes('|') ? id.split('|')[0] : '';
+          const i = Number(id.split('|').pop().slice(1));
+          if (!lineasDe[parte]) lineasDe[parte] = lineasOrtografia(partes[parte]).lineas;
+          if (lineasDe[parte][i] !== undefined) lineasDe[parte][i] = p.despues;
+        });
+        ORTOGRAFIA_CAMPOS.delete(clave);
+        const nuevos = {};
+        Object.keys(lineasDe).forEach(k => { nuevos[k] = lineasDe[k].join('\n'); });
+        if (campo.partes) campo.ponerPartes(nuevos);
+        else campo.poner(nuevos['']);
+        toast(`${props.length} corrección(es) puestas`);
+        pintar();
+      } }, 'Poner las correcciones'),
+      h('button', { clase: 'mini fantasma', type: 'button', onclick: () => {
+        if (est.rid) {
+          pedir(`${BASE}/api/ortografia/textos/descartar`, { method: 'POST',
+            cuerpo: { rid: est.rid, ids: props.map(p => p.id) } }).catch(() => {});
+        }
+        ORTOGRAFIA_CAMPOS.set(clave, { estado: 'listo', propuestas: [], huella });
+        pintar();
+      } }, 'Dejarlo como está')));
+  };
+  pintar();
+  return caja;
+}
+
+async function revisarCampoOrtografia(clave, campo, pintar) {
+  const partes = partesOrtografia(campo);
+  const huella = JSON.stringify(partes);
+  const textos = textosOrtografia(partes);
+  if (!Object.keys(textos).length) return;
+  const est = { estado: 'pensando', huella };
+  ORTOGRAFIA_CAMPOS.set(clave, est);
+  pintar();
+  let ficha;
+  try {
+    const lanzada = await pedir(`${BASE}/api/ortografia/textos`, { method: 'POST', cuerpo: { textos } });
+    ficha = { estado: 'pensando' };
+    for (let i = 0; i < 400 && ficha.estado === 'pensando'; i += 1) {
+      await new Promise(r => setTimeout(r, 1500));
+      ficha = await pedir(`${BASE}/api/ortografia/textos/${lanzada.id}`);
+    }
+    if (ficha.estado === 'pensando') throw new Error('la revisión tarda demasiado: vuelve a pedirla en un momento');
+    ficha.rid = lanzada.id;
+  } catch (e) {
+    ficha = { estado: 'error', error: e.message };
+  }
+  ficha.huella = huella;
+  if (ORTOGRAFIA_CAMPOS.get(clave) === est) ORTOGRAFIA_CAMPOS.set(clave, ficha);
+  pintar();
 }
 
 /* «Arreglar los subtítulos»: rótulos de todos los planos y montaje, sin pagar
@@ -8540,10 +8769,10 @@ function vistaGuionLight() {
   // si algo quedó viejo (un cambio de estilo traído, por ejemplo), qué pulsar
   const siguiente = siguientePasoLight();
   if (siguiente) caja.appendChild(siguiente);
-  /* LA ORTOGRAFÍA DEL GUION, ANTES DE GRABAR: aquí es gratis, y de aquí salen
-     la voz y los subtítulos. Con la voz ya grabada, tocar el guion es
-     regrabar: entonces se corrigen los subtítulos, en la pantalla Vídeo. */
-  if (!v.audio) caja.appendChild(panelOrtografia('guion'));
+  /* LA ORTOGRAFÍA DEL GUION: antes de grabar es gratis y se revisa sola; con
+     la voz ya grabada corregir es regrabar (lo dice el panel), y para que solo
+     se lea bien están los subtítulos, en la pantalla Vídeo. */
+  caja.appendChild(panelOrtografia('guion'));
 
   // EL REPRODUCTOR VIVE EN LA BARRA DE ABAJO (ver `pieLight`). Estaba arriba
   // del guion para que los mandos no se fueran con el scroll; la barra fija lo
@@ -18989,6 +19218,32 @@ function limpiarBorradorPublicar(enviado) {
 
 /* Lo escrito a mano se guarda solo al dejar de teclear, como en el resto del
    Studio. Los textos no entran en ninguna firma: guardarlos no cuesta nada. */
+/* LA ORTOGRAFÍA DE LO QUE SE PUBLICA EN UNA RED (corrector-ortografia,
+   19-10-2026): título, texto, llamada a la acción, texto alternativo y primer
+   comentario, revisados juntos con la pieza común (`ortografiaDeCampo`). Lo
+   que se pone va por `editarTextoPublicar`, el mismo camino que escribirlo. Los
+   hashtags no se revisan: no son frases. */
+const PARTES_ORTOGRAFIA_RED = { titulo: 'Título', descripcion: 'Texto', cta: 'Llamada a la acción',
+  alt: 'Texto alternativo', primer_comentario: 'Primer comentario' };
+
+function ortografiaDeRedPublicar(red) {
+  return ortografiaDeCampo(`publicar-${PUB.pid || ''}-${red}`, {
+    etiquetas: PARTES_ORTOGRAFIA_RED,
+    partes: () => {
+      const t = textosDeFicha(red);
+      const partes = {};
+      Object.keys(PARTES_ORTOGRAFIA_RED).forEach(k => {
+        if (String(t[k] || '').trim()) partes[k] = String(t[k]);
+      });
+      return partes;
+    },
+    ponerPartes: nuevos => {
+      Object.keys(nuevos).forEach(k => editarTextoPublicar(red, k, nuevos[k]));
+      guardarTextosPublicar();
+    },
+  });
+}
+
 function editarTextoPublicar(red, campo, valor) {
   PUB.borrador[red] = Object.assign({}, PUB.borrador[red] || {}, {
     [campo]: campo === 'hashtags' ? String(valor).split(/[\s,]+/).filter(Boolean) : valor,
@@ -19247,6 +19502,7 @@ function bloqueTextoRed(red) {
       oninput: ev => editarTextoPublicar(red, 'hashtags', ev.target.value) })));
   b.appendChild(pie);
   b.appendChild(seoDeRedPublicar(red));
+  b.appendChild(ortografiaDeRedPublicar(red));
   if (red === 'youtube' && (f.capitulos || []).length) {
     b.appendChild(h('div', { clase: 'meta' }, 'Capítulos: '
       + f.capitulos.map(c => `${mmss(c.t)} ${c.titulo}`).join(' · ')));
@@ -21387,6 +21643,9 @@ function seccionFichaParrilla() {
       botonGuia('guion_parrilla', () => document.querySelector('#modulo [data-foco="parrilla-texto"]')),
       h('button', { clase: 'mini', onclick: () => copiarTexto(PAR.borradorTexto !== null ? PAR.borradorTexto : g.texto) }, 'Copiar')),
     area,
+    ortografiaDeCampo(`parrilla-${g.id || g.codigo || ''}`, {
+      leer: () => (PAR.borradorTexto !== null ? PAR.borradorTexto : g.texto),
+      poner: nuevo => { PAR.borradorTexto = nuevo; pintarModulo(); } }),
     h('div', { clase: 'fila' },
       h('button', { clase: 'primario mini guardar-texto-guion', disabled: cambiado ? null : true,
         onclick: () => guardarGuionParrilla({ texto: PAR.borradorTexto }) }, 'Guardar el texto'),

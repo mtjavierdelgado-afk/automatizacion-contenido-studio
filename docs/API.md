@@ -44,7 +44,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/musica/presencia` | Cuánto se oye la música bajo la voz en este vídeo, y los niveles que hay. |
 | `PUT` | `/api/proyectos/{pid}/musica/presencia` | Fija cuánto se oye la música y, si el vídeo ya está montado, lo REMONTA. |
 | `POST` | `/api/proyectos/{pid}/ortografia/aplicar` | Pone los subtitulos corregidos: {cambios: {plano: texto}}. |
-| `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de |
+| `POST` | `/api/proyectos/{pid}/ortografia/descartar` | Lo que se deja SIN marcar al aplicar: {rid, ids: [...]}. Esos textos se |
+| `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video), de |
 | `GET` | `/api/proyectos/{pid}/ortografia/{rid}` | Como va la revision de ortografia, y lo que propone al terminar. |
 | `POST` | `/api/proyectos/{pid}/presets-canal/{preset_id}/aplicar` | Copia los valores del preset a los params de los pasos que toque. |
 | `GET` | `/api/proyectos/{pid}/previsualizacion` | Las piezas para ver el video sin montarlo. -> {escenas, audio, ...} |
@@ -407,6 +408,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/musica/buscar` | Temas de Jamendo por animo, sin video: el borrador de un video nuevo. |
 | `GET` | `/api/musica/escucha` | Pasa por aqui la escucha de un tema de Jamendo antes de elegirlo. |
 | `GET` | `/api/musica/propia/{archivo}` | Un tema tuyo del banco, para escucharlo. |
+| `POST` | `/api/ortografia/textos` | Revisa la ortografia de campos sueltos que se ven o se publican: {textos: |
+| `POST` | `/api/ortografia/textos/descartar` | Lo que se deja como estaba: {rid, ids: [...]}. No se vuelve a proponer. |
+| `GET` | `/api/ortografia/textos/{rid}` | Como va la revision de unos campos sueltos, y lo que propone al terminar. |
 | `GET` | `/api/sistema/estilos-perdidos` | Los videos que apuntan a imagenes de estilo que ya no estan. Solo mira. |
 | `GET` | `/api/sistema/guias` | Como rellenar cada campo de texto: plantilla, ejemplo y prompt para otra IA. |
 | `POST` | `/api/sistema/guias/{gid}/revisar` | Lanza la revision de un texto contra la guia de su campo. -> {id} |
@@ -422,4 +426,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**308 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**312 endpoints.** Escrito por `generar_api.py` desde `app.py`.

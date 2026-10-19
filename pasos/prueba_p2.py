@@ -98,9 +98,10 @@ def prueba_idiomas():
     # Sin aire entre bloques solo descuentan las PAUSAS DE BLOQUE que se preven
     # (la del gancho y la de cada cambio de tema: 0,9 s x 0,6 cada una), que la
     # voz mete igual con hueco 0. Antes del 16-10 no se contaban: 414, 460 y 153.
+    # Un minuto es un CORTO y prevé sus dos pausas, no tres: 148 -> 150 (18-10).
     igual(p2_brief.presupuesto_de(180, "es"), 409, "180 s en espanol = 409 palabras")
     igual(p2_brief.presupuesto_de(180, "en"), 454, "180 s en ingles = 454 palabras")
-    igual(p2_brief.presupuesto_de(60, "en"), 148, "60 s en ingles = 148 palabras")
+    igual(p2_brief.presupuesto_de(60, "en"), 150, "60 s en ingles = 150 palabras")
 
     # Y CON AIRE CABEN MENOS: el silencio entre bloques son segundos que no dice
     # nadie. Con 1 s de hueco y bloques de 30 palabras, 180 s pierden unos 6 s.
@@ -307,9 +308,43 @@ def prueba_pausas_en_la_horquilla():
         vuelta = cadencia.segundos_para(ficha["palabras"], "es", "normal", 1.0, 30)
         comprobar(abs(vuelta - segundos) < 1.0,
                   f"y segundos_para, la inversa, devuelve {vuelta:.1f} s")
-    igual(cadencia.pausas_previstas(120, 9), 4, "dos minutos: cuatro tramos (regla 11)")
+    igual(cadencia.pausas_previstas(180, 13), 4, "tres minutos: cuatro tramos (regla 11)")
     igual(cadencia.pausas_previstas(900, 66), 10, "quince minutos: diez, el tope")
     igual(cadencia.pausas_previstas(60, 2), 1, "nunca mas pausas que costuras")
+    # LOS CORTOS (18-10-2026): su guion es gancho -> caso -> cierre, o sea dos
+    # pausas de parada. Se escribe el guion con las pausas QUE DE VERDAD LLEVA,
+    # no con las que preve la cuenta: con la regla de los largos el video de un
+    # minuto salia medio segundo por debajo de lo pedido.
+    igual(getattr(cadencia, "DURACION_CORTA_S", None), p3_guion.DURACION_CORTA_S,
+          "la cadencia y el guion dicen lo mismo de hasta dónde es corto")
+    for segundos in (30, 60, 90, 120):
+        ficha = cadencia.palabras_para(segundos, "es", "normal", 1.0, 30)
+        bloques = ficha["bloques"]
+        textos = []
+        for i in range(bloques):
+            cuantas = ficha["palabras"] // bloques + (1 if i < ficha["palabras"] % bloques else 0)
+            texto = " ".join(["palabra"] * cuantas) + "."
+            # el gancho cierra con su pausa, y el caso con la suya
+            if i in (0, max(1, bloques - 2)) and i < bloques - 1:
+                texto += '<break time="900ms"/>'
+            textos.append(texto)
+        pausas = sum(1 for t in textos if "break" in t)
+        habla = ficha["palabras"] / ficha["cadencia_palabras_s"]
+        dura = habla + cadencia.aire_de(textos, 1.0)
+        comprobar(abs(dura - segundos) < 0.35,
+                  f"un corto de {segundos} s con sus {pausas} pausas reales dura "
+                  f"{dura:.2f} s")
+    # LOS SEGUNDOS DE LA HORQUILLA van con la estructura de lo PEDIDO, no con
+    # la de lo que sale: el minimo de un video de 130 s (largo) no puede contar
+    # las pausas de un corto por quedarse por debajo de 120 (revision 18-10).
+    ficha = cadencia.palabras_para(130, "es", "normal", 1.0, 30)
+    minimo = int(ficha["palabras"] * 0.7)
+    igual(cadencia.segundos_para(minimo, "es", "normal", 1.0, 30, objetivo_s=130),
+          cadencia.segundos_para(minimo, "es", "normal", 1.0, 30, objetivo_s=900),
+          "el mínimo de un vídeo de 130 s se cuenta como el de un largo")
+    comprobar(cadencia.segundos_para(minimo, "es", "normal", 1.0, 30, objetivo_s=130)
+              != cadencia.segundos_para(minimo, "es", "normal", 1.0, 30, objetivo_s=60),
+              "y no como el de un corto")
     defecto = p3_guion.PARAMS_POR_DEFECTO
     igual([defecto["pausa_gancho_ms"], defecto["pausa_seccion_ms"]],
           [int(cadencia.PAUSA_DE_BLOQUE_PREVISTA * 1000)] * 2,
@@ -329,7 +364,7 @@ def prueba_proyecto_viejo_sigue_listo(base):
     fabricar_ingesta(proyecto, estado)
     nueva = cadencia._aire_previsto
 
-    def vieja(_segundos, bloques, hueco):
+    def vieja(_segundos, bloques, hueco, _corto=None):
         return max(0.0, hueco - cadencia.PAUSA_ENTRE_BLOQUES) * max(0, int(bloques) - 1)
     params = {"instrucciones": "igual", "idioma_salida": "es", "duracion_objetivo_s": 240}
     estado.set_params("brief", params)

@@ -118,7 +118,7 @@ class SimuladoUploadPost:
     # ---------------------------------------------------------- publicar
 
     def publicar(self, perfil, redes, mp4, campos, cuando=None, zona="America/Lima",
-                 id_propio=None, ficheros=None):
+                 id_propio=None, ficheros=None, nombre_video=None):
         redes = [r for r in redes if r in REDES]
         if not redes:
             raise ErrorUploadPost("no hay ninguna red que publicar", 400)
@@ -145,7 +145,7 @@ class SimuladoUploadPost:
             datos["subidas"].append({
                 "id": id_propio, "perfil": perfil, "redes": redes,
                 "campos": campos, "cuando": cuando, "zona": zona,
-                "fichero": os.path.basename(mp4), "bytes": os.path.getsize(mp4),
+                "fichero": nombre_video or os.path.basename(mp4), "bytes": os.path.getsize(mp4),
                 "imagenes": {c: os.path.getsize(r) for c, r in (ficheros or [])
                              if r and os.path.isfile(r)}})
             datos["trabajos"][id_propio] = {

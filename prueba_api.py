@@ -4672,6 +4672,91 @@ def probar_turno_y_notas_de_otro_texto():
     igual(sin_nada.escrito, [], "ni que escribir")
 
 
+def probar_montaje_por_plano(cliente, carpeta):
+    """El movimiento y la 2.5D de UN plano (rama montaje-por-plano, 19-10-2026).
+
+    Elegirlo deja obsoleto ESE plano y ninguno más; devolverlo a «como el
+    vídeo» quita la clave y la firma de las capas vuelve a la de antes. Las
+    cartelas llevan siempre lo de siempre.
+    """
+    seccion("EL MONTAJE DE CADA PLANO: MOVIMIENTO Y 2.5D EN SU DIAPOSITIVA")
+    from nucleo.estado import Estado
+    from nucleo.proyecto import Proyecto, escribir_json
+
+    _r, datos = cliente.post("/api/proyectos", {"nombre": "Montaje por plano"})
+    pid = (datos.get("proyecto") or {}).get("id")
+    proyecto = Proyecto(os.path.join(carpeta, pid))
+    estado = Estado(proyecto)
+    escribir_json(os.path.join(proyecto.ruta_trabajo("assets"), "plan.json"), {
+        "escenas": [{"id": "S001", "t_in": 0.0, "t_out": 4.0, "duracion": 4.0, "narracion": "uno"},
+                    {"id": "S002", "t_in": 4.0, "t_out": 8.0, "duracion": 4.0, "narracion": "dos"},
+                    {"id": "S003", "t_in": 8.0, "t_out": 11.0, "duracion": 3.0, "narracion": "tres",
+                     "cartela": {"plantilla": "tesis", "fondo": "negro"}}],
+        "duracion_total": 11.0})
+    planos = ("escena:S001", "escena:S002", "escena:S003")
+    estado.set_params("assets", {"unidades": {u: {"direccion": "plano"} for u in planos}})
+    estado.completar("assets", {"plan": "plan.json"}, unidades={u: {"ok": 1} for u in planos})
+    estado.completar("callouts", {"movimiento": "movimiento.json"},
+                     unidades={u: {"ok": 1} for u in planos})
+
+    base = f"/api/proyectos/{pid}/planos"
+    respuesta, leido = cliente.get(f"{base}/montaje")
+    igual(respuesta.status_code, 200, "GET .../planos/montaje responde 200")
+    igual(leido.get("planos"), {}, "ningún plano tiene montaje propio al empezar")
+    igual(leido.get("planos_del_video"), ["S001", "S002", "S003"], "y trae los planos del vídeo")
+    igual(leido.get("no_aplica"), ["S003"], "la cartela no admite movimiento propio")
+    ok("quieto" in (leido.get("niveles") or []), "y se puede elegir «quieta»")
+    _r, callouts = cliente.get(f"/api/proyectos/{pid}/pasos/callouts")
+    firma_antes = callouts.get("firma")
+    sucias_antes = set(callouts.get("unidades_obsoletas") or [])
+    igual(sucias_antes, set(), "las capas empiezan al día")
+
+    respuesta, puesto = cliente.put(f"{base}/S001/montaje", {"movimiento": "quieto"})
+    igual(respuesta.status_code, 200, f"PUT .../planos/S001/montaje responde 200: {puesto}")
+    ok(puesto.get("cambiado") is True, "y dice que cambió")
+    igual((puesto.get("planos") or {}).get("S001"), {"movimiento": "quieto"},
+          "y lo devuelve en la lista de planos")
+    _r, callouts = cliente.get(f"/api/proyectos/{pid}/pasos/callouts")
+    params = callouts.get("params") or {}
+    igual(((params.get("unidades") or {}).get("escena:S001") or {}).get("montaje"),
+          {"movimiento": "quieto"}, "se guarda en la unidad de ese plano, solo lo elegido")
+    ok("montaje" not in params, "y no toca el montaje del vídeo")
+    igual(set(callouts.get("unidades_obsoletas") or []), {"escena:S001"},
+          "deja obsoleto ESE plano y ninguno más")
+    _r, assets = cliente.get(f"/api/proyectos/{pid}/pasos/assets")
+    igual(assets.get("unidades_obsoletas") or [], [], "y ni una imagen")
+
+    respuesta, otra = cliente.put(f"{base}/S001/montaje", {"movimiento": "quieto"})
+    ok(otra.get("cambiado") is False, "poner lo que ya está no cambia nada")
+    respuesta, _d = cliente.put(f"{base}/S001/montaje", {"movimiento": "loco"})
+    igual(respuesta.status_code, 400, "un movimiento que no existe da 400")
+    respuesta, _d = cliente.put(f"{base}/S001/montaje", {"profundidad": "si"})
+    igual(respuesta.status_code, 400, "una 2.5D que no es sí/no da 400")
+    respuesta, _d = cliente.put(f"{base}/S999/montaje", {"movimiento": "vivo"})
+    igual(respuesta.status_code, 404, "un plano que no existe da 404")
+    respuesta, _d = cliente.put(f"{base}/S003/montaje", {"movimiento": "vivo"})
+    igual(respuesta.status_code, 400, "S003 es una cartela: no se le cambia la cámara")
+    respuesta, _d = cliente.put(f"{base}/S003/montaje", {"movimiento": None})
+    igual(respuesta.status_code, 200, "pero devolverla a «como el vídeo» siempre se puede")
+    respuesta, _d = cliente.put(f"{base}/S002/montaje", {"profundidad": True})
+    if (leido.get("profundidad") or {}).get("disponible"):
+        igual(respuesta.status_code, 200, "con modelo, la 2.5D de un plano se enciende")
+        cliente.put(f"{base}/S002/montaje", {"profundidad": None})
+    else:
+        igual(respuesta.status_code, 409, "sin modelo, la 2.5D de un plano no se puede encender")
+
+    respuesta, vuelta = cliente.put(f"{base}/S001/montaje", {"movimiento": None,
+                                                             "profundidad": None})
+    igual(respuesta.status_code, 200, "volver a «como el vídeo» responde 200")
+    igual(vuelta.get("planos"), {}, "y el plano ya no tiene nada propio")
+    _r, callouts = cliente.get(f"/api/proyectos/{pid}/pasos/callouts")
+    igual(((callouts.get("params") or {}).get("unidades") or {}), {},
+          "la unidad vacía se quita entera (regla 1)")
+    igual(callouts.get("firma"), firma_antes, "y la firma de las capas vuelve a la de antes")
+    igual(set(callouts.get("unidades_obsoletas") or []), set(),
+          "y el plano deja de estar obsoleto")
+
+
 def probar_montaje(cliente):
     """El montaje (rama montaje-movimiento, 18-10-2026).
 
@@ -6087,6 +6172,7 @@ def main():
         probar_sonido_propio_y_cola(cliente)
         probar_audio_y_musica_de_la_previa(cliente, carpeta)
         probar_taller_oculto(cliente)
+        probar_montaje_por_plano(cliente, carpeta)
         probar_cartelas_y_transiciones(cliente, pid, os.path.join(carpeta, pid))
         probar_direccion(cliente, pid)
         probar_motor_del_plan(cliente, pid)

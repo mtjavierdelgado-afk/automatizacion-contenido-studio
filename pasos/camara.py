@@ -170,6 +170,93 @@ def ajustes_de(montaje):
     return AJUSTES_NIVEL.get(normalizar_montaje(montaje)["movimiento"])
 
 
+# ------------------------------------------------------- el montaje de un plano
+#
+# EL MOVIMIENTO Y LA 2.5D DE CADA PLANO (19-10-2026, rama montaje-por-plano).
+# El video elige su montaje; un plano puede llevar el suyo, elegido en su
+# diapositiva de Imagenes. Vive en la UNIDAD de callouts
+# (`unidades["escena:S013"]["montaje"]`), fuera de la firma global: cambiar el de
+# un plano deja obsoleto ESE plano y ninguno mas, y no toca ni una imagen.
+#
+# Solo las claves que alguien eligio: un plano sin bloque --o con uno vacio--
+# sigue al video y sale IDENTICO (regla 1 de CLAUDE.md). El gancho, las cifras,
+# la barra y los subtitulos son del video entero y aqui no se tocan; las
+# transiciones (los cortes secos de «dinamico») tambien siguen al video.
+
+#: Lo que se puede elegir para un plano. «quieto» solo existe aqui: un video
+#: entero quieto se lee como una presentacion, pero una imagen quieta entre
+#: otras que se mueven es un respiro (un primer plano, un texto dibujado).
+NIVELES_PLANO = ("quieto",) + NIVELES
+
+#: Cuanto cierra el encuadre de un plano quieto respecto a la imagen entera. El
+#: movimiento de siempre va del 100 % al 95 %: quieto se queda en medio, para
+#: que el plano no salte de tamano respecto a sus vecinos.
+ZOOM_QUIETO = 1.025
+
+
+def montaje_propio(crudo, estricto=False):
+    """Lo que ESE plano eligio, validado: solo las claves elegidas. -> dict
+
+    `crudo` es el `montaje` de la unidad de callouts. Con `estricto`, un valor
+    que no existe es ValueError (la API); sin el, se ignora (lo guardado). Un
+    dict vacio quiere decir «como el video».
+    """
+    if not isinstance(crudo, dict):
+        if crudo not in (None, "") and estricto:
+            raise ValueError("el montaje del plano tiene que ser un objeto")
+        return {}
+    salida = {}
+    if crudo.get("movimiento") not in (None, ""):
+        nivel = str(crudo["movimiento"]).strip().lower()
+        nivel = {"dinámico": "dinamico", "quieta": "quieto"}.get(nivel, nivel)
+        if nivel in NIVELES_PLANO:
+            salida["movimiento"] = nivel
+        elif estricto:
+            raise ValueError("movimiento: " + ", ".join(NIVELES_PLANO))
+    if crudo.get("profundidad") is not None:
+        valor = crudo["profundidad"]
+        if isinstance(valor, bool):
+            salida["profundidad"] = valor
+        elif estricto:
+            raise ValueError("profundidad: true, false o null")
+    return salida
+
+
+def montaje_del_plano(montaje_video, propio):
+    """El montaje con el que se mueve ESE plano: el del video con lo suyo encima.
+
+    Sin nada propio devuelve el del video tal cual (el mismo dict normalizado),
+    asi que un plano que nadie toco sale exactamente como antes.
+    """
+    completo = normalizar_montaje(montaje_video)
+    if not propio:
+        return completo
+    return dict(completo, **{k: v for k, v in propio.items()
+                             if k in ("movimiento", "profundidad")})
+
+
+def mueve_distinto(montaje):
+    """Si este montaje (de plano) pide calcular un trayecto propio."""
+    return (str((montaje or {}).get("movimiento")) == "quieto"
+            or not es_de_siempre(montaje))
+
+
+def _trayecto_quieto(duracion, base):
+    """Un plano QUIETO: el mismo encuadre de principio a fin, sin golpes.
+
+    Se queda donde el movimiento de siempre encuadraria la mitad de su
+    recorrido (su centro, su ancla), para que el sujeto siga en cuadro.
+    """
+    centro = (0.5, 0.5)
+    propio = (base or {}).get("centro")
+    if propio and len(propio) == 2 and all(es_finito(v) for v in propio):
+        centro = (float(propio[0]), float(propio[1]))
+    caja = _caja(centro, ZOOM_QUIETO)
+    return {"tramos": [{"t0": 0.0, "t1": round(duracion, 3), "ini": caja,
+                        "fin": list(caja), "curva": "suave"}],
+            "golpes": []}
+
+
 # --------------------------------------------------------------- la ventana
 
 def _caja(centro, escala):
@@ -417,6 +504,9 @@ def trayecto_de(escena, indice, montaje, semilla=0, cifras=None, gancho=False,
         return None
     if duracion <= 0.05:
         return None
+    if str((montaje or {}).get("movimiento")) == "quieto":
+        # un plano QUIETO (elegido en su diapositiva): ni recorrido ni gancho
+        return _trayecto_quieto(duracion, base)
     if not ajustes:
         # MOVIMIENTO DE SIEMPRE, PERO CON GANCHO: el primer plano lleva su zoom
         # de siempre (el del plan) y delante la entrada rapida. Los demas

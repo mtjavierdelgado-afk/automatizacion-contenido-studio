@@ -1627,6 +1627,15 @@ def _sin_callout(p, uid):
     return bool(bloque.get("sin_callout")) if isinstance(bloque, dict) else False
 
 
+def montaje_propio_de(p, uid):
+    """El movimiento y la 2.5D que se eligieron para ESE plano en su
+    diapositiva (`camara.montaje_propio`), o {} si sigue al video. Vive en la
+    unidad, como el resto de decisiones por plano: cambiarlo solo deja
+    obsoleto ese plano."""
+    bloque = (p.get("unidades") or {}).get(uid)
+    return camara.montaje_propio(bloque.get("montaje")) if isinstance(bloque, dict) else {}
+
+
 def capa_vacia(tamano=TAMANO):
     """Capa sin nada. Un SVG valido y del tamano del lienzo, no un fichero vacio.
 
@@ -1916,18 +1925,22 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
         cifras = (cifras_clave(escena, p.get("idioma"))
                   if montaje["cifras"] and not cartelas.es_cartela(escena)
                   and not escena.get("capitulo_svg") else [])
-        if (con_montaje and not cartelas.sobre_imagen(escena)
+        # EL MONTAJE DE ESTE PLANO (19-10-2026): el del video, con lo que se
+        # eligio en su diapositiva encima. Sin nada elegido es el del video tal
+        # cual y el plano sale como antes.
+        del_plano = camara.montaje_del_plano(montaje, montaje_propio_de(p, uid))
+        if (camara.mueve_distinto(del_plano) and not cartelas.sobre_imagen(escena)
                 and not escena.get("capitulo_svg")):
             # LA CAMARA DEL MONTAJE. No en las cartelas sobre imagen ni en las
             # cabeceras: su texto viaja DENTRO del zoom, y un reencuadre o un
             # golpe lo moverian por la pantalla. Esas llevan lo de siempre.
             trayecto = camara.trayecto_de(
-                escena, indice, montaje, semilla=semilla,
+                escena, indice, del_plano, semilla=semilla,
                 cifras=[c["palabra"] for c in cifras],
                 gancho=montaje["gancho"], base=entrada)
             if trayecto:
                 entrada["trayecto"] = trayecto
-        prof = camara.profundidad_de(montaje, indice)
+        prof = camara.profundidad_de(del_plano, indice)
         if (prof and not cartelas.sobre_imagen(escena)
                 and not escena.get("capitulo_svg")):
             # LA PROFUNDIDAD 2.5D. Tampoco en cartelas ni cabeceras, por lo

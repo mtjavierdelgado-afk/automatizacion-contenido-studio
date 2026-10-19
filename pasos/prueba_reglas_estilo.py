@@ -175,6 +175,7 @@ def prueba_afinar():
     def doble(instruccion, **kw):
         pedido["i"] = instruccion
         return json.dumps({"nombre": "Miran la pantalla", "en": "Players look at the screen.",
+                           "en_es": "Los jugadores miran la pantalla.",
                            "palabras": ["jugadores"], "gravedad": "alta"}), {}
     rs.cli_claude.ejecutar = doble
     try:
@@ -183,6 +184,9 @@ def prueba_afinar():
               ("Miran la pantalla", "Players look at the screen.", ["jugadores"], "alta"),
               "la propuesta, validada")
         ok("que los jugadores miren la tele" in pedido["i"], "con el texto de la persona")
+        igual(p.get("en_es"), "Los jugadores miran la pantalla.", "con su traduccion para leerla")
+        ok("en_es" not in rs.normalizar([{"texto": "x", "en_es": "y"}])[0],
+           "sin version afinada no se guarda traduccion")
         try:
             rs.afinar("  ")
             ok(False, "sin texto no se afina")

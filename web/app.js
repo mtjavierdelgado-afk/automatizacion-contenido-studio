@@ -13219,7 +13219,7 @@ async function volcarReglasLight() {
     .map(r => ({
       id: r.id, nombre: r.nombre || '', texto: r.texto, gravedad: r.gravedad || 'media',
       palabras: String(r.palabras || '').split(',').map(p => p.trim()).filter(Boolean),
-      en: r.en || '',
+      en: r.en || '', en_es: r.en ? (r.en_es || '') : '',
     }));
   REGLAS_LIGHT.enVuelo = true;
   REGLAS_LIGHT.estado = 'guardando…';
@@ -13295,6 +13295,7 @@ function aceptarPropuestaLight(regla) {
   if (!p) return;
   regla.nombre = p.nombre || regla.nombre;
   regla.en = p.en || '';
+  regla.en_es = p.en_es || '';
   regla.palabras = (p.palabras || []).join(', ');
   regla.gravedad = p.gravedad || regla.gravedad;
   regla.enVieja = false;
@@ -13309,7 +13310,9 @@ function tarjetaReglaLight(regla, i) {
     /* LA VERSIÓN AFINADA ERA DE TU TEXTO DE ANTES: si lo cambias, deja de
        usarse (si no, las imágenes seguirían la regla vieja y el revisor
        comprobaría la nueva). Se dice, y se puede volver a afinar. */
-    if (clave === 'texto' && regla.en) { regla.en = ''; regla.enVieja = true; }
+    if (clave === 'texto' && regla.en) { regla.en = ''; regla.en_es = ''; regla.enVieja = true; }
+    // la traducción era de la versión afinada de antes: si la tocas a mano, ya no lo es
+    if (clave === 'en') regla.en_es = '';
     guardarReglasLight();
   };
   const texto = h('textarea', {
@@ -13365,20 +13368,26 @@ function tarjetaReglaLight(regla, i) {
     en.dataset.foco = `regla:${regla.id}:en`;
     return h('div', { clase: 'regla-estilo-en' },
       h('div', { clase: 'fila' },
-        h('span', { clase: 'meta' }, 'Lo que lee la IA de imágenes (afinada, en inglés)'),
+        h('span', { clase: 'meta' }, 'Lo que lee la IA de imágenes (afinada; va en inglés '
+          + 'porque es como mejor la sigue)'),
         h('span', { clase: 'crece' }),
         h('button', {
           clase: 'mini fantasma', title: 'Volver a usar tu texto tal cual',
-          onclick: () => { regla.en = ''; pintarLight(); volcarReglasLight(); },
+          onclick: () => { regla.en = ''; regla.en_es = ''; pintarLight(); volcarReglasLight(); },
         }, 'Usar mi texto')),
-      en);
+      en,
+      regla.en_es ? h('div', { clase: 'meta regla-estilo-traduccion' },
+        h('strong', {}, 'En español: '), regla.en_es) : null);
   }));
   const p = REGLAS_LIGHT.propuestas[regla.id];
   if (p) {
     tarjeta.appendChild(h('div', { clase: 'regla-estilo-propuesta' },
       h('strong', {}, 'Propuesta de Claude'),
       h('div', {}, h('span', { clase: 'meta' }, 'Nombre: '), p.nombre || '—'),
-      h('div', {}, h('span', { clase: 'meta' }, 'Para la IA: '), p.en || '—'),
+      h('div', {}, h('span', { clase: 'meta' }, 'Lo que leerá la IA, en español: '),
+        p.en_es || '—'),
+      h('details', {}, h('summary', { clase: 'meta' }, 'Ver el texto exacto en inglés'),
+        h('div', {}, p.en || '—')),
       h('div', {}, h('span', { clase: 'meta' }, 'Solo si habla de: '),
         (p.palabras || []).join(', ') || 'todos los planos'),
       h('div', {}, h('span', { clase: 'meta' }, 'Gravedad: '), p.gravedad || 'media'),

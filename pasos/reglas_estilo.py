@@ -126,6 +126,10 @@ def normalizar(reglas):
         en = _limpio(cruda.get("en"), MAX_EN)
         if en:
             regla["en"] = en
+            # lo mismo en espanol, SOLO para leerlo en pantalla: la IA lee `en`
+            es = _limpio(cruda.get("en_es"), MAX_EN)
+            if es:
+                regla["en_es"] = es
         salida.append(regla)
     if len(salida) > MAX_REGLAS:
         raise ReglaInvalida(f"como mucho {MAX_REGLAS} reglas por estilo: una lista "
@@ -222,6 +226,9 @@ Devuelve un objeto JSON con:
   "palabras"  de 0 a 8 palabras en espanol que, si aparecen en lo que cuenta
               un plano, hacen que la regla aplique (por ejemplo: jugadores,
               mandos, partida). Lista vacia si debe aplicar siempre.
+  "en_es"     EXACTAMENTE lo mismo que "en", traducido al espanol, frase por
+              frase, sin anadir ni quitar nada: es para que la persona sepa
+              que va a leer la IA.
   "gravedad"  "alta", "media" o "baja": cuanto se nota si se rompe.
 """
 
@@ -256,7 +263,7 @@ def afinar(texto, nombre="", palabras=(), cwd=None):
                          "palabras": datos.get("palabras") or [],
                          "gravedad": datos.get("gravedad") if datos.get("gravedad")
                          in GRAVEDADES else "media",
-                         "en": datos.get("en")}])
+                         "en": datos.get("en"), "en_es": datos.get("en_es")}])
     if not regla or not regla[0].get("en"):
         raise RuntimeError("Claude no devolvió la regla afinada")
     salida = {k: v for k, v in regla[0].items() if k != "id"}

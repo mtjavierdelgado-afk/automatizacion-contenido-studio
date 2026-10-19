@@ -16647,10 +16647,15 @@ function esCortoElEncargo(e, datos) {
  * de ese plano (`PUT /planos/{sid}/montaje`), así que solo deja pendiente ESE
  * plano: se aplica al montar, gratis. Las cartelas y las cabeceras llevan
  * siempre lo de siempre (su texto va con la imagen). */
-const MONTAJE_PLANOS = { pid: '', datos: null, cargando: false, error: '', guardando: '' };
+const MONTAJE_PLANOS = { pid: '', ficha: null, datos: null, cargando: false, error: '', guardando: '' };
 
-const NIVELES_DEL_PLANO = [['quieto', 'Quieta', 'La imagen no se mueve: un respiro entre planos que se mueven.']]
-  .concat(NIVELES_MOVIMIENTO);
+/* Con su propia ayuda: los cortes secos de «Dinámico» son del vídeo entero,
+   no de una imagen suelta. */
+const NIVELES_DEL_PLANO = [
+  ['quieto', 'Quieta', 'La imagen no se mueve (ni la 2.5D, salvo que la pidas aquí). Un respiro entre planos que se mueven. En la primera imagen, sin la entrada rápida del gancho.'],
+  ['sobrio', 'Sobrio', 'Un acercamiento lento, casi quieto.'],
+  ['vivo', 'Vivo', 'El zoom se nota, con paneo; si es larga, cambia de encuadre a mitad.'],
+  ['dinamico', 'Dinámico', 'Como vivo, más un golpe de zoom en la palabra clave.']];
 
 function cargarMontajePlanos(pid) {
   if (MONTAJE_PLANOS.cargando) return;
@@ -16659,7 +16664,7 @@ function cargarMontajePlanos(pid) {
   pedir(`${API.proyecto(pid)}/planos/montaje`)
     .then(d => { if (MONTAJE_PLANOS.pid === pid) MONTAJE_PLANOS.datos = d; })
     .catch(err => { if (MONTAJE_PLANOS.pid === pid) MONTAJE_PLANOS.error = err.message || 'no se ha podido leer'; })
-    .then(() => { MONTAJE_PLANOS.cargando = false; repintarVideo(); });
+    .then(() => { if (MONTAJE_PLANOS.pid === pid) MONTAJE_PLANOS.cargando = false; repintarVideo(); });
 }
 
 async function cambiarMontajeDelPlano(pid, sid, cambio) {
@@ -16684,8 +16689,12 @@ async function cambiarMontajeDelPlano(pid, sid, cambio) {
 function montajeDelPlano(e) {
   const v = videoAbierto();
   if (!v || !e) return null;
-  if (MONTAJE_PLANOS.pid !== v.pid) {
-    Object.assign(MONTAJE_PLANOS, { pid: v.pid, datos: null, cargando: false, error: '', guardando: '' });
+  /* SE VUELVE A PEDIR CADA VEZ QUE CAMBIAN LAS DIAPOSITIVAS (otro vídeo, o el
+     mismo al volver a Imágenes): el montaje del vídeo, las cartelas o el
+     modelo de la 2.5D pueden haber cambiado entretanto (revisión 19-10). */
+  if (MONTAJE_PLANOS.pid !== v.pid || MONTAJE_PLANOS.ficha !== PREVIA.ficha) {
+    Object.assign(MONTAJE_PLANOS, { pid: v.pid, ficha: PREVIA.ficha, datos: null,
+      cargando: false, error: '', guardando: '' });
   }
   const d = MONTAJE_PLANOS.datos;
   if (!d) {
@@ -16775,6 +16784,7 @@ function editorMontaje(modo, est, repintar) {
       if (cambios) cuerpo.montaje = cambios;
       if (transiciones) cuerpo.transiciones = transiciones;
       est.montaje = await pedir(`${API.proyecto(modo.pid)}/montaje`, { method: 'PUT', cuerpo });
+      MONTAJE_PLANOS.datos = null;   // «Como el vídeo (…)» dice el de ahora
     } catch (err) { toast(err.message, true); }
     repintar();
   };

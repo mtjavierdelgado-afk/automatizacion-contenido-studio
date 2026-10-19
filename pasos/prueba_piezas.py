@@ -5629,7 +5629,10 @@ def prueba_montaje_por_plano():
     igual(camara.profundidad_de(camara.montaje_del_plano(None, {"profundidad": True,
                                                                 "movimiento": "quieto"}), 1),
           camara.profundidad_de({"movimiento": "sobrio", "profundidad": True}, 1),
-          "en un plano quieto se mueve como en sobrio (lo más suave)")
+          "en un plano quieto con la 2.5D pedida, se mueve como en sobrio (lo más suave)")
+    igual(camara.profundidad_de(camara.montaje_del_plano(
+        {"movimiento": "vivo", "profundidad": True}, {"movimiento": "quieto"}), 0), None,
+        "y «Quieta» en un vídeo con 2.5D no la lleva: quieta es quieta (revisión 19-10)")
 
 
 def prueba_profundidad_25d():

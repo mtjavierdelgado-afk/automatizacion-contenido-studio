@@ -4696,6 +4696,9 @@ def probar_montaje_por_plano(cliente, carpeta):
     planos = ("escena:S001", "escena:S002", "escena:S003")
     estado.set_params("assets", {"unidades": {u: {"direccion": "plano"} for u in planos}})
     estado.completar("assets", {"plan": "plan.json"}, unidades={u: {"ok": 1} for u in planos})
+    # S002 ya tiene otras decisiones por plano: tienen que sobrevivir
+    estado.set_params("callouts", {"unidades": {"escena:S002": {"evitar": [{"x": 1}],
+                                                               "sin_callout": True}}})
     estado.completar("callouts", {"movimiento": "movimiento.json"},
                      unidades={u: {"ok": 1} for u in planos})
 
@@ -4741,17 +4744,44 @@ def probar_montaje_por_plano(cliente, carpeta):
     respuesta, _d = cliente.put(f"{base}/S002/montaje", {"profundidad": True})
     if (leido.get("profundidad") or {}).get("disponible"):
         igual(respuesta.status_code, 200, "con modelo, la 2.5D de un plano se enciende")
+        _r, cal = cliente.get(f"/api/proyectos/{pid}/pasos/callouts")
+        igual(((cal.get("params") or {}).get("unidades") or {}).get("escena:S002"),
+              {"evitar": [{"x": 1}], "sin_callout": True, "montaje": {"profundidad": True}},
+              "y se suma a lo que ese plano ya tenía, sin borrarlo")
         cliente.put(f"{base}/S002/montaje", {"profundidad": None})
     else:
         igual(respuesta.status_code, 409, "sin modelo, la 2.5D de un plano no se puede encender")
+
+    # UN VÍDEO DONDE NADIE DECLARA LOS PLANOS: elegir lo declara, y quitarlo lo
+    # deja exactamente como estaba
+    _r, d2 = cliente.post("/api/proyectos", {"nombre": "Montaje por plano sin unidades"})
+    pid2 = (d2.get("proyecto") or {}).get("id")
+    p2 = Proyecto(os.path.join(carpeta, pid2))
+    e2 = Estado(p2)
+    escribir_json(os.path.join(p2.ruta_trabajo("assets"), "plan.json"), {
+        "escenas": [{"id": "S001", "t_in": 0.0, "t_out": 4.0, "duracion": 4.0, "narracion": "uno"}],
+        "duracion_total": 4.0})
+    e2.completar("assets", {"plan": "plan.json"})
+    e2.completar("callouts", {"movimiento": "movimiento.json"})
+    _r, c2 = cliente.get(f"/api/proyectos/{pid2}/pasos/callouts")
+    firma2, estado2 = c2.get("firma"), c2.get("estado")
+    respuesta, _d = cliente.put(f"/api/proyectos/{pid2}/planos/S001/montaje", {"movimiento": "vivo"})
+    igual(respuesta.status_code, 200, "en un vídeo sin unidades también se puede elegir")
+    _r, c2 = cliente.get(f"/api/proyectos/{pid2}/pasos/callouts")
+    igual(c2.get("unidades_obsoletas"), ["escena:S001"], "y queda pendiente ese plano")
+    cliente.put(f"/api/proyectos/{pid2}/planos/S001/montaje", {"movimiento": None})
+    _r, c2 = cliente.get(f"/api/proyectos/{pid2}/pasos/callouts")
+    igual((c2.get("firma"), c2.get("estado")), (firma2, estado2),
+          "quitarlo deja la firma y el estado como estaban")
 
     respuesta, vuelta = cliente.put(f"{base}/S001/montaje", {"movimiento": None,
                                                              "profundidad": None})
     igual(respuesta.status_code, 200, "volver a «como el vídeo» responde 200")
     igual(vuelta.get("planos"), {}, "y el plano ya no tiene nada propio")
     _r, callouts = cliente.get(f"/api/proyectos/{pid}/pasos/callouts")
-    igual(((callouts.get("params") or {}).get("unidades") or {}), {},
-          "la unidad vacía se quita entera (regla 1)")
+    igual(((callouts.get("params") or {}).get("unidades") or {}),
+          {"escena:S002": {"evitar": [{"x": 1}], "sin_callout": True}},
+          "la unidad vacía se quita entera (regla 1) y las otras decisiones siguen")
     igual(callouts.get("firma"), firma_antes, "y la firma de las capas vuelve a la de antes")
     igual(set(callouts.get("unidades_obsoletas") or []), set(),
           "y el plano deja de estar obsoleto")

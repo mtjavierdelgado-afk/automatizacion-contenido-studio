@@ -231,8 +231,14 @@ def montaje_del_plano(montaje_video, propio):
     completo = normalizar_montaje(montaje_video)
     if not propio:
         return completo
-    return dict(completo, **{k: v for k, v in propio.items()
-                             if k in ("movimiento", "profundidad")})
+    salida = dict(completo, **{k: v for k, v in propio.items()
+                               if k in ("movimiento", "profundidad")})
+    # QUIETA ES QUIETA (revision 19-10): la 2.5D tambien desplaza la imagen, asi
+    # que en un video con 2.5D una imagen «quieta» seguiria moviendose. Solo la
+    # lleva si se pidio en ESE plano.
+    if propio.get("movimiento") == "quieto" and "profundidad" not in propio:
+        salida["profundidad"] = False
+    return salida
 
 
 def mueve_distinto(montaje):

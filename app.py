@@ -8191,16 +8191,25 @@ def cambiar_montaje_de_plano(pid: str, sid: str, cuerpo: dict = Body(default=Non
     if sid in _planos_sin_montaje_propio(plan) and pedido:
         raise ErrorApi(400, "este plano es una cartela o una cabecera: su texto va con la imagen "
                             "y no se le puede cambiar el movimiento")
-    if pedido.get("profundidad") and not PASOS_MODULOS.profundidad.disponible()[0]:
+    uid = f"escena:{sid}"
+    previo = (ctx.estado.params("callouts") or {}).get("unidades") or {}
+    ya_tenia = camara.montaje_propio((previo.get(uid) or {}).get("montaje")
+                                     if isinstance(previo.get(uid), dict) else None)
+    # solo al ENCENDERLA: un plano que ya la lleva (y un modelo que se fue) no
+    # puede quedarse sin poder cambiar su movimiento
+    if (pedido.get("profundidad") and not ya_tenia.get("profundidad")
+            and not PASOS_MODULOS.profundidad.disponible()[0]):
         raise ErrorApi(409, "la profundidad 2.5D no está disponible: "
                             + PASOS_MODULOS.profundidad.disponible()[1])
     if _trabajo_que_toca(ctx, ("callouts", "render")):
         raise ErrorApi(409, "el vídeo se está montando ahora: cámbialo cuando termine")
-    uid = f"escena:{sid}"
     with ctx.estado._lock:
         params = copy.deepcopy(ctx.estado.params("callouts") or {})
         unidades = params.get("unidades") if isinstance(params.get("unidades"), dict) else {}
         bloque = dict(unidades.get(uid)) if isinstance(unidades.get(uid), dict) else {}
+        # un bloque que YA existia (aunque vacio) se queda: quitarlo moveria la
+        # firma de ese plano sin que nadie lo pidiera
+        existia = isinstance(unidades.get(uid), dict) and "montaje" not in unidades[uid]
         antes = camara.montaje_propio(bloque.get("montaje"))
         cambiado = antes != pedido or (bool(pedido) and bloque.get("montaje") != pedido)
         if cambiado:
@@ -8208,7 +8217,7 @@ def cambiar_montaje_de_plano(pid: str, sid: str, cuerpo: dict = Body(default=Non
                 bloque["montaje"] = pedido
             else:
                 bloque.pop("montaje", None)
-            if bloque:
+            if bloque or existia:
                 unidades[uid] = bloque
             else:
                 unidades.pop(uid, None)

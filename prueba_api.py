@@ -5798,6 +5798,235 @@ def probar_que_lo_lento_no_para_el_servicio():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_cancelar_en_el_taller():
+    """CANCELAR Y VOLVER A PULSAR EN EL TALLER DE ESTILOS (18-10-2026).
+
+    Lo que vio el dueño: cancelar un «Rehacer» y, al rehacer otro estilo,
+    «este estilo se está generando». El 409 era un doble toque (el reparto de
+    la frase tarda y la pantalla no cambiaba); la cancelacion, ademas, no
+    cortaba la guia que esperaba al CLI. Aqui, EN ESTE PROCESO y con dobles:
+
+      - un doble toque da 409 ANTES de repartir otra vez con Claude;
+      - la guia que espera «al CLI» se corta en el acto y acaba cancelada;
+      - lo que el reparto escribio en el taller vuelve a como estaba;
+      - volver a pulsar mientras se cancela dice eso, y con que trabajo;
+      - un estilo no bloquea a otro, ni una escucha de voz a un «Rehacer».
+    """
+    seccion("CANCELAR Y VOLVER A PULSAR EN EL TALLER DE ESTILOS")
+    import threading                                          # noqa: PLC0415
+    import types                                              # noqa: PLC0415
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import bitacora as BITACORA                   # noqa: PLC0415
+
+    presets = servidor.PASOS_MODULOS.presets_canal
+    base = tempfile.mkdtemp(prefix="estudio_cancelar_")
+    raiz_antes = servidor.raiz_proyectos()
+    guardado = {"FICHERO": presets.FICHERO, "BANCO": presets.BANCO,
+                "global": BITACORA.RUTA_GLOBAL,
+                "hace": dict(servidor._LIGHT_QUE_HACE),
+                "congelar": servidor._congelar_preset,
+                "enrutar": servidor._enrutar_estilo,
+                "registrar": servidor._registrar_trabajo}
+    presets.FICHERO = os.path.join(base, "_presets.json")
+    presets.BANCO = os.path.join(base, "_banco_presets")
+    BITACORA.RUTA_GLOBAL = os.path.join(base, "_bitacora_global.jsonl")
+    servidor.fijar_raiz_proyectos(base)
+
+    repartos = []
+
+    def repartir(frase, **_k):
+        repartos.append(frase)
+        time.sleep(1.5)                       # Claude leyendo la frase
+        return {"tareas": ("guia", "grafismo", "muestra"),
+                "params": {"callouts": {"diseno": "sobrio"}},
+                "laminas": {}, "resumen": "se rehace la guía"}
+
+    modo = {"guia": "cli"}
+    soltar = {}
+
+    def guia(avisar, ctx, encargo):
+        avisar(0.0, "")
+        if modo["guia"] == "rapida":
+            pass
+        elif modo["guia"] == "cli":
+            # como el CLI: se registra para que lo corten, y no vuelve a avisar
+            # hasta que «contesta»
+            evento = threading.Event()
+            soltar[ctx.id] = evento
+            avisar.al_cancelar(evento.set)
+            evento.wait(20)
+        else:
+            time.sleep(1.0)                   # sin registrarse: solo la marca
+        avisar(0.5, "la guia contesto")
+        return {}
+
+    servidor._LIGHT_QUE_HACE["guia"] = guia
+    for tarea in ("referencias", "grafismo", "muestra"):
+        servidor._LIGHT_QUE_HACE[tarea] = lambda avisar, ctx, encargo: avisar(1.0, "") or {}
+    servidor._congelar_preset = lambda ctx, encargo, preset_id=None: {
+        "id": preset_id, "nombre": "x"}
+    servidor._enrutar_estilo = lambda: types.SimpleNamespace(repartir=repartir)
+
+    def estilo(nombre):
+        servidor.crear_proyecto({"nombre": f"taller {nombre}"})
+        tid = servidor.identificador(f"taller {nombre}")
+        ctx = servidor.contexto(tid)
+        ctx.proyecto.config[servidor.CONFIG_TALLER] = True
+        ctx.proyecto.guardar_config()
+        ctx.estado.actualizar_params("callouts", {"diseno": "clasico"})
+        ficha = presets.guardar("canal", nombre, {
+            "guion": {"idiomas_salida": ["es"]},
+            "origen": {"estilo_prompt": "dibujo plano",
+                       "estilo_imagenes": ["01_a.png", "02_b.png", "03_c.png"],
+                       "tono_prompt": "serio pero cercano",
+                       "voz_prompt": "grave y pausada", "taller": tid}})
+        return ficha["id"], ctx
+
+    def pulsar(preset, salida, clave):
+        try:
+            datos = servidor.regenerar_preset_light(
+                preset, {"parte": "estilo", "peticion": "más sobrio"})
+            salida[clave] = (202, datos.get("trabajo_id"), {})
+        except servidor.ErrorApi as fallo:
+            salida[clave] = (fallo.codigo, fallo.mensaje, fallo.extra)
+
+    try:
+        pa, ctxa = estilo("Estilo A")
+        pb, ctxb = estilo("Estilo B")
+
+        # ---- el doble toque: el segundo, 409 ANTES de repartir otra vez
+        respuestas = {}
+        uno = threading.Thread(target=pulsar, args=(pb, respuestas, 1))
+        uno.start()
+        time.sleep(0.3)
+        dos = threading.Thread(target=pulsar, args=(pb, respuestas, 2))
+        dos.start()
+        uno.join(20)
+        dos.join(20)
+        igual(respuestas[1][0], 202, "el primer toque lanza el «Rehacer»")
+        primero_b = respuestas[1][1]
+        igual(respuestas[2][0], 409, "el segundo toque contesta 409")
+        igual(len(repartos), 1, "y NO vuelve a repartir la frase con Claude (antes: "
+                                "dos repartos y params escritos bajo el trabajo)")
+        ok(respuestas[2][2].get("preparando"),
+           "el 409 dice que se está preparando un cambio, no que «se está generando»")
+        igual(ctxb.estado.params("callouts").get("diseno"), "sobrio",
+              "el reparto escribe su param en el taller antes de lanzar")
+
+        # ---- otro estilo no se bloquea por este
+        respuestas = {}
+        modo["guia"] = "cli"
+        pulsar(pa, respuestas, "a")
+        igual(respuestas["a"][0], 202, "con B en marcha, rehacer A se lanza: el "
+                                       "cerrojo es de cada estilo")
+
+        # ---- cancelar B: la guia «esperando al CLI» se corta en el acto
+        tid_b = primero_b
+        limite = time.time() + 5
+        while ctxb.id not in soltar and time.time() < limite:
+            time.sleep(0.02)
+        antes = time.time()
+        servidor.cancelar_trabajo(tid_b)
+        ficha = ctxb.gestor.esperar(tid_b, 10)
+        tarda = time.time() - antes
+        igual(ficha["estado"], "cancelado", "cancelar la guia acaba «cancelado», no en error")
+        ok(tarda < 2.0, f"y en el acto ({tarda:.2f} s): la tarea recibe `al_cancelar`")
+        igual(ctxb.estado.params("callouts").get("diseno"), "clasico",
+              "lo que el reparto escribio vuelve a como estaba: el preset no se ha "
+              "guardado, y el siguiente «Rehacer» lo aplicaba sin que nadie lo pidiera")
+
+        # ---- A, mientras se cancela: el 409 lo dice y trae el trabajo
+        for trabajo in ctxa.gestor.listar(activos=True):
+            servidor.cancelar_trabajo(trabajo["id"])
+        soltar.clear()
+        modo["guia"] = "lenta"
+        respuestas = {}
+        pulsar(pb, respuestas, "b")
+        igual(respuestas["b"][0], 202, "B, ya parado, se puede volver a rehacer")
+        tid_b = respuestas["b"][1]
+        servidor.cancelar_trabajo(tid_b)
+        pulsar(pb, respuestas, "otra")
+        codigo, mensaje, extra = respuestas["otra"]
+        igual(codigo, 409, "pulsar otra vez mientras se cancela da 409")
+        ok("cancelando" in mensaje, f"y dice que se está cancelando: «{mensaje}»")
+        igual((extra.get("trabajo_id"), extra.get("cancelando")), (tid_b, True),
+              "con el trabajo y «cancelando» para que la pantalla se enganche a él")
+        igual(ctxb.gestor.esperar(tid_b, 10)["estado"], "cancelado",
+              "y al volver a avisar, se para")
+
+        # ---- una escucha de voz no impide rehacer
+        suelta = threading.Event()
+        escucha = ctxb.gestor.lanzar("voz:previsualizar",
+                                     lambda avisar: suelta.wait(10) and "ok")
+        respuestas = {}
+        pulsar(pb, respuestas, "voz")
+        igual(respuestas["voz"][0], 202, "con una escucha de voz sonando, «Rehacer» se "
+                                         "lanza: la escucha no escribe nada que rehacer pise")
+        suelta.set()
+        ctxb.gestor.esperar(escucha, 10)
+        for t in ctxb.gestor.listar(activos=True) + ctxa.gestor.listar(activos=True):
+            servidor.cancelar_trabajo(t["id"])
+        for t in ctxb.gestor.listar(activos=False):
+            ctxb.gestor.esperar(t["id"], 10)
+
+        # ---- cancelado DESPUES de guardar el preset: lo guardado se queda
+        ctxb.estado.actualizar_params("callouts", {"diseno": "clasico"})
+        modo["guia"] = "rapida"
+
+        def congelar_y_cancelar(ctx, encargo, preset_id=None):
+            for t in ctx.gestor.listar(activos=True):
+                ctx.gestor.cancelar(t["id"])      # llega justo tras guardar
+            return {"id": preset_id, "nombre": "x"}
+        servidor._congelar_preset = congelar_y_cancelar
+        respuestas = {}
+        pulsar(pb, respuestas, "tarde")
+        igual(ctxb.gestor.esperar(respuestas["tarde"][1], 10)["estado"], "cancelado",
+              "una cancelacion que llega tras guardar el preset acaba «cancelado»")
+        igual(ctxb.estado.params("callouts").get("diseno"), "sobrio",
+              "y NO deshace lo que el preset ya guardo (taller y preset iguales)")
+        servidor._congelar_preset = guardado["congelar"]
+
+        # ---- «Reintentar» tampoco espera sin tope al cerrojo del taller
+        cogido, soltar_cerrojo = threading.Event(), threading.Event()
+
+        def ocupar():
+            with servidor._cerrojo_de_cadena(ctxb.id):
+                cogido.set()
+                soltar_cerrojo.wait(10)
+        ocupa = threading.Thread(target=ocupar)
+        ocupa.start()
+        cogido.wait(5)
+        antes = time.time()
+        try:
+            servidor.crear_preset_light({
+                "nombre": "Estilo B", "idioma": "es", "estilo_prompt": "dibujo plano",
+                "estilo_imagenes": ["01_a.png", "02_b.png", "03_c.png"],
+                "tono_prompt": "serio pero cercano", "voz_prompt": "grave y pausada",
+                "taller": ctxb.id})
+            codigo = 202
+        except servidor.ErrorApi as fallo:
+            codigo = fallo.codigo
+        tarda = time.time() - antes
+        soltar_cerrojo.set()
+        ocupa.join(10)
+        igual(codigo, 409, "«Reintentar» con el taller ocupado contesta 409")
+        ok(tarda < 3.0, f"en un segundo, no esperando sin tope ({tarda:.1f} s)")
+    finally:
+        for evento in list(soltar.values()):
+            evento.set()
+        presets.FICHERO = guardado["FICHERO"]
+        presets.BANCO = guardado["BANCO"]
+        BITACORA.RUTA_GLOBAL = guardado["global"]
+        servidor._LIGHT_QUE_HACE.clear()
+        servidor._LIGHT_QUE_HACE.update(guardado["hace"])
+        servidor._congelar_preset = guardado["congelar"]
+        servidor._enrutar_estilo = guardado["enrutar"]
+        time.sleep(1.5)                       # que acaben los hilos de los dobles
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
     parser.add_argument("--conservar", action="store_true",
@@ -5882,6 +6111,7 @@ def main():
         probar_el_reloj_de_un_trabajo()
         probar_revision_del_nucleo_v2f()
         probar_que_lo_lento_no_para_el_servicio()
+        probar_cancelar_en_el_taller()
     finally:
         parar(proceso)
         if not argumentos.conservar:

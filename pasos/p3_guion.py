@@ -1541,6 +1541,12 @@ def _pedir(instruccion, opciones, trabajo, avisar, tramo, mensaje, prevision,
             avisar(intento_hasta,
                    f"reintentando tras fallar en {int(tardado)} s: {fallo}")
             continue
+        except BaseException:
+            # una cancelacion (Cancelado) o cualquier otra cosa: el latido se
+            # para SIEMPRE, o seguiria avisando --y queriendo matar-- un CLI
+            # que ya no existe
+            avance.parar()
+            raise
         tardado = avance.parar()
 
         comun.escribir_json(

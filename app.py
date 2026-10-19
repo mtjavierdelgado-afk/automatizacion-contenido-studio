@@ -5977,6 +5977,8 @@ def _correr_notas_imagenes(avisar, ctx):
                 return avisar((hechos + min(1.0, max(0.0, float(valor or 0)))) / total,
                               f"{etiqueta} — {mensaje}" if mensaje else "",
                               publico or "")
+            # la cancelacion en el acto llega tambien a traves de este envoltorio
+            avisar_plano.al_cancelar = getattr(avisar, "al_cancelar", None)
             try:
                 _correr_paso(avisar_plano, ctx, "assets", [uid], {"rehacer": True})
             except Cancelado:
@@ -9224,6 +9226,8 @@ def _correr_receta(avisar, ctx, pestana, receta, tareas, modo,
                    f" de {max(total_publico, hechas_antes + indice)}"
                    f" · {ultimo['frase']}")
 
+        # la cancelacion en el acto llega tambien a traves de este envoltorio
+        avisar_tarea.al_cancelar = getattr(avisar, "al_cancelar", None)
         avisar_tarea(0.0, "")
         funcion, args = _que_hace(tarea["id"], ctx, receta, modo, solo_montar,
                                   sonido_prescindible)
@@ -11745,8 +11749,15 @@ _LIGHT_QUE_HACE = {
 
 
 @_medido_en("estilo")
-def _correr_preset_light(avisar, ctx, encargo, solo, preset_id, retomar=False):
+def _correr_preset_light(avisar, ctx, encargo, solo, preset_id, retomar=False,
+                         deshacer=None):
     """Recorre el plan tanda a tanda y congela el resultado en el preset.
+
+    `deshacer` es {paso: {clave: (antes, escrito)}}: los params que la PETICION
+    escribio antes de lanzar (el reparto de la frase). Si el trabajo se
+    cancela, se devuelven a como estaban --solo los que siguen valiendo lo que
+    se escribio--: el preset no se ha vuelto a guardar, y dejarlos en el taller
+    hacia que el siguiente «Rehacer» los guardara sin que nadie lo pidiera.
 
     LA BARRA VA POR TIEMPO, no por numero de tareas. Cada tanda ocupa en la barra
     lo que se espera que tarde (`presets_light.plan_de`, que mira el historial
@@ -11754,6 +11765,56 @@ def _correr_preset_light(avisar, ctx, encargo, solo, preset_id, retomar=False):
     «bajando el vídeo» no sea el 12 % de la barra durante tres minutos y despues
     seis tareas cortas se coman el resto de golpe.
     """
+    try:
+        return _correr_preset_light_dentro(avisar, ctx, encargo, solo, preset_id,
+                                           retomar, deshacer)
+    except _Cancelado:
+        _deshacer_params(ctx, deshacer)
+        raise
+
+
+#: Lo que no estaba antes en los params (ver `_deshacer_params`).
+_NO_ESTABA = object()
+
+
+def _deshacer_params(ctx, deshacer):
+    """Devuelve a como estaban los params que escribio la peticion. -> [claves]
+
+    Solo los que SIGUEN valiendo lo que se escribio: si alguien los ha cambiado
+    a mano mientras tanto, lo suyo manda. Nunca lanza: corre al cancelar."""
+    vueltos = []
+    for paso, claves in (deshacer or {}).items():
+        try:
+            with ctx.estado._lock:
+                params = ctx.estado.params(paso) or {}
+                tocado = False
+                for clave, (antes, escrito) in claves.items():
+                    if params.get(clave, _NO_ESTABA) != escrito:
+                        continue
+                    if antes is _NO_ESTABA:
+                        params.pop(clave, None)
+                    else:
+                        params[clave] = antes
+                    tocado = True
+                    vueltos.append(f"{paso}.{clave}")
+                if tocado:
+                    ctx.estado.set_params(paso, params)
+        except Exception as fallo:                          # noqa: BLE001
+            try:
+                ctx.bitacora.anotar("aviso", None, {"deshacer": str(fallo)})
+            except Exception:                               # noqa: BLE001
+                pass
+    if vueltos:
+        try:
+            ctx.bitacora.anotar("reparto_deshecho", None, {"params": vueltos})
+        except Exception:                                   # noqa: BLE001
+            pass
+    return vueltos
+
+
+def _correr_preset_light_dentro(avisar, ctx, encargo, solo, preset_id, retomar,
+                                deshacer=None):
+    """El cuerpo de `_correr_preset_light`."""
     light = _light()
     presets = _presets()
     plan = light.plan_de(encargo, solo)
@@ -11782,6 +11843,10 @@ def _correr_preset_light(avisar, ctx, encargo, solo, preset_id, retomar=False):
                 avisar(desde + trozo * min(1.0, max(0.0, float(valor or 0))),
                        ficha["nombre"] + (f" — {mensaje}" if mensaje else ""),
                        ultimo["frase"])
+            # CANCELAR EN EL ACTO llega hasta la tarea: la guia espera al CLI y
+            # se registra aqui para que lo corten al cancelar, sin esperar a su
+            # latido (ver `GestorTrabajos.al_cancelar`)
+            avisar_tarea.al_cancelar = getattr(avisar, "al_cancelar", None)
 
             avisar_tarea(0.0, "")
             arranque = time.time()
@@ -11796,12 +11861,17 @@ def _correr_preset_light(avisar, ctx, encargo, solo, preset_id, retomar=False):
         if len(tanda) == 1:
             correr(tanda[0])
             continue
-        with ThreadPoolExecutor(max_workers=len(tanda)) as pool:
-            for futuro in [pool.submit(correr, f) for f in tanda]:
-                futuro.result()          # una excepcion sube y corta la tanda
+        # una excepcion (una cancelacion lo es) sube y corta la tanda, y lo que
+        # quede en cola no arranca (`moodboard.en_paralelo`)
+        _moodboard().en_paralelo(len(tanda), correr, [(f,) for f in tanda])
 
     avisar(0.99, "guardando el preset", "Guardando tu estilo")
     ficha = _congelar_preset(ctx, encargo, preset_id)
+    # GUARDADO: lo que escribio el reparto ya esta en el preset. Una
+    # cancelacion que llegue ahora (el avisar del final la lanza) no puede
+    # devolver el taller a lo de antes: quedarian distintos al reves.
+    if deshacer:
+        deshacer.clear()
     salida["preset"] = ficha["id"]
     # EL PROYECTO (cliente) en el que se creo, si se creo dentro de uno. Solo
     # al crear: rehacer una parte no lo mueve de donde este.
@@ -12051,9 +12121,9 @@ def crear_preset_light(cuerpo: dict = Body(default=None)):
     # corria. Mirar que este libre, sembrar y lanzar van juntos (D3 del
     # analisis del 13-10-2026). Un taller recien creado es de esta peticion y
     # de nadie mas: no hace falta.
-    with (_cerrojo_de_cadena(ctx.id) if retomar else contextlib.nullcontext()):
-        if retomar:
-            _taller_libre(ctx)
+    # Con la misma espera corta que «Regenerar» (`_taller_reservado`): si otra
+    # peticion lo tiene, 409 en un segundo, no un boton colgado sin respuesta.
+    with (_taller_reservado(ctx) if retomar else contextlib.nullcontext()):
         if encargo.get("cliente"):
             # para ensenar el intento a medias DENTRO de su proyecto
             ctx.proyecto.config["cliente_del_taller"] = encargo["cliente"]
@@ -12305,8 +12375,16 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     if ficha.get("tipo") != "canal":
         raise ErrorApi(400, "esto no es un preset de canal")
     ctx = _taller_de(ficha)
-    _taller_libre(ctx)
+    # DE MIRAR SI ESTA LIBRE A LANZAR, CON EL TALLER RESERVADO: un segundo
+    # toque contesta 409 antes de repartir la frase con Claude o de escribir
+    # nada (ver `_taller_reservado`)
+    with _taller_reservado(ctx):
+        return _regenerar_en_taller(ctx, ficha, preset_id, parte, peticion, fuente)
 
+
+def _regenerar_en_taller(ctx, ficha, preset_id, parte, peticion, fuente):
+    """El cuerpo de `regenerar_preset_light`, con el taller ya reservado."""
+    light = _light()
     origen = dict((ficha.get("datos") or {}).get("origen") or {})
     antes = dict(origen)
     origen["nombre"] = ficha.get("nombre") or "canal"
@@ -12383,6 +12461,7 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     # NO toca el camino de la fuente nueva: si de verdad hay otro video o otras
     # imagenes, hay que rehacerlo todo y no hay nada que repartir.
     reparto = None
+    deshacer = {}
     if parte == "estilo" and not material:
         frase = _frase_del_estilo(encargo, antes, peticion)
         if frase:
@@ -12396,9 +12475,16 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
                 frase, estado=_estado_del_estilo(ctx, laminas), cwd=ctx.proyecto.raiz,
                 proyecto_id=ctx.id, laminas=laminas)
             # LOS PARAMS SE ESCRIBEN AQUI Y NO DENTRO DEL TRABAJO: asi el
-            # grafismo que corre despues ya los encuentra puestos, y si el
-            # trabajo se cancela lo elegido se queda.
+            # grafismo que corre despues ya los encuentra puestos. Lo que habia
+            # se apunta: si el trabajo se CANCELA, vuelven a como estaban
+            # (`_deshacer_params`) -- el preset no se ha vuelto a guardar, y
+            # dejarlos en el taller hacia que el siguiente «Rehacer» los
+            # guardara sin que nadie lo pidiera.
             for paso_destino, valores in (reparto.get("params") or {}).items():
+                previos = ctx.estado.params(paso_destino) or {}
+                deshacer.setdefault(paso_destino, {}).update({
+                    clave: (previos.get(clave, _NO_ESTABA), copy.deepcopy(valor))
+                    for clave, valor in valores.items()})
                 ctx.estado.actualizar_params(paso_destino, valores)
             # QUE REFERENCIA REDIBUJAR Y QUE CAMBIARLE. Va en el encargo y NO
             # en los params, por lo mismo que el feedback: describe esta pasada
@@ -12455,7 +12541,7 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
 
     trabajo_id = _lanzar_en_taller(
         ctx, "preset_light", _correr_preset_light, ctx, encargo,
-        list(tareas), preset_id, paso="assets")
+        list(tareas), preset_id, paso="assets", deshacer=deshacer)
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "taller": ctx.id, "parte": parte,
             "fuente_nueva": bool(fuente), "material_nuevo": material,
@@ -12500,15 +12586,79 @@ def _plan_con_laminas(plan, imagenes):
     return plan
 
 
+#: Los trabajos del taller que NO impiden cambiar el estilo. Una escucha de voz
+#: lee una copia de los mandos y escribe solo su wav, con nombre de firma, en
+#: `previsualizaciones/` (`p4_voz.previsualizar`): nada que un «Rehacer» toque
+#: ni nada suyo que un «Rehacer» pise. Bloquear por ella era quedarse sin poder
+#: corregir mientras sonaba una muestra.
+_NO_BLOQUEAN_EL_TALLER = ("voz:previsualizar",)
+
+
+def _que_hace_el_taller(trabajo):
+    """Lo que esta haciendo un trabajo del taller, dicho para el 409. -> str"""
+    if trabajo.get("cancelando"):
+        return ("se está cancelando lo anterior: termina en unos segundos (lo que "
+                "ya se estaba dibujando se acaba y se guarda). Vuelve a pulsar "
+                "entonces")
+    if trabajo.get("nombre") == "voz:previsualizar":
+        return "se está preparando una escucha de la voz: espera a que suene"
+    ahora = str(trabajo.get("publico") or "").strip()
+    return ("este estilo se está generando"
+            + (f" («{ahora}»)" if ahora else "")
+            + ": espera a que termine para cambiar otra cosa")
+
+
 def _taller_libre(ctx):
     """409 si el taller de este estilo esta generando algo.
 
     Lo que se guarde mientras tanto se lo llevaria por delante el trabajo al
     terminar (vuelve a guardar el estilo con SU copia del encargo), y dos
-    laminas nuevas seguidas se llamarian igual y se pagarian las dos."""
-    if ctx.gestor.listar(activos=True):
-        raise ErrorApi(409, "este estilo se está generando: espera a que termine "
-                            "para cambiar otra cosa")
+    laminas nuevas seguidas se llamarian igual y se pagarian las dos.
+
+    EL 409 DICE QUE HAY EN MARCHA Y CUAL ES (`trabajo_id`, `cancelando`): la
+    pantalla se engancha a ese trabajo en vez de quedarse con un aviso, y quien
+    vuelve a pulsar mientras se cancela lee eso y no «se está generando»."""
+    for trabajo in ctx.gestor.listar(activos=True):
+        if trabajo.get("nombre") in _NO_BLOQUEAN_EL_TALLER:
+            continue
+        raise ErrorApi(409, _que_hace_el_taller(trabajo),
+                       {"trabajo_id": trabajo.get("id") or "",
+                        "cancelando": bool(trabajo.get("cancelando")),
+                        "segundos": trabajo.get("segundos") or 0,
+                        "taller": ctx.id})
+
+
+#: Cuanto espera una peticion a que otra del MISMO taller suelte el cerrojo
+#: antes de contestar 409. Poco: la otra puede estar repartiendo la frase con
+#: Claude (segundos), y esperarla seria dejar el boton pulsado sin respuesta.
+ESPERA_CERROJO_TALLER_S = 1.0
+
+
+@contextlib.contextmanager
+def _taller_reservado(ctx):
+    """El taller para esta peticion, de mirar si esta libre a lanzar.
+
+    DOBLE TOQUE EN «Regenerar» (18-10-2026): la segunda peticion pasaba
+    `_taller_libre` mientras la primera repartia la frase con Claude, repartia
+    OTRA vez (otra llamada al CLI), escribia params en el taller por debajo del
+    trabajo ya lanzado y solo al final se llevaba el 409. Con el cerrojo de la
+    cadena (reentrante: `_lanzar_en_taller` lo vuelve a tomar dentro) tomado
+    desde el principio, la segunda contesta 409 ANTES de gastar nada.
+
+    No se espera al cerrojo: si en `ESPERA_CERROJO_TALLER_S` no se suelta, es que
+    otra peticion esta preparando un cambio de este estilo, y se dice.
+    """
+    cerrojo = _cerrojo_de_cadena(ctx.id)
+    if not cerrojo.acquire(timeout=ESPERA_CERROJO_TALLER_S):
+        raise ErrorApi(409, "ya se está preparando un cambio de este estilo: "
+                            "espera a que empiece y lo verás en marcha",
+                       {"trabajo_id": "", "cancelando": False, "taller": ctx.id,
+                        "preparando": True})
+    try:
+        _taller_libre(ctx)
+        yield ctx
+    finally:
+        cerrojo.release()
 
 
 def _lanzar_en_taller(ctx, *args, **kwargs):
@@ -12616,14 +12766,22 @@ def cambiar_laminas(preset_id: str, cuerpo: dict = Body(default=None)):
     muestras (gratis) y se vuelve a guardar el estilo.
     """
     lam = _laminas()
-    mod = _moodboard()
-    light = _light()
     datos = _cuerpo(cuerpo)
     accion = str(datos.get("accion") or "").strip().lower()
     lamina = str(datos.get("lamina") or "").strip()
     texto = " ".join(str(datos.get("texto") or "").split())[:lam.MAX_TEXTO]
     ficha, ctx = _taller_con_laminas(preset_id)
-    _taller_libre(ctx)
+    # reservado de mirar a lanzar, como `regenerar_preset_light`
+    with _taller_reservado(ctx):
+        return _cambiar_laminas_en_taller(ctx, ficha, preset_id, datos, accion,
+                                          lamina, texto)
+
+
+def _cambiar_laminas_en_taller(ctx, ficha, preset_id, datos, accion, lamina, texto):
+    """El cuerpo de `cambiar_laminas`, con el taller ya reservado."""
+    lam = _laminas()
+    mod = _moodboard()
+    light = _light()
     origen = dict((ficha.get("datos") or {}).get("origen") or {})
     ids = lam.ids_de(origen)
     quitadas, propias, hoja = lam.config_de(origen)

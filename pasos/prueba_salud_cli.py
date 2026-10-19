@@ -15,6 +15,7 @@ herramientas del asistente. Sin red y sin CLI: dobles en los tres sitios.
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -172,6 +173,209 @@ def prueba_una_pasada():
         igual(salud_cli.de(cuenta)["estado"], "ok", "probar con el CLI contestando limpia el cupo")
     finally:
         subprocess.Popen = original
+        cli_claude.localizar = original_localizar
+
+
+# ------------------------------------------------------- cancelar corta el CLI
+
+CLI_LENTO = """#!{python}
+# Doble del CLI: lee la instruccion, lanza un HIJO que hereda la salida (como
+# una herramienta del CLI) y tarda. Apunta el pid del hijo para poder mirarlo.
+import os, subprocess, sys, time
+sys.stdin.read()
+hijo = subprocess.Popen(["sleep", "30"])
+with open({pids!r}, "a") as fh:
+    fh.write(f"{{hijo.pid}}\\n")
+time.sleep(30)
+print('{{"result": "tarde", "is_error": false}}')
+"""
+
+
+def _vivo(pid):
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    try:                                     # un zombi ya no hace nada
+        with open(f"/proc/{pid}/stat", "r", encoding="utf-8") as fh:
+            return fh.read().split(")")[-1].split()[0] != "Z"
+    except OSError:
+        return True
+
+
+def prueba_cancelar_corta_el_cli():
+    """CANCELAR CORTA EL CLI, CON SUS HIJOS, Y EN EL ACTO (18-10-2026).
+
+    Con un «Rehacer estilo» esperando al CLI, cancelar mataba solo el padre (en
+    Linux no hay taskkill) y `communicate()` seguia esperando al hijo que tenia
+    la salida: el trabajo seguia vivo lo que tardara el CLI (37 s con este
+    doble), el taller contestaba 409 y al final acababa en ERROR, no cancelado.
+    """
+    seccion("2b] cancelar corta el CLI y sus hijos, y acaba «cancelado»")
+    if os.name == "nt":
+        print("  (en Windows esto lo hace taskkill /T: se omite)")
+        return
+    import time                                               # noqa: PLC0415
+    import estadisticas                                       # noqa: PLC0415
+    from nucleo.trabajos import GestorTrabajos                # noqa: PLC0415
+    carpeta = os.path.join(CARPETA, "cli_lento")
+    os.makedirs(carpeta, exist_ok=True)
+    pids = os.path.join(carpeta, "pids.txt")
+    script = os.path.join(carpeta, "claude")
+    with open(script, "w", encoding="utf-8") as fh:
+        fh.write(CLI_LENTO.format(python=sys.executable, pids=pids))
+    os.chmod(script, 0o755)
+    original_localizar = cli_claude.localizar
+    cli_claude.localizar = lambda *a, **k: script
+    salud_antes = salud_cli.de(dict(cli_claude.POR_DEFECTO))
+
+    def hijos():
+        try:
+            with open(pids, "r", encoding="utf-8") as fh:
+                return [int(x) for x in fh.read().split()]
+        except OSError:
+            return []
+
+    avances = []
+    senales = []                       # (instante, grupo, senal) de verdad
+    killpg_real = os.killpg
+
+    def killpg_espia(grupo, senal):
+        senales.append((time.time(), grupo, senal))
+        return killpg_real(grupo, senal)
+
+    def guia(avisar):
+        # lo mismo que `estilo.generar_guia`; el latido, a proposito MUY lento:
+        # lo que tiene que cortar es la cancelacion en el acto, no el latido
+        avance = estadisticas.Avance(avisar, 0.05, 0.9, {"segundos": 60},
+                                     "mirando", cadencia=30)
+        avances.append(avance)
+        avance.arrancar()
+        try:
+            return cli_claude.ejecutar("hola", modelo="sonnet", esfuerzo="low",
+                                       cwd=carpeta, avance=avance,
+                                       para="la guia de estilo")
+        finally:
+            avance.parar()
+
+    os.killpg = killpg_espia
+    try:
+        gestor = GestorTrabajos()
+        tid = gestor.lanzar("preset_light", guia)
+        limite = time.time() + 10
+        while not hijos() and time.time() < limite:
+            time.sleep(0.05)
+        comprobar(bool(hijos()), "el doble del CLI ha arrancado su hijo")
+        antes = time.time()
+        gestor.cancelar(tid)
+        while gestor.listar(activos=True) and time.time() - antes < 40:
+            time.sleep(0.05)
+        tarda = time.time() - antes
+        comprobar(tarda < 3.0, f"el trabajo se para en {tarda:.1f} s tras cancelar "
+                               f"(antes: lo que tardara el CLI, 37 s con este doble)")
+        ficha = gestor.estado(tid)
+        igual(ficha["estado"], "cancelado",
+              "y acaba CANCELADO, no en error (su paso no se marca fallido)")
+        limite = time.time() + 5
+        while any(_vivo(p) for p in hijos()) and time.time() < limite:
+            time.sleep(0.1)
+        comprobar(not any(_vivo(p) for p in hijos()),
+                  "el hijo que tenia la salida tambien muere (todo el grupo)")
+        igual(salud_cli.de(dict(cli_claude.POR_DEFECTO)), salud_antes,
+              "una cancelacion no apunta nada en la salud de la cuenta")
+
+        # NINGUNA SENAL A UN PROCESO QUE YA ACABO (revision del 18-10): el
+        # SIGKILL de la gracia y el latido no pueden ir a un pid ya recogido,
+        # que puede ser de otro
+        fin_trabajo = time.time()
+        time.sleep(cli_claude.GRACIA_SIGTERM_S + 0.8)
+        tardias = [x for x in senales if x[0] > fin_trabajo]
+        igual(tardias, [], "acabado el CLI, no se le manda ninguna senal mas "
+                           "(ni el SIGKILL de la gracia)")
+        igual([x[2] for x in senales], [signal.SIGTERM],
+              "solo el SIGTERM al grupo: el SIGKILL sobra si ya se fue")
+        avance = avances[0]
+        igual(avance.al_cancelar, None,
+              "y el avance ya no sabe matarlo: se suelta al volver communicate()")
+        comprobar(not (avance._hilo and avance._hilo.is_alive()),
+                  "el latido se para con la cancelacion")
+        hecho = subprocess.Popen(["true"], **cli_claude.GRUPO_PROPIO)
+        hecho.wait()
+        hecho._grupo_propio = True
+        antes_n = len(senales)
+        cli_claude.matar_arbol(hecho)
+        igual(len(senales), antes_n, "matar un proceso ya recogido no manda nada")
+
+        # EL PLAZO VENCIDO SIGUE CORTANDO, y tambien con sus hijos
+        with open(pids, "w", encoding="utf-8"):
+            pass
+        minimo = cli_claude.TIEMPO_MINIMO_S
+        cli_claude.TIEMPO_MINIMO_S = 1
+        antes = time.time()
+        try:
+            cli_claude.ejecutar("hola", modelo="sonnet", esfuerzo="low", cwd=carpeta,
+                                tiempo_max_s=1, para="la prueba del plazo")
+            comprobar(False, "tenia que lanzar TiempoAgotado")
+        except cli_claude.TiempoAgotado:
+            comprobar(time.time() - antes < 5, "un plazo vencido sigue lanzando "
+                                               "TiempoAgotado, a su hora")
+        finally:
+            cli_claude.TIEMPO_MINIMO_S = minimo
+        limite = time.time() + 5
+        while any(_vivo(p) for p in hijos()) and time.time() < limite:
+            time.sleep(0.1)
+        comprobar(hijos() and not any(_vivo(p) for p in hijos()),
+                  "y mata tambien al hijo, no solo al padre")
+
+        # MATAR NO ESPERA: lo llama la peticion que cancela
+        class Quieto:
+            pid = os.getpid()
+            _grupo_propio = False
+            matado = False
+
+            def kill(self):
+                Quieto.matado = True
+        antes = time.time()
+        cli_claude.matar_arbol(Quieto())
+        comprobar(time.time() - antes < 0.5 and Quieto.matado,
+                  "sin grupo propio se mata solo el proceso (nunca el grupo del Estudio)")
+
+        # LA CANCELACION EN EL ACTO ATRAVIESA LOS ENVOLTORIOS: `avisador`
+        # cambia la firma de avisar y se quedaba sin `al_cancelar`
+        def del_gestor(valor, mensaje="", publico=""):
+            return valor
+        del_gestor.al_cancelar = lambda fn: None
+        envuelto = estadisticas.avisador(del_gestor)
+        comprobar(envuelto is not del_gestor
+                  and envuelto.al_cancelar is del_gestor.al_cancelar,
+                  "estadisticas.avisador conserva el al_cancelar del gestor")
+
+        # UN DOBLE NUNCA RECIBE UNA SENAL DE GRUPO: su pid es inventado (999,
+        # o -1, que para killpg es «todos»). Lo que devuelva un Popen sustituido
+        # no se marca, y aunque viniera marcado no se le hace killpg.
+        class Doble:
+            pid = -1
+            _grupo_propio = True
+            matado = False
+
+            def poll(self):
+                return None
+
+            def kill(self):
+                Doble.matado = True
+        antes_n = len(senales)
+        cli_claude.matar_arbol(Doble())
+        igual(len(senales), antes_n, "a un doble (pid -1) no se le hace killpg")
+        comprobar(Doble.matado, "se le pide kill(), como antes")
+        original_popen = subprocess.Popen
+        subprocess.Popen = lambda *a, **k: Doble()
+        try:
+            igual(cli_claude._es_proceso_real(subprocess.Popen()), False,
+                  "lo que da un Popen sustituido no cuenta como proceso real")
+        finally:
+            subprocess.Popen = original_popen
+    finally:
+        os.killpg = killpg_real
         cli_claude.localizar = original_localizar
 
 
@@ -351,6 +555,7 @@ def main():
     try:
         prueba_salud()
         prueba_una_pasada()
+        prueba_cancelar_corta_el_cli()
         prueba_claves()
         prueba_mcp()
     finally:

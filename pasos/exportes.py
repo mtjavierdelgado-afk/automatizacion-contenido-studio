@@ -253,7 +253,9 @@ def _planos_sin_subtitulos(proyecto, m, trabajo, avisar, estado=None):
             "mov": dict({"ventana_ini": mov["ventana_ini"], "ventana_fin": mov["ventana_fin"],
                          "hyperframe_px": mov.get("hyperframe_px")},
                         # el trayecto del montaje (camara por tramos), si lo hay
-                        **({"trayecto": mov["trayecto"]} if mov.get("trayecto") else {})),
+                        **({"trayecto": mov["trayecto"]} if mov.get("trayecto") else {}),
+                        # y la profundidad 2.5D, si el plano la trae
+                        **p8_render.profundidad_de_mov(mov, base_callouts)),
             # la cartela y la cabecera se quedan (son contenido); el subtitulo no
             "capa": svg, "capa_fija": "",
             "hyper": hyper,

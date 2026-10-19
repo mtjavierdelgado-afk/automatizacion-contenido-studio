@@ -31,6 +31,7 @@ Salidas por escena: capas/<id>.svg, movimiento/<id>.json, hyper/<id>.png y
 previo/<id>.png (plano + capa compuestos para la pantalla de revision).
 """
 import os
+import shutil
 import re
 import sys
 import time
@@ -45,6 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # nada que colocar -- ni un pixel que mirar.
 
 import camara  # noqa: E402
+import profundidad  # noqa: E402
 import cartelas  # noqa: E402
 import comun  # noqa: E402
 import estadisticas  # noqa: E402
@@ -1784,6 +1786,8 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
             "capas_fijas": os.path.join(trabajo, "capas_fijas"),
             "movimiento": os.path.join(trabajo, "movimiento"),
             "hyper": os.path.join(trabajo, "hyper"),
+            # los mapas de profundidad de la 2.5D, con la version del paso
+            "prof": os.path.join(trabajo, "prof"),
             "previo": os.path.join(trabajo, "previo")}
     for ruta in dirs.values():
         os.makedirs(ruta, exist_ok=True)
@@ -1923,6 +1927,22 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
                 gancho=montaje["gancho"], base=entrada)
             if trayecto:
                 entrada["trayecto"] = trayecto
+        prof = camara.profundidad_de(montaje, indice)
+        if (prof and not cartelas.sobre_imagen(escena)
+                and not escena.get("capitulo_svg")):
+            # LA PROFUNDIDAD 2.5D. Tampoco en cartelas ni cabeceras, por lo
+            # mismo que el trayecto: su texto va con la imagen. El mapa se saca
+            # de la imagen del plano (de la cache por contenido si ya se hizo)
+            # y se copia a la version del paso, que es de donde lo lee el render.
+            mapa = profundidad.mapa_de(png)
+            if mapa:
+                destino_mapa = os.path.join(dirs["prof"], f"{sid}.png")
+                shutil.copyfile(mapa, destino_mapa)
+                entrada["profundidad"] = dict(prof, mapa=os.path.relpath(destino_mapa, trabajo))
+            elif not any("profundidad" in a for a in avisos):
+                avisos.append("la profundidad 2.5D no se ha podido aplicar: "
+                              + (profundidad.disponible()[1] or "el mapa no ha salido")
+                              + ". Los planos llevan el movimiento de siempre")
         if cartelas.sobre_imagen(escena):
             # el plano se ha rodado y tiene su zoom; encima va el velo y el
             # texto de la cartela, no los rotulos de siempre

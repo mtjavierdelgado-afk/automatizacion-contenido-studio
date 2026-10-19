@@ -12,6 +12,9 @@ enlaces.json
 coste_global.jsonl
 bitacora_global.jsonl
 
+# El modelo de profundidad (99 MB): lo baja `asvs actualizar`, no va al repo.
+modelos/
+
 # LAS CLAVES. Nunca, y no se arregla borrandolas de un commit: se rotan.
 secretos/
 .env

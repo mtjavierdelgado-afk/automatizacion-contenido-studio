@@ -225,6 +225,12 @@ ok '[ -x "$T/binarios/asvs" ] && [ -x "$T/binarios/estudio-clave" ]' "los mandos
 ok 'grep -q "yo/estudio" "$T/raiz/datos/repositorio"' "y se apunta de donde vino"
 ok '[ "$(grep -n "pip install" "$T/llamadas" | head -1 | cut -d: -f1)" -lt "$(grep -n "systemctl stop" "$T/llamadas" | head -1 | cut -d: -f1)" ]' \
    "pip va ANTES de parar el estudio"
+# la profundidad 2.5D (18-10): su pip de onnxruntime tambien va antes de parar
+# (sin red son minutos de reintentos y no pueden ser minutos de web caida), y
+# una descarga del modelo que falla no para la actualizacion (ya sale bien arriba)
+ok '! grep -q "onnxruntime" "$T/llamadas" || [ "$(grep -n "onnxruntime" "$T/llamadas" | tail -1 | cut -d: -f1)" -lt "$(grep -n "systemctl stop" "$T/llamadas" | head -1 | cut -d: -f1)" ]' \
+   "la librería de la profundidad, también antes de parar"
+ok 'grep -q "onnxruntime" "$T/llamadas"' "y se intenta instalar si falta"
 ok 'cmp -s "$T/etc/systemd/system/as-video-studio.service" <(plantilla_unidad "$DESPL/as-video-studio.service" "$T/raiz" studio)' \
    "la unidad que cambio se instala nueva"
 ok 'grep -q "systemctl daemon-reload" "$T/llamadas"' "y se hace daemon-reload"

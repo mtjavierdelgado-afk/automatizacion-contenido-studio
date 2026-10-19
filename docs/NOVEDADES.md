@@ -10,6 +10,43 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Publicar: SEO de verdad (18 de octubre)**
+- **Palabras clave del proyecto**, en Publicar → Cuentas y ajustes → **SEO de
+  este proyecto**: la principal («alquiler de consolas en Lima»), las
+  secundarias, la zona y las palabras a evitar. **«Proponer palabras clave»**:
+  Claude las propone desde los encargos y guiones del proyecto, cada una con su
+  porqué y, si el servidor puede salir a internet, con lo que sugiere YouTube al
+  escribirlas. Tú eliges.
+- **Palabra clave de cada vídeo**, en su ficha (si no, vale la del proyecto).
+  Al escribir los textos, Claude la pone en la primera línea de cada red, al
+  principio del título de YouTube y Facebook y en las dos primeras líneas de la
+  descripción de YouTube, reparte las secundarias, nombra la zona con un
+  hashtag local, propone una palabra más concreta para ese vídeo y escribe un
+  **primer comentario**. Rota los hashtags del **banco del proyecto** (amplios,
+  de nicho, locales) para no repetir el mismo bloque, y aprende de los posts
+  que mejor funcionaron.
+- **La nota SEO de cada red**, sin Claude y sin coste: ✓ y ⚠ con el porqué
+  (palabra clave en el título y en la primera línea, largo del título y de la
+  primera línea, hashtags en su rango y uno local, sin hashtags vacíos como
+  «fyp», CTA, ubicación, categoría, portada) y una nota de 0 a 100.
+- **«Optimizar SEO con Claude»**: una segunda pasada como revisor SEO que
+  propone cambios campo a campo con su porqué. Tú aceptas campo a campo,
+  «Aceptar todo» o «Dejar el mío»; nunca pisa lo que hayas cambiado a mano
+  después de pedirla. **«Dame 3 ganchos»** para la primera línea de una red.
+  Y en lo fijo, «Optimizar SEO al escribir los textos» hace las dos pasadas
+  seguidas.
+- **Lo que ahora va a cada red además del texto:** Instagram, la ubicación
+  (el número de un Lugar o Página de Facebook, con su guía), colaboradores y
+  etiquetas; YouTube, la categoría, el idioma del texto y del audio, «Hecho
+  para niños» (apagado: un vídeo para padres que contratan fiestas infantiles
+  NO es para niños) y las etiquetas con las palabras clave; TikTok, la
+  ubicación (si tu cuenta tiene esa función); y el primer comentario. Instagram
+  no admite texto alternativo en Upload-Post, y se dice.
+- **El MP4 se sube con la palabra clave en el nombre**
+  («alquiler-de-consolas-en-lima-fiesta.mp4»); el del proyecto no cambia.
+- **En el Encargo**, si el proyecto tiene palabra clave, una sugerencia: que
+  el guion la diga en los 3 primeros segundos y salga en pantalla.
+
 **Arreglos pendientes de los análisis del 10 y 13 de octubre (18 de octubre)**
 - **Ajustes guardados con un tipo equivocado** (un texto donde va un objeto, en
   el estilo, la música, el logo…) se rechazan al guardarlos: antes se aceptaban
@@ -65,6 +102,19 @@ vídeos, estilos, claves y contraseña no se tocan.
   YouTube y lo que hayas mirado desde la web de Upload-Post.
 - Si la carga de Resultados fallaba, la pantalla se quedaba rota en vez de
   decir el motivo: ahora sale el error.
+
+**Los cortos duran lo pedido, y comparar el guion con opus (18 de octubre)**
+- Un vídeo de hasta 2 minutos salía medio segundo o un segundo más corto de lo
+  pedido: el cálculo de palabras preveía las pausas de un vídeo largo (tres o
+  cuatro) y el guion corto lleva dos. Ahora cuenta las suyas. Los vídeos ya
+  hechos no cambian.
+- **`asvs comparar-guion`**, en la consola del servidor: escribe el guion de un
+  vídeo tuyo con sonnet y con opus, con el mismo material y las mismas
+  indicaciones, y te los enseña como «A» y «B» sin decir cuál es cuál.
+  `asvs comparar-guion revelar` lo dice después de elegir (y cuál es el que
+  usa hoy ese vídeo: por defecto, opus con esfuerzo muy alto). No toca el vídeo y
+  no gasta dólares, solo tokens de la suscripción. Sin nada detrás, enseña la
+  lista de vídeos que se pueden comparar.
 
 **Vídeos con más movimiento, sobre todo los cortos (18 de octubre)**
 - **Movimiento de cámara en tres niveles**, en el Encargo y en el vídeo

@@ -79,6 +79,7 @@ if RAIZ_ESTUDIO not in sys.path:
     sys.path.insert(0, RAIZ_ESTUDIO)
 from motores.publicar_uploadpost import cliente as UP  # noqa: E402
 from motores.publicar_uploadpost import simulado as UP_SIMULADO  # noqa: E402
+import publicar_seo as SEO                                     # noqa: E402
 from nucleo.proyecto import escribir_json, leer_json  # noqa: E402
 
 ZONA = "America/Lima"
@@ -305,7 +306,9 @@ AJUSTES_DEFECTO = {
     "cuentas_vistas": "",
     "seguidores": {},                   # lo ultimo que dijo de cada cuenta
     "seguidores_al": "",
+    "propuesta_palabras": {},           # lo que propuso Claude (publicar-seo)
 }
+AJUSTES_DEFECTO.update(SEO.AJUSTES_SEO)
 LARGOS = {"firma": 400, "hashtags": 400, "tono": 600, "perfil": 60,
           "facebook_pagina": 40}
 
@@ -333,7 +336,14 @@ def _validar_ajustes(cambios):
     limpios = {}
     for k, v in (cambios or {}).items():
         if k not in AJUSTES_DEFECTO or k in ("cuentas", "cuentas_vistas",
-                                             "seguidores", "seguidores_al"):
+                                             "seguidores", "seguidores_al",
+                                             "propuesta_palabras"):
+            continue
+        if k in SEO.AJUSTES_SEO:
+            try:
+                limpios[k] = SEO.validar(k, v)
+            except SEO.ErrorSeo as fallo:
+                raise ErrorPublicar(str(fallo)) from None
             continue
         if k in ("marcar_ia", "avisar_youtube", "usar_emojis"):
             if not isinstance(v, bool):
@@ -754,6 +764,8 @@ CÓMO SE ESCRIBE (todas las redes)
 REGLAS POR RED
 {reglas}
 
+{seo}
+
 {capitulos}
 
 Devuelve SOLO este JSON, con EXACTAMENTE estas claves de red, en minúsculas y
@@ -763,8 +775,9 @@ tal cual: {claves}
     "titulo": "solo YouTube y Facebook; vacío en las demás",
     "descripcion": "el texto principal (gancho en la primera línea), sin hashtags ni CTA",
     "cta": "una frase de llamada a la acción",
-    "hashtags": ["sin almohadilla", "..."]
-  }}{capitulos_json}
+    "hashtags": ["sin almohadilla", "..."],
+    "primer_comentario": "opcional: una pregunta o un dato extra, corto"
+  }}{palabra_json}{capitulos_json}
 }}
 """
 
@@ -776,7 +789,7 @@ def _cta_como_texto(cta):
     return str(cta or "ninguna")
 
 
-def instruccion_textos(info, redes, ajustes):
+def instruccion_textos(info, redes, ajustes, seo=""):
     encajes = {r: encaje(r, info.get("formato"), info.get("duracion_s")) for r in redes}
     guion = "\n".join(f"- {b.get('texto', '')}" for b in (info.get("guion") or []))
     caps = info.get("capitulos_base") or []
@@ -804,6 +817,8 @@ def instruccion_textos(info, redes, ajustes):
         reglas="\n".join(f"- {NOMBRE_RED[r]}: {REGLAS_RED[r]}" for r in redes),
         capitulos=capitulos,
         claves=", ".join(f'"{r}"' for r in redes),
+        seo=seo or "",
+        palabra_json=(',\n  "palabra_clave": "la propuesta para este vídeo"' if seo else ""),
         capitulos_json=(',\n  "capitulos": ["título del tramo 1", "..."]' if con_caps else ""))
 
 
@@ -828,7 +843,8 @@ _ALIAS_CAMPO = {"titulo": ("titulo", "título", "title"),
                 "descripcion": ("descripcion", "descripción", "description", "texto",
                                 "caption", "pie", "copy", "text"),
                 "cta": ("cta", "llamada", "llamada_a_la_accion", "call_to_action"),
-                "hashtags": ("hashtags", "etiquetas", "tags")}
+                "hashtags": ("hashtags", "etiquetas", "tags"),
+                "primer_comentario": ("primer_comentario", "first_comment", "comentario")}
 
 
 def _clave_suelta(texto):
@@ -869,6 +885,7 @@ def normalizar_textos(datos, redes, caps_base=None):
             "descripcion": str(_campo(bruto, "descripcion") or "").strip()[:LIMITES[red]],
             "cta": " ".join(str(_campo(bruto, "cta") or "").split())[:300],
             "hashtags": _limpiar_hashtags(_campo(bruto, "hashtags")),
+            "primer_comentario": " ".join(str(_campo(bruto, "primer_comentario") or "").split())[:500],
         }
     capitulos = []
     titulos = datos.get("capitulos") if isinstance(datos.get("capitulos"), list) else []
@@ -899,24 +916,29 @@ def _textos_simulados(info, redes, raiz=None):
     caps = info.get("capitulos_base") or []
     if caps:
         datos["capitulos"] = [f"Parte {i + 1}" for i in range(len(caps))]
+    datos["palabra_clave"] = "consolas para fiestas en casa"
     # con `_textos_lentos`, como el CLI de verdad (10-20 s en el servidor)
     lento = raiz and os.path.exists(os.path.join(carpeta(raiz), "_textos_lentos"))
     time.sleep(6 if lento else 0.3)
     return json.dumps(datos, ensure_ascii=False), {"usage": {}, "_coste_anotado": True}
 
 
-def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd):
+def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd, aprendido=None, recientes=None):
     """El hilo que habla con Claude. Apunta los tokens en el vídeo."""
     pid = info["pid"]
     inicio = time.time()
     try:
+        datos_video = _leer_video(raiz, pid)
+        seo = SEO.bloque_instruccion(ajustes, SEO.palabra_del_video(datos_video, ajustes), redes,
+                                     recientes=recientes,
+                                     aprendido=aprendido)
         coste = None
         try:
             from nucleo import coste as coste_mod          # noqa: PLC0415
             coste = coste_mod
         except Exception:                                   # noqa: BLE001
             coste = None
-        instruccion = instruccion_textos(info, redes, ajustes)
+        instruccion = instruccion_textos(info, redes, ajustes, seo)
 
         def llamar():
             return cli_claude.ejecutar(
@@ -947,9 +969,15 @@ def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd):
         if not textos:
             raise RuntimeError("Claude ha contestado sin ningún texto que se pueda usar "
                                f"(vino con: {', '.join(map(str, claves)) or 'nada'})")
+        propuesta = ""
+        if isinstance(datos, dict):
+            propuesta = " ".join(str(datos.get("palabra_clave") or "").split())[:80]
         with _lock(pid):
             ficha = _leer_video(raiz, pid)
             ficha["textos"].update(textos)
+            if propuesta:
+                ficha["palabra_propuesta"] = propuesta
+            ficha.pop("seo_propuesta", None)       # la de los textos de antes ya no vale
             if "youtube" in redes:
                 ficha["capitulos"] = capitulos
             ficha["huella"] = huella_origen(info)
@@ -965,6 +993,17 @@ def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd):
             _REDES_FALLIDAS[pid] = vacias
         _log("textos_escritos", {"video": pid, "redes": list(textos), "modelo": MODELO,
                                  "segundos": round(time.time() - inicio, 1)})
+        # «Optimizar SEO al escribir los textos»: la segunda pasada, ya aplicada
+        # (los textos son los que Claude acaba de escribir: no hay nada a mano)
+        if ajustes.get("optimizar_al_escribir"):
+            # su fallo es SUYO: los textos ya están escritos y no se piden otra vez
+            try:
+                _optimizar(raiz, info, list(textos), ajustes, proyecto, cwd, aplicar=True)
+            except Exception as fallo:                      # noqa: BLE001
+                _log("seo_optimizar_fallo", {"clave": pid, "error": str(fallo)[:600]})
+                _SEO_ERRORES[("optimizar", pid)] = (
+                    f"los textos están escritos, pero la revisión SEO falló: {str(fallo)[:300]}",
+                    time.time())
     except Exception as fallo:                              # noqa: BLE001
         # SE APUNTA: el 16-10 fallo en el servidor sin dejar rastro en ningun log
         import traceback                                    # noqa: PLC0415
@@ -978,7 +1017,8 @@ def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd):
         _ESCRIBIENDO.pop(pid, None)
 
 
-def lanzar_textos(raiz, info, redes, ajustes, proyecto=None, cwd=None, en_hilo=True):
+def lanzar_textos(raiz, info, redes, ajustes, proyecto=None, cwd=None, en_hilo=True,
+                  aprendido=None, recientes=None):
     """Claude escribe los textos de las redes pedidas. Va en un hilo: detrás del
     proxy una petición de más de un minuto se corta."""
     pid = info["pid"]
@@ -993,10 +1033,335 @@ def lanzar_textos(raiz, info, redes, ajustes, proyecto=None, cwd=None, en_hilo=T
         _ESCRIBIENDO[pid] = {"desde": _iso_lima(), "redes": redes}
     _ERRORES_TEXTOS.pop(pid, None)
     if not en_hilo:
-        _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd)
+        _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd, aprendido, recientes)
         return
     threading.Thread(target=_escribir_textos, name=f"textos-{pid}", daemon=True,
-                     args=(raiz, info, redes, ajustes, proyecto, cwd)).start()
+                     args=(raiz, info, redes, ajustes, proyecto, cwd, aprendido, recientes)).start()
+
+
+# ------------------------------------------------------------- el SEO con Claude
+#
+# Tres pasadas que van en hilo (detrás del proxy una petición de más de un
+# minuto se corta) y se siguen preguntando por la ficha: «Optimizar SEO»
+# (deja una PROPUESTA campo a campo, que la persona acepta o no), «Dame 3
+# ganchos» (deja tres primeras líneas para elegir) y «Proponer palabras clave»
+# (en los ajustes del proyecto). Ninguna pisa un texto: lo que cambia lo
+# acepta alguien.
+
+_SEO_TRABAJANDO = {}           # (tipo, clave) -> {"desde", ...}
+_SEO_ERRORES = {}              # (tipo, clave) -> (mensaje, cuándo)
+#: Un fallo de una pasada SEO se enseña este rato (o hasta volver a lanzarla).
+CADUCA_ERROR_SEO_S = 900
+
+
+def _error_seo(tipo, clave):
+    dato = _SEO_ERRORES.get((tipo, clave))
+    if not dato:
+        return ""
+    if time.time() - dato[1] > CADUCA_ERROR_SEO_S:
+        _SEO_ERRORES.pop((tipo, clave), None)
+        return ""
+    return dato[0]
+
+
+def _hablar_con_claude(instruccion, sistema, proyecto, cwd, para, simulado):
+    """(texto, sobre) de Claude, con su coste apuntado en el vídeo si lo hay."""
+    def llamar():
+        if _simular_todo():
+            return simulado()
+        return cli_claude.ejecutar(
+            instruccion, modelo=MODELO, esfuerzo=ESFUERZO, cwd=cwd,
+            base_tiempo_s=180, tiempo_max_s=TECHO_TEXTOS_S, sistema=sistema,
+            extra=["--no-session-persistence"], para=para)
+    try:
+        from nucleo import coste                            # noqa: PLC0415
+    except Exception:                                       # noqa: BLE001
+        coste = None
+    if coste is not None and proyecto is not None:
+        with coste.contexto(proyecto, "render"):
+            respuesta, sobre = llamar()
+            if isinstance(sobre, dict) and not sobre.get("_coste_anotado"):
+                coste.reportar_claude(sobre, operacion=para)
+                sobre["_coste_anotado"] = True
+        return respuesta, sobre
+    return llamar()
+
+
+def _en_marcha(tipo, clave, extra=None):
+    with _LOCK_LOCKS:
+        if (tipo, clave) in _SEO_TRABAJANDO:
+            raise ErrorPublicar("ya está en marcha: espera a que termine", 409)
+        _SEO_TRABAJANDO[(tipo, clave)] = dict(extra or {}, desde=_iso_lima())
+        _SEO_ERRORES.pop((tipo, clave), None)
+
+
+def _lanzar_seo(tipo, clave, fn, en_hilo):
+    def trabajo():
+        try:
+            fn()
+        except Exception as fallo:                          # noqa: BLE001
+            import traceback                                # noqa: PLC0415
+            _log(f"seo_{tipo}_fallo", {"clave": clave, "error": str(fallo)[:600],
+                                       "traza": traceback.format_exc()[-1200:]})
+            _SEO_ERRORES[(tipo, clave)] = (f"{str(fallo)[:400]}", time.time())
+        finally:
+            _SEO_TRABAJANDO.pop((tipo, clave), None)
+    if en_hilo:
+        threading.Thread(target=trabajo, name=f"seo-{tipo}-{clave}", daemon=True).start()
+    else:
+        trabajo()
+
+
+def _optimizar_simulado(datos_video, redes):
+    salida = {}
+    for red in redes:
+        t = (datos_video.get("textos") or {}).get(red) or {}
+        salida[red] = {"nota": 80, "fallos": ["la primera línea no dice la palabra clave"],
+                       "campos": {"descripcion": {
+                           "despues": "[SEO] " + str(t.get("descripcion") or ""),
+                           "porque": "la palabra clave va en la primera línea"},
+                           "primer_comentario": {"despues": "¿Cuál elegirías tú?",
+                                                 "porque": "invita a comentar"}}}
+    time.sleep(0.3)
+    return json.dumps(salida, ensure_ascii=False), {"_coste_anotado": True}
+
+
+def _optimizar(raiz, info, redes, ajustes, proyecto, cwd, aplicar=False):
+    pid = info["pid"]
+    datos = _leer_video(raiz, pid)
+    palabra = SEO.palabra_del_video(datos, ajustes)
+    notas, textos = {}, {}
+    for red in redes:
+        t = datos["textos"].get(red) or {}
+        if not str(t.get("descripcion") or "").strip():
+            continue
+        comp = componer(red, t, ajustes, info, datos.get("capitulos"), datos)
+        notas[red] = SEO.nota(red, t, comp, ajustes, datos, info, palabra)
+        textos[red] = {k: t.get(k) for k in SEO.CAMPOS_OPTIMIZABLES
+                       if k != "titulo" or red in ("youtube", "facebook")}
+    if not textos:
+        raise ErrorPublicar("no hay textos que optimizar: pide antes los textos a Claude o escríbelos")
+    instruccion = SEO.INSTRUCCION_OPTIMIZAR.format(
+        nombre=info.get("nombre") or pid, duracion=_marca_de_tiempo(info.get("duracion_s") or 0),
+        palabra=palabra or "(el proyecto no tiene)", secundarias=ajustes.get("secundarias") or "—",
+        zona=ajustes.get("zona") or "—", evitar=ajustes.get("evitar") or "—",
+        textos=json.dumps(textos, ensure_ascii=False, indent=1),
+        nota=SEO.nota_como_texto(notas),
+        reglas="\n".join(f"- {NOMBRE_RED[r]}: {REGLAS_RED[r]}" for r in textos),
+        claves=", ".join(f'"{r}"' for r in textos))
+    respuesta, _sobre = _hablar_con_claude(
+        instruccion, SEO.SISTEMA_OPTIMIZAR, proyecto, cwd, "optimizar el SEO de los textos",
+        lambda: _optimizar_simulado(datos, list(textos)))
+    propuesta = SEO.normalizar_optimizacion(comun.extraer_json(respuesta, "la revisión SEO"),
+                                            list(textos))
+    if not propuesta:
+        raise RuntimeError("Claude no ha devuelto ninguna revisión que se pueda usar")
+    with _lock(pid):
+        ficha = _leer_video(raiz, pid)
+        # «ANTES» ES LO QUE SE LE MANDÓ A CLAUDE, no lo que hay ahora: si alguien
+        # retocó un campo mientras Claude revisaba, aceptar ese campo da 409 y
+        # no pisa el retoque (revisión del 18-10)
+        tocados = {}
+        for red, p in propuesta.items():
+            p["antes"] = {k: (textos.get(red) or {}).get(k) for k in p["campos"]}
+            actual = ficha["textos"].get(red) or {}
+            tocados[red] = [k for k in p["campos"]
+                            if (actual.get(k) or None) != (p["antes"][k] or None)]
+        ficha["seo_propuesta"] = {"al": _iso_lima(), "redes": propuesta}
+        if aplicar:
+            _aceptar_seo(ficha, {r: [k for k in p["campos"] if k not in tocados[r]]
+                                 for r, p in propuesta.items()})
+        _escribir(_ruta_video(raiz, pid), ficha)
+    _log("seo_optimizado", {"video": pid, "redes": list(propuesta), "aplicado": aplicar})
+
+
+def _aceptar_seo(ficha, aceptar):
+    """Aplica a los textos los campos aceptados de la propuesta SEO: {red: [campos]}.
+    Un campo cambiado a mano DESPUÉS de la propuesta no se pisa: se dice."""
+    if not isinstance(aceptar, dict):
+        raise ErrorPublicar("«aceptar_seo» va como {red: [campos]}")
+    propuesta = ((ficha.get("seo_propuesta") or {}).get("redes")) or {}
+    for red, campos in aceptar.items():
+        if red not in propuesta or not isinstance(campos, list):
+            raise ErrorPublicar("esa propuesta ya no está: vuelve a pedirla")
+        p = propuesta[red]
+        actual = dict(ficha["textos"].get(red) or {})
+        for campo in campos:
+            if campo not in p["campos"]:
+                continue
+            antes = (p.get("antes") or {}).get(campo)
+            if (actual.get(campo) or None) != (antes or None):
+                raise ErrorPublicar(f"has cambiado «{campo}» de {NOMBRE_RED[red]} después de "
+                                    "pedir la revisión: vuelve a pedirla para no pisar lo tuyo", 409)
+            actual[campo] = p["campos"][campo]["despues"]
+            del p["campos"][campo]
+        ficha["textos"][red] = actual
+        if not p["campos"]:
+            del propuesta[red]
+    if not propuesta:
+        ficha.pop("seo_propuesta", None)
+
+
+def lanzar_optimizar(raiz, info, redes, ajustes, proyecto=None, cwd=None, en_hilo=True):
+    redes = [r for r in (redes or []) if r in REDES]
+    if not redes:
+        raise ErrorPublicar("elige al menos una red")
+    if info["pid"] in _ESCRIBIENDO:
+        raise ErrorPublicar("Claude todavía está escribiendo los textos: espera a que acabe", 409)
+    _en_marcha("optimizar", info["pid"], {"redes": redes})
+    _lanzar_seo("optimizar", info["pid"],
+                lambda: _optimizar(raiz, info, redes, ajustes, proyecto, cwd), en_hilo)
+
+
+def _ganchos(raiz, info, red, ajustes, proyecto, cwd):
+    pid = info["pid"]
+    datos = _leer_video(raiz, pid)
+    texto = str((datos["textos"].get(red) or {}).get("descripcion") or "")
+    instruccion = SEO.INSTRUCCION_GANCHOS.format(
+        red=NOMBRE_RED[red], largo=SEO.PRIMERA_LINEA.get(red) or 100,
+        palabra=SEO.palabra_del_video(datos, ajustes) or "(sin palabra clave)",
+        emojis=("Puedes usar un emoji." if ajustes.get("usar_emojis", True) else "Sin emojis."),
+        texto=texto[:1500] or "—",
+        guion="\n".join(f"- {b.get('texto', '')}" for b in (info.get("guion") or []))[:3000] or "—")
+    respuesta, _s = _hablar_con_claude(
+        instruccion, SISTEMA, proyecto, cwd, "ganchos para redes",
+        lambda: (json.dumps({"ganchos": [f"¿{red} 1?", f"Gancho {red} 2", f"Gancho {red} 3"]}),
+                 {"_coste_anotado": True}))
+    ganchos = SEO.normalizar_ganchos(comun.extraer_json(respuesta, "los ganchos"))
+    if not ganchos:
+        raise RuntimeError("Claude no ha devuelto ningún gancho")
+    with _lock(pid):
+        ficha = _leer_video(raiz, pid)
+        ficha.setdefault("ganchos", {})[red] = ganchos
+        _escribir(_ruta_video(raiz, pid), ficha)
+
+
+def lanzar_ganchos(raiz, info, red, ajustes, proyecto=None, cwd=None, en_hilo=True):
+    if red not in REDES:
+        raise ErrorPublicar("esa red no existe")
+    _en_marcha(f"ganchos_{red}", info["pid"])
+    _lanzar_seo(f"ganchos_{red}", info["pid"],
+                lambda: _ganchos(raiz, info, red, ajustes, proyecto, cwd), en_hilo)
+
+
+def usar_gancho(raiz, pid, red, indice):
+    """Pone el gancho elegido como primera línea del texto de esa red."""
+    with _lock(pid):
+        ficha = _leer_video(raiz, pid)
+        ganchos = (ficha.get("ganchos") or {}).get(red) or []
+        if isinstance(indice, bool) or not isinstance(indice, int) or not 0 <= indice < len(ganchos):
+            raise ErrorPublicar("ese gancho ya no está")
+        gancho = ganchos[indice]
+        actual = dict(ficha["textos"].get(red) or {})
+        lineas = str(actual.get("descripcion") or "").split("\n")
+        resto = "\n".join(lineas[1:]).lstrip("\n") if lineas and lineas[0].strip() else \
+            str(actual.get("descripcion") or "")
+        actual["descripcion"] = (gancho + ("\n\n" + resto if resto.strip() else ""))[:LIMITES[red]]
+        ficha["textos"][red] = actual
+        ficha["editado"] = True
+        ficha.get("ganchos", {}).pop(red, None)
+        # la propuesta SEO de ese texto era sobre el de antes del gancho
+        propuesta = ((ficha.get("seo_propuesta") or {}).get("redes")) or {}
+        ((propuesta.get(red) or {}).get("campos") or {}).pop("descripcion", None)
+        if red in propuesta and not propuesta[red].get("campos"):
+            del propuesta[red]
+        if not propuesta:
+            ficha.pop("seo_propuesta", None)
+        _escribir(_ruta_video(raiz, pid), ficha)
+    return ficha
+
+
+def sugerencias_de_busqueda(frase, plazo=4):
+    """Lo que YouTube sugiere al escribir la frase, o None si el servidor no
+    puede salir a internet (se dice, no se inventa)."""
+    import urllib.parse                                     # noqa: PLC0415
+    import urllib.request                                   # noqa: PLC0415
+    if _simular_todo():
+        return [f"{frase} precio", f"{frase} cerca de mi"]
+    url = ("https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&hl=es&q="
+           + urllib.parse.quote(frase))
+    try:
+        with urllib.request.urlopen(url, timeout=plazo) as r:
+            datos = json.loads(r.read().decode("utf-8", "replace"))
+        return [str(x) for x in (datos[1] if isinstance(datos, list) and len(datos) > 1 else [])][:8]
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
+def _proponer_palabras(raiz, cid, nombre, marca, contexto, proyecto, cwd):
+    ajustes = ajustes_de(raiz, cid)
+    instruccion = SEO.INSTRUCCION_PALABRAS.format(
+        nombre=nombre or cid, marca=(marca or "—")[:1500], zona=ajustes.get("zona") or "—",
+        contexto=(contexto or "—")[:8000])
+    respuesta, _s = _hablar_con_claude(
+        instruccion, SISTEMA, proyecto, cwd, "palabras clave del proyecto",
+        lambda: (json.dumps({"principal": {"frase": "alquiler de consolas en Lima",
+                                           "porque": "es lo que se busca"},
+                             "secundarias": [{"frase": "fiestas infantiles", "porque": "x"}],
+                             "zona": {"frase": "Lima, Perú", "porque": "y"}}),
+                 {"_coste_anotado": True}))
+    propuesta = SEO.normalizar_palabras(comun.extraer_json(respuesta, "las palabras clave"))
+    con_internet = True
+    for item in [propuesta["principal"]] + propuesta["secundarias"]:
+        sug = sugerencias_de_busqueda(item["frase"])
+        if sug is None:
+            con_internet = False
+            break
+        item["sugerencias"] = sug
+    propuesta["internet"] = con_internet
+    propuesta["al"] = _iso_lima()
+    guardar_ajustes(raiz, cid, {}, internos={"propuesta_palabras": propuesta})
+
+
+def lanzar_palabras(raiz, cid, nombre, marca, contexto, proyecto=None, cwd=None, en_hilo=True):
+    _en_marcha("palabras", _clave_proyecto(cid))
+    _lanzar_seo("palabras", _clave_proyecto(cid),
+                lambda: _proponer_palabras(raiz, cid, nombre, marca, contexto, proyecto, cwd),
+                en_hilo)
+
+
+def estado_palabras(cid):
+    clave = _clave_proyecto(cid)
+    return {"trabajando": ("palabras", clave) in _SEO_TRABAJANDO,
+            "error": _error_seo("palabras", clave)}
+
+
+def hashtags_recientes(raiz, pids, sin_pid=None, cuantos=5):
+    """Los hashtags de los últimos vídeos del proyecto (`pids`), para no
+    repetir el mismo bloque en todos los posts."""
+    filas = []
+    for pid in pids or []:
+        if pid == sin_pid:
+            continue
+        try:
+            datos = _leer_video(raiz, pid)
+        except ErrorPublicar:
+            continue
+        if datos.get("escritos"):
+            filas.append((str(datos["escritos"]), datos))
+    vistos = []
+    for _al, datos in sorted(filas, key=lambda x: x[0], reverse=True)[:cuantos]:
+        for t in (datos.get("textos") or {}).values():
+            for h in (t or {}).get("hashtags") or []:
+                if h not in vistos:
+                    vistos.append(h)
+    return vistos[:30]
+
+
+def aprendido_de_resultados(raiz, videos, cid):
+    """Las primeras líneas de los posts que mejor fueron, con sus vistas, para
+    dárselas a Claude como ejemplo (publicar-redes-2: `lo_que_funciono`)."""
+    try:
+        mejores = lo_que_funciono(raiz, videos, cid, dias=90, por="vistas", cuantos=5)
+    except Exception:                                       # noqa: BLE001
+        return []
+    salida = []
+    for p in mejores.get("posts") or []:
+        primera = (str(p.get("descripcion") or "").strip().splitlines() or [""])[0][:160]
+        if primera:
+            vistas = (p.get("metricas") or {}).get("vistas")
+            salida.append(f"{NOMBRE_RED.get(p['red'], p['red'])}, {vistas} vistas: «{primera}»")
+    return salida
 
 
 def _texto_para(textos_red, ajustes, extra=""):
@@ -1014,9 +1379,10 @@ def _texto_para(textos_red, ajustes, extra=""):
     return "\n\n".join(p for p in partes if p), tags
 
 
-def componer(red, textos_red, ajustes, info, capitulos=None):
+def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
     """Lo que sale en la red: el texto para copiar y los campos de Upload-Post."""
     textos_red = textos_red or {}
+    palabra = SEO.palabra_del_video(datos_video, ajustes)
     titulo = str(textos_red.get("titulo") or "").strip()
     extra = ""
     # los capitulos, solo en un video de YouTube de verdad: un Short no los usa
@@ -1047,12 +1413,8 @@ def componer(red, textos_red, ajustes, info, capitulos=None):
         titulo = re.sub(r"[<>]", "", titulo or info.get("nombre") or "Vídeo")[:100]
         campos["youtube_title"] = titulo
         campos["youtube_description"] = re.sub(r"[<>]", "", texto)
-        etiquetas, largo = [], 0
-        for t in tags:
-            if largo + len(t) + 1 > 450:
-                break
-            etiquetas.append(t)
-            largo += len(t) + 1
+        # las etiquetas: la palabra clave, las secundarias y los hashtags
+        etiquetas = SEO.etiquetas_youtube(ajustes, palabra, tags)
         if etiquetas:
             campos["tags[]"] = etiquetas
         campos["privacyStatus"] = ajustes.get("privacidad_youtube") or "public"
@@ -1072,10 +1434,13 @@ def componer(red, textos_red, ajustes, info, capitulos=None):
             campos["facebook_page_id"] = ajustes["facebook_pagina"]
         if ia:
             campos["facebook_is_ai_generated"] = True
+    extra_seo, avisos_seo = SEO.campos_extra(red, textos_red, ajustes, datos_video, info, palabra)
+    campos.update(extra_seo)
+    avisos += avisos_seo
     if not str(textos_red.get("descripcion") or "").strip():
         avisos.append("sin texto todavía")
     return {"texto": texto, "titulo": titulo if red in ("youtube", "facebook") else "",
-            "campos": campos, "avisos": avisos}
+            "campos": campos, "avisos": avisos, "tags": tags}
 
 
 # ----------------------------------------------------------- textos a mano
@@ -1105,6 +1470,10 @@ def guardar_ficha(raiz, pid, cambios):
                         actual[campo] = valor[campo][:LIMITES[red]]
                 if "hashtags" in valor:
                     actual["hashtags"] = _limpiar_hashtags(valor["hashtags"])
+                if "primer_comentario" in valor:
+                    if not isinstance(valor["primer_comentario"], str):
+                        raise ErrorPublicar("«primer_comentario» es un texto")
+                    actual["primer_comentario"] = valor["primer_comentario"].strip()[:500]
                 ficha["textos"][red] = actual
             ficha["editado"] = True
         if "capitulos" in cambios:
@@ -1120,6 +1489,25 @@ def guardar_ficha(raiz, pid, cambios):
                     except (TypeError, ValueError):
                         raise ErrorPublicar("cada capítulo lleva su segundo y su título") from None
             ficha["capitulos"] = limpios
+        for campo, largo in (("palabra_clave", 80), ("colaboradores", 200), ("etiquetas", 600)):
+            if campo in cambios:
+                if not isinstance(cambios[campo], str) or len(cambios[campo]) > largo:
+                    raise ErrorPublicar(f"«{campo}» es un texto de hasta {largo} caracteres")
+                ficha[campo] = " ".join(cambios[campo].split())
+        if "aceptar_seo" in cambios:
+            _aceptar_seo(ficha, cambios["aceptar_seo"])
+        if cambios.get("descartar_seo"):
+            ficha.pop("seo_propuesta", None)
+        if isinstance(cambios.get("rechazar_seo"), dict):
+            # «Dejar el mío»: ese cambio sale de la propuesta y el texto no se toca
+            redes_p = ((ficha.get("seo_propuesta") or {}).get("redes")) or {}
+            for red, campos in cambios["rechazar_seo"].items():
+                for campo in campos if isinstance(campos, list) else []:
+                    ((redes_p.get(red) or {}).get("campos") or {}).pop(campo, None)
+                if red in redes_p and not redes_p[red].get("campos"):
+                    del redes_p[red]
+            if not redes_p:
+                ficha.pop("seo_propuesta", None)
         if "portada" in cambios:
             ficha["portada"] = _validar_portada(cambios["portada"], ficha.get("portada"))
             if cambios["portada"].get("quitar_imagen"):
@@ -1338,8 +1726,12 @@ def ficha(raiz, info, ajustes):
                      for r in REDES)
     desactualizada = bool(hay_textos and datos.get("huella") and huella
                           and datos["huella"] != huella)
-    compuestos = {r: componer(r, datos["textos"].get(r), ajustes, info, datos.get("capitulos"))
+    compuestos = {r: componer(r, datos["textos"].get(r), ajustes, info, datos.get("capitulos"),
+                              datos)
                   for r in REDES}
+    palabra = SEO.palabra_del_video(datos, ajustes)
+    notas_seo = {r: SEO.nota(r, datos["textos"].get(r), compuestos[r], ajustes, datos, info, palabra)
+                 for r in REDES}
     for r in compuestos:
         compuestos[r].pop("campos", None)
     envios = [_envio_publico(e) for e in datos["envios"]]
@@ -1359,6 +1751,18 @@ def ficha(raiz, info, ajustes):
         "desactualizada": desactualizada, "escritos": datos.get("escritos") or "",
         "editado": bool(datos.get("editado")),
         "portada": portada_de(datos),
+        "seo": {
+            "palabra": palabra, "palabra_propia": str(datos.get("palabra_clave") or ""),
+            "palabra_propuesta": str(datos.get("palabra_propuesta") or ""),
+            "colaboradores": str(datos.get("colaboradores") or ""),
+            "etiquetas": str(datos.get("etiquetas") or ""),
+            "notas": notas_seo, "propuesta": datos.get("seo_propuesta") or {},
+            "ganchos": datos.get("ganchos") or {},
+            "trabajando": {t: dict(v) for (t, c), v in list(_SEO_TRABAJANDO.items()) if c == pid},
+            "errores": {t: _error_seo(t, c) for (t, c) in list(_SEO_ERRORES) if c == pid
+                        and _error_seo(t, c)},
+            "nombre_fichero": SEO.nombre_fichero(palabra, info.get("nombre"), pid),
+        },
         "escribiendo": pid in _ESCRIBIENDO, "error_textos": _ERRORES_TEXTOS.get(pid, ""),
         "error_redes": _REDES_FALLIDAS.get(pid, []) if pid in _ERRORES_TEXTOS else [],
         "escribiendo_desde": (_ESCRIBIENDO.get(pid) or {}).get("desde", ""),
@@ -1533,7 +1937,7 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
     titulo_general = ""
     for e in envios:
         comp = componer(e["red"], datos["textos"].get(e["red"]), ajustes, info,
-                        datos.get("capitulos"))
+                        datos.get("capitulos"), datos)
         campos.update(comp["campos"])
         if comp.get("titulo") and not titulo_general:
             titulo_general = comp["titulo"]
@@ -1555,13 +1959,17 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
     campos.update(extra)
     cuando = envios[0]["cuando"] if envios[0].get("modo") == "programado" else None
     perfil = envios[0].get("perfil") or ajustes.get("perfil")
+    # EL NOMBRE DEL FICHERO lleva la palabra clave; el MP4 del proyecto no cambia
+    nombre_subido = SEO.nombre_fichero(SEO.palabra_del_video(datos, ajustes),
+                                       info.get("nombre"), pid)
 
     _SUBIENDO.add(lote)          # ANTES del hilo: /refrescar no lo da por huerfano
 
     def trabajo():
         try:
             r = cliente(raiz).publicar(perfil, redes, info["mp4"], campos, cuando=cuando,
-                                       zona=ZONA, id_propio=lote, ficheros=ficheros)
+                                       zona=ZONA, id_propio=lote, ficheros=ficheros,
+                                       nombre_video=nombre_subido)
         except UP.ErrorUploadPost as fallo:
             mensaje = str(fallo)
             if fallo.sin_respuesta:

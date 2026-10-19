@@ -47,6 +47,21 @@ vídeos, estilos, claves y contraseña no se tocan.
   una misma imagen no se rehace sola más de dos veces.
 - Revisar no cambia nada del vídeo: no deja ningún paso obsoleto.
 
+**Profundidad 2.5D en el montaje (18 de octubre)**
+- **Nueva casilla en 🎬 Movimiento y efectos: «Profundidad 2.5D».** Lo que
+  está cerca (un árbol, una persona, un producto) se mueve más que el fondo
+  mientras la cámara hace su recorrido, como si la imagen tuviera capas.
+- **No cuesta nada:** un modelo gratuito calcula en el propio servidor qué está
+  cerca y qué lejos de cada imagen (menos de un segundo por imagen, y una sola
+  vez: se guarda). No redibuja ninguna imagen; encenderla solo rehace las capas
+  y el montaje. Eso sí, el montaje tarda más: unos dos tercios más por plano.
+- **Es experimental y va apagada.** En fotos se ve limpia; en una ilustración,
+  el borde de lo que va delante puede deformarse un poco al moverse.
+- `asvs actualizar` instala lo que hace falta (unos 100 MB, una sola vez). Si
+  no puede, el Studio sigue igual y la casilla dice qué falta.
+- Por ahora se elige para el vídeo entero; elegirla plano a plano llegará con
+  el revisor de imágenes, en la diapositiva de cada plano.
+
 **Publicar: SEO de verdad (18 de octubre)**
 - **Palabras clave del proyecto**, en Publicar → Cuentas y ajustes → **SEO de
   este proyecto**: la principal («alquiler de consolas en Lima»), las

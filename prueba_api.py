@@ -4759,6 +4759,20 @@ def probar_montaje(cliente):
           "y la firma de las capas vuelve a la de antes")
     respuesta, otra = cliente.put(base, {"montaje": {"movimiento": "sobrio"}})
     ok(otra.get("cambiado") is False, "poner lo que ya está no cambia nada")
+    # LA PROFUNDIDAD 2.5D (18-10): se dice si está disponible, se guarda sola
+    # al encenderla y apagarla quita la clave
+    _r, datos_m = cliente.get("/api/montaje")
+    ok(isinstance((datos_m.get("profundidad") or {}).get("disponible"), bool),
+       "GET /api/montaje dice si la profundidad 2.5D está disponible")
+    respuesta, _d = cliente.put(base, {"montaje": {"profundidad": True}})
+    _r, callouts = cliente.get(f"/api/proyectos/{largo}/pasos/callouts")
+    igual((callouts.get("params") or {}).get("montaje"), {"profundidad": True},
+          "encender la profundidad guarda solo esa clave")
+    respuesta, _d = cliente.put(base, {"montaje": {"profundidad": False}})
+    _r, callouts = cliente.get(f"/api/proyectos/{largo}/pasos/callouts")
+    ok("montaje" not in (callouts.get("params") or {}), "y apagarla quita la clave")
+    respuesta, _d = cliente.put(base, {"montaje": {"profundidad": "quizá"}})
+    igual(respuesta.status_code, 400, "un valor que no es sí/no da 400")
     respuesta, _d = cliente.put(base, {"transiciones": ["inventada"]})
     igual(respuesta.status_code, 400, "una transición que no existe da 400")
     respuesta, _d = cliente.post(f"{base}/aplicar", {})

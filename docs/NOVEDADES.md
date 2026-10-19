@@ -20,6 +20,70 @@ vídeos, estilos, claves y contraseña no se tocan.
   dice «Leyendo tu corrección…», y un segundo toque no gasta nada.
 - Escuchar una voz ya no impide rehacer el estilo.
 
+**Un revisor de imágenes que mira cada plano con su guion (18 de octubre)**
+- En **Imágenes**, debajo del cuadro de notas, el panel **Revisor de
+  imágenes**: «Revisar imágenes» mira cada imagen con lo que dice la voz en
+  ese plano, el bloque del guion, las indicaciones del estilo y del Encargo y
+  las reglas de la casa, y deja una **nota por plano** en las que no cuadran
+  (el equipo mal montado, mandos de otro color, gente que no mira a la
+  pantalla, manos o mandos fundidos, otro estilo). Sus notas salen en la lista
+  de siempre con la etiqueta **revisor · alta/media/baja** y se cambian o se
+  quitan como las tuyas.
+- **«Rehacer las marcadas»** las manda a la cola de siempre: las de retoque
+  parten de la imagen de ahora y las que piden otra imagen se dibujan desde
+  cero. Cada plano marcado tiene su «✕» para decir «está bien así».
+- Mira las imágenes en grupos de 8 seguidas, para ver si el sitio, el equipo y
+  la gente se mantienen de un plano a otro; cada grupo ve además la última
+  imagen del anterior, para que el salto entre grupos tampoco se escape.
+- Revisar **no gasta en imágenes** (usa tu cuenta de Claude) y una imagen ya
+  revisada no se vuelve a mirar mientras no cambie. Lo que cuesta es rehacer.
+- **Tres modos**, en Configuración → Revisor de imágenes: **manual** (solo con
+  el botón; es el de fábrica), **autónomo** (al acabar cada tanda de imágenes, o
+  al rehacer imágenes con tus notas, revisa las nuevas y rehace solo lo grave,
+  una vez) y **automático** (también
+  al generar el vídeo entero: rehace todo lo marcado y lo vuelve a revisar,
+  hasta el número de vueltas que elijas, antes de montar). En los dos últimos,
+  con **topes**: imágenes como mucho por tanda y gasto como mucho por vídeo; y
+  una misma imagen no se rehace sola más de dos veces.
+- Revisar no cambia nada del vídeo: no deja ningún paso obsoleto.
+
+**Publicar: SEO de verdad (18 de octubre)**
+- **Palabras clave del proyecto**, en Publicar → Cuentas y ajustes → **SEO de
+  este proyecto**: la principal («alquiler de consolas en Lima»), las
+  secundarias, la zona y las palabras a evitar. **«Proponer palabras clave»**:
+  Claude las propone desde los encargos y guiones del proyecto, cada una con su
+  porqué y, si el servidor puede salir a internet, con lo que sugiere YouTube al
+  escribirlas. Tú eliges.
+- **Palabra clave de cada vídeo**, en su ficha (si no, vale la del proyecto).
+  Al escribir los textos, Claude la pone en la primera línea de cada red, al
+  principio del título de YouTube y Facebook y en las dos primeras líneas de la
+  descripción de YouTube, reparte las secundarias, nombra la zona con un
+  hashtag local, propone una palabra más concreta para ese vídeo y escribe un
+  **primer comentario**. Rota los hashtags del **banco del proyecto** (amplios,
+  de nicho, locales) para no repetir el mismo bloque, y aprende de los posts
+  que mejor funcionaron.
+- **La nota SEO de cada red**, sin Claude y sin coste: ✓ y ⚠ con el porqué
+  (palabra clave en el título y en la primera línea, largo del título y de la
+  primera línea, hashtags en su rango y uno local, sin hashtags vacíos como
+  «fyp», CTA, ubicación, categoría, portada) y una nota de 0 a 100.
+- **«Optimizar SEO con Claude»**: una segunda pasada como revisor SEO que
+  propone cambios campo a campo con su porqué. Tú aceptas campo a campo,
+  «Aceptar todo» o «Dejar el mío»; nunca pisa lo que hayas cambiado a mano
+  después de pedirla. **«Dame 3 ganchos»** para la primera línea de una red.
+  Y en lo fijo, «Optimizar SEO al escribir los textos» hace las dos pasadas
+  seguidas.
+- **Lo que ahora va a cada red además del texto:** Instagram, la ubicación
+  (el número de un Lugar o Página de Facebook, con su guía), colaboradores y
+  etiquetas; YouTube, la categoría, el idioma del texto y del audio, «Hecho
+  para niños» (apagado: un vídeo para padres que contratan fiestas infantiles
+  NO es para niños) y las etiquetas con las palabras clave; TikTok, la
+  ubicación (si tu cuenta tiene esa función); y el primer comentario. Instagram
+  no admite texto alternativo en Upload-Post, y se dice.
+- **El MP4 se sube con la palabra clave en el nombre**
+  («alquiler-de-consolas-en-lima-fiesta.mp4»); el del proyecto no cambia.
+- **En el Encargo**, si el proyecto tiene palabra clave, una sugerencia: que
+  el guion la diga en los 3 primeros segundos y salga en pantalla.
+
 **Publicar: los resultados, más completos (17 de octubre)**
 - **Cuánto se ve de cada vídeo.** TikTok dice qué parte de la gente lo vio
   **hasta el final** y los **segundos de media**; YouTube, cuando su informe
@@ -44,6 +108,19 @@ vídeos, estilos, claves y contraseña no se tocan.
   YouTube y lo que hayas mirado desde la web de Upload-Post.
 - Si la carga de Resultados fallaba, la pantalla se quedaba rota en vez de
   decir el motivo: ahora sale el error.
+
+**Los cortos duran lo pedido, y comparar el guion con opus (18 de octubre)**
+- Un vídeo de hasta 2 minutos salía medio segundo o un segundo más corto de lo
+  pedido: el cálculo de palabras preveía las pausas de un vídeo largo (tres o
+  cuatro) y el guion corto lleva dos. Ahora cuenta las suyas. Los vídeos ya
+  hechos no cambian.
+- **`asvs comparar-guion`**, en la consola del servidor: escribe el guion de un
+  vídeo tuyo con sonnet y con opus, con el mismo material y las mismas
+  indicaciones, y te los enseña como «A» y «B» sin decir cuál es cuál.
+  `asvs comparar-guion revelar` lo dice después de elegir (y cuál es el que
+  usa hoy ese vídeo: por defecto, opus con esfuerzo muy alto). No toca el vídeo y
+  no gasta dólares, solo tokens de la suscripción. Sin nada detrás, enseña la
+  lista de vídeos que se pueden comparar.
 
 **Vídeos con más movimiento, sobre todo los cortos (18 de octubre)**
 - **Movimiento de cámara en tres niveles**, en el Encargo y en el vídeo
@@ -260,7 +337,6 @@ vídeos, estilos, claves y contraseña no se tocan.
   regenerarlo entero.
 - Subir imágenes, logos o capturas ya no deja parado el resto del Studio
   mientras se guardan.
-
 
 **Publicar en redes (16 de octubre)**
 - **Arriba hay una barra de módulos: Inicio · Crear · Publicar · Automatizar.**
@@ -846,7 +922,6 @@ los derechos de la música, la voz y los efectos.
 - «Empezar de cero» ahora explica qué hace: olvida el intento a medias y lo
   genera todo otra vez (se vuelve a pagar); «Retomar» aprovecha lo ya hecho.
   Pide confirmación.
-
 
 **Corregido: la música no se oía aunque estuviera marcada**
 - La música sí iba en el vídeo, pero se agachaba tanto bajo la voz (unos

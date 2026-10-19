@@ -4289,6 +4289,97 @@ def publicar_resultados_y_lo_mejor(navegador, datos):
     pg.cerrar()
 
 
+# publicar-seo (18-10-2026): el SEO de Publicar. Con el doble de Claude.
+@escenario
+def publicar_seo(navegador, datos):
+    """SEO del proyecto (palabra clave, ubicación que no es un número,
+    «Proponer palabras clave»), y en la ficha la nota SEO de cada red,
+    «Optimizar SEO con Claude» con su antes/después y «Dame 3 ganchos». En el
+    móvil y en los dos temas."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    api.post(f"/api/publicar/proyectos/{cid}/perfil", {})
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["instagram", "youtube"], "textos": {
+        "instagram": {"descripcion": "Reel para el SEO", "cta": "Escríbenos", "hashtags": ["lima"]},
+        "youtube": {"titulo": "Un vídeo", "descripcion": "Descripción", "hashtags": ["lima"]}}})
+    pg = Pagina(navegador, datos)
+    pg.js("PUB.seccion = 'cuentas'; irAModulo('publicar');")
+    pg.p.wait_for_timeout(1500)
+    tarjeta = f'.proyecto-publicar:has(input[data-perfil="{cid}"])'
+    pg.p.locator(f"{tarjeta} .seo-proyecto > summary").first.click()
+    ok(pg.esperar(f"{tarjeta} .seo-proyecto button", "Proponer palabras clave", 5),
+       "Cuentas y ajustes → SEO de este proyecto, con «Proponer palabras clave»")
+    campo = pg.p.locator(f'{tarjeta} input[data-seo="palabra_clave"]').first
+    campo.fill("alquiler de consolas en Lima")
+    campo.press("Tab")
+    pg.p.wait_for_timeout(1200)
+    _r, proyectos = api.get("/api/publicar/proyectos")
+    fila = next((x for x in proyectos["proyectos"] if x["id"] == cid), {})
+    ok((fila.get("ajustes") or {}).get("palabra_clave") == "alquiler de consolas en Lima",
+       "la palabra clave del proyecto se guarda")
+    ubic = pg.p.locator(f'{tarjeta} input[data-seo="ig_ubicacion"]').first
+    ubic.fill("Lima centro")
+    ubic.press("Tab")
+    pg.p.wait_for_timeout(1000)
+    ok("número" in pg.toast().lower(), f"una ubicación de Instagram que no es un número se dice: {pg.toast()[:60]!r}")
+    ok(pg.visible(f"{tarjeta} .seo-proyecto select option", "Entretenimiento") or
+       pg.p.locator(f"{tarjeta} .seo-proyecto select").count() >= 3, "las categorías e idiomas de YouTube")
+    pg.pulsar(f"{tarjeta} .seo-proyecto button", "Proponer palabras clave")
+    ok(pg.esperar(f"{tarjeta} .propuesta-palabras", "alquiler de consolas en Lima", 20),
+       "Claude propone la principal, las secundarias y la zona, con su porqué")
+    ok(pg.visible(f"{tarjeta} .propuesta-palabras .meta", "YouTube sugiere"), "y lo que sugiere YouTube")
+    pg.captura("publicar_seo_proyecto")
+
+    # la ficha
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    ok(pg.esperar(".seo-video h3", "SEO", 15), "la ficha tiene su bloque SEO")
+    ok(pg.esperar(".texto-red[data-red=instagram] .nota-seo .pastilla", "SEO", 5), "cada red con su nota SEO")
+    pg.p.locator(".texto-red[data-red=instagram] .nota-seo > summary").first.click()
+    ok(pg.visible(".texto-red[data-red=instagram] .punto-seo", "primera línea"), "y el porqué de la nota")
+    ok(pg.visible(".texto-red[data-red=instagram] .meta", "texto alternativo"),
+       "Instagram dice que no admite texto alternativo")
+    pg.pulsar(".seo-video button", "Optimizar SEO con Claude")
+    ok(pg.esperar(".propuesta-seo .cambio-seo", segundos=20), "«Optimizar SEO»: la propuesta campo a campo")
+    ok(pg.visible(".propuesta-seo .antes-despues .despues", "[SEO]"), "con el antes y el después")
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    ok(ficha["textos"]["instagram"]["descripcion"] == "Reel para el SEO", "sin tocar todavía el texto")
+    pg.pulsar('.cambio-seo[data-red="instagram"][data-campo="descripcion"] button', "Aceptar")
+    pg.p.wait_for_timeout(1200)
+    valor = pg.p.evaluate("() => (document.querySelector('.texto-red[data-red=instagram] textarea') || {}).value || ''")
+    ok(valor.startswith("[SEO]"), f"«Aceptar» lo pone en el texto: {valor[:30]!r}")
+    pg.pulsar(".texto-red[data-red=instagram] .seo-red button", "Dame 3 ganchos")
+    ok(pg.esperar(".texto-red[data-red=instagram] .gancho-seo", segundos=20), "«Dame 3 ganchos»")
+    pg.pulsar(".texto-red[data-red=instagram] .gancho-seo button", "Usar este")
+    pg.p.wait_for_timeout(1200)
+    valor = pg.p.evaluate("() => (document.querySelector('.texto-red[data-red=instagram] textarea') || {}).value || ''")
+    ok(valor.startswith("¿instagram 1?"), f"«Usar este» lo pone de primera línea: {valor[:30]!r}")
+    pg.captura("publicar_seo_ficha")
+    pg.sin_errores("el SEO de Publicar")
+    pg.cerrar()
+
+    # en el móvil y en los dos temas
+    for tema in ("oscuro", "claro"):
+        pg = Pagina(navegador, datos, ancho=390, alto=844, nombre=f"seo móvil {tema}")
+        pg.js(f"document.documentElement.dataset.tema = '{tema}'; abrirPublicarVideo('{pid}');")
+        pg.p.wait_for_timeout(2500)
+        ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        ok(ancho <= 2, f"la ficha con el SEO cabe en un móvil, tema {tema} ({ancho}px)")
+        pg.js("PUB.seccion = 'cuentas'; PUB.seoAbierto = {}; irAModulo('publicar');")
+        pg.p.wait_for_timeout(1500)
+        pg.js("document.querySelectorAll('.seo-proyecto').forEach(d => { d.open = true; });")
+        ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        ok(ancho <= 2, f"y el SEO del proyecto, tema {tema} ({ancho}px)")
+        texto = pg.p.evaluate("() => document.querySelector('#modulo').innerText")
+        malos = sorted(set(x.group(0) for x in TEXTOS_MALOS.finditer(texto)))
+        ok(not malos, f"sin «undefined», «NaN» ni «null» ({malos})")
+        pg.captura(f"publicar_seo_movil_{tema}", entera=False)
+        pg.sin_errores(f"el SEO en el móvil ({tema})")
+        pg.cerrar()
+
+
 @escenario
 def parrilla_marca_chat_y_resultados(navegador, datos):
     """parrilla-2 (18-10-2026): la marca del cliente, «Conversar con Claude» (el

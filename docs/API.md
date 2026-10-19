@@ -105,22 +105,6 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/videos/{pid}/portada` | Sube una imagen de portada (multipart, campo «portada»). |
 | `GET` | `/api/publicar/videos/{pid}/portada.jpg` | La imagen de portada subida para este vídeo. |
 | `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
-| `GET` | `/api/parrilla/plantilla` | Un guion en blanco en el formato del Studio, para «Escribir uno». |
-| `GET` | `/api/parrilla/proyectos` | Los proyectos que se pueden ver, con cuántos guiones tiene cada uno, y |
-| `GET` | `/api/parrilla/proyectos/{cid}` | Las matrices del proyecto y sus guiones, con el estado al día. |
-| `POST` | `/api/parrilla/proyectos/{cid}/convertir` | Claude convierte lo pegado al formato: {texto, modo, matriz?, nombre?, |
-| `POST` | `/api/parrilla/proyectos/{cid}/guiones` | Sin Claude: {texto (ya en el formato), matriz?, nombre?} -> {matriz, guiones} |
-| `DELETE` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | — |
-| `GET` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | Un guion entero: el texto, lo leído y lo que iría al Encargo. |
-| `PUT` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | {texto?, uso?, formato?, duracion_s?, estado?} -> el guion. |
-| `POST` | `/api/parrilla/proyectos/{cid}/guiones/{gid}/encargo` | {indice?, estilo?} -> lo que la pantalla pone en «Un vídeo nuevo». El |
-| `POST` | `/api/parrilla/proyectos/{cid}/matrices` | {nombre} -> {id} |
-| `DELETE` | `/api/parrilla/proyectos/{cid}/matrices/{mid}` | — |
-| `PUT` | `/api/parrilla/proyectos/{cid}/matrices/{mid}` | {nombre} |
-| `POST` | `/api/parrilla/proyectos/{cid}/pedir` | Claude escribe guiones nuevos: {peticion, cuantos, modo, matriz?, nombre?, |
-| `POST` | `/api/parrilla/proyectos/{cid}/subir` | Una matriz en Word, Excel, PDF o texto (multipart: «documento», «modo», |
-| `DELETE` | `/api/parrilla/trabajos/{tid}` | Quita de la pantalla un trabajo terminado (el aviso de listo o de error). |
-| `GET` | `/api/parrilla/trabajos/{tid}` | Cómo va una conversión: {estado: trabajando|listo|error, avance, ...}. |
 | `GET` | `/api/parrilla/cuentas` | Las cuentas ya leídas, las conexiones (sin claves) y el gasto del mes. |
 | `PUT` | `/api/parrilla/cuentas/conexiones` | {youtube_clave?, meta_token?, ig_id?, apify_token?, pago?, tope_usd?} ("" quita una). |
 | `POST` | `/api/parrilla/cuentas/conexiones/instagram` | Con el token de Meta puesto: tu cuenta profesional (se guarda si es una). |
@@ -143,6 +127,27 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/parrilla/proyectos/{cid}/marca` | La marca del cliente guardada en el proyecto, con sus campos. |
 | `PUT` | `/api/parrilla/proyectos/{cid}/marca` | {quien?, mostrar?, evitar?, tono?, cta?, otras?} -> la marca. |
 | `GET` | `/api/parrilla/proyectos/{cid}/resultados` | Lo que mejor funcionó en el proyecto (solo lo guardado). |
+| `GET` | `/api/publicar/palabra-clave` | La palabra clave y la zona del proyecto de un estilo, para sugerirlas en |
+| `POST` | `/api/publicar/proyectos/{cid}/palabras` | Claude propone la palabra clave principal, las secundarias y la zona del |
+| `POST` | `/api/publicar/videos/{pid}/ganchos` | Tres ganchos para la primera línea de una red: {red}. |
+| `POST` | `/api/publicar/videos/{pid}/ganchos/usar` | Pone el gancho elegido como primera línea: {red, indice}. |
+| `POST` | `/api/publicar/videos/{pid}/optimizar` | Claude revisa el SEO de los textos: {redes}. Deja una PROPUESTA campo a |
+| `GET` | `/api/parrilla/plantilla` | Un guion en blanco en el formato del Studio, para «Escribir uno». |
+| `GET` | `/api/parrilla/proyectos` | Los proyectos que se pueden ver, con cuántos guiones tiene cada uno, y |
+| `GET` | `/api/parrilla/proyectos/{cid}` | Las matrices del proyecto y sus guiones, con el estado al día. |
+| `POST` | `/api/parrilla/proyectos/{cid}/convertir` | Claude convierte lo pegado al formato: {texto, modo, matriz?, nombre?, |
+| `POST` | `/api/parrilla/proyectos/{cid}/guiones` | Sin Claude: {texto (ya en el formato), matriz?, nombre?} -> {matriz, guiones} |
+| `DELETE` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | — |
+| `GET` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | Un guion entero: el texto, lo leído y lo que iría al Encargo. |
+| `PUT` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | {texto?, uso?, formato?, duracion_s?, estado?} -> el guion. |
+| `POST` | `/api/parrilla/proyectos/{cid}/guiones/{gid}/encargo` | {indice?, estilo?} -> lo que la pantalla pone en «Un vídeo nuevo». El |
+| `POST` | `/api/parrilla/proyectos/{cid}/matrices` | {nombre} -> {id} |
+| `DELETE` | `/api/parrilla/proyectos/{cid}/matrices/{mid}` | — |
+| `PUT` | `/api/parrilla/proyectos/{cid}/matrices/{mid}` | {nombre} |
+| `POST` | `/api/parrilla/proyectos/{cid}/pedir` | Claude escribe guiones nuevos: {peticion, cuantos, modo, matriz?, nombre?, |
+| `POST` | `/api/parrilla/proyectos/{cid}/subir` | Una matriz en Word, Excel, PDF o texto (multipart: «documento», «modo», |
+| `DELETE` | `/api/parrilla/trabajos/{tid}` | Quita de la pantalla un trabajo terminado (el aviso de listo o de error). |
+| `GET` | `/api/parrilla/trabajos/{tid}` | Cómo va una conversión: {estado: trabajando|listo|error, avance, ...}. |
 | `GET` | `/api/trabajos` | Trabajos conocidos, opcionalmente de un solo proyecto. |
 | `GET` | `/api/trabajos/{tid}` | Estado y progreso de un trabajo. |
 | `POST` | `/api/trabajos/{tid}/cancelar` | Pide la cancelacion cooperativa de un trabajo. |
@@ -246,6 +251,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/proyectos/{pid}/imagenes/cola/{nid}` | Saca una nota de la cola (la que ya se esta dibujando no se para). |
 | `POST` | `/api/proyectos/{pid}/imagenes/calidad` | Rehace SOLO las imagenes de plano que siguen en otra calidad que la del video: {imagenes: cuantas se confirmaron} (409 si ya no son esas o hay algo en marcha). |
 | `POST` | `/api/proyectos/{pid}/imagenes/rehacer` | Pone en la cola las notas de imagenes: {notas?: [ids], desde_cero?} (sin ids, todas). |
+| `GET` | `/api/proyectos/{pid}/imagenes/revision` | El revisor de imágenes: la última revisión, sus notas sin aplicar, cuántas faltan por mirar, el modo, los topes y el precio por imagen. |
+| `POST` | `/api/proyectos/{pid}/imagenes/revision/aplicar` | Rehace por la cola las notas pendientes del revisor: {notas?: [ids]} (sin ids, todas); las de «sustituye», desde cero. |
+| `POST` | `/api/proyectos/{pid}/imagenes/revision/descartar` | «Está bien así»: {plano}. Quita la nota pendiente del revisor de ese plano y no la vuelve a marcar mientras la imagen no cambie. |
+| `POST` | `/api/proyectos/{pid}/imagenes/revisar` | Revisa las imágenes con su guion, estilo y reglas y deja una nota por plano a corregir: {planos?: [ids], forzar?}. No rehace nada. -> {trabajo_id} |
 
 ## Sonido y transiciones
 
@@ -402,4 +411,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**241 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**297 endpoints.** Escrito por `generar_api.py` desde `app.py`.

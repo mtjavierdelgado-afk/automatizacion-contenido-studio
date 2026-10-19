@@ -3227,6 +3227,28 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
   color: var(--texto); margin-bottom: 0; }
 .tarjeta-transicion .fila { align-items: center; gap: 8px; }
 
+/* ============================================================ EL REVISOR
+   Rama `revisor-imagenes` (18-10-2026): el panel «Revisor de imágenes» de la
+   pantalla Imágenes, la etiqueta de sus notas y sus topes en Configuración. */
+.revisor-panel { border: 1px solid var(--linea); border-radius: 10px;
+  background: var(--panel); padding: 10px 12px; margin: 10px 0;
+  display: flex; flex-direction: column; gap: 8px; }
+.revisor-panel .fila { align-items: center; gap: 8px; flex-wrap: wrap; }
+.revisor-pendientes { display: flex; flex-wrap: wrap; gap: 6px; }
+.revisor-chip { display: inline-flex; align-items: center; gap: 2px;
+  border: 1px solid var(--linea); border-radius: 999px; padding: 0 2px 0 4px; }
+.revisor-fallo { color: var(--aviso); }
+.gravedad-alta { color: var(--malo); }
+.gravedad-media { color: var(--aviso); }
+.gravedad-baja { color: var(--tenue); }
+.pastilla.revisor-autor { font-size: 11px; margin-bottom: 4px; display: inline-block; }
+.pastilla.revisor-autor.gravedad-alta { border-color: var(--malo-borde); }
+.pastilla.revisor-autor.gravedad-media { border-color: var(--aviso-borde); }
+.revisor-topes { gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.revisor-tope { display: flex; flex-direction: column; gap: 4px; text-transform: none;
+  letter-spacing: normal; }
+.revisor-tope input { width: 9em; }
+
 /* ================================================================ PUBLICAR
    Rama `publicar-redes-1` (16-10-2026): la barra de módulos y el módulo
    Publicar. Todo nuevo y aquí, al final, para no chocar con las otras ramas.
@@ -3494,6 +3516,41 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
   .proyecto-parrilla select, .pasar-encargo select { max-width: 100%; flex: 1 1 100%; }
   .fila-guion .crece { display: none; }
 }
+
+/* ================================================================ PUBLICAR · SEO
+   Rama `publicar-seo` (18-10-2026): el SEO del proyecto y de cada vídeo. */
+.campos-seo { gap: 8px 12px; align-items: flex-end; flex-wrap: wrap; }
+.campos-seo .etiqueta-campo { flex: 1 1 200px; }
+.seo-proyecto textarea, .seo-proyecto input[type=text] { width: 100%; }
+.seo-proyecto .etiqueta-tono { margin-top: 10px; font-weight: 600; font-size: 13px; }
+.propuesta-palabras, .propuesta-seo {
+  margin: 8px 0; padding: 10px; border: 1px solid var(--acento); border-radius: 9px;
+  background: var(--marcado); display: flex; flex-direction: column; gap: 6px;
+}
+.propuesta-palabra { gap: 8px; align-items: flex-start; border-top: 1px solid var(--linea-suave); padding-top: 6px; }
+.seo-video input[type=text] { width: 100%; }
+.propuesta-red { border-top: 1px solid var(--linea-suave); padding-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.cambio-seo { display: flex; flex-direction: column; gap: 4px; }
+.antes-despues { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.antes-despues > div {
+  white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; padding: 6px 8px;
+  border-radius: 7px; border: 1px solid var(--linea); background: var(--hueco); min-width: 0;
+}
+.antes-despues .antes { color: var(--tenue); text-decoration: line-through; text-decoration-color: var(--linea); }
+.antes-despues .despues { border-color: var(--ok); }
+.seo-red { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.seo-red input[type=text] { width: 100%; }
+.nota-seo > summary { cursor: pointer; font-size: 13px; color: var(--tenue); }
+.punto-seo { font-size: 12px; padding: 1px 0 1px 6px; }
+.punto-seo.ok { color: var(--ok); }
+.punto-seo.aviso { color: var(--aviso); }
+.gancho-seo { gap: 8px; padding: 4px 8px; border: 1px solid var(--linea); border-radius: 7px; background: var(--hueco); }
+.pista-palabra-clave:empty { display: none; }
+.pista-palabra-clave { margin: 8px 0; }
+@media (max-width: 600px) {
+  .antes-despues { grid-template-columns: 1fr; }
+}
+
 
 /* ------------------------------------------- PARRILLA 2 (18-10-2026)
    La marca del cliente, «Desde mis resultados» y el chat de guiones. */

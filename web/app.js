@@ -2458,6 +2458,7 @@ function pintarConfig() {
   caja.appendChild(bloquePruebaClaves());
   caja.appendChild(seccionOpenAI(ficha));
   caja.appendChild(seccionCalidadImagen());
+  caja.appendChild(seccionRevisor());
   caja.appendChild(seccionDictado());
   caja.appendChild(seccionZonaHoraria());
   caja.appendChild(seccionCartesia(ficha));
@@ -7401,6 +7402,7 @@ function vistaEncargoVideoLight() {
       'céntrate en el mecanismo, no en las personas; no fuerces una historia '
       + 'de personaje', 'encargo-indicaciones')));
 
+  caja.appendChild(pistaPalabraClaveEncargo(v));
   caja.appendChild(bloqueLight('Las llamadas a la acción',
     'cuándo se presenta y qué le pides a quien lo ve',
     bloqueCTA(e.cta, { alCambiar: programarGuardadoEncargo, repintar: pintarLight })));
@@ -10189,6 +10191,10 @@ function vistaPreviaLight() {
 
   if (e.obsoleta) caja.appendChild(avisoImagenObsoleta(e));
   caja.appendChild(cuadroFeedbackEscena(e));
+  /* EL REVISOR: pedir que mire las imágenes y ver lo que dejó (ver
+     `panelRevisor`). Sus notas salen abajo, en la lista de siempre. */
+  const revisor = panelRevisor();
+  if (revisor) caja.appendChild(revisor);
 
   /* LA LISTA ENTERA DE NOTAS, LA MISMA QUE EN EL VIDEO.
      Antes aqui solo salian las de la escena que estabas mirando, asi que para
@@ -10235,6 +10241,435 @@ function vistaPreviaLight() {
   BARRA_INFERIOR.nodo = mandos;
   return caja;
 }
+
+/* ------------------------------------------------ el revisor de imágenes
+ *
+ * LO QUE ANTES SE HACÍA A MANO (18-10-2026): mirar cada imagen con el guion
+ * delante, el estilo y la marca, y escribir una nota por plano para rehacerlo.
+ * Lo hace un agente que ve las imágenes (`pasos/revisor_imagenes.py`), y sus
+ * notas entran en la MISMA lista que las tuyas, marcadas «revisor». Rehacerlas
+ * va por la misma cola. Aquí se pide la revisión y se ve lo que dejó; el modo
+ * (manual, autónomo, automático) se elige en Configuración. */
+const REVISOR = { pid: '', ficha: null, cargando: false, error: '', sondeo: null, leido: 0,
+  cancelando: false, aviso: '', aplicando: false };
+
+/* Literales y no `gravedad-${...}`: así `css_sin_usar` las encuentra. */
+const CLASE_GRAVEDAD = { alta: 'gravedad-alta', media: 'gravedad-media', baja: 'gravedad-baja' };
+
+const NOMBRE_MODO_REVISOR = {
+  manual: 'manual',
+  autonomo: 'autónomo',
+  automatico: 'automático',
+};
+
+async function cargarRevisor(pid) {
+  if (!pid) return;
+  if (REVISOR.pid !== pid) {
+    REVISOR.pid = pid;
+    REVISOR.ficha = null;
+    REVISOR.error = '';
+  }
+  REVISOR.cargando = true;
+  try {
+    const ficha = await pedir(`${API.colaImagenes(pid)}/revision`);
+    if (REVISOR.pid !== pid) return;          // se abrió otro vídeo mientras tanto
+    REVISOR.ficha = ficha;
+    REVISOR.error = '';
+    REVISOR.leido = Date.now();
+  } catch (err) {
+    if (REVISOR.pid === pid) REVISOR.error = err.message;
+    /* TAMBIÉN AL FALLAR: si no, con el servidor reiniciándose la ficha seguía
+       «vieja» y cada repintado volvía a pedirla, sin parar. */
+    REVISOR.leido = Date.now();
+  }
+  REVISOR.cargando = false;
+  const trabajo = (REVISOR.ficha || {}).trabajo;
+  if (trabajo && ['pendiente', 'ejecutando'].includes(trabajo.estado)) vigilarRevisor(pid);
+  else if ((REVISOR.ficha || {}).automatico) vigilarRevisorSolo(pid);
+}
+
+/* MIENTRAS EL REVISOR TRABAJA SOLO (modos autónomo y automático, al final de
+   una tanda o de la cola de notas) se relee la ficha cada tres segundos, para
+   que el panel lo diga y, al acabar, salgan sus notas. */
+function vigilarRevisorSolo(pid) {
+  if (REVISOR.sondeo) return;
+  REVISOR.sondeo = setInterval(async () => {
+    if (videoAbierto().pid !== pid || REVISOR.pid !== pid) {
+      clearInterval(REVISOR.sondeo);
+      REVISOR.sondeo = null;
+      return;
+    }
+    let ficha = null;
+    try { ficha = await pedir(`${API.colaImagenes(pid)}/revision`); } catch (e) { return; }
+    if (REVISOR.pid !== pid) return;
+    REVISOR.ficha = ficha;
+    REVISOR.leido = Date.now();
+    if (ficha.automatico) { refrescarVivosLight(); return; }
+    clearInterval(REVISOR.sondeo);
+    REVISOR.sondeo = null;
+    if (REVISOR.cancelando) {
+      REVISOR.cancelando = false;
+      REVISOR.aviso = 'El revisor se paró: lo que ya estaba revisado sigue igual.';
+      toast('Revisor parado');
+    }
+    await recargarNotas();
+    repintarVideo();
+  }, 3000);
+}
+
+/* MIRA EL TRABAJO del «Revisar imágenes» cada tres segundos; al acabar relee
+   las notas (las nuevas son del revisor) y la ficha. */
+function vigilarRevisor(pid) {
+  if (REVISOR.sondeo) return;
+  REVISOR.sondeo = setInterval(async () => {
+    if (videoAbierto().pid !== pid || REVISOR.pid !== pid) {
+      clearInterval(REVISOR.sondeo);
+      REVISOR.sondeo = null;
+      return;
+    }
+    const trabajo = (REVISOR.ficha || {}).trabajo;
+    let ficha = null;
+    try { ficha = trabajo ? await pedir(API.trabajo(trabajo.id)) : null; } catch (e) { ficha = null; }
+    if (ficha && ['pendiente', 'ejecutando'].includes(ficha.estado)) {
+      REVISOR.ficha = { ...(REVISOR.ficha || {}), trabajo: ficha };
+      refrescarVivosLight();
+      return;
+    }
+    clearInterval(REVISOR.sondeo);
+    REVISOR.sondeo = null;
+    REVISOR.cancelando = false;
+    if (ficha && ficha.estado === 'error') toast(`la revisión falló: ${ficha.error || ''}`, true);
+    /* CANCELADA, DICHO: sin esto el panel volvía a su estado de antes y no se
+       sabía si había parado o terminado. */
+    if (ficha && ficha.estado === 'cancelado') {
+      REVISOR.aviso = 'La última revisión se canceló: lo que ya estaba revisado sigue igual, '
+        + 'y lo que faltaba se mira la próxima vez.';
+      toast('Revisión cancelada');
+    } else if (ficha && ficha.estado === 'listo') {
+      REVISOR.aviso = '';
+    }
+    await recargarNotas();
+    await cargarRevisor(pid);
+    repintarVideo();
+  }, 3000);
+}
+
+async function pedirRevision(forzar) {
+  const pid = videoAbierto().pid;
+  if (!pid) return;
+  try {
+    const r = await pedir(`${API.colaImagenes(pid)}/revisar`,
+                          { method: 'POST', cuerpo: forzar ? { forzar: true } : {} });
+    REVISOR.pid = pid;
+    REVISOR.aviso = '';
+    REVISOR.ficha = { ...(REVISOR.ficha || {}), trabajo: r.trabajo };
+    vigilarRevisor(pid);
+  } catch (err) {
+    toast(`no se ha podido revisar: ${err.message}`, true);
+  }
+  repintarVideo();
+}
+
+async function cancelarRevision() {
+  const trabajo = (REVISOR.ficha || {}).trabajo;
+  if (!trabajo) return;
+  REVISOR.cancelando = true;
+  refrescarVivosLight();
+  try { await pedir(API.cancelar(trabajo.id), { method: 'POST' }); } catch (e) { /* ya acabó */ }
+}
+
+async function aplicarRevision() {
+  const v = videoAbierto();
+  const ficha = REVISOR.ficha || {};
+  const pendientes = pendientesDelRevisor(ficha).libres;
+  const n = pendientes.length;
+  if (!v.pid || !n || REVISOR.aplicando) return;
+  const precio = usdCorto(n * Number(ficha.usd_por_imagen || 0));
+  if (!window.confirm(`¿Rehacer las ${n} imágenes que marcó el revisor? (≈ ${precio})`)) return;
+  REVISOR.aplicando = true;
+  refrescarVivosLight();
+  try {
+    /* CON SUS IDS: se rehacen las que se han confirmado y ninguna más, aunque
+       mientras tanto el revisor haya marcado otras. */
+    aplicarCola(await pedir(`${API.colaImagenes(v.pid)}/revision/aplicar`,
+                            { method: 'POST', cuerpo: { notas: pendientes.map(p => p.nota) } }));
+    COLA_IMG.pid = v.pid;
+    await recargarNotas();
+    await cargarRevisor(v.pid);
+    vigilarCola();
+  } catch (err) {
+    toast(`no se ha podido poner en cola: ${err.message}`, true);
+  }
+  REVISOR.aplicando = false;
+  repintarVideo();
+}
+
+/* LAS MARCADAS, PARTIDAS EN DOS: las que ya están en la cola (dibujándose o
+   esperando) y las que no. Se mira la cola de AHORA y el estado de cada nota en
+   la lista, que se relee sola mientras la cola dibuja: así el panel dice lo que
+   pasa sin esperar a releer su ficha. */
+function pendientesDelRevisor(ficha) {
+  const enCola = new Set([...(COLA_IMG.cola || []), ...((COLA_IMG.actual || {}).notas || [])]);
+  const dibujando = new Set((COLA_IMG.actual || {}).notas || []);
+  const hechas = new Set((estadoRepaso().notas || [])
+    .filter(n => n.estado === 'aplicado').map(n => n.id));
+  const vivas = ((ficha || {}).pendientes || []).filter(p => !hechas.has(p.nota));
+  return {
+    libres: vivas.filter(p => !enCola.has(p.nota)),
+    enCola: vivas.filter(p => enCola.has(p.nota)),
+    dibujando: vivas.filter(p => dibujando.has(p.nota)).map(p => p.plano),
+  };
+}
+
+async function descartarRevision(plano) {
+  const pid = videoAbierto().pid;
+  try {
+    const r = await pedir(`${API.colaImagenes(pid)}/revision/descartar`,
+                          { method: 'POST', cuerpo: { plano } });
+    REVISOR.ficha = { ...(REVISOR.ficha || {}), pendientes: r.pendientes || [] };
+    await recargarNotas();
+  } catch (err) {
+    toast(`no se ha podido quitar: ${err.message}`, true);
+  }
+  repintarVideo();
+}
+
+/* «revisando S001–S008; 22 s de 30 s (estimacion…)» → «revisando S001–S008»:
+   la cuenta del reloj es de casa, no de la pantalla. */
+function mensajeDelRevisor(texto) {
+  return String(texto || '').split(';')[0].trim();
+}
+
+function irAPlanoDelRevisor(plano) {
+  irAlMomentoDeLaNota({ plano });
+}
+
+/* EL PANEL, debajo del cuadro de notas de la imagen. Vivo: mientras revisa
+   solo cambia el mensaje, y repintar la pantalla entera en cada tic movería lo
+   que se está escribiendo. */
+function panelRevisor() {
+  const v = videoAbierto();
+  if (!v.pid) return null;
+  /* SE RELEE SI TIENE MÁS DE MEDIO MINUTO: en los modos autónomo y automático
+     el revisor trabaja al final de cada tanda, sin que nadie pulse nada aquí. */
+  const vieja = REVISOR.ficha && Date.now() - REVISOR.leido > 30000;
+  if (REVISOR.pid !== v.pid || vieja || (!REVISOR.ficha && !REVISOR.cargando && !REVISOR.error)) {
+    if (!REVISOR.cargando) setTimeout(() => cargarRevisor(v.pid).then(repintarVideo), 0);
+  }
+  return enVivo(() => {
+    const ficha = REVISOR.pid === v.pid ? REVISOR.ficha : null;
+    const caja = h('section', { clase: 'revisor-panel' });
+    const modo = (ficha || {}).modo || 'manual';
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('strong', {}, 'Revisor de imágenes'),
+      h('span', {
+        clase: 'pastilla',
+        title: 'Se cambia en Configuración → Revisor de imágenes',
+      }, `modo ${NOMBRE_MODO_REVISOR[modo] || modo}`),
+      h('span', { clase: 'crece' })));
+    if (REVISOR.error && !ficha) {
+      caja.appendChild(h('div', { clase: 'meta' }, `no se ha podido leer: ${REVISOR.error}`));
+      return caja;
+    }
+    if (!ficha) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'leyendo la última revisión…'));
+      return caja;
+    }
+    const trabajo = ficha.trabajo;
+    const revisando = trabajo && ['pendiente', 'ejecutando'].includes(trabajo.estado);
+    if (revisando) {
+      caja.appendChild(h('div', { clase: 'fila' },
+        h('span', { clase: 'pastilla estado-corriendo' },
+          REVISOR.cancelando ? 'Cancelando la revisión…'
+            : `Revisando… ${mensajeDelRevisor(trabajo.mensaje)}`.trim()),
+        h('span', { clase: 'crece' }),
+        h('button', {
+          clase: 'mini fantasma', disabled: REVISOR.cancelando, onclick: cancelarRevision,
+        }, REVISOR.cancelando ? 'Cancelando…' : 'Cancelar')));
+      return caja;
+    }
+    if (ficha.automatico) {
+      const a = ficha.automatico;
+      const cuantas = a.planos === 1 ? 'la imagen recién hecha'
+        : a.planos > 1 ? `las ${a.planos} imágenes recién hechas` : 'las imágenes recién hechas';
+      caja.appendChild(h('div', { clase: 'fila' },
+        h('span', { clase: 'pastilla estado-corriendo' },
+          REVISOR.cancelando ? 'Cancelando…'
+            : `El revisor está mirando ${cuantas} (modo ${NOMBRE_MODO_REVISOR[a.modo] || a.modo})…`),
+        h('span', { clase: 'meta' }, mensajeDelRevisor(a.mensaje)),
+        h('span', { clase: 'crece' }),
+        a.trabajo ? h('button', {
+          clase: 'mini fantasma', disabled: REVISOR.cancelando,
+          title: 'Para el trabajo entero en el que va el revisor (si es la tanda del vídeo, '
+            + 'también la tanda). Lo ya dibujado se queda.',
+          onclick: async () => {
+            if (!window.confirm('¿Parar el revisor? Si va dentro de una tanda, se para la tanda.')) return;
+            REVISOR.cancelando = true;
+            refrescarVivosLight();
+            try { await pedir(API.cancelar(a.trabajo), { method: 'POST' }); } catch (e) { /* ya acabó */ }
+          },
+        }, 'Cancelar') : null));
+      caja.appendChild(h('div', { clase: 'meta' },
+        'Si encuentra algo grave lo rehace solo, dentro de los topes; lo demás lo deja como nota.'));
+      return caja;
+    }
+    if (REVISOR.aviso) caja.appendChild(h('div', { clase: 'meta revisor-fallo' }, REVISOR.aviso));
+    const ultima = ficha.ultima || {};
+    caja.appendChild(h('div', { clase: 'meta' },
+      ultima.fecha
+        ? `Última revisión: ${ultima.revisados || 0} ${(ultima.revisados || 0) === 1 ? 'imagen' : 'imágenes'}, `
+          + `${(ultima.marcadas || []).length} con nota.`
+          + (ficha.sin_revisar === 1 ? ' Queda 1 sin revisar.'
+            : ficha.sin_revisar ? ` Quedan ${ficha.sin_revisar} sin revisar.` : '')
+        : 'Mira cada imagen con su trozo de guion, el estilo y la marca, y deja una '
+          + 'nota en las que no cuadran. No rehace nada hasta que tú lo pidas'
+          + (modo === 'manual' ? '.' : ' (o hasta que acabe una tanda, en este modo).')));
+    (ultima.fallos || []).forEach(f => caja.appendChild(
+      h('div', { clase: 'meta revisor-fallo' }, `⚠ ${f}`)));
+    const partes = pendientesDelRevisor(ficha);
+    const pendientes = partes.libres;
+    /* LO QUE SE ESTÁ REHACIENDO, AQUÍ MISMO: antes solo se veía en la tarjeta
+       de cada imagen, y si quedaba abajo parecía que el botón no había hecho
+       nada y se pulsaba otra vez. */
+    if (partes.enCola.length) {
+      caja.appendChild(h('div', { clase: 'fila' },
+        h('span', { clase: 'pastilla estado-corriendo' },
+          `Rehaciendo ${partes.enCola.length} ${partes.enCola.length === 1 ? 'imagen marcada' : 'imágenes marcadas'}`
+          + (partes.dibujando.length ? ` · dibujando ${partes.dibujando.join(', ')}` : ' · en cola')),
+        h('span', { clase: 'meta' }, partes.enCola.map(p => p.plano).join(', '))));
+    }
+    if (pendientes.length) {
+      const chips = h('div', { clase: 'revisor-pendientes' });
+      pendientes.forEach(p => chips.appendChild(h('span', { clase: 'revisor-chip' },
+        h('button', {
+          clase: `mini fantasma ${CLASE_GRAVEDAD[p.gravedad] || ''}`,
+          title: `ir a ${p.plano} (gravedad ${p.gravedad}; `
+            + (p.alcance === 'sustituye' ? 'se dibuja de nuevo)' : 'se retoca)'),
+          onclick: () => irAPlanoDelRevisor(p.plano),
+        }, `${p.plano} · ${p.gravedad}`),
+        h('button', {
+          clase: 'mini fantasma', title: 'Está bien así: quita la nota del revisor',
+          onclick: () => descartarRevision(p.plano),
+        }, '✕'))));
+      caja.appendChild(chips);
+    }
+    const fila = h('div', { clase: 'fila' });
+    const nuevas = ficha.sin_revisar;
+    fila.appendChild(conAyuda(
+      'Revisa las imágenes que todavía no ha mirado (o que cambiaron desde la '
+      + 'última vez). Usa tu cuenta de Claude, no gasta en imágenes.',
+      h('button', {
+        clase: pendientes.length ? 'mini' : 'mini primario',
+        disabled: nuevas === 0,
+        onclick: () => pedirRevision(false),
+      }, nuevas === 0 ? 'Todo revisado'
+        : ultima.fecha ? `Revisar las nuevas (${nuevas})` : 'Revisar imágenes')));
+    if (ultima.fecha) {
+      fila.appendChild(h('button', {
+        clase: 'mini fantasma',
+        title: 'Vuelve a mirar TODAS las imágenes, también las que ya revisó y no han cambiado',
+        onclick: () => {
+          if (window.confirm('¿Revisar otra vez TODAS las imágenes?')) pedirRevision(true);
+        },
+      }, 'Revisar todas otra vez'));
+    }
+    fila.appendChild(h('span', { clase: 'crece' }));
+    if (pendientes.length) {
+      fila.appendChild(h('button', {
+        clase: 'mini avisa',
+        disabled: REVISOR.aplicando,
+        title: 'Las de retoque parten de la imagen de ahora; las que piden otra imagen, desde cero',
+        onclick: aplicarRevision,
+      }, REVISOR.aplicando ? 'Poniendo en cola…'
+        : `Rehacer las marcadas (${pendientes.length}, ≈ `
+        + `${usdCorto(pendientes.length * Number(ficha.usd_por_imagen || 0))})`));
+    }
+    caja.appendChild(fila);
+    return caja;
+  });
+}
+
+/* LA NOTA DEL REVISOR SE DISTINGUE de la tuya: quién la escribió y cuánto pesa. */
+function etiquetaRevisor(nota) {
+  if (!nota || nota.autor !== 'revisor') return null;
+  return h('span', {
+    clase: `pastilla revisor-autor ${CLASE_GRAVEDAD[nota.gravedad] || CLASE_GRAVEDAD.media}`,
+    title: 'La escribió el revisor de imágenes mirando la imagen con su guion. '
+      + 'Puedes cambiarla o quitarla como cualquier otra.'
+      + (nota.alcance === 'sustituye' ? ' Pide dibujarla de nuevo, no retocarla.' : ''),
+  }, `revisor · ${nota.gravedad || 'media'}`);
+}
+
+
+/* EL REVISOR DE IMÁGENES en Configuración: el modo y sus topes. Los topes
+   solo cuentan lo que el revisor manda rehacer SOLO; lo que pides tú, no. */
+function seccionRevisor() {
+  const vista = estadoConfig();
+  const datos = vista.ajustes;
+  const caja = h('section', { clase: 'bloque-config' },
+    h('div', { clase: 'fila' },
+      h('h3', {}, 'Revisor de imágenes'),
+      h('span', { clase: 'crece' }),
+      datos ? pastillaEstado('ok', NOMBRE_MODO_REVISOR[datos.ajustes.revisor_modo]
+        || datos.ajustes.revisor_modo) : null));
+  if (!datos) return caja;
+  const a = datos.ajustes;
+  caja.appendChild(h('div', { clase: 'pista' },
+    'Mira cada imagen con su trozo de guion, el estilo, el Encargo y las reglas de '
+    + 'la casa, y deja una nota en las que no cuadran (el equipo mal montado, '
+    + 'gente que no mira a la pantalla, objetos fundidos). Mirar usa tu cuenta '
+    + 'de Claude; lo que cuesta es rehacer.'));
+  const opciones = [
+    ['manual', 'Manual',
+      'Solo cuando pulsas «Revisar imágenes». Tú decides qué se rehace.'],
+    ['autonomo', 'Autónomo',
+      'Al acabar cada tanda de imágenes revisa las nuevas y rehace SOLO lo grave '
+      + '(lo que contradice el guion o la marca), una vez. Lo demás queda como nota.'],
+    ['automatico', 'Automático',
+      'Al acabar cada tanda (también al generar el vídeo entero) rehace todo lo '
+      + 'marcado y lo vuelve a revisar, hasta el número de vueltas de abajo.'],
+  ];
+  opciones.forEach(([valor, nombre, detalle]) => {
+    const puesta = valor === a.revisor_modo;
+    caja.appendChild(h('button', {
+      clase: 'fila-calidad opcion-dictado' + (puesta ? ' elegida' : ''), disabled: puesta,
+      onclick: () => guardarAjusteRevisor({ revisor_modo: valor }),
+    },
+      h('span', { clase: 'nombre' }, nombre),
+      h('span', { clase: 'meta desglose' }, detalle)));
+  });
+  const numero = (clave, etiqueta, paso, ayuda) => h('label', { clase: 'revisor-tope', title: ayuda },
+    h('span', { clase: 'meta' }, etiqueta),
+    h('input', {
+      type: 'number', min: '0', step: paso, value: String(a[clave]),
+      'aria-label': etiqueta,
+      onchange: ev => guardarAjusteRevisor({ [clave]: ev.target.value }),
+    }));
+  caja.appendChild(h('div', { clase: 'fila revisor-topes' },
+    numero('revisor_max_imagenes', 'Imágenes como mucho por tanda', '1',
+      'Cuántas puede rehacer solo después de una tanda'),
+    numero('revisor_max_usd', 'Gasto como mucho por vídeo ($)', '0.1',
+      'Lo que puede gastar rehaciendo solo en un mismo vídeo, sumando todas las tandas'),
+    numero('revisor_vueltas', 'Vueltas (automático)', '1',
+      'Rehacer y volver a revisar, cuántas veces como mucho')));
+  caja.appendChild(h('div', { clase: 'meta' },
+    'Una misma imagen no se rehace sola más de dos veces: si sigue mal, espera a una persona.'));
+  return caja;
+}
+
+async function guardarAjusteRevisor(cambio) {
+  const vista = estadoConfig();
+  try {
+    const r = await pedir(API.ajustes(), { method: 'PUT', cuerpo: cambio });
+    vista.ajustes = { ...(vista.ajustes || {}), ajustes: r.ajustes,
+      costes: r.costes || (vista.ajustes || {}).costes };
+    REVISOR.ficha = null;                    // el modo de la pantalla Imágenes
+  } catch (e) {
+    toast(e.message, true);
+  }
+  repintarClaves();
+}
+
 
 /* EL SUBTÍTULO QUE TOCA AHORA. Sus tiempos vienen en el reloj DEL PLANO, así
    que se compara con lo que lleva sonando de esta escena. Parado se enseña el
@@ -11252,6 +11687,9 @@ function vigilarCola(deQuien) {
       if (vacia) {
         clearInterval(sondeo);
         if (COLA_IMG.sondeo === sondeo) COLA_IMG.sondeo = null;
+        /* EN LOS MODOS AUTÓNOMO Y AUTOMÁTICO el revisor mira lo recién hecho
+           al acabar la cola: se pregunta ya, para que el panel lo diga. */
+        cargarRevisor(pid).then(repintarVideo);
       }
     } finally {
       enVuelo = false;
@@ -11579,6 +12017,8 @@ function tarjetaNotaImagen(plano, notas, vieja) {
 function filaDeNotaImagen(nota, vieja) {
   const v = videoAbierto();
   const fila = h('div', { clase: 'nota-fila' });
+  const delRevisor = etiquetaRevisor(nota);
+  if (delRevisor) fila.appendChild(delRevisor);
   fila.appendChild(h('div', { clase: 'texto' }, nota.texto));
   if ((nota.imagenes || []).length) {
     const tira = h('div', { clase: 'tira-aportadas' });
@@ -11786,17 +12226,22 @@ function botonAplicarRepaso() {
   if (cuadernoDeAhora() === 'imagenes') {
     const ocupadas = new Set([...(COLA_IMG.cola || []),
       ...((COLA_IMG.actual || {}).notas || [])]);
-    const planos = new Set(notasDeAhora()
-      .filter(n => n.estado !== 'aplicado' && n.plano && !ocupadas.has(n.id))
-      .map(n => n.plano));
+    const vivas = notasDeAhora()
+      .filter(n => n.estado !== 'aplicado' && n.plano && !ocupadas.has(n.id));
+    const planos = new Set(vivas.map(n => n.plano));
     if (!planos.size) return null;
     const n = planos.size;
+    /* LAS DEL REVISOR VAN DENTRO, y se dice: después de «Revisar imágenes»,
+       quien escribió una nota veía «Rehacer 16 imágenes» sin saber por qué. */
+    const delRevisor = new Set(vivas.filter(x => x.autor === 'revisor').map(x => x.plano)).size;
     return conAyuda(
       'Rehace las imágenes de todas las notas pendientes, una detrás de otra. '
       + 'Si hay varias notas para la misma imagen, se juntan y se paga una sola. '
       + 'Si OpenAI rechaza una, las demás siguen y esa nota te dice por qué.',
       h('button', { clase: 'avisa', onclick: encolarTodasLasImagenes },
-        `Rehacer ${n} ${n === 1 ? 'imagen' : 'imágenes'} · ≈ ${usdCorto(n * COLA_IMG.usdPorImagen)}`
+        `Rehacer ${n} ${n === 1 ? 'imagen' : 'imágenes'}`
+        + (delRevisor ? ` (${delRevisor} del revisor)` : '')
+        + ` · ≈ ${usdCorto(n * COLA_IMG.usdPorImagen)}`
         + ` · ~${mmss(n * COLA_IMG.segundosPorImagen)}`));
   }
   const corriendo = !!trabajoVideoLight();
@@ -17612,13 +18057,33 @@ async function cargarPublicar(silencio) {
       /* CLAUDE ACABA DE ESCRIBIR: se pinta YA, aunque haya un campo con el
          cursor (sus textos son justo los que llegan). Antes se esperaba a
          salir del campo y los textos no aparecían (17-10, en el servidor). */
+      const trabajos = x => Object.keys(((x || {}).seo || {}).trabajando || {});
+      if (antes && antes.pid === PUB.ficha.pid) {
+        trabajos(antes).filter(t => !trabajos(PUB.ficha).includes(t)).forEach(t => {
+          terminoDeEscribir = true;
+          const error = ((PUB.ficha.seo || {}).errores || {})[t];
+          if (error) toast(error, true);
+          else toast(t === 'optimizar' ? 'Revisión SEO lista: acepta lo que te guste'
+            : 'Tres ganchos listos: elige uno');
+        });
+      }
       if (antes && antes.pid === PUB.ficha.pid && antes.escribiendo && !PUB.ficha.escribiendo) {
         terminoDeEscribir = true;
         if (PUB.ficha.error_textos) toast(PUB.ficha.error_textos, true);
         else toast('Textos listos: revísalos antes de publicar');
       }
     } else if (PUB.seccion === 'cuentas') {
+      const antes = PUB.proyectos;
       PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
+      // terminó «Proponer palabras clave»: se pinta aunque haya un campo con el cursor
+      ((antes || {}).proyectos || []).forEach(x => {
+        const ahora = (PUB.proyectos.proyectos || []).find(y => y.id === x.id) || {};
+        if ((x.palabras || {}).trabajando && !(ahora.palabras || {}).trabajando) {
+          terminoDeEscribir = true;
+          if ((ahora.palabras || {}).error) toast(ahora.palabras.error, true);
+          else toast(`Palabras clave propuestas para ${ahora.nombre}`);
+        }
+      });
     } else if (PUB.seccion === 'resultados') {
       // la lista, cada vez: un proyecto con clave cerrado desde la última no sale
       PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
@@ -17713,7 +18178,9 @@ function programarRelojPublicar() {
   pararRelojPublicar();
   if (MODULOS.actual !== 'publicar') return;
   const f = PUB.ficha;
-  const enElAire = (PUB.seccion === 'ficha' && f && (f.escribiendo
+  const enElAire = (PUB.seccion === 'ficha' && f && Object.keys((f.seo || {}).trabajando || {}).length)
+    || (PUB.seccion === 'cuentas' && ((PUB.proyectos || {}).proyectos || []).some(x => (x.palabras || {}).trabajando))
+    || (PUB.seccion === 'ficha' && f && (f.escribiendo
     || (f.envios || []).some(e => ['enviando', 'publicando', 'comprobar'].includes(e.estado))))
     || (PUB.seccion === 'cola' && PUB.cola && (PUB.cola.envios || []).some(e =>
       ['enviando', 'publicando', 'comprobar'].includes(e.estado)));
@@ -17741,6 +18208,7 @@ function pararRelojPublicar() {
 }
 
 function olvidarEnvioPublicar() {
+  PUB.seoBorrador = {};
   PUB.modoEnvio = '';
   PUB.cuandoEnvio = '';
   PUB.borrador = {};
@@ -18115,18 +18583,23 @@ function editarTextoPublicar(red, campo, valor) {
   PUB.guardando = setTimeout(guardarTextosPublicar, 900);
 }
 
+/* Devuelve si quedó guardado: quien sigue después (optimizar, aceptar, pedir
+   ganchos) no puede seguir sobre el texto viejo del servidor. */
 async function guardarTextosPublicar() {
+  clearTimeout(PUB.guardando);
   PUB.guardando = null;
   const textos = JSON.parse(JSON.stringify(PUB.borrador));
-  if (!Object.keys(textos).length || !PUB.pid) return;
+  if (!Object.keys(textos).length || !PUB.pid) return true;
   try {
     PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
       method: 'PUT', cuerpo: { textos },
     });
     limpiarBorradorPublicar(textos);
     repintarPublicarSinPisar();
+    return true;
   } catch (e) {
     toast(`no se han podido guardar los textos: ${e.message}`, true);
+    return false;
   }
 }
 
@@ -18285,6 +18758,9 @@ function seccionFichaPublicar() {
   // LOS TEXTOS POR RED
   (f.redes || []).forEach(r => caja.appendChild(bloqueTextoRed(r)));
 
+  // EL SEO DEL VÍDEO: palabra clave, «Optimizar SEO» y su propuesta
+  if ((f.redes || []).length) caja.appendChild(bloqueSeoVideo());
+
   // LA PORTADA
   if ((f.redes || []).length && f.mp4) caja.appendChild(bloquePortadaPublicar());
 
@@ -18336,6 +18812,7 @@ function bloqueTextoRed(red) {
     h('input', { type: 'text', value: (t.hashtags || []).map(x => `#${x}`).join(' '), datos: { foco: `${red}-hashtags` },
       oninput: ev => editarTextoPublicar(red, 'hashtags', ev.target.value) })));
   b.appendChild(pie);
+  b.appendChild(seoDeRedPublicar(red));
   if (red === 'youtube' && (f.capitulos || []).length) {
     b.appendChild(h('div', { clase: 'meta' }, 'Capítulos: '
       + f.capitulos.map(c => `${mmss(c.t)} ${c.titulo}`).join(' · ')));
@@ -18789,7 +19266,7 @@ async function guardarAjustePublicar(cid, cambios) {
     toast('Guardado');
     // lo que cambia qué botones salen se repinta; el resto no, para no quitar
     // el foco a quien sigue escribiendo
-    if ('usar_emojis' in cambios || 'perfil' in cambios) pintarModulo();
+    if (['usar_emojis', 'perfil', 'yt_para_ninos', 'palabra_clave'].some(k => k in cambios)) pintarModulo();
   } catch (e) { toast(e.message, true); }
 }
 
@@ -18944,6 +19421,7 @@ function tarjetaProyectoPublicar(p) {
     } }), ` ${CORTOS_RED[r]}`)));
   fijos.appendChild(redes);
   b.appendChild(fijos);
+  b.appendChild(bloqueSeoProyecto(p));
   return b;
 }
 
@@ -19207,6 +19685,351 @@ function seccionClaveUploadPost(ficha) {
       } }, 'Cambiar'),
       puesta ? h('button', { clase: 'mini fantasma peligro',
         onclick: () => guardarClaves({ uploadpost: { clave: '' } }) }, 'Quitar') : null));
+}
+
+/* ================================================================ PUBLICAR · SEO
+ * Rama `publicar-seo` (18-10-2026). Lo que hace que un vídeo se ENCUENTRE:
+ * la palabra clave del proyecto y la de cada vídeo, los campos que acepta
+ * Upload-Post además del texto, la nota SEO de cada red (sin Claude) y las
+ * pasadas con Claude («Optimizar SEO», «Dame 3 ganchos», «Proponer palabras
+ * clave»). Ninguna pasada pisa un texto: lo que cambia, lo acepta alguien.
+ * Las cuentas y las instrucciones viven en `pasos/publicar_seo.py`.
+ */
+
+/* En «Lo fijo de este proyecto», un bloque más: el SEO. */
+function bloqueSeoProyecto(p) {
+  const a = p.ajustes || {};
+  const op = (PUB.proyectos || {}).seo_opciones || {};
+  const guardar = (campo, valor) => guardarAjustePublicar(p.id, { [campo]: valor });
+  PUB.seoAbierto = PUB.seoAbierto || {};
+  const caja = h('details', { clase: 'ajustes-fijos seo-proyecto', open: !!PUB.seoAbierto[p.id],
+    ontoggle: ev => { PUB.seoAbierto[p.id] = ev.currentTarget.open; } },
+  h('summary', {}, `SEO de este proyecto${a.palabra_clave ? ` · «${a.palabra_clave}»` : ' · sin palabra clave'}`));
+  const campoTexto = (campo, etiqueta, opciones) => h('label', { clase: 'etiqueta-campo' }, etiqueta,
+    h(opciones && opciones.area ? 'textarea' : 'input', Object.assign({ type: 'text', value: a[campo] || '',
+      rows: 2, placeholder: (opciones || {}).ejemplo || '', datos: { foco: `seo-${campo}-${p.id}`, seo: campo },
+      onchange: ev => { a[campo] = ev.target.value; guardar(campo, ev.target.value); } })));
+  const campoClave = () => document.querySelector(`[data-foco="seo-palabra_clave-${p.id}"]`);
+  caja.appendChild(h('div', { clase: 'fila guia-y-revisar' },
+    h('span', { clase: 'etiqueta-tono' }, 'Palabras clave'), h('span', { clase: 'crece' }),
+    botonGuia('palabra_clave', campoClave),
+    h('button', { clase: 'mini primario', disabled: !!(p.palabras || {}).trabajando,
+      title: 'Claude propone la principal, las secundarias y la zona desde los encargos y guiones del proyecto',
+      onclick: () => proponerPalabrasPublicar(p.id) },
+    (p.palabras || {}).trabajando ? 'Claude está pensando…' : 'Proponer palabras clave')));
+  if ((p.palabras || {}).error) caja.appendChild(cajaError(p.palabras.error));
+  if (a.propuesta_palabras && a.propuesta_palabras.principal) caja.appendChild(propuestaPalabrasPublicar(p));
+  caja.appendChild(h('div', { clase: 'fila campos-seo' },
+    campoTexto('palabra_clave', 'Palabra clave principal', { ejemplo: 'alquiler de consolas en Lima' }),
+    campoTexto('zona', 'Zona', { ejemplo: 'Lima, Perú (Miraflores, Surco…)' })));
+  caja.appendChild(campoTexto('secundarias', 'Palabras clave secundarias (separadas por comas, de 2 a 8)',
+    { ejemplo: 'fiestas infantiles, eventos corporativos, simulador de carreras', area: true }));
+  caja.appendChild(campoTexto('evitar', 'Palabras a evitar (opcional)', { ejemplo: 'barato, gratis' }));
+  caja.appendChild(h('div', { clase: 'meta' }, 'Banco de hashtags: Claude elige de aquí y los rota para no repetir el mismo bloque.'));
+  caja.appendChild(h('div', { clase: 'fila campos-seo' },
+    campoTexto('hashtags_amplios', 'Amplios', { ejemplo: 'gaming, fiestas' }),
+    campoTexto('hashtags_nicho', 'De nicho', { ejemplo: 'alquilerdeconsolas, simracing' }),
+    campoTexto('hashtags_locales', 'Locales', { ejemplo: 'lima, miraflores' })));
+  // Instagram
+  const campoUbic = () => document.querySelector(`[data-foco="seo-ig_ubicacion-${p.id}"]`);
+  caja.appendChild(h('div', { clase: 'fila guia-y-revisar' },
+    h('span', { clase: 'etiqueta-tono' }, 'Instagram'), h('span', { clase: 'crece' }),
+    botonGuia('ubicacion_instagram', campoUbic)));
+  caja.appendChild(h('div', { clase: 'fila campos-seo' },
+    campoTexto('ig_ubicacion', 'Ubicación: el número del Lugar o Página de Facebook', { ejemplo: '106042326099451' }),
+    campoTexto('ig_ubicacion_nombre', 'Cómo se llama ese lugar (solo para leerlo aquí)', { ejemplo: 'Lima, Perú' })));
+  caja.appendChild(h('div', { clase: 'meta' }, 'Instagram no admite texto alternativo a través de Upload-Post.'));
+  // YouTube
+  const campoCat = () => document.querySelector(`[data-seo-cat="${p.id}"]`);
+  const selector = (campo, opciones, etiqueta, datos) => h('label', { clase: 'etiqueta-campo' }, etiqueta,
+    h('select', { datos: datos || {}, onchange: ev => { a[campo] = ev.target.value; guardar(campo, ev.target.value); } },
+      ...(opciones || []).map(([v, t]) => h('option', { value: v, selected: String(a[campo]) === String(v) }, t))));
+  caja.appendChild(h('div', { clase: 'fila guia-y-revisar' },
+    h('span', { clase: 'etiqueta-tono' }, 'YouTube'), h('span', { clase: 'crece' }),
+    botonGuia('categoria_youtube', campoCat)));
+  caja.appendChild(h('div', { clase: 'fila campos-seo' },
+    selector('yt_categoria', op.categorias, 'Categoría', { seoCat: p.id }),
+    selector('yt_idioma', op.idiomas, 'Idioma del título y la descripción'),
+    selector('yt_idioma_audio', op.idiomas_audio, 'Idioma del audio')));
+  const casilla = (campo, texto, titulo) => h('label', { clase: 'casilla-red', title: titulo || '' },
+    h('input', { type: 'checkbox', checked: !!a[campo], onchange: ev => { a[campo] = ev.target.checked; guardar(campo, ev.target.checked); } }),
+    ` ${texto}`);
+  caja.appendChild(h('div', { clase: 'fila' },
+    casilla('yt_para_ninos', 'Hecho para niños',
+      'Solo si el vídeo es PARA niños. Uno para padres que contratan fiestas infantiles no lo es: marcarlo quita comentarios y alcance.'),
+    botonGuia('hecho_para_ninos', null)));
+  if (a.yt_para_ninos) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' }, 'Marcado como hecho para niños: YouTube le quita los comentarios, '
+      + 'las notificaciones y gran parte del alcance. Un vídeo para padres que contratan una fiesta infantil NO es para niños.'));
+  }
+  // TikTok
+  caja.appendChild(h('div', { clase: 'etiqueta-tono' }, 'TikTok'));
+  caja.appendChild(h('div', { clase: 'fila campos-seo' },
+    campoTexto('tt_ubicacion_id', 'Ubicación: id', {}),
+    campoTexto('tt_ubicacion_nombre', 'Ubicación: nombre', { ejemplo: 'Lima, Perú' })));
+  caja.appendChild(h('div', { clase: 'fila' },
+    casilla('tt_ubicacion_puede', 'Mi cuenta de TikTok tiene la función «location»',
+      'Sin ella, TikTok no acepta la ubicación y no se manda'),
+    casilla('tt_comentarios_puede', 'Mi cuenta de TikTok tiene la función «comments»',
+      'Sin ella, el primer comentario de TikTok no se manda')));
+  caja.appendChild(h('div', { clase: 'fila' },
+    casilla('optimizar_al_escribir', 'Optimizar SEO al escribir los textos',
+      'Tras escribir los textos, Claude hace la revisión SEO y la aplica sola (un poco más de tiempo y de tokens)')));
+  return caja;
+}
+
+async function proponerPalabrasPublicar(cid) {
+  try {
+    await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(cid)}/palabras`), { method: 'POST' });
+    const fila = ((PUB.proyectos || {}).proyectos || []).find(x => x.id === cid);
+    if (fila) fila.palabras = { trabajando: true };
+    PUB.seoAbierto = Object.assign(PUB.seoAbierto || {}, { [cid]: true });
+    pintarModulo();
+    programarRelojPublicar();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* Lo que propuso Claude: cada frase con su porqué y, si el servidor pudo salir
+   a internet, lo que sugiere YouTube al escribirla. La persona elige. */
+function propuestaPalabrasPublicar(p) {
+  const a = p.ajustes || {};
+  const pr = a.propuesta_palabras || {};
+  const caja = h('div', { clase: 'propuesta-palabras' }, h('b', {}, 'Lo que propone Claude'));
+  const fila = (item, campo, sumar) => {
+    if (!item) return null;
+    const ya = sumar ? (a[campo] || '').toLowerCase().split(/\s*,\s*/).includes(item.frase.toLowerCase())
+      : (a[campo] || '') === item.frase;
+    return h('div', { clase: 'fila propuesta-palabra' },
+      h('div', { clase: 'crece' }, h('b', {}, item.frase),
+        item.porque ? h('div', { clase: 'meta' }, item.porque) : null,
+        (item.sugerencias || []).length ? h('div', { clase: 'meta' }, `YouTube sugiere: ${item.sugerencias.slice(0, 5).join(' · ')}`) : null),
+      h('button', { clase: 'mini', disabled: ya, onclick: async () => {
+        const valor = sumar ? [a[campo], item.frase].filter(Boolean).join(', ') : item.frase;
+        a[campo] = valor;
+        await guardarAjustePublicar(p.id, { [campo]: valor });
+        pintarModulo();
+      } }, ya ? 'Puesta' : (sumar ? 'Añadir' : 'Usar')));
+  };
+  caja.appendChild(fila(pr.principal, 'palabra_clave', false));
+  (pr.secundarias || []).forEach(x => caja.appendChild(fila(x, 'secundarias', true)));
+  if (pr.zona) caja.appendChild(fila(pr.zona, 'zona', false));
+  if (pr.internet === false) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'El servidor no ha podido salir a internet para mirar las sugerencias de búsqueda de YouTube: las frases son solo de Claude.'));
+  }
+  return caja;
+}
+
+/* En la ficha: la palabra clave de este vídeo y «Optimizar SEO con Claude». */
+function bloqueSeoVideo() {
+  const f = PUB.ficha;
+  const seo = f.seo || {};
+  const proyecto = (f.ajustes || {}).palabra_clave || '';
+  const b = h('div', { clase: 'bloque seo-video' }, h('div', { clase: 'fila' }, h('h3', { clase: 'crece' }, 'SEO'),
+    h('button', { clase: 'mini primario', disabled: !!(seo.trabajando || {}).optimizar || f.escribiendo,
+      title: 'Claude revisa los textos como un revisor SEO y propone cambios campo a campo; tú eliges cuáles aceptar',
+      onclick: () => optimizarSeoPublicar() },
+    (seo.trabajando || {}).optimizar ? 'Claude está revisando…' : 'Optimizar SEO con Claude')));
+  const campo = () => document.querySelector('input[data-foco="seo-palabra-video"]');
+  b.appendChild(h('div', { clase: 'fila campos-seo' },
+    h('label', { clase: 'etiqueta-campo' }, 'Palabra clave de este vídeo',
+      h('input', { type: 'text', value: 'palabra_clave' in (PUB.seoBorrador || {}) ? PUB.seoBorrador.palabra_clave : (seo.palabra_propia || ''),
+        placeholder: proyecto || 'la del proyecto (Cuentas y ajustes → SEO)', datos: { foco: 'seo-palabra-video' },
+        oninput: ev => { PUB.seoBorrador = Object.assign(PUB.seoBorrador || {}, { palabra_clave: ev.target.value }); },
+        onchange: async ev => { await guardarSeoVideoPublicar({ palabra_clave: ev.target.value }); delete PUB.seoBorrador.palabra_clave; } })),
+    botonGuia('palabra_clave', campo)));
+  if (seo.palabra_propuesta && seo.palabra_propuesta !== seo.palabra) {
+    b.appendChild(h('div', { clase: 'fila' },
+      h('span', { clase: 'meta crece' }, `Claude propone para este vídeo: «${seo.palabra_propuesta}»`),
+      h('button', { clase: 'mini', onclick: () => guardarSeoVideoPublicar({ palabra_clave: seo.palabra_propuesta }) }, 'Usarla')));
+  }
+  if (!seo.palabra) {
+    b.appendChild(h('div', { clase: 'caja-aviso' }, 'Ni este vídeo ni su proyecto tienen palabra clave: sin ella los textos no se posicionan para nada en concreto. Ponla aquí o en Cuentas y ajustes → SEO de este proyecto.'));
+  }
+  if (seo.nombre_fichero) b.appendChild(h('div', { clase: 'meta' }, `El MP4 se sube como «${seo.nombre_fichero}» (el del proyecto no cambia).`));
+  if ((seo.errores || {}).optimizar) b.appendChild(cajaError(seo.errores.optimizar));
+  const propuesta = (seo.propuesta || {}).redes || {};
+  if (Object.keys(propuesta).length) b.appendChild(propuestaSeoPublicar(propuesta));
+  return b;
+}
+
+async function guardarSeoVideoPublicar(cambios) {
+  try {
+    if (!(await guardarTextosPublicar())) return;
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), { method: 'PUT', cuerpo: cambios });
+    toast('Guardado');
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function optimizarSeoPublicar() {
+  const f = PUB.ficha;
+  const redes = (f.redes || []).filter(r => String(textosDeFicha(r).descripcion || '').trim());
+  if (!redes.length) { toast('Antes hacen falta los textos: pídeselos a Claude o escríbelos', true); return; }
+  try {
+    if (!(await guardarTextosPublicar())) return;
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(f.pid)}/optimizar`), { method: 'POST', cuerpo: { redes } });
+    f.seo = Object.assign({}, f.seo, { trabajando: Object.assign({}, (f.seo || {}).trabajando, { optimizar: {} }) });
+    pintarModulo();
+    cargarPublicar(true);
+  } catch (e) { toast(e.message, true); }
+}
+
+const NOMBRE_CAMPO_SEO = { titulo: 'Título', descripcion: 'Texto', cta: 'Llamada a la acción',
+  hashtags: 'Hashtags', primer_comentario: 'Primer comentario' };
+
+/* La propuesta SEO: por red y campo, antes y después con su porqué. Se acepta
+   campo a campo o todo; «Dejar el mío» la quita sin tocar nada. */
+function propuestaSeoPublicar(propuesta) {
+  const caja = h('div', { clase: 'propuesta-seo' }, h('div', { clase: 'fila' },
+    h('b', { clase: 'crece' }, 'La revisión SEO de Claude'),
+    h('button', { clase: 'mini primario', onclick: () => aceptarSeoPublicar(
+      Object.fromEntries(Object.entries(propuesta).map(([r, p]) => [r, Object.keys(p.campos || {})]))) }, 'Aceptar todo'),
+    h('button', { clase: 'mini fantasma', onclick: () => guardarSeoVideoPublicar({ descartar_seo: true }) }, 'Descartarla')));
+  const verTexto = v => (Array.isArray(v) ? v.map(x => `#${x}`).join(' ') : String(v || '—'));
+  Object.entries(propuesta).forEach(([red, p]) => {
+    const bloque = h('div', { clase: 'propuesta-red' }, h('div', { clase: 'fila' },
+      h('b', {}, NOMBRES_RED[red] || red), p.nota != null ? h('span', { clase: 'pastilla' }, `${p.nota}/100 según Claude`) : null));
+    (p.fallos || []).forEach(x => bloque.appendChild(h('div', { clase: 'meta' }, `⚠ ${x}`)));
+    Object.entries(p.campos || {}).forEach(([campo, c]) => {
+      bloque.appendChild(h('div', { clase: 'cambio-seo', datos: { red, campo } },
+        h('div', { clase: 'meta' }, NOMBRE_CAMPO_SEO[campo] || campo),
+        h('div', { clase: 'antes-despues' },
+          h('div', { clase: 'antes' }, verTexto((p.antes || {})[campo])),
+          h('div', { clase: 'despues' }, verTexto(c.despues))),
+        c.porque ? h('div', { clase: 'meta' }, c.porque) : null,
+        h('div', { clase: 'fila' },
+          h('button', { clase: 'mini', onclick: () => aceptarSeoPublicar({ [red]: [campo] }) }, 'Aceptar'),
+          h('button', { clase: 'mini fantasma', onclick: () => dejarMioSeoPublicar(red, campo) }, 'Dejar el mío'))));
+    });
+    caja.appendChild(bloque);
+  });
+  return caja;
+}
+
+async function aceptarSeoPublicar(aceptar) {
+  // lo que se esté tecleando va antes: si no, el servidor compararía con lo viejo
+  try {
+    if (!(await guardarTextosPublicar())) return;
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
+      method: 'PUT', cuerpo: { aceptar_seo: aceptar } });
+    toast('Aceptado');
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* «Dejar el mío»: quita ese cambio de la propuesta (en el servidor también). */
+async function dejarMioSeoPublicar(red, campo) {
+  try {
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
+      method: 'PUT', cuerpo: { rechazar_seo: { [red]: [campo] } } });
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* Un campo SEO del vídeo que se guarda al salir de él. Lo tecleado vive en
+   PUB.seoBorrador hasta guardarse: un repintado (al acabar un trabajo de
+   Claude) no se lo lleva. */
+function campoSeoVideo(campo, etiqueta, ejemplo) {
+  const seo = (PUB.ficha || {}).seo || {};
+  PUB.seoBorrador = PUB.seoBorrador || {};
+  const valor = campo in PUB.seoBorrador ? PUB.seoBorrador[campo] : (seo[campo] || '');
+  return h('label', { clase: 'etiqueta-campo' }, etiqueta,
+    h('input', { type: 'text', value: valor, placeholder: ejemplo || '', datos: { foco: `seo-${campo}` },
+      oninput: ev => { PUB.seoBorrador[campo] = ev.target.value; },
+      onchange: async ev => {
+        await guardarSeoVideoPublicar({ [campo]: ev.target.value });
+        delete PUB.seoBorrador[campo];
+      } }));
+}
+
+/* Por red: la nota SEO (sin Claude), el primer comentario, lo de Instagram
+   (colaboradores, etiquetas) y «Dame 3 ganchos». */
+function seoDeRedPublicar(red) {
+  const f = PUB.ficha;
+  const seo = f.seo || {};
+  const n = (seo.notas || {})[red] || { nota: 0, puntos: [] };
+  const t = textosDeFicha(red);
+  const caja = h('div', { clase: 'seo-red' });
+  PUB.notaAbierta = PUB.notaAbierta || {};
+  const clase = n.nota >= 80 ? 'ok' : n.nota >= 50 ? 'aviso' : 'error';
+  const detalle = h('details', { clase: 'nota-seo', open: !!PUB.notaAbierta[red],
+    ontoggle: ev => { PUB.notaAbierta[red] = ev.currentTarget.open; } },
+  h('summary', {}, h('span', { clase: `pastilla ${clase}` }, `SEO ${n.nota}/100`),
+    ` ${(n.puntos || []).filter(x => !x.ok).length} por mejorar`));
+  (n.puntos || []).forEach(x => detalle.appendChild(h('div', { clase: `punto-seo ${x.ok ? 'ok' : 'aviso'}` },
+    `${x.ok ? '✓' : '⚠'} ${x.texto}`)));
+  caja.appendChild(detalle);
+  caja.appendChild(h('label', { clase: 'etiqueta-campo' },
+    red === 'tiktok' && !(f.ajustes || {}).tt_comentarios_puede
+      ? 'Primer comentario (en TikTok solo se manda si tu cuenta tiene la función «comments»)' : 'Primer comentario (opcional)',
+    h('input', { type: 'text', value: t.primer_comentario || '', datos: { foco: `${red}-primer_comentario` },
+      placeholder: '¿Cuál elegirías tú? Cuéntanos en los comentarios',
+      oninput: ev => editarTextoPublicar(red, 'primer_comentario', ev.target.value) })));
+  if (red === 'instagram') {
+    caja.appendChild(h('div', { clase: 'fila campos-seo' },
+      campoSeoVideo('colaboradores', 'Colaboradores (hasta 3 cuentas, separadas por comas)', '@cuenta1, @cuenta2'),
+      campoSeoVideo('etiquetas', 'Etiquetar cuentas (separadas por comas)', '@cuenta')));
+    caja.appendChild(h('div', { clase: 'meta' }, 'Instagram no admite texto alternativo a través de Upload-Post.'));
+  }
+  const trabajando = !!((seo.trabajando || {})[`ganchos_${red}`]);
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', disabled: trabajando || !String(t.descripcion || '').trim(),
+      title: 'Tres primeras líneas distintas para elegir',
+      onclick: () => pedirGanchosPublicar(red) }, trabajando ? 'Claude está pensando…' : 'Dame 3 ganchos')));
+  const error = (seo.errores || {})[`ganchos_${red}`];
+  if (error) caja.appendChild(cajaError(error));
+  ((seo.ganchos || {})[red] || []).forEach((g, i) => caja.appendChild(h('div', { clase: 'fila gancho-seo' },
+    h('span', { clase: 'crece' }, g),
+    h('button', { clase: 'mini', onclick: () => usarGanchoPublicar(red, i) }, 'Usar este'))));
+  return caja;
+}
+
+async function pedirGanchosPublicar(red) {
+  try {
+    if (!(await guardarTextosPublicar())) return;
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/ganchos`), { method: 'POST', cuerpo: { red } });
+    const f = PUB.ficha;
+    f.seo = Object.assign({}, f.seo, { trabajando: Object.assign({}, (f.seo || {}).trabajando, { [`ganchos_${red}`]: {} }) });
+    pintarModulo();
+    cargarPublicar(true);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function usarGanchoPublicar(red, indice) {
+  try {
+    if (!(await guardarTextosPublicar())) return;
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/ganchos/usar`), {
+      method: 'POST', cuerpo: { red, indice } });
+    toast('Gancho puesto en la primera línea');
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* En el Encargo (Crear): la palabra clave del proyecto como sugerencia, para
+   que el guion la diga en los 3 primeros segundos y salga en pantalla. Solo
+   se enseña: no toca el encargo ni el guion (ni sus firmas). */
+const PISTAS_PALABRA = {};
+function pistaPalabraClaveEncargo(v) {
+  const caja = h('div', { clase: 'pista-palabra-clave' });
+  if (!v || !v.estilo) return caja;
+  // en memoria por estilo: el Encargo se repinta a menudo y la caja parpadeaba
+  const pintar = r => {
+    if (!r || !r.palabra) return;
+    meter(caja, [h('div', { clase: 'caja-info fila' },
+      h('span', { clase: 'crece' }, `SEO: la palabra clave de este proyecto es «${r.palabra}»${r.zona ? ` (${r.zona})` : ''}. `
+        + 'Si el guion la dice en los 3 primeros segundos y sale en pantalla, las redes lo encuentran mejor.'),
+      h('button', { clase: 'mini', onclick: () => copiarTexto(`Di «${r.palabra}» en los 3 primeros segundos y que salga en pantalla.`) },
+        'Copiar como indicación'))]);
+  };
+  if (v.estilo in PISTAS_PALABRA) {
+    pintar(PISTAS_PALABRA[v.estilo]);
+    return caja;
+  }
+  pedir(`${BASE}/api/publicar/palabra-clave?${consulta({ estilo: v.estilo })}`).then(r => {
+    PISTAS_PALABRA[v.estilo] = r;
+    pintar(r);
+  }).catch(() => null);
+  return caja;
 }
 
 /* ================================================================== PARRILLA

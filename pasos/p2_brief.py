@@ -221,10 +221,10 @@ def horquilla_de(duracion_s, idioma, tolerancia=TOLERANCIA_MAXIMA,
         "palabras_maximo": maximo,
         "segundos_minimo": cadencia.segundos_para(
             minimo, normalizar_idioma(idioma), velocidad, hueco_minimo,
-            palabras_por_bloque, voz),
+            palabras_por_bloque, voz, objetivo_s=duracion_s),
         "segundos_maximo": cadencia.segundos_para(
             maximo, normalizar_idioma(idioma), velocidad, hueco_minimo,
-            palabras_por_bloque, voz),
+            palabras_por_bloque, voz, objetivo_s=duracion_s),
         "tolerancia": holgura,
     }
 

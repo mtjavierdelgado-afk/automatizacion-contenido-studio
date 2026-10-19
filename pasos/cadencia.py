@@ -117,7 +117,19 @@ PARTE_DE_LA_PAUSA = 0.6
 PAUSA_DE_BLOQUE_PREVISTA = 0.9
 
 
-def pausas_previstas(segundos, bloques):
+#: Hasta aqui un video es CORTO y su guion lleva otra estructura (la misma
+#: cifra que `p3_guion.DURACION_CORTA_S`; `prueba_p2` comprueba que coinciden).
+DURACION_CORTA_S = 120
+
+#: Las pausas de un corto: su guion tiene como mucho tres paradas contando el
+#: gancho (gancho -> caso -> cierre, ver `p3_guion._estructura_corta`), asi que
+#: hay DOS cambios de parada. Con la regla de los largos se preveian tres o
+#: cuatro, el guion se pedia mas corto de la cuenta y el video salia medio
+#: segundo o un segundo por debajo de lo pedido (18-10-2026).
+PAUSAS_DE_UN_CORTO = 2
+
+
+def pausas_previstas(segundos, bloques, corto=None):
     """Cuantas pausas de bloque llevara un guion de esa duracion. -> int
 
     Una por tramo del relato: la del gancho y la de cada cambio de tema (la del
@@ -125,13 +137,18 @@ def pausas_previstas(segundos, bloques):
     escrito cuantos tramos salen (regla 11 de `p3_guion`): «en un video de dos
     minutos salen cuatro o cinco; en uno de quince, ocho o diez COMO MUCHO».
     Eso es 3 + medio tramo por minuto, entre 1 y 10, y nunca mas que costuras.
+    Un corto (hasta DURACION_CORTA_S) lleva su propia estructura y sus pausas:
+    PAUSAS_DE_UN_CORTO.
     """
-    minutos = max(0.0, float(segundos or 0.0)) / 60.0
+    total = max(0.0, float(segundos or 0.0))
+    minutos = total / 60.0
     tramos = max(1, min(10, int(round(3 + minutos / 2.0))))
+    if (0 < total <= DURACION_CORTA_S) if corto is None else corto:
+        tramos = PAUSAS_DE_UN_CORTO
     return max(0, min(int(bloques) - 1, tramos))
 
 
-def _aire_previsto(segundos, bloques, hueco):
+def _aire_previsto(segundos, bloques, hueco, corto=None):
     """El aire de un guion que aun no existe: costuras + pausas de bloque.
 
     Lo mismo que cuenta `aire_de` sobre un guion escrito, con las pausas que se
@@ -141,7 +158,7 @@ def _aire_previsto(segundos, bloques, hueco):
     costuras = max(0, int(bloques) - 1)
     por_costura = max(0.0, hueco - PAUSA_ENTRE_BLOQUES)
     por_pausa = PAUSA_DE_BLOQUE_PREVISTA * PARTE_DE_LA_PAUSA
-    return por_costura * costuras + por_pausa * pausas_previstas(segundos, bloques)
+    return por_costura * costuras + por_pausa * pausas_previstas(segundos, bloques, corto)
 
 
 #: Muestras minimas para que el historial gane a la tabla. Con una sola toma
@@ -446,8 +463,14 @@ def palabras_para(segundos, idioma=None, velocidad=None, hueco_minimo=0.0,
 
 
 def segundos_para(palabras, idioma=None, velocidad=None, hueco_minimo=0.0,
-                  palabras_por_bloque=30, voz=None):
-    """Lo que va a durar un guion de N palabras. La otra mitad de la inversa."""
+                  palabras_por_bloque=30, voz=None, objetivo_s=None):
+    """Lo que va a durar un guion de N palabras. La otra mitad de la inversa.
+
+    `objetivo_s` es la duracion PEDIDA, si la hay: decide si el guion es corto
+    (y lleva las pausas de un corto). Sin ella se decide por lo que sale, y en
+    los bordes de la horquilla de un video de 2 minutos eso cruzaba el limite y
+    contaba las pausas de la otra estructura (revision 18-10).
+    """
     cuenta = max(0, int(palabras or 0))
     cadencia, _origen = cadencia_de(idioma, velocidad, voz)
     por_bloque = max(5, int(palabras_por_bloque or 30))
@@ -456,8 +479,14 @@ def segundos_para(palabras, idioma=None, velocidad=None, hueco_minimo=0.0,
     hueco = max(0.0, float(hueco_minimo or 0.0))
     # las pausas previstas dependen de la duracion, y la duracion del aire: dos
     # pasadas, como en palabras_para
-    total = habla + _aire_previsto(habla, bloques, hueco)
-    total = habla + _aire_previsto(total, bloques, hueco)
+    corto = None
+    if objetivo_s is not None:
+        try:
+            corto = 0 < float(objetivo_s) <= DURACION_CORTA_S
+        except (TypeError, ValueError):
+            corto = None
+    total = habla + _aire_previsto(habla, bloques, hueco, corto)
+    total = habla + _aire_previsto(total, bloques, hueco, corto)
     return round(total, 2)
 
 

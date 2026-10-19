@@ -90,6 +90,19 @@ vídeos, estilos, claves y contraseña no se tocan.
 - Si la carga de Resultados fallaba, la pantalla se quedaba rota en vez de
   decir el motivo: ahora sale el error.
 
+**Los cortos duran lo pedido, y comparar el guion con opus (18 de octubre)**
+- Un vídeo de hasta 2 minutos salía medio segundo o un segundo más corto de lo
+  pedido: el cálculo de palabras preveía las pausas de un vídeo largo (tres o
+  cuatro) y el guion corto lleva dos. Ahora cuenta las suyas. Los vídeos ya
+  hechos no cambian.
+- **`asvs comparar-guion`**, en la consola del servidor: escribe el guion de un
+  vídeo tuyo con sonnet y con opus, con el mismo material y las mismas
+  indicaciones, y te los enseña como «A» y «B» sin decir cuál es cuál.
+  `asvs comparar-guion revelar` lo dice después de elegir (y cuál es el que
+  usa hoy ese vídeo: por defecto, opus con esfuerzo muy alto). No toca el vídeo y
+  no gasta dólares, solo tokens de la suscripción. Sin nada detrás, enseña la
+  lista de vídeos que se pueden comparar.
+
 **Vídeos con más movimiento, sobre todo los cortos (18 de octubre)**
 - **Movimiento de cámara en tres niveles**, en el Encargo y en el vídeo
   (Ajustes del montaje → 🎬 Movimiento y efectos): **sobrio** (lo de siempre:

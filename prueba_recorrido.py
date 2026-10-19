@@ -4508,6 +4508,15 @@ def movimiento_de_cada_imagen(navegador, datos):
     pid = datos["video"]
     api = datos["api"]
     api.libre(pid)
+    # «todos_los_botones» ya ha pulsado estos botones: se parte de cada imagen
+    # «como el vídeo», y con el vídeo montado así
+    _r, leido = api.get(f"/api/proyectos/{pid}/planos/montaje")
+    if leido.get("planos"):
+        for sid_ in leido["planos"]:
+            api.put(f"/api/proyectos/{pid}/planos/{sid_}/montaje",
+                    {"movimiento": None, "profundidad": None})
+        api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})
+        api.libre(pid, 600)
     pg = Pagina(navegador, datos)
     pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
     ok(pg.esperar(".montaje-plano", "Esta imagen", 15), "la diapositiva trae «🎬 Esta imagen»")

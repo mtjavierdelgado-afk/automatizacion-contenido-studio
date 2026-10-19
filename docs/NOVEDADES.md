@@ -10,6 +10,33 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Un revisor de imágenes que mira cada plano con su guion (18 de octubre)**
+- En **Imágenes**, debajo del cuadro de notas, el panel **Revisor de
+  imágenes**: «Revisar imágenes» mira cada imagen con lo que dice la voz en
+  ese plano, el bloque del guion, las indicaciones del estilo y del Encargo y
+  las reglas de la casa, y deja una **nota por plano** en las que no cuadran
+  (el equipo mal montado, mandos de otro color, gente que no mira a la
+  pantalla, manos o mandos fundidos, otro estilo). Sus notas salen en la lista
+  de siempre con la etiqueta **revisor · alta/media/baja** y se cambian o se
+  quitan como las tuyas.
+- **«Rehacer las marcadas»** las manda a la cola de siempre: las de retoque
+  parten de la imagen de ahora y las que piden otra imagen se dibujan desde
+  cero. Cada plano marcado tiene su «✕» para decir «está bien así».
+- Mira las imágenes en grupos de 8 seguidas, para ver si el sitio, el equipo y
+  la gente se mantienen de un plano a otro; cada grupo ve además la última
+  imagen del anterior, para que el salto entre grupos tampoco se escape.
+- Revisar **no gasta en imágenes** (usa tu cuenta de Claude) y una imagen ya
+  revisada no se vuelve a mirar mientras no cambie. Lo que cuesta es rehacer.
+- **Tres modos**, en Configuración → Revisor de imágenes: **manual** (solo con
+  el botón; es el de fábrica), **autónomo** (al acabar cada tanda de imágenes, o
+  al rehacer imágenes con tus notas, revisa las nuevas y rehace solo lo grave,
+  una vez) y **automático** (también
+  al generar el vídeo entero: rehace todo lo marcado y lo vuelve a revisar,
+  hasta el número de vueltas que elijas, antes de montar). En los dos últimos,
+  con **topes**: imágenes como mucho por tanda y gasto como mucho por vídeo; y
+  una misma imagen no se rehace sola más de dos veces.
+- Revisar no cambia nada del vídeo: no deja ningún paso obsoleto.
+
 **Publicar: SEO de verdad (18 de octubre)**
 - **Palabras clave del proyecto**, en Publicar → Cuentas y ajustes → **SEO de
   este proyecto**: la principal («alquiler de consolas en Lima»), las
@@ -300,7 +327,6 @@ vídeos, estilos, claves y contraseña no se tocan.
   regenerarlo entero.
 - Subir imágenes, logos o capturas ya no deja parado el resto del Studio
   mientras se guardan.
-
 
 **Publicar en redes (16 de octubre)**
 - **Arriba hay una barra de módulos: Inicio · Crear · Publicar · Automatizar.**
@@ -886,7 +912,6 @@ los derechos de la música, la voz y los efectos.
 - «Empezar de cero» ahora explica qué hace: olvida el intento a medias y lo
   genera todo otra vez (se vuelve a pagar); «Retomar» aprovecha lo ya hecho.
   Pide confirmación.
-
 
 **Corregido: la música no se oía aunque estuviera marcada**
 - La música sí iba en el vídeo, pero se agachaba tanto bajo la voz (unos

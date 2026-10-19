@@ -80,9 +80,37 @@ POR_DEFECTO = {
     # (`ahora()`, `strftime`) sale ya en esa zona, sin tocar cada sitio que la
     # escribe. Lo apuntado antes de cambiarla se queda con la hora que tenia.
     "zona_horaria": "",
+    # EL REVISOR DE IMAGENES (pasos/revisor_imagenes.py). «manual»: solo con
+    # el boton. «autonomo»: tras cada tanda revisa lo nuevo y rehace solo lo
+    # grave, una vuelta. «automatico»: rehace todo lo marcado y vuelve a
+    # revisar, hasta `revisor_vueltas`. Los topes cuentan solo lo que el
+    # revisor manda rehacer SOLO (lo que pide una persona no):
+    # `revisor_max_imagenes` por tanda y `revisor_max_usd` por video.
+    "revisor_modo": "manual",
+    "revisor_max_imagenes": 10,
+    "revisor_max_usd": 1.0,
+    "revisor_vueltas": 2,
 }
 
 DICTADOS = ("auto", "navegador")
+REVISOR_MODOS = ("manual", "autonomo", "automatico")
+#: (minimo, maximo) de los topes del revisor
+REVISOR_LIMITES = {"revisor_max_imagenes": (0, 200), "revisor_max_usd": (0.0, 100.0),
+                   "revisor_vueltas": (1, 5)}
+
+
+def _tope_revisor(clave, valor):
+    """El tope validado, o ValueError."""
+    minimo, maximo = REVISOR_LIMITES[clave]
+    if isinstance(valor, bool):
+        raise ValueError(f"{clave} es un número")
+    try:
+        numero = float(valor)
+    except (TypeError, ValueError):
+        raise ValueError(f"{clave} es un número") from None
+    if not minimo <= numero <= maximo:
+        raise ValueError(f"{clave}: entre {minimo} y {maximo}")
+    return round(numero, 2) if isinstance(minimo, float) else int(numero)
 
 
 def leer():
@@ -100,6 +128,13 @@ def leer():
     if not isinstance(salida.get("zona_horaria"), str) \
             or (salida["zona_horaria"] and not zona_valida(salida["zona_horaria"])):
         salida["zona_horaria"] = ""
+    if salida.get("revisor_modo") not in REVISOR_MODOS:
+        salida["revisor_modo"] = POR_DEFECTO["revisor_modo"]
+    for clave in REVISOR_LIMITES:
+        try:
+            salida[clave] = _tope_revisor(clave, salida.get(clave))
+        except ValueError:
+            salida[clave] = POR_DEFECTO[clave]
     return salida
 
 
@@ -171,6 +206,10 @@ def guardar(cambios):
             if valor and not zona_valida(valor):
                 raise ValueError(f"zona horaria {valor!r}: no es una zona que este "
                                  "servidor conozca (p. ej. America/Lima)")
+        if clave == "revisor_modo" and valor not in REVISOR_MODOS:
+            raise ValueError(f"revisor_modo {valor!r}: solo {', '.join(REVISOR_MODOS)}")
+        if clave in REVISOR_LIMITES:
+            valor = _tope_revisor(clave, valor)
         actual[clave] = valor
     escribir_json(RUTA, actual)
     return actual

@@ -1404,7 +1404,7 @@ def prueba_titulo_completo():
     try:
         cli = P.cliente(raiz)
         cli.crear_perfil("studio_t")
-        cli.enlace_conectar("studio_t", ["tiktok", "instagram", "youtube"])
+        cli.enlace_conectar("studio_t", ["tiktok", "instagram", "youtube", "facebook", "google_business"])
         mp4 = os.path.join(raiz, "v.mp4")
         with open(mp4, "wb") as fh:
             fh.write(b"0" * 2000)
@@ -1470,6 +1470,24 @@ def prueba_titulo_completo():
         with open(simulador, encoding="utf-8") as fh:
             nuevas = json.load(fh)["subidas"][antes:]
         igual(len(nuevas), 1, "YouTube + Facebook solas: una subida (las dos llevan su título)")
+        # Google Business + YouTube + Instagram: tres subidas, cada una con su «title»
+        with open(simulador, encoding="utf-8") as fh:
+            antes = len(json.load(fh)["subidas"])
+        P.guardar_ficha(raiz, "t_tres", {"textos": dict(textos, google_business={
+            "descripcion": "Consolas para tu fiesta en Lima. Escríbenos."})})
+        P.enviar(raiz, dict(INFO, pid="t_tres", mp4=mp4, mp4_huella="t_tres", duracion_s=20),
+                 ajustes, {"redes": ["google_business", "youtube", "instagram"], "modo": "ahora",
+                           "confirmado": True}, en_hilo=False)
+        with open(simulador, encoding="utf-8") as fh:
+            nuevas = json.load(fh)["subidas"][antes:]
+        igual(sorted(tuple(s_["redes"]) for s_ in nuevas),
+              [("google_business",), ("instagram",), ("youtube",)],
+              "Google Business + YouTube + Instagram: tres subidas, cada red en la suya")
+        ig = next(s_ for s_ in nuevas if s_["redes"] == ["instagram"])
+        igual(ig["campos"]["title"], ig["campos"]["instagram_title"],
+              "y la de Instagram sigue con su texto completo")
+        lotes = {e["red"]: e["lote"] for e in P._leer_video(raiz, "t_tres")["envios"]}
+        igual(len(set(lotes.values())), 3, "tres lotes distintos")
         # lo que devuelve la red, comparado con lo mandado
         e = {"red": "instagram", "enviado": {"instagram_title": "x" * 300}}
         P.comparar_publicado(e, "x" * 120)

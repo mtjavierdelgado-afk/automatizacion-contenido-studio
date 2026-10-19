@@ -16,6 +16,10 @@ vídeos, estilos, claves y contraseña no se tocan.
   una para YouTube/Facebook con su título y otra para las demás con su texto
   completo. Antes iba todo junto y el título de YouTube podía acabar como el
   texto de Instagram.
+- **Cada subida cuenta en el mes de Upload-Post**: Instagram + YouTube son 2;
+  con Google Business, 3. La confirmación antes de enviar dice cuántas.
+- Cancelar un programado de YouTube ya no cancela el de Instagram (van en
+  subidas distintas): cancela cada red por separado si quieres quitar las dos.
 - En la ficha no cambia nada: cada red sigue con su envío, su estado y su
   «Reintentar». Lo que ya estaba programado antes de este cambio no se toca:
   cancélalo y vuelve a programarlo para que salga con el texto entero.

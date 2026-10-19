@@ -35,6 +35,7 @@ Y NO ESCRIBE NADA POR DEFECTO: un estilo sin reglas no lleva la clave, y el
 prompt de un video sin reglas sale byte a byte como antes (regla 1 de
 CLAUDE.md: una firma que se mueve sin que nadie pida nada es dinero).
 """
+import os
 import re
 import time
 import unicodedata
@@ -78,6 +79,14 @@ def normalizar(reglas):
     if not isinstance(reglas, list):
         raise ReglaInvalida("las reglas son una lista")
     salida, ids = [], set()
+    # LOS IDS QUE YA TRAEN SE RESERVAN ANTES: si no, una regla sin id delante de
+    # la «r1» se quedaba ese nombre y la «r1» de verdad pasaba a ser otra
+    for cruda in reglas:
+        if isinstance(cruda, dict) and _limpio(cruda.get("texto"), MAX_TEXTO + 1):
+            propio = re.sub(r"[^a-z0-9_-]", "", str(cruda.get("id") or "").lower())[:24]
+            if propio:
+                ids.add(propio)
+    vistos = set()
     for n, cruda in enumerate(reglas):
         if not isinstance(cruda, dict):
             raise ReglaInvalida(f"la regla {n + 1} no es un objeto")
@@ -103,11 +112,12 @@ def normalizar(reglas):
         if len(limpias) > MAX_PALABRAS:
             raise ReglaInvalida(f"la regla {n + 1} tiene más de {MAX_PALABRAS} palabras")
         rid = re.sub(r"[^a-z0-9_-]", "", str(cruda.get("id") or "").lower())[:24]
-        if not rid or rid in ids:
+        if not rid or rid in vistos:
             rid = f"r{n + 1}"
-            while rid in ids:
+            while rid in ids or rid in vistos:
                 rid += "b"
         ids.add(rid)
+        vistos.add(rid)
         regla = {"id": rid,
                  "nombre": _limpio(cruda.get("nombre"), MAX_NOMBRE) or texto[:60],
                  "texto": texto, "gravedad": gravedad}
@@ -181,7 +191,12 @@ def para_revisor(reglas):
 # --------------------------------------------------------- afinar con Claude
 
 FASE = "reglas_estilo"
-TIEMPO_BASE_S = 240
+#: Una regla se afina en segundos: con el defecto del canal (opus, esfuerzo muy
+#: alto) el techo era de una hora, y la pantalla deja de preguntar a los tres
+#: minutos. Sonnet/medium y un techo de dos minutos y medio, como el asistente.
+MODELO = "sonnet"
+ESFUERZO = "medium"
+TIEMPO_MAX_S = 150
 
 SISTEMA = ("Eres director de fotografia y redactor de prompts para un generador "
            "de imagenes. Responde exclusivamente con el objeto JSON pedido, sin "
@@ -216,7 +231,10 @@ def afinar(texto, nombre="", palabras=(), cwd=None):
     texto = _limpio(texto, MAX_TEXTO)
     if not texto:
         raise ReglaInvalida("escribe primero lo que exige la regla")
-    defecto = cli_claude.por_defecto_de(FASE)
+    modelo = cli_claude.normalizar_modelo(os.environ.get("ESTUDIO_REGLAS_MODELO"),
+                                          defecto=MODELO)
+    esfuerzo = cli_claude.normalizar_esfuerzo(os.environ.get("ESTUDIO_REGLAS_ESFUERZO"),
+                                              defecto=ESFUERZO)
     contexto = ""
     if nombre:
         contexto += f"\nSu nombre ahora: {_limpio(nombre, MAX_NOMBRE)}\n"
@@ -225,8 +243,8 @@ def afinar(texto, nombre="", palabras=(), cwd=None):
     arranque = time.time()
     texto_resp, _sobre = cli_claude.ejecutar(
         INSTRUCCION.format(texto=texto, contexto=contexto),
-        modelo=defecto["modelo"], esfuerzo=defecto["esfuerzo"], cwd=cwd,
-        tiempo_max_s=0, base_tiempo_s=TIEMPO_BASE_S, sistema=SISTEMA,
+        modelo=modelo, esfuerzo=esfuerzo, cwd=cwd,
+        tiempo_max_s=TIEMPO_MAX_S, sistema=SISTEMA,
         herramientas_vetadas=("Bash", "Write", "Edit", "NotebookEdit", "Read",
                               "Grep", "Glob", "WebFetch", "WebSearch", "Task",
                               "TodoWrite"),

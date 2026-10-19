@@ -13207,14 +13207,11 @@ def leer_reglas_estilo(preset_id: str):
 
 @app.put("/api/presets-light/{preset_id}/reglas")
 def guardar_reglas_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
-    """Guarda las reglas de un estilo: {reglas: [{nombre, texto, palabras?,
+    """Guarda las reglas de un estilo: {reglas: [{id?, nombre, texto, palabras?,
     gravedad?, en?}]}. Una lista vacia las quita. No toca ningun video: llegan
     a los nuevos al crearlos y a los hechos con «Traer el estilo»."""
     presets = _presets()
     modulo = _reglas_estilo()
-    ficha = _preset_o_400(lambda p: p.leer(preset_id))
-    if ficha.get("tipo") != "canal":
-        raise ErrorApi(400, "esto no es un preset de canal")
     datos = _cuerpo(cuerpo)
     if "reglas" not in datos:
         raise ErrorApi(400, "manda {reglas: [...]} (una lista vacía las quita)")
@@ -13222,26 +13219,37 @@ def guardar_reglas_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
         reglas = modulo.normalizar(datos.get("reglas"))
     except modulo.ReglaInvalida as fallo:
         raise ErrorApi(400, str(fallo))
-    contenido = copy.deepcopy(ficha.get("datos") or {})
-    estilo = dict(contenido.get("estilo") or {})
-    antes = modulo.de_estilo(estilo)
-    if reglas:
-        estilo["reglas"] = reglas
-    else:
-        estilo.pop("reglas", None)
-    if estilo:
-        contenido["estilo"] = estilo
-    else:
-        contenido.pop("estilo", None)
-    if reglas == antes:
-        return {"reglas": reglas, "cambiado": False}
-    try:
-        nueva = presets.guardar("canal", ficha.get("nombre") or "", contenido,
-                                nota=ficha.get("nota") or "",
-                                miniatura=ficha.get("miniatura") or "",
-                                pid=preset_id)
-    except presets.ErrorPreset as fallo:
-        raise ErrorApi(400, str(fallo))
+    # LEER, CAMBIAR Y ESCRIBIR CON EL CERROJO DE LOS PRESETS (reentrante: el
+    # `guardar` de dentro lo vuelve a coger). Sin el, una congelacion del taller
+    # que cayera entre la lectura y la escritura --un «rehacer» del estilo, que
+    # se paga-- se perderia: esto volveria a escribir el estilo de antes.
+    with presets.lock_de(presets.FICHERO):
+        ficha = _preset_o_400(lambda p: p.leer(preset_id))
+        if ficha.get("tipo") != "canal":
+            raise ErrorApi(400, "esto no es un preset de canal")
+        contenido = copy.deepcopy(ficha.get("datos") or {})
+        estilo = dict(contenido.get("estilo") or {})
+        if reglas and not estilo.get("referencias"):
+            raise ErrorApi(400, "este estilo todavía no tiene su estilo gráfico (las "
+                                "láminas): genéralo antes de ponerle reglas")
+        antes = modulo.de_estilo(estilo)
+        if reglas == antes:
+            return {"reglas": reglas, "cambiado": False}
+        if reglas:
+            estilo["reglas"] = reglas
+        else:
+            estilo.pop("reglas", None)
+        if estilo:
+            contenido["estilo"] = estilo
+        else:
+            contenido.pop("estilo", None)
+        try:
+            nueva = presets.guardar("canal", ficha.get("nombre") or "", contenido,
+                                    nota=ficha.get("nota") or "",
+                                    miniatura=ficha.get("miniatura") or "",
+                                    pid=preset_id)
+        except presets.ErrorPreset as fallo:
+            raise ErrorApi(400, str(fallo))
     anotar_global("reglas_estilo", {"preset": preset_id, "reglas": len(reglas)})
     return {"reglas": modulo.de_estilo((nueva.get("datos") or {}).get("estilo") or {}),
             "cambiado": True}
@@ -13260,6 +13268,10 @@ def afinar_regla_estilo(cuerpo: dict = Body(default=None)):
     palabras = datos.get("palabras") if isinstance(datos.get("palabras"), list) else []
     rid = uuid.uuid4().hex[:12]
     with _LOCK_AFINADOS:
+        # DE UNA EN UNA: cada una es una llamada al CLI con su cupo, y nadie la
+        # cancela; pulsar diez veces no puede lanzar diez
+        if any(f.get("estado") == "pensando" for f in _AFINADOS.values()):
+            raise ErrorApi(409, "Claude ya está afinando otra regla: espera a que termine")
         for viejo in list(_AFINADOS)[:-19]:
             _AFINADOS.pop(viejo, None)
         _AFINADOS[rid] = {"estado": "pensando"}

@@ -69,6 +69,14 @@ def prueba_normalizar():
     igual([r["id"] for r in reglas], ["r1", "r2"], "ids propios")
     igual(reglas[1]["gravedad"], "media", "gravedad")
     ok("palabras" not in reglas[1], "sin palabras no se escribe la clave")
+    fmt = rs.normalizar([{"nombre": "{logo}", "texto": "con llaves {0} y }{", "palabras": ["{x}"]}])
+    ok(rs.para_revisor(fmt) and rs.para_prompt(fmt, "{x}"), "las llaves en el texto no rompen nada")
+    ok(revisor_imagenes.BLOQUE_REGLAS_ESTILO.format(reglas=rs.para_revisor(fmt)), "ni en el revisor")
+    ids = [r["id"] for r in rs.normalizar([{"texto": "nueva"}, {"id": "r1", "texto": "vieja"}])]
+    ok(ids[1] == "r1" and ids[0] != "r1",
+       f"una regla sin id no le quita el suyo a la que ya lo tenia ({ids})")
+    igual([r["id"] for r in rs.normalizar([{"id": "nueva17", "texto": "a"}, {"id": "nueva17", "texto": "b"}])],
+          ["nueva17", "r2"], "un id repetido se cambia en la segunda")
     igual(rs.normalizar([{"texto": "x", "palabras": "jugador, Jugador ,mandos"}])[0]["palabras"],
           ["jugador", "mandos"], "palabras desde texto con comas, sin repetidas")
     for malo, que in (([{"texto": "x", "gravedad": "enorme"}], "gravedad rara"),

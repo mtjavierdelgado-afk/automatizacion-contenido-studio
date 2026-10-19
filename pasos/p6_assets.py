@@ -2940,16 +2940,6 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
               if foto else reglas.bloque_prompt("prompt_imagen"))
     if bloque:
         lineas.append(bloque)
-    # LAS REGLAS DEL ESTILO (pasos/reglas_estilo.py): las que escribio quien
-    # hizo el estilo, detras de las de la casa y delante de la escena, con la
-    # misma razon que ellas -- lo concreto de la escena pesa mas que una regla
-    # general, y aqui la regla tiene que ganar. Solo las que aplican a ESTE
-    # plano (sus palabras), y NADA si el estilo no tiene: sin reglas el prompt
-    # sale byte a byte como antes y ninguna firma se mueve (regla 1).
-    lineas.extend(reglas_estilo.para_prompt(
-        reglas_estilo.de_estilo(estilo),
-        " ".join([str(escena.get("prompt") or ""), str(escena.get("narracion") or ""),
-                  _texto_feedback(feedback)])))
     # CUAL es el idioma del video. La POLITICA --que lo que la produccion
     # escribe va en el idioma del video, y que los nombres propios no se
     # traducen-- vive en la regla `texto-dibujado-en-el-idioma-del-video`, que
@@ -2962,6 +2952,17 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
     nombre = _nombre_en(idioma)
     if nombre:
         lineas.append(f"The language of this film is {nombre}.")
+    # LAS REGLAS DEL ESTILO (pasos/reglas_estilo.py): las que escribio quien
+    # hizo el estilo, detras de las de la casa (y del idioma, que va pegado a la suya) y
+    # delante de la escena, con la
+    # misma razon que ellas -- lo concreto de la escena pesa mas que una regla
+    # general, y aqui la regla tiene que ganar. Solo las que aplican a ESTE
+    # plano (sus palabras), y NADA si el estilo no tiene: sin reglas el prompt
+    # sale byte a byte como antes y ninguna firma se mueve (regla 1).
+    lineas.extend(reglas_estilo.para_prompt(
+        reglas_estilo.de_estilo(estilo),
+        " ".join([str(escena.get("prompt") or ""), str(escena.get("narracion") or ""),
+                  _texto_feedback(feedback)])))
     # EL RESPALDO DE `_citar_reparto`: la escena nombra a su gente por el
     # identificador de su hoja, asi que un personaje SIN hoja adjunta se
     # quedaria en un identificador y nada mas. Solo para esos, y solo aqui --

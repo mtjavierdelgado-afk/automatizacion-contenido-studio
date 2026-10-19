@@ -13287,7 +13287,14 @@ def afinar_regla_estilo(cuerpo: dict = Body(default=None)):
         with _LOCK_AFINADOS:
             _AFINADOS[rid] = ficha
 
-    threading.Thread(target=correr, daemon=True, name=f"afinar-{rid}").start()
+    try:
+        threading.Thread(target=correr, daemon=True, name=f"afinar-{rid}").start()
+    except RuntimeError as fallo:
+        # sin hilo, la entrada no puede quedarse «pensando» para siempre: con
+        # ella asi, el 409 de arriba bloquearia afinar hasta reiniciar
+        with _LOCK_AFINADOS:
+            _AFINADOS[rid] = {"estado": "error", "error": str(fallo)[:300]}
+        raise ErrorApi(503, "no se ha podido arrancar: inténtalo otra vez")
     return {"id": rid, "estado": "pensando"}
 
 

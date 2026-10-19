@@ -13155,7 +13155,8 @@ function vistaGenerandoLight() {
  * ESTILO, y llegan a cada vídeo nuevo al crearlo y a uno ya hecho con «Traer el
  * estilo». Se guardan solas al dejar de escribir; guardarlas no paga nada. */
 const REGLAS_LIGHT = { id: '', reglas: null, cargando: false, error: '', estado: '',
-  temporizador: null, propuestas: {}, afinando: {}, enVuelo: false, otraVez: false };
+  temporizador: null, propuestas: {}, afinando: {}, enVuelo: false, otraVez: false,
+  promesa: null };
 
 const GRAVEDAD_REGLA = {
   alta: 'Alta — se nota a la primera (el revisor la corrige solo en autónomo)',
@@ -13164,11 +13165,19 @@ const GRAVEDAD_REGLA = {
 };
 
 async function cargarReglasLight(id) {
-  // lo escrito en el estilo anterior y aún sin mandar, se manda antes
-  if (REGLAS_LIGHT.temporizador && REGLAS_LIGHT.id && REGLAS_LIGHT.id !== id) {
+  /* LO ESCRITO EN EL ESTILO ANTERIOR Y AÚN SIN MANDAR, se manda antes: el
+     guardado pendiente, el que va en camino y el que se pidió mientras iba. */
+  if (REGLAS_LIGHT.id && REGLAS_LIGHT.id !== id
+      && (REGLAS_LIGHT.temporizador || REGLAS_LIGHT.enVuelo || REGLAS_LIGHT.otraVez)) {
+    const pendiente = !!REGLAS_LIGHT.temporizador;
     clearTimeout(REGLAS_LIGHT.temporizador);
     REGLAS_LIGHT.temporizador = null;
-    await volcarReglasLight();
+    if (REGLAS_LIGHT.enVuelo) {
+      if (pendiente) REGLAS_LIGHT.otraVez = true;
+      await REGLAS_LIGHT.promesa;
+    } else {
+      await volcarReglasLight();
+    }
   }
   REGLAS_LIGHT.id = id;
   REGLAS_LIGHT.reglas = null;
@@ -13199,11 +13208,12 @@ function guardarReglasLight() {
 async function volcarReglasLight() {
   REGLAS_LIGHT.temporizador = null;
   /* DE UNO EN UNO: dos guardados a la vez podían llegar al revés y dejar
-     guardado el más viejo. Si se pide otro mientras va uno, se manda al acabar. */
-  if (REGLAS_LIGHT.enVuelo) { REGLAS_LIGHT.otraVez = true; return; }
+     guardado el más viejo. Si se pide otro mientras va uno, se manda al acabar
+     ese, y dentro de la MISMA promesa: así quien cambia de estilo puede
+     esperarla entera (`cargarReglasLight`) y no se pierde lo último escrito. */
+  if (REGLAS_LIGHT.enVuelo) { REGLAS_LIGHT.otraVez = true; return REGLAS_LIGHT.promesa; }
   const id = REGLAS_LIGHT.id;
-  if (!id || !REGLAS_LIGHT.reglas) return;
-  REGLAS_LIGHT.enVuelo = true;
+  if (!id || !REGLAS_LIGHT.reglas) return null;
   const reglas = REGLAS_LIGHT.reglas
     .filter(r => String(r.texto || '').trim())
     .map(r => ({
@@ -13211,23 +13221,27 @@ async function volcarReglasLight() {
       palabras: String(r.palabras || '').split(',').map(p => p.trim()).filter(Boolean),
       en: r.en || '',
     }));
+  REGLAS_LIGHT.enVuelo = true;
   REGLAS_LIGHT.estado = 'guardando…';
   refrescarVivosLight();
-  try {
-    /* LOS IDS SON LOS DE AQUÍ: el servidor conserva los que le llegan, así
-       que no se copia nada de vuelta (copiarlos por posición mezclaba reglas
-       si mientras tanto se escribía en un borrador). */
-    const r = await pedir(`${API.presetLight(id)}/reglas`, { method: 'PUT', cuerpo: { reglas } });
-    if (REGLAS_LIGHT.id === id) REGLAS_LIGHT.estado = r.cambiado ? 'guardado ✓' : 'sin cambios';
-  } catch (err) {
-    if (REGLAS_LIGHT.id === id) REGLAS_LIGHT.estado = `no se ha podido guardar: ${err.message}`;
-  }
-  REGLAS_LIGHT.enVuelo = false;
-  refrescarVivosLight();
-  if (REGLAS_LIGHT.otraVez) {
-    REGLAS_LIGHT.otraVez = false;
-    volcarReglasLight();
-  }
+  REGLAS_LIGHT.promesa = (async () => {
+    try {
+      /* LOS IDS SON LOS DE AQUÍ: el servidor conserva los que le llegan, así
+         que no se copia nada de vuelta (copiarlos por posición mezclaba
+         reglas si mientras tanto se escribía en un borrador). */
+      const r = await pedir(`${API.presetLight(id)}/reglas`, { method: 'PUT', cuerpo: { reglas } });
+      if (REGLAS_LIGHT.id === id) REGLAS_LIGHT.estado = r.cambiado ? 'guardado ✓' : 'sin cambios';
+    } catch (err) {
+      if (REGLAS_LIGHT.id === id) REGLAS_LIGHT.estado = `no se ha podido guardar: ${err.message}`;
+    }
+    REGLAS_LIGHT.enVuelo = false;
+    refrescarVivosLight();
+    if (REGLAS_LIGHT.otraVez && REGLAS_LIGHT.id === id) {
+      REGLAS_LIGHT.otraVez = false;
+      await volcarReglasLight();
+    }
+  })();
+  return REGLAS_LIGHT.promesa;
 }
 
 function anadirReglaLight() {
@@ -13340,13 +13354,16 @@ function tarjetaReglaLight(regla, i) {
       'Cambiaste tu texto: la versión afinada era de antes y ya no se usa. '
       + 'Pulsa «Afinar con Claude» otra vez si la quieres.')
     : null)));
-  if (regla.en) {
+  /* VIVA: si cambias tu texto, la versión afinada desaparece al momento (deja
+     de usarse) sin repintar la tarjeta que estás escribiendo. */
+  tarjeta.appendChild(enVivo(() => {
+    if (!regla.en) return null;
     const en = h('textarea', {
       rows: 3, value: regla.en, 'aria-label': `Versión afinada de la regla ${i + 1}`,
       oninput: ev => cambiar('en', ev.target.value),
     });
     en.dataset.foco = `regla:${regla.id}:en`;
-    tarjeta.appendChild(h('div', { clase: 'regla-estilo-en' },
+    return h('div', { clase: 'regla-estilo-en' },
       h('div', { clase: 'fila' },
         h('span', { clase: 'meta' }, 'Lo que lee la IA de imágenes (afinada, en inglés)'),
         h('span', { clase: 'crece' }),
@@ -13354,8 +13371,8 @@ function tarjetaReglaLight(regla, i) {
           clase: 'mini fantasma', title: 'Volver a usar tu texto tal cual',
           onclick: () => { regla.en = ''; pintarLight(); volcarReglasLight(); },
         }, 'Usar mi texto')),
-      en));
-  }
+      en);
+  }));
   const p = REGLAS_LIGHT.propuestas[regla.id];
   if (p) {
     tarjeta.appendChild(h('div', { clase: 'regla-estilo-propuesta' },

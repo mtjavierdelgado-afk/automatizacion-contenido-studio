@@ -3254,7 +3254,7 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
   padding: 8px 10px; border: 1px solid var(--linea); border-radius: 8px; background: var(--panel); }
 .montaje-plano-cab { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px; }
 .montaje-plano-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.montaje-plano-fila > label { min-width: 6.5em; color: var(--tenue); font-size: 12px; }
+.montaje-plano-fila > label { min-width: 8.5em; color: var(--tenue); font-size: 12px; }
 
 /* ================================================================ PUBLICAR
    Rama `publicar-redes-1` (16-10-2026): la barra de módulos y el módulo

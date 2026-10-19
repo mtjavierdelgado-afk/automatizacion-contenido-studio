@@ -4537,6 +4537,7 @@ def movimiento_de_cada_imagen(navegador, datos):
        "deja pendiente ese plano y ninguno más")
     ok(pg.esperar(".previa-mandos button", "Montar el vídeo", 10),
        "y abajo sale «Montar el vídeo»")
+    pg.js("document.querySelector('.montaje-plano').scrollIntoView({block: 'center'});")
     pg.captura("movimiento_de_una_imagen", entera=False)
     assets_antes = _version_de(datos, "assets", "").get("activa")
     api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})

@@ -5770,10 +5770,22 @@ function dialogo(op) {
     const campo = c => {
       valores[c.clave] = c.valor === undefined ? '' : c.valor;
       if (c.tipo === 'textarea') {
-        const area = h('textarea', { rows: 3, placeholder: c.pista || '',
-          oninput: ev => { valores[c.clave] = ev.target.value; } });
+        // CON TOPE, SE VE (19-10-2026): `max` pone el límite en el campo y un
+        // contador debajo. Sin él, las láminas se cortaban en el servidor y se
+        // pagaba una imagen con la mitad de lo pedido
+        const cuenta = c.max ? h('span', { clase: 'meta cuenta-caracteres' }) : null;
+        const contar = () => {
+          if (!cuenta) return;
+          const n = (valores[c.clave] || '').length;
+          cuenta.textContent = `${n} de ${c.max} caracteres`;
+          cuenta.classList.toggle('cerca-del-tope', n > c.max * 0.9);
+        };
+        const area = h('textarea', { rows: c.max ? 6 : 3, placeholder: c.pista || '',
+          maxlength: c.max || null,
+          oninput: ev => { valores[c.clave] = ev.target.value; contar(); } });
         area.value = c.valor || '';
-        return h('label', { clase: 'campo' }, h('span', {}, c.etiqueta), area,
+        contar();
+        return h('label', { clase: 'campo' }, h('span', {}, c.etiqueta), area, cuenta,
           c.ayuda ? h('span', { clase: 'meta' }, c.ayuda) : null);
       }
       const control = c.tipo === 'select'
@@ -7227,6 +7239,7 @@ function opcionesParaCrear(e) {
   const op = e.opciones || {};
   const salida = {};
   if (op.presencia) salida.presencia = op.presencia;
+  if (Number(op.musica_db)) salida.musica_db = Number(op.musica_db);
   if (op.musica && op.musica.id) salida.musica = op.musica;
   if (op.subtitulos && Object.keys(op.subtitulos).length) salida.subtitulos = op.subtitulos;
   if (op.logo === false) salida.logo = false;
@@ -14022,12 +14035,19 @@ function laminasDelEstilo(ficha) {
   return caja;
 }
 
+/* Lo que cabe en lo que pide una lámina: lo dice el servidor (`GET /laminas`,
+   `max_texto`); 1500 si aún no ha contestado. */
+function maxTextoLamina() {
+  const d = (APP.light.laminas || {}).datos || APP.light.laminas || {};
+  return Number(d.max_texto) || 1500;
+}
+
 async function regenerarLamina(ficha, lamina, precio) {
   const r = await dialogo({
     titulo: `Regenerar «${lamina.titulo}»`,
     texto: `Se dibuja otra vez con tu estilo: una imagen${precio}. Si quieres, di qué le corregirías.`,
     campos: [{ clave: 'texto', tipo: 'textarea', etiqueta: 'Qué le corregirías (opcional)',
-      pista: 'sin sombras duras, y la persona mirando a cámara' }],
+      max: maxTextoLamina(), pista: 'sin sombras duras, y la persona mirando a cámara' }],
     aceptar: 'Regenerar',
   });
   if (!r) return;
@@ -14040,7 +14060,8 @@ async function cambiarLamina(ficha, lamina, precio) {
     texto: `Se guarda con el estilo y se dibuja ya: una imagen${precio}.`
       + (lamina.fabrica ? ' Déjalo vacío para volver a lo de fábrica.' : ''),
     campos: [{ clave: 'texto', tipo: 'textarea', etiqueta: 'Lo que tiene que enseñar',
-      valor: lamina.texto || '', pista: 'una cocina pequeña de noche, con luz cálida y sin personas' }],
+      max: maxTextoLamina(), valor: lamina.texto || '',
+      pista: 'una cocina pequeña de noche, con luz cálida y sin personas' }],
     aceptar: 'Guardar y dibujar',
   });
   if (!r) return;
@@ -14052,7 +14073,7 @@ async function nuevaLamina(ficha, precio) {
     titulo: 'Una lámina más',
     texto: `Piensa en algo que salga a menudo en tus vídeos y que las otras no enseñen. Una imagen${precio}.`,
     campos: [{ clave: 'texto', tipo: 'textarea', etiqueta: 'Lo que tiene que enseñar',
-      pista: 'un baño con espejo iluminado, plano general' }],
+      max: maxTextoLamina(), pista: 'un baño con espejo iluminado, plano general' }],
     aceptar: 'Dibujarla',
   });
   if (!r) return;
@@ -16120,10 +16141,14 @@ function pintarAsistente() {
   const ocupada = !!(charla && charla.ocupada);
 
   burbuja.classList.toggle('sin-sesion', !listo);
+  // ámbar, no rojo: la cuenta está bien, pero la última llamada de algún
+  // trabajo falló por algo pasajero (19-10-2026). Se vuelve a probar sola.
+  burbuja.classList.toggle('dudosa', listo && !!(estado && estado.aviso));
   burbuja.classList.toggle('pensando', ocupada);
   burbuja.classList.toggle('aviso', ASISTENTE.sinLeer && !ocupada);
   burbuja.title = listo
-    ? 'Asistente: pregunta lo que sea del Estudio'
+    ? (estado && estado.aviso ? `Asistente: conectado; la última llamada falló (${estado.aviso})`
+      : 'Asistente: pregunta lo que sea del Estudio')
     : 'Asistente: necesita que entres con tu cuenta de Claude';
   if (cajon.classList.contains('plegado')) return;
 
@@ -16646,7 +16671,7 @@ function resumenAjuste(modo, est, cual) {
     const tema = op ? op.musica : (est.musica || {}).tema;
     const nivel = (PRESENCIAS_MUSICA.find(p => p.id === presencia) || {}).nombre || presencia;
     const deQuien = t => (t.fuente === 'propia' ? ' (tuya)' : ` de ${t.artista || '?'}`);
-    const db = op ? 0 : Number((est.musica || {}).db) || 0;
+    const db = op ? (Number(op.musica_db) || 0) : Number((est.musica || {}).db) || 0;
     const animo = op ? '' : animoUnicoDe(est);
     const automatica = animo
       ? `Automática, toda ${(ANIMOS_MUSICA.find(a => a[0] === animo) || [0, animo])[1].toLowerCase()}`
@@ -16729,7 +16754,10 @@ function editorMusica(modo, est, repintar) {
     !borrador && !elegida
       ? '. Si este vídeo se montó antes del 10 de octubre, sonó «Suave»: pulsa «Normal» para volver a mezclarlo.'
       : ''));
-  if (!borrador) caja.appendChild(volumenFinoMusica(modo, est, repintar));
+  // TAMBIÉN EN UN VÍDEO NUEVO (19-10-2026): el dueño lo buscaba en el Encargo
+  // antes de crear el vídeo y no estaba. Ahí no se remezcla nada: se apunta y
+  // nace con él (`musica_db` en las opciones al crear)
+  caja.appendChild(volumenFinoMusica(modo, est, repintar));
 
   caja.appendChild(h('label', {}, 'Qué música'));
   caja.appendChild(h('div', { clase: 'herramientas' },
@@ -16790,10 +16818,18 @@ function animoUnicoDe(est) {
    (regla 1); y con un respiro, para que las flechas del teclado no lancen una
    mezcla por cada paso. */
 function volumenFinoMusica(modo, est, repintar) {
-  const guardado = Number((est.musica || {}).db) || 0;
+  const borrador = modo.tipo === 'borrador';
+  const op = borrador ? opcionesBorrador(modo.e) : null;
+  const guardado = borrador ? (Number(op.musica_db) || 0) : (Number((est.musica || {}).db) || 0);
   const actual = est.dbEnVuelo !== undefined ? est.dbEnVuelo : guardado;
   const etiqueta = h('span', { clase: 'meta' }, textoDb(actual));
   const guardar = async valor => {
+    if (borrador) {
+      if (valor) op.musica_db = valor; else delete op.musica_db;
+      est.dbEnVuelo = undefined;
+      repintar();
+      return;
+    }
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/sonido`, {
         method: 'PUT', cuerpo: { musica_db: valor, remontar: true } });
@@ -18642,10 +18678,26 @@ function pintarBarraModulos() {
       href: '#', clase: `boton-modulo${MODULOS.actual === id ? ' activo' : ''}`, title: ayuda,
       'aria-current': MODULOS.actual === id ? 'page' : null,
       datos: { modulo: id },
-      onclick: ev => { ev.preventDefault(); irAModulo(id); },
+      onclick: ev => { ev.preventDefault(); if (id === 'crear') entrarEnCrear(); else irAModulo(id); },
     }, texto, id === 'publicar' && PUB.avisos
       ? h('span', { clase: 'aviso-modulo', title: 'Envíos que fallaron o esperan tu OK' }, String(PUB.avisos))
       : null)));
+}
+
+/* «CREAR» ABRE SIEMPRE «TUS PROYECTOS» (decisión del dueño, 19-10-2026). Antes
+   volvía a lo último donde se estaba (un vídeo, un proyecto concreto), y
+   había que salir a mano. Solo la barra y la tarjeta de Inicio pasan por aquí:
+   el «atrás» del navegador y «Pasar al Encargo» de la Parrilla siguen yendo
+   adonde tienen que ir. Lo escrito en un estilo se guarda antes, como al
+   pulsar «‹ Volver»; cerrar el vídeo en pantalla no para lo que se genera. */
+function entrarEnCrear() {
+  if (APP.light.pendiente) volcarPresetLight();
+  pararPrevia();
+  recordarVideoLight('');
+  apuntarCliente('');
+  irAModulo('crear');
+  irALight('galeria');
+  cargarGaleriaLight(true);
 }
 
 function irAModulo(nombre, opciones) {
@@ -18752,7 +18804,8 @@ function vistaInicioModulos() {
     'Ir a la Parrilla']].forEach(([id, titulo, texto, boton]) => tarjetas.appendChild(
     h('div', { clase: 'tarjeta-modulo' },
       h('h3', {}, titulo), h('p', { clase: 'meta' }, texto),
-      h('button', { clase: id === 'automatizar' ? 'mini' : 'primario mini', onclick: () => irAModulo(id) }, boton))));
+      h('button', { clase: id === 'automatizar' ? 'mini' : 'primario mini',
+        onclick: () => (id === 'crear' ? entrarEnCrear() : irAModulo(id)) }, boton))));
   caja.appendChild(tarjetas);
   caja.appendChild(lineaMejorSemana());
   const hoy = h('div', { clase: 'bloque' }, h('h3', {}, 'Lo que pasa hoy'));

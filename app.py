@@ -10280,8 +10280,16 @@ def _asistente_listo():
                                or ("todavía no has entrado con tu cuenta de Claude"
                                    if por_defecto else
                                    f"la cuenta «{ficha['etiqueta']}» no tiene sesión"))
-        elif (ficha_salud or {}).get("estado") in ("cupo", "sesion", "tiempo", "error"):
+        elif (ficha_salud or {}).get("estado") in ("cupo", "sesion"):
             ficha["motivo"] = salud.describir(ficha_salud, ficha["etiqueta"])
+        elif (ficha_salud or {}).get("estado") in ("tiempo", "error"):
+            # UN FALLO PASAJERO DE OTRO TRABAJO NO APAGA EL ASISTENTE (19-10-2026).
+            # La salud la escribe cualquier llamada del Estudio (un guion que
+            # tardo, un «Overloaded», la sesion renovandose en otro proceso), y
+            # con eso la burbuja salia en rojo «no conectado» con la cuenta
+            # bien. Se queda como aviso y se vuelve a probar sola al abrirla.
+            ficha["aviso"] = salud.describir(ficha_salud, ficha["etiqueta"])
+            sin_probar = True
         elif ficha_salud is None:
             sin_probar = True
         fichas.append(ficha)
@@ -10459,6 +10467,7 @@ def estado_asistente():
     listo, motivo, cuenta, cuentas, sin_probar = _asistente_listo()
     return {"listo": listo, "motivo": motivo, "cuenta": cuenta,
             "cuentas": cuentas, "sin_probar": sin_probar,
+            "aviso": (cuenta or {}).get("aviso", "") if listo else "",
             "modelo": modulo.MODELO, "esfuerzo": modulo.ESFUERZO,
             "simulado": modulo.simulado(),
             # si se dicta con la clave de OpenAI; si no (sin clave, o porque
@@ -13148,6 +13157,7 @@ def laminas_de_preset(preset_id: str):
             "imagenes": len(_aportadas_del_taller(ctx)),
             "en_la_hoja": _light().MAX_EN_LA_HOJA,
             "max": lam.MAX_LAMINAS, "min": lam.MIN_LAMINAS,
+            "max_texto": lam.MAX_TEXTO,
             "calidad": calidad, "usd_por_lamina": round(usd, 4),
             # lo que paga «Regenerar» el estilo entero con ESTAS laminas
             "imagenes_estilo": _light().imagenes_de_parte("estilo", origen)}
@@ -13186,7 +13196,12 @@ def cambiar_laminas(preset_id: str, cuerpo: dict = Body(default=None)):
     datos = _cuerpo(cuerpo)
     accion = str(datos.get("accion") or "").strip().lower()
     lamina = str(datos.get("lamina") or "").strip()
-    texto = " ".join(str(datos.get("texto") or "").split())[:lam.MAX_TEXTO]
+    texto = " ".join(str(datos.get("texto") or "").split())
+    # UN TEXTO DEMASIADO LARGO SE DICE, no se corta: cortado, la lamina se
+    # pagaba dibujando la mitad de lo pedido y nadie se enteraba (19-10-2026)
+    if len(texto) > lam.MAX_TEXTO:
+        raise ErrorApi(400, f"lo que pides para la lámina tiene {len(texto)} caracteres "
+                            f"y el máximo es {lam.MAX_TEXTO}: acórtalo un poco")
     ficha, ctx = _taller_con_laminas(preset_id)
     # reservado de mirar a lanzar, como `regenerar_preset_light`
     with _taller_reservado(ctx):
@@ -15240,6 +15255,15 @@ def _opciones_al_crear(ctx, preset_id, opciones):
             raise ErrorApi(400, "presencia: " + ", ".join(sonido.PRESENCIAS))
         if presencia != sonido.PRESENCIA_POR_DEFECTO:
             ctx.estado.actualizar_params("render", {"musica_presencia": presencia})
+    # EL AJUSTE FINO DE LA MUSICA, elegido ya en el encargo del video nuevo
+    # (19-10-2026). Mismo margen que `PUT /sonido`; 0 no se escribe (regla 1)
+    if "musica_db" in opciones and opciones.get("musica_db") is not None:
+        valor = opciones.get("musica_db")
+        if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+            raise ErrorApi(400, "musica_db: un número de decibelios, de -12 a +6")
+        valor = round(max(-12.0, min(6.0, float(valor))), 1)
+        if valor:
+            ctx.estado.actualizar_params("render", {"musica_db": valor})
     tema = opciones.get("musica")
     if isinstance(tema, dict) and tema.get("id") and tema.get("descarga"):
         try:

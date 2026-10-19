@@ -49,7 +49,12 @@ EXPLICACION = {
 #: Cuantas laminas caben: las que entran en la hoja de cada plano.
 MAX_LAMINAS = 8
 MIN_LAMINAS = 3
-MAX_TEXTO = 400
+#: Lo que puede decir una lamina (que ensena, o la correccion de esta vez).
+#: Era 400 y se cortaba sin avisar: el dueño describio una escena entera de un
+#: evento y la lamina se pago dibujando la mitad (19-10-2026). Solo va al
+#: dibujar la lamina, no a cada plano: 1.500 caracteres son ~400 tokens, unos
+#: 0,002 $ por lamina. Las laminas ya guardadas (≤400) no cambian de huella.
+MAX_TEXTO = 1500
 HOJAS = ("comun", "repartida")
 _EXTRA = re.compile(r"^extra_\d{1,3}$")
 

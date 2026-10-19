@@ -3283,6 +3283,12 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .regla-estilo-propuesta { border: 1px dashed var(--acento-borde); border-radius: 8px;
   padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--hueco); }
 
+/* ---- notas-19oct: contador de caracteres de un diálogo (láminas) */
+.cuenta-caracteres { text-align: right; }
+.cuenta-caracteres.cerca-del-tope { color: var(--aviso); }
+/* el asistente con sesión, pero con un fallo pasajero apuntado: ámbar */
+.burbuja-asistente.dudosa::after { background: var(--aviso); }
+
 /* ================================================================ PUBLICAR
    Rama `publicar-redes-1` (16-10-2026): la barra de módulos y el módulo
    Publicar. Todo nuevo y aquí, al final, para no chocar con las otras ramas.

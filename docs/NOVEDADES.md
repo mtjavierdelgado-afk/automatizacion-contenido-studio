@@ -10,6 +10,25 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Tus notas del 19 de octubre**
+- **«Crear» abre siempre «Tus proyectos»**, desde la barra de arriba y desde
+  la tarjeta de Inicio, aunque hubieras dejado un vídeo abierto. El «atrás»
+  del navegador sigue llevando adonde estabas.
+- **Lo que pide una lámina ya no se corta en 400 caracteres**: ahora caben
+  1.500, el campo dice cuántos llevas, y si te pasas lo dice en vez de cortar.
+  Antes se guardaba cortado sin avisar y la lámina se dibujaba (y se pagaba)
+  con la mitad de lo pedido.
+- **El asistente ya no sale en rojo («no conectado») por un fallo pasajero**
+  de otro trabajo (un guion que tardó, «Overloaded», la sesión renovándose):
+  sale en ámbar y se comprueba solo al abrirlo. Rojo es solo sin sesión o sin
+  cupo.
+- **El ajuste fino de la música (dB) también en un vídeo nuevo**: en el Encargo,
+  Ajustes del montaje → Música → «Cambiar». El vídeo nace con él.
+- **Regrabar una sección ya no deja un chasquido** donde se cose con el resto
+  de la voz: se corta en el punto más tranquilo de la pausa y con un fundido
+  corto. Era el ruido del «Torneo de 8» (segundo 22,7). Para quitarlo de un
+  vídeo ya hecho, regraba esa sección otra vez.
+
 **El movimiento y la profundidad 2.5D de cada imagen (19 de octubre)**
 - En **Imágenes**, cada diapositiva trae **🎬 Esta imagen**: su movimiento
   (**Quieta**, Sobrio, Vivo o Dinámico) y su **2.5D** (sí o no). De partida

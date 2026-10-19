@@ -3919,10 +3919,11 @@ def publicar_en_redes(navegador, datos):
     # desde la rama `parrilla` (17-10), Automatizar es la Parrilla de guiones
     ok(pg.esperar(".automatizar.parrilla", segundos=10), "Automatizar abre la Parrilla")
 
-    # de vuelta a Crear, donde se dejó
+    # de vuelta a Crear: SIEMPRE «Tus proyectos» (decisión del dueño, 19-10-2026;
+    # hasta entonces volvía al vídeo donde se había dejado)
     pg.pulsar("#barra-modulos .boton-modulo", "Crear")
-    ok(pg.esperar(".bloque-publicar-video", segundos=10), "volver a Crear deja el vídeo donde estaba")
-    ok(pg.p.evaluate("() => (APP.light.video || {}).pid") == pid, "con el mismo vídeo abierto")
+    ok(pg.esperar("h2", "Tus proyectos", 10), "volver a Crear abre «Tus proyectos»")
+    ok(not pg.p.evaluate("() => (APP.light.video || {}).pid"), "con ningún vídeo abierto")
 
     # «atrás» del móvil vuelve a Publicar
     pg.p.go_back()
@@ -4965,6 +4966,55 @@ def lo_de_v2h_en_la_pantalla(navegador, datos):
     ok(pg.esperar("#asistente:not(.plegado)", segundos=5), "el asistente se abre a pantalla completa")
     ok(not pg.visible(".minimizar-burbuja"), "U1: y el «–» de la burbuja no queda encima del chat")
     pg.sin_errores("el móvil")
+    pg.cerrar()
+
+
+# ======================================================================
+# NOTAS DEL 19-10-2026 (rama `notas-19oct`). Tramo propio, al final.
+
+@escenario
+def notas_del_19_10(navegador, datos):
+    """Crear → Tus proyectos, el tope de las láminas a la vista, el asistente
+    en ámbar con un fallo pasajero y el ajuste fino de la música en el vídeo nuevo."""
+    pg = Pagina(navegador, datos)
+    # CREAR SIEMPRE ABRE «TUS PROYECTOS», aunque se dejara un vídeo abierto
+    pg.js(f"await abrirVideoLight('{datos['video']}');")
+    pg.pulsar("#barra-modulos .boton-modulo", "Inicio")
+    pg.pulsar("#barra-modulos .boton-modulo", "Crear")
+    ok(pg.esperar("h2", "Tus proyectos", 10), "CREAR: abre «Tus proyectos», no el último vídeo")
+    pg.pulsar("#barra-modulos .boton-modulo", "Inicio")
+    pg.pulsar(".tarjeta-modulo button", "Ir a Crear")
+    ok(pg.esperar("h2", "Tus proyectos", 10), "CREAR: también desde la tarjeta de Inicio")
+
+    # LÁMINAS: el campo dice su tope y cuenta
+    pg.js(f"nuevaLamina(fichaLight('{datos['preset']}'), '');")
+    ok(pg.esperar(".dialogo textarea", segundos=5), "LÁMINAS: «Una lámina más» abre su diálogo")
+    tope = pg.p.locator(".dialogo textarea").first.get_attribute("maxlength")
+    ok(tope and int(tope) >= 1500, f"LÁMINAS: el campo admite 1.500 caracteres ({tope})")
+    pg.p.locator(".dialogo textarea").first.fill("una sala de eventos amplia " * 20)
+    ok(pg.visible(".dialogo .cuenta-caracteres", "de 1500"), "LÁMINAS: y cuenta lo escrito «N de 1500»")
+    pg.pulsar(".dialogo button", "Cancelar")
+
+    # ASISTENTE: con sesión y un fallo pasajero, ámbar y no rojo
+    clases = pg.p.evaluate("""() => { const antes = ASISTENTE.estado;
+      ASISTENTE.estado = {listo: true, aviso: 'mia: un guion tardó', cuentas: [], cuenta: {correo: 'a@b.c'}};
+      pintarAsistente(); const b = document.querySelector('#burbuja-asistente');
+      const c = [b.classList.contains('dudosa'), b.classList.contains('sin-sesion')];
+      ASISTENTE.estado = antes; pintarAsistente(); return c; }""")
+    ok(clases == [True, False], f"ASISTENTE: un fallo pasajero se pinta ámbar, no «sin sesión» ({clases})")
+
+    # MÚSICA: el ajuste fino, ya en el encargo de un vídeo nuevo
+    pg.js(f"await cargarGaleriaLight(true); elegirEstiloLight(fichaLight('{datos['preset']}'));")
+    ok(pg.esperar("h2", "Un vídeo nuevo", 10), "MÚSICA: «Un vídeo nuevo» se abre")
+    pg.p.locator(".fila-ajuste").filter(has_text="Música").locator("button", has_text="Cambiar").first.click()
+    ok(pg.esperar(".editor-ajuste input.volumen-fino", segundos=5),
+       "MÚSICA: el ajuste fino en dB sale en el vídeo nuevo (antes, solo en uno ya creado)")
+    pg.p.evaluate("""() => { const r = document.querySelector('.editor-ajuste input.volumen-fino');
+      r.value = -4; r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); }""")
+    pg.p.wait_for_timeout(1200)
+    enviado = pg.p.evaluate("() => opcionesParaCrear(APP.light.video.encargo || encargoLight()).musica_db")
+    ok(enviado == -4, f"MÚSICA: y viaja al crear el vídeo ({enviado})")
+    pg.sin_errores("las notas del 19-10")
     pg.cerrar()
 
 

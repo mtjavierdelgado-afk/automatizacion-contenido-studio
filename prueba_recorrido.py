@@ -4552,15 +4552,20 @@ def publicar_lo_que_se_mando(navegador, datos):
     pg.js(f"abrirPublicarVideo('{pid}');")
     ok(pg.esperar(".lo-mandado > summary", "Ver lo que se mandó a Reels", 20),
        "cada envío tiene «Ver lo que se mandó»")
-    pg.p.locator(".lo-mandado > summary").first.click()
+    # EL envío de este escenario (en la batería entera el vídeo ya trae otros
+    # de Instagram, y el primero de la lista puede ser uno programado de antes)
+    propio = '.lo-mandado:has(pre:has-text("Tercera parte."))'
+    ok(pg.esperar(propio, segundos=20) or pg.p.locator(propio).count() > 0,
+       "el envío de ahora tiene lo que se mandó")
+    pg.p.locator(f"{propio} > summary").first.click()
     pg.p.wait_for_timeout(500)
-    texto = pg.p.locator(".lo-mandado").first.inner_text()
+    texto = pg.p.locator(propio).first.inner_text()
     ok("instagram_title" in texto and "Tercera parte." in texto and "#fiestaslima" in texto,
        "con el texto entero que se mandó a Instagram (y sus hashtags)")
     ok("title (" in texto and texto.count("Tercera parte.") >= 2,
        "y el «title» común también lleva el texto entero, no solo la primera línea")
     pg.p.wait_for_timeout(5000)
-    ok(pg.visible(".lo-mandado pre", "Tercera parte."), "y se queda abierto aunque la ficha se repinte")
+    ok(pg.visible(f"{propio} pre", "Tercera parte."), "y se queda abierto aunque la ficha se repinte")
     pg.captura("publicar_lo_que_se_mando")
     pg.sin_errores("«Ver lo que se mandó»")
     pg.cerrar()

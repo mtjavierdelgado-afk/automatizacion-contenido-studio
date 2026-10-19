@@ -2202,8 +2202,10 @@ def probar_sistema(cliente):
                 "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
                 "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente", "chat_guiones",
                 "analizar_cuenta", "conexiones_cuentas",
-                "palabra_clave", "ubicacion_instagram", "categoria_youtube", "hecho_para_ninos"],
-          "estan las veintiuna guias (seis de Crear, nueve de Publicar y seis de la Parrilla), en orden")
+                "palabra_clave", "ubicacion_instagram", "categoria_youtube", "hecho_para_ninos",
+                "texto_linkedin", "texto_x", "texto_threads", "texto_pinterest", "texto_bluesky",
+                "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business"],
+          "estan las treinta guias (seis de Crear, dieciocho de Publicar y seis de la Parrilla), en orden")
     ok(all(g.get("plantilla") and g.get("prompt_ia") and g.get("que_hace")
            for g in datos.get("guias") or []),
        "cada guia trae plantilla, prompt para otra IA y que hace el sistema")

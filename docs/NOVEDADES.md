@@ -27,6 +27,24 @@ vídeos, estilos, claves y contraseña no se tocan.
   crearlos, y a uno ya hecho con **«Traer el estilo»**; sus imágenes no se
   rehacen solas. Un estilo sin reglas sigue exactamente igual que antes.
 
+**Publicar: más redes, cifras automáticas e informe del mes (18 de octubre)**
+- **Nueve redes más**: LinkedIn, X, Threads, Pinterest, Bluesky, Discord,
+  Telegram, Mastodon y Google Business. Se añaden por proyecto en Publicar →
+  Cuentas y ajustes → **Redes de este proyecto**, con lo que cada una necesita
+  (el tablero de Pinterest, la página de LinkedIn, el botón de Google
+  Business…). En la ficha, título donde lo hay y **texto alternativo** donde se
+  admite. Claude escribe para cada una con sus reglas y límites. Reddit no, porque
+  Upload-Post la tiene caída.
+- **Cifras automáticas**, apagadas de fábrica: elige la frecuencia (una vez al
+  día, cada 12 o 6 horas, semanal), la hora y cuántos posts (los últimos 30, por
+  ejemplo). Antes de guardar se ve **lo que gasta**: 0 $ (va incluido en el plan
+  de Upload-Post), y las consultas del cupo que usa. **Pedirlas ahora**, para una
+  vuelta ya.
+- **Resultados**: la tabla de **palabras clave y ganchos que funcionaron**,
+  **cuándo publicar** en cada red (y en la ficha, la hora propuesta con «Usar»)
+  y el **informe del mes** de cada proyecto, imprimible y con un resumen para
+  copiar.
+
 **Cancelar de verdad en el taller de estilos (18 de octubre)**
 - **«Cancelar» un «Rehacer» para en el acto**: corta la llamada a Claude y no
   encarga ninguna lámina más (las que ya se estaban dibujando se acaban y se

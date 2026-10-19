@@ -55,7 +55,23 @@ BASE_POR_DEFECTO = "https://api.upload-post.com"
 
 #: Las redes que el Studio sabe publicar hoy, con el nombre que les da
 #: Upload-Post. El orden es el de la pantalla.
-REDES = ("tiktok", "instagram", "youtube", "facebook")
+REDES = ("tiktok", "instagram", "youtube", "facebook",
+         # publicar-mas (18-10-2026): las demás que acepta Upload-Post (sin Reddit,
+         # que da 503, ni WordPress, que no es una red)
+         "linkedin", "x", "threads", "pinterest", "bluesky", "discord", "telegram",
+         "mastodon", "google_business")
+#: Las de siempre: las que salen marcadas y a la vista en un proyecto nuevo.
+REDES_CLASICAS = ("tiktok", "instagram", "youtube", "facebook")
+#: Las que dan seguidores en /api/analytics (docs.upload-post.com/api/get-analytics,
+#: 18-10-2026). Esa ruta no tiene limite ni coste. Discord, Telegram y Mastodon
+#: no dan cifras de ningun tipo.
+CON_SEGUIDORES = ("tiktok", "instagram", "youtube", "facebook", "linkedin", "x",
+                  "threads", "pinterest", "bluesky", "google_business")
+#: Las que dan cifras POR POST. Preguntar por un envio que solo fue a otras
+#: gasta una consulta del cupo (100 cada 5 minutos) para nada. Google Business
+#: no sale en la lista de cifras por post.
+CON_CIFRAS_POST = ("tiktok", "instagram", "youtube", "facebook", "linkedin", "x",
+                   "threads", "pinterest", "bluesky")
 
 #: Para hablar con Upload-Post. La subida en si puede tardar: un MP4 de 200 MB
 #: por la linea del VPS son minutos, y el plazo es por operacion de socket, no
@@ -288,6 +304,13 @@ class ClienteUploadPost:
                 salida.append({"perfil": str(p["username"]),
                                "cuentas": self._cuentas(p.get("social_accounts"))})
         return {"perfiles": salida, "limite": r.get("limit"), "plan": r.get("plan") or ""}
+
+    def tableros_pinterest(self, perfil):
+        """Los tableros de la cuenta de Pinterest del perfil. -> [{"id", "nombre"}]
+        (docs.upload-post.com/api/get-pinterest-boards)"""
+        r = self._pedir("GET", "/api/uploadposts/pinterest/boards", consulta={"profile": perfil})
+        return [{"id": str(b["id"])[:80], "nombre": str(b.get("name") or b["id"])[:120]}
+                for b in (r.get("boards") or []) if isinstance(b, dict) and b.get("id")]
 
     def crear_perfil(self, perfil):
         r = self._pedir("POST", "/api/uploadposts/users", cuerpo={"username": perfil})

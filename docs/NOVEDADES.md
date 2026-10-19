@@ -10,6 +10,20 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**El movimiento y la profundidad 2.5D de cada imagen (19 de octubre)**
+- En **Imágenes**, cada diapositiva trae **🎬 Esta imagen**: su movimiento
+  (**Quieta**, Sobrio, Vivo o Dinámico) y su **2.5D** (sí o no). De partida
+  dice «Como el vídeo», que es lo elegido en 🎬 Movimiento y efectos.
+- **Quieta** es nueva y solo existe por imagen: el plano no se mueve. Va bien
+  en primeros planos, textos dibujados o para dar un respiro.
+- La 2.5D por imagen sirve para ponerla solo donde queda bien (paisajes,
+  escenas con fondo) y quitarla donde deforma (caras de cerca, textos).
+- Cambiarlo deja pendiente **solo esa imagen**: se aplica al montar el vídeo
+  («Montar el vídeo» sale abajo), gratis y sin redibujar nada.
+- Las cartelas y las cabeceras llevan siempre el movimiento de siempre, porque
+  su texto va con la imagen. Los cortes secos de «Dinámico» siguen al vídeo
+  entero, no a la imagen.
+
 **Publicar: los posts salen con el texto entero (19 de octubre)**
 - **Arreglado:** sin YouTube ni Facebook en el envío, los posts salían solo con
   la primera línea (sin el resto ni los hashtags). El «title» común que se manda

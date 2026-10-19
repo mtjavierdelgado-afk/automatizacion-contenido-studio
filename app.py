@@ -8416,6 +8416,111 @@ def aplicar_montaje(pid: str):
     return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id)}
 
 
+# ----------------------------------------- MONTAJE POR PLANO (19-10-2026)
+# El movimiento y la 2.5D de UN plano, elegidos en su diapositiva de Imagenes
+# (`camara.montaje_propio`). Van en la unidad de callouts
+# (`unidades["escena:S013"]["montaje"]`), fuera de la firma global: cambiarlos
+# deja obsoleto ESE plano --sus capas y su trozo del montaje, gratis-- y ni una
+# imagen. Sin elegir, la clave no existe y el plano sigue al video (regla 1).
+
+def _planos_sin_montaje_propio(plan):
+    """Los planos donde la camara no se puede tocar: las cartelas y las
+    cabeceras (su texto viaja dentro del zoom). Ahi va lo de siempre."""
+    cartelas = PASOS_MODULOS.cartelas
+    return [e["id"] for e in (plan.get("escenas") or [])
+            if cartelas.sin_imagen(e) or cartelas.sobre_imagen(e) or e.get("capitulo_svg")]
+
+
+@app.get("/api/proyectos/{pid}/planos/montaje")
+def leer_montaje_de_planos(pid: str):
+    """{video, planos: {sid: {movimiento?, profundidad?}}, no_aplica, niveles, profundidad}"""
+    ctx = contexto(pid)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    camara = PASOS_MODULOS.camara
+    callouts = ctx.estado.params("callouts") or {}
+    planos = {}
+    for uid, bloque in (callouts.get("unidades") or {}).items():
+        propio = camara.montaje_propio(bloque.get("montaje")) if isinstance(bloque, dict) else {}
+        if propio and str(uid).startswith("escena:"):
+            planos[str(uid)[len("escena:"):]] = propio
+    plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    si, por_que = PASOS_MODULOS.profundidad.disponible()
+    return {"video": camara.normalizar_montaje(callouts.get("montaje")),
+            "planos": planos,
+            "planos_del_video": [str(e.get("id")) for e in (plan.get("escenas") or [])],
+            "no_aplica": _planos_sin_montaje_propio(plan),
+            "niveles": list(camara.NIVELES_PLANO),
+            "profundidad": {"disponible": si, "por_que": por_que}}
+
+
+@app.put("/api/proyectos/{pid}/planos/{sid}/montaje")
+def cambiar_montaje_de_plano(pid: str, sid: str, cuerpo: dict = Body(default=None)):
+    """{movimiento?: quieto|sobrio|vivo|dinamico|null, profundidad?: true|false|null}
+
+    null (o no mandarla) en una clave la deja «como el video». Lo que queda
+    vacio QUITA el bloque: un plano devuelto a «como el video» tiene la misma
+    firma que uno que nunca se toco. Deja pendientes ese plano en las capas y
+    el montaje; se aplica al montar.
+    """
+    ctx = contexto(pid)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    camara = PASOS_MODULOS.camara
+    datos = _cuerpo(cuerpo)
+    try:
+        pedido = camara.montaje_propio(datos, estricto=True)
+    except ValueError as fallo:
+        raise ErrorApi(400, f"montaje del plano: {fallo}")
+    plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    ids = [str(e.get("id")) for e in (plan.get("escenas") or [])]
+    if sid not in ids:
+        raise ErrorApi(404, f"este vídeo no tiene el plano {sid}")
+    if sid in _planos_sin_montaje_propio(plan) and pedido:
+        raise ErrorApi(400, "este plano es una cartela o una cabecera: su texto va con la imagen "
+                            "y no se le puede cambiar el movimiento")
+    uid = f"escena:{sid}"
+    previo = (ctx.estado.params("callouts") or {}).get("unidades") or {}
+    ya_tenia = camara.montaje_propio((previo.get(uid) or {}).get("montaje")
+                                     if isinstance(previo.get(uid), dict) else None)
+    # solo al ENCENDERLA: un plano que ya la lleva (y un modelo que se fue) no
+    # puede quedarse sin poder cambiar su movimiento
+    if (pedido.get("profundidad") and not ya_tenia.get("profundidad")
+            and not PASOS_MODULOS.profundidad.disponible()[0]):
+        raise ErrorApi(409, "la profundidad 2.5D no está disponible: "
+                            + PASOS_MODULOS.profundidad.disponible()[1])
+    if _trabajo_que_toca(ctx, ("callouts", "render")):
+        raise ErrorApi(409, "el vídeo se está montando ahora: cámbialo cuando termine")
+    with ctx.estado._lock:
+        params = copy.deepcopy(ctx.estado.params("callouts") or {})
+        unidades = params.get("unidades") if isinstance(params.get("unidades"), dict) else {}
+        bloque = dict(unidades.get(uid)) if isinstance(unidades.get(uid), dict) else {}
+        # un bloque que YA existia (aunque vacio) se queda: quitarlo moveria la
+        # firma de ese plano sin que nadie lo pidiera
+        existia = isinstance(unidades.get(uid), dict) and "montaje" not in unidades[uid]
+        antes = camara.montaje_propio(bloque.get("montaje"))
+        cambiado = antes != pedido or (bool(pedido) and bloque.get("montaje") != pedido)
+        if cambiado:
+            if pedido:
+                bloque["montaje"] = pedido
+            else:
+                bloque.pop("montaje", None)
+            if bloque or existia:
+                unidades[uid] = bloque
+            else:
+                unidades.pop(uid, None)
+            if unidades:
+                params["unidades"] = unidades
+            else:
+                params.pop("unidades", None)
+            ctx.estado.set_params("callouts", params)
+    if cambiado:
+        ctx.bitacora.anotar("montaje_de_plano", "callouts", {"plano": sid, "montaje": pedido})
+    return dict(leer_montaje_de_planos(pid), cambiado=cambiado,
+                pendiente=(ctx.estado.estado_de("callouts") == "obsoleto"
+                           or ctx.estado.estado_de("render") == "obsoleto"))
+
+
 def _correr_rehacer_montaje(avisar, ctx, tareas, solo_montar=False):
     """Rehace lo que se pida del montaje (rotulos, banda sonora, MP4). Gratis."""
     _regenerar_tras_repaso(avisar, ctx, tareas, "pendientes", solo_montar)

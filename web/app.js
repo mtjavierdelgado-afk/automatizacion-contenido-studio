@@ -10464,6 +10464,7 @@ function vistaPreviaLight() {
    * `subtitulo_texto`, `subtitulo_tam`... en `pasos/repaso.py`). */
 
   if (e.obsoleta) caja.appendChild(avisoImagenObsoleta(e));
+  const delPlano = montajeDelPlano(e); if (delPlano) caja.appendChild(delPlano);
   caja.appendChild(cuadroFeedbackEscena(e));
   /* EL REVISOR: pedir que mire las imágenes y ver lo que dejó (ver
      `panelRevisor`). Sus notas salen abajo, en la lista de siempre. */
@@ -17240,6 +17241,111 @@ function esCortoElEncargo(e, datos) {
   return Number(e.duracion_objetivo_s) <= Number((datos || {}).duracion_corta_s || 0);
 }
 
+/* EL MOVIMIENTO Y LA 2.5D DE UNA IMAGEN (19-10-2026, rama montaje-por-plano).
+ * En su diapositiva de Imágenes: «como el vídeo» (lo de partida, no escribe
+ * nada), o quieta, sobrio, vivo o dinámico; y la 2.5D sí o no. Va en la unidad
+ * de ese plano (`PUT /planos/{sid}/montaje`), así que solo deja pendiente ESE
+ * plano: se aplica al montar, gratis. Las cartelas y las cabeceras llevan
+ * siempre lo de siempre (su texto va con la imagen). */
+const MONTAJE_PLANOS = { pid: '', ficha: null, datos: null, cargando: false, error: '', guardando: '' };
+
+/* Con su propia ayuda: los cortes secos de «Dinámico» son del vídeo entero,
+   no de una imagen suelta. */
+const NIVELES_DEL_PLANO = [
+  ['quieto', 'Quieta', 'La imagen no se mueve (ni la 2.5D, salvo que la pidas aquí). Un respiro entre planos que se mueven. En la primera imagen, sin la entrada rápida del gancho.'],
+  ['sobrio', 'Sobrio', 'Un acercamiento lento, casi quieto.'],
+  ['vivo', 'Vivo', 'El zoom se nota, con paneo; si es larga, cambia de encuadre a mitad.'],
+  ['dinamico', 'Dinámico', 'Como vivo, más un golpe de zoom en la palabra clave.']];
+
+function cargarMontajePlanos(pid) {
+  if (MONTAJE_PLANOS.cargando) return;
+  MONTAJE_PLANOS.cargando = true;
+  MONTAJE_PLANOS.error = '';
+  pedir(`${API.proyecto(pid)}/planos/montaje`)
+    .then(d => { if (MONTAJE_PLANOS.pid === pid) MONTAJE_PLANOS.datos = d; })
+    .catch(err => { if (MONTAJE_PLANOS.pid === pid) MONTAJE_PLANOS.error = err.message || 'no se ha podido leer'; })
+    .then(() => { if (MONTAJE_PLANOS.pid === pid) MONTAJE_PLANOS.cargando = false; repintarVideo(); });
+}
+
+async function cambiarMontajeDelPlano(pid, sid, cambio) {
+  const actual = ((MONTAJE_PLANOS.datos || {}).planos || {})[sid] || {};
+  const cuerpo = Object.assign({ movimiento: null, profundidad: null }, actual, cambio);
+  MONTAJE_PLANOS.guardando = sid;
+  repintarVideo();
+  try {
+    const r = await pedir(`${API.proyecto(pid)}/planos/${encodeURIComponent(sid)}/montaje`,
+      { method: 'PUT', cuerpo });
+    if (MONTAJE_PLANOS.pid === pid) MONTAJE_PLANOS.datos = r;
+    if (r.cambiado) {
+      toast(`${sid}: se aplicará al montar el vídeo (gratis)`);
+      // el botón «Montar el vídeo» sale cuando el vídeo se queda pendiente
+      await recargarVideoAbierto();
+    }
+  } catch (err) { toast(err.message, true); }
+  MONTAJE_PLANOS.guardando = '';
+  repintarVideo();
+}
+
+function montajeDelPlano(e) {
+  const v = videoAbierto();
+  if (!v || !e) return null;
+  /* SE VUELVE A PEDIR CADA VEZ QUE CAMBIAN LAS DIAPOSITIVAS (otro vídeo, o el
+     mismo al volver a Imágenes): el montaje del vídeo, las cartelas o el
+     modelo de la 2.5D pueden haber cambiado entretanto (revisión 19-10). */
+  if (MONTAJE_PLANOS.pid !== v.pid || MONTAJE_PLANOS.ficha !== PREVIA.ficha) {
+    Object.assign(MONTAJE_PLANOS, { pid: v.pid, ficha: PREVIA.ficha, datos: null,
+      cargando: false, error: '', guardando: '' });
+  }
+  const d = MONTAJE_PLANOS.datos;
+  if (!d) {
+    if (MONTAJE_PLANOS.error) {
+      return h('div', { clase: 'montaje-plano' },
+        h('span', { clase: 'meta' }, `Movimiento de esta imagen: ${MONTAJE_PLANOS.error}`),
+        h('button', { clase: 'mini', onclick: () => cargarMontajePlanos(v.pid) }, 'Reintentar'));
+    }
+    if (!MONTAJE_PLANOS.cargando) setTimeout(() => cargarMontajePlanos(v.pid), 0);
+    return null;
+  }
+  if ((d.no_aplica || []).includes(e.id)) {
+    return h('div', { clase: 'montaje-plano' }, h('span', { clase: 'meta' },
+      'Movimiento: esta imagen es una cartela o una cabecera y lleva el de siempre (su texto va con la imagen).'));
+  }
+  const propio = (d.planos || {})[e.id] || {};
+  const video = d.video || {};
+  const ocupado = MONTAJE_PLANOS.guardando === e.id;
+  const nombreDe = id => (NIVELES_DEL_PLANO.find(n => n[0] === id) || [id, id])[1];
+  const boton = (texto, activo, cambio, titulo) => h('button', {
+    clase: 'mini' + (activo ? ' activo' : ''), disabled: ocupado, title: titulo || '',
+    onclick: () => { if (!activo) cambiarMontajeDelPlano(v.pid, e.id, cambio); } }, texto);
+  const elegido = NIVELES_DEL_PLANO.find(n => n[0] === propio.movimiento);
+  const movimiento = h('div', { clase: 'montaje-plano-fila' },
+    h('label', {}, 'Movimiento'),
+    h('div', { clase: 'herramientas' },
+      boton(`Como el vídeo (${nombreDe(video.movimiento || 'sobrio')})`, !propio.movimiento,
+        { movimiento: null }, 'Lo que se eligió en 🎬 Movimiento y efectos para todo el vídeo'),
+      ...NIVELES_DEL_PLANO.map(([id, nombre, ayuda]) =>
+        boton(nombre, propio.movimiento === id, { movimiento: id }, ayuda))));
+  const prof = d.profundidad || {};
+  const sinModelo = !prof.disponible;
+  const tiene = 'profundidad' in propio;
+  const profundidad = h('div', { clase: 'montaje-plano-fila' },
+    h('label', {}, '2.5D'),
+    h('div', { clase: 'herramientas' },
+      boton(`Como el vídeo (${video.profundidad ? 'sí' : 'no'})`, !tiene, { profundidad: null },
+        'Lo que se eligió en 🎬 Movimiento y efectos para todo el vídeo'),
+      sinModelo && propio.profundidad !== true ? h('button', { clase: 'mini', disabled: true,
+        title: `No disponible todavía: ${prof.por_que || 'falta el modelo'}` }, 'Sí')
+        : boton('Sí', propio.profundidad === true, { profundidad: true },
+          'Lo cercano se mueve más que el fondo. Bien en paisajes y escenas con fondo.'),
+      boton('No', propio.profundidad === false, { profundidad: false },
+        'Mejor en primeros planos de caras, textos o imágenes que se deforman')));
+  return h('div', { clase: 'montaje-plano' },
+    h('div', { clase: 'montaje-plano-cab' }, h('b', {}, '🎬 Esta imagen'),
+      h('span', { clase: 'meta' }, elegido ? ` · ${elegido[2]}`
+        : ' · cambia solo esta imagen; se aplica al montar el vídeo, gratis')),
+    movimiento, profundidad);
+}
+
 function editorMontaje(modo, est, repintar) {
   const caja = h('div', { clase: 'editor-ajuste editor-montaje' });
   const borrador = modo.tipo === 'borrador';
@@ -17278,6 +17384,7 @@ function editorMontaje(modo, est, repintar) {
       if (cambios) cuerpo.montaje = cambios;
       if (transiciones) cuerpo.transiciones = transiciones;
       est.montaje = await pedir(`${API.proyecto(modo.pid)}/montaje`, { method: 'PUT', cuerpo });
+      MONTAJE_PLANOS.datos = null;   // «Como el vídeo (…)» dice el de ahora
     } catch (err) { toast(err.message, true); }
     repintar();
   };

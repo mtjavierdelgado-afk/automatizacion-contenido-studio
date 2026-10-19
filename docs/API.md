@@ -296,6 +296,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/montaje` | El montaje del vídeo (movimiento, subtítulos, gancho, cifras, barra), las transiciones elegidas y si está pendiente de aplicar. |
 | `PUT` | `/api/proyectos/{pid}/montaje` | Cambia el montaje o las transiciones. Solo guarda lo que difiere de siempre; volver a lo de siempre quita la clave. 409 mientras se monta. |
 | `POST` | `/api/proyectos/{pid}/montaje/aplicar` | Rehace las capas y vuelve a montar el vídeo con el montaje nuevo. Ni una imagen. 409 si aún no está montado. |
+| `GET` | `/api/proyectos/{pid}/planos/montaje` | El movimiento y la 2.5D elegidos para cada plano: `{video, planos: {sid: {movimiento?, profundidad?}}, planos_del_video, no_aplica, niveles, profundidad: {disponible, por_que}}`. `no_aplica` son las cartelas y cabeceras, que llevan siempre lo de siempre. |
+| `PUT` | `/api/proyectos/{pid}/planos/{sid}/montaje` | `{movimiento?: quieto\|sobrio\|vivo\|dinamico\|null, profundidad?: true\|false\|null}`. null es «como el vídeo»; lo que queda vacío quita la clave (regla 1). Va en `callouts.unidades["escena:SID"].montaje`: deja obsoleto SOLO ese plano. 400 valor raro o cartela, 404 plano que no existe, 409 2.5D sin modelo o vídeo montándose. |
 
 ## Presets del canal
 

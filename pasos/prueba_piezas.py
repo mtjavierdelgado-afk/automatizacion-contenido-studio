@@ -5623,6 +5623,89 @@ def prueba_montaje_movimiento():
     igual(presets_light.ritmo_para_video_nuevo(60, 4.0), None, "y uno mas rapido tambien")
 
 
+def prueba_montaje_por_plano():
+    """El movimiento y la 2.5D de cada plano (rama montaje-por-plano, 19-10-2026)."""
+    import camara
+
+    def escena_de(texto, t_in=10.0, paso=0.4):
+        palabras = texto.split()
+        marcas = [[t_in + k * paso, t_in + k * paso + paso * 0.8]
+                  for k in range(len(palabras))]
+        return {"id": "S001", "t_in": t_in, "t_out": t_in + len(palabras) * paso + 0.2,
+                "narracion": texto, "marcas": marcas, "zoom": {"de": 1.0, "a": 1.08}}
+
+    titulo("montaje de un plano: sin elegir, el del vídeo tal cual (regla 1)")
+    for video in (None, {"movimiento": "vivo"}, {"movimiento": "dinamico", "profundidad": True,
+                                                 "gancho": True, "cifras": True}):
+        completo = camara.normalizar_montaje(video)
+        igual(camara.montaje_del_plano(video, {}), completo,
+              f"{video}: un plano sin bloque se mueve como el vídeo")
+        igual(camara.montaje_del_plano(video, camara.montaje_propio(None)), completo,
+              f"{video}: y con el bloque vacío también")
+    igual(p7_callouts.montaje_propio_de({}, "escena:S001"), {}, "sin unidades no hay nada propio")
+    igual(p7_callouts.montaje_propio_de({"unidades": {"escena:S001": {"evitar": []}}},
+                                        "escena:S001"), {},
+          "una unidad con otras decisiones (zonas) no trae montaje")
+    igual(p7_callouts.montaje_propio_de(
+        {"unidades": {"escena:S001": {"montaje": {"movimiento": "quieto"}}}}, "escena:S001"),
+        {"movimiento": "quieto"}, "y una con montaje lo trae")
+
+    titulo("montaje de un plano: solo se guarda lo elegido, y se valida")
+    igual(camara.montaje_propio({"movimiento": "Vivo", "profundidad": None}),
+          {"movimiento": "vivo"}, "null es «como el vídeo»: no se guarda")
+    igual(camara.montaje_propio({"movimiento": "quieta"}), {"movimiento": "quieto"},
+          "«quieta» es quieto")
+    igual(camara.montaje_propio({"movimiento": "loco", "profundidad": "si"}), {},
+          "lo guardado que no vale se ignora, no revienta")
+    for malo in ({"movimiento": "loco"}, {"profundidad": "si"}, "vivo"):
+        try:
+            camara.montaje_propio(malo, estricto=True)
+            ok(False, f"{malo!r}: la API lo rechaza")
+        except ValueError:
+            ok(True, f"{malo!r}: la API lo rechaza")
+
+    titulo("montaje de un plano: cada nivel manda sobre el del vídeo")
+    larga = escena_de("Coge la bandeja más grande que lavas en casa. Primero, métela "
+                      "en el fregadero simple: entra tumbada y el grifo te deja sitio.")
+    duracion = larga["t_out"] - larga["t_in"]
+    sobrio = camara.normalizar_montaje(None)
+    vivo = camara.montaje_del_plano(sobrio, {"movimiento": "vivo"})
+    ok(camara.mueve_distinto(vivo), "un plano vivo en un vídeo sobrio calcula su trayecto")
+    igual(camara.trayecto_de(larga, 2, vivo, semilla=3),
+          camara.trayecto_de(larga, 2, camara.normalizar_montaje({"movimiento": "vivo"}), semilla=3),
+          "y se mueve igual que en un vídeo entero vivo")
+    al_reves = camara.montaje_del_plano({"movimiento": "dinamico"}, {"movimiento": "sobrio"})
+    igual(camara.trayecto_de(larga, 2, al_reves), None,
+          "un plano sobrio en un vídeo dinámico lleva el movimiento de siempre")
+    quieto = camara.montaje_del_plano({"movimiento": "dinamico", "gancho": True},
+                                      {"movimiento": "quieto"})
+    ok(camara.mueve_distinto(quieto), "un plano quieto también pide su trayecto")
+    for indice in (0, 3):
+        tray = camara.trayecto_de(larga, indice, quieto, gancho=True,
+                                  base={"centro": [0.4, 0.6], "origen_centro": "ancla"})
+        tramos = tray["tramos"]
+        ok(len(tramos) == 1 and tramos[0]["ini"] == tramos[0]["fin"] and not tray["golpes"],
+           f"quieto/{indice}: un solo encuadre, sin golpes ni gancho")
+        ok(abs(tramos[0]["t1"] - duracion) < 0.01, f"quieto/{indice}: cubre el plano entero")
+        x0, y0, x1, y1 = camara.ventana_en_t({"trayecto": tray}, duracion / 2, (1024, 1536), 9 / 16)
+        ok(x1 > x0 and y1 > y0 and x0 >= -0.5 and x1 <= 1024.5,
+           f"quieto/{indice}: la ventana cae dentro de la imagen")
+
+    titulo("montaje de un plano: la 2.5D se enciende o se apaga sola")
+    con = camara.montaje_del_plano({"movimiento": "vivo"}, {"profundidad": True})
+    ok(camara.profundidad_de(con, 0), "encendida en un plano de un vídeo sin ella")
+    igual(camara.profundidad_de(camara.montaje_del_plano(
+        {"movimiento": "vivo", "profundidad": True}, {"profundidad": False}), 0), None,
+        "apagada en un plano de un vídeo con ella")
+    igual(camara.profundidad_de(camara.montaje_del_plano(None, {"profundidad": True,
+                                                                "movimiento": "quieto"}), 1),
+          camara.profundidad_de({"movimiento": "sobrio", "profundidad": True}, 1),
+          "en un plano quieto con la 2.5D pedida, se mueve como en sobrio (lo más suave)")
+    igual(camara.profundidad_de(camara.montaje_del_plano(
+        {"movimiento": "vivo", "profundidad": True}, {"movimiento": "quieto"}), 0), None,
+        "y «Quieta» en un vídeo con 2.5D no la lleva: quieta es quieta (revisión 19-10)")
+
+
 def prueba_profundidad_25d():
     """La profundidad 2.5D (rama profundidad-25d, 18-10-2026)."""
     import camara
@@ -5791,6 +5874,7 @@ def main():
     prueba_enlaces_del_render()
     prueba_montaje_movimiento()
     prueba_profundidad_25d()
+    prueba_montaje_por_plano()
 
     print("\n" + "=" * 70)
     if _fallos:

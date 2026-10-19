@@ -3261,6 +3261,13 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
   letter-spacing: normal; }
 .revisor-tope input { width: 9em; }
 
+/* El movimiento y la 2.5D de una imagen, en su diapositiva (montaje-por-plano) */
+.montaje-plano { display: flex; flex-direction: column; gap: 6px; margin: 10px 0;
+  padding: 8px 10px; border: 1px solid var(--linea); border-radius: 8px; background: var(--panel); }
+.montaje-plano-cab { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px; }
+.montaje-plano-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.montaje-plano-fila > label { min-width: 8.5em; color: var(--tenue); font-size: 12px; }
+
 /* ==================================================== REGLAS DEL ESTILO
    Rama `reglas-estilo` (19-10-2026): las tarjetas de cada regla en la pantalla
    del estilo. */

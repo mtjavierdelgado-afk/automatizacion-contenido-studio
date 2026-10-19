@@ -3256,6 +3256,21 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
   letter-spacing: normal; }
 .revisor-tope input { width: 9em; }
 
+/* ==================================================== REGLAS DEL ESTILO
+   Rama `reglas-estilo` (19-10-2026): las tarjetas de cada regla en la pantalla
+   del estilo. */
+.regla-estilo { border: 1px solid var(--linea); border-radius: 10px; padding: 10px 12px;
+  margin: 8px 0; display: flex; flex-direction: column; gap: 8px; background: var(--panel); }
+.regla-estilo .fila { align-items: center; gap: 8px; flex-wrap: wrap; }
+.regla-estilo input[type="text"] { flex: 1 1 220px; min-width: 0; }
+.regla-estilo textarea { width: 100%; }
+.regla-estilo-campos label { display: flex; flex-direction: column; gap: 4px; flex: 1 1 220px;
+  text-transform: none; letter-spacing: normal; }
+.regla-estilo-en { border-left: 3px solid var(--acento-borde); padding-left: 8px; }
+.regla-estilo-traduccion { margin-top: 4px; }
+.regla-estilo-propuesta { border: 1px dashed var(--acento-borde); border-radius: 8px;
+  padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--hueco); }
+
 /* ================================================================ PUBLICAR
    Rama `publicar-redes-1` (16-10-2026): la barra de módulos y el módulo
    Publicar. Todo nuevo y aquí, al final, para no chocar con las otras ramas.

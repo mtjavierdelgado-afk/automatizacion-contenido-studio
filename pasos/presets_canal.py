@@ -140,8 +140,10 @@ TIPOS = {
         # preset dijera que tiene referencias dibujadas que nadie ha mirado.
         # 'modo' es el tipo de imagen (Etapa Foto A): solo se guarda cuando es
         # "foto". Un estilo sin el es de ilustracion, como todos los de antes.
+        # 'reglas' son las reglas del estilo (pasos/reglas_estilo.py): solo se
+        # guardan si hay alguna, igual que 'modo'.
         "claves": ("referencias", "guia", "url", "moodboard",
-                   "calidad", "min_s", "max_s", "min_s_rotulos", "modo"),
+                   "calidad", "min_s", "max_s", "min_s_rotulos", "modo", "reglas"),
         "pasos": ("assets",),
     },
     # El id se queda en 'rotulos' aunque ya no haya rotulos: es la clave con la
@@ -232,6 +234,15 @@ def _validar_tipo(tipo):
     return clave
 
 
+def _reglas_estilo():
+    """El modulo de las reglas del estilo, cargado al usarlo (tira del CLI)."""
+    try:
+        from . import reglas_estilo                        # noqa: PLC0415
+    except ImportError:
+        import reglas_estilo                               # noqa: PLC0415
+    return reglas_estilo
+
+
 def _limpiar_datos(tipo, datos):
     """Deja solo las claves declaradas del tipo, y protesta por las demas."""
     if not isinstance(datos, dict):
@@ -245,6 +256,17 @@ def _limpiar_datos(tipo, datos):
             f"Lo que guarda es: {', '.join(permitidas)}")
     limpios = {c: copy.deepcopy(v) for c, v in datos.items()
                if v is not None and v != ""}
+    if tipo == "estilo" and "reglas" in limpios:
+        # VALIDADAS AQUI, que es por donde entra todo: una regla mal formada
+        # guardada en un preset llegaria al prompt de cada plano
+        try:
+            reglas = _reglas_estilo().normalizar(limpios["reglas"])
+        except ValueError as fallo:
+            raise ErrorPreset(f"reglas del estilo: {fallo}") from None
+        if reglas:
+            limpios["reglas"] = reglas
+        else:
+            limpios.pop("reglas")
     if tipo == "canal":
         # un canal es un paquete de los otros tipos: cada bloque se valida con
         # las reglas de SU tipo, o el paquete se convierte en el agujero por
@@ -1101,6 +1123,13 @@ def cambios_para(ficha, params_actuales=None):
             estilo["modo"] = "foto"
         else:
             estilo.pop("modo", None)
+        # LAS REGLAS DEL ESTILO, igual que el modo: las pone un estilo que las
+        # tiene y las QUITA uno que no (si el video las traia de otro estilo).
+        # A un video sin ellas y un estilo sin ellas no se les escribe nada.
+        if datos.get("reglas"):
+            estilo["reglas"] = copy.deepcopy(datos["reglas"])
+        else:
+            estilo.pop("reglas", None)
         cambios["assets"] = {"estilo": estilo}
         # la calidad y la duracion de plano son params sueltos de assets, no van
         # dentro del diccionario 'estilo'
@@ -1190,6 +1219,8 @@ def datos_de_params(params_por_paso, incluir=ORDEN):
         # solo "foto": ilustracion es no tenerlo (ver p6_assets.modo_de)
         if estilo.get("modo") == "foto":
             bloque["modo"] = "foto"
+        if estilo.get("reglas"):
+            bloque["reglas"] = copy.deepcopy(estilo["reglas"])
         for clave in ("calidad", "min_s", "max_s", "min_s_rotulos"):
             if assets.get(clave) not in (None, ""):
                 bloque[clave] = copy.deepcopy(assets[clave])

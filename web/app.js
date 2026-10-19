@@ -13221,6 +13221,297 @@ function vistaGenerandoLight() {
  * cambiarías» con su Regenerar — corregir una cosa se hace mirándola, no en un
  * apartado aparte. */
 
+/* ------------------------------------------------ las reglas del estilo
+ *
+ * Lo que ningún plano de este estilo puede romper (pasos/reglas_estilo.py):
+ * «los jugadores miran la pantalla, nunca a cámara». Se escriben aquí, en el
+ * ESTILO, y llegan a cada vídeo nuevo al crearlo y a uno ya hecho con «Traer el
+ * estilo». Se guardan solas al dejar de escribir; guardarlas no paga nada. */
+const REGLAS_LIGHT = { id: '', reglas: null, cargando: false, error: '', estado: '',
+  temporizador: null, propuestas: {}, afinando: {}, enVuelo: false, otraVez: false,
+  promesa: null };
+
+const GRAVEDAD_REGLA = {
+  alta: 'Alta — se nota a la primera (el revisor la corrige solo en autónomo)',
+  media: 'Media — se nota si te fijas',
+  baja: 'Baja — un detalle',
+};
+
+async function cargarReglasLight(id) {
+  /* LO ESCRITO EN EL ESTILO ANTERIOR Y AÚN SIN MANDAR, se manda antes: el
+     guardado pendiente, el que va en camino y el que se pidió mientras iba. */
+  if (REGLAS_LIGHT.id && REGLAS_LIGHT.id !== id
+      && (REGLAS_LIGHT.temporizador || REGLAS_LIGHT.enVuelo || REGLAS_LIGHT.otraVez)) {
+    const pendiente = !!REGLAS_LIGHT.temporizador;
+    clearTimeout(REGLAS_LIGHT.temporizador);
+    REGLAS_LIGHT.temporizador = null;
+    if (REGLAS_LIGHT.enVuelo) {
+      if (pendiente) REGLAS_LIGHT.otraVez = true;
+      await REGLAS_LIGHT.promesa;
+    } else {
+      await volcarReglasLight();
+    }
+  }
+  REGLAS_LIGHT.id = id;
+  REGLAS_LIGHT.reglas = null;
+  REGLAS_LIGHT.error = '';
+  REGLAS_LIGHT.estado = '';
+  REGLAS_LIGHT.propuestas = {};
+  REGLAS_LIGHT.cargando = true;
+  try {
+    const r = await pedir(`${API.presetLight(id)}/reglas`);
+    if (REGLAS_LIGHT.id !== id) return;
+    REGLAS_LIGHT.reglas = (r.reglas || []).map(x => ({ ...x, palabras: (x.palabras || []).join(', ') }));
+  } catch (err) {
+    if (REGLAS_LIGHT.id === id) REGLAS_LIGHT.error = err.message;
+  }
+  REGLAS_LIGHT.cargando = false;
+  pintarLight();
+}
+
+/* SE GUARDAN SOLAS al dejar de escribir, como el resto del estilo. Las que no
+   tienen texto todavía son borradores: se quedan en pantalla y no se mandan. */
+function guardarReglasLight() {
+  clearTimeout(REGLAS_LIGHT.temporizador);
+  REGLAS_LIGHT.estado = 'cambios sin guardar…';
+  refrescarVivosLight();
+  REGLAS_LIGHT.temporizador = setTimeout(volcarReglasLight, 900);
+}
+
+async function volcarReglasLight() {
+  REGLAS_LIGHT.temporizador = null;
+  /* DE UNO EN UNO: dos guardados a la vez podían llegar al revés y dejar
+     guardado el más viejo. Si se pide otro mientras va uno, se manda al acabar
+     ese, y dentro de la MISMA promesa: así quien cambia de estilo puede
+     esperarla entera (`cargarReglasLight`) y no se pierde lo último escrito. */
+  if (REGLAS_LIGHT.enVuelo) { REGLAS_LIGHT.otraVez = true; return REGLAS_LIGHT.promesa; }
+  const id = REGLAS_LIGHT.id;
+  if (!id || !REGLAS_LIGHT.reglas) return null;
+  const reglas = REGLAS_LIGHT.reglas
+    .filter(r => String(r.texto || '').trim())
+    .map(r => ({
+      id: r.id, nombre: r.nombre || '', texto: r.texto, gravedad: r.gravedad || 'media',
+      palabras: String(r.palabras || '').split(',').map(p => p.trim()).filter(Boolean),
+      en: r.en || '', en_es: r.en ? (r.en_es || '') : '',
+    }));
+  REGLAS_LIGHT.enVuelo = true;
+  REGLAS_LIGHT.estado = 'guardando…';
+  refrescarVivosLight();
+  REGLAS_LIGHT.promesa = (async () => {
+    try {
+      /* LOS IDS SON LOS DE AQUÍ: el servidor conserva los que le llegan, así
+         que no se copia nada de vuelta (copiarlos por posición mezclaba
+         reglas si mientras tanto se escribía en un borrador). */
+      const r = await pedir(`${API.presetLight(id)}/reglas`, { method: 'PUT', cuerpo: { reglas } });
+      if (REGLAS_LIGHT.id === id) REGLAS_LIGHT.estado = r.cambiado ? 'guardado ✓' : 'sin cambios';
+    } catch (err) {
+      if (REGLAS_LIGHT.id === id) REGLAS_LIGHT.estado = `no se ha podido guardar: ${err.message}`;
+    }
+    REGLAS_LIGHT.enVuelo = false;
+    refrescarVivosLight();
+    if (REGLAS_LIGHT.otraVez && REGLAS_LIGHT.id === id) {
+      REGLAS_LIGHT.otraVez = false;
+      await volcarReglasLight();
+    }
+  })();
+  return REGLAS_LIGHT.promesa;
+}
+
+function anadirReglaLight() {
+  const n = (REGLAS_LIGHT.reglas || []).length;
+  if (n >= 20) { toast('como mucho 20 reglas por estilo', true); return; }
+  REGLAS_LIGHT.reglas = [...(REGLAS_LIGHT.reglas || []),
+    { id: `nueva${Date.now()}`, nombre: '', texto: '', gravedad: 'media', palabras: '', en: '' }];
+  pintarLight();
+}
+
+function quitarReglaLight(regla) {
+  if (String(regla.texto || '').trim()
+      && !window.confirm(`¿Quitar la regla «${regla.nombre || regla.texto.slice(0, 40)}»?`)) return;
+  REGLAS_LIGHT.reglas = REGLAS_LIGHT.reglas.filter(r => r !== regla);
+  delete REGLAS_LIGHT.propuestas[regla.id];
+  pintarLight();
+  volcarReglasLight();
+}
+
+/* «AFINAR CON CLAUDE»: la reescribe para el generador (en inglés, concreta y
+   física) y propone nombre, palabras y gravedad. No se aplica sola: se enseña
+   y se acepta o se descarta. Se pregunta cada dos segundos porque una llamada
+   larga detrás del proxy se corta a los sesenta. */
+async function afinarReglaLight(regla) {
+  if (!String(regla.texto || '').trim()) { toast('escribe primero lo que exige la regla', true); return; }
+  REGLAS_LIGHT.afinando[regla.id] = true;
+  pintarLight();
+  try {
+    const r = await pedir(`${BASE}/api/reglas-estilo/afinar`, {
+      method: 'POST',
+      cuerpo: { texto: regla.texto, nombre: regla.nombre || '',
+        palabras: String(regla.palabras || '').split(',').map(p => p.trim()).filter(Boolean) },
+    });
+    let terminado = false;
+    for (let i = 0; i < 90 && !terminado; i += 1) {
+      await new Promise(listo => setTimeout(listo, 2000));
+      const f = await pedir(`${BASE}/api/reglas-estilo/afinar/${encodeURIComponent(r.id)}`);
+      if (f.estado === 'listo') { REGLAS_LIGHT.propuestas[regla.id] = f.propuesta; terminado = true; }
+      if (f.estado === 'error') { toast(`no se ha podido afinar: ${f.error || ''}`, true); terminado = true; }
+    }
+    if (!terminado) toast('Claude está tardando demasiado: vuelve a pulsar «Afinar» en un momento', true);
+  } catch (err) {
+    toast(`no se ha podido afinar: ${err.message}`, true);
+  }
+  delete REGLAS_LIGHT.afinando[regla.id];
+  pintarLight();
+}
+
+function aceptarPropuestaLight(regla) {
+  const p = REGLAS_LIGHT.propuestas[regla.id];
+  if (!p) return;
+  regla.nombre = p.nombre || regla.nombre;
+  regla.en = p.en || '';
+  regla.en_es = p.en_es || '';
+  regla.palabras = (p.palabras || []).join(', ');
+  regla.gravedad = p.gravedad || regla.gravedad;
+  regla.enVieja = false;
+  delete REGLAS_LIGHT.propuestas[regla.id];
+  pintarLight();
+  volcarReglasLight();
+}
+
+function tarjetaReglaLight(regla, i) {
+  const cambiar = (clave, valor) => {
+    regla[clave] = valor;
+    /* LA VERSIÓN AFINADA ERA DE TU TEXTO DE ANTES: si lo cambias, deja de
+       usarse (si no, las imágenes seguirían la regla vieja y el revisor
+       comprobaría la nueva). Se dice, y se puede volver a afinar. */
+    if (clave === 'texto' && regla.en) { regla.en = ''; regla.en_es = ''; regla.enVieja = true; }
+    // la traducción era de la versión afinada de antes: si la tocas a mano, ya no lo es
+    if (clave === 'en') regla.en_es = '';
+    guardarReglasLight();
+  };
+  const texto = h('textarea', {
+    rows: 3, value: regla.texto || '', 'aria-label': `Qué exige la regla ${i + 1}`,
+    placeholder: 'qué se exige, como se lo dirías a un fotógrafo: «quien juega mira siempre la pantalla, nunca a cámara…»',
+    oninput: ev => cambiar('texto', ev.target.value),
+  });
+  texto.dataset.foco = `regla:${regla.id}:texto`;
+  const nombre = h('input', {
+    type: 'text', value: regla.nombre || '', 'aria-label': `Nombre de la regla ${i + 1}`,
+    placeholder: 'nombre corto (p. ej. «Los jugadores miran la pantalla»)',
+    oninput: ev => cambiar('nombre', ev.target.value),
+  });
+  nombre.dataset.foco = `regla:${regla.id}:nombre`;
+  const palabras = h('input', {
+    type: 'text', value: regla.palabras || '', 'aria-label': `Cuándo aplica la regla ${i + 1}`,
+    placeholder: 'vacío = en todos los planos · o palabras separadas por comas: jugadores, mandos, partida',
+    oninput: ev => cambiar('palabras', ev.target.value),
+  });
+  palabras.dataset.foco = `regla:${regla.id}:palabras`;
+  const gravedad = h('select', {
+    'aria-label': `Gravedad de la regla ${i + 1}`, value: regla.gravedad || 'media',
+    onchange: ev => cambiar('gravedad', ev.target.value),
+  }, Object.entries(GRAVEDAD_REGLA).map(([v, t]) => h('option', { value: v }, t)));
+  const tarjeta = h('div', { clase: 'regla-estilo' },
+    h('div', { clase: 'fila' },
+      h('span', { clase: 'meta' }, `Regla ${i + 1}`),
+      nombre,
+      h('span', { clase: 'crece' }),
+      h('button', {
+        clase: 'mini', disabled: !!REGLAS_LIGHT.afinando[regla.id],
+        title: 'Claude la reescribe para la IA de imágenes (en inglés, concreta) y te propone nombre, palabras y gravedad. Tú decides si la usas.',
+        onclick: () => afinarReglaLight(regla),
+      }, REGLAS_LIGHT.afinando[regla.id] ? 'Afinando…' : '✦ Afinar con Claude'),
+      h('button', { clase: 'mini fantasma', title: 'Quitar esta regla', onclick: () => quitarReglaLight(regla) }, '✕')),
+    texto,
+    h('div', { clase: 'fila regla-estilo-campos' },
+      h('label', {}, h('span', { clase: 'meta' }, 'Solo si el plano habla de'), palabras),
+      h('label', {}, h('span', { clase: 'meta' }, 'Si se incumple'), gravedad)));
+  tarjeta.appendChild(enVivo(() => (regla.enVieja && !regla.en
+    ? h('div', { clase: 'meta revisor-fallo' },
+      'Cambiaste tu texto: la versión afinada era de antes y ya no se usa. '
+      + 'Pulsa «Afinar con Claude» otra vez si la quieres.')
+    : null)));
+  /* VIVA: si cambias tu texto, la versión afinada desaparece al momento (deja
+     de usarse) sin repintar la tarjeta que estás escribiendo. */
+  tarjeta.appendChild(enVivo(() => {
+    if (!regla.en) return null;
+    const en = h('textarea', {
+      rows: 3, value: regla.en, 'aria-label': `Versión afinada de la regla ${i + 1}`,
+      oninput: ev => cambiar('en', ev.target.value),
+    });
+    en.dataset.foco = `regla:${regla.id}:en`;
+    return h('div', { clase: 'regla-estilo-en' },
+      h('div', { clase: 'fila' },
+        h('span', { clase: 'meta' }, 'Lo que lee la IA de imágenes (afinada; va en inglés '
+          + 'porque es como mejor la sigue)'),
+        h('span', { clase: 'crece' }),
+        h('button', {
+          clase: 'mini fantasma', title: 'Volver a usar tu texto tal cual',
+          onclick: () => { regla.en = ''; regla.en_es = ''; pintarLight(); volcarReglasLight(); },
+        }, 'Usar mi texto')),
+      en,
+      regla.en_es ? h('div', { clase: 'meta regla-estilo-traduccion' },
+        h('strong', {}, 'En español: '), regla.en_es) : null);
+  }));
+  const p = REGLAS_LIGHT.propuestas[regla.id];
+  if (p) {
+    tarjeta.appendChild(h('div', { clase: 'regla-estilo-propuesta' },
+      h('strong', {}, 'Propuesta de Claude'),
+      h('div', {}, h('span', { clase: 'meta' }, 'Nombre: '), p.nombre || '—'),
+      h('div', {}, h('span', { clase: 'meta' }, 'Lo que leerá la IA, en español: '),
+        p.en_es || '—'),
+      h('details', {}, h('summary', { clase: 'meta' }, 'Ver el texto exacto en inglés'),
+        h('div', {}, p.en || '—')),
+      h('div', {}, h('span', { clase: 'meta' }, 'Solo si habla de: '),
+        (p.palabras || []).join(', ') || 'todos los planos'),
+      h('div', {}, h('span', { clase: 'meta' }, 'Gravedad: '), p.gravedad || 'media'),
+      h('div', { clase: 'fila' },
+        h('button', { clase: 'mini primario', onclick: () => aceptarPropuestaLight(regla) }, 'Usar esta'),
+        h('button', {
+          clase: 'mini fantasma',
+          onclick: () => { delete REGLAS_LIGHT.propuestas[regla.id]; pintarLight(); },
+        }, 'Descartar'))));
+  }
+  return tarjeta;
+}
+
+function bloqueReglasLight(ficha) {
+  const caja = h('div', {});
+  if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Primero genera el estilo gráfico (las láminas); después podrás ponerle reglas.'));
+    return caja;
+  }
+  if (REGLAS_LIGHT.id !== ficha.id) {
+    setTimeout(() => cargarReglasLight(ficha.id), 0);
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo las reglas…'));
+    return caja;
+  }
+  if (REGLAS_LIGHT.error) {
+    caja.appendChild(cajaError(REGLAS_LIGHT.error));
+    caja.appendChild(h('button', { clase: 'mini', onclick: () => cargarReglasLight(ficha.id) }, 'Reintentar'));
+    return caja;
+  }
+  if (!REGLAS_LIGHT.reglas) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo las reglas…'));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'pista' },
+    'Lo que NINGUNA imagen de este estilo puede romper. Cada regla entra en las imágenes '
+    + 'de los planos a los que aplica, el corrector la respeta y el revisor la comprueba '
+    + 'con su gravedad. Pocas y claras: cinco reglas se cumplen, veinte se diluyen.'));
+  REGLAS_LIGHT.reglas.forEach((regla, i) => caja.appendChild(tarjetaReglaLight(regla, i)));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', onclick: anadirReglaLight }, '+ Añadir regla'),
+    h('span', { clase: 'crece' }),
+    enVivo(() => h('span', { clase: 'meta' }, REGLAS_LIGHT.estado || ''))));
+  caja.appendChild(h('div', { clase: 'meta' },
+    'Llegan a los vídeos nuevos al crearlos. A un vídeo ya hecho, con «Traer el estilo»; '
+    + 'sus imágenes no se rehacen solas: cambiar las reglas las marca como desactualizadas '
+    + 'y tú decides si las rehaces.'));
+  return caja;
+}
+
+
 function vistaPresetLight() {
   const ficha = fichaLight(APP.light.abierto);
   if (!ficha) {
@@ -13265,6 +13556,10 @@ function vistaPresetLight() {
   grafico.appendChild(fuenteDeEstiloLight(ficha));
   caja.appendChild(bloqueLight('🎨 Estilo gráfico',
     'las imágenes, las cartelas y los subtítulos', grafico));
+
+  // 📏 las reglas del estilo: lo que ningún plano puede romper
+  caja.appendChild(bloqueLight('📏 Reglas del estilo',
+    'lo que ninguna imagen puede romper', bloqueReglasLight(ficha)));
 
   /* 🗣️ EL TONO, ENTERO Y EDITABLE.
      Aquí se enseñaba `tono_resumen`: cuatro líneas cortadas con «…». La guía

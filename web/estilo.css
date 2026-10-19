@@ -3234,6 +3234,28 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
   color: var(--texto); margin-bottom: 0; }
 .tarjeta-transicion .fila { align-items: center; gap: 8px; }
 
+/* ============================================================ EL REVISOR
+   Rama `revisor-imagenes` (18-10-2026): el panel «Revisor de imágenes» de la
+   pantalla Imágenes, la etiqueta de sus notas y sus topes en Configuración. */
+.revisor-panel { border: 1px solid var(--linea); border-radius: 10px;
+  background: var(--panel); padding: 10px 12px; margin: 10px 0;
+  display: flex; flex-direction: column; gap: 8px; }
+.revisor-panel .fila { align-items: center; gap: 8px; flex-wrap: wrap; }
+.revisor-pendientes { display: flex; flex-wrap: wrap; gap: 6px; }
+.revisor-chip { display: inline-flex; align-items: center; gap: 2px;
+  border: 1px solid var(--linea); border-radius: 999px; padding: 0 2px 0 4px; }
+.revisor-fallo { color: var(--aviso); }
+.gravedad-alta { color: var(--malo); }
+.gravedad-media { color: var(--aviso); }
+.gravedad-baja { color: var(--tenue); }
+.pastilla.revisor-autor { font-size: 11px; margin-bottom: 4px; display: inline-block; }
+.pastilla.revisor-autor.gravedad-alta { border-color: var(--malo-borde); }
+.pastilla.revisor-autor.gravedad-media { border-color: var(--aviso-borde); }
+.revisor-topes { gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+.revisor-tope { display: flex; flex-direction: column; gap: 4px; text-transform: none;
+  letter-spacing: normal; }
+.revisor-tope input { width: 9em; }
+
 /* ================================================================ PUBLICAR
    Rama `publicar-redes-1` (16-10-2026): la barra de módulos y el módulo
    Publicar. Todo nuevo y aquí, al final, para no chocar con las otras ramas.

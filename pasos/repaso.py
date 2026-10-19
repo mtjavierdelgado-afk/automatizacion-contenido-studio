@@ -494,7 +494,7 @@ PANTALLAS = ("video", "imagenes")
 
 
 def _anadir_sin_cerrojo(proyecto, texto, t, plano="", imagenes=(), version_mp4=None,
-           pantalla="video", ancla=""):
+           pantalla="video", ancla="", autor="", alcance="", gravedad=""):
     """Una nota nueva, anclada a su segundo. El texto es OBLIGATORIO.
 
     La imagen es opcional y el texto no, y no es una asimetría caprichosa: una
@@ -520,6 +520,10 @@ def _anadir_sin_cerrojo(proyecto, texto, t, plano="", imagenes=(), version_mp4=N
         # los planos se renumeren: ver `reanclar`.
         "ancla": " ".join(str(ancla or "").split())[:MAX_TEXTO],
     }
+    # QUIEN LA ESCRIBIO, si no fue una persona («revisor»: el revisor de
+    # imagenes, `pasos/revisor_imagenes.py`). Solo se escribe si viene: las
+    # notas de siempre quedan byte a byte como antes.
+    _poner_autor(nota, autor, alcance, gravedad)
     ficha["notas"].append(nota)
     if version_mp4 is not None:
         ficha["version_mp4"] = version_mp4
@@ -585,6 +589,34 @@ def _editar_sin_cerrojo(proyecto, nid, texto=None, t=None, imagenes=None,
                           else "pendiente")
         guardar(proyecto, ficha)
         return nota
+    raise KeyError(nid)
+
+
+#: Lo que puede decir una nota sobre quien la escribio y cuanto pesa. `alcance`
+#: lo lee p6 (`_adjuntos_de_la_nota`): «sustituye» dibuja sin la imagen de
+#: ahora delante.
+AUTORES = ("revisor",)
+GRAVEDADES = ("alta", "media", "baja")
+
+
+def _poner_autor(nota, autor, alcance="", gravedad=""):
+    if autor in AUTORES:
+        nota["autor"] = autor
+    if alcance in ALCANCES:
+        nota["alcance"] = alcance
+    if gravedad in GRAVEDADES:
+        nota["gravedad"] = gravedad
+    return nota
+
+
+def _marcar_autor_sin_cerrojo(proyecto, nid, autor, alcance="", gravedad=""):
+    """Pone autor, alcance y gravedad a una nota que ya existe. -> la nota"""
+    ficha = leer(proyecto)
+    for nota in ficha["notas"]:
+        if nota.get("id") == nid:
+            _poner_autor(nota, autor, alcance, gravedad)
+            guardar(proyecto, ficha)
+            return nota
     raise KeyError(nid)
 
 
@@ -1130,3 +1162,8 @@ def editar(*args, **kwargs):
 def borrar(*args, **kwargs):
     with CERROJO:
         return _borrar_sin_cerrojo(*args, **kwargs)
+
+
+def marcar_autor(*args, **kwargs):
+    with CERROJO:
+        return _marcar_autor_sin_cerrojo(*args, **kwargs)

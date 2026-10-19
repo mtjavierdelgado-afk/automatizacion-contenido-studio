@@ -250,6 +250,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/proyectos/{pid}/imagenes/cola/{nid}` | Saca una nota de la cola (la que ya se esta dibujando no se para). |
 | `POST` | `/api/proyectos/{pid}/imagenes/calidad` | Rehace SOLO las imagenes de plano que siguen en otra calidad que la del video: {imagenes: cuantas se confirmaron} (409 si ya no son esas o hay algo en marcha). |
 | `POST` | `/api/proyectos/{pid}/imagenes/rehacer` | Pone en la cola las notas de imagenes: {notas?: [ids], desde_cero?} (sin ids, todas). |
+| `GET` | `/api/proyectos/{pid}/imagenes/revision` | El revisor de imágenes: la última revisión, sus notas sin aplicar, cuántas faltan por mirar, el modo, los topes y el precio por imagen. |
+| `POST` | `/api/proyectos/{pid}/imagenes/revision/aplicar` | Rehace por la cola las notas pendientes del revisor: {notas?: [ids]} (sin ids, todas); las de «sustituye», desde cero. |
+| `POST` | `/api/proyectos/{pid}/imagenes/revision/descartar` | «Está bien así»: {plano}. Quita la nota pendiente del revisor de ese plano y no la vuelve a marcar mientras la imagen no cambie. |
+| `POST` | `/api/proyectos/{pid}/imagenes/revisar` | Revisa las imágenes con su guion, estilo y reglas y deja una nota por plano a corregir: {planos?: [ids], forzar?}. No rehace nada. -> {trabajo_id} |
 
 ## Sonido y transiciones
 
@@ -406,4 +410,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**241 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**297 endpoints.** Escrito por `generar_api.py` desde `app.py`.

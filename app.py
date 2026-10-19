@@ -6520,7 +6520,9 @@ def _revisar_y_apuntar(avisar, ctx, planos=None, forzar=False):
         ctx.proyecto, plan, imagenes, mirar, estilo=estilo, encargo=encargo,
         reglas=_reglas_para_revisor(estilo, plan), guia=guia,
         formato=str(plan.get("formato") or ""),
-        avisar=avisar)
+        avisar=avisar,
+        # las reglas del estilo, con su gravedad (pasos/reglas_estilo.py)
+        reglas_estilo=_reglas_estilo().para_revisor(_reglas_estilo().de_estilo(estilo)))
     resumen = revisor.apuntar(ctx.proyecto, plan, veredictos)
     ctx.bitacora.anotar("revisor_imagenes", "assets", {
         "revisados": resumen.get("revisados"), "bien": resumen.get("bien"),
@@ -11895,6 +11897,17 @@ def _congelar_preset(ctx, encargo, preset_id=None):
     params = {paso: (ctx.estado.params(paso) or {})
               for paso in ("brief", "guion", "assets", "voz", "callouts")}
     datos = presets.datos_de_params(params)
+    # LAS REGLAS DEL ESTILO NO SALEN DEL TALLER: se escriben a mano en el
+    # preset (`guardar_reglas_estilo`). Congelar desde el taller --al rehacer
+    # cualquier parte del estilo-- se las llevaria por delante sin decir nada.
+    if preset_id:
+        try:
+            anterior = presets.leer(preset_id)
+            reglas = ((anterior.get("datos") or {}).get("estilo") or {}).get("reglas")
+        except Exception:                                    # noqa: BLE001
+            reglas = None
+        if reglas:
+            datos.setdefault("estilo", {})["reglas"] = copy.deepcopy(reglas)
     # `estilo_modo` solo si es foto (ver `presets_light.origen_de`)
     datos["origen"] = _light().origen_de(encargo, presets.CLAVES_ORIGEN)
     datos["origen"]["taller"] = ctx.id
@@ -13160,6 +13173,120 @@ def editar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
                    "trabajo": ctx.gestor.estado(trabajo_id),
                    "eventos": f"/api/trabajos/{trabajo_id}/eventos"})
     return salida
+
+
+# ======================================================== REGLAS DEL ESTILO
+#
+# Ver pasos/reglas_estilo.py. Se escriben en el ESTILO (el preset), no en el
+# video: viajan a cada video nuevo al crearlo y a uno ya hecho con «Traer el
+# estilo», como el resto del estilo. Guardarlas no paga nada; lo que cuesta
+# --si se quiere-- es rehacer las imagenes de un video que las trae.
+
+_AFINADOS = {}
+_LOCK_AFINADOS = threading.Lock()
+
+
+def _reglas_estilo():
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, "los pasos no están cargados")
+    import importlib                                         # noqa: PLC0415
+    return importlib.import_module("pasos.reglas_estilo")
+
+
+@app.get("/api/presets-light/{preset_id}/reglas")
+def leer_reglas_estilo(preset_id: str):
+    """Las reglas de un estilo. -> {reglas, gravedades, maximo}"""
+    ficha = _preset_o_400(lambda p: p.leer(preset_id))
+    if ficha.get("tipo") != "canal":
+        raise ErrorApi(400, "esto no es un preset de canal")
+    modulo = _reglas_estilo()
+    estilo = (ficha.get("datos") or {}).get("estilo") or {}
+    return {"reglas": modulo.de_estilo(estilo), "gravedades": list(modulo.GRAVEDADES),
+            "maximo": modulo.MAX_REGLAS}
+
+
+@app.put("/api/presets-light/{preset_id}/reglas")
+def guardar_reglas_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
+    """Guarda las reglas de un estilo: {reglas: [{nombre, texto, palabras?,
+    gravedad?, en?}]}. Una lista vacia las quita. No toca ningun video: llegan
+    a los nuevos al crearlos y a los hechos con «Traer el estilo»."""
+    presets = _presets()
+    modulo = _reglas_estilo()
+    ficha = _preset_o_400(lambda p: p.leer(preset_id))
+    if ficha.get("tipo") != "canal":
+        raise ErrorApi(400, "esto no es un preset de canal")
+    datos = _cuerpo(cuerpo)
+    if "reglas" not in datos:
+        raise ErrorApi(400, "manda {reglas: [...]} (una lista vacía las quita)")
+    try:
+        reglas = modulo.normalizar(datos.get("reglas"))
+    except modulo.ReglaInvalida as fallo:
+        raise ErrorApi(400, str(fallo))
+    contenido = copy.deepcopy(ficha.get("datos") or {})
+    estilo = dict(contenido.get("estilo") or {})
+    antes = modulo.de_estilo(estilo)
+    if reglas:
+        estilo["reglas"] = reglas
+    else:
+        estilo.pop("reglas", None)
+    if estilo:
+        contenido["estilo"] = estilo
+    else:
+        contenido.pop("estilo", None)
+    if reglas == antes:
+        return {"reglas": reglas, "cambiado": False}
+    try:
+        nueva = presets.guardar("canal", ficha.get("nombre") or "", contenido,
+                                nota=ficha.get("nota") or "",
+                                miniatura=ficha.get("miniatura") or "",
+                                pid=preset_id)
+    except presets.ErrorPreset as fallo:
+        raise ErrorApi(400, str(fallo))
+    anotar_global("reglas_estilo", {"preset": preset_id, "reglas": len(reglas)})
+    return {"reglas": modulo.de_estilo((nueva.get("datos") or {}).get("estilo") or {}),
+            "cambiado": True}
+
+
+@app.post("/api/reglas-estilo/afinar", status_code=202)
+def afinar_regla_estilo(cuerpo: dict = Body(default=None)):
+    """Claude reescribe una regla para el generador: {texto, nombre?, palabras?}.
+    -> {id}; el resultado ({nombre, en, palabras, gravedad}) en GET. No guarda
+    nada: lo propone y la persona lo acepta."""
+    modulo = _reglas_estilo()
+    datos = _cuerpo(cuerpo)
+    texto = " ".join(str(datos.get("texto") or "").split())
+    if not texto:
+        raise ErrorApi(400, "escribe primero lo que exige la regla")
+    palabras = datos.get("palabras") if isinstance(datos.get("palabras"), list) else []
+    rid = uuid.uuid4().hex[:12]
+    with _LOCK_AFINADOS:
+        for viejo in list(_AFINADOS)[:-19]:
+            _AFINADOS.pop(viejo, None)
+        _AFINADOS[rid] = {"estado": "pensando"}
+
+    def correr():
+        try:
+            propuesta = modulo.afinar(texto, nombre=str(datos.get("nombre") or ""),
+                                      palabras=[str(p) for p in palabras],
+                                      cwd=RAIZ_ESTUDIO)
+            ficha = {"estado": "listo", "propuesta": propuesta}
+        except Exception as fallo:                          # noqa: BLE001
+            ficha = {"estado": "error", "error": str(fallo)[:600]}
+        with _LOCK_AFINADOS:
+            _AFINADOS[rid] = ficha
+
+    threading.Thread(target=correr, daemon=True, name=f"afinar-{rid}").start()
+    return {"id": rid, "estado": "pensando"}
+
+
+@app.get("/api/reglas-estilo/afinar/{rid}")
+def leer_afinado_regla(rid: str):
+    """Como va «Afinar con Claude», y la propuesta al terminar."""
+    with _LOCK_AFINADOS:
+        ficha = _AFINADOS.get(rid)
+    if not ficha:
+        raise ErrorApi(404, "esa propuesta ya no está: vuelve a pedirla")
+    return ficha
 
 
 @app.delete("/api/presets-light/{preset_id}")

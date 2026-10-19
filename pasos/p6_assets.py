@@ -67,6 +67,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import cartelas  # noqa: E402
 import corrector  # noqa: E402
+import reglas_estilo  # noqa: E402
 import cta  # noqa: E402
 import encuadres  # noqa: E402
 import estadisticas  # noqa: E402
@@ -855,9 +856,15 @@ def _corregir_con_agente(escena, plan, dirs, p, trabajo, notas, proyecto,
             if isinstance(b, dict) and str(b.get("id")) == bid:
                 bloque = str(b.get("texto") or "")
         titulo = str(plan.get("titulo") or "")
+        # la guia escrita y, si el estilo las tiene, sus reglas: una correccion
+        # no puede romperlas
+        estilo_legible = "\n".join(
+            ["  " + l for l in guia_escrita(p["estilo"])]
+            + [l for l in [reglas_estilo.para_corrector(
+                reglas_estilo.de_estilo(p["estilo"]))] if l])
         resultado = corrector.preparar(
             nota_texto, escena, p.get("catalogo") or {},
-            "\n".join("  " + l for l in guia_escrita(p["estilo"])),
+            estilo_legible,
             regla_de_especie(p["estilo"]), inventario, titulo=titulo,
             bloque=bloque, cwd=getattr(proyecto, "raiz", None),
             proyecto_id=getattr(proyecto, "id", None),
@@ -2933,6 +2940,16 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
               if foto else reglas.bloque_prompt("prompt_imagen"))
     if bloque:
         lineas.append(bloque)
+    # LAS REGLAS DEL ESTILO (pasos/reglas_estilo.py): las que escribio quien
+    # hizo el estilo, detras de las de la casa y delante de la escena, con la
+    # misma razon que ellas -- lo concreto de la escena pesa mas que una regla
+    # general, y aqui la regla tiene que ganar. Solo las que aplican a ESTE
+    # plano (sus palabras), y NADA si el estilo no tiene: sin reglas el prompt
+    # sale byte a byte como antes y ninguna firma se mueve (regla 1).
+    lineas.extend(reglas_estilo.para_prompt(
+        reglas_estilo.de_estilo(estilo),
+        " ".join([str(escena.get("prompt") or ""), str(escena.get("narracion") or ""),
+                  _texto_feedback(feedback)])))
     # CUAL es el idioma del video. La POLITICA --que lo que la produccion
     # escribe va en el idioma del video, y que los nombres propios no se
     # traducen-- vive en la regla `texto-dibujado-en-el-idioma-del-video`, que

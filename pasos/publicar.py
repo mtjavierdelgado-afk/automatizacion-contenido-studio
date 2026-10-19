@@ -1935,11 +1935,21 @@ def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
         # Upload-Post, y en una subida con otras redes ese «title» es otro
         lote = uuid.uuid4().hex[:20]
         lote_gbp = uuid.uuid4().hex[:20]
+        # YOUTUBE Y FACEBOOK, EN SU PROPIA SUBIDA cuando van con otras redes
+        # (19-10-2026): en una subida el «title» común es su título, y si
+        # Upload-Post (o la red) usa «title» en vez de «instagram_title», el
+        # post de Instagram saldría solo con el título de YouTube. Separadas,
+        # el «title» de la otra subida es el texto completo (titulo_general).
+        lote_titulo = lote
+        if any(r in TITULO_MANDA for r in redes) and \
+                any(r not in TITULO_MANDA and r != "google_business" for r in redes):
+            lote_titulo = uuid.uuid4().hex[:20]
         nuevos = []
         for red in redes:
             nuevos.append({
                 "id": uuid.uuid4().hex[:12], "red": red, "perfil": perfil,
-                "lote": lote_gbp if red == "google_business" else lote,
+                "lote": (lote_gbp if red == "google_business"
+                         else lote_titulo if red in TITULO_MANDA else lote),
                 "estado": "espera_ok" if modo == "pendiente" else "enviando",
                 "modo": "ahora" if modo == "ahora" else "programado",
                 "cuando": cuando or _iso_lima(), "creado": _iso_lima(),

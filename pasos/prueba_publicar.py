@@ -1439,9 +1439,37 @@ def prueba_titulo_completo():
         igual(c["title"], c[f"{primera}_title"],
               f"Instagram + TikTok: el texto completo de la primera red de la subida ({primera})")
         ok(c["tiktok_title"].startswith("TikTok: "), "y cada red con el suyo")
-        c, _d = subir("t_yt", ["instagram", "youtube"])
-        igual(c["title"], "Consolas para tu fiesta", "con YouTube, «title» sigue siendo su título")
-        igual(c["youtube_title"], "Consolas para tu fiesta", "y su campo propio igual")
+        # INSTAGRAM + YOUTUBE: dos subidas (19-10, tarde). En una sola, el «title»
+        # común era el título de YouTube y Instagram podía salir solo con él.
+        with open(simulador, encoding="utf-8") as fh:
+            antes = len(json.load(fh)["subidas"])
+        _c, datos = subir("t_yt", ["instagram", "youtube"])
+        with open(simulador, encoding="utf-8") as fh:
+            nuevas = json.load(fh)["subidas"][antes:]
+        igual(len(nuevas), 2, "Instagram + YouTube: dos subidas a Upload-Post")
+        yt = next((s for s in nuevas if "youtube" in s["redes"]), {})
+        ig = next((s for s in nuevas if "instagram" in s["redes"]), {})
+        igual(yt.get("redes"), ["youtube"], "YouTube va sola")
+        igual(ig.get("redes"), ["instagram"], "Instagram va sola")
+        igual(yt["campos"]["title"], "Consolas para tu fiesta", "con YouTube, «title» sigue siendo su título")
+        igual(yt["campos"]["youtube_title"], "Consolas para tu fiesta", "y su campo propio igual")
+        igual(ig["campos"]["title"], ig["campos"]["instagram_title"],
+              "y la de Instagram lleva su texto completo en «title», no el título de YouTube")
+        ok("instagram_title" not in yt["campos"] and "youtube_title" not in ig["campos"],
+           "lo de una red no va en la subida de la otra")
+        lotes = {e["red"]: e["lote"] for e in datos["envios"]}
+        ok(lotes["instagram"] != lotes["youtube"], "cada una con su lote (Reintentar va por su lado)")
+        # YouTube + Facebook, sin otras: juntas (las dos tienen título propio)
+        with open(simulador, encoding="utf-8") as fh:
+            antes = len(json.load(fh)["subidas"])
+        P.guardar_ficha(raiz, "t_ytfb", {"textos": dict(textos, facebook={
+            "titulo": "Fiestas con consolas", "descripcion": largo})})
+        P.enviar(raiz, dict(INFO, pid="t_ytfb", mp4=mp4, mp4_huella="t_ytfb"), ajustes,
+                 {"redes": ["youtube", "facebook"], "modo": "ahora", "confirmado": True},
+                 en_hilo=False)
+        with open(simulador, encoding="utf-8") as fh:
+            nuevas = json.load(fh)["subidas"][antes:]
+        igual(len(nuevas), 1, "YouTube + Facebook solas: una subida (las dos llevan su título)")
         # lo que devuelve la red, comparado con lo mandado
         e = {"red": "instagram", "enviado": {"instagram_title": "x" * 300}}
         P.comparar_publicado(e, "x" * 120)

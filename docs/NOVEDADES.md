@@ -10,6 +10,16 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Publicar: YouTube y Facebook van en su propia subida (19 de octubre, tarde)**
+- Si publicas o programas a la vez en **YouTube o Facebook y en otras redes**
+  (Instagram, TikTok…), el Studio lo manda a Upload-Post en **dos subidas**:
+  una para YouTube/Facebook con su título y otra para las demás con su texto
+  completo. Antes iba todo junto y el título de YouTube podía acabar como el
+  texto de Instagram.
+- En la ficha no cambia nada: cada red sigue con su envío, su estado y su
+  «Reintentar». Lo que ya estaba programado antes de este cambio no se toca:
+  cancélalo y vuelve a programarlo para que salga con el texto entero.
+
 **El movimiento y la profundidad 2.5D de cada imagen (19 de octubre)**
 - En **Imágenes**, cada diapositiva trae **🎬 Esta imagen**: su movimiento
   (**Quieta**, Sobrio, Vivo o Dinámico) y su **2.5D** (sí o no). De partida

@@ -997,6 +997,51 @@ def prueba_toma_cortada_no_se_paga_dos_veces(base):
         coste.RUTA_GLOBAL = ruta_global
 
 
+def prueba_costura_sin_chasquido(base):
+    """REGRABAR UNA SECCION NO DEJA UN CHASQUIDO (19-10-2026).
+
+    Lo que se oyo en el «Torneo de 8»: la toma vieja se cortaba en la MARCA de
+    la primera palabra de la seccion, que llega un poco tarde, y se quedaban
+    ~30 ms del arranque de esa palabra cortados en seco contra el silencio con
+    el que empieza la toma nueva. Aqui la toma vieja tiene justo eso: una
+    palabra, una pausa, y el arranque de la palabra siguiente 40 ms ANTES de su
+    marca; la toma nueva (simulada) es silencio.
+    """
+    print("\n[costura] regrabar una seccion: sin chasquido en las costuras")
+    import numpy as np  # noqa: PLC0415
+    sr = p4_voz.SR
+    t = np.arange(int(3.0 * sr)) / sr
+    voz = np.zeros_like(t)
+    tono = lambda a, b: ((t >= a) & (t < b)) * 0.4 * np.sin(2 * np.pi * 220 * t)  # noqa: E731
+    voz += tono(0.20, 1.00)          # la palabra de antes
+    voz += tono(1.46, 2.40)          # la de la seccion: suena desde 1,46…
+    voz += tono(2.70, 3.00)          # …y la de despues
+    pcm = (voz * 32767).astype("<i2").tobytes()
+    destino = os.path.join(base, "costura")
+    os.makedirs(destino, exist_ok=True)
+    with open(os.path.join(destino, p4_voz.NOMBRE_PISTA), "wb") as fh:
+        fh.write(p4_voz.motor.wav_desde_pcm(pcm))
+    meta = {"archivo": p4_voz.NOMBRE_PISTA,
+            # …pero su marca dice 1,50: la toma vieja guardaba 40 ms de ella
+            "secciones": [{"id": "SB002", "bloques": ["S02"], "t_in": 1.50, "t_out": 2.40}],
+            "palabras": [{"w": "antes", "s": 0.20, "e": 1.00},
+                         {"w": "seccion", "s": 1.50, "e": 2.40},
+                         {"w": "despues", "s": 2.70, "e": 3.00}]}
+    bloques = [{"id": "S01", "texto": "antes"}, {"id": "S02", "texto": "seccion"},
+               {"id": "S03", "texto": "despues"}]
+    p4_voz.regrabar_seccion(bloques, "SB002", {"idioma": "es"}, meta, destino)
+    with open(os.path.join(destino, p4_voz.NOMBRE_PISTA), "rb") as fh:
+        nueva = np.frombuffer(p4_voz._pcm_de(fh.read()), dtype="<i2").astype(np.float64) / 32768
+    salto = float(np.max(np.abs(np.diff(nueva)))) if len(nueva) > 1 else 0.0
+    # un seno de 220 Hz a 0,4 cambia como mucho ~0,013 entre dos muestras: un
+    # corte en seco desde 0,4 son 0,4 de golpe
+    comprobar(salto < 0.05, f"ninguna costura salta de golpe (mayor salto {salto:.3f}; "
+                            "un chasquido son ~0,4)")
+    arranque = nueva[int(1.40 * sr):int(1.50 * sr)]
+    comprobar(float(np.max(np.abs(arranque))) < 0.01 if len(arranque) else True,
+              "y el arranque de la palabra vieja no se queda pegado delante de la nueva")
+
+
 def prueba_pronunciacion(base):
     """COMO SE PRONUNCIA (15-10-2026): lo que se manda va como suena, y lo que
     vuelve se devuelve a la palabra escrita sin descuadrar nada."""
@@ -1128,6 +1173,7 @@ def main():
         prueba_sse_en_utf8()
         prueba_espacio_entre_secciones()
         prueba_toma_cortada_no_se_paga_dos_veces(base)
+        prueba_costura_sin_chasquido(base)
         prueba_pronunciacion(base)
         prueba_catalogo_voces(con_red)
         if con_red:

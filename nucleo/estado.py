@@ -876,13 +876,22 @@ class Estado:
             antes = self._firma(paso_id)
             if datos.get("params") == params:
                 return False
+            marca = datos.get("marca")
+            corriendo = isinstance(marca, dict) and marca.get("estado") == "ejecutando"
+            previo = None
+            if corriendo and del_propio_paso:
+                # lo de JUSTO ANTES de este cambio, para saber despues que tocó
+                # el usuario mientras el trabajo corria (ver `_refrescar_foto`)
+                previo = {"params": copy.deepcopy(datos.get("params", {})),
+                          "firma": antes,
+                          "firma_propia": self._firma(paso_id, propias=False),
+                          "unidades": {u: self._firma_unidad(paso_id, u)
+                                       for u in self._declaradas(paso_id)}}
             datos["params"] = copy.deepcopy(params)
             self._cache = {}
             cambiado = self._firma(paso_id) != antes
-            marca = datos.get("marca")
-            corriendo = isinstance(marca, dict) and marca.get("estado") == "ejecutando"
             if cambiado and corriendo and del_propio_paso:
-                self._fotografiar_entradas(paso_id)
+                self._refrescar_foto(paso_id, marca, previo)
             elif cambiado and isinstance(marca, dict) and not corriendo:
                 datos["marca"] = None
             # la marca de "ejecutando" ajena se conserva: es la prueba de con que
@@ -934,6 +943,56 @@ class Estado:
             "unidades": {u: self._firma_unidad(paso_id, u)
                          for u in sorted(self._declaradas(paso_id))},
         }
+
+    def _refrescar_foto(self, paso_id, vieja, previo):
+        """La foto del arranque, con el cambio del PROPIO trabajo y sin los del usuario.
+
+        Cuando el trabajo escribe en sus params (la huella de assets, la
+        direccion de una receta), la foto se rehace para que su resultado siga
+        contando como al dia. Rehacerla entera con lo de ahora metia dentro
+        tambien lo que el usuario hubiera cambiado mientras corria: un retoque
+        de un plano hecho durante la tanda quedaba sellado como hecho sin que
+        nadie lo hubiera dibujado (D7 del analisis del 13-10-2026).
+
+        Por eso, pieza a pieza: lo que en la foto vieja coincidia con lo de
+        justo antes de este cambio (nadie lo toco) se actualiza; lo que no
+        coincidia (el usuario lo cambio durante el trabajo) se queda como en la
+        foto vieja, y `completar` lo dejara obsoleto como debe.
+        """
+        self._fotografiar_entradas(paso_id)
+        nueva = self._doc["pasos"][paso_id]["marca"]
+        for clave in ("firma", "firma_propia"):
+            if vieja.get(clave) is not None and vieja.get(clave) != previo[clave]:
+                nueva[clave] = vieja[clave]
+        fotos_viejas = vieja.get("unidades") or {}
+        for unidad in list(nueva["unidades"]):
+            if unidad in fotos_viejas and fotos_viejas[unidad] != previo["unidades"].get(unidad):
+                nueva["unidades"][unidad] = fotos_viejas[unidad]
+        # los params de la version: los del arranque MAS lo que este cambio
+        # movio, no los de ahora (que llevan dentro los cambios del usuario)
+        if "params" in vieja:
+            base = copy.deepcopy(vieja["params"])
+            antes_p, ahora_p = previo["params"], self._doc["pasos"][paso_id].get("params", {})
+            for clave in set(antes_p) | set(ahora_p):
+                if antes_p.get(clave) == ahora_p.get(clave):
+                    continue
+                if (clave == CLAVE_UNIDADES and isinstance(antes_p.get(clave), dict)
+                        and isinstance(ahora_p.get(clave), dict)):
+                    bloque = base.get(clave) if isinstance(base.get(clave), dict) else {}
+                    bloque = dict(bloque)
+                    for u in set(antes_p[clave]) | set(ahora_p[clave]):
+                        if antes_p[clave].get(u) == ahora_p[clave].get(u):
+                            continue
+                        if u in ahora_p[clave]:
+                            bloque[u] = copy.deepcopy(ahora_p[clave][u])
+                        else:
+                            bloque.pop(u, None)
+                    base[clave] = bloque
+                elif clave in ahora_p:
+                    base[clave] = copy.deepcopy(ahora_p[clave])
+                else:
+                    base.pop(clave, None)
+            nueva["params"] = base
 
     def marcar_error(self, paso_id, mensaje):
         """Marca el paso como fallido; se limpia solo si cambian los params."""

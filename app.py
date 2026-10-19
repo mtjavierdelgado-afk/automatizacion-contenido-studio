@@ -241,6 +241,8 @@ def contexto(pid):
         raise ErrorApi(503, str(fallo))
     except Exception as fallo:  # noqa: BLE001
         raise ErrorApi(500, f"no se ha podido abrir el proyecto {clave}: {fallo}")
+    if getattr(ctx.proyecto, "id_en_fichero", None):
+        _adoptar_id(ctx.proyecto.raiz, ctx.proyecto.id_en_fichero, ctx.proyecto.id)
     with _LOCK:
         ganador = _CONTEXTOS.setdefault(clave, ctx)
         if ganador is ctx:
@@ -248,6 +250,48 @@ def contexto(pid):
             # este contexto, asi que lo que se quita es de un servicio anterior
             ctx.limpiar_marcas_huerfanas()
         return ganador
+
+
+def _adoptar_id(raiz, viejo, nuevo):
+    """Un video cuyo id cambio al abrirlo (carpeta copiada o renombrada a mano,
+    R4) se queda con lo que colgaba de su id viejo. -> bool (si adopto)
+
+    - SU CLIENTE: el mapa de `clientes.json` va por id. Sin esto la copia
+      quedaba suelta, y si el cliente tenia clave, la copia se listaba a quien
+      no la habia abierto. Si el id viejo sigue siendo de otra carpeta (una
+      copia), la copia toma el MISMO cliente; si ya no (un renombrado), se mueve.
+    - EL ID EN `proyecto.json`: se escribe el nuevo (con `id_anterior`) para que
+      esto pase una sola vez. No toca ninguna firma.
+
+    El coste del historial global no hace falta moverlo: se agrupa por la
+    carpeta de cada registro (`coste.resumen_global`).
+    """
+    adoptado = False
+    try:
+        base = raiz_proyectos()
+        cid = CLIENTES.cliente_de(base, video_id=viejo)
+        if cid and not CLIENTES.cliente_de(base, video_id=nuevo):
+            CLIENTES.asignar_video(base, nuevo, cid)
+            adoptado = True
+            if not os.path.isdir(os.path.join(base, str(viejo))):
+                CLIENTES.asignar_video(base, viejo, "")
+        proyecto = Proyecto(raiz)
+        if proyecto.id_en_fichero:
+            proyecto.guardar_config()
+            adoptado = True
+    except Exception as fallo:  # noqa: BLE001  -- nunca impide abrir el video
+        anotar_global("aviso", {"adoptar_id": str(fallo), "viejo": viejo},
+                      proyecto=nuevo)
+    return adoptado
+
+
+def _listar_proyectos():
+    """`Proyecto.listar` con las carpetas de id cambiado ya adoptadas (R4)."""
+    fichas = Proyecto.listar(raiz_proyectos())
+    cambiadas = [f for f in fichas if f.get("id_en_fichero")]
+    for ficha in cambiadas:
+        _adoptar_id(ficha["raiz"], ficha["id_en_fichero"], ficha["id"])
+    return Proyecto.listar(raiz_proyectos()) if cambiadas else fichas
 
 
 def _registrar_trabajo(trabajo_id, pid):
@@ -951,7 +995,10 @@ app = FastAPI(title=NOMBRE_PRODUCTO, version=VERSION,
 
 @app.exception_handler(ErrorApi)
 async def _manejar_error_api(peticion, fallo):
-    return _respuesta_error(fallo.codigo, fallo.mensaje, fallo.extra)
+    # los 5xx de `ErrorApi` suelen llevar el texto de una excepcion pegado
+    # («no se ha podido abrir el proyecto x: <ruta>»): sin carpetas del servidor
+    mensaje = _sin_rutas(fallo.mensaje) if fallo.codigo >= 500 else fallo.mensaje
+    return _respuesta_error(fallo.codigo, mensaje, fallo.extra)
 
 
 @app.exception_handler(ErrorHTTP)
@@ -969,14 +1016,50 @@ async def _manejar_validacion(peticion, fallo):
                             {"detalles": detalles})
 
 
+#: Una ruta absoluta del disco (POSIX o Windows) dentro de un mensaje de error.
+_RUTA_DEL_DISCO = re.compile(r"(?<![\w.:/\\])(?:[A-Za-z]:)?[\\/](?:[^\\/\s'\"<>|:]+[\\/])+([^\\/\s'\"<>|:]*)")
+
+
+def _sin_rutas(texto):
+    """El texto de un error sin las carpetas del servidor: «…/fichero.png».
+
+    Un 500 enseña el texto de la excepción (es lo que dice qué ha pasado), y
+    el de un fichero que falta lleva su ruta entera (R9 del analisis del
+    13-10-2026). Se deja el nombre del fichero, que es lo que ayuda.
+    """
+    return _RUTA_DEL_DISCO.sub(lambda m: "…/" + m.group(1), str(texto))
+
+
 @app.exception_handler(Exception)
 async def _manejar_imprevisto(peticion, fallo):
-    return _respuesta_error(500, f"{type(fallo).__name__}: {fallo}",
-                            {"traza": traceback.format_exc(limit=8)})
+    # LA TRAZA VA AL REGISTRO DEL SERVICIO, NO A LA RESPUESTA (R9 del analisis
+    # del 13-10-2026): llevaba rutas del servidor a cualquiera que provocara un
+    # 500, y la pantalla no la lee. La respuesta lleva una marca para buscarla.
+    marca = uuid.uuid4().hex[:8]
+    print(f"[500 {marca}] {peticion.method} {peticion.url.path}\n"
+          + traceback.format_exc(limit=8), file=sys.stderr, flush=True)
+    return _respuesta_error(500, _sin_rutas(f"{type(fallo).__name__}: {fallo}"),
+                            {"marca": marca})
 
 
 def _cuerpo(crudo):
     return crudo if isinstance(crudo, dict) else {}
+
+
+def _lista_de_textos(datos, clave):
+    """`datos[clave]` como lista de textos sueltos, o None si no viene.
+
+    Un tipo equivocado (un numero, un objeto, listas dentro de la lista) es un
+    400 que lo dice, y no un 500 con un TypeError al recorrerlo o al buscarlo
+    en un catalogo (R7 del analisis del 13-10-2026).
+    """
+    valor = (datos or {}).get(clave)
+    if valor is None:
+        return None
+    if not isinstance(valor, list) or any(
+            isinstance(v, (list, dict)) or v is None for v in valor):
+        raise ErrorApi(400, f"'{clave}' tiene que ser una lista de textos")
+    return valor
 
 
 # LAS RUTAS `async def` CORREN EN EL BUCLE DE EVENTOS, que es UNO para todo el
@@ -1006,7 +1089,7 @@ def salud():
         "ok": True,
         "version": VERSION,
         "raiz_proyectos": raiz_proyectos(),
-        "proyectos": len(Proyecto.listar(raiz_proyectos())),
+        "proyectos": len(_listar_proyectos()),
         "abiertos": abiertos,
         "trabajos_activos": activos,
         "pasos": [p["id"] for p in PASOS],
@@ -1125,7 +1208,7 @@ def estilos_perdidos():
     """
     diag = _herramienta("diagnostico_estilo")
     salida = []
-    for ficha in Proyecto.listar(raiz_proyectos()):
+    for ficha in _listar_proyectos():
         if ficha.get(CONFIG_TALLER):
             continue
         rotas = diag.revisar(ficha.get("raiz"))
@@ -1203,7 +1286,7 @@ def listar_proyectos(peticion: Request):
     fichas = []
     cerrados = _cerrados(peticion)
     asignaciones = CLIENTES._leer(raiz_proyectos()) if cerrados else None
-    for ficha in Proyecto.listar(raiz_proyectos()):
+    for ficha in _listar_proyectos():
         if ficha.get(CONFIG_TALLER):
             continue
         # LO DE UN PROYECTO CON CLAVE no se lista a quien no lo ha abierto
@@ -1645,6 +1728,10 @@ CLAVES_AJUSTE = {
 
 
 
+#: Params que el codigo lee SIEMPRE como objeto (o None), en cualquier paso.
+CLAVES_OBJETO = ("unidades", "estilo", "paleta", "musica", "efectos", "logo")
+
+
 def _validar_params(paso_id, nuevos, ctx=None):
     """Rechaza un ajuste del CLI imposible AL GUARDARLO, no al ejecutar.
 
@@ -1660,6 +1747,35 @@ def _validar_params(paso_id, nuevos, ctx=None):
     guardar un brief a medias mientras se escribe. Guardar y ejecutar son dos
     momentos distintos y solo el segundo exige que este todo.
     """
+    # LAS CLAVES ESTRUCTURALES, POR TIPO (R2 del analisis del 13-10-2026). Una
+    # docena de pantallas leen `params["estilo"]`, `["unidades"]`, `["musica"]`...
+    # como objetos; guardar un texto ahi devolvia 200 y a partir de entonces esas
+    # pantallas daban 500 para siempre, sin ningun boton para deshacerlo. `None`
+    # sigue valiendo: es "sin valor" y todos los lectores lo tratan como {}.
+    # SOLO LO QUE CAMBIA: el modo editor manda el borrador ENTERO del paso en
+    # cada guardado, y un valor antiguo que ya estaba guardado no puede dejar
+    # el paso sin poder guardarse nunca mas (la misma regla que los params
+    # sueltos por unidad del nucleo).
+    try:
+        guardados = (ctx.estado.params(paso_id) or {}) if ctx is not None else {}
+    except Exception:  # noqa: BLE001
+        guardados = {}
+    for clave in CLAVES_OBJETO:
+        if clave not in (nuevos or {}) or nuevos[clave] == guardados.get(clave):
+            continue
+        valor = nuevos[clave]
+        if valor is not None and not isinstance(valor, dict):
+            raise ErrorApi(400, f"'{clave}' tiene que ser un objeto, "
+                                f"llegó {type(valor).__name__}")
+    bloque = (nuevos or {}).get("unidades")
+    previas = guardados.get("unidades") if isinstance(guardados.get("unidades"), dict) else {}
+    if isinstance(bloque, dict):
+        malas = [str(u) for u, v in bloque.items()
+                 if v is not None and not isinstance(v, dict) and v != previas.get(u)]
+        if malas:
+            raise ErrorApi(400, "'unidades' lleva un objeto por unidad; no lo "
+                                "son: " + ", ".join(malas[:5]))
+
     for clave, es_modelo in CLAVES_AJUSTE.items():
         if clave not in (nuevos or {}):
             continue
@@ -1720,7 +1836,7 @@ def fijar_params(pid: str, paso: str, cuerpo: dict = Body(default=None)):
     else:
         nuevos = {k: v for k, v in datos.items() if k != "reemplazar"}
 
-    _validar_params(paso_id, nuevos)
+    _validar_params(paso_id, nuevos, ctx)
 
     antes = {p["id"]: ctx.estado.estado_de(p["id"]) for p in PASOS}
     try:
@@ -1739,7 +1855,7 @@ def fijar_params(pid: str, paso: str, cuerpo: dict = Body(default=None)):
     # usan si se vuelve a propagar la huella de dependencias
     if paso_id == "assets" and cambiado and PASOS_MODULOS is not None:
         try:
-            PASOS_MODULOS.p6_assets.propagar_dependencias(ctx.estado)
+            PASOS_MODULOS.p6_assets.propagar_dependencias(ctx.estado, del_propio_paso=False)
         except Exception as fallo:  # noqa: BLE001
             ctx.bitacora.anotar("aviso", paso_id,
                                 {"propagar_dependencias": str(fallo)})
@@ -1779,10 +1895,11 @@ def ejecutar_paso(pid: str, paso: str, cuerpo: dict = Body(default=None)):
     paso_id = _validar_paso(paso)
     datos = _cuerpo(cuerpo)
     if isinstance(datos.get("params"), dict):
+        _validar_params(paso_id, datos["params"], ctx)     # como el PUT (R2)
         ctx.estado.actualizar_params(paso_id, datos["params"])
         if paso_id == "assets" and PASOS_MODULOS is not None:
             try:
-                PASOS_MODULOS.p6_assets.propagar_dependencias(ctx.estado)
+                PASOS_MODULOS.p6_assets.propagar_dependencias(ctx.estado, del_propio_paso=False)
             except Exception as fallo:  # noqa: BLE001
                 ctx.bitacora.anotar("aviso", paso_id,
                                     {"propagar_dependencias": str(fallo)})
@@ -1987,7 +2104,7 @@ def enviar_feedback(pid: str, cuerpo: dict = Body(default=None)):
 
     if paso_id == "assets" and PASOS_MODULOS is not None:
         try:
-            PASOS_MODULOS.p6_assets.propagar_dependencias(ctx.estado)
+            PASOS_MODULOS.p6_assets.propagar_dependencias(ctx.estado, del_propio_paso=False)
         except Exception as fallo:  # noqa: BLE001
             ctx.bitacora.anotar("aviso", paso_id, {"propagar_dependencias": str(fallo)})
 
@@ -2540,7 +2657,8 @@ def reescribir_bloques_guion(pid: str, cuerpo: dict = Body(default=None)):
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
     datos = _cuerpo(cuerpo)
-    crudos = datos.get("bloques") or ([datos["bloque"]] if datos.get("bloque") else [])
+    crudos = (_lista_de_textos(datos, "bloques")
+              or ([datos["bloque"]] if datos.get("bloque") else []))
     ids = [str(b).strip().upper() for b in crudos if str(b).strip()]
     if not ids:
         raise ErrorApi(400, "hace falta 'bloque' o 'bloques' con los ids a reescribir")
@@ -2759,6 +2877,7 @@ def quitar_pausas_guion(pid: str, cuerpo: dict = Body(default=None)):
     """
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
+    _lista_de_textos(datos, "bloques")       # R7: un numero aqui era un 500
     marcas = PASOS_MODULOS.marcas_tts if PASOS_MODULOS else None
 
     def hacer(params, bloques, _grabados):
@@ -2883,6 +3002,12 @@ def estimar_video(cuerpo: dict = Body(default=None)):
     # UN VIDEO CORTO NUEVO nace en ritmo rapido si su estilo va mas lento
     # (`presets_light.ritmo_para_video_nuevo`): con `ritmo_corto` la pantalla
     # pregunta por el video que va a nacer, no por el estilo.
+    for clave in ("min_s", "max_s"):          # R7: un texto aqui era un 500
+        if datos.get(clave) not in (None, ""):
+            try:
+                float(datos[clave])
+            except (TypeError, ValueError):
+                raise ErrorApi(400, f"'{clave}' tiene que ser un número de segundos")
     corto = (light.ritmo_para_video_nuevo(segundos, datos.get("max_s"))
              if datos.get("ritmo_corto") and not datos.get("ritmo") else None)
     if datos.get("ritmo") or corto:
@@ -3249,7 +3374,7 @@ def coste_en_detalle(pid: str):
             estilo = {"id": pid_estilo, "nombre": ficha.get("nombre") or pid_estilo,
                       **(_coste_del_estilo(ficha) or {})}
             videos = 0
-            for f in Proyecto.listar(raiz_proyectos()):
+            for f in _listar_proyectos():
                 if (f.get("config") or f).get("estilo_light") == pid_estilo or f.get("estilo_light") == pid_estilo:
                     videos += 1
             estilo["videos"] = videos
@@ -3317,7 +3442,8 @@ def exportar_por_partes(pid: str, cuerpo: dict = Body(default=None)):
     que = str(datos.get("que") or "video")
     if que not in ("video", "audio", "zip"):
         raise ErrorApi(400, "«que» tiene que ser video, audio o zip")
-    partes = [str(x) for x in (datos.get("partes") or []) if str(x) in ("voz", "musica", "efectos")]
+    partes = [str(x) for x in (_lista_de_textos(datos, "partes") or [])
+              if str(x) in ("voz", "musica", "efectos")]
     pedido = {"que": que, "partes": partes, "parte": str(datos.get("parte") or ""),
               "subtitulos": datos.get("subtitulos", True) is not False,
               "logo": datos.get("logo", True) is not False}
@@ -3347,6 +3473,8 @@ def exportar_por_partes(pid: str, cuerpo: dict = Body(default=None)):
 def descargar_exporte(pid: str, ruta: str):
     """Un fichero preparado por /exportar, para descargar con su nombre."""
     ctx = contexto(pid)
+    if "\x00" in ruta:                    # R7: un nulo en la ruta era un 500
+        raise ErrorApi(404, "ese fichero no está preparado: vuelve a pedirlo")
     base = os.path.realpath(os.path.join(ctx.proyecto.raiz, "exportes"))
     destino = os.path.realpath(os.path.join(base, ruta))
     if not destino.startswith(base + os.sep) or not os.path.isfile(destino):
@@ -3587,26 +3715,13 @@ def _correr_tono(avisar, ctx, urls, ajuste):
     return ficha
 
 
-@app.get("/api/proyectos/{pid}/estilo")
-def leer_estilo(pid: str):
-    """Fotogramas ya extraidos y cuales estan elegidos ahora mismo."""
-    ctx = contexto(pid)
-    estilo = _estilo()
-    ficha = estilo.ficha(ctx.proyecto) or {"total": 0, "candidatos": []}
-    elegidas = ((ctx.estado.params("assets") or {}).get("estilo") or {}).get("referencias") or []
-    for candidato in ficha.get("candidatos", []):
-        candidato["url"] = url_de(ctx.id, candidato["ruta"], ctx.proyecto.raiz)
-        candidato["elegida"] = candidato["ruta"] in elegidas
-    ficha["elegidas"] = elegidas
-    return ficha
-
-
 @app.put("/api/proyectos/{pid}/estilo/seleccion")
 def elegir_estilo(pid: str, cuerpo: dict = Body(default=None)):
     """Guarda las imagenes de estilo elegidas en los params de assets."""
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
     estilo = _estilo()
+    _lista_de_textos(datos, "referencias")
     try:
         rutas = estilo.validar_seleccion(datos.get("referencias"))
     except ValueError as fallo:
@@ -3669,7 +3784,7 @@ def escribir_guia_estilo(pid: str, cuerpo: dict = Body(default=None)):
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
     estilo = _estilo()
-    rutas = datos.get("referencias")
+    rutas = _lista_de_textos(datos, "referencias")
     if not rutas:
         rutas = ((ctx.estado.params("assets") or {}).get("estilo") or {}).get("referencias")
     try:
@@ -4422,25 +4537,24 @@ def guardar_plan_callouts(pid: str, cuerpo: dict = Body(default=None)):
         cambios["subtitulo_tam"] = nombre
         hecho.append("subtitulo_tam")
     if datos.get("diseno"):
-        if datos["diseno"] not in p7.SETS_DISENO:
+        if not isinstance(datos["diseno"], str) or datos["diseno"] not in p7.SETS_DISENO:
             raise ErrorApi(400, f"set de diseño desconocido: {datos['diseno']}. "
                                 f"Los sets son: {', '.join(p7.SETS_DISENO)}")
         cambios["diseno"] = datos["diseno"]
-    if isinstance(datos.get("arquetipos"), list):
-        # contra los VIGENTES: los cinco jubilados el 19-08-2026 se siguen
-        # dibujando para los planes ya guardados, pero no se pueden elegir
-        vigentes = p7.vigentes()
-        desconocidos = [a for a in datos["arquetipos"] if a not in vigentes]
-        if desconocidos:
-            raise ErrorApi(400, f"arquetipos no disponibles: {', '.join(desconocidos)}. "
-                                f"Los que hay son: {', '.join(vigentes)}")
-        cambios["arquetipos"] = datos["arquetipos"]
+    if "arquetipos" in datos:
+        # LOS ARQUETIPOS YA NO SE ELIGEN (R8 del analisis del 13-10-2026): se
+        # retiraron con `p7.vigentes()`, y esta rama era un 500 con cualquier
+        # valor. La pantalla no los manda; quien los mande se entera con un 400.
+        raise ErrorApi(400, "los arquetipos ya no se eligen: el grafismo se "
+                            "decide solo con el diseño y la paleta")
     if isinstance(datos.get("paleta"), dict):
         # Los colores elegidos a mano viajan en 'fijados' DENTRO de la paleta,
         # no sueltos: paleta_de_guia necesita distinguir "esto lo puso alguien"
         # de "esto se derivo", o al volver a derivar se los lleva por delante.
-        fijados = {papel: str(color) for papel, color in
-                   (datos["paleta"].get("fijados") or {}).items()
+        crudos = datos["paleta"].get("fijados") or {}
+        if not isinstance(crudos, dict):      # R7: un numero aqui era un 500
+            raise ErrorApi(400, "'paleta.fijados' tiene que ser un objeto papel → color")
+        fijados = {papel: str(color) for papel, color in crudos.items()
                    if papel in p7.PARAMS_POR_DEFECTO["paleta"] and color}
         actual = dict((ctx.estado.params("callouts") or {}).get("paleta")
                       or p7.PARAMS_POR_DEFECTO["paleta"])
@@ -4948,6 +5062,7 @@ def guardar_cartelas(pid: str, cuerpo: dict = Body(default=None)):
         _guardar_cartelas_por_unidad(ctx, cartelas, datos["plan"])
         hecho.append("plan")
     if isinstance(datos.get("plantillas"), list):
+        _lista_de_textos(datos, "plantillas")
         desconocidas = [t for t in datos["plantillas"]
                         if t not in cartelas.PLANTILLAS]
         if desconocidas:
@@ -5685,7 +5800,7 @@ def anadir_nota_repaso(pid: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(400, "hace falta 't', el segundo del vídeo")
     plano = str(datos.get("plano") or "") or repaso.plano_en(
         _cortes_del_mp4(ctx), segundo)
-    imagenes = [str(i) for i in (datos.get("imagenes") or [])]
+    imagenes = [str(i) for i in (_lista_de_textos(datos, "imagenes") or [])]
     try:
         # DE QUE PANTALLA VIENE. Imagenes y Video no comparten cuaderno: en una
         # se anota sobre el dibujo y en la otra sobre lo que se monta encima.
@@ -5820,6 +5935,42 @@ def _devolver_unidad(ctx, uid, previo):
         ctx.estado.set_params("assets", params)
     except Exception as fallo:                              # noqa: BLE001
         ctx.bitacora.anotar("aviso", "assets", {"devolver_unidad": str(fallo)})
+
+
+def _apartar_imagen_de_nota(ctx, plano, desde):
+    """Aparta la imagen que una nota dejo en `trabajo/` sin llegar a sellar. -> ruta | None
+
+    F5 del analisis del 13-10-2026: si la nota se cancela o falla DESPUES de
+    pagar la imagen, el PNG nuevo se quedaba en `pasos/assets/trabajo/escenas/`
+    y, como al sembrar lo de `trabajo/` gana, la siguiente tanda lo sellaba sin
+    que nadie lo hubiera visto ni aceptado. No se borra (esta pagada): se aparta
+    a `pasos/assets/_apartados/`, que no empieza por «v» y nada siembra de ahi.
+    Solo lo escrito en ESTE intento (`desde`): lo que ya habia es la copia de la
+    version activa, y esa no se toca.
+    """
+    carpeta = os.path.join(ctx.proyecto.ruta_trabajo("assets", crear=False), "escenas")
+    png = os.path.join(carpeta, f"{plano}.png")
+    try:
+        if not os.path.isfile(png) or os.path.getmtime(png) < desde - 1:
+            return None
+        activa = _ruta_de_version(ctx, "assets", "escenas", f"{plano}.png")
+        activa = os.path.join(ctx.proyecto.raiz, activa) if activa else ""
+        if activa and os.path.isfile(activa):
+            import filecmp                                  # noqa: PLC0415
+            if filecmp.cmp(png, activa, shallow=False):
+                return None                # la copia de la activa: nada nuevo
+        marca = time.strftime("%Y%m%dT%H%M%S")
+        destino = ctx.proyecto.ruta("pasos", "assets", "_apartados",
+                                    f"nota_{plano}_{marca}")
+        os.makedirs(destino, exist_ok=True)
+        for extension in (".png", ".json"):
+            origen = os.path.join(carpeta, f"{plano}{extension}")
+            if os.path.isfile(origen):
+                os.replace(origen, os.path.join(destino, f"{plano}{extension}"))
+        return os.path.relpath(destino, ctx.proyecto.raiz)
+    except OSError as fallo:
+        ctx.bitacora.anotar("aviso", "assets", {"apartar_imagen_de_nota": str(fallo)})
+        return None
 
 
 def _siguiente_plano(ctx, cola):
@@ -5983,6 +6134,15 @@ def _correr_notas_imagenes(avisar, ctx):
                 _correr_paso(avisar_plano, ctx, "assets", [uid], {"rehacer": True})
             except Cancelado:
                 _devolver_unidad(ctx, uid, previo)
+                apartada = _apartar_imagen_de_nota(ctx, plano, arranque)
+                if apartada:
+                    for nota in notas:
+                        try:
+                            repaso.editar(ctx.proyecto, nota["id"], error="", aviso=(
+                                "parado a mitad: la imagen nueva ya se había pagado y "
+                                f"no se ha puesto; está guardada aparte en {apartada}"))
+                        except (KeyError, ValueError):
+                            pass
                 raise
             except Exception as fallo:                           # noqa: BLE001
                 ctx.estado.limpiar_marca("assets")
@@ -5990,11 +6150,16 @@ def _correr_notas_imagenes(avisar, ctx):
                 # obsoleto y la proxima «regenerar lo obsoleto» lo volveria a
                 # pedir (y a pagar, o a que lo rechacen)
                 _devolver_unidad(ctx, uid, previo)
+                apartada = _apartar_imagen_de_nota(ctx, plano, arranque)
                 rechazo = type(fallo).__name__ == "RechazoSeguridad"
                 motivo = str(fallo)
+                aviso_apartada = (f"la imagen nueva ya se había pagado y no se ha "
+                                  f"puesto; está guardada aparte en {apartada}"
+                                  if apartada else "")
                 for nota in notas:
                     try:
-                        repaso.editar(ctx.proyecto, nota["id"], error=motivo, aviso="")
+                        repaso.editar(ctx.proyecto, nota["id"], error=motivo,
+                                      aviso=aviso_apartada)
                     except (KeyError, ValueError):
                         pass
                 (rechazadas if rechazo else fallidas).append(plano)
@@ -6613,7 +6778,9 @@ def _revisar_y_apuntar(avisar, ctx, planos=None, forzar=False):
         ctx.proyecto, plan, imagenes, mirar, estilo=estilo, encargo=encargo,
         reglas=_reglas_para_revisor(estilo, plan), guia=guia,
         formato=str(plan.get("formato") or ""),
-        avisar=avisar)
+        avisar=avisar,
+        # las reglas del estilo, con su gravedad (pasos/reglas_estilo.py)
+        reglas_estilo=_reglas_estilo().para_revisor(_reglas_estilo().de_estilo(estilo)))
     resumen = revisor.apuntar(ctx.proyecto, plan, veredictos)
     ctx.bitacora.anotar("revisor_imagenes", "assets", {
         "revisados": resumen.get("revisados"), "bien": resumen.get("bien"),
@@ -7002,11 +7169,24 @@ async def subir_imagenes_repaso(pid: str, peticion: Request):
             avisos.append(f"«{origen or 'sin nombre'}» no es una imagen "
                           f"({', '.join(EXT_REPASO)})")
             continue
+        # UNA NOTA LLEVA COMO MUCHO `repaso.MAX_IMAGENES` (R3 del analisis del
+        # 13-10-2026): lo que pase de ahi la nota lo tiraria igual, y sin tope
+        # una sola peticion podia llenar el disco del proyecto.
+        if len(guardadas) >= _repaso().MAX_IMAGENES:
+            avisos.append(f"«{origen}» no se ha subido: una nota lleva como "
+                          f"mucho {_repaso().MAX_IMAGENES} imágenes")
+            continue
         contenido = await valor.read()
         if len(contenido) > MAX_BYTES_REPASO:
             avisos.append(f"«{origen}» pesa "
                           f"{len(contenido) / 1024 / 1024:.1f} MB y el tope son "
                           f"{MAX_BYTES_REPASO // 1024 // 1024}")
+            continue
+        # LA MISMA REVISION QUE LAS REFERENCIAS DEL ESTILO (M4): una imagen rota
+        # se aceptaba y el agente del repaso se encontraba con ella al aplicar
+        motivo = await _en_hilo(_motivo_para_no_aceptar, contenido, origen, False)
+        if motivo:
+            avisos.append(motivo)
             continue
         nombre = f"{uuid.uuid4().hex[:12]}{extension}"
         await _en_hilo(_escribir_bytes, os.path.join(carpeta, nombre), contenido)
@@ -7379,8 +7559,25 @@ def aplicar_repaso(pid: str, cuerpo: dict = Body(default=None)):
     # diapositivas, donde lo que se quiere es MIRAR lo arreglado; la del video
     # no lo manda, porque alli aplicar y montar son el mismo gesto.
     sin_montar = bool(datos.get("sin_montar"))
-    trabajo_id = ctx.gestor.lanzar("repaso", _correr_repaso, ctx, ajuste, modo,
-                                   sin_montar, paso="render")
+    # NI DOS A LA VEZ NI ENCIMA DE OTRA COSA (D8 del analisis del 13-10-2026):
+    # dos clics lanzaban dos repasos que montaban a la vez sobre la misma
+    # carpeta `trabajo/`, y tambien con la tanda del video corriendo. Mirar y
+    # lanzar van con los mismos cerrojos que `/generar`, y el trabajo declara
+    # los pasos que puede tocar para que los demas lo vean (`_trabajo_que_toca`).
+    todos = [p["id"] for p in PASOS]
+    with _cerrojo_de_cadena(ctx.id):
+        otro = _trabajo_de_cadena(ctx) or _trabajo_que_toca(ctx, todos)
+        if otro is not None:
+            raise ErrorApi(409, f"«{otro.get('nombre')}» está corriendo en este "
+                                "vídeo: espera a que termine para aplicar las notas",
+                           {"trabajo_id": otro["id"], "progreso": otro["progreso"]})
+        with _COLA_LOCK:
+            if _cola_dibujando(ctx):
+                raise ErrorApi(409, "se están rehaciendo imágenes con tus notas: "
+                                    "espera a que terminen (o páralas) y vuelve a "
+                                    "aplicar")
+            trabajo_id = ctx.gestor.lanzar("repaso", _correr_repaso, ctx, ajuste, modo,
+                                           sin_montar, paso="render", toca=todos)
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "ajuste": ajuste,
             "trabajo": ctx.gestor.estado(trabajo_id),
@@ -7640,6 +7837,8 @@ def guardar_sonido(pid: str, cuerpo: dict = Body(default=None)):
                 "estado": ctx.estado.estado_de("render")}
     if "musica" in datos:
         ficha = datos["musica"] or {}
+        if not isinstance(ficha, dict):       # R7: un texto aqui era un 500
+            raise ErrorApi(400, "'musica' tiene que ser la ficha de un tema (o null)")
         if not ficha:
             cambios["musica"] = {}
         else:
@@ -7769,6 +7968,14 @@ async def _leer_logo_subido(peticion):
     if not contenido or len(contenido) > MAX_BYTES_LOGO:
         raise ErrorApi(400, f"el logo tiene que pesar menos de "
                             f"{MAX_BYTES_LOGO // 1024 // 1024} MB")
+    # LA MISMA REVISION QUE LAS REFERENCIAS DEL ESTILO (M4, R3 del analisis del
+    # 13-10-2026): un logo roto se aceptaba y el montaje reventaba al 97 %,
+    # dejando un MP4 de 0 bytes
+    motivo = await _en_hilo(_motivo_para_no_aceptar, contenido,
+                            os.path.basename(str(getattr(fichero, "filename", "") or "logo")),
+                            False)
+    if motivo:
+        raise ErrorApi(400, motivo)
     return contenido, extension
 
 
@@ -7847,20 +8054,8 @@ async def subir_logo(pid: str, peticion: Request):
     ni una imagen ni un clip.
     """
     ctx = await _en_hilo(contexto, pid)
-    try:
-        formulario = await peticion.form()
-    except Exception as fallo:                              # noqa: BLE001
-        raise ErrorApi(400, f"multipart ilegible: {fallo}")
-    fichero = formulario.get("logo")
-    if not hasattr(fichero, "read"):
-        raise ErrorApi(400, "manda la imagen en el campo «logo»")
-    extension = os.path.splitext(str(getattr(fichero, "filename", "") or ""))[1].lower()
-    if extension not in EXT_LOGO:
-        raise ErrorApi(400, f"el logo tiene que ser {', '.join(EXT_LOGO)}")
-    contenido = await fichero.read()
-    if not contenido or len(contenido) > MAX_BYTES_LOGO:
-        raise ErrorApi(400, f"el logo tiene que pesar menos de "
-                            f"{MAX_BYTES_LOGO // 1024 // 1024} MB")
+    # la MISMA lectura que el logo suelto: eran dos copias, y solo una revisaba
+    contenido, extension = await _leer_logo_subido(peticion)
     return await _en_hilo(_poner_logo_subido, ctx, contenido, extension)
 
 
@@ -8572,7 +8767,10 @@ async def subir_audio_propio(peticion: Request, familia: str = Query(default="mu
     tipo = (peticion.headers.get("content-type") or "").lower()
     if not tipo.startswith("multipart/"):
         raise ErrorApi(400, "manda el audio como multipart")
-    formulario = await peticion.form()
+    try:
+        formulario = await peticion.form()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(400, f"multipart ilegible: {fallo}")
     for _clave, valor in formulario.multi_items():
         if not hasattr(valor, "read"):
             continue
@@ -8789,7 +8987,7 @@ def surtir_efectos(pid: str, cuerpo: dict = Body(default=None)):
     ctx = contexto(pid)
     sonido = _sonido()
     datos = _cuerpo(cuerpo)
-    pedidos = datos.get("papeles") or list(sonido.PAPELES)
+    pedidos = _lista_de_textos(datos, "papeles") or list(sonido.PAPELES)
     desconocidos = [p for p in pedidos if p not in sonido.PAPELES]
     if desconocidos:
         raise ErrorApi(400, f"papeles desconocidos: {', '.join(desconocidos)}. "
@@ -10050,7 +10248,7 @@ def _foto_para_asistente(pid, pantalla=None):
 
     # -- los proyectos que hay
     try:
-        fichas = [f for f in Proyecto.listar(raiz_proyectos())
+        fichas = [f for f in _listar_proyectos()
                   if not f.get(CONFIG_TALLER)]
         lineas.append(f"proyectos (videos): {len(fichas)}")
         for ficha in fichas[:15]:
@@ -10927,8 +11125,13 @@ MIN_LADO_APORTADA = 64
 MAX_PIXELES_APORTADA = 60_000_000
 
 
-def _motivo_para_no_aceptar(contenido, origen):
+def _motivo_para_no_aceptar(contenido, origen, de_estilo=True):
     """Por que esta imagen NO vale como referencia de estilo, o None si vale.
+
+    `de_estilo=False` (el logo y las imagenes del repaso, R3 del analisis del
+    13-10-2026) mira solo lo que rompe algo: que se pueda abrir de punta a punta
+    y que no sea gigante. Un logo de texto de 200×40 o una muestra de un solo
+    color («este rojo») son legitimos ahi, aunque no sirvan para copiar un estilo.
 
     SE MIRA AL SUBIRLA, que es cuando se puede decir. Antes solo se miraban la
     extension y el peso: un «.jpg» que no era una imagen salia como miniatura
@@ -10960,11 +11163,13 @@ def _motivo_para_no_aceptar(contenido, origen):
                 return (f"«{origen}» mide {ancho}×{alto} px: es demasiado grande "
                         f"(como mucho {MAX_PIXELES_APORTADA // 1_000_000} "
                         f"megapíxeles)")
-            if min(ancho, alto) < MIN_LADO_APORTADA:
+            if de_estilo and min(ancho, alto) < MIN_LADO_APORTADA:
                 return (f"«{origen}» mide {ancho}×{alto} px: es demasiado pequeña "
                         f"para copiar un estilo de ella (mínimo "
                         f"{MIN_LADO_APORTADA} px de lado)")
             imagen.load()
+            if not de_estilo:
+                return None
             # CON LA TRANSPARENCIA: un logo negro sobre fondo transparente tiene
             # todo el dibujo en el canal alfa, y no es de un solo color
             muestra = imagen.convert("RGBA")
@@ -11184,7 +11389,7 @@ def _talleres_sueltos():
             if tid:
                 usados.add(str(tid))
     sueltos = []
-    for ficha in Proyecto.listar(raiz_proyectos()):
+    for ficha in _listar_proyectos():
         if not ficha.get(CONFIG_TALLER):
             continue
         if str(ficha.get("id")) in usados:
@@ -11988,6 +12193,17 @@ def _congelar_preset(ctx, encargo, preset_id=None):
     params = {paso: (ctx.estado.params(paso) or {})
               for paso in ("brief", "guion", "assets", "voz", "callouts")}
     datos = presets.datos_de_params(params)
+    # LAS REGLAS DEL ESTILO NO SALEN DEL TALLER: se escriben a mano en el
+    # preset (`guardar_reglas_estilo`). Congelar desde el taller --al rehacer
+    # cualquier parte del estilo-- se las llevaria por delante sin decir nada.
+    if preset_id:
+        try:
+            anterior = presets.leer(preset_id)
+            reglas = ((anterior.get("datos") or {}).get("estilo") or {}).get("reglas")
+        except Exception:                                    # noqa: BLE001
+            reglas = None
+        if reglas:
+            datos.setdefault("estilo", {})["reglas"] = copy.deepcopy(reglas)
     # `estilo_modo` solo si es foto (ver `presets_light.origen_de`)
     datos["origen"] = _light().origen_de(encargo, presets.CLAVES_ORIGEN)
     datos["origen"]["taller"] = ctx.id
@@ -13255,6 +13471,139 @@ def editar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     return salida
 
 
+# ======================================================== REGLAS DEL ESTILO
+#
+# Ver pasos/reglas_estilo.py. Se escriben en el ESTILO (el preset), no en el
+# video: viajan a cada video nuevo al crearlo y a uno ya hecho con «Traer el
+# estilo», como el resto del estilo. Guardarlas no paga nada; lo que cuesta
+# --si se quiere-- es rehacer las imagenes de un video que las trae.
+
+_AFINADOS = {}
+_LOCK_AFINADOS = threading.Lock()
+
+
+def _reglas_estilo():
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, "los pasos no están cargados")
+    import importlib                                         # noqa: PLC0415
+    return importlib.import_module("pasos.reglas_estilo")
+
+
+@app.get("/api/presets-light/{preset_id}/reglas")
+def leer_reglas_estilo(preset_id: str):
+    """Las reglas de un estilo. -> {reglas, gravedades, maximo}"""
+    ficha = _preset_o_400(lambda p: p.leer(preset_id))
+    if ficha.get("tipo") != "canal":
+        raise ErrorApi(400, "esto no es un preset de canal")
+    modulo = _reglas_estilo()
+    estilo = (ficha.get("datos") or {}).get("estilo") or {}
+    return {"reglas": modulo.de_estilo(estilo), "gravedades": list(modulo.GRAVEDADES),
+            "maximo": modulo.MAX_REGLAS}
+
+
+@app.put("/api/presets-light/{preset_id}/reglas")
+def guardar_reglas_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
+    """Guarda las reglas de un estilo: {reglas: [{id?, nombre, texto, palabras?,
+    gravedad?, en?}]}. Una lista vacia las quita. No toca ningun video: llegan
+    a los nuevos al crearlos y a los hechos con «Traer el estilo»."""
+    presets = _presets()
+    modulo = _reglas_estilo()
+    datos = _cuerpo(cuerpo)
+    if "reglas" not in datos:
+        raise ErrorApi(400, "manda {reglas: [...]} (una lista vacía las quita)")
+    try:
+        reglas = modulo.normalizar(datos.get("reglas"))
+    except modulo.ReglaInvalida as fallo:
+        raise ErrorApi(400, str(fallo))
+    # LEER, CAMBIAR Y ESCRIBIR CON EL CERROJO DE LOS PRESETS (reentrante: el
+    # `guardar` de dentro lo vuelve a coger). Sin el, una congelacion del taller
+    # que cayera entre la lectura y la escritura --un «rehacer» del estilo, que
+    # se paga-- se perderia: esto volveria a escribir el estilo de antes.
+    with presets.lock_de(presets.FICHERO):
+        ficha = _preset_o_400(lambda p: p.leer(preset_id))
+        if ficha.get("tipo") != "canal":
+            raise ErrorApi(400, "esto no es un preset de canal")
+        contenido = copy.deepcopy(ficha.get("datos") or {})
+        estilo = dict(contenido.get("estilo") or {})
+        if reglas and not estilo.get("referencias"):
+            raise ErrorApi(400, "este estilo todavía no tiene su estilo gráfico (las "
+                                "láminas): genéralo antes de ponerle reglas")
+        antes = modulo.de_estilo(estilo)
+        if reglas == antes:
+            return {"reglas": reglas, "cambiado": False}
+        if reglas:
+            estilo["reglas"] = reglas
+        else:
+            estilo.pop("reglas", None)
+        if estilo:
+            contenido["estilo"] = estilo
+        else:
+            contenido.pop("estilo", None)
+        try:
+            nueva = presets.guardar("canal", ficha.get("nombre") or "", contenido,
+                                    nota=ficha.get("nota") or "",
+                                    miniatura=ficha.get("miniatura") or "",
+                                    pid=preset_id)
+        except presets.ErrorPreset as fallo:
+            raise ErrorApi(400, str(fallo))
+    anotar_global("reglas_estilo", {"preset": preset_id, "reglas": len(reglas)})
+    return {"reglas": modulo.de_estilo((nueva.get("datos") or {}).get("estilo") or {}),
+            "cambiado": True}
+
+
+@app.post("/api/reglas-estilo/afinar", status_code=202)
+def afinar_regla_estilo(cuerpo: dict = Body(default=None)):
+    """Claude reescribe una regla para el generador: {texto, nombre?, palabras?}.
+    -> {id}; el resultado ({nombre, en, palabras, gravedad}) en GET. No guarda
+    nada: lo propone y la persona lo acepta."""
+    modulo = _reglas_estilo()
+    datos = _cuerpo(cuerpo)
+    texto = " ".join(str(datos.get("texto") or "").split())
+    if not texto:
+        raise ErrorApi(400, "escribe primero lo que exige la regla")
+    palabras = datos.get("palabras") if isinstance(datos.get("palabras"), list) else []
+    rid = uuid.uuid4().hex[:12]
+    with _LOCK_AFINADOS:
+        # DE UNA EN UNA: cada una es una llamada al CLI con su cupo, y nadie la
+        # cancela; pulsar diez veces no puede lanzar diez
+        if any(f.get("estado") == "pensando" for f in _AFINADOS.values()):
+            raise ErrorApi(409, "Claude ya está afinando otra regla: espera a que termine")
+        for viejo in list(_AFINADOS)[:-19]:
+            _AFINADOS.pop(viejo, None)
+        _AFINADOS[rid] = {"estado": "pensando"}
+
+    def correr():
+        try:
+            propuesta = modulo.afinar(texto, nombre=str(datos.get("nombre") or ""),
+                                      palabras=[str(p) for p in palabras],
+                                      cwd=RAIZ_ESTUDIO)
+            ficha = {"estado": "listo", "propuesta": propuesta}
+        except Exception as fallo:                          # noqa: BLE001
+            ficha = {"estado": "error", "error": str(fallo)[:600]}
+        with _LOCK_AFINADOS:
+            _AFINADOS[rid] = ficha
+
+    try:
+        threading.Thread(target=correr, daemon=True, name=f"afinar-{rid}").start()
+    except RuntimeError as fallo:
+        # sin hilo, la entrada no puede quedarse «pensando» para siempre: con
+        # ella asi, el 409 de arriba bloquearia afinar hasta reiniciar
+        with _LOCK_AFINADOS:
+            _AFINADOS[rid] = {"estado": "error", "error": str(fallo)[:300]}
+        raise ErrorApi(503, "no se ha podido arrancar: inténtalo otra vez")
+    return {"id": rid, "estado": "pensando"}
+
+
+@app.get("/api/reglas-estilo/afinar/{rid}")
+def leer_afinado_regla(rid: str):
+    """Como va «Afinar con Claude», y la propuesta al terminar."""
+    with _LOCK_AFINADOS:
+        ficha = _AFINADOS.get(rid)
+    if not ficha:
+        raise ErrorApi(404, "esa propuesta ya no está: vuelve a pedirla")
+    return ficha
+
+
 @app.delete("/api/presets-light/{preset_id}")
 def borrar_preset_light(preset_id: str):
     """A la papelera de presets, y su taller con el.
@@ -13646,7 +13995,7 @@ def traer_cambios_del_estilo(pid: str, cuerpo: dict = Body(default=None)):
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
     datos = _cuerpo(cuerpo)
-    pedidas = [str(p).strip().lower() for p in (datos.get("partes") or [])]
+    pedidas = [str(p).strip().lower() for p in (_lista_de_textos(datos, "partes") or [])]
     malas = [p for p in pedidas if p not in PARTES_ESTILO]
     if not pedidas or malas:
         raise ErrorApi(400, "hace falta 'partes' con alguna de: "
@@ -14454,6 +14803,9 @@ def generar_video(pid: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
+    if datos.get("params") is not None and not isinstance(datos.get("params"), dict):
+        raise ErrorApi(400, "'params' debe ser un objeto con los params de cada paso")
+    nuevos_params = []
     for paso_id, valores in (datos.get("params") or {}).items():
         if paso_id not in PASOS_POR_ID:
             raise ErrorApi(400, f"'{paso_id}' no es un paso: no tiene params")
@@ -14462,7 +14814,7 @@ def generar_video(pid: str, cuerpo: dict = Body(default=None)):
         # `_validar_params` VALIDA y no devuelve nada: lo que se guarda es lo
         # que llego. Encadenarlas escribiria None y no guardaria nada.
         _validar_params(paso_id, valores, ctx)
-        ctx.estado.actualizar_params(paso_id, valores)
+        nuevos_params.append((paso_id, valores))
 
     modo = str(datos.get("modo") or "pendientes").strip().lower()
     if modo not in ("todo", "pendientes"):
@@ -14480,6 +14832,32 @@ def generar_video(pid: str, cuerpo: dict = Body(default=None)):
         for pestana in elegidas:
             if _trabajo_de_receta(ctx, pestana) is not None:
                 raise ErrorApi(409, f"la pestaña '{pestana}' ya se está generando")
+
+        # LOS PARAMS SE GUARDAN AQUI, NO ANTES (R2 del analisis del 13-10-2026).
+        # Escritos antes del cerrojo, un segundo clic que acaba en 409 cambiaba
+        # igualmente los params del video que se estaba generando: la firma se
+        # movia debajo del trabajo vivo. Se siguen guardando ANTES de planificar
+        # (el plan cuenta con lo escrito en pantalla), pero solo si nada esta
+        # corriendo en el video: NINGUN trabajo, no solo los de esos pasos. Lo
+        # que corre la tanda (`producidos`) no se sabe hasta planificar, y
+        # planificar necesita los params ya escritos; con un trabajo vivo de
+        # cualquier paso, los mas adelante darian 409 con los params ya movidos
+        # (revision de arreglos-v2h). Los 409 que quedan detras (impedimentos,
+        # dependencias) no son de algo corriendo: dejar escrito lo de la
+        # pantalla ahi es lo de siempre.
+        if nuevos_params:
+            otro = _trabajo_que_toca(ctx, [p["id"] for p in PASOS])
+            if otro is not None:
+                raise ErrorApi(409, f"«{otro.get('nombre')}» está corriendo en este "
+                                    "vídeo: espera a que termine para generar",
+                               {"trabajo_id": otro["id"], "progreso": otro["progreso"]})
+            with _COLA_LOCK:
+                if _cola_dibujando(ctx):
+                    raise ErrorApi(409, "se están rehaciendo imágenes con tus "
+                                        "notas: espera a que terminen (o páralas) "
+                                        "y vuelve a generar")
+                for paso_id, valores in nuevos_params:
+                    ctx.estado.actualizar_params(paso_id, valores)
 
         plan = _plan_de_generacion(ctx, elegidas, modo, datos)
         if not plan["tareas"]:
@@ -15251,6 +15629,8 @@ def aplicar_capturas(pid: str, cuerpo: dict = Body(default=None)):
     pedidas = datos.get("capturas")
     if isinstance(pedidas, str):
         pedidas = [pedidas]
+    else:
+        pedidas = _lista_de_textos(datos, "capturas")
     if pedidas:
         fichas = guardadas.obtener_varias(pedidas)
     else:
@@ -15525,7 +15905,7 @@ def _videos_para_publicar(peticion):
     except Exception:                                       # noqa: BLE001
         estilos = {}
     salida = []
-    for ficha in Proyecto.listar(raiz_proyectos()):
+    for ficha in _listar_proyectos():
         if ficha.get(CONFIG_TALLER):
             continue
         cid = CLIENTES.cliente_de(raiz_proyectos(), ficha.get(CONFIG_ESTILO_LIGHT) or "",
@@ -16186,7 +16566,7 @@ def _buscador_de_videos(peticion):
         if estado["lista"] is None:
             asignaciones = CLIENTES._leer(raiz_proyectos())
             lista = []
-            for ficha in Proyecto.listar(raiz_proyectos()):
+            for ficha in _listar_proyectos():
                 if ficha.get(CONFIG_TALLER):
                     continue
                 if cerrados and CLIENTES.cliente_de(

@@ -520,11 +520,20 @@ def espejar_env(datos=None):
 # ----------------------------------------------------------------- resumen
 
 def tapar(clave):
-    """Una clave como se puede ensenar: los cuatro ultimos y nada mas."""
+    """Una clave como se puede ensenar: lo justo para reconocerla.
+
+    Los cuatro ultimos solo en una clave larga (20 o mas). En una corta, cuatro
+    son media clave: el Client ID de Jamendo tiene 8 y se ensenaban 4 (S3 del
+    analisis del 13-10-2026). De 8 a 19, dos; por debajo, nada.
+    """
     clave = str(clave or "")
     if not clave:
         return ""
-    return f"…{clave[-4:]}" if len(clave) > 4 else "…"
+    if len(clave) >= 20:
+        return f"…{clave[-4:]}"
+    if len(clave) >= 8:
+        return f"…{clave[-2:]}"
+    return "…"
 
 
 def resumen(datos=None):

@@ -4617,6 +4617,42 @@ def publicar_mas(navegador, datos):
 
 
 @escenario
+def publicar_lo_que_se_mando(navegador, datos):
+    """19-10-2026, en producción: los posts salían solo con la primera línea
+    (el «title» general llevaba solo esa línea). Ahora el «title» es el texto
+    completo y la ficha enseña «Ver lo que se mandó» por red."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    api.post(f"/api/publicar/proyectos/{cid}/perfil", {})
+    api.post(f"/api/publicar/proyectos/{cid}/conectar", {"redes": ["tiktok", "instagram", "youtube"]})
+    api.post(f"/api/publicar/proyectos/{cid}/cuentas")
+    largo = "Primera línea del Reel\n\nSegunda parte del texto, la que se perdía.\n\nTercera parte."
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["instagram"], "textos": {
+        "instagram": {"descripcion": largo, "hashtags": ["fiestaslima"]}}})
+    api.post(f"/api/publicar/videos/{pid}/enviar", {"redes": ["instagram"], "modo": "ahora",
+                                                     "confirmado": True, "repetir": True})
+    pg = Pagina(navegador, datos)
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    ok(pg.esperar(".lo-mandado > summary", "Ver lo que se mandó a Reels", 20),
+       "cada envío tiene «Ver lo que se mandó»")
+    pg.p.locator(".lo-mandado > summary").first.click()
+    pg.p.wait_for_timeout(500)
+    texto = pg.p.locator(".lo-mandado").first.inner_text()
+    ok("instagram_title" in texto and "Tercera parte." in texto and "#fiestaslima" in texto,
+       "con el texto entero que se mandó a Instagram (y sus hashtags)")
+    ok("title (" in texto and texto.count("Tercera parte.") >= 2,
+       "y el «title» común también lleva el texto entero, no solo la primera línea")
+    pg.p.wait_for_timeout(5000)
+    ok(pg.visible(".lo-mandado pre", "Tercera parte."), "y se queda abierto aunque la ficha se repinte")
+    pg.captura("publicar_lo_que_se_mando")
+    pg.sin_errores("«Ver lo que se mandó»")
+    pg.cerrar()
+
+
+@escenario
 def parrilla_marca_chat_y_resultados(navegador, datos):
     """parrilla-2 (18-10-2026): la marca del cliente, «Conversar con Claude» (el
     doble del recorrido) con captura e internet, guardar su guion en la
@@ -4728,6 +4764,117 @@ def parrilla_analizar_una_cuenta(navegador, datos):
     ancho = pg.p.evaluate("() => document.documentElement.scrollWidth")
     ok(ancho <= 391, f"la cuenta cabe a lo ancho en el móvil ({ancho} px)")
     pg.sin_errores("analizar una cuenta en el móvil")
+    pg.cerrar()
+
+
+# ======================================================================
+# ARREGLOS V2H (18-10-2026): lo que seguía de los informes del 10 y 13-10.
+# Tramo propio y al final, como los demás.
+
+@escenario
+def lo_de_v2h_en_la_pantalla(navegador, datos):
+    """U1, U2, U4, U5, M2, B1, B3, B4, B5, B7, B9 y B10: cada uno como se vio."""
+    # B3 + U5 · «Un estilo nuevo» no pregunta al servidor con el nombre vacío
+    pg = Pagina(navegador, datos)
+    planes = []
+    pg.p.on("request", lambda r: planes.append(r.url) if "presets-light/plan" in r.url else None)
+    pg.js("APP.light.encargo = null; irALight('crear', { taller: null });")
+    ok(pg.esperar("input, textarea"), "«Un estilo nuevo» se abre")
+    pg.p.wait_for_timeout(1500)
+    ok(not planes, f"B3: abrirlo no manda ninguna petición del plan con el nombre vacío ({len(planes)})")
+    ok(pg.visible(".pie-light .aviso", "nombre al estilo"), "U5: y dice «ponle un nombre al estilo»")
+    ok(not pg.visible(".pie-light", "canal") and not pg.visible(".pie-light", "preset"),
+       "U5: sin «canal» ni «preset»")
+    # M2 · cambiar el tipo de imagen con referencias puestas lo avisa
+    pg.js("encargoLight().estilo_imagenes = [{nombre: 'x.png'}]; pintarLight();")
+    pg.p.locator(".campo").filter(has_text="Tipo de imagen").locator("select").first.select_option("foto")
+    pg.p.wait_for_timeout(400)
+    ok(any("Foto realista" in a and "fotos" in a for a in pg.avisos()),
+       f"M2: con imágenes puestas, pasar a Foto realista avisa de que deberían ser fotos: {pg.avisos()[-1:]}")
+    pg.js("encargoLight().estilo_imagenes = []; APP.light.encargo = null;")
+    pg.sin_errores("«Un estilo nuevo»")
+    pg.cerrar()
+
+    # B4 + B5 + B7 · «Un vídeo nuevo»
+    pg = Pagina(navegador, datos)
+    pg.js(f"await cargarGaleriaLight(true); elegirEstiloLight(fichaLight('{datos['preset']}'));")
+    ok(pg.esperar("h2", "Un vídeo nuevo"), "«Un vídeo nuevo» se abre")
+    ok(pg.visible(".nav-light .parada.activa", "Encargo"), "B4: con «Encargo» activa en la barra")
+    ok(pg.visible(".meta", "de 10 s a 30 min"), "B5: el rótulo de la duración dice el mínimo de verdad (10 s)")
+    ok(pg.visible("body", "el redactor lee") and not pg.visible("body", "documentalista"),
+       "B7: habla del redactor, no del documentalista")
+    pg.sin_errores("«Un vídeo nuevo»")
+    pg.cerrar()
+
+    # U2 · sin login, «Salir» no está ni se alcanza con el tabulador
+    pg = Pagina(navegador, datos)
+    ok(pg.p.evaluate("() => getComputedStyle(document.querySelector('#cuenta')).display") == "none",
+       "U2: sin login la pastilla de la cuenta no se pinta")
+    vistos = []
+    for _ in range(40):
+        pg.p.keyboard.press("Tab")
+        vistos.append(pg.p.evaluate("() => document.activeElement && document.activeElement.id"))
+    ok("btn-salir" not in vistos, "U2: y el tabulador no pasa por «Salir»")
+
+    # U4 · el recuento del guion cuenta lo editado a mano
+    pg.js(f"await abrirVideoLight('{datos['video']}'); APP.light.video.vista = 'guion'; pintarLight();")
+    pg.p.wait_for_timeout(800)
+    cuenta = pg.p.evaluate("""() => { const v = APP.light.video; const b = (v.guion.bloques || [])[0];
+      if (!b) return null;
+      const leer = () => { pintarLight(); const m = document.querySelector('.light-guion .light-cab .meta');
+        return Number(((m && m.textContent.match(/([\\d.]+) palabras/)) || [0, 'NaN'])[1].replace(/\\./g, '')); };
+      const antes = leer();
+      const ficha = (v.fichas.guion = v.fichas.guion || {}); ficha.params = ficha.params || {};
+      const previo = (ficha.params.bloques || {})[b.id];
+      ficha.params.bloques = Object.assign({}, ficha.params.bloques, {[b.id]: {texto: b.texto + ' una dos tres'}});
+      const despues = leer();
+      if (previo === undefined) delete ficha.params.bloques[b.id]; else ficha.params.bloques[b.id] = previo;
+      leer(); return despues - antes; }""")
+    ok(cuenta == 3, f"U4: el recuento de palabras sube con lo editado a mano ({cuenta})")
+
+    # U3 · la ayuda de «Generar imágenes» nombra la parada que existe
+    ayuda = pg.p.evaluate("() => ayudaDiapositivas(false, false, false)")
+    ok("«Imágenes»" in ayuda and "Diapositivas" not in ayuda,
+       f"U3: la ayuda manda a «Imágenes», no a «Diapositivas» ({ayuda[:70]!r})")
+
+    # B8 · «La pausa ... se hace» con una sola
+    frase = pg.p.evaluate("""() => { const v = APP.light.video, antes = v.estructura;
+      v.estructura = {pausas: {total: 0, tope: 3, al_final: ['B001']}};
+      const n = barraPausasLight(); v.estructura = antes; return n ? n.textContent : ''; }""")
+    ok("se hace al montar" in frase and "se hacen" not in frase,
+       f"B8: con una pausa, «se hace» ({frase[:80]!r})")
+
+    # B1 · el tiempo restante no dice minutos con la barra al 99 %
+    texto = pg.p.evaluate("""() => { const v = APP.light.video, antes = [v.planDe, v.plan];
+      v.planDe = 'b1'; v.plan = {segundos: 720};
+      const t = restanteTandaLight({id: 'b1', inicio: Date.now() - 60000}, 0.99);
+      v.planDe = antes[0]; v.plan = antes[1]; return t; }""")
+    ok(texto == "", f"B1: al 99 % tras un minuto no promete minutos ({texto!r})")
+
+    # B9 · el mismo trabajo no sale dos veces en la cabecera
+    veces = pg.p.evaluate("""() => { const antes = APP.trabajos;
+      APP.trabajos = {receta: {id: 'mismo', estado: 'ejecutando', progreso: 0.08},
+                      [CLAVE_VIDEO_LIGHT]: {id: 'mismo', estado: 'ejecutando', progreso: 0.08,
+                                            pid: APP.light.video.pid}};
+      pintarFaro(); const n = (document.querySelector('#faro').textContent.match(/%/g) || []).length;
+      APP.trabajos = antes; pintarFaro(); return n; }""")
+    ok(veces == 1, f"B9: un trabajo reenganchado en dos ranuras sale UNA vez ({veces})")
+    pg.sin_errores("la cuenta, el guion y la cabecera")
+    pg.cerrar()
+
+    # U1 + B10 · en el móvil
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="movil v2h")
+    pg.js(f"await abrirVideoLight('{datos['video']}'); APP.light.video.vista = 'previa'; pintarLight();")
+    ok(pg.esperar(".previa-mandos"), "la pantalla de Imágenes en el móvil")
+    burbuja = pg.p.locator(".burbuja-asistente").bounding_box()
+    siguiente = pg.p.locator(".previa-mandos button", has_text="Siguiente").first.bounding_box()
+    ok(burbuja and siguiente and burbuja["y"] + burbuja["height"] <= siguiente["y"],
+       f"B10: la burbuja no pisa «Siguiente ›» ({burbuja and burbuja['y'] + burbuja['height']} "
+       f"frente a {siguiente and siguiente['y']})")
+    pg.pulsar(".burbuja-asistente")
+    ok(pg.esperar("#asistente:not(.plegado)", segundos=5), "el asistente se abre a pantalla completa")
+    ok(not pg.visible(".minimizar-burbuja"), "U1: y el «–» de la burbuja no queda encima del chat")
+    pg.sin_errores("el móvil")
     pg.cerrar()
 
 

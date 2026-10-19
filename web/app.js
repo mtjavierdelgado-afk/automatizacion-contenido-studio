@@ -445,7 +445,6 @@ const API = {
   papeleraFicha: carpeta => `${BASE}/api/proyectos/papelera/${encodeURIComponent(carpeta)}`,
   restaurar: carpeta => `${BASE}/api/proyectos/papelera/${encodeURIComponent(carpeta)}/restaurar`,
   tono: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/tono`,
-  estilo: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/estilo`,
   estiloExtraer: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/estilo/extraer`,
   estiloSeleccion: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/estilo/seleccion`,
   estiloGuia: pid => `${BASE}/api/proyectos/${encodeURIComponent(pid)}/estilo/guia`,
@@ -1266,8 +1265,24 @@ function legibleCorto(texto) {
   return t.length > 24 ? `${t.slice(0, 23)}…` : t;
 }
 
-function pintarFaro() {
+/* UN TRABAJO, UNA VEZ (B9, 10-10-2026): al recargar, la tanda de un vídeo se
+   reengancha en la ranura de la receta Y en la del vídeo, y la cabecera decía
+   «El vídeo 8 % · La tanda 8 %» del MISMO trabajo. Se queda la del vídeo, que
+   dice cuál es y lleva a él. */
+function trabajosDelFaro() {
   const activos = Object.entries(APP.trabajos).filter(([paso]) => trabajando(paso));
+  activos.sort(([a], [b]) => (b === CLAVE_VIDEO_LIGHT) - (a === CLAVE_VIDEO_LIGHT));
+  const vistos = new Set();
+  return activos.filter(([, t]) => {
+    if (!t || t.id == null) return true;
+    if (vistos.has(t.id)) return false;
+    vistos.add(t.id);
+    return true;
+  });
+}
+
+function pintarFaro() {
+  const activos = trabajosDelFaro();
   const faro = vaciar($('#faro'));
   if (!activos.length) return;
   faro.append('⏳ ');
@@ -5024,7 +5039,10 @@ async function cargarCuenta() {
     const nombre = ((d || {}).user || {}).username;
     if (!nombre) return;
     $('#cuenta-nombre').textContent = nombre;
-    $('#cuenta').classList.remove('oculto');
+    // `hidden` y no la clase `.oculto` (U2, 13-10-2026): `.cuenta` pone
+    // display:flex detras de la primera `.oculto`, y la segunda solo lo encoge
+    // a 1 px: «Salir» seguia ahi y se llegaba a el con el tabulador sin login
+    $('#cuenta').hidden = false;
   } catch (e) { /* sin login delante: nada que ensenar */ }
 }
 
@@ -5119,6 +5137,10 @@ const BARRA_INFERIOR = { nodo: null };
 function navLight() {
   const v = APP.light.video;
   const dentro = APP.light.vista === 'elegido' && !!v.pid;
+  // «UN VIDEO NUEVO»: el formulario de un encargo que aun no es un video. Lo
+  // decia el comentario del Encargo y no lo hacia el codigo: ninguna parada
+  // salia activa (B4, 10-10-2026)
+  const nuevo = APP.light.vista === 'elegido' && !v.pid;
   const sub = dentro ? v.vista : '';
   const hayGuion = dentro && !!v.guion;
   const hayPlanos = dentro && !!versionDe(v.fichas.assets || {});
@@ -5171,9 +5193,10 @@ function navLight() {
        formulario de crear uno es otra pantalla, `vistaElegidoLight`). Cuenta
        como «aquí» también en ese formulario: es el encargo de un vídeo que
        todavía no existe, y la barra tiene que decir en qué parada estás. */
-    { id: 'encargo', texto: 'Encargo', puede: dentro,
-      activa: dentro && (sub === 'encargo_video' || sub === 'encargo'),
+    { id: 'encargo', texto: 'Encargo', puede: dentro || nuevo,
+      activa: nuevo || (dentro && (sub === 'encargo_video' || sub === 'encargo')),
       porque: dentro ? 'lo que se pidió para el guion: se lee y se cambia aquí'
+        : nuevo ? 'el encargo del vídeo nuevo: es esta pantalla'
         : 'abre un vídeo primero',
       ir: () => { pararPrevia(); v.vista = 'encargo_video'; pintarLight(); } },
     /* Antes, sin guion, este botón caía en el formulario de crear un vídeo
@@ -6804,6 +6827,14 @@ function urlMp4Light() {
 /* El TEXTO que se enseña de un bloque: el editado a mano si lo hay, y el del
    guion si no. Las dos cosas viven donde ya vivían (`params.guion.bloques` y
    `guion.json`), así que una edición hecha aquí se ve igual en el modo editor. */
+/* LAS PALABRAS DEL GUION COMO ESTA AHORA (U4, 13-10-2026): `guion.palabras`
+ * es lo que conto el redactor al escribirlo, y no se movia al corregir un bloque
+ * a mano (llego a decir «0 palabras»). Se cuentan con lo editado delante. */
+function palabrasDelGuionLight(v) {
+  return ((v.guion || {}).bloques || [])
+    .reduce((n, b) => n + palabrasDe(textoDeBloqueLight(b) || ''), 0);
+}
+
 function textoDeBloqueLight(bloque) {
   const editados = ((APP.light.video.fichas.guion || {}).params || {}).bloques || {};
   const ficha = editados[bloque.id];
@@ -6884,7 +6915,7 @@ function vistaElegidoLight() {
     campoTexto('Nombre', e.nombre,
       v => { e.nombre = v; },
       { pista: 'La crisis del agua en el sur', ayuda: 'Es el nombre del proyecto y '
-        + 'lo que el documentalista lee como «de qué va este vídeo».' }),
+        + 'lo que el redactor lee como «de qué va este vídeo».' }),
     duracionLight(e),
     selectorFormato(e.formato, v => { e.formato = v; })));
 
@@ -7055,7 +7086,9 @@ function duracionLight(e, estilo) {
   return h('div', { clase: 'campo duracion' },
     h('label', {}, 'Duración objetivo'),
     h('div', { clase: 'duracion-cabeza' }, grande,
-      h('span', { clase: 'meta' }, `de ${DURACION_MIN_S} s a ${DURACION_MAX_S / 60} min`)),
+      // B5: el rótulo dice el mínimo DE VERDAD (decía «de 1 s»); por debajo se
+      // deja escribir igual y avisa, como explica la cabecera de las constantes
+      h('span', { clase: 'meta' }, `de ${DURACION_MIN_REAL_S} s a ${DURACION_MAX_S / 60} min`)),
     barra,
     h('div', { clase: 'duracion-campos' },
       minutos, h('span', { clase: 'meta' }, 'min'),
@@ -8193,7 +8226,16 @@ function restanteTandaLight(trabajo, avance) {
   if (!v.planDe || v.planDe !== trabajo.id) return '';
   const previsto = Number((v.plan || {}).segundos) || 0;
   if (!previsto || !trabajo.inicio || avance >= 1) return '';
-  const restante = previsto - (Date.now() - trabajo.inicio) / 1000;
+  const transcurrido = (Date.now() - trabajo.inicio) / 1000;
+  let restante = previsto - transcurrido;
+  // PERO NUNCA MAS DE LO QUE DICE EL AVANCE, pasado el 10 % (B1, 10-10-2026):
+  // sin historico el previsto puede ir muy desviado, y se vio «quedan ~12 min»
+  // con la barra al 99 % y un guion previsto en 27 min que tardo 27 s. Solo
+  // como techo: el avance no sube la cifra, por lo dicho arriba del reloj
+  // sintetico; la baja cuando lo hecho ya dice que el previsto se paso.
+  if (avance > 0.1) {
+    restante = Math.min(restante, transcurrido * (1 - avance) / avance);
+  }
   return restante > 5 ? `quedan ~${duracionCorta(restante)}` : '';
 }
 
@@ -8690,7 +8732,7 @@ function vistaGuionLight() {
   caja.appendChild(h('div', { clase: 'light-cab' },
     h('h2', {}, (v.guion || {}).titulo || v.nombre || 'El guion'),
     h('span', { clase: 'meta' }, v.guion
-      ? `${v.guion.bloques.length} bloques · ${miles(v.guion.palabras)} palabras`
+      ? `${v.guion.bloques.length} bloques · ${miles(palabrasDelGuionLight(v))} palabras`
       : ''),
     h('span', { clase: 'crece' }),
     costeLight()));
@@ -9128,8 +9170,10 @@ function barraPausasLight() {
      voz se graba de corrido. Las que cuentan son las de DENTRO de una frase. */
   const finalesTexto = finales.length
     ? `${finales.length === 1 ? 'La pausa' : `Las ${finales.length} pausas`} al final de `
-      + `${finales.length === 1 ? 'bloque' : 'bloques'} (${finales.join(', ')}) se hacen al `
-      + 'montar el vídeo y no cortan la voz. '
+      + `${finales.length === 1 ? 'bloque' : 'bloques'} (${finales.join(', ')}) `
+      // B8: con una sola, «se hace» y «no corta» (decía «La pausa... se hacen»)
+      + `${finales.length === 1 ? 'se hace' : 'se hacen'} al montar el vídeo y `
+      + `${finales.length === 1 ? 'no corta' : 'no cortan'} la voz. `
     : '';
   if (!sobra) {
     return h('div', { clase: 'caja-info barra-pausas' },
@@ -9524,8 +9568,9 @@ function ayudaAudio(hayAudio, queda) {
 
 function ayudaDiapositivas(hayVideo, obsoleto, queda) {
   if (queda === false) {
-    return 'Las diapositivas ya recogen el guion y el audio de ahora. Para '
-      + 'verlas, «Diapositivas» en la barra de abajo: no cuesta nada.';
+    // U3: la parada de la barra se llama «Imágenes» (antes «Diapositivas»)
+    return 'Las imágenes ya recogen el guion y el audio de ahora. Para '
+      + 'verlas, «Imágenes» en la barra de abajo: no cuesta nada.';
   }
   if (hayVideo && obsoleto) {
     return 'Vuelve a partir los subtítulos con los tiempos del audio de ahora y '
@@ -9534,7 +9579,7 @@ function ayudaDiapositivas(hayVideo, obsoleto, queda) {
       + 'lo hace. No monta el MP4: eso es «Montar el vídeo», después de mirarlo.';
   }
   return 'Dibuja los planos, les monta los subtítulos y las cartelas y prepara '
-    + 'la música. Para ahí, en las diapositivas, para que lo mires antes de '
+    + 'la música. Para ahí, en Imágenes, para que lo mires antes de '
     + 'gastar el render: no monta ningún MP4.';
 }
 
@@ -12921,6 +12966,7 @@ function camposEstiloLight() {
     v => {
       e.estilo_modo = v; tocarEncargoLight();
       if (APP.light.repintarRitmo) APP.light.repintarRitmo();
+      avisoTipoDeImagen(v, (e.estilo_imagenes || []).length > 0);
     }));
   caja.appendChild(imagenesDeApoyoLight(e, tocarEncargoLight));
   caja.appendChild(conGuia(campoArea('Indicaciones (opcional)', e.estilo_prompt,
@@ -12941,6 +12987,21 @@ const TIPOS_DE_IMAGEN = [
   { valor: 'ilustracion', nombre: 'Ilustración' },
   { valor: 'foto', nombre: 'Foto realista' },
 ];
+
+/* EL TIPO DE IMAGEN Y LAS REFERENCIAS TIENEN QUE DECIR LO MISMO (M2 del informe
+ * de la Etapa Foto A): con referencias que son fotos y el tipo en Ilustración,
+ * la guía que escribe Claude mirándolas pide «foto de verdad» y la cabecera
+ * pide «dibujo», y la imagen sale a medio camino, con aspecto falso. La
+ * pantalla no puede saber si una imagen «es» una foto; lo que sí puede es
+ * decirlo en el momento de cambiar el tipo con imágenes ya puestas. */
+function avisoTipoDeImagen(modo, hayImagenes) {
+  if (!hayImagenes) return;
+  toast(modo === 'foto'
+    ? 'Has elegido Foto realista: tus imágenes de referencia deberían ser fotos. '
+      + 'Si son dibujos, la guía pedirá foto y dibujo a la vez y saldrá a medio camino.'
+    : 'Has elegido Ilustración: tus imágenes de referencia deberían ser dibujos. '
+      + 'Si son fotos, la guía pedirá foto y dibujo a la vez y saldrá a medio camino.');
+}
 
 function selectorTipoDeImagen(valor, alCambiar) {
   return campoSelect('Tipo de imagen', valor === 'foto' ? 'foto' : 'ilustracion',
@@ -13191,6 +13252,10 @@ async function quitarImagenLight(e, ficha, pintar, alCambiar, clave) {
    porque nadie repintaba el pie. Repintar el formulario entero tampoco vale
    —tira el foco del campo donde estás escribiendo—, así que lo que se repinta
    es el pie y nada más. */
+/* El mismo texto que el servidor (`presets_light.validar_encargo`), U5. */
+const NOMBRE_DEL_ESTILO_FALTA = 'ponle un nombre al estilo: es lo que se lee en '
+  + 'su tarjeta y lo que lo distingue de los demás';
+
 function pieDeCreacion() {
   const caja = h('div', { clase: 'pie-light' });
   const aMedias = APP.light.taller;
@@ -13221,6 +13286,14 @@ function pieDeCreacion() {
   }
 
   const comprobar = () => {
+    // SIN NOMBRE NO SE PREGUNTA (B3, 10-10-2026): abrir «Un estilo nuevo»
+    // mandaba dos peticiones que volvian 400 antes de tocar nada, y otra por
+    // cada tecla. Lo que falta se dice aqui mismo.
+    if (!String(encargoParaServidor().nombre || '').trim()) {
+      boton.disabled = true;
+      vaciar(nota).append(h('span', { clase: 'aviso' }, NOMBRE_DEL_ESTILO_FALTA));
+      return;
+    }
     pedir(API.presetLightPlan(), { method: 'POST', cuerpo: encargoParaServidor() })
       .then(datos => {
         const plan = datos.plan || {};
@@ -13377,6 +13450,297 @@ function vistaGenerandoLight() {
  * cambiarías» con su Regenerar — corregir una cosa se hace mirándola, no en un
  * apartado aparte. */
 
+/* ------------------------------------------------ las reglas del estilo
+ *
+ * Lo que ningún plano de este estilo puede romper (pasos/reglas_estilo.py):
+ * «los jugadores miran la pantalla, nunca a cámara». Se escriben aquí, en el
+ * ESTILO, y llegan a cada vídeo nuevo al crearlo y a uno ya hecho con «Traer el
+ * estilo». Se guardan solas al dejar de escribir; guardarlas no paga nada. */
+const REGLAS_LIGHT = { id: '', reglas: null, cargando: false, error: '', estado: '',
+  temporizador: null, propuestas: {}, afinando: {}, enVuelo: false, otraVez: false,
+  promesa: null };
+
+const GRAVEDAD_REGLA = {
+  alta: 'Alta — se nota a la primera (el revisor la corrige solo en autónomo)',
+  media: 'Media — se nota si te fijas',
+  baja: 'Baja — un detalle',
+};
+
+async function cargarReglasLight(id) {
+  /* LO ESCRITO EN EL ESTILO ANTERIOR Y AÚN SIN MANDAR, se manda antes: el
+     guardado pendiente, el que va en camino y el que se pidió mientras iba. */
+  if (REGLAS_LIGHT.id && REGLAS_LIGHT.id !== id
+      && (REGLAS_LIGHT.temporizador || REGLAS_LIGHT.enVuelo || REGLAS_LIGHT.otraVez)) {
+    const pendiente = !!REGLAS_LIGHT.temporizador;
+    clearTimeout(REGLAS_LIGHT.temporizador);
+    REGLAS_LIGHT.temporizador = null;
+    if (REGLAS_LIGHT.enVuelo) {
+      if (pendiente) REGLAS_LIGHT.otraVez = true;
+      await REGLAS_LIGHT.promesa;
+    } else {
+      await volcarReglasLight();
+    }
+  }
+  REGLAS_LIGHT.id = id;
+  REGLAS_LIGHT.reglas = null;
+  REGLAS_LIGHT.error = '';
+  REGLAS_LIGHT.estado = '';
+  REGLAS_LIGHT.propuestas = {};
+  REGLAS_LIGHT.cargando = true;
+  try {
+    const r = await pedir(`${API.presetLight(id)}/reglas`);
+    if (REGLAS_LIGHT.id !== id) return;
+    REGLAS_LIGHT.reglas = (r.reglas || []).map(x => ({ ...x, palabras: (x.palabras || []).join(', ') }));
+  } catch (err) {
+    if (REGLAS_LIGHT.id === id) REGLAS_LIGHT.error = err.message;
+  }
+  REGLAS_LIGHT.cargando = false;
+  pintarLight();
+}
+
+/* SE GUARDAN SOLAS al dejar de escribir, como el resto del estilo. Las que no
+   tienen texto todavía son borradores: se quedan en pantalla y no se mandan. */
+function guardarReglasLight() {
+  clearTimeout(REGLAS_LIGHT.temporizador);
+  REGLAS_LIGHT.estado = 'cambios sin guardar…';
+  refrescarVivosLight();
+  REGLAS_LIGHT.temporizador = setTimeout(volcarReglasLight, 900);
+}
+
+async function volcarReglasLight() {
+  REGLAS_LIGHT.temporizador = null;
+  /* DE UNO EN UNO: dos guardados a la vez podían llegar al revés y dejar
+     guardado el más viejo. Si se pide otro mientras va uno, se manda al acabar
+     ese, y dentro de la MISMA promesa: así quien cambia de estilo puede
+     esperarla entera (`cargarReglasLight`) y no se pierde lo último escrito. */
+  if (REGLAS_LIGHT.enVuelo) { REGLAS_LIGHT.otraVez = true; return REGLAS_LIGHT.promesa; }
+  const id = REGLAS_LIGHT.id;
+  if (!id || !REGLAS_LIGHT.reglas) return null;
+  const reglas = REGLAS_LIGHT.reglas
+    .filter(r => String(r.texto || '').trim())
+    .map(r => ({
+      id: r.id, nombre: r.nombre || '', texto: r.texto, gravedad: r.gravedad || 'media',
+      palabras: String(r.palabras || '').split(',').map(p => p.trim()).filter(Boolean),
+      en: r.en || '', en_es: r.en ? (r.en_es || '') : '',
+    }));
+  REGLAS_LIGHT.enVuelo = true;
+  REGLAS_LIGHT.estado = 'guardando…';
+  refrescarVivosLight();
+  REGLAS_LIGHT.promesa = (async () => {
+    try {
+      /* LOS IDS SON LOS DE AQUÍ: el servidor conserva los que le llegan, así
+         que no se copia nada de vuelta (copiarlos por posición mezclaba
+         reglas si mientras tanto se escribía en un borrador). */
+      const r = await pedir(`${API.presetLight(id)}/reglas`, { method: 'PUT', cuerpo: { reglas } });
+      if (REGLAS_LIGHT.id === id) REGLAS_LIGHT.estado = r.cambiado ? 'guardado ✓' : 'sin cambios';
+    } catch (err) {
+      if (REGLAS_LIGHT.id === id) REGLAS_LIGHT.estado = `no se ha podido guardar: ${err.message}`;
+    }
+    REGLAS_LIGHT.enVuelo = false;
+    refrescarVivosLight();
+    if (REGLAS_LIGHT.otraVez && REGLAS_LIGHT.id === id) {
+      REGLAS_LIGHT.otraVez = false;
+      await volcarReglasLight();
+    }
+  })();
+  return REGLAS_LIGHT.promesa;
+}
+
+function anadirReglaLight() {
+  const n = (REGLAS_LIGHT.reglas || []).length;
+  if (n >= 20) { toast('como mucho 20 reglas por estilo', true); return; }
+  REGLAS_LIGHT.reglas = [...(REGLAS_LIGHT.reglas || []),
+    { id: `nueva${Date.now()}`, nombre: '', texto: '', gravedad: 'media', palabras: '', en: '' }];
+  pintarLight();
+}
+
+function quitarReglaLight(regla) {
+  if (String(regla.texto || '').trim()
+      && !window.confirm(`¿Quitar la regla «${regla.nombre || regla.texto.slice(0, 40)}»?`)) return;
+  REGLAS_LIGHT.reglas = REGLAS_LIGHT.reglas.filter(r => r !== regla);
+  delete REGLAS_LIGHT.propuestas[regla.id];
+  pintarLight();
+  volcarReglasLight();
+}
+
+/* «AFINAR CON CLAUDE»: la reescribe para el generador (en inglés, concreta y
+   física) y propone nombre, palabras y gravedad. No se aplica sola: se enseña
+   y se acepta o se descarta. Se pregunta cada dos segundos porque una llamada
+   larga detrás del proxy se corta a los sesenta. */
+async function afinarReglaLight(regla) {
+  if (!String(regla.texto || '').trim()) { toast('escribe primero lo que exige la regla', true); return; }
+  REGLAS_LIGHT.afinando[regla.id] = true;
+  pintarLight();
+  try {
+    const r = await pedir(`${BASE}/api/reglas-estilo/afinar`, {
+      method: 'POST',
+      cuerpo: { texto: regla.texto, nombre: regla.nombre || '',
+        palabras: String(regla.palabras || '').split(',').map(p => p.trim()).filter(Boolean) },
+    });
+    let terminado = false;
+    for (let i = 0; i < 90 && !terminado; i += 1) {
+      await new Promise(listo => setTimeout(listo, 2000));
+      const f = await pedir(`${BASE}/api/reglas-estilo/afinar/${encodeURIComponent(r.id)}`);
+      if (f.estado === 'listo') { REGLAS_LIGHT.propuestas[regla.id] = f.propuesta; terminado = true; }
+      if (f.estado === 'error') { toast(`no se ha podido afinar: ${f.error || ''}`, true); terminado = true; }
+    }
+    if (!terminado) toast('Claude está tardando demasiado: vuelve a pulsar «Afinar» en un momento', true);
+  } catch (err) {
+    toast(`no se ha podido afinar: ${err.message}`, true);
+  }
+  delete REGLAS_LIGHT.afinando[regla.id];
+  pintarLight();
+}
+
+function aceptarPropuestaLight(regla) {
+  const p = REGLAS_LIGHT.propuestas[regla.id];
+  if (!p) return;
+  regla.nombre = p.nombre || regla.nombre;
+  regla.en = p.en || '';
+  regla.en_es = p.en_es || '';
+  regla.palabras = (p.palabras || []).join(', ');
+  regla.gravedad = p.gravedad || regla.gravedad;
+  regla.enVieja = false;
+  delete REGLAS_LIGHT.propuestas[regla.id];
+  pintarLight();
+  volcarReglasLight();
+}
+
+function tarjetaReglaLight(regla, i) {
+  const cambiar = (clave, valor) => {
+    regla[clave] = valor;
+    /* LA VERSIÓN AFINADA ERA DE TU TEXTO DE ANTES: si lo cambias, deja de
+       usarse (si no, las imágenes seguirían la regla vieja y el revisor
+       comprobaría la nueva). Se dice, y se puede volver a afinar. */
+    if (clave === 'texto' && regla.en) { regla.en = ''; regla.en_es = ''; regla.enVieja = true; }
+    // la traducción era de la versión afinada de antes: si la tocas a mano, ya no lo es
+    if (clave === 'en') regla.en_es = '';
+    guardarReglasLight();
+  };
+  const texto = h('textarea', {
+    rows: 3, value: regla.texto || '', 'aria-label': `Qué exige la regla ${i + 1}`,
+    placeholder: 'qué se exige, como se lo dirías a un fotógrafo: «quien juega mira siempre la pantalla, nunca a cámara…»',
+    oninput: ev => cambiar('texto', ev.target.value),
+  });
+  texto.dataset.foco = `regla:${regla.id}:texto`;
+  const nombre = h('input', {
+    type: 'text', value: regla.nombre || '', 'aria-label': `Nombre de la regla ${i + 1}`,
+    placeholder: 'nombre corto (p. ej. «Los jugadores miran la pantalla»)',
+    oninput: ev => cambiar('nombre', ev.target.value),
+  });
+  nombre.dataset.foco = `regla:${regla.id}:nombre`;
+  const palabras = h('input', {
+    type: 'text', value: regla.palabras || '', 'aria-label': `Cuándo aplica la regla ${i + 1}`,
+    placeholder: 'vacío = en todos los planos · o palabras separadas por comas: jugadores, mandos, partida',
+    oninput: ev => cambiar('palabras', ev.target.value),
+  });
+  palabras.dataset.foco = `regla:${regla.id}:palabras`;
+  const gravedad = h('select', {
+    'aria-label': `Gravedad de la regla ${i + 1}`, value: regla.gravedad || 'media',
+    onchange: ev => cambiar('gravedad', ev.target.value),
+  }, Object.entries(GRAVEDAD_REGLA).map(([v, t]) => h('option', { value: v }, t)));
+  const tarjeta = h('div', { clase: 'regla-estilo' },
+    h('div', { clase: 'fila' },
+      h('span', { clase: 'meta' }, `Regla ${i + 1}`),
+      nombre,
+      h('span', { clase: 'crece' }),
+      h('button', {
+        clase: 'mini', disabled: !!REGLAS_LIGHT.afinando[regla.id],
+        title: 'Claude la reescribe para la IA de imágenes (en inglés, concreta) y te propone nombre, palabras y gravedad. Tú decides si la usas.',
+        onclick: () => afinarReglaLight(regla),
+      }, REGLAS_LIGHT.afinando[regla.id] ? 'Afinando…' : '✦ Afinar con Claude'),
+      h('button', { clase: 'mini fantasma', title: 'Quitar esta regla', onclick: () => quitarReglaLight(regla) }, '✕')),
+    texto,
+    h('div', { clase: 'fila regla-estilo-campos' },
+      h('label', {}, h('span', { clase: 'meta' }, 'Solo si el plano habla de'), palabras),
+      h('label', {}, h('span', { clase: 'meta' }, 'Si se incumple'), gravedad)));
+  tarjeta.appendChild(enVivo(() => (regla.enVieja && !regla.en
+    ? h('div', { clase: 'meta revisor-fallo' },
+      'Cambiaste tu texto: la versión afinada era de antes y ya no se usa. '
+      + 'Pulsa «Afinar con Claude» otra vez si la quieres.')
+    : null)));
+  /* VIVA: si cambias tu texto, la versión afinada desaparece al momento (deja
+     de usarse) sin repintar la tarjeta que estás escribiendo. */
+  tarjeta.appendChild(enVivo(() => {
+    if (!regla.en) return null;
+    const en = h('textarea', {
+      rows: 3, value: regla.en, 'aria-label': `Versión afinada de la regla ${i + 1}`,
+      oninput: ev => cambiar('en', ev.target.value),
+    });
+    en.dataset.foco = `regla:${regla.id}:en`;
+    return h('div', { clase: 'regla-estilo-en' },
+      h('div', { clase: 'fila' },
+        h('span', { clase: 'meta' }, 'Lo que lee la IA de imágenes (afinada; va en inglés '
+          + 'porque es como mejor la sigue)'),
+        h('span', { clase: 'crece' }),
+        h('button', {
+          clase: 'mini fantasma', title: 'Volver a usar tu texto tal cual',
+          onclick: () => { regla.en = ''; regla.en_es = ''; pintarLight(); volcarReglasLight(); },
+        }, 'Usar mi texto')),
+      en,
+      regla.en_es ? h('div', { clase: 'meta regla-estilo-traduccion' },
+        h('strong', {}, 'En español: '), regla.en_es) : null);
+  }));
+  const p = REGLAS_LIGHT.propuestas[regla.id];
+  if (p) {
+    tarjeta.appendChild(h('div', { clase: 'regla-estilo-propuesta' },
+      h('strong', {}, 'Propuesta de Claude'),
+      h('div', {}, h('span', { clase: 'meta' }, 'Nombre: '), p.nombre || '—'),
+      h('div', {}, h('span', { clase: 'meta' }, 'Lo que leerá la IA, en español: '),
+        p.en_es || '—'),
+      h('details', {}, h('summary', { clase: 'meta' }, 'Ver el texto exacto en inglés'),
+        h('div', {}, p.en || '—')),
+      h('div', {}, h('span', { clase: 'meta' }, 'Solo si habla de: '),
+        (p.palabras || []).join(', ') || 'todos los planos'),
+      h('div', {}, h('span', { clase: 'meta' }, 'Gravedad: '), p.gravedad || 'media'),
+      h('div', { clase: 'fila' },
+        h('button', { clase: 'mini primario', onclick: () => aceptarPropuestaLight(regla) }, 'Usar esta'),
+        h('button', {
+          clase: 'mini fantasma',
+          onclick: () => { delete REGLAS_LIGHT.propuestas[regla.id]; pintarLight(); },
+        }, 'Descartar'))));
+  }
+  return tarjeta;
+}
+
+function bloqueReglasLight(ficha) {
+  const caja = h('div', {});
+  if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Primero genera el estilo gráfico (las láminas); después podrás ponerle reglas.'));
+    return caja;
+  }
+  if (REGLAS_LIGHT.id !== ficha.id) {
+    setTimeout(() => cargarReglasLight(ficha.id), 0);
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo las reglas…'));
+    return caja;
+  }
+  if (REGLAS_LIGHT.error) {
+    caja.appendChild(cajaError(REGLAS_LIGHT.error));
+    caja.appendChild(h('button', { clase: 'mini', onclick: () => cargarReglasLight(ficha.id) }, 'Reintentar'));
+    return caja;
+  }
+  if (!REGLAS_LIGHT.reglas) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo las reglas…'));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'pista' },
+    'Lo que NINGUNA imagen de este estilo puede romper. Cada regla entra en las imágenes '
+    + 'de los planos a los que aplica, el corrector la respeta y el revisor la comprueba '
+    + 'con su gravedad. Pocas y claras: cinco reglas se cumplen, veinte se diluyen.'));
+  REGLAS_LIGHT.reglas.forEach((regla, i) => caja.appendChild(tarjetaReglaLight(regla, i)));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', onclick: anadirReglaLight }, '+ Añadir regla'),
+    h('span', { clase: 'crece' }),
+    enVivo(() => h('span', { clase: 'meta' }, REGLAS_LIGHT.estado || ''))));
+  caja.appendChild(h('div', { clase: 'meta' },
+    'Llegan a los vídeos nuevos al crearlos. A un vídeo ya hecho, con «Traer el estilo»; '
+    + 'sus imágenes no se rehacen solas: cambiar las reglas las marca como desactualizadas '
+    + 'y tú decides si las rehaces.'));
+  return caja;
+}
+
+
 function vistaPresetLight() {
   const ficha = fichaLight(APP.light.abierto);
   if (!ficha) {
@@ -13421,6 +13785,10 @@ function vistaPresetLight() {
   grafico.appendChild(fuenteDeEstiloLight(ficha));
   caja.appendChild(bloqueLight('🎨 Estilo gráfico',
     'las imágenes, las cartelas y los subtítulos', grafico));
+
+  // 📏 las reglas del estilo: lo que ningún plano puede romper
+  caja.appendChild(bloqueLight('📏 Reglas del estilo',
+    'lo que ninguna imagen puede romper', bloqueReglasLight(ficha)));
 
   /* 🗣️ EL TONO, ENTERO Y EDITABLE.
      Aquí se enseñaba `tono_resumen`: cuatro líneas cortadas con «…». La guía
@@ -14341,7 +14709,10 @@ function fuenteDeEstiloLight(ficha) {
      contrato del tipo nuevo) y las láminas con las MISMAS imágenes, y deja el
      tono, la voz y el ritmo. */
   caja.appendChild(selectorTipoDeImagen(f.modo,
-    v => { f.modo = v; repintarPieDeEstilo(); }));
+    v => {
+      f.modo = v; repintarPieDeEstilo();
+      avisoTipoDeImagen(v, (f.existentes || []).length + (f.estilo_imagenes || []).length > 0);
+    }));
   caja.appendChild(imagenesDelEstilo(ficha, f));
   caja.appendChild(h('div', { clase: 'meta' },
     'Añadir imágenes nuevas (se suman a las de arriba). Añadir o quitar imágenes, '
@@ -19507,8 +19878,31 @@ function bloqueEnviosFicha() {
       ['fallido', 'comprobar'].includes(e.estado)
         ? h('button', { clase: 'mini fantasma', title: 'Quitarlo de «Te necesitan» (no borra nada en la red)',
           onclick: () => cancelarEnvioPublicar(e) }, 'Quitar de la lista') : null));
+    if (e.recortado) {
+      b.appendChild(h('div', { clase: 'caja-aviso aviso-recortado' },
+        `⚠ ${CORTOS_RED[e.red] || e.red}: ${e.recortado}. Mira el post y, si hace falta, pega el texto a mano.`));
+    }
+    b.appendChild(loMandadoPublicar(e));
   });
   return b;
+}
+
+/* «VER LO QUE SE MANDÓ» (19-10-2026): los campos de texto tal como salieron
+   hacia Upload-Post, por envío. Abierto o cerrado como lo dejaste: la ficha se
+   repinta cada pocos segundos mientras algo está en el aire. */
+function loMandadoPublicar(e) {
+  const campos = Object.entries(e.enviado || {}).filter(([, v]) => typeof v === 'string' && v);
+  if (!campos.length) return h('span', {});
+  PUB.mandadoAbierto = PUB.mandadoAbierto || {};
+  return h('details', { clase: 'asi-sale lo-mandado', open: !!PUB.mandadoAbierto[e.id],
+    ontoggle: ev => { PUB.mandadoAbierto[e.id] = ev.currentTarget.open; } },
+  h('summary', {}, `Ver lo que se mandó a ${CORTOS_RED[e.red] || e.red}`),
+  ...campos.map(([k, v]) => h('div', { clase: 'campo-mandado' },
+    h('div', { clase: 'fila' }, h('b', { clase: 'crece' }, `${k} (${v.length} caracteres)`),
+      h('button', { clase: 'mini fantasma', onclick: () => copiarTexto(v) }, 'Copiar')),
+    h('pre', { clase: 'texto-compuesto' }, v))),
+  e.texto_publicado ? h('div', { clase: 'meta' },
+    `Lo que devolvió la red: ${e.texto_publicado.length} caracteres.`) : null);
 }
 
 /* ---------------------------------------------------- CUENTAS Y AJUSTES */

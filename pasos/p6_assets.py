@@ -67,6 +67,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import cartelas  # noqa: E402
 import corrector  # noqa: E402
+import reglas_estilo  # noqa: E402
 import cta  # noqa: E402
 import encuadres  # noqa: E402
 import estadisticas  # noqa: E402
@@ -855,9 +856,15 @@ def _corregir_con_agente(escena, plan, dirs, p, trabajo, notas, proyecto,
             if isinstance(b, dict) and str(b.get("id")) == bid:
                 bloque = str(b.get("texto") or "")
         titulo = str(plan.get("titulo") or "")
+        # la guia escrita y, si el estilo las tiene, sus reglas: una correccion
+        # no puede romperlas
+        estilo_legible = "\n".join(
+            ["  " + l for l in guia_escrita(p["estilo"])]
+            + [l for l in [reglas_estilo.para_corrector(
+                reglas_estilo.de_estilo(p["estilo"]))] if l])
         resultado = corrector.preparar(
             nota_texto, escena, p.get("catalogo") or {},
-            "\n".join("  " + l for l in guia_escrita(p["estilo"])),
+            estilo_legible,
             regla_de_especie(p["estilo"]), inventario, titulo=titulo,
             bloque=bloque, cwd=getattr(proyecto, "raiz", None),
             proyecto_id=getattr(proyecto, "id", None),
@@ -2945,6 +2952,17 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
     nombre = _nombre_en(idioma)
     if nombre:
         lineas.append(f"The language of this film is {nombre}.")
+    # LAS REGLAS DEL ESTILO (pasos/reglas_estilo.py): las que escribio quien
+    # hizo el estilo, detras de las de la casa (y del idioma, que va pegado a la suya) y
+    # delante de la escena, con la
+    # misma razon que ellas -- lo concreto de la escena pesa mas que una regla
+    # general, y aqui la regla tiene que ganar. Solo las que aplican a ESTE
+    # plano (sus palabras), y NADA si el estilo no tiene: sin reglas el prompt
+    # sale byte a byte como antes y ninguna firma se mueve (regla 1).
+    lineas.extend(reglas_estilo.para_prompt(
+        reglas_estilo.de_estilo(estilo),
+        " ".join([str(escena.get("prompt") or ""), str(escena.get("narracion") or ""),
+                  _texto_feedback(feedback)])))
     # EL RESPALDO DE `_citar_reparto`: la escena nombra a su gente por el
     # identificador de su hoja, asi que un personaje SIN hoja adjunta se
     # quedaria en un identificador y nada mas. Solo para esos, y solo aqui --
@@ -5162,7 +5180,7 @@ def escenas_del_set(plan, set_nombre):
 
 
 
-def propagar_dependencias(estado, dependencias=None, paso="assets"):
+def propagar_dependencias(estado, dependencias=None, paso="assets", del_propio_paso=True):
     """Mete en los params de cada escena la firma de los assets que usa.
 
     Sin esto la cascada no existiria: el nucleo firma cada unidad con SUS
@@ -5194,6 +5212,10 @@ def propagar_dependencias(estado, dependencias=None, paso="assets"):
         return []
     antes = {u: estado.firma_unidad(paso, u) for u in cambios}
     # del_propio_paso: esto no es una edicion del usuario, es lo que el paso
-    # acaba de descubrir sobre si mismo, asi que no invalida su propia ejecucion
-    estado.actualizar_params(paso, {"unidades": cambios}, del_propio_paso=True)
+    # acaba de descubrir sobre si mismo, asi que no invalida su propia ejecucion.
+    # PERO CUANDO LO DISPARA EL USUARIO (tocar a mano la hoja de un asset con la
+    # tanda corriendo) es la cascada de SU cambio, y quien llama pasa False: si
+    # no, la foto del arranque se tragaba la huella nueva y el plano que usa esa
+    # hoja quedaba «al dia» con la hoja vieja (revision de arreglos-v2h, 18-10)
+    estado.actualizar_params(paso, {"unidades": cambios}, del_propio_paso=del_propio_paso)
     return sorted(u for u in cambios if estado.firma_unidad(paso, u) != antes[u])

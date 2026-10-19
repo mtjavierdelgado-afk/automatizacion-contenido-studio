@@ -10,6 +10,33 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Publicar: los posts salen con el texto entero (19 de octubre)**
+- **Arreglado:** sin YouTube ni Facebook en el envío, los posts salían solo con
+  la primera línea (sin el resto ni los hashtags). El «title» común que se manda
+  a Upload-Post llevaba solo esa línea; ahora lleva el texto completo de la red,
+  el mismo que su campo propio. Con YouTube o Facebook sigue siendo su título.
+- En la ficha, cada envío tiene **«Ver lo que se mandó»**: los textos exactos
+  que salieron hacia Upload-Post, con su largo y **Copiar**. Si Upload-Post
+  devuelve el texto que quedó en la red y es más corto, sale el aviso «la red
+  lo recortó».
+
+**Reglas del estilo: lo que ninguna imagen puede romper (19 de octubre)**
+- En cada estilo, debajo de «Estilo gráfico», la sección **📏 Reglas del
+  estilo**: una lista corta de normas, escritas como se las dirías a un
+  fotógrafo («quien juega mira siempre la pantalla, nunca a cámara»). Cada
+  una con su nombre, **«solo si el plano habla de…»** (unas palabras; vacío =
+  en todos los planos) y su **gravedad** si se incumple.
+- Cada regla entra en las imágenes de los planos a los que aplica, marcada
+  como obligatoria; el **corrector** la respeta al rehacer una imagen con una
+  nota, y el **revisor** la comprueba una por una con la gravedad que le diste
+  (en modo autónomo, las de gravedad alta se corrigen solas).
+- **«✦ Afinar con Claude»**: la reescribe para la IA de imágenes (en inglés,
+  concreta: dónde va la cámara, hacia dónde mira cada uno) y te propone
+  nombre, palabras y gravedad. Tú decides si la usas.
+- Se guardan solas y no cuestan nada. Llegan a los vídeos **nuevos** al
+  crearlos, y a uno ya hecho con **«Traer el estilo»**; sus imágenes no se
+  rehacen solas. Un estilo sin reglas sigue exactamente igual que antes.
+
 **Publicar: más redes, cifras automáticas e informe del mes (18 de octubre)**
 - **Nueve redes más**: LinkedIn, X, Threads, Pinterest, Bluesky, Discord,
   Telegram, Mastodon y Google Business. Se añaden por proyecto en Publicar →
@@ -142,6 +169,39 @@ vídeos, estilos, claves y contraseña no se tocan.
   («alquiler-de-consolas-en-lima-fiesta.mp4»); el del proyecto no cambia.
 - **En el Encargo**, si el proyecto tiene palabra clave, una sugerencia: que
   el guion la diga en los 3 primeros segundos y salga en pantalla.
+
+**Arreglos pendientes de los análisis del 10 y 13 de octubre (18 de octubre)**
+- **Ajustes guardados con un tipo equivocado** (un texto donde va un objeto, en
+  el estilo, la música, el logo…) se rechazan al guardarlos: antes se aceptaban
+  y varias pantallas del vídeo daban error para siempre. Y un segundo clic en
+  «Generar» con el vídeo ya generándose no cambia sus ajustes a mitad.
+- **El logo y las imágenes de una nota del repaso se revisan al subirlos**: un
+  fichero roto se rechaza ahí, en vez de romper el montaje al 97 %. Una nota
+  sube como mucho sus 4 imágenes.
+- **Copiar a mano la carpeta de un vídeo** ya no crea un «gemelo» que abre el
+  original; la copia se queda en el mismo cliente que el original (y una
+  carpeta renombrada, en el suyo), y su gasto sale a su nombre. Nombres de
+  vídeo larguísimos y vídeos creados a la vez ya no dan problemas.
+- **«Aplicar» del repaso** no lanza dos montajes con dos clics, ni encima de
+  la tanda del vídeo: avisa de que espere.
+- **Un retoque de una imagen hecho mientras corre la tanda** ya no se da por
+  hecho sin dibujarlo.
+- **Si una nota de imagen se para o falla después de pagar la imagen**, esa
+  imagen se guarda aparte (no se pierde) y la nota lo dice; antes la siguiente
+  tanda la metía sin avisar.
+- Sin el programa de Claude instalado, el asistente dice que no está (antes un
+  error), y los errores ya no enseñan rutas ni carpetas del servidor (solo el
+  nombre del fichero). Las claves cortas
+  (como el Client ID de Jamendo) enseñan 2 caracteres, no la mitad.
+- **En la pantalla:** en el móvil, el «–» de la burbuja ya no tapa el chat
+  abierto, y la burbuja ya no pisa «Siguiente ›» en Imágenes; «Un vídeo nuevo»
+  marca «Encargo» en la barra y la duración dice «de 10 s a 30 min»; «Un estilo
+  nuevo» pide el nombre del estilo sin errores de fondo; cambiar el tipo de
+  imagen con referencias puestas avisa de que deben ser fotos (o dibujos); el
+  recuento de palabras del guion cuenta lo corregido a mano; el tiempo que
+  queda no promete minutos con la barra casi llena; la cabecera ya no enseña
+  dos veces el mismo trabajo; y textos corregidos («Imágenes» en vez de
+  «Diapositivas», «el redactor», «La pausa… se hace»).
 
 **Publicar: los resultados, más completos (17 de octubre)**
 - **Cuánto se ve de cada vídeo.** TikTok dice qué parte de la gente lo vio

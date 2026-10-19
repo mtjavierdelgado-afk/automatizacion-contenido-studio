@@ -66,14 +66,22 @@ LARGOS = {"palabra_clave": 80, "secundarias": 500, "zona": 120, "evitar": 300,
           "hashtags_locales": 300}
 
 #: Cuántos hashtags pide cada red (los mismos números que las reglas del texto).
-RANGO_HASHTAGS = {"tiktok": (3, 5), "instagram": (5, 8), "youtube": (3, 5), "facebook": (2, 4)}
+import publicar_redes as _RD                                   # noqa: E402
+
+RANGO_HASHTAGS = {"tiktok": (3, 5), "instagram": (5, 8), "youtube": (3, 5), "facebook": (2, 4),
+                  **_RD.HASHTAGS}
 #: Hashtags que no posicionan nada: o vacíos, o de los que las redes castigan.
 HASHTAGS_VACIOS = {"fyp", "foryou", "foryoupage", "fy", "parati", "paratii", "viral",
                    "viralvideo", "trending", "tendencia", "xyzbca", "explore", "explorepage",
                    "reels", "reel", "tiktok", "instagram", "youtube", "shorts", "follow",
                    "like", "likes", "followme", "follow4follow", "like4like", "f4f", "l4l"}
 #: Largo de la primera línea que se ve sin pulsar «más».
-PRIMERA_LINEA = {"instagram": 125, "tiktok": 150, "facebook": 125, "youtube": 0}
+PRIMERA_LINEA = {"instagram": 125, "tiktok": 150, "facebook": 125, "youtube": 0,
+                 **_RD.PRIMERA_LINEA}
+_ALIAS_OPT = {"instagram": ("instagram", "reels"), "tiktok": ("tiktok",), "youtube": ("youtube",),
+              "facebook": ("facebook",), **_RD.ALIAS}
+#: Donde Upload-Post acepta primer comentario (`<red>_first_comment`).
+CON_PRIMER_COMENTARIO = ("instagram", "facebook", "youtube", "tiktok")
 
 CAMPOS_OPTIMIZABLES = ("titulo", "descripcion", "cta", "hashtags", "primer_comentario")
 
@@ -300,9 +308,10 @@ def normalizar_optimizacion(datos, redes):
     for red in redes:
         bruto = None
         for clave, valor in datos.items():
-            if isinstance(valor, dict) and sin_tildes(clave).replace(" ", "").startswith(
-                    {"instagram": "instagram", "tiktok": "tiktok", "youtube": "youtube",
-                     "facebook": "facebook"}[red]):
+            suelta = re.sub(r"[^a-z0-9]", "", sin_tildes(clave))
+            buscadas = {re.sub(r"[^a-z0-9]", "", a) for a in _ALIAS_OPT.get(red, (red,))}
+            if isinstance(valor, dict) and (suelta in buscadas or (
+                    red in ("instagram", "tiktok", "youtube", "facebook") and suelta.startswith(red))):
                 bruto = valor
                 break
         if not bruto:
@@ -313,7 +322,7 @@ def normalizar_optimizacion(datos, redes):
             campo = sin_tildes(campo).replace(" ", "_")
             if campo not in CAMPOS_OPTIMIZABLES or not isinstance(cambio, dict):
                 continue
-            if campo == "titulo" and red not in ("youtube", "facebook"):
+            if campo == "titulo" and red not in ("youtube", "facebook") + tuple(_RD.TITULOS):
                 continue
             despues = cambio.get("despues")
             if campo == "hashtags":
@@ -401,7 +410,7 @@ def campos_extra(red, textos_red, ajustes, datos_video, info, palabra):
             else:
                 avisos.append("la ubicación de TikTok no se manda: marca antes que tu cuenta "
                               "tiene la función «location»")
-    if comentario:
+    if comentario and red in CON_PRIMER_COMENTARIO:
         if red == "tiktok" and not ajustes.get("tt_comentarios_puede"):
             avisos.append("el primer comentario de TikTok no se manda: marca antes que tu "
                           "cuenta tiene la función «comments»")

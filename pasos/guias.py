@@ -1214,11 +1214,111 @@ GUIAS = {
     },
 }
 
+# Las redes que se añadieron en publicar-mas (18-10-2026). Mismo formato que
+# las de arriba, escrito corto: lo que Claude sigue al escribirlas está en
+# `pasos/publicar_redes.py` (REGLAS, LIMITES, TITULOS, ALT). Si cambia ahí, se
+# revisa aquí.
+_REDES_NUEVAS = {
+    "linkedin": ("LinkedIn", 3000,
+                 ["Tiene TÍTULO aparte (hasta 400 caracteres; mejor corto, que diga el "
+                  "beneficio) y un texto de hasta 3.000. La primera línea se corta a los "
+                  "~210 caracteres con «ver más»."],
+                 ["Una primera línea que enganche al público profesional.",
+                  "3 a 6 párrafos cortos: contexto y una idea útil.",
+                  "3 a 5 hashtags."],
+                 ["Tono de anuncio o de TikTok: aquí lee gente de negocio."],
+                 "[Primera línea: la idea o el resultado]\n\n[Contexto en dos frases]\n\n[La idea útil]",
+                 "Una fiesta infantil sin pantallas aburridas sí existe.\n\nEn EstadoPlay llevamos "
+                 "consolas a cumpleaños en Lima y vemos lo mismo cada fin de semana: los niños "
+                 "juegan juntos, no cada uno con su móvil."),
+    "x": ("X (Twitter)", 280,
+          ["Todo junto (texto, llamada a la acción y hashtags) cabe en 280 caracteres: "
+           "lo que sobre se corta.", "X QUITA LOS ENLACES del texto al publicar."],
+          ["Una frase directa, una sola idea.", "1 o 2 hashtags."],
+          ["Enlaces: no saldrán.", "Listas de hashtags."],
+          "[Una frase con la idea del vídeo]",
+          "Consolas, mandos y juegos para tu fiesta en Lima: tú pones a los invitados. 🎮"),
+    "threads": ("Threads", 500,
+                ["Hasta 500 BYTES en total: con tildes y emojis caben menos letras."],
+                ["Tono de conversación.", "Una pregunta que invite a contestar."],
+                ["Más de un hashtag."],
+                "[Una frase de charla]\n[Una pregunta]",
+                "Este finde llevamos la consola a un cumpleaños de 15 niños y nadie lloró. "
+                "¿Cuál fue el juego de tu infancia?"),
+    "pinterest": ("Pinterest", 800,
+                  ["Pinterest es un BUSCADOR: título de hasta 100 caracteres y descripción "
+                   "de hasta 800.", "Sin tablero (Cuentas y ajustes → Redes de este "
+                   "proyecto) no se puede publicar."],
+                  ["La palabra clave al principio del título.",
+                   "Qué es y para quién, con palabras que alguien buscaría. 2 a 5 hashtags."],
+                  ["Frases de relleno sin palabras que se busquen."],
+                  "[Qué es] para [quién] en [zona]: [lo que lo hace distinto]",
+                  "Alquiler de consolas para fiestas infantiles en Lima: llevamos todo y lo "
+                  "montamos en tu casa."),
+    "bluesky": ("Bluesky", 300,
+                ["Hasta 300 caracteres en total, con la llamada a la acción y los hashtags.",
+                 "Vídeos de hasta 10 minutos."],
+                ["Tono natural.", "1 a 3 hashtags."],
+                ["Aire de anuncio."],
+                "[Una o dos frases naturales]",
+                "Llevamos una consola a un cumpleaños y acabaron jugando también los padres."),
+    "discord": ("Discord", 2000,
+                ["Un mensaje en un canal de tu comunidad, hasta 2.000 caracteres.",
+                 "El tamaño máximo del vídeo lo pone el servidor."],
+                ["Directo y cercano: te leen quienes ya te conocen."],
+                ["Hashtags: en Discord no sirven."],
+                "[Lo nuevo, en una frase]\n[Un detalle]",
+                "¡Vídeo nuevo! Así montamos la consola en un cumpleaños de este sábado."),
+    "telegram": ("Telegram", 1024,
+                 ["El pie del vídeo en el canal, hasta 1.024 caracteres."],
+                 ["Primera línea clara, párrafos cortos, la llamada a la acción al final."],
+                 ["Muchos hashtags."],
+                 "[Primera línea]\n\n[Un párrafo corto]",
+                 "Nuevo vídeo: un cumpleaños con consola en Lima.\n\nMira cómo lo montamos en "
+                 "menos de 20 minutos."),
+    "mastodon": ("Mastodon", 500,
+                 ["Hasta 500 caracteres. En Mastodon se busca por hashtags."],
+                 ["Tono natural, sin exagerar.", "2 a 4 hashtags."],
+                 ["Exageraciones de anuncio."],
+                 "[Una o dos frases]",
+                 "Así se ve un cumpleaños infantil con consola: menos móviles y más juego juntos."),
+    "google_business": ("Google Business", 1500,
+                        ["Una publicación del perfil de empresa: sale en Google Maps y en la "
+                         "búsqueda local.", "Solo vídeos de hasta 30 segundos. El botón "
+                         "(Reservar, Llamar…) se elige en Cuentas y ajustes."],
+                        ["1 a 3 frases con lo que ofreces y la ZONA."],
+                        ["Hashtags y emojis de más.", "La llamada a la acción: la pone el botón."],
+                        "[Qué ofreces] en [zona]. [Un detalle que dé confianza].",
+                        "Alquiler de consolas para fiestas en Lima. Llevamos todo y lo dejamos "
+                        "funcionando en tu casa."),
+}
+for _red, (_nombre, _tope, _hace, _si, _no, _plantilla, _ejemplo) in _REDES_NUEVAS.items():
+    GUIAS[f"texto_{_red}"] = {
+        "titulo": f"Texto para {_nombre}",
+        "donde": f"Publicar → ficha de un vídeo → {_nombre}",
+        "usa": "pasos/publicar_redes.py (REGLAS, LIMITES, campos) y pasos/publicar.py (componer)",
+        "que_hace": _hace + [
+            "Al enviarlo, el Studio le añade la llamada a la acción, la firma del proyecto "
+            f"y los hashtags. Todo junto no pasa de {format(_tope, ',').replace(',', '.')} "
+            "caracteres.",
+        ],
+        "si": _si,
+        "no": _no + ["Teléfonos, precios o enlaces que no estén en el encargo."],
+        "plantilla": _plantilla,
+        "ejemplo": _ejemplo,
+        "prompt_ia": (f"Escríbeme el texto de un vídeo para {_nombre}. "
+                      + " ".join(_hace + _si) + " SIN llamada a la acción ni firma (van "
+                      "aparte). No inventes teléfonos, precios ni enlaces.\n\nDE QUÉ VA EL "
+                      "VÍDEO:\n[pega aquí el guion o un resumen]"),
+    }
+
 ORDEN = ("estilo_grafico", "tono", "voz", "material", "indicaciones", "cta",
          "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
          "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente",
          "chat_guiones", "analizar_cuenta", "conexiones_cuentas",
-         "palabra_clave", "ubicacion_instagram", "categoria_youtube", "hecho_para_ninos")
+         "palabra_clave", "ubicacion_instagram", "categoria_youtube", "hecho_para_ninos",
+         "texto_linkedin", "texto_x", "texto_threads", "texto_pinterest", "texto_bluesky",
+         "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business")
 
 
 

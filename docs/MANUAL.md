@@ -294,7 +294,9 @@ derechos: «Mario Kart», «Nintendo Switch»…):
 
 ## Publicar
 
-Lleva un vídeo **ya montado** a TikTok, Instagram Reels, YouTube y Facebook:
+Lleva un vídeo **ya montado** a TikTok, Instagram Reels, YouTube y Facebook
+(y, si las añades al proyecto, a LinkedIn, X, Threads, Pinterest, Bluesky,
+Discord, Telegram, Mastodon y Google Business):
 a mano (copias los textos y descargas el MP4) o con **Upload-Post**, que lo
 sube ya o a la hora que digas (hora de Lima). Nada de Publicar cambia el vídeo
 ni lo deja por rehacer.
@@ -327,6 +329,31 @@ emojis en los textos** (de fábrica sí; quítalo y Claude no pone ninguno), si 
 como hecho con IA, si YouTube avisa a los suscriptores, la privacidad en
 YouTube y las redes que salen marcadas de fábrica. La confirmación antes de
 enviar no se puede quitar.
+
+**Redes de este proyecto** (en la misma tarjeta): marca qué redes se enseñan
+en sus vídeos. De fábrica son las cuatro de siempre; las demás (LinkedIn, X,
+Threads, Pinterest, Bluesky, Discord, Telegram, Mastodon y Google Business)
+salen al marcarlas, y cada una necesita su cuenta conectada en Upload-Post
+(«Conectar»). Algunas piden algo más: **Pinterest**, el tablero (sin él no se
+puede publicar) y el enlace del pin; **LinkedIn**, la página de empresa (vacío:
+tu perfil) y quién lo ve; **Google Business**, el botón (Reservar, Llamar…) con
+su enlace y la ubicación (solo vídeos de hasta 30 segundos); **Mastodon**,
+quién lo ve; **Threads**, el tema. Reddit no está porque Upload-Post la tiene
+caída. En la ficha, LinkedIn y Pinterest tienen **título**, y X, Threads,
+Pinterest, Bluesky, Discord y Mastodon un **texto alternativo** (lo que se ve en
+el vídeo, para quien no puede verlo). Google Business sale en su propia subida.
+
+**Cifras automáticas** (arriba en Cuentas y ajustes): las cifras de lo
+publicado se piden solas, sin pulsar «Actualizar». **Apagadas de fábrica.**
+Elige la frecuencia (una vez a la semana, una vez al día, cada 12 o cada 6
+horas), la hora y cuántos posts (los últimos 10, 30, 60 o 100); debajo sale
+**lo que gasta** antes de guardar, y «Guardar» lo vuelve a enseñar para que lo
+confirmes. No cuesta dinero (las cifras van incluidas en el plan de pago de
+Upload-Post; no gasta subidas ni Claude): gasta consultas del cupo de 100 cada
+5 minutos, separadas para que «Actualizar» siga funcionando mientras. Los
+seguidores y lo que Upload-Post ya tiene guardado no gastan cupo. **Pedirlas
+ahora** hace una vuelta en segundo plano. Discord, Telegram, Mastodon y Google
+Business no dan cifras por post, así que no se preguntan.
 
 **La ficha de un vídeo** (desde «Enviar a Publicar» o desde la cola):
 1. **Redes**: marca dónde va. Si el vídeo no encaja (horizontal en TikTok, un
@@ -430,6 +457,22 @@ listo, qué parte del vídeo se ve **de media**. Instagram y Facebook no dan
 ninguna de las dos. En **Inicio** hay una línea con lo mejor de los últimos 7
 días. Nada de esto pregunta a Upload-Post: sale de lo que se pidió con el
 último «Actualizar».
+
+Más abajo:
+- **Palabras clave y ganchos que funcionaron**: una tabla con cada palabra
+  clave (la del momento de publicar), sus publicaciones, las vistas de mediana
+  y en total, la interacción y las redes; y las primeras líneas que más vistas
+  trajeron, con **Copiar**. Va por la mediana: un post viral no hace buena a
+  una palabra con diez flojos.
+- **Cuándo publicar**: el mejor día y franja de cada red con tus cifras («2×»
+  es el doble de vistas que lo normal en esa red). Hace falta un mínimo de
+  publicaciones con cifras; mientras no las hay, sale un punto de partida
+  general, marcado como tal. En la ficha, **Cuándo → Programar** propone esa
+  hora para cada red con **Usar**.
+- **Informe del mes** (botón arriba): el mes del proyecto para el cliente:
+  publicaciones, vistas, me gusta y comentarios frente al mes anterior, cada
+  red con sus seguidores, lo que mejor funcionó y lo aprendido. **Imprimir o
+  guardar en PDF** y **Copiar resumen** (en texto, para un correo).
 
 ## Configuración (⚙)
 

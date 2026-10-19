@@ -24,6 +24,24 @@ vídeos, estilos, claves y contraseña no se tocan.
   su texto va con la imagen. Los cortes secos de «Dinámico» siguen al vídeo
   entero, no a la imagen.
 
+**Publicar: más redes, cifras automáticas e informe del mes (18 de octubre)**
+- **Nueve redes más**: LinkedIn, X, Threads, Pinterest, Bluesky, Discord,
+  Telegram, Mastodon y Google Business. Se añaden por proyecto en Publicar →
+  Cuentas y ajustes → **Redes de este proyecto**, con lo que cada una necesita
+  (el tablero de Pinterest, la página de LinkedIn, el botón de Google
+  Business…). En la ficha, título donde lo hay y **texto alternativo** donde se
+  admite. Claude escribe para cada una con sus reglas y límites. Reddit no, porque
+  Upload-Post la tiene caída.
+- **Cifras automáticas**, apagadas de fábrica: elige la frecuencia (una vez al
+  día, cada 12 o 6 horas, semanal), la hora y cuántos posts (los últimos 30, por
+  ejemplo). Antes de guardar se ve **lo que gasta**: 0 $ (va incluido en el plan
+  de Upload-Post), y las consultas del cupo que usa. **Pedirlas ahora**, para una
+  vuelta ya.
+- **Resultados**: la tabla de **palabras clave y ganchos que funcionaron**,
+  **cuándo publicar** en cada red (y en la ficha, la hora propuesta con «Usar»)
+  y el **informe del mes** de cada proyecto, imprimible y con un resumen para
+  copiar.
+
 **Cancelar de verdad en el taller de estilos (18 de octubre)**
 - **«Cancelar» un «Rehacer» para en el acto**: corta la llamada a Claude y no
   encarga ninguna lámina más (las que ya se estaban dibujando se acaban y se
@@ -112,6 +130,39 @@ vídeos, estilos, claves y contraseña no se tocan.
   («alquiler-de-consolas-en-lima-fiesta.mp4»); el del proyecto no cambia.
 - **En el Encargo**, si el proyecto tiene palabra clave, una sugerencia: que
   el guion la diga en los 3 primeros segundos y salga en pantalla.
+
+**Arreglos pendientes de los análisis del 10 y 13 de octubre (18 de octubre)**
+- **Ajustes guardados con un tipo equivocado** (un texto donde va un objeto, en
+  el estilo, la música, el logo…) se rechazan al guardarlos: antes se aceptaban
+  y varias pantallas del vídeo daban error para siempre. Y un segundo clic en
+  «Generar» con el vídeo ya generándose no cambia sus ajustes a mitad.
+- **El logo y las imágenes de una nota del repaso se revisan al subirlos**: un
+  fichero roto se rechaza ahí, en vez de romper el montaje al 97 %. Una nota
+  sube como mucho sus 4 imágenes.
+- **Copiar a mano la carpeta de un vídeo** ya no crea un «gemelo» que abre el
+  original; la copia se queda en el mismo cliente que el original (y una
+  carpeta renombrada, en el suyo), y su gasto sale a su nombre. Nombres de
+  vídeo larguísimos y vídeos creados a la vez ya no dan problemas.
+- **«Aplicar» del repaso** no lanza dos montajes con dos clics, ni encima de
+  la tanda del vídeo: avisa de que espere.
+- **Un retoque de una imagen hecho mientras corre la tanda** ya no se da por
+  hecho sin dibujarlo.
+- **Si una nota de imagen se para o falla después de pagar la imagen**, esa
+  imagen se guarda aparte (no se pierde) y la nota lo dice; antes la siguiente
+  tanda la metía sin avisar.
+- Sin el programa de Claude instalado, el asistente dice que no está (antes un
+  error), y los errores ya no enseñan rutas ni carpetas del servidor (solo el
+  nombre del fichero). Las claves cortas
+  (como el Client ID de Jamendo) enseñan 2 caracteres, no la mitad.
+- **En la pantalla:** en el móvil, el «–» de la burbuja ya no tapa el chat
+  abierto, y la burbuja ya no pisa «Siguiente ›» en Imágenes; «Un vídeo nuevo»
+  marca «Encargo» en la barra y la duración dice «de 10 s a 30 min»; «Un estilo
+  nuevo» pide el nombre del estilo sin errores de fondo; cambiar el tipo de
+  imagen con referencias puestas avisa de que deben ser fotos (o dibujos); el
+  recuento de palabras del guion cuenta lo corregido a mano; el tiempo que
+  queda no promete minutos con la barra casi llena; la cabecera ya no enseña
+  dos veces el mismo trabajo; y textos corregidos («Imágenes» en vez de
+  «Diapositivas», «el redactor», «La pausa… se hace»).
 
 **Publicar: los resultados, más completos (17 de octubre)**
 - **Cuánto se ve de cada vídeo.** TikTok dice qué parte de la gente lo vio

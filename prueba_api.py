@@ -2061,7 +2061,11 @@ def probar_asistente(cliente):
                                      "pantalla": {"pestana": "encargo"}})
     igual(respuesta.status_code, 202, f"una pregunta responde 202: {ficha}")
     igual(len(ficha.get("turnos") or []), 2, "con el turno de la persona y el del asistente")
-    igual(ficha["turnos"][1]["estado"], "pensando", "que empieza pensando")
+    # «pensando» O YA «listo» (B12, 10-10-2026): la pregunta arranca un hilo y
+    # devuelve la ficha; el asistente SIMULADO contesta tan rapido que a veces
+    # gana la carrera, y la prueba fallaba sola y bajo carga
+    ok(ficha["turnos"][1]["estado"] in ("pensando", "listo"),
+       f"que empieza pensando (o ya contestó): {ficha['turnos'][1]['estado']!r}")
 
     def esperar_respuesta(segundos=20):
         limite = time.time() + segundos
@@ -2202,8 +2206,10 @@ def probar_sistema(cliente):
                 "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
                 "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente", "chat_guiones",
                 "analizar_cuenta", "conexiones_cuentas",
-                "palabra_clave", "ubicacion_instagram", "categoria_youtube", "hecho_para_ninos"],
-          "estan las veintiuna guias (seis de Crear, nueve de Publicar y seis de la Parrilla), en orden")
+                "palabra_clave", "ubicacion_instagram", "categoria_youtube", "hecho_para_ninos",
+                "texto_linkedin", "texto_x", "texto_threads", "texto_pinterest", "texto_bluesky",
+                "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business"],
+          "estan las treinta guias (seis de Crear, dieciocho de Publicar y seis de la Parrilla), en orden")
     ok(all(g.get("plantilla") and g.get("prompt_ia") and g.get("que_hace")
            for g in datos.get("guias") or []),
        "cada guia trae plantilla, prompt para otra IA y que hace el sistema")
@@ -5927,6 +5933,435 @@ def probar_que_lo_lento_no_para_el_servicio():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def _llamar(funcion, *args, **kwargs):
+    """Llama a una ruta de app.py en este proceso. -> (codigo, respuesta|mensaje)."""
+    import app as servidor                                    # noqa: PLC0415
+    try:
+        return 200, funcion(*args, **kwargs)
+    except servidor.ErrorApi as fallo:
+        return fallo.codigo, fallo.mensaje
+    except Exception as fallo:  # noqa: BLE001  -- lo que el servicio da como 500
+        return 500, f"{type(fallo).__name__}: {fallo}"
+
+
+def probar_lo_de_v2h():
+    """Los pendientes del analisis del 13-10 que seguian en el codigo (18-10-2026).
+
+    En este proceso, contra proyectos de verdad (nucleo real): lo que se mira es
+    lo que la API acepta, rechaza y deja escrito.
+    """
+    seccion("ARREGLOS V2H: PARAMS, SUBIDAS, IDS Y ERRORES")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    from nucleo import bitacora as BITACORA                   # noqa: PLC0415
+
+    raiz_antes = servidor.raiz_proyectos()
+    base = tempfile.mkdtemp(prefix="estudio_v2h_")
+    global_antes = BITACORA.RUTA_GLOBAL
+    BITACORA.RUTA_GLOBAL = os.path.join(base, "_bitacora_global.jsonl")
+    servidor.fijar_raiz_proyectos(base)
+    reales = {}
+    import threading                                          # noqa: PLC0415
+    import uvicorn                                            # noqa: PLC0415
+    puerto = puerto_libre()
+    motor = uvicorn.Server(uvicorn.Config(servidor.app, host="127.0.0.1", port=puerto,
+                                          log_level="error", lifespan="off"))
+    hilo = threading.Thread(target=motor.run, daemon=True)
+    hilo.start()
+    url = f"http://127.0.0.1:{puerto}"
+    for _ in range(100):
+        try:
+            requests.get(f"{url}/api/salud", timeout=2)
+            break
+        except requests.RequestException:
+            time.sleep(0.1)
+
+    def pedir(metodo, ruta, **extra):
+        # una conexion por peticion: tras un 500 sin capturar el servidor corta
+        # la conexion y la siguiente peticion de la sesion saldria «reset»
+        extra.setdefault("headers", {})["Connection"] = "close"
+        respuesta = requests.request(metodo, url + ruta, timeout=60, **extra)
+        try:
+            return respuesta.status_code, respuesta.json()
+        except ValueError:
+            return respuesta.status_code, None
+
+    from PIL import Image                                     # noqa: PLC0415
+
+    def png(tam=(200, 40), color=(255, 0, 0, 255)):
+        crudo = io.BytesIO()
+        Image.new("RGBA", tam, color).save(crudo, "PNG")
+        return crudo.getvalue()
+
+    def cambiar(nombre, valor):
+        reales.setdefault(nombre, getattr(servidor, nombre))
+        setattr(servidor, nombre, valor)
+
+    try:
+        # R2 · LOS PARAMS ESTRUCTURALES SE VALIDAN POR TIPO. Antes devolvian 200
+        # y una docena de pantallas del video daban 500 para siempre.
+        pid = Proyecto.crear(base, "r2 tipos").id
+        for paso, params in (("assets", {"estilo": "x"}), ("assets", {"unidades": "x"}),
+                             ("assets", {"unidades": {"escena:S1": "x"}}),
+                             ("render", {"musica": "x"}), ("render", {"logo": "x"}),
+                             ("render", {"efectos": ["x"]}), ("callouts", {"paleta": 3})):
+            codigo, _m = _llamar(servidor.fijar_params, pid, paso, {"params": params})
+            clave = next(iter(params))
+            igual(codigo, 400, f"R2: guardar {paso}.{clave}={params[clave]!r} da 400")
+            ok(clave not in (servidor.contexto(pid).estado.params(paso) or {}),
+               f"R2: y no deja {paso}.{clave} escrito")
+        codigo, _r = _llamar(servidor.fijar_params, pid, "assets",
+                             {"params": {"estilo": {"modo": "foto"}, "logo": None,
+                                         "unidades": {"escena:S1": {"d": "a"}}}})
+        igual(codigo, 200, "R2: un objeto (o null) sigue valiendo")
+        codigo, _m = _llamar(servidor.generar_video, pid,
+                             {"params": {"assets": {"estilo": "x"}}})
+        igual(codigo, 400, "R2: /generar valida los params igual que el PUT")
+        codigo, _m = _llamar(servidor.generar_video, pid, {"params": ["assets"]})
+        igual(codigo, 400, "R2: /generar con 'params' que no es un objeto da 400, no 500")
+
+        # R2 · UN /generar RECHAZADO POR 409 NO ESCRIBE SUS PARAMS: antes los
+        # guardaba antes del cerrojo y la firma se movia bajo el trabajo vivo.
+        cambiar("_trabajo_de_cadena", lambda ctx: {"id": "vivo", "progreso": 0.4})
+        codigo, _m = _llamar(servidor.generar_video, pid,
+                             {"params": {"brief": {"duracion_s": 77}}})
+        igual(codigo, 409, "R2: /generar con el video generandose da 409")
+        ok((servidor.contexto(pid).estado.params("brief") or {}).get("duracion_s") != 77,
+           "R2: y el 409 no deja escritos los params que traia")
+        setattr(servidor, "_trabajo_de_cadena", reales.pop("_trabajo_de_cadena"))
+
+        # R3 · EL LOGO Y LAS IMAGENES DEL REPASO SE REVISAN AL SUBIRLOS. Un logo
+        # roto se aceptaba y el montaje reventaba al 97 % con un MP4 de 0 bytes.
+        pid = Proyecto.crear(base, "r3 subidas").id
+        Estado(servidor.contexto(pid).proyecto)
+        roto = png()[:60]                                # una PNG cortada
+        codigo, datos = pedir("POST", f"/api/proyectos/{pid}/logo",
+                              files={"logo": ("logo.png", roto, "image/png")})
+        igual(codigo, 400, "R3: un logo que no se puede abrir da 400 al subirlo")
+        ok(not (servidor.contexto(pid).estado.params("render") or {}).get("logo"),
+           "R3: y no queda puesto en el video")
+        codigo, datos = pedir("POST", "/api/logos",
+                              files={"logo": ("logo.png", b"no soy una imagen", "image/png")})
+        igual(codigo, 400, "R3: el logo suelto (borrador) se revisa igual")
+        codigo, datos = pedir("POST", "/api/logos",
+                              files={"logo": ("logo.png", png((200, 40)), "image/png")})
+        igual(codigo, 201, "R3: un logo de texto, ancho y bajo, de un color, sigue valiendo")
+        codigo, datos = pedir("POST", f"/api/proyectos/{pid}/repaso/imagenes",
+                              files={"f": ("nota.png", roto, "image/png")})
+        igual(codigo, 400, "R3: una imagen rota en una nota del repaso da 400")
+        maximo = servidor._repaso().MAX_IMAGENES
+        codigo, datos = pedir("POST", f"/api/proyectos/{pid}/repaso/imagenes",
+                              files=[("f", (f"n{i}.png", png((300, 200), (i * 20, 90, 90, 255)),
+                                            "image/png")) for i in range(maximo + 3)])
+        igual(codigo, 201, "R3: una tanda de imagenes del repaso se sube")
+        igual(len((datos or {}).get("imagenes") or []), maximo,
+              f"R3: pero como mucho {maximo}, las que caben en una nota")
+        ok(any("como mucho" in a for a in (datos or {}).get("avisos") or []),
+           "R3: y dice por que no subio las demas")
+
+        # R4 · UNA CARPETA COPIADA A MANO NO ES UN GEMELO DEL ORIGINAL. El id
+        # salia de proyecto.json: la copia se listaba y se abria como el original.
+        original = Proyecto.crear(base, "r4 original")
+        shutil.copytree(original.raiz, os.path.join(base, "r4_copia_a_mano"))
+        igual(Proyecto(os.path.join(base, "r4_copia_a_mano")).id, "r4_copia_a_mano",
+              "R4: la copia a mano tiene el id de SU carpeta")
+        ids = [f["id"] for f in Proyecto.listar(base) if f["id"].startswith("r4")]
+        igual(sorted(ids), ["r4_copia_a_mano", "r4_original"],
+              "R4: y la lista no enseña dos veces el original")
+        codigo, datos = pedir("GET", "/api/proyectos/r4_copia_a_mano")
+        igual(((datos or {}).get("proyecto") or datos or {}).get("id"), "r4_copia_a_mano",
+              "R4: y abrirla abre la copia, no el original")
+
+        # R5 · UN NOMBRE LARGUISIMO: antes 500 al crear (>255) o un video que no
+        # se podia duplicar ni apartar (250)
+        for largo in (260, 250):
+            codigo, datos = pedir("POST", "/api/proyectos", json={"nombre": "a" * largo})
+            igual(codigo, 201, f"R5: un video de {largo} caracteres de nombre se crea")
+            nuevo = ((datos or {}).get("proyecto") or {}).get("id") or ""
+            ok(0 < len(nuevo) <= 60, f"R5: con un id corto ({len(nuevo)} caracteres)")
+            codigo, _d = pedir("POST", f"/api/proyectos/{nuevo}/duplicar", json={})
+            igual(codigo, 201, f"R5: y se puede duplicar ({largo})")
+            codigo, _d = pedir("DELETE", f"/api/proyectos/{nuevo}")
+            ok(codigo in (200, 204), f"R5: y apartar ({largo}: {codigo})")
+
+        # R6 · CREAR A LA VEZ NO REPITE IDS (8 «creado» y 6 carpetas, medido)
+        hechos = []
+        hilos = [threading.Thread(target=lambda: hechos.append(
+            Proyecto.crear(base, "r6 mismo").id)) for _ in range(8)]
+        for h in hilos:
+            h.start()
+        for h in hilos:
+            h.join()
+        igual(len(set(hechos)), 8, "R6: ocho creaciones a la vez dan ocho ids distintos")
+        igual(len([n for n in os.listdir(base) if n.startswith("r6_mismo")]), 8,
+              "R6: y ocho carpetas")
+
+        # R8 · LAS DOS RUTAS MUERTAS QUE SIEMPRE DABAN 500
+        pid = Proyecto.crear(base, "r8 muertas").id
+        Estado(servidor.contexto(pid).proyecto)
+        codigo, _d = pedir("GET", f"/api/proyectos/{pid}/estilo")
+        ok(codigo in (404, 405), f"R8: GET /estilo ya no existe (no es un 500: {codigo})")
+        codigo, datos = pedir("PUT", f"/api/proyectos/{pid}/callouts/plan",
+                              json={"arquetipos": []})
+        igual(codigo, 400, "R8: mandar 'arquetipos' al plan del grafismo da 400, no 500")
+
+        # R9 · SIN EL CLI DE CLAUDE, EL ASISTENTE DICE QUE NO ESTA (no un 500)
+        from pasos import cli_claude as CLI                   # noqa: PLC0415
+        localizar_real = CLI.localizar
+
+        def sin_cli(*_a, **_k):
+            raise RuntimeError("no se encuentra el CLI de claude")
+        CLI.localizar = sin_cli
+        try:
+            codigo, datos = pedir("GET", "/api/asistente")
+            igual(codigo, 200, "R9: GET /api/asistente sin el CLI responde 200")
+            ok((datos or {}).get("listo") is False, f"R9: y dice que no está listo: {datos}")
+        finally:
+            CLI.localizar = localizar_real
+        # y un 500 de verdad no enseña la traza con las rutas del servidor
+        cambiar("_sonido", lambda: (_ for _ in ()).throw(KeyError("roto")))
+        codigo, datos = pedir("GET", f"/api/proyectos/{pid}/sonido")
+        igual(codigo, 500, "R9: un fallo imprevisto sigue siendo un 500")
+        ok("traza" not in (datos or {}) and RAIZ_ESTUDIO not in json.dumps(datos or {}),
+           "R9: pero sin la traza ni rutas del servidor")
+        ok(bool((datos or {}).get("marca")), "R9: con una marca para buscarlo en el registro")
+        setattr(servidor, "_sonido", reales.pop("_sonido"))
+
+        # R7 · UN CUERPO CON UN TIPO EQUIVOCADO ES UN 400, NO UN 500
+        pid = Proyecto.crear(base, "r7 tipos").id
+        sembrar(os.path.join(base, pid))
+        p = f"/api/proyectos/{pid}"
+        for metodo, ruta, cuerpo in (
+                ("POST", p + "/guion/bloques/reescribir", {"bloques": 5, "peticion": "x"}),
+                ("POST", p + "/guion/pausas/quitar", {"bloques": 5}),
+                ("POST", p + "/exportar", {"que": "video", "partes": 5}),
+                ("POST", p + "/estilo/traer", {"partes": 5}),
+                ("PUT", p + "/estilo/seleccion", {"referencias": 5}),
+                ("POST", p + "/estilo/guia", {"referencias": 5}),
+                ("POST", p + "/repaso", {"texto": "hola", "t": 1, "imagenes": 5}),
+                ("POST", p + "/capturas/aplicar", {"capturas": 5}),
+                ("POST", p + "/sonido/efectos", {"papeles": 5}),
+                ("POST", p + "/sonido/efectos", {"papeles": [[1]]}),
+                ("POST", "/api/estimacion", {"duracion_objetivo_s": 60, "min_s": "a"}),
+                ("PUT", p + "/sonido", {"musica": "x"}),
+                ("PUT", p + "/callouts/plan", {"diseno": [1]}),
+                ("PUT", p + "/callouts/plan", {"paleta": {"fijados": 5}}),
+                ("PUT", p + "/cartelas", {"plantillas": [[1]]})):
+            codigo, datos = pedir(metodo, ruta, json=cuerpo)
+            igual(codigo, 400, f"R7: {metodo} {ruta.replace(p, '')} {json.dumps(cuerpo)} da 400")
+        codigo, _d = pedir("GET", p + "/exportes/a%00b")
+        igual(codigo, 404, "R7: un nulo en la ruta de un exporte da 404, no 500")
+        codigo, _d = pedir("POST", "/api/sonido/subir", data=b"--xx\r\nbasura sin dos puntos"
+                           b"\r\n\r\nabc\r\n--xx--\r\n",
+                           headers={"Content-Type": "multipart/form-data; boundary=xx"})
+        igual(codigo, 400, "R7: un multipart roto al subir un audio da 400, no 500")
+
+        # D8 · «APLICAR» DEL REPASO NO LANZA DOS MONTAJES A LA VEZ
+        pid = Proyecto.crear(base, "d8 repaso").id
+        Estado(servidor.contexto(pid).proyecto)
+        suelta = threading.Event()
+        cambiar("_correr_repaso", lambda avisar, ctx, *a, **k: suelta.wait(20) and {})
+        try:
+            primero, _r = _llamar(servidor.aplicar_repaso, pid, {})
+            segundo, _m = _llamar(servidor.aplicar_repaso, pid, {})
+            igual(primero, 200, "D8: el primer «Aplicar» lanza el repaso")
+            igual(segundo, 409, "D8: el segundo, con el primero corriendo, da 409")
+        finally:
+            suelta.set()
+        for _ in range(100):
+            if not servidor.contexto(pid).gestor.listar(activos=True):
+                break
+            time.sleep(0.05)
+        cambiar("_trabajo_de_cadena", lambda ctx: {"id": "vivo", "nombre": "La tanda",
+                                                     "progreso": 0.3})
+        codigo, _m = _llamar(servidor.aplicar_repaso, pid, {})
+        igual(codigo, 409, "D8: y con la tanda del vídeo corriendo, también 409")
+        setattr(servidor, "_trabajo_de_cadena", reales.pop("_trabajo_de_cadena"))
+        setattr(servidor, "_correr_repaso", reales.pop("_correr_repaso"))
+
+        # D7 · UN RETOQUE HECHO MIENTRAS CORRE LA TANDA NO QUEDA SELLADO COMO
+        # HECHO aunque la tanda escriba en sus params (la huella de una hoja)
+        proyecto = Proyecto.crear(base, "d7 retoque")
+        sembrar(proyecto.raiz)
+        e = Estado(proyecto)
+        for paso in ("voz", "revision_audio"):
+            e.completar(paso, {"x": 1})
+        unidades = {"escena:S010": {"prompt": "a"}, "escena:S020": {"prompt": "b"}}
+        e.set_params("assets", {"unidades": unidades})
+        e.completar("assets", {}, unidades={k: {"f": k} for k in unidades})
+        e.marcar_ejecutando("assets")                          # arranca la tanda
+        e.actualizar_params("assets", {"unidades": {          # el usuario retoca S010
+            "escena:S010": {"prompt": "a", "feedback": "retoque del usuario"}}})
+        e.actualizar_params("assets", {"unidades": {          # la tanda: su huella
+            "escena:S020": {"prompt": "b", "huella_assets": "nueva"}}}, del_propio_paso=True)
+        e.completar("assets", {}, unidades={"escena:S010": {"f": "con el prompt viejo"},
+                                            "escena:S020": {"f": "nueva"}})
+        obsoletas = e.unidades_obsoletas("assets")
+        ok("escena:S010" in obsoletas,
+           f"D7: el plano retocado durante la tanda queda por rehacer ({obsoletas})")
+        ok("escena:S020" not in obsoletas,
+           "D7: y el que la tanda cambió ella misma sigue al día")
+        params_version = (e.versiones("assets") or [{}])[-1].get("params") or {}
+        ok("retoque del usuario" not in json.dumps(params_version),
+           "D7: y la versión no apunta el retoque como usado")
+        ok("nueva" in json.dumps(params_version),
+           "D7: pero sí lo que la propia tanda escribió")
+
+        # F5 · UNA NOTA DE IMAGEN QUE FALLA O SE CANCELA DESPUES DE PAGAR no deja
+        # la imagen nueva escondida en trabajo/ para que la selle la siguiente tanda
+        from nucleo.trabajos import Cancelado                 # noqa: PLC0415
+        from pasos import medios as MEDIOS                    # noqa: PLC0415
+        pid = Proyecto.crear(base, "f5 nota pagada").id
+        sembrar(os.path.join(base, pid))
+        ctx = servidor.contexto(pid)
+        for paso in ("voz", "revision_audio"):
+            ctx.estado.completar(paso, {"x": 1})
+        trab = ctx.proyecto.ruta_trabajo("assets", crear=True)
+        os.makedirs(os.path.join(trab, "escenas"), exist_ok=True)
+        with open(os.path.join(trab, "escenas", "S010.png"), "wb") as fh:
+            fh.write(b"VIEJA")
+        ctx.estado.set_params("assets", {"unidades": {"escena:S010": {"prompt": "a"}}})
+        ctx.estado.completar("assets", {}, unidades={"escena:S010": {"png": "escenas/S010.png"}})
+        rep = servidor._repaso()
+        for modo in ("fallo", "cancelado"):
+            nota = rep.anadir(ctx.proyecto, "pon un perro", 1.0, plano="S010",
+                              imagenes=[], pantalla="imagenes", ancla="")
+
+            def paso_falso(avisar, ctx, paso_id, unidades, opciones=None, modo=modo):
+                carpeta = MEDIOS.sembrar_trabajo(ctx.proyecto, "assets")
+                with open(os.path.join(carpeta, "escenas", "S010.png"), "wb") as fh:
+                    fh.write(b"NUEVA_PAGADA")                # ya pagada
+                if modo == "fallo":
+                    raise RuntimeError("fallo al sellar")
+                raise Cancelado("cancelado")
+            cambiar("_correr_paso", paso_falso)
+            servidor._COLA_NOTAS[ctx.id] = {"cola": [nota["id"]]}
+            try:
+                servidor._correr_notas_imagenes(lambda *a, **k: None, ctx)
+            except Cancelado:
+                pass
+            setattr(servidor, "_correr_paso", reales.pop("_correr_paso"))
+            carpeta = MEDIOS.sembrar_trabajo(ctx.proyecto, "assets")   # la siguiente tanda
+            with open(os.path.join(carpeta, "escenas", "S010.png"), "rb") as fh:
+                visto = fh.read()
+            igual(visto, b"VIEJA", f"F5 ({modo}): la siguiente tanda no ve la imagen "
+                                   "de la nota que no se puso")
+            apartadas = os.path.join(ctx.proyecto.raiz, "pasos", "assets", "_apartados")
+            ok(any(os.path.isfile(os.path.join(apartadas, d, "S010.png"))
+                   for d in (os.listdir(apartadas) if os.path.isdir(apartadas) else [])),
+               f"F5 ({modo}): la imagen pagada queda apartada, no borrada")
+            ficha = next(n for n in rep.leer(ctx.proyecto)["notas"] if n["id"] == nota["id"])
+            ok("aparte" in str(ficha.get("aviso") or ""),
+               f"F5 ({modo}): y la nota lo dice: {ficha.get('aviso')!r}")
+            shutil.rmtree(apartadas, ignore_errors=True)
+            servidor._COLA_NOTAS.pop(ctx.id, None)
+
+        # D7 (revisión) · TOCAR A MANO LA HOJA DE UN ASSET CON LA TANDA CORRIENDO
+        # deja obsoleto el plano que la usa: la cascada es del usuario, no de la tanda
+        p6 = servidor.PASOS_MODULOS.p6_assets
+        proyecto = Proyecto.crear(base, "d7 hoja")
+        e = Estado(proyecto)
+        for paso in ("ingesta", "brief", "guion", "voz", "revision_audio"):
+            e.completar(paso, {"x": 1})
+        deps = {"escena:S05": ["asset:X"]}
+        e.set_params("assets", {"unidades": {"asset:X": {"d": "hoja"}, "escena:S05": {"d": "plano"}}})
+        p6.propagar_dependencias(e, deps)
+        e.completar("assets", {}, {"asset:X": {"p": 1}, "escena:S05": {"p": 1}})
+        e.marcar_ejecutando("assets")                           # arranca una tanda
+        e.actualizar_params("assets", {"unidades": {"asset:X": {"d": "hoja", "feedback": "más alto"}}})
+        try:                                                    # lo que hace fijar_params
+            p6.propagar_dependencias(e, deps, del_propio_paso=False)
+        except TypeError:
+            p6.propagar_dependencias(e, deps)
+        p6.propagar_dependencias(e, deps)                       # la tanda, antes de sellar
+        e.completar("assets", {}, {"asset:X": {"p": 1}, "escena:S05": {"p": 1}})
+        obsoletas = e.unidades_obsoletas("assets")
+        ok("escena:S05" in obsoletas,
+           f"D7: el plano que usa una hoja retocada durante la tanda queda por rehacer ({obsoletas})")
+
+        # R2 (revisión) · un valor ANTIGUO ya guardado no impide guardar el paso
+        pid = Proyecto.crear(base, "r2 antiguo").id
+        servidor.contexto(pid).estado.set_params("assets", {"estilo": "cartoon", "calidad": "low"})
+        codigo, _m = _llamar(servidor.fijar_params, pid, "assets",
+                             {"params": {"estilo": "cartoon", "calidad": "medium"}})
+        igual(codigo, 200, "R2: el borrador entero con un valor antiguo sin tocar se guarda")
+        # R2 (revisión) · /generar no escribe params con CUALQUIER trabajo del vídeo vivo
+        cambiar("_trabajo_que_toca", lambda ctx, pasos: {"id": "m", "nombre": "montaje",
+                                                          "progreso": 0.5}
+                if "render" in set([pasos] if isinstance(pasos, str) else pasos) else None)
+        codigo, _m = _llamar(servidor.generar_video, pid, {"params": {"brief": {"duracion_s": 55}}})
+        igual(codigo, 409, "R2: /generar con un montaje corriendo da 409")
+        ok((servidor.contexto(pid).estado.params("brief") or {}).get("duracion_s") != 55,
+           "R2: y no deja sus params escritos")
+        setattr(servidor, "_trabajo_que_toca", reales.pop("_trabajo_que_toca"))
+
+        # R4 (segunda parte) · LA CARPETA DE ID CAMBIADO SE QUEDA CON SU CLIENTE Y
+        # SU GASTO: el cliente iba por el id viejo y el gasto global también
+        CL = servidor.CLIENTES
+        cliente = CL.crear(base, "Cliente R4")["id"]
+        original = Proyecto.crear(base, "r4b original")
+        CL.asignar_video(base, original.id, cliente)
+        shutil.copytree(original.raiz, os.path.join(base, "r4b_copia"))      # copia
+        renombrar = Proyecto.crear(base, "r4b antes")
+        CL.asignar_video(base, renombrar.id, cliente)
+        os.rename(renombrar.raiz, os.path.join(base, "r4b_despues"))         # renombrado
+        codigo, _d = pedir("GET", "/api/proyectos")
+        igual(codigo, 200, "R4: la lista de vídeos se pide")
+        igual(CL.cliente_de(base, video_id="r4b_copia"), cliente,
+              "R4: la copia a mano queda en el mismo cliente que su original")
+        igual(CL.cliente_de(base, video_id=original.id), cliente, "R4: y el original sigue en él")
+        igual(CL.cliente_de(base, video_id="r4b_despues"), cliente,
+              "R4: la carpeta renombrada a mano sigue en su cliente")
+        ok(not CL.cliente_de(base, video_id="r4b_antes"),
+           "R4: y su id viejo, que ya no es de nadie, se suelta")
+        with open(os.path.join(base, "r4b_copia", "proyecto.json"), encoding="utf-8") as fh:
+            ficha = json.load(fh)
+        igual((ficha.get("id"), ficha.get("id_anterior")), ("r4b_copia", "r4b_original"),
+              "R4: y su proyecto.json ya dice su id (una sola vez)")
+        from nucleo import coste as COSTE                     # noqa: PLC0415
+        ruta_global_antes = COSTE.RUTA_GLOBAL
+        COSTE.RUTA_GLOBAL = os.path.join(base, "_coste_global.jsonl")
+        try:
+            with open(COSTE.RUTA_GLOBAL, "w", encoding="utf-8") as fh:
+                for pid_, raiz_, usd in (("r4b_original", original.raiz, 1.0),
+                                         ("r4b_original", os.path.join(base, "r4b_copia"), 2.0)):
+                    fh.write(json.dumps({"proveedor": "openai", "operacion": "imagen", "usd": usd,
+                                         "proyecto": pid_, "raiz": raiz_,
+                                         "momento": "2026-10-18T10:00:00"}) + "\n")
+            por = {p_["proyecto"]: p_["total_usd"] for p_ in COSTE.resumen_global()["proyectos"]}
+            igual((por.get("r4b_original"), por.get("r4b_copia")), (1.0, 2.0),
+                  f"R4: el gasto que la copia anotó con el id del original sale a nombre de la copia ({por})")
+        finally:
+            COSTE.RUTA_GLOBAL = ruta_global_antes
+
+        # R9 (segunda parte) · el texto de un 500 no lleva las carpetas del servidor
+        pid = Proyecto.crear(base, "r9 rutas").id
+        Estado(servidor.contexto(pid).proyecto)
+        cambiar("_sonido", lambda: (_ for _ in ()).throw(FileNotFoundError(
+            2, "No such file or directory", "/opt/as-video-studio/datos/secretos/claves.json")))
+        codigo, datos = pedir("GET", f"/api/proyectos/{pid}/sonido")
+        igual(codigo, 500, "R9: un fichero que falta sigue siendo un 500")
+        texto = json.dumps(datos or {}, ensure_ascii=False)
+        ok("/opt/" not in texto and "datos/secretos" not in texto and "claves.json" in texto,
+           f"R9: con el nombre del fichero y sin sus carpetas: {(datos or {}).get('error')}")
+        setattr(servidor, "_sonido", reales.pop("_sonido"))
+
+        # S3 · UNA CLAVE CORTA NO SE ENSEÑA A MEDIAS (el Client ID de Jamendo
+        # tiene 8 caracteres y se enseñaban 4)
+        from pasos import claves as CLAVES                    # noqa: PLC0415
+        igual(CLAVES.tapar("abcd1234"), "…34", "S3: de una clave de 8 se enseñan 2")
+        igual(CLAVES.tapar("abcde"), "…", "S3: de una de 5, nada")
+        igual(CLAVES.tapar("sk-" + "a" * 37 + "wxyz"), "…wxyz",
+              "S3: de una larga, los cuatro últimos, como siempre")
+    finally:
+        motor.should_exit = True
+        hilo.join(10)
+        for nombre, valor in reales.items():
+            setattr(servidor, nombre, valor)
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        BITACORA.RUTA_GLOBAL = global_antes
+
 def probar_cancelar_en_el_taller():
     """CANCELAR Y VOLVER A PULSAR EN EL TALLER DE ESTILOS (18-10-2026).
 
@@ -6241,6 +6676,7 @@ def main():
         probar_el_reloj_de_un_trabajo()
         probar_revision_del_nucleo_v2f()
         probar_que_lo_lento_no_para_el_servicio()
+        probar_lo_de_v2h()
         probar_cancelar_en_el_taller()
     finally:
         parar(proceso)

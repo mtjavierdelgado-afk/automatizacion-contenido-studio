@@ -19327,8 +19327,31 @@ function bloqueEnviosFicha() {
       ['fallido', 'comprobar'].includes(e.estado)
         ? h('button', { clase: 'mini fantasma', title: 'Quitarlo de «Te necesitan» (no borra nada en la red)',
           onclick: () => cancelarEnvioPublicar(e) }, 'Quitar de la lista') : null));
+    if (e.recortado) {
+      b.appendChild(h('div', { clase: 'caja-aviso aviso-recortado' },
+        `⚠ ${CORTOS_RED[e.red] || e.red}: ${e.recortado}. Mira el post y, si hace falta, pega el texto a mano.`));
+    }
+    b.appendChild(loMandadoPublicar(e));
   });
   return b;
+}
+
+/* «VER LO QUE SE MANDÓ» (19-10-2026): los campos de texto tal como salieron
+   hacia Upload-Post, por envío. Abierto o cerrado como lo dejaste: la ficha se
+   repinta cada pocos segundos mientras algo está en el aire. */
+function loMandadoPublicar(e) {
+  const campos = Object.entries(e.enviado || {}).filter(([, v]) => typeof v === 'string' && v);
+  if (!campos.length) return h('span', {});
+  PUB.mandadoAbierto = PUB.mandadoAbierto || {};
+  return h('details', { clase: 'asi-sale lo-mandado', open: !!PUB.mandadoAbierto[e.id],
+    ontoggle: ev => { PUB.mandadoAbierto[e.id] = ev.currentTarget.open; } },
+  h('summary', {}, `Ver lo que se mandó a ${CORTOS_RED[e.red] || e.red}`),
+  ...campos.map(([k, v]) => h('div', { clase: 'campo-mandado' },
+    h('div', { clase: 'fila' }, h('b', { clase: 'crece' }, `${k} (${v.length} caracteres)`),
+      h('button', { clase: 'mini fantasma', onclick: () => copiarTexto(v) }, 'Copiar')),
+    h('pre', { clase: 'texto-compuesto' }, v))),
+  e.texto_publicado ? h('div', { clase: 'meta' },
+    `Lo que devolvió la red: ${e.texto_publicado.length} caracteres.`) : null);
 }
 
 /* ---------------------------------------------------- CUENTAS Y AJUSTES */

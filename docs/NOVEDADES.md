@@ -10,6 +10,16 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Publicar: los posts salen con el texto entero (19 de octubre)**
+- **Arreglado:** sin YouTube ni Facebook en el envío, los posts salían solo con
+  la primera línea (sin el resto ni los hashtags). El «title» común que se manda
+  a Upload-Post llevaba solo esa línea; ahora lleva el texto completo de la red,
+  el mismo que su campo propio. Con YouTube o Facebook sigue siendo su título.
+- En la ficha, cada envío tiene **«Ver lo que se mandó»**: los textos exactos
+  que salieron hacia Upload-Post, con su largo y **Copiar**. Si Upload-Post
+  devuelve el texto que quedó en la red y es más corto, sale el aviso «la red
+  lo recortó».
+
 **Publicar: más redes, cifras automáticas e informe del mes (18 de octubre)**
 - **Nueve redes más**: LinkedIn, X, Threads, Pinterest, Bluesky, Discord,
   Telegram, Mastodon y Google Business. Se añaden por proyecto en Publicar →

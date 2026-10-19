@@ -3681,3 +3681,8 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
   .informe-publicar .no-imprimir { display: none; }
   .informe-publicar .pastilla { border: 1px solid var(--negro); color: var(--negro); background: none; }
 }
+/* Publicar · «Ver lo que se mandó» (19-10) */
+.lo-mandado { margin: 2px 0 8px; }
+.campo-mandado { margin-top: 6px; }
+.campo-mandado b { font-size: 12px; overflow-wrap: anywhere; }
+.aviso-recortado { margin: 4px 0; overflow-wrap: anywhere; }

@@ -405,6 +405,11 @@ html,body{margin:0;padding:0;background:#0b0c09;overflow:hidden}
    error, da un subtitulo apagado. Se dice, y asi no hay que deducirlo. */
 #camara{z-index:0}
 #capafija{position:absolute;left:0;top:0;width:__W__px;height:__H__px;z-index:1}
+/* LA PROFUNDIDAD 2.5D (18-10-2026): un lienzo WebGL a la medida del cuadro, por
+   DEBAJO de #camara (mismo z-index, antes en el DOM). Pinta la imagen con la
+   misma ventana que la camara y desplaza cada pixel segun su profundidad. Solo
+   se enciende si el plano trae mapa; si no, ni se toca y sale como siempre. */
+#prof{position:absolute;left:0;top:0;width:__W__px;height:__H__px;z-index:0;display:none}
 #capafija > svg{width:__W__px;height:__H__px;display:block}
 </style></head><body>
 <!-- DOS CAPAS, Y LA DIFERENCIA ES EN QUE LADO DEL TRANSFORM ESTAN.
@@ -415,6 +420,7 @@ html,body{margin:0;padding:0;background:#0b0c09;overflow:hidden}
      capa y el subtitulo hacia zoom con la imagen; el canal lo vio montado y
      pidio que no se moviera (PENDIENTE 38). -->
 <div id="lienzo">
+  <canvas id="prof" width="__W__" height="__H__"></canvas>
   <div id="camara">
     <img id="fondo" src="__FONDO__">
     <div id="capa">__CAPA__</div>
@@ -523,6 +529,87 @@ function ventanaTrayecto(t){
   return [px, py, pw];
 }
 
+// LA PROFUNDIDAD 2.5D. La imagen y su mapa (blanco = cerca) como texturas; el
+// shader mira por la MISMA ventana que la camara y, dentro de ella, aleja del
+// centro y desplaza de lado lo cercano mas que el fondo. Lo que tarda en
+// cargar se espera en el primer `pintar`: devuelve la promesa y quien llama la
+// espera. Si algo falla (sin WebGL, una textura que no carga) se queda en null
+// y el plano se pinta con el <img> de siempre.
+const VERT_PROF = 'attribute vec2 a_pos;varying vec2 v_uv;' +
+  'void main(){v_uv=a_pos*0.5+0.5;gl_Position=vec4(a_pos,0.0,1.0);}';
+const FRAG_PROF = '#ifdef GL_FRAGMENT_PRECISION_HIGH\\nprecision highp float;\\n#else\\n' +
+  'precision mediump float;\\n#endif\\n' +
+  'varying vec2 v_uv;uniform sampler2D u_img,u_dep;uniform vec4 u_ven;' +
+  'uniform float u_lat,u_emp;' +
+  'void main(){vec2 uv=vec2(v_uv.x,1.0-v_uv.y);vec2 base=u_ven.xy+uv*u_ven.zw;' +
+  'float d=texture2D(u_dep,base).r-0.5;vec2 c=u_ven.xy+0.5*u_ven.zw;' +
+  'vec2 s=c+(base-c)/(1.0+u_emp*d)-vec2(u_lat*d*u_ven.z,0.0);' +
+  'gl_FragColor=vec4(texture2D(u_img,clamp(s,0.0,1.0)).rgb,1.0);}';
+function cargarImagen(url){
+  return new Promise((ok, mal) => {
+    const img = new Image();
+    img.onload = () => ok(img);
+    img.onerror = () => mal(new Error('no carga ' + url));
+    img.src = url;
+  });
+}
+async function prepararProfundidad(){
+  const p = MOV.profundidad;
+  if (!p || !p.mapa) return null;
+  const lienzoGL = document.getElementById('prof');
+  const gl = lienzoGL.getContext('webgl', {preserveDrawingBuffer: true,
+                                            antialias: false, alpha: false});
+  if (!gl) return null;
+  const compilar = (tipo, fuente) => {
+    const sh = gl.createShader(tipo); gl.shaderSource(sh, fuente); gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS))
+      throw new Error('shader: ' + gl.getShaderInfoLog(sh));
+    return sh;
+  };
+  const pr = gl.createProgram();
+  gl.attachShader(pr, compilar(gl.VERTEX_SHADER, VERT_PROF));
+  gl.attachShader(pr, compilar(gl.FRAGMENT_SHADER, FRAG_PROF));
+  gl.bindAttribLocation(pr, 0, 'a_pos'); gl.linkProgram(pr);
+  if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error('link');
+  gl.useProgram(pr);
+  const quad = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  const [img, dep] = await Promise.all([
+    fondo.complete && fondo.naturalWidth ? fondo : cargarImagen(fondo.src),
+    cargarImagen(p.mapa)]);
+  [[img, 0], [dep, 1]].forEach(([fuente, unidad]) => {
+    const tx = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0 + unidad); gl.bindTexture(gl.TEXTURE_2D, tx);
+    // no son potencia de dos: solo CLAMP_TO_EDGE y LINEAR, o WebGL pinta negro
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, fuente);
+  });
+  const u = n => gl.getUniformLocation(pr, n);
+  gl.uniform1i(u('u_img'), 0); gl.uniform1i(u('u_dep'), 1);
+  gl.viewport(0, 0, W, H);
+  lienzoGL.style.display = 'block';
+  fondo.style.visibility = 'hidden';
+  return {gl: gl, ven: u('u_ven'), lat: u('u_lat'), emp: u('u_emp'),
+          lateral: Number(p.lateral) || 0, empuje: Number(p.empuje) || 0};
+}
+const PROFUNDIDAD = MOV.profundidad
+  ? prepararProfundidad().catch(e => { console.error('profundidad: ' + e); return null; })
+  : null;
+function pintarProfundidad(pr, v, u){
+  const e = suavizar(u);
+  const pw = v[2], ph = pw * H / W;
+  pr.gl.uniform4f(pr.ven, v[0] / HW, v[1] / HH, pw / HW, ph / HH);
+  pr.gl.uniform1f(pr.lat, pr.lateral * (e - 0.5));
+  pr.gl.uniform1f(pr.emp, pr.empuje * e);
+  pr.gl.drawArrays(pr.gl.TRIANGLE_STRIP, 0, 4);
+}
+
 function pintar(t){
   const u = DUR > 0 ? Math.min(1, Math.max(0, t/DUR)) : 0;
   const v = (MOV.trayecto && MOV.trayecto.tramos && MOV.trayecto.tramos.length)
@@ -533,6 +620,9 @@ function pintar(t){
     'px) scale(' + s.toFixed(6) + ')';
   if (svg && svg.setCurrentTime) svg.setCurrentTime(t);
   if (svgFijo && svgFijo.setCurrentTime) svgFijo.setCurrentTime(t);
+  if (PROFUNDIDAD) {
+    return PROFUNDIDAD.then(pr => { if (pr) pintarProfundidad(pr, v, u); return 1; });
+  }
   // Sigue devolviendo 1 y no undefined: quien llama hace
   // `Promise.resolve(pintar(t))`, asi que un valor pelado vale igual.
   return 1;
@@ -543,6 +633,22 @@ pintar(0);
 
 def _url_local(ruta):
     return medios.url_de_fichero(ruta)
+
+
+def profundidad_de_mov(mov, base_callouts):
+    """{"profundidad": {...}} con el mapa en ruta absoluta, o {} si no hay.
+
+    Un mapa que falta en disco no tumba el render: el plano sale con el
+    movimiento de siempre (es lo mismo que pasa sin modelo de profundidad).
+    """
+    prof = (mov or {}).get("profundidad") or {}
+    mapa = prof.get("mapa")
+    if not mapa:
+        return {}
+    ruta = mapa if os.path.isabs(mapa) else os.path.join(base_callouts, mapa)
+    if not os.path.exists(ruta):
+        return {}
+    return {"profundidad": dict(prof, mapa=ruta)}
 
 
 def _pagina_de(escena, mov, capa_svg, hyper, p, destino, capa_fija="", fps=30):
@@ -557,7 +663,10 @@ def _pagina_de(escena, mov, capa_svg, hyper, p, destino, capa_fija="", fps=30):
             .replace("__CAPAFIJA__", capa_fija or "")
             .replace("__MOV__", json.dumps(dict(
                 {"ventana_ini": mov["ventana_ini"], "ventana_fin": mov["ventana_fin"]},
-                **({"trayecto": mov["trayecto"]} if mov.get("trayecto") else {}))))
+                **({"trayecto": mov["trayecto"]} if mov.get("trayecto") else {}),
+                **({"profundidad": dict(mov["profundidad"],
+                                        mapa=_url_local(mov["profundidad"]["mapa"]))}
+                   if (mov.get("profundidad") or {}).get("mapa") else {}))))
             .replace("__FPS__", str(int(fps)))
             .replace("__DUR__", f"{duracion:.4f}"))
     return medios.escribir_texto(destino, html)
@@ -1470,7 +1579,9 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
                          "hyperframe_px": mov.get("hyperframe_px")},
                         # el trayecto del montaje, si lo hay (ver PAGINA)
                         **({"trayecto": mov["trayecto"]}
-                           if mov.get("trayecto") else {})),
+                           if mov.get("trayecto") else {}),
+                        # y la profundidad 2.5D, con su mapa ya en ruta absoluta
+                        **profundidad_de_mov(mov, base_callouts)),
             "capa": svg, "capa_fija": fija,
             "hyper": hyper, "frames": total, "fps": fps,
             "resolucion": [ancho, alto], "calidad": p["calidad_video"],

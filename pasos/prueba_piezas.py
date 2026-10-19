@@ -5447,6 +5447,89 @@ def prueba_montaje_movimiento():
     igual(presets_light.ritmo_para_video_nuevo(60, 4.0), None, "y uno mas rapido tambien")
 
 
+def prueba_profundidad_25d():
+    """La profundidad 2.5D (rama profundidad-25d, 18-10-2026)."""
+    import camara
+    import profundidad
+
+    titulo("profundidad: apagada no se guarda, y encendida se lee")
+    igual(camara.para_guardar({"profundidad": False}), None,
+          "apagada es lo de siempre: no se escribe (regla 1)")
+    igual(camara.para_guardar({"profundidad": True}), {"profundidad": True},
+          "encendida, solo esa clave")
+    igual(camara.profundidad_de(None), None, "sin montaje, ningún plano la lleva")
+    a = camara.profundidad_de({"movimiento": "vivo", "profundidad": True}, 0)
+    b = camara.profundidad_de({"movimiento": "vivo", "profundidad": True}, 1)
+    ok(a and b and a["lateral"] == -b["lateral"] and a["empuje"] == b["empuje"] > 0,
+       "el desplazamiento cambia de lado de un plano al siguiente")
+    ok(abs(camara.profundidad_de({"movimiento": "dinamico", "profundidad": True})["lateral"])
+       > abs(a["lateral"]), "en dinámico se mueve algo más que en vivo")
+    try:
+        camara.normalizar_montaje({"profundidad": "si"}, estricto=True)
+        ok(False, "un valor que no es sí/no da error en la API")
+    except ValueError:
+        ok(True, "un valor que no es sí/no da error en la API")
+    igual(camara.MONTAJE_CORTOS.get("profundidad", False), False,
+          "los cortos nuevos no nacen con ella (es experimental)")
+
+    titulo("profundidad: sin modelo no rompe nada")
+    antes = os.environ.get("ESTUDIO_MODELO_PROFUNDIDAD")
+    os.environ["ESTUDIO_MODELO_PROFUNDIDAD"] = os.path.join(tempfile.gettempdir(), "no_existe.onnx")
+    try:
+        si, por_que = profundidad.disponible()
+        ok(not si and por_que, f"dice que no está y por qué ({por_que})")
+        igual(profundidad.mapa_de(__file__), None, "y no hay mapa: el plano va como siempre")
+    finally:
+        if antes is None:
+            os.environ.pop("ESTUDIO_MODELO_PROFUNDIDAD", None)
+        else:
+            os.environ["ESTUDIO_MODELO_PROFUNDIDAD"] = antes
+
+    titulo("profundidad: el render no se cae si falta el mapa")
+    igual(p8_render.profundidad_de_mov({"profundidad": {"mapa": "prof/S999.png",
+                                                       "lateral": 0.03, "empuje": 0.07}},
+                                       tempfile.gettempdir()), {},
+          "un mapa que no está en disco: el plano sale con el movimiento de siempre")
+    igual(p8_render.profundidad_de_mov({}, tempfile.gettempdir()), {},
+          "y un plano sin profundidad no lleva nada")
+    ok("FRAG_PROF" in p8_render.PAGINA and "PROFUNDIDAD.then" in p8_render.PAGINA,
+       "la página pinta con WebGL cuando el plano trae mapa")
+
+    si, _ = profundidad.disponible()
+    if not si:
+        print("    (sin modelo de profundidad en esta máquina: no se calcula ningún mapa)")
+        return
+    titulo("profundidad: el mapa sale, blanco cerca, y la segunda vez de la caché")
+    carpeta = tempfile.mkdtemp(prefix="prueba_prof_")
+    antes_p = os.environ.get("ESTUDIO_PROYECTOS")
+    os.environ["ESTUDIO_PROYECTOS"] = carpeta
+    try:
+        imagen = Image.new("RGB", (256, 384), (150, 190, 230))
+        from PIL import ImageDraw                              # noqa: PLC0415
+        dibujo = ImageDraw.Draw(imagen)
+        dibujo.rectangle([0, 230, 256, 384], fill=(110, 160, 90))     # suelo
+        dibujo.ellipse([20, 150, 140, 370], fill=(50, 110, 50))       # arbol delante
+        ruta = os.path.join(carpeta, "plano.png")
+        imagen.save(ruta)
+        t0 = time.time()
+        mapa = profundidad.mapa_de(ruta)
+        ok(mapa and os.path.exists(mapa), "sale el mapa")
+        with Image.open(mapa) as m:
+            igual(m.size, (256, 384), "del tamaño de la imagen")
+            cielo = m.getpixel((200, 20))
+            suelo = m.getpixel((200, 370))
+        ok(suelo > cielo, f"el suelo de abajo sale más cerca que el cielo ({suelo} > {cielo})")
+        t1 = time.time()
+        igual(profundidad.mapa_de(ruta), mapa, "la segunda vez es el mismo fichero")
+        ok(time.time() - t1 < max(0.2, (t1 - t0) / 5), "y no se vuelve a calcular")
+    finally:
+        if antes_p is None:
+            os.environ.pop("ESTUDIO_PROYECTOS", None)
+        else:
+            os.environ["ESTUDIO_PROYECTOS"] = antes_p
+        shutil.rmtree(carpeta, ignore_errors=True)
+
+
 def main():
     _prohibir_pagar()
     # EL HISTORICO DE TIEMPOS, A UNA COPIA. Guarda 30 muestras por paso, asi
@@ -5508,6 +5591,7 @@ def main():
     prueba_revision_16_10_render()
     prueba_enlaces_del_render()
     prueba_montaje_movimiento()
+    prueba_profundidad_25d()
 
     print("\n" + "=" * 70)
     if _fallos:

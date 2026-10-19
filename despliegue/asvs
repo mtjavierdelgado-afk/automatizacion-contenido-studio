@@ -325,6 +325,11 @@ actualizar() {
   # systemd, nginx, el navegador y el entorno, con copia en anterior/config
   _configurar "$RAIZ/app/despliegue" "$anterior/config"
   chown "$USUARIO:$USUARIO" "$RAIZ/datos/entorno"
+  # La profundidad 2.5D: su libreria y su modelo, si faltan. No falla nunca
+  # (ver plantillas.sh): sin ella todo lo demas va igual.
+  if declare -F instalar_profundidad >/dev/null; then
+    instalar_profundidad "$RAIZ" "$USUARIO" || true
+  fi
   systemctl restart as-video-login as-video-studio
   trap - ERR
 

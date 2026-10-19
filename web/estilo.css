@@ -3283,6 +3283,21 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .regla-estilo-propuesta { border: 1px dashed var(--acento-borde); border-radius: 8px;
   padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--hueco); }
 
+/* ============================================== NOTAS DEL 19-10 (PUBLICAR)
+   Rama `notas-19oct`: la pastilla de guardado de los textos, un botón por
+   punto de la nota SEO, «con estos cambios» y los envíos descartados plegados. */
+.fila-guardado-publicar { position: sticky; top: 0; z-index: 3; justify-content: flex-end;
+  pointer-events: none; margin: 4px 0 -4px; }
+.guardado-publicar { display: inline-flex; gap: 6px; align-items: center; pointer-events: auto;
+  background: var(--panel); border-radius: 999px; padding: 2px; }
+.punto-seo.fila { gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; }
+.punto-seo.fila > .crece { min-width: 0; overflow-wrap: anywhere; }
+.pista-punto-seo { font-size: 12px; padding: 0 0 4px 18px; }
+.enlace-punto-seo { color: var(--acento); white-space: nowrap; }
+.nota-con-cambios { font-size: 12px; }
+.envios-descartados > summary { cursor: pointer; font-size: 13px; color: var(--tenue); padding: 6px 0; }
+.motivo-cola { font-size: 12px; }
+
 /* ================================================================ PUBLICAR
    Rama `publicar-redes-1` (16-10-2026): la barra de módulos y el módulo
    Publicar. Todo nuevo y aquí, al final, para no chocar con las otras ramas.

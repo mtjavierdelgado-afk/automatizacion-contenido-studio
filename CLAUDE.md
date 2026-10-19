@@ -92,6 +92,7 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 | Rama abierta | Ficheros reservados | Desde |
 |---|---|---|
 | `publicar-partir-subida` | Publicar: YouTube/Facebook en su propia subida cuando van con otras redes. `pasos/publicar.py` (`enviar`), `pasos/prueba_publicar.py` (sección 4f), `docs/NOVEDADES.md` | 19-10-2026 |
+| `notas-19oct` | Notas del dueño del 19-10. **Por zonas:** `web/app.js` (`irAModulo`/barra de módulos y la tarjeta «Ir a Crear»: Crear → Tus proyectos; los diálogos de lámina y `dialogo`; la pintura del asistente; en PUBLICAR, la pastilla de guardado, `filaEnvioCola` «Quitar» y el bloque SEO `seoDeRedPublicar`/`propuestaSeoPublicar`; el deslizador de música en el encargo nuevo), `app.py` (`cambiar_laminas`, `_asistente_listo`, `_opciones_al_crear` solo `musica_db`, las rutas de cola de Publicar), `pasos/laminas.py` (`MAX_TEXTO`), `pasos/login_cli.py` (`situacion`: stdin), `pasos/publicar.py` (`_limpiar_hashtags`, `_texto_para`, `cola`, `_optimizar`; **NO** `enviar`, de `publicar-partir-subida`), `pasos/publicar_seo.py` (`nota` con ids de punto e `INSTRUCCION_OPTIMIZAR`), `pasos/p4_voz.py` (`regrabar_seccion`: el cosido), `web/estilo.css` (clases nuevas antes de las de Publicar), `docs/NOVEDADES.md`, `docs/API.md`; sus pruebas (`prueba_api.py`, `pasos/prueba_publicar.py` en sección propia, `pasos/prueba_pasos_voz.py`, `pasos/prueba_presets_light.py`, un tramo al final de `prueba_recorrido.py`) | 19-10-2026 |
 
 Quien abre una rama la apunta aquí (en `main`, regla 8); quien la une a `main`,
 la quita.

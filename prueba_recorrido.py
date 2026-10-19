@@ -4495,5 +4495,80 @@ def parrilla_analizar_una_cuenta(navegador, datos):
     pg.cerrar()
 
 
+# ======================================================================
+# EL MOVIMIENTO DE CADA IMAGEN (rama `montaje-por-plano`, 19-10-2026). Tramo
+# propio y al final, para no chocar con las otras ramas.
+
+@escenario
+def movimiento_de_cada_imagen(navegador, datos):
+    """En la diapositiva de Imágenes, «🎬 Esta imagen» elige el movimiento y la
+    2.5D de ESE plano: «Quieta» lo guarda en su unidad, deja pendiente solo
+    ese plano y, al montar, su trayecto es un encuadre fijo. «Como el vídeo»
+    lo quita y la firma vuelve a la de antes."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
+    ok(pg.esperar(".montaje-plano", "Esta imagen", 15), "la diapositiva trae «🎬 Esta imagen»")
+    _r, leido = api.get(f"/api/proyectos/{pid}/planos/montaje")
+    for _vuelta in range(len(leido.get("planos_del_video") or [])):
+        if pg.p.evaluate("() => escenaPrevia().id") not in (leido.get("no_aplica") or []):
+            break
+        pg.js("irAEscenaPrevia(1);")
+        pg.p.wait_for_timeout(400)
+    sid = pg.p.evaluate("() => escenaPrevia().id")
+    ok(sid not in (leido.get("no_aplica") or []), f"se mira un plano con imagen ({sid})")
+    ok(pg.visible(".montaje-plano button.activo", "Como el vídeo"),
+       "de partida, «Como el vídeo» (no se escribe nada al abrir)")
+    _r, callouts = api.get(f"/api/proyectos/{pid}/pasos/callouts")
+    firma_antes = callouts.get("firma")
+    sucias_antes = set(callouts.get("unidades_obsoletas") or [])
+    ok(f"escena:{sid}" not in ((callouts.get("params") or {}).get("unidades") or {})
+       or "montaje" not in (((callouts.get("params") or {}).get("unidades") or {}).get(f"escena:{sid}") or {}),
+       "abrir la diapositiva no escribe el montaje del plano (regla 1)")
+    pg.p.locator(".montaje-plano button", has_text="Quieta").first.click()
+    ok(pg.esperar(".montaje-plano button.activo", "Quieta", 10), "«Quieta» queda marcada")
+    _r, leido = api.get(f"/api/proyectos/{pid}/planos/montaje")
+    ok((leido.get("planos") or {}).get(sid) == {"movimiento": "quieto"},
+       f"y se guarda solo en ese plano ({leido.get('planos')})")
+    _r, callouts = api.get(f"/api/proyectos/{pid}/pasos/callouts")
+    ok(set(callouts.get("unidades_obsoletas") or []) - sucias_antes == {f"escena:{sid}"},
+       "deja pendiente ese plano y ninguno más")
+    ok(pg.esperar(".previa-mandos button", "Montar el vídeo", 10),
+       "y abajo sale «Montar el vídeo»")
+    pg.captura("movimiento_de_una_imagen", entera=False)
+    assets_antes = _version_de(datos, "assets", "").get("activa")
+    api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})
+    ok(api.libre(pid, 600), "el montaje termina")
+    activa = _version_de(datos, "callouts", "").get("activa")
+    ruta_mov = os.path.join(datos["proyectos"], pid, "pasos", "callouts",
+                            f"v{activa}", "movimiento", f"{sid}.json")
+    try:
+        with open(ruta_mov, encoding="utf-8") as fh:
+            mov = json.load(fh)
+    except (OSError, ValueError):
+        mov = {}
+    tramos = (mov.get("trayecto") or {}).get("tramos") or []
+    ok(len(tramos) == 1 and tramos[0].get("ini") == tramos[0].get("fin"),
+       f"montado, el plano {sid} va quieto: un solo encuadre fijo")
+    ok(_version_de(datos, "assets", "").get("activa") == assets_antes, "y ni una imagen rehecha")
+    pg.js("pintarLight();")
+    pg.p.wait_for_timeout(800)
+    pg.p.locator(".montaje-plano-fila", has_text="Movimiento").locator(
+        "button", has_text="Como el vídeo").first.click()
+    ok(pg.esperar(".montaje-plano button.activo", "Como el vídeo", 10),
+       "«Como el vídeo» lo devuelve")
+    _r, callouts = api.get(f"/api/proyectos/{pid}/pasos/callouts")
+    ok("montaje" not in (((callouts.get("params") or {}).get("unidades") or {}).get(f"escena:{sid}") or {}),
+       "y quita la clave del plano")
+    api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})
+    api.libre(pid, 600)
+    _r, callouts = api.get(f"/api/proyectos/{pid}/pasos/callouts")
+    ok(callouts.get("firma") == firma_antes, "y la firma de las capas vuelve a la de antes")
+    pg.sin_errores("movimiento de cada imagen")
+    pg.cerrar()
+
+
 if __name__ == "__main__":
     sys.exit(main())

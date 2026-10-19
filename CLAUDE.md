@@ -91,7 +91,6 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 
 | Rama abierta | Ficheros reservados | Desde |
 |---|---|---|
-| `montaje-por-plano` | **Rama por excepción** (pedida por el dueño, 19-10): el **movimiento y la profundidad 2.5D de cada plano**, elegidos en su diapositiva de Imágenes (quieta, sobrio, vivo, dinámico; 2.5D sí/no). Sin elegir, cada plano sigue al vídeo y sale idéntico (regla 1). Va en `callouts.unidades["escena:SID"].montaje`, así que cambiarlo solo deja obsoleto ESE plano (capas y montaje, gratis). **Propios:** nada nuevo. **Por zonas:** `pasos/camara.py` (el montaje de un plano), el bucle de `pasos/p7_callouts.ejecutar` (trayecto y profundidad por plano); en `app.py` un bloque MONTAJE POR PLANO justo después de `aplicar_montaje`; en `web/app.js` una función nueva (`montajeDelPlano` y vecinas) y UNA línea en `vistaPreviaLight`; clases nuevas en `web/estilo.css` antes de las de Publicar; `docs/NOVEDADES.md`, `docs/API.md`; `prueba_piezas.py`, `prueba_api.py` y un tramo al final de `prueba_recorrido.py`. No toca lo reservado por las otras ramas abiertas | 19-10-2026 |
 
 Quien abre una rama la apunta aquí (en `main`, regla 8); quien la une a `main`,
 la quita.

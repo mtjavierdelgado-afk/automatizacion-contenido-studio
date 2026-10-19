@@ -683,7 +683,13 @@ def lanzar_paso(ctx, paso_id, unidades, nombre=None, evento="paso_lanzado",
     # clics seguidos pasaban los dos la comprobacion.
     with _cerrojo_de_cadena(ctx.id):
         _sin_otra_pasada(ctx, paso_id)
-        trabajo_id = ctx.gestor.lanzar(nombre or paso_id, _correr_paso, ctx, paso_id,
+        # LAS IMAGENES DESDE SU BOTON llevan el revisor detras (si su modo no
+        # es «manual»): ver el bloque REVISOR. Solo las de los planos; las
+        # hojas y las piezas (`tipos`) y la recalidad (`nombre`) no.
+        funcion = (_correr_assets_y_revisar
+                   if paso_id == "assets" and nombre is None
+                   and not (opciones or {}).get("tipos") else _correr_paso)
+        trabajo_id = ctx.gestor.lanzar(nombre or paso_id, funcion, ctx, paso_id,
                                        unidades, opciones or {}, paso=paso_id,
                                        unidades=unidades)
     _registrar_trabajo(trabajo_id, ctx.id)
@@ -5878,7 +5884,8 @@ def _que_se_espera(otros):
 def _lanzar_cola(ctx):
     """Lanza el trabajo de la cola. Con el _COLA_LOCK tomado."""
     estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
-    trabajo_id = ctx.gestor.lanzar("notas_imagenes", _correr_notas_imagenes,
+    # con el revisor detras (modos autonomo y automatico): ver el bloque REVISOR
+    trabajo_id = ctx.gestor.lanzar("notas_imagenes", _correr_notas_y_revisar,
                                    ctx, paso="assets")
     estado["trabajo"] = trabajo_id
     _registrar_trabajo(trabajo_id, ctx.id)
@@ -5970,6 +5977,8 @@ def _correr_notas_imagenes(avisar, ctx):
                 return avisar((hechos + min(1.0, max(0.0, float(valor or 0)))) / total,
                               f"{etiqueta} — {mensaje}" if mensaje else "",
                               publico or "")
+            # la cancelacion en el acto llega tambien a traves de este envoltorio
+            avisar_plano.al_cancelar = getattr(avisar, "al_cancelar", None)
             try:
                 _correr_paso(avisar_plano, ctx, "assets", [uid], {"rehacer": True})
             except Cancelado:
@@ -6410,6 +6419,443 @@ def sacar_de_la_cola(pid: str, nid: str):
         estado["cola"] = [x for x in estado["cola"] if x != nid]
         (estado.get("desde_cero") or set()).discard(nid)
     return _ficha_cola(ctx)
+
+
+# ===================================================================== REVISOR
+#
+# EL REVISOR DE IMAGENES (pasos/revisor_imagenes.py, 18-10-2026). Mira cada
+# plano dibujado contra su trozo de guion, el estilo, el Encargo y las reglas de
+# la casa, y deja una nota por plano en el repaso (pantalla «imagenes», autor
+# «revisor»). Rehacerlas va por la MISMA cola de notas de arriba: el revisor no
+# dibuja nada por su cuenta.
+#
+# Tres modos (ajuste `revisor_modo`):
+#   manual      solo «Revisar imágenes»; la persona decide que se rehace.
+#   autonomo    tras cada tanda, revisa lo nuevo y rehace SOLO lo grave, una
+#               vuelta, dentro de los topes.
+#   automatico  tras cada tanda, rehace todo lo marcado y vuelve a revisar, hasta
+#               `revisor_vueltas` vueltas.
+# El enganche de los dos ultimos va en `lanzar_paso` (el boton de generar las
+# imagenes) y en `_correr_assets_de_tanda` (la tanda del video entero), DENTRO
+# del mismo trabajo: asi nada se monta con las imagenes a medio corregir y no
+# hay dos tandas de imagenes a la vez (regla 2 de CLAUDE.md).
+
+#: {pid: trabajo_id} del «Revisar imágenes» a mano en marcha.
+_REVISOR = {}
+#: {pid: {"desde", "mensaje"}} mientras el revisor trabaja SOLO, al final de una
+#: tanda o de la cola de notas: la pantalla lo ensena en su panel.
+_REVISOR_AUTO = {}
+_REVISOR_LOCK = threading.Lock()
+
+
+def _revisor():
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, "los pasos no están cargados")
+    import importlib                                         # noqa: PLC0415
+    return importlib.import_module("pasos.revisor_imagenes")
+
+
+def _imagenes_de_planos(ctx, plan):
+    """{plano: ruta absoluta del PNG de la version activa}, en orden de video."""
+    salida = {}
+    for escena in plan.get("escenas") or []:
+        sid = str(escena.get("id") or "")
+        relativa = _ruta_de_version(ctx, "assets", "escenas", f"{sid}.png") if sid else None
+        if relativa:
+            salida[sid] = os.path.join(ctx.proyecto.raiz, *relativa.split("/"))
+    return salida
+
+
+def _huellas_de_planos(ctx):
+    """{plano: huella del PNG activo}: la foto de antes de una tanda. Vacia en
+    modo manual: ahi nadie la va a mirar y leer ochenta PNG no es gratis."""
+    try:
+        if AJUSTES.leer().get("revisor_modo") not in ("autonomo", "automatico"):
+            return {}
+        plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+        revisor = _revisor()
+        return {p: revisor.huella(r) for p, r in _imagenes_de_planos(ctx, plan).items()}
+    except Exception:                                        # noqa: BLE001
+        return {}
+
+
+def _reglas_para_revisor(estilo, plan):
+    """Las reglas de la casa que se le dieron al generador, en texto."""
+    try:
+        reglas = PASOS_MODULOS.medios.motor("reglas/reglas.py")
+        p6 = PASOS_MODULOS.p6_assets
+        if p6.modo_de(estilo) == "foto":
+            contexto = " ".join([p6.contexto_de_reglas(estilo)] + [
+                str(e.get("prompt") or "") for e in plan.get("escenas") or []])
+            lineas = reglas.para("prompt_imagen", modo="foto", contexto=contexto)
+        else:
+            lineas = reglas.para("prompt_imagen")
+        return "\n".join(f"  - {l}" for l in lineas)
+    except Exception:                                        # noqa: BLE001
+        return ""
+
+
+def _revisar_y_apuntar(avisar, ctx, planos=None, forzar=False):
+    """Revisa los planos sin revisar (o `planos`) y deja sus notas. -> resumen"""
+    revisor = _revisor()
+    p6 = PASOS_MODULOS.p6_assets
+    plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    imagenes = _imagenes_de_planos(ctx, plan)
+    if planos is not None:
+        pedidos = {str(p) for p in planos}
+        imagenes_pedidas = {p: r for p, r in imagenes.items() if p in pedidos}
+        mirar = revisor.sin_revisar(ctx.proyecto, imagenes_pedidas, forzar=forzar)
+    else:
+        mirar = revisor.sin_revisar(ctx.proyecto, imagenes, forzar=forzar)
+    if not mirar:
+        return {"revisados": 0, "bien": 0, "marcadas": [], "fallos": []}
+    assets = ctx.estado.params("assets") or {}
+    estilo = assets.get("estilo") if isinstance(assets.get("estilo"), dict) else {}
+    try:
+        guia = "\n".join("  " + l for l in p6.guia_escrita(estilo))
+    except Exception:                                        # noqa: BLE001
+        guia = ""
+    encargo = str((ctx.estado.params("guion") or {}).get("prompt_general") or "")
+    veredictos = revisor.revisar(
+        ctx.proyecto, plan, imagenes, mirar, estilo=estilo, encargo=encargo,
+        reglas=_reglas_para_revisor(estilo, plan), guia=guia,
+        formato=str(plan.get("formato") or ""),
+        avisar=avisar)
+    resumen = revisor.apuntar(ctx.proyecto, plan, veredictos)
+    ctx.bitacora.anotar("revisor_imagenes", "assets", {
+        "revisados": resumen.get("revisados"), "bien": resumen.get("bien"),
+        "marcadas": [m["plano"] for m in resumen.get("marcadas") or []],
+        "fallos": (resumen.get("fallos") or [])[:3]})
+    return resumen
+
+
+def _mi_trabajo(ctx):
+    """El id del trabajo del gestor en el que corre este hilo, o None."""
+    nombre = threading.current_thread().name
+    if nombre.startswith("trabajo-"):
+        candidato = nombre.rsplit("-", 1)[-1]
+        try:
+            ctx.gestor.estado(candidato)
+            return candidato
+        except KeyError:
+            pass
+    # una tarea de receta que corre a la vez que otra va en un hilo del pool,
+    # sin el nombre del trabajo: es la tanda viva que dibuja imagenes
+    for ficha in ctx.gestor.listar(activos=True):
+        if ficha.get("nombre") in ("notas_imagenes", "revisor_imagenes"):
+            continue
+        if ficha.get("paso") == "assets" or "assets" in (ficha.get("toca") or ()):
+            return ficha["id"]
+    return None
+
+
+def _rehacer_en_linea(avisar, ctx, retoque, sustituye):
+    """Dibuja YA, dentro de este trabajo, esas notas (y lo que hubiera en la
+    cola). Si la cola de notas esta dibujando en otro trabajo, espera a que
+    acabe: dos tandas de imagenes a la vez no (regla 2)."""
+    ids = list(retoque) + list(sustituye)
+    if not ids:
+        return {"hechas": [], "rechazadas": [], "fallidas": []}
+    mio = _mi_trabajo(ctx)
+    if not mio:
+        # SIN TRABAJO AL QUE COLGARLO no se dibuja: la cola apuntaria «nadie
+        # dibuja» y otra tanda podria arrancar a la vez (regla 2). Las notas
+        # se quedan para rehacerlas a mano.
+        ctx.bitacora.anotar("revisor_sin_trabajo", "assets", {"notas": ids})
+        return {"hechas": [], "rechazadas": [], "fallidas": [], "sin_trabajo": True}
+    while True:
+        with _COLA_LOCK:
+            # la cola «dibujando» con ESTE mismo trabajo (el de la cola de notas,
+            # que revisa al final) no es otra tanda: es esta
+            propia = (_COLA_NOTAS.get(ctx.id) or {}).get("trabajo") == mio
+            if propia or not _cola_dibujando(ctx):
+                estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+                ya = set(estado["cola"]) | set((estado.get("actual") or {}).get("notas") or ())
+                estado["cola"].extend(i for i in ids if i not in ya)
+                cero = estado.setdefault("desde_cero", set())
+                cero.update(sustituye)
+                cero.difference_update(retoque)
+                # ESTE trabajo es ahora el de la cola: una nota que llegue
+                # mientras tanto se suma aqui en vez de lanzar otra tanda
+                estado["trabajo"] = mio
+                estado.pop("esperando", None)
+                break
+        avisar(0.99, "el revisor espera a que acaben las imágenes en marcha")
+        time.sleep(2)
+    return _correr_notas_imagenes(avisar, ctx)
+
+
+def _revisar_y_corregir(avisar, ctx, modo, ajustes, planos=None):
+    """El bucle de los modos autonomo y automatico. -> informe
+
+    autonomo: revisa, rehace lo grave, y revisa lo rehecho (una vuelta).
+    automatico: lo mismo hasta `revisor_vueltas` vueltas, con todo lo marcado.
+    Las imagenes por pasada y los dolares por video los limita `elegir`."""
+    revisor = _revisor()
+    vueltas = 1 if modo == "autonomo" else max(1, int(ajustes.get("revisor_vueltas") or 1))
+    usd = _usd_por_imagen(ctx)
+    cupo = max(0, int(ajustes.get("revisor_max_imagenes") or 0))
+    informe = {"modo": modo, "vueltas": [], "rehechas": 0, "mandadas": 0, "porque": ""}
+    # LO QUE ESTA TANDA DIBUJO, y nada mas: se mira y se rehace solo eso. Sin
+    # acotar, en un video de antes del revisor (o revisado a mano) una tanda de
+    # un plano revisaba los ochenta y rehacia notas que nadie habia pedido.
+    objetivo = {str(p) for p in (planos or ())}
+    for vuelta in range(vueltas + 1):
+        # en cada vuelta se pide lo mismo; `sin_revisar` deja fuera lo que no
+        # cambio desde que se miro, asi que en la segunda solo entra lo rehecho
+        resumen = _revisar_y_apuntar(avisar, ctx, planos=sorted(objetivo))
+        if vuelta == vueltas:
+            informe["vueltas"].append({"revisados": resumen.get("revisados", 0),
+                                       "marcadas": len(resumen.get("marcadas") or [])})
+            break
+        retoque, sustituye, porque = revisor.elegir(
+            ctx.proyecto, modo, cupo - informe["mandadas"],
+            float(ajustes.get("revisor_max_usd") or 0.0), usd,
+            # SOLO lo que ESTA vuelta acaba de mirar y marcar: una nota vieja de
+            # un plano cuya imagen nueva no se pudo revisar (cupo, tiempo) es de
+            # la imagen de antes, y rehacerla seria pagar a ciegas
+            planos={m["plano"] for m in resumen.get("marcadas") or []} & objetivo)
+        informe["porque"] = porque
+        informe["vueltas"].append({"revisados": resumen.get("revisados", 0),
+                                   "marcadas": len(resumen.get("marcadas") or []),
+                                   "a_rehacer": len(retoque) + len(sustituye)})
+        if not retoque and not sustituye:
+            break
+        if not _mi_trabajo(ctx):
+            # sin trabajo al que colgar el dibujo no se dibuja (ver
+            # `_rehacer_en_linea`), y tampoco se apunta como intento ni gasto
+            informe["porque"] = "no se pudo colgar del trabajo: quedan como nota"
+            ctx.bitacora.anotar("revisor_sin_trabajo", "assets",
+                                {"notas": retoque + sustituye})
+            break
+        # EL TOPE CUENTA LO MANDADO, no lo que salio: un redibujo que falla
+        # tambien pudo cobrarse, y las notas de una persona que se dibujen en la
+        # misma cola no son del revisor
+        informe["mandadas"] += revisor.contar_intento(ctx.proyecto, retoque + sustituye, usd)
+        avisar(0.99, f"el revisor rehace {len(retoque) + len(sustituye)} imágenes",
+               "Corrigiendo las imágenes")
+        hecho = _rehacer_en_linea(avisar, ctx, retoque, sustituye)
+        if hecho.get("sin_trabajo"):
+            informe["porque"] = "no se pudo colgar del trabajo: quedan como nota"
+            break
+        informe["rehechas"] += len(hecho.get("hechas") or [])
+    ctx.bitacora.anotar("revisor_corrige", "assets", informe)
+    return informe
+
+
+def _revisor_tras_tanda(avisar, ctx, antes):
+    """El enganche de despues de una tanda de imagenes. `antes` son las huellas
+    de los planos antes de dibujar: se revisa SOLO lo que cambio. Nunca tumba la
+    tanda: un fallo del revisor se apunta y la tanda sigue."""
+    try:
+        ajustes = AJUSTES.leer()
+        modo = ajustes.get("revisor_modo")
+        if modo not in ("autonomo", "automatico"):
+            return None
+        despues = _huellas_de_planos(ctx)
+        cambiados = [p for p, h in despues.items() if h and antes.get(p) != h]
+        if not cambiados:
+            return None
+        # CON UN «Revisar imágenes» A MANO EN MARCHA no se revisa otra vez lo
+        # mismo a la vez: se pagaria dos veces la lectura y las dos escribirian
+        # las mismas copias. Lo de esta tanda queda sin revisar y lo coge el
+        # siguiente «Revisar imágenes».
+        with _REVISOR_LOCK:
+            manual = _REVISOR.get(ctx.id)
+        if manual:
+            try:
+                if ctx.gestor.estado(manual)["estado"] in ("pendiente", "ejecutando"):
+                    return None
+            except KeyError:
+                pass
+
+        def tramo(valor, mensaje="", publico=""):
+            if mensaje:
+                with _REVISOR_LOCK:
+                    if ctx.id in _REVISOR_AUTO:
+                        _REVISOR_AUTO[ctx.id]["mensaje"] = str(mensaje)[:200]
+            return avisar(0.99, mensaje, publico)
+        with _REVISOR_LOCK:
+            _REVISOR_AUTO[ctx.id] = {"desde": time.time(), "modo": modo,
+                                     "planos": len(cambiados), "mensaje": "",
+                                     "trabajo": _mi_trabajo(ctx)}
+        try:
+            return _revisar_y_corregir(tramo, ctx, modo, ajustes, planos=cambiados)
+        finally:
+            with _REVISOR_LOCK:
+                _REVISOR_AUTO.pop(ctx.id, None)
+    except _Cancelado:
+        raise
+    except Exception as fallo:                               # noqa: BLE001
+        ctx.bitacora.anotar("revisor_fallo", "assets", {"error": str(fallo)[:400]})
+        return None
+
+
+def _correr_notas_y_revisar(avisar, ctx):
+    """El trabajo de la cola de notas, con el revisor detras.
+
+    Lo que acaba de dibujar la cola (las notas de una persona, o «Rehacer las
+    marcadas») lo mira el revisor si su modo no es «manual»: es justo el caso de
+    «la rehice y sigue mal». Mientras revisa, ESTE trabajo sigue siendo el de la
+    cola: una nota que llegue entra aqui y se dibuja al final, en vez de lanzar
+    otra tanda a la vez (regla 2). Los redibujos del propio revisor no pasan por
+    aqui (`_rehacer_en_linea` llama a `_correr_notas_imagenes`), asi que no se
+    revisa a si mismo en bucle."""
+    if AJUSTES.leer().get("revisor_modo") not in ("autonomo", "automatico"):
+        return _correr_notas_imagenes(avisar, ctx)
+    antes = _huellas_de_planos(ctx)
+    resultado = _correr_notas_imagenes(avisar, ctx)
+    mio = _mi_trabajo(ctx)
+    if not mio:
+        return resultado
+    # YA, antes de mirar que cambio: la pantalla pregunta en cuanto la cola se
+    # vacia, y tiene que saber que el revisor viene detras
+    with _REVISOR_LOCK:
+        _REVISOR_AUTO[ctx.id] = {"desde": time.time(), "modo": AJUSTES.leer().get("revisor_modo"),
+                                 "planos": 0, "mensaje": "comprobando qué imágenes cambiaron",
+                                 "trabajo": mio}
+    try:
+        while True:
+            with _COLA_LOCK:
+                _COLA_NOTAS.setdefault(ctx.id, {"cola": []})["trabajo"] = mio
+            informe = _revisor_tras_tanda(avisar, ctx, antes)
+            if informe and isinstance(resultado, dict):
+                resultado = dict(resultado, revisor=informe)
+            with _COLA_LOCK:
+                estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+                if not estado.get("cola"):
+                    break
+            # llegaron notas mientras revisaba: se dibujan, y se revisa eso
+            antes = _huellas_de_planos(ctx)
+            _correr_notas_imagenes(avisar, ctx)
+    finally:
+        with _REVISOR_LOCK:
+            _REVISOR_AUTO.pop(ctx.id, None)
+        with _COLA_LOCK:
+            estado = _COLA_NOTAS.setdefault(ctx.id, {"cola": []})
+            if estado.get("trabajo") == mio:
+                estado["trabajo"] = None
+    return resultado
+
+
+def _correr_assets_y_revisar(avisar, ctx, paso_id, unidades, opciones=None):
+    """`_correr_paso` de las imagenes desde su boton, con el revisor detras."""
+    antes = _huellas_de_planos(ctx)
+    resultado = _correr_paso(avisar, ctx, paso_id, unidades, opciones)
+    informe = _revisor_tras_tanda(avisar, ctx, antes)
+    if informe and isinstance(resultado, dict):
+        resultado = dict(resultado, revisor=informe)
+    return resultado
+
+
+def _correr_revisor_a_mano(avisar, ctx, planos, forzar):
+    try:
+        resumen = _revisar_y_apuntar(avisar, ctx, planos=planos, forzar=forzar)
+    finally:
+        with _REVISOR_LOCK:
+            _REVISOR.pop(ctx.id, None)
+    avisar(1.0, f"{resumen.get('revisados', 0)} revisadas, "
+                f"{len(resumen.get('marcadas') or [])} con nota",
+           "Imágenes revisadas")
+    return resumen
+
+
+@app.post("/api/proyectos/{pid}/imagenes/revisar", status_code=202)
+def revisar_imagenes(pid: str, cuerpo: dict = Body(default=None)):
+    """Revisa las imagenes: {planos?: [ids], forzar?}. Sin planos, las que no se
+    han revisado con su imagen de ahora; con `forzar`, otra vez aunque ya se
+    hayan mirado. Deja una nota por plano a corregir; NO rehace nada (eso es
+    `/imagenes/revision/aplicar`). -> {trabajo_id, trabajo}"""
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    planos = datos.get("planos")
+    if planos is not None and not (isinstance(planos, list)
+                                   and all(isinstance(p, str) for p in planos)):
+        raise ErrorApi(400, "'planos' es una lista de ids de plano (p. ej. [\"S001\"])")
+    otro = _trabajo_que_toca(ctx, "assets")
+    if otro is not None:
+        raise ErrorApi(409, "se están dibujando imágenes: revísalas cuando terminen",
+                       {"trabajo_id": otro["id"]})
+    plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    if not _imagenes_de_planos(ctx, plan):
+        raise ErrorApi(400, "este vídeo todavía no tiene imágenes que revisar")
+    with _REVISOR_LOCK:
+        previo = _REVISOR.get(ctx.id)
+        if previo:
+            try:
+                vivo = ctx.gestor.estado(previo)["estado"] in ("pendiente", "ejecutando")
+            except KeyError:
+                vivo = False
+            if vivo:
+                raise ErrorApi(409, "ya se están revisando las imágenes de este vídeo",
+                               {"trabajo_id": previo})
+        trabajo_id = ctx.gestor.lanzar("revisor_imagenes", _correr_revisor_a_mano, ctx,
+                                       planos, bool(datos.get("forzar")))
+        _REVISOR[ctx.id] = trabajo_id
+    _registrar_trabajo(trabajo_id, ctx.id)
+    return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id)}
+
+
+@app.get("/api/proyectos/{pid}/imagenes/revision")
+def revision_de_imagenes(pid: str):
+    """La ultima revision, las notas del revisor sin aplicar, lo que falta por
+    mirar, el modo y lo que costaria rehacer las marcadas."""
+    ctx = contexto(pid)
+    revisor = _revisor()
+    plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    ficha = revisor.resumen(ctx.proyecto, _imagenes_de_planos(ctx, plan))
+    with _REVISOR_LOCK:
+        trabajo = _REVISOR.get(ctx.id)
+    try:
+        ficha["trabajo"] = ctx.gestor.estado(trabajo) if trabajo else None
+    except KeyError:
+        ficha["trabajo"] = None
+    ajustes = AJUSTES.leer()
+    with _REVISOR_LOCK:
+        auto = dict(_REVISOR_AUTO.get(ctx.id) or {})
+    ficha["automatico"] = (dict(auto, segundos=round(time.time() - auto["desde"], 1))
+                           if auto else None)
+    ficha.update({"modo": ajustes["revisor_modo"],
+                  "max_imagenes": ajustes["revisor_max_imagenes"],
+                  "max_usd": ajustes["revisor_max_usd"],
+                  "vueltas": ajustes["revisor_vueltas"],
+                  "usd_por_imagen": _usd_por_imagen(ctx)})
+    return ficha
+
+
+@app.post("/api/proyectos/{pid}/imagenes/revision/aplicar", status_code=202)
+def aplicar_revision_de_imagenes(pid: str, cuerpo: dict = Body(default=None)):
+    """Rehace las notas pendientes del revisor ({notas?: [ids]}; sin ids, todas)
+    por la cola de notas: las de retoque con la imagen de ahora delante y las
+    que piden otra imagen, desde cero. -> la cola"""
+    ctx = contexto(pid)
+    pedidas = _cuerpo(cuerpo).get("notas")
+    pendientes = _revisor().resumen(ctx.proyecto)["pendientes"]
+    if isinstance(pedidas, list):
+        quiero = {str(x) for x in pedidas}
+        pendientes = [p for p in pendientes if p["nota"] in quiero]
+    if not pendientes:
+        raise ErrorApi(400, "el revisor no tiene ninguna nota pendiente")
+    retoque = [p["nota"] for p in pendientes if p["alcance"] != "sustituye"]
+    sustituye = [p["nota"] for p in pendientes if p["alcance"] == "sustituye"]
+    ficha = None
+    if retoque:
+        ficha = rehacer_imagenes_con_notas(pid, {"notas": retoque})
+    if sustituye:
+        ficha = rehacer_imagenes_con_notas(pid, {"notas": sustituye, "desde_cero": True})
+    return ficha
+
+
+@app.post("/api/proyectos/{pid}/imagenes/revision/descartar")
+def descartar_revision_de_imagen(pid: str, cuerpo: dict = Body(default=None)):
+    """«Esta imagen está bien así»: {plano}. Quita la nota pendiente del revisor
+    de ese plano y no la vuelve a marcar mientras la imagen no cambie."""
+    ctx = contexto(pid)
+    plano = str(_cuerpo(cuerpo).get("plano") or "").strip()
+    if not plano:
+        raise ErrorApi(400, "manda {plano}")
+    quitada = _revisor().descartar(ctx.proyecto, plano)
+    return {"plano": plano, "quitada": quitada, **_revisor().resumen(ctx.proyecto)}
 
 
 @app.post("/api/proyectos/{pid}/repaso/{nid}/sin-marcas")
@@ -8525,7 +8971,16 @@ def _correr_assets_de_tanda(avisar, ctx, unidades, opciones):
         _retirar_lo_de_otro_texto(ctx, en_cola=vivas)
     except Exception as fallo:                              # noqa: BLE001
         ctx.bitacora.anotar("notas_de_otro_texto_fallo", "assets", {"error": str(fallo)[:300]})
-    return _correr_paso(avisar, ctx, "assets", unidades, opciones)
+    if (opciones or {}).get("tipos"):
+        # las hojas y las piezas: el revisor solo mira planos
+        return _correr_paso(avisar, ctx, "assets", unidades, opciones)
+    # LA TANDA DEL VIDEO ENTERO lleva el revisor detras (modos autonomo y
+    # automatico), dentro de su tarea: los subtitulos y el montaje, que van
+    # despues, ya salen con las imagenes corregidas. Ver el bloque REVISOR.
+    antes = _huellas_de_planos(ctx)
+    resultado = _correr_paso(avisar, ctx, "assets", unidades, opciones)
+    _revisor_tras_tanda(avisar, ctx, antes)
+    return resultado
 
 
 def _que_hace(tarea_id, ctx, receta, modo="pendientes", solo_montar=False,
@@ -8774,6 +9229,8 @@ def _correr_receta(avisar, ctx, pestana, receta, tareas, modo,
                    f" de {max(total_publico, hechas_antes + indice)}"
                    f" · {ultimo['frase']}")
 
+        # la cancelacion en el acto llega tambien a traves de este envoltorio
+        avisar_tarea.al_cancelar = getattr(avisar, "al_cancelar", None)
         avisar_tarea(0.0, "")
         funcion, args = _que_hace(tarea["id"], ctx, receta, modo, solo_montar,
                                   sonido_prescindible)
@@ -11295,8 +11752,15 @@ _LIGHT_QUE_HACE = {
 
 
 @_medido_en("estilo")
-def _correr_preset_light(avisar, ctx, encargo, solo, preset_id, retomar=False):
+def _correr_preset_light(avisar, ctx, encargo, solo, preset_id, retomar=False,
+                         deshacer=None):
     """Recorre el plan tanda a tanda y congela el resultado en el preset.
+
+    `deshacer` es {paso: {clave: (antes, escrito)}}: los params que la PETICION
+    escribio antes de lanzar (el reparto de la frase). Si el trabajo se
+    cancela, se devuelven a como estaban --solo los que siguen valiendo lo que
+    se escribio--: el preset no se ha vuelto a guardar, y dejarlos en el taller
+    hacia que el siguiente «Rehacer» los guardara sin que nadie lo pidiera.
 
     LA BARRA VA POR TIEMPO, no por numero de tareas. Cada tanda ocupa en la barra
     lo que se espera que tarde (`presets_light.plan_de`, que mira el historial
@@ -11304,6 +11768,56 @@ def _correr_preset_light(avisar, ctx, encargo, solo, preset_id, retomar=False):
     «bajando el vídeo» no sea el 12 % de la barra durante tres minutos y despues
     seis tareas cortas se coman el resto de golpe.
     """
+    try:
+        return _correr_preset_light_dentro(avisar, ctx, encargo, solo, preset_id,
+                                           retomar, deshacer)
+    except _Cancelado:
+        _deshacer_params(ctx, deshacer)
+        raise
+
+
+#: Lo que no estaba antes en los params (ver `_deshacer_params`).
+_NO_ESTABA = object()
+
+
+def _deshacer_params(ctx, deshacer):
+    """Devuelve a como estaban los params que escribio la peticion. -> [claves]
+
+    Solo los que SIGUEN valiendo lo que se escribio: si alguien los ha cambiado
+    a mano mientras tanto, lo suyo manda. Nunca lanza: corre al cancelar."""
+    vueltos = []
+    for paso, claves in (deshacer or {}).items():
+        try:
+            with ctx.estado._lock:
+                params = ctx.estado.params(paso) or {}
+                tocado = False
+                for clave, (antes, escrito) in claves.items():
+                    if params.get(clave, _NO_ESTABA) != escrito:
+                        continue
+                    if antes is _NO_ESTABA:
+                        params.pop(clave, None)
+                    else:
+                        params[clave] = antes
+                    tocado = True
+                    vueltos.append(f"{paso}.{clave}")
+                if tocado:
+                    ctx.estado.set_params(paso, params)
+        except Exception as fallo:                          # noqa: BLE001
+            try:
+                ctx.bitacora.anotar("aviso", None, {"deshacer": str(fallo)})
+            except Exception:                               # noqa: BLE001
+                pass
+    if vueltos:
+        try:
+            ctx.bitacora.anotar("reparto_deshecho", None, {"params": vueltos})
+        except Exception:                                   # noqa: BLE001
+            pass
+    return vueltos
+
+
+def _correr_preset_light_dentro(avisar, ctx, encargo, solo, preset_id, retomar,
+                                deshacer=None):
+    """El cuerpo de `_correr_preset_light`."""
     light = _light()
     presets = _presets()
     plan = light.plan_de(encargo, solo)
@@ -11332,6 +11846,10 @@ def _correr_preset_light(avisar, ctx, encargo, solo, preset_id, retomar=False):
                 avisar(desde + trozo * min(1.0, max(0.0, float(valor or 0))),
                        ficha["nombre"] + (f" — {mensaje}" if mensaje else ""),
                        ultimo["frase"])
+            # CANCELAR EN EL ACTO llega hasta la tarea: la guia espera al CLI y
+            # se registra aqui para que lo corten al cancelar, sin esperar a su
+            # latido (ver `GestorTrabajos.al_cancelar`)
+            avisar_tarea.al_cancelar = getattr(avisar, "al_cancelar", None)
 
             avisar_tarea(0.0, "")
             arranque = time.time()
@@ -11346,12 +11864,17 @@ def _correr_preset_light(avisar, ctx, encargo, solo, preset_id, retomar=False):
         if len(tanda) == 1:
             correr(tanda[0])
             continue
-        with ThreadPoolExecutor(max_workers=len(tanda)) as pool:
-            for futuro in [pool.submit(correr, f) for f in tanda]:
-                futuro.result()          # una excepcion sube y corta la tanda
+        # una excepcion (una cancelacion lo es) sube y corta la tanda, y lo que
+        # quede en cola no arranca (`moodboard.en_paralelo`)
+        _moodboard().en_paralelo(len(tanda), correr, [(f,) for f in tanda])
 
     avisar(0.99, "guardando el preset", "Guardando tu estilo")
     ficha = _congelar_preset(ctx, encargo, preset_id)
+    # GUARDADO: lo que escribio el reparto ya esta en el preset. Una
+    # cancelacion que llegue ahora (el avisar del final la lanza) no puede
+    # devolver el taller a lo de antes: quedarian distintos al reves.
+    if deshacer:
+        deshacer.clear()
     salida["preset"] = ficha["id"]
     # EL PROYECTO (cliente) en el que se creo, si se creo dentro de uno. Solo
     # al crear: rehacer una parte no lo mueve de donde este.
@@ -11601,9 +12124,9 @@ def crear_preset_light(cuerpo: dict = Body(default=None)):
     # corria. Mirar que este libre, sembrar y lanzar van juntos (D3 del
     # analisis del 13-10-2026). Un taller recien creado es de esta peticion y
     # de nadie mas: no hace falta.
-    with (_cerrojo_de_cadena(ctx.id) if retomar else contextlib.nullcontext()):
-        if retomar:
-            _taller_libre(ctx)
+    # Con la misma espera corta que «Regenerar» (`_taller_reservado`): si otra
+    # peticion lo tiene, 409 en un segundo, no un boton colgado sin respuesta.
+    with (_taller_reservado(ctx) if retomar else contextlib.nullcontext()):
         if encargo.get("cliente"):
             # para ensenar el intento a medias DENTRO de su proyecto
             ctx.proyecto.config["cliente_del_taller"] = encargo["cliente"]
@@ -11855,8 +12378,16 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     if ficha.get("tipo") != "canal":
         raise ErrorApi(400, "esto no es un preset de canal")
     ctx = _taller_de(ficha)
-    _taller_libre(ctx)
+    # DE MIRAR SI ESTA LIBRE A LANZAR, CON EL TALLER RESERVADO: un segundo
+    # toque contesta 409 antes de repartir la frase con Claude o de escribir
+    # nada (ver `_taller_reservado`)
+    with _taller_reservado(ctx):
+        return _regenerar_en_taller(ctx, ficha, preset_id, parte, peticion, fuente)
 
+
+def _regenerar_en_taller(ctx, ficha, preset_id, parte, peticion, fuente):
+    """El cuerpo de `regenerar_preset_light`, con el taller ya reservado."""
+    light = _light()
     origen = dict((ficha.get("datos") or {}).get("origen") or {})
     antes = dict(origen)
     origen["nombre"] = ficha.get("nombre") or "canal"
@@ -11933,6 +12464,7 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
     # NO toca el camino de la fuente nueva: si de verdad hay otro video o otras
     # imagenes, hay que rehacerlo todo y no hay nada que repartir.
     reparto = None
+    deshacer = {}
     if parte == "estilo" and not material:
         frase = _frase_del_estilo(encargo, antes, peticion)
         if frase:
@@ -11946,9 +12478,16 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
                 frase, estado=_estado_del_estilo(ctx, laminas), cwd=ctx.proyecto.raiz,
                 proyecto_id=ctx.id, laminas=laminas)
             # LOS PARAMS SE ESCRIBEN AQUI Y NO DENTRO DEL TRABAJO: asi el
-            # grafismo que corre despues ya los encuentra puestos, y si el
-            # trabajo se cancela lo elegido se queda.
+            # grafismo que corre despues ya los encuentra puestos. Lo que habia
+            # se apunta: si el trabajo se CANCELA, vuelven a como estaban
+            # (`_deshacer_params`) -- el preset no se ha vuelto a guardar, y
+            # dejarlos en el taller hacia que el siguiente «Rehacer» los
+            # guardara sin que nadie lo pidiera.
             for paso_destino, valores in (reparto.get("params") or {}).items():
+                previos = ctx.estado.params(paso_destino) or {}
+                deshacer.setdefault(paso_destino, {}).update({
+                    clave: (previos.get(clave, _NO_ESTABA), copy.deepcopy(valor))
+                    for clave, valor in valores.items()})
                 ctx.estado.actualizar_params(paso_destino, valores)
             # QUE REFERENCIA REDIBUJAR Y QUE CAMBIARLE. Va en el encargo y NO
             # en los params, por lo mismo que el feedback: describe esta pasada
@@ -12005,7 +12544,7 @@ def regenerar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
 
     trabajo_id = _lanzar_en_taller(
         ctx, "preset_light", _correr_preset_light, ctx, encargo,
-        list(tareas), preset_id, paso="assets")
+        list(tareas), preset_id, paso="assets", deshacer=deshacer)
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "taller": ctx.id, "parte": parte,
             "fuente_nueva": bool(fuente), "material_nuevo": material,
@@ -12050,15 +12589,79 @@ def _plan_con_laminas(plan, imagenes):
     return plan
 
 
+#: Los trabajos del taller que NO impiden cambiar el estilo. Una escucha de voz
+#: lee una copia de los mandos y escribe solo su wav, con nombre de firma, en
+#: `previsualizaciones/` (`p4_voz.previsualizar`): nada que un «Rehacer» toque
+#: ni nada suyo que un «Rehacer» pise. Bloquear por ella era quedarse sin poder
+#: corregir mientras sonaba una muestra.
+_NO_BLOQUEAN_EL_TALLER = ("voz:previsualizar",)
+
+
+def _que_hace_el_taller(trabajo):
+    """Lo que esta haciendo un trabajo del taller, dicho para el 409. -> str"""
+    if trabajo.get("cancelando"):
+        return ("se está cancelando lo anterior: termina en unos segundos (lo que "
+                "ya se estaba dibujando se acaba y se guarda). Vuelve a pulsar "
+                "entonces")
+    if trabajo.get("nombre") == "voz:previsualizar":
+        return "se está preparando una escucha de la voz: espera a que suene"
+    ahora = str(trabajo.get("publico") or "").strip()
+    return ("este estilo se está generando"
+            + (f" («{ahora}»)" if ahora else "")
+            + ": espera a que termine para cambiar otra cosa")
+
+
 def _taller_libre(ctx):
     """409 si el taller de este estilo esta generando algo.
 
     Lo que se guarde mientras tanto se lo llevaria por delante el trabajo al
     terminar (vuelve a guardar el estilo con SU copia del encargo), y dos
-    laminas nuevas seguidas se llamarian igual y se pagarian las dos."""
-    if ctx.gestor.listar(activos=True):
-        raise ErrorApi(409, "este estilo se está generando: espera a que termine "
-                            "para cambiar otra cosa")
+    laminas nuevas seguidas se llamarian igual y se pagarian las dos.
+
+    EL 409 DICE QUE HAY EN MARCHA Y CUAL ES (`trabajo_id`, `cancelando`): la
+    pantalla se engancha a ese trabajo en vez de quedarse con un aviso, y quien
+    vuelve a pulsar mientras se cancela lee eso y no «se está generando»."""
+    for trabajo in ctx.gestor.listar(activos=True):
+        if trabajo.get("nombre") in _NO_BLOQUEAN_EL_TALLER:
+            continue
+        raise ErrorApi(409, _que_hace_el_taller(trabajo),
+                       {"trabajo_id": trabajo.get("id") or "",
+                        "cancelando": bool(trabajo.get("cancelando")),
+                        "segundos": trabajo.get("segundos") or 0,
+                        "taller": ctx.id})
+
+
+#: Cuanto espera una peticion a que otra del MISMO taller suelte el cerrojo
+#: antes de contestar 409. Poco: la otra puede estar repartiendo la frase con
+#: Claude (segundos), y esperarla seria dejar el boton pulsado sin respuesta.
+ESPERA_CERROJO_TALLER_S = 1.0
+
+
+@contextlib.contextmanager
+def _taller_reservado(ctx):
+    """El taller para esta peticion, de mirar si esta libre a lanzar.
+
+    DOBLE TOQUE EN «Regenerar» (18-10-2026): la segunda peticion pasaba
+    `_taller_libre` mientras la primera repartia la frase con Claude, repartia
+    OTRA vez (otra llamada al CLI), escribia params en el taller por debajo del
+    trabajo ya lanzado y solo al final se llevaba el 409. Con el cerrojo de la
+    cadena (reentrante: `_lanzar_en_taller` lo vuelve a tomar dentro) tomado
+    desde el principio, la segunda contesta 409 ANTES de gastar nada.
+
+    No se espera al cerrojo: si en `ESPERA_CERROJO_TALLER_S` no se suelta, es que
+    otra peticion esta preparando un cambio de este estilo, y se dice.
+    """
+    cerrojo = _cerrojo_de_cadena(ctx.id)
+    if not cerrojo.acquire(timeout=ESPERA_CERROJO_TALLER_S):
+        raise ErrorApi(409, "ya se está preparando un cambio de este estilo: "
+                            "espera a que empiece y lo verás en marcha",
+                       {"trabajo_id": "", "cancelando": False, "taller": ctx.id,
+                        "preparando": True})
+    try:
+        _taller_libre(ctx)
+        yield ctx
+    finally:
+        cerrojo.release()
 
 
 def _lanzar_en_taller(ctx, *args, **kwargs):
@@ -12166,14 +12769,22 @@ def cambiar_laminas(preset_id: str, cuerpo: dict = Body(default=None)):
     muestras (gratis) y se vuelve a guardar el estilo.
     """
     lam = _laminas()
-    mod = _moodboard()
-    light = _light()
     datos = _cuerpo(cuerpo)
     accion = str(datos.get("accion") or "").strip().lower()
     lamina = str(datos.get("lamina") or "").strip()
     texto = " ".join(str(datos.get("texto") or "").split())[:lam.MAX_TEXTO]
     ficha, ctx = _taller_con_laminas(preset_id)
-    _taller_libre(ctx)
+    # reservado de mirar a lanzar, como `regenerar_preset_light`
+    with _taller_reservado(ctx):
+        return _cambiar_laminas_en_taller(ctx, ficha, preset_id, datos, accion,
+                                          lamina, texto)
+
+
+def _cambiar_laminas_en_taller(ctx, ficha, preset_id, datos, accion, lamina, texto):
+    """El cuerpo de `cambiar_laminas`, con el taller ya reservado."""
+    lam = _laminas()
+    mod = _moodboard()
+    light = _light()
     origen = dict((ficha.get("datos") or {}).get("origen") or {})
     ids = lam.ids_de(origen)
     quitadas, propias, hoja = lam.config_de(origen)

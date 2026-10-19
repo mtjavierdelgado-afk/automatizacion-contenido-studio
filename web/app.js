@@ -16050,7 +16050,7 @@ const INTERRUPTORES_MONTAJE = [
   ['gancho', 'Gancho del primer segundo', 'El primer plano entra con un zoom rápido y la primera frase sale grande en el centro.'],
   ['cifras', 'Cifras clave en pantalla', 'Cuando la voz dice una cifra con su unidad («ochenta y cuatro centímetros»), sale grande: «84 cm».'],
   ['barra', 'Barra de progreso', 'Una línea fina arriba que avanza con el vídeo.'],
-  ['profundidad', 'Profundidad 2.5D', 'Lo que está cerca se mueve más que el fondo, como si la imagen tuviera capas. Sin coste. Experimental: en una ilustración, el borde de lo que va delante puede deformarse un poco.']];
+  ['profundidad', 'Profundidad 2.5D', 'Lo que está cerca se mueve más que el fondo, como si la imagen tuviera capas. Sin coste, pero el montaje tarda más (unos dos tercios más por plano). Experimental: en una ilustración, el borde de lo que va delante puede deformarse un poco.']];
 
 let DATOS_MONTAJE = null;
 function datosMontaje() {
@@ -16133,7 +16133,7 @@ function editorMontaje(modo, est, repintar) {
       h('input', { type: 'checkbox', checked: !!actual[clave], disabled: sinModelo,
         onchange: ev => cambiar({ [clave]: ev.target.checked }) }),
       ` ${nombre}`, h('span', { clase: 'meta' }, ` · ${ayuda}`),
-      sinModelo ? h('span', { clase: 'meta' }, ` (no disponible: ${datos.profundidad.por_que})`) : null));
+      sinModelo ? h('span', { clase: 'meta' }, ` · No disponible todavía: ${datos.profundidad.por_que}.`) : null));
   });
   if (borrador && esCortoElEncargo(modo.e, datos)) {
     const ritmo = op.ritmo === 'estilo' ? 'estilo' : 'rapido';

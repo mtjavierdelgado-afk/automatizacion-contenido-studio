@@ -559,7 +559,7 @@ async function prepararProfundidad(){
   const lienzoGL = document.getElementById('prof');
   const gl = lienzoGL.getContext('webgl', {preserveDrawingBuffer: true,
                                             antialias: false, alpha: false});
-  if (!gl) return null;
+  if (!gl) { window.PROF_FALLO = 'este navegador no tiene WebGL'; return null; }
   const compilar = (tipo, fuente) => {
     const sh = gl.createShader(tipo); gl.shaderSource(sh, fuente); gl.compileShader(sh);
     if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS))
@@ -577,9 +577,11 @@ async function prepararProfundidad(){
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 1,-1, -1,1, 1,1]), gl.STATIC_DRAW);
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-  const [img, dep] = await Promise.all([
-    fondo.complete && fondo.naturalWidth ? fondo : cargarImagen(fondo.src),
-    cargarImagen(p.mapa)]);
+  // el <img> de la pagina ya esta cargando la imagen: se espera a ESE, no se
+  // baja y decodifica una segunda copia de 2048x3072
+  const esperarFondo = (fondo.complete && fondo.naturalWidth) ? Promise.resolve(fondo)
+    : (fondo.decode ? fondo.decode().then(() => fondo) : cargarImagen(fondo.src));
+  const [img, dep] = await Promise.all([esperarFondo, cargarImagen(p.mapa)]);
   [[img, 0], [dep, 1]].forEach(([fuente, unidad]) => {
     const tx = gl.createTexture();
     gl.activeTexture(gl.TEXTURE0 + unidad); gl.bindTexture(gl.TEXTURE_2D, tx);
@@ -599,12 +601,23 @@ async function prepararProfundidad(){
           lateral: Number(p.lateral) || 0, empuje: Number(p.empuje) || 0};
 }
 const PROFUNDIDAD = MOV.profundidad
-  ? prepararProfundidad().catch(e => { console.error('profundidad: ' + e); return null; })
+  ? prepararProfundidad().catch(e => { window.PROF_FALLO = String(e); return null; })
   : null;
+// EL MARGEN (revision 18-10): el desplazamiento empuja lo de los bordes hacia
+// fuera de la ventana, y cuando la ventana toca el borde de la imagen (sobrio
+// con zoom 1, o un paneo hasta el final) el shader leia fuera y repetia la
+// ultima columna: una franja estirada. La ventana se cierra hacia dentro lo
+// justo para que nunca haga falta leer fuera.
+function margenProfundidad(pr){
+  return Math.min(0.12, Math.abs(pr.lateral) / 2 + pr.empuje / 2 + 0.01);
+}
 function pintarProfundidad(pr, v, u){
   const e = suavizar(u);
-  const pw = v[2], ph = pw * H / W;
-  pr.gl.uniform4f(pr.ven, v[0] / HW, v[1] / HH, pw / HW, ph / HH);
+  const m = margenProfundidad(pr);
+  const pw0 = v[2], ph0 = pw0 * H / W;
+  const pw = pw0 * (1 - m), ph = ph0 * (1 - m);
+  const px = v[0] + (pw0 - pw) / 2, py = v[1] + (ph0 - ph) / 2;
+  pr.gl.uniform4f(pr.ven, px / HW, py / HH, pw / HW, ph / HH);
   pr.gl.uniform1f(pr.lat, pr.lateral * (e - 0.5));
   pr.gl.uniform1f(pr.emp, pr.empuje * e);
   pr.gl.drawArrays(pr.gl.TRIANGLE_STRIP, 0, 4);
@@ -1137,6 +1150,14 @@ def renderizar_plano(tarea, navegador=None):
     navegador.abrir(pagina)
     for numero in range(total):
         navegador.pintar(numero / float(fps))
+        if numero == 0 and (tarea["mov"].get("profundidad") or {}).get("mapa"):
+            # SI LA PROFUNDIDAD NO HA PODIDO PINTARSE, SE DICE: el plano sale
+            # igual con el movimiento de siempre, y sin esta linea nadie sabria
+            # por que la casilla encendida no se nota en el video.
+            fallo = navegador.evaluar("window.PROF_FALLO || ''")
+            if fallo:
+                print(f"[render] {sid}: la profundidad 2.5D no se ha podido pintar "
+                      f"({fallo}); el plano va con el movimiento de siempre", flush=True)
         navegador.capturar(os.path.join(carpeta, f"f{numero + 1:05d}.png"))
     # El ultimo fotograma se guarda ANTES de la transicion: es el que mira el
     # plano siguiente, y lo que tiene que mirar es este plano limpio, no este

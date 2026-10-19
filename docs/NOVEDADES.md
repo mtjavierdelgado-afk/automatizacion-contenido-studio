@@ -17,7 +17,7 @@ vídeos, estilos, claves y contraseña no se tocan.
 - **No cuesta nada:** un modelo gratuito calcula en el propio servidor qué está
   cerca y qué lejos de cada imagen (menos de un segundo por imagen, y una sola
   vez: se guarda). No redibuja ninguna imagen; encenderla solo rehace las capas
-  y el montaje.
+  y el montaje. Eso sí, el montaje tarda más: unos dos tercios más por plano.
 - **Es experimental y va apagada.** En fotos se ve limpia; en una ilustración,
   el borde de lo que va delante puede deformarse un poco al moverse.
 - `asvs actualizar` instala lo que hace falta (unos 100 MB, una sola vez). Si

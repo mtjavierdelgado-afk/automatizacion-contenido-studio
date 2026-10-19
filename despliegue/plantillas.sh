@@ -87,8 +87,8 @@ ONNXRUNTIME_VERSION="1.29.0"
 instalar_profundidad() {
   local raiz="$1" usuario="$2" carpeta modelo temporal huella
   if ! "$raiz/venv/bin/python" -c "import onnxruntime" >/dev/null 2>&1; then
-    "$raiz/venv/bin/pip" install --quiet "onnxruntime==$ONNXRUNTIME_VERSION" >/dev/null 2>&1 \
-      || "$raiz/venv/bin/pip" install --quiet "onnxruntime<2" >/dev/null 2>&1 \
+    "$raiz/venv/bin/pip" install --quiet --timeout 30 --retries 1 "onnxruntime==$ONNXRUNTIME_VERSION" >/dev/null 2>&1 \
+      || "$raiz/venv/bin/pip" install --quiet --timeout 30 --retries 1 "onnxruntime<2" >/dev/null 2>&1 \
       || { echo "  (profundidad 2.5D: no se ha podido instalar onnxruntime; el resto va igual)"; return 0; }
   fi
   carpeta="$raiz/datos/modelos"
@@ -98,7 +98,8 @@ instalar_profundidad() {
   if [ "$huella" != "$MODELO_PROFUNDIDAD_SHA256" ]; then
     echo "Bajando el modelo de la profundidad 2.5D (unos 100 MB, una sola vez)..."
     temporal="$modelo.bajando"
-    if curl -fsSL "$MODELO_PROFUNDIDAD_URL" -o "$temporal" \
+    # con plazo: una descarga atascada no puede dejar la actualizacion colgada
+    if curl -fsSL --connect-timeout 20 --max-time 900 "$MODELO_PROFUNDIDAD_URL" -o "$temporal" \
         && [ "$(sha256sum "$temporal" | cut -d' ' -f1)" = "$MODELO_PROFUNDIDAD_SHA256" ]; then
       mv -f "$temporal" "$modelo"
     else

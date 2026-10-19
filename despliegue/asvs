@@ -301,6 +301,15 @@ actualizar() {
     || { no "npm no ha podido instalar las librerias del acceso: no se ha cambiado nada"
          tail -n 15 "$temporal/npm.log" | sed 's/^/    /'; rm -rf "$temporal"; exit 1; }
 
+  # LA PROFUNDIDAD 2.5D: su libreria y su modelo, si faltan. ANTES de parar el
+  # estudio, como las demas librerias (revision 18-10): sin red son minutos de
+  # reintentos, y con el estudio parado serian minutos de web caida. Nunca
+  # falla (ver plantillas.sh) y va en un subshell para no traer sus variables.
+  if [ -f "$temporal/codigo/despliegue/plantillas.sh" ]; then
+    ( . "$temporal/codigo/despliegue/plantillas.sh"
+      declare -F instalar_profundidad >/dev/null && instalar_profundidad "$RAIZ" "$USUARIO" ) || true
+  fi
+
   # LA COPIA DE LO QUE FUNCIONA, para poder volver. Fuera de app/ y sin la
   # cache: es lo que se restaura si algo sale mal de aqui en adelante.
   anterior="$RAIZ/anterior"
@@ -325,11 +334,6 @@ actualizar() {
   # systemd, nginx, el navegador y el entorno, con copia en anterior/config
   _configurar "$RAIZ/app/despliegue" "$anterior/config"
   chown "$USUARIO:$USUARIO" "$RAIZ/datos/entorno"
-  # La profundidad 2.5D: su libreria y su modelo, si faltan. No falla nunca
-  # (ver plantillas.sh): sin ella todo lo demas va igual.
-  if declare -F instalar_profundidad >/dev/null; then
-    instalar_profundidad "$RAIZ" "$USUARIO" || true
-  fi
   systemctl restart as-video-login as-video-studio
   trap - ERR
 

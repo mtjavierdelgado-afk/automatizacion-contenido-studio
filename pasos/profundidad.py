@@ -22,7 +22,9 @@ calcular nada. Vive en `<proyectos>/_sistema/profundidad/`.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import os
+import tempfile
 import threading
 
 #: Donde esta el modelo si nadie dice otra cosa (en el servidor lo dice
@@ -59,13 +61,16 @@ def carpeta_cache():
 
 def disponible():
     """(si, por_que) -- si se puede calcular un mapa en esta maquina."""
+    # SIN IMPORTARLA: preguntar desde la pantalla no puede cargar onnxruntime
+    # (cientos de MB) en el proceso de la API solo por abrir el editor.
     try:
-        import onnxruntime  # noqa: F401,PLC0415
-    except Exception:                                         # noqa: BLE001
-        return False, "falta la libreria onnxruntime (la instala `asvs actualizar`)"
+        hay_libreria = importlib.util.find_spec("onnxruntime") is not None
+    except (ImportError, ValueError):
+        hay_libreria = False
+    if not hay_libreria:
+        return False, "falta la librería onnxruntime, que instala asvs actualizar"
     if not os.path.isfile(ruta_modelo()):
-        return False, (f"falta el modelo de profundidad ({NOMBRE_MODELO}); "
-                       "lo baja `asvs actualizar`")
+        return False, "falta el modelo de profundidad, que baja asvs actualizar"
     return True, ""
 
 
@@ -112,10 +117,19 @@ def calcular(origen, destino):
     mapa = Image.fromarray((d * 255).astype(np.uint8)).resize((ancho, alto), Image.BICUBIC)
     radio = max(1.0, ancho * DESENFOQUE_POR_MIL / 1000.0)
     mapa = mapa.filter(ImageFilter.GaussianBlur(radio))
-    os.makedirs(os.path.dirname(destino) or ".", exist_ok=True)
-    temporal = destino + ".tmp"
-    mapa.save(temporal, format="PNG")
-    os.replace(temporal, destino)
+    carpeta = os.path.dirname(destino) or "."
+    os.makedirs(carpeta, exist_ok=True)
+    # UN TEMPORAL PROPIO (revision 18-10): dos montajes que calculan a la vez el
+    # mapa de la misma imagen del banco escribian en el mismo «.tmp», y el
+    # segundo `os.replace` no lo encontraba.
+    descriptor, temporal = tempfile.mkstemp(prefix=".mapa_", suffix=".png", dir=carpeta)
+    try:
+        with os.fdopen(descriptor, "wb") as fh:
+            mapa.save(fh, format="PNG")
+        os.replace(temporal, destino)
+    finally:
+        if os.path.exists(temporal):
+            os.remove(temporal)
     return destino
 
 
@@ -129,7 +143,9 @@ def mapa_de(origen):
     if not si or not origen or not os.path.isfile(origen):
         return None
     try:
-        guardado = os.path.join(carpeta_cache(), huella_de(origen) + ".png")
+        # la clave lleva el MODELO: uno nuevo no puede servir mapas del viejo
+        guardado = os.path.join(carpeta_cache(),
+                                f"{huella_de(origen)}_{NOMBRE_MODELO.split('.')[0]}.png")
         if not os.path.isfile(guardado):
             calcular(origen, guardado)
         return guardado

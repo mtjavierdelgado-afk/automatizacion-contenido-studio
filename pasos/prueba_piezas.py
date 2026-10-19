@@ -5494,6 +5494,8 @@ def prueba_profundidad_25d():
           "y un plano sin profundidad no lleva nada")
     ok("FRAG_PROF" in p8_render.PAGINA and "PROFUNDIDAD.then" in p8_render.PAGINA,
        "la página pinta con WebGL cuando el plano trae mapa")
+    ok("margenProfundidad(pr)" in p8_render.PAGINA,
+       "y cierra la ventana lo justo para no leer fuera de la imagen (sin franjas)")
 
     si, _ = profundidad.disponible()
     if not si:
@@ -5522,6 +5524,25 @@ def prueba_profundidad_25d():
         t1 = time.time()
         igual(profundidad.mapa_de(ruta), mapa, "la segunda vez es el mismo fichero")
         ok(time.time() - t1 < max(0.2, (t1 - t0) / 5), "y no se vuelve a calcular")
+        # DOS A LA VEZ sobre el mismo destino (dos montajes con la misma imagen
+        # del banco): los dos tienen que salir bien y no dejar temporales
+        import threading                                       # noqa: PLC0415
+        destino = os.path.join(carpeta, "doble", "mapa.png")
+        errores = []
+
+        def hacer():
+            try:
+                profundidad.calcular(ruta, destino)
+            except Exception as fallo:                         # noqa: BLE001
+                errores.append(str(fallo))
+        hilos = [threading.Thread(target=hacer) for _ in range(3)]
+        for hilo in hilos:
+            hilo.start()
+        for hilo in hilos:
+            hilo.join()
+        igual(errores, [], "tres cálculos a la vez del mismo mapa salen bien")
+        igual(sorted(os.listdir(os.path.dirname(destino))), ["mapa.png"],
+              "y no dejan temporales a medias")
     finally:
         if antes_p is None:
             os.environ.pop("ESTUDIO_PROYECTOS", None)

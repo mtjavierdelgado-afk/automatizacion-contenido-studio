@@ -160,7 +160,15 @@ def situacion(carpeta=""):
     diria «si» de un login caducado, y un login caducado es exactamente el caso
     en el que hace falta enterarse.
     """
-    orden = [_ejecutable(), "auth", "status", "--json"]
+    try:
+        orden = [_ejecutable(), "auth", "status", "--json"]
+    except RuntimeError as fallo:
+        # SIN EL CLI INSTALADO NO HAY NADIE CONECTADO (R9 del analisis del
+        # 13-10-2026): `localizar` lanza, y fuera del `try` eso era un 500 en
+        # «Configuración», en la burbuja y en «Probar». Es una respuesta, no un
+        # fallo del Estudio, y se dice con su motivo.
+        return {"conectada": False, "correo": "", "plan": "", "metodo": "",
+                "error": str(fallo) or "no está instalado el CLI de Claude"}
     entorno = cli_claude.entorno({"config_dir": carpeta} if carpeta else None)
     try:
         proceso = subprocess.run(orden, capture_output=True, timeout=60,

@@ -232,7 +232,6 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/api/moodboard/{clave}/{origen}/{archivo}` | Sirve una lamina del banco de moodboards, que vive fuera de los proyectos. |
-| `GET` | `/api/proyectos/{pid}/estilo` | Fotogramas ya extraidos y cuales estan elegidos ahora mismo. |
 | `GET` | `/api/proyectos/{pid}/estilo/cambios` | Que tiene el estilo del video que el video no tiene, por partes, y lo que |
 | `POST` | `/api/proyectos/{pid}/estilo/guia` | Escribe la guia de estilo mirando los fotogramas elegidos. |
 | `PUT` | `/api/proyectos/{pid}/estilo/seleccion` | Guarda las imagenes de estilo elegidas en los params de assets. |

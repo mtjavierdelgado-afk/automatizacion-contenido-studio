@@ -2817,6 +2817,13 @@ body.burbuja-minimizada .pestana-asistente { display: flex; }
   body.config-abierta .burbuja-asistente,
   body.config-abierta .minimizar-burbuja,
   body.config-abierta .pestana-asistente { display: none; }
+  /* U1 (13-10-2026): en el movil el chat abierto ocupa la pantalla entera y
+     el «–» quedaba ENCIMA (z-index 67 contra 66), tapando texto; pulsarlo
+     escondia el asistente. Con el chat abierto no hay burbuja que minimizar. */
+  #asistente:not(.plegado) ~ .minimizar-burbuja,
+  #asistente:not(.plegado) ~ .pestana-asistente { display: none; }
+  /* B10: la burbuja pisaba 9 px de «Siguiente ›» en Imágenes (medido a 390 px) */
+  :root { --alto-pie: 76px; }
 }
 
 /* ---- «Que lleva este video»: cuatro tarjetas con su interruptor */

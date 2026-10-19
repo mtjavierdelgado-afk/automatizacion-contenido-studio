@@ -5180,7 +5180,7 @@ def escenas_del_set(plan, set_nombre):
 
 
 
-def propagar_dependencias(estado, dependencias=None, paso="assets"):
+def propagar_dependencias(estado, dependencias=None, paso="assets", del_propio_paso=True):
     """Mete en los params de cada escena la firma de los assets que usa.
 
     Sin esto la cascada no existiria: el nucleo firma cada unidad con SUS
@@ -5212,6 +5212,10 @@ def propagar_dependencias(estado, dependencias=None, paso="assets"):
         return []
     antes = {u: estado.firma_unidad(paso, u) for u in cambios}
     # del_propio_paso: esto no es una edicion del usuario, es lo que el paso
-    # acaba de descubrir sobre si mismo, asi que no invalida su propia ejecucion
-    estado.actualizar_params(paso, {"unidades": cambios}, del_propio_paso=True)
+    # acaba de descubrir sobre si mismo, asi que no invalida su propia ejecucion.
+    # PERO CUANDO LO DISPARA EL USUARIO (tocar a mano la hoja de un asset con la
+    # tanda corriendo) es la cascada de SU cambio, y quien llama pasa False: si
+    # no, la foto del arranque se tragaba la huella nueva y el plano que usa esa
+    # hoja quedaba «al dia» con la hoja vieja (revision de arreglos-v2h, 18-10)
+    estado.actualizar_params(paso, {"unidades": cambios}, del_propio_paso=del_propio_paso)
     return sorted(u for u in cambios if estado.firma_unidad(paso, u) != antes[u])

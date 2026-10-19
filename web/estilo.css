@@ -3263,6 +3263,21 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .montaje-plano-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .montaje-plano-fila > label { min-width: 8.5em; color: var(--tenue); font-size: 12px; }
 
+/* ==================================================== REGLAS DEL ESTILO
+   Rama `reglas-estilo` (19-10-2026): las tarjetas de cada regla en la pantalla
+   del estilo. */
+.regla-estilo { border: 1px solid var(--linea); border-radius: 10px; padding: 10px 12px;
+  margin: 8px 0; display: flex; flex-direction: column; gap: 8px; background: var(--panel); }
+.regla-estilo .fila { align-items: center; gap: 8px; flex-wrap: wrap; }
+.regla-estilo input[type="text"] { flex: 1 1 220px; min-width: 0; }
+.regla-estilo textarea { width: 100%; }
+.regla-estilo-campos label { display: flex; flex-direction: column; gap: 4px; flex: 1 1 220px;
+  text-transform: none; letter-spacing: normal; }
+.regla-estilo-en { border-left: 3px solid var(--acento-borde); padding-left: 8px; }
+.regla-estilo-traduccion { margin-top: 4px; }
+.regla-estilo-propuesta { border: 1px dashed var(--acento-borde); border-radius: 8px;
+  padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--hueco); }
+
 /* ================================================================ PUBLICAR
    Rama `publicar-redes-1` (16-10-2026): la barra de módulos y el módulo
    Publicar. Todo nuevo y aquí, al final, para no chocar con las otras ramas.
@@ -3688,3 +3703,8 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
   .informe-publicar .no-imprimir { display: none; }
   .informe-publicar .pastilla { border: 1px solid var(--negro); color: var(--negro); background: none; }
 }
+/* Publicar · «Ver lo que se mandó» (19-10) */
+.lo-mandado { margin: 2px 0 8px; }
+.campo-mandado { margin-top: 6px; }
+.campo-mandado b { font-size: 12px; overflow-wrap: anywhere; }
+.aviso-recortado { margin: 4px 0; overflow-wrap: anywhere; }

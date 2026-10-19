@@ -327,6 +327,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/presets-light/talleres/{taller_id}` | Tira un intento a medias. A la papelera de proyectos, no al vacio. |
 | `DELETE` | `/api/presets-light/{preset_id}` | A la papelera de presets, y su taller con el. |
 | `PUT` | `/api/presets-light/{preset_id}` | El nombre, el idioma y la guia de tono: lo que se cambia a mano. |
+| `GET` | `/api/presets-light/{preset_id}/reglas` | Las reglas del estilo. -> {reglas, gravedades, maximo} |
+| `PUT` | `/api/presets-light/{preset_id}/reglas` | Guarda las reglas del estilo: {reglas: [{nombre, texto, palabras?, gravedad?, en?}]}; una lista vacía las quita. No toca ningún vídeo. |
+| `POST` | `/api/reglas-estilo/afinar` | Claude reescribe una regla para la IA de imágenes: {texto, nombre?, palabras?} -> {id}; la propuesta, en GET. No guarda nada. |
+| `GET` | `/api/reglas-estilo/afinar/{rid}` | Cómo va «Afinar con Claude», y la propuesta al terminar. |
 | `GET` | `/api/presets-light/{preset_id}/aportadas` | Las imagenes de referencia de un estilo, con lo que se dijo de cada una. |
 | `PUT` | `/api/presets-light/{preset_id}/aportadas` | Guarda lo que se dice de cada imagen y las ★: {descripciones, destacadas}. |
 | `GET` | `/api/presets-light/{preset_id}/aportadas/{nombre}/imagen` | Una de tus imagenes de referencia, tal cual la subiste. |
@@ -420,4 +424,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**297 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**308 endpoints.** Escrito por `generar_api.py` desde `app.py`.

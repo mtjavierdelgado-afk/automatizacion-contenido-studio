@@ -325,7 +325,8 @@ def prueba_cliente():
         ok(b"async_upload" not in cuerpo, "y sin async_upload")
 
         e = cli.estado(job_id="job_9")
-        igual(e["redes"]["tiktok"], {"estado": "publicado", "url": "https://tiktok.com/v/1", "error": ""},
+        igual(e["redes"]["tiktok"], {"estado": "publicado", "url": "https://tiktok.com/v/1", "error": "",
+                                     "texto": ""},
               "estado: publicado con su enlace")
         igual(e["redes"]["youtube"]["estado"], "fallido", "y la red que falló, fallida")
         igual(e["redes"]["youtube"]["error"], "quota", "con el motivo")
@@ -670,7 +671,13 @@ def prueba_studio():
         ok(subida["bytes"] > 1000, "y el MP4 de verdad")
         igual((subida["campos"].get("thumb_offset"), subida["campos"].get("cover_timestamp")),
               ("1500", 1500), "la portada: el fotograma elegido en Instagram y TikTok")
-        ok(subida["campos"].get("title"), f"y el «title» general: {subida['campos'].get('title')!r}")
+        igual(subida["campos"].get("title"), subida["campos"].get("tiktok_title"),
+              "y el «title» general es el texto COMPLETO de la primera red (19-10: salía solo la primera línea)")
+        f_env = s.get(base + "/api/publicar/videos/fiesta").json()
+        env_ig = next(e for e in f_env["envios"] if e["red"] == "instagram")
+        igual((env_ig.get("enviado") or {}).get("instagram_title"), subida["campos"]["instagram_title"],
+              "la ficha guarda lo que se mandó a cada red, tal cual")
+        ok("tiktok_title" not in (env_ig.get("enviado") or {}), "y solo lo de esa red (más el «title» común)")
         for _ in range(4):
             s.post(base + "/api/publicar/refrescar")
             f = s.get(base + "/api/publicar/videos/fiesta").json()
@@ -1388,6 +1395,68 @@ def prueba_informe():
     igual(otro["palabras"], [], "lo de otro proyecto no entra")
 
 
+def prueba_titulo_completo():
+    seccion("4f] el «title» general lleva el texto completo (19-10: los posts salían solo con la primera línea)")
+    raiz = os.path.join(CARPETA, "titulo")
+    os.makedirs(raiz)
+    simulador = os.path.join(CARPETA, "sim_titulo.json")
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    try:
+        cli = P.cliente(raiz)
+        cli.crear_perfil("studio_t")
+        cli.enlace_conectar("studio_t", ["tiktok", "instagram", "youtube"])
+        mp4 = os.path.join(raiz, "v.mp4")
+        with open(mp4, "wb") as fh:
+            fh.write(b"0" * 2000)
+        ajustes = dict(P.AJUSTES_DEFECTO, perfil="studio_t", firma="EstadoPlay", hashtags="#lima")
+        largo = ("¿Tu fiesta necesita algo distinto? 🎮\n\nLlevamos la consola, los mandos y "
+                 "los juegos a tu casa, en cualquier distrito.\n\nTe lo dejamos funcionando.")
+        textos = {"instagram": {"descripcion": largo, "cta": "Escríbenos", "hashtags": ["fiestas"]},
+                  "tiktok": {"descripcion": "TikTok: " + largo, "hashtags": ["consolas"]},
+                  "youtube": {"titulo": "Consolas para tu fiesta", "descripcion": largo}}
+
+        def subir(pid, redes):
+            info = dict(INFO, pid=pid, mp4=mp4, mp4_huella=pid)
+            P.guardar_ficha(raiz, pid, {"textos": textos})
+            P.enviar(raiz, info, ajustes, {"redes": redes, "modo": "ahora", "confirmado": True},
+                     en_hilo=False)
+            with open(simulador, encoding="utf-8") as fh:
+                return json.load(fh)["subidas"][-1]["campos"], P._leer_video(raiz, pid)
+
+        c, datos = subir("t_ig", ["instagram"])
+        igual(c["title"], c["instagram_title"], "solo Instagram: «title» = el texto completo de Instagram")
+        ok("\n" in c["title"] and "#fiestas" in c["title"] and "EstadoPlay" in c["title"]
+           and "Escríbenos" in c["title"], "con los saltos de línea, la llamada, la firma y los hashtags")
+        ok(len(c["title"]) > 100, f"y sin cortar a 100 ({len(c['title'])} caracteres)")
+        env = datos["envios"][0]
+        igual(env["enviado"]["instagram_title"], c["instagram_title"], "el envío guarda lo que se mandó")
+        igual(env["enviado"]["title"], c["title"], "también el «title» común")
+        ok(not any("key" in k.lower() or "apikey" in str(v).lower() for k, v in env["enviado"].items()),
+           "y nada de la clave")
+        c, _d = subir("t_igtt", ["instagram", "tiktok"])
+        with open(simulador, encoding="utf-8") as fh:
+            primera = json.load(fh)["subidas"][-1]["redes"][0]
+        igual(c["title"], c[f"{primera}_title"],
+              f"Instagram + TikTok: el texto completo de la primera red de la subida ({primera})")
+        ok(c["tiktok_title"].startswith("TikTok: "), "y cada red con el suyo")
+        c, _d = subir("t_yt", ["instagram", "youtube"])
+        igual(c["title"], "Consolas para tu fiesta", "con YouTube, «title» sigue siendo su título")
+        igual(c["youtube_title"], "Consolas para tu fiesta", "y su campo propio igual")
+        # lo que devuelve la red, comparado con lo mandado
+        e = {"red": "instagram", "enviado": {"instagram_title": "x" * 300}}
+        P.comparar_publicado(e, "x" * 120)
+        ok("recortó" in e.get("recortado", "") and "120 de 300" in e["recortado"],
+           f"si la red lo devuelve más corto, se avisa: {e.get('recortado')!r}")
+        P.comparar_publicado(e, "x" * 300)
+        ok("recortado" not in e, "entero, sin aviso")
+        r = UP.ClienteUploadPost._resultados([{"platform": "instagram", "status": "completed",
+                                                "post_url": "https://instagram.com/p/1",
+                                                "caption": "texto de la red"}])
+        igual(r["instagram"]["texto"], "texto de la red", "el cliente recoge el texto que devuelve Upload-Post")
+    finally:
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
+
 def prueba_perfiles():
     """Lo que salió en el servidor el 16-10: «Crear perfil» sin el nombre
     escrito, el plan lleno con el perfil YA en Upload-Post, y «Suyu» frente
@@ -1986,6 +2055,7 @@ def main():
     prueba_metricas_auto()
     prueba_redes_nuevas()
     prueba_informe()
+    prueba_titulo_completo()
     prueba_retencion_y_resumenes()
     prueba_perfiles()
     prueba_textos()

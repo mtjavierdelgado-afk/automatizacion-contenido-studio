@@ -4531,6 +4531,42 @@ def publicar_mas(navegador, datos):
 
 
 @escenario
+def publicar_lo_que_se_mando(navegador, datos):
+    """19-10-2026, en producción: los posts salían solo con la primera línea
+    (el «title» general llevaba solo esa línea). Ahora el «title» es el texto
+    completo y la ficha enseña «Ver lo que se mandó» por red."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    api.post(f"/api/publicar/proyectos/{cid}/perfil", {})
+    api.post(f"/api/publicar/proyectos/{cid}/conectar", {"redes": ["tiktok", "instagram", "youtube"]})
+    api.post(f"/api/publicar/proyectos/{cid}/cuentas")
+    largo = "Primera línea del Reel\n\nSegunda parte del texto, la que se perdía.\n\nTercera parte."
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["instagram"], "textos": {
+        "instagram": {"descripcion": largo, "hashtags": ["fiestaslima"]}}})
+    api.post(f"/api/publicar/videos/{pid}/enviar", {"redes": ["instagram"], "modo": "ahora",
+                                                     "confirmado": True, "repetir": True})
+    pg = Pagina(navegador, datos)
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    ok(pg.esperar(".lo-mandado > summary", "Ver lo que se mandó a Reels", 20),
+       "cada envío tiene «Ver lo que se mandó»")
+    pg.p.locator(".lo-mandado > summary").first.click()
+    pg.p.wait_for_timeout(500)
+    texto = pg.p.locator(".lo-mandado").first.inner_text()
+    ok("instagram_title" in texto and "Tercera parte." in texto and "#fiestaslima" in texto,
+       "con el texto entero que se mandó a Instagram (y sus hashtags)")
+    ok("title (" in texto and texto.count("Tercera parte.") >= 2,
+       "y el «title» común también lleva el texto entero, no solo la primera línea")
+    pg.p.wait_for_timeout(5000)
+    ok(pg.visible(".lo-mandado pre", "Tercera parte."), "y se queda abierto aunque la ficha se repinte")
+    pg.captura("publicar_lo_que_se_mando")
+    pg.sin_errores("«Ver lo que se mandó»")
+    pg.cerrar()
+
+
+@escenario
 def parrilla_marca_chat_y_resultados(navegador, datos):
     """parrilla-2 (18-10-2026): la marca del cliente, «Conversar con Claude» (el
     doble del recorrido) con captura e internet, guardar su guion en la

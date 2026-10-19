@@ -420,7 +420,12 @@ class ClienteUploadPost:
             if estado == "fallido":
                 error = str(f.get("error") or f.get("message") or f.get("skip_reason")
                             or "la red no lo aceptó")[:400]
-            salida[red] = {"estado": estado, "url": url, "error": error}
+            # el texto que quedó en la red, si Upload-Post lo devuelve (para
+            # avisar de que lo recortó)
+            texto = next((f.get(k) for k in ("caption", "post_text", "text", "description")
+                          if isinstance(f.get(k), str) and f.get(k).strip()), "")
+            salida[red] = {"estado": estado, "url": url, "error": error,
+                           "texto": str(texto)[:5000]}
         return salida
 
     def estado(self, request_id=None, job_id=None):

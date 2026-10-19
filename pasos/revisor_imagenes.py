@@ -75,8 +75,18 @@ INTENTOS_POR_PLANO = 2
 
 TIEMPO_BASE_S = 420
 
-TIPOS = ("guion", "equipo", "congruencia", "personas", "manos", "orientacion",
-         "estilo", "texto", "artefacto")
+TIPOS = ("regla", "guion", "equipo", "congruencia", "personas", "manos",
+         "orientacion", "estilo", "texto", "artefacto")
+
+#: El hueco de las reglas del estilo en la instruccion, cuando el estilo las
+#: tiene (pasos/reglas_estilo.py). Sin reglas el hueco queda vacio.
+BLOQUE_REGLAS_ESTILO = """
+LAS REGLAS DEL ESTILO (las escribio quien hizo el estilo; son lo PRIMERO que se
+comprueba en cada plano al que aplican, y si una se incumple el problema es de
+tipo "regla", con la gravedad que dice la propia regla -- esa manda sobre tu
+criterio):
+{reglas}
+"""
 GRAVEDADES = ("alta", "media", "baja")
 
 HERRAMIENTAS_VETADAS = ("Bash", "Write", "Edit", "NotebookEdit", "Grep", "Glob",
@@ -112,11 +122,13 @@ LAS INDICACIONES DEL ENCARGO (las del video):
 
 LAS REGLAS DE LA CASA:
 {reglas}
-
+{reglas_estilo}
 {referencia}LOS PLANOS (abre cada imagen con Read; van en orden de video):
 {planos}
 
 QUE BUSCAR, y en este orden:
+  - regla: incumple una de las REGLAS DEL ESTILO que aplican a ese plano (si
+    el estilo tiene); la gravedad es la de la regla.
   - guion: la imagen no cuenta lo que dice la voz (otra accion, otro numero de
     personas, otro momento).
   - equipo: el equipo no es el que mandan las indicaciones o esta montado
@@ -403,7 +415,8 @@ def entradas_de(texto):
 
 
 def revisar(proyecto, plan, imagenes, planos, estilo=None, encargo="",
-            reglas="", guia="", formato="", ajuste=None, avisar=None):
+            reglas="", guia="", formato="", ajuste=None, avisar=None,
+            reglas_estilo=""):
     """Mira esos planos y devuelve {plano: ficha}. Los que no se pudieron mirar
     no salen (y se vuelven a mirar la proxima vez).
 
@@ -432,6 +445,8 @@ def revisar(proyecto, plan, imagenes, planos, estilo=None, encargo="",
             guia=guia or "(sin guia escrita)",
             encargo=_texto(encargo, 3000) or "(sin indicaciones)",
             reglas=reglas or "(sin reglas)",
+            reglas_estilo=(BLOQUE_REGLAS_ESTILO.format(reglas=reglas_estilo)
+                           if reglas_estilo else ""),
             referencia=_referencia_de(proyecto, plan, ids[0], imagenes, bloques),
             planos=_planos_legibles(proyecto, tanda, imagenes, bloques),
             tipos=" | ".join(TIPOS))

@@ -20,6 +20,23 @@ vídeos, estilos, claves y contraseña no se tocan.
   devuelve el texto que quedó en la red y es más corto, sale el aviso «la red
   lo recortó».
 
+**Reglas del estilo: lo que ninguna imagen puede romper (19 de octubre)**
+- En cada estilo, debajo de «Estilo gráfico», la sección **📏 Reglas del
+  estilo**: una lista corta de normas, escritas como se las dirías a un
+  fotógrafo («quien juega mira siempre la pantalla, nunca a cámara»). Cada
+  una con su nombre, **«solo si el plano habla de…»** (unas palabras; vacío =
+  en todos los planos) y su **gravedad** si se incumple.
+- Cada regla entra en las imágenes de los planos a los que aplica, marcada
+  como obligatoria; el **corrector** la respeta al rehacer una imagen con una
+  nota, y el **revisor** la comprueba una por una con la gravedad que le diste
+  (en modo autónomo, las de gravedad alta se corrigen solas).
+- **«✦ Afinar con Claude»**: la reescribe para la IA de imágenes (en inglés,
+  concreta: dónde va la cámara, hacia dónde mira cada uno) y te propone
+  nombre, palabras y gravedad. Tú decides si la usas.
+- Se guardan solas y no cuestan nada. Llegan a los vídeos **nuevos** al
+  crearlos, y a uno ya hecho con **«Traer el estilo»**; sus imágenes no se
+  rehacen solas. Un estilo sin reglas sigue exactamente igual que antes.
+
 **Publicar: más redes, cifras automáticas e informe del mes (18 de octubre)**
 - **Nueve redes más**: LinkedIn, X, Threads, Pinterest, Bluesky, Discord,
   Telegram, Mastodon y Google Business. Se añaden por proyecto en Publicar →

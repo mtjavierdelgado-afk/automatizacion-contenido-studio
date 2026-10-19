@@ -729,7 +729,9 @@ def avisador(avisar):
     try:
         parametros = inspect.signature(avisar).parameters.values()
     except (TypeError, ValueError):          # un callable sin firma legible
-        return lambda fraccion, mensaje="", unidades=None: avisar(fraccion, mensaje)
+        def sin_firma(fraccion, mensaje="", unidades=None):
+            return avisar(fraccion, mensaje)
+        return _con_cancelacion(sin_firma, avisar)
     # SE MIRA EL NOMBRE, NO CUANTOS HAY. El `avisar` del gestor de trabajos es
     # (valor, mensaje, publico): con la cuenta de parametros pasaba tal cual y
     # el contador (hechos, total) caia en `publico`, y la barra decia
@@ -743,7 +745,19 @@ def avisador(avisar):
     def sin_unidades(fraccion, mensaje="", unidades=None):
         return avisar(fraccion, mensaje)
 
-    return sin_unidades
+    return _con_cancelacion(sin_unidades, avisar)
+
+
+def _con_cancelacion(envoltorio, avisar):
+    """El envoltorio con el `al_cancelar` del avisar de dentro, si lo tiene.
+
+    Es lo que deja que la cancelacion en el acto (`GestorTrabajos.al_cancelar`)
+    llegue a un `Avance` aunque entre medias haya un envoltorio: sin el, quien
+    espera al CLI se quedaba con el latido de 2 s."""
+    registrar = getattr(avisar, "al_cancelar", None)
+    if callable(registrar):
+        envoltorio.al_cancelar = registrar
+    return envoltorio
 
 
 class Avance:
@@ -768,6 +782,7 @@ class Avance:
         self.inicio = time.time()
         self._parar = threading.Event()
         self._hilo = None
+        self._quitar_aviso = None
 
     @property
     def segundos(self):
@@ -799,6 +814,7 @@ class Avance:
                 # el hilo principal esta bloqueado en el subproceso y no se
                 # entera, asi que hay que sacarlo de ahi desde aqui
                 self.cancelado = True
+                self._parar.set()
                 if callable(self.al_cancelar):
                     try:
                         self.al_cancelar()
@@ -806,9 +822,40 @@ class Avance:
                         pass
                 return
 
+    def _cortar(self):
+        """La cancelacion, en el acto (la llama el gestor al cancelar)."""
+        self.cancelado = True
+        # el latido ya no tiene nada que contar: se para, y con el su
+        # «al_cancelar», aunque quien lo arranco no llegue a llamar a parar()
+        self._parar.set()
+        if callable(self.al_cancelar):
+            try:
+                self.al_cancelar()
+            except Exception:  # noqa: BLE001
+                pass
+
+    def relanzar_cancelacion(self, para="la llamada"):
+        """Lo que sube cuando se ha cancelado: el `Cancelado` del gestor.
+
+        Se pide a `avisar`, que lo lanza porque el trabajo esta marcado: asi el
+        trabajo acaba «cancelado» y no en error, sin que este modulo tenga que
+        conocer el de trabajos. Un avisar que no lanza (una prueba, un uso
+        suelto) deja el RuntimeError de siempre.
+        """
+        self.avisar(self.valor(), self.texto())
+        raise RuntimeError(f"{para} se cancelo mientras esperaba al CLI de claude")
+
     def arrancar(self):
         self.inicio = time.time()
         self.avisar(self.desde, self.texto())
+        # CANCELAR EN EL ACTO, no al siguiente latido: el gestor de trabajos
+        # pone `al_cancelar` en su avisar (y quien lo envuelve lo pasa).
+        registrar = getattr(self.avisar, "al_cancelar", None)
+        if callable(registrar):
+            try:
+                self._quitar_aviso = registrar(self._cortar)
+            except Exception:  # noqa: BLE001 -- queda el latido
+                self._quitar_aviso = None
         self._hilo = threading.Thread(target=self._latir, daemon=True,
                                       name="avance-estimado")
         self._hilo.start()
@@ -817,6 +864,12 @@ class Avance:
     def parar(self):
         """Detiene el hilo y devuelve los segundos reales que se han tardado."""
         self._parar.set()
+        if callable(self._quitar_aviso):
+            try:
+                self._quitar_aviso()
+            except Exception:  # noqa: BLE001
+                pass
+            self._quitar_aviso = None
         if self._hilo is not None:
             self._hilo.join(timeout=self.cadencia + 1.0)
         return self.segundos

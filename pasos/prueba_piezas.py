@@ -4963,6 +4963,111 @@ def prueba_revision_imagenes_16_10():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def prueba_cancelar_no_paga_lo_que_queda():
+    """CANCELAR NO PAGA LAS LAMINAS QUE QUEDAN (18-10-2026).
+
+    Seis laminas en cuatro cadenas: con el `with ThreadPoolExecutor` de antes,
+    cancelar a media tanda esperaba a TODAS --tambien a las dos que aun no habian
+    empezado-- y se pagaban las seis (medido con un doble: 6 de 6, dos
+    empezadas despues de cancelar). Ahora se pregunta a `avisar` ANTES de pagar
+    cada una y lo que queda en cola se tira; las que ya estaban en vuelo se
+    acaban y quedan apuntadas, que lo pagado no se pierde.
+    """
+    import threading                                          # noqa: PLC0415
+    import types                                              # noqa: PLC0415
+    import moodboard                                          # noqa: PLC0415
+    from nucleo.trabajos import GestorTrabajos                # noqa: PLC0415
+
+    base = os.path.join(tempfile.gettempdir(), "estudio_prueba_cancelar_laminas")
+    shutil.rmtree(base, ignore_errors=True)
+    os.makedirs(base, exist_ok=True)
+    rutas = []
+    for indice in range(3):
+        ruta = os.path.join(base, f"ref_{indice}.png")
+        Image.new("RGB", (64, 48), color=(20 + indice * 40, 30, 40)).save(ruta)
+        rutas.append(ruta)
+
+    encargadas = []                     # (instante en que se encarga, eje)
+    candado = threading.Lock()
+
+    def generar(prompt, refs, quality="low", tamano="apaisado"):
+        with candado:
+            encargadas.append(time.time())
+        time.sleep(0.8)                 # lo que tarda una imagen (y se paga)
+        buffer = io.BytesIO()
+        Image.new("RGB", (32, 18), color=(9, 9, 9)).save(buffer, format="PNG")
+        return buffer.getvalue(), {"coste": 0.082}
+
+    falso = types.SimpleNamespace(generar=generar, normalizar=lambda r, c: r)
+    reales = (medios.motor, moodboard._reglas_de, moodboard._montar,
+              moodboard.prompt_de_dibujo, moodboard.prompt_de_eje,
+              p6_assets.guia_escrita)
+    medios.motor = lambda ruta: falso if "imagen" in ruta else types.SimpleNamespace()
+    moodboard._reglas_de = lambda reglas, estilo: ""
+    moodboard._montar = lambda fuentes, destino: fuentes[0]
+    moodboard.prompt_de_dibujo = lambda *a, **k: "dibuja"
+    moodboard.prompt_de_eje = lambda *a, **k: "dibuja"
+    p6_assets.guia_escrita = lambda estilo: "una guia"
+    destino = os.path.join(base, "dibujadas")
+    caminos = {
+        "dibujar_desde_guia": lambda avisar: moodboard.dibujar_desde_guia(
+            {"guia": {"guia": "g"}}, destino, calidad="low", avisar=avisar,
+            referencias=[rutas[0]], reutilizar=False),
+        "generar": lambda avisar: moodboard.generar(
+            rutas, {"guia": "g"}, calidad="low", avisar=avisar,
+            raiz=os.path.join(base, "banco")),
+    }
+    try:
+        for nombre, funcion in caminos.items():
+            titulo(f"cancelar a media tanda no paga lo que queda ({nombre})")
+            encargadas.clear()
+            gestor = GestorTrabajos()
+            tid = gestor.lanzar("laminas", funcion)
+            while len(encargadas) < min(len(moodboard.EJES), p6_assets.MAX_CADENAS):
+                time.sleep(0.01)
+            cancelado_en = time.time()
+            gestor.cancelar(tid)
+            ficha = gestor.esperar(tid, 30)
+            igual(ficha["estado"], "cancelado", "el trabajo acaba cancelado")
+            despues = sum(1 for t in encargadas if t > cancelado_en)
+            igual(despues, 0, "ninguna lamina se encarga DESPUES de cancelar "
+                              "(antes: las que quedaban en cola, y se pagaban)")
+            ok(len(encargadas) <= p6_assets.MAX_CADENAS,
+               f"se pagan solo las que ya estaban en vuelo: {len(encargadas)} de "
+               f"{len(moodboard.EJES)}")
+        titulo("en_paralelo tira la cola al PRIMER fallo, sea de la tarea que sea")
+        empezadas = []
+
+        def tarea(indice):
+            with candado:
+                empezadas.append(indice)
+            if indice == 0:
+                time.sleep(1.0)         # la primera sigue dibujando...
+            elif indice == 1:
+                raise RuntimeError("cancelado")   # ...cuando falla la segunda
+            else:
+                time.sleep(0.05)
+
+        try:
+            moodboard.en_paralelo(2, tarea, [(i,) for i in range(6)])
+            ok(False, "tenia que subir el fallo")
+        except RuntimeError:
+            ok(True, "el fallo de la segunda sube")
+        ok(len(empezadas) <= 3, f"y lo que quedaba en cola no arranca: empezaron "
+                                f"{sorted(empezadas)} de 6 (antes: las seis, "
+                                f"porque se esperaba a la primera)")
+        titulo("lo pagado antes de parar queda apuntado para no repagarlo")
+        huella = moodboard.huella_de_lamina("dibuja", [rutas[0]], "low")
+        apuntadas = [e for e in moodboard.EJES
+                     if moodboard.lamina_apuntada(destino, e, huella)]
+        ok(apuntadas, f"las laminas en vuelo se guardan y se apuntan: {apuntadas}")
+    finally:
+        (medios.motor, moodboard._reglas_de, moodboard._montar,
+         moodboard.prompt_de_dibujo, moodboard.prompt_de_eje,
+         p6_assets.guia_escrita) = reales
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def _prohibir_pagar():
     """Deja el motor de imagen sin `generar`. Ver la cabecera del modulo.
 
@@ -5470,6 +5575,7 @@ def main():
     prueba_exigir_estilo()
     prueba_cadenas()
     prueba_moodboard()
+    prueba_cancelar_no_paga_lo_que_queda()
     prueba_rehacer_de_verdad()
     prueba_ids_en_orden()
     prueba_guia_con_manos()

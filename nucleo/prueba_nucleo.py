@@ -603,6 +603,61 @@ def prueba_trabajos(estado, bitacora):
     igual(len(gestor.listar(activos=False)), 4, "el historico guarda los cuatro")
     estado.limpiar_marca("revision_audio")
 
+    # CANCELAR EN EL ACTO (18-10-2026). Un trabajo que espera a algo de fuera
+    # (el CLI de claude) no llama a avisar() hasta que eso contesta: la
+    # cancelacion tiene que llegarle por `avisar.al_cancelar`, y la ficha tiene
+    # que decir «cancelando» mientras termina, para que la pantalla no deje el
+    # boton vivo como si no se hubiera pulsado.
+    import threading                                          # noqa: PLC0415
+    soltar = threading.Event()
+    tarde = []
+
+    def esperando_fuera(avisar):
+        avisar(0.1, "esperando al subproceso")
+        avisar.al_cancelar(soltar.set)          # el «matar el subproceso»
+        soltar.wait(10)                         # bloqueado sin llamar a avisar
+        avisar(0.5, "ya contesto")              # aqui lanza Cancelado
+        return "no deberia llegar"
+
+    def esperar_a(condicion):
+        # con tope: una prueba que se cuelga no dice que falla
+        limite = time.time() + 5
+        while not condicion() and time.time() < limite:
+            time.sleep(0.01)
+
+    identificador = gestor.lanzar("fuera", esperando_fuera)
+    esperar_a(lambda: gestor.estado(identificador)["mensaje"] == "esperando al subproceso"
+              or gestor.estado(identificador)["estado"] != "ejecutando")
+    time.sleep(0.05)                    # que llegue a registrarse
+    igual(gestor.estado(identificador).get("cancelando"), False,
+          "sin pedir cancelar, la ficha no dice «cancelando»")
+    antes = time.time()
+    comprobar(gestor.cancelar(identificador), "cancelar acepta el trabajo que espera")
+    comprobar(soltar.is_set(), "cancelar llama EN EL ACTO a lo que el trabajo registro "
+                               "(antes esperaba a que el trabajo volviera a avisar)")
+    ficha = gestor.esperar(identificador, 10)
+    igual(ficha["estado"], "cancelado", "y el trabajo acaba cancelado, no en error")
+    comprobar(time.time() - antes < 2.0,
+              f"en menos de dos segundos ({time.time() - antes:.2f} s)")
+    igual(ficha.get("cancelando"), False, "acabado, ya no esta «cancelando»")
+    if hasattr(gestor, "al_cancelar"):
+        gestor.al_cancelar(identificador, lambda: tarde.append("ya"))
+    igual(tarde, ["ya"], "quien se registra despues de cancelar se entera al momento")
+
+    def lento(avisar):
+        avisar(0.1, "empezando")
+        time.sleep(0.6)                         # sin avisar: la marca espera
+        avisar(0.9, "aqui se entera")
+        return "no"
+
+    identificador = gestor.lanzar("lento", lento)
+    esperar_a(lambda: gestor.estado(identificador)["mensaje"] == "empezando")
+    gestor.cancelar(identificador)
+    igual(gestor.estado(identificador).get("cancelando"), True,
+          "pedida y todavia en marcha, la ficha dice «cancelando»")
+    igual(gestor.esperar(identificador, 10)["estado"], "cancelado",
+          "y al volver a avisar se para")
+
 
 def prueba_duplicar(proyecto, estado, base):
     """Una copia es lo que hay puesto HOY, con las rutas mudadas.

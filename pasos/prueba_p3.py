@@ -631,6 +631,41 @@ def prueba_fallos_cli():
               f"encuentra el CLI: {p3_guion._localizar_claude()}")
 
 
+def prueba_cancelar_para_el_latido():
+    """UNA CANCELACION PARA EL LATIDO (revision del 18-10-2026).
+
+    El guion solo paraba el `Avance` con un RuntimeError: un `Cancelado` del
+    gestor de trabajos se lo saltaba y el latido seguia avisando --y queriendo
+    matar-- un CLI que ya no existia."""
+    print("\n[6b] cancelar el guion para el latido")
+    import threading                                          # noqa: PLC0415
+
+    class Cancelado(Exception):
+        pass
+
+    base = tempfile.mkdtemp(prefix="prueba_p3_cancelar_")
+    original = p3_guion._llamar_claude
+
+    def cancelado(*_a, **_k):
+        raise Cancelado("cancelado")
+    p3_guion._llamar_claude = cancelado
+    try:
+        proyecto, _estado = preparar_proyecto(base, "Guion Cancelado")
+        try:
+            p3_guion.ejecutar(proyecto, {"prompt_general": "prueba"},
+                              lambda v, m="": v)
+            comprobar(False, "tenia que subir la cancelacion")
+        except Cancelado:
+            comprobar(True, "la cancelacion sube tal cual")
+        time.sleep(0.3)
+        vivos = [h for h in threading.enumerate()
+                 if h.name == "avance-estimado" and h.is_alive()]
+        comprobar(not vivos, f"y no queda ningun latido vivo ({len(vivos)})")
+    finally:
+        p3_guion._llamar_claude = original
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def prueba_reintento():
     print("\n[7] reintento cuando la respuesta no se puede leer")
     base = tempfile.mkdtemp(prefix="prueba_p3_sim_")
@@ -853,6 +888,7 @@ def principal():
         prueba_instruccion()
         prueba_videos_cortos()
         prueba_fallos_cli()
+        prueba_cancelar_para_el_latido()
         prueba_reintento()
         # La redaccion REAL es opt-in, con el mismo flag que prueba_pasos_voz:
         # llama al CLI de verdad (red, medio minuto y varianza del modelo -- una

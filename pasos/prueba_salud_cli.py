@@ -176,6 +176,90 @@ def prueba_una_pasada():
         cli_claude.localizar = original_localizar
 
 
+def prueba_fallo_pasajero():
+    seccion("2c] la sesion renovandose en otro proceso se repite sola (18-10-2026)")
+    cuenta = {"etiqueta": "pasajera", "config_dir": os.path.join(CARPETA, "cli8")}
+    pasajero = ("Failed to refresh OAuth token: another Claude Code process is refreshing it "
+                "or exited mid-refresh. This is usually transient; retry in a minute.")
+    original = subprocess.Popen
+    original_localizar = cli_claude.localizar
+    original_esperas = cli_claude.ESPERAS_PASAJERO_S
+    original_cuentas = cli_claude.cuentas
+    cli_claude.localizar = lambda *a, **k: "claude"
+    cli_claude.ESPERAS_PASAJERO_S = (0.05, 0.05)
+    cli_claude.cuentas = lambda *a, **k: [cuenta]
+    llamadas = []
+
+    def secuencia(*respuestas):
+        cola = list(respuestas)
+
+        def popen(*a, **k):
+            llamadas.append(1)
+            sobre, codigo = cola.pop(0) if len(cola) > 1 else cola[0]
+            return ProcesoFalso(sobre, codigo)
+        return popen
+    try:
+        igual(salud_cli.clasificar(RuntimeError(pasajero))[0], "error",
+              "un fallo pasajero NO se apunta como «sin sesion»")
+        comprobar(cli_claude.es_pasajero(RuntimeError(pasajero)), "y se reconoce como pasajero")
+        comprobar(not cli_claude.es_pasajero(RuntimeError("Not logged in · Please run /login")),
+                  "una sesion de verdad rota no es pasajera")
+        comprobar(not cli_claude.es_pasajero(cli_claude.LimiteAgotado("usually transient")),
+                  "un cupo nunca es pasajero")
+
+        llamadas.clear()
+        subprocess.Popen = secuencia(({"result": pasajero, "is_error": True}, 1),
+                                     ({"result": "vale", "session_id": "s"}, 0))
+        texto, _ = cli_claude.ejecutar("hola", modelo="haiku", esfuerzo="low", para="probar")
+        igual(texto, "vale", "a la segunda contesta")
+        igual(len(llamadas), 2, "y se ha llamado dos veces")
+        igual(salud_cli.de(cuenta)["estado"], "ok", "y la cuenta queda en ok")
+
+        llamadas.clear()
+        subprocess.Popen = secuencia(({"result": pasajero, "is_error": True}, 1))
+        try:
+            cli_claude.ejecutar("hola", modelo="haiku", esfuerzo="low", para="probar")
+            comprobar(False, "si sigue fallando tenia que lanzar")
+        except RuntimeError as fallo:
+            comprobar("usually transient" in str(fallo), "si no se arregla, sube el mismo fallo")
+        igual(len(llamadas), 1 + len(cli_claude.ESPERAS_PASAJERO_S), "tras los reintentos que tocan")
+
+        llamadas.clear()
+        subprocess.Popen = secuencia(({"result": "Not logged in · Please run /login", "is_error": True}, 1))
+        try:
+            cli_claude.ejecutar("hola", modelo="haiku", esfuerzo="low", para="probar")
+        except RuntimeError:
+            pass
+        igual(len(llamadas), 1, "una sesion rota NO se repite")
+
+        class Avance:
+            cancelado = False
+            al_cancelar = None
+        avance = Avance()
+        cli_claude.ESPERAS_PASAJERO_S = (5, 5)
+
+        def popen_y_cancela(*a, **k):
+            llamadas.append(1)
+            import threading
+            threading.Timer(0.3, lambda: setattr(avance, "cancelado", True)).start()
+            return ProcesoFalso({"result": pasajero, "is_error": True}, 1)
+        llamadas.clear()
+        subprocess.Popen = popen_y_cancela
+        import time as _t
+        antes = _t.time()
+        try:
+            cli_claude.ejecutar("hola", modelo="haiku", esfuerzo="low", para="probar", avance=avance)
+        except RuntimeError:
+            pass
+        comprobar(_t.time() - antes < 3, "cancelar durante la espera corta en el acto")
+        igual(len(llamadas), 1, "y no se vuelve a llamar")
+    finally:
+        subprocess.Popen = original
+        cli_claude.localizar = original_localizar
+        cli_claude.ESPERAS_PASAJERO_S = original_esperas
+        cli_claude.cuentas = original_cuentas
+
+
 # ------------------------------------------------------- cancelar corta el CLI
 
 CLI_LENTO = """#!{python}
@@ -555,6 +639,7 @@ def main():
     try:
         prueba_salud()
         prueba_una_pasada()
+        prueba_fallo_pasajero()
         prueba_cancelar_corta_el_cli()
         prueba_claves()
         prueba_mcp()

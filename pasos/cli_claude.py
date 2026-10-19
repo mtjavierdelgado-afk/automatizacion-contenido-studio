@@ -174,6 +174,40 @@ class LimiteAgotado(RuntimeError):
     """
 
 
+#: Fallos PASAJEROS del propio CLI, que se arreglan solos esperando un poco.
+#: El de verdad (18-10-2026, en «Ortografía de los subtítulos»): «Failed to
+#: refresh OAuth token: another Claude Code process is refreshing it or exited
+#: mid-refresh. This is usually transient; retry in a minute». Pasa cuando dos
+#: llamadas del CLI arrancan a la vez con la sesion a punto de renovarse (el
+#: revisor de imagenes y el corrector, por ejemplo): una renueva y la otra se
+#: encuentra el fichero de la sesion a medio escribir. No es una sesion rota y
+#: no se apunta como tal (salud_cli.clasificar); se espera y se repite.
+_PASAJEROS = ("another claude code process is refreshing", "exited mid-refresh",
+              "usually transient")
+#: Cuantas veces se repite una llamada que fallo por algo pasajero, y cuanto se
+#: espera antes de cada repeticion. El CLI pide «un minuto»: 20 + 40 lo cubren.
+ESPERAS_PASAJERO_S = (20, 40)
+
+
+def es_pasajero(fallo):
+    """Si el fallo es de los que el CLI llama pasajeros (`_PASAJEROS`)."""
+    if isinstance(fallo, (TiempoAgotado, LimiteAgotado)):
+        return False
+    bajo = " ".join(str(fallo).split()).lower()
+    return any(pista in bajo for pista in _PASAJEROS)
+
+
+def _esperar_pasajero(segundos, avance):
+    """Espera `segundos`, mirando cada medio segundo si se ha cancelado. -> bool
+    (True si se cancelo durante la espera)."""
+    fin = time.time() + max(0.0, float(segundos))
+    while time.time() < fin:
+        if avance is not None and getattr(avance, "cancelado", False):
+            return True
+        time.sleep(min(0.5, max(0.0, fin - time.time())))
+    return avance is not None and getattr(avance, "cancelado", False)
+
+
 # ------------------------------------------------------------------ validacion
 
 #: Con que codigo sale una SUITE que no ha podido correr porque no hay cupo.
@@ -728,7 +762,7 @@ def ejecutar(instruccion, modelo=MODELO_POR_DEFECTO,
     lista = cuentas()
     for indice, cuenta in enumerate(lista):
         try:
-            return _una_pasada(
+            return _con_reintento_pasajero(
                 instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tiempo_s,
                 sistema, herramientas_vetadas, permisos, extra, avance,
                 consejos_extra, para, cuenta, herramientas_permitidas)
@@ -754,6 +788,32 @@ def ejecutar(instruccion, modelo=MODELO_POR_DEFECTO,
     # inalcanzable: `cuentas()` nunca devuelve una lista vacia. Escrito de todas
     # formas porque "inalcanzable" envejece mal.
     raise RuntimeError("no hay ninguna cuenta del CLI de claude configurada")
+
+
+def _con_reintento_pasajero(instruccion, modelo, esfuerzo, cwd, tiempo_max_s,
+                            base_tiempo_s, sistema, herramientas_vetadas, permisos,
+                            extra, avance, consejos_extra, para, cuenta,
+                            herramientas_permitidas=()):
+    """`_una_pasada` con la MISMA cuenta, repetida si falla por algo pasajero
+    (`es_pasajero`: la sesion renovandose en otro proceso). Lo demas sube a la
+    primera, como siempre: un cupo o un plazo no se arreglan esperando."""
+    for intento in range(len(ESPERAS_PASAJERO_S) + 1):
+        try:
+            return _una_pasada(
+                instruccion, modelo, esfuerzo, cwd, tiempo_max_s, base_tiempo_s,
+                sistema, herramientas_vetadas, permisos, extra, avance,
+                consejos_extra, para, cuenta, herramientas_permitidas)
+        except RuntimeError as fallo:
+            if intento >= len(ESPERAS_PASAJERO_S) or not es_pasajero(fallo):
+                raise
+            if avance is not None and getattr(avance, "cancelado", False):
+                raise
+            espera = ESPERAS_PASAJERO_S[intento]
+            print(f"[cli] {para}: fallo pasajero del CLI ({str(fallo)[:100]}); "
+                  f"se repite en {espera} s", flush=True)
+            if _esperar_pasajero(espera, avance):
+                _subir_cancelacion(avance, para)
+    raise RuntimeError("inalcanzable")                    # pragma: no cover
 
 
 def _anotar_salud(cuenta, fallo=None, para=""):

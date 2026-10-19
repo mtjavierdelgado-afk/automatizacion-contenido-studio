@@ -43,11 +43,11 @@ import re
 import threading
 
 try:
-    from .proyecto import (Proyecto, ahora, escribir_json, leer_json,
+    from .proyecto import (ID_DE_CARPETA, Proyecto, ahora, escribir_json, leer_json,
                            leer_jsonl, lock_de)
     from .estado import PASOS, PASOS_POR_ID
 except ImportError:  # ejecutado con la carpeta nucleo directamente en sys.path
-    from proyecto import (Proyecto, ahora, escribir_json, leer_json,
+    from proyecto import (ID_DE_CARPETA, Proyecto, ahora, escribir_json, leer_json,
                           leer_jsonl, lock_de)
     from estado import PASOS, PASOS_POR_ID
 
@@ -516,8 +516,17 @@ def resumen_global(limite=None):
     if limite and int(limite) > 0:
         registros = registros[-int(limite):]
     proyectos = []
-    for pid in sorted({str(r.get("proyecto") or "") for r in registros}):
-        suyos = [r for r in registros if str(r.get("proyecto") or "") == pid]
+    # POR LA CARPETA DE CADA REGISTRO, no por el id que llevaba (R4): el id de
+    # un proyecto es su carpeta, y una carpeta copiada o renombrada a mano se
+    # anoto un tiempo con el id que traia su proyecto.json. Agrupando por el id
+    # escrito, su gasto salia a nombre del original. Sin `raiz` (registros muy
+    # viejos), el id de siempre.
+    def clave(registro):
+        raiz = str(registro.get("raiz") or "").rstrip("/\\")
+        nombre = re.split(r"[/\\]", raiz)[-1] if raiz else ""
+        return nombre if ID_DE_CARPETA.match(nombre or "") else str(registro.get("proyecto") or "")
+    for pid in sorted({clave(r) for r in registros}):
+        suyos = [r for r in registros if clave(r) == pid]
         ficha = agregar(suyos)
         ficha["proyecto"] = pid or None
         raices = [r.get("raiz") for r in suyos if r.get("raiz")]

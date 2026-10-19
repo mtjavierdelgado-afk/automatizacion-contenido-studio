@@ -83,8 +83,9 @@ vídeos, estilos, claves y contraseña no se tocan.
   fichero roto se rechaza ahí, en vez de romper el montaje al 97 %. Una nota
   sube como mucho sus 4 imágenes.
 - **Copiar a mano la carpeta de un vídeo** ya no crea un «gemelo» que abre el
-  original. Nombres de vídeo larguísimos y vídeos creados a la vez ya no dan
-  problemas.
+  original; la copia se queda en el mismo cliente que el original (y una
+  carpeta renombrada, en el suyo), y su gasto sale a su nombre. Nombres de
+  vídeo larguísimos y vídeos creados a la vez ya no dan problemas.
 - **«Aplicar» del repaso** no lanza dos montajes con dos clics, ni encima de
   la tanda del vídeo: avisa de que espere.
 - **Un retoque de una imagen hecho mientras corre la tanda** ya no se da por
@@ -93,7 +94,8 @@ vídeos, estilos, claves y contraseña no se tocan.
   imagen se guarda aparte (no se pierde) y la nota lo dice; antes la siguiente
   tanda la metía sin avisar.
 - Sin el programa de Claude instalado, el asistente dice que no está (antes un
-  error), y los errores ya no enseñan rutas del servidor. Las claves cortas
+  error), y los errores ya no enseñan rutas ni carpetas del servidor (solo el
+  nombre del fichero). Las claves cortas
   (como el Client ID de Jamendo) enseñan 2 caracteres, no la mitad.
 - **En la pantalla:** en el móvil, el «–» de la burbuja ya no tapa el chat
   abierto, y la burbuja ya no pisa «Siguiente ›» en Imágenes; «Un vídeo nuevo»

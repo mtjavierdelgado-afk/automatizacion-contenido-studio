@@ -439,7 +439,9 @@ class Proyecto:
         # apartaba el original. Solo cuando el nombre de la carpeta es un id
         # valido: si no lo es, no hay URL que llegue a ella de todas formas.
         carpeta = os.path.basename(self.raiz)
+        self.id_en_fichero = None
         if ID_DE_CARPETA.match(carpeta) and self.config["id"] != carpeta:
+            self.id_en_fichero = self.config["id"]
             self.config.setdefault("id_anterior", self.config["id"])
             self.config["id"] = carpeta
         self.config.setdefault("nombre", self.config["id"])
@@ -510,6 +512,10 @@ class Proyecto:
             ficha["raiz"] = carpeta
             ficha.setdefault("id", identificador(nombre))
             if ID_DE_CARPETA.match(nombre):
+                if ficha["id"] != nombre:
+                    # el que dice el fichero, para que quien liste pueda adoptar
+                    # lo que colgaba de el (su cliente) antes de olvidarlo
+                    ficha["id_en_fichero"] = ficha["id"]
                 ficha["id"] = nombre             # el id es la carpeta (R4)
             ficha.setdefault("nombre", ficha["id"])
             encontrados.append(ficha)

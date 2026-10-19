@@ -6165,6 +6165,57 @@ def probar_lo_de_v2h():
            "R2: y no deja sus params escritos")
         setattr(servidor, "_trabajo_que_toca", reales.pop("_trabajo_que_toca"))
 
+        # R4 (segunda parte) · LA CARPETA DE ID CAMBIADO SE QUEDA CON SU CLIENTE Y
+        # SU GASTO: el cliente iba por el id viejo y el gasto global también
+        CL = servidor.CLIENTES
+        cliente = CL.crear(base, "Cliente R4")["id"]
+        original = Proyecto.crear(base, "r4b original")
+        CL.asignar_video(base, original.id, cliente)
+        shutil.copytree(original.raiz, os.path.join(base, "r4b_copia"))      # copia
+        renombrar = Proyecto.crear(base, "r4b antes")
+        CL.asignar_video(base, renombrar.id, cliente)
+        os.rename(renombrar.raiz, os.path.join(base, "r4b_despues"))         # renombrado
+        codigo, _d = pedir("GET", "/api/proyectos")
+        igual(codigo, 200, "R4: la lista de vídeos se pide")
+        igual(CL.cliente_de(base, video_id="r4b_copia"), cliente,
+              "R4: la copia a mano queda en el mismo cliente que su original")
+        igual(CL.cliente_de(base, video_id=original.id), cliente, "R4: y el original sigue en él")
+        igual(CL.cliente_de(base, video_id="r4b_despues"), cliente,
+              "R4: la carpeta renombrada a mano sigue en su cliente")
+        ok(not CL.cliente_de(base, video_id="r4b_antes"),
+           "R4: y su id viejo, que ya no es de nadie, se suelta")
+        with open(os.path.join(base, "r4b_copia", "proyecto.json"), encoding="utf-8") as fh:
+            ficha = json.load(fh)
+        igual((ficha.get("id"), ficha.get("id_anterior")), ("r4b_copia", "r4b_original"),
+              "R4: y su proyecto.json ya dice su id (una sola vez)")
+        from nucleo import coste as COSTE                     # noqa: PLC0415
+        ruta_global_antes = COSTE.RUTA_GLOBAL
+        COSTE.RUTA_GLOBAL = os.path.join(base, "_coste_global.jsonl")
+        try:
+            with open(COSTE.RUTA_GLOBAL, "w", encoding="utf-8") as fh:
+                for pid_, raiz_, usd in (("r4b_original", original.raiz, 1.0),
+                                         ("r4b_original", os.path.join(base, "r4b_copia"), 2.0)):
+                    fh.write(json.dumps({"proveedor": "openai", "operacion": "imagen", "usd": usd,
+                                         "proyecto": pid_, "raiz": raiz_,
+                                         "momento": "2026-10-18T10:00:00"}) + "\n")
+            por = {p_["proyecto"]: p_["total_usd"] for p_ in COSTE.resumen_global()["proyectos"]}
+            igual((por.get("r4b_original"), por.get("r4b_copia")), (1.0, 2.0),
+                  f"R4: el gasto que la copia anotó con el id del original sale a nombre de la copia ({por})")
+        finally:
+            COSTE.RUTA_GLOBAL = ruta_global_antes
+
+        # R9 (segunda parte) · el texto de un 500 no lleva las carpetas del servidor
+        pid = Proyecto.crear(base, "r9 rutas").id
+        Estado(servidor.contexto(pid).proyecto)
+        cambiar("_sonido", lambda: (_ for _ in ()).throw(FileNotFoundError(
+            2, "No such file or directory", "/opt/as-video-studio/datos/secretos/claves.json")))
+        codigo, datos = pedir("GET", f"/api/proyectos/{pid}/sonido")
+        igual(codigo, 500, "R9: un fichero que falta sigue siendo un 500")
+        texto = json.dumps(datos or {}, ensure_ascii=False)
+        ok("/opt/" not in texto and "datos/secretos" not in texto and "claves.json" in texto,
+           f"R9: con el nombre del fichero y sin sus carpetas: {(datos or {}).get('error')}")
+        setattr(servidor, "_sonido", reales.pop("_sonido"))
+
         # S3 · UNA CLAVE CORTA NO SE ENSEÑA A MEDIAS (el Client ID de Jamendo
         # tiene 8 caracteres y se enseñaban 4)
         from pasos import claves as CLAVES                    # noqa: PLC0415

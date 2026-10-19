@@ -241,6 +241,8 @@ def contexto(pid):
         raise ErrorApi(503, str(fallo))
     except Exception as fallo:  # noqa: BLE001
         raise ErrorApi(500, f"no se ha podido abrir el proyecto {clave}: {fallo}")
+    if getattr(ctx.proyecto, "id_en_fichero", None):
+        _adoptar_id(ctx.proyecto.raiz, ctx.proyecto.id_en_fichero, ctx.proyecto.id)
     with _LOCK:
         ganador = _CONTEXTOS.setdefault(clave, ctx)
         if ganador is ctx:
@@ -248,6 +250,48 @@ def contexto(pid):
             # este contexto, asi que lo que se quita es de un servicio anterior
             ctx.limpiar_marcas_huerfanas()
         return ganador
+
+
+def _adoptar_id(raiz, viejo, nuevo):
+    """Un video cuyo id cambio al abrirlo (carpeta copiada o renombrada a mano,
+    R4) se queda con lo que colgaba de su id viejo. -> bool (si adopto)
+
+    - SU CLIENTE: el mapa de `clientes.json` va por id. Sin esto la copia
+      quedaba suelta, y si el cliente tenia clave, la copia se listaba a quien
+      no la habia abierto. Si el id viejo sigue siendo de otra carpeta (una
+      copia), la copia toma el MISMO cliente; si ya no (un renombrado), se mueve.
+    - EL ID EN `proyecto.json`: se escribe el nuevo (con `id_anterior`) para que
+      esto pase una sola vez. No toca ninguna firma.
+
+    El coste del historial global no hace falta moverlo: se agrupa por la
+    carpeta de cada registro (`coste.resumen_global`).
+    """
+    adoptado = False
+    try:
+        base = raiz_proyectos()
+        cid = CLIENTES.cliente_de(base, video_id=viejo)
+        if cid and not CLIENTES.cliente_de(base, video_id=nuevo):
+            CLIENTES.asignar_video(base, nuevo, cid)
+            adoptado = True
+            if not os.path.isdir(os.path.join(base, str(viejo))):
+                CLIENTES.asignar_video(base, viejo, "")
+        proyecto = Proyecto(raiz)
+        if proyecto.id_en_fichero:
+            proyecto.guardar_config()
+            adoptado = True
+    except Exception as fallo:  # noqa: BLE001  -- nunca impide abrir el video
+        anotar_global("aviso", {"adoptar_id": str(fallo), "viejo": viejo},
+                      proyecto=nuevo)
+    return adoptado
+
+
+def _listar_proyectos():
+    """`Proyecto.listar` con las carpetas de id cambiado ya adoptadas (R4)."""
+    fichas = Proyecto.listar(raiz_proyectos())
+    cambiadas = [f for f in fichas if f.get("id_en_fichero")]
+    for ficha in cambiadas:
+        _adoptar_id(ficha["raiz"], ficha["id_en_fichero"], ficha["id"])
+    return Proyecto.listar(raiz_proyectos()) if cambiadas else fichas
 
 
 def _registrar_trabajo(trabajo_id, pid):
@@ -951,7 +995,10 @@ app = FastAPI(title=NOMBRE_PRODUCTO, version=VERSION,
 
 @app.exception_handler(ErrorApi)
 async def _manejar_error_api(peticion, fallo):
-    return _respuesta_error(fallo.codigo, fallo.mensaje, fallo.extra)
+    # los 5xx de `ErrorApi` suelen llevar el texto de una excepcion pegado
+    # («no se ha podido abrir el proyecto x: <ruta>»): sin carpetas del servidor
+    mensaje = _sin_rutas(fallo.mensaje) if fallo.codigo >= 500 else fallo.mensaje
+    return _respuesta_error(fallo.codigo, mensaje, fallo.extra)
 
 
 @app.exception_handler(ErrorHTTP)
@@ -969,6 +1016,20 @@ async def _manejar_validacion(peticion, fallo):
                             {"detalles": detalles})
 
 
+#: Una ruta absoluta del disco (POSIX o Windows) dentro de un mensaje de error.
+_RUTA_DEL_DISCO = re.compile(r"(?<![\w.:/\\])(?:[A-Za-z]:)?[\\/](?:[^\\/\s'\"<>|:]+[\\/])+([^\\/\s'\"<>|:]*)")
+
+
+def _sin_rutas(texto):
+    """El texto de un error sin las carpetas del servidor: «…/fichero.png».
+
+    Un 500 enseña el texto de la excepción (es lo que dice qué ha pasado), y
+    el de un fichero que falta lleva su ruta entera (R9 del analisis del
+    13-10-2026). Se deja el nombre del fichero, que es lo que ayuda.
+    """
+    return _RUTA_DEL_DISCO.sub(lambda m: "…/" + m.group(1), str(texto))
+
+
 @app.exception_handler(Exception)
 async def _manejar_imprevisto(peticion, fallo):
     # LA TRAZA VA AL REGISTRO DEL SERVICIO, NO A LA RESPUESTA (R9 del analisis
@@ -977,7 +1038,7 @@ async def _manejar_imprevisto(peticion, fallo):
     marca = uuid.uuid4().hex[:8]
     print(f"[500 {marca}] {peticion.method} {peticion.url.path}\n"
           + traceback.format_exc(limit=8), file=sys.stderr, flush=True)
-    return _respuesta_error(500, f"{type(fallo).__name__}: {fallo}",
+    return _respuesta_error(500, _sin_rutas(f"{type(fallo).__name__}: {fallo}"),
                             {"marca": marca})
 
 
@@ -1028,7 +1089,7 @@ def salud():
         "ok": True,
         "version": VERSION,
         "raiz_proyectos": raiz_proyectos(),
-        "proyectos": len(Proyecto.listar(raiz_proyectos())),
+        "proyectos": len(_listar_proyectos()),
         "abiertos": abiertos,
         "trabajos_activos": activos,
         "pasos": [p["id"] for p in PASOS],
@@ -1147,7 +1208,7 @@ def estilos_perdidos():
     """
     diag = _herramienta("diagnostico_estilo")
     salida = []
-    for ficha in Proyecto.listar(raiz_proyectos()):
+    for ficha in _listar_proyectos():
         if ficha.get(CONFIG_TALLER):
             continue
         rotas = diag.revisar(ficha.get("raiz"))
@@ -1225,7 +1286,7 @@ def listar_proyectos(peticion: Request):
     fichas = []
     cerrados = _cerrados(peticion)
     asignaciones = CLIENTES._leer(raiz_proyectos()) if cerrados else None
-    for ficha in Proyecto.listar(raiz_proyectos()):
+    for ficha in _listar_proyectos():
         if ficha.get(CONFIG_TALLER):
             continue
         # LO DE UN PROYECTO CON CLAVE no se lista a quien no lo ha abierto
@@ -3313,7 +3374,7 @@ def coste_en_detalle(pid: str):
             estilo = {"id": pid_estilo, "nombre": ficha.get("nombre") or pid_estilo,
                       **(_coste_del_estilo(ficha) or {})}
             videos = 0
-            for f in Proyecto.listar(raiz_proyectos()):
+            for f in _listar_proyectos():
                 if (f.get("config") or f).get("estilo_light") == pid_estilo or f.get("estilo_light") == pid_estilo:
                     videos += 1
             estilo["videos"] = videos
@@ -10085,7 +10146,7 @@ def _foto_para_asistente(pid, pantalla=None):
 
     # -- los proyectos que hay
     try:
-        fichas = [f for f in Proyecto.listar(raiz_proyectos())
+        fichas = [f for f in _listar_proyectos()
                   if not f.get(CONFIG_TALLER)]
         lineas.append(f"proyectos (videos): {len(fichas)}")
         for ficha in fichas[:15]:
@@ -11226,7 +11287,7 @@ def _talleres_sueltos():
             if tid:
                 usados.add(str(tid))
     sueltos = []
-    for ficha in Proyecto.listar(raiz_proyectos()):
+    for ficha in _listar_proyectos():
         if not ficha.get(CONFIG_TALLER):
             continue
         if str(ficha.get("id")) in usados:
@@ -15444,7 +15505,7 @@ def _videos_para_publicar(peticion):
     except Exception:                                       # noqa: BLE001
         estilos = {}
     salida = []
-    for ficha in Proyecto.listar(raiz_proyectos()):
+    for ficha in _listar_proyectos():
         if ficha.get(CONFIG_TALLER):
             continue
         cid = CLIENTES.cliente_de(raiz_proyectos(), ficha.get(CONFIG_ESTILO_LIGHT) or "",
@@ -16000,7 +16061,7 @@ def _buscador_de_videos(peticion):
         if estado["lista"] is None:
             asignaciones = CLIENTES._leer(raiz_proyectos())
             lista = []
-            for ficha in Proyecto.listar(raiz_proyectos()):
+            for ficha in _listar_proyectos():
                 if ficha.get(CONFIG_TALLER):
                     continue
                 if cerrados and CLIENTES.cliente_de(

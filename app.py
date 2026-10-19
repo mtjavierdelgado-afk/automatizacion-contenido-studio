@@ -14943,8 +14943,16 @@ def publicar_escribir_textos(pid: str, peticion: Request, cuerpo: dict = Body(de
     info = _info_para_publicar(ctx)
     ajustes = _publicar().ajustes_de(raiz_proyectos(), info["cliente"])
     redes = _cuerpo(cuerpo).get("redes")
-    _por_publicar(_publicar().lanzar_textos, raiz_proyectos(), info, redes, ajustes,
-                  proyecto=ctx.proyecto, cwd=ctx.proyecto.raiz)
+    P = _publicar()
+    # lo que mejor funcionó en el proyecto y los hashtags de sus últimos vídeos,
+    # para que Claude aprenda y no repita bloque (publicar-seo)
+    del_proyecto = [v for v in _videos_para_publicar(peticion) if v["cliente"] == info["cliente"]]
+    cid_res = "" if info["cliente"] in ("", P.SIN_PROYECTO) else info["cliente"]
+    _por_publicar(P.lanzar_textos, raiz_proyectos(), info, redes, ajustes,
+                  proyecto=ctx.proyecto, cwd=ctx.proyecto.raiz,
+                  aprendido=P.aprendido_de_resultados(raiz_proyectos(), del_proyecto, cid_res),
+                  recientes=P.hashtags_recientes(raiz_proyectos(), [v["pid"] for v in del_proyecto],
+                                                 sin_pid=ctx.id))
     anotar_global("publicar_textos", {"proyecto": ctx.id, "redes": redes})
     return {"escribiendo": True}
 
@@ -15032,7 +15040,11 @@ def publicar_proyectos(peticion: Request):
                       "ajustes": P.ajustes_de(raiz_proyectos(), cid),
                       "perfil_sugerido": P.perfil_sugerido(cid, nombre)})
     filas[0]["perfil_sugerido"] = P.perfil_sugerido("", "sin_proyecto")
-    return {"proyectos": filas, "clave": P.estado_clave()}
+    for fila in filas:
+        fila["palabras"] = P.estado_palabras(fila["id"])
+    return {"proyectos": filas, "clave": P.estado_clave(), "seo_opciones": {
+        "categorias": P.SEO.CATEGORIAS_YOUTUBE, "idiomas": P.SEO.IDIOMAS,
+        "idiomas_audio": P.SEO.IDIOMAS_AUDIO}}
 
 
 @app.put("/api/publicar/proyectos/{cid}")
@@ -15182,6 +15194,86 @@ def publicar_lo_que_funciono(peticion: Request, proyecto: str = Query(default=""
         cid = "" if cid == P.SIN_PROYECTO else cid
     return P.lo_que_funciono(raiz_proyectos(), _videos_para_publicar(peticion), cid,
                              dias=dias, red=red, por=por, cuantos=cuantos)
+
+# ------------------------------------------------------- PUBLICAR: el SEO
+# Rama `publicar-seo` (18-10-2026): «Optimizar SEO», «Dame 3 ganchos»,
+# «Proponer palabras clave» y la palabra clave para el Encargo. Las tres
+# primeras van en hilo y se siguen preguntando por la ficha o por /proyectos.
+
+@app.post("/api/publicar/videos/{pid}/optimizar", status_code=202)
+def publicar_optimizar(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Claude revisa el SEO de los textos: {redes}. Deja una PROPUESTA campo a
+    campo en la ficha (`seo.propuesta`); no cambia ningún texto."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    P = _publicar()
+    ajustes = P.ajustes_de(raiz_proyectos(), info["cliente"])
+    _por_publicar(P.lanzar_optimizar, raiz_proyectos(), info, _cuerpo(cuerpo).get("redes"),
+                  ajustes, proyecto=ctx.proyecto, cwd=ctx.proyecto.raiz)
+    return {"trabajando": True}
+
+
+@app.post("/api/publicar/videos/{pid}/ganchos", status_code=202)
+def publicar_ganchos(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Tres ganchos para la primera línea de una red: {red}."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    P = _publicar()
+    ajustes = P.ajustes_de(raiz_proyectos(), info["cliente"])
+    _por_publicar(P.lanzar_ganchos, raiz_proyectos(), info, str(_cuerpo(cuerpo).get("red") or ""),
+                  ajustes, proyecto=ctx.proyecto, cwd=ctx.proyecto.raiz)
+    return {"trabajando": True}
+
+
+@app.post("/api/publicar/videos/{pid}/ganchos/usar")
+def publicar_usar_gancho(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Pone el gancho elegido como primera línea: {red, indice}."""
+    ctx = _ctx_publicable(pid, peticion)
+    d = _cuerpo(cuerpo)
+    _por_publicar(_publicar().usar_gancho, raiz_proyectos(), ctx.id, str(d.get("red") or ""),
+                  d.get("indice"))
+    return publicar_ficha(pid, peticion)
+
+
+@app.post("/api/publicar/proyectos/{cid}/palabras", status_code=202)
+def publicar_proponer_palabras(cid: str, peticion: Request):
+    """Claude propone la palabra clave principal, las secundarias y la zona del
+    proyecto, desde sus encargos y guiones. Queda en `ajustes.propuesta_palabras`."""
+    P = _publicar()
+    cid = _proyecto_publicable(cid, peticion)
+    nombre = _nombres_de_clientes().get(cid, "Vídeos sin proyecto")
+    trozos, proyecto, cwd = [], None, None
+    propios = [v for v in _videos_para_publicar(peticion)
+               if v["cliente"] == cid or (cid == P.SIN_PROYECTO and not v["cliente"])]
+    for v in sorted(propios, key=lambda x: str(x.get("actualizado") or ""), reverse=True)[:6]:
+        try:
+            ctx = contexto(v["pid"])
+            info = _info_para_publicar(ctx)
+        except Exception:                                   # noqa: BLE001
+            continue
+        proyecto, cwd = proyecto or ctx.proyecto, cwd or ctx.proyecto.raiz
+        guion = " ".join(b.get("texto", "") for b in info.get("guion") or [])
+        trozos.append(f"## {info['nombre']}\nEncargo: {info.get('titulo') or '—'}\n"
+                      f"Material: {info.get('material', '')[:800]}\nGuion: {guion[:1200]}")
+    if not trozos:
+        raise ErrorApi(409, "este proyecto todavía no tiene vídeos de los que sacar palabras clave")
+    # el coste se apunta en el vídeo más reciente del proyecto (el primero leído)
+    _por_publicar(P.lanzar_palabras, raiz_proyectos(), cid, nombre, "", "\n\n".join(trozos),
+                  proyecto=proyecto, cwd=cwd)
+    return {"trabajando": True}
+
+
+@app.get("/api/publicar/palabra-clave")
+def publicar_palabra_para_encargo(peticion: Request, estilo: str = Query(default="")):
+    """La palabra clave y la zona del proyecto de un estilo, para sugerirlas en
+    el Encargo (que el guion la diga en los 3 primeros segundos). Solo lee."""
+    P = _publicar()
+    cid = CLIENTES.cliente_de(raiz_proyectos(), estilo or "", None) if estilo else ""
+    if cid and cid in (_cerrados(peticion) or set()):
+        return {"palabra": "", "zona": ""}
+    ajustes = P.ajustes_de(raiz_proyectos(), cid or P.SIN_PROYECTO)
+    return {"palabra": ajustes.get("palabra_clave") or "", "zona": ajustes.get("zona") or ""}
+
 
 # =================================================================== PARRILLA
 # Automatizar → Parrilla (rama `parrilla`, 17-10-2026): matrices de guiones por

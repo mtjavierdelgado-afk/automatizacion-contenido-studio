@@ -7378,6 +7378,7 @@ function vistaEncargoVideoLight() {
       'céntrate en el mecanismo, no en las personas; no fuerces una historia '
       + 'de personaje', 'encargo-indicaciones')));
 
+  caja.appendChild(pistaPalabraClaveEncargo(v));
   caja.appendChild(bloqueLight('Las llamadas a la acción',
     'cuándo se presenta y qué le pides a quien lo ve',
     bloqueCTA(e.cta, { alCambiar: programarGuardadoEncargo, repintar: pintarLight })));
@@ -17487,13 +17488,33 @@ async function cargarPublicar(silencio) {
       /* CLAUDE ACABA DE ESCRIBIR: se pinta YA, aunque haya un campo con el
          cursor (sus textos son justo los que llegan). Antes se esperaba a
          salir del campo y los textos no aparecían (17-10, en el servidor). */
+      const trabajos = x => Object.keys(((x || {}).seo || {}).trabajando || {});
+      if (antes && antes.pid === PUB.ficha.pid) {
+        trabajos(antes).filter(t => !trabajos(PUB.ficha).includes(t)).forEach(t => {
+          terminoDeEscribir = true;
+          const error = ((PUB.ficha.seo || {}).errores || {})[t];
+          if (error) toast(error, true);
+          else toast(t === 'optimizar' ? 'Revisión SEO lista: acepta lo que te guste'
+            : 'Tres ganchos listos: elige uno');
+        });
+      }
       if (antes && antes.pid === PUB.ficha.pid && antes.escribiendo && !PUB.ficha.escribiendo) {
         terminoDeEscribir = true;
         if (PUB.ficha.error_textos) toast(PUB.ficha.error_textos, true);
         else toast('Textos listos: revísalos antes de publicar');
       }
     } else if (PUB.seccion === 'cuentas') {
+      const antes = PUB.proyectos;
       PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
+      // terminó «Proponer palabras clave»: se pinta aunque haya un campo con el cursor
+      ((antes || {}).proyectos || []).forEach(x => {
+        const ahora = (PUB.proyectos.proyectos || []).find(y => y.id === x.id) || {};
+        if ((x.palabras || {}).trabajando && !(ahora.palabras || {}).trabajando) {
+          terminoDeEscribir = true;
+          if ((ahora.palabras || {}).error) toast(ahora.palabras.error, true);
+          else toast(`Palabras clave propuestas para ${ahora.nombre}`);
+        }
+      });
     } else if (PUB.seccion === 'resultados') {
       // la lista, cada vez: un proyecto con clave cerrado desde la última no sale
       PUB.proyectos = await pedir(rutaPublicar('/proyectos'));
@@ -17588,7 +17609,9 @@ function programarRelojPublicar() {
   pararRelojPublicar();
   if (MODULOS.actual !== 'publicar') return;
   const f = PUB.ficha;
-  const enElAire = (PUB.seccion === 'ficha' && f && (f.escribiendo
+  const enElAire = (PUB.seccion === 'ficha' && f && Object.keys((f.seo || {}).trabajando || {}).length)
+    || (PUB.seccion === 'cuentas' && ((PUB.proyectos || {}).proyectos || []).some(x => (x.palabras || {}).trabajando))
+    || (PUB.seccion === 'ficha' && f && (f.escribiendo
     || (f.envios || []).some(e => ['enviando', 'publicando', 'comprobar'].includes(e.estado))))
     || (PUB.seccion === 'cola' && PUB.cola && (PUB.cola.envios || []).some(e =>
       ['enviando', 'publicando', 'comprobar'].includes(e.estado)));
@@ -17616,6 +17639,7 @@ function pararRelojPublicar() {
 }
 
 function olvidarEnvioPublicar() {
+  PUB.seoBorrador = {};
   PUB.modoEnvio = '';
   PUB.cuandoEnvio = '';
   PUB.borrador = {};
@@ -17990,18 +18014,23 @@ function editarTextoPublicar(red, campo, valor) {
   PUB.guardando = setTimeout(guardarTextosPublicar, 900);
 }
 
+/* Devuelve si quedó guardado: quien sigue después (optimizar, aceptar, pedir
+   ganchos) no puede seguir sobre el texto viejo del servidor. */
 async function guardarTextosPublicar() {
+  clearTimeout(PUB.guardando);
   PUB.guardando = null;
   const textos = JSON.parse(JSON.stringify(PUB.borrador));
-  if (!Object.keys(textos).length || !PUB.pid) return;
+  if (!Object.keys(textos).length || !PUB.pid) return true;
   try {
     PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
       method: 'PUT', cuerpo: { textos },
     });
     limpiarBorradorPublicar(textos);
     repintarPublicarSinPisar();
+    return true;
   } catch (e) {
     toast(`no se han podido guardar los textos: ${e.message}`, true);
+    return false;
   }
 }
 
@@ -18160,6 +18189,9 @@ function seccionFichaPublicar() {
   // LOS TEXTOS POR RED
   (f.redes || []).forEach(r => caja.appendChild(bloqueTextoRed(r)));
 
+  // EL SEO DEL VÍDEO: palabra clave, «Optimizar SEO» y su propuesta
+  if ((f.redes || []).length) caja.appendChild(bloqueSeoVideo());
+
   // LA PORTADA
   if ((f.redes || []).length && f.mp4) caja.appendChild(bloquePortadaPublicar());
 
@@ -18211,6 +18243,7 @@ function bloqueTextoRed(red) {
     h('input', { type: 'text', value: (t.hashtags || []).map(x => `#${x}`).join(' '), datos: { foco: `${red}-hashtags` },
       oninput: ev => editarTextoPublicar(red, 'hashtags', ev.target.value) })));
   b.appendChild(pie);
+  b.appendChild(seoDeRedPublicar(red));
   if (red === 'youtube' && (f.capitulos || []).length) {
     b.appendChild(h('div', { clase: 'meta' }, 'Capítulos: '
       + f.capitulos.map(c => `${mmss(c.t)} ${c.titulo}`).join(' · ')));
@@ -18664,7 +18697,7 @@ async function guardarAjustePublicar(cid, cambios) {
     toast('Guardado');
     // lo que cambia qué botones salen se repinta; el resto no, para no quitar
     // el foco a quien sigue escribiendo
-    if ('usar_emojis' in cambios || 'perfil' in cambios) pintarModulo();
+    if (['usar_emojis', 'perfil', 'yt_para_ninos', 'palabra_clave'].some(k => k in cambios)) pintarModulo();
   } catch (e) { toast(e.message, true); }
 }
 
@@ -18819,6 +18852,7 @@ function tarjetaProyectoPublicar(p) {
     } }), ` ${CORTOS_RED[r]}`)));
   fijos.appendChild(redes);
   b.appendChild(fijos);
+  b.appendChild(bloqueSeoProyecto(p));
   return b;
 }
 
@@ -19082,6 +19116,351 @@ function seccionClaveUploadPost(ficha) {
       } }, 'Cambiar'),
       puesta ? h('button', { clase: 'mini fantasma peligro',
         onclick: () => guardarClaves({ uploadpost: { clave: '' } }) }, 'Quitar') : null));
+}
+
+/* ================================================================ PUBLICAR · SEO
+ * Rama `publicar-seo` (18-10-2026). Lo que hace que un vídeo se ENCUENTRE:
+ * la palabra clave del proyecto y la de cada vídeo, los campos que acepta
+ * Upload-Post además del texto, la nota SEO de cada red (sin Claude) y las
+ * pasadas con Claude («Optimizar SEO», «Dame 3 ganchos», «Proponer palabras
+ * clave»). Ninguna pasada pisa un texto: lo que cambia, lo acepta alguien.
+ * Las cuentas y las instrucciones viven en `pasos/publicar_seo.py`.
+ */
+
+/* En «Lo fijo de este proyecto», un bloque más: el SEO. */
+function bloqueSeoProyecto(p) {
+  const a = p.ajustes || {};
+  const op = (PUB.proyectos || {}).seo_opciones || {};
+  const guardar = (campo, valor) => guardarAjustePublicar(p.id, { [campo]: valor });
+  PUB.seoAbierto = PUB.seoAbierto || {};
+  const caja = h('details', { clase: 'ajustes-fijos seo-proyecto', open: !!PUB.seoAbierto[p.id],
+    ontoggle: ev => { PUB.seoAbierto[p.id] = ev.currentTarget.open; } },
+  h('summary', {}, `SEO de este proyecto${a.palabra_clave ? ` · «${a.palabra_clave}»` : ' · sin palabra clave'}`));
+  const campoTexto = (campo, etiqueta, opciones) => h('label', { clase: 'etiqueta-campo' }, etiqueta,
+    h(opciones && opciones.area ? 'textarea' : 'input', Object.assign({ type: 'text', value: a[campo] || '',
+      rows: 2, placeholder: (opciones || {}).ejemplo || '', datos: { foco: `seo-${campo}-${p.id}`, seo: campo },
+      onchange: ev => { a[campo] = ev.target.value; guardar(campo, ev.target.value); } })));
+  const campoClave = () => document.querySelector(`[data-foco="seo-palabra_clave-${p.id}"]`);
+  caja.appendChild(h('div', { clase: 'fila guia-y-revisar' },
+    h('span', { clase: 'etiqueta-tono' }, 'Palabras clave'), h('span', { clase: 'crece' }),
+    botonGuia('palabra_clave', campoClave),
+    h('button', { clase: 'mini primario', disabled: !!(p.palabras || {}).trabajando,
+      title: 'Claude propone la principal, las secundarias y la zona desde los encargos y guiones del proyecto',
+      onclick: () => proponerPalabrasPublicar(p.id) },
+    (p.palabras || {}).trabajando ? 'Claude está pensando…' : 'Proponer palabras clave')));
+  if ((p.palabras || {}).error) caja.appendChild(cajaError(p.palabras.error));
+  if (a.propuesta_palabras && a.propuesta_palabras.principal) caja.appendChild(propuestaPalabrasPublicar(p));
+  caja.appendChild(h('div', { clase: 'fila campos-seo' },
+    campoTexto('palabra_clave', 'Palabra clave principal', { ejemplo: 'alquiler de consolas en Lima' }),
+    campoTexto('zona', 'Zona', { ejemplo: 'Lima, Perú (Miraflores, Surco…)' })));
+  caja.appendChild(campoTexto('secundarias', 'Palabras clave secundarias (separadas por comas, de 2 a 8)',
+    { ejemplo: 'fiestas infantiles, eventos corporativos, simulador de carreras', area: true }));
+  caja.appendChild(campoTexto('evitar', 'Palabras a evitar (opcional)', { ejemplo: 'barato, gratis' }));
+  caja.appendChild(h('div', { clase: 'meta' }, 'Banco de hashtags: Claude elige de aquí y los rota para no repetir el mismo bloque.'));
+  caja.appendChild(h('div', { clase: 'fila campos-seo' },
+    campoTexto('hashtags_amplios', 'Amplios', { ejemplo: 'gaming, fiestas' }),
+    campoTexto('hashtags_nicho', 'De nicho', { ejemplo: 'alquilerdeconsolas, simracing' }),
+    campoTexto('hashtags_locales', 'Locales', { ejemplo: 'lima, miraflores' })));
+  // Instagram
+  const campoUbic = () => document.querySelector(`[data-foco="seo-ig_ubicacion-${p.id}"]`);
+  caja.appendChild(h('div', { clase: 'fila guia-y-revisar' },
+    h('span', { clase: 'etiqueta-tono' }, 'Instagram'), h('span', { clase: 'crece' }),
+    botonGuia('ubicacion_instagram', campoUbic)));
+  caja.appendChild(h('div', { clase: 'fila campos-seo' },
+    campoTexto('ig_ubicacion', 'Ubicación: el número del Lugar o Página de Facebook', { ejemplo: '106042326099451' }),
+    campoTexto('ig_ubicacion_nombre', 'Cómo se llama ese lugar (solo para leerlo aquí)', { ejemplo: 'Lima, Perú' })));
+  caja.appendChild(h('div', { clase: 'meta' }, 'Instagram no admite texto alternativo a través de Upload-Post.'));
+  // YouTube
+  const campoCat = () => document.querySelector(`[data-seo-cat="${p.id}"]`);
+  const selector = (campo, opciones, etiqueta, datos) => h('label', { clase: 'etiqueta-campo' }, etiqueta,
+    h('select', { datos: datos || {}, onchange: ev => { a[campo] = ev.target.value; guardar(campo, ev.target.value); } },
+      ...(opciones || []).map(([v, t]) => h('option', { value: v, selected: String(a[campo]) === String(v) }, t))));
+  caja.appendChild(h('div', { clase: 'fila guia-y-revisar' },
+    h('span', { clase: 'etiqueta-tono' }, 'YouTube'), h('span', { clase: 'crece' }),
+    botonGuia('categoria_youtube', campoCat)));
+  caja.appendChild(h('div', { clase: 'fila campos-seo' },
+    selector('yt_categoria', op.categorias, 'Categoría', { seoCat: p.id }),
+    selector('yt_idioma', op.idiomas, 'Idioma del título y la descripción'),
+    selector('yt_idioma_audio', op.idiomas_audio, 'Idioma del audio')));
+  const casilla = (campo, texto, titulo) => h('label', { clase: 'casilla-red', title: titulo || '' },
+    h('input', { type: 'checkbox', checked: !!a[campo], onchange: ev => { a[campo] = ev.target.checked; guardar(campo, ev.target.checked); } }),
+    ` ${texto}`);
+  caja.appendChild(h('div', { clase: 'fila' },
+    casilla('yt_para_ninos', 'Hecho para niños',
+      'Solo si el vídeo es PARA niños. Uno para padres que contratan fiestas infantiles no lo es: marcarlo quita comentarios y alcance.'),
+    botonGuia('hecho_para_ninos', null)));
+  if (a.yt_para_ninos) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' }, 'Marcado como hecho para niños: YouTube le quita los comentarios, '
+      + 'las notificaciones y gran parte del alcance. Un vídeo para padres que contratan una fiesta infantil NO es para niños.'));
+  }
+  // TikTok
+  caja.appendChild(h('div', { clase: 'etiqueta-tono' }, 'TikTok'));
+  caja.appendChild(h('div', { clase: 'fila campos-seo' },
+    campoTexto('tt_ubicacion_id', 'Ubicación: id', {}),
+    campoTexto('tt_ubicacion_nombre', 'Ubicación: nombre', { ejemplo: 'Lima, Perú' })));
+  caja.appendChild(h('div', { clase: 'fila' },
+    casilla('tt_ubicacion_puede', 'Mi cuenta de TikTok tiene la función «location»',
+      'Sin ella, TikTok no acepta la ubicación y no se manda'),
+    casilla('tt_comentarios_puede', 'Mi cuenta de TikTok tiene la función «comments»',
+      'Sin ella, el primer comentario de TikTok no se manda')));
+  caja.appendChild(h('div', { clase: 'fila' },
+    casilla('optimizar_al_escribir', 'Optimizar SEO al escribir los textos',
+      'Tras escribir los textos, Claude hace la revisión SEO y la aplica sola (un poco más de tiempo y de tokens)')));
+  return caja;
+}
+
+async function proponerPalabrasPublicar(cid) {
+  try {
+    await pedir(rutaPublicar(`/proyectos/${encodeURIComponent(cid)}/palabras`), { method: 'POST' });
+    const fila = ((PUB.proyectos || {}).proyectos || []).find(x => x.id === cid);
+    if (fila) fila.palabras = { trabajando: true };
+    PUB.seoAbierto = Object.assign(PUB.seoAbierto || {}, { [cid]: true });
+    pintarModulo();
+    programarRelojPublicar();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* Lo que propuso Claude: cada frase con su porqué y, si el servidor pudo salir
+   a internet, lo que sugiere YouTube al escribirla. La persona elige. */
+function propuestaPalabrasPublicar(p) {
+  const a = p.ajustes || {};
+  const pr = a.propuesta_palabras || {};
+  const caja = h('div', { clase: 'propuesta-palabras' }, h('b', {}, 'Lo que propone Claude'));
+  const fila = (item, campo, sumar) => {
+    if (!item) return null;
+    const ya = sumar ? (a[campo] || '').toLowerCase().split(/\s*,\s*/).includes(item.frase.toLowerCase())
+      : (a[campo] || '') === item.frase;
+    return h('div', { clase: 'fila propuesta-palabra' },
+      h('div', { clase: 'crece' }, h('b', {}, item.frase),
+        item.porque ? h('div', { clase: 'meta' }, item.porque) : null,
+        (item.sugerencias || []).length ? h('div', { clase: 'meta' }, `YouTube sugiere: ${item.sugerencias.slice(0, 5).join(' · ')}`) : null),
+      h('button', { clase: 'mini', disabled: ya, onclick: async () => {
+        const valor = sumar ? [a[campo], item.frase].filter(Boolean).join(', ') : item.frase;
+        a[campo] = valor;
+        await guardarAjustePublicar(p.id, { [campo]: valor });
+        pintarModulo();
+      } }, ya ? 'Puesta' : (sumar ? 'Añadir' : 'Usar')));
+  };
+  caja.appendChild(fila(pr.principal, 'palabra_clave', false));
+  (pr.secundarias || []).forEach(x => caja.appendChild(fila(x, 'secundarias', true)));
+  if (pr.zona) caja.appendChild(fila(pr.zona, 'zona', false));
+  if (pr.internet === false) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'El servidor no ha podido salir a internet para mirar las sugerencias de búsqueda de YouTube: las frases son solo de Claude.'));
+  }
+  return caja;
+}
+
+/* En la ficha: la palabra clave de este vídeo y «Optimizar SEO con Claude». */
+function bloqueSeoVideo() {
+  const f = PUB.ficha;
+  const seo = f.seo || {};
+  const proyecto = (f.ajustes || {}).palabra_clave || '';
+  const b = h('div', { clase: 'bloque seo-video' }, h('div', { clase: 'fila' }, h('h3', { clase: 'crece' }, 'SEO'),
+    h('button', { clase: 'mini primario', disabled: !!(seo.trabajando || {}).optimizar || f.escribiendo,
+      title: 'Claude revisa los textos como un revisor SEO y propone cambios campo a campo; tú eliges cuáles aceptar',
+      onclick: () => optimizarSeoPublicar() },
+    (seo.trabajando || {}).optimizar ? 'Claude está revisando…' : 'Optimizar SEO con Claude')));
+  const campo = () => document.querySelector('input[data-foco="seo-palabra-video"]');
+  b.appendChild(h('div', { clase: 'fila campos-seo' },
+    h('label', { clase: 'etiqueta-campo' }, 'Palabra clave de este vídeo',
+      h('input', { type: 'text', value: 'palabra_clave' in (PUB.seoBorrador || {}) ? PUB.seoBorrador.palabra_clave : (seo.palabra_propia || ''),
+        placeholder: proyecto || 'la del proyecto (Cuentas y ajustes → SEO)', datos: { foco: 'seo-palabra-video' },
+        oninput: ev => { PUB.seoBorrador = Object.assign(PUB.seoBorrador || {}, { palabra_clave: ev.target.value }); },
+        onchange: async ev => { await guardarSeoVideoPublicar({ palabra_clave: ev.target.value }); delete PUB.seoBorrador.palabra_clave; } })),
+    botonGuia('palabra_clave', campo)));
+  if (seo.palabra_propuesta && seo.palabra_propuesta !== seo.palabra) {
+    b.appendChild(h('div', { clase: 'fila' },
+      h('span', { clase: 'meta crece' }, `Claude propone para este vídeo: «${seo.palabra_propuesta}»`),
+      h('button', { clase: 'mini', onclick: () => guardarSeoVideoPublicar({ palabra_clave: seo.palabra_propuesta }) }, 'Usarla')));
+  }
+  if (!seo.palabra) {
+    b.appendChild(h('div', { clase: 'caja-aviso' }, 'Ni este vídeo ni su proyecto tienen palabra clave: sin ella los textos no se posicionan para nada en concreto. Ponla aquí o en Cuentas y ajustes → SEO de este proyecto.'));
+  }
+  if (seo.nombre_fichero) b.appendChild(h('div', { clase: 'meta' }, `El MP4 se sube como «${seo.nombre_fichero}» (el del proyecto no cambia).`));
+  if ((seo.errores || {}).optimizar) b.appendChild(cajaError(seo.errores.optimizar));
+  const propuesta = (seo.propuesta || {}).redes || {};
+  if (Object.keys(propuesta).length) b.appendChild(propuestaSeoPublicar(propuesta));
+  return b;
+}
+
+async function guardarSeoVideoPublicar(cambios) {
+  try {
+    if (!(await guardarTextosPublicar())) return;
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), { method: 'PUT', cuerpo: cambios });
+    toast('Guardado');
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function optimizarSeoPublicar() {
+  const f = PUB.ficha;
+  const redes = (f.redes || []).filter(r => String(textosDeFicha(r).descripcion || '').trim());
+  if (!redes.length) { toast('Antes hacen falta los textos: pídeselos a Claude o escríbelos', true); return; }
+  try {
+    if (!(await guardarTextosPublicar())) return;
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(f.pid)}/optimizar`), { method: 'POST', cuerpo: { redes } });
+    f.seo = Object.assign({}, f.seo, { trabajando: Object.assign({}, (f.seo || {}).trabajando, { optimizar: {} }) });
+    pintarModulo();
+    cargarPublicar(true);
+  } catch (e) { toast(e.message, true); }
+}
+
+const NOMBRE_CAMPO_SEO = { titulo: 'Título', descripcion: 'Texto', cta: 'Llamada a la acción',
+  hashtags: 'Hashtags', primer_comentario: 'Primer comentario' };
+
+/* La propuesta SEO: por red y campo, antes y después con su porqué. Se acepta
+   campo a campo o todo; «Dejar el mío» la quita sin tocar nada. */
+function propuestaSeoPublicar(propuesta) {
+  const caja = h('div', { clase: 'propuesta-seo' }, h('div', { clase: 'fila' },
+    h('b', { clase: 'crece' }, 'La revisión SEO de Claude'),
+    h('button', { clase: 'mini primario', onclick: () => aceptarSeoPublicar(
+      Object.fromEntries(Object.entries(propuesta).map(([r, p]) => [r, Object.keys(p.campos || {})]))) }, 'Aceptar todo'),
+    h('button', { clase: 'mini fantasma', onclick: () => guardarSeoVideoPublicar({ descartar_seo: true }) }, 'Descartarla')));
+  const verTexto = v => (Array.isArray(v) ? v.map(x => `#${x}`).join(' ') : String(v || '—'));
+  Object.entries(propuesta).forEach(([red, p]) => {
+    const bloque = h('div', { clase: 'propuesta-red' }, h('div', { clase: 'fila' },
+      h('b', {}, NOMBRES_RED[red] || red), p.nota != null ? h('span', { clase: 'pastilla' }, `${p.nota}/100 según Claude`) : null));
+    (p.fallos || []).forEach(x => bloque.appendChild(h('div', { clase: 'meta' }, `⚠ ${x}`)));
+    Object.entries(p.campos || {}).forEach(([campo, c]) => {
+      bloque.appendChild(h('div', { clase: 'cambio-seo', datos: { red, campo } },
+        h('div', { clase: 'meta' }, NOMBRE_CAMPO_SEO[campo] || campo),
+        h('div', { clase: 'antes-despues' },
+          h('div', { clase: 'antes' }, verTexto((p.antes || {})[campo])),
+          h('div', { clase: 'despues' }, verTexto(c.despues))),
+        c.porque ? h('div', { clase: 'meta' }, c.porque) : null,
+        h('div', { clase: 'fila' },
+          h('button', { clase: 'mini', onclick: () => aceptarSeoPublicar({ [red]: [campo] }) }, 'Aceptar'),
+          h('button', { clase: 'mini fantasma', onclick: () => dejarMioSeoPublicar(red, campo) }, 'Dejar el mío'))));
+    });
+    caja.appendChild(bloque);
+  });
+  return caja;
+}
+
+async function aceptarSeoPublicar(aceptar) {
+  // lo que se esté tecleando va antes: si no, el servidor compararía con lo viejo
+  try {
+    if (!(await guardarTextosPublicar())) return;
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
+      method: 'PUT', cuerpo: { aceptar_seo: aceptar } });
+    toast('Aceptado');
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* «Dejar el mío»: quita ese cambio de la propuesta (en el servidor también). */
+async function dejarMioSeoPublicar(red, campo) {
+  try {
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
+      method: 'PUT', cuerpo: { rechazar_seo: { [red]: [campo] } } });
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* Un campo SEO del vídeo que se guarda al salir de él. Lo tecleado vive en
+   PUB.seoBorrador hasta guardarse: un repintado (al acabar un trabajo de
+   Claude) no se lo lleva. */
+function campoSeoVideo(campo, etiqueta, ejemplo) {
+  const seo = (PUB.ficha || {}).seo || {};
+  PUB.seoBorrador = PUB.seoBorrador || {};
+  const valor = campo in PUB.seoBorrador ? PUB.seoBorrador[campo] : (seo[campo] || '');
+  return h('label', { clase: 'etiqueta-campo' }, etiqueta,
+    h('input', { type: 'text', value: valor, placeholder: ejemplo || '', datos: { foco: `seo-${campo}` },
+      oninput: ev => { PUB.seoBorrador[campo] = ev.target.value; },
+      onchange: async ev => {
+        await guardarSeoVideoPublicar({ [campo]: ev.target.value });
+        delete PUB.seoBorrador[campo];
+      } }));
+}
+
+/* Por red: la nota SEO (sin Claude), el primer comentario, lo de Instagram
+   (colaboradores, etiquetas) y «Dame 3 ganchos». */
+function seoDeRedPublicar(red) {
+  const f = PUB.ficha;
+  const seo = f.seo || {};
+  const n = (seo.notas || {})[red] || { nota: 0, puntos: [] };
+  const t = textosDeFicha(red);
+  const caja = h('div', { clase: 'seo-red' });
+  PUB.notaAbierta = PUB.notaAbierta || {};
+  const clase = n.nota >= 80 ? 'ok' : n.nota >= 50 ? 'aviso' : 'error';
+  const detalle = h('details', { clase: 'nota-seo', open: !!PUB.notaAbierta[red],
+    ontoggle: ev => { PUB.notaAbierta[red] = ev.currentTarget.open; } },
+  h('summary', {}, h('span', { clase: `pastilla ${clase}` }, `SEO ${n.nota}/100`),
+    ` ${(n.puntos || []).filter(x => !x.ok).length} por mejorar`));
+  (n.puntos || []).forEach(x => detalle.appendChild(h('div', { clase: `punto-seo ${x.ok ? 'ok' : 'aviso'}` },
+    `${x.ok ? '✓' : '⚠'} ${x.texto}`)));
+  caja.appendChild(detalle);
+  caja.appendChild(h('label', { clase: 'etiqueta-campo' },
+    red === 'tiktok' && !(f.ajustes || {}).tt_comentarios_puede
+      ? 'Primer comentario (en TikTok solo se manda si tu cuenta tiene la función «comments»)' : 'Primer comentario (opcional)',
+    h('input', { type: 'text', value: t.primer_comentario || '', datos: { foco: `${red}-primer_comentario` },
+      placeholder: '¿Cuál elegirías tú? Cuéntanos en los comentarios',
+      oninput: ev => editarTextoPublicar(red, 'primer_comentario', ev.target.value) })));
+  if (red === 'instagram') {
+    caja.appendChild(h('div', { clase: 'fila campos-seo' },
+      campoSeoVideo('colaboradores', 'Colaboradores (hasta 3 cuentas, separadas por comas)', '@cuenta1, @cuenta2'),
+      campoSeoVideo('etiquetas', 'Etiquetar cuentas (separadas por comas)', '@cuenta')));
+    caja.appendChild(h('div', { clase: 'meta' }, 'Instagram no admite texto alternativo a través de Upload-Post.'));
+  }
+  const trabajando = !!((seo.trabajando || {})[`ganchos_${red}`]);
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', disabled: trabajando || !String(t.descripcion || '').trim(),
+      title: 'Tres primeras líneas distintas para elegir',
+      onclick: () => pedirGanchosPublicar(red) }, trabajando ? 'Claude está pensando…' : 'Dame 3 ganchos')));
+  const error = (seo.errores || {})[`ganchos_${red}`];
+  if (error) caja.appendChild(cajaError(error));
+  ((seo.ganchos || {})[red] || []).forEach((g, i) => caja.appendChild(h('div', { clase: 'fila gancho-seo' },
+    h('span', { clase: 'crece' }, g),
+    h('button', { clase: 'mini', onclick: () => usarGanchoPublicar(red, i) }, 'Usar este'))));
+  return caja;
+}
+
+async function pedirGanchosPublicar(red) {
+  try {
+    if (!(await guardarTextosPublicar())) return;
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/ganchos`), { method: 'POST', cuerpo: { red } });
+    const f = PUB.ficha;
+    f.seo = Object.assign({}, f.seo, { trabajando: Object.assign({}, (f.seo || {}).trabajando, { [`ganchos_${red}`]: {} }) });
+    pintarModulo();
+    cargarPublicar(true);
+  } catch (e) { toast(e.message, true); }
+}
+
+async function usarGanchoPublicar(red, indice) {
+  try {
+    if (!(await guardarTextosPublicar())) return;
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/ganchos/usar`), {
+      method: 'POST', cuerpo: { red, indice } });
+    toast('Gancho puesto en la primera línea');
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+/* En el Encargo (Crear): la palabra clave del proyecto como sugerencia, para
+   que el guion la diga en los 3 primeros segundos y salga en pantalla. Solo
+   se enseña: no toca el encargo ni el guion (ni sus firmas). */
+const PISTAS_PALABRA = {};
+function pistaPalabraClaveEncargo(v) {
+  const caja = h('div', { clase: 'pista-palabra-clave' });
+  if (!v || !v.estilo) return caja;
+  // en memoria por estilo: el Encargo se repinta a menudo y la caja parpadeaba
+  const pintar = r => {
+    if (!r || !r.palabra) return;
+    meter(caja, [h('div', { clase: 'caja-info fila' },
+      h('span', { clase: 'crece' }, `SEO: la palabra clave de este proyecto es «${r.palabra}»${r.zona ? ` (${r.zona})` : ''}. `
+        + 'Si el guion la dice en los 3 primeros segundos y sale en pantalla, las redes lo encuentran mejor.'),
+      h('button', { clase: 'mini', onclick: () => copiarTexto(`Di «${r.palabra}» en los 3 primeros segundos y que salga en pantalla.`) },
+        'Copiar como indicación'))]);
+  };
+  if (v.estilo in PISTAS_PALABRA) {
+    pintar(PISTAS_PALABRA[v.estilo]);
+    return caja;
+  }
+  pedir(`${BASE}/api/publicar/palabra-clave?${consulta({ estilo: v.estilo })}`).then(r => {
+    PISTAS_PALABRA[v.estilo] = r;
+    pintar(r);
+  }).catch(() => null);
+  return caja;
 }
 
 /* ================================================================== PARRILLA

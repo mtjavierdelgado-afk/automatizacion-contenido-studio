@@ -18695,8 +18695,15 @@ function entrarEnCrear() {
   pararPrevia();
   recordarVideoLight('');
   apuntarCliente('');
+  /* La galería se pone ANTES de entrar: así `irAModulo` la pinta y la apunta
+     en la entrada de historial que abre para Crear. Con `irALight` detrás, el
+     segundo pintado apilaba otra entrada y «atrás» no volvía al módulo. */
+  APP.light.vista = 'galeria';
+  APP.light.desdeVideo = '';
+  const panel = $('#panel');
+  if (panel) panel.scrollTop = 0;
   irAModulo('crear');
-  irALight('galeria');
+  if (MODULOS.actual === 'crear' && document.body.classList.contains('en-modulo')) pintarLight();
   cargarGaleriaLight(true);
 }
 

@@ -19144,7 +19144,6 @@ function tarjetaProyectoPublicar(p) {
       ` ${texto}`)));
   casillas.appendChild(h('span', { clase: 'meta' }, 'La confirmación antes de enviar no se puede quitar.'));
   fijos.appendChild(casillas);
-  b.appendChild(bloqueRedesProyectoPublicar(p));
   const redes = h('div', { clase: 'fila' }, h('span', { clase: 'meta' }, 'Redes marcadas de fábrica:'));
   redesVisiblesPublicar(a).forEach(r => redes.appendChild(h('label', { clase: 'casilla-red' },
     h('input', { type: 'checkbox', checked: (a.redes || []).includes(r), onchange: ev => {
@@ -19155,6 +19154,8 @@ function tarjetaProyectoPublicar(p) {
     } }), ` ${CORTOS_RED[r]}`)));
   fijos.appendChild(redes);
   b.appendChild(fijos);
+  // DESPUÉS de lo fijo: «.ajustes-fijos > summary» (el primero) es lo fijo
+  b.appendChild(bloqueRedesProyectoPublicar(p));
   b.appendChild(bloqueSeoProyecto(p));
   return b;
 }

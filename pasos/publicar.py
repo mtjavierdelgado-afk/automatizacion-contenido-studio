@@ -1759,7 +1759,7 @@ def _envio_publico(e):
     return {k: e.get(k) for k in (
         "id", "red", "estado", "modo", "cuando", "creado", "actualizado", "url",
         "error", "lote", "perfil", "mp4_huella", "nota", "programado_para", "sin_hora",
-        "metricas")}
+        "metricas", "enviado", "texto_publicado", "recortado")}
 
 
 def redes_visibles(ajustes, datos=None):
@@ -1991,6 +1991,66 @@ def confirmar(raiz, info, ajustes, eid, cuerpo, en_hilo=True):
     return nuevos
 
 
+#: Las redes cuyo «title» general manda: si van en la subida, «title» es su título.
+TITULO_MANDA = ("youtube", "facebook")
+
+
+def titulo_general(redes, compuestos, info):
+    """El «title» común de Upload-Post (19-10-2026).
+
+    Con YouTube o Facebook en la subida, es su título. Sin ellos, era la PRIMERA
+    LÍNEA del texto, y en producción los posts de Instagram salieron solo con
+    esa línea: Upload-Post (o la red) usaba «title» en vez de
+    «instagram_title». Ahora es el texto COMPLETO de la primera red, el mismo
+    que su `<red>_title`, así que da igual cuál de los dos use."""
+    for red in TITULO_MANDA:
+        if red in redes and (compuestos.get(red) or {}).get("titulo"):
+            return compuestos[red]["titulo"][:100 if red == "youtube" else 255]
+    for red in redes:
+        texto = str((compuestos.get(red) or {}).get("texto") or "").strip()
+        if texto:
+            return texto[:LIMITES.get(red, 2200)]
+    return (info.get("nombre") or "Vídeo")[:100]
+
+
+#: Los campos de texto que se guardan en cada envío («Ver lo que se mandó»).
+_CAMPOS_TEXTO = re.compile(r"(^title$|_title$|_description$|^description$|_alt_text$|"
+                           r"^first_comment$|_first_comment$|_link$)")
+
+
+def textos_enviados(campos):
+    return {k: v for k, v in campos.items()
+            if isinstance(v, str) and _CAMPOS_TEXTO.search(k)}
+
+
+def _campo_de_red(campo, red):
+    """Si un campo de texto es de esa red (o común a todas)."""
+    if campo in ("title", "description", "first_comment"):
+        return True
+    return campo.startswith(f"{red}_")
+
+
+def _normal(texto):
+    return " ".join(str(texto or "").split())
+
+
+def comparar_publicado(envio, texto_red):
+    """Si Upload-Post devuelve el texto que quedó en la red, se compara con lo
+    mandado: más corto (más de un 5 % y de 10 letras) es que la red lo recortó."""
+    texto_red = _normal(texto_red)
+    if not texto_red:
+        return
+    envio["texto_publicado"] = texto_red[:3000]
+    mandado = _normal((envio.get("enviado") or {}).get(f"{envio['red']}_title")
+                      or (envio.get("enviado") or {}).get(f"{envio['red']}_description")
+                      or (envio.get("enviado") or {}).get("title"))
+    if mandado and len(texto_red) < len(mandado) * 0.95 and len(mandado) - len(texto_red) > 10:
+        envio["recortado"] = (f"la red lo recortó: llegaron {len(texto_red)} de "
+                              f"{len(mandado)} caracteres")
+    else:
+        envio.pop("recortado", None)
+
+
 def _actualizar_lote(raiz, pid, lote, fn):
     with _lock(pid):
         datos = _leer_video(raiz, pid)
@@ -2013,22 +2073,13 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
         return
     redes = [e["red"] for e in envios]
     campos = {}
-    titulo_general = ""
+    compuestos = {}
     for e in envios:
         comp = componer(e["red"], datos["textos"].get(e["red"]), ajustes, info,
                         datos.get("capitulos"), datos)
+        compuestos[e["red"]] = comp
         campos.update(comp["campos"])
-        if comp.get("titulo") and not titulo_general:
-            titulo_general = comp["titulo"]
-    if not titulo_general:
-        # sin YouTube ni Facebook: la primera línea del texto (en Instagram y
-        # TikTok el «título» es eso), o el nombre del vídeo
-        for e in envios:
-            primera = str((datos["textos"].get(e["red"]) or {}).get("descripcion") or "").strip()
-            if primera:
-                titulo_general = primera.splitlines()[0].strip()
-                break
-    campos["title"] = (titulo_general or info.get("nombre") or "Vídeo")[:100]
+    campos["title"] = titulo_general(redes, compuestos, info)
     if redes == ["google_business"]:
         # su texto ES el «title» (hasta 1.500): ver enviar()
         gbp = componer("google_business", datos["textos"].get("google_business"), ajustes,
@@ -2041,6 +2092,11 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
         _log("portada_fallo", {"video": pid, "error": str(fallo)[:300]})
         extra, ficheros = {}, []
     campos.update(extra)
+    # LO QUE SE MANDÓ, tal cual (solo los textos; la clave nunca va en `campos`):
+    # «Ver lo que se mandó» en la ficha y la comparación con lo publicado
+    enviado = textos_enviados(campos)
+    _actualizar_lote(raiz, pid, lote, lambda e: e.update(
+        enviado={k: v for k, v in enviado.items() if _campo_de_red(k, e["red"])}))
     cuando = envios[0]["cuando"] if envios[0].get("modo") == "programado" else None
     perfil = envios[0].get("perfil") or ajustes.get("perfil")
     # EL NOMBRE DEL FICHERO lleva la palabra clave; el MP4 del proyecto no cambia
@@ -2089,6 +2145,7 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
                 e["estado"] = propio["estado"] if propio["estado"] in ESTADOS else "publicando"
                 e["url"] = propio.get("url") or ""
                 e["error"] = propio.get("error") or ""
+                comparar_publicado(e, propio.get("texto"))
             else:
                 e["estado"] = "programado" if r.get("modo") == "programado" else "publicando"
                 e["error"] = ""
@@ -2315,6 +2372,7 @@ def _refrescar(raiz, limite):
                     x["error"] = propio["error"]
                 elif nuevo == "publicado":
                     x["error"] = ""
+                comparar_publicado(x, propio.get("texto"))
             elif general == "completed" and x["estado"] in ("publicando", "comprobar", "programado"):
                 x["estado"] = "publicado"
                 x["error"] = ""

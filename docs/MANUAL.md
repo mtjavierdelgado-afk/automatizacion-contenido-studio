@@ -390,7 +390,9 @@ Business no dan cifras por post, así que no se preguntan.
 6. **Confirmas** en la ventana que enseña las redes, las cuentas y la hora.
 7. **Envíos**: cada red con su estado (subiendo, programado, publicándose,
    publicado con su enlace, falló con su motivo). Si una red falla, las demás
-   siguen. Lo programado se puede **Cancelar**.
+   siguen. Lo programado se puede **Cancelar**. **Ver lo que se mandó** enseña
+   los textos exactos que salieron hacia Upload-Post; si la red devolvió uno
+   más corto, avisa de que lo recortó.
 
 **El SEO** (que te encuentren):
 - En **Cuentas y ajustes → SEO de este proyecto**: la **palabra clave

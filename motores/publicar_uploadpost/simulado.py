@@ -87,6 +87,16 @@ class SimuladoUploadPost:
                              for p, c in sorted(datos["perfiles"].items())],
                 "limite": datos.get("limite") or 25, "plan": "simulado"}
 
+    def tableros_pinterest(self, perfil):
+        with _LOCK:
+            datos = self._leer()
+        cuentas = datos["perfiles"].get(perfil)
+        if cuentas is None:
+            raise ErrorUploadPost("Upload-Post no encuentra ese perfil", 404)
+        if not cuentas.get("pinterest"):
+            raise ErrorUploadPost("este perfil no tiene Pinterest conectado", 400)
+        return [{"id": "1001", "nombre": "Fiestas"}, {"id": "1002", "nombre": "Consolas"}]
+
     def crear_perfil(self, perfil):
         with _LOCK:
             datos = self._leer()

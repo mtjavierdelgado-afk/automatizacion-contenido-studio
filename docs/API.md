@@ -83,6 +83,13 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/publicar/cola` | Los videos listos para publicar y los envios de la semana (hora de Lima). |
 | `GET` | `/api/publicar/estado` | Si hay clave de Upload-Post (y de donde sale). Nunca la clave. |
 | `GET` | `/api/publicar/lo-que-funciono` | Los posts que mejor fueron: {proyecto?, dias, red?, por, cuantos}. |
+| `GET` | `/api/publicar/horarios` | El mejor día y hora de cada red con lo propio (o el punto de partida |
+| `GET` | `/api/publicar/informe` | El informe del mes de un proyecto, para el cliente: {proyecto, mes}. |
+| `GET` | `/api/publicar/metricas-auto` | La configuracion, la ultima vuelta, la proxima y lo que gasta. |
+| `PUT` | `/api/publicar/metricas-auto` | Guarda la eleccion (tras confirmar el coste en pantalla). |
+| `POST` | `/api/publicar/metricas-auto/ahora` | Una vuelta ya, en segundo plano (puede tardar minutos). |
+| `POST` | `/api/publicar/metricas-auto/coste` | Lo que gastaria una eleccion SIN guardarla: {frecuencia?, hora?, posts?}. |
+| `GET` | `/api/publicar/palabras-y-ganchos` | Qué palabras clave y qué primeras líneas fueron mejor. No pregunta a nadie. |
 | `POST` | `/api/publicar/probar` | Prueba la clave contra Upload-Post sin gastar ninguna subida. |
 | `GET` | `/api/publicar/proyectos` | Cada proyecto con lo fijo de publicar y sus cuentas (lo ultimo visto). |
 | `PUT` | `/api/publicar/proyectos/{cid}` | Lo fijo de un proyecto: {perfil, redes, hora, firma, hashtags, tono, |
@@ -91,6 +98,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/proyectos/{cid}/metricas` | Pide las cifras de lo publicado del proyecto y los seguidores de sus |
 | `POST` | `/api/publicar/proyectos/{cid}/perfil` | Apunta el perfil de Upload-Post del proyecto: {perfil, crear?}. Si ya |
 | `GET` | `/api/publicar/proyectos/{cid}/perfiles` | Los perfiles que hay de verdad en Upload-Post, para elegir uno: los que |
+| `GET` | `/api/publicar/proyectos/{cid}/tableros` | Los tableros de Pinterest del perfil del proyecto: [{id, nombre}]. |
 | `POST` | `/api/publicar/refrescar` | Pregunta a Upload-Post por los envios que siguen en el aire. |
 | `GET` | `/api/publicar/resultados` | El resumen de un proyecto (lo que ya se sabe; no pregunta a nadie). |
 | `GET` | `/api/publicar/videos/{pid}` | La ficha de publicar de un video: redes, textos, encaje, envios. |

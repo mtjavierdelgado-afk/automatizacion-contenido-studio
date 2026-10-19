@@ -3787,6 +3787,10 @@ def publicar_en_redes(navegador, datos):
     # la cola y el calendario
     pg.pulsar(".pestanas-publicar button", "Cola y calendario")
     ok(pg.esperar(".calendario-publicar .dia-publicar", segundos=10), "la semana, día a día")
+    # un domingo después de la hora del proyecto, lo programado cae el lunes:
+    # en la semana SIGUIENTE (fallaba solo los domingos por la noche, 18-10)
+    if not pg.esperar(".calendario-publicar .envio-dia", segundos=5):
+        pg.pulsar('button[title="Semana siguiente"]')
     ok(pg.esperar(".calendario-publicar .envio-dia", segundos=10), "con lo programado en su día")
     ok(pg.visible(".fila-listo", ""), "y los vídeos listos para publicar")
     pg.captura("publicar_cola")
@@ -4378,6 +4382,152 @@ def publicar_seo(navegador, datos):
         pg.captura(f"publicar_seo_movil_{tema}", entera=False)
         pg.sin_errores(f"el SEO en el móvil ({tema})")
         pg.cerrar()
+
+
+@escenario
+def publicar_mas(navegador, datos):
+    """publicar-mas (18-10-2026): las cifras automáticas (apagadas de fábrica,
+    el coste antes de guardar y la confirmación, que se puede cancelar), «Redes
+    de este proyecto» con sus ajustes, las redes nuevas en la ficha (título,
+    texto alternativo, el motivo si falta el tablero), la hora sugerida con
+    «Usar», palabras y ganchos, horarios y el informe del mes. Y en el móvil."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    api.post(f"/api/publicar/proyectos/{cid}/perfil", {})
+    api.post(f"/api/publicar/proyectos/{cid}/conectar",
+             {"redes": ["tiktok", "instagram", "youtube", "linkedin", "pinterest"]})
+    api.post(f"/api/publicar/proyectos/{cid}/cuentas")
+    api.put("/api/publicar/metricas-auto", {"frecuencia": "apagada"})
+    api.put(f"/api/publicar/proyectos/{cid}", {"redes_visibles": ["tiktok", "instagram", "youtube", "facebook"],
+                                                "pinterest_tablero": ""})
+    pg = Pagina(navegador, datos)
+    pg.js("PUB.seccion = 'cuentas'; irAModulo('publicar');")
+    ok(pg.esperar(".metricas-auto .pastilla", "apagadas", 10), "las cifras automáticas, apagadas de fábrica")
+    pg.pulsar(".metricas-auto button", "Encender: una vez al día, últimos 30")
+    ok(pg.esperar(".metricas-auto .coste-auto", "Si guardas", 10), "al elegir, el coste ANTES de guardar")
+    coste = pg.p.locator(".metricas-auto .coste-auto").inner_text()
+    ok("0 $" in coste and "cupo" in coste, f"dice que no cuesta dinero y lo que gasta del cupo: {coste[:90]!r}")
+    pg.aceptar = False
+    pg.pulsar(".metricas-auto button", "Guardar")
+    pg.p.wait_for_timeout(800)
+    ok(pg.dialogos and "0 $" in pg.dialogos[-1], "«Guardar» pide confirmar enseñando el coste")
+    _r, auto = api.get("/api/publicar/metricas-auto")
+    ok(auto.get("frecuencia") == "apagada", "cancelado: no se guarda nada")
+    pg.aceptar = True
+    pg.pulsar(".metricas-auto button", "Guardar")
+    pg.p.wait_for_timeout(1200)
+    _r, auto = api.get("/api/publicar/metricas-auto")
+    ok((auto.get("frecuencia"), auto.get("posts")) == ("diaria", 30), "aceptado: una vez al día, los últimos 30")
+    ok(pg.esperar(".metricas-auto .pastilla", "una vez al día", 10), "y la tarjeta lo dice, con la próxima vuelta")
+    ok(pg.visible(".metricas-auto .meta", "próxima"), "con la próxima vuelta")
+    pg.p.locator(".eleccion-auto select").first.select_option("apagada")
+    ok(pg.esperar(".metricas-auto .coste-auto", "no se gasta nada", 10), "apagarlas: lo dice antes de guardar")
+    pg.pulsar(".metricas-auto button", "Guardar")
+    pg.p.wait_for_timeout(1200)
+    _r, auto = api.get("/api/publicar/metricas-auto")
+    ok(auto.get("frecuencia") == "apagada", "y se pueden apagar")
+    pg.captura("publicar_mas_cifras_auto")
+
+    # «Redes de este proyecto»
+    tarjeta = f'.proyecto-publicar:has(input[data-perfil="{cid}"])'
+    pg.p.locator(f"{tarjeta} .redes-proyecto > summary").first.click()
+    pg.p.locator(f'{tarjeta} .redes-de-proyecto input[data-red="linkedin"]').check()
+    pg.p.wait_for_timeout(1200)
+    pg.p.locator(f'{tarjeta} .redes-de-proyecto input[data-red="pinterest"]').check()
+    pg.p.wait_for_timeout(1200)
+    _r, proyectos = api.get("/api/publicar/proyectos")
+    fila = next((x for x in proyectos["proyectos"] if x["id"] == cid), {})
+    vis = (fila.get("ajustes") or {}).get("redes_visibles") or []
+    ok("linkedin" in vis and "pinterest" in vis, f"marcar LinkedIn y Pinterest las pone a la vista ({vis})")
+    ok(pg.esperar(f"{tarjeta} .redes-proyecto .aviso-red", "tablero", 10), "Pinterest avisa de que falta el tablero")
+    ok(pg.visible(f"{tarjeta} .redes-proyecto .ajustes-red b", "LinkedIn"), "y LinkedIn enseña su página y quién lo ve")
+    pg.pulsar(f"{tarjeta} .redes-proyecto button", "Elegir tablero")
+    ok(pg.esperar(f"{tarjeta} select[data-tablero]", segundos=10) and
+       "Fiestas" in pg.p.locator(f"{tarjeta} select[data-tablero]").inner_text(),
+       f"«Elegir tablero»: los tableros de la cuenta de Pinterest ({pg.toast()[:60]!r})")
+    pg.p.locator(f"{tarjeta} select[data-tablero]").select_option("1001")
+    pg.p.wait_for_timeout(1200)
+    _r, proyectos = api.get("/api/publicar/proyectos")
+    fila = next((x for x in proyectos["proyectos"] if x["id"] == cid), {})
+    ok((fila.get("ajustes") or {}).get("pinterest_tablero") == "1001", "elegir uno lo guarda")
+    api.put(f"/api/publicar/proyectos/{cid}", {"pinterest_tablero": ""})
+    pg.js("PUB.tableros = {}; cargarPublicar();")
+    pg.p.wait_for_timeout(1200)
+    pg.captura("publicar_mas_redes_proyecto")
+
+    # la ficha
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    ok(pg.esperar(".redes-ficha .casilla-red", "LinkedIn", 15), "la ficha enseña LinkedIn")
+    ok(not pg.visible(".redes-ficha .casilla-red", "Mastodon"), "y no las que no se pidieron")
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["instagram", "linkedin", "pinterest"], "textos": {
+        "instagram": {"descripcion": "Reel"}, "linkedin": {"descripcion": "Post de LinkedIn"},
+        "pinterest": {"descripcion": "Pin"}}})
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    ok(pg.esperar(".texto-red[data-red=linkedin] .etiqueta-campo", "Título (", 15), "LinkedIn con su título (400)")
+    ok(pg.visible(".texto-red[data-red=pinterest] .etiqueta-campo", "Texto alternativo"),
+       "Pinterest con su texto alternativo")
+    ok(not pg.visible(".texto-red[data-red=instagram] .etiqueta-campo", "Texto alternativo"),
+       "Instagram sin él (no lo admite)")
+    ok(pg.esperar(".motivo-no-publicar", "tablero", 10), "«Publicar» dice que falta el tablero de Pinterest")
+    pg.p.locator(".texto-red[data-red=pinterest] input[data-foco=pinterest-alt]").fill("Una consola en una fiesta")
+    pg.p.wait_for_timeout(1800)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    ok((ficha["textos"].get("pinterest") or {}).get("alt") == "Una consola en una fiesta",
+       "el texto alternativo se guarda")
+    pg.js("PUB.modoEnvio = 'programar'; pintarModulo();")
+    ok(pg.esperar(".sugerencias-cuando .sugerencia-hora", "LinkedIn", 15), "Cuándo propone hora para cada red")
+    ok(pg.visible(".sugerencias-cuando .meta", "punto de partida general"),
+       "sin datos propios lo dice: es un punto de partida general")
+    pg.pulsar(".sugerencias-cuando .sugerencia-hora:has-text('LinkedIn') button", "Usar")
+    pg.p.wait_for_timeout(600)
+    valor = pg.p.locator(".cuando-publicar input[type=datetime-local]").input_value()
+    ok(bool(valor) and valor == pg.p.evaluate("() => PUB.cuandoEnvio"), f"«Usar» pone esa hora ({valor})")
+    pg.captura("publicar_mas_ficha")
+    pg.sin_errores("las redes nuevas en la ficha")
+
+    # Resultados
+    pg.js("PUB.verInforme = false; irASeccionPublicar('resultados');")
+    ok(pg.esperar(".palabras-ganchos h3", "Palabras clave", 15), "Resultados: palabras clave y ganchos")
+    ok(pg.esperar(".horarios-publicar .fila-horario", "LinkedIn", 10), "y cuándo publicar en cada red")
+    ok(pg.visible(".linea-auto", "apagadas"), "y si las cifras automáticas están encendidas")
+    pg.pulsar(".resultados-publicar button", "Informe del mes")
+    ok(pg.esperar(".informe-publicar .titulo-informe", segundos=15), "«Informe del mes»")
+    ok(pg.visible(".informe-publicar button", "Copiar resumen") and
+       pg.visible(".informe-publicar button", "Imprimir o guardar en PDF"), "con «Copiar resumen» e «Imprimir»")
+    pg.captura("publicar_mas_informe")
+    pg.pulsar(".informe-publicar button", "← Resultados")
+    ok(pg.esperar(".palabras-ganchos", segundos=10), "y se vuelve a Resultados")
+    pg.sin_errores("Resultados e informe")
+    pg.cerrar()
+
+    for tema in ("oscuro", "claro"):
+        pg = Pagina(navegador, datos, ancho=390, alto=844, nombre=f"publicar-mas móvil {tema}")
+        pg.js(f"document.documentElement.dataset.tema = '{tema}'; PUB.redesAbiertas = {{}}; "
+              "PUB.seccion = 'cuentas'; irAModulo('publicar');")
+        pg.p.wait_for_timeout(2000)
+        pg.js("document.querySelectorAll('.redes-proyecto').forEach(d => { d.open = true; });")
+        pg.p.wait_for_timeout(300)
+        for nombre, preparar in (("cuentas", ""),
+                                 ("ficha", f"PUB.modoEnvio = 'programar'; abrirPublicarVideo('{pid}');"),
+                                 ("resultados", "PUB.verInforme = false; irASeccionPublicar('resultados');"),
+                                 ("informe", "PUB.verInforme = true; PUB.informe = null; cargarPublicar();")):
+            if preparar:
+                pg.js(preparar)
+                pg.p.wait_for_timeout(2500)
+            ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+            ok(ancho <= 2, f"{nombre} cabe en un móvil, tema {tema} ({ancho}px)")
+            texto = pg.p.evaluate("() => document.querySelector('#modulo').innerText")
+            malos = sorted(set(x.group(0) for x in TEXTOS_MALOS.finditer(texto)))
+            ok(not malos, f"{nombre}: sin «undefined», «NaN» ni «null» ({malos})")
+        pg.captura(f"publicar_mas_movil_{tema}", entera=False)
+        pg.sin_errores(f"publicar-mas en el móvil ({tema})")
+        pg.cerrar()
+    # como estaba, para los escenarios de después
+    api.put(f"/api/publicar/proyectos/{cid}", {"redes_visibles": ["tiktok", "instagram", "youtube", "facebook"]})
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["instagram", "youtube"]})
 
 
 @escenario

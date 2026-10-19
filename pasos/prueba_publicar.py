@@ -295,7 +295,7 @@ def prueba_cliente():
         mp4 = os.path.join(CARPETA, "v.mp4")
         with open(mp4, "wb") as fh:
             fh.write(os.urandom(300_000))
-        r = cli.publicar("studio_b", ["tiktok", "youtube", "x"], mp4,
+        r = cli.publicar("studio_b", ["tiktok", "youtube", "reddit"], mp4,
                          {"tiktok_title": "Hola ñ", "tags[]": ["a", "b"], "is_aigc": True},
                          id_propio="lote123")
         igual(r["modo"], "en_cola", "subir ya: en segundo plano")
@@ -530,7 +530,7 @@ def prueba_studio():
         igual(f["formato"], "vertical", "y su formato, medido en el MP4")
         ok(3.5 <= f["duracion_s"] <= 4.5, f"y su duración real: {f['duracion_s']}")
         igual(f["encaje"]["youtube"]["tipo"], "Short", "en YouTube sale como Short")
-        igual(f["redes"], list(P.REDES), "de fábrica, las cuatro redes")
+        igual(f["redes"], list(P.REDES_CLASICAS), "de fábrica, las cuatro redes de siempre")
         ok(f["mp4"].endswith("video.mp4"), "con la ruta del MP4 para descargarlo")
         igual(s.get(base + "/api/publicar/videos/sin_montar").json()["montado"], False,
               "un vídeo sin montar lo dice")
@@ -1032,6 +1032,360 @@ def prueba_metricas():
               "el detalle por red de un vídeo cuadra con su suma")
     finally:
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
+
+def prueba_metricas_auto():
+    seccion("4c] cifras automáticas: frecuencia, coste antes de confirmar, apagadas de fábrica")
+    import publicar_auto as A
+    raiz = os.path.join(CARPETA, "auto")
+    os.makedirs(raiz)
+    simulador = os.path.join(CARPETA, "sim_auto.json")
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    espacio, A.ESPACIO_S = A.ESPACIO_S, 0
+    try:
+        c0 = A.leer(raiz)
+        igual(c0["frecuencia"], "apagada", "apagadas de fábrica")
+        igual(c0["proxima"], "", "apagadas no tienen próxima vuelta")
+        ok(not os.path.exists(A._ruta(raiz)), "leer no escribe nada (regla 1)")
+        igual(A.coste(raiz)["consultas_vuelta"], 0, "sin nada publicado no gasta")
+        ok("no se gasta nada" in A.coste(raiz)["texto"], "apagadas: lo dice")
+        for malo in ({"frecuencia": "cada rato"}, {"posts": 7}, {"hora": "25:00"}):
+            try:
+                A.guardar(raiz, malo)
+                ok(False, f"rechaza {malo}")
+            except P.ErrorPublicar:
+                ok(True, f"rechaza {malo}")
+        cli = P.cliente(raiz)
+        cli.crear_perfil("studio_a")
+        cli.enlace_conectar("studio_a", ["tiktok", "youtube"])
+        mp4 = os.path.join(raiz, "v.mp4")
+        with open(mp4, "wb") as fh:
+            fh.write(b"0" * 2000)
+        ajustes = dict(P.AJUSTES_DEFECTO, perfil="studio_a")
+        P.RESPIRO_CONSULTA_S = 0
+        for i, pid in enumerate(("auto_a", "auto_b", "auto_c")):
+            info = dict(INFO, pid=pid, mp4=mp4, mp4_huella=f"h{i}")
+            P.guardar_ficha(raiz, pid, {"textos": {"tiktok": {"descripcion": "T"}}})
+            P.enviar(raiz, info, ajustes, {"redes": ["tiktok"], "modo": "ahora",
+                                           "confirmado": True}, en_hilo=False)
+            for _ in range(3):
+                P.refrescar(raiz)
+            datos = P._leer_video(raiz, pid)
+            for e in datos["envios"]:
+                e["cuando"] = f"2026-10-1{i}T10:00:00"     # auto_c, el más nuevo
+            P._escribir(P._ruta_video(raiz, pid), datos)
+        P.guardar_ajustes(raiz, "", {"perfil": "studio_a"})
+        P.recordar_cuentas(raiz, "", {"tiktok": {"nombre": "t"}, "youtube": {"nombre": "y"},
+                                      "instagram": None, "facebook": None})
+        c = A.coste(raiz, {"frecuencia": "diaria", "posts": 10})
+        igual((c["publicados"], c["en_vivo"], c["perfiles"]), (3, 3, 1),
+              "el coste cuenta lo publicado y los proyectos con cuentas")
+        igual(c["consultas_vuelta"], 3, "una consulta del cupo por envío (los seguidores no gastan cupo)")
+        igual(c["consultas_dia"], 3, "diaria: una vuelta al día")
+        igual(A.coste(raiz, {"frecuencia": "6h", "posts": 10})["consultas_dia"], 12,
+              "cada 6 horas: cuatro vueltas")
+        igual(c["dinero"], 0, "sin coste en dinero")
+        ok("0 $" in c["texto"] and "100 consultas" in c["texto"], "y el texto lo explica con el cupo")
+        ok("no gastan cupo" in c["texto"], "y dice que los seguidores no gastan cupo")
+        ok(not os.path.exists(A._ruta(raiz)), "calcular el coste no guarda nada")
+        g = A.guardar(raiz, {"frecuencia": "diaria", "hora": "04:00", "posts": 10})
+        igual(g["frecuencia"], "diaria", "se guarda la frecuencia")
+        ok(g["activada_al"] and g["proxima"], "y se calcula la próxima vuelta")
+        ok(not A.toca(raiz), "recién encendida no corre ya: espera a su hora")
+        manana = P._leer_momento(g["proxima"]) + dt.timedelta(minutes=1)
+        ok(A.toca(raiz, manana), "a su hora, toca")
+        # una vuelta: solo los últimos N
+        r = A.correr(raiz, "prueba")
+        igual(r["consultados"], 3, "la vuelta pide los tres envíos")
+        ok(r["fin"] and not r["errores"], f"y termina sin avisos ({r.get('errores')})")
+        igual(r["seguidores"], 1, "y los seguidores del proyecto")
+        ok(all(e.get("metricas", {}).get("al") for pid in ("auto_a", "auto_b", "auto_c")
+               for e in P._leer_video(raiz, pid)["envios"]), "las cifras quedan en cada envío")
+        leida = A.leer(raiz)
+        igual(leida["ultima"]["motivo"], "prueba", "la última vuelta queda apuntada")
+        igual(len(leida["historial"]), 1, "y en el historial")
+        ok(P._leer_momento(leida["proxima"]) > P._leer_momento(leida["ultima"]["empezo"]),
+           "la próxima es después de la última")
+        # con posts=10 pero respiro: no repite lo recién mirado
+        r = A.correr(raiz, "otra")
+        igual(r["consultados"], 0, "lo recién mirado no se vuelve a pedir")
+        # solo los últimos N: con 1, solo el más nuevo
+        for pid in ("auto_a", "auto_b", "auto_c"):
+            datos = P._leer_video(raiz, pid)
+            for e in datos["envios"]:
+                e["metricas"] = {}
+            P._escribir(P._ruta_video(raiz, pid), datos)
+        lotes = A._publicados(raiz)
+        nuevo = lotes[0][1]
+        ok(any(e.get("lote") == nuevo or e.get("request_id") == nuevo
+               for e in P._leer_video(raiz, "auto_c")["envios"]), "el más nuevo va primero")
+        A.POSTS = A.POSTS + (1,)
+        A.guardar(raiz, {"posts": 1})
+        r = A.correr(raiz, "uno")
+        igual(r["consultados"], 1, "con «los últimos 1», una sola consulta")
+        ok(P._leer_video(raiz, "auto_c")["envios"][0].get("metricas", {}).get("al"),
+           "y es la del post más nuevo")
+        ok(not P._leer_video(raiz, "auto_a")["envios"][0].get("metricas", {}).get("al"),
+           "el viejo se queda para otra")
+        A.POSTS = A.POSTS[:-1]
+        # una vuelta a medias (el servicio se reinició) no bloquea nada
+        datos = A._leer(raiz)
+        datos["ultima"] = {"empezo": P._iso_lima(), "motivo": "programada"}
+        P._escribir(A._ruta(raiz), datos)
+        leida = A.leer(raiz)
+        ok(not leida["corriendo"] and leida["ultima"].get("cortada"),
+           "una vuelta sin terminar y sin nadie haciéndola: cortada, no «en marcha»")
+        historial_antes = len(leida["historial"])
+        A.correr(raiz, "tras reinicio")
+        leida = A.leer(raiz)
+        ok(any(x.get("cortada") for x in leida["historial"]) and
+           len(leida["historial"]) == historial_antes + 2, "y la cortada pasa al historial marcada")
+        # en marcha en este proceso
+        A._LOCK.acquire()
+        try:
+            ok(A.leer(raiz)["corriendo"], "con una vuelta en marcha, lo dice")
+            try:
+                A.correr_ya(raiz)
+                ok(False, "«Pedirlas ahora» con una vuelta en marcha: 409")
+            except P.ErrorPublicar as fallo:
+                igual(fallo.codigo, 409, "«Pedirlas ahora» con una vuelta en marcha: 409")
+            igual(A.correr(raiz).get("ocupado"), True, "y la programada tampoco la pisa")
+        finally:
+            A._LOCK.release()
+        # en marcha en OTRO proceso (dos servicios con la misma carpeta)
+        if A.fcntl is not None:
+            import fcntl
+            fh = open(A._ruta_cerrojo(raiz), "a+")
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            try:
+                ok(A.en_marcha(raiz), "la de otro proceso también cuenta")
+                igual(A.correr(raiz).get("ocupado"), True, "y no se hace dos veces")
+            finally:
+                fcntl.flock(fh, fcntl.LOCK_UN)
+                fh.close()
+        # apagarlas a mitad: la programada se para antes de gastar
+        for pid in ("auto_a", "auto_b", "auto_c"):
+            datos = P._leer_video(raiz, pid)
+            for e in datos["envios"]:
+                e["metricas"] = {}
+            P._escribir(P._ruta_video(raiz, pid), datos)
+        A.guardar(raiz, {"frecuencia": "apagada"})
+        r = A.correr(raiz, "programada")
+        igual(r["consultados"], 0, "apagadas mientras corre: la programada no gasta más")
+        ok(any("apagaron" in A._texto_aviso(e) for e in r["errores"]), "y lo dice")
+        # la manual sí corre aunque estén apagadas; la programada de justo
+        # después no repite lo que pidió la manual (respiro de media vuelta)
+        respiro, P.RESPIRO_METRICAS_S = P.RESPIRO_METRICAS_S, 0
+        try:
+            A.guardar(raiz, {"posts": 10})
+            r = A.correr(raiz, "a mano")
+            igual(r["consultados"], 3, "«Pedirlas ahora» corre con ellas apagadas")
+            A.guardar(raiz, {"frecuencia": "diaria"})
+            r = A.correr(raiz, "programada")
+            igual(r["consultados"], 0, "la programada justo después no repite lo que pidió la manual")
+        finally:
+            P.RESPIRO_METRICAS_S = respiro
+        # lo que no puede ver quien pregunta no sale
+        datos = A._leer(raiz)
+        datos["ultima"]["errores"] = [{"texto": "seguidores de cl_secreto: algo", "proyecto": "cl_secreto"},
+                                      "Upload-Post: el perfil studio_a no responde"]
+        P._escribir(A._ruta(raiz), datos)
+        tapada = A.leer(raiz, ocultar={"cl_secreto", ""})
+        textos = [A._texto_aviso(e) for e in tapada["ultima"]["errores"]]
+        ok(not any("cl_secreto" in t for t in textos), "el aviso de un proyecto cerrado no sale")
+        ok(textos and "studio_a" not in textos[0] and "proyecto con clave" in textos[0],
+           f"y su perfil se tapa en los demás ({textos})")
+        # apagarlas
+        A.guardar(raiz, {"frecuencia": "apagada"})
+        ok(not A.toca(raiz, P.ahora_lima() + dt.timedelta(days=30)), "apagadas no corren nunca")
+        # el reloj: no arranca con ESTUDIO_METRICAS_AUTO=0
+        os.environ["ESTUDIO_METRICAS_AUTO"] = "0"
+        igual(A.arrancar(lambda: raiz), None, "con ESTUDIO_METRICAS_AUTO=0 el reloj no arranca")
+        os.environ.pop("ESTUDIO_METRICAS_AUTO", None)
+        ok(not any(k in json.dumps(A.leer(raiz)) for k in ("api_key", "Apikey")),
+           "nada de la clave en lo que se enseña")
+    finally:
+        A.ESPACIO_S = espacio
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
+
+def prueba_redes_nuevas():
+    seccion("4d] las redes nuevas: a la vista por proyecto, campos, texto alternativo y Google Business")
+    import publicar_redes as RD
+    raiz = os.path.join(CARPETA, "redes_nuevas")
+    os.makedirs(raiz)
+    simulador = os.path.join(CARPETA, "sim_redes.json")
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    try:
+        a = P.ajustes_de(raiz, "cl_r")
+        igual(a["redes_visibles"], list(P.REDES_CLASICAS), "un proyecto nuevo enseña las cuatro de siempre")
+        igual(P.redes_visibles(a), list(P.REDES_CLASICAS), "y nada más")
+        a = P.guardar_ajustes(raiz, "cl_r", {"redes_visibles": ["tiktok", "linkedin", "pinterest",
+                                                                "google_business", "x"]})
+        igual(a["redes"], ["tiktok"], "quitar una red de la vista la quita de las marcadas de fábrica")
+        a = P.guardar_ajustes(raiz, "cl_r", {"redes": ["tiktok", "threads"]})
+        ok("threads" in a["redes_visibles"], "marcar una de fábrica la pone a la vista")
+        datos = {"redes": ["bluesky"], "redes_puestas": True, "envios": [{"red": "discord"}]}
+        vis = P.redes_visibles(a, datos)
+        ok("bluesky" in vis and "discord" in vis, "una red marcada en el vídeo o con envío no desaparece")
+        igual(vis, [r for r in P.REDES if r in vis], "en el orden de la pantalla")
+        try:
+            P.guardar_ajustes(raiz, "cl_r", {"redes_visibles": []})
+            ok(False, "sin ninguna red a la vista no se deja")
+        except P.ErrorPublicar:
+            ok(True, "sin ninguna red a la vista no se deja")
+        try:
+            P.guardar_ajustes(raiz, "cl_r", {"redes_visibles": ["reddit"]})
+            ok(False, "Reddit no se deja poner")
+        except P.ErrorPublicar:
+            ok(True, "Reddit no se deja poner")
+        # campos de cada red
+        info = dict(INFO, pid="redes1", nombre="El vídeo")
+        aj = dict(P.AJUSTES_DEFECTO, perfil="studio_r", pinterest_tablero="123",
+                  linkedin_visibilidad="CONNECTIONS", gbp_cta="BOOK", gbp_cta_url="https://x.pe")
+        t = {"descripcion": "Hola mundo", "titulo": "Título LinkedIn", "alt": "Una persona  juega."}
+        c = P.componer("linkedin", t, aj, info, [], {})["campos"]
+        igual((c.get("linkedin_title"), c.get("linkedin_visibility")), ("Título LinkedIn", "CONNECTIONS"),
+              "LinkedIn: título y quién lo ve")
+        ok(c.get("linkedin_description", "").startswith("Hola mundo"), "y su texto")
+        c = P.componer("pinterest", t, aj, info, [], {})["campos"]
+        igual((c.get("pinterest_board_id"), c.get("pinterest_alt_text")), ("123", "Una persona juega."),
+              "Pinterest: tablero y texto alternativo limpio")
+        c = P.componer("x", dict(t, descripcion="ver https://a.pe"), aj, info, [], {})
+        ok(any("enlaces" in x for x in c["avisos"]), "X avisa de que quita los enlaces")
+        c = P.componer("google_business", t, aj, info, [], {})["campos"]
+        igual((c.get("gbp_cta_type"), c.get("gbp_cta_url")), ("BOOK", "https://x.pe"),
+              "Google Business: botón con su enlace")
+        ok("linkedin_title" not in P.componer("tiktok", t, aj, info, [], {})["campos"],
+           "lo de una red no se cuela en otra")
+        igual(RD.falta("pinterest", dict(aj, pinterest_tablero="")) != "", True,
+              "Pinterest sin tablero: falta")
+        igual(P.encaje("google_business", "vertical", 45)["nivel"], "error",
+              "Google Business no acepta más de 30 s")
+        # ficha: lo que la pantalla necesita
+        ok(P.LIMITES["x"] == 280 and P.LIMITES["bluesky"] == 300, "los límites de X y Bluesky")
+        # el envío: Google Business en su propia subida, y Pinterest sin tablero no sale
+        cli = P.cliente(raiz)
+        cli.crear_perfil("studio_r")
+        cli.enlace_conectar("studio_r", ["linkedin", "google_business", "pinterest", "discord"])
+        mp4 = os.path.join(raiz, "v.mp4")
+        with open(mp4, "wb") as fh:
+            fh.write(b"0" * 2000)
+        info = dict(info, mp4=mp4, mp4_huella="hr", duracion_s=20, formato="vertical")
+        P.guardar_ficha(raiz, "redes1", {"textos": {r: {"descripcion": f"Texto {r}", "alt": "Se ve algo"}
+                                                     for r in ("linkedin", "google_business",
+                                                               "pinterest", "discord")}})
+        try:
+            P.enviar(raiz, info, dict(aj, pinterest_tablero=""),
+                     {"redes": ["pinterest"], "modo": "ahora", "confirmado": True}, en_hilo=False)
+            ok(False, "Pinterest sin tablero no se envía")
+        except P.ErrorPublicar as fallo:
+            ok("tablero" in str(fallo), "Pinterest sin tablero no se envía, y dice por qué")
+        P.enviar(raiz, info, aj, {"redes": ["linkedin", "google_business", "discord"], "modo": "ahora",
+                                  "confirmado": True}, en_hilo=False)
+        subidas = json.load(open(simulador))["subidas"]
+        igual(len(subidas), 2, "Google Business va en su propia subida")
+        gbp = next(x for x in subidas if "google_business" in x["redes"])
+        otra = next(x for x in subidas if "google_business" not in x["redes"])
+        igual(gbp["redes"], ["google_business"], "sola")
+        ok(str(gbp["campos"].get("title", "")).startswith("Texto google_business"),
+           "con su texto en el «title» común")
+        igual(sorted(otra["redes"]), ["discord", "linkedin"], "las otras, juntas")
+        ok(otra["campos"].get("discord_alt_text") == "Se ve algo", "Discord lleva su texto alternativo")
+        # cifras: un envío que solo fue a Discord no gasta consultas
+        for _ in range(3):
+            P.refrescar(raiz)
+        lotes = P._lotes_publicados(raiz, ["redes1"])
+        redes_medidas = sorted({e["red"] for envs in lotes.values() for _p, e in envs})
+        igual(redes_medidas, ["linkedin"], "Discord y Google Business no se preguntan por cifras por post")
+        P.guardar_ajustes(raiz, "cl_r", {"perfil": "studio_r"})
+        P.recordar_cuentas(raiz, "cl_r", {r: {"nombre": r} for r in
+                                          ("linkedin", "google_business", "discord")})
+        igual([t["id"] for t in P.tableros_pinterest(raiz, "cl_r")["tableros"]], ["1001", "1002"],
+              "los tableros de Pinterest del perfil")
+        seg = P.actualizar_seguidores(raiz, "cl_r")["seguidores"]
+        ok("discord" not in seg, "Discord no da seguidores: no se pregunta")
+    finally:
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
+
+def prueba_informe():
+    seccion("4e] palabras y ganchos, horarios por red e informe del mes")
+    import publicar_informe as I
+    raiz = os.path.join(CARPETA, "informe")
+    os.makedirs(raiz)
+    ahora = P.ahora_lima()
+    lunes = (ahora - dt.timedelta(days=ahora.weekday() + 7)).replace(hour=19, minute=10, second=0)
+
+    def envio(red, cuando, vistas, palabra="", linea="", me_gusta=None):
+        return {"id": f"e{red}{cuando.strftime('%m%d%H')}{vistas}", "red": red, "estado": "publicado",
+                "lote": "l", "cuando": P._iso_lima(cuando), "palabra": palabra,
+                "primera_linea": linea,
+                "metricas": {"vistas": vistas, "me_gusta": me_gusta, "al": P._iso_lima()}}
+    envios = []
+    # TikTok: los lunes a las 19 h van el triple que el resto
+    for i in range(4):
+        envios.append(envio("tiktok", lunes - dt.timedelta(days=7 * i), 3000, "fiesta infantil",
+                            "¿Tu hijo cumple años?", me_gusta=300))
+    for i in range(4):
+        envios.append(envio("tiktok", lunes - dt.timedelta(days=7 * i - 2, hours=10), 1000,
+                            "decoración", "Mira esta decoración", me_gusta=20))
+    envios.append(envio("instagram", lunes, 500, "fiesta infantil", "Otra cosa"))
+    P._escribir(P._ruta_video(raiz, "inf1"), {"envios": envios, "textos": {}, "redes": []})
+    videos = [{"pid": "inf1", "nombre": "Fiesta", "cliente": ""}]
+    pg = I.palabras_y_ganchos(raiz, videos, "", dias=60)
+    igual([p["palabra"] for p in pg["palabras"]][:2], ["fiesta infantil", "decoración"],
+          "la palabra que mejor fue, primero (por la mediana)")
+    fi = pg["palabras"][0]
+    igual((fi["posts"], fi["mediana"]), (5, 3000), "con sus publicaciones y su mediana")
+    ok(abs(fi["interaccion"] - 0.1) < 0.01, f"y su interacción ({fi['interaccion']})")
+    igual(pg["ganchos"][0]["gancho"], "¿Tu hijo cumple años?", "el gancho con más vistas, primero")
+    igual(pg["ganchos"][0]["veces"], 4, "la misma primera línea cuenta una vez (salió 4 veces)")
+    igual(len({g["gancho"] for g in pg["ganchos"]}), len(pg["ganchos"]), "sin ganchos repetidos")
+    hor = I.horarios(raiz, videos, "")
+    tt = hor["redes"]["tiktok"]
+    ok(tt["propios"], "TikTok tiene datos propios (8 publicaciones)")
+    igual((tt["mejores"][0]["dia"], tt["mejores"][0]["franja"]), (0, "18–21 h"),
+          "el mejor hueco de TikTok: lunes de 18 a 21 h")
+    igual(tt["mejores"][0]["hora"], "19:00", "y la hora que se propone")
+    prox = P._leer_momento(tt["mejores"][0]["proxima"])
+    ok(prox > ahora and prox.weekday() == 0 and prox.hour == 19, "«Usar» lleva al próximo lunes a las 19:00")
+    ok(all(m["indice"] > 1 for m in tt["mejores"]), "solo huecos por encima de lo normal")
+    ig = hor["redes"]["instagram"]
+    ok(not ig["propios"] and ig["faltan"] == 5, "Instagram con una sola: no se inventa nada y dice cuántas faltan")
+    ok(ig["general"]["texto"] and P._leer_momento(ig["general"]["proxima"]) > ahora,
+       "y da el punto de partida general")
+    # informe del mes
+    mes = lunes.strftime("%Y-%m")
+    inf = I.informe_mensual(raiz, videos, "", mes=mes, nombre="Fiestas Suyu")
+    del_mes = [e for e in envios if e["cuando"].startswith(mes)]
+    igual(inf["total"]["posts"], len(del_mes), "el informe cuenta lo publicado ese mes")
+    igual(inf["total"]["vistas"], sum(e["metricas"]["vistas"] for e in del_mes), "y suma sus vistas")
+    ok(inf["mejores"][0]["metricas"]["vistas"] == 3000, "lo mejor del mes, primero")
+    ok("Fiestas Suyu" in inf["resumen"] and inf["nombre_mes"] in inf["resumen"], "el resumen para copiar")
+    ok("undefined" not in inf["resumen"] and "None" not in inf["resumen"], "sin huecos raros en el resumen")
+    ok(mes in inf["meses"], "y el mes sale en la lista para elegir")
+    # el mes en curso, frente a los MISMOS días del anterior
+    hoy_mes = ahora.strftime("%Y-%m")
+    ini_mes = ahora.replace(day=1, hour=0, minute=0, second=0)
+    antes_ini = (ini_mes - dt.timedelta(days=1)).replace(day=1)
+    tarde = antes_ini + (ahora - ini_mes) + dt.timedelta(hours=2)    # después del mismo tramo
+    temprano = antes_ini + dt.timedelta(hours=1)
+    P._escribir(P._ruta_video(raiz, "inf2"), {"envios": [
+        envio("youtube", temprano, 100), envio("youtube", tarde, 5000)] if tarde.month == antes_ini.month
+        else [envio("youtube", temprano, 100)], "textos": {}, "redes": []})
+    inf = I.informe_mensual(raiz, [{"pid": "inf2", "nombre": "B", "cliente": ""}], "", mes=hoy_mes, nombre="B")
+    ok(inf["en_curso"], "el mes de hoy sale como en curso")
+    igual(inf["anterior"]["posts"], 1, "y se compara con el mismo tramo del mes anterior, no con el entero")
+    vacio = I.informe_mensual(raiz, videos, "", mes="2020-01", nombre="X")
+    igual(vacio["total"]["posts"], 0, "un mes sin nada: cero, sin fallar")
+    try:
+        I.informe_mensual(raiz, videos, "", mes="octubre")
+        ok(False, "un mes mal escrito: error claro")
+    except P.ErrorPublicar:
+        ok(True, "un mes mal escrito: error claro")
+    otro = I.palabras_y_ganchos(raiz, [dict(videos[0], cliente="cl_otro")], "", dias=60)
+    igual(otro["palabras"], [], "lo de otro proyecto no entra")
 
 
 def prueba_perfiles():
@@ -1629,6 +1983,9 @@ def main():
     prueba_cliente()
     prueba_envios_sueltos()
     prueba_metricas()
+    prueba_metricas_auto()
+    prueba_redes_nuevas()
+    prueba_informe()
     prueba_retencion_y_resumenes()
     prueba_perfiles()
     prueba_textos()

@@ -15658,7 +15658,12 @@ def publicar_proyectos(peticion: Request):
         fila["palabras"] = P.estado_palabras(fila["id"])
     return {"proyectos": filas, "clave": P.estado_clave(), "seo_opciones": {
         "categorias": P.SEO.CATEGORIAS_YOUTUBE, "idiomas": P.SEO.IDIOMAS,
-        "idiomas_audio": P.SEO.IDIOMAS_AUDIO}}
+        "idiomas_audio": P.SEO.IDIOMAS_AUDIO},
+        # publicar-mas: los desplegables de «Redes de este proyecto»
+        "redes_opciones": {"redes": list(P.REDES), "clasicas": list(P.REDES_CLASICAS),
+                           "cta_gbp": P.RD.CTA_GBP,
+                           "visibilidad_linkedin": P.RD.VISIBILIDAD_LINKEDIN,
+                           "visibilidad_mastodon": P.RD.VISIBILIDAD_MASTODON}}
 
 
 @app.put("/api/publicar/proyectos/{cid}")
@@ -15677,6 +15682,13 @@ def publicar_ver_cuentas(cid: str, peticion: Request):
     P = _publicar()
     cid = _proyecto_publicable(cid, peticion)
     return _por_publicar(P.ver_cuentas, raiz_proyectos(), cid)
+
+
+@app.get("/api/publicar/proyectos/{cid}/tableros")
+def publicar_tableros_pinterest(cid: str, peticion: Request):
+    """Los tableros de Pinterest del perfil del proyecto: [{id, nombre}]."""
+    cid = _proyecto_publicable(cid, peticion)
+    return _por_publicar(_publicar().tableros_pinterest, raiz_proyectos(), cid)
 
 
 @app.get("/api/publicar/proyectos/{cid}/perfiles")
@@ -15791,6 +15803,49 @@ def publicar_metricas_proyecto(cid: str, peticion: Request, cuerpo: dict = Body(
     return r
 
 
+# Las cifras automaticas (publicar-mas): apagadas de fabrica; la pantalla
+# enseña lo que gasta la eleccion ANTES de guardarla. Ver `publicar_auto`.
+
+def _publicar_auto():
+    _publicar()
+    import publicar_auto  # noqa: E402  (pasos/ ya esta en sys.path)
+    return publicar_auto
+
+
+@app.get("/api/publicar/metricas-auto")
+def publicar_metricas_auto(peticion: Request):
+    """La configuracion, la ultima vuelta, la proxima y lo que gasta. Los avisos
+    de un proyecto con clave cerrado no salen."""
+    A = _publicar_auto()
+    r = A.leer(raiz_proyectos(), ocultar=_cerrados(peticion))
+    r["coste"] = _por_publicar(A.coste, raiz_proyectos())
+    r["opciones"] = {"frecuencias": [{"id": k, "nombre": v} for k, v in A.NOMBRE_FRECUENCIA.items()],
+                     "posts": list(A.POSTS), "sugerido": A.SUGERIDO}
+    return r
+
+
+@app.post("/api/publicar/metricas-auto/coste")
+def publicar_metricas_auto_coste(cuerpo: dict = Body(default=None)):
+    """Lo que gastaria una eleccion SIN guardarla: {frecuencia?, hora?, posts?}."""
+    A = _publicar_auto()
+    return _por_publicar(A.coste, raiz_proyectos(), _cuerpo(cuerpo))
+
+
+@app.put("/api/publicar/metricas-auto")
+def publicar_metricas_auto_guardar(peticion: Request, cuerpo: dict = Body(default=None)):
+    """Guarda la eleccion (tras confirmar el coste en pantalla)."""
+    A = _publicar_auto()
+    _por_publicar(A.guardar, raiz_proyectos(), _cuerpo(cuerpo))
+    return publicar_metricas_auto(peticion)
+
+
+@app.post("/api/publicar/metricas-auto/ahora")
+def publicar_metricas_auto_ahora():
+    """Una vuelta ya, en segundo plano (puede tardar minutos)."""
+    A = _publicar_auto()
+    return _por_publicar(A.correr_ya, raiz_proyectos())
+
+
 @app.get("/api/publicar/lo-que-funciono")
 def publicar_lo_que_funciono(peticion: Request, proyecto: str = Query(default=""),
                              dias: int = Query(default=30), red: str = Query(default=""),
@@ -15808,6 +15863,56 @@ def publicar_lo_que_funciono(peticion: Request, proyecto: str = Query(default=""
         cid = "" if cid == P.SIN_PROYECTO else cid
     return P.lo_que_funciono(raiz_proyectos(), _videos_para_publicar(peticion), cid,
                              dias=dias, red=red, por=por, cuantos=cuantos)
+
+# Lo que se lee de los resultados (publicar-mas): palabras y ganchos, horarios
+# y el informe del mes. Solo leen lo guardado; ver `publicar_informe`.
+
+def _publicar_informe():
+    _publicar()
+    import publicar_informe  # noqa: E402  (pasos/ ya esta en sys.path)
+    return publicar_informe
+
+
+def _proyecto_de_lectura(proyecto, peticion):
+    """None (todos los que se pueden ver) o el cid del proyecto ("" = sin proyecto)."""
+    if not proyecto:
+        return None
+    P = _publicar()
+    cid = _proyecto_publicable(proyecto, peticion)
+    return "" if cid == P.SIN_PROYECTO else cid
+
+
+@app.get("/api/publicar/palabras-y-ganchos")
+def publicar_palabras_y_ganchos(peticion: Request, proyecto: str = Query(default=""),
+                                dias: int = Query(default=90)):
+    """Qué palabras clave y qué primeras líneas fueron mejor. No pregunta a nadie."""
+    I = _publicar_informe()
+    cid = _proyecto_de_lectura(proyecto, peticion)
+    return _por_publicar(I.palabras_y_ganchos, raiz_proyectos(), _videos_para_publicar(peticion),
+                         cid, dias=max(7, min(int(dias or 90), 365)))
+
+
+@app.get("/api/publicar/horarios")
+def publicar_horarios(peticion: Request, proyecto: str = Query(default="")):
+    """El mejor día y hora de cada red con lo propio (o el punto de partida
+    general si aún no hay bastante). No pregunta a nadie."""
+    I = _publicar_informe()
+    cid = _proyecto_de_lectura(proyecto, peticion)
+    return _por_publicar(I.horarios, raiz_proyectos(), _videos_para_publicar(peticion), cid)
+
+
+@app.get("/api/publicar/informe")
+def publicar_informe_mensual(peticion: Request, proyecto: str = Query(default=""),
+                             mes: str = Query(default="")):
+    """El informe del mes de un proyecto, para el cliente: {proyecto, mes}."""
+    P = _publicar()
+    I = _publicar_informe()
+    cid = _proyecto_publicable(proyecto or P.SIN_PROYECTO, peticion)
+    nombre = "Vídeos sin proyecto" if cid == P.SIN_PROYECTO else _nombres_de_clientes().get(cid, cid)
+    clave = "" if cid == P.SIN_PROYECTO else cid
+    return _por_publicar(I.informe_mensual, raiz_proyectos(), _videos_para_publicar(peticion),
+                         clave, mes=mes or None, nombre=nombre)
+
 
 # ------------------------------------------------------- PUBLICAR: el SEO
 # Rama `publicar-seo` (18-10-2026): «Optimizar SEO», «Dame 3 ganchos»,
@@ -16647,6 +16752,13 @@ def main():
     os.environ.setdefault("ESTUDIO_API", f"http://127.0.0.1:{argumentos.puerto}")
 
     import uvicorn
+    # las cifras automaticas de Publicar (apagadas de fabrica: el hilo solo mira)
+    if PUBLICAR is not None:
+        try:
+            import publicar_auto  # noqa: E402
+            publicar_auto.arrancar(raiz_proyectos)
+        except Exception as fallo:                          # noqa: BLE001
+            print(f"AVISO: las cifras automáticas no arrancan -> {fallo}")
     print(f"Estudio de Video en http://{argumentos.host}:{argumentos.puerto}")
     print(f"proyectos en {raiz_proyectos()}")
     if ERROR_PASOS:

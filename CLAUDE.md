@@ -91,6 +91,7 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 
 | Rama abierta | Ficheros reservados | Desde |
 |---|---|---|
+| `publicar-partir-subida` | Publicar: YouTube/Facebook en su propia subida cuando van con otras redes. `pasos/publicar.py` (`enviar`), `pasos/prueba_publicar.py` (sección 4f), `docs/NOVEDADES.md` | 19-10-2026 |
 
 Quien abre una rama la apunta aquí (en `main`, regla 8); quien la une a `main`,
 la quita.

@@ -10,6 +10,24 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Publicar: más redes, cifras automáticas e informe del mes (18 de octubre)**
+- **Nueve redes más**: LinkedIn, X, Threads, Pinterest, Bluesky, Discord,
+  Telegram, Mastodon y Google Business. Se añaden por proyecto en Publicar →
+  Cuentas y ajustes → **Redes de este proyecto**, con lo que cada una necesita
+  (el tablero de Pinterest, la página de LinkedIn, el botón de Google
+  Business…). En la ficha, título donde lo hay y **texto alternativo** donde se
+  admite. Claude escribe para cada una con sus reglas y límites. Reddit no, porque
+  Upload-Post la tiene caída.
+- **Cifras automáticas**, apagadas de fábrica: elige la frecuencia (una vez al
+  día, cada 12 o 6 horas, semanal), la hora y cuántos posts (los últimos 30, por
+  ejemplo). Antes de guardar se ve **lo que gasta**: 0 $ (va incluido en el plan
+  de Upload-Post), y las consultas del cupo que usa. **Pedirlas ahora**, para una
+  vuelta ya.
+- **Resultados**: la tabla de **palabras clave y ganchos que funcionaron**,
+  **cuándo publicar** en cada red (y en la ficha, la hora propuesta con «Usar»)
+  y el **informe del mes** de cada proyecto, imprimible y con un resumen para
+  copiar.
+
 **El corrector de ortografía, en el guion y en los campos que se ven (18 de octubre)**
 - **El guion se revisa solo**: en la pantalla del guion, sin la voz grabada,
   el panel **Ortografía del guion** revisa el texto unos segundos después de
@@ -33,6 +51,7 @@ vídeos, estilos, claves y contraseña no se tocan.
   refreshing it…»** ya no corta el corrector (ni nada que hable con Claude):
   pasa cuando dos llamadas arrancan mientras la sesión se renueva, y ahora se
   espera y se repite solo. Tampoco marca la cuenta como «sin sesión».
+
 
 **Cancelar de verdad en el taller de estilos (18 de octubre)**
 - **«Cancelar» un «Rehacer» para en el acto**: corta la llamada a Claude y no

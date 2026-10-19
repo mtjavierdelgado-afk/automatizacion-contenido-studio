@@ -3629,3 +3629,53 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
   .traer-cuenta select, .cuenta-chat { max-width: 100%; flex: 1 1 45%; }
 }
 .pago-cuentas label { text-transform: none; letter-spacing: normal; font-size: 13px; color: var(--texto); }
+
+/* ---------------- PUBLICAR · publicar-mas: cifras automáticas, redes nuevas,
+   palabras y ganchos, horarios y el informe del mes */
+.metricas-auto .fila { gap: 8px; flex-wrap: wrap; align-items: center; }
+.eleccion-auto label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px;
+  text-transform: none; letter-spacing: normal; color: var(--texto); }
+.eleccion-auto select, .eleccion-auto input { max-width: 100%; }
+.coste-auto { background: var(--hueco); border: 1px solid var(--linea); border-radius: 8px;
+  padding: 8px 10px; margin: 8px 0; line-height: 1.5; overflow-wrap: anywhere; }
+.ultima-auto, .aviso-auto { overflow-wrap: anywhere; }
+.linea-auto { gap: 8px; align-items: center; margin: 6px 0; min-width: 0; }
+.linea-auto .crece { min-width: 0; overflow-wrap: anywhere; }
+.redes-de-proyecto { gap: 6px 14px; flex-wrap: wrap; margin: 8px 0; }
+.ajustes-red { gap: 8px; flex-wrap: wrap; align-items: flex-end; margin: 6px 0;
+  padding-top: 6px; border-top: 1px solid var(--linea-suave); }
+.ajustes-red > b { min-width: 110px; align-self: center; }
+.ajustes-red .etiqueta-campo { flex: 1 1 180px; min-width: 0; }
+.ajustes-red input, .ajustes-red select { width: 100%; min-width: 0; }
+.sugerencias-cuando { margin: 6px 0; }
+.sugerencia-hora { gap: 8px; align-items: center; padding: 4px 0; min-width: 0; }
+.sugerencia-hora b { min-width: 70px; }
+.sugerencia-hora .crece { min-width: 0; overflow-wrap: anywhere; }
+.tabla-desliza { overflow-x: auto; max-width: 100%; }
+.tabla-palabras { border-collapse: collapse; width: 100%; font-size: 13px; }
+.tabla-palabras th, .tabla-palabras td { text-align: left; padding: 6px 8px;
+  border-top: 1px solid var(--linea-suave); vertical-align: top; }
+.tabla-palabras th { color: var(--tenue); font-weight: 600; white-space: nowrap; }
+.tabla-palabras td { font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.palabras-ganchos h4 { margin: 14px 0 4px; }
+.fila-gancho, .fila-horario { gap: 8px; padding: 6px 0; border-top: 1px solid var(--linea-suave);
+  align-items: center; min-width: 0; }
+.fila-gancho .puesto { min-width: 1.6em; }
+.fila-gancho .crece, .fila-horario .crece { min-width: 0; overflow-wrap: anywhere; }
+.gancho-texto { font-style: italic; overflow-wrap: anywhere; }
+.fila-horario .nombre-red { min-width: 120px; }
+.informe-publicar > .fila { gap: 8px; flex-wrap: wrap; align-items: center; }
+.titulo-informe { margin: 14px 0 4px; overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .fila-horario, .fila-gancho, .sugerencia-hora { flex-wrap: wrap; }
+  .fila-horario .nombre-red, .sugerencia-hora b { min-width: 0; }
+}
+@media print {
+  body * { visibility: hidden; }
+  .informe-publicar, .informe-publicar * { visibility: visible; }
+  .informe-publicar { position: absolute; left: 0; top: 0; width: 100%;
+    color: var(--negro); background: var(--blanco); }
+  .informe-publicar .meta, .informe-publicar th { color: var(--negro); }
+  .informe-publicar .no-imprimir { display: none; }
+  .informe-publicar .pastilla { border: 1px solid var(--negro); color: var(--negro); background: none; }
+}

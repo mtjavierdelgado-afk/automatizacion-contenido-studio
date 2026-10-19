@@ -2713,6 +2713,20 @@ def ortografia_en_el_guion_y_en_los_campos(navegador, datos):
     puesto = pg.js("return window.__puesto;")
     ok(puesto == "Una vez más\nsegunda linea bien",
        f"y la pone por el camino del campo, con los saltos de línea donde estaban ({puesto!r})")
+    # VARIOS CAMPOS A LA VEZ (lo de una red en Publicar): cada corrección a su campo
+    pg.js("""window.__partes = null;
+      const caja = ortografiaDeCampo('prueba-partes', { etiquetas: { titulo: 'Título', descripcion: 'Texto' },
+        partes: () => ({ titulo: 'Las gruas del puerto', descripcion: 'bien escrito\\nuna vez mas' }),
+        ponerPartes: n => { window.__partes = n; } });
+      caja.classList.add('ortografia-de-partes');
+      document.body.appendChild(caja);""")
+    pg.pulsar(".ortografia-de-partes button", "Revisar ortografía")
+    ok(pg.esperar(".ortografia-de-partes button", "Poner las correcciones", 60), "revisa varios campos juntos")
+    ok(pg.visible(".ortografia-de-partes", "Título"), "y dice de qué campo es cada corrección")
+    pg.pulsar(".ortografia-de-partes button", "Poner las correcciones")
+    partes = pg.js("return window.__partes;")
+    ok(partes == {"titulo": "Las grúas del puerto", "descripcion": "bien escrito\nuna vez más"},
+       f"y pone cada una en su campo, sin tocar las demás líneas ({partes!r})")
     pg.sin_errores("la ortografía en el guion y en los campos")
     pg.cerrar()
 
@@ -3839,6 +3853,8 @@ def publicar_en_redes(navegador, datos):
     _r, ficha = api.get(f"/api/publicar/videos/{pid}")
     ok((ficha.get("textos", {}).get("instagram") or {}).get("descripcion") == "Reel escrito a mano para la prueba",
        "lo escrito a mano se guarda solo")
+    ok(pg.visible(".texto-red .ortografia-campo button", "Revisar ortografía"),
+       "cada red trae «Revisar ortografía» de lo que se publica")
 
     # programar, con la confirmación delante
     manana = pg.p.evaluate("() => PUB.ficha.hora_sugerida")

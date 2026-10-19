@@ -45,8 +45,9 @@ vídeos, estilos, claves y contraseña no se tocan.
   las llamadas a la acción y el guion de la ficha de la Parrilla. Propone las
   correcciones y «Poner las correcciones» las escribe en el campo, con los
   saltos de línea donde estaban; «Dejarlo como está» no las vuelve a proponer.
-  Los textos de Publicar (título, descripción, primer comentario…) lo
-  llevarán en cuanto se una lo nuevo de Publicar.
+  En **Publicar**, cada red trae su «Revisar ortografía», que mira juntos el
+  título, el texto, la llamada a la acción, el texto alternativo y el primer
+  comentario, y dice de qué campo es cada corrección (los hashtags no).
 - **El error «Failed to refresh OAuth token: another Claude Code process is
   refreshing it…»** ya no corta el corrector (ni nada que hable con Claude):
   pasa cuando dos llamadas arrancan mientras la sesión se renueva, y ahora se

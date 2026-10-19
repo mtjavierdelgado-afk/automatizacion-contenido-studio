@@ -7852,9 +7852,12 @@ async function aplicarOrtografia(fuente) {
    estar en todos los campos que incluyen texto que será publicado, visible o
    producto final». Un botón pequeño al lado del campo; revisa su texto
    (`/api/ortografia/textos`), enseña lo que propone y lo pone con el MISMO
-   camino que escribir a mano (`campo.poner`; `campo.leer` da el texto de
-   ahora). El texto se manda POR LÍNEAS: así los saltos de línea se quedan
-   donde estaban y un texto largo no se corta.
+   camino que escribir a mano. El texto se manda POR LÍNEAS: así los saltos de
+   línea se quedan donde estaban y un texto largo no se corta.
+   `campo` es {leer, poner} para un campo, o {partes, ponerPartes, etiquetas}
+   para varios que se revisan juntos (los de una red en Publicar: título,
+   texto, llamada a la acción…): `partes()` da {nombre: texto} y
+   `ponerPartes({nombre: texto})` pone solo los que cambian.
    El estado vive fuera del campo (`ORTOGRAFIA_CAMPOS`, por `clave`) para que
    un repintado no lo pierda. */
 const ORTOGRAFIA_CAMPOS = new Map();
@@ -7866,15 +7869,35 @@ function lineasOrtografia(texto) {
   return { lineas, textos };
 }
 
+function partesOrtografia(campo) {
+  const crudas = campo.partes ? (campo.partes() || {}) : { '': campo.leer() };
+  const partes = {};
+  Object.keys(crudas).forEach(k => { partes[k] = String(crudas[k] || ''); });
+  return partes;
+}
+
+/* Las líneas de todas las partes, con un id que dice de qué parte y línea son
+   («descripcion|L3»; en un campo solo, «L3»). */
+function textosOrtografia(partes) {
+  const textos = {};
+  Object.keys(partes).forEach(k => {
+    const porLinea = lineasOrtografia(partes[k]).textos;
+    Object.keys(porLinea).forEach(l => { textos[k ? `${k}|${l}` : l] = porLinea[l]; });
+  });
+  return textos;
+}
+
 function ortografiaDeCampo(clave, campo) {
   const caja = h('div', { clase: 'ortografia-campo' });
   const pintar = () => {
     caja.replaceChildren();
     const est = ORTOGRAFIA_CAMPOS.get(clave) || {};
-    const texto = String(campo.leer() || '');
-    const viejo = est.texto !== undefined && est.texto !== texto;
+    const partes = partesOrtografia(campo);
+    const huella = JSON.stringify(partes);
+    const hayTexto = Object.keys(partes).some(k => partes[k].trim());
+    const viejo = est.huella !== undefined && est.huella !== huella;
     caja.appendChild(h('button', { clase: 'mini fantasma', type: 'button',
-      disabled: est.estado === 'pensando' || !texto.trim(),
+      disabled: est.estado === 'pensando' || !hayTexto,
       title: 'Revisa tildes, letras y signos de este texto (gratis)',
       onclick: () => revisarCampoOrtografia(clave, campo, pintar) },
     est.estado === 'pensando' ? 'Revisando…' : 'Revisar ortografía'));
@@ -7888,9 +7911,12 @@ function ortografiaDeCampo(clave, campo) {
       caja.appendChild(h('span', { clase: 'meta' }, '✓ Sin faltas'));
       return;
     }
+    const etiquetas = campo.etiquetas || {};
     const lista = h('div', { clase: 'lista-ortografia' });
     props.forEach(p => {
+      const parte = String(p.id).includes('|') ? String(p.id).split('|')[0] : '';
       lista.appendChild(h('div', { clase: 'fila-ortografia' },
+        parte ? h('span', { clase: 'id' }, etiquetas[parte] || parte) : null,
         h('span', { clase: 'crece' }, h('span', { clase: 'despues' }, p.despues),
           (p.cambios || []).length ? h('span', { clase: 'meta' },
             ' · ' + p.cambios.map(c => `${c[0]} → ${c[1]}`).join(', ')) : null)));
@@ -7900,18 +7926,24 @@ function ortografiaDeCampo(clave, campo) {
       h('button', { clase: 'mini primario', type: 'button', onclick: () => {
         // SE VUELVE A LEER EL CAMPO: si se ha seguido escribiendo después de
         // revisar, poner lo propuesto se llevaría lo escrito. Se revisa otra vez.
-        if (String(campo.leer() || '') !== texto) {
+        if (JSON.stringify(partesOrtografia(campo)) !== huella) {
           toast('El texto ha cambiado desde la revisión: se revisa otra vez');
           revisarCampoOrtografia(clave, campo, pintar);
           return;
         }
-        const { lineas } = lineasOrtografia(texto);
+        const lineasDe = {};
         props.forEach(p => {
-          const i = Number(String(p.id).slice(1));
-          if (lineas[i] !== undefined) lineas[i] = p.despues;
+          const id = String(p.id);
+          const parte = id.includes('|') ? id.split('|')[0] : '';
+          const i = Number(id.split('|').pop().slice(1));
+          if (!lineasDe[parte]) lineasDe[parte] = lineasOrtografia(partes[parte]).lineas;
+          if (lineasDe[parte][i] !== undefined) lineasDe[parte][i] = p.despues;
         });
         ORTOGRAFIA_CAMPOS.delete(clave);
-        campo.poner(lineas.join('\n'));
+        const nuevos = {};
+        Object.keys(lineasDe).forEach(k => { nuevos[k] = lineasDe[k].join('\n'); });
+        if (campo.partes) campo.ponerPartes(nuevos);
+        else campo.poner(nuevos['']);
         toast(`${props.length} corrección(es) puestas`);
         pintar();
       } }, 'Poner las correcciones'),
@@ -7920,7 +7952,7 @@ function ortografiaDeCampo(clave, campo) {
           pedir(`${BASE}/api/ortografia/textos/descartar`, { method: 'POST',
             cuerpo: { rid: est.rid, ids: props.map(p => p.id) } }).catch(() => {});
         }
-        ORTOGRAFIA_CAMPOS.set(clave, { estado: 'listo', propuestas: [], texto });
+        ORTOGRAFIA_CAMPOS.set(clave, { estado: 'listo', propuestas: [], huella });
         pintar();
       } }, 'Dejarlo como está')));
   };
@@ -7929,10 +7961,11 @@ function ortografiaDeCampo(clave, campo) {
 }
 
 async function revisarCampoOrtografia(clave, campo, pintar) {
-  const texto = String(campo.leer() || '');
-  const { textos } = lineasOrtografia(texto);
+  const partes = partesOrtografia(campo);
+  const huella = JSON.stringify(partes);
+  const textos = textosOrtografia(partes);
   if (!Object.keys(textos).length) return;
-  const est = { estado: 'pensando', texto };
+  const est = { estado: 'pensando', huella };
   ORTOGRAFIA_CAMPOS.set(clave, est);
   pintar();
   let ficha;
@@ -7948,7 +7981,7 @@ async function revisarCampoOrtografia(clave, campo, pintar) {
   } catch (e) {
     ficha = { estado: 'error', error: e.message };
   }
-  ficha.texto = texto;
+  ficha.huella = huella;
   if (ORTOGRAFIA_CAMPOS.get(clave) === est) ORTOGRAFIA_CAMPOS.set(clave, ficha);
   pintar();
 }
@@ -18814,6 +18847,32 @@ function limpiarBorradorPublicar(enviado) {
 
 /* Lo escrito a mano se guarda solo al dejar de teclear, como en el resto del
    Studio. Los textos no entran en ninguna firma: guardarlos no cuesta nada. */
+/* LA ORTOGRAFÍA DE LO QUE SE PUBLICA EN UNA RED (corrector-ortografia,
+   19-10-2026): título, texto, llamada a la acción, texto alternativo y primer
+   comentario, revisados juntos con la pieza común (`ortografiaDeCampo`). Lo
+   que se pone va por `editarTextoPublicar`, el mismo camino que escribirlo. Los
+   hashtags no se revisan: no son frases. */
+const PARTES_ORTOGRAFIA_RED = { titulo: 'Título', descripcion: 'Texto', cta: 'Llamada a la acción',
+  alt: 'Texto alternativo', primer_comentario: 'Primer comentario' };
+
+function ortografiaDeRedPublicar(red) {
+  return ortografiaDeCampo(`publicar-${PUB.pid || ''}-${red}`, {
+    etiquetas: PARTES_ORTOGRAFIA_RED,
+    partes: () => {
+      const t = textosDeFicha(red);
+      const partes = {};
+      Object.keys(PARTES_ORTOGRAFIA_RED).forEach(k => {
+        if (String(t[k] || '').trim()) partes[k] = String(t[k]);
+      });
+      return partes;
+    },
+    ponerPartes: nuevos => {
+      Object.keys(nuevos).forEach(k => editarTextoPublicar(red, k, nuevos[k]));
+      guardarTextosPublicar();
+    },
+  });
+}
+
 function editarTextoPublicar(red, campo, valor) {
   PUB.borrador[red] = Object.assign({}, PUB.borrador[red] || {}, {
     [campo]: campo === 'hashtags' ? String(valor).split(/[\s,]+/).filter(Boolean) : valor,
@@ -19072,6 +19131,7 @@ function bloqueTextoRed(red) {
       oninput: ev => editarTextoPublicar(red, 'hashtags', ev.target.value) })));
   b.appendChild(pie);
   b.appendChild(seoDeRedPublicar(red));
+  b.appendChild(ortografiaDeRedPublicar(red));
   if (red === 'youtube' && (f.capitulos || []).length) {
     b.appendChild(h('div', { clase: 'meta' }, 'Capítulos: '
       + f.capitulos.map(c => `${mmss(c.t)} ${c.titulo}`).join(' · ')));

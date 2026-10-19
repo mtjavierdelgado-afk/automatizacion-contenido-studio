@@ -80,7 +80,25 @@ DURACION_CORTA_S = 120
 
 #: El montaje de siempre, completo. Es lo que vale cualquier clave que falte.
 MONTAJE_DE_SIEMPRE = {"movimiento": "sobrio", "subtitulos": "clasicos",
-                      "gancho": False, "cifras": False, "barra": False}
+                      "gancho": False, "cifras": False, "barra": False,
+                      "profundidad": False}
+
+#: LA PROFUNDIDAD 2.5D (18-10-2026, rama profundidad-25d): con ella cada plano
+#: lleva el mapa de profundidad de su imagen (`pasos/profundidad.py`) y la
+#: pagina del render mueve lo cercano mas que el fondo. Apagada por defecto,
+#: tambien en los cortos: en una ilustracion los bordes de lo que va delante
+#: pueden «derretirse» un poco, y eso lo decide quien la enciende. Las cifras se
+#: probaron en una foto y en una ilustracion plana (muestras del 18-10):
+#:
+#:   lateral   fraccion del ancho que se desplaza lo MAS cercano respecto al
+#:             fondo a lo largo del plano (de -lateral/2 a +lateral/2)
+#:   empuje    cuanto MAS se acerca lo cercano que el fondo al final del plano
+#:
+#: Son mas bajas que las de la muestra (4,5 % y 10 %) para que el borde de lo
+#: cercano se note menos; en dinamico, algo mas.
+AJUSTES_PROFUNDIDAD = {"sobrio": {"lateral": 0.025, "empuje": 0.06},
+                       "vivo": {"lateral": 0.03, "empuje": 0.07},
+                       "dinamico": {"lateral": 0.04, "empuje": 0.09}}
 
 
 def normalizar_montaje(crudo, estricto=False):
@@ -106,7 +124,7 @@ def normalizar_montaje(crudo, estricto=False):
         salida["subtitulos"] = sub
     elif sub and estricto:
         raise ValueError("subtitulos: " + ", ".join(SUBTITULOS))
-    for clave in ("gancho", "cifras", "barra"):
+    for clave in ("gancho", "cifras", "barra", "profundidad"):
         if clave in crudo:
             valor = crudo[clave]
             if not isinstance(valor, bool) and estricto:
@@ -130,6 +148,21 @@ def para_guardar(montaje):
     completo = normalizar_montaje(montaje)
     distinto = {k: v for k, v in completo.items() if MONTAJE_DE_SIEMPRE[k] != v}
     return distinto or None
+
+
+def profundidad_de(montaje, indice=0):
+    """Lo que la pagina del render necesita para la 2.5D de un plano, o None.
+
+    El sentido del desplazamiento alterna de un plano al siguiente: siempre
+    hacia el mismo lado se lee como un tic, no como camara.
+    """
+    completo = normalizar_montaje(montaje)
+    if not completo["profundidad"]:
+        return None
+    ajustes = AJUSTES_PROFUNDIDAD[completo["movimiento"]]
+    sentido = 1 if int(indice) % 2 == 0 else -1
+    return {"lateral": round(ajustes["lateral"] * sentido, 4),
+            "empuje": ajustes["empuje"]}
 
 
 def ajustes_de(montaje):

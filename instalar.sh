@@ -409,6 +409,10 @@ entorno_python() {
     || fallo "no se han podido instalar las librerias de Python (mira $REGISTRO)."
   chown -R "$USUARIO:$USUARIO" "$RAIZ/venv"
   bien "$("$RAIZ/venv/bin/python" --version) con fastapi, pillow y numpy"
+  # la profundidad 2.5D del montaje: opcional, nunca para la instalacion
+  if declare -F instalar_profundidad >/dev/null; then
+    instalar_profundidad "$RAIZ" "$USUARIO" || true
+  fi
 
   # El entorno de la cuenta: donde vive cada cosa. Los datos van FUERA del
   # arbol de codigo, que es lo que permite actualizar sin tocarlos.

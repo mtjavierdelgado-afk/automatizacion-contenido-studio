@@ -4963,6 +4963,111 @@ def prueba_revision_imagenes_16_10():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def prueba_cancelar_no_paga_lo_que_queda():
+    """CANCELAR NO PAGA LAS LAMINAS QUE QUEDAN (18-10-2026).
+
+    Seis laminas en cuatro cadenas: con el `with ThreadPoolExecutor` de antes,
+    cancelar a media tanda esperaba a TODAS --tambien a las dos que aun no habian
+    empezado-- y se pagaban las seis (medido con un doble: 6 de 6, dos
+    empezadas despues de cancelar). Ahora se pregunta a `avisar` ANTES de pagar
+    cada una y lo que queda en cola se tira; las que ya estaban en vuelo se
+    acaban y quedan apuntadas, que lo pagado no se pierde.
+    """
+    import threading                                          # noqa: PLC0415
+    import types                                              # noqa: PLC0415
+    import moodboard                                          # noqa: PLC0415
+    from nucleo.trabajos import GestorTrabajos                # noqa: PLC0415
+
+    base = os.path.join(tempfile.gettempdir(), "estudio_prueba_cancelar_laminas")
+    shutil.rmtree(base, ignore_errors=True)
+    os.makedirs(base, exist_ok=True)
+    rutas = []
+    for indice in range(3):
+        ruta = os.path.join(base, f"ref_{indice}.png")
+        Image.new("RGB", (64, 48), color=(20 + indice * 40, 30, 40)).save(ruta)
+        rutas.append(ruta)
+
+    encargadas = []                     # (instante en que se encarga, eje)
+    candado = threading.Lock()
+
+    def generar(prompt, refs, quality="low", tamano="apaisado"):
+        with candado:
+            encargadas.append(time.time())
+        time.sleep(0.8)                 # lo que tarda una imagen (y se paga)
+        buffer = io.BytesIO()
+        Image.new("RGB", (32, 18), color=(9, 9, 9)).save(buffer, format="PNG")
+        return buffer.getvalue(), {"coste": 0.082}
+
+    falso = types.SimpleNamespace(generar=generar, normalizar=lambda r, c: r)
+    reales = (medios.motor, moodboard._reglas_de, moodboard._montar,
+              moodboard.prompt_de_dibujo, moodboard.prompt_de_eje,
+              p6_assets.guia_escrita)
+    medios.motor = lambda ruta: falso if "imagen" in ruta else types.SimpleNamespace()
+    moodboard._reglas_de = lambda reglas, estilo: ""
+    moodboard._montar = lambda fuentes, destino: fuentes[0]
+    moodboard.prompt_de_dibujo = lambda *a, **k: "dibuja"
+    moodboard.prompt_de_eje = lambda *a, **k: "dibuja"
+    p6_assets.guia_escrita = lambda estilo: "una guia"
+    destino = os.path.join(base, "dibujadas")
+    caminos = {
+        "dibujar_desde_guia": lambda avisar: moodboard.dibujar_desde_guia(
+            {"guia": {"guia": "g"}}, destino, calidad="low", avisar=avisar,
+            referencias=[rutas[0]], reutilizar=False),
+        "generar": lambda avisar: moodboard.generar(
+            rutas, {"guia": "g"}, calidad="low", avisar=avisar,
+            raiz=os.path.join(base, "banco")),
+    }
+    try:
+        for nombre, funcion in caminos.items():
+            titulo(f"cancelar a media tanda no paga lo que queda ({nombre})")
+            encargadas.clear()
+            gestor = GestorTrabajos()
+            tid = gestor.lanzar("laminas", funcion)
+            while len(encargadas) < min(len(moodboard.EJES), p6_assets.MAX_CADENAS):
+                time.sleep(0.01)
+            cancelado_en = time.time()
+            gestor.cancelar(tid)
+            ficha = gestor.esperar(tid, 30)
+            igual(ficha["estado"], "cancelado", "el trabajo acaba cancelado")
+            despues = sum(1 for t in encargadas if t > cancelado_en)
+            igual(despues, 0, "ninguna lamina se encarga DESPUES de cancelar "
+                              "(antes: las que quedaban en cola, y se pagaban)")
+            ok(len(encargadas) <= p6_assets.MAX_CADENAS,
+               f"se pagan solo las que ya estaban en vuelo: {len(encargadas)} de "
+               f"{len(moodboard.EJES)}")
+        titulo("en_paralelo tira la cola al PRIMER fallo, sea de la tarea que sea")
+        empezadas = []
+
+        def tarea(indice):
+            with candado:
+                empezadas.append(indice)
+            if indice == 0:
+                time.sleep(1.0)         # la primera sigue dibujando...
+            elif indice == 1:
+                raise RuntimeError("cancelado")   # ...cuando falla la segunda
+            else:
+                time.sleep(0.05)
+
+        try:
+            moodboard.en_paralelo(2, tarea, [(i,) for i in range(6)])
+            ok(False, "tenia que subir el fallo")
+        except RuntimeError:
+            ok(True, "el fallo de la segunda sube")
+        ok(len(empezadas) <= 3, f"y lo que quedaba en cola no arranca: empezaron "
+                                f"{sorted(empezadas)} de 6 (antes: las seis, "
+                                f"porque se esperaba a la primera)")
+        titulo("lo pagado antes de parar queda apuntado para no repagarlo")
+        huella = moodboard.huella_de_lamina("dibuja", [rutas[0]], "low")
+        apuntadas = [e for e in moodboard.EJES
+                     if moodboard.lamina_apuntada(destino, e, huella)]
+        ok(apuntadas, f"las laminas en vuelo se guardan y se apuntan: {apuntadas}")
+    finally:
+        (medios.motor, moodboard._reglas_de, moodboard._montar,
+         moodboard.prompt_de_dibujo, moodboard.prompt_de_eje,
+         p6_assets.guia_escrita) = reales
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def _prohibir_pagar():
     """Deja el motor de imagen sin `generar`. Ver la cabecera del modulo.
 
@@ -5447,6 +5552,110 @@ def prueba_montaje_movimiento():
     igual(presets_light.ritmo_para_video_nuevo(60, 4.0), None, "y uno mas rapido tambien")
 
 
+def prueba_profundidad_25d():
+    """La profundidad 2.5D (rama profundidad-25d, 18-10-2026)."""
+    import camara
+    import profundidad
+
+    titulo("profundidad: apagada no se guarda, y encendida se lee")
+    igual(camara.para_guardar({"profundidad": False}), None,
+          "apagada es lo de siempre: no se escribe (regla 1)")
+    igual(camara.para_guardar({"profundidad": True}), {"profundidad": True},
+          "encendida, solo esa clave")
+    igual(camara.profundidad_de(None), None, "sin montaje, ningún plano la lleva")
+    a = camara.profundidad_de({"movimiento": "vivo", "profundidad": True}, 0)
+    b = camara.profundidad_de({"movimiento": "vivo", "profundidad": True}, 1)
+    ok(a and b and a["lateral"] == -b["lateral"] and a["empuje"] == b["empuje"] > 0,
+       "el desplazamiento cambia de lado de un plano al siguiente")
+    ok(abs(camara.profundidad_de({"movimiento": "dinamico", "profundidad": True})["lateral"])
+       > abs(a["lateral"]), "en dinámico se mueve algo más que en vivo")
+    try:
+        camara.normalizar_montaje({"profundidad": "si"}, estricto=True)
+        ok(False, "un valor que no es sí/no da error en la API")
+    except ValueError:
+        ok(True, "un valor que no es sí/no da error en la API")
+    igual(camara.MONTAJE_CORTOS.get("profundidad", False), False,
+          "los cortos nuevos no nacen con ella (es experimental)")
+
+    titulo("profundidad: sin modelo no rompe nada")
+    antes = os.environ.get("ESTUDIO_MODELO_PROFUNDIDAD")
+    os.environ["ESTUDIO_MODELO_PROFUNDIDAD"] = os.path.join(tempfile.gettempdir(), "no_existe.onnx")
+    try:
+        si, por_que = profundidad.disponible()
+        ok(not si and por_que, f"dice que no está y por qué ({por_que})")
+        igual(profundidad.mapa_de(__file__), None, "y no hay mapa: el plano va como siempre")
+    finally:
+        if antes is None:
+            os.environ.pop("ESTUDIO_MODELO_PROFUNDIDAD", None)
+        else:
+            os.environ["ESTUDIO_MODELO_PROFUNDIDAD"] = antes
+
+    titulo("profundidad: el render no se cae si falta el mapa")
+    igual(p8_render.profundidad_de_mov({"profundidad": {"mapa": "prof/S999.png",
+                                                       "lateral": 0.03, "empuje": 0.07}},
+                                       tempfile.gettempdir()), {},
+          "un mapa que no está en disco: el plano sale con el movimiento de siempre")
+    igual(p8_render.profundidad_de_mov({}, tempfile.gettempdir()), {},
+          "y un plano sin profundidad no lleva nada")
+    ok("FRAG_PROF" in p8_render.PAGINA and "PROFUNDIDAD.then" in p8_render.PAGINA,
+       "la página pinta con WebGL cuando el plano trae mapa")
+    ok("margenProfundidad(pr)" in p8_render.PAGINA,
+       "y cierra la ventana lo justo para no leer fuera de la imagen (sin franjas)")
+
+    si, _ = profundidad.disponible()
+    if not si:
+        print("    (sin modelo de profundidad en esta máquina: no se calcula ningún mapa)")
+        return
+    titulo("profundidad: el mapa sale, blanco cerca, y la segunda vez de la caché")
+    carpeta = tempfile.mkdtemp(prefix="prueba_prof_")
+    antes_p = os.environ.get("ESTUDIO_PROYECTOS")
+    os.environ["ESTUDIO_PROYECTOS"] = carpeta
+    try:
+        imagen = Image.new("RGB", (256, 384), (150, 190, 230))
+        from PIL import ImageDraw                              # noqa: PLC0415
+        dibujo = ImageDraw.Draw(imagen)
+        dibujo.rectangle([0, 230, 256, 384], fill=(110, 160, 90))     # suelo
+        dibujo.ellipse([20, 150, 140, 370], fill=(50, 110, 50))       # arbol delante
+        ruta = os.path.join(carpeta, "plano.png")
+        imagen.save(ruta)
+        t0 = time.time()
+        mapa = profundidad.mapa_de(ruta)
+        ok(mapa and os.path.exists(mapa), "sale el mapa")
+        with Image.open(mapa) as m:
+            igual(m.size, (256, 384), "del tamaño de la imagen")
+            cielo = m.getpixel((200, 20))
+            suelo = m.getpixel((200, 370))
+        ok(suelo > cielo, f"el suelo de abajo sale más cerca que el cielo ({suelo} > {cielo})")
+        t1 = time.time()
+        igual(profundidad.mapa_de(ruta), mapa, "la segunda vez es el mismo fichero")
+        ok(time.time() - t1 < max(0.2, (t1 - t0) / 5), "y no se vuelve a calcular")
+        # DOS A LA VEZ sobre el mismo destino (dos montajes con la misma imagen
+        # del banco): los dos tienen que salir bien y no dejar temporales
+        import threading                                       # noqa: PLC0415
+        destino = os.path.join(carpeta, "doble", "mapa.png")
+        errores = []
+
+        def hacer():
+            try:
+                profundidad.calcular(ruta, destino)
+            except Exception as fallo:                         # noqa: BLE001
+                errores.append(str(fallo))
+        hilos = [threading.Thread(target=hacer) for _ in range(3)]
+        for hilo in hilos:
+            hilo.start()
+        for hilo in hilos:
+            hilo.join()
+        igual(errores, [], "tres cálculos a la vez del mismo mapa salen bien")
+        igual(sorted(os.listdir(os.path.dirname(destino))), ["mapa.png"],
+              "y no dejan temporales a medias")
+    finally:
+        if antes_p is None:
+            os.environ.pop("ESTUDIO_PROYECTOS", None)
+        else:
+            os.environ["ESTUDIO_PROYECTOS"] = antes_p
+        shutil.rmtree(carpeta, ignore_errors=True)
+
+
 def main():
     _prohibir_pagar()
     # EL HISTORICO DE TIEMPOS, A UNA COPIA. Guarda 30 muestras por paso, asi
@@ -5470,6 +5679,7 @@ def main():
     prueba_exigir_estilo()
     prueba_cadenas()
     prueba_moodboard()
+    prueba_cancelar_no_paga_lo_que_queda()
     prueba_rehacer_de_verdad()
     prueba_ids_en_orden()
     prueba_guia_con_manos()
@@ -5508,6 +5718,7 @@ def main():
     prueba_revision_16_10_render()
     prueba_enlaces_del_render()
     prueba_montaje_movimiento()
+    prueba_profundidad_25d()
 
     print("\n" + "=" * 70)
     if _fallos:

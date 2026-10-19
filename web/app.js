@@ -596,6 +596,8 @@ async function pedir(url, opciones) {
     // de «el servidor no contesta»
     const fallo = new Error(detalle);
     fallo.status = respuesta.status;
+    // y el cuerpo: un 409 del taller dice QUÉ trabajo lo ocupa, para engancharse
+    fallo.datos = datos || {};
     throw fallo;
   }
   if (datos && datos.error) throw new Error(datos.error);
@@ -997,7 +999,10 @@ function seguirTrabajo(paso, tid, alTerminar, alAvanzar, pidDelTrabajo) {
     if (!datos || APP.seguimientos[paso] !== seguimiento) return;
     const actual = APP.trabajos[paso] || {};
     APP.trabajos[paso] = Object.assign({}, actual, datos,
-      { id: tid, inicio: actual.inicio, muestras: actual.muestras });
+      { id: tid, inicio: actual.inicio, muestras: actual.muestras,
+        // pedida la cancelación, no se des-pide: una actualización que salió
+        // antes del clic no puede volver a encender el botón
+        cancelando: !!(actual.cancelando || datos.cancelando) });
     anotarAvance(paso, datos.progreso);
     pintarTrabajo(paso);
     // lo que se esta produciendo se ve mientras se produce
@@ -1204,11 +1209,29 @@ function pintarTrabajo(paso) {
 
 
 
+/* CANCELAR SE VE EN EL ACTO: «Cancelando…» y el botón apagado desde el clic,
+   no desde que el servidor contesta. Lo que ya se estaba pagando se acaba (y
+   se guarda), así que el trabajo tarda unos segundos en pararse: con el botón
+   vivo se leía como que no había hecho caso. */
 async function cancelar(paso) {
   const t = APP.trabajos[paso];
-  if (!t) return;
-  try { await pedir(API.cancelar(t.id), { method: 'POST' }); toast('cancelación pedida'); }
-  catch (e) { mostrarError(paso, e); }
+  if (!t || t.cancelando) return;
+  t.cancelando = true;
+  repintarTrasCancelar(paso);
+  try {
+    await pedir(API.cancelar(t.id), { method: 'POST' });
+    toast('cancelando: se acaba lo que ya estaba en marcha y se para');
+  } catch (e) {
+    const ahora = APP.trabajos[paso];
+    if (ahora && ahora.id === t.id) ahora.cancelando = false;
+    repintarTrasCancelar(paso);
+    mostrarError(paso, e);
+  }
+}
+
+function repintarTrasCancelar(paso) {
+  if (paso === CLAVE_LIGHT && APP.light.vista === 'generando') pintarLight();
+  else pintarTrabajo(paso);
 }
 
 /* En qué pestaña vive la barra de un trabajo. Los que no son un paso del grafo
@@ -13032,7 +13055,14 @@ async function alTerminarLight(datos) {
   if ((datos || {}).estado === 'listo' && cola.length) {
     const ficha = fichaLight(nuevo || APP.light.abierto);
     APP.light.cola = cola.slice(1);
-    if (ficha) { await regenerarParteLight(ficha, cola[0]); return; }
+    /* LA SIGUIENTE PARTE NO SE PIERDE: si hay otra petición del taller en
+       camino (una lámina), se espera a que conteste; `regenerarParteLight`
+       la descartaría en silencio. */
+    if (ficha && await esperarSinLanzarLight()) {
+      await regenerarParteLight(ficha, cola[0]);
+      return;
+    }
+    if (ficha) toast(`no se ha podido lanzar ${cola.join(' y ')}: vuelve a pulsar «Regenerar»`, true);
   }
   APP.light.cola = [];
   if ((datos || {}).estado === 'listo') {
@@ -13055,7 +13085,9 @@ function vistaGenerandoLight() {
   const trabajo = APP.trabajos[CLAVE_LIGHT] || {};
   const plan = APP.light.plan || {};
   const caja = h('div', { clase: 'light-generando' });
-  caja.appendChild(h('h2', {}, APP.light.abierto ? 'Rehaciendo' : 'Montando el estilo'));
+  const cancelando = !!trabajo.cancelando;
+  caja.appendChild(h('h2', {}, cancelando ? 'Cancelando…'
+    : (APP.light.abierto ? 'Rehaciendo' : 'Montando el estilo')));
 
   const fraccion = Math.max(0, Math.min(1, Number(trabajo.progreso) || 0));
   const transcurrido = (Date.now() - (trabajo.inicio || Date.now())) / 1000;
@@ -13068,11 +13100,15 @@ function vistaGenerandoLight() {
   // servidor, que reparte por TIEMPO MEDIDO y no por número de tareas, así que
   // avanza a velocidad parecida de principio a fin.
   const restante = previsto > 0 ? Math.max(0, previsto - transcurrido) : 0;
-  caja.appendChild(h('div', { clase: 'paso-actual' },
-    avancePublico(trabajo) || 'arrancando…'));
-  caja.appendChild(h('div', { clase: 'meta' },
-    `${duracionCorta(transcurrido)} de unos ${duracionCorta(previsto)}`
-    + (restante > 5 ? ` · quedan ~${duracionCorta(restante)}` : '')));
+  caja.appendChild(h('div', { clase: 'paso-actual' }, cancelando
+    ? 'Parando: lo que ya se estaba dibujando se acaba y se guarda, y no se empieza nada más.'
+    : (avancePublico(trabajo) || 'arrancando…')));
+  /* Sin plan (enganchado a un trabajo que ya corría) no hay «de unos»: solo lo
+     que lleva. */
+  caja.appendChild(h('div', { clase: 'meta' }, previsto > 0
+    ? `${duracionCorta(transcurrido)} de unos ${duracionCorta(previsto)}`
+      + (restante > 5 && !cancelando ? ` · quedan ~${duracionCorta(restante)}` : '')
+    : duracionCorta(transcurrido)));
 
   // La lista de tareas, con la que va marcada. No es decoración: es lo que
   // permite entender por qué esto tarda diez minutos, y qué se está pagando.
@@ -13093,9 +13129,9 @@ function vistaGenerandoLight() {
 
   caja.appendChild(h('div', { clase: 'fila' },
     h('button', {
-      clase: 'mini peligro',
+      clase: 'mini peligro', disabled: cancelando,
       onclick: async () => { await cancelar(CLAVE_LIGHT); },
-    }, 'Cancelar'),
+    }, cancelando ? 'Cancelando…' : 'Cancelar'),
     h('span', { clase: 'meta' },
       'Puedes cerrar esta pestaña: sigue corriendo en el servidor.')));
   return caja;
@@ -13318,6 +13354,8 @@ function laminasDelEstilo(ficha) {
     APP.light.trabajoLaminas = null;
   }
   const enMarcha = !!APP.light.trabajoLaminas && APP.light.trabajoLaminas.preset === ficha.id;
+  // mientras sale la petición de una acción, la rejilla tampoco se toca
+  const ocupada = enMarcha || APP.light.lanzando === 'laminas';
   if (enMarcha) {
     caja.appendChild(enVivo(() => {
       const t = APP.trabajos[CLAVE_LIGHT] || {};
@@ -13328,7 +13366,7 @@ function laminasDelEstilo(ficha) {
         h('progress', { max: 100, value: pct }));
     }));
   }
-  const rejilla = h('div', { clase: 'rejilla-laminas' + (enMarcha ? ' ocupada' : '') });
+  const rejilla = h('div', { clase: 'rejilla-laminas' + (ocupada ? ' ocupada' : '') });
   d.laminas.forEach((l, i) => {
     rejilla.appendChild(h('div', { clase: 'lamina' },
       l.url
@@ -13351,7 +13389,7 @@ function laminasDelEstilo(ficha) {
   });
   caja.appendChild(rejilla);
 
-  const pie = h('div', { clase: 'fila' + (enMarcha ? ' rejilla-laminas ocupada' : '') });
+  const pie = h('div', { clase: 'fila' + (ocupada ? ' rejilla-laminas ocupada' : '') });
   if (d.laminas.length < d.max) {
     pie.appendChild(h('button', { clase: 'mini', onclick: () => nuevaLamina(ficha, precio) },
       `+ Añadir una lámina${precio}`));
@@ -13425,22 +13463,24 @@ async function nuevaLamina(ficha, precio) {
 
 async function accionLaminas(ficha, cuerpo, pregunta) {
   if (pregunta && !window.confirm(pregunta)) return;
+  // un toque, una petición (como «Regenerar»): la rejilla se apaga mientras
+  if (APP.light.lanzando) return;
+  APP.light.lanzando = 'laminas';
+  repintarLaminasLight(ficha);
+  try {
+    await accionLaminasYa(ficha, cuerpo);
+  } finally {
+    APP.light.lanzando = null;
+    if (APP.light.vista === 'preset') repintarLaminasLight(ficha);
+  }
+}
+
+async function accionLaminasYa(ficha, cuerpo) {
   try {
     const datos = await pedir(API.presetLightLaminas(ficha.id), { method: 'POST', cuerpo });
     APP.light.laminas = null;
     if (datos.trabajo_id) {
-      /* SE QUEDA EN LA FICHA, con el progreso en las propias láminas. Antes
-         saltaba a la pantalla de «generando» (la de crear un estilo entero)
-         para quitar o devolver una lámina, que dura segundos (11-10-2026). */
-      APP.light.trabajoLaminas = { id: datos.trabajo_id, preset: ficha.id, accion: cuerpo.accion };
-      seguirTrabajo(CLAVE_LIGHT, datos.trabajo_id, async trabajo => {
-        APP.light.trabajoLaminas = null;
-        APP.light.laminas = null;
-        if (trabajo.estado === 'listo') toast('Láminas al día');
-        else if (trabajo.estado === 'error') toast(`no se ha podido: ${trabajo.error || 'falló'}`, true);
-        await cargarGaleriaLight(true);
-      }, () => refrescarVivosLight());
-      pintarLight();
+      seguirTrabajoLaminas(ficha, datos.trabajo_id, cuerpo.accion);
       return;
     }
     if (datos.preset && APP.light.datos) {
@@ -13449,8 +13489,35 @@ async function accionLaminas(ficha, cuerpo, pregunta) {
     toast('guardado');
     pintarLight();
   } catch (e) {
-    toast(`no se ha podido: ${e.message}`, true);
+    toast(e.status === 409 ? e.message : `no se ha podido: ${e.message}`, true);
+    /* UN 409 CON SU TRABAJO: se sigue AQUÍ, en las láminas, sin saltar a la
+       pantalla de «generando» (la misma razón que el 11-10-2026). */
+    const tid = e.status === 409 ? (e.datos || {}).trabajo_id : '';
+    const ya = APP.trabajos[CLAVE_LIGHT];
+    if (tid && !(ya && ya.id === tid && APP.seguimientos[CLAVE_LIGHT])) {
+      APP.trabajos[CLAVE_LIGHT] = {
+        id: tid, estado: 'ejecutando', progreso: 0, mensaje: '',
+        cancelando: !!e.datos.cancelando,
+        inicio: Date.now() - (Number(e.datos.segundos) || 0) * 1000,
+      };
+      seguirTrabajoLaminas(ficha, tid, 'otro');
+    }
   }
+}
+
+/* SE QUEDA EN LA FICHA, con el progreso en las propias láminas. Antes saltaba
+   a la pantalla de «generando» (la de crear un estilo entero) para quitar o
+   devolver una lámina, que dura segundos (11-10-2026). */
+function seguirTrabajoLaminas(ficha, tid, accion) {
+  APP.light.trabajoLaminas = { id: tid, preset: ficha.id, accion };
+  seguirTrabajo(CLAVE_LIGHT, tid, async trabajo => {
+    APP.light.trabajoLaminas = null;
+    APP.light.laminas = null;
+    if (trabajo.estado === 'listo') toast('Láminas al día');
+    else if (trabajo.estado === 'error') toast(`no se ha podido: ${trabajo.error || 'falló'}`, true);
+    await cargarGaleriaLight(true);
+  }, () => refrescarVivosLight());
+  pintarLight();
 }
 
 /* Una fila de imágenes servidas desde la carpeta del estilo. El sello del
@@ -14336,10 +14403,15 @@ function pieDeEstilo(ficha) {
   const caja = h('div', { clase: 'pie-light' });
   if (pedidas.length) {
     const plan = imagenesDePartes(pedidas);
+    // apagado con cualquier petición del taller en camino; «Leyendo tu
+    // corrección…» solo si es la de rehacer (no la de una lámina)
+    const lanzando = !!APP.light.lanzando;
+    const leyendo = lanzando && APP.light.lanzando !== 'laminas';
     caja.appendChild(h('div', { clase: 'fila' },
       h('button', {
-        clase: 'primario', onclick: () => regenerarPedidasLight(ficha, pedidas),
-      }, 'Regenerar'),
+        clase: 'primario', disabled: lanzando,
+        onclick: () => regenerarPedidasLight(ficha, pedidas),
+      }, leyendo ? 'Leyendo tu corrección…' : 'Regenerar'),
       h('span', { clase: 'meta' },
         `${pedidas.map(p => partes[p] || p).join(' y ')} · ${plan}`
         + ((fuenteCambiadaLight(ficha) || fuenteTonoCambiadaLight(ficha))
@@ -14488,7 +14560,59 @@ async function volcarPresetLight(repintar) {
   }
 }
 
+/* UN 409 DEL TALLER TRAE EL TRABAJO QUE LO OCUPA: en vez de quedarse con el
+   aviso, la pantalla se engancha a él y lo enseña (con «Cancelando…» si es uno
+   que se está parando). */
+function engancharAlTallerLight(ficha, datos, mensaje) {
+  const tid = (datos || {}).trabajo_id;
+  if (!tid) return false;          // sin trabajo, el aviso lo da quien llama
+  toast(mensaje, true);
+  const ya = APP.trabajos[CLAVE_LIGHT];
+  if (!(ya && ya.id === tid && APP.seguimientos[CLAVE_LIGHT])) {
+    APP.trabajos[CLAVE_LIGHT] = {
+      id: tid, estado: 'ejecutando', progreso: 0, mensaje: '',
+      cancelando: !!datos.cancelando,
+      inicio: Date.now() - (Number(datos.segundos) || 0) * 1000,
+    };
+    seguirTrabajo(CLAVE_LIGHT, tid, alTerminarLight, () => pintarLight());
+  }
+  irALight('generando', { plan: null, abierto: ficha.id });
+  return true;
+}
+
+/* Espera (hasta un minuto) a que no haya ninguna petición del taller en
+   camino. -> true si quedó libre */
+async function esperarSinLanzarLight() {
+  const fin = Date.now() + 60000;
+  while (APP.light.lanzando && Date.now() < fin) {
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return !APP.light.lanzando;
+}
+
+/* Repinta solo la caja de las láminas (sin tirar el foco del resto). */
+function repintarLaminasLight(ficha) {
+  const vieja = document.querySelector('.light-preset .laminas-estilo');
+  if (vieja) vieja.replaceWith(laminasDelEstilo(ficha));
+}
+
 async function regenerarParteLight(ficha, parte) {
+  /* UN TOQUE, UNA PETICIÓN. Repartir la frase lleva unos segundos (Claude la
+     lee dentro de la petición) y la pantalla no cambiaba: en el móvil se
+     volvía a pulsar y el segundo toque acababa en «este estilo se está
+     generando» (18-10-2026). Mientras tanto el botón dice lo que pasa. */
+  if (APP.light.lanzando) return;
+  APP.light.lanzando = parte;
+  repintarPieDeEstilo();
+  try {
+    await regenerarParteLightYa(ficha, parte);
+  } finally {
+    APP.light.lanzando = null;
+    repintarPieDeEstilo();
+  }
+}
+
+async function regenerarParteLightYa(ficha, parte) {
   const peticion = String(APP.light.feedback[parte] || '').trim();
   const cuerpo = { parte, peticion };
   // la fuente solo viaja si de verdad ha cambiado: mandarla siempre haria que
@@ -14528,7 +14652,8 @@ async function regenerarParteLight(ficha, parte) {
     irALight('generando', { plan: datos.plan || null, abierto: ficha.id });
     seguirTrabajo(CLAVE_LIGHT, datos.trabajo_id, alTerminarLight, () => pintarLight());
   } catch (e) {
-    toast(`no se ha podido rehacer: ${e.message}`, true);
+    if (e.status === 409 && engancharAlTallerLight(ficha, e.datos, e.message)) return;
+    toast(e.status === 409 ? e.message : `no se ha podido rehacer: ${e.message}`, true);
   }
 }
 
@@ -16493,7 +16618,8 @@ const ESTILOS_SUB_MONTAJE = [
 const INTERRUPTORES_MONTAJE = [
   ['gancho', 'Gancho del primer segundo', 'El primer plano entra con un zoom rápido y la primera frase sale grande en el centro.'],
   ['cifras', 'Cifras clave en pantalla', 'Cuando la voz dice una cifra con su unidad («ochenta y cuatro centímetros»), sale grande: «84 cm».'],
-  ['barra', 'Barra de progreso', 'Una línea fina arriba que avanza con el vídeo.']];
+  ['barra', 'Barra de progreso', 'Una línea fina arriba que avanza con el vídeo.'],
+  ['profundidad', 'Profundidad 2.5D', 'Lo que está cerca se mueve más que el fondo, como si la imagen tuviera capas. Sin coste, pero el montaje tarda más (unos dos tercios más por plano). Experimental: en una ilustración, el borde de lo que va delante puede deformarse un poco.']];
 
 let DATOS_MONTAJE = null;
 function datosMontaje() {
@@ -16567,10 +16693,16 @@ function editorMontaje(modo, est, repintar) {
     botones(ESTILOS_SUB_MONTAJE, actual.subtitulos, 'subtitulos'),
     h('div', { clase: 'pista' }, sub[2])));
   INTERRUPTORES_MONTAJE.forEach(([clave, nombre, ayuda]) => {
+    // LA PROFUNDIDAD NECESITA SU MODELO en el servidor (lo baja `asvs
+    // actualizar`). Sin él la casilla se ve, apagada, y dice por qué: si se
+    // escondiera, nadie sabría que existe ni qué falta para tenerla.
+    const sinModelo = clave === 'profundidad' && datos.profundidad
+      && !datos.profundidad.disponible && !actual[clave];
     caja.appendChild(h('label', { clase: 'casilla' },
-      h('input', { type: 'checkbox', checked: !!actual[clave],
+      h('input', { type: 'checkbox', checked: !!actual[clave], disabled: sinModelo,
         onchange: ev => cambiar({ [clave]: ev.target.checked }) }),
-      ` ${nombre}`, h('span', { clase: 'meta' }, ` · ${ayuda}`)));
+      ` ${nombre}`, h('span', { clase: 'meta' }, ` · ${ayuda}`),
+      sinModelo ? h('span', { clase: 'meta' }, ` · No disponible todavía: ${datos.profundidad.por_que}.`) : null));
   });
   if (borrador && esCortoElEncargo(modo.e, datos)) {
     const ritmo = op.ritmo === 'estilo' ? 'estilo' : 'rapido';

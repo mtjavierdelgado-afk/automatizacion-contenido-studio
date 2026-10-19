@@ -28,6 +28,16 @@ vídeos, estilos, claves y contraseña no se tocan.
   y el **informe del mes** de cada proyecto, imprimible y con un resumen para
   copiar.
 
+**Cancelar de verdad en el taller de estilos (18 de octubre)**
+- **«Cancelar» un «Rehacer» para en el acto**: corta la llamada a Claude y no
+  encarga ninguna lámina más (las que ya se estaban dibujando se acaban y se
+  guardan, para no pagarlas otra vez). Mientras termina, la pantalla dice
+  «Cancelando…» con el botón apagado, y acaba con «cancelado», no con un error.
+- Si vuelves a pulsar mientras tanto, te dice qué está pasando y te lleva a ello.
+- **«Regenerar» ya no se pulsa dos veces**: mientras Claude lee tu corrección
+  dice «Leyendo tu corrección…», y un segundo toque no gasta nada.
+- Escuchar una voz ya no impide rehacer el estilo.
+
 **Un revisor de imágenes que mira cada plano con su guion (18 de octubre)**
 - En **Imágenes**, debajo del cuadro de notas, el panel **Revisor de
   imágenes**: «Revisar imágenes» mira cada imagen con lo que dice la voz en
@@ -54,6 +64,21 @@ vídeos, estilos, claves y contraseña no se tocan.
   con **topes**: imágenes como mucho por tanda y gasto como mucho por vídeo; y
   una misma imagen no se rehace sola más de dos veces.
 - Revisar no cambia nada del vídeo: no deja ningún paso obsoleto.
+
+**Profundidad 2.5D en el montaje (18 de octubre)**
+- **Nueva casilla en 🎬 Movimiento y efectos: «Profundidad 2.5D».** Lo que
+  está cerca (un árbol, una persona, un producto) se mueve más que el fondo
+  mientras la cámara hace su recorrido, como si la imagen tuviera capas.
+- **No cuesta nada:** un modelo gratuito calcula en el propio servidor qué está
+  cerca y qué lejos de cada imagen (menos de un segundo por imagen, y una sola
+  vez: se guarda). No redibuja ninguna imagen; encenderla solo rehace las capas
+  y el montaje. Eso sí, el montaje tarda más: unos dos tercios más por plano.
+- **Es experimental y va apagada.** En fotos se ve limpia; en una ilustración,
+  el borde de lo que va delante puede deformarse un poco al moverse.
+- `asvs actualizar` instala lo que hace falta (unos 100 MB, una sola vez). Si
+  no puede, el Studio sigue igual y la casilla dice qué falta.
+- Por ahora se elige para el vídeo entero; elegirla plano a plano llegará con
+  el revisor de imágenes, en la diapositiva de cada plano.
 
 **Publicar: SEO de verdad (18 de octubre)**
 - **Palabras clave del proyecto**, en Publicar → Cuentas y ajustes → **SEO de

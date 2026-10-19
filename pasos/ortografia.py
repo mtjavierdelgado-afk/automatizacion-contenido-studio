@@ -281,6 +281,12 @@ def revisar_con_memoria(textos, carpeta, cwd=None, informe=None):
     pares = {str(k): str(v) for k, v in textos.items() if str(v or "").strip()}
     memoria = leer_memoria(carpeta)
     salida, nuevos = {}, {}
+    # UN TEXTO MAS LARGO QUE `MAX_TEXTO` NO SE MANDA: `_lote` lo cortaria y la
+    # correccion volveria sin su final (y aplicarla lo borraria). Se cuenta como
+    # sin revisar y no se recuerda.
+    largos = [cid for cid, t in pares.items() if len(" ".join(t.split())) > MAX_TEXTO]
+    for cid in largos:
+        pares.pop(cid)
     for cid, texto in pares.items():
         ficha = memoria.get(huella(texto))
         if not isinstance(ficha, dict):
@@ -295,8 +301,12 @@ def revisar_con_memoria(textos, carpeta, cwd=None, informe=None):
                           for cid, t in nuevos.items() if cid not in rotos})
         salida.update(corregidos)
     if informe is not None:
-        informe.update({"sin_revisar": int(propio.get("sin_revisar") or 0),
-                        "detalle": str(propio.get("detalle") or ""),
+        detalle = str(propio.get("detalle") or "")
+        if largos:
+            detalle = (f"{len(largos)} texto(s) de más de {MAX_TEXTO} caracteres no se revisan: "
+                       f"pártelos ({', '.join(largos[:5])}). {detalle}").strip()
+        informe.update({"sin_revisar": int(propio.get("sin_revisar") or 0) + len(largos),
+                        "detalle": detalle,
                         "de_memoria": len(pares) - len(nuevos)})
     return salida
 

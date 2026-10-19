@@ -6256,7 +6256,7 @@ def _lanzar_ortografia(rid, textos, fuente, dueno, memoria, anclas=None):
 def _nueva_revision_ortografia(fuente, dueno):
     rid = uuid.uuid4().hex[:12]
     with _LOCK_ORTOGRAFIA:
-        for viejo in list(_ORTOGRAFIA)[:-19]:
+        for viejo in list(_ORTOGRAFIA)[:-59]:
             _ORTOGRAFIA.pop(viejo, None)
         _ORTOGRAFIA[rid] = {"estado": "pensando", "fuente": fuente, "proyecto": dueno}
     return rid
@@ -6264,6 +6264,8 @@ def _nueva_revision_ortografia(fuente, dueno):
 
 #: Dueño de las revisiones de campos sueltos (no son de ningun proyecto).
 _DUENO_TEXTOS = "_textos"
+#: Cuantos textos (lineas) se revisan de una vez en un campo suelto.
+MAX_TEXTOS_ORTOGRAFIA = 400
 
 
 def _memoria_textos():
@@ -6277,8 +6279,12 @@ def revisar_ortografia_textos(cuerpo: dict = Body(default=None)):
     quien lo pide pone lo que se acepte en su campo por su camino de siempre."""
     textos = _cuerpo(cuerpo).get("textos")
     textos = textos if isinstance(textos, dict) else {}
-    textos = {str(k)[:120]: str(v)[:PASOS_MODULOS.ortografia.MAX_TEXTO * 3]
-              for k, v in list(textos.items())[:60] if str(v or "").strip()}
+    # SIN RECORTAR EN SILENCIO: lo que no se revisara no puede salir como
+    # «Sin faltas». Lo largo lo cuenta `revisar_con_memoria` como sin revisar.
+    if len(textos) > MAX_TEXTOS_ORTOGRAFIA:
+        raise ErrorApi(400, f"son {len(textos)} líneas; se revisan como mucho "
+                            f"{MAX_TEXTOS_ORTOGRAFIA} de una vez")
+    textos = {str(k)[:120]: str(v) for k, v in textos.items() if str(v or "").strip()}
     if not textos:
         raise ErrorApi(400, "manda {textos: {campo: texto}}")
     rid = _nueva_revision_ortografia("textos", _DUENO_TEXTOS)

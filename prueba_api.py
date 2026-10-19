@@ -5807,6 +5807,8 @@ def probar_ortografia_de_campos(cliente, pid):
     igual(r.status_code, 400, "sin textos: 400")
     r, _d = cliente.post("/api/ortografia/textos", {"textos": {"a": "   "}})
     igual(r.status_code, 400, "con textos vacios: 400")
+    r, _d = cliente.post("/api/ortografia/textos", {"textos": {f"L{i}": "hola" for i in range(401)}})
+    igual(r.status_code, 400, "mas de 400 lineas: 400, no un recorte callado")
     r, _d = cliente.get("/api/ortografia/textos/noexiste")
     igual(r.status_code, 404, "una revision que no existe: 404")
     r, _d = cliente.post("/api/ortografia/textos/descartar", {"rid": "noexiste", "ids": ["L0"]})

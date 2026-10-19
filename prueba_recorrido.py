@@ -2692,8 +2692,8 @@ def ortografia_en_el_guion_y_en_los_campos(navegador, datos):
        f"la segunda vez todo sale de la memoria, sin preguntar a Claude ({ficha.get('de_memoria')} de {ficha.get('revisados')})")
     pg.js(f"ORTOGRAFIA_VIVA.delete(claveOrtografia('{pid}', 'guion')); await abrirVideoLight('{pid}');")
     # UN CAMPO SUELTO: la pieza común, montada en la pantalla
-    pg.js("""window.__puesto = null;
-      const caja = ortografiaDeCampo('prueba-recorrido', { leer: () => 'Una vez mas\\nsegunda linea bien',
+    pg.js("""window.__puesto = null; window.__texto = 'Una vez mas\\nsegunda linea bien';
+      const caja = ortografiaDeCampo('prueba-recorrido', { leer: () => window.__texto,
         poner: t => { window.__puesto = t; } });
       caja.classList.add('ortografia-de-prueba');
       document.body.appendChild(caja);""")
@@ -2701,6 +2701,14 @@ def ortografia_en_el_guion_y_en_los_campos(navegador, datos):
     pg.pulsar(".ortografia-de-prueba button", "Revisar ortografía")
     ok(pg.esperar(".ortografia-de-prueba button", "Poner las correcciones", 60), "propone la corrección del campo")
     ok(pg.visible(".ortografia-de-prueba", "más"), "con la tilde que faltaba")
+    # SE SIGUE ESCRIBIENDO después de revisar: «Poner» no se lleva lo escrito
+    pg.js("window.__texto = 'Una vez mas\\nsegunda linea bien y algo nuevo';")
+    pg.pulsar(".ortografia-de-prueba button", "Poner las correcciones")
+    ok(pg.js("return window.__puesto;") is None,
+       "si el texto cambió después de revisar, «Poner» no lo pisa: se revisa otra vez")
+    pg.js("window.__texto = 'Una vez mas\\nsegunda linea bien';")
+    pg.pulsar(".ortografia-de-prueba button", "Revisar ortografía")
+    ok(pg.esperar(".ortografia-de-prueba button", "Poner las correcciones", 60), "vuelve a proponer")
     pg.pulsar(".ortografia-de-prueba button", "Poner las correcciones")
     puesto = pg.js("return window.__puesto;")
     ok(puesto == "Una vez más\nsegunda linea bien",

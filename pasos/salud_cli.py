@@ -180,8 +180,8 @@ def clasificar(fallo):
     # «oauth» y casaria con `_SESION`): es pasajero y `cli_claude` lo repite.
     # Pintarlo como «no tiene sesion valida» mandaba a volver a entrar sin
     # ninguna falta (18-10-2026).
-    if any(p in bajo for p in ("another claude code process is refreshing",
-                               "exited mid-refresh", "usually transient")):
+    if "refresh" in bajo and any(p in bajo for p in ("another claude code process is refreshing",
+                                                     "exited mid-refresh", "usually transient")):
         return "error", texto
     if any(pista in bajo for pista in _SESION):
         return "sesion", texto

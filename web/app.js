@@ -7599,6 +7599,12 @@ function panelOrtografia(fuente) {
     caja.appendChild(lista);
   } else if (est.estado === 'listo') {
     const props = est.propuestas || [];
+    if (fuente === 'guion' && est.huella && props.length
+      && est.huella !== huellaTextosOrtografia(textosGuionOrtografia(v))) {
+      caja.appendChild(h('div', { clase: 'caja-aviso' },
+        'El guion ha cambiado desde esta revisión: los bloques editados no se tocan al aplicar. '
+        + (conVoz ? 'Pulsa «Revisar otra vez» para revisarlo como está.' : 'Se vuelve a revisar solo en unos segundos.')));
+    }
     // UNA TANDA ROTA NO SE LLEVA LAS DEMÁS (pasos/ortografia.py): los textos
     // cuya respuesta no se pudo leer se dicen aquí, y «Sin faltas» no los
     // cuenta como revisados (N6 de las notas de mejoras, 13-10-2026)
@@ -7717,7 +7723,7 @@ async function revisarOrtografia(fuente) {
     const lanzada = await pedir(`${API.proyecto(pid)}/ortografia/revisar`, { method: 'POST', cuerpo });
     est.revisados = lanzada.revisados;
     let ficha = { estado: 'pensando' };
-    for (let i = 0; i < 160 && ficha.estado === 'pensando'; i += 1) {
+    for (let i = 0; i < 400 && ficha.estado === 'pensando'; i += 1) {
       await new Promise(r => setTimeout(r, 1500));
       ficha = await pedir(`${API.proyecto(pid)}/ortografia/${lanzada.id}`);
     }
@@ -7802,9 +7808,13 @@ async function aplicarOrtografia(fuente) {
       // por el MISMO camino que escribir a mano en el bloque
       const porId = {};
       ((v.guion || {}).bloques || []).forEach(b => { porId[b.id] = b; });
+      const llano = t => String(t || '').split(/\s+/).filter(Boolean).join(' ');
       elegidas.forEach(p => {
         const b = porId[p.id];
         if (!b) { aMano.push(p); return; }
+        // EL BLOQUE HA CAMBIADO desde la revisión (se editó a mano): poner la
+        // propuesta lo devolvería al texto de antes. Se deja a mano.
+        if (llano(textoVisibleLight(textoDeBloqueLight(b))) !== llano(p.antes)) { aMano.push(p); return; }
         const nuevo = ortografiaSobreCrudo(textoDeBloqueLight(b), p);
         if (nuevo === null) { aMano.push(p); return; }
         guardarBloqueLight(b.id, nuevo, b.insertado ? undefined : b.texto, !!b.insertado);
@@ -7824,8 +7834,8 @@ async function aplicarOrtografia(fuente) {
        además, se queda en el panel con su texto. */
     if (aMano.length) {
       const aviso = `${puestas} corrección(es) puestas; ${aMano.length} hay que corregirla(s) a mano `
-        + `(${aMano.map(p => p.id).join(', ')}): llevan pausas o marcas de la voz y no se han podido `
-        + 'poner sin tocarlas.';
+        + `(${aMano.map(p => p.id).join(', ')}): llevan pausas o marcas de la voz, o el bloque ha `
+        + 'cambiado desde la revisión, y no se han podido poner sin tocarlo.';
       toast(aviso, true);
       ORTOGRAFIA_VIVA.set(clave, { estado: 'aplicada', aviso, aMano });
     } else {
@@ -7888,6 +7898,13 @@ function ortografiaDeCampo(clave, campo) {
     caja.appendChild(lista);
     caja.appendChild(h('div', { clase: 'fila' },
       h('button', { clase: 'mini primario', type: 'button', onclick: () => {
+        // SE VUELVE A LEER EL CAMPO: si se ha seguido escribiendo después de
+        // revisar, poner lo propuesto se llevaría lo escrito. Se revisa otra vez.
+        if (String(campo.leer() || '') !== texto) {
+          toast('El texto ha cambiado desde la revisión: se revisa otra vez');
+          revisarCampoOrtografia(clave, campo, pintar);
+          return;
+        }
         const { lineas } = lineasOrtografia(texto);
         props.forEach(p => {
           const i = Number(String(p.id).slice(1));
@@ -7922,7 +7939,7 @@ async function revisarCampoOrtografia(clave, campo, pintar) {
   try {
     const lanzada = await pedir(`${BASE}/api/ortografia/textos`, { method: 'POST', cuerpo: { textos } });
     ficha = { estado: 'pensando' };
-    for (let i = 0; i < 160 && ficha.estado === 'pensando'; i += 1) {
+    for (let i = 0; i < 400 && ficha.estado === 'pensando'; i += 1) {
       await new Promise(r => setTimeout(r, 1500));
       ficha = await pedir(`${BASE}/api/ortografia/textos/${lanzada.id}`);
     }

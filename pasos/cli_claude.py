@@ -194,7 +194,9 @@ def es_pasajero(fallo):
     if isinstance(fallo, (TiempoAgotado, LimiteAgotado)):
         return False
     bajo = " ".join(str(fallo).split()).lower()
-    return any(pista in bajo for pista in _PASAJEROS)
+    # tiene que hablar de RENOVAR la sesion: «usually transient» a secas podria
+    # venir en el texto de otra cosa
+    return "refresh" in bajo and any(pista in bajo for pista in _PASAJEROS)
 
 
 def _esperar_pasajero(segundos, avance):

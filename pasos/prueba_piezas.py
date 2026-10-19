@@ -4682,6 +4682,13 @@ def prueba_ortografia_con_memoria():
         except ortografia.ErrorOrtografia:
             pass
         ok(preguntados, "una tanda rota NO se recuerda: la siguiente vez se vuelve a preguntar")
+        preguntados.clear()
+        informe = {}
+        largo = "palabra mas " * (ortografia.MAX_TEXTO // 6)
+        salida = ortografia.revisar_con_memoria({"L": largo, "C": "corto mas"}, carpeta, informe=informe)
+        ok(preguntados == ["C"] and "L" not in salida and informe.get("sin_revisar") == 1,
+           f"un texto de mas de {ortografia.MAX_TEXTO} caracteres no se manda (se cortaria): "
+           f"cuenta como sin revisar ({preguntados}, {informe.get('sin_revisar')})")
         with open(os.path.join(carpeta, ortografia.FICHERO_MEMORIA), "w", encoding="utf-8") as fh:
             fh.write("{roto")
         preguntados.clear()

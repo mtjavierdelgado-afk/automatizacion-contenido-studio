@@ -3715,6 +3715,9 @@ details.plegado-manual > summary { cursor: pointer; font-weight: 600; padding: 4
 .pie-sistema .enlace-pie:hover { text-decoration: underline; }
 #modulo > .pie-sistema { max-width: 1180px; }
 .ventana-texto p { margin: 6px 0; line-height: 1.5; }
+/* los términos de uso son largos: la ventana rueda por dentro */
+.dialogo.ventana-texto { width: min(680px, 94vw); max-height: 86vh; overflow-y: auto; }
+.ventana-texto .novedades { max-height: none; overflow: visible; }
 
 /* ---- Configuración → Aspecto: las cuatro paletas con su muestra */
 .paletas { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-top: 8px; }

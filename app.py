@@ -10853,6 +10853,7 @@ def guias_de_escritura():
 
 RUTA_NOVEDADES = os.path.join(RAIZ_ESTUDIO, "docs", "NOVEDADES.md")
 RUTA_MANUAL = os.path.join(RAIZ_ESTUDIO, "docs", "MANUAL.md")
+RUTA_TERMINOS = os.path.join(RAIZ_ESTUDIO, "docs", "TERMINOS.md")
 
 
 @app.get("/api/sistema/manual")
@@ -10860,6 +10861,18 @@ def manual_del_sistema():
     """Cómo se usa el Estudio, tal cual esta en docs/MANUAL.md."""
     try:
         with open(RUTA_MANUAL, encoding="utf-8") as fh:
+            texto = fh.read()
+    except OSError:
+        texto = ""
+    return {"version": VERSION, "producto": NOMBRE_PRODUCTO,
+            "subtitulo": SUBTITULO_PRODUCTO, "texto": texto}
+
+
+@app.get("/api/sistema/terminos")
+def terminos_del_sistema():
+    """Los terminos de uso, tal cual estan en docs/TERMINOS.md (el pie)."""
+    try:
+        with open(RUTA_TERMINOS, encoding="utf-8") as fh:
             texto = fh.read()
     except OSError:
         texto = ""

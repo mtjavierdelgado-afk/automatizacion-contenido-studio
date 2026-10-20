@@ -4720,10 +4720,21 @@ function seccionPaleta() {
 const PIE_DERECHOS = '© 2026 Agencia Redes Botánica · CrearIA Studio — '
   + 'Automatización de contenido · v3.1 · Todos los derechos reservados.';
 
-/* EL CONTACTO Y LOS TÉRMINOS: los tiene que escribir el dueño. Mientras estén
-   vacíos, el pie lo dice en vez de inventarse un correo o un texto legal. */
-const CONTACTO_STUDIO = '';
-const TERMINOS_STUDIO = [];
+/* EL CONTACTO (mailto) y LOS TÉRMINOS DE USO, que viven en docs/TERMINOS.md y
+   se sirven en /api/sistema/terminos, como el manual. */
+const CONTACTO_STUDIO = 'agencia.redes.botanica@gmail.com';
+
+async function abrirTerminos() {
+  let texto = '';
+  try {
+    texto = (await pedir(`${BASE}/api/sistema/terminos`)).texto || '';
+  } catch (e) {
+    toast(`no se han podido leer los términos: ${e.message}`, true);
+    return;
+  }
+  ventanaTexto('Términos de uso', [h('div', { clase: 'novedades terminos' },
+    textoConFormato(unirLineas(texto.replace(/^# .+\n/, '').replace(/^#{2,6} (.+)$/gm, '**$1**'))))]);
+}
 
 function enlacePie(texto, accion, titulo) {
   return h('a', { href: '#', clase: 'enlace-pie', title: titulo || texto,
@@ -4736,15 +4747,9 @@ function pieSistema() {
     h('span', { clase: 'pie-enlaces' },
       enlacePie('Novedades', () => abrirNovedades(), 'Lo que ha cambiado en el Studio'),
       enlacePie('Guía', () => abrirManual(), 'El panel de ayuda: el manual y las guías'),
-      enlacePie('Términos de uso', () => ventanaTexto('Términos de uso', TERMINOS_STUDIO.length
-        ? TERMINOS_STUDIO
-        : ['Texto pendiente: los términos de uso los tiene que escribir el dueño del Studio '
-          + '(Agencia Redes Botánica). Se ponen en TERMINOS_STUDIO, en web/app.js.'])),
-      enlacePie('Contacto', () => {
-        if (CONTACTO_STUDIO) { window.location.href = `mailto:${CONTACTO_STUDIO}`; return; }
-        ventanaTexto('Contacto', ['Pendiente: el dueño del Studio tiene que poner aquí su correo '
-          + 'de contacto (CONTACTO_STUDIO, en web/app.js).']);
-      })));
+      enlacePie('Términos de uso', () => abrirTerminos(), 'Las condiciones de uso del Studio'),
+      h('a', { href: `mailto:${CONTACTO_STUDIO}`, clase: 'enlace-pie', title: `Escribir a ${CONTACTO_STUDIO}` },
+        'Contacto')));
 }
 
 /* Una ventana de solo lectura, con «Cerrar». */
@@ -4755,7 +4760,7 @@ function ventanaTexto(titulo, parrafos) {
   const boton = h('button', { type: 'button', clase: 'mini primario', onclick: cerrar }, 'Cerrar');
   capa.appendChild(h('div', { clase: 'dialogo ventana-texto', role: 'dialog', 'aria-label': titulo },
     h('h3', {}, titulo),
-    ...parrafos.map(p => h('p', {}, p)),
+    ...parrafos.map(p => (p instanceof Node ? p : h('p', {}, p))),
     h('div', { clase: 'dialogo-botones' }, boton)));
   capa.addEventListener('click', ev => { if (ev.target === capa) cerrar(); });
   document.addEventListener('keydown', teclas);

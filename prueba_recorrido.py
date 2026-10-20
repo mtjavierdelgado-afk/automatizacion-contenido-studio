@@ -5251,8 +5251,13 @@ def diseno_crearia(navegador, datos):
     ok(pg.visible(".pie-sistema a", "Términos de uso") and pg.visible(".pie-sistema a", "Contacto"),
        "con Novedades, Guía, Términos de uso y Contacto")
     pg.p.locator(".pie-sistema a", has_text="Términos de uso").first.click()
-    ok(pg.esperar(".ventana-texto", "pendiente", 5), "Términos abre un texto, marcado como pendiente del dueño")
+    ok(pg.esperar(".ventana-texto", "Agencia Redes Botánica", 5)
+       and pg.visible(".ventana-texto", "República del Perú")
+       and pg.visible(".ventana-texto", "Última actualización: 19 de octubre de 2026"),
+       "Términos abre los términos de uso (titular, ley peruana, fecha)")
     pg.p.keyboard.press("Escape")
+    ok(pg.p.eval_on_selector(".pie-sistema a:has-text('Contacto')", "a => a.getAttribute('href')")
+       == "mailto:agencia.redes.botanica@gmail.com", "Contacto es un mailto a la agencia")
 
     # LAS CUATRO PALETAS: cada una cambia una variable visible y se recuerda
     fondo = "() => getComputedStyle(document.body).backgroundColor"

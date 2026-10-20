@@ -37,7 +37,31 @@ def _ortografia(entrada):
     return {"correcciones": salida}
 
 
+#: Lo que el corrector EDITORIAL falso propone (arreglos-19oct): frases del
+#: guion del video de prueba, con su motivo.
+EDITORIALES = [("el buque atraca", "el buque atracó", "concordancia",
+                "el resto del relato va en pasado"),
+               ("La marina llega", "La marina llegó", "concordancia",
+                "el resto del relato va en pasado"),
+               ("todo queda incautado", "todo quedó incautado", "concordancia",
+                "el resto del relato va en pasado"),
+               ("descargan el patio entero", "vacían el patio entero", "claridad",
+                "lo que se descarga es la carga, no el patio")]
+
+
+def _editorial(entrada):
+    salida = {}
+    for tid, texto in re.findall(r'<t id="([^"]+)">(.*?)</t>', entrada, re.S):
+        lista = [{"original": a, "propuesta": b, "tipo": t, "motivo": m}
+                 for a, b, t, m in EDITORIALES if a in texto]
+        if lista:
+            salida[tid] = lista
+    return {"propuestas": salida}
+
+
 def responder(entrada):
+    if "<textos>" in entrada and "REVISION EDITORIAL" in entrada:
+        return _editorial(entrada)
     if "<textos>" in entrada and "ORTOGRAFIA" in entrada:
         return _ortografia(entrada)
     if "<guia>" in entrada and "<texto>" in entrada:

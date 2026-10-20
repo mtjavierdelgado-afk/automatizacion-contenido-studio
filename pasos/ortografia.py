@@ -29,6 +29,10 @@ revisar SOLA cada vez que cambia el guion y solo se pregunta por los bloques
 que cambiaron. Lo que la persona deja sin marcar al aplicar se apunta como
 bueno (`descartar`) y no se vuelve a proponer.
 
+LA REVISION EDITORIAL (`revisar_editorial`, 19-10-2026) es un modo APARTE, al
+final del fichero: sintaxis y redaccion, con propuestas sueltas. No toca nada
+de lo de aqui arriba.
+
 Va por SUSCRIPCION (el CLI de Claude), con sonnet y poco esfuerzo, igual que
 «Revisar». Si el modelo devuelve algo que no es una correccion ortografica
 --otra frase, palabras de mas o de menos-- se descarta (`_es_ortografia`).
@@ -313,3 +317,165 @@ def revisar_con_memoria(textos, carpeta, cwd=None, informe=None):
 
 def como_json(resultado):
     return json.dumps(resultado, ensure_ascii=False)
+
+
+# ------------------------------------------------------ la revision EDITORIAL
+#
+# Arreglos del 19-10 (5), pedido del dueño: «una revision de sintaxis y
+# redaccion del guion, como la haria un corrector editorial». Es un modo
+# APARTE: la ortografia de arriba no cambia (corrige solo letras y signos, y
+# su filtro `_es_ortografia` tira todo lo que cambie palabras). Aqui se
+# proponen cambios de redaccion --sintaxis, concordancia, puntuacion,
+# repeticiones, frases confusas o largas para decirlas en voz alta, registro--
+# como PROPUESTAS sueltas {original, propuesta, motivo}: un trozo literal del
+# texto y su sustitucion, para aceptarlas o rechazarlas una a una.
+#
+# No hay memoria: cada revision pregunta (lo editorial no es «correcto o no»,
+# y lo rechazado una vez puede tener sentido despues de otros cambios).
+#
+# MODELO: sonnet con esfuerzo medio. Pide criterio (mas que la ortografia,
+# que va con poco esfuerzo) y se espera mirando la pantalla; opus tardaria el
+# doble por tanda para un guion que se lee en segundos.
+
+MODELO_EDITORIAL = "sonnet"
+ESFUERZO_EDITORIAL = "medium"
+#: Textos por llamada: cada uno vuelve con varias propuestas y su motivo, asi
+#: que la respuesta es mas larga que la de la ortografia.
+POR_LLAMADA_EDITORIAL = 8
+#: Propuestas por texto como mucho: un bloque con veinte no se revisa, se
+#: reescribe, y eso es otra cosa (regenerar el guion).
+MAX_PROPUESTAS_POR_TEXTO = 6
+MAX_FRAGMENTO = 400
+TIPOS_EDITORIALES = ("sintaxis", "concordancia", "puntuacion", "repeticion",
+                     "claridad", "registro")
+
+SISTEMA_EDITORIAL = ("Eres corrector editorial experto en castellano. Propones "
+                     "cambios minimos de redaccion y contestas unicamente con el "
+                     "JSON pedido.")
+
+INSTRUCCION_EDITORIAL = """Haz una REVISION EDITORIAL de estos bloques de un
+guion narrado en castellano (se graban con una voz y se oyen, no se leen).
+Revisa como un corrector editorial profesional:
+
+- sintaxis: frases mal construidas, subordinadas que no cierran, orden confuso;
+- concordancia: genero, numero, tiempos verbales que saltan sin motivo;
+- puntuacion: comas que separan sujeto y verbo, que faltan en un inciso,
+  puntos que hacen falta en una frase demasiado larga para decirla de un tiron;
+- repeticiones: la misma palabra o idea muy cerca;
+- claridad: frases ambiguas o que obligan a releer;
+- registro: un salto de tono (coloquial en medio de algo formal, o al reves).
+
+Reglas:
+- CAMBIOS MINIMOS: no reescribas el bloque ni cambies el estilo del autor. Si
+  algo esta bien, no lo toques. Lo normal es que muchos bloques no tengan nada.
+- NO cambies hechos, cifras, nombres propios, marcas ni el sentido.
+- La ortografia (tildes, letras) NO es tu trabajo: hay otro corrector.
+- «original» es un trozo COPIADO LITERALMENTE del bloque (letra a letra, con sus
+  signos), lo mas corto posible pero que se encuentre una sola vez; «propuesta»
+  es por lo que se cambia; «motivo», una frase corta para el autor.
+- Como mucho {maximo} propuestas por bloque.
+
+<textos>
+{textos}
+</textos>
+
+Devuelve SOLO este JSON, con UNICAMENTE los bloques que tienen propuestas (si
+ninguno, {{"propuestas": {{}}}}):
+{{"propuestas": {{"<id>": [{{"original": "<trozo literal>", "propuesta": "<como queda>",
+                           "motivo": "<por que>", "tipo": "<{tipos}>"}}]}}}}"""
+
+
+def _llano_espacios(texto):
+    return " ".join(str(texto or "").split())
+
+
+def _pedir_tanda_editorial(trozo, cwd):
+    instruccion = INSTRUCCION_EDITORIAL.format(
+        textos=_lote(trozo), maximo=MAX_PROPUESTAS_POR_TEXTO,
+        tipos="|".join(TIPOS_EDITORIALES))
+    ultimo = ""
+    for _intento in range(1 + REINTENTOS_JSON):
+        respuesta, _sobre = cli_claude.ejecutar(
+            instruccion, modelo=MODELO_EDITORIAL, esfuerzo=ESFUERZO_EDITORIAL, cwd=cwd,
+            base_tiempo_s=240, sistema=SISTEMA_EDITORIAL,
+            extra=["--no-session-persistence"], para="la revision editorial")
+        try:
+            datos = comun.extraer_json(respuesta, "la revision editorial")
+        except RuntimeError as fallo:
+            ultimo = str(fallo)
+            continue
+        return (datos or {}).get("propuestas") if isinstance(datos, dict) else None
+    raise _JsonRoto(ultimo)
+
+
+def _propuestas_validas(texto, crudas):
+    """Las propuestas de un bloque que se pueden aplicar tal cual: su
+    `original` esta UNA vez en el texto, la propuesta es distinta y no
+    vacia, y no se pisan entre ellas. Lo demas se descarta en silencio (un
+    trozo que no esta no se podria poner)."""
+    texto = _llano_espacios(texto)
+    salida, ocupado = [], []
+    for cruda in crudas if isinstance(crudas, list) else []:
+        if not isinstance(cruda, dict):
+            continue
+        original = _llano_espacios(cruda.get("original"))
+        propuesta = _llano_espacios(cruda.get("propuesta"))
+        if (not original or not propuesta or original == propuesta
+                or len(original) > MAX_FRAGMENTO or len(propuesta) > MAX_FRAGMENTO * 2
+                or texto.count(original) != 1):
+            continue
+        desde = texto.index(original)
+        tramo = (desde, desde + len(original))
+        if any(a < tramo[1] and tramo[0] < b for a, b in ocupado):
+            continue
+        ocupado.append(tramo)
+        tipo = str(cruda.get("tipo") or "").strip().lower()
+        salida.append({"original": original, "propuesta": propuesta,
+                       "motivo": _llano_espacios(cruda.get("motivo"))[:240],
+                       "tipo": tipo if tipo in TIPOS_EDITORIALES else ""})
+        if len(salida) >= MAX_PROPUESTAS_POR_TEXTO:
+            break
+    return salida
+
+
+def revisar_editorial(textos, cwd=None, informe=None):
+    """{id: texto} -> {id: [{original, propuesta, motivo, tipo}]}, solo de los
+    bloques con propuestas. Por tandas, y una tanda rota no se lleva las demas
+    (como `revisar`): en `informe` van `sin_revisar`, `ids_sin_revisar` y
+    `detalle`. Si no sale NINGUNA tanda, `ErrorOrtografia`."""
+    if not isinstance(textos, dict):
+        raise ErrorOrtografia("hacen falta los textos a revisar")
+    pares = [(str(k), str(v)) for k, v in textos.items() if str(v or "").strip()]
+    largos = [k for k, t in pares if len(_llano_espacios(t)) > MAX_TEXTO]
+    pares = [(k, t) for k, t in pares if k not in largos]
+    if informe is not None:
+        informe.update({"sin_revisar": len(largos), "detalle": "", "ids_sin_revisar": list(largos)})
+    if not pares:
+        return {}
+    salida, tandas_bien, detalle, sin_revisar = {}, 0, "", []
+    for desde in range(0, len(pares), POR_LLAMADA_EDITORIAL):
+        trozo = pares[desde:desde + POR_LLAMADA_EDITORIAL]
+        try:
+            propuestas = _pedir_tanda_editorial(trozo, cwd)
+        except _JsonRoto as fallo:
+            sin_revisar.extend(k for k, _t in trozo)
+            detalle = str(fallo)
+            continue
+        tandas_bien += 1
+        originales = dict(trozo)
+        for cid, lista in (propuestas or {}).items():
+            cid = str(cid)
+            if cid not in originales:
+                continue
+            validas = _propuestas_validas(originales[cid], lista)
+            if validas:
+                salida[cid] = validas
+    if not tandas_bien:
+        raise ErrorOrtografia(f"{RESPUESTA_ROTA}\n\n{detalle}")
+    if informe is not None:
+        if largos:
+            detalle = (f"{len(largos)} bloque(s) de más de {MAX_TEXTO} caracteres no se revisan: "
+                       f"pártelos ({', '.join(largos[:5])}). {detalle}").strip()
+        informe.update({"sin_revisar": len(sin_revisar) + len(largos), "detalle": detalle,
+                        "ids_sin_revisar": sin_revisar + largos})
+    return salida

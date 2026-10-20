@@ -51,6 +51,77 @@ SIN_VENTANA = {}
 if os.name == "nt":
     SIN_VENTANA = {"creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)}
 
+# ------------------------------------------------- un ffmpeg que se cancela
+#
+# CANCELAR ES EN EL ACTO (CLAUDE.md, 18-10-2026), y ffmpeg no se enteraba: el
+# montaje final (`_concatenar`, la medida de la mezcla, el logo, la cola, la
+# banda) era `subprocess.run(timeout=3600)`, y «Parar» esperaba a que acabara
+# --medio minuto en una mezcla, minutos en el logo de un vídeo largo-- (19-10).
+
+#: Cada proceso en SU grupo: se le mata entero sin tocar el del servicio. En
+#: Windows no hay grupos POSIX: ahí se mata el proceso y nada más.
+GRUPO_PROPIO = {} if os.name == "nt" else {"start_new_session": True}
+
+
+def _matar_grupo(proceso):
+    """SIGKILL al grupo PROPIO del proceso (lo creó `correr`). Vuelve enseguida."""
+    if proceso.poll() is not None:
+        return
+    try:
+        if GRUPO_PROPIO:
+            import signal                                      # noqa: PLC0415
+            os.killpg(proceso.pid, signal.SIGKILL)
+        else:
+            proceso.kill()
+    except (OSError, ProcessLookupError):
+        pass
+
+
+def correr(orden, avisar=None, timeout=3600, texto=True):
+    """`subprocess.run(orden, capture_output=True)` que se corta AL CANCELAR.
+
+    Si `avisar` trae `al_cancelar` (el del gestor de trabajos, o un envoltorio
+    que lo copie), el proceso arranca en su propio grupo y se registra para que
+    «Parar» lo mate en el acto; al volver, si se canceló, lanza `Cancelado`
+    (y no un «ffmpeg falló», que es lo que parecería). Sin `avisar` es el
+    `subprocess.run` de siempre. -> CompletedProcess
+    """
+    registrar = getattr(avisar, "al_cancelar", None)
+    if not callable(registrar):
+        return subprocess.run(orden, capture_output=True, text=texto, timeout=timeout,
+                              **SIN_VENTANA)
+    cancelado = threading.Event()
+    proceso = subprocess.Popen(orden, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               text=texto, **GRUPO_PROPIO, **SIN_VENTANA)
+
+    def matar():
+        cancelado.set()
+        _matar_grupo(proceso)
+    quitar = registrar(matar)
+    try:
+        salida, errores = proceso.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _matar_grupo(proceso)
+        proceso.communicate()
+        raise
+    except BaseException:
+        _matar_grupo(proceso)
+        raise
+    finally:
+        if callable(quitar):
+            quitar()
+    if cancelado.is_set():
+        from nucleo.trabajos import Cancelado                  # noqa: PLC0415
+        raise Cancelado("cancelado")
+    return subprocess.CompletedProcess(orden, proceso.returncode, salida, errores)
+
+
+def es_cancelado(fallo):
+    """Si una excepcion es la de cancelar (por NOMBRE: hay pasos que corren en
+    un proceso aparte sin el nucleo cargado)."""
+    return type(fallo).__name__ == "Cancelado"
+
+
 #: Donde buscar el navegador del render, en orden. Las dos primeras son las de
 #: Windows; las de Linux van detras para que en Windows no cambie nada. Se puede
 #: forzar uno concreto con ESTUDIO_EDGE.

@@ -7171,6 +7171,10 @@ function vistaElegidoLight() {
       'céntrate en el mecanismo, no en las personas; no fuerces una historia '
       + 'de personaje')));
 
+  caja.appendChild(bloqueLight('El espacio fijo',
+    'si todo el vídeo pasa en un mismo sitio (opcional)',
+    bloqueEspacioFijoLight(e)));
+
   /* LAS LLAMADAS A LA ACCIÓN son de ESTE vídeo y se deciden aquí. No viajan en
      el estilo a propósito: si viajaran, elegir un estilo pisaría lo que acabas
      de escribir para este vídeo. */
@@ -7454,6 +7458,257 @@ function materialLight(e) {
 /* Crear el proyecto y lanzar la primera tanda, en un gesto. Son dos llamadas
    —el proyecto tiene que existir antes de poder generar nada en él— pero UNA
    decisión, así que un botón. */
+/* EL ESPACIO FIJO (rama espacio-fijo, 20-10-2026): todo el vídeo en un mismo
+   sitio. Lo rellena la Parrilla si el guion trae ESPACIO FIJO y se puede
+   escribir a mano. Con él, el reparto de sitios usa UNO solo con esta
+   descripción tal cual. Los secundarios se escriben uno por línea
+   («Nombre: descripción») y se guardan como texto: leerlos y volver a pintarlos
+   en cada tecla se comería los dos puntos recién escritos. Solo viaja si tiene
+   descripción (`opcionesParaCrear`); sin ella el vídeo nace como siempre. */
+function espacioFijoDelEncargo(r) {
+  const ef = (r && typeof r === 'object') ? r : {};
+  return {
+    sitio: String(ef.sitio || ''),
+    descripcion: String(ef.descripcion || ''),
+    luz: String(ef.luz || ''),
+    secundarios_texto: (Array.isArray(ef.secundarios) ? ef.secundarios : [])
+      .filter(x => x && x.nombre)
+      .map(x => (x.descripcion ? `${x.nombre}: ${x.descripcion}` : String(x.nombre)))
+      .join('\n'),
+  };
+}
+
+function secundariosDelTexto(texto) {
+  return String(texto || '').split(/[\n;]/).map(l => l.trim()).filter(Boolean).map(l => {
+    const i = l.indexOf(':');
+    return i > 0 ? { nombre: l.slice(0, i).trim(), descripcion: l.slice(i + 1).trim() }
+      : { nombre: l, descripcion: '' };
+  }).filter(x => x.nombre);
+}
+
+/* Lo que se manda al crear, o null si no hay espacio fijo. */
+function espacioFijoParaCrear(e) {
+  const ef = e.espacio_fijo;
+  if (!ef || !String(ef.descripcion || '').trim()) return null;
+  const salida = {
+    sitio: String(ef.sitio || '').trim(),
+    descripcion: String(ef.descripcion).trim(),
+    luz: String(ef.luz || '').trim(),
+    secundarios: secundariosDelTexto(ef.secundarios_texto),
+  };
+  if (ef.imagen_nueva) salida.imagen_nueva = ef.imagen_nueva;
+  return salida;
+}
+
+/* LA IMAGEN DEL ESPACIO, leída en el navegador como data URL: viaja con el
+   resto al crear (o al aplicar) y el servidor la guarda en PNG en el proyecto.
+   Se adjunta a cada plano del sitio principal, y eso se paga como una
+   referencia más por imagen. */
+function campoImagenDelEspacio(ef, urlGuardada, alCambiar) {
+  const vista = ef.imagen_nueva || (ef.quitar_imagen ? '' : (urlGuardada || ''));
+  const entrada = h('input', {
+    type: 'file', accept: 'image/png,image/jpeg,image/webp', clase: 'oculto-espacio-fijo',
+    onchange: ev => {
+      const fichero = (ev.target.files || [])[0];
+      if (!fichero) return;
+      if (fichero.size > 12 * 1024 * 1024) { toast('la imagen pasa de 12 MB', true); return; }
+      const lector = new FileReader();
+      lector.onload = () => { ef.imagen_nueva = String(lector.result || ''); ef.quitar_imagen = false; alCambiar(); };
+      lector.readAsDataURL(fichero);
+    },
+  });
+  return h('div', { clase: 'campo espacio-fijo-imagen' },
+    h('label', {}, 'Imagen del sitio (opcional)'),
+    vista ? h('img', { src: vista, alt: 'el espacio fijo', clase: 'miniatura-espacio-fijo' }) : null,
+    h('div', { clase: 'fila' },
+      entrada,
+      h('button', { clase: 'mini', onclick: () => entrada.click() },
+        vista ? 'Cambiar la imagen' : 'Subir una imagen'),
+      vista ? h('button', {
+        clase: 'mini fantasma',
+        onclick: () => { ef.imagen_nueva = null; ef.quitar_imagen = true; alCambiar(); },
+      }, 'Quitarla') : null),
+    h('div', { clase: 'pista' }, 'Se adjunta a cada imagen de plano de este sitio (no a los '
+      + 'secundarios) para que se reconozca el lugar. Se paga como una referencia más: alrededor '
+      + 'de medio céntimo por imagen.'));
+}
+
+function bloqueEspacioFijoLight(e) {
+  if (!e.espacio_fijo) e.espacio_fijo = espacioFijoDelEncargo(null);
+  const ef = e.espacio_fijo;
+  return h('div', { clase: 'espacio-fijo' },
+    h('div', { clase: 'espacio-fijo-fila' },
+      campoTexto('Sitio', ef.sitio, v => { ef.sitio = v; }, { pista: 'Panadería Rosa' }),
+      campoTexto('Luz', ef.luz, v => { ef.luz = v; }, { pista: 'morning, warm window light' })),
+    campoArea('Descripción', ef.descripcion, v => { ef.descripcion = v; },
+      'a small bakery with wooden shelves full of bread and a white counter',
+      'espacio-fijo-descripcion'),
+    campoArea('Sitios secundarios', ef.secundarios_texto, v => { ef.secundarios_texto = v; },
+      'uno por línea: Fachada: a shop front with a pink awning', 'espacio-fijo-secundarios'),
+    campoImagenDelEspacio(ef, '', pintarLight),
+    h('div', { clase: 'pista' }, 'Con descripción, todos los planos van a este sitio (salvo los '
+      + 'que el guion sitúe en un secundario), con esa descripción tal cual y sin cabeceras de '
+      + 'sitio. Mejor en inglés, que es lo que lee el generador de imágenes. Vacío, el reparto '
+      + 'de sitios es el de siempre.'));
+}
+
+/* EL ESPACIO FIJO DE UN VÍDEO YA HECHO, como corrección (rama espacio-fijo).
+ *
+ * «Aplicar el espacio fijo» guarda el sitio (y su imagen) y ajusta el reparto
+ * de sitios SIN dibujar nada (`POST /espacio_fijo/aplicar`): lo hecho se
+ * conserva. Después enseña qué planos cambiarían y lo que cuesta rehacerlos, y
+ * solo se rehace lo que se pide: todos los del sitio, los marcados o ninguno
+ * (`POST /espacio_fijo/rehacer`, que manda SOLO esas unidades). El estado vive
+ * en `APP.light.video.espacio` para que el repintado no pierda lo escrito. */
+function espacioDelVideoLight() {
+  const v = APP.light.video;
+  if (v.espacio && v.espacio.pid === v.pid) return v.espacio;
+  const pid = v.pid;
+  v.espacio = { pid, cargado: false, copia: espacioFijoDelEncargo(null), imagen: '',
+    imagenUrl: '', cambios: null, marcados: new Set(), ocupado: false, error: '' };
+  pedir(`${API.proyecto(pid)}/espacio_fijo`).then(d => {
+    const est = APP.light.video.espacio;
+    if (!est || est.pid !== pid) return;
+    leerEspacioDelServidor(est, d);
+    pintarLight();
+  }).catch(err => {
+    const est = APP.light.video.espacio;
+    if (!est || est.pid !== pid) return;
+    est.cargado = true;
+    est.error = err.message;
+    pintarLight();
+  });
+  return v.espacio;
+}
+
+function leerEspacioDelServidor(est, d) {
+  const ef = (d || {}).espacio_fijo || {};
+  est.cargado = true;
+  est.error = '';
+  est.copia = espacioFijoDelEncargo(ef);
+  est.imagen = ef.imagen || '';
+  est.imagenUrl = ef.imagen_url ? `${BASE}${ef.imagen_url}?v=${encodeURIComponent(est.imagen)}` : '';
+  est.cambios = (d || {}).cambios || null;
+  est.marcados = new Set(((est.cambios || {}).planos || []).map(x => x.id));
+}
+
+function bloqueEspacioFijoDelVideo() {
+  const est = espacioDelVideoLight();
+  if (!est.cargado) return h('div', { clase: 'cargando' }, 'cargando…');
+  const ef = est.copia;
+  const corriendo = !!trabajoVideoLight();
+  const caja = h('div', { clase: 'espacio-fijo espacio-fijo-del-video' },
+    h('div', { clase: 'espacio-fijo-fila' },
+      campoTexto('Sitio', ef.sitio, x => { ef.sitio = x; }, { pista: 'Panadería Rosa' }),
+      campoTexto('Luz', ef.luz, x => { ef.luz = x; }, { pista: 'morning, warm window light' })),
+    campoArea('Descripción', ef.descripcion, x => { ef.descripcion = x; },
+      'a small bakery with wooden shelves full of bread and a white counter',
+      'video-espacio-descripcion'),
+    campoArea('Sitios secundarios', ef.secundarios_texto, x => { ef.secundarios_texto = x; },
+      'uno por línea: Fachada: a shop front with a pink awning', 'video-espacio-secundarios'),
+    campoImagenDelEspacio(ef, est.imagenUrl, pintarLight),
+    h('div', { clase: 'fila' },
+      h('button', {
+        clase: 'primario', disabled: corriendo || est.ocupado,
+        onclick: () => aplicarEspacioFijoDelVideo(),
+      }, 'Aplicar el espacio fijo'),
+      h('span', { clase: 'meta' }, 'gratis: no se dibuja nada; después eliges qué planos rehacer')));
+  if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
+  if (est.cambios) caja.appendChild(cambiosDelEspacioFijo(est, corriendo));
+  return caja;
+}
+
+function cambiosDelEspacioFijo(est, corriendo) {
+  const c = est.cambios;
+  const planos = c.planos || [];
+  const unidad = Number(c.usd_por_imagen || 0) + Number(c.usd_referencia || 0);
+  if (!planos.length) {
+    return h('div', { clase: 'caja-info cambios-espacio-fijo' },
+      `Ningún plano hecho cambia con este espacio fijo${c.hechas ? ` (${c.hechas} con imagen)` : ''}: `
+      + 'lo que se dibuje desde ahora ya sale en este sitio.');
+  }
+  const marcados = planos.filter(x => est.marcados.has(x.id)).map(x => x.id);
+  const lista = h('div', { clase: 'lista-espacio-fijo' });
+  planos.forEach(x => {
+    lista.appendChild(h('label', { clase: 'fila-espacio-fijo' },
+      h('input', { type: 'checkbox', checked: est.marcados.has(x.id),
+        onchange: ev => { if (ev.target.checked) est.marcados.add(x.id); else est.marcados.delete(x.id); pintarLight(); } }),
+      h('span', { clase: 'id' }, x.id),
+      h('span', { clase: 'crece' }, x.narracion || '', h('span', { clase: 'meta' }, ` · ${x.sitio || 'sin sitio'}`))));
+  });
+  return h('div', { clase: 'caja-aviso cambios-espacio-fijo' },
+    h('div', {}, `${planos.length} ${planos.length === 1 ? 'plano cambiaría' : 'planos cambiarían'} `
+      + `con el espacio fijo. Rehacer cada uno cuesta ≈ ${usdCorto(unidad)}`
+      + (Number(c.usd_referencia) ? ` (con ${usdCorto(c.usd_referencia)} de la imagen del sitio)` : '')
+      + '. Nada se rehace hasta que lo pidas; lo que no rehagas se queda como está.'),
+    lista,
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', disabled: corriendo || est.ocupado,
+        onclick: () => rehacerPlanosDelEspacio(planos.map(x => x.id), unidad) },
+      `Rehacer los ${planos.length} · ≈ ${usdCorto(planos.length * unidad)}`),
+      h('button', { clase: 'mini', disabled: corriendo || est.ocupado || !marcados.length,
+        onclick: () => rehacerPlanosDelEspacio(marcados, unidad) },
+      `Solo los marcados (${marcados.length}) · ≈ ${usdCorto(marcados.length * unidad)}`),
+      h('button', { clase: 'mini fantasma',
+        onclick: () => { est.cambios = null; toast('no se rehace ninguno: el vídeo se queda como está'); pintarLight(); } },
+      'Ninguno')));
+}
+
+async function aplicarEspacioFijoDelVideo() {
+  const est = espacioDelVideoLight();
+  const ef = est.copia;
+  if (!String(ef.descripcion || '').trim()) { toast('escribe cómo es el sitio (la descripción)', true); return; }
+  const cuerpo = {
+    sitio: String(ef.sitio || '').trim(), descripcion: String(ef.descripcion).trim(),
+    luz: String(ef.luz || '').trim(), secundarios: secundariosDelTexto(ef.secundarios_texto),
+  };
+  if (ef.imagen_nueva) cuerpo.imagen_nueva = ef.imagen_nueva;
+  else if (est.imagen && !ef.quitar_imagen) cuerpo.imagen = est.imagen;
+  est.ocupado = true;
+  pintarLight();
+  try {
+    const d = await pedir(`${API.proyecto(est.pid)}/espacio_fijo/aplicar`,
+      { method: 'POST', cuerpo: { espacio_fijo: cuerpo } });
+    leerEspacioDelServidor(est, d);
+    toast('espacio fijo aplicado: no se ha dibujado nada');
+  } catch (err) {
+    est.error = err.message;
+  }
+  est.ocupado = false;
+  pintarLight();
+}
+
+async function rehacerPlanosDelEspacio(planos, unidad) {
+  const est = espacioDelVideoLight();
+  const pid = est.pid;
+  if (!planos.length) return;
+  if (!confirm(`Rehacer ${planos.length} ${planos.length === 1 ? 'imagen' : 'imágenes'} con el `
+    + `espacio fijo: ≈ ${usdCorto(planos.length * unidad)}.\n\nSolo esas; las demás no se `
+    + 'tocan. Después hay que volver a montar el vídeo.')) return;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(`${API.proyecto(pid)}/espacio_fijo/rehacer`, {
+      method: 'POST', cuerpo: { planos, imagenes: planos.length },
+    });
+    est.cambios = null;
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') {
+        reiniciarPrevia();
+        await cargarVideoLight(pid);
+        refrescarPlanLight('video', true);
+        const ahora = APP.light.video.espacio;
+        if (ahora && ahora.pid === pid) ahora.cargado = false;
+        APP.light.video.espacio = null;
+      }
+      pintarLight();
+    }, () => { refrescarPlanosLight(); refrescarVivosLight(); }, pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
+}
+
 /* Lo elegido en «Ajustes del montaje» del borrador, tal como lo entiende
    `_opciones_al_crear`. Lo que no se eligió no viaja: queda automático. */
 function opcionesParaCrear(e) {
@@ -7470,6 +7725,8 @@ function opcionesParaCrear(e) {
   if (op.montaje) salida.montaje = op.montaje;
   if (op.transiciones && op.transiciones.length) salida.transiciones = op.transiciones;
   if (op.ritmo) salida.ritmo = op.ritmo;
+  const espacio = espacioFijoParaCrear(e);
+  if (espacio) salida.espacio_fijo = espacio;
   return salida;
 }
 
@@ -7675,6 +7932,7 @@ function vistaEncargoVideoLight() {
   caja.appendChild(bloqueLight('Las llamadas a la acción',
     'cuándo se presenta y qué le pides a quien lo ve',
     bloqueCTA(e.cta, { alCambiar: programarGuardadoEncargo, repintar: pintarLight })));
+  caja.appendChild(bloqueLight('El espacio fijo', 'todo el vídeo en un mismo sitio: se aplica como corrección', bloqueEspacioFijoDelVideo()));
 
   BARRA_INFERIOR.nodo = pieDeEncargo();
   return caja;
@@ -23669,6 +23927,8 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   e.cta = r.cta || ctaPorDefecto();
   if (r.duracion_objetivo_s) e.duracion_objetivo_s = r.duracion_objetivo_s;
   if (r.formato === 'vertical' || r.formato === 'horizontal') e.formato = r.formato;
+  /* el espacio fijo es del guion: uno sin él deja el campo vacío */
+  e.espacio_fijo = espacioFijoDelEncargo(r.espacio_fijo);
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.datos = null;
   irAModulo('crear');

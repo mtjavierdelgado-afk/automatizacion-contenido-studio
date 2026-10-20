@@ -40,6 +40,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/proyectos/{pid}` | Cambia el nombre VISIBLE del proyecto. -> la ficha. |
 | `POST` | `/api/proyectos/{pid}/duplicar` | Copia un proyecto entero con lo que tiene puesto HOY. -> el nuevo. |
 | `POST` | `/api/proyectos/{pid}/escenas/{sid}/vale` | «Este dibujo me vale para lo que dice ahora». -> {ok} |
+| `GET` | `/api/proyectos/{pid}/espacio_fijo` | El espacio fijo guardado del video ({} si no tiene) y los planos que cambiarian. |
+| `POST` | `/api/proyectos/{pid}/espacio_fijo/aplicar` | Guarda el espacio fijo de un video hecho y ajusta su catalogo. No dibuja nada. |
+| `GET` | `/api/proyectos/{pid}/espacio_fijo/imagen` | La imagen de referencia del espacio fijo de este video. |
+| `POST` | `/api/proyectos/{pid}/espacio_fijo/rehacer` | Rehace SOLO los planos pedidos de los que cambian con el espacio fijo (se paga). |
 | `POST` | `/api/proyectos/{pid}/exportar` | Prepara el vídeo, o una parte, para descargar (gratis, no toca el proyecto). |
 | `GET` | `/api/proyectos/{pid}/exportes/{ruta:path}` | Un fichero preparado por /exportar, para descargar con su nombre. |
 | `POST` | `/api/proyectos/{pid}/feedback` | Feedback general o sobre una unidad; rehace SOLO lo que apunta. |
@@ -440,4 +444,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**318 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**322 endpoints.** Escrito por `generar_api.py` desde `app.py`.

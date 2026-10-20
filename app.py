@@ -3840,6 +3840,20 @@ def _bloques_del_guion(ctx):
     return limpios
 
 
+def _espacio_fijo_guardado(ctx):
+    """El espacio fijo del video (params de assets), limpio. -> {} si no hay.
+
+    Vive en assets por la regla de la casa --se guarda en el paso cuya salida
+    cambia, y lo que cambia son los sitios de las imagenes-- y entra en su firma
+    como cualquier param: cambiarlo en un video hecho deja assets obsoleto.
+    """
+    crudo = (ctx.estado.params("assets") or {}).get("espacio_fijo")
+    try:
+        return _catalogo_visual().normalizar_espacio_fijo(crudo)
+    except ValueError as fallo:
+        raise RuntimeError(f"el espacio fijo guardado no vale: {fallo}")
+
+
 def _correr_catalogo(avisar, ctx, ajuste, peticion):
     catalogo = _catalogo_visual()
     bloques = _bloques_del_guion(ctx)
@@ -3874,13 +3888,19 @@ def _correr_catalogo(avisar, ctx, ajuste, peticion):
     # reconocimiento del lugar, que ya era la parte fragil de este modo.
     ficha = catalogo.proponer(bloques, brief=brief, ajuste=ajuste,
                               avisar=avisar, proyecto_id=ctx.id,
+                              # lo que pide el editor: llegaba hasta aqui y no
+                              # se pasaba, asi que el prompt nunca lo veia
+                              peticion=peticion,
                               planos=planos, min_s=min_s, max_s=max_s,
                               # los personajes del canal, que entran en el
                               # reparto ya decididos
                               # y como son los personajes en este estilo, para
                               # que el reparto se describa ya convertido
                               regla_personajes=PASOS_MODULOS.p6_assets.regla_de_especie(
-                                  params.get("estilo") or {}))
+                                  params.get("estilo") or {}),
+                              # todo el video en un mismo sitio, si el encargo
+                              # lo fijo (rama espacio-fijo, 20-10-2026)
+                              espacio_fijo=_espacio_fijo_guardado(ctx))
     ctx.bitacora.anotar("catalogo_propuesto", "assets", {
         "personajes": len(ficha.get("reparto") or {}),
         "sets": len(ficha.get("sets") or {}),
@@ -4237,6 +4257,13 @@ def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer):
     # La firma es el TEXTO de los bloques: si el guion no ha cambiado, los
     # nombres se quedan quietos y lo construido sigue valiendo.
     firma = _firma_del_guion(ctx)
+    # CON ESPACIO FIJO, LA FIRMA LO LLEVA: con otro sitio fijo los sitios
+    # deducidos ya no valen aunque el guion sea el mismo. Sin el, la firma es
+    # la de siempre y ningun catalogo guardado se vuelve a pedir.
+    espacio = _espacio_fijo_guardado(ctx)
+    if firma and espacio:
+        firma += "+" + hashlib.sha256(json.dumps(
+            espacio, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:8]
     cambio = bool(firma) and guardado.get("_firma_guion") != firma
     # Y tambien se vuelve a leer si el catalogo guardado es de ANTES de que el
     # catalogo supiera deducir algo que ahora deduce. La clave 'reales' se
@@ -4306,6 +4333,228 @@ def construir_escenarios(pid: str, cuerpo: dict = Body(default=None)):
                                    paso="assets")
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "ajuste": ajuste_catalogo,
+            "trabajo": ctx.gestor.estado(trabajo_id),
+            "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
+
+
+# ------------------------------------------------------------- ESPACIO FIJO
+#
+# Rama espacio-fijo (20-10-2026). Todo el video en un mismo sitio: se elige al
+# crear el video (`_opciones_al_crear`) o se APLICA a uno ya hecho, como una
+# correccion. Aplicar es gratis y no dibuja nada:
+#
+#   1. guarda `assets.espacio_fijo` (y su imagen, en el proyecto) y ajusta el
+#      catalogo guardado sin llamar a nadie (`catalogo_visual.ajustar_catalogo`);
+#   2. contesta QUE planos cambiarian y lo que costaria rehacerlos.
+#
+# Las dos cosas son params de assets, asi que mueven la firma GLOBAL del paso y
+# todas sus unidades quedan sucias A LA VEZ. Eso es lo que hace que no cueste:
+# con todo sucio la tanda no pide ninguna unidad (`_plan_de_ejecucion`) y p6
+# conserva cada PNG que exista («una imagen que ya existe se queda»), igual que
+# al cambiar la calidad o traer el estilo. Lo que se rehace es lo que se PIDE
+# despues con `/espacio_fijo/rehacer`, como unidades sueltas (el patron de
+# `/imagenes/calidad`). `_firma_imagen` no se toca: la imagen nueva entra en la
+# firma de una imagen solo cuando se adjunta, o sea al rehacer ese plano.
+
+def _espacio_fijo_de_ficha(ctx):
+    guardado = (ctx.estado.params("assets") or {}).get("espacio_fijo") or {}
+    try:
+        espacio = _catalogo_visual().normalizar_espacio_fijo(guardado)
+    except ValueError:
+        espacio = {}
+    if espacio.get("imagen"):
+        espacio["imagen_url"] = f"/api/proyectos/{ctx.id}/espacio_fijo/imagen"
+    return espacio
+
+
+@app.get("/api/proyectos/{pid}/espacio_fijo")
+def leer_espacio_fijo(pid: str):
+    """El espacio fijo guardado del video ({} si no tiene) y los planos que cambiarian."""
+    ctx = contexto(pid)
+    espacio = _espacio_fijo_de_ficha(ctx)
+    return {"espacio_fijo": espacio,
+            "cambios": _cambios_del_espacio(ctx) if espacio else None}
+
+
+@app.get("/api/proyectos/{pid}/espacio_fijo/imagen")
+def imagen_del_espacio_fijo(pid: str):
+    """La imagen de referencia del espacio fijo de este video."""
+    ctx = contexto(pid)
+    ruta = PASOS_MODULOS.p6_assets.ruta_imagen_del_espacio(
+        ctx.proyecto, ctx.estado.params("assets") or {})
+    if not ruta:
+        raise ErrorApi(404, "este vídeo no tiene imagen del espacio fijo")
+    return FileResponse(ruta, media_type="image/png")
+
+
+def _cambios_del_espacio(ctx):
+    """QUE PLANOS CAMBIARIAN con el espacio fijo guardado, y cuanto cuesta rehacerlos.
+
+    -> {"planos": [{id, sitio, narracion}], "imagenes", "usd_por_imagen",
+        "usd_referencia", "usd", "calidad", "hechas"}
+
+    Cambia un plano con imagen cuyo sitio (el que le daria el catalogo de
+    ahora) tiene una descripcion que su prompt no lleva, o que es del sitio
+    principal y no lleva adjunta la imagen del espacio. Repetir «Aplicar» con lo
+    mismo no ofrece nada que rehacer."""
+    p6 = PASOS_MODULOS.p6_assets
+    params = ctx.estado.params("assets") or {}
+    espacio = _catalogo_visual().normalizar_espacio_fijo(params.get("espacio_fijo"))
+    plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    escenas = [e for e in _escenas_que_pagan(plan) if not e.get("componente")]
+    carpetas = _carpetas_de_assets(ctx)
+    salida = {"planos": [], "imagenes": 0, "hechas": 0}
+    if escenas and carpetas and espacio:
+        principal, _ = _catalogo_visual().ids_del_espacio(espacio)
+        sets = (params.get("catalogo") or {}).get("sets") or {}
+        con_imagen = bool(p6.ruta_imagen_del_espacio(ctx.proyecto, params))
+        try:
+            previstos = p6.sitios_previstos(ctx.proyecto, params, escenas)
+        except Exception:                                   # noqa: BLE001
+            previstos = [e.get("set") for e in escenas]
+        for escena, sitio in zip(escenas, previstos):
+            ficha = None
+            for carpeta in carpetas:
+                if os.path.exists(os.path.join(carpeta, "escenas", f"{escena['id']}.png")):
+                    ficha = PASOS_MODULOS.medios.leer_json(
+                        os.path.join(carpeta, "escenas", f"{escena['id']}.json"), {}) or {}
+                    break
+            if ficha is None:
+                continue
+            salida["hechas"] += 1
+            descripcion = str((sets.get(sitio) or {}).get("descripcion") or "")
+            prompt = " ".join(str(ficha.get("prompt") or "").split())
+            falta_desc = bool(descripcion) and " ".join(descripcion.split()) not in prompt
+            falta_img = (sitio == principal and con_imagen
+                         and not any(r.get("papel") == "espacio"
+                                     for r in ficha.get("referencias") or []))
+            if falta_desc or falta_img:
+                salida["planos"].append({
+                    "id": escena["id"], "sitio": sitio,
+                    "narracion": " ".join(str(escena.get("narracion") or "").split())[:140]})
+    salida["imagenes"] = len(salida["planos"])
+    usd = _usd_por_imagen(ctx)
+    # LA IMAGEN DEL ESPACIO SE PAGA COMO UNA REFERENCIA MAS (tokens de entrada,
+    # ~730 por referencia: `coste.TOKENS_POR_REFERENCIA`). La mediana de lo
+    # cobrado no la lleva todavia en un video que nunca la adjunto.
+    extra = 0.0
+    if espacio.get("imagen"):
+        try:
+            tarifa = float((COSTE.tarifa_tokens() or {}).get("entrada_imagen") or 0.0)
+            extra = round(COSTE.TOKENS_POR_REFERENCIA * tarifa, 4)
+        except Exception:                                   # noqa: BLE001
+            extra = 0.0
+    salida.update({"calidad": str(params.get("calidad") or "low"),
+                   "usd_por_imagen": usd, "usd_referencia": extra,
+                   "usd": round(salida["imagenes"] * (usd + extra), 2)})
+    return salida
+
+
+@app.post("/api/proyectos/{pid}/espacio_fijo/aplicar")
+def aplicar_espacio_fijo(pid: str, cuerpo: dict = Body(default=None)):
+    """Guarda el espacio fijo de un video hecho y ajusta su catalogo. No dibuja nada.
+
+    {espacio_fijo: {sitio, descripcion, luz, secundarios, imagen?, imagen_nueva?}}
+    `imagen` es la ya guardada (se conserva tal cual); `imagen_nueva`, una
+    subida que la sustituye; sin ninguna de las dos, sin imagen. -> el espacio
+    guardado, el catalogo y los planos que cambiarian (`cambios`)."""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    crudo = datos.get("espacio_fijo")
+    if not isinstance(crudo, dict):
+        raise ErrorApi(400, "hace falta el objeto 'espacio_fijo'")
+    catalogo_mod = _catalogo_visual()
+    nueva = crudo.get("imagen_nueva")
+    limpio = {k: v for k, v in crudo.items() if k != "imagen_nueva"}
+    try:
+        espacio = catalogo_mod.normalizar_espacio_fijo(limpio)
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    if not espacio:
+        raise ErrorApi(400, "el espacio fijo necesita la descripción del sitio")
+    guardada = ((ctx.estado.params("assets") or {}).get("espacio_fijo") or {}).get("imagen")
+    if espacio.get("imagen") and espacio["imagen"] != guardada:
+        raise ErrorApi(400, "esa imagen no es la del espacio fijo de este vídeo: súbela otra vez")
+    png = _png_del_espacio(nueva) if nueva else None
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo generándose en este vídeo: espera a que "
+                                "termine y vuelve a aplicarlo")
+        if png:
+            espacio["imagen"] = _guardar_png_del_espacio(ctx, png)
+        cambios = {"espacio_fijo": espacio}
+        guardado = (ctx.estado.params("assets") or {}).get("catalogo") or {}
+        avisos = []
+        if guardado.get("sets") or guardado.get("beats"):
+            ids = [b["id"] for b in _bloques_del_guion(ctx)]
+            try:
+                catalogo, avisos = catalogo_mod.ajustar_catalogo(guardado, espacio, ids)
+            except ValueError as fallo:
+                raise ErrorApi(400, str(fallo))
+            # la firma de los escenarios lleva el espacio: con ella, «deducir los
+            # sitios» no vuelve a leer el guion por este cambio
+            firma = _firma_del_guion(ctx)
+            if firma:
+                catalogo["_firma_guion"] = firma + "+" + hashlib.sha256(json.dumps(
+                    espacio, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:8]
+            cambios["catalogo"] = catalogo
+        ctx.estado.actualizar_params("assets", cambios)
+    ctx.bitacora.anotar("espacio_fijo_aplicado", "assets", {
+        "sitio": espacio.get("sitio"), "imagen": bool(espacio.get("imagen")),
+        "catalogo": "catalogo" in cambios})
+    return {"espacio_fijo": _espacio_fijo_de_ficha(ctx),
+            "catalogo": cambios.get("catalogo"), "avisos": avisos,
+            "cambios": _cambios_del_espacio(ctx),
+            "estado": ctx.estado.estado_de("assets")}
+
+
+@app.post("/api/proyectos/{pid}/espacio_fijo/rehacer", status_code=202)
+def rehacer_planos_del_espacio(pid: str, cuerpo: dict = Body(default=None)):
+    """Rehace SOLO los planos pedidos de los que cambian con el espacio fijo (se paga).
+
+    {planos: ["S004", ...], imagenes: n}: `planos` son los elegidos (todos los
+    del sitio, o los marcados) y `imagenes` cuantos ha visto quien confirma. Van
+    como unidades PEDIDAS, en un trabajo, con la segunda mitad de cada plano
+    largo detras (gratis). Lo que no se pide se conserva."""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    pedidos = datos.get("planos")
+    if not isinstance(pedidos, list) or not pedidos:
+        raise ErrorApi(400, "hace falta 'planos': la lista de los que rehacer")
+    pedidos = [str(x).split(":", 1)[-1].strip() for x in pedidos]
+    try:
+        vistas = int(datos.get("imagenes"))
+    except (TypeError, ValueError):
+        raise ErrorApi(400, "hace falta 'imagenes': cuántas se confirmaron")
+    if vistas != len(set(pedidos)):
+        raise ErrorApi(400, f"se piden {len(set(pedidos))} planos y se confirmaron {vistas}")
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo generándose en este vídeo: espera a que "
+                                "termine y vuelve a mirarlo")
+        with _COLA_LOCK:
+            if _cola_dibujando(ctx):
+                raise ErrorApi(409, "se están rehaciendo imágenes con tus notas: "
+                                    "espera a que terminen")
+            posibles = {p["id"] for p in (_cambios_del_espacio(ctx).get("planos") or [])}
+            fuera = sorted(set(pedidos) - posibles)
+            if fuera:
+                raise ErrorApi(409, "estos planos ya no cambian con el espacio fijo: "
+                                    + ", ".join(fuera[:8]) + ". Vuelve a mirarlo.",
+                               {"fuera": fuera})
+            plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets",
+                                                       estado=ctx.estado) or {}
+            unidades = _con_sus_continuaciones(
+                [f"escena:{sid}" for sid in sorted(set(pedidos))], plan)
+            trabajo_id = lanzar_paso(ctx, "assets", unidades,
+                                     nombre="espacio_fijo",
+                                     evento="espacio_fijo_rehacer",
+                                     datos={"planos": len(set(pedidos))})
+    return {"trabajo_id": trabajo_id, "unidades": unidades,
             "trabajo": ctx.gestor.estado(trabajo_id),
             "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
 
@@ -15685,6 +15934,8 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     lleva = _normalizar_lleva(datos["lleva"]) if datos.get("lleva") is not None else {}
     # Y EL MONTAJE (movimiento, subtitulos de redes...), por lo mismo
     montaje_pedido = _montaje_pedido_al_crear(datos)
+    # Y EL ESPACIO FIJO, por lo mismo (se guarda en `_opciones_al_crear`)
+    _espacio_fijo_pedido(datos.get("opciones"))
 
     nombre = str(datos.get("nombre") or "").strip()
     if not nombre:
@@ -15813,6 +16064,86 @@ def _montaje_al_crear(ctx, datos, pedido):
     return avisos
 
 
+def _espacio_fijo_pedido(opciones):
+    """El `espacio_fijo` de las opciones del encargo, limpio. -> ({} | espacio, png|None)
+
+    400 si llega mal formado. Se llama tambien ANTES de crear el video, para
+    que un espacio que no vale se diga sin dejar un video creado a medias. La
+    imagen llega como `imagen_nueva` (data URL o base64) y vuelve en PNG; una
+    `imagen` ya guardada no vale aqui: el video todavia no existe.
+    """
+    if not isinstance(opciones, dict) or opciones.get("espacio_fijo") is None:
+        return {}, None
+    crudo = opciones["espacio_fijo"]
+    if isinstance(crudo, dict):
+        crudo = {k: v for k, v in crudo.items() if k not in ("imagen", "imagen_nueva")}
+    try:
+        espacio = _catalogo_visual().normalizar_espacio_fijo(crudo)
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    nueva = (opciones["espacio_fijo"] or {}).get("imagen_nueva") \
+        if isinstance(opciones["espacio_fijo"], dict) else None
+    png = _png_del_espacio(nueva) if (espacio and nueva) else None
+    return espacio, png
+
+
+#: Lo que se acepta de la imagen del espacio fijo. Se guarda en PNG y con el
+#: lado mayor recortado: va adjunta a cada plano de su sitio y el motor la
+#: reduce a 1024 de todos modos (`imagen.normalizar`).
+MAX_BYTES_IMAGEN_ESPACIO = 12 * 1024 * 1024
+LADO_IMAGEN_ESPACIO = 1536
+
+
+def _png_del_espacio(crudo):
+    """La imagen subida del espacio fijo (data URL o base64) -> bytes PNG. 400 si no vale."""
+    import base64
+    import binascii
+    import io as _io
+    if not isinstance(crudo, str) or not crudo.strip():
+        raise ErrorApi(400, "espacio_fijo.imagen_nueva: hace falta la imagen")
+    texto = crudo.strip()
+    if texto.startswith("data:"):
+        texto = texto.split(",", 1)[-1]
+    if len(texto) > MAX_BYTES_IMAGEN_ESPACIO * 4 // 3 + 16:
+        raise ErrorApi(400, f"la imagen del espacio fijo pasa de "
+                            f"{MAX_BYTES_IMAGEN_ESPACIO // (1024 * 1024)} MB")
+    try:
+        datos = base64.b64decode(texto, validate=False)
+    except (binascii.Error, ValueError):
+        raise ErrorApi(400, "la imagen del espacio fijo no se puede leer")
+    try:
+        from PIL import Image                                # noqa: PLC0415
+        imagen = Image.open(_io.BytesIO(datos))
+        imagen.load()
+        imagen = imagen.convert("RGB")
+    except Exception:                                       # noqa: BLE001
+        raise ErrorApi(400, "eso no es una imagen: sube un JPG o un PNG del sitio")
+    if max(imagen.size) > LADO_IMAGEN_ESPACIO:
+        escala = LADO_IMAGEN_ESPACIO / max(imagen.size)
+        imagen = imagen.resize((max(1, int(imagen.width * escala)),
+                                max(1, int(imagen.height * escala))))
+    salida = _io.BytesIO()
+    imagen.save(salida, format="PNG")
+    return salida.getvalue()
+
+
+def _guardar_png_del_espacio(ctx, png):
+    """Guarda la imagen en <proyecto>/espacio_fijo/<huella>.png -> la ruta RELATIVA.
+
+    Relativa y con el nombre del contenido: viaja con la carpeta del proyecto
+    sin mudanza (CLAUDE.md, «copiar un proyecto»), y otra imagen es otro
+    fichero, asi que la anterior sigue ahi para lo que ya se dibujo con ella."""
+    nombre = hashlib.sha256(png).hexdigest()[:16] + ".png"
+    destino = ctx.proyecto.ruta("espacio_fijo", nombre)
+    os.makedirs(os.path.dirname(destino), exist_ok=True)
+    if not os.path.exists(destino):
+        temporal = destino + ".tmp"
+        with open(temporal, "wb") as fh:
+            fh.write(png)
+        os.replace(temporal, destino)
+    return f"espacio_fijo/{nombre}"
+
+
 def _opciones_al_crear(ctx, preset_id, opciones):
     """Musica, subtitulos y logo elegidos en el encargo de un video NUEVO. -> avisos
 
@@ -15825,6 +16156,14 @@ def _opciones_al_crear(ctx, preset_id, opciones):
     sonido = _sonido()
     if not isinstance(opciones, dict):
         return avisos
+    # EL ESPACIO FIJO (todo el video en un mismo sitio), a los params de assets,
+    # que es lo que lee el catalogo. SOLO si viene con descripcion: sin el no se
+    # escribe nada y el video nace como siempre (regla 1).
+    espacio, png = _espacio_fijo_pedido(opciones)
+    if espacio:
+        if png:
+            espacio["imagen"] = _guardar_png_del_espacio(ctx, png)
+        ctx.estado.actualizar_params("assets", {"espacio_fijo": espacio})
     presencia = opciones.get("presencia")
     if presencia:
         if presencia not in sonido.PRESENCIAS:

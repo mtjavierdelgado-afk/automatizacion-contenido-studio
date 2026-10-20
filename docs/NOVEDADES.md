@@ -14,6 +14,38 @@ vídeos, estilos, claves y contraseña no se tocan.
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
+**El espacio fijo: todo el vídeo en un mismo sitio (20 de octubre)**
+- **En la Parrilla, un guion puede traer «ESPACIO FIJO»** (opcional), con
+  `- Sitio:` (un nombre corto), `- Descripción:` (cómo es el sitio, en una
+  frase), `- Luz:` y `- Secundarios:` (otros sitios que sí pueden salir,
+  «Nombre: descripción» separados por «;» o uno por línea). Está en la
+  plantilla de «Escribir uno», en el formato que se le pide a Claude y en la
+  guía del formato. Sin descripción no cuenta.
+- **«Pasar al Encargo» lo lleva a «Un vídeo nuevo»**, a un bloque nuevo, «El
+  espacio fijo», que también se puede rellenar a mano.
+- **Con él, el reparto de sitios usa UN solo sitio** con esa descripción tal
+  cual (y esa luz), pone ahí todos los tramos salvo los que el guion sitúe en
+  un secundario de la lista, no pone cabeceras de sitio ni rótulos de lugar y
+  no reparte «dos planos por sitio». Se impone aunque Claude proponga otra
+  cosa. Vacío, todo sale como siempre.
+- **La petición al deducir el reparto y los sitios ya llega a Claude** (el
+  campo `peticion` de `/catalogo/proponer` y `/escenarios`): se quedaba por el
+  camino y no se le pasaba nunca. La pantalla todavía no tiene un campo para
+  escribirla.
+- **Con una imagen del sitio (opcional)**: en «El espacio fijo» puedes subir
+  una foto o un dibujo del lugar (también al pasar un guion de la Parrilla). Se
+  adjunta a cada imagen de plano del sitio principal —no a los secundarios—
+  para que el lugar se reconozca. Se paga como una referencia más: unos ~730
+  tokens de entrada por imagen, alrededor de medio céntimo (≈ +12 % en calidad
+  baja, ≈ +7 % en media); el aviso de «rehacer» lo suma.
+- **En un vídeo ya hecho, como corrección**: el Encargo del vídeo trae «El
+  espacio fijo». «Aplicar el espacio fijo» lo guarda y reparte los tramos de
+  siempre en ese sitio **sin dibujar nada ni pagar nada** (las imágenes hechas
+  se conservan). Después enseña qué planos cambiarían y lo que cuesta
+  rehacerlos, y eliges: **rehacer todos**, **solo los marcados** en esa lista,
+  o **ninguno**. Solo se rehacen los que pidas; luego hay que volver a montar
+  el vídeo.
+
 **Arreglos del 19 de octubre (segunda tanda)**
 - **La pantalla ya no salta arriba** al terminar un remontaje, al «Traer» los
   cambios del estilo ni al cambiar el proyecto, los días o el mes en Publicar →

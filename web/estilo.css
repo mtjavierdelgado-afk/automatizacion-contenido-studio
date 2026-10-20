@@ -3468,6 +3468,21 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 /* el asistente con sesión, pero con un fallo pasajero apuntado: ámbar */
 .burbuja-asistente.dudosa::after { background: var(--aviso); }
 
+/* ---- espacio-fijo: el espacio fijo del vídeo nuevo (sitio y luz en una fila) */
+.espacio-fijo { display: flex; flex-direction: column; }
+.espacio-fijo-fila { display: flex; flex-wrap: wrap; gap: 0 12px; }
+.espacio-fijo-fila > .campo { flex: 1 1 200px; min-width: 0; }
+.oculto-espacio-fijo { display: none; }
+.miniatura-espacio-fijo { display: block; max-width: 220px; max-height: 140px; width: auto;
+  border-radius: 8px; border: 1px solid var(--linea); margin-bottom: 6px; object-fit: cover; }
+.cambios-espacio-fijo { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.lista-espacio-fijo { display: flex; flex-direction: column; gap: 4px; max-height: 260px;
+  overflow-y: auto; }
+.fila-espacio-fijo { display: flex; gap: 8px; align-items: baseline; min-width: 0;
+  text-transform: none; letter-spacing: normal; }
+.fila-espacio-fijo .crece { min-width: 0; overflow-wrap: anywhere; }
+.fila-espacio-fijo .id { font-family: var(--mono, monospace); flex: 0 0 auto; }
+
 /* ================================== ARREGLOS DEL 19-10 (segunda tanda)
    Rama `arreglos-19oct`. */
 /* el Encargo: los cambios del montaje guardados sin montar */

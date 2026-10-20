@@ -6793,6 +6793,137 @@ def probar_notas_19oct():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_espacio_fijo():
+    """Rama espacio-fijo (20-10-2026): la peticion del catalogo y el ESPACIO FIJO.
+
+    En este proceso y sin el CLI: `_llamar_claude` del catalogo se sustituye por
+    un doble que apunta la instruccion y corta, que es lo que se mira.
+    """
+    seccion("ESPACIO FIJO: LA PETICIÓN LLEGA AL CATÁLOGO")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+
+    catalogo = servidor.PASOS_MODULOS.catalogo_visual
+
+    class _Cortar(Exception):
+        pass
+
+    vistas = []
+
+    def claude_falso(instruccion, *_a, **_k):
+        vistas.append(instruccion)
+        raise _Cortar()
+
+    bloques = [{"id": "B001", "texto": "Entras en la cocina del local.", "personaje": False},
+               {"id": "B002", "texto": "Y sale el pan del horno.", "personaje": False}]
+    base = tempfile.mkdtemp(prefix="estudio_espacio_")
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(base)
+    reales = {"_bloques_del_guion": servidor._bloques_del_guion}
+    real_claude = catalogo._llamar_claude
+    servidor._bloques_del_guion = lambda _ctx: bloques
+    catalogo._llamar_claude = claude_falso
+    try:
+        pid = Proyecto.crear(base, "espacio fijo").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+
+        def proponer(peticion):
+            vistas.clear()
+            try:
+                servidor._correr_catalogo(lambda *_a, **_k: None, ctx,
+                                          {"modelo": "sonnet", "esfuerzo": "medium"},
+                                          peticion)
+            except _Cortar:
+                pass
+            return vistas[0] if vistas else ""
+
+        prompt = proponer("pon todo en la panaderia de la esquina")
+        ok("pon todo en la panaderia de la esquina" in prompt,
+           "CATÁLOGO: la petición del editor llega al prompt (antes se quedaba en "
+           "_correr_catalogo)")
+        ok("LO QUE TE PIDE EL EDITOR" not in proponer(""),
+           "CATÁLOGO: y sin petición el prompt no lleva el bloque")
+        ok("ESPACIO FIJO" not in proponer(""),
+           "CATÁLOGO: sin espacio fijo guardado, el prompt no lo nombra")
+
+        # EL ENCARGO NUEVO: se guarda solo si viene con descripción (regla 1)
+        espacio = {"sitio": "Cocina del local", "descripcion": "a small steel kitchen",
+                   "luz": "day, window light",
+                   "secundarios": [{"nombre": "Fachada", "descripcion": "a blue shop front"}]}
+        firma_antes = ctx.estado.firma("assets")
+        for nada in ({}, {"espacio_fijo": None}, {"espacio_fijo": {}},
+                     {"espacio_fijo": {"sitio": "Cocina", "descripcion": "   "}}):
+            servidor._opciones_al_crear(ctx, "", nada)
+        ok("espacio_fijo" not in (ctx.estado.params("assets") or {}),
+           "ESPACIO FIJO: sin descripción no se escribe nada en assets")
+        igual(ctx.estado.firma("assets"), firma_antes, "ESPACIO FIJO: y la firma de assets no se mueve")
+        for malo in ("una cocina", {"descripcion": 5},
+                     {"descripcion": "x", "secundarios": "fachada"},
+                     {"descripcion": "x" * 5000}):
+            codigo, mensaje = _llamar(servidor._opciones_al_crear, ctx, "", {"espacio_fijo": malo})
+            igual(codigo, 400, f"ESPACIO FIJO: {str(malo)[:30]!r} da 400 ({mensaje})")
+        ok("espacio_fijo" not in (ctx.estado.params("assets") or {}),
+           "ESPACIO FIJO: y uno que no vale tampoco escribe nada")
+        servidor._opciones_al_crear(ctx, "", {"espacio_fijo": dict(espacio, luz="  day,  window light ")})
+        igual((ctx.estado.params("assets") or {}).get("espacio_fijo"), espacio,
+              "ESPACIO FIJO: con descripción se guarda limpio en los params de assets")
+        ok(ctx.estado.firma("assets") != firma_antes,
+           "ESPACIO FIJO: y entra en la firma de assets (cambiarlo deja obsoleto lo que dependa)")
+        prompt = proponer("")
+        ok("ESTE VIDEO TIENE UN ESPACIO FIJO" in prompt and "a small steel kitchen" in prompt
+           and "'fachada' (Fachada)" in prompt,
+           "CATÁLOGO: _correr_catalogo le pasa el espacio fijo guardado al catálogo")
+
+        # LA IMAGEN DEL ESPACIO, al crear: se guarda en el proyecto con ruta relativa
+        import base64 as _b64                                 # noqa: PLC0415
+        from PIL import Image as _Imagen                      # noqa: PLC0415
+        tampon = io.BytesIO()
+        _Imagen.new("RGB", (3000, 1500), (180, 140, 90)).save(tampon, format="JPEG")
+        url = "data:image/jpeg;base64," + _b64.b64encode(tampon.getvalue()).decode()
+        pid2 = Proyecto.crear(base, "espacio con imagen").id
+        Estado(servidor.contexto(pid2).proyecto)
+        ctx2 = servidor.contexto(pid2)
+        codigo, _m = _llamar(servidor._opciones_al_crear, ctx2, "",
+                             {"espacio_fijo": dict(espacio, imagen_nueva="no es una imagen")})
+        igual(codigo, 400, "ESPACIO FIJO: una imagen que no es imagen da 400")
+        servidor._opciones_al_crear(ctx2, "", {"espacio_fijo": dict(
+            espacio, imagen="espacio_fijo/0123456789abcdef.png", imagen_nueva=url)})
+        guardado = (ctx2.estado.params("assets") or {}).get("espacio_fijo") or {}
+        relativa = guardado.get("imagen") or ""
+        ok(re.match(r"^espacio_fijo/[0-9a-f]{16}\.png$", relativa),
+           f"ESPACIO FIJO: la imagen se guarda con ruta RELATIVA al proyecto ({relativa})")
+        ruta = ctx2.proyecto.ruta(*relativa.split("/")) if relativa else ""
+        ok(ruta and os.path.exists(ruta) and max(_Imagen.open(ruta).size) == 1536,
+           "ESPACIO FIJO: en PNG y reducida a 1.536 px de lado (la que mandó el cliente como "
+           "'imagen' se ignora)")
+        sin_imagen = servidor.aplicar_espacio_fijo
+        codigo, respuesta = _llamar(sin_imagen, pid2, {"espacio_fijo": dict(espacio, imagen="espacio_fijo/0123456789abcdef.png")})
+        igual(codigo, 400, "APLICAR: una imagen que no es la guardada da 400")
+        codigo, respuesta = _llamar(sin_imagen, pid2, {"espacio_fijo": {"sitio": "x"}})
+        igual(codigo, 400, "APLICAR: sin descripción, 400")
+        firma_antes = ctx2.estado.firma("assets")
+        codigo, respuesta = _llamar(sin_imagen, pid2, {"espacio_fijo": dict(
+            espacio, luz="night", imagen=relativa)})
+        igual(codigo, 200, f"APLICAR: a un vídeo sin imágenes responde 200 ({respuesta if codigo != 200 else ''})")
+        if codigo == 200:
+            igual(respuesta["espacio_fijo"].get("imagen"), relativa, "APLICAR: conserva la imagen guardada")
+            igual((respuesta["cambios"] or {}).get("imagenes"), 0, "APLICAR: sin imágenes, nada que rehacer")
+            ok(respuesta["cambios"].get("usd_referencia", 0) >= 0, "APLICAR: y dice lo que cuesta la referencia")
+        ok(ctx2.estado.firma("assets") != firma_antes and not ctx2.gestor.listar(activos=True),
+           "APLICAR: guarda (mueve la firma de assets) y no lanza ningún trabajo")
+        for cuerpo, esperado in (({}, 400), ({"planos": ["S001"]}, 400),
+                                 ({"planos": ["S001"], "imagenes": 2}, 400),
+                                 ({"planos": ["S001"], "imagenes": 1}, 409)):
+            codigo, _m = _llamar(servidor.rehacer_planos_del_espacio, pid2, cuerpo)
+            igual(codigo, esperado, f"REHACER: {cuerpo} da {esperado} ({_m})")
+        ok(not ctx2.gestor.listar(activos=True), "REHACER: y ninguno lanza nada")
+    finally:
+        catalogo._llamar_claude = real_claude
+        for nombre, valor in reales.items():
+            setattr(servidor, nombre, valor)
+
 def _video_montado_de_prueba(servidor, base, nombre):
     """Un vídeo con todos los pasos hechos y su MP4: «montado y al día»."""
     from nucleo import Estado, Proyecto                       # noqa: PLC0415
@@ -7015,6 +7146,7 @@ def main():
         probar_cambios_del_encargo_un_montaje()
         probar_mezcla_cancelada_se_aplica_con_otra_mezcla()
         probar_cancelar_en_el_taller()
+        probar_espacio_fijo()
     finally:
         parar(proceso)
         if not argumentos.conservar:

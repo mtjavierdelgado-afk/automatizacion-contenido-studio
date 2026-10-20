@@ -5767,5 +5767,164 @@ def diseno_crearia(navegador, datos):
     pg.cerrar()
 
 
+# espacio-fijo (20-10-2026): un guion de la Parrilla con ESPACIO FIJO llena el
+# campo «El espacio fijo» de «Un vídeo nuevo», y eso es lo que se manda al crear.
+@escenario
+def parrilla_con_espacio_fijo(navegador, datos):
+    """La Parrilla con un guion con ESPACIO FIJO → «Pasar al Encargo» → el
+    campo aparece relleno en el vídeo nuevo → `opcionesParaCrear().espacio_fijo`
+    correcto. Y a mano: sin descripción no viaja."""
+    api = datos["api"]
+    cid = datos["cliente"]
+    guion = ("EF01 — Pan del día\nCliente / proyecto: Panadería\nUso: adaptar\nRed: Reels\n"
+             "Formato: vertical\nDuración: 30 s\nObjetivo: que pidan\nCTA: Escríbenos\n"
+             "Tono: cercano\n\n"
+             "ESPACIO FIJO\n- Sitio: Panadería Rosa\n"
+             "- Descripción: a small bakery with wooden shelves full of bread\n"
+             "- Luz: morning, warm window light\n"
+             "- Secundarios: Fachada: a shop front with a pink awning; Almacén\n\n"
+             "ESCENA 1\nVisual: el mostrador\nVoz: «Recién hecho.»\n\n"
+             "PARA EL ENCARGO\n- Material: Recién hecho, cada mañana.\n"
+             "- Indicaciones: cercano\n- Llamadas a la acción: Escríbenos\n"
+             "- Duración: 30 s · Formato: vertical\n\nAVISOS\n- ninguno")
+    r, hecho = api.post(f"/api/parrilla/proyectos/{cid}/guiones",
+                        {"texto": guion, "nombre": "Espacio fijo"})
+    ok(r.status_code == 201 and (hecho or {}).get("guiones"),
+       f"el guion con ESPACIO FIJO se guarda ({r.status_code})")
+    pg = Pagina(navegador, datos, nombre="espacio fijo")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    pg.p.wait_for_timeout(800)
+    pg.pulsar(".fila-guion .titulo-guion", "EF01")
+    ok(pg.esperar(".ficha-parrilla h3", "EF01"), "su ficha")
+    pg.p.locator(".pasar-encargo select").first.select_option(datos["preset"])
+    pg.pulsar(".pasar-encargo button", "Pasar al Encargo")
+    fin = time.time() + 10
+    while time.time() < fin and not pg.p.evaluate(
+            "() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"):
+        pg.p.wait_for_timeout(300)
+    ok(pg.esperar(".bloque-light h3", "El espacio fijo", 10), "«Un vídeo nuevo» trae el bloque «El espacio fijo»")
+    valores = pg.p.evaluate("""() => {
+        const caja = document.querySelector('.espacio-fijo');
+        if (!caja) return null;
+        const ent = caja.querySelectorAll('input');
+        return {sitio: ent[0] ? ent[0].value : '', luz: ent[1] ? ent[1].value : '',
+                desc: (caja.querySelector('[data-foco=espacio-fijo-descripcion]') || {}).value || '',
+                sec: (caja.querySelector('[data-foco=espacio-fijo-secundarios]') || {}).value || ''};
+    }""")
+    ok(valores == {"sitio": "Panadería Rosa", "luz": "morning, warm window light",
+                   "desc": "a small bakery with wooden shelves full of bread",
+                   "sec": "Fachada: a shop front with a pink awning\nAlmacén"},
+       f"relleno con lo que dice el guion: {valores}")
+    enviado = pg.p.evaluate("() => opcionesParaCrear(APP.light.video.encargo).espacio_fijo || null")
+    ok(enviado == {"sitio": "Panadería Rosa",
+                   "descripcion": "a small bakery with wooden shelves full of bread",
+                   "luz": "morning, warm window light",
+                   "secundarios": [{"nombre": "Fachada", "descripcion": "a shop front with a pink awning"},
+                                   {"nombre": "Almacén", "descripcion": ""}]},
+       f"y es lo que se manda al crear (opciones.espacio_fijo): {enviado}")
+    pg.captura("espacio_fijo_encargo")
+
+    # a mano: cambiar la luz se manda; sin descripción, no viaja nada
+    pg.p.locator(".espacio-fijo input").nth(1).fill("night, neon sign")
+    ok(pg.p.evaluate("() => opcionesParaCrear(APP.light.video.encargo).espacio_fijo.luz")
+       == "night, neon sign", "lo escrito a mano es lo que viaja")
+    pg.p.locator("[data-foco=espacio-fijo-descripcion]").fill("")
+    ok(pg.p.evaluate("() => !('espacio_fijo' in opcionesParaCrear(APP.light.video.encargo))"),
+       "sin descripción no se manda espacio fijo (regla 1)")
+    pg.sin_errores("el espacio fijo")
+    pg.cerrar()
+
+
+def _huellas_de_planos(datos, pid):
+    """{plano: sha1 de su PNG} en la versión activa de assets."""
+    import hashlib as _hl                                    # noqa: PLC0415
+    activa = _version_de(datos, "assets", "")
+    version = activa.get("activa") or activa.get("n") or activa.get("version")
+    carpeta = os.path.join(datos["proyectos"], pid, "pasos", "assets", f"v{version}", "escenas")
+    salida = {}
+    for nombre in sorted(os.listdir(carpeta)) if os.path.isdir(carpeta) else []:
+        if nombre.endswith(".png"):
+            with open(os.path.join(carpeta, nombre), "rb") as fh:
+                salida[nombre[:-4]] = _hl.sha1(fh.read()).hexdigest()
+    return salida
+
+
+# espacio-fijo (20-10-2026, ampliación): el espacio fijo aplicado a un vídeo
+# YA HECHO, como corrección. Aplicar no dibuja ni paga; después se elige qué
+# planos rehacer y solo se rehacen esos.
+@escenario
+def espacio_fijo_en_un_video_hecho(navegador, datos):
+    """Encargo de un vídeo hecho → «El espacio fijo» con su imagen → «Aplicar»
+    no lanza nada ni deja imágenes por pagar → la lista de planos que cambian →
+    «Solo los marcados» rehace SOLO ese plano."""
+    api = datos["api"]
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="espacio fijo del vídeo")
+    pg.sin_trabajo(300)
+    antes = _huellas_de_planos(datos, pid)
+    ok(len(antes) >= 2, f"el vídeo de prueba tiene sus imágenes ({len(antes)})")
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; pintarLight();")
+    ok(pg.esperar(".bloque-light h3", "El espacio fijo", 15), "el Encargo del vídeo trae «El espacio fijo»")
+    ok(pg.esperar(".espacio-fijo-del-video button", "Aplicar el espacio fijo", 15), "con «Aplicar el espacio fijo»")
+    pg.p.locator(".espacio-fijo-del-video input").nth(0).fill("Salón de casa")
+    pg.p.locator("[data-foco=video-espacio-descripcion]").fill(
+        "a cosy living room with a green sofa, a wooden table and a big window")
+    foto = os.path.join(datos["base"], "salon.png")
+    _png(foto, (90, 140, 70))
+    pg.p.set_input_files(".espacio-fijo-del-video .oculto-espacio-fijo", foto)
+    ok(pg.esperar(".espacio-fijo-del-video .miniatura-espacio-fijo", segundos=10),
+       "la imagen elegida se ve antes de aplicar")
+    pg.pulsar(".espacio-fijo-del-video button", "Aplicar el espacio fijo")
+    ok(pg.esperar(".cambios-espacio-fijo", segundos=20), "aplicado, dice qué cambia")
+    _r, vivos = api.get(f"/api/trabajos?proyecto={pid}&activos=1")
+    lista = vivos if isinstance(vivos, list) else (vivos.get("trabajos") or [])
+    ok(not lista, f"aplicar no lanza ningún trabajo ({len(lista)})")
+    _r, plan = api.get(f"/api/proyectos/{pid}/generar?tanda=video")
+    ok((plan.get("coste") or {}).get("imagenes_por_generar") == 0,
+       f"y no deja ninguna imagen por pagar: {(plan.get('coste') or {}).get('imagenes_por_generar')}")
+    ok(_huellas_de_planos(datos, pid) == antes, "ni ha tocado ninguna imagen")
+    _r, ef = api.get(f"/api/proyectos/{pid}/espacio_fijo")
+    cambios = (ef or {}).get("cambios") or {}
+    planos = [x["id"] for x in cambios.get("planos") or []]
+    ok(len(planos) >= 2 and (ef.get("espacio_fijo") or {}).get("imagen"),
+       f"el servidor guarda el espacio con su imagen y ofrece {len(planos)} planos")
+    ok(pg.visible(".cambios-espacio-fijo button", f"Rehacer los {len(planos)}"),
+       "«Rehacer los N» con su precio")
+    pg.captura("espacio_fijo_video")
+    # deja marcado SOLO el primero
+    casillas = pg.p.locator(".lista-espacio-fijo input[type=checkbox]")
+    for i in range(1, casillas.count()):
+        casillas.nth(i).uncheck()
+    pg.p.wait_for_timeout(400)
+    ok(pg.visible(".cambios-espacio-fijo button", "Solo los marcados (1)"), "«Solo los marcados (1)»")
+    pg.pulsar(".cambios-espacio-fijo button", "Solo los marcados (1)")
+    pg.p.wait_for_timeout(1500)
+    _r, todos = api.get(f"/api/trabajos?proyecto={pid}")
+    trabajos = todos if isinstance(todos, list) else (todos.get("trabajos") or [])
+    suyo = next((t for t in trabajos if t.get("nombre") == "espacio_fijo"), {})
+    ok(suyo.get("unidades") and [u for u in suyo["unidades"] if u.split(":")[-1] == planos[0]]
+       and all(u.split(":")[-1] == planos[0] or "sigue" in u or u.split(":")[-1] not in planos
+               for u in suyo["unidades"]),
+       f"rehace SOLO el marcado (y su segunda mitad si la tiene): {suyo.get('unidades')}")
+    pg.sin_trabajo(300)
+    despues = _huellas_de_planos(datos, pid)
+    cambiados = sorted(k for k in antes if despues.get(k) != antes[k])
+    ok(planos[0] in cambiados and not [k for k in cambiados if k in planos[1:]],
+       f"solo cambia la imagen pedida: {cambiados}")
+    activa = _version_de(datos, "assets", "")
+    version = activa.get("activa") or activa.get("n") or activa.get("version")
+    ficha = os.path.join(datos["proyectos"], pid, "pasos", "assets", f"v{version}", "escenas",
+                         f"{planos[0]}.json")
+    try:
+        with open(ficha, encoding="utf-8") as fh:
+            papeles = [r.get("papel") for r in json.load(fh).get("referencias") or []]
+    except (OSError, ValueError):
+        papeles = []
+    ok("espacio" in papeles, f"y lleva adjunta la imagen del sitio: {papeles}")
+    pg.sin_errores("el espacio fijo de un vídeo hecho")
+    pg.cerrar()
+
+
 if __name__ == "__main__":
     sys.exit(main())

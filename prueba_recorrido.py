@@ -3880,6 +3880,10 @@ def publicar_en_redes(navegador, datos):
     pg.pulsar(".cuando-publicar button", "Programar")
     ok(len(pg.dialogos) > antes and "hora de Lima" in pg.dialogos[-1],
        "antes de enviar pide confirmarlo, con las redes y la hora de Lima")
+    # desde el 20-10 la ficha se cierra al programar y vuelve a la cola con un
+    # aviso; «Volver a la ficha» la abre otra vez (publicar_arreglos_del_20_10)
+    ok(pg.esperar(".aviso-tras-envio button", "Volver a la ficha", 20), "al programar vuelve a la cola, con su aviso")
+    pg.pulsar(".aviso-tras-envio button", "Volver a la ficha")
     fin = time.time() + 20
     while time.time() < fin and not pg.visible(".ficha-publicar .fila-envio .pastilla", "programado"):
         pg.p.wait_for_timeout(500)

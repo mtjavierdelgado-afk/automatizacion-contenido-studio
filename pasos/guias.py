@@ -412,8 +412,10 @@ GUIAS = {
             "caracteres: lo que sobre se corta.",
             "TikTok busca por las palabras del texto y de la voz: lo que no se "
             "nombra, no se encuentra.",
-            "Si el proyecto tiene puesto «Usar emojis en los textos» (Lo fijo del "
-            "proyecto), Claude pone 1 a 3; si no, ninguno.",
+            "Los emojis salen del nivel del proyecto («Emojis en los textos», en "
+            "Lo fijo del proyecto): en Vistoso, que es el de fábrica, 3 a 6 en el "
+            "texto; en Ninguno, ninguno. «✨ Más emojis» los añade a un texto ya "
+            "escrito sin cambiar sus palabras.",
         ],
         "si": [
             "Una primera línea que enganche: la promesa del vídeo o la pregunta "
@@ -460,8 +462,9 @@ GUIAS = {
             "Es el pie del Reel. Instagram no tiene título aparte: enseña solo la "
             "primera línea (unos 125 caracteres) hasta que se pulsa «más», así "
             "que esa línea hace de título.",
-            "Con «Usar emojis en los textos» puesto en el proyecto, Claude usa "
-            "3 a 6 (en el gancho, como viñetas y en la llamada a la acción).",
+            "Con el nivel Vistoso del proyecto (el de fábrica), Claude usa 5 a 9: "
+            "uno abriendo el gancho, de viñeta en cada párrafo y otro en la "
+            "llamada a la acción. Con Ninguno, ninguno.",
             "Al enviarlo, el Studio le añade la llamada a la acción, la firma del "
             "proyecto y los hashtags (como mucho 15, contando los fijos del "
             "proyecto). Todo junto no puede pasar de 2.200 caracteres.",
@@ -603,8 +606,9 @@ GUIAS = {
             "cualquier tema.",
             "La firma y los hashtags fijos tienen su casilla y los añade el "
             "Studio al final de cada texto: no hace falta pedirlos aquí.",
-            "Los emojis se encienden o apagan con «Usar emojis en los textos», "
-            "justo debajo; aquí puedes afinar cuáles y cuántos.",
+            "Cuántos emojis se ponen lo dice «Emojis en los textos», justo debajo "
+            "(Ninguno · Sobrio · Normal · Vistoso), y los de la marca tienen su "
+            "casilla; aquí puedes afinar de qué tipo.",
         ],
         "si": [
             "Cómo suena la marca en redes: de tú o de usted, con o sin humor, "
@@ -639,6 +643,51 @@ GUIAS = {
             "estas etiquetas: CÓMO SUENA, EMOJIS, PALABRAS DE LA MARCA, EVITAR. "
             "Máximo 500 caracteres. Sin temas, ofertas ni precios concretos, y "
             "sin firma ni hashtags.\n\nMIS NOTAS:\n[cómo habla tu marca]"
+        ),
+    },
+    "emojis_redes": {
+        "titulo": "Emojis en los textos para redes",
+        "donde": "Publicar → Cuentas y ajustes → un proyecto → Lo fijo de este proyecto",
+        "usa": "pasos/publicar.py (bloque_emojis, emojis_de_ficha, vestir_con_emojis)",
+        "que_hace": [
+            "El NIVEL dice cuántos emojis pone Claude en cada red: Ninguno, "
+            "Sobrio (uno o dos), Normal (gancho, listas y llamada a la acción) o "
+            "Vistoso (siempre: título, gancho, una viñeta por párrafo, llamada a "
+            "la acción y 📍 en la zona). De fábrica, Vistoso. LinkedIn y Google "
+            "van siempre más sobrios, y en YouTube el título lleva uno solo, al "
+            "final, para no tapar la palabra clave.",
+            "Los EMOJIS DE LA MARCA son su firma: Claude los prefiere en el "
+            "gancho y en la llamada a la acción de cada red. El resto los elige "
+            "por el tema de cada vídeo, no los mismos ✨🔥 en todo.",
+            "Si un texto sale con menos emojis de los que pide el nivel, la "
+            "ficha lo avisa junto al campo. «✨ Más emojis» le añade los que "
+            "faltan SIN cambiar ninguna palabra ni hashtag (el Studio lo "
+            "comprueba y, si Claude cambiara algo, no toca nada). La nota SEO no "
+            "cuenta los emojis.",
+            "Emojis dibujados a medida NO se pueden poner en un título o una "
+            "descripción: las redes solo enseñan los emojis estándar (Unicode), "
+            "y uno inventado saldría como un cuadrado vacío. Lo «propio» de "
+            "verdad son las combinaciones de dos (🎮➕🎉 = fiesta gamer), la "
+            "lista de emojis de la marca y, en la portada, stickers o grafismo.",
+        ],
+        "si": [
+            "En los de la marca, 2 a 5 emojis que digan qué vende: una consola, "
+            "una fiesta, una entrega.",
+            "Combinaciones que cuenten el servicio (🏠➡️🎉: la fiesta en casa).",
+        ],
+        "no": [
+            "Letras o palabras en la casilla de la marca: solo emojis.",
+            "Más de 12: dejan de ser una firma.",
+            "Caras o banderas que no tengan que ver con la marca.",
+        ],
+        "plantilla": "[2 a 5 emojis de lo que vende la marca, separados por espacios]",
+        "ejemplo": "🎮 🕹️ 🎉",
+        "prompt_ia": (
+            "Propón de 3 a 5 emojis estándar (Unicode) que sirvan de firma visual "
+            "de mi marca en redes, y 3 combinaciones de dos emojis que cuenten lo "
+            "que hacemos. Solo los emojis, separados por espacios, y debajo una "
+            "línea con lo que cuenta cada combinación.\n\nMI MARCA:\n[qué vende, "
+            "a quién y cómo suena]"
         ),
     },
     # ------------------------------------------------------------- parrilla
@@ -1318,7 +1367,8 @@ ORDEN = ("estilo_grafico", "tono", "voz", "material", "indicaciones", "cta",
          "chat_guiones", "analizar_cuenta", "conexiones_cuentas",
          "palabra_clave", "ubicacion_instagram", "categoria_youtube", "hecho_para_ninos",
          "texto_linkedin", "texto_x", "texto_threads", "texto_pinterest", "texto_bluesky",
-         "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business")
+         "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business",
+         "emojis_redes")
 
 
 

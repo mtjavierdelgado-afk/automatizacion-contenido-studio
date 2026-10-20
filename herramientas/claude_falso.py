@@ -2,8 +2,8 @@
 """Un CLI de Claude FALSO, para el recorrido automatico (`prueba_recorrido.py`).
 
 Contesta como `claude -p --output-format json` a lo que la pantalla puede pedir
-sin gastar nada y sin red: la revision de un campo («Revisar») y quitar las
-marcas de una nota o de un prompt. A lo demas contesta un JSON vacio, que es
+sin gastar nada y sin red: la revision de un campo («Revisar»), quitar las
+marcas de una nota o de un prompt y «✨ Más emojis» de Publicar. A lo demas contesta un JSON vacio, que es
 lo que haria un modelo que no sabe que decir: el codigo que llama tiene que
 aguantarlo.
 
@@ -38,6 +38,10 @@ def _ortografia(entrada):
 
 
 def responder(entrada):
+    if "<texto_para_emojis>" in entrada:
+        # «✨ Más emojis» de Publicar: el mismo texto, con un emoji delante
+        # (las palabras no se tocan: si se tocaran, el Studio lo rechaza)
+        return {"texto": "🎮 " + _entre(entrada, "texto_para_emojis")}
     if "<textos>" in entrada and "ORTOGRAFIA" in entrada:
         return _ortografia(entrada)
     if "<guia>" in entrada and "<texto>" in entrada:

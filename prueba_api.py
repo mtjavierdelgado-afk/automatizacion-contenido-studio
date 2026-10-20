@@ -2208,8 +2208,9 @@ def probar_sistema(cliente):
                 "analizar_cuenta", "conexiones_cuentas",
                 "palabra_clave", "ubicacion_instagram", "categoria_youtube", "hecho_para_ninos",
                 "texto_linkedin", "texto_x", "texto_threads", "texto_pinterest", "texto_bluesky",
-                "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business"],
-          "estan las treinta guias (seis de Crear, dieciocho de Publicar y seis de la Parrilla), en orden")
+                "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business",
+                "emojis_redes"],
+          "estan las treinta y una guias (seis de Crear, diecinueve de Publicar y seis de la Parrilla), en orden")
     ok(all(g.get("plantilla") and g.get("prompt_ia") and g.get("que_hace")
            for g in datos.get("guias") or []),
        "cada guia trae plantilla, prompt para otra IA y que hace el sistema")
@@ -6690,6 +6691,49 @@ def probar_notas_19oct():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_mas_emojis(cliente, carpeta, pid):
+    """«✨ Más emojis» de Publicar (rama `textos-emojis`, 20-10-2026): la ruta
+    devuelve el MISMO texto con emojis (con el doble de ESTUDIO_SIMULAR), no
+    guarda nada, y rechaza con 422 lo que cambie una palabra."""
+    seccion("PUBLICAR: «✨ MÁS EMOJIS» Y EL NIVEL DE EMOJIS")
+    ruta = f"/api/publicar/videos/{pid}/emojis"
+    texto = "Fiesta en casa\n\nReserva ya #consolas"
+    r, d = cliente.post(ruta, {"red": "tiktok", "campo": "descripcion", "texto": texto})
+    igual(r.status_code, 200, f"POST {ruta} responde 200")
+    d = d or {}
+    ok(d.get("despues", 0) > d.get("antes", 0) == 0, f"con emojis añadidos: {d.get('texto')!r}")
+    ok(re.sub(r"[^\w#]", "", d.get("texto") or "") == re.sub(r"[^\w#]", "", texto),
+       "y las mismas palabras y hashtags")
+    r, f = cliente.get(f"/api/publicar/videos/{pid}")
+    ok(not (((f or {}).get("textos") or {}).get("tiktok") or {}).get("descripcion"),
+       "la ruta no guarda nada: lo guarda la pantalla")
+    igual(((f or {}).get("emojis") or {}).get("nivel"), "vistoso", "la ficha dice el nivel (Vistoso de fábrica)")
+    r, _d = cliente.post(ruta, {"red": "tiktok", "campo": "titulo", "texto": "Hola"})
+    igual(r.status_code, 400, "TikTok no tiene título: 400")
+    r, _d = cliente.post(ruta, {"red": "tiktok", "campo": "descripcion", "texto": "   "})
+    igual(r.status_code, 400, "sin texto: 400")
+    r, _d = cliente.post("/api/publicar/videos/noexiste/emojis", {"red": "tiktok", "campo": "descripcion",
+                                                                  "texto": "Hola"})
+    igual(r.status_code, 404, "un vídeo que no existe: 404")
+    marca = os.path.join(carpeta, "_sistema", "publicar", "_emojis_cambia_palabras")
+    os.makedirs(os.path.dirname(marca), exist_ok=True)
+    with open(marca, "w") as fh:
+        fh.write("1")
+    try:
+        r, d = cliente.post(ruta, {"red": "tiktok", "campo": "descripcion", "texto": texto})
+        igual(r.status_code, 422, "si Claude cambia una palabra: 422 y no se toca nada")
+        ok("palabras" in str((d or {}).get("detail") or d), "y lo dice")
+    finally:
+        os.remove(marca)
+    r, d = cliente.put("/api/publicar/proyectos/_sin", {"emojis": "sobrio", "emojis_marca": "🎮 🕹️"})
+    igual((r.status_code, ((d or {}).get("ajustes") or {}).get("emojis"),
+           ((d or {}).get("ajustes") or {}).get("emojis_marca")), (200, "sobrio", "🎮 🕹️"),
+          "el nivel y los emojis de la marca se guardan por proyecto")
+    r, _d = cliente.put("/api/publicar/proyectos/_sin", {"emojis": "muchos"})
+    igual(r.status_code, 400, "un nivel que no existe: 400")
+    r, _d = cliente.put("/api/publicar/proyectos/_sin", {"emojis": "vistoso", "emojis_marca": ""})
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
     parser.add_argument("--conservar", action="store_true",
@@ -6779,6 +6823,7 @@ def main():
         probar_lo_de_v2h()
         probar_notas_19oct()
         probar_cancelar_en_el_taller()
+        probar_mas_emojis(cliente, carpeta, pid)
     finally:
         parar(proceso)
         if not argumentos.conservar:

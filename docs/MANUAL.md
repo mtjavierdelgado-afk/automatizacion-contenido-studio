@@ -19,7 +19,10 @@ Los **módulos** están en el menú de la izquierda (en el móvil y la tableta, 
 la fila de debajo del nombre): **Inicio** (tu panel: lo que pasa hoy y lo que
 te necesita), **Crear** (estilos y vídeos: todo lo de esta guía hasta
 «Vídeo»), **Publicar** (las redes), **Automatizar** (la Parrilla de guiones y
-Analizar cuentas) y **Configuración**. Al abrir el Studio estás en Crear.
+Analizar cuentas) y **Configuración**. Al abrir el Studio estás en el
+**Inicio**; Crear (y el logo) te llevan a **Tus proyectos**. Cada pantalla trae
+su «‹ Volver» (o «‹ Mis vídeos», «‹ La cola», «‹ Parrilla») y el «atrás» del
+móvil nunca te saca del Studio.
 
 ## Inicio
 

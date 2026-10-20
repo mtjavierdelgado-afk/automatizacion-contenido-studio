@@ -416,7 +416,7 @@ def informe_de_cobertura(carpeta):
 class Pagina:
     """Una pestana con sus errores de JavaScript apuntados y sus capturas."""
 
-    def __init__(self, navegador, datos, ancho=1300, alto=900, nombre="pantalla"):
+    def __init__(self, navegador, datos, ancho=1300, alto=900, nombre="pantalla", entrada="crear"):
         self.datos = datos
         self.nombre = nombre
         self.errores = []
@@ -431,7 +431,9 @@ class Pagina:
         self.aceptar = True
         self.dialogos = []
         self.p.on("dialog", self._dialogo)
-        self.p.goto(datos["url"] + "/")
+        # AL ENTRAR SE ABRE EL INICIO (diseno-crearia, 19-10-2026); los
+        # escenarios empiezan en Crear, como siempre, con `?entrada=crear`
+        self.p.goto(datos["url"] + ("/?entrada=crear" if entrada == "crear" else "/"))
         self.p.wait_for_function("() => typeof APP !== 'undefined' && APP.light && APP.light.datos", timeout=30000)
         self.p.wait_for_timeout(800)
         # TODOS LOS AVISOS, no solo el último: uno de un trabajo que acaba
@@ -5371,6 +5373,42 @@ def diseno_crearia(navegador, datos):
     ok(pg.esperar("#ayuda .ayuda-pantalla", "Qué es una lámina", 10), "y en Crear, el de los estilos")
     pg.js("conmutarAyuda(false);")
     pg.sin_errores("el diseño CrearIA")
+    pg.cerrar()
+
+    # LA ENTRADA Y LA NAVEGACIÓN (decisión del dueño, 19-10-2026)
+    pg = Pagina(navegador, datos, nombre="crearia entrada", entrada="inicio")
+    ok(pg.esperar(".tarjeta-inicio.tarjeta-saludo", segundos=10)
+       and pg.p.evaluate("() => MODULOS.actual") == "inicio", "al entrar en el Studio se abre el Inicio")
+    pg.js(f"irAModulo('crear'); await abrirVideoLight('{datos['video']}'); APP.light.video.vista = 'video'; pintarLight();")
+    ok(pg.esperar(".migas-video button", "Mis vídeos", 15), "un vídeo abierto trae su «‹ Mis vídeos» arriba")
+    pg.pulsar(".migas-video button", "Mis vídeos")
+    ok(pg.esperar("h2", "Tus proyectos", 10), "y lleva a Tus proyectos")
+    pg.js("PUB.seccion = 'resultados'; irAModulo('publicar');")
+    ok(pg.esperar(".volver-modulo button", "Volver", 10), "Publicar → Resultados trae «‹ Volver»")
+    pg.pulsar(".volver-modulo button", "Volver")
+    ok(pg.p.evaluate("() => PUB.seccion") == "cola", "que lleva a la cola")
+    pg.pulsar(".volver-modulo button", "Volver")
+    ok(pg.p.evaluate("() => MODULOS.actual") == "inicio", "y desde la cola, al Inicio")
+    pg.js("PAR.seccion = 'marca'; irAModulo('automatizar');")
+    ok(pg.esperar(".volver-modulo button", "Volver", 10), "Automatizar → Marca del cliente trae «‹ Volver»")
+    pg.js(f"irAModulo('crear'); await abrirVideoLight('{datos['video']}'); APP.light.video.vista = 'guion'; pintarLight();")
+    pg.esperar(".migas-video", None, 15)
+    url = pg.p.url
+    salio = False
+    for _ in range(14):
+        try:
+            pg.p.go_back(timeout=5000)
+        except Exception:                                    # noqa: BLE001
+            pass
+        pg.p.wait_for_timeout(700)
+        if not pg.p.url.startswith(datos["url"]):
+            salio = True
+            break
+    ok(not salio, f"catorce «atrás» seguidos no sacan del Studio ({pg.p.url[:60]})")
+    ok(pg.esperar("h2", "Tus proyectos", 5) or pg.esperar(".tarjeta-inicio.tarjeta-saludo", segundos=5),
+       "y se queda en Tus proyectos o en el Inicio")
+    ok(url.startswith(datos["url"]), "(la página es la del Studio)")
+    pg.sin_errores("la entrada y el atrás")
     pg.cerrar()
 
     # en el móvil: cabe, y el Inicio y la Ayuda se ven

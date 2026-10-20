@@ -46,6 +46,15 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   el apartado de la pantalla en la que estás, todas las guías de escritura, la
   guía de inicio y las novedades. El manual tiene apartados nuevos de Inicio y
   de Automatizar (Parrilla y Analizar cuentas).
+- **Al entrar se abre el Inicio** (tu panel). Recargar la página te deja donde
+  estabas, y el botón Crear (o el logo) lleva siempre a **Tus proyectos**.
+- **El «atrás» del móvil ya no te saca del Studio**: cuando no queda nada
+  atrás, te lleva a Tus proyectos (y desde ahí, al Inicio) en vez de volver a
+  la pantalla de la contraseña.
+- **«‹ Volver» en pantalla** en las secciones de Publicar y Automatizar (las
+  fichas ya tenían «‹ La cola» y «‹ Parrilla»; en un vídeo sigue «‹ Mis
+  vídeos»), y **«✕» para cerrar** las imágenes ampliadas, para no depender del
+  «atrás» del teléfono.
 - **Un pie en todas las pantallas** con los derechos (© 2026 Agencia Redes
   Botánica · v3.1) y los enlaces a Novedades, Guía, **Términos de uso** (las
   condiciones de uso del Studio) y **Contacto** (escribe a

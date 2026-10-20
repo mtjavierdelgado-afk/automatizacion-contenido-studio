@@ -3709,6 +3709,14 @@ details.plegado-manual > summary { cursor: pointer; font-weight: 600; padding: 4
 .lista-guias li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .botones-ayuda { gap: 8px; flex-wrap: wrap; }
 
+/* ---- «‹ Volver» arriba de los módulos y «✕» en las lupas */
+.volver-modulo { display: flex; align-items: center; gap: 8px; margin: 0 auto 10px; }
+button.cerrar-capa {
+  position: fixed; top: calc(12px + env(safe-area-inset-top)); right: 12px; z-index: 2;
+  min-width: var(--toque); min-height: var(--toque); border-radius: 999px;
+  background: var(--panel); color: var(--texto); border: 1px solid var(--linea); font-size: 16px;
+}
+
 /* ---- el pie: los derechos y los enlaces */
 .pie-sistema .pie-enlaces { display: inline-flex; flex-wrap: wrap; gap: 4px 16px; justify-content: center; }
 .pie-sistema .enlace-pie { color: var(--acento); text-decoration: none; }

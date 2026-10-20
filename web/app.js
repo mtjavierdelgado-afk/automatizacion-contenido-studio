@@ -3403,7 +3403,7 @@ function lupa(url, detalle) {
   const capa = h('div', {
     id: 'lupa',
     onclick: ev => { if (!detalle || ev.target === capa) capa.remove(); },
-  }, h('img', { src: url }),
+  }, botonCerrarCapa(() => capa.remove()), h('img', { src: url }),
     // La ficha va DENTRO de la lupa y no debajo de la miniatura: en la
     // cuadrícula lo que se compara es el encuadre, y una tabla por miniatura
     // convierte seis vistas en una pared de texto que nadie lee.
@@ -4752,6 +4752,13 @@ function pieSistema() {
         'Contacto')));
 }
 
+/* «✕» arriba a la derecha de una capa que tapa la pantalla (las lupas), para
+   no depender del «atrás» ni de Escape en el móvil. */
+function botonCerrarCapa(cerrar) {
+  return h('button', { type: 'button', clase: 'mini cerrar-capa', title: 'Cerrar', 'aria-label': 'Cerrar',
+    onclick: ev => { ev.stopPropagation(); cerrar(); } }, '✕');
+}
+
 /* Una ventana de solo lectura, con «Cerrar». */
 function ventanaTexto(titulo, parrafos) {
   const capa = h('div', { clase: 'capa-dialogo' });
@@ -5660,8 +5667,14 @@ function pintarLightAhora() {
    El vídeo se cierra en la pantalla, no en el servidor: lo que se esté
    generando sigue y se vuelve a ver al abrirlo. */
 function irAInicioLight() {
+  /* «UN HOME DE CREAR» ES «TUS PROYECTOS» (diseno-crearia, 19-10-2026): sin
+     el proyecto elegido, y saliendo del módulo en el que se esté (el logo se
+     pulsa también desde Publicar o el Inicio). */
+  if (MODULOS.actual !== 'crear') { entrarEnCrear(); return; }
   pararPrevia();
   recordarVideoLight('');
+  apuntarCliente('');
+  APP.light.desdeVideo = '';
   irALight('galeria');
   cargarGaleriaLight(true);
 }
@@ -13307,6 +13320,7 @@ function verAportadaEnGrande(lista, ficha) {
     id: 'lupa', clase: 'lupa-aportadas',
     onclick: ev => { if (ev.target === capa || ev.target === imagen) cerrar(); },
   },
+    botonCerrarCapa(() => cerrar()),
     lista.length > 1 ? h('button', { clase: 'lupa-flecha izq', title: 'anterior (←)',
       onclick: ev => { ev.stopPropagation(); mover(-1); } }, '‹') : null,
     imagen,
@@ -19065,6 +19079,8 @@ function pintarModulo() {
   const foco = document.activeElement && document.activeElement.dataset
     ? document.activeElement.dataset.foco : '';
   vaciar(m);
+  const volver = barraVolverModulo();  // «‹ Volver» (diseno-crearia)
+  if (volver) m.appendChild(volver);
   const contenido = h('div', { clase: 'contenido modulo-contenido' });
   m.appendChild(contenido);
   m.appendChild(pieSistema());  // el pie, también en los módulos (diseno-crearia)
@@ -19107,6 +19123,97 @@ const INI = {
   vistas7: null, parrilla: null, calendario: null, novedades: null,
   relojGuardar: null,
 };
+
+/* ----------------------------------- LA ENTRADA Y EL «ATRÁS» QUE NO SALE
+ *
+ * (diseno-crearia, 19-10-2026, decisión del dueño)
+ *
+ * AL ENTRAR se abre el Inicio: la primera carga de la página (no una recarga
+ * ni un «atrás» desde otra web), sin un sitio concreto en la URL (un `#` de
+ * los de antes) ni `?entrada=crear`, que abre Crear como siempre (lo usa el
+ * recorrido para que sus escenarios empiecen donde empezaban).
+ *
+ * EL «ATRÁS» DEL MÓVIL YA NO SACA DEL STUDIO: al entrar, la entrada del
+ * historial con la que se cargó la página se convierte en CENTINELA y se
+ * empuja otra encima. Si un «atrás» llega a la centinela, se vuelve a empujar
+ * una entrada y se lleva a Tus proyectos (o al Inicio si ya se estaba en Tus
+ * proyectos), en vez de dejar que el navegador vuelva al login. Este oyente
+ * va ANTES que el de los módulos y el de las pestañas (se registra al leer el
+ * fichero; ellos, al arrancar) y les corta el paso: la centinela no es un
+ * sitio de nadie.
+ */
+function tipoDeCarga() {
+  try {
+    const n = performance.getEntriesByType('navigation')[0];
+    if (n && n.type) return n.type;
+  } catch (e) { /* navegador viejo */ }
+  return 'navigate';
+}
+
+function enTusProyectos() {
+  return MODULOS.actual === 'crear' && APP.light.vista === 'galeria' && !clienteElegido();
+}
+
+function montarEntrada() {
+  const tipo = tipoDeCarga();
+  let pedida = '';
+  try { pedida = new URLSearchParams(location.search).get('entrada') || ''; } catch (e) { pedida = ''; }
+  if (tipo === 'navigate') {
+    try {
+      history.replaceState({ centinela: true }, '');
+      history.pushState({}, '');
+    } catch (e) { /* sin historial: el «atrás» hace lo de siempre */ }
+    if (pedida !== 'crear' && !location.hash) irAModulo('inicio', { sinHistoria: true });
+    return;
+  }
+  // una recarga dentro de un módulo se queda en él (el sitio está en el historial)
+  const estado = history.state || {};
+  if (estado.modulo && estado.modulo !== 'crear') {
+    if (estado.pub) Object.assign(PUB, { seccion: estado.pub.seccion || 'cola', pid: estado.pub.pid || '' });
+    irAModulo(estado.modulo, { sinHistoria: true });
+  }
+}
+
+window.addEventListener('popstate', ev => {
+  if (!(ev.state && ev.state.centinela)) return;
+  ev.stopImmediatePropagation();
+  try { history.pushState({}, ''); } catch (e) { /* sin historial */ }
+  if (enTusProyectos()) {
+    irAModulo('inicio', { sinHistoria: true });
+    return;
+  }
+  if (APP.light.pendiente) volcarPresetLight();
+  pararPrevia();
+  recordarVideoLight('');
+  apuntarCliente('');
+  APP.light.vista = 'galeria';
+  APP.light.desdeVideo = '';
+  if (MODULOS.actual !== 'crear') irAModulo('crear', { sinHistoria: true });
+  else pintarLight();
+  cargarGaleriaLight(true);
+});
+
+/* «‹ Volver» arriba de cada pantalla de Publicar y Automatizar que no lo trae
+   (la ficha de un vídeo ya tiene «‹ La cola», y la de un guion «‹ Parrilla»):
+   para no depender del «atrás» del móvil. Desde la pantalla principal de un
+   módulo vuelve al Inicio. */
+function barraVolverModulo() {
+  const m = MODULOS.actual;
+  let destino = null;
+  if (m === 'publicar') {
+    if (PUB.seccion === 'ficha') return null;
+    destino = PUB.seccion === 'cola' || !PUB.seccion
+      ? ['al Inicio', () => irAModulo('inicio')] : ['a la cola', () => irASeccionPublicar('cola')];
+  } else if (m === 'automatizar') {
+    if (PAR.seccion === 'ficha') return null;
+    destino = PAR.seccion === 'parrilla' || !PAR.seccion
+      ? ['al Inicio', () => irAModulo('inicio')] : ['a la Parrilla', () => irASeccionParrilla('parrilla')];
+  } else return null;
+  return h('div', { clase: 'volver-modulo modulo-contenido' },
+    h('button', { type: 'button', clase: 'mini fantasma', title: `Volver ${destino[0]}`,
+      onclick: destino[1] }, '‹ Volver'),
+    h('span', { clase: 'meta' }, destino[0]));
+}
 
 const CATALOGO_PANEL = {
   saludo: { nombre: 'Saludo y botones', que: 'Resumen de la semana y accesos rápidos' },
@@ -23981,6 +24088,8 @@ montarModulos();
    access 'MODOS' before initialization» y deja la pantalla en blanco.
    Las funciones se izan; los const no. */
 arrancar();
+// la pantalla de entrada (el Inicio) y el «atrás» que no sale (diseno-crearia)
+montarEntrada();
 
 /* ----------------------------------------- PUBLICAR · RESULTADOS (redes-2)
  *

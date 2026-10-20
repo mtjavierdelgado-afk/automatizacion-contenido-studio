@@ -60,6 +60,35 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   condiciones de uso del Studio) y **Contacto** (escribe a
   agencia.redes.botanica@gmail.com).
 
+**Textos de Publicar con emojis, siempre a juego con el vídeo (20 de octubre)**
+- **«Emojis en los textos» tiene niveles** (Publicar → Cuentas y ajustes → Lo
+  fijo de este proyecto): **Ninguno · Sobrio · Normal · Vistoso**. De fábrica,
+  **Vistoso**: el título lleva uno (en YouTube, al final, para no tapar la
+  palabra clave), el gancho empieza con uno, cada párrafo lleva el suyo de
+  viñeta, la llamada a la acción otro y la zona va con 📍. Elegidos por el tema
+  de cada vídeo (🎮 consolas, 🎂 cumpleaños, 🏢 empresa), no los mismos ✨🔥 en
+  todo. LinkedIn y Google van más sobrios. Antes era un sí/no con «1 a 3» y por
+  eso unos textos salían con emojis y otros no. **Si tenías «Usar emojis»
+  apagado, se respeta: ese proyecto queda en Ninguno.**
+- **Emojis de la marca**: una casilla con los emojis propios del proyecto (para
+  EstadoPlay, 🎮 🕹️ 🎉). Claude los usa de firma en el gancho y en la llamada a
+  la acción de cada red.
+- **Combinaciones de dos emojis** (🎮➕🎉 = fiesta gamer, 🏠➡️🎉 = la fiesta en
+  casa): es la forma real de tener emojis «propios». Emojis dibujados a medida
+  no se pueden poner en un título o una descripción: las redes solo enseñan los
+  emojis estándar, y uno inventado saldría como un cuadrado. Para algo dibujado
+  de verdad, la portada (stickers y grafismo).
+- **El aviso**: si un texto sale con menos emojis de los que pide el nivel, la
+  ficha lo dice junto al campo («va con menos emojis de los pedidos»). La nota
+  SEO no cambia por eso.
+- **«✨ Más emojis»**, junto al título y al texto de cada red: añade emojis a lo
+  ya escrito **sin cambiar ninguna palabra ni hashtag** (el Studio lo comprueba;
+  si Claude cambiara algo, no se toca nada y te lo dice). Es una llamada corta y
+  barata (haiku) con tu suscripción de Claude, y se guarda sola, con su
+  «✓ Guardado».
+- «Dame 3 ganchos» sigue el nivel de emojis, y «Optimizar SEO» ya no quita los
+  emojis al reescribir una línea.
+
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
 **Tus notas del 19 de octubre**

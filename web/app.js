@@ -10998,6 +10998,148 @@ function irAPrimeraObsoleta() {
   if (i >= 0) { PREVIA.i = i; PREVIA.t = 0; repintarVideo(); }
 }
 
+/* ------------------------------------- descargar la imagen y leer lo que dice
+ *
+ * Rama `imagenes-texto` (20-10-2026), pedido del dueño: «poder descargar las
+ * imágenes que se creen, y que se vea (cuadro para leer el texto) qué parte del
+ * guion están diciendo en la imagen que se ve, que no solo se escuche».
+ *
+ * SOLO PANTALLA. Descargar una es un enlace al MISMO PNG que se pinta (sin
+ * `?mini`: el original) con `download`; «Descargar todas» es la ruta del .zip
+ * (`GET .../imagenes/zip`, que solo lee). El texto es la `narracion` del plano
+ * que ya trae la previsualización, sin las marcas del TTS, y el tramo que suena
+ * sale de los SUBTÍTULOS del plano (los mismos trozos y tiempos que el
+ * render), que es lo único con reloj que viaja en la ficha. No se escribe
+ * ningún param (regla 1): ocultar el cuadro se recuerda en el navegador. */
+const CLAVE_TEXTO_DEL_PLANO = 'previa.texto_del_plano';
+
+function textoDelPlanoVisible() {
+  try { return localStorage.getItem(CLAVE_TEXTO_DEL_PLANO) !== '0'; } catch (_) { return true; }
+}
+
+function conmutarTextoDelPlano() {
+  const ver = !textoDelPlanoVisible();
+  try { localStorage.setItem(CLAVE_TEXTO_DEL_PLANO, ver ? '1' : '0'); } catch (_) { /* sin almacén */ }
+  /* Si el navegador no deja guardar, que al menos cambie ahora */
+  TEXTO_DEL_PLANO.oculto = !ver;
+  repintarVideo();
+}
+
+const TEXTO_DEL_PLANO = { oculto: null };
+
+/* El nombre del fichero, como el id de carpeta (`identificador` en Python):
+   sin tildes, en minúsculas y con «_». Es el mismo que lleva el .zip. */
+function slugDeDescarga(texto) {
+  const plano = String(texto || '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/ñ/g, 'n').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return (plano || 'video').slice(0, 60);
+}
+
+function nombreDeDescarga(sid) {
+  const v = videoAbierto();
+  return `${slugDeDescarga(v.nombre || v.pid)}_${sid}.png`;
+}
+
+function descargarImagenPlano(e) {
+  if (!e || !e.imagen) return null;
+  return h('a', {
+    clase: 'boton-enlace mini', href: API.archivo(videoAbierto().pid, e.imagen),
+    download: nombreDeDescarga(e.id), title: 'Bajar esta imagen tal cual se generó (PNG)',
+  }, '⬇ Descargar');
+}
+
+function descargarTodasLasImagenes() {
+  const escenas = (PREVIA.ficha || {}).escenas || [];
+  const cuantas = escenas.filter(x => x.imagen).length;
+  if (!cuantas) return null;
+  const v = videoAbierto();
+  /* el pase de un proyecto con clave va en la URL: un <a download> no lleva
+     la cabecera `X-Estudio-Abiertos` que pone `pedir` */
+  const pases = cabeceraDePases();
+  return h('a', {
+    clase: 'boton-enlace mini',
+    href: `${API.proyecto(v.pid)}/imagenes/zip${pases ? `?abiertos=${encodeURIComponent(pases)}` : ''}`,
+    download: `${slugDeDescarga(v.nombre || v.pid)}_imagenes.zip`,
+    title: `Las ${cuantas} imágenes de plano en un .zip, en orden y numeradas`,
+  }, '⬇ Descargar todas');
+}
+
+/* LA NARRACIÓN PARTIDA EN LOS TRAMOS DEL SUBTÍTULO. Las palabras se reparten
+   en proporción a las de cada trozo: el subtítulo puede estar corregido a mano
+   y no coincidir palabra a palabra, pero el reparto sigue cayendo en su sitio.
+   `desde`/`hasta` van en el reloj del plano, como en la ficha. */
+function tramosDelPlano(e) {
+  const palabras = sinMarcasTts(legible(e.narracion)).match(/\S+/g) || [];
+  const trozos = (e.subtitulos || []).map(t => ({
+    n: ((t.lineas || []).join(' ').match(/\S+/g) || []).length,
+    desde: Number(t.desde) || 0, hasta: Number(t.hasta) || 0,
+  })).filter(t => t.n > 0);
+  if (!palabras.length) return [];
+  if (!trozos.length) return [{ texto: palabras.join(' '), desde: 0, hasta: Number(e.duracion) || 0 }];
+  const total = trozos.reduce((s, t) => s + t.n, 0);
+  let llevadas = 0;
+  return trozos.map(t => {
+    const a = Math.round(llevadas / total * palabras.length);
+    llevadas += t.n;
+    const b = Math.round(llevadas / total * palabras.length);
+    return { texto: palabras.slice(a, b).join(' '), desde: t.desde, hasta: t.hasta };
+  }).filter(t => t.texto);
+}
+
+/* EL TRAMO QUE SUENA, sin repintar: el reloj del <audio> va a cuatro tics por
+   segundo y repintar la pantalla entera en cada uno haría saltar el cuadro de
+   feedback. Solo se cambia una clase en los trozos del cuadro que se ve. */
+function marcarTramoQueSuena() {
+  const caja = document.querySelector('.texto-del-plano');
+  const e = escenaPrevia();
+  if (!caja || !e || caja.dataset.plano !== e.id) return;
+  const t = PREVIA.audio ? PREVIA.audio.currentTime - e.t_in : -1;
+  for (const trozo of caja.querySelectorAll('.tramo-del-plano')) {
+    const dentro = PREVIA.sonando && t >= Number(trozo.dataset.desde) && t < Number(trozo.dataset.hasta);
+    trozo.classList.toggle('sonando', dentro);
+  }
+}
+
+function textoDelPlano(e) {
+  if (PREVIA.audio && !PREVIA.audio.dataset.textoDelPlano) {
+    PREVIA.audio.dataset.textoDelPlano = '1';
+    PREVIA.audio.addEventListener('timeupdate', marcarTramoQueSuena);
+  }
+  const tramos = tramosDelPlano(e);
+  const caja = h('div', { clase: 'texto-del-plano', datos: { plano: e.id }, 'aria-live': 'off' });
+  if (!tramos.length) {
+    caja.appendChild(h('span', { clase: 'meta' }, 'en este plano la voz no dice nada'));
+    return caja;
+  }
+  tramos.forEach((t, i) => {
+    if (i) caja.appendChild(document.createTextNode(' '));
+    caja.appendChild(h('span', {
+      clase: 'tramo-del-plano', datos: { desde: String(t.desde), hasta: String(t.hasta) },
+    }, t.texto));
+  });
+  setTimeout(marcarTramoQueSuena, 0);
+  return caja;
+}
+
+/* Lo que se cuelga debajo de la imagen: la cabecera con las descargas y el
+   botón de ocultar, y el cuadro con el texto si se quiere ver. */
+function descargasYTextoDelPlano(e) {
+  if (!e) return null;
+  if (TEXTO_DEL_PLANO.oculto === null) TEXTO_DEL_PLANO.oculto = !textoDelPlanoVisible();
+  const ver = !TEXTO_DEL_PLANO.oculto;
+  return h('div', { clase: 'plano-texto-y-descarga' },
+    h('div', { clase: 'plano-texto-cab' },
+      h('span', { clase: 'meta' }, 'Lo que dice la voz'),
+      h('button', {
+        clase: 'mini fantasma', onclick: conmutarTextoDelPlano, 'aria-pressed': ver ? 'true' : 'false',
+        title: ver ? 'Ocultar el texto de este plano' : 'Ver el texto que dice la voz en este plano',
+      }, ver ? 'Ocultar el texto' : 'Ver el texto'),
+      h('span', { clase: 'crece' }),
+      descargarImagenPlano(e),
+      descargarTodasLasImagenes()),
+    ver ? textoDelPlano(e) : null);
+}
+
 function vistaPreviaLight() {
   const v = videoAbierto();
   const caja = h('div', { clase: 'light-previa' });
@@ -11072,6 +11214,7 @@ function vistaPreviaLight() {
      del texto de encima. */
   engancharSwipePrevia(marco);
   caja.appendChild(marco);
+  caja.appendChild(descargasYTextoDelPlano(e)); // descargar y leer lo que dice (imagenes-texto)
 
   /* LOS MANDOS. La flecha derecha es el gesto principal —pasar de escena y
      oírla— así que va grande y también en el teclado. */

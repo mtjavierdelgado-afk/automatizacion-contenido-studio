@@ -18821,7 +18821,7 @@ function bloqueElementosPortada(d) {
   const cat = PORT.catalogo || {};
   const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Elementos'));
   (d.elementos || []).forEach((el, i) => {
-    const fila = h('div', { clase: `elemento-portada${el.oculto ? ' oculto-portada' : ''}` });
+    const fila = h('div', { clase: `elemento-portada${el.oculto ? ' escondido-portada' : ''}` });
     const cab = h('div', { clase: 'fila' }, h('b', { clase: 'crece' }, `${i + 1}. ${el.tipo}`
       + (el.rol ? ` · ${(cat.campos || {})[el.rol] || el.rol}` : '')),
     h('button', { clase: 'mini fantasma', type: 'button', title: el.oculto ? 'Enseñar' : 'Esconder',

@@ -1,4 +1,4 @@
-# Novedades de Automatización Contenido Studio
+# Novedades de CrearIA Studio
 
 Lo que ha cambiado en el sistema, de lo más nuevo a lo más antiguo. Se ve en
 **Configuración → Novedades**, y el asistente lo lee para estar al día.
@@ -9,6 +9,43 @@ vídeos, estilos, claves y contraseña no se tocan.
 ---
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
+
+**El nuevo diseño: CrearIA Studio (19 de octubre)**
+- **Se llama CrearIA Studio · Automatización de contenido**, con logo nuevo: la
+  C de Crear con el bucle dentro y un «play». El favicon es el mismo dibujo. Por
+  dentro no cambia nada (el comando `asvs`, las carpetas y los servicios siguen
+  igual). El color del «play» aún está por decidir: por defecto, el violeta de
+  la C.
+- **Cuatro paletas**, en Configuración → Aspecto: **Nocturno** (la de siempre),
+  **Aurora** (turquesa y rosa), **Brasa** (ámbar y frambuesa) y **Día**, la
+  clara. Se recuerdan en el navegador. **Día es el tema claro de antes**: el
+  botón de sol y luna de arriba sigue estando y pasa de Día a tu última paleta
+  oscura (si tenías elegido el claro, entras en Día). Los textos se leen bien
+  (contraste AA) en las cuatro.
+- **Letras nuevas**: Space Grotesk en los títulos, Inter en el texto y
+  JetBrains Mono en las cifras (si no cargan, las del sistema).
+- **En el ordenador, los módulos van en un menú a la izquierda**: Inicio,
+  Crear, Publicar (con su contador), Automatizar y Configuración, y debajo el
+  **gasto del mes** (con tu tope, si lo pones) y si el **asistente está
+  listo**. En el móvil y la tableta siguen en la fila de arriba. Crear
+  funciona igual que antes.
+- **El Inicio es ahora tu panel**: el saludo con lo que sale esta semana, las
+  cifras del mes (vídeos, programados, vistas de 7 días, para publicar), «Te
+  necesitan» (fallos, lo que espera tu OK, lo de hoy y lo listo para
+  publicar), la semana por días, los proyectos recientes, lo que está en marcha
+  y lo mejor de 7 días.
+- **«✎ Personalizar panel» (Arma tu panel)**: quita tarjetas, cámbiales el
+  tamaño (S, M, L) y el orden (arrastrando o con ↑ ↓), enciende otras (Gasto
+  del mes, Parrilla, Calendario, Por cliente, Novedades), empieza desde una
+  vista (Producción, Publicación, Resultados, Mínima) o vuelve al original. Se
+  guarda **para tu usuario** si entras con contraseña, y en el navegador si no.
+- **El «?» abre un panel de Ayuda** (ya no Configuración): el manual abierto en
+  el apartado de la pantalla en la que estás, todas las guías de escritura, la
+  guía de inicio y las novedades. El manual tiene apartados nuevos de Inicio y
+  de Automatizar (Parrilla y Analizar cuentas).
+- **Un pie en todas las pantallas** con los derechos (© 2026 Agencia Redes
+  Botánica) y los enlaces a Novedades, Guía, Términos de uso y Contacto. Los
+  términos y el correo de contacto **están por escribir**: de momento lo dicen.
 
 **Tus notas del 19 de octubre**
 - **«Crear» abre siempre «Tus proyectos»**, desde la barra de arriba y desde

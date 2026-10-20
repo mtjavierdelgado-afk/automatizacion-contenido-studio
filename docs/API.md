@@ -33,6 +33,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/proyectos/{pid}` | Cambia el nombre VISIBLE del proyecto. -> la ficha. |
 | `POST` | `/api/proyectos/{pid}/duplicar` | Copia un proyecto entero con lo que tiene puesto HOY. -> el nuevo. |
 | `POST` | `/api/proyectos/{pid}/escenas/{sid}/vale` | «Este dibujo me vale para lo que dice ahora». -> {ok} |
+| `POST` | `/api/proyectos/{pid}/exportar` | Prepara el vídeo, o una parte, para descargar (gratis, no toca el proyecto). |
+| `GET` | `/api/proyectos/{pid}/exportes/{ruta:path}` | Un fichero preparado por /exportar, para descargar con su nombre. |
 | `POST` | `/api/proyectos/{pid}/feedback` | Feedback general o sobre una unidad; rehace SOLO lo que apunta. |
 | `GET` | `/api/proyectos/{pid}/lleva` | Lo que lleva este video: voz, subtitulos, musica y efectos. |
 | `PUT` | `/api/proyectos/{pid}/lleva` | Enciende o apaga lo que lleva el video. Rehace solo el montaje, nunca imagenes. |
@@ -45,8 +47,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/proyectos/{pid}/musica/presencia` | Fija cuánto se oye la música y, si el vídeo ya está montado, lo REMONTA. |
 | `POST` | `/api/proyectos/{pid}/ortografia/aplicar` | Pone los subtitulos corregidos: {cambios: {plano: texto}}. |
 | `POST` | `/api/proyectos/{pid}/ortografia/descartar` | Lo que se deja SIN marcar al aplicar: {rid, ids: [...]}. Esos textos se |
-| `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video), de |
+| `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de |
 | `GET` | `/api/proyectos/{pid}/ortografia/{rid}` | Como va la revision de ortografia, y lo que propone al terminar. |
+| `GET` | `/api/proyectos/{pid}/planos/montaje` | {video, planos: {sid: {movimiento?, profundidad?}}, no_aplica, niveles, profundidad} |
+| `PUT` | `/api/proyectos/{pid}/planos/{sid}/montaje` | {movimiento?: quieto|sobrio|vivo|dinamico|null, profundidad?: true|false|null} |
 | `POST` | `/api/proyectos/{pid}/presets-canal/{preset_id}/aplicar` | Copia los valores del preset a los params de los pasos que toque. |
 | `GET` | `/api/proyectos/{pid}/previsualizacion` | Las piezas para ver el video sin montarlo. -> {escenas, audio, ...} |
 | `PUT` | `/api/proyectos/{pid}/redactor` | Guarda el prompt escrito de cada plano. Un prompt vacío lo quita. |
@@ -61,7 +65,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/proyectos/{pid}/repaso/{nid}` | Cambia el texto, el instante o las imágenes de una nota. |
 | `POST` | `/api/proyectos/{pid}/repaso/{nid}/sin-marcas` | Propone la nota reescrita sin marcas ni personajes: NO la guarda. |
 | `GET` | `/api/proyectos/{pid}/subtitulos` | Como son los subtitulos de este video, y si son los del estilo. |
-| `PUT` | `/api/proyectos/{pid}/subtitulos` | {tam?, caja? ("auto" o 0-1), diseno?, color? ("#rrggbb" o ""), fuente? ("auto", Verdana, Arial, Georgia), posicion? ("auto", abajo, tercio, centro, arriba)} o {automatico: true}. «auto» quita la clave. |
+| `PUT` | `/api/proyectos/{pid}/subtitulos` | {tam?, caja? ("auto" o 0-1), diseno?, color? ("#rrggbb" o ""), |
 | `POST` | `/api/proyectos/{pid}/subtitulos/aplicar` | Rehace las capas de texto y vuelve a montar el video. Ni una imagen. |
 | `POST` | `/api/proyectos/{pid}/subtitulos/rehacer` | Rehace los subtitulos (y monta) de un video cuya voz llego con las |
 | `GET` | `/api/proyectos/{pid}/subtitulos/rotos` | {planos}: cuantos planos tienen los subtitulos dibujados con las tildes |
@@ -81,82 +85,6 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 | | Ruta | Qué hace |
 |---|---|---|
-| `GET` | `/api/publicar/cola` | Los videos listos para publicar y los envios de la semana (hora de Lima). |
-| `GET` | `/api/publicar/estado` | Si hay clave de Upload-Post (y de donde sale). Nunca la clave. |
-| `GET` | `/api/publicar/lo-que-funciono` | Los posts que mejor fueron: {proyecto?, dias, red?, por, cuantos}. |
-| `GET` | `/api/publicar/horarios` | El mejor día y hora de cada red con lo propio (o el punto de partida |
-| `GET` | `/api/publicar/informe` | El informe del mes de un proyecto, para el cliente: {proyecto, mes}. |
-| `GET` | `/api/publicar/metricas-auto` | La configuracion, la ultima vuelta, la proxima y lo que gasta. |
-| `PUT` | `/api/publicar/metricas-auto` | Guarda la eleccion (tras confirmar el coste en pantalla). |
-| `POST` | `/api/publicar/metricas-auto/ahora` | Una vuelta ya, en segundo plano (puede tardar minutos). |
-| `POST` | `/api/publicar/metricas-auto/coste` | Lo que gastaria una eleccion SIN guardarla: {frecuencia?, hora?, posts?}. |
-| `GET` | `/api/publicar/palabras-y-ganchos` | Qué palabras clave y qué primeras líneas fueron mejor. No pregunta a nadie. |
-| `POST` | `/api/publicar/probar` | Prueba la clave contra Upload-Post sin gastar ninguna subida. |
-| `GET` | `/api/publicar/proyectos` | Cada proyecto con lo fijo de publicar y sus cuentas (lo ultimo visto). |
-| `PUT` | `/api/publicar/proyectos/{cid}` | Lo fijo de un proyecto: {perfil, redes, hora, firma, hashtags, tono, |
-| `POST` | `/api/publicar/proyectos/{cid}/conectar` | El enlace (48 h) para conectar o reconectar las cuentas: {redes?, volver_a?}. |
-| `POST` | `/api/publicar/proyectos/{cid}/cuentas` | Pregunta a Upload-Post que cuentas tiene conectadas el perfil del proyecto |
-| `POST` | `/api/publicar/proyectos/{cid}/metricas` | Pide las cifras de lo publicado del proyecto y los seguidores de sus |
-| `POST` | `/api/publicar/proyectos/{cid}/perfil` | Apunta el perfil de Upload-Post del proyecto: {perfil, crear?}. Si ya |
-| `GET` | `/api/publicar/proyectos/{cid}/perfiles` | Los perfiles que hay de verdad en Upload-Post, para elegir uno: los que |
-| `GET` | `/api/publicar/proyectos/{cid}/tableros` | Los tableros de Pinterest del perfil del proyecto: [{id, nombre}]. |
-| `POST` | `/api/publicar/refrescar` | Pregunta a Upload-Post por los envios que siguen en el aire. |
-| `GET` | `/api/publicar/resultados` | El resumen de un proyecto (lo que ya se sabe; no pregunta a nadie). |
-| `GET` | `/api/publicar/videos/{pid}` | La ficha de publicar de un video: redes, textos, encaje, envios. |
-| `PUT` | `/api/publicar/videos/{pid}` | {redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?} |
-| `POST` | `/api/publicar/videos/{pid}/a-mano` | «Lo he subido yo»: {red, url?}. Queda en el historial. |
-| `POST` | `/api/publicar/videos/{pid}/enviar` | {redes, modo: ahora|programar|pendiente, cuando?, confirmado, repetir?} |
-| `POST` | `/api/publicar/videos/{pid}/envios/{eid}/cancelar` | Cancela lo programado (en Upload-Post) o lo que esperaba tu OK, y quita |
-| `POST` | `/api/publicar/videos/{pid}/envios/{eid}/confirmar` | Un envio que esperaba tu OK sale: {confirmado, modo?, cuando?}. |
-| `POST` | `/api/publicar/videos/{pid}/envios/{eid}/reintentar` | Vuelve a mandar un envio que quedo en «comprobar», con su misma clave de |
-| `GET` | `/api/publicar/videos/{pid}/fotograma` | El fotograma del momento `ms` (vista pequeña), para elegir la portada. |
-| `POST` | `/api/publicar/videos/{pid}/metricas` | Pide las cifras de lo publicado de este video: {forzar?}. |
-| `POST` | `/api/publicar/videos/{pid}/portada` | Sube una imagen de portada (multipart, campo «portada»). |
-| `GET` | `/api/publicar/videos/{pid}/portada.jpg` | La imagen de portada subida para este vídeo. |
-| `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
-| `GET` | `/api/parrilla/cuentas` | Las cuentas ya leídas, las conexiones (sin claves) y el gasto del mes. |
-| `PUT` | `/api/parrilla/cuentas/conexiones` | {youtube_clave?, meta_token?, ig_id?, apify_token?, pago?, tope_usd?} ("" quita una). |
-| `POST` | `/api/parrilla/cuentas/conexiones/instagram` | Con el token de Meta puesto: tu cuenta profesional (se guarda si es una). |
-| `POST` | `/api/parrilla/cuentas/leer` | {texto, red?, cuantos?, forzar?, pagar?} -> el trabajo (se sigue preguntando). |
-| `POST` | `/api/parrilla/cuentas/plan` | {texto, red?, cuantos?} -> qué vía se usaría y cuánto costaría. |
-| `GET` | `/api/parrilla/cuentas/trabajos/{tid}` | — |
-| `DELETE` | `/api/parrilla/cuentas/{red}/{usuario}` | — |
-| `GET` | `/api/parrilla/cuentas/{red}/{usuario}` | — |
-| `POST` | `/api/parrilla/cuentas/{red}/{usuario}/analizar` | Claude dice qué le funciona a esa cuenta -> el trabajo. |
-| `GET` | `/api/parrilla/proyectos/{cid}/chats` | Las conversaciones del proyecto, la más nueva primero. |
-| `POST` | `/api/parrilla/proyectos/{cid}/chats` | Una conversación nueva: {modelo?}. No se guarda hasta el primer mensaje. |
-| `DELETE` | `/api/parrilla/proyectos/{cid}/chats/{chid}` | — |
-| `GET` | `/api/parrilla/proyectos/{cid}/chats/{chid}` | — |
-| `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/cancelar` | — |
-| `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/guardar` | Los guiones de una respuesta a la Parrilla: {turno, indices?, matriz?, nombre?}. |
-| `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/mensajes` | Un mensaje (multipart): «texto», «web» (1/0), «resultados» (1/0), «modelo» |
-| `POST` | `/api/parrilla/proyectos/{cid}/desde-cuenta` | Guiones para ESTE proyecto con lo que le funciona a una cuenta ajena: |
-| `POST` | `/api/parrilla/proyectos/{cid}/desde-resultados` | Claude escribe guiones a partir de lo que mejor funcionó: {claves?, dias?, |
-| `POST` | `/api/parrilla/proyectos/{cid}/guiones/{gid}/marca` | «Usar su marca para el proyecto»: {pisar?} -> {marca, cambiados}. |
-| `GET` | `/api/parrilla/proyectos/{cid}/marca` | La marca del cliente guardada en el proyecto, con sus campos. |
-| `PUT` | `/api/parrilla/proyectos/{cid}/marca` | {quien?, mostrar?, evitar?, tono?, cta?, otras?} -> la marca. |
-| `GET` | `/api/parrilla/proyectos/{cid}/resultados` | Lo que mejor funcionó en el proyecto (solo lo guardado). |
-| `GET` | `/api/publicar/palabra-clave` | La palabra clave y la zona del proyecto de un estilo, para sugerirlas en |
-| `POST` | `/api/publicar/proyectos/{cid}/palabras` | Claude propone la palabra clave principal, las secundarias y la zona del |
-| `POST` | `/api/publicar/videos/{pid}/ganchos` | Tres ganchos para la primera línea de una red: {red}. |
-| `POST` | `/api/publicar/videos/{pid}/ganchos/usar` | Pone el gancho elegido como primera línea: {red, indice}. |
-| `POST` | `/api/publicar/videos/{pid}/optimizar` | Claude revisa el SEO de los textos: {redes}. Deja una PROPUESTA campo a |
-| `GET` | `/api/parrilla/plantilla` | Un guion en blanco en el formato del Studio, para «Escribir uno». |
-| `GET` | `/api/parrilla/proyectos` | Los proyectos que se pueden ver, con cuántos guiones tiene cada uno, y |
-| `GET` | `/api/parrilla/proyectos/{cid}` | Las matrices del proyecto y sus guiones, con el estado al día. |
-| `POST` | `/api/parrilla/proyectos/{cid}/convertir` | Claude convierte lo pegado al formato: {texto, modo, matriz?, nombre?, |
-| `POST` | `/api/parrilla/proyectos/{cid}/guiones` | Sin Claude: {texto (ya en el formato), matriz?, nombre?} -> {matriz, guiones} |
-| `DELETE` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | — |
-| `GET` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | Un guion entero: el texto, lo leído y lo que iría al Encargo. |
-| `PUT` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | {texto?, uso?, formato?, duracion_s?, estado?} -> el guion. |
-| `POST` | `/api/parrilla/proyectos/{cid}/guiones/{gid}/encargo` | {indice?, estilo?} -> lo que la pantalla pone en «Un vídeo nuevo». El |
-| `POST` | `/api/parrilla/proyectos/{cid}/matrices` | {nombre} -> {id} |
-| `DELETE` | `/api/parrilla/proyectos/{cid}/matrices/{mid}` | — |
-| `PUT` | `/api/parrilla/proyectos/{cid}/matrices/{mid}` | {nombre} |
-| `POST` | `/api/parrilla/proyectos/{cid}/pedir` | Claude escribe guiones nuevos: {peticion, cuantos, modo, matriz?, nombre?, |
-| `POST` | `/api/parrilla/proyectos/{cid}/subir` | Una matriz en Word, Excel, PDF o texto (multipart: «documento», «modo», |
-| `DELETE` | `/api/parrilla/trabajos/{tid}` | Quita de la pantalla un trabajo terminado (el aviso de listo o de error). |
-| `GET` | `/api/parrilla/trabajos/{tid}` | Cómo va una conversión: {estado: trabajando|listo|error, avance, ...}. |
 | `GET` | `/api/trabajos` | Trabajos conocidos, opcionalmente de un solo proyecto. |
 | `GET` | `/api/trabajos/{tid}` | Estado y progreso de un trabajo. |
 | `POST` | `/api/trabajos/{tid}/cancelar` | Pide la cancelacion cooperativa de un trabajo. |
@@ -184,11 +112,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/bitacora` | Historial estructurado del proyecto. |
 | `GET` | `/api/proyectos/{pid}/bitacora/llm` | Historial en texto navegable, pensado para darselo a un LLM. |
 | `GET` | `/api/proyectos/{pid}/coste` | Total del video, desglosado por proveedor, con la linea de cabecera. |
+| `GET` | `/api/proyectos/{pid}/coste/detalle` | EL COSTE DE UN VIDEO, TODO Y DESGLOSADO (11-10-2026). |
 | `GET` | `/api/proyectos/{pid}/coste/eventos` | Detalle de cada consumo, filtrable por proveedor, paso y unidad. |
-| `GET` | `/api/proyectos/{pid}/coste/detalle` | El coste de un vídeo, todo y desglosado: imágenes nuevas/rehechas/personajes, voz y regrabaciones, Claude, música y efectos, su estilo y prometido frente a gastado de cada tanda. |
-| `GET` | `/api/presets-light/{preset_id}/coste` | Lo que costó hacer un estilo (su taller), desglosado. |
-| `POST` | `/api/proyectos/{pid}/exportar` | Prepara el vídeo, o una parte, para descargar (gratis, no toca el proyecto): {que: video, partes, subtitulos, logo} · {que: audio, parte} · {que: zip}. |
-| `GET` | `/api/proyectos/{pid}/exportes/{ruta:path}` | Un fichero preparado por /exportar, con su nombre de descarga. |
 | `GET` | `/api/proyectos/{pid}/coste/flujo` | Coste en vivo por SSE, para que la cabecera se mueva mientras corre un paso. |
 | `GET` | `/api/proyectos/{pid}/coste/por-paso` | Desglose por paso del pipeline: que fase se come el presupuesto. |
 | `PUT` | `/api/proyectos/{pid}/coste/presupuesto` | Fija el presupuesto en dolares del video (null para quitarlo). |
@@ -255,14 +180,14 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/direccion` | Qué se ve en cada plano: lo dirigido, y los planos que lo admiten. |
 | `PUT` | `/api/proyectos/{pid}/direccion` | Guarda qué se ve en cada plano. Un texto vacío la quita. |
 | `POST` | `/api/proyectos/{pid}/direccion/proponer` | Escribe qué se ve en cada plano, con TODOS los planos delante de una vez. |
+| `POST` | `/api/proyectos/{pid}/imagenes/calidad` | REHACE LAS IMAGENES QUE SIGUEN EN OTRA CALIDAD, y solo esas. |
 | `GET` | `/api/proyectos/{pid}/imagenes/cola` | La cola de notas de imagenes: cual se dibuja, cuanto lleva y que espera. |
 | `DELETE` | `/api/proyectos/{pid}/imagenes/cola/{nid}` | Saca una nota de la cola (la que ya se esta dibujando no se para). |
-| `POST` | `/api/proyectos/{pid}/imagenes/calidad` | Rehace SOLO las imagenes de plano que siguen en otra calidad que la del video: {imagenes: cuantas se confirmaron} (409 si ya no son esas o hay algo en marcha). |
 | `POST` | `/api/proyectos/{pid}/imagenes/rehacer` | Pone en la cola las notas de imagenes: {notas?: [ids], desde_cero?} (sin ids, todas). |
-| `GET` | `/api/proyectos/{pid}/imagenes/revision` | El revisor de imágenes: la última revisión, sus notas sin aplicar, cuántas faltan por mirar, el modo, los topes y el precio por imagen. |
-| `POST` | `/api/proyectos/{pid}/imagenes/revision/aplicar` | Rehace por la cola las notas pendientes del revisor: {notas?: [ids]} (sin ids, todas); las de «sustituye», desde cero. |
-| `POST` | `/api/proyectos/{pid}/imagenes/revision/descartar` | «Está bien así»: {plano}. Quita la nota pendiente del revisor de ese plano y no la vuelve a marcar mientras la imagen no cambie. |
-| `POST` | `/api/proyectos/{pid}/imagenes/revisar` | Revisa las imágenes con su guion, estilo y reglas y deja una nota por plano a corregir: {planos?: [ids], forzar?}. No rehace nada. -> {trabajo_id} |
+| `POST` | `/api/proyectos/{pid}/imagenes/revisar` | Revisa las imagenes: {planos?: [ids], forzar?}. Sin planos, las que no se |
+| `GET` | `/api/proyectos/{pid}/imagenes/revision` | La ultima revision, las notas del revisor sin aplicar, lo que falta por |
+| `POST` | `/api/proyectos/{pid}/imagenes/revision/aplicar` | Rehace las notas pendientes del revisor ({notas?: [ids]}; sin ids, todas) |
+| `POST` | `/api/proyectos/{pid}/imagenes/revision/descartar` | «Esta imagen está bien así»: {plano}. Quita la nota pendiente del revisor |
 
 ## Sonido y transiciones
 
@@ -276,9 +201,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/sonido/banda` | Monta la banda sonora SOLA: un tema por tramo, elegido por el ritmo. |
 | `PUT` | `/api/proyectos/{pid}/sonido/efecto` | Fija UN sonido para un papel ({papel, efecto}) o lo devuelve a automático |
 | `POST` | `/api/proyectos/{pid}/sonido/efectos` | Llena el banco de efectos del canal para los papeles que se pidan. |
+| `PUT` | `/api/proyectos/{pid}/sonido/efectos/volumen` | Fija cuánto se oyen los efectos ({nivel: bajos|normales|altos}) y, si |
 | `POST` | `/api/proyectos/{pid}/sonido/musica` | Temas de Jamendo que pegan con el tono. Devuelve candidatos, no elige. |
 | `POST` | `/api/proyectos/{pid}/sonido/vetados` | Prohíbe un efecto en TODO el canal, o levanta el veto con `quitar`. |
-| `PUT` | `/api/proyectos/{pid}/sonido/efectos/volumen` | Cuánto se oyen los efectos ({nivel: bajos, normales, altos}); si el vídeo está al día, vuelve a mezclar. |
 | `GET` | `/api/proyectos/{pid}/transiciones` | Las transiciones que existen, con su GLSL, y cuales entran en este video. |
 
 ## Render y montaje
@@ -290,14 +215,11 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/capturas/aplicar` | Traduce las capturas a instruccion y rehace SOLO las escenas tocadas. |
 | `GET` | `/api/proyectos/{pid}/capturas/contexto` | Donde cae un instante y con que material se compone ese fotograma. |
 | `DELETE` | `/api/proyectos/{pid}/capturas/{cid}` | Borra una captura y su PNG. |
+| `GET` | `/api/proyectos/{pid}/montaje` | El montaje de este video, las transiciones elegidas y si esta aplicado. |
+| `PUT` | `/api/proyectos/{pid}/montaje` | {montaje?: {movimiento, subtitulos, gancho, cifras, barra}, transiciones?: [..]} |
+| `POST` | `/api/proyectos/{pid}/montaje/aplicar` | Rehace las capas y vuelve a montar el video con el montaje nuevo. Ni una imagen. |
 | `GET` | `/api/proyectos/{pid}/montaje/notas` | Lo escrito sobre el vídeo terminado. No toca ninguna firma. |
 | `PUT` | `/api/proyectos/{pid}/montaje/notas` | Guarda la nota del vídeo entero. Autoguardado, como todo lo demás. |
-| `GET` | `/api/montaje` | Lo que hace falta para elegir el montaje antes de que exista el vídeo: el de los cortos, el de siempre, hasta cuántos segundos es corto y el catálogo de transiciones con su GLSL. |
-| `GET` | `/api/proyectos/{pid}/montaje` | El montaje del vídeo (movimiento, subtítulos, gancho, cifras, barra), las transiciones elegidas y si está pendiente de aplicar. |
-| `PUT` | `/api/proyectos/{pid}/montaje` | Cambia el montaje o las transiciones. Solo guarda lo que difiere de siempre; volver a lo de siempre quita la clave. 409 mientras se monta. |
-| `POST` | `/api/proyectos/{pid}/montaje/aplicar` | Rehace las capas y vuelve a montar el vídeo con el montaje nuevo. Ni una imagen. 409 si aún no está montado. |
-| `GET` | `/api/proyectos/{pid}/planos/montaje` | El movimiento y la 2.5D elegidos para cada plano: `{video, planos: {sid: {movimiento?, profundidad?}}, planos_del_video, no_aplica, niveles, profundidad: {disponible, por_que}}`. `no_aplica` son las cartelas y cabeceras, que llevan siempre lo de siempre. |
-| `PUT` | `/api/proyectos/{pid}/planos/{sid}/montaje` | `{movimiento?: quieto\|sobrio\|vivo\|dinamico\|null, profundidad?: true\|false\|null}`. null es «como el vídeo»; lo que queda vacío quita la clave (regla 1). Va en `callouts.unidades["escena:SID"].montaje`: deja obsoleto SOLO ese plano. 400 valor raro o cartela, 404 plano que no existe, 409 2.5D sin modelo o vídeo montándose. |
 
 ## Presets del canal
 
@@ -328,18 +250,17 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/presets-light/talleres/{taller_id}` | Tira un intento a medias. A la papelera de proyectos, no al vacio. |
 | `DELETE` | `/api/presets-light/{preset_id}` | A la papelera de presets, y su taller con el. |
 | `PUT` | `/api/presets-light/{preset_id}` | El nombre, el idioma y la guia de tono: lo que se cambia a mano. |
-| `GET` | `/api/presets-light/{preset_id}/reglas` | Las reglas del estilo. -> {reglas, gravedades, maximo} |
-| `PUT` | `/api/presets-light/{preset_id}/reglas` | Guarda las reglas del estilo: {reglas: [{nombre, texto, palabras?, gravedad?, en?}]}; una lista vacía las quita. No toca ningún vídeo. |
-| `POST` | `/api/reglas-estilo/afinar` | Claude reescribe una regla para la IA de imágenes: {texto, nombre?, palabras?} -> {id}; la propuesta, en GET. No guarda nada. |
-| `GET` | `/api/reglas-estilo/afinar/{rid}` | Cómo va «Afinar con Claude», y la propuesta al terminar. |
 | `GET` | `/api/presets-light/{preset_id}/aportadas` | Las imagenes de referencia de un estilo, con lo que se dijo de cada una. |
 | `PUT` | `/api/presets-light/{preset_id}/aportadas` | Guarda lo que se dice de cada imagen y las ★: {descripciones, destacadas}. |
 | `GET` | `/api/presets-light/{preset_id}/aportadas/{nombre}/imagen` | Una de tus imagenes de referencia, tal cual la subiste. |
+| `GET` | `/api/presets-light/{preset_id}/coste` | Lo que costo hacer este estilo (su taller), desglosado. |
 | `POST` | `/api/presets-light/{preset_id}/duplicar` | Una copia del estilo, con su taller. |
 | `GET` | `/api/presets-light/{preset_id}/laminas` | Las laminas de un estilo, limpias y con lo que ensena cada una. |
 | `POST` | `/api/presets-light/{preset_id}/laminas` | Una accion sobre las laminas de un estilo. |
 | `GET` | `/api/presets-light/{preset_id}/laminas/{lamina}/imagen` | Una lamina LIMPIA, sin texto encima: la que va en la hoja de cada plano. |
 | `POST` | `/api/presets-light/{preset_id}/regenerar` | Rehace UNA de las tres partes con una frase de feedback. |
+| `GET` | `/api/presets-light/{preset_id}/reglas` | Las reglas de un estilo. -> {reglas, gravedades, maximo} |
+| `PUT` | `/api/presets-light/{preset_id}/reglas` | Guarda las reglas de un estilo: {reglas: [{id?, nombre, texto, palabras?, |
 | `POST` | `/api/presets-light/{preset_id}/video` | Un proyecto de video nuevo con ese estilo ya aplicado. -> la ficha. |
 | `POST` | `/api/presets-light/{preset_id}/voz/previsualizar` | Unos segundos con la voz de este estilo, para escucharla. |
 
@@ -349,8 +270,6 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 |---|---|---|
 | `GET` | `/api/ajustes` | Lo que hay puesto, y lo que cuesta cada calidad de imagen. |
 | `PUT` | `/api/ajustes` | Cambia ajustes. NO toca ningun proyecto: es el valor de los NUEVOS. |
-| `GET` | `/api/pronunciaciones` | Las palabras que la voz dice como se escriben aqui (sobre todo en ingles). |
-| `PUT` | `/api/pronunciaciones` | {lista: [{escrito, dicho}]} -> la lista guardada. No graba nada ni paga nada. |
 | `GET` | `/api/ajustes-cli` | Catalogo de modelos y esfuerzos, y en que pasos se puede elegir. |
 | `GET` | `/api/estadisticas` | Historico de tiempos reales, entre todos los proyectos. |
 | `POST` | `/api/estadisticas/valoracion` | Anota si el resultado de un ajuste gusto o no. |
@@ -405,14 +324,98 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/clientes/{cid}` | Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto. |
 | `PUT` | `/api/clientes/{cid}` | Renombra, oculta o pone clave: {nombre?, oculto?, clave?} ("" la quita). |
 | `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
+| `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
+| `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
+| `GET` | `/api/inicio/resumen` | Lo del Inicio que no sale de otras rutas, en una sola llamada. |
 | `POST` | `/api/logos` | Guarda un logo sin video todavia: el de un borrador o el de un proyecto. |
 | `GET` | `/api/logos/{nombre}` | Un logo subido que todavia no esta en ningun video. |
+| `GET` | `/api/montaje` | Lo que la pantalla necesita para elegir el montaje antes de que exista |
 | `POST` | `/api/musica/buscar` | Temas de Jamendo por animo, sin video: el borrador de un video nuevo. |
 | `GET` | `/api/musica/escucha` | Pasa por aqui la escucha de un tema de Jamendo antes de elegirlo. |
 | `GET` | `/api/musica/propia/{archivo}` | Un tema tuyo del banco, para escucharlo. |
 | `POST` | `/api/ortografia/textos` | Revisa la ortografia de campos sueltos que se ven o se publican: {textos: |
 | `POST` | `/api/ortografia/textos/descartar` | Lo que se deja como estaba: {rid, ids: [...]}. No se vuelve a proponer. |
 | `GET` | `/api/ortografia/textos/{rid}` | Como va la revision de unos campos sueltos, y lo que propone al terminar. |
+| `GET` | `/api/parrilla/cuentas` | Las cuentas ya leídas, las conexiones (sin claves) y el gasto del mes. |
+| `PUT` | `/api/parrilla/cuentas/conexiones` | {youtube_clave?, meta_token?, ig_id?, apify_token?, pago?, tope_usd?} ("" quita una). |
+| `POST` | `/api/parrilla/cuentas/conexiones/instagram` | Con el token de Meta puesto: tu cuenta profesional (se guarda si es una). |
+| `POST` | `/api/parrilla/cuentas/leer` | {texto, red?, cuantos?, forzar?, pagar?} -> el trabajo (se sigue preguntando). |
+| `POST` | `/api/parrilla/cuentas/plan` | {texto, red?, cuantos?} -> qué vía se usaría y cuánto costaría. |
+| `GET` | `/api/parrilla/cuentas/trabajos/{tid}` | — |
+| `DELETE` | `/api/parrilla/cuentas/{red}/{usuario}` | — |
+| `GET` | `/api/parrilla/cuentas/{red}/{usuario}` | — |
+| `POST` | `/api/parrilla/cuentas/{red}/{usuario}/analizar` | Claude dice qué le funciona a esa cuenta -> el trabajo. |
+| `GET` | `/api/parrilla/plantilla` | Un guion en blanco en el formato del Studio, para «Escribir uno». |
+| `GET` | `/api/parrilla/proyectos` | Los proyectos que se pueden ver, con cuántos guiones tiene cada uno, y |
+| `GET` | `/api/parrilla/proyectos/{cid}` | Las matrices del proyecto y sus guiones, con el estado al día. |
+| `GET` | `/api/parrilla/proyectos/{cid}/chats` | Las conversaciones del proyecto, la más nueva primero. |
+| `POST` | `/api/parrilla/proyectos/{cid}/chats` | Una conversación nueva: {modelo?}. No se guarda hasta el primer mensaje. |
+| `DELETE` | `/api/parrilla/proyectos/{cid}/chats/{chid}` | — |
+| `GET` | `/api/parrilla/proyectos/{cid}/chats/{chid}` | — |
+| `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/cancelar` | — |
+| `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/guardar` | Los guiones de una respuesta a la Parrilla: {turno, indices?, matriz?, nombre?}. |
+| `POST` | `/api/parrilla/proyectos/{cid}/chats/{chid}/mensajes` | Un mensaje (multipart): «texto», «web» (1/0), «resultados» (1/0), «modelo» |
+| `POST` | `/api/parrilla/proyectos/{cid}/convertir` | Claude convierte lo pegado al formato: {texto, modo, matriz?, nombre?, |
+| `POST` | `/api/parrilla/proyectos/{cid}/desde-cuenta` | Guiones para ESTE proyecto con lo que le funciona a una cuenta ajena: |
+| `POST` | `/api/parrilla/proyectos/{cid}/desde-resultados` | Claude escribe guiones a partir de lo que mejor funcionó: {claves?, dias?, |
+| `POST` | `/api/parrilla/proyectos/{cid}/guiones` | Sin Claude: {texto (ya en el formato), matriz?, nombre?} -> {matriz, guiones} |
+| `DELETE` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | — |
+| `GET` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | Un guion entero: el texto, lo leído y lo que iría al Encargo. |
+| `PUT` | `/api/parrilla/proyectos/{cid}/guiones/{gid}` | {texto?, uso?, formato?, duracion_s?, estado?} -> el guion. |
+| `POST` | `/api/parrilla/proyectos/{cid}/guiones/{gid}/encargo` | {indice?, estilo?} -> lo que la pantalla pone en «Un vídeo nuevo». El |
+| `POST` | `/api/parrilla/proyectos/{cid}/guiones/{gid}/marca` | «Usar su marca para el proyecto»: {pisar?} -> {marca, cambiados}. |
+| `GET` | `/api/parrilla/proyectos/{cid}/marca` | La marca del cliente guardada en el proyecto, con sus campos. |
+| `PUT` | `/api/parrilla/proyectos/{cid}/marca` | {quien?, mostrar?, evitar?, tono?, cta?, otras?} -> la marca. |
+| `POST` | `/api/parrilla/proyectos/{cid}/matrices` | {nombre} -> {id} |
+| `DELETE` | `/api/parrilla/proyectos/{cid}/matrices/{mid}` | — |
+| `PUT` | `/api/parrilla/proyectos/{cid}/matrices/{mid}` | {nombre} |
+| `POST` | `/api/parrilla/proyectos/{cid}/pedir` | Claude escribe guiones nuevos: {peticion, cuantos, modo, matriz?, nombre?, |
+| `GET` | `/api/parrilla/proyectos/{cid}/resultados` | Lo que mejor funcionó en el proyecto (solo lo guardado). |
+| `POST` | `/api/parrilla/proyectos/{cid}/subir` | Una matriz en Word, Excel, PDF o texto (multipart: «documento», «modo», |
+| `DELETE` | `/api/parrilla/trabajos/{tid}` | Quita de la pantalla un trabajo terminado (el aviso de listo o de error). |
+| `GET` | `/api/parrilla/trabajos/{tid}` | Cómo va una conversión: {estado: trabajando|listo|error, avance, ...}. |
+| `GET` | `/api/pronunciaciones` | Las palabras que la voz dice como se escriben aqui (sobre todo en ingles). |
+| `PUT` | `/api/pronunciaciones` | {lista: [{escrito, dicho}]} -> la lista guardada. No graba nada ni paga nada. |
+| `GET` | `/api/publicar/cola` | Los videos listos para publicar y los envios de la semana (hora de Lima). |
+| `GET` | `/api/publicar/estado` | Si hay clave de Upload-Post (y de donde sale). Nunca la clave. |
+| `GET` | `/api/publicar/horarios` | El mejor día y hora de cada red con lo propio (o el punto de partida |
+| `GET` | `/api/publicar/informe` | El informe del mes de un proyecto, para el cliente: {proyecto, mes}. |
+| `GET` | `/api/publicar/lo-que-funciono` | Los posts que mejor fueron: {proyecto?, dias, red?, por, cuantos}. |
+| `GET` | `/api/publicar/metricas-auto` | La configuracion, la ultima vuelta, la proxima y lo que gasta. Los avisos |
+| `PUT` | `/api/publicar/metricas-auto` | Guarda la eleccion (tras confirmar el coste en pantalla). |
+| `POST` | `/api/publicar/metricas-auto/ahora` | Una vuelta ya, en segundo plano (puede tardar minutos). |
+| `POST` | `/api/publicar/metricas-auto/coste` | Lo que gastaria una eleccion SIN guardarla: {frecuencia?, hora?, posts?}. |
+| `GET` | `/api/publicar/palabra-clave` | La palabra clave y la zona del proyecto de un estilo, para sugerirlas en |
+| `GET` | `/api/publicar/palabras-y-ganchos` | Qué palabras clave y qué primeras líneas fueron mejor. No pregunta a nadie. |
+| `POST` | `/api/publicar/probar` | Prueba la clave contra Upload-Post sin gastar ninguna subida. |
+| `GET` | `/api/publicar/proyectos` | Cada proyecto con lo fijo de publicar y sus cuentas (lo ultimo visto). |
+| `PUT` | `/api/publicar/proyectos/{cid}` | Lo fijo de un proyecto: {perfil, redes, hora, firma, hashtags, tono, |
+| `POST` | `/api/publicar/proyectos/{cid}/conectar` | El enlace (48 h) para conectar o reconectar las cuentas: {redes?, volver_a?}. |
+| `POST` | `/api/publicar/proyectos/{cid}/cuentas` | Pregunta a Upload-Post que cuentas tiene conectadas el perfil del proyecto |
+| `POST` | `/api/publicar/proyectos/{cid}/metricas` | Pide las cifras de lo publicado del proyecto y los seguidores de sus |
+| `POST` | `/api/publicar/proyectos/{cid}/palabras` | Claude propone la palabra clave principal, las secundarias y la zona del |
+| `POST` | `/api/publicar/proyectos/{cid}/perfil` | Apunta el perfil de Upload-Post del proyecto: {perfil, crear?}. Si ya |
+| `GET` | `/api/publicar/proyectos/{cid}/perfiles` | Los perfiles que hay de verdad en Upload-Post, para elegir uno: los que |
+| `GET` | `/api/publicar/proyectos/{cid}/tableros` | Los tableros de Pinterest del perfil del proyecto: [{id, nombre}]. |
+| `POST` | `/api/publicar/refrescar` | Pregunta a Upload-Post por los envios que siguen en el aire. |
+| `GET` | `/api/publicar/resultados` | El resumen de un proyecto (lo que ya se sabe; no pregunta a nadie). |
+| `GET` | `/api/publicar/videos/{pid}` | La ficha de publicar de un video: redes, textos, encaje, envios. |
+| `PUT` | `/api/publicar/videos/{pid}` | {redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?} |
+| `POST` | `/api/publicar/videos/{pid}/a-mano` | «Lo he subido yo»: {red, url?}. Queda en el historial. |
+| `POST` | `/api/publicar/videos/{pid}/enviar` | {redes, modo: ahora|programar|pendiente, cuando?, confirmado, repetir?} |
+| `POST` | `/api/publicar/videos/{pid}/envios/{eid}/cancelar` | Cancela lo programado (en Upload-Post) o lo que esperaba tu OK, y quita |
+| `POST` | `/api/publicar/videos/{pid}/envios/{eid}/confirmar` | Un envio que esperaba tu OK sale: {confirmado, modo?, cuando?}. |
+| `POST` | `/api/publicar/videos/{pid}/envios/{eid}/reintentar` | Vuelve a mandar un envio que quedo en «comprobar», con su misma clave de |
+| `GET` | `/api/publicar/videos/{pid}/fotograma` | El fotograma del momento `ms` (vista pequeña), para elegir la portada. |
+| `POST` | `/api/publicar/videos/{pid}/ganchos` | Tres ganchos para la primera línea de una red: {red}. |
+| `POST` | `/api/publicar/videos/{pid}/ganchos/usar` | Pone el gancho elegido como primera línea: {red, indice}. |
+| `POST` | `/api/publicar/videos/{pid}/metricas` | Pide las cifras de lo publicado de este video: {forzar?}. |
+| `POST` | `/api/publicar/videos/{pid}/optimizar` | Claude revisa el SEO de los textos: {redes}. Deja una PROPUESTA campo a |
+| `POST` | `/api/publicar/videos/{pid}/portada` | Sube una imagen de portada (multipart, campo «portada»). |
+| `GET` | `/api/publicar/videos/{pid}/portada.jpg` | La imagen de portada subida para este vídeo. |
+| `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
+| `POST` | `/api/reglas-estilo/afinar` | Claude reescribe una regla para el generador: {texto, nombre?, palabras?}. |
+| `GET` | `/api/reglas-estilo/afinar/{rid}` | Como va «Afinar con Claude», y la propuesta al terminar. |
 | `GET` | `/api/sistema/estilos-perdidos` | Los videos que apuntan a imagenes de estilo que ya no estan. Solo mira. |
 | `GET` | `/api/sistema/guias` | Como rellenar cada campo de texto: plantilla, ejemplo y prompt para otra IA. |
 | `POST` | `/api/sistema/guias/{gid}/revisar` | Lanza la revision de un texto contra la guia de su campo. -> {id} |
@@ -428,4 +431,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**312 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**317 endpoints.** Escrito por `generar_api.py` desde `app.py`.

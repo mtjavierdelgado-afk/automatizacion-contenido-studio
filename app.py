@@ -16158,13 +16158,24 @@ def _imagenes_de_plano(ctx):
 
 
 @app.get("/api/proyectos/{pid}/imagenes/zip")
-def descargar_imagenes_zip(pid: str):
+def descargar_imagenes_zip(pid: str, peticion: Request, abiertos: str = Query(default="")):
     """Todas las imágenes de plano del vídeo en un .zip, en orden (solo lee)."""
     import tempfile  # noqa: PLC0415
     import zipfile  # noqa: PLC0415
     from starlette.background import BackgroundTask  # noqa: PLC0415
 
     ctx = contexto(pid)
+    # UN PROYECTO CON CLAVE SIN ABRIR NO SE BAJA, como en Publicar
+    # (`_ctx_publicable`). El pase llega en `X-Estudio-Abiertos` o, porque un
+    # enlace `<a download>` no puede llevar cabeceras, en `?abiertos=`: es el
+    # mismo pase firmado que la pantalla ya manda, no la clave.
+    try:
+        cerrados = CLIENTES.cerrados_para(
+            raiz_proyectos(), abiertos or peticion.headers.get("x-estudio-abiertos"))
+    except Exception:                                       # noqa: BLE001
+        cerrados = set()
+    if cerrados and _cliente_del_video(ctx.proyecto) in cerrados:
+        raise ErrorApi(404, f"proyecto desconocido: {pid}")
     imagenes = _imagenes_de_plano(ctx)
     if not imagenes:
         raise ErrorApi(404, "este vídeo todavía no tiene imágenes que descargar")

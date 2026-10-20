@@ -4869,6 +4869,25 @@ def probar_descargar_imagenes(cliente, carpeta):
     zips_despues = {n for n in os.listdir(temporal) if n.startswith("imagenes_") and n.endswith(".zip")}
     igual(zips_despues - zips_antes, set(), "y el .zip temporal se borra al mandarlo")
 
+    # UN PROYECTO CON CLAVE: sin abrirlo no se baja; con su pase, sí (en la
+    # cabecera de siempre o en `?abiertos=`, que es lo que lleva el enlace)
+    _r, datos = cliente.post("/api/clientes", {"nombre": "Con clave para el zip"})
+    cid = (datos.get("cliente") or {}).get("id") or ""
+    cliente.put(f"/api/clientes/{cid}", {"clave": "4321"})
+    cliente.put(f"/api/clientes/videos/{pid}", {"cliente": cid})
+    respuesta, _d = cliente.get(ruta_zip)
+    igual(respuesta.status_code, 404, "el de un proyecto con clave sin abrir da 404")
+    _r, abierto = cliente.post(f"/api/clientes/{cid}/abrir", {"clave": "4321"})
+    pase = f"{cid}.{abierto.get('pase')}"
+    respuesta, _d = cliente.get(ruta_zip, headers={"X-Estudio-Abiertos": pase})
+    igual(respuesta.status_code, 200, "abierto (con su pase en la cabecera), se baja")
+    respuesta, _d = cliente.get(ruta_zip, params={"abiertos": pase})
+    igual(respuesta.status_code, 200, "y con el pase en ?abiertos= (el enlace de la pantalla), también")
+    respuesta, _d = cliente.get(ruta_zip, params={"abiertos": f"{cid}.falso"})
+    igual(respuesta.status_code, 404, "con un pase falso, no")
+    cliente.put(f"/api/clientes/videos/{pid}", {"cliente": ""})
+    cliente.pedir("DELETE", f"/api/clientes/{cid}")
+
 
 def probar_montaje(cliente):
     """El montaje (rama montaje-movimiento, 18-10-2026).

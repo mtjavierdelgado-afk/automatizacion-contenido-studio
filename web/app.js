@@ -10541,8 +10541,12 @@ function descargarTodasLasImagenes() {
   const cuantas = escenas.filter(x => x.imagen).length;
   if (!cuantas) return null;
   const v = videoAbierto();
+  /* el pase de un proyecto con clave va en la URL: un <a download> no lleva
+     la cabecera `X-Estudio-Abiertos` que pone `pedir` */
+  const pases = cabeceraDePases();
   return h('a', {
-    clase: 'boton-enlace mini', href: `${API.proyecto(v.pid)}/imagenes/zip`,
+    clase: 'boton-enlace mini',
+    href: `${API.proyecto(v.pid)}/imagenes/zip${pases ? `?abiertos=${encodeURIComponent(pases)}` : ''}`,
     download: `${slugDeDescarga(v.nombre || v.pid)}_imagenes.zip`,
     title: `Las ${cuantas} imágenes de plano en un .zip, en orden y numeradas`,
   }, '⬇ Descargar todas');

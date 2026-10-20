@@ -17062,9 +17062,16 @@ def publicar_cola(peticion: Request, desde: str = Query(default=""),
 
 
 @app.post("/api/publicar/refrescar")
-def publicar_refrescar():
-    """Pregunta a Upload-Post por los envios que siguen en el aire."""
-    return _publicar().refrescar(raiz_proyectos())
+def publicar_refrescar(cuerpo: dict = Body(default=None)):
+    """Pregunta a Upload-Post por los envios que siguen en el aire.
+
+    {lote?}: «Comprobar» de un programado que ya debio salir (20-10-2026): solo
+    ese, ya, sin esperar el respiro; la respuesta trae `estados` de ese lote."""
+    cuerpo = _cuerpo(cuerpo)
+    lote = cuerpo.get("lote")
+    if lote is not None and (not isinstance(lote, str) or not re.fullmatch(r"[a-f0-9]{6,40}", lote)):
+        raise ErrorApi(400, "«lote» es el id de un envío")
+    return _publicar().refrescar(raiz_proyectos(), lote=lote or None)
 
 
 @app.get("/api/publicar/videos/{pid}")

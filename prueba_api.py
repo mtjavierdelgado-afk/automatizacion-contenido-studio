@@ -6955,6 +6955,17 @@ def probar_publicar_20oct(cliente, pid):
     igual(r.status_code, 400, "un formato que no existe: 400")
     r, d = cliente.put(ruta, {"youtube_formato": "auto"})
     igual((r.status_code, (d or {}).get("youtube_formato")), (200, "auto"), "«auto» vuelve a lo de siempre")
+    # 4. «Comprobar» un programado que ya debió salir: /refrescar con su lote
+    r, d = cliente.post("/api/publicar/refrescar", {"lote": "abc123abc123"})
+    igual((r.status_code, (d or {}).get("estados")), (200, []),
+          "POST /api/publicar/refrescar {lote} pregunta por ese envío y dice cómo quedó")
+    r, _d = cliente.post("/api/publicar/refrescar", {"lote": "../../x"})
+    igual(r.status_code, 400, "un lote que no es un id: 400")
+    r, d = cliente.post("/api/publicar/refrescar")
+    igual(r.status_code, 200, "y sin cuerpo sigue como siempre")
+    r, d = cliente.get("/api/publicar/cola")
+    ok(all("debio_salir" in e for e in (d or {}).get("envios") or []),
+       "cada envío de la cola dice si ya debió salir")
 
 
 def probar_espacio_fijo():

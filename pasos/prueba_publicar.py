@@ -2521,6 +2521,89 @@ def prueba_20oct_short():
     ok("youtube_formato" not in P._leer_video(raiz, "corto"), "«auto» no deja nada escrito (lo de siempre)")
 
 
+def prueba_20oct_programado():
+    """Lo programado que ya salió seguía «programado» (a las 12:22, los de las 09:00)."""
+    seccion("12c] 20-10: lo programado cuya hora pasó se pregunta y cambia de estado")
+    raiz = os.path.join(CARPETA, "prog20")
+    os.makedirs(raiz)
+    simulador = os.path.join(CARPETA, "sim_prog20.json")
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    respiro = P.RESPIRO_CONSULTA_S
+    try:
+        cli = P.cliente(raiz)
+        cli.crear_perfil("studio_p")
+        cli.enlace_conectar("studio_p", ["tiktok", "youtube"])
+        mp4 = os.path.join(raiz, "v.mp4")
+        with open(mp4, "wb") as fh:
+            fh.write(b"0" * 2000)
+        info = dict(INFO, pid="prog", mp4=mp4, mp4_huella="p1")
+        ajustes = dict(P.AJUSTES_DEFECTO, perfil="studio_p")
+        P.guardar_ficha(raiz, "prog", {"textos": {"tiktok": {"descripcion": "Hola"},
+                                                  "youtube": {"titulo": "T", "descripcion": "Hola"}}})
+        luego = (P.ahora_lima() + dt.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
+        nuevos = P.enviar(raiz, info, ajustes, {"redes": ["tiktok", "youtube"], "modo": "programar",
+                                                "cuando": luego, "confirmado": True}, en_hilo=False)
+        envios = P._leer_video(raiz, "prog")["envios"]
+        igual(sorted(e["estado"] for e in envios), ["programado", "programado"], "programados para dentro de 2 h")
+        c = P.cola(raiz, [{"pid": "prog", "nombre": "Prog", "montado": True}])
+        ok(all(e.get("debio_salir") is False for e in c["envios"]), "a su hora todavía no: no «debió salir»")
+        # pasa el tiempo: la hora era las 09:00 y son las 12:22 (en el almacén y en el simulador)
+        hace = P.ahora_lima() - dt.timedelta(hours=3, minutes=22)
+        for lote in {e["lote"] for e in nuevos}:
+            P._actualizar_lote(raiz, "prog", lote, lambda e: e.update(cuando=hace.strftime("%Y-%m-%dT%H:%M:%S")))
+        with open(simulador, encoding="utf-8") as fh:
+            sim = json.load(fh)
+        for t in sim["trabajos"].values():
+            t["cuando_utc"] = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=3)).isoformat()
+        with open(simulador, "w", encoding="utf-8") as fh:
+            json.dump(sim, fh)
+        c = P.cola(raiz, [{"pid": "prog", "nombre": "Prog", "montado": True}])
+        ok(c["envios"] and all(e.get("debio_salir") for e in c["envios"]),
+           "pasada su hora, la cola dice que DEBIÓ salir (la pantalla: «debería haber salido a las …»)")
+        f = P.ficha(raiz, info, ajustes)
+        ok(all(e.get("debio_salir") for e in f["envios"]), "y la ficha también")
+        # «Comprobar»: ese lote, ya, sin esperar el respiro
+        P.RESPIRO_CONSULTA_S = 3600
+        lote = nuevos[0]["lote"]
+        try:
+            r1 = P.refrescar(raiz, lote=lote)
+            r2 = P.refrescar(raiz, lote=lote)
+            ok(r1["consultados"] == 1 and r2["consultados"] == 1,
+               f"«Comprobar» pregunta ya, aunque se acabe de preguntar: {r1} {r2}")
+            igual(r2.get("estados"), ["publicado"], "y dice cómo quedó: publicado")
+        except TypeError:
+            ok(False, "«Comprobar» pregunta por un envío concreto (refrescar con lote)")
+        P.RESPIRO_CONSULTA_S = 0
+        for _ in range(3):
+            P.refrescar(raiz)
+        envios = P._leer_video(raiz, "prog")["envios"]
+        igual(sorted(e["estado"] for e in envios), ["publicado", "publicado"], "las dos redes pasan a publicado")
+        ok(all(e.get("url") for e in envios), "con su enlace")
+        # uno programado del que Upload-Post no sabe nada: «comprobar», nunca «programado» para siempre
+        datos = P._leer_video(raiz, "prog")
+        datos["envios"].append({"id": "fantasma", "red": "facebook", "lote": "lote_fantasma",
+                                "estado": "programado", "modo": "programado", "job_id": "no_existe",
+                                "cuando": hace.strftime("%Y-%m-%dT%H:%M:%S"),
+                                "creado": hace.strftime("%Y-%m-%dT%H:%M:%S"), "mp4_huella": "p1"})
+        P._escribir(P._ruta_video(raiz, "prog"), datos)
+        for _ in range(P.VECES_NO_LO_CONOCE + 1):
+            P._ULTIMA_CONSULTA.pop("lote_fantasma", None)
+            P.refrescar(raiz)
+        fantasma = next(e for e in P._leer_video(raiz, "prog")["envios"] if e["id"] == "fantasma")
+        igual(fantasma["estado"], "comprobar",
+              "si Upload-Post no da su estado, pasa a «comprobar» (no sigue «programado»)")
+        ok("debería haber salido" in (fantasma.get("error") or ""), f"y lo dice: {fantasma.get('error')}")
+        try:
+            P.enviar(raiz, info, ajustes, {"redes": ["facebook"], "modo": "ahora", "confirmado": True},
+                     en_hilo=False)
+            ok(False, "y no se deja publicar otra vez sin preguntar")
+        except P.ErrorPublicar:
+            ok(True, "y no se deja publicar otra vez sin preguntar")
+    finally:
+        P.RESPIRO_CONSULTA_S = respiro
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
+
 def main():
     print("PRUEBA DE PUBLICAR")
     prueba_piezas()
@@ -2539,6 +2622,7 @@ def main():
     prueba_emojis()
     prueba_20oct_idioma()
     prueba_20oct_short()
+    prueba_20oct_programado()
     if shutil.which("ffmpeg"):
         prueba_portada()
     if shutil.which("ffmpeg"):

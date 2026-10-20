@@ -20837,14 +20837,14 @@ function programarRelojPublicar() {
     || (PUB.seccion === 'cuentas' && ((PUB.proyectos || {}).proyectos || []).some(x => (x.palabras || {}).trabajando))
     || (['cuentas', 'resultados'].includes(PUB.seccion) && (PUB.metricasAuto || {}).corriendo)
     || (PUB.seccion === 'ficha' && f && (f.escribiendo
-    || (f.envios || []).some(e => ['enviando', 'publicando', 'comprobar'].includes(e.estado))))
+    || (f.envios || []).some(e => envioEnElAirePublicar(e, f.ahora))))
     || (PUB.seccion === 'cola' && PUB.cola && (PUB.cola.envios || []).some(e =>
-      ['enviando', 'publicando', 'comprobar'].includes(e.estado)));
+      envioEnElAirePublicar(e, PUB.cola.ahora)));
   if (!enElAire) return;
   // solo se pregunta a Upload-Post si hay envíos en el aire, y SIN esperarlo:
   // una consulta lenta allí no puede retrasar que se vean los textos
   const hayEnvios = (PUB.seccion === 'ficha' && f && (f.envios || []).some(e =>
-    ['enviando', 'publicando', 'comprobar'].includes(e.estado))) || PUB.seccion === 'cola';
+    envioEnElAirePublicar(e, f.ahora))) || PUB.seccion === 'cola';
   PUB.reloj = setTimeout(async () => {
     if (hayEnvios) {
       const refresco = pedir(rutaPublicar('/refrescar'), { method: 'POST' }).catch(() => null);
@@ -20856,6 +20856,45 @@ function programarRelojPublicar() {
        pedir la ficha y «Claude está escribiendo» no acababa nunca (16-10). */
     cargarPublicar(true);
   }, 4000);
+}
+
+/* EN EL AIRE ES TAMBIÉN LO PROGRAMADO CUYA HORA LLEGA (20-10-2026: a las
+   12:22 seguían «programados» los de las 09:00). Antes solo se preguntaba por
+   lo que subía o se publicaba, y un programado no se volvía a mirar nunca: su
+   hora pasaba y nadie le preguntaba a Upload-Post. Ahora cuenta desde 15 min
+   antes de su hora (para que el reloj esté andando cuando llegue). `ahora` es
+   la hora de Lima del servidor, sin zona, como `cuando`. */
+function envioEnElAirePublicar(e, ahora) {
+  if (['enviando', 'publicando', 'comprobar'].includes(e.estado)) return true;
+  if (e.estado !== 'programado' || !e.cuando) return false;
+  if (e.debio_salir) return true;
+  const quince = Date.parse(`${String(ahora || '').slice(0, 19)}Z`) + 15 * 60000;
+  const cuando = Date.parse(`${String(e.cuando).slice(0, 19)}Z`);
+  return Number.isFinite(quince) && Number.isFinite(cuando) && cuando <= quince;
+}
+
+/* «Comprobar» de un programado que ya debió salir: le pregunta a Upload-Post
+   por ESE envío, ya, y dice cómo quedó. */
+async function comprobarProgramadoPublicar(e) {
+  try {
+    const r = await pedir(rutaPublicar('/refrescar'), { method: 'POST', cuerpo: { lote: e.lote } });
+    const estados = (r.estados || []).map(x => ESTADOS_ENVIO[x] || x);
+    toast(r.ocupado ? 'Upload-Post está ocupado con otra consulta: vuelve a probar en un momento'
+      : estados.length ? `${NOMBRES_RED[e.red] || e.red}: ${estados.join(', ')}` : 'Comprobado', !!r.ocupado);
+  } catch (err) { toast(err.message, true); }
+  if (MODULOS.actual === 'inicio') { cargarInicioModulos(); return; }
+  cargarPublicar(true);
+}
+
+function debioSalirPublicar(e) {
+  if (!e.debio_salir) return null;
+  return h('span', { clase: 'meta debio-salir' }, `debería haber salido a las ${String(e.cuando || '').slice(11, 16)}`);
+}
+
+function botonComprobarPublicar(e) {
+  if (!e.debio_salir || !e.lote) return null;
+  return h('button', { clase: 'mini', title: 'Pregunta ya a Upload-Post si salió',
+    onclick: () => comprobarProgramadoPublicar(e) }, 'Comprobar');
 }
 
 function pararRelojPublicar() {
@@ -20878,6 +20917,7 @@ function olvidarEnvioPublicar() {
 async function irASeccionPublicar(seccion, pid) {
   if (!(await guardarPendientePublicar())) return;
   PUB.seccion = seccion;
+  if (seccion === 'ficha') PUB.avisoCola = null;
   if (pid !== undefined && pid !== PUB.pid) olvidarEnvioPublicar();
   if (pid !== undefined) PUB.pid = pid;
   if (seccion === 'ficha' && pid) PUB.ficha = PUB.ficha && PUB.ficha.pid === pid ? PUB.ficha : null;
@@ -20962,6 +21002,7 @@ function filaEnvioCola(e) {
     e.cliente_nombre ? h('span', { clase: 'meta' }, e.cliente_nombre) : null,
     h('span', { clase: 'crece' }),
     pastillaEstadoEnvio(e.estado),
+    debioSalirPublicar(e), botonComprobarPublicar(e),
     fallo && e.superado ? h('span', { clase: 'meta motivo-cola' },
       e.superado_como === 'reenviado' ? 'se volvió a mandar' : 'ya salió en otro envío') : null,
     fallo && !e.superado ? h('button', { clase: 'mini fantasma', title: 'Quitarlo de «Te necesitan» (no borra nada en la red)',
@@ -20986,7 +21027,7 @@ function refrescarAvisosPublicar() {
 
 /* LA COLA, CON FILTROS (16-10-2026: con muchos vídeos la lista era un caos).
    Buscador, proyecto, estilo, estado y fecha; se acuerdan en este navegador.
-   La semana o el mes, filtrados igual. */
+   El calendario NO se filtra (20-10-2026): enseña siempre todo. */
 const FILTROS_COLA_DEFECTO = { texto: '', proyecto: '', estilo: '', estado: '', fecha: '', agrupar: false };
 
 function filtrosCola() {
@@ -21122,12 +21163,27 @@ function seccionColaPublicar() {
     return pasaFiltroCola({ nombre: e.video, pid: e.pid, cliente: e.cliente, cliente_nombre: e.cliente_nombre, envios: {} });
   };
 
+  const trasEnvio = avisoTrasEnvioCola();
+  if (trasEnvio) caja.appendChild(trasEnvio);
   if (todos.length) caja.appendChild(barraFiltrosCola(todos));
+  /* LOS FILTROS SON DE LA LISTA (notas del 20-10: «el calendario cambia con los
+     filtros y confunde»). El calendario enseña SIEMPRE todo lo de la semana o
+     el mes; los filtros solo cambian «Vídeos listos» y «Te necesitan», y se
+     dice cuántos de estos esconden. */
+  if (filtrando) {
+    caja.appendChild(h('div', { clase: 'meta nota-filtros-cola' },
+      'Los filtros solo cambian la lista de vídeos y «Te necesitan»: el calendario enseña siempre todo lo programado y publicado.'));
+  }
 
-  const atencion = (c.esperan_ok || []).concat(c.fallidos || []).filter(pasaEnvio);
-  if (atencion.length) {
+  // lo programado que ya debió salir y Upload-Post no ha confirmado, también (20-10)
+  const todaAtencion = (c.esperan_ok || []).concat(c.fallidos || [], (c.envios || []).filter(e => e.debio_salir));
+  const atencion = todaAtencion.filter(pasaEnvio);
+  if (atencion.length || todaAtencion.length) {
     const b = h('div', { clase: 'bloque bloque-atencion' }, h('h3', {}, 'Te necesitan'));
     atencion.forEach(e => b.appendChild(filaEnvioCola(e)));
+    if (todaAtencion.length > atencion.length) {
+      b.appendChild(h('div', { clase: 'meta' }, `${todaAtencion.length - atencion.length} más que no cumplen los filtros.`));
+    }
     caja.appendChild(b);
   }
 
@@ -21172,7 +21228,8 @@ function seccionColaPublicar() {
   const rejilla = h('div', { clase: `calendario-publicar${vista === 'mes' ? ' calendario-mes' : ''}` });
   if (vista === 'mes') ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'].forEach(d => rejilla.appendChild(h('div', { clase: 'cab-semana' }, d)));
   const mesActual = PUB.mes || mesDeHoyPublicar();
-  const enviosVisibles = (c.envios || []).filter(e => e.estado !== 'cancelado' && pasaEnvio(e));
+  // el calendario, SIN los filtros (ver arriba)
+  const enviosVisibles = (c.envios || []).filter(e => e.estado !== 'cancelado');
   const TOPE_DIA = vista === 'mes' ? 3 : 99;
   (c.dias || []).forEach(dia => {
     const fuera = vista === 'mes' && !dia.startsWith(mesActual);
@@ -21181,8 +21238,9 @@ function seccionColaPublicar() {
     const delDia = enviosVisibles.filter(e => String(e.cuando || '').startsWith(dia));
     if (!delDia.length && vista !== 'mes') columna.appendChild(h('div', { clase: 'meta dia-vacio' }, '—'));
     delDia.slice(0, TOPE_DIA).forEach(e => columna.appendChild(h('button', {
-      clase: `envio-dia ${CLASE_ESTADO[e.estado] || ''}`,
-      title: `${NOMBRES_RED[e.red]} · ${e.video} · ${ESTADOS_ENVIO[e.estado] || e.estado}`,
+      clase: `envio-dia ${CLASE_ESTADO[e.estado] || ''}${e.debio_salir ? ' debio-salir' : ''}`,
+      title: `${NOMBRES_RED[e.red]}${e.tipo && e.red === 'youtube' ? ` (${e.tipo})` : ''} · ${e.video} · ${ESTADOS_ENVIO[e.estado] || e.estado}`
+        + (e.debio_salir ? ' · debería haber salido ya' : ''),
       onclick: () => irASeccionPublicar('ficha', e.pid),
     }, h('span', { clase: 'hora' }, String(e.cuando || '').slice(11, 16)),
     ` ${CORTOS_RED[e.red]} · ${recortar(e.video || '', vista === 'mes' ? 12 : 22)}`)));
@@ -21435,9 +21493,9 @@ async function escribirTextosPublicar(redes, reintento) {
   } catch (e) { toast(e.message, true); }
 }
 
-/* DESPUÉS DE PUBLICAR la ficha se queda donde estaba, para seguir con las otras
-   redes, y dice arriba en cuáles ya está (con su enlace) y en cuáles va a
-   salir. Cada red marca su último estado al lado de su casilla. */
+/* AL VOLVER A LA FICHA después de publicar (desde el 20-10 la ficha se cierra
+   al programar o enviar: ver `cerrarFichaTrasEnvio`), dice arriba en cuáles
+   ya está (con su enlace) y en cuáles va a salir. Cada red marca su último estado al lado de su casilla. */
 function ultimoEnvioPorRed(f) {
   const salida = {};
   // `envios` llega del más nuevo al más viejo
@@ -21975,17 +22033,48 @@ async function confirmarEnvioPublicar(modo, repetir) {
   if (!confirm(texto)) return;
   PUB.enviando = true;
   pintarModulo();
+  let hecho = false;
   try {
-    await guardarTextosPublicar();
+    const guardado = await guardarTextosPublicar();
     await pedir(rutaPublicar(`/videos/${encodeURIComponent(f.pid)}/enviar`), {
       method: 'POST', cuerpo: { redes, modo, cuando, confirmado: true, repetir: !!repetir },
     });
+    hecho = guardado;
     toast(modo === 'ahora' ? 'Subiendo a Upload-Post…' : 'Programando…');
   } catch (e) {
     toast(e.message, true);
   }
   PUB.enviando = false;
+  if (hecho) {
+    const nombres = redes.map(r => NOMBRES_RED[r]).join(', ');
+    cerrarFichaTrasEnvio(f, modo === 'ahora' ? `Enviado a ${nombres}: se está subiendo ✓`
+      : `Programado para ${cuandoLegible(cuando)} en ${nombres} ✓`);
+    return;
+  }
   cargarPublicar(true);
+}
+
+/* LA FICHA SE CIERRA AL PROGRAMAR O ENVIAR (notas del 20-10: «cuando completo
+   el llenado y se guarda o programa, esta ficha sigue mostrándose»). Vuelve a
+   la cola, que es donde se ve en el calendario lo que se acaba de programar, con
+   el aviso arriba y un botón para volver a la ficha. Solo si los textos quedaron
+   guardados: con un guardado fallido, la ficha se queda abierta y lo escrito
+   también. Guardar textos a secas NO cierra: se sigue escribiendo. */
+function cerrarFichaTrasEnvio(f, mensaje) {
+  toast(mensaje);
+  PUB.avisoCola = { texto: mensaje, pid: f.pid, nombre: f.nombre };
+  PUB.modoEnvio = '';
+  PUB.cuandoEnvio = '';
+  irASeccionPublicar('cola');
+}
+
+function avisoTrasEnvioCola() {
+  const a = PUB.avisoCola;
+  if (!a) return null;
+  return h('div', { clase: 'caja-info fila aviso-tras-envio', role: 'status' },
+    h('span', { clase: 'crece' }, `«${a.nombre}»: ${a.texto}`),
+    h('button', { clase: 'mini', onclick: () => { PUB.avisoCola = null; irASeccionPublicar('ficha', a.pid); } }, 'Volver a la ficha'),
+    h('button', { clase: 'mini fantasma', 'aria-label': 'Cerrar el aviso', onclick: () => { PUB.avisoCola = null; pintarModulo(); } }, '×'));
 }
 
 async function dejarPendientePublicar(modo) {
@@ -21993,10 +22082,16 @@ async function dejarPendientePublicar(modo) {
   const redes = (f.redes || []).filter(r => ((f.encaje || {})[r] || {}).nivel !== 'error');
   if (!redes.length) { toast('elige al menos una red', true); return; }
   try {
-    await guardarTextosPublicar();
+    const guardado = await guardarTextosPublicar();
+    const cuando = modo === 'programar' ? PUB.cuandoEnvio : '';
     await pedir(rutaPublicar(`/videos/${encodeURIComponent(f.pid)}/enviar`), {
-      method: 'POST', cuerpo: { redes, modo: 'pendiente', cuando: modo === 'programar' ? PUB.cuandoEnvio : '' },
+      method: 'POST', cuerpo: { redes, modo: 'pendiente', cuando },
     });
+    if (guardado) {
+      cerrarFichaTrasEnvio(f, `Queda esperando tu OK${cuando ? ` para ${cuandoLegible(cuando)}` : ''}`
+        + ` en ${redes.map(r => NOMBRES_RED[r]).join(', ')} ✓ (sale en «Te necesitan»)`);
+      return;
+    }
     toast('Queda esperando tu OK');
     cargarPublicar(true);
   } catch (e) { toast(e.message, true); }
@@ -22148,7 +22243,9 @@ function filasEnvioFicha(e) {
     h('b', {}, nombreEnvioPublicar(e)),
     h('span', { clase: 'meta hora-envio' }, cuandoLegible(e.cuando)),
     pastillaEstadoEnvio(e.estado),
+    debioSalirPublicar(e),
     h('span', { clase: 'crece meta motivo-envio' }, e.error || e.nota || ''),
+    botonComprobarPublicar(e),
     e.metricas && textoMetricas(e.metricas)
       ? h('span', { clase: 'metricas-envio', title: `actualizado ${fechaCorta(e.metricas.al)}` },
         textoMetricas(e.metricas))

@@ -2279,7 +2279,30 @@ def campos_portada(raiz, info, datos, redes, lote="vista"):
 
 # -------------------------------------------------------------- la ficha
 
+#: LO PROGRAMADO QUE YA DEBIÓ SALIR (20-10-2026: a las 12:22 seguían en
+#: «programado» cuatro envíos de las 09:00). Pasado este margen desde su hora,
+#: la pantalla dice «debería haber salido a las 09:00» con «Comprobar».
+MARGEN_SALIDA_S = 600
+#: Si Upload-Post sigue sin dar su estado, cada cuánto se le vuelve a preguntar
+#: (una hora después de su hora ya no cambia cada 15 s).
+RESPIRO_VENCIDO_S = 300
+
+
+def debio_salir(e, ahora=None):
+    """True si un envío programado ya pasó su hora (con margen) y sigue como
+    programado: Upload-Post todavía no ha dicho que salió."""
+    if (e or {}).get("estado") != "programado":
+        return False
+    momento = _leer_momento(e.get("cuando"))
+    ahora = ahora or ahora_lima()
+    return bool(momento and (ahora - momento).total_seconds() > MARGEN_SALIDA_S)
+
+
 def _envio_publico(e):
+    return dict(_envio_publico_campos(e), debio_salir=debio_salir(e))
+
+
+def _envio_publico_campos(e):
     return {k: e.get(k) for k in (
         "id", "red", "estado", "modo", "cuando", "creado", "actualizado", "url",
         "error", "lote", "perfil", "mp4_huella", "nota", "programado_para", "sin_hora",
@@ -2821,25 +2844,35 @@ def _videos_con_ficha(raiz):
 _LOCK_REFRESCO = threading.Lock()
 
 
-def refrescar(raiz, limite=8):
+def refrescar(raiz, limite=8, lote=None):
     """Pregunta a Upload-Post por lo que sigue en el aire. -> {consultados, cambios}
 
-    De uno en uno: con dos pestañas abiertas, el segundo no pregunta lo mismo."""
-    if not _LOCK_REFRESCO.acquire(blocking=False):
+    De uno en uno: con dos pestañas abiertas, el segundo no pregunta lo mismo.
+    Con `lote` («Comprobar» de un programado que ya debió salir) pregunta SOLO
+    por ese, ya, sin esperar el respiro, y dice cómo quedó (`estados`)."""
+    if not _LOCK_REFRESCO.acquire(blocking=lote is not None, timeout=10 if lote else -1):
         return {"consultados": 0, "cambios": 0, "ocupado": True}
     try:
-        return _refrescar(raiz, limite)
+        if lote:
+            _ULTIMA_CONSULTA.pop(lote, None)
+        r = _refrescar(raiz, limite, lote)
     finally:
         _LOCK_REFRESCO.release()
+    if lote:
+        r["estados"] = sorted({e.get("estado") for pid in _videos_con_ficha(raiz)
+                               for e in _leer_video(raiz, pid)["envios"] if e.get("lote") == lote})
+    return r
 
 
-def _refrescar(raiz, limite):
+def _refrescar(raiz, limite, solo=None):
     pendientes = {}
     ahora = ahora_lima()
     for pid in _videos_con_ficha(raiz):
         for e in _leer_video(raiz, pid)["envios"]:
             estado = e.get("estado")
             if estado not in PENDIENTES or not e.get("lote"):
+                continue
+            if solo and e["lote"] != solo:
                 continue
             if estado == "enviando":
                 if e["lote"] in _SUBIENDO:
@@ -2863,8 +2896,14 @@ def _refrescar(raiz, limite):
         return {"consultados": 0, "cambios": 0, "sin_clave": True}
     # EL RESPIRO ANTES DE CORTAR, y primero lo que hace mas que no se mira: con
     # el corte primero, ocho envios atascados dejaban sin mirar a todos los demas
+    def respiro(par):
+        e = par[1]
+        momento = _leer_momento(e.get("cuando"))
+        if e.get("estado") == "programado" and momento and (ahora - momento).total_seconds() > 3600:
+            return RESPIRO_VENCIDO_S
+        return RESPIRO_CONSULTA_S
     listos = [(lote, par) for lote, par in pendientes.items()
-              if time.time() - _ULTIMA_CONSULTA.get(lote, 0) >= RESPIRO_CONSULTA_S]
+              if time.time() - _ULTIMA_CONSULTA.get(lote, 0) >= respiro(par)]
     listos.sort(key=lambda x: _ULTIMA_CONSULTA.get(x[0], 0))
     consultados = cambios = 0
     for lote, (pid, e) in listos[:limite]:
@@ -2889,6 +2928,18 @@ def _refrescar(raiz, limite):
                     _actualizar_lote(raiz, pid, lote, lambda x: x.update(
                         estado="fallido", error="Upload-Post no conoce este envío: no llegó. "
                         "Puedes publicarlo otra vez."))
+                    _NO_LO_CONOCE.pop(lote, None)
+                    cambios += 1
+                # UNO PROGRAMADO QUE YA DEBIÓ SALIR y del que Upload-Post no da
+                # estado: no se da por fallido (puede haber salido) ni se deja
+                # en «programado» para siempre: pasa a «comprobar», que pide
+                # mirarlo y no deja publicarlo otra vez sin preguntar
+                elif veces >= VECES_NO_LO_CONOCE and e.get("estado") == "programado" \
+                        and debio_salir(e, ahora):
+                    hora = str(e.get("cuando") or "")[11:16]
+                    _actualizar_lote(raiz, pid, lote, lambda x: x.update(
+                        estado="comprobar", error=f"debería haber salido a las {hora} y Upload-Post "
+                        "no da su estado: mira en la red si salió") if x.get("estado") == "programado" else None)
                     _NO_LO_CONOCE.pop(lote, None)
                     cambios += 1
             continue

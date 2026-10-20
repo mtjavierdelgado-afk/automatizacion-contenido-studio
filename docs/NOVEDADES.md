@@ -14,6 +14,39 @@ vídeos, estilos, claves y contraseña no se tocan.
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
+**Publicar: arreglos del 20 de octubre**
+- **El Short de YouTube vuelve a subir.** Upload-Post rechazaba el idioma del
+  audio «es-419» («Invalid defaultAudioLanguage format»): solo acepta códigos
+  «idioma-PAÍS» como «es-ES» o «en-US». Ahora el español de Latinoamérica se
+  manda como **«es-US»** (YouTube lo enseña como «Español (Estados Unidos)», el
+  más cercano que entra en esa forma), y lo guardado antes como «es-419», «es»
+  o «en» se traduce solo al enviar. En «SEO de este proyecto» la lista solo
+  ofrece códigos que valen (también «Español de México», «es-MX»).
+- **Short o vídeo normal en YouTube.** La ficha dice cómo sale («YouTube ·
+  Short» o «YouTube · Vídeo normal») y qué cambia: un Short lleva **«#Shorts»**
+  en el título (o al final de la descripción si no cabe), Claude le escribe un
+  título de 30 a 60 caracteres y una descripción de 1 a 3 líneas, y no lleva
+  capítulos; un vídeo normal, título de 40 a 70, descripción para el buscador
+  y capítulos. En un vídeo **vertical** se puede elegir «Publicarlo como»:
+  Automático, Short o Vídeo normal (quien decide de verdad es YouTube, por las
+  medidas: vertical de hasta 3 minutos sale en Shorts; se avisa cuando lo
+  elegido no cuadra). Cada envío recuerda cómo salió («YT · Short»).
+- **Al programar, la ficha se cierra.** «Programar…», «Publicar ahora…» y
+  «Dejar esperando mi OK» vuelven a **Cola y calendario** con el aviso
+  «Programado para … ✓» y un botón «Volver a la ficha». Guardar textos a secas
+  no cierra nada, y si el guardado de los textos falla la ficha se queda
+  abierta con lo escrito.
+- **Lo programado que ya salió deja de decir «programado».** La pantalla solo
+  le preguntaba a Upload-Post por lo que se estaba subiendo; lo programado no
+  se volvía a mirar nunca. Ahora, llegada su hora, Cola y calendario y la ficha
+  preguntan solas y pasa a «publicado» (o «falló», con el motivo). Si pasan 10
+  minutos de su hora sin noticias, dice **«debería haber salido a las 09:00»**
+  con **«Comprobar»** (también en «Te necesitan»); si Upload-Post no sabe nada
+  de él, pasa a «comprobar» para que lo mires, sin dejar publicarlo dos veces.
+- **El calendario ya no cambia con los filtros.** Enseña siempre todo lo
+  programado y publicado de la semana o el mes; los filtros (proyecto, estilo,
+  estado, buscar) solo cambian «Vídeos listos» y «Te necesitan», y se dice.
+
 **Imágenes: descargarlas y leer lo que dice la voz (20 de octubre)**
 - **«⬇ Descargar»** debajo de cada imagen de las diapositivas: baja el PNG
   original del plano que estás viendo, con un nombre que se entiende

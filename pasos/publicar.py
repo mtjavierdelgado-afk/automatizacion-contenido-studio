@@ -634,13 +634,31 @@ def huella_origen(info):
     return hashlib.sha256("\n".join(trozos).encode("utf-8")).hexdigest()[:16]
 
 
-def encaje(red, formato, duracion):
+#: SHORT O VÍDEO NORMAL EN YOUTUBE (20-10-2026: en Publicar no había
+#: diferencia). Quien decide es YouTube, por las MEDIDAS del fichero: vertical
+#: (o cuadrado) y de hasta 3 minutos sale en Shorts; lo demás, como vídeo. No
+#: hay ningún campo de Upload-Post que lo fuerce (docs de /api/upload, 20-10).
+#: Lo que sí cambia aquí es CÓMO se publica: un Short lleva «#Shorts» en el
+#: título, textos más cortos y ningún capítulo; un vídeo normal, capítulos y
+#: una descripción para el buscador. `youtube_formato` de la ficha: «auto»
+#: (lo que digan las medidas), «short» o «video»; solo se puede elegir en un
+#: vídeo vertical, que es el único caso dudoso.
+FORMATOS_YOUTUBE = ("auto", "short", "video")
+SHORT_MAX_S = 180
+MARCA_SHORT = "#Shorts"
+
+
+def encaje(red, formato, duracion, youtube=None):
     """Si el vídeo encaja en la red y cómo sale. -> {tipo, nivel, texto}
 
     `nivel`: ok (sale como debe), aviso (sale, pero no como se espera) o error
-    (la red no lo acepta: no se deja enviar)."""
+    (la red no lo acepta: no se deja enviar). En YouTube, además: `puede_elegir`
+    (es vertical: Short o vídeo es una decisión) y `eleccion` (`youtube`, el
+    `youtube_formato` de la ficha)."""
     d = float(duracion or 0)
     vertical = formato == "vertical"
+    if red == "youtube":
+        return _encaje_youtube(vertical, d, youtube)
     if red == "tiktok":
         if d > 600:
             return {"tipo": "", "nivel": "error",
@@ -660,13 +678,6 @@ def encaje(red, formato, duracion):
             return {"tipo": "Reel", "nivel": "aviso",
                     "texto": "pasa de 3 minutos: Instagram lo enseña poco a quien no te sigue"}
         return {"tipo": "Reel", "nivel": "ok", "texto": ""}
-    if red == "youtube":
-        if vertical and d <= 180:
-            return {"tipo": "Short", "nivel": "ok", "texto": ""}
-        if vertical:
-            return {"tipo": "vídeo", "nivel": "aviso",
-                    "texto": "vertical de más de 3 minutos: no sale como Short, sino como vídeo normal"}
-        return {"tipo": "vídeo", "nivel": "ok", "texto": ""}
     if red == "facebook":
         if vertical and d <= 90:
             return {"tipo": "Reel", "nivel": "ok", "texto": ""}
@@ -675,6 +686,40 @@ def encaje(red, formato, duracion):
     if red in RD.REDES:
         return RD.encaje(red, formato, duracion)
     return {"tipo": "", "nivel": "error", "texto": "red desconocida"}
+
+
+def _encaje_youtube(vertical, d, eleccion):
+    eleccion = eleccion if eleccion in FORMATOS_YOUTUBE else "auto"
+    base = {"puede_elegir": vertical, "eleccion": eleccion if vertical else "auto"}
+    if not vertical:
+        texto = ("es horizontal: YouTube no hace Shorts horizontales, sale como vídeo normal"
+                 if eleccion == "short" else "")
+        return dict(base, tipo="vídeo", nivel="aviso" if texto else "ok", texto=texto)
+    corto = d <= SHORT_MAX_S
+    if eleccion == "video":
+        return dict(base, tipo="vídeo", nivel="aviso" if corto else "ok",
+                    texto=("lo eliges como vídeo normal (sin #Shorts y con capítulos), pero YouTube "
+                           "decide por las medidas: un vertical de hasta 3 minutos suele salir "
+                           "igualmente en Shorts") if corto else "")
+    if eleccion == "short" and not corto:
+        return dict(base, tipo="Short", nivel="aviso",
+                    texto="pasa de 3 minutos: YouTube lo publicará como vídeo normal aunque lleve "
+                          "#Shorts; recórtalo a 3 minutos para que salga en Shorts")
+    if corto:
+        return dict(base, tipo="Short", nivel="ok", texto="")
+    return dict(base, tipo="vídeo", nivel="aviso",
+                texto="vertical de más de 3 minutos: no sale como Short, sino como vídeo normal "
+                      "(puedes elegir tratarlo como Short)")
+
+
+def encaje_de(red, info, datos_video=None):
+    """`encaje` con lo elegido en la ficha del vídeo (Short o vídeo en YouTube)."""
+    return encaje(red, (info or {}).get("formato"), (info or {}).get("duracion_s"),
+                  (datos_video or {}).get("youtube_formato"))
+
+
+def es_short(info, datos_video=None):
+    return encaje_de("youtube", info, datos_video).get("tipo") == "Short"
 
 
 def capitulos_base(escenas, duracion):
@@ -750,6 +795,15 @@ REGLAS_RED = {
 }
 LIMITES = {"tiktok": 2200, "instagram": 2200, "youtube": 5000, "facebook": 5000, **RD.LIMITES}
 REGLAS_RED.update(RD.REGLAS)
+#: Un SHORT de YouTube no se escribe como un vídeo largo (20-10-2026): el
+#: título se lee encima del vídeo mientras pasa, la descripción casi no se ve.
+REGLA_YOUTUBE_SHORT = (
+    "YouTube SHORT (vertical de hasta 3 minutos): TÍTULO CORTO, de 30 a 60 "
+    "caracteres, que se lea de un vistazo encima del vídeo, con la palabra clave "
+    "principal al principio, sin «<» ni «>» y sin escribir «#Shorts» (lo pone el "
+    "Studio). DESCRIPCIÓN breve: 1 a 3 líneas, la primera con la palabra clave y "
+    "la promesa del vídeo; nada de capítulos ni párrafos largos. CTA corto: "
+    "suscribirse o comentar. Hashtags: 3 a 5.")
 
 
 # ------------------------------------------------------------------ los emojis
@@ -1231,8 +1285,8 @@ def _cta_como_texto(cta):
     return str(cta or "ninguna")
 
 
-def instruccion_textos(info, redes, ajustes, seo=""):
-    encajes = {r: encaje(r, info.get("formato"), info.get("duracion_s")) for r in redes}
+def instruccion_textos(info, redes, ajustes, seo="", datos_video=None):
+    encajes = {r: encaje_de(r, info, datos_video) for r in redes}
     guion = "\n".join(f"- {b.get('texto', '')}" for b in (info.get("guion") or []))
     caps = info.get("capitulos_base") or []
     con_caps = "youtube" in redes and encajes.get("youtube", {}).get("tipo") == "vídeo" and caps
@@ -1253,7 +1307,9 @@ def instruccion_textos(info, redes, ajustes, seo=""):
         guion=guion[:MAX_GUION] or "—",
         tono=ajustes.get("tono") or "el del guion",
         emojis=bloque_emojis(ajustes, redes),
-        reglas="\n".join(f"- {NOMBRE_RED[r]}: {REGLAS_RED[r]}" for r in redes),
+        reglas="\n".join(f"- {NOMBRE_RED[r]}: "
+                          + (REGLA_YOUTUBE_SHORT if r == "youtube" and encajes[r].get("tipo") == "Short"
+                             else REGLAS_RED[r]) for r in redes),
         capitulos=capitulos,
         claves=", ".join(f'"{r}"' for r in redes),
         seo=seo or "",
@@ -1382,7 +1438,7 @@ def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd, aprendido=None, 
             coste = coste_mod
         except Exception:                                   # noqa: BLE001
             coste = None
-        instruccion = instruccion_textos(info, redes, ajustes, seo)
+        instruccion = instruccion_textos(info, redes, ajustes, seo, datos_video)
 
         def llamar():
             return cli_claude.ejecutar(
@@ -1859,6 +1915,16 @@ def _texto_para(textos_red, ajustes, extra="", red=None):
     return "\n\n".join(p for p in partes if p), tags, sobran
 
 
+def marcar_short(titulo, descripcion):
+    """(titulo, descripcion) de un Short con «#Shorts»: en el título si cabe
+    (YouTube corta en 100), si no al final de la descripción; nunca dos veces."""
+    if re.search(r"#shorts\b", f"{titulo}\n{descripcion}", re.I):
+        return titulo, descripcion
+    if len(titulo) + len(MARCA_SHORT) + 1 <= 100:
+        return f"{titulo} {MARCA_SHORT}".strip(), descripcion
+    return titulo, (f"{descripcion}\n\n{MARCA_SHORT}" if descripcion else MARCA_SHORT)[:LIMITES["youtube"]]
+
+
 def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
     """Lo que sale en la red: el texto para copiar y los campos de Upload-Post."""
     textos_red = textos_red or {}
@@ -1866,8 +1932,7 @@ def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
     titulo = str(textos_red.get("titulo") or "").strip()
     extra = ""
     # los capitulos, solo en un video de YouTube de verdad: un Short no los usa
-    if red == "youtube" and capitulos and \
-            encaje(red, info.get("formato"), info.get("duracion_s")).get("tipo") == "vídeo":
+    if red == "youtube" and capitulos and encaje_de(red, info, datos_video).get("tipo") == "vídeo":
         extra = "\n".join(f"{_marca_de_tiempo(c['t'])} {c['titulo']}" for c in capitulos)
     texto, tags, sobran = _texto_para(textos_red, ajustes, extra, red)
     limite = LIMITES[red]
@@ -1882,7 +1947,7 @@ def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
         texto = texto[:limite]
     campos = {}
     ia = bool(ajustes.get("marcar_ia"))
-    tipo = encaje(red, info.get("formato"), info.get("duracion_s")).get("tipo")
+    tipo = encaje_de(red, info, datos_video).get("tipo")
     if red == "tiktok":
         campos["tiktok_title"] = texto
         if ia:
@@ -1894,8 +1959,13 @@ def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
             campos["is_ai_generated"] = True
     elif red == "youtube":
         titulo = re.sub(r"[<>]", "", titulo or info.get("nombre") or "Vídeo")[:100]
+        descripcion = re.sub(r"[<>]", "", texto)
+        if tipo == "Short":
+            titulo, marcada = marcar_short(titulo, descripcion)
+            if marcada != descripcion:
+                texto = descripcion = marcada        # lo que se copia, igual que lo que sale
         campos["youtube_title"] = titulo
-        campos["youtube_description"] = re.sub(r"[<>]", "", texto)
+        campos["youtube_description"] = descripcion
         # las etiquetas: la palabra clave, las secundarias y los hashtags
         etiquetas = SEO.etiquetas_youtube(ajustes, palabra, tags)
         if etiquetas:
@@ -1905,6 +1975,8 @@ def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
         # no esta en la documentacion de Upload-Post que se leyo; ver NOVEDADES)
         if not ajustes.get("avisar_youtube"):
             campos["notifySubscribers"] = False
+            # el nombre que trae ahora la documentación de /api/upload (20-10)
+            campos["youtube_notify_subscribers"] = False
         if ia:
             campos["containsSyntheticMedia"] = True
         if not titulo.strip():
@@ -1999,6 +2071,13 @@ def guardar_ficha(raiz, pid, cambios):
                     del redes_p[red]
             if not redes_p:
                 ficha.pop("seo_propuesta", None)
+        if "youtube_formato" in cambios:
+            if cambios["youtube_formato"] not in FORMATOS_YOUTUBE:
+                raise ErrorPublicar("«youtube_formato» es auto, short o video")
+            if cambios["youtube_formato"] == "auto":
+                ficha.pop("youtube_formato", None)
+            else:
+                ficha["youtube_formato"] = cambios["youtube_formato"]
         if "portada" in cambios:
             ficha["portada"] = _validar_portada(cambios["portada"], ficha.get("portada"))
             if cambios["portada"].get("quitar_imagen"):
@@ -2193,18 +2272,41 @@ def campos_portada(raiz, info, datos, redes, lote="vista"):
             and os.path.getsize(foto) <= MAX_BYTES_MINIATURA:
         ficheros.append(("thumbnail", foto))
     if "facebook" in redes and foto and \
-            encaje("facebook", info.get("formato"), info.get("duracion_s")).get("tipo") != "Reel":
+            encaje_de("facebook", info, datos).get("tipo") != "Reel":
         ficheros.append(("facebook_thumbnail", foto))
     return campos, ficheros
 
 
 # -------------------------------------------------------------- la ficha
 
+#: LO PROGRAMADO QUE YA DEBIÓ SALIR (20-10-2026: a las 12:22 seguían en
+#: «programado» cuatro envíos de las 09:00). Pasado este margen desde su hora,
+#: la pantalla dice «debería haber salido a las 09:00» con «Comprobar».
+MARGEN_SALIDA_S = 600
+#: Si Upload-Post sigue sin dar su estado, cada cuánto se le vuelve a preguntar
+#: (una hora después de su hora ya no cambia cada 15 s).
+RESPIRO_VENCIDO_S = 300
+
+
+def debio_salir(e, ahora=None):
+    """True si un envío programado ya pasó su hora (con margen) y sigue como
+    programado: Upload-Post todavía no ha dicho que salió."""
+    if (e or {}).get("estado") != "programado":
+        return False
+    momento = _leer_momento(e.get("cuando"))
+    ahora = ahora or ahora_lima()
+    return bool(momento and (ahora - momento).total_seconds() > MARGEN_SALIDA_S)
+
+
 def _envio_publico(e):
+    return dict(_envio_publico_campos(e), debio_salir=debio_salir(e))
+
+
+def _envio_publico_campos(e):
     return {k: e.get(k) for k in (
         "id", "red", "estado", "modo", "cuando", "creado", "actualizado", "url",
         "error", "lote", "perfil", "mp4_huella", "nota", "programado_para", "sin_hora",
-        "metricas", "enviado", "texto_publicado", "recortado")}
+        "metricas", "enviado", "texto_publicado", "recortado", "tipo")}
 
 
 def redes_visibles(ajustes, datos=None):
@@ -2271,7 +2373,8 @@ def ficha(raiz, info, ajustes):
                           for r in REDES},
         "capitulos_posibles": len(info.get("capitulos_base") or []),
         "compuestos": compuestos,
-        "encaje": {r: encaje(r, info.get("formato"), info.get("duracion_s")) for r in REDES},
+        "encaje": {r: encaje_de(r, info, datos) for r in REDES},
+        "youtube_formato": datos.get("youtube_formato") or "auto",
         "desactualizada": desactualizada, "escritos": datos.get("escritos") or "",
         "editado": bool(datos.get("editado")),
         "portada": portada_de(datos),
@@ -2416,6 +2519,9 @@ def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
                 "actualizado": _iso_lima(), "url": "", "error": "",
                 "mp4_huella": info.get("mp4_huella") or "",
                 "sin_hora": modo == "pendiente" and not cuando,
+                # cómo sale (Short o vídeo en YouTube, Reel en Instagram…): la
+                # cola lo dice y no cambia si después se elige otra cosa
+                "tipo": encaje_de(red, info, datos).get("tipo") or "",
                 # con qué palabra clave y qué primera línea salió (publicar-mas):
                 # la tabla de «lo que funcionó» no cambia si después se edita
                 "palabra": SEO.palabra_del_video(datos, ajustes)[:80],
@@ -2738,25 +2844,35 @@ def _videos_con_ficha(raiz):
 _LOCK_REFRESCO = threading.Lock()
 
 
-def refrescar(raiz, limite=8):
+def refrescar(raiz, limite=8, lote=None):
     """Pregunta a Upload-Post por lo que sigue en el aire. -> {consultados, cambios}
 
-    De uno en uno: con dos pestañas abiertas, el segundo no pregunta lo mismo."""
-    if not _LOCK_REFRESCO.acquire(blocking=False):
+    De uno en uno: con dos pestañas abiertas, el segundo no pregunta lo mismo.
+    Con `lote` («Comprobar» de un programado que ya debió salir) pregunta SOLO
+    por ese, ya, sin esperar el respiro, y dice cómo quedó (`estados`)."""
+    if not _LOCK_REFRESCO.acquire(blocking=lote is not None, timeout=10 if lote else -1):
         return {"consultados": 0, "cambios": 0, "ocupado": True}
     try:
-        return _refrescar(raiz, limite)
+        if lote:
+            _ULTIMA_CONSULTA.pop(lote, None)
+        r = _refrescar(raiz, limite, lote)
     finally:
         _LOCK_REFRESCO.release()
+    if lote:
+        r["estados"] = sorted({e.get("estado") for pid in _videos_con_ficha(raiz)
+                               for e in _leer_video(raiz, pid)["envios"] if e.get("lote") == lote})
+    return r
 
 
-def _refrescar(raiz, limite):
+def _refrescar(raiz, limite, solo=None):
     pendientes = {}
     ahora = ahora_lima()
     for pid in _videos_con_ficha(raiz):
         for e in _leer_video(raiz, pid)["envios"]:
             estado = e.get("estado")
             if estado not in PENDIENTES or not e.get("lote"):
+                continue
+            if solo and e["lote"] != solo:
                 continue
             if estado == "enviando":
                 if e["lote"] in _SUBIENDO:
@@ -2780,8 +2896,14 @@ def _refrescar(raiz, limite):
         return {"consultados": 0, "cambios": 0, "sin_clave": True}
     # EL RESPIRO ANTES DE CORTAR, y primero lo que hace mas que no se mira: con
     # el corte primero, ocho envios atascados dejaban sin mirar a todos los demas
+    def respiro(par):
+        e = par[1]
+        momento = _leer_momento(e.get("cuando"))
+        if e.get("estado") == "programado" and momento and (ahora - momento).total_seconds() > 3600:
+            return RESPIRO_VENCIDO_S
+        return RESPIRO_CONSULTA_S
     listos = [(lote, par) for lote, par in pendientes.items()
-              if time.time() - _ULTIMA_CONSULTA.get(lote, 0) >= RESPIRO_CONSULTA_S]
+              if time.time() - _ULTIMA_CONSULTA.get(lote, 0) >= respiro(par)]
     listos.sort(key=lambda x: _ULTIMA_CONSULTA.get(x[0], 0))
     consultados = cambios = 0
     for lote, (pid, e) in listos[:limite]:
@@ -2806,6 +2928,18 @@ def _refrescar(raiz, limite):
                     _actualizar_lote(raiz, pid, lote, lambda x: x.update(
                         estado="fallido", error="Upload-Post no conoce este envío: no llegó. "
                         "Puedes publicarlo otra vez."))
+                    _NO_LO_CONOCE.pop(lote, None)
+                    cambios += 1
+                # UNO PROGRAMADO QUE YA DEBIÓ SALIR y del que Upload-Post no da
+                # estado: no se da por fallido (puede haber salido) ni se deja
+                # en «programado» para siempre: pasa a «comprobar», que pide
+                # mirarlo y no deja publicarlo otra vez sin preguntar
+                elif veces >= VECES_NO_LO_CONOCE and e.get("estado") == "programado" \
+                        and debio_salir(e, ahora):
+                    hora = str(e.get("cuando") or "")[11:16]
+                    _actualizar_lote(raiz, pid, lote, lambda x: x.update(
+                        estado="comprobar", error=f"debería haber salido a las {hora} y Upload-Post "
+                        "no da su estado: mira en la red si salió") if x.get("estado") == "programado" else None)
                     _NO_LO_CONOCE.pop(lote, None)
                     cambios += 1
             continue

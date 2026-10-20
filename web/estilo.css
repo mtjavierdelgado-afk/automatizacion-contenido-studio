@@ -3821,6 +3821,18 @@ button.eleccion-paleta.activa { border-color: var(--acento); box-shadow: 0 0 0 2
 .muestra-dia .m3 { background: var(--muestra-dia-3); }
 .muestra-dia .m4 { background: var(--muestra-dia-4); }
 
+/* ---- Publicar · arreglos del 20-10 (rama publicar-20oct) */
+/* Short o vídeo normal en YouTube, en la ficha */
+.formato-youtube { align-items: center; gap: 8px; margin-top: 6px; padding: 6px 8px;
+  border: 1px solid var(--linea-suave); border-radius: 10px; background: var(--hueco); }
+.formato-youtube.es-short { border-color: var(--aviso); }
+.formato-youtube .tipo-youtube { white-space: nowrap; }
+.formato-youtube select { margin-left: 6px; }
+/* lo programado cuya hora ya pasó y Upload-Post no ha confirmado */
+.debio-salir { color: var(--aviso); }
+/* el calendario enseña todo; esta línea dice que los filtros son de la lista */
+.nota-filtros-cola { margin-top: 4px; }
+
 /* ================================================================ PUBLICAR
    Rama `publicar-redes-1` (16-10-2026): la barra de módulos y el módulo
    Publicar. Todo nuevo y aquí, al final, para no chocar con las otras ramas.

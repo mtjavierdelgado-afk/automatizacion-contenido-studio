@@ -3880,6 +3880,10 @@ def publicar_en_redes(navegador, datos):
     pg.pulsar(".cuando-publicar button", "Programar")
     ok(len(pg.dialogos) > antes and "hora de Lima" in pg.dialogos[-1],
        "antes de enviar pide confirmarlo, con las redes y la hora de Lima")
+    # desde el 20-10 la ficha se cierra al programar y vuelve a la cola con un
+    # aviso; «Volver a la ficha» la abre otra vez (publicar_arreglos_del_20_10)
+    ok(pg.esperar(".aviso-tras-envio button", "Volver a la ficha", 20), "al programar vuelve a la cola, con su aviso")
+    pg.pulsar(".aviso-tras-envio button", "Volver a la ficha")
     fin = time.time() + 20
     while time.time() < fin and not pg.visible(".ficha-publicar .fila-envio .pastilla", "programado"):
         pg.p.wait_for_timeout(500)
@@ -6153,6 +6157,183 @@ def espacio_fijo_en_un_video_hecho(navegador, datos):
         papeles = []
     ok("espacio" in papeles, f"y lleva adjunta la imagen del sitio: {papeles}")
     pg.sin_errores("el espacio fijo de un vídeo hecho")
+    pg.cerrar()
+
+
+# ======================================================================
+# PUBLICAR: ARREGLOS DEL 20 DE OCTUBRE (rama `publicar-20oct`). Tramo propio
+# y al final, como los demás. Lo que el dueño vio en el servidor: la ficha no
+# se cerraba al programar, lo programado que ya salió seguía «programado» y el
+# calendario cambiaba con los filtros. Y el Short frente al vídeo normal.
+
+def _sim_uploadpost(datos):
+    return os.path.join(datos["proyectos"], "_sistema", "publicar", "uploadpost_simulado.json")
+
+
+@escenario
+def publicar_arreglos_del_20_10(navegador, datos):
+    """(3) Programar o dejar esperando el OK cierra la ficha y vuelve a la cola
+    con «Programado para … ✓»; guardar textos a secas no la cierra. (4) Lo
+    programado cuya hora pasó se pregunta solo y pasa a publicado; si Upload-
+    Post no da su estado, «debería haber salido a las …» con «Comprobar».
+    (5) El calendario enseña todo aunque haya filtros. (2) YouTube dice si
+    sale como Short o como vídeo normal."""
+    import datetime as _dt                                   # noqa: PLC0415
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    api.post(f"/api/publicar/proyectos/{cid}/perfil", {})
+    api.post(f"/api/publicar/proyectos/{cid}/conectar", {"redes": ["tiktok", "instagram", "youtube", "facebook"]})
+    api.post(f"/api/publicar/proyectos/{cid}/cuentas")
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["tiktok", "youtube"], "textos": {
+        "tiktok": {"descripcion": "Fiesta del 20 de octubre"},
+        "youtube": {"titulo": "Consolas para tu fiesta", "descripcion": "Fiesta del 20 de octubre"}}})
+    ruta_ficha = os.path.join(datos["proyectos"], "_sistema", "publicar", "videos", f"{pid}.json")
+
+    def parte(nombre, fn):
+        try:
+            fn()
+        except Exception as fallo:                           # noqa: BLE001
+            traceback.print_exc()
+            ok(False, f"{nombre} se cortó: {type(fallo).__name__}: {str(fallo)[:120]}")
+
+    pg = Pagina(navegador, datos, nombre="publicar 20-10")
+    pg.js(f"await abrirVideoLight('{pid}');")
+    ok(_montar_desde_video(pg), "se parte de un vídeo montado")
+
+    def parte_short():
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        ok(pg.esperar(".ficha-publicar .formato-youtube .tipo-youtube", segundos=15),
+           "(2) con YouTube marcado, la ficha dice cómo sale en YouTube")
+        _r, f = api.get(f"/api/publicar/videos/{pid}")
+        tipo = ((f.get("encaje") or {}).get("youtube") or {}).get("tipo")
+        ok(pg.visible(".formato-youtube .tipo-youtube", "Short" if tipo == "Short" else "Vídeo normal"),
+           f"(2) «YouTube · {tipo}», lo mismo que el servidor")
+        if f.get("formato") == "vertical":
+            ok(pg.visible(".formato-youtube select"), "(2) en un vertical se puede elegir Short o vídeo normal")
+            pg.p.locator(".formato-youtube select").select_option("video")
+            pg.p.wait_for_timeout(1500)
+            _r, f = api.get(f"/api/publicar/videos/{pid}")
+            ok(f.get("youtube_formato") == "video", "(2) y elegirlo se guarda")
+            pg.p.locator(".formato-youtube select").select_option("auto")
+            pg.p.wait_for_timeout(1200)
+        else:
+            ok(not pg.visible(".formato-youtube select"), "(2) en un horizontal no hay nada que elegir")
+        pg.captura("publicar_20oct_formato_youtube")
+
+    def parte_cerrar():
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        ok(pg.esperar(".ficha-publicar .nombre-ficha", segundos=15), "(3) la ficha abierta")
+        # guardar textos a secas NO cierra
+        caja = pg.p.locator(".texto-red[data-red=tiktok] textarea").first
+        caja.fill("Fiesta del 20 de octubre, escrita a mano")
+        pg.p.locator(".ficha-publicar h3").first.click()
+        ok(pg.esperar(".guardado-publicar .pastilla.ok", "Guardado", 10), "(3) el texto se guarda solo")
+        ok(pg.visible(".ficha-publicar .nombre-ficha"), "(3) y guardar a secas deja la ficha abierta")
+        # programar: se cierra y vuelve a la cola con el aviso
+        pg.js("PUB.modoEnvio = 'programar'; PUB.cuandoEnvio = PUB.ficha.hora_sugerida; pintarModulo();")
+        pg.pulsar(".cuando-publicar button", "Programar")
+        ok(pg.esperar(".cola-publicar .aviso-tras-envio", "Programado para", 20),
+           "(3) al programar vuelve a la cola con «Programado para … ✓»")
+        ok(not pg.visible(".ficha-publicar"), "(3) y la ficha ya no se ve")
+        ok(pg.p.evaluate("() => PUB.seccion") == "cola", "(3) estamos en «Cola y calendario»")
+        _r, f = api.get(f"/api/publicar/videos/{pid}")
+        ok((f["textos"].get("tiktok") or {}).get("descripcion") == "Fiesta del 20 de octubre, escrita a mano",
+           "(3) y no se perdió lo escrito")
+        pg.captura("publicar_20oct_vuelve_a_la_cola")
+        pg.pulsar(".aviso-tras-envio button", "Volver a la ficha")
+        ok(pg.esperar(".ficha-publicar .nombre-ficha", segundos=15), "(3) «Volver a la ficha» la abre otra vez")
+        # «Dejar esperando mi OK» también la cierra (en Instagram, que no se ha mandado)
+        api.put(f"/api/publicar/videos/{pid}", {"redes": ["instagram"], "textos": {
+            "instagram": {"descripcion": "Reel del 20 de octubre"}}})
+        pg.js("await cargarPublicar(true);")
+        pg.pulsar(".cuando-publicar button", "Dejar esperando mi OK")
+        ok(pg.esperar(".cola-publicar .aviso-tras-envio", "esperando tu OK", 20),
+           "(3) «Dejar esperando mi OK» también vuelve a la cola, con su aviso")
+        # lo programado arriba termina de subir (pasa de «enviando» a «programado»)
+        fin = time.time() + 30
+        while time.time() < fin:
+            with open(ruta_ficha, encoding="utf-8") as fh:
+                if not any(e.get("estado") == "enviando" for e in json.load(fh)["envios"]):
+                    break
+            pg.p.wait_for_timeout(1000)
+
+    def parte_programado_vencido():
+        # un envío programado para hace tres horas, que Upload-Post ya publicó
+        hace = (_dt.datetime.now(_dt.timezone(_dt.timedelta(hours=-5))).replace(tzinfo=None)
+                - _dt.timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%S")
+        with open(ruta_ficha, encoding="utf-8") as fh:
+            guardada = json.load(fh)
+        programados = [e for e in guardada["envios"] if e.get("estado") == "programado"]
+        ok(programados, "(4) hay envíos programados (de la parte de arriba)")
+        lotes = {e["lote"] for e in programados}
+        for e in programados:
+            e["cuando"] = hace
+        # y uno que Upload-Post no conoce: debería haber salido y nadie lo sabe
+        guardada["envios"].append({"id": "fantasma2010", "red": "facebook", "lote": "fa20fa20fa20fa20",
+                                   "estado": "programado", "modo": "programado", "job_id": "no_existe",
+                                   "cuando": hace, "creado": hace, "mp4_huella": ""})
+        with open(ruta_ficha, "w", encoding="utf-8") as fh:
+            json.dump(guardada, fh, ensure_ascii=False)
+        with open(_sim_uploadpost(datos), encoding="utf-8") as fh:
+            sim = json.load(fh)
+        for lote in lotes:
+            if lote in sim["trabajos"]:
+                sim["trabajos"][lote]["cuando_utc"] = (_dt.datetime.now(_dt.timezone.utc)
+                                                       - _dt.timedelta(hours=3)).isoformat()
+        with open(_sim_uploadpost(datos), "w", encoding="utf-8") as fh:
+            json.dump(sim, fh)
+        pg.js("PUB.desde = ''; PUB.vistaCal = 'semana'; irASeccionPublicar('cola');")
+        ok(pg.esperar(".cola-publicar .fila-envio .debio-salir", "debería haber salido a las", 15),
+           "(4) lo que ya debió salir lo dice: «debería haber salido a las …»")
+        ok(pg.visible(".cola-publicar .fila-envio button", "Comprobar"), "(4) con su «Comprobar»")
+        pg.captura("publicar_20oct_debio_salir")
+        antes = len(pg.avisos())
+        boton = '.cola-publicar .fila-envio[data-envio="fantasma2010"] button'
+        if pg.visible(boton, "Comprobar"):
+            pg.pulsar(boton, "Comprobar")
+            pg.p.wait_for_timeout(2500)
+        ok(len(pg.avisos()) > antes, f"(4) «Comprobar» dice cómo quedó: {pg.avisos()[antes:]}")
+        # sin pulsar nada: el reloj de la cola le pregunta a Upload-Post y cambia
+        fin = time.time() + 60
+        publicados = False
+        while time.time() < fin and not publicados:
+            pg.p.wait_for_timeout(2000)
+            with open(ruta_ficha, encoding="utf-8") as fh:
+                ahora = json.load(fh)["envios"]
+            publicados = all(e.get("estado") == "publicado" for e in ahora if e.get("lote") in lotes)
+        ok(publicados, "(4) pasada su hora, la pantalla pregunta sola y lo programado pasa a «publicado»")
+        ok(pg.esperar(".calendario-publicar .envio-dia", segundos=10), "(4) y el calendario lo enseña")
+
+    def parte_calendario():
+        pg.js("PUB.desde = ''; PUB.vistaCal = 'semana'; irASeccionPublicar('cola');")
+        ok(pg.esperar(".calendario-publicar .envio-dia", segundos=15), "(5) el calendario con lo de la semana")
+        cuantos = pg.p.locator(".calendario-publicar .envio-dia").count()
+        pg.js("cambiarFiltroCola('texto', 'zzz-ningun-video-se-llama-asi');")
+        pg.p.wait_for_timeout(800)
+        ok(pg.visible(".cola-publicar .meta", "Ningún vídeo cumple estos filtros"), "(5) la lista sí se filtra")
+        igual_n = pg.p.locator(".calendario-publicar .envio-dia").count()
+        ok(igual_n == cuantos and cuantos > 0,
+           f"(5) y el calendario NO: sigue enseñando todo ({igual_n} de {cuantos})")
+        ok(pg.visible(".cola-publicar .nota-filtros-cola", "el calendario enseña siempre todo"),
+           "(5) y se dice que los filtros son de la lista")
+        proyecto = pg.p.locator('.filtros-cola select[data-filtro="proyecto"] option').all()
+        if len(proyecto) > 1:
+            pg.js("cambiarFiltroCola('texto', '');")
+            pg.p.locator('.filtros-cola select[data-filtro="proyecto"]').select_option(index=len(proyecto) - 1)
+            pg.p.wait_for_timeout(800)
+            ok(pg.p.locator(".calendario-publicar .envio-dia").count() == cuantos,
+               "(5) con un proyecto elegido, el calendario tampoco cambia")
+        pg.captura("publicar_20oct_calendario_con_filtros")
+        pg.js("PUB.filtros = Object.assign({}, FILTROS_COLA_DEFECTO); cambiarFiltroCola('texto', '');")
+
+    parte("el formato de YouTube", parte_short)
+    parte("cerrar la ficha", parte_cerrar)
+    parte("lo programado que ya salió", parte_programado_vencido)
+    parte("el calendario y los filtros", parte_calendario)
+    pg.sin_errores("los arreglos de Publicar del 20-10")
     pg.cerrar()
 
 

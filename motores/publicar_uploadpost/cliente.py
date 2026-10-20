@@ -79,6 +79,56 @@ CON_CIFRAS_POST = ("tiktok", "instagram", "youtube", "facebook", "linkedin", "x"
 PLAZO_CONSULTA_S = 30
 PLAZO_SUBIDA_S = 300
 
+#: EL IDIOMA DEL AUDIO DE YOUTUBE (20-10-2026, en el servidor: el Short no
+#: subía). Upload-Post solo acepta `defaultAudioLanguage` con la forma
+#: «idioma-PAÍS» de dos letras y dos letras («Invalid defaultAudioLanguage
+#: format: "es-419". Expected format: "en-US", "es-ES", etc.»), aunque YouTube
+#: por su lado sí conozca «es-419». Lo que no tiene esa forma se traduce aquí,
+#: en `campos_para_enviar`, por donde pasa TODA subida (la de verdad y la
+#: simulada): una región con números (419 = Latinoamérica) va a «es-US», que
+#: YouTube enseña como «Español (Estados Unidos)» y es el español de América
+#: más cercano que entra en esa forma; un idioma sin país va a su país más
+#: común. Lo que no se sabe traducir NO se manda: sin el campo YouTube lo
+#: deduce, y con uno malo la subida entera falla.
+FORMA_IDIOMA_AUDIO = re.compile(r"^[a-z]{2}-[A-Z]{2}$")
+IDIOMA_REGION_NUMERICA = {"es": "es-US", "en": "en-US", "pt": "pt-BR"}
+IDIOMA_SIN_PAIS = {"es": "es-ES", "en": "en-US", "pt": "pt-BR", "fr": "fr-FR",
+                   "it": "it-IT", "de": "de-DE"}
+CAMPOS_IDIOMA_AUDIO = ("defaultAudioLanguage",)
+
+
+def idioma_audio_youtube(codigo):
+    """«es-419» -> «es-US», «es» -> «es-ES», «pt-br» -> «pt-BR»; «» si no se
+    puede llevar a la forma que acepta Upload-Post."""
+    texto = str(codigo or "").strip().replace("_", "-")
+    if not texto:
+        return ""
+    partes = texto.split("-")
+    idioma = partes[0].lower()
+    if not re.fullmatch(r"[a-z]{2}", idioma):
+        return ""
+    if len(partes) == 1:
+        return IDIOMA_SIN_PAIS.get(idioma, "")
+    region = partes[1]
+    if region.isdigit():
+        return IDIOMA_REGION_NUMERICA.get(idioma, IDIOMA_SIN_PAIS.get(idioma, ""))
+    candidato = f"{idioma}-{region.upper()}"
+    return candidato if FORMA_IDIOMA_AUDIO.match(candidato) else ""
+
+
+def campos_para_enviar(campos):
+    """Los campos de una subida tal como los acepta Upload-Post (hoy: el idioma
+    del audio de YouTube). Devuelve una copia; no toca la que llega."""
+    salida = dict(campos or {})
+    for nombre in CAMPOS_IDIOMA_AUDIO:
+        if nombre in salida:
+            valor = idioma_audio_youtube(salida[nombre])
+            if valor:
+                salida[nombre] = valor
+            else:
+                salida.pop(nombre)
+    return salida
+
 
 class ErrorUploadPost(RuntimeError):
     """Upload-Post dijo que no, o no contesto. El mensaje es para una persona.
@@ -352,7 +402,7 @@ class ClienteUploadPost:
             raise ErrorUploadPost("no encuentro el MP4 del vídeo")
         id_propio = id_propio or uuid.uuid4().hex
         pares = [("user", perfil)] + [("platform[]", r) for r in redes]
-        for nombre, valor in (campos or {}).items():
+        for nombre, valor in campos_para_enviar(campos).items():
             if isinstance(valor, (list, tuple)):
                 pares.extend((nombre, str(v)) for v in valor)
             elif isinstance(valor, bool):

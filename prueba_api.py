@@ -6933,6 +6933,41 @@ def probar_mas_emojis(cliente, carpeta, pid):
     r, _d = cliente.put("/api/publicar/proyectos/_sin", {"emojis": "vistoso", "emojis_marca": ""})
 
 
+def probar_publicar_20oct(cliente, pid):
+    """Rama `publicar-20oct`: los fallos de Publicar que vio el dueño el 20-10."""
+    seccion("PUBLICAR: ARREGLOS DEL 20 DE OCTUBRE")
+    # 1. el idioma del audio de YouTube: Upload-Post no acepta «es-419»
+    r, d = cliente.get("/api/publicar/proyectos")
+    audio = [c for c, _n in (((d or {}).get("seo_opciones") or {}).get("idiomas_audio") or [])]
+    ok(audio and all(re.fullmatch(r"[a-z]{2}-[A-Z]{2}", c) for c in audio),
+       f"los idiomas del audio que se ofrecen son todos idioma-PAÍS: {audio}")
+    r, d = cliente.put("/api/publicar/proyectos/_sin", {"yt_idioma_audio": "es-419"})
+    igual((r.status_code, ((d or {}).get("ajustes") or {}).get("yt_idioma_audio")), (200, "es-US"),
+          "un «es-419» que llegue se guarda como «es-US»")
+    # 2. Short o vídeo normal en YouTube, elegido en la ficha
+    ruta = f"/api/publicar/videos/{pid}"
+    r, d = cliente.put(ruta, {"youtube_formato": "video"})
+    igual((r.status_code, (d or {}).get("youtube_formato")), (200, "video"),
+          f"PUT {ruta} guarda «youtube_formato»")
+    ok("puede_elegir" in (((d or {}).get("encaje") or {}).get("youtube") or {}),
+       "y el encaje de YouTube dice si se puede elegir")
+    r, _d = cliente.put(ruta, {"youtube_formato": "reel"})
+    igual(r.status_code, 400, "un formato que no existe: 400")
+    r, d = cliente.put(ruta, {"youtube_formato": "auto"})
+    igual((r.status_code, (d or {}).get("youtube_formato")), (200, "auto"), "«auto» vuelve a lo de siempre")
+    # 4. «Comprobar» un programado que ya debió salir: /refrescar con su lote
+    r, d = cliente.post("/api/publicar/refrescar", {"lote": "abc123abc123"})
+    igual((r.status_code, (d or {}).get("estados")), (200, []),
+          "POST /api/publicar/refrescar {lote} pregunta por ese envío y dice cómo quedó")
+    r, _d = cliente.post("/api/publicar/refrescar", {"lote": "../../x"})
+    igual(r.status_code, 400, "un lote que no es un id: 400")
+    r, d = cliente.post("/api/publicar/refrescar")
+    igual(r.status_code, 200, "y sin cuerpo sigue como siempre")
+    r, d = cliente.get("/api/publicar/cola")
+    ok(all("debio_salir" in e for e in (d or {}).get("envios") or []),
+       "cada envío de la cola dice si ya debió salir")
+
+
 def probar_espacio_fijo():
     """Rama espacio-fijo (20-10-2026): la peticion del catalogo y el ESPACIO FIJO.
 
@@ -7288,6 +7323,7 @@ def main():
         probar_mezcla_cancelada_se_aplica_con_otra_mezcla()
         probar_cancelar_en_el_taller()
         probar_mas_emojis(cliente, carpeta, pid)
+        probar_publicar_20oct(cliente, pid)
         probar_espacio_fijo()
     finally:
         parar(proceso)

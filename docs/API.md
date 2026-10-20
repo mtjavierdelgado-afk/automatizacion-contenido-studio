@@ -403,10 +403,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/proyectos/{cid}/perfil` | Apunta el perfil de Upload-Post del proyecto: {perfil, crear?}. Si ya |
 | `GET` | `/api/publicar/proyectos/{cid}/perfiles` | Los perfiles que hay de verdad en Upload-Post, para elegir uno: los que |
 | `GET` | `/api/publicar/proyectos/{cid}/tableros` | Los tableros de Pinterest del perfil del proyecto: [{id, nombre}]. |
-| `POST` | `/api/publicar/refrescar` | Pregunta a Upload-Post por los envios que siguen en el aire. |
+| `POST` | `/api/publicar/refrescar` | Pregunta a Upload-Post por los envios que siguen en el aire. Con `{lote}` («Comprobar» de un programado que ya debió salir, 20-10) pregunta solo por ese, ya, y devuelve `estados` de ese lote. |
 | `GET` | `/api/publicar/resultados` | El resumen de un proyecto (lo que ya se sabe; no pregunta a nadie). |
 | `GET` | `/api/publicar/videos/{pid}` | La ficha de publicar de un video: redes, textos, encaje, envios. |
-| `PUT` | `/api/publicar/videos/{pid}` | {redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?} |
+| `PUT` | `/api/publicar/videos/{pid}` | {redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?, youtube_formato?: auto\|short\|video} (Short o vídeo normal en YouTube, 20-10) |
 | `POST` | `/api/publicar/videos/{pid}/a-mano` | «Lo he subido yo»: {red, url?}. Queda en el historial. |
 | `POST` | `/api/publicar/videos/{pid}/emojis` | «✨ Más emojis»: {red, campo: titulo\|descripcion, texto?} → {texto, antes, despues}, el MISMO texto con emojis añadidos (haiku, en la petición). No guarda nada; si Claude cambia una palabra o un hashtag, 422. |
 | `POST` | `/api/publicar/videos/{pid}/enviar` | {redes, modo: ahora|programar|pendiente, cuando?, confirmado, repetir?} |

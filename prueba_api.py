@@ -4793,6 +4793,83 @@ def probar_montaje_por_plano(cliente, carpeta):
           "y el plano deja de estar obsoleto")
 
 
+def probar_descargar_imagenes(cliente, carpeta):
+    """«Descargar todas» de las diapositivas (rama imagenes-texto, 20-10-2026).
+
+    El .zip trae las imágenes de plano de la versión ACTIVA de assets, en el
+    orden del plan y numeradas; un vídeo sin imágenes es un 404; y pedirlo no
+    escribe nada: ni el estado ni un fichero dentro del proyecto ni un .zip
+    olvidado en el temporal.
+    """
+    seccion("DESCARGAR TODAS LAS IMÁGENES DE UN VÍDEO EN UN .ZIP")
+    import hashlib
+    import zipfile
+    from nucleo.estado import Estado
+    from nucleo.proyecto import Proyecto, escribir_json
+
+    _r, datos = cliente.post("/api/proyectos", {"nombre": "Descargar imágenes"})
+    pid = (datos.get("proyecto") or {}).get("id")
+    proyecto = Proyecto(os.path.join(carpeta, pid))
+    estado = Estado(proyecto)
+    ruta_zip = f"/api/proyectos/{pid}/imagenes/zip"
+    respuesta, _d = cliente.get(ruta_zip)
+    igual(respuesta.status_code, 404, "un vídeo sin imágenes da 404")
+    respuesta, _d = cliente.get("/api/proyectos/no_existe_este/imagenes/zip")
+    igual(respuesta.status_code, 404, "un vídeo que no existe da 404")
+
+    def tanda(contenidos):
+        trabajo = proyecto.ruta_trabajo("assets")
+        os.makedirs(os.path.join(trabajo, "escenas"), exist_ok=True)
+        escribir_json(os.path.join(trabajo, "plan.json"), {
+            "escenas": [{"id": sid, "t_in": 0.0, "t_out": 1.0, "duracion": 1.0, "narracion": sid}
+                        for sid in ("S002", "S001", "S003", "S004")],
+            "duracion_total": 4.0})
+        for sid, contenido in contenidos.items():
+            with open(os.path.join(trabajo, "escenas", f"{sid}.png"), "wb") as fh:
+                fh.write(contenido)
+        # una que no es de plano: no va en el .zip
+        with open(os.path.join(trabajo, "suelta.png"), "wb") as fh:
+            fh.write(b"no")
+        estado.completar("assets", {"plan": "plan.json"})
+
+    # el plan va en otro orden que los nombres: el .zip sigue el PLAN.
+    # S004 no tiene imagen (una cartela, una que falló): no sale.
+    tanda({"S001": b"v1-uno", "S002": b"v1-dos", "S003": b"v1-tres"})
+    tanda({"S001": b"v2-uno", "S002": b"v2-dos", "S003": b"v2-tres"})
+
+    def foto():
+        huellas = {}
+        for raiz, _dirs, ficheros in os.walk(proyecto.raiz):
+            for nombre in ficheros:
+                ruta = os.path.join(raiz, nombre)
+                with open(ruta, "rb") as fh:
+                    huellas[os.path.relpath(ruta, proyecto.raiz)] = hashlib.sha1(fh.read()).hexdigest()
+        return huellas
+
+    temporal = tempfile.gettempdir()
+    zips_antes = {n for n in os.listdir(temporal) if n.startswith("imagenes_") and n.endswith(".zip")}
+    antes = foto()
+    respuesta, _d = cliente.get(ruta_zip)
+    igual(respuesta.status_code, 200, f"GET {ruta_zip} responde 200")
+    igual(respuesta.headers.get("content-type"), "application/zip", "y es un .zip")
+    ok("descargar_imagenes_imagenes.zip" in (respuesta.headers.get("content-disposition") or ""),
+       f"con el nombre del vídeo ({respuesta.headers.get('content-disposition')})")
+    try:
+        with zipfile.ZipFile(io.BytesIO(respuesta.content)) as archivo:
+            nombres = archivo.namelist()
+            contenidos = [archivo.read(n) for n in nombres]
+    except zipfile.BadZipFile:
+        nombres, contenidos = [], []
+    igual(nombres, ["descargar_imagenes_001_S002.png", "descargar_imagenes_002_S001.png",
+                    "descargar_imagenes_003_S003.png"],
+          "trae las 3 imágenes de plano, en el orden del plan y numeradas")
+    igual(contenidos, [b"v2-dos", b"v2-uno", b"v2-tres"], "y son las de la versión ACTIVA")
+    igual(foto(), antes, "pedir el .zip no escribe nada en el proyecto (ni el estado)")
+    time.sleep(0.5)
+    zips_despues = {n for n in os.listdir(temporal) if n.startswith("imagenes_") and n.endswith(".zip")}
+    igual(zips_despues - zips_antes, set(), "y el .zip temporal se borra al mandarlo")
+
+
 def probar_montaje(cliente):
     """El montaje (rama montaje-movimiento, 18-10-2026).
 
@@ -6737,6 +6814,7 @@ def main():
         probar_audio_y_musica_de_la_previa(cliente, carpeta)
         probar_taller_oculto(cliente)
         probar_montaje_por_plano(cliente, carpeta)
+        probar_descargar_imagenes(cliente, carpeta)
         probar_cartelas_y_transiciones(cliente, pid, os.path.join(carpeta, pid))
         probar_direccion(cliente, pid)
         probar_motor_del_plan(cliente, pid)

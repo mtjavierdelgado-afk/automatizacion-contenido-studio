@@ -2217,7 +2217,7 @@ def probar_sistema(cliente):
     respuesta, datos = cliente.get("/api/sistema/novedades")
     igual(respuesta.status_code, 200, "GET /api/sistema/novedades responde 200")
     ok("V2.0" in (datos.get("texto") or ""), "las novedades hablan de la V2.0")
-    igual(datos.get("producto"), "Automatización Contenido Studio", "con el nombre nuevo")
+    igual(datos.get("producto"), "CrearIA Studio", "con el nombre nuevo")
 
     respuesta, datos = cliente.post("/api/sistema/notas", {"texto": "  "})
     igual(respuesta.status_code, 400, "una nota vacia da 400")

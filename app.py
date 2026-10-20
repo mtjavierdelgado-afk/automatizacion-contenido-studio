@@ -110,8 +110,12 @@ def comun_tokens(sobre):
             "salida": int(uso.get("output_tokens") or 0)}
 
 VERSION = "2.0"
-#: Como se llama el producto en pantalla, en los avisos y en la documentacion.
-NOMBRE_PRODUCTO = "Automatización Contenido Studio"
+#: Como se llama el producto en pantalla, en los avisos y en la documentacion
+#: (CrearIA Studio desde el 19-10-2026, rama `diseno-crearia`). Es SOLO lo que
+#: se ve: los nombres internos --/opt/as-video-studio, el comando `asvs`, los
+#: servicios `as-video-*`, el repositorio-- no cambian.
+NOMBRE_PRODUCTO = "CrearIA Studio"
+SUBTITULO_PRODUCTO = "Automatización de contenido"
 RAIZ_POR_DEFECTO = os.path.join(RAIZ_ESTUDIO, "proyectos")
 RAIZ_WEB = os.path.join(RAIZ_ESTUDIO, "web")
 ID_VALIDO = re.compile(r"^[a-z0-9_]+$")
@@ -9141,6 +9145,200 @@ def guardar_ajustes(cuerpo: dict = Body(default=None)):
             "zona": AJUSTES.zona_en_uso()}
 
 
+# ================================================================== INICIO
+#
+# EL PANEL DE INICIO (rama `diseno-crearia`, 19-10-2026). Dos cosas:
+#
+#   - `GET /api/inicio/resumen`: lo que el Inicio no puede sacar de las rutas
+#     que ya hay sin pedir veinte: el gasto del mes (de `coste_global.jsonl`),
+#     los videos creados este mes, los recientes, lo que se esta generando y el
+#     reparto por cliente. Solo LEE: no abre el estado de ningun video ni
+#     escribe nada (regla 1 de CLAUDE.md).
+#   - `GET/PUT /api/inicio/panel`: «Arma tu panel» (que tarjetas se ven, en que
+#     orden y tamaño, y el tope de gasto del mes) POR USUARIO. Studio no sabe
+#     de cuentas --el login vive delante--, asi que el usuario lo dice la
+#     pantalla (el de `/api/me`); sin login delante la pantalla lo guarda en el
+#     navegador y no llama aqui. NO es param de ningun paso: no mueve firmas.
+#     Vive junto a ajustes.json (y se redirige con ESTUDIO_AJUSTES).
+
+#: Las tarjetas que puede llevar el Inicio. Lo que llegue fuera de esta lista
+#: se descarta al guardar.
+TARJETAS_INICIO = ("saludo", "cifras", "necesitan", "semana", "recientes", "marcha",
+                   "mejor", "gasto", "parrilla", "calendario", "clientes", "novedades")
+TAMANOS_TARJETA = ("S", "M", "L")
+MAX_PANELES_INICIO = 200
+_LOCK_PANELES = threading.Lock()
+
+
+def _ruta_paneles_inicio():
+    return os.path.join(os.path.dirname(os.path.abspath(AJUSTES.RUTA)), "paneles_inicio.json")
+
+
+def _usuario_de_panel(valor):
+    """El nombre del usuario, limpio. "" si no vale (no se guarda nada)."""
+    nombre = str(valor or "").strip()
+    if not nombre or len(nombre) > 80 or not re.match(r"^[\w.@+-]+$", nombre):
+        return ""
+    return nombre
+
+
+def _panel_limpio(datos):
+    """El panel validado: {tarjetas: [{id, tam}], vista, tope_usd}. -> dict o ValueError"""
+    if not isinstance(datos, dict):
+        raise ValueError("el panel se guarda con un objeto")
+    tarjetas, vistas = [], set()
+    for t in datos.get("tarjetas") or []:
+        if not isinstance(t, dict):
+            raise ValueError("cada tarjeta es un objeto {id, tam}")
+        tid = str(t.get("id") or "")
+        if tid not in TARJETAS_INICIO:
+            raise ValueError(f"tarjeta desconocida: {tid!r}")
+        if tid in vistas:
+            continue
+        vistas.add(tid)
+        tam = t.get("tam") if t.get("tam") in TAMANOS_TARJETA else "M"
+        tarjetas.append({"id": tid, "tam": tam})
+    tope = datos.get("tope_usd")
+    if tope in (None, ""):
+        tope = None
+    else:
+        if isinstance(tope, bool):
+            raise ValueError("tope_usd es un número")
+        try:
+            tope = round(float(tope), 2)
+        except (TypeError, ValueError):
+            raise ValueError("tope_usd es un número") from None
+        if not 0 <= tope <= 100000:
+            raise ValueError("tope_usd: entre 0 y 100000")
+    vista = str(datos.get("vista") or "")[:40]
+    return {"tarjetas": tarjetas, "vista": vista, "tope_usd": tope}
+
+
+@app.get("/api/inicio/panel")
+def leer_panel_inicio(usuario: str = Query(default="")):
+    """El panel guardado de ese usuario, o {panel: null} si no tiene."""
+    nombre = _usuario_de_panel(usuario)
+    if not nombre:
+        raise ErrorApi(400, "hace falta el usuario (el de /api/me)")
+    paneles = leer_json(_ruta_paneles_inicio(), {}) or {}
+    panel = paneles.get(nombre) if isinstance(paneles, dict) else None
+    return {"usuario": nombre, "panel": panel if isinstance(panel, dict) else None,
+            "tarjetas": list(TARJETAS_INICIO)}
+
+
+@app.put("/api/inicio/panel")
+def guardar_panel_inicio(cuerpo: dict = Body(default=None)):
+    """Guarda el panel de un usuario: {usuario, panel} (panel null lo borra)."""
+    datos = _cuerpo(cuerpo)
+    nombre = _usuario_de_panel(datos.get("usuario"))
+    if not nombre:
+        raise ErrorApi(400, "hace falta el usuario (el de /api/me)")
+    panel = None
+    if datos.get("panel") is not None:
+        try:
+            panel = _panel_limpio(datos.get("panel"))
+        except ValueError as fallo:
+            raise ErrorApi(400, str(fallo))
+    ruta = _ruta_paneles_inicio()
+    with _LOCK_PANELES:
+        paneles = leer_json(ruta, {}) or {}
+        if not isinstance(paneles, dict):
+            paneles = {}
+        if panel is None:
+            paneles.pop(nombre, None)
+        else:
+            if nombre not in paneles and len(paneles) >= MAX_PANELES_INICIO:
+                raise ErrorApi(400, f"como mucho {MAX_PANELES_INICIO} paneles guardados")
+            paneles[nombre] = dict(panel, guardado=ahora())
+        os.makedirs(os.path.dirname(ruta), exist_ok=True)
+        escribir_json(ruta, paneles)
+    return {"usuario": nombre, "panel": paneles.get(nombre)}
+
+
+def _carpeta_de_registro(registro):
+    """La carpeta (= id) del video de un registro de coste, como hace
+    `coste.resumen_global`: por la ruta, y si no hay, por el id escrito."""
+    raiz = str(registro.get("raiz") or "").rstrip("/\\")
+    nombre = re.split(r"[/\\]", raiz)[-1] if raiz else ""
+    return nombre or str(registro.get("proyecto") or "")
+
+
+@app.get("/api/inicio/resumen")
+def resumen_inicio(peticion: Request):
+    """Lo del Inicio que no sale de otras rutas, en una sola llamada.
+
+    -> {mes, gasto_mes_usd, videos_mes, videos, recientes: [{pid, nombre,
+        cliente_nombre, estilo, actualizado, creado}], en_marcha: [{id, pid,
+        nombre, paso, progreso, mensaje}], por_cliente: [{id, nombre, videos,
+        videos_mes, usd_mes}]}. Lo de un proyecto con clave cerrado no sale."""
+    mes = time.strftime("%Y-%m")
+    cerrados = _cerrados(peticion)
+    asignaciones = CLIENTES._leer(raiz_proyectos())
+    nombres = _nombres_de_clientes()
+    fichas, cliente_de = [], {}
+    for ficha in _listar_proyectos():
+        if ficha.get(CONFIG_TALLER):
+            continue
+        cid = CLIENTES.cliente_de(raiz_proyectos(), ficha.get(CONFIG_ESTILO_LIGHT) or "",
+                                  ficha.get("id"), datos=asignaciones)
+        if cerrados and cid in cerrados:
+            continue
+        cliente_de[ficha.get("id")] = cid or ""
+        fichas.append({"pid": ficha.get("id"), "nombre": ficha.get("nombre") or ficha.get("id"),
+                       "cliente": cid or "", "cliente_nombre": nombres.get(cid, ""),
+                       "estilo": ficha.get(CONFIG_ESTILO_LIGHT) or "",
+                       "creado": str(ficha.get("creado") or ""),
+                       "actualizado": str(ficha.get("actualizado") or "")})
+    del_mes = [f for f in fichas if f["creado"].startswith(mes)]
+    # EL GASTO DEL MES: solo lo de los videos que se pueden ver, mas lo que no
+    # es de ningun video (los estilos, el asistente)
+    try:
+        registros = leer_jsonl(COSTE.RUTA_GLOBAL)
+    except Exception:                                       # noqa: BLE001
+        registros = []
+    suyos, por_carpeta = [], {}
+    for r in registros:
+        if not str(r.get("momento") or "").startswith(mes):
+            continue
+        carpeta = _carpeta_de_registro(r)
+        if cerrados and carpeta and carpeta not in cliente_de:
+            # de un video que no se lista: si es de un proyecto cerrado, fuera
+            if CLIENTES.cliente_de(raiz_proyectos(), "", carpeta, datos=asignaciones) in cerrados:
+                continue
+        suyos.append(r)
+        por_carpeta.setdefault(carpeta, []).append(r)
+    gasto = COSTE.agregar(suyos)["total_usd"] if suyos else 0.0
+    por_cliente = {}
+    for f in fichas:
+        c = por_cliente.setdefault(f["cliente"], {"id": f["cliente"] or "_sin",
+                                                  "nombre": f["cliente_nombre"] or "Sin proyecto",
+                                                  "videos": 0, "videos_mes": 0, "usd_mes": 0.0})
+        c["videos"] += 1
+        c["videos_mes"] += 1 if f["creado"].startswith(mes) else 0
+    for carpeta, lista in por_carpeta.items():
+        if carpeta in cliente_de:
+            c = por_cliente.get(cliente_de[carpeta])
+            if c is not None:
+                c["usd_mes"] = round(c["usd_mes"] + COSTE.agregar(lista)["total_usd"], 4)
+    recientes = sorted(fichas, key=lambda f: f["actualizado"], reverse=True)[:4]
+    en_marcha = []
+    with _LOCK:
+        vivos = [(pid, _CONTEXTOS[pid]) for pid in list(_CONTEXTOS)]
+    nombre_de = {f["pid"]: f["nombre"] for f in fichas}
+    for pid, ctx in vivos:
+        if pid not in nombre_de:
+            continue
+        for t in ctx.gestor.listar(activos=True):
+            en_marcha.append({"id": t["id"], "pid": pid, "nombre": nombre_de[pid],
+                              "paso": t.get("paso") or "", "progreso": t.get("progreso") or 0,
+                              "mensaje": t.get("mensaje") or "",
+                              "cancelando": bool(t.get("cancelando"))})
+    return {"mes": mes, "gasto_mes_usd": round(gasto, 4), "videos_mes": len(del_mes),
+            "videos": len(fichas), "recientes": recientes, "en_marcha": en_marcha[:5],
+            "por_cliente": sorted(por_cliente.values(),
+                                  key=lambda c: (-c["usd_mes"], -c["videos"], c["nombre"]))}
+
+
 # ------------------------------------------------------- como se pronuncia
 
 @app.get("/api/pronunciaciones")
@@ -10665,7 +10863,8 @@ def manual_del_sistema():
             texto = fh.read()
     except OSError:
         texto = ""
-    return {"version": VERSION, "producto": NOMBRE_PRODUCTO, "texto": texto}
+    return {"version": VERSION, "producto": NOMBRE_PRODUCTO,
+            "subtitulo": SUBTITULO_PRODUCTO, "texto": texto}
 
 
 @app.get("/api/sistema/novedades")
@@ -10676,7 +10875,8 @@ def novedades_del_sistema():
             texto = fh.read()
     except OSError:
         texto = ""
-    return {"version": VERSION, "producto": NOMBRE_PRODUCTO, "texto": texto}
+    return {"version": VERSION, "producto": NOMBRE_PRODUCTO,
+            "subtitulo": SUBTITULO_PRODUCTO, "texto": texto}
 
 
 #: Las notas de mejoras: una lista corta que se edita desde Configuracion. En

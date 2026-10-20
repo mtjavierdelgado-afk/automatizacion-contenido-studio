@@ -2469,6 +2469,7 @@ function pintarConfig() {
     return;
   }
   if (SISTEMA.notas === null && !SISTEMA.pedido) { SISTEMA.pedido = true; cargarSistema(); }
+  caja.appendChild(seccionPaleta());  // la paleta (rama diseno-crearia)
   caja.appendChild(seccionManual());
   caja.appendChild(seccionNovedades());
   caja.appendChild(seccionNotas());
@@ -4603,13 +4604,31 @@ function llenarFiltroBitacora() {
 
 /* ------------------------------------------------------------------ arranque */
 
-/* ---------------------------------------------------------- el tema y el pie
+/* ---------------------------------------------------- las paletas y el pie
  *
- * EL TEMA: oscuro de fabrica, claro si se elige. Solo cambia un atributo en
- * <html>; toda la paleta vive en variables de `estilo.css`, asi que no hay ni
- * una regla que repetir. Se recuerda en el navegador (es de quien mira, no del
- * servidor) y el <head> lo aplica antes de pintar para que no parpadee.
+ * CUATRO PALETAS (rama `diseno-crearia`, 19-10-2026): Nocturno (la de
+ * fabrica), Aurora y Brasa, oscuras, y Día, la clara. Se eligen en
+ * Configuración → Aspecto; toda la paleta vive en variables de `estilo.css`,
+ * asi que elegir una es poner un atributo en <html>. Se recuerda en el
+ * navegador (es de quien mira, no del servidor) y el <head> la aplica antes
+ * de pintar para que no parpadee.
+ *
+ * EL CONMUTADOR DE LA CABECERA SIGUE: claro u oscuro. Día ES el tema claro de
+ * siempre (`data-tema="claro"`), y «oscuro» vuelve a la ultima oscura que se
+ * eligió. Así no hay dos ajustes que se contradigan: hay uno (la paleta), y
+ * el botón es un atajo entre Día y tu oscura.
  */
+const PALETAS = [
+  { id: 'nocturno', nombre: 'Nocturno', tipo: 'oscura · la de siempre',
+    idea: 'Violeta creativo con coral para lo que pide atención.' },
+  { id: 'aurora', nombre: 'Aurora', tipo: 'oscura',
+    idea: 'Turquesa y rosa sobre azul petróleo: fresca, de automatización.' },
+  { id: 'brasa', nombre: 'Brasa', tipo: 'oscura',
+    idea: 'Ámbar y frambuesa sobre marrón casi negro: cálida, de productora.' },
+  { id: 'dia', nombre: 'Día', tipo: 'clara',
+    idea: 'La versión clara de Nocturno: el mismo violeta, más profundo.' },
+];
+
 const ICONO_TEMA = {
   oscuro: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>',
   claro: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
@@ -4619,37 +4638,130 @@ function temaActual() {
   return document.documentElement.getAttribute('data-tema') === 'claro' ? 'claro' : 'oscuro';
 }
 
-function aplicarTema(tema) {
-  const claro = tema === 'claro';
-  if (claro) document.documentElement.setAttribute('data-tema', 'claro');
-  else document.documentElement.removeAttribute('data-tema');
-  try { localStorage.setItem('tema', claro ? 'claro' : 'oscuro'); } catch (e) { /* sin almacen: dura la sesion */ }
+function paletaActual() {
+  if (temaActual() === 'claro') return 'dia';
+  const p = document.documentElement.getAttribute('data-paleta');
+  return PALETAS.some(x => x.id === p) ? p : 'nocturno';
+}
+
+function leerAlmacen(clave) {
+  try { return localStorage.getItem(clave); } catch (e) { return null; }
+}
+
+function guardarEnAlmacen(clave, valor) {
+  try {
+    if (valor === null) localStorage.removeItem(clave);
+    else localStorage.setItem(clave, valor);
+  } catch (e) { /* sin almacén (ventana privada): dura lo que la página */ }
+}
+
+function aplicarPaleta(id) {
+  const paleta = PALETAS.some(x => x.id === id) ? id : 'nocturno';
+  const raiz = document.documentElement;
+  if (paleta === 'dia') raiz.setAttribute('data-tema', 'claro');
+  else raiz.removeAttribute('data-tema');
+  if (paleta === 'aurora' || paleta === 'brasa') raiz.setAttribute('data-paleta', paleta);
+  else raiz.removeAttribute('data-paleta');
+  guardarEnAlmacen('paleta', paleta);
+  // `tema` se sigue escribiendo: lo lee una pestaña abierta con la versión de antes
+  guardarEnAlmacen('tema', paleta === 'dia' ? 'claro' : 'oscuro');
+  if (paleta !== 'dia') guardarEnAlmacen('paleta-oscura', paleta);
   const boton = document.getElementById('btn-tema');
   if (boton) {
     // el icono es el del tema AL QUE SE VA, como en cualquier conmutador
+    const claro = paleta === 'dia';
     boton.innerHTML = ICONO_TEMA[claro ? 'oscuro' : 'claro'];
-    boton.title = claro ? 'Pasar a modo oscuro' : 'Pasar a modo claro';
+    boton.title = claro ? 'Pasar a tu paleta oscura' : 'Pasar a la paleta clara (Día)';
   }
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', getComputedStyle(document.documentElement)
-    .getPropertyValue('--panel').trim() || '#14122a');
+  if (meta) meta.setAttribute('content', getComputedStyle(raiz).getPropertyValue('--panel').trim() || meta.getAttribute('content'));
+  document.querySelectorAll('.eleccion-paleta').forEach(b => {
+    b.classList.toggle('activa', b.dataset.paleta === paleta);
+    b.setAttribute('aria-pressed', b.dataset.paleta === paleta ? 'true' : 'false');
+  });
 }
 
-/* EL PIE DEL SISTEMA. Va al final de cada pantalla, dentro del panel que
-   rueda: anclado abajo se comeria una franja en el movil, donde ya estan la
-   barra de pasos y la de mandos. */
-const PIE_SISTEMA = 'Todos los derechos reservados y creación pertenecen a '
-  + 'Agencia Redes Botánica · Octubre 2026 · V2.0';
+/* El conmutador de la cabecera: Día o tu última oscura. */
+function aplicarTema(tema) {
+  const oscura = leerAlmacen('paleta-oscura');
+  aplicarPaleta(tema === 'claro' ? 'dia'
+    : (PALETAS.some(x => x.id === oscura && x.id !== 'dia') ? oscura : 'nocturno'));
+}
+
+/* Configuración → Aspecto: las cuatro, con su muestra. Es del navegador: no
+   toca ningún vídeo ni ningún ajuste del servidor. */
+function seccionPaleta() {
+  const actual = paletaActual();
+  return h('section', { clase: 'bloque-config seccion-paleta' },
+    h('h3', {}, 'Aspecto: la paleta'),
+    h('div', { clase: 'pista' },
+      'Cambia solo los colores de la pantalla. Se recuerda en este navegador. '
+      + 'El botón de sol y luna de arriba pasa de Día a tu paleta oscura.'),
+    h('div', { clase: 'paletas' }, PALETAS.map(p => h('button', {
+      type: 'button', clase: `eleccion-paleta${p.id === actual ? ' activa' : ''}`,
+      datos: { paleta: p.id }, 'aria-pressed': p.id === actual ? 'true' : 'false',
+      title: `${p.nombre}: ${p.idea}`,
+      onclick: () => aplicarPaleta(p.id),
+    },
+    h('span', { clase: `muestra-paleta muestra-${p.id}`, 'aria-hidden': 'true' },
+      h('i', { clase: 'm1' }), h('i', { clase: 'm2' }), h('i', { clase: 'm3' }), h('i', { clase: 'm4' })),
+    h('b', {}, p.nombre),
+    h('span', { clase: 'meta' }, p.tipo)))));
+}
+
+/* EL PIE, en todas las pantallas: al final de Crear (dentro del panel que
+   rueda: anclado abajo se comería una franja en el móvil) y al final de cada
+   módulo. Los enlaces son enlaces y no botones, para que el barrido de botones
+   del recorrido no se vaya a otra parte a mitad. */
+const PIE_DERECHOS = '© 2026 Agencia Redes Botánica · CrearIA Studio — '
+  + 'Automatización de contenido · v3.1 · Todos los derechos reservados.';
+
+/* EL CONTACTO Y LOS TÉRMINOS: los tiene que escribir el dueño. Mientras estén
+   vacíos, el pie lo dice en vez de inventarse un correo o un texto legal. */
+const CONTACTO_STUDIO = '';
+const TERMINOS_STUDIO = [];
+
+function enlacePie(texto, accion, titulo) {
+  return h('a', { href: '#', clase: 'enlace-pie', title: titulo || texto,
+    onclick: ev => { ev.preventDefault(); accion(); } }, texto);
+}
 
 function pieSistema() {
   return h('footer', { clase: 'pie-sistema' },
-    h('span', { clase: 'pie-marca' }, 'Automatización Contenido Studio'),
-    h('span', {}, PIE_SISTEMA));
+    h('span', { clase: 'pie-texto' }, PIE_DERECHOS),
+    h('span', { clase: 'pie-enlaces' },
+      enlacePie('Novedades', () => abrirNovedades(), 'Lo que ha cambiado en el Studio'),
+      enlacePie('Guía', () => abrirManual(), 'El panel de ayuda: el manual y las guías'),
+      enlacePie('Términos de uso', () => ventanaTexto('Términos de uso', TERMINOS_STUDIO.length
+        ? TERMINOS_STUDIO
+        : ['Texto pendiente: los términos de uso los tiene que escribir el dueño del Studio '
+          + '(Agencia Redes Botánica). Se ponen en TERMINOS_STUDIO, en web/app.js.'])),
+      enlacePie('Contacto', () => {
+        if (CONTACTO_STUDIO) { window.location.href = `mailto:${CONTACTO_STUDIO}`; return; }
+        ventanaTexto('Contacto', ['Pendiente: el dueño del Studio tiene que poner aquí su correo '
+          + 'de contacto (CONTACTO_STUDIO, en web/app.js).']);
+      })));
+}
+
+/* Una ventana de solo lectura, con «Cerrar». */
+function ventanaTexto(titulo, parrafos) {
+  const capa = h('div', { clase: 'capa-dialogo' });
+  const teclas = ev => { if (ev.key === 'Escape') cerrar(); };
+  const cerrar = () => { capa.remove(); document.removeEventListener('keydown', teclas); };
+  const boton = h('button', { type: 'button', clase: 'mini primario', onclick: cerrar }, 'Cerrar');
+  capa.appendChild(h('div', { clase: 'dialogo ventana-texto', role: 'dialog', 'aria-label': titulo },
+    h('h3', {}, titulo),
+    ...parrafos.map(p => h('p', {}, p)),
+    h('div', { clase: 'dialogo-botones' }, boton)));
+  capa.addEventListener('click', ev => { if (ev.target === capa) cerrar(); });
+  document.addEventListener('keydown', teclas);
+  document.body.appendChild(capa);
+  setTimeout(() => boton.focus(), 0);
 }
 
 function arrancar() {
   ponerMandosDeCabecera();
-  aplicarTema(temaActual());
+  aplicarPaleta(paletaActual());
   /* EL LOGO LLEVA AL INICIO, como en cualquier web: era la primera salida que
      se buscaba y no hacía nada (11-10-2026). */
   const marca = document.querySelector('#cabecera .marca');
@@ -15336,7 +15448,7 @@ const INICIO = { abierta: false, paso: 0, arrancando: false, accesoFallido: '' }
    `estadoConfig()` (las claves y las cuentas del CLI, que son las mismas que
    ve Configuración). */
 const TARJETAS_INICIO = [
-  { id: 'bienvenida', titulo: 'Bienvenido a Automatización Contenido Studio', pinta: tarjetaBienvenidaInicio },
+  { id: 'bienvenida', titulo: 'Bienvenido a CrearIA Studio', pinta: tarjetaBienvenidaInicio },
   { id: 'claude', titulo: '1 · Tu cuenta de Claude', pinta: tarjetaClaudeInicio },
   { id: 'openai', titulo: '2 · La clave de OpenAI (imágenes)', pinta: tarjetaOpenAIInicio },
   { id: 'cartesia', titulo: '3 · La clave de Cartesia (voz)', pinta: tarjetaCartesiaInicio },
@@ -16146,6 +16258,7 @@ function pintarAsistente() {
   burbuja.classList.toggle('dudosa', listo && !!(estado && estado.aviso));
   burbuja.classList.toggle('pensando', ocupada);
   burbuja.classList.toggle('aviso', ASISTENTE.sinLeer && !ocupada);
+  pintarEstadoAsistenteMenu();  // «Asistente listo» en el menú lateral (diseno-crearia)
   burbuja.title = listo
     ? (estado && estado.aviso ? `Asistente: conectado; la última llamada falló (${estado.aviso})`
       : 'Asistente: pregunta lo que sea del Estudio')
@@ -18147,18 +18260,140 @@ function seccionManual() {
   return caja;
 }
 
-/* El botón «?»: abre Configuración con la guía desplegada y a la vista. */
+/* ============================================================ EL PANEL DE AYUDA
+ *
+ * El «?» de la cabecera (rama `diseno-crearia`, 19-10-2026). Antes abría
+ * Configuración con el manual desplegado; ahora tiene su propio panel: el
+ * manual (`docs/MANUAL.md`) ABIERTO EN EL APARTADO DE LA PANTALLA EN LA QUE
+ * SE ESTÁ, el resto del manual plegado, todas las guías de escritura, la guía
+ * de inicio y las novedades. Solo lee.
+ */
+const AYUDA = { abierta: false, montada: false };
+
+/* Qué apartado del manual (sus `## Títulos`) va con la pantalla de ahora. */
+function apartadosDeLaPantalla() {
+  if (!$('#config').classList.contains('plegado')) return ['Configuración'];
+  if (MODULOS.actual === 'inicio') return ['Inicio'];
+  if (MODULOS.actual === 'publicar') return ['Publicar'];
+  if (MODULOS.actual === 'automatizar') return ['Automatizar'];
+  const vista = APP.light.vista;
+  if (vista === 'preset' || vista === 'crear' || vista === 'generando') return ['Estilos'];
+  if (vista === 'elegido') {
+    const sub = (APP.light.video || {}).vista;
+    if (sub === 'guion') return ['Guion'];
+    if (sub === 'previa') return ['Imágenes'];
+    if (sub === 'video') return ['Vídeo'];
+    return ['Encargo'];
+  }
+  return ['La idea en una frase', 'Proyectos', 'Estilos'];
+}
+
+/* El manual partido por sus `## `: [{titulo, texto}]. */
+function apartadosDelManual(texto) {
+  const salida = [];
+  String(texto || '').replace(/\r/g, '').split('\n').forEach(linea => {
+    const m = /^## (.+)$/.exec(linea);
+    if (m) salida.push({ titulo: m[1].trim(), lineas: [] });
+    else if (salida.length) salida[salida.length - 1].lineas.push(linea);
+  });
+  return salida.map(a => ({ titulo: a.titulo, texto: a.lineas.join('\n').trim() }));
+}
+
+function montarAyuda() {
+  if (AYUDA.montada || !$('#ayuda')) return;
+  AYUDA.montada = true;
+  $('#btn-cerrar-ayuda').addEventListener('click', () => conmutarAyuda(false));
+  document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && AYUDA.abierta) conmutarAyuda(false); });
+}
+
+function conmutarAyuda(abrir) {
+  montarAyuda();
+  const cajon = $('#ayuda');
+  if (!cajon) return;
+  const quiero = abrir === undefined ? cajon.classList.contains('plegado') : !!abrir;
+  AYUDA.abierta = quiero;
+  cajon.classList.toggle('plegado', !quiero);
+  document.body.classList.toggle('ayuda-abierta', quiero);
+  const boton = $('#btn-ayuda');
+  if (boton) boton.setAttribute('aria-expanded', quiero ? 'true' : 'false');
+  if (!quiero) return;
+  pintarAyuda();
+  if (!SISTEMA.manual) { SISTEMA.pedido = true; cargarSistema().then(pintarAyuda); }
+  cargarGuias().then(pintarAyuda).catch(() => {});
+}
+
+/* El «?» (y «Guía» del pie): el panel de Ayuda en el apartado de esta pantalla. */
 function abrirManual() {
-  SISTEMA.manualAbierto = true;
+  AYUDA.apartados = apartadosDeLaPantalla();
+  conmutarAyuda(true);
+}
+
+function pintarAyuda() {
+  const caja = $('#cuerpo-ayuda');
+  if (!caja || !AYUDA.abierta) return;
+  vaciar(caja);
+  const deAqui = AYUDA.apartados || apartadosDeLaPantalla();
+  const manual = SISTEMA.manual;
+  const todos = apartadosDelManual(manual && manual.texto);
+  const casa = a => deAqui.some(t => a.titulo.startsWith(t));
+  const suyos = todos.filter(casa);
+  const seccion = h('section', { clase: 'ayuda-seccion ayuda-pantalla' },
+    h('span', { clase: 'etiqueta-inicio' }, 'Esta pantalla'));
+  if (SISTEMA.error) seccion.appendChild(h('div', { clase: 'meta' }, SISTEMA.error));
+  else if (!manual) seccion.appendChild(h('div', { clase: 'cargando' }, 'leyendo el manual…'));
+  else if (!suyos.length) seccion.appendChild(h('div', { clase: 'meta' }, 'Esta pantalla aún no tiene apartado en el manual.'));
+  suyos.forEach(a => seccion.appendChild(h('div', { clase: 'apartado-manual' },
+    h('h3', {}, a.titulo),
+    h('div', { clase: 'novedades' }, textoConFormato(unirLineas(a.texto))))));
+  caja.appendChild(seccion);
+
+  const otras = h('section', { clase: 'ayuda-seccion' }, h('span', { clase: 'etiqueta-inicio' }, 'Más ayuda'),
+    h('div', { clase: 'fila botones-ayuda' },
+      h('button', { type: 'button', clase: 'mini', title: 'Las tarjetas de la primera vez: qué hace falta y dónde se consigue',
+        onclick: () => { conmutarAyuda(false); abrirInicio(0); } }, 'Guía de inicio'),
+      h('button', { type: 'button', clase: 'mini', title: 'Lo que ha cambiado en el Studio',
+        onclick: () => { conmutarAyuda(false); abrirNovedades(); } }, 'Novedades')));
+  caja.appendChild(otras);
+
+  const guias = h('section', { clase: 'ayuda-seccion' }, h('span', { clase: 'etiqueta-inicio' }, 'Guías de escritura'),
+    h('div', { clase: 'meta' }, 'Cómo escribir cada campo para que el sistema lo entienda, con plantilla y ejemplo.'));
+  if (!GUIAS.lista) guias.appendChild(h('div', { clase: 'cargando' }, 'leyendo las guías…'));
+  else {
+    guias.appendChild(h('ul', { clase: 'lista-guias' }, GUIAS.lista.map(g => h('li', {},
+      h('button', { type: 'button', clase: 'mini fantasma boton-guia-ayuda', title: g.donde || '',
+        onclick: () => abrirGuia(g.id) }, `✦ ${g.titulo}`),
+      g.donde ? h('span', { clase: 'meta' }, g.donde) : null))));
+  }
+  caja.appendChild(guias);
+
+  if (todos.length) {
+    const resto = h('section', { clase: 'ayuda-seccion' }, h('span', { clase: 'etiqueta-inicio' }, 'Todo el manual'));
+    todos.filter(a => !casa(a)).forEach(a => {
+      const d = h('details', { clase: 'apartado-manual plegado-manual' }, h('summary', {}, a.titulo));
+      d.addEventListener('toggle', () => {
+        if (d.open && d.childNodes.length === 1) d.appendChild(h('div', { clase: 'novedades' }, textoConFormato(unirLineas(a.texto))));
+      });
+      resto.appendChild(d);
+    });
+    caja.appendChild(resto);
+  }
+}
+
+/* «Novedades» (el pie, la Ayuda, la tarjeta del Inicio): Configuración con
+   las novedades desplegadas y a la vista. */
+function abrirNovedades() {
+  SISTEMA.novedadesAbiertas = true;
   conmutarConfig(true);
   setTimeout(() => {
-    const caja = document.querySelector('.manual-config');
+    const caja = document.querySelector('.novedades-config');
     if (caja) { caja.open = true; caja.scrollIntoView({ block: 'start' }); }
   }, 400);
 }
 
 function seccionNovedades() {
-  const caja = h('details', { clase: 'bloque-config plegable-config' });
+  const caja = h('details', { clase: 'bloque-config plegable-config novedades-config',
+    open: !!SISTEMA.novedadesAbiertas });
+  caja.addEventListener('toggle', () => { SISTEMA.novedadesAbiertas = caja.open; });
   const nov = SISTEMA.novedades;
   caja.appendChild(h('summary', {},
     h('h3', {}, 'Novedades'),
@@ -18235,7 +18470,7 @@ function seccionNotas() {
       h('button', {
         clase: 'mini',
         onclick: () => copiarTexto(
-          'NOTAS DE MEJORAS de Automatización Contenido Studio\n\n'
+          'NOTAS DE MEJORAS de CrearIA Studio\n\n'
           + (pendientes.length ? 'PENDIENTES:\n' + pendientes.map(n => `- ${n.texto}`).join('\n') : 'Sin pendientes.')
           + (hechas.length ? '\n\nHECHAS:\n' + hechas.map(n => `- ${n.texto}`).join('\n') : '')),
       }, 'Copiar todas')));
@@ -18666,15 +18901,21 @@ function contarAvisosPublicar() {
   pintarBarraModulos();
 }
 
+/* LA BARRA DE MÓDULOS. En el móvil y la tableta, una fila debajo de la
+   cabecera (como siempre); en el ordenador (estilo.css, ≥1200 px) es el MENÚ
+   LATERAL del diseño CrearIA: los módulos, Configuración, el gasto del mes y
+   si el asistente está listo. Es el mismo nodo: solo cambia cómo se coloca. */
 function pintarBarraModulos() {
   const barra = $('#barra-modulos');
   if (!barra) return;
+  document.body.classList.add('con-menu');
   vaciar(barra);
-  [['inicio', 'Inicio', 'Lo que pasa hoy y los tres módulos'],
+  const enlaces = h('div', { clase: 'modulos-enlaces' });
+  [['inicio', 'Inicio', 'Tu panel: lo que pasa hoy y lo que te necesita'],
     ['crear', 'Crear', 'Tus estilos y tus vídeos'],
     ['publicar', 'Publicar', 'Cola, calendario, textos por red y cuentas'],
-    ['automatizar', 'Automatizar', 'La Parrilla de guiones (el piloto automático, próximamente)']]
-    .forEach(([id, texto, ayuda]) => barra.appendChild(h('a', {
+    ['automatizar', 'Automatizar', 'La Parrilla de guiones y Analizar cuentas']]
+    .forEach(([id, texto, ayuda]) => enlaces.appendChild(h('a', {
       href: '#', clase: `boton-modulo${MODULOS.actual === id ? ' activo' : ''}`, title: ayuda,
       'aria-current': MODULOS.actual === id ? 'page' : null,
       datos: { modulo: id },
@@ -18682,6 +18923,64 @@ function pintarBarraModulos() {
     }, texto, id === 'publicar' && PUB.avisos
       ? h('span', { clase: 'aviso-modulo', title: 'Envíos que fallaron o esperan tu OK' }, String(PUB.avisos))
       : null)));
+  enlaces.appendChild(h('a', {
+    href: '#', clase: 'boton-modulo modulo-config', title: 'Claves, cuentas, la paleta, novedades y notas',
+    onclick: ev => { ev.preventDefault(); conmutarConfig(true); },
+  }, 'Configuración'));
+  barra.appendChild(enlaces);
+  barra.appendChild(gastoDelMenu());
+  barra.appendChild(h('button', { type: 'button', id: 'menu-asistente', clase: 'menu-asistente',
+    title: 'Abrir el asistente', onclick: () => conmutarAsistente(true) }));
+  pintarEstadoAsistenteMenu();
+  if (!INI.resumen && !INI.pidiendoResumen) cargarResumenInicio();
+}
+
+/* «Asistente listo» abajo del menú: lo mismo que dice la burbuja. Lo llama
+   `pintarAsistente` cada vez que cambia. */
+function pintarEstadoAsistenteMenu() {
+  const nodo = $('#menu-asistente');
+  if (!nodo) return;
+  const estado = (typeof ASISTENTE !== 'undefined' && ASISTENTE.estado) || null;
+  const listo = !!(estado && estado.listo);
+  const clase = !estado ? 'mirando' : (!listo ? 'sin-sesion' : (estado.aviso ? 'dudoso' : 'listo'));
+  nodo.className = `menu-asistente ${clase}`;
+  vaciar(nodo).appendChild(h('span', { clase: 'punto-asistente', 'aria-hidden': 'true' }));
+  nodo.appendChild(document.createTextNode(!estado ? 'Asistente: mirando…'
+    : (!listo ? 'Asistente sin conectar' : (estado.aviso ? 'Asistente con aviso' : 'Asistente listo'))));
+}
+
+/* El gasto del mes en el menú: lo gastado y, si lo pusiste, tu tope. */
+function gastoDelMenu() {
+  const r = INI.resumen;
+  const caja = h('div', { clase: 'gasto-menu', title: 'Lo gastado este mes en todos los vídeos que puedes ver' });
+  caja.appendChild(h('span', { clase: 'gasto-etiqueta' }, 'Gasto del mes'));
+  if (!r) {
+    caja.appendChild(h('span', { clase: 'meta' }, 'mirando…'));
+    return caja;
+  }
+  const tope = (panelInicio().tope_usd || 0);
+  caja.appendChild(h('b', { clase: 'gasto-cifra' }, dolares(r.gasto_mes_usd)));
+  if (tope > 0) {
+    caja.appendChild(barraDeProgreso(r.gasto_mes_usd / tope, r.gasto_mes_usd > tope ? 'pasado' : ''));
+    caja.appendChild(h('span', { clase: 'meta' }, `de ${dolares(tope, true)} de tope`));
+  } else {
+    caja.appendChild(h('span', { clase: 'meta' }, 'sin tope (ponlo en Inicio → Personalizar)'));
+  }
+  return caja;
+}
+
+function dolares(n, redondo) {
+  const v = Number(n) || 0;
+  return `$ ${redondo && Number.isInteger(v) ? String(v) : v.toFixed(2).replace('.', ',')}`;
+}
+
+/* Una barra de progreso sin `style=""` (la CSP del proxy lo bloquea): el
+   ancho va por CSSOM en una variable, y el color, en estilo.css. */
+function barraDeProgreso(fraccion, clase) {
+  const pct = Math.max(0, Math.min(100, Math.round((Number(fraccion) || 0) * 100)));
+  return h('span', { clase: `barra-inicio ${clase || ''}`, role: 'progressbar',
+    'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(pct) },
+  h('span', { clase: 'barra-inicio-llena', estilo: `--lleno:${pct}%` }));
 }
 
 /* «CREAR» ABRE SIEMPRE «TUS PROYECTOS» (decisión del dueño, 19-10-2026). Antes
@@ -18759,6 +19058,7 @@ function pintarModulo() {
   vaciar(m);
   const contenido = h('div', { clase: 'contenido modulo-contenido' });
   m.appendChild(contenido);
+  m.appendChild(pieSistema());  // el pie, también en los módulos (diseno-crearia)
   try {
     if (MODULOS.actual === 'inicio') contenido.appendChild(vistaInicioModulos());
     else if (MODULOS.actual === 'publicar') contenido.appendChild(vistaPublicar());
@@ -18777,56 +19077,610 @@ function pintarModulo() {
   }
 }
 
-/* -------------------------------------------------------------- INICIO */
+/* -------------------------------------------------------------- INICIO
+ *
+ * EL PANEL MIXTO (rama `diseno-crearia`, 19-10-2026): el saludo con lo que
+ * sale esta semana, las cifras del mes, lo que te necesita, la semana, los
+ * proyectos recientes, lo que se está generando y lo mejor de 7 días. Y «Arma
+ * tu panel»: qué tarjetas se ven, en qué orden y de qué tamaño.
+ *
+ * EL PANEL SE GUARDA POR USUARIO. Con login delante (`/api/me` da un nombre),
+ * en el servidor (`/api/inicio/panel`); sin él, en este navegador. No es param
+ * de ningún paso: no mueve ninguna firma (regla 1 de CLAUDE.md). Sin nada
+ * guardado se ve la vista «Producción», que es «el original».
+ *
+ * TODO LO DE AQUÍ SOLO LEE: las rutas de Publicar, `/api/inicio/resumen`, la
+ * Parrilla y las novedades. Abrir el Inicio no escribe nada.
+ */
+const INI = {
+  resumen: null, pidiendoResumen: false, errorResumen: '',
+  panel: undefined, usuario: '', editando: false, arrastra: null,
+  vistas7: null, parrilla: null, calendario: null, novedades: null,
+  relojGuardar: null,
+};
+
+const CATALOGO_PANEL = {
+  saludo: { nombre: 'Saludo y botones', que: 'Resumen de la semana y accesos rápidos' },
+  cifras: { nombre: 'Cifras del mes', que: 'Vídeos, programados, vistas, para publicar' },
+  necesitan: { nombre: 'Te necesitan', que: 'Fallos, envíos que esperan tu OK y listos para publicar' },
+  semana: { nombre: 'Esta semana', que: 'Publicaciones por día' },
+  recientes: { nombre: 'Proyectos recientes', que: 'Los últimos vídeos con su estado' },
+  marcha: { nombre: 'En marcha', que: 'Lo que se está generando ahora' },
+  mejor: { nombre: 'Lo mejor de 7 días', que: 'El vídeo con más vistas' },
+  gasto: { nombre: 'Gasto del mes', que: 'Lo gastado frente a tu tope' },
+  parrilla: { nombre: 'Parrilla', que: 'Guiones esperando en Automatizar' },
+  calendario: { nombre: 'Calendario', que: 'Lo programado en los próximos 30 días' },
+  clientes: { nombre: 'Por cliente', que: 'Vídeos y gasto de cada cliente este mes' },
+  novedades: { nombre: 'Novedades', que: 'Lo último que cambió en el Studio' },
+};
+
+const VISTAS_INICIO = {
+  produccion: { nombre: 'Producción', tarjetas: [['saludo', 'L'], ['cifras', 'L'], ['necesitan', 'M'],
+    ['semana', 'S'], ['recientes', 'M'], ['marcha', 'S'], ['mejor', 'S'], ['parrilla', 'S'], ['novedades', 'S']] },
+  publicacion: { nombre: 'Publicación', tarjetas: [['saludo', 'L'], ['necesitan', 'M'], ['semana', 'S'],
+    ['calendario', 'M'], ['mejor', 'S']] },
+  resultados: { nombre: 'Resultados', tarjetas: [['saludo', 'L'], ['cifras', 'L'], ['mejor', 'S'],
+    ['clientes', 'M'], ['gasto', 'S'], ['semana', 'M']] },
+  minima: { nombre: 'Mínima', tarjetas: [['saludo', 'L'], ['recientes', 'L']] },
+};
+const VISTA_ORIGINAL = 'produccion';
+const CLAVE_PANEL_LOCAL = 'inicio.panel';
+
+function panelDeVista(id) {
+  const v = VISTAS_INICIO[id] || VISTAS_INICIO[VISTA_ORIGINAL];
+  return { vista: VISTAS_INICIO[id] ? id : VISTA_ORIGINAL, tope_usd: null,
+    tarjetas: v.tarjetas.map(([tid, tam]) => ({ id: tid, tam })) };
+}
+
+/* El panel en uso: el guardado o, si no hay, el original. */
+function panelInicio() {
+  const p = INI.panel;
+  if (!p || !Array.isArray(p.tarjetas)) return panelDeVista(VISTA_ORIGINAL);
+  return {
+    vista: p.vista || '', tope_usd: typeof p.tope_usd === 'number' ? p.tope_usd : null,
+    tarjetas: p.tarjetas.filter(t => t && CATALOGO_PANEL[t.id])
+      .map(t => ({ id: t.id, tam: ['S', 'M', 'L'].includes(t.tam) ? t.tam : 'M' })),
+  };
+}
+
+/* Quién mira. La misma pregunta que `cargarCuenta`, una vez. */
+function usuarioDelPanel() {
+  if (!INI.yo) {
+    INI.yo = fetch('/api/me', { credentials: 'same-origin' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => String((((d || {}).user) || {}).username || ''))
+      .catch(() => '');
+  }
+  return INI.yo;
+}
+
+async function cargarPanelInicio() {
+  if (INI.panel !== undefined) return;
+  INI.usuario = await usuarioDelPanel();
+  let panel = null;
+  if (INI.usuario) {
+    try {
+      panel = (await pedir(`${BASE}/api/inicio/panel?${consulta({ usuario: INI.usuario })}`)).panel;
+    } catch (e) { panel = null; }
+  } else {
+    try { panel = JSON.parse(leerAlmacen(CLAVE_PANEL_LOCAL) || 'null'); } catch (e) { panel = null; }
+  }
+  INI.panel = panel && Array.isArray(panel.tarjetas) ? panel : null;
+}
+
+/* Guarda el panel (o lo borra, con null) donde toca: el servidor con
+   usuario, el navegador sin él. Con un respiro, para no guardar a cada
+   tecla del tope. */
+function guardarPanelInicio(inmediato) {
+  clearTimeout(INI.relojGuardar);
+  const hacer = async () => {
+    const panel = INI.panel ? panelInicio() : null;
+    if (INI.usuario) {
+      try {
+        await pedir(`${BASE}/api/inicio/panel`, { method: 'PUT', cuerpo: { usuario: INI.usuario, panel } });
+      } catch (e) { toast(`no se ha podido guardar tu panel: ${e.message}`, true); }
+    } else {
+      guardarEnAlmacen(CLAVE_PANEL_LOCAL, panel ? JSON.stringify(panel) : null);
+    }
+  };
+  if (inmediato) return hacer();
+  INI.relojGuardar = setTimeout(hacer, 500);
+  return null;
+}
+
+function cambiarPanelInicio(cambio, inmediato) {
+  const p = panelInicio();
+  cambio(p);
+  INI.panel = p;
+  guardarPanelInicio(inmediato);
+  if (MODULOS.actual === 'inicio') pintarModulo();
+  pintarBarraModulos();
+}
+
+async function cargarResumenInicio() {
+  INI.pidiendoResumen = true;
+  try {
+    INI.resumen = await pedir(`${BASE}/api/inicio/resumen`);
+    INI.errorResumen = '';
+  } catch (e) {
+    INI.errorResumen = e.message;
+  }
+  INI.pidiendoResumen = false;
+  pintarBarraModulos();
+}
 
 async function cargarInicioModulos() {
+  await cargarPanelInicio();
   pintarModulo();
-  try {
-    PUB.cola = await pedir(rutaPublicar('/cola'));
-    contarAvisosPublicar();
-  } catch (e) {
-    PUB.error = e.message;
+  const visibles = panelInicio().tarjetas.map(t => t.id);
+  const pedidos = [
+    pedir(rutaPublicar('/cola')).then(c => { PUB.cola = c; contarAvisosPublicar(); })
+      .catch(e => { PUB.error = e.message; }),
+    // lo mejor de la semana y las vistas: solo lee lo guardado, no pregunta a Upload-Post
+    pedir(rutaPublicar(`/lo-que-funciono?${consulta({ dias: 7, cuantos: 50 })}`)).then(r => {
+      INI.vistas7 = r.posts || [];
+      PUB.mejorSemana = INI.vistas7[0] || false;
+    }).catch(() => { INI.vistas7 = []; PUB.mejorSemana = false; }),
+    cargarResumenInicio(),
+  ];
+  if (visibles.includes('parrilla')) {
+    pedidos.push(pedir(`${BASE}/api/parrilla/proyectos`).then(r => { INI.parrilla = r.proyectos || []; })
+      .catch(() => { INI.parrilla = []; }));
   }
-  // lo mejor de la semana: solo lee lo guardado, no pregunta a Upload-Post
-  try {
-    const r = await pedir(rutaPublicar(`/lo-que-funciono?${consulta({ dias: 7, cuantos: 1 })}`));
-    PUB.mejorSemana = (r.posts || [])[0] || false;
-  } catch (e) {
-    PUB.mejorSemana = false;
+  if (visibles.includes('calendario')) {
+    const hoy = new Date();
+    const desde = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`;
+    pedidos.push(pedir(rutaPublicar(`/cola?${consulta({ desde, dias: 31 })}`))
+      .then(c => { INI.calendario = c; }).catch(() => { INI.calendario = { envios: [] }; }));
   }
+  if (visibles.includes('novedades') && !INI.novedades) {
+    pedidos.push(pedir(`${BASE}/api/sistema/novedades`).then(r => { INI.novedades = r; })
+      .catch(() => { INI.novedades = { texto: '' }; }));
+  }
+  await Promise.all(pedidos);
   if (MODULOS.actual === 'inicio') pintarModulo();
 }
 
 function vistaInicioModulos() {
-  const caja = h('div', { clase: 'inicio-modulos' });
-  caja.appendChild(h('div', { clase: 'light-cab' }, h('h2', {}, 'Inicio')));
-  const c = PUB.cola || {};
-  const tarjetas = h('div', { clase: 'tarjetas-modulo' });
-  [['crear', 'Crear', 'Estilos y vídeos: el encargo, el guion, la voz, las imágenes y el montaje.',
-    'Ir a Crear'],
-  ['publicar', 'Publicar', `${(c.listos || []).length} vídeo(s) listos · `
-    + `${(c.envios || []).filter(e => e.estado === 'programado').length} programado(s) esta semana.`,
-  'Ir a Publicar'],
-  ['automatizar', 'Automatizar', 'La Parrilla: matrices de guiones por proyecto, listas para pasar al Encargo.',
-    'Ir a la Parrilla']].forEach(([id, titulo, texto, boton]) => tarjetas.appendChild(
-    h('div', { clase: 'tarjeta-modulo' },
-      h('h3', {}, titulo), h('p', { clase: 'meta' }, texto),
-      h('button', { clase: id === 'automatizar' ? 'mini' : 'primario mini',
-        onclick: () => (id === 'crear' ? entrarEnCrear() : irAModulo(id)) }, boton))));
-  caja.appendChild(tarjetas);
-  caja.appendChild(lineaMejorSemana());
-  const hoy = h('div', { clase: 'bloque' }, h('h3', {}, 'Lo que pasa hoy'));
-  const deHoy = (c.de_hoy || []).concat((c.esperan_ok || []).filter(e => !(c.de_hoy || []).some(x => x.id === e.id)));
-  if (!PUB.cola) hoy.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
-  else if (!deHoy.length && !(c.fallidos || []).length) {
-    hoy.appendChild(h('div', { clase: 'meta' }, 'Hoy no sale nada. Los envíos programados aparecerán aquí.'));
-  } else {
-    deHoy.concat((c.fallidos || []).filter(e => !deHoy.some(x => x.id === e.id)))
-      .forEach(e => hoy.appendChild(filaEnvioCola(e)));
+  const panel = panelInicio();
+  const caja = h('div', { clase: `inicio-modulos panel-inicio${INI.editando ? ' editando' : ''}` });
+  if (INI.editando) {
+    caja.appendChild(h('div', { clase: 'aviso-editando' },
+      h('span', {}, h('b', {}, 'Editando tu panel. '),
+        'Arrastra las tarjetas por ⋮⋮ (o usa ↑ ↓) para cambiarlas de sitio, cambia su tamaño o quítalas.'),
+      h('span', { clase: 'fila' },
+        h('button', { type: 'button', clase: 'mini', onclick: volverAlPanelOriginal }, 'Volver al original'),
+        h('button', { type: 'button', clase: 'mini primario',
+          onclick: () => { INI.editando = false; guardarPanelInicio(true); pintarModulo(); } }, 'Listo'))));
+    const cuerpo = h('div', { clase: 'inicio-edicion' });
+    const rejilla = h('div', { clase: 'rejilla-inicio' });
+    panel.tarjetas.forEach((t, i) => rejilla.appendChild(tarjetaEditable(t, i, panel.tarjetas.length)));
+    if (!panel.tarjetas.length) {
+      rejilla.appendChild(h('div', { clase: 'tarjeta-inicio tam-L vacia' },
+        'No queda ninguna tarjeta: enciende alguna a la derecha.'));
+    }
+    cuerpo.appendChild(rejilla);
+    cuerpo.appendChild(armaTuPanel(panel));
+    caja.appendChild(cuerpo);
+    return caja;
   }
-  caja.appendChild(hoy);
+  caja.appendChild(h('div', { clase: 'cab-panel-inicio' },
+    h('h2', {}, 'Tu panel'),
+    h('span', { clase: 'crece' }),
+    h('span', { clase: 'vistas-inicio' },
+      ...Object.entries(VISTAS_INICIO).slice(0, 3).map(([id, v]) => h('button', {
+        type: 'button', clase: `mini chip-vista${panel.vista === id ? ' activa' : ''}`,
+        'aria-pressed': panel.vista === id ? 'true' : 'false',
+        title: `Ver la vista «${v.nombre}»`, onclick: () => usarVistaInicio(id),
+      }, panel.vista === id ? `Vista: ${v.nombre}` : v.nombre)),
+      h('button', { type: 'button', clase: 'mini chip-personalizar',
+        onclick: () => { INI.editando = true; pintarModulo(); } }, '✎ Personalizar panel'))));
+  const rejilla = h('div', { clase: 'rejilla-inicio' });
+  panel.tarjetas.forEach(t => {
+    let contenido;
+    try {
+      contenido = (PINTORES_INICIO[t.id] || (() => null))(t.tam);
+    } catch (e) {
+      console.error(e);
+      contenido = cajaError(`no se ha podido pintar «${CATALOGO_PANEL[t.id].nombre}»: ${e.message}`);
+    }
+    if (contenido) rejilla.appendChild(h('section', { clase: `tarjeta-inicio tarjeta-${t.id} tam-${t.tam}`,
+      datos: { tarjeta: t.id } }, contenido));
+  });
+  if (!panel.tarjetas.length) {
+    rejilla.appendChild(h('div', { clase: 'tarjeta-inicio tam-L vacia' },
+      'Tu panel está vacío. Pulsa «✎ Personalizar panel» para elegir qué ver.'));
+  }
+  caja.appendChild(rejilla);
   return caja;
 }
+
+function usarVistaInicio(id) {
+  const tope = panelInicio().tope_usd;
+  INI.panel = Object.assign(panelDeVista(id), { tope_usd: tope });
+  guardarPanelInicio(true);
+  cargarInicioModulos();
+}
+
+function volverAlPanelOriginal() {
+  INI.panel = null;
+  guardarPanelInicio(true);
+  pintarBarraModulos();
+  cargarInicioModulos();
+  toast('Tu panel vuelve a estar como al principio');
+}
+
+function moverTarjetaInicio(id, destino) {
+  cambiarPanelInicio(p => {
+    const desde = p.tarjetas.findIndex(t => t.id === id);
+    const hasta = p.tarjetas.findIndex(t => t.id === destino);
+    if (desde < 0 || hasta < 0 || desde === hasta) return;
+    const [t] = p.tarjetas.splice(desde, 1);
+    p.tarjetas.splice(hasta, 0, t);
+    p.vista = '';
+  });
+}
+
+function tarjetaEditable(t, i, total) {
+  const info = CATALOGO_PANEL[t.id];
+  const caja = h('section', {
+    clase: `tarjeta-inicio tarjeta-${t.id} tam-${t.tam} editable`, draggable: 'true',
+    datos: { tarjeta: t.id }, 'aria-label': info.nombre,
+    ondragstart: ev => {
+      INI.arrastra = t.id;
+      try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', t.id); } catch (e) { /* nada */ }
+      caja.classList.add('arrastrada');
+    },
+    ondragend: () => { INI.arrastra = null; caja.classList.remove('arrastrada'); },
+    ondragover: ev => {
+      if (!INI.arrastra || INI.arrastra === t.id) return;
+      ev.preventDefault();
+      caja.classList.add('destino');
+    },
+    ondragleave: () => caja.classList.remove('destino'),
+    ondrop: ev => {
+      ev.preventDefault();
+      const id = INI.arrastra;
+      INI.arrastra = null;
+      if (id && id !== t.id) moverTarjetaInicio(id, t.id);
+    },
+  });
+  const tamano = tam => h('button', {
+    type: 'button', clase: `mini tam-boton${t.tam === tam ? ' activo' : ''}`,
+    'aria-pressed': t.tam === tam ? 'true' : 'false',
+    title: { S: 'Pequeña', M: 'Mediana', L: 'Grande (todo el ancho)' }[tam],
+    onclick: () => cambiarPanelInicio(p => { p.tarjetas[i].tam = tam; p.vista = ''; }),
+  }, tam);
+  caja.appendChild(h('div', { clase: 'editable-cab' },
+    h('span', { clase: 'asa', title: 'Arrastra para cambiarla de sitio', 'aria-hidden': 'true' }, '⋮⋮'),
+    h('b', { clase: 'crece' }, info.nombre),
+    h('span', { clase: 'tamanos' }, tamano('S'), tamano('M'), tamano('L')),
+    h('button', { type: 'button', clase: 'mini fantasma', title: 'Subirla un puesto',
+      'aria-label': `Subir «${info.nombre}»`, disabled: i === 0,
+      onclick: () => cambiarPanelInicio(p => { const [x] = p.tarjetas.splice(i, 1); p.tarjetas.splice(i - 1, 0, x); p.vista = ''; }) }, '↑'),
+    h('button', { type: 'button', clase: 'mini fantasma', title: 'Bajarla un puesto',
+      'aria-label': `Bajar «${info.nombre}»`, disabled: i === total - 1,
+      onclick: () => cambiarPanelInicio(p => { const [x] = p.tarjetas.splice(i, 1); p.tarjetas.splice(i + 1, 0, x); p.vista = ''; }) }, '↓'),
+    h('button', { type: 'button', clase: 'mini fantasma quitar-tarjeta', title: 'Quitarla del panel',
+      'aria-label': `Quitar «${info.nombre}»`,
+      onclick: () => cambiarPanelInicio(p => { p.tarjetas.splice(i, 1); p.vista = ''; }) }, '✕')));
+  caja.appendChild(h('div', { clase: 'editable-relleno' }, h('span', { clase: 'meta' }, info.que)));
+  return caja;
+}
+
+/* El lateral de «Arma tu panel»: las vistas de partida, un interruptor por
+   tarjeta del catálogo y el tope del gasto. */
+function armaTuPanel(panel) {
+  const puestas = panel.tarjetas.map(t => t.id);
+  const caja = h('aside', { clase: 'arma-tu-panel', 'aria-label': 'Arma tu panel' },
+    h('h2', {}, 'Arma tu panel'),
+    h('p', { clase: 'meta' }, INI.usuario
+      ? `Elige qué quieres ver al entrar. Se guarda para tu usuario (${INI.usuario}) y lo puedes cambiar cuando quieras.`
+      : 'Elige qué quieres ver al entrar. Se guarda en este navegador y lo puedes cambiar cuando quieras.'),
+    h('span', { clase: 'etiqueta-inicio' }, 'Empezar desde una vista'),
+    h('div', { clase: 'vistas-inicio' }, Object.entries(VISTAS_INICIO).map(([id, v]) => h('button', {
+      type: 'button', clase: `mini chip-vista${panel.vista === id ? ' activa' : ''}`,
+      'aria-pressed': panel.vista === id ? 'true' : 'false',
+      onclick: () => cambiarPanelInicio(p => { Object.assign(p, panelDeVista(id), { tope_usd: p.tope_usd }); }),
+    }, v.nombre))),
+    h('span', { clase: 'etiqueta-inicio' }, 'Tarjetas'));
+  Object.entries(CATALOGO_PANEL).forEach(([id, info]) => {
+    const casilla = h('input', { type: 'checkbox', clase: 'conmutador', checked: puestas.includes(id),
+      'aria-label': `Ver «${info.nombre}»`,
+      onchange: ev => {
+        const encender = ev.target.checked;
+        cambiarPanelInicio(p => {
+          p.vista = '';
+          if (encender && !p.tarjetas.some(t => t.id === id)) {
+            p.tarjetas.push({ id, tam: id === 'saludo' || id === 'cifras' ? 'L' : 'S' });
+          } else if (!encender) p.tarjetas = p.tarjetas.filter(t => t.id !== id);
+        });
+        if (encender) cargarInicioModulos();
+      } });
+    caja.appendChild(h('label', { clase: 'interruptor-tarjeta' }, casilla,
+      h('span', { clase: 'textos' }, h('b', {}, info.nombre), h('span', { clase: 'meta' }, info.que))));
+  });
+  const tope = h('input', { type: 'number', min: '0', step: '1', inputmode: 'decimal',
+    value: panel.tope_usd === null ? '' : String(panel.tope_usd), placeholder: 'sin tope',
+    'aria-label': 'Tope de gasto del mes, en dólares',
+    oninput: ev => {
+      const v = ev.target.value.trim();
+      const n = Number(v.replace(',', '.'));
+      if (v && (!Number.isFinite(n) || n < 0)) return;
+      const p = panelInicio();
+      p.tope_usd = v ? n : null;
+      INI.panel = p;
+      guardarPanelInicio();
+      pintarBarraModulos();
+    } });
+  caja.appendChild(h('label', { clase: 'campo tope-gasto' },
+    h('span', {}, 'Tope de gasto del mes ($)'), tope,
+    h('span', { clase: 'meta' }, 'Solo para verlo en «Gasto del mes»: no frena nada.')));
+  return caja;
+}
+
+/* -------------------------- lo que pinta cada tarjeta (una función por id) */
+
+function cabezaTarjeta(titulo, extra) {
+  return h('div', { clase: 'cab-tarjeta' }, h('h3', {}, titulo), h('span', { clase: 'crece' }), extra || null);
+}
+
+function enviosDeLaSemana() {
+  const c = PUB.cola || {};
+  const dias = c.dias || [];
+  return (c.envios || []).filter(e => e.estado !== 'cancelado'
+    && dias.some(d => String(e.cuando || '').startsWith(d)));
+}
+
+function programadosDeLaSemana() {
+  const ahora = (PUB.cola || {}).ahora || '';
+  return enviosDeLaSemana().filter(e => ['programado', 'espera_ok'].includes(e.estado)
+    && String(e.cuando || '') >= ahora.slice(0, 16));
+}
+
+function fechaLarga() {
+  const d = new Date();
+  let texto = '';
+  try {
+    texto = d.toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' }).replace(',', '');
+  } catch (e) { texto = d.toDateString(); }
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
+function plural(n, uno, varios) { return `${n} ${n === 1 ? uno : varios}`; }
+
+const PINTORES_INICIO = {
+  saludo() {
+    const c = PUB.cola || {};
+    const salen = programadosDeLaSemana().length;
+    const listos = (c.listos || []).length;
+    const necesitan = (c.esperan_ok || []).length + (c.fallidos || []).length;
+    const nombre = INI.usuario ? `, ${INI.usuario}` : '';
+    return h('div', { clase: 'saludo-inicio' },
+      h('span', { clase: 'halo halo-1', 'aria-hidden': 'true' }),
+      h('span', { clase: 'halo halo-2', 'aria-hidden': 'true' }),
+      h('div', { clase: 'saludo-textos' },
+        h('span', { clase: 'fecha-inicio' }, fechaLarga()),
+        h('h1', { clase: 'titular-inicio' }, `Hola${nombre}. `,
+          salen ? h('span', { clase: 'resalta' }, plural(salen, 'vídeo', 'vídeos')) : null,
+          salen ? ` ${salen === 1 ? 'sale' : 'salen'} esta semana.` : 'Esta semana no sale nada programado.'),
+        h('p', { clase: 'meta' }, !PUB.cola ? 'mirando la cola…'
+          : `${plural(listos, 'vídeo listo', 'vídeos listos')} para publicar y `
+            + `${plural(necesitan, 'cosa que necesita', 'cosas que necesitan')} tu mirada.`)),
+      h('div', { clase: 'saludo-botones' },
+        h('button', { type: 'button', clase: 'primario', title: 'Elige el estilo y empieza un vídeo',
+          onclick: () => { entrarEnCrear(); toast('Elige el estilo del vídeo nuevo'); } }, '+ Nuevo vídeo'),
+        h('button', { type: 'button', title: 'Tus estilos y tus vídeos', onclick: () => entrarEnCrear() },
+          'Tus proyectos')));
+  },
+
+  cifras() {
+    const c = PUB.cola || {};
+    const r = INI.resumen;
+    const prog = programadosDeLaSemana();
+    const vistas = (INI.vistas7 || []).reduce((suma, p) => suma + (Number((p.metricas || {}).vistas) || 0), 0);
+    const cifra = (que, valor, cambio, clase) => h('div', { clase: `cifra-inicio ${clase || ''}` },
+      h('span', { clase: 'meta' }, que), h('b', {}, valor), h('span', { clase: 'cambio' }, cambio));
+    return h('div', { clase: 'cifras-inicio' },
+      cifra('Vídeos este mes', r ? String(r.videos_mes) : '…', r ? `de ${r.videos} en total` : ''),
+      cifra('Programados', PUB.cola ? String(prog.length) : '…',
+        prog.length ? `el próximo, ${cuandoLegible(prog[0].cuando)}` : 'esta semana'),
+      cifra('Vistas 7 días', INI.vistas7 ? numeroCorto(vistas) : '…',
+        INI.vistas7 ? (INI.vistas7.length ? `${plural(INI.vistas7.length, 'publicación', 'publicaciones')} con cifras` : 'sin cifras todavía') : ''),
+      cifra('Para publicar', PUB.cola ? String((c.listos || []).length) : '…',
+        (c.listos || [])[0] ? recortar(c.listos[0].nombre || c.listos[0].pid, 40) : 'nada pendiente'));
+  },
+
+  necesitan() {
+    const c = PUB.cola || {};
+    const caja = h('div', { clase: 'te-necesitan' });
+    const deHoy = (c.de_hoy || []).concat((c.esperan_ok || []).filter(e => !(c.de_hoy || []).some(x => x.id === e.id)));
+    const filas = deHoy.concat((c.fallidos || []).filter(e => !deHoy.some(x => x.id === e.id)));
+    const listos = (c.listos || []).filter(v => !Object.keys(v.envios || {}).length).slice(0, 3);
+    caja.appendChild(cabezaTarjeta('Te necesitan', h('span', { clase: 'meta' },
+      PUB.cola ? plural(filas.length + listos.length, 'cosa', 'cosas') : '')));
+    if (!PUB.cola) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+      return caja;
+    }
+    if (!filas.length && !listos.length) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'Nada pendiente. Los fallos, lo que espera tu OK y '
+        + 'lo que sale hoy aparecerán aquí.'));
+    }
+    filas.forEach(e => caja.appendChild(filaEnvioCola(e)));
+    listos.forEach(v => caja.appendChild(h('div', { clase: 'fila fila-listo-inicio' },
+      h('span', { clase: 'etiqueta-listo' }, 'LISTO'),
+      h('span', { clase: 'crece' }, `«${v.nombre || v.pid}» para publicar`),
+      h('button', { type: 'button', clase: 'mini', onclick: () => irASeccionPublicar('ficha', v.pid) }, 'Publicar'))));
+    return caja;
+  },
+
+  semana() {
+    const c = PUB.cola || {};
+    const dias = c.dias || [];
+    const envios = enviosDeLaSemana();
+    const cuenta = d => envios.filter(e => String(e.cuando || '').startsWith(d)).length;
+    const maximo = Math.max(1, ...dias.map(cuenta));
+    const letras = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+    const caja = h('div', { clase: 'semana-inicio' }, cabezaTarjeta('Esta semana'));
+    if (!PUB.cola) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+      return caja;
+    }
+    caja.appendChild(h('div', { clase: 'barras-semana' }, dias.map(d => {
+      const n = cuenta(d);
+      const letra = letras[new Date(`${d}T12:00:00`).getDay()];
+      return h('div', { clase: `dia-semana${d === c.hoy ? ' hoy' : ''}`, title: `${d}: ${plural(n, 'publicación', 'publicaciones')}` },
+        h('span', { clase: 'meta' }, letra),
+        h('span', { clase: 'columna' }, h('span', { clase: 'relleno-columna', estilo: `--alto:${Math.round((n / maximo) * 100)}%` })),
+        h('b', {}, String(n)));
+    })));
+    caja.appendChild(h('span', { clase: 'meta' }, 'Publicaciones por día · hoy, en violeta'));
+    return caja;
+  },
+
+  recientes(tam) {
+    const r = INI.resumen;
+    const caja = h('div', { clase: 'recientes-inicio' },
+      cabezaTarjeta('Proyectos recientes', h('a', { href: '#', clase: 'enlace-tarjeta',
+        onclick: ev => { ev.preventDefault(); entrarEnCrear(); } }, 'Todos →')));
+    if (!r) {
+      caja.appendChild(h('div', { clase: 'meta' }, INI.errorResumen || 'cargando…'));
+      return caja;
+    }
+    if (!r.recientes.length) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay vídeos. Empieza uno con «+ Nuevo vídeo».'));
+      return caja;
+    }
+    const listos = new Set(((PUB.cola || {}).listos || []).map(v => v.pid));
+    const marcha = new Set((r.en_marcha || []).map(t => t.pid));
+    caja.appendChild(h('div', { clase: 'lista-recientes' }, r.recientes.slice(0, tam === 'S' ? 2 : (tam === 'L' ? 4 : 3)).map((v, i) =>
+      h('button', { type: 'button', clase: 'reciente', title: `Abrir «${v.nombre}»`,
+        onclick: () => { irAModulo('crear'); abrirVideoLight(v.pid); } },
+      h('span', { clase: `miniatura-reciente tono-${i % 3}`, 'aria-hidden': 'true' },
+        (v.nombre || '?').trim().charAt(0).toUpperCase()),
+      h('b', {}, v.nombre),
+      h('span', { clase: 'meta' }, [marcha.has(v.pid) ? 'Generando' : (listos.has(v.pid) ? 'Listo para publicar' : ''),
+        v.cliente_nombre, fechaCorta(v.actualizado)].filter(Boolean).join(' · '))))));
+    return caja;
+  },
+
+  marcha() {
+    const r = INI.resumen;
+    const caja = h('div', { clase: 'marcha-inicio' }, cabezaTarjeta('En marcha'));
+    if (!r) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+      return caja;
+    }
+    if (!(r.en_marcha || []).length) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'Nada generándose ahora mismo.'));
+      return caja;
+    }
+    r.en_marcha.slice(0, 2).forEach(t => caja.appendChild(h('div', { clase: 'trabajo-inicio' },
+      h('button', { type: 'button', clase: 'mini fantasma nombre-envio', onclick: () => { irAModulo('crear'); abrirVideoLight(t.pid); } },
+        `${t.nombre} · ${t.paso || 'trabajo'}`),
+      barraDeProgreso(t.progreso, 'coral'),
+      h('span', { clase: 'meta cifra-mono' }, `${Math.round((t.progreso || 0) * 100)} %${t.mensaje ? ` · ${recortar(t.mensaje, 60)}` : ''}`))));
+    return caja;
+  },
+
+  mejor() {
+    // `linea-mejor-semana`: la línea de Inicio de siempre (publicar-redes-2), ahora tarjeta
+    const m = PUB.mejorSemana;
+    const caja = h('div', { clase: 'linea-mejor-semana mejor-inicio' }, cabezaTarjeta('Lo mejor de los últimos 7 días'));
+    if (m === null || m === undefined) caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    else if (!m) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay cifras. Se piden en Publicar → '
+        + 'Resultados, con «Actualizar».'));
+    } else {
+      caja.appendChild(h('button', { type: 'button', clase: 'mini fantasma nombre-envio',
+        onclick: () => irASeccionPublicar('ficha', m.pid) }, m.nombre));
+      caja.appendChild(h('div', { clase: 'fila' },
+        h('span', { clase: 'pastilla red-mini ok' }, CORTOS_RED[m.red] || m.red),
+        h('span', { clase: 'meta' }, textoMetricas(m.metricas) || '')));
+    }
+    return caja;
+  },
+
+  gasto() {
+    const r = INI.resumen;
+    const tope = panelInicio().tope_usd || 0;
+    const caja = h('div', { clase: 'gasto-inicio' }, cabezaTarjeta('Gasto del mes'));
+    if (!r) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+      return caja;
+    }
+    caja.appendChild(h('b', { clase: 'cifra-grande' }, dolares(r.gasto_mes_usd)));
+    if (tope > 0) {
+      caja.appendChild(barraDeProgreso(r.gasto_mes_usd / tope, r.gasto_mes_usd > tope ? 'pasado' : ''));
+      caja.appendChild(h('span', { clase: 'meta' }, `de ${dolares(tope, true)} de tope`
+        + (r.gasto_mes_usd > tope ? ' · te has pasado' : '')));
+    } else caja.appendChild(h('span', { clase: 'meta' }, 'Sin tope: ponlo en «✎ Personalizar panel».'));
+    return caja;
+  },
+
+  parrilla() {
+    const lista = INI.parrilla;
+    const caja = h('div', { clase: 'parrilla-inicio' }, cabezaTarjeta('Parrilla', h('a', { href: '#', clase: 'enlace-tarjeta',
+      onclick: ev => { ev.preventDefault(); irAModulo('automatizar'); } }, 'Abrir →')));
+    if (lista === null) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+      return caja;
+    }
+    const suma = estado => lista.reduce((n, p) => n + (Number((p.cuentas || {})[estado]) || 0), 0);
+    caja.appendChild(h('b', { clase: 'cifra-grande' }, String(suma('pendiente'))));
+    caja.appendChild(h('span', { clase: 'meta' }, `${suma('pendiente') === 1 ? 'guion espera' : 'guiones esperan'} a pasar al Encargo · `
+      + `${suma('usado')} usados · ${suma('publicado')} publicados`));
+    return caja;
+  },
+
+  calendario() {
+    const c = INI.calendario;
+    const caja = h('div', { clase: 'calendario-inicio' }, cabezaTarjeta('Calendario', h('a', { href: '#', clase: 'enlace-tarjeta',
+      onclick: ev => { ev.preventDefault(); PUB.seccion = 'cola'; irAModulo('publicar'); } }, 'Ver la cola →')));
+    if (!c) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+      return caja;
+    }
+    const vienen = (c.envios || []).filter(e => ['programado', 'espera_ok'].includes(e.estado)).slice(0, 6);
+    if (!vienen.length) caja.appendChild(h('div', { clase: 'meta' }, 'Nada programado en los próximos 30 días.'));
+    vienen.forEach(e => caja.appendChild(filaEnvioCola(e)));
+    return caja;
+  },
+
+  clientes() {
+    const r = INI.resumen;
+    const caja = h('div', { clase: 'clientes-inicio' }, cabezaTarjeta('Por cliente'));
+    if (!r) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+      return caja;
+    }
+    if (!(r.por_cliente || []).length) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay vídeos.'));
+      return caja;
+    }
+    caja.appendChild(h('table', { clase: 'tabla tabla-clientes-inicio' },
+      h('thead', {}, h('tr', {}, h('th', {}, 'Cliente'), h('th', {}, 'Vídeos (mes)'), h('th', {}, 'Gasto del mes'))),
+      h('tbody', {}, r.por_cliente.slice(0, 8).map(c => h('tr', {},
+        h('td', {}, c.nombre), h('td', {}, `${c.videos} (${c.videos_mes})`), h('td', { clase: 'cifra-mono' }, dolares(c.usd_mes)))))));
+    return caja;
+  },
+
+  novedades() {
+    const n = INI.novedades;
+    const caja = h('div', { clase: 'novedades-inicio' }, cabezaTarjeta('Novedades', h('a', { href: '#', clase: 'enlace-tarjeta',
+      onclick: ev => { ev.preventDefault(); abrirNovedades(); } }, 'Todas →')));
+    if (!n) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+      return caja;
+    }
+    const puntos = unirLineas(n.texto || '').split('\n').filter(l => /^- /.test(l)).slice(0, 3)
+      .map(l => recortar(l.replace(/^- /, '').replace(/\*\*/g, '').replace(/`/g, ''), 140));
+    if (!puntos.length) caja.appendChild(h('div', { clase: 'meta' }, 'Sin novedades escritas.'));
+    else caja.appendChild(h('ul', { clase: 'puntos-novedades' }, puntos.map(p => h('li', {}, p))));
+    return caja;
+  },
+};
 
 /* --------------------------------------------------------- AUTOMATIZAR */
 
@@ -23103,26 +23957,8 @@ arrancar();
  * Upload-Post ni gasta consultas; las cifras se piden solo con «Actualizar».
  */
 
-function lineaMejorSemana() {
-  const m = PUB.mejorSemana;
-  const caja = h('div', { clase: 'bloque linea-mejor-semana' });
-  if (m === null) {
-    caja.appendChild(h('div', { clase: 'meta' }, 'Lo mejor de los últimos 7 días: cargando…'));
-    return caja;
-  }
-  if (!m) {
-    caja.appendChild(h('div', { clase: 'meta' },
-      'Lo mejor de los últimos 7 días: todavía no hay cifras. '
-      + 'Se piden en Publicar → Resultados, con «Actualizar».'));
-    return caja;
-  }
-  caja.appendChild(h('div', { clase: 'fila' },
-    h('span', { clase: 'meta' }, 'Lo mejor de los últimos 7 días:'),
-    h('button', { clase: 'mini fantasma nombre-envio', onclick: () => irASeccionPublicar('ficha', m.pid) }, m.nombre),
-    h('span', { clase: 'pastilla red-mini ok' }, CORTOS_RED[m.red] || m.red),
-    h('span', { clase: 'crece meta' }, textoMetricas(m.metricas) || '')));
-  return caja;
-}
+/* La línea de Inicio («lo mejor de los últimos 7 días») es desde el 19-10-2026
+   una tarjeta del panel: `PINTORES_INICIO.mejor`, en la sección INICIO. */
 
 function variacion(actual, anterior) {
   if (typeof actual !== 'number' || typeof anterior !== 'number' || anterior <= 0) return '';

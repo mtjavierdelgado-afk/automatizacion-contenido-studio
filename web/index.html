@@ -6,29 +6,42 @@
      arriba y abajo. Lo que se mete debajo del notch se recupera con las
      env(safe-area-inset-*) de la hoja de estilo. -->
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#14122a">
-<title>Automatización Contenido Studio</title>
-<!-- EL TEMA ANTES DE PINTAR NADA: si espera a app.js, quien eligio el claro
-     ve un parpadeo oscuro en cada carga. Lo mismo que hace `aplicarTema`. -->
-<script>try{if(localStorage.getItem('tema')==='claro')document.documentElement.setAttribute('data-tema','claro');}catch(e){}</script>
-<!-- La letra. Si Google Fonts no responde, se queda la del sistema: la
-     interfaz no depende de ella para funcionar. -->
+<meta name="theme-color" content="#14112a">
+<title>CrearIA Studio</title>
+<!-- LA PALETA ANTES DE PINTAR NADA: si espera a app.js, quien eligio otra ve
+     un parpadeo de Nocturno en cada carga. Lo mismo que hace `aplicarPaleta`.
+     «Dia» es el tema claro de siempre (data-tema="claro"); quien tenia el
+     claro elegido de antes de las paletas entra en Dia. -->
+<script>try{var p=localStorage.getItem('paleta')||(localStorage.getItem('tema')==='claro'?'dia':'');if(p==='dia')document.documentElement.setAttribute('data-tema','claro');else if(p==='aurora'||p==='brasa')document.documentElement.setAttribute('data-paleta',p);}catch(e){}</script>
+<!-- Las letras: Space Grotesk (titulos), Inter (texto) y JetBrains Mono (las
+     cifras). Si Google Fonts no responde, se queda la del sistema: la interfaz
+     no depende de ellas para funcionar. -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap">
-<!-- La claqueta. Va como data: URI para no pedir un fichero mas: sin esto el
-     navegador pedia /favicon.ico en cada carga y dejaba un 404 permanente en la
-     consola. -->
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🎬</text></svg>">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@500;600&display=swap">
+<!-- El logo, el mismo dibujo que la cabecera (web/logo.svg). Antes era un
+     emoji en un data: URI. -->
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="estilo.css">
 </head>
 <body>
 
 <header id="cabecera">
-  <h1 class="marca" title="Automatización Contenido Studio">
-    <span class="marca-logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 5.5v13l11-6.5z"/></svg></span>
-    <span class="marca-nombre">Automatización Contenido <b>Studio</b></span>
-    <span class="marca-corto">AC <b>Studio</b></span>
+  <h1 class="marca" title="CrearIA Studio · Automatización de contenido">
+    <!-- LA C CON EL BUCLE Y EL «PLAY» (web/logo.svg es el mismo dibujo). Sin
+         un color escrito: los pone estilo.css con las variables --logo-*. El
+         id del degradado lo usa --logo-play (la opcion P1, por defecto). -->
+    <svg class="marca-logo" viewBox="0 0 48 48" aria-hidden="true">
+      <defs><linearGradient id="logo-degradado" x1="0" y1="0" x2="1" y2="1"><stop offset="0" class="logo-c1"/><stop offset="1" class="logo-c2"/></linearGradient></defs>
+      <path class="logo-c" d="M38.17 12.11A18.5 18.5 0 1 0 38.17 35.89"/>
+      <path class="logo-bucle" d="M24 24c-4.5-6-8-9-12-9a9 9 0 0 0 0 18c4 0 7.5-3 12-9s8-9 12-9a9 9 0 0 1 0 18c-4 0-7.5-3-12-9z" transform="translate(24.3 24) scale(0.56) translate(-24 -24)"/>
+      <path class="logo-play" d="M29.15 21.38L33.60 24L29.15 26.62z"/>
+    </svg>
+    <span class="marca-textos">
+      <span class="marca-nombre">Crear<b>IA</b> Studio</span>
+      <span class="marca-sub">Automatización de contenido</span>
+    </span>
+    <span class="marca-corto">Crear<b>IA</b></span>
   </h1>
   <span id="meta-proyecto" class="meta"></span>
   <span class="crece"></span>
@@ -38,7 +51,8 @@
        una pestana porque no es de este video: es de la maquina. -->
   <!-- Claro u oscuro. Lo recuerda el navegador (`aplicarTema` en app.js). -->
   <button id="btn-tema" class="mini fantasma btn-tema" title="Cambiar entre modo claro y oscuro" aria-label="Cambiar el tema"></button>
-  <button id="btn-ayuda" class="mini fantasma" title="Cómo se usa: qué es cada pantalla y cada campo" aria-label="Ayuda">?</button>
+  <!-- El «?»: el panel de Ayuda (`abrirAyuda` en app.js), no Configuracion -->
+  <button id="btn-ayuda" class="mini fantasma" title="Ayuda: el manual de esta pantalla, las guías y las novedades" aria-label="Ayuda" aria-controls="ayuda" aria-expanded="false">?</button>
   <button id="btn-config" class="mini fantasma" title="Configuración: claves, cuentas, novedades y notas">⚙</button>
   <!-- LA CUENTA. Vacio y oculto de fabrica: solo se rellena si delante hay un
        login que conteste /api/me. En local no lo hay --se entra sin cuenta--,
@@ -55,6 +69,17 @@
     <button id="btn-cerrar-config" class="mini fantasma" title="Cerrar">×</button>
   </div>
   <div id="cuerpo-config"></div>
+</aside>
+
+<!-- EL PANEL DE AYUDA (el «?»): el manual abierto en el apartado de la
+     pantalla en la que se esta, todas las guias de escritura, la guia de
+     inicio y las novedades. Lo rellena `abrirAyuda` en app.js. -->
+<aside id="ayuda" class="plegado" aria-label="Ayuda">
+  <div class="lateral-cab">
+    <h2>Ayuda</h2>
+    <button id="btn-cerrar-ayuda" class="mini fantasma" title="Cerrar">×</button>
+  </div>
+  <div id="cuerpo-ayuda"></div>
 </aside>
 
 <div id="coste-detalle" class="plegado"></div>

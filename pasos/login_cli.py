@@ -171,7 +171,10 @@ def situacion(carpeta=""):
                 "error": str(fallo) or "no está instalado el CLI de Claude"}
     entorno = cli_claude.entorno({"config_dir": carpeta} if carpeta else None)
     try:
+        # stdin cerrado: con la entrada abierta, un CLI que espera algo se
+        # quedaba colgado los 60 s, y detras del proxy eso era «sin sesion»
         proceso = subprocess.run(orden, capture_output=True, timeout=60,
+                                 stdin=subprocess.DEVNULL,
                                  env=entorno, **cli_claude.SIN_VENTANA)
     except (OSError, subprocess.TimeoutExpired) as fallo:
         return {"conectada": False, "correo": "", "plan": "", "metodo": "",

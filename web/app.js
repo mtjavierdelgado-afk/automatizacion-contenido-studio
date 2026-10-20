@@ -5770,10 +5770,22 @@ function dialogo(op) {
     const campo = c => {
       valores[c.clave] = c.valor === undefined ? '' : c.valor;
       if (c.tipo === 'textarea') {
-        const area = h('textarea', { rows: 3, placeholder: c.pista || '',
-          oninput: ev => { valores[c.clave] = ev.target.value; } });
+        // CON TOPE, SE VE (19-10-2026): `max` pone el límite en el campo y un
+        // contador debajo. Sin él, las láminas se cortaban en el servidor y se
+        // pagaba una imagen con la mitad de lo pedido
+        const cuenta = c.max ? h('span', { clase: 'meta cuenta-caracteres' }) : null;
+        const contar = () => {
+          if (!cuenta) return;
+          const n = (valores[c.clave] || '').length;
+          cuenta.textContent = `${n} de ${c.max} caracteres`;
+          cuenta.classList.toggle('cerca-del-tope', n > c.max * 0.9);
+        };
+        const area = h('textarea', { rows: c.max ? 6 : 3, placeholder: c.pista || '',
+          maxlength: c.max || null,
+          oninput: ev => { valores[c.clave] = ev.target.value; contar(); } });
         area.value = c.valor || '';
-        return h('label', { clase: 'campo' }, h('span', {}, c.etiqueta), area,
+        contar();
+        return h('label', { clase: 'campo' }, h('span', {}, c.etiqueta), area, cuenta,
           c.ayuda ? h('span', { clase: 'meta' }, c.ayuda) : null);
       }
       const control = c.tipo === 'select'
@@ -7227,6 +7239,7 @@ function opcionesParaCrear(e) {
   const op = e.opciones || {};
   const salida = {};
   if (op.presencia) salida.presencia = op.presencia;
+  if (Number(op.musica_db)) salida.musica_db = Number(op.musica_db);
   if (op.musica && op.musica.id) salida.musica = op.musica;
   if (op.subtitulos && Object.keys(op.subtitulos).length) salida.subtitulos = op.subtitulos;
   if (op.logo === false) salida.logo = false;
@@ -14022,12 +14035,19 @@ function laminasDelEstilo(ficha) {
   return caja;
 }
 
+/* Lo que cabe en lo que pide una lámina: lo dice el servidor (`GET /laminas`,
+   `max_texto`); 1500 si aún no ha contestado. */
+function maxTextoLamina() {
+  const d = (APP.light.laminas || {}).datos || APP.light.laminas || {};
+  return Number(d.max_texto) || 1500;
+}
+
 async function regenerarLamina(ficha, lamina, precio) {
   const r = await dialogo({
     titulo: `Regenerar «${lamina.titulo}»`,
     texto: `Se dibuja otra vez con tu estilo: una imagen${precio}. Si quieres, di qué le corregirías.`,
     campos: [{ clave: 'texto', tipo: 'textarea', etiqueta: 'Qué le corregirías (opcional)',
-      pista: 'sin sombras duras, y la persona mirando a cámara' }],
+      max: maxTextoLamina(), pista: 'sin sombras duras, y la persona mirando a cámara' }],
     aceptar: 'Regenerar',
   });
   if (!r) return;
@@ -14040,7 +14060,8 @@ async function cambiarLamina(ficha, lamina, precio) {
     texto: `Se guarda con el estilo y se dibuja ya: una imagen${precio}.`
       + (lamina.fabrica ? ' Déjalo vacío para volver a lo de fábrica.' : ''),
     campos: [{ clave: 'texto', tipo: 'textarea', etiqueta: 'Lo que tiene que enseñar',
-      valor: lamina.texto || '', pista: 'una cocina pequeña de noche, con luz cálida y sin personas' }],
+      max: maxTextoLamina(), valor: lamina.texto || '',
+      pista: 'una cocina pequeña de noche, con luz cálida y sin personas' }],
     aceptar: 'Guardar y dibujar',
   });
   if (!r) return;
@@ -14052,7 +14073,7 @@ async function nuevaLamina(ficha, precio) {
     titulo: 'Una lámina más',
     texto: `Piensa en algo que salga a menudo en tus vídeos y que las otras no enseñen. Una imagen${precio}.`,
     campos: [{ clave: 'texto', tipo: 'textarea', etiqueta: 'Lo que tiene que enseñar',
-      pista: 'un baño con espejo iluminado, plano general' }],
+      max: maxTextoLamina(), pista: 'un baño con espejo iluminado, plano general' }],
     aceptar: 'Dibujarla',
   });
   if (!r) return;
@@ -16120,10 +16141,14 @@ function pintarAsistente() {
   const ocupada = !!(charla && charla.ocupada);
 
   burbuja.classList.toggle('sin-sesion', !listo);
+  // ámbar, no rojo: la cuenta está bien, pero la última llamada de algún
+  // trabajo falló por algo pasajero (19-10-2026). Se vuelve a probar sola.
+  burbuja.classList.toggle('dudosa', listo && !!(estado && estado.aviso));
   burbuja.classList.toggle('pensando', ocupada);
   burbuja.classList.toggle('aviso', ASISTENTE.sinLeer && !ocupada);
   burbuja.title = listo
-    ? 'Asistente: pregunta lo que sea del Estudio'
+    ? (estado && estado.aviso ? `Asistente: conectado; la última llamada falló (${estado.aviso})`
+      : 'Asistente: pregunta lo que sea del Estudio')
     : 'Asistente: necesita que entres con tu cuenta de Claude';
   if (cajon.classList.contains('plegado')) return;
 
@@ -16646,7 +16671,7 @@ function resumenAjuste(modo, est, cual) {
     const tema = op ? op.musica : (est.musica || {}).tema;
     const nivel = (PRESENCIAS_MUSICA.find(p => p.id === presencia) || {}).nombre || presencia;
     const deQuien = t => (t.fuente === 'propia' ? ' (tuya)' : ` de ${t.artista || '?'}`);
-    const db = op ? 0 : Number((est.musica || {}).db) || 0;
+    const db = op ? (Number(op.musica_db) || 0) : Number((est.musica || {}).db) || 0;
     const animo = op ? '' : animoUnicoDe(est);
     const automatica = animo
       ? `Automática, toda ${(ANIMOS_MUSICA.find(a => a[0] === animo) || [0, animo])[1].toLowerCase()}`
@@ -16729,7 +16754,10 @@ function editorMusica(modo, est, repintar) {
     !borrador && !elegida
       ? '. Si este vídeo se montó antes del 10 de octubre, sonó «Suave»: pulsa «Normal» para volver a mezclarlo.'
       : ''));
-  if (!borrador) caja.appendChild(volumenFinoMusica(modo, est, repintar));
+  // TAMBIÉN EN UN VÍDEO NUEVO (19-10-2026): el dueño lo buscaba en el Encargo
+  // antes de crear el vídeo y no estaba. Ahí no se remezcla nada: se apunta y
+  // nace con él (`musica_db` en las opciones al crear)
+  caja.appendChild(volumenFinoMusica(modo, est, repintar));
 
   caja.appendChild(h('label', {}, 'Qué música'));
   caja.appendChild(h('div', { clase: 'herramientas' },
@@ -16790,10 +16818,18 @@ function animoUnicoDe(est) {
    (regla 1); y con un respiro, para que las flechas del teclado no lancen una
    mezcla por cada paso. */
 function volumenFinoMusica(modo, est, repintar) {
-  const guardado = Number((est.musica || {}).db) || 0;
+  const borrador = modo.tipo === 'borrador';
+  const op = borrador ? opcionesBorrador(modo.e) : null;
+  const guardado = borrador ? (Number(op.musica_db) || 0) : (Number((est.musica || {}).db) || 0);
   const actual = est.dbEnVuelo !== undefined ? est.dbEnVuelo : guardado;
   const etiqueta = h('span', { clase: 'meta' }, textoDb(actual));
   const guardar = async valor => {
+    if (borrador) {
+      if (valor) op.musica_db = valor; else delete op.musica_db;
+      est.dbEnVuelo = undefined;
+      repintar();
+      return;
+    }
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/sonido`, {
         method: 'PUT', cuerpo: { musica_db: valor, remontar: true } });
@@ -19116,15 +19152,38 @@ function pintarBarraModulos() {
       href: '#', clase: `boton-modulo${MODULOS.actual === id ? ' activo' : ''}`, title: ayuda,
       'aria-current': MODULOS.actual === id ? 'page' : null,
       datos: { modulo: id },
-      onclick: ev => { ev.preventDefault(); irAModulo(id); },
+      onclick: ev => { ev.preventDefault(); if (id === 'crear') entrarEnCrear(); else irAModulo(id); },
     }, texto, id === 'publicar' && PUB.avisos
       ? h('span', { clase: 'aviso-modulo', title: 'Envíos que fallaron o esperan tu OK' }, String(PUB.avisos))
       : null)));
 }
 
+/* «CREAR» ABRE SIEMPRE «TUS PROYECTOS» (decisión del dueño, 19-10-2026). Antes
+   volvía a lo último donde se estaba (un vídeo, un proyecto concreto), y
+   había que salir a mano. Solo la barra y la tarjeta de Inicio pasan por aquí:
+   el «atrás» del navegador y «Pasar al Encargo» de la Parrilla siguen yendo
+   adonde tienen que ir. Lo escrito en un estilo se guarda antes, como al
+   pulsar «‹ Volver»; cerrar el vídeo en pantalla no para lo que se genera. */
+function entrarEnCrear() {
+  if (APP.light.pendiente) volcarPresetLight();
+  pararPrevia();
+  recordarVideoLight('');
+  apuntarCliente('');
+  /* La galería se pone ANTES de entrar: así `irAModulo` la pinta y la apunta
+     en la entrada de historial que abre para Crear. Con `irALight` detrás, el
+     segundo pintado apilaba otra entrada y «atrás» no volvía al módulo. */
+  APP.light.vista = 'galeria';
+  APP.light.desdeVideo = '';
+  const panel = $('#panel');
+  if (panel) panel.scrollTop = 0;
+  irAModulo('crear');
+  cargarGaleriaLight(true);
+}
+
 function irAModulo(nombre, opciones) {
   const o = opciones || {};
   const antes = MODULOS.actual;
+  if (antes === 'publicar' && nombre !== 'publicar' && hayPendientePublicar()) guardarTextosPublicar();
   MODULOS.actual = nombre;
   /* LA ENTRADA DE UN MÓDULO NO LLEVA EL SITIO DE CREAR (`light`): con él,
      volver a ella hacía que Crear la restaurase y la reescribiera sin la marca
@@ -19226,7 +19285,8 @@ function vistaInicioModulos() {
     'Ir a la Parrilla']].forEach(([id, titulo, texto, boton]) => tarjetas.appendChild(
     h('div', { clase: 'tarjeta-modulo' },
       h('h3', {}, titulo), h('p', { clase: 'meta' }, texto),
-      h('button', { clase: id === 'automatizar' ? 'mini' : 'primario mini', onclick: () => irAModulo(id) }, boton))));
+      h('button', { clase: id === 'automatizar' ? 'mini' : 'primario mini',
+        onclick: () => (id === 'crear' ? entrarEnCrear() : irAModulo(id)) }, boton))));
   caja.appendChild(tarjetas);
   caja.appendChild(lineaMejorSemana());
   const hoy = h('div', { clase: 'bloque' }, h('h3', {}, 'Lo que pasa hoy'));
@@ -19436,9 +19496,15 @@ function olvidarEnvioPublicar() {
   PUB.modoEnvio = '';
   PUB.cuandoEnvio = '';
   PUB.borrador = {};
+  PUB.borradorDe = '';
 }
 
-function irASeccionPublicar(seccion, pid) {
+/* ANTES DE IRSE, LO TECLEADO SE GUARDA (notas del 19-10): cambiar de vídeo en
+   menos de 0,9 s vaciaba el borrador antes de que saliera su guardado. Quien
+   cambia de vídeo, de pestaña o de módulo llama aquí y espera. Si no se puede
+   guardar, se pregunta antes de perderlo. */
+async function irASeccionPublicar(seccion, pid) {
+  if (!(await guardarPendientePublicar())) return;
   PUB.seccion = seccion;
   if (pid !== undefined && pid !== PUB.pid) olvidarEnvioPublicar();
   if (pid !== undefined) PUB.pid = pid;
@@ -19447,8 +19513,9 @@ function irASeccionPublicar(seccion, pid) {
 }
 
 /* «Enviar a Publicar» desde la pantalla Vídeo de Crear */
-function abrirPublicarVideo(pid) {
+async function abrirPublicarVideo(pid) {
   if (!pid) return;
+  if (!(await guardarPendientePublicar())) return;
   if (pid !== PUB.pid) olvidarEnvioPublicar();
   PUB.seccion = 'ficha';
   PUB.pid = pid;
@@ -19508,8 +19575,14 @@ function pastillaEstadoEnvio(estado) {
   return h('span', { clase: `pastilla ${CLASE_ESTADO[estado] || ''}` }, ESTADOS_ENVIO[estado] || estado);
 }
 
+/* Una fila de la cola, de Inicio («Lo que pasa hoy») y de «Te necesitan». Un
+   fallo se QUITA DE LA LISTA desde aquí (notas del 19-10: solo se podía en la
+   ficha, y el contador de la barra no bajaba nunca). Va con el `pid` de LA
+   FILA: aquí `PUB.pid` es el último vídeo abierto, no el de este envío. Un
+   fallo que ya salió en otro envío (`superado`) lo dice y no pide nada. */
 function filaEnvioCola(e) {
-  return h('div', { clase: 'fila fila-envio' },
+  const fallo = ['fallido', 'comprobar'].includes(e.estado);
+  return h('div', { clase: 'fila fila-envio', datos: { envio: e.id || '' } },
     h('span', { clase: 'meta hora-envio' }, cuandoLegible(e.cuando)),
     h('b', {}, CORTOS_RED[e.red] || e.red),
     h('button', { clase: 'mini fantasma nombre-envio', title: 'Abrir la ficha de este vídeo',
@@ -19517,7 +19590,20 @@ function filaEnvioCola(e) {
     e.cliente_nombre ? h('span', { clase: 'meta' }, e.cliente_nombre) : null,
     h('span', { clase: 'crece' }),
     pastillaEstadoEnvio(e.estado),
+    fallo && e.superado ? h('span', { clase: 'meta motivo-cola' },
+      e.superado_como === 'reenviado' ? 'se volvió a mandar' : 'ya salió en otro envío') : null,
+    fallo && !e.superado ? h('button', { clase: 'mini fantasma', title: 'Quitarlo de «Te necesitan» (no borra nada en la red)',
+      onclick: () => cancelarEnvioPublicar(e) }, 'Quitar de la lista') : null,
     e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver') : null);
+}
+
+/* El contador de la barra, pedido aparte: desde la ficha, `PUB.cola` es la de
+   la semana que se miraba y no se toca. */
+function refrescarAvisosPublicar() {
+  pedir(rutaPublicar('/cola')).then(c => {
+    PUB.avisos = (c.esperan_ok || []).length + (c.fallidos || []).length;
+    pintarBarraModulos();
+  }).catch(() => {});
 }
 
 /* LA COLA, CON FILTROS (16-10-2026: con muchos vídeos la lista era un caos).
@@ -19780,7 +19866,8 @@ function seccionColaPublicar() {
 function textosDeFicha(red) {
   const f = PUB.ficha || {};
   const guardado = (f.textos || {})[red] || {};
-  const borrador = PUB.borrador[red] || {};
+  // el borrador es de UN vídeo: el de otro (volver atrás con el navegador) no se pinta aquí
+  const borrador = (!PUB.borradorDe || PUB.borradorDe === f.pid ? PUB.borrador[red] : null) || {};
   return Object.assign({ titulo: '', descripcion: '', cta: '', hashtags: [] }, guardado, borrador);
 }
 
@@ -19826,32 +19913,119 @@ function ortografiaDeRedPublicar(red) {
 }
 
 function editarTextoPublicar(red, campo, valor) {
+  if (PUB.borradorDe && PUB.borradorDe !== PUB.pid) {
+    // quedaba algo de otro vídeo (se volvió con «atrás»): sale ya, a SU vídeo.
+    // Si ese guardado falla, lo escrito no se tira: queda aparte y se reintenta
+    // con el próximo guardado que salga bien (revisión independiente, 19-10).
+    if (Object.keys(PUB.borrador).length) {
+      const suyo = PUB.borradorDe;
+      const textos = JSON.parse(JSON.stringify(PUB.borrador));
+      guardarTextosPublicar().then(bien => {
+        if (!bien) PUB.ajenos = Object.assign(PUB.ajenos || {}, { [suyo]: textos });
+      });
+    }
+    PUB.borrador = {};
+  }
+  PUB.borradorDe = PUB.pid;
   PUB.borrador[red] = Object.assign({}, PUB.borrador[red] || {}, {
     [campo]: campo === 'hashtags' ? String(valor).split(/[\s,]+/).filter(Boolean) : valor,
   });
+  ponerEstadoGuardadoPublicar('sin');
   clearTimeout(PUB.guardando);
   PUB.guardando = setTimeout(guardarTextosPublicar, 900);
 }
 
+function hayPendientePublicar() {
+  return !!((PUB.borrador && Object.keys(PUB.borrador).length)
+    || (PUB.ajenos && Object.keys(PUB.ajenos).length));
+}
+
+/* Los textos de OTRO vídeo cuyo guardado falló: se vuelven a mandar, cada uno
+   a su vídeo, cuando un guardado sale bien. */
+async function reintentarAjenosPublicar() {
+  const ajenos = PUB.ajenos || {};
+  for (const pid of Object.keys(ajenos)) {
+    try {
+      await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}`), { method: 'PUT', cuerpo: { textos: ajenos[pid] } });
+      delete ajenos[pid];
+    } catch (e) { /* se queda para la próxima */ }
+  }
+}
+
+/* true si no queda nada sin guardar (o si quien se iba acepta perderlo). */
+async function guardarPendientePublicar() {
+  if (!hayPendientePublicar()) return true;
+  if (await guardarTextosPublicar()) return true;
+  return confirm('No se han podido guardar los últimos cambios de los textos.\n\n'
+    + '¿Seguir igualmente? Lo último que escribiste se pierde.');
+}
+
 /* Devuelve si quedó guardado: quien sigue después (optimizar, aceptar, pedir
-   ganchos) no puede seguir sobre el texto viejo del servidor. */
+   ganchos) no puede seguir sobre el texto viejo del servidor.
+   LO QUE SE MANDA SE COGE ANTES DE NINGÚN «await»: quien llama y sigue sin
+   esperar (cambiar de módulo) ya no puede perderlo. Un guardado espera al
+   que esté en marcha: dos PUT a la vez podían llegar al revés. */
 async function guardarTextosPublicar() {
   clearTimeout(PUB.guardando);
   PUB.guardando = null;
   const textos = JSON.parse(JSON.stringify(PUB.borrador));
-  if (!Object.keys(textos).length || !PUB.pid) return true;
+  const pid = PUB.borradorDe || PUB.pid;
+  if (!Object.keys(textos).length || !pid) return true;
+  ponerEstadoGuardadoPublicar('guardando', '', pid);
+  const antes = PUB.guardadoEnCurso;
+  const peticion = (async () => {
+    if (antes) { try { await antes; } catch (e) { /* el suyo ya lo dijo */ } }
+    return pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}`), { method: 'PUT', cuerpo: { textos } });
+  })();
+  PUB.guardadoEnCurso = peticion;
   try {
-    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
-      method: 'PUT', cuerpo: { textos },
-    });
-    limpiarBorradorPublicar(textos);
-    repintarPublicarSinPisar();
+    const ficha = await peticion;
+    if (PUB.borradorDe === pid || (!PUB.borradorDe && PUB.pid === pid)) limpiarBorradorPublicar(textos);
+    if (PUB.pid === pid) PUB.ficha = ficha;
+    ponerEstadoGuardadoPublicar(PUB.borradorDe === pid && hayPendientePublicar() ? 'sin' : 'ok', '', pid);
+    if (PUB.pid === pid) repintarPublicarSinPisar();
+    if (PUB.ajenos && Object.keys(PUB.ajenos).length) reintentarAjenosPublicar();
     return true;
   } catch (e) {
+    ponerEstadoGuardadoPublicar('error', e.message, pid);
     toast(`no se han podido guardar los textos: ${e.message}`, true);
     return false;
+  } finally {
+    if (PUB.guardadoEnCurso === peticion) PUB.guardadoEnCurso = null;
   }
 }
+
+/* LA PASTILLA DE GUARDADO (notas del 19-10): los textos se guardaban solos
+   0,9 s después de teclear sin ninguna señal. Ahora se ve siempre junto a los
+   textos: «Sin guardar…», «Guardando…», «✓ Guardado hh:mm» o «No se ha
+   guardado — Reintentar». Se cambia EN SU SITIO: mientras se escribe la ficha
+   no se repinta (se llevaría el cursor). */
+function ponerEstadoGuardadoPublicar(estado, error, pid) {
+  const hora = estado === 'ok' ? new Date().toTimeString().slice(0, 5) : '';
+  PUB.guardado = { pid: pid || PUB.pid, estado, error: error || '', hora };
+  const viejo = document.querySelector('#modulo .guardado-publicar');
+  if (viejo && PUB.ficha && PUB.guardado.pid === PUB.ficha.pid) viejo.replaceWith(pastillaGuardadoPublicar());
+}
+
+function pastillaGuardadoPublicar() {
+  const f = PUB.ficha || {};
+  const g = PUB.guardado && PUB.guardado.pid === f.pid ? PUB.guardado : { estado: hayPendientePublicar() ? 'sin' : 'ok' };
+  const caja = h('div', { clase: 'guardado-publicar', role: 'status', 'aria-live': 'polite', datos: { estado: g.estado } });
+  if (g.estado === 'sin') caja.appendChild(h('span', { clase: 'pastilla aviso' }, 'Sin guardar…'));
+  else if (g.estado === 'guardando') caja.appendChild(h('span', { clase: 'pastilla' }, 'Guardando…'));
+  else if (g.estado === 'error') {
+    caja.appendChild(h('span', { clase: 'pastilla error', title: g.error || '' }, 'No se ha guardado'));
+    caja.appendChild(h('button', { clase: 'mini', onclick: () => guardarTextosPublicar() }, 'Reintentar'));
+  } else caja.appendChild(h('span', { clase: 'pastilla ok' }, g.hora ? `✓ Guardado ${g.hora}` : '✓ Guardado'));
+  return caja;
+}
+
+/* Cerrar la pestaña (o recargar) con algo sin guardar lo pregunta el navegador. */
+window.addEventListener('beforeunload', ev => {
+  if (typeof PUB === 'undefined' || !hayPendientePublicar()) return;
+  ev.preventDefault();
+  ev.returnValue = '';
+});
 
 async function cambiarRedesPublicar(red, puesta) {
   const f = PUB.ficha;
@@ -20016,7 +20190,8 @@ function seccionFichaPublicar() {
   redes.appendChild(estadoTextosPublicar(f));
   caja.appendChild(redes);
 
-  // LOS TEXTOS POR RED
+  // LOS TEXTOS POR RED, con la pastilla de guardado fija encima
+  if ((f.redes || []).length) caja.appendChild(h('div', { clase: 'fila fila-guardado-publicar' }, pastillaGuardadoPublicar()));
   (f.redes || []).forEach(r => caja.appendChild(bloqueTextoRed(r)));
 
   // EL SEO DEL VÍDEO: palabra clave, «Optimizar SEO» y su propuesta
@@ -20349,8 +20524,10 @@ async function reintentarEnvioPublicar(envio) {
 }
 
 async function cancelarEnvioPublicar(envio) {
+  const pid = envio.pid || PUB.pid;
+  const quitar = ['fallido', 'comprobar'].includes(envio.estado);
   const pregunta = envio.estado === 'fallido'
-    ? `¿Quitar de la lista el fallo de ${NOMBRES_RED[envio.red]}?`
+    ? `¿Quitar de la lista el fallo de ${NOMBRES_RED[envio.red]}${envio.video ? ` («${envio.video}»)` : ''}?`
     : envio.estado === 'comprobar'
       ? `¿Ya miraste en Upload-Post si ${NOMBRES_RED[envio.red]} salió?\n\nQuitarlo de la lista deja `
         + 'volver a publicarlo sin aviso: hazlo solo si allí no está.'
@@ -20358,9 +20535,11 @@ async function cancelarEnvioPublicar(envio) {
       ? ' (y las demás redes que iban en el mismo envío programado)' : ''}?`;
   if (!confirm(pregunta)) return;
   try {
-    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/envios/${envio.id}/cancelar`), { method: 'POST' });
-    toast('Cancelado');
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/envios/${envio.id}/cancelar`), { method: 'POST' });
+    toast(quitar ? 'Quitado de la lista' : 'Cancelado');
   } catch (e) { toast(e.message, true); }
+  if (MODULOS.actual === 'inicio') { cargarInicioModulos(); return; }
+  if (PUB.seccion !== 'cola') refrescarAvisosPublicar();
   cargarPublicar(true);
 }
 
@@ -20440,33 +20619,50 @@ function bloqueEnviosFicha() {
     b.appendChild(h('div', { clase: 'meta' }, 'Todavía no se ha publicado nada de este vídeo.'));
     return b;
   }
-  f.envios.forEach(e => {
-    b.appendChild(h('div', { clase: 'fila fila-envio' },
-      h('b', {}, CORTOS_RED[e.red] || e.red),
-      h('span', { clase: 'meta hora-envio' }, cuandoLegible(e.cuando)),
-      pastillaEstadoEnvio(e.estado),
-      h('span', { clase: 'crece meta motivo-envio' }, e.error || e.nota || ''),
-      e.metricas && textoMetricas(e.metricas)
-        ? h('span', { clase: 'metricas-envio', title: `actualizado ${fechaCorta(e.metricas.al)}` },
-          textoMetricas(e.metricas))
-        : (e.metricas && e.metricas.error ? h('span', { clase: 'meta', title: e.metricas.error }, 'sin cifras todavía') : null),
-      e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver el post') : null,
-      e.estado === 'espera_ok' ? h('button', { clase: 'primario mini', onclick: () => confirmarPendientePublicar(e) }, 'Dar el OK') : null,
-      e.estado === 'comprobar' ? h('button', { clase: 'mini',
-        title: 'Lo vuelve a mandar con la misma clave: si Upload-Post ya lo tenía, no se publica dos veces',
-        onclick: () => reintentarEnvioPublicar(e) }, 'Reintentar') : null,
-      ['programado', 'espera_ok'].includes(e.estado)
-        ? h('button', { clase: 'mini peligro', onclick: () => cancelarEnvioPublicar(e) }, 'Cancelar') : null,
-      ['fallido', 'comprobar'].includes(e.estado)
-        ? h('button', { clase: 'mini fantasma', title: 'Quitarlo de «Te necesitan» (no borra nada en la red)',
-          onclick: () => cancelarEnvioPublicar(e) }, 'Quitar de la lista') : null));
-    if (e.recortado) {
-      b.appendChild(h('div', { clase: 'caja-aviso aviso-recortado' },
-        `⚠ ${CORTOS_RED[e.red] || e.red}: ${e.recortado}. Mira el post y, si hace falta, pega el texto a mano.`));
-    }
-    b.appendChild(loMandadoPublicar(e));
-  });
+  /* LOS DESCARTADOS, PLEGADOS (notas del 19-10): un fallo quitado de la lista
+     seguía saliendo entre los demás como «cancelado — fallo descartado». */
+  const descartados = f.envios.filter(e => e.estado === 'cancelado');
+  const vivos = f.envios.filter(e => e.estado !== 'cancelado');
+  if (!vivos.length) b.appendChild(h('div', { clase: 'meta' }, 'Nada en marcha ni publicado de este vídeo.'));
+  vivos.forEach(e => filasEnvioFicha(e).forEach(x => b.appendChild(x)));
+  if (descartados.length) {
+    PUB.descartadosAbiertos = PUB.descartadosAbiertos || {};
+    const plegado = h('details', { clase: 'envios-descartados', open: !!PUB.descartadosAbiertos[f.pid],
+      ontoggle: ev => { PUB.descartadosAbiertos[f.pid] = ev.currentTarget.open; } },
+    h('summary', {}, `${descartados.length} descartado${descartados.length > 1 ? 's' : ''} (cancelados o quitados de la lista)`));
+    descartados.forEach(e => filasEnvioFicha(e).forEach(x => plegado.appendChild(x)));
+    b.appendChild(plegado);
+  }
   return b;
+}
+
+function filasEnvioFicha(e) {
+  const filas = [];
+  filas.push(h('div', { clase: 'fila fila-envio' },
+    h('b', {}, CORTOS_RED[e.red] || e.red),
+    h('span', { clase: 'meta hora-envio' }, cuandoLegible(e.cuando)),
+    pastillaEstadoEnvio(e.estado),
+    h('span', { clase: 'crece meta motivo-envio' }, e.error || e.nota || ''),
+    e.metricas && textoMetricas(e.metricas)
+      ? h('span', { clase: 'metricas-envio', title: `actualizado ${fechaCorta(e.metricas.al)}` },
+        textoMetricas(e.metricas))
+      : (e.metricas && e.metricas.error ? h('span', { clase: 'meta', title: e.metricas.error }, 'sin cifras todavía') : null),
+    e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver el post') : null,
+    e.estado === 'espera_ok' ? h('button', { clase: 'primario mini', onclick: () => confirmarPendientePublicar(e) }, 'Dar el OK') : null,
+    e.estado === 'comprobar' ? h('button', { clase: 'mini',
+      title: 'Lo vuelve a mandar con la misma clave: si Upload-Post ya lo tenía, no se publica dos veces',
+      onclick: () => reintentarEnvioPublicar(e) }, 'Reintentar') : null,
+    ['programado', 'espera_ok'].includes(e.estado)
+      ? h('button', { clase: 'mini peligro', onclick: () => cancelarEnvioPublicar(e) }, 'Cancelar') : null,
+    ['fallido', 'comprobar'].includes(e.estado)
+      ? h('button', { clase: 'mini fantasma', title: 'Quitarlo de «Te necesitan» (no borra nada en la red)',
+        onclick: () => cancelarEnvioPublicar(e) }, 'Quitar de la lista') : null));
+  if (e.recortado) {
+    filas.push(h('div', { clase: 'caja-aviso aviso-recortado' },
+      `⚠ ${CORTOS_RED[e.red] || e.red}: ${e.recortado}. Mira el post y, si hace falta, pega el texto a mano.`));
+  }
+  filas.push(loMandadoPublicar(e));
+  return filas;
 }
 
 /* «VER LO QUE SE MANDÓ» (19-10-2026): los campos de texto tal como salieron
@@ -21385,7 +21581,7 @@ function bloqueSeoVideo() {
   b.appendChild(h('div', { clase: 'fila campos-seo' },
     h('label', { clase: 'etiqueta-campo' }, 'Palabra clave de este vídeo',
       h('input', { type: 'text', value: 'palabra_clave' in (PUB.seoBorrador || {}) ? PUB.seoBorrador.palabra_clave : (seo.palabra_propia || ''),
-        placeholder: proyecto || 'la del proyecto (Cuentas y ajustes → SEO)', datos: { foco: 'seo-palabra-video' },
+        placeholder: proyecto || `la del proyecto (${DONDE_SEO_PROYECTO})`, datos: { foco: 'seo-palabra-video' },
         oninput: ev => { PUB.seoBorrador = Object.assign(PUB.seoBorrador || {}, { palabra_clave: ev.target.value }); },
         onchange: async ev => { await guardarSeoVideoPublicar({ palabra_clave: ev.target.value }); delete PUB.seoBorrador.palabra_clave; } })),
     botonGuia('palabra_clave', campo)));
@@ -21395,7 +21591,7 @@ function bloqueSeoVideo() {
       h('button', { clase: 'mini', onclick: () => guardarSeoVideoPublicar({ palabra_clave: seo.palabra_propuesta }) }, 'Usarla')));
   }
   if (!seo.palabra) {
-    b.appendChild(h('div', { clase: 'caja-aviso' }, 'Ni este vídeo ni su proyecto tienen palabra clave: sin ella los textos no se posicionan para nada en concreto. Ponla aquí o en Cuentas y ajustes → SEO de este proyecto.'));
+    b.appendChild(h('div', { clase: 'caja-aviso' }, `Ni este vídeo ni su proyecto tienen palabra clave: sin ella los textos no se posicionan para nada en concreto. Ponla aquí o en ${DONDE_SEO_PROYECTO}.`));
   }
   if (seo.nombre_fichero) b.appendChild(h('div', { clase: 'meta' }, `El MP4 se sube como «${seo.nombre_fichero}» (el del proyecto no cambia).`));
   if ((seo.errores || {}).optimizar) b.appendChild(cajaError(seo.errores.optimizar));
@@ -21431,17 +21627,36 @@ const NOMBRE_CAMPO_SEO = { titulo: 'Título', descripcion: 'Texto', cta: 'Llamad
 
 /* La propuesta SEO: por red y campo, antes y después con su porqué. Se acepta
    campo a campo o todo; «Dejar el mío» la quita sin tocar nada. */
+/* UNA SOLA NOTA (notas del 19-10): la del Studio. Claude ya no pone la suya
+   («80/100 según Claude» al lado de un «SEO 57/100» confundía); lo que se
+   enseña es cuánto subiría la del Studio con lo que propone, calculada por el
+   servidor (`seo.notas_con_propuesta`). Lo que Claude repite de la nota no
+   llega (el servidor lo quita: ya sale con su botón en la nota de cada red). */
 function propuestaSeoPublicar(propuesta) {
+  const seo = (PUB.ficha || {}).seo || {};
+  const conCambios = seo.notas_con_propuesta || {};
+  const hayCambios = Object.values(propuesta).some(p => Object.keys(p.campos || {}).length);
   const caja = h('div', { clase: 'propuesta-seo' }, h('div', { clase: 'fila' },
     h('b', { clase: 'crece' }, 'La revisión SEO de Claude'),
-    h('button', { clase: 'mini primario', onclick: () => aceptarSeoPublicar(
-      Object.fromEntries(Object.entries(propuesta).map(([r, p]) => [r, Object.keys(p.campos || {})]))) }, 'Aceptar todo'),
-    h('button', { clase: 'mini fantasma', onclick: () => guardarSeoVideoPublicar({ descartar_seo: true }) }, 'Descartarla')));
+    hayCambios ? h('button', { clase: 'mini primario', onclick: () => aceptarSeoPublicar(
+      Object.fromEntries(Object.entries(propuesta).filter(([, p]) => Object.keys(p.campos || {}).length)
+        .map(([r, p]) => [r, Object.keys(p.campos || {})]))) }, 'Aceptar todo') : null,
+    h('button', { clase: 'mini fantasma', onclick: () => guardarSeoVideoPublicar({ descartar_seo: true }) },
+      hayCambios ? 'Descartarla' : 'Cerrarla')));
+  if (!hayCambios) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Claude no propone cambios en los textos. Lo que falta para subir la nota '
+      + 'está en la nota SEO de cada red, cada punto con su botón.'));
+  }
   const verTexto = v => (Array.isArray(v) ? v.map(x => `#${x}`).join(' ') : String(v || '—'));
   Object.entries(propuesta).forEach(([red, p]) => {
-    const bloque = h('div', { clase: 'propuesta-red' }, h('div', { clase: 'fila' },
-      h('b', {}, NOMBRES_RED[red] || red), p.nota != null ? h('span', { clase: 'pastilla' }, `${p.nota}/100 según Claude`) : null));
-    (p.fallos || []).forEach(x => bloque.appendChild(h('div', { clase: 'meta' }, `⚠ ${x}`)));
+    const antes = ((seo.notas || {})[red] || {}).nota;
+    const despues = conCambios[red];
+    if (!Object.keys(p.campos || {}).length && !(p.fallos || []).length) return;
+    const bloque = h('div', { clase: 'propuesta-red', datos: { red } }, h('div', { clase: 'fila' },
+      h('b', {}, NOMBRES_RED[red] || red),
+      despues != null && antes != null ? h('span', { clase: `pastilla ${despues > antes ? 'ok' : ''} nota-con-cambios` },
+        `con estos cambios: ${antes} → ${despues}`) : null));
+    (p.fallos || []).forEach(x => bloque.appendChild(h('div', { clase: 'meta' }, `Claude ve además: ${x}`)));
     Object.entries(p.campos || {}).forEach(([campo, c]) => {
       bloque.appendChild(h('div', { clase: 'cambio-seo', datos: { red, campo } },
         h('div', { clase: 'meta' }, NOMBRE_CAMPO_SEO[campo] || campo),
@@ -21508,8 +21723,16 @@ function seoDeRedPublicar(red) {
     ontoggle: ev => { PUB.notaAbierta[red] = ev.currentTarget.open; } },
   h('summary', {}, h('span', { clase: `pastilla ${clase}` }, `SEO ${n.nota}/100`),
     ` ${(n.puntos || []).filter(x => !x.ok).length} por mejorar`));
-  (n.puntos || []).forEach(x => detalle.appendChild(h('div', { clase: `punto-seo ${x.ok ? 'ok' : 'aviso'}` },
-    `${x.ok ? '✓' : '⚠'} ${x.texto}`)));
+  (n.puntos || []).forEach(x => {
+    detalle.appendChild(h('div', { clase: `punto-seo fila ${x.ok ? 'ok' : 'aviso'}`, datos: { punto: x.id || '' } },
+      h('span', { clase: 'crece' }, `${x.ok ? '✓' : '⚠'} ${x.texto}`),
+      x.ok ? null : accionPuntoSeoPublicar(red, x)));
+    if (!x.ok && x.id === 'ubicacion') {
+      detalle.appendChild(h('div', { clase: 'meta pista-punto-seo' }, 'Qué poner: el NÚMERO del Lugar o la Página de '
+        + 'Facebook de tu zona (por ejemplo, el de «Lima, Perú»), no el nombre. La «Guía» de al lado del campo dice cómo '
+        + 'encontrarlo. Vale para todos los vídeos del proyecto.'));
+    }
+  });
   caja.appendChild(detalle);
   caja.appendChild(h('label', { clase: 'etiqueta-campo' },
     red === 'tiktok' && !(f.ajustes || {}).tt_comentarios_puede
@@ -21534,6 +21757,79 @@ function seoDeRedPublicar(red) {
     h('span', { clase: 'crece' }, g),
     h('button', { clase: 'mini', onclick: () => usarGanchoPublicar(red, i) }, 'Usar este'))));
   return caja;
+}
+
+/* UN BOTÓN POR CADA PUNTO QUE RESTA (notas del 19-10): antes la nota decía
+   «sin palabra clave» o «sin portada» y no había forma de arreglarlo desde
+   ahí. Cada punto trae su `id` del servidor (`publicar_seo.nota`) y aquí
+   lleva UNA acción: casi siempre, ir al campo que lo arregla. */
+function accionPuntoSeoPublicar(red, punto) {
+  const f = PUB.ficha || {};
+  const seo = f.seo || {};
+  const ir = (foco, texto) => h('button', { clase: 'mini fantasma', datos: { punto: punto.id },
+    onclick: () => irACampoPublicar(foco) }, texto);
+  const id = punto.id || '';
+  if (id === 'palabra') {
+    return seo.palabra_propuesta
+      ? h('button', { clase: 'mini', datos: { punto: id },
+        title: 'La palabra clave que Claude propone para este vídeo',
+        onclick: () => guardarSeoVideoPublicar({ palabra_clave: seo.palabra_propuesta }) }, `Usar «${seo.palabra_propuesta}»`)
+      : ir('seo-palabra-video', 'Escribir palabra clave');
+  }
+  if (id === 'portada') {
+    return h('button', { clase: 'mini fantasma', datos: { punto: id }, onclick: irAPortadaPublicar }, 'Elegir portada');
+  }
+  if (id === 'ubicacion') {
+    return h('a', { href: '#', clase: 'mini enlace-punto-seo', datos: { punto: id },
+      title: `${DONDE_SEO_PROYECTO}: la ubicación de Instagram`,
+      onclick: ev => { ev.preventDefault(); abrirSeoProyectoPublicar(f.cliente || '_sin', 'ig_ubicacion'); } },
+    'Ponerla en SEO de este proyecto');
+  }
+  if (['palabra_titulo', 'titulo_largo'].includes(id)) return ir(`${red}-titulo`, 'Ir al título');
+  if (['palabra_primera', 'palabra_descripcion', 'primera_linea', 'texto'].includes(id)) {
+    return ir(`${red}-descripcion`, 'Ir al texto');
+  }
+  if (id.startsWith('hashtag')) return ir(`${red}-hashtags`, 'Ir a los hashtags');
+  if (id === 'cta') return ir(`${red}-cta`, 'Escribir la llamada a la acción');
+  return null;
+}
+
+/* El nombre de verdad de la pantalla donde está lo SEO del proyecto (antes
+   unos textos decían «Lo fijo → SEO» y otros «Cuentas y ajustes → SEO»). */
+const DONDE_SEO_PROYECTO = 'Cuentas y ajustes → SEO de este proyecto';
+
+/* Lleva al campo (por su `data-foco`) y le pone el cursor. */
+function irACampoPublicar(foco) {
+  const campo = document.querySelector(`#modulo [data-foco="${foco}"]`);
+  if (!campo) { toast('Ese campo no está a la vista en esta ficha', true); return; }
+  try { campo.scrollIntoView({ block: 'center' }); } catch (e) { /* sin scroll */ }
+  campo.focus({ preventScroll: true });
+}
+
+function irAPortadaPublicar() {
+  const bloque = document.querySelector('#modulo .portada-publicar');
+  if (!bloque) { toast('La portada se elige con un vídeo montado y alguna red marcada', true); return; }
+  try { bloque.scrollIntoView({ block: 'center' }); } catch (e) { /* sin scroll */ }
+  const mando = bloque.querySelector('input[type=range]:not([disabled]), button:not([disabled])');
+  if (mando) mando.focus({ preventScroll: true });
+}
+
+/* Abre Cuentas y ajustes con el «SEO de este proyecto» desplegado y el cursor
+   en el campo. La pestaña se pinta cuando llegan los proyectos: se espera a
+   que el campo salga (hasta 10 s). */
+async function abrirSeoProyectoPublicar(cid, campo) {
+  PUB.seoAbierto = Object.assign(PUB.seoAbierto || {}, { [cid]: true });
+  await irASeccionPublicar('cuentas');
+  const foco = `seo-${campo}-${cid}`;
+  const fin = Date.now() + 10000;
+  const buscar = () => {
+    const el = document.querySelector(`#modulo [data-foco="${foco}"]`);
+    if (el) {
+      try { el.scrollIntoView({ block: 'center' }); } catch (e) { /* sin scroll */ }
+      el.focus({ preventScroll: true });
+    } else if (Date.now() < fin && PUB.seccion === 'cuentas') setTimeout(buscar, 150);
+  };
+  buscar();
 }
 
 async function pedirGanchosPublicar(red) {

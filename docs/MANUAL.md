@@ -377,7 +377,13 @@ Business no dan cifras por post, así que no se preguntan.
    **✦ Guía** (qué poner y qué no) y **✓ Revisar** (comprueba el texto contra la
    guía y propone una versión mejor que se pone con un botón), **Copiar texto**
    y **Así sale** (el texto final, con la llamada a la acción, la firma y los
-   hashtags). **Reescribir** pide a Claude solo esa red.
+   hashtags). **Reescribir** pide a Claude solo esa red. Lo que escribes se
+   guarda solo; la pastilla de encima de los textos dice cómo va (**Sin
+   guardar…**, **Guardando…**, **✓ Guardado** con la hora, o **No se ha
+   guardado** con **Reintentar**), y cambiar de vídeo o de pestaña espera a
+   que se guarde. Cada red admite sus hashtags (Instagram 30, YouTube 60, las
+   demás 30, contando los fijos del proyecto): los que no caben se dicen
+   debajo del texto y no se mandan.
 4. **Portada** (opcional): mueve el deslizador para elegir un **fotograma** del
    vídeo (se ve al lado) y pulsa **Usar este fotograma**, o **Sube una imagen**
    (JPG, PNG o WebP; se pasa a JPEG de menos de 2 MB). El fotograma va a
@@ -411,9 +417,14 @@ Business no dan cifras por post, así que no se preguntan.
   la dejas vacía vale la del proyecto; Claude propone una y la pones con
   «Usarla»), el nombre con el que se sube el MP4 y **Optimizar SEO con
   Claude**: su propuesta sale campo a campo con el antes y el después;
-  **Aceptar**, **Aceptar todo** o **Dejar el mío**. Si cambias un texto
+  **Aceptar**, **Aceptar todo** o **Dejar el mío**, y cuánto subiría la nota
+  con esos cambios («con estos cambios: 57 → 72»). Si cambias un texto
   después de pedirla, ese campo no se pisa: vuelve a pedirla.
-- En cada red, la **nota SEO** (de 0 a 100, con lo que está bien y lo que no),
+- En cada red, la **nota SEO** (de 0 a 100, la única: con lo que está bien y
+  lo que no, y en cada punto que resta un botón para arreglarlo: **Escribir
+  palabra clave** o **Usar «…»** si Claude propone una, **Elegir portada**, ir
+  al título, al texto o a los hashtags, y la ubicación de Instagram, que te
+  lleva a SEO de este proyecto con el cursor en su campo),
   el **primer comentario**, **Dame 3 ganchos** (tres primeras líneas para
   elegir) y, en Instagram, **colaboradores** y **etiquetas**.
 
@@ -438,7 +449,8 @@ un vídeo en una red donde ya salió pide confirmarlo aparte.
 **estilo**, **estado** (sin publicar, en algunas, en todas, programado, con
 algún fallo) y **fecha**, más **Agrupar por proyecto**; se acuerdan en este
 navegador y valen también para el calendario. Después **Te necesitan** (lo que
-falló y lo que espera tu OK), el calendario por **Semana** o por **Mes** (‹ ›
+falló y lo que espera tu OK; un fallo se quita con **Quitar de la lista**, aquí
+o en Inicio, y uno que volviste a mandar y salió ya no cuenta), el calendario por **Semana** o por **Mes** (‹ ›
 para moverte; en el mes, «+N más» abre los del día) y los vídeos listos, de 30
 en 30, con el estado de cada red.
 

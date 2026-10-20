@@ -6642,6 +6642,84 @@ def probar_cancelar_en_el_taller():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_notas_19oct():
+    """Las notas del dueño del 19-10-2026, en lo que toca al servidor."""
+    seccion("NOTAS DEL 19-10: LÁMINAS, ASISTENTE Y MÚSICA DEL VÍDEO NUEVO")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    from pasos import laminas as LAM                          # noqa: PLC0415
+
+    # LÁMINAS: lo que pide una lámina ya no se corta en 400 sin avisar. El texto
+    # del dueño (un evento entero) se cortó en «…jugadores con lent».
+    largo = ("debe ser una lamina de un evento grande en un ambiente amplio tipo salon "
+             "de eventos " * 12)[:1200]
+    _q, propias, _h = LAM.config_de({"laminas_propias": {"extra_1": largo}})
+    igual(len(propias.get("extra_1", "")), len(" ".join(largo.split())),
+          "LÁMINAS: 1.200 caracteres se guardan enteros (antes, 400)")
+    codigo, mensaje = _llamar(servidor.cambiar_laminas, "no_importa",
+                              {"accion": "nueva", "texto": "x" * (LAM.MAX_TEXTO + 1)})
+    igual(codigo, 400, "LÁMINAS: lo que pasa del tope se dice con un 400, no se corta")
+    ok("máximo" in str(mensaje), f"LÁMINAS: y el mensaje dice el máximo: {mensaje}")
+
+    # ASISTENTE: un fallo pasajero de otro trabajo no lo pone «no conectado»
+    reales = {n: getattr(servidor, n) for n in ("_candidatas_del_asistente", "_sesion_de",
+                                                "_salud_cli")}
+    cuenta = {"id": "c1", "etiqueta": "mia", "entrada": True}
+
+    class _Salud:
+        estado = "tiempo"
+
+        def de(self, _c):
+            return {"estado": self.estado, "mensaje": "el guion tardó 1800 s",
+                    "para": "escribir el guion", "cuando": "2026-10-19T10:00:00"}
+
+        def describir(self, ficha, etiqueta):
+            return f"{etiqueta}: {ficha['estado']}"
+    salud = _Salud()
+    servidor._candidatas_del_asistente = lambda: [cuenta]
+    servidor._sesion_de = lambda c, refrescar=False: {"conectada": True, "correo": "a@b.c"}
+    servidor._salud_cli = lambda: salud
+    try:
+        for estado in ("tiempo", "error"):
+            salud.estado = estado
+            listo, motivo, _c, _cs, sin_probar = servidor._asistente_listo()
+            ok(listo, f"ASISTENTE: con «{estado}» de otro trabajo sigue listo (antes, rojo): {motivo}")
+            ok(sin_probar, f"ASISTENTE: y se vuelve a probar solo al abrirlo ({estado})")
+        for estado in ("cupo", "sesion"):
+            salud.estado = estado
+            listo, motivo, *_ = servidor._asistente_listo()
+            ok(not listo and motivo, f"ASISTENTE: con «{estado}» sí se dice que no puede contestar")
+    finally:
+        for n, v in reales.items():
+            setattr(servidor, n, v)
+
+    # MÚSICA: el ajuste fino se puede elegir ya en el vídeo nuevo
+    base = tempfile.mkdtemp(prefix="estudio_19oct_")
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(base)
+    try:
+        pid = Proyecto.crear(base, "musica nueva").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        servidor._opciones_al_crear(ctx, "", {"musica_db": -4})
+        igual((ctx.estado.params("render") or {}).get("musica_db"), -4.0,
+              "MÚSICA: «−4 dB» elegido en el encargo nuevo llega al vídeo")
+        pid2 = Proyecto.crear(base, "musica cero").id
+        Estado(servidor.contexto(pid2).proyecto)
+        ctx2 = servidor.contexto(pid2)
+        servidor._opciones_al_crear(ctx2, "", {"musica_db": 0})
+        ok("musica_db" not in (ctx2.estado.params("render") or {}),
+           "MÚSICA: y 0 dB no escribe nada (regla 1)")
+        codigo, _m = _llamar(servidor._opciones_al_crear, ctx2, "", {"musica_db": "alto"})
+        igual(codigo, 400, "MÚSICA: un valor que no es un número da 400")
+        codigo, _m = _llamar(servidor._opciones_al_crear, ctx2, "", {"musica_db": float("nan")})
+        igual(codigo, 400, "MÚSICA: un NaN da 400 (antes se volvía +6 dB)")
+    finally:
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
     parser.add_argument("--conservar", action="store_true",
@@ -6730,6 +6808,7 @@ def main():
         probar_ortografia_de_campos(cliente, pid)
         probar_portadas(cliente, pid)
         probar_lo_de_v2h()
+        probar_notas_19oct()
         probar_cancelar_en_el_taller()
     finally:
         parar(proceso)

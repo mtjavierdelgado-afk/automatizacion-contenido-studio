@@ -72,6 +72,7 @@ import re
 import sys
 import time
 
+import numpy as np
 import requests
 
 try:
@@ -1752,6 +1753,72 @@ def plan_regrabado(meta, efectivos, seccion_pedida=None):
             "seccion_de": seccion_de}
 
 
+#: Milisegundos de fundido a cada lado de una costura de «regrabar».
+FUNDIDO_COSTURA_MS = 10
+#: Segundos, a cada lado de la seccion, donde se busca el punto del corte. Basta
+#: para recoger el arranque tardio de las marcas (~40 ms) y NO llega a la pausa:
+#: buscando en todo el hueco, el corte caia a veces en el otro extremo de una
+#: pausa alargada por `espaciar` y la seccion nueva salia pegada a la anterior.
+VENTANA_COSTURA_S = 0.12
+
+
+def _cortes_de_seccion(pcm, seccion, palabras):
+    """(desde, hasta) en segundos: DONDE se corta la toma vieja para coser la nueva.
+
+    El ruido que oyo el dueño en el «Torneo de 8» (19-10-2026): se cortaba en el
+    `t_in`/`t_out` de la seccion, que son las MARCAS de sus palabras, y las
+    marcas de Cartesia empiezan un poco tarde. La toma vieja conservaba asi los
+    primeros 30 ms de la palabra de la seccion, y detras venia el silencio con
+    el que arranca la toma nueva: un golpe de voz cortado en seco, un chasquido.
+    Ahora se corta en el punto MAS TRANQUILO de la pausa de cada lado (la misma
+    regla que `motor.espaciar`): entre el final de la palabra anterior y el
+    principio de la seccion, y entre el final de la seccion y la siguiente.
+    """
+    muestras = np.frombuffer(pcm[:len(pcm) & ~1], dtype="<i2")
+    t_in, t_out = float(seccion["t_in"]), float(seccion["t_out"])
+    antes = [p["e"] for p in palabras if p.get("e") is not None and p["e"] <= t_in + 1e-6]
+    despues = [p["s"] for p in palabras if p.get("s") is not None and p["s"] >= t_out - 1e-6]
+    # hasta 0,6 s de margen a cada lado si no hay palabra vecina (principio/fin)
+    fin_previo = max(antes) if antes else max(0.0, t_in - 0.6)
+    inicio_siguiente = min(despues) if despues else min(len(muestras) / SR, t_out + 0.6)
+    desde = t_in
+    ini_ventana = max(fin_previo, t_in - VENTANA_COSTURA_S)
+    if t_in - ini_ventana > 0.02:
+        desde, _nivel = motor._punto_tranquilo(muestras, ini_ventana, t_in)
+    hasta = t_out
+    fin_ventana = min(inicio_siguiente, t_out + VENTANA_COSTURA_S)
+    if fin_ventana - t_out > 0.02:
+        hasta, _nivel = motor._punto_tranquilo(muestras, t_out, fin_ventana)
+    return round(desde, 4), round(max(hasta, desde), 4)
+
+
+def _coser_seccion(pcm, corte_ini, corte_fin, pcm_nuevo):
+    """lo de antes + lo nuevo + lo de despues, con un fundido corto en cada costura.
+
+    Sin fundido, cualquier cosa que no fuera silencio exacto en un corte (una
+    respiracion, el final de una consonante) saltaba a cero de una muestra a la
+    siguiente: un chasquido. Coseno de FUNDIDO_COSTURA_MS a los dos lados.
+    """
+    rampa = max(1, int(FUNDIDO_COSTURA_MS * SR / 1000))
+
+    def fundir(trozo, salida, entrada):
+        a = np.frombuffer(trozo[:len(trozo) & ~1], dtype="<i2").astype(np.float64)
+        if not len(a):
+            return trozo
+        n = min(rampa, len(a))
+        curva = 0.5 - 0.5 * np.cos(np.linspace(0.0, np.pi, n))
+        if entrada:
+            a[:n] *= curva
+        if salida:
+            a[-n:] *= curva[::-1]
+        return np.clip(np.round(a), -32768, 32767).astype("<i2").tobytes()
+
+    previo = fundir(pcm[:corte_ini], salida=True, entrada=False)
+    nuevo = fundir(pcm_nuevo, salida=True, entrada=True) if pcm_nuevo else b""
+    siguiente = fundir(pcm[corte_fin:], salida=False, entrada=True)
+    return previo + nuevo + siguiente
+
+
 def regrabar_seccion(bloques, seccion_id, cfg, meta, destino, peticion="",
                      ajuste=None, avisar=None, cwd=None, secciones=None):
     """Vuelve a grabar UNA seccion y la cose en la toma que ya existe.
@@ -1838,14 +1905,15 @@ def regrabar_seccion(bloques, seccion_id, cfg, meta, destino, peticion="",
     with open(origen, "rb") as fh:
         pcm = _pcm_de(fh.read())
     bytes_seg = SR * 2
-    corte_ini = int(seccion["t_in"] * bytes_seg) & ~1
-    corte_fin = int(seccion["t_out"] * bytes_seg) & ~1
     pcm_nuevo = _pcm_de(wav_nuevo) if wav_nuevo else b""
-    wav = motor.wav_desde_pcm(pcm[:corte_ini] + pcm_nuevo + pcm[corte_fin:])
+    desde, hasta = _cortes_de_seccion(pcm, seccion, meta.get("palabras") or [])
+    wav = motor.wav_desde_pcm(_coser_seccion(pcm, int(round(desde * SR)) * 2,
+                                             int(round(hasta * SR)) * 2, pcm_nuevo))
 
     # 4. las marcas: las de antes, las nuevas desplazadas, y las de despues
     #    corridas por la diferencia de duracion. Tiempos ABSOLUTOS, como siempre.
-    desde, hasta = seccion["t_in"], seccion["t_out"]
+    #    `desde`/`hasta` son los cortes DE VERDAD (en la pausa), no los de las
+    #    marcas: lo que queda antes y despues se mide desde ahi.
     delta = (len(pcm_nuevo) / bytes_seg) - (hasta - desde)
     palabras = []
     for p in meta.get("palabras") or []:

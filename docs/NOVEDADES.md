@@ -14,6 +14,21 @@ vídeos, estilos, claves y contraseña no se tocan.
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
+**Imágenes: descargarlas y leer lo que dice la voz (20 de octubre)**
+- **«⬇ Descargar»** debajo de cada imagen de las diapositivas: baja el PNG
+  original del plano que estás viendo, con un nombre que se entiende
+  (`<vídeo>_<plano>.png`, por ejemplo `padres_vs_hijos_S004.png`).
+- **«⬇ Descargar todas»**: un .zip con todas las imágenes de plano del vídeo,
+  en el orden del vídeo y numeradas (`<vídeo>_001_S001.png`…). Solo lee: no
+  cambia nada del vídeo ni cuesta nada.
+- **«Lo que dice la voz»**: un cuadro debajo de la imagen con el texto del
+  guion que se oye en ese plano, para leerlo y no solo escucharlo. Cambia al
+  pasar de plano y, mientras suena «♪ Oírla» o «▶ Todo seguido», **se resalta
+  el trozo que se está diciendo**. Con el texto a la vista, en el ordenador la
+  imagen se hace un poco más pequeña para que quepan las dos cosas sin bajar.
+  **«Ocultar el texto»** lo quita (y la imagen vuelve a su tamaño); el
+  navegador se acuerda de tu elección.
+
 **El nuevo diseño: CrearIA Studio (19 de octubre)**
 - **Se llama CrearIA Studio · Automatización de contenido**, con logo nuevo: la
   C de Crear con el bucle dentro y un «play». El favicon es el mismo dibujo. Por

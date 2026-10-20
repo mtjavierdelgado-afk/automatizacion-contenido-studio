@@ -5767,7 +5767,135 @@ def diseno_crearia(navegador, datos):
     pg.cerrar()
 
 
-<<<<<<< HEAD
+# ======================================================================
+# IMÁGENES: DESCARGAR Y LEER LO QUE DICE (rama `imagenes-texto`, 20-10-2026).
+# Tramo propio y al final, como los demás.
+
+_TEXTO_ESPERADO_JS = ("() => { const e = escenaPrevia(); return sinMarcasTts(legible(e.narracion))"
+                      ".replace(/\\s+/g, ' ').trim(); }")
+_TEXTO_VISTO_JS = ("() => { const c = document.querySelector('.texto-del-plano'); "
+                   "return c ? c.innerText.replace(/\\s+/g, ' ').trim() : null; }")
+
+
+@escenario
+def descargar_y_leer_lo_que_dice(navegador, datos):
+    """En la diapositiva de Imágenes: «⬇ Descargar» baja el PNG original del
+    plano con un nombre útil, «⬇ Descargar todas» apunta al .zip, y el cuadro
+    enseña lo que dice la voz en ESE plano, cambia al pasar de plano, marca el
+    tramo que suena con «Oírla» y se oculta (y se recuerda) sin escribir nada
+    en el vídeo."""
+    from nucleo.proyecto import identificador  # noqa: PLC0415
+    pid = datos["video"]
+    api = datos["api"]
+    pg = Pagina(navegador, datos, nombre="descargar y leer")
+    pg.js("try { localStorage.removeItem('previa.texto_del_plano'); } catch (_) {} "
+          "if (typeof TEXTO_DEL_PLANO !== 'undefined') TEXTO_DEL_PLANO.oculto = null;")
+    api.libre(pid)
+    estado_json = os.path.join(datos["proyectos"], pid, "estado.json")
+    with open(estado_json, "rb") as fh:
+        estado_antes = fh.read()
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
+    ok(pg.esperar(".plano-texto-y-descarga", segundos=20), "debajo de la imagen salen las descargas y el texto")
+    # a un plano que tenga imagen y voz
+    total = pg.p.evaluate("() => (PREVIA.ficha.escenas || []).length")
+    for _vuelta in range(total):
+        if pg.p.evaluate("() => !!escenaPrevia().imagen") and pg.p.evaluate(_TEXTO_ESPERADO_JS):
+            break
+        pg.js("irAEscenaPrevia(1); pararPrevia();")
+    sid = pg.p.evaluate("() => escenaPrevia().id")
+    nombre = pg.p.evaluate("() => videoAbierto().nombre || videoAbierto().pid")
+    esperado = f"{identificador(nombre)[:60]}_{sid}.png"
+    enlace = pg.p.locator(".plano-texto-cab a", has_text="Descargar").filter(has_not_text="todas").first
+    ok(enlace.count() == 1 and enlace.is_visible(), f"se ve «⬇ Descargar» en el plano {sid}")
+    href = enlace.get_attribute("href") or ""
+    ok(re.search(rf"/a/{re.escape(pid)}/pasos/assets/v\d+/escenas/{sid}\.png$", href) is not None,
+       f"y apunta al PNG original de la versión activa, sin miniatura ({href})")
+    ok(enlace.get_attribute("download") == esperado,
+       f"con un nombre útil: {enlace.get_attribute('download')!r} (se esperaba {esperado!r})")
+    try:
+        with pg.p.expect_download(timeout=10000) as bajada:
+            enlace.click()
+        ok(bajada.value.suggested_filename == esperado,
+           f"pulsarlo baja el fichero con ese nombre ({bajada.value.suggested_filename})")
+    except Exception as fallo:                               # noqa: BLE001
+        ok(False, f"pulsar «⬇ Descargar» baja el PNG: se cortó ({type(fallo).__name__}: {str(fallo)[:120]})")
+    todas = pg.p.locator(".plano-texto-cab a", has_text="Descargar todas").first
+    ok(todas.count() == 1 and todas.is_visible(), "y «⬇ Descargar todas»")
+    ok((todas.get_attribute("href") or "").endswith(f"/api/proyectos/{pid}/imagenes/zip"),
+       f"que apunta al .zip ({todas.get_attribute('href')})")
+    ok(todas.get_attribute("download") == f"{identificador(nombre)[:60]}_imagenes.zip",
+       f"con el nombre del vídeo ({todas.get_attribute('download')})")
+    estado_zip = pg.p.evaluate("async () => { const r = await fetch(document.querySelector("
+                               "'.plano-texto-cab a[href$=\"/imagenes/zip\"]').href); "
+                               "return [r.status, r.headers.get('content-type')]; }")
+    ok(estado_zip == [200, "application/zip"], f"y el .zip se sirve ({estado_zip})")
+
+    # EL CUADRO: el texto del plano que se ve, y cambia con el plano
+    visto, texto = pg.p.evaluate(_TEXTO_VISTO_JS), pg.p.evaluate(_TEXTO_ESPERADO_JS)
+    ok(bool(texto) and visto == texto, f"el cuadro dice lo que dice la voz en {sid}: {visto!r} (guion: {texto!r})")
+    ok(pg.p.evaluate("() => document.querySelector('.texto-del-plano').dataset.plano") == sid,
+       "y es el del plano que se ve")
+    pg.captura("imagenes_texto_escritorio", entera=False)
+    otro = None
+    for _vuelta in range(total):
+        if pg.p.evaluate("() => PREVIA.i >= PREVIA.ficha.escenas.length - 1"):
+            break
+        pg.js("irAEscenaPrevia(1); pararPrevia();")
+        pg.p.wait_for_timeout(300)
+        nuevo = pg.p.evaluate(_TEXTO_ESPERADO_JS)
+        if nuevo and nuevo != texto:
+            otro = nuevo
+            break
+    sid2 = pg.p.evaluate("() => escenaPrevia().id")
+    ok(otro is not None and pg.p.evaluate(_TEXTO_VISTO_JS) == otro,
+       f"al pasar de plano ({sid} → {sid2}) el cuadro cambia a su texto: {pg.p.evaluate(_TEXTO_VISTO_JS)!r}")
+    ok((pg.p.locator(".plano-texto-cab a", has_text="Descargar").filter(has_not_text="todas")
+        .first.get_attribute("download") or "").endswith(f"_{sid2}.png"),
+       "y «⬇ Descargar» es ya la imagen de ese plano")
+
+    # «OÍRLA» MARCA EL TRAMO QUE SUENA
+    pg.pulsar(".previa-mandos button", "Oírla")
+    marcado = False
+    for _vuelta in range(30):
+        if pg.p.locator(".texto-del-plano .tramo-del-plano.sonando").count():
+            marcado = True
+            break
+        pg.p.wait_for_timeout(250)
+    ok(marcado, "mientras suena «Oírla», el tramo que se oye va resaltado")
+    pg.js("pararPrevia(); repintarVideo();")
+    ok(pg.p.locator(".texto-del-plano .tramo-del-plano.sonando").count() == 0, "y al parar se apaga")
+
+    # OCULTAR Y RECORDARLO
+    pg.pulsar(".plano-texto-cab button", "Ocultar el texto")
+    ok(not pg.visible(".texto-del-plano") and pg.visible(".plano-texto-cab button", "Ver el texto"),
+       "«Ocultar el texto» lo quita y deja «Ver el texto»")
+    ok(pg.visible(".plano-texto-cab a", "Descargar"), "y las descargas siguen a mano")
+    pg.p.reload()
+    pg.p.wait_for_function("() => typeof APP !== 'undefined' && APP.light && APP.light.datos", timeout=30000)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
+    pg.esperar(".plano-texto-y-descarga", segundos=20)
+    ok(not pg.visible(".texto-del-plano") and pg.visible(".plano-texto-cab button", "Ver el texto"),
+       "al recargar se recuerda oculto")
+    pg.pulsar(".plano-texto-cab button", "Ver el texto")
+    ok(pg.esperar(".texto-del-plano", segundos=5), "y «Ver el texto» lo devuelve")
+    api.libre(pid)
+    with open(estado_json, "rb") as fh:
+        ok(fh.read() == estado_antes, "mirar, descargar y ocultar no escriben nada en el vídeo (regla 1)")
+    pg.sin_errores("descargar y leer lo que dice")
+    pg.cerrar()
+
+    # EN EL MÓVIL: cabe, y se lee
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="descargar y leer móvil")
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
+    ok(pg.esperar(".texto-del-plano", segundos=20), "en el móvil se ve el cuadro del texto")
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    ok(ancho <= 2, f"y cabe en 390 px ({ancho}px)")
+    pg.js("document.querySelector('.plano-texto-y-descarga').scrollIntoView({block: 'center'});")
+    pg.captura("imagenes_texto_movil", entera=False)
+    pg.sin_errores("descargar y leer en el móvil")
+    pg.cerrar()
+
+
 # espacio-fijo (20-10-2026): un guion de la Parrilla con ESPACIO FIJO llena el
 # campo «El espacio fijo» de «Un vídeo nuevo», y eso es lo que se manda al crear.
 @escenario
@@ -5924,134 +6052,6 @@ def espacio_fijo_en_un_video_hecho(navegador, datos):
         papeles = []
     ok("espacio" in papeles, f"y lleva adjunta la imagen del sitio: {papeles}")
     pg.sin_errores("el espacio fijo de un vídeo hecho")
-=======
-# ======================================================================
-# IMÁGENES: DESCARGAR Y LEER LO QUE DICE (rama `imagenes-texto`, 20-10-2026).
-# Tramo propio y al final, como los demás.
-
-_TEXTO_ESPERADO_JS = ("() => { const e = escenaPrevia(); return sinMarcasTts(legible(e.narracion))"
-                      ".replace(/\\s+/g, ' ').trim(); }")
-_TEXTO_VISTO_JS = ("() => { const c = document.querySelector('.texto-del-plano'); "
-                   "return c ? c.innerText.replace(/\\s+/g, ' ').trim() : null; }")
-
-
-@escenario
-def descargar_y_leer_lo_que_dice(navegador, datos):
-    """En la diapositiva de Imágenes: «⬇ Descargar» baja el PNG original del
-    plano con un nombre útil, «⬇ Descargar todas» apunta al .zip, y el cuadro
-    enseña lo que dice la voz en ESE plano, cambia al pasar de plano, marca el
-    tramo que suena con «Oírla» y se oculta (y se recuerda) sin escribir nada
-    en el vídeo."""
-    from nucleo.proyecto import identificador  # noqa: PLC0415
-    pid = datos["video"]
-    api = datos["api"]
-    pg = Pagina(navegador, datos, nombre="descargar y leer")
-    pg.js("try { localStorage.removeItem('previa.texto_del_plano'); } catch (_) {} "
-          "if (typeof TEXTO_DEL_PLANO !== 'undefined') TEXTO_DEL_PLANO.oculto = null;")
-    api.libre(pid)
-    estado_json = os.path.join(datos["proyectos"], pid, "estado.json")
-    with open(estado_json, "rb") as fh:
-        estado_antes = fh.read()
-    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
-    ok(pg.esperar(".plano-texto-y-descarga", segundos=20), "debajo de la imagen salen las descargas y el texto")
-    # a un plano que tenga imagen y voz
-    total = pg.p.evaluate("() => (PREVIA.ficha.escenas || []).length")
-    for _vuelta in range(total):
-        if pg.p.evaluate("() => !!escenaPrevia().imagen") and pg.p.evaluate(_TEXTO_ESPERADO_JS):
-            break
-        pg.js("irAEscenaPrevia(1); pararPrevia();")
-    sid = pg.p.evaluate("() => escenaPrevia().id")
-    nombre = pg.p.evaluate("() => videoAbierto().nombre || videoAbierto().pid")
-    esperado = f"{identificador(nombre)[:60]}_{sid}.png"
-    enlace = pg.p.locator(".plano-texto-cab a", has_text="Descargar").filter(has_not_text="todas").first
-    ok(enlace.count() == 1 and enlace.is_visible(), f"se ve «⬇ Descargar» en el plano {sid}")
-    href = enlace.get_attribute("href") or ""
-    ok(re.search(rf"/a/{re.escape(pid)}/pasos/assets/v\d+/escenas/{sid}\.png$", href) is not None,
-       f"y apunta al PNG original de la versión activa, sin miniatura ({href})")
-    ok(enlace.get_attribute("download") == esperado,
-       f"con un nombre útil: {enlace.get_attribute('download')!r} (se esperaba {esperado!r})")
-    try:
-        with pg.p.expect_download(timeout=10000) as bajada:
-            enlace.click()
-        ok(bajada.value.suggested_filename == esperado,
-           f"pulsarlo baja el fichero con ese nombre ({bajada.value.suggested_filename})")
-    except Exception as fallo:                               # noqa: BLE001
-        ok(False, f"pulsar «⬇ Descargar» baja el PNG: se cortó ({type(fallo).__name__}: {str(fallo)[:120]})")
-    todas = pg.p.locator(".plano-texto-cab a", has_text="Descargar todas").first
-    ok(todas.count() == 1 and todas.is_visible(), "y «⬇ Descargar todas»")
-    ok((todas.get_attribute("href") or "").endswith(f"/api/proyectos/{pid}/imagenes/zip"),
-       f"que apunta al .zip ({todas.get_attribute('href')})")
-    ok(todas.get_attribute("download") == f"{identificador(nombre)[:60]}_imagenes.zip",
-       f"con el nombre del vídeo ({todas.get_attribute('download')})")
-    estado_zip = pg.p.evaluate("async () => { const r = await fetch(document.querySelector("
-                               "'.plano-texto-cab a[href$=\"/imagenes/zip\"]').href); "
-                               "return [r.status, r.headers.get('content-type')]; }")
-    ok(estado_zip == [200, "application/zip"], f"y el .zip se sirve ({estado_zip})")
-
-    # EL CUADRO: el texto del plano que se ve, y cambia con el plano
-    visto, texto = pg.p.evaluate(_TEXTO_VISTO_JS), pg.p.evaluate(_TEXTO_ESPERADO_JS)
-    ok(bool(texto) and visto == texto, f"el cuadro dice lo que dice la voz en {sid}: {visto!r} (guion: {texto!r})")
-    ok(pg.p.evaluate("() => document.querySelector('.texto-del-plano').dataset.plano") == sid,
-       "y es el del plano que se ve")
-    pg.captura("imagenes_texto_escritorio", entera=False)
-    otro = None
-    for _vuelta in range(total):
-        if pg.p.evaluate("() => PREVIA.i >= PREVIA.ficha.escenas.length - 1"):
-            break
-        pg.js("irAEscenaPrevia(1); pararPrevia();")
-        pg.p.wait_for_timeout(300)
-        nuevo = pg.p.evaluate(_TEXTO_ESPERADO_JS)
-        if nuevo and nuevo != texto:
-            otro = nuevo
-            break
-    sid2 = pg.p.evaluate("() => escenaPrevia().id")
-    ok(otro is not None and pg.p.evaluate(_TEXTO_VISTO_JS) == otro,
-       f"al pasar de plano ({sid} → {sid2}) el cuadro cambia a su texto: {pg.p.evaluate(_TEXTO_VISTO_JS)!r}")
-    ok((pg.p.locator(".plano-texto-cab a", has_text="Descargar").filter(has_not_text="todas")
-        .first.get_attribute("download") or "").endswith(f"_{sid2}.png"),
-       "y «⬇ Descargar» es ya la imagen de ese plano")
-
-    # «OÍRLA» MARCA EL TRAMO QUE SUENA
-    pg.pulsar(".previa-mandos button", "Oírla")
-    marcado = False
-    for _vuelta in range(30):
-        if pg.p.locator(".texto-del-plano .tramo-del-plano.sonando").count():
-            marcado = True
-            break
-        pg.p.wait_for_timeout(250)
-    ok(marcado, "mientras suena «Oírla», el tramo que se oye va resaltado")
-    pg.js("pararPrevia(); repintarVideo();")
-    ok(pg.p.locator(".texto-del-plano .tramo-del-plano.sonando").count() == 0, "y al parar se apaga")
-
-    # OCULTAR Y RECORDARLO
-    pg.pulsar(".plano-texto-cab button", "Ocultar el texto")
-    ok(not pg.visible(".texto-del-plano") and pg.visible(".plano-texto-cab button", "Ver el texto"),
-       "«Ocultar el texto» lo quita y deja «Ver el texto»")
-    ok(pg.visible(".plano-texto-cab a", "Descargar"), "y las descargas siguen a mano")
-    pg.p.reload()
-    pg.p.wait_for_function("() => typeof APP !== 'undefined' && APP.light && APP.light.datos", timeout=30000)
-    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
-    pg.esperar(".plano-texto-y-descarga", segundos=20)
-    ok(not pg.visible(".texto-del-plano") and pg.visible(".plano-texto-cab button", "Ver el texto"),
-       "al recargar se recuerda oculto")
-    pg.pulsar(".plano-texto-cab button", "Ver el texto")
-    ok(pg.esperar(".texto-del-plano", segundos=5), "y «Ver el texto» lo devuelve")
-    api.libre(pid)
-    with open(estado_json, "rb") as fh:
-        ok(fh.read() == estado_antes, "mirar, descargar y ocultar no escriben nada en el vídeo (regla 1)")
-    pg.sin_errores("descargar y leer lo que dice")
-    pg.cerrar()
-
-    # EN EL MÓVIL: cabe, y se lee
-    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="descargar y leer móvil")
-    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
-    ok(pg.esperar(".texto-del-plano", segundos=20), "en el móvil se ve el cuadro del texto")
-    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
-    ok(ancho <= 2, f"y cabe en 390 px ({ancho}px)")
-    pg.js("document.querySelector('.plano-texto-y-descarga').scrollIntoView({block: 'center'});")
-    pg.captura("imagenes_texto_movil", entera=False)
-    pg.sin_errores("descargar y leer en el móvil")
->>>>>>> origin/imagenes-texto
     pg.cerrar()
 
 

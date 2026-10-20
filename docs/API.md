@@ -15,13 +15,6 @@ Reglas que valen para toda la API y no se repiten en cada fila:
   se sigue por `GET /api/trabajos/{tid}` o por el `eventos` que devuelve.
 - **Editar es decidir.** No hay endpoint de «guardar y confirmar»: `PUT` guarda,
   y pasar de paso es aprobar.
-- **Los ajustes del montaje aceptan `remontar: false`** (sonido, presencia,
-  efectos, su volumen, los vetos y el logo; en la subida del logo, `?remontar=0`):
-  se guardan sin montar y dejan la marca `montaje_pendiente` en `proyecto.json`
-  (fuera de los params, no mueve ninguna firma). `GET .../montaje` la enseña como
-  `sin_aplicar` (y `solo_mezcla` si basta con volver a mezclar), y
-  `POST .../montaje/aplicar` lo monta todo en un solo trabajo. Es lo que usa el
-  Encargo (19-10-2026).
 
 
 ## Proyectos y papelera
@@ -58,7 +51,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/proyectos/{pid}/musica/presencia` | Fija cuánto se oye la música y, si el vídeo ya está montado, lo REMONTA. |
 | `POST` | `/api/proyectos/{pid}/ortografia/aplicar` | Pone los subtitulos corregidos: {cambios: {plano: texto}}. |
 | `POST` | `/api/proyectos/{pid}/ortografia/descartar` | Lo que se deja SIN marcar al aplicar: {rid, ids: [...]}. Esos textos se |
-| `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de {fuente: "guion", textos}. Con `modo: "editorial"` (solo el guion) es la REVISION EDITORIAL: sintaxis y redaccion (sonnet, esfuerzo medio); el resultado (`GET .../ortografia/{rid}`, `fuente: "editorial"`) trae `propuestas: [{id, bloque, original, propuesta, motivo, tipo}]` y no escribe nada: la pantalla aplica cada una como una edicion a mano. |
+| `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de |
 | `GET` | `/api/proyectos/{pid}/ortografia/{rid}` | Como va la revision de ortografia, y lo que propone al terminar. |
 | `GET` | `/api/proyectos/{pid}/planos/montaje` | {video, planos: {sid: {movimiento?, profundidad?}}, no_aplica, niveles, profundidad} |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/montaje` | {movimiento?: quieto|sobrio|vivo|dinamico|null, profundidad?: true|false|null} |
@@ -169,11 +162,11 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/api/moodboard/{clave}/{origen}/{archivo}` | Sirve una lamina del banco de moodboards, que vive fuera de los proyectos. |
-| `GET` | `/api/proyectos/{pid}/estilo/cambios` | Que tiene el estilo del video que el video no tiene, por partes, y lo que costaria traerlo. Con `?estilo=<otro>`, lo mismo frente a OTRO estilo (vista previa de «Cambiar de estilo…», con `cliente: {antes, ahora}`). Dice `actual` y `estilo.en_papelera`. No escribe nada. |
+| `PUT` | `/api/proyectos/{pid}/estilo` | PASA EL VIDEO A OTRO ESTILO: {estilo, partes: [...]} (19-10-2026). |
+| `GET` | `/api/proyectos/{pid}/estilo/cambios` | Que tiene el estilo del video que el video no tiene, por partes, y lo que |
 | `POST` | `/api/proyectos/{pid}/estilo/guia` | Escribe la guia de estilo mirando los fotogramas elegidos. |
 | `PUT` | `/api/proyectos/{pid}/estilo/seleccion` | Guarda las imagenes de estilo elegidas en los params de assets. |
-| `POST` | `/api/proyectos/{pid}/estilo/traer` | Trae al video las partes elegidas del estilo: {partes: [estilo, tono, voz, rotulos]}. No genera nada. |
-| `PUT` | `/api/proyectos/{pid}/estilo` | Pasa el video a OTRO estilo: `{estilo, partes: [..]}`. Escribe `config.estilo_light` (no mueve firmas) y trae solo las partes elegidas (sin partes, nada queda obsoleto). El video se queda en su proyecto (cliente) si tenia uno. 400 estilo o parte que no existe, 409 algo en marcha o estilo en la papelera. |
+| `POST` | `/api/proyectos/{pid}/estilo/traer` | Trae al video las partes elegidas del estilo: {partes: [estilo, tono, |
 | `GET` | `/api/proyectos/{pid}/moodboard` | Las referencias de estilo dibujadas a proposito para este estilo. |
 | `POST` | `/api/proyectos/{pid}/moodboard` | Dibuja las laminas de estilo. Quedan PROPUESTAS hasta que alguien las mira. |
 | `POST` | `/api/proyectos/{pid}/moodboard/aprobar` | Mete el moodboard en el banco del canal. Es la decision de una persona. |
@@ -230,7 +223,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/proyectos/{pid}/capturas/{cid}` | Borra una captura y su PNG. |
 | `GET` | `/api/proyectos/{pid}/montaje` | El montaje de este video, las transiciones elegidas y si esta aplicado. |
 | `PUT` | `/api/proyectos/{pid}/montaje` | {montaje?: {movimiento, subtitulos, gancho, cifras, barra}, transiciones?: [..]} |
-| `POST` | `/api/proyectos/{pid}/montaje/aplicar` | Aplica lo que quede del montaje en UN solo trabajo. Ni una imagen. Si lo pendiente es solo la mezcla (música, efectos, volúmenes, logo), `solo_montar` (segundos; con la música vuelta a la automática, antes la banda); si no, capas y montaje. -> `{trabajo_id, solo_mezcla}`. 409 si aún no está montado. |
+| `POST` | `/api/proyectos/{pid}/montaje/aplicar` | Aplica lo que quede del montaje en UN solo trabajo. Ni una imagen. |
 | `GET` | `/api/proyectos/{pid}/montaje/notas` | Lo escrito sobre el vídeo terminado. No toca ninguna firma. |
 | `PUT` | `/api/proyectos/{pid}/montaje/notas` | Guarda la nota del vídeo entero. Autoguardado, como todo lo demás. |
 
@@ -445,8 +438,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-<<<<<<< HEAD
-**322 endpoints.** Escrito por `generar_api.py` desde `app.py`.
-=======
-**319 endpoints.** Escrito por `generar_api.py` desde `app.py`.
->>>>>>> origin/imagenes-texto
+**324 endpoints.** Escrito por `generar_api.py` desde `app.py`.

@@ -416,7 +416,7 @@ def informe_de_cobertura(carpeta):
 class Pagina:
     """Una pestana con sus errores de JavaScript apuntados y sus capturas."""
 
-    def __init__(self, navegador, datos, ancho=1300, alto=900, nombre="pantalla"):
+    def __init__(self, navegador, datos, ancho=1300, alto=900, nombre="pantalla", entrada="crear"):
         self.datos = datos
         self.nombre = nombre
         self.errores = []
@@ -431,7 +431,9 @@ class Pagina:
         self.aceptar = True
         self.dialogos = []
         self.p.on("dialog", self._dialogo)
-        self.p.goto(datos["url"] + "/")
+        # AL ENTRAR SE ABRE EL INICIO (diseno-crearia, 19-10-2026); los
+        # escenarios empiezan en Crear, como siempre, con `?entrada=crear`
+        self.p.goto(datos["url"] + ("/?entrada=crear" if entrada == "crear" else "/"))
         self.p.wait_for_function("() => typeof APP !== 'undefined' && APP.light && APP.light.datos", timeout=30000)
         self.p.wait_for_timeout(800)
         # TODOS LOS AVISOS, no solo el último: uno de un trabajo que acaba
@@ -3913,8 +3915,9 @@ def publicar_en_redes(navegador, datos):
 
     # Inicio y Automatizar
     pg.pulsar("#barra-modulos .boton-modulo", "Inicio")
-    ok(pg.esperar(".tarjetas-modulo .tarjeta-modulo h3", "Publicar", 10), "Inicio: las tres tarjetas")
-    ok(pg.esperar(".inicio-modulos h3", "Lo que pasa hoy", 10), "y «lo que pasa hoy»")
+    # desde `diseno-crearia` (19-10-2026), el panel mixto
+    ok(pg.esperar(".inicio-modulos .tarjeta-saludo h1", "Hola", 10), "Inicio: el saludo del panel")
+    ok(pg.esperar(".inicio-modulos h3", "Te necesitan", 10), "y «Te necesitan»")
     pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
     # desde la rama `parrilla` (17-10), Automatizar es la Parrilla de guiones
     ok(pg.esperar(".automatizar.parrilla", segundos=10), "Automatizar abre la Parrilla")
@@ -4983,8 +4986,9 @@ def notas_del_19_10(navegador, datos):
     pg.pulsar("#barra-modulos .boton-modulo", "Crear")
     ok(pg.esperar("h2", "Tus proyectos", 10), "CREAR: abre «Tus proyectos», no el último vídeo")
     pg.pulsar("#barra-modulos .boton-modulo", "Inicio")
-    pg.pulsar(".tarjeta-modulo button", "Ir a Crear")
-    ok(pg.esperar("h2", "Tus proyectos", 10), "CREAR: también desde la tarjeta de Inicio")
+    # desde `diseno-crearia` (19-10-2026), el botón «Tus proyectos» del saludo del panel
+    pg.pulsar(".saludo-botones button", "Tus proyectos")
+    ok(pg.esperar("h2", "Tus proyectos", 10), "CREAR: también desde el Inicio («Tus proyectos»)")
 
     # LÁMINAS: el campo dice su tope y cuenta
     pg.js(f"nuevaLamina(fichaLight('{datos['preset']}'), '');")
@@ -5230,6 +5234,204 @@ def publicar_notas_del_19_10(navegador, datos):
     parte("los fallos que se quitan", parte_fallos)
     parte("los descartados, plegados", parte_descartados)
     tocar_ficha(lambda g: g.update(envios=[]))
+
+
+
+# ======================================================================
+# EL DISEÑO CREARIA (rama `diseno-crearia`, 19-10-2026). Tramo propio y al
+# final: el logo y el nombre, el pie, las cuatro paletas (y que se recuerdan),
+# el Inicio con «Arma tu panel» (y que se recuerda), el panel de Ayuda del «?».
+
+@escenario
+def diseno_crearia(navegador, datos):
+    pg = Pagina(navegador, datos)
+    ok(pg.visible("#cabecera .marca .marca-logo"), "la cabecera lleva el logo (la C con el bucle)")
+    ok(pg.visible("#cabecera .marca", "CrearIA Studio")
+       and pg.visible("#cabecera .marca", "Automatización de contenido"),
+       "y el nombre «CrearIA Studio · Automatización de contenido»")
+    ok(pg.p.title() == "CrearIA Studio", f"el título de la pestaña ({pg.p.title()!r})")
+    ok(pg.esperar(".pie-sistema", "© 2026 Agencia Redes Botánica", 10), "el pie con los derechos, en Crear")
+    ok(pg.visible(".pie-sistema a", "Términos de uso") and pg.visible(".pie-sistema a", "Contacto"),
+       "con Novedades, Guía, Términos de uso y Contacto")
+    pg.p.locator(".pie-sistema a", has_text="Términos de uso").first.click()
+    ok(pg.esperar(".ventana-texto", "Agencia Redes Botánica", 5)
+       and pg.visible(".ventana-texto", "República del Perú")
+       and pg.visible(".ventana-texto", "Última actualización: 19 de octubre de 2026"),
+       "Términos abre los términos de uso (titular, ley peruana, fecha)")
+    pg.p.keyboard.press("Escape")
+    ok(pg.p.eval_on_selector(".pie-sistema a:has-text('Contacto')", "a => a.getAttribute('href')")
+       == "mailto:agencia.redes.botanica@gmail.com", "Contacto es un mailto a la agencia")
+
+    # LAS CUATRO PALETAS: cada una cambia una variable visible y se recuerda
+    fondo = "() => getComputedStyle(document.body).backgroundColor"
+    vistos = {}
+    pg.js("conmutarConfig(true);")
+    ok(pg.esperar("#cuerpo-config h3", "Aspecto", 10), "Configuración trae la elección de paleta")
+    for paleta in ("aurora", "brasa", "dia", "nocturno"):
+        pg.pulsar(f'.eleccion-paleta[data-paleta="{paleta}"]')
+        vistos[paleta] = pg.p.evaluate("() => getComputedStyle(document.documentElement)"
+                                       ".getPropertyValue('--bg').trim()")
+    ok(len(set(vistos.values())) == 4, f"las cuatro paletas ponen un fondo distinto ({vistos})")
+    ok(vistos["dia"] == "#f6f4ff" and vistos["nocturno"] == "#0a0913", "Día es la clara y Nocturno la de siempre")
+    pg.pulsar('.eleccion-paleta[data-paleta="brasa"]')
+    pg.js("conmutarConfig(false);")
+    pg.p.reload()
+    pg.p.wait_for_function("() => typeof APP !== 'undefined' && APP.light && APP.light.datos", timeout=30000)
+    ok(pg.p.evaluate("() => document.documentElement.dataset.paleta") == "brasa",
+       "la paleta elegida se recuerda al recargar")
+    pg.pulsar("#btn-tema")
+    ok(pg.p.evaluate("() => document.documentElement.dataset.tema") == "claro",
+       "el sol y la luna pasan a Día (el tema claro)")
+    pg.pulsar("#btn-tema")
+    ok(pg.p.evaluate("() => document.documentElement.dataset.paleta") == "brasa",
+       "y vuelven a tu oscura (Brasa)")
+    pg.js("aplicarPaleta('nocturno');")
+    pg.captura("crearia_crear")
+
+    # EL INICIO Y «ARMA TU PANEL»
+    pg.js("localStorage.removeItem('inicio.panel');")
+    pg.pulsar("#barra-modulos .boton-modulo", "Inicio")
+    for clase, que in (("saludo", "el saludo"), ("cifras", "las cifras"), ("necesitan", "Te necesitan"),
+                       ("semana", "la semana"), ("recientes", "los recientes"), ("marcha", "En marcha"),
+                       ("mejor", "lo mejor de 7 días")):
+        ok(pg.esperar(f".tarjeta-inicio.tarjeta-{clase}", segundos=10), f"el Inicio pinta {que}")
+    ok(pg.esperar(".cifra-inicio", "Vídeos este mes", 10), "con «Vídeos este mes»")
+    ok(pg.visible("#modulo .pie-sistema", "© 2026"), "y el pie también en los módulos")
+    ok(pg.visible(".barra-modulos .gasto-menu", "Gasto del mes"), "el menú lateral trae el gasto del mes")
+    ok(pg.visible(".barra-modulos .boton-modulo", "Configuración"), "y Configuración")
+    for paleta in ("nocturno", "aurora", "brasa", "dia"):
+        pg.js(f"aplicarPaleta('{paleta}');")
+        pg.p.wait_for_timeout(300)
+        pg.captura(f"crearia_inicio_{paleta}", entera=False)
+    pg.js("aplicarPaleta('nocturno');")
+    pg.pulsar(".chip-personalizar")
+    ok(pg.esperar(".arma-tu-panel h2", "Arma tu panel", 5), "«✎ Personalizar panel» abre «Arma tu panel»")
+    ok(pg.p.locator(".interruptor-tarjeta").count() == 12, "con las 12 tarjetas del catálogo")
+    ok(pg.visible(".arma-tu-panel .chip-vista", "Mínima"), "y las cuatro vistas de partida")
+    pg.pulsar('.tarjeta-inicio.editable[data-tarjeta="semana"] button.quitar-tarjeta')
+    ok(not pg.visible('.tarjeta-inicio[data-tarjeta="semana"]'), "✕ quita «Esta semana»")
+    pg.pulsar('.tarjeta-inicio.editable[data-tarjeta="necesitan"] button.tam-boton', "L")
+    ok(pg.visible('.tarjeta-inicio.editable.tam-L[data-tarjeta="necesitan"]'), "S/M/L le cambia el tamaño")
+    orden = lambda: pg.p.evaluate("() => [...document.querySelectorAll('.rejilla-inicio .tarjeta-inicio')].map(t => t.dataset.tarjeta)")
+    antes = orden()
+    pg.p.locator('.tarjeta-inicio.editable[data-tarjeta="recientes"] button[title="Subirla un puesto"]').click()
+    pg.p.wait_for_timeout(500)
+    despues = orden()
+    ok(despues.index("recientes") == antes.index("recientes") - 1, f"↑ la sube un puesto ({despues[:5]})")
+    pg.captura("crearia_personalizar")
+    pg.pulsar(".aviso-editando button", "Listo")
+    pg.p.wait_for_timeout(800)
+    pg.p.reload()
+    pg.p.wait_for_function("() => typeof APP !== 'undefined' && APP.light && APP.light.datos", timeout=30000)
+    pg.js("irAModulo('inicio');")
+    ok(pg.esperar(".tarjeta-inicio.tarjeta-saludo", segundos=10), "tras recargar, el Inicio")
+    ok(not pg.visible('.tarjeta-inicio[data-tarjeta="semana"]') and pg.visible('.tarjeta-inicio.tam-L[data-tarjeta="necesitan"]'),
+       "se recuerda sin «Esta semana» y con «Te necesitan» grande")
+    pg.pulsar(".chip-personalizar")
+    pg.pulsar(".aviso-editando button", "Volver al original")
+    pg.p.wait_for_timeout(1200)
+    ok(pg.esperar('.tarjeta-inicio[data-tarjeta="semana"]', segundos=10), "«Volver al original» la devuelve")
+    ok(pg.p.evaluate("() => localStorage.getItem('inicio.panel')") is None, "y borra lo guardado")
+
+    # el panel, por usuario en el servidor
+    api = datos["api"]
+    r, d = api.put("/api/inicio/panel", {"usuario": "javier", "panel": {"tarjetas": [{"id": "saludo", "tam": "L"}],
+                                                                       "tope_usd": 50}})
+    ok(r.status_code == 200 and d["panel"]["tope_usd"] == 50, "PUT /api/inicio/panel guarda el de un usuario")
+    _r, d = api.get("/api/inicio/panel?usuario=javier")
+    ok(d["panel"]["tarjetas"] == [{"id": "saludo", "tam": "L"}], "y GET lo devuelve")
+    r, _d = api.put("/api/inicio/panel", {"usuario": "javier", "panel": {"tarjetas": [{"id": "nada"}]}})
+    ok(r.status_code == 400, "una tarjeta que no existe es un 400")
+    api.put("/api/inicio/panel", {"usuario": "javier", "panel": None})
+    _r, d = api.get("/api/salud")
+    ok(d.get("version") == "3.1", f"la versión es la 3.1 ({d.get('version')})")
+    _r, d = api.get("/api/sistema/novedades")
+    ok(d.get("version") == "3.1" and "## V3.1" in d.get("texto", ""), "y Novedades empieza por la V3.1")
+    _r, d = api.get("/api/inicio/resumen")
+    ok(isinstance(d.get("gasto_mes_usd"), (int, float)) and d.get("videos", 0) >= 1 and d.get("recientes"),
+       f"/api/inicio/resumen: gasto del mes, vídeos y recientes ({d.get('gasto_mes_usd')}, {d.get('videos')})")
+
+    # EL «?»: el panel de Ayuda, en el apartado de la pantalla
+    pg.pulsar("#btn-ayuda")
+    ok(pg.esperar("#ayuda .ayuda-pantalla h3", "Inicio", 10), "el «?» abre la Ayuda en el apartado de Inicio")
+    ok(pg.esperar("#ayuda .lista-guias button", segundos=10), "con la lista de las guías")
+    ok(pg.visible("#ayuda button", "Guía de inicio") and pg.visible("#ayuda button", "Novedades"),
+       "la guía de inicio y las novedades")
+    ok(pg.p.evaluate("() => document.querySelector('#config').classList.contains('plegado')"),
+       "y sin abrir Configuración")
+    pg.p.locator("#ayuda .lista-guias button").first.click()
+    ok(pg.esperar("#ventana-guia h2", segundos=5), "cada guía se abre")
+    pg.p.keyboard.press("Escape")
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible("#ayuda"), "Escape la cierra")
+    pg.js("irAModulo('automatizar');")
+    pg.pulsar("#btn-ayuda")
+    ok(pg.esperar("#ayuda .ayuda-pantalla h3", "Automatizar", 10), "en Automatizar, el apartado de Automatizar")
+    pg.captura("crearia_ayuda", entera=False)
+    pg.js("conmutarAyuda(false); entrarEnCrear();")
+    pg.pulsar("#btn-ayuda")
+    ok(pg.esperar("#ayuda .ayuda-pantalla", "Qué es una lámina", 10), "y en Crear, el de los estilos")
+    pg.js("conmutarAyuda(false);")
+    pg.sin_errores("el diseño CrearIA")
+    pg.cerrar()
+
+    # LA ENTRADA Y LA NAVEGACIÓN (decisión del dueño, 19-10-2026)
+    pg = Pagina(navegador, datos, nombre="crearia entrada", entrada="inicio")
+    ok(pg.esperar(".tarjeta-inicio.tarjeta-saludo", segundos=10)
+       and pg.p.evaluate("() => MODULOS.actual") == "inicio", "al entrar en el Studio se abre el Inicio")
+    pg.js(f"irAModulo('crear'); await abrirVideoLight('{datos['video']}'); APP.light.video.vista = 'video'; pintarLight();")
+    ok(pg.esperar(".migas-video button", "Mis vídeos", 15), "un vídeo abierto trae su «‹ Mis vídeos» arriba")
+    pg.pulsar(".migas-video button", "Mis vídeos")
+    ok(pg.esperar("h2", "Tus proyectos", 10), "y lleva a Tus proyectos")
+    pg.js("PUB.seccion = 'resultados'; irAModulo('publicar');")
+    ok(pg.esperar(".volver-modulo button", "Volver", 10), "Publicar → Resultados trae «‹ Volver»")
+    pg.pulsar(".volver-modulo button", "Volver")
+    ok(pg.p.evaluate("() => PUB.seccion") == "cola", "que lleva a la cola")
+    pg.pulsar(".volver-modulo button", "Volver")
+    ok(pg.p.evaluate("() => MODULOS.actual") == "inicio", "y desde la cola, al Inicio")
+    pg.js("PAR.seccion = 'marca'; irAModulo('automatizar');")
+    ok(pg.esperar(".volver-modulo button", "Volver", 10), "Automatizar → Marca del cliente trae «‹ Volver»")
+    pg.js(f"irAModulo('crear'); await abrirVideoLight('{datos['video']}'); APP.light.video.vista = 'guion'; pintarLight();")
+    pg.esperar(".migas-video", None, 15)
+    url = pg.p.url
+    salio = False
+    for _ in range(14):
+        try:
+            pg.p.go_back(timeout=5000)
+        except Exception:                                    # noqa: BLE001
+            pass
+        pg.p.wait_for_timeout(700)
+        if not pg.p.url.startswith(datos["url"]):
+            salio = True
+            break
+    ok(not salio, f"catorce «atrás» seguidos no sacan del Studio ({pg.p.url[:60]})")
+    ok(pg.esperar("h2", "Tus proyectos", 5) or pg.esperar(".tarjeta-inicio.tarjeta-saludo", segundos=5),
+       "y se queda en Tus proyectos o en el Inicio")
+    ok(url.startswith(datos["url"]), "(la página es la del Studio)")
+    pg.sin_errores("la entrada y el atrás")
+    pg.cerrar()
+
+    # en el móvil: cabe, y el Inicio y la Ayuda se ven
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="crearia móvil")
+    pg.js("irAModulo('inicio');")
+    ok(pg.esperar(".tarjeta-inicio.tarjeta-saludo", segundos=10), "en el móvil, el Inicio")
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    ok(ancho <= 2, f"cabe en 390 px ({ancho}px)")
+    caja = pg.p.evaluate("() => { const b = document.querySelector('#barra-modulos'); return [b.scrollWidth, b.clientWidth]; }")
+    ok(caja[0] <= caja[1] + 2, f"la barra de módulos cabe entera ({caja})")
+    pg.captura("crearia_inicio_movil")
+    pg.pulsar(".chip-personalizar")
+    pg.p.wait_for_timeout(400)
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    ok(ancho <= 2, f"«Arma tu panel» cabe en el móvil ({ancho}px)")
+    pg.captura("crearia_personalizar_movil")
+    pg.pulsar(".aviso-editando button", "Listo")
+    pg.pulsar("#btn-ayuda")
+    ok(pg.esperar("#ayuda .ayuda-pantalla h3", "Inicio", 10), "y la Ayuda")
+    pg.captura("crearia_ayuda_movil", entera=False)
+    pg.sin_errores("el diseño CrearIA en el móvil")
+    pg.cerrar()
 
 
 if __name__ == "__main__":

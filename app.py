@@ -3874,6 +3874,9 @@ def _correr_catalogo(avisar, ctx, ajuste, peticion):
     # reconocimiento del lugar, que ya era la parte fragil de este modo.
     ficha = catalogo.proponer(bloques, brief=brief, ajuste=ajuste,
                               avisar=avisar, proyecto_id=ctx.id,
+                              # lo que pide el editor: llegaba hasta aqui y no
+                              # se pasaba, asi que el prompt nunca lo veia
+                              peticion=peticion,
                               planos=planos, min_s=min_s, max_s=max_s,
                               # los personajes del canal, que entran en el
                               # reparto ya decididos

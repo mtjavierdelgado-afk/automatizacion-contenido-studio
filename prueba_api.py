@@ -6690,6 +6690,66 @@ def probar_notas_19oct():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_espacio_fijo():
+    """Rama espacio-fijo (20-10-2026): la peticion del catalogo y el ESPACIO FIJO.
+
+    En este proceso y sin el CLI: `_llamar_claude` del catalogo se sustituye por
+    un doble que apunta la instruccion y corta, que es lo que se mira.
+    """
+    seccion("ESPACIO FIJO: LA PETICIÓN LLEGA AL CATÁLOGO")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+
+    catalogo = servidor.PASOS_MODULOS.catalogo_visual
+
+    class _Cortar(Exception):
+        pass
+
+    vistas = []
+
+    def claude_falso(instruccion, *_a, **_k):
+        vistas.append(instruccion)
+        raise _Cortar()
+
+    bloques = [{"id": "B001", "texto": "Entras en la cocina del local.", "personaje": False},
+               {"id": "B002", "texto": "Y sale el pan del horno.", "personaje": False}]
+    base = tempfile.mkdtemp(prefix="estudio_espacio_")
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(base)
+    reales = {"_bloques_del_guion": servidor._bloques_del_guion}
+    real_claude = catalogo._llamar_claude
+    servidor._bloques_del_guion = lambda _ctx: bloques
+    catalogo._llamar_claude = claude_falso
+    try:
+        pid = Proyecto.crear(base, "espacio fijo").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+
+        def proponer(peticion):
+            vistas.clear()
+            try:
+                servidor._correr_catalogo(lambda *_a, **_k: None, ctx,
+                                          {"modelo": "sonnet", "esfuerzo": "medium"},
+                                          peticion)
+            except _Cortar:
+                pass
+            return vistas[0] if vistas else ""
+
+        prompt = proponer("pon todo en la panaderia de la esquina")
+        ok("pon todo en la panaderia de la esquina" in prompt,
+           "CATÁLOGO: la petición del editor llega al prompt (antes se quedaba en "
+           "_correr_catalogo)")
+        ok("LO QUE TE PIDE EL EDITOR" not in proponer(""),
+           "CATÁLOGO: y sin petición el prompt no lleva el bloque")
+    finally:
+        catalogo._llamar_claude = real_claude
+        for nombre, valor in reales.items():
+            setattr(servidor, nombre, valor)
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
     parser.add_argument("--conservar", action="store_true",
@@ -6779,6 +6839,7 @@ def main():
         probar_lo_de_v2h()
         probar_notas_19oct()
         probar_cancelar_en_el_taller()
+        probar_espacio_fijo()
     finally:
         parar(proceso)
         if not argumentos.conservar:

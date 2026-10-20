@@ -14,6 +14,23 @@ vídeos, estilos, claves y contraseña no se tocan.
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
+**Arreglos del 19 de octubre (segunda tanda)**
+- **La pantalla ya no salta arriba** al terminar un remontaje, al «Traer» los
+  cambios del estilo ni al cambiar el proyecto, los días o el mes en Publicar →
+  Resultados: se queda donde estabas. Ir a otra pantalla sí empieza arriba.
+- **En el Encargo, varios cambios del montaje y un solo montaje.** La música,
+  cuánto se oye, su volumen, los efectos, el logo, los subtítulos y el
+  movimiento se guardan sin montar, y sale la franja «Hay cambios del montaje
+  sin aplicar · **Aplicar y volver a montar**». Ya no sale «el vídeo se está
+  montando ahora» al tocar la segunda cosa. Si lo cambiado es solo sonido o
+  logo, se vuelve a mezclar en segundos, sin rehacer ningún plano. En la
+  pantalla Vídeo cada cambio sigue montando al momento, como antes.
+- **«Parar» un montaje para en el acto.** El botón dice «Cancelando…» y se
+  apaga; antes esperaba a que terminara la mezcla (medio minuto, o más con el
+  logo). Al parar, el vídeo sigue siendo el de antes, no queda ningún trozo a
+  medias, y el cambio sigue guardado: **«Regenerar Vídeo» lo aplica volviendo a
+  mezclar** (segundos), no renderizando otra vez todos los planos.
+
 **El nuevo diseño: CrearIA Studio (19 de octubre)**
 - **Se llama CrearIA Studio · Automatización de contenido**, con logo nuevo: la
   C de Crear con el bucle dentro y un «play». El favicon es el mismo dibujo. Por
@@ -61,23 +78,6 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   agencia.redes.botanica@gmail.com).
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
-
-**Arreglos del 19 de octubre (segunda tanda)**
-- **La pantalla ya no salta arriba** al terminar un remontaje, al «Traer» los
-  cambios del estilo ni al cambiar el proyecto, los días o el mes en Publicar →
-  Resultados: se queda donde estabas. Ir a otra pantalla sí empieza arriba.
-- **En el Encargo, varios cambios del montaje y un solo montaje.** La música,
-  cuánto se oye, su volumen, los efectos, el logo, los subtítulos y el
-  movimiento se guardan sin montar, y sale la franja «Hay cambios del montaje
-  sin aplicar · **Aplicar y volver a montar**». Ya no sale «el vídeo se está
-  montando ahora» al tocar la segunda cosa. Si lo cambiado es solo sonido o
-  logo, se vuelve a mezclar en segundos, sin rehacer ningún plano. En la
-  pantalla Vídeo cada cambio sigue montando al momento, como antes.
-- **«Parar» un montaje para en el acto.** El botón dice «Cancelando…» y se
-  apaga; antes esperaba a que terminara la mezcla (medio minuto, o más con el
-  logo). Al parar, el vídeo sigue siendo el de antes, no queda ningún trozo a
-  medias, y el cambio sigue guardado: **«Regenerar Vídeo» lo aplica volviendo a
-  mezclar** (segundos), no renderizando otra vez todos los planos.
 
 **Tus notas del 19 de octubre**
 - **«Crear» abre siempre «Tus proyectos»**, desde la barra de arriba y desde

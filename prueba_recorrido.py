@@ -5232,5 +5232,85 @@ def publicar_notas_del_19_10(navegador, datos):
     tocar_ficha(lambda g: g.update(envios=[]))
 
 
+# ------------------------------------------------------- arreglos-19oct (segunda tanda)
+
+#: Dónde está el scroll de cada caja que lo lleva (la ventana no se mueve nunca).
+SCROLL = "(() => ({panel: ($('#panel')||{}).scrollTop, modulo: ($('#modulo')||{}).scrollTop}))()"
+
+
+@escenario
+def la_pantalla_no_salta(navegador, datos):
+    """Notas del dueño del 19-10: al terminar un remontaje lanzado desde el
+    Encargo, al «Traer» el estilo y al cambiar los días de Resultados, la
+    pantalla volvía arriba del todo. El scroll se conserva (±20 px)."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.p.wait_for_timeout(1500)
+    pg.js("APP.light.video.vista = 'encargo_video'; pintarLight();")
+    ok(pg.esperar(".fila-ajuste", "Música", 20), "SCROLL: el Encargo enseña los ajustes del montaje")
+
+    # 1) el Encargo bajado, se cambia la música y se espera al montaje
+    pg.p.locator(".fila-ajuste").filter(has_text="Música").locator(".fila-ajuste-cab button").first.click()
+    pg.p.wait_for_timeout(600)
+    boton = ("() => [...document.querySelectorAll('.editor-ajuste .herramientas button')]"
+             ".find(x => x.innerText.trim() === 'Suave')")
+    pg.p.evaluate(f"() => ({boton})().scrollIntoView({{block: 'center'}})")
+    pg.p.wait_for_timeout(500)
+    antes = pg.p.evaluate(SCROLL)["panel"]
+    pg.p.evaluate(f"() => ({boton})().click()")
+    pg.p.wait_for_timeout(1500)
+    pg.sin_trabajo()
+    pg.p.wait_for_timeout(2500)
+    despues = pg.p.evaluate(SCROLL)["panel"]
+    ok(antes > 100 and abs(despues - antes) <= 20,
+       f"SCROLL: tras el montaje lanzado desde el Encargo, la pantalla sigue donde estaba ({antes} → {despues})")
+
+    # 2) «Traer» del estilo (el vídeo de prueba, como uno de verdad, ya tiene
+    # algo del estilo sin traer; si no, se le cambian los rótulos al estilo)
+    _r, cambios = api.get(f"/api/proyectos/{pid}/estilo/cambios")
+    if not any(p.get("cambia") for p in cambios.get("partes") or []):
+        api.put(f"/api/presets-light/{datos['preset']}", {"instrucciones": "Cercano y con humor."})
+    pg.js("await recargarVideoAbierto(); APP.light.video.vista = 'encargo_video'; pintarLight();")
+    pg.p.wait_for_timeout(3000)
+    hay = pg.p.evaluate("() => { const c = document.querySelector('.estilo-del-video input[type=checkbox]');"
+                        " if (!c) return false; if (!c.checked) c.click(); return true; }")
+    ok(hay, "SCROLL: «Su estilo» ofrece algo que traer")
+    if hay:
+        pg.p.wait_for_timeout(600)
+        pg.p.evaluate("() => document.querySelector('.estilo-del-video').scrollIntoView({block: 'center'})")
+        pg.p.wait_for_timeout(500)
+        antes = pg.p.evaluate(SCROLL)["panel"]
+        pg.p.evaluate("() => [...document.querySelectorAll('.estilo-del-video button')]"
+                      ".find(b => /Traer/.test(b.innerText)).click()")
+        pg.p.wait_for_timeout(3500)
+        despues = pg.p.evaluate(SCROLL)["panel"]
+        ok(antes > 100 and abs(despues - antes) <= 20,
+           f"SCROLL: «Traer» del estilo no sube la pantalla ({antes} → {despues})")
+
+    # 3) Publicar → Resultados → los días
+    pg.js("irAModulo('publicar'); irASeccionPublicar('resultados');")
+    pg.p.wait_for_timeout(3000)
+    pg.p.evaluate("() => { const m = $('#modulo'); m.scrollTop = Math.min(400, m.scrollHeight - m.clientHeight); }")
+    pg.p.wait_for_timeout(400)
+    antes = pg.p.evaluate(SCROLL)["modulo"]
+    pg.p.evaluate("""() => { const s = [...document.querySelectorAll('#modulo select')]
+      .find(y => [...y.options].some(o => /días/.test(o.text)));
+      s.selectedIndex = (s.selectedIndex + 1) % s.options.length;
+      s.dispatchEvent(new Event('change', {bubbles: true})); }""")
+    pg.p.wait_for_timeout(3000)
+    despues = pg.p.evaluate(SCROLL)["modulo"]
+    ok(antes > 100 and abs(despues - antes) <= 20,
+       f"SCROLL: cambiar los días de Resultados no sube la pantalla ({antes} → {despues})")
+    # ir a otra sección sí va arriba
+    pg.js("irASeccionPublicar('cola');")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.p.evaluate(SCROLL)["modulo"] < 5, "SCROLL: ir a otra sección sí empieza arriba")
+    pg.sin_errores("la pantalla no salta")
+    pg.cerrar()
+
+
 if __name__ == "__main__":
     sys.exit(main())

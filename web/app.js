@@ -1909,7 +1909,7 @@ async function irA(pestana, sinHistorial) {
     history.pushState({ pestana }, '', `#${pestana}`);
   }
   pintarPestanas();
-  $('#panel').scrollTop = 0;
+  subirArriba('panel');
   await refrescarPestana(pestana);
 }
 
@@ -5277,8 +5277,66 @@ function pintarLight() {
     pintarLightAhora();
   } finally {
     devolverFoco(foco);
+    devolverScroll('panel', claveScrollCrear);
   }
   apuntarSitioEnHistoria();
+}
+
+/* ==================================== LA PANTALLA NO SALTA (19-10-2026)
+ *
+ * Quien hace scroll es `#panel` (Crear) o `#modulo` (los módulos); la ventana
+ * nunca. Repintar entero en el acto conserva el scroll, pero en cuanto un
+ * repintado espera a la red con la pantalla a medio pintar («abriendo el
+ * vídeo…», «cargando…») el contenido mide casi nada, el navegador baja el
+ * scroll a 0 y al volver el contenido ya no sube solo: al terminar un
+ * remontaje, al «Traer» el estilo o al cambiar los días de Resultados se
+ * volvía arriba del todo (notas del dueño del 19-10).
+ *
+ * La memoria es UNA por caja: el último sitio en el que se movió y a qué
+ * altura. Se apunta al hacer scroll SOLO si hay un sitio (mientras se carga no
+ * lo hay: `sitioActual` da null y `claveScrollModulo` da '') y se devuelve al
+ * acabar de pintar si el sitio es el mismo. Ir a otro sitio a propósito pasa
+ * por `subirArriba`, que además la olvida: si no, volver al mismo sitio
+ * devolvería la altura de antes encima del «arriba» que se pidió. */
+const MEMORIA_SCROLL = {};
+
+function vigilarScroll(id, clave) {
+  const caja = document.getElementById(id);
+  if (!caja || caja.dataset.vigilaScroll) return;
+  caja.dataset.vigilaScroll = '1';
+  caja.addEventListener('scroll', () => {
+    const c = clave();
+    if (c) MEMORIA_SCROLL[id] = { clave: c, top: caja.scrollTop };
+  }, { passive: true });
+}
+
+function devolverScroll(id, clave) {
+  vigilarScroll(id, clave);
+  const caja = document.getElementById(id);
+  const m = MEMORIA_SCROLL[id];
+  if (!caja || !m) return;
+  const c = clave();
+  if (!c || c !== m.clave) return;
+  if (Math.abs(caja.scrollTop - m.top) > 1) caja.scrollTop = m.top;
+}
+
+function subirArriba(id) {
+  const caja = document.getElementById(id);
+  if (caja) caja.scrollTop = 0;
+  delete MEMORIA_SCROLL[id];
+}
+
+function claveScrollCrear() {
+  if (MODULOS.actual !== 'crear') return '';
+  const s = sitioActual();
+  return s ? JSON.stringify(s) : '';
+}
+
+function claveScrollModulo() {
+  if (MODULOS.actual === 'crear') return '';
+  if (MODULOS.actual === 'publicar' && PUB.cargando) return '';
+  return JSON.stringify([MODULOS.actual, PUB.seccion || '', PUB.pid || '', !!PUB.verInforme,
+    MODULOS.actual === 'automatizar' ? (PAR.seccion || '') : '']);
 }
 
 /* ==================================== EL BOTÓN «ATRÁS» DEL MÓVIL (N3, el resto)
@@ -5649,7 +5707,7 @@ function irALight(vista, extra) {
       && !APP.light.desdeVideo) {
     APP.light.desdeVideo = desde;
   }
-  $('#panel').scrollTop = 0;
+  subirArriba('panel');
   pintarLight();
 }
 
@@ -5734,7 +5792,7 @@ function apuntarClienteDe(cid) {
 
 function elegirCliente(cid) {
   apuntarCliente(cid);
-  $('#panel').scrollTop = 0;
+  subirArriba('panel');
   pintarLight();
 }
 
@@ -6554,9 +6612,17 @@ async function cargarVideoLight(pid) {
     ajustes.animoPedido = '';
     ajustes.dbEnVuelo = undefined;
   }
-  v.cargando = true;
+  /* EL VÍDEO QUE YA ESTÁ ABIERTO SE RELEE SIN TAPARLO (19-10-2026). Pintar
+     «abriendo el vídeo…» mientras llega lo nuevo dejaba la pantalla sin
+     contenido un instante y el scroll caía a 0: al acabar un remontaje o al
+     «Traer» el estilo se volvía arriba del todo. Se queda la vista de antes
+     hasta que llega la de ahora; abrir OTRO vídeo sí avisa. */
+  const releer = v.cargadoDe === pid && !v.cargando && !v.error && !!v.vista;
   v.error = '';
-  pintarLight();
+  if (!releer) {
+    v.cargando = true;
+    pintarLight();
+  }
   try {
     const proyecto = await pedir(API.proyecto(pid));
     /* lo que se estaba viendo de OTRO vídeo no se queda en este. Contra
@@ -18700,8 +18766,7 @@ function entrarEnCrear() {
      segundo pintado apilaba otra entrada y «atrás» no volvía al módulo. */
   APP.light.vista = 'galeria';
   APP.light.desdeVideo = '';
-  const panel = $('#panel');
-  if (panel) panel.scrollTop = 0;
+  subirArriba('panel');
   irAModulo('crear');
   cargarGaleriaLight(true);
 }
@@ -18728,8 +18793,7 @@ function irAModulo(nombre, opciones) {
     pintarLight();
     return;
   }
-  const m = $('#modulo');
-  if (m) m.scrollTop = 0;
+  subirArriba('modulo');
   if (nombre === 'publicar') cargarPublicar();
   else if (nombre === 'inicio') cargarInicioModulos();
   else pintarModulo();
@@ -18770,11 +18834,12 @@ function pintarModulo() {
   if (foco) {
     const campo = m.querySelector(`[data-foco="${foco}"]`);
     if (campo) {
-      campo.focus();
+      campo.focus({ preventScroll: true });
       // el cursor, al final: si no, buscar letra a letra escribía al revés
       try { if (campo.setSelectionRange && /^(text|search)$/.test(campo.type)) campo.setSelectionRange(campo.value.length, campo.value.length); } catch (e) { /* no aplica */ }
     }
   }
+  devolverScroll('modulo', claveScrollModulo);
 }
 
 /* -------------------------------------------------------------- INICIO */
@@ -20739,9 +20804,9 @@ function seccionResultadosPublicar() {
   const caja = h('div', { clase: 'resultados-publicar' });
   const proyectos = ((PUB.proyectos || {}).proyectos || []);
   caja.appendChild(h('div', { clase: 'fila' },
-    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; PUB.resultados = null; PUB.mejores = null; cargarPublicar(); } },
+    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; cargarPublicar(); } },
       ...proyectos.map(x => h('option', { value: x.id, selected: x.id === PUB.proyectoResultados }, x.nombre))),
-    h('select', { onchange: ev => { PUB.diasResultados = Number(ev.target.value); PUB.resultados = null; PUB.mejores = null; cargarPublicar(); } },
+    h('select', { onchange: ev => { PUB.diasResultados = Number(ev.target.value); cargarPublicar(); } },
       ...[[7, 'últimos 7 días'], [30, 'últimos 30 días'], [90, 'últimos 90 días']].map(([v, t]) =>
         h('option', { value: v, selected: (PUB.diasResultados || 30) === v }, t))),
     h('span', { clase: 'crece' }),
@@ -21537,8 +21602,7 @@ function elegirProyectoParrilla(cid) {
 
 function irASeccionParrilla(seccion) {
   PAR.seccion = seccion;
-  const m = $('#modulo');
-  if (m) m.scrollTop = 0;
+  subirArriba('modulo');
   pintarModulo();
 }
 
@@ -23258,10 +23322,10 @@ function seccionInformePublicar() {
   const proyectos = ((PUB.proyectos || {}).proyectos || []);
   caja.appendChild(h('div', { clase: 'fila no-imprimir' },
     h('button', { clase: 'mini fantasma', onclick: () => { PUB.verInforme = false; pintarModulo(); } }, '← Resultados'),
-    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; PUB.informe = null; PUB.resultados = null; cargarPublicar(); } },
+    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; cargarPublicar(); } },
       ...proyectos.map(x => h('option', { value: x.id, selected: x.id === PUB.proyectoResultados }, x.nombre))),
-    r && (r.meses || []).length ? h('select', { onchange: ev => { PUB.mesInforme = ev.target.value; PUB.informe = null; cargarPublicar(); } },
-      ...r.meses.map(m => h('option', { value: m, selected: m === r.mes }, m))) : null,
+    r && (r.meses || []).length ? h('select', { onchange: ev => { PUB.mesInforme = ev.target.value; cargarPublicar(); } },
+      ...r.meses.map(m => h('option', { value: m, selected: m === (PUB.mesInforme || r.mes) }, m))) : null,
     h('span', { clase: 'crece' }),
     h('button', { clase: 'mini', disabled: !r || !!r.error, onclick: () => copiarTexto(r.resumen) }, 'Copiar resumen'),
     h('button', { clase: 'mini primario', disabled: !r || !!r.error, onclick: () => window.print() }, 'Imprimir o guardar en PDF')));

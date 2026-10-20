@@ -10,6 +10,18 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Arreglos del 19 de octubre (segunda tanda)**
+- **La pantalla ya no salta arriba** al terminar un remontaje, al «Traer» los
+  cambios del estilo ni al cambiar el proyecto, los días o el mes en Publicar →
+  Resultados: se queda donde estabas. Ir a otra pantalla sí empieza arriba.
+- **En el Encargo, varios cambios del montaje y un solo montaje.** La música,
+  cuánto se oye, su volumen, los efectos, el logo, los subtítulos y el
+  movimiento se guardan sin montar, y sale la franja «Hay cambios del montaje
+  sin aplicar · **Aplicar y volver a montar**». Ya no sale «el vídeo se está
+  montando ahora» al tocar la segunda cosa. Si lo cambiado es solo sonido o
+  logo, se vuelve a mezclar en segundos, sin rehacer ningún plano. En la
+  pantalla Vídeo cada cambio sigue montando al momento, como antes.
+
 **Tus notas del 19 de octubre**
 - **«Crear» abre siempre «Tus proyectos»**, desde la barra de arriba y desde
   la tarjeta de Inicio, aunque hubieras dejado un vídeo abierto. El «atrás»

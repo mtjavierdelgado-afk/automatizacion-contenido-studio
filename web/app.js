@@ -16511,7 +16511,10 @@ function bloqueLlevaDelVideo() {
         cargar();
       }
     }));
-    caja.appendChild(ajustesDelMontaje({ tipo: 'video', pid: v.pid }, v.lleva));
+    /* EN EL ENCARGO SE GUARDA SIN MONTAR (`diferir`, 19-10-2026): se tocan
+       varias cosas seguidas y se montan todas a la vez con «Aplicar y volver
+       a montar». La pantalla Vídeo sigue montando con cada cambio. */
+    caja.appendChild(ajustesDelMontaje({ tipo: 'video', pid: v.pid, diferir: true }, v.lleva));
   };
   const cargar = async () => {
     await leerLlevaDelVideo(v);
@@ -16641,6 +16644,8 @@ function ajustesDelMontaje(modo, lleva) {
     vaciar(caja);
     caja.appendChild(h('div', { clase: 'ajustes-cab' }, h('b', {}, 'Ajustes del montaje'),
       h('span', { clase: 'meta' }, ' · todo automático si no tocas nada; nada de esto paga imágenes')));
+    const franja = franjaSinAplicar(modo, est);
+    if (franja) caja.appendChild(franja);
     if (lleva.musica !== false) caja.appendChild(filaAjuste(modo, est, 'musica', pintar));
     if (lleva.subtitulos !== false) caja.appendChild(filaAjuste(modo, est, 'subtitulos', pintar));
     caja.appendChild(filaAjuste(modo, est, 'logo', pintar));
@@ -16660,6 +16665,38 @@ function ajustesDelMontaje(modo, lleva) {
   }
   pintar();
   return caja;
+}
+
+/* «Hay cambios del montaje sin aplicar» (solo en el Encargo, `diferir`): lo
+   guardado con `remontar: false` se monta todo de una vez. El servidor decide
+   si basta con volver a mezclar (segundos) o hay que rehacer capas y montaje. */
+function franjaSinAplicar(modo, est) {
+  if (!modo.diferir || modo.tipo !== 'video') return null;
+  const montaje = est.montaje || {};
+  if (!montaje.montado || !(est.sinAplicar || montaje.sin_aplicar)) return null;
+  const enMarcha = !!trabajoVideoLight();
+  return h('div', { clase: 'franja-sin-aplicar' },
+    h('span', { clase: 'crece' }, enMarcha ? 'Montando el vídeo con tus cambios…'
+      : 'Hay cambios del montaje sin aplicar'),
+    h('button', {
+      clase: 'mini primario', disabled: enMarcha || !!est.aplicando,
+      title: 'Monta el vídeo una sola vez con todo lo cambiado: ninguna imagen, gratis',
+      onclick: () => aplicarMontajePendiente(modo, est),
+    }, est.aplicando ? 'Aplicando…' : 'Aplicar y volver a montar'));
+}
+
+async function aplicarMontajePendiente(modo, est) {
+  est.aplicando = true;
+  if (est.repintar) est.repintar();
+  try {
+    const r = await pedir(`${API.proyecto(modo.pid)}/montaje/aplicar`, { method: 'POST' });
+    est.sinAplicar = false;
+    if (est.montaje) { est.montaje.sin_aplicar = false; est.montaje.pendiente = false; }
+    if (est.subtitulos) est.subtitulos.pendiente = false;
+    avisoDeMontaje(r, r.solo_mezcla ? 'Cambios del montaje (solo la mezcla)' : 'Cambios del montaje');
+  } catch (e) { toast(e.message, true); }
+  est.aplicando = false;
+  if (est.repintar) est.repintar();
 }
 
 async function cargarAjustesVideo(modo, est) {
@@ -16778,7 +16815,15 @@ function resumenAjuste(modo, est, cual) {
 }
 
 /* Lo que devuelve la API al cambiar algo que vuelve a montar el vídeo. */
-function avisoDeMontaje(r, quePasa) {
+function avisoDeMontaje(r, quePasa, modo) {
+  if (modo && modo.diferir && !(r && r.trabajo_id)) {
+    // el Encargo: guardado, y se aplica con lo demás en un solo montaje
+    const est = estadoAjustes(modo);
+    est.sinAplicar = true;
+    toast(`${quePasa}: guardado. Se aplica con «Aplicar y volver a montar»`);
+    if (est.repintar) est.repintar();
+    return;
+  }
   if (r && r.trabajo_id) {
     toast(`${quePasa}: volviendo a montar el vídeo, sin dibujar nada`);
     seguirTrabajo(CLAVE_VIDEO_LIGHT, r.trabajo_id, async trabajo => {
@@ -16808,9 +16853,9 @@ function editorMusica(modo, est, repintar) {
       if (borrador) { op.presencia = n.id; repintar(); return; }
       try {
         const r = await pedir(`${API.proyecto(modo.pid)}/musica/presencia`,
-          { method: 'PUT', cuerpo: { presencia: n.id } });
+          { method: 'PUT', cuerpo: { presencia: n.id, remontar: !modo.diferir } });
         est.musica.presencia = Object.assign({}, est.musica.presencia, { presencia: r.presencia, elegida: true });
-        if (r.cambiado) avisoDeMontaje(r, 'Música');
+        if (r.cambiado) avisoDeMontaje(r, 'Música', modo);
       } catch (e) { toast(e.message, true); }
       repintar();
     },
@@ -16849,10 +16894,10 @@ function editorMusica(modo, est, repintar) {
     }
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/sonido`, {
-        method: 'PUT', cuerpo: { musica: nuevo || {}, remontar: true } });
+        method: 'PUT', cuerpo: { musica: nuevo || {}, remontar: !modo.diferir } });
       est.musica.tema = nuevo || null;
       if (!nuevo) est.busqueda.abierta = false;
-      avisoDeMontaje(r, nuevo ? 'Música' : 'Música automática');
+      avisoDeMontaje(r, nuevo ? 'Música' : 'Música automática', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   }
@@ -16898,9 +16943,9 @@ function volumenFinoMusica(modo, est, repintar) {
     }
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/sonido`, {
-        method: 'PUT', cuerpo: { musica_db: valor, remontar: true } });
+        method: 'PUT', cuerpo: { musica_db: valor, remontar: !modo.diferir } });
       est.musica.db = valor;
-      if (r.cambiado !== false) avisoDeMontaje(r, 'Volumen de la música');
+      if (r.cambiado !== false) avisoDeMontaje(r, 'Volumen de la música', modo);
     } catch (e) { toast(e.message, true); }
     est.dbEnVuelo = undefined;
     repintar();
@@ -17096,17 +17141,17 @@ function editorEfectos(modo, est, repintar) {
   const volumen = async nivel => {
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/sonido/efectos/volumen`, {
-        method: 'PUT', cuerpo: { nivel } });
+        method: 'PUT', cuerpo: { nivel, remontar: !modo.diferir } });
       est.efectosVolumen = r.nivel;
-      if (r.cambiado) avisoDeMontaje(r, 'Volumen de los efectos');
+      if (r.cambiado) avisoDeMontaje(r, 'Volumen de los efectos', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   };
   const vetar = async (papel, ef, quitar) => {
     try {
       const r = await pedir(API.sonidoVetados(modo.pid), {
-        method: 'POST', cuerpo: { efecto: ef, papel, quitar: !!quitar, remontar: true } });
-      avisoDeMontaje(r, quitar ? 'Efecto devuelto' : 'Efecto descartado');
+        method: 'POST', cuerpo: { efecto: ef, papel, quitar: !!quitar, remontar: !modo.diferir } });
+      avisoDeMontaje(r, quitar ? 'Efecto devuelto' : 'Efecto descartado', modo);
     } catch (e) { toast(e.message, true); }
     await releer();
   };
@@ -17132,11 +17177,11 @@ function editorEfectos(modo, est, repintar) {
   const fijar = async (papel, ficha) => {
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/sonido/efecto`, {
-        method: 'PUT', cuerpo: { papel, efecto: ficha || null, remontar: true } });
+        method: 'PUT', cuerpo: { papel, efecto: ficha || null, remontar: !modo.diferir } });
       est.fijos = r.fijos || [];
       est.efectos = Object.assign({}, est.efectos, { [papel]: r.efectos || [] });
       if (ficha) bf.papel = '';
-      avisoDeMontaje(r, ficha ? 'Efecto' : 'Efecto automático');
+      avisoDeMontaje(r, ficha ? 'Efecto' : 'Efecto automático', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   };
@@ -17244,10 +17289,11 @@ function editorSubtitulos(modo, est, repintar) {
       return;
     }
     try {
-      await pedir(`${API.proyecto(modo.pid)}/subtitulos`, { method: 'PUT', cuerpo: cambios });
+      const r = await pedir(`${API.proyecto(modo.pid)}/subtitulos`, { method: 'PUT', cuerpo: cambios });
       est.subtitulos = await pedir(`${API.proyecto(modo.pid)}/subtitulos`);
+      if (modo.diferir && r.cambiado) est.sinAplicar = true;
     } catch (e) { toast(e.message, true); }
-    repintar();
+    if (modo.diferir && est.repintar) est.repintar(); else repintar();
   };
   const filaDe = (etiqueta, opciones, valor, clave, ayuda) => h('div', { clase: 'campo' },
     h('label', {}, etiqueta),
@@ -17278,7 +17324,9 @@ function editorSubtitulos(modo, est, repintar) {
     pie.appendChild(h('button', { clase: 'mini', onclick: () => cambiar({ automatico: true }) },
       'Volver a los del estilo'));
   }
-  if (!borrador && actual.montado && actual.pendiente) {
+  if (!borrador && modo.diferir && actual.montado && actual.pendiente) {
+    pie.appendChild(h('span', { clase: 'meta' }, 'se aplican con «Aplicar y volver a montar», arriba'));
+  } else if (!borrador && actual.montado && actual.pendiente) {
     pie.appendChild(h('button', {
       clase: 'mini primario',
       onclick: async () => {
@@ -17487,8 +17535,9 @@ function editorMontaje(modo, est, repintar) {
       if (transiciones) cuerpo.transiciones = transiciones;
       est.montaje = await pedir(`${API.proyecto(modo.pid)}/montaje`, { method: 'PUT', cuerpo });
       MONTAJE_PLANOS.datos = null;   // «Como el vídeo (…)» dice el de ahora
+      if (modo.diferir && est.montaje.cambiado) est.sinAplicar = true;
     } catch (err) { toast(err.message, true); }
-    repintar();
+    if (modo.diferir && est.repintar) est.repintar(); else repintar();
   };
   const botones = (lista, valor, clave) => h('div', { clase: 'herramientas' },
     ...lista.map(([id, nombre]) => h('button', {
@@ -17540,6 +17589,8 @@ function editorMontaje(modo, est, repintar) {
     pie.appendChild(h('span', { clase: 'meta' }, esCortoElEncargo(modo.e, datos)
       ? 'Automático en un vídeo de hasta 2 minutos: vivo, subtítulos de redes, gancho, cifras y barra.'
       : 'Automático en un vídeo largo: lo de siempre.'));
+  } else if (modo.diferir && est.montaje.montado && est.montaje.pendiente) {
+    pie.appendChild(h('span', { clase: 'meta' }, 'se aplica con «Aplicar y volver a montar», arriba'));
   } else if (est.montaje.montado && est.montaje.pendiente) {
     pie.appendChild(h('button', {
       clase: 'mini primario',
@@ -17804,9 +17855,10 @@ function editorLogo(modo, est, repintar) {
         op.logo = Object.assign({ posicion: 'arriba_derecha', tamano: 0.12, opacidad: 0.9 },
           op.logo || {}, { fichero: r.nombre });
       } else {
-        const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'POST', cuerpo });
+        const r = await pedir(`${API.proyecto(modo.pid)}/logo${modo.diferir ? '?remontar=0' : ''}`,
+          { method: 'POST', cuerpo });
         est.logo = r.logo;
-        avisoDeMontaje(r, 'Logo');
+        avisoDeMontaje(r, 'Logo', modo);
       }
     } catch (e) { toast(e.message, true); }
     repintar();
@@ -17814,18 +17866,20 @@ function editorLogo(modo, est, repintar) {
   async function usarDelProyecto() {
     if (borrador) { op.logo = null; delete op.logo; repintar(); return; }
     try {
-      const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'PUT', cuerpo: { usar: delProyecto.logo } });
+      const r = await pedir(`${API.proyecto(modo.pid)}/logo`,
+        { method: 'PUT', cuerpo: { usar: delProyecto.logo, remontar: !modo.diferir } });
       est.logo = r.logo;
-      avisoDeMontaje(r, 'Logo');
+      avisoDeMontaje(r, 'Logo', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   }
   async function quitar() {
     if (borrador) { op.logo = false; repintar(); return; }
     try {
-      const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'PUT', cuerpo: { quitar: true } });
+      const r = await pedir(`${API.proyecto(modo.pid)}/logo`,
+        { method: 'PUT', cuerpo: { quitar: true, remontar: !modo.diferir } });
       est.logo = null;
-      avisoDeMontaje(r, 'Logo quitado');
+      avisoDeMontaje(r, 'Logo quitado', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   }
@@ -17836,9 +17890,10 @@ function editorLogo(modo, est, repintar) {
       return;
     }
     try {
-      const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'PUT', cuerpo: cambios });
+      const r = await pedir(`${API.proyecto(modo.pid)}/logo`,
+        { method: 'PUT', cuerpo: Object.assign({ remontar: !modo.diferir }, cambios) });
       est.logo = r.logo || est.logo;
-      if (r.trabajo_id || r.montado !== undefined) avisoDeMontaje(r, 'Logo');
+      if (r.trabajo_id || r.montado !== undefined) avisoDeMontaje(r, 'Logo', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   }

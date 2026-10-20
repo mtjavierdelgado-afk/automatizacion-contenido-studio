@@ -6690,6 +6690,99 @@ def probar_notas_19oct():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def _video_montado_de_prueba(servidor, base, nombre):
+    """Un vídeo con todos los pasos hechos y su MP4: «montado y al día»."""
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    from nucleo.estado import PASOS                           # noqa: PLC0415
+    pid = Proyecto.crear(base, nombre).id
+    estado = Estado(servidor.contexto(pid).proyecto)
+    for paso in PASOS:
+        estado.completar(paso["id"], {})
+    proyecto = servidor.contexto(pid).proyecto
+    ruta = proyecto.ruta_paso("render", proyecto.version_activa("render"))
+    with open(os.path.join(ruta, "video.mp4"), "wb") as fh:
+        fh.write(b"mp4 de mentira")
+    return pid
+
+
+def probar_cambios_del_encargo_un_montaje():
+    """Arreglos del 19-10 (2): en el Encargo se tocan varias cosas del montaje
+    seguidas sin montar (`remontar: false`), queda la marca «sin aplicar» fuera
+    de los params, y «Aplicar y volver a montar» lanza UN trabajo: si lo
+    pendiente es solo la mezcla, `solo_montar`; si no, capas y montaje."""
+    seccion("ARREGLOS 19-10: VARIOS CAMBIOS DEL ENCARGO, UN SOLO MONTAJE")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_encargo_")
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(base)
+    lanzados, corridos = [], []
+    guardado = (servidor.lanzar_paso, servidor._correr_rehacer_montaje)
+    # un trabajo de verdad en el gestor, que no hace nada: se mira qué se pide
+    servidor.lanzar_paso = (lambda ctx, paso, unidades, **kw:
+                            lanzados.append((paso, kw.get("opciones")))
+                            or ctx.gestor.lanzar("falso", lambda avisar: {}, paso=paso))
+    servidor._correr_rehacer_montaje = (lambda avisar, ctx, tareas, solo_montar=False:
+                                        corridos.append((list(tareas), solo_montar)))
+    try:
+        pid = _video_montado_de_prueba(servidor, base, "encargo diferido")
+        ctx = servidor.contexto(pid)
+        igual(ctx.estado.estado_de("render"), "listo", "el vídeo de prueba está montado y al día")
+        firma = ctx.estado.firma("render")
+        r1 = servidor.cambiar_presencia_musica(pid, {"presencia": "alta", "remontar": False})
+        r2 = servidor.guardar_sonido(pid, {"musica_db": -3, "remontar": False})
+        r3 = servidor.cambiar_volumen_efectos(pid, {"nivel": "altos", "remontar": False})
+        igual((r1.get("trabajo_id"), r2.get("trabajo_id"), r3.get("trabajo_id"), lanzados),
+              (None, None, None, []),
+              "tres cambios seguidos con `remontar: false`: ningún trabajo (y ningún 409)")
+        ctx = servidor.contexto(pid)
+        ok("montaje_pendiente" in ctx.proyecto.config,
+           "queda la marca «sin aplicar» en proyecto.json")
+        ok(all("montaje_pendiente" not in (ctx.estado.params(p) or {})
+               for p in ("callouts", "render")),
+           "y FUERA de los params: no entra en ninguna firma")
+        leido = servidor.leer_montaje(pid)
+        igual((leido.get("sin_aplicar"), leido.get("solo_mezcla")), (True, True),
+              "GET /montaje dice «sin aplicar» y que basta con volver a mezclar")
+        respuesta = servidor.aplicar_montaje(pid)
+        time.sleep(0.5)
+        igual((lanzados, corridos), ([("render", {"solo_montar": True})], []),
+              "«Aplicar» lanza UN trabajo y solo vuelve a mezclar (`solo_montar`)")
+        igual(respuesta.get("solo_mezcla"), True, "y lo dice")
+        ok(not servidor.leer_montaje(pid).get("sin_aplicar"), "y la marca se va")
+        ok(ctx.estado.firma("render") != firma, "(el cambio sí está guardado en el render)")
+
+        # un cambio que toca las capas (los subtítulos): capas y montaje
+        lanzados.clear()
+        pid2 = _video_montado_de_prueba(servidor, base, "encargo con subtitulos")
+        servidor.guardar_sonido(pid2, {"musica_db": 2, "remontar": False})
+        servidor.cambiar_subtitulos(pid2, {"tam": "grande"})
+        leido = servidor.leer_montaje(pid2)
+        igual((leido.get("sin_aplicar"), leido.get("solo_mezcla")), (True, False),
+              "con los subtítulos cambiados ya no es solo mezcla")
+        respuesta = servidor.aplicar_montaje(pid2)
+        time.sleep(0.5)
+        igual((lanzados, corridos), ([], [(["callouts", "render"], False)]),
+              "y «Aplicar» rehace capas y montaje en un solo trabajo")
+
+        # un efecto vetado no toca params: la marca pide mezclar igual
+        lanzados.clear()
+        corridos.clear()
+        pid3 = _video_montado_de_prueba(servidor, base, "encargo con veto")
+        servidor._apuntar_montaje_pendiente(servidor.contexto(pid3), mezcla=True)
+        ok(servidor.leer_montaje(pid3).get("sin_aplicar"),
+           "un veto (sin params) también deja «sin aplicar»")
+        servidor.aplicar_montaje(pid3)
+        time.sleep(0.5)
+        igual(lanzados, [("render", {"solo_montar": True})],
+              "y se aplica con una mezcla aunque el render diga «al día»")
+    finally:
+        servidor.lanzar_paso, servidor._correr_rehacer_montaje = guardado
+        time.sleep(0.5)
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
     parser.add_argument("--conservar", action="store_true",
@@ -6778,6 +6871,7 @@ def main():
         probar_ortografia_de_campos(cliente, pid)
         probar_lo_de_v2h()
         probar_notas_19oct()
+        probar_cambios_del_encargo_un_montaje()
         probar_cancelar_en_el_taller()
     finally:
         parar(proceso)

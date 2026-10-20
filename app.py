@@ -7892,6 +7892,8 @@ def guardar_sonido(pid: str, cuerpo: dict = Body(default=None)):
     ctx.bitacora.anotar("sonido", "render", {
         "musica": (cambios.get("musica") or {}).get("titulo"),
         "activo": cambios.get("sonido"), "musica_db": cambios.get("musica_db")})
+    if trabajo_id is None:
+        _apuntar_montaje_pendiente(ctx)
     return {"guardado": list(cambios), "cambiado": True,
             "estado": ctx.estado.estado_de("render"),
             "trabajo_id": trabajo_id, "montado": montado}
@@ -7928,6 +7930,126 @@ def _remontar_si_estaba_al_dia(ctx, al_dia, montado, nombre):
         return None
     return lanzar_paso(ctx, "render", None, nombre=nombre,
                        opciones={"solo_montar": True})
+
+
+# ----------------------------------- los cambios del montaje SIN APLICAR (19-10)
+# En el Encargo se tocan varias cosas seguidas (la música, su volumen, el logo,
+# los subtítulos) y montar con CADA una dejaba la siguiente en 409 («el vídeo
+# se está montando ahora») y el resultado dependía del orden. Ahí se guardan
+# con `remontar: false` y se aplican todas a la vez con «Aplicar y volver a
+# montar» (`POST /montaje/aplicar`): un solo trabajo, y si lo pendiente es solo
+# la mezcla, una mezcla (segundos), no un render.
+#
+# La marca vive en `proyecto.json` (config), FUERA de los params: no entra en
+# ninguna firma. Dice para qué versión del render se apuntó --un montaje
+# posterior la deja sin valor-- y si hace falta mezclar aunque el estado diga
+# «al día» (un efecto vetado no toca ningún param).
+
+CONFIG_MONTAJE_PENDIENTE = "montaje_pendiente"
+
+#: Las claves del render que solo cambian la MEZCLA o el muxeado final (lo que
+#: `p8_render.ejecutar(solo_montar=True)` vuelve a hacer sobre los clips que
+#: hay): la música, los efectos, sus volúmenes y el logo. Ninguna cambia un
+#: fotograma de un clip.
+CLAVES_DE_MEZCLA = frozenset({
+    "sonido", "musica", "musica_lufs", "musica_db", "musica_presencia",
+    "efectos", "efectos_fijos", "efectos_db", "logo"})
+
+
+def _remontar_pedido(datos, defecto=True):
+    """El `remontar` de un cuerpo (o de la consulta): False solo si se pide."""
+    valor = (datos or {}).get("remontar", defecto)
+    if isinstance(valor, str):
+        return valor.strip().lower() not in ("0", "false", "no", "")
+    return bool(valor)
+
+
+def _apuntar_montaje_pendiente(ctx, mezcla=False):
+    """Apunta que hay cambios del montaje guardados sin montar (si hay MP4)."""
+    if getattr(ctx, "proyecto", None) is None or not _ruta_de_version(ctx, "render", "video.mp4"):
+        return
+    version = ctx.proyecto.version_activa("render")
+    marca = dict(ctx.proyecto.config.get(CONFIG_MONTAJE_PENDIENTE) or {})
+    if marca.get("version") != version:
+        marca = {}
+    nueva = {"version": version, "mezcla": bool(marca.get("mezcla") or mezcla),
+             "desde": marca.get("desde") or time.strftime("%Y-%m-%dT%H:%M:%S")}
+    if nueva != marca:
+        ctx.proyecto.config[CONFIG_MONTAJE_PENDIENTE] = nueva
+        ctx.proyecto.guardar_config()
+
+
+def _montaje_pendiente(ctx):
+    """La marca de cambios sin aplicar, si sigue valiendo; si no, se borra. -> dict|None"""
+    marca = ctx.proyecto.config.get(CONFIG_MONTAJE_PENDIENTE)
+    if not marca:
+        return None
+    vale = (isinstance(marca, dict)
+            and marca.get("version") == ctx.proyecto.version_activa("render")
+            and bool(_ruta_de_version(ctx, "render", "video.mp4"))
+            and (marca.get("mezcla")
+                 or ctx.estado.estado_de("callouts") == "obsoleto"
+                 or ctx.estado.estado_de("render") == "obsoleto"))
+    if not vale:
+        _olvidar_montaje_pendiente(ctx)
+        return None
+    return marca
+
+
+def _olvidar_montaje_pendiente(ctx):
+    if ctx.proyecto.config.pop(CONFIG_MONTAJE_PENDIENTE, None) is not None:
+        ctx.proyecto.guardar_config()
+
+
+def _solo_falta_mezclar(ctx):
+    """Si lo único pendiente del vídeo montado es volver a MEZCLAR. -> bool
+
+    El render está obsoleto, las capas no, y lo que cambió en sus params desde
+    la versión activa son solo claves de mezcla (`CLAVES_DE_MEZCLA`); y con esas
+    claves como estaban, el render estaría al día (no hay nada que venga de
+    pasos anteriores). Entonces basta `solo_montar`: ni un clip.
+
+    Para saber lo último se calcula el estado con los params de mezcla de la
+    versión activa, en ESTA instancia y bajo su cerrojo, y se devuelven los de
+    verdad antes de soltarlo: no se escribe nada.
+    """
+    estado = ctx.estado
+    if not _ruta_de_version(ctx, "render", "video.mp4"):
+        return False
+    if estado.estado_de("render") != "obsoleto" or not estado.al_dia("callouts"):
+        return False
+    params = estado.params("render") or {}
+    cambiadas = _params_cambiados(estado, "render", params)
+    if not cambiadas or not set(cambiadas) <= CLAVES_DE_MEZCLA:
+        return False
+    activa = next((v for v in estado.versiones("render") if v.get("activa")), None) or {}
+    antes = activa.get("params") or {}
+    with estado._lock:
+        datos = estado._datos("render")
+        de_verdad = datos.get("params")
+        supuesto = copy.deepcopy(de_verdad or {})
+        for clave in cambiadas:
+            if clave in antes:
+                supuesto[clave] = copy.deepcopy(antes[clave])
+            else:
+                supuesto.pop(clave, None)
+        datos["params"] = supuesto
+        estado._cache = {}
+        try:
+            return estado.al_dia("render")
+        finally:
+            datos["params"] = de_verdad
+            estado._cache = {}
+
+
+def _vuelve_a_la_automatica(ctx):
+    """Si la música pasó de un tema elegido a la automática (hay que montar la
+    banda otra vez antes de mezclar)."""
+    activa = next((v for v in ctx.estado.versiones("render") if v.get("activa")), None) or {}
+    antes = (activa.get("params") or {}).get("musica")
+    ahora = (ctx.estado.params("render") or {}).get("musica")
+    # sin música en el vídeo («Qué lleva») no hay banda que montar
+    return bool(antes) and not ahora and lleva_de(ctx).get("musica", True)
 
 
 # ------------------------------------------------------------------- el logo
@@ -8057,10 +8179,11 @@ async def subir_logo(pid: str, peticion: Request):
     ctx = await _en_hilo(contexto, pid)
     # la MISMA lectura que el logo suelto: eran dos copias, y solo una revisaba
     contenido, extension = await _leer_logo_subido(peticion)
-    return await _en_hilo(_poner_logo_subido, ctx, contenido, extension)
+    remontar = _remontar_pedido(dict(peticion.query_params))
+    return await _en_hilo(_poner_logo_subido, ctx, contenido, extension, remontar)
 
 
-def _poner_logo_subido(ctx, contenido, extension):
+def _poner_logo_subido(ctx, contenido, extension, remontar=True):
     """Lo de `subir_logo` que toca disco y estado, fuera del bucle de eventos."""
     carpeta = _carpeta_logo(ctx)
     os.makedirs(carpeta, exist_ok=True)
@@ -8074,7 +8197,9 @@ def _poner_logo_subido(ctx, contenido, extension):
     ficha.setdefault("tamano", 0.12)
     ficha.setdefault("opacidad", 0.9)
     ctx.estado.actualizar_params("render", {"logo": ficha})
-    trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado, "poner el logo")
+    trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia and remontar, montado, "poner el logo")
+    if trabajo_id is None:
+        _apuntar_montaje_pendiente(ctx)
     return {"logo": ficha, "trabajo_id": trabajo_id, "montado": montado}
 
 
@@ -8085,14 +8210,22 @@ def colocar_logo(pid: str, cuerpo: dict = Body(default=None)):
     datos = _cuerpo(cuerpo)
     p8 = PASOS_MODULOS.p8_render
     actual = dict((ctx.estado.params("render") or {}).get("logo") or {})
+    # `remontar: false` (el Encargo): se guarda y se aplica con los demás
+    # cambios del montaje, en un solo montaje (`POST /montaje/aplicar`)
+    remontar = _remontar_pedido(datos)
+
+    def remontado(al_dia, montado, nombre):
+        trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia and remontar, montado, nombre)
+        if trabajo_id is None:
+            _apuntar_montaje_pendiente(ctx)
+        return trabajo_id
     if datos.get("usar"):
         # el logo del proyecto (o cualquiera del buzon), puesto en este video
         al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
         ficha = dict(datos["usar"]) if isinstance(datos["usar"], dict) else {"fichero": datos["usar"]}
         nuevo = _poner_logo_suelto(ctx, ficha)
         return {"logo": nuevo, "montado": montado,
-                "trabajo_id": _remontar_si_estaba_al_dia(ctx, al_dia, montado,
-                                                         "poner el logo")}
+                "trabajo_id": remontado(al_dia, montado, "poner el logo")}
     if datos.get("quitar"):
         if not actual:
             return {"logo": None, "trabajo_id": None}
@@ -8103,8 +8236,7 @@ def colocar_logo(pid: str, cuerpo: dict = Body(default=None)):
         params.pop("logo", None)
         ctx.estado.set_params("render", params)
         return {"logo": None, "montado": montado,
-                "trabajo_id": _remontar_si_estaba_al_dia(ctx, al_dia, montado,
-                                                         "quitar el logo")}
+                "trabajo_id": remontado(al_dia, montado, "quitar el logo")}
     if not actual.get("fichero"):
         raise ErrorApi(409, "primero sube el logo")
     nuevo = dict(actual)
@@ -8123,8 +8255,7 @@ def colocar_logo(pid: str, cuerpo: dict = Body(default=None)):
     al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
     ctx.estado.actualizar_params("render", {"logo": nuevo})
     return {"logo": nuevo, "montado": montado,
-            "trabajo_id": _remontar_si_estaba_al_dia(ctx, al_dia, montado,
-                                                     "mover el logo")}
+            "trabajo_id": remontado(al_dia, montado, "mover el logo")}
 
 
 # --------------------------------------------------------- los subtitulos
@@ -8295,6 +8426,8 @@ def cambiar_subtitulos(pid: str, cuerpo: dict = Body(default=None)):
     if _trabajo_activo(ctx, "callouts") or _trabajo_activo(ctx, "render"):
         raise ErrorApi(409, "el vídeo se está montando ahora: cámbialo cuando termine")
     cambiado = _aplicar_subtitulos(ctx, _cuerpo(cuerpo))
+    if cambiado:
+        _apuntar_montaje_pendiente(ctx)
     return {"cambiado": cambiado, "estado": ctx.estado.estado_de("callouts")}
 
 
@@ -8344,7 +8477,10 @@ def leer_montaje(pid: str):
             "niveles": list(camara.NIVELES),
             "montado": bool(_ruta_de_version(ctx, "render", "video.mp4")),
             "pendiente": (ctx.estado.estado_de("callouts") == "obsoleto"
-                          or ctx.estado.estado_de("render") == "obsoleto")}
+                          or ctx.estado.estado_de("render") == "obsoleto"),
+            # cambios guardados sin montar (el Encargo): la franja «Aplicar»
+            "sin_aplicar": bool(_montaje_pendiente(ctx)),
+            "solo_mezcla": _solo_falta_mezclar(ctx)}
 
 
 @app.put("/api/proyectos/{pid}/montaje")
@@ -8395,12 +8531,20 @@ def cambiar_montaje(pid: str, cuerpo: dict = Body(default=None)):
     if cambiado:
         ctx.bitacora.anotar("montaje_cambiado", "callouts", {
             "montaje": datos.get("montaje"), "transiciones": datos.get("transiciones")})
+        _apuntar_montaje_pendiente(ctx)
     return dict(leer_montaje(pid), cambiado=cambiado)
 
 
 @app.post("/api/proyectos/{pid}/montaje/aplicar", status_code=202)
 def aplicar_montaje(pid: str):
-    """Rehace las capas y vuelve a montar el video con el montaje nuevo. Ni una imagen."""
+    """Aplica lo que quede del montaje en UN solo trabajo. Ni una imagen.
+
+    Lo usan «Aplicar ahora» (movimiento, subtítulos) y «Aplicar y volver a
+    montar» del Encargo (los cambios guardados con `remontar: false`, 19-10).
+    Si lo pendiente es solo la MEZCLA (música, efectos, volúmenes, logo), se
+    vuelve a mezclar sobre los clips que hay (`solo_montar`, segundos); si la
+    música volvió a la automática, antes se monta la banda. Si no, se rehacen
+    las capas y el montaje como siempre."""
     ctx = contexto(pid)
     if not _ruta_de_version(ctx, "render", "video.mp4"):
         raise ErrorApi(409, "este vídeo todavía no está montado: se aplicará al montarlo")
@@ -8410,11 +8554,25 @@ def aplicar_montaje(pid: str):
     with _CERROJO_MONTAJE:
         if _trabajo_que_toca(ctx, ("callouts", "render")):
             raise ErrorApi(409, "el vídeo ya se está montando")
-        trabajo_id = ctx.gestor.lanzar("montaje", _correr_rehacer_montaje, ctx,
-                                       ["callouts", "render"], paso="render",
-                                       toca=["callouts", "render"])
-    _registrar_trabajo(trabajo_id, ctx.id)
-    return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id)}
+        marca = _montaje_pendiente(ctx)
+        solo_mezcla = _solo_falta_mezclar(ctx) or bool(
+            marca and marca.get("mezcla") and ctx.estado.al_dia("render")
+            and ctx.estado.al_dia("callouts"))
+        if solo_mezcla and not _vuelve_a_la_automatica(ctx):
+            # el paso directo y no la receta: con solo un veto pendiente el
+            # render dice «al día» y la receta en «pendientes» no haría nada
+            trabajo_id = lanzar_paso(ctx, "render", None, nombre="montaje",
+                                     opciones={"solo_montar": True})
+        else:
+            tareas = (["banda_sonora", "render"] if solo_mezcla
+                      else ["callouts", "render"])
+            trabajo_id = ctx.gestor.lanzar("montaje", _correr_rehacer_montaje, ctx,
+                                           tareas, solo_mezcla, paso="render",
+                                           toca=["callouts", "render"])
+            _registrar_trabajo(trabajo_id, ctx.id)
+        _olvidar_montaje_pendiente(ctx)
+    return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id),
+            "solo_mezcla": solo_mezcla}
 
 
 # ----------------------------------------- MONTAJE POR PLANO (19-10-2026)
@@ -8631,8 +8789,10 @@ def cambiar_presencia_musica(pid: str, cuerpo: dict = Body(default=None)):
     ctx.bitacora.anotar("musica_presencia", "render",
                         {"antes": actual, "ahora": pedida})
     trabajo_id = _remontar_si_estaba_al_dia(
-        ctx, al_dia and datos.get("remontar", True), montado,
+        ctx, al_dia and _remontar_pedido(datos), montado,
         "volver a mezclar la música")
+    if trabajo_id is None:
+        _apuntar_montaje_pendiente(ctx)
     return {"presencia": pedida, "cambiado": True,
             "remontando": bool(trabajo_id), "trabajo_id": trabajo_id,
             "montado": montado,
@@ -8985,6 +9145,8 @@ def fijar_efecto(pid: str, cuerpo: dict = Body(default=None)):
                                                 "volver a mezclar los efectos")
     ctx.bitacora.anotar("efecto_fijado", "render",
                         {"papel": papel, "efecto": (ficha or {}).get("titulo")})
+    if trabajo_id is None:
+        _apuntar_montaje_pendiente(ctx)
     lista = [dict(f, muestra=f"/api/efectos/{sonido._nombre_de(f)}")
              for f in (surtido.get(papel) or []) if isinstance(f, dict)]
     return {"papel": papel, "fijos": fijos, "efectos": lista,
@@ -9037,6 +9199,10 @@ def vetar_efecto(pid: str, cuerpo: dict = Body(default=None)):
         quitado = sonido.desvetar(clave)
         trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado, "volver a mezclar los efectos") \
             if remontar and quitado else None
+        if quitado and trabajo_id is None:
+            # un veto no toca ningún param: sin la marca, «Aplicar» no sabría
+            # que hay que volver a mezclar
+            _apuntar_montaje_pendiente(ctx, mezcla=True)
         return {"vetado": False, "quitado": quitado, "trabajo_id": trabajo_id,
                 "vetados": [sonido.vetados()[k] for k in sorted(sonido.vetados())]}
     try:
@@ -9046,6 +9212,8 @@ def vetar_efecto(pid: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(400, str(fallo))
     trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado, "volver a mezclar los efectos") \
         if remontar else None
+    if trabajo_id is None:
+        _apuntar_montaje_pendiente(ctx, mezcla=True)
     return {"vetado": True, "efecto": entrada, "trabajo_id": trabajo_id,
             "vetados": [sonido.vetados()[k] for k in sorted(sonido.vetados())]}
 
@@ -9079,7 +9247,10 @@ def cambiar_volumen_efectos(pid: str, cuerpo: dict = Body(default=None)):
     al_dia, montado = _antes_de_cambiar_el_montaje(ctx)
     ctx.estado.actualizar_params("render", {"efectos_db": VOLUMEN_EFECTOS[nivel]})
     ctx.bitacora.anotar("efectos_volumen", "render", {"antes": actual, "ahora": nivel})
-    trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia, montado, "volver a mezclar los efectos")
+    trabajo_id = _remontar_si_estaba_al_dia(ctx, al_dia and _remontar_pedido(_cuerpo(cuerpo)),
+                                            montado, "volver a mezclar los efectos")
+    if trabajo_id is None:
+        _apuntar_montaje_pendiente(ctx)
     return {"nivel": nivel, "cambiado": True, "trabajo_id": trabajo_id, "montado": montado}
 
 

@@ -5262,6 +5262,10 @@ def la_pantalla_no_salta(navegador, datos):
     antes = pg.p.evaluate(SCROLL)["panel"]
     pg.p.evaluate(f"() => ({boton})().click()")
     pg.p.wait_for_timeout(1500)
+    # desde el Encargo se monta con «Aplicar y volver a montar» (arreglo 2)
+    pg.p.evaluate("() => { const b = [...document.querySelectorAll('.franja-sin-aplicar button')]"
+                  ".find(x => /Aplicar/.test(x.innerText)); if (b) b.click(); }")
+    pg.p.wait_for_timeout(1500)
     pg.sin_trabajo()
     pg.p.wait_for_timeout(2500)
     despues = pg.p.evaluate(SCROLL)["panel"]
@@ -5309,6 +5313,52 @@ def la_pantalla_no_salta(navegador, datos):
     pg.p.wait_for_timeout(1500)
     ok(pg.p.evaluate(SCROLL)["modulo"] < 5, "SCROLL: ir a otra sección sí empieza arriba")
     pg.sin_errores("la pantalla no salta")
+    pg.cerrar()
+
+
+@escenario
+def encargo_un_solo_montaje(navegador, datos):
+    """Notas del dueño del 19-10: en el Encargo cada cambio del montaje volvía
+    a montar el vídeo y el siguiente daba «el vídeo se está montando ahora».
+    Ahora se guardan sin montar y una franja los aplica todos de una vez."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.p.wait_for_timeout(1500)
+    pg.js("APP.light.video.vista = 'encargo_video'; pintarLight();")
+    ok(pg.esperar(".fila-ajuste", "Música", 20), "ENCARGO: se ven los ajustes del montaje")
+    pg.p.locator(".fila-ajuste").filter(has_text="Música").locator(".fila-ajuste-cab button").first.click()
+    pg.p.wait_for_timeout(600)
+    antes = len(pg.avisos())
+    for nivel in ("Alta", "Suave"):
+        pg.p.evaluate(f"""() => [...document.querySelectorAll('.editor-ajuste .herramientas button')]
+          .find(x => x.innerText.trim() === '{nivel}').click()""")
+        pg.p.wait_for_timeout(900)
+    pg.p.evaluate("""() => { const r = document.querySelector('.editor-ajuste input.volumen-fino');
+      r.value = -2; r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); }""")
+    pg.p.wait_for_timeout(1800)
+    avisos = pg.avisos()[antes:]
+    ok(not any("montando ahora" in a for a in avisos),
+       f"ENCARGO: tres cambios seguidos sin ningún «se está montando ahora» ({avisos})")
+    ok(pg.p.evaluate("() => ((APP.trabajos[CLAVE_VIDEO_LIGHT] || {}).estado) !== 'ejecutando'"),
+       "ENCARGO: y sin lanzar ningún montaje")
+    ok(pg.esperar(".franja-sin-aplicar", "sin aplicar", 5),
+       "ENCARGO: sale la franja «Hay cambios del montaje sin aplicar»")
+    _r, trabajos_antes = api.get(f"/api/trabajos?proyecto={pid}")
+    vistos = {x.get("id") for x in trabajos_antes.get("trabajos") or []}
+    pg.pulsar(".franja-sin-aplicar button", "Aplicar y volver a montar")
+    pg.p.wait_for_timeout(800)
+    _r, trabajos = api.get(f"/api/trabajos?proyecto={pid}")
+    nuevos = [t for t in trabajos.get("trabajos") or [] if t.get("id") not in vistos]
+    ok(len(nuevos) == 1, f"ENCARGO: «Aplicar» lanza UN solo montaje ({[t.get('nombre') for t in nuevos]})")
+    pg.sin_trabajo()
+    pg.p.wait_for_timeout(2500)
+    ok(not pg.visible(".franja-sin-aplicar"), "ENCARGO: al terminar, la franja se va")
+    _r, render = api.get(f"/api/proyectos/{pid}/pasos/render")
+    ok(render.get("estado") == "listo", f"ENCARGO: y el vídeo queda montado y al día ({render.get('estado')})")
+    pg.sin_errores("varios cambios del Encargo, un solo montaje")
     pg.cerrar()
 
 

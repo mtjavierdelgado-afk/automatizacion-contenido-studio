@@ -15,6 +15,13 @@ Reglas que valen para toda la API y no se repiten en cada fila:
   se sigue por `GET /api/trabajos/{tid}` o por el `eventos` que devuelve.
 - **Editar es decidir.** No hay endpoint de «guardar y confirmar»: `PUT` guarda,
   y pasar de paso es aprobar.
+- **Los ajustes del montaje aceptan `remontar: false`** (sonido, presencia,
+  efectos, su volumen, los vetos y el logo; en la subida del logo, `?remontar=0`):
+  se guardan sin montar y dejan la marca `montaje_pendiente` en `proyecto.json`
+  (fuera de los params, no mueve ninguna firma). `GET .../montaje` la enseña como
+  `sin_aplicar` (y `solo_mezcla` si basta con volver a mezclar), y
+  `POST .../montaje/aplicar` lo monta todo en un solo trabajo. Es lo que usa el
+  Encargo (19-10-2026).
 
 
 ## Proyectos y papelera
@@ -295,7 +302,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/montaje` | Lo que hace falta para elegir el montaje antes de que exista el vídeo: el de los cortos, el de siempre, hasta cuántos segundos es corto y el catálogo de transiciones con su GLSL. |
 | `GET` | `/api/proyectos/{pid}/montaje` | El montaje del vídeo (movimiento, subtítulos, gancho, cifras, barra), las transiciones elegidas y si está pendiente de aplicar. |
 | `PUT` | `/api/proyectos/{pid}/montaje` | Cambia el montaje o las transiciones. Solo guarda lo que difiere de siempre; volver a lo de siempre quita la clave. 409 mientras se monta. |
-| `POST` | `/api/proyectos/{pid}/montaje/aplicar` | Rehace las capas y vuelve a montar el vídeo con el montaje nuevo. Ni una imagen. 409 si aún no está montado. |
+| `POST` | `/api/proyectos/{pid}/montaje/aplicar` | Aplica lo que quede del montaje en UN solo trabajo. Ni una imagen. Si lo pendiente es solo la mezcla (música, efectos, volúmenes, logo), `solo_montar` (segundos; con la música vuelta a la automática, antes la banda); si no, capas y montaje. -> `{trabajo_id, solo_mezcla}`. 409 si aún no está montado. |
 | `GET` | `/api/proyectos/{pid}/planos/montaje` | El movimiento y la 2.5D elegidos para cada plano: `{video, planos: {sid: {movimiento?, profundidad?}}, planos_del_video, no_aplica, niveles, profundidad: {disponible, por_que}}`. `no_aplica` son las cartelas y cabeceras, que llevan siempre lo de siempre. |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/montaje` | `{movimiento?: quieto\|sobrio\|vivo\|dinamico\|null, profundidad?: true\|false\|null}`. null es «como el vídeo»; lo que queda vacío quita la clave (regla 1). Va en `callouts.unidades["escena:SID"].montaje`: deja obsoleto SOLO ese plano. 400 valor raro o cartela, 404 plano que no existe, 409 2.5D sin modelo o vídeo montándose. |
 

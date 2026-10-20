@@ -20744,6 +20744,7 @@ function ajusteEmojisPublicar(p, a, guardar) {
     onclick: () => { if (valor === (a.emojis || 'vistoso')) return; a.emojis = valor; guardar('emojis', valor); },
   }, texto)));
   const campoMarca = () => document.querySelector(`input[data-emojis-marca="${p.id}"]`);
+  let relojMarca = null;
   caja.appendChild(h('div', { clase: 'fila' },
     h('span', { clase: 'etiqueta-tono' }, 'Emojis en los textos'), botones,
     h('span', { clase: 'crece' }), botonGuia('emojis_redes', campoMarca)));
@@ -20757,7 +20758,17 @@ function ajusteEmojisPublicar(p, a, guardar) {
     caja.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Emojis de la marca (opcional: su firma, Claude los repite en el gancho y en la llamada a la acción)',
       h('input', { type: 'text', value: a.emojis_marca || '', placeholder: '🎮 🕹️ 🎉', maxlength: 80,
         datos: { emojisMarca: p.id, foco: `emojis-marca-${p.id}` },
-        onchange: ev => { a.emojis_marca = ev.target.value; guardar('emojis_marca', ev.target.value); } })));
+        // también con un evento `input` («Usar en el campo» de la guía), tras dejar de teclear
+        oninput: ev => {
+          clearTimeout(relojMarca);
+          const v = ev.target.value;
+          relojMarca = setTimeout(() => { if (v !== (a.emojis_marca || '')) { a.emojis_marca = v; guardar('emojis_marca', v); } }, 1200);
+        },
+        onchange: ev => {
+          clearTimeout(relojMarca);
+          if (ev.target.value === (a.emojis_marca || '')) return;
+          a.emojis_marca = ev.target.value; guardar('emojis_marca', ev.target.value);
+        } })));
   }
   return caja;
 }

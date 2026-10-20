@@ -2711,7 +2711,9 @@ def ortografia_en_el_guion_y_en_los_campos(navegador, datos):
       const caja = ortografiaDeCampo('prueba-recorrido', { leer: () => window.__texto,
         poner: t => { window.__puesto = t; } });
       caja.classList.add('ortografia-de-prueba');
-      document.body.appendChild(caja);""")
+      // DENTRO DE LA PANTALLA, como un campo de verdad: colgado de <body>
+      // quedaba debajo del menú lateral fijo de CrearIA y no se podía pulsar
+      (document.querySelector('#panel') || document.querySelector('#cuerpo') || document.body).appendChild(caja);""")
     ok(pg.esperar(".ortografia-de-prueba button", "Revisar ortografía", 10), "el campo trae «Revisar ortografía»")
     pg.pulsar(".ortografia-de-prueba button", "Revisar ortografía")
     ok(pg.esperar(".ortografia-de-prueba button", "Poner las correcciones", 60), "propone la corrección del campo")
@@ -2734,7 +2736,7 @@ def ortografia_en_el_guion_y_en_los_campos(navegador, datos):
         partes: () => ({ titulo: 'Las gruas del puerto', descripcion: 'bien escrito\\nuna vez mas' }),
         ponerPartes: n => { window.__partes = n; } });
       caja.classList.add('ortografia-de-partes');
-      document.body.appendChild(caja);""")
+      (document.querySelector("#panel") || document.querySelector("#cuerpo") || document.body).appendChild(caja);""")
     pg.pulsar(".ortografia-de-partes button", "Revisar ortografía")
     ok(pg.esperar(".ortografia-de-partes button", "Poner las correcciones", 60), "revisa varios campos juntos")
     ok(pg.visible(".ortografia-de-partes", "Título"), "y dice de qué campo es cada corrección")
@@ -5370,7 +5372,10 @@ def encargo_un_solo_montaje(navegador, datos):
     _r, trabajos = api.get(f"/api/trabajos?proyecto={pid}")
     nuevos = [t for t in trabajos.get("trabajos") or [] if t.get("id") not in vistos]
     ok(len(nuevos) == 1, f"ENCARGO: «Aplicar» lanza UN solo montaje ({[t.get('nombre') for t in nuevos]})")
-    pg.sin_trabajo()
+    pg.sin_trabajo(600)
+    # en el recorrido entero lo de antes (el «Traer» de la_pantalla_no_salta)
+    # deja también las capas por rehacer: es un montaje largo, no una mezcla
+    api.libre(pid, 600)
     pg.p.wait_for_timeout(2500)
     ok(not pg.visible(".franja-sin-aplicar"), "ENCARGO: al terminar, la franja se va")
     _r, render = api.get(f"/api/proyectos/{pid}/pasos/render")

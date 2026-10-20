@@ -269,7 +269,8 @@ def prueba_solo_mezcla():
     fuente = io.open(os.path.join(raiz, "app.py"), encoding="utf-8").read()
     ok("repaso.solo_mezcla(" in fuente,
        "y el repaso lo decide de verdad, no sólo lo declara")
-    ok('{"solo_montar": True} if solo_montar else None' in fuente,
+    # (arreglos 19-10: también cuando lo único pendiente es la mezcla)
+    ok('solo = solo_montar or' in fuente and '{"solo_montar": True} if solo else None' in fuente,
        "y se lo pasa a la tarea del MP4")
 
 

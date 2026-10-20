@@ -4968,6 +4968,109 @@ def probar_traer_estilo(cliente):
     igual(otra.get("traidas"), [], "traer otra vez lo mismo no cambia nada")
 
 
+def probar_cambiar_de_estilo(cliente):
+    """Arreglos del 19-10 (4): un vídeo cuyo estilo se borró se quedaba
+    huérfano --«Su estilo» no ofrecía nada y «Traer» daba 404--. Ahora
+    `GET /estilo/cambios?estilo=<otro>` enseña lo que cambiaría con su coste y
+    `PUT /estilo {estilo, partes}` lo pasa al otro estilo trayendo SOLO las
+    partes elegidas."""
+    seccion("ARREGLOS 19-10: UN VÍDEO HUÉRFANO SE PASA A OTRO ESTILO")
+    def estilo(nombre, tono):
+        _r, datos = cliente.post("/api/presets-canal", {
+            "tipo": "canal", "nombre": nombre,
+            "datos": {"guion": {"idioma_salida": "es", "instrucciones": tono},
+                      "voz": {"voz_id": "v-de-prueba", "idioma": "es",
+                              "velocidad": "normal"},
+                      "origen": {"tono_prompt": "serio", "estilo_prompt": "plano"}}})
+        return (datos.get("preset") or {}).get("id") or ""
+    viejo = estilo("Estilo que se borra", "Habla claro.")
+    otro = estilo("Estilo de acogida", "Cuéntalo como una historia.")
+    _r, creado = cliente.post(f"/api/presets-light/{viejo}/video", {
+        "nombre": "Vídeo huérfano", "duracion_objetivo_s": 60,
+        "material": "Un hecho.\n\nY otro."})
+    vid = (creado.get("proyecto") or {}).get("id") or ""
+    base = f"/api/proyectos/{vid}/estilo"
+    _r, brief_antes = cliente.get(f"/api/proyectos/{vid}/pasos/brief")
+    _r, voz_antes = cliente.get(f"/api/proyectos/{vid}/pasos/voz")
+
+    # el estilo viejo es de un proyecto (cliente); el nuevo, de ninguno
+    _r, nuevo_cliente = cliente.post("/api/clientes", {"nombre": "Cliente del huérfano"})
+    cid = (nuevo_cliente.get("cliente") or {}).get("id") or ""
+    cliente.put(f"/api/clientes/estilos/{viejo}", {"cliente": cid})
+
+    # a la papelera: se sigue pudiendo comparar, y lo dice
+    cliente.delete(f"/api/presets-canal/{viejo}")
+    _r, cambios = cliente.get(f"{base}/cambios")
+    ok((cambios.get("estilo") or {}).get("en_papelera") is True,
+       f"con el estilo en la papelera, «Su estilo» lo sabe (para «Restaurarlo»): {cambios.get('estilo')}")
+    # y purgado: huérfano de verdad
+    respuesta, _d = cliente.delete(f"/api/presets-canal/papelera/{viejo}?confirmar=1")
+    igual(respuesta.status_code, 200, "el estilo se borra del todo")
+    _r, cambios = cliente.get(f"{base}/cambios")
+    ok(bool(cambios.get("por_que_no")), f"el vídeo queda huérfano: {cambios.get('por_que_no')}")
+    igual(cambios.get("actual"), viejo, "y sigue diciendo cuál era su estilo")
+
+    # la vista previa con otro estilo: con su coste y sin escribir nada
+    respuesta, previa = cliente.get(f"{base}/cambios?estilo={otro}")
+    igual(respuesta.status_code, 200, f"la vista previa con otro estilo responde 200: {previa}")
+    tono = [p for p in previa.get("partes") or [] if p["id"] == "tono"]
+    ok(tono and tono[0]["cambia"] and "rehace" in tono[0],
+       f"dice que el tono cambiaría y qué rehace: {tono}")
+    _r, brief = cliente.get(f"/api/proyectos/{vid}/pasos/brief")
+    igual(brief.get("firma"), brief_antes.get("firma"), "MIRAR NO ESCRIBE NADA")
+    respuesta, _d = cliente.get(f"{base}/cambios?estilo=no-existe")
+    ok(respuesta.status_code == 200 and _d.get("por_que_no"),
+       "un estilo que no existe se dice, sin 500")
+
+    # cambiar: validaciones
+    respuesta, _d = cliente.put(base, {"partes": ["tono"]})
+    igual(respuesta.status_code, 400, "sin 'estilo', 400")
+    respuesta, _d = cliente.put(base, {"estilo": otro, "partes": ["inventada"]})
+    igual(respuesta.status_code, 400, "una parte que no existe, 400")
+    respuesta, _d = cliente.put(base, {"estilo": "no-existe", "partes": []})
+    igual(respuesta.status_code, 400, "un estilo que no existe, 400")
+
+    # el cambio: solo el tono
+    respuesta, cambio = cliente.put(base, {"estilo": otro, "partes": ["tono"]})
+    igual(respuesta.status_code, 200, f"PUT estilo responde 200: {cambio}")
+    igual(cambio.get("traidas"), ["tono"], "trae solo lo elegido")
+    _r, brief = cliente.get(f"/api/proyectos/{vid}/pasos/brief")
+    igual((brief.get("params") or {}).get("instrucciones"), "Cuéntalo como una historia.",
+          "el tono del estilo nuevo llega al vídeo")
+    igual((brief.get("params") or {}).get("duracion_objetivo_s"), 60,
+          "sin pisar la duración del encargo")
+    _r, voz = cliente.get(f"/api/proyectos/{vid}/pasos/voz")
+    igual(voz.get("params"), voz_antes.get("params"), "y la voz, que no se pidió, no se toca")
+    _r, cambios = cliente.get(f"{base}/cambios")
+    igual((cambios.get("estilo") or {}).get("id"), otro, "«Su estilo» es ya el nuevo")
+    ok(not cambios.get("por_que_no"), "y deja de estar huérfano")
+    _r, galeria = cliente.get("/api/proyectos")
+    fila = [p for p in galeria.get("proyectos") or [] if p.get("id") == vid]
+    ok(fila and fila[0].get("estilo_light") == otro,
+       f"la lista de vídeos lo apunta en el estilo nuevo: {fila[:1]}")
+    _r, clientes = cliente.get("/api/clientes")
+    igual((clientes.get("videos") or {}).get(vid), cid,
+          "SE QUEDA EN SU PROYECTO (el del estilo viejo): se le fija, el nuevo es de otro")
+    igual((cambio.get("cliente") or {}).get("ahora"), cid, "y la respuesta lo dice")
+
+    # la revisión editorial (arreglos 19-10, 5): solo del guion, y un modo raro no
+    respuesta, _d = cliente.post(f"/api/proyectos/{vid}/ortografia/revisar",
+                                 {"fuente": "subtitulos", "modo": "editorial"})
+    igual(respuesta.status_code, 400, "EDITORIAL: la revisión editorial es solo del guion")
+    respuesta, _d = cliente.post(f"/api/proyectos/{vid}/ortografia/revisar",
+                                 {"fuente": "guion", "modo": "estilo", "textos": {"B1": "x"}})
+    igual(respuesta.status_code, 400, "EDITORIAL: un modo que no existe, 400")
+    respuesta, _d = cliente.post(f"/api/proyectos/{vid}/ortografia/revisar",
+                                 {"fuente": "guion", "modo": "editorial", "textos": {}})
+    igual(respuesta.status_code, 400, "EDITORIAL: sin textos, 400")
+
+    # con el estilo nuevo en la papelera no se adopta
+    tercero = estilo("Estilo apartado", "Otro tono.")
+    cliente.delete(f"/api/presets-canal/{tercero}")
+    respuesta, _d = cliente.put(base, {"estilo": tercero, "partes": []})
+    igual(respuesta.status_code, 409, "un estilo en la papelera no se adopta: 409 (restáuralo antes)")
+
+
 def probar_continuaciones_en_otra_calidad():
     """Rehacer en otra calidad lleva tambien la segunda mitad de cada plano
     largo (`sigue_a`): sin ella, a mitad de toma se veia la imagen vieja
@@ -6820,6 +6923,133 @@ def probar_espacio_fijo():
         catalogo._llamar_claude = real_claude
         for nombre, valor in reales.items():
             setattr(servidor, nombre, valor)
+
+def _video_montado_de_prueba(servidor, base, nombre):
+    """Un vídeo con todos los pasos hechos y su MP4: «montado y al día»."""
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    from nucleo.estado import PASOS                           # noqa: PLC0415
+    pid = Proyecto.crear(base, nombre).id
+    estado = Estado(servidor.contexto(pid).proyecto)
+    for paso in PASOS:
+        estado.completar(paso["id"], {})
+    proyecto = servidor.contexto(pid).proyecto
+    ruta = proyecto.ruta_paso("render", proyecto.version_activa("render"))
+    with open(os.path.join(ruta, "video.mp4"), "wb") as fh:
+        fh.write(b"mp4 de mentira")
+    return pid
+
+
+def probar_cambios_del_encargo_un_montaje():
+    """Arreglos del 19-10 (2): en el Encargo se tocan varias cosas del montaje
+    seguidas sin montar (`remontar: false`), queda la marca «sin aplicar» fuera
+    de los params, y «Aplicar y volver a montar» lanza UN trabajo: si lo
+    pendiente es solo la mezcla, `solo_montar`; si no, capas y montaje."""
+    seccion("ARREGLOS 19-10: VARIOS CAMBIOS DEL ENCARGO, UN SOLO MONTAJE")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_encargo_")
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(base)
+    lanzados, corridos = [], []
+    guardado = (servidor.lanzar_paso, servidor._correr_rehacer_montaje)
+    # un trabajo de verdad en el gestor, que no hace nada: se mira qué se pide
+    servidor.lanzar_paso = (lambda ctx, paso, unidades, **kw:
+                            lanzados.append((paso, kw.get("opciones")))
+                            or ctx.gestor.lanzar("falso", lambda avisar: {}, paso=paso))
+    servidor._correr_rehacer_montaje = (lambda avisar, ctx, tareas, solo_montar=False:
+                                        corridos.append((list(tareas), solo_montar)))
+    try:
+        pid = _video_montado_de_prueba(servidor, base, "encargo diferido")
+        ctx = servidor.contexto(pid)
+        igual(ctx.estado.estado_de("render"), "listo", "el vídeo de prueba está montado y al día")
+        firma = ctx.estado.firma("render")
+        r1 = servidor.cambiar_presencia_musica(pid, {"presencia": "alta", "remontar": False})
+        r2 = servidor.guardar_sonido(pid, {"musica_db": -3, "remontar": False})
+        r3 = servidor.cambiar_volumen_efectos(pid, {"nivel": "altos", "remontar": False})
+        igual((r1.get("trabajo_id"), r2.get("trabajo_id"), r3.get("trabajo_id"), lanzados),
+              (None, None, None, []),
+              "tres cambios seguidos con `remontar: false`: ningún trabajo (y ningún 409)")
+        ctx = servidor.contexto(pid)
+        ok("montaje_pendiente" in ctx.proyecto.config,
+           "queda la marca «sin aplicar» en proyecto.json")
+        ok(all("montaje_pendiente" not in (ctx.estado.params(p) or {})
+               for p in ("callouts", "render")),
+           "y FUERA de los params: no entra en ninguna firma")
+        leido = servidor.leer_montaje(pid)
+        igual((leido.get("sin_aplicar"), leido.get("solo_mezcla")), (True, True),
+              "GET /montaje dice «sin aplicar» y que basta con volver a mezclar")
+        respuesta = servidor.aplicar_montaje(pid)
+        time.sleep(0.5)
+        igual((lanzados, corridos), ([("render", {"solo_montar": True})], []),
+              "«Aplicar» lanza UN trabajo y solo vuelve a mezclar (`solo_montar`)")
+        igual(respuesta.get("solo_mezcla"), True, "y lo dice")
+        ok(not servidor.leer_montaje(pid).get("sin_aplicar"), "y la marca se va")
+        ok(ctx.estado.firma("render") != firma, "(el cambio sí está guardado en el render)")
+
+        # un cambio que toca las capas (los subtítulos): capas y montaje
+        lanzados.clear()
+        pid2 = _video_montado_de_prueba(servidor, base, "encargo con subtitulos")
+        servidor.guardar_sonido(pid2, {"musica_db": 2, "remontar": False})
+        servidor.cambiar_subtitulos(pid2, {"tam": "grande"})
+        leido = servidor.leer_montaje(pid2)
+        igual((leido.get("sin_aplicar"), leido.get("solo_mezcla")), (True, False),
+              "con los subtítulos cambiados ya no es solo mezcla")
+        respuesta = servidor.aplicar_montaje(pid2)
+        time.sleep(0.5)
+        igual((lanzados, corridos), ([], [(["callouts", "render"], False)]),
+              "y «Aplicar» rehace capas y montaje en un solo trabajo")
+
+        # un efecto vetado no toca params: la marca pide mezclar igual
+        lanzados.clear()
+        corridos.clear()
+        pid3 = _video_montado_de_prueba(servidor, base, "encargo con veto")
+        servidor._apuntar_montaje_pendiente(servidor.contexto(pid3), mezcla=True)
+        ok(servidor.leer_montaje(pid3).get("sin_aplicar"),
+           "un veto (sin params) también deja «sin aplicar»")
+        servidor.aplicar_montaje(pid3)
+        time.sleep(0.5)
+        igual(lanzados, [("render", {"solo_montar": True})],
+              "y se aplica con una mezcla aunque el render diga «al día»")
+    finally:
+        servidor.lanzar_paso, servidor._correr_rehacer_montaje = guardado
+        time.sleep(0.5)
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def probar_mezcla_cancelada_se_aplica_con_otra_mezcla():
+    """Arreglos del 19-10 (3): una mezcla cancelada (o un remontaje que
+    falló) deja el render obsoleto solo por claves de mezcla. «Regenerar
+    Vídeo» (la tanda `render` en «pendientes») la aplica con OTRA mezcla
+    (`solo_montar`), no volviendo a renderizar todos los planos."""
+    seccion("ARREGLOS 19-10: UNA MEZCLA CANCELADA SE APLICA CON OTRA MEZCLA")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_mezcla_")
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(base)
+    try:
+        pid = _video_montado_de_prueba(servidor, base, "mezcla cancelada")
+        # el cambio se guardó y su montaje se canceló: el render queda obsoleto
+        servidor.guardar_sonido(pid, {"musica_db": -4, "remontar": False})
+        ctx = servidor.contexto(pid)
+        igual(ctx.estado.estado_de("render"), "obsoleto", "el render queda obsoleto por la mezcla")
+        _funcion, args = servidor._que_hace("render", ctx, {}, "pendientes")
+        igual(args[-1], {"solo_montar": True},
+              "y «Regenerar Vídeo» lo aplica con `solo_montar`: ni un plano otra vez")
+        _funcion, args = servidor._que_hace("render", ctx, {}, "todo")
+        ok(not (args[-1] or {}).get("solo_montar"), "(en «todo», el render de siempre)")
+        # algo que no es mezcla (los subtítulos) obliga a renderizar
+        servidor.cambiar_subtitulos(pid, {"tam": "grande"})
+        ctx = servidor.contexto(pid)
+        ok(not servidor._solo_falta_mezclar(ctx),
+           "con las capas pendientes ya no es solo mezcla")
+        # y una transición (param del render que cambia los clips) tampoco
+        pid2 = _video_montado_de_prueba(servidor, base, "transiciones")
+        servidor.contexto(pid2).estado.actualizar_params("render", {"transiciones": ["fundido"]})
+        ok(not servidor._solo_falta_mezclar(servidor.contexto(pid2)),
+           "ni con otras transiciones: cambian los clips")
+    finally:
         servidor.fijar_raiz_proyectos(raiz_antes)
         shutil.rmtree(base, ignore_errors=True)
 
@@ -6859,6 +7089,7 @@ def main():
         probar_modo_light(cliente)
         probar_video_light(cliente)
         probar_traer_estilo(cliente)
+        probar_cambiar_de_estilo(cliente)
         probar_montaje(cliente)
         probar_estimacion(cliente)
         probar_el_coste_de_las_imagenes(cliente)
@@ -6912,6 +7143,8 @@ def main():
         probar_ortografia_de_campos(cliente, pid)
         probar_lo_de_v2h()
         probar_notas_19oct()
+        probar_cambios_del_encargo_un_montaje()
+        probar_mezcla_cancelada_se_aplica_con_otra_mezcla()
         probar_cancelar_en_el_taller()
         probar_espacio_fijo()
     finally:

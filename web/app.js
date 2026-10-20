@@ -1230,7 +1230,20 @@ async function cancelar(paso) {
 
 function repintarTrasCancelar(paso) {
   if (paso === CLAVE_LIGHT && APP.light.vista === 'generando') pintarLight();
+  // el «Parar» del vídeo no es una pieza viva: sin repintar seguía encendido
+  else if (paso === CLAVE_VIDEO_LIGHT && MODULOS.actual === 'crear') pintarLight();
   else pintarTrabajo(paso);
+}
+
+/* EL «PARAR» DEL VÍDEO (guion, voz, imágenes y montaje), con «Cancelando…» y
+   apagado desde el clic: el de la tanda del estilo ya lo hacía, este no, y un
+   montaje que tardaba en pararse se leía como que no había hecho caso (19-10). */
+function botonPararVideo() {
+  const t = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
+  return h('button', {
+    clase: 'mini peligro', disabled: !!t.cancelando,
+    onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
+  }, t.cancelando ? 'Cancelando…' : 'Parar');
 }
 
 /* En qué pestaña vive la barra de un trabajo. Los que no son un paso del grafo
@@ -1909,7 +1922,7 @@ async function irA(pestana, sinHistorial) {
     history.pushState({ pestana }, '', `#${pestana}`);
   }
   pintarPestanas();
-  $('#panel').scrollTop = 0;
+  subirArriba('panel');
   await refrescarPestana(pestana);
 }
 
@@ -5307,10 +5320,18 @@ function navLight() {
         /* EL ESTILO DE ESTE VÍDEO YA NO ESTÁ (borrado, o de un proyecto con
            clave sin abrir): se dice y te quedas en el vídeo. Antes te sacaba a
            la galería sin una palabra (N3 de las notas de mejoras, 13-10-2026). */
+        /* Y SE OFRECE CAMBIARLO (arreglos del 19-10): te lleva a «Su estilo»,
+           en el Encargo, con «Cambiar de estilo…» abierto (y «Restaurarlo» si
+           está en la papelera). */
         if (dentro) {
           toast(v.estilo
-            ? 'el estilo de este vídeo ya no está (borrado, o de un proyecto con clave sin abrir): el vídeo sigue igual'
-            : 'este vídeo no tiene un estilo apuntado', true);
+            ? 'el estilo de este vídeo ya no está (borrado, o de un proyecto con clave sin abrir): el vídeo sigue igual. Puedes pasarlo a otro estilo'
+            : 'este vídeo no tiene un estilo apuntado: puedes darle uno', true);
+          v.cambioEstilo = { pid: v.pid, abierto: true, partes: {} };
+          v.vista = 'encargo_video';
+          pintarLight();
+          const bloque = document.querySelector('.cambio-de-estilo');
+          if (bloque) bloque.scrollIntoView({ block: 'center' });
           return;
         }
         recordarVideoLight('');
@@ -5405,8 +5426,66 @@ function pintarLight() {
     pintarLightAhora();
   } finally {
     devolverFoco(foco);
+    devolverScroll('panel', claveScrollCrear);
   }
   apuntarSitioEnHistoria();
+}
+
+/* ==================================== LA PANTALLA NO SALTA (19-10-2026)
+ *
+ * Quien hace scroll es `#panel` (Crear) o `#modulo` (los módulos); la ventana
+ * nunca. Repintar entero en el acto conserva el scroll, pero en cuanto un
+ * repintado espera a la red con la pantalla a medio pintar («abriendo el
+ * vídeo…», «cargando…») el contenido mide casi nada, el navegador baja el
+ * scroll a 0 y al volver el contenido ya no sube solo: al terminar un
+ * remontaje, al «Traer» el estilo o al cambiar los días de Resultados se
+ * volvía arriba del todo (notas del dueño del 19-10).
+ *
+ * La memoria es UNA por caja: el último sitio en el que se movió y a qué
+ * altura. Se apunta al hacer scroll SOLO si hay un sitio (mientras se carga no
+ * lo hay: `sitioActual` da null y `claveScrollModulo` da '') y se devuelve al
+ * acabar de pintar si el sitio es el mismo. Ir a otro sitio a propósito pasa
+ * por `subirArriba`, que además la olvida: si no, volver al mismo sitio
+ * devolvería la altura de antes encima del «arriba» que se pidió. */
+const MEMORIA_SCROLL = {};
+
+function vigilarScroll(id, clave) {
+  const caja = document.getElementById(id);
+  if (!caja || caja.dataset.vigilaScroll) return;
+  caja.dataset.vigilaScroll = '1';
+  caja.addEventListener('scroll', () => {
+    const c = clave();
+    if (c) MEMORIA_SCROLL[id] = { clave: c, top: caja.scrollTop };
+  }, { passive: true });
+}
+
+function devolverScroll(id, clave) {
+  vigilarScroll(id, clave);
+  const caja = document.getElementById(id);
+  const m = MEMORIA_SCROLL[id];
+  if (!caja || !m) return;
+  const c = clave();
+  if (!c || c !== m.clave) return;
+  if (Math.abs(caja.scrollTop - m.top) > 1) caja.scrollTop = m.top;
+}
+
+function subirArriba(id) {
+  const caja = document.getElementById(id);
+  if (caja) caja.scrollTop = 0;
+  delete MEMORIA_SCROLL[id];
+}
+
+function claveScrollCrear() {
+  if (MODULOS.actual !== 'crear') return '';
+  const s = sitioActual();
+  return s ? JSON.stringify(s) : '';
+}
+
+function claveScrollModulo() {
+  if (MODULOS.actual === 'crear') return '';
+  if (MODULOS.actual === 'publicar' && PUB.cargando) return '';
+  return JSON.stringify([MODULOS.actual, PUB.seccion || '', PUB.pid || '', !!PUB.verInforme,
+    MODULOS.actual === 'automatizar' ? (PAR.seccion || '') : '']);
 }
 
 /* ==================================== EL BOTÓN «ATRÁS» DEL MÓVIL (N3, el resto)
@@ -5783,7 +5862,7 @@ function irALight(vista, extra) {
       && !APP.light.desdeVideo) {
     APP.light.desdeVideo = desde;
   }
-  $('#panel').scrollTop = 0;
+  subirArriba('panel');
   pintarLight();
 }
 
@@ -5868,7 +5947,7 @@ function apuntarClienteDe(cid) {
 
 function elegirCliente(cid) {
   apuntarCliente(cid);
-  $('#panel').scrollTop = 0;
+  subirArriba('panel');
   pintarLight();
 }
 
@@ -6688,9 +6767,17 @@ async function cargarVideoLight(pid) {
     ajustes.animoPedido = '';
     ajustes.dbEnVuelo = undefined;
   }
-  v.cargando = true;
+  /* EL VÍDEO QUE YA ESTÁ ABIERTO SE RELEE SIN TAPARLO (19-10-2026). Pintar
+     «abriendo el vídeo…» mientras llega lo nuevo dejaba la pantalla sin
+     contenido un instante y el scroll caía a 0: al acabar un remontaje o al
+     «Traer» el estilo se volvía arriba del todo. Se queda la vista de antes
+     hasta que llega la de ahora; abrir OTRO vídeo sí avisa. */
+  const releer = v.cargadoDe === pid && !v.cargando && !v.error && !!v.vista;
   v.error = '';
-  pintarLight();
+  if (!releer) {
+    v.cargando = true;
+    pintarLight();
+  }
   try {
     const proyecto = await pedir(API.proyecto(pid));
     /* lo que se estaba viendo de OTRO vídeo no se queda en este. Contra
@@ -7875,9 +7962,7 @@ function pieDeEncargo() {
     corriendo ? conAyuda(
       'Corta la tanda donde esté. Lo que ya se ha generado se queda hecho y no '
       + 'hay que volver a pagarlo.',
-      h('button', {
-        clase: 'mini peligro', onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
-      }, 'Parar')) : null,
+      botonPararVideo()) : null,
     (!corriendo && hayGuion && queda) ? h('span', {
       clase: 'pastilla obsoleto',
       title: 'has cambiado el encargo después de escribir el guion, así que el '
@@ -8014,7 +8099,10 @@ function panelOrtografia(fuente) {
       : 'tildes, letras y signos de lo que se lee; corregir solo vuelve a montar (gratis)'),
     h('button', { clase: 'mini', disabled: est.estado === 'pensando' || !!trabajoVideoLight(),
       onclick: () => revisarOrtografia(fuente) },
-    est.estado === 'pensando' ? 'Revisando…' : (est.estado ? 'Revisar otra vez' : 'Revisar la ortografía')));
+    est.estado === 'pensando' ? 'Revisando…' : (est.estado ? 'Revisar otra vez' : 'Revisar la ortografía')),
+    // LA REVISIÓN EDITORIAL, al lado (arreglos del 19-10): sus propuestas
+    // salen en su propio panel, debajo (`panelEditorial`)
+    fuente === 'guion' ? botonRevisionEditorial() : null);
   caja.appendChild(cab);
   if (fuente === 'guion') programarOrtografiaGuion();
   if (est.estado === 'pensando') {
@@ -8284,6 +8372,172 @@ async function aplicarOrtografia(fuente) {
   } catch (e) {
     toast(`no se han podido poner: ${e.message}`, true);
   }
+}
+
+/* LA REVISIÓN EDITORIAL DEL GUION (arreglos del 19-10, 5). «Revisión
+   editorial», junto a la ortografía: Claude como corrector editorial
+   (sintaxis, concordancia, puntuación, repeticiones, claridad, registro;
+   `ortografia.revisar_editorial`, sonnet con esfuerzo medio) propone trozos
+   sueltos {original → propuesta, motivo}. Se aceptan o rechazan UNA A UNA, o
+   «Aceptar todas». Aceptar pone el trozo en su bloque por el MISMO camino que
+   escribir a mano (`guardarBloqueLight`), sin tocar las marcas de la voz; con
+   la voz ya grabada, se avisa de qué bloques habrá que regrabar. El estado,
+   fuera del panel y por vídeo, como el de la ortografía. */
+const EDITORIAL_VIVA = new Map();
+
+function botonRevisionEditorial() {
+  const v = APP.light.video;
+  const est = EDITORIAL_VIVA.get(v.pid) || {};
+  return h('button', {
+    clase: 'mini', disabled: est.estado === 'pensando' || !!trabajoVideoLight(),
+    title: 'sintaxis, concordancia, puntuación, repeticiones y claridad, como un corrector editorial',
+    onclick: () => revisarEditorial(),
+  }, est.estado === 'pensando' ? 'Revisando la redacción…' : 'Revisión editorial');
+}
+
+function panelEditorial() {
+  const v = APP.light.video;
+  const est = EDITORIAL_VIVA.get(v.pid);
+  if (!est) return null;
+  const caja = h('div', { clase: 'panel-ortografia panel-editorial' });
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('b', {}, 'Revisión editorial'),
+    h('span', { clase: 'meta crece' }, v.audio
+      ? 'propuestas de redacción; la voz ya está grabada: lo que aceptes habrá que regrabarlo'
+      : 'propuestas de redacción: acéptalas o recházalas una a una'),
+    h('button', { clase: 'mini', onclick: () => { EDITORIAL_VIVA.delete(v.pid); pintarLight(); } }, 'Cerrar')));
+  if (est.estado === 'pensando') {
+    caja.appendChild(h('div', { clase: 'cargando' },
+      `el corrector editorial está leyendo ${est.revisados || ''} bloques… (puede tardar un par de minutos)`));
+    return caja;
+  }
+  if (est.estado === 'error') { caja.appendChild(cajaError(est.error || 'no se ha podido revisar')); return caja; }
+  const sinRevisar = Number(est.sin_revisar) || 0;
+  if (sinRevisar) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      `${sinRevisar} bloque(s) se han quedado sin revisar: ${est.detalle || 'el corrector devolvió una respuesta rota'}. `
+      + 'Pulsa «Revisión editorial» otra vez para repasarlos.'));
+  }
+  const props = est.propuestas || [];
+  est.hechas = est.hechas || {};
+  const pendientes = props.filter(p => !est.hechas[p.id]);
+  if (!props.length) {
+    caja.appendChild(h('div', { clase: 'meta' }, `✓ Nada que proponer en ${est.revisados || 0} bloques.`));
+    return caja;
+  }
+  const aceptadas = props.filter(p => est.hechas[p.id] === 'aceptada').length;
+  caja.appendChild(h('div', { clase: 'meta' }, pendientes.length
+    ? `${pendientes.length} de ${props.length} propuestas por decidir`
+      + (aceptadas ? ` · ${aceptadas} aceptada(s)` : '')
+    : `Decididas las ${props.length} propuestas (${aceptadas} aceptada(s)).`));
+  const lista = h('div', { clase: 'lista-ortografia' });
+  props.forEach(p => {
+    const hecha = est.hechas[p.id];
+    lista.appendChild(h('div', { clase: 'fila-ortografia fila-editorial' + (hecha ? ' decidida' : '') },
+      h('span', { clase: 'id' }, p.bloque),
+      h('span', { clase: 'crece' },
+        h('span', { clase: 'editorial-antes' }, p.original), ' → ',
+        h('span', { clase: 'despues' }, p.propuesta),
+        h('span', { clase: 'meta' }, ` · ${p.motivo || ''}${p.tipo ? ` (${p.tipo})` : ''}`)),
+      hecha ? h('span', { clase: 'pastilla' }, hecha === 'aceptada' ? 'aceptada'
+        : hecha === 'a_mano' ? 'a mano' : 'rechazada')
+        : h('span', { clase: 'herramientas' },
+          h('button', { clase: 'mini primario', disabled: !!trabajoVideoLight(),
+            onclick: () => aceptarEditorial([p.id]) }, 'Aceptar'),
+          h('button', { clase: 'mini', onclick: () => { est.hechas[p.id] = 'rechazada'; pintarLight(); } },
+            'Rechazar'))));
+  });
+  caja.appendChild(lista);
+  if (pendientes.length > 1) {
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'primario', disabled: !!trabajoVideoLight(),
+        onclick: () => aceptarEditorial(pendientes.map(p => p.id)) }, 'Aceptar todas'),
+      h('span', { clase: 'meta' }, v.audio
+        ? 'se guardan en el guion; la voz de esos bloques queda por regrabar (se paga)'
+        : 'se guardan en el guion, como si las escribieras a mano')));
+  }
+  return caja;
+}
+
+async function revisarEditorial() {
+  const v = APP.light.video;
+  const pid = v.pid;
+  const textos = textosGuionOrtografia(v);
+  if (!Object.keys(textos).length) { toast('No hay guion que revisar', true); return; }
+  const est = { estado: 'pensando', revisados: Object.keys(textos).length };
+  EDITORIAL_VIVA.set(pid, est);
+  pintarLight();
+  try {
+    const lanzada = await pedir(`${API.proyecto(pid)}/ortografia/revisar`, {
+      method: 'POST', cuerpo: { fuente: 'guion', modo: 'editorial', textos },
+    });
+    let ficha = { estado: 'pensando' };
+    for (let i = 0; i < 400 && ficha.estado === 'pensando'; i += 1) {
+      await new Promise(r => setTimeout(r, 1500));
+      ficha = await pedir(`${API.proyecto(pid)}/ortografia/${lanzada.id}`);
+    }
+    if (ficha.estado === 'pensando') throw new Error('la revisión tarda demasiado: vuelve a pedirla en un momento');
+    ficha.hechas = {};
+    if (EDITORIAL_VIVA.get(pid) === est) EDITORIAL_VIVA.set(pid, ficha);
+  } catch (e) {
+    if (EDITORIAL_VIVA.get(pid) === est) EDITORIAL_VIVA.set(pid, { estado: 'error', error: e.message });
+  }
+  if (videoAbierto().pid === pid) pintarLight();
+}
+
+/* Pone las propuestas `ids` en sus bloques. El trozo se busca en el texto
+   CRUDO del bloque (con sus marcas de la voz) como en la ortografía
+   (`sustituirPalabra`: palabra entera y fuera de las marcas), y tiene que
+   estar UNA sola vez en lo que se lee; varias del mismo bloque se encadenan.
+   Lo que no se encuentra (el bloque cambió desde la revisión) queda «a mano». */
+async function aceptarEditorial(ids) {
+  const v = APP.light.video;
+  const pid = v.pid;
+  const est = EDITORIAL_VIVA.get(pid) || {};
+  est.hechas = est.hechas || {};
+  const elegidas = (est.propuestas || []).filter(p => ids.includes(p.id) && !est.hechas[p.id]);
+  if (!elegidas.length) return;
+  const bloques = [...new Set(elegidas.map(p => p.bloque))];
+  if (v.audio && !window.confirm(
+    `La voz ya está grabada: aceptar ${elegidas.length === 1 ? 'esta propuesta' : `estas ${elegidas.length} propuestas`} `
+    + `cambia ${bloques.length === 1 ? 'el bloque' : 'los bloques'} ${bloques.join(', ')}, y habrá que `
+    + 'regrabar su voz (se paga). ¿Las aceptamos?')) return;
+  const porId = {};
+  ((v.guion || {}).bloques || []).forEach(b => { porId[b.id] = b; });
+  const nuevos = {};
+  const aMano = [];
+  const veces = (texto, trozo) => texto.split(trozo).length - 1;
+  elegidas.forEach(p => {
+    const b = porId[p.bloque];
+    if (!b) { aMano.push(p); return; }
+    const crudo = nuevos[b.id] !== undefined ? nuevos[b.id] : textoDeBloqueLight(b);
+    const visible = textoVisibleLight(crudo).split(/\s+/).filter(Boolean).join(' ');
+    if (veces(visible, p.original) !== 1) { aMano.push(p); return; }
+    const puesto = sustituirPalabra(crudo, p.original, p.propuesta);
+    if (puesto === null) { aMano.push(p); return; }
+    nuevos[b.id] = puesto;
+  });
+  try {
+    Object.entries(nuevos).forEach(([bid, texto]) => {
+      const b = porId[bid];
+      guardarBloqueLight(bid, texto, b.insertado ? undefined : b.texto, !!b.insertado);
+    });
+    await guardarBloquesPendientesLight();
+    elegidas.forEach(p => { est.hechas[p.id] = aMano.includes(p) ? 'a_mano' : 'aceptada'; });
+    const puestas = elegidas.length - aMano.length;
+    const tocados = Object.keys(nuevos);
+    let aviso = `${puestas} propuesta(s) puestas en el guion`;
+    if (aMano.length) {
+      aviso += `; ${aMano.length} hay que ponerla(s) a mano (${aMano.map(p => p.bloque).join(', ')}): `
+        + 'ese trozo ya no está igual en el bloque';
+    }
+    if (v.audio && tocados.length) aviso += `. Hay que regrabar la voz de ${tocados.join(', ')}`;
+    toast(aviso, aMano.length > 0);
+    await recargarVideoAbierto();
+  } catch (e) {
+    toast(`no se han podido poner: ${e.message}`, true);
+  }
+  if (videoAbierto().pid === pid) pintarLight();
 }
 
 /* LA ORTOGRAFÍA DE UN CAMPO SUELTO (18-10-2026): «el corrector también debe
@@ -9178,6 +9432,8 @@ function vistaGuionLight() {
      la voz ya grabada corregir es regrabar (lo dice el panel), y para que solo
      se lea bien están los subtítulos, en la pantalla Vídeo. */
   caja.appendChild(panelOrtografia('guion'));
+  const editorial = panelEditorial();
+  if (editorial) caja.appendChild(editorial);
 
   // EL REPRODUCTOR VIVE EN LA BARRA DE ABAJO (ver `pieLight`). Estaba arriba
   // del guion para que los mandos no se fueran con el scroll; la barra fija lo
@@ -10047,9 +10303,7 @@ function pieLight() {
     corriendo ? conAyuda(
       'Corta la tanda donde esté. Lo que ya se ha generado se queda hecho y no '
       + 'hay que volver a pagarlo.',
-      h('button', {
-        clase: 'mini peligro', onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
-      }, 'Parar')) : null,
+      botonPararVideo()) : null,
     conAyuda(!hayAudio
       ? 'Primero hace falta el audio: los subtítulos se colocan con sus '
         + 'tiempos, así que sin voz no hay dónde ponerlos.'
@@ -11727,9 +11981,7 @@ function vistaVideoLight() {
     barraTandaLight('render'),
     trabajoVideoLight() ? conAyuda(
       'Corta el montaje donde esté. Los clips ya encadenados se quedan hechos.',
-      h('button', {
-        clase: 'mini peligro', onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
-      }, 'Parar')) : null,
+      botonPararVideo()) : null,
     /* EL MISMO ORDEN QUE EN EL GUION: a la izquierda lo que se le hace al
        video, en medio lo que esta pasando, y a la derecha lo que se hace CON el
        video ya montado. Estaba mezclado --boton, pastilla, progreso, aplicar,
@@ -16839,7 +17091,10 @@ function bloqueLlevaDelVideo() {
         cargar();
       }
     }));
-    caja.appendChild(ajustesDelMontaje({ tipo: 'video', pid: v.pid }, v.lleva));
+    /* EN EL ENCARGO SE GUARDA SIN MONTAR (`diferir`, 19-10-2026): se tocan
+       varias cosas seguidas y se montan todas a la vez con «Aplicar y volver
+       a montar». La pantalla Vídeo sigue montando con cada cambio. */
+    caja.appendChild(ajustesDelMontaje({ tipo: 'video', pid: v.pid, diferir: true }, v.lleva));
   };
   const cargar = async () => {
     await leerLlevaDelVideo(v);
@@ -16969,6 +17224,8 @@ function ajustesDelMontaje(modo, lleva) {
     vaciar(caja);
     caja.appendChild(h('div', { clase: 'ajustes-cab' }, h('b', {}, 'Ajustes del montaje'),
       h('span', { clase: 'meta' }, ' · todo automático si no tocas nada; nada de esto paga imágenes')));
+    const franja = franjaSinAplicar(modo, est);
+    if (franja) caja.appendChild(franja);
     if (lleva.musica !== false) caja.appendChild(filaAjuste(modo, est, 'musica', pintar));
     if (lleva.subtitulos !== false) caja.appendChild(filaAjuste(modo, est, 'subtitulos', pintar));
     caja.appendChild(filaAjuste(modo, est, 'logo', pintar));
@@ -16988,6 +17245,38 @@ function ajustesDelMontaje(modo, lleva) {
   }
   pintar();
   return caja;
+}
+
+/* «Hay cambios del montaje sin aplicar» (solo en el Encargo, `diferir`): lo
+   guardado con `remontar: false` se monta todo de una vez. El servidor decide
+   si basta con volver a mezclar (segundos) o hay que rehacer capas y montaje. */
+function franjaSinAplicar(modo, est) {
+  if (!modo.diferir || modo.tipo !== 'video') return null;
+  const montaje = est.montaje || {};
+  if (!montaje.montado || !(est.sinAplicar || montaje.sin_aplicar)) return null;
+  const enMarcha = !!trabajoVideoLight();
+  return h('div', { clase: 'franja-sin-aplicar' },
+    h('span', { clase: 'crece' }, enMarcha ? 'Montando el vídeo con tus cambios…'
+      : 'Hay cambios del montaje sin aplicar'),
+    h('button', {
+      clase: 'mini primario', disabled: enMarcha || !!est.aplicando,
+      title: 'Monta el vídeo una sola vez con todo lo cambiado: ninguna imagen, gratis',
+      onclick: () => aplicarMontajePendiente(modo, est),
+    }, est.aplicando ? 'Aplicando…' : 'Aplicar y volver a montar'));
+}
+
+async function aplicarMontajePendiente(modo, est) {
+  est.aplicando = true;
+  if (est.repintar) est.repintar();
+  try {
+    const r = await pedir(`${API.proyecto(modo.pid)}/montaje/aplicar`, { method: 'POST' });
+    est.sinAplicar = false;
+    if (est.montaje) { est.montaje.sin_aplicar = false; est.montaje.pendiente = false; }
+    if (est.subtitulos) est.subtitulos.pendiente = false;
+    avisoDeMontaje(r, r.solo_mezcla ? 'Cambios del montaje (solo la mezcla)' : 'Cambios del montaje');
+  } catch (e) { toast(e.message, true); }
+  est.aplicando = false;
+  if (est.repintar) est.repintar();
 }
 
 async function cargarAjustesVideo(modo, est) {
@@ -17106,13 +17395,30 @@ function resumenAjuste(modo, est, cual) {
 }
 
 /* Lo que devuelve la API al cambiar algo que vuelve a montar el vídeo. */
-function avisoDeMontaje(r, quePasa) {
+function avisoDeMontaje(r, quePasa, modo) {
+  if (modo && modo.diferir && !(r && r.trabajo_id)) {
+    // el Encargo: guardado, y se aplica con lo demás en un solo montaje
+    const est = estadoAjustes(modo);
+    est.sinAplicar = true;
+    toast(`${quePasa}: guardado. Se aplica con «Aplicar y volver a montar»`);
+    if (est.repintar) est.repintar();
+    return;
+  }
   if (r && r.trabajo_id) {
     toast(`${quePasa}: volviendo a montar el vídeo, sin dibujar nada`);
     seguirTrabajo(CLAVE_VIDEO_LIGHT, r.trabajo_id, async trabajo => {
       if (trabajo.estado === 'listo') toast(`${quePasa}: el vídeo ya está montado de nuevo`);
+      // CANCELADO NO ES UN FALLO: el MP4 es el de antes y el cambio sigue
+      // guardado (en un montaje cancelado no se toca ninguna versión)
+      else if (trabajo.estado === 'cancelado') {
+        toast('Cancelado: el vídeo sigue siendo el de antes. El cambio está guardado '
+          + 'y se aplicará al volver a montar.');
+      }
       try { await recargarVideoAbierto(); } catch (e) { /* se relee al volver */ }
     });
+    // el «Parar» y la barra salen YA: sin repintar no aparecían hasta el
+    // siguiente repintado (y no había cómo parar un montaje recién lanzado)
+    if (MODULOS.actual === 'crear') pintarLight();
   } else if (r && r.montado) {
     toast(`${quePasa}: guardado. Se aplicará al volver a montar el vídeo (hay cosas pendientes)`);
   } else {
@@ -17136,9 +17442,9 @@ function editorMusica(modo, est, repintar) {
       if (borrador) { op.presencia = n.id; repintar(); return; }
       try {
         const r = await pedir(`${API.proyecto(modo.pid)}/musica/presencia`,
-          { method: 'PUT', cuerpo: { presencia: n.id } });
+          { method: 'PUT', cuerpo: { presencia: n.id, remontar: !modo.diferir } });
         est.musica.presencia = Object.assign({}, est.musica.presencia, { presencia: r.presencia, elegida: true });
-        if (r.cambiado) avisoDeMontaje(r, 'Música');
+        if (r.cambiado) avisoDeMontaje(r, 'Música', modo);
       } catch (e) { toast(e.message, true); }
       repintar();
     },
@@ -17177,10 +17483,10 @@ function editorMusica(modo, est, repintar) {
     }
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/sonido`, {
-        method: 'PUT', cuerpo: { musica: nuevo || {}, remontar: true } });
+        method: 'PUT', cuerpo: { musica: nuevo || {}, remontar: !modo.diferir } });
       est.musica.tema = nuevo || null;
       if (!nuevo) est.busqueda.abierta = false;
-      avisoDeMontaje(r, nuevo ? 'Música' : 'Música automática');
+      avisoDeMontaje(r, nuevo ? 'Música' : 'Música automática', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   }
@@ -17226,9 +17532,9 @@ function volumenFinoMusica(modo, est, repintar) {
     }
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/sonido`, {
-        method: 'PUT', cuerpo: { musica_db: valor, remontar: true } });
+        method: 'PUT', cuerpo: { musica_db: valor, remontar: !modo.diferir } });
       est.musica.db = valor;
-      if (r.cambiado !== false) avisoDeMontaje(r, 'Volumen de la música');
+      if (r.cambiado !== false) avisoDeMontaje(r, 'Volumen de la música', modo);
     } catch (e) { toast(e.message, true); }
     est.dbEnVuelo = undefined;
     repintar();
@@ -17424,17 +17730,17 @@ function editorEfectos(modo, est, repintar) {
   const volumen = async nivel => {
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/sonido/efectos/volumen`, {
-        method: 'PUT', cuerpo: { nivel } });
+        method: 'PUT', cuerpo: { nivel, remontar: !modo.diferir } });
       est.efectosVolumen = r.nivel;
-      if (r.cambiado) avisoDeMontaje(r, 'Volumen de los efectos');
+      if (r.cambiado) avisoDeMontaje(r, 'Volumen de los efectos', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   };
   const vetar = async (papel, ef, quitar) => {
     try {
       const r = await pedir(API.sonidoVetados(modo.pid), {
-        method: 'POST', cuerpo: { efecto: ef, papel, quitar: !!quitar, remontar: true } });
-      avisoDeMontaje(r, quitar ? 'Efecto devuelto' : 'Efecto descartado');
+        method: 'POST', cuerpo: { efecto: ef, papel, quitar: !!quitar, remontar: !modo.diferir } });
+      avisoDeMontaje(r, quitar ? 'Efecto devuelto' : 'Efecto descartado', modo);
     } catch (e) { toast(e.message, true); }
     await releer();
   };
@@ -17460,11 +17766,11 @@ function editorEfectos(modo, est, repintar) {
   const fijar = async (papel, ficha) => {
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/sonido/efecto`, {
-        method: 'PUT', cuerpo: { papel, efecto: ficha || null, remontar: true } });
+        method: 'PUT', cuerpo: { papel, efecto: ficha || null, remontar: !modo.diferir } });
       est.fijos = r.fijos || [];
       est.efectos = Object.assign({}, est.efectos, { [papel]: r.efectos || [] });
       if (ficha) bf.papel = '';
-      avisoDeMontaje(r, ficha ? 'Efecto' : 'Efecto automático');
+      avisoDeMontaje(r, ficha ? 'Efecto' : 'Efecto automático', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   };
@@ -17572,10 +17878,11 @@ function editorSubtitulos(modo, est, repintar) {
       return;
     }
     try {
-      await pedir(`${API.proyecto(modo.pid)}/subtitulos`, { method: 'PUT', cuerpo: cambios });
+      const r = await pedir(`${API.proyecto(modo.pid)}/subtitulos`, { method: 'PUT', cuerpo: cambios });
       est.subtitulos = await pedir(`${API.proyecto(modo.pid)}/subtitulos`);
+      if (modo.diferir && r.cambiado) est.sinAplicar = true;
     } catch (e) { toast(e.message, true); }
-    repintar();
+    if (modo.diferir && est.repintar) est.repintar(); else repintar();
   };
   const filaDe = (etiqueta, opciones, valor, clave, ayuda) => h('div', { clase: 'campo' },
     h('label', {}, etiqueta),
@@ -17606,7 +17913,9 @@ function editorSubtitulos(modo, est, repintar) {
     pie.appendChild(h('button', { clase: 'mini', onclick: () => cambiar({ automatico: true }) },
       'Volver a los del estilo'));
   }
-  if (!borrador && actual.montado && actual.pendiente) {
+  if (!borrador && modo.diferir && actual.montado && actual.pendiente) {
+    pie.appendChild(h('span', { clase: 'meta' }, 'se aplican con «Aplicar y volver a montar», arriba'));
+  } else if (!borrador && actual.montado && actual.pendiente) {
     pie.appendChild(h('button', {
       clase: 'mini primario',
       onclick: async () => {
@@ -17815,8 +18124,9 @@ function editorMontaje(modo, est, repintar) {
       if (transiciones) cuerpo.transiciones = transiciones;
       est.montaje = await pedir(`${API.proyecto(modo.pid)}/montaje`, { method: 'PUT', cuerpo });
       MONTAJE_PLANOS.datos = null;   // «Como el vídeo (…)» dice el de ahora
+      if (modo.diferir && est.montaje.cambiado) est.sinAplicar = true;
     } catch (err) { toast(err.message, true); }
-    repintar();
+    if (modo.diferir && est.repintar) est.repintar(); else repintar();
   };
   const botones = (lista, valor, clave) => h('div', { clase: 'herramientas' },
     ...lista.map(([id, nombre]) => h('button', {
@@ -17868,6 +18178,8 @@ function editorMontaje(modo, est, repintar) {
     pie.appendChild(h('span', { clase: 'meta' }, esCortoElEncargo(modo.e, datos)
       ? 'Automático en un vídeo de hasta 2 minutos: vivo, subtítulos de redes, gancho, cifras y barra.'
       : 'Automático en un vídeo largo: lo de siempre.'));
+  } else if (modo.diferir && est.montaje.montado && est.montaje.pendiente) {
+    pie.appendChild(h('span', { clase: 'meta' }, 'se aplica con «Aplicar y volver a montar», arriba'));
   } else if (est.montaje.montado && est.montaje.pendiente) {
     pie.appendChild(h('button', {
       clase: 'mini primario',
@@ -18132,9 +18444,10 @@ function editorLogo(modo, est, repintar) {
         op.logo = Object.assign({ posicion: 'arriba_derecha', tamano: 0.12, opacidad: 0.9 },
           op.logo || {}, { fichero: r.nombre });
       } else {
-        const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'POST', cuerpo });
+        const r = await pedir(`${API.proyecto(modo.pid)}/logo${modo.diferir ? '?remontar=0' : ''}`,
+          { method: 'POST', cuerpo });
         est.logo = r.logo;
-        avisoDeMontaje(r, 'Logo');
+        avisoDeMontaje(r, 'Logo', modo);
       }
     } catch (e) { toast(e.message, true); }
     repintar();
@@ -18142,18 +18455,20 @@ function editorLogo(modo, est, repintar) {
   async function usarDelProyecto() {
     if (borrador) { op.logo = null; delete op.logo; repintar(); return; }
     try {
-      const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'PUT', cuerpo: { usar: delProyecto.logo } });
+      const r = await pedir(`${API.proyecto(modo.pid)}/logo`,
+        { method: 'PUT', cuerpo: { usar: delProyecto.logo, remontar: !modo.diferir } });
       est.logo = r.logo;
-      avisoDeMontaje(r, 'Logo');
+      avisoDeMontaje(r, 'Logo', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   }
   async function quitar() {
     if (borrador) { op.logo = false; repintar(); return; }
     try {
-      const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'PUT', cuerpo: { quitar: true } });
+      const r = await pedir(`${API.proyecto(modo.pid)}/logo`,
+        { method: 'PUT', cuerpo: { quitar: true, remontar: !modo.diferir } });
       est.logo = null;
-      avisoDeMontaje(r, 'Logo quitado');
+      avisoDeMontaje(r, 'Logo quitado', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   }
@@ -18164,9 +18479,10 @@ function editorLogo(modo, est, repintar) {
       return;
     }
     try {
-      const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'PUT', cuerpo: cambios });
+      const r = await pedir(`${API.proyecto(modo.pid)}/logo`,
+        { method: 'PUT', cuerpo: Object.assign({ remontar: !modo.diferir }, cambios) });
       est.logo = r.logo || est.logo;
-      if (r.trabajo_id || r.montado !== undefined) avisoDeMontaje(r, 'Logo');
+      if (r.trabajo_id || r.montado !== undefined) avisoDeMontaje(r, 'Logo', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   }
@@ -18188,7 +18504,13 @@ function vistaPreviaLogo(url, logo) {
 function bloqueEstiloDelVideo() {
   const v = APP.light.video;
   const caja = h('div', { clase: 'estilo-del-video' });
+  /* «CAMBIAR DE ESTILO…» VA SIEMPRE DEBAJO (arreglos del 19-10): un vídeo
+     cuyo estilo se borró se quedaba aquí con una frase y ningún botón. */
   const pintar = () => {
+    pintarLoDelEstilo();
+    if (v.cambiosEstilo) caja.appendChild(cambioDeEstiloLight(pintar));
+  };
+  const pintarLoDelEstilo = () => {
     vaciar(caja);
     const datos = v.cambiosEstilo;
     if (!datos) { caja.appendChild(h('div', { clase: 'cargando' }, 'comparando con el estilo…')); return; }
@@ -18265,6 +18587,7 @@ function bloqueEstiloDelVideo() {
      margen de unos segundos para no preguntar en cada repintado. */
   if (v.cambiosEstiloDe !== v.pid) {
     v.cambiosEstiloDe = v.pid; v.cambiosEstilo = null; v.partesEstilo = {};
+    if ((v.cambioEstilo || {}).pid !== v.pid) v.cambioEstilo = null;
   }
   if (!v.cambiosEstiloCargando
     && (!v.cambiosEstilo || Date.now() - (v.cambiosEstiloEn || 0) > 4000)) cargar();
@@ -18357,6 +18680,135 @@ function listaConY(lista) {
 function usdCorto(usd) {
   const n = Number(usd || 0);
   return `${n.toFixed(n < 0.1 ? 3 : 2)} $`;
+}
+
+/* ============================================ CAMBIAR DE ESTILO UN VÍDEO
+ *
+ * Arreglos del 19-10 (4). Un vídeo se queda con la copia de su estilo; si el
+ * estilo se borra (o el vídeo llega de otra máquina) quedaba huérfano: «Su
+ * estilo» decía «ya no existe» y no había nada que pulsar. Ahora se elige otro
+ * estilo, se ve qué partes cambiarían con su coste (`GET .../estilo/cambios
+ * ?estilo=<otro>`, no escribe nada) y se pasa a él trayendo solo lo marcado
+ * (`PUT .../estilo`). Sin marcar nada solo cambia el estilo apuntado: nada se
+ * rehace. Si el estilo está en la papelera, además, «Restaurarlo». El estado
+ * vive en `v.cambioEstilo` para que el repintado del encargo no lo pierda. */
+function cambioDeEstiloLight(repintar) {
+  const v = APP.light.video;
+  const datos = v.cambiosEstilo || {};
+  const c = v.cambioEstilo || (v.cambioEstilo = { pid: v.pid, abierto: false, partes: {} });
+  const corriendo = !!trabajoVideoLight();
+  const actual = datos.actual || (datos.estilo || {}).id || v.estilo || '';
+  const caja = h('div', { clase: 'cambio-de-estilo' });
+  if ((datos.estilo || {}).en_papelera) {
+    caja.appendChild(h('div', { clase: 'caja-aviso fila' },
+      h('span', { clase: 'crece' }, `«${datos.estilo.nombre || actual}» está en la papelera. `
+        + 'El vídeo sigue igual; restáuralo para seguir usándolo, o pásalo a otro estilo.'),
+      h('button', { clase: 'mini', onclick: () => restaurarEstiloDelVideo(actual) }, 'Restaurarlo')));
+  }
+  if (!c.abierto) {
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', disabled: corriendo,
+        onclick: () => { c.abierto = true; repintar(); } }, 'Cambiar de estilo…')));
+    return caja;
+  }
+  const otros = presetsLight().filter(p => p.id !== actual);
+  const elegir = h('select', {
+    onchange: ev => {
+      ev.stopPropagation();              // no es un campo del encargo
+      verCambioDeEstilo(ev.target.value, repintar);
+    },
+  }, h('option', { value: '' }, otros.length ? 'Elige el estilo nuevo…' : 'no hay otros estilos'),
+  ...otros.map(p => h('option', { value: p.id, selected: p.id === c.destino }, p.nombre || p.id)));
+  caja.appendChild(h('div', { clase: 'fila' }, h('b', {}, 'Pasar este vídeo a otro estilo'), elegir));
+  const previa = c.previa;
+  if (c.cargando) caja.appendChild(h('div', { clase: 'cargando' }, 'comparando con ese estilo…'));
+  else if (previa && previa.por_que_no) caja.appendChild(h('div', { clase: 'caja-aviso' }, previa.por_que_no));
+  else if (previa) {
+    const cambian = (previa.partes || []).filter(p => p.cambia);
+    caja.appendChild(h('div', { clase: 'meta' }, cambian.length
+      ? 'Marca lo que quieras traer de ese estilo. Sin marcar nada, el vídeo solo cambia de '
+        + 'estilo apuntado y no se rehace nada.'
+      : 'Ese estilo no cambiaría nada de este vídeo: solo cambia el estilo apuntado.'));
+    for (const parte of cambian) {
+      const coste = parte.usd === null ? 'cuesta según tu plan de voz'
+        : parte.usd_hasta !== undefined
+          ? `≈ ${usdCorto(parte.usd)} de voz y hasta ${usdCorto(parte.usd_hasta)} si cambian todas las imágenes`
+          : (parte.usd ? `≈ ${usdCorto(parte.usd)}` : 'gratis');
+      caja.appendChild(h('label', { clase: 'parte-estilo' },
+        h('input', { type: 'checkbox', checked: !!c.partes[parte.id],
+          onchange: ev => { ev.stopPropagation(); c.partes[parte.id] = ev.target.checked; repintar(); } }),
+        h('span', { clase: 'crece' }, h('b', {}, parte.nombre), h('span', { clase: 'meta' }, ` · ${parte.rehace}`)),
+        h('span', { clase: 'pastilla' + (parte.usd !== 0 ? ' coste' : '') }, coste)));
+    }
+    const cli = previa.cliente || {};
+    const nombreDe = cid => (fichaCliente(cid) || {}).nombre || cid;
+    if (cli.antes && cli.antes === cli.ahora) {
+      caja.appendChild(h('div', { clase: 'meta' }, `Se queda en el proyecto «${nombreDe(cli.antes)}».`));
+    } else if (cli.ahora !== cli.antes) {
+      caja.appendChild(h('div', { clase: 'caja-aviso' }, cli.ahora
+        ? `Pasa al proyecto «${nombreDe(cli.ahora)}», el de ese estilo.`
+        : 'Sale de su proyecto: ese estilo no es de ninguno.'));
+    }
+  }
+  const elegidas = ((previa && previa.partes) || []).filter(p => p.cambia && c.partes[p.id]);
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini primario',
+      disabled: corriendo || !c.destino || !previa || !!previa.por_que_no || c.cargando,
+      onclick: () => pasarAEstiloLight(elegidas) },
+    elegidas.length ? `Pasar a este estilo y traer ${elegidas.length === 1 ? 'esto' : 'lo marcado'}`
+      : 'Pasar a este estilo'),
+    h('button', { clase: 'mini', onclick: () => { v.cambioEstilo = null; repintar(); } }, 'Cancelar')));
+  return caja;
+}
+
+async function verCambioDeEstilo(id, repintar) {
+  const v = APP.light.video;
+  const pid = v.pid;
+  const c = v.cambioEstilo;
+  if (!c) return;
+  Object.assign(c, { destino: id, previa: null, partes: {}, cargando: !!id });
+  repintar();
+  if (!id) return;
+  try {
+    const previa = await pedir(`${API.proyecto(pid)}/estilo/cambios?estilo=${encodeURIComponent(id)}`);
+    if (v.pid !== pid || v.cambioEstilo !== c || c.destino !== id) return;
+    c.previa = previa;
+  } catch (e) {
+    if (v.cambioEstilo === c) c.previa = { por_que_no: e.message };
+  }
+  c.cargando = false;
+  if (v.cambioEstilo === c) repintar();
+}
+
+async function pasarAEstiloLight(partes) {
+  const v = APP.light.video;
+  const c = v.cambioEstilo || {};
+  const ficha = fichaLight(c.destino) || {};
+  const lista = partes.map(p => `• ${p.nombre}: ${p.rehace}`).join('\n');
+  if (!confirm(`Pasar «${v.nombre}» al estilo «${ficha.nombre || c.destino}».\n\n`
+    + (partes.length ? `Se trae:\n${lista}\n\nAhora no se genera nada.`
+      : 'No se trae nada: solo cambia el estilo apuntado y no se rehace nada.'))) return;
+  try {
+    const r = await pedir(`${API.proyecto(v.pid)}/estilo`, {
+      method: 'PUT', cuerpo: { estilo: c.destino, partes: partes.map(p => p.id) },
+    });
+    v.cambioEstilo = null;
+    v.cambiosEstilo = null;
+    toast(`Ahora es del estilo «${(r.estilo || {}).nombre || c.destino}».`
+      + ((r.traidas || []).length ? ' Debajo tienes el siguiente paso.' : ''));
+    await cargarClientes();
+    await cargarVideoLight(v.pid);
+  } catch (e) { toast(`no se ha podido cambiar de estilo: ${e.message}`, true); }
+}
+
+async function restaurarEstiloDelVideo(id) {
+  const v = APP.light.video;
+  try {
+    await pedir(`${BASE}/api/presets-canal/papelera/${encodeURIComponent(id)}/restaurar`, { method: 'POST' });
+    toast('Estilo restaurado: vuelve a estar en tus estilos.');
+    v.cambiosEstilo = null;
+    await cargarGaleriaLight(true);
+  } catch (e) { toast(`no se ha podido restaurar: ${e.message}`, true); }
 }
 
 async function traerEstiloLight(partes, total) {
@@ -19280,8 +19732,7 @@ function entrarEnCrear() {
      segundo pintado apilaba otra entrada y «atrás» no volvía al módulo. */
   APP.light.vista = 'galeria';
   APP.light.desdeVideo = '';
-  const panel = $('#panel');
-  if (panel) panel.scrollTop = 0;
+  subirArriba('panel');
   irAModulo('crear');
   cargarGaleriaLight(true);
 }
@@ -19308,8 +19759,7 @@ function irAModulo(nombre, opciones) {
     pintarLight();
     return;
   }
-  const m = $('#modulo');
-  if (m) m.scrollTop = 0;
+  subirArriba('modulo');
   if (nombre === 'publicar') cargarPublicar();
   else if (nombre === 'inicio') cargarInicioModulos();
   else pintarModulo();
@@ -19353,11 +19803,12 @@ function pintarModulo() {
   if (foco) {
     const campo = m.querySelector(`[data-foco="${foco}"]`);
     if (campo) {
-      campo.focus();
+      campo.focus({ preventScroll: true });
       // el cursor, al final: si no, buscar letra a letra escribía al revés
       try { if (campo.setSelectionRange && /^(text|search)$/.test(campo.type)) campo.setSelectionRange(campo.value.length, campo.value.length); } catch (e) { /* no aplica */ }
     }
   }
+  devolverScroll('modulo', claveScrollModulo);
 }
 
 /* -------------------------------------------------------------- INICIO
@@ -22013,9 +22464,9 @@ function seccionResultadosPublicar() {
   const caja = h('div', { clase: 'resultados-publicar' });
   const proyectos = ((PUB.proyectos || {}).proyectos || []);
   caja.appendChild(h('div', { clase: 'fila' },
-    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; PUB.resultados = null; PUB.mejores = null; cargarPublicar(); } },
+    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; cargarPublicar(); } },
       ...proyectos.map(x => h('option', { value: x.id, selected: x.id === PUB.proyectoResultados }, x.nombre))),
-    h('select', { onchange: ev => { PUB.diasResultados = Number(ev.target.value); PUB.resultados = null; PUB.mejores = null; cargarPublicar(); } },
+    h('select', { onchange: ev => { PUB.diasResultados = Number(ev.target.value); cargarPublicar(); } },
       ...[[7, 'últimos 7 días'], [30, 'últimos 30 días'], [90, 'últimos 90 días']].map(([v, t]) =>
         h('option', { value: v, selected: (PUB.diasResultados || 30) === v }, t))),
     h('span', { clase: 'crece' }),
@@ -22811,8 +23262,7 @@ function elegirProyectoParrilla(cid) {
 
 function irASeccionParrilla(seccion) {
   PAR.seccion = seccion;
-  const m = $('#modulo');
-  if (m) m.scrollTop = 0;
+  subirArriba('modulo');
   pintarModulo();
 }
 
@@ -24518,10 +24968,10 @@ function seccionInformePublicar() {
   const proyectos = ((PUB.proyectos || {}).proyectos || []);
   caja.appendChild(h('div', { clase: 'fila no-imprimir' },
     h('button', { clase: 'mini fantasma', onclick: () => { PUB.verInforme = false; pintarModulo(); } }, '← Resultados'),
-    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; PUB.informe = null; PUB.resultados = null; cargarPublicar(); } },
+    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; cargarPublicar(); } },
       ...proyectos.map(x => h('option', { value: x.id, selected: x.id === PUB.proyectoResultados }, x.nombre))),
-    r && (r.meses || []).length ? h('select', { onchange: ev => { PUB.mesInforme = ev.target.value; PUB.informe = null; cargarPublicar(); } },
-      ...r.meses.map(m => h('option', { value: m, selected: m === r.mes }, m))) : null,
+    r && (r.meses || []).length ? h('select', { onchange: ev => { PUB.mesInforme = ev.target.value; cargarPublicar(); } },
+      ...r.meses.map(m => h('option', { value: m, selected: m === (PUB.mesInforme || r.mes) }, m))) : null,
     h('span', { clase: 'crece' }),
     h('button', { clase: 'mini', disabled: !r || !!r.error, onclick: () => copiarTexto(r.resumen) }, 'Copiar resumen'),
     h('button', { clase: 'mini primario', disabled: !r || !!r.error, onclick: () => window.print() }, 'Imprimir o guardar en PDF')));

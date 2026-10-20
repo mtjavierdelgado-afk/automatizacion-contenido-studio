@@ -2852,7 +2852,6 @@ button.mini { border-radius: 8px; }
   border-top: 1px solid var(--linea-suave);
   color: var(--tenue2); font-size: 11.5px; text-align: center; line-height: 1.5;
 }
-.pie-sistema .pie-marca { font-weight: 700; color: var(--tenue); }
 
 /* ---- el medidor de coste: en estrecho se PARTE en vez de cortarse.
    Con una sola linea y nowrap, en un movil de 360 «TOTAL $0.06» quedaba

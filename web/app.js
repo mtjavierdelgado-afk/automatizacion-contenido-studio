@@ -4629,6 +4629,10 @@ const PALETAS = [
     idea: 'La versión clara de Nocturno: el mismo violeta, más profundo.' },
 ];
 
+const CLASE_MUESTRA = {
+  nocturno: 'muestra-nocturno', aurora: 'muestra-aurora', brasa: 'muestra-brasa', dia: 'muestra-dia',
+};
+
 const ICONO_TEMA = {
   oscuro: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>',
   claro: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
@@ -4703,7 +4707,7 @@ function seccionPaleta() {
       title: `${p.nombre}: ${p.idea}`,
       onclick: () => aplicarPaleta(p.id),
     },
-    h('span', { clase: `muestra-paleta muestra-${p.id}`, 'aria-hidden': 'true' },
+    h('span', { clase: `muestra-paleta ${CLASE_MUESTRA[p.id]}`, 'aria-hidden': 'true' },
       h('i', { clase: 'm1' }), h('i', { clase: 'm2' }), h('i', { clase: 'm3' }), h('i', { clase: 'm4' })),
     h('b', {}, p.nombre),
     h('span', { clase: 'meta' }, p.tipo)))));
@@ -19124,6 +19128,16 @@ const VISTAS_INICIO = {
   minima: { nombre: 'Mínima', tarjetas: [['saludo', 'L'], ['recientes', 'L']] },
 };
 const VISTA_ORIGINAL = 'produccion';
+/* Las clases, escritas enteras: las herramientas de `herramientas/` buscan
+   cada clase de la hoja tal cual en el código, y una montada con `${}` no la
+   ven. */
+const CLASE_TAM = { S: 'tam-S', M: 'tam-M', L: 'tam-L' };
+const CLASE_TARJETA = {
+  saludo: 'tarjeta-saludo', cifras: 'tarjeta-cifras', necesitan: 'tarjeta-necesitan',
+  semana: 'tarjeta-semana', recientes: 'tarjeta-recientes', marcha: 'tarjeta-marcha',
+  mejor: 'tarjeta-mejor', gasto: 'tarjeta-gasto', parrilla: 'tarjeta-parrilla',
+  calendario: 'tarjeta-calendario', clientes: 'tarjeta-clientes', novedades: 'tarjeta-novedades',
+};
 const CLAVE_PANEL_LOCAL = 'inicio.panel';
 
 function panelDeVista(id) {
@@ -19284,7 +19298,7 @@ function vistaInicioModulos() {
       console.error(e);
       contenido = cajaError(`no se ha podido pintar «${CATALOGO_PANEL[t.id].nombre}»: ${e.message}`);
     }
-    if (contenido) rejilla.appendChild(h('section', { clase: `tarjeta-inicio tarjeta-${t.id} tam-${t.tam}`,
+    if (contenido) rejilla.appendChild(h('section', { clase: `tarjeta-inicio ${CLASE_TARJETA[t.id]} ${CLASE_TAM[t.tam]}`,
       datos: { tarjeta: t.id } }, contenido));
   });
   if (!panel.tarjetas.length) {
@@ -19324,7 +19338,7 @@ function moverTarjetaInicio(id, destino) {
 function tarjetaEditable(t, i, total) {
   const info = CATALOGO_PANEL[t.id];
   const caja = h('section', {
-    clase: `tarjeta-inicio tarjeta-${t.id} tam-${t.tam} editable`, draggable: 'true',
+    clase: `tarjeta-inicio ${CLASE_TARJETA[t.id]} ${CLASE_TAM[t.tam]} editable`, draggable: 'true',
     datos: { tarjeta: t.id }, 'aria-label': info.nombre,
     ondragstart: ev => {
       INI.arrastra = t.id;
@@ -19450,237 +19464,250 @@ function fechaLarga() {
 
 function plural(n, uno, varios) { return `${n} ${n === 1 ? uno : varios}`; }
 
+function tarjetaInicioSaludo() {
+  const c = PUB.cola || {};
+  const salen = programadosDeLaSemana().length;
+  const listos = (c.listos || []).length;
+  const necesitan = (c.esperan_ok || []).length + (c.fallidos || []).length;
+  const nombre = INI.usuario ? `, ${INI.usuario}` : '';
+  return h('div', { clase: 'saludo-inicio' },
+    h('span', { clase: 'halo halo-1', 'aria-hidden': 'true' }),
+    h('span', { clase: 'halo halo-2', 'aria-hidden': 'true' }),
+    h('div', { clase: 'saludo-textos' },
+      h('span', { clase: 'fecha-inicio' }, fechaLarga()),
+      h('h1', { clase: 'titular-inicio' }, `Hola${nombre}. `,
+        salen ? h('span', { clase: 'resalta' }, plural(salen, 'vídeo', 'vídeos')) : null,
+        salen ? ` ${salen === 1 ? 'sale' : 'salen'} esta semana.` : 'Esta semana no sale nada programado.'),
+      h('p', { clase: 'meta' }, !PUB.cola ? 'mirando la cola…'
+        : `${plural(listos, 'vídeo listo', 'vídeos listos')} para publicar y `
+          + `${plural(necesitan, 'cosa que necesita', 'cosas que necesitan')} tu mirada.`)),
+    h('div', { clase: 'saludo-botones' },
+      h('button', { type: 'button', clase: 'primario', title: 'Elige el estilo y empieza un vídeo',
+        onclick: () => { entrarEnCrear(); toast('Elige el estilo del vídeo nuevo'); } }, '+ Nuevo vídeo'),
+      h('button', { type: 'button', title: 'Tus estilos y tus vídeos', onclick: () => entrarEnCrear() },
+        'Tus proyectos')));
+}
+
+function tarjetaInicioCifras() {
+  const c = PUB.cola || {};
+  const r = INI.resumen;
+  const prog = programadosDeLaSemana();
+  const vistas = (INI.vistas7 || []).reduce((suma, p) => suma + (Number((p.metricas || {}).vistas) || 0), 0);
+  const cifra = (que, valor, cambio, clase) => h('div', { clase: `cifra-inicio ${clase || ''}` },
+    h('span', { clase: 'meta' }, que), h('b', {}, valor), h('span', { clase: 'cambio' }, cambio));
+  return h('div', { clase: 'cifras-inicio' },
+    cifra('Vídeos este mes', r ? String(r.videos_mes) : '…', r ? `de ${r.videos} en total` : ''),
+    cifra('Programados', PUB.cola ? String(prog.length) : '…',
+      prog.length ? `el próximo, ${cuandoLegible(prog[0].cuando)}` : 'esta semana'),
+    cifra('Vistas 7 días', INI.vistas7 ? numeroCorto(vistas) : '…',
+      INI.vistas7 ? (INI.vistas7.length ? `${plural(INI.vistas7.length, 'publicación', 'publicaciones')} con cifras` : 'sin cifras todavía') : ''),
+    cifra('Para publicar', PUB.cola ? String((c.listos || []).length) : '…',
+      (c.listos || [])[0] ? recortar(c.listos[0].nombre || c.listos[0].pid, 40) : 'nada pendiente'));
+}
+
+function tarjetaInicioNecesitan() {
+  const c = PUB.cola || {};
+  const caja = h('div', { clase: 'te-necesitan' });
+  const deHoy = (c.de_hoy || []).concat((c.esperan_ok || []).filter(e => !(c.de_hoy || []).some(x => x.id === e.id)));
+  const filas = deHoy.concat((c.fallidos || []).filter(e => !deHoy.some(x => x.id === e.id)));
+  const listos = (c.listos || []).filter(v => !Object.keys(v.envios || {}).length).slice(0, 3);
+  caja.appendChild(cabezaTarjeta('Te necesitan', h('span', { clase: 'meta' },
+    PUB.cola ? plural(filas.length + listos.length, 'cosa', 'cosas') : '')));
+  if (!PUB.cola) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  if (!filas.length && !listos.length) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Nada pendiente. Los fallos, lo que espera tu OK y '
+      + 'lo que sale hoy aparecerán aquí.'));
+  }
+  filas.forEach(e => caja.appendChild(filaEnvioCola(e)));
+  listos.forEach(v => caja.appendChild(h('div', { clase: 'fila fila-listo-inicio' },
+    h('span', { clase: 'etiqueta-listo' }, 'LISTO'),
+    h('span', { clase: 'crece' }, `«${v.nombre || v.pid}» para publicar`),
+    h('button', { type: 'button', clase: 'mini', onclick: () => irASeccionPublicar('ficha', v.pid) }, 'Publicar'))));
+  return caja;
+}
+
+function tarjetaInicioSemana() {
+  const c = PUB.cola || {};
+  const dias = c.dias || [];
+  const envios = enviosDeLaSemana();
+  const cuenta = d => envios.filter(e => String(e.cuando || '').startsWith(d)).length;
+  const maximo = Math.max(1, ...dias.map(cuenta));
+  const letras = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+  const caja = h('div', { clase: 'semana-inicio' }, cabezaTarjeta('Esta semana'));
+  if (!PUB.cola) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'barras-semana' }, dias.map(d => {
+    const n = cuenta(d);
+    const letra = letras[new Date(`${d}T12:00:00`).getDay()];
+    return h('div', { clase: `dia-semana${d === c.hoy ? ' hoy' : ''}`, title: `${d}: ${plural(n, 'publicación', 'publicaciones')}` },
+      h('span', { clase: 'meta' }, letra),
+      h('span', { clase: 'columna' }, h('span', { clase: 'relleno-columna', estilo: `--alto:${Math.round((n / maximo) * 100)}%` })),
+      h('b', {}, String(n)));
+  })));
+  caja.appendChild(h('span', { clase: 'meta' }, 'Publicaciones por día · hoy, resaltado'));
+  return caja;
+}
+
+function tarjetaInicioRecientes(tam) {
+  const r = INI.resumen;
+  const caja = h('div', { clase: 'recientes-inicio' },
+    cabezaTarjeta('Proyectos recientes', h('a', { href: '#', clase: 'enlace-tarjeta',
+      onclick: ev => { ev.preventDefault(); entrarEnCrear(); } }, 'Todos →')));
+  if (!r) {
+    caja.appendChild(h('div', { clase: 'meta' }, INI.errorResumen || 'cargando…'));
+    return caja;
+  }
+  if (!r.recientes.length) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay vídeos. Empieza uno con «+ Nuevo vídeo».'));
+    return caja;
+  }
+  const listos = new Set(((PUB.cola || {}).listos || []).map(v => v.pid));
+  const marcha = new Set((r.en_marcha || []).map(t => t.pid));
+  caja.appendChild(h('div', { clase: 'lista-recientes' }, r.recientes.slice(0, tam === 'S' ? 2 : (tam === 'L' ? 4 : 3)).map((v, i) =>
+    h('button', { type: 'button', clase: 'reciente', title: `Abrir «${v.nombre}»`,
+      onclick: () => { irAModulo('crear'); abrirVideoLight(v.pid); } },
+    h('span', { clase: ['miniatura-reciente', 'miniatura-reciente tono-1', 'miniatura-reciente tono-2'][i % 3], 'aria-hidden': 'true' },
+      (v.nombre || '?').trim().charAt(0).toUpperCase()),
+    h('b', {}, v.nombre),
+    h('span', { clase: 'meta' }, [marcha.has(v.pid) ? 'Generando' : (listos.has(v.pid) ? 'Listo para publicar' : ''),
+      v.cliente_nombre, fechaCorta(v.actualizado)].filter(Boolean).join(' · '))))));
+  return caja;
+}
+
+function tarjetaInicioMarcha() {
+  const r = INI.resumen;
+  const caja = h('div', { clase: 'marcha-inicio' }, cabezaTarjeta('En marcha'));
+  if (!r) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  if (!(r.en_marcha || []).length) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Nada generándose ahora mismo.'));
+    return caja;
+  }
+  r.en_marcha.slice(0, 2).forEach(t => caja.appendChild(h('div', { clase: 'trabajo-inicio' },
+    h('button', { type: 'button', clase: 'mini fantasma nombre-envio', onclick: () => { irAModulo('crear'); abrirVideoLight(t.pid); } },
+      `${t.nombre} · ${t.paso || 'trabajo'}`),
+    barraDeProgreso(t.progreso, 'coral'),
+    h('span', { clase: 'meta cifra-mono' }, `${Math.round((t.progreso || 0) * 100)} %${t.mensaje ? ` · ${recortar(t.mensaje, 60)}` : ''}`))));
+  return caja;
+}
+
+function tarjetaInicioMejor() {
+  // `linea-mejor-semana`: la línea de Inicio de siempre (publicar-redes-2), ahora tarjeta
+  const m = PUB.mejorSemana;
+  const caja = h('div', { clase: 'linea-mejor-semana mejor-inicio' }, cabezaTarjeta('Lo mejor de los últimos 7 días'));
+  if (m === null || m === undefined) caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+  else if (!m) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay cifras. Se piden en Publicar → '
+      + 'Resultados, con «Actualizar».'));
+  } else {
+    caja.appendChild(h('button', { type: 'button', clase: 'mini fantasma nombre-envio',
+      onclick: () => irASeccionPublicar('ficha', m.pid) }, m.nombre));
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('span', { clase: 'pastilla red-mini ok' }, CORTOS_RED[m.red] || m.red),
+      h('span', { clase: 'meta' }, textoMetricas(m.metricas) || '')));
+  }
+  return caja;
+}
+
+function tarjetaInicioGasto() {
+  const r = INI.resumen;
+  const tope = panelInicio().tope_usd || 0;
+  const caja = h('div', { clase: 'gasto-inicio' }, cabezaTarjeta('Gasto del mes'));
+  if (!r) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  caja.appendChild(h('b', { clase: 'cifra-grande' }, dolares(r.gasto_mes_usd)));
+  if (tope > 0) {
+    caja.appendChild(barraDeProgreso(r.gasto_mes_usd / tope, r.gasto_mes_usd > tope ? 'pasado' : ''));
+    caja.appendChild(h('span', { clase: 'meta' }, `de ${dolares(tope, true)} de tope`
+      + (r.gasto_mes_usd > tope ? ' · te has pasado' : '')));
+  } else caja.appendChild(h('span', { clase: 'meta' }, 'Sin tope: ponlo en «✎ Personalizar panel».'));
+  return caja;
+}
+
+function tarjetaInicioParrilla() {
+  const lista = INI.parrilla;
+  const caja = h('div', { clase: 'parrilla-inicio' }, cabezaTarjeta('Parrilla', h('a', { href: '#', clase: 'enlace-tarjeta',
+    onclick: ev => { ev.preventDefault(); irAModulo('automatizar'); } }, 'Abrir →')));
+  if (lista === null) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  const suma = estado => lista.reduce((n, p) => n + (Number((p.cuentas || {})[estado]) || 0), 0);
+  caja.appendChild(h('b', { clase: 'cifra-grande' }, String(suma('pendiente'))));
+  caja.appendChild(h('span', { clase: 'meta' }, `${suma('pendiente') === 1 ? 'guion espera' : 'guiones esperan'} a pasar al Encargo · `
+    + `${suma('usado')} usados · ${suma('publicado')} publicados`));
+  return caja;
+}
+
+function tarjetaInicioCalendario() {
+  const c = INI.calendario;
+  const caja = h('div', { clase: 'calendario-inicio' }, cabezaTarjeta('Calendario', h('a', { href: '#', clase: 'enlace-tarjeta',
+    onclick: ev => { ev.preventDefault(); PUB.seccion = 'cola'; irAModulo('publicar'); } }, 'Ver la cola →')));
+  if (!c) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  const vienen = (c.envios || []).filter(e => ['programado', 'espera_ok'].includes(e.estado)).slice(0, 6);
+  if (!vienen.length) caja.appendChild(h('div', { clase: 'meta' }, 'Nada programado en los próximos 30 días.'));
+  vienen.forEach(e => caja.appendChild(filaEnvioCola(e)));
+  return caja;
+}
+
+function tarjetaInicioClientes() {
+  const r = INI.resumen;
+  const caja = h('div', { clase: 'clientes-inicio' }, cabezaTarjeta('Por cliente'));
+  if (!r) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  if (!(r.por_cliente || []).length) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay vídeos.'));
+    return caja;
+  }
+  caja.appendChild(h('table', { clase: 'tabla tabla-clientes-inicio' },
+    h('thead', {}, h('tr', {}, h('th', {}, 'Cliente'), h('th', {}, 'Vídeos (mes)'), h('th', {}, 'Gasto del mes'))),
+    h('tbody', {}, r.por_cliente.slice(0, 8).map(c => h('tr', {},
+      h('td', {}, c.nombre), h('td', {}, `${c.videos} (${c.videos_mes})`), h('td', { clase: 'cifra-mono' }, dolares(c.usd_mes)))))));
+  return caja;
+}
+
+function tarjetaInicioNovedades() {
+  const n = INI.novedades;
+  const caja = h('div', { clase: 'novedades-inicio' }, cabezaTarjeta('Novedades', h('a', { href: '#', clase: 'enlace-tarjeta',
+    onclick: ev => { ev.preventDefault(); abrirNovedades(); } }, 'Todas →')));
+  if (!n) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  const puntos = unirLineas(n.texto || '').split('\n').filter(l => /^- /.test(l)).slice(0, 3)
+    .map(l => recortar(l.replace(/^- /, '').replace(/\*\*/g, '').replace(/\x60/g, ''), 140));
+  if (!puntos.length) caja.appendChild(h('div', { clase: 'meta' }, 'Sin novedades escritas.'));
+  else caja.appendChild(h('ul', { clase: 'puntos-novedades' }, puntos.map(p => h('li', {}, p))));
+  return caja;
+}
+
 const PINTORES_INICIO = {
-  saludo() {
-    const c = PUB.cola || {};
-    const salen = programadosDeLaSemana().length;
-    const listos = (c.listos || []).length;
-    const necesitan = (c.esperan_ok || []).length + (c.fallidos || []).length;
-    const nombre = INI.usuario ? `, ${INI.usuario}` : '';
-    return h('div', { clase: 'saludo-inicio' },
-      h('span', { clase: 'halo halo-1', 'aria-hidden': 'true' }),
-      h('span', { clase: 'halo halo-2', 'aria-hidden': 'true' }),
-      h('div', { clase: 'saludo-textos' },
-        h('span', { clase: 'fecha-inicio' }, fechaLarga()),
-        h('h1', { clase: 'titular-inicio' }, `Hola${nombre}. `,
-          salen ? h('span', { clase: 'resalta' }, plural(salen, 'vídeo', 'vídeos')) : null,
-          salen ? ` ${salen === 1 ? 'sale' : 'salen'} esta semana.` : 'Esta semana no sale nada programado.'),
-        h('p', { clase: 'meta' }, !PUB.cola ? 'mirando la cola…'
-          : `${plural(listos, 'vídeo listo', 'vídeos listos')} para publicar y `
-            + `${plural(necesitan, 'cosa que necesita', 'cosas que necesitan')} tu mirada.`)),
-      h('div', { clase: 'saludo-botones' },
-        h('button', { type: 'button', clase: 'primario', title: 'Elige el estilo y empieza un vídeo',
-          onclick: () => { entrarEnCrear(); toast('Elige el estilo del vídeo nuevo'); } }, '+ Nuevo vídeo'),
-        h('button', { type: 'button', title: 'Tus estilos y tus vídeos', onclick: () => entrarEnCrear() },
-          'Tus proyectos')));
-  },
-
-  cifras() {
-    const c = PUB.cola || {};
-    const r = INI.resumen;
-    const prog = programadosDeLaSemana();
-    const vistas = (INI.vistas7 || []).reduce((suma, p) => suma + (Number((p.metricas || {}).vistas) || 0), 0);
-    const cifra = (que, valor, cambio, clase) => h('div', { clase: `cifra-inicio ${clase || ''}` },
-      h('span', { clase: 'meta' }, que), h('b', {}, valor), h('span', { clase: 'cambio' }, cambio));
-    return h('div', { clase: 'cifras-inicio' },
-      cifra('Vídeos este mes', r ? String(r.videos_mes) : '…', r ? `de ${r.videos} en total` : ''),
-      cifra('Programados', PUB.cola ? String(prog.length) : '…',
-        prog.length ? `el próximo, ${cuandoLegible(prog[0].cuando)}` : 'esta semana'),
-      cifra('Vistas 7 días', INI.vistas7 ? numeroCorto(vistas) : '…',
-        INI.vistas7 ? (INI.vistas7.length ? `${plural(INI.vistas7.length, 'publicación', 'publicaciones')} con cifras` : 'sin cifras todavía') : ''),
-      cifra('Para publicar', PUB.cola ? String((c.listos || []).length) : '…',
-        (c.listos || [])[0] ? recortar(c.listos[0].nombre || c.listos[0].pid, 40) : 'nada pendiente'));
-  },
-
-  necesitan() {
-    const c = PUB.cola || {};
-    const caja = h('div', { clase: 'te-necesitan' });
-    const deHoy = (c.de_hoy || []).concat((c.esperan_ok || []).filter(e => !(c.de_hoy || []).some(x => x.id === e.id)));
-    const filas = deHoy.concat((c.fallidos || []).filter(e => !deHoy.some(x => x.id === e.id)));
-    const listos = (c.listos || []).filter(v => !Object.keys(v.envios || {}).length).slice(0, 3);
-    caja.appendChild(cabezaTarjeta('Te necesitan', h('span', { clase: 'meta' },
-      PUB.cola ? plural(filas.length + listos.length, 'cosa', 'cosas') : '')));
-    if (!PUB.cola) {
-      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
-      return caja;
-    }
-    if (!filas.length && !listos.length) {
-      caja.appendChild(h('div', { clase: 'meta' }, 'Nada pendiente. Los fallos, lo que espera tu OK y '
-        + 'lo que sale hoy aparecerán aquí.'));
-    }
-    filas.forEach(e => caja.appendChild(filaEnvioCola(e)));
-    listos.forEach(v => caja.appendChild(h('div', { clase: 'fila fila-listo-inicio' },
-      h('span', { clase: 'etiqueta-listo' }, 'LISTO'),
-      h('span', { clase: 'crece' }, `«${v.nombre || v.pid}» para publicar`),
-      h('button', { type: 'button', clase: 'mini', onclick: () => irASeccionPublicar('ficha', v.pid) }, 'Publicar'))));
-    return caja;
-  },
-
-  semana() {
-    const c = PUB.cola || {};
-    const dias = c.dias || [];
-    const envios = enviosDeLaSemana();
-    const cuenta = d => envios.filter(e => String(e.cuando || '').startsWith(d)).length;
-    const maximo = Math.max(1, ...dias.map(cuenta));
-    const letras = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
-    const caja = h('div', { clase: 'semana-inicio' }, cabezaTarjeta('Esta semana'));
-    if (!PUB.cola) {
-      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
-      return caja;
-    }
-    caja.appendChild(h('div', { clase: 'barras-semana' }, dias.map(d => {
-      const n = cuenta(d);
-      const letra = letras[new Date(`${d}T12:00:00`).getDay()];
-      return h('div', { clase: `dia-semana${d === c.hoy ? ' hoy' : ''}`, title: `${d}: ${plural(n, 'publicación', 'publicaciones')}` },
-        h('span', { clase: 'meta' }, letra),
-        h('span', { clase: 'columna' }, h('span', { clase: 'relleno-columna', estilo: `--alto:${Math.round((n / maximo) * 100)}%` })),
-        h('b', {}, String(n)));
-    })));
-    caja.appendChild(h('span', { clase: 'meta' }, 'Publicaciones por día · hoy, resaltado'));
-    return caja;
-  },
-
-  recientes(tam) {
-    const r = INI.resumen;
-    const caja = h('div', { clase: 'recientes-inicio' },
-      cabezaTarjeta('Proyectos recientes', h('a', { href: '#', clase: 'enlace-tarjeta',
-        onclick: ev => { ev.preventDefault(); entrarEnCrear(); } }, 'Todos →')));
-    if (!r) {
-      caja.appendChild(h('div', { clase: 'meta' }, INI.errorResumen || 'cargando…'));
-      return caja;
-    }
-    if (!r.recientes.length) {
-      caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay vídeos. Empieza uno con «+ Nuevo vídeo».'));
-      return caja;
-    }
-    const listos = new Set(((PUB.cola || {}).listos || []).map(v => v.pid));
-    const marcha = new Set((r.en_marcha || []).map(t => t.pid));
-    caja.appendChild(h('div', { clase: 'lista-recientes' }, r.recientes.slice(0, tam === 'S' ? 2 : (tam === 'L' ? 4 : 3)).map((v, i) =>
-      h('button', { type: 'button', clase: 'reciente', title: `Abrir «${v.nombre}»`,
-        onclick: () => { irAModulo('crear'); abrirVideoLight(v.pid); } },
-      h('span', { clase: `miniatura-reciente tono-${i % 3}`, 'aria-hidden': 'true' },
-        (v.nombre || '?').trim().charAt(0).toUpperCase()),
-      h('b', {}, v.nombre),
-      h('span', { clase: 'meta' }, [marcha.has(v.pid) ? 'Generando' : (listos.has(v.pid) ? 'Listo para publicar' : ''),
-        v.cliente_nombre, fechaCorta(v.actualizado)].filter(Boolean).join(' · '))))));
-    return caja;
-  },
-
-  marcha() {
-    const r = INI.resumen;
-    const caja = h('div', { clase: 'marcha-inicio' }, cabezaTarjeta('En marcha'));
-    if (!r) {
-      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
-      return caja;
-    }
-    if (!(r.en_marcha || []).length) {
-      caja.appendChild(h('div', { clase: 'meta' }, 'Nada generándose ahora mismo.'));
-      return caja;
-    }
-    r.en_marcha.slice(0, 2).forEach(t => caja.appendChild(h('div', { clase: 'trabajo-inicio' },
-      h('button', { type: 'button', clase: 'mini fantasma nombre-envio', onclick: () => { irAModulo('crear'); abrirVideoLight(t.pid); } },
-        `${t.nombre} · ${t.paso || 'trabajo'}`),
-      barraDeProgreso(t.progreso, 'coral'),
-      h('span', { clase: 'meta cifra-mono' }, `${Math.round((t.progreso || 0) * 100)} %${t.mensaje ? ` · ${recortar(t.mensaje, 60)}` : ''}`))));
-    return caja;
-  },
-
-  mejor() {
-    // `linea-mejor-semana`: la línea de Inicio de siempre (publicar-redes-2), ahora tarjeta
-    const m = PUB.mejorSemana;
-    const caja = h('div', { clase: 'linea-mejor-semana mejor-inicio' }, cabezaTarjeta('Lo mejor de los últimos 7 días'));
-    if (m === null || m === undefined) caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
-    else if (!m) {
-      caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay cifras. Se piden en Publicar → '
-        + 'Resultados, con «Actualizar».'));
-    } else {
-      caja.appendChild(h('button', { type: 'button', clase: 'mini fantasma nombre-envio',
-        onclick: () => irASeccionPublicar('ficha', m.pid) }, m.nombre));
-      caja.appendChild(h('div', { clase: 'fila' },
-        h('span', { clase: 'pastilla red-mini ok' }, CORTOS_RED[m.red] || m.red),
-        h('span', { clase: 'meta' }, textoMetricas(m.metricas) || '')));
-    }
-    return caja;
-  },
-
-  gasto() {
-    const r = INI.resumen;
-    const tope = panelInicio().tope_usd || 0;
-    const caja = h('div', { clase: 'gasto-inicio' }, cabezaTarjeta('Gasto del mes'));
-    if (!r) {
-      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
-      return caja;
-    }
-    caja.appendChild(h('b', { clase: 'cifra-grande' }, dolares(r.gasto_mes_usd)));
-    if (tope > 0) {
-      caja.appendChild(barraDeProgreso(r.gasto_mes_usd / tope, r.gasto_mes_usd > tope ? 'pasado' : ''));
-      caja.appendChild(h('span', { clase: 'meta' }, `de ${dolares(tope, true)} de tope`
-        + (r.gasto_mes_usd > tope ? ' · te has pasado' : '')));
-    } else caja.appendChild(h('span', { clase: 'meta' }, 'Sin tope: ponlo en «✎ Personalizar panel».'));
-    return caja;
-  },
-
-  parrilla() {
-    const lista = INI.parrilla;
-    const caja = h('div', { clase: 'parrilla-inicio' }, cabezaTarjeta('Parrilla', h('a', { href: '#', clase: 'enlace-tarjeta',
-      onclick: ev => { ev.preventDefault(); irAModulo('automatizar'); } }, 'Abrir →')));
-    if (lista === null) {
-      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
-      return caja;
-    }
-    const suma = estado => lista.reduce((n, p) => n + (Number((p.cuentas || {})[estado]) || 0), 0);
-    caja.appendChild(h('b', { clase: 'cifra-grande' }, String(suma('pendiente'))));
-    caja.appendChild(h('span', { clase: 'meta' }, `${suma('pendiente') === 1 ? 'guion espera' : 'guiones esperan'} a pasar al Encargo · `
-      + `${suma('usado')} usados · ${suma('publicado')} publicados`));
-    return caja;
-  },
-
-  calendario() {
-    const c = INI.calendario;
-    const caja = h('div', { clase: 'calendario-inicio' }, cabezaTarjeta('Calendario', h('a', { href: '#', clase: 'enlace-tarjeta',
-      onclick: ev => { ev.preventDefault(); PUB.seccion = 'cola'; irAModulo('publicar'); } }, 'Ver la cola →')));
-    if (!c) {
-      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
-      return caja;
-    }
-    const vienen = (c.envios || []).filter(e => ['programado', 'espera_ok'].includes(e.estado)).slice(0, 6);
-    if (!vienen.length) caja.appendChild(h('div', { clase: 'meta' }, 'Nada programado en los próximos 30 días.'));
-    vienen.forEach(e => caja.appendChild(filaEnvioCola(e)));
-    return caja;
-  },
-
-  clientes() {
-    const r = INI.resumen;
-    const caja = h('div', { clase: 'clientes-inicio' }, cabezaTarjeta('Por cliente'));
-    if (!r) {
-      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
-      return caja;
-    }
-    if (!(r.por_cliente || []).length) {
-      caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay vídeos.'));
-      return caja;
-    }
-    caja.appendChild(h('table', { clase: 'tabla tabla-clientes-inicio' },
-      h('thead', {}, h('tr', {}, h('th', {}, 'Cliente'), h('th', {}, 'Vídeos (mes)'), h('th', {}, 'Gasto del mes'))),
-      h('tbody', {}, r.por_cliente.slice(0, 8).map(c => h('tr', {},
-        h('td', {}, c.nombre), h('td', {}, `${c.videos} (${c.videos_mes})`), h('td', { clase: 'cifra-mono' }, dolares(c.usd_mes)))))));
-    return caja;
-  },
-
-  novedades() {
-    const n = INI.novedades;
-    const caja = h('div', { clase: 'novedades-inicio' }, cabezaTarjeta('Novedades', h('a', { href: '#', clase: 'enlace-tarjeta',
-      onclick: ev => { ev.preventDefault(); abrirNovedades(); } }, 'Todas →')));
-    if (!n) {
-      caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
-      return caja;
-    }
-    const puntos = unirLineas(n.texto || '').split('\n').filter(l => /^- /.test(l)).slice(0, 3)
-      .map(l => recortar(l.replace(/^- /, '').replace(/\*\*/g, '').replace(/`/g, ''), 140));
-    if (!puntos.length) caja.appendChild(h('div', { clase: 'meta' }, 'Sin novedades escritas.'));
-    else caja.appendChild(h('ul', { clase: 'puntos-novedades' }, puntos.map(p => h('li', {}, p))));
-    return caja;
-  },
+  saludo: tarjetaInicioSaludo,
+  cifras: tarjetaInicioCifras,
+  necesitan: tarjetaInicioNecesitan,
+  semana: tarjetaInicioSemana,
+  recientes: tarjetaInicioRecientes,
+  marcha: tarjetaInicioMarcha,
+  mejor: tarjetaInicioMejor,
+  gasto: tarjetaInicioGasto,
+  parrilla: tarjetaInicioParrilla,
+  calendario: tarjetaInicioCalendario,
+  clientes: tarjetaInicioClientes,
+  novedades: tarjetaInicioNovedades,
 };
 
 /* --------------------------------------------------------- AUTOMATIZAR */

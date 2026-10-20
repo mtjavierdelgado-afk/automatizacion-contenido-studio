@@ -5340,6 +5340,10 @@ def diseno_crearia(navegador, datos):
     r, _d = api.put("/api/inicio/panel", {"usuario": "javier", "panel": {"tarjetas": [{"id": "nada"}]}})
     ok(r.status_code == 400, "una tarjeta que no existe es un 400")
     api.put("/api/inicio/panel", {"usuario": "javier", "panel": None})
+    _r, d = api.get("/api/salud")
+    ok(d.get("version") == "3.1", f"la versión es la 3.1 ({d.get('version')})")
+    _r, d = api.get("/api/sistema/novedades")
+    ok(d.get("version") == "3.1" and "## V3.1" in d.get("texto", ""), "y Novedades empieza por la V3.1")
     _r, d = api.get("/api/inicio/resumen")
     ok(isinstance(d.get("gasto_mes_usd"), (int, float)) and d.get("videos", 0) >= 1 and d.get("recientes"),
        f"/api/inicio/resumen: gasto del mes, vídeos y recientes ({d.get('gasto_mes_usd')}, {d.get('videos')})")

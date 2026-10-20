@@ -8,14 +8,17 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ---
 
-## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
+## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
+
+**Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
+está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
+cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
 **El nuevo diseño: CrearIA Studio (19 de octubre)**
 - **Se llama CrearIA Studio · Automatización de contenido**, con logo nuevo: la
   C de Crear con el bucle dentro y un «play». El favicon es el mismo dibujo. Por
   dentro no cambia nada (el comando `asvs`, las carpetas y los servicios siguen
-  igual). El color del «play» aún está por decidir: por defecto, el violeta de
-  la C.
+  igual). El «play» va en el mismo violeta de la C.
 - **Cuatro paletas**, en Configuración → Aspecto: **Nocturno** (la de siempre),
   **Aurora** (turquesa y rosa), **Brasa** (ámbar y frambuesa) y **Día**, la
   clara. Se recuerdan en el navegador. **Día es el tema claro de antes**: el
@@ -44,8 +47,11 @@ vídeos, estilos, claves y contraseña no se tocan.
   guía de inicio y las novedades. El manual tiene apartados nuevos de Inicio y
   de Automatizar (Parrilla y Analizar cuentas).
 - **Un pie en todas las pantallas** con los derechos (© 2026 Agencia Redes
-  Botánica) y los enlaces a Novedades, Guía, Términos de uso y Contacto. Los
-  términos y el correo de contacto **están por escribir**: de momento lo dicen.
+  Botánica · v3.1) y los enlaces a Novedades, Guía, **Términos de uso** (las
+  condiciones de uso del Studio) y **Contacto** (escribe a
+  agencia.redes.botanica@gmail.com).
+
+## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
 **Tus notas del 19 de octubre**
 - **«Crear» abre siempre «Tus proyectos»**, desde la barra de arriba y desde

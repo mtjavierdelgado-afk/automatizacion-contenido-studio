@@ -109,7 +109,10 @@ def comun_tokens(sobre):
     return {"entrada": int(uso.get("input_tokens") or 0),
             "salida": int(uso.get("output_tokens") or 0)}
 
-VERSION = "2.0"
+#: La version que ve quien usa el Studio (Novedades, el pie, /api/salud). La
+#: 3.1 empieza con el diseño CrearIA (19-10-2026). Los nombres de fase «V2.0
+#: fase N» de CLAUDE.md son otra cosa y no cambian.
+VERSION = "3.1"
 #: Como se llama el producto en pantalla, en los avisos y en la documentacion
 #: (CrearIA Studio desde el 19-10-2026, rama `diseno-crearia`). Es SOLO lo que
 #: se ve: los nombres internos --/opt/as-video-studio, el comando `asvs`, los

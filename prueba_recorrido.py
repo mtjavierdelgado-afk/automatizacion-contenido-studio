@@ -4036,8 +4036,8 @@ def publicar_lo_del_16_de_octubre(navegador, datos):
     ok(pg.p.locator(f'input[data-perfil="{cid}"]').input_value() == original,
        "«Usar este perfil» (Enter) en mayúsculas encuentra el de Upload-Post")
     pg.p.locator(f"{tarjeta} .ajustes-fijos > summary").first.click()
-    ok(pg.esperar(f"{tarjeta} .ajustes-fijos .casilla-red", "Usar emojis", 5),
-       "en lo fijo, el interruptor «Usar emojis en los textos»")
+    ok(pg.esperar(f"{tarjeta} .ajustes-fijos .ajuste-emojis", "Emojis en los textos", 5),
+       "en lo fijo, el nivel de «Emojis en los textos» (rama textos-emojis: antes un sí/no)")
     pg.captura("publicar_perfil")
 
     # --- los textos: escribiendo y el fallo con «Reintentar»
@@ -5765,6 +5765,107 @@ def diseno_crearia(navegador, datos):
     pg.captura("crearia_ayuda_movil", entera=False)
     pg.sin_errores("el diseño CrearIA en el móvil")
     pg.cerrar()
+
+
+
+# ======================================================================
+# TEXTOS CON EMOJIS (rama `textos-emojis`, 20-10-2026). Tramo propio al final.
+
+def _igual_emojis(obtenido, esperado, texto):
+    ok(obtenido == esperado, texto if obtenido == esperado
+       else f"{texto}  [obtenido={obtenido!r} esperado={esperado!r}]")
+
+
+@escenario
+def publicar_emojis(navegador, datos):
+    """El nivel de emojis del proyecto (Ninguno · Sobrio · Normal · Vistoso,
+    de fábrica Vistoso) y los emojis de la marca en «Cuentas y ajustes»; en la
+    ficha, el aviso de un texto con menos emojis de los pedidos y «✨ Más
+    emojis», que cambia el texto (sin tocar sus palabras) y lo guarda."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    api.put(f"/api/publicar/proyectos/{cid}", {"emojis": "vistoso", "emojis_marca": ""})
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["tiktok", "youtube"], "textos": {
+        "tiktok": {"descripcion": "Fiesta en casa con consola\n\nReserva ya #consolas"},
+        "youtube": {"titulo": "Alquiler de consolas en Lima", "descripcion": "Hola"}}})
+    pg = Pagina(navegador, datos)
+
+    # --- Cuentas y ajustes: el nivel y los de la marca
+    pg.js("PUB.seccion = 'cuentas'; irAModulo('publicar');")
+    tarjeta = f'.proyecto-publicar:has(input[data-perfil="{cid}"])'
+    ok(pg.esperar(tarjeta, segundos=15), "la tarjeta del proyecto en Cuentas y ajustes")
+    pg.p.locator(f"{tarjeta} .ajustes-fijos > summary").first.click()
+    niveles = f"{tarjeta} .ajuste-emojis .niveles-emojis"
+    ok(pg.esperar(niveles, segundos=5), "el selector «Emojis en los textos»")
+    textos = pg.p.locator(f"{niveles} button").all_inner_texts()
+    _igual_emojis(textos, ["Ninguno", "Sobrio", "Normal", "Vistoso"], "con sus cuatro niveles")
+    ok(pg.visible(f"{niveles} button.elegido", "Vistoso"), "y Vistoso elegido de fábrica")
+    pg.pulsar(f"{niveles} button", "Sobrio")
+    pg.p.wait_for_timeout(1200)
+    _r, proyectos = api.get("/api/publicar/proyectos")
+    fila = next((x for x in proyectos.get("proyectos", []) if x["id"] == cid), {})
+    _igual_emojis((fila.get("ajustes") or {}).get("emojis"), "sobrio", "pulsar «Sobrio» lo guarda")
+    if not pg.visible(f"{tarjeta} .ajuste-emojis input[data-emojis-marca]"):
+        pg.p.locator(f"{tarjeta} .ajustes-fijos > summary").first.click()
+    ok(pg.visible(f"{niveles} button.elegido", "Sobrio"), "y se ve elegido tras repintar")
+    pg.pulsar(f"{niveles} button", "Vistoso")
+    pg.p.wait_for_timeout(1200)
+    if not pg.visible(f"{tarjeta} .ajuste-emojis input[data-emojis-marca]"):
+        pg.p.locator(f"{tarjeta} .ajustes-fijos > summary").first.click()
+    campo = pg.p.locator(f"{tarjeta} .ajuste-emojis input[data-emojis-marca]")
+    ok(campo.count() == 1, "el campo «Emojis de la marca»")
+    campo.fill("🕹️ 🎉")
+    campo.press("Tab")
+    pg.p.wait_for_timeout(1200)
+    _r, proyectos = api.get("/api/publicar/proyectos")
+    fila = next((x for x in proyectos.get("proyectos", []) if x["id"] == cid), {})
+    _igual_emojis(((fila.get("ajustes") or {}).get("emojis"), (fila.get("ajustes") or {}).get("emojis_marca")),
+          ("vistoso", "🕹️ 🎉"), "el nivel vuelve a Vistoso y los de la marca se guardan")
+    pg.captura("publicar_emojis_ajustes")
+
+    # --- la ficha: el aviso y «✨ Más emojis»
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    red = ".texto-red[data-red=tiktok]"
+    ok(pg.esperar(f"{red} .aviso-emojis", "menos emojis de los pedidos", 15),
+       "un texto sin emojis avisa: «va con menos emojis de los pedidos»")
+    ok(pg.visible(".texto-red[data-red=youtube] .aviso-emojis", "Este título"),
+       "y el título de YouTube sin emoji, también")
+    ok(pg.visible(f'{red} button[data-emojis="tiktok-descripcion"]', "Más emojis"),
+       "«✨ Más emojis» junto al texto")
+    ok(pg.visible('.texto-red[data-red=youtube] button[data-emojis="youtube-titulo"]', "Más emojis"),
+       "y junto al título")
+    pg.pulsar(f'{red} button[data-emojis="tiktok-descripcion"]')
+    hecho = False
+    for _ in range(30):
+        pg.p.wait_for_timeout(500)
+        valor = pg.p.locator(f"{red} textarea").first.input_value()
+        if valor != "Fiesta en casa con consola\n\nReserva ya #consolas":
+            hecho = True
+            break
+    ok(hecho and "🕹️" in valor and "Fiesta en casa con consola" in valor and "#consolas" in valor,
+       f"«✨ Más emojis» cambia el texto, con los de la marca y sin tocar sus palabras ({valor!r})")
+    ok(pg.esperar(".guardado-publicar .pastilla.ok", "Guardado", 10), "y se guarda: «✓ Guardado»")
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    _igual_emojis(ficha["textos"]["tiktok"]["descripcion"], valor, "en el servidor está el texto con emojis")
+    ok(not pg.visible(f"{red} .aviso-emojis"), "y el aviso se va")
+    pg.pulsar('.texto-red[data-red=youtube] button[data-emojis="youtube-titulo"]')
+    pg.p.wait_for_timeout(2500)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    titulo = ficha["textos"]["youtube"]["titulo"]
+    ok(titulo.startswith("Alquiler de consolas en Lima") and titulo != "Alquiler de consolas en Lima",
+       f"el título también, con el emoji al final ({titulo!r})")
+    # con Ninguno no se ofrece
+    api.put(f"/api/publicar/proyectos/{cid}", {"emojis": "ninguno"})
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.esperar(f"{red} textarea", segundos=10) and not pg.visible(f"{red} button[data-emojis]")
+       and not pg.visible(f"{red} .aviso-emojis"), "con «Ninguno» ni el botón ni el aviso")
+    api.put(f"/api/publicar/proyectos/{cid}", {"emojis": "vistoso", "emojis_marca": ""})
+    pg.captura("publicar_emojis_ficha")
+    pg.sin_errores("los emojis de Publicar")
 
 
 # ======================================================================

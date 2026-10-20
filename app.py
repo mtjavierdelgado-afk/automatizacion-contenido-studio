@@ -17257,7 +17257,8 @@ def publicar_proyectos(peticion: Request):
 @app.put("/api/publicar/proyectos/{cid}")
 def publicar_guardar_ajustes(cid: str, peticion: Request, cuerpo: dict = Body(default=None)):
     """Lo fijo de un proyecto: {perfil, redes, hora, firma, hashtags, tono,
-    marcar_ia, avisar_youtube, privacidad_youtube, facebook_pagina}."""
+    marcar_ia, avisar_youtube, privacidad_youtube, facebook_pagina, emojis
+    (ninguno/sobrio/normal/vistoso), emojis_marca}."""
     cid = _proyecto_publicable(cid, peticion)
     ajustes = _por_publicar(_publicar().guardar_ajustes, raiz_proyectos(), cid, _cuerpo(cuerpo))
     return {"ajustes": ajustes}
@@ -17540,6 +17541,23 @@ def publicar_usar_gancho(pid: str, peticion: Request, cuerpo: dict = Body(defaul
     _por_publicar(_publicar().usar_gancho, raiz_proyectos(), ctx.id, str(d.get("red") or ""),
                   d.get("indice"))
     return publicar_ficha(pid, peticion)
+
+
+@app.post("/api/publicar/videos/{pid}/emojis")
+def publicar_mas_emojis(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """«✨ Más emojis» (rama `textos-emojis`): {red, campo: titulo|descripcion,
+    texto?}. Devuelve {texto, antes, despues}: el MISMO texto con emojis
+    añadidos (si Claude cambia una palabra, 422 y no se toca nada). NO guarda:
+    la pantalla lo pone en el campo y lo guarda como lo escrito a mano. Va en
+    la petición (haiku, tope de 50 s: el proxy corta a los 60)."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    P = _publicar()
+    d = _cuerpo(cuerpo)
+    ajustes = P.ajustes_de(raiz_proyectos(), info["cliente"])
+    return _por_publicar(P.vestir_con_emojis, raiz_proyectos(), info, str(d.get("red") or ""),
+                         str(d.get("campo") or ""), d.get("texto"), ajustes,
+                         proyecto=ctx.proyecto, cwd=ctx.proyecto.raiz)
 
 
 @app.post("/api/publicar/proyectos/{cid}/palabras", status_code=202)

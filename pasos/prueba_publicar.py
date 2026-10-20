@@ -1602,7 +1602,7 @@ def prueba_textos():
         ok(True, "«usar_emojis» es sí o no")
     con = P.instruccion_textos(INFO, ["tiktok", "instagram", "youtube"], P.AJUSTES_DEFECTO)
     sin = P.instruccion_textos(INFO, ["tiktok"], dict(P.AJUSTES_DEFECTO, usar_emojis=False))
-    ok("Emojis: sí" in con and "Instagram Reels, 3 a 6 emojis" in con, "con emojis: cuántos por red")
+    ok("nivel «Vistoso»" in con and "Instagram Reels: 5 a 9" in con, "con emojis: cuántos por red")
     ok("NINGUNO" in sin and "Emojis: sí" not in sin, "sin emojis: se le dice que ninguno")
     ok("gancho" in con and "70 caracteres" in con, "pide gancho y el título de YouTube de 70 como mucho")
     ok("SIN SONIDO" not in con, "las reglas de Facebook solo si se pide Facebook")
@@ -1661,6 +1661,161 @@ def prueba_textos():
         f3 = P.ficha(raiz, INFO, P.AJUSTES_DEFECTO)
         ok(f3["textos"]["tiktok"]["descripcion"] == "Solo TT" and "Instagram" in f3["error_textos"]
            and f3["error_redes"] == ["instagram"], "a medias: lo que vino se guarda y lo que falta se dice")
+    finally:
+        os.environ.pop("ESTUDIO_SIMULAR", None)
+
+
+def prueba_emojis():
+    """Rama `textos-emojis` (20-10): el nivel por proyecto (y el sí/no de antes
+    leído igual), los emojis de la marca en el prompt, el contador, el aviso
+    de la ficha (fuera de la nota SEO) y «✨ Más emojis», que rechaza lo que
+    cambie una palabra."""
+    seccion("11] emojis: nivel, marca, contador, aviso y «✨ Más emojis»")
+    import publicar_seo as SEO                              # noqa: PLC0415
+    raiz = os.path.join(CARPETA, "emojis")
+    os.makedirs(raiz)
+    # EL NIVEL: de fábrica vistoso; el sí/no de antes guardado se respeta
+    igual(P.ajustes_de(raiz, "nuevo")["emojis"], "vistoso", "un proyecto sin nada guardado: Vistoso")
+    os.makedirs(os.path.dirname(P._ruta_ajustes(raiz)), exist_ok=True)
+    P._escribir(P._ruta_ajustes(raiz), {"proyectos": {"viejo_no": {"usar_emojis": False},
+                                                      "viejo_si": {"usar_emojis": True}}})
+    with open(P._ruta_ajustes(raiz), "rb") as fh:
+        antes = fh.read()
+    igual(P.ajustes_de(raiz, "viejo_no")["emojis"], "ninguno",
+          "«usar_emojis: false» guardado se lee como Ninguno (se respeta lo que eligió)")
+    igual(P.ajustes_de(raiz, "viejo_no")["usar_emojis"], False, "y sigue diciendo que no a quien lee el sí/no")
+    igual(P.ajustes_de(raiz, "viejo_si")["emojis"], "vistoso", "«usar_emojis: true» guardado: Vistoso")
+    with open(P._ruta_ajustes(raiz), "rb") as fh:
+        ok(fh.read() == antes, "leer los ajustes no escribe nada (solo se guarda si el dueño toca)")
+    igual(P.guardar_ajustes(raiz, "viejo_no", {"emojis": "normal"})["emojis"], "normal",
+          "el nivel se cambia y manda sobre el sí/no de antes")
+    for malo, que in (("mucho", "un nivel que no existe"), (3, "un número")):
+        try:
+            P.guardar_ajustes(raiz, "viejo_no", {"emojis": malo})
+            ok(False, f"«emojis» no acepta {que}")
+        except P.ErrorPublicar:
+            ok(True, f"«emojis» no acepta {que}")
+    igual(P.guardar_ajustes(raiz, "viejo_no", {"emojis_marca": "🎮, 🕹️ 🎉 🎮"})["emojis_marca"],
+          "🎮 🕹️ 🎉", "los emojis de la marca se guardan limpios y sin repetir")
+    try:
+        P.guardar_ajustes(raiz, "viejo_no", {"emojis_marca": "🎮 consolas"})
+        ok(False, "en los emojis de la marca no van letras")
+    except P.ErrorPublicar:
+        ok(True, "en los emojis de la marca no van letras")
+
+    # EL PROMPT
+    redes = ["tiktok", "instagram", "youtube", "linkedin"]
+    vistoso = P.instruccion_textos(INFO, redes, dict(P.AJUSTES_DEFECTO, emojis_marca="🎮 🕹️"))
+    ok("SIEMPRE con emojis" in vistoso and "EMPIEZA con un emoji" in vistoso,
+       "en Vistoso el prompt EXIGE emojis, con el gancho empezando por uno")
+    ok("🎮 🕹️" in vistoso and "firma" in vistoso, "y lleva los emojis de la marca como su firma")
+    ok("TEMA" in vistoso and "comodines" in vistoso, "pide emojis del tema del vídeo, no comodines")
+    ok("🎮➕🎉" in vistoso, "y combinaciones de dos para contar algo (los emojis «propios»)")
+    ok("TikTok: 3 a 6" in vistoso and "LinkedIn: 2 a 4" in vistoso and "en el título 1." in vistoso,
+       "con su número por red (LinkedIn más sobrio, YouTube uno en el título)")
+    ok("que aporten, no que decoren" not in vistoso, "sin la frase que le daba permiso para no poner ninguno")
+    sobrio = P.instruccion_textos(INFO, ["tiktok"], dict(P.AJUSTES_DEFECTO, emojis="sobrio"))
+    ok("TikTok: 1 a 2" in sobrio and "SIEMPRE con emojis" not in sobrio, "en Sobrio, pocos")
+    viejo = P.instruccion_textos(INFO, ["tiktok"], P.ajustes_de(raiz, "viejo_si"))
+    ok("SIEMPRE con emojis" in viejo, "un proyecto con el sí de antes recibe el prompt de Vistoso")
+    P._escribir(P._ruta_ajustes(raiz), {"proyectos": {"viejo_no": {"usar_emojis": False}}})
+    nada = P.instruccion_textos(INFO, ["tiktok"], P.ajustes_de(raiz, "viejo_no"))
+    ok("NINGUNO" in nada and "SIEMPRE" not in nada, "y uno con el no de antes, Ninguno")
+    ok("EMPIEZAN con un emoji" in P._emojis_de_ganchos(P.AJUSTES_DEFECTO)
+       and P._emojis_de_ganchos(dict(P.AJUSTES_DEFECTO, emojis="ninguno")) == "Sin emojis.",
+       "los ganchos siguen el nivel")
+    ok("los emojis" in SEO.INSTRUCCION_OPTIMIZAR, "«Optimizar SEO» no quita los emojis al reescribir")
+
+    # EL CONTADOR
+    for texto, n, que in (("Hola", 0, "sin emojis"), ("🎮 Fiesta 🎉", 2, "dos sueltos"),
+                          ("👨‍👩‍👧 familia", 1, "una familia con ZWJ es uno"),
+                          ("🇵🇪 Lima 🇲🇽", 2, "cada bandera es una"),
+                          ("👍🏽👍🏿", 2, "con tono de piel, uno cada uno"),
+                          ("❤️ y ❤", 2, "con y sin selector de variante"),
+                          ("1️⃣ 2️⃣ #3 en 2026", 2, "las teclas, sí; un número suelto, no"),
+                          ("© → ↔️ ™️", 2, "©/→ sin selector son texto; con él, emoji"),
+                          ("🎮➕🎉", 3, "una combinación son sus emojis"),
+                          ("🏳️‍🌈", 1, "la bandera del arcoíris es una")):
+        igual(P.contar_emojis(texto), n, f"contar: {que}")
+    igual(P.quitar_emojis("🎮 Fiesta 👨‍👩‍👧 en 🇵🇪 ❤️"), " Fiesta  en  ", "quitar emojis deja solo el texto")
+
+    # EL AVISO: por debajo del mínimo del nivel, y SIN tocar la nota SEO
+    textos = {"tiktok": {"descripcion": "Fiesta en casa con consola 🎮"},
+              "youtube": {"titulo": "Alquiler de consolas en Lima", "descripcion":
+                          "🎮 Uno\n\n🎉 Dos\n\n📍 Lima\n\n👉 Reserva"},
+              "instagram": {"descripcion": ""}}
+    e = P.emojis_de_ficha(textos, P.AJUSTES_DEFECTO, ["tiktok", "youtube", "instagram"])
+    ok(e["redes"]["tiktok"]["descripcion"]["faltan"] and e["redes"]["tiktok"]["descripcion"]["minimo"] == 3,
+       "TikTok con 1 de 3: la ficha avisa")
+    ok(e["redes"]["youtube"]["titulo"]["faltan"] and not e["redes"]["youtube"]["descripcion"]["faltan"],
+       "el título de YouTube sin emoji avisa; su texto con 4, no")
+    ok(not e["redes"]["instagram"]["descripcion"]["faltan"], "un texto vacío no avisa de emojis")
+    ok(not any(c["faltan"] for r in P.emojis_de_ficha(textos, dict(P.AJUSTES_DEFECTO, emojis="ninguno"),
+                                                       ["tiktok", "youtube"])["redes"].values()
+               for c in r.values()), "en Ninguno no avisa nunca")
+    comp = P.componer("tiktok", textos["tiktok"], P.AJUSTES_DEFECTO, INFO)
+    nota_v = SEO.nota("tiktok", textos["tiktok"], comp, P.AJUSTES_DEFECTO, {}, INFO, "consolas")
+    nota_n = SEO.nota("tiktok", textos["tiktok"], comp, dict(P.AJUSTES_DEFECTO, emojis="ninguno"), {}, INFO,
+                      "consolas")
+    igual(nota_v, nota_n, "la nota SEO no cambia por los emojis que falten")
+    ok("emoji" not in json.dumps(nota_v, ensure_ascii=False).lower(), "ni habla de emojis")
+
+    # «✨ MÁS EMOJIS»
+    P._escribir(P._ruta_video(raiz, "fiesta"), dict(P._leer_video(raiz, "fiesta"), textos={
+        "tiktok": {"descripcion": "Fiesta en casa\nReserva ya #consolas"},
+        "youtube": {"titulo": "Alquiler de consolas en Lima", "descripcion": "Hola"}}))
+    original = P._hablar_con_claude
+    pedido = {}
+
+    def falso(respuesta):
+        def hablar(instruccion, sistema, proyecto, cwd, para, simulado, **kw):
+            pedido.update(kw, instruccion=instruccion)
+            return json.dumps({"texto": respuesta}, ensure_ascii=False), {"_coste_anotado": True}
+        return hablar
+    try:
+        P._hablar_con_claude = falso("🎮 Fiesta en casa\n👉 Reserva ya #consolas 🎉")
+        r = P.vestir_con_emojis(raiz, INFO, "tiktok", "descripcion", None,
+                                dict(P.AJUSTES_DEFECTO, emojis_marca="🎮"))
+        igual((r["texto"], r["antes"], r["despues"]), ("🎮 Fiesta en casa\n👉 Reserva ya #consolas 🎉", 0, 3),
+              "«Más emojis» acepta el mismo texto con emojis añadidos")
+        igual((pedido.get("modelo"), pedido.get("esfuerzo")), ("haiku", "low"), "y es barato: haiku, esfuerzo bajo")
+        ok(pedido.get("tiempo_max_s", 99) <= 55, "con un tope por debajo del corte del proxy")
+        ok("🎮" in pedido["instruccion"] and "Fiesta en casa" in pedido["instruccion"],
+           "el prompt lleva los emojis de la marca y el texto")
+        igual(P._leer_video(raiz, "fiesta")["textos"]["tiktok"]["descripcion"], "Fiesta en casa\nReserva ya #consolas",
+              "y no guarda nada: lo guarda la pantalla por el camino de siempre")
+        for respuesta, que in (("🎮 Fiesta en tu casa\nReserva ya #consolas", "cambia una palabra"),
+                               ("🎮 Fiesta en casa\nReserva ya 🎉", "quita un hashtag"),
+                               ("Fiesta casa 🎮\nReserva ya #consolas", "quita una palabra"),
+                               ("Fiesta en casa\nReserva ya #consolas", "no añade ningún emoji"),
+                               ("", "no devuelve nada")):
+            P._hablar_con_claude = falso(respuesta)
+            try:
+                P.vestir_con_emojis(raiz, INFO, "tiktok", "descripcion", "Fiesta en casa\nReserva ya #consolas",
+                                    P.AJUSTES_DEFECTO)
+                ok(False, f"«Más emojis» rechaza una respuesta que {que}")
+            except P.ErrorPublicar as fallo:
+                ok(fallo.codigo == 422, f"«Más emojis» rechaza una respuesta que {que} ({str(fallo)[:40]}…)")
+        P._hablar_con_claude = falso("Alquiler de consolas en Lima 🎮")
+        r = P.vestir_con_emojis(raiz, INFO, "youtube", "titulo", None, P.AJUSTES_DEFECTO)
+        igual(r["texto"], "Alquiler de consolas en Lima 🎮", "también con el título")
+        ok("al final" in pedido["instruccion"], "y en YouTube pide el emoji al final del título")
+        for red, campo, que in (("tiktok", "titulo", "TikTok no tiene título"), ("nada", "descripcion", "una red que no existe"),
+                                ("youtube", "cta", "un campo que no es título ni texto")):
+            try:
+                P.vestir_con_emojis(raiz, INFO, red, campo, None, P.AJUSTES_DEFECTO)
+                ok(False, f"«Más emojis» no vale con {que}")
+            except P.ErrorPublicar:
+                ok(True, f"«Más emojis» no vale con {que}")
+    finally:
+        P._hablar_con_claude = original
+    # el doble del Studio (ESTUDIO_SIMULAR) también pasa la comprobación
+    os.environ["ESTUDIO_SIMULAR"] = "1"
+    try:
+        r = P.vestir_con_emojis(raiz, INFO, "tiktok", "descripcion", "Uno\n\nDos", P.AJUSTES_DEFECTO)
+        ok(r["texto"].startswith("🎮 Uno\n\n🎉 Dos") and P.contar_emojis(r["texto"]) >= 3
+           and P.quitar_emojis(r["texto"]).replace(" ", "") == "Uno\n\nDos",
+           f"el doble pone uno por párrafo y llega al mínimo de TikTok en Vistoso: {r['texto']!r}")
     finally:
         os.environ.pop("ESTUDIO_SIMULAR", None)
 
@@ -2242,6 +2397,7 @@ def main():
     prueba_textos()
     prueba_seo()
     prueba_notas_19oct()
+    prueba_emojis()
     if shutil.which("ffmpeg"):
         prueba_portada()
     if shutil.which("ffmpeg"):

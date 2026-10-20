@@ -21580,6 +21580,94 @@ function seccionFichaPublicar() {
   return caja;
 }
 
+/* LOS EMOJIS (rama `textos-emojis`, 20-10): el nivel del proyecto (Ninguno ·
+   Sobrio · Normal · Vistoso; de fábrica, Vistoso) y los emojis de la marca.
+   Lo que viene del servidor ya es el nivel LEÍDO (un `usar_emojis: false`
+   guardado llega como «ninguno»): aquí solo se guarda si se toca. */
+const NIVELES_EMOJIS_PUB = [['ninguno', 'Ninguno'], ['sobrio', 'Sobrio'], ['normal', 'Normal'], ['vistoso', 'Vistoso']];
+
+function ajusteEmojisPublicar(p, a, guardar) {
+  const nivel = a.emojis || 'vistoso';
+  const caja = h('div', { clase: 'ajuste-emojis' });
+  const botones = h('div', { clase: 'niveles-emojis', role: 'group', 'aria-label': 'Emojis en los textos' });
+  NIVELES_EMOJIS_PUB.forEach(([valor, texto]) => botones.appendChild(h('button', {
+    type: 'button', clase: `mini nivel-emojis${valor === nivel ? ' elegido' : ''}`,
+    datos: { nivel: valor }, 'aria-pressed': valor === nivel ? 'true' : 'false',
+    onclick: () => { if (valor === (a.emojis || 'vistoso')) return; a.emojis = valor; guardar('emojis', valor); },
+  }, texto)));
+  const campoMarca = () => document.querySelector(`input[data-emojis-marca="${p.id}"]`);
+  let relojMarca = null;
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('span', { clase: 'etiqueta-tono' }, 'Emojis en los textos'), botones,
+    h('span', { clase: 'crece' }), botonGuia('emojis_redes', campoMarca)));
+  caja.appendChild(h('div', { clase: 'meta' }, {
+    ninguno: 'Ninguno: Claude no pone emojis en ningún texto.',
+    sobrio: 'Sobrio: uno o dos, en el gancho o en la llamada a la acción.',
+    normal: 'Normal: en el gancho, en las listas y en la llamada a la acción.',
+    vistoso: 'Vistoso: siempre, a juego con el tema del vídeo: en el título, el gancho, de viñeta en cada párrafo, en la llamada a la acción y en la zona.',
+  }[nivel]));
+  if (nivel !== 'ninguno') {
+    caja.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Emojis de la marca (opcional: su firma, Claude los repite en el gancho y en la llamada a la acción)',
+      h('input', { type: 'text', value: a.emojis_marca || '', placeholder: '🎮 🕹️ 🎉', maxlength: 80,
+        datos: { emojisMarca: p.id, foco: `emojis-marca-${p.id}` },
+        // también con un evento `input` («Usar en el campo» de la guía), tras dejar de teclear
+        oninput: ev => {
+          clearTimeout(relojMarca);
+          const v = ev.target.value;
+          relojMarca = setTimeout(() => { if (v !== (a.emojis_marca || '')) { a.emojis_marca = v; guardar('emojis_marca', v); } }, 1200);
+        },
+        onchange: ev => {
+          clearTimeout(relojMarca);
+          if (ev.target.value === (a.emojis_marca || '')) return;
+          a.emojis_marca = ev.target.value; guardar('emojis_marca', ev.target.value);
+        } })));
+  }
+  return caja;
+}
+
+/* «✨ Más emojis»: el MISMO texto con emojis añadidos (el servidor comprueba
+   que no cambia ni una palabra). Lo que vuelve entra como lo escrito a mano y
+   se guarda por el camino de siempre, con su pastilla «Guardado». */
+async function masEmojisPublicar(red, campo, boton) {
+  const actual = String(textosDeFicha(red)[campo] || '');
+  if (!actual.trim()) { toast('Todavía no hay texto al que añadir emojis', true); return; }
+  if (boton) { boton.disabled = true; boton.textContent = 'Poniendo emojis…'; }
+  try {
+    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/emojis`),
+      { method: 'POST', cuerpo: { red, campo, texto: actual } });
+    if (String(textosDeFicha(red)[campo] || '') !== actual) {
+      toast('Has cambiado el texto mientras tanto: vuelve a pulsar «✨ Más emojis»', true);
+      return;
+    }
+    editarTextoPublicar(red, campo, r.texto);
+    const sitio = document.querySelector(`[data-foco="${red}-${campo}"]`);
+    if (sitio) sitio.value = r.texto;
+    await guardarTextosPublicar();
+    toast(`${NOMBRES_RED[red]}: ${r.despues - r.antes} emoji${r.despues - r.antes === 1 ? '' : 's'} más`);
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    if (boton && boton.isConnected) { boton.disabled = false; boton.textContent = '✨ Más emojis'; }
+  }
+}
+
+function botonMasEmojisPublicar(red, campo) {
+  if (((PUB.ficha || {}).ajustes || {}).emojis === 'ninguno') return null;
+  return h('button', { type: 'button', clase: 'mini boton-emojis', datos: { emojis: `${red}-${campo}` },
+    title: 'Añade emojis a este texto sin cambiar sus palabras',
+    onclick: ev => masEmojisPublicar(red, campo, ev.currentTarget) }, '✨ Más emojis');
+}
+
+/* El aviso de la ficha cuando un texto lleva menos emojis de los que pide el
+   nivel del proyecto. No entra en la nota SEO. */
+function avisoEmojisPublicar(red, campo) {
+  const dato = ((((PUB.ficha || {}).emojis || {}).redes || {})[red] || {})[campo];
+  if (!dato || !dato.faltan) return null;
+  return h('div', { clase: 'meta aviso-emojis', datos: { avisoEmojis: `${red}-${campo}` } },
+    `⚠ ${campo === 'titulo' ? 'Este título' : 'Este texto'} va con menos emojis de los pedidos `
+    + `(${dato.hay} de ${dato.minimo} como mínimo): pulsa «✨ Más emojis».`);
+}
+
 function bloqueTextoRed(red) {
   const f = PUB.ficha;
   const t = textosDeFicha(red);
@@ -21601,20 +21689,25 @@ function bloqueTextoRed(red) {
   const maxTitulo = formato.titulo || (red === 'youtube' ? 100 : red === 'facebook' ? 255 : 0);
   if (maxTitulo) {
     const largo = (t.titulo || '').length;
-    b.appendChild(h('label', { clase: 'etiqueta-campo' },
+    b.appendChild(h('div', { clase: 'fila fila-campo-emojis' }, h('label', { clase: 'etiqueta-campo crece' },
       red === 'youtube' ? `Título (${largo}/70: más largo se corta en el móvil)`
-        : red === 'facebook' ? 'Título' : `Título (${largo}/${maxTitulo})`));
+        : red === 'facebook' ? 'Título' : `Título (${largo}/${maxTitulo})`), botonMasEmojisPublicar(red, 'titulo')));
     b.appendChild(h('input', { type: 'text', value: t.titulo || '', maxlength: maxTitulo,
       datos: { foco: `${red}-titulo` }, oninput: ev => editarTextoPublicar(red, 'titulo', ev.target.value) }));
+    const avisoTitulo = avisoEmojisPublicar(red, 'titulo');
+    if (avisoTitulo) b.appendChild(avisoTitulo);
   }
-  b.appendChild(h('label', { clase: 'etiqueta-campo' },
-    formato.limite && formato.limite < 1000 ? `Texto (hasta ${formato.limite} caracteres con todo)` : 'Texto'));
+  b.appendChild(h('div', { clase: 'fila fila-campo-emojis' }, h('label', { clase: 'etiqueta-campo crece' },
+    formato.limite && formato.limite < 1000 ? `Texto (hasta ${formato.limite} caracteres con todo)` : 'Texto'),
+  botonMasEmojisPublicar(red, 'descripcion')));
   if (!maxTitulo && !['discord', 'telegram'].includes(red)) {
     b.appendChild(h('div', { clase: 'meta' }, `${NOMBRES_RED[red]} no tiene título aparte: la PRIMERA LÍNEA del texto `
       + `es lo que se ve sin pulsar «más», así que hace de título.`));
   }
   b.appendChild(h('textarea', { rows: 4, value: t.descripcion || '', datos: { foco: `${red}-descripcion` },
     oninput: ev => editarTextoPublicar(red, 'descripcion', ev.target.value) }));
+  const avisoTexto = avisoEmojisPublicar(red, 'descripcion');
+  if (avisoTexto) b.appendChild(avisoTexto);
   b.appendChild(panelRevisionPublicar(`texto_${red}`, f.pid, campoTexto));
   if (formato.alt) {
     b.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Texto alternativo (lo que se ve en el vídeo, para quien no puede verlo)',
@@ -22132,7 +22225,7 @@ async function guardarAjustePublicar(cid, cambios) {
     toast('Guardado');
     // lo que cambia qué botones salen se repinta; el resto no, para no quitar
     // el foco a quien sigue escribiendo
-    if (['usar_emojis', 'perfil', 'yt_para_ninos', 'palabra_clave', 'redes', 'redes_visibles',
+    if (['usar_emojis', 'emojis', 'perfil', 'yt_para_ninos', 'palabra_clave', 'redes', 'redes_visibles',
       'pinterest_tablero', 'gbp_cta'].some(k => k in cambios)) pintarModulo();
   } catch (e) { toast(e.message, true); }
 }
@@ -22533,8 +22626,9 @@ function tarjetaProyectoPublicar(p) {
   fijos.appendChild(panelRevisionPublicar('tono_redes', p.id, campoTono));
   fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Página de Facebook (solo si hay más de una)',
     h('input', { type: 'text', value: a.facebook_pagina || '', onchange: ev => guardar('facebook_pagina', ev.target.value) })));
+  fijos.appendChild(ajusteEmojisPublicar(p, a, guardar));
   const casillas = h('div', { clase: 'fila' });
-  [['usar_emojis', 'Usar emojis en los textos'], ['marcar_ia', 'Marcar como hecho con IA'],
+  [['marcar_ia', 'Marcar como hecho con IA'],
     ['avisar_youtube', 'Avisar a los suscriptores de YouTube']]
     .forEach(([campo, texto]) => casillas.appendChild(h('label', { clase: 'casilla-red' },
       h('input', { type: 'checkbox', checked: !!a[campo], onchange: ev => guardar(campo, ev.target.checked) }),

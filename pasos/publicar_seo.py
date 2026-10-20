@@ -260,7 +260,8 @@ REGLAS DE CADA RED
 Para cada red: arregla los fallos de la nota y lo que veas (palabra clave al principio
 del título y en la primera línea, primera línea que enganche, hashtags en su rango y
 con uno local, un CTA claro, primer comentario que invite a contestar). No cambies lo
-que ya está bien: deja ese campo igual. Mantén el idioma y el tono.
+que ya está bien: deja ese campo igual. Mantén el idioma, el tono y los emojis: si
+reescribes una línea que llevaba emojis, que los siga llevando (son del proyecto).
 
 La nota la pone el Studio con sus cuentas: no pongas tú otra. En «fallos» van SOLO
 los que la nota de arriba NO dice ya (no repitas sus puntos: la persona ya los ve con

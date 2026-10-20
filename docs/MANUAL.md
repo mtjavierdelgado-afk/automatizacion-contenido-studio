@@ -358,8 +358,9 @@ ni lo deja por rehacer.
 
 **Cuentas y ajustes**, en cada proyecto, también tiene **lo fijo**: la hora
 por defecto al programar, la firma y los hashtags que van al final de todos
-los textos, el **tono de los textos** (con su ✦ Guía y ✓ Revisar), **usar
-emojis en los textos** (de fábrica sí; quítalo y Claude no pone ninguno), si se marca
+los textos, el **tono de los textos** (con su ✦ Guía y ✓ Revisar), los
+**emojis en los textos** (Ninguno · Sobrio · Normal · Vistoso; de fábrica
+Vistoso) con los **emojis de la marca**, si se marca
 como hecho con IA, si YouTube avisa a los suscriptores, la privacidad en
 YouTube y las redes que salen marcadas de fábrica. La confirmación antes de
 enviar no se puede quitar.

@@ -3490,6 +3490,17 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 /* el asistente con sesión, pero con un fallo pasajero apuntado: ámbar */
 .burbuja-asistente.dudosa::after { background: var(--aviso); }
 
+/* ---- textos-emojis (20-10): el nivel de emojis del proyecto, los de la
+   marca, «✨ Más emojis» junto a cada texto y su aviso */
+.ajuste-emojis { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
+.niveles-emojis { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.nivel-emojis.elegido { background: var(--acento-relleno); color: var(--sobre-acento);
+  border-color: var(--acento); }
+.fila-campo-emojis { align-items: flex-end; gap: 8px; }
+.fila-campo-emojis .etiqueta-campo { margin-bottom: 0; }
+.boton-emojis { white-space: nowrap; }
+.aviso-emojis { color: var(--aviso); }
+
 /* ---- espacio-fijo: el espacio fijo del vídeo nuevo (sitio y luz en una fila) */
 .espacio-fijo { display: flex; flex-direction: column; }
 .espacio-fijo-fila { display: flex; flex-wrap: wrap; gap: 0 12px; }

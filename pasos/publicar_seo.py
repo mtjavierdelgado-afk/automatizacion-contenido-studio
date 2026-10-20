@@ -70,6 +70,22 @@ import publicar_redes as _RD                                   # noqa: E402
 
 RANGO_HASHTAGS = {"tiktok": (3, 5), "instagram": (5, 8), "youtube": (3, 5), "facebook": (2, 4),
                   **_RD.HASHTAGS}
+#: CUÁNTOS HASHTAGS ADMITE CADA RED como mucho (notas del 19-10: antes se
+#: cortaba en 15 sin decir nada). Instagram rechaza el post con más de 30;
+#: YouTube ignora TODOS si lleva más de 60. Las demás no dicen un tope claro
+#: (Upload-Post tampoco, /resources/character-limits): 30. Lo que sobre no se
+#: manda, y la ficha lo dice (`componer`).
+TOPE_HASHTAGS = {"instagram": 30, "youtube": 60}
+TOPE_HASHTAGS_DEFECTO = 30
+#: Lo más que se GUARDA por red: más que cualquier tope, para que lo que sobra
+#: se vea en el aviso y no desaparezca al guardar.
+TOPE_HASHTAGS_GUARDADOS = 100
+
+
+def tope_hashtags(red):
+    return TOPE_HASHTAGS.get(red, TOPE_HASHTAGS_DEFECTO)
+
+
 #: Hashtags que no posicionan nada: o vacíos, o de los que las redes castigan.
 HASHTAGS_VACIOS = {"fyp", "foryou", "foryoupage", "fy", "parati", "paratii", "viral",
                    "viralvideo", "trending", "tendencia", "xyzbca", "explore", "explorepage",
@@ -246,11 +262,15 @@ del título y en la primera línea, primera línea que enganche, hashtags en su 
 con uno local, un CTA claro, primer comentario que invite a contestar). No cambies lo
 que ya está bien: deja ese campo igual. Mantén el idioma y el tono.
 
+La nota la pone el Studio con sus cuentas: no pongas tú otra. En «fallos» van SOLO
+los que la nota de arriba NO dice ya (no repitas sus puntos: la persona ya los ve con
+su botón para arreglarlos), y solo los que no arreglas tú en «campos».
+
 Devuelve SOLO este JSON, con estas claves de red tal cual: {claves}
 {{
+  "palabra_clave": "la palabra clave más concreta para ESTE vídeo (de 2 a 6 palabras, como la buscaría alguien)",
   "<red>": {{
-    "nota": 0-100,
-    "fallos": ["lo que falla, en una frase", "..."],
+    "fallos": ["lo que falla y no está en la nota, en una frase", "..."],
     "campos": {{
       "<campo>": {{"despues": "el texto mejorado (hashtags como lista)", "porque": "por qué, en una frase"}}
     }}
@@ -302,7 +322,8 @@ negocio de verdad ofrece según el material.
 
 
 def normalizar_optimizacion(datos, redes):
-    """{red: {nota, fallos, campos: {campo: {despues, porque}}}} limpio."""
+    """{red: {fallos, campos: {campo: {despues, porque}}}} limpio. Sin nota: la
+    única nota es la del Studio (`nota`), también la de «con estos cambios»."""
     datos = datos if isinstance(datos, dict) else {}
     salida = {}
     for red in redes:
@@ -328,7 +349,7 @@ def normalizar_optimizacion(datos, redes):
             if campo == "hashtags":
                 despues = [hashtag_de(h) for h in (despues if isinstance(despues, list)
                                                    else re.split(r"[\s,]+", str(despues or "")))]
-                despues = [h for h in despues if h][:15]
+                despues = [h for h in despues if h][:tope_hashtags(red)]
                 if not despues:
                     continue
             else:
@@ -339,15 +360,47 @@ def normalizar_optimizacion(datos, redes):
                     despues = " ".join(despues.split())[:100]
             campos[campo] = {"despues": despues,
                              "porque": " ".join(str(cambio.get("porque") or "").split())[:300]}
-        try:
-            nota = max(0, min(100, int(bruto.get("nota"))))
-        except (TypeError, ValueError):
-            nota = None
         fallos = bruto.get("fallos")
         fallos = [fallos] if isinstance(fallos, str) else (fallos if isinstance(fallos, list) else [])
-        salida[red] = {"nota": nota, "campos": campos,
+        salida[red] = {"campos": campos,
                        "fallos": [" ".join(str(f).split())[:200] for f in fallos if str(f).strip()][:8]}
     return salida
+
+
+def palabra_de_optimizacion(datos):
+    """La palabra clave que propone Claude en la revisión SEO ("" si ninguna)."""
+    if not isinstance(datos, dict):
+        return ""
+    return " ".join(str(datos.get("palabra_clave") or "").split())[:80]
+
+
+#: De qué habla cada punto de la nota, para no enseñar dos veces lo mismo: un
+#: «fallo» de Claude que trata del tema de un punto que ya resta en la nota
+#: sale de la propuesta (la nota lo dice, y con su botón). Sin tildes.
+TEMAS_DE_PUNTO = {
+    "palabra": r"palabra(s)? clave",
+    "palabra_titulo": r"palabra(s)? clave",
+    "palabra_primera": r"palabra(s)? clave",
+    "palabra_descripcion": r"palabra(s)? clave",
+    "ubicacion": r"ubicacion|location",
+    "portada": r"portada|miniatura|thumbnail",
+    "cta": r"llamada a la accion|\bcta\b",
+    "hashtags": r"hashtag",
+    "hashtags_vacios": r"hashtag",
+    "hashtags_repetidos": r"hashtag",
+    "hashtag_local": r"hashtag",
+    "titulo_largo": r"titulo.*(largo|corto|caracteres)|(largo|corto|caracteres).*titulo",
+    "primera_linea": r"primera linea.*(larga|corta|caracteres|se corta)",
+    "texto": r"sin texto|no hay texto",
+}
+
+
+def fallos_nuevos(fallos, nota_red):
+    """Los «fallos» de Claude que la nota del Studio NO dice ya."""
+    abiertos = [p.get("id") for p in (nota_red or {}).get("puntos") or [] if not p.get("ok")]
+    temas = [TEMAS_DE_PUNTO[i] for i in abiertos if i in TEMAS_DE_PUNTO]
+    return [f for f in fallos or []
+            if not any(re.search(t, sin_tildes(f)) for t in temas)]
 
 
 def normalizar_ganchos(datos):
@@ -439,67 +492,81 @@ def etiquetas_youtube(ajustes, palabra, tags):
 
 # ------------------------------------------------------------------ la nota SEO
 
+#: Dónde se pone lo que es del PROYECTO: el nombre de verdad de la pantalla
+#: (antes unos decían «Lo fijo → SEO» y otros «Cuentas y ajustes → SEO»).
+DONDE_SEO_PROYECTO = "Publicar → Cuentas y ajustes → SEO de este proyecto"
+
+
 def nota(red, textos_red, compuesto, ajustes, datos_video, info, palabra):
-    """{nota: 0-100, puntos: [{ok, texto, peso}]}: lo que se puede mirar SIN
-    Claude. Cada punto dice el porqué; la nota es lo que pesan los que pasan."""
+    """{nota: 0-100, puntos: [{id, ok, texto}]}: lo que se puede mirar SIN
+    Claude. Cada punto dice el porqué; la nota es lo que pesan los que pasan.
+    Es LA nota: la de la pantalla y la de «con estos cambios» de una revisión
+    de Claude. El `id` dice qué arregla cada punto y la pantalla le pone UN
+    botón (notas del 19-10): palabra, palabra_titulo, palabra_primera,
+    palabra_descripcion, titulo_largo, primera_linea, hashtags,
+    hashtags_vacios, hashtags_repetidos, hashtag_local, cta, ubicacion,
+    portada y texto."""
     textos_red = textos_red or {}
     ajustes = ajustes or {}
     datos_video = datos_video or {}
     puntos = []
 
-    def punto(ok, texto, peso=10):
-        puntos.append({"ok": bool(ok), "texto": texto, "peso": peso})
+    def punto(id_, ok, texto, peso=10):
+        puntos.append({"id": id_, "ok": bool(ok), "texto": texto, "peso": peso})
 
     descripcion = str(textos_red.get("descripcion") or "").strip()
     primera = descripcion.splitlines()[0].strip() if descripcion else ""
     titulo = str(textos_red.get("titulo") or "").strip()
     tags = [str(t) for t in (compuesto or {}).get("tags") or textos_red.get("hashtags") or []]
     if not descripcion:
-        return {"nota": 0, "puntos": [{"ok": False, "texto": "todavía no hay texto", "peso": 100}]}
+        return {"nota": 0, "puntos": [{"id": "texto", "ok": False, "texto": "todavía no hay texto"}]}
     if palabra:
         if red in ("youtube", "facebook"):
             al_principio = contiene(titulo[:len(palabra) + 25], palabra)
-            punto(al_principio, "palabra clave al principio del título" if al_principio else (
+            punto("palabra_titulo", al_principio, "palabra clave al principio del título" if al_principio else (
                 "la palabra clave está en el título, pero no al principio"
                 if contiene(titulo, palabra) else f"el título no lleva «{palabra}»"), 20)
-        punto(contiene(primera, palabra), "palabra clave en la primera línea" if contiene(primera, palabra)
-              else f"la primera línea no dice «{palabra}»", 20)
+        punto("palabra_primera", contiene(primera, palabra), "palabra clave en la primera línea"
+              if contiene(primera, palabra) else f"la primera línea no dice «{palabra}»", 20)
         if red == "youtube":
             dos = "\n".join(descripcion.splitlines()[:2])
-            punto(contiene(dos, palabra), "palabra clave en las dos primeras líneas de la descripción"
+            punto("palabra_descripcion", contiene(dos, palabra),
+                  "palabra clave en las dos primeras líneas de la descripción"
                   if contiene(dos, palabra) else "las dos primeras líneas de la descripción no la dicen", 10)
     else:
-        punto(False, "el proyecto no tiene palabra clave (Lo fijo → SEO)", 20)
+        punto("palabra", False, "sin palabra clave: ponla en este vídeo o en el proyecto "
+              f"({DONDE_SEO_PROYECTO})", 20)
     if red == "youtube":
         n = len(titulo)
-        punto(40 <= n <= 70, f"título de {n} caracteres" + ("" if 40 <= n <= 70 else
-                                                            " (mejor entre 40 y 70)"), 10)
+        punto("titulo_largo", 40 <= n <= 70, f"título de {n} caracteres" + ("" if 40 <= n <= 70 else
+                                                                           " (mejor entre 40 y 70)"), 10)
     tope = PRIMERA_LINEA.get(red) or 0
     if tope:
-        punto(len(primera) <= tope, f"primera línea de {len(primera)} caracteres"
+        punto("primera_linea", len(primera) <= tope, f"primera línea de {len(primera)} caracteres"
               + ("" if len(primera) <= tope else f" (se corta a los {tope}: «más»)"), 10)
     minimo, maximo = RANGO_HASHTAGS[red]
     n = len(tags)
     en_rango = minimo <= n <= maximo
-    punto(en_rango, f"{n} hashtags" + ("" if en_rango else f" (en {red} van de {minimo} a {maximo})"), 10)
+    punto("hashtags", en_rango, f"{n} hashtags" + ("" if en_rango else f" (en {red} van de {minimo} a {maximo})"), 10)
     vacios = sorted({t for t in tags if sin_tildes(t) in HASHTAGS_VACIOS})
-    punto(not vacios, "sin hashtags vacíos" if not vacios else
+    punto("hashtags_vacios", not vacios, "sin hashtags vacíos" if not vacios else
           "hashtags que no posicionan: " + ", ".join(f"#{v}" for v in vacios), 5)
     repetidos = len(tags) != len({sin_tildes(t) for t in tags})
-    punto(not repetidos, "sin hashtags repetidos" if not repetidos else "hay hashtags repetidos", 5)
+    punto("hashtags_repetidos", not repetidos, "sin hashtags repetidos" if not repetidos
+          else "hay hashtags repetidos", 5)
     zona = str(ajustes.get("zona") or "").strip()
     locales = [hashtag_de(x) for x in lista(ajustes.get("hashtags_locales"), 20)]
     if zona or locales:
         palabras_zona = [hashtag_de(p) for p in re.split(r"[,\s]+", zona) if len(p) > 3]
         local = any(any(z and z in sin_tildes(t) for z in palabras_zona + locales) for t in tags)
-        punto(local, "al menos un hashtag local" if local else "ningún hashtag de la zona", 5)
-    punto(bool(str(textos_red.get("cta") or "").strip()), "llamada a la acción"
+        punto("hashtag_local", local, "al menos un hashtag local" if local else "ningún hashtag de la zona", 5)
+    punto("cta", bool(str(textos_red.get("cta") or "").strip()), "llamada a la acción"
           if str(textos_red.get("cta") or "").strip() else "falta la llamada a la acción", 10)
     if red == "instagram":
-        punto(bool(ajustes.get("ig_ubicacion")), "ubicación puesta" if ajustes.get("ig_ubicacion")
-              else "sin ubicación de Instagram (Lo fijo → SEO)", 5)
+        punto("ubicacion", bool(ajustes.get("ig_ubicacion")), "ubicación puesta" if ajustes.get("ig_ubicacion")
+              else f"sin ubicación de Instagram ({DONDE_SEO_PROYECTO})", 5)
     portada = (datos_video.get("portada") or {})
-    punto(portada.get("ms") is not None or bool(portada.get("imagen")),
+    punto("portada", portada.get("ms") is not None or bool(portada.get("imagen")),
           "portada elegida" if (portada.get("ms") is not None or portada.get("imagen"))
           else "sin portada elegida (cada red pondrá la suya)", 5)
     total = sum(p["peso"] for p in puntos) or 1

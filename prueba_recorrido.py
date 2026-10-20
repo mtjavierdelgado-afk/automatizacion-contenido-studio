@@ -3919,10 +3919,11 @@ def publicar_en_redes(navegador, datos):
     # desde la rama `parrilla` (17-10), Automatizar es la Parrilla de guiones
     ok(pg.esperar(".automatizar.parrilla", segundos=10), "Automatizar abre la Parrilla")
 
-    # de vuelta a Crear, donde se dejó
+    # de vuelta a Crear: SIEMPRE «Tus proyectos» (decisión del dueño, 19-10-2026;
+    # hasta entonces volvía al vídeo donde se había dejado)
     pg.pulsar("#barra-modulos .boton-modulo", "Crear")
-    ok(pg.esperar(".bloque-publicar-video", segundos=10), "volver a Crear deja el vídeo donde estaba")
-    ok(pg.p.evaluate("() => (APP.light.video || {}).pid") == pid, "con el mismo vídeo abierto")
+    ok(pg.esperar("h2", "Tus proyectos", 10), "volver a Crear abre «Tus proyectos»")
+    ok(not pg.p.evaluate("() => (APP.light.video || {}).pid"), "con ningún vídeo abierto")
 
     # «atrás» del móvil vuelve a Publicar
     pg.p.go_back()
@@ -4966,6 +4967,269 @@ def lo_de_v2h_en_la_pantalla(navegador, datos):
     ok(not pg.visible(".minimizar-burbuja"), "U1: y el «–» de la burbuja no queda encima del chat")
     pg.sin_errores("el móvil")
     pg.cerrar()
+
+
+# ======================================================================
+# NOTAS DEL 19-10-2026 (rama `notas-19oct`). Tramo propio, al final.
+
+@escenario
+def notas_del_19_10(navegador, datos):
+    """Crear → Tus proyectos, el tope de las láminas a la vista, el asistente
+    en ámbar con un fallo pasajero y el ajuste fino de la música en el vídeo nuevo."""
+    pg = Pagina(navegador, datos)
+    # CREAR SIEMPRE ABRE «TUS PROYECTOS», aunque se dejara un vídeo abierto
+    pg.js(f"await abrirVideoLight('{datos['video']}');")
+    pg.pulsar("#barra-modulos .boton-modulo", "Inicio")
+    pg.pulsar("#barra-modulos .boton-modulo", "Crear")
+    ok(pg.esperar("h2", "Tus proyectos", 10), "CREAR: abre «Tus proyectos», no el último vídeo")
+    pg.pulsar("#barra-modulos .boton-modulo", "Inicio")
+    pg.pulsar(".tarjeta-modulo button", "Ir a Crear")
+    ok(pg.esperar("h2", "Tus proyectos", 10), "CREAR: también desde la tarjeta de Inicio")
+
+    # LÁMINAS: el campo dice su tope y cuenta
+    pg.js(f"nuevaLamina(fichaLight('{datos['preset']}'), '');")
+    ok(pg.esperar(".dialogo textarea", segundos=5), "LÁMINAS: «Una lámina más» abre su diálogo")
+    tope = pg.p.locator(".dialogo textarea").first.get_attribute("maxlength")
+    ok(tope and int(tope) >= 1500, f"LÁMINAS: el campo admite 1.500 caracteres ({tope})")
+    pg.p.locator(".dialogo textarea").first.fill("una sala de eventos amplia " * 20)
+    ok(pg.visible(".dialogo .cuenta-caracteres", "de 1500"), "LÁMINAS: y cuenta lo escrito «N de 1500»")
+    pg.pulsar(".dialogo button", "Cancelar")
+
+    # ASISTENTE: con sesión y un fallo pasajero, ámbar y no rojo
+    clases = pg.p.evaluate("""() => { const antes = ASISTENTE.estado;
+      ASISTENTE.estado = {listo: true, aviso: 'mia: un guion tardó', cuentas: [], cuenta: {correo: 'a@b.c'}};
+      pintarAsistente(); const b = document.querySelector('#burbuja-asistente');
+      const c = [b.classList.contains('dudosa'), b.classList.contains('sin-sesion')];
+      ASISTENTE.estado = antes; pintarAsistente(); return c; }""")
+    ok(clases == [True, False], f"ASISTENTE: un fallo pasajero se pinta ámbar, no «sin sesión» ({clases})")
+
+    # MÚSICA: el ajuste fino, ya en el encargo de un vídeo nuevo
+    pg.js(f"await cargarGaleriaLight(true); elegirEstiloLight(fichaLight('{datos['preset']}'));")
+    ok(pg.esperar("h2", "Un vídeo nuevo", 10), "MÚSICA: «Un vídeo nuevo» se abre")
+    pg.p.locator(".fila-ajuste").filter(has_text="Música").locator("button", has_text="Cambiar").first.click()
+    ok(pg.esperar(".editor-ajuste input.volumen-fino", segundos=5),
+       "MÚSICA: el ajuste fino en dB sale en el vídeo nuevo (antes, solo en uno ya creado)")
+    pg.p.evaluate("""() => { const r = document.querySelector('.editor-ajuste input.volumen-fino');
+      r.value = -4; r.dispatchEvent(new Event('input')); r.dispatchEvent(new Event('change')); }""")
+    pg.p.wait_for_timeout(1200)
+    enviado = pg.p.evaluate("() => opcionesParaCrear(APP.light.video.encargo || encargoLight()).musica_db")
+    ok(enviado == -4, f"MÚSICA: y viaja al crear el vídeo ({enviado})")
+    pg.sin_errores("las notas del 19-10")
+    pg.cerrar()
+
+
+@escenario
+def publicar_notas_del_19_10(navegador, datos):
+    """Las notas del dueño del 19-10 en Publicar, como se vieron: UNA nota SEO
+    con un botón por punto (palabra clave, portada, ubicación), la revisión de
+    Claude sin su «X/100» y con «con estos cambios: A → B», sin «Aceptar todo»
+    vacío; los hashtags que no caben se dicen; la pastilla de guardado y lo
+    tecleado que ya no se pierde al cambiar de vídeo; y los fallos que se
+    quitan desde Inicio, con los descartados plegados en la ficha."""
+    import datetime as _dt                                   # noqa: PLC0415
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    api.put(f"/api/publicar/proyectos/{cid}", {"palabra_clave": "", "ig_ubicacion": ""})
+    muchos = [f"tag{i}" for i in range(35)]
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["instagram"], "palabra_clave": "",
+                                             "portada": {"ms": None, "quitar_imagen": True},
+                                             "textos": {"instagram": {"descripcion": "Reel de las notas",
+                                                                      "cta": "", "hashtags": muchos}}})
+    ruta_ficha = os.path.join(datos["proyectos"], "_sistema", "publicar", "videos", f"{pid}.json")
+
+    def tocar_ficha(fn):
+        with open(ruta_ficha, encoding="utf-8") as fh:
+            guardada = json.load(fh)
+        fn(guardada)
+        with open(ruta_ficha, "w", encoding="utf-8") as fh:
+            json.dump(guardada, fh, ensure_ascii=False)
+    tocar_ficha(lambda g: (g.pop("palabra_propuesta", None), g.pop("seo_propuesta", None)))
+
+    # CADA PARTE POR SU LADO: si una se corta (sin el arreglo, un botón que no
+    # está), las demás se miran igual
+    def parte(nombre, fn):
+        try:
+            fn()
+        except Exception as fallo:                           # noqa: BLE001
+            traceback.print_exc()
+            ok(False, f"{nombre} se cortó: {type(fallo).__name__}: {str(fallo)[:120]}")
+
+    def parte_nota():
+        pg = Pagina(navegador, datos)
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        ok(pg.esperar(".texto-red[data-red=instagram] .nota-seo", segundos=15), "la ficha con su nota SEO")
+        # --- los hashtags que no caben, dichos
+        ok(pg.visible(".texto-red[data-red=instagram] .aviso-red", "5 hashtags no caben en Instagram"),
+           "35 hashtags en Instagram: los 5 que no caben se dicen (antes se cortaban a 15 sin aviso)")
+        # --- un botón por punto
+        pg.js("PUB.notaAbierta = {instagram: true}; pintarModulo();")
+        nota = ".texto-red[data-red=instagram] .nota-seo"
+        ok(pg.visible(f'{nota} .punto-seo[data-punto="palabra"] button', "Escribir palabra clave"),
+           "sin palabra clave: «Escribir palabra clave»")
+        pg.pulsar(f'{nota} .punto-seo[data-punto="palabra"] button')
+        foco = pg.p.evaluate("() => document.activeElement && document.activeElement.dataset.foco")
+        ok(foco == "seo-palabra-video", f"lleva el cursor al campo «Palabra clave de este vídeo» ({foco})")
+        pg.js("document.activeElement.blur(); PUB.notaAbierta = {instagram: true}; pintarModulo();")
+        ok(pg.visible(f'{nota} .punto-seo[data-punto="portada"] button', "Elegir portada"), "sin portada: «Elegir portada»")
+        pg.pulsar(f'{nota} .punto-seo[data-punto="portada"] button')
+        dentro = pg.p.evaluate("() => !!(document.activeElement && document.activeElement.closest('.portada-publicar'))")
+        ok(dentro, "lleva al bloque de la portada")
+        pg.js("document.activeElement.blur(); PUB.notaAbierta = {instagram: true}; pintarModulo();")
+        ok(pg.visible(f"{nota} .pista-punto-seo", "NÚMERO del Lugar"), "sin ubicación: la pista de qué poner")
+        texto = pg.p.evaluate("() => document.querySelector('#modulo').innerText")
+        ok("Lo fijo → SEO" not in texto and "Cuentas y ajustes → SEO de este proyecto" in texto,
+           "dónde está cada cosa, con el nombre de verdad de la pantalla")
+        # la palabra que propone Claude, con su «Usar»
+        tocar_ficha(lambda g: g.update(palabra_propuesta="consolas en Lima"))
+        pg.js("await cargarPublicar(true); PUB.notaAbierta = {instagram: true}; pintarModulo();")
+        ok(pg.visible(f'{nota} .punto-seo[data-punto="palabra"] button', "Usar «consolas en Lima»"),
+           "con una propuesta de Claude: «Usar \"consolas en Lima\"»")
+        pg.pulsar(f'{nota} .punto-seo[data-punto="palabra"] button', "Usar")
+        pg.p.wait_for_timeout(800)
+        _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+        ok(ficha["seo"]["palabra_propia"] == "consolas en Lima", "«Usar» la pone como palabra clave del vídeo")
+        # la ubicación: un enlace que abre «SEO de este proyecto» con el cursor en el campo
+        pg.js("PUB.notaAbierta = {instagram: true}; pintarModulo();")
+        pg.pulsar(f'{nota} .punto-seo[data-punto="ubicacion"] a')
+        fin = time.time() + 10
+        foco = ""
+        while time.time() < fin and foco != f"seo-ig_ubicacion-{cid}":
+            pg.p.wait_for_timeout(300)
+            foco = pg.p.evaluate("() => (document.activeElement && document.activeElement.dataset.foco) || ''")
+        ok(foco == f"seo-ig_ubicacion-{cid}" and pg.visible(".seo-proyecto[open] summary", "SEO de este proyecto"),
+           f"la ubicación: abre «SEO de este proyecto» con el cursor en su campo ({foco})")
+        pg.sin_errores("los botones de la nota SEO")
+        pg.cerrar()
+
+    def parte_revision():
+        # --- la revisión de Claude: una sola nota
+        pg = Pagina(navegador, datos)
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        ok(pg.esperar(".seo-video button", "Optimizar SEO con Claude", 15), "de vuelta en la ficha")
+        pg.pulsar(".seo-video button", "Optimizar SEO con Claude")
+        ok(pg.esperar(".propuesta-seo .cambio-seo", segundos=20), "«Optimizar SEO»: la propuesta")
+        texto = pg.p.evaluate("() => document.querySelector('#modulo').innerText")
+        ok("según Claude" not in texto.lower() and "SEGÚN CLAUDE" not in texto,
+           "sin el «X/100 según Claude»: la nota es una")
+        ok(pg.visible(".propuesta-seo .nota-con-cambios", "con estos cambios:"),
+           "«con estos cambios: A → B», con la nota del Studio")
+        ok(not any("primera línea no dice la palabra clave" in x for x in
+                   pg.p.evaluate("() => [...document.querySelectorAll('.propuesta-seo .meta')].map(x => x.textContent)")),
+           "lo que Claude repite de la nota no sale dos veces")
+        ok(pg.visible(".propuesta-seo button", "Aceptar todo"), "con cambios, «Aceptar todo»")
+        tocar_ficha(lambda g: g.update(seo_propuesta={"al": "2026-10-19T10:00:00", "redes": {
+            "instagram": {"campos": {}, "fallos": ["el texto no dice para qué tipo de fiesta es"]}}}))
+        pg.js("await cargarPublicar(true); pintarModulo();")
+        ok(pg.esperar(".propuesta-seo", "no propone cambios", 5) and not pg.visible(".propuesta-seo button", "Aceptar todo"),
+           "sin cambios que aceptar, no hay «Aceptar todo»")
+        pg.pulsar(".propuesta-seo button", "Cerrarla")
+        pg.sin_errores("la revisión SEO")
+        pg.cerrar()
+
+    def parte_guardado():
+        # --- la pastilla de guardado
+        pg = Pagina(navegador, datos)
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        caja = ".texto-red[data-red=instagram] textarea"
+        ok(pg.esperar(caja, segundos=15), "la ficha para escribir")
+        ok(pg.visible(".guardado-publicar"), "la pastilla de guardado, junto a los textos")
+        pg.p.locator(caja).first.fill("Uno")
+        ok(pg.visible(".guardado-publicar", "Sin guardar"), "al teclear: «Sin guardar…»")
+        ok(pg.esperar(".guardado-publicar", "Guardado", 8), "y al poco «✓ Guardado hh:mm»")
+        ok(bool(re.search(r"Guardado \d\d:\d\d", pg.p.locator(".guardado-publicar").first.inner_text(), re.I)),
+           f"con su hora ({pg.p.locator('.guardado-publicar').first.inner_text()!r})")
+        # sale mal: lo dice, con «Reintentar»
+        pg.p.route("**/api/publicar/videos/*", lambda ruta: ruta.fulfill(status=500, body='{"detail": "caído"}',
+                                                                           content_type="application/json")
+                   if ruta.request.method == "PUT" else ruta.continue_())
+        pg.p.locator(caja).first.fill("Dos")
+        ok(pg.esperar(".guardado-publicar", "No se ha guardado", 8), "si falla: «No se ha guardado»")
+        hay = pg.p.evaluate("""() => { const ev = new Event('beforeunload', {cancelable: true});
+          window.dispatchEvent(ev); return ev.defaultPrevented; }""")
+        ok(hay, "y cerrar la pestaña con algo sin guardar lo pregunta el navegador")
+        pg.p.unroute("**/api/publicar/videos/*")
+        pg.pulsar(".guardado-publicar button", "Reintentar")
+        ok(pg.esperar(".guardado-publicar", "Guardado", 8), "«Reintentar» lo guarda")
+        _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+        ok(ficha["textos"]["instagram"]["descripcion"] == "Dos", "y llega al servidor")
+        hay = pg.p.evaluate("""() => { const ev = new Event('beforeunload', {cancelable: true});
+          window.dispatchEvent(ev); return ev.defaultPrevented; }""")
+        ok(not hay, "con todo guardado, cerrar no pregunta nada")
+        pg.sin_errores("la pastilla de guardado")
+        pg.cerrar()
+
+    def parte_cambio():
+        # cambiar de vídeo enseguida ya no pierde lo último (por su lado: sin
+        # el arreglo, la pastilla no existe y la parte de arriba se corta)
+        pg = Pagina(navegador, datos)
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        caja = ".texto-red[data-red=instagram] textarea"
+        ok(pg.esperar(caja, segundos=15), "la ficha, para escribir y cambiar de vídeo")
+        _r, lista = api.get("/api/proyectos")
+        otros = [x.get("id") or x.get("pid") for x in (lista if isinstance(lista, list) else lista.get("proyectos") or [])]
+        otro = next((x for x in otros if x and x != pid), "otro_video")
+        pg.p.locator(caja).first.fill("Tres, y me voy")
+        pg.js(f"await irASeccionPublicar('ficha', '{otro}');")
+        _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+        ok(ficha["textos"]["instagram"]["descripcion"] == "Tres, y me voy",
+           f"cambiar de vídeo antes de 0,9 s guarda antes lo tecleado ({ficha['textos']['instagram']['descripcion']!r})")
+        pg.sin_errores("cambiar de vídeo")
+        pg.cerrar()
+
+    ahora = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=-5))).strftime("%Y-%m-%dT%H:%M:%S")
+
+    def envio(i, red, estado):
+        return {"id": f"n19e{i}", "red": red, "estado": estado, "cuando": ahora, "lote": f"n19l{i}",
+                "perfil": "p", "modo": "ahora", "error": "falló adrede" if estado != "publicado" else ""}
+
+    def parte_fallos():
+        # --- los fallos: se quitan desde Inicio
+        tocar_ficha(lambda g: g.update(envios=[envio(1, "instagram", "fallido"), envio(2, "instagram", "publicado"),
+                                               envio(3, "tiktok", "fallido")]))
+        pg = Pagina(navegador, datos)
+        pg.js("PUB.pid = 'otro_video'; irAModulo('inicio');")
+        ok(pg.esperar('.fila-envio[data-envio="n19e3"] button', "Quitar de la lista", 15),
+           "Inicio: el fallo trae «Quitar de la lista»")
+        ok(pg.visible('.fila-envio[data-envio="n19e1"]', "ya salió en otro envío")
+           and not pg.visible('.fila-envio[data-envio="n19e1"] button', "Quitar"),
+           "el que se reenvió y salió lo dice, sin pedir nada")
+        antes = pg.p.evaluate("() => PUB.avisos")
+        pg.pulsar('.fila-envio[data-envio="n19e3"] button', "Quitar de la lista")
+        fin = time.time() + 8
+        while time.time() < fin and pg.visible('.fila-envio[data-envio="n19e3"] button', "Quitar"):
+            pg.p.wait_for_timeout(300)
+        _r, cola = api.get("/api/publicar/cola")
+        ok(not any(e["id"] == "n19e3" for e in cola["fallidos"]),
+           "«Quitar» lo saca de la lista, con el vídeo de LA FILA (no el último abierto)")
+        ok(not any(e["id"] == "n19e1" for e in cola["fallidos"]), "el que salió después ya no contaba")
+        despues = pg.p.evaluate("() => PUB.avisos")
+        ok(despues == antes - 1, f"y el contador de la barra baja ({antes} → {despues})")
+        pg.sin_errores("los fallos que se quitan")
+        pg.cerrar()
+
+    def parte_descartados():
+        # --- en la ficha, los descartados van plegados
+        tocar_ficha(lambda g: g.update(envios=[envio(1, "instagram", "fallido"), envio(2, "instagram", "publicado"),
+                                               dict(envio(3, "tiktok", "cancelado"), nota="fallo descartado")]))
+        pg = Pagina(navegador, datos)
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        ok(pg.esperar(".envios-descartados > summary", "1 descartado", 15), "en la ficha: «1 descartado», plegado")
+        ok(not pg.visible(".envios-descartados .fila-envio"), "sin abrirlo, el descartado no sale mezclado")
+        pg.pulsar(".envios-descartados > summary")
+        ok(pg.visible(".envios-descartados .fila-envio", "falló adrede"), "y al abrirlo, ahí está")
+        pg.sin_errores("los descartados")
+        pg.cerrar()
+
+    parte("la nota SEO con un botón por punto", parte_nota)
+    parte("la revisión de Claude", parte_revision)
+    parte("la pastilla de guardado", parte_guardado)
+    parte("cambiar de vídeo enseguida", parte_cambio)
+    parte("los fallos que se quitan", parte_fallos)
+    parte("los descartados, plegados", parte_descartados)
+    tocar_ficha(lambda g: g.update(envios=[]))
 
 
 if __name__ == "__main__":

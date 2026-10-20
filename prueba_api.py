@@ -5053,6 +5053,17 @@ def probar_cambiar_de_estilo(cliente):
           "SE QUEDA EN SU PROYECTO (el del estilo viejo): se le fija, el nuevo es de otro")
     igual((cambio.get("cliente") or {}).get("ahora"), cid, "y la respuesta lo dice")
 
+    # la revisión editorial (arreglos 19-10, 5): solo del guion, y un modo raro no
+    respuesta, _d = cliente.post(f"/api/proyectos/{vid}/ortografia/revisar",
+                                 {"fuente": "subtitulos", "modo": "editorial"})
+    igual(respuesta.status_code, 400, "EDITORIAL: la revisión editorial es solo del guion")
+    respuesta, _d = cliente.post(f"/api/proyectos/{vid}/ortografia/revisar",
+                                 {"fuente": "guion", "modo": "estilo", "textos": {"B1": "x"}})
+    igual(respuesta.status_code, 400, "EDITORIAL: un modo que no existe, 400")
+    respuesta, _d = cliente.post(f"/api/proyectos/{vid}/ortografia/revisar",
+                                 {"fuente": "guion", "modo": "editorial", "textos": {}})
+    igual(respuesta.status_code, 400, "EDITORIAL: sin textos, 400")
+
     # con el estilo nuevo en la papelera no se adopta
     tercero = estilo("Estilo apartado", "Otro tono.")
     cliente.delete(f"/api/presets-canal/{tercero}")

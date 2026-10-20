@@ -5515,6 +5515,56 @@ def video_huerfano_cambia_de_estilo(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def revision_editorial_del_guion(navegador, datos):
+    """Notas del dueño del 19-10: una revisión de sintaxis y redacción del
+    guion, como la de un corrector editorial. «Revisión editorial» junto a la
+    ortografía; las propuestas se aceptan o rechazan una a una o todas, y
+    aceptar cambia el bloque como si se escribiera a mano (con la voz grabada,
+    avisa de que hay que regrabar)."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.p.wait_for_timeout(1500)
+    pg.js("APP.light.video.vista = 'guion'; pintarLight();")
+    ok(pg.esperar(".panel-ortografia button", "Revisión editorial", 20),
+       "EDITORIAL: «Revisión editorial» está junto a la ortografía del guion")
+    pg.pulsar(".panel-ortografia button", "Revisión editorial")
+    ok(pg.esperar(".panel-editorial .fila-editorial", None, 60),
+       "EDITORIAL: salen las propuestas, cada una con su trozo, la propuesta y el motivo")
+    filas = pg.p.evaluate("() => [...document.querySelectorAll('.panel-editorial .fila-editorial')].map(f => f.innerText)")
+    ok(len(filas) == 4 and all("→" in f for f in filas), f"EDITORIAL: cuatro propuestas ({filas})")
+
+    def en_fila(trozo, boton):
+        pg.p.evaluate(f"""() => {{ const f = [...document.querySelectorAll('.panel-editorial .fila-editorial')]
+          .find(x => x.innerText.includes({trozo!r}));
+          [...f.querySelectorAll('button')].find(b => b.innerText.trim() === {boton!r}).click(); }}""")
+        pg.p.wait_for_timeout(2500)
+
+    def bloques():
+        _r, guion = api.get(f"/api/proyectos/{pid}/pasos/guion")
+        return json.dumps((guion.get("params") or {}).get("bloques") or {}, ensure_ascii=False)
+
+    antes_dialogos = len(pg.dialogos)
+    en_fila("descargan el patio", "Rechazar")
+    ok("vacían" not in bloques(), "EDITORIAL: rechazar no cambia nada")
+    en_fila("el buque atraca", "Aceptar")
+    ok("el buque atracó" in bloques(), "EDITORIAL: aceptar una la pone en su bloque (como escrita a mano)")
+    ok(any("regrabar" in d for d in pg.dialogos[antes_dialogos:]),
+       f"EDITORIAL: con la voz grabada, pregunta antes y dice que habrá que regrabar ({pg.dialogos[-1:]})")
+    pg.pulsar(".panel-editorial button", "Aceptar todas")
+    pg.p.wait_for_timeout(3000)
+    texto = bloques()
+    ok("La marina llegó" in texto and "todo quedó incautado" in texto,
+       "EDITORIAL: «Aceptar todas» pone las dos del mismo bloque, encadenadas")
+    ok(pg.esperar(".panel-editorial", "Decididas las 4", 10), "EDITORIAL: y el panel dice que están todas decididas")
+    _r, voz = api.get(f"/api/proyectos/{pid}/pasos/voz")
+    ok(voz.get("estado") == "obsoleto", f"EDITORIAL: la voz queda por regrabar ({voz.get('estado')})")
+    pg.sin_errores("revisión editorial")
+    pg.cerrar()
+
 # ======================================================================
 # EL DISEÑO CREARIA (rama `diseno-crearia`, 19-10-2026). Tramo propio y al
 # final: el logo y el nombre, el pie, las cuatro paletas (y que se recuerdan),

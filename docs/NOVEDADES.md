@@ -37,6 +37,14 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   vídeo solo cambia de estilo apuntado y no se rehace nada. El vídeo **se queda
   en su proyecto** si tenía uno. Si su estilo está en la papelera sale además
   **«Restaurarlo»**, y la parada «Estilo» de un vídeo sin estilo te lleva ahí.
+- **«Revisión editorial» del guion**, junto a la ortografía. Claude lo lee como
+  un corrector editorial (sintaxis, concordancia, puntuación, repeticiones,
+  frases confusas o largas para decirlas en voz alta y saltos de registro) y
+  propone cambios sueltos con su motivo: **«Aceptar»** o **«Rechazar»** una a
+  una, o **«Aceptar todas»**. Aceptar cambia el bloque como si lo escribieras a
+  mano (las pausas de la voz se conservan). Si la voz ya está grabada, te avisa
+  de qué bloques habrá que regrabar. La ortografía de siempre no cambia. Va con
+  tu cuenta de Claude (sonnet, esfuerzo medio): no cuesta dinero de API.
 
 **El nuevo diseño: CrearIA Studio (19 de octubre)**
 - **Se llama CrearIA Studio · Automatización de contenido**, con logo nuevo: la

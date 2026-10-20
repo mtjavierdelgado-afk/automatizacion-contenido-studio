@@ -4699,6 +4699,53 @@ def prueba_ortografia_con_memoria():
         shutil.rmtree(carpeta, ignore_errors=True)
 
 
+def prueba_revision_editorial():
+    """Arreglos del 19-10 (5): la REVISION EDITORIAL del guion es un modo
+    aparte (sintaxis y redaccion, propuestas sueltas {original, propuesta,
+    motivo}). La ortografia de siempre no cambia, y solo vuelven propuestas
+    que se pueden aplicar tal cual: su trozo esta UNA vez en el bloque."""
+    print("\n[ortografia: la revision editorial, aparte de la ortografia]")
+    import ortografia
+    original = cli_claude.ejecutar
+    pedidas = []
+
+    def ejecutar(instruccion, **k):
+        pedidas.append((instruccion, k))
+        ids = dict(re.findall(r'<t id="([^"]+)">([^<]*)</t>', instruccion))
+        propuestas = {}
+        if "B1" in ids:
+            propuestas["B1"] = [
+                {"original": "atraca", "propuesta": "atracó", "motivo": "el relato va en pasado",
+                 "tipo": "concordancia"},
+                {"original": "frase que no está", "propuesta": "x", "motivo": "no está"},
+                {"original": "el", "propuesta": "un", "motivo": "sale dos veces"},
+                {"original": "buque atraca", "propuesta": "barco atraca", "motivo": "se pisa con la 1"}]
+        if "B2" in ids:
+            propuestas["B2"] = [{"original": "Todo", "propuesta": "Todo", "motivo": "igual"}]
+        return json.dumps({"propuestas": propuestas}), {}
+    try:
+        cli_claude.ejecutar = ejecutar
+        informe = {}
+        salida = ortografia.revisar_editorial(
+            {"B1": "Por la noche el buque atraca en el muelle.", "B2": "Todo bien."},
+            informe=informe)
+        igual(sorted(salida), ["B1"], "solo vuelven los bloques con propuestas que valen")
+        igual([(p["original"], p["propuesta"], p["tipo"]) for p in salida.get("B1", [])],
+              [("atraca", "atracó", "concordancia")],
+              "se descartan el trozo que no está, el que sale dos veces y el que se pisa con otro")
+        ok(salida["B1"][0]["motivo"], "cada propuesta lleva su motivo")
+        instruccion, opciones = pedidas[0]
+        ok("REVISION EDITORIAL" in instruccion and "ORTOGRAFIA" not in instruccion,
+           "pide una revisión EDITORIAL (no la de ortografía)")
+        igual((opciones.get("modelo"), opciones.get("esfuerzo")), ("sonnet", "medium"),
+              "con sonnet y esfuerzo medio")
+        igual(informe.get("sin_revisar"), 0, "y no queda nada sin revisar")
+        ok(ortografia.INSTRUCCION.find("EDITORIAL") < 0 and ortografia.MODELO == "sonnet"
+           and ortografia.ESFUERZO == "low", "la ortografía de siempre sigue igual")
+    finally:
+        cli_claude.ejecutar = original
+
+
 def prueba_ortografia_por_tandas():
     """N6 de las notas de mejoras (13-10-2026): «la revision de ortografia no
     es un JSON legible» salia de titular y se perdia la revision entera por una
@@ -6018,6 +6065,7 @@ def main():
     prueba_profundidad_25d()
     prueba_montaje_por_plano()
     prueba_cancelar_montaje()
+    prueba_revision_editorial()
 
     print("\n" + "=" * 70)
     if _fallos:

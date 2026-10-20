@@ -7841,7 +7841,10 @@ function panelOrtografia(fuente) {
       : 'tildes, letras y signos de lo que se lee; corregir solo vuelve a montar (gratis)'),
     h('button', { clase: 'mini', disabled: est.estado === 'pensando' || !!trabajoVideoLight(),
       onclick: () => revisarOrtografia(fuente) },
-    est.estado === 'pensando' ? 'Revisando…' : (est.estado ? 'Revisar otra vez' : 'Revisar la ortografía')));
+    est.estado === 'pensando' ? 'Revisando…' : (est.estado ? 'Revisar otra vez' : 'Revisar la ortografía')),
+    // LA REVISIÓN EDITORIAL, al lado (arreglos del 19-10): sus propuestas
+    // salen en su propio panel, debajo (`panelEditorial`)
+    fuente === 'guion' ? botonRevisionEditorial() : null);
   caja.appendChild(cab);
   if (fuente === 'guion') programarOrtografiaGuion();
   if (est.estado === 'pensando') {
@@ -8111,6 +8114,172 @@ async function aplicarOrtografia(fuente) {
   } catch (e) {
     toast(`no se han podido poner: ${e.message}`, true);
   }
+}
+
+/* LA REVISIÓN EDITORIAL DEL GUION (arreglos del 19-10, 5). «Revisión
+   editorial», junto a la ortografía: Claude como corrector editorial
+   (sintaxis, concordancia, puntuación, repeticiones, claridad, registro;
+   `ortografia.revisar_editorial`, sonnet con esfuerzo medio) propone trozos
+   sueltos {original → propuesta, motivo}. Se aceptan o rechazan UNA A UNA, o
+   «Aceptar todas». Aceptar pone el trozo en su bloque por el MISMO camino que
+   escribir a mano (`guardarBloqueLight`), sin tocar las marcas de la voz; con
+   la voz ya grabada, se avisa de qué bloques habrá que regrabar. El estado,
+   fuera del panel y por vídeo, como el de la ortografía. */
+const EDITORIAL_VIVA = new Map();
+
+function botonRevisionEditorial() {
+  const v = APP.light.video;
+  const est = EDITORIAL_VIVA.get(v.pid) || {};
+  return h('button', {
+    clase: 'mini', disabled: est.estado === 'pensando' || !!trabajoVideoLight(),
+    title: 'sintaxis, concordancia, puntuación, repeticiones y claridad, como un corrector editorial',
+    onclick: () => revisarEditorial(),
+  }, est.estado === 'pensando' ? 'Revisando la redacción…' : 'Revisión editorial');
+}
+
+function panelEditorial() {
+  const v = APP.light.video;
+  const est = EDITORIAL_VIVA.get(v.pid);
+  if (!est) return null;
+  const caja = h('div', { clase: 'panel-ortografia panel-editorial' });
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('b', {}, 'Revisión editorial'),
+    h('span', { clase: 'meta crece' }, v.audio
+      ? 'propuestas de redacción; la voz ya está grabada: lo que aceptes habrá que regrabarlo'
+      : 'propuestas de redacción: acéptalas o recházalas una a una'),
+    h('button', { clase: 'mini', onclick: () => { EDITORIAL_VIVA.delete(v.pid); pintarLight(); } }, 'Cerrar')));
+  if (est.estado === 'pensando') {
+    caja.appendChild(h('div', { clase: 'cargando' },
+      `el corrector editorial está leyendo ${est.revisados || ''} bloques… (puede tardar un par de minutos)`));
+    return caja;
+  }
+  if (est.estado === 'error') { caja.appendChild(cajaError(est.error || 'no se ha podido revisar')); return caja; }
+  const sinRevisar = Number(est.sin_revisar) || 0;
+  if (sinRevisar) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      `${sinRevisar} bloque(s) se han quedado sin revisar: ${est.detalle || 'el corrector devolvió una respuesta rota'}. `
+      + 'Pulsa «Revisión editorial» otra vez para repasarlos.'));
+  }
+  const props = est.propuestas || [];
+  est.hechas = est.hechas || {};
+  const pendientes = props.filter(p => !est.hechas[p.id]);
+  if (!props.length) {
+    caja.appendChild(h('div', { clase: 'meta' }, `✓ Nada que proponer en ${est.revisados || 0} bloques.`));
+    return caja;
+  }
+  const aceptadas = props.filter(p => est.hechas[p.id] === 'aceptada').length;
+  caja.appendChild(h('div', { clase: 'meta' }, pendientes.length
+    ? `${pendientes.length} de ${props.length} propuestas por decidir`
+      + (aceptadas ? ` · ${aceptadas} aceptada(s)` : '')
+    : `Decididas las ${props.length} propuestas (${aceptadas} aceptada(s)).`));
+  const lista = h('div', { clase: 'lista-ortografia' });
+  props.forEach(p => {
+    const hecha = est.hechas[p.id];
+    lista.appendChild(h('div', { clase: 'fila-ortografia fila-editorial' + (hecha ? ' decidida' : '') },
+      h('span', { clase: 'id' }, p.bloque),
+      h('span', { clase: 'crece' },
+        h('span', { clase: 'editorial-antes' }, p.original), ' → ',
+        h('span', { clase: 'despues' }, p.propuesta),
+        h('span', { clase: 'meta' }, ` · ${p.motivo || ''}${p.tipo ? ` (${p.tipo})` : ''}`)),
+      hecha ? h('span', { clase: 'pastilla' }, hecha === 'aceptada' ? 'aceptada'
+        : hecha === 'a_mano' ? 'a mano' : 'rechazada')
+        : h('span', { clase: 'herramientas' },
+          h('button', { clase: 'mini primario', disabled: !!trabajoVideoLight(),
+            onclick: () => aceptarEditorial([p.id]) }, 'Aceptar'),
+          h('button', { clase: 'mini', onclick: () => { est.hechas[p.id] = 'rechazada'; pintarLight(); } },
+            'Rechazar'))));
+  });
+  caja.appendChild(lista);
+  if (pendientes.length > 1) {
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'primario', disabled: !!trabajoVideoLight(),
+        onclick: () => aceptarEditorial(pendientes.map(p => p.id)) }, 'Aceptar todas'),
+      h('span', { clase: 'meta' }, v.audio
+        ? 'se guardan en el guion; la voz de esos bloques queda por regrabar (se paga)'
+        : 'se guardan en el guion, como si las escribieras a mano')));
+  }
+  return caja;
+}
+
+async function revisarEditorial() {
+  const v = APP.light.video;
+  const pid = v.pid;
+  const textos = textosGuionOrtografia(v);
+  if (!Object.keys(textos).length) { toast('No hay guion que revisar', true); return; }
+  const est = { estado: 'pensando', revisados: Object.keys(textos).length };
+  EDITORIAL_VIVA.set(pid, est);
+  pintarLight();
+  try {
+    const lanzada = await pedir(`${API.proyecto(pid)}/ortografia/revisar`, {
+      method: 'POST', cuerpo: { fuente: 'guion', modo: 'editorial', textos },
+    });
+    let ficha = { estado: 'pensando' };
+    for (let i = 0; i < 400 && ficha.estado === 'pensando'; i += 1) {
+      await new Promise(r => setTimeout(r, 1500));
+      ficha = await pedir(`${API.proyecto(pid)}/ortografia/${lanzada.id}`);
+    }
+    if (ficha.estado === 'pensando') throw new Error('la revisión tarda demasiado: vuelve a pedirla en un momento');
+    ficha.hechas = {};
+    if (EDITORIAL_VIVA.get(pid) === est) EDITORIAL_VIVA.set(pid, ficha);
+  } catch (e) {
+    if (EDITORIAL_VIVA.get(pid) === est) EDITORIAL_VIVA.set(pid, { estado: 'error', error: e.message });
+  }
+  if (videoAbierto().pid === pid) pintarLight();
+}
+
+/* Pone las propuestas `ids` en sus bloques. El trozo se busca en el texto
+   CRUDO del bloque (con sus marcas de la voz) como en la ortografía
+   (`sustituirPalabra`: palabra entera y fuera de las marcas), y tiene que
+   estar UNA sola vez en lo que se lee; varias del mismo bloque se encadenan.
+   Lo que no se encuentra (el bloque cambió desde la revisión) queda «a mano». */
+async function aceptarEditorial(ids) {
+  const v = APP.light.video;
+  const pid = v.pid;
+  const est = EDITORIAL_VIVA.get(pid) || {};
+  est.hechas = est.hechas || {};
+  const elegidas = (est.propuestas || []).filter(p => ids.includes(p.id) && !est.hechas[p.id]);
+  if (!elegidas.length) return;
+  const bloques = [...new Set(elegidas.map(p => p.bloque))];
+  if (v.audio && !window.confirm(
+    `La voz ya está grabada: aceptar ${elegidas.length === 1 ? 'esta propuesta' : `estas ${elegidas.length} propuestas`} `
+    + `cambia ${bloques.length === 1 ? 'el bloque' : 'los bloques'} ${bloques.join(', ')}, y habrá que `
+    + 'regrabar su voz (se paga). ¿Las aceptamos?')) return;
+  const porId = {};
+  ((v.guion || {}).bloques || []).forEach(b => { porId[b.id] = b; });
+  const nuevos = {};
+  const aMano = [];
+  const veces = (texto, trozo) => texto.split(trozo).length - 1;
+  elegidas.forEach(p => {
+    const b = porId[p.bloque];
+    if (!b) { aMano.push(p); return; }
+    const crudo = nuevos[b.id] !== undefined ? nuevos[b.id] : textoDeBloqueLight(b);
+    const visible = textoVisibleLight(crudo).split(/\s+/).filter(Boolean).join(' ');
+    if (veces(visible, p.original) !== 1) { aMano.push(p); return; }
+    const puesto = sustituirPalabra(crudo, p.original, p.propuesta);
+    if (puesto === null) { aMano.push(p); return; }
+    nuevos[b.id] = puesto;
+  });
+  try {
+    Object.entries(nuevos).forEach(([bid, texto]) => {
+      const b = porId[bid];
+      guardarBloqueLight(bid, texto, b.insertado ? undefined : b.texto, !!b.insertado);
+    });
+    await guardarBloquesPendientesLight();
+    elegidas.forEach(p => { est.hechas[p.id] = aMano.includes(p) ? 'a_mano' : 'aceptada'; });
+    const puestas = elegidas.length - aMano.length;
+    const tocados = Object.keys(nuevos);
+    let aviso = `${puestas} propuesta(s) puestas en el guion`;
+    if (aMano.length) {
+      aviso += `; ${aMano.length} hay que ponerla(s) a mano (${aMano.map(p => p.bloque).join(', ')}): `
+        + 'ese trozo ya no está igual en el bloque';
+    }
+    if (v.audio && tocados.length) aviso += `. Hay que regrabar la voz de ${tocados.join(', ')}`;
+    toast(aviso, aMano.length > 0);
+    await recargarVideoAbierto();
+  } catch (e) {
+    toast(`no se han podido poner: ${e.message}`, true);
+  }
+  if (videoAbierto().pid === pid) pintarLight();
 }
 
 /* LA ORTOGRAFÍA DE UN CAMPO SUELTO (18-10-2026): «el corrector también debe
@@ -9005,6 +9174,8 @@ function vistaGuionLight() {
      la voz ya grabada corregir es regrabar (lo dice el panel), y para que solo
      se lea bien están los subtítulos, en la pantalla Vídeo. */
   caja.appendChild(panelOrtografia('guion'));
+  const editorial = panelEditorial();
+  if (editorial) caja.appendChild(editorial);
 
   // EL REPRODUCTOR VIVE EN LA BARRA DE ABAJO (ver `pieLight`). Estaba arriba
   // del guion para que los mandos no se fueran con el scroll; la barra fija lo

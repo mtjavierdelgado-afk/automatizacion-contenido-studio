@@ -6366,10 +6366,17 @@ def revisar_ortografia(pid: str, cuerpo: dict = Body(default=None)):
     """Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de
     {fuente: "guion", textos: {bloque: texto}}. -> {id}; el resultado, en GET.
     No cambia nada: propone. Lo ya revisado sale de la memoria del proyecto
-    (pasos/ortografia.py) y no vuelve al CLI."""
+    (pasos/ortografia.py) y no vuelve al CLI. Con {modo: "editorial"} (solo
+    el guion) es la REVISION EDITORIAL: sintaxis y redaccion, ver
+    `_revision_editorial`."""
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
     fuente = str(datos.get("fuente") or "subtitulos")
+    modo = str(datos.get("modo") or "ortografia")
+    if modo not in ("ortografia", "editorial"):
+        raise ErrorApi(400, "modo: «ortografia» o «editorial»")
+    if modo == "editorial":
+        return _revision_editorial(ctx, fuente, datos)
     if fuente == "subtitulos":
         textos = _subtitulos_por_plano(pid)
         if not textos:
@@ -6385,6 +6392,54 @@ def revisar_ortografia(pid: str, cuerpo: dict = Body(default=None)):
     anclas = _narracion_por_plano(ctx) if fuente == "subtitulos" else {}
     _lanzar_ortografia(rid, textos, fuente, ctx.id, ctx.proyecto.raiz, anclas)
     return {"id": rid, "estado": "pensando", "revisados": len(textos)}
+
+
+def _revision_editorial(ctx, fuente, datos):
+    """LA REVISION EDITORIAL DEL GUION (arreglos del 19-10, 5): sintaxis,
+    concordancia, puntuacion, repeticiones, claridad y registro, como un
+    corrector editorial (`ortografia.revisar_editorial`, sonnet con esfuerzo
+    medio). Propone trozos sueltos {original, propuesta, motivo}; aceptar uno
+    lo pone la pantalla en el bloque por el MISMO camino que escribir a mano
+    (`firma_propia`), asi que esta ruta no escribe nada. Se pregunta igual que
+    la ortografia (`GET .../ortografia/{rid}`), con `fuente: "editorial"`."""
+    if fuente != "guion":
+        raise ErrorApi(400, "la revisión editorial es del guion: fuente «guion»")
+    textos = datos.get("textos") if isinstance(datos.get("textos"), dict) else {}
+    textos = {str(k): str(v) for k, v in textos.items() if str(v or "").strip()}
+    if not textos:
+        raise ErrorApi(400, "manda los textos del guion a revisar")
+    rid = _nueva_revision_ortografia("editorial", ctx.id)
+    dueno = ctx.id
+
+    def correr():
+        try:
+            informe = {}
+            propuestas = PASOS_MODULOS.ortografia.revisar_editorial(
+                textos, cwd=RAIZ_ESTUDIO, informe=informe)
+            lista = []
+            for bloque in textos:              # en el orden del guion
+                for n, p in enumerate(propuestas.get(bloque) or [], 1):
+                    lista.append({"id": f"{bloque}#{n}", "bloque": bloque,
+                                  "antes": textos[bloque], **p})
+            ficha = {"estado": "listo", "fuente": "editorial", "proyecto": dueno,
+                     "revisados": len(textos),
+                     "sin_revisar": int(informe.get("sin_revisar") or 0),
+                     "detalle": str(informe.get("detalle") or "")[:600],
+                     "propuestas": lista}
+        except Exception as fallo:                          # noqa: BLE001
+            error = str(fallo)[:600]
+            if CLI_CLAUDE.es_pasajero(fallo):
+                error = ("La sesión de Claude se estaba renovando y no ha contestado. "
+                         "Pulsa «Revisar otra vez» en un minuto; no se ha cambiado nada."
+                         f"\n\n{error}")
+            ficha = {"estado": "error", "fuente": "editorial", "proyecto": dueno,
+                     "error": error}
+        with _LOCK_ORTOGRAFIA:
+            _ORTOGRAFIA[rid] = ficha
+
+    threading.Thread(target=correr, daemon=True, name=f"editorial-{rid}").start()
+    ctx.bitacora.anotar("revision_editorial", "guion", {"bloques": len(textos)})
+    return {"id": rid, "estado": "pensando", "revisados": len(textos), "modo": "editorial"}
 
 
 def _lanzar_ortografia(rid, textos, fuente, dueno, memoria, anclas=None):

@@ -426,9 +426,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/sistema/notas/{nid}` | Cambia el texto de una nota o la marca como hecha / pendiente. |
 | `GET` | `/api/sistema/novedades` | El historial de cambios, tal cual esta en docs/NOVEDADES.md. |
 | `GET` | `/api/sistema/revisiones/{rid}` | — |
+| `GET` | `/api/sistema/terminos` | Los terminos de uso, tal cual estan en docs/TERMINOS.md (el pie). |
 | `POST` | `/api/sonido/subir` | Sube un audio tuyo (MP3, WAV, M4A, OGG) para la música o un efecto. |
 | `GET` | `/{fichero}` | Sirve un fichero suelto de web/ (app.js, estilo.css...). |
 
 ---
 
-**317 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**318 endpoints.** Escrito por `generar_api.py` desde `app.py`.

@@ -4986,8 +4986,9 @@ def notas_del_19_10(navegador, datos):
     pg.pulsar("#barra-modulos .boton-modulo", "Crear")
     ok(pg.esperar("h2", "Tus proyectos", 10), "CREAR: abre «Tus proyectos», no el último vídeo")
     pg.pulsar("#barra-modulos .boton-modulo", "Inicio")
-    pg.pulsar(".tarjeta-modulo button", "Ir a Crear")
-    ok(pg.esperar("h2", "Tus proyectos", 10), "CREAR: también desde la tarjeta de Inicio")
+    # desde `diseno-crearia` (19-10-2026), el botón «Tus proyectos» del saludo del panel
+    pg.pulsar(".saludo-botones button", "Tus proyectos")
+    ok(pg.esperar("h2", "Tus proyectos", 10), "CREAR: también desde el Inicio («Tus proyectos»)")
 
     # LÁMINAS: el campo dice su tope y cuenta
     pg.js(f"nuevaLamina(fichaLight('{datos['preset']}'), '');")

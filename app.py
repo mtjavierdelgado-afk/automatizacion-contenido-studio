@@ -16187,7 +16187,8 @@ def _rutas_fondo_portada(ctx, info, diseno):
     rutas = []
     if tipo in ("subida", "ia"):
         for clave in ("imagen", "imagen2"):
-            if fondo.get(clave):
+            # SOLO los de este video: el nombre de otro no se pinta aqui
+            if fondo.get(clave) and P.es_fondo_de(ctx.id, fondo[clave]):
                 ruta = P.ruta_fondo(_raiz_publicar(), fondo[clave])
                 if os.path.isfile(ruta):
                     rutas.append(ruta)
@@ -16196,14 +16197,25 @@ def _rutas_fondo_portada(ctx, info, diseno):
         elegidos = [s for s in fondo.get("planos") or [] if s in planos] or list(planos)[:2]
         rutas = [planos[s] for s in elegidos]
     if not rutas and info.get("mp4"):
-        # el fotograma (o dos, para las plantillas partidas)
-        cache = os.path.join(_raiz_publicar(), "portadas", "fotogramas")
+        # el fotograma (o dos, para las plantillas partidas). La cache va POR
+        # MP4 (su huella): al volver a montar el video, los fotogramas viejos
+        # no se cuelan en la portada; y se quedan los ultimos 40 por video.
+        cache = os.path.join(_raiz_publicar(), "portadas", "fotogramas", P.prefijo_fondo(ctx.id))
+        huella = re.sub(r"[^a-z0-9]", "", str(info.get("mp4_huella") or "x").lower())[:10] or "x"
         momentos = [int(fondo.get("ms") or 0)]
         if dos:
             dur = int(float(info.get("duracion_s") or 0) * 1000)
             momentos.append(int(fondo.get("ms2") or (dur // 2 if dur else 0)))
+        try:
+            hay = sorted((os.path.join(cache, n) for n in os.listdir(cache)), key=os.path.getmtime)
+            de_otro_mp4 = [r for r in hay if not os.path.basename(r).startswith(huella + "_")]
+            de_este = [r for r in hay if r not in de_otro_mp4]
+            for ruta in de_otro_mp4 + de_este[:-40]:
+                os.remove(ruta)
+        except OSError:
+            pass
         for ms in momentos:
-            destino = os.path.join(cache, f"{ctx.id}_{ms}.jpg")
+            destino = os.path.join(cache, f"{huella}_{ms}.jpg")
             if not os.path.isfile(destino):
                 try:
                     _publicar().fotograma(info["mp4"], ms, destino, ancho=1280)
@@ -16257,7 +16269,8 @@ def portada_diseno(pid: str, peticion: Request):
     return {"diseno": guardado or _diseno_inicial(ctx, info), "guardado": bool(guardado),
             "formato_video": _portadas().formato_de_video(info.get("formato")),
             "duracion_s": info.get("duracion_s") or 0, "montado": bool(info.get("mp4")),
-            "planos": [{"sid": p["sid"], "texto": p["texto"]} for p in _planos_para_portada(ctx)]}
+            "planos": [{"sid": p["sid"], "texto": p["texto"]} for p in _planos_para_portada(ctx)],
+            "fondos": _portadas().fondos_de(_raiz_publicar(), ctx.id)}
 
 
 @app.put("/api/publicar/videos/{pid}/portada/diseno")
@@ -16269,14 +16282,19 @@ def portada_guardar_diseno(pid: str, peticion: Request, cuerpo: dict = Body(defa
 
 @app.post("/api/publicar/videos/{pid}/portada/plantilla")
 def portada_desde_plantilla(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """Rehace el diseno con otra plantilla, paleta, fuente o formato:
-    {plantilla, paleta?, fuente?, formato?, textos?, diseno?}. Conserva los
-    textos y el fondo del diseno que se mande. No guarda nada."""
+    """Rehace el diseno con otra plantilla: {plantilla, paleta?, fuente?,
+    formato?, textos?, diseno?}, conservando textos y fondo. Sin `plantilla`
+    (solo paleta, letra o formato) cambia el estilo y deja los elementos como
+    estaban. No guarda nada."""
     _ctx_publicable(pid, peticion)
     datos = _cuerpo(cuerpo)
     base = datos.get("diseno") if isinstance(datos.get("diseno"), dict) else None
     P = _portadas()
     actual = P.normalizar(base) if base else None
+    if actual and not datos.get("plantilla"):
+        # SOLO paleta, letra o formato: lo hecho a mano se queda (cambiar_estilo)
+        return {"diseno": P.cambiar_estilo(actual, datos.get("paleta"), datos.get("fuente"),
+                                           datos.get("formato"))}
     return {"diseno": P.de_plantilla(
         datos.get("plantilla") or (actual or {}).get("plantilla"),
         datos.get("textos") if isinstance(datos.get("textos"), dict) else None,
@@ -16284,6 +16302,11 @@ def portada_desde_plantilla(pid: str, peticion: Request, cuerpo: dict = Body(def
         datos.get("fuente") or (actual or {}).get("fuente") or "anton",
         datos.get("formato") or (actual or {}).get("formato") or "9:16",
         base=actual)}
+
+
+#: Cuantas vistas de portada se pintan a la vez (cada una abre un navegador):
+#: arrastrar un deslizador no puede amontonar navegadores contra el render.
+_VISTAS_PORTADA = threading.BoundedSemaphore(2)
 
 
 @app.post("/api/publicar/videos/{pid}/portada/vista")
@@ -16298,7 +16321,9 @@ def portada_vista(pid: str, peticion: Request, cuerpo: dict = Body(default=None)
     except (TypeError, ValueError):
         ancho = 360
     rutas = _rutas_fondo_portada(ctx, info, diseno)
-    destino = os.path.join(_raiz_publicar(), "portadas", "vistas", f"{ctx.id}_{uuid.uuid4().hex[:8]}.png")
+    destino = os.path.join(_raiz_publicar(), "portadas", "vistas", f"{uuid.uuid4().hex[:12]}.png")
+    if not _VISTAS_PORTADA.acquire(timeout=20):
+        raise ErrorApi(503, "hay otras vistas pintándose: vuelve a intentarlo en un momento")
     try:
         _portadas().renderizar(diseno, rutas, destino, ancho_vista=ancho,
                                guias=bool(_cuerpo(cuerpo).get("guias")))
@@ -16307,6 +16332,7 @@ def portada_vista(pid: str, peticion: Request, cuerpo: dict = Body(default=None)
     except Exception as fallo:                              # noqa: BLE001
         raise ErrorApi(500, f"no he podido pintar la portada: {fallo}")
     finally:
+        _VISTAS_PORTADA.release()
         try:
             os.remove(destino)
         except OSError:
@@ -16323,7 +16349,7 @@ def portada_usar(pid: str, peticion: Request, cuerpo: dict = Body(default=None))
     diseno = _diseno_de_cuerpo(cuerpo)
     P = _portadas()
     rutas = _rutas_fondo_portada(ctx, info, diseno)
-    destino = os.path.join(_raiz_publicar(), "portadas", "vistas", f"{ctx.id}_final_{uuid.uuid4().hex[:6]}.png")
+    destino = os.path.join(_raiz_publicar(), "portadas", "vistas", f"final_{uuid.uuid4().hex[:12]}.png")
     try:
         P.renderizar(diseno, rutas, destino)
         with open(destino, "rb") as fh:
@@ -16369,7 +16395,7 @@ def portada_fondo(pid: str, nombre: str, peticion: Request):
         ruta = _portadas().ruta_fondo(_raiz_publicar(), nombre)
     except ValueError:
         raise ErrorApi(404, "ese fondo no existe")
-    if not os.path.isfile(ruta) or not nombre.startswith(f"{pid.lower()}_"):
+    if not os.path.isfile(ruta) or not _portadas().es_fondo_de(pid, nombre):
         raise ErrorApi(404, "ese fondo no existe")
     return FileResponse(ruta, headers={"Cache-Control": "private, max-age=3600"})
 
@@ -16399,10 +16425,16 @@ def _guardar_fondo_portada(pid, contenido):
     try:
         from PIL import Image                               # noqa: PLC0415
         with Image.open(io.BytesIO(contenido)) as im:
-            im = im.convert("RGB")
+            # una imagen enorme (40 Mpx) se rechaza antes de abrirla en memoria
+            if im.width * im.height > 40_000_000:
+                raise ErrorApi(400, "esa imagen es demasiado grande (más de 40 megapíxeles)")
+            im.draft("RGB", (2048, 2048))
             im.thumbnail((2048, 2048))
+            im = im.convert("RGB")
             salida = io.BytesIO()
             im.save(salida, "PNG")
+    except ErrorApi:
+        raise
     except Exception:                                       # noqa: BLE001
         raise ErrorApi(400, "esa imagen no se puede leer")
     datos = salida.getvalue()
@@ -16410,9 +16442,10 @@ def _guardar_fondo_portada(pid, contenido):
     nombre = P.nombre_fondo(pid, datos)
     ruta = P.ruta_fondo(_raiz_publicar(), nombre)
     os.makedirs(os.path.dirname(ruta), exist_ok=True)
-    with open(ruta + ".tmp", "wb") as fh:
+    temporal = f"{ruta}.{uuid.uuid4().hex[:6]}.tmp"
+    with open(temporal, "wb") as fh:
         fh.write(datos)
-    os.replace(ruta + ".tmp", ruta)
+    os.replace(temporal, ruta)
     return {"nombre": nombre}
 
 
@@ -16487,9 +16520,22 @@ def _correr_portada_ia(avisar, ctx, que, prompt, referencias, calidad, tamano):
     nombre = P.nombre_fondo(ctx.id, png)
     ruta = P.ruta_fondo(_raiz_publicar(), nombre)
     os.makedirs(os.path.dirname(ruta), exist_ok=True)
-    with open(ruta + ".tmp", "wb") as fh:
+    temporal = f"{ruta}.{uuid.uuid4().hex[:6]}.tmp"
+    with open(temporal, "wb") as fh:
         fh.write(png)
-    os.replace(ruta + ".tmp", ruta)
+    os.replace(temporal, ruta)
+    # LO PAGADO SE APUNTA EN EL DISENO GUARDADO enseguida: si se cerro el
+    # editor mientras se dibujaba, al volver a abrirlo sale (y en «Fondos ya
+    # hechos» siempre esta)
+    try:
+        guardado = P.leer(_raiz_publicar(), ctx.id)
+        if guardado:
+            guardado["fondo"] = dict(guardado["fondo"], tipo="ia", imagen=nombre)
+            if que == "portada":
+                guardado["modo"] = "ia"
+            P.guardar(_raiz_publicar(), ctx.id, guardado)
+    except Exception:                                       # noqa: BLE001
+        pass
     ctx.bitacora.anotar("portada_ia", "publicar", {"que": que, "calidad": calidad,
                                                    "coste_usd": meta.get("coste")})
     return {"nombre": nombre, "que": que, "coste_usd": meta.get("coste")}

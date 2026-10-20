@@ -96,8 +96,12 @@ def fijar_carpeta(ruta):
 
 
 def carpeta_fuentes():
-    ruta = _CARPETA["ruta"] or os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                            "..", "recursos", "fuentes_grafismo")
+    """FUERA DEL CODIGO a proposito: `asvs actualizar` sincroniza la carpeta del
+    codigo con `--delete`, y unas fuentes bajadas ahi se borrarian en cada
+    actualizacion (revision 19-10). En la carpeta del usuario del servicio
+    duran, y el render (p7) y la pantalla (app.py) ven las mismas."""
+    ruta = _CARPETA["ruta"] or os.path.join(os.path.expanduser("~"), ".local", "share",
+                                            "estudio", "fuentes_grafismo")
     return os.path.abspath(ruta)
 
 
@@ -139,7 +143,7 @@ def asegurar_fuentes(descargar=True, tiempo_s=20):
                 continue
             os.makedirs(carpeta_fuentes(), exist_ok=True)
             destino = os.path.join(carpeta_fuentes(), ficha["fichero"])
-            temporal = f"{destino}.{os.getpid()}.tmp"
+            temporal = f"{destino}.{os.getpid()}.{threading.get_ident()}.tmp"
             with open(temporal, "wb") as fh:
                 fh.write(datos)
             os.replace(temporal, destino)

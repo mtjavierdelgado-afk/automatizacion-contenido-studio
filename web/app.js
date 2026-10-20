@@ -18344,7 +18344,7 @@ function pintarAyuda() {
   else if (!suyos.length) seccion.appendChild(h('div', { clase: 'meta' }, 'Esta pantalla aún no tiene apartado en el manual.'));
   suyos.forEach(a => seccion.appendChild(h('div', { clase: 'apartado-manual' },
     h('h3', {}, a.titulo),
-    h('div', { clase: 'novedades' }, textoConFormato(unirLineas(a.texto))))));
+    h('div', { clase: 'novedades' }, textoConFormato(unirLineas(a.texto.replace(/^#{3,6} (.+)$/gm, '**$1**')))))));
   caja.appendChild(seccion);
 
   const otras = h('section', { clase: 'ayuda-seccion' }, h('span', { clase: 'etiqueta-inicio' }, 'Más ayuda'),
@@ -18371,7 +18371,7 @@ function pintarAyuda() {
     todos.filter(a => !casa(a)).forEach(a => {
       const d = h('details', { clase: 'apartado-manual plegado-manual' }, h('summary', {}, a.titulo));
       d.addEventListener('toggle', () => {
-        if (d.open && d.childNodes.length === 1) d.appendChild(h('div', { clase: 'novedades' }, textoConFormato(unirLineas(a.texto))));
+        if (d.open && d.childNodes.length === 1) d.appendChild(h('div', { clase: 'novedades' }, textoConFormato(unirLineas(a.texto.replace(/^#{3,6} (.+)$/gm, '**$1**')))));
       });
       resto.appendChild(d);
     });
@@ -19354,6 +19354,7 @@ function tarjetaEditable(t, i, total) {
   caja.appendChild(h('div', { clase: 'editable-cab' },
     h('span', { clase: 'asa', title: 'Arrastra para cambiarla de sitio', 'aria-hidden': 'true' }, '⋮⋮'),
     h('b', { clase: 'crece' }, info.nombre),
+    h('span', { clase: 'controles-tarjeta' },
     h('span', { clase: 'tamanos' }, tamano('S'), tamano('M'), tamano('L')),
     h('button', { type: 'button', clase: 'mini fantasma', title: 'Subirla un puesto',
       'aria-label': `Subir «${info.nombre}»`, disabled: i === 0,
@@ -19363,7 +19364,7 @@ function tarjetaEditable(t, i, total) {
       onclick: () => cambiarPanelInicio(p => { const [x] = p.tarjetas.splice(i, 1); p.tarjetas.splice(i + 1, 0, x); p.vista = ''; }) }, '↓'),
     h('button', { type: 'button', clase: 'mini fantasma quitar-tarjeta', title: 'Quitarla del panel',
       'aria-label': `Quitar «${info.nombre}»`,
-      onclick: () => cambiarPanelInicio(p => { p.tarjetas.splice(i, 1); p.vista = ''; }) }, '✕')));
+      onclick: () => cambiarPanelInicio(p => { p.tarjetas.splice(i, 1); p.vista = ''; }) }, '✕'))));
   caja.appendChild(h('div', { clase: 'editable-relleno' }, h('span', { clase: 'meta' }, info.que)));
   return caja;
 }
@@ -19535,7 +19536,7 @@ const PINTORES_INICIO = {
         h('span', { clase: 'columna' }, h('span', { clase: 'relleno-columna', estilo: `--alto:${Math.round((n / maximo) * 100)}%` })),
         h('b', {}, String(n)));
     })));
-    caja.appendChild(h('span', { clase: 'meta' }, 'Publicaciones por día · hoy, en violeta'));
+    caja.appendChild(h('span', { clase: 'meta' }, 'Publicaciones por día · hoy, resaltado'));
     return caja;
   },
 

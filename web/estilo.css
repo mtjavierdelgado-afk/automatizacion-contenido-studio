@@ -3495,7 +3495,8 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
    el ordenador. En el móvil y la tableta sigue siendo la fila de siempre, y
    lo que solo cabe en el lateral (el gasto, el asistente) se esconde. */
 .barra-modulos .modulos-enlaces { display: flex; gap: 4px; align-items: center; }
-.barra-modulos .gasto-menu, .barra-modulos .menu-asistente { display: none; }
+/* Configuración, en la fila, ya está en el engranaje de la cabecera: solo sale en el lateral */
+.barra-modulos .gasto-menu, .barra-modulos .menu-asistente, .barra-modulos .modulo-config { display: none; }
 @media (min-width: 1200px) {
   body.con-menu .barra-modulos {
     position: fixed; z-index: 30; left: 0; bottom: 0; top: calc(var(--alto) + 6px);
@@ -3505,6 +3506,7 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
   }
   body.con-menu #cuerpo { margin-left: var(--ancho-menu); }
   body.con-menu .barra-modulos .modulos-enlaces { flex-direction: column; align-items: stretch; gap: 4px; }
+  body.con-menu .barra-modulos .modulo-config { display: inline-flex; }
   body.con-menu .boton-modulo {
     padding: 11px 14px; border-radius: 10px; font-size: 15px; font-weight: 500;
     color: var(--tenue); border: 0; border-left: 3px solid transparent;
@@ -3562,7 +3564,7 @@ button.chip-personalizar { border-style: dashed; border-color: var(--acento); co
 .tarjeta-inicio.tam-L { grid-column: span 12; }
 .tarjeta-inicio > div { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .tarjeta-inicio.vacia { color: var(--tenue); text-align: center; padding: 34px 20px; }
-.tarjeta-inicio.tarjeta-cifras { background: transparent; border: 0; padding: 0; }
+.tarjeta-inicio.tarjeta-cifras:not(.editable) { background: transparent; border: 0; padding: 0; }
 @media (max-width: 899px) {
   .tarjeta-inicio.tam-S { grid-column: span 6; }
   .tarjeta-inicio.tam-M { grid-column: span 12; }
@@ -3579,7 +3581,7 @@ button.chip-personalizar { border-style: dashed; border-color: var(--acento); co
 .cifra-mono { font-family: var(--letra-cifra); }
 
 /* el saludo, con los dos halos de la marca */
-.tarjeta-inicio.tarjeta-saludo { position: relative; overflow: hidden; background: var(--heroe); padding: 30px; border-radius: 22px; }
+.tarjeta-inicio.tarjeta-saludo:not(.editable) { position: relative; overflow: hidden; background: var(--heroe); padding: 30px; border-radius: 22px; }
 .saludo-inicio { position: relative; flex-direction: row !important; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 20px !important; }
 .halo { position: absolute; border-radius: 50%; filter: blur(60px); pointer-events: none; }
 .halo-1 { right: -110px; top: -150px; width: 360px; height: 360px; background: var(--halo); opacity: .22; }
@@ -3653,7 +3655,8 @@ button.reciente .meta { font-size: 12px; overflow-wrap: anywhere; }
 .tarjeta-inicio.editable.destino { border-color: var(--acento); background: var(--hueco); }
 .editable-cab { display: flex !important; flex-direction: row !important; align-items: center; gap: 6px !important; flex-wrap: wrap; }
 .editable-cab .asa { color: var(--acento); font-size: 16px; cursor: grab; letter-spacing: -2px; }
-.editable-cab b { min-width: 0; font-size: 14px; }
+.editable-cab b { flex: 1 1 auto; min-width: 8em; font-size: 14px; }
+.controles-tarjeta { display: inline-flex; flex-wrap: nowrap; align-items: center; gap: 4px; margin-left: auto; }
 .tamanos { display: inline-flex; gap: 3px; }
 button.tam-boton { min-width: 30px; padding: 3px 8px; }
 button.tam-boton.activo { background: var(--acento-relleno); color: var(--sobre-acento); border-color: transparent; }

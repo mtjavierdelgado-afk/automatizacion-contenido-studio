@@ -113,6 +113,17 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/videos/{pid}/metricas` | Pide las cifras de lo publicado de este video: {forzar?}. |
 | `POST` | `/api/publicar/videos/{pid}/portada` | Sube una imagen de portada (multipart, campo «portada»). |
 | `GET` | `/api/publicar/videos/{pid}/portada.jpg` | La imagen de portada subida para este vídeo. |
+| `GET` | `/api/publicar/videos/{pid}/portada/diseno` | El diseno de portada de este video (el guardado o uno de partida, SIN |
+| `PUT` | `/api/publicar/videos/{pid}/portada/diseno` | Guarda el diseno (para retocarlo otro dia). No cambia la portada. |
+| `POST` | `/api/publicar/videos/{pid}/portada/fondo` | Sube una imagen para el fondo (multipart, campo «imagen»). -> {nombre} |
+| `GET` | `/api/publicar/videos/{pid}/portada/fondos/{nombre}` | Un fondo subido o hecho con IA. |
+| `POST` | `/api/publicar/videos/{pid}/portada/ia` | Dibuja con la IA de imagenes (SE PAGA): {diseno, que: «fondo» o «portada», |
+| `GET` | `/api/publicar/videos/{pid}/portada/planos/{sid}.jpg` | La imagen de un plano, en pequeno, para elegir el fondo. |
+| `POST` | `/api/publicar/videos/{pid}/portada/plantilla` | Rehace el diseno con otra plantilla, paleta, fuente o formato: |
+| `POST` | `/api/publicar/videos/{pid}/portada/proponer` | Claude propone tres portadas (suscripcion, sin coste aparte). -> {id}; |
+| `GET` | `/api/publicar/videos/{pid}/portada/proponer/{rid}` | Como van las portadas propuestas, y cuales son al terminar. |
+| `POST` | `/api/publicar/videos/{pid}/portada/usar` | La pinta a tamano real y la deja como portada del video (como si la |
+| `POST` | `/api/publicar/videos/{pid}/portada/vista` | La portada pintada en pequeno, para la pantalla: {diseno, ancho?, |
 | `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
 | `GET` | `/api/parrilla/cuentas` | Las cuentas ya leídas, las conexiones (sin claves) y el gasto del mes. |
 | `PUT` | `/api/parrilla/cuentas/conexiones` | {youtube_clave?, meta_token?, ig_id?, apify_token?, pago?, tope_usd?} ("" quita una). |
@@ -410,6 +421,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/musica/buscar` | Temas de Jamendo por animo, sin video: el borrador de un video nuevo. |
 | `GET` | `/api/musica/escucha` | Pasa por aqui la escucha de un tema de Jamendo antes de elegirlo. |
 | `GET` | `/api/musica/propia/{archivo}` | Un tema tuyo del banco, para escucharlo. |
+| `GET` | `/api/portadas/catalogo` | Plantillas, paletas, fuentes, elementos y formatos de las portadas. |
 | `POST` | `/api/ortografia/textos` | Revisa la ortografia de campos sueltos que se ven o se publican: {textos: |
 | `POST` | `/api/ortografia/textos/descartar` | Lo que se deja como estaba: {rid, ids: [...]}. No se vuelve a proponer. |
 | `GET` | `/api/ortografia/textos/{rid}` | Como va la revision de unos campos sueltos, y lo que propone al terminar. |
@@ -428,4 +440,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**312 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**326 endpoints.** Escrito por `generar_api.py` desde `app.py`.

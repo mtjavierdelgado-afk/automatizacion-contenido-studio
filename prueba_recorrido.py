@@ -4968,5 +4968,83 @@ def lo_de_v2h_en_la_pantalla(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def portadas_disenadas(navegador, datos):
+    """Rama `portadas` (19-10-2026): diseñar la portada de un vídeo en Publicar.
+    Abrir el editor no guarda nada; cada plantilla pinta su vista; Claude
+    propone tres; el fondo se hace con la IA (simulada) solo tras confirmar el
+    precio; «Usar como portada» la deja como la imagen que va a las redes."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    r, cat = api.get("/api/portadas/catalogo")
+    ok(r.status_code == 200 and len(cat.get("plantillas") or []) >= 20,
+       f"el catálogo trae las plantillas ({len(cat.get('plantillas') or [])})")
+    r, ficha = api.get(f"/api/publicar/videos/{pid}/portada/diseno")
+    ok(r.status_code == 200 and ficha.get("guardado") is False and ficha.get("diseno"),
+       "abrir el diseño da uno de partida SIN guardarlo")
+    ruta = os.path.join(datos["proyectos"], "_sistema", "publicar", "portadas", f"{pid}.diseno.json")
+    ok(not os.path.exists(ruta), "y no escribe nada en el disco")
+    pg = Pagina(navegador, datos, nombre="portadas")
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    ok(pg.esperar(".portada-publicar button", "Diseñar portada", 20), "el bloque Portada trae «Diseñar portada»")
+    pg.pulsar(".portada-publicar button", "Diseñar portada")
+    ok(pg.esperar(".capa-portada", "Diseñar portada", 15), "se abre el editor de portadas")
+    ok(pg.esperar(".vista-portada-grande img", segundos=30), "con la vista pintada")
+    texto = pg.p.locator(".capa-portada").inner_text()
+    malos = sorted(set(x.group(0) for x in TEXTOS_MALOS.finditer(texto)))
+    ok(not malos, f"sin «null», «undefined» ni tildes rotas en el editor ({malos})")
+    primera = pg.p.evaluate("() => PORT.vista")
+    pg.pulsar(".capa-portada .plantilla-portada", "Versus")
+    pg.p.wait_for_timeout(600)
+    pg.p.locator(".capa-portada input[data-foco=portada-izquierda]").fill("Diseño")
+    pg.p.locator(".capa-portada input[data-foco=portada-derecha]").fill("Función")
+    fin = time.time() + 30
+    while time.time() < fin and pg.p.evaluate("() => PORT.vista") == primera:
+        pg.p.wait_for_timeout(500)
+    ok(pg.p.evaluate("() => PORT.vista") != primera, "al cambiar de plantilla y textos se vuelve a pintar")
+    ok(pg.p.evaluate("() => PORT.diseno.fondo.disposicion") == "diagonal",
+       "el versus parte el fondo en diagonal")
+    pg.captura("portada_versus", entera=False)
+    # Claude propone (el CLI falso contesta tres)
+    pg.pulsar(".capa-portada button", "Proponer 3 portadas")
+    ok(pg.esperar(".propuesta-portada", "PS5", 60), "Claude propone portadas")
+    ok(pg.p.locator(".propuesta-portada").count() == 3, "tres")
+    pg.p.locator(".propuesta-portada button", has_text="Usar esta").nth(1).click()
+    pg.p.wait_for_timeout(800)
+    ok(pg.p.evaluate("() => PORT.diseno.plantilla") == "oferta", "y se puede usar una")
+    # el fondo con IA, con el precio delante (motor de imágenes simulado)
+    antes = len(pg.dialogos)
+    pg.pulsar(".capa-portada button", "Hacer el fondo con IA")
+    fin = time.time() + 90
+    while time.time() < fin and pg.p.evaluate("() => (PORT.diseno.fondo || {}).tipo") != "ia":
+        pg.p.wait_for_timeout(700)
+    ok(len(pg.dialogos) > antes and "$" in pg.dialogos[-1], "antes de pagar enseña el precio y pregunta")
+    ok(pg.p.evaluate("() => PORT.diseno.fondo.tipo") == "ia" and pg.p.evaluate("() => !!PORT.diseno.fondo.imagen"),
+       "el fondo hecho con IA queda puesto")
+    # usarla como portada
+    pg.pulsar(".capa-portada button", "Usar como portada")
+    fin = time.time() + 40
+    while time.time() < fin and pg.visible(".capa-portada"):
+        pg.p.wait_for_timeout(500)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    ok(((ficha.get("portada") or {}).get("imagen") or ""), "«Usar como portada» la deja como la imagen de portada")
+    ok(os.path.exists(ruta), "y guarda el diseño para retocarlo otro día")
+    _r, d = api.get(f"/api/publicar/videos/{pid}/portada/diseno")
+    ok(d.get("guardado") and d["diseno"]["plantilla"] == "oferta", "al volver a abrirlo sale el guardado")
+    pg.sin_errores("las portadas diseñadas")
+    pg.cerrar()
+    # en el móvil, cabe
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="portadas móvil")
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    ok(pg.esperar(".portada-publicar button", "Diseñar portada", 20), "en el móvil también está")
+    pg.pulsar(".portada-publicar button", "Diseñar portada")
+    ok(pg.esperar(".capa-portada .vista-portada-grande img", segundos=30), "y se abre")
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    ok(ancho <= 2, f"sin salirse por los lados ({ancho}px)")
+    pg.captura("portada_movil", entera=False)
+    pg.sin_errores("las portadas en el móvil")
+    pg.cerrar()
+
+
 if __name__ == "__main__":
     sys.exit(main())

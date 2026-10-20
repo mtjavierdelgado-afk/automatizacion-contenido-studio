@@ -15899,7 +15899,9 @@ def _portadas():
     return PASOS_MODULOS.portadas if hasattr(PASOS_MODULOS, "portadas") else __import__("portadas")
 
 
-def _grafismo():
+def _motor_grafismo():
+    # NO `_grafismo`: ese nombre ya es el de la paleta y el set de un video
+    # (mas arriba), y en Python el segundo pisa al primero sin avisar
     return PASOS_MODULOS.grafismo if hasattr(PASOS_MODULOS, "grafismo") else __import__("grafismo")
 
 
@@ -15986,7 +15988,7 @@ def _diseno_inicial(ctx, info):
 def portadas_catalogo():
     """Plantillas, paletas, fuentes, elementos y formatos de las portadas."""
     # las fuentes de miniatura se bajan una vez, sin esperar (grafismo.py)
-    _grafismo().asegurar_fuentes_en_segundo_plano()
+    _motor_grafismo().asegurar_fuentes_en_segundo_plano()
     return _portadas().catalogo()
 
 
@@ -16031,7 +16033,8 @@ def portada_desde_plantilla(pid: str, peticion: Request, cuerpo: dict = Body(def
 
 @app.post("/api/publicar/videos/{pid}/portada/vista")
 def portada_vista(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """La portada pintada en pequeno, para la pantalla: {diseno, ancho?}. PNG."""
+    """La portada pintada en pequeno, para la pantalla: {diseno, ancho?,
+    guias?} (con `guias`, las zonas que tapa cada red en rojo). PNG."""
     ctx = _ctx_publicable(pid, peticion)
     info = _info_para_publicar(ctx)
     diseno = _diseno_de_cuerpo(cuerpo)
@@ -16042,7 +16045,8 @@ def portada_vista(pid: str, peticion: Request, cuerpo: dict = Body(default=None)
     rutas = _rutas_fondo_portada(ctx, info, diseno)
     destino = os.path.join(_raiz_publicar(), "portadas", "vistas", f"{ctx.id}_{uuid.uuid4().hex[:8]}.png")
     try:
-        _portadas().renderizar(diseno, rutas, destino, ancho_vista=ancho)
+        _portadas().renderizar(diseno, rutas, destino, ancho_vista=ancho,
+                               guias=bool(_cuerpo(cuerpo).get("guias")))
         with open(destino, "rb") as fh:
             contenido = fh.read()
     except Exception as fallo:                              # noqa: BLE001

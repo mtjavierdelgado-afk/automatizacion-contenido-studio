@@ -5933,6 +5933,36 @@ def probar_que_lo_lento_no_para_el_servicio():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_portadas(cliente, pid):
+    """Rama `portadas`: las rutas que no gastan ni llaman a Claude."""
+    seccion("LAS PORTADAS DISEÑADAS")
+    r, cat = cliente.get("/api/portadas/catalogo")
+    igual(r.status_code, 200, "GET /api/portadas/catalogo responde 200")
+    ok(len(cat.get("plantillas") or []) >= 20 and cat.get("formatos", {}).get("9:16"),
+       "con veinte plantillas o más y los cuatro formatos")
+    r, d = cliente.get(f"/api/publicar/videos/{pid}/portada/diseno")
+    igual(r.status_code, 200, "el diseño de un vídeo se lee")
+    ok(d.get("guardado") is False and (d.get("diseno") or {}).get("plantilla"),
+       "sin diseño guardado da uno de partida, sin guardarlo")
+    r, _d = cliente.put(f"/api/publicar/videos/{pid}/portada/diseno", {"diseno": "no"})
+    igual(r.status_code, 400, "guardar un diseño que no es un objeto: 400")
+    r, p = cliente.post(f"/api/publicar/videos/{pid}/portada/plantilla",
+                        {"plantilla": "versus", "textos": {"izquierda": "A"}, "formato": "1:1"})
+    igual(r.status_code, 200, "cambiar de plantilla responde 200")
+    ok(p["diseno"]["plantilla"] == "versus" and p["diseno"]["formato"] == "1:1",
+       "con la plantilla y el formato pedidos")
+    r, precio = cliente.post(f"/api/publicar/videos/{pid}/portada/ia",
+                             {"diseno": p["diseno"], "que": "portada", "calidad": "high"})
+    igual(r.status_code, 202, "la IA sin confirmar contesta")
+    ok("precio" in precio and "trabajo_id" not in precio, "sin `confirmado` solo dice el precio y no lanza nada")
+    r, _d = cliente.get(f"/api/publicar/videos/{pid}/portada/fondos/..%2F..%2Fsecretos")
+    igual(r.status_code, 404, "un fondo con .. no sale de su carpeta")
+    r, _d = cliente.get(f"/api/publicar/videos/{pid}/portada/planos/NOEXISTE.jpg")
+    igual(r.status_code, 404, "un plano que no existe: 404")
+    r, _d = cliente.get(f"/api/publicar/videos/{pid}/portada/proponer/noexiste")
+    igual(r.status_code, 404, "una propuesta que no existe: 404")
+
+
 def probar_ortografia_de_campos(cliente, pid):
     """El corrector de campos sueltos (18-10-2026): lo que se ve o se publica
     fuera del guion y los subtitulos. Solo lo que NO llega al CLI (aqui no hay
@@ -6698,6 +6728,7 @@ def main():
         probar_revision_del_nucleo_v2f()
         probar_que_lo_lento_no_para_el_servicio()
         probar_ortografia_de_campos(cliente, pid)
+        probar_portadas(cliente, pid)
         probar_lo_de_v2h()
         probar_cancelar_en_el_taller()
     finally:

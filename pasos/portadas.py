@@ -615,21 +615,41 @@ def _fondo_svg(diseno, rutas, W, H, uid):
     return "".join(piezas)
 
 
-def componer(diseno, rutas_fondo):
-    """El SVG de la portada a su tamano de verdad. -> (svg, W, H)"""
+def svg_guias(formato, W, H):
+    """Las zonas que tapa cada red, en rojo translucido (SOLO en la vista)."""
+    piezas = []
+    for z in ZONAS.get(formato) or []:
+        x, y, w, h = z["x"] * W, z["y"] * H, z["w"] * W, z["h"] * H
+        piezas.append(f'<rect x="{x:.0f}" y="{y:.0f}" width="{w:.0f}" height="{h:.0f}" fill="#ff0000" '
+                      f'opacity="0.22" stroke="#ff0000" stroke-width="4" stroke-dasharray="18 12"/>'
+                      f'<text x="{x + 14:.0f}" y="{y + 44:.0f}" font-family="Verdana, sans-serif" '
+                      f'font-size="30" fill="#ffffff" stroke="#000" stroke-width="5" paint-order="stroke">'
+                      f'{grafismo.escapar(z["que"])}</text>')
+    return "".join(piezas)
+
+
+def componer(diseno, rutas_fondo, guias=False):
+    """El SVG de la portada a su tamano de verdad. -> (svg, W, H)
+
+    En modo «ia» la imagen de la IA ES la portada (lleva el texto dentro): no se
+    le pone nada encima ni se le tocan los colores."""
     d = normalizar(diseno)
     W, H = FORMATOS[d["formato"]]
     uid = "p" + hashlib.sha1(json.dumps(d, sort_keys=True).encode("utf-8")).hexdigest()[:8]
+    if d["modo"] == "ia":
+        d = dict(d, elementos=[], efectos={}, fondo=dict(d["fondo"], disposicion="uno"))
     fondo = _fondo_svg(d, list(rutas_fondo or []), W, H, uid)
     paleta = PALETAS[d["paleta"]]
     svg = grafismo.lienzo(W, H, fondo, d["elementos"], d["efectos"], fondo_color=paleta["fondo"])
+    if guias:
+        svg = svg[:-len("</svg>")] + svg_guias(d["formato"], W, H) + "</svg>"
     return svg, W, H
 
 
-def renderizar(diseno, rutas_fondo, destino, ancho_vista=0):
+def renderizar(diseno, rutas_fondo, destino, ancho_vista=0, guias=False):
     """La portada en PNG. Con `ancho_vista` sale reducida (para la pantalla)."""
     import medios                                             # noqa: PLC0415
-    svg, W, H = componer(diseno, rutas_fondo)
+    svg, W, H = componer(diseno, rutas_fondo, guias=guias)
     escala = (float(ancho_vista) / W) if ancho_vista and ancho_vista < W else 1.0
     w, h = int(round(W * escala)), int(round(H * escala))
     if escala != 1.0:

@@ -3283,6 +3283,59 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .regla-estilo-propuesta { border: 1px dashed var(--acento-borde); border-radius: 8px;
   padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--hueco); }
 
+/* ================================================================ PORTADAS
+   El editor de portadas (rama `portadas`): una capa encima de Publicar con la
+   vista a la izquierda y los mandos a la derecha; en el movil, una debajo de
+   la otra. */
+.capa-portada { position: fixed; inset: 0; z-index: 95; background: var(--velo);
+  display: flex; align-items: stretch; justify-content: center; padding: 12px; }
+.panel-portada { width: min(1180px, 100%); background: var(--panel); border: 1px solid var(--linea);
+  border-radius: 14px; box-shadow: var(--sombra); display: flex; flex-direction: column;
+  overflow: hidden; }
+.cab-portada { padding: 10px 14px; border-bottom: 1px solid var(--linea); gap: 8px; flex-wrap: wrap; }
+.cab-portada h3 { margin: 0; }
+.cuerpo-portada { display: flex; gap: 14px; padding: 12px; min-height: 0; flex: 1; overflow: hidden; }
+.columna-vista-portada { flex: 0 0 auto; width: min(440px, 45%); display: flex; flex-direction: column;
+  gap: 8px; overflow-y: auto; }
+.vista-portada-grande { background: var(--lienzo); border-radius: 10px; min-height: 200px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 8px; }
+.vista-portada-grande.pintando img { opacity: 0.55; }
+.vista-portada-grande img { max-width: 100%; max-height: 70vh; border-radius: 6px; display: block; }
+.mandos-portada { flex: 1; min-width: 0; overflow-y: auto; display: flex; flex-direction: column;
+  gap: 10px; padding-right: 4px; }
+.mandos-portada .bloque { border: 1px solid var(--linea); border-radius: 10px; padding: 10px;
+  display: flex; flex-direction: column; gap: 8px; }
+.mandos-portada h4 { margin: 0; font-size: 14px; }
+.mandos-portada .fila { flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.campo-portada { display: flex; flex-direction: column; gap: 4px; font-size: 13px; min-width: 120px; }
+.campo-portada input[type="text"], .campo-portada select { width: 100%; }
+.plantillas-portada { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+.plantilla-portada.elegida, .plano-portada.elegida { outline: 2px solid var(--acento); }
+.planos-portada { display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+  max-height: 260px; overflow-y: auto; }
+.plano-portada { position: relative; padding: 0; border-radius: 6px; overflow: hidden; background: var(--hueco); }
+.plano-portada img { width: 100%; display: block; aspect-ratio: 3 / 2; object-fit: cover; }
+.numero-plano { position: absolute; top: 4px; left: 4px; background: var(--acento); color: var(--blanco);
+  border-radius: 999px; padding: 0 7px; font-weight: 700; font-size: 12px; }
+.elemento-portada { border-top: 1px dashed var(--linea); padding-top: 8px; display: flex;
+  flex-direction: column; gap: 6px; }
+.elemento-portada.oculto-portada { opacity: 0.55; }
+.elemento-portada input[type="text"] { width: 100%; }
+.estilos-portada, .deslizadores-portada { gap: 4px 10px; }
+.deslizador-portada { display: flex; flex-direction: column; font-size: 12px; min-width: 110px; flex: 1; }
+.propuestas-portada { display: flex; flex-direction: column; gap: 6px; }
+.propuesta-portada { display: flex; flex-direction: column; gap: 3px; border: 1px solid var(--linea);
+  border-radius: 8px; padding: 8px; }
+.propuesta-portada button { align-self: flex-start; }
+@media (max-width: 760px) {
+  .capa-portada { padding: 0; }
+  .panel-portada { border-radius: 0; }
+  .cuerpo-portada { flex-direction: column; overflow-y: auto; }
+  .columna-vista-portada { width: 100%; overflow: visible; }
+  .mandos-portada { overflow: visible; }
+  .vista-portada-grande img { max-height: 55vh; }
+}
+
 /* ================================================================ PUBLICAR
    Rama `publicar-redes-1` (16-10-2026): la barra de módulos y el módulo
    Publicar. Todo nuevo y aquí, al final, para no chocar con las otras ramas.

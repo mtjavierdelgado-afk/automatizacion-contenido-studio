@@ -30,6 +30,13 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   logo). Al parar, el vídeo sigue siendo el de antes, no queda ningún trozo a
   medias, y el cambio sigue guardado: **«Regenerar Vídeo» lo aplica volviendo a
   mezclar** (segundos), no renderizando otra vez todos los planos.
+- **«Cambiar de estilo…» en «Su estilo»** (en el Encargo del vídeo). Un vídeo
+  cuyo estilo se borró se quedaba sin forma de adoptar otro; ahora eliges otro
+  estilo, ves qué partes cambiarían (estilo gráfico, tono, voz, rótulos) con
+  lo que costaría, y marcas solo las que quieras traer. Sin marcar nada, el
+  vídeo solo cambia de estilo apuntado y no se rehace nada. El vídeo **se queda
+  en su proyecto** si tenía uno. Si su estilo está en la papelera sale además
+  **«Restaurarlo»**, y la parada «Estilo» de un vídeo sin estilo te lleva ahí.
 
 **El nuevo diseño: CrearIA Studio (19 de octubre)**
 - **Se llama CrearIA Studio · Automatización de contenido**, con logo nuevo: la

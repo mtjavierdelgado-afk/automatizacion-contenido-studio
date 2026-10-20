@@ -3475,6 +3475,11 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
   padding: 8px 14px; background: var(--aviso-fondo); color: var(--aviso-texto);
   border-top: 1px solid var(--aviso-borde); border-bottom: 1px solid var(--aviso-borde);
   font-size: 13px; }
+/* «Su estilo»: pasar el vídeo a otro estilo (o restaurar el suyo) */
+.cambio-de-estilo { display: flex; flex-direction: column; gap: 8px;
+  padding-top: 8px; border-top: 1px dashed var(--linea); }
+.cambio-de-estilo > .fila { align-items: center; gap: 10px; flex-wrap: wrap; }
+.cambio-de-estilo select { flex: 1; min-width: 0; max-width: 100%; }
 
 /* ============================================== NOTAS DEL 19-10 (PUBLICAR)
    Rama `notas-19oct`: la pastilla de guardado de los textos, un botón por

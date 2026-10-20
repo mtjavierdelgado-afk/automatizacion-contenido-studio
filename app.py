@@ -14470,26 +14470,9 @@ def _que_rehace(ctx, parte, cambios):
             "usd_hasta": tope, "imagenes_hasta": hechas}
 
 
-@app.get("/api/proyectos/{pid}/estilo/cambios")
-def cambios_del_estilo(pid: str):
-    """Que tiene el estilo del video que el video no tiene, por partes, y lo que
-    costaria traerlo. No escribe nada."""
-    ctx = contexto(pid)
-    if PASOS_MODULOS is None:
-        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
-    preset_id = ctx.proyecto.config.get(CONFIG_ESTILO_LIGHT) or ""
-    if not preset_id:
-        return {"estilo": None, "partes": [],
-                "por_que_no": "este vídeo no se creó desde un estilo"}
+def _partes_comparadas(ctx, ficha):
+    """Cada parte del estilo `ficha` frente al video: si cambia y lo que cuesta."""
     presets = _presets()
-    try:
-        ficha = presets.leer(preset_id)
-    except presets.ErrorPreset as fallo:
-        ficha, motivo = None, str(fallo)
-    else:
-        motivo = "el estilo con el que se creó ya no existe"
-    if not ficha:
-        return {"estilo": {"id": preset_id}, "partes": [], "por_que_no": motivo}
     partes = []
     for parte in PARTES_ESTILO:
         try:
@@ -14505,35 +14488,76 @@ def cambios_del_estilo(pid: str):
         if cambios:
             ficha_parte.update(_que_rehace(ctx, parte, cambios))
         partes.append(ficha_parte)
-    return {"estilo": {"id": preset_id, "nombre": ficha.get("nombre") or preset_id},
-            "partes": partes, "al_dia": not any(p["cambia"] for p in partes)}
+    return partes
 
 
-@app.post("/api/proyectos/{pid}/estilo/traer")
-def traer_cambios_del_estilo(pid: str, cuerpo: dict = Body(default=None)):
-    """Trae al video las partes elegidas del estilo: {partes: [estilo, tono,
-    voz, rotulos]}. No genera nada: deja obsoleto lo que toque."""
+def _cliente_al_cambiar_de_estilo(ctx, nuevo):
+    """{antes, ahora} del proyecto (cliente) del video si pasa al estilo `nuevo`.
+
+    El proyecto de un video se deduce de su estilo salvo que se le haya fijado
+    uno (`/api/clientes/videos`). Al cambiar de estilo, un video que estaba en
+    un proyecto SE QUEDA en el (se le fija); uno que no estaba en ninguno pasa
+    al del estilo nuevo, si lo tiene. -> ({antes, ahora}, fijar)"""
+    raiz = raiz_proyectos()
+    asignaciones = CLIENTES._leer(raiz)
+    actual = ctx.proyecto.config.get(CONFIG_ESTILO_LIGHT) or ""
+    antes = CLIENTES.cliente_de(raiz, actual, ctx.id, datos=asignaciones)
+    propio = (asignaciones.get("videos") or {}).get(ctx.id)
+    del_nuevo = CLIENTES.cliente_de(raiz, nuevo, datos=asignaciones)
+    fijar = bool(antes and not propio and del_nuevo != antes)
+    return {"antes": antes, "ahora": antes if (fijar or propio) else del_nuevo}, fijar
+
+
+@app.get("/api/proyectos/{pid}/estilo/cambios")
+def cambios_del_estilo(pid: str, estilo: str = Query(default="")):
+    """Que tiene el estilo del video que el video no tiene, por partes, y lo que
+    costaria traerlo. Con `?estilo=<otro>`, lo mismo frente a OTRO estilo: la
+    vista previa de «Cambiar de estilo…» (19-10-2026). No escribe nada."""
     ctx = contexto(pid)
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
-    datos = _cuerpo(cuerpo)
-    pedidas = [str(p).strip().lower() for p in (_lista_de_textos(datos, "partes") or [])]
-    malas = [p for p in pedidas if p not in PARTES_ESTILO]
-    if not pedidas or malas:
-        raise ErrorApi(400, "hace falta 'partes' con alguna de: "
-                            + ", ".join(PARTES_ESTILO))
-    if ctx.gestor.listar(activos=True):
-        raise ErrorApi(409, "hay algo generándose en este vídeo: espera a que "
-                            "termine para traer los cambios del estilo")
-    preset_id = ctx.proyecto.config.get(CONFIG_ESTILO_LIGHT) or ""
+    actual = ctx.proyecto.config.get(CONFIG_ESTILO_LIGHT) or ""
+    otro = str(estilo or "").strip()
+    preset_id = otro or actual
     if not preset_id:
-        raise ErrorApi(409, "este vídeo no se creó desde un estilo")
+        return {"estilo": None, "partes": [], "actual": "",
+                "por_que_no": "este vídeo no se creó desde un estilo"}
     presets = _presets()
-    ficha = _preset_o_400(lambda p: p.leer(preset_id))
+    # el motivo, para la persona (antes salia el de `leer` tal cual: «no hay
+    # ningun preset con id '…'»)
+    motivo = ("ese estilo ya no existe" if otro
+              else "el estilo con el que se creó este vídeo ya no existe (se borró): "
+                   "el vídeo sigue igual, y puedes pasarlo a otro estilo")
+    try:
+        ficha = presets.leer(preset_id)
+    except presets.ErrorPreset:
+        ficha = None
+    if ficha and otro and ficha.get("tipo") != "canal":
+        raise ErrorApi(400, "eso no es un estilo de vídeo")
+    if ficha and otro and ficha.get("apartado") and otro != actual:
+        ficha, motivo = None, "ese estilo está en la papelera: restáuralo antes"
     if not ficha:
-        raise ErrorApi(404, "el estilo con el que se creó este vídeo ya no existe")
-    # todo calculado ANTES de escribir nada: una parte que no se puede aplicar
-    # (fotogramas que ya no estan) no deja el video a medias
+        return {"estilo": {"id": preset_id}, "partes": [], "actual": actual,
+                "por_que_no": motivo}
+    salida = {"estilo": {"id": preset_id, "nombre": ficha.get("nombre") or preset_id,
+                         # EN LA PAPELERA se sigue pudiendo comparar y traer
+                         # (leer mira tambien ahi), pero la pantalla ofrece
+                         # «Restaurarlo» y «Cambiar de estilo…»
+                         "en_papelera": bool(ficha.get("apartado"))},
+              "actual": actual,
+              "partes": _partes_comparadas(ctx, ficha)}
+    salida["al_dia"] = not any(p["cambia"] for p in salida["partes"])
+    if otro and otro != actual:
+        salida["cliente"], _fijar = _cliente_al_cambiar_de_estilo(ctx, otro)
+    return salida
+
+
+def _traer_partes(ctx, ficha, pedidas):
+    """Aplica al video las partes `pedidas` del estilo `ficha`, con el MISMO
+    codigo que al crearlo. Todo se calcula ANTES de escribir nada: una parte
+    que no se puede aplicar (fotogramas que ya no estan) no deja el video a
+    medias. Lanza ErrorApi(400) si alguna falla. -> {parte: [pasos cambiados]}"""
+    presets = _presets()
     por_parte = {}
     for parte in pedidas:
         por_parte[parte] = _preset_o_400(lambda _p, parte=parte:
@@ -14545,16 +14569,99 @@ def traer_cambios_del_estilo(pid: str, cuerpo: dict = Body(default=None)):
         for paso, valores in cambios.items():
             if ctx.estado.actualizar_params(paso, valores):
                 cambiados.setdefault(parte, []).append(paso)
+    return cambiados
+
+
+def _calcular_partes(ctx, ficha, pedidas):
+    """Comprueba (sin escribir) que todas las partes se pueden aplicar."""
+    for parte in pedidas:
+        _preset_o_400(lambda _p, parte=parte: _cambios_de_parte(ctx, ficha, parte))
+
+
+def _respuesta_de_traer(ctx, cambiados):
     afectados = {paso for pasos in cambiados.values() for paso in pasos}
-    ctx.bitacora.anotar("estilo_traido", None, {
-        "estilo": preset_id, "partes": pedidas,
-        "cambiados": {k: sorted(v) for k, v in cambiados.items()}})
     return {"traidas": sorted(cambiados), "cambiados": cambiados,
             "obsoletos": sorted(p["id"] for p in PASOS
                                 if ctx.estado.estado_de(p["id"]) == "obsoleto"),
             "aguas_abajo": sorted({h for paso in afectados
                                    for h in descendientes_de(paso)} - afectados),
             "pasos": [ficha_paso(ctx, p["id"]) for p in PASOS]}
+
+
+def _partes_pedidas(datos, vacias=False):
+    pedidas = [str(p).strip().lower() for p in (_lista_de_textos(datos, "partes") or [])]
+    malas = [p for p in pedidas if p not in PARTES_ESTILO]
+    if (not pedidas and not vacias) or malas:
+        raise ErrorApi(400, "hace falta 'partes' con alguna de: "
+                            + ", ".join(PARTES_ESTILO))
+    return pedidas
+
+
+@app.post("/api/proyectos/{pid}/estilo/traer")
+def traer_cambios_del_estilo(pid: str, cuerpo: dict = Body(default=None)):
+    """Trae al video las partes elegidas del estilo: {partes: [estilo, tono,
+    voz, rotulos]}. No genera nada: deja obsoleto lo que toque."""
+    ctx = contexto(pid)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    pedidas = _partes_pedidas(_cuerpo(cuerpo))
+    if ctx.gestor.listar(activos=True):
+        raise ErrorApi(409, "hay algo generándose en este vídeo: espera a que "
+                            "termine para traer los cambios del estilo")
+    preset_id = ctx.proyecto.config.get(CONFIG_ESTILO_LIGHT) or ""
+    if not preset_id:
+        raise ErrorApi(409, "este vídeo no se creó desde un estilo")
+    ficha = _preset_o_400(lambda p: p.leer(preset_id))
+    if not ficha:
+        raise ErrorApi(404, "el estilo con el que se creó este vídeo ya no existe")
+    cambiados = _traer_partes(ctx, ficha, pedidas)
+    ctx.bitacora.anotar("estilo_traido", None, {
+        "estilo": preset_id, "partes": pedidas,
+        "cambiados": {k: sorted(v) for k, v in cambiados.items()}})
+    return _respuesta_de_traer(ctx, cambiados)
+
+
+@app.put("/api/proyectos/{pid}/estilo")
+def cambiar_estilo_del_video(pid: str, cuerpo: dict = Body(default=None)):
+    """PASA EL VIDEO A OTRO ESTILO: {estilo, partes: [...]} (19-10-2026).
+
+    Un video cuyo estilo se borro (o llego de otra maquina) se quedaba
+    huerfano: «Su estilo» no ofrecia nada y «Traer» daba 404. Esto escribe
+    `config.estilo_light` (config: no mueve ninguna firma) y trae las partes
+    elegidas por el mismo camino que «Traer»; sin partes, solo cambia el
+    estilo apuntado y nada queda obsoleto. El video se queda en su proyecto
+    (cliente) si tenia uno. 409 con algo en marcha o con el estilo en la
+    papelera; 400 si no existe o una parte no se puede aplicar."""
+    ctx = contexto(pid)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    datos = _cuerpo(cuerpo)
+    nuevo = str(datos.get("estilo") or "").strip()
+    if not nuevo:
+        raise ErrorApi(400, "hace falta 'estilo': el id del estilo nuevo")
+    pedidas = _partes_pedidas(datos, vacias=True)
+    ficha = _preset_o_400(lambda p: p.leer(nuevo))
+    if ficha.get("tipo") != "canal":
+        raise ErrorApi(400, "eso no es un estilo de vídeo")
+    actual = ctx.proyecto.config.get(CONFIG_ESTILO_LIGHT) or ""
+    if ficha.get("apartado") and nuevo != actual:
+        raise ErrorApi(409, "ese estilo está en la papelera: restáuralo antes")
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo generándose en este vídeo: espera a que "
+                                "termine para cambiarle el estilo")
+        _calcular_partes(ctx, ficha, pedidas)
+        cliente, fijar = _cliente_al_cambiar_de_estilo(ctx, nuevo)
+        ctx.proyecto.config[CONFIG_ESTILO_LIGHT] = nuevo
+        ctx.proyecto.guardar_config()
+        if fijar:
+            CLIENTES.asignar_video(raiz_proyectos(), ctx.id, cliente["antes"])
+        cambiados = _traer_partes(ctx, ficha, pedidas)
+    ctx.bitacora.anotar("estilo_cambiado", None, {
+        "antes": actual, "ahora": nuevo, "partes": pedidas, "cliente": cliente,
+        "cambiados": {k: sorted(v) for k, v in cambiados.items()}})
+    return {"estilo": {"id": nuevo, "nombre": ficha.get("nombre") or nuevo},
+            "antes": actual, "cliente": cliente, **_respuesta_de_traer(ctx, cambiados)}
 
 
 @app.post("/api/proyectos/{pid}/imagenes/calidad", status_code=202)

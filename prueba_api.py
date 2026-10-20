@@ -4968,6 +4968,98 @@ def probar_traer_estilo(cliente):
     igual(otra.get("traidas"), [], "traer otra vez lo mismo no cambia nada")
 
 
+def probar_cambiar_de_estilo(cliente):
+    """Arreglos del 19-10 (4): un vídeo cuyo estilo se borró se quedaba
+    huérfano --«Su estilo» no ofrecía nada y «Traer» daba 404--. Ahora
+    `GET /estilo/cambios?estilo=<otro>` enseña lo que cambiaría con su coste y
+    `PUT /estilo {estilo, partes}` lo pasa al otro estilo trayendo SOLO las
+    partes elegidas."""
+    seccion("ARREGLOS 19-10: UN VÍDEO HUÉRFANO SE PASA A OTRO ESTILO")
+    def estilo(nombre, tono):
+        _r, datos = cliente.post("/api/presets-canal", {
+            "tipo": "canal", "nombre": nombre,
+            "datos": {"guion": {"idioma_salida": "es", "instrucciones": tono},
+                      "voz": {"voz_id": "v-de-prueba", "idioma": "es",
+                              "velocidad": "normal"},
+                      "origen": {"tono_prompt": "serio", "estilo_prompt": "plano"}}})
+        return (datos.get("preset") or {}).get("id") or ""
+    viejo = estilo("Estilo que se borra", "Habla claro.")
+    otro = estilo("Estilo de acogida", "Cuéntalo como una historia.")
+    _r, creado = cliente.post(f"/api/presets-light/{viejo}/video", {
+        "nombre": "Vídeo huérfano", "duracion_objetivo_s": 60,
+        "material": "Un hecho.\n\nY otro."})
+    vid = (creado.get("proyecto") or {}).get("id") or ""
+    base = f"/api/proyectos/{vid}/estilo"
+    _r, brief_antes = cliente.get(f"/api/proyectos/{vid}/pasos/brief")
+    _r, voz_antes = cliente.get(f"/api/proyectos/{vid}/pasos/voz")
+
+    # el estilo viejo es de un proyecto (cliente); el nuevo, de ninguno
+    _r, nuevo_cliente = cliente.post("/api/clientes", {"nombre": "Cliente del huérfano"})
+    cid = (nuevo_cliente.get("cliente") or {}).get("id") or ""
+    cliente.put(f"/api/clientes/estilos/{viejo}", {"cliente": cid})
+
+    # a la papelera: se sigue pudiendo comparar, y lo dice
+    cliente.delete(f"/api/presets-canal/{viejo}")
+    _r, cambios = cliente.get(f"{base}/cambios")
+    ok((cambios.get("estilo") or {}).get("en_papelera") is True,
+       f"con el estilo en la papelera, «Su estilo» lo sabe (para «Restaurarlo»): {cambios.get('estilo')}")
+    # y purgado: huérfano de verdad
+    respuesta, _d = cliente.delete(f"/api/presets-canal/papelera/{viejo}?confirmar=1")
+    igual(respuesta.status_code, 200, "el estilo se borra del todo")
+    _r, cambios = cliente.get(f"{base}/cambios")
+    ok(bool(cambios.get("por_que_no")), f"el vídeo queda huérfano: {cambios.get('por_que_no')}")
+    igual(cambios.get("actual"), viejo, "y sigue diciendo cuál era su estilo")
+
+    # la vista previa con otro estilo: con su coste y sin escribir nada
+    respuesta, previa = cliente.get(f"{base}/cambios?estilo={otro}")
+    igual(respuesta.status_code, 200, f"la vista previa con otro estilo responde 200: {previa}")
+    tono = [p for p in previa.get("partes") or [] if p["id"] == "tono"]
+    ok(tono and tono[0]["cambia"] and "rehace" in tono[0],
+       f"dice que el tono cambiaría y qué rehace: {tono}")
+    _r, brief = cliente.get(f"/api/proyectos/{vid}/pasos/brief")
+    igual(brief.get("firma"), brief_antes.get("firma"), "MIRAR NO ESCRIBE NADA")
+    respuesta, _d = cliente.get(f"{base}/cambios?estilo=no-existe")
+    ok(respuesta.status_code == 200 and _d.get("por_que_no"),
+       "un estilo que no existe se dice, sin 500")
+
+    # cambiar: validaciones
+    respuesta, _d = cliente.put(base, {"partes": ["tono"]})
+    igual(respuesta.status_code, 400, "sin 'estilo', 400")
+    respuesta, _d = cliente.put(base, {"estilo": otro, "partes": ["inventada"]})
+    igual(respuesta.status_code, 400, "una parte que no existe, 400")
+    respuesta, _d = cliente.put(base, {"estilo": "no-existe", "partes": []})
+    igual(respuesta.status_code, 400, "un estilo que no existe, 400")
+
+    # el cambio: solo el tono
+    respuesta, cambio = cliente.put(base, {"estilo": otro, "partes": ["tono"]})
+    igual(respuesta.status_code, 200, f"PUT estilo responde 200: {cambio}")
+    igual(cambio.get("traidas"), ["tono"], "trae solo lo elegido")
+    _r, brief = cliente.get(f"/api/proyectos/{vid}/pasos/brief")
+    igual((brief.get("params") or {}).get("instrucciones"), "Cuéntalo como una historia.",
+          "el tono del estilo nuevo llega al vídeo")
+    igual((brief.get("params") or {}).get("duracion_objetivo_s"), 60,
+          "sin pisar la duración del encargo")
+    _r, voz = cliente.get(f"/api/proyectos/{vid}/pasos/voz")
+    igual(voz.get("params"), voz_antes.get("params"), "y la voz, que no se pidió, no se toca")
+    _r, cambios = cliente.get(f"{base}/cambios")
+    igual((cambios.get("estilo") or {}).get("id"), otro, "«Su estilo» es ya el nuevo")
+    ok(not cambios.get("por_que_no"), "y deja de estar huérfano")
+    _r, galeria = cliente.get("/api/proyectos")
+    fila = [p for p in galeria.get("proyectos") or [] if p.get("id") == vid]
+    ok(fila and fila[0].get("estilo_light") == otro,
+       f"la lista de vídeos lo apunta en el estilo nuevo: {fila[:1]}")
+    _r, clientes = cliente.get("/api/clientes")
+    igual((clientes.get("videos") or {}).get(vid), cid,
+          "SE QUEDA EN SU PROYECTO (el del estilo viejo): se le fija, el nuevo es de otro")
+    igual((cambio.get("cliente") or {}).get("ahora"), cid, "y la respuesta lo dice")
+
+    # con el estilo nuevo en la papelera no se adopta
+    tercero = estilo("Estilo apartado", "Otro tono.")
+    cliente.delete(f"/api/presets-canal/{tercero}")
+    respuesta, _d = cliente.put(base, {"estilo": tercero, "partes": []})
+    igual(respuesta.status_code, 409, "un estilo en la papelera no se adopta: 409 (restáuralo antes)")
+
+
 def probar_continuaciones_en_otra_calidad():
     """Rehacer en otra calidad lleva tambien la segunda mitad de cada plano
     largo (`sigue_a`): sin ella, a mitad de toma se veia la imagen vieja
@@ -6855,6 +6947,7 @@ def main():
         probar_modo_light(cliente)
         probar_video_light(cliente)
         probar_traer_estilo(cliente)
+        probar_cambiar_de_estilo(cliente)
         probar_montaje(cliente)
         probar_estimacion(cliente)
         probar_el_coste_de_las_imagenes(cliente)

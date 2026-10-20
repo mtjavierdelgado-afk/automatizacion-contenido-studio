@@ -5320,10 +5320,18 @@ function navLight() {
         /* EL ESTILO DE ESTE VÍDEO YA NO ESTÁ (borrado, o de un proyecto con
            clave sin abrir): se dice y te quedas en el vídeo. Antes te sacaba a
            la galería sin una palabra (N3 de las notas de mejoras, 13-10-2026). */
+        /* Y SE OFRECE CAMBIARLO (arreglos del 19-10): te lleva a «Su estilo»,
+           en el Encargo, con «Cambiar de estilo…» abierto (y «Restaurarlo» si
+           está en la papelera). */
         if (dentro) {
           toast(v.estilo
-            ? 'el estilo de este vídeo ya no está (borrado, o de un proyecto con clave sin abrir): el vídeo sigue igual'
-            : 'este vídeo no tiene un estilo apuntado', true);
+            ? 'el estilo de este vídeo ya no está (borrado, o de un proyecto con clave sin abrir): el vídeo sigue igual. Puedes pasarlo a otro estilo'
+            : 'este vídeo no tiene un estilo apuntado: puedes darle uno', true);
+          v.cambioEstilo = { pid: v.pid, abierto: true, partes: {} };
+          v.vista = 'encargo_video';
+          pintarLight();
+          const bloque = document.querySelector('.cambio-de-estilo');
+          if (bloque) bloque.scrollIntoView({ block: 'center' });
           return;
         }
         recordarVideoLight('');
@@ -18067,7 +18075,13 @@ function vistaPreviaLogo(url, logo) {
 function bloqueEstiloDelVideo() {
   const v = APP.light.video;
   const caja = h('div', { clase: 'estilo-del-video' });
+  /* «CAMBIAR DE ESTILO…» VA SIEMPRE DEBAJO (arreglos del 19-10): un vídeo
+     cuyo estilo se borró se quedaba aquí con una frase y ningún botón. */
   const pintar = () => {
+    pintarLoDelEstilo();
+    if (v.cambiosEstilo) caja.appendChild(cambioDeEstiloLight(pintar));
+  };
+  const pintarLoDelEstilo = () => {
     vaciar(caja);
     const datos = v.cambiosEstilo;
     if (!datos) { caja.appendChild(h('div', { clase: 'cargando' }, 'comparando con el estilo…')); return; }
@@ -18144,6 +18158,7 @@ function bloqueEstiloDelVideo() {
      margen de unos segundos para no preguntar en cada repintado. */
   if (v.cambiosEstiloDe !== v.pid) {
     v.cambiosEstiloDe = v.pid; v.cambiosEstilo = null; v.partesEstilo = {};
+    if ((v.cambioEstilo || {}).pid !== v.pid) v.cambioEstilo = null;
   }
   if (!v.cambiosEstiloCargando
     && (!v.cambiosEstilo || Date.now() - (v.cambiosEstiloEn || 0) > 4000)) cargar();
@@ -18236,6 +18251,135 @@ function listaConY(lista) {
 function usdCorto(usd) {
   const n = Number(usd || 0);
   return `${n.toFixed(n < 0.1 ? 3 : 2)} $`;
+}
+
+/* ============================================ CAMBIAR DE ESTILO UN VÍDEO
+ *
+ * Arreglos del 19-10 (4). Un vídeo se queda con la copia de su estilo; si el
+ * estilo se borra (o el vídeo llega de otra máquina) quedaba huérfano: «Su
+ * estilo» decía «ya no existe» y no había nada que pulsar. Ahora se elige otro
+ * estilo, se ve qué partes cambiarían con su coste (`GET .../estilo/cambios
+ * ?estilo=<otro>`, no escribe nada) y se pasa a él trayendo solo lo marcado
+ * (`PUT .../estilo`). Sin marcar nada solo cambia el estilo apuntado: nada se
+ * rehace. Si el estilo está en la papelera, además, «Restaurarlo». El estado
+ * vive en `v.cambioEstilo` para que el repintado del encargo no lo pierda. */
+function cambioDeEstiloLight(repintar) {
+  const v = APP.light.video;
+  const datos = v.cambiosEstilo || {};
+  const c = v.cambioEstilo || (v.cambioEstilo = { pid: v.pid, abierto: false, partes: {} });
+  const corriendo = !!trabajoVideoLight();
+  const actual = datos.actual || (datos.estilo || {}).id || v.estilo || '';
+  const caja = h('div', { clase: 'cambio-de-estilo' });
+  if ((datos.estilo || {}).en_papelera) {
+    caja.appendChild(h('div', { clase: 'caja-aviso fila' },
+      h('span', { clase: 'crece' }, `«${datos.estilo.nombre || actual}» está en la papelera. `
+        + 'El vídeo sigue igual; restáuralo para seguir usándolo, o pásalo a otro estilo.'),
+      h('button', { clase: 'mini', onclick: () => restaurarEstiloDelVideo(actual) }, 'Restaurarlo')));
+  }
+  if (!c.abierto) {
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', disabled: corriendo,
+        onclick: () => { c.abierto = true; repintar(); } }, 'Cambiar de estilo…')));
+    return caja;
+  }
+  const otros = presetsLight().filter(p => p.id !== actual);
+  const elegir = h('select', {
+    onchange: ev => {
+      ev.stopPropagation();              // no es un campo del encargo
+      verCambioDeEstilo(ev.target.value, repintar);
+    },
+  }, h('option', { value: '' }, otros.length ? 'Elige el estilo nuevo…' : 'no hay otros estilos'),
+  ...otros.map(p => h('option', { value: p.id, selected: p.id === c.destino }, p.nombre || p.id)));
+  caja.appendChild(h('div', { clase: 'fila' }, h('b', {}, 'Pasar este vídeo a otro estilo'), elegir));
+  const previa = c.previa;
+  if (c.cargando) caja.appendChild(h('div', { clase: 'cargando' }, 'comparando con ese estilo…'));
+  else if (previa && previa.por_que_no) caja.appendChild(h('div', { clase: 'caja-aviso' }, previa.por_que_no));
+  else if (previa) {
+    const cambian = (previa.partes || []).filter(p => p.cambia);
+    caja.appendChild(h('div', { clase: 'meta' }, cambian.length
+      ? 'Marca lo que quieras traer de ese estilo. Sin marcar nada, el vídeo solo cambia de '
+        + 'estilo apuntado y no se rehace nada.'
+      : 'Ese estilo no cambiaría nada de este vídeo: solo cambia el estilo apuntado.'));
+    for (const parte of cambian) {
+      const coste = parte.usd === null ? 'cuesta según tu plan de voz'
+        : parte.usd_hasta !== undefined
+          ? `≈ ${usdCorto(parte.usd)} de voz y hasta ${usdCorto(parte.usd_hasta)} si cambian todas las imágenes`
+          : (parte.usd ? `≈ ${usdCorto(parte.usd)}` : 'gratis');
+      caja.appendChild(h('label', { clase: 'parte-estilo' },
+        h('input', { type: 'checkbox', checked: !!c.partes[parte.id],
+          onchange: ev => { ev.stopPropagation(); c.partes[parte.id] = ev.target.checked; repintar(); } }),
+        h('span', { clase: 'crece' }, h('b', {}, parte.nombre), h('span', { clase: 'meta' }, ` · ${parte.rehace}`)),
+        h('span', { clase: 'pastilla' + (parte.usd !== 0 ? ' coste' : '') }, coste)));
+    }
+    const cli = previa.cliente || {};
+    const nombreDe = cid => (fichaCliente(cid) || {}).nombre || cid;
+    if (cli.antes && cli.antes === cli.ahora) {
+      caja.appendChild(h('div', { clase: 'meta' }, `Se queda en el proyecto «${nombreDe(cli.antes)}».`));
+    } else if (cli.ahora !== cli.antes) {
+      caja.appendChild(h('div', { clase: 'caja-aviso' }, cli.ahora
+        ? `Pasa al proyecto «${nombreDe(cli.ahora)}», el de ese estilo.`
+        : 'Sale de su proyecto: ese estilo no es de ninguno.'));
+    }
+  }
+  const elegidas = ((previa && previa.partes) || []).filter(p => p.cambia && c.partes[p.id]);
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini primario',
+      disabled: corriendo || !c.destino || !previa || !!previa.por_que_no || c.cargando,
+      onclick: () => pasarAEstiloLight(elegidas) },
+    elegidas.length ? `Pasar a este estilo y traer ${elegidas.length === 1 ? 'esto' : 'lo marcado'}`
+      : 'Pasar a este estilo'),
+    h('button', { clase: 'mini', onclick: () => { v.cambioEstilo = null; repintar(); } }, 'Cancelar')));
+  return caja;
+}
+
+async function verCambioDeEstilo(id, repintar) {
+  const v = APP.light.video;
+  const pid = v.pid;
+  const c = v.cambioEstilo;
+  if (!c) return;
+  Object.assign(c, { destino: id, previa: null, partes: {}, cargando: !!id });
+  repintar();
+  if (!id) return;
+  try {
+    const previa = await pedir(`${API.proyecto(pid)}/estilo/cambios?estilo=${encodeURIComponent(id)}`);
+    if (v.pid !== pid || v.cambioEstilo !== c || c.destino !== id) return;
+    c.previa = previa;
+  } catch (e) {
+    if (v.cambioEstilo === c) c.previa = { por_que_no: e.message };
+  }
+  c.cargando = false;
+  if (v.cambioEstilo === c) repintar();
+}
+
+async function pasarAEstiloLight(partes) {
+  const v = APP.light.video;
+  const c = v.cambioEstilo || {};
+  const ficha = fichaLight(c.destino) || {};
+  const lista = partes.map(p => `• ${p.nombre}: ${p.rehace}`).join('\n');
+  if (!confirm(`Pasar «${v.nombre}» al estilo «${ficha.nombre || c.destino}».\n\n`
+    + (partes.length ? `Se trae:\n${lista}\n\nAhora no se genera nada.`
+      : 'No se trae nada: solo cambia el estilo apuntado y no se rehace nada.'))) return;
+  try {
+    const r = await pedir(`${API.proyecto(v.pid)}/estilo`, {
+      method: 'PUT', cuerpo: { estilo: c.destino, partes: partes.map(p => p.id) },
+    });
+    v.cambioEstilo = null;
+    v.cambiosEstilo = null;
+    toast(`Ahora es del estilo «${(r.estilo || {}).nombre || c.destino}».`
+      + ((r.traidas || []).length ? ' Debajo tienes el siguiente paso.' : ''));
+    await cargarClientes();
+    await cargarVideoLight(v.pid);
+  } catch (e) { toast(`no se ha podido cambiar de estilo: ${e.message}`, true); }
+}
+
+async function restaurarEstiloDelVideo(id) {
+  const v = APP.light.video;
+  try {
+    await pedir(`${BASE}/api/presets-canal/papelera/${encodeURIComponent(id)}/restaurar`, { method: 'POST' });
+    toast('Estilo restaurado: vuelve a estar en tus estilos.');
+    v.cambiosEstilo = null;
+    await cargarGaleriaLight(true);
+  } catch (e) { toast(`no se ha podido restaurar: ${e.message}`, true); }
 }
 
 async function traerEstiloLight(partes, total) {

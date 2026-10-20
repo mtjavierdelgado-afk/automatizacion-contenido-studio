@@ -165,10 +165,11 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/api/moodboard/{clave}/{origen}/{archivo}` | Sirve una lamina del banco de moodboards, que vive fuera de los proyectos. |
-| `GET` | `/api/proyectos/{pid}/estilo/cambios` | Que tiene el estilo del video que el video no tiene, por partes, y lo que |
+| `GET` | `/api/proyectos/{pid}/estilo/cambios` | Que tiene el estilo del video que el video no tiene, por partes, y lo que costaria traerlo. Con `?estilo=<otro>`, lo mismo frente a OTRO estilo (vista previa de «Cambiar de estilo…», con `cliente: {antes, ahora}`). Dice `actual` y `estilo.en_papelera`. No escribe nada. |
 | `POST` | `/api/proyectos/{pid}/estilo/guia` | Escribe la guia de estilo mirando los fotogramas elegidos. |
 | `PUT` | `/api/proyectos/{pid}/estilo/seleccion` | Guarda las imagenes de estilo elegidas en los params de assets. |
-| `POST` | `/api/proyectos/{pid}/estilo/traer` | Trae al video las partes elegidas del estilo: {partes: [estilo, tono, |
+| `POST` | `/api/proyectos/{pid}/estilo/traer` | Trae al video las partes elegidas del estilo: {partes: [estilo, tono, voz, rotulos]}. No genera nada. |
+| `PUT` | `/api/proyectos/{pid}/estilo` | Pasa el video a OTRO estilo: `{estilo, partes: [..]}`. Escribe `config.estilo_light` (no mueve firmas) y trae solo las partes elegidas (sin partes, nada queda obsoleto). El video se queda en su proyecto (cliente) si tenia uno. 400 estilo o parte que no existe, 409 algo en marcha o estilo en la papelera. |
 | `GET` | `/api/proyectos/{pid}/moodboard` | Las referencias de estilo dibujadas a proposito para este estilo. |
 | `POST` | `/api/proyectos/{pid}/moodboard` | Dibuja las laminas de estilo. Quedan PROPUESTAS hasta que alguien las mira. |
 | `POST` | `/api/proyectos/{pid}/moodboard/aprobar` | Mete el moodboard en el banco del canal. Es la decision de una persona. |

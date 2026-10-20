@@ -5445,6 +5445,76 @@ def parar_un_montaje(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def video_huerfano_cambia_de_estilo(navegador, datos):
+    """Notas del dueño del 19-10: un vídeo cuyo estilo se borró se quedaba
+    sin forma de adoptar otro. «Su estilo» ofrece ahora «Restaurarlo» (si está
+    en la papelera) y «Cambiar de estilo…», con la vista previa y su coste; y
+    la parada «Estilo» lleva ahí."""
+    api = datos["api"]
+    _r, d = api.post("/api/presets-canal", {
+        "tipo": "canal", "nombre": "Estilo que se va",
+        "datos": {"guion": {"idioma_salida": "es", "instrucciones": "Seco y directo."},
+                  "voz": {"voz_id": "v-de-prueba", "idioma": "es", "velocidad": "normal"},
+                  "origen": {"tono_prompt": "serio", "estilo_prompt": "plano"}}})
+    viejo = (d.get("preset") or {}).get("id") or ""
+    _r, creado = api.post(f"/api/presets-light/{viejo}/video", {
+        "nombre": "Vídeo que se queda huérfano", "duracion_objetivo_s": 60,
+        "material": "Un hecho.\n\nY otro."})
+    vid = (creado.get("proyecto") or {}).get("id") or ""
+    ok(bool(viejo and vid), "HUÉRFANO: un estilo y un vídeo hecho con él")
+    api._r("DELETE", f"/api/presets-canal/{viejo}")          # a la papelera
+    pg = Pagina(navegador, datos)
+    pg.js("await cargarGaleriaLight(true);")
+    pg.js(f"await abrirVideoLight('{vid}');")
+    pg.p.wait_for_timeout(1500)
+    # la parada «Estilo» ya no deja al vídeo sin salida: lleva a «Su estilo»
+    pg.p.evaluate("""() => { const b = [...document.querySelectorAll('button, a')]
+      .find(x => x.innerText.trim() === 'Estilo'); if (b) b.click(); }""")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.esperar(".cambio-de-estilo button", "Restaurarlo", 15),
+       "HUÉRFANO: con el estilo en la papelera, «Su estilo» ofrece «Restaurarlo»")
+    ok(pg.esperar(".cambio-de-estilo select", None, 5),
+       "HUÉRFANO: y la parada «Estilo» abre «Cambiar de estilo…» con la lista de estilos")
+    # «Restaurarlo» lo devuelve a tus estilos
+    pg.pulsar(".cambio-de-estilo button", "Restaurarlo")
+    pg.p.wait_for_timeout(2500)
+    ok(any("restaurado" in a for a in pg.avisos()), f"HUÉRFANO: «Restaurarlo» lo dice ({pg.avisos()[-1:]})")
+    _r, lista = api.get("/api/presets-canal")
+    ok(not any(f.get("id") == viejo for f in lista.get("papelera") or []),
+       "HUÉRFANO: y el estilo sale de la papelera")
+    ok(not pg.visible(".cambio-de-estilo button", "Restaurarlo"), "HUÉRFANO: el botón se va")
+    # y se purga: ahora sí, huérfano de verdad
+    api._r("DELETE", f"/api/presets-canal/{viejo}")
+    api._r("DELETE", f"/api/presets-canal/papelera/{viejo}?confirmar=1")
+    pg.js("await cargarGaleriaLight(true); APP.light.video.cambiosEstilo = null;"
+          " APP.light.video.cambioEstilo = {pid: APP.light.video.pid, abierto: true, partes: {}}; pintarLight();")
+    pg.p.wait_for_timeout(2000)
+    ok(pg.visible(".estilo-del-video", "ya no existe") and pg.esperar(".cambio-de-estilo select", None, 10),
+       "HUÉRFANO: con el estilo borrado del todo, «Su estilo» lo dice y deja elegir otro")
+    # se elige otro estilo: la vista previa, sin escribir nada
+    _r, brief_antes = api.get(f"/api/proyectos/{vid}/pasos/brief")
+    pg.p.evaluate(f"""() => {{ const s = document.querySelector('.cambio-de-estilo select');
+      s.value = '{datos["preset"]}'; s.dispatchEvent(new Event('change', {{bubbles: true}})); }}""")
+    ok(pg.esperar(".cambio-de-estilo .parte-estilo", None, 15),
+       "HUÉRFANO: la vista previa enseña las partes que cambiarían, con su coste")
+    _r, brief = api.get(f"/api/proyectos/{vid}/pasos/brief")
+    ok(brief.get("firma") == brief_antes.get("firma"), "HUÉRFANO: mirar no escribe nada")
+    pg.pulsar(".cambio-de-estilo button", "Pasar a este estilo")
+    pg.p.wait_for_timeout(2500)
+    _r, cambios = api.get(f"/api/proyectos/{vid}/estilo/cambios")
+    ok((cambios.get("estilo") or {}).get("id") == datos["preset"],
+       f"HUÉRFANO: el vídeo pasa al estilo elegido ({cambios.get('estilo')})")
+    ok(any("Ahora es del estilo" in a for a in pg.avisos()),
+       f"HUÉRFANO: y lo dice ({pg.avisos()[-2:]})")
+    ok(not pg.visible(".cambio-de-estilo button", "Restaurarlo"),
+       "HUÉRFANO: «Restaurarlo» ya no sale (su estilo no está en la papelera)")
+    ok(pg.visible(".cambio-de-estilo button", "Cambiar de estilo"),
+       "HUÉRFANO: «Cambiar de estilo…» sigue a mano")
+    pg.sin_errores("vídeo huérfano")
+    pg.cerrar()
+
+
 # ======================================================================
 # EL DISEÑO CREARIA (rama `diseno-crearia`, 19-10-2026). Tramo propio y al
 # final: el logo y el nombre, el pie, las cuatro paletas (y que se recuerdan),

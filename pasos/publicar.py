@@ -849,13 +849,15 @@ def instruccion_textos(info, redes, ajustes, seo=""):
         capitulos_json=(',\n  "capitulos": ["título del tramo 1", "..."]' if con_caps else ""))
 
 
-def _limpiar_hashtags(lista):
+def _limpiar_hashtags(lista, tope=SEO.TOPE_HASHTAGS_GUARDADOS):
+    """Sin «#», sin repetir. NO se corta al tope de una red (antes, a 15 y sin
+    decirlo, notas del 19-10): eso lo hace `_texto_para` al componer, y lo dice."""
     salida = []
     for h in (lista if isinstance(lista, list) else re.split(r"[\s,]+", str(lista or ""))):
         h = re.sub(r"[^\w]", "", str(h or "").lstrip("#"), flags=re.U)[:40]
         if h and h.lower() not in {x.lower() for x in salida}:
             salida.append(h)
-    return salida[:15]
+    return salida[:tope]
 
 
 #: Como puede llamar Claude a cada red y a cada campo. EL 17-10, EN EL
@@ -912,7 +914,7 @@ def normalizar_textos(datos, redes, caps_base=None):
             if red in CON_TITULO else "",
             "descripcion": str(_campo(bruto, "descripcion") or "").strip()[:LIMITES[red]],
             "cta": " ".join(str(_campo(bruto, "cta") or "").split())[:300],
-            "hashtags": _limpiar_hashtags(_campo(bruto, "hashtags")),
+            "hashtags": _limpiar_hashtags(_campo(bruto, "hashtags"), SEO.tope_hashtags(red)),
             "primer_comentario": " ".join(str(_campo(bruto, "primer_comentario") or "").split())[:500],
             "alt": " ".join(str(_campo(bruto, "alt") or "").split())[:1000] if red in RD.ALT else "",
         }
@@ -1143,10 +1145,12 @@ def _lanzar_seo(tipo, clave, fn, en_hilo):
 
 
 def _optimizar_simulado(datos_video, redes):
-    salida = {}
+    salida = {"palabra_clave": "consolas para fiestas en casa"}
     for red in redes:
         t = (datos_video.get("textos") or {}).get(red) or {}
-        salida[red] = {"nota": 80, "fallos": ["la primera línea no dice la palabra clave"],
+        # el primero repite la nota del Studio (y no se enseña); el segundo, no
+        salida[red] = {"fallos": ["la primera línea no dice la palabra clave",
+                                  "el texto no dice para qué tipo de fiesta es"],
                        "campos": {"descripcion": {
                            "despues": "[SEO] " + str(t.get("descripcion") or ""),
                            "porque": "la palabra clave va en la primera línea"},
@@ -1182,10 +1186,14 @@ def _optimizar(raiz, info, redes, ajustes, proyecto, cwd, aplicar=False):
     respuesta, _sobre = _hablar_con_claude(
         instruccion, SEO.SISTEMA_OPTIMIZAR, proyecto, cwd, "optimizar el SEO de los textos",
         lambda: _optimizar_simulado(datos, list(textos)))
-    propuesta = SEO.normalizar_optimizacion(comun.extraer_json(respuesta, "la revisión SEO"),
-                                            list(textos))
+    bruto = comun.extraer_json(respuesta, "la revisión SEO")
+    propuesta = SEO.normalizar_optimizacion(bruto, list(textos))
     if not propuesta:
         raise RuntimeError("Claude no ha devuelto ninguna revisión que se pueda usar")
+    # lo que Claude repite de la nota del Studio no sale dos veces (notas del 19-10)
+    for red, p in propuesta.items():
+        p["fallos"] = SEO.fallos_nuevos(p.get("fallos"), notas.get(red))
+    palabra_propuesta = SEO.palabra_de_optimizacion(bruto)
     with _lock(pid):
         ficha = _leer_video(raiz, pid)
         # «ANTES» ES LO QUE SE LE MANDÓ A CLAUDE, no lo que hay ahora: si alguien
@@ -1198,6 +1206,10 @@ def _optimizar(raiz, info, redes, ajustes, proyecto, cwd, aplicar=False):
             tocados[red] = [k for k in p["campos"]
                             if (actual.get(k) or None) != (p["antes"][k] or None)]
         ficha["seo_propuesta"] = {"al": _iso_lima(), "redes": propuesta}
+        if palabra_propuesta:
+            # la misma que deja «Que Claude escriba»: la pantalla la ofrece con
+            # «Usar "…"» en el punto de la palabra clave
+            ficha["palabra_propuesta"] = palabra_propuesta
         if aplicar:
             _aceptar_seo(ficha, {r: [k for k in p["campos"] if k not in tocados[r]]
                                  for r, p in propuesta.items()})
@@ -1402,7 +1414,9 @@ def aprendido_de_resultados(raiz, videos, cid):
     return salida
 
 
-def _texto_para(textos_red, ajustes, extra=""):
+def _texto_para(textos_red, ajustes, extra="", red=None):
+    """(texto, tags, sobran): los hashtags de la red y los fijos del proyecto,
+    hasta el tope de ESA red; `sobran` son los que no caben (y no se mandan)."""
     partes = [str(textos_red.get("descripcion") or "").strip()]
     if extra:
         partes.append(extra)
@@ -1410,11 +1424,13 @@ def _texto_para(textos_red, ajustes, extra=""):
         partes.append(str(textos_red["cta"]).strip())
     if ajustes.get("firma"):
         partes.append(str(ajustes["firma"]).strip())
-    tags = _limpiar_hashtags(list(textos_red.get("hashtags") or [])
-                             + _limpiar_hashtags(ajustes.get("hashtags") or ""))
+    todos = _limpiar_hashtags(list(textos_red.get("hashtags") or [])
+                              + _limpiar_hashtags(ajustes.get("hashtags") or ""))
+    tope = SEO.tope_hashtags(red)
+    tags, sobran = todos[:tope], todos[tope:]
     if tags:
         partes.append(" ".join(f"#{t}" for t in tags))
-    return "\n\n".join(p for p in partes if p), tags
+    return "\n\n".join(p for p in partes if p), tags, sobran
 
 
 def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
@@ -1427,14 +1443,17 @@ def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
     if red == "youtube" and capitulos and \
             encaje(red, info.get("formato"), info.get("duracion_s")).get("tipo") == "vídeo":
         extra = "\n".join(f"{_marca_de_tiempo(c['t'])} {c['titulo']}" for c in capitulos)
-    texto, tags = _texto_para(textos_red, ajustes, extra)
+    texto, tags, sobran = _texto_para(textos_red, ajustes, extra, red)
     limite = LIMITES[red]
     avisos = []
+    if sobran:
+        avisos.append(f"{len(sobran)} hashtag{'s' if len(sobran) > 1 else ''} no cabe"
+                      f"{'n' if len(sobran) > 1 else ''} en {NOMBRE_RED[red]} (admite "
+                      f"{SEO.tope_hashtags(red)}, contando los fijos del proyecto) y no se "
+                      f"manda{'n' if len(sobran) > 1 else ''}: " + " ".join(f"#{t}" for t in sobran))
     if len(texto) > limite:
         avisos.append(f"el texto pasa de {limite} caracteres: se corta al enviarlo")
         texto = texto[:limite]
-    if red == "instagram" and len(tags) > 30:
-        avisos.append("Instagram acepta como mucho 30 hashtags")
     campos = {}
     ia = bool(ajustes.get("marcar_ia"))
     tipo = encaje(red, info.get("formato"), info.get("duracion_s")).get("tipo")
@@ -1794,6 +1813,17 @@ def ficha(raiz, info, ajustes):
                  for r in REDES}
     for r in compuestos:
         compuestos[r].pop("campos", None)
+    # «CON ESTOS CAMBIOS: 57 → 72» (notas del 19-10): la misma nota del Studio,
+    # sobre los textos con lo que Claude propone y nadie ha aceptado todavía
+    con_propuesta = {}
+    for r, p in (((datos.get("seo_propuesta") or {}).get("redes")) or {}).items():
+        if r not in REDES or not (p or {}).get("campos"):
+            continue
+        nuevos = dict(datos["textos"].get(r) or {},
+                      **{c: v.get("despues") for c, v in p["campos"].items()})
+        con_propuesta[r] = SEO.nota(r, nuevos, componer(r, nuevos, ajustes, info, datos.get("capitulos"),
+                                                         datos),
+                                    ajustes, datos, info, palabra)["nota"]
     envios = [_envio_publico(e) for e in datos["envios"]]
     viejos = [e for e in datos["envios"] if e.get("estado") == "programado"
               and e.get("mp4_huella") and info.get("mp4_huella")
@@ -1825,6 +1855,7 @@ def ficha(raiz, info, ajustes):
             "colaboradores": str(datos.get("colaboradores") or ""),
             "etiquetas": str(datos.get("etiquetas") or ""),
             "notas": notas_seo, "propuesta": datos.get("seo_propuesta") or {},
+            "notas_con_propuesta": con_propuesta,
             "ganchos": datos.get("ganchos") or {},
             "trabajando": {t: dict(v) for (t, c), v in list(_SEO_TRABAJANDO.items()) if c == pid},
             "errores": {t: _error_seo(t, c) for (t, c) in list(_SEO_ERRORES) if c == pid
@@ -2397,6 +2428,28 @@ def _refrescar(raiz, limite):
 
 # ------------------------------------------------------------------ cola
 
+def _fallos_superados(envios):
+    """{id: "salio" | "reenviado"} de los fallos (o «comprobar») de una red tras
+    los que hubo otro envío de ESA red (notas del 19-10: un fallo reenviado que
+    salió seguía en «Te necesitan» y en el contador de la barra). `envios` va en
+    el orden en que se crearon, como en la ficha guardada.
+
+    Un FALLO lo supera cualquier envío posterior vivo (ya se volvió a mandar).
+    Un «COMPROBAR» solo uno que SALIÓ: puede que ya esté publicado, y con otro
+    solo programado detrás es justo cuando hay que mirarlo, o saldría dos veces
+    (revisión independiente, 19-10)."""
+    superados = {}
+    for i, e in enumerate(envios):
+        if e.get("estado") not in ("fallido", "comprobar"):
+            continue
+        despues = [d.get("estado") for d in envios[i + 1:] if d.get("red") == e.get("red")]
+        if any(d in ("publicado", "a_mano") for d in despues):
+            superados[e.get("id")] = "salio"
+        elif e.get("estado") == "fallido" and any(d in VIVOS for d in despues):
+            superados[e.get("id")] = "reenviado"
+    return superados
+
+
 def cola(raiz, videos, desde=None, dias=7):
     """Los vídeos listos para publicar y los envíos de la semana.
 
@@ -2439,13 +2492,18 @@ def cola(raiz, videos, desde=None, dias=7):
                                textos=bool(datos and any(
                                    (datos.get("textos") or {}).get(r, {}).get("descripcion")
                                    for r in REDES))))
+        superados = _fallos_superados(propios)
         for e in propios:
             momento = _leer_momento(e.get("cuando"))
             if momento is None:
                 continue
-            # lo que te necesita sale aunque sea de otra semana
-            if inicio <= momento < fin or e.get("estado") in ("espera_ok", "fallido", "comprobar"):
-                envios.append(dict(_envio_publico(e), pid=v["pid"],
+            superado = e.get("id") in superados
+            # lo que te necesita sale aunque sea de otra semana (un fallo que
+            # ya se volvió a mandar y salió, no: ya no te necesita)
+            if inicio <= momento < fin or (e.get("estado") in ("espera_ok", "fallido", "comprobar")
+                                           and not superado):
+                envios.append(dict(_envio_publico(e), pid=v["pid"], superado=superado,
+                                   superado_como=superados.get(e.get("id"), ""),
                                    video=visibles[v["pid"]].get("nombre") or v["pid"],
                                    cliente=v.get("cliente") or "",
                                    cliente_nombre=v.get("cliente_nombre") or ""))
@@ -2457,7 +2515,8 @@ def cola(raiz, videos, desde=None, dias=7):
             "desde": inicio.strftime("%Y-%m-%d"), "hoy": hoy_txt, "ahora": _iso_lima(),
             "de_hoy": [e for e in envios if str(e.get("cuando") or "").startswith(hoy_txt)],
             "esperan_ok": [e for e in envios if e.get("estado") == "espera_ok"],
-            "fallidos": [e for e in envios if e.get("estado") in ("fallido", "comprobar")],
+            "fallidos": [e for e in envios if e.get("estado") in ("fallido", "comprobar")
+                         and not e.get("superado")],
             "clave": estado_clave()}
 
 

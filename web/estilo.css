@@ -3330,7 +3330,7 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
   border-radius: 999px; padding: 0 7px; font-weight: 700; font-size: 12px; }
 .elemento-portada { border-top: 1px dashed var(--linea); padding-top: 8px; display: flex;
   flex-direction: column; gap: 6px; }
-.elemento-portada.oculto-portada { opacity: 0.55; }
+.elemento-portada.escondido-portada { opacity: 0.55; }
 .elemento-portada input[type="text"] { width: 100%; }
 .estilos-portada, .deslizadores-portada { gap: 4px 10px; }
 .deslizador-portada { display: flex; flex-direction: column; font-size: 12px; min-width: 110px; flex: 1; }

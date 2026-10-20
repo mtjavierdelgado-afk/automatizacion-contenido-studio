@@ -3700,6 +3700,8 @@ input.conmutador:focus-visible { outline: 2px solid var(--acento); outline-offse
 #cuerpo-ayuda { overflow-y: auto; padding: 14px 16px 90px; display: flex; flex-direction: column; gap: 18px; }
 .ayuda-seccion { display: flex; flex-direction: column; gap: 10px; }
 .apartado-manual h3 { font-size: 18px; margin-bottom: 6px; }
+/* en la Ayuda el apartado se lee entero: el panel ya rueda */
+#ayuda .novedades { max-height: none; overflow: visible; }
 .ayuda-pantalla .apartado-manual {
   padding: 14px; border-radius: 12px; background: var(--hueco); border: 1px solid var(--linea-suave);
 }

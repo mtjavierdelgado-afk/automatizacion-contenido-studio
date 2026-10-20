@@ -40,6 +40,19 @@ def _ortografia(entrada):
 def responder(entrada):
     if "<textos>" in entrada and "ORTOGRAFIA" in entrada:
         return _ortografia(entrada)
+    if "Eres editor de videos para redes" in entrada:
+        # los elementos del video (pasos/elementos_video.py): uno por plano,
+        # en la primera palabra, y una flecha en el segundo
+        planos = {}
+        for n, (pid, texto) in enumerate(re.findall(r'<p id="([^"]+)"[^>]*>(.*?)</p>', entrada, re.S)):
+            primera = (texto.split(" ")[0].split(":", 1) + [""])[1] or "MIRA"
+            planos[pid] = [{"tipo": "texto", "texto": primera.upper()[:20], "palabra": 0,
+                            "posicion": "arriba", "entrada": "pop", "color": "acento"}]
+            if n == 1:
+                planos[pid].append({"tipo": "flecha", "palabra": 1, "posicion": "centro",
+                                    "entrada": "dibuja", "color": "alerta"})
+        planos["NOEXISTE"] = [{"tipo": "texto", "texto": "x", "palabra": 0}]
+        return {"planos": planos}
     if "director de arte de miniaturas" in entrada:
         # las portadas propuestas (pasos/portadas.py): tres distintas
         return {"propuestas": [

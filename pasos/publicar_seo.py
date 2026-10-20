@@ -33,9 +33,13 @@ CATEGORIAS_YOUTUBE = [
     ("29", "ONG y activismo"),
 ]
 IDIOMAS = [("es", "Español"), ("en", "Inglés"), ("pt", "Portugués")]
-IDIOMAS_AUDIO = [("es-419", "Español de Latinoamérica"), ("es-ES", "Español de España"),
-                 ("es-US", "Español de Estados Unidos"), ("es", "Español"),
-                 ("en", "Inglés"), ("pt-BR", "Portugués de Brasil")]
+#: SOLO códigos «idioma-PAÍS»: es lo único que acepta Upload-Post (20-10-2026,
+#: el Short no subía con «es-419»; ver `idioma_audio_youtube` en el cliente).
+#: El español de Latinoamérica va como «es-US»; lo guardado antes con «es-419»,
+#: «es» o «en» se sigue leyendo y se manda traducido.
+IDIOMAS_AUDIO = [("es-US", "Español de Latinoamérica (es-US)"), ("es-MX", "Español de México"),
+                 ("es-ES", "Español de España"), ("en-US", "Inglés"),
+                 ("pt-BR", "Portugués de Brasil")]
 
 #: Lo SEO que es fijo de cada proyecto (se suma a los ajustes de Publicar).
 AJUSTES_SEO = {
@@ -51,7 +55,7 @@ AJUSTES_SEO = {
     "tt_comentarios_puede": False,  # … y la capacidad «comments»
     "yt_categoria": "22",
     "yt_idioma": "es",
-    "yt_idioma_audio": "es-419",
+    "yt_idioma_audio": "es-US",
     "yt_para_ninos": False,
     "hashtags_amplios": "",
     "hashtags_nicho": "",
@@ -67,6 +71,12 @@ LARGOS = {"palabra_clave": 80, "secundarias": 500, "zona": 120, "evitar": 300,
 
 #: Cuántos hashtags pide cada red (los mismos números que las reglas del texto).
 import publicar_redes as _RD                                   # noqa: E402
+import os as _os                                               # noqa: E402
+import sys as _sys                                             # noqa: E402
+_RAIZ = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _RAIZ not in _sys.path:
+    _sys.path.insert(0, _RAIZ)
+from motores.publicar_uploadpost import cliente as _UP         # noqa: E402
 
 RANGO_HASHTAGS = {"tiktok": (3, 5), "instagram": (5, 8), "youtube": (3, 5), "facebook": (2, 4),
                   **_RD.HASHTAGS}
@@ -170,6 +180,8 @@ def validar(k, v):
         raise ErrorSeo("esa categoría de YouTube no existe")
     if k == "yt_idioma" and v not in {c for c, _n in IDIOMAS}:
         raise ErrorSeo("ese idioma no está en la lista")
+    if k == "yt_idioma_audio":
+        v = _UP.idioma_audio_youtube(v) or v          # «es-419» de antes -> «es-US»
     if k == "yt_idioma_audio" and v not in {c for c, _n in IDIOMAS_AUDIO}:
         raise ErrorSeo("ese idioma del audio no está en la lista")
     if k == "tt_ubicacion_id" and v and not re.fullmatch(r"[A-Za-z0-9_\-]{3,60}", v):
@@ -454,7 +466,9 @@ def campos_extra(red, textos_red, ajustes, datos_video, info, palabra):
     elif red == "youtube":
         campos["categoryId"] = str(ajustes.get("yt_categoria") or "22")
         campos["defaultLanguage"] = str(ajustes.get("yt_idioma") or "es")
-        campos["defaultAudioLanguage"] = str(ajustes.get("yt_idioma_audio") or "es-419")
+        # tal cual: lo traduce a la forma de Upload-Post `campos_para_enviar`,
+        # por donde pasa toda subida
+        campos["defaultAudioLanguage"] = str(ajustes.get("yt_idioma_audio") or "es-US")
         campos["selfDeclaredMadeForKids"] = bool(ajustes.get("yt_para_ninos"))
     elif red == "tiktok":
         if ajustes.get("tt_ubicacion_id"):

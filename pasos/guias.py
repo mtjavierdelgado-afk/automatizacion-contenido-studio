@@ -1048,8 +1048,8 @@ GUIAS = {
             "Cambiar la categoría en cada vídeo sin motivo: el canal se lee mejor si es "
             "constante.",
         ],
-        "plantilla": "CATEGORÍA: [la más parecida] · IDIOMA: es · AUDIO: es-419",
-        "ejemplo": "CATEGORÍA: Entretenimiento · IDIOMA: es · AUDIO: es-419",
+        "plantilla": "CATEGORÍA: [la más parecida] · IDIOMA: es · AUDIO: es-US",
+        "ejemplo": "CATEGORÍA: Entretenimiento · IDIOMA: es · AUDIO: es-US",
         "prompt_ia": (
             "¿Qué categoría de YouTube encaja mejor con un canal que publica estos "
             "vídeos? Dame una y por qué.\n\nMIS VÍDEOS:\n[de qué van]"

@@ -17078,7 +17078,8 @@ def publicar_ficha(pid: str, peticion: Request):
 
 @app.put("/api/publicar/videos/{pid}")
 def publicar_guardar_ficha(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
-    """{redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?}"""
+    """{redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?,
+    youtube_formato?: auto|short|video}"""
     ctx = _ctx_publicable(pid, peticion)
     _por_publicar(_publicar().guardar_ficha, raiz_proyectos(), ctx.id, _cuerpo(cuerpo))
     return publicar_ficha(pid, peticion)

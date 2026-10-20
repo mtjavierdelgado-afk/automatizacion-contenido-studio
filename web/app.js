@@ -20956,7 +20956,7 @@ function filaEnvioCola(e) {
   const fallo = ['fallido', 'comprobar'].includes(e.estado);
   return h('div', { clase: 'fila fila-envio', datos: { envio: e.id || '' } },
     h('span', { clase: 'meta hora-envio' }, cuandoLegible(e.cuando)),
-    h('b', {}, CORTOS_RED[e.red] || e.red),
+    h('b', {}, nombreEnvioPublicar(e)),
     h('button', { clase: 'mini fantasma nombre-envio', title: 'Abrir la ficha de este vídeo',
       onclick: () => irASeccionPublicar('ficha', e.pid) }, e.video || e.pid),
     e.cliente_nombre ? h('span', { clase: 'meta' }, e.cliente_nombre) : null,
@@ -20967,6 +20967,12 @@ function filaEnvioCola(e) {
     fallo && !e.superado ? h('button', { clase: 'mini fantasma', title: 'Quitarlo de «Te necesitan» (no borra nada en la red)',
       onclick: () => cancelarEnvioPublicar(e) }, 'Quitar de la lista') : null,
     e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver') : null);
+}
+
+/* «YT · Short» o «YT · vídeo»: el envío recuerda cómo salió (20-10). */
+function nombreEnvioPublicar(e) {
+  const red = CORTOS_RED[e.red] || e.red;
+  return e.red === 'youtube' && e.tipo ? `${red} · ${e.tipo}` : red;
 }
 
 /* El contador de la barra, pedido aparte: desde la ficha, `PUB.cola` es la de
@@ -21477,6 +21483,41 @@ function avisarCambiosPublicar(antes, despues) {
   });
 }
 
+/* SHORT O VÍDEO NORMAL EN YOUTUBE (20-10-2026: no había diferencia). Se dice
+   siempre cómo sale y qué cambia; en un vídeo vertical (el único caso dudoso)
+   se puede elegir. Quien decide de verdad es YouTube, por las medidas. */
+const FORMATOS_YOUTUBE_PUB = [['auto', 'Automático (por las medidas)'], ['short', 'Short'], ['video', 'Vídeo normal']];
+
+function formatoYoutubePublicar(f) {
+  if (!(f.redes || []).includes('youtube')) return null;
+  const enc = (f.encaje || {}).youtube || {};
+  const corto = enc.tipo === 'Short';
+  const caja = h('div', { clase: `fila formato-youtube${corto ? ' es-short' : ''}`, datos: { tipo: corto ? 'short' : 'video' } },
+    h('span', { clase: `pastilla ${corto ? 'aviso' : ''} tipo-youtube` }, corto ? 'YouTube · Short' : 'YouTube · Vídeo normal'),
+    h('span', { clase: 'meta crece' }, corto
+      ? 'Título corto con #Shorts (lo pone el Studio), descripción de 1 a 3 líneas y sin capítulos.'
+      : 'Título de 40 a 70 caracteres, descripción para el buscador y capítulos si los hay.'));
+  if (enc.puede_elegir) {
+    caja.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Publicarlo como',
+      h('select', { 'aria-label': 'Short o vídeo normal en YouTube', datos: { formatoYoutube: f.pid },
+        onchange: ev => cambiarFormatoYoutubePublicar(ev.target.value) },
+      ...FORMATOS_YOUTUBE_PUB.map(([v, t]) => h('option', { value: v, selected: (f.youtube_formato || 'auto') === v }, t)))));
+  }
+  return caja;
+}
+
+async function cambiarFormatoYoutubePublicar(valor) {
+  try {
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
+      method: 'PUT', cuerpo: { youtube_formato: valor },
+    });
+    const tipo = ((PUB.ficha.encaje || {}).youtube || {}).tipo;
+    toast(`YouTube: sale como ${tipo === 'Short' ? 'Short' : 'vídeo normal'}. Si los textos ya estaban escritos, `
+      + 'pide otros a Claude para que encajen.');
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
 function seccionFichaPublicar() {
   const f = PUB.ficha;
   const caja = h('div', { clase: 'ficha-publicar' });
@@ -21531,6 +21572,8 @@ function seccionFichaPublicar() {
   redes.appendChild(fila);
   Object.keys(NOMBRES_RED).filter(r => (f.redes || []).includes(r) && ((f.encaje || {})[r] || {}).texto)
     .forEach(r => redes.appendChild(h('div', { clase: 'meta' }, `${NOMBRES_RED[r]}: ${f.encaje[r].texto}`)));
+  const formatoYt = formatoYoutubePublicar(f);
+  if (formatoYt) redes.appendChild(formatoYt);
   // lo que falta en los ajustes del proyecto (el tablero de Pinterest…)
   const faltaAjuste = (f.redes || []).filter(r => ((f.formato_redes || {})[r] || {}).falta);
   if (faltaAjuste.length) {
@@ -22102,7 +22145,7 @@ function bloqueEnviosFicha() {
 function filasEnvioFicha(e) {
   const filas = [];
   filas.push(h('div', { clase: 'fila fila-envio' },
-    h('b', {}, CORTOS_RED[e.red] || e.red),
+    h('b', {}, nombreEnvioPublicar(e)),
     h('span', { clase: 'meta hora-envio' }, cuandoLegible(e.cuando)),
     pastillaEstadoEnvio(e.estado),
     h('span', { clase: 'crece meta motivo-envio' }, e.error || e.nota || ''),

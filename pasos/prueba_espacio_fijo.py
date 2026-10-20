@@ -222,11 +222,91 @@ def prueba_normalizar():
           "los ids no chocan entre sí")
 
 
+def prueba_referencia_en_p6():
+    seccion("4] la imagen del espacio fijo va SOLO a los planos de su sitio principal")
+    from PIL import Image                                    # noqa: PLC0415
+    import p6_assets as P6                                   # noqa: PLC0415
+    carpeta = os.path.join(_TEMPORAL, "proyecto_p6")
+    for sub in ("escenas", "reparto", "cache", "espacio_fijo"):
+        os.makedirs(os.path.join(carpeta, sub), exist_ok=True)
+    foto = os.path.join(carpeta, "espacio_fijo", "a1b2c3d4e5f6.png")
+    Image.new("RGB", (64, 40), (200, 120, 90)).save(foto)
+
+    class _Proyecto:
+        def ruta(self, *partes):
+            return os.path.join(carpeta, *partes)
+
+    espacio = dict(ESPACIO, imagen="espacio_fijo/a1b2c3d4e5f6.png")
+    p = {"estilo": {"referencias": []}, "espacio_fijo": espacio, "unidades": {}}
+    igual(P6.ruta_imagen_del_espacio(_Proyecto(), p), foto, "la ruta relativa se resuelve en el proyecto")
+    igual(P6.ruta_imagen_del_espacio(_Proyecto(), {"espacio_fijo": dict(ESPACIO)}), None,
+          "sin imagen, ninguna ruta")
+    dirs = {"escenas": os.path.join(carpeta, "escenas"), "reparto": os.path.join(carpeta, "reparto"),
+            "cache": os.path.join(carpeta, "cache"), "espacio_fijo": foto}
+    escenas = [{"id": "S001", "set": "panaderia_rosa", "personajes": [], "narracion": "pan"},
+               {"id": "S002", "set": "fachada", "personajes": [], "narracion": "puerta"},
+               {"id": "S003", "set": None, "personajes": [], "narracion": "nada"}]
+    plan = {"escenas": escenas, "assets": {}}
+
+    def papeles(escena, params, carpetas):
+        refs = P6._referencias_escena(escena, plan, carpetas, params,   # noqa: SLF001
+                                      carpetas["cache"], {}, anteriores=[])
+        return [r["papel"] for r in refs]
+
+    igual(papeles(escenas[0], p, dirs), ["espacio"], "un plano del sitio principal la lleva")
+    igual(papeles(escenas[1], p, dirs), [], "uno de un secundario no")
+    igual(papeles(escenas[2], p, dirs), [], "ni uno sin sitio")
+    sin = dict(p)
+    sin.pop("espacio_fijo")
+    igual(papeles(escenas[0], sin, dict(dirs, espacio_fijo=None)), [],
+          "y sin espacio fijo, nada (el prompt de siempre)")
+    refs = P6._referencias_escena(escenas[0], plan, dirs, p, dirs["cache"], {},  # noqa: SLF001
+                                  anteriores=[])
+    texto = P6._prompt_completo(escenas[0], refs, p["estilo"])                  # noqa: SLF001
+    ok("Reference image 1 shows THE PLACE where this shot happens ('Panadería Rosa')" in texto,
+       "y el prompt la presenta como el sitio, por su número")
+    ok("THE PLACE" not in P6._prompt_completo(escenas[1], [], p["estilo"]),        # noqa: SLF001
+       "un plano sin ella no la nombra")
+
+
+def prueba_ajustar_catalogo():
+    seccion("5] ajustar un catálogo ya guardado (un vídeo hecho), sin llamar a nadie")
+    ids = [b["id"] for b in BLOQUES]
+    guardado = C._limpiar(copy.deepcopy(RESPUESTA), ids)                     # noqa: SLF001
+    guardado = {"reparto": guardado["reparto"], "sets": guardado["sets"],
+                "beats": guardado["beats"], "reales": [{"id": "x"}], "_firma_guion": "abc"}
+    nuevo, avisos = C.ajustar_catalogo(guardado, ESPACIO, ids)
+    igual(sorted(nuevo["sets"]), ["almacen", "fachada", "panaderia_rosa"],
+          "el principal y los secundarios usados")
+    igual([b["set"] for b in nuevo["beats"]],
+          ["panaderia_rosa", "panaderia_rosa", "almacen", "fachada", "panaderia_rosa"],
+          "los tramos de siempre, cambiados de sitio, y el hueco cubierto")
+    igual([b["accion"] for b in nuevo["beats"]][:4],
+          ["Rosa sube la persiana", "el horno abierto", "tres sacos", "la cola en la puerta"],
+          "con su acción de antes")
+    igual((nuevo["reales"], nuevo["_firma_guion"], nuevo["reparto"]),
+          (guardado["reales"], "abc", guardado["reparto"]), "lo que no es de sitios se conserva")
+    ok(avisos, "y dice lo que ha movido")
+    try:
+        C.ajustar_catalogo(guardado, {"sitio": "x"}, ids)
+        ok(False, "sin descripción tiene que dar ValueError")
+    except ValueError:
+        ok(True, "sin descripción da ValueError")
+    for mala in ("../../secretos.png", "/etc/passwd", "espacio_fijo/x.png", 3):
+        try:
+            C.normalizar_espacio_fijo(dict(ESPACIO, imagen=mala))
+            ok(False, f"imagen {mala!r} tiene que dar ValueError")
+        except ValueError:
+            ok(True, f"imagen {mala!r} da ValueError")
+
+
 def main():
     print("PRUEBA DEL ESPACIO FIJO DEL CATÁLOGO")
     prueba_sin_espacio()
     prueba_con_espacio()
     prueba_normalizar()
+    prueba_referencia_en_p6()
+    prueba_ajustar_catalogo()
     import shutil                                            # noqa: PLC0415
     shutil.rmtree(_TEMPORAL, ignore_errors=True)
     print("\n" + "=" * 70)

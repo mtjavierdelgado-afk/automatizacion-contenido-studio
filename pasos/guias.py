@@ -672,7 +672,8 @@ GUIAS = {
             "Encargo y, con él, el reparto de sitios usa UN solo sitio con esa "
             "descripción tal cual, pone ahí todos los tramos (salvo los que el guion "
             "sitúe en un secundario) y no pone cabeceras de sitio. Sin descripción "
-            "no cuenta.",
+            "no cuenta. La imagen del sitio (opcional) se sube en «El espacio fijo» "
+            "de «Un vídeo nuevo» después de «Pasar al Encargo».",
         ],
         "si": [
             "Una línea de cabecera por dato: «Uso:», «Formato:», «Duración:»…",

@@ -5503,5 +5503,95 @@ def parrilla_con_espacio_fijo(navegador, datos):
     pg.cerrar()
 
 
+def _huellas_de_planos(datos, pid):
+    """{plano: sha1 de su PNG} en la versión activa de assets."""
+    import hashlib as _hl                                    # noqa: PLC0415
+    activa = _version_de(datos, "assets", "")
+    version = activa.get("activa") or activa.get("n") or activa.get("version")
+    carpeta = os.path.join(datos["proyectos"], pid, "pasos", "assets", f"v{version}", "escenas")
+    salida = {}
+    for nombre in sorted(os.listdir(carpeta)) if os.path.isdir(carpeta) else []:
+        if nombre.endswith(".png"):
+            with open(os.path.join(carpeta, nombre), "rb") as fh:
+                salida[nombre[:-4]] = _hl.sha1(fh.read()).hexdigest()
+    return salida
+
+
+# espacio-fijo (20-10-2026, ampliación): el espacio fijo aplicado a un vídeo
+# YA HECHO, como corrección. Aplicar no dibuja ni paga; después se elige qué
+# planos rehacer y solo se rehacen esos.
+@escenario
+def espacio_fijo_en_un_video_hecho(navegador, datos):
+    """Encargo de un vídeo hecho → «El espacio fijo» con su imagen → «Aplicar»
+    no lanza nada ni deja imágenes por pagar → la lista de planos que cambian →
+    «Solo los marcados» rehace SOLO ese plano."""
+    api = datos["api"]
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="espacio fijo del vídeo")
+    pg.sin_trabajo(300)
+    antes = _huellas_de_planos(datos, pid)
+    ok(len(antes) >= 2, f"el vídeo de prueba tiene sus imágenes ({len(antes)})")
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; pintarLight();")
+    ok(pg.esperar(".bloque-light h3", "El espacio fijo", 15), "el Encargo del vídeo trae «El espacio fijo»")
+    ok(pg.esperar(".espacio-fijo-del-video button", "Aplicar el espacio fijo", 15), "con «Aplicar el espacio fijo»")
+    pg.p.locator(".espacio-fijo-del-video input").nth(0).fill("Salón de casa")
+    pg.p.locator("[data-foco=video-espacio-descripcion]").fill(
+        "a cosy living room with a green sofa, a wooden table and a big window")
+    foto = os.path.join(datos["base"], "salon.png")
+    _png(foto, (90, 140, 70))
+    pg.p.set_input_files(".espacio-fijo-del-video .oculto-espacio-fijo", foto)
+    ok(pg.esperar(".espacio-fijo-del-video .miniatura-espacio-fijo", segundos=10),
+       "la imagen elegida se ve antes de aplicar")
+    pg.pulsar(".espacio-fijo-del-video button", "Aplicar el espacio fijo")
+    ok(pg.esperar(".cambios-espacio-fijo", segundos=20), "aplicado, dice qué cambia")
+    _r, vivos = api.get(f"/api/trabajos?proyecto={pid}&activos=1")
+    lista = vivos if isinstance(vivos, list) else (vivos.get("trabajos") or [])
+    ok(not lista, f"aplicar no lanza ningún trabajo ({len(lista)})")
+    _r, plan = api.get(f"/api/proyectos/{pid}/generar?tanda=video")
+    ok((plan.get("coste") or {}).get("imagenes_por_generar") == 0,
+       f"y no deja ninguna imagen por pagar: {(plan.get('coste') or {}).get('imagenes_por_generar')}")
+    ok(_huellas_de_planos(datos, pid) == antes, "ni ha tocado ninguna imagen")
+    _r, ef = api.get(f"/api/proyectos/{pid}/espacio_fijo")
+    cambios = (ef or {}).get("cambios") or {}
+    planos = [x["id"] for x in cambios.get("planos") or []]
+    ok(len(planos) >= 2 and (ef.get("espacio_fijo") or {}).get("imagen"),
+       f"el servidor guarda el espacio con su imagen y ofrece {len(planos)} planos")
+    ok(pg.visible(".cambios-espacio-fijo button", f"Rehacer los {len(planos)}"),
+       "«Rehacer los N» con su precio")
+    pg.captura("espacio_fijo_video")
+    # deja marcado SOLO el primero
+    casillas = pg.p.locator(".lista-espacio-fijo input[type=checkbox]")
+    for i in range(1, casillas.count()):
+        casillas.nth(i).uncheck()
+    pg.p.wait_for_timeout(400)
+    ok(pg.visible(".cambios-espacio-fijo button", "Solo los marcados (1)"), "«Solo los marcados (1)»")
+    pg.pulsar(".cambios-espacio-fijo button", "Solo los marcados (1)")
+    pg.p.wait_for_timeout(1500)
+    _r, todos = api.get(f"/api/trabajos?proyecto={pid}")
+    trabajos = todos if isinstance(todos, list) else (todos.get("trabajos") or [])
+    suyo = next((t for t in trabajos if t.get("nombre") == "espacio_fijo"), {})
+    ok(suyo.get("unidades") and [u for u in suyo["unidades"] if u.split(":")[-1] == planos[0]]
+       and all(u.split(":")[-1] == planos[0] or "sigue" in u or u.split(":")[-1] not in planos
+               for u in suyo["unidades"]),
+       f"rehace SOLO el marcado (y su segunda mitad si la tiene): {suyo.get('unidades')}")
+    pg.sin_trabajo(300)
+    despues = _huellas_de_planos(datos, pid)
+    cambiados = sorted(k for k in antes if despues.get(k) != antes[k])
+    ok(planos[0] in cambiados and not [k for k in cambiados if k in planos[1:]],
+       f"solo cambia la imagen pedida: {cambiados}")
+    activa = _version_de(datos, "assets", "")
+    version = activa.get("activa") or activa.get("n") or activa.get("version")
+    ficha = os.path.join(datos["proyectos"], pid, "pasos", "assets", f"v{version}", "escenas",
+                         f"{planos[0]}.json")
+    try:
+        with open(ficha, encoding="utf-8") as fh:
+            papeles = [r.get("papel") for r in json.load(fh).get("referencias") or []]
+    except (OSError, ValueError):
+        papeles = []
+    ok("espacio" in papeles, f"y lleva adjunta la imagen del sitio: {papeles}")
+    pg.sin_errores("el espacio fijo de un vídeo hecho")
+    pg.cerrar()
+
+
 if __name__ == "__main__":
     sys.exit(main())

@@ -32,8 +32,19 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   campo `peticion` de `/catalogo/proponer` y `/escenarios`): se quedaba por el
   camino y no se le pasaba nunca. La pantalla todavía no tiene un campo para
   escribirla.
-- Por ahora se elige al crear el vídeo; en el Encargo de un vídeo ya empezado
-  todavía no se ve ni se cambia.
+- **Con una imagen del sitio (opcional)**: en «El espacio fijo» puedes subir
+  una foto o un dibujo del lugar (también al pasar un guion de la Parrilla). Se
+  adjunta a cada imagen de plano del sitio principal —no a los secundarios—
+  para que el lugar se reconozca. Se paga como una referencia más: unos ~730
+  tokens de entrada por imagen, alrededor de medio céntimo (≈ +12 % en calidad
+  baja, ≈ +7 % en media); el aviso de «rehacer» lo suma.
+- **En un vídeo ya hecho, como corrección**: el Encargo del vídeo trae «El
+  espacio fijo». «Aplicar el espacio fijo» lo guarda y reparte los tramos de
+  siempre en ese sitio **sin dibujar nada ni pagar nada** (las imágenes hechas
+  se conservan). Después enseña qué planos cambiarían y lo que cuesta
+  rehacerlos, y eliges: **rehacer todos**, **solo los marcados** en esa lista,
+  o **ninguno**. Solo se rehacen los que pidas; luego hay que volver a montar
+  el vídeo.
 
 **El nuevo diseño: CrearIA Studio (19 de octubre)**
 - **Se llama CrearIA Studio · Automatización de contenido**, con logo nuevo: la

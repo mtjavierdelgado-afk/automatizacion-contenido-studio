@@ -864,6 +864,13 @@ MAX_DESCRIPCION_SITIO = 1500
 MAX_LUZ = 200
 MAX_SECUNDARIOS = 8
 
+#: La imagen de referencia del espacio, como se guarda: una ruta RELATIVA a la
+#: carpeta del proyecto y con el nombre sacado de su contenido. Relativa a
+#: proposito: las referencias de estilo guardan rutas absolutas y por eso una
+#: mudanza tiene que reescribirlas y volver a sellar (CLAUDE.md); esta viaja
+#: con la carpeta sin tocar nada.
+RE_IMAGEN_ESPACIO = re.compile(r"^espacio_fijo/[0-9a-f]{12,40}\.png$")
+
 
 def normalizar_espacio_fijo(crudo):
     """El espacio fijo tal como se guarda. -> {} o {sitio, descripcion, luz, secundarios}
@@ -912,8 +919,15 @@ def normalizar_espacio_fijo(crudo):
             secundarios.append({"nombre": nombre, "descripcion": detalle})
     if not descripcion:
         return {}
-    return {"sitio": sitio, "descripcion": descripcion, "luz": luz,
-            "secundarios": secundarios}
+    limpio = {"sitio": sitio, "descripcion": descripcion, "luz": luz,
+              "secundarios": secundarios}
+    imagen = crudo.get("imagen")
+    if imagen not in (None, ""):
+        if not isinstance(imagen, str) or not RE_IMAGEN_ESPACIO.match(imagen):
+            raise ValueError("espacio_fijo.imagen no es una imagen guardada del "
+                             "espacio fijo: súbela otra vez")
+        limpio["imagen"] = imagen
+    return limpio
 
 
 def ids_del_espacio(espacio):
@@ -1040,6 +1054,36 @@ def _aplicar_espacio_fijo(ficha, espacio, ids_bloque):
     ficha["lugares"] = {}
     ficha["cobertura"] = 1.0 if ids_bloque else ficha.get("cobertura", 0)
     return ficha
+
+
+def ajustar_catalogo(catalogo, espacio, ids_bloque):
+    """Un catalogo YA GUARDADO, ajustado al espacio fijo, sin llamar a nadie.
+
+    Es lo que hace «Aplicar el espacio fijo» en un video hecho: los tramos son
+    los que habia (su accion, su reparto, su tono), y solo cambian de sitio con
+    las reglas de `_aplicar_espacio_fijo`. Gratis e instantaneo: volver a pedir
+    el catalogo seria otra lectura del guion entera, y nombraria los sitios de
+    otra forma. Lo que no es de sitios ('reales', '_firma_guion') se conserva.
+    """
+    espacio = normalizar_espacio_fijo(espacio)
+    if not espacio:
+        raise ValueError("sin descripción no hay espacio fijo que aplicar")
+    ids_bloque = [str(b).strip().upper() for b in ids_bloque or []]
+    validos = set(ids_bloque)
+    beats = [dict(b) for b in (catalogo or {}).get("beats") or []
+             if isinstance(b, dict)
+             and str(b.get("desde") or "").upper() in validos
+             and str(b.get("hasta") or b.get("desde") or "").upper() in validos]
+    for beat in beats:
+        beat["desde"] = str(beat["desde"]).upper()
+        beat["hasta"] = str(beat.get("hasta") or beat["desde"]).upper()
+    ficha = {"sets": dict((catalogo or {}).get("sets") or {}), "beats": beats,
+             "avisos": []}
+    ficha = _aplicar_espacio_fijo(ficha, espacio, ids_bloque)
+    salida = dict(catalogo or {})
+    salida.update({"sets": ficha["sets"], "beats": ficha["beats"]})
+    salida.setdefault("reparto", {})
+    return salida, ficha["avisos"]
 
 
 def _especie_legible(regla):

@@ -6772,6 +6772,50 @@ def probar_espacio_fijo():
         ok("ESTE VIDEO TIENE UN ESPACIO FIJO" in prompt and "a small steel kitchen" in prompt
            and "'fachada' (Fachada)" in prompt,
            "CATÁLOGO: _correr_catalogo le pasa el espacio fijo guardado al catálogo")
+
+        # LA IMAGEN DEL ESPACIO, al crear: se guarda en el proyecto con ruta relativa
+        import base64 as _b64                                 # noqa: PLC0415
+        from PIL import Image as _Imagen                      # noqa: PLC0415
+        tampon = io.BytesIO()
+        _Imagen.new("RGB", (3000, 1500), (180, 140, 90)).save(tampon, format="JPEG")
+        url = "data:image/jpeg;base64," + _b64.b64encode(tampon.getvalue()).decode()
+        pid2 = Proyecto.crear(base, "espacio con imagen").id
+        Estado(servidor.contexto(pid2).proyecto)
+        ctx2 = servidor.contexto(pid2)
+        codigo, _m = _llamar(servidor._opciones_al_crear, ctx2, "",
+                             {"espacio_fijo": dict(espacio, imagen_nueva="no es una imagen")})
+        igual(codigo, 400, "ESPACIO FIJO: una imagen que no es imagen da 400")
+        servidor._opciones_al_crear(ctx2, "", {"espacio_fijo": dict(
+            espacio, imagen="espacio_fijo/0123456789abcdef.png", imagen_nueva=url)})
+        guardado = (ctx2.estado.params("assets") or {}).get("espacio_fijo") or {}
+        relativa = guardado.get("imagen") or ""
+        ok(re.match(r"^espacio_fijo/[0-9a-f]{16}\.png$", relativa),
+           f"ESPACIO FIJO: la imagen se guarda con ruta RELATIVA al proyecto ({relativa})")
+        ruta = ctx2.proyecto.ruta(*relativa.split("/")) if relativa else ""
+        ok(ruta and os.path.exists(ruta) and max(_Imagen.open(ruta).size) == 1536,
+           "ESPACIO FIJO: en PNG y reducida a 1.536 px de lado (la que mandó el cliente como "
+           "'imagen' se ignora)")
+        sin_imagen = servidor.aplicar_espacio_fijo
+        codigo, respuesta = _llamar(sin_imagen, pid2, {"espacio_fijo": dict(espacio, imagen="espacio_fijo/0123456789abcdef.png")})
+        igual(codigo, 400, "APLICAR: una imagen que no es la guardada da 400")
+        codigo, respuesta = _llamar(sin_imagen, pid2, {"espacio_fijo": {"sitio": "x"}})
+        igual(codigo, 400, "APLICAR: sin descripción, 400")
+        firma_antes = ctx2.estado.firma("assets")
+        codigo, respuesta = _llamar(sin_imagen, pid2, {"espacio_fijo": dict(
+            espacio, luz="night", imagen=relativa)})
+        igual(codigo, 200, f"APLICAR: a un vídeo sin imágenes responde 200 ({respuesta if codigo != 200 else ''})")
+        if codigo == 200:
+            igual(respuesta["espacio_fijo"].get("imagen"), relativa, "APLICAR: conserva la imagen guardada")
+            igual((respuesta["cambios"] or {}).get("imagenes"), 0, "APLICAR: sin imágenes, nada que rehacer")
+            ok(respuesta["cambios"].get("usd_referencia", 0) >= 0, "APLICAR: y dice lo que cuesta la referencia")
+        ok(ctx2.estado.firma("assets") != firma_antes and not ctx2.gestor.listar(activos=True),
+           "APLICAR: guarda (mueve la firma de assets) y no lanza ningún trabajo")
+        for cuerpo, esperado in (({}, 400), ({"planos": ["S001"]}, 400),
+                                 ({"planos": ["S001"], "imagenes": 2}, 400),
+                                 ({"planos": ["S001"], "imagenes": 1}, 409)):
+            codigo, _m = _llamar(servidor.rehacer_planos_del_espacio, pid2, cuerpo)
+            igual(codigo, esperado, f"REHACER: {cuerpo} da {esperado} ({_m})")
+        ok(not ctx2.gestor.listar(activos=True), "REHACER: y ninguno lanza nada")
     finally:
         catalogo._llamar_claude = real_claude
         for nombre, valor in reales.items():

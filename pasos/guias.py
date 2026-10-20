@@ -645,8 +645,9 @@ GUIAS = {
     "guion_parrilla": {
         "titulo": "El formato del guion (Parrilla)",
         "donde": "Automatizar → Añadir guiones, y la ficha de un guion",
-        "usa": "pasos/parrilla.py (leer_guion, encargo_de, el prompt de conversión) y "
-               "«Pasar al Encargo» en web/app.js",
+        "usa": "pasos/parrilla.py (leer_guion, encargo_de, el prompt de conversión), "
+               "«Pasar al Encargo» en web/app.js y, para ESPACIO FIJO, "
+               "pasos/catalogo_visual.py (proponer)",
         "que_hace": [
             "Todo guion de la Parrilla vive en ESTE formato, venga de un Word, un PDF, "
             "un Excel, de Claude o pegado. Lo que subes o pegas lo convierte Claude; "
@@ -664,6 +665,15 @@ GUIAS = {
             "ejemplo, uno vertical y uno horizontal): la ficha deja elegir cuál pasas.",
             "Cambiar Uso, Formato o Duración en la ficha cambia su línea en el texto "
             "(y en PARA EL ENCARGO si hay uno solo).",
+            "ESPACIO FIJO (opcional) es para los vídeos que ocurren enteros en un "
+            "mismo sitio: «- Sitio:» (un nombre corto), «- Descripción:» (cómo es, en "
+            "una frase), «- Luz:» y «- Secundarios:» (otros sitios que sí pueden "
+            "salir, «Nombre: descripción» separados por «;» o uno por línea). Viaja al "
+            "Encargo y, con él, el reparto de sitios usa UN solo sitio con esa "
+            "descripción tal cual, pone ahí todos los tramos (salvo los que el guion "
+            "sitúe en un secundario) y no pone cabeceras de sitio. Sin descripción "
+            "no cuenta. La imagen del sitio (opcional) se sube en «El espacio fijo» "
+            "de «Un vídeo nuevo» después de «Pasar al Encargo».",
         ],
         "si": [
             "Una línea de cabecera por dato: «Uso:», «Formato:», «Duración:»…",
@@ -671,6 +681,8 @@ GUIAS = {
             "La locución completa y seguida en «- Material:» de PARA EL ENCARGO.",
             "Las reglas fijas del cliente en MARCA DEL CLIENTE, no en cada escena.",
             "«Duración: la elijo en el Encargo» si el original no la dice.",
+            "La descripción de ESPACIO FIJO como la quieres ver: va tal cual a todas "
+            "las imágenes (mejor en inglés, que es lo que lee el generador).",
         ],
         "no": [
             "Diálogos entre personajes: el Studio narra con UNA voz (en «exacto» "
@@ -690,6 +702,12 @@ GUIAS = {
             "Objetivo: [qué tiene que conseguir]\n"
             "CTA: [qué se pide al final]\n"
             "Tono: [cómo suena]\n"
+            "\n"
+            "ESPACIO FIJO (opcional: bórralo si el vídeo cambia de sitio)\n"
+            "- Sitio: [nombre corto]\n"
+            "- Descripción: [cómo es el sitio, en una frase; va tal cual a todas las imágenes]\n"
+            "- Luz: [hora del día y fuente de luz]\n"
+            "- Secundarios: ninguno\n"
             "\n"
             "ESCENA 1\n"
             "Visual: [una imagen fija: quién, dónde, qué hace]\n"
@@ -772,6 +790,7 @@ GUIAS = {
             "5. Tiempos por escena solo si el original los trae; si no, numera las escenas.\n"
             "6. Las reglas fijas del cliente (qué mostrar, qué evitar, colores, frases de marca) van a MARCA DEL CLIENTE, no dentro de las escenas.\n"
             "7. No inventes datos: teléfonos, precios o enlaces solo si están en el original. Si falta el CTA, pon [FALTA CTA].\n"
+            "8. ESPACIO FIJO solo si el original dice que todo el vídeo ocurre en un mismo sitio (un local, una cocina, un plató). Si no lo dice, no pongas esa sección.\n"
             "\n"
             "AJUSTE POR RED (en \"adaptar\" aplícalo; en \"exacto\" solo avisa con ⚠ si algo no encaja)\n"
             "- TikTok / Reels / Shorts: vertical. Gancho en los primeros 2–3 s. Un cambio de plano cada 1–3 s. Texto en pantalla frecuente y grande, que refuerce la voz. CTA corto (comenta, guárdalo, link en bio, escríbenos). En TikTok, las palabras clave del tema dichas en la voz.\n"
@@ -791,6 +810,12 @@ GUIAS = {
             "Objetivo: …\n"
             "CTA: …\n"
             "Tono: …\n"
+            "\n"
+            "ESPACIO FIJO (solo si todo el vídeo ocurre en un mismo sitio; si no, quita esta sección)\n"
+            "- Sitio: [nombre corto del sitio]\n"
+            "- Descripción: [cómo es el sitio, en una frase; va tal cual a todas las imágenes]\n"
+            "- Luz: [hora del día y fuente de luz]\n"
+            "- Secundarios: [otros sitios que sí pueden salir, «Nombre: descripción» separados por «;», o ninguno]\n"
             "\n"
             "ESCENA 1 (tiempo, si lo hay)\n"
             "Visual: …\n"

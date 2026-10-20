@@ -3490,6 +3490,41 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 /* el asistente con sesión, pero con un fallo pasajero apuntado: ámbar */
 .burbuja-asistente.dudosa::after { background: var(--aviso); }
 
+/* ---- espacio-fijo: el espacio fijo del vídeo nuevo (sitio y luz en una fila) */
+.espacio-fijo { display: flex; flex-direction: column; }
+.espacio-fijo-fila { display: flex; flex-wrap: wrap; gap: 0 12px; }
+.espacio-fijo-fila > .campo { flex: 1 1 200px; min-width: 0; }
+.oculto-espacio-fijo { display: none; }
+.miniatura-espacio-fijo { display: block; max-width: 220px; max-height: 140px; width: auto;
+  border-radius: 8px; border: 1px solid var(--linea); margin-bottom: 6px; object-fit: cover; }
+.cambios-espacio-fijo { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.lista-espacio-fijo { display: flex; flex-direction: column; gap: 4px; max-height: 260px;
+  overflow-y: auto; }
+.fila-espacio-fijo { display: flex; gap: 8px; align-items: baseline; min-width: 0;
+  text-transform: none; letter-spacing: normal; }
+.fila-espacio-fijo .crece { min-width: 0; overflow-wrap: anywhere; }
+.fila-espacio-fijo .id { font-family: var(--mono, monospace); flex: 0 0 auto; }
+
+/* ================================== ARREGLOS DEL 19-10 (segunda tanda)
+   Rama `arreglos-19oct`. */
+/* el Encargo: los cambios del montaje guardados sin montar */
+.franja-sin-aplicar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  padding: 8px 14px; background: var(--aviso-fondo); color: var(--aviso-texto);
+  border-top: 1px solid var(--aviso-borde); border-bottom: 1px solid var(--aviso-borde);
+  font-size: 13px; }
+/* «Su estilo»: pasar el vídeo a otro estilo (o restaurar el suyo) */
+.cambio-de-estilo { display: flex; flex-direction: column; gap: 8px;
+  padding-top: 8px; border-top: 1px dashed var(--linea); }
+.cambio-de-estilo > .fila { align-items: center; gap: 10px; flex-wrap: wrap; }
+.cambio-de-estilo select { flex: 1; min-width: 0; max-width: 100%; }
+/* la revisión editorial del guion: propuestas que se aceptan una a una */
+.panel-editorial { margin-top: 8px; }
+.fila-editorial { cursor: default; align-items: center; flex-wrap: wrap; }
+.fila-editorial .crece { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fila-editorial .editorial-antes { color: var(--tenue); text-decoration: line-through; }
+.fila-editorial .herramientas { display: flex; gap: 6px; flex: none; }
+.fila-editorial.decidida { opacity: 0.6; }
+
 /* ============================================== NOTAS DEL 19-10 (PUBLICAR)
    Rama `notas-19oct`: la pastilla de guardado de los textos, un botón por
    punto de la nota SEO, «con estos cambios» y los envíos descartados plegados. */

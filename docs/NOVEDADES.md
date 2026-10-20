@@ -29,6 +29,70 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   **«Ocultar el texto»** lo quita (y la imagen vuelve a su tamaño); el
   navegador se acuerda de tu elección.
 
+**El espacio fijo: todo el vídeo en un mismo sitio (20 de octubre)**
+- **En la Parrilla, un guion puede traer «ESPACIO FIJO»** (opcional), con
+  `- Sitio:` (un nombre corto), `- Descripción:` (cómo es el sitio, en una
+  frase), `- Luz:` y `- Secundarios:` (otros sitios que sí pueden salir,
+  «Nombre: descripción» separados por «;» o uno por línea). Está en la
+  plantilla de «Escribir uno», en el formato que se le pide a Claude y en la
+  guía del formato. Sin descripción no cuenta.
+- **«Pasar al Encargo» lo lleva a «Un vídeo nuevo»**, a un bloque nuevo, «El
+  espacio fijo», que también se puede rellenar a mano.
+- **Con él, el reparto de sitios usa UN solo sitio** con esa descripción tal
+  cual (y esa luz), pone ahí todos los tramos salvo los que el guion sitúe en
+  un secundario de la lista, no pone cabeceras de sitio ni rótulos de lugar y
+  no reparte «dos planos por sitio». Se impone aunque Claude proponga otra
+  cosa. Vacío, todo sale como siempre.
+- **La petición al deducir el reparto y los sitios ya llega a Claude** (el
+  campo `peticion` de `/catalogo/proponer` y `/escenarios`): se quedaba por el
+  camino y no se le pasaba nunca. La pantalla todavía no tiene un campo para
+  escribirla.
+- **Con una imagen del sitio (opcional)**: en «El espacio fijo» puedes subir
+  una foto o un dibujo del lugar (también al pasar un guion de la Parrilla). Se
+  adjunta a cada imagen de plano del sitio principal —no a los secundarios—
+  para que el lugar se reconozca. Se paga como una referencia más: unos ~730
+  tokens de entrada por imagen, alrededor de medio céntimo (≈ +12 % en calidad
+  baja, ≈ +7 % en media); el aviso de «rehacer» lo suma.
+- **En un vídeo ya hecho, como corrección**: el Encargo del vídeo trae «El
+  espacio fijo». «Aplicar el espacio fijo» lo guarda y reparte los tramos de
+  siempre en ese sitio **sin dibujar nada ni pagar nada** (las imágenes hechas
+  se conservan). Después enseña qué planos cambiarían y lo que cuesta
+  rehacerlos, y eliges: **rehacer todos**, **solo los marcados** en esa lista,
+  o **ninguno**. Solo se rehacen los que pidas; luego hay que volver a montar
+  el vídeo.
+
+**Arreglos del 19 de octubre (segunda tanda)**
+- **La pantalla ya no salta arriba** al terminar un remontaje, al «Traer» los
+  cambios del estilo ni al cambiar el proyecto, los días o el mes en Publicar →
+  Resultados: se queda donde estabas. Ir a otra pantalla sí empieza arriba.
+- **En el Encargo, varios cambios del montaje y un solo montaje.** La música,
+  cuánto se oye, su volumen, los efectos, el logo, los subtítulos y el
+  movimiento se guardan sin montar, y sale la franja «Hay cambios del montaje
+  sin aplicar · **Aplicar y volver a montar**». Ya no sale «el vídeo se está
+  montando ahora» al tocar la segunda cosa. Si lo cambiado es solo sonido o
+  logo, se vuelve a mezclar en segundos, sin rehacer ningún plano. En la
+  pantalla Vídeo cada cambio sigue montando al momento, como antes.
+- **«Parar» un montaje para en el acto.** El botón dice «Cancelando…» y se
+  apaga; antes esperaba a que terminara la mezcla (medio minuto, o más con el
+  logo). Al parar, el vídeo sigue siendo el de antes, no queda ningún trozo a
+  medias, y el cambio sigue guardado: **«Regenerar Vídeo» lo aplica volviendo a
+  mezclar** (segundos), no renderizando otra vez todos los planos.
+- **«Cambiar de estilo…» en «Su estilo»** (en el Encargo del vídeo). Un vídeo
+  cuyo estilo se borró se quedaba sin forma de adoptar otro; ahora eliges otro
+  estilo, ves qué partes cambiarían (estilo gráfico, tono, voz, rótulos) con
+  lo que costaría, y marcas solo las que quieras traer. Sin marcar nada, el
+  vídeo solo cambia de estilo apuntado y no se rehace nada. El vídeo **se queda
+  en su proyecto** si tenía uno. Si su estilo está en la papelera sale además
+  **«Restaurarlo»**, y la parada «Estilo» de un vídeo sin estilo te lleva ahí.
+- **«Revisión editorial» del guion**, junto a la ortografía. Claude lo lee como
+  un corrector editorial (sintaxis, concordancia, puntuación, repeticiones,
+  frases confusas o largas para decirlas en voz alta y saltos de registro) y
+  propone cambios sueltos con su motivo: **«Aceptar»** o **«Rechazar»** una a
+  una, o **«Aceptar todas»**. Aceptar cambia el bloque como si lo escribieras a
+  mano (las pausas de la voz se conservan). Si la voz ya está grabada, te avisa
+  de qué bloques habrá que regrabar. La ortografía de siempre no cambia. Va con
+  tu cuenta de Claude (sonnet, esfuerzo medio): no cuesta dinero de API.
+
 **El nuevo diseño: CrearIA Studio (19 de octubre)**
 - **Se llama CrearIA Studio · Automatización de contenido**, con logo nuevo: la
   C de Crear con el bucle dentro y un «play». El favicon es el mismo dibujo. Por

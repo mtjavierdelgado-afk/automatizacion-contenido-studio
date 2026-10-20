@@ -33,6 +33,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/proyectos/{pid}` | Cambia el nombre VISIBLE del proyecto. -> la ficha. |
 | `POST` | `/api/proyectos/{pid}/duplicar` | Copia un proyecto entero con lo que tiene puesto HOY. -> el nuevo. |
 | `POST` | `/api/proyectos/{pid}/escenas/{sid}/vale` | «Este dibujo me vale para lo que dice ahora». -> {ok} |
+| `GET` | `/api/proyectos/{pid}/espacio_fijo` | El espacio fijo guardado del video ({} si no tiene) y los planos que cambiarian. |
+| `POST` | `/api/proyectos/{pid}/espacio_fijo/aplicar` | Guarda el espacio fijo de un video hecho y ajusta su catalogo. No dibuja nada. |
+| `GET` | `/api/proyectos/{pid}/espacio_fijo/imagen` | La imagen de referencia del espacio fijo de este video. |
+| `POST` | `/api/proyectos/{pid}/espacio_fijo/rehacer` | Rehace SOLO los planos pedidos de los que cambian con el espacio fijo (se paga). |
 | `POST` | `/api/proyectos/{pid}/exportar` | Prepara el vídeo, o una parte, para descargar (gratis, no toca el proyecto). |
 | `GET` | `/api/proyectos/{pid}/exportes/{ruta:path}` | Un fichero preparado por /exportar, para descargar con su nombre. |
 | `POST` | `/api/proyectos/{pid}/feedback` | Feedback general o sobre una unidad; rehace SOLO lo que apunta. |
@@ -158,6 +162,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/api/moodboard/{clave}/{origen}/{archivo}` | Sirve una lamina del banco de moodboards, que vive fuera de los proyectos. |
+| `PUT` | `/api/proyectos/{pid}/estilo` | PASA EL VIDEO A OTRO ESTILO: {estilo, partes: [...]} (19-10-2026). |
 | `GET` | `/api/proyectos/{pid}/estilo/cambios` | Que tiene el estilo del video que el video no tiene, por partes, y lo que |
 | `POST` | `/api/proyectos/{pid}/estilo/guia` | Escribe la guia de estilo mirando los fotogramas elegidos. |
 | `PUT` | `/api/proyectos/{pid}/estilo/seleccion` | Guarda las imagenes de estilo elegidas en los params de assets. |
@@ -218,7 +223,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/proyectos/{pid}/capturas/{cid}` | Borra una captura y su PNG. |
 | `GET` | `/api/proyectos/{pid}/montaje` | El montaje de este video, las transiciones elegidas y si esta aplicado. |
 | `PUT` | `/api/proyectos/{pid}/montaje` | {montaje?: {movimiento, subtitulos, gancho, cifras, barra}, transiciones?: [..]} |
-| `POST` | `/api/proyectos/{pid}/montaje/aplicar` | Rehace las capas y vuelve a montar el video con el montaje nuevo. Ni una imagen. |
+| `POST` | `/api/proyectos/{pid}/montaje/aplicar` | Aplica lo que quede del montaje en UN solo trabajo. Ni una imagen. |
 | `GET` | `/api/proyectos/{pid}/montaje/notas` | Lo escrito sobre el vídeo terminado. No toca ninguna firma. |
 | `PUT` | `/api/proyectos/{pid}/montaje/notas` | Guarda la nota del vídeo entero. Autoguardado, como todo lo demás. |
 
@@ -433,4 +438,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**319 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**324 endpoints.** Escrito por `generar_api.py` desde `app.py`.

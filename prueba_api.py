@@ -6742,6 +6742,36 @@ def probar_espacio_fijo():
            "_correr_catalogo)")
         ok("LO QUE TE PIDE EL EDITOR" not in proponer(""),
            "CATÁLOGO: y sin petición el prompt no lleva el bloque")
+        ok("ESPACIO FIJO" not in proponer(""),
+           "CATÁLOGO: sin espacio fijo guardado, el prompt no lo nombra")
+
+        # EL ENCARGO NUEVO: se guarda solo si viene con descripción (regla 1)
+        espacio = {"sitio": "Cocina del local", "descripcion": "a small steel kitchen",
+                   "luz": "day, window light",
+                   "secundarios": [{"nombre": "Fachada", "descripcion": "a blue shop front"}]}
+        firma_antes = ctx.estado.firma("assets")
+        for nada in ({}, {"espacio_fijo": None}, {"espacio_fijo": {}},
+                     {"espacio_fijo": {"sitio": "Cocina", "descripcion": "   "}}):
+            servidor._opciones_al_crear(ctx, "", nada)
+        ok("espacio_fijo" not in (ctx.estado.params("assets") or {}),
+           "ESPACIO FIJO: sin descripción no se escribe nada en assets")
+        igual(ctx.estado.firma("assets"), firma_antes, "ESPACIO FIJO: y la firma de assets no se mueve")
+        for malo in ("una cocina", {"descripcion": 5},
+                     {"descripcion": "x", "secundarios": "fachada"},
+                     {"descripcion": "x" * 5000}):
+            codigo, mensaje = _llamar(servidor._opciones_al_crear, ctx, "", {"espacio_fijo": malo})
+            igual(codigo, 400, f"ESPACIO FIJO: {str(malo)[:30]!r} da 400 ({mensaje})")
+        ok("espacio_fijo" not in (ctx.estado.params("assets") or {}),
+           "ESPACIO FIJO: y uno que no vale tampoco escribe nada")
+        servidor._opciones_al_crear(ctx, "", {"espacio_fijo": dict(espacio, luz="  day,  window light ")})
+        igual((ctx.estado.params("assets") or {}).get("espacio_fijo"), espacio,
+              "ESPACIO FIJO: con descripción se guarda limpio en los params de assets")
+        ok(ctx.estado.firma("assets") != firma_antes,
+           "ESPACIO FIJO: y entra en la firma de assets (cambiarlo deja obsoleto lo que dependa)")
+        prompt = proponer("")
+        ok("ESTE VIDEO TIENE UN ESPACIO FIJO" in prompt and "a small steel kitchen" in prompt
+           and "'fachada' (Fachada)" in prompt,
+           "CATÁLOGO: _correr_catalogo le pasa el espacio fijo guardado al catálogo")
     finally:
         catalogo._llamar_claude = real_claude
         for nombre, valor in reales.items():

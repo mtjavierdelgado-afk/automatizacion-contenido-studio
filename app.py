@@ -3840,6 +3840,20 @@ def _bloques_del_guion(ctx):
     return limpios
 
 
+def _espacio_fijo_guardado(ctx):
+    """El espacio fijo del video (params de assets), limpio. -> {} si no hay.
+
+    Vive en assets por la regla de la casa --se guarda en el paso cuya salida
+    cambia, y lo que cambia son los sitios de las imagenes-- y entra en su firma
+    como cualquier param: cambiarlo en un video hecho deja assets obsoleto.
+    """
+    crudo = (ctx.estado.params("assets") or {}).get("espacio_fijo")
+    try:
+        return _catalogo_visual().normalizar_espacio_fijo(crudo)
+    except ValueError as fallo:
+        raise RuntimeError(f"el espacio fijo guardado no vale: {fallo}")
+
+
 def _correr_catalogo(avisar, ctx, ajuste, peticion):
     catalogo = _catalogo_visual()
     bloques = _bloques_del_guion(ctx)
@@ -3883,7 +3897,10 @@ def _correr_catalogo(avisar, ctx, ajuste, peticion):
                               # y como son los personajes en este estilo, para
                               # que el reparto se describa ya convertido
                               regla_personajes=PASOS_MODULOS.p6_assets.regla_de_especie(
-                                  params.get("estilo") or {}))
+                                  params.get("estilo") or {}),
+                              # todo el video en un mismo sitio, si el encargo
+                              # lo fijo (rama espacio-fijo, 20-10-2026)
+                              espacio_fijo=_espacio_fijo_guardado(ctx))
     ctx.bitacora.anotar("catalogo_propuesto", "assets", {
         "personajes": len(ficha.get("reparto") or {}),
         "sets": len(ficha.get("sets") or {}),
@@ -4240,6 +4257,13 @@ def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer):
     # La firma es el TEXTO de los bloques: si el guion no ha cambiado, los
     # nombres se quedan quietos y lo construido sigue valiendo.
     firma = _firma_del_guion(ctx)
+    # CON ESPACIO FIJO, LA FIRMA LO LLEVA: con otro sitio fijo los sitios
+    # deducidos ya no valen aunque el guion sea el mismo. Sin el, la firma es
+    # la de siempre y ningun catalogo guardado se vuelve a pedir.
+    espacio = _espacio_fijo_guardado(ctx)
+    if firma and espacio:
+        firma += "+" + hashlib.sha256(json.dumps(
+            espacio, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:8]
     cambio = bool(firma) and guardado.get("_firma_guion") != firma
     # Y tambien se vuelve a leer si el catalogo guardado es de ANTES de que el
     # catalogo supiera deducir algo que ahora deduce. La clave 'reales' se
@@ -15329,6 +15353,8 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     lleva = _normalizar_lleva(datos["lleva"]) if datos.get("lleva") is not None else {}
     # Y EL MONTAJE (movimiento, subtitulos de redes...), por lo mismo
     montaje_pedido = _montaje_pedido_al_crear(datos)
+    # Y EL ESPACIO FIJO, por lo mismo (se guarda en `_opciones_al_crear`)
+    _espacio_fijo_pedido(datos.get("opciones"))
 
     nombre = str(datos.get("nombre") or "").strip()
     if not nombre:
@@ -15457,6 +15483,20 @@ def _montaje_al_crear(ctx, datos, pedido):
     return avisos
 
 
+def _espacio_fijo_pedido(opciones):
+    """El `espacio_fijo` de las opciones del encargo, limpio. -> {} si no hay.
+
+    400 si llega mal formado. Se llama tambien ANTES de crear el video, para
+    que un espacio que no vale se diga sin dejar un video creado a medias.
+    """
+    if not isinstance(opciones, dict) or opciones.get("espacio_fijo") is None:
+        return {}
+    try:
+        return _catalogo_visual().normalizar_espacio_fijo(opciones["espacio_fijo"])
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+
+
 def _opciones_al_crear(ctx, preset_id, opciones):
     """Musica, subtitulos y logo elegidos en el encargo de un video NUEVO. -> avisos
 
@@ -15469,6 +15509,12 @@ def _opciones_al_crear(ctx, preset_id, opciones):
     sonido = _sonido()
     if not isinstance(opciones, dict):
         return avisos
+    # EL ESPACIO FIJO (todo el video en un mismo sitio), a los params de assets,
+    # que es lo que lee el catalogo. SOLO si viene con descripcion: sin el no se
+    # escribe nada y el video nace como siempre (regla 1).
+    espacio = _espacio_fijo_pedido(opciones)
+    if espacio:
+        ctx.estado.actualizar_params("assets", {"espacio_fijo": espacio})
     presencia = opciones.get("presencia")
     if presencia:
         if presencia not in sonido.PRESENCIAS:

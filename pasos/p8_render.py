@@ -144,7 +144,7 @@ def filtro_logo(ficha, ancho_video=1920):
             f"[0:v][lg]overlay=x={x}:y={y}:format=auto,format=yuv420p[v]")
 
 
-def poner_logo(destino, ruta_logo, ficha, calidad="media"):
+def poner_logo(destino, ruta_logo, ficha, calidad="media", avisar=None):
     """Pone el logo encima del MP4 montado, en su sitio. -> destino
 
     Es la UNICA pasada que recodifica el video entero: el montaje une los clips
@@ -155,10 +155,10 @@ def poner_logo(destino, ruta_logo, ficha, calidad="media"):
     ajustes = CALIDADES.get(calidad) or CALIDADES["media"]
     temporal = medios.romper_enlace(destino + ".logo.mp4")
     try:
-        sonda = subprocess.run(
+        sonda = medios.correr(
             [medios.ffprobe(), "-v", "error", "-select_streams", "v:0",
              "-show_entries", "stream=width", "-of", "csv=p=0", destino],
-            capture_output=True, text=True, timeout=120, **medios.SIN_VENTANA)
+            avisar, timeout=120)
         ancho = int((sonda.stdout or "").strip().split(",")[0])
     except (ValueError, IndexError, OSError, subprocess.SubprocessError):
         ancho = 1920
@@ -167,8 +167,8 @@ def poner_logo(destino, ruta_logo, ficha, calidad="media"):
              "-map", "[v]", "-map", "0:a?", "-c:a", "copy",
              "-c:v", "libx264", "-preset", ajustes["preset"], "-crf", ajustes["crf"],
              "-movflags", "+faststart", temporal]
-    proceso = subprocess.run(orden, capture_output=True, text=True, timeout=3600,
-                             **medios.SIN_VENTANA)
+    # cancelable en el acto: es la pasada más larga del montaje (recodifica)
+    proceso = medios.correr(orden, avisar)
     if proceso.returncode != 0 or not os.path.exists(temporal):
         raise RuntimeError(f"ffmpeg no pudo poner el logo: {proceso.stderr[-400:]}")
     os.replace(temporal, destino)
@@ -687,7 +687,7 @@ def _pagina_de(escena, mov, capa_svg, hyper, p, destino, capa_fija="", fps=30):
 
 # ------------------------------------------------------------------ ffmpeg
 
-def _codificar(dir_frames, destino, fps, calidad):
+def _codificar(dir_frames, destino, fps, calidad, avisar=None):
     ajustes = CALIDADES.get(calidad) or CALIDADES["media"]
     # el clip puede ser el MISMO fichero que el de la version anterior
     medios.romper_enlace(destino)
@@ -695,14 +695,13 @@ def _codificar(dir_frames, destino, fps, calidad):
              "-framerate", str(fps), "-i", os.path.join(dir_frames, "f%05d.png"),
              "-c:v", "libx264", "-preset", ajustes["preset"], "-crf", ajustes["crf"],
              "-pix_fmt", "yuv420p", "-r", str(fps), destino]
-    proceso = subprocess.run(orden, capture_output=True, text=True, timeout=3600,
-                             **medios.SIN_VENTANA)
+    proceso = medios.correr(orden, avisar)
     if proceso.returncode != 0 or not os.path.exists(destino):
         raise RuntimeError(f"ffmpeg fallo con {destino}: {proceso.stderr[-400:]}")
     return destino
 
 
-def _medir_mezcla(orden):
+def _medir_mezcla(orden, avisar=None):
     """Corre la pasada de analisis y devuelve lo que midio `loudnorm`. -> dict|None
 
     El filtro escribe un JSON al final de stderr y no a la salida estandar, asi
@@ -720,9 +719,11 @@ def _medir_mezcla(orden):
         if arg == "-loglevel":
             orden[indice + 1] = "info"
     try:
-        proceso = subprocess.run(orden, capture_output=True, text=True,
-                                 timeout=900, **medios.SIN_VENTANA)
-    except Exception:                                          # noqa: BLE001
+        proceso = medios.correr(orden, avisar, timeout=900)
+    except Exception as fallo:                                 # noqa: BLE001
+        # «nunca levanta»... salvo CANCELAR: eso no es una medida que falla
+        if medios.es_cancelado(fallo):
+            raise
         return None
     salida = (proceso.stderr or "") + (proceso.stdout or "")
     abre = salida.rfind("{")
@@ -757,7 +758,7 @@ COLA_NEGRO_S = 3.0
 ENTRADA_NEGRO_S = 0.8
 
 
-def _cola_negra(clips, trabajo, fps, calidad, segundos=COLA_NEGRO_S):
+def _cola_negra(clips, trabajo, fps, calidad, segundos=COLA_NEGRO_S, avisar=None):
     """Anade al final un clip de negro. -> [rutas]
 
     SE ANADE, NO SE FUNDE. La primera version fundia a negro los ultimos tres
@@ -786,30 +787,32 @@ def _cola_negra(clips, trabajo, fps, calidad, segundos=COLA_NEGRO_S):
         medios.romper_enlace(fotograma)
         medios.romper_enlace(negro)
         # el ultimo fotograma del ultimo clip
-        sacar = subprocess.run(
+        sacar = medios.correr(
             [medios.ffmpeg(), "-y", "-loglevel", "error", "-sseof", "-0.2",
              "-i", ultimo, "-update", "1", "-frames:v", "1", fotograma],
-            capture_output=True, text=True, timeout=120, **medios.SIN_VENTANA)
+            avisar, timeout=120)
         if sacar.returncode != 0 or not os.path.exists(fotograma):
             return clips
-        hacer = subprocess.run(
+        hacer = medios.correr(
             [medios.ffmpeg(), "-y", "-loglevel", "error", "-loop", "1",
              "-framerate", str(fps), "-t", f"{segundos:g}", "-i", fotograma,
              "-vf", f"fade=t=out:st=0:d={entrada:g}:color=black",
              "-c:v", "libx264", "-preset", ajustes["preset"],
              "-crf", ajustes["crf"], "-pix_fmt", "yuv420p", "-r", str(fps),
              "-an", negro],
-            capture_output=True, text=True, timeout=300, **medios.SIN_VENTANA)
+            avisar, timeout=300)
         if hacer.returncode != 0 or not os.path.exists(negro):
             return clips
-    except Exception:                                       # noqa: BLE001
+    except Exception as fallo:                              # noqa: BLE001
+        if medios.es_cancelado(fallo):
+            raise
         return clips
     return list(clips) + [negro]
 
 def _concatenar(clips, destino, audio, desfase, trabajo, musica=None,
                 efectos=None, duracion=0.0, lufs=None, cama=False,
                 ajuste_db=0.0, fps=12, calidad="media", efectos_db=0.0,
-                presencia=None):
+                presencia=None, avisar=None):
     """Une los clips sin recodificar y mezcla la banda sonora.
 
     La banda son tres pistas: la locucion, el tema de fondo agachado bajo ella
@@ -824,7 +827,7 @@ def _concatenar(clips, destino, audio, desfase, trabajo, musica=None,
     # LA COLA DE NEGRO. Se hace aqui y no en el clip de cada plano porque
     # depende del ORDEN: es el final del VIDEO, no el de una escena, y hasta
     # que no estan todos no se sabe cual es el ultimo.
-    clips = _cola_negra(clips, trabajo, fps, calidad)
+    clips = _cola_negra(clips, trabajo, fps, calidad, avisar=avisar)
     lista = medios.romper_enlace(os.path.join(trabajo, "clips.txt"))
     medios.romper_enlace(destino)
     with open(lista, "w", encoding="utf-8") as fh:
@@ -861,7 +864,8 @@ def _concatenar(clips, destino, audio, desfase, trabajo, musica=None,
             # bombeo-- en una ganancia constante. Si falla se sigue sin
             # masterizar, que es como salia el video hasta el 28-08.
             medida = _medir_mezcla(orden + ["-filter_complex", mezcla(),
-                                            "-map", "[salida]", "-f", "null", "-"])
+                                            "-map", "[salida]", "-f", "null", "-"],
+                                   avisar)
             orden += ["-filter_complex", mezcla(medida),
                       "-map", "0:v", "-map", "[salida]"]
         else:
@@ -880,8 +884,7 @@ def _concatenar(clips, destino, audio, desfase, trabajo, musica=None,
     # pasada de ffmpeg sobre el fichero ya escrito: no recodifica nada.
     orden += ["-movflags", "+faststart"]
     orden.append(destino)
-    proceso = subprocess.run(orden, capture_output=True, text=True, timeout=3600,
-                             **medios.SIN_VENTANA)
+    proceso = medios.correr(orden, avisar)
     if proceso.returncode != 0 or not os.path.exists(destino):
         raise RuntimeError(f"ffmpeg no pudo concatenar: {proceso.stderr[-400:]}")
     return destino
@@ -1118,7 +1121,7 @@ def _guardar_ultimo(origen, destino):
     return destino
 
 
-def renderizar_plano(tarea, navegador=None):
+def renderizar_plano(tarea, navegador=None, avisar=None):
     """Los fotogramas de UN plano, su transicion y su clip. -> ficha del plano.
 
     Es el cuerpo que corria dentro del bucle de `ejecutar`, sacado a una funcion
@@ -1187,7 +1190,7 @@ def renderizar_plano(tarea, navegador=None):
             pintados = _cocer_transicion(navegador, tarea["pagina_trans"],
                                          anterior, carpeta, total, fps, corte)
 
-    _codificar(carpeta, tarea["clip"], fps, tarea["calidad"])
+    _codificar(carpeta, tarea["clip"], fps, tarea["calidad"], avisar)
     medios.borrar(pagina)
     if not tarea.get("conservar_frames"):
         shutil.rmtree(carpeta, ignore_errors=True)
@@ -1199,7 +1202,7 @@ def renderizar_plano(tarea, navegador=None):
             "origen": "renderizado"}
 
 
-def correr_lote(tareas, senal_vivo=None, al_plano=None):
+def correr_lote(tareas, senal_vivo=None, al_plano=None, avisar=None):
     """Un tramo de planos con UN navegador. -> [ficha por plano].
 
     Arrancar Edge cuesta medio segundo y abrir su pagina otra decima; con un
@@ -1222,10 +1225,14 @@ def correr_lote(tareas, senal_vivo=None, al_plano=None):
             medios.escribir_texto(senal_vivo, "1")
         except Exception:                                      # noqa: BLE001
             pass          # una barra que no avanza no puede tumbar un render
+    # EN FILA, CANCELAR MATA EL NAVEGADOR EN EL ACTO (19-10-2026): el plano
+    # que se estaba pintando falla al momento y `ejecutar` lo da por cancelado
+    registrar = getattr(avisar, "al_cancelar", None)
+    quitar = registrar(navegador.proceso.kill) if callable(registrar) else None
     try:
         fichas = []
         for tarea in tareas:
-            fichas.append(renderizar_plano(tarea, navegador))
+            fichas.append(renderizar_plano(tarea, navegador, avisar))
             # EN FILA, CANCELAR SE OYE ENTRE PLANO Y PLANO: `al_plano` es el
             # `avisar` del paso, que lanza si alguien ha cancelado. Antes este
             # camino no avisaba nada hasta acabar todos los planos.
@@ -1233,6 +1240,8 @@ def correr_lote(tareas, senal_vivo=None, al_plano=None):
                 al_plano(len(fichas), len(tareas))
         return fichas
     finally:
+        if callable(quitar):
+            quitar()
         navegador.cerrar()
 
 
@@ -1360,6 +1369,9 @@ def _correr_lotes_en_procesos(lotes, trabajo, avisar, total_planos,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
             encoding="utf-8", errors="replace", **_SESION_PROPIA,
             **medios.SIN_VENTANA)))
+    # CANCELAR LOS MATA EN EL ACTO, sin esperar al latido del vigilante
+    registrar = getattr(avisar, "al_cancelar", None)
+    quitar = registrar(lambda: _matar_lotes(procesos)) if callable(registrar) else None
     avisar(0.02, f"{total_planos} planos en {len(lotes)} procesos: "
                  f"arrancando los navegadores")
 
@@ -1424,6 +1436,8 @@ def _correr_lotes_en_procesos(lotes, trabajo, avisar, total_planos,
         terminado = True
     finally:
         parar.set()
+        if callable(quitar):
+            quitar()
         if not terminado:
             # salga como salga (cancelado, un fallo aqui), ningun lote se
             # queda renderizando solo con sus navegadores
@@ -1445,6 +1459,37 @@ OPCIONES_EJECUCION = ("solo_montar",)
 
 
 def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
+    """Renderiza los clips que toquen y rehace el MP4 final (ver `_ejecutar`).
+
+    CANCELAR NO DEJA RASTRO (19-10-2026). Se corta en el acto --ffmpeg, los
+    lotes y el navegador se registran en `avisar.al_cancelar`-- y despues se
+    borra `trabajo/` entero: ahi solo hay enlaces a la version activa (que no
+    se tocan: borrar un enlace no borra el fichero) o trabajo de maquina que no
+    se ha pagado, y lo que quedaba eran clips a medio escribir que una pasada
+    posterior, si no rehacia ese plano, montaba tal cual. Las `v<N>` no se
+    tocan. Si un fallo llega MIENTRAS se cancela (el navegador muerto a mitad
+    de un plano), es la cancelacion y se dice `Cancelado`, no ese fallo.
+    """
+    avisar = estadisticas.avisador(avisar)
+    cancelado = threading.Event()
+    registrar = getattr(avisar, "al_cancelar", None)
+    quitar = registrar(cancelado.set) if callable(registrar) else None
+    try:
+        return _ejecutar(proyecto, params, avisar, unidades, solo_montar)
+    except BaseException as fallo:
+        if not (cancelado.is_set() or medios.es_cancelado(fallo)):
+            raise
+        shutil.rmtree(proyecto.ruta_trabajo("render", crear=False), ignore_errors=True)
+        if medios.es_cancelado(fallo):
+            raise
+        from nucleo.trabajos import Cancelado                  # noqa: PLC0415
+        raise Cancelado("cancelado") from fallo
+    finally:
+        if callable(quitar):
+            quitar()
+
+
+def _ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
     """Renderiza los clips que toquen y rehace el MP4 final.
 
     Con `solo_montar` NO se toca un solo clip: se vuelven a mezclar la banda
@@ -1647,7 +1692,7 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
                 lotes[0], al_plano=lambda hechos, total: avisar(
                     0.05 + 0.85 * hechos / max(1, total),
                     f"{hechos} de {total} planos renderizados",
-                    (hechos, total)))}
+                    (hechos, total)), avisar=avisar)}
         else:
             fichas = _correr_lotes_en_procesos(
                 lotes, trabajo, avisar, len(tareas),
@@ -1691,7 +1736,7 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
                                        semilla=(plan.get("semilla") or 0))
         if lista_eventos:
             pista_efectos, sonidos = sonido.pista_de_efectos(
-                lista_eventos, largo, os.path.join(trabajo, "efectos.wav"))
+                lista_eventos, largo, os.path.join(trabajo, "efectos.wav"), avisar=avisar)
     pista_musica, faltan_temas, cama = None, [], False
     ficha_musica = (p.get("musica") or {}) if p.get("sonido", True) else {}
     if ficha_musica.get("tramos"):
@@ -1700,7 +1745,7 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
         # banco quien la decidio: el mismo plan da la misma cama siempre.
         avisar(0.94, f"encadenando {len(ficha_musica['tramos'])} temas")
         pista_musica, faltan_temas = sonido.construir_cama(
-            ficha_musica, largo_con_cola, os.path.join(trabajo, "cama.wav"))
+            ficha_musica, largo_con_cola, os.path.join(trabajo, "cama.wav"), avisar=avisar)
         cama = bool(pista_musica)
     elif ficha_musica.get("id"):
         candidata = sonido.banco("musica", sonido._nombre_de(ficha_musica))
@@ -1724,7 +1769,7 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
                 lufs=p.get("musica_lufs"), cama=cama, ajuste_db=ajuste_musica,
                 fps=fps, calidad=p.get("calidad_video") or "media",
                 efectos_db=ajuste_efectos,
-                presencia=p.get("musica_presencia"))
+                presencia=p.get("musica_presencia"), avisar=avisar)
     # EL LOGO, encima del video ya montado (ver `poner_logo`)
     ficha_logo = p.get("logo") or {}
     if isinstance(ficha_logo, dict) and ficha_logo.get("fichero"):
@@ -1732,7 +1777,8 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_montar=False):
                                  os.path.basename(str(ficha_logo["fichero"])))
         if os.path.exists(ruta_logo):
             avisar(0.97, "poniendo el logo")
-            poner_logo(destino, ruta_logo, ficha_logo, p.get("calidad_video") or "media")
+            poner_logo(destino, ruta_logo, ficha_logo, p.get("calidad_video") or "media",
+                       avisar=avisar)
     duracion = medios.duracion_media(destino)
 
     # los assets son unidades heredadas: no se renderizan, pero se sellan igual

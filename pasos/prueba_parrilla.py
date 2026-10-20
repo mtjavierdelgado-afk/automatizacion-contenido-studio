@@ -216,6 +216,38 @@ def prueba_lector():
     igual(P.huella_material(" Hola\n  mundo "), P.huella_material("Hola mundo"),
           "la huella del material no mira los espacios")
 
+    # ESPACIO FIJO (20-10-2026): todo el vídeo en un mismo sitio
+    con_espacio = GUION.replace("ESCENA 1", "ESPACIO FIJO (todo en el local)\n"
+                                "- Sitio: Cocina del local\n"
+                                "- Descripción: a small steel kitchen with white tiles\n"
+                                "  and a big window\n"
+                                "- Luz: day, soft window light\n"
+                                "- Secundarios: Fachada: shop front with a blue awning; Almacén\n"
+                                "- Terraza — a tiny terrace with two chairs\n\nESCENA 1", 1)
+    ge = P.leer_guion(con_espacio)
+    igual(ge["espacio_fijo"], {
+        "sitio": "Cocina del local",
+        "descripcion": "a small steel kitchen with white tiles and a big window",
+        "luz": "day, soft window light",
+        "secundarios": [{"nombre": "Fachada", "descripcion": "shop front with a blue awning"},
+                        {"nombre": "Almacén", "descripcion": ""},
+                        {"nombre": "Terraza", "descripcion": "a tiny terrace with two chairs"}]},
+        "ESPACIO FIJO: sitio, descripción en dos líneas, luz y secundarios («;» y uno por línea)")
+    igual((len(ge["escenas"]), ge["escenas"][0]["tiempo"]), (2, "0-3 s"),
+          "ESPACIO FIJO: y las escenas se siguen leyendo igual")
+    igual(P.encargo_de(ge)["espacio_fijo"], ge["espacio_fijo"], "encargo_de lleva el espacio fijo")
+    igual(P.leer_guion(GUION)["espacio_fijo"], {}, "sin la sección, el espacio fijo va vacío")
+    igual(P.encargo_de(g)["espacio_fijo"], {}, "y el encargo también")
+    igual(P.leer_guion(P.plantilla_vacia())["espacio_fijo"], {},
+          "la plantilla con sus huecos («[…]») no fija ningún espacio")
+    sin_desc = con_espacio.replace("- Descripción: a small steel kitchen with white tiles\n"
+                                   "  and a big window\n", "")
+    igual(P.leer_guion(sin_desc)["espacio_fijo"], {}, "sin descripción no hay espacio fijo")
+    igual(P.leer_guion(P.cambiar_cabecera(con_espacio, "uso", "adaptar"))["espacio_fijo"],
+          ge["espacio_fijo"], "cambiar una cabecera no toca el espacio fijo")
+    ok("ESPACIO FIJO" in P.prompt_para_otra_ia() and "ESPACIO FIJO" in P.plantilla_vacia(),
+       "el formato del anexo y la plantilla enseñan ESPACIO FIJO")
+
 
 # ------------------------------------------------------------ 2. documentos
 

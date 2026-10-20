@@ -986,7 +986,10 @@ def prueba_metricas():
         estados = sorted(e["estado"] for e in P._leer_video(raiz, "medido")["envios"])
         igual(estados, ["publicado", "publicado"], "publicado en las dos redes")
         r = P.actualizar_metricas(raiz, ["medido"])
-        igual((r["consultados"], r["actualizados"]), (1, 2), "UNA consulta por envío trae las dos redes")
+        # desde `publicar-partir-subida` (19-10) YouTube va en SU subida cuando
+        # va con otras redes: son dos envíos, así que dos consultas
+        igual((r["consultados"], r["actualizados"]), (2, 2),
+              "UNA consulta por subida: YouTube va en la suya, así que dos")
         envios = {e["red"]: e for e in P._leer_video(raiz, "medido")["envios"]}
         ok(envios["youtube"]["metricas"]["vistas"] > 0, "YouTube trae sus vistas")
         igual(envios["youtube"]["metricas"]["guardados"], None,

@@ -822,7 +822,7 @@ def montar_banda(escenas, duracion_s, avisar=None, tramos=None):
             "cruce_s": CRUCE_S, "modo": "cama"}
 
 
-def construir_cama(ficha, duracion_s, destino):
+def construir_cama(ficha, duracion_s, destino, avisar=None):
     """Encadena los temas de los tramos en UNA pista del largo del video.
 
     No sale a la red: coge del banco lo que dicen los params. Si falta algun
@@ -869,7 +869,7 @@ def construir_cama(ficha, duracion_s, destino):
             orden += ["-i", origen, "-t", f"{quiere:.2f}",
                       "-af", f"loudnorm=I={MUSICA_LUFS:.0f}:TP=-2:LRA=11",
                       "-ar", str(FRECUENCIA), "-ac", "2", trozo]
-            _ffmpeg_cama(orden, f"el tramo «{tramo.get('titulo') or tramo.get('id')}»")
+            _ffmpeg_cama(orden, f"el tramo «{tramo.get('titulo') or tramo.get('id')}»", avisar)
             trozos.append(trozo)
         if not trozos:
             return None, faltan
@@ -881,7 +881,7 @@ def construir_cama(ficha, duracion_s, destino):
                 [medios.ffmpeg(), "-y", "-loglevel", "error",
                  "-i", cadena, "-i", trozos[indice], "-filter_complex",
                  f"[0:a][1:a]acrossfade=d={cruce:g}:c1=tri:c2=tri", siguiente],
-                f"el cruce {indice}")
+                f"el cruce {indice}", avisar)
             cadena = siguiente
         salida = float(min(cruce, max(1.0, total * 0.05)))
         medios.romper_enlace(destino)   # puede ser el de la version anterior
@@ -890,21 +890,21 @@ def construir_cama(ficha, duracion_s, destino):
              f"apad=whole_dur={total + 1:.2f},atrim=0:{total:.3f},"
              f"afade=t=in:st=0:d=3,afade=t=out:st={max(0.0, total - salida):.2f}:d={salida:g}",
              "-ar", str(FRECUENCIA), "-ac", "2", destino],
-            "el remate de la cama")
+            "el remate de la cama", avisar)
         return destino, faltan
     finally:
         shutil.rmtree(temporal, ignore_errors=True)
 
 
-def _ffmpeg_cama(orden, que):
+def _ffmpeg_cama(orden, que, avisar=None):
     """Una pasada de ffmpeg de la cama; si falla, el error DICE por que.
 
     Con `check=True` a secas salia un `CalledProcessError` con la orden y sin
     una linea de lo que contesto ffmpeg, y eso despues de renderizar todos los
     clips del video.
     """
-    proceso = subprocess.run(orden, capture_output=True, text=True, timeout=600,
-                             **medios.SIN_VENTANA)
+    # con `avisar`, «Parar» lo corta en el acto (`medios.correr`, 19-10-2026)
+    proceso = medios.correr(orden, avisar, timeout=600)
     if proceso.returncode != 0:
         raise RuntimeError(f"ffmpeg no pudo montar {que} de la banda sonora: "
                            f"{(proceso.stderr or '').strip()[-400:] or 'sin mensaje'}")
@@ -1468,7 +1468,7 @@ def eventos(escenas, cortes, params, semilla=0):
 
 # ------------------------------------------------------------------ mezcla
 
-def _a_wav(origen, destino=None):
+def _a_wav(origen, destino=None, avisar=None):
     """Decodifica a WAV 48k estereo. Se cachea al lado del fichero del banco."""
     destino = destino or os.path.splitext(origen)[0] + f".{FRECUENCIA}.wav"
     if os.path.exists(destino) and os.path.getmtime(destino) >= os.path.getmtime(origen):
@@ -1480,10 +1480,10 @@ def _a_wav(origen, destino=None):
     # la vez leian uno a medio escribir (revision 16-10-2026).
     parcial = f"{destino}.{os.getpid()}.{threading.get_ident()}.parcial.wav"
     try:
-        proceso = subprocess.run(
+        proceso = medios.correr(
             [medios.ffmpeg(), "-y", "-loglevel", "error", "-i", origen,
              "-ac", "2", "-ar", str(FRECUENCIA), "-c:a", "pcm_s16le", parcial],
-            capture_output=True, text=True, timeout=300, **medios.SIN_VENTANA)
+            avisar, timeout=300)
         if proceso.returncode != 0 or not os.path.exists(parcial):
             raise RuntimeError(f"no se pudo decodificar {os.path.basename(origen)}: "
                                f"{proceso.stderr[-200:]}")
@@ -1573,7 +1573,7 @@ def igualar_por_papel(lista):
     return factores
 
 
-def pista_de_efectos(lista, duracion_s, destino, igualar=True):
+def pista_de_efectos(lista, duracion_s, destino, igualar=True, avisar=None):
     """Suma todos los efectos en un WAV del largo del video.
 
     En numpy y no con un grafo de ffmpeg: una cartela de seis palabras son ya
@@ -1594,7 +1594,7 @@ def pista_de_efectos(lista, duracion_s, destino, igualar=True):
         if not os.path.exists(origen):
             continue                                   # no esta en el banco: se calla
         if origen not in cache:
-            cache[origen] = _leer(_a_wav(origen))
+            cache[origen] = _leer(_a_wav(origen, avisar=avisar))
         muestra = cache[origen]
         inicio = int(round(max(0.0, float(evento.get("t") or 0.0)) * FRECUENCIA))
         if inicio >= total:

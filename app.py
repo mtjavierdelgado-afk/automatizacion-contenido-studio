@@ -34,6 +34,7 @@ import asyncio
 import copy
 import hashlib
 import inspect
+import math
 import html as html_lib
 import json
 import mimetypes
@@ -15259,7 +15260,8 @@ def _opciones_al_crear(ctx, preset_id, opciones):
     # (19-10-2026). Mismo margen que `PUT /sonido`; 0 no se escribe (regla 1)
     if "musica_db" in opciones and opciones.get("musica_db") is not None:
         valor = opciones.get("musica_db")
-        if isinstance(valor, bool) or not isinstance(valor, (int, float)):
+        if isinstance(valor, bool) or not isinstance(valor, (int, float)) \
+                or not math.isfinite(valor):
             raise ErrorApi(400, "musica_db: un número de decibelios, de -12 a +6")
         valor = round(max(-12.0, min(6.0, float(valor))), 1)
         if valor:

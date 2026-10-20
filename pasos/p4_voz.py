@@ -1755,6 +1755,11 @@ def plan_regrabado(meta, efectivos, seccion_pedida=None):
 
 #: Milisegundos de fundido a cada lado de una costura de «regrabar».
 FUNDIDO_COSTURA_MS = 10
+#: Segundos, a cada lado de la seccion, donde se busca el punto del corte. Basta
+#: para recoger el arranque tardio de las marcas (~40 ms) y NO llega a la pausa:
+#: buscando en todo el hueco, el corte caia a veces en el otro extremo de una
+#: pausa alargada por `espaciar` y la seccion nueva salia pegada a la anterior.
+VENTANA_COSTURA_S = 0.12
 
 
 def _cortes_de_seccion(pcm, seccion, palabras):
@@ -1777,11 +1782,13 @@ def _cortes_de_seccion(pcm, seccion, palabras):
     fin_previo = max(antes) if antes else max(0.0, t_in - 0.6)
     inicio_siguiente = min(despues) if despues else min(len(muestras) / SR, t_out + 0.6)
     desde = t_in
-    if t_in - fin_previo > 0.02:
-        desde, _nivel = motor._punto_tranquilo(muestras, fin_previo, t_in)
+    ini_ventana = max(fin_previo, t_in - VENTANA_COSTURA_S)
+    if t_in - ini_ventana > 0.02:
+        desde, _nivel = motor._punto_tranquilo(muestras, ini_ventana, t_in)
     hasta = t_out
-    if inicio_siguiente - t_out > 0.02:
-        hasta, _nivel = motor._punto_tranquilo(muestras, t_out, inicio_siguiente)
+    fin_ventana = min(inicio_siguiente, t_out + VENTANA_COSTURA_S)
+    if fin_ventana - t_out > 0.02:
+        hasta, _nivel = motor._punto_tranquilo(muestras, t_out, fin_ventana)
     return round(desde, 4), round(max(hasta, desde), 4)
 
 

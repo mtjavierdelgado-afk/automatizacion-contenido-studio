@@ -6683,6 +6683,8 @@ def probar_notas_19oct():
            "MÚSICA: y 0 dB no escribe nada (regla 1)")
         codigo, _m = _llamar(servidor._opciones_al_crear, ctx2, "", {"musica_db": "alto"})
         igual(codigo, 400, "MÚSICA: un valor que no es un número da 400")
+        codigo, _m = _llamar(servidor._opciones_al_crear, ctx2, "", {"musica_db": float("nan")})
+        igual(codigo, 400, "MÚSICA: un NaN da 400 (antes se volvía +6 dB)")
     finally:
         servidor.fijar_raiz_proyectos(raiz_antes)
         shutil.rmtree(base, ignore_errors=True)

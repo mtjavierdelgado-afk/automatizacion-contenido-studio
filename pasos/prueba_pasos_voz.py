@@ -1041,6 +1041,21 @@ def prueba_costura_sin_chasquido(base):
     comprobar(float(np.max(np.abs(arranque))) < 0.01 if len(arranque) else True,
               "y el arranque de la palabra vieja no se queda pegado delante de la nueva")
 
+    # LA PAUSA SE QUEDA (revision independiente, 19-10): una pausa alargada por
+    # `espaciar` lleva relleno con fundido a cero en sus bordes, y su punto mas
+    # tranquilo puede caer pegado a la palabra de ANTES. Buscando el corte en
+    # todo el hueco se tiraba la pausa entera y la seccion salia pegada.
+    ruido = np.random.default_rng(7).standard_normal(len(t)) * 0.002
+    rampa = np.clip((t - 1.0) / 0.5, 0.0, 1.0)        # 0 justo tras la palabra, sube hacia 1,5
+    hueco = voz.copy()
+    hueco[(t >= 1.0) & (t < 1.5)] = (ruido * rampa)[(t >= 1.0) & (t < 1.5)]
+    hueco[(t >= 2.4) & (t < 2.7)] = (ruido * (1 - np.clip((t - 2.4) / 0.3, 0, 1)))[(t >= 2.4) & (t < 2.7)]
+    pcm_h = (hueco * 32767).astype("<i2").tobytes()
+    desde, hasta = p4_voz._cortes_de_seccion(pcm_h, meta["secciones"][0], meta["palabras"])
+    comprobar(desde >= 1.50 - 0.13, f"el corte de antes no se come la pausa (corta en {desde:.2f}, "
+                                    "la seccion empieza en 1,50)")
+    comprobar(hasta <= 2.40 + 0.13, f"ni el de despues (corta en {hasta:.2f}, la seccion acaba en 2,40)")
+
 
 def prueba_pronunciacion(base):
     """COMO SE PRONUNCIA (15-10-2026): lo que se manda va como suena, y lo que

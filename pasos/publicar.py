@@ -2429,17 +2429,24 @@ def _refrescar(raiz, limite):
 # ------------------------------------------------------------------ cola
 
 def _fallos_superados(envios):
-    """Los ids de los fallos (o «comprobar») de una red tras los que hubo otro
-    envío de ESA red publicado o en marcha (notas del 19-10: un fallo reenviado
-    que salió seguía en «Te necesitan» y en el contador de la barra). `envios`
-    va en el orden en que se crearon, como en la ficha guardada."""
-    superados = set()
+    """{id: "salio" | "reenviado"} de los fallos (o «comprobar») de una red tras
+    los que hubo otro envío de ESA red (notas del 19-10: un fallo reenviado que
+    salió seguía en «Te necesitan» y en el contador de la barra). `envios` va en
+    el orden en que se crearon, como en la ficha guardada.
+
+    Un FALLO lo supera cualquier envío posterior vivo (ya se volvió a mandar).
+    Un «COMPROBAR» solo uno que SALIÓ: puede que ya esté publicado, y con otro
+    solo programado detrás es justo cuando hay que mirarlo, o saldría dos veces
+    (revisión independiente, 19-10)."""
+    superados = {}
     for i, e in enumerate(envios):
         if e.get("estado") not in ("fallido", "comprobar"):
             continue
-        if any(d.get("red") == e.get("red") and d.get("estado") in VIVOS
-               for d in envios[i + 1:]):
-            superados.add(e.get("id"))
+        despues = [d.get("estado") for d in envios[i + 1:] if d.get("red") == e.get("red")]
+        if any(d in ("publicado", "a_mano") for d in despues):
+            superados[e.get("id")] = "salio"
+        elif e.get("estado") == "fallido" and any(d in VIVOS for d in despues):
+            superados[e.get("id")] = "reenviado"
     return superados
 
 
@@ -2496,6 +2503,7 @@ def cola(raiz, videos, desde=None, dias=7):
             if inicio <= momento < fin or (e.get("estado") in ("espera_ok", "fallido", "comprobar")
                                            and not superado):
                 envios.append(dict(_envio_publico(e), pid=v["pid"], superado=superado,
+                                   superado_como=superados.get(e.get("id"), ""),
                                    video=visibles[v["pid"]].get("nombre") or v["pid"],
                                    cliente=v.get("cliente") or "",
                                    cliente_nombre=v.get("cliente_nombre") or ""))

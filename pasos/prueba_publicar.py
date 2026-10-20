@@ -2152,24 +2152,29 @@ def prueba_notas_19oct():
     datos["envios"] = [envio(1, "instagram", "fallido"), envio(2, "instagram", "publicado"),
                        envio(3, "tiktok", "fallido"), envio(4, "youtube", "publicado"),
                        envio(5, "youtube", "comprobar"), envio(6, "facebook", "fallido"),
-                       envio(7, "facebook", "programado")]
+                       envio(7, "facebook", "programado"), envio(8, "x", "comprobar"),
+                       envio(9, "x", "programado")]
     P._escribir(P._ruta_video(raiz, "n19c"), datos)
     c = P.cola(raiz, [{"pid": "n19c", "nombre": "Cola", "cliente": "", "montado": True}])
     fallidos = sorted(e["id"] for e in c["fallidos"])
-    igual(fallidos, ["e3", "e5"], "«Te necesitan» no cuenta el fallo que luego salió (ni el que va programado), "
+    igual(fallidos, ["e3", "e5", "e8"], "«Te necesitan» no cuenta el fallo que luego salió (ni el que va programado), "
           "y sí el que sigue solo o el que falló después de publicar")
     ok(next(e for e in c["envios"] if e["id"] == "e1").get("superado") is True,
        "el superado sigue en la semana, marcado para que la pantalla lo diga")
+    igual([next(e for e in c["envios"] if e["id"] == i).get("superado_como") for i in ("e1", "e6")],
+          ["salio", "reenviado"], "y dice si salió o solo se volvió a mandar")
+    ok(any(e["id"] == "e8" for e in c["fallidos"]),
+       "un «comprobar» con otro solo PROGRAMADO detrás sigue en «Te necesitan» (podría salir dos veces)")
     viejo = P._leer_video(raiz, "n19c")
     for e in viejo["envios"]:
         e["cuando"] = "2020-01-06T10:00:00"
     P._escribir(P._ruta_video(raiz, "n19c"), viejo)
     c = P.cola(raiz, [{"pid": "n19c", "nombre": "Cola", "cliente": "", "montado": True}])
-    igual(sorted(e["id"] for e in c["envios"]), ["e3", "e5"],
+    igual(sorted(e["id"] for e in c["envios"]), ["e3", "e5", "e8"],
           "de otra semana solo sale lo que te necesita: el fallo superado, no")
     P.cancelar(raiz, "n19c", "e3")
     igual([e["id"] for e in P.cola(raiz, [{"pid": "n19c", "nombre": "Cola", "cliente": "",
-                                          "montado": True}])["fallidos"]], ["e5"],
+                                          "montado": True}])["fallidos"]], ["e5", "e8"],
           "«Quitar de la lista» lo saca de los fallidos")
 
 

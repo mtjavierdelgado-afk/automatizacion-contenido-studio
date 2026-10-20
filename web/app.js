@@ -18703,7 +18703,6 @@ function entrarEnCrear() {
   const panel = $('#panel');
   if (panel) panel.scrollTop = 0;
   irAModulo('crear');
-  if (MODULOS.actual === 'crear' && document.body.classList.contains('en-modulo')) pintarLight();
   cargarGaleriaLight(true);
 }
 
@@ -19117,7 +19116,8 @@ function filaEnvioCola(e) {
     e.cliente_nombre ? h('span', { clase: 'meta' }, e.cliente_nombre) : null,
     h('span', { clase: 'crece' }),
     pastillaEstadoEnvio(e.estado),
-    fallo && e.superado ? h('span', { clase: 'meta motivo-cola' }, 'ya salió en otro envío') : null,
+    fallo && e.superado ? h('span', { clase: 'meta motivo-cola' },
+      e.superado_como === 'reenviado' ? 'se volvió a mandar' : 'ya salió en otro envío') : null,
     fallo && !e.superado ? h('button', { clase: 'mini fantasma', title: 'Quitarlo de «Te necesitan» (no borra nada en la red)',
       onclick: () => cancelarEnvioPublicar(e) }, 'Quitar de la lista') : null,
     e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver') : null);
@@ -19440,8 +19440,16 @@ function ortografiaDeRedPublicar(red) {
 
 function editarTextoPublicar(red, campo, valor) {
   if (PUB.borradorDe && PUB.borradorDe !== PUB.pid) {
-    // quedaba algo de otro vídeo (se volvió con «atrás»): sale ya, a SU vídeo
-    if (Object.keys(PUB.borrador).length) guardarTextosPublicar();
+    // quedaba algo de otro vídeo (se volvió con «atrás»): sale ya, a SU vídeo.
+    // Si ese guardado falla, lo escrito no se tira: queda aparte y se reintenta
+    // con el próximo guardado que salga bien (revisión independiente, 19-10).
+    if (Object.keys(PUB.borrador).length) {
+      const suyo = PUB.borradorDe;
+      const textos = JSON.parse(JSON.stringify(PUB.borrador));
+      guardarTextosPublicar().then(bien => {
+        if (!bien) PUB.ajenos = Object.assign(PUB.ajenos || {}, { [suyo]: textos });
+      });
+    }
     PUB.borrador = {};
   }
   PUB.borradorDe = PUB.pid;
@@ -19454,7 +19462,20 @@ function editarTextoPublicar(red, campo, valor) {
 }
 
 function hayPendientePublicar() {
-  return !!(PUB.borrador && Object.keys(PUB.borrador).length);
+  return !!((PUB.borrador && Object.keys(PUB.borrador).length)
+    || (PUB.ajenos && Object.keys(PUB.ajenos).length));
+}
+
+/* Los textos de OTRO vídeo cuyo guardado falló: se vuelven a mandar, cada uno
+   a su vídeo, cuando un guardado sale bien. */
+async function reintentarAjenosPublicar() {
+  const ajenos = PUB.ajenos || {};
+  for (const pid of Object.keys(ajenos)) {
+    try {
+      await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}`), { method: 'PUT', cuerpo: { textos: ajenos[pid] } });
+      delete ajenos[pid];
+    } catch (e) { /* se queda para la próxima */ }
+  }
 }
 
 /* true si no queda nada sin guardar (o si quien se iba acepta perderlo). */
@@ -19489,6 +19510,7 @@ async function guardarTextosPublicar() {
     if (PUB.pid === pid) PUB.ficha = ficha;
     ponerEstadoGuardadoPublicar(PUB.borradorDe === pid && hayPendientePublicar() ? 'sin' : 'ok', '', pid);
     if (PUB.pid === pid) repintarPublicarSinPisar();
+    if (PUB.ajenos && Object.keys(PUB.ajenos).length) reintentarAjenosPublicar();
     return true;
   } catch (e) {
     ponerEstadoGuardadoPublicar('error', e.message, pid);

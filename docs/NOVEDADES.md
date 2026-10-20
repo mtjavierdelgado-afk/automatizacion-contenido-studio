@@ -107,6 +107,20 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   mandar y salió en esa red ya no cuenta (ni en el número de la barra). En la
   ficha, lo cancelado o quitado va plegado en **N descartados**.
 
+**Publicar: YouTube y Facebook van en su propia subida (19 de octubre, tarde)**
+- Si publicas o programas a la vez en **YouTube o Facebook y en otras redes**
+  (Instagram, TikTok…), el Studio lo manda a Upload-Post en **dos subidas**:
+  una para YouTube/Facebook con su título y otra para las demás con su texto
+  completo. Antes iba todo junto y el título de YouTube podía acabar como el
+  texto de Instagram.
+- **Cada subida cuenta en el mes de Upload-Post**: Instagram + YouTube son 2;
+  con Google Business, 3. La confirmación antes de enviar dice cuántas.
+- Cancelar un programado de YouTube ya no cancela el de Instagram (van en
+  subidas distintas): cancela cada red por separado si quieres quitar las dos.
+- En la ficha no cambia nada: cada red sigue con su envío, su estado y su
+  «Reintentar». Lo que ya estaba programado antes de este cambio no se toca:
+  cancélalo y vuelve a programarlo para que salga con el texto entero.
+
 **El movimiento y la profundidad 2.5D de cada imagen (19 de octubre)**
 - En **Imágenes**, cada diapositiva trae **🎬 Esta imagen**: su movimiento
   (**Quieta**, Sobrio, Vivo o Dinámico) y su **2.5D** (sí o no). De partida

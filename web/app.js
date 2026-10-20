@@ -20983,8 +20983,7 @@ async function confirmarEnvioPublicar(modo, repetir) {
   const texto = `${modo === 'ahora' ? 'Publicar AHORA' : `Programar para ${cuandoLegible(cuando)} (hora de Lima)`}`
     + ` «${f.nombre}» en:\n\n${lineas}\n\nCon el perfil de Upload-Post «${(f.ajustes || {}).perfil}». `
     + 'Una vez publicado no se puede deshacer desde aquí.'
-    + (redes.includes('google_business') && redes.length > 1
-      ? '\n\nGoogle Business va en una subida aparte: gasta 2 subidas del mes de Upload-Post.' : '');
+    + avisoSubidasPublicar(redes);
   if (!confirm(texto)) return;
   PUB.enviando = true;
   pintarModulo();
@@ -21051,7 +21050,7 @@ async function cancelarEnvioPublicar(envio) {
       ? `¿Ya miraste en Upload-Post si ${NOMBRES_RED[envio.red]} salió?\n\nQuitarlo de la lista deja `
         + 'volver a publicarlo sin aviso: hazlo solo si allí no está.'
       : `¿Cancelar ${NOMBRES_RED[envio.red]}${envio.estado === 'programado'
-      ? ' (y las demás redes que iban en el mismo envío programado)' : ''}?`;
+      ? ' (y las redes que iban en su misma subida a Upload-Post)' : ''}?`;
   if (!confirm(pregunta)) return;
   try {
     await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/envios/${envio.id}/cancelar`), { method: 'POST' });
@@ -21569,6 +21568,29 @@ function bloqueRedesProyectoPublicar(p) {
       texto('threads_tema', 'Tema', 'una palabra, sin #')));
   }
   return caja;
+}
+
+/* CUÁNTAS SUBIDAS A UPLOAD-POST salen de un envío: la misma regla que
+   `publicar.enviar` (19-10-2026). Google Business va siempre aparte, y YouTube y
+   Facebook van en la suya cuando hay otras redes. Cada subida gasta del mes. */
+const TITULO_MANDA_PUBLICAR = ['youtube', 'facebook'];
+function subidasDeEnvioPublicar(redes) {
+  const lotes = new Set();
+  const conTitulo = redes.some(r => TITULO_MANDA_PUBLICAR.includes(r));
+  const otras = redes.some(r => !TITULO_MANDA_PUBLICAR.includes(r) && r !== 'google_business');
+  redes.forEach(r => lotes.add(r === 'google_business' ? 'gbp'
+    : (TITULO_MANDA_PUBLICAR.includes(r) && conTitulo && otras) ? 'titulo' : 'resto'));
+  return lotes.size;
+}
+function avisoSubidasPublicar(redes) {
+  const n = subidasDeEnvioPublicar(redes);
+  if (n < 2) return '';
+  const partes = [];
+  if (redes.includes('google_business') && redes.length > 1) partes.push('Google Business');
+  if (redes.some(r => TITULO_MANDA_PUBLICAR.includes(r))
+      && redes.some(r => !TITULO_MANDA_PUBLICAR.includes(r) && r !== 'google_business')) partes.push('YouTube/Facebook');
+  return `\n\n${partes.join(' y ')} ${partes.length > 1 ? 'van cada uno en su propia subida' : 'va en una subida aparte'}: `
+    + `gasta ${n} subidas del mes de Upload-Post.`;
 }
 
 function tarjetaProyectoPublicar(p) {

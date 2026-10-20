@@ -7084,6 +7084,10 @@ function vistaElegidoLight() {
       'céntrate en el mecanismo, no en las personas; no fuerces una historia '
       + 'de personaje')));
 
+  caja.appendChild(bloqueLight('El espacio fijo',
+    'si todo el vídeo pasa en un mismo sitio (opcional)',
+    bloqueEspacioFijoLight(e)));
+
   /* LAS LLAMADAS A LA ACCIÓN son de ESTE vídeo y se deciden aquí. No viajan en
      el estilo a propósito: si viajaran, elegir un estilo pisaría lo que acabas
      de escribir para este vídeo. */
@@ -7367,6 +7371,64 @@ function materialLight(e) {
 /* Crear el proyecto y lanzar la primera tanda, en un gesto. Son dos llamadas
    —el proyecto tiene que existir antes de poder generar nada en él— pero UNA
    decisión, así que un botón. */
+/* EL ESPACIO FIJO (rama espacio-fijo, 20-10-2026): todo el vídeo en un mismo
+   sitio. Lo rellena la Parrilla si el guion trae ESPACIO FIJO y se puede
+   escribir a mano. Con él, el reparto de sitios usa UNO solo con esta
+   descripción tal cual. Los secundarios se escriben uno por línea
+   («Nombre: descripción») y se guardan como texto: leerlos y volver a pintarlos
+   en cada tecla se comería los dos puntos recién escritos. Solo viaja si tiene
+   descripción (`opcionesParaCrear`); sin ella el vídeo nace como siempre. */
+function espacioFijoDelEncargo(r) {
+  const ef = (r && typeof r === 'object') ? r : {};
+  return {
+    sitio: String(ef.sitio || ''),
+    descripcion: String(ef.descripcion || ''),
+    luz: String(ef.luz || ''),
+    secundarios_texto: (Array.isArray(ef.secundarios) ? ef.secundarios : [])
+      .filter(x => x && x.nombre)
+      .map(x => (x.descripcion ? `${x.nombre}: ${x.descripcion}` : String(x.nombre)))
+      .join('\n'),
+  };
+}
+
+function secundariosDelTexto(texto) {
+  return String(texto || '').split(/[\n;]/).map(l => l.trim()).filter(Boolean).map(l => {
+    const i = l.indexOf(':');
+    return i > 0 ? { nombre: l.slice(0, i).trim(), descripcion: l.slice(i + 1).trim() }
+      : { nombre: l, descripcion: '' };
+  }).filter(x => x.nombre);
+}
+
+/* Lo que se manda al crear, o null si no hay espacio fijo. */
+function espacioFijoParaCrear(e) {
+  const ef = e.espacio_fijo;
+  if (!ef || !String(ef.descripcion || '').trim()) return null;
+  return {
+    sitio: String(ef.sitio || '').trim(),
+    descripcion: String(ef.descripcion).trim(),
+    luz: String(ef.luz || '').trim(),
+    secundarios: secundariosDelTexto(ef.secundarios_texto),
+  };
+}
+
+function bloqueEspacioFijoLight(e) {
+  if (!e.espacio_fijo) e.espacio_fijo = espacioFijoDelEncargo(null);
+  const ef = e.espacio_fijo;
+  return h('div', { clase: 'espacio-fijo' },
+    h('div', { clase: 'espacio-fijo-fila' },
+      campoTexto('Sitio', ef.sitio, v => { ef.sitio = v; }, { pista: 'Panadería Rosa' }),
+      campoTexto('Luz', ef.luz, v => { ef.luz = v; }, { pista: 'morning, warm window light' })),
+    campoArea('Descripción', ef.descripcion, v => { ef.descripcion = v; },
+      'a small bakery with wooden shelves full of bread and a white counter',
+      'espacio-fijo-descripcion'),
+    campoArea('Sitios secundarios', ef.secundarios_texto, v => { ef.secundarios_texto = v; },
+      'uno por línea: Fachada: a shop front with a pink awning', 'espacio-fijo-secundarios'),
+    h('div', { clase: 'pista' }, 'Con descripción, todos los planos van a este sitio (salvo los '
+      + 'que el guion sitúe en un secundario), con esa descripción tal cual y sin cabeceras de '
+      + 'sitio. Mejor en inglés, que es lo que lee el generador de imágenes. Vacío, el reparto '
+      + 'de sitios es el de siempre.'));
+}
+
 /* Lo elegido en «Ajustes del montaje» del borrador, tal como lo entiende
    `_opciones_al_crear`. Lo que no se eligió no viaja: queda automático. */
 function opcionesParaCrear(e) {
@@ -7383,6 +7445,8 @@ function opcionesParaCrear(e) {
   if (op.montaje) salida.montaje = op.montaje;
   if (op.transiciones && op.transiciones.length) salida.transiciones = op.transiciones;
   if (op.ritmo) salida.ritmo = op.ritmo;
+  const espacio = espacioFijoParaCrear(e);
+  if (espacio) salida.espacio_fijo = espacio;
   return salida;
 }
 
@@ -23219,6 +23283,8 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   e.cta = r.cta || ctaPorDefecto();
   if (r.duracion_objetivo_s) e.duracion_objetivo_s = r.duracion_objetivo_s;
   if (r.formato === 'vertical' || r.formato === 'horizontal') e.formato = r.formato;
+  /* el espacio fijo es del guion: uno sin él deja el campo vacío */
+  e.espacio_fijo = espacioFijoDelEncargo(r.espacio_fijo);
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.datos = null;
   irAModulo('crear');

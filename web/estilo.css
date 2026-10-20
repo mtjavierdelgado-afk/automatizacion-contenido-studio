@@ -3468,6 +3468,11 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 /* el asistente con sesión, pero con un fallo pasajero apuntado: ámbar */
 .burbuja-asistente.dudosa::after { background: var(--aviso); }
 
+/* ---- espacio-fijo: el espacio fijo del vídeo nuevo (sitio y luz en una fila) */
+.espacio-fijo { display: flex; flex-direction: column; }
+.espacio-fijo-fila { display: flex; flex-wrap: wrap; gap: 0 12px; }
+.espacio-fijo-fila > .campo { flex: 1 1 200px; min-width: 0; }
+
 /* ============================================== NOTAS DEL 19-10 (PUBLICAR)
    Rama `notas-19oct`: la pastilla de guardado de los textos, un botón por
    punto de la nota SEO, «con estos cambios» y los envíos descartados plegados. */

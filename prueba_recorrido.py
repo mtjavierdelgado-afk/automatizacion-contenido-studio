@@ -5434,5 +5434,74 @@ def diseno_crearia(navegador, datos):
     pg.cerrar()
 
 
+# espacio-fijo (20-10-2026): un guion de la Parrilla con ESPACIO FIJO llena el
+# campo «El espacio fijo» de «Un vídeo nuevo», y eso es lo que se manda al crear.
+@escenario
+def parrilla_con_espacio_fijo(navegador, datos):
+    """La Parrilla con un guion con ESPACIO FIJO → «Pasar al Encargo» → el
+    campo aparece relleno en el vídeo nuevo → `opcionesParaCrear().espacio_fijo`
+    correcto. Y a mano: sin descripción no viaja."""
+    api = datos["api"]
+    cid = datos["cliente"]
+    guion = ("EF01 — Pan del día\nCliente / proyecto: Panadería\nUso: adaptar\nRed: Reels\n"
+             "Formato: vertical\nDuración: 30 s\nObjetivo: que pidan\nCTA: Escríbenos\n"
+             "Tono: cercano\n\n"
+             "ESPACIO FIJO\n- Sitio: Panadería Rosa\n"
+             "- Descripción: a small bakery with wooden shelves full of bread\n"
+             "- Luz: morning, warm window light\n"
+             "- Secundarios: Fachada: a shop front with a pink awning; Almacén\n\n"
+             "ESCENA 1\nVisual: el mostrador\nVoz: «Recién hecho.»\n\n"
+             "PARA EL ENCARGO\n- Material: Recién hecho, cada mañana.\n"
+             "- Indicaciones: cercano\n- Llamadas a la acción: Escríbenos\n"
+             "- Duración: 30 s · Formato: vertical\n\nAVISOS\n- ninguno")
+    r, hecho = api.post(f"/api/parrilla/proyectos/{cid}/guiones",
+                        {"texto": guion, "nombre": "Espacio fijo"})
+    ok(r.status_code == 201 and (hecho or {}).get("guiones"),
+       f"el guion con ESPACIO FIJO se guarda ({r.status_code})")
+    pg = Pagina(navegador, datos, nombre="espacio fijo")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    pg.p.wait_for_timeout(800)
+    pg.pulsar(".fila-guion .titulo-guion", "EF01")
+    ok(pg.esperar(".ficha-parrilla h3", "EF01"), "su ficha")
+    pg.p.locator(".pasar-encargo select").first.select_option(datos["preset"])
+    pg.pulsar(".pasar-encargo button", "Pasar al Encargo")
+    fin = time.time() + 10
+    while time.time() < fin and not pg.p.evaluate(
+            "() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"):
+        pg.p.wait_for_timeout(300)
+    ok(pg.esperar(".bloque-light h3", "El espacio fijo", 10), "«Un vídeo nuevo» trae el bloque «El espacio fijo»")
+    valores = pg.p.evaluate("""() => {
+        const caja = document.querySelector('.espacio-fijo');
+        if (!caja) return null;
+        const ent = caja.querySelectorAll('input');
+        return {sitio: ent[0] ? ent[0].value : '', luz: ent[1] ? ent[1].value : '',
+                desc: (caja.querySelector('[data-foco=espacio-fijo-descripcion]') || {}).value || '',
+                sec: (caja.querySelector('[data-foco=espacio-fijo-secundarios]') || {}).value || ''};
+    }""")
+    ok(valores == {"sitio": "Panadería Rosa", "luz": "morning, warm window light",
+                   "desc": "a small bakery with wooden shelves full of bread",
+                   "sec": "Fachada: a shop front with a pink awning\nAlmacén"},
+       f"relleno con lo que dice el guion: {valores}")
+    enviado = pg.p.evaluate("() => opcionesParaCrear(APP.light.video.encargo).espacio_fijo || null")
+    ok(enviado == {"sitio": "Panadería Rosa",
+                   "descripcion": "a small bakery with wooden shelves full of bread",
+                   "luz": "morning, warm window light",
+                   "secundarios": [{"nombre": "Fachada", "descripcion": "a shop front with a pink awning"},
+                                   {"nombre": "Almacén", "descripcion": ""}]},
+       f"y es lo que se manda al crear (opciones.espacio_fijo): {enviado}")
+    pg.captura("espacio_fijo_encargo")
+
+    # a mano: cambiar la luz se manda; sin descripción, no viaja nada
+    pg.p.locator(".espacio-fijo input").nth(1).fill("night, neon sign")
+    ok(pg.p.evaluate("() => opcionesParaCrear(APP.light.video.encargo).espacio_fijo.luz")
+       == "night, neon sign", "lo escrito a mano es lo que viaja")
+    pg.p.locator("[data-foco=espacio-fijo-descripcion]").fill("")
+    ok(pg.p.evaluate("() => !('espacio_fijo' in opcionesParaCrear(APP.light.video.encargo))"),
+       "sin descripción no se manda espacio fijo (regla 1)")
+    pg.sin_errores("el espacio fijo")
+    pg.cerrar()
+
+
 if __name__ == "__main__":
     sys.exit(main())

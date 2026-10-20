@@ -3900,7 +3900,10 @@ def _correr_catalogo(avisar, ctx, ajuste, peticion):
                                   params.get("estilo") or {}),
                               # todo el video en un mismo sitio, si el encargo
                               # lo fijo (rama espacio-fijo, 20-10-2026)
-                              espacio_fijo=_espacio_fijo_guardado(ctx))
+                              espacio_fijo=_espacio_fijo_guardado(ctx),
+                              # como se cuenta (rama tipo-de-relato): solo un
+                              # modo EXPLICITO cambia algo del catalogo
+                              relato=PASOS_MODULOS.tipo_relato.resolver(params))
     ctx.bitacora.anotar("catalogo_propuesto", "assets", {
         "personajes": len(ficha.get("reparto") or {}),
         "sets": len(ficha.get("sets") or {}),
@@ -3977,9 +3980,11 @@ def guardar_catalogo(pid: str, cuerpo: dict = Body(default=None)):
     # /escenarios. Guardar el catalogo a mano las borraba, y con ellas
     # desaparecian los logos de todos los planos.
     previo = (ctx.estado.params("assets") or {}).get("catalogo") or {}
-    for clave in ("reales", "_firma_guion"):
+    for clave in ("reales", "_firma_guion", "relato"):
         if clave in previo and clave not in catalogo:
             limpio[clave] = previo[clave]
+    if isinstance(catalogo.get("relato"), dict) and catalogo["relato"]:
+        limpio["relato"] = catalogo["relato"]
     ctx.estado.actualizar_params("assets", {"catalogo": limpio})
     ctx.bitacora.anotar("catalogo_guardado", "assets", {
         "personajes": len(limpio["reparto"]), "sets": len(limpio["sets"]),
@@ -4264,6 +4269,12 @@ def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer):
     if firma and espacio:
         firma += "+" + hashlib.sha256(json.dumps(
             espacio, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:8]
+    # Y EL TIPO DE RELATO, por lo mismo, y SOLO si es explicito (rama
+    # tipo-de-relato): sin el, la firma es la de antes y nada se vuelve a pedir.
+    relato = PASOS_MODULOS.tipo_relato.resolver(ctx.estado.params("assets") or {})
+    if firma and PASOS_MODULOS.tipo_relato.activo(relato):
+        firma += "+relato:" + relato["modo"] + (
+            ":" + relato["cambia"] if relato.get("cambia") else "")
     cambio = bool(firma) and guardado.get("_firma_guion") != firma
     # Y tambien se vuelve a leer si el catalogo guardado es de ANTES de que el
     # catalogo supiera deducir algo que ahora deduce. La clave 'reales' se
@@ -4299,6 +4310,10 @@ def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer):
                   # y no fallaba -- simplemente no salia ningun logo.
                   "reales": ficha.get("reales") or [],
                   "_firma_guion": firma}
+        if ficha.get("relato"):
+            # con que tipo de relato se repartio (y, en «un espacio que
+            # cambia», sus beats traen `cambio` y `estado`)
+            limpio["relato"] = ficha["relato"]
         if not limpio["reparto"] and not limpio["sets"]:
             raise RuntimeError(
                 "del guion no ha salido ni un personaje ni un sitio. Sin eso no "
@@ -7092,7 +7107,10 @@ def _revisar_y_apuntar(avisar, ctx, planos=None, forzar=False):
         formato=str(plan.get("formato") or ""),
         avisar=avisar,
         # las reglas del estilo, con su gravedad (pasos/reglas_estilo.py)
-        reglas_estilo=_reglas_estilo().para_revisor(_reglas_estilo().de_estilo(estilo)))
+        reglas_estilo=_reglas_estilo().para_revisor(_reglas_estilo().de_estilo(estilo)),
+        # las imagenes base aprobadas (tipo de relato explicito; si no, {}):
+        # los planos editados desde una se comparan con ella
+        bases=p6.rutas_de_bases(ctx.proyecto, assets))
     resumen = revisor.apuntar(ctx.proyecto, plan, veredictos)
     ctx.bitacora.anotar("revisor_imagenes", "assets", {
         "revisados": resumen.get("revisados"), "bien": resumen.get("bien"),

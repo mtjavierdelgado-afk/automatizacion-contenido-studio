@@ -695,8 +695,8 @@ GUIAS = {
         "titulo": "El formato del guion (Parrilla)",
         "donde": "Automatizar → Añadir guiones, y la ficha de un guion",
         "usa": "pasos/parrilla.py (leer_guion, encargo_de, el prompt de conversión), "
-               "«Pasar al Encargo» en web/app.js y, para ESPACIO FIJO, "
-               "pasos/catalogo_visual.py (proponer)",
+               "«Pasar al Encargo» en web/app.js y, para ESPACIO FIJO y «Tipo de "
+               "relato:», pasos/catalogo_visual.py (proponer) y pasos/tipo_relato.py",
         "que_hace": [
             "Todo guion de la Parrilla vive en ESTE formato, venga de un Word, un PDF, "
             "un Excel, de Claude o pegado. Lo que subes o pegas lo convierte Claude; "
@@ -723,6 +723,16 @@ GUIAS = {
             "sitúe en un secundario) y no pone cabeceras de sitio. Sin descripción "
             "no cuenta. La imagen del sitio (opcional) se sube en «El espacio fijo» "
             "de «Un vídeo nuevo» después de «Pasar al Encargo».",
+            "«Tipo de relato:» (opcional, en la cabecera) dice CÓMO se cuenta en "
+            "imágenes: «espacio_que_cambia (objeto | acabados | estado | hora)» es un "
+            "sitio que se ve siempre igual y en el que solo cambia lo que dice la voz "
+            "(cada plano se genera editando una imagen base que apruebas antes); "
+            "«recorrido», varios ambientes de un mismo lugar con la misma luz y "
+            "materiales; «escenario_y_apoyos», un sitio con secundarios; «producto», "
+            "el producto manda y el fondo no se mueve; «clase», una clase. Vale la "
+            "clave o el nombre («Un espacio que cambia (acabados)»), con o sin "
+            "tildes. Sin la línea, manda el tipo de relato del estilo; si tampoco "
+            "hay, con ESPACIO FIJO es «escenario y apoyos» y sin él, «documental».",
         ],
         "si": [
             "Una línea de cabecera por dato: «Uso:», «Formato:», «Duración:»…",
@@ -732,6 +742,8 @@ GUIAS = {
             "«Duración: la elijo en el Encargo» si el original no la dice.",
             "La descripción de ESPACIO FIJO como la quieres ver: va tal cual a todas "
             "las imágenes (mejor en inglés, que es lo que lee el generador).",
+            "«Tipo de relato: espacio_que_cambia (acabados)» junto con ESPACIO FIJO "
+            "para un antes y después o varias versiones del mismo sitio.",
         ],
         "no": [
             "Diálogos entre personajes: el Studio narra con UNA voz (en «exacto» "
@@ -751,6 +763,8 @@ GUIAS = {
             "Objetivo: [qué tiene que conseguir]\n"
             "CTA: [qué se pide al final]\n"
             "Tono: [cómo suena]\n"
+            "Tipo de relato: documental | espacio_que_cambia (objeto | acabados | estado | hora) "
+            "| recorrido | escenario_y_apoyos | producto | clase  (opcional: deja uno o bórrala)\n"
             "\n"
             "ESPACIO FIJO (opcional: bórralo si el vídeo cambia de sitio)\n"
             "- Sitio: [nombre corto]\n"
@@ -840,6 +854,7 @@ GUIAS = {
             "6. Las reglas fijas del cliente (qué mostrar, qué evitar, colores, frases de marca) van a MARCA DEL CLIENTE, no dentro de las escenas.\n"
             "7. No inventes datos: teléfonos, precios o enlaces solo si están en el original. Si falta el CTA, pon [FALTA CTA].\n"
             "8. ESPACIO FIJO solo si el original dice que todo el vídeo ocurre en un mismo sitio (un local, una cocina, un plató). Si no lo dice, no pongas esa sección.\n"
+            "9. \"Tipo de relato\" solo si el original pide una forma concreta de contarlo en imágenes: \"espacio_que_cambia (objeto | acabados | estado | hora)\" si es UN sitio que se ve siempre igual y en el que solo cambia lo que dice la voz (un antes y después, tres paletas, una sala vacía → montada); \"recorrido\" si son varios ambientes de un mismo lugar; \"escenario_y_apoyos\" si es un sitio con otros secundarios; \"producto\" si el producto manda y el fondo no cambia; \"clase\" si es una clase. Si no lo pide, quita la línea.\n"
             "\n"
             "AJUSTE POR RED (en \"adaptar\" aplícalo; en \"exacto\" solo avisa con ⚠ si algo no encaja)\n"
             "- TikTok / Reels / Shorts: vertical. Gancho en los primeros 2–3 s. Un cambio de plano cada 1–3 s. Texto en pantalla frecuente y grande, que refuerce la voz. CTA corto (comenta, guárdalo, link en bio, escríbenos). En TikTok, las palabras clave del tema dichas en la voz.\n"
@@ -859,6 +874,7 @@ GUIAS = {
             "Objetivo: …\n"
             "CTA: …\n"
             "Tono: …\n"
+            "Tipo de relato: … (opcional; quita la línea si no hace falta)\n"
             "\n"
             "ESPACIO FIJO (solo si todo el vídeo ocurre en un mismo sitio; si no, quita esta sección)\n"
             "- Sitio: [nombre corto del sitio]\n"

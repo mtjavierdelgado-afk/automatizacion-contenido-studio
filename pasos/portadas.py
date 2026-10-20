@@ -33,6 +33,7 @@ import json
 import os
 import re
 import sys
+import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -480,7 +481,7 @@ def _limpiar_fondo(fondo):
     salida["planos"] = planos[:2]
     for clave in ("imagen", "imagen2"):
         nombre = str(fondo.get(clave) or "")
-        if re.match(r"^[a-z0-9_.-]{1,80}$", nombre) and ".." not in nombre:
+        if re.match(r"^[a-z0-9_.-]{1,120}$", nombre) and ".." not in nombre:
             salida[clave] = nombre
     for clave in ("ms2",):
         try:
@@ -542,7 +543,8 @@ def carpeta(raiz_publicar):
 
 
 def ruta_diseno(raiz_publicar, pid):
-    if not re.match(r"^[A-Za-z0-9_-]{1,80}$", str(pid)):
+    # hasta 160: los ids nuevos llegan a 60 y los de antes pueden ser mas largos
+    if not re.match(r"^[A-Za-z0-9_-]{1,160}$", str(pid)):
         raise ValueError("vídeo desconocido")
     return os.path.join(carpeta(raiz_publicar), f"{pid}.diseno.json")
 
@@ -560,19 +562,66 @@ def guardar(raiz_publicar, pid, diseno):
     d = normalizar(diseno)
     ruta = ruta_diseno(raiz_publicar, pid)
     os.makedirs(os.path.dirname(ruta), exist_ok=True)
-    temporal = f"{ruta}.{os.getpid()}.tmp"
+    temporal = f"{ruta}.{os.getpid()}.{uuid.uuid4().hex[:6]}.tmp"
     with open(temporal, "w", encoding="utf-8") as fh:
         json.dump(d, fh, ensure_ascii=False, indent=1)
     os.replace(temporal, ruta)
     return d
 
 
+def prefijo_fondo(pid):
+    """El principio del nombre de los fondos de UN video: corto aunque el id
+    sea largo (un id de 60 hacia un nombre de 81 que no pasaba la validacion,
+    y la imagen de la IA, ya pagada, se perdia; revision 19-10)."""
+    return "v" + hashlib.sha1(str(pid).encode("utf-8")).hexdigest()[:12]
+
+
 def nombre_fondo(pid, contenido, extension=".png"):
-    return f"{pid.lower()}_fondo_{hashlib.sha1(contenido).hexdigest()[:10]}{extension}"
+    return f"{prefijo_fondo(pid)}_{hashlib.sha1(contenido).hexdigest()[:10]}{extension}"
+
+
+def es_fondo_de(pid, nombre):
+    return str(nombre or "").startswith(prefijo_fondo(pid) + "_")
+
+
+def fondos_de(raiz_publicar, pid):
+    """Los fondos que ya tiene este video (subidos o hechos con IA), del mas
+    nuevo al mas viejo: lo pagado no se pierde aunque se cierre el editor."""
+    carpeta_f = os.path.join(carpeta(raiz_publicar), "fondos")
+    try:
+        nombres = [n for n in os.listdir(carpeta_f) if es_fondo_de(pid, n) and not n.endswith(".tmp")]
+    except OSError:
+        return []
+    nombres.sort(key=lambda n: os.path.getmtime(os.path.join(carpeta_f, n)), reverse=True)
+    return nombres[:40]
+
+
+def cambiar_estilo(diseno, paleta=None, fuente=None, formato=None):
+    """Cambia la paleta, la letra o el formato SIN rehacer los elementos: lo
+    movido, escondido o anadido a mano se queda (revision 19-10). Los colores
+    que eran de la paleta vieja pasan a los de la nueva; la letra vieja, a la
+    nueva. Las posiciones son relativas: valen en cualquier formato."""
+    d = normalizar(diseno)
+    vieja, nueva = PALETAS[d["paleta"]], PALETAS.get(paleta) or PALETAS[d["paleta"]]
+    cambio_color = {vieja[k].lower(): nueva[k] for k in ("fondo", "acento", "alerta", "texto", "contorno")}
+    for el in d["elementos"]:
+        for campo in ("color", "contorno", "acento", "color_texto"):
+            valor = str(el.get(campo) or "").lower()
+            if valor in cambio_color:
+                el[campo] = cambio_color[valor]
+        if fuente in grafismo.FUENTES and el.get("fuente") in (None, d["fuente"]):
+            el["fuente"] = fuente
+    if paleta in PALETAS:
+        d["paleta"] = paleta
+    if fuente in grafismo.FUENTES:
+        d["fuente"] = fuente
+    if formato in FORMATOS:
+        d["formato"] = formato
+    return normalizar(d)
 
 
 def ruta_fondo(raiz_publicar, nombre):
-    if not re.match(r"^[a-z0-9_.-]{1,80}$", str(nombre)) or ".." in str(nombre):
+    if not re.match(r"^[a-z0-9_.-]{1,120}$", str(nombre)) or ".." in str(nombre):
         raise ValueError("ese fondo no existe")
     return os.path.join(carpeta(raiz_publicar), "fondos", nombre)
 

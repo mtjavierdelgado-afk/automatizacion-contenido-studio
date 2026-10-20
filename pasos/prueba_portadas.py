@@ -147,6 +147,29 @@ def prueba_plantillas():
     with open(portadas.ruta_diseno(CARPETA, "video2"), "w") as fh:
         fh.write("{roto")
     ok(portadas.leer(CARPETA, "video2") is None, "un diseño ilegible es como no tenerlo")
+    largo = "x" * 60
+    nombre = portadas.nombre_fondo(largo, b"png de prueba")
+    ok(len(nombre) < 40 and portadas.es_fondo_de(largo, nombre) and not portadas.es_fondo_de("otro", nombre),
+       f"el nombre de un fondo es corto aunque el id sea de 60, y dice de qué vídeo es ({len(nombre)})")
+    ruta = portadas.ruta_fondo(CARPETA, nombre)
+    os.makedirs(os.path.dirname(ruta), exist_ok=True)
+    with open(ruta, "wb") as fh:
+        fh.write(b"x")
+    ok(portadas.fondos_de(CARPETA, largo) == [nombre] and portadas.fondos_de(CARPETA, "otro") == [],
+       "los fondos ya hechos de un vídeo se listan (y los de otro no)")
+    portadas.guardar(CARPETA, "y" * 120, d)
+    ok(portadas.leer(CARPETA, "y" * 120) is not None, "un vídeo de id largo (de antes) también guarda su diseño")
+    a_mano = portadas.normalizar(d)
+    a_mano["elementos"].append({"tipo": "icono", "icono": "fuego", "x": 0.1, "y": 0.1,
+                                "color": portadas.PALETAS["calido"]["acento"]})
+    a_mano["elementos"][0]["oculto"] = True
+    otro = portadas.cambiar_estilo(a_mano, paleta="oferta", fuente="bangers", formato="1:1")
+    ok(len(otro["elementos"]) == len(a_mano["elementos"]) and otro["elementos"][0].get("oculto")
+       and otro["formato"] == "1:1", "cambiar paleta, letra o formato deja lo hecho a mano (añadido y escondido)")
+    ok(otro["elementos"][-1]["color"] == portadas.PALETAS["oferta"]["acento"] and otro["paleta"] == "oferta",
+       "y los colores de la paleta vieja pasan a los de la nueva")
+    ok(all(e.get("fuente") in (None, "bangers") for e in otro["elementos"] if e["tipo"] == "texto"),
+       "y la letra, a la nueva")
     cat = portadas.catalogo()
     ok(len(cat["plantillas"]) == len(portadas.PLANTILLAS) and cat["formatos"]["9:16"]["zonas"],
        "el catálogo lleva las plantillas y las zonas que tapa cada red")

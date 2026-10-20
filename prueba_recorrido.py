@@ -5021,6 +5021,17 @@ def portadas_disenadas(navegador, datos):
     ok(len(pg.dialogos) > antes and "$" in pg.dialogos[-1], "antes de pagar enseña el precio y pregunta")
     ok(pg.p.evaluate("() => PORT.diseno.fondo.tipo") == "ia" and pg.p.evaluate("() => !!PORT.diseno.fondo.imagen"),
        "el fondo hecho con IA queda puesto")
+    hecho = pg.p.evaluate("() => PORT.diseno.fondo.imagen")
+    _r, d = api.get(f"/api/publicar/videos/{pid}/portada/diseno")
+    ok(hecho in (d.get("fondos") or []), "y queda entre los «fondos ya hechos» del vídeo (lo pagado no se pierde)")
+    # cambiar la paleta no se lleva lo hecho a mano
+    n_antes = pg.p.evaluate("() => PORT.diseno.elementos.length")
+    pg.p.evaluate("() => { PORT.diseno.elementos.push({tipo: 'icono', icono: 'fuego', x: 0.1, y: 0.1}); }")
+    pg.p.locator(".capa-portada select").nth(1).select_option("fiesta")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.p.evaluate("() => PORT.diseno.elementos.length") == n_antes + 1
+       and pg.p.evaluate("() => PORT.diseno.paleta") == "fiesta",
+       "cambiar la paleta deja los elementos añadidos a mano")
     # usarla como portada
     pg.pulsar(".capa-portada button", "Usar como portada")
     fin = time.time() + 40

@@ -18549,7 +18549,7 @@ function minimizarBurbuja(si, sinGuardar) {
 const PORT = {
   pid: '', catalogo: null, diseno: null, planos: [], formatoVideo: '9:16', duracion: 0,
   cambiado: false, vista: '', pidiendo: 0, reloj: null, guias: true, error: '',
-  propuestas: null, proponiendo: false, ia: null, abierto: false,
+  propuestas: null, proponiendo: false, ia: null, abierto: false, fondos: [], cortar: null,
 };
 
 function campoPortada(etiqueta, control, ayuda) {
@@ -18558,12 +18558,11 @@ function campoPortada(etiqueta, control, ayuda) {
 }
 
 async function abrirEditorPortada(pid) {
-  PORT.pid = pid;
-  PORT.abierto = true;
-  PORT.error = '';
-  PORT.propuestas = null;
-  PORT.ia = null;
-  PORT.cambiado = false;
+  // TODO lo del vídeo anterior fuera: su vista, sus propuestas, lo que pensaba
+  if (PORT.vista) URL.revokeObjectURL(PORT.vista);
+  Object.assign(PORT, { pid, abierto: true, error: '', propuestas: null, ia: null, cambiado: false,
+    proponiendo: false, vista: '', diseno: null, fondos: [] });
+  PORT.pidiendo += 1;
   try {
     if (!PORT.catalogo) PORT.catalogo = await pedir(`${BASE}/api/portadas/catalogo`);
     const datos = await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/diseno`));
@@ -18571,6 +18570,7 @@ async function abrirEditorPortada(pid) {
     PORT.planos = datos.planos || [];
     PORT.formatoVideo = datos.formato_video || '9:16';
     PORT.duracion = Number(datos.duracion_s) || 0;
+    PORT.fondos = datos.fondos || [];
   } catch (e) {
     toast(`no se puede abrir el diseño de la portada: ${e.message}`, true);
     PORT.abierto = false;
@@ -18583,6 +18583,8 @@ async function abrirEditorPortada(pid) {
 function cerrarEditorPortada() {
   if (PORT.cambiado && !window.confirm('Hay cambios sin guardar en el diseño de la portada. ¿Cerrar igualmente?')) return;
   PORT.abierto = false;
+  clearTimeout(PORT.reloj);
+  if (PORT.cortar) PORT.cortar.abort();
   const capa = document.querySelector('.capa-portada');
   if (capa) capa.remove();
 }
@@ -18599,19 +18601,28 @@ function refrescarVistaPortada(ya) {
   clearTimeout(PORT.reloj);
   PORT.reloj = setTimeout(async () => {
     const turno = ++PORT.pidiendo;
+    // la vista que se estaba pintando ya no sirve: se corta (el servidor
+    // pinta como mucho dos a la vez)
+    if (PORT.cortar) PORT.cortar.abort();
+    const corte = new AbortController();
+    PORT.cortar = corte;
     const pases = typeof cabeceraDePases === 'function' ? cabeceraDePases() : '';
     const marco = document.querySelector('.capa-portada .vista-portada-grande');
     if (marco) marco.classList.add('pintando');
     try {
       const r = await fetch(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/vista`), {
-        method: 'POST',
+        method: 'POST', signal: corte.signal,
         headers: Object.assign({ 'Content-Type': 'application/json' }, pases ? { 'X-Estudio-Abiertos': pases } : {}),
         body: JSON.stringify({ diseno: PORT.diseno, ancho: 420, guias: PORT.guias }),
       });
       if (!r.ok) {
-        let motivo = `HTTP ${r.status}`;
-        try { motivo = ((await r.json()).error || {}).mensaje || (await r.text()) || motivo; } catch (e) { /* nada */ }
-        throw new Error(motivo);
+        const crudo = await r.text();
+        let motivo = crudo.slice(0, 300) || `HTTP ${r.status}`;
+        try {
+          const datos = JSON.parse(crudo);
+          motivo = (datos.error && (datos.error.mensaje || datos.error)) || motivo;
+        } catch (e) { /* no era JSON */ }
+        throw new Error(String(motivo));
       }
       const blob = await r.blob();
       if (turno !== PORT.pidiendo) return;           // ya se pidió otra
@@ -18619,6 +18630,7 @@ function refrescarVistaPortada(ya) {
       PORT.vista = URL.createObjectURL(blob);
       PORT.error = '';
     } catch (e) {
+      if (e.name === 'AbortError') return;
       if (turno === PORT.pidiendo) PORT.error = `no se ha podido pintar: ${e.message}`;
     }
     if (turno === PORT.pidiendo) pintarVistaPortada();
@@ -18739,7 +18751,7 @@ function bloqueFondoPortada(d) {
   } else if (f.tipo === 'plano') {
     const lista = h('div', { clase: 'planos-portada' });
     const elegidos = f.planos || [];
-    PORT.planos.slice(0, 80).forEach(p => {
+    PORT.planos.slice(0, 400).forEach(p => {
       const img = h('img', { alt: p.sid, title: p.texto, loading: 'lazy' });
       ponerImagenPublicar(img, rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/planos/${encodeURIComponent(p.sid)}.jpg`));
       const n = elegidos.indexOf(p.sid);
@@ -18773,6 +18785,24 @@ function bloqueFondoPortada(d) {
   } else if (f.tipo === 'ia') {
     b.appendChild(h('div', { clase: 'meta' }, f.imagen ? 'Fondo hecho con IA.'
       : 'Todavía no hay fondo hecho con IA: pídelo abajo, en «Con la IA de imágenes».'));
+  }
+  /* LOS FONDOS YA HECHOS de este vídeo (subidos o con IA): lo pagado se puede
+     volver a elegir aunque se cerrara el editor mientras se dibujaba. */
+  if ((f.tipo === 'subida' || f.tipo === 'ia') && (PORT.fondos || []).length) {
+    const lista = h('div', { clase: 'planos-portada' });
+    PORT.fondos.forEach(nombre => {
+      const img = h('img', { alt: nombre, loading: 'lazy' });
+      ponerImagenPublicar(img, rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/fondos/${encodeURIComponent(nombre)}`));
+      const n = [f.imagen, f.imagen2].indexOf(nombre);
+      lista.appendChild(h('button', { clase: `plano-portada${n >= 0 ? ' elegida' : ''}`, type: 'button', title: 'Usar este fondo',
+        onclick: () => {
+          const clave = partida && f.imagen && f.imagen !== nombre && !f.imagen2 ? 'imagen2' : 'imagen';
+          d.fondo = Object.assign({}, d.fondo, { [clave]: nombre });
+          tocarPortada(true);
+        } }, img, n >= 0 ? h('span', { clase: 'numero-plano' }, String(n + 1)) : null));
+    });
+    b.appendChild(h('div', { clase: 'meta' }, 'Fondos ya hechos de este vídeo:'));
+    b.appendChild(lista);
   }
   return b;
 }
@@ -18915,9 +18945,10 @@ async function usarPortada() {
 }
 
 async function proponerPortadas() {
+  const pid = PORT.pid;
   PORT.proponiendo = true;
   pintarEditorPortada();
-  const ruta = rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/proponer`);
+  const ruta = rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/proponer`);
   try {
     const lanzada = await pedir(ruta, { method: 'POST', cuerpo: { diseno: PORT.diseno } });
     let ficha = { estado: 'pensando' };
@@ -18927,16 +18958,20 @@ async function proponerPortadas() {
     }
     if (ficha.estado === 'error') throw new Error(ficha.error);
     if (ficha.estado !== 'listo') throw new Error('tarda demasiado: vuelve a pedirlo en un momento');
+    // SOLO si seguimos en el mismo vídeo: las de A no salen en el editor de B
+    if (PORT.pid !== pid || !PORT.abierto) return;
     PORT.propuestas = ficha.propuestas || [];
   } catch (e) {
-    toast(`no se han podido proponer portadas: ${e.message}`, true);
+    if (PORT.pid === pid) toast(`no se han podido proponer portadas: ${e.message}`, true);
   }
+  if (PORT.pid !== pid) return;
   PORT.proponiendo = false;
   pintarEditorPortada();
 }
 
 async function portadaConIA(que, calidad) {
-  const ruta = rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/ia`);
+  const pid = PORT.pid;
+  const ruta = rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/ia`);
   try {
     const precio = await pedir(ruta, { method: 'POST', cuerpo: { diseno: PORT.diseno, que, calidad } });
     const usd = Number((precio.precio || {}).usd || 0).toFixed(3);
@@ -18955,14 +18990,23 @@ async function portadaConIA(que, calidad) {
     }
     if (t.estado !== 'listo') throw new Error(t.error || t.mensaje || `el trabajo ha acabado «${t.estado}»`);
     const r = t.resultado || {};
+    /* SOLO EN SU VÍDEO. Si entretanto se cerró el editor o se abrió el de
+       otro vídeo, la imagen no se pierde: el servidor la apunta en el diseño
+       guardado y sale en «Fondos ya hechos» al volver a abrirlo. */
+    if (PORT.pid !== pid || !PORT.abierto) return;
+    PORT.fondos = [r.nombre].concat((PORT.fondos || []).filter(x => x !== r.nombre));
     PORT.diseno.fondo = Object.assign({}, PORT.diseno.fondo, { tipo: 'ia', imagen: r.nombre });
     if (que === 'portada') PORT.diseno.modo = 'ia';
     toast(que === 'portada' ? 'Portada hecha con IA: revisa el texto' : 'Fondo hecho con IA');
+    PORT.ia = null;
+    tocarPortada(true);
+    return;
   } catch (e) {
-    toast(`no se ha podido hacer con la IA: ${e.message}`, true);
+    if (PORT.pid === pid) toast(`no se ha podido hacer con la IA: ${e.message}`, true);
   }
+  if (PORT.pid !== pid || !PORT.abierto) return;
   PORT.ia = null;
-  tocarPortada(true);
+  pintarEditorPortada();
 }
 
 /* ================================================================== PUBLICAR

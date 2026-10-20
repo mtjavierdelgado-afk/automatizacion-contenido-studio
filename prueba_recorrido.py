@@ -5057,5 +5057,90 @@ def portadas_disenadas(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def elementos_en_el_video(navegador, datos):
+    """Rama elementos-video (19-10-2026): el grafismo encima de cada imagen, al
+    ritmo de la voz. Se añade y se guarda en la diapositiva, Claude lo propone
+    para todo el vídeo, solo queda pendiente el montaje (ni una imagen), y al
+    montar los elementos van en la capa del plano. La opción de pedir la imagen
+    con el texto dentro apunta una nota (se paga al aplicarla, no antes)."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    _r, antes = api.get(f"/api/proyectos/{pid}")
+    assets_antes = {p.get("id"): (p.get("estado"), p.get("firma")) for p in antes.get("pasos") or []}.get("assets")
+    pg = Pagina(navegador, datos, nombre="elementos")
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
+    ok(pg.esperar(".elementos-plano", "Elementos de esta imagen", 20), "la diapositiva trae «Elementos de esta imagen»")
+    sid = pg.p.evaluate("() => (PREVIA.ficha && PREVIA.ficha.escenas[PREVIA.indice || 0] || {}).id")
+    pg.pulsar(".elementos-plano button", "Añadir")
+    ok(pg.esperar(".elemento-plano", segundos=10) and pg.visible(".elementos-plano", "sin guardar"),
+       "«Añadir» pone uno, sin guardar todavía")
+    pg.p.locator(".elemento-plano input[type=text]").first.fill("¡GRATIS!")
+    pg.pulsar(".elementos-plano button", "Ver cómo queda")
+    ok(pg.esperar(".vista-elementos", segundos=30), "«Ver cómo queda» pinta la imagen con el elemento encima")
+    pg.pulsar(".elementos-plano button", "Guardar")
+    fin = time.time() + 20
+    guardados = {}
+    while time.time() < fin:
+        _r, d = api.get(f"/api/proyectos/{pid}/planos/elementos")
+        guardados = d.get("planos") or {}
+        if guardados:
+            break
+        pg.p.wait_for_timeout(500)
+    ok(any(e.get("texto") == "¡GRATIS!" for l in guardados.values() for e in l),
+       f"«Guardar» lo deja en el plano ({list(guardados)[:3]}, {sid})")
+    _r, despues = api.get(f"/api/proyectos/{pid}")
+    estados = {p.get("id"): (p.get("estado"), p.get("firma")) for p in despues.get("pasos") or []}
+    ok(estados.get("assets") == assets_antes, "ni una imagen queda pendiente (no se paga nada)")
+    ok(estados.get("callouts", ("",))[0] == "obsoleto", "solo queda pendiente el montaje")
+    # Claude, para todo el vídeo (CLI falso)
+    pg.js("pintarLight();")
+    pg.pulsar(".elementos-video button", "Proponer para todo el vídeo")
+    ok(pg.esperar(".elementos-video .caja-aviso", "Claude propone", 60), "Claude propone elementos para todo el vídeo")
+    pg.pulsar(".elementos-video button", "Aplicar sumando")
+    fin = time.time() + 20
+    while time.time() < fin:
+        _r, d = api.get(f"/api/proyectos/{pid}/planos/elementos")
+        if len(d.get("planos") or {}) > 1:
+            break
+        pg.p.wait_for_timeout(500)
+    planos = d.get("planos") or {}
+    ok(len(planos) > 1 and "NOEXISTE" not in planos, f"se aplican a varias imágenes ({len(planos)}) y no a planos que no existen")
+    ok(any(e.get("texto") == "¡GRATIS!" for e in planos.get(sid, [])), "sumando: lo que ya había se queda")
+    # montar y mirarlo en la capa
+    r, dd = api.post(f"/api/proyectos/{pid}/generar", {"tanda": "render", "modo": "pendientes"})
+    fin_montaje = api.esperar(dd.get("trabajo_id") or (dd.get("trabajo") or {}).get("id"), 600)
+    ok(fin_montaje.get("estado") == "listo", f"se vuelve a montar ({fin_montaje.get('estado')})")
+    activa = _version_de(datos, "callouts", "").get("activa")
+    carpeta = os.path.join(datos["proyectos"], pid, "pasos", "callouts", f"v{activa}", "capas_fijas")
+    capa = ""
+    if os.path.isfile(os.path.join(carpeta, f"{sid}.svg")):
+        with open(os.path.join(carpeta, f"{sid}.svg"), encoding="utf-8") as fh:
+            capa = fh.read()
+    ok("¡GRATIS!" in capa and "animateTransform" in capa, "al montar, el elemento va en la capa del plano, animado")
+    # la otra opción: texto dentro de la imagen (nota, se paga al aplicarla)
+    _r, rep = api.get(f"/api/proyectos/{pid}/repaso")
+    notas_antes = len(rep.get("notas") or [])
+    pg.js("APP.light.video.vista = 'previa'; pintarLight();")
+    pg.pulsar(".elementos-plano button", "Texto dentro de la imagen")
+    ok(pg.esperar(".capa-dialogo", "Texto dentro de la imagen", 10), "pide el texto y avisa de que se paga")
+    pg.p.locator(".capa-dialogo input").first.fill("OFERTA")
+    pg.pulsar(".capa-dialogo button", "Apuntar la nota")
+    pg.p.wait_for_timeout(1500)
+    _r, rep = api.get(f"/api/proyectos/{pid}/repaso")
+    nuevas = [n for n in rep.get("notas") or [] if "OFERTA" in str(n.get("texto") or "")]
+    ok(len(rep.get("notas") or []) == notas_antes + 1 and nuevas and nuevas[0].get("estado") != "aplicado",
+       "queda como nota de esa imagen, sin aplicar (no se ha pagado nada)")
+    _r, fin_estado = api.get(f"/api/proyectos/{pid}")
+    ok({p.get("id"): (p.get("estado"), p.get("firma")) for p in fin_estado.get("pasos") or []}.get("assets") == assets_antes,
+       "y las imágenes siguen igual")
+    # dejarlo como estaba para los escenarios de después
+    api.post(f"/api/proyectos/{pid}/elementos/aplicar", {"planos": {k: [] for k in planos}, "reemplazar": True})
+    for n in nuevas:
+        api._r("DELETE", f"/api/proyectos/{pid}/repaso/{n.get('id')}")
+    pg.sin_errores("los elementos del vídeo")
+    pg.cerrar()
+
+
 if __name__ == "__main__":
     sys.exit(main())

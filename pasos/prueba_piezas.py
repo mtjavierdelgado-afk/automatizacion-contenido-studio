@@ -4743,6 +4743,12 @@ def prueba_elementos_video():
     ok(propuesta["S004"][0]["y"] < 0.3, "«arriba» va arriba, lejos del subtítulo")
     vertical = EV.colocar({"tipo": "texto"}, "derecha", vertical=True)
     ok(vertical["x"] < 0.8, "en vertical, a la derecha no tanto: ahí están los botones de la red")
+    seguidos = EV.momentos([{"tipo": "texto", "palabra": 1}, {"tipo": "icono", "palabra": 4}], escena, 4.0)
+    ok(seguidos[0][1] <= seguidos[1][0], f"uno detrás de otro: el primero se va cuando salta el segundo ({seguidos})")
+    dos = EV.leer_propuesta({"planos": {"S004": [{"tipo": "texto", "texto": "A", "palabra": 0, "posicion": "arriba"},
+                                                 {"tipo": "texto", "texto": "B", "palabra": 3, "posicion": "arriba"}]}},
+                            [escena], vertical=True)["S004"]
+    ok((dos[0]["x"], dos[0]["y"]) != (dos[1]["x"], dos[1]["y"]), "dos en el mismo sitio: el segundo va al siguiente libre")
     texto = EV.instruccion([escena], "dinamico")
     ok('<p id="S004"' in texto and "4:99" in texto, "a Claude le llegan las palabras numeradas")
     ok("«99 soles»" in EV.nota_texto_en_imagen("99 soles"), "la nota de la IA lleva el texto exacto")

@@ -271,6 +271,16 @@ derechos: «Mario Kart», «Nintendo Switch»…):
    te ofrece quitar las fotos adjuntas (pueden llevar logos).
 3. Un rechazo **no para las demás**: el resto de la cola sigue.
 
+### Elementos encima de la imagen
+
+En cada diapositiva, **✨ Elementos de esta imagen** pone grafismo que salta al
+ritmo de la voz: elige el tipo, «Añadir», la palabra en la que salta, el sitio
+y cómo entra; «Ver cómo queda» y **Guardar**. **Proponer con Claude** lo hace
+por ti (en una imagen o en todo el vídeo, con la intensidad Sobrio, Vivo o
+Dinámico). Es gratis: se aplica al montar el vídeo y no redibuja ninguna
+imagen. «Texto dentro de la imagen» es la opción con IA: apunta una nota para
+redibujarla con el texto dentro, y se paga al aplicarla.
+
 ## Vídeo
 
 - **Montar el vídeo** junta imágenes, voz, subtítulos, música y efectos en el MP4.

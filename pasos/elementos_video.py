@@ -174,6 +174,19 @@ def _animado(interior, entrada, desde, hasta, cx, cy, W, uid):
     return f'<g opacity="0">{cuerpo}{aparece}</g>'
 
 
+def momentos(elementos, escena, duracion):
+    """[(desde, hasta)] de todos, en el orden de la lista. UNO DETRAS DE OTRO:
+    un elemento se va cuando salta el siguiente (si no, dos en pantalla a la
+    vez se pisan y ninguno se lee). Nunca menos de 0,6 s a la vista."""
+    tiempos = [list(momento(el, escena, duracion)) for el in elementos]
+    orden = sorted(range(len(tiempos)), key=lambda i: tiempos[i][0])
+    for a, b in zip(orden, orden[1:]):
+        siguiente = tiempos[b][0]
+        if tiempos[a][1] > siguiente - 0.05:
+            tiempos[a][1] = round(max(tiempos[a][0] + 0.6, siguiente - 0.05), 3)
+    return [tuple(t) for t in tiempos]
+
+
 def fragmento(escena, elementos, salida, paleta, duracion):
     """Los elementos de un plano, dibujados y animados. -> svg ('' si no hay)."""
     elementos = limpiar(elementos)
@@ -181,12 +194,13 @@ def fragmento(escena, elementos, salida, paleta, duracion):
         return ""
     W, H = int(salida[0]), int(salida[1])
     piezas = []
+    tiempos = momentos(elementos, escena, float(duracion))
     for i, el in enumerate(elementos):
         resuelto = _colores(el, paleta)
         interior = grafismo.elemento(resuelto, W, H)
         if not interior:
             continue
-        desde, hasta = momento(el, escena, float(duracion))
+        desde, hasta = tiempos[i]
         cx, cy = _centro(resuelto, W, H)
         uid = f"el{re.sub(r'[^A-Za-z0-9]', '', str(escena.get('id') or ''))}{i}"
         piezas.append(_animado(interior, el.get("entrada") or "pop", desde, hasta, cx, cy, W, uid))
@@ -198,8 +212,8 @@ def fragmento(escena, elementos, salida, paleta, duracion):
 def fichas(escena, elementos, duracion):
     """Lo que se apunta en la ficha del plano (para la pantalla)."""
     salida = []
-    for el in limpiar(elementos):
-        desde, hasta = momento(el, escena, float(duracion))
+    limpios = limpiar(elementos)
+    for el, (desde, hasta) in zip(limpios, momentos(limpios, escena, float(duracion))):
         salida.append({"tipo": f"elemento:{el['tipo']}", "texto": el.get("texto") or el.get("icono") or "",
                        "desde": desde, "hasta": hasta})
     return salida
@@ -220,8 +234,8 @@ def estatico(elementos, salida, paleta):
 POSICIONES = {
     "horizontal": {"arriba": (0.5, 0.16), "centro": (0.5, 0.42), "izquierda": (0.24, 0.38),
                    "derecha": (0.76, 0.38), "arriba_izquierda": (0.2, 0.16), "arriba_derecha": (0.8, 0.16)},
-    "vertical": {"arriba": (0.48, 0.2), "centro": (0.48, 0.42), "izquierda": (0.28, 0.36),
-                 "derecha": (0.66, 0.36), "arriba_izquierda": (0.26, 0.2), "arriba_derecha": (0.68, 0.2)},
+    "vertical": {"arriba": (0.48, 0.18), "centro": (0.48, 0.42), "izquierda": (0.27, 0.32),
+                 "derecha": (0.68, 0.32), "arriba_izquierda": (0.27, 0.24), "arriba_derecha": (0.68, 0.24)},
 }
 
 
@@ -306,7 +320,7 @@ def leer_propuesta(datos, escenas, vertical):
         if escena is None or not isinstance(lista, list):
             continue
         n_palabras = len(str(escena.get("narracion") or "").split())
-        usadas, elementos = set(), []
+        usadas, elementos, sitios = set(), [], []
         for crudo in lista:
             if not isinstance(crudo, dict) or crudo.get("tipo") not in TIPOS:
                 continue
@@ -319,7 +333,11 @@ def leer_propuesta(datos, escenas, vertical):
             usadas.add(palabra)
             el = {k: v for k, v in crudo.items() if k not in ("posicion",)}
             el["palabra"] = palabra
-            el.setdefault("color", "acento" if el["tipo"] in ("texto", "insignia", "etiqueta", "subrayado") else "alerta")
+            if el["tipo"] in ("texto", "insignia", "etiqueta", "subrayado"):
+                el.setdefault("color", "acento")
+            elif el["tipo"] in ("flecha", "circulo", "rayo"):
+                el.setdefault("color", "alerta")
+            # (un icono sin color lleva el suyo: el dinero verde, la estrella amarilla)
             if el["tipo"] == "texto":
                 el.setdefault("estilos", ["contorno", "sombra"])
                 el.setdefault("tam", 0.1)
@@ -329,7 +347,14 @@ def leer_propuesta(datos, escenas, vertical):
                 el.setdefault("tam", 0.07)
             if el["tipo"] in ("insignia",):
                 el.setdefault("tam", 0.08)
-            el = colocar(el, crudo.get("posicion") or "arriba", vertical)
+            # CADA UNO EN SU SITIO dentro del plano: si Claude repite sitio, el
+            # siguiente libre (en el orden de POSICIONES)
+            sitio = crudo.get("posicion") if crudo.get("posicion") in POSICIONES["horizontal"] else "arriba"
+            if sitio in sitios:
+                libres = [x for x in POSICIONES["horizontal"] if x not in sitios]
+                sitio = libres[0] if libres else sitio
+            sitios.append(sitio)
+            el = colocar(el, sitio, vertical)
             elementos.append(el)
         elementos = limpiar(elementos)
         if elementos:

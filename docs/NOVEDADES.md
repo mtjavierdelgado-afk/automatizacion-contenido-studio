@@ -10,6 +10,28 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Elementos encima de las imágenes, al ritmo de la voz (19 de octubre)**
+- En **Imágenes**, cada diapositiva trae **✨ Elementos de esta imagen**:
+  palabras que saltan, insignias (x3, -50 %, NUEVO), etiquetas de precio,
+  iconos, flechas y círculos que señalan, estrellas, subrayados, bandas,
+  cintas y el rayo de un versus. Cada uno **salta en la palabra que elijas**
+  (la voz trae el momento exacto de cada palabra), en el sitio que digas
+  (arriba, centro, izquierda…) y con su entrada: salta, golpe, desliza,
+  aparece suave o se dibuja. Uno se va cuando salta el siguiente, para que
+  nunca se pisen.
+- **«Ver cómo queda»** pinta la imagen con sus elementos encima.
+- **«Proponer con Claude»**, para una imagen o para **todo el vídeo**, con una
+  intensidad: **Sobrio** (unos 6 por minuto), **Vivo** (unos 13, lo
+  recomendado) o **Dinámico** (unos 23). Lo propuesto sale «sin guardar» para
+  mirarlo, y «Aplicar sumando» o «Aplicar en lugar de lo que hay» lo pone en
+  todas las imágenes de una vez.
+- **No se paga nada**: cambiarlos solo deja pendiente el montaje de esas
+  imágenes (gratis); ninguna imagen se vuelve a dibujar. Sin elementos, el
+  vídeo sale exactamente igual que antes.
+- **La otra opción, con IA (se paga)**: «Texto dentro de la imagen» apunta una
+  nota en esa imagen para que la IA la vuelva a dibujar con el texto DENTRO
+  (un cartel, una pantalla…). Se paga al aplicar la nota, como cualquier otra.
+
 **Portadas diseñadas, como las miniaturas que funcionan (19 de octubre)**
 - En **Publicar → Portada**, el botón **Diseñar portada** abre un editor con
   la vista a un lado y los mandos al otro.

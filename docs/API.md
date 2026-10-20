@@ -307,6 +307,13 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/montaje` | El montaje del vídeo (movimiento, subtítulos, gancho, cifras, barra), las transiciones elegidas y si está pendiente de aplicar. |
 | `PUT` | `/api/proyectos/{pid}/montaje` | Cambia el montaje o las transiciones. Solo guarda lo que difiere de siempre; volver a lo de siempre quita la clave. 409 mientras se monta. |
 | `POST` | `/api/proyectos/{pid}/montaje/aplicar` | Rehace las capas y vuelve a montar el vídeo con el montaje nuevo. Ni una imagen. 409 si aún no está montado. |
+| `POST` | `/api/proyectos/{pid}/elementos/aplicar` | Pone los elementos de varios planos de una vez: {planos: {sid: [...]}, |
+| `POST` | `/api/proyectos/{pid}/elementos/proponer` | Claude propone elementos para el video (o para {planos: [sid]}) con la |
+| `GET` | `/api/proyectos/{pid}/elementos/proponer/{rid}` | Como va la propuesta de elementos, y cual es al terminar. |
+| `GET` | `/api/proyectos/{pid}/planos/elementos` | {planos: {sid: [elementos]}, no_aplica, tipos, entradas, intensidades, |
+| `PUT` | `/api/proyectos/{pid}/planos/{sid}/elementos` | {elementos: [...]} de UN plano (vacia, los quita). Deja pendientes ese |
+| `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/nota-ia` | LA OTRA OPCION (se paga al aplicarla): una nota de imagen que pide |
+| `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/vista` | La imagen del plano con sus elementos encima, quietos (todos a la vez), |
 | `GET` | `/api/proyectos/{pid}/planos/montaje` | El movimiento y la 2.5D elegidos para cada plano: `{video, planos: {sid: {movimiento?, profundidad?}}, planos_del_video, no_aplica, niveles, profundidad: {disponible, por_que}}`. `no_aplica` son las cartelas y cabeceras, que llevan siempre lo de siempre. |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/montaje` | `{movimiento?: quieto\|sobrio\|vivo\|dinamico\|null, profundidad?: true\|false\|null}`. null es «como el vídeo»; lo que queda vacío quita la clave (regla 1). Va en `callouts.unidades["escena:SID"].montaje`: deja obsoleto SOLO ese plano. 400 valor raro o cartela, 404 plano que no existe, 409 2.5D sin modelo o vídeo montándose. |
 
@@ -440,4 +447,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**326 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**333 endpoints.** Escrito por `generar_api.py` desde `app.py`.

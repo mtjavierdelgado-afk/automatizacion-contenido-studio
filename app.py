@@ -3980,7 +3980,7 @@ def guardar_catalogo(pid: str, cuerpo: dict = Body(default=None)):
     # /escenarios. Guardar el catalogo a mano las borraba, y con ellas
     # desaparecian los logos de todos los planos.
     previo = (ctx.estado.params("assets") or {}).get("catalogo") or {}
-    for clave in ("reales", "_firma_guion", "relato"):
+    for clave in ("reales", "_firma_guion", "relato", "_pedido"):
         if clave in previo and clave not in catalogo:
             limpio[clave] = previo[clave]
     if isinstance(catalogo.get("relato"), dict) and catalogo["relato"]:
@@ -4291,7 +4291,13 @@ def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer):
     elif rehacer and hay and not cambio:
         avisar(0.02, "el guion no ha cambiado: se conservan los sitios ya deducidos")
 
-    if (rehacer and cambio) or incompleto or not hay:
+    # CON UN PEDIDO ESCRITO se vuelve a leer aunque el guion no haya cambiado
+    # (rama tipo-de-relato: «Pedido para el reparto de sitios»). La tanda manda
+    # el pedido vacio, asi que para ella todo sigue como estaba.
+    pedido = " ".join(str(peticion or "").split())
+    if pedido and hay:
+        avisar(0.02, "con tu pedido: se vuelve a repartir el reparto y los sitios")
+    if (rehacer and cambio) or incompleto or not hay or pedido:
         avisar(0.02, "leyendo el guion para deducir quien sale y donde ocurre")
         ficha = _correr_catalogo(_tramo(0.02, 0.33), ctx, ajuste_catalogo, peticion)
         # Se guarda lo mismo que guardaba el PUT de aprobar: reparto, sitios y
@@ -4314,6 +4320,9 @@ def _correr_escenarios(avisar, ctx, ajuste_catalogo, peticion, rehacer):
             # con que tipo de relato se repartio (y, en «un espacio que
             # cambia», sus beats traen `cambio` y `estado`)
             limpio["relato"] = ficha["relato"]
+        if pedido:
+            # el ultimo pedido con el que se repartio, para enseñarlo
+            limpio["_pedido"] = pedido[:400]
         if not limpio["reparto"] and not limpio["sets"]:
             raise RuntimeError(
                 "del guion no ha salido ni un personaje ni un sitio. Sin eso no "
@@ -4578,6 +4587,420 @@ def rehacer_planos_del_espacio(pid: str, cuerpo: dict = Body(default=None)):
 
 
 
+
+
+# ----------------------------------------------------------- TIPO DE RELATO
+#
+# Rama tipo-de-relato (20-10-2026). COMO se cuenta un video en imagenes
+# (`pasos/tipo_relato.py`): documental, un espacio que cambia, recorrido,
+# escenario y apoyos, producto o clase. Se elige en el Encargo (opcion
+# `tipo_relato` de `_opciones_al_crear`), en la Parrilla («Tipo de relato:») o
+# por defecto en el preset de Estilo (`estilo.relato`), y se resuelve con
+# `tipo_relato.resolver` (opcion B del dueño: video > estilo > espacio fijo
+# implicito > documental).
+#
+# En un video HECHO funciona como «Aplicar el espacio fijo»: guardar no dibuja
+# nada, se enseña que planos cambian y cuanto cuesta, y se rehace lo que se pide
+# (todos, marcados o ninguno). Los modos que EDITAN necesitan la imagen base del
+# sitio aprobada: subida (gratis) o generada (se paga una imagen, con su coste
+# delante), y se aprueba antes de pagar ningun plano.
+
+def _tipo_relato():
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    return PASOS_MODULOS.tipo_relato
+
+
+def _tipo_relato_guardado(ctx):
+    try:
+        return _tipo_relato().normalizar((ctx.estado.params("assets") or {}).get("tipo_relato"))
+    except ValueError:
+        return {}
+
+
+def _ficha_tipo_relato(ctx):
+    """Lo que la pantalla necesita del tipo de relato del video."""
+    tr = _tipo_relato()
+    p6 = PASOS_MODULOS.p6_assets
+    params = ctx.estado.params("assets") or {}
+    guardado = _tipo_relato_guardado(ctx)
+    resuelto = tr.resolver(params)
+    try:
+        sitio, espacio = p6.espacio_del_relato(ctx.proyecto, params)
+    except Exception:                                       # noqa: BLE001
+        sitio, espacio = None, {}
+    bases = {}
+    for sid, ficha in (guardado.get("bases") or {}).items():
+        bases[sid] = {"aprobada": ficha.get("aprobada", False),
+                      "imagen_url": f"/api/proyectos/{ctx.id}/tipo_relato/base/imagen?sitio={sid}"}
+    subida = (params.get("espacio_fijo") or {}).get("imagen") \
+        if isinstance(params.get("espacio_fijo"), dict) else None
+    catalogo = params.get("catalogo") or {}
+    sin_cambios = (resuelto["modo"] == "espacio_que_cambia" and tr.activo(resuelto)
+                   and bool(catalogo.get("beats"))
+                   and not any(b.get("cambio") or b.get("estado")
+                               for b in catalogo.get("beats") or [] if isinstance(b, dict)))
+    return {
+        "tipo_relato": {k: v for k, v in guardado.items() if k != "bases"},
+        "resuelto": dict(resuelto, nombre=tr.nombre(resuelto["modo"], resuelto.get("cambia"))),
+        "del_estilo": tr.normalizar_de_estilo((params.get("estilo") or {}).get("relato"))
+                      if isinstance(params.get("estilo"), dict) else {},
+        "modos": [{"clave": k, "nombre": v} for k, v in tr.MODOS.items()],
+        "cambia": [{"clave": k, "nombre": v} for k, v in tr.CAMBIA.items()],
+        "edita": tr.edita(resuelto),
+        "sitio": sitio, "sitio_nombre": (espacio or {}).get("sitio") or sitio,
+        "bases": bases,
+        "base_aprobada": bool(sitio and (bases.get(sitio) or {}).get("aprobada")),
+        "puede_usar_subida": bool(subida and sitio),
+        "usd_base": _usd_por_imagen(ctx),
+        "calidad": str(params.get("calidad") or "low"),
+        "faltan_cambios": sin_cambios,
+    }
+
+
+@app.get("/api/proyectos/{pid}/tipo_relato")
+def leer_tipo_relato(pid: str):
+    """El tipo de relato del video: el guardado, el que rige, las bases y los planos que cambian."""
+    ctx = contexto(pid)
+    ficha = _ficha_tipo_relato(ctx)
+    ficha["cambios"] = _cambios_del_relato(ctx) if _tipo_relato_guardado(ctx) else None
+    return ficha
+
+
+def _cambios_del_relato(ctx):
+    """QUE PLANOS HECHOS CAMBIARIAN con el tipo de relato que rige, y su coste.
+
+    -> {"planos": [{id, sitio, narracion}], "imagenes", "usd_por_imagen", "usd",
+        "calidad", "hechas"}. Cambia un plano hecho del sitio cuando:
+      - se edita desde la base y su imagen no salio de editarla;
+      - lleva la base como referencia (modos de referencia o planos de detalle)
+        y no la lleva;
+      - salio de editar una base y ya no se edita (se volvio a otro modo).
+    Repetir «Aplicar» con lo mismo no ofrece nada que rehacer."""
+    tr = _tipo_relato()
+    p6 = PASOS_MODULOS.p6_assets
+    params = ctx.estado.params("assets") or {}
+    relato = tr.resolver(params)
+    plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    escenas = [e for e in _escenas_que_pagan(plan) if not e.get("componente")]
+    carpetas = _carpetas_de_assets(ctx)
+    salida = {"planos": [], "imagenes": 0, "hechas": 0}
+    if escenas and carpetas:
+        try:
+            sitio, _ = p6.espacio_del_relato(ctx.proyecto, params)
+        except Exception:                                   # noqa: BLE001
+            sitio = None
+        bases = tr.bases_aprobadas(params) if tr.activo(relato) else {}
+        modo_img = p6.modo_de(params.get("estilo"))
+        try:
+            previstos = p6.sitios_previstos(ctx.proyecto, params, escenas)
+        except Exception:                                   # noqa: BLE001
+            previstos = [e.get("set") for e in escenas]
+        for escena, previsto in zip(escenas, previstos):
+            ficha = None
+            for carpeta in carpetas:
+                if os.path.exists(os.path.join(carpeta, "escenas", f"{escena['id']}.png")):
+                    ficha = PASOS_MODULOS.medios.leer_json(
+                        os.path.join(carpeta, "escenas", f"{escena['id']}.json"), {}) or {}
+                    break
+            if ficha is None:
+                continue
+            salida["hechas"] += 1
+            papeles = {r.get("papel") for r in ficha.get("referencias") or []
+                       if isinstance(r, dict)}
+            familia = (PASOS_MODULOS.encuadres.por_id_de(modo_img).get(escena.get("carta") or "")
+                       or {}).get("familia", "")
+            editaria = tr.plano_se_edita(dict(escena, set=previsto), relato, sitio, familia)
+            cambia = False
+            if editaria:
+                cambia = "base" not in papeles
+            elif "base" in papeles:
+                cambia = True
+            elif tr.activo(relato) and previsto in bases and "espacio" not in papeles:
+                cambia = True
+            if cambia:
+                salida["planos"].append({
+                    "id": escena["id"], "sitio": previsto,
+                    "narracion": " ".join(str(escena.get("narracion") or "").split())[:140]})
+    salida["imagenes"] = len(salida["planos"])
+    usd = _usd_por_imagen(ctx)
+    salida.update({"calidad": str(params.get("calidad") or "low"),
+                   "usd_por_imagen": usd, "usd": round(salida["imagenes"] * usd, 2)})
+    return salida
+
+
+def _guardar_tipo_relato(ctx, nuevo):
+    """Escribe `assets.tipo_relato` conservando las bases. {} borra el modo."""
+    tr = _tipo_relato()
+    guardado = _tipo_relato_guardado(ctx)
+    final = {k: v for k, v in (nuevo or {}).items() if k in ("modo", "cambia")}
+    if guardado.get("bases"):
+        final["bases"] = guardado["bases"]
+    final = tr.normalizar(final) if final else {}
+    ctx.estado.actualizar_params("assets", {"tipo_relato": final or None}) \
+        if (final or guardado) else None
+    return final
+
+
+@app.post("/api/proyectos/{pid}/tipo_relato/aplicar")
+def aplicar_tipo_relato(pid: str, cuerpo: dict = Body(default=None)):
+    """Guarda el tipo de relato de un video (hecho o no). No dibuja nada.
+
+    {tipo_relato: {modo, cambia?}} o {tipo_relato: null} para volver a lo que
+    diga el estilo. En un video con catalogo, un modo de UN solo sitio ajusta
+    los sitios sin llamar a nadie (`catalogo_visual.ajustar_catalogo`). -> la
+    ficha y los planos que cambiarian (`cambios`)."""
+    tr = _tipo_relato()
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    crudo = datos.get("tipo_relato")
+    if crudo is not None and not isinstance(crudo, dict):
+        raise ErrorApi(400, "'tipo_relato' tiene que ser un objeto {modo, cambia} o null")
+    try:
+        pedido = tr.normalizar({k: v for k, v in (crudo or {}).items()
+                                if k in ("modo", "cambia")}) if crudo else {}
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    catalogo_mod = _catalogo_visual()
+    avisos = []
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo generándose en este vídeo: espera a que "
+                                "termine y vuelve a aplicarlo")
+        _guardar_tipo_relato(ctx, pedido)
+        params = ctx.estado.params("assets") or {}
+        relato = tr.resolver(params)
+        guardado = params.get("catalogo") or {}
+        if tr.activo(relato) and (guardado.get("sets") or guardado.get("beats")):
+            espacio = _espacio_fijo_guardado(ctx) or catalogo_mod.espacio_del_catalogo(guardado)
+            if espacio:
+                ids = [b["id"] for b in _bloques_del_guion(ctx)]
+                try:
+                    catalogo, avisos = catalogo_mod.ajustar_catalogo(guardado, espacio, ids)
+                except ValueError as fallo:
+                    raise ErrorApi(400, str(fallo))
+                catalogo["relato"] = {k: v for k, v in (("modo", relato["modo"]),
+                                                        ("cambia", relato.get("cambia"))) if v}
+                if relato["modo"] != "espacio_que_cambia":
+                    for beat in catalogo.get("beats") or []:
+                        beat.pop("cambio", None)
+                        beat.pop("estado", None)
+                firma = _firma_del_guion(ctx)
+                if firma:
+                    if _espacio_fijo_guardado(ctx):
+                        firma += "+" + hashlib.sha256(json.dumps(
+                            _espacio_fijo_guardado(ctx), sort_keys=True,
+                            ensure_ascii=False).encode("utf-8")).hexdigest()[:8]
+                    firma += "+relato:" + relato["modo"] + (
+                        ":" + relato["cambia"] if relato.get("cambia") else "")
+                    catalogo["_firma_guion"] = firma
+                ctx.estado.actualizar_params("assets", {"catalogo": catalogo})
+    ctx.bitacora.anotar("tipo_relato_aplicado", "assets", {
+        "modo": (pedido or {}).get("modo"), "cambia": (pedido or {}).get("cambia")})
+    ficha = _ficha_tipo_relato(ctx)
+    ficha.update({"avisos": avisos, "cambios": _cambios_del_relato(ctx),
+                  "estado": ctx.estado.estado_de("assets")})
+    return ficha
+
+
+def _correr_cambios_relato(avisar, ctx, ajuste):
+    """Claude escribe QUE CAMBIA en cada tramo de un catalogo ya guardado."""
+    tr = _tipo_relato()
+    params = ctx.estado.params("assets") or {}
+    relato = tr.resolver(params)
+    catalogo, avisos = _catalogo_visual().proponer_cambios(
+        _bloques_del_guion(ctx), params.get("catalogo") or {}, relato, ajuste=ajuste,
+        avisar=avisar, proyecto_id=ctx.id, cwd=ctx.proyecto.raiz)
+    ctx.estado.actualizar_params("assets", {"catalogo": catalogo})
+    ctx.bitacora.anotar("tipo_relato_cambios", "assets",
+                        {"tramos": len(catalogo.get("beats") or [])})
+    avisar(1.0, "cambios por tramo escritos")
+    return {"tramos": len(catalogo.get("beats") or []), "avisos": avisos}
+
+
+@app.post("/api/proyectos/{pid}/tipo_relato/cambios", status_code=202)
+def escribir_cambios_relato(pid: str, cuerpo: dict = Body(default=None)):
+    """En «un espacio que cambia», Claude escribe el cambio de cada tramo (solo texto)."""
+    tr = _tipo_relato()
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    relato = tr.resolver(ctx.estado.params("assets") or {})
+    if relato["modo"] != "espacio_que_cambia" or not tr.activo(relato):
+        raise ErrorApi(400, "solo «Un espacio que cambia» lleva cambios por tramo")
+    por_fase = CLI_CLAUDE.por_defecto_de("catalogo_visual")
+    ajuste = _ajuste_cli(datos, por_fase["modelo"], por_fase["esfuerzo"])
+    trabajo_id = ctx.gestor.lanzar("tipo_relato_cambios", _correr_cambios_relato, ctx,
+                                   ajuste, paso="assets")
+    _registrar_trabajo(trabajo_id, ctx.id)
+    return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id),
+            "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
+
+
+def _correr_base(avisar, ctx, rehacer):
+    """Genera (y paga) la imagen base del sitio. No la aprueba."""
+    p6 = PASOS_MODULOS.p6_assets
+    avisar(0.1, "dibujando la imagen base del sitio (se paga una imagen)")
+    hecho = p6.generar_imagen_base(ctx.proyecto, ctx.estado.params("assets") or {},
+                                   rehacer=rehacer)
+    tr = _tipo_relato()
+    with _cerrojo_de_cadena(ctx.id):
+        guardado = _tipo_relato_guardado(ctx)
+        bases = dict(guardado.get("bases") or {})
+        bases[hecho["sitio"]] = {"imagen": hecho["imagen"], "aprobada": False}
+        guardado["bases"] = bases
+        ctx.estado.actualizar_params("assets", {"tipo_relato": tr.normalizar(guardado)})
+    ctx.bitacora.anotar("tipo_relato_base", "assets", {
+        "sitio": hecho["sitio"], "coste": hecho.get("coste"), "origen": hecho.get("origen")})
+    avisar(1.0, "imagen base lista: mírala y apruébala")
+    return hecho
+
+
+@app.post("/api/proyectos/{pid}/tipo_relato/base/generar", status_code=202)
+def generar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
+    """Genera la imagen base del sitio (SE PAGA una imagen). {usd: lo que se vio}"""
+    tr = _tipo_relato()
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    params = ctx.estado.params("assets") or {}
+    if not tr.activo(tr.resolver(params)):
+        raise ErrorApi(400, "elige antes un tipo de relato que no sea documental")
+    if "usd" not in datos:
+        raise ErrorApi(400, "hace falta 'usd': el coste que se ha enseñado antes de pagar")
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo generándose en este vídeo: las imágenes "
+                                "se generan de una tanda en una")
+        trabajo_id = ctx.gestor.lanzar("tipo_relato_base", _correr_base, ctx,
+                                       bool(datos.get("otra")), paso="assets")
+    _registrar_trabajo(trabajo_id, ctx.id)
+    return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id),
+            "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
+
+
+@app.post("/api/proyectos/{pid}/tipo_relato/base/usar_subida")
+def usar_subida_como_base(pid: str):
+    """La imagen subida del espacio fijo pasa a ser la base, aprobada (gratis)."""
+    tr = _tipo_relato()
+    ctx = contexto(pid)
+    params = ctx.estado.params("assets") or {}
+    subida = (params.get("espacio_fijo") or {}).get("imagen") \
+        if isinstance(params.get("espacio_fijo"), dict) else None
+    sitio, _ = PASOS_MODULOS.p6_assets.espacio_del_relato(ctx.proyecto, params)
+    if not subida or not sitio:
+        raise ErrorApi(400, "este vídeo no tiene imagen subida del espacio fijo")
+    with _cerrojo_de_cadena(ctx.id):
+        guardado = _tipo_relato_guardado(ctx)
+        bases = dict(guardado.get("bases") or {})
+        bases[sitio] = {"imagen": subida, "aprobada": True}
+        guardado["bases"] = bases
+        ctx.estado.actualizar_params("assets", {"tipo_relato": tr.normalizar(guardado)})
+    ctx.bitacora.anotar("tipo_relato_base", "assets", {"sitio": sitio, "subida": True})
+    ficha = _ficha_tipo_relato(ctx)
+    ficha["cambios"] = _cambios_del_relato(ctx)
+    return ficha
+
+
+@app.post("/api/proyectos/{pid}/tipo_relato/base/aprobar")
+def aprobar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
+    """{sitio?, aprobada: true|false}: aprueba (o retira) la imagen base del sitio."""
+    tr = _tipo_relato()
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    guardado = _tipo_relato_guardado(ctx)
+    bases = dict(guardado.get("bases") or {})
+    sitio = str(datos.get("sitio") or "") or PASOS_MODULOS.p6_assets.espacio_del_relato(
+        ctx.proyecto, ctx.estado.params("assets") or {})[0]
+    if sitio not in bases:
+        raise ErrorApi(404, "ese sitio no tiene imagen base: genérala o usa la subida")
+    with _cerrojo_de_cadena(ctx.id):
+        bases[sitio] = dict(bases[sitio], aprobada=bool(datos.get("aprobada", True)))
+        guardado["bases"] = bases
+        ctx.estado.actualizar_params("assets", {"tipo_relato": tr.normalizar(guardado)})
+    ctx.bitacora.anotar("tipo_relato_base_aprobada", "assets",
+                        {"sitio": sitio, "aprobada": bases[sitio]["aprobada"]})
+    ficha = _ficha_tipo_relato(ctx)
+    ficha["cambios"] = _cambios_del_relato(ctx)
+    return ficha
+
+
+@app.get("/api/proyectos/{pid}/tipo_relato/base/imagen")
+def imagen_base_relato(pid: str, sitio: str = Query(default="")):
+    """La imagen base (aprobada o no) de un sitio del video."""
+    ctx = contexto(pid)
+    bases = _tipo_relato_guardado(ctx).get("bases") or {}
+    ficha = bases.get(sitio) or (next(iter(bases.values())) if bases and not sitio else None)
+    if not ficha:
+        raise ErrorApi(404, "ese sitio no tiene imagen base")
+    try:
+        ruta = ctx.proyecto.ruta(*str(ficha["imagen"]).split("/"))
+    except ValueError:
+        raise ErrorApi(404, "imagen base fuera del proyecto")
+    if not os.path.exists(ruta):
+        raise ErrorApi(404, "la imagen base ya no está en el disco")
+    return FileResponse(ruta, media_type="image/png")
+
+
+@app.post("/api/proyectos/{pid}/tipo_relato/rehacer", status_code=202)
+def rehacer_planos_del_relato(pid: str, cuerpo: dict = Body(default=None)):
+    """Rehace SOLO los planos pedidos de los que cambian con el tipo de relato (se paga).
+
+    {planos: [...], imagenes: n}, como `/espacio_fijo/rehacer`."""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    pedidos = datos.get("planos")
+    if not isinstance(pedidos, list) or not pedidos:
+        raise ErrorApi(400, "hace falta 'planos': la lista de los que rehacer")
+    pedidos = [str(x).split(":", 1)[-1].strip() for x in pedidos]
+    try:
+        vistas = int(datos.get("imagenes"))
+    except (TypeError, ValueError):
+        raise ErrorApi(400, "hace falta 'imagenes': cuántas se confirmaron")
+    if vistas != len(set(pedidos)):
+        raise ErrorApi(400, f"se piden {len(set(pedidos))} planos y se confirmaron {vistas}")
+    ficha = _ficha_tipo_relato(ctx)
+    if ficha["edita"] and not ficha["base_aprobada"]:
+        raise ErrorApi(409, "falta aprobar la imagen base del sitio antes de rehacer planos")
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo generándose en este vídeo: espera a que "
+                                "termine y vuelve a mirarlo")
+        with _COLA_LOCK:
+            if _cola_dibujando(ctx):
+                raise ErrorApi(409, "se están rehaciendo imágenes con tus notas: "
+                                    "espera a que terminen")
+            posibles = {p["id"] for p in (_cambios_del_relato(ctx).get("planos") or [])}
+            fuera = sorted(set(pedidos) - posibles)
+            if fuera:
+                raise ErrorApi(409, "estos planos ya no cambian con el tipo de relato: "
+                                    + ", ".join(fuera[:8]) + ". Vuelve a mirarlo.",
+                               {"fuera": fuera})
+            plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets",
+                                                       estado=ctx.estado) or {}
+            unidades = _con_sus_continuaciones(
+                [f"escena:{sid}" for sid in sorted(set(pedidos))], plan)
+            trabajo_id = lanzar_paso(ctx, "assets", unidades,
+                                     nombre="tipo_relato",
+                                     evento="tipo_relato_rehacer",
+                                     datos={"planos": len(set(pedidos))})
+    return {"trabajo_id": trabajo_id, "unidades": unidades,
+            "trabajo": ctx.gestor.estado(trabajo_id),
+            "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
+
+
+def _tipo_relato_pedido(opciones):
+    """El `tipo_relato` de las opciones del encargo, limpio. -> {} o {modo, cambia?}"""
+    if not isinstance(opciones, dict) or opciones.get("tipo_relato") in (None, "", {}):
+        return {}
+    crudo = opciones["tipo_relato"]
+    if not isinstance(crudo, dict):
+        raise ErrorApi(400, "tipo_relato: tiene que ser un objeto {modo, cambia}")
+    try:
+        return _tipo_relato().normalizar({k: v for k, v in crudo.items()
+                                          if k in ("modo", "cambia")})
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
 
 
 # --------------------------------------------------------------- conservacion
@@ -13038,10 +13461,14 @@ def _congelar_preset(ctx, encargo, preset_id=None):
         try:
             anterior = presets.leer(preset_id)
             reglas = ((anterior.get("datos") or {}).get("estilo") or {}).get("reglas")
+            # el tipo de relato por defecto, por lo mismo (rama tipo-de-relato)
+            relato = ((anterior.get("datos") or {}).get("estilo") or {}).get("relato")
         except Exception:                                    # noqa: BLE001
-            reglas = None
+            reglas = relato = None
         if reglas:
             datos.setdefault("estilo", {})["reglas"] = copy.deepcopy(reglas)
+        if relato:
+            datos.setdefault("estilo", {})["relato"] = copy.deepcopy(relato)
     # `estilo_modo` solo si es foto (ver `presets_light.origen_de`)
     datos["origen"] = _light().origen_de(encargo, presets.CLAVES_ORIGEN)
     datos["origen"]["taller"] = ctx.id
@@ -14393,6 +14820,68 @@ def guardar_reglas_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
     anotar_global("reglas_estilo", {"preset": preset_id, "reglas": len(reglas)})
     return {"reglas": modulo.de_estilo((nueva.get("datos") or {}).get("estilo") or {}),
             "cambiado": True}
+
+
+@app.get("/api/presets-light/{preset_id}/relato")
+def leer_relato_estilo(preset_id: str):
+    """El tipo de relato por defecto de un estilo (rama tipo-de-relato).
+    -> {relato: {} | {modo, cambia?}, modos, cambia}"""
+    ficha = _preset_o_400(lambda p: p.leer(preset_id))
+    if ficha.get("tipo") != "canal":
+        raise ErrorApi(400, "esto no es un preset de canal")
+    tr = _tipo_relato()
+    estilo = (ficha.get("datos") or {}).get("estilo") or {}
+    try:
+        relato = tr.normalizar_de_estilo(estilo.get("relato"))
+    except ValueError:
+        relato = {}
+    return {"relato": relato,
+            "modos": [{"clave": k, "nombre": v} for k, v in tr.MODOS.items()],
+            "cambia": [{"clave": k, "nombre": v} for k, v in tr.CAMBIA.items()]}
+
+
+@app.put("/api/presets-light/{preset_id}/relato")
+def guardar_relato_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
+    """Guarda el tipo de relato por defecto de un estilo: {relato: {modo, cambia?}}.
+    Documental (o null) lo quita. No toca ningun video: llega a los nuevos al
+    crearlos y a los hechos con «Traer el estilo» (con su aviso de siempre)."""
+    presets = _presets()
+    tr = _tipo_relato()
+    datos = _cuerpo(cuerpo)
+    if "relato" not in datos:
+        raise ErrorApi(400, "manda {relato: {modo, cambia}} (null lo quita)")
+    try:
+        relato = tr.normalizar_de_estilo(datos.get("relato") or {})
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    with presets.lock_de(presets.FICHERO):
+        ficha = _preset_o_400(lambda p: p.leer(preset_id))
+        if ficha.get("tipo") != "canal":
+            raise ErrorApi(400, "esto no es un preset de canal")
+        contenido = copy.deepcopy(ficha.get("datos") or {})
+        estilo = dict(contenido.get("estilo") or {})
+        try:
+            antes = tr.normalizar_de_estilo(estilo.get("relato"))
+        except ValueError:
+            antes = {}
+        if relato == antes:
+            return {"relato": relato, "cambiado": False}
+        if relato:
+            estilo["relato"] = relato
+        else:
+            estilo.pop("relato", None)
+        if estilo:
+            contenido["estilo"] = estilo
+        else:
+            contenido.pop("estilo", None)
+        try:
+            presets.guardar("canal", ficha.get("nombre") or "", contenido,
+                            nota=ficha.get("nota") or "",
+                            miniatura=ficha.get("miniatura") or "", pid=preset_id)
+        except presets.ErrorPreset as fallo:
+            raise ErrorApi(400, str(fallo))
+    anotar_global("relato_estilo", {"preset": preset_id, "modo": relato.get("modo")})
+    return {"relato": relato, "cambiado": True}
 
 
 @app.post("/api/reglas-estilo/afinar", status_code=202)
@@ -15954,6 +16443,8 @@ def crear_video_light(preset_id: str, cuerpo: dict = Body(default=None)):
     montaje_pedido = _montaje_pedido_al_crear(datos)
     # Y EL ESPACIO FIJO, por lo mismo (se guarda en `_opciones_al_crear`)
     _espacio_fijo_pedido(datos.get("opciones"))
+    # y el tipo de relato (rama tipo-de-relato), por lo mismo
+    _tipo_relato_pedido(datos.get("opciones"))
 
     nombre = str(datos.get("nombre") or "").strip()
     if not nombre:
@@ -16182,6 +16673,11 @@ def _opciones_al_crear(ctx, preset_id, opciones):
         if png:
             espacio["imagen"] = _guardar_png_del_espacio(ctx, png)
         ctx.estado.actualizar_params("assets", {"espacio_fijo": espacio})
+    # EL TIPO DE RELATO elegido en el encargo (o leido de la Parrilla). Solo si
+    # se eligio uno: sin el, manda el del estilo y no se escribe nada (regla 1)
+    relato = _tipo_relato_pedido(opciones)
+    if relato:
+        ctx.estado.actualizar_params("assets", {"tipo_relato": relato})
     presencia = opciones.get("presencia")
     if presencia:
         if presencia not in sonido.PRESENCIAS:

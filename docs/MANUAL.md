@@ -235,6 +235,18 @@ Lo que se le pide a este vídeo. Todo se guarda solo mientras escribes.
 - **El material**: de dónde salen los hechos (pega el texto, notas, un
   artículo). El vídeo cuenta esto, no se inventa los datos.
 - **Las indicaciones** (opcional): cómo quieres que se cuente este vídeo.
+- **El tipo de relato** (opcional): cómo se cuenta en imágenes. **Documental**
+  reparte el guion en sitios; **Un espacio que cambia** es un solo sitio en el
+  que cambia solo lo que dice la voz (un objeto, los acabados, el estado o la
+  hora): cada plano se genera editando una **imagen base** del sitio, que se
+  aprueba en el vídeo antes de generar las imágenes (la subida en «El espacio
+  fijo», gratis, o una generada, que se paga). **Recorrido**, **Escenario y
+  apoyos**, **Producto** y **Clase** completan la lista. Sin elegir, manda el
+  del estilo. En un vídeo hecho, «Aplicar el tipo de relato» enseña qué planos
+  cambian y cuánto cuesta, y eliges cuáles rehacer.
+- **El reparto y los sitios** (en un vídeo hecho): «Pedido para el reparto de
+  sitios» es una frase para Claude al repartir; «Volver a repartir con este
+  pedido» no paga imágenes.
 - **Las llamadas a la acción**: qué se pide al espectador (suscribirse, visitar
   una web) y dónde.
 - **Generar el guion**: el siguiente paso.

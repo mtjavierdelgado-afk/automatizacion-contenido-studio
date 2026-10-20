@@ -7099,6 +7099,155 @@ def probar_espacio_fijo():
         for nombre, valor in reales.items():
             setattr(servidor, nombre, valor)
 
+def probar_tipo_relato():
+    """Rama tipo-de-relato (20-10-2026): el tipo de relato del Encargo, el
+    catalogo con «un espacio que cambia», aplicarlo a un video hecho, la imagen
+    base (usar la subida, aprobar, servirla) y el pedido del reparto de sitios.
+
+    En este proceso y sin el CLI: `_llamar_claude` del catalogo es un doble que
+    apunta la instruccion y corta. Nada se paga: ninguna ruta de aqui genera.
+    """
+    seccion("TIPO DE RELATO: ENCARGO, CATÁLOGO, APLICAR E IMAGEN BASE")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+
+    catalogo = servidor.PASOS_MODULOS.catalogo_visual
+
+    class _Cortar(Exception):
+        pass
+
+    vistas = []
+
+    def claude_falso(instruccion, *_a, **_k):
+        vistas.append(instruccion)
+        raise _Cortar()
+
+    bloques = [{"id": "B001", "texto": "La mampara choca con el inodoro.", "personaje": False},
+               {"id": "B002", "texto": "La corrediza ya no choca.", "personaje": False}]
+    base = tempfile.mkdtemp(prefix="estudio_relato_")
+    servidor.fijar_raiz_proyectos(base)
+    reales = {"_bloques_del_guion": servidor._bloques_del_guion}
+    real_claude = catalogo._llamar_claude
+    servidor._bloques_del_guion = lambda _ctx: bloques
+    catalogo._llamar_claude = claude_falso
+    try:
+        pid = Proyecto.crear(base, "tipo de relato").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+
+        def proponer():
+            vistas.clear()
+            try:
+                servidor._correr_catalogo(lambda *_a, **_k: None, ctx,
+                                          {"modelo": "sonnet", "esfuerzo": "medium"}, "")
+            except _Cortar:
+                pass
+            return vistas[0] if vistas else ""
+
+        sin_nada = proponer()
+        firma_antes = ctx.estado.firma("assets")
+        for nada in ({}, {"tipo_relato": None}, {"tipo_relato": {}}, {"tipo_relato": {"modo": ""}}):
+            servidor._opciones_al_crear(ctx, "", nada)
+        ok("tipo_relato" not in (ctx.estado.params("assets") or {}),
+           "TIPO DE RELATO: sin elegir, no se escribe nada en assets (regla 1)")
+        igual(ctx.estado.firma("assets"), firma_antes, "TIPO DE RELATO: y la firma no se mueve")
+        igual(proponer(), sin_nada, "TIPO DE RELATO: y el prompt del catálogo es el de siempre")
+        for malo in ("producto", {"modo": "culebron"}, {"modo": "espacio_que_cambia", "cambia": "x"}):
+            codigo, mensaje = _llamar(servidor._opciones_al_crear, ctx, "", {"tipo_relato": malo})
+            igual(codigo, 400, f"TIPO DE RELATO: {str(malo)[:30]!r} da 400 ({mensaje})")
+        espacio = {"sitio": "Baño", "descripcion": "a small bathroom, toilet on the left",
+                   "luz": "day", "secundarios": []}
+        servidor._opciones_al_crear(ctx, "", {"espacio_fijo": espacio,
+                                             "tipo_relato": {"modo": "Un espacio que cambia",
+                                                             "cambia": "objeto"}})
+        igual((ctx.estado.params("assets") or {}).get("tipo_relato"),
+              {"modo": "espacio_que_cambia", "cambia": "objeto"},
+              "TIPO DE RELATO: elegido en el encargo, se guarda por clave")
+        prompt = proponer()
+        ok("UN ESPACIO QUE CAMBIA" in prompt and "ESTE VIDEO TIENE UN ESPACIO FIJO" in prompt,
+           "CATÁLOGO: _correr_catalogo le pasa el tipo de relato al catálogo")
+
+        codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+        igual(codigo, 200, "LEER: 200")
+        if codigo == 200:
+            igual((ficha["resuelto"]["modo"], ficha["resuelto"]["origen"], ficha["edita"]),
+                  ("espacio_que_cambia", "video", True), "LEER: rige el del vídeo y edita")
+            ok(not ficha["base_aprobada"] and ficha["sitio"] == "bano",
+               "LEER: sin base aprobada, y el sitio es el del espacio fijo")
+
+        codigo, _m = _llamar(servidor.usar_subida_como_base, pid)
+        igual(codigo, 400, f"BASE: sin imagen subida, «usar la subida» da 400 ({_m})")
+        codigo, _m = _llamar(servidor.generar_base_relato, pid, {})
+        igual(codigo, 400, f"BASE: generar sin el coste que se vio da 400 ({_m})")
+        ok(not ctx.gestor.listar(activos=True), "BASE: y no lanza nada")
+
+        # con una imagen subida del espacio: «usar la subida» la aprueba gratis
+        from PIL import Image as _Imagen                      # noqa: PLC0415
+        os.makedirs(ctx.proyecto.ruta("espacio_fijo"), exist_ok=True)
+        _Imagen.new("RGB", (64, 40), (200, 200, 200)).save(
+            ctx.proyecto.ruta("espacio_fijo", "0123456789abcdef.png"))
+        ctx.estado.actualizar_params("assets", {"espacio_fijo": dict(
+            espacio, imagen="espacio_fijo/0123456789abcdef.png")})
+        codigo, ficha = _llamar(servidor.usar_subida_como_base, pid)
+        igual(codigo, 200, f"BASE: usar la subida, 200 ({ficha if codigo != 200 else ''})")
+        if codigo == 200:
+            ok(ficha["base_aprobada"], "BASE: y queda aprobada")
+        codigo, ficha = _llamar(servidor.aprobar_base_relato, pid, {"aprobada": False})
+        ok(codigo == 200 and not ficha["base_aprobada"], "BASE: se puede retirar la aprobación")
+        codigo, _r = _llamar(servidor.imagen_base_relato, pid, "bano")
+        igual(codigo, 200, "BASE: la imagen base se sirve")
+        codigo, _m = _llamar(servidor.aprobar_base_relato, pid, {"sitio": "otro"})
+        igual(codigo, 404, "BASE: aprobar un sitio sin base da 404")
+
+        # aplicar a un video (sin imagenes): guarda, no dibuja, nada que rehacer
+        codigo, ficha = _llamar(servidor.aplicar_tipo_relato, pid,
+                                {"tipo_relato": {"modo": "recorrido"}})
+        igual(codigo, 200, f"APLICAR: 200 ({ficha if codigo != 200 else ''})")
+        if codigo == 200:
+            igual(ficha["resuelto"]["modo"], "recorrido", "APLICAR: rige el nuevo modo")
+            igual((ficha["cambios"] or {}).get("imagenes"), 0, "APLICAR: sin imágenes, nada que rehacer")
+        bases = ((ctx.estado.params("assets") or {}).get("tipo_relato") or {}).get("bases") or {}
+        ok("bano" in bases, "APLICAR: cambiar de modo conserva la imagen base")
+        codigo, _m = _llamar(servidor.aplicar_tipo_relato, pid, {"tipo_relato": "producto"})
+        igual(codigo, 400, "APLICAR: un tipo de relato que no es un objeto da 400")
+        codigo, ficha = _llamar(servidor.aplicar_tipo_relato, pid, {"tipo_relato": None})
+        ok(codigo == 200 and ficha["resuelto"]["modo"] == "escenario_y_apoyos",
+           "APLICAR: null vuelve a lo que diga el estilo (aquí, el espacio fijo implícito)")
+        codigo, _m = _llamar(servidor.escribir_cambios_relato, pid, {})
+        igual(codigo, 400, "CAMBIOS: fuera de «un espacio que cambia», 400")
+        for cuerpo, esperado in (({}, 400), ({"planos": ["S001"]}, 400),
+                                 ({"planos": ["S001"], "imagenes": 2}, 400),
+                                 ({"planos": ["S001"], "imagenes": 1}, 409)):
+            codigo, _m = _llamar(servidor.rehacer_planos_del_relato, pid, cuerpo)
+            igual(codigo, esperado, f"REHACER: {cuerpo} da {esperado} ({_m})")
+        ok(not ctx.gestor.listar(activos=True), "REHACER: y ninguno lanza nada")
+
+        # el pedido del reparto de sitios vuelve a leer el guion aunque no cambie
+        ctx.estado.actualizar_params("assets", {"catalogo": {
+            "sets": {"bano": {"descripcion": "x"}}, "reparto": {}, "beats": [],
+            "reales": [], "_firma_guion": "lo que sea"}})
+        vistas.clear()
+        try:
+            servidor._correr_escenarios(lambda *_a, **_k: None, ctx,
+                                        {"modelo": "sonnet", "esfuerzo": "medium"}, "", False)
+        except _Cortar:
+            pass
+        ok(not vistas, "PEDIDO: sin pedido y con catálogo, no se vuelve a leer el guion")
+        try:
+            servidor._correr_escenarios(lambda *_a, **_k: None, ctx,
+                                        {"modelo": "sonnet", "esfuerzo": "medium"},
+                                        "todo en el baño", False)
+        except _Cortar:
+            pass
+        ok(vistas and "todo en el baño" in vistas[0],
+           "PEDIDO: con un pedido escrito se vuelve a repartir y el pedido llega a Claude")
+    finally:
+        catalogo._llamar_claude = real_claude
+        for nombre, valor in reales.items():
+            setattr(servidor, nombre, valor)
+
+
 def _video_montado_de_prueba(servidor, base, nombre):
     """Un vídeo con todos los pasos hechos y su MP4: «montado y al día»."""
     from nucleo import Estado, Proyecto                       # noqa: PLC0415
@@ -7325,6 +7474,7 @@ def main():
         probar_mas_emojis(cliente, carpeta, pid)
         probar_publicar_20oct(cliente, pid)
         probar_espacio_fijo()
+        probar_tipo_relato()
     finally:
         parar(proceso)
         if not argumentos.conservar:

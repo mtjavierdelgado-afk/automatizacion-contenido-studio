@@ -62,6 +62,38 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   **«Ocultar el texto»** lo quita (y la imagen vuelve a su tamaño); el
   navegador se acuerda de tu elección.
 
+**El tipo de relato: el mismo sitio en todas las imágenes (20 de octubre)**
+- **Nuevo «El tipo de relato»** en el Encargo, en un vídeo hecho y en el estilo
+  (🧭 Tipo de relato): dice CÓMO se cuenta el vídeo en imágenes, nunca de qué
+  negocio es. **Documental** (lo de siempre), **Un espacio que cambia**,
+  **Recorrido**, **Escenario y apoyos**, **Producto** y **Clase** (de momento,
+  como un recorrido).
+- **Un espacio que cambia** es un solo sitio que se ve siempre igual y en el
+  que cambia SOLO lo que dice la voz: un objeto, los acabados (misma geometría
+  y ángulo), el estado (obra, montaje, terminado) o la hora (la luz y la
+  gente). Claude escribe qué cambia en cada tramo y **cada plano se genera
+  editando una imagen base del sitio, con la misma cámara**. Los planos de
+  detalle la llevan como referencia. Era el fallo del Reel del baño: cada
+  imagen salía con un baño distinto.
+- **La imagen base** es el sitio vacío y entero: la que subiste en «El espacio
+  fijo» (gratis) o una generada (se paga una imagen y ves su coste antes). **Se
+  aprueba antes de generar los planos**: sin ella aprobada no se paga ningún
+  plano de ese sitio. «Producto» también edita la base (el fondo no se mueve).
+- **El revisor compara cada plano editado con su base**: si cambió algo que no
+  se pidió (la distribución, la cámara, un mueble fijo), lo marca como
+  congruencia de gravedad alta.
+- **Qué manda**: lo elegido en el vídeo (o la línea **«Tipo de relato:»** de la
+  Parrilla, con la clave o el nombre, con o sin tildes); si no, lo del estilo;
+  si tampoco, con espacio fijo es «Escenario y apoyos» y sin él, «Documental».
+  **Sin elegir nada, los vídeos salen exactamente como antes.**
+- **En un vídeo hecho**, «Aplicar el tipo de relato» no dibuja nada: enseña qué
+  planos cambiarían y cuánto cuesta rehacerlos, y eliges todos, los marcados o
+  ninguno.
+- **«Pedido para el reparto de sitios»**, junto a «El reparto y los sitios» del
+  vídeo: una frase que lee Claude al repartir («todo en la cocina; el patio
+  solo al final») y «Volver a repartir con este pedido» (no se paga ninguna
+  imagen; las hechas se quedan hasta que pidas rehacerlas).
+
 **El espacio fijo: todo el vídeo en un mismo sitio (20 de octubre)**
 - **En la Parrilla, un guion puede traer «ESPACIO FIJO»** (opcional), con
   `- Sitio:` (un nombre corto), `- Descripción:` (cómo es el sitio, en una

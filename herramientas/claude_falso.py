@@ -92,6 +92,14 @@ def responder(entrada):
                     "sugerida": limpio + " (revisado)"}
         return {"veredicto": "sirve", "resumen": "Cumple la guía.", "problemas": [],
                 "sugerida": ""}
+    if "LOS TRAMOS (no los cambies" in entrada:
+        # el «qué cambia en cada tramo» de un espacio que cambia (rama
+        # tipo-de-relato): un cambio por tramo, con su estado
+        tramos = re.findall(r"^- ([A-Z0-9_]+)-([A-Z0-9_]+):", entrada, re.M)
+        return {"beats": [{"desde": d, "hasta": h,
+                           "cambio": "" if i == 0 else "the hinged shower door is a sliding door",
+                           "estado": "antes" if i == 0 else "despues"}
+                          for i, (d, h) in enumerate(tramos)]}
     if "<nota>" in entrada:
         nota = _entre(entrada, "nota")
         nuevo = re.sub(r"mario\s*kart", "un juego de carreras de karts de dibujos", nota, flags=re.I)

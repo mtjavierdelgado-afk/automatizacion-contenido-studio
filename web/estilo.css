@@ -3516,6 +3516,15 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .fila-espacio-fijo .crece { min-width: 0; overflow-wrap: anywhere; }
 .fila-espacio-fijo .id { font-family: var(--mono, monospace); flex: 0 0 auto; }
 
+/* ---- tipo-de-relato: el tipo de relato y la imagen base que se edita (rama tipo-de-relato) */
+.tipo-relato { display: flex; flex-direction: column; gap: 4px; }
+.imagen-base-relato { display: flex; flex-direction: column; gap: 6px; margin-top: 10px;
+  padding: 10px; border: 1px solid var(--linea); border-radius: 8px; min-width: 0; }
+.imagen-base-relato.aprobada { border-color: var(--ok-borde); }
+.miniatura-imagen-base { display: block; max-width: 260px; max-height: 200px; width: auto;
+  border-radius: 8px; border: 1px solid var(--linea); object-fit: contain; }
+.pedido-sitios { display: flex; flex-direction: column; gap: 4px; }
+
 /* ================================== ARREGLOS DEL 19-10 (segunda tanda)
    Rama `arreglos-19oct`. */
 /* el Encargo: los cambios del montaje guardados sin montar */

@@ -3501,7 +3501,12 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
     padding: 22px 14px 16px; overflow-x: hidden; overflow-y: auto;
     background: var(--fondo-menu); border-bottom: 0; border-right: 1px solid var(--linea-suave);
   }
-  body.con-menu #cuerpo { margin-left: var(--ancho-menu); }
+  /* EL HUECO DEL MENÚ, EN EL <body> Y NO EN #cuerpo: así todo lo que va en el
+     flujo de la página (#cuerpo y cualquier caja que se cuelgue del body) queda
+     a la derecha del menú y no debajo de él; la cabecera recupera el ancho
+     entero con un margen negativo. Lo fijo (cajones, diálogos) no se mueve. */
+  body.con-menu { padding-left: var(--ancho-menu); }
+  body.con-menu #cabecera { margin-left: calc(var(--ancho-menu) * -1); width: calc(100% + var(--ancho-menu)); }
   body.con-menu .barra-modulos .modulos-enlaces { flex-direction: column; align-items: stretch; gap: 4px; }
   body.con-menu .barra-modulos .modulo-config { display: inline-flex; }
   body.con-menu .boton-modulo {

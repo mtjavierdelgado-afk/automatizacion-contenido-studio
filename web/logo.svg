@@ -3,10 +3,8 @@
        en su lazo derecho. Variante «Equilibrada» (19-10-2026). Es el mismo
        dibujo que la cabecera de index.html.
 
-       EL COLOR DEL PLAY LO ESTA DECIDIENDO EL DUEÑO: se cambia SOLO en
-       --logo-play, aqui abajo (y en el :root de estilo.css para la cabecera).
-       P1 (por defecto): url(#gv), el degradado de la C. P2: #C4B5FD (lila).
-       P3: #FBBF24 (ambar). P4: #5EEAD4 (turquesa). -->
+       El «play» lleva el mismo degradado violeta de la C (decision del
+       dueño, 19-10-2026). -->
   <style>
     svg { --logo-c1: #A78BFA; --logo-c2: #7C3AED; --logo-bucle: #FF6B57; --logo-play: url(#gv); }
     .c1 { stop-color: var(--logo-c1); }

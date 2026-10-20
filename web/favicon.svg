@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="32" height="32">
   <!-- El favicon: el logo (logo.svg) simplificado para 16 px. Trazos mas
        gruesos y el «play» un poco mayor, para que la C y el bucle se sigan
-       leyendo en la pestaña. El color del play: --logo-play, como en logo.svg. -->
+       leyendo en la pestaña. El play, con el degradado de la C, como en logo.svg. -->
   <style>
     svg { --logo-c1: #A78BFA; --logo-c2: #7C3AED; --logo-bucle: #FF6B57; --logo-play: url(#gv); }
     .c1 { stop-color: var(--logo-c1); }

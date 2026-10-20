@@ -76,11 +76,9 @@
   --halo: #8b5cf6;                          /* los dos halos del saludo */
   --halo2: #ff6b57;
 
-  /* el logo: la C, el bucle y el «play». El color del play lo esta
-     decidiendo el dueño (19-10-2026): se cambia SOLO aqui. Por defecto, el
-     degradado de la C (opcion P1); las otras, un color: #c4b5fd (P2, lila),
-     #fbbf24 (P3, ambar), #5eead4 (P4, turquesa). El logo es de la marca y no
-     cambia con la paleta. */
+  /* el logo: la C, el bucle y el «play». El play lleva el mismo degradado
+     violeta de la C (decision del dueño, 19-10-2026). El logo es de la marca
+     y no cambia con la paleta. */
   --logo-c1: #a78bfa;
   --logo-c2: #7c3aed;
   --logo-bucle: #ff6b57;

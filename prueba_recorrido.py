@@ -101,6 +101,19 @@ def preparar_entorno(base):
         "ESTUDIO_BANCO": os.path.join(base, "banco"),
     })
     os.makedirs(env["ESTUDIO_SECRETOS"], exist_ok=True)
+    # UN FRENO PARA FFMPEG (arreglos-19oct): mientras exista `ffmpeg_lento` al
+    # lado de los proyectos, el montaje final (el concat) tarda 20 s, que es lo
+    # que da tiempo a pulsar «Parar». Sin el fichero es el ffmpeg de siempre.
+    real = shutil.which("ffmpeg")
+    if real and os.name != "nt":
+        freno = os.path.join(binarios, "ffmpeg_con_freno")
+        with open(freno, "w", encoding="utf-8") as fh:
+            fh.write("#!/bin/bash\n"
+                     f'if [ -f "{os.path.join(base, "ffmpeg_lento")}" ] '
+                     '&& [[ " $* " == *" concat "* ]]; then sleep 20; fi\n'
+                     f'exec "{real}" "$@"\n')
+        os.chmod(freno, os.stat(freno).st_mode | stat.S_IEXEC)
+        env["ESTUDIO_FFMPEG"] = freno
     # la guia de la primera vez, ya vista: si no, tapa la pantalla
     with open(env["ESTUDIO_AJUSTES"], "w", encoding="utf-8") as fh:
         json.dump({"onboarding_visto": True}, fh)
@@ -5359,6 +5372,72 @@ def encargo_un_solo_montaje(navegador, datos):
     _r, render = api.get(f"/api/proyectos/{pid}/pasos/render")
     ok(render.get("estado") == "listo", f"ENCARGO: y el vídeo queda montado y al día ({render.get('estado')})")
     pg.sin_errores("varios cambios del Encargo, un solo montaje")
+    pg.cerrar()
+
+
+@escenario
+def parar_un_montaje(navegador, datos):
+    """Notas del dueño del 19-10: «Parar» un montaje esperaba a que ffmpeg
+    acabara y el botón no decía nada. Ahora dice «Cancelando…», se para en el
+    acto y el vídeo sigue siendo el de antes, sin caja de error."""
+    if os.name == "nt":
+        print("  (el freno de ffmpeg es de bash: se salta en Windows)")
+        return
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, render = api.get(f"/api/proyectos/{pid}/pasos/render")
+    version_antes = render.get("version_activa") or render.get("activa")
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.p.wait_for_timeout(1500)
+    pg.js("APP.light.video.vista = 'video'; pintarLight();")
+    ok(pg.esperar(".ajustes-en-video .fila-ajuste", "Música", 20), "PARAR: la pantalla Vídeo con sus ajustes")
+    freno = os.path.join(os.path.dirname(datos["proyectos"]), "ffmpeg_lento")
+    with open(freno, "w", encoding="utf-8") as fh:
+        fh.write("1")
+    try:
+        pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="Música") \
+            .locator(".fila-ajuste-cab button").first.click()
+        pg.p.wait_for_timeout(600)
+        pg.p.evaluate("""() => { const b = [...document.querySelectorAll('.ajustes-en-video .editor-ajuste .herramientas button')]
+          .find(x => x.innerText.trim() === 'Alta' && !x.classList.contains('activo'))
+          || [...document.querySelectorAll('.ajustes-en-video .editor-ajuste .herramientas button')]
+          .find(x => x.innerText.trim() === 'Suave'); b.click(); }""")
+        ok(pg.esperar("button.peligro", "Parar", 15),
+           f"PARAR: el montaje arranca y sale «Parar» ({pg.avisos()[-2:]})")
+        pg.p.wait_for_timeout(2500)
+        t0 = time.time()
+        # se mira en el MISMO instante del clic: el montaje se para tan rápido
+        # que «Cancelando…» dura menos de lo que tarda en mirarse otra vez
+        tras = pg.p.evaluate("""() => {
+          [...document.querySelectorAll('button.peligro')].find(x => x.innerText.trim() === 'Parar').click();
+          const b = [...document.querySelectorAll('button.peligro')].find(x => /Cancelando/.test(x.innerText));
+          return b ? {texto: b.innerText.trim(), apagado: b.disabled} : null; }""")
+        ok(tras and tras["texto"] == "Cancelando…", f"PARAR: el botón dice «Cancelando…» ({tras})")
+        ok(tras and tras["apagado"], "PARAR: y está apagado")
+        pg.sin_trabajo(30)
+        tardo = time.time() - t0
+        ok(tardo < 8, f"PARAR: se para en el acto ({tardo:.1f} s con un montaje de 20 s)")
+    finally:
+        os.remove(freno)
+    pg.p.wait_for_timeout(1500)
+    avisos = pg.avisos()
+    ok(any("sigue siendo el de antes" in a for a in avisos),
+       f"PARAR: el aviso dice que el vídeo sigue siendo el de antes ({avisos[-2:]})")
+    ok(not pg.visible(".caja-error"), "PARAR: sin caja de error")
+    ok(pg.visible("video"), "PARAR: el reproductor sigue ahí")
+    _r, render = api.get(f"/api/proyectos/{pid}/pasos/render")
+    ok((render.get("version_activa") or render.get("activa")) == version_antes,
+       f"PARAR: la versión del vídeo no cambia ({version_antes})")
+    trabajo = os.path.join(datos["proyectos"], pid, "pasos", "render", "trabajo")
+    ok(not os.path.exists(trabajo), "PARAR: y no queda nada en trabajo/")
+    # y volver a montar es solo volver a mezclar
+    _r, plan = api.get(f"/api/proyectos/{pid}/generar?tanda=render")
+    render_plan = [t for f in plan.get("fases") or [] for t in f.get("tareas") or [] if t.get("id") == "render"]
+    ok(render_plan and render_plan[0].get("solo_mezcla"),
+       f"PARAR: «Regenerar Vídeo» promete solo volver a mezclar ({render_plan[:1]})")
+    pg.sin_errores("parar un montaje")
     pg.cerrar()
 
 

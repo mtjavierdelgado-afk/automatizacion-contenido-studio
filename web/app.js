@@ -1230,7 +1230,20 @@ async function cancelar(paso) {
 
 function repintarTrasCancelar(paso) {
   if (paso === CLAVE_LIGHT && APP.light.vista === 'generando') pintarLight();
+  // el «Parar» del vídeo no es una pieza viva: sin repintar seguía encendido
+  else if (paso === CLAVE_VIDEO_LIGHT && MODULOS.actual === 'crear') pintarLight();
   else pintarTrabajo(paso);
+}
+
+/* EL «PARAR» DEL VÍDEO (guion, voz, imágenes y montaje), con «Cancelando…» y
+   apagado desde el clic: el de la tanda del estilo ya lo hacía, este no, y un
+   montaje que tardaba en pararse se leía como que no había hecho caso (19-10). */
+function botonPararVideo() {
+  const t = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
+  return h('button', {
+    clase: 'mini peligro', disabled: !!t.cancelando,
+    onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
+  }, t.cancelando ? 'Cancelando…' : 'Parar');
 }
 
 /* En qué pestaña vive la barra de un trabajo. Los que no son un paso del grafo
@@ -7549,9 +7562,7 @@ function pieDeEncargo() {
     corriendo ? conAyuda(
       'Corta la tanda donde esté. Lo que ya se ha generado se queda hecho y no '
       + 'hay que volver a pagarlo.',
-      h('button', {
-        clase: 'mini peligro', onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
-      }, 'Parar')) : null,
+      botonPararVideo()) : null,
     (!corriendo && hayGuion && queda) ? h('span', {
       clase: 'pastilla obsoleto',
       title: 'has cambiado el encargo después de escribir el guion, así que el '
@@ -9721,9 +9732,7 @@ function pieLight() {
     corriendo ? conAyuda(
       'Corta la tanda donde esté. Lo que ya se ha generado se queda hecho y no '
       + 'hay que volver a pagarlo.',
-      h('button', {
-        clase: 'mini peligro', onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
-      }, 'Parar')) : null,
+      botonPararVideo()) : null,
     conAyuda(!hayAudio
       ? 'Primero hace falta el audio: los subtítulos se colocan con sus '
         + 'tiempos, así que sin voz no hay dónde ponerlos.'
@@ -11401,9 +11410,7 @@ function vistaVideoLight() {
     barraTandaLight('render'),
     trabajoVideoLight() ? conAyuda(
       'Corta el montaje donde esté. Los clips ya encadenados se quedan hechos.',
-      h('button', {
-        clase: 'mini peligro', onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
-      }, 'Parar')) : null,
+      botonPararVideo()) : null,
     /* EL MISMO ORDEN QUE EN EL GUION: a la izquierda lo que se le hace al
        video, en medio lo que esta pasando, y a la derecha lo que se hace CON el
        video ya montado. Estaba mezclado --boton, pastilla, progreso, aplicar,
@@ -16828,8 +16835,17 @@ function avisoDeMontaje(r, quePasa, modo) {
     toast(`${quePasa}: volviendo a montar el vídeo, sin dibujar nada`);
     seguirTrabajo(CLAVE_VIDEO_LIGHT, r.trabajo_id, async trabajo => {
       if (trabajo.estado === 'listo') toast(`${quePasa}: el vídeo ya está montado de nuevo`);
+      // CANCELADO NO ES UN FALLO: el MP4 es el de antes y el cambio sigue
+      // guardado (en un montaje cancelado no se toca ninguna versión)
+      else if (trabajo.estado === 'cancelado') {
+        toast('Cancelado: el vídeo sigue siendo el de antes. El cambio está guardado '
+          + 'y se aplicará al volver a montar.');
+      }
       try { await recargarVideoAbierto(); } catch (e) { /* se relee al volver */ }
     });
+    // el «Parar» y la barra salen YA: sin repintar no aparecían hasta el
+    // siguiente repintado (y no había cómo parar un montaje recién lanzado)
+    if (MODULOS.actual === 'crear') pintarLight();
   } else if (r && r.montado) {
     toast(`${quePasa}: guardado. Se aplicará al volver a montar el vídeo (hay cosas pendientes)`);
   } else {

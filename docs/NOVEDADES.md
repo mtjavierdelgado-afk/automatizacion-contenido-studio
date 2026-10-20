@@ -21,6 +21,11 @@ vídeos, estilos, claves y contraseña no se tocan.
   montando ahora» al tocar la segunda cosa. Si lo cambiado es solo sonido o
   logo, se vuelve a mezclar en segundos, sin rehacer ningún plano. En la
   pantalla Vídeo cada cambio sigue montando al momento, como antes.
+- **«Parar» un montaje para en el acto.** El botón dice «Cancelando…» y se
+  apaga; antes esperaba a que terminara la mezcla (medio minuto, o más con el
+  logo). Al parar, el vídeo sigue siendo el de antes, no queda ningún trozo a
+  medias, y el cambio sigue guardado: **«Regenerar Vídeo» lo aplica volviendo a
+  mezclar** (segundos), no renderizando otra vez todos los planos.
 
 **Tus notas del 19 de octubre**
 - **«Crear» abre siempre «Tus proyectos»**, desde la barra de arriba y desde

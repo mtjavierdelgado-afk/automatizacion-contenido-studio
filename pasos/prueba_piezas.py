@@ -5810,6 +5810,148 @@ def prueba_profundidad_25d():
         shutil.rmtree(carpeta, ignore_errors=True)
 
 
+def prueba_cancelar_montaje():
+    """Arreglos del 19-10 (3): «Parar» un montaje corta ffmpeg EN EL ACTO.
+
+    Antes el montaje final (`_concatenar`, la medida de la mezcla, el logo, la
+    cola, la banda) era `subprocess.run` y cancelar esperaba a que ffmpeg
+    acabara: 29,7 s en el diagnóstico. Ahora va por `medios.correr`, que se
+    registra en `avisar.al_cancelar`. Y lo que quedaba en `trabajo/` (clips a
+    medio escribir) se borra sin tocar la versión activa."""
+    titulo("render: cancelar un montaje en el acto, sin rastro en trabajo/")
+    if os.name == "nt":
+        print("  (grupos de procesos POSIX: se salta en Windows)")
+        return
+    from nucleo.trabajos import Cancelado, GestorTrabajos     # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="cancelar_montaje_")
+    antes_ffmpeg = os.environ.get("ESTUDIO_FFMPEG")
+    try:
+        # un ffmpeg que tarda treinta segundos en todo, y apunta su pid
+        lento = os.path.join(base, "ffmpeg_lento")
+        pids = os.path.join(base, "pids")
+        with open(lento, "w", encoding="utf-8") as fh:
+            fh.write(f"#!/bin/sh\necho $$ >> {pids}\nexec sleep 30\n")
+        os.chmod(lento, 0o755)
+        os.environ["ESTUDIO_FFMPEG"] = lento
+
+        def vivos():
+            vistos = []
+            try:
+                with open(pids, encoding="utf-8") as fh:
+                    vistos = [int(x) for x in fh.read().split()]
+            except OSError:
+                return []
+            quedan = []
+            for pid in vistos:
+                try:
+                    os.kill(pid, 0)
+                except OSError:
+                    continue
+                try:            # un zombi ya muerto no cuenta
+                    with open(f"/proc/{pid}/stat", encoding="utf-8") as fh:
+                        if fh.read().split()[2] == "Z":
+                            continue
+                except OSError:
+                    pass
+                quedan.append(pid)
+            return quedan
+
+        def cancelar_a_tiempo(funcion, *args):
+            gestor = GestorTrabajos()
+            tid = gestor.lanzar("montaje", funcion, *args)
+            fin = time.time() + 10
+            while time.time() < fin and not os.path.exists(pids):
+                time.sleep(0.05)
+            time.sleep(0.3)
+            t0 = time.time()
+            gestor.cancelar(tid)
+            ficha = gestor.esperar(tid, 10)
+            return ficha, time.time() - t0
+
+        # --- 1) el montaje final (`_concatenar`, con su cola de negro)
+        clips = []
+        for sid in ("S001", "S002"):
+            ruta = os.path.join(base, f"{sid}.mp4")
+            medios.escribir_texto(ruta, "clip")
+            clips.append(ruta)
+        ficha, tardo = cancelar_a_tiempo(
+            lambda avisar: p8_render._concatenar(clips, os.path.join(base, "video.mp4"),
+                                                 None, 0.0, base, avisar=avisar))
+        igual(ficha.get("estado"), "cancelado", "el montaje final queda «cancelado» (no «error»)")
+        ok(tardo < 2.0, f"y en el acto: {tardo:.1f} s con un ffmpeg de 30 s (antes, lo que tardara ffmpeg)")
+        time.sleep(0.2)
+        igual(vivos(), [], "sin ningún ffmpeg vivo después")
+
+        # --- 2) el paso entero: `trabajo/` limpio y la versión activa intacta
+        os.remove(pids)
+
+        class _Proyecto:
+            raiz = base
+
+            def ruta_trabajo(self, paso_id, crear=True):
+                ruta = os.path.join(base, "pasos", paso_id, "trabajo")
+                if crear:
+                    os.makedirs(ruta, exist_ok=True)
+                return ruta
+        proyecto = _Proyecto()
+        v1 = os.path.join(base, "pasos", "render", "v1")
+        os.makedirs(os.path.join(v1, "clips"))
+        medios.escribir_texto(os.path.join(v1, "clips", "S001.mp4"), "clip bueno de v1")
+        medios.escribir_texto(os.path.join(v1, "video.mp4"), "video de v1")
+        huellas = _huellas_de(v1)
+        trabajo = proyecto.ruta_trabajo("render")
+        medios._sembrar_carpeta(v1, trabajo, True)
+
+        def montaje_que_se_corta(_proyecto, _params, avisar, _unidades, _solo):
+            # un clip a medio escribir, como el que dejaba ffmpeg al morir
+            medios.escribir_texto(os.path.join(trabajo, "clips", "S002.mp4"), "trunc")
+            medios.correr([medios.ffmpeg(), "-i", "x"], avisar)
+            return {}
+        real = p8_render._ejecutar
+        p8_render._ejecutar = montaje_que_se_corta
+        try:
+            ficha, tardo = cancelar_a_tiempo(
+                lambda avisar: p8_render.ejecutar(proyecto, {}, avisar, None, True))
+        finally:
+            p8_render._ejecutar = real
+        igual(ficha.get("estado"), "cancelado", "el paso del render queda «cancelado»")
+        ok(tardo < 2.0, f"también en el acto ({tardo:.1f} s)")
+        ok(not os.path.exists(trabajo), "y `trabajo/` se borra: no queda ningún clip a medias")
+        igual(_huellas_de(v1), huellas, "la versión activa sigue byte a byte igual")
+        igual(os.stat(os.path.join(v1, "clips", "S001.mp4")).st_nlink, 1,
+              "(sus ficheros, ya sin el enlace de trabajo/)")
+        time.sleep(0.2)
+        igual(vivos(), [], "y ningún proceso vivo")
+
+        # --- 3) un fallo MIENTRAS se cancela es la cancelación, no ese fallo
+        def falla_al_cancelar(_proyecto, _params, avisar, _unidades, _solo):
+            hecho = {}
+            avisar.al_cancelar(lambda: hecho.setdefault("si", True))
+            fin = time.time() + 5
+            while time.time() < fin and not hecho:
+                time.sleep(0.05)
+            raise RuntimeError("el navegador se ha cerrado")
+        p8_render._ejecutar = falla_al_cancelar
+        try:
+            gestor = GestorTrabajos()
+            tid = gestor.lanzar("montaje", lambda avisar: p8_render.ejecutar(
+                proyecto, {}, avisar, None, False))
+            time.sleep(0.3)
+            gestor.cancelar(tid)
+            ficha = gestor.esperar(tid, 10)
+        finally:
+            p8_render._ejecutar = real
+        igual(ficha.get("estado"), "cancelado",
+              "el navegador muerto por «Parar» se da por cancelado, no por error")
+        ok(issubclass(Cancelado, Exception), "(Cancelado es la del núcleo)")
+    finally:
+        if antes_ffmpeg is None:
+            os.environ.pop("ESTUDIO_FFMPEG", None)
+        else:
+            os.environ["ESTUDIO_FFMPEG"] = antes_ffmpeg
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def main():
     _prohibir_pagar()
     # EL HISTORICO DE TIEMPOS, A UNA COPIA. Guarda 30 muestras por paso, asi
@@ -5875,6 +6017,7 @@ def main():
     prueba_montaje_movimiento()
     prueba_profundidad_25d()
     prueba_montaje_por_plano()
+    prueba_cancelar_montaje()
 
     print("\n" + "=" * 70)
     if _fallos:

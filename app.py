@@ -7370,9 +7370,13 @@ def _regenerar_tras_repaso(avisar, ctx, tareas, modo, solo_montar=False):
         base = 0.25 + 0.7 * indice / max(1, len(pestanas))
         techo = 0.25 + 0.7 * (indice + 1) / max(1, len(pestanas))
         receta = _receta_de_video(ctx, pestana)
-        _correr_receta(lambda v, m="", p="", _b=base, _t=techo:
-                       avisar(_b + (_t - _b) * float(v or 0), m, p),
-                       ctx, pestana, receta, por_pestana[pestana], modo,
+
+        def avisar_pestana(v, m="", p="", _b=base, _t=techo):
+            return avisar(_b + (_t - _b) * float(v or 0), m, p)
+        # CANCELAR EN EL ACTO también a través de este envoltorio: sin el
+        # atributo, «Parar» un montaje esperaba a que ffmpeg acabara (19-10)
+        avisar_pestana.al_cancelar = getattr(avisar, "al_cancelar", None)
+        _correr_receta(avisar_pestana, ctx, pestana, receta, por_pestana[pestana], modo,
                        solo_montar)
 
 
@@ -8993,8 +8997,11 @@ def _correr_banda_y_mezcla(avisar, ctx, tramos, remezclar):
     ficha = _correr_banda(lambda v, m="", p="": avisar(0.6 * float(v or 0), m),
                           ctx, tramos)
     if remezclar:
-        _regenerar_tras_repaso(lambda v, m="", p="": avisar(0.6 + 0.4 * float(v or 0), m, p),
-                               ctx, ["render"], "pendientes", True)
+        def avisar_mezcla(v, m="", p=""):
+            return avisar(0.6 + 0.4 * float(v or 0), m, p)
+        # «Parar» corta la mezcla en el acto (ver `medios.correr`)
+        avisar_mezcla.al_cancelar = getattr(avisar, "al_cancelar", None)
+        _regenerar_tras_repaso(avisar_mezcla, ctx, ["render"], "pendientes", True)
     return {"tramos": len(ficha.get("tramos") or []), "remezclado": bool(remezclar),
             "resumen": ficha.get("resumen")}
 
@@ -9613,8 +9620,15 @@ def _que_hace(tarea_id, ctx, receta, modo="pendientes", solo_montar=False,
             return _correr_efectos_de_tanda, (ctx,)
         return _correr_surtir_efectos, (ctx, list(_sonido().PAPELES), False)
     if tarea_id == "render":
+        # UNA MEZCLA PENDIENTE SE APLICA CON OTRA MEZCLA (19-10-2026): un cambio
+        # de música cancelado (o un remontaje que falló) dejaba el render
+        # obsoleto, y «Generar» volvía a renderizar TODOS los planos para
+        # cambiar el audio. Si lo único pendiente son claves de mezcla, basta
+        # `solo_montar`. Se mira AQUÍ, al correr la tarea, y no al planificar:
+        # lo de antes en la tanda (las capas) puede haberlo cambiado.
+        solo = solo_montar or (modo == "pendientes" and _solo_falta_mezclar(ctx))
         return _un_paso(ctx, "render", modo,
-                        {"solo_montar": True} if solo_montar else None)
+                        {"solo_montar": True} if solo else None)
     raise ErrorApi(500, f"la receta declara la tarea '{tarea_id}' y nadie sabe "
                         f"hacerla: falta cablearla en app.py")
 
@@ -14815,6 +14829,10 @@ def _segundos_de_tarea(ctx, tarea, planos, palabras, reparto=None,
     return segundos
 
 
+#: Lo que se promete para una tarea de render que solo vuelve a mezclar.
+SEGUNDOS_SOLO_MEZCLA = 30.0
+
+
 def _plan_de_generacion(ctx, pestanas, modo="pendientes", datos=None):
     """Que se va a hacer, cuanto va a tardar y cuanto va a costar. No lanza nada.
 
@@ -14846,12 +14864,18 @@ def _plan_de_generacion(ctx, pestanas, modo="pendientes", datos=None):
             al_dia = _esta_al_dia(ctx, tarea)
             segundos = _segundos_de_tarea(ctx, tarea, planos, palabras,
                                           reparto, modo)
+            # solo volver a mezclar: segundos, no el render (ver `_que_hace`)
+            solo_mezcla = (tarea["id"] == "render" and not al_dia
+                           and modo == "pendientes" and _solo_falta_mezclar(ctx))
+            if solo_mezcla:
+                segundos = min(segundos, SEGUNDOS_SOLO_MEZCLA)
             tareas.append({
                 "id": tarea["id"], "nombre": tarea["nombre"],
                 "publico": recetas.publico_de(tarea["id"]),
                 "paso": tarea["paso"], "porque": tarea.get("porque", ""),
                 "cuesta": bool(tarea["cuesta"]), "al_dia": al_dia,
                 "se_hace": not (modo == "pendientes" and al_dia),
+                "solo_mezcla": solo_mezcla,
                 "segundos": round(segundos, 1)})
         pendientes = [t for t in tareas if t["se_hace"]]
         segundos = round(sum(t["segundos"] for t in pendientes), 1)
@@ -14935,6 +14959,8 @@ def _correr_cadena(avisar, ctx, pestanas, modo, datos, plan):
                    f"{_p} · {mensaje}" if mensaje else _p,
                    # el nombre de la pestana NO va en el publico: es de casa
                    publico)
+        # «Parar» llega en el acto también a través de este envoltorio
+        avisar_fase.al_cancelar = getattr(avisar, "al_cancelar", None)
 
         receta = _receta_de_video(ctx, pestana, datos)
         sin = _sin_de_la_tanda(datos)

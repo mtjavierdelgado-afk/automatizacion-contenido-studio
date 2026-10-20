@@ -6783,6 +6783,43 @@ def probar_cambios_del_encargo_un_montaje():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_mezcla_cancelada_se_aplica_con_otra_mezcla():
+    """Arreglos del 19-10 (3): una mezcla cancelada (o un remontaje que
+    falló) deja el render obsoleto solo por claves de mezcla. «Regenerar
+    Vídeo» (la tanda `render` en «pendientes») la aplica con OTRA mezcla
+    (`solo_montar`), no volviendo a renderizar todos los planos."""
+    seccion("ARREGLOS 19-10: UNA MEZCLA CANCELADA SE APLICA CON OTRA MEZCLA")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_mezcla_")
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(base)
+    try:
+        pid = _video_montado_de_prueba(servidor, base, "mezcla cancelada")
+        # el cambio se guardó y su montaje se canceló: el render queda obsoleto
+        servidor.guardar_sonido(pid, {"musica_db": -4, "remontar": False})
+        ctx = servidor.contexto(pid)
+        igual(ctx.estado.estado_de("render"), "obsoleto", "el render queda obsoleto por la mezcla")
+        _funcion, args = servidor._que_hace("render", ctx, {}, "pendientes")
+        igual(args[-1], {"solo_montar": True},
+              "y «Regenerar Vídeo» lo aplica con `solo_montar`: ni un plano otra vez")
+        _funcion, args = servidor._que_hace("render", ctx, {}, "todo")
+        ok(not (args[-1] or {}).get("solo_montar"), "(en «todo», el render de siempre)")
+        # algo que no es mezcla (los subtítulos) obliga a renderizar
+        servidor.cambiar_subtitulos(pid, {"tam": "grande"})
+        ctx = servidor.contexto(pid)
+        ok(not servidor._solo_falta_mezclar(ctx),
+           "con las capas pendientes ya no es solo mezcla")
+        # y una transición (param del render que cambia los clips) tampoco
+        pid2 = _video_montado_de_prueba(servidor, base, "transiciones")
+        servidor.contexto(pid2).estado.actualizar_params("render", {"transiciones": ["fundido"]})
+        ok(not servidor._solo_falta_mezclar(servidor.contexto(pid2)),
+           "ni con otras transiciones: cambian los clips")
+    finally:
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
     parser.add_argument("--conservar", action="store_true",
@@ -6872,6 +6909,7 @@ def main():
         probar_lo_de_v2h()
         probar_notas_19oct()
         probar_cambios_del_encargo_un_montaje()
+        probar_mezcla_cancelada_se_aplica_con_otra_mezcla()
         probar_cancelar_en_el_taller()
     finally:
         parar(proceso)

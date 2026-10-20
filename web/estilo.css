@@ -3447,6 +3447,28 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .montaje-plano-fila { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .montaje-plano-fila > label { min-width: 8.5em; color: var(--tenue); font-size: 12px; }
 
+/* ==================================================== IMÁGENES: DESCARGAR Y LEER
+   Rama `imagenes-texto` (20-10-2026): debajo de la imagen de la diapositiva,
+   las descargas y el cuadro con lo que dice la voz en ese plano. */
+.plano-texto-y-descarga { display: flex; flex-direction: column; gap: 6px; }
+/* CON EL TEXTO A LA VISTA, la imagen deja sitio para leerlo sin bajar: a todo
+   el ancho, un 16:9 llena la pantalla del ordenador y el cuadro queda debajo
+   de la barra. Oculto el texto, vuelve a su tamaño de siempre. */
+.light-previa:has(.texto-del-plano) .previa-marco:not(.vertical) {
+  max-width: max(320px, calc((100vh - 440px) * 16 / 9)); margin-left: auto; margin-right: auto; }
+.plano-texto-cab { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.plano-texto-cab a.boton-enlace { white-space: nowrap; }
+.texto-del-plano { padding: 10px 14px; border: 1px solid var(--linea); border-radius: 10px;
+  background: var(--panel); color: var(--texto); font-size: 17px; line-height: 1.5;
+  max-height: 9.5em; overflow-y: auto; overflow-wrap: anywhere; }
+.tramo-del-plano { border-radius: 4px; transition: background-color .15s, color .15s; }
+.tramo-del-plano.sonando { background: var(--acento-relleno); color: var(--texto);
+  box-shadow: 0 0 0 2px var(--acento-relleno); }
+@media (max-width: 640px) {
+  .texto-del-plano { font-size: 15px; padding: 8px 10px; }
+  .plano-texto-cab a.boton-enlace { flex: 1 1 auto; text-align: center; }
+}
+
 /* ==================================================== REGLAS DEL ESTILO
    Rama `reglas-estilo` (19-10-2026): las tarjetas de cada regla en la pantalla
    del estilo. */

@@ -200,6 +200,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/imagenes/revision` | La ultima revision, las notas del revisor sin aplicar, lo que falta por |
 | `POST` | `/api/proyectos/{pid}/imagenes/revision/aplicar` | Rehace las notas pendientes del revisor ({notas?: [ids]}; sin ids, todas) |
 | `POST` | `/api/proyectos/{pid}/imagenes/revision/descartar` | «Esta imagen está bien así»: {plano}. Quita la nota pendiente del revisor |
+| `GET` | `/api/proyectos/{pid}/imagenes/zip` | Todas las imágenes de plano del vídeo en un .zip, en orden (solo lee). |
 
 ## Sonido y transiciones
 
@@ -444,4 +445,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
+<<<<<<< HEAD
 **322 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+=======
+**319 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+>>>>>>> origin/imagenes-texto

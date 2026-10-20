@@ -16822,6 +16822,76 @@ def fichero_web(fichero: str, peticion: Request):
     return servir_fichero(peticion, destino)
 
 
+# ===================================================== DESCARGAS DE IMÁGENES
+# Rama `imagenes-texto` (20-10-2026), pedido del dueño: bajarse las imágenes
+# que se han creado. Una a una no hace falta ruta: la diapositiva enlaza el
+# PNG con `/a/{pid}/...` (la misma que la pinta) y el atributo `download`.
+# Aquí solo está «Descargar todas»: un .zip con las imágenes de PLANO de la
+# versión ACTIVA de `assets`, en el orden del plan y numeradas.
+#
+# SOLO LEE. No toca el estado ni los params (regla 1) ni escribe nada dentro
+# del proyecto: el .zip se arma en un temporal del sistema y se borra al
+# terminar de mandarlo. Es una ruta normal (`def`), así que FastAPI la corre
+# en su pool de hilos y comprimir 300 PNG no para el bucle de eventos. Los PNG
+# van sin recomprimir (ZIP_STORED): ya vienen comprimidos y desinflarlos otra
+# vez solo gasta CPU del servidor para ganar nada.
+
+def _imagenes_de_plano(ctx):
+    """[(nombre_en_el_zip, ruta)] de las imágenes de plano de la versión activa."""
+    version = ctx.proyecto.version_activa("assets")
+    if not version:
+        return []
+    carpeta = os.path.join(ctx.proyecto.ruta_paso("assets", version), "escenas")
+    plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    salida = []
+    for escena in plan.get("escenas") or []:
+        sid = str(escena.get("id") or "")
+        # el id viene del plan; aun así no se le deja salir de la carpeta
+        if not sid or not re.fullmatch(r"[A-Za-z0-9_-]+", sid):
+            continue
+        ruta = os.path.join(carpeta, f"{sid}.png")
+        if os.path.isfile(ruta):
+            salida.append((f"{len(salida) + 1:03d}_{sid}.png", ruta))
+    return salida
+
+
+@app.get("/api/proyectos/{pid}/imagenes/zip")
+def descargar_imagenes_zip(pid: str, peticion: Request, abiertos: str = Query(default="")):
+    """Todas las imágenes de plano del vídeo en un .zip, en orden (solo lee)."""
+    import tempfile  # noqa: PLC0415
+    import zipfile  # noqa: PLC0415
+    from starlette.background import BackgroundTask  # noqa: PLC0415
+
+    ctx = contexto(pid)
+    # UN PROYECTO CON CLAVE SIN ABRIR NO SE BAJA, como en Publicar
+    # (`_ctx_publicable`). El pase llega en `X-Estudio-Abiertos` o, porque un
+    # enlace `<a download>` no puede llevar cabeceras, en `?abiertos=`: es el
+    # mismo pase firmado que la pantalla ya manda, no la clave.
+    try:
+        cerrados = CLIENTES.cerrados_para(
+            raiz_proyectos(), abiertos or peticion.headers.get("x-estudio-abiertos"))
+    except Exception:                                       # noqa: BLE001
+        cerrados = set()
+    if cerrados and _cliente_del_video(ctx.proyecto) in cerrados:
+        raise ErrorApi(404, f"proyecto desconocido: {pid}")
+    imagenes = _imagenes_de_plano(ctx)
+    if not imagenes:
+        raise ErrorApi(404, "este vídeo todavía no tiene imágenes que descargar")
+    nombre = identificador(ctx.proyecto.config.get("nombre") or pid)[:60]
+    descriptor, temporal = tempfile.mkstemp(prefix="imagenes_", suffix=".zip")
+    os.close(descriptor)
+    try:
+        with zipfile.ZipFile(temporal, "w", zipfile.ZIP_STORED) as archivo:
+            for dentro, ruta in imagenes:
+                archivo.write(ruta, f"{nombre}_{dentro}")
+    except Exception:
+        os.remove(temporal)
+        raise
+    return FileResponse(temporal, media_type="application/zip",
+                        filename=f"{nombre}_imagenes.zip",
+                        background=BackgroundTask(os.remove, temporal))
+
+
 # =================================================================== PUBLICAR
 # Publicar en redes (rama `publicar-redes-1`, 16-10-2026). TODO lo de aqui es
 # nuevo y vive en un bloque propio al final para no chocar con las ramas que

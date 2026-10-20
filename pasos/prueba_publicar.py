@@ -2046,6 +2046,138 @@ def prueba_seo():
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 
 
+def prueba_notas_19oct():
+    """Las notas del dueño del 19-10 en Publicar: UNA nota SEO con un id por
+    punto, la revisión de Claude sin nota propia y sin repetir la del Studio,
+    los hashtags que no caben se dicen (y no se cortan a 15), y un fallo que
+    ya salió en otro envío deja de contar en la cola."""
+    seccion("10] notas del 19-10: una nota SEO, hashtags que no caben, fallos superados")
+    S = P.SEO
+    raiz = os.path.join(CARPETA, "notas19")
+    os.makedirs(raiz)
+    # --- la nota: cada punto con su id, y dónde se pone cada cosa con su nombre de verdad
+    textos = {"descripcion": "Una fiesta increíble\nTe lo llevamos.", "cta": "",
+              "hashtags": ["fiesta", "consolas", "lima", "gaming", "cumple"]}
+    n = S.nota("instagram", textos, {}, dict(P.AJUSTES_DEFECTO, zona="Lima"), {}, INFO, "")
+    ids = {x.get("id"): x for x in n["puntos"]}
+    ok(all(x.get("id") for x in n["puntos"]), f"cada punto de la nota lleva su id: {sorted(ids)}")
+    ok({"palabra", "ubicacion", "portada", "cta"} <= {i for i, x in ids.items() if not x["ok"]},
+       "sin palabra clave, ubicación, portada ni CTA: los cuatro restan con su id")
+    ok({"hashtags", "hashtags_vacios", "hashtags_repetidos", "hashtag_local", "primera_linea"} <= set(ids),
+       "y los demás puntos también llevan el suyo")
+    ok(all("Lo fijo" not in x["texto"] for x in n["puntos"])
+       and "Cuentas y ajustes → SEO de este proyecto" in ids["ubicacion"]["texto"]
+       and "Cuentas y ajustes → SEO de este proyecto" in ids["palabra"]["texto"],
+       "dónde se pone la ubicación y la palabra clave, con el nombre real de la pantalla")
+    con = S.nota("youtube", dict(textos, titulo="Fiesta"), {}, P.AJUSTES_DEFECTO, {}, INFO, "consolas en Lima")
+    ok({"palabra_titulo", "palabra_primera", "palabra_descripcion", "titulo_largo"} <=
+       {x.get("id") for x in con["puntos"]}, "con palabra clave: título, primera línea y descripción, cada uno el suyo")
+    # --- lo que se pide a Claude: sin nota suya, con la palabra clave del vídeo
+    ok('"nota"' not in S.INSTRUCCION_OPTIMIZAR and "0-100" not in S.INSTRUCCION_OPTIMIZAR,
+       "a Claude ya no se le pide una nota propia")
+    ok('"palabra_clave"' in S.INSTRUCCION_OPTIMIZAR, "y sí la palabra clave para este vídeo")
+    norm = S.normalizar_optimizacion({"instagram": {"nota": 80, "fallos": ["x"], "campos": {}}}, ["instagram"])
+    ok("nota" not in norm["instagram"], "si Claude la pone igual, no se guarda")
+    # --- «Optimizar»: lo que repite de la nota no sale, la palabra y «con estos cambios»
+    ajustes = dict(P.AJUSTES_DEFECTO, palabra_clave="alquiler de consolas en Lima")
+    os.environ["ESTUDIO_SIMULAR"] = "1"
+    try:
+        info = dict(INFO, pid="n19")
+        P.guardar_ficha(raiz, "n19", {"textos": {"instagram": {
+            "descripcion": "Texto mío sin la palabra", "cta": "Ven", "hashtags": ["lima"]}}})
+        original = P._optimizar_simulado
+
+        def con_palabra(datos_video, redes):
+            # el doble de siempre, con un texto que SÍ dice la palabra clave
+            respuesta, sobre = original(datos_video, redes)
+            bruto = json.loads(respuesta)
+            bruto["instagram"]["nota"] = 80               # una nota suya, por si la pone
+            bruto["instagram"]["campos"]["descripcion"]["despues"] = "Alquiler de consolas en Lima para tu fiesta"
+            return json.dumps(bruto, ensure_ascii=False), sobre
+        P._optimizar_simulado = con_palabra
+        try:
+            P.lanzar_optimizar(raiz, info, ["instagram"], ajustes, en_hilo=False)
+        finally:
+            P._optimizar_simulado = original
+        f = P.ficha(raiz, info, ajustes)
+        prop = f["seo"]["propuesta"]["redes"]["instagram"]
+        ok("nota" not in prop, "la propuesta guardada no lleva nota de Claude")
+        prop.setdefault("fallos", [])
+        ok(not any("palabra clave" in x for x in prop["fallos"]),
+           f"lo que Claude repite de la nota (la primera línea sin la palabra) no sale dos veces: {prop['fallos']}")
+        ok(any("tipo de fiesta" in x for x in prop["fallos"]), "lo que la nota no dice, sí")
+        igual(f["seo"]["palabra_propuesta"], "consolas para fiestas en casa",
+              "la palabra clave que propone la revisión queda para «Usar»")
+        nuevos = dict(f["textos"]["instagram"], **{c: v["despues"] for c, v in prop["campos"].items()})
+        datos = P._leer_video(raiz, "n19")
+        esperada = S.nota("instagram", nuevos, P.componer("instagram", nuevos, ajustes, info, None, datos),
+                          ajustes, datos, info, S.palabra_del_video(datos, ajustes))["nota"]
+        igual(f["seo"].get("notas_con_propuesta", {}).get("instagram"), esperada,
+              "«con estos cambios»: la nota del Studio sobre los textos propuestos")
+        ok(esperada > f["seo"]["notas"]["instagram"]["nota"],
+           f"y sube: {f['seo']['notas']['instagram']['nota']} → {esperada}")
+        P.guardar_ficha(raiz, "n19", {"aceptar_seo": {"instagram": list(prop["campos"])}})
+        igual(P.ficha(raiz, info, ajustes)["seo"].get("notas_con_propuesta"), {},
+              "aceptado todo, no queda «con estos cambios»")
+    finally:
+        os.environ.pop("ESTUDIO_SIMULAR", None)
+    # --- hashtags: el tope de cada red, y lo que sobra se dice
+    muchos = [f"tag{i}" for i in range(35)]
+    f = P.guardar_ficha(raiz, "n19h", {"textos": {"instagram": {"descripcion": "Hola", "hashtags": muchos},
+                                                 "tiktok": {"descripcion": "Hola", "hashtags": muchos[:20]},
+                                                 "youtube": {"descripcion": "Hola", "hashtags": muchos}}})
+    igual(len(f["textos"]["instagram"]["hashtags"]), 35, "guardar no corta los hashtags (antes, a 15 sin decirlo)")
+    r = P.componer("instagram", f["textos"]["instagram"], P.AJUSTES_DEFECTO, INFO, None, {})
+    igual(len(r["tags"]), 30, "a Instagram van 30, su tope")
+    ok(any("5 hashtags no caben en Instagram" in a for a in r["avisos"]),
+       f"y los 5 que sobran se dicen: {r['avisos']}")
+    r = P.componer("tiktok", f["textos"]["tiktok"], dict(P.AJUSTES_DEFECTO, hashtags="#marca #ciudad"), INFO, None, {})
+    ok(len(r["tags"]) == 22 and not any("no cabe" in a for a in r["avisos"]),
+       f"20 de la red y 2 fijos del proyecto en TikTok van todos ({len(r['tags'])}; antes se cortaban a 15)")
+    r = P.componer("youtube", f["textos"]["youtube"], P.AJUSTES_DEFECTO, dict(INFO, formato="horizontal"), None, {})
+    igual(len(r["tags"]), 35, "YouTube admite hasta 60")
+    r = P.componer("instagram", dict(f["textos"]["instagram"], hashtags=muchos[:29]),
+                   dict(P.AJUSTES_DEFECTO, hashtags="#marca #ciudad"), INFO, None, {})
+    ok(any("1 hashtag no cabe en Instagram" in a and "contando los fijos" in a for a in r["avisos"]),
+       f"29 de la red y 2 fijos: el que no cabe se dice, contando los fijos ({r['avisos']})")
+    t, _c = P.normalizar_textos({"instagram": {"descripcion": "x", "hashtags": muchos}}, ["instagram"])
+    igual(len(t["instagram"]["hashtags"]), 30, "lo que escribe Claude se queda en el tope de la red")
+    # --- la cola: un fallo que se reenvió y salió ya no te necesita
+    ahora = P._iso_lima()
+
+    def envio(i, red, estado):
+        return {"id": f"e{i}", "red": red, "estado": estado, "cuando": ahora, "lote": f"l{i}",
+                "perfil": "p", "modo": "ahora"}
+    datos = P._leer_video(raiz, "n19c")
+    datos["envios"] = [envio(1, "instagram", "fallido"), envio(2, "instagram", "publicado"),
+                       envio(3, "tiktok", "fallido"), envio(4, "youtube", "publicado"),
+                       envio(5, "youtube", "comprobar"), envio(6, "facebook", "fallido"),
+                       envio(7, "facebook", "programado"), envio(8, "x", "comprobar"),
+                       envio(9, "x", "programado")]
+    P._escribir(P._ruta_video(raiz, "n19c"), datos)
+    c = P.cola(raiz, [{"pid": "n19c", "nombre": "Cola", "cliente": "", "montado": True}])
+    fallidos = sorted(e["id"] for e in c["fallidos"])
+    igual(fallidos, ["e3", "e5", "e8"], "«Te necesitan» no cuenta el fallo que luego salió (ni el que va programado), "
+          "y sí el que sigue solo o el que falló después de publicar")
+    ok(next(e for e in c["envios"] if e["id"] == "e1").get("superado") is True,
+       "el superado sigue en la semana, marcado para que la pantalla lo diga")
+    igual([next(e for e in c["envios"] if e["id"] == i).get("superado_como") for i in ("e1", "e6")],
+          ["salio", "reenviado"], "y dice si salió o solo se volvió a mandar")
+    ok(any(e["id"] == "e8" for e in c["fallidos"]),
+       "un «comprobar» con otro solo PROGRAMADO detrás sigue en «Te necesitan» (podría salir dos veces)")
+    viejo = P._leer_video(raiz, "n19c")
+    for e in viejo["envios"]:
+        e["cuando"] = "2020-01-06T10:00:00"
+    P._escribir(P._ruta_video(raiz, "n19c"), viejo)
+    c = P.cola(raiz, [{"pid": "n19c", "nombre": "Cola", "cliente": "", "montado": True}])
+    igual(sorted(e["id"] for e in c["envios"]), ["e3", "e5", "e8"],
+          "de otra semana solo sale lo que te necesita: el fallo superado, no")
+    P.cancelar(raiz, "n19c", "e3")
+    igual([e["id"] for e in P.cola(raiz, [{"pid": "n19c", "nombre": "Cola", "cliente": "",
+                                          "montado": True}])["fallidos"]], ["e5", "e8"],
+          "«Quitar de la lista» lo saca de los fallidos")
+
+
 def main():
     print("PRUEBA DE PUBLICAR")
     prueba_piezas()
@@ -2060,6 +2192,7 @@ def main():
     prueba_perfiles()
     prueba_textos()
     prueba_seo()
+    prueba_notas_19oct()
     if shutil.which("ffmpeg"):
         prueba_portada()
     if shutil.which("ffmpeg"):

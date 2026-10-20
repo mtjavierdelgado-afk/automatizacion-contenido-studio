@@ -397,7 +397,7 @@ _CABECERAS = {
     "duración": "duracion", "duracion": "duracion", "locución estimada": "locucion",
     "locucion estimada": "locucion", "objetivo": "objetivo", "cta": "cta", "tono": "tono",
     # rama tipo-de-relato: como se cuenta en imagenes (opcional)
-    "tipo de relato": "tipo_relato", "tipo relato": "tipo_relato", "relato": "tipo_relato",
+    "tipo de relato": "tipo_relato", "tipo relato": "tipo_relato",
 }
 
 
@@ -629,8 +629,9 @@ def _tipo_relato(g, valor):
     sin ella `g` no gana ninguna clave y la Parrilla se lee como antes. Un hueco
     de plantilla («…», o la lista de opciones con «|») es no ponerla; un valor
     que no se reconoce se avisa y no se aplica."""
+    valor = re.sub(r"\s*\(\s*opcional[^)]*\)\s*$", "", str(valor or ""), flags=re.I)
     valor = _sin_relleno(valor)
-    if not valor or "|" in valor:
+    if not valor or "|" in valor or valor.strip(" .") in ("…", "..."):
         return
     try:
         g["tipo_relato"] = _modulo_tipo_relato().leer_linea(valor)

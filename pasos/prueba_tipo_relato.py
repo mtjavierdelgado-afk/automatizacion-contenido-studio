@@ -321,8 +321,14 @@ def prueba_referencias_y_prompt():
     igual([r["papel"] for r in refs_det][:2], ["estilo", "espacio"],
           "el de detalle lleva la base como referencia del sitio")
     igual(P6.planos_sin_base(plan, dirs), {}, "con la base aprobada no falta ninguna")
-    igual(P6.planos_sin_base(plan, dict(dirs, bases={})), {"bano_mampara": ["S001", "S002"]},
-          "sin ella, se dice qué planos esperan (y la tanda no paga)")
+    igual(P6.planos_sin_base(plan, dict(dirs, bases={})), {"bano_mampara": ["S002"]},
+          "sin ella, se dice qué planos ESPERAN: los que no tienen imagen (S001 ya la tiene)")
+    igual(P6.planos_sin_base(plan, dict(dirs, bases={}), unidades=["escena:S001"]),
+          {"bano_mampara": ["S001"]}, "o los pedidos, aunque tengan imagen")
+    igual(P6.planos_sin_base(plan, dict(dirs, bases={}), unidades=["escena:S003"]), {},
+          "y rehacer un plano que no se edita no se bloquea")
+    igual(P6.planos_sin_base(plan, dict(dirs, bases={}), rehacer=True),
+          {"bano_mampara": ["S001", "S002"]}, "con «rehacer todo», todos los editados")
 
     seccion("8] sin modo explícito, las referencias y el prompt son los de siempre")
     sin = {"estilo": {"referencias": [estilo]}, "espacio_fijo": dict(ESPACIO), "unidades": {}}

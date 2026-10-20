@@ -4975,7 +4975,7 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     # cada plano, que es justo lo que este modo viene a quitar. Se para ANTES
     # de gastar nada y se dice donde se aprueba.
     if not solo_assets:
-        faltan = planos_sin_base(plan, dirs)
+        faltan = planos_sin_base(plan, dirs, unidades=unidades, rehacer=rehacer)
         if faltan:
             raise RuntimeError(
                 "falta aprobar la imagen base de "
@@ -5493,12 +5493,28 @@ def generar_imagen_base(proyecto, params, rehacer=False):
             "origen": meta.get("origen"), "calidad": p["calidad"]}
 
 
-def planos_sin_base(plan, dirs):
-    """Los planos que se editan desde una base que no esta aprobada. -> {sitio: [sid]}"""
+def planos_sin_base(plan, dirs, unidades=None, rehacer=False):
+    """Los planos que se van a PRODUCIR editando una base que no esta aprobada.
+    -> {sitio: [sid]}
+
+    Solo cuenta los que esta pasada va a dibujar: los pedidos (`unidades`), o
+    sin unidades los que no tienen PNG (o todos con `rehacer`). Un plano hecho
+    que se conserva no paga nada, y bloquearlo impedia volver a montar un video
+    al que se le acaba de aplicar el tipo de relato (revision del 20-10)."""
     bases = (dirs or {}).get("bases") or {}
+    pedidas = set(unidades) if unidades is not None else None
     faltan = {}
     for escena in (plan or {}).get("escenas") or []:
-        if escena.get("editar_base") and escena.get("set") not in bases:
+        if not escena.get("editar_base") or escena.get("set") in bases:
+            continue
+        uid = f"escena:{escena['id']}"
+        if pedidas is not None:
+            va = uid in pedidas
+        else:
+            hecho = os.path.exists(os.path.join((dirs or {}).get("escenas") or "",
+                                                f"{escena['id']}.png"))
+            va = bool(rehacer) or not hecho
+        if va:
             faltan.setdefault(escena.get("set") or "?", []).append(escena["id"])
     return faltan
 

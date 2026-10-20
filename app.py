@@ -4729,19 +4729,6 @@ def _cambios_del_relato(ctx):
     return salida
 
 
-def _guardar_tipo_relato(ctx, nuevo):
-    """Escribe `assets.tipo_relato` conservando las bases. {} borra el modo."""
-    tr = _tipo_relato()
-    guardado = _tipo_relato_guardado(ctx)
-    final = {k: v for k, v in (nuevo or {}).items() if k in ("modo", "cambia")}
-    if guardado.get("bases"):
-        final["bases"] = guardado["bases"]
-    final = tr.normalizar(final) if final else {}
-    ctx.estado.actualizar_params("assets", {"tipo_relato": final or None}) \
-        if (final or guardado) else None
-    return final
-
-
 @app.post("/api/proyectos/{pid}/tipo_relato/aplicar")
 def aplicar_tipo_relato(pid: str, cuerpo: dict = Body(default=None)):
     """Guarda el tipo de relato de un video (hecho o no). No dibuja nada.
@@ -4767,10 +4754,15 @@ def aplicar_tipo_relato(pid: str, cuerpo: dict = Body(default=None)):
         if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
             raise ErrorApi(409, "hay algo generándose en este vídeo: espera a que "
                                 "termine y vuelve a aplicarlo")
-        _guardar_tipo_relato(ctx, pedido)
-        params = ctx.estado.params("assets") or {}
+        actual = dict(ctx.estado.params("assets") or {})
+        previo = _tipo_relato_guardado(ctx)
+        provisional = {k: v for k, v in (pedido or {}).items()}
+        if previo.get("bases"):
+            provisional["bases"] = previo["bases"]
+        params = dict(actual, tipo_relato=provisional or None)
         relato = tr.resolver(params)
         guardado = params.get("catalogo") or {}
+        cambios_params = {}
         if tr.activo(relato) and (guardado.get("sets") or guardado.get("beats")):
             espacio = _espacio_fijo_guardado(ctx) or catalogo_mod.espacio_del_catalogo(guardado)
             if espacio:
@@ -4794,7 +4786,14 @@ def aplicar_tipo_relato(pid: str, cuerpo: dict = Body(default=None)):
                     firma += "+relato:" + relato["modo"] + (
                         ":" + relato["cambia"] if relato.get("cambia") else "")
                     catalogo["_firma_guion"] = firma
-                ctx.estado.actualizar_params("assets", {"catalogo": catalogo})
+                cambios_params["catalogo"] = catalogo
+        # el modo y el catalogo, en UNA escritura: si el ajuste falla (400) no
+        # queda guardado un modo sin su catalogo
+        final = tr.normalizar(provisional) if provisional else {}
+        if final or previo:
+            cambios_params["tipo_relato"] = final or None
+        if cambios_params:
+            ctx.estado.actualizar_params("assets", cambios_params)
     ctx.bitacora.anotar("tipo_relato_aplicado", "assets", {
         "modo": (pedido or {}).get("modo"), "cambia": (pedido or {}).get("cambia")})
     ficha = _ficha_tipo_relato(ctx)
@@ -4803,15 +4802,22 @@ def aplicar_tipo_relato(pid: str, cuerpo: dict = Body(default=None)):
     return ficha
 
 
+@_medido_en("assets", "cambios_relato")
 def _correr_cambios_relato(avisar, ctx, ajuste):
     """Claude escribe QUE CAMBIA en cada tramo de un catalogo ya guardado."""
     tr = _tipo_relato()
     params = ctx.estado.params("assets") or {}
     relato = tr.resolver(params)
+    leido = params.get("catalogo") or {}
     catalogo, avisos = _catalogo_visual().proponer_cambios(
-        _bloques_del_guion(ctx), params.get("catalogo") or {}, relato, ajuste=ajuste,
+        _bloques_del_guion(ctx), leido, relato, ajuste=ajuste,
         avisar=avisar, proyecto_id=ctx.id, cwd=ctx.proyecto.raiz)
-    ctx.estado.actualizar_params("assets", {"catalogo": catalogo})
+    with _cerrojo_de_cadena(ctx.id):
+        # si el catalogo cambio mientras Claude leia, no se pisa lo nuevo
+        if ((ctx.estado.params("assets") or {}).get("catalogo") or {}) != leido:
+            raise RuntimeError("el reparto y los sitios cambiaron mientras se escribían "
+                               "los cambios: vuelve a pedirlos")
+        ctx.estado.actualizar_params("assets", {"catalogo": catalogo})
     ctx.bitacora.anotar("tipo_relato_cambios", "assets",
                         {"tramos": len(catalogo.get("beats") or [])})
     avisar(1.0, "cambios por tramo escritos")
@@ -4829,13 +4835,18 @@ def escribir_cambios_relato(pid: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(400, "solo «Un espacio que cambia» lleva cambios por tramo")
     por_fase = CLI_CLAUDE.por_defecto_de("catalogo_visual")
     ajuste = _ajuste_cli(datos, por_fase["modelo"], por_fase["esfuerzo"])
-    trabajo_id = ctx.gestor.lanzar("tipo_relato_cambios", _correr_cambios_relato, ctx,
-                                   ajuste, paso="assets")
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo en marcha en este vídeo: espera a que termine")
+        trabajo_id = ctx.gestor.lanzar("tipo_relato_cambios", _correr_cambios_relato, ctx,
+                                       ajuste, paso="assets")
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id),
             "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
 
 
+@_medido_en("assets", "base")
+@_con_turno
 def _correr_base(avisar, ctx, rehacer):
     """Genera (y paga) la imagen base del sitio. No la aprueba."""
     p6 = PASOS_MODULOS.p6_assets
@@ -4862,10 +4873,16 @@ def generar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
     params = ctx.estado.params("assets") or {}
-    if not tr.activo(tr.resolver(params)):
-        raise ErrorApi(400, "elige antes un tipo de relato que no sea documental")
-    if "usd" not in datos:
+    if not tr.edita(tr.resolver(params)):
+        raise ErrorApi(400, "la imagen base que se edita es de «Un espacio que cambia» y "
+                            "«Producto»: elige antes uno de los dos")
+    try:
+        visto = float(datos.get("usd"))
+    except (TypeError, ValueError):
         raise ErrorApi(400, "hace falta 'usd': el coste que se ha enseñado antes de pagar")
+    ahora = _usd_por_imagen(ctx)
+    if ahora and abs(visto - ahora) > max(0.01, ahora * 0.25):
+        raise ErrorApi(409, f"el precio ha cambiado (≈ {ahora:.3f} $): vuelve a mirarlo")
     with _cerrojo_de_cadena(ctx.id):
         if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
             raise ErrorApi(409, "hay algo generándose en este vídeo: las imágenes "
@@ -4889,6 +4906,8 @@ def usar_subida_como_base(pid: str):
     if not subida or not sitio:
         raise ErrorApi(400, "este vídeo no tiene imagen subida del espacio fijo")
     with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo en marcha en este vídeo: espera a que termine")
         guardado = _tipo_relato_guardado(ctx)
         bases = dict(guardado.get("bases") or {})
         bases[sitio] = {"imagen": subida, "aprobada": True}
@@ -4906,14 +4925,19 @@ def aprobar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
     tr = _tipo_relato()
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
-    guardado = _tipo_relato_guardado(ctx)
-    bases = dict(guardado.get("bases") or {})
+    aprobada = datos.get("aprobada", True)
+    if not isinstance(aprobada, bool):
+        raise ErrorApi(400, "'aprobada' tiene que ser true o false")
     sitio = str(datos.get("sitio") or "") or PASOS_MODULOS.p6_assets.espacio_del_relato(
         ctx.proyecto, ctx.estado.params("assets") or {})[0]
-    if sitio not in bases:
-        raise ErrorApi(404, "ese sitio no tiene imagen base: genérala o usa la subida")
     with _cerrojo_de_cadena(ctx.id):
-        bases[sitio] = dict(bases[sitio], aprobada=bool(datos.get("aprobada", True)))
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo en marcha en este vídeo: espera a que termine")
+        guardado = _tipo_relato_guardado(ctx)
+        bases = dict(guardado.get("bases") or {})
+        if sitio not in bases:
+            raise ErrorApi(404, "ese sitio no tiene imagen base: genérala o usa la subida")
+        bases[sitio] = dict(bases[sitio], aprobada=aprobada)
         guardado["bases"] = bases
         ctx.estado.actualizar_params("assets", {"tipo_relato": tr.normalizar(guardado)})
     ctx.bitacora.anotar("tipo_relato_base_aprobada", "assets",
@@ -10909,6 +10933,31 @@ def _impedimentos(ctx, pestana, pendientes):
             fuera.append({"tarea": "escenarios",
                           "que": "no hay guion todavía: sin él no hay nada que leer",
                           "donde": "la pestaña Guion"})
+    # la imagen base del tipo de relato (rama tipo-de-relato): sin ella aprobada
+    # no se dibuja ningun plano nuevo de ese sitio, y se dice antes de lanzar
+    if "assets" in ids:
+        try:
+            ficha = _ficha_tipo_relato(ctx)
+        except Exception:                                   # noqa: BLE001
+            ficha = {}
+        faltan = {}
+        if ficha.get("edita") and not ficha.get("base_aprobada"):
+            # SOLO si hay planos que dibujar: un video hecho cuyos planos se
+            # conservan se tiene que poder volver a montar sin base
+            try:
+                p6 = PASOS_MODULOS.p6_assets
+                plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+                carpetas = _carpetas_de_assets(ctx) or [""]
+                faltan = p6.planos_sin_base(plan, {
+                    "escenas": os.path.join(carpetas[-1], "escenas"),
+                    "bases": p6.rutas_de_bases(ctx.proyecto, ctx.estado.params("assets") or {})})
+            except Exception:                               # noqa: BLE001
+                faltan = {}
+        if faltan:
+            fuera.append({"tarea": "assets",
+                          "que": "falta aprobar la imagen base del sitio: sin ella no se "
+                                 "dibujan los planos nuevos de ese sitio",
+                          "donde": "El tipo de relato"})
     return fuera
 
 

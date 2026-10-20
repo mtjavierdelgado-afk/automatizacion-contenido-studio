@@ -185,7 +185,7 @@ def normalizar(crudo):
             raise ValueError(f"tipo_relato.bases: como mucho {MAX_SITIOS_BASE} sitios")
         limpias = {}
         for sitio, ficha in bases.items():
-            sid = re.sub(r"[^a-z0-9_]", "", _llano(sitio))[:60]
+            sid = re.sub(r"[^a-z0-9_]", "", _llano(sitio))[:120]
             if not sid:
                 raise ValueError("tipo_relato.bases: un sitio sin nombre")
             if not isinstance(ficha, dict):
@@ -418,12 +418,16 @@ def anotar_cambios(crudos, beats):
             usados.add(elegido)
             cambio = _texto(libres[elegido].get("cambio"), 400)
             estado = _etiqueta(libres[elegido].get("estado"))
-        if estado and estado in por_estado and por_estado[estado]:
+        if estado and estado in por_estado:
             cambio = por_estado[estado]
         elif estado and cambio:
             por_estado[estado] = cambio
         beat["cambio"] = cambio
         beat["estado"] = estado or ("antes" if not cambio else "")
+    # y los del mismo estado que llegaron vacios ANTES del primero con cambio
+    for beat in beats or []:
+        if beat.get("estado") in por_estado and not beat.get("cambio"):
+            beat["cambio"] = por_estado[beat["estado"]]
     return beats
 
 

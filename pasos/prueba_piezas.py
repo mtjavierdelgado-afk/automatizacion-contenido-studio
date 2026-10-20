@@ -4708,7 +4708,7 @@ def prueba_elementos_video():
     import xml.dom.minidom
     import elementos_video as EV
     escena = {"id": "S004", "t_in": 10.0, "t_out": 14.0,
-              "narracion": "Alquila tres consolas por 99 soles",
+              "narracion": "Alquila hoy tres consolas por 99 soles",
               "marcas": [[10.0, 10.4], [10.4, 10.8], [10.8, 11.1], [11.1, 11.6], [11.6, 11.8], [11.8, 12.2], [12.2, 12.7]]}
     ok(EV.fragmento(escena, [], (1920, 1080), {}, 4.0) == "", "sin elementos, la capa no lleva nada nuevo")
     ok(EV.de_plano({"unidades": {"escena:S004": {"montaje": {"movimiento": "vivo"}}}}, "escena:S004") == [],
@@ -4723,6 +4723,10 @@ def prueba_elementos_video():
     desde, hasta = EV.momento({"palabra": 5}, escena, 4.0)
     ok(abs(desde - 1.8) < 0.01, f"salta en el momento de SU palabra ({desde})")
     ok(hasta <= 4.0 - 0.04, f"y se va antes de acabar el plano ({hasta})")
+    # un plano fusionado: las marcas no cuadran con las palabras -> no se fía de ellas
+    raro = dict(escena, narracion="Alquila tres consolas")
+    ok(EV.momento({"palabra": 5}, raro, 4.0)[0] < 1.8,
+       "si las marcas no cuadran con las palabras, no salta en una palabra que no es")
     svg = EV.fragmento(escena, limpios, (1920, 1080), {"linea": "#ff9900"}, 4.0)
     try:
         xml.dom.minidom.parseString(f'<svg xmlns="http://www.w3.org/2000/svg">{svg}</svg>')
@@ -4750,7 +4754,7 @@ def prueba_elementos_video():
                             [escena], vertical=True)["S004"]
     ok((dos[0]["x"], dos[0]["y"]) != (dos[1]["x"], dos[1]["y"]), "dos en el mismo sitio: el segundo va al siguiente libre")
     texto = EV.instruccion([escena], "dinamico")
-    ok('<p id="S004"' in texto and "4:99" in texto, "a Claude le llegan las palabras numeradas")
+    ok('<p id="S004"' in texto and "5:99" in texto, "a Claude le llegan las palabras numeradas")
     ok("«99 soles»" in EV.nota_texto_en_imagen("99 soles"), "la nota de la IA lleva el texto exacto")
 
 

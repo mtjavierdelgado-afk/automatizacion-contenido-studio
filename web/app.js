@@ -17413,9 +17413,16 @@ function colocarElemento(el, posicion) {
 function elementosDelPlano(e) {
   const v = videoAbierto();
   if (!v || !e) return null;
-  if (ELEMENTOS_PLANOS.pid !== v.pid || ELEMENTOS_PLANOS.ficha !== PREVIA.ficha) {
+  if (ELEMENTOS_PLANOS.pid !== v.pid) {
+    // OTRO VÍDEO: se empieza de cero (y se sueltan las vistas pintadas)
+    Object.values(ELEMENTOS_PLANOS.vista).forEach(u => { try { URL.revokeObjectURL(u); } catch (_) { /* nada */ } });
     Object.assign(ELEMENTOS_PLANOS, { pid: v.pid, ficha: PREVIA.ficha, datos: null, cargando: false, error: '',
       guardando: '', borrador: {}, vista: {}, viendo: '', proponiendo: '', propuesta: null });
+  } else if (ELEMENTOS_PLANOS.ficha !== PREVIA.ficha) {
+    // EL MISMO VÍDEO RECARGADO (p. ej. al guardar un plano): se relee lo
+    // guardado SIN tirar los borradores ni la propuesta de los demás planos
+    ELEMENTOS_PLANOS.ficha = PREVIA.ficha;
+    if (ELEMENTOS_PLANOS.datos && !ELEMENTOS_PLANOS.cargando) setTimeout(() => cargarElementosPlanos(v.pid), 0);
   }
   const d = ELEMENTOS_PLANOS.datos;
   if (!d) {
@@ -17439,9 +17446,11 @@ function elementosDelPlano(e) {
       : ' · palabras que saltan, flechas, insignias… al ritmo de la voz (gratis)')));
 
   lista.forEach((el, i) => {
+    // SIEMPRE SOBRE LO ÚLTIMO: la fila se pintó con una lista que ya puede
+    // haber cambiado (se escribe sin repintar), así que se relee aquí
     const cambiar = cambio => {
-      const nueva = lista.slice();
-      nueva[i] = Object.assign({}, el, cambio);
+      const nueva = elementosEnEdicion(sid).slice();
+      nueva[i] = Object.assign({}, nueva[i] || el, cambio);
       tocarElementos(sid, nueva, false);
     };
     const fila = h('div', { clase: 'elemento-plano' },
@@ -17459,8 +17468,8 @@ function elementosDelPlano(e) {
     ...palabras.map((p, k) => h('option', { value: k, selected: k === el.palabra }, `${k + 1} · ${p}`))));
     if (el.tipo !== 'rayo' && el.tipo !== 'banda') {
       fila.appendChild(h('select', { 'aria-label': 'Dónde', onchange: ev => {
-        const nueva = lista.slice();
-        nueva[i] = colocarElemento(el, ev.target.value);
+        const nueva = elementosEnEdicion(sid).slice();
+        nueva[i] = colocarElemento(nueva[i] || el, ev.target.value);
         tocarElementos(sid, nueva, true);
       } }, ...Object.keys(d.posiciones || {}).map(p => h('option', { value: p, selected: p === posicionMasCercana(el) },
         NOMBRES_POSICION[p] || p))));
@@ -17468,7 +17477,7 @@ function elementosDelPlano(e) {
     fila.appendChild(h('select', { 'aria-label': 'Cómo entra', onchange: ev => { cambiar({ entrada: ev.target.value }); repintarVideo(); } },
       ...(d.entradas || []).map(n => h('option', { value: n, selected: n === (el.entrada || 'pop') }, NOMBRES_ENTRADA[n] || n))));
     fila.appendChild(h('button', { clase: 'mini fantasma', disabled: ocupado,
-      onclick: () => { const nueva = lista.slice(); nueva.splice(i, 1); tocarElementos(sid, nueva, true); } }, 'Quitar'));
+      onclick: () => { const nueva = elementosEnEdicion(sid).slice(); nueva.splice(i, 1); tocarElementos(sid, nueva, true); } }, 'Quitar'));
     caja.appendChild(fila);
   });
 
@@ -17483,7 +17492,7 @@ function elementosDelPlano(e) {
         icono: t === 'icono' ? 'estrella' : undefined, tam: t === 'texto' ? 0.1 : (t === 'icono' ? 0.07 : 0.08),
         estilos: t === 'texto' ? ['contorno', 'sombra'] : undefined };
       Object.keys(base).forEach(k => base[k] === undefined && delete base[k]);
-      tocarElementos(sid, lista.concat([colocarElemento(base, 'arriba')]), true);
+      tocarElementos(sid, elementosEnEdicion(sid).concat([colocarElemento(base, 'arriba')]), true);
     } }, 'Añadir'),
     h('button', { clase: 'mini', disabled: !!ELEMENTOS_PLANOS.proponiendo,
       onclick: () => proponerElementos([sid]) },
@@ -17491,7 +17500,7 @@ function elementosDelPlano(e) {
     lista.length ? h('button', { clase: 'mini', disabled: ELEMENTOS_PLANOS.viendo === sid,
       onclick: () => verElementosDelPlano(sid) }, ELEMENTOS_PLANOS.viendo === sid ? 'Pintando…' : 'Ver cómo queda') : null,
     h('button', { clase: 'mini fantasma', title: 'Se paga al aplicar la nota: vuelve a dibujar la imagen con el texto dentro',
-      onclick: () => pedirTextoDentroDeImagen(sid, lista) }, 'Texto dentro de la imagen (IA, se paga)')));
+      onclick: () => pedirTextoDentroDeImagen(sid, elementosEnEdicion(sid)) }, 'Texto dentro de la imagen (IA, se paga)')));
   if (ELEMENTOS_PLANOS.vista[sid]) {
     caja.appendChild(h('img', { clase: 'vista-elementos', src: ELEMENTOS_PLANOS.vista[sid], alt: 'Cómo queda con los elementos' }));
   }
@@ -17526,8 +17535,11 @@ function bloqueElementosDelVideo(pid, d) {
         + 'Puedes verlos imagen a imagen (salen como «sin guardar») o aplicarlos todos.'),
       h('button', { clase: 'mini primario', onclick: () => aplicarPropuestaElementos(pid, false) }, 'Aplicar sumando'),
       h('button', { clase: 'mini', onclick: () => aplicarPropuestaElementos(pid, true) }, 'Aplicar en lugar de lo que hay'),
-      h('button', { clase: 'mini fantasma', onclick: () => { ELEMENTOS_PLANOS.propuesta = null; ELEMENTOS_PLANOS.borrador = {}; repintarVideo(); } },
-        'Descartar')));
+      h('button', { clase: 'mini fantasma', onclick: () => {
+        // solo los planos de la propuesta: lo que se esté editando a mano en otros se queda
+        Object.keys(p.propuesta || {}).forEach(sid => { delete ELEMENTOS_PLANOS.borrador[sid]; delete ELEMENTOS_PLANOS.vista[sid]; });
+        ELEMENTOS_PLANOS.propuesta = null; repintarVideo();
+      } }, 'Descartar')));
   }
   return b;
 }
@@ -17590,7 +17602,9 @@ async function proponerElementos(planos) {
     if (!Object.keys(propuesta).length) toast('Claude no ha visto dónde poner nada aquí');
     // lo propuesto entra como «sin guardar» en cada imagen, para mirarlo
     Object.entries(propuesta).forEach(([sid, lista]) => {
-      ELEMENTOS_PLANOS.borrador[sid] = (planos ? elementosEnEdicion(sid) : []).concat(lista).slice(0, 6);
+      // SE SUMA A LO QUE YA TIENE (guardado o a medio editar): una propuesta
+      // nunca esconde ni borra lo que alguien puso a mano
+      ELEMENTOS_PLANOS.borrador[sid] = elementosEnEdicion(sid).concat(lista).slice(0, 6);
       delete ELEMENTOS_PLANOS.vista[sid];
     });
     if (!planos) ELEMENTOS_PLANOS.propuesta = ficha;
@@ -17604,14 +17618,20 @@ async function proponerElementos(planos) {
 async function aplicarPropuestaElementos(pid, reemplazar) {
   const p = ELEMENTOS_PLANOS.propuesta;
   if (!p) return;
+  // El borrador de cada plano YA es «lo que había + lo propuesto» (con lo que
+  // se haya retocado): sumando se manda tal cual; «en lugar de» manda solo lo
+  // propuesto. Las dos sustituyen en el servidor, para no sumar dos veces.
   const planos = {};
-  Object.keys(p.propuesta || {}).forEach(sid => { planos[sid] = ELEMENTOS_PLANOS.borrador[sid] || p.propuesta[sid]; });
+  Object.keys(p.propuesta || {}).forEach(sid => {
+    planos[sid] = reemplazar ? p.propuesta[sid] : (ELEMENTOS_PLANOS.borrador[sid] || p.propuesta[sid]);
+  });
   try {
-    const r = await pedir(`${API.proyecto(pid)}/elementos/aplicar`, { method: 'POST', cuerpo: { planos, reemplazar } });
+    const r = await pedir(`${API.proyecto(pid)}/elementos/aplicar`, { method: 'POST', cuerpo: { planos, reemplazar: true } });
     ELEMENTOS_PLANOS.datos = r;
     ELEMENTOS_PLANOS.propuesta = null;
     Object.keys(planos).forEach(sid => { delete ELEMENTOS_PLANOS.borrador[sid]; });
-    toast(`${(r.cambiados || []).length} imagen(es) con elementos: se aplican al montar el vídeo (gratis)`);
+    toast(`${(r.cambiados || []).length} imagen(es) con elementos: se aplican al montar el vídeo (gratis)`
+      + ((r.recortados || []).length ? ` · en ${r.recortados.length} solo caben los 6 primeros` : ''));
     await recargarVideoAbierto();
   } catch (err) { toast(err.message, true); }
   repintarVideo();

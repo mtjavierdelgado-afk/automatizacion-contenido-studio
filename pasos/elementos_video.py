@@ -101,6 +101,10 @@ def momento(el, escena, duracion):
     """(desde, hasta) en segundos dentro del plano."""
     t_in = float(escena.get("t_in") or 0.0)
     marcas = escena.get("marcas") or []
+    # SOLO SI LAS MARCAS CUADRAN CON LAS PALABRAS (como hacen camara y las
+    # cifras): en un plano fusionado no cuadran y saltaria en otra palabra
+    if len(str(escena.get("narracion") or "").split()) != len(marcas):
+        marcas = []
     desde = None
     if "palabra" in el and el["palabra"] < len(marcas):
         try:

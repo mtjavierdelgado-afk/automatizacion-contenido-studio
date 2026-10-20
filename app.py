@@ -42,6 +42,7 @@ import os
 import re
 import unicodedata
 import shutil
+import tempfile
 import sys
 import threading
 import time
@@ -8623,6 +8624,8 @@ def cambiar_elementos_de_plano(pid: str, sid: str, cuerpo: dict = Body(default=N
     """{elementos: [...]} de UN plano (vacia, los quita). Deja pendientes ese
     plano en las capas y el montaje; se aplica al montar (gratis)."""
     ctx = contexto(pid)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
     lista = _cuerpo(cuerpo).get("elementos")
     if not isinstance(lista, list):
         raise ErrorApi(400, "manda {elementos: [...]}")
@@ -8698,6 +8701,8 @@ def aplicar_elementos(pid: str, cuerpo: dict = Body(default=None)):
     reemplazar?}. Sin `reemplazar`, se SUMAN a los que ya tenia cada plano.
     Los planos que no se mandan no se tocan. Se aplica al montar (gratis)."""
     ctx = contexto(pid)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
     datos = _cuerpo(cuerpo)
     planos = datos.get("planos")
     if not isinstance(planos, dict) or not planos:
@@ -8707,7 +8712,7 @@ def aplicar_elementos(pid: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(409, "el vídeo se está montando ahora: aplícalo cuando termine")
     EV = _elementos_video()
     previos = ((ctx.estado.params("callouts") or {}).get("unidades") or {})
-    cambios = {}
+    cambios, recortados = {}, []
     for sid, lista in planos.items():
         sid = str(sid)
         if sid in no or not isinstance(lista, list):
@@ -8715,11 +8720,15 @@ def aplicar_elementos(pid: str, cuerpo: dict = Body(default=None)):
         ya = [] if datos.get("reemplazar") else EV.limpiar(((previos.get(f"escena:{sid}") or {})
                                                             if isinstance(previos.get(f"escena:{sid}"), dict)
                                                             else {}).get(EV.CLAVE))
-        cambios[sid] = (ya + EV.limpiar(lista))[:EV.MAX_POR_PLANO]
+        juntos = ya + EV.limpiar(lista)
+        if len(juntos) > EV.MAX_POR_PLANO:
+            recortados.append(sid)
+        cambios[sid] = juntos[:EV.MAX_POR_PLANO]
     cambiados = _guardar_elementos(ctx, cambios)
     if cambiados:
         ctx.bitacora.anotar("elementos_aplicados", "callouts", {"planos": cambiados})
-    return dict(leer_elementos_de_planos(pid), cambiados=cambiados,
+    # los que no cabian (mas de MAX_POR_PLANO) se dicen, no se tiran callando
+    return dict(leer_elementos_de_planos(pid), cambiados=cambiados, recortados=recortados,
                 pendiente=(ctx.estado.estado_de("callouts") == "obsoleto"
                            or ctx.estado.estado_de("render") == "obsoleto"))
 
@@ -8746,7 +8755,10 @@ def vista_elementos_de_plano(pid: str, sid: str, cuerpo: dict = Body(default=Non
     G = _motor_grafismo()
     svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W // 3}" height="{H // 3}" viewBox="0 0 {W} {H}">'
            + G.imagen_cubre(G.data_uri(ruta), 0, 0, W, H) + EV.estatico(lista, (W, H), paleta) + "</svg>")
-    destino = os.path.join(ctx.proyecto.raiz, "_vistas_elementos", f"{sid}_{uuid.uuid4().hex[:8]}.png")
+    # UNA CARPETA TEMPORAL POR PETICION (fuera del proyecto): dos vistas a la
+    # vez no se borran la una a la otra
+    carpeta_tmp = tempfile.mkdtemp(prefix="vista_elementos_")
+    destino = os.path.join(carpeta_tmp, f"{sid}.png")
     try:
         PASOS_MODULOS.medios.rasterizar(svg, destino, W // 3, H // 3 + 160, transparente=False, espera_ms=1000)
         from PIL import Image                               # noqa: PLC0415
@@ -8757,7 +8769,7 @@ def vista_elementos_de_plano(pid: str, sid: str, cuerpo: dict = Body(default=Non
     except Exception as fallo:                              # noqa: BLE001
         raise ErrorApi(500, f"no he podido pintar la vista: {fallo}")
     finally:
-        shutil.rmtree(os.path.dirname(destino), ignore_errors=True)
+        shutil.rmtree(carpeta_tmp, ignore_errors=True)
     return Response(salida_png.getvalue(), media_type="image/png", headers={"Cache-Control": "no-store"})
 
 
@@ -8770,7 +8782,9 @@ def nota_texto_dentro_de_imagen(pid: str, sid: str, cuerpo: dict = Body(default=
     texto = " ".join(str(_cuerpo(cuerpo).get("texto") or "").split())
     if not texto:
         raise ErrorApi(400, "¿qué texto quieres dentro de la imagen?")
-    _plan, escenas, _no = _comprobar_planos(ctx, [sid])
+    _plan, escenas, no = _comprobar_planos(ctx, [sid])
+    if sid in no:
+        raise ErrorApi(400, "este plano es una cartela o una cabecera: su texto ya va escrito")
     escena = next(e for e in escenas if str(e["id"]) == sid)
     return anadir_nota_repaso(pid, {"texto": _elementos_video().nota_texto_en_imagen(texto),
                                     "t": float(escena.get("t_in") or 0.0), "plano": sid,

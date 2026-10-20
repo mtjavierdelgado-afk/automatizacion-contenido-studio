@@ -2001,8 +2001,15 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
             fija, fichas = fija_vacia(escena), []
         elif apagada:
             # el movimiento SI se calcula: el plano sigue teniendo su zoom y su
-            # transicion, lo unico que se va es el texto
+            # transicion, lo unico que se va es el texto. Los ELEMENTOS que
+            # alguien puso a mano en este plano si se quedan (se pidieron).
+            propios = elementos_video.de_plano(p, uid)
             svg, fija, fichas = capa_vacia(lienzo), fija_vacia(escena), []
+            if propios:
+                piezas = extras_de(escena, [], propios)
+                fija = _envoltorio_fijo(piezas, salida) if piezas else fija
+                fichas = elementos_video.fichas(escena, propios,
+                                                float(escena["t_out"]) - float(escena["t_in"]))
         else:
             propios = elementos_video.de_plano(p, uid)
             svg, fija, fichas = capa_de_escena(

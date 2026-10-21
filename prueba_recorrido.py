@@ -6567,33 +6567,34 @@ def tipos_de_negocio(navegador, datos):
     pg.sin_errores("Configuración → Tipos de negocio")
     pg.js("conmutarConfig(false);")
 
-    # LA FICHA DEL ESTILO: el selector, sin escribir nada al abrir
+    # LA FICHA DEL ESTILO: el selector, sin escribir nada al abrir. El estilo del
+    # recorrido no tiene estilo gráfico guardado (sus láminas vienen del
+    # taller), y entonces el selector sale APAGADO y lo explica; elegir y
+    # guardar lo prueban prueba_api y prueba_dominios.
     estilo_antes = estilo_guardado()
     pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{datos['preset']}' }});")
     ok(pg.esperar(".selector-tipo-negocio select", None, 20), "la ficha del estilo trae «Tipo de negocio»")
     sel = pg.p.locator(".selector-tipo-negocio select")
-    ok(sel.input_value() == "", "en Automático")
-    ok("Mamparas y baños" in sel.locator("option").all_inner_texts(), "y ofrece el tipo recién creado")
+    if estilo_antes.get("referencias"):
+        ok(sel.is_enabled() and sel.input_value() == "", "en Automático, y se puede elegir")
+        ok("Mamparas y baños" in sel.locator("option").all_inner_texts(), "ofrece el tipo recién creado")
+    else:
+        ok(not sel.is_enabled() and pg.visible(".selector-tipo-negocio", "Genera primero el estilo gráfico"),
+           "sin estilo gráfico todavía, sale apagado y dice por qué")
     ok(json.dumps(estilo_guardado(), sort_keys=True) == json.dumps(estilo_antes, sort_keys=True),
        "abrir la ficha no ha escrito nada en el estilo")
-    sel.select_option("mamparas-y-banos")
-    pg.p.wait_for_timeout(1200)
-    ok(estilo_guardado().get("dominio") == "mamparas-y-banos",
-       "elegirlo lo guarda en el estilo")
     pg.captura("tipos_de_negocio_ficha", entera=False)
     pg.sin_errores("el selector de la ficha del estilo")
 
-    # BORRARLO con un estilo que lo usa: avisa, y al aceptar vuelve a automático
+    # BORRARLO desde la pantalla
     pg.js("conmutarConfig(true);")
     ok(pg.esperar(sec + " .tipo-negocio", "Mamparas y baños", 15), "de vuelta en Configuración")
     pg.pulsar(sec + " .tipo-negocio:has-text('Mamparas') button", "Borrar")
     pg.p.wait_for_timeout(1500)
-    ok(any("Eventos" in x or "lo tienen fijado" in x for x in pg.dialogos) or len(pg.dialogos) >= 2,
-       f"pregunta dos veces: borrar y que un estilo lo usa ({pg.dialogos[-2:]})")
+    ok(any("Borrar el tipo de negocio" in x for x in pg.dialogos), "pregunta antes de borrar")
     _r, d = api.get("/api/dominios")
     ok(not any(t["id"] == "mamparas-y-banos" for t in d.get("dominios") or []), "y lo borra")
-    ok("dominio" not in estilo_guardado(),
-       "el estilo que lo usaba vuelve a automático")
+    ok(not pg.visible(sec + " .tipo-negocio", "Mamparas y baños"), "y deja de salir")
     pg.sin_errores("borrar un tipo de negocio")
     pg.cerrar()
 

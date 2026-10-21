@@ -26287,7 +26287,12 @@ function repintarTiposDeNegocio() {
 }
 
 async function cargarTiposDeNegocio(forzar) {
-  if (TIPOS_NEGOCIO.cargando) return TIPOS_NEGOCIO.promesa;
+  // pedida otra vez mientras va una: se espera esa y se vuelve a leer (lo
+  // recién guardado podría no estar en la que iba)
+  if (TIPOS_NEGOCIO.cargando) {
+    await TIPOS_NEGOCIO.promesa;
+    if (!forzar) return TIPOS_NEGOCIO.lista;
+  }
   if (TIPOS_NEGOCIO.lista && !forzar) return TIPOS_NEGOCIO.lista;
   TIPOS_NEGOCIO.cargando = true;
   TIPOS_NEGOCIO.promesa = (async () => {
@@ -26313,7 +26318,7 @@ function borradorDeTipo(tipo) {
     descripcion: t.descripcion || '',
     palabras: (t.palabras || []).join(', '),
     reglas: (t.reglas || []).map((r, i) => ({
-      id: r.id || `r${i + 1}`, texto: r.texto || '', en: r.en || '',
+      id: r.id || `r${i + 1}`, texto: r.texto || '', en: r.en || '', enDe: r.texto || '',
       palabras: (r.palabras || []).join(', '), nombre: r.nombre || '',
       gravedad: r.gravedad || 'media',
     })),
@@ -26406,6 +26411,7 @@ async function afinarReglaDeTipo(regla) {
       const f = await pedir(`${BASE}/api/reglas-estilo/afinar/${encodeURIComponent(r.id)}`);
       if (f.estado === 'listo') {
         regla.en = (f.propuesta || {}).en || regla.en;
+        regla.enDe = regla.texto;
         if (!regla.nombre) regla.nombre = (f.propuesta || {}).nombre || '';
         listo = true;
       }
@@ -26423,7 +26429,15 @@ function tarjetaReglaDeTipo(b, regla, i) {
   const texto = h('textarea', {
     rows: 2, value: regla.texto, 'aria-label': `Qué exige la regla ${i + 1}`,
     placeholder: 'qué se exige, como se lo dirías a un fotógrafo: «las mamparas son de vidrio transparente con perfiles finos»',
-    oninput: ev => { regla.texto = ev.target.value; },
+    oninput: ev => {
+      regla.texto = ev.target.value;
+      /* LA VERSIÓN EN INGLÉS ERA DE TU TEXTO DE ANTES, y es la que lee el
+         generador: si cambias el tuyo, se vacía (y se puede volver a afinar). */
+      if (regla.en && regla.enDe !== undefined && regla.enDe !== regla.texto) {
+        regla.en = ''; en.value = '';
+        en.placeholder = 'cambiaste tu texto: la versión en inglés de antes ya no vale. Pulsa «Afinar con Claude» otra vez o déjala vacía';
+      }
+    },
   });
   texto.dataset.foco = `tipo-regla:${regla.id}:texto`;
   const palabras = h('input', {
@@ -26435,7 +26449,7 @@ function tarjetaReglaDeTipo(b, regla, i) {
   const en = h('textarea', {
     rows: 2, value: regla.en, 'aria-label': `Versión para el generador de la regla ${i + 1}`,
     placeholder: 'opcional: la regla en inglés, que es como mejor la sigue el generador («Afinar con Claude» la escribe)',
-    oninput: ev => { regla.en = ev.target.value; },
+    oninput: ev => { regla.en = ev.target.value; regla.enDe = regla.texto; },
   });
   en.dataset.foco = `tipo-regla:${regla.id}:en`;
   return h('div', { clase: 'regla-estilo' },
@@ -26468,8 +26482,8 @@ function editorTipoDeNegocio() {
     { pista: 'para quien lo elige en un estilo' }));
   caja.appendChild(campoTexto('Palabras con las que se reconoce', b.palabras, v => { b.palabras = v; },
     { pista: 'mampara, ducha, baño',
-      ayuda: 'Separadas por comas. Sirven para que el revisor reconozca el negocio en un '
-        + 'estilo en Automático; sus reglas solo entran si el estilo fija este tipo.' }));
+      ayuda: 'Separadas por comas. Si el texto de un estilo en Automático las nombra, su '
+        + 'ficha te sugiere este tipo. Nunca deciden nada solas: el tipo solo se usa si lo eliges.' }));
   caja.appendChild(h('div', { clase: 'fila' },
     h('strong', {}, 'Reglas de foto'),
     h('span', { clase: 'crece' }),
@@ -26570,6 +26584,15 @@ function selectorTipoDeNegocio(ficha) {
     return h('div', { clase: 'campo' }, h('label', {}, 'Tipo de negocio'),
       h('div', { clase: 'cargando' }, 'leyendo los tipos…'));
   }
+  /* SIN ESTILO GRÁFICO TODAVÍA (sin láminas) el servidor no deja fijarlo: se
+     dice aquí en vez de dejar elegir y contestar con un error. */
+  if (!(estilo.referencias || []).length) {
+    const apagado = campoSelect('Tipo de negocio', '', [{ valor: '', nombre: 'Automático' }], () => {},
+      'Genera primero el estilo gráfico (las láminas); después podrás elegir su tipo de negocio.');
+    apagado.querySelector('select').disabled = true;
+    apagado.classList.add('selector-tipo-negocio');
+    return apagado;
+  }
   const actual = lista.some(t => t.id === estilo.dominio) ? estilo.dominio : '';
   const opciones = [{ valor: '', nombre: 'Automático (como siempre: según el texto del vídeo)' }]
     .concat(lista.map(t => ({ valor: t.id, nombre: t.nombre })));
@@ -26590,5 +26613,23 @@ function selectorTipoDeNegocio(ficha) {
   }, 'Sus reglas de foto y lo que vigila el revisor. Los tipos se crean y se cambian en '
     + 'Configuración → Tipos de negocio. Guardarlo no rehace nada ni cuesta nada.');
   campo.classList.add('selector-tipo-negocio');
+  /* LA SUGERENCIA: si está en Automático y su texto nombra las palabras de un
+     tipo tuyo, se dice. Solo se dice: elegirlo sigue siendo tuyo (regla 1). */
+  if (!actual) {
+    const hueco = h('div', { clase: 'meta sugerencia-tipo-negocio' });
+    campo.appendChild(hueco);
+    pedir(`${API.presetLight(ficha.id)}/dominio`).then(r => {
+      if (!r.sugerido || !hueco.isConnected) return;
+      hueco.appendChild(h('span', {}, `Este estilo parece de «${r.sugerido.nombre}». `));
+      hueco.appendChild(h('button', {
+        clase: 'mini', onclick: () => {
+          const s = campo.querySelector('select');
+          s.value = r.sugerido.id;
+          s.dispatchEvent(new Event('change'));
+          hueco.remove();
+        },
+      }, 'Usarlo'));
+    }).catch(() => {});
+  }
   return campo;
 }

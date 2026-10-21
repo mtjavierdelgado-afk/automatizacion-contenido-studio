@@ -352,8 +352,11 @@ def prueba_tipos_del_dueno():
           "el revisor vigila lo que se escribió del equipo")
     igual(frases["manos"], D.REVISOR_GENERAL["manos"], "y lo demás, como el general")
     igual(R._frases({}, {"escenas": [{"prompt": "una ducha nueva"}]})["equipo"],  # noqa: SLF001
-          "las mamparas no son de vidrio o los perfiles son gruesos",
-          "en automático, el revisor lo reconoce por sus palabras (con o sin tildes)")
+          D.REVISOR_GENERAL["equipo"],
+          "en automático, un tipo propio NO cambia lo que vigila el revisor (revisión independiente, M1)")
+    igual((D.sugerido("una ducha nueva") or {}).get("id"), "mamparas-y-banos",
+          "sus palabras solo sirven para SUGERIRLO (con o sin tildes)")
+    igual(D.sugerido("plantas en la terraza"), None, "y si no las nombra, nada")
     igual(R._frases({}, {"escenas": [{"prompt": "consolas y una ducha"}]})["equipo"],  # noqa: SLF001
           D.REVISOR_ESTADOPLAY["equipo"], "pero los de fábrica van primero, como antes")
 
@@ -392,10 +395,26 @@ def prueba_tipos_del_dueno():
     ok([t["id"] for t in D.listar()][:2] == ["general", "estadoplay"],
        "con los de fábrica delante")
 
+    prompt_fijo = _prompt(banos, fijo)
     ok(D.borrar("mamparas-y-banos"), "se borra")
-    igual(D.fijado(fijo), None, "y un estilo que lo tenía fijado vuelve a automático")
-    igual(_prompt(banos, fijo), _prompt(banos, estilo), "con el prompt de automático")
+    ok(not any(t["id"] == "mamparas-y-banos" for t in D.listar()), "deja de salir en la lista")
+    try:
+        D.normalizar("mamparas-y-banos")
+        ok(False, "un tipo borrado no se puede fijar")
+    except ValueError:
+        ok(True, "un tipo borrado no se puede fijar")
+    igual(_prompt(banos, fijo), prompt_fijo,
+          "pero un vídeo ya creado con él saca el MISMO prompt: sus imágenes no quedan obsoletas (M2)")
     ok(not D.borrar("mamparas-y-banos"), "borrar uno que no está: False")
+    otra = D.guardar({"nombre": "Mamparas y baños", "reglas": [{"texto": "otra cosa", "en": "OTHER RULE."}]})
+    ok(otra["id"] != "mamparas-y-banos", f"crear otro con el mismo nombre da otro id ({otra['id']})")
+    ok("OTHER RULE" not in _prompt(banos, fijo), "y no se le cuela al vídeo del borrado")
+    for corta in ("de", "\u0301", "x"):
+        try:
+            D.guardar({"nombre": f"Corta {len(corta)}{corta[:1]}", "palabras": [corta.encode().decode("unicode_escape")]})
+            ok(False, f"palabra «{corta}»: tenía que rechazarse")
+        except ValueError:
+            ok(True, f"una palabra demasiado corta («{corta}») se rechaza (B5)")
 
     with open(os.environ["ESTUDIO_DOMINIOS"], "w", encoding="utf-8") as fh:
         fh.write("{roto")

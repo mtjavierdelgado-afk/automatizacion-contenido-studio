@@ -7247,6 +7247,10 @@ def probar_tipos_de_negocio():
         ok(codigo == 200 and t.get("descripcion") == "sonrisas"
            and [e["id"] for e in t.get("estilos") or []] == [pid],
            "PUT lo cambia y dice qué estilos lo usan")
+        codigo, t = _llamar(servidor.cambiar_dominio, "CLINICA-Dental", dict(cuerpo, descripcion="x"))
+        igual(codigo, 200, "el id en mayúsculas en la URL vale igual (B4)")
+        codigo, t = _llamar(servidor.dominio_de_estilo, pid)
+        igual(t.get("dominio"), "clinica-dental", "GET …/dominio dice el fijado")
         codigo, m = _llamar(servidor.borrar_dominio, "clinica-dental")
         ok(codigo == 409 and "Dental" in str(m), f"borrarlo con un estilo que lo usa: 409 ({codigo})")
         codigo, r = _llamar(servidor.borrar_dominio, "clinica-dental", True)

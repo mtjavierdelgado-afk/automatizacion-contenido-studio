@@ -107,9 +107,8 @@ AUTOMATICO = ""
 #
 #   nombre       como se llama («Mamparas y baños»)
 #   descripcion  para quien lo elige
-#   palabras     con que palabras se reconoce en el texto de un vídeo (sirven
-#                para que el revisor use sus frases en automático; NUNCA para
-#                meter sus reglas en un vídeo que no lo ha fijado)
+#   palabras     con que palabras se reconoce: la ficha del estilo lo SUGIERE
+#                si su texto las nombra (`sugerido`). Nunca deciden nada solas
 #   reglas       sus reglas de foto, con el formato de las reglas del estilo
 #                (`pasos/reglas_estilo.py`: texto, palabras «solo si», versión
 #                afinada en inglés)
@@ -240,6 +239,8 @@ def validar(datos):
             continue
         if len(p) > MAX_PALABRA:
             raise ValueError(f"«{p[:20]}…» es demasiado larga para una palabra")
+        if len(re.sub(r"[^a-z0-9]", "", _llano(p))) < 3:
+            raise ValueError(f"«{p}» es demasiado corta para reconocer nada")
         if _llano(p) not in {_llano(x) for x in limpias}:
             limpias.append(p)
     if len(limpias) > MAX_PALABRAS:
@@ -326,23 +327,30 @@ def _escribir_usuario(ruta, tipos):
     _CACHE.clear()
 
 
-def de_usuario(raiz=None):
-    """{id: tipo} de los que creó el dueño, ya con la forma de los de fábrica."""
-    return {tid: _de_usuario_a_tipo(c) for tid, c in _leer_usuario(ruta_usuario(raiz)).items()}
+def de_usuario(raiz=None, con_borrados=False):
+    """{id: tipo} de los que creó el dueño, ya con la forma de los de fábrica.
+
+    Los BORRADOS no salen (ni en la lista ni para fijarlos), pero se guardan:
+    un vídeo ya creado con ese tipo en su copia del estilo lo sigue leyendo
+    igual (`obtener`), así que borrar no deja sus imágenes obsoletas, y crear
+    otro con el mismo nombre no le cuela las reglas del nuevo (otro id)."""
+    return {tid: _de_usuario_a_tipo(c) for tid, c in _leer_usuario(ruta_usuario(raiz)).items()
+            if con_borrados or not c.get("borrado")}
 
 
 def todos(raiz=None):
-    """{id: tipo}: los de fábrica y después los del dueño."""
+    """{id: tipo}: los de fábrica y después los del dueño (sin los borrados)."""
     salida = dict(DE_FABRICA)
     salida.update(de_usuario(raiz))
     return salida
 
 
 def obtener(tid, raiz=None):
-    """El tipo con ese id, o None."""
+    """El tipo con ese id, o None. Incluye los borrados: ver `de_usuario`."""
     if not tid:
         return None
-    return todos(raiz).get(str(tid).strip().lower())
+    clave = str(tid).strip().lower()
+    return DE_FABRICA.get(clave) or de_usuario(raiz, con_borrados=True).get(clave)
 
 
 def guardar(datos, tid=None, raiz=None):
@@ -359,7 +367,7 @@ def guardar(datos, tid=None, raiz=None):
             tid = str(tid).strip().lower()
             if tid in DE_FABRICA:
                 raise ValueError("los tipos de fábrica no se cambian: crea uno tuyo")
-            if tid not in tipos:
+            if tid not in tipos or tipos[tid].get("borrado"):
                 raise ValueError(f"no hay ningún tipo «{tid}»")
             anterior = tipos[tid]
             nuevo = dict(limpio, id=tid, creado=anterior.get("creado") or ahora,
@@ -367,7 +375,7 @@ def guardar(datos, tid=None, raiz=None):
         else:
             if len(tipos) >= MAX_TIPOS:
                 raise ValueError(f"como mucho {MAX_TIPOS} tipos de negocio propios")
-            nombres = {_llano(c.get("nombre")) for c in tipos.values()}
+            nombres = {_llano(c.get("nombre")) for c in tipos.values() if not c.get("borrado")}
             nombres |= {_llano(d["nombre"]) for d in DE_FABRICA.values()}
             if _llano(limpio["nombre"]) in nombres:
                 raise ValueError(f"ya hay un tipo que se llama «{limpio['nombre']}»")
@@ -391,17 +399,18 @@ def _sin_fechas(crudo):
 def borrar(tid, raiz=None):
     """Quita un tipo del dueño. -> bool (si estaba). Los de fábrica, ValueError.
 
-    Quien lo use (estilos, vídeos) vuelve a AUTOMÁTICO: `fijado` no lo encuentra.
-    La API avisa antes de qué estilos lo tienen fijado."""
+    Se MARCA como borrado y no se quita del fichero (ver `de_usuario`): deja de
+    salir y de poder fijarse; la API quita la clave de los estilos que lo
+    tenían, y los vídeos ya creados con él siguen como estaban."""
     tid = str(tid or "").strip().lower()
     if tid in DE_FABRICA:
         raise ValueError("los tipos de fábrica no se borran")
     ruta = ruta_usuario(raiz)
     with _LOCK:
         tipos = dict(_leer_usuario(ruta))
-        if tid not in tipos:
+        if tid not in tipos or tipos[tid].get("borrado"):
             return False
-        tipos.pop(tid)
+        tipos[tid] = dict(tipos[tid], borrado=time.strftime("%Y-%m-%dT%H:%M:%S"))
         _escribir_usuario(ruta, tipos)
     return True
 
@@ -463,16 +472,26 @@ def _lo_nombra(dominio, texto):
 def de_estilo(estilo, texto="", raiz=None):
     """El tipo que rige: el fijado o, en automático, el que delata el texto.
 
-    -> (dominio, automatico: bool). En automático se prueban los tipos en orden
-    --los de fábrica primero, así EstadoPlay sigue ganando como antes-- y el
-    primero cuyo texto aparezca rige; si ninguno, el general."""
+    -> (dominio, automatico: bool). En automático solo se prueban los de
+    FÁBRICA (EstadoPlay si el texto nombra sus servicios; si no, general): un
+    tipo del dueño no cambia nada de un vídeo que no lo haya elegido, tampoco
+    lo que vigila el revisor (que en modo autónomo decide qué se rehace)."""
     propio = fijado(estilo, raiz)
     if propio is not None:
         return propio, False
-    for dominio in todos(raiz).values():
+    for dominio in DE_FABRICA.values():
         if _lo_nombra(dominio, str(texto or "")):
             return dominio, True
     return GENERAL, True
+
+
+def sugerido(texto, raiz=None):
+    """El tipo del dueño cuyas palabras salen en un texto, o None. Solo para
+    SUGERIRLO en la ficha del estilo: no decide nada por su cuenta."""
+    for dominio in de_usuario(raiz).values():
+        if _lo_nombra(dominio, str(texto or "")):
+            return dominio
+    return None
 
 
 def frases_revisor(estilo, texto="", raiz=None):

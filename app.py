@@ -14727,6 +14727,28 @@ def _tipo_publicado(tid):
     raise ErrorApi(404, f"no hay ningún tipo de negocio «{tid}»")
 
 
+@app.get("/api/presets-light/{preset_id}/dominio")
+def dominio_de_estilo(preset_id: str):
+    """El tipo fijado en un estilo y, si está en automático, el tipo PROPIO que
+    su texto parece nombrar (solo para sugerirlo; no guarda nada).
+    -> {dominio, sugerido: {id, nombre} | null}"""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    presets = _presets()
+    ficha = _preset_o_400(lambda p: p.leer(preset_id))
+    datos = ficha.get("datos") or {}
+    estilo = datos.get("estilo") or {}
+    fijo = str(estilo.get("dominio") or "")
+    sugerido = None
+    if not fijo:
+        texto = " ".join([PASOS_MODULOS.p6_assets.contexto_de_reglas(estilo),
+                          str((datos.get("origen") or {}).get("estilo_prompt") or "")])
+        tipo = PASOS_MODULOS.dominios.sugerido(texto)
+        if tipo:
+            sugerido = {"id": tipo["id"], "nombre": tipo["nombre"]}
+    return {"dominio": fijo, "sugerido": sugerido}
+
+
 @app.post("/api/dominios", status_code=201)
 def crear_dominio(cuerpo: dict = Body(default=None)):
     """Crea un tipo de negocio propio: {nombre, descripcion?, palabras?,
@@ -14745,6 +14767,7 @@ def crear_dominio(cuerpo: dict = Body(default=None)):
 def cambiar_dominio(tid: str, cuerpo: dict = Body(default=None)):
     """Cambia un tipo propio (el cuerpo entero, como al crearlo). Los de
     fábrica, 400. -> el tipo, más `estilos`: los que lo tienen fijado"""
+    tid = str(tid or "").strip().lower()
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
     try:
@@ -14760,6 +14783,7 @@ def borrar_dominio(tid: str, forzar: bool = False):
     """Borra un tipo propio. Si algún estilo lo tiene fijado contesta 409 con
     la lista, y con `?forzar=1` lo borra igual: esos estilos (y sus vídeos)
     vuelven a automático."""
+    tid = str(tid or "").strip().lower()
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
     if tid in PASOS_MODULOS.dominios.DE_FABRICA:
@@ -14776,9 +14800,9 @@ def borrar_dominio(tid: str, forzar: bool = False):
         raise ErrorApi(400, str(fallo))
     if not borrado:
         raise ErrorApi(404, f"no hay ningún tipo de negocio «{tid}»")
-    # LOS ESTILOS QUE LO TENÍAN vuelven a automático también en su ficha: un id
-    # que ya no existe se leería igual como automático, pero la pantalla lo
-    # enseñaría como un tipo perdido. Los vídeos ya creados no se tocan.
+    # LOS ESTILOS QUE LO TENÍAN vuelven a automático en su ficha. Los vídeos ya
+    # creados con él no: el tipo queda MARCADO como borrado y lo siguen leyendo
+    # igual (`dominios.de_usuario`), así que ninguna imagen queda obsoleta.
     for usado in usan:
         _quitar_dominio_del_estilo(usado["id"], tid)
     anotar_global("dominio_borrado", {"dominio": tid, "estilos": [e["id"] for e in usan]})

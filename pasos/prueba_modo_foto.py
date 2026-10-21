@@ -715,7 +715,11 @@ def prueba_correcciones():
     reglas = medios.motor("reglas/reglas.py")
 
     titulo("6 · las reglas de consolas solo en videos de consolas (A1)")
-    con_condicion = [r for r in reglas.cargar("foto")["reglas"] if r.get("solo_si")]
+    # desde la Etapa Foto C viven en su TIPO DE NEGOCIO (pasos/dominios_fabrica.json)
+    # y entran por el hueco `reglas-del-negocio` de reglas_foto.json
+    con_condicion = p6_assets.dominios.reglas_de_foto({})
+    ok(not any(r.get("solo_si") for r in reglas.cargar("foto")["reglas"]),
+       "en reglas_foto.json ya no queda ninguna regla de un negocio")
     ok(len(con_condicion) >= 2, "hay reglas de foto con «solo_si» (mandos y equipo)")
     for regla in con_condicion:
         ok(not reglas.aplica(regla), f"{regla['id']}: sin contexto no entra")
@@ -725,7 +729,8 @@ def prueba_correcciones():
            f"{regla['id']}: con mandos en la escena, entra")
         ok(reglas.aplica(regla, "Fiesta con CONSOLAS en Lima"),
            f"{regla['id']}: en castellano y en mayusculas, tambien")
-    generales = [r for r in reglas.cargar("foto")["reglas"] if not r.get("solo_si")]
+    generales = [r for r in reglas.cargar("foto")["reglas"]
+                 if not r.get("solo_si") and not r.get("hueco")]
     for regla in generales:
         igual(DE_CONSOLAS.findall(regla["regla"]), [],
               f"{regla['id']}: una regla general no habla de consolas")

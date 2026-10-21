@@ -14,6 +14,17 @@ Lo de EstadoPlay salió del código a `pasos/dominios.py`. Lo que se comprueba:
      en un vídeo que no es de consolas, sin televisores ni mandos.
   5. EL PRESET DE ESTILO guarda `dominio` y lo lleva y lo quita.
 
+Y de la Etapa Foto C (tipos de negocio como datos, editables):
+
+  6. LAS REGLAS DE FOTO SIGUEN AL TIPO: en automático, el bloque de reglas de
+     cada encargo es letra por letra el de antes (las de consolas salieron de
+     `reglas_foto.json` a su tipo y vuelven a entrar en el mismo sitio);
+     fijado en general, ninguna de consolas; fijado en EstadoPlay, las suyas.
+  7. LOS TIPOS DEL DUEÑO: se crean, se cambian y se borran en su fichero; sus
+     reglas entran SOLO si un estilo los fija, con sus «solo si…»; crear uno
+     no cambia ni una letra de un vídeo en automático; los de fábrica no se
+     tocan; lo que no vale se rechaza con su motivo.
+
 En memoria, sin el CLI y sin pagar nada.
 
     python pasos/prueba_dominios.py
@@ -27,6 +38,10 @@ import tempfile
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RAIZ)
 sys.path.insert(0, os.path.join(RAIZ, "pasos"))
+
+# los tipos del dueño de esta prueba, en un fichero suyo: nunca en el de verdad
+os.environ["ESTUDIO_DOMINIOS"] = os.path.join(tempfile.mkdtemp(prefix="dominios_"),
+                                              "dominios.json")
 
 import dominios as D  # noqa: E402
 import encuadres as E  # noqa: E402
@@ -202,6 +217,193 @@ def prueba_presets():
     ok("dominio" not in (sin.get("estilo") or {}), "y uno sin dominio no lo inventa")
 
 
+def _reglas_de_antes():
+    """`motores/reglas/reglas.py` y `reglas_foto.json` de `ANTES`, juntos."""
+    carpeta = tempfile.mkdtemp(prefix="reglas_antes_")
+    try:
+        for nombre in ("reglas.py", "reglas_foto.json"):
+            codigo = subprocess.run(
+                ["git", "-C", RAIZ, "show", f"{ANTES}:motores/reglas/{nombre}"],
+                capture_output=True, text=True, check=True).stdout
+            with open(os.path.join(carpeta, nombre), "w", encoding="utf-8") as fh:
+                fh.write(codigo)
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    spec = importlib.util.spec_from_file_location("reglas_antes",
+                                                  os.path.join(carpeta, "reglas.py"))
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    return modulo
+
+
+CONTEXTOS = ["", "a woman waters the plants", "four kids hold game controllers",
+             "Fiesta con CONSOLAS en Lima", "gamers at an e-sports final",
+             "a racing wheel and pedals", "un baño con mampara",
+             "que se vea una consola en la mesa"]
+
+
+def prueba_reglas_siguen_al_tipo():
+    seccion("6] las reglas de foto siguen al tipo de negocio")
+    import medios                                                 # noqa: PLC0415
+    reglas = medios.motor("reglas/reglas.py")
+    antes = _reglas_de_antes()
+    if antes is None:
+        ok(False, "no se ha podido leer reglas.py de antes")
+        return
+    for ambito in ("prompt_imagen", "reparto"):
+        for contexto in CONTEXTOS:
+            if reglas.bloque_prompt(ambito, modo="foto", contexto=contexto,
+                                    extra=D.reglas_de_foto({})) != \
+                    antes.bloque_prompt(ambito, modo="foto", contexto=contexto):
+                ok(False, f"{ambito}, «{contexto}»: el bloque de reglas cambió")
+                break
+        else:
+            ok(True, f"{ambito}: en automático, {len(CONTEXTOS)} encargos con el "
+                     "bloque de reglas letra por letra el de antes")
+    ok(not any(r.get("solo_si") for r in reglas.cargar("foto")["reglas"]),
+       "en reglas_foto.json no queda ninguna regla de un negocio")
+    ok(any(r.get("hueco") == "negocio" for r in reglas.cargar("foto")["reglas"]),
+       "y queda el hueco donde entran las del tipo")
+    mandos = "four kids hold game controllers"
+    igual(reglas.bloque_prompt("prompt_imagen", modo="foto", contexto=mandos,
+                               extra=D.reglas_de_foto({"dominio": "general"})),
+          reglas.bloque_prompt("prompt_imagen", modo="foto", contexto=""),
+          "fijado en «general»: ni una regla de consolas aunque el plano tenga mandos")
+    ok("GAME CONTROLLERS" in reglas.bloque_prompt(
+        "prompt_imagen", modo="foto", contexto=mandos,
+        extra=D.reglas_de_foto({"dominio": "estadoplay"})),
+       "fijado en «estadoplay»: las suyas, con su «solo si»")
+
+
+def _prompt(escena, estilo):
+    import p6_assets as P6                                        # noqa: PLC0415
+    lamina = [{"papel": "lamina", "cuantas": 6, "ruta": "l.png"}]
+    return P6._prompt_completo(escena, lamina, estilo)             # noqa: SLF001
+
+
+def prueba_tipos_del_dueno():
+    seccion("7] los tipos de negocio del dueño")
+    import p6_assets as P6                                        # noqa: PLC0415
+    import moodboard as M                                         # noqa: PLC0415
+    import medios                                                 # noqa: PLC0415
+    import revisor_imagenes as R                                  # noqa: PLC0415
+    reglas = medios.motor("reglas/reglas.py")
+    estilo = {"referencias": ["a.png"], "modo": "foto",
+              "guia": {"guia": "natural light photography", "resumen_es": "foto"}}
+    banos = {"prompt": "a couple chooses a glass shower screen in a small bathroom",
+             "luz": "morning"}
+    plantas = {"prompt": "a woman waters the plants", "luz": "morning"}
+    sin_tipos = {(n, k): _prompt(e, dict(estilo, prompt=k))
+                 for n, e in (("banos", banos), ("plantas", plantas))
+                 for k in ("", "bathroom remodeling")}
+    lamina_antes = M._reglas_de(reglas, estilo)                    # noqa: SLF001
+    igual(D.de_usuario(), {}, "sin fichero: ningún tipo propio")
+
+    creado = D.guardar({
+        "nombre": "Mamparas y baños", "descripcion": "reformas de baño",
+        "palabras": "mampara, baño, ducha",
+        "reglas": [
+            {"texto": "Las mamparas son de vidrio templado transparente, con perfiles finos.",
+             "en": "SHOWER SCREENS ARE CLEAR TEMPERED GLASS with thin metal profiles.",
+             "palabras": ["mampara", "shower screen"]},
+            {"texto": "Los baños están limpios y ordenados, sin botes de marca.",
+             "en": "BATHROOMS ARE CLEAN AND TIDY, no branded bottles."}],
+        "revisor": {"equipo": "las mamparas no son de vidrio o los perfiles son gruesos"}})
+    igual(creado["id"], "mamparas-y-banos", "se crea con un id sacado del nombre")
+    ok(os.path.exists(os.environ["ESTUDIO_DOMINIOS"]), "y se guarda en su fichero")
+    igual(D.normalizar("Mamparas-y-Banos"), "mamparas-y-banos", "un estilo puede fijarlo")
+
+    cambiado = {k: _prompt(e, dict(estilo, prompt=p)) for k, e, p in
+                [(k, banos if k[0] == "banos" else plantas, k[1]) for k in sin_tipos]}
+    igual(cambiado, sin_tipos,
+          "crear un tipo NO cambia ni una letra de un vídeo en automático, "
+          "aunque el texto nombre sus palabras")
+    igual(M._reglas_de(reglas, estilo), lamina_antes,               # noqa: SLF001
+          "ni de sus láminas")
+
+    fijo = dict(estilo, dominio="mamparas-y-banos")
+    texto = _prompt(banos, fijo)
+    ok("SHOWER SCREENS ARE CLEAR TEMPERED GLASS" in texto,
+       "fijado: su regla con «solo si mampara/shower screen» entra en un plano de mamparas")
+    ok("BATHROOMS ARE CLEAN AND TIDY" in texto, "y la que no tiene «solo si», también")
+    texto = _prompt(plantas, fijo)
+    ok("SHOWER SCREENS" not in texto and "BATHROOMS ARE CLEAN" in texto,
+       "en un plano sin mamparas, solo la que entra siempre")
+    ok(texto.index("HANDS ARE PHOTOGRAPHED") < texto.index("BATHROOMS ARE CLEAN")
+       < texto.index(reglas.para("prompt_imagen", modo="foto")[-1][:40]),
+       "y entran en su hueco, entre las de la casa")
+    ok("GAME CONTROLLERS" not in _prompt({"prompt": "kids with game controllers"}, fijo),
+       "un tipo propio no arrastra las reglas de consolas")
+    ok("BATHROOMS ARE CLEAN" in M._reglas_de(reglas, fijo),        # noqa: SLF001
+       "sus láminas también llevan sus reglas")
+    igual(_prompt(banos, dict(fijo, modo="ilustracion")),
+          _prompt(banos, {k: v for k, v in fijo.items() if k not in ("modo", "dominio")}
+                  | {"modo": "ilustracion"}),
+          "en ilustración el tipo no cambia el prompt")
+
+    escenas = [{"id": f"S{i:03d}", "prompt": "mampara"} for i in range(1, 30)]
+    P6._asignar_cartas(escenas, P6._con_defectos({"semilla": 4, "estilo": fijo}),  # noqa: SLF001
+                       "mamparas")
+    general = {e["carta"] for e in escenas}
+    ok(general <= {c["id"] for c in E.ESCALERA_FOTO_GENERAL},
+       "sus cartas son las de la escalera general de foto")
+    frases = R._frases(fijo, {"escenas": [{"prompt": "x"}]})          # noqa: SLF001
+    igual(frases["equipo"], "las mamparas no son de vidrio o los perfiles son gruesos",
+          "el revisor vigila lo que se escribió del equipo")
+    igual(frases["manos"], D.REVISOR_GENERAL["manos"], "y lo demás, como el general")
+    igual(R._frases({}, {"escenas": [{"prompt": "una ducha nueva"}]})["equipo"],  # noqa: SLF001
+          "las mamparas no son de vidrio o los perfiles son gruesos",
+          "en automático, el revisor lo reconoce por sus palabras (con o sin tildes)")
+    igual(R._frases({}, {"escenas": [{"prompt": "consolas y una ducha"}]})["equipo"],  # noqa: SLF001
+          D.REVISOR_ESTADOPLAY["equipo"], "pero los de fábrica van primero, como antes")
+
+    D.guardar({"nombre": "Mamparas y baños", "palabras": ["mampara"],
+               "reglas": []}, "mamparas-y-banos")
+    ok("BATHROOMS ARE CLEAN" not in _prompt(banos, fijo), "cambiarlo cambia lo que entra")
+    for malo, motivo in (({"nombre": ""}, "sin nombre"),
+                         ({"nombre": "x" * 90}, "nombre largo"),
+                         ({"nombre": "Otro", "palabras": ["p"] * 0 + [f"p{i}" for i in range(40)]},
+                          "demasiadas palabras"),
+                         ({"nombre": "Otro", "reglas": [{"texto": "x", "gravedad": "rara"}]},
+                          "una regla rara"),
+                         ({"nombre": "General (cualquier negocio)"}, "nombre de uno de fábrica"),
+                         ({"nombre": "mamparas y baños"}, "nombre repetido"),
+                         ("no es un objeto", "no es un objeto")):
+        try:
+            D.guardar(malo)
+            ok(False, f"{motivo}: tenía que rechazarse")
+        except ValueError:
+            ok(True, f"{motivo}: se rechaza")
+    for tid in ("estadoplay", "general"):
+        try:
+            D.guardar({"nombre": "Cambio"}, tid)
+            ok(False, f"{tid}: un tipo de fábrica no se cambia")
+        except ValueError:
+            ok(True, f"{tid}: un tipo de fábrica no se cambia")
+        try:
+            D.borrar(tid)
+            ok(False, f"{tid}: ni se borra")
+        except ValueError:
+            ok(True, f"{tid}: ni se borra")
+    otro = D.guardar({"nombre": "Mamparas & baños!"})
+    ok(otro["id"] != "mamparas-y-banos", f"dos nombres con el mismo id se separan ({otro['id']})")
+    ok(any(t["id"] == otro["id"] and not t["de_fabrica"] for t in D.listar()),
+       "listar enseña los del dueño")
+    ok([t["id"] for t in D.listar()][:2] == ["general", "estadoplay"],
+       "con los de fábrica delante")
+
+    ok(D.borrar("mamparas-y-banos"), "se borra")
+    igual(D.fijado(fijo), None, "y un estilo que lo tenía fijado vuelve a automático")
+    igual(_prompt(banos, fijo), _prompt(banos, estilo), "con el prompt de automático")
+    ok(not D.borrar("mamparas-y-banos"), "borrar uno que no está: False")
+
+    with open(os.environ["ESTUDIO_DOMINIOS"], "w", encoding="utf-8") as fh:
+        fh.write("{roto")
+    igual(D.de_usuario(), {}, "un fichero roto no tumba nada: ningún tipo propio")
+    igual(_prompt(banos, estilo), sin_tipos[("banos", "")], "y los vídeos salen como siempre")
+    os.remove(os.environ["ESTUDIO_DOMINIOS"])
+
+
 def main():
     print("PRUEBA DE LOS DOMINIOS")
     antes = _de_antes("pasos/encuadres.py", "encuadres")
@@ -210,6 +412,8 @@ def main():
     prueba_dominio_fijado()
     prueba_revisor()
     prueba_presets()
+    prueba_reglas_siguen_al_tipo()
+    prueba_tipos_del_dueno()
     print("\n" + "=" * 70)
     if _fallos:
         print(f"FALLAN {len(_fallos)} de {_ok + len(_fallos)} comprobaciones:")

@@ -2961,9 +2961,13 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
     # televisores en su tripode) solo si este plano va de eso. Lo decide el texto
     # de lo que se esta pidiendo: la guia del estilo, la escena y la nota del
     # revisor (ver `contexto_de_reglas`).
+    # Las del TIPO DE NEGOCIO (Etapa Foto C) entran en su hueco de
+    # `reglas_foto.json`: las del tipo que fije el estilo o, sin fijar, las
+    # condicionales de los de fabrica, que son las de consolas de siempre.
     bloque = (reglas.bloque_prompt("prompt_imagen", modo="foto",
                                    contexto=contexto_de_reglas(estilo, escena,
-                                                               feedback))
+                                                               feedback),
+                                   extra=dominios.reglas_de_foto(estilo))
               if foto else reglas.bloque_prompt("prompt_imagen"))
     if bloque:
         lineas.append(bloque)

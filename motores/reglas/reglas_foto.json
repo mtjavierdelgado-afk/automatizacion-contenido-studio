@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "descripcion": "Reglas transversales del MODO FOTO (estilo.modo = \"foto\", Etapa Foto A). Sustituyen a las de reglas.json, que se escribieron y se aprenden para video cartoon, en todo prompt de un video fotografico. Viven en un fichero aparte porque `asvs actualizar` no sobrescribe reglas.json (es lo que reescribe el destilador en el servidor) y una regla nueva puesta alli no llegaria nunca. Este fichero SI se actualiza con el codigo. Escritas en ingles porque se concatenan tal cual a un prompt en ingles. LAS REGLAS CON `solo_si` SON DE UN TIPO DE VIDEO, NO DE TODOS: solo entran cuando el estilo, la escena o la nota del revisor nombran alguna de sus palabras (expresiones regulares, sin distinguir mayusculas). Las de consolas y videojuegos van asi: el modo foto es para cualquier proyecto, y pedirle a un video de plantas que monte los televisores en su tripode es meterle pantallas y mandos donde no los hay.",
+  "descripcion": "Reglas transversales del MODO FOTO (estilo.modo = \"foto\", Etapa Foto A). Sustituyen a las de reglas.json, que se escribieron y se aprenden para video cartoon, en todo prompt de un video fotografico. Viven en un fichero aparte porque `asvs actualizar` no sobrescribe reglas.json (es lo que reescribe el destilador en el servidor) y una regla nueva puesta alli no llegaria nunca. Este fichero SI se actualiza con el codigo. Escritas en ingles porque se concatenan tal cual a un prompt en ingles. LAS REGLAS CON `solo_si` SON DE UN TIPO DE VIDEO, NO DE TODOS: solo entran cuando el estilo, la escena o la nota del revisor nombran alguna de sus palabras (expresiones regulares, sin distinguir mayusculas). Las de un negocio concreto (las de consolas y videojuegos, por ejemplo) ya no viven aqui sino en su TIPO DE NEGOCIO (pasos/dominios_fabrica.json), y entran en el HUECO `reglas-del-negocio`; van con `solo_si` porque el modo foto es para cualquier proyecto, y pedirle a un video de plantas que monte los televisores en su tripode es meterle pantallas y mandos donde no los hay.",
   "reglas": [
     {
       "id": "foto-hora-y-luz-explicitas",
@@ -27,60 +27,9 @@
       "fecha": "2026-10-11"
     },
     {
-      "id": "foto-manos-con-mandos",
-      "ambito": "prompt_imagen",
-      "prioridad": 1,
-      "regla": "GAME CONTROLLERS ARE HELD LIKE THE REAL THING: a game controller with both hands, the right way up, thumbs on the sticks; a racing wheel with both hands; a microphone in one hand near the mouth; VR controllers one in each hand. Never a controller held in one hand or floating.",
-      "por_que": "En un servicio de alquiler de consolas las manos con el mando salen en casi todos los planos. Solo cuando el video va de eso.",
-      "fecha": "2026-10-11",
-      "solo_si": [
-        "\\bconsol(e|es|a|as)\\b",
-        "\\bcontrollers?\\b",
-        "\\bgamepads?\\b",
-        "\\bjoysticks?\\b",
-        "\\bmandos?\\b",
-        "\\bvideo ?games?\\b",
-        "\\bvideojuegos?\\b",
-        "\\bgameplay\\b",
-        "\\bgaming\\b",
-        "\\bgamers?\\b",
-        "\\bplaystation\\b",
-        "\\bps[345]\\b",
-        "\\bxbox\\b",
-        "\\bnintendo\\b",
-        "\\be-?sports?\\b",
-        "\\bgame screens?\\b",
-        "\\bracing wheels?\\b",
-        "\\bvr (headset|controller)s?\\b"
-      ]
-    },
-    {
-      "id": "foto-equipo-montado-de-verdad",
-      "ambito": "prompt_imagen",
-      "prioridad": 1,
-      "regla": "GAMING EQUIPMENT IS SET UP LIKE THE REAL THING: every TV stands on its tripod stand or a piece of furniture, never floating and never on the floor; consoles rest on a low table, never on the floor; cables run neatly down the stand to the console and never hang in the air or end in nothing. Screens are switched on, brighter than the room and cast a faint coloured glow on nearby faces and hands; they show generic gameplay that matches what the players are doing, with no game titles, team crests, player names or score overlays.",
-      "por_que": "Una pantalla sin soporte, una consola en el suelo o un cable flotando hacen que el montaje parezca falso. Solo en los videos de consolas: en los demas no hay equipo que montar.",
-      "fecha": "2026-10-11",
-      "solo_si": [
-        "\\bconsol(e|es|a|as)\\b",
-        "\\bcontrollers?\\b",
-        "\\bgamepads?\\b",
-        "\\bjoysticks?\\b",
-        "\\bmandos?\\b",
-        "\\bvideo ?games?\\b",
-        "\\bvideojuegos?\\b",
-        "\\bgameplay\\b",
-        "\\bgaming\\b",
-        "\\bgamers?\\b",
-        "\\bplaystation\\b",
-        "\\bps[345]\\b",
-        "\\bxbox\\b",
-        "\\bnintendo\\b",
-        "\\be-?sports?\\b",
-        "\\bgame screens?\\b",
-        "\\bracing wheels?\\b",
-        "\\bvr (headset|controller)s?\\b"
-      ]
+      "id": "reglas-del-negocio",
+      "hueco": "negocio",
+      "por_que": "Aquí entran las reglas de foto del TIPO DE NEGOCIO del vídeo (pasos/dominios_fabrica.json y los tipos creados en Configuración). Van en este sitio, y no al final, para que un vídeo de antes saque sus reglas en el mismo orden y su prompt no cambie."
     },
     {
       "id": "foto-sin-marcas-de-terceros",

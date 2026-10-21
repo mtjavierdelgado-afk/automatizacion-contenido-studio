@@ -833,8 +833,14 @@ def elemento(el, W, H):
         return ""
 
 
+#: Los elementos que llevan letra (los demas no necesitan ninguna fuente
+#: dentro del SVG: una flecha no tiene por que cargar 150 KB de Anton).
+CON_LETRA = ("texto", "insignia", "etiqueta", "banda", "cinta", "icono")
+
+
 def fuentes_de(elementos):
-    return {e.get("fuente") or "anton" for e in elementos or [] if isinstance(e, dict)}
+    return {e.get("fuente") or "anton" for e in elementos or []
+            if isinstance(e, dict) and e.get("tipo") in CON_LETRA}
 
 
 # ------------------------------------------------------------------ validar

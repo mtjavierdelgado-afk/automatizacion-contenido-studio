@@ -292,6 +292,19 @@ def prueba_capas_limpias():
        "pasar a «Sin paleta» y volver no pierde el color del resaltado")
     ok([e.get("orig", {}).get("color") for e in ida["elementos"]] != [e.get("orig", {}).get("color") for e in otra["elementos"]],
        "y «Restablecer» devuelve los colores de la paleta que está puesta")
+    campos = ("color", "contorno", "acento", "color_texto")
+    rotas = []
+    for plantilla in portadas.PLANTILLAS:
+        for paleta in portadas.PALETAS:
+            d = portadas.de_plantilla(plantilla, {}, paleta, "anton", "9:16")
+            v = portadas.cambiar_estilo(portadas.cambiar_estilo(d, paleta="ninguna"), paleta=paleta)
+            colores = lambda x: [[e.get(c) for c in campos] + [(e.get("orig") or {}).get(c) for c in campos]
+                                 for e in x["elementos"]]
+            if colores(d) != colores(v):
+                rotas.append(f"{plantilla}/{paleta}")
+    ok(not rotas, f"ida y vuelta por «Sin paleta» deja TODOS los colores como estaban, en las 21 × 8 ({rotas[:4]})")
+    ok(all("oculto" not in (e.get("orig") or {}) for e in oferta["elementos"]),
+       "«Restablecer» no vuelve a esconder los rayos que se enseñaron")
 
 
 def main():

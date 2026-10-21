@@ -469,6 +469,12 @@ def de_plantilla(plantilla, textos=None, paleta="gamer", fuente="anton", formato
     base = normalizar(base) if base else None
     textos = dict((base or {}).get("textos") or {}, **{k: v for k, v in (textos or {}).items() if v is not None})
     disposicion, elementos, look = PLANTILLAS[plantilla][3](textos, PALETAS[paleta], fuente, formato)
+    # QUÉ PAPEL TIENE CADA COLOR: la misma plantilla con una paleta de marcas
+    # dice qué color salió de qué papel (dos papeles pueden valer lo mismo,
+    # como en «Sin paleta», y por valor no se distinguen)
+    marcas = {k: f"@{k}" for k in grafismo.PAPELES_PALETA}
+    marcas["nombre"] = ""
+    _d, con_marcas, _l = PLANTILLAS[plantilla][3](textos, marcas, fuente, formato)
     fondo_previo = dict((base or {}).get("fondo") or {})
     fondo_nuevo = dict(fondo_previo, **(fondo or {}))
     fondo_nuevo["disposicion"] = disposicion
@@ -477,10 +483,19 @@ def de_plantilla(plantilla, textos=None, paleta="gamer", fuente="anton", formato
     # ajustes que la persona ya puso se quedan al cambiar de plantilla.
     efectos = dict((base or {}).get("efectos") or {})
     nuevos = []
-    for el in elementos:
+    for el, marcado in zip(elementos, con_marcas):
         if el:
             el = dict(el)
-            el["orig"] = {k: v for k, v in el.items() if k not in ("texto", "orig")}
+            # (y solo si de verdad salió de ese papel: hay plantillas que, si
+            # el papel no les vale, ponen un color fijo)
+            papeles = {c: str(marcado.get(c))[1:] for c in grafismo.CAMPOS_COLOR
+                       if str((marcado or {}).get(c) or "").startswith("@")
+                       and el.get(c) == PALETAS[paleta][str(marcado.get(c))[1:]]}
+            # siempre, aunque vacío: un color de la plantilla que no es de
+            # ningún papel (el rojo de la «X») es fijo y no se repinta
+            el["papeles"] = papeles
+            # «Restablecer» no vuelve a esconder lo que se enseñó a propósito
+            el["orig"] = {k: v for k, v in el.items() if k not in ("texto", "orig", "oculto")}
             nuevos.append(el)
     # LO AÑADIDO A MANO SE QUEDA al cambiar de plantilla
     propios = [e for e in (base or {}).get("elementos") or [] if e.get("propio")]
@@ -631,16 +646,21 @@ def cambiar_estilo(diseno, paleta=None, fuente=None, formato=None):
     d = normalizar(diseno)
     vieja, nueva = PALETAS[d["paleta"]], PALETAS.get(paleta) or PALETAS[d["paleta"]]
     for el in d["elementos"]:
+        papeles = el.get("papeles")
         for cual in (el, el.get("orig")):
             if not isinstance(cual, dict):
                 continue
-            for campo in ("color", "contorno", "acento", "color_texto"):
-                cual[campo] = _color_en_paleta(cual.get(campo), campo, vieja, nueva)
+            for campo in grafismo.CAMPOS_COLOR:
+                if campo not in cual:
+                    continue
+                if papeles is not None:
+                    # de la plantilla: por papel, exacto; sin papel, color fijo
+                    if campo in papeles:
+                        cual[campo] = nueva[papeles[campo]]
+                else:
+                    cual[campo] = _color_en_paleta(cual.get(campo), campo, vieja, nueva)
             if fuente in grafismo.FUENTES and cual.get("fuente") in (None, d["fuente"]):
                 cual["fuente"] = fuente
-        for campo in ("color", "contorno", "acento", "color_texto"):
-            if el.get(campo) is None:
-                el.pop(campo, None)
     if paleta in PALETAS:
         d["paleta"] = paleta
     if fuente in grafismo.FUENTES:

@@ -2300,7 +2300,7 @@ def portada_mandada(red, campos, ficheros):
         return "tu miniatura (solo si el canal está verificado)" if "thumbnail" in nombres else ""
     if red == "facebook":
         return "tu miniatura" if "facebook_thumbnail" in nombres else ""
-    return ""
+    return None          # una red sin portada por Upload-Post: no se dice nada
 
 
 # -------------------------------------------------------------- la ficha

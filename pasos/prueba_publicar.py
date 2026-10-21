@@ -2617,6 +2617,7 @@ def prueba_portada_mandada():
     ok("verificado" in P.portada_mandada("youtube", {}, [("thumbnail", "/x.jpg")]), "YouTube, del canal verificado")
     ok(P.portada_mandada("youtube", {}, []) == "" and P.portada_mandada("facebook", {}, []) == "",
        "sin nada, vacío: la puso la red")
+    ok(P.portada_mandada("linkedin", {}, []) is None, "una red sin portada no dice «ninguna»: no dice nada")
     ok("portada" in P._envio_publico_campos({"portada": "tu imagen de portada"}),
        "y la ficha del envío lo enseña")
 

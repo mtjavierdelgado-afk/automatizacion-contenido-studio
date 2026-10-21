@@ -6600,6 +6600,19 @@ def portadas_2_capas_y_pantalla_quieta(navegador, datos):
        "y es el de la idea elegida, para cambiarlo si se quiere")
     pg.pulsar(".capa-portada .antes-de-pagar button", "Cancelar")
     ok(not pg.visible(".capa-portada .antes-de-pagar"), "y se puede no pagar")
+    # UN DOBLE CLIC EN «Dibujar» PAGA UNA SOLA IMAGEN (revisión del 21-10)
+    def de_ia():
+        _r, lista = api.get(f"/api/trabajos?proyecto={pid}")
+        lista = lista if isinstance(lista, list) else (lista or {}).get("trabajos") or []
+        return len([t for t in lista if str(t.get("tipo") or t.get("nombre") or "").startswith("portada_ia")])
+    antes_ia = de_ia()
+    pg.pulsar(".capa-portada button", "Hacer el fondo con IA")
+    pg.esperar(".capa-portada .antes-de-pagar button", "Dibujar", 15)
+    pg.p.evaluate("() => { const b = [...document.querySelectorAll('.capa-portada .antes-de-pagar button')].find(x => x.textContent.includes('Dibujar')); b.click(); b.click(); }")
+    fin = time.time() + 90
+    while time.time() < fin and pg.p.evaluate("() => !!PORT.ia"):
+        pg.p.wait_for_timeout(700)
+    ok(de_ia() - antes_ia == 1, f"un doble clic en «Dibujar» lanza UNA imagen ({de_ia() - antes_ia})")
     pg.captura("portadas_2_editor", entera=False)
     pg.p.evaluate("() => { PORT.cambiado = false; }")
     pg.pulsar(".capa-portada button", "Cerrar")

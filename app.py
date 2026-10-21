@@ -17548,9 +17548,13 @@ def portada_ideas_ia(pid: str, peticion: Request, cuerpo: dict = Body(default=No
                "negocio": info.get("cliente_nombre") or ""}
     rid = uuid.uuid4().hex[:12]
     with _LOCK_PORTADAS:
+        # UNA A LA VEZ POR VÍDEO: cerrar y abrir el editor lanzaba otra (cupo)
+        for otro, ficha in _PROPUESTAS_PORTADA.items():
+            if ficha.get("proyecto") == ctx.id and ficha.get("estado") == "pensando" and ficha.get("ideas_ia"):
+                return {"id": otro, "estado": "pensando"}
         for viejo in list(_PROPUESTAS_PORTADA)[:-19]:
             _PROPUESTAS_PORTADA.pop(viejo, None)
-        _PROPUESTAS_PORTADA[rid] = {"estado": "pensando", "proyecto": ctx.id}
+        _PROPUESTAS_PORTADA[rid] = {"estado": "pensando", "proyecto": ctx.id, "ideas_ia": True}
 
     def correr():
         try:

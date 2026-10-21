@@ -5482,7 +5482,8 @@ const textoDeAncla = el => (el.textContent || '').trim().slice(0, 80);
 
 function anclaDeScroll(id, clave) {
   const caja = document.getElementById(id);
-  if (!caja || !caja.scrollTop) return null;
+  // sin sitio (cargando, o en Crear) no hay ancla, como en `devolverScroll`
+  if (!caja || !caja.scrollTop || !clave()) return null;
   const arriba = caja.getBoundingClientRect().top;
   const todos = Array.from(caja.querySelectorAll(SELECTOR_ANCLA));
   const el = todos.find(x => {
@@ -5496,7 +5497,7 @@ function anclaDeScroll(id, clave) {
 }
 
 function volverAlAncla(ancla, clave) {
-  if (!ancla || !ancla.texto || clave() !== ancla.sitio) return;
+  if (!ancla || !ancla.texto || !ancla.sitio || clave() !== ancla.sitio) return;
   const caja = document.getElementById(ancla.id);
   if (!caja) return;
   const el = Array.from(caja.querySelectorAll(SELECTOR_ANCLA))
@@ -20376,7 +20377,7 @@ function bloqueElementosPortada(d) {
     el.orig ? h('button', { clase: 'mini fantasma', type: 'button', title: 'Vuelve a como nació (sitio, tamaño, giro y colores; el texto se queda)',
       onclick: () => {
         const texto = el.texto;
-        Object.keys(el).forEach(k => { if (!['tipo', 'texto', 'orig', 'propio', 'rol'].includes(k)) delete el[k]; });
+        Object.keys(el).forEach(k => { if (!['tipo', 'texto', 'orig', 'propio', 'rol', 'oculto', 'papeles'].includes(k)) delete el[k]; });
         Object.assign(el, el.orig);
         if (texto != null) el.texto = texto;
         tocarPortada(true);
@@ -20417,7 +20418,12 @@ function bloqueElementosPortada(d) {
     fila.appendChild(deslizadores);
     fila.appendChild(h('label', { clase: 'casilla-red' }, 'Color ',
       h('input', { type: 'color', value: /^#[0-9a-f]{6}$/i.test(el.color || '') ? el.color : '#ffffff',
-        onchange: ev => { el.color = ev.target.value; tocarPortada(false); } })));
+        onchange: ev => {
+          el.color = ev.target.value;
+          // un color elegido a mano ya no es de la paleta: no se repinta al cambiarla
+          if (el.papeles) { el.papeles = Object.assign({}, el.papeles); delete el.papeles.color; }
+          tocarPortada(false);
+        } })));
     b.appendChild(fila);
   });
   const elegir = h('select', { 'aria-label': 'Elemento que se añade' },
@@ -20432,6 +20438,10 @@ function bloqueElementosPortada(d) {
         : (d.paleta === 'ninguna' ? '#ffffff' : (pal.alerta || '#ff2b2b'));
       const nuevo = Object.assign({ tipo, x, y, fuente: d.fuente, color, contorno: pal.contorno || '#000000',
         acento: pal.acento, propio: true }, NUEVOS_ELEMENTOS_PORTADA[tipo] || {});
+      // qué papel de la paleta pinta cada color: al cambiar de paleta se repinta
+      nuevo.papeles = { contorno: 'contorno', acento: 'acento' };
+      if (tipo === 'texto') nuevo.papeles.color = 'texto';
+      else if (d.paleta !== 'ninguna') nuevo.papeles.color = 'alerta';
       if (tipo === 'flecha') Object.assign(nuevo, { x: Math.max(0.08, x - 0.2), y: Math.min(0.92, y + 0.1), x2: x, y2: y });
       nuevo.orig = Object.assign({}, nuevo);
       delete nuevo.orig.texto;
@@ -20458,10 +20468,10 @@ function bloqueAyudasPortada() {
         // la propuesta trae su plantilla, textos y colores; la imagen, sus
         // ajustes y lo añadido a mano se quedan
         const actual = PORT.diseno;
+        // (lo añadido a mano ya viene dentro: el servidor la hizo sobre este diseño)
         PORT.diseno = Object.assign({}, p.diseno, {
           fondo: Object.assign({}, actual.fondo, { disposicion: p.diseno.fondo.disposicion }),
-          efectos: actual.efectos || {},
-          elementos: (p.diseno.elementos || []).concat((actual.elementos || []).filter(e => e.propio)) });
+          efectos: actual.efectos || {} });
         tocarPortada(true);
       } }, 'Usar esta'))));
     b.appendChild(lista);
@@ -20502,7 +20512,7 @@ function bloqueAyudasPortada() {
         ? 'Siempre se añade al final: que escriba exactamente tus textos, con tildes, y nada más.'
         : 'Siempre se añade al final: sin letras ni logotipos, y con sitio para el titular.'),
       h('div', { clase: 'fila' }, calidad,
-        h('button', { clase: 'primario mini', type: 'button', onclick: () => portadaConIA(p) },
+        h('button', { clase: 'primario mini', type: 'button', disabled: !!p.enviando, onclick: () => portadaConIA(p) },
           `Dibujar (≈ ${Number((p.precio || {}).usd || 0).toFixed(3)} $)`),
         h('button', { clase: 'mini fantasma', type: 'button', onclick: () => { PORT.iaPendiente = null; pintarEditorPortada(); } }, 'Cancelar'))));
   }
@@ -20625,6 +20635,12 @@ async function prepararIA(que, prompt, calidad) {
 async function portadaConIA(p) {
   const pid = PORT.pid;
   const ruta = rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/ia`);
+  // UN SOLO PAGO: un doble clic en «Dibujar» mandaba dos `confirmado` y se
+  // dibujaban (y se pagaban) dos imágenes
+  if (p.enviando || PORT.ia) return;
+  p.enviando = true;
+  PORT.ia = 'Mandando a la IA…';
+  pintarEditorPortada();
   try {
     const lanzado = await pedir(ruta, { method: 'POST',
       cuerpo: { diseno: PORT.diseno, que: p.que, calidad: p.calidad, prompt: p.prompt, confirmado: true } });
@@ -20653,6 +20669,7 @@ async function portadaConIA(p) {
   } catch (e) {
     if (PORT.pid === pid) avisoPortada(`no se ha podido hacer con la IA: ${e.message}`, true);
   }
+  p.enviando = false;
   if (PORT.pid !== pid || !PORT.abierto) return;
   PORT.ia = null;
   pintarEditorPortada();
@@ -23044,7 +23061,9 @@ function portadaPorRedPublicar(f) {
     } else if (red === 'facebook') {
       const reel = ((f.encaje || {}).facebook || {}).tipo === 'Reel';
       if (reel) { que = 'ninguna: sale como Reel y Facebook no admite portada en los Reels'; ok = false; }
-      else que = p.imagen ? 'tu imagen ✓' : p.ms != null ? `${seg(p.ms)} ✓` : 'un fotograma del vídeo';
+      else if (p.imagen) que = 'tu imagen ✓';
+      else if (p.ms != null) que = `${seg(p.ms)} ✓`;
+      else { que = 'ninguna: la elige Facebook'; ok = false; }
     }
     caja.appendChild(h('div', { clase: `fila portada-red${ok ? '' : ' sin-portada'}` }, h('b', {}, `${nombres[red]}:`), h('span', {}, que)));
   });

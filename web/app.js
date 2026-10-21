@@ -5266,6 +5266,9 @@ const PASO_DE_LA_VISTA = { encargo: 'encargo', encargo_video: 'encargo', guion: 
 /* Las marcas de cada estado: forma Y color (el color solo no lo distingue todo
    el mundo). `actual` es «estás aquí». */
 const MARCA_DEL_ESTADO = { hecho: '✓', aviso: '!', curso: '⟳', pend: '○', bloq: '·', actual: '●' };
+// La clase de cada estado, escrita entera para que css_sin_usar la encuentre.
+const CLASE_DEL_ESTADO = { hecho: 'e-hecho', aviso: 'e-aviso', curso: 'e-curso', pend: 'e-pend', bloq: 'e-bloq', actual: 'e-actual' };
+const claseEstado = (e) => CLASE_DEL_ESTADO[e] || 'e-bloq';
 
 /* EN QUÉ PASO DEL CARRIL SE ESTÁ, o '' si la pantalla no es de un vídeo (la
    galería, un estilo nuevo, la ficha de un estilo abierta desde la galería). */
@@ -5558,17 +5561,18 @@ function pasosDelCarril(pasos, actual) {
   pasos.forEach((p, i) => {
     const aqui = p.id === actual;
     const boton = h('button', {
-      clase: `paso-carril e-${aqui ? 'actual' : p.e}` + (aqui ? ' actual' : ''),
-      disabled: !p.puede && !aqui,
+      clase: `paso-carril ${claseEstado(aqui ? 'actual' : p.e)}` + (aqui ? ' actual' : ''),
+      // el paso en el que ya estás no lleva a ningún sitio: apagado, pero con su color
+      disabled: aqui || !p.puede,
       title: p.puede ? (p.porque || `${p.nombre}: ${p.txt}`) : (p.porque || 'todavía no'),
       'aria-current': aqui ? 'step' : null,
       datos: { paso: p.id, estado: p.e },
-      onclick: () => { if (!aqui) irAPasoDelCarril(p.id); },
+      onclick: () => irAPasoDelCarril(p.id),
     },
       marcaEstado(aqui ? 'actual' : p.e),
       h('span', { clase: 'paso-textos' },
         h('b', {}, `${i + 1}. ${p.nombre}`),
-        h('span', { clase: `estado-txt e-${p.e}` }, aqui ? `estás aquí · ${p.txt}` : p.txt),
+        h('span', { clase: `estado-txt ${claseEstado(p.e)}` }, aqui ? `estás aquí · ${p.txt}` : p.txt),
         p.detalle ? h('small', {}, p.detalle) : (p.porque && !p.puede ? h('small', {}, p.porque) : null)));
     fila.appendChild(boton);
   });
@@ -5722,7 +5726,7 @@ function barraDeAccion(op) {
     dentro.appendChild(h('div', { clase: 'progreso' }, op.progreso || barraTandaLight(op.tanda)));
   } else {
     const e = (op.estado || {}).e || 'pend';
-    dentro.appendChild(h('div', { clase: `estado e-${e}` }, marcaEstado(e),
+    dentro.appendChild(h('div', { clase: `estado ${claseEstado(e)}` }, marcaEstado(e),
       h('span', {}, (op.estado || {}).texto || '')));
     dentro.appendChild(h('div', { clase: 'plan' }, op.plan || ''));
   }
@@ -5763,13 +5767,14 @@ function ajustarAltoDeLaBarra() {
 }
 
 /* El botón principal de una barra: grande, con su ayuda larga en el globo. */
-function botonDeBarra(texto, accion, op) {
+/* El botón llega ya hecho, con su texto escrito en la llamada, para que el
+ * inventario de botones lo lea; aquí se le pone la ropa de la barra. */
+function botonDeBarra(boton, op) {
   const o = op || {};
-  return conAyuda(o.ayuda || '', h('button', {
-    clase: (o.secundario ? 'secundario-barra' : 'primario principal') + (o.clase ? ` ${o.clase}` : ''),
-    disabled: !!o.disabled, title: o.title || null,
-    onclick: accion,
-  }, texto));
+  boton.className = (o.secundario ? 'secundario-barra' : 'primario principal') + (o.clase ? ` ${o.clase}` : '');
+  boton.disabled = !!o.disabled;
+  if (o.title) boton.title = o.title;
+  return conAyuda(o.ayuda || '', boton);
 }
 
 /* «Parar», el mismo en todas las barras. */
@@ -7602,7 +7607,7 @@ function barraDelEncargoNuevo(ficha) {
   const plan = h('div', { clase: 'coste-del-encargo' });
   pintarCosteDelEncargoLight(e, plan);
   return barraDeAccion({ estado: { e: 'pend', texto: 'Borrador: aún no se ha guardado nada' }, plan,
-    botones: [botonDeBarra('Generar el guion', () => crearYGenerarLight(ficha),
+    botones: [botonDeBarra(h('button', { onclick: () => crearYGenerarLight(ficha) }, 'Generar el guion'),
       { ayuda: 'Crea el vídeo y redacta el guion con tu cuenta de Claude (gratis). No dibuja nada todavía: '
         + 'las imágenes se generan después, con su precio delante.' })] });
 }
@@ -8384,16 +8389,16 @@ function pieDeEncargo() {
      el guion al día, montar es lo principal; con el guion viejo, regenerarlo,
      y montar va al lado. */
   const cambios = cambiosDelMontaje();
-  const montar = cambios.hay ? botonDeBarra(`${textoMontarCambios(cambios)} · gratis`,
-    () => montarCambiosDelMontaje(), {
+  const montar = cambios.hay ? botonDeBarra(h('button', { onclick:
+    () => montarCambiosDelMontaje() }, `${textoMontarCambios(cambios)} · gratis`), {
       secundario: queda !== false,
       ayuda: 'Monta el vídeo una sola vez con todo lo cambiado en los ajustes del montaje: '
         + 'ninguna imagen, gratis.' }) : null;
-  const guion = botonDeBarra(hayGuion ? 'Regenerar el guion' : 'Generar el guion',
-    /* 'pendientes' y no 'todo': REHACER UNA COSA REHACE ESA COSA. Lo que
-       se ha tocado aquí ya ha dejado obsoleto lo suyo, y eso es lo que
-       entra; lo que sigue al día se salta. */
-    () => lanzarTandaLight('guion', 'pendientes'), {
+  /* 'pendientes' y no 'todo': REHACER UNA COSA REHACE ESA COSA. Lo que se ha
+     tocado aquí ya ha dejado obsoleto lo suyo, y eso es lo que entra; lo que
+     sigue al día se salta. */
+  const guion = botonDeBarra(h('button', { onclick: () => lanzarTandaLight('guion', 'pendientes') },
+    hayGuion ? 'Regenerar el guion' : 'Generar el guion'), {
       disabled: queda === false,
       secundario: !!montar && queda === false,
       ayuda: unirAyuda(ayudaEncargo(hayGuion, queda), textoDelPlan('guion')) });
@@ -10741,14 +10746,14 @@ function barraDelGuion() {
   if (pedido) {
     return barraDeAccion({ estado: { e: 'aviso', texto: 'Hay un cambio pedido para el guion entero' },
       plan: v.audio ? 'vuelve a redactar; la voz queda por regrabar' : 'vuelve a redactar con esa instrucción delante',
-      botones: [botonDeBarra('Regenerar el guion', () => reescribirGuionLight(),
+      botones: [botonDeBarra(h('button', { onclick: () => reescribirGuionLight() }, 'Regenerar el guion'),
         { ayuda: 'Vuelve a redactar el guion con lo que has escrito delante (con tu cuenta de Claude, gratis). '
           + 'La voz y las imágenes de lo que cambie quedan por rehacer.' })] });
   }
   if (!v.guion) {
     return barraDeAccion({ estado: { e: 'pend', texto: 'Todavía no hay guion' },
       plan: 'se genera desde el encargo',
-      botones: [botonDeBarra('Ir al encargo', () => irAPasoDelCarril('encargo'))] });
+      botones: [botonDeBarra(h('button', { onclick: () => irAPasoDelCarril('encargo') }, 'Ir al encargo'))] });
   }
   const voz = accionDeLaVoz();
   if (viejo) {
@@ -10759,10 +10764,10 @@ function barraDelGuion() {
     return barraDeAccion({ estado: { e: 'aviso', texto: 'Guion obsoleto' },
       plan: textoDelPlan('guion'),
       botones: [
-        grabada ? null : botonDeBarra(v.audio ? 'Regrabar la voz tal cual' : 'Grabar la voz tal cual',
-          () => lanzarTandaLight('voz', 'pendientes'), { secundario: true,
+        grabada ? null : botonDeBarra(h('button', { onclick:
+          () => lanzarTandaLight('voz', 'pendientes') }, v.audio ? 'Regrabar la voz tal cual' : 'Grabar la voz tal cual'), { secundario: true,
             ayuda: 'Graba la voz con el texto que ves, sin reescribir el guion.' }),
-        botonDeBarra('Regenerar el guion', () => lanzarTandaLight('guion', 'pendientes'),
+        botonDeBarra(h('button', { onclick: () => lanzarTandaLight('guion', 'pendientes') }, 'Regenerar el guion'),
           { ayuda: ayudaEncargo(true, true) })] });
   }
   if (voz) return barraDeAccion(Object.assign({}, voz, { estado: voz.estado }));
@@ -10943,7 +10948,7 @@ function accionDeLaVoz() {
   const v = APP.light.video;
   if (!v.guion) {
     return { estado: { e: 'bloq', texto: 'Sin guion todavía' }, plan: 'la voz se graba con el guion',
-      botones: [botonDeBarra('Ir al encargo', () => irAPasoDelCarril('encargo'))] };
+      botones: [botonDeBarra(h('button', { onclick: () => irAPasoDelCarril('encargo') }, 'Ir al encargo'))] };
   }
   refrescarPlanLight('voz');
   const quedaVoz = vozPorGrabar();
@@ -10951,8 +10956,8 @@ function accionDeLaVoz() {
     const plan = textoDelPlan('voz');
     const usd = Number((((v.planes || {}).voz || {}).coste || {}).usd_total) || 0;
     return { estado: { e: 'pend', texto: 'Voz sin grabar' }, plan,
-      botones: [botonDeBarra(`Grabar la voz${usd ? ` · ≈ ${usdCorto(usd)}` : ''}`,
-        () => lanzarTandaLight('voz', 'pendientes'),
+      botones: [botonDeBarra(h('button', { onclick:
+        () => lanzarTandaLight('voz', 'pendientes') }, `Grabar la voz${usd ? ` · ≈ ${usdCorto(usd)}` : ''}`),
         { ayuda: unirAyuda(ayudaAudio(false, quedaVoz), plan), disabled: quedaVoz === false })] };
   }
   const previsto = regrabarPrevistoLight();
@@ -10960,14 +10965,14 @@ function accionDeLaVoz() {
   if (tramos) {
     return { estado: { e: 'aviso', texto: `${tramos} ${tramos === 1 ? 'tramo' : 'tramos'} sin grabar` },
       plan: 'lo que has escrito todavía no se oye',
-      botones: [botonDeBarra(`Regrabar ${tramos} ${tramos === 1 ? 'tramo' : 'tramos'} · ≈ ${usdCorto(previsto.usd)}`,
-        () => regrabarPendientesLight(previsto.pendientes[0]),
+      botones: [botonDeBarra(h('button', { onclick:
+        () => regrabarPendientesLight(previsto.pendientes[0]) }, `Regrabar ${tramos} ${tramos === 1 ? 'tramo' : 'tramos'} · ≈ ${usdCorto(previsto.usd)}`),
         { ayuda: 'Vuelve a grabar SOLO los tramos con cambios, con lo que has escrito. Las imágenes no se tocan ahora.' })] };
   }
   if (quedaVoz === true) {
     const plan = textoDelPlan('voz');
     return { estado: { e: 'aviso', texto: 'La voz no dice el guion de ahora' }, plan,
-      botones: [botonDeBarra('Regrabar la voz', () => lanzarTandaLight('voz', 'pendientes'),
+      botones: [botonDeBarra(h('button', { onclick: () => lanzarTandaLight('voz', 'pendientes') }, 'Regrabar la voz'),
         { ayuda: unirAyuda('Vuelve a grabar lo que ha quedado viejo de la voz.', plan) })] };
   }
   return null;
@@ -10985,18 +10990,18 @@ function accionDeLasImagenes() {
   const usd = Number(coste.imagenes_hechas ? coste.usd_por_generar : coste.usd_total) || 0;
   const n = Number(coste.imagenes_hechas ? coste.imagenes_por_generar : coste.imagenes) || 0;
   if (!hayPlanos) {
-    return { plan, botones: [botonDeBarra(`Generar las imágenes${n ? ` · ${n}` : ''}${usd ? ` · ≈ ${usdCorto(usd)}` : ''}`,
-      () => lanzarTandaLight('video'),
+    return { plan, botones: [botonDeBarra(h('button', { onclick:
+      () => lanzarTandaLight('video') }, `Generar las imágenes${n ? ` · ${n}` : ''}${usd ? ` · ≈ ${usdCorto(usd)}` : ''}`),
       { ayuda: unirAyuda(ayudaDiapositivas(false, false, quedaVideo), plan), disabled: quedaVideo === false })] };
   }
   if (quedaVideo === true) {
     const etiqueta = n ? `Poner al día ${n} ${n === 1 ? 'imagen' : 'imágenes'}` : 'Poner al día las imágenes';
-    return { plan, botones: [botonDeBarra(etiqueta + (usd ? ` · ≈ ${usdCorto(usd)}` : ''),
-      () => lanzarTandaLight('video'),
+    return { plan, botones: [botonDeBarra(h('button', { onclick:
+      () => lanzarTandaLight('video') }, etiqueta + (usd ? ` · ≈ ${usdCorto(usd)}` : '')),
       { ayuda: unirAyuda(ayudaDiapositivas(hayMp4Light(), true, quedaVideo), plan) })] };
   }
   return { plan: 'Las imágenes ya recogen el guion y la voz de ahora.',
-    botones: [botonDeBarra('Imágenes ›', () => irAPasoDelCarril('imagenes'))] };
+    botones: [botonDeBarra(h('button', { onclick: () => irAPasoDelCarril('imagenes') }, 'Imágenes ›'))] };
 }
 
 
@@ -12013,8 +12018,8 @@ function tiraDeLasEscenas(escenas) {
     tira.appendChild(h('button', {
       clase: 'escena-mini' + (i === PREVIA.i ? ' actual' : '') + (e.obsoleta ? ' obsoleta' : ''),
       role: 'listitem', title: `${e.id}${e.bloque ? ` · ${e.bloque}` : ''}`,
-      'aria-current': i === PREVIA.i ? 'true' : null,
-      onclick: () => { if (i !== PREVIA.i) irAEscenaPrevia(i - PREVIA.i); },
+      'aria-current': i === PREVIA.i ? 'true' : null, disabled: i === PREVIA.i,
+      onclick: () => irAEscenaPrevia(i - PREVIA.i),
     },
       e.imagen ? h('img', { src: `${API.archivo(v.pid, e.imagen)}?mini=1`, alt: '', loading: 'lazy' }) : null,
       h('span', { clase: 'id-mini' }, e.id), ...marcas));
@@ -12058,7 +12063,7 @@ function barraDeLasImagenes(mandos) {
   }
   return barraDeAccion({ encima: mandos, estado: { e: 'hecho', texto: 'Imágenes al día' },
     plan: `${((PREVIA.ficha || {}).escenas || []).length} planos`,
-    botones: [botonDeBarra('Vídeo ›', () => irAPasoDelCarril('video'))] });
+    botones: [botonDeBarra(h('button', { onclick: () => irAPasoDelCarril('video') }, 'Vídeo ›'))] });
 }
 
 
@@ -12872,7 +12877,7 @@ function barraDelVideo() {
   if (cambios.hay) {
     return barraDeAccion({ estado: { e: 'aviso', texto: `${cambios.n ? `${cambios.n} ${cambios.n === 1 ? 'cambio' : 'cambios'}` : 'Cambios'} del montaje sin aplicar` },
       plan: porDibujar ? plan : 'vuelve a mezclar o a montar, sin dibujar ninguna imagen',
-      botones: [botonDeBarra(`${textoMontarCambios(cambios)}${precio}`, () => montarCambiosDelMontaje(), {
+      botones: [botonDeBarra(h('button', { onclick: () => montarCambiosDelMontaje() }, `${textoMontarCambios(cambios)}${precio}`), {
         ayuda: 'Monta el vídeo una sola vez con todo lo cambiado en los ajustes del montaje. '
           + (porDibujar ? `Además se dibujan ${porDibujar} imagen(es) que han quedado viejas.` : 'Ninguna imagen: gratis.') })] });
   }
@@ -12880,7 +12885,7 @@ function barraDelVideo() {
     const viejo = hayMp4Light();
     return barraDeAccion({ estado: { e: viejo ? 'aviso' : 'pend', texto: viejo ? 'Vídeo obsoleto' : 'Sin montar todavía' },
       plan,
-      botones: [botonDeBarra(`Montar el vídeo${precio}`, () => lanzarTandaLight('render', 'pendientes'), {
+      botones: [botonDeBarra(h('button', { onclick: () => lanzarTandaLight('render', 'pendientes') }, `Montar el vídeo${precio}`), {
         disabled: quedaRender === false || !v.audio,
         ayuda: unirAyuda('Encadena los planos que ya has visto, con sus transiciones, '
           + 'la voz y la música, y saca el MP4. No genera ninguna imagen: no '
@@ -12888,7 +12893,7 @@ function barraDelVideo() {
   }
   return barraDeAccion({ estado: { e: 'hecho', texto: 'Vídeo al día' },
     plan: 'el MP4 está al día con los planos y la voz de ahora',
-    botones: [botonDeBarra('Enviar a Publicar ›', () => abrirPublicarVideo(v.pid),
+    botones: [botonDeBarra(h('button', { onclick: () => abrirPublicarVideo(v.pid) }, 'Enviar a Publicar ›'),
       { ayuda: 'Textos por red, programar y subir a TikTok, Reels, YouTube y Facebook.' })] });
 }
 
@@ -14863,7 +14868,7 @@ function pieDeCreacion() {
   const barra = h('div', { clase: 'barra-accion pie-light pie-creacion' },
     h('div', { clase: 'dentro' }, estado, nota, h('div', { clase: 'derecha' }, boton)));
   const decir = (e, texto) => {
-    estado.className = `estado e-${e}`;
+    estado.className = `estado ${claseEstado(e)}`;
     vaciar(estado).append(marcaEstado(e), h('span', {}, texto));
   };
   const falta = avisos => {
@@ -16726,21 +16731,21 @@ function pieDeEstilo(ficha) {
     return barraDeAccion({ clase: 'pie-light',
       estado: { e: 'aviso', texto: 'Hay cambios pedidos (las pestañas con punto)' },
       plan: h('span', {}, que, notas.length ? h('span', { clase: 'notas-pie' }, ` · ${notas.join(' ')}`) : null),
-      botones: [botonDeBarra(leyendo ? 'Leyendo tu corrección…' : 'Regenerar lo pedido',
-        () => regenerarPedidasLight(ficha, pedidas), { disabled: lanzando, ayuda: `Regenera ${que}. ${notas.join(' ')}` })] });
+      botones: [botonDeBarra(h('button', { onclick:
+        () => regenerarPedidasLight(ficha, pedidas) }, leyendo ? 'Leyendo tu corrección…' : 'Regenerar lo pedido'), { disabled: lanzando, ayuda: `Regenera ${que}. ${notas.join(' ')}` })] });
   }
   const traer = enVideo ? ((APP.light.video.cambiosEstilo || {}).partes || []).filter(p => p.cambia).length : 0;
   return barraDeAccion({ clase: 'pie-light',
     estado: { e: 'hecho', texto: 'Estilo guardado' + (traer ? ` · ${traer} ${traer === 1 ? 'cambio' : 'cambios'} por traer arriba` : '') },
     plan: enVideo ? 'lo que cambias se guarda solo; esto lo adelanta y sigue al Encargo'
       : 'lo que cambias se guarda solo; esto lo adelanta y vuelve a tus estilos',
-    botones: [botonDeBarra('Guardar', async () => {
+    botones: [botonDeBarra(h('button', { onclick: async () => {
       await volcarPresetLight();
       await cargarGaleriaLight(true);
       if (enVideo) irAPasoDelCarril('encargo');
       else irALight('galeria');
       toast(`«${ficha.nombre}» guardado`);
-    })] });
+    } }, 'Guardar'))] });
 }
 
 /* Repinta SOLO la barra (y los puntos de las pestañas). El formulario entero

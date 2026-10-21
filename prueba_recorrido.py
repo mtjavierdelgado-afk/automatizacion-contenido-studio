@@ -558,7 +558,10 @@ class Pagina:
 def ir_al_paso(pg, nombre):
     """El carril de Crear (rediseño, 20-10-2026): pulsa el paso de ese nombre
     (Estilo, Encargo, Guion, Voz, Imágenes, Vídeo). Sustituye a la barra de
-    pasos de abajo («.nav-light»)."""
+    pasos de abajo («.nav-light»). El paso en el que ya se está va apagado
+    (no lleva a ningún sitio): entonces no hay nada que pulsar."""
+    if pg.p.locator(".pasos-carril button.actual").filter(has_text=nombre).count():
+        return
     pg.pulsar(".pasos-carril button", nombre)
 
 

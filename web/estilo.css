@@ -2067,7 +2067,7 @@ textarea.texto-bloque:focus { outline: none; }
    panel, fuera del contenido (`BARRA_INFERIOR` en app.js). Comparten regla a
    proposito: eran dos estilos parecidos, uno tarjeta flotante y otro franja, y
    al cambiar de pantalla se notaba el salto. */
-.pie-guion, .previa-mandos {
+.previa-mandos {
   position: sticky; z-index: 6;
   bottom: calc(var(--alto-nav) + env(safe-area-inset-bottom, 0px));
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
@@ -2076,8 +2076,6 @@ textarea.texto-bloque:focus { outline: none; }
   background: var(--panel); border-top: 1px solid var(--linea);
   box-shadow: 0 -6px 18px rgba(0, 0, 0, .28);
 }
-.pie-guion .barra-light { flex: 1; min-width: 0; }
-.pie-guion > button, .pie-guion > .ayuda-de { flex: 0 0 auto; white-space: nowrap; }
 
 .barra-light { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .barra-light .carril {
@@ -2182,16 +2180,6 @@ button.primario.grande { padding: 9px 18px; font-size: 14px; }
    fila, a 375 px la barra se queda en 57 px y la línea que dice lo que va a
    hacer y lo que cuesta —que es la mitad de por qué existe— no se puede leer.
    Los botones arriba y la barra debajo, a todo el ancho. */
-@media (max-width: 560px) {
-  .pie-guion { flex-wrap: wrap; }
-  /* `.ayuda-de` tambien: desde que cada boton lleva su tooltip, el hijo
-     directo del pie es el envoltorio y no el boton. */
-  .pie-guion > button, .pie-guion > a, .pie-guion > .ayuda-de { flex: 1 1 auto; }
-  .pie-guion > .ayuda-de > button, .pie-guion > .ayuda-de > a { width: 100%; }
-  /* En estrecho, la barra y el reproductor se llevan su propia fila: entre dos
-     botones no queda ancho para nada mas. */
-  .pie-guion .barra-light,
-  .pie-guion .reproductor-light { flex: 1 0 100%; order: 2; }
 }
 
 /* ==========================================================================
@@ -2408,40 +2396,6 @@ body.modo-light #panel > .contenido {
   flex: 1 0 auto; padding-bottom: 14px; width: 100%;
 }
 
-.nav-light {
-  position: sticky; bottom: 0; z-index: 20;
-  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
-  background: var(--panel); border-top: 1px solid var(--linea);
-  /* `auto` arriba la empuja al fondo cuando sobra sitio; de borde a borde a los
-     lados, cancelando el relleno lateral del panel. Va TODO en la abreviada: el
-     `margin-top: auto` suelto que habia antes lo pisaba esta misma linea, asi
-     que el empujon al fondo no llegaba a aplicarse nunca. */
-  margin: auto calc(var(--margen-panel) * -1) 0;
-  /* el hueco del gesto de inicio en los moviles sin boton */
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-}
-.nav-light .parada {
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-  padding: 8px 4px 7px; background: none; border: none; border-radius: 0;
-  color: var(--tenue); cursor: pointer; min-height: 52px;
-}
-.nav-light .parada svg { width: 22px; height: 22px; display: block; }
-.nav-light .parada .etiqueta {
-  font-size: 11px; letter-spacing: .02em; line-height: 1;
-}
-.nav-light .parada:hover:not(:disabled):not(.activa) { color: var(--texto); }
-.nav-light .parada.activa { color: var(--acento); cursor: default; }
-/* Apagada pero LEGIBLE: dice que ese paso existe y todavia no toca. */
-/* Apagada pero LEGIBLE: con --punto-bloqueado (#262b34) sobre el panel casi
-   no se leia, y un paso que no se puede leer no ensena ningun camino. */
-.nav-light .parada:disabled { color: var(--punto-pendiente); cursor: not-allowed; }
-
-/* En movil la etiqueta cabe justa; el icono manda y el texto acompana. */
-@media (max-width: 420px) {
-  .nav-light .parada .etiqueta { font-size: 10px; }
-  .nav-light .parada { padding: 7px 2px 6px; }
-}
-
 /* --------------------------------------------------- la cuenta, en la barra
    Quien esta dentro y como salir. Solo aparece si delante hay un login que
    conteste /api/me: en local no lo hay y este bloque no pinta nada. */
@@ -2486,8 +2440,6 @@ body.modo-light #panel > .contenido {
 .ayuda-de:hover::after, .ayuda-de:focus-within::after {
   opacity: 1; visibility: visible; transition-delay: .45s;
 }
-/* Cerca del borde izquierdo el cartel se salia por fuera del panel. */
-.pie-guion > .ayuda-de:first-child::after { left: 0; transform: none; }
 
 /* ------------------------------------------ los mandos de una diapositiva
    Anclada al fondo, justo encima de la barra de pasos, con «anterior» a la
@@ -2585,7 +2537,7 @@ button.avisa:hover:not(:disabled) { border-color: var(--aviso); }
    La burbuja va ENCIMA de la barra de abajo (--alto-nav), no en la esquina:
    en un móvil la esquina es la cuarta parada de esa barra, y una burbuja ahí
    tapa el botón del vídeo. Y ENCIMA de la franja de mandos de cada pantalla
-   (.pie-guion / .previa-mandos, ~60px pegada a la barra): en el vídeo su
+   (.barra-accion, que fija --alto-pie desde app.js): en el vídeo su
    «Descargar» queda en la esquina y la burbuja se lo comía. El aviso de arriba
    (#toast) queda por debajo de la burbuja y no se pisan. */
 :root { --alto-pie: 62px; }
@@ -2821,19 +2773,6 @@ button.mini { border-radius: 8px; }
 .galeria-estilos .ficha-estilo.nuevo { background: var(--degradado-suave); }
 .light-cab h2 { font-size: 22px; font-weight: 800; }
 
-/* ---- la barra de pasos de abajo: la parada activa con su pildora */
-.nav-light {
-  background: var(--vidrio);
-  backdrop-filter: saturate(1.4) blur(14px);
-  -webkit-backdrop-filter: saturate(1.4) blur(14px);
-}
-.nav-light .parada { position: relative; }
-.nav-light .parada.activa { color: var(--acento); }
-.nav-light .parada.activa::before {
-  content: ''; position: absolute; top: 0; left: 28%; right: 28%; height: 3px;
-  border-radius: 0 0 3px 3px; background: var(--degradado);
-}
-
 /* ---- la burbuja del asistente, con el degradado */
 .burbuja-asistente {
   background: var(--degradado); box-shadow: var(--sombra), var(--brillo-acento);
@@ -3047,7 +2986,6 @@ ul.inicio-como li { display: flex; gap: 10px; align-items: flex-start; line-heig
 }
 
 /* ---- añadir, partir y regrabar bloques del guion (V2.0) */
-.acciones-guion { align-items: baseline; gap: 10px; margin: 0 0 10px; }
 .regrabar-pendiente {
   display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
   margin-bottom: 12px;
@@ -3369,9 +3307,6 @@ textarea.autoalto, textarea.crece.autoalto { max-height: 60vh; overflow-y: auto;
 /* El logo lleva al inicio (irAInicioLight) */
 #cabecera .marca { cursor: pointer; }
 #cabecera .marca:focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
-/* «‹ Mis vídeos / nombre», encima de cada pantalla de un vídeo */
-.migas-video { flex-wrap: wrap; min-width: 0; }
-.migas-video .migas-nombre { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
 
 /* Versiones de un paso: volver a una anterior (bloqueVersionesLight) */
 .bloque-versiones { margin: 16px 0 8px; padding: 10px 12px; border: 1px solid var(--linea); border-radius: 10px; background: var(--panel); }
@@ -4337,3 +4272,269 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 .campo-mandado { margin-top: 6px; }
 .campo-mandado b { font-size: 12px; overflow-wrap: anywhere; }
 .aviso-recortado { margin: 4px 0; overflow-wrap: anywhere; }
+
+/* ============================================================ CREAR · CARRIL
+ *
+ * El rediseño de Crear, forma «A · Carril» (rama `rediseno-crear`, 20-10-2026,
+ * con la maqueta aprobada). Dentro de un vídeo: el carril de seis pasos a la
+ * izquierda (en el móvil, una fila que se desliza arriba), la cabecera del
+ * vídeo, el paso y una barra de acción pegada abajo. Los colores, SOLO con las
+ * variables del tema: así valen en las cuatro paletas y en claro y oscuro.
+ *
+ * La barra de pasos de abajo ya no existe: su alto pasa a cero, y con él lo
+ * que se colocaba encima (la burbuja del asistente, las barras de antes). */
+:root { --alto-nav: 0px; --ancho-carril: 258px; }
+/* Sin el ancla de scroll del navegador: al repintar, el sitio lo devuelve
+   `devolverScroll` (LA PANTALLA NO SALTA). Con las dos, un estado intermedio
+   del repintado movía el scroll y la memoria se quedaba con esa altura. */
+#panel { overflow-anchor: none; }
+
+.contenido.light.con-carril {
+  max-width: 1500px; display: grid; align-items: start;
+  grid-template-columns: var(--ancho-carril) minmax(0, 1fr); gap: 0 28px;
+}
+.paso-crear {
+  min-width: 0; display: flex; flex-direction: column; gap: 14px;
+  min-height: calc(100vh - var(--alto) - 40px);
+}
+.paso-crear > .pie-sistema { margin-top: auto; }
+.salida-crear { align-self: flex-start; font-weight: 600; }
+
+/* ---- el carril */
+.carril-crear {
+  position: sticky; top: 0; align-self: start; z-index: 5;
+  max-height: calc(100vh - var(--alto) - 24px); overflow: auto;
+  display: flex; flex-direction: column; gap: 12px; padding: 2px 2px 8px;
+}
+.carril-titulo {
+  font-size: 11px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--tenue); font-weight: 700; padding: 2px 4px;
+}
+.carril-titulo .desliza { display: none; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.pasos-carril { display: flex; flex-direction: column; gap: 6px; }
+.paso-carril {
+  display: flex; gap: 11px; align-items: center; width: 100%; min-width: 0;
+  padding: 9px 11px; border-radius: 12px; text-align: left;
+  border: 1px solid var(--linea); background: var(--panel); color: var(--texto);
+}
+.paso-carril:hover:not(:disabled) { border-color: var(--linea-fuerte); background: var(--hover); }
+.paso-carril.actual { border-color: var(--acento); background: var(--marcado); cursor: default; }
+.paso-carril:disabled:not(.actual) { opacity: .62; cursor: not-allowed; }
+.paso-carril.actual:disabled { opacity: 1; cursor: default; }
+.paso-textos { display: flex; flex-direction: column; min-width: 0; }
+.paso-carril b { font-size: 14px; line-height: 1.25; }
+.paso-carril small { font-size: 12px; color: var(--tenue); line-height: 1.3; }
+.estado-txt { font-size: 11.5px; font-weight: 600; }
+
+/* las marcas: forma y color */
+.marca-estado {
+  flex: none; display: grid; place-items: center; width: 27px; height: 27px;
+  border-radius: 50%; font-size: 13px; font-weight: 800;
+  border: 2px solid var(--linea-fuerte); color: var(--tenue); background: var(--hueco);
+}
+.e-hecho .marca-estado, .e-hecho > .marca-estado { border-color: var(--ok); color: var(--ok); background: var(--panel); }
+.e-aviso .marca-estado, .e-aviso > .marca-estado { border-color: var(--aviso); color: var(--aviso); background: var(--aviso-fondo); border-radius: 8px; }
+.e-actual .marca-estado, .e-actual > .marca-estado { border-color: var(--acento); color: var(--acento); background: var(--panel); }
+.e-curso .marca-estado, .e-curso > .marca-estado { border-color: var(--acento); color: var(--acento); border-style: dashed; animation: girar-carril 2.4s linear infinite; }
+.e-curso .marca-estado span { display: inline-block; animation: girar-carril 2.4s linear infinite reverse; }
+.e-bloq .marca-estado, .e-bloq > .marca-estado { border-style: dotted; }
+@keyframes girar-carril { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .e-curso .marca-estado, .e-curso .marca-estado span { animation: none; } }
+.estado-txt.e-hecho { color: var(--ok); }
+.estado-txt.e-aviso { color: var(--aviso); }
+.estado-txt.e-curso, .paso-carril.actual .estado-txt { color: var(--acento); }
+.estado-txt.e-pend, .estado-txt.e-bloq { color: var(--tenue); }
+
+.gasto-video {
+  display: flex; flex-direction: column; gap: 3px; text-align: left; padding: 12px;
+  border-radius: 12px; border: 1px solid var(--linea); background: var(--panel); color: var(--texto);
+}
+.gasto-video:hover { border-color: var(--acento); }
+.gasto-video .meta:first-child { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+.gasto-video b { font-size: 20px; font-family: var(--letra-cifra); }
+
+/* ---- la cabecera del vídeo */
+.cab-video {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 12px;
+  border-radius: 14px; border: 1px solid var(--linea); background: var(--panel);
+}
+.miniatura-video { width: 64px; aspect-ratio: 16 / 9; border-radius: 8px; flex: none; object-fit: cover; background: var(--hueco); }
+.miniatura-video.vertical { width: 36px; aspect-ratio: 9 / 16; }
+.miniatura-video.vacia { display: block; background: var(--degradado-suave); }
+.cab-video .datos { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.nombre-video { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.nombre-video b { font-family: var(--letra-titulo); font-size: 17px; line-height: 1.2; overflow-wrap: anywhere; }
+.renombrar-en-linea { display: flex; gap: 6px; align-items: center; flex: 1; min-width: 0; }
+.renombrar-en-linea input { flex: 1; min-width: 0; }
+.chips-video { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip-enlace {
+  border: 1px solid var(--linea); background: var(--hueco); border-radius: 999px;
+  padding: 2px 10px; font-size: 12.5px; color: var(--tenue); min-height: 0;
+}
+button.chip-enlace:hover { border-color: var(--acento); color: var(--texto); }
+.pastilla.borrador { background: var(--info-fondo); color: var(--acento); }
+.cab-video .coste-light { margin-left: auto; }
+.video-light.renombrando { padding: 6px 8px; }
+
+/* ---- la cabecera de cada paso */
+.cab-paso { align-items: baseline; gap: 10px; margin-bottom: 0; }
+.cab-paso h2 { font-size: 28px; }
+.cifra-paso { font-family: var(--letra-cifra); }
+.entrada-paso { margin-top: -6px; max-width: 70ch; }
+
+/* ---- la barra de acción, pegada abajo */
+.barra-accion {
+  position: sticky; bottom: 0; z-index: 8; margin-top: 4px;
+  padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px));
+  background: var(--vidrio); border-top: 1px solid var(--linea);
+  backdrop-filter: saturate(1.4) blur(12px); -webkit-backdrop-filter: saturate(1.4) blur(12px);
+}
+#panel > .barra-accion { margin: 0 calc(var(--margen-panel) * -1); padding-left: var(--margen-panel); padding-right: var(--margen-panel); }
+.barra-accion .dentro {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr) auto;
+  gap: 8px 16px; align-items: center;
+}
+.barra-accion .dentro.corriendo { grid-template-columns: minmax(0, 1fr) auto; }
+.barra-accion .estado { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; min-width: 0; }
+.barra-accion .estado .marca-estado { width: 22px; height: 22px; font-size: 11px; }
+.barra-accion .plan { font-size: 12.5px; color: var(--tenue); min-width: 0; font-family: var(--letra-cifra); }
+.barra-accion .derecha { display: flex; gap: 8px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.barra-accion .principal { padding: 10px 18px; font-size: 14.5px; border-radius: 12px; min-height: 44px; white-space: nowrap; }
+.barra-accion .secundario-barra { white-space: nowrap; }
+.barra-accion .progreso { min-width: 0; }
+.barra-accion .ayuda-de:first-child::after { left: auto; right: 0; transform: none; }
+
+/* ---- revisar el guion, la ficha del estilo: pestañas */
+.pestanas-crear { display: flex; gap: 2px; border-bottom: 1px solid var(--linea); overflow-x: auto; scrollbar-width: none; }
+.pestanas-crear::-webkit-scrollbar { display: none; }
+.pestana-crear {
+  background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0;
+  color: var(--tenue); padding: 8px 12px; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center;
+}
+.pestana-crear.activa { color: var(--texto); font-weight: 700; border-bottom-color: var(--acento); }
+.pestana-crear .punto { width: 7px; height: 7px; border-radius: 50%; background: var(--aviso); }
+.revisar-guion { background: var(--panel); border: 1px solid var(--linea); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.revisar-guion .panel-ortografia { border: none; padding: 0; margin: 0; background: none; }
+
+/* ---- el guion: los huecos para añadir y los mandos a la vista */
+.hueco-anadir { display: flex; align-items: center; gap: 10px; margin: 2px 0; }
+.hueco-anadir::before, .hueco-anadir::after { content: ''; flex: 1; height: 1px; background: var(--linea-suave); }
+.hueco-anadir .anadir-bloque { font-size: 12px; padding: 2px 10px; min-height: 0; border-radius: 999px; }
+.bloques-light .parrafo-guion .cabecera button { opacity: 1; visibility: visible; }
+.prompt-general .etiqueta-bloque { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--tenue); font-weight: 700; }
+
+/* ---- la voz */
+.bloque-voz-video { background: var(--panel); border: 1px solid var(--linea); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.bloque-voz-video .reproductor-light { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.bloque-voz-video .reproductor-light audio { flex: 1 1 260px; min-width: 0; }
+.tramos-voz { display: flex; flex-direction: column; gap: 10px; }
+.tramo-voz .cabecera { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* ---- en el móvil y la tableta: el carril arriba, en fila */
+@media (max-width: 1000px) {
+  .contenido.light.con-carril { grid-template-columns: minmax(0, 1fr); }
+  .carril-crear {
+    position: static; max-height: none; overflow: visible; gap: 8px;
+    padding: 0 0 10px; border-bottom: 1px solid var(--linea); margin-bottom: 12px;
+  }
+  .carril-titulo .desliza { display: inline; }
+  .carril-crear .gasto-video { display: none; }
+  .pasos-carril {
+    flex-direction: row; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity;
+    padding-bottom: 2px;
+  }
+  .pasos-carril::-webkit-scrollbar { display: none; }
+  .paso-carril { width: auto; min-width: 132px; flex: 0 0 auto; padding: 8px 10px; gap: 8px; scroll-snap-align: start; }
+  .paso-carril small { display: none; }
+  .paso-carril .marca-estado { width: 24px; height: 24px; font-size: 12px; }
+  .paso-carril b { font-size: 13.5px; white-space: nowrap; }
+  .paso-carril .estado-txt { white-space: nowrap; font-size: 12px; }
+  .paso-crear { min-height: 0; }
+}
+@media (max-width: 700px) {
+  .barra-accion .dentro { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; }
+  .barra-accion .plan { grid-column: 1 / -1; order: 3; font-size: 11.5px; }
+  .barra-accion .principal { padding: 10px 14px; font-size: 14px; white-space: normal; }
+  .barra-accion .estado { font-size: 12.5px; }
+  .cab-paso h2 { font-size: 24px; }
+  .cab-video .coste-light { margin-left: 0; }
+}
+.carril-dentro { display: flex; flex-direction: column; gap: 12px; }
+.bloques-light .parrafo-guion > .cabecera { flex-wrap: wrap; }
+@media (max-width: 700px) {
+  .cab-video { gap: 10px; }
+  .cab-video .datos { flex: 1 1 calc(100% - 80px); }
+  .cab-video .coste-light { flex: 1 1 100%; }
+}
+
+/* ---- la tarjeta de estilo: «✎ Editar» a la vista y «⋯» con lo demás */
+.galeria-estilos .pie-tarjeta { display: flex; gap: 6px; align-items: center; padding: 0 12px 11px; }
+.galeria-estilos .pie-tarjeta .esquina { position: relative; top: auto; right: auto; }
+.galeria-estilos .pie-tarjeta .puntos { background: var(--boton); }
+.galeria-estilos .pie-tarjeta .menu-estilo { top: auto; bottom: 30px; right: auto; left: 0; min-width: 170px; }
+
+/* ---- la ficha del estilo */
+.cab-ficha { align-items: flex-start; gap: 8px; flex-wrap: wrap; }
+.cab-ficha h2 { font-size: 21px; }
+.etiqueta-ficha { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; }
+.ficha-en-pestanas { display: flex; flex-direction: column; gap: 14px; }
+.ficha-en-pestanas > .panel-estilo > .bloque-light, .ficha-en-pestanas > .panel-estilo > * { margin-top: 0; }
+.caja-con-nombre { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.caja-con-nombre:first-child { margin-top: 0; }
+.etiqueta-caja { font-size: 12px; font-weight: 700; letter-spacing: .04em; color: var(--texto); }
+details.caja-con-nombre > summary { cursor: pointer; }
+.barra-accion .notas-pie { font-family: var(--letra); }
+.aviso-falta { display: inline; font-size: 12.5px; margin-right: 8px; text-align: left; }
+button.aviso-falta { background: none; border: none; padding: 0; min-height: 0; text-decoration: underline; cursor: pointer; color: var(--aviso); }
+.estilo-a-medias { display: block; }
+
+/* ---- imágenes: la tira de planos y los mandos de mirar, encima de la barra */
+.tira-escenas { display: flex; gap: 6px; overflow-x: auto; padding: 2px 2px 6px; scrollbar-width: thin; }
+.escena-mini {
+  position: relative; flex: 0 0 auto; width: 92px; aspect-ratio: 16 / 9; padding: 0;
+  border-radius: 8px; overflow: hidden; border: 2px solid var(--linea); background: var(--lienzo); min-height: 0;
+}
+.escena-mini img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.escena-mini.actual { border-color: var(--acento); }
+.escena-mini.actual:disabled { opacity: 1; cursor: default; }
+.escena-mini.obsoleta { border-color: var(--aviso); }
+.escena-mini.actual.obsoleta { border-color: var(--acento); }
+.escena-mini .id-mini {
+  position: absolute; left: 3px; bottom: 3px; font-size: 10px; font-family: var(--letra-cifra);
+  padding: 0 4px; border-radius: 4px; background: var(--velo-imagen); color: var(--texto);
+}
+.escena-mini .marca-mini {
+  position: absolute; right: 3px; top: 3px; font-size: 10px; line-height: 1; padding: 2px 3px;
+  border-radius: 4px; background: var(--velo-imagen); color: var(--texto);
+}
+.escena-mini .marca-mini.obsoleta { color: var(--aviso); }
+.escena-mini .marca-mini.revisada { color: var(--ok); }
+.barra-accion > .previa-mandos {
+  position: static; margin: 0 0 8px; padding: 6px 10px; box-shadow: none;
+  border: 1px solid var(--linea); border-radius: 12px; background: var(--panel);
+}
+
+/* ---- vídeo: dos columnas debajo del reproductor */
+.rejilla-video { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.rejilla-video > * { min-width: 0; margin: 0; }
+.caja-video { background: var(--panel); border: 1px solid var(--linea); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.caja-video h3, .rejilla-video .repaso h3 { font-size: 16px; }
+.caja-video .panel-ortografia { border: none; padding: 0; margin: 0; background: none; }
+.rejilla-video .bloque-publicar-video { flex-wrap: wrap; height: 100%; }
+@media (max-width: 860px) { .rejilla-video { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---- «Su estilo»: cada parte con su coste, sin apretarse */
+.estilo-del-video .parte-estilo { flex-wrap: wrap; }
+.estilo-del-video .parte-estilo .crece { min-width: 200px; }
+.estilo-del-video .parte-estilo .pastilla { white-space: normal; }
+.franja-sin-aplicar .meta { margin-left: 8px; }
+.sin-aplicar { color: var(--aviso); }
+.paso-crear .light-video, .paso-crear .light-previa, .paso-crear .light-encargo, .paso-crear .light-guion,
+.paso-crear .light-voz, .paso-crear .light-preset { display: flex; flex-direction: column; gap: 14px; }
+.paso-crear .light-video > *, .paso-crear .light-voz > *, .paso-crear .light-guion > * { margin-top: 0; margin-bottom: 0; }
+.rejilla-video .repaso { background: var(--panel); border: 1px solid var(--linea); border-radius: 12px; padding: 14px 16px; }
+.descargar-video a.boton {
+  display: inline-flex; align-items: center; padding: 5px 11px; border: 1px solid var(--linea);
+  border-radius: 8px; background: var(--boton); color: var(--texto); text-decoration: none; font-size: 13px;
+}
+.descargar-video a.boton:hover { border-color: var(--acento); }

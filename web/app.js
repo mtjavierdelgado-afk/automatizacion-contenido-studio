@@ -15530,7 +15530,7 @@ function vistaPresetLight() {
         + (origen.tono_resumen ? ` · ${String(origen.tono_resumen).split('\n')[0]}` : '')) : null),
     guiaTono
       ? campoTexto('', guiaTono,
-        valor => guardarPresetLight(ficha.id, { instrucciones: valor }),
+        v => guardarPresetLight(ficha.id, { instrucciones: v }),
         { filas: 16,
           ayuda: 'Es lo que lee el redactor, tal cual. Se guarda solo; '
                + 'regenerar el tono lo reescribe entero.' })

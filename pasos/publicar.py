@@ -2277,6 +2277,32 @@ def campos_portada(raiz, info, datos, redes, lote="vista"):
     return campos, ficheros
 
 
+def portada_mandada(red, campos, ficheros):
+    """Lo que se mandó de portada a UNA red, en palabras (portadas-2, 21-10):
+    el envío lo guarda para que se vea si la portada salió de aquí o no."""
+    nombres = {nombre for nombre, _ruta in ficheros or []}
+    campos = campos or {}
+
+    def segundo(ms):
+        try:
+            return f"el fotograma del segundo {int(ms) / 1000:.1f}".replace(".", ",")
+        except (TypeError, ValueError):
+            return "un fotograma"
+    if red == "instagram":
+        if "cover_image" in nombres:
+            return "tu imagen de portada"
+        return segundo(campos["thumb_offset"]) if "thumb_offset" in campos else ""
+    if red == "tiktok":
+        if "tiktok_cover_image" in nombres:
+            return "tu imagen de portada (solo si tu cuenta tiene el permiso «cover_image»)"
+        return segundo(campos["cover_timestamp"]) if "cover_timestamp" in campos else ""
+    if red == "youtube":
+        return "tu miniatura (solo si el canal está verificado)" if "thumbnail" in nombres else ""
+    if red == "facebook":
+        return "tu miniatura" if "facebook_thumbnail" in nombres else ""
+    return ""
+
+
 # -------------------------------------------------------------- la ficha
 
 #: LO PROGRAMADO QUE YA DEBIÓ SALIR (20-10-2026: a las 12:22 seguían en
@@ -2306,7 +2332,7 @@ def _envio_publico_campos(e):
     return {k: e.get(k) for k in (
         "id", "red", "estado", "modo", "cuando", "creado", "actualizado", "url",
         "error", "lote", "perfil", "mp4_huella", "nota", "programado_para", "sin_hora",
-        "metricas", "enviado", "texto_publicado", "recortado", "tipo")}
+        "metricas", "enviado", "texto_publicado", "recortado", "tipo", "portada")}
 
 
 def redes_visibles(ajustes, datos=None):
@@ -2672,7 +2698,9 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
     # «Ver lo que se mandó» en la ficha y la comparación con lo publicado
     enviado = textos_enviados(campos)
     _actualizar_lote(raiz, pid, lote, lambda e: e.update(
-        enviado={k: v for k, v in enviado.items() if _campo_de_red(k, e["red"])}))
+        enviado={k: v for k, v in enviado.items() if _campo_de_red(k, e["red"])},
+        # QUÉ PORTADA SE MANDÓ (portadas-2): «» = ninguna, la puso la red
+        portada=portada_mandada(e["red"], extra, ficheros)))
     cuando = envios[0]["cuando"] if envios[0].get("modo") == "programado" else None
     perfil = envios[0].get("perfil") or ajustes.get("perfil")
     # EL NOMBRE DEL FICHERO lleva la palabra clave; el MP4 del proyecto no cambia

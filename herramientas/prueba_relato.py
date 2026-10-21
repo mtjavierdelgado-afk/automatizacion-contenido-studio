@@ -170,10 +170,14 @@ def main():
     ap.add_argument("--tope", type=float, default=5.0)
     ap.add_argument("--seguir", action="store_true")
     ap.add_argument("--solo", default="", help="a, b, c o varias: «ab»")
+    ap.add_argument("--video", default="", help="con --solo de UNA letra: sigue ese vídeo de prueba ya "
+                    "hecho (guion, voz y sitios) desde su imagen base; si la aprobaste tú, no paga otra")
     # PARA PROBAR ESTA PRUEBA en local, con motores simulados
     ap.add_argument("--sin-claves", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--sin-opcionales", action="store_true", help=argparse.SUPPRESS)
     args = ap.parse_args()
+    if args.video and len(args.solo.strip()) != 1:
+        ap.error("--video va con --solo de una sola letra (a, b o c)")
     api = PR.Api(args.api)
     proyectos = os.environ.get("ESTUDIO_PROYECTOS") or os.path.join(RAIZ, "proyectos")
     os.makedirs(PR._carpeta_informes(proyectos), exist_ok=True)   # noqa: SLF001
@@ -280,6 +284,14 @@ def main():
             return f"{k}:{nombre}" not in est["hechas"]
 
         PR.seccion(f"{k}) {esc['titulo']} — {esc['relato']['modo']} ({esc['relato']['cambia']})")
+        # --video: un video de prueba ya hecho, desde su imagen base (la que
+        # apruebe una persona en la pantalla manda sobre el juez)
+        if args.video and parte("crear"):
+            v = {"pid": args.video.strip()}
+            est["videos"][k] = v
+            for hecho in ("crear", "guion", "voz", "sitios"):
+                hecha(f"{k}:{hecho}")
+            informe.apunta("ok", f"se sigue el vídeo ya hecho «{v['pid']}» desde su imagen base")
         # crear
         if parte("crear"):
             nombre = f"Prueba relato {k} " + datetime.datetime.now().strftime("%Y-%m-%d %H.%M")
@@ -389,10 +401,11 @@ def main():
                         "estado inicial."
                         + (f" Y tiene que verse YA, donde dice, lo que luego cambia: «{tr_.get('inicial')}»."
                            if tr_.get("inicial") else "")
-                        + " Contesta por separado: 'distribucion' (cada mueble fijo en la pared que "
-                        "dice y la puerta donde dice), 'objeto' (lo que luego cambia está, está donde "
-                        "dice y es un objeto real a escala: una puerta o un panel recto, vertical y "
-                        "plano, no torcido ni a medio abrir; 'si' si no se pide ninguno) y 'acabados' (colores y materiales). Devuelve SOLO "
+                        + " Contesta por separado: 'distribucion' (cada mueble fijo en la PARED que dice "
+                        "y la puerta donde dice; cuánto ocupa cada uno y en qué punto exacto de su pared "
+                        "NO cuentan), 'objeto' (lo que luego cambia está, en su zona, y es un objeto real "
+                        "a escala: una puerta o un panel recto, vertical y plano, no torcido ni a medio "
+                        "abrir; el lado exacto de las bisagras NO cuenta; 'si' si no se pide ninguno) y 'acabados' (colores y materiales). Devuelve SOLO "
                         '{"distribucion": "si" | "no", "objeto": "si" | "no", "acabados": "si" | "no", '
                         '"por_que": "<una frase>"}', raiz)
                     # LO QUE IMPORTA es la distribucion y el objeto: los planos editan la

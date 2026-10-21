@@ -7256,6 +7256,14 @@ def probar_tipos_de_negocio():
            "y el estilo que lo tenía vuelve a automático, con el resto intacto")
         codigo, _m = _llamar(servidor.borrar_dominio, "clinica-dental")
         igual(codigo, 404, "borrar uno que ya no está, 404")
+        # EL REVISOR recibe las mismas reglas de la casa que el generador: las de
+        # consolas, ahora en su tipo, siguen llegándole en automático
+        foto = {"modo": "foto", "referencias": ["a.png"]}
+        plan = {"escenas": [{"prompt": "two kids hold game controllers"}]}
+        ok("GAME CONTROLLERS" in servidor._reglas_para_revisor(foto, plan),
+           "el revisor recibe las reglas de consolas en un vídeo de consolas (automático)")
+        ok("GAME CONTROLLERS" not in servidor._reglas_para_revisor(dict(foto, dominio="general"), plan),
+           "y no si el estilo fija «General»")
     finally:
         presets.FICHERO = antes
         if antes_env is None:

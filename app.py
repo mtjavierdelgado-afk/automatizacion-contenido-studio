@@ -7059,7 +7059,10 @@ def _reglas_para_revisor(estilo, plan):
         if p6.modo_de(estilo) == "foto":
             contexto = " ".join([p6.contexto_de_reglas(estilo)] + [
                 str(e.get("prompt") or "") for e in plan.get("escenas") or []])
-            lineas = reglas.para("prompt_imagen", modo="foto", contexto=contexto)
+            # con las del tipo de negocio en su hueco (Etapa Foto C), las mismas
+            # que recibió el generador (`p6_assets._prompt_completo`)
+            lineas = reglas.para("prompt_imagen", modo="foto", contexto=contexto,
+                                 extra=p6.dominios.reglas_de_foto(estilo))
         else:
             lineas = reglas.para("prompt_imagen")
         return "\n".join(f"  - {l}" for l in lineas)

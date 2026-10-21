@@ -523,6 +523,22 @@ Más abajo:
   red con sus seguidores, lo que mejor funcionó y lo aprendido. **Imprimir o
   guardar en PDF** y **Copiar resumen** (en texto, para un correo).
 
+### Diseñar la portada
+
+En el bloque **Portada** de un vídeo, **Diseñar portada** abre el editor:
+
+1. **Plantilla**: elige una de las 21 (Versus, Top N, Oferta…). Cada una
+   coloca sus textos y su grafismo; cambiar de plantilla conserva lo escrito.
+2. **Textos**: de 1 a 3 palabras por campo. Más de 4 bajan los clics.
+3. **Fondo**: un fotograma, un plano, una imagen tuya o una hecha con IA. Las
+   plantillas partidas (Versus, Antes / Después, Mito) usan dos.
+4. **Elementos**: muévelos, agrándalos, gíralos, cámbiales el color o
+   escóndelos; «Añadir» pone más (flecha, círculo, insignia, icono…).
+5. **Proponer 3 portadas con Claude** si no sabes por dónde empezar.
+6. **Usar como portada**: la deja como la imagen que va a las redes.
+
+Lo de la IA de imágenes se paga y te dice el precio antes: solo el fondo (el
+texto sigue en capas, exacto) o la portada entera con el texto dentro.
 ## Automatizar
 
 Lo que prepara los vídeos antes de crearlos. Dos pestañas grandes:

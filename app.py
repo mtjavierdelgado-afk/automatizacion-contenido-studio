@@ -34,6 +34,7 @@ import asyncio
 import copy
 import hashlib
 import inspect
+import io
 import math
 import html as html_lib
 import json
@@ -16822,6 +16823,432 @@ def fichero_web(fichero: str, peticion: Request):
     return servir_fichero(peticion, destino)
 
 
+# =================================================================== PORTADAS
+# Portadas disenadas (rama `portadas`, 19-10-2026): ver pasos/portadas.py y
+# pasos/grafismo.py. El diseno vive en la carpeta de Publicar, fuera de toda
+# firma, y la portada hecha entra por `publicar.guardar_imagen_portada`, igual
+# que una imagen subida: Publicar no sabe si la subiste o la disenaste. Lo que
+# se paga (el fondo o la portada hechos con IA) va como trabajo, con su turno
+# de imagenes (regla 2) y su coste apuntado en el video.
+
+_PROPUESTAS_PORTADA = {}
+_LOCK_PORTADAS = threading.Lock()
+
+
+def _portadas():
+    return PASOS_MODULOS.portadas if hasattr(PASOS_MODULOS, "portadas") else __import__("portadas")
+
+
+def _motor_grafismo():
+    # NO `_grafismo`: ese nombre ya es el de la paleta y el set de un video
+    # (mas arriba), y en Python el segundo pisa al primero sin avisar
+    return PASOS_MODULOS.grafismo if hasattr(PASOS_MODULOS, "grafismo") else __import__("grafismo")
+
+
+def _raiz_publicar():
+    return _publicar().carpeta(raiz_proyectos())
+
+
+def _planos_para_portada(ctx):
+    """[{sid, texto, ruta}] de los planos del video con imagen hecha."""
+    plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    rutas = _imagenes_de_planos(ctx, plan)
+    salida = []
+    for escena in plan.get("escenas") or []:
+        sid = str(escena.get("id") or "")
+        ruta = rutas.get(sid)
+        if ruta and os.path.isfile(ruta):
+            salida.append({"sid": sid, "ruta": ruta,
+                           "texto": " ".join(str(escena.get("narracion") or "").split())[:140]})
+    return salida
+
+
+def _rutas_fondo_portada(ctx, info, diseno):
+    """Los ficheros del fondo del diseno (1 o 2), sacandolos si hace falta."""
+    P = _portadas()
+    fondo = (diseno or {}).get("fondo") or {}
+    tipo = fondo.get("tipo")
+    dos = fondo.get("disposicion") in ("diagonal", "vertical", "horizontal")
+    rutas = []
+    if tipo in ("subida", "ia"):
+        for clave in ("imagen", "imagen2"):
+            # SOLO los de este video: el nombre de otro no se pinta aqui
+            if fondo.get(clave) and P.es_fondo_de(ctx.id, fondo[clave]):
+                ruta = P.ruta_fondo(_raiz_publicar(), fondo[clave])
+                if os.path.isfile(ruta):
+                    rutas.append(ruta)
+    elif tipo == "plano":
+        planos = {p["sid"]: p["ruta"] for p in _planos_para_portada(ctx)}
+        elegidos = [s for s in fondo.get("planos") or [] if s in planos] or list(planos)[:2]
+        rutas = [planos[s] for s in elegidos]
+    if not rutas and info.get("mp4"):
+        # el fotograma (o dos, para las plantillas partidas). La cache va POR
+        # MP4 (su huella): al volver a montar el video, los fotogramas viejos
+        # no se cuelan en la portada; y se quedan los ultimos 40 por video.
+        cache = os.path.join(_raiz_publicar(), "portadas", "fotogramas", P.prefijo_fondo(ctx.id))
+        huella = re.sub(r"[^a-z0-9]", "", str(info.get("mp4_huella") or "x").lower())[:10] or "x"
+        momentos = [int(fondo.get("ms") or 0)]
+        if dos:
+            dur = int(float(info.get("duracion_s") or 0) * 1000)
+            momentos.append(int(fondo.get("ms2") or (dur // 2 if dur else 0)))
+        try:
+            hay = sorted((os.path.join(cache, n) for n in os.listdir(cache)), key=os.path.getmtime)
+            de_otro_mp4 = [r for r in hay if not os.path.basename(r).startswith(huella + "_")]
+            de_este = [r for r in hay if r not in de_otro_mp4]
+            for ruta in de_otro_mp4 + de_este[:-40]:
+                os.remove(ruta)
+        except OSError:
+            pass
+        for ms in momentos:
+            destino = os.path.join(cache, f"{huella}_{ms}.jpg")
+            if not os.path.isfile(destino):
+                try:
+                    _publicar().fotograma(info["mp4"], ms, destino, ancho=1280)
+                except Exception:                           # noqa: BLE001
+                    continue
+            rutas.append(destino)
+    if not rutas:
+        planos = _planos_para_portada(ctx)
+        rutas = [p["ruta"] for p in planos[:2]]
+    return rutas[:2] if dos else rutas[:1]
+
+
+def _diseno_de_cuerpo(cuerpo):
+    d = _cuerpo(cuerpo).get("diseno")
+    if not isinstance(d, dict):
+        raise ErrorApi(400, "manda {diseno}")
+    return _portadas().normalizar(d)
+
+
+def _diseno_inicial(ctx, info):
+    P = _portadas()
+    datos = _publicar()._leer_video(raiz_proyectos(), ctx.id)
+    titulo = ""
+    for red in ("youtube", "facebook", "instagram", "tiktok"):
+        t = (datos.get("textos") or {}).get(red) or {}
+        titulo = str(t.get("titulo") or "").strip() or titulo
+        if titulo:
+            break
+    titulo = titulo or info.get("titulo") or info.get("nombre") or ""
+    # 3-4 palabras: una portada no es el titulo del post
+    corto = " ".join(str(titulo).split()[:4])
+    return P.de_plantilla("titular", {"titulo": corto}, "gamer", "anton",
+                          P.formato_de_video(info.get("formato")))
+
+
+@app.get("/api/portadas/catalogo")
+def portadas_catalogo():
+    """Plantillas, paletas, fuentes, elementos y formatos de las portadas."""
+    # las fuentes de miniatura se bajan una vez, sin esperar (grafismo.py)
+    _motor_grafismo().asegurar_fuentes_en_segundo_plano()
+    return _portadas().catalogo()
+
+
+@app.get("/api/publicar/videos/{pid}/portada/diseno")
+def portada_diseno(pid: str, peticion: Request):
+    """El diseno de portada de este video (el guardado o uno de partida, SIN
+    guardarlo) y los planos que se pueden usar de fondo."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    guardado = _portadas().leer(_raiz_publicar(), ctx.id)
+    return {"diseno": guardado or _diseno_inicial(ctx, info), "guardado": bool(guardado),
+            "formato_video": _portadas().formato_de_video(info.get("formato")),
+            "duracion_s": info.get("duracion_s") or 0, "montado": bool(info.get("mp4")),
+            "planos": [{"sid": p["sid"], "texto": p["texto"]} for p in _planos_para_portada(ctx)],
+            "fondos": _portadas().fondos_de(_raiz_publicar(), ctx.id)}
+
+
+@app.put("/api/publicar/videos/{pid}/portada/diseno")
+def portada_guardar_diseno(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Guarda el diseno (para retocarlo otro dia). No cambia la portada."""
+    ctx = _ctx_publicable(pid, peticion)
+    return {"diseno": _portadas().guardar(_raiz_publicar(), ctx.id, _diseno_de_cuerpo(cuerpo))}
+
+
+@app.post("/api/publicar/videos/{pid}/portada/plantilla")
+def portada_desde_plantilla(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Rehace el diseno con otra plantilla: {plantilla, paleta?, fuente?,
+    formato?, textos?, diseno?}, conservando textos y fondo. Sin `plantilla`
+    (solo paleta, letra o formato) cambia el estilo y deja los elementos como
+    estaban. No guarda nada."""
+    _ctx_publicable(pid, peticion)
+    datos = _cuerpo(cuerpo)
+    base = datos.get("diseno") if isinstance(datos.get("diseno"), dict) else None
+    P = _portadas()
+    actual = P.normalizar(base) if base else None
+    if actual and not datos.get("plantilla"):
+        # SOLO paleta, letra o formato: lo hecho a mano se queda (cambiar_estilo)
+        return {"diseno": P.cambiar_estilo(actual, datos.get("paleta"), datos.get("fuente"),
+                                           datos.get("formato"))}
+    return {"diseno": P.de_plantilla(
+        datos.get("plantilla") or (actual or {}).get("plantilla"),
+        datos.get("textos") if isinstance(datos.get("textos"), dict) else None,
+        datos.get("paleta") or (actual or {}).get("paleta") or "gamer",
+        datos.get("fuente") or (actual or {}).get("fuente") or "anton",
+        datos.get("formato") or (actual or {}).get("formato") or "9:16",
+        base=actual)}
+
+
+#: Cuantas vistas de portada se pintan a la vez (cada una abre un navegador):
+#: arrastrar un deslizador no puede amontonar navegadores contra el render.
+_VISTAS_PORTADA = threading.BoundedSemaphore(2)
+
+
+@app.post("/api/publicar/videos/{pid}/portada/vista")
+def portada_vista(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """La portada pintada en pequeno, para la pantalla: {diseno, ancho?,
+    guias?} (con `guias`, las zonas que tapa cada red en rojo). PNG."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    diseno = _diseno_de_cuerpo(cuerpo)
+    try:
+        ancho = max(160, min(720, int(_cuerpo(cuerpo).get("ancho") or 360)))
+    except (TypeError, ValueError):
+        ancho = 360
+    rutas = _rutas_fondo_portada(ctx, info, diseno)
+    destino = os.path.join(_raiz_publicar(), "portadas", "vistas", f"{uuid.uuid4().hex[:12]}.png")
+    if not _VISTAS_PORTADA.acquire(timeout=20):
+        raise ErrorApi(503, "hay otras vistas pintándose: vuelve a intentarlo en un momento")
+    try:
+        _portadas().renderizar(diseno, rutas, destino, ancho_vista=ancho,
+                               guias=bool(_cuerpo(cuerpo).get("guias")))
+        with open(destino, "rb") as fh:
+            contenido = fh.read()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(500, f"no he podido pintar la portada: {fallo}")
+    finally:
+        _VISTAS_PORTADA.release()
+        try:
+            os.remove(destino)
+        except OSError:
+            pass
+    return Response(contenido, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/publicar/videos/{pid}/portada/usar")
+def portada_usar(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """La pinta a tamano real y la deja como portada del video (como si la
+    hubieras subido). Guarda tambien el diseno. -> la ficha de Publicar."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    diseno = _diseno_de_cuerpo(cuerpo)
+    P = _portadas()
+    rutas = _rutas_fondo_portada(ctx, info, diseno)
+    destino = os.path.join(_raiz_publicar(), "portadas", "vistas", f"final_{uuid.uuid4().hex[:12]}.png")
+    try:
+        P.renderizar(diseno, rutas, destino)
+        with open(destino, "rb") as fh:
+            contenido = fh.read()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(500, f"no he podido pintar la portada: {fallo}")
+    finally:
+        try:
+            os.remove(destino)
+        except OSError:
+            pass
+    _por_publicar(_publicar().guardar_imagen_portada, raiz_proyectos(), ctx.id, contenido, ".png")
+    P.guardar(_raiz_publicar(), ctx.id, diseno)
+    ctx.bitacora.anotar("portada_disenada", "publicar", {"plantilla": diseno["plantilla"],
+                                                         "formato": diseno["formato"]})
+    return publicar_ficha(pid, peticion)
+
+
+@app.get("/api/publicar/videos/{pid}/portada/planos/{sid}.jpg")
+def portada_imagen_plano(pid: str, sid: str, peticion: Request):
+    """La imagen de un plano, en pequeno, para elegir el fondo."""
+    ctx = _ctx_publicable(pid, peticion)
+    planos = {p["sid"]: p["ruta"] for p in _planos_para_portada(ctx)}
+    if sid not in planos:
+        raise ErrorApi(404, "ese plano no tiene imagen")
+    try:
+        from PIL import Image                               # noqa: PLC0415
+        with Image.open(planos[sid]) as im:
+            im = im.convert("RGB")
+            im.thumbnail((360, 360))
+            salida = io.BytesIO()
+            im.save(salida, "JPEG", quality=82)
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(500, f"no he podido leer la imagen del plano: {fallo}")
+    return Response(salida.getvalue(), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=300"})
+
+
+@app.get("/api/publicar/videos/{pid}/portada/fondos/{nombre}")
+def portada_fondo(pid: str, nombre: str, peticion: Request):
+    """Un fondo subido o hecho con IA."""
+    _ctx_publicable(pid, peticion)
+    try:
+        ruta = _portadas().ruta_fondo(_raiz_publicar(), nombre)
+    except ValueError:
+        raise ErrorApi(404, "ese fondo no existe")
+    if not os.path.isfile(ruta) or not _portadas().es_fondo_de(pid, nombre):
+        raise ErrorApi(404, "ese fondo no existe")
+    return FileResponse(ruta, headers={"Cache-Control": "private, max-age=3600"})
+
+
+@app.post("/api/publicar/videos/{pid}/portada/fondo")
+async def portada_subir_fondo(pid: str, peticion: Request):
+    """Sube una imagen para el fondo (multipart, campo «imagen»). -> {nombre}"""
+    ctx = await _en_hilo(_ctx_publicable, pid, peticion)
+    try:
+        formulario = await peticion.form()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(400, f"multipart ilegible: {fallo}")
+    fichero = formulario.get("imagen")
+    if not hasattr(fichero, "read"):
+        raise ErrorApi(400, "manda la imagen en el campo «imagen»")
+    contenido = await fichero.read(15 * 1024 * 1024 + 1)
+    return await _en_hilo(_guardar_fondo_portada, ctx.id, contenido)
+
+
+def _guardar_fondo_portada(pid, contenido):
+    """La imagen, revisada por sus bytes y pasada a PNG de 2048 px como mucho."""
+    if not contenido or len(contenido) > 15 * 1024 * 1024:
+        raise ErrorApi(400, "el fondo tiene que pesar menos de 15 MB")
+    if not (contenido[:8] == b"\x89PNG\r\n\x1a\n" or contenido[:3] == b"\xff\xd8\xff"
+            or (contenido[:4] == b"RIFF" and contenido[8:12] == b"WEBP")):
+        raise ErrorApi(400, "esa imagen no es un JPG, PNG o WebP de verdad")
+    try:
+        from PIL import Image                               # noqa: PLC0415
+        with Image.open(io.BytesIO(contenido)) as im:
+            # una imagen enorme (40 Mpx) se rechaza antes de abrirla en memoria
+            if im.width * im.height > 40_000_000:
+                raise ErrorApi(400, "esa imagen es demasiado grande (más de 40 megapíxeles)")
+            im.draft("RGB", (2048, 2048))
+            im.thumbnail((2048, 2048))
+            im = im.convert("RGB")
+            salida = io.BytesIO()
+            im.save(salida, "PNG")
+    except ErrorApi:
+        raise
+    except Exception:                                       # noqa: BLE001
+        raise ErrorApi(400, "esa imagen no se puede leer")
+    datos = salida.getvalue()
+    P = _portadas()
+    nombre = P.nombre_fondo(pid, datos)
+    ruta = P.ruta_fondo(_raiz_publicar(), nombre)
+    os.makedirs(os.path.dirname(ruta), exist_ok=True)
+    temporal = f"{ruta}.{uuid.uuid4().hex[:6]}.tmp"
+    with open(temporal, "wb") as fh:
+        fh.write(datos)
+    os.replace(temporal, ruta)
+    return {"nombre": nombre}
+
+
+def _resumen_para_portada(info):
+    textos = [str(b.get("texto") or "") for b in info.get("guion") or [] if isinstance(b, dict)]
+    return " ".join(" ".join(textos).split())[:1500] or str(info.get("material") or "")[:1500]
+
+
+@app.post("/api/publicar/videos/{pid}/portada/proponer", status_code=202)
+def portada_proponer(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Claude propone tres portadas (suscripcion, sin coste aparte). -> {id};
+    el resultado, en GET. No guarda nada."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    base = _cuerpo(cuerpo).get("diseno") if isinstance(_cuerpo(cuerpo).get("diseno"), dict) else None
+    P = _portadas()
+    formato = P.normalizar(base)["formato"] if base else P.formato_de_video(info.get("formato"))
+    datos = _publicar()._leer_video(raiz_proyectos(), ctx.id)
+    palabras = []
+    for t in (datos.get("textos") or {}).values():
+        palabras += [str(h) for h in (t or {}).get("hashtags") or []][:5]
+    entrada = {"titulo": info.get("titulo") or info.get("nombre"), "palabras": palabras[:10],
+               "resumen": _resumen_para_portada(info), "negocio": info.get("cliente_nombre") or ""}
+    rid = uuid.uuid4().hex[:12]
+    with _LOCK_PORTADAS:
+        for viejo in list(_PROPUESTAS_PORTADA)[:-19]:
+            _PROPUESTAS_PORTADA.pop(viejo, None)
+        _PROPUESTAS_PORTADA[rid] = {"estado": "pensando", "proyecto": ctx.id}
+
+    def correr():
+        try:
+            propuestas = P.proponer(entrada, formato, base=base, cwd=RAIZ_ESTUDIO)
+            ficha = {"estado": "listo", "proyecto": ctx.id, "propuestas": propuestas}
+        except Exception as fallo:                          # noqa: BLE001
+            error = str(fallo)[:600]
+            if CLI_CLAUDE.es_pasajero(fallo):
+                error = ("La sesión de Claude se estaba renovando y no ha contestado. "
+                         f"Vuelve a pedirlo en un minuto.\n\n{error}")
+            ficha = {"estado": "error", "proyecto": ctx.id, "error": error}
+        with _LOCK_PORTADAS:
+            _PROPUESTAS_PORTADA[rid] = ficha
+
+    threading.Thread(target=correr, daemon=True, name=f"portada-{rid}").start()
+    return {"id": rid, "estado": "pensando"}
+
+
+@app.get("/api/publicar/videos/{pid}/portada/proponer/{rid}")
+def portada_propuestas(pid: str, rid: str, peticion: Request):
+    """Como van las portadas propuestas, y cuales son al terminar."""
+    ctx = _ctx_publicable(pid, peticion)
+    with _LOCK_PORTADAS:
+        ficha = _PROPUESTAS_PORTADA.get(rid)
+    if not ficha or ficha.get("proyecto") != ctx.id:
+        raise ErrorApi(404, "esa propuesta ya no está: vuelve a pedirla")
+    return ficha
+
+
+@_medido_en("publicar", "portada")
+@_con_turno
+def _correr_portada_ia(avisar, ctx, que, prompt, referencias, calidad, tamano):
+    """Dibuja el fondo (o la portada entera) con la IA. Se paga."""
+    avisar(0.05, "preparando la imagen")
+    imagen = PASOS_MODULOS.medios.motor("imagen_openai/imagen.py")
+    cache = os.path.join(_raiz_publicar(), "portadas", "refs")
+    os.makedirs(cache, exist_ok=True)
+    refs = [imagen.normalizar(r, cache) for r in referencias if r and os.path.isfile(r)][:2]
+    if not refs:
+        raise RuntimeError("no hay ninguna imagen del vídeo para tomar de referencia")
+    avisar(0.15, "dibujando con la IA (se paga)")
+    png, meta = imagen.generar(prompt, refs, quality=calidad, tamano=tamano)
+    P = _portadas()
+    nombre = P.nombre_fondo(ctx.id, png)
+    ruta = P.ruta_fondo(_raiz_publicar(), nombre)
+    os.makedirs(os.path.dirname(ruta), exist_ok=True)
+    temporal = f"{ruta}.{uuid.uuid4().hex[:6]}.tmp"
+    with open(temporal, "wb") as fh:
+        fh.write(png)
+    os.replace(temporal, ruta)
+    # LO PAGADO SE APUNTA EN EL DISENO GUARDADO enseguida: si se cerro el
+    # editor mientras se dibujaba, al volver a abrirlo sale (y en «Fondos ya
+    # hechos» siempre esta)
+    try:
+        guardado = P.leer(_raiz_publicar(), ctx.id)
+        if guardado:
+            guardado["fondo"] = dict(guardado["fondo"], tipo="ia", imagen=nombre)
+            if que == "portada":
+                guardado["modo"] = "ia"
+            P.guardar(_raiz_publicar(), ctx.id, guardado)
+    except Exception:                                       # noqa: BLE001
+        pass
+    ctx.bitacora.anotar("portada_ia", "publicar", {"que": que, "calidad": calidad,
+                                                   "coste_usd": meta.get("coste")})
+    return {"nombre": nombre, "que": que, "coste_usd": meta.get("coste")}
+
+
+@app.post("/api/publicar/videos/{pid}/portada/ia", status_code=202)
+def portada_ia(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Dibuja con la IA de imagenes (SE PAGA): {diseno, que: "fondo"|"portada",
+    calidad: low|medium|high, confirmado: true}. «fondo» hace solo la imagen de
+    detras, sin texto (el texto sigue en capas); «portada» la hace entera, con
+    el texto dentro. Sin `confirmado` devuelve el precio y no gasta nada."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    datos = _cuerpo(cuerpo)
+    diseno = _diseno_de_cuerpo(cuerpo)
+    que = "portada" if datos.get("que") == "portada" else "fondo"
+    calidad = datos.get("calidad") if datos.get("calidad") in ("low", "medium", "high") else "low"
+    precio = AJUSTES.precio_por_imagen(calidad)
+    if datos.get("confirmado") is not True:
+        return {"precio": precio, "que": que, "calidad": calidad}
+    P = _portadas()
+    entrada = {"titulo": info.get("titulo") or info.get("nombre"), "resumen": _resumen_para_portada(info)}
+    prompt = P.prompt_portada_ia(diseno, entrada) if que == "portada" else P.prompt_fondo_ia(diseno, entrada)
+    referencias = _rutas_fondo_portada(ctx, info, diseno)
+    trabajo_id = ctx.gestor.lanzar(f"portada_ia_{que}", _correr_portada_ia, ctx, que, prompt,
+                                   referencias, calidad, P.TAMANO_IA[diseno["formato"]])
+    _registrar_trabajo(trabajo_id, ctx.id)
+    return {"trabajo_id": trabajo_id, "precio": precio}
 # ===================================================== DESCARGAS DE IMÁGENES
 # Rama `imagenes-texto` (20-10-2026), pedido del dueño: bajarse las imágenes
 # que se han creado. Una a una no hace falta ruta: la diapositiva enlaza el

@@ -417,6 +417,13 @@ respecto a esa base. Lo que cambia en este video: {que_cambia}.
     que no cabe, que se vea que no cabe. Si escribes tu la 'descripcion' del sitio,
     pon las distancias que lo hacen verdad («the toilet bowl only 0.4 m from the
     glass front»); un baño holgado contradice el video entero.
+  - Si la voz enseña el objeto en OTRA POSICION (la puerta abierta chocando, el
+    cajon fuera, la cama plegada), eso es un estado propio con su cambio, aunque
+    sea el mismo objeto de la base: «the hinged glass door swung fully open
+    outward, its edge touching the toilet bowl». Cada estado se dibuja una sola
+    vez; lo que quede en "" se vera tal cual la base en todos sus planos, y
+    entonces la accion no puede mover el objeto (prueba real del 21-10: la
+    puerta abierta se inventaba distinta en cada plano).
   - Si un cambio tiene geometria (por donde abre una puerta, una marca en el
     suelo, una medida), dila respecto a lo fijo y coherente con "inicial": «blue
     tape on the floor tracing the quarter circle the hinged door sweeps, from

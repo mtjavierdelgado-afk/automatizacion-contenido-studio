@@ -60,6 +60,11 @@ def cadenas_js(ruta):
                     continue                     # un selector de CSS, no una frase
                 # lo de dentro de ${...} es código, no texto
                 cadena = re.sub(r"\$\{[^{}]*(\{[^{}]*\}[^{}]*)*\}", " ", cadena)
+                # LAS RUTAS NO SON TEXTO (21-10-2026): «/imagenes/zip» es el nombre
+                # de una ruta y va sin tilde. Un literal con otro literal dentro
+                # (`${...}/imagenes/zip${x ? `...` : ''}`) se partía y la ruta
+                # salía como si fuera una frase de la pantalla.
+                cadena = re.sub(r"(?<![\w])/[\w./{}$-]+", " ", cadena)
                 trozos = cadena.split()
                 if all(re.fullmatch(r"[a-z0-9_-]*", t) for t in trozos) and any("-" in t for t in trozos):
                     continue                     # clases de CSS («caja-info trabajo-laminas»)
@@ -86,6 +91,17 @@ def main():
              if PATRON.search(c)]
     ok(not malos, "app.py: ningún mensaje de error sin sus tildes"
        + "".join(f"\n        línea {n}: «{p}» en {c[:90]!r}" for n, c, p in malos[:15]))
+    # la prueba se prueba a sí misma: caza una frase sin tilde y deja en paz
+    # una ruta, también dentro de un literal con otro literal dentro
+    import tempfile                                           # noqa: PLC0415
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as f:
+        f.write("toast('No hay imagenes en este video');\n"
+                "const u = `${A}/imagenes/zip${p ? `?a=${p}` : ''}`;\n")
+    try:
+        vistos = [n for n, c in cadenas_js(f.name) if PATRON.search(c)]
+    finally:
+        os.remove(f.name)
+    ok(vistos == [1], f"caza una frase sin tilde y no confunde una ruta con texto ({vistos})")
     html = open(os.path.join(RAIZ, "web", "index.html"), encoding="utf-8").read()
     visibles = re.findall(r'title="([^"]*)"|>([^<>]{3,})<', html)
     malos = [t for par in visibles for t in par if t and PATRON.search(t)]

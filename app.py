@@ -43,6 +43,7 @@ import os
 import re
 import unicodedata
 import shutil
+import tempfile
 import sys
 import threading
 import time
@@ -8994,6 +8995,274 @@ def cambiar_montaje_de_plano(pid: str, sid: str, cuerpo: dict = Body(default=Non
     return dict(leer_montaje_de_planos(pid), cambiado=cambiado,
                 pendiente=(ctx.estado.estado_de("callouts") == "obsoleto"
                            or ctx.estado.estado_de("render") == "obsoleto"))
+
+
+# ------------------------------------------------ ELEMENTOS (19-10-2026)
+# El grafismo encima de cada plano, al ritmo de la voz (rama elementos-video;
+# ver pasos/elementos_video.py). Como el montaje por plano, van en la unidad de
+# callouts (`unidades["escena:S013"]["elementos"]`): cambiarlos deja obsoleto
+# ESE plano --capas y montaje, gratis-- y ni una imagen. Sin elementos la clave
+# no existe (regla 1). Proponerlos con Claude NO guarda nada: se guarda al
+# aplicarlos.
+
+_PROPUESTAS_ELEMENTOS = {}
+_LOCK_ELEMENTOS = threading.Lock()
+
+
+def _elementos_video():
+    return getattr(PASOS_MODULOS, "elementos_video", None) or __import__("elementos_video")
+
+
+def _escenas_del_video(ctx):
+    plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    return plan, [e for e in (plan.get("escenas") or []) if e.get("id")]
+
+
+def _es_vertical(ctx, plan):
+    try:
+        salida = PASOS_MODULOS.p7_callouts.salida_de(plan)
+        return int(salida[1]) > int(salida[0])
+    except Exception:                                       # noqa: BLE001
+        return str(plan.get("formato") or "") == "vertical"
+
+
+def _guardar_elementos(ctx, cambios):
+    """{sid: [elementos]} -> los planos que cambiaron. Una lista vacia QUITA la
+    clave; un bloque que ya existia (aunque quede vacio) se queda, por lo mismo
+    que en el montaje por plano: quitarlo moveria la firma sin que nadie lo
+    pidiera."""
+    EV = _elementos_video()
+    cambiados = []
+    with ctx.estado._lock:
+        params = copy.deepcopy(ctx.estado.params("callouts") or {})
+        unidades = params.get("unidades") if isinstance(params.get("unidades"), dict) else {}
+        for sid, lista in cambios.items():
+            uid = f"escena:{sid}"
+            limpios = EV.limpiar(lista)
+            bloque = dict(unidades.get(uid)) if isinstance(unidades.get(uid), dict) else {}
+            existia = isinstance(unidades.get(uid), dict) and EV.CLAVE not in unidades[uid]
+            antes = EV.limpiar(bloque.get(EV.CLAVE))
+            if antes == limpios and (bool(limpios) == (EV.CLAVE in bloque)):
+                continue
+            if limpios:
+                bloque[EV.CLAVE] = limpios
+            else:
+                bloque.pop(EV.CLAVE, None)
+            if bloque or existia:
+                unidades[uid] = bloque
+            else:
+                unidades.pop(uid, None)
+            cambiados.append(sid)
+        if cambiados:
+            if unidades:
+                params["unidades"] = unidades
+            else:
+                params.pop("unidades", None)
+            ctx.estado.set_params("callouts", params)
+    return cambiados
+
+
+def _comprobar_planos(ctx, sids):
+    plan, escenas = _escenas_del_video(ctx)
+    ids = {str(e["id"]) for e in escenas}
+    no = _planos_sin_montaje_propio(plan)
+    for sid in sids:
+        if sid not in ids:
+            raise ErrorApi(404, f"este vídeo no tiene el plano {sid}")
+    return plan, escenas, set(no)
+
+
+@app.get("/api/proyectos/{pid}/planos/elementos")
+def leer_elementos_de_planos(pid: str):
+    """{planos: {sid: [elementos]}, no_aplica, tipos, entradas, intensidades,
+    posiciones, iconos}: lo puesto en cada plano y lo que se puede poner."""
+    ctx = contexto(pid)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    EV = _elementos_video()
+    callouts = ctx.estado.params("callouts") or {}
+    planos = {}
+    for uid, bloque in (callouts.get("unidades") or {}).items():
+        if str(uid).startswith("escena:") and isinstance(bloque, dict) and bloque.get(EV.CLAVE):
+            planos[str(uid)[len("escena:"):]] = EV.limpiar(bloque.get(EV.CLAVE))
+    plan, escenas = _escenas_del_video(ctx)
+    return {"planos": planos, "no_aplica": _planos_sin_montaje_propio(plan),
+            "vertical": _es_vertical(ctx, plan),
+            "tipos": list(EV.TIPOS), "entradas": list(EV.ENTRADAS),
+            "intensidades": EV.INTENSIDADES, "iconos": list(_motor_grafismo().ICONOS),
+            "posiciones": EV.POSICIONES["vertical" if _es_vertical(ctx, plan) else "horizontal"]}
+
+
+@app.put("/api/proyectos/{pid}/planos/{sid}/elementos")
+def cambiar_elementos_de_plano(pid: str, sid: str, cuerpo: dict = Body(default=None)):
+    """{elementos: [...]} de UN plano (vacia, los quita). Deja pendientes ese
+    plano en las capas y el montaje; se aplica al montar (gratis)."""
+    ctx = contexto(pid)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    lista = _cuerpo(cuerpo).get("elementos")
+    if not isinstance(lista, list):
+        raise ErrorApi(400, "manda {elementos: [...]}")
+    _plan, _escenas, no = _comprobar_planos(ctx, [sid])
+    if sid in no and lista:
+        raise ErrorApi(400, "este plano es una cartela o una cabecera: ya lleva su texto encima")
+    if _trabajo_que_toca(ctx, ("callouts", "render")):
+        raise ErrorApi(409, "el vídeo se está montando ahora: cámbialo cuando termine")
+    cambiados = _guardar_elementos(ctx, {sid: lista})
+    if cambiados:
+        ctx.bitacora.anotar("elementos_de_plano", "callouts", {"plano": sid, "n": len(lista)})
+    return dict(leer_elementos_de_planos(pid), cambiado=bool(cambiados),
+                pendiente=(ctx.estado.estado_de("callouts") == "obsoleto"
+                           or ctx.estado.estado_de("render") == "obsoleto"))
+
+
+@app.post("/api/proyectos/{pid}/elementos/proponer", status_code=202)
+def proponer_elementos(pid: str, cuerpo: dict = Body(default=None)):
+    """Claude propone elementos para el video (o para {planos: [sid]}) con la
+    {intensidad} pedida. -> {id}; la propuesta, en GET. No guarda nada."""
+    ctx = contexto(pid)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    datos = _cuerpo(cuerpo)
+    EV = _elementos_video()
+    intensidad = datos.get("intensidad") if datos.get("intensidad") in EV.INTENSIDADES else "vivo"
+    plan, escenas = _escenas_del_video(ctx)
+    no = set(_planos_sin_montaje_propio(plan))
+    pedidos = [str(x) for x in (datos.get("planos") or [])] if isinstance(datos.get("planos"), list) else []
+    escenas = [e for e in escenas if str(e["id"]) not in no and (not pedidos or str(e["id"]) in pedidos)]
+    escenas = [e for e in escenas if str(e.get("narracion") or "").strip()]
+    if not escenas:
+        raise ErrorApi(400, "no hay planos con narración a los que ponerles elementos")
+    vertical = _es_vertical(ctx, plan)
+    rid = uuid.uuid4().hex[:12]
+    with _LOCK_ELEMENTOS:
+        for viejo in list(_PROPUESTAS_ELEMENTOS)[:-19]:
+            _PROPUESTAS_ELEMENTOS.pop(viejo, None)
+        _PROPUESTAS_ELEMENTOS[rid] = {"estado": "pensando", "proyecto": ctx.id, "intensidad": intensidad}
+
+    def correr():
+        try:
+            propuesta = EV.proponer(escenas, intensidad, vertical, cwd=RAIZ_ESTUDIO)
+            ficha = {"estado": "listo", "proyecto": ctx.id, "intensidad": intensidad,
+                     "propuesta": propuesta, "planos": len(escenas),
+                     "elementos": sum(len(v) for v in propuesta.values())}
+        except Exception as fallo:                          # noqa: BLE001
+            error = str(fallo)[:600]
+            if CLI_CLAUDE.es_pasajero(fallo):
+                error = ("La sesión de Claude se estaba renovando y no ha contestado. "
+                         f"Vuelve a pedirlo en un minuto.\n\n{error}")
+            ficha = {"estado": "error", "proyecto": ctx.id, "error": error}
+        with _LOCK_ELEMENTOS:
+            _PROPUESTAS_ELEMENTOS[rid] = ficha
+
+    threading.Thread(target=correr, daemon=True, name=f"elementos-{rid}").start()
+    return {"id": rid, "estado": "pensando", "planos": len(escenas)}
+
+
+@app.get("/api/proyectos/{pid}/elementos/proponer/{rid}")
+def leer_propuesta_elementos(pid: str, rid: str):
+    """Como va la propuesta de elementos, y cual es al terminar."""
+    with _LOCK_ELEMENTOS:
+        ficha = _PROPUESTAS_ELEMENTOS.get(rid)
+    if not ficha or ficha.get("proyecto") != pid:
+        raise ErrorApi(404, "esa propuesta ya no está: vuelve a pedirla")
+    return ficha
+
+
+@app.post("/api/proyectos/{pid}/elementos/aplicar")
+def aplicar_elementos(pid: str, cuerpo: dict = Body(default=None)):
+    """Pone los elementos de varios planos de una vez: {planos: {sid: [...]},
+    reemplazar?}. Sin `reemplazar`, se SUMAN a los que ya tenia cada plano.
+    Los planos que no se mandan no se tocan. Se aplica al montar (gratis)."""
+    ctx = contexto(pid)
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    datos = _cuerpo(cuerpo)
+    planos = datos.get("planos")
+    if not isinstance(planos, dict) or not planos:
+        raise ErrorApi(400, "manda {planos: {plano: [elementos]}}")
+    _plan, _escenas, no = _comprobar_planos(ctx, [str(s) for s in planos])
+    if _trabajo_que_toca(ctx, ("callouts", "render")):
+        raise ErrorApi(409, "el vídeo se está montando ahora: aplícalo cuando termine")
+    EV = _elementos_video()
+    previos = ((ctx.estado.params("callouts") or {}).get("unidades") or {})
+    cambios, recortados = {}, []
+    for sid, lista in planos.items():
+        sid = str(sid)
+        if sid in no or not isinstance(lista, list):
+            continue
+        ya = [] if datos.get("reemplazar") else EV.limpiar(((previos.get(f"escena:{sid}") or {})
+                                                            if isinstance(previos.get(f"escena:{sid}"), dict)
+                                                            else {}).get(EV.CLAVE))
+        juntos = ya + EV.limpiar(lista)
+        if len(juntos) > EV.MAX_POR_PLANO:
+            recortados.append(sid)
+        cambios[sid] = juntos[:EV.MAX_POR_PLANO]
+    cambiados = _guardar_elementos(ctx, cambios)
+    if cambiados:
+        ctx.bitacora.anotar("elementos_aplicados", "callouts", {"planos": cambiados})
+    # los que no cabian (mas de MAX_POR_PLANO) se dicen, no se tiran callando
+    return dict(leer_elementos_de_planos(pid), cambiados=cambiados, recortados=recortados,
+                pendiente=(ctx.estado.estado_de("callouts") == "obsoleto"
+                           or ctx.estado.estado_de("render") == "obsoleto"))
+
+
+@app.post("/api/proyectos/{pid}/planos/{sid}/elementos/vista")
+def vista_elementos_de_plano(pid: str, sid: str, cuerpo: dict = Body(default=None)):
+    """La imagen del plano con sus elementos encima, quietos (todos a la vez),
+    en pequeno: {elementos?} (sin ellos, los guardados). PNG."""
+    ctx = contexto(pid)
+    plan, escenas, _no = _comprobar_planos(ctx, [sid])
+    EV = _elementos_video()
+    lista = _cuerpo(cuerpo).get("elementos")
+    if not isinstance(lista, list):
+        lista = EV.de_plano(ctx.estado.params("callouts") or {}, f"escena:{sid}")
+    ruta = _imagenes_de_planos(ctx, plan).get(sid)
+    if not ruta or not os.path.isfile(ruta):
+        raise ErrorApi(404, "este plano todavía no tiene imagen")
+    salida = PASOS_MODULOS.p7_callouts.salida_de(plan)
+    W, H = int(salida[0]), int(salida[1])
+    try:
+        paleta = _paleta_del_video(ctx)
+    except Exception:                                       # noqa: BLE001
+        paleta = {}
+    G = _motor_grafismo()
+    svg = (f'<svg xmlns="http://www.w3.org/2000/svg" width="{W // 3}" height="{H // 3}" viewBox="0 0 {W} {H}">'
+           + G.imagen_cubre(G.data_uri(ruta), 0, 0, W, H) + EV.estatico(lista, (W, H), paleta) + "</svg>")
+    # UNA CARPETA TEMPORAL POR PETICION (fuera del proyecto): dos vistas a la
+    # vez no se borran la una a la otra
+    carpeta_tmp = tempfile.mkdtemp(prefix="vista_elementos_")
+    destino = os.path.join(carpeta_tmp, f"{sid}.png")
+    try:
+        PASOS_MODULOS.medios.rasterizar(svg, destino, W // 3, H // 3 + 160, transparente=False, espera_ms=1000)
+        from PIL import Image                               # noqa: PLC0415
+        with Image.open(destino) as im:
+            recorte = im.convert("RGB").crop((0, 0, W // 3, H // 3))
+            salida_png = io.BytesIO()
+            recorte.save(salida_png, "PNG")
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(500, f"no he podido pintar la vista: {fallo}")
+    finally:
+        shutil.rmtree(carpeta_tmp, ignore_errors=True)
+    return Response(salida_png.getvalue(), media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/proyectos/{pid}/planos/{sid}/elementos/nota-ia", status_code=201)
+def nota_texto_dentro_de_imagen(pid: str, sid: str, cuerpo: dict = Body(default=None)):
+    """LA OTRA OPCION (se paga al aplicarla): una nota de imagen que pide
+    volver a dibujar ESTE plano con {texto} DENTRO de la imagen. Va a la lista
+    de notas de siempre; nada se dibuja hasta que alguien la aplica."""
+    ctx = contexto(pid)
+    texto = " ".join(str(_cuerpo(cuerpo).get("texto") or "").split())
+    if not texto:
+        raise ErrorApi(400, "¿qué texto quieres dentro de la imagen?")
+    _plan, escenas, no = _comprobar_planos(ctx, [sid])
+    if sid in no:
+        raise ErrorApi(400, "este plano es una cartela o una cabecera: su texto ya va escrito")
+    escena = next(e for e in escenas if str(e["id"]) == sid)
+    return anadir_nota_repaso(pid, {"texto": _elementos_video().nota_texto_en_imagen(texto),
+                                    "t": float(escena.get("t_in") or 0.0), "plano": sid,
+                                    "pantalla": "imagenes", "ancla": escena.get("narracion") or ""})
 
 
 def _correr_rehacer_montaje(avisar, ctx, tareas, solo_montar=False):

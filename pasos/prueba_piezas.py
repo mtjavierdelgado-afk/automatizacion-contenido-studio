@@ -4699,6 +4699,65 @@ def prueba_ortografia_con_memoria():
         shutil.rmtree(carpeta, ignore_errors=True)
 
 
+def prueba_elementos_video():
+    """Rama elementos-video (19-10-2026): el grafismo encima de cada plano.
+    Sin elementos no se dibuja nada (regla 1); lo que viene de Claude se valida
+    (planos y palabras que no existen fuera); cada elemento salta en SU
+    palabra; y el SVG es legible con sus animaciones."""
+    print("\n[elementos del video: por plano y al ritmo de la voz]")
+    import xml.dom.minidom
+    import elementos_video as EV
+    escena = {"id": "S004", "t_in": 10.0, "t_out": 14.0,
+              "narracion": "Alquila hoy tres consolas por 99 soles",
+              "marcas": [[10.0, 10.4], [10.4, 10.8], [10.8, 11.1], [11.1, 11.6], [11.6, 11.8], [11.8, 12.2], [12.2, 12.7]]}
+    ok(EV.fragmento(escena, [], (1920, 1080), {}, 4.0) == "", "sin elementos, la capa no lleva nada nuevo")
+    ok(EV.de_plano({"unidades": {"escena:S004": {"montaje": {"movimiento": "vivo"}}}}, "escena:S004") == [],
+       "un plano con otras cosas pero sin elementos no tiene elementos")
+    limpios = EV.limpiar([{"tipo": "texto", "texto": "99 SOLES", "palabra": 5, "color": "acento",
+                           "entrada": "golpe", "dura": 99, "onload": "x"},
+                          {"tipo": "marco"}, {"tipo": "script"}] + [{"tipo": "icono"}] * 10)
+    ok(limpios[0]["palabra"] == 5 and limpios[0]["color"] == "acento" and limpios[0]["dura"] == 30.0
+       and "onload" not in limpios[0], "se limpian: papel de color, palabra y duración acotada")
+    ok(len(limpios) <= EV.MAX_POR_PLANO and not any(e["tipo"] == "marco" for e in limpios),
+       f"como mucho {EV.MAX_POR_PLANO} por plano y sin los que tapan (marco)")
+    desde, hasta = EV.momento({"palabra": 5}, escena, 4.0)
+    ok(abs(desde - 1.8) < 0.01, f"salta en el momento de SU palabra ({desde})")
+    ok(hasta <= 4.0 - 0.04, f"y se va antes de acabar el plano ({hasta})")
+    # un plano fusionado: las marcas no cuadran con las palabras -> no se fía de ellas
+    raro = dict(escena, narracion="Alquila tres consolas")
+    ok(EV.momento({"palabra": 5}, raro, 4.0)[0] < 1.8,
+       "si las marcas no cuadran con las palabras, no salta en una palabra que no es")
+    svg = EV.fragmento(escena, limpios, (1920, 1080), {"linea": "#ff9900"}, 4.0)
+    try:
+        xml.dom.minidom.parseString(f'<svg xmlns="http://www.w3.org/2000/svg">{svg}</svg>')
+        legible = True
+    except Exception:                                       # noqa: BLE001
+        legible = False
+    ok(legible and "animateTransform" in svg and 'begin="1.80s"' in svg,
+       "el SVG se lee, va animado y empieza en su palabra")
+    ok("#ff9900" in svg, "el papel «acento» toma el color del vídeo")
+    datos = {"planos": {"S004": [{"tipo": "texto", "texto": "99 SOLES", "palabra": 5, "posicion": "arriba"},
+                                 {"tipo": "flecha", "palabra": 5, "posicion": "centro"},
+                                 {"tipo": "icono", "palabra": 70, "icono": "dinero"},
+                                 {"tipo": "inventado", "palabra": 1}],
+                        "S999": [{"tipo": "texto", "texto": "x", "palabra": 0}]}}
+    propuesta = EV.leer_propuesta(datos, [escena], vertical=False)
+    ok(list(propuesta) == ["S004"], "un plano que no existe se descarta")
+    ok(len(propuesta["S004"]) == 1, "y dos en la misma palabra, una palabra que no existe o un tipo raro, también")
+    ok(propuesta["S004"][0]["y"] < 0.3, "«arriba» va arriba, lejos del subtítulo")
+    vertical = EV.colocar({"tipo": "texto"}, "derecha", vertical=True)
+    ok(vertical["x"] < 0.8, "en vertical, a la derecha no tanto: ahí están los botones de la red")
+    seguidos = EV.momentos([{"tipo": "texto", "palabra": 1}, {"tipo": "icono", "palabra": 4}], escena, 4.0)
+    ok(seguidos[0][1] <= seguidos[1][0], f"uno detrás de otro: el primero se va cuando salta el segundo ({seguidos})")
+    dos = EV.leer_propuesta({"planos": {"S004": [{"tipo": "texto", "texto": "A", "palabra": 0, "posicion": "arriba"},
+                                                 {"tipo": "texto", "texto": "B", "palabra": 3, "posicion": "arriba"}]}},
+                            [escena], vertical=True)["S004"]
+    ok((dos[0]["x"], dos[0]["y"]) != (dos[1]["x"], dos[1]["y"]), "dos en el mismo sitio: el segundo va al siguiente libre")
+    texto = EV.instruccion([escena], "dinamico")
+    ok('<p id="S004"' in texto and "5:99" in texto, "a Claude le llegan las palabras numeradas")
+    ok("«99 soles»" in EV.nota_texto_en_imagen("99 soles"), "la nota de la IA lleva el texto exacto")
+
+
 def prueba_revision_editorial():
     """Arreglos del 19-10 (5): la REVISION EDITORIAL del guion es un modo
     aparte (sintaxis y redaccion, propuestas sueltas {original, propuesta,
@@ -6056,6 +6115,7 @@ def main():
     prueba_familias_de_receta()
     prueba_musica_un_pelin_mas_alta()
     prueba_ortografia_por_tandas()
+    prueba_elementos_video()
     prueba_ortografia_con_memoria()
     prueba_microcorte_de_red()
     prueba_revision_imagenes_16_10()

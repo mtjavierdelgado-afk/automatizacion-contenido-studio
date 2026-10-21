@@ -6133,6 +6133,27 @@ def probar_que_lo_lento_no_para_el_servicio():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_elementos_del_video(cliente, pid):
+    """Rama elementos-video: las rutas que no llaman a Claude ni gastan."""
+    seccion("LOS ELEMENTOS DEL VIDEO")
+    r, d = cliente.get(f"/api/proyectos/{pid}/planos/elementos")
+    igual(r.status_code, 200, "GET planos/elementos responde 200")
+    ok(set(d.get("intensidades") or {}) == {"sobrio", "vivo", "dinamico"} and d.get("posiciones"),
+       "con las tres intensidades y las posiciones")
+    r, _d = cliente.put(f"/api/proyectos/{pid}/planos/S001/elementos", {"elementos": "no"})
+    igual(r.status_code, 400, "elementos que no son una lista: 400")
+    r, _d = cliente.put(f"/api/proyectos/{pid}/planos/NOEXISTE/elementos", {"elementos": []})
+    igual(r.status_code, 404, "un plano que no existe: 404")
+    r, _d = cliente.post(f"/api/proyectos/{pid}/elementos/aplicar", {"planos": {}})
+    igual(r.status_code, 400, "aplicar sin planos: 400")
+    r, _d = cliente.get(f"/api/proyectos/{pid}/elementos/proponer/noexiste")
+    igual(r.status_code, 404, "una propuesta que no existe: 404")
+    r, _d = cliente.post(f"/api/proyectos/{pid}/planos/NOEXISTE/elementos/nota-ia", {"texto": "hola"})
+    igual(r.status_code, 404, "la nota de texto dentro de un plano que no existe: 404")
+    r, _d = cliente.post(f"/api/proyectos/{pid}/planos/NOEXISTE/elementos/nota-ia", {"texto": ""})
+    ok(r.status_code in (400, 404), "y sin texto no se apunta nada")
+
+
 def probar_portadas(cliente, pid):
     """Rama `portadas`: las rutas que no gastan ni llaman a Claude."""
     seccion("LAS PORTADAS DISEÑADAS")
@@ -7348,6 +7369,7 @@ def main():
         probar_que_lo_lento_no_para_el_servicio()
         probar_ortografia_de_campos(cliente, pid)
         probar_portadas(cliente, pid)
+        probar_elementos_del_video(cliente, pid)
         probar_lo_de_v2h()
         probar_notas_19oct()
         probar_cambios_del_encargo_un_montaje()

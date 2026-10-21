@@ -3419,6 +3419,17 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .regla-estilo-propuesta { border: 1px dashed var(--acento-borde); border-radius: 8px;
   padding: 8px 10px; display: flex; flex-direction: column; gap: 4px; background: var(--hueco); }
 
+/* Los elementos de una imagen (rama elementos-video), en su diapositiva. */
+.elementos-plano { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--linea);
+  border-radius: 10px; padding: 8px 10px; margin-top: 8px; }
+.elemento-plano { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  border-top: 1px dashed var(--linea); padding-top: 6px; }
+.elemento-plano b { min-width: 120px; font-size: 13px; }
+.elemento-plano input[type="text"] { flex: 1; min-width: 120px; }
+.elemento-plano select { max-width: 210px; }
+.vista-elementos { max-width: 100%; max-height: 320px; border-radius: 8px; align-self: flex-start; }
+.elementos-video { border-top: 1px solid var(--linea); padding-top: 6px; margin-top: 2px; }
+
 /* ================================================================ PORTADAS
    El editor de portadas (rama `portadas`): una capa encima de Publicar con la
    vista a la izquierda y los mandos a la derecha; en el movil, una debajo de

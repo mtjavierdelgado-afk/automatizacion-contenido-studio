@@ -14660,16 +14660,132 @@ def guardar_reglas_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
 
 @app.get("/api/dominios")
 def listar_dominios():
-    """Los dominios de fabrica (el negocio de un estilo). -> {dominios, automatico}"""
+    """Los tipos de negocio: los de fábrica y los del dueño (Etapa Foto C).
+    -> {dominios, automatico, limites}"""
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
     return {"dominios": PASOS_MODULOS.dominios.listar(),
-            "automatico": "sin fijar: se detecta por el texto del vídeo, como siempre"}
+            "automatico": "sin fijar: se detecta por el texto del vídeo, como siempre",
+            "limites": {"tipos": PASOS_MODULOS.dominios.MAX_TIPOS,
+                        "palabras": PASOS_MODULOS.dominios.MAX_PALABRAS,
+                        "reglas": 20}}
+
+
+# ------------------------------------------------------- TIPOS DE NEGOCIO
+#
+# Etapa Foto C (21-10-2026): el dueño crea los tipos de SUS clientes en
+# Configuración (nombre, palabras, reglas de foto, lo que vigila el revisor).
+# Viven en `<proyectos>/_sistema/dominios.json` (`dominios.ruta_usuario`), fuera
+# del código. Los de fábrica no se cambian ni se borran. Crear o cambiar un tipo
+# no toca ningún vídeo que no lo tenga fijado en su estilo; uno que sí, recibe
+# lo nuevo en sus planos siguientes (y sus imágenes de foto ya hechas quedan
+# para rehacer, como al cambiar una regla del estilo: rehacerlas se paga).
+
+def _estilos_con_dominio(tid):
+    """[{id, nombre}] de los estilos guardados que tienen fijado ese tipo."""
+    presets = _presets()
+    salida = []
+    for resumen in (presets.listar().get("presets") or {}).get("canal") or []:
+        try:
+            ficha = presets.leer(resumen.get("id"))
+        except presets.ErrorPreset:
+            continue
+        estilo = (ficha.get("datos") or {}).get("estilo") or {}
+        if str(estilo.get("dominio") or "") == tid:
+            salida.append({"id": ficha.get("id"), "nombre": ficha.get("nombre") or ""})
+    return salida
+
+
+def _quitar_dominio_del_estilo(preset_id, tid):
+    presets = _presets()
+    with presets.lock_de(presets.FICHERO):
+        try:
+            ficha = presets.leer(preset_id)
+        except presets.ErrorPreset:
+            return
+        contenido = copy.deepcopy(ficha.get("datos") or {})
+        estilo = dict(contenido.get("estilo") or {})
+        if estilo.get("dominio") != tid:
+            return
+        estilo.pop("dominio", None)
+        contenido["estilo"] = estilo
+        try:
+            presets.guardar("canal", ficha.get("nombre") or "", contenido,
+                            nota=ficha.get("nota") or "",
+                            miniatura=ficha.get("miniatura") or "", pid=preset_id)
+        except presets.ErrorPreset:
+            pass
+
+
+def _tipo_publicado(tid):
+    for ficha in PASOS_MODULOS.dominios.listar():
+        if ficha["id"] == tid:
+            return ficha
+    raise ErrorApi(404, f"no hay ningún tipo de negocio «{tid}»")
+
+
+@app.post("/api/dominios", status_code=201)
+def crear_dominio(cuerpo: dict = Body(default=None)):
+    """Crea un tipo de negocio propio: {nombre, descripcion?, palabras?,
+    reglas?, revisor?: {equipo?, orientacion?}}. -> el tipo, como en la lista"""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    try:
+        nuevo = PASOS_MODULOS.dominios.guardar(_cuerpo(cuerpo))
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    anotar_global("dominio_creado", {"dominio": nuevo["id"]})
+    return _tipo_publicado(nuevo["id"])
+
+
+@app.put("/api/dominios/{tid}")
+def cambiar_dominio(tid: str, cuerpo: dict = Body(default=None)):
+    """Cambia un tipo propio (el cuerpo entero, como al crearlo). Los de
+    fábrica, 400. -> el tipo, más `estilos`: los que lo tienen fijado"""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    try:
+        PASOS_MODULOS.dominios.guardar(_cuerpo(cuerpo), tid)
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    anotar_global("dominio_cambiado", {"dominio": tid})
+    return dict(_tipo_publicado(tid), estilos=_estilos_con_dominio(tid))
+
+
+@app.delete("/api/dominios/{tid}")
+def borrar_dominio(tid: str, forzar: bool = False):
+    """Borra un tipo propio. Si algún estilo lo tiene fijado contesta 409 con
+    la lista, y con `?forzar=1` lo borra igual: esos estilos (y sus vídeos)
+    vuelven a automático."""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    if tid in PASOS_MODULOS.dominios.DE_FABRICA:
+        raise ErrorApi(400, "los tipos de fábrica no se borran")
+    if tid not in PASOS_MODULOS.dominios.de_usuario():
+        raise ErrorApi(404, f"no hay ningún tipo de negocio «{tid}»")
+    usan = _estilos_con_dominio(tid)
+    if usan and not forzar:
+        raise ErrorApi(409, "lo tienen fijado " + ", ".join(
+            f"«{e['nombre']}»" for e in usan) + ": si lo borras vuelven a automático")
+    try:
+        borrado = PASOS_MODULOS.dominios.borrar(tid)
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    if not borrado:
+        raise ErrorApi(404, f"no hay ningún tipo de negocio «{tid}»")
+    # LOS ESTILOS QUE LO TENÍAN vuelven a automático también en su ficha: un id
+    # que ya no existe se leería igual como automático, pero la pantalla lo
+    # enseñaría como un tipo perdido. Los vídeos ya creados no se tocan.
+    for usado in usan:
+        _quitar_dominio_del_estilo(usado["id"], tid)
+    anotar_global("dominio_borrado", {"dominio": tid, "estilos": [e["id"] for e in usan]})
+    return {"borrado": tid, "estilos": usan}
 
 
 @app.put("/api/presets-light/{preset_id}/dominio")
 def guardar_dominio_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
-    """Fija el negocio de un estilo: {dominio: "estadoplay" | "general" | null}.
+    """Fija el negocio de un estilo: {dominio: id de un tipo (de fábrica o del
+    dueño) | null}.
     null (o "") vuelve a la deteccion automatica. No toca ningun video: llega a
     los nuevos al crearlos y a los hechos con «Traer el estilo»."""
     if PASOS_MODULOS is None:

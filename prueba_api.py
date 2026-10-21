@@ -7193,6 +7193,77 @@ def probar_dominios():
         presets.FICHERO = antes
 
 
+def probar_tipos_de_negocio():
+    """Etapa Foto C (21-10-2026): crear, cambiar y borrar tipos de negocio, y
+    fijar uno propio en un estilo."""
+    seccion("TIPOS DE NEGOCIO: LOS DEL DUEÑO")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from PIL import Image as _Imagen                          # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_tipos_")
+    antes_env = os.environ.get("ESTUDIO_DOMINIOS")
+    os.environ["ESTUDIO_DOMINIOS"] = os.path.join(base, "_sistema", "dominios.json")
+    presets = servidor._presets()
+    antes = presets.FICHERO
+    try:
+        presets.FICHERO = os.path.join(base, "presets.json")
+        cuerpo = {"nombre": "Clínica dental", "palabras": "dentista, sonrisa",
+                  "reglas": [{"texto": "Batas blancas limpias", "palabras": ["bata"]}],
+                  "revisor": {"equipo": "el sillón no es de dentista"}}
+        codigo, t = _llamar(servidor.crear_dominio, cuerpo)
+        ok(codigo == 200 and t.get("id") == "clinica-dental" and not t.get("de_fabrica"),
+           f"POST /api/dominios lo crea ({codigo} {t.get('id')})")
+        ok(os.path.exists(os.environ["ESTUDIO_DOMINIOS"]), "en su fichero de _sistema")
+        igual(t.get("palabras"), ["dentista", "sonrisa"], "con sus palabras")
+        igual((t.get("revisor") or {}).get("equipo"), "el sillón no es de dentista",
+              "y lo que vigila el revisor")
+        codigo, d = _llamar(servidor.listar_dominios)
+        igual([x["id"] for x in d.get("dominios") or []],
+              ["general", "estadoplay", "clinica-dental"], "GET lo lista detrás de los de fábrica")
+        codigo, _m = _llamar(servidor.crear_dominio, cuerpo)
+        igual(codigo, 400, "otro con el mismo nombre, 400")
+        codigo, _m = _llamar(servidor.crear_dominio, {"nombre": ""})
+        igual(codigo, 400, "sin nombre, 400")
+        codigo, _m = _llamar(servidor.cambiar_dominio, "estadoplay", {"nombre": "x"})
+        igual(codigo, 400, "un tipo de fábrica no se cambia, 400")
+        codigo, _m = _llamar(servidor.borrar_dominio, "general")
+        igual(codigo, 400, "ni se borra, 400")
+        codigo, _m = _llamar(servidor.cambiar_dominio, "no-existe", {"nombre": "x"})
+        igual(codigo, 400, "cambiar uno que no existe, 400")
+
+        refs = []
+        for i in range(3):
+            ruta = os.path.join(base, f"r{i}.png")
+            _Imagen.new("RGB", (64, 40), (40 * i, 90, 160)).save(ruta)
+            refs.append(ruta)
+        ficha = presets.guardar("canal", "Dental", {"estilo": {"referencias": refs},
+                                                    "guion": {"instrucciones": "x"}})
+        pid = ficha["id"]
+        codigo, r = _llamar(servidor.guardar_dominio_estilo, pid, {"dominio": "clinica-dental"})
+        ok(codigo == 200 and r.get("dominio") == "clinica-dental",
+           f"un estilo puede fijar un tipo propio ({codigo} {r})")
+        codigo, t = _llamar(servidor.cambiar_dominio, "clinica-dental",
+                            dict(cuerpo, descripcion="sonrisas"))
+        ok(codigo == 200 and t.get("descripcion") == "sonrisas"
+           and [e["id"] for e in t.get("estilos") or []] == [pid],
+           "PUT lo cambia y dice qué estilos lo usan")
+        codigo, m = _llamar(servidor.borrar_dominio, "clinica-dental")
+        ok(codigo == 409 and "Dental" in str(m), f"borrarlo con un estilo que lo usa: 409 ({codigo})")
+        codigo, r = _llamar(servidor.borrar_dominio, "clinica-dental", True)
+        ok(codigo == 200 and r.get("borrado") == "clinica-dental", "con forzar, se borra")
+        estilo = presets.leer(pid)["datos"]["estilo"]
+        ok("dominio" not in estilo and len(estilo.get("referencias") or []) == 3,
+           "y el estilo que lo tenía vuelve a automático, con el resto intacto")
+        codigo, _m = _llamar(servidor.borrar_dominio, "clinica-dental")
+        igual(codigo, 404, "borrar uno que ya no está, 404")
+    finally:
+        presets.FICHERO = antes
+        if antes_env is None:
+            os.environ.pop("ESTUDIO_DOMINIOS", None)
+        else:
+            os.environ["ESTUDIO_DOMINIOS"] = antes_env
+
+
 def _video_montado_de_prueba(servidor, base, nombre):
     """Un vídeo con todos los pasos hechos y su MP4: «montado y al día»."""
     from nucleo import Estado, Proyecto                       # noqa: PLC0415
@@ -7422,6 +7493,7 @@ def main():
         probar_publicar_20oct(cliente, pid)
         probar_espacio_fijo()
         probar_dominios()
+        probar_tipos_de_negocio()
     finally:
         parar(proceso)
         if not argumentos.conservar:

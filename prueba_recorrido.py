@@ -5528,6 +5528,9 @@ def la_pantalla_no_salta(navegador, datos):
     if hay:
         pg.p.wait_for_timeout(600)
         pg.p.evaluate("() => document.querySelector('.estilo-del-video').scrollIntoView({block: 'center'})")
+        # en el paso Estilo «Su estilo» va arriba del todo: se baja un poco
+        # para que subir la pantalla se note
+        pg.p.evaluate("() => { const p = $('#panel'); if (p.scrollTop < 150) p.scrollTop = 200; }")
         pg.p.wait_for_timeout(500)
         antes = pg.p.evaluate(SCROLL)["panel"]
         pg.p.evaluate("() => [...document.querySelectorAll('.estilo-del-video button')]"

@@ -5380,7 +5380,11 @@ function cambiosDelEstiloCarril() {
       .then(() => {
         v.cambiosEstiloCargando = false;
         v.cambiosEstiloEn = Date.now();
-        if (APP.light.video.pid === pid) repintarCarril();
+        if (APP.light.video.pid !== pid) return;
+        // «Su estilo» en pantalla se quedaba en «comparando…»: esperaba esta
+        // misma respuesta y solo se repintaba el carril
+        if (document.querySelector('.estilo-del-video')) pintarLight();
+        else repintarCarril();
       });
   }
   return v.cambiosEstilo;
@@ -6151,6 +6155,7 @@ function pintarLightAhora() {
       else donde.appendChild(vistaElegidoLight());
     }
     else donde.appendChild(vistaGaleriaLight());
+    if (paso) pintarBloquesExtraDelPaso(donde, paso);
   } catch (e) {
     donde.appendChild(cajaError(`fallo pintando el modo light: ${e.message}`));
     console.error(e);
@@ -7519,6 +7524,97 @@ function bloqueEditadoLight(bloque) {
  * Duración y material. Todo lo demás —el estilo gráfico, el tono, la
  * voz, el ritmo, la calidad, el grafismo— lo trae el ESTILO, que es justamente
  * lo que un estilo es. Preguntarlo otra vez aquí sería no haberlo elegido. */
+/* =========================================== LOS BLOQUES DEL ENCARGO
+ *
+ * PUNTO DE ENGANCHE. Los dos Encargos (el de un vídeo nuevo y el de uno ya
+ * creado) son el MISMO paso y pintan ESTA lista, en este orden. Para añadir
+ * un bloque al Encargo, añade aquí su función: una línea
+ *     { id: 'mi-bloque', pinta: c => miBloque(c) },
+ * en el sitio en que deba salir. `c` trae { nuevo, v, e, ficha }: `nuevo` es
+ * true en un vídeo nuevo (`e` es el borrador de la página: no se guarda nada
+ * hasta «Generar el guion»); en uno creado, `e` es la copia del pedido que se
+ * guarda sola (`programarGuardadoEncargo` escucha `input`/`change` de todo el
+ * paso). `ficha` es el estilo. Devolver null es no pintar nada. Regla 1: un
+ * bloque nuevo NO escribe nada en `e` al pintarse. Los demás pasos tienen su
+ * propio enganche: `BLOQUES_EXTRA_DEL_PASO`, más abajo. */
+const BLOQUES_DEL_ENCARGO = [
+  { id: 'video', pinta: c => bloqueLight('El vídeo', 'cómo se llama y cuánto dura', ...campoDelNombreEncargo(c),
+    duracionLight(c.e, c.nuevo ? undefined : c.ficha),
+    selectorFormato(c.e.formato, valor => { c.e.formato = valor; if (!c.nuevo) programarGuardadoEncargo(); })) },
+  { id: 'lleva', pinta: c => c.nuevo
+    ? bloqueLight('Qué lleva este vídeo', 'lo que se produce y lo que no; apagar algo no cuesta nada',
+      llevaConAjustes(c.e, c.ficha))
+    : bloqueLight('Qué lleva este vídeo', 'cambiarlo rehace solo el montaje: ninguna imagen se vuelve a pagar',
+      bloqueLlevaDelVideo()) },
+  { id: 'material', pinta: c => bloqueLight('El material', 'de dónde salen los hechos que se van a contar',
+    materialLight(c.e)) },
+  /* LAS INDICACIONES, detrás del material y en su propio bloque: los hechos son
+     una cosa y CÓMO contarlos es otra. Cuando iban en la misma caja, lo escrito
+     detrás del material lo leía el documentalista y no el guionista: salía un
+     guion que no hacía caso a algo que nadie le había dicho. */
+  { id: 'indicaciones', pinta: c => bloqueLight('Las indicaciones', 'cómo quieres que se cuente (opcional)',
+    campoArea('', c.e.indicaciones, valor => { c.e.indicaciones = valor; },
+      'céntrate en el mecanismo, no en las personas; no fuerces una historia '
+      + 'de personaje', c.nuevo ? undefined : 'encargo-indicaciones')) },
+  { id: 'palabra-clave', pinta: c => (c.nuevo ? null : pistaPalabraClaveEncargo(c.v)) },
+  /* LAS LLAMADAS A LA ACCIÓN son de ESTE vídeo y se deciden aquí. No viajan en
+     el estilo a propósito: si viajaran, elegir un estilo pisaría lo que acabas
+     de escribir para este vídeo. */
+  { id: 'cta', pinta: c => bloqueLight('Las llamadas a la acción', 'cuándo se presenta y qué le pides a quien lo ve',
+    bloqueCTA(c.e.cta, c.nuevo ? { repintar: pintarLight }
+      : { alCambiar: programarGuardadoEncargo, repintar: pintarLight })) },
+  // el espacio fijo (rama tipo-de-relato): sus funciones, sin tocarlas por dentro
+  { id: 'espacio-fijo', pinta: c => (c.nuevo
+    ? bloqueLight('El espacio fijo', 'si todo el vídeo pasa en un mismo sitio (opcional)', bloqueEspacioFijoLight(c.e))
+    : bloqueLight('El espacio fijo', 'todo el vídeo en un mismo sitio: se aplica como corrección',
+      bloqueEspacioFijoDelVideo())) },
+];
+
+/* PUNTO DE ENGANCHE DE CADA PASO del carril. Para añadir un bloque al final
+ * de un paso (debajo de lo suyo y encima de la barra de acción), añade aquí
+ * su función a la lista de ese paso: `c => nodo` (o null para no pintar
+ * nada), con `c = { paso, v }`. En el Encargo, mejor en
+ * `BLOQUES_DEL_ENCARGO`, que deja elegir el sitio entre los demás bloques.
+ * Regla 1: pintar no escribe nada. */
+const BLOQUES_EXTRA_DEL_PASO = {
+  estilo: [],
+  encargo: [],
+  guion: [],
+  voz: [],
+  imagenes: [],
+  video: [],
+};
+
+function pintarBloquesExtraDelPaso(donde, paso) {
+  (BLOQUES_EXTRA_DEL_PASO[paso] || []).forEach(pinta => {
+    const nodo = pinta({ paso, v: APP.light.video });
+    if (nodo) donde.appendChild(nodo);
+  });
+}
+
+function pintarBloquesDelEncargo(caja, c) {
+  BLOQUES_DEL_ENCARGO.forEach(b => {
+    const nodo = b.pinta(c);
+    if (nodo) { if (nodo.dataset) nodo.dataset.bloque = b.id; caja.appendChild(nodo); }
+  });
+}
+
+/* El nombre: en un vídeo creado lleva su `data-foco` (el foco sobrevive al
+   repintado) y dice que cambiarlo no regenera nada. */
+function campoDelNombreEncargo(c) {
+  if (c.nuevo) {
+    return [campoTexto('Nombre', c.e.nombre, v => { c.e.nombre = v; },
+      { pista: 'La crisis del agua en el sur', ayuda: 'Es el nombre del proyecto y '
+        + 'lo que el redactor lee como «de qué va este vídeo».' })];
+  }
+  const nombre = campoTexto('Nombre', c.e.nombre, valor => { c.e.nombre = valor; },
+    { pista: 'La crisis del agua en el sur',
+      ayuda: 'Es la etiqueta del vídeo en la lista. Cambiarla no regenera nada.' });
+  const entrada = nombre.querySelector('input');
+  if (entrada) entrada.dataset.foco = 'encargo-nombre';
+  return [nombre];
+}
+
 function vistaElegidoLight() {
   const ficha = fichaLight(APP.light.abierto) || estiloElegido();
   const e = encargoVideoLight();
@@ -7556,44 +7652,9 @@ function vistaElegidoLight() {
         }, 'Empezar otro'))));
   }
 
-  caja.appendChild(bloqueLight('El vídeo', 'cómo se llama y cuánto dura',
-    campoTexto('Nombre', e.nombre,
-      v => { e.nombre = v; },
-      { pista: 'La crisis del agua en el sur', ayuda: 'Es el nombre del proyecto y '
-        + 'lo que el redactor lee como «de qué va este vídeo».' }),
-    duracionLight(e),
-    selectorFormato(e.formato, v => { e.formato = v; })));
-
   if (!e.lleva) e.lleva = { voz: true, subtitulos: true, musica: true, efectos: true };
-  caja.appendChild(bloqueLight('Qué lleva este vídeo',
-    'lo que se produce y lo que no; apagar algo no cuesta nada',
-    llevaConAjustes(e, ficha)));
-
-  caja.appendChild(bloqueLight('El material',
-    'de dónde salen los hechos que se van a contar',
-    materialLight(e)));
-
-  /* LAS INDICACIONES, detrás del material y en su propio bloque: los hechos son
-     una cosa y CÓMO contarlos es otra. Cuando iban en la misma caja, lo escrito
-     detrás del material lo leía el documentalista y no el guionista: salía un
-     guion que no hacía caso a algo que nadie le había dicho. */
-  caja.appendChild(bloqueLight('Las indicaciones',
-    'cómo quieres que se cuente (opcional)',
-    campoArea('', e.indicaciones, v => { e.indicaciones = v; },
-      'céntrate en el mecanismo, no en las personas; no fuerces una historia '
-      + 'de personaje')));
-
-  /* LAS LLAMADAS A LA ACCIÓN son de ESTE vídeo y se deciden aquí. No viajan en
-     el estilo a propósito: si viajaran, elegir un estilo pisaría lo que acabas
-     de escribir para este vídeo. */
   if (!e.cta) e.cta = ctaPorDefecto();
-  caja.appendChild(bloqueLight('Las llamadas a la acción',
-    'cuándo se presenta y qué le pides a quien lo ve',
-    bloqueCTA(e.cta, { repintar: pintarLight })));
-
-  caja.appendChild(bloqueLight('El espacio fijo',
-    'si todo el vídeo pasa en un mismo sitio (opcional)',
-    bloqueEspacioFijoLight(e)));
+  pintarBloquesDelEncargo(caja, { nuevo: true, v: APP.light.video, e, ficha });
 
   ponerBarra(() => barraDelEncargoNuevo(ficha));
   return caja;
@@ -8336,35 +8397,7 @@ function vistaEncargoVideoLight() {
   caja.addEventListener('input', programarGuardadoEncargo);
   caja.addEventListener('change', programarGuardadoEncargo);
 
-  const nombre = campoTexto('Nombre', e.nombre, valor => { e.nombre = valor; },
-    { pista: 'La crisis del agua en el sur',
-      ayuda: 'Es la etiqueta del vídeo en la lista. Cambiarla no regenera nada.' });
-  const entradaNombre = nombre.querySelector('input');
-  if (entradaNombre) entradaNombre.dataset.foco = 'encargo-nombre';
-  caja.appendChild(bloqueLight('El vídeo', 'cómo se llama y cuánto dura',
-    nombre,
-    duracionLight(e, estilo),
-    selectorFormato(e.formato, valor => { e.formato = valor; programarGuardadoEncargo(); })));
-
-  caja.appendChild(bloqueLight('Qué lleva este vídeo',
-    'cambiarlo rehace solo el montaje: ninguna imagen se vuelve a pagar',
-    bloqueLlevaDelVideo()));
-
-  caja.appendChild(bloqueLight('El material',
-    'de dónde salen los hechos que se van a contar',
-    materialLight(e)));
-
-  caja.appendChild(bloqueLight('Las indicaciones',
-    'cómo quieres que se cuente (opcional)',
-    campoArea('', e.indicaciones, valor => { e.indicaciones = valor; },
-      'céntrate en el mecanismo, no en las personas; no fuerces una historia '
-      + 'de personaje', 'encargo-indicaciones')));
-
-  caja.appendChild(pistaPalabraClaveEncargo(v));
-  caja.appendChild(bloqueLight('Las llamadas a la acción',
-    'cuándo se presenta y qué le pides a quien lo ve',
-    bloqueCTA(e.cta, { alCambiar: programarGuardadoEncargo, repintar: pintarLight })));
-  caja.appendChild(bloqueLight('El espacio fijo', 'todo el vídeo en un mismo sitio: se aplica como corrección', bloqueEspacioFijoDelVideo()));
+  pintarBloquesDelEncargo(caja, { nuevo: false, v, e, ficha: estilo });
 
   ponerBarra(pieDeEncargo);
   return caja;
@@ -12052,12 +12085,21 @@ function barraDeLasImagenes(mandos) {
   refrescarPlanLight('video');
   if (quedaTandaLight('video') === true) {
     const n = obsoletasConocidas();
-    return barraDeAccion(Object.assign({},
-      accionDeLasImagenes(), { encima: mandos,
+    const accion = accionDeLasImagenes();
+    /* MONTAR SIN PONER AL DÍA sigue a mano (gratis), como estaba en los mandos:
+       al lado, en secundario. */
+    const soloMontar = botonRenderizarLight();
+    if (soloMontar) {
+      const b = soloMontar.tagName === 'BUTTON' ? soloMontar : soloMontar.querySelector('button');
+      if (b) b.className = 'secundario-barra';
+      accion.botones = [soloMontar, ...(accion.botones || [])];
+    }
+    return barraDeAccion(Object.assign({}, accion, { encima: mandos,
         estado: { e: 'aviso', texto: n ? `${n} ${n === 1 ? 'imagen obsoleta' : 'imágenes obsoletas'}` : 'Imágenes por poner al día' } }));
   }
   const montar = botonRenderizarLight();
   if (montar) {
+    refrescarPlanLight('render');
     return barraDeAccion({ encima: mandos,
       estado: { e: hayMp4Light() ? 'aviso' : 'hecho', texto: hayMp4Light() ? 'El vídeo es de antes de estas imágenes' : 'Imágenes al día' },
       plan: textoDelPlan('render'), botones: [montar] });

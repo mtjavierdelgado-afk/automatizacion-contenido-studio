@@ -4266,6 +4266,10 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
  * La barra de pasos de abajo ya no existe: su alto pasa a cero, y con él lo
  * que se colocaba encima (la burbuja del asistente, las barras de antes). */
 :root { --alto-nav: 0px; --ancho-carril: 258px; }
+/* Sin el ancla de scroll del navegador: al repintar, el sitio lo devuelve
+   `devolverScroll` (LA PANTALLA NO SALTA). Con las dos, un estado intermedio
+   del repintado movía el scroll y la memoria se quedaba con esa altura. */
+#panel { overflow-anchor: none; }
 
 .contenido.light.con-carril {
   max-width: 1500px; display: grid; align-items: start;

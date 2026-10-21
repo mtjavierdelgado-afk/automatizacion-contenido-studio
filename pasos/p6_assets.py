@@ -66,6 +66,7 @@ from concurrent.futures import ThreadPoolExecutor
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import cartelas  # noqa: E402
+import catalogo_visual  # noqa: E402
 import corrector  # noqa: E402
 import reglas_estilo  # noqa: E402
 import cta  # noqa: E402
@@ -2459,6 +2460,22 @@ def frase_de_referencia(indice, ref, modo="ilustracion"):
     foto = modo == "foto"
     if ref["papel"] in ("estilo", "lamina"):
         return None
+    if ref["papel"] == "espacio":
+        # LA IMAGEN DEL ESPACIO FIJO (rama espacio-fijo, 20-10-2026): el sitio
+        # donde pasa todo el video, subido por quien lo encarga. Solo la llevan
+        # los planos de ese sitio (`_referencia_del_espacio`).
+        return (f"Reference image {indice} shows THE PLACE where this shot "
+                f"happens ('{ref.get('nombre') or 'the fixed set'}'): the one "
+                f"fixed location of this whole film. Use it for the PLACE only: "
+                f"the same architecture and layout, the same walls, floor and "
+                f"fixed furniture, the same materials and colours, so that the "
+                f"viewer recognises it in every shot. The camera may stand "
+                f"anywhere in it and frame any part of it. Never copy its people, "
+                f"its exact framing or its light"
+                + (", and keep the photographic style of the style references."
+                   if foto else
+                   ", and draw it in the art style of the style references, "
+                   "never as a photograph."))
     if ref["papel"] == "reparto" and ref.get("de_nota") and foto:
         lineas.append(f"Reference image {indice} is the cast sheet for "
                       f"'{ref['nombre']}', a person the reviewer's note at "
@@ -3844,6 +3861,8 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                           if r.get("papel") == "reparto"}
                     referencias = (
                         list(_referencias_estilo(p, dirs["cache"], escena_final))
+                        + _referencia_del_espacio(escena_final, p, dirs,
+                                                  dirs["cache"])
                         + _hojas_del_plano(escena_final, plan, dirs,
                                            dirs["cache"], ya)
                         + elegidas)
@@ -4452,6 +4471,7 @@ def _referencias_escena(escena, plan, dirs, p, cache, hechas, anteriores=None,
     """
     imagen = medios.motor("imagen_openai/imagen.py")
     referencias = list(_referencias_estilo(p, cache, escena))
+    referencias += _referencia_del_espacio(escena, p, dirs, cache)
     referencias += _hojas_del_plano(escena, plan, dirs, cache)
     for real in _referencias_reales(escena, p):
         referencias.append({"papel": "parecido", "ruta": imagen.normalizar(real["ruta"], cache),
@@ -4853,6 +4873,8 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     }
     for ruta in dirs.values():
         os.makedirs(ruta, exist_ok=True)
+    # la imagen del espacio fijo, si la hay (no es una carpeta: va despues)
+    dirs["espacio_fijo"] = ruta_imagen_del_espacio(proyecto, p)
     catalogo = _catalogo_de(p, proyecto)
     _exigir_catalogo(catalogo)
 
@@ -5219,3 +5241,52 @@ def propagar_dependencias(estado, dependencias=None, paso="assets", del_propio_p
     # hoja quedaba «al dia» con la hoja vieja (revision de arreglos-v2h, 18-10)
     estado.actualizar_params(paso, {"unidades": cambios}, del_propio_paso=del_propio_paso)
     return sorted(u for u in cambios if estado.firma_unidad(paso, u) != antes[u])
+
+
+# ------------------------------------------------------------ espacio fijo
+#
+# Rama espacio-fijo (20-10-2026). Un video que pasa entero en un mismo sitio
+# (`params.espacio_fijo`, ver `catalogo_visual.normalizar_espacio_fijo`) puede
+# traer una IMAGEN del sitio. Va adjunta a los planos de su sitio PRINCIPAL y a
+# ningun otro: un plano de un sitio secundario con la foto del local se
+# dibujaria dentro del local. Sin imagen, o sin espacio fijo, no se adjunta nada
+# y el prompt y la firma de cada imagen son los de siempre (regla 1).
+
+def ruta_imagen_del_espacio(proyecto, params):
+    """La ruta absoluta de la imagen del espacio fijo, o None si no hay."""
+    relativa = ((params or {}).get("espacio_fijo") or {}).get("imagen")
+    if not relativa or proyecto is None:
+        return None
+    try:
+        ruta = proyecto.ruta(*str(relativa).split("/"))
+    except ValueError:
+        return None
+    return ruta if os.path.exists(ruta) else None
+
+
+def _referencia_del_espacio(escena, p, dirs, cache):
+    """[la referencia del espacio] si el plano es de su sitio principal, o []."""
+    ruta = (dirs or {}).get("espacio_fijo")
+    espacio = p.get("espacio_fijo") or {}
+    if not ruta or not espacio or not escena.get("set"):
+        return []
+    principal, _ = catalogo_visual.ids_del_espacio(espacio)
+    if escena["set"] != principal:
+        return []
+    imagen = medios.motor("imagen_openai/imagen.py")
+    return [{"papel": "espacio", "nombre": espacio.get("sitio") or principal,
+             "ruta": imagen.normalizar(ruta, cache)}]
+
+
+def sitios_previstos(proyecto, params, escenas):
+    """El sitio que el catalogo de `params` daria a cada plano. -> [set|None]
+
+    Sin generar ni cortar nada: los tramos del catalogo sobre los planos que ya
+    hay, con el mismo reparto que la planificacion (`_beats_por_escena`). Es lo
+    que permite decir QUE planos cambian al aplicar un espacio fijo antes de
+    rehacer ninguno."""
+    p = _con_defectos(params)
+    catalogo = _catalogo_de(p, proyecto)
+    _, _, _, meta = _palabras_narracion(proyecto, p)
+    _tramos_de_beats(catalogo, meta)
+    return [(beat or {}).get("set") for beat in _beats_por_escena(escenas, catalogo)]

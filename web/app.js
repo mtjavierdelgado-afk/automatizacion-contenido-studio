@@ -1230,7 +1230,20 @@ async function cancelar(paso) {
 
 function repintarTrasCancelar(paso) {
   if (paso === CLAVE_LIGHT && APP.light.vista === 'generando') pintarLight();
+  // el «Parar» del vídeo no es una pieza viva: sin repintar seguía encendido
+  else if (paso === CLAVE_VIDEO_LIGHT && MODULOS.actual === 'crear') pintarLight();
   else pintarTrabajo(paso);
+}
+
+/* EL «PARAR» DEL VÍDEO (guion, voz, imágenes y montaje), con «Cancelando…» y
+   apagado desde el clic: el de la tanda del estilo ya lo hacía, este no, y un
+   montaje que tardaba en pararse se leía como que no había hecho caso (19-10). */
+function botonPararVideo() {
+  const t = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
+  return h('button', {
+    clase: 'mini peligro', disabled: !!t.cancelando,
+    onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
+  }, t.cancelando ? 'Cancelando…' : 'Parar');
 }
 
 /* En qué pestaña vive la barra de un trabajo. Los que no son un paso del grafo
@@ -1909,7 +1922,7 @@ async function irA(pestana, sinHistorial) {
     history.pushState({ pestana }, '', `#${pestana}`);
   }
   pintarPestanas();
-  $('#panel').scrollTop = 0;
+  subirArriba('panel');
   await refrescarPestana(pestana);
 }
 
@@ -2469,6 +2482,7 @@ function pintarConfig() {
     return;
   }
   if (SISTEMA.notas === null && !SISTEMA.pedido) { SISTEMA.pedido = true; cargarSistema(); }
+  caja.appendChild(seccionPaleta());  // la paleta (rama diseno-crearia)
   caja.appendChild(seccionManual());
   caja.appendChild(seccionNovedades());
   caja.appendChild(seccionNotas());
@@ -3402,7 +3416,7 @@ function lupa(url, detalle) {
   const capa = h('div', {
     id: 'lupa',
     onclick: ev => { if (!detalle || ev.target === capa) capa.remove(); },
-  }, h('img', { src: url }),
+  }, botonCerrarCapa(() => capa.remove()), h('img', { src: url }),
     // La ficha va DENTRO de la lupa y no debajo de la miniatura: en la
     // cuadrícula lo que se compara es el encuadre, y una tabla por miniatura
     // convierte seis vistas en una pared de texto que nadie lee.
@@ -4603,13 +4617,35 @@ function llenarFiltroBitacora() {
 
 /* ------------------------------------------------------------------ arranque */
 
-/* ---------------------------------------------------------- el tema y el pie
+/* ---------------------------------------------------- las paletas y el pie
  *
- * EL TEMA: oscuro de fabrica, claro si se elige. Solo cambia un atributo en
- * <html>; toda la paleta vive en variables de `estilo.css`, asi que no hay ni
- * una regla que repetir. Se recuerda en el navegador (es de quien mira, no del
- * servidor) y el <head> lo aplica antes de pintar para que no parpadee.
+ * CUATRO PALETAS (rama `diseno-crearia`, 19-10-2026): Nocturno (la de
+ * fabrica), Aurora y Brasa, oscuras, y Día, la clara. Se eligen en
+ * Configuración → Aspecto; toda la paleta vive en variables de `estilo.css`,
+ * asi que elegir una es poner un atributo en <html>. Se recuerda en el
+ * navegador (es de quien mira, no del servidor) y el <head> la aplica antes
+ * de pintar para que no parpadee.
+ *
+ * EL CONMUTADOR DE LA CABECERA SIGUE: claro u oscuro. Día ES el tema claro de
+ * siempre (`data-tema="claro"`), y «oscuro» vuelve a la ultima oscura que se
+ * eligió. Así no hay dos ajustes que se contradigan: hay uno (la paleta), y
+ * el botón es un atajo entre Día y tu oscura.
  */
+const PALETAS = [
+  { id: 'nocturno', nombre: 'Nocturno', tipo: 'oscura · la de siempre',
+    idea: 'Violeta creativo con coral para lo que pide atención.' },
+  { id: 'aurora', nombre: 'Aurora', tipo: 'oscura',
+    idea: 'Turquesa y rosa sobre azul petróleo: fresca, de automatización.' },
+  { id: 'brasa', nombre: 'Brasa', tipo: 'oscura',
+    idea: 'Ámbar y frambuesa sobre marrón casi negro: cálida, de productora.' },
+  { id: 'dia', nombre: 'Día', tipo: 'clara',
+    idea: 'La versión clara de Nocturno: el mismo violeta, más profundo.' },
+];
+
+const CLASE_MUESTRA = {
+  nocturno: 'muestra-nocturno', aurora: 'muestra-aurora', brasa: 'muestra-brasa', dia: 'muestra-dia',
+};
+
 const ICONO_TEMA = {
   oscuro: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>',
   claro: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
@@ -4619,37 +4655,142 @@ function temaActual() {
   return document.documentElement.getAttribute('data-tema') === 'claro' ? 'claro' : 'oscuro';
 }
 
-function aplicarTema(tema) {
-  const claro = tema === 'claro';
-  if (claro) document.documentElement.setAttribute('data-tema', 'claro');
-  else document.documentElement.removeAttribute('data-tema');
-  try { localStorage.setItem('tema', claro ? 'claro' : 'oscuro'); } catch (e) { /* sin almacen: dura la sesion */ }
+function paletaActual() {
+  if (temaActual() === 'claro') return 'dia';
+  const p = document.documentElement.getAttribute('data-paleta');
+  return PALETAS.some(x => x.id === p) ? p : 'nocturno';
+}
+
+function leerAlmacen(clave) {
+  try { return localStorage.getItem(clave); } catch (e) { return null; }
+}
+
+function guardarEnAlmacen(clave, valor) {
+  try {
+    if (valor === null) localStorage.removeItem(clave);
+    else localStorage.setItem(clave, valor);
+  } catch (e) { /* sin almacén (ventana privada): dura lo que la página */ }
+}
+
+function aplicarPaleta(id) {
+  const paleta = PALETAS.some(x => x.id === id) ? id : 'nocturno';
+  const raiz = document.documentElement;
+  if (paleta === 'dia') raiz.setAttribute('data-tema', 'claro');
+  else raiz.removeAttribute('data-tema');
+  if (paleta === 'aurora' || paleta === 'brasa') raiz.setAttribute('data-paleta', paleta);
+  else raiz.removeAttribute('data-paleta');
+  guardarEnAlmacen('paleta', paleta);
+  // `tema` se sigue escribiendo: lo lee una pestaña abierta con la versión de antes
+  guardarEnAlmacen('tema', paleta === 'dia' ? 'claro' : 'oscuro');
+  if (paleta !== 'dia') guardarEnAlmacen('paleta-oscura', paleta);
   const boton = document.getElementById('btn-tema');
   if (boton) {
     // el icono es el del tema AL QUE SE VA, como en cualquier conmutador
+    const claro = paleta === 'dia';
     boton.innerHTML = ICONO_TEMA[claro ? 'oscuro' : 'claro'];
-    boton.title = claro ? 'Pasar a modo oscuro' : 'Pasar a modo claro';
+    boton.title = claro ? 'Pasar a tu paleta oscura' : 'Pasar a la paleta clara (Día)';
   }
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', getComputedStyle(document.documentElement)
-    .getPropertyValue('--panel').trim() || '#14122a');
+  if (meta) meta.setAttribute('content', getComputedStyle(raiz).getPropertyValue('--panel').trim() || meta.getAttribute('content'));
+  document.querySelectorAll('.eleccion-paleta').forEach(b => {
+    b.classList.toggle('activa', b.dataset.paleta === paleta);
+    b.setAttribute('aria-pressed', b.dataset.paleta === paleta ? 'true' : 'false');
+  });
 }
 
-/* EL PIE DEL SISTEMA. Va al final de cada pantalla, dentro del panel que
-   rueda: anclado abajo se comeria una franja en el movil, donde ya estan la
-   barra de pasos y la de mandos. */
-const PIE_SISTEMA = 'Todos los derechos reservados y creación pertenecen a '
-  + 'Agencia Redes Botánica · Octubre 2026 · V2.0';
+/* El conmutador de la cabecera: Día o tu última oscura. */
+function aplicarTema(tema) {
+  const oscura = leerAlmacen('paleta-oscura');
+  aplicarPaleta(tema === 'claro' ? 'dia'
+    : (PALETAS.some(x => x.id === oscura && x.id !== 'dia') ? oscura : 'nocturno'));
+}
+
+/* Configuración → Aspecto: las cuatro, con su muestra. Es del navegador: no
+   toca ningún vídeo ni ningún ajuste del servidor. */
+function seccionPaleta() {
+  const actual = paletaActual();
+  return h('section', { clase: 'bloque-config seccion-paleta' },
+    h('h3', {}, 'Aspecto: la paleta'),
+    h('div', { clase: 'pista' },
+      'Cambia solo los colores de la pantalla. Se recuerda en este navegador. '
+      + 'El botón de sol y luna de arriba pasa de Día a tu paleta oscura.'),
+    h('div', { clase: 'paletas' }, PALETAS.map(p => h('button', {
+      type: 'button', clase: `eleccion-paleta${p.id === actual ? ' activa' : ''}`,
+      datos: { paleta: p.id }, 'aria-pressed': p.id === actual ? 'true' : 'false',
+      title: `${p.nombre}: ${p.idea}`,
+      onclick: () => aplicarPaleta(p.id),
+    },
+    h('span', { clase: `muestra-paleta ${CLASE_MUESTRA[p.id]}`, 'aria-hidden': 'true' },
+      h('i', { clase: 'm1' }), h('i', { clase: 'm2' }), h('i', { clase: 'm3' }), h('i', { clase: 'm4' })),
+    h('b', {}, p.nombre),
+    h('span', { clase: 'meta' }, p.tipo)))));
+}
+
+/* EL PIE, en todas las pantallas: al final de Crear (dentro del panel que
+   rueda: anclado abajo se comería una franja en el móvil) y al final de cada
+   módulo. Los enlaces son enlaces y no botones, para que el barrido de botones
+   del recorrido no se vaya a otra parte a mitad. */
+const PIE_DERECHOS = '© 2026 Agencia Redes Botánica · CrearIA Studio — '
+  + 'Automatización de contenido · v3.1 · Todos los derechos reservados.';
+
+/* EL CONTACTO (mailto) y LOS TÉRMINOS DE USO, que viven en docs/TERMINOS.md y
+   se sirven en /api/sistema/terminos, como el manual. */
+const CONTACTO_STUDIO = 'agencia.redes.botanica@gmail.com';
+
+async function abrirTerminos() {
+  let texto = '';
+  try {
+    texto = (await pedir(`${BASE}/api/sistema/terminos`)).texto || '';
+  } catch (e) {
+    toast(`no se han podido leer los términos: ${e.message}`, true);
+    return;
+  }
+  ventanaTexto('Términos de uso', [h('div', { clase: 'novedades terminos' },
+    textoConFormato(unirLineas(texto.replace(/^# .+\n/, '').replace(/^#{2,6} (.+)$/gm, '**$1**'))))]);
+}
+
+function enlacePie(texto, accion, titulo) {
+  return h('a', { href: '#', clase: 'enlace-pie', title: titulo || texto,
+    onclick: ev => { ev.preventDefault(); accion(); } }, texto);
+}
 
 function pieSistema() {
   return h('footer', { clase: 'pie-sistema' },
-    h('span', { clase: 'pie-marca' }, 'Automatización Contenido Studio'),
-    h('span', {}, PIE_SISTEMA));
+    h('span', { clase: 'pie-texto' }, PIE_DERECHOS),
+    h('span', { clase: 'pie-enlaces' },
+      enlacePie('Novedades', () => abrirNovedades(), 'Lo que ha cambiado en el Studio'),
+      enlacePie('Guía', () => abrirManual(), 'El panel de ayuda: el manual y las guías'),
+      enlacePie('Términos de uso', () => abrirTerminos(), 'Las condiciones de uso del Studio'),
+      h('a', { href: `mailto:${CONTACTO_STUDIO}`, clase: 'enlace-pie', title: `Escribir a ${CONTACTO_STUDIO}` },
+        'Contacto')));
+}
+
+/* «✕» arriba a la derecha de una capa que tapa la pantalla (las lupas), para
+   no depender del «atrás» ni de Escape en el móvil. */
+function botonCerrarCapa(cerrar) {
+  return h('button', { type: 'button', clase: 'mini cerrar-capa', title: 'Cerrar', 'aria-label': 'Cerrar',
+    onclick: ev => { ev.stopPropagation(); cerrar(); } }, '✕');
+}
+
+/* Una ventana de solo lectura, con «Cerrar». */
+function ventanaTexto(titulo, parrafos) {
+  const capa = h('div', { clase: 'capa-dialogo' });
+  const teclas = ev => { if (ev.key === 'Escape') cerrar(); };
+  const cerrar = () => { capa.remove(); document.removeEventListener('keydown', teclas); };
+  const boton = h('button', { type: 'button', clase: 'mini primario', onclick: cerrar }, 'Cerrar');
+  capa.appendChild(h('div', { clase: 'dialogo ventana-texto', role: 'dialog', 'aria-label': titulo },
+    h('h3', {}, titulo),
+    ...parrafos.map(p => (p instanceof Node ? p : h('p', {}, p))),
+    h('div', { clase: 'dialogo-botones' }, boton)));
+  capa.addEventListener('click', ev => { if (ev.target === capa) cerrar(); });
+  document.addEventListener('keydown', teclas);
+  document.body.appendChild(capa);
+  setTimeout(() => boton.focus(), 0);
 }
 
 function arrancar() {
   ponerMandosDeCabecera();
-  aplicarTema(temaActual());
+  aplicarPaleta(paletaActual());
   /* EL LOGO LLEVA AL INICIO, como en cualquier web: era la primera salida que
      se buscaba y no hacía nada (11-10-2026). */
   const marca = document.querySelector('#cabecera .marca');
@@ -5179,10 +5320,18 @@ function navLight() {
         /* EL ESTILO DE ESTE VÍDEO YA NO ESTÁ (borrado, o de un proyecto con
            clave sin abrir): se dice y te quedas en el vídeo. Antes te sacaba a
            la galería sin una palabra (N3 de las notas de mejoras, 13-10-2026). */
+        /* Y SE OFRECE CAMBIARLO (arreglos del 19-10): te lleva a «Su estilo»,
+           en el Encargo, con «Cambiar de estilo…» abierto (y «Restaurarlo» si
+           está en la papelera). */
         if (dentro) {
           toast(v.estilo
-            ? 'el estilo de este vídeo ya no está (borrado, o de un proyecto con clave sin abrir): el vídeo sigue igual'
-            : 'este vídeo no tiene un estilo apuntado', true);
+            ? 'el estilo de este vídeo ya no está (borrado, o de un proyecto con clave sin abrir): el vídeo sigue igual. Puedes pasarlo a otro estilo'
+            : 'este vídeo no tiene un estilo apuntado: puedes darle uno', true);
+          v.cambioEstilo = { pid: v.pid, abierto: true, partes: {} };
+          v.vista = 'encargo_video';
+          pintarLight();
+          const bloque = document.querySelector('.cambio-de-estilo');
+          if (bloque) bloque.scrollIntoView({ block: 'center' });
           return;
         }
         recordarVideoLight('');
@@ -5277,8 +5426,66 @@ function pintarLight() {
     pintarLightAhora();
   } finally {
     devolverFoco(foco);
+    devolverScroll('panel', claveScrollCrear);
   }
   apuntarSitioEnHistoria();
+}
+
+/* ==================================== LA PANTALLA NO SALTA (19-10-2026)
+ *
+ * Quien hace scroll es `#panel` (Crear) o `#modulo` (los módulos); la ventana
+ * nunca. Repintar entero en el acto conserva el scroll, pero en cuanto un
+ * repintado espera a la red con la pantalla a medio pintar («abriendo el
+ * vídeo…», «cargando…») el contenido mide casi nada, el navegador baja el
+ * scroll a 0 y al volver el contenido ya no sube solo: al terminar un
+ * remontaje, al «Traer» el estilo o al cambiar los días de Resultados se
+ * volvía arriba del todo (notas del dueño del 19-10).
+ *
+ * La memoria es UNA por caja: el último sitio en el que se movió y a qué
+ * altura. Se apunta al hacer scroll SOLO si hay un sitio (mientras se carga no
+ * lo hay: `sitioActual` da null y `claveScrollModulo` da '') y se devuelve al
+ * acabar de pintar si el sitio es el mismo. Ir a otro sitio a propósito pasa
+ * por `subirArriba`, que además la olvida: si no, volver al mismo sitio
+ * devolvería la altura de antes encima del «arriba» que se pidió. */
+const MEMORIA_SCROLL = {};
+
+function vigilarScroll(id, clave) {
+  const caja = document.getElementById(id);
+  if (!caja || caja.dataset.vigilaScroll) return;
+  caja.dataset.vigilaScroll = '1';
+  caja.addEventListener('scroll', () => {
+    const c = clave();
+    if (c) MEMORIA_SCROLL[id] = { clave: c, top: caja.scrollTop };
+  }, { passive: true });
+}
+
+function devolverScroll(id, clave) {
+  vigilarScroll(id, clave);
+  const caja = document.getElementById(id);
+  const m = MEMORIA_SCROLL[id];
+  if (!caja || !m) return;
+  const c = clave();
+  if (!c || c !== m.clave) return;
+  if (Math.abs(caja.scrollTop - m.top) > 1) caja.scrollTop = m.top;
+}
+
+function subirArriba(id) {
+  const caja = document.getElementById(id);
+  if (caja) caja.scrollTop = 0;
+  delete MEMORIA_SCROLL[id];
+}
+
+function claveScrollCrear() {
+  if (MODULOS.actual !== 'crear') return '';
+  const s = sitioActual();
+  return s ? JSON.stringify(s) : '';
+}
+
+function claveScrollModulo() {
+  if (MODULOS.actual === 'crear') return '';
+  if (MODULOS.actual === 'publicar' && PUB.cargando) return '';
+  return JSON.stringify([MODULOS.actual, PUB.seccion || '', PUB.pid || '', !!PUB.verInforme,
+    MODULOS.actual === 'automatizar' ? (PAR.seccion || '') : '']);
 }
 
 /* ==================================== EL BOTÓN «ATRÁS» DEL MÓVIL (N3, el resto)
@@ -5539,8 +5746,14 @@ function pintarLightAhora() {
    El vídeo se cierra en la pantalla, no en el servidor: lo que se esté
    generando sigue y se vuelve a ver al abrirlo. */
 function irAInicioLight() {
+  /* «UN HOME DE CREAR» ES «TUS PROYECTOS» (diseno-crearia, 19-10-2026): sin
+     el proyecto elegido, y saliendo del módulo en el que se esté (el logo se
+     pulsa también desde Publicar o el Inicio). */
+  if (MODULOS.actual !== 'crear') { entrarEnCrear(); return; }
   pararPrevia();
   recordarVideoLight('');
+  apuntarCliente('');
+  APP.light.desdeVideo = '';
   irALight('galeria');
   cargarGaleriaLight(true);
 }
@@ -5649,7 +5862,7 @@ function irALight(vista, extra) {
       && !APP.light.desdeVideo) {
     APP.light.desdeVideo = desde;
   }
-  $('#panel').scrollTop = 0;
+  subirArriba('panel');
   pintarLight();
 }
 
@@ -5734,7 +5947,7 @@ function apuntarClienteDe(cid) {
 
 function elegirCliente(cid) {
   apuntarCliente(cid);
-  $('#panel').scrollTop = 0;
+  subirArriba('panel');
   pintarLight();
 }
 
@@ -6554,9 +6767,17 @@ async function cargarVideoLight(pid) {
     ajustes.animoPedido = '';
     ajustes.dbEnVuelo = undefined;
   }
-  v.cargando = true;
+  /* EL VÍDEO QUE YA ESTÁ ABIERTO SE RELEE SIN TAPARLO (19-10-2026). Pintar
+     «abriendo el vídeo…» mientras llega lo nuevo dejaba la pantalla sin
+     contenido un instante y el scroll caía a 0: al acabar un remontaje o al
+     «Traer» el estilo se volvía arriba del todo. Se queda la vista de antes
+     hasta que llega la de ahora; abrir OTRO vídeo sí avisa. */
+  const releer = v.cargadoDe === pid && !v.cargando && !v.error && !!v.vista;
   v.error = '';
-  pintarLight();
+  if (!releer) {
+    v.cargando = true;
+    pintarLight();
+  }
   try {
     const proyecto = await pedir(API.proyecto(pid));
     /* lo que se estaba viendo de OTRO vídeo no se queda en este. Contra
@@ -6950,6 +7171,10 @@ function vistaElegidoLight() {
       'céntrate en el mecanismo, no en las personas; no fuerces una historia '
       + 'de personaje')));
 
+  caja.appendChild(bloqueLight('El espacio fijo',
+    'si todo el vídeo pasa en un mismo sitio (opcional)',
+    bloqueEspacioFijoLight(e)));
+
   /* LAS LLAMADAS A LA ACCIÓN son de ESTE vídeo y se deciden aquí. No viajan en
      el estilo a propósito: si viajaran, elegir un estilo pisaría lo que acabas
      de escribir para este vídeo. */
@@ -7233,6 +7458,257 @@ function materialLight(e) {
 /* Crear el proyecto y lanzar la primera tanda, en un gesto. Son dos llamadas
    —el proyecto tiene que existir antes de poder generar nada en él— pero UNA
    decisión, así que un botón. */
+/* EL ESPACIO FIJO (rama espacio-fijo, 20-10-2026): todo el vídeo en un mismo
+   sitio. Lo rellena la Parrilla si el guion trae ESPACIO FIJO y se puede
+   escribir a mano. Con él, el reparto de sitios usa UNO solo con esta
+   descripción tal cual. Los secundarios se escriben uno por línea
+   («Nombre: descripción») y se guardan como texto: leerlos y volver a pintarlos
+   en cada tecla se comería los dos puntos recién escritos. Solo viaja si tiene
+   descripción (`opcionesParaCrear`); sin ella el vídeo nace como siempre. */
+function espacioFijoDelEncargo(r) {
+  const ef = (r && typeof r === 'object') ? r : {};
+  return {
+    sitio: String(ef.sitio || ''),
+    descripcion: String(ef.descripcion || ''),
+    luz: String(ef.luz || ''),
+    secundarios_texto: (Array.isArray(ef.secundarios) ? ef.secundarios : [])
+      .filter(x => x && x.nombre)
+      .map(x => (x.descripcion ? `${x.nombre}: ${x.descripcion}` : String(x.nombre)))
+      .join('\n'),
+  };
+}
+
+function secundariosDelTexto(texto) {
+  return String(texto || '').split(/[\n;]/).map(l => l.trim()).filter(Boolean).map(l => {
+    const i = l.indexOf(':');
+    return i > 0 ? { nombre: l.slice(0, i).trim(), descripcion: l.slice(i + 1).trim() }
+      : { nombre: l, descripcion: '' };
+  }).filter(x => x.nombre);
+}
+
+/* Lo que se manda al crear, o null si no hay espacio fijo. */
+function espacioFijoParaCrear(e) {
+  const ef = e.espacio_fijo;
+  if (!ef || !String(ef.descripcion || '').trim()) return null;
+  const salida = {
+    sitio: String(ef.sitio || '').trim(),
+    descripcion: String(ef.descripcion).trim(),
+    luz: String(ef.luz || '').trim(),
+    secundarios: secundariosDelTexto(ef.secundarios_texto),
+  };
+  if (ef.imagen_nueva) salida.imagen_nueva = ef.imagen_nueva;
+  return salida;
+}
+
+/* LA IMAGEN DEL ESPACIO, leída en el navegador como data URL: viaja con el
+   resto al crear (o al aplicar) y el servidor la guarda en PNG en el proyecto.
+   Se adjunta a cada plano del sitio principal, y eso se paga como una
+   referencia más por imagen. */
+function campoImagenDelEspacio(ef, urlGuardada, alCambiar) {
+  const vista = ef.imagen_nueva || (ef.quitar_imagen ? '' : (urlGuardada || ''));
+  const entrada = h('input', {
+    type: 'file', accept: 'image/png,image/jpeg,image/webp', clase: 'oculto-espacio-fijo',
+    onchange: ev => {
+      const fichero = (ev.target.files || [])[0];
+      if (!fichero) return;
+      if (fichero.size > 12 * 1024 * 1024) { toast('la imagen pasa de 12 MB', true); return; }
+      const lector = new FileReader();
+      lector.onload = () => { ef.imagen_nueva = String(lector.result || ''); ef.quitar_imagen = false; alCambiar(); };
+      lector.readAsDataURL(fichero);
+    },
+  });
+  return h('div', { clase: 'campo espacio-fijo-imagen' },
+    h('label', {}, 'Imagen del sitio (opcional)'),
+    vista ? h('img', { src: vista, alt: 'el espacio fijo', clase: 'miniatura-espacio-fijo' }) : null,
+    h('div', { clase: 'fila' },
+      entrada,
+      h('button', { clase: 'mini', onclick: () => entrada.click() },
+        vista ? 'Cambiar la imagen' : 'Subir una imagen'),
+      vista ? h('button', {
+        clase: 'mini fantasma',
+        onclick: () => { ef.imagen_nueva = null; ef.quitar_imagen = true; alCambiar(); },
+      }, 'Quitarla') : null),
+    h('div', { clase: 'pista' }, 'Se adjunta a cada imagen de plano de este sitio (no a los '
+      + 'secundarios) para que se reconozca el lugar. Se paga como una referencia más: alrededor '
+      + 'de medio céntimo por imagen.'));
+}
+
+function bloqueEspacioFijoLight(e) {
+  if (!e.espacio_fijo) e.espacio_fijo = espacioFijoDelEncargo(null);
+  const ef = e.espacio_fijo;
+  return h('div', { clase: 'espacio-fijo' },
+    h('div', { clase: 'espacio-fijo-fila' },
+      campoTexto('Sitio', ef.sitio, v => { ef.sitio = v; }, { pista: 'Panadería Rosa' }),
+      campoTexto('Luz', ef.luz, v => { ef.luz = v; }, { pista: 'morning, warm window light' })),
+    campoArea('Descripción', ef.descripcion, v => { ef.descripcion = v; },
+      'a small bakery with wooden shelves full of bread and a white counter',
+      'espacio-fijo-descripcion'),
+    campoArea('Sitios secundarios', ef.secundarios_texto, v => { ef.secundarios_texto = v; },
+      'uno por línea: Fachada: a shop front with a pink awning', 'espacio-fijo-secundarios'),
+    campoImagenDelEspacio(ef, '', pintarLight),
+    h('div', { clase: 'pista' }, 'Con descripción, todos los planos van a este sitio (salvo los '
+      + 'que el guion sitúe en un secundario), con esa descripción tal cual y sin cabeceras de '
+      + 'sitio. Mejor en inglés, que es lo que lee el generador de imágenes. Vacío, el reparto '
+      + 'de sitios es el de siempre.'));
+}
+
+/* EL ESPACIO FIJO DE UN VÍDEO YA HECHO, como corrección (rama espacio-fijo).
+ *
+ * «Aplicar el espacio fijo» guarda el sitio (y su imagen) y ajusta el reparto
+ * de sitios SIN dibujar nada (`POST /espacio_fijo/aplicar`): lo hecho se
+ * conserva. Después enseña qué planos cambiarían y lo que cuesta rehacerlos, y
+ * solo se rehace lo que se pide: todos los del sitio, los marcados o ninguno
+ * (`POST /espacio_fijo/rehacer`, que manda SOLO esas unidades). El estado vive
+ * en `APP.light.video.espacio` para que el repintado no pierda lo escrito. */
+function espacioDelVideoLight() {
+  const v = APP.light.video;
+  if (v.espacio && v.espacio.pid === v.pid) return v.espacio;
+  const pid = v.pid;
+  v.espacio = { pid, cargado: false, copia: espacioFijoDelEncargo(null), imagen: '',
+    imagenUrl: '', cambios: null, marcados: new Set(), ocupado: false, error: '' };
+  pedir(`${API.proyecto(pid)}/espacio_fijo`).then(d => {
+    const est = APP.light.video.espacio;
+    if (!est || est.pid !== pid) return;
+    leerEspacioDelServidor(est, d);
+    pintarLight();
+  }).catch(err => {
+    const est = APP.light.video.espacio;
+    if (!est || est.pid !== pid) return;
+    est.cargado = true;
+    est.error = err.message;
+    pintarLight();
+  });
+  return v.espacio;
+}
+
+function leerEspacioDelServidor(est, d) {
+  const ef = (d || {}).espacio_fijo || {};
+  est.cargado = true;
+  est.error = '';
+  est.copia = espacioFijoDelEncargo(ef);
+  est.imagen = ef.imagen || '';
+  est.imagenUrl = ef.imagen_url ? `${BASE}${ef.imagen_url}?v=${encodeURIComponent(est.imagen)}` : '';
+  est.cambios = (d || {}).cambios || null;
+  est.marcados = new Set(((est.cambios || {}).planos || []).map(x => x.id));
+}
+
+function bloqueEspacioFijoDelVideo() {
+  const est = espacioDelVideoLight();
+  if (!est.cargado) return h('div', { clase: 'cargando' }, 'cargando…');
+  const ef = est.copia;
+  const corriendo = !!trabajoVideoLight();
+  const caja = h('div', { clase: 'espacio-fijo espacio-fijo-del-video' },
+    h('div', { clase: 'espacio-fijo-fila' },
+      campoTexto('Sitio', ef.sitio, x => { ef.sitio = x; }, { pista: 'Panadería Rosa' }),
+      campoTexto('Luz', ef.luz, x => { ef.luz = x; }, { pista: 'morning, warm window light' })),
+    campoArea('Descripción', ef.descripcion, x => { ef.descripcion = x; },
+      'a small bakery with wooden shelves full of bread and a white counter',
+      'video-espacio-descripcion'),
+    campoArea('Sitios secundarios', ef.secundarios_texto, x => { ef.secundarios_texto = x; },
+      'uno por línea: Fachada: a shop front with a pink awning', 'video-espacio-secundarios'),
+    campoImagenDelEspacio(ef, est.imagenUrl, pintarLight),
+    h('div', { clase: 'fila' },
+      h('button', {
+        clase: 'primario', disabled: corriendo || est.ocupado,
+        onclick: () => aplicarEspacioFijoDelVideo(),
+      }, 'Aplicar el espacio fijo'),
+      h('span', { clase: 'meta' }, 'gratis: no se dibuja nada; después eliges qué planos rehacer')));
+  if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
+  if (est.cambios) caja.appendChild(cambiosDelEspacioFijo(est, corriendo));
+  return caja;
+}
+
+function cambiosDelEspacioFijo(est, corriendo) {
+  const c = est.cambios;
+  const planos = c.planos || [];
+  const unidad = Number(c.usd_por_imagen || 0) + Number(c.usd_referencia || 0);
+  if (!planos.length) {
+    return h('div', { clase: 'caja-info cambios-espacio-fijo' },
+      `Ningún plano hecho cambia con este espacio fijo${c.hechas ? ` (${c.hechas} con imagen)` : ''}: `
+      + 'lo que se dibuje desde ahora ya sale en este sitio.');
+  }
+  const marcados = planos.filter(x => est.marcados.has(x.id)).map(x => x.id);
+  const lista = h('div', { clase: 'lista-espacio-fijo' });
+  planos.forEach(x => {
+    lista.appendChild(h('label', { clase: 'fila-espacio-fijo' },
+      h('input', { type: 'checkbox', checked: est.marcados.has(x.id),
+        onchange: ev => { if (ev.target.checked) est.marcados.add(x.id); else est.marcados.delete(x.id); pintarLight(); } }),
+      h('span', { clase: 'id' }, x.id),
+      h('span', { clase: 'crece' }, x.narracion || '', h('span', { clase: 'meta' }, ` · ${x.sitio || 'sin sitio'}`))));
+  });
+  return h('div', { clase: 'caja-aviso cambios-espacio-fijo' },
+    h('div', {}, `${planos.length} ${planos.length === 1 ? 'plano cambiaría' : 'planos cambiarían'} `
+      + `con el espacio fijo. Rehacer cada uno cuesta ≈ ${usdCorto(unidad)}`
+      + (Number(c.usd_referencia) ? ` (con ${usdCorto(c.usd_referencia)} de la imagen del sitio)` : '')
+      + '. Nada se rehace hasta que lo pidas; lo que no rehagas se queda como está.'),
+    lista,
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', disabled: corriendo || est.ocupado,
+        onclick: () => rehacerPlanosDelEspacio(planos.map(x => x.id), unidad) },
+      `Rehacer los ${planos.length} · ≈ ${usdCorto(planos.length * unidad)}`),
+      h('button', { clase: 'mini', disabled: corriendo || est.ocupado || !marcados.length,
+        onclick: () => rehacerPlanosDelEspacio(marcados, unidad) },
+      `Solo los marcados (${marcados.length}) · ≈ ${usdCorto(marcados.length * unidad)}`),
+      h('button', { clase: 'mini fantasma',
+        onclick: () => { est.cambios = null; toast('no se rehace ninguno: el vídeo se queda como está'); pintarLight(); } },
+      'Ninguno')));
+}
+
+async function aplicarEspacioFijoDelVideo() {
+  const est = espacioDelVideoLight();
+  const ef = est.copia;
+  if (!String(ef.descripcion || '').trim()) { toast('escribe cómo es el sitio (la descripción)', true); return; }
+  const cuerpo = {
+    sitio: String(ef.sitio || '').trim(), descripcion: String(ef.descripcion).trim(),
+    luz: String(ef.luz || '').trim(), secundarios: secundariosDelTexto(ef.secundarios_texto),
+  };
+  if (ef.imagen_nueva) cuerpo.imagen_nueva = ef.imagen_nueva;
+  else if (est.imagen && !ef.quitar_imagen) cuerpo.imagen = est.imagen;
+  est.ocupado = true;
+  pintarLight();
+  try {
+    const d = await pedir(`${API.proyecto(est.pid)}/espacio_fijo/aplicar`,
+      { method: 'POST', cuerpo: { espacio_fijo: cuerpo } });
+    leerEspacioDelServidor(est, d);
+    toast('espacio fijo aplicado: no se ha dibujado nada');
+  } catch (err) {
+    est.error = err.message;
+  }
+  est.ocupado = false;
+  pintarLight();
+}
+
+async function rehacerPlanosDelEspacio(planos, unidad) {
+  const est = espacioDelVideoLight();
+  const pid = est.pid;
+  if (!planos.length) return;
+  if (!confirm(`Rehacer ${planos.length} ${planos.length === 1 ? 'imagen' : 'imágenes'} con el `
+    + `espacio fijo: ≈ ${usdCorto(planos.length * unidad)}.\n\nSolo esas; las demás no se `
+    + 'tocan. Después hay que volver a montar el vídeo.')) return;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(`${API.proyecto(pid)}/espacio_fijo/rehacer`, {
+      method: 'POST', cuerpo: { planos, imagenes: planos.length },
+    });
+    est.cambios = null;
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') {
+        reiniciarPrevia();
+        await cargarVideoLight(pid);
+        refrescarPlanLight('video', true);
+        const ahora = APP.light.video.espacio;
+        if (ahora && ahora.pid === pid) ahora.cargado = false;
+        APP.light.video.espacio = null;
+      }
+      pintarLight();
+    }, () => { refrescarPlanosLight(); refrescarVivosLight(); }, pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
+}
+
 /* Lo elegido en «Ajustes del montaje» del borrador, tal como lo entiende
    `_opciones_al_crear`. Lo que no se eligió no viaja: queda automático. */
 function opcionesParaCrear(e) {
@@ -7249,6 +7725,8 @@ function opcionesParaCrear(e) {
   if (op.montaje) salida.montaje = op.montaje;
   if (op.transiciones && op.transiciones.length) salida.transiciones = op.transiciones;
   if (op.ritmo) salida.ritmo = op.ritmo;
+  const espacio = espacioFijoParaCrear(e);
+  if (espacio) salida.espacio_fijo = espacio;
   return salida;
 }
 
@@ -7454,6 +7932,7 @@ function vistaEncargoVideoLight() {
   caja.appendChild(bloqueLight('Las llamadas a la acción',
     'cuándo se presenta y qué le pides a quien lo ve',
     bloqueCTA(e.cta, { alCambiar: programarGuardadoEncargo, repintar: pintarLight })));
+  caja.appendChild(bloqueLight('El espacio fijo', 'todo el vídeo en un mismo sitio: se aplica como corrección', bloqueEspacioFijoDelVideo()));
 
   BARRA_INFERIOR.nodo = pieDeEncargo();
   return caja;
@@ -7483,9 +7962,7 @@ function pieDeEncargo() {
     corriendo ? conAyuda(
       'Corta la tanda donde esté. Lo que ya se ha generado se queda hecho y no '
       + 'hay que volver a pagarlo.',
-      h('button', {
-        clase: 'mini peligro', onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
-      }, 'Parar')) : null,
+      botonPararVideo()) : null,
     (!corriendo && hayGuion && queda) ? h('span', {
       clase: 'pastilla obsoleto',
       title: 'has cambiado el encargo después de escribir el guion, así que el '
@@ -7622,7 +8099,10 @@ function panelOrtografia(fuente) {
       : 'tildes, letras y signos de lo que se lee; corregir solo vuelve a montar (gratis)'),
     h('button', { clase: 'mini', disabled: est.estado === 'pensando' || !!trabajoVideoLight(),
       onclick: () => revisarOrtografia(fuente) },
-    est.estado === 'pensando' ? 'Revisando…' : (est.estado ? 'Revisar otra vez' : 'Revisar la ortografía')));
+    est.estado === 'pensando' ? 'Revisando…' : (est.estado ? 'Revisar otra vez' : 'Revisar la ortografía')),
+    // LA REVISIÓN EDITORIAL, al lado (arreglos del 19-10): sus propuestas
+    // salen en su propio panel, debajo (`panelEditorial`)
+    fuente === 'guion' ? botonRevisionEditorial() : null);
   caja.appendChild(cab);
   if (fuente === 'guion') programarOrtografiaGuion();
   if (est.estado === 'pensando') {
@@ -7892,6 +8372,172 @@ async function aplicarOrtografia(fuente) {
   } catch (e) {
     toast(`no se han podido poner: ${e.message}`, true);
   }
+}
+
+/* LA REVISIÓN EDITORIAL DEL GUION (arreglos del 19-10, 5). «Revisión
+   editorial», junto a la ortografía: Claude como corrector editorial
+   (sintaxis, concordancia, puntuación, repeticiones, claridad, registro;
+   `ortografia.revisar_editorial`, sonnet con esfuerzo medio) propone trozos
+   sueltos {original → propuesta, motivo}. Se aceptan o rechazan UNA A UNA, o
+   «Aceptar todas». Aceptar pone el trozo en su bloque por el MISMO camino que
+   escribir a mano (`guardarBloqueLight`), sin tocar las marcas de la voz; con
+   la voz ya grabada, se avisa de qué bloques habrá que regrabar. El estado,
+   fuera del panel y por vídeo, como el de la ortografía. */
+const EDITORIAL_VIVA = new Map();
+
+function botonRevisionEditorial() {
+  const v = APP.light.video;
+  const est = EDITORIAL_VIVA.get(v.pid) || {};
+  return h('button', {
+    clase: 'mini', disabled: est.estado === 'pensando' || !!trabajoVideoLight(),
+    title: 'sintaxis, concordancia, puntuación, repeticiones y claridad, como un corrector editorial',
+    onclick: () => revisarEditorial(),
+  }, est.estado === 'pensando' ? 'Revisando la redacción…' : 'Revisión editorial');
+}
+
+function panelEditorial() {
+  const v = APP.light.video;
+  const est = EDITORIAL_VIVA.get(v.pid);
+  if (!est) return null;
+  const caja = h('div', { clase: 'panel-ortografia panel-editorial' });
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('b', {}, 'Revisión editorial'),
+    h('span', { clase: 'meta crece' }, v.audio
+      ? 'propuestas de redacción; la voz ya está grabada: lo que aceptes habrá que regrabarlo'
+      : 'propuestas de redacción: acéptalas o recházalas una a una'),
+    h('button', { clase: 'mini', onclick: () => { EDITORIAL_VIVA.delete(v.pid); pintarLight(); } }, 'Cerrar')));
+  if (est.estado === 'pensando') {
+    caja.appendChild(h('div', { clase: 'cargando' },
+      `el corrector editorial está leyendo ${est.revisados || ''} bloques… (puede tardar un par de minutos)`));
+    return caja;
+  }
+  if (est.estado === 'error') { caja.appendChild(cajaError(est.error || 'no se ha podido revisar')); return caja; }
+  const sinRevisar = Number(est.sin_revisar) || 0;
+  if (sinRevisar) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      `${sinRevisar} bloque(s) se han quedado sin revisar: ${est.detalle || 'el corrector devolvió una respuesta rota'}. `
+      + 'Pulsa «Revisión editorial» otra vez para repasarlos.'));
+  }
+  const props = est.propuestas || [];
+  est.hechas = est.hechas || {};
+  const pendientes = props.filter(p => !est.hechas[p.id]);
+  if (!props.length) {
+    caja.appendChild(h('div', { clase: 'meta' }, `✓ Nada que proponer en ${est.revisados || 0} bloques.`));
+    return caja;
+  }
+  const aceptadas = props.filter(p => est.hechas[p.id] === 'aceptada').length;
+  caja.appendChild(h('div', { clase: 'meta' }, pendientes.length
+    ? `${pendientes.length} de ${props.length} propuestas por decidir`
+      + (aceptadas ? ` · ${aceptadas} aceptada(s)` : '')
+    : `Decididas las ${props.length} propuestas (${aceptadas} aceptada(s)).`));
+  const lista = h('div', { clase: 'lista-ortografia' });
+  props.forEach(p => {
+    const hecha = est.hechas[p.id];
+    lista.appendChild(h('div', { clase: 'fila-ortografia fila-editorial' + (hecha ? ' decidida' : '') },
+      h('span', { clase: 'id' }, p.bloque),
+      h('span', { clase: 'crece' },
+        h('span', { clase: 'editorial-antes' }, p.original), ' → ',
+        h('span', { clase: 'despues' }, p.propuesta),
+        h('span', { clase: 'meta' }, ` · ${p.motivo || ''}${p.tipo ? ` (${p.tipo})` : ''}`)),
+      hecha ? h('span', { clase: 'pastilla' }, hecha === 'aceptada' ? 'aceptada'
+        : hecha === 'a_mano' ? 'a mano' : 'rechazada')
+        : h('span', { clase: 'herramientas' },
+          h('button', { clase: 'mini primario', disabled: !!trabajoVideoLight(),
+            onclick: () => aceptarEditorial([p.id]) }, 'Aceptar'),
+          h('button', { clase: 'mini', onclick: () => { est.hechas[p.id] = 'rechazada'; pintarLight(); } },
+            'Rechazar'))));
+  });
+  caja.appendChild(lista);
+  if (pendientes.length > 1) {
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'primario', disabled: !!trabajoVideoLight(),
+        onclick: () => aceptarEditorial(pendientes.map(p => p.id)) }, 'Aceptar todas'),
+      h('span', { clase: 'meta' }, v.audio
+        ? 'se guardan en el guion; la voz de esos bloques queda por regrabar (se paga)'
+        : 'se guardan en el guion, como si las escribieras a mano')));
+  }
+  return caja;
+}
+
+async function revisarEditorial() {
+  const v = APP.light.video;
+  const pid = v.pid;
+  const textos = textosGuionOrtografia(v);
+  if (!Object.keys(textos).length) { toast('No hay guion que revisar', true); return; }
+  const est = { estado: 'pensando', revisados: Object.keys(textos).length };
+  EDITORIAL_VIVA.set(pid, est);
+  pintarLight();
+  try {
+    const lanzada = await pedir(`${API.proyecto(pid)}/ortografia/revisar`, {
+      method: 'POST', cuerpo: { fuente: 'guion', modo: 'editorial', textos },
+    });
+    let ficha = { estado: 'pensando' };
+    for (let i = 0; i < 400 && ficha.estado === 'pensando'; i += 1) {
+      await new Promise(r => setTimeout(r, 1500));
+      ficha = await pedir(`${API.proyecto(pid)}/ortografia/${lanzada.id}`);
+    }
+    if (ficha.estado === 'pensando') throw new Error('la revisión tarda demasiado: vuelve a pedirla en un momento');
+    ficha.hechas = {};
+    if (EDITORIAL_VIVA.get(pid) === est) EDITORIAL_VIVA.set(pid, ficha);
+  } catch (e) {
+    if (EDITORIAL_VIVA.get(pid) === est) EDITORIAL_VIVA.set(pid, { estado: 'error', error: e.message });
+  }
+  if (videoAbierto().pid === pid) pintarLight();
+}
+
+/* Pone las propuestas `ids` en sus bloques. El trozo se busca en el texto
+   CRUDO del bloque (con sus marcas de la voz) como en la ortografía
+   (`sustituirPalabra`: palabra entera y fuera de las marcas), y tiene que
+   estar UNA sola vez en lo que se lee; varias del mismo bloque se encadenan.
+   Lo que no se encuentra (el bloque cambió desde la revisión) queda «a mano». */
+async function aceptarEditorial(ids) {
+  const v = APP.light.video;
+  const pid = v.pid;
+  const est = EDITORIAL_VIVA.get(pid) || {};
+  est.hechas = est.hechas || {};
+  const elegidas = (est.propuestas || []).filter(p => ids.includes(p.id) && !est.hechas[p.id]);
+  if (!elegidas.length) return;
+  const bloques = [...new Set(elegidas.map(p => p.bloque))];
+  if (v.audio && !window.confirm(
+    `La voz ya está grabada: aceptar ${elegidas.length === 1 ? 'esta propuesta' : `estas ${elegidas.length} propuestas`} `
+    + `cambia ${bloques.length === 1 ? 'el bloque' : 'los bloques'} ${bloques.join(', ')}, y habrá que `
+    + 'regrabar su voz (se paga). ¿Las aceptamos?')) return;
+  const porId = {};
+  ((v.guion || {}).bloques || []).forEach(b => { porId[b.id] = b; });
+  const nuevos = {};
+  const aMano = [];
+  const veces = (texto, trozo) => texto.split(trozo).length - 1;
+  elegidas.forEach(p => {
+    const b = porId[p.bloque];
+    if (!b) { aMano.push(p); return; }
+    const crudo = nuevos[b.id] !== undefined ? nuevos[b.id] : textoDeBloqueLight(b);
+    const visible = textoVisibleLight(crudo).split(/\s+/).filter(Boolean).join(' ');
+    if (veces(visible, p.original) !== 1) { aMano.push(p); return; }
+    const puesto = sustituirPalabra(crudo, p.original, p.propuesta);
+    if (puesto === null) { aMano.push(p); return; }
+    nuevos[b.id] = puesto;
+  });
+  try {
+    Object.entries(nuevos).forEach(([bid, texto]) => {
+      const b = porId[bid];
+      guardarBloqueLight(bid, texto, b.insertado ? undefined : b.texto, !!b.insertado);
+    });
+    await guardarBloquesPendientesLight();
+    elegidas.forEach(p => { est.hechas[p.id] = aMano.includes(p) ? 'a_mano' : 'aceptada'; });
+    const puestas = elegidas.length - aMano.length;
+    const tocados = Object.keys(nuevos);
+    let aviso = `${puestas} propuesta(s) puestas en el guion`;
+    if (aMano.length) {
+      aviso += `; ${aMano.length} hay que ponerla(s) a mano (${aMano.map(p => p.bloque).join(', ')}): `
+        + 'ese trozo ya no está igual en el bloque';
+    }
+    if (v.audio && tocados.length) aviso += `. Hay que regrabar la voz de ${tocados.join(', ')}`;
+    toast(aviso, aMano.length > 0);
+    await recargarVideoAbierto();
+  } catch (e) {
+    toast(`no se han podido poner: ${e.message}`, true);
+  }
+  if (videoAbierto().pid === pid) pintarLight();
 }
 
 /* LA ORTOGRAFÍA DE UN CAMPO SUELTO (18-10-2026): «el corrector también debe
@@ -8786,6 +9432,8 @@ function vistaGuionLight() {
      la voz ya grabada corregir es regrabar (lo dice el panel), y para que solo
      se lea bien están los subtítulos, en la pantalla Vídeo. */
   caja.appendChild(panelOrtografia('guion'));
+  const editorial = panelEditorial();
+  if (editorial) caja.appendChild(editorial);
 
   // EL REPRODUCTOR VIVE EN LA BARRA DE ABAJO (ver `pieLight`). Estaba arriba
   // del guion para que los mandos no se fueran con el scroll; la barra fija lo
@@ -9655,9 +10303,7 @@ function pieLight() {
     corriendo ? conAyuda(
       'Corta la tanda donde esté. Lo que ya se ha generado se queda hecho y no '
       + 'hay que volver a pagarlo.',
-      h('button', {
-        clase: 'mini peligro', onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
-      }, 'Parar')) : null,
+      botonPararVideo()) : null,
     conAyuda(!hayAudio
       ? 'Primero hace falta el audio: los subtítulos se colocan con sus '
         + 'tiempos, así que sin voz no hay dónde ponerlos.'
@@ -10352,6 +10998,148 @@ function irAPrimeraObsoleta() {
   if (i >= 0) { PREVIA.i = i; PREVIA.t = 0; repintarVideo(); }
 }
 
+/* ------------------------------------- descargar la imagen y leer lo que dice
+ *
+ * Rama `imagenes-texto` (20-10-2026), pedido del dueño: «poder descargar las
+ * imágenes que se creen, y que se vea (cuadro para leer el texto) qué parte del
+ * guion están diciendo en la imagen que se ve, que no solo se escuche».
+ *
+ * SOLO PANTALLA. Descargar una es un enlace al MISMO PNG que se pinta (sin
+ * `?mini`: el original) con `download`; «Descargar todas» es la ruta del .zip
+ * (`GET .../imagenes/zip`, que solo lee). El texto es la `narracion` del plano
+ * que ya trae la previsualización, sin las marcas del TTS, y el tramo que suena
+ * sale de los SUBTÍTULOS del plano (los mismos trozos y tiempos que el
+ * render), que es lo único con reloj que viaja en la ficha. No se escribe
+ * ningún param (regla 1): ocultar el cuadro se recuerda en el navegador. */
+const CLAVE_TEXTO_DEL_PLANO = 'previa.texto_del_plano';
+
+function textoDelPlanoVisible() {
+  try { return localStorage.getItem(CLAVE_TEXTO_DEL_PLANO) !== '0'; } catch (_) { return true; }
+}
+
+function conmutarTextoDelPlano() {
+  const ver = !textoDelPlanoVisible();
+  try { localStorage.setItem(CLAVE_TEXTO_DEL_PLANO, ver ? '1' : '0'); } catch (_) { /* sin almacén */ }
+  /* Si el navegador no deja guardar, que al menos cambie ahora */
+  TEXTO_DEL_PLANO.oculto = !ver;
+  repintarVideo();
+}
+
+const TEXTO_DEL_PLANO = { oculto: null };
+
+/* El nombre del fichero, como el id de carpeta (`identificador` en Python):
+   sin tildes, en minúsculas y con «_». Es el mismo que lleva el .zip. */
+function slugDeDescarga(texto) {
+  const plano = String(texto || '').normalize('NFKD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase().replace(/ñ/g, 'n').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return (plano || 'video').slice(0, 60);
+}
+
+function nombreDeDescarga(sid) {
+  const v = videoAbierto();
+  return `${slugDeDescarga(v.nombre || v.pid)}_${sid}.png`;
+}
+
+function descargarImagenPlano(e) {
+  if (!e || !e.imagen) return null;
+  return h('a', {
+    clase: 'boton-enlace mini', href: API.archivo(videoAbierto().pid, e.imagen),
+    download: nombreDeDescarga(e.id), title: 'Bajar esta imagen tal cual se generó (PNG)',
+  }, '⬇ Descargar');
+}
+
+function descargarTodasLasImagenes() {
+  const escenas = (PREVIA.ficha || {}).escenas || [];
+  const cuantas = escenas.filter(x => x.imagen).length;
+  if (!cuantas) return null;
+  const v = videoAbierto();
+  /* el pase de un proyecto con clave va en la URL: un <a download> no lleva
+     la cabecera `X-Estudio-Abiertos` que pone `pedir` */
+  const pases = cabeceraDePases();
+  return h('a', {
+    clase: 'boton-enlace mini',
+    href: `${API.proyecto(v.pid)}/imagenes/zip${pases ? `?abiertos=${encodeURIComponent(pases)}` : ''}`,
+    download: `${slugDeDescarga(v.nombre || v.pid)}_imagenes.zip`,
+    title: `Las ${cuantas} imágenes de plano en un .zip, en orden y numeradas`,
+  }, '⬇ Descargar todas');
+}
+
+/* LA NARRACIÓN PARTIDA EN LOS TRAMOS DEL SUBTÍTULO. Las palabras se reparten
+   en proporción a las de cada trozo: el subtítulo puede estar corregido a mano
+   y no coincidir palabra a palabra, pero el reparto sigue cayendo en su sitio.
+   `desde`/`hasta` van en el reloj del plano, como en la ficha. */
+function tramosDelPlano(e) {
+  const palabras = sinMarcasTts(legible(e.narracion)).match(/\S+/g) || [];
+  const trozos = (e.subtitulos || []).map(t => ({
+    n: ((t.lineas || []).join(' ').match(/\S+/g) || []).length,
+    desde: Number(t.desde) || 0, hasta: Number(t.hasta) || 0,
+  })).filter(t => t.n > 0);
+  if (!palabras.length) return [];
+  if (!trozos.length) return [{ texto: palabras.join(' '), desde: 0, hasta: Number(e.duracion) || 0 }];
+  const total = trozos.reduce((s, t) => s + t.n, 0);
+  let llevadas = 0;
+  return trozos.map(t => {
+    const a = Math.round(llevadas / total * palabras.length);
+    llevadas += t.n;
+    const b = Math.round(llevadas / total * palabras.length);
+    return { texto: palabras.slice(a, b).join(' '), desde: t.desde, hasta: t.hasta };
+  }).filter(t => t.texto);
+}
+
+/* EL TRAMO QUE SUENA, sin repintar: el reloj del <audio> va a cuatro tics por
+   segundo y repintar la pantalla entera en cada uno haría saltar el cuadro de
+   feedback. Solo se cambia una clase en los trozos del cuadro que se ve. */
+function marcarTramoQueSuena() {
+  const caja = document.querySelector('.texto-del-plano');
+  const e = escenaPrevia();
+  if (!caja || !e || caja.dataset.plano !== e.id) return;
+  const t = PREVIA.audio ? PREVIA.audio.currentTime - e.t_in : -1;
+  for (const trozo of caja.querySelectorAll('.tramo-del-plano')) {
+    const dentro = PREVIA.sonando && t >= Number(trozo.dataset.desde) && t < Number(trozo.dataset.hasta);
+    trozo.classList.toggle('sonando', dentro);
+  }
+}
+
+function textoDelPlano(e) {
+  if (PREVIA.audio && !PREVIA.audio.dataset.textoDelPlano) {
+    PREVIA.audio.dataset.textoDelPlano = '1';
+    PREVIA.audio.addEventListener('timeupdate', marcarTramoQueSuena);
+  }
+  const tramos = tramosDelPlano(e);
+  const caja = h('div', { clase: 'texto-del-plano', datos: { plano: e.id }, 'aria-live': 'off' });
+  if (!tramos.length) {
+    caja.appendChild(h('span', { clase: 'meta' }, 'en este plano la voz no dice nada'));
+    return caja;
+  }
+  tramos.forEach((t, i) => {
+    if (i) caja.appendChild(document.createTextNode(' '));
+    caja.appendChild(h('span', {
+      clase: 'tramo-del-plano', datos: { desde: String(t.desde), hasta: String(t.hasta) },
+    }, t.texto));
+  });
+  setTimeout(marcarTramoQueSuena, 0);
+  return caja;
+}
+
+/* Lo que se cuelga debajo de la imagen: la cabecera con las descargas y el
+   botón de ocultar, y el cuadro con el texto si se quiere ver. */
+function descargasYTextoDelPlano(e) {
+  if (!e) return null;
+  if (TEXTO_DEL_PLANO.oculto === null) TEXTO_DEL_PLANO.oculto = !textoDelPlanoVisible();
+  const ver = !TEXTO_DEL_PLANO.oculto;
+  return h('div', { clase: 'plano-texto-y-descarga' },
+    h('div', { clase: 'plano-texto-cab' },
+      h('span', { clase: 'meta' }, 'Lo que dice la voz'),
+      h('button', {
+        clase: 'mini fantasma', onclick: conmutarTextoDelPlano, 'aria-pressed': ver ? 'true' : 'false',
+        title: ver ? 'Ocultar el texto de este plano' : 'Ver el texto que dice la voz en este plano',
+      }, ver ? 'Ocultar el texto' : 'Ver el texto'),
+      h('span', { clase: 'crece' }),
+      descargarImagenPlano(e),
+      descargarTodasLasImagenes()),
+    ver ? textoDelPlano(e) : null);
+}
+
 function vistaPreviaLight() {
   const v = videoAbierto();
   const caja = h('div', { clase: 'light-previa' });
@@ -10426,6 +11214,7 @@ function vistaPreviaLight() {
      del texto de encima. */
   engancharSwipePrevia(marco);
   caja.appendChild(marco);
+  caja.appendChild(descargasYTextoDelPlano(e)); // descargar y leer lo que dice (imagenes-texto)
 
   /* LOS MANDOS. La flecha derecha es el gesto principal —pasar de escena y
      oírla— así que va grande y también en el teclado. */
@@ -11336,9 +12125,7 @@ function vistaVideoLight() {
     barraTandaLight('render'),
     trabajoVideoLight() ? conAyuda(
       'Corta el montaje donde esté. Los clips ya encadenados se quedan hechos.',
-      h('button', {
-        clase: 'mini peligro', onclick: () => cancelar(CLAVE_VIDEO_LIGHT),
-      }, 'Parar')) : null,
+      botonPararVideo()) : null,
     /* EL MISMO ORDEN QUE EN EL GUION: a la izquierda lo que se le hace al
        video, en medio lo que esta pasando, y a la derecha lo que se hace CON el
        video ya montado. Estaba mezclado --boton, pastilla, progreso, aplicar,
@@ -13187,6 +13974,7 @@ function verAportadaEnGrande(lista, ficha) {
     id: 'lupa', clase: 'lupa-aportadas',
     onclick: ev => { if (ev.target === capa || ev.target === imagen) cerrar(); },
   },
+    botonCerrarCapa(() => cerrar()),
     lista.length > 1 ? h('button', { clase: 'lupa-flecha izq', title: 'anterior (←)',
       onclick: ev => { ev.stopPropagation(); mover(-1); } }, '‹') : null,
     imagen,
@@ -15337,7 +16125,7 @@ const INICIO = { abierta: false, paso: 0, arrancando: false, accesoFallido: '' }
    `estadoConfig()` (las claves y las cuentas del CLI, que son las mismas que
    ve Configuración). */
 const TARJETAS_INICIO = [
-  { id: 'bienvenida', titulo: 'Bienvenido a Automatización Contenido Studio', pinta: tarjetaBienvenidaInicio },
+  { id: 'bienvenida', titulo: 'Bienvenido a CrearIA Studio', pinta: tarjetaBienvenidaInicio },
   { id: 'claude', titulo: '1 · Tu cuenta de Claude', pinta: tarjetaClaudeInicio },
   { id: 'openai', titulo: '2 · La clave de OpenAI (imágenes)', pinta: tarjetaOpenAIInicio },
   { id: 'cartesia', titulo: '3 · La clave de Cartesia (voz)', pinta: tarjetaCartesiaInicio },
@@ -16147,6 +16935,7 @@ function pintarAsistente() {
   burbuja.classList.toggle('dudosa', listo && !!(estado && estado.aviso));
   burbuja.classList.toggle('pensando', ocupada);
   burbuja.classList.toggle('aviso', ASISTENTE.sinLeer && !ocupada);
+  pintarEstadoAsistenteMenu();  // «Asistente listo» en el menú lateral (diseno-crearia)
   burbuja.title = listo
     ? (estado && estado.aviso ? `Asistente: conectado; la última llamada falló (${estado.aviso})`
       : 'Asistente: pregunta lo que sea del Estudio')
@@ -16446,7 +17235,10 @@ function bloqueLlevaDelVideo() {
         cargar();
       }
     }));
-    caja.appendChild(ajustesDelMontaje({ tipo: 'video', pid: v.pid }, v.lleva));
+    /* EN EL ENCARGO SE GUARDA SIN MONTAR (`diferir`, 19-10-2026): se tocan
+       varias cosas seguidas y se montan todas a la vez con «Aplicar y volver
+       a montar». La pantalla Vídeo sigue montando con cada cambio. */
+    caja.appendChild(ajustesDelMontaje({ tipo: 'video', pid: v.pid, diferir: true }, v.lleva));
   };
   const cargar = async () => {
     await leerLlevaDelVideo(v);
@@ -16576,6 +17368,8 @@ function ajustesDelMontaje(modo, lleva) {
     vaciar(caja);
     caja.appendChild(h('div', { clase: 'ajustes-cab' }, h('b', {}, 'Ajustes del montaje'),
       h('span', { clase: 'meta' }, ' · todo automático si no tocas nada; nada de esto paga imágenes')));
+    const franja = franjaSinAplicar(modo, est);
+    if (franja) caja.appendChild(franja);
     if (lleva.musica !== false) caja.appendChild(filaAjuste(modo, est, 'musica', pintar));
     if (lleva.subtitulos !== false) caja.appendChild(filaAjuste(modo, est, 'subtitulos', pintar));
     caja.appendChild(filaAjuste(modo, est, 'logo', pintar));
@@ -16595,6 +17389,38 @@ function ajustesDelMontaje(modo, lleva) {
   }
   pintar();
   return caja;
+}
+
+/* «Hay cambios del montaje sin aplicar» (solo en el Encargo, `diferir`): lo
+   guardado con `remontar: false` se monta todo de una vez. El servidor decide
+   si basta con volver a mezclar (segundos) o hay que rehacer capas y montaje. */
+function franjaSinAplicar(modo, est) {
+  if (!modo.diferir || modo.tipo !== 'video') return null;
+  const montaje = est.montaje || {};
+  if (!montaje.montado || !(est.sinAplicar || montaje.sin_aplicar)) return null;
+  const enMarcha = !!trabajoVideoLight();
+  return h('div', { clase: 'franja-sin-aplicar' },
+    h('span', { clase: 'crece' }, enMarcha ? 'Montando el vídeo con tus cambios…'
+      : 'Hay cambios del montaje sin aplicar'),
+    h('button', {
+      clase: 'mini primario', disabled: enMarcha || !!est.aplicando,
+      title: 'Monta el vídeo una sola vez con todo lo cambiado: ninguna imagen, gratis',
+      onclick: () => aplicarMontajePendiente(modo, est),
+    }, est.aplicando ? 'Aplicando…' : 'Aplicar y volver a montar'));
+}
+
+async function aplicarMontajePendiente(modo, est) {
+  est.aplicando = true;
+  if (est.repintar) est.repintar();
+  try {
+    const r = await pedir(`${API.proyecto(modo.pid)}/montaje/aplicar`, { method: 'POST' });
+    est.sinAplicar = false;
+    if (est.montaje) { est.montaje.sin_aplicar = false; est.montaje.pendiente = false; }
+    if (est.subtitulos) est.subtitulos.pendiente = false;
+    avisoDeMontaje(r, r.solo_mezcla ? 'Cambios del montaje (solo la mezcla)' : 'Cambios del montaje');
+  } catch (e) { toast(e.message, true); }
+  est.aplicando = false;
+  if (est.repintar) est.repintar();
 }
 
 async function cargarAjustesVideo(modo, est) {
@@ -16713,13 +17539,30 @@ function resumenAjuste(modo, est, cual) {
 }
 
 /* Lo que devuelve la API al cambiar algo que vuelve a montar el vídeo. */
-function avisoDeMontaje(r, quePasa) {
+function avisoDeMontaje(r, quePasa, modo) {
+  if (modo && modo.diferir && !(r && r.trabajo_id)) {
+    // el Encargo: guardado, y se aplica con lo demás en un solo montaje
+    const est = estadoAjustes(modo);
+    est.sinAplicar = true;
+    toast(`${quePasa}: guardado. Se aplica con «Aplicar y volver a montar»`);
+    if (est.repintar) est.repintar();
+    return;
+  }
   if (r && r.trabajo_id) {
     toast(`${quePasa}: volviendo a montar el vídeo, sin dibujar nada`);
     seguirTrabajo(CLAVE_VIDEO_LIGHT, r.trabajo_id, async trabajo => {
       if (trabajo.estado === 'listo') toast(`${quePasa}: el vídeo ya está montado de nuevo`);
+      // CANCELADO NO ES UN FALLO: el MP4 es el de antes y el cambio sigue
+      // guardado (en un montaje cancelado no se toca ninguna versión)
+      else if (trabajo.estado === 'cancelado') {
+        toast('Cancelado: el vídeo sigue siendo el de antes. El cambio está guardado '
+          + 'y se aplicará al volver a montar.');
+      }
       try { await recargarVideoAbierto(); } catch (e) { /* se relee al volver */ }
     });
+    // el «Parar» y la barra salen YA: sin repintar no aparecían hasta el
+    // siguiente repintado (y no había cómo parar un montaje recién lanzado)
+    if (MODULOS.actual === 'crear') pintarLight();
   } else if (r && r.montado) {
     toast(`${quePasa}: guardado. Se aplicará al volver a montar el vídeo (hay cosas pendientes)`);
   } else {
@@ -16743,9 +17586,9 @@ function editorMusica(modo, est, repintar) {
       if (borrador) { op.presencia = n.id; repintar(); return; }
       try {
         const r = await pedir(`${API.proyecto(modo.pid)}/musica/presencia`,
-          { method: 'PUT', cuerpo: { presencia: n.id } });
+          { method: 'PUT', cuerpo: { presencia: n.id, remontar: !modo.diferir } });
         est.musica.presencia = Object.assign({}, est.musica.presencia, { presencia: r.presencia, elegida: true });
-        if (r.cambiado) avisoDeMontaje(r, 'Música');
+        if (r.cambiado) avisoDeMontaje(r, 'Música', modo);
       } catch (e) { toast(e.message, true); }
       repintar();
     },
@@ -16784,10 +17627,10 @@ function editorMusica(modo, est, repintar) {
     }
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/sonido`, {
-        method: 'PUT', cuerpo: { musica: nuevo || {}, remontar: true } });
+        method: 'PUT', cuerpo: { musica: nuevo || {}, remontar: !modo.diferir } });
       est.musica.tema = nuevo || null;
       if (!nuevo) est.busqueda.abierta = false;
-      avisoDeMontaje(r, nuevo ? 'Música' : 'Música automática');
+      avisoDeMontaje(r, nuevo ? 'Música' : 'Música automática', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   }
@@ -16833,9 +17676,9 @@ function volumenFinoMusica(modo, est, repintar) {
     }
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/sonido`, {
-        method: 'PUT', cuerpo: { musica_db: valor, remontar: true } });
+        method: 'PUT', cuerpo: { musica_db: valor, remontar: !modo.diferir } });
       est.musica.db = valor;
-      if (r.cambiado !== false) avisoDeMontaje(r, 'Volumen de la música');
+      if (r.cambiado !== false) avisoDeMontaje(r, 'Volumen de la música', modo);
     } catch (e) { toast(e.message, true); }
     est.dbEnVuelo = undefined;
     repintar();
@@ -17031,17 +17874,17 @@ function editorEfectos(modo, est, repintar) {
   const volumen = async nivel => {
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/sonido/efectos/volumen`, {
-        method: 'PUT', cuerpo: { nivel } });
+        method: 'PUT', cuerpo: { nivel, remontar: !modo.diferir } });
       est.efectosVolumen = r.nivel;
-      if (r.cambiado) avisoDeMontaje(r, 'Volumen de los efectos');
+      if (r.cambiado) avisoDeMontaje(r, 'Volumen de los efectos', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   };
   const vetar = async (papel, ef, quitar) => {
     try {
       const r = await pedir(API.sonidoVetados(modo.pid), {
-        method: 'POST', cuerpo: { efecto: ef, papel, quitar: !!quitar, remontar: true } });
-      avisoDeMontaje(r, quitar ? 'Efecto devuelto' : 'Efecto descartado');
+        method: 'POST', cuerpo: { efecto: ef, papel, quitar: !!quitar, remontar: !modo.diferir } });
+      avisoDeMontaje(r, quitar ? 'Efecto devuelto' : 'Efecto descartado', modo);
     } catch (e) { toast(e.message, true); }
     await releer();
   };
@@ -17067,11 +17910,11 @@ function editorEfectos(modo, est, repintar) {
   const fijar = async (papel, ficha) => {
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/sonido/efecto`, {
-        method: 'PUT', cuerpo: { papel, efecto: ficha || null, remontar: true } });
+        method: 'PUT', cuerpo: { papel, efecto: ficha || null, remontar: !modo.diferir } });
       est.fijos = r.fijos || [];
       est.efectos = Object.assign({}, est.efectos, { [papel]: r.efectos || [] });
       if (ficha) bf.papel = '';
-      avisoDeMontaje(r, ficha ? 'Efecto' : 'Efecto automático');
+      avisoDeMontaje(r, ficha ? 'Efecto' : 'Efecto automático', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   };
@@ -17179,10 +18022,11 @@ function editorSubtitulos(modo, est, repintar) {
       return;
     }
     try {
-      await pedir(`${API.proyecto(modo.pid)}/subtitulos`, { method: 'PUT', cuerpo: cambios });
+      const r = await pedir(`${API.proyecto(modo.pid)}/subtitulos`, { method: 'PUT', cuerpo: cambios });
       est.subtitulos = await pedir(`${API.proyecto(modo.pid)}/subtitulos`);
+      if (modo.diferir && r.cambiado) est.sinAplicar = true;
     } catch (e) { toast(e.message, true); }
-    repintar();
+    if (modo.diferir && est.repintar) est.repintar(); else repintar();
   };
   const filaDe = (etiqueta, opciones, valor, clave, ayuda) => h('div', { clase: 'campo' },
     h('label', {}, etiqueta),
@@ -17213,7 +18057,9 @@ function editorSubtitulos(modo, est, repintar) {
     pie.appendChild(h('button', { clase: 'mini', onclick: () => cambiar({ automatico: true }) },
       'Volver a los del estilo'));
   }
-  if (!borrador && actual.montado && actual.pendiente) {
+  if (!borrador && modo.diferir && actual.montado && actual.pendiente) {
+    pie.appendChild(h('span', { clase: 'meta' }, 'se aplican con «Aplicar y volver a montar», arriba'));
+  } else if (!borrador && actual.montado && actual.pendiente) {
     pie.appendChild(h('button', {
       clase: 'mini primario',
       onclick: async () => {
@@ -17729,8 +18575,9 @@ function editorMontaje(modo, est, repintar) {
       if (transiciones) cuerpo.transiciones = transiciones;
       est.montaje = await pedir(`${API.proyecto(modo.pid)}/montaje`, { method: 'PUT', cuerpo });
       MONTAJE_PLANOS.datos = null;   // «Como el vídeo (…)» dice el de ahora
+      if (modo.diferir && est.montaje.cambiado) est.sinAplicar = true;
     } catch (err) { toast(err.message, true); }
-    repintar();
+    if (modo.diferir && est.repintar) est.repintar(); else repintar();
   };
   const botones = (lista, valor, clave) => h('div', { clase: 'herramientas' },
     ...lista.map(([id, nombre]) => h('button', {
@@ -17782,6 +18629,8 @@ function editorMontaje(modo, est, repintar) {
     pie.appendChild(h('span', { clase: 'meta' }, esCortoElEncargo(modo.e, datos)
       ? 'Automático en un vídeo de hasta 2 minutos: vivo, subtítulos de redes, gancho, cifras y barra.'
       : 'Automático en un vídeo largo: lo de siempre.'));
+  } else if (modo.diferir && est.montaje.montado && est.montaje.pendiente) {
+    pie.appendChild(h('span', { clase: 'meta' }, 'se aplica con «Aplicar y volver a montar», arriba'));
   } else if (est.montaje.montado && est.montaje.pendiente) {
     pie.appendChild(h('button', {
       clase: 'mini primario',
@@ -18046,9 +18895,10 @@ function editorLogo(modo, est, repintar) {
         op.logo = Object.assign({ posicion: 'arriba_derecha', tamano: 0.12, opacidad: 0.9 },
           op.logo || {}, { fichero: r.nombre });
       } else {
-        const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'POST', cuerpo });
+        const r = await pedir(`${API.proyecto(modo.pid)}/logo${modo.diferir ? '?remontar=0' : ''}`,
+          { method: 'POST', cuerpo });
         est.logo = r.logo;
-        avisoDeMontaje(r, 'Logo');
+        avisoDeMontaje(r, 'Logo', modo);
       }
     } catch (e) { toast(e.message, true); }
     repintar();
@@ -18056,18 +18906,20 @@ function editorLogo(modo, est, repintar) {
   async function usarDelProyecto() {
     if (borrador) { op.logo = null; delete op.logo; repintar(); return; }
     try {
-      const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'PUT', cuerpo: { usar: delProyecto.logo } });
+      const r = await pedir(`${API.proyecto(modo.pid)}/logo`,
+        { method: 'PUT', cuerpo: { usar: delProyecto.logo, remontar: !modo.diferir } });
       est.logo = r.logo;
-      avisoDeMontaje(r, 'Logo');
+      avisoDeMontaje(r, 'Logo', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   }
   async function quitar() {
     if (borrador) { op.logo = false; repintar(); return; }
     try {
-      const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'PUT', cuerpo: { quitar: true } });
+      const r = await pedir(`${API.proyecto(modo.pid)}/logo`,
+        { method: 'PUT', cuerpo: { quitar: true, remontar: !modo.diferir } });
       est.logo = null;
-      avisoDeMontaje(r, 'Logo quitado');
+      avisoDeMontaje(r, 'Logo quitado', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   }
@@ -18078,9 +18930,10 @@ function editorLogo(modo, est, repintar) {
       return;
     }
     try {
-      const r = await pedir(`${API.proyecto(modo.pid)}/logo`, { method: 'PUT', cuerpo: cambios });
+      const r = await pedir(`${API.proyecto(modo.pid)}/logo`,
+        { method: 'PUT', cuerpo: Object.assign({ remontar: !modo.diferir }, cambios) });
       est.logo = r.logo || est.logo;
-      if (r.trabajo_id || r.montado !== undefined) avisoDeMontaje(r, 'Logo');
+      if (r.trabajo_id || r.montado !== undefined) avisoDeMontaje(r, 'Logo', modo);
     } catch (e) { toast(e.message, true); }
     repintar();
   }
@@ -18102,7 +18955,13 @@ function vistaPreviaLogo(url, logo) {
 function bloqueEstiloDelVideo() {
   const v = APP.light.video;
   const caja = h('div', { clase: 'estilo-del-video' });
+  /* «CAMBIAR DE ESTILO…» VA SIEMPRE DEBAJO (arreglos del 19-10): un vídeo
+     cuyo estilo se borró se quedaba aquí con una frase y ningún botón. */
   const pintar = () => {
+    pintarLoDelEstilo();
+    if (v.cambiosEstilo) caja.appendChild(cambioDeEstiloLight(pintar));
+  };
+  const pintarLoDelEstilo = () => {
     vaciar(caja);
     const datos = v.cambiosEstilo;
     if (!datos) { caja.appendChild(h('div', { clase: 'cargando' }, 'comparando con el estilo…')); return; }
@@ -18179,6 +19038,7 @@ function bloqueEstiloDelVideo() {
      margen de unos segundos para no preguntar en cada repintado. */
   if (v.cambiosEstiloDe !== v.pid) {
     v.cambiosEstiloDe = v.pid; v.cambiosEstilo = null; v.partesEstilo = {};
+    if ((v.cambioEstilo || {}).pid !== v.pid) v.cambioEstilo = null;
   }
   if (!v.cambiosEstiloCargando
     && (!v.cambiosEstilo || Date.now() - (v.cambiosEstiloEn || 0) > 4000)) cargar();
@@ -18271,6 +19131,135 @@ function listaConY(lista) {
 function usdCorto(usd) {
   const n = Number(usd || 0);
   return `${n.toFixed(n < 0.1 ? 3 : 2)} $`;
+}
+
+/* ============================================ CAMBIAR DE ESTILO UN VÍDEO
+ *
+ * Arreglos del 19-10 (4). Un vídeo se queda con la copia de su estilo; si el
+ * estilo se borra (o el vídeo llega de otra máquina) quedaba huérfano: «Su
+ * estilo» decía «ya no existe» y no había nada que pulsar. Ahora se elige otro
+ * estilo, se ve qué partes cambiarían con su coste (`GET .../estilo/cambios
+ * ?estilo=<otro>`, no escribe nada) y se pasa a él trayendo solo lo marcado
+ * (`PUT .../estilo`). Sin marcar nada solo cambia el estilo apuntado: nada se
+ * rehace. Si el estilo está en la papelera, además, «Restaurarlo». El estado
+ * vive en `v.cambioEstilo` para que el repintado del encargo no lo pierda. */
+function cambioDeEstiloLight(repintar) {
+  const v = APP.light.video;
+  const datos = v.cambiosEstilo || {};
+  const c = v.cambioEstilo || (v.cambioEstilo = { pid: v.pid, abierto: false, partes: {} });
+  const corriendo = !!trabajoVideoLight();
+  const actual = datos.actual || (datos.estilo || {}).id || v.estilo || '';
+  const caja = h('div', { clase: 'cambio-de-estilo' });
+  if ((datos.estilo || {}).en_papelera) {
+    caja.appendChild(h('div', { clase: 'caja-aviso fila' },
+      h('span', { clase: 'crece' }, `«${datos.estilo.nombre || actual}» está en la papelera. `
+        + 'El vídeo sigue igual; restáuralo para seguir usándolo, o pásalo a otro estilo.'),
+      h('button', { clase: 'mini', onclick: () => restaurarEstiloDelVideo(actual) }, 'Restaurarlo')));
+  }
+  if (!c.abierto) {
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', disabled: corriendo,
+        onclick: () => { c.abierto = true; repintar(); } }, 'Cambiar de estilo…')));
+    return caja;
+  }
+  const otros = presetsLight().filter(p => p.id !== actual);
+  const elegir = h('select', {
+    onchange: ev => {
+      ev.stopPropagation();              // no es un campo del encargo
+      verCambioDeEstilo(ev.target.value, repintar);
+    },
+  }, h('option', { value: '' }, otros.length ? 'Elige el estilo nuevo…' : 'no hay otros estilos'),
+  ...otros.map(p => h('option', { value: p.id, selected: p.id === c.destino }, p.nombre || p.id)));
+  caja.appendChild(h('div', { clase: 'fila' }, h('b', {}, 'Pasar este vídeo a otro estilo'), elegir));
+  const previa = c.previa;
+  if (c.cargando) caja.appendChild(h('div', { clase: 'cargando' }, 'comparando con ese estilo…'));
+  else if (previa && previa.por_que_no) caja.appendChild(h('div', { clase: 'caja-aviso' }, previa.por_que_no));
+  else if (previa) {
+    const cambian = (previa.partes || []).filter(p => p.cambia);
+    caja.appendChild(h('div', { clase: 'meta' }, cambian.length
+      ? 'Marca lo que quieras traer de ese estilo. Sin marcar nada, el vídeo solo cambia de '
+        + 'estilo apuntado y no se rehace nada.'
+      : 'Ese estilo no cambiaría nada de este vídeo: solo cambia el estilo apuntado.'));
+    for (const parte of cambian) {
+      const coste = parte.usd === null ? 'cuesta según tu plan de voz'
+        : parte.usd_hasta !== undefined
+          ? `≈ ${usdCorto(parte.usd)} de voz y hasta ${usdCorto(parte.usd_hasta)} si cambian todas las imágenes`
+          : (parte.usd ? `≈ ${usdCorto(parte.usd)}` : 'gratis');
+      caja.appendChild(h('label', { clase: 'parte-estilo' },
+        h('input', { type: 'checkbox', checked: !!c.partes[parte.id],
+          onchange: ev => { ev.stopPropagation(); c.partes[parte.id] = ev.target.checked; repintar(); } }),
+        h('span', { clase: 'crece' }, h('b', {}, parte.nombre), h('span', { clase: 'meta' }, ` · ${parte.rehace}`)),
+        h('span', { clase: 'pastilla' + (parte.usd !== 0 ? ' coste' : '') }, coste)));
+    }
+    const cli = previa.cliente || {};
+    const nombreDe = cid => (fichaCliente(cid) || {}).nombre || cid;
+    if (cli.antes && cli.antes === cli.ahora) {
+      caja.appendChild(h('div', { clase: 'meta' }, `Se queda en el proyecto «${nombreDe(cli.antes)}».`));
+    } else if (cli.ahora !== cli.antes) {
+      caja.appendChild(h('div', { clase: 'caja-aviso' }, cli.ahora
+        ? `Pasa al proyecto «${nombreDe(cli.ahora)}», el de ese estilo.`
+        : 'Sale de su proyecto: ese estilo no es de ninguno.'));
+    }
+  }
+  const elegidas = ((previa && previa.partes) || []).filter(p => p.cambia && c.partes[p.id]);
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini primario',
+      disabled: corriendo || !c.destino || !previa || !!previa.por_que_no || c.cargando,
+      onclick: () => pasarAEstiloLight(elegidas) },
+    elegidas.length ? `Pasar a este estilo y traer ${elegidas.length === 1 ? 'esto' : 'lo marcado'}`
+      : 'Pasar a este estilo'),
+    h('button', { clase: 'mini', onclick: () => { v.cambioEstilo = null; repintar(); } }, 'Cancelar')));
+  return caja;
+}
+
+async function verCambioDeEstilo(id, repintar) {
+  const v = APP.light.video;
+  const pid = v.pid;
+  const c = v.cambioEstilo;
+  if (!c) return;
+  Object.assign(c, { destino: id, previa: null, partes: {}, cargando: !!id });
+  repintar();
+  if (!id) return;
+  try {
+    const previa = await pedir(`${API.proyecto(pid)}/estilo/cambios?estilo=${encodeURIComponent(id)}`);
+    if (v.pid !== pid || v.cambioEstilo !== c || c.destino !== id) return;
+    c.previa = previa;
+  } catch (e) {
+    if (v.cambioEstilo === c) c.previa = { por_que_no: e.message };
+  }
+  c.cargando = false;
+  if (v.cambioEstilo === c) repintar();
+}
+
+async function pasarAEstiloLight(partes) {
+  const v = APP.light.video;
+  const c = v.cambioEstilo || {};
+  const ficha = fichaLight(c.destino) || {};
+  const lista = partes.map(p => `• ${p.nombre}: ${p.rehace}`).join('\n');
+  if (!confirm(`Pasar «${v.nombre}» al estilo «${ficha.nombre || c.destino}».\n\n`
+    + (partes.length ? `Se trae:\n${lista}\n\nAhora no se genera nada.`
+      : 'No se trae nada: solo cambia el estilo apuntado y no se rehace nada.'))) return;
+  try {
+    const r = await pedir(`${API.proyecto(v.pid)}/estilo`, {
+      method: 'PUT', cuerpo: { estilo: c.destino, partes: partes.map(p => p.id) },
+    });
+    v.cambioEstilo = null;
+    v.cambiosEstilo = null;
+    toast(`Ahora es del estilo «${(r.estilo || {}).nombre || c.destino}».`
+      + ((r.traidas || []).length ? ' Debajo tienes el siguiente paso.' : ''));
+    await cargarClientes();
+    await cargarVideoLight(v.pid);
+  } catch (e) { toast(`no se ha podido cambiar de estilo: ${e.message}`, true); }
+}
+
+async function restaurarEstiloDelVideo(id) {
+  const v = APP.light.video;
+  try {
+    await pedir(`${BASE}/api/presets-canal/papelera/${encodeURIComponent(id)}/restaurar`, { method: 'POST' });
+    toast('Estilo restaurado: vuelve a estar en tus estilos.');
+    v.cambiosEstilo = null;
+    await cargarGaleriaLight(true);
+  } catch (e) { toast(`no se ha podido restaurar: ${e.message}`, true); }
 }
 
 async function traerEstiloLight(partes, total) {
@@ -18455,18 +19444,140 @@ function seccionManual() {
   return caja;
 }
 
-/* El botón «?»: abre Configuración con la guía desplegada y a la vista. */
+/* ============================================================ EL PANEL DE AYUDA
+ *
+ * El «?» de la cabecera (rama `diseno-crearia`, 19-10-2026). Antes abría
+ * Configuración con el manual desplegado; ahora tiene su propio panel: el
+ * manual (`docs/MANUAL.md`) ABIERTO EN EL APARTADO DE LA PANTALLA EN LA QUE
+ * SE ESTÁ, el resto del manual plegado, todas las guías de escritura, la guía
+ * de inicio y las novedades. Solo lee.
+ */
+const AYUDA = { abierta: false, montada: false };
+
+/* Qué apartado del manual (sus `## Títulos`) va con la pantalla de ahora. */
+function apartadosDeLaPantalla() {
+  if (!$('#config').classList.contains('plegado')) return ['Configuración'];
+  if (MODULOS.actual === 'inicio') return ['Inicio'];
+  if (MODULOS.actual === 'publicar') return ['Publicar'];
+  if (MODULOS.actual === 'automatizar') return ['Automatizar'];
+  const vista = APP.light.vista;
+  if (vista === 'preset' || vista === 'crear' || vista === 'generando') return ['Estilos'];
+  if (vista === 'elegido') {
+    const sub = (APP.light.video || {}).vista;
+    if (sub === 'guion') return ['Guion'];
+    if (sub === 'previa') return ['Imágenes'];
+    if (sub === 'video') return ['Vídeo'];
+    return ['Encargo'];
+  }
+  return ['La idea en una frase', 'Proyectos', 'Estilos'];
+}
+
+/* El manual partido por sus `## `: [{titulo, texto}]. */
+function apartadosDelManual(texto) {
+  const salida = [];
+  String(texto || '').replace(/\r/g, '').split('\n').forEach(linea => {
+    const m = /^## (.+)$/.exec(linea);
+    if (m) salida.push({ titulo: m[1].trim(), lineas: [] });
+    else if (salida.length) salida[salida.length - 1].lineas.push(linea);
+  });
+  return salida.map(a => ({ titulo: a.titulo, texto: a.lineas.join('\n').trim() }));
+}
+
+function montarAyuda() {
+  if (AYUDA.montada || !$('#ayuda')) return;
+  AYUDA.montada = true;
+  $('#btn-cerrar-ayuda').addEventListener('click', () => conmutarAyuda(false));
+  document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && AYUDA.abierta) conmutarAyuda(false); });
+}
+
+function conmutarAyuda(abrir) {
+  montarAyuda();
+  const cajon = $('#ayuda');
+  if (!cajon) return;
+  const quiero = abrir === undefined ? cajon.classList.contains('plegado') : !!abrir;
+  AYUDA.abierta = quiero;
+  cajon.classList.toggle('plegado', !quiero);
+  document.body.classList.toggle('ayuda-abierta', quiero);
+  const boton = $('#btn-ayuda');
+  if (boton) boton.setAttribute('aria-expanded', quiero ? 'true' : 'false');
+  if (!quiero) return;
+  pintarAyuda();
+  if (!SISTEMA.manual) { SISTEMA.pedido = true; cargarSistema().then(pintarAyuda); }
+  cargarGuias().then(pintarAyuda).catch(() => {});
+}
+
+/* El «?» (y «Guía» del pie): el panel de Ayuda en el apartado de esta pantalla. */
 function abrirManual() {
-  SISTEMA.manualAbierto = true;
+  AYUDA.apartados = apartadosDeLaPantalla();
+  conmutarAyuda(true);
+}
+
+function pintarAyuda() {
+  const caja = $('#cuerpo-ayuda');
+  if (!caja || !AYUDA.abierta) return;
+  vaciar(caja);
+  const deAqui = AYUDA.apartados || apartadosDeLaPantalla();
+  const manual = SISTEMA.manual;
+  const todos = apartadosDelManual(manual && manual.texto);
+  const casa = a => deAqui.some(t => a.titulo.startsWith(t));
+  const suyos = todos.filter(casa);
+  const seccion = h('section', { clase: 'ayuda-seccion ayuda-pantalla' },
+    h('span', { clase: 'etiqueta-inicio' }, 'Esta pantalla'));
+  if (SISTEMA.error) seccion.appendChild(h('div', { clase: 'meta' }, SISTEMA.error));
+  else if (!manual) seccion.appendChild(h('div', { clase: 'cargando' }, 'leyendo el manual…'));
+  else if (!suyos.length) seccion.appendChild(h('div', { clase: 'meta' }, 'Esta pantalla aún no tiene apartado en el manual.'));
+  suyos.forEach(a => seccion.appendChild(h('div', { clase: 'apartado-manual' },
+    h('h3', {}, a.titulo),
+    h('div', { clase: 'novedades' }, textoConFormato(unirLineas(a.texto.replace(/^#{3,6} (.+)$/gm, '**$1**')))))));
+  caja.appendChild(seccion);
+
+  const otras = h('section', { clase: 'ayuda-seccion' }, h('span', { clase: 'etiqueta-inicio' }, 'Más ayuda'),
+    h('div', { clase: 'fila botones-ayuda' },
+      h('button', { type: 'button', clase: 'mini', title: 'Las tarjetas de la primera vez: qué hace falta y dónde se consigue',
+        onclick: () => { conmutarAyuda(false); abrirInicio(0); } }, 'Guía de inicio'),
+      h('button', { type: 'button', clase: 'mini', title: 'Lo que ha cambiado en el Studio',
+        onclick: () => { conmutarAyuda(false); abrirNovedades(); } }, 'Novedades')));
+  caja.appendChild(otras);
+
+  const guias = h('section', { clase: 'ayuda-seccion' }, h('span', { clase: 'etiqueta-inicio' }, 'Guías de escritura'),
+    h('div', { clase: 'meta' }, 'Cómo escribir cada campo para que el sistema lo entienda, con plantilla y ejemplo.'));
+  if (!GUIAS.lista) guias.appendChild(h('div', { clase: 'cargando' }, 'leyendo las guías…'));
+  else {
+    guias.appendChild(h('ul', { clase: 'lista-guias' }, GUIAS.lista.map(g => h('li', {},
+      h('button', { type: 'button', clase: 'mini fantasma boton-guia-ayuda', title: g.donde || '',
+        onclick: () => abrirGuia(g.id) }, `✦ ${g.titulo}`),
+      g.donde ? h('span', { clase: 'meta' }, g.donde) : null))));
+  }
+  caja.appendChild(guias);
+
+  if (todos.length) {
+    const resto = h('section', { clase: 'ayuda-seccion' }, h('span', { clase: 'etiqueta-inicio' }, 'Todo el manual'));
+    todos.filter(a => !casa(a)).forEach(a => {
+      const d = h('details', { clase: 'apartado-manual plegado-manual' }, h('summary', {}, a.titulo));
+      d.addEventListener('toggle', () => {
+        if (d.open && d.childNodes.length === 1) d.appendChild(h('div', { clase: 'novedades' }, textoConFormato(unirLineas(a.texto.replace(/^#{3,6} (.+)$/gm, '**$1**')))));
+      });
+      resto.appendChild(d);
+    });
+    caja.appendChild(resto);
+  }
+}
+
+/* «Novedades» (el pie, la Ayuda, la tarjeta del Inicio): Configuración con
+   las novedades desplegadas y a la vista. */
+function abrirNovedades() {
+  SISTEMA.novedadesAbiertas = true;
   conmutarConfig(true);
   setTimeout(() => {
-    const caja = document.querySelector('.manual-config');
+    const caja = document.querySelector('.novedades-config');
     if (caja) { caja.open = true; caja.scrollIntoView({ block: 'start' }); }
   }, 400);
 }
 
 function seccionNovedades() {
-  const caja = h('details', { clase: 'bloque-config plegable-config' });
+  const caja = h('details', { clase: 'bloque-config plegable-config novedades-config',
+    open: !!SISTEMA.novedadesAbiertas });
+  caja.addEventListener('toggle', () => { SISTEMA.novedadesAbiertas = caja.open; });
   const nov = SISTEMA.novedades;
   caja.appendChild(h('summary', {},
     h('h3', {}, 'Novedades'),
@@ -18543,7 +19654,7 @@ function seccionNotas() {
       h('button', {
         clase: 'mini',
         onclick: () => copiarTexto(
-          'NOTAS DE MEJORAS de Automatización Contenido Studio\n\n'
+          'NOTAS DE MEJORAS de CrearIA Studio\n\n'
           + (pendientes.length ? 'PENDIENTES:\n' + pendientes.map(n => `- ${n.texto}`).join('\n') : 'Sin pendientes.')
           + (hechas.length ? '\n\nHECHAS:\n' + hechas.map(n => `- ${n.texto}`).join('\n') : '')),
       }, 'Copiar todas')));
@@ -19448,15 +20559,21 @@ function contarAvisosPublicar() {
   pintarBarraModulos();
 }
 
+/* LA BARRA DE MÓDULOS. En el móvil y la tableta, una fila debajo de la
+   cabecera (como siempre); en el ordenador (estilo.css, ≥1200 px) es el MENÚ
+   LATERAL del diseño CrearIA: los módulos, Configuración, el gasto del mes y
+   si el asistente está listo. Es el mismo nodo: solo cambia cómo se coloca. */
 function pintarBarraModulos() {
   const barra = $('#barra-modulos');
   if (!barra) return;
+  document.body.classList.add('con-menu');
   vaciar(barra);
-  [['inicio', 'Inicio', 'Lo que pasa hoy y los tres módulos'],
+  const enlaces = h('div', { clase: 'modulos-enlaces' });
+  [['inicio', 'Inicio', 'Tu panel: lo que pasa hoy y lo que te necesita'],
     ['crear', 'Crear', 'Tus estilos y tus vídeos'],
     ['publicar', 'Publicar', 'Cola, calendario, textos por red y cuentas'],
-    ['automatizar', 'Automatizar', 'La Parrilla de guiones (el piloto automático, próximamente)']]
-    .forEach(([id, texto, ayuda]) => barra.appendChild(h('a', {
+    ['automatizar', 'Automatizar', 'La Parrilla de guiones y Analizar cuentas']]
+    .forEach(([id, texto, ayuda]) => enlaces.appendChild(h('a', {
       href: '#', clase: `boton-modulo${MODULOS.actual === id ? ' activo' : ''}`, title: ayuda,
       'aria-current': MODULOS.actual === id ? 'page' : null,
       datos: { modulo: id },
@@ -19464,6 +20581,64 @@ function pintarBarraModulos() {
     }, texto, id === 'publicar' && PUB.avisos
       ? h('span', { clase: 'aviso-modulo', title: 'Envíos que fallaron o esperan tu OK' }, String(PUB.avisos))
       : null)));
+  enlaces.appendChild(h('a', {
+    href: '#', clase: 'boton-modulo modulo-config', title: 'Claves, cuentas, la paleta, novedades y notas',
+    onclick: ev => { ev.preventDefault(); conmutarConfig(true); },
+  }, 'Configuración'));
+  barra.appendChild(enlaces);
+  barra.appendChild(gastoDelMenu());
+  barra.appendChild(h('button', { type: 'button', id: 'menu-asistente', clase: 'menu-asistente',
+    title: 'Abrir el asistente', onclick: () => conmutarAsistente(true) }));
+  pintarEstadoAsistenteMenu();
+  if (!INI.resumen && !INI.pidiendoResumen) cargarResumenInicio();
+}
+
+/* «Asistente listo» abajo del menú: lo mismo que dice la burbuja. Lo llama
+   `pintarAsistente` cada vez que cambia. */
+function pintarEstadoAsistenteMenu() {
+  const nodo = $('#menu-asistente');
+  if (!nodo) return;
+  const estado = (typeof ASISTENTE !== 'undefined' && ASISTENTE.estado) || null;
+  const listo = !!(estado && estado.listo);
+  const clase = !estado ? 'mirando' : (!listo ? 'sin-sesion' : (estado.aviso ? 'dudoso' : 'listo'));
+  nodo.className = `menu-asistente ${clase}`;
+  vaciar(nodo).appendChild(h('span', { clase: 'punto-asistente', 'aria-hidden': 'true' }));
+  nodo.appendChild(document.createTextNode(!estado ? 'Asistente: mirando…'
+    : (!listo ? 'Asistente sin conectar' : (estado.aviso ? 'Asistente con aviso' : 'Asistente listo'))));
+}
+
+/* El gasto del mes en el menú: lo gastado y, si lo pusiste, tu tope. */
+function gastoDelMenu() {
+  const r = INI.resumen;
+  const caja = h('div', { clase: 'gasto-menu', title: 'Lo gastado este mes en todos los vídeos que puedes ver' });
+  caja.appendChild(h('span', { clase: 'gasto-etiqueta' }, 'Gasto del mes'));
+  if (!r) {
+    caja.appendChild(h('span', { clase: 'meta' }, 'mirando…'));
+    return caja;
+  }
+  const tope = (panelInicio().tope_usd || 0);
+  caja.appendChild(h('b', { clase: 'gasto-cifra' }, dolares(r.gasto_mes_usd)));
+  if (tope > 0) {
+    caja.appendChild(barraDeProgreso(r.gasto_mes_usd / tope, r.gasto_mes_usd > tope ? 'pasado' : ''));
+    caja.appendChild(h('span', { clase: 'meta' }, `de ${dolares(tope, true)} de tope`));
+  } else {
+    caja.appendChild(h('span', { clase: 'meta' }, 'sin tope (ponlo en Inicio → Personalizar)'));
+  }
+  return caja;
+}
+
+function dolares(n, redondo) {
+  const v = Number(n) || 0;
+  return `$ ${redondo && Number.isInteger(v) ? String(v) : v.toFixed(2).replace('.', ',')}`;
+}
+
+/* Una barra de progreso sin `style=""` (la CSP del proxy lo bloquea): el
+   ancho va por CSSOM en una variable, y el color, en estilo.css. */
+function barraDeProgreso(fraccion, clase) {
+  const pct = Math.max(0, Math.min(100, Math.round((Number(fraccion) || 0) * 100)));
+  return h('span', { clase: `barra-inicio ${clase || ''}`, role: 'progressbar',
+    'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(pct) },
+  h('span', { clase: 'barra-inicio-llena', estilo: `--lleno:${pct}%` }));
 }
 
 /* «CREAR» ABRE SIEMPRE «TUS PROYECTOS» (decisión del dueño, 19-10-2026). Antes
@@ -19482,8 +20657,7 @@ function entrarEnCrear() {
      segundo pintado apilaba otra entrada y «atrás» no volvía al módulo. */
   APP.light.vista = 'galeria';
   APP.light.desdeVideo = '';
-  const panel = $('#panel');
-  if (panel) panel.scrollTop = 0;
+  subirArriba('panel');
   irAModulo('crear');
   cargarGaleriaLight(true);
 }
@@ -19510,8 +20684,7 @@ function irAModulo(nombre, opciones) {
     pintarLight();
     return;
   }
-  const m = $('#modulo');
-  if (m) m.scrollTop = 0;
+  subirArriba('modulo');
   if (nombre === 'publicar') cargarPublicar();
   else if (nombre === 'inicio') cargarInicioModulos();
   else pintarModulo();
@@ -19539,8 +20712,11 @@ function pintarModulo() {
   const foco = document.activeElement && document.activeElement.dataset
     ? document.activeElement.dataset.foco : '';
   vaciar(m);
+  const volver = barraVolverModulo();  // «‹ Volver» (diseno-crearia)
+  if (volver) m.appendChild(volver);
   const contenido = h('div', { clase: 'contenido modulo-contenido' });
   m.appendChild(contenido);
+  m.appendChild(pieSistema());  // el pie, también en los módulos (diseno-crearia)
   try {
     if (MODULOS.actual === 'inicio') contenido.appendChild(vistaInicioModulos());
     else if (MODULOS.actual === 'publicar') contenido.appendChild(vistaPublicar());
@@ -19552,63 +20728,733 @@ function pintarModulo() {
   if (foco) {
     const campo = m.querySelector(`[data-foco="${foco}"]`);
     if (campo) {
-      campo.focus();
+      campo.focus({ preventScroll: true });
       // el cursor, al final: si no, buscar letra a letra escribía al revés
       try { if (campo.setSelectionRange && /^(text|search)$/.test(campo.type)) campo.setSelectionRange(campo.value.length, campo.value.length); } catch (e) { /* no aplica */ }
     }
   }
+  devolverScroll('modulo', claveScrollModulo);
 }
 
-/* -------------------------------------------------------------- INICIO */
+/* -------------------------------------------------------------- INICIO
+ *
+ * EL PANEL MIXTO (rama `diseno-crearia`, 19-10-2026): el saludo con lo que
+ * sale esta semana, las cifras del mes, lo que te necesita, la semana, los
+ * proyectos recientes, lo que se está generando y lo mejor de 7 días. Y «Arma
+ * tu panel»: qué tarjetas se ven, en qué orden y de qué tamaño.
+ *
+ * EL PANEL SE GUARDA POR USUARIO. Con login delante (`/api/me` da un nombre),
+ * en el servidor (`/api/inicio/panel`); sin él, en este navegador. No es param
+ * de ningún paso: no mueve ninguna firma (regla 1 de CLAUDE.md). Sin nada
+ * guardado se ve la vista «Producción», que es «el original».
+ *
+ * TODO LO DE AQUÍ SOLO LEE: las rutas de Publicar, `/api/inicio/resumen`, la
+ * Parrilla y las novedades. Abrir el Inicio no escribe nada.
+ */
+const INI = {
+  resumen: null, pidiendoResumen: false, errorResumen: '',
+  panel: undefined, usuario: '', editando: false, arrastra: null,
+  vistas7: null, parrilla: null, calendario: null, novedades: null,
+  relojGuardar: null,
+};
+
+/* ----------------------------------- LA ENTRADA Y EL «ATRÁS» QUE NO SALE
+ *
+ * (diseno-crearia, 19-10-2026, decisión del dueño)
+ *
+ * AL ENTRAR se abre el Inicio: la primera carga de la página (no una recarga
+ * ni un «atrás» desde otra web), sin un sitio concreto en la URL (un `#` de
+ * los de antes) ni `?entrada=crear`, que abre Crear como siempre (lo usa el
+ * recorrido para que sus escenarios empiecen donde empezaban).
+ *
+ * EL «ATRÁS» DEL MÓVIL YA NO SACA DEL STUDIO: al entrar, la entrada del
+ * historial con la que se cargó la página se convierte en CENTINELA y se
+ * empuja otra encima. Si un «atrás» llega a la centinela, se vuelve a empujar
+ * una entrada y se lleva a Tus proyectos (o al Inicio si ya se estaba en Tus
+ * proyectos), en vez de dejar que el navegador vuelva al login. Este oyente
+ * va ANTES que el de los módulos y el de las pestañas (se registra al leer el
+ * fichero; ellos, al arrancar) y les corta el paso: la centinela no es un
+ * sitio de nadie.
+ */
+function tipoDeCarga() {
+  try {
+    const n = performance.getEntriesByType('navigation')[0];
+    if (n && n.type) return n.type;
+  } catch (e) { /* navegador viejo */ }
+  return 'navigate';
+}
+
+function enTusProyectos() {
+  return MODULOS.actual === 'crear' && APP.light.vista === 'galeria' && !clienteElegido();
+}
+
+function montarEntrada() {
+  const tipo = tipoDeCarga();
+  let pedida = '';
+  try { pedida = new URLSearchParams(location.search).get('entrada') || ''; } catch (e) { pedida = ''; }
+  if (tipo === 'navigate') {
+    try {
+      history.replaceState({ centinela: true }, '');
+      history.pushState({}, '');
+    } catch (e) { /* sin historial: el «atrás» hace lo de siempre */ }
+    if (pedida !== 'crear' && !location.hash) irAModulo('inicio', { sinHistoria: true });
+    return;
+  }
+  // una recarga dentro de un módulo se queda en él (el sitio está en el historial)
+  const estado = history.state || {};
+  if (estado.modulo && estado.modulo !== 'crear') {
+    if (estado.pub) Object.assign(PUB, { seccion: estado.pub.seccion || 'cola', pid: estado.pub.pid || '' });
+    irAModulo(estado.modulo, { sinHistoria: true });
+  }
+}
+
+window.addEventListener('popstate', ev => {
+  if (!(ev.state && ev.state.centinela)) return;
+  ev.stopImmediatePropagation();
+  try { history.pushState({}, ''); } catch (e) { /* sin historial */ }
+  if (enTusProyectos()) {
+    irAModulo('inicio', { sinHistoria: true });
+    return;
+  }
+  if (APP.light.pendiente) volcarPresetLight();
+  pararPrevia();
+  recordarVideoLight('');
+  apuntarCliente('');
+  APP.light.vista = 'galeria';
+  APP.light.desdeVideo = '';
+  if (MODULOS.actual !== 'crear') irAModulo('crear', { sinHistoria: true });
+  else pintarLight();
+  cargarGaleriaLight(true);
+});
+
+/* «‹ Volver» arriba de cada pantalla de Publicar y Automatizar que no lo trae
+   (la ficha de un vídeo ya tiene «‹ La cola», y la de un guion «‹ Parrilla»):
+   para no depender del «atrás» del móvil. Desde la pantalla principal de un
+   módulo vuelve al Inicio. */
+function barraVolverModulo() {
+  const m = MODULOS.actual;
+  let destino = null;
+  if (m === 'publicar') {
+    if (PUB.seccion === 'ficha') return null;
+    destino = PUB.seccion === 'cola' || !PUB.seccion
+      ? ['al Inicio', () => irAModulo('inicio')] : ['a la cola', () => irASeccionPublicar('cola')];
+  } else if (m === 'automatizar') {
+    if (PAR.seccion === 'ficha') return null;
+    destino = PAR.seccion === 'parrilla' || !PAR.seccion
+      ? ['al Inicio', () => irAModulo('inicio')] : ['a la Parrilla', () => irASeccionParrilla('parrilla')];
+  } else return null;
+  return h('div', { clase: 'volver-modulo modulo-contenido' },
+    h('button', { type: 'button', clase: 'mini fantasma', title: `Volver ${destino[0]}`,
+      onclick: destino[1] }, '‹ Volver'),
+    h('span', { clase: 'meta' }, destino[0]));
+}
+
+const CATALOGO_PANEL = {
+  saludo: { nombre: 'Saludo y botones', que: 'Resumen de la semana y accesos rápidos' },
+  cifras: { nombre: 'Cifras del mes', que: 'Vídeos, programados, vistas, para publicar' },
+  necesitan: { nombre: 'Te necesitan', que: 'Fallos, envíos que esperan tu OK y listos para publicar' },
+  semana: { nombre: 'Esta semana', que: 'Publicaciones por día' },
+  recientes: { nombre: 'Proyectos recientes', que: 'Los últimos vídeos con su estado' },
+  marcha: { nombre: 'En marcha', que: 'Lo que se está generando ahora' },
+  mejor: { nombre: 'Lo mejor de 7 días', que: 'El vídeo con más vistas' },
+  gasto: { nombre: 'Gasto del mes', que: 'Lo gastado frente a tu tope' },
+  parrilla: { nombre: 'Parrilla', que: 'Guiones esperando en Automatizar' },
+  calendario: { nombre: 'Calendario', que: 'Lo programado en los próximos 30 días' },
+  clientes: { nombre: 'Por cliente', que: 'Vídeos y gasto de cada cliente este mes' },
+  novedades: { nombre: 'Novedades', que: 'Lo último que cambió en el Studio' },
+};
+
+const VISTAS_INICIO = {
+  produccion: { nombre: 'Producción', tarjetas: [['saludo', 'L'], ['cifras', 'L'], ['necesitan', 'M'],
+    ['semana', 'S'], ['recientes', 'M'], ['marcha', 'S'], ['mejor', 'S'], ['parrilla', 'S'], ['novedades', 'S']] },
+  publicacion: { nombre: 'Publicación', tarjetas: [['saludo', 'L'], ['necesitan', 'M'], ['semana', 'S'],
+    ['calendario', 'M'], ['mejor', 'S']] },
+  resultados: { nombre: 'Resultados', tarjetas: [['saludo', 'L'], ['cifras', 'L'], ['mejor', 'S'],
+    ['clientes', 'M'], ['gasto', 'S'], ['semana', 'M']] },
+  minima: { nombre: 'Mínima', tarjetas: [['saludo', 'L'], ['recientes', 'L']] },
+};
+const VISTA_ORIGINAL = 'produccion';
+/* Las clases, escritas enteras: las herramientas de `herramientas/` buscan
+   cada clase de la hoja tal cual en el código, y una montada con `${}` no la
+   ven. */
+const CLASE_TAM = { S: 'tam-S', M: 'tam-M', L: 'tam-L' };
+const CLASE_TARJETA = {
+  saludo: 'tarjeta-saludo', cifras: 'tarjeta-cifras', necesitan: 'tarjeta-necesitan',
+  semana: 'tarjeta-semana', recientes: 'tarjeta-recientes', marcha: 'tarjeta-marcha',
+  mejor: 'tarjeta-mejor', gasto: 'tarjeta-gasto', parrilla: 'tarjeta-parrilla',
+  calendario: 'tarjeta-calendario', clientes: 'tarjeta-clientes', novedades: 'tarjeta-novedades',
+};
+const CLAVE_PANEL_LOCAL = 'inicio.panel';
+
+function panelDeVista(id) {
+  const v = VISTAS_INICIO[id] || VISTAS_INICIO[VISTA_ORIGINAL];
+  return { vista: VISTAS_INICIO[id] ? id : VISTA_ORIGINAL, tope_usd: null,
+    tarjetas: v.tarjetas.map(([tid, tam]) => ({ id: tid, tam })) };
+}
+
+/* El panel en uso: el guardado o, si no hay, el original. */
+function panelInicio() {
+  const p = INI.panel;
+  if (!p || !Array.isArray(p.tarjetas)) return panelDeVista(VISTA_ORIGINAL);
+  return {
+    vista: p.vista || '', tope_usd: typeof p.tope_usd === 'number' ? p.tope_usd : null,
+    tarjetas: p.tarjetas.filter(t => t && CATALOGO_PANEL[t.id])
+      .map(t => ({ id: t.id, tam: ['S', 'M', 'L'].includes(t.tam) ? t.tam : 'M' })),
+  };
+}
+
+/* Quién mira. La misma pregunta que `cargarCuenta`, una vez. */
+function usuarioDelPanel() {
+  if (!INI.yo) {
+    INI.yo = fetch('/api/me', { credentials: 'same-origin' })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => String((((d || {}).user) || {}).username || ''))
+      .catch(() => '');
+  }
+  return INI.yo;
+}
+
+async function cargarPanelInicio() {
+  if (INI.panel !== undefined) return;
+  INI.usuario = await usuarioDelPanel();
+  let panel = null;
+  if (INI.usuario) {
+    try {
+      panel = (await pedir(`${BASE}/api/inicio/panel?${consulta({ usuario: INI.usuario })}`)).panel;
+    } catch (e) { panel = null; }
+  } else {
+    try { panel = JSON.parse(leerAlmacen(CLAVE_PANEL_LOCAL) || 'null'); } catch (e) { panel = null; }
+  }
+  INI.panel = panel && Array.isArray(panel.tarjetas) ? panel : null;
+}
+
+/* Guarda el panel (o lo borra, con null) donde toca: el servidor con
+   usuario, el navegador sin él. Con un respiro, para no guardar a cada
+   tecla del tope. */
+function guardarPanelInicio(inmediato) {
+  clearTimeout(INI.relojGuardar);
+  const hacer = async () => {
+    const panel = INI.panel ? panelInicio() : null;
+    if (INI.usuario) {
+      try {
+        await pedir(`${BASE}/api/inicio/panel`, { method: 'PUT', cuerpo: { usuario: INI.usuario, panel } });
+      } catch (e) { toast(`no se ha podido guardar tu panel: ${e.message}`, true); }
+    } else {
+      guardarEnAlmacen(CLAVE_PANEL_LOCAL, panel ? JSON.stringify(panel) : null);
+    }
+  };
+  if (inmediato) return hacer();
+  INI.relojGuardar = setTimeout(hacer, 500);
+  return null;
+}
+
+function cambiarPanelInicio(cambio, inmediato) {
+  const p = panelInicio();
+  cambio(p);
+  INI.panel = p;
+  guardarPanelInicio(inmediato);
+  if (MODULOS.actual === 'inicio') pintarModulo();
+  pintarBarraModulos();
+}
+
+async function cargarResumenInicio() {
+  INI.pidiendoResumen = true;
+  try {
+    INI.resumen = await pedir(`${BASE}/api/inicio/resumen`);
+    INI.errorResumen = '';
+  } catch (e) {
+    INI.errorResumen = e.message;
+  }
+  INI.pidiendoResumen = false;
+  pintarBarraModulos();
+}
 
 async function cargarInicioModulos() {
+  await cargarPanelInicio();
   pintarModulo();
-  try {
-    PUB.cola = await pedir(rutaPublicar('/cola'));
-    contarAvisosPublicar();
-  } catch (e) {
-    PUB.error = e.message;
+  const visibles = panelInicio().tarjetas.map(t => t.id);
+  const pedidos = [
+    pedir(rutaPublicar('/cola')).then(c => { PUB.cola = c; contarAvisosPublicar(); })
+      .catch(e => { PUB.error = e.message; }),
+    // lo mejor de la semana y las vistas: solo lee lo guardado, no pregunta a Upload-Post
+    pedir(rutaPublicar(`/lo-que-funciono?${consulta({ dias: 7, cuantos: 50 })}`)).then(r => {
+      INI.vistas7 = r.posts || [];
+      PUB.mejorSemana = INI.vistas7[0] || false;
+    }).catch(() => { INI.vistas7 = []; PUB.mejorSemana = false; }),
+    cargarResumenInicio(),
+  ];
+  if (visibles.includes('parrilla')) {
+    pedidos.push(pedir(`${BASE}/api/parrilla/proyectos`).then(r => { INI.parrilla = r.proyectos || []; })
+      .catch(() => { INI.parrilla = []; }));
   }
-  // lo mejor de la semana: solo lee lo guardado, no pregunta a Upload-Post
-  try {
-    const r = await pedir(rutaPublicar(`/lo-que-funciono?${consulta({ dias: 7, cuantos: 1 })}`));
-    PUB.mejorSemana = (r.posts || [])[0] || false;
-  } catch (e) {
-    PUB.mejorSemana = false;
+  if (visibles.includes('calendario')) {
+    const hoy = new Date();
+    const desde = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-${String(hoy.getDate()).padStart(2, '0')}`;
+    pedidos.push(pedir(rutaPublicar(`/cola?${consulta({ desde, dias: 31 })}`))
+      .then(c => { INI.calendario = c; }).catch(() => { INI.calendario = { envios: [] }; }));
   }
+  if (visibles.includes('novedades') && !INI.novedades) {
+    pedidos.push(pedir(`${BASE}/api/sistema/novedades`).then(r => { INI.novedades = r; })
+      .catch(() => { INI.novedades = { texto: '' }; }));
+  }
+  await Promise.all(pedidos);
   if (MODULOS.actual === 'inicio') pintarModulo();
 }
 
 function vistaInicioModulos() {
-  const caja = h('div', { clase: 'inicio-modulos' });
-  caja.appendChild(h('div', { clase: 'light-cab' }, h('h2', {}, 'Inicio')));
-  const c = PUB.cola || {};
-  const tarjetas = h('div', { clase: 'tarjetas-modulo' });
-  [['crear', 'Crear', 'Estilos y vídeos: el encargo, el guion, la voz, las imágenes y el montaje.',
-    'Ir a Crear'],
-  ['publicar', 'Publicar', `${(c.listos || []).length} vídeo(s) listos · `
-    + `${(c.envios || []).filter(e => e.estado === 'programado').length} programado(s) esta semana.`,
-  'Ir a Publicar'],
-  ['automatizar', 'Automatizar', 'La Parrilla: matrices de guiones por proyecto, listas para pasar al Encargo.',
-    'Ir a la Parrilla']].forEach(([id, titulo, texto, boton]) => tarjetas.appendChild(
-    h('div', { clase: 'tarjeta-modulo' },
-      h('h3', {}, titulo), h('p', { clase: 'meta' }, texto),
-      h('button', { clase: id === 'automatizar' ? 'mini' : 'primario mini',
-        onclick: () => (id === 'crear' ? entrarEnCrear() : irAModulo(id)) }, boton))));
-  caja.appendChild(tarjetas);
-  caja.appendChild(lineaMejorSemana());
-  const hoy = h('div', { clase: 'bloque' }, h('h3', {}, 'Lo que pasa hoy'));
-  const deHoy = (c.de_hoy || []).concat((c.esperan_ok || []).filter(e => !(c.de_hoy || []).some(x => x.id === e.id)));
-  if (!PUB.cola) hoy.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
-  else if (!deHoy.length && !(c.fallidos || []).length) {
-    hoy.appendChild(h('div', { clase: 'meta' }, 'Hoy no sale nada. Los envíos programados aparecerán aquí.'));
-  } else {
-    deHoy.concat((c.fallidos || []).filter(e => !deHoy.some(x => x.id === e.id)))
-      .forEach(e => hoy.appendChild(filaEnvioCola(e)));
+  const panel = panelInicio();
+  const caja = h('div', { clase: `inicio-modulos panel-inicio${INI.editando ? ' editando' : ''}` });
+  if (INI.editando) {
+    caja.appendChild(h('div', { clase: 'aviso-editando' },
+      h('span', {}, h('b', {}, 'Editando tu panel. '),
+        'Arrastra las tarjetas por ⋮⋮ (o usa ↑ ↓) para cambiarlas de sitio, cambia su tamaño o quítalas.'),
+      h('span', { clase: 'fila' },
+        h('button', { type: 'button', clase: 'mini', onclick: volverAlPanelOriginal }, 'Volver al original'),
+        h('button', { type: 'button', clase: 'mini primario',
+          onclick: () => { INI.editando = false; guardarPanelInicio(true); pintarModulo(); } }, 'Listo'))));
+    const cuerpo = h('div', { clase: 'inicio-edicion' });
+    const rejilla = h('div', { clase: 'rejilla-inicio' });
+    panel.tarjetas.forEach((t, i) => rejilla.appendChild(tarjetaEditable(t, i, panel.tarjetas.length)));
+    if (!panel.tarjetas.length) {
+      rejilla.appendChild(h('div', { clase: 'tarjeta-inicio tam-L vacia' },
+        'No queda ninguna tarjeta: enciende alguna a la derecha.'));
+    }
+    cuerpo.appendChild(rejilla);
+    cuerpo.appendChild(armaTuPanel(panel));
+    caja.appendChild(cuerpo);
+    return caja;
   }
-  caja.appendChild(hoy);
+  caja.appendChild(h('div', { clase: 'cab-panel-inicio' },
+    h('h2', {}, 'Tu panel'),
+    h('span', { clase: 'crece' }),
+    h('span', { clase: 'vistas-inicio' },
+      ...Object.entries(VISTAS_INICIO).slice(0, 3).map(([id, v]) => h('button', {
+        type: 'button', clase: `mini chip-vista${panel.vista === id ? ' activa' : ''}`,
+        'aria-pressed': panel.vista === id ? 'true' : 'false',
+        title: `Ver la vista «${v.nombre}»`, onclick: () => usarVistaInicio(id),
+      }, panel.vista === id ? `Vista: ${v.nombre}` : v.nombre)),
+      h('button', { type: 'button', clase: 'mini chip-personalizar',
+        onclick: () => { INI.editando = true; pintarModulo(); } }, '✎ Personalizar panel'))));
+  const rejilla = h('div', { clase: 'rejilla-inicio' });
+  panel.tarjetas.forEach(t => {
+    let contenido;
+    try {
+      contenido = (PINTORES_INICIO[t.id] || (() => null))(t.tam);
+    } catch (e) {
+      console.error(e);
+      contenido = cajaError(`no se ha podido pintar «${CATALOGO_PANEL[t.id].nombre}»: ${e.message}`);
+    }
+    if (contenido) rejilla.appendChild(h('section', { clase: `tarjeta-inicio ${CLASE_TARJETA[t.id]} ${CLASE_TAM[t.tam]}`,
+      datos: { tarjeta: t.id } }, contenido));
+  });
+  if (!panel.tarjetas.length) {
+    rejilla.appendChild(h('div', { clase: 'tarjeta-inicio tam-L vacia' },
+      'Tu panel está vacío. Pulsa «✎ Personalizar panel» para elegir qué ver.'));
+  }
+  caja.appendChild(rejilla);
   return caja;
 }
+
+function usarVistaInicio(id) {
+  const tope = panelInicio().tope_usd;
+  INI.panel = Object.assign(panelDeVista(id), { tope_usd: tope });
+  guardarPanelInicio(true);
+  cargarInicioModulos();
+}
+
+function volverAlPanelOriginal() {
+  INI.panel = null;
+  guardarPanelInicio(true);
+  pintarBarraModulos();
+  cargarInicioModulos();
+  toast('Tu panel vuelve a estar como al principio');
+}
+
+function moverTarjetaInicio(id, destino) {
+  cambiarPanelInicio(p => {
+    const desde = p.tarjetas.findIndex(t => t.id === id);
+    const hasta = p.tarjetas.findIndex(t => t.id === destino);
+    if (desde < 0 || hasta < 0 || desde === hasta) return;
+    const [t] = p.tarjetas.splice(desde, 1);
+    p.tarjetas.splice(hasta, 0, t);
+    p.vista = '';
+  });
+}
+
+function tarjetaEditable(t, i, total) {
+  const info = CATALOGO_PANEL[t.id];
+  const caja = h('section', {
+    clase: `tarjeta-inicio ${CLASE_TARJETA[t.id]} ${CLASE_TAM[t.tam]} editable`, draggable: 'true',
+    datos: { tarjeta: t.id }, 'aria-label': info.nombre,
+    ondragstart: ev => {
+      INI.arrastra = t.id;
+      try { ev.dataTransfer.effectAllowed = 'move'; ev.dataTransfer.setData('text/plain', t.id); } catch (e) { /* nada */ }
+      caja.classList.add('arrastrada');
+    },
+    ondragend: () => { INI.arrastra = null; caja.classList.remove('arrastrada'); },
+    ondragover: ev => {
+      if (!INI.arrastra || INI.arrastra === t.id) return;
+      ev.preventDefault();
+      caja.classList.add('destino');
+    },
+    ondragleave: () => caja.classList.remove('destino'),
+    ondrop: ev => {
+      ev.preventDefault();
+      const id = INI.arrastra;
+      INI.arrastra = null;
+      if (id && id !== t.id) moverTarjetaInicio(id, t.id);
+    },
+  });
+  const tamano = tam => h('button', {
+    type: 'button', clase: `mini tam-boton${t.tam === tam ? ' activo' : ''}`,
+    'aria-pressed': t.tam === tam ? 'true' : 'false',
+    title: { S: 'Pequeña', M: 'Mediana', L: 'Grande (todo el ancho)' }[tam],
+    onclick: () => cambiarPanelInicio(p => { p.tarjetas[i].tam = tam; p.vista = ''; }),
+  }, tam);
+  caja.appendChild(h('div', { clase: 'editable-cab' },
+    h('span', { clase: 'asa', title: 'Arrastra para cambiarla de sitio', 'aria-hidden': 'true' }, '⋮⋮'),
+    h('b', { clase: 'crece' }, info.nombre),
+    h('span', { clase: 'controles-tarjeta' },
+    h('span', { clase: 'tamanos' }, tamano('S'), tamano('M'), tamano('L')),
+    h('button', { type: 'button', clase: 'mini fantasma', title: 'Subirla un puesto',
+      'aria-label': `Subir «${info.nombre}»`, disabled: i === 0,
+      onclick: () => cambiarPanelInicio(p => { const [x] = p.tarjetas.splice(i, 1); p.tarjetas.splice(i - 1, 0, x); p.vista = ''; }) }, '↑'),
+    h('button', { type: 'button', clase: 'mini fantasma', title: 'Bajarla un puesto',
+      'aria-label': `Bajar «${info.nombre}»`, disabled: i === total - 1,
+      onclick: () => cambiarPanelInicio(p => { const [x] = p.tarjetas.splice(i, 1); p.tarjetas.splice(i + 1, 0, x); p.vista = ''; }) }, '↓'),
+    h('button', { type: 'button', clase: 'mini fantasma quitar-tarjeta', title: 'Quitarla del panel',
+      'aria-label': `Quitar «${info.nombre}»`,
+      onclick: () => cambiarPanelInicio(p => { p.tarjetas.splice(i, 1); p.vista = ''; }) }, '✕'))));
+  caja.appendChild(h('div', { clase: 'editable-relleno' }, h('span', { clase: 'meta' }, info.que)));
+  return caja;
+}
+
+/* El lateral de «Arma tu panel»: las vistas de partida, un interruptor por
+   tarjeta del catálogo y el tope del gasto. */
+function armaTuPanel(panel) {
+  const puestas = panel.tarjetas.map(t => t.id);
+  const caja = h('aside', { clase: 'arma-tu-panel', 'aria-label': 'Arma tu panel' },
+    h('h2', {}, 'Arma tu panel'),
+    h('p', { clase: 'meta' }, INI.usuario
+      ? `Elige qué quieres ver al entrar. Se guarda para tu usuario (${INI.usuario}) y lo puedes cambiar cuando quieras.`
+      : 'Elige qué quieres ver al entrar. Se guarda en este navegador y lo puedes cambiar cuando quieras.'),
+    h('span', { clase: 'etiqueta-inicio' }, 'Empezar desde una vista'),
+    h('div', { clase: 'vistas-inicio' }, Object.entries(VISTAS_INICIO).map(([id, v]) => h('button', {
+      type: 'button', clase: `mini chip-vista${panel.vista === id ? ' activa' : ''}`,
+      'aria-pressed': panel.vista === id ? 'true' : 'false',
+      onclick: () => cambiarPanelInicio(p => { Object.assign(p, panelDeVista(id), { tope_usd: p.tope_usd }); }),
+    }, v.nombre))),
+    h('span', { clase: 'etiqueta-inicio' }, 'Tarjetas'));
+  Object.entries(CATALOGO_PANEL).forEach(([id, info]) => {
+    const casilla = h('input', { type: 'checkbox', clase: 'conmutador', checked: puestas.includes(id),
+      'aria-label': `Ver «${info.nombre}»`,
+      onchange: ev => {
+        const encender = ev.target.checked;
+        cambiarPanelInicio(p => {
+          p.vista = '';
+          if (encender && !p.tarjetas.some(t => t.id === id)) {
+            p.tarjetas.push({ id, tam: id === 'saludo' || id === 'cifras' ? 'L' : 'S' });
+          } else if (!encender) p.tarjetas = p.tarjetas.filter(t => t.id !== id);
+        });
+        if (encender) cargarInicioModulos();
+      } });
+    caja.appendChild(h('label', { clase: 'interruptor-tarjeta' }, casilla,
+      h('span', { clase: 'textos' }, h('b', {}, info.nombre), h('span', { clase: 'meta' }, info.que))));
+  });
+  const tope = h('input', { type: 'number', min: '0', step: '1', inputmode: 'decimal',
+    value: panel.tope_usd === null ? '' : String(panel.tope_usd), placeholder: 'sin tope',
+    'aria-label': 'Tope de gasto del mes, en dólares',
+    oninput: ev => {
+      const v = ev.target.value.trim();
+      const n = Number(v.replace(',', '.'));
+      if (v && (!Number.isFinite(n) || n < 0)) return;
+      const p = panelInicio();
+      p.tope_usd = v ? n : null;
+      INI.panel = p;
+      guardarPanelInicio();
+      pintarBarraModulos();
+    } });
+  caja.appendChild(h('label', { clase: 'campo tope-gasto' },
+    h('span', {}, 'Tope de gasto del mes ($)'), tope,
+    h('span', { clase: 'meta' }, 'Solo para verlo en «Gasto del mes»: no frena nada.')));
+  return caja;
+}
+
+/* -------------------------- lo que pinta cada tarjeta (una función por id) */
+
+function cabezaTarjeta(titulo, extra) {
+  return h('div', { clase: 'cab-tarjeta' }, h('h3', {}, titulo), h('span', { clase: 'crece' }), extra || null);
+}
+
+function enviosDeLaSemana() {
+  const c = PUB.cola || {};
+  const dias = c.dias || [];
+  return (c.envios || []).filter(e => e.estado !== 'cancelado'
+    && dias.some(d => String(e.cuando || '').startsWith(d)));
+}
+
+function programadosDeLaSemana() {
+  const ahora = (PUB.cola || {}).ahora || '';
+  return enviosDeLaSemana().filter(e => ['programado', 'espera_ok'].includes(e.estado)
+    && String(e.cuando || '') >= ahora.slice(0, 16));
+}
+
+function fechaLarga() {
+  const d = new Date();
+  let texto = '';
+  try {
+    texto = d.toLocaleDateString('es', { weekday: 'long', day: 'numeric', month: 'long' }).replace(',', '');
+  } catch (e) { texto = d.toDateString(); }
+  return texto.charAt(0).toUpperCase() + texto.slice(1);
+}
+
+function plural(n, uno, varios) { return `${n} ${n === 1 ? uno : varios}`; }
+
+function tarjetaInicioSaludo() {
+  const c = PUB.cola || {};
+  const salen = programadosDeLaSemana().length;
+  const listos = (c.listos || []).length;
+  const necesitan = (c.esperan_ok || []).length + (c.fallidos || []).length;
+  const nombre = INI.usuario ? `, ${INI.usuario}` : '';
+  return h('div', { clase: 'saludo-inicio' },
+    h('span', { clase: 'halo halo-1', 'aria-hidden': 'true' }),
+    h('span', { clase: 'halo halo-2', 'aria-hidden': 'true' }),
+    h('div', { clase: 'saludo-textos' },
+      h('span', { clase: 'fecha-inicio' }, fechaLarga()),
+      h('h1', { clase: 'titular-inicio' }, `Hola${nombre}. `,
+        salen ? h('span', { clase: 'resalta' }, plural(salen, 'vídeo', 'vídeos')) : null,
+        salen ? ` ${salen === 1 ? 'sale' : 'salen'} esta semana.` : 'Esta semana no sale nada programado.'),
+      h('p', { clase: 'meta' }, !PUB.cola ? 'mirando la cola…'
+        : `${plural(listos, 'vídeo listo', 'vídeos listos')} para publicar y `
+          + `${plural(necesitan, 'cosa que necesita', 'cosas que necesitan')} tu mirada.`)),
+    h('div', { clase: 'saludo-botones' },
+      h('button', { type: 'button', clase: 'primario', title: 'Elige el estilo y empieza un vídeo',
+        onclick: () => { entrarEnCrear(); toast('Elige el estilo del vídeo nuevo'); } }, '+ Nuevo vídeo'),
+      h('button', { type: 'button', title: 'Tus estilos y tus vídeos', onclick: () => entrarEnCrear() },
+        'Tus proyectos')));
+}
+
+function tarjetaInicioCifras() {
+  const c = PUB.cola || {};
+  const r = INI.resumen;
+  const prog = programadosDeLaSemana();
+  const vistas = (INI.vistas7 || []).reduce((suma, p) => suma + (Number((p.metricas || {}).vistas) || 0), 0);
+  const cifra = (que, valor, cambio, clase) => h('div', { clase: `cifra-inicio ${clase || ''}` },
+    h('span', { clase: 'meta' }, que), h('b', {}, valor), h('span', { clase: 'cambio' }, cambio));
+  return h('div', { clase: 'cifras-inicio' },
+    cifra('Vídeos este mes', r ? String(r.videos_mes) : '…', r ? `de ${r.videos} en total` : ''),
+    cifra('Programados', PUB.cola ? String(prog.length) : '…',
+      prog.length ? `el próximo, ${cuandoLegible(prog[0].cuando)}` : 'esta semana'),
+    cifra('Vistas 7 días', INI.vistas7 ? numeroCorto(vistas) : '…',
+      INI.vistas7 ? (INI.vistas7.length ? `${plural(INI.vistas7.length, 'publicación', 'publicaciones')} con cifras` : 'sin cifras todavía') : ''),
+    cifra('Para publicar', PUB.cola ? String((c.listos || []).length) : '…',
+      (c.listos || [])[0] ? recortar(c.listos[0].nombre || c.listos[0].pid, 40) : 'nada pendiente'));
+}
+
+function tarjetaInicioNecesitan() {
+  const c = PUB.cola || {};
+  const caja = h('div', { clase: 'te-necesitan' });
+  const deHoy = (c.de_hoy || []).concat((c.esperan_ok || []).filter(e => !(c.de_hoy || []).some(x => x.id === e.id)));
+  const filas = deHoy.concat((c.fallidos || []).filter(e => !deHoy.some(x => x.id === e.id)));
+  const listos = (c.listos || []).filter(v => !Object.keys(v.envios || {}).length).slice(0, 3);
+  caja.appendChild(cabezaTarjeta('Te necesitan', h('span', { clase: 'meta' },
+    PUB.cola ? plural(filas.length + listos.length, 'cosa', 'cosas') : '')));
+  if (!PUB.cola) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  if (!filas.length && !listos.length) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Nada pendiente. Los fallos, lo que espera tu OK y '
+      + 'lo que sale hoy aparecerán aquí.'));
+  }
+  filas.forEach(e => caja.appendChild(filaEnvioCola(e)));
+  listos.forEach(v => caja.appendChild(h('div', { clase: 'fila fila-listo-inicio' },
+    h('span', { clase: 'etiqueta-listo' }, 'LISTO'),
+    h('span', { clase: 'crece' }, `«${v.nombre || v.pid}» para publicar`),
+    h('button', { type: 'button', clase: 'mini', onclick: () => irASeccionPublicar('ficha', v.pid) }, 'Publicar'))));
+  return caja;
+}
+
+function tarjetaInicioSemana() {
+  const c = PUB.cola || {};
+  const dias = c.dias || [];
+  const envios = enviosDeLaSemana();
+  const cuenta = d => envios.filter(e => String(e.cuando || '').startsWith(d)).length;
+  const maximo = Math.max(1, ...dias.map(cuenta));
+  const letras = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+  const caja = h('div', { clase: 'semana-inicio' }, cabezaTarjeta('Esta semana'));
+  if (!PUB.cola) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'barras-semana' }, dias.map(d => {
+    const n = cuenta(d);
+    const letra = letras[new Date(`${d}T12:00:00`).getDay()];
+    return h('div', { clase: `dia-semana${d === c.hoy ? ' hoy' : ''}`, title: `${d}: ${plural(n, 'publicación', 'publicaciones')}` },
+      h('span', { clase: 'meta' }, letra),
+      h('span', { clase: 'columna' }, h('span', { clase: 'relleno-columna', estilo: `--alto:${Math.round((n / maximo) * 100)}%` })),
+      h('b', {}, String(n)));
+  })));
+  caja.appendChild(h('span', { clase: 'meta' }, 'Publicaciones por día · hoy, resaltado'));
+  return caja;
+}
+
+function tarjetaInicioRecientes(tam) {
+  const r = INI.resumen;
+  const caja = h('div', { clase: 'recientes-inicio' },
+    cabezaTarjeta('Proyectos recientes', h('a', { href: '#', clase: 'enlace-tarjeta',
+      onclick: ev => { ev.preventDefault(); entrarEnCrear(); } }, 'Todos →')));
+  if (!r) {
+    caja.appendChild(h('div', { clase: 'meta' }, INI.errorResumen || 'cargando…'));
+    return caja;
+  }
+  if (!r.recientes.length) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay vídeos. Empieza uno con «+ Nuevo vídeo».'));
+    return caja;
+  }
+  const listos = new Set(((PUB.cola || {}).listos || []).map(v => v.pid));
+  const marcha = new Set((r.en_marcha || []).map(t => t.pid));
+  caja.appendChild(h('div', { clase: 'lista-recientes' }, r.recientes.slice(0, tam === 'S' ? 2 : (tam === 'L' ? 4 : 3)).map((v, i) =>
+    h('button', { type: 'button', clase: 'reciente', title: `Abrir «${v.nombre}»`,
+      onclick: () => { irAModulo('crear'); abrirVideoLight(v.pid); } },
+    h('span', { clase: ['miniatura-reciente', 'miniatura-reciente tono-1', 'miniatura-reciente tono-2'][i % 3], 'aria-hidden': 'true' },
+      (v.nombre || '?').trim().charAt(0).toUpperCase()),
+    h('b', {}, v.nombre),
+    h('span', { clase: 'meta' }, [marcha.has(v.pid) ? 'Generando' : (listos.has(v.pid) ? 'Listo para publicar' : ''),
+      v.cliente_nombre, fechaCorta(v.actualizado)].filter(Boolean).join(' · '))))));
+  return caja;
+}
+
+function tarjetaInicioMarcha() {
+  const r = INI.resumen;
+  const caja = h('div', { clase: 'marcha-inicio' }, cabezaTarjeta('En marcha'));
+  if (!r) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  if (!(r.en_marcha || []).length) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Nada generándose ahora mismo.'));
+    return caja;
+  }
+  r.en_marcha.slice(0, 2).forEach(t => caja.appendChild(h('div', { clase: 'trabajo-inicio' },
+    h('button', { type: 'button', clase: 'mini fantasma nombre-envio', onclick: () => { irAModulo('crear'); abrirVideoLight(t.pid); } },
+      `${t.nombre} · ${t.paso || 'trabajo'}`),
+    barraDeProgreso(t.progreso, 'coral'),
+    h('span', { clase: 'meta cifra-mono' }, `${Math.round((t.progreso || 0) * 100)} %${t.mensaje ? ` · ${recortar(t.mensaje, 60)}` : ''}`))));
+  return caja;
+}
+
+function tarjetaInicioMejor() {
+  // `linea-mejor-semana`: la línea de Inicio de siempre (publicar-redes-2), ahora tarjeta
+  const m = PUB.mejorSemana;
+  const caja = h('div', { clase: 'linea-mejor-semana mejor-inicio' }, cabezaTarjeta('Lo mejor de los últimos 7 días'));
+  if (m === null || m === undefined) caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+  else if (!m) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay cifras. Se piden en Publicar → '
+      + 'Resultados, con «Actualizar».'));
+  } else {
+    caja.appendChild(h('button', { type: 'button', clase: 'mini fantasma nombre-envio',
+      onclick: () => irASeccionPublicar('ficha', m.pid) }, m.nombre));
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('span', { clase: 'pastilla red-mini ok' }, CORTOS_RED[m.red] || m.red),
+      h('span', { clase: 'meta' }, textoMetricas(m.metricas) || '')));
+  }
+  return caja;
+}
+
+function tarjetaInicioGasto() {
+  const r = INI.resumen;
+  const tope = panelInicio().tope_usd || 0;
+  const caja = h('div', { clase: 'gasto-inicio' }, cabezaTarjeta('Gasto del mes'));
+  if (!r) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  caja.appendChild(h('b', { clase: 'cifra-grande' }, dolares(r.gasto_mes_usd)));
+  if (tope > 0) {
+    caja.appendChild(barraDeProgreso(r.gasto_mes_usd / tope, r.gasto_mes_usd > tope ? 'pasado' : ''));
+    caja.appendChild(h('span', { clase: 'meta' }, `de ${dolares(tope, true)} de tope`
+      + (r.gasto_mes_usd > tope ? ' · te has pasado' : '')));
+  } else caja.appendChild(h('span', { clase: 'meta' }, 'Sin tope: ponlo en «✎ Personalizar panel».'));
+  return caja;
+}
+
+function tarjetaInicioParrilla() {
+  const lista = INI.parrilla;
+  const caja = h('div', { clase: 'parrilla-inicio' }, cabezaTarjeta('Parrilla', h('a', { href: '#', clase: 'enlace-tarjeta',
+    onclick: ev => { ev.preventDefault(); irAModulo('automatizar'); } }, 'Abrir →')));
+  if (lista === null) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  const suma = estado => lista.reduce((n, p) => n + (Number((p.cuentas || {})[estado]) || 0), 0);
+  caja.appendChild(h('b', { clase: 'cifra-grande' }, String(suma('pendiente'))));
+  caja.appendChild(h('span', { clase: 'meta' }, `${suma('pendiente') === 1 ? 'guion espera' : 'guiones esperan'} a pasar al Encargo · `
+    + `${suma('usado')} usados · ${suma('publicado')} publicados`));
+  return caja;
+}
+
+function tarjetaInicioCalendario() {
+  const c = INI.calendario;
+  const caja = h('div', { clase: 'calendario-inicio' }, cabezaTarjeta('Calendario', h('a', { href: '#', clase: 'enlace-tarjeta',
+    onclick: ev => { ev.preventDefault(); PUB.seccion = 'cola'; irAModulo('publicar'); } }, 'Ver la cola →')));
+  if (!c) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  const vienen = (c.envios || []).filter(e => ['programado', 'espera_ok'].includes(e.estado)).slice(0, 6);
+  if (!vienen.length) caja.appendChild(h('div', { clase: 'meta' }, 'Nada programado en los próximos 30 días.'));
+  vienen.forEach(e => caja.appendChild(filaEnvioCola(e)));
+  return caja;
+}
+
+function tarjetaInicioClientes() {
+  const r = INI.resumen;
+  const caja = h('div', { clase: 'clientes-inicio' }, cabezaTarjeta('Por cliente'));
+  if (!r) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  if (!(r.por_cliente || []).length) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay vídeos.'));
+    return caja;
+  }
+  caja.appendChild(h('table', { clase: 'tabla tabla-clientes-inicio' },
+    h('thead', {}, h('tr', {}, h('th', {}, 'Cliente'), h('th', {}, 'Vídeos (mes)'), h('th', {}, 'Gasto del mes'))),
+    h('tbody', {}, r.por_cliente.slice(0, 8).map(c => h('tr', {},
+      h('td', {}, c.nombre), h('td', {}, `${c.videos} (${c.videos_mes})`), h('td', { clase: 'cifra-mono' }, dolares(c.usd_mes)))))));
+  return caja;
+}
+
+function tarjetaInicioNovedades() {
+  const n = INI.novedades;
+  const caja = h('div', { clase: 'novedades-inicio' }, cabezaTarjeta('Novedades', h('a', { href: '#', clase: 'enlace-tarjeta',
+    onclick: ev => { ev.preventDefault(); abrirNovedades(); } }, 'Todas →')));
+  if (!n) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'cargando…'));
+    return caja;
+  }
+  const puntos = unirLineas(n.texto || '').split('\n').filter(l => /^- /.test(l)).slice(0, 3)
+    .map(l => recortar(l.replace(/^- /, '').replace(/\*\*/g, '').replace(/\x60/g, ''), 140));
+  if (!puntos.length) caja.appendChild(h('div', { clase: 'meta' }, 'Sin novedades escritas.'));
+  else caja.appendChild(h('ul', { clase: 'puntos-novedades' }, puntos.map(p => h('li', {}, p))));
+  return caja;
+}
+
+const PINTORES_INICIO = {
+  saludo: tarjetaInicioSaludo,
+  cifras: tarjetaInicioCifras,
+  necesitan: tarjetaInicioNecesitan,
+  semana: tarjetaInicioSemana,
+  recientes: tarjetaInicioRecientes,
+  marcha: tarjetaInicioMarcha,
+  mejor: tarjetaInicioMejor,
+  gasto: tarjetaInicioGasto,
+  parrilla: tarjetaInicioParrilla,
+  calendario: tarjetaInicioCalendario,
+  clientes: tarjetaInicioClientes,
+  novedades: tarjetaInicioNovedades,
+};
 
 /* --------------------------------------------------------- AUTOMATIZAR */
 
@@ -19773,14 +21619,14 @@ function programarRelojPublicar() {
     || (PUB.seccion === 'cuentas' && ((PUB.proyectos || {}).proyectos || []).some(x => (x.palabras || {}).trabajando))
     || (['cuentas', 'resultados'].includes(PUB.seccion) && (PUB.metricasAuto || {}).corriendo)
     || (PUB.seccion === 'ficha' && f && (f.escribiendo
-    || (f.envios || []).some(e => ['enviando', 'publicando', 'comprobar'].includes(e.estado))))
+    || (f.envios || []).some(e => envioEnElAirePublicar(e, f.ahora))))
     || (PUB.seccion === 'cola' && PUB.cola && (PUB.cola.envios || []).some(e =>
-      ['enviando', 'publicando', 'comprobar'].includes(e.estado)));
+      envioEnElAirePublicar(e, PUB.cola.ahora)));
   if (!enElAire) return;
   // solo se pregunta a Upload-Post si hay envíos en el aire, y SIN esperarlo:
   // una consulta lenta allí no puede retrasar que se vean los textos
   const hayEnvios = (PUB.seccion === 'ficha' && f && (f.envios || []).some(e =>
-    ['enviando', 'publicando', 'comprobar'].includes(e.estado))) || PUB.seccion === 'cola';
+    envioEnElAirePublicar(e, f.ahora))) || PUB.seccion === 'cola';
   PUB.reloj = setTimeout(async () => {
     if (hayEnvios) {
       const refresco = pedir(rutaPublicar('/refrescar'), { method: 'POST' }).catch(() => null);
@@ -19792,6 +21638,45 @@ function programarRelojPublicar() {
        pedir la ficha y «Claude está escribiendo» no acababa nunca (16-10). */
     cargarPublicar(true);
   }, 4000);
+}
+
+/* EN EL AIRE ES TAMBIÉN LO PROGRAMADO CUYA HORA LLEGA (20-10-2026: a las
+   12:22 seguían «programados» los de las 09:00). Antes solo se preguntaba por
+   lo que subía o se publicaba, y un programado no se volvía a mirar nunca: su
+   hora pasaba y nadie le preguntaba a Upload-Post. Ahora cuenta desde 15 min
+   antes de su hora (para que el reloj esté andando cuando llegue). `ahora` es
+   la hora de Lima del servidor, sin zona, como `cuando`. */
+function envioEnElAirePublicar(e, ahora) {
+  if (['enviando', 'publicando', 'comprobar'].includes(e.estado)) return true;
+  if (e.estado !== 'programado' || !e.cuando) return false;
+  if (e.debio_salir) return true;
+  const quince = Date.parse(`${String(ahora || '').slice(0, 19)}Z`) + 15 * 60000;
+  const cuando = Date.parse(`${String(e.cuando).slice(0, 19)}Z`);
+  return Number.isFinite(quince) && Number.isFinite(cuando) && cuando <= quince;
+}
+
+/* «Comprobar» de un programado que ya debió salir: le pregunta a Upload-Post
+   por ESE envío, ya, y dice cómo quedó. */
+async function comprobarProgramadoPublicar(e) {
+  try {
+    const r = await pedir(rutaPublicar('/refrescar'), { method: 'POST', cuerpo: { lote: e.lote } });
+    const estados = (r.estados || []).map(x => ESTADOS_ENVIO[x] || x);
+    toast(r.ocupado ? 'Upload-Post está ocupado con otra consulta: vuelve a probar en un momento'
+      : estados.length ? `${NOMBRES_RED[e.red] || e.red}: ${estados.join(', ')}` : 'Comprobado', !!r.ocupado);
+  } catch (err) { toast(err.message, true); }
+  if (MODULOS.actual === 'inicio') { cargarInicioModulos(); return; }
+  cargarPublicar(true);
+}
+
+function debioSalirPublicar(e) {
+  if (!e.debio_salir) return null;
+  return h('span', { clase: 'meta debio-salir' }, `debería haber salido a las ${String(e.cuando || '').slice(11, 16)}`);
+}
+
+function botonComprobarPublicar(e) {
+  if (!e.debio_salir || !e.lote) return null;
+  return h('button', { clase: 'mini', title: 'Pregunta ya a Upload-Post si salió',
+    onclick: () => comprobarProgramadoPublicar(e) }, 'Comprobar');
 }
 
 function pararRelojPublicar() {
@@ -19814,6 +21699,7 @@ function olvidarEnvioPublicar() {
 async function irASeccionPublicar(seccion, pid) {
   if (!(await guardarPendientePublicar())) return;
   PUB.seccion = seccion;
+  if (seccion === 'ficha') PUB.avisoCola = null;
   if (pid !== undefined && pid !== PUB.pid) olvidarEnvioPublicar();
   if (pid !== undefined) PUB.pid = pid;
   if (seccion === 'ficha' && pid) PUB.ficha = PUB.ficha && PUB.ficha.pid === pid ? PUB.ficha : null;
@@ -19892,17 +21778,24 @@ function filaEnvioCola(e) {
   const fallo = ['fallido', 'comprobar'].includes(e.estado);
   return h('div', { clase: 'fila fila-envio', datos: { envio: e.id || '' } },
     h('span', { clase: 'meta hora-envio' }, cuandoLegible(e.cuando)),
-    h('b', {}, CORTOS_RED[e.red] || e.red),
+    h('b', {}, nombreEnvioPublicar(e)),
     h('button', { clase: 'mini fantasma nombre-envio', title: 'Abrir la ficha de este vídeo',
       onclick: () => irASeccionPublicar('ficha', e.pid) }, e.video || e.pid),
     e.cliente_nombre ? h('span', { clase: 'meta' }, e.cliente_nombre) : null,
     h('span', { clase: 'crece' }),
     pastillaEstadoEnvio(e.estado),
+    debioSalirPublicar(e), botonComprobarPublicar(e),
     fallo && e.superado ? h('span', { clase: 'meta motivo-cola' },
       e.superado_como === 'reenviado' ? 'se volvió a mandar' : 'ya salió en otro envío') : null,
     fallo && !e.superado ? h('button', { clase: 'mini fantasma', title: 'Quitarlo de «Te necesitan» (no borra nada en la red)',
       onclick: () => cancelarEnvioPublicar(e) }, 'Quitar de la lista') : null,
     e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver') : null);
+}
+
+/* «YT · Short» o «YT · vídeo»: el envío recuerda cómo salió (20-10). */
+function nombreEnvioPublicar(e) {
+  const red = CORTOS_RED[e.red] || e.red;
+  return e.red === 'youtube' && e.tipo ? `${red} · ${e.tipo}` : red;
 }
 
 /* El contador de la barra, pedido aparte: desde la ficha, `PUB.cola` es la de
@@ -19916,7 +21809,7 @@ function refrescarAvisosPublicar() {
 
 /* LA COLA, CON FILTROS (16-10-2026: con muchos vídeos la lista era un caos).
    Buscador, proyecto, estilo, estado y fecha; se acuerdan en este navegador.
-   La semana o el mes, filtrados igual. */
+   El calendario NO se filtra (20-10-2026): enseña siempre todo. */
 const FILTROS_COLA_DEFECTO = { texto: '', proyecto: '', estilo: '', estado: '', fecha: '', agrupar: false };
 
 function filtrosCola() {
@@ -20052,12 +21945,27 @@ function seccionColaPublicar() {
     return pasaFiltroCola({ nombre: e.video, pid: e.pid, cliente: e.cliente, cliente_nombre: e.cliente_nombre, envios: {} });
   };
 
+  const trasEnvio = avisoTrasEnvioCola();
+  if (trasEnvio) caja.appendChild(trasEnvio);
   if (todos.length) caja.appendChild(barraFiltrosCola(todos));
+  /* LOS FILTROS SON DE LA LISTA (notas del 20-10: «el calendario cambia con los
+     filtros y confunde»). El calendario enseña SIEMPRE todo lo de la semana o
+     el mes; los filtros solo cambian «Vídeos listos» y «Te necesitan», y se
+     dice cuántos de estos esconden. */
+  if (filtrando) {
+    caja.appendChild(h('div', { clase: 'meta nota-filtros-cola' },
+      'Los filtros solo cambian la lista de vídeos y «Te necesitan»: el calendario enseña siempre todo lo programado y publicado.'));
+  }
 
-  const atencion = (c.esperan_ok || []).concat(c.fallidos || []).filter(pasaEnvio);
-  if (atencion.length) {
+  // lo programado que ya debió salir y Upload-Post no ha confirmado, también (20-10)
+  const todaAtencion = (c.esperan_ok || []).concat(c.fallidos || [], (c.envios || []).filter(e => e.debio_salir));
+  const atencion = todaAtencion.filter(pasaEnvio);
+  if (atencion.length || todaAtencion.length) {
     const b = h('div', { clase: 'bloque bloque-atencion' }, h('h3', {}, 'Te necesitan'));
     atencion.forEach(e => b.appendChild(filaEnvioCola(e)));
+    if (todaAtencion.length > atencion.length) {
+      b.appendChild(h('div', { clase: 'meta' }, `${todaAtencion.length - atencion.length} más que no cumplen los filtros.`));
+    }
     caja.appendChild(b);
   }
 
@@ -20102,7 +22010,8 @@ function seccionColaPublicar() {
   const rejilla = h('div', { clase: `calendario-publicar${vista === 'mes' ? ' calendario-mes' : ''}` });
   if (vista === 'mes') ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'].forEach(d => rejilla.appendChild(h('div', { clase: 'cab-semana' }, d)));
   const mesActual = PUB.mes || mesDeHoyPublicar();
-  const enviosVisibles = (c.envios || []).filter(e => e.estado !== 'cancelado' && pasaEnvio(e));
+  // el calendario, SIN los filtros (ver arriba)
+  const enviosVisibles = (c.envios || []).filter(e => e.estado !== 'cancelado');
   const TOPE_DIA = vista === 'mes' ? 3 : 99;
   (c.dias || []).forEach(dia => {
     const fuera = vista === 'mes' && !dia.startsWith(mesActual);
@@ -20111,8 +22020,9 @@ function seccionColaPublicar() {
     const delDia = enviosVisibles.filter(e => String(e.cuando || '').startsWith(dia));
     if (!delDia.length && vista !== 'mes') columna.appendChild(h('div', { clase: 'meta dia-vacio' }, '—'));
     delDia.slice(0, TOPE_DIA).forEach(e => columna.appendChild(h('button', {
-      clase: `envio-dia ${CLASE_ESTADO[e.estado] || ''}`,
-      title: `${NOMBRES_RED[e.red]} · ${e.video} · ${ESTADOS_ENVIO[e.estado] || e.estado}`,
+      clase: `envio-dia ${CLASE_ESTADO[e.estado] || ''}${e.debio_salir ? ' debio-salir' : ''}`,
+      title: `${NOMBRES_RED[e.red]}${e.tipo && e.red === 'youtube' ? ` (${e.tipo})` : ''} · ${e.video} · ${ESTADOS_ENVIO[e.estado] || e.estado}`
+        + (e.debio_salir ? ' · debería haber salido ya' : ''),
       onclick: () => irASeccionPublicar('ficha', e.pid),
     }, h('span', { clase: 'hora' }, String(e.cuando || '').slice(11, 16)),
     ` ${CORTOS_RED[e.red]} · ${recortar(e.video || '', vista === 'mes' ? 12 : 22)}`)));
@@ -20365,9 +22275,9 @@ async function escribirTextosPublicar(redes, reintento) {
   } catch (e) { toast(e.message, true); }
 }
 
-/* DESPUÉS DE PUBLICAR la ficha se queda donde estaba, para seguir con las otras
-   redes, y dice arriba en cuáles ya está (con su enlace) y en cuáles va a
-   salir. Cada red marca su último estado al lado de su casilla. */
+/* AL VOLVER A LA FICHA después de publicar (desde el 20-10 la ficha se cierra
+   al programar o enviar: ver `cerrarFichaTrasEnvio`), dice arriba en cuáles
+   ya está (con su enlace) y en cuáles va a salir. Cada red marca su último estado al lado de su casilla. */
 function ultimoEnvioPorRed(f) {
   const salida = {};
   // `envios` llega del más nuevo al más viejo
@@ -20411,6 +22321,41 @@ function avisarCambiosPublicar(antes, despues) {
     else if (e.estado === 'programado' && previo[e.id] === 'enviando') toast(`Programado en ${NOMBRES_RED[e.red]} para ${cuandoLegible(e.cuando)}`);
     else if (e.estado === 'fallido') toast(`Falló en ${NOMBRES_RED[e.red]}: ${e.error || 'mira el motivo en la lista de envíos'}`, true);
   });
+}
+
+/* SHORT O VÍDEO NORMAL EN YOUTUBE (20-10-2026: no había diferencia). Se dice
+   siempre cómo sale y qué cambia; en un vídeo vertical (el único caso dudoso)
+   se puede elegir. Quien decide de verdad es YouTube, por las medidas. */
+const FORMATOS_YOUTUBE_PUB = [['auto', 'Automático (por las medidas)'], ['short', 'Short'], ['video', 'Vídeo normal']];
+
+function formatoYoutubePublicar(f) {
+  if (!(f.redes || []).includes('youtube')) return null;
+  const enc = (f.encaje || {}).youtube || {};
+  const corto = enc.tipo === 'Short';
+  const caja = h('div', { clase: `fila formato-youtube${corto ? ' es-short' : ''}`, datos: { tipo: corto ? 'short' : 'video' } },
+    h('span', { clase: `pastilla ${corto ? 'aviso' : ''} tipo-youtube` }, corto ? 'YouTube · Short' : 'YouTube · Vídeo normal'),
+    h('span', { clase: 'meta crece' }, corto
+      ? 'Título corto con #Shorts (lo pone el Studio), descripción de 1 a 3 líneas y sin capítulos.'
+      : 'Título de 40 a 70 caracteres, descripción para el buscador y capítulos si los hay.'));
+  if (enc.puede_elegir) {
+    caja.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Publicarlo como',
+      h('select', { 'aria-label': 'Short o vídeo normal en YouTube', datos: { formatoYoutube: f.pid },
+        onchange: ev => cambiarFormatoYoutubePublicar(ev.target.value) },
+      ...FORMATOS_YOUTUBE_PUB.map(([v, t]) => h('option', { value: v, selected: (f.youtube_formato || 'auto') === v }, t)))));
+  }
+  return caja;
+}
+
+async function cambiarFormatoYoutubePublicar(valor) {
+  try {
+    PUB.ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}`), {
+      method: 'PUT', cuerpo: { youtube_formato: valor },
+    });
+    const tipo = ((PUB.ficha.encaje || {}).youtube || {}).tipo;
+    toast(`YouTube: sale como ${tipo === 'Short' ? 'Short' : 'vídeo normal'}. Si los textos ya estaban escritos, `
+      + 'pide otros a Claude para que encajen.');
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
 }
 
 function seccionFichaPublicar() {
@@ -20467,6 +22412,8 @@ function seccionFichaPublicar() {
   redes.appendChild(fila);
   Object.keys(NOMBRES_RED).filter(r => (f.redes || []).includes(r) && ((f.encaje || {})[r] || {}).texto)
     .forEach(r => redes.appendChild(h('div', { clase: 'meta' }, `${NOMBRES_RED[r]}: ${f.encaje[r].texto}`)));
+  const formatoYt = formatoYoutubePublicar(f);
+  if (formatoYt) redes.appendChild(formatoYt);
   // lo que falta en los ajustes del proyecto (el tablero de Pinterest…)
   const faltaAjuste = (f.redes || []).filter(r => ((f.formato_redes || {})[r] || {}).falta);
   if (faltaAjuste.length) {
@@ -20516,6 +22463,94 @@ function seccionFichaPublicar() {
   return caja;
 }
 
+/* LOS EMOJIS (rama `textos-emojis`, 20-10): el nivel del proyecto (Ninguno ·
+   Sobrio · Normal · Vistoso; de fábrica, Vistoso) y los emojis de la marca.
+   Lo que viene del servidor ya es el nivel LEÍDO (un `usar_emojis: false`
+   guardado llega como «ninguno»): aquí solo se guarda si se toca. */
+const NIVELES_EMOJIS_PUB = [['ninguno', 'Ninguno'], ['sobrio', 'Sobrio'], ['normal', 'Normal'], ['vistoso', 'Vistoso']];
+
+function ajusteEmojisPublicar(p, a, guardar) {
+  const nivel = a.emojis || 'vistoso';
+  const caja = h('div', { clase: 'ajuste-emojis' });
+  const botones = h('div', { clase: 'niveles-emojis', role: 'group', 'aria-label': 'Emojis en los textos' });
+  NIVELES_EMOJIS_PUB.forEach(([valor, texto]) => botones.appendChild(h('button', {
+    type: 'button', clase: `mini nivel-emojis${valor === nivel ? ' elegido' : ''}`,
+    datos: { nivel: valor }, 'aria-pressed': valor === nivel ? 'true' : 'false',
+    onclick: () => { if (valor === (a.emojis || 'vistoso')) return; a.emojis = valor; guardar('emojis', valor); },
+  }, texto)));
+  const campoMarca = () => document.querySelector(`input[data-emojis-marca="${p.id}"]`);
+  let relojMarca = null;
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('span', { clase: 'etiqueta-tono' }, 'Emojis en los textos'), botones,
+    h('span', { clase: 'crece' }), botonGuia('emojis_redes', campoMarca)));
+  caja.appendChild(h('div', { clase: 'meta' }, {
+    ninguno: 'Ninguno: Claude no pone emojis en ningún texto.',
+    sobrio: 'Sobrio: uno o dos, en el gancho o en la llamada a la acción.',
+    normal: 'Normal: en el gancho, en las listas y en la llamada a la acción.',
+    vistoso: 'Vistoso: siempre, a juego con el tema del vídeo: en el título, el gancho, de viñeta en cada párrafo, en la llamada a la acción y en la zona.',
+  }[nivel]));
+  if (nivel !== 'ninguno') {
+    caja.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Emojis de la marca (opcional: su firma, Claude los repite en el gancho y en la llamada a la acción)',
+      h('input', { type: 'text', value: a.emojis_marca || '', placeholder: '🎮 🕹️ 🎉', maxlength: 80,
+        datos: { emojisMarca: p.id, foco: `emojis-marca-${p.id}` },
+        // también con un evento `input` («Usar en el campo» de la guía), tras dejar de teclear
+        oninput: ev => {
+          clearTimeout(relojMarca);
+          const v = ev.target.value;
+          relojMarca = setTimeout(() => { if (v !== (a.emojis_marca || '')) { a.emojis_marca = v; guardar('emojis_marca', v); } }, 1200);
+        },
+        onchange: ev => {
+          clearTimeout(relojMarca);
+          if (ev.target.value === (a.emojis_marca || '')) return;
+          a.emojis_marca = ev.target.value; guardar('emojis_marca', ev.target.value);
+        } })));
+  }
+  return caja;
+}
+
+/* «✨ Más emojis»: el MISMO texto con emojis añadidos (el servidor comprueba
+   que no cambia ni una palabra). Lo que vuelve entra como lo escrito a mano y
+   se guarda por el camino de siempre, con su pastilla «Guardado». */
+async function masEmojisPublicar(red, campo, boton) {
+  const actual = String(textosDeFicha(red)[campo] || '');
+  if (!actual.trim()) { toast('Todavía no hay texto al que añadir emojis', true); return; }
+  if (boton) { boton.disabled = true; boton.textContent = 'Poniendo emojis…'; }
+  try {
+    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/emojis`),
+      { method: 'POST', cuerpo: { red, campo, texto: actual } });
+    if (String(textosDeFicha(red)[campo] || '') !== actual) {
+      toast('Has cambiado el texto mientras tanto: vuelve a pulsar «✨ Más emojis»', true);
+      return;
+    }
+    editarTextoPublicar(red, campo, r.texto);
+    const sitio = document.querySelector(`[data-foco="${red}-${campo}"]`);
+    if (sitio) sitio.value = r.texto;
+    await guardarTextosPublicar();
+    toast(`${NOMBRES_RED[red]}: ${r.despues - r.antes} emoji${r.despues - r.antes === 1 ? '' : 's'} más`);
+  } catch (e) {
+    toast(e.message, true);
+  } finally {
+    if (boton && boton.isConnected) { boton.disabled = false; boton.textContent = '✨ Más emojis'; }
+  }
+}
+
+function botonMasEmojisPublicar(red, campo) {
+  if (((PUB.ficha || {}).ajustes || {}).emojis === 'ninguno') return null;
+  return h('button', { type: 'button', clase: 'mini boton-emojis', datos: { emojis: `${red}-${campo}` },
+    title: 'Añade emojis a este texto sin cambiar sus palabras',
+    onclick: ev => masEmojisPublicar(red, campo, ev.currentTarget) }, '✨ Más emojis');
+}
+
+/* El aviso de la ficha cuando un texto lleva menos emojis de los que pide el
+   nivel del proyecto. No entra en la nota SEO. */
+function avisoEmojisPublicar(red, campo) {
+  const dato = ((((PUB.ficha || {}).emojis || {}).redes || {})[red] || {})[campo];
+  if (!dato || !dato.faltan) return null;
+  return h('div', { clase: 'meta aviso-emojis', datos: { avisoEmojis: `${red}-${campo}` } },
+    `⚠ ${campo === 'titulo' ? 'Este título' : 'Este texto'} va con menos emojis de los pedidos `
+    + `(${dato.hay} de ${dato.minimo} como mínimo): pulsa «✨ Más emojis».`);
+}
+
 function bloqueTextoRed(red) {
   const f = PUB.ficha;
   const t = textosDeFicha(red);
@@ -20537,20 +22572,25 @@ function bloqueTextoRed(red) {
   const maxTitulo = formato.titulo || (red === 'youtube' ? 100 : red === 'facebook' ? 255 : 0);
   if (maxTitulo) {
     const largo = (t.titulo || '').length;
-    b.appendChild(h('label', { clase: 'etiqueta-campo' },
+    b.appendChild(h('div', { clase: 'fila fila-campo-emojis' }, h('label', { clase: 'etiqueta-campo crece' },
       red === 'youtube' ? `Título (${largo}/70: más largo se corta en el móvil)`
-        : red === 'facebook' ? 'Título' : `Título (${largo}/${maxTitulo})`));
+        : red === 'facebook' ? 'Título' : `Título (${largo}/${maxTitulo})`), botonMasEmojisPublicar(red, 'titulo')));
     b.appendChild(h('input', { type: 'text', value: t.titulo || '', maxlength: maxTitulo,
       datos: { foco: `${red}-titulo` }, oninput: ev => editarTextoPublicar(red, 'titulo', ev.target.value) }));
+    const avisoTitulo = avisoEmojisPublicar(red, 'titulo');
+    if (avisoTitulo) b.appendChild(avisoTitulo);
   }
-  b.appendChild(h('label', { clase: 'etiqueta-campo' },
-    formato.limite && formato.limite < 1000 ? `Texto (hasta ${formato.limite} caracteres con todo)` : 'Texto'));
+  b.appendChild(h('div', { clase: 'fila fila-campo-emojis' }, h('label', { clase: 'etiqueta-campo crece' },
+    formato.limite && formato.limite < 1000 ? `Texto (hasta ${formato.limite} caracteres con todo)` : 'Texto'),
+  botonMasEmojisPublicar(red, 'descripcion')));
   if (!maxTitulo && !['discord', 'telegram'].includes(red)) {
     b.appendChild(h('div', { clase: 'meta' }, `${NOMBRES_RED[red]} no tiene título aparte: la PRIMERA LÍNEA del texto `
       + `es lo que se ve sin pulsar «más», así que hace de título.`));
   }
   b.appendChild(h('textarea', { rows: 4, value: t.descripcion || '', datos: { foco: `${red}-descripcion` },
     oninput: ev => editarTextoPublicar(red, 'descripcion', ev.target.value) }));
+  const avisoTexto = avisoEmojisPublicar(red, 'descripcion');
+  if (avisoTexto) b.appendChild(avisoTexto);
   b.appendChild(panelRevisionPublicar(`texto_${red}`, f.pid, campoTexto));
   if (formato.alt) {
     b.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Texto alternativo (lo que se ve en el vídeo, para quien no puede verlo)',
@@ -20772,22 +22812,52 @@ async function confirmarEnvioPublicar(modo, repetir) {
   const texto = `${modo === 'ahora' ? 'Publicar AHORA' : `Programar para ${cuandoLegible(cuando)} (hora de Lima)`}`
     + ` «${f.nombre}» en:\n\n${lineas}\n\nCon el perfil de Upload-Post «${(f.ajustes || {}).perfil}». `
     + 'Una vez publicado no se puede deshacer desde aquí.'
-    + (redes.includes('google_business') && redes.length > 1
-      ? '\n\nGoogle Business va en una subida aparte: gasta 2 subidas del mes de Upload-Post.' : '');
+    + avisoSubidasPublicar(redes);
   if (!confirm(texto)) return;
   PUB.enviando = true;
   pintarModulo();
+  let hecho = false;
   try {
-    await guardarTextosPublicar();
+    const guardado = await guardarTextosPublicar();
     await pedir(rutaPublicar(`/videos/${encodeURIComponent(f.pid)}/enviar`), {
       method: 'POST', cuerpo: { redes, modo, cuando, confirmado: true, repetir: !!repetir },
     });
+    hecho = guardado;
     toast(modo === 'ahora' ? 'Subiendo a Upload-Post…' : 'Programando…');
   } catch (e) {
     toast(e.message, true);
   }
   PUB.enviando = false;
+  if (hecho) {
+    const nombres = redes.map(r => NOMBRES_RED[r]).join(', ');
+    cerrarFichaTrasEnvio(f, modo === 'ahora' ? `Enviado a ${nombres}: se está subiendo ✓`
+      : `Programado para ${cuandoLegible(cuando)} en ${nombres} ✓`);
+    return;
+  }
   cargarPublicar(true);
+}
+
+/* LA FICHA SE CIERRA AL PROGRAMAR O ENVIAR (notas del 20-10: «cuando completo
+   el llenado y se guarda o programa, esta ficha sigue mostrándose»). Vuelve a
+   la cola, que es donde se ve en el calendario lo que se acaba de programar, con
+   el aviso arriba y un botón para volver a la ficha. Solo si los textos quedaron
+   guardados: con un guardado fallido, la ficha se queda abierta y lo escrito
+   también. Guardar textos a secas NO cierra: se sigue escribiendo. */
+function cerrarFichaTrasEnvio(f, mensaje) {
+  toast(mensaje);
+  PUB.avisoCola = { texto: mensaje, pid: f.pid, nombre: f.nombre };
+  PUB.modoEnvio = '';
+  PUB.cuandoEnvio = '';
+  irASeccionPublicar('cola');
+}
+
+function avisoTrasEnvioCola() {
+  const a = PUB.avisoCola;
+  if (!a) return null;
+  return h('div', { clase: 'caja-info fila aviso-tras-envio', role: 'status' },
+    h('span', { clase: 'crece' }, `«${a.nombre}»: ${a.texto}`),
+    h('button', { clase: 'mini', onclick: () => { PUB.avisoCola = null; irASeccionPublicar('ficha', a.pid); } }, 'Volver a la ficha'),
+    h('button', { clase: 'mini fantasma', 'aria-label': 'Cerrar el aviso', onclick: () => { PUB.avisoCola = null; pintarModulo(); } }, '×'));
 }
 
 async function dejarPendientePublicar(modo) {
@@ -20795,10 +22865,16 @@ async function dejarPendientePublicar(modo) {
   const redes = (f.redes || []).filter(r => ((f.encaje || {})[r] || {}).nivel !== 'error');
   if (!redes.length) { toast('elige al menos una red', true); return; }
   try {
-    await guardarTextosPublicar();
+    const guardado = await guardarTextosPublicar();
+    const cuando = modo === 'programar' ? PUB.cuandoEnvio : '';
     await pedir(rutaPublicar(`/videos/${encodeURIComponent(f.pid)}/enviar`), {
-      method: 'POST', cuerpo: { redes, modo: 'pendiente', cuando: modo === 'programar' ? PUB.cuandoEnvio : '' },
+      method: 'POST', cuerpo: { redes, modo: 'pendiente', cuando },
     });
+    if (guardado) {
+      cerrarFichaTrasEnvio(f, `Queda esperando tu OK${cuando ? ` para ${cuandoLegible(cuando)}` : ''}`
+        + ` en ${redes.map(r => NOMBRES_RED[r]).join(', ')} ✓ (sale en «Te necesitan»)`);
+      return;
+    }
     toast('Queda esperando tu OK');
     cargarPublicar(true);
   } catch (e) { toast(e.message, true); }
@@ -20840,7 +22916,7 @@ async function cancelarEnvioPublicar(envio) {
       ? `¿Ya miraste en Upload-Post si ${NOMBRES_RED[envio.red]} salió?\n\nQuitarlo de la lista deja `
         + 'volver a publicarlo sin aviso: hazlo solo si allí no está.'
       : `¿Cancelar ${NOMBRES_RED[envio.red]}${envio.estado === 'programado'
-      ? ' (y las demás redes que iban en el mismo envío programado)' : ''}?`;
+      ? ' (y las redes que iban en su misma subida a Upload-Post)' : ''}?`;
   if (!confirm(pregunta)) return;
   try {
     await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/envios/${envio.id}/cancelar`), { method: 'POST' });
@@ -20947,10 +23023,12 @@ function bloqueEnviosFicha() {
 function filasEnvioFicha(e) {
   const filas = [];
   filas.push(h('div', { clase: 'fila fila-envio' },
-    h('b', {}, CORTOS_RED[e.red] || e.red),
+    h('b', {}, nombreEnvioPublicar(e)),
     h('span', { clase: 'meta hora-envio' }, cuandoLegible(e.cuando)),
     pastillaEstadoEnvio(e.estado),
+    debioSalirPublicar(e),
     h('span', { clase: 'crece meta motivo-envio' }, e.error || e.nota || ''),
+    botonComprobarPublicar(e),
     e.metricas && textoMetricas(e.metricas)
       ? h('span', { clase: 'metricas-envio', title: `actualizado ${fechaCorta(e.metricas.al)}` },
         textoMetricas(e.metricas))
@@ -21070,7 +23148,7 @@ async function guardarAjustePublicar(cid, cambios) {
     toast('Guardado');
     // lo que cambia qué botones salen se repinta; el resto no, para no quitar
     // el foco a quien sigue escribiendo
-    if (['usar_emojis', 'perfil', 'yt_para_ninos', 'palabra_clave', 'redes', 'redes_visibles',
+    if (['usar_emojis', 'emojis', 'perfil', 'yt_para_ninos', 'palabra_clave', 'redes', 'redes_visibles',
       'pinterest_tablero', 'gbp_cta'].some(k => k in cambios)) pintarModulo();
   } catch (e) { toast(e.message, true); }
 }
@@ -21360,6 +23438,29 @@ function bloqueRedesProyectoPublicar(p) {
   return caja;
 }
 
+/* CUÁNTAS SUBIDAS A UPLOAD-POST salen de un envío: la misma regla que
+   `publicar.enviar` (19-10-2026). Google Business va siempre aparte, y YouTube y
+   Facebook van en la suya cuando hay otras redes. Cada subida gasta del mes. */
+const TITULO_MANDA_PUBLICAR = ['youtube', 'facebook'];
+function subidasDeEnvioPublicar(redes) {
+  const lotes = new Set();
+  const conTitulo = redes.some(r => TITULO_MANDA_PUBLICAR.includes(r));
+  const otras = redes.some(r => !TITULO_MANDA_PUBLICAR.includes(r) && r !== 'google_business');
+  redes.forEach(r => lotes.add(r === 'google_business' ? 'gbp'
+    : (TITULO_MANDA_PUBLICAR.includes(r) && conTitulo && otras) ? 'titulo' : 'resto'));
+  return lotes.size;
+}
+function avisoSubidasPublicar(redes) {
+  const n = subidasDeEnvioPublicar(redes);
+  if (n < 2) return '';
+  const partes = [];
+  if (redes.includes('google_business') && redes.length > 1) partes.push('Google Business');
+  if (redes.some(r => TITULO_MANDA_PUBLICAR.includes(r))
+      && redes.some(r => !TITULO_MANDA_PUBLICAR.includes(r) && r !== 'google_business')) partes.push('YouTube/Facebook');
+  return `\n\n${partes.join(' y ')} ${partes.length > 1 ? 'van cada uno en su propia subida' : 'va en una subida aparte'}: `
+    + `gasta ${n} subidas del mes de Upload-Post.`;
+}
+
 function tarjetaProyectoPublicar(p) {
   const a = p.ajustes || {};
   const b = h('div', { clase: 'bloque proyecto-publicar' }, h('h3', {}, p.nombre));
@@ -21448,8 +23549,9 @@ function tarjetaProyectoPublicar(p) {
   fijos.appendChild(panelRevisionPublicar('tono_redes', p.id, campoTono));
   fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Página de Facebook (solo si hay más de una)',
     h('input', { type: 'text', value: a.facebook_pagina || '', onchange: ev => guardar('facebook_pagina', ev.target.value) })));
+  fijos.appendChild(ajusteEmojisPublicar(p, a, guardar));
   const casillas = h('div', { clase: 'fila' });
-  [['usar_emojis', 'Usar emojis en los textos'], ['marcar_ia', 'Marcar como hecho con IA'],
+  [['marcar_ia', 'Marcar como hecho con IA'],
     ['avisar_youtube', 'Avisar a los suscriptores de YouTube']]
     .forEach(([campo, texto]) => casillas.appendChild(h('label', { clase: 'casilla-red' },
       h('input', { type: 'checkbox', checked: !!a[campo], onchange: ev => guardar(campo, ev.target.checked) }),
@@ -21522,9 +23624,9 @@ function seccionResultadosPublicar() {
   const caja = h('div', { clase: 'resultados-publicar' });
   const proyectos = ((PUB.proyectos || {}).proyectos || []);
   caja.appendChild(h('div', { clase: 'fila' },
-    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; PUB.resultados = null; PUB.mejores = null; cargarPublicar(); } },
+    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; cargarPublicar(); } },
       ...proyectos.map(x => h('option', { value: x.id, selected: x.id === PUB.proyectoResultados }, x.nombre))),
-    h('select', { onchange: ev => { PUB.diasResultados = Number(ev.target.value); PUB.resultados = null; PUB.mejores = null; cargarPublicar(); } },
+    h('select', { onchange: ev => { PUB.diasResultados = Number(ev.target.value); cargarPublicar(); } },
       ...[[7, 'últimos 7 días'], [30, 'últimos 30 días'], [90, 'últimos 90 días']].map(([v, t]) =>
         h('option', { value: v, selected: (PUB.diasResultados || 30) === v }, t))),
     h('span', { clase: 'crece' }),
@@ -22320,8 +24422,7 @@ function elegirProyectoParrilla(cid) {
 
 function irASeccionParrilla(seccion) {
   PAR.seccion = seccion;
-  const m = $('#modulo');
-  if (m) m.scrollTop = 0;
+  subirArriba('modulo');
   pintarModulo();
 }
 
@@ -22986,6 +25087,8 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   e.cta = r.cta || ctaPorDefecto();
   if (r.duracion_objetivo_s) e.duracion_objetivo_s = r.duracion_objetivo_s;
   if (r.formato === 'vertical' || r.formato === 'horizontal') e.formato = r.formato;
+  /* el espacio fijo es del guion: uno sin él deja el campo vacío */
+  e.espacio_fijo = espacioFijoDelEncargo(r.espacio_fijo);
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.datos = null;
   irAModulo('crear');
@@ -23877,6 +25980,8 @@ montarModulos();
    access 'MODOS' before initialization» y deja la pantalla en blanco.
    Las funciones se izan; los const no. */
 arrancar();
+// la pantalla de entrada (el Inicio) y el «atrás» que no sale (diseno-crearia)
+montarEntrada();
 
 /* ----------------------------------------- PUBLICAR · RESULTADOS (redes-2)
  *
@@ -23886,26 +25991,8 @@ arrancar();
  * Upload-Post ni gasta consultas; las cifras se piden solo con «Actualizar».
  */
 
-function lineaMejorSemana() {
-  const m = PUB.mejorSemana;
-  const caja = h('div', { clase: 'bloque linea-mejor-semana' });
-  if (m === null) {
-    caja.appendChild(h('div', { clase: 'meta' }, 'Lo mejor de los últimos 7 días: cargando…'));
-    return caja;
-  }
-  if (!m) {
-    caja.appendChild(h('div', { clase: 'meta' },
-      'Lo mejor de los últimos 7 días: todavía no hay cifras. '
-      + 'Se piden en Publicar → Resultados, con «Actualizar».'));
-    return caja;
-  }
-  caja.appendChild(h('div', { clase: 'fila' },
-    h('span', { clase: 'meta' }, 'Lo mejor de los últimos 7 días:'),
-    h('button', { clase: 'mini fantasma nombre-envio', onclick: () => irASeccionPublicar('ficha', m.pid) }, m.nombre),
-    h('span', { clase: 'pastilla red-mini ok' }, CORTOS_RED[m.red] || m.red),
-    h('span', { clase: 'crece meta' }, textoMetricas(m.metricas) || '')));
-  return caja;
-}
+/* La línea de Inicio («lo mejor de los últimos 7 días») es desde el 19-10-2026
+   una tarjeta del panel: `PINTORES_INICIO.mejor`, en la sección INICIO. */
 
 function variacion(actual, anterior) {
   if (typeof actual !== 'number' || typeof anterior !== 'number' || anterior <= 0) return '';
@@ -24041,10 +26128,10 @@ function seccionInformePublicar() {
   const proyectos = ((PUB.proyectos || {}).proyectos || []);
   caja.appendChild(h('div', { clase: 'fila no-imprimir' },
     h('button', { clase: 'mini fantasma', onclick: () => { PUB.verInforme = false; pintarModulo(); } }, '← Resultados'),
-    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; PUB.informe = null; PUB.resultados = null; cargarPublicar(); } },
+    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; cargarPublicar(); } },
       ...proyectos.map(x => h('option', { value: x.id, selected: x.id === PUB.proyectoResultados }, x.nombre))),
-    r && (r.meses || []).length ? h('select', { onchange: ev => { PUB.mesInforme = ev.target.value; PUB.informe = null; cargarPublicar(); } },
-      ...r.meses.map(m => h('option', { value: m, selected: m === r.mes }, m))) : null,
+    r && (r.meses || []).length ? h('select', { onchange: ev => { PUB.mesInforme = ev.target.value; cargarPublicar(); } },
+      ...r.meses.map(m => h('option', { value: m, selected: m === (PUB.mesInforme || r.mes) }, m))) : null,
     h('span', { clase: 'crece' }),
     h('button', { clase: 'mini', disabled: !r || !!r.error, onclick: () => copiarTexto(r.resumen) }, 'Copiar resumen'),
     h('button', { clase: 'mini primario', disabled: !r || !!r.error, onclick: () => window.print() }, 'Imprimir o guardar en PDF')));

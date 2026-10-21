@@ -161,7 +161,8 @@ _REGLAS = """REGLAS GENERALES
    - Siempre calcula la locución estimada (unas 2,5 palabras por segundo).
 5. Tiempos por escena solo si el original los trae; si no, numera las escenas.
 6. Las reglas fijas del cliente (qué mostrar, qué evitar, colores, frases de marca) van a MARCA DEL CLIENTE, no dentro de las escenas.
-7. No inventes datos: teléfonos, precios o enlaces solo si están en el original. Si falta el CTA, pon [FALTA CTA]."""
+7. No inventes datos: teléfonos, precios o enlaces solo si están en el original. Si falta el CTA, pon [FALTA CTA].
+8. ESPACIO FIJO solo si el original dice que todo el vídeo ocurre en un mismo sitio (un local, una cocina, un plató). Si no lo dice, no pongas esa sección."""
 
 _AJUSTE_RED = """AJUSTE POR RED (en "adaptar" aplícalo; en "exacto" solo avisa con ⚠ si algo no encaja)
 - TikTok / Reels / Shorts: vertical. Gancho en los primeros 2–3 s. Un cambio de plano cada 1–3 s. Texto en pantalla frecuente y grande, que refuerce la voz. CTA corto (comenta, guárdalo, link en bio, escríbenos). En TikTok, las palabras clave del tema dichas en la voz.
@@ -181,6 +182,12 @@ Locución estimada: … palabras ≈ … s
 Objetivo: …
 CTA: …
 Tono: …
+
+ESPACIO FIJO (solo si todo el vídeo ocurre en un mismo sitio; si no, quita esta sección)
+- Sitio: [nombre corto del sitio]
+- Descripción: [cómo es el sitio, en una frase; va tal cual a todas las imágenes]
+- Luz: [hora del día y fuente de luz]
+- Secundarios: [otros sitios que sí pueden salir, «Nombre: descripción» separados por «;», o ninguno]
 
 ESCENA 1 (tiempo, si lo hay)
 Visual: …
@@ -440,8 +447,10 @@ def _nueva_escena(n, tiempo=""):
 
 _RE_ESCENA = re.compile(r"^ESCENA\s+(\d+)\s*(?:\((.*)\))?\s*[:.]?\s*(.*)$", re.I)
 _RE_SECCION = re.compile(
-    r"^(CIERRE DE MARCA|MARCA DEL CLIENTE|VERSIONES POR RED|PARA EL ENCARGO|AVISOS)\b\s*(.*)$",
+    r"^(CIERRE DE MARCA|MARCA DEL CLIENTE|VERSIONES POR RED|PARA EL ENCARGO|ESPACIO FIJO|AVISOS)\b\s*(.*)$",
     re.I)
+_RE_ITEM_ESPACIO = re.compile(
+    r"^[-•*]?\s*(Sitio|Descripci[oó]n|Luz|Secundarios?)\s*:\s*(.*)$", re.I)
 _RE_ITEM_ENCARGO = re.compile(
     r"^[-•*]?\s*(Material|Indicaciones|Llamadas a la acci[oó]n|Duraci[oó]n)\s*:\s*(.*)$", re.I)
 
@@ -456,7 +465,7 @@ def leer_guion(texto):
     g = {"codigo": "", "titulo": "", "cliente": "", "uso": "", "red": "", "formato": "",
          "duracion_s": None, "duracion_texto": "", "locucion": "", "objetivo": "", "cta": "",
          "tono": "", "escenas": [], "cierre": "", "marca": {"mostrar": "", "evitar": "", "otras": ""},
-         "versiones": "", "encargos": [], "avisos": []}
+         "versiones": "", "encargos": [], "avisos": [], "espacio_fijo": {}}
     i = 0
     while i < len(lineas) and not lineas[i]:
         i += 1
@@ -476,6 +485,7 @@ def leer_guion(texto):
         i += 1
     seccion, escena, clave_escena, item = "cabecera", None, "", None
     marca_clave = ""
+    espacio, espacio_clave = {"sitio": "", "descripcion": "", "luz": "", "secundarios": []}, ""
     for linea in lineas[i:]:
         if not linea:
             continue
@@ -499,6 +509,8 @@ def leer_guion(texto):
                 seccion = "versiones"
             elif nombre == "PARA EL ENCARGO":
                 seccion, item = "encargo", None
+            elif nombre == "ESPACIO FIJO":
+                seccion, espacio_clave = "espacio", ""
             else:
                 seccion = "avisos"
             continue
@@ -549,6 +561,22 @@ def leer_guion(texto):
         if seccion == "versiones":
             g["versiones"] = (g["versiones"] + "\n" + linea).strip()
             continue
+        if seccion == "espacio":
+            m = _RE_ITEM_ESPACIO.match(linea)
+            if m:
+                espacio_clave = {"sitio": "sitio", "luz": "luz"}.get(
+                    m.group(1).lower(), "secundarios" if m.group(1).lower().startswith("sec")
+                    else "descripcion")
+                if espacio_clave == "secundarios":
+                    espacio["secundarios"].append(m.group(2).strip())
+                else:
+                    espacio[espacio_clave] = m.group(2).strip()
+            elif espacio_clave == "secundarios":
+                # uno por línea debajo de «- Secundarios:»
+                espacio["secundarios"].append(re.sub(r"^[-•*]\s*", "", linea).strip())
+            elif espacio_clave and not linea.startswith("("):
+                espacio[espacio_clave] = (espacio[espacio_clave] + " " + linea).strip()
+            continue
         if seccion == "encargo":
             m = _RE_ITEM_ENCARGO.match(linea)
             if m:
@@ -584,7 +612,40 @@ def leer_guion(texto):
         enc["indicaciones"] = _sin_corchete_vacio(enc["indicaciones"])
     for campo in ("cliente", "red", "objetivo", "cta", "tono", "locucion"):
         g[campo] = "" if g[campo] in ("…", "...") else g[campo]
+    g["espacio_fijo"] = _espacio_fijo(espacio)
     return g
+
+
+def _sin_relleno(texto):
+    """Lo escrito, sin los huecos de la plantilla («[…]», «…», «ninguno»)."""
+    t = _sin_corchete_vacio(" ".join(str(texto or "").split()))
+    return "" if t.lower().strip(". ") in ("", "…", "...", "ninguno", "ninguna", "no") else t
+
+
+def _espacio_fijo(crudo):
+    """Lo leído en ESPACIO FIJO → {sitio, descripcion, luz, secundarios} o {}.
+
+    SIN DESCRIPCIÓN NO HAY ESPACIO FIJO: es lo que va literal al catálogo, y un
+    sitio sin descripción no fija nada. La plantilla trae la sección con sus
+    huecos («[…]») y eso es lo mismo que no traerla.
+    Cada secundario es «Nombre: descripción» (o «Nombre — descripción», o solo
+    el nombre), separados por «;» o uno por línea."""
+    descripcion = _sin_relleno(crudo.get("descripcion"))
+    if not descripcion:
+        return {}
+    secundarios = []
+    for trozo in crudo.get("secundarios") or []:
+        for item in re.split(r"\s*;\s*", str(trozo or "")):
+            item = _sin_relleno(item)
+            if not item:
+                continue
+            partes = re.split(r"\s*:\s*|\s+[—–]\s+", item, maxsplit=1)
+            nombre = _sin_relleno(partes[0])
+            if nombre:
+                secundarios.append({"nombre": nombre,
+                                    "descripcion": _sin_relleno(partes[1]) if len(partes) > 1 else ""})
+    return {"sitio": _sin_relleno(crudo.get("sitio")), "descripcion": descripcion,
+            "luz": _sin_relleno(crudo.get("luz")), "secundarios": secundarios}
 
 
 def _sin_corchete_vacio(texto):
@@ -652,7 +713,7 @@ def huella_material(texto):
 
 def encargo_de(guion, indice=0):
     """Lo que se pone en «Un vídeo nuevo»: {nombre, material, indicaciones, cta,
-    duracion_objetivo_s, formato, guion_propio, avisos}.
+    duracion_objetivo_s, formato, guion_propio, espacio_fijo, avisos}.
 
     - Con «Uso: exacto» se marca «Esto YA es el guion»: el redactor reparte el
       texto en bloques y no lo reescribe. La llamada a la acción ya va dentro
@@ -706,6 +767,8 @@ def encargo_de(guion, indice=0):
     return {"nombre": nombre[:60], "material": material, "indicaciones": indicaciones,
             "llamadas": llamadas, "cta": cta, "duracion_objetivo_s": int(duracion) if duracion else None,
             "formato": formato, "guion_propio": exacto, "uso": uso or "adaptar",
+            # todo el vídeo en un mismo sitio ({} si el guion no lo fija)
+            "espacio_fijo": dict(g.get("espacio_fijo") or {}),
             "avisos": avisos}
 
 
@@ -763,6 +826,9 @@ def plantilla_vacia(cliente=""):
             "Formato: vertical\nDuración: la elijo en el Encargo\n"
             "Locución estimada: … palabras ≈ … s\nObjetivo: [qué tiene que conseguir]\n"
             "CTA: [qué se pide al final]\nTono: [cómo suena]\n\n"
+            "ESPACIO FIJO (opcional: bórralo si el vídeo cambia de sitio)\n- Sitio: [nombre corto]\n"
+            "- Descripción: [cómo es el sitio, en una frase; va tal cual a todas las imágenes]\n"
+            "- Luz: [hora del día y fuente de luz]\n- Secundarios: ninguno\n\n"
             "ESCENA 1\nVisual: [una imagen fija: quién, dónde, qué hace]\nVoz: «[lo que se oye]»\n"
             "Texto en pantalla: [si lo hay]\n\n"
             "ESCENA 2\nVisual: …\nVoz: «…»\nTexto en pantalla: …\n\n"
@@ -1113,6 +1179,9 @@ def pasar_al_encargo(raiz, cid, gid, indice=0, estilo=""):
         datos = _leer(raiz, cid)
         _m, g = _guion(datos, gid)
         leido = g.get("leido") or leer_guion(g.get("texto"))
+        if "espacio_fijo" not in leido:
+            # leído antes de que existiera ESPACIO FIJO: se lee otra vez
+            leido = leer_guion(g.get("texto"))
         n = len(leido.get("encargos") or [])
         try:
             indice = int(indice or 0)

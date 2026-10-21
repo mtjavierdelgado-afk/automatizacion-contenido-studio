@@ -340,9 +340,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
 | `GET` | `/api/dominios` | Los tipos de negocio: los de fábrica y los del dueño (Etapa Foto C). -> {dominios: [{id, nombre, descripcion, de_fabrica, palabras, reglas, revisor, cartas_propias…}], automatico, limites} |
 | `POST` | `/api/dominios` | Crea un tipo propio: {nombre, descripcion?, palabras?, reglas? (formato de las reglas del estilo), revisor?: {equipo?, orientacion?}}. Se guarda en `<proyectos>/_sistema/dominios.json`. 400 si no vale o el nombre se repite |
-| `PUT` | `/api/dominios/{id}` | Cambia un tipo propio (el cuerpo entero). Los de fábrica, 400. -> el tipo + `estilos` que lo tienen fijado |
+| `PUT` | `/api/dominios/{tid}` | Cambia un tipo propio (el cuerpo entero). Los de fábrica, 400. -> el tipo + `estilos` que lo tienen fijado |
 | `GET` | `/api/presets-light/{preset_id}/dominio` | El tipo fijado en un estilo y, en automático, el tipo propio que su texto parece nombrar (solo sugerencia). -> {dominio, sugerido} |
-| `DELETE` | `/api/dominios/{id}` | Borra un tipo propio. 409 si algún estilo lo tiene fijado; con `?forzar=true` lo borra y esos estilos vuelven a automático; queda marcado como borrado para que los vídeos ya hechos con él no cambien. Los de fábrica, 400 |
+| `DELETE` | `/api/dominios/{tid}` | Borra un tipo propio. 409 si algún estilo lo tiene fijado; con `?forzar=true` lo borra y esos estilos vuelven a automático; queda marcado como borrado para que los vídeos ya hechos con él no cambien. Los de fábrica, 400 |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
 | `GET` | `/api/inicio/resumen` | Lo del Inicio que no sale de otras rutas, en una sola llamada. |

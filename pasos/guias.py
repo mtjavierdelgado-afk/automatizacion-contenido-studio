@@ -91,6 +91,17 @@ GUIAS = {
             "REVISOR · EQUIPO: la mampara no es de vidrio, flota sin perfiles o "
             "tiene un tamaño imposible para el baño.\n"
             "REVISOR · MIRADAS: el instalador mira lo que hace, no a cámara."),
+        "prompt_ia": (
+            "Ayúdame a escribir el TIPO DE NEGOCIO de un cliente para un sistema que "
+            "genera fotos realistas con IA. Dame: un nombre; de 3 a 8 palabras con las "
+            "que se nombra el negocio en un guion; hasta 8 reglas de foto, cada una una "
+            "exigencia física y comprobable sobre lo que el generador suele hacer mal en "
+            "ese negocio (materiales, cómo se monta o se usa el producto, el sitio, la "
+            "ropa del personal), con las palabras que la activan si solo vale para "
+            "ciertos planos; y dos frases para el revisor: el fallo del producto o del "
+            "equipo que se vería a la primera, y hacia dónde tiene que mirar la gente. "
+            "Sin marcas ni logos de terceros, sin luz ni paleta (eso es del estilo).\n\n"
+            "EL NEGOCIO:\n[describe aquí qué vende o qué servicio da el cliente]"),
     },
     "estilo_grafico": {
         "titulo": "Indicaciones del estilo gráfico",

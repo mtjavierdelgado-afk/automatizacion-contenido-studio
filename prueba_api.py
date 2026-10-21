@@ -2202,7 +2202,7 @@ def probar_sistema(cliente):
     respuesta, datos = cliente.get("/api/sistema/guias")
     igual(respuesta.status_code, 200, "GET /api/sistema/guias responde 200")
     ids = [g.get("id") for g in datos.get("guias") or []]
-    igual(ids, ["estilo_grafico", "tono", "voz", "material", "indicaciones", "cta",
+    igual(ids, ["estilo_grafico", "tipo_negocio", "tono", "voz", "material", "indicaciones", "cta",
                 "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
                 "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente", "chat_guiones",
                 "analizar_cuenta", "conexiones_cuentas",
@@ -2210,7 +2210,7 @@ def probar_sistema(cliente):
                 "texto_linkedin", "texto_x", "texto_threads", "texto_pinterest", "texto_bluesky",
                 "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business",
                 "emojis_redes"],
-          "estan las treinta y una guias (seis de Crear, diecinueve de Publicar y seis de la Parrilla), en orden")
+          "estan las treinta y dos guias (siete de Crear, diecinueve de Publicar y seis de la Parrilla), en orden")
     ok(all(g.get("plantilla") and g.get("prompt_ia") and g.get("que_hace")
            for g in datos.get("guias") or []),
        "cada guia trae plantilla, prompt para otra IA y que hace el sistema")

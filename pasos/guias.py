@@ -26,6 +26,72 @@ lado de cada una (`usa`): si ese codigo cambia, la guia se revisa con el.
 
 GUIAS = {
     # ------------------------------------------------------------------ estilo
+    "tipo_negocio": {
+        "titulo": "Tipo de negocio",
+        "donde": "Configuración → Tipos de negocio (y el selector «Tipo de negocio» "
+                 "en la ficha de un estilo)",
+        "usa": "pasos/dominios.py (validar, reglas_de_foto, frases_revisor), "
+               "motores/reglas/reglas_foto.json (el hueco reglas-del-negocio), "
+               "pasos/p6_assets.py y pasos/revisor_imagenes.py",
+        "que_hace": [
+            "Un tipo de negocio reúne lo que el Studio debe saber de UN tipo de "
+            "cliente para que sus fotos parezcan de verdad: sus reglas de foto y "
+            "lo que el revisor tiene que vigilar. Los de fábrica son «General» y "
+            "«EstadoPlay»; los tuyos los creas aquí y se guardan fuera del código.",
+            "SOLO SE USA SI UN ESTILO LO FIJA (selector «Tipo de negocio» de su "
+            "ficha). En «Automático» todo sale como siempre: crear o cambiar un "
+            "tipo no toca ningún vídeo que no lo haya elegido.",
+            "Cada REGLA entra en el prompt de cada imagen de foto, junto a las "
+            "reglas de la casa. Si le pones palabras en «Solo si el plano habla "
+            "de…», solo entra en los planos que las nombran; si no, en todos.",
+            "La «Versión para el generador» es la regla en inglés, concreta y "
+            "física, que es lo que lee el generador de imágenes. «Afinar con "
+            "Claude» la escribe por ti; si la dejas vacía, va tu texto tal cual.",
+            "Las PALABRAS del tipo («mampara, ducha, baño») sirven para que el "
+            "revisor reconozca el negocio en un estilo en Automático y use sus "
+            "frases; nunca meten sus reglas en un vídeo que no lo ha fijado.",
+            "Lo que escribes para el REVISOR (equipo y hacia dónde mira la gente) "
+            "es lo que anota como fallo al mirar cada imagen.",
+            "Los encuadres siguen siendo los generales de foto (las cartas propias "
+            "de cada negocio llegarán más adelante).",
+            "Cambiar las reglas de un tipo que ya usa un vídeo de foto cambia el "
+            "prompt de sus imágenes: quedan para rehacer, y rehacerlas se paga.",
+        ],
+        "si": [
+            "Una regla, una exigencia física y comprobable: «las mamparas son de "
+            "vidrio transparente con perfiles finos».",
+            "Lo que el generador suele hacer mal en ESE negocio: materiales, cómo "
+            "se monta o se usa el producto, la ropa del personal, el sitio.",
+            "Palabras «solo si…» cuando la regla es de un tipo de plano (las manos "
+            "con el producto, el exterior del local).",
+            "Para el revisor, el fallo que verías tú a la primera.",
+        ],
+        "no": [
+            "Marcas, logos o nombres de productos de terceros: el generador los "
+            "rechaza o los dibuja mal.",
+            "Reglas de estilo gráfico (luz, paleta, lente): eso es del estilo.",
+            "Lo que es de un solo vídeo: va en sus indicaciones o en el encargo.",
+            "Más de 20 reglas: una lista larga deja de leerse entera.",
+        ],
+        "plantilla": (
+            "NOMBRE: [el negocio, p. ej. «Mamparas y baños»]\n"
+            "PALABRAS: [3 a 8 palabras con las que se nombra en un guion]\n"
+            "REGLA 1: [qué tiene que verse siempre bien] — solo si: [palabras]\n"
+            "REGLA 2: [...]\n"
+            "REVISOR · EQUIPO: [el fallo del producto o del equipo que verías a la primera]\n"
+            "REVISOR · MIRADAS: [hacia dónde tiene que mirar la gente]"),
+        "ejemplo": (
+            "NOMBRE: Mamparas y baños\n"
+            "PALABRAS: mampara, ducha, baño, vidrio templado\n"
+            "REGLA 1: Las mamparas son de vidrio templado transparente, con "
+            "perfiles finos de aluminio y sin reflejos que tapen el baño — solo "
+            "si: mampara, ducha\n"
+            "REGLA 2: Los baños están limpios y ordenados, sin botes ni toallas "
+            "de marca.\n"
+            "REVISOR · EQUIPO: la mampara no es de vidrio, flota sin perfiles o "
+            "tiene un tamaño imposible para el baño.\n"
+            "REVISOR · MIRADAS: el instalador mira lo que hace, no a cámara."),
+    },
     "estilo_grafico": {
         "titulo": "Indicaciones del estilo gráfico",
         "donde": "Crear un estilo → Estilo gráfico → Indicaciones",
@@ -1386,7 +1452,7 @@ for _red, (_nombre, _tope, _hace, _si, _no, _plantilla, _ejemplo) in _REDES_NUEV
                       "VÍDEO:\n[pega aquí el guion o un resumen]"),
     }
 
-ORDEN = ("estilo_grafico", "tono", "voz", "material", "indicaciones", "cta",
+ORDEN = ("estilo_grafico", "tipo_negocio", "tono", "voz", "material", "indicaciones", "cta",
          "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
          "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente",
          "chat_guiones", "analizar_cuenta", "conexiones_cuentas",

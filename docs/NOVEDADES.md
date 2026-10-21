@@ -239,6 +239,60 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
+**Elementos encima de las imágenes, al ritmo de la voz (19 de octubre)**
+- En **Imágenes**, cada diapositiva trae **✨ Elementos de esta imagen**:
+  palabras que saltan, insignias (x3, -50 %, NUEVO), etiquetas de precio,
+  iconos, flechas y círculos que señalan, estrellas, subrayados, bandas,
+  cintas y el rayo de un versus. Cada uno **salta en la palabra que elijas**
+  (la voz trae el momento exacto de cada palabra), en el sitio que digas
+  (arriba, centro, izquierda…) y con su entrada: salta, golpe, desliza,
+  aparece suave o se dibuja. Uno se va cuando salta el siguiente, para que
+  nunca se pisen.
+- **«Ver cómo queda»** pinta la imagen con sus elementos encima.
+- **«Proponer con Claude»**, para una imagen o para **todo el vídeo**, con una
+  intensidad: **Sobrio** (unos 6 por minuto), **Vivo** (unos 13, lo
+  recomendado) o **Dinámico** (unos 23). Lo propuesto sale «sin guardar» para
+  mirarlo, y «Aplicar sumando» o «Aplicar en lugar de lo que hay» lo pone en
+  todas las imágenes de una vez.
+- **No se paga nada**: cambiarlos solo deja pendiente el montaje de esas
+  imágenes (gratis); ninguna imagen se vuelve a dibujar. Sin elementos, el
+  vídeo sale exactamente igual que antes.
+- **La otra opción, con IA (se paga)**: «Texto dentro de la imagen» apunta una
+  nota en esa imagen para que la IA la vuelva a dibujar con el texto DENTRO
+  (un cartel, una pantalla…). Se paga al aplicar la nota, como cualquier otra.
+
+**Portadas diseñadas, como las miniaturas que funcionan (19 de octubre)**
+- En **Publicar → Portada**, el botón **Diseñar portada** abre un editor con
+  la vista a un lado y los mandos al otro.
+- **21 plantillas** sacadas de lo que funciona en YouTube, Instagram y
+  TikTok: Titular, Versus (como «diseño vs función»), Antes / Después, Top N,
+  Pregunta, Precio / Oferta, Dato impactante, Error común, Tutorial, Lista de
+  pasos, Testimonio, Curiosidad, Desafío, Comparativa de precios, Urgencia,
+  Resultado, Detrás de cámaras, Mito vs realidad, Evento / temporada, Escala
+  y Reacción.
+- **El fondo**: un fotograma del vídeo, la imagen de un plano, dos imágenes
+  partidas (con el rayo del versus), una imagen tuya o una hecha con IA.
+- **Encima, en capas**: títulos con contorno, sombra, brillo neón, relieve,
+  degradado o palabra resaltada; insignias (VS, RETO, -50 %), flechas,
+  círculos a mano, rayos, iconos, etiquetas de precio, bandas, cintas,
+  estrellas, ráfagas y marcos. Cada uno se mueve, se agranda, se gira, se
+  colorea o se esconde. Y efectos de la foto: contraste, color, brillo,
+  viñeta y oscurecer abajo. Todo esto es gratis y el texto sale exacto.
+- **Paletas** (Impacto, Gamer, Oferta, Confianza, Fiesta, Fiestas Patrias,
+  Cálido) y **letras de miniatura** (Anton, Bebas Neue, Luckiest Guy,
+  Bangers, Archivo Black, Montserrat, Lilita One, Permanent Marker, Russo
+  One), de licencia libre: el servidor las baja solo la primera vez; mientras
+  tanto se usa una parecida.
+- **4 formatos**: 9:16, 16:9, 4:5 y 1:1. «Ver lo que tapan las redes» marca
+  en rojo las zonas que tapan los botones (no sale en la portada).
+- **Proponer 3 portadas con Claude**: lee el guion y propone plantilla,
+  textos y colores; eliges una y la retocas. No se paga aparte.
+- **Con la IA de imágenes (se paga, con el precio delante)**: hacer solo el
+  fondo (el texto sigue en capas) o la portada entera con el texto dentro
+  (más vistosa, pero puede escribir mal alguna letra).
+- **Usar como portada** la pinta a tamaño real y la deja como la imagen que
+  se manda a las redes, igual que si la hubieras subido. El diseño se guarda
+  para retocarlo otro día.
 **Tus notas del 19 de octubre**
 - **«Crear» abre siempre «Tus proyectos»**, desde la barra de arriba y desde
   la tarjeta de Inicio, aunque hubieras dejado un vídeo abierto. El «atrás»

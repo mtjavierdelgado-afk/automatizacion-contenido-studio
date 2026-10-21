@@ -32,6 +32,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}` | Estado del proyecto: los ocho pasos, sus params, versiones y trabajos. |
 | `PUT` | `/api/proyectos/{pid}` | Cambia el nombre VISIBLE del proyecto. -> la ficha. |
 | `POST` | `/api/proyectos/{pid}/duplicar` | Copia un proyecto entero con lo que tiene puesto HOY. -> el nuevo. |
+| `POST` | `/api/proyectos/{pid}/elementos/aplicar` | Pone los elementos de varios planos de una vez: {planos: {sid: [...]}, |
+| `POST` | `/api/proyectos/{pid}/elementos/proponer` | Claude propone elementos para el video (o para {planos: [sid]}) con la |
+| `GET` | `/api/proyectos/{pid}/elementos/proponer/{rid}` | Como va la propuesta de elementos, y cual es al terminar. |
 | `POST` | `/api/proyectos/{pid}/escenas/{sid}/vale` | «Este dibujo me vale para lo que dice ahora». -> {ok} |
 | `GET` | `/api/proyectos/{pid}/espacio_fijo` | El espacio fijo guardado del video ({} si no tiene) y los planos que cambiarian. |
 | `POST` | `/api/proyectos/{pid}/espacio_fijo/aplicar` | Guarda el espacio fijo de un video hecho y ajusta su catalogo. No dibuja nada. |
@@ -53,7 +56,11 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/ortografia/descartar` | Lo que se deja SIN marcar al aplicar: {rid, ids: [...]}. Esos textos se |
 | `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de |
 | `GET` | `/api/proyectos/{pid}/ortografia/{rid}` | Como va la revision de ortografia, y lo que propone al terminar. |
+| `GET` | `/api/proyectos/{pid}/planos/elementos` | {planos: {sid: [elementos]}, no_aplica, tipos, entradas, intensidades, |
 | `GET` | `/api/proyectos/{pid}/planos/montaje` | {video, planos: {sid: {movimiento?, profundidad?}}, no_aplica, niveles, profundidad} |
+| `PUT` | `/api/proyectos/{pid}/planos/{sid}/elementos` | {elementos: [...]} de UN plano (vacia, los quita). Deja pendientes ese |
+| `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/nota-ia` | LA OTRA OPCION (se paga al aplicarla): una nota de imagen que pide |
+| `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/vista` | La imagen del plano con sus elementos encima, quietos (todos a la vez), |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/montaje` | {movimiento?: quieto|sobrio|vivo|dinamico|null, profundidad?: true|false|null} |
 | `POST` | `/api/proyectos/{pid}/presets-canal/{preset_id}/aplicar` | Copia los valores del preset a los params de los pasos que toque. |
 | `GET` | `/api/proyectos/{pid}/previsualizacion` | Las piezas para ver el video sin montarlo. -> {escenas, audio, ...} |
@@ -390,6 +397,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/parrilla/proyectos/{cid}/subir` | Una matriz en Word, Excel, PDF o texto (multipart: «documento», «modo», |
 | `DELETE` | `/api/parrilla/trabajos/{tid}` | Quita de la pantalla un trabajo terminado (el aviso de listo o de error). |
 | `GET` | `/api/parrilla/trabajos/{tid}` | Cómo va una conversión: {estado: trabajando|listo|error, avance, ...}. |
+| `GET` | `/api/portadas/catalogo` | Plantillas, paletas, fuentes, elementos y formatos de las portadas. |
 | `GET` | `/api/pronunciaciones` | Las palabras que la voz dice como se escriben aqui (sobre todo en ingles). |
 | `PUT` | `/api/pronunciaciones` | {lista: [{escrito, dicho}]} -> la lista guardada. No graba nada ni paga nada. |
 | `GET` | `/api/publicar/cola` | Los videos listos para publicar y los envios de la semana (hora de Lima). |
@@ -430,6 +438,17 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/videos/{pid}/optimizar` | Claude revisa el SEO de los textos: {redes}. Deja una PROPUESTA campo a |
 | `POST` | `/api/publicar/videos/{pid}/portada` | Sube una imagen de portada (multipart, campo «portada»). |
 | `GET` | `/api/publicar/videos/{pid}/portada.jpg` | La imagen de portada subida para este vídeo. |
+| `GET` | `/api/publicar/videos/{pid}/portada/diseno` | El diseno de portada de este video (el guardado o uno de partida, SIN |
+| `PUT` | `/api/publicar/videos/{pid}/portada/diseno` | Guarda el diseno (para retocarlo otro dia). No cambia la portada. |
+| `POST` | `/api/publicar/videos/{pid}/portada/fondo` | Sube una imagen para el fondo (multipart, campo «imagen»). -> {nombre} |
+| `GET` | `/api/publicar/videos/{pid}/portada/fondos/{nombre}` | Un fondo subido o hecho con IA. |
+| `POST` | `/api/publicar/videos/{pid}/portada/ia` | Dibuja con la IA de imagenes (SE PAGA): {diseno, que: "fondo"|"portada", |
+| `GET` | `/api/publicar/videos/{pid}/portada/planos/{sid}.jpg` | La imagen de un plano, en pequeno, para elegir el fondo. |
+| `POST` | `/api/publicar/videos/{pid}/portada/plantilla` | Rehace el diseno con otra plantilla: {plantilla, paleta?, fuente?, |
+| `POST` | `/api/publicar/videos/{pid}/portada/proponer` | Claude propone tres portadas (suscripcion, sin coste aparte). -> {id}; |
+| `GET` | `/api/publicar/videos/{pid}/portada/proponer/{rid}` | Como van las portadas propuestas, y cuales son al terminar. |
+| `POST` | `/api/publicar/videos/{pid}/portada/usar` | La pinta a tamano real y la deja como portada del video (como si la |
+| `POST` | `/api/publicar/videos/{pid}/portada/vista` | La portada pintada en pequeno, para la pantalla: {diseno, ancho?, |
 | `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
 | `POST` | `/api/reglas-estilo/afinar` | Claude reescribe una regla para el generador: {texto, nombre?, palabras?}. |
 | `GET` | `/api/reglas-estilo/afinar/{rid}` | Como va «Afinar con Claude», y la propuesta al terminar. |
@@ -449,4 +468,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**335 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**354 endpoints.** Escrito por `generar_api.py` desde `app.py`.

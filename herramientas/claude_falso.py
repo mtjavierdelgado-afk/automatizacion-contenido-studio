@@ -68,6 +68,28 @@ def responder(entrada):
         return _editorial(entrada)
     if "<textos>" in entrada and "ORTOGRAFIA" in entrada:
         return _ortografia(entrada)
+    if "Eres editor de videos para redes" in entrada:
+        # los elementos del video (pasos/elementos_video.py): uno por plano,
+        # en la primera palabra, y una flecha en el segundo
+        planos = {}
+        for n, (pid, texto) in enumerate(re.findall(r'<p id="([^"]+)"[^>]*>(.*?)</p>', entrada, re.S)):
+            primera = (texto.split(" ")[0].split(":", 1) + [""])[1] or "MIRA"
+            planos[pid] = [{"tipo": "texto", "texto": primera.upper()[:20], "palabra": 0,
+                            "posicion": "arriba", "entrada": "pop", "color": "acento"}]
+            if n == 1:
+                planos[pid].append({"tipo": "flecha", "palabra": 1, "posicion": "centro",
+                                    "entrada": "dibuja", "color": "alerta"})
+        planos["NOEXISTE"] = [{"tipo": "texto", "texto": "x", "palabra": 0}]
+        return {"planos": planos}
+    if "director de arte de miniaturas" in entrada:
+        # las portadas propuestas (pasos/portadas.py): tres distintas
+        return {"propuestas": [
+            {"plantilla": "versus", "paleta": "gamer", "fuente": "anton",
+             "textos": {"izquierda": "PS5", "derecha": "XBOX"}, "por_que": "compara dos opciones"},
+            {"plantilla": "oferta", "paleta": "oferta", "fuente": "luckiest",
+             "textos": {"titulo": "TODO EL DÍA", "etiqueta": "S/ 99"}, "por_que": "el precio vende"},
+            {"plantilla": "pregunta", "paleta": "impacto", "fuente": "bebas",
+             "textos": {"titulo": "¿CUÁNTO CUESTA?"}, "por_que": "la duda del cliente"}]}
     if "<guia>" in entrada and "<texto>" in entrada:
         texto = _entre(entrada, "texto")
         if "BORRADOR" in texto:

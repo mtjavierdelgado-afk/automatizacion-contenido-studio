@@ -68,6 +68,15 @@ def responder(entrada):
         return _editorial(entrada)
     if "<textos>" in entrada and "ORTOGRAFIA" in entrada:
         return _ortografia(entrada)
+    if "director de arte de miniaturas" in entrada:
+        # las portadas propuestas (pasos/portadas.py): tres distintas
+        return {"propuestas": [
+            {"plantilla": "versus", "paleta": "gamer", "fuente": "anton",
+             "textos": {"izquierda": "PS5", "derecha": "XBOX"}, "por_que": "compara dos opciones"},
+            {"plantilla": "oferta", "paleta": "oferta", "fuente": "luckiest",
+             "textos": {"titulo": "TODO EL DÍA", "etiqueta": "S/ 99"}, "por_que": "el precio vende"},
+            {"plantilla": "pregunta", "paleta": "impacto", "fuente": "bebas",
+             "textos": {"titulo": "¿CUÁNTO CUESTA?"}, "por_que": "la duda del cliente"}]}
     if "<guia>" in entrada and "<texto>" in entrada:
         texto = _entre(entrada, "texto")
         if "BORRADOR" in texto:

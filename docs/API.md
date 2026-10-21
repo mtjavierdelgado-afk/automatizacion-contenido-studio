@@ -380,6 +380,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/parrilla/proyectos/{cid}/subir` | Una matriz en Word, Excel, PDF o texto (multipart: «documento», «modo», |
 | `DELETE` | `/api/parrilla/trabajos/{tid}` | Quita de la pantalla un trabajo terminado (el aviso de listo o de error). |
 | `GET` | `/api/parrilla/trabajos/{tid}` | Cómo va una conversión: {estado: trabajando|listo|error, avance, ...}. |
+| `GET` | `/api/portadas/catalogo` | Plantillas, paletas, fuentes, elementos y formatos de las portadas. |
 | `GET` | `/api/pronunciaciones` | Las palabras que la voz dice como se escriben aqui (sobre todo en ingles). |
 | `PUT` | `/api/pronunciaciones` | {lista: [{escrito, dicho}]} -> la lista guardada. No graba nada ni paga nada. |
 | `GET` | `/api/publicar/cola` | Los videos listos para publicar y los envios de la semana (hora de Lima). |
@@ -420,6 +421,17 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/videos/{pid}/optimizar` | Claude revisa el SEO de los textos: {redes}. Deja una PROPUESTA campo a |
 | `POST` | `/api/publicar/videos/{pid}/portada` | Sube una imagen de portada (multipart, campo «portada»). |
 | `GET` | `/api/publicar/videos/{pid}/portada.jpg` | La imagen de portada subida para este vídeo. |
+| `GET` | `/api/publicar/videos/{pid}/portada/diseno` | El diseno de portada de este video (el guardado o uno de partida, SIN |
+| `PUT` | `/api/publicar/videos/{pid}/portada/diseno` | Guarda el diseno (para retocarlo otro dia). No cambia la portada. |
+| `POST` | `/api/publicar/videos/{pid}/portada/fondo` | Sube una imagen para el fondo (multipart, campo «imagen»). -> {nombre} |
+| `GET` | `/api/publicar/videos/{pid}/portada/fondos/{nombre}` | Un fondo subido o hecho con IA. |
+| `POST` | `/api/publicar/videos/{pid}/portada/ia` | Dibuja con la IA de imagenes (SE PAGA): {diseno, que: "fondo"|"portada", |
+| `GET` | `/api/publicar/videos/{pid}/portada/planos/{sid}.jpg` | La imagen de un plano, en pequeno, para elegir el fondo. |
+| `POST` | `/api/publicar/videos/{pid}/portada/plantilla` | Rehace el diseno con otra plantilla: {plantilla, paleta?, fuente?, |
+| `POST` | `/api/publicar/videos/{pid}/portada/proponer` | Claude propone tres portadas (suscripcion, sin coste aparte). -> {id}; |
+| `GET` | `/api/publicar/videos/{pid}/portada/proponer/{rid}` | Como van las portadas propuestas, y cuales son al terminar. |
+| `POST` | `/api/publicar/videos/{pid}/portada/usar` | La pinta a tamano real y la deja como portada del video (como si la |
+| `POST` | `/api/publicar/videos/{pid}/portada/vista` | La portada pintada en pequeno, para la pantalla: {diseno, ancho?, |
 | `POST` | `/api/publicar/videos/{pid}/seo/investigar` | Investiga las búsquedas de verdad para la palabra clave de este vídeo. |
 | `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
 | `POST` | `/api/publicar/youtube/probar` | Prueba la clave de la API de datos de YouTube (gasta 1 unidad del cupo) y dice lo que queda hoy. |
@@ -441,4 +453,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**324 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**337 endpoints.** Escrito por `generar_api.py` desde `app.py`.

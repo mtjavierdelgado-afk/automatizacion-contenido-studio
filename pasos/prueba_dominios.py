@@ -148,6 +148,9 @@ def prueba_dominio_fijado():
         except ValueError:
             ok(True, f"{malo!r} da ValueError")
     igual(D.normalizar(None), "", "sin nada, automático")
+    igual([D.normalizar(x) for x in (" ", "Auto", "AUTOMATICO", " General ")], ["", "", "", "general"],
+          "se limpia antes de comparar")
+    igual(D.fijado("no es un dict"), None, "un estilo que no es un objeto: automático")
     igual(D.fijado({"dominio": "basura"}), None, "un valor guardado roto es automático, no un fallo")
 
 
@@ -174,6 +177,8 @@ def prueba_revisor():
                                  f_manos=general["manos"], f_orientacion=general["orientacion"])
     ok("tripode" not in texto and "mandos" not in texto and "consola" not in texto,
        "un vídeo de baños: sin trípodes, mandos ni consolas en el criterio")
+    igual(R._frases({"prompt": "fiesta"}, {}, guia="Sala:\nconsolas en fila")["equipo"],  # noqa: SLF001
+          ep["equipo"], "la guía en texto, con saltos de línea, también delata las consolas")
     igual(R._frases({"prompt": "fiesta"},                                  # noqa: SLF001
                     {"escenas": [{"prompt": "two players with controllers"}]})["equipo"],
           ep["equipo"], "y uno de consolas, el criterio de EstadoPlay")

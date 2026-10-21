@@ -296,13 +296,12 @@ para ver si el primer plano de la lista mantiene {continuidad} que venia de ante
 """
 
 
-def _frases(estilo, plan):
+def _frases(estilo, plan, guia="", encargo=""):
     """Las frases del revisor que hablan del equipo del negocio (rama
     dominio-negocio): las del dominio que fija el estilo o, en automático, las
     de EstadoPlay si el vídeo nombra sus servicios y las generales si no. Antes
     eran siempre las de consolas, también en un vídeo de baños."""
-    texto = " ".join([str((estilo or {}).get("prompt") or ""),
-                      json.dumps((estilo or {}).get("guia") or "", ensure_ascii=False)]
+    texto = " ".join([str((estilo or {}).get("prompt") or ""), str(guia or ""), str(encargo or "")]
                      + [str(e.get("prompt") or "") for e in (plan or {}).get("escenas") or []])
     return dominios.frases_revisor(estilo, texto)
 
@@ -441,7 +440,7 @@ def revisar(proyecto, plan, imagenes, planos, estilo=None, encargo="",
     modelo, esfuerzo = _ajuste(ajuste)
     estilo = estilo if isinstance(estilo, dict) else {}
     salida, fallos = {}, []
-    frases = _frases(estilo, plan)
+    frases = _frases(estilo, plan, guia, encargo)
     tandas = [escenas[i:i + POR_LLAMADA] for i in range(0, len(escenas), POR_LLAMADA)]
     for n, tanda in enumerate(tandas):
         ids = [str(e.get("id")) for e in tanda]

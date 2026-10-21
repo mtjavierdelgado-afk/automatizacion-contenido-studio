@@ -182,12 +182,14 @@ def normalizar(valor):
     """Lo que se guarda en `estilo.dominio`. -> "" (automático) o un id de fábrica.
 
     Lanza ValueError con un id que no existe."""
-    if valor in (None, "", "auto", "automatico", "automático"):
+    if valor is None:
         return AUTOMATICO
     if not isinstance(valor, str):
         raise ValueError("el dominio es el id de uno de fábrica: "
                          + ", ".join(DE_FABRICA))
     clave = valor.strip().lower()
+    if clave in ("", "auto", "automatico", "automático"):
+        return AUTOMATICO
     if clave not in DE_FABRICA:
         raise ValueError(f"«{valor}» no es un dominio (valen: {', '.join(DE_FABRICA)})")
     return clave
@@ -195,8 +197,10 @@ def normalizar(valor):
 
 def fijado(estilo):
     """El dominio que fija el estilo, o None si es automático (o no vale)."""
+    if not isinstance(estilo, dict):
+        return None
     try:
-        clave = normalizar((estilo or {}).get("dominio"))
+        clave = normalizar(estilo.get("dominio"))
     except ValueError:
         return None
     return DE_FABRICA.get(clave) if clave else None

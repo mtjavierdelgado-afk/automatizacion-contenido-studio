@@ -14688,6 +14688,9 @@ def guardar_dominio_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
             raise ErrorApi(400, "esto no es un preset de canal")
         contenido = copy.deepcopy(ficha.get("datos") or {})
         estilo = dict(contenido.get("estilo") or {})
+        if dominio and not estilo.get("referencias"):
+            raise ErrorApi(400, "este estilo todavía no tiene su estilo gráfico (las "
+                                "láminas): genéralo antes de fijarle el negocio")
         if (estilo.get("dominio") or "") == dominio:
             return {"dominio": dominio, "cambiado": False}
         if dominio:

@@ -986,7 +986,10 @@ def prueba_metricas():
         estados = sorted(e["estado"] for e in P._leer_video(raiz, "medido")["envios"])
         igual(estados, ["publicado", "publicado"], "publicado en las dos redes")
         r = P.actualizar_metricas(raiz, ["medido"])
-        igual((r["consultados"], r["actualizados"]), (1, 2), "UNA consulta por envío trae las dos redes")
+        # desde `publicar-partir-subida` (19-10) YouTube va en SU subida cuando
+        # va con otras redes: son dos envíos, así que dos consultas
+        igual((r["consultados"], r["actualizados"]), (2, 2),
+              "UNA consulta por subida: YouTube va en la suya, así que dos")
         envios = {e["red"]: e for e in P._leer_video(raiz, "medido")["envios"]}
         ok(envios["youtube"]["metricas"]["vistas"] > 0, "YouTube trae sus vistas")
         igual(envios["youtube"]["metricas"]["guardados"], None,
@@ -1404,7 +1407,7 @@ def prueba_titulo_completo():
     try:
         cli = P.cliente(raiz)
         cli.crear_perfil("studio_t")
-        cli.enlace_conectar("studio_t", ["tiktok", "instagram", "youtube"])
+        cli.enlace_conectar("studio_t", ["tiktok", "instagram", "youtube", "facebook", "google_business"])
         mp4 = os.path.join(raiz, "v.mp4")
         with open(mp4, "wb") as fh:
             fh.write(b"0" * 2000)
@@ -1439,9 +1442,57 @@ def prueba_titulo_completo():
         igual(c["title"], c[f"{primera}_title"],
               f"Instagram + TikTok: el texto completo de la primera red de la subida ({primera})")
         ok(c["tiktok_title"].startswith("TikTok: "), "y cada red con el suyo")
-        c, _d = subir("t_yt", ["instagram", "youtube"])
-        igual(c["title"], "Consolas para tu fiesta", "con YouTube, «title» sigue siendo su título")
-        igual(c["youtube_title"], "Consolas para tu fiesta", "y su campo propio igual")
+        # INSTAGRAM + YOUTUBE: dos subidas (19-10, tarde). En una sola, el «title»
+        # común era el título de YouTube y Instagram podía salir solo con él.
+        with open(simulador, encoding="utf-8") as fh:
+            antes = len(json.load(fh)["subidas"])
+        _c, datos = subir("t_yt", ["instagram", "youtube"])
+        with open(simulador, encoding="utf-8") as fh:
+            nuevas = json.load(fh)["subidas"][antes:]
+        igual(len(nuevas), 2, "Instagram + YouTube: dos subidas a Upload-Post")
+        yt = next((s for s in nuevas if "youtube" in s["redes"]), {})
+        ig = next((s for s in nuevas if "instagram" in s["redes"]), {})
+        igual(yt.get("redes"), ["youtube"], "YouTube va sola")
+        igual(ig.get("redes"), ["instagram"], "Instagram va sola")
+        # (el vídeo es vertical de 45 s: un Short, y desde el 20-10 lleva «#Shorts»)
+        igual(yt["campos"]["title"], "Consolas para tu fiesta #Shorts",
+              "con YouTube, «title» sigue siendo su título")
+        igual(yt["campos"]["youtube_title"], "Consolas para tu fiesta #Shorts", "y su campo propio igual")
+        igual(ig["campos"]["title"], ig["campos"]["instagram_title"],
+              "y la de Instagram lleva su texto completo en «title», no el título de YouTube")
+        ok("instagram_title" not in yt["campos"] and "youtube_title" not in ig["campos"],
+           "lo de una red no va en la subida de la otra")
+        lotes = {e["red"]: e["lote"] for e in datos["envios"]}
+        ok(lotes["instagram"] != lotes["youtube"], "cada una con su lote (Reintentar va por su lado)")
+        # YouTube + Facebook, sin otras: juntas (las dos tienen título propio)
+        with open(simulador, encoding="utf-8") as fh:
+            antes = len(json.load(fh)["subidas"])
+        P.guardar_ficha(raiz, "t_ytfb", {"textos": dict(textos, facebook={
+            "titulo": "Fiestas con consolas", "descripcion": largo})})
+        P.enviar(raiz, dict(INFO, pid="t_ytfb", mp4=mp4, mp4_huella="t_ytfb"), ajustes,
+                 {"redes": ["youtube", "facebook"], "modo": "ahora", "confirmado": True},
+                 en_hilo=False)
+        with open(simulador, encoding="utf-8") as fh:
+            nuevas = json.load(fh)["subidas"][antes:]
+        igual(len(nuevas), 1, "YouTube + Facebook solas: una subida (las dos llevan su título)")
+        # Google Business + YouTube + Instagram: tres subidas, cada una con su «title»
+        with open(simulador, encoding="utf-8") as fh:
+            antes = len(json.load(fh)["subidas"])
+        P.guardar_ficha(raiz, "t_tres", {"textos": dict(textos, google_business={
+            "descripcion": "Consolas para tu fiesta en Lima. Escríbenos."})})
+        P.enviar(raiz, dict(INFO, pid="t_tres", mp4=mp4, mp4_huella="t_tres", duracion_s=20),
+                 ajustes, {"redes": ["google_business", "youtube", "instagram"], "modo": "ahora",
+                           "confirmado": True}, en_hilo=False)
+        with open(simulador, encoding="utf-8") as fh:
+            nuevas = json.load(fh)["subidas"][antes:]
+        igual(sorted(tuple(s_["redes"]) for s_ in nuevas),
+              [("google_business",), ("instagram",), ("youtube",)],
+              "Google Business + YouTube + Instagram: tres subidas, cada red en la suya")
+        ig = next(s_ for s_ in nuevas if s_["redes"] == ["instagram"])
+        igual(ig["campos"]["title"], ig["campos"]["instagram_title"],
+              "y la de Instagram sigue con su texto completo")
+        lotes = {e["red"]: e["lote"] for e in P._leer_video(raiz, "t_tres")["envios"]}
+        igual(len(set(lotes.values())), 3, "tres lotes distintos")
         # lo que devuelve la red, comparado con lo mandado
         e = {"red": "instagram", "enviado": {"instagram_title": "x" * 300}}
         P.comparar_publicado(e, "x" * 120)
@@ -1551,9 +1602,11 @@ def prueba_textos():
         ok(False, "«usar_emojis» es sí o no")
     except P.ErrorPublicar:
         ok(True, "«usar_emojis» es sí o no")
-    con = P.instruccion_textos(INFO, ["tiktok", "instagram", "youtube"], P.AJUSTES_DEFECTO)
+    # en horizontal: un vídeo normal de YouTube (el Short tiene sus reglas, 12b)
+    con = P.instruccion_textos(dict(INFO, formato="horizontal"), ["tiktok", "instagram", "youtube"],
+                               P.AJUSTES_DEFECTO)
     sin = P.instruccion_textos(INFO, ["tiktok"], dict(P.AJUSTES_DEFECTO, usar_emojis=False))
-    ok("Emojis: sí" in con and "Instagram Reels, 3 a 6 emojis" in con, "con emojis: cuántos por red")
+    ok("nivel «Vistoso»" in con and "Instagram Reels: 5 a 9" in con, "con emojis: cuántos por red")
     ok("NINGUNO" in sin and "Emojis: sí" not in sin, "sin emojis: se le dice que ninguno")
     ok("gancho" in con and "70 caracteres" in con, "pide gancho y el título de YouTube de 70 como mucho")
     ok("SIN SONIDO" not in con, "las reglas de Facebook solo si se pide Facebook")
@@ -1612,6 +1665,161 @@ def prueba_textos():
         f3 = P.ficha(raiz, INFO, P.AJUSTES_DEFECTO)
         ok(f3["textos"]["tiktok"]["descripcion"] == "Solo TT" and "Instagram" in f3["error_textos"]
            and f3["error_redes"] == ["instagram"], "a medias: lo que vino se guarda y lo que falta se dice")
+    finally:
+        os.environ.pop("ESTUDIO_SIMULAR", None)
+
+
+def prueba_emojis():
+    """Rama `textos-emojis` (20-10): el nivel por proyecto (y el sí/no de antes
+    leído igual), los emojis de la marca en el prompt, el contador, el aviso
+    de la ficha (fuera de la nota SEO) y «✨ Más emojis», que rechaza lo que
+    cambie una palabra."""
+    seccion("11] emojis: nivel, marca, contador, aviso y «✨ Más emojis»")
+    import publicar_seo as SEO                              # noqa: PLC0415
+    raiz = os.path.join(CARPETA, "emojis")
+    os.makedirs(raiz)
+    # EL NIVEL: de fábrica vistoso; el sí/no de antes guardado se respeta
+    igual(P.ajustes_de(raiz, "nuevo")["emojis"], "vistoso", "un proyecto sin nada guardado: Vistoso")
+    os.makedirs(os.path.dirname(P._ruta_ajustes(raiz)), exist_ok=True)
+    P._escribir(P._ruta_ajustes(raiz), {"proyectos": {"viejo_no": {"usar_emojis": False},
+                                                      "viejo_si": {"usar_emojis": True}}})
+    with open(P._ruta_ajustes(raiz), "rb") as fh:
+        antes = fh.read()
+    igual(P.ajustes_de(raiz, "viejo_no")["emojis"], "ninguno",
+          "«usar_emojis: false» guardado se lee como Ninguno (se respeta lo que eligió)")
+    igual(P.ajustes_de(raiz, "viejo_no")["usar_emojis"], False, "y sigue diciendo que no a quien lee el sí/no")
+    igual(P.ajustes_de(raiz, "viejo_si")["emojis"], "vistoso", "«usar_emojis: true» guardado: Vistoso")
+    with open(P._ruta_ajustes(raiz), "rb") as fh:
+        ok(fh.read() == antes, "leer los ajustes no escribe nada (solo se guarda si el dueño toca)")
+    igual(P.guardar_ajustes(raiz, "viejo_no", {"emojis": "normal"})["emojis"], "normal",
+          "el nivel se cambia y manda sobre el sí/no de antes")
+    for malo, que in (("mucho", "un nivel que no existe"), (3, "un número")):
+        try:
+            P.guardar_ajustes(raiz, "viejo_no", {"emojis": malo})
+            ok(False, f"«emojis» no acepta {que}")
+        except P.ErrorPublicar:
+            ok(True, f"«emojis» no acepta {que}")
+    igual(P.guardar_ajustes(raiz, "viejo_no", {"emojis_marca": "🎮, 🕹️ 🎉 🎮"})["emojis_marca"],
+          "🎮 🕹️ 🎉", "los emojis de la marca se guardan limpios y sin repetir")
+    try:
+        P.guardar_ajustes(raiz, "viejo_no", {"emojis_marca": "🎮 consolas"})
+        ok(False, "en los emojis de la marca no van letras")
+    except P.ErrorPublicar:
+        ok(True, "en los emojis de la marca no van letras")
+
+    # EL PROMPT
+    redes = ["tiktok", "instagram", "youtube", "linkedin"]
+    vistoso = P.instruccion_textos(INFO, redes, dict(P.AJUSTES_DEFECTO, emojis_marca="🎮 🕹️"))
+    ok("SIEMPRE con emojis" in vistoso and "EMPIEZA con un emoji" in vistoso,
+       "en Vistoso el prompt EXIGE emojis, con el gancho empezando por uno")
+    ok("🎮 🕹️" in vistoso and "firma" in vistoso, "y lleva los emojis de la marca como su firma")
+    ok("TEMA" in vistoso and "comodines" in vistoso, "pide emojis del tema del vídeo, no comodines")
+    ok("🎮➕🎉" in vistoso, "y combinaciones de dos para contar algo (los emojis «propios»)")
+    ok("TikTok: 3 a 6" in vistoso and "LinkedIn: 2 a 4" in vistoso and "en el título 1." in vistoso,
+       "con su número por red (LinkedIn más sobrio, YouTube uno en el título)")
+    ok("que aporten, no que decoren" not in vistoso, "sin la frase que le daba permiso para no poner ninguno")
+    sobrio = P.instruccion_textos(INFO, ["tiktok"], dict(P.AJUSTES_DEFECTO, emojis="sobrio"))
+    ok("TikTok: 1 a 2" in sobrio and "SIEMPRE con emojis" not in sobrio, "en Sobrio, pocos")
+    viejo = P.instruccion_textos(INFO, ["tiktok"], P.ajustes_de(raiz, "viejo_si"))
+    ok("SIEMPRE con emojis" in viejo, "un proyecto con el sí de antes recibe el prompt de Vistoso")
+    P._escribir(P._ruta_ajustes(raiz), {"proyectos": {"viejo_no": {"usar_emojis": False}}})
+    nada = P.instruccion_textos(INFO, ["tiktok"], P.ajustes_de(raiz, "viejo_no"))
+    ok("NINGUNO" in nada and "SIEMPRE" not in nada, "y uno con el no de antes, Ninguno")
+    ok("EMPIEZAN con un emoji" in P._emojis_de_ganchos(P.AJUSTES_DEFECTO)
+       and P._emojis_de_ganchos(dict(P.AJUSTES_DEFECTO, emojis="ninguno")) == "Sin emojis.",
+       "los ganchos siguen el nivel")
+    ok("los emojis" in SEO.INSTRUCCION_OPTIMIZAR, "«Optimizar SEO» no quita los emojis al reescribir")
+
+    # EL CONTADOR
+    for texto, n, que in (("Hola", 0, "sin emojis"), ("🎮 Fiesta 🎉", 2, "dos sueltos"),
+                          ("👨‍👩‍👧 familia", 1, "una familia con ZWJ es uno"),
+                          ("🇵🇪 Lima 🇲🇽", 2, "cada bandera es una"),
+                          ("👍🏽👍🏿", 2, "con tono de piel, uno cada uno"),
+                          ("❤️ y ❤", 2, "con y sin selector de variante"),
+                          ("1️⃣ 2️⃣ #3 en 2026", 2, "las teclas, sí; un número suelto, no"),
+                          ("© → ↔️ ™️", 2, "©/→ sin selector son texto; con él, emoji"),
+                          ("🎮➕🎉", 3, "una combinación son sus emojis"),
+                          ("🏳️‍🌈", 1, "la bandera del arcoíris es una")):
+        igual(P.contar_emojis(texto), n, f"contar: {que}")
+    igual(P.quitar_emojis("🎮 Fiesta 👨‍👩‍👧 en 🇵🇪 ❤️"), " Fiesta  en  ", "quitar emojis deja solo el texto")
+
+    # EL AVISO: por debajo del mínimo del nivel, y SIN tocar la nota SEO
+    textos = {"tiktok": {"descripcion": "Fiesta en casa con consola 🎮"},
+              "youtube": {"titulo": "Alquiler de consolas en Lima", "descripcion":
+                          "🎮 Uno\n\n🎉 Dos\n\n📍 Lima\n\n👉 Reserva"},
+              "instagram": {"descripcion": ""}}
+    e = P.emojis_de_ficha(textos, P.AJUSTES_DEFECTO, ["tiktok", "youtube", "instagram"])
+    ok(e["redes"]["tiktok"]["descripcion"]["faltan"] and e["redes"]["tiktok"]["descripcion"]["minimo"] == 3,
+       "TikTok con 1 de 3: la ficha avisa")
+    ok(e["redes"]["youtube"]["titulo"]["faltan"] and not e["redes"]["youtube"]["descripcion"]["faltan"],
+       "el título de YouTube sin emoji avisa; su texto con 4, no")
+    ok(not e["redes"]["instagram"]["descripcion"]["faltan"], "un texto vacío no avisa de emojis")
+    ok(not any(c["faltan"] for r in P.emojis_de_ficha(textos, dict(P.AJUSTES_DEFECTO, emojis="ninguno"),
+                                                       ["tiktok", "youtube"])["redes"].values()
+               for c in r.values()), "en Ninguno no avisa nunca")
+    comp = P.componer("tiktok", textos["tiktok"], P.AJUSTES_DEFECTO, INFO)
+    nota_v = SEO.nota("tiktok", textos["tiktok"], comp, P.AJUSTES_DEFECTO, {}, INFO, "consolas")
+    nota_n = SEO.nota("tiktok", textos["tiktok"], comp, dict(P.AJUSTES_DEFECTO, emojis="ninguno"), {}, INFO,
+                      "consolas")
+    igual(nota_v, nota_n, "la nota SEO no cambia por los emojis que falten")
+    ok("emoji" not in json.dumps(nota_v, ensure_ascii=False).lower(), "ni habla de emojis")
+
+    # «✨ MÁS EMOJIS»
+    P._escribir(P._ruta_video(raiz, "fiesta"), dict(P._leer_video(raiz, "fiesta"), textos={
+        "tiktok": {"descripcion": "Fiesta en casa\nReserva ya #consolas"},
+        "youtube": {"titulo": "Alquiler de consolas en Lima", "descripcion": "Hola"}}))
+    original = P._hablar_con_claude
+    pedido = {}
+
+    def falso(respuesta):
+        def hablar(instruccion, sistema, proyecto, cwd, para, simulado, **kw):
+            pedido.update(kw, instruccion=instruccion)
+            return json.dumps({"texto": respuesta}, ensure_ascii=False), {"_coste_anotado": True}
+        return hablar
+    try:
+        P._hablar_con_claude = falso("🎮 Fiesta en casa\n👉 Reserva ya #consolas 🎉")
+        r = P.vestir_con_emojis(raiz, INFO, "tiktok", "descripcion", None,
+                                dict(P.AJUSTES_DEFECTO, emojis_marca="🎮"))
+        igual((r["texto"], r["antes"], r["despues"]), ("🎮 Fiesta en casa\n👉 Reserva ya #consolas 🎉", 0, 3),
+              "«Más emojis» acepta el mismo texto con emojis añadidos")
+        igual((pedido.get("modelo"), pedido.get("esfuerzo")), ("haiku", "low"), "y es barato: haiku, esfuerzo bajo")
+        ok(pedido.get("tiempo_max_s", 99) <= 55, "con un tope por debajo del corte del proxy")
+        ok("🎮" in pedido["instruccion"] and "Fiesta en casa" in pedido["instruccion"],
+           "el prompt lleva los emojis de la marca y el texto")
+        igual(P._leer_video(raiz, "fiesta")["textos"]["tiktok"]["descripcion"], "Fiesta en casa\nReserva ya #consolas",
+              "y no guarda nada: lo guarda la pantalla por el camino de siempre")
+        for respuesta, que in (("🎮 Fiesta en tu casa\nReserva ya #consolas", "cambia una palabra"),
+                               ("🎮 Fiesta en casa\nReserva ya 🎉", "quita un hashtag"),
+                               ("Fiesta casa 🎮\nReserva ya #consolas", "quita una palabra"),
+                               ("Fiesta en casa\nReserva ya #consolas", "no añade ningún emoji"),
+                               ("", "no devuelve nada")):
+            P._hablar_con_claude = falso(respuesta)
+            try:
+                P.vestir_con_emojis(raiz, INFO, "tiktok", "descripcion", "Fiesta en casa\nReserva ya #consolas",
+                                    P.AJUSTES_DEFECTO)
+                ok(False, f"«Más emojis» rechaza una respuesta que {que}")
+            except P.ErrorPublicar as fallo:
+                ok(fallo.codigo == 422, f"«Más emojis» rechaza una respuesta que {que} ({str(fallo)[:40]}…)")
+        P._hablar_con_claude = falso("Alquiler de consolas en Lima 🎮")
+        r = P.vestir_con_emojis(raiz, INFO, "youtube", "titulo", None, P.AJUSTES_DEFECTO)
+        igual(r["texto"], "Alquiler de consolas en Lima 🎮", "también con el título")
+        ok("al final" in pedido["instruccion"], "y en YouTube pide el emoji al final del título")
+        for red, campo, que in (("tiktok", "titulo", "TikTok no tiene título"), ("nada", "descripcion", "una red que no existe"),
+                                ("youtube", "cta", "un campo que no es título ni texto")):
+            try:
+                P.vestir_con_emojis(raiz, INFO, red, campo, None, P.AJUSTES_DEFECTO)
+                ok(False, f"«Más emojis» no vale con {que}")
+            except P.ErrorPublicar:
+                ok(True, f"«Más emojis» no vale con {que}")
+    finally:
+        P._hablar_con_claude = original
+    # el doble del Studio (ESTUDIO_SIMULAR) también pasa la comprobación
+    os.environ["ESTUDIO_SIMULAR"] = "1"
+    try:
+        r = P.vestir_con_emojis(raiz, INFO, "tiktok", "descripcion", "Uno\n\nDos", P.AJUSTES_DEFECTO)
+        ok(r["texto"].startswith("🎮 Uno\n\n🎉 Dos") and P.contar_emojis(r["texto"]) >= 3
+           and P.quitar_emojis(r["texto"]).replace(" ", "") == "Uno\n\nDos",
+           f"el doble pone uno por párrafo y llega al mínimo de TikTok en Vistoso: {r['texto']!r}")
     finally:
         os.environ.pop("ESTUDIO_SIMULAR", None)
 
@@ -1868,7 +2076,7 @@ def prueba_seo():
     a = P.guardar_ajustes(raiz, "cl_s", {"palabra_clave": " alquiler de  consolas en Lima ",
                                          "ig_ubicacion": "106042326099451"})
     igual(a["palabra_clave"], "alquiler de consolas en Lima", "la palabra clave se guarda limpia")
-    igual((a["yt_categoria"], a["yt_idioma_audio"], a["yt_para_ninos"]), ("22", "es-419", False),
+    igual((a["yt_categoria"], a["yt_idioma_audio"], a["yt_para_ninos"]), ("22", "es-US", False),
           "de fábrica: Gente y blogs, español de Latinoamérica y NO hecho para niños")
     # --- lo que se pide a Claude
     bloque = S.bloque_instruccion(ajustes, "consolas para cumpleaños", ["instagram"],
@@ -1894,7 +2102,7 @@ def prueba_seo():
           "Instagram: ubicación, colaboradores, etiquetas y primer comentario")
     c = P.componer("youtube", textos, ajustes, dict(INFO, formato="horizontal", duracion_s=300), None, {})["campos"]
     igual((c.get("categoryId"), c.get("defaultLanguage"), c.get("defaultAudioLanguage"),
-           c.get("selfDeclaredMadeForKids")), ("24", "es", "es-419", False), "YouTube: categoría, idiomas, no niños")
+           c.get("selfDeclaredMadeForKids")), ("24", "es", "es-US", False), "YouTube: categoría, idiomas, no niños")
     ok(c.get("tags[]", [None])[0] == "alquiler de consolas en Lima" and "fiestas infantiles" in c["tags[]"],
        f"YouTube: las etiquetas empiezan por la palabra clave: {c.get('tags[]')}")
     r = P.componer("tiktok", textos, ajustes, INFO, None, {})
@@ -2178,6 +2386,224 @@ def prueba_notas_19oct():
           "«Quitar de la lista» lo saca de los fallidos")
 
 
+# ------------------------------------------- 12. arreglos del 20 de octubre
+
+def prueba_20oct_idioma():
+    """El Short no subía: Upload-Post rechaza «es-419» en defaultAudioLanguage."""
+    seccion("12a] 20-10: el idioma del audio de YouTube va como lo acepta Upload-Post")
+    tabla = {"es-419": "es-US", "es": "es-ES", "en": "en-US", "pt": "pt-BR", "pt-br": "pt-BR",
+             "es-ES": "es-ES", "es-MX": "es-MX", "en-US": "en-US", "es_us": "es-US",
+             "": "", "xx-1-2": "", "español": ""}
+    traducir = getattr(UP, "idioma_audio_youtube", None)
+    para_enviar = getattr(UP, "campos_para_enviar", None)
+    ok(traducir and para_enviar, "el cliente tiene UN sitio que traduce el idioma antes de mandar")
+    if traducir and para_enviar:
+        for entrada, esperado in tabla.items():
+            igual(traducir(entrada), esperado, f"«{entrada}» se manda como «{esperado}»")
+        campos = para_enviar({"defaultAudioLanguage": "es-419", "defaultLanguage": "es"})
+        igual(campos, {"defaultAudioLanguage": "es-US", "defaultLanguage": "es"},
+              "solo cambia el idioma del AUDIO (el del título sigue en «es», que sí vale)")
+        ok("defaultAudioLanguage" not in para_enviar({"defaultAudioLanguage": "klingon"}),
+           "lo que no se sabe traducir no se manda (sin él YouTube lo deduce; con uno malo falla todo)")
+    forma = getattr(UP, "FORMA_IDIOMA_AUDIO", None) or __import__("re").compile(r"^[a-z]{2}-[A-Z]{2}$")
+    ok(all(forma.match(c) for c, _n in P.SEO.IDIOMAS_AUDIO),
+       "todo lo que se puede elegir en la pantalla tiene la forma idioma-PAÍS")
+    igual(P.SEO.AJUSTES_SEO["yt_idioma_audio"], "es-US", "y lo de fábrica también")
+    try:
+        igual(P.SEO.validar("yt_idioma_audio", "es-419"), "es-US",
+              "un «es-419» que llegue de antes se guarda ya traducido")
+    except P.SEO.ErrorSeo as fallo:
+        ok(False, f"un «es-419» que llegue de antes se guarda ya traducido: {fallo}")
+
+    # el cliente DE VERDAD, contra el Upload-Post falso: lo que sale por el cable
+    puerto = puerto_libre()
+    servidor = http.server.ThreadingHTTPServer(("127.0.0.1", puerto), _FalsoUploadPost)
+    threading.Thread(target=servidor.serve_forever, daemon=True).start()
+    try:
+        cli = UP.ClienteUploadPost(_FalsoUploadPost.clave, base=f"http://127.0.0.1:{puerto}")
+        mp4 = os.path.join(CARPETA, "idioma.mp4")
+        with open(mp4, "wb") as fh:
+            fh.write(b"0" * 5000)
+        ajustes_viejos = dict(P.AJUSTES_DEFECTO, yt_idioma_audio="es-419")   # guardado antes del 20-10
+        comp = P.componer("youtube", {"titulo": "Short", "descripcion": "Hola"}, ajustes_viejos, INFO)
+        cli.publicar("studio_b", ["youtube"], mp4, comp["campos"], id_propio="idioma1")
+        cuerpo = _FalsoUploadPost.vistas[-1]["cuerpo"]
+        ok(b"es-419" not in cuerpo, "al cable de Upload-Post no sale nunca «es-419»")
+        ok(b'name="defaultAudioLanguage"\r\n\r\nes-US' in cuerpo, "sale «es-US»")
+    finally:
+        servidor.shutdown()
+
+    # y el Studio entero con el simulador, que contesta lo mismo que Upload-Post
+    raiz = os.path.join(CARPETA, "idioma20")
+    os.makedirs(raiz)
+    simulador = os.path.join(CARPETA, "sim_idioma20.json")
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    try:
+        sim = P.cliente(raiz)
+        sim.crear_perfil("studio_i")
+        sim.enlace_conectar("studio_i", ["youtube"])
+        info = dict(INFO, pid="idioma", mp4=mp4, mp4_huella="i1")
+        P.guardar_ficha(raiz, "idioma", {"textos": {"youtube": {"titulo": "Fiesta", "descripcion": "Hola"}}})
+        P.enviar(raiz, info, dict(ajustes_viejos, perfil="studio_i"),
+                 {"redes": ["youtube"], "modo": "ahora", "confirmado": True}, en_hilo=False)
+        envio = P._leer_video(raiz, "idioma")["envios"][-1]
+        ok(envio["estado"] != "fallido", f"el Short sale (estado {envio['estado']}, {envio.get('error')})")
+        with open(simulador, encoding="utf-8") as fh:
+            igual(json.load(fh)["subidas"][-1]["campos"].get("defaultAudioLanguage"), "es-US",
+                  "y lo que recibe Upload-Post es «es-US»")
+    finally:
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
+
+def prueba_20oct_short():
+    """Short frente a vídeo largo: antes salían igual (mismo texto, sin #Shorts)."""
+    seccion("12b] 20-10: Short o vídeo normal en YouTube")
+    vert = dict(INFO, formato="vertical", duracion_s=45)
+    largo_v = dict(INFO, formato="vertical", duracion_s=240)
+    horiz = dict(INFO, formato="horizontal", duracion_s=300)
+    e = P.encaje("youtube", "vertical", 45)
+    igual((e["tipo"], e["nivel"], e.get("puede_elegir")), ("Short", "ok", True),
+          "vertical de 45 s: Short, y como es vertical se puede elegir")
+    e = P.encaje("youtube", "horizontal", 300)
+    igual((e["tipo"], e.get("puede_elegir")), ("vídeo", False), "horizontal: vídeo normal, sin elegir")
+    e = P.encaje("youtube", "vertical", 240)
+    igual((e["tipo"], e["nivel"], e.get("puede_elegir")), ("vídeo", "aviso", True),
+          "vertical de 4 min: vídeo normal, con aviso, y se puede elegir (el caso dudoso)")
+    try:
+        e = P.encaje("youtube", "vertical", 240, "short")
+        igual((e["tipo"], e["nivel"]), ("Short", "aviso"), "elegido Short con 4 min: Short, avisando de YouTube")
+        ok("3 minutos" in e["texto"], f"y dice por qué: {e['texto']}")
+        e = P.encaje("youtube", "vertical", 45, "video")
+        igual((e["tipo"], e["nivel"]), ("vídeo", "aviso"), "elegido vídeo con 45 s: vídeo, avisando")
+        e = P.encaje("youtube", "horizontal", 300, "short")
+        igual(e["tipo"], "vídeo", "un horizontal nunca es Short, se elija lo que se elija")
+    except TypeError:
+        ok(False, "encaje acepta lo elegido en la ficha (Short o vídeo)")
+    caps = [{"t": 0, "titulo": "Intro"}, {"t": 60, "titulo": "Juegos"}, {"t": 120, "titulo": "Precios"}]
+    textos = {"titulo": "Consolas para tu fiesta", "descripcion": "Llega la fiesta", "hashtags": ["lima"]}
+    short = P.componer("youtube", textos, P.AJUSTES_DEFECTO, vert, caps, {})
+    igual(short["campos"]["youtube_title"], "Consolas para tu fiesta #Shorts", "el Short lleva #Shorts en el título")
+    ok("0:00 Intro" not in short["campos"]["youtube_description"], "y ningún capítulo")
+    normal = P.componer("youtube", textos, P.AJUSTES_DEFECTO, horiz, caps, {})
+    ok("#Shorts" not in normal["campos"]["youtube_title"] + normal["campos"]["youtube_description"],
+       "el vídeo normal no lleva #Shorts")
+    ok("0:00 Intro" in normal["campos"]["youtube_description"], "y sí sus capítulos")
+    elegido = P.componer("youtube", textos, P.AJUSTES_DEFECTO, largo_v, caps, {"youtube_formato": "short"})
+    ok("#Shorts" in elegido["campos"]["youtube_title"] and "0:00 Intro" not in elegido["campos"]["youtube_description"],
+       "un vertical largo elegido como Short sale como Short (con #Shorts y sin capítulos)")
+    marcar = getattr(P, "marcar_short", None)
+    ok(marcar is not None, "hay una pieza que pone «#Shorts»")
+    if marcar:
+        t, d = marcar("x" * 95, "Texto")
+        igual((t, d), ("x" * 95, "Texto\n\n#Shorts"), "si no cabe en el título, va al final de la descripción")
+        igual(marcar("Hola #shorts", "Texto"), ("Hola #shorts", "Texto"), "y nunca dos veces")
+    inst_s = P.instruccion_textos(vert, ["youtube"], P.AJUSTES_DEFECTO)
+    inst_v = P.instruccion_textos(horiz, ["youtube"], P.AJUSTES_DEFECTO)
+    ok("SHORT" in inst_s and "30 a 60" in inst_s, "a Claude se le piden textos de Short para un Short")
+    ok("40 a 70" in inst_v and "30 a 60" not in inst_v, "y de vídeo largo para un vídeo")
+    # la ficha guarda lo elegido y lo usa
+    raiz = os.path.join(CARPETA, "short20")
+    os.makedirs(raiz)
+    try:
+        P.guardar_ficha(raiz, "corto", {"youtube_formato": "video"})
+        ok(True, "la ficha guarda «youtube_formato»")
+    except P.ErrorPublicar as fallo:
+        ok(False, f"la ficha guarda «youtube_formato»: {fallo}")
+    f = P.ficha(raiz, dict(vert, pid="corto"), P.AJUSTES_DEFECTO)
+    igual((f["encaje"]["youtube"]["tipo"], f.get("youtube_formato")), ("vídeo", "video"),
+          "y la ficha lo enseña: vídeo normal")
+    try:
+        P.guardar_ficha(raiz, "corto", {"youtube_formato": "reel"})
+        ok(False, "un formato que no existe se rechaza")
+    except P.ErrorPublicar:
+        ok(True, "un formato que no existe se rechaza")
+    P.guardar_ficha(raiz, "corto", {"youtube_formato": "auto"})
+    ok("youtube_formato" not in P._leer_video(raiz, "corto"), "«auto» no deja nada escrito (lo de siempre)")
+
+
+def prueba_20oct_programado():
+    """Lo programado que ya salió seguía «programado» (a las 12:22, los de las 09:00)."""
+    seccion("12c] 20-10: lo programado cuya hora pasó se pregunta y cambia de estado")
+    raiz = os.path.join(CARPETA, "prog20")
+    os.makedirs(raiz)
+    simulador = os.path.join(CARPETA, "sim_prog20.json")
+    os.environ["ESTUDIO_UPLOADPOST_SIMULADO"] = simulador
+    respiro = P.RESPIRO_CONSULTA_S
+    try:
+        cli = P.cliente(raiz)
+        cli.crear_perfil("studio_p")
+        cli.enlace_conectar("studio_p", ["tiktok", "youtube"])
+        mp4 = os.path.join(raiz, "v.mp4")
+        with open(mp4, "wb") as fh:
+            fh.write(b"0" * 2000)
+        info = dict(INFO, pid="prog", mp4=mp4, mp4_huella="p1")
+        ajustes = dict(P.AJUSTES_DEFECTO, perfil="studio_p")
+        P.guardar_ficha(raiz, "prog", {"textos": {"tiktok": {"descripcion": "Hola"},
+                                                  "youtube": {"titulo": "T", "descripcion": "Hola"}}})
+        luego = (P.ahora_lima() + dt.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M")
+        nuevos = P.enviar(raiz, info, ajustes, {"redes": ["tiktok", "youtube"], "modo": "programar",
+                                                "cuando": luego, "confirmado": True}, en_hilo=False)
+        envios = P._leer_video(raiz, "prog")["envios"]
+        igual(sorted(e["estado"] for e in envios), ["programado", "programado"], "programados para dentro de 2 h")
+        c = P.cola(raiz, [{"pid": "prog", "nombre": "Prog", "montado": True}])
+        ok(all(e.get("debio_salir") is False for e in c["envios"]), "a su hora todavía no: no «debió salir»")
+        # pasa el tiempo: la hora era las 09:00 y son las 12:22 (en el almacén y en el simulador)
+        hace = P.ahora_lima() - dt.timedelta(hours=3, minutes=22)
+        for lote in {e["lote"] for e in nuevos}:
+            P._actualizar_lote(raiz, "prog", lote, lambda e: e.update(cuando=hace.strftime("%Y-%m-%dT%H:%M:%S")))
+        with open(simulador, encoding="utf-8") as fh:
+            sim = json.load(fh)
+        for t in sim["trabajos"].values():
+            t["cuando_utc"] = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=3)).isoformat()
+        with open(simulador, "w", encoding="utf-8") as fh:
+            json.dump(sim, fh)
+        c = P.cola(raiz, [{"pid": "prog", "nombre": "Prog", "montado": True}])
+        ok(c["envios"] and all(e.get("debio_salir") for e in c["envios"]),
+           "pasada su hora, la cola dice que DEBIÓ salir (la pantalla: «debería haber salido a las …»)")
+        f = P.ficha(raiz, info, ajustes)
+        ok(all(e.get("debio_salir") for e in f["envios"]), "y la ficha también")
+        # «Comprobar»: ese lote, ya, sin esperar el respiro
+        P.RESPIRO_CONSULTA_S = 3600
+        lote = nuevos[0]["lote"]
+        try:
+            r1 = P.refrescar(raiz, lote=lote)
+            r2 = P.refrescar(raiz, lote=lote)
+            ok(r1["consultados"] == 1 and r2["consultados"] == 1,
+               f"«Comprobar» pregunta ya, aunque se acabe de preguntar: {r1} {r2}")
+            igual(r2.get("estados"), ["publicado"], "y dice cómo quedó: publicado")
+        except TypeError:
+            ok(False, "«Comprobar» pregunta por un envío concreto (refrescar con lote)")
+        P.RESPIRO_CONSULTA_S = 0
+        for _ in range(3):
+            P.refrescar(raiz)
+        envios = P._leer_video(raiz, "prog")["envios"]
+        igual(sorted(e["estado"] for e in envios), ["publicado", "publicado"], "las dos redes pasan a publicado")
+        ok(all(e.get("url") for e in envios), "con su enlace")
+        # uno programado del que Upload-Post no sabe nada: «comprobar», nunca «programado» para siempre
+        datos = P._leer_video(raiz, "prog")
+        datos["envios"].append({"id": "fantasma", "red": "facebook", "lote": "lote_fantasma",
+                                "estado": "programado", "modo": "programado", "job_id": "no_existe",
+                                "cuando": hace.strftime("%Y-%m-%dT%H:%M:%S"),
+                                "creado": hace.strftime("%Y-%m-%dT%H:%M:%S"), "mp4_huella": "p1"})
+        P._escribir(P._ruta_video(raiz, "prog"), datos)
+        for _ in range(P.VECES_NO_LO_CONOCE + 1):
+            P._ULTIMA_CONSULTA.pop("lote_fantasma", None)
+            P.refrescar(raiz)
+        fantasma = next(e for e in P._leer_video(raiz, "prog")["envios"] if e["id"] == "fantasma")
+        igual(fantasma["estado"], "comprobar",
+              "si Upload-Post no da su estado, pasa a «comprobar» (no sigue «programado»)")
+        ok("debería haber salido" in (fantasma.get("error") or ""), f"y lo dice: {fantasma.get('error')}")
+        try:
+            P.enviar(raiz, info, ajustes, {"redes": ["facebook"], "modo": "ahora", "confirmado": True},
+                     en_hilo=False)
+            ok(False, "y no se deja publicar otra vez sin preguntar")
+        except P.ErrorPublicar:
+            ok(True, "y no se deja publicar otra vez sin preguntar")
+    finally:
+        P.RESPIRO_CONSULTA_S = respiro
+        os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
+
+
 def main():
     print("PRUEBA DE PUBLICAR")
     prueba_piezas()
@@ -2193,6 +2619,10 @@ def main():
     prueba_textos()
     prueba_seo()
     prueba_notas_19oct()
+    prueba_emojis()
+    prueba_20oct_idioma()
+    prueba_20oct_short()
+    prueba_20oct_programado()
     if shutil.which("ffmpeg"):
         prueba_portada()
     if shutil.which("ffmpeg"):

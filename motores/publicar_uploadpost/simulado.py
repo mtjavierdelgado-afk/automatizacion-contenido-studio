@@ -27,9 +27,11 @@ import threading
 import uuid
 
 try:
-    from .cliente import REDES, ErrorUploadPost, ClienteUploadPost
+    from .cliente import (REDES, ErrorUploadPost, ClienteUploadPost, FORMA_IDIOMA_AUDIO,
+                          campos_para_enviar)
 except ImportError:                                     # cargado suelto
-    from cliente import REDES, ErrorUploadPost, ClienteUploadPost  # noqa: F401
+    from cliente import (REDES, ErrorUploadPost, ClienteUploadPost,  # noqa: F401
+                         FORMA_IDIOMA_AUDIO, campos_para_enviar)
 
 _LOCK = threading.Lock()
 
@@ -135,6 +137,13 @@ class SimuladoUploadPost:
         if not os.path.isfile(mp4):
             raise ErrorUploadPost("no encuentro el MP4 del vídeo")
         id_propio = id_propio or uuid.uuid4().hex
+        # lo mismo que hace el cliente de verdad antes de mandar, y lo mismo que
+        # contesta Upload-Post si algo se cuela (20-10-2026: «es-419»)
+        campos = campos_para_enviar(campos)
+        audio = campos.get("defaultAudioLanguage")
+        if audio is not None and not FORMA_IDIOMA_AUDIO.match(str(audio)):
+            raise ErrorUploadPost(f'Invalid defaultAudioLanguage format: "{audio}". '
+                                  'Expected format: "en-US", "es-ES", etc.', 400)
         with _LOCK:
             datos = self._leer()
             cuentas = datos["perfiles"].get(perfil)

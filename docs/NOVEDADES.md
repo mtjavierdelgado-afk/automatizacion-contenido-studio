@@ -1,4 +1,4 @@
-# Novedades de Automatización Contenido Studio
+# Novedades de CrearIA Studio
 
 Lo que ha cambiado en el sistema, de lo más nuevo a lo más antiguo. Se ve en
 **Configuración → Novedades**, y el asistente lo lee para estar al día.
@@ -7,6 +7,199 @@ Para actualizar el servidor: en la consola del VPS, `asvs actualizar`. Tus
 vídeos, estilos, claves y contraseña no se tocan.
 
 ---
+
+## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
+
+**Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
+está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
+cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
+
+**Publicar: arreglos del 20 de octubre**
+- **El Short de YouTube vuelve a subir.** Upload-Post rechazaba el idioma del
+  audio «es-419» («Invalid defaultAudioLanguage format»): solo acepta códigos
+  «idioma-PAÍS» como «es-ES» o «en-US». Ahora el español de Latinoamérica se
+  manda como **«es-US»** (YouTube lo enseña como «Español (Estados Unidos)», el
+  más cercano que entra en esa forma), y lo guardado antes como «es-419», «es»
+  o «en» se traduce solo al enviar. En «SEO de este proyecto» la lista solo
+  ofrece códigos que valen (también «Español de México», «es-MX»).
+- **Short o vídeo normal en YouTube.** La ficha dice cómo sale («YouTube ·
+  Short» o «YouTube · Vídeo normal») y qué cambia: un Short lleva **«#Shorts»**
+  en el título (o al final de la descripción si no cabe), Claude le escribe un
+  título de 30 a 60 caracteres y una descripción de 1 a 3 líneas, y no lleva
+  capítulos; un vídeo normal, título de 40 a 70, descripción para el buscador
+  y capítulos. En un vídeo **vertical** se puede elegir «Publicarlo como»:
+  Automático, Short o Vídeo normal (quien decide de verdad es YouTube, por las
+  medidas: vertical de hasta 3 minutos sale en Shorts; se avisa cuando lo
+  elegido no cuadra). Cada envío recuerda cómo salió («YT · Short»).
+- **Al programar, la ficha se cierra.** «Programar…», «Publicar ahora…» y
+  «Dejar esperando mi OK» vuelven a **Cola y calendario** con el aviso
+  «Programado para … ✓» y un botón «Volver a la ficha». Guardar textos a secas
+  no cierra nada, y si el guardado de los textos falla la ficha se queda
+  abierta con lo escrito.
+- **Lo programado que ya salió deja de decir «programado».** La pantalla solo
+  le preguntaba a Upload-Post por lo que se estaba subiendo; lo programado no
+  se volvía a mirar nunca. Ahora, llegada su hora, Cola y calendario y la ficha
+  preguntan solas y pasa a «publicado» (o «falló», con el motivo). Si pasan 10
+  minutos de su hora sin noticias, dice **«debería haber salido a las 09:00»**
+  con **«Comprobar»** (también en «Te necesitan»); si Upload-Post no sabe nada
+  de él, pasa a «comprobar» para que lo mires, sin dejar publicarlo dos veces.
+- **El calendario ya no cambia con los filtros.** Enseña siempre todo lo
+  programado y publicado de la semana o el mes; los filtros (proyecto, estilo,
+  estado, buscar) solo cambian «Vídeos listos» y «Te necesitan», y se dice.
+
+**Imágenes: descargarlas y leer lo que dice la voz (20 de octubre)**
+- **«⬇ Descargar»** debajo de cada imagen de las diapositivas: baja el PNG
+  original del plano que estás viendo, con un nombre que se entiende
+  (`<vídeo>_<plano>.png`, por ejemplo `padres_vs_hijos_S004.png`).
+- **«⬇ Descargar todas»**: un .zip con todas las imágenes de plano del vídeo,
+  en el orden del vídeo y numeradas (`<vídeo>_001_S001.png`…). Solo lee: no
+  cambia nada del vídeo ni cuesta nada.
+- **«Lo que dice la voz»**: un cuadro debajo de la imagen con el texto del
+  guion que se oye en ese plano, para leerlo y no solo escucharlo. Cambia al
+  pasar de plano y, mientras suena «♪ Oírla» o «▶ Todo seguido», **se resalta
+  el trozo que se está diciendo**. Con el texto a la vista, en el ordenador la
+  imagen se hace un poco más pequeña para que quepan las dos cosas sin bajar.
+  **«Ocultar el texto»** lo quita (y la imagen vuelve a su tamaño); el
+  navegador se acuerda de tu elección.
+
+**El espacio fijo: todo el vídeo en un mismo sitio (20 de octubre)**
+- **En la Parrilla, un guion puede traer «ESPACIO FIJO»** (opcional), con
+  `- Sitio:` (un nombre corto), `- Descripción:` (cómo es el sitio, en una
+  frase), `- Luz:` y `- Secundarios:` (otros sitios que sí pueden salir,
+  «Nombre: descripción» separados por «;» o uno por línea). Está en la
+  plantilla de «Escribir uno», en el formato que se le pide a Claude y en la
+  guía del formato. Sin descripción no cuenta.
+- **«Pasar al Encargo» lo lleva a «Un vídeo nuevo»**, a un bloque nuevo, «El
+  espacio fijo», que también se puede rellenar a mano.
+- **Con él, el reparto de sitios usa UN solo sitio** con esa descripción tal
+  cual (y esa luz), pone ahí todos los tramos salvo los que el guion sitúe en
+  un secundario de la lista, no pone cabeceras de sitio ni rótulos de lugar y
+  no reparte «dos planos por sitio». Se impone aunque Claude proponga otra
+  cosa. Vacío, todo sale como siempre.
+- **La petición al deducir el reparto y los sitios ya llega a Claude** (el
+  campo `peticion` de `/catalogo/proponer` y `/escenarios`): se quedaba por el
+  camino y no se le pasaba nunca. La pantalla todavía no tiene un campo para
+  escribirla.
+- **Con una imagen del sitio (opcional)**: en «El espacio fijo» puedes subir
+  una foto o un dibujo del lugar (también al pasar un guion de la Parrilla). Se
+  adjunta a cada imagen de plano del sitio principal —no a los secundarios—
+  para que el lugar se reconozca. Se paga como una referencia más: unos ~730
+  tokens de entrada por imagen, alrededor de medio céntimo (≈ +12 % en calidad
+  baja, ≈ +7 % en media); el aviso de «rehacer» lo suma.
+- **En un vídeo ya hecho, como corrección**: el Encargo del vídeo trae «El
+  espacio fijo». «Aplicar el espacio fijo» lo guarda y reparte los tramos de
+  siempre en ese sitio **sin dibujar nada ni pagar nada** (las imágenes hechas
+  se conservan). Después enseña qué planos cambiarían y lo que cuesta
+  rehacerlos, y eliges: **rehacer todos**, **solo los marcados** en esa lista,
+  o **ninguno**. Solo se rehacen los que pidas; luego hay que volver a montar
+  el vídeo.
+
+**Arreglos del 19 de octubre (segunda tanda)**
+- **La pantalla ya no salta arriba** al terminar un remontaje, al «Traer» los
+  cambios del estilo ni al cambiar el proyecto, los días o el mes en Publicar →
+  Resultados: se queda donde estabas. Ir a otra pantalla sí empieza arriba.
+- **En el Encargo, varios cambios del montaje y un solo montaje.** La música,
+  cuánto se oye, su volumen, los efectos, el logo, los subtítulos y el
+  movimiento se guardan sin montar, y sale la franja «Hay cambios del montaje
+  sin aplicar · **Aplicar y volver a montar**». Ya no sale «el vídeo se está
+  montando ahora» al tocar la segunda cosa. Si lo cambiado es solo sonido o
+  logo, se vuelve a mezclar en segundos, sin rehacer ningún plano. En la
+  pantalla Vídeo cada cambio sigue montando al momento, como antes.
+- **«Parar» un montaje para en el acto.** El botón dice «Cancelando…» y se
+  apaga; antes esperaba a que terminara la mezcla (medio minuto, o más con el
+  logo). Al parar, el vídeo sigue siendo el de antes, no queda ningún trozo a
+  medias, y el cambio sigue guardado: **«Regenerar Vídeo» lo aplica volviendo a
+  mezclar** (segundos), no renderizando otra vez todos los planos.
+- **«Cambiar de estilo…» en «Su estilo»** (en el Encargo del vídeo). Un vídeo
+  cuyo estilo se borró se quedaba sin forma de adoptar otro; ahora eliges otro
+  estilo, ves qué partes cambiarían (estilo gráfico, tono, voz, rótulos) con
+  lo que costaría, y marcas solo las que quieras traer. Sin marcar nada, el
+  vídeo solo cambia de estilo apuntado y no se rehace nada. El vídeo **se queda
+  en su proyecto** si tenía uno. Si su estilo está en la papelera sale además
+  **«Restaurarlo»**, y la parada «Estilo» de un vídeo sin estilo te lleva ahí.
+- **«Revisión editorial» del guion**, junto a la ortografía. Claude lo lee como
+  un corrector editorial (sintaxis, concordancia, puntuación, repeticiones,
+  frases confusas o largas para decirlas en voz alta y saltos de registro) y
+  propone cambios sueltos con su motivo: **«Aceptar»** o **«Rechazar»** una a
+  una, o **«Aceptar todas»**. Aceptar cambia el bloque como si lo escribieras a
+  mano (las pausas de la voz se conservan). Si la voz ya está grabada, te avisa
+  de qué bloques habrá que regrabar. La ortografía de siempre no cambia. Va con
+  tu cuenta de Claude (sonnet, esfuerzo medio): no cuesta dinero de API.
+
+**El nuevo diseño: CrearIA Studio (19 de octubre)**
+- **Se llama CrearIA Studio · Automatización de contenido**, con logo nuevo: la
+  C de Crear con el bucle dentro y un «play». El favicon es el mismo dibujo. Por
+  dentro no cambia nada (el comando `asvs`, las carpetas y los servicios siguen
+  igual). El «play» va en el mismo violeta de la C.
+- **Cuatro paletas**, en Configuración → Aspecto: **Nocturno** (la de siempre),
+  **Aurora** (turquesa y rosa), **Brasa** (ámbar y frambuesa) y **Día**, la
+  clara. Se recuerdan en el navegador. **Día es el tema claro de antes**: el
+  botón de sol y luna de arriba sigue estando y pasa de Día a tu última paleta
+  oscura (si tenías elegido el claro, entras en Día). Los textos se leen bien
+  (contraste AA) en las cuatro.
+- **Letras nuevas**: Space Grotesk en los títulos, Inter en el texto y
+  JetBrains Mono en las cifras (si no cargan, las del sistema).
+- **En el ordenador, los módulos van en un menú a la izquierda**: Inicio,
+  Crear, Publicar (con su contador), Automatizar y Configuración, y debajo el
+  **gasto del mes** (con tu tope, si lo pones) y si el **asistente está
+  listo**. En el móvil y la tableta siguen en la fila de arriba. Crear
+  funciona igual que antes.
+- **El Inicio es ahora tu panel**: el saludo con lo que sale esta semana, las
+  cifras del mes (vídeos, programados, vistas de 7 días, para publicar), «Te
+  necesitan» (fallos, lo que espera tu OK, lo de hoy y lo listo para
+  publicar), la semana por días, los proyectos recientes, lo que está en marcha
+  y lo mejor de 7 días.
+- **«✎ Personalizar panel» (Arma tu panel)**: quita tarjetas, cámbiales el
+  tamaño (S, M, L) y el orden (arrastrando o con ↑ ↓), enciende otras (Gasto
+  del mes, Parrilla, Calendario, Por cliente, Novedades), empieza desde una
+  vista (Producción, Publicación, Resultados, Mínima) o vuelve al original. Se
+  guarda **para tu usuario** si entras con contraseña, y en el navegador si no.
+- **El «?» abre un panel de Ayuda** (ya no Configuración): el manual abierto en
+  el apartado de la pantalla en la que estás, todas las guías de escritura, la
+  guía de inicio y las novedades. El manual tiene apartados nuevos de Inicio y
+  de Automatizar (Parrilla y Analizar cuentas).
+- **Al entrar se abre el Inicio** (tu panel). Recargar la página te deja donde
+  estabas, y el botón Crear (o el logo) lleva siempre a **Tus proyectos**.
+- **El «atrás» del móvil ya no te saca del Studio**: cuando no queda nada
+  atrás, te lleva a Tus proyectos (y desde ahí, al Inicio) en vez de volver a
+  la pantalla de la contraseña.
+- **«‹ Volver» en pantalla** en las secciones de Publicar y Automatizar (las
+  fichas ya tenían «‹ La cola» y «‹ Parrilla»; en un vídeo sigue «‹ Mis
+  vídeos»), y **«✕» para cerrar** las imágenes ampliadas, para no depender del
+  «atrás» del teléfono.
+- **Un pie en todas las pantallas** con los derechos (© 2026 Agencia Redes
+  Botánica · v3.1) y los enlaces a Novedades, Guía, **Términos de uso** (las
+  condiciones de uso del Studio) y **Contacto** (escribe a
+  agencia.redes.botanica@gmail.com).
+
+**Textos de Publicar con emojis, siempre a juego con el vídeo (20 de octubre)**
+- **«Emojis en los textos» tiene niveles** (Publicar → Cuentas y ajustes → Lo
+  fijo de este proyecto): **Ninguno · Sobrio · Normal · Vistoso**. De fábrica,
+  **Vistoso**: el título lleva uno (en YouTube, al final, para no tapar la
+  palabra clave), el gancho empieza con uno, cada párrafo lleva el suyo de
+  viñeta, la llamada a la acción otro y la zona va con 📍. Elegidos por el tema
+  de cada vídeo (🎮 consolas, 🎂 cumpleaños, 🏢 empresa), no los mismos ✨🔥 en
+  todo. LinkedIn y Google van más sobrios. Antes era un sí/no con «1 a 3» y por
+  eso unos textos salían con emojis y otros no. **Si tenías «Usar emojis»
+  apagado, se respeta: ese proyecto queda en Ninguno.**
+- **Emojis de la marca**: una casilla con los emojis propios del proyecto (para
+  EstadoPlay, 🎮 🕹️ 🎉). Claude los usa de firma en el gancho y en la llamada a
+  la acción de cada red.
+- **Combinaciones de dos emojis** (🎮➕🎉 = fiesta gamer, 🏠➡️🎉 = la fiesta en
+  casa): es la forma real de tener emojis «propios». Emojis dibujados a medida
+  no se pueden poner en un título o una descripción: las redes solo enseñan los
+  emojis estándar, y uno inventado saldría como un cuadrado. Para algo dibujado
+  de verdad, la portada (stickers y grafismo).
+- **El aviso**: si un texto sale con menos emojis de los que pide el nivel, la
+  ficha lo dice junto al campo («va con menos emojis de los pedidos»). La nota
+  SEO no cambia por eso.
+- **«✨ Más emojis»**, junto al título y al texto de cada red: añade emojis a lo
+  ya escrito **sin cambiar ninguna palabra ni hashtag** (el Studio lo comprueba;
+  si Claude cambiara algo, no se toca nada y te lo dice). Es una llamada corta y
+  barata (haiku) con tu suscripción de Claude, y se guarda sola, con su
+  «✓ Guardado».
+- «Dame 3 ganchos» sigue el nivel de emojis, y «Optimizar SEO» ya no quita los
+  emojis al reescribir una línea.
 
 ## V2.0 · octubre de 2026 (imágenes, música y efectos, y un recorrido de toda la pantalla)
 
@@ -86,6 +279,20 @@ vídeos, estilos, claves y contraseña no se tocan.
   necesitan**, cada fallo trae **Quitar de la lista**. Un fallo que volviste a
   mandar y salió en esa red ya no cuenta (ni en el número de la barra). En la
   ficha, lo cancelado o quitado va plegado en **N descartados**.
+
+**Publicar: YouTube y Facebook van en su propia subida (19 de octubre, tarde)**
+- Si publicas o programas a la vez en **YouTube o Facebook y en otras redes**
+  (Instagram, TikTok…), el Studio lo manda a Upload-Post en **dos subidas**:
+  una para YouTube/Facebook con su título y otra para las demás con su texto
+  completo. Antes iba todo junto y el título de YouTube podía acabar como el
+  texto de Instagram.
+- **Cada subida cuenta en el mes de Upload-Post**: Instagram + YouTube son 2;
+  con Google Business, 3. La confirmación antes de enviar dice cuántas.
+- Cancelar un programado de YouTube ya no cancela el de Instagram (van en
+  subidas distintas): cancela cada red por separado si quieres quitar las dos.
+- En la ficha no cambia nada: cada red sigue con su envío, su estado y su
+  «Reintentar». Lo que ya estaba programado antes de este cambio no se toca:
+  cancélalo y vuelve a programarlo para que salga con el texto entero.
 
 **El movimiento y la profundidad 2.5D de cada imagen (19 de octubre)**
 - En **Imágenes**, cada diapositiva trae **🎬 Esta imagen**: su movimiento

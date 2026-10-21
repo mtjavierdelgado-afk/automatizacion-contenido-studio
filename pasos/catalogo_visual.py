@@ -392,6 +392,44 @@ Las descripciones van EN INGLES porque alimentan a un generador de imagen. Los
 identificadores, en minusculas, sin acentos y sin espacios.
 """
 
+# EL ESPACIO FIJO (20-10-2026, pedido del dueño). Un video que pasa entero en
+# un mismo sitio --el local de un cliente, una cocina, un plato-- no puede
+# repartirse en sitios: el criterio de arriba pide justo lo contrario («se
+# generoso con los sitios», dos planos por sitio) y de un local salian doce. Con
+# el espacio fijo, la parte de SETS y la de LUGARES se CAMBIAN por estas, y el
+# resto del criterio (reparto, reales, beats) se queda igual. Lo que aqui se
+# pide se impone despues por codigo (`_aplicar_espacio_fijo`): el modelo puede
+# no hacer caso, y entonces un plano se iria a un sitio que nadie pidio.
+SETS_ESPACIO_FIJO = """SETS — donde ocurre: ESTE VIDEO TIENE UN ESPACIO FIJO
+El editor ha fijado donde ocurre el video, y eso va por delante de todo lo que
+se dice en este criterio sobre sitios. Aqui NO se reparte el guion en sitios:
+todo pasa en UN solo sitio, y lo que cambia de un tramo a otro es la accion y el
+encuadre, no el lugar.
+
+  - El sitio es '{principal}'{nombre}. Declaralo en 'sets' con ese id exacto y con
+    esta 'descripcion', LITERAL: no la reescribas, no la traduzcas, no la completes.
+    <<<
+    {descripcion}
+    >>>
+  - 'luz': {luz}
+  - 'rotulo': vacio, en este sitio y en cualquier otro. Este video no lleva
+    cabeceras de sitio.
+  - TODOS los tramos van a '{principal}'{salvo}
+  - No declares ningun otro sitio. Si el guion nombra un sitio que no esta en
+    esta lista, el tramo se queda en '{principal}' y lo cuentas con la accion.
+  - Sigue habiendo un tramo por idea visual: un solo sitio no es un solo tramo.
+
+"""
+
+SECUNDARIO_ESPACIO_FIJO = """
+    - '{id}' ({nombre}): {descripcion}"""
+
+LUGARES_ESPACIO_FIJO = """LUGARES — en este video, ninguno
+Con el espacio fijo no se rotula ningun sitio en pantalla: devuelve 'lugares'
+vacio.
+
+"""
+
 PETICION = """
 LO QUE TE PIDE EL EDITOR
 Va por delante del criterio general. No cambia las reglas duras.
@@ -819,6 +857,235 @@ proporciones a lo que diga la regla. Lo mismo con los grupos.
 """
 
 
+#: Topes del espacio fijo. Es texto que escribe una persona y viaja literal a
+#: cada prompt de imagen: uno de diez mil caracteres se pagaria en cada plano.
+MAX_SITIO = 80
+MAX_DESCRIPCION_SITIO = 1500
+MAX_LUZ = 200
+MAX_SECUNDARIOS = 8
+
+#: La imagen de referencia del espacio, como se guarda: una ruta RELATIVA a la
+#: carpeta del proyecto y con el nombre sacado de su contenido. Relativa a
+#: proposito: las referencias de estilo guardan rutas absolutas y por eso una
+#: mudanza tiene que reescribirlas y volver a sellar (CLAUDE.md); esta viaja
+#: con la carpeta sin tocar nada.
+RE_IMAGEN_ESPACIO = re.compile(r"^espacio_fijo/[0-9a-f]{12,40}\.png$")
+
+
+def normalizar_espacio_fijo(crudo):
+    """El espacio fijo tal como se guarda. -> {} o {sitio, descripcion, luz, secundarios}
+
+    {} es «no hay espacio fijo»: lo que no trae descripcion no fija nada, que es
+    justo lo que va literal al prompt. Lanza ValueError si llega mal formado
+    (no es un objeto, un campo no es texto, pasa de los topes).
+    """
+    if crudo is None or crudo == "" or crudo == {}:
+        return {}
+    if not isinstance(crudo, dict):
+        raise ValueError("espacio_fijo tiene que ser un objeto con sitio, "
+                         "descripcion, luz y secundarios")
+
+    def texto(clave, valor, tope, donde="espacio_fijo"):
+        if valor is None:
+            return ""
+        if not isinstance(valor, str):
+            raise ValueError(f"{donde}.{clave} tiene que ser un texto")
+        limpio = " ".join(valor.split())
+        if len(limpio) > tope:
+            raise ValueError(f"{donde}.{clave}: como mucho {tope} caracteres")
+        return limpio
+
+    descripcion = texto("descripcion", crudo.get("descripcion"), MAX_DESCRIPCION_SITIO)
+    sitio = texto("sitio", crudo.get("sitio"), MAX_SITIO)
+    luz = texto("luz", crudo.get("luz"), MAX_LUZ)
+    crudos = crudo.get("secundarios")
+    if crudos is None:
+        crudos = []
+    if not isinstance(crudos, list):
+        raise ValueError("espacio_fijo.secundarios tiene que ser una lista")
+    if len(crudos) > MAX_SECUNDARIOS:
+        raise ValueError(f"espacio_fijo.secundarios: como mucho {MAX_SECUNDARIOS}")
+    secundarios = []
+    for item in crudos:
+        if isinstance(item, str):
+            item = {"nombre": item}
+        if not isinstance(item, dict):
+            raise ValueError("cada secundario de espacio_fijo es un objeto con "
+                             "nombre y descripcion")
+        nombre = texto("nombre", item.get("nombre"), MAX_SITIO, "espacio_fijo.secundarios")
+        detalle = texto("descripcion", item.get("descripcion"), MAX_DESCRIPCION_SITIO,
+                        "espacio_fijo.secundarios")
+        if nombre:
+            secundarios.append({"nombre": nombre, "descripcion": detalle})
+    if not descripcion:
+        return {}
+    limpio = {"sitio": sitio, "descripcion": descripcion, "luz": luz,
+              "secundarios": secundarios}
+    imagen = crudo.get("imagen")
+    if imagen not in (None, ""):
+        if not isinstance(imagen, str) or not RE_IMAGEN_ESPACIO.match(imagen):
+            raise ValueError("espacio_fijo.imagen no es una imagen guardada del "
+                             "espacio fijo: súbela otra vez")
+        limpio["imagen"] = imagen
+    return limpio
+
+
+def ids_del_espacio(espacio):
+    """(id del sitio principal, {id: secundario}). Ids como los de los sets."""
+    principal = _identificador(espacio.get("sitio")) or "espacio_fijo"
+    secundarios = {}
+    for ficha in espacio.get("secundarios") or []:
+        base = _identificador(ficha.get("nombre")) or "secundario"
+        sid, n = base, 2
+        while sid == principal or sid in secundarios:
+            sid, n = f"{base}_{n}", n + 1
+        secundarios[sid] = ficha
+    return principal, secundarios
+
+
+def _cambiar_tramo(texto, desde, hasta, nuevo):
+    """`texto` con lo que va de `desde` (incluido) a `hasta` (excluido) cambiado."""
+    inicio, fin = texto.index(desde), texto.index(hasta)
+    return texto[:inicio] + nuevo + texto[fin:]
+
+
+def _criterio(planos, min_s, max_s, espacio=None):
+    """El criterio del prompt. Sin espacio fijo, el de siempre, byte a byte."""
+    texto = CRITERIO.format(planos_por_set=PLANOS_POR_SET,
+                            cuantos_planos=("" if espacio else
+                                            _cuantos_planos(planos, min_s, max_s)),
+                            regiones_mapa=", ".join(regiones_de_mapa()) or "ninguna")
+    if not espacio:
+        return texto
+    principal, secundarios = ids_del_espacio(espacio)
+    if secundarios:
+        salvo = (", salvo los que el guion situe CLARAMENTE en uno de estos sitios "
+                 "secundarios, que son los unicos que puedes declarar ademas (con "
+                 "su id exacto, y la descripcion LITERAL si aqui la tiene):"
+                 + "".join(SECUNDARIO_ESPACIO_FIJO.format(
+                     id=sid, nombre=ficha["nombre"],
+                     descripcion=(f"<<<{ficha['descripcion']}>>>" if ficha.get("descripcion")
+                                  else "sin descripcion: escribela tu, en ingles, en "
+                                       "una frase"))
+                           for sid, ficha in secundarios.items()))
+    else:
+        salvo = ". Todos, sin excepcion."
+    luz = (f"'{espacio['luz']}', literal, la misma en todo el video"
+           if espacio.get("luz") else
+           "la eliges tu, en ingles, coherente con la descripcion, y es la misma en "
+           "todo el video")
+    texto = _cambiar_tramo(texto, "SETS — donde ocurre", "REALES — lo que existe",
+                           SETS_ESPACIO_FIJO.format(
+                               principal=principal,
+                               nombre=f" ({espacio['sitio']})" if espacio.get("sitio") else "",
+                               descripcion=espacio["descripcion"], luz=luz, salvo=salvo))
+    return _cambiar_tramo(texto, "LUGARES — el rotulo que situa", "CAPITULOS — donde",
+                          LUGARES_ESPACIO_FIJO)
+
+
+def _aplicar_espacio_fijo(ficha, espacio, ids_bloque):
+    """Impone el espacio fijo sobre el catalogo ya limpio, sin fiarse del modelo.
+
+    Un sitio principal con la descripcion LITERAL y la luz dadas; todo tramo que
+    no este en un secundario de la lista va a el; los bloques sin tramo, a un
+    tramo nuevo en el principal (si no, p6 los repartiria por palabras); fuera
+    los sitios que nadie pidio y los secundarios que ningun tramo usa; ningun
+    rotulo y ningun lugar que rotular.
+    """
+    principal, secundarios = ids_del_espacio(espacio)
+    propuestos = ficha.get("sets") or {}
+    avisos = ficha.setdefault("avisos", [])
+    orden = {bid: i for i, bid in enumerate(ids_bloque)}
+
+    luz = espacio.get("luz") or (propuestos.get(principal) or {}).get("luz") or next(
+        (f.get("luz") for sid, f in propuestos.items()
+         if sid not in secundarios and f.get("luz")), "")
+    sets = {principal: {
+        "rotulo": "", "descripcion": espacio["descripcion"],
+        "palabras": ((propuestos.get(principal) or {}).get("palabras")
+                     or _lista_de_palabras([espacio.get("sitio")], principal)),
+        "luz": luz}}
+    for sid, dado in secundarios.items():
+        propuesto = propuestos.get(sid) or {}
+        sets[sid] = {
+            "rotulo": "",
+            "descripcion": (dado.get("descripcion") or propuesto.get("descripcion")
+                            or dado["nombre"]),
+            "palabras": propuesto.get("palabras") or _lista_de_palabras([dado["nombre"]], sid),
+            "luz": propuesto.get("luz") or luz}
+
+    beats = list(ficha.get("beats") or [])
+    movidos = 0
+    for beat in beats:
+        if beat.get("set") not in secundarios and beat.get("set") != principal:
+            beat["set"] = principal
+            movidos += 1
+    cubiertos = set()
+    for beat in beats:
+        cubiertos.update(ids_bloque[orden[beat["desde"]]:orden[beat["hasta"]] + 1])
+    huecos, tramo = [], []
+    for bid in ids_bloque + [None]:
+        if bid is not None and bid not in cubiertos:
+            tramo.append(bid)
+        elif tramo:
+            huecos.append((tramo[0], tramo[-1]))
+            tramo = []
+    for desde, hasta in huecos:
+        beats.append({"desde": desde, "hasta": hasta, "set": principal,
+                      "personajes": [], "tono": "neutro", "accion": "", "palabras": []})
+    beats.sort(key=lambda b: orden[b["desde"]])
+
+    usados = {b["set"] for b in beats}
+    for sid in list(secundarios):
+        if sid not in usados:
+            sets.pop(sid, None)
+    fuera = sorted(set(propuestos) - set(sets))
+    if movidos or huecos or fuera:
+        avisos.append(
+            f"espacio fijo '{principal}': "
+            + ", ".join(x for x in (
+                f"{movidos} tramo(s) llevados a el" if movidos else "",
+                f"{len(huecos)} hueco(s) cubiertos con el" if huecos else "",
+                (f"fuera {len(fuera)} sitio(s) que no estaban en la lista "
+                 f"({', '.join(fuera[:8])}" + ("…" if len(fuera) > 8 else "") + ")")
+                if fuera else "") if x))
+    ficha["sets"] = sets
+    ficha["beats"] = beats
+    ficha["lugares"] = {}
+    ficha["cobertura"] = 1.0 if ids_bloque else ficha.get("cobertura", 0)
+    return ficha
+
+
+def ajustar_catalogo(catalogo, espacio, ids_bloque):
+    """Un catalogo YA GUARDADO, ajustado al espacio fijo, sin llamar a nadie.
+
+    Es lo que hace «Aplicar el espacio fijo» en un video hecho: los tramos son
+    los que habia (su accion, su reparto, su tono), y solo cambian de sitio con
+    las reglas de `_aplicar_espacio_fijo`. Gratis e instantaneo: volver a pedir
+    el catalogo seria otra lectura del guion entera, y nombraria los sitios de
+    otra forma. Lo que no es de sitios ('reales', '_firma_guion') se conserva.
+    """
+    espacio = normalizar_espacio_fijo(espacio)
+    if not espacio:
+        raise ValueError("sin descripción no hay espacio fijo que aplicar")
+    ids_bloque = [str(b).strip().upper() for b in ids_bloque or []]
+    validos = set(ids_bloque)
+    beats = [dict(b) for b in (catalogo or {}).get("beats") or []
+             if isinstance(b, dict)
+             and str(b.get("desde") or "").upper() in validos
+             and str(b.get("hasta") or b.get("desde") or "").upper() in validos]
+    for beat in beats:
+        beat["desde"] = str(beat["desde"]).upper()
+        beat["hasta"] = str(beat.get("hasta") or beat["desde"]).upper()
+    ficha = {"sets": dict((catalogo or {}).get("sets") or {}), "beats": beats,
+             "avisos": []}
+    ficha = _aplicar_espacio_fijo(ficha, espacio, ids_bloque)
+    salida = dict(catalogo or {})
+    salida.update({"sets": ficha["sets"], "beats": ficha["beats"]})
+    salida.setdefault("reparto", {})
+    return salida, ficha["avisos"]
+
+
 def _especie_legible(regla):
     regla = " ".join(str(regla or "").split())
     return ESPECIE.format(regla=regla) if regla else ""
@@ -826,7 +1093,7 @@ def _especie_legible(regla):
 
 def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
              cwd=None, peticion="", planos=0, min_s=None, max_s=None,
-             regla_personajes=""):
+             regla_personajes="", espacio_fijo=None):
     """Propone el catalogo visual del video. NO lo guarda: eso lo hace una persona.
 
     'bloques' son los del guion, con id y texto, EN ORDEN. Se manda el guion
@@ -837,7 +1104,13 @@ def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
     max_s), que se elige en otra tarjeta. Se pasa desde fuera y no se supone
     aqui: es lo que convierte «dos planos por sitio» en un numero de sitios (ver
     `planos_previstos`). En 0 el prompt se queda como estaba, sin la cuenta.
+
+    'espacio_fijo' ({sitio, descripcion, luz, secundarios}, ver
+    `normalizar_espacio_fijo`): todo el video en UN sitio. Cambia la parte de
+    sitios del prompt (sin la cuenta de planos por sitio) y se impone despues
+    por codigo. Sin el, el prompt y el resultado son los de siempre.
     """
+    espacio = normalizar_espacio_fijo(espacio_fijo)
     ajuste = ajuste or {}
     modelo = ajuste.get("modelo") or MODELO_POR_DEFECTO
     esfuerzo = ajuste.get("esfuerzo") or ESFUERZO_POR_DEFECTO
@@ -856,11 +1129,7 @@ def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
         tema=(brief or {}).get("resumen") or (brief or {}).get("tema") or "sin brief",
         peticion=PETICION.format(texto=peticion) if peticion else "",
         especie=_especie_legible(regla_personajes),
-        criterio=CRITERIO.format(planos_por_set=PLANOS_POR_SET,
-                                 cuantos_planos=_cuantos_planos(planos, min_s,
-                                                                max_s),
-                                 regiones_mapa=", ".join(regiones_de_mapa())
-                                               or "ninguna"),
+        criterio=_criterio(planos, min_s, max_s, espacio),
         guion=guion)
 
     palabras = sum(comun.contar_palabras(b.get("texto", "")) for b in bloques)
@@ -885,6 +1154,8 @@ def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
     segundos = avance.parar() if avance is not None else time.time() - arranque
 
     catalogo = _limpiar(comun.extraer_json(texto, "el catalogo"), ids_bloque)
+    if espacio:
+        catalogo = _aplicar_espacio_fijo(catalogo, espacio, ids_bloque)
     estadisticas.anotar(PASO, segundos, tamano=palabras, ajuste=elegido,
                         proyecto=proyecto_id, unidades=len(catalogo["beats"]),
                         detalle={"modelo": modelo, "esfuerzo": esfuerzo,

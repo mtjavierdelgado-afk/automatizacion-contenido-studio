@@ -412,8 +412,10 @@ GUIAS = {
             "caracteres: lo que sobre se corta.",
             "TikTok busca por las palabras del texto y de la voz: lo que no se "
             "nombra, no se encuentra.",
-            "Si el proyecto tiene puesto «Usar emojis en los textos» (Lo fijo del "
-            "proyecto), Claude pone 1 a 3; si no, ninguno.",
+            "Los emojis salen del nivel del proyecto («Emojis en los textos», en "
+            "Lo fijo del proyecto): en Vistoso, que es el de fábrica, 3 a 6 en el "
+            "texto; en Ninguno, ninguno. «✨ Más emojis» los añade a un texto ya "
+            "escrito sin cambiar sus palabras.",
         ],
         "si": [
             "Una primera línea que enganche: la promesa del vídeo o la pregunta "
@@ -460,8 +462,9 @@ GUIAS = {
             "Es el pie del Reel. Instagram no tiene título aparte: enseña solo la "
             "primera línea (unos 125 caracteres) hasta que se pulsa «más», así "
             "que esa línea hace de título.",
-            "Con «Usar emojis en los textos» puesto en el proyecto, Claude usa "
-            "3 a 6 (en el gancho, como viñetas y en la llamada a la acción).",
+            "Con el nivel Vistoso del proyecto (el de fábrica), Claude usa 5 a 9: "
+            "uno abriendo el gancho, de viñeta en cada párrafo y otro en la "
+            "llamada a la acción. Con Ninguno, ninguno.",
             "Al enviarlo, el Studio le añade la llamada a la acción, la firma del "
             "proyecto y los hashtags (como mucho 15, contando los fijos del "
             "proyecto). Todo junto no puede pasar de 2.200 caracteres.",
@@ -603,8 +606,9 @@ GUIAS = {
             "cualquier tema.",
             "La firma y los hashtags fijos tienen su casilla y los añade el "
             "Studio al final de cada texto: no hace falta pedirlos aquí.",
-            "Los emojis se encienden o apagan con «Usar emojis en los textos», "
-            "justo debajo; aquí puedes afinar cuáles y cuántos.",
+            "Cuántos emojis se ponen lo dice «Emojis en los textos», justo debajo "
+            "(Ninguno · Sobrio · Normal · Vistoso), y los de la marca tienen su "
+            "casilla; aquí puedes afinar de qué tipo.",
         ],
         "si": [
             "Cómo suena la marca en redes: de tú o de usted, con o sin humor, "
@@ -641,12 +645,58 @@ GUIAS = {
             "sin firma ni hashtags.\n\nMIS NOTAS:\n[cómo habla tu marca]"
         ),
     },
+    "emojis_redes": {
+        "titulo": "Emojis en los textos para redes",
+        "donde": "Publicar → Cuentas y ajustes → un proyecto → Lo fijo de este proyecto",
+        "usa": "pasos/publicar.py (bloque_emojis, emojis_de_ficha, vestir_con_emojis)",
+        "que_hace": [
+            "El NIVEL dice cuántos emojis pone Claude en cada red: Ninguno, "
+            "Sobrio (uno o dos), Normal (gancho, listas y llamada a la acción) o "
+            "Vistoso (siempre: título, gancho, una viñeta por párrafo, llamada a "
+            "la acción y 📍 en la zona). De fábrica, Vistoso. LinkedIn y Google "
+            "van siempre más sobrios, y en YouTube el título lleva uno solo, al "
+            "final, para no tapar la palabra clave.",
+            "Los EMOJIS DE LA MARCA son su firma: Claude los prefiere en el "
+            "gancho y en la llamada a la acción de cada red. El resto los elige "
+            "por el tema de cada vídeo, no los mismos ✨🔥 en todo.",
+            "Si un texto sale con menos emojis de los que pide el nivel, la "
+            "ficha lo avisa junto al campo. «✨ Más emojis» le añade los que "
+            "faltan SIN cambiar ninguna palabra ni hashtag (el Studio lo "
+            "comprueba y, si Claude cambiara algo, no toca nada). La nota SEO no "
+            "cuenta los emojis.",
+            "Emojis dibujados a medida NO se pueden poner en un título o una "
+            "descripción: las redes solo enseñan los emojis estándar (Unicode), "
+            "y uno inventado saldría como un cuadrado vacío. Lo «propio» de "
+            "verdad son las combinaciones de dos (🎮➕🎉 = fiesta gamer), la "
+            "lista de emojis de la marca y, en la portada, stickers o grafismo.",
+        ],
+        "si": [
+            "En los de la marca, 2 a 5 emojis que digan qué vende: una consola, "
+            "una fiesta, una entrega.",
+            "Combinaciones que cuenten el servicio (🏠➡️🎉: la fiesta en casa).",
+        ],
+        "no": [
+            "Letras o palabras en la casilla de la marca: solo emojis.",
+            "Más de 12: dejan de ser una firma.",
+            "Caras o banderas que no tengan que ver con la marca.",
+        ],
+        "plantilla": "[2 a 5 emojis de lo que vende la marca, separados por espacios]",
+        "ejemplo": "🎮 🕹️ 🎉",
+        "prompt_ia": (
+            "Propón de 3 a 5 emojis estándar (Unicode) que sirvan de firma visual "
+            "de mi marca en redes, y 3 combinaciones de dos emojis que cuenten lo "
+            "que hacemos. Solo los emojis, separados por espacios, y debajo una "
+            "línea con lo que cuenta cada combinación.\n\nMI MARCA:\n[qué vende, "
+            "a quién y cómo suena]"
+        ),
+    },
     # ------------------------------------------------------------- parrilla
     "guion_parrilla": {
         "titulo": "El formato del guion (Parrilla)",
         "donde": "Automatizar → Añadir guiones, y la ficha de un guion",
-        "usa": "pasos/parrilla.py (leer_guion, encargo_de, el prompt de conversión) y "
-               "«Pasar al Encargo» en web/app.js",
+        "usa": "pasos/parrilla.py (leer_guion, encargo_de, el prompt de conversión), "
+               "«Pasar al Encargo» en web/app.js y, para ESPACIO FIJO, "
+               "pasos/catalogo_visual.py (proponer)",
         "que_hace": [
             "Todo guion de la Parrilla vive en ESTE formato, venga de un Word, un PDF, "
             "un Excel, de Claude o pegado. Lo que subes o pegas lo convierte Claude; "
@@ -664,6 +714,15 @@ GUIAS = {
             "ejemplo, uno vertical y uno horizontal): la ficha deja elegir cuál pasas.",
             "Cambiar Uso, Formato o Duración en la ficha cambia su línea en el texto "
             "(y en PARA EL ENCARGO si hay uno solo).",
+            "ESPACIO FIJO (opcional) es para los vídeos que ocurren enteros en un "
+            "mismo sitio: «- Sitio:» (un nombre corto), «- Descripción:» (cómo es, en "
+            "una frase), «- Luz:» y «- Secundarios:» (otros sitios que sí pueden "
+            "salir, «Nombre: descripción» separados por «;» o uno por línea). Viaja al "
+            "Encargo y, con él, el reparto de sitios usa UN solo sitio con esa "
+            "descripción tal cual, pone ahí todos los tramos (salvo los que el guion "
+            "sitúe en un secundario) y no pone cabeceras de sitio. Sin descripción "
+            "no cuenta. La imagen del sitio (opcional) se sube en «El espacio fijo» "
+            "de «Un vídeo nuevo» después de «Pasar al Encargo».",
         ],
         "si": [
             "Una línea de cabecera por dato: «Uso:», «Formato:», «Duración:»…",
@@ -671,6 +730,8 @@ GUIAS = {
             "La locución completa y seguida en «- Material:» de PARA EL ENCARGO.",
             "Las reglas fijas del cliente en MARCA DEL CLIENTE, no en cada escena.",
             "«Duración: la elijo en el Encargo» si el original no la dice.",
+            "La descripción de ESPACIO FIJO como la quieres ver: va tal cual a todas "
+            "las imágenes (mejor en inglés, que es lo que lee el generador).",
         ],
         "no": [
             "Diálogos entre personajes: el Studio narra con UNA voz (en «exacto» "
@@ -690,6 +751,12 @@ GUIAS = {
             "Objetivo: [qué tiene que conseguir]\n"
             "CTA: [qué se pide al final]\n"
             "Tono: [cómo suena]\n"
+            "\n"
+            "ESPACIO FIJO (opcional: bórralo si el vídeo cambia de sitio)\n"
+            "- Sitio: [nombre corto]\n"
+            "- Descripción: [cómo es el sitio, en una frase; va tal cual a todas las imágenes]\n"
+            "- Luz: [hora del día y fuente de luz]\n"
+            "- Secundarios: ninguno\n"
             "\n"
             "ESCENA 1\n"
             "Visual: [una imagen fija: quién, dónde, qué hace]\n"
@@ -772,6 +839,7 @@ GUIAS = {
             "5. Tiempos por escena solo si el original los trae; si no, numera las escenas.\n"
             "6. Las reglas fijas del cliente (qué mostrar, qué evitar, colores, frases de marca) van a MARCA DEL CLIENTE, no dentro de las escenas.\n"
             "7. No inventes datos: teléfonos, precios o enlaces solo si están en el original. Si falta el CTA, pon [FALTA CTA].\n"
+            "8. ESPACIO FIJO solo si el original dice que todo el vídeo ocurre en un mismo sitio (un local, una cocina, un plató). Si no lo dice, no pongas esa sección.\n"
             "\n"
             "AJUSTE POR RED (en \"adaptar\" aplícalo; en \"exacto\" solo avisa con ⚠ si algo no encaja)\n"
             "- TikTok / Reels / Shorts: vertical. Gancho en los primeros 2–3 s. Un cambio de plano cada 1–3 s. Texto en pantalla frecuente y grande, que refuerce la voz. CTA corto (comenta, guárdalo, link en bio, escríbenos). En TikTok, las palabras clave del tema dichas en la voz.\n"
@@ -791,6 +859,12 @@ GUIAS = {
             "Objetivo: …\n"
             "CTA: …\n"
             "Tono: …\n"
+            "\n"
+            "ESPACIO FIJO (solo si todo el vídeo ocurre en un mismo sitio; si no, quita esta sección)\n"
+            "- Sitio: [nombre corto del sitio]\n"
+            "- Descripción: [cómo es el sitio, en una frase; va tal cual a todas las imágenes]\n"
+            "- Luz: [hora del día y fuente de luz]\n"
+            "- Secundarios: [otros sitios que sí pueden salir, «Nombre: descripción» separados por «;», o ninguno]\n"
             "\n"
             "ESCENA 1 (tiempo, si lo hay)\n"
             "Visual: …\n"
@@ -974,8 +1048,8 @@ GUIAS = {
             "Cambiar la categoría en cada vídeo sin motivo: el canal se lee mejor si es "
             "constante.",
         ],
-        "plantilla": "CATEGORÍA: [la más parecida] · IDIOMA: es · AUDIO: es-419",
-        "ejemplo": "CATEGORÍA: Entretenimiento · IDIOMA: es · AUDIO: es-419",
+        "plantilla": "CATEGORÍA: [la más parecida] · IDIOMA: es · AUDIO: es-US",
+        "ejemplo": "CATEGORÍA: Entretenimiento · IDIOMA: es · AUDIO: es-US",
         "prompt_ia": (
             "¿Qué categoría de YouTube encaja mejor con un canal que publica estos "
             "vídeos? Dame una y por qué.\n\nMIS VÍDEOS:\n[de qué van]"
@@ -1318,7 +1392,8 @@ ORDEN = ("estilo_grafico", "tono", "voz", "material", "indicaciones", "cta",
          "chat_guiones", "analizar_cuenta", "conexiones_cuentas",
          "palabra_clave", "ubicacion_instagram", "categoria_youtube", "hecho_para_ninos",
          "texto_linkedin", "texto_x", "texto_threads", "texto_pinterest", "texto_bluesky",
-         "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business")
+         "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business",
+         "emojis_redes")
 
 
 

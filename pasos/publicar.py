@@ -303,7 +303,9 @@ AJUSTES_DEFECTO = {
     "hashtags": "",                     # los fijos del proyecto
     "tono": "",                         # como escribe los textos Claude
     "marcar_ia": True,                  # avisar en cada red de que es IA
-    "usar_emojis": True,                # que Claude ponga emojis en los textos
+    "usar_emojis": True,                # el sí/no de antes: se lee, ver `nivel_emojis`
+    "emojis": "",                       # ninguno/sobrio/normal/vistoso; "" = el de fábrica
+    "emojis_marca": "",                 # los emojis propios del proyecto (su firma)
     "avisar_youtube": True,             # notificar a los suscriptores
     "privacidad_youtube": "public",
     "facebook_pagina": "",              # id de la pagina, si hay mas de una
@@ -330,6 +332,10 @@ def ajustes_de(raiz, cid):
     salida = json.loads(json.dumps(AJUSTES_DEFECTO))
     if isinstance(propio, dict):
         salida.update({k: v for k, v in propio.items() if k in AJUSTES_DEFECTO})
+    # el nivel que vale, LEÍDO (no se escribe): `usar_emojis: False` guardado
+    # es «ninguno»; sin nada, «vistoso»
+    salida["emojis"] = nivel_emojis(propio if isinstance(propio, dict) else {})
+    salida["usar_emojis"] = salida["emojis"] != "ninguno"
     return salida
 
 
@@ -361,6 +367,15 @@ def _validar_ajustes(cambios):
             if not isinstance(v, bool):
                 raise ErrorPublicar(f"«{k}» es sí o no")
             limpios[k] = v
+            if k == "usar_emojis" and "emojis" not in (cambios or {}):
+                # el sí/no de antes, dicho a mano: manda sobre el nivel guardado
+                limpios["emojis"] = NIVEL_EMOJIS_DEFECTO if v else "ninguno"
+        elif k == "emojis":
+            if v not in NIVELES_EMOJIS:
+                raise ErrorPublicar("los emojis van: " + ", ".join(NIVELES_EMOJIS))
+            limpios[k] = v
+        elif k == "emojis_marca":
+            limpios[k] = limpiar_emojis_marca(v)
         elif k in ("redes", "redes_visibles"):
             if not isinstance(v, list) or any(r not in REDES for r in v):
                 raise ErrorPublicar("las redes son: " + ", ".join(REDES))
@@ -619,13 +634,31 @@ def huella_origen(info):
     return hashlib.sha256("\n".join(trozos).encode("utf-8")).hexdigest()[:16]
 
 
-def encaje(red, formato, duracion):
+#: SHORT O VÍDEO NORMAL EN YOUTUBE (20-10-2026: en Publicar no había
+#: diferencia). Quien decide es YouTube, por las MEDIDAS del fichero: vertical
+#: (o cuadrado) y de hasta 3 minutos sale en Shorts; lo demás, como vídeo. No
+#: hay ningún campo de Upload-Post que lo fuerce (docs de /api/upload, 20-10).
+#: Lo que sí cambia aquí es CÓMO se publica: un Short lleva «#Shorts» en el
+#: título, textos más cortos y ningún capítulo; un vídeo normal, capítulos y
+#: una descripción para el buscador. `youtube_formato` de la ficha: «auto»
+#: (lo que digan las medidas), «short» o «video»; solo se puede elegir en un
+#: vídeo vertical, que es el único caso dudoso.
+FORMATOS_YOUTUBE = ("auto", "short", "video")
+SHORT_MAX_S = 180
+MARCA_SHORT = "#Shorts"
+
+
+def encaje(red, formato, duracion, youtube=None):
     """Si el vídeo encaja en la red y cómo sale. -> {tipo, nivel, texto}
 
     `nivel`: ok (sale como debe), aviso (sale, pero no como se espera) o error
-    (la red no lo acepta: no se deja enviar)."""
+    (la red no lo acepta: no se deja enviar). En YouTube, además: `puede_elegir`
+    (es vertical: Short o vídeo es una decisión) y `eleccion` (`youtube`, el
+    `youtube_formato` de la ficha)."""
     d = float(duracion or 0)
     vertical = formato == "vertical"
+    if red == "youtube":
+        return _encaje_youtube(vertical, d, youtube)
     if red == "tiktok":
         if d > 600:
             return {"tipo": "", "nivel": "error",
@@ -645,13 +678,6 @@ def encaje(red, formato, duracion):
             return {"tipo": "Reel", "nivel": "aviso",
                     "texto": "pasa de 3 minutos: Instagram lo enseña poco a quien no te sigue"}
         return {"tipo": "Reel", "nivel": "ok", "texto": ""}
-    if red == "youtube":
-        if vertical and d <= 180:
-            return {"tipo": "Short", "nivel": "ok", "texto": ""}
-        if vertical:
-            return {"tipo": "vídeo", "nivel": "aviso",
-                    "texto": "vertical de más de 3 minutos: no sale como Short, sino como vídeo normal"}
-        return {"tipo": "vídeo", "nivel": "ok", "texto": ""}
     if red == "facebook":
         if vertical and d <= 90:
             return {"tipo": "Reel", "nivel": "ok", "texto": ""}
@@ -660,6 +686,40 @@ def encaje(red, formato, duracion):
     if red in RD.REDES:
         return RD.encaje(red, formato, duracion)
     return {"tipo": "", "nivel": "error", "texto": "red desconocida"}
+
+
+def _encaje_youtube(vertical, d, eleccion):
+    eleccion = eleccion if eleccion in FORMATOS_YOUTUBE else "auto"
+    base = {"puede_elegir": vertical, "eleccion": eleccion if vertical else "auto"}
+    if not vertical:
+        texto = ("es horizontal: YouTube no hace Shorts horizontales, sale como vídeo normal"
+                 if eleccion == "short" else "")
+        return dict(base, tipo="vídeo", nivel="aviso" if texto else "ok", texto=texto)
+    corto = d <= SHORT_MAX_S
+    if eleccion == "video":
+        return dict(base, tipo="vídeo", nivel="aviso" if corto else "ok",
+                    texto=("lo eliges como vídeo normal (sin #Shorts y con capítulos), pero YouTube "
+                           "decide por las medidas: un vertical de hasta 3 minutos suele salir "
+                           "igualmente en Shorts") if corto else "")
+    if eleccion == "short" and not corto:
+        return dict(base, tipo="Short", nivel="aviso",
+                    texto="pasa de 3 minutos: YouTube lo publicará como vídeo normal aunque lleve "
+                          "#Shorts; recórtalo a 3 minutos para que salga en Shorts")
+    if corto:
+        return dict(base, tipo="Short", nivel="ok", texto="")
+    return dict(base, tipo="vídeo", nivel="aviso",
+                texto="vertical de más de 3 minutos: no sale como Short, sino como vídeo normal "
+                      "(puedes elegir tratarlo como Short)")
+
+
+def encaje_de(red, info, datos_video=None):
+    """`encaje` con lo elegido en la ficha del vídeo (Short o vídeo en YouTube)."""
+    return encaje(red, (info or {}).get("formato"), (info or {}).get("duracion_s"),
+                  (datos_video or {}).get("youtube_formato"))
+
+
+def es_short(info, datos_video=None):
+    return encaje_de("youtube", info, datos_video).get("tipo") == "Short"
 
 
 def capitulos_base(escenas, duracion):
@@ -733,16 +793,425 @@ REGLAS_RED = {
                  "y fáciles de leer, tono cercano. CTA: enviar mensaje, llamar o "
                  "comentar. Hashtags: 2 a 4."),
 }
-#: Cuántos emojis y cómo, por red, cuando el proyecto los quiere.
-EMOJIS_RED = {
-    "tiktok": "1 a 3 emojis, en el gancho o al final de la línea; nunca en lugar de palabras clave",
-    "instagram": "3 a 6 emojis: uno en el gancho, como viñetas de los párrafos y en el CTA",
-    "youtube": "en la descripción, 1 a 3 como viñetas; en el TÍTULO, ninguno o uno como mucho",
-    "facebook": "1 a 3 emojis que acompañen, sin recargar",
-}
 LIMITES = {"tiktok": 2200, "instagram": 2200, "youtube": 5000, "facebook": 5000, **RD.LIMITES}
 REGLAS_RED.update(RD.REGLAS)
-EMOJIS_RED.update(RD.EMOJIS)
+#: Un SHORT de YouTube no se escribe como un vídeo largo (20-10-2026): el
+#: título se lee encima del vídeo mientras pasa, la descripción casi no se ve.
+REGLA_YOUTUBE_SHORT = (
+    "YouTube SHORT (vertical de hasta 3 minutos): TÍTULO CORTO, de 30 a 60 "
+    "caracteres, que se lea de un vistazo encima del vídeo, con la palabra clave "
+    "principal al principio, sin «<» ni «>» y sin escribir «#Shorts» (lo pone el "
+    "Studio). DESCRIPCIÓN breve: 1 a 3 líneas, la primera con la palabra clave y "
+    "la promesa del vídeo; nada de capítulos ni párrafos largos. CTA corto: "
+    "suscribirse o comentar. Hashtags: 3 a 5.")
+
+
+# ------------------------------------------------------------------ los emojis
+#
+# Rama `textos-emojis` (20-10-2026). Pedido del dueño: «que no se vean tan
+# planos; unos los hace con buenos emojis y otros no». Antes era un sí/no
+# (`usar_emojis`) con rangos bajos («1 a 3») y la frase «que aporten, no que
+# decoren»: Claude lo leía como permiso para no poner ninguno. Ahora hay un
+# NIVEL por proyecto, los emojis de la marca, los números por red y nivel, una
+# comprobación que avisa si un texto sale por debajo y «✨ Más emojis».
+#
+# Lo que NO se puede: emojis dibujados a medida. Las redes solo enseñan los
+# emojis estándar de Unicode; lo «propio» de verdad son las COMBINACIONES
+# (🎮➕🎉), la lista de emojis de la marca y, en la portada, el grafismo.
+
+NIVELES_EMOJIS = ("ninguno", "sobrio", "normal", "vistoso")
+NOMBRE_NIVEL = {"ninguno": "Ninguno", "sobrio": "Sobrio", "normal": "Normal",
+                "vistoso": "Vistoso"}
+NIVEL_EMOJIS_DEFECTO = "vistoso"
+#: Cuántos emojis lleva el TEXTO (la descripción, sin título ni CTA) de cada
+#: red, por nivel: (mínimo, máximo) para sobrio, normal y vistoso. El mínimo es
+#: el que dispara el aviso de la ficha.
+_TABLA_EMOJIS = {
+    "tiktok": ((1, 2), (2, 4), (3, 6)),
+    "instagram": ((1, 3), (3, 6), (5, 9)),
+    "youtube": ((1, 2), (2, 4), (4, 8)),
+    "facebook": ((1, 2), (2, 4), (4, 7)),
+    "linkedin": ((0, 1), (1, 2), (2, 4)),
+    "x": ((0, 1), (1, 2), (1, 3)),
+    "threads": ((1, 1), (1, 3), (2, 4)),
+    "pinterest": ((0, 1), (1, 2), (1, 3)),
+    "bluesky": ((0, 1), (1, 2), (1, 3)),
+    "discord": ((1, 2), (2, 4), (3, 6)),
+    "telegram": ((1, 2), (2, 4), (3, 6)),
+    "mastodon": ((0, 1), (1, 2), (1, 3)),
+    "google_business": ((0, 0), (0, 1), (0, 2)),
+}
+#: Lo mismo para el TÍTULO, en las redes que lo tienen. YouTube con cuidado:
+#: uno, al final, y nunca en lugar de la palabra clave.
+_TABLA_EMOJIS_TITULO = {
+    "youtube": ((0, 0), (0, 1), (1, 1)),
+    "facebook": ((0, 0), (1, 1), (1, 2)),
+    "linkedin": ((0, 0), (0, 0), (0, 1)),
+    "pinterest": ((0, 0), (0, 1), (1, 1)),
+}
+#: Dónde y cómo van, por red (los números salen de la tabla de arriba).
+EMOJIS_RED = {
+    "tiktok": "uno abriendo el gancho y otro al cerrar la línea; nunca en lugar de una palabra clave",
+    "instagram": "uno abriendo el gancho, uno de viñeta en cada párrafo o beneficio y otro en el CTA",
+    "youtube": ("de viñeta en cada párrafo o punto de la descripción (el del TÍTULO, al "
+                "final: nunca delante ni en lugar de la palabra clave)"),
+    "facebook": "uno abriendo el gancho y de viñeta en los párrafos",
+    "linkedin": "sobrios, de viñeta en una lista de puntos; nada de caras ni fuegos",
+    "x": "pegados a la idea, sin quitar sitio a las palabras (280 caracteres)",
+    "threads": "uno en el gancho y otro al cerrar",
+    "pinterest": "uno en el título y otro en el texto, de objeto o lugar",
+    "bluesky": "uno en el gancho y otro al cerrar",
+    "discord": "de viñeta en cada punto, como en un anuncio de comunidad",
+    "telegram": "de viñeta en cada punto y uno en el CTA",
+    "mastodon": "pocos y con sentido",
+    "google_business": "como mucho uno o dos (📍 en la zona); es Google, no una red de ocio",
+}
+
+
+def _rango(tabla, red, nivel):
+    if nivel not in NIVELES_EMOJIS or nivel == "ninguno":
+        return (0, 0)
+    fila = tabla.get(red)
+    if not fila:
+        return (0, 0) if tabla is _TABLA_EMOJIS_TITULO else ((1, 2), (1, 3), (2, 4))[
+            NIVELES_EMOJIS.index(nivel) - 1]
+    return fila[NIVELES_EMOJIS.index(nivel) - 1]
+
+
+def rango_emojis(red, nivel, campo="descripcion"):
+    """(mínimo, máximo) de emojis de ese campo en esa red con ese nivel."""
+    if campo == "titulo":
+        return _rango(_TABLA_EMOJIS_TITULO, red, nivel) if red in CON_TITULO else (0, 0)
+    return _rango(_TABLA_EMOJIS, red, nivel)
+
+
+def nivel_emojis(ajustes):
+    """El nivel que vale para un proyecto. LEE, no escribe: un proyecto que
+    guardó `usar_emojis: False` (el sí/no de antes) es «ninguno»; uno sin nada
+    guardado, o con `True`, es el de fábrica («vistoso»)."""
+    ajustes = ajustes if isinstance(ajustes, dict) else {}
+    nivel = ajustes.get("emojis")
+    if nivel in NIVELES_EMOJIS:
+        return nivel
+    return "ninguno" if ajustes.get("usar_emojis") is False else NIVEL_EMOJIS_DEFECTO
+
+
+# Lo que es un emoji, sin `regex` ni tablas de fuera (pypi no está en todas
+# las máquinas). Un emoji es UNA cosa en pantalla aunque sean varios puntos de
+# código: 👍🏽 (con su tono), 👨‍👩‍👧 (unidos con ZWJ), 🇵🇪 (dos letras
+# regionales), 1️⃣ (tecla) o ❤️ (con el selector de variante). Se cuentan como uno.
+_ZWJ, _VS16, _VS15, _TECLA = 0x200D, 0xFE0F, 0xFE0E, 0x20E3
+#: Siempre emoji (los bloques de pictogramas).
+_EMOJI_SIEMPRE = ((0x1F000, 0x1F0FF), (0x1F100, 0x1F1E5), (0x1F200, 0x1F2FF),
+                  (0x1F300, 0x1F5FF), (0x1F600, 0x1F64F), (0x1F680, 0x1F6FF),
+                  (0x1F700, 0x1F77F), (0x1F780, 0x1F7FF), (0x1F800, 0x1F8FF),
+                  (0x1F900, 0x1F9FF), (0x1FA00, 0x1FAFF), (0x2600, 0x27BF),
+                  (0x2B00, 0x2BFF), (0x231A, 0x231B), (0x23E9, 0x23EC),
+                  (0x23F0, 0x23F0), (0x23F3, 0x23F3), (0x25FD, 0x25FE),
+                  (0x2934, 0x2935), (0x3297, 0x3297), (0x3299, 0x3299),
+                  (0x3030, 0x3030), (0x303D, 0x303D), (0x24C2, 0x24C2))
+#: Emoji solo con el selector de variante detrás (© ® ™ ↔ ‼ ⁉ ℹ y las flechas):
+#: sin él son signos del texto.
+_EMOJI_CON_VS = ((0x00A9, 0x00A9), (0x00AE, 0x00AE), (0x203C, 0x203C),
+                 (0x2049, 0x2049), (0x2122, 0x2122), (0x2139, 0x2139),
+                 (0x2194, 0x21FF), (0x2300, 0x23FF), (0x25A0, 0x25FF))
+_REGIONAL = (0x1F1E6, 0x1F1FF)
+_TONOS = (0x1F3FB, 0x1F3FF)
+_ETIQUETAS = (0xE0020, 0xE007F)
+
+
+def _en(cp, rangos):
+    return any(a <= cp <= b for a, b in rangos)
+
+
+def _modificador(cp):
+    return cp in (_VS16, _VS15, _TECLA) or _TONOS[0] <= cp <= _TONOS[1] \
+        or _ETIQUETAS[0] <= cp <= _ETIQUETAS[1]
+
+
+def _trozos_emoji(texto):
+    """[(inicio, fin)] de cada emoji del texto, contando como uno lo que se ve
+    como uno (tonos, ZWJ, banderas, teclas, variantes)."""
+    texto = str(texto or "")
+    cps = [ord(c) for c in texto]
+    trozos, i, n = [], 0, len(cps)
+    while i < n:
+        cp = cps[i]
+        siguiente = cps[i + 1] if i + 1 < n else None
+        inicio = i
+        if _REGIONAL[0] <= cp <= _REGIONAL[1]:
+            # una bandera son dos letras regionales; una suelta también se ve
+            i += 2 if siguiente is not None and _REGIONAL[0] <= siguiente <= _REGIONAL[1] else 1
+            trozos.append((inicio, i))
+            continue
+        tecla = cp in (0x23, 0x2A) or 0x30 <= cp <= 0x39
+        if tecla:
+            j = i + 1
+            if j < n and cps[j] == _VS16:
+                j += 1
+            if j < n and cps[j] == _TECLA:
+                trozos.append((inicio, j + 1))
+                i = j + 1
+                continue
+            i += 1
+            continue
+        es = _en(cp, _EMOJI_SIEMPRE) or (_en(cp, _EMOJI_CON_VS) and siguiente == _VS16)
+        if not es:
+            i += 1
+            continue
+        i += 1
+        while i < n:
+            if _modificador(cps[i]):
+                i += 1
+            elif cps[i] == _ZWJ and i + 1 < n and (_en(cps[i + 1], _EMOJI_SIEMPRE)
+                                                   or _en(cps[i + 1], _EMOJI_CON_VS)):
+                i += 2
+            else:
+                break
+        trozos.append((inicio, i))
+    return trozos
+
+
+def contar_emojis(texto):
+    """Cuántos emojis se VEN en el texto (👨‍👩‍👧 es uno, 🇵🇪 es uno, 👍🏽 es uno)."""
+    return len(_trozos_emoji(texto))
+
+
+def quitar_emojis(texto):
+    """El texto sin ningún emoji (ni ZWJ ni selectores sueltos)."""
+    texto = str(texto or "")
+    partes, desde = [], 0
+    for a, b in _trozos_emoji(texto):
+        partes.append(texto[desde:a])
+        desde = b
+    partes.append(texto[desde:])
+    return re.sub("[‍️︎⃣]", "", "".join(partes))
+
+
+def _solo_palabras(texto):
+    """Para comparar: sin emojis y sin espacios ni saltos de línea."""
+    return re.sub(r"\s+", "", quitar_emojis(texto))
+
+
+def limpiar_emojis_marca(valor):
+    """La lista de emojis de la marca: solo emojis (los espacios y las comas
+    separan), como mucho 12. Lo que no es un emoji es un error, no se tira."""
+    if not isinstance(valor, str):
+        raise ErrorPublicar("«emojis de la marca» es un texto")
+    valor = valor.strip()
+    if not valor:
+        return ""
+    if re.sub(r"[\s,;·]+", "", quitar_emojis(valor)):
+        raise ErrorPublicar("en «emojis de la marca» van solo emojis (🎮 🕹️ 🎉), sin letras")
+    trozos = [valor[a:b] for a, b in _trozos_emoji(valor)]
+    vistos = []
+    for t in trozos:
+        if t not in vistos:
+            vistos.append(t)
+    if len(vistos) > 12:
+        raise ErrorPublicar("en «emojis de la marca» caben 12 como mucho: los que sean su firma")
+    return " ".join(vistos)
+
+
+def bloque_emojis(ajustes, redes):
+    """El trozo de la instrucción sobre los emojis, según el nivel del proyecto."""
+    nivel = nivel_emojis(ajustes)
+    if nivel == "ninguno":
+        return "Emojis: NINGUNO (el proyecto no los quiere), ni en el título ni en el texto."
+    marca = str(ajustes.get("emojis_marca") or "").strip()
+    lineas = [f"EMOJIS — nivel «{NOMBRE_NIVEL[nivel]}», elegido por el proyecto:",
+              "  - Elígelos por el TEMA de ESTE vídeo: los objetos, lugares, acciones y "
+              "emociones que salen en el guion (🎮 consolas, 🎂 cumpleaños, 🏢 empresa, "
+              "🏆 torneo, 🍕 comida…). Nada de comodines que valen para todo (✨🔥💯🚀) en "
+              "cada texto: como mucho uno, y solo si encaja."]
+    if nivel == "vistoso":
+        lineas += [
+            "  - SIEMPRE con emojis: un texto sin ellos o con menos de los pedidos está MAL.",
+            "  - Título (donde lo hay): un emoji al principio o al final, NUNCA en lugar de "
+            "la palabra clave ni partiéndola. En YouTube, uno solo y al final.",
+            "  - La primera línea (el gancho) EMPIEZA con un emoji.",
+            "  - Cada párrafo o beneficio empieza con su emoji de viñeta, distinto en cada "
+            "uno y a juego con lo que dice (🎮 la consola, 🍿 el ambiente, 🚚 la entrega).",
+            "  - El CTA lleva un emoji de acción (👉 📩 📲 📅).",
+            "  - La ubicación o la zona, si se nombra, va con 📍.",
+            "  - Cuando ayude a contar algo, COMBINA dos emojis como si fueran uno "
+            "(🎮➕🎉 = fiesta gamer, 🏠➡️🎉 = la fiesta en casa, 🎂🕹️ = cumpleaños con "
+            "consolas): son los emojis «propios» de este vídeo. Una o dos por texto.",
+        ]
+    elif nivel == "normal":
+        lineas += [
+            "  - El gancho lleva un emoji; si hay una lista de beneficios, cada punto con "
+            "su emoji de viñeta; el CTA con uno de acción (👉 📩).",
+            "  - En el título, uno al final si encaja (nunca en lugar de la palabra clave).",
+            "  - Si ayuda a contar algo, una combinación de dos (🎮➕🎉).",
+        ]
+    else:
+        lineas += ["  - Pocos y con sentido: uno en el gancho o en el CTA. El título, sin emoji."]
+    if marca:
+        lineas.append(f"  - Emojis de la MARCA (su firma visual): {marca}. Úsalos de preferencia "
+                      "en el gancho y en el CTA de cada red, y repítelos entre redes para que "
+                      "se reconozca la marca; el resto, del tema del vídeo.")
+    lineas.append("  - Cuántos y dónde, por red (en el TEXTO, sin contar título ni CTA):")
+    for r in redes:
+        mn, mx = rango_emojis(r, nivel)
+        trozo = f"    - {NOMBRE_RED[r]}: {mn} a {mx} en el texto, {EMOJIS_RED.get(r, 'pocos y con sentido')}"
+        if r in CON_TITULO:
+            tmn, tmx = rango_emojis(r, nivel, "titulo")
+            trozo += (f"; en el título {tmn if tmn == tmx else f'{tmn} a {tmx}'}"
+                      if tmx else "; el título sin emoji")
+        lineas.append(trozo + ".")
+    return "\n".join(lineas)
+
+
+def emojis_de_ficha(textos, ajustes, redes):
+    """Lo que la ficha enseña: cuántos emojis lleva cada texto y si se queda
+    por debajo del nivel. NO entra en la nota SEO: es un aviso aparte."""
+    nivel = nivel_emojis(ajustes)
+    salida = {"nivel": nivel, "redes": {}}
+    for r in redes:
+        t = (textos or {}).get(r) or {}
+        fila = {}
+        for campo in ("titulo", "descripcion"):
+            if campo == "titulo" and r not in CON_TITULO:
+                continue
+            valor = str(t.get(campo) or "")
+            mn, mx = rango_emojis(r, nivel, campo)
+            hay = contar_emojis(valor)
+            fila[campo] = {"hay": hay, "minimo": mn, "maximo": mx,
+                           "faltan": bool(valor.strip() and nivel != "ninguno" and hay < mn)}
+        salida["redes"][r] = fila
+    return salida
+
+
+SISTEMA_EMOJIS = ("Eres un editor de redes sociales. Tu único trabajo aquí es AÑADIR emojis "
+                  "a un texto que ya está escrito, sin tocar ni una letra de lo demás. "
+                  "Contestas únicamente con el JSON pedido.")
+
+INSTRUCCION_EMOJIS = """Añade emojis a este {campo} de {red} para que se vea más vistoso.
+
+<video>
+{tema}
+</video>
+
+<texto_para_emojis>
+{texto}
+</texto_para_emojis>
+
+REGLAS (si rompes una, el Studio tira tu respuesta):
+- Devuelve EXACTAMENTE el mismo texto, con las mismas palabras, en el mismo orden, con
+  la misma puntuación, los mismos hashtags y los mismos saltos de línea. Solo puedes
+  INSERTAR emojis (y el espacio que los separa). No quites, no cambies ni añadas
+  palabras.
+- Ahora lleva {hay}; déjalo con {objetivo} en total.
+- Emojis del TEMA de este vídeo (objetos, lugares, acciones que salen en él), no
+  comodines (✨🔥💯) en todo.{donde}{marca}
+- Cuando ayude a contar algo, combina dos como si fueran uno (🎮➕🎉).
+
+Devuelve SOLO este JSON: {{"texto": "el mismo texto con los emojis añadidos"}}
+"""
+
+MODELO_EMOJIS = os.environ.get("ESTUDIO_PUBLICAR_EMOJIS_MODELO") or "haiku"
+ESFUERZO_EMOJIS = os.environ.get("ESTUDIO_PUBLICAR_EMOJIS_ESFUERZO") or "low"
+#: Va en la petición, no en un hilo: detrás del proxy se corta a los 60 s.
+TECHO_EMOJIS_S = int(os.environ.get("ESTUDIO_PUBLICAR_EMOJIS_TECHO_S") or 50)
+_PARA_SIMULADO = ("🎮", "🎉", "📍", "👉", "🕹️", "🏆")
+
+
+def comprobar_vestido(original, nuevo):
+    """El texto con emojis vale si, quitando emojis y espacios, es el mismo que
+    el original, y si lleva más emojis que antes. Si no, ErrorPublicar (422)."""
+    nuevo = str(nuevo or "")
+    if not nuevo.strip():
+        raise ErrorPublicar("Claude no ha devuelto el texto: vuelve a probar", 422)
+    if _solo_palabras(nuevo) != _solo_palabras(original):
+        raise ErrorPublicar("Claude ha cambiado palabras del texto, no solo los emojis: no se "
+                            "ha tocado nada. Vuelve a probar o añádelos a mano", 422)
+    if contar_emojis(nuevo) <= contar_emojis(original):
+        raise ErrorPublicar("Claude no ha añadido ningún emoji: vuelve a probar", 422)
+    return nuevo
+
+
+def _vestido_simulado(texto, campo, marca, raiz=None, minimo=1):
+    """El doble de Claude con ESTUDIO_SIMULAR: un emoji delante de cada línea
+    con letras (y en el título, al final), y al final los que falten hasta el
+    mínimo pedido. Con `_emojis_cambia_palabras` en la
+    carpeta de Publicar, cambia una palabra, para probar que se rechaza."""
+    surtido = [marca[a:b] for a, b in _trozos_emoji(marca)] or list(_PARA_SIMULADO)
+    if campo == "titulo":
+        salida = f"{texto.rstrip()} {surtido[0]}"
+    else:
+        lineas, k = [], 0
+        for linea in texto.split("\n"):
+            if linea.strip() and not _trozos_emoji(linea.strip()[:4]):
+                linea = f"{surtido[k % len(surtido)]} {linea}"
+                k += 1
+            lineas.append(linea)
+        salida = "\n".join(lineas)
+        while contar_emojis(salida) < max(1, minimo, contar_emojis(texto) + 1):
+            salida = f"{salida} {surtido[k % len(surtido)]}"
+            k += 1
+    if raiz and os.path.exists(os.path.join(carpeta(raiz), "_emojis_cambia_palabras")):
+        salida = salida.replace(" ", " otra ", 1)
+    return json.dumps({"texto": salida}, ensure_ascii=False), {"_coste_anotado": True}
+
+
+def vestir_con_emojis(raiz, info, red, campo, texto, ajustes, proyecto=None, cwd=None):
+    """«✨ Más emojis»: el MISMO texto con emojis añadidos. No guarda nada: la
+    pantalla lo pone en el campo y lo guarda por el camino de siempre (la
+    pastilla «Guardado»). Barato a propósito: haiku, esfuerzo bajo."""
+    if red not in REDES:
+        raise ErrorPublicar("esa red no existe")
+    if campo not in ("titulo", "descripcion") or (campo == "titulo" and red not in CON_TITULO):
+        raise ErrorPublicar("«Más emojis» va con el título o con el texto")
+    if texto is None:
+        texto = str(((_leer_video(raiz, info["pid"])["textos"].get(red)) or {}).get(campo) or "")
+    if not isinstance(texto, str):
+        raise ErrorPublicar("«texto» es un texto")
+    if not texto.strip():
+        raise ErrorPublicar("no hay texto al que añadir emojis: escríbelo o pídeselo a Claude")
+    nivel = nivel_emojis(ajustes)
+    nivel = "vistoso" if nivel == "ninguno" else nivel
+    hay = contar_emojis(texto)
+    mn, mx = rango_emojis(red, "vistoso" if nivel == "sobrio" else nivel, campo)
+    mx = max(mx, 1)
+    objetivo = (f"{max(mx, hay + 1)}" if campo == "titulo" and red == "youtube"
+                else f"entre {max(mn, hay + 1)} y {max(mx, hay + 2)}")
+    if campo == "titulo":
+        donde = ("\n- Es un TÍTULO: el emoji va al principio o al final, nunca en lugar de "
+                 "la palabra clave ni en medio de ella." + (" En YouTube, al final." if red == "youtube" else ""))
+    else:
+        donde = ("\n- Uno abriendo la primera línea, uno de viñeta al empezar cada párrafo "
+                 "o punto, 📍 junto a la zona si se nombra.")
+    marca = str(ajustes.get("emojis_marca") or "").strip()
+    tema = (f"Nombre: {info.get('nombre') or ''}\n"
+            + "\n".join(f"- {b.get('texto', '')}" for b in (info.get("guion") or []))[:1500])
+    instruccion = INSTRUCCION_EMOJIS.format(
+        campo="título" if campo == "titulo" else "texto", red=NOMBRE_RED[red], tema=tema,
+        texto=texto, hay=hay, objetivo=objetivo, donde=donde,
+        marca=(f"\n- Emojis de la marca (su firma): {marca}. Usa al menos uno." if marca else ""))
+    try:
+        respuesta, _s = _hablar_con_claude(
+            instruccion, SISTEMA_EMOJIS, proyecto, cwd, "emojis para redes",
+            lambda: _vestido_simulado(texto, campo, marca, raiz, max(mn, hay + 1)),
+            modelo=MODELO_EMOJIS, esfuerzo=ESFUERZO_EMOJIS, tiempo_max_s=TECHO_EMOJIS_S)
+    except Exception as fallo:                              # noqa: BLE001
+        _log("emojis_fallo", {"video": info["pid"], "red": red, "error": str(fallo)[:600]})
+        raise ErrorPublicar(f"Claude no ha contestado: {str(fallo)[:300]}", 502) from None
+    try:
+        datos = comun.extraer_json(respuesta, "los emojis")
+    except Exception:                                       # noqa: BLE001
+        raise ErrorPublicar("Claude no ha devuelto el texto: vuelve a probar", 422) from None
+    nuevo = str((datos or {}).get("texto") or "") if isinstance(datos, dict) else ""
+    if texto == texto.strip():
+        nuevo = nuevo.strip()
+    comprobar_vestido(texto, nuevo)
+    largo = LIMITES[red] if campo == "descripcion" else (
+        100 if red == "youtube" else 255 if red == "facebook" else RD.TITULOS.get(red, 100))
+    if len(nuevo) > largo:
+        raise ErrorPublicar(f"con los emojis pasa de {largo} caracteres: quita algo antes", 422)
+    _log("emojis_vestidos", {"video": info["pid"], "red": red, "campo": campo,
+                             "antes": hay, "despues": contar_emojis(nuevo)})
+    return {"texto": nuevo, "antes": hay, "despues": contar_emojis(nuevo)}
 
 SISTEMA = ("Eres un redactor de redes sociales con oficio: escribes los textos con "
            "los que se publica un vídeo para que la gente pare, lo vea entero y haga "
@@ -816,8 +1285,8 @@ def _cta_como_texto(cta):
     return str(cta or "ninguna")
 
 
-def instruccion_textos(info, redes, ajustes, seo=""):
-    encajes = {r: encaje(r, info.get("formato"), info.get("duracion_s")) for r in redes}
+def instruccion_textos(info, redes, ajustes, seo="", datos_video=None):
+    encajes = {r: encaje_de(r, info, datos_video) for r in redes}
     guion = "\n".join(f"- {b.get('texto', '')}" for b in (info.get("guion") or []))
     caps = info.get("capitulos_base") or []
     con_caps = "youtube" in redes and encajes.get("youtube", {}).get("tipo") == "vídeo" and caps
@@ -837,11 +1306,10 @@ def instruccion_textos(info, redes, ajustes, seo=""):
         material=(info.get("material") or "—")[:MAX_MATERIAL],
         guion=guion[:MAX_GUION] or "—",
         tono=ajustes.get("tono") or "el del guion",
-        emojis=("Emojis: sí, bien usados (que aporten, no que decoren): "
-                + "; ".join(f"{NOMBRE_RED[r]}, {EMOJIS_RED[r]}" for r in redes) + "."
-                if ajustes.get("usar_emojis", True) else
-                "Emojis: NINGUNO (el proyecto no los quiere), ni en el título ni en el texto."),
-        reglas="\n".join(f"- {NOMBRE_RED[r]}: {REGLAS_RED[r]}" for r in redes),
+        emojis=bloque_emojis(ajustes, redes),
+        reglas="\n".join(f"- {NOMBRE_RED[r]}: "
+                          + (REGLA_YOUTUBE_SHORT if r == "youtube" and encajes[r].get("tipo") == "Short"
+                             else REGLAS_RED[r]) for r in redes),
         capitulos=capitulos,
         claves=", ".join(f'"{r}"' for r in redes),
         seo=seo or "",
@@ -970,7 +1438,7 @@ def _escribir_textos(raiz, info, redes, ajustes, proyecto, cwd, aprendido=None, 
             coste = coste_mod
         except Exception:                                   # noqa: BLE001
             coste = None
-        instruccion = instruccion_textos(info, redes, ajustes, seo)
+        instruccion = instruccion_textos(info, redes, ajustes, seo, datos_video)
 
         def llamar():
             return cli_claude.ejecutar(
@@ -1096,14 +1564,16 @@ def _error_seo(tipo, clave):
     return dato[0]
 
 
-def _hablar_con_claude(instruccion, sistema, proyecto, cwd, para, simulado):
-    """(texto, sobre) de Claude, con su coste apuntado en el vídeo si lo hay."""
+def _hablar_con_claude(instruccion, sistema, proyecto, cwd, para, simulado,
+                       modelo=None, esfuerzo=None, tiempo_max_s=None):
+    """(texto, sobre) de Claude, con su coste apuntado en el vídeo si lo hay.
+    `modelo`/`esfuerzo`/`tiempo_max_s` solo para lo corto («✨ Más emojis»)."""
     def llamar():
         if _simular_todo():
             return simulado()
         return cli_claude.ejecutar(
-            instruccion, modelo=MODELO, esfuerzo=ESFUERZO, cwd=cwd,
-            base_tiempo_s=180, tiempo_max_s=TECHO_TEXTOS_S, sistema=sistema,
+            instruccion, modelo=modelo or MODELO, esfuerzo=esfuerzo or ESFUERZO, cwd=cwd,
+            base_tiempo_s=180, tiempo_max_s=tiempo_max_s or TECHO_TEXTOS_S, sistema=sistema,
             extra=["--no-session-persistence"], para=para)
     try:
         from nucleo import coste                            # noqa: PLC0415
@@ -1255,6 +1725,18 @@ def lanzar_optimizar(raiz, info, redes, ajustes, proyecto=None, cwd=None, en_hil
                 lambda: _optimizar(raiz, info, redes, ajustes, proyecto, cwd), en_hilo)
 
 
+def _emojis_de_ganchos(ajustes):
+    nivel = nivel_emojis(ajustes)
+    marca = str(ajustes.get("emojis_marca") or "").strip()
+    firma = f" Los de la marca ({marca}) van primero si encajan." if marca else ""
+    return {"ninguno": "Sin emojis.",
+            "sobrio": "Puedes usar un emoji.",
+            "normal": "Al menos dos de los tres llevan un emoji del tema del vídeo." + firma,
+            "vistoso": ("Los tres EMPIEZAN con un emoji del tema del vídeo (concreto, no un "
+                        "comodín como ✨🔥), y pueden cerrar con otro o con una combinación "
+                        "de dos (🎮➕🎉)." + firma)}[nivel]
+
+
 def _ganchos(raiz, info, red, ajustes, proyecto, cwd):
     pid = info["pid"]
     datos = _leer_video(raiz, pid)
@@ -1262,7 +1744,7 @@ def _ganchos(raiz, info, red, ajustes, proyecto, cwd):
     instruccion = SEO.INSTRUCCION_GANCHOS.format(
         red=NOMBRE_RED[red], largo=SEO.PRIMERA_LINEA.get(red) or 100,
         palabra=SEO.palabra_del_video(datos, ajustes) or "(sin palabra clave)",
-        emojis=("Puedes usar un emoji." if ajustes.get("usar_emojis", True) else "Sin emojis."),
+        emojis=_emojis_de_ganchos(ajustes),
         texto=texto[:1500] or "—",
         guion="\n".join(f"- {b.get('texto', '')}" for b in (info.get("guion") or []))[:3000] or "—")
     respuesta, _s = _hablar_con_claude(
@@ -1433,6 +1915,16 @@ def _texto_para(textos_red, ajustes, extra="", red=None):
     return "\n\n".join(p for p in partes if p), tags, sobran
 
 
+def marcar_short(titulo, descripcion):
+    """(titulo, descripcion) de un Short con «#Shorts»: en el título si cabe
+    (YouTube corta en 100), si no al final de la descripción; nunca dos veces."""
+    if re.search(r"#shorts\b", f"{titulo}\n{descripcion}", re.I):
+        return titulo, descripcion
+    if len(titulo) + len(MARCA_SHORT) + 1 <= 100:
+        return f"{titulo} {MARCA_SHORT}".strip(), descripcion
+    return titulo, (f"{descripcion}\n\n{MARCA_SHORT}" if descripcion else MARCA_SHORT)[:LIMITES["youtube"]]
+
+
 def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
     """Lo que sale en la red: el texto para copiar y los campos de Upload-Post."""
     textos_red = textos_red or {}
@@ -1440,8 +1932,7 @@ def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
     titulo = str(textos_red.get("titulo") or "").strip()
     extra = ""
     # los capitulos, solo en un video de YouTube de verdad: un Short no los usa
-    if red == "youtube" and capitulos and \
-            encaje(red, info.get("formato"), info.get("duracion_s")).get("tipo") == "vídeo":
+    if red == "youtube" and capitulos and encaje_de(red, info, datos_video).get("tipo") == "vídeo":
         extra = "\n".join(f"{_marca_de_tiempo(c['t'])} {c['titulo']}" for c in capitulos)
     texto, tags, sobran = _texto_para(textos_red, ajustes, extra, red)
     limite = LIMITES[red]
@@ -1456,7 +1947,7 @@ def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
         texto = texto[:limite]
     campos = {}
     ia = bool(ajustes.get("marcar_ia"))
-    tipo = encaje(red, info.get("formato"), info.get("duracion_s")).get("tipo")
+    tipo = encaje_de(red, info, datos_video).get("tipo")
     if red == "tiktok":
         campos["tiktok_title"] = texto
         if ia:
@@ -1468,8 +1959,13 @@ def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
             campos["is_ai_generated"] = True
     elif red == "youtube":
         titulo = re.sub(r"[<>]", "", titulo or info.get("nombre") or "Vídeo")[:100]
+        descripcion = re.sub(r"[<>]", "", texto)
+        if tipo == "Short":
+            titulo, marcada = marcar_short(titulo, descripcion)
+            if marcada != descripcion:
+                texto = descripcion = marcada        # lo que se copia, igual que lo que sale
         campos["youtube_title"] = titulo
-        campos["youtube_description"] = re.sub(r"[<>]", "", texto)
+        campos["youtube_description"] = descripcion
         # las etiquetas: la palabra clave, las secundarias y los hashtags
         etiquetas = SEO.etiquetas_youtube(ajustes, palabra, tags)
         if etiquetas:
@@ -1479,6 +1975,8 @@ def componer(red, textos_red, ajustes, info, capitulos=None, datos_video=None):
         # no esta en la documentacion de Upload-Post que se leyo; ver NOVEDADES)
         if not ajustes.get("avisar_youtube"):
             campos["notifySubscribers"] = False
+            # el nombre que trae ahora la documentación de /api/upload (20-10)
+            campos["youtube_notify_subscribers"] = False
         if ia:
             campos["containsSyntheticMedia"] = True
         if not titulo.strip():
@@ -1573,6 +2071,13 @@ def guardar_ficha(raiz, pid, cambios):
                     del redes_p[red]
             if not redes_p:
                 ficha.pop("seo_propuesta", None)
+        if "youtube_formato" in cambios:
+            if cambios["youtube_formato"] not in FORMATOS_YOUTUBE:
+                raise ErrorPublicar("«youtube_formato» es auto, short o video")
+            if cambios["youtube_formato"] == "auto":
+                ficha.pop("youtube_formato", None)
+            else:
+                ficha["youtube_formato"] = cambios["youtube_formato"]
         if "portada" in cambios:
             ficha["portada"] = _validar_portada(cambios["portada"], ficha.get("portada"))
             if cambios["portada"].get("quitar_imagen"):
@@ -1767,18 +2272,41 @@ def campos_portada(raiz, info, datos, redes, lote="vista"):
             and os.path.getsize(foto) <= MAX_BYTES_MINIATURA:
         ficheros.append(("thumbnail", foto))
     if "facebook" in redes and foto and \
-            encaje("facebook", info.get("formato"), info.get("duracion_s")).get("tipo") != "Reel":
+            encaje_de("facebook", info, datos).get("tipo") != "Reel":
         ficheros.append(("facebook_thumbnail", foto))
     return campos, ficheros
 
 
 # -------------------------------------------------------------- la ficha
 
+#: LO PROGRAMADO QUE YA DEBIÓ SALIR (20-10-2026: a las 12:22 seguían en
+#: «programado» cuatro envíos de las 09:00). Pasado este margen desde su hora,
+#: la pantalla dice «debería haber salido a las 09:00» con «Comprobar».
+MARGEN_SALIDA_S = 600
+#: Si Upload-Post sigue sin dar su estado, cada cuánto se le vuelve a preguntar
+#: (una hora después de su hora ya no cambia cada 15 s).
+RESPIRO_VENCIDO_S = 300
+
+
+def debio_salir(e, ahora=None):
+    """True si un envío programado ya pasó su hora (con margen) y sigue como
+    programado: Upload-Post todavía no ha dicho que salió."""
+    if (e or {}).get("estado") != "programado":
+        return False
+    momento = _leer_momento(e.get("cuando"))
+    ahora = ahora or ahora_lima()
+    return bool(momento and (ahora - momento).total_seconds() > MARGEN_SALIDA_S)
+
+
 def _envio_publico(e):
+    return dict(_envio_publico_campos(e), debio_salir=debio_salir(e))
+
+
+def _envio_publico_campos(e):
     return {k: e.get(k) for k in (
         "id", "red", "estado", "modo", "cuando", "creado", "actualizado", "url",
         "error", "lote", "perfil", "mp4_huella", "nota", "programado_para", "sin_hora",
-        "metricas", "enviado", "texto_publicado", "recortado")}
+        "metricas", "enviado", "texto_publicado", "recortado", "tipo")}
 
 
 def redes_visibles(ajustes, datos=None):
@@ -1845,10 +2373,14 @@ def ficha(raiz, info, ajustes):
                           for r in REDES},
         "capitulos_posibles": len(info.get("capitulos_base") or []),
         "compuestos": compuestos,
-        "encaje": {r: encaje(r, info.get("formato"), info.get("duracion_s")) for r in REDES},
+        "encaje": {r: encaje_de(r, info, datos) for r in REDES},
+        "youtube_formato": datos.get("youtube_formato") or "auto",
         "desactualizada": desactualizada, "escritos": datos.get("escritos") or "",
         "editado": bool(datos.get("editado")),
         "portada": portada_de(datos),
+        # cuántos emojis lleva cada texto y si se queda corto (aviso aparte: la
+        # nota SEO no lo cuenta)
+        "emojis": emojis_de_ficha(datos["textos"], ajustes, REDES),
         "seo": {
             "palabra": palabra, "palabra_propia": str(datos.get("palabra_clave") or ""),
             "palabra_propuesta": str(datos.get("palabra_propuesta") or ""),
@@ -1966,17 +2498,30 @@ def enviar(raiz, info, ajustes, cuerpo, en_hilo=True):
         # Upload-Post, y en una subida con otras redes ese «title» es otro
         lote = uuid.uuid4().hex[:20]
         lote_gbp = uuid.uuid4().hex[:20]
+        # YOUTUBE Y FACEBOOK, EN SU PROPIA SUBIDA cuando van con otras redes
+        # (19-10-2026): en una subida el «title» común es su título, y si
+        # Upload-Post (o la red) usa «title» en vez de «instagram_title», el
+        # post de Instagram saldría solo con el título de YouTube. Separadas,
+        # el «title» de la otra subida es el texto completo (titulo_general).
+        lote_titulo = lote
+        if any(r in TITULO_MANDA for r in redes) and \
+                any(r not in TITULO_MANDA and r != "google_business" for r in redes):
+            lote_titulo = uuid.uuid4().hex[:20]
         nuevos = []
         for red in redes:
             nuevos.append({
                 "id": uuid.uuid4().hex[:12], "red": red, "perfil": perfil,
-                "lote": lote_gbp if red == "google_business" else lote,
+                "lote": (lote_gbp if red == "google_business"
+                         else lote_titulo if red in TITULO_MANDA else lote),
                 "estado": "espera_ok" if modo == "pendiente" else "enviando",
                 "modo": "ahora" if modo == "ahora" else "programado",
                 "cuando": cuando or _iso_lima(), "creado": _iso_lima(),
                 "actualizado": _iso_lima(), "url": "", "error": "",
                 "mp4_huella": info.get("mp4_huella") or "",
                 "sin_hora": modo == "pendiente" and not cuando,
+                # cómo sale (Short o vídeo en YouTube, Reel en Instagram…): la
+                # cola lo dice y no cambia si después se elige otra cosa
+                "tipo": encaje_de(red, info, datos).get("tipo") or "",
                 # con qué palabra clave y qué primera línea salió (publicar-mas):
                 # la tabla de «lo que funcionó» no cambia si después se edita
                 "palabra": SEO.palabra_del_video(datos, ajustes)[:80],
@@ -2299,25 +2844,35 @@ def _videos_con_ficha(raiz):
 _LOCK_REFRESCO = threading.Lock()
 
 
-def refrescar(raiz, limite=8):
+def refrescar(raiz, limite=8, lote=None):
     """Pregunta a Upload-Post por lo que sigue en el aire. -> {consultados, cambios}
 
-    De uno en uno: con dos pestañas abiertas, el segundo no pregunta lo mismo."""
-    if not _LOCK_REFRESCO.acquire(blocking=False):
+    De uno en uno: con dos pestañas abiertas, el segundo no pregunta lo mismo.
+    Con `lote` («Comprobar» de un programado que ya debió salir) pregunta SOLO
+    por ese, ya, sin esperar el respiro, y dice cómo quedó (`estados`)."""
+    if not _LOCK_REFRESCO.acquire(blocking=lote is not None, timeout=10 if lote else -1):
         return {"consultados": 0, "cambios": 0, "ocupado": True}
     try:
-        return _refrescar(raiz, limite)
+        if lote:
+            _ULTIMA_CONSULTA.pop(lote, None)
+        r = _refrescar(raiz, limite, lote)
     finally:
         _LOCK_REFRESCO.release()
+    if lote:
+        r["estados"] = sorted({e.get("estado") for pid in _videos_con_ficha(raiz)
+                               for e in _leer_video(raiz, pid)["envios"] if e.get("lote") == lote})
+    return r
 
 
-def _refrescar(raiz, limite):
+def _refrescar(raiz, limite, solo=None):
     pendientes = {}
     ahora = ahora_lima()
     for pid in _videos_con_ficha(raiz):
         for e in _leer_video(raiz, pid)["envios"]:
             estado = e.get("estado")
             if estado not in PENDIENTES or not e.get("lote"):
+                continue
+            if solo and e["lote"] != solo:
                 continue
             if estado == "enviando":
                 if e["lote"] in _SUBIENDO:
@@ -2341,8 +2896,14 @@ def _refrescar(raiz, limite):
         return {"consultados": 0, "cambios": 0, "sin_clave": True}
     # EL RESPIRO ANTES DE CORTAR, y primero lo que hace mas que no se mira: con
     # el corte primero, ocho envios atascados dejaban sin mirar a todos los demas
+    def respiro(par):
+        e = par[1]
+        momento = _leer_momento(e.get("cuando"))
+        if e.get("estado") == "programado" and momento and (ahora - momento).total_seconds() > 3600:
+            return RESPIRO_VENCIDO_S
+        return RESPIRO_CONSULTA_S
     listos = [(lote, par) for lote, par in pendientes.items()
-              if time.time() - _ULTIMA_CONSULTA.get(lote, 0) >= RESPIRO_CONSULTA_S]
+              if time.time() - _ULTIMA_CONSULTA.get(lote, 0) >= respiro(par)]
     listos.sort(key=lambda x: _ULTIMA_CONSULTA.get(x[0], 0))
     consultados = cambios = 0
     for lote, (pid, e) in listos[:limite]:
@@ -2367,6 +2928,18 @@ def _refrescar(raiz, limite):
                     _actualizar_lote(raiz, pid, lote, lambda x: x.update(
                         estado="fallido", error="Upload-Post no conoce este envío: no llegó. "
                         "Puedes publicarlo otra vez."))
+                    _NO_LO_CONOCE.pop(lote, None)
+                    cambios += 1
+                # UNO PROGRAMADO QUE YA DEBIÓ SALIR y del que Upload-Post no da
+                # estado: no se da por fallido (puede haber salido) ni se deja
+                # en «programado» para siempre: pasa a «comprobar», que pide
+                # mirarlo y no deja publicarlo otra vez sin preguntar
+                elif veces >= VECES_NO_LO_CONOCE and e.get("estado") == "programado" \
+                        and debio_salir(e, ahora):
+                    hora = str(e.get("cuando") or "")[11:16]
+                    _actualizar_lote(raiz, pid, lote, lambda x: x.update(
+                        estado="comprobar", error=f"debería haber salido a las {hora} y Upload-Post "
+                        "no da su estado: mira en la red si salió") if x.get("estado") == "programado" else None)
                     _NO_LO_CONOCE.pop(lote, None)
                     cambios += 1
             continue

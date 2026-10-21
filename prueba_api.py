@@ -2208,8 +2208,9 @@ def probar_sistema(cliente):
                 "analizar_cuenta", "conexiones_cuentas",
                 "palabra_clave", "ubicacion_instagram", "categoria_youtube", "hecho_para_ninos",
                 "texto_linkedin", "texto_x", "texto_threads", "texto_pinterest", "texto_bluesky",
-                "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business"],
-          "estan las treinta guias (seis de Crear, dieciocho de Publicar y seis de la Parrilla), en orden")
+                "texto_discord", "texto_telegram", "texto_mastodon", "texto_google_business",
+                "emojis_redes"],
+          "estan las treinta y una guias (seis de Crear, diecinueve de Publicar y seis de la Parrilla), en orden")
     ok(all(g.get("plantilla") and g.get("prompt_ia") and g.get("que_hace")
            for g in datos.get("guias") or []),
        "cada guia trae plantilla, prompt para otra IA y que hace el sistema")
@@ -2217,7 +2218,7 @@ def probar_sistema(cliente):
     respuesta, datos = cliente.get("/api/sistema/novedades")
     igual(respuesta.status_code, 200, "GET /api/sistema/novedades responde 200")
     ok("V2.0" in (datos.get("texto") or ""), "las novedades hablan de la V2.0")
-    igual(datos.get("producto"), "Automatización Contenido Studio", "con el nombre nuevo")
+    igual(datos.get("producto"), "CrearIA Studio", "con el nombre nuevo")
 
     respuesta, datos = cliente.post("/api/sistema/notas", {"texto": "  "})
     igual(respuesta.status_code, 400, "una nota vacia da 400")
@@ -4793,6 +4794,102 @@ def probar_montaje_por_plano(cliente, carpeta):
           "y el plano deja de estar obsoleto")
 
 
+def probar_descargar_imagenes(cliente, carpeta):
+    """«Descargar todas» de las diapositivas (rama imagenes-texto, 20-10-2026).
+
+    El .zip trae las imágenes de plano de la versión ACTIVA de assets, en el
+    orden del plan y numeradas; un vídeo sin imágenes es un 404; y pedirlo no
+    escribe nada: ni el estado ni un fichero dentro del proyecto ni un .zip
+    olvidado en el temporal.
+    """
+    seccion("DESCARGAR TODAS LAS IMÁGENES DE UN VÍDEO EN UN .ZIP")
+    import hashlib
+    import zipfile
+    from nucleo.estado import Estado
+    from nucleo.proyecto import Proyecto, escribir_json
+
+    _r, datos = cliente.post("/api/proyectos", {"nombre": "Descargar imágenes"})
+    pid = (datos.get("proyecto") or {}).get("id")
+    proyecto = Proyecto(os.path.join(carpeta, pid))
+    estado = Estado(proyecto)
+    ruta_zip = f"/api/proyectos/{pid}/imagenes/zip"
+    respuesta, _d = cliente.get(ruta_zip)
+    igual(respuesta.status_code, 404, "un vídeo sin imágenes da 404")
+    respuesta, _d = cliente.get("/api/proyectos/no_existe_este/imagenes/zip")
+    igual(respuesta.status_code, 404, "un vídeo que no existe da 404")
+
+    def tanda(contenidos):
+        trabajo = proyecto.ruta_trabajo("assets")
+        os.makedirs(os.path.join(trabajo, "escenas"), exist_ok=True)
+        escribir_json(os.path.join(trabajo, "plan.json"), {
+            "escenas": [{"id": sid, "t_in": 0.0, "t_out": 1.0, "duracion": 1.0, "narracion": sid}
+                        for sid in ("S002", "S001", "S003", "S004")],
+            "duracion_total": 4.0})
+        for sid, contenido in contenidos.items():
+            with open(os.path.join(trabajo, "escenas", f"{sid}.png"), "wb") as fh:
+                fh.write(contenido)
+        # una que no es de plano: no va en el .zip
+        with open(os.path.join(trabajo, "suelta.png"), "wb") as fh:
+            fh.write(b"no")
+        estado.completar("assets", {"plan": "plan.json"})
+
+    # el plan va en otro orden que los nombres: el .zip sigue el PLAN.
+    # S004 no tiene imagen (una cartela, una que falló): no sale.
+    tanda({"S001": b"v1-uno", "S002": b"v1-dos", "S003": b"v1-tres"})
+    tanda({"S001": b"v2-uno", "S002": b"v2-dos", "S003": b"v2-tres"})
+
+    def foto():
+        huellas = {}
+        for raiz, _dirs, ficheros in os.walk(proyecto.raiz):
+            for nombre in ficheros:
+                ruta = os.path.join(raiz, nombre)
+                with open(ruta, "rb") as fh:
+                    huellas[os.path.relpath(ruta, proyecto.raiz)] = hashlib.sha1(fh.read()).hexdigest()
+        return huellas
+
+    temporal = tempfile.gettempdir()
+    zips_antes = {n for n in os.listdir(temporal) if n.startswith("imagenes_") and n.endswith(".zip")}
+    antes = foto()
+    respuesta, _d = cliente.get(ruta_zip)
+    igual(respuesta.status_code, 200, f"GET {ruta_zip} responde 200")
+    igual(respuesta.headers.get("content-type"), "application/zip", "y es un .zip")
+    ok("descargar_imagenes_imagenes.zip" in (respuesta.headers.get("content-disposition") or ""),
+       f"con el nombre del vídeo ({respuesta.headers.get('content-disposition')})")
+    try:
+        with zipfile.ZipFile(io.BytesIO(respuesta.content)) as archivo:
+            nombres = archivo.namelist()
+            contenidos = [archivo.read(n) for n in nombres]
+    except zipfile.BadZipFile:
+        nombres, contenidos = [], []
+    igual(nombres, ["descargar_imagenes_001_S002.png", "descargar_imagenes_002_S001.png",
+                    "descargar_imagenes_003_S003.png"],
+          "trae las 3 imágenes de plano, en el orden del plan y numeradas")
+    igual(contenidos, [b"v2-dos", b"v2-uno", b"v2-tres"], "y son las de la versión ACTIVA")
+    igual(foto(), antes, "pedir el .zip no escribe nada en el proyecto (ni el estado)")
+    time.sleep(0.5)
+    zips_despues = {n for n in os.listdir(temporal) if n.startswith("imagenes_") and n.endswith(".zip")}
+    igual(zips_despues - zips_antes, set(), "y el .zip temporal se borra al mandarlo")
+
+    # UN PROYECTO CON CLAVE: sin abrirlo no se baja; con su pase, sí (en la
+    # cabecera de siempre o en `?abiertos=`, que es lo que lleva el enlace)
+    _r, datos = cliente.post("/api/clientes", {"nombre": "Con clave para el zip"})
+    cid = (datos.get("cliente") or {}).get("id") or ""
+    cliente.put(f"/api/clientes/{cid}", {"clave": "4321"})
+    cliente.put(f"/api/clientes/videos/{pid}", {"cliente": cid})
+    respuesta, _d = cliente.get(ruta_zip)
+    igual(respuesta.status_code, 404, "el de un proyecto con clave sin abrir da 404")
+    _r, abierto = cliente.post(f"/api/clientes/{cid}/abrir", {"clave": "4321"})
+    pase = f"{cid}.{abierto.get('pase')}"
+    respuesta, _d = cliente.get(ruta_zip, headers={"X-Estudio-Abiertos": pase})
+    igual(respuesta.status_code, 200, "abierto (con su pase en la cabecera), se baja")
+    respuesta, _d = cliente.get(ruta_zip, params={"abiertos": pase})
+    igual(respuesta.status_code, 200, "y con el pase en ?abiertos= (el enlace de la pantalla), también")
+    respuesta, _d = cliente.get(ruta_zip, params={"abiertos": f"{cid}.falso"})
+    igual(respuesta.status_code, 404, "con un pase falso, no")
+    cliente.put(f"/api/clientes/videos/{pid}", {"cliente": ""})
+    cliente.pedir("DELETE", f"/api/clientes/{cid}")
+
+
 def probar_montaje(cliente):
     """El montaje (rama montaje-movimiento, 18-10-2026).
 
@@ -4966,6 +5063,109 @@ def probar_traer_estilo(cliente):
     ok(cambios.get("al_dia") is True, "y después vuelve a estar al día")
     respuesta, otra = cliente.post(f"{base}/traer", {"partes": ["tono"]})
     igual(otra.get("traidas"), [], "traer otra vez lo mismo no cambia nada")
+
+
+def probar_cambiar_de_estilo(cliente):
+    """Arreglos del 19-10 (4): un vídeo cuyo estilo se borró se quedaba
+    huérfano --«Su estilo» no ofrecía nada y «Traer» daba 404--. Ahora
+    `GET /estilo/cambios?estilo=<otro>` enseña lo que cambiaría con su coste y
+    `PUT /estilo {estilo, partes}` lo pasa al otro estilo trayendo SOLO las
+    partes elegidas."""
+    seccion("ARREGLOS 19-10: UN VÍDEO HUÉRFANO SE PASA A OTRO ESTILO")
+    def estilo(nombre, tono):
+        _r, datos = cliente.post("/api/presets-canal", {
+            "tipo": "canal", "nombre": nombre,
+            "datos": {"guion": {"idioma_salida": "es", "instrucciones": tono},
+                      "voz": {"voz_id": "v-de-prueba", "idioma": "es",
+                              "velocidad": "normal"},
+                      "origen": {"tono_prompt": "serio", "estilo_prompt": "plano"}}})
+        return (datos.get("preset") or {}).get("id") or ""
+    viejo = estilo("Estilo que se borra", "Habla claro.")
+    otro = estilo("Estilo de acogida", "Cuéntalo como una historia.")
+    _r, creado = cliente.post(f"/api/presets-light/{viejo}/video", {
+        "nombre": "Vídeo huérfano", "duracion_objetivo_s": 60,
+        "material": "Un hecho.\n\nY otro."})
+    vid = (creado.get("proyecto") or {}).get("id") or ""
+    base = f"/api/proyectos/{vid}/estilo"
+    _r, brief_antes = cliente.get(f"/api/proyectos/{vid}/pasos/brief")
+    _r, voz_antes = cliente.get(f"/api/proyectos/{vid}/pasos/voz")
+
+    # el estilo viejo es de un proyecto (cliente); el nuevo, de ninguno
+    _r, nuevo_cliente = cliente.post("/api/clientes", {"nombre": "Cliente del huérfano"})
+    cid = (nuevo_cliente.get("cliente") or {}).get("id") or ""
+    cliente.put(f"/api/clientes/estilos/{viejo}", {"cliente": cid})
+
+    # a la papelera: se sigue pudiendo comparar, y lo dice
+    cliente.delete(f"/api/presets-canal/{viejo}")
+    _r, cambios = cliente.get(f"{base}/cambios")
+    ok((cambios.get("estilo") or {}).get("en_papelera") is True,
+       f"con el estilo en la papelera, «Su estilo» lo sabe (para «Restaurarlo»): {cambios.get('estilo')}")
+    # y purgado: huérfano de verdad
+    respuesta, _d = cliente.delete(f"/api/presets-canal/papelera/{viejo}?confirmar=1")
+    igual(respuesta.status_code, 200, "el estilo se borra del todo")
+    _r, cambios = cliente.get(f"{base}/cambios")
+    ok(bool(cambios.get("por_que_no")), f"el vídeo queda huérfano: {cambios.get('por_que_no')}")
+    igual(cambios.get("actual"), viejo, "y sigue diciendo cuál era su estilo")
+
+    # la vista previa con otro estilo: con su coste y sin escribir nada
+    respuesta, previa = cliente.get(f"{base}/cambios?estilo={otro}")
+    igual(respuesta.status_code, 200, f"la vista previa con otro estilo responde 200: {previa}")
+    tono = [p for p in previa.get("partes") or [] if p["id"] == "tono"]
+    ok(tono and tono[0]["cambia"] and "rehace" in tono[0],
+       f"dice que el tono cambiaría y qué rehace: {tono}")
+    _r, brief = cliente.get(f"/api/proyectos/{vid}/pasos/brief")
+    igual(brief.get("firma"), brief_antes.get("firma"), "MIRAR NO ESCRIBE NADA")
+    respuesta, _d = cliente.get(f"{base}/cambios?estilo=no-existe")
+    ok(respuesta.status_code == 200 and _d.get("por_que_no"),
+       "un estilo que no existe se dice, sin 500")
+
+    # cambiar: validaciones
+    respuesta, _d = cliente.put(base, {"partes": ["tono"]})
+    igual(respuesta.status_code, 400, "sin 'estilo', 400")
+    respuesta, _d = cliente.put(base, {"estilo": otro, "partes": ["inventada"]})
+    igual(respuesta.status_code, 400, "una parte que no existe, 400")
+    respuesta, _d = cliente.put(base, {"estilo": "no-existe", "partes": []})
+    igual(respuesta.status_code, 400, "un estilo que no existe, 400")
+
+    # el cambio: solo el tono
+    respuesta, cambio = cliente.put(base, {"estilo": otro, "partes": ["tono"]})
+    igual(respuesta.status_code, 200, f"PUT estilo responde 200: {cambio}")
+    igual(cambio.get("traidas"), ["tono"], "trae solo lo elegido")
+    _r, brief = cliente.get(f"/api/proyectos/{vid}/pasos/brief")
+    igual((brief.get("params") or {}).get("instrucciones"), "Cuéntalo como una historia.",
+          "el tono del estilo nuevo llega al vídeo")
+    igual((brief.get("params") or {}).get("duracion_objetivo_s"), 60,
+          "sin pisar la duración del encargo")
+    _r, voz = cliente.get(f"/api/proyectos/{vid}/pasos/voz")
+    igual(voz.get("params"), voz_antes.get("params"), "y la voz, que no se pidió, no se toca")
+    _r, cambios = cliente.get(f"{base}/cambios")
+    igual((cambios.get("estilo") or {}).get("id"), otro, "«Su estilo» es ya el nuevo")
+    ok(not cambios.get("por_que_no"), "y deja de estar huérfano")
+    _r, galeria = cliente.get("/api/proyectos")
+    fila = [p for p in galeria.get("proyectos") or [] if p.get("id") == vid]
+    ok(fila and fila[0].get("estilo_light") == otro,
+       f"la lista de vídeos lo apunta en el estilo nuevo: {fila[:1]}")
+    _r, clientes = cliente.get("/api/clientes")
+    igual((clientes.get("videos") or {}).get(vid), cid,
+          "SE QUEDA EN SU PROYECTO (el del estilo viejo): se le fija, el nuevo es de otro")
+    igual((cambio.get("cliente") or {}).get("ahora"), cid, "y la respuesta lo dice")
+
+    # la revisión editorial (arreglos 19-10, 5): solo del guion, y un modo raro no
+    respuesta, _d = cliente.post(f"/api/proyectos/{vid}/ortografia/revisar",
+                                 {"fuente": "subtitulos", "modo": "editorial"})
+    igual(respuesta.status_code, 400, "EDITORIAL: la revisión editorial es solo del guion")
+    respuesta, _d = cliente.post(f"/api/proyectos/{vid}/ortografia/revisar",
+                                 {"fuente": "guion", "modo": "estilo", "textos": {"B1": "x"}})
+    igual(respuesta.status_code, 400, "EDITORIAL: un modo que no existe, 400")
+    respuesta, _d = cliente.post(f"/api/proyectos/{vid}/ortografia/revisar",
+                                 {"fuente": "guion", "modo": "editorial", "textos": {}})
+    igual(respuesta.status_code, 400, "EDITORIAL: sin textos, 400")
+
+    # con el estilo nuevo en la papelera no se adopta
+    tercero = estilo("Estilo apartado", "Otro tono.")
+    cliente.delete(f"/api/presets-canal/{tercero}")
+    respuesta, _d = cliente.put(base, {"estilo": tercero, "partes": []})
+    igual(respuesta.status_code, 409, "un estilo en la papelera no se adopta: 409 (restáuralo antes)")
 
 
 def probar_continuaciones_en_otra_calidad():
@@ -6720,6 +6920,345 @@ def probar_notas_19oct():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def probar_mas_emojis(cliente, carpeta, pid):
+    """«✨ Más emojis» de Publicar (rama `textos-emojis`, 20-10-2026): la ruta
+    devuelve el MISMO texto con emojis (con el doble de ESTUDIO_SIMULAR), no
+    guarda nada, y rechaza con 422 lo que cambie una palabra."""
+    seccion("PUBLICAR: «✨ MÁS EMOJIS» Y EL NIVEL DE EMOJIS")
+    ruta = f"/api/publicar/videos/{pid}/emojis"
+    texto = "Fiesta en casa\n\nReserva ya #consolas"
+    r, d = cliente.post(ruta, {"red": "tiktok", "campo": "descripcion", "texto": texto})
+    igual(r.status_code, 200, f"POST {ruta} responde 200")
+    d = d or {}
+    ok(d.get("despues", 0) > d.get("antes", 0) == 0, f"con emojis añadidos: {d.get('texto')!r}")
+    ok(re.sub(r"[^\w#]", "", d.get("texto") or "") == re.sub(r"[^\w#]", "", texto),
+       "y las mismas palabras y hashtags")
+    r, f = cliente.get(f"/api/publicar/videos/{pid}")
+    ok(not (((f or {}).get("textos") or {}).get("tiktok") or {}).get("descripcion"),
+       "la ruta no guarda nada: lo guarda la pantalla")
+    igual(((f or {}).get("emojis") or {}).get("nivel"), "vistoso", "la ficha dice el nivel (Vistoso de fábrica)")
+    r, _d = cliente.post(ruta, {"red": "tiktok", "campo": "titulo", "texto": "Hola"})
+    igual(r.status_code, 400, "TikTok no tiene título: 400")
+    r, _d = cliente.post(ruta, {"red": "tiktok", "campo": "descripcion", "texto": "   "})
+    igual(r.status_code, 400, "sin texto: 400")
+    r, _d = cliente.post("/api/publicar/videos/noexiste/emojis", {"red": "tiktok", "campo": "descripcion",
+                                                                  "texto": "Hola"})
+    igual(r.status_code, 404, "un vídeo que no existe: 404")
+    marca = os.path.join(carpeta, "_sistema", "publicar", "_emojis_cambia_palabras")
+    os.makedirs(os.path.dirname(marca), exist_ok=True)
+    with open(marca, "w") as fh:
+        fh.write("1")
+    try:
+        r, d = cliente.post(ruta, {"red": "tiktok", "campo": "descripcion", "texto": texto})
+        igual(r.status_code, 422, "si Claude cambia una palabra: 422 y no se toca nada")
+        ok("palabras" in str((d or {}).get("detail") or d), "y lo dice")
+    finally:
+        os.remove(marca)
+    r, d = cliente.put("/api/publicar/proyectos/_sin", {"emojis": "sobrio", "emojis_marca": "🎮 🕹️"})
+    igual((r.status_code, ((d or {}).get("ajustes") or {}).get("emojis"),
+           ((d or {}).get("ajustes") or {}).get("emojis_marca")), (200, "sobrio", "🎮 🕹️"),
+          "el nivel y los emojis de la marca se guardan por proyecto")
+    r, _d = cliente.put("/api/publicar/proyectos/_sin", {"emojis": "muchos"})
+    igual(r.status_code, 400, "un nivel que no existe: 400")
+    r, _d = cliente.put("/api/publicar/proyectos/_sin", {"emojis": "vistoso", "emojis_marca": ""})
+
+
+def probar_publicar_20oct(cliente, pid):
+    """Rama `publicar-20oct`: los fallos de Publicar que vio el dueño el 20-10."""
+    seccion("PUBLICAR: ARREGLOS DEL 20 DE OCTUBRE")
+    # 1. el idioma del audio de YouTube: Upload-Post no acepta «es-419»
+    r, d = cliente.get("/api/publicar/proyectos")
+    audio = [c for c, _n in (((d or {}).get("seo_opciones") or {}).get("idiomas_audio") or [])]
+    ok(audio and all(re.fullmatch(r"[a-z]{2}-[A-Z]{2}", c) for c in audio),
+       f"los idiomas del audio que se ofrecen son todos idioma-PAÍS: {audio}")
+    r, d = cliente.put("/api/publicar/proyectos/_sin", {"yt_idioma_audio": "es-419"})
+    igual((r.status_code, ((d or {}).get("ajustes") or {}).get("yt_idioma_audio")), (200, "es-US"),
+          "un «es-419» que llegue se guarda como «es-US»")
+    # 2. Short o vídeo normal en YouTube, elegido en la ficha
+    ruta = f"/api/publicar/videos/{pid}"
+    r, d = cliente.put(ruta, {"youtube_formato": "video"})
+    igual((r.status_code, (d or {}).get("youtube_formato")), (200, "video"),
+          f"PUT {ruta} guarda «youtube_formato»")
+    ok("puede_elegir" in (((d or {}).get("encaje") or {}).get("youtube") or {}),
+       "y el encaje de YouTube dice si se puede elegir")
+    r, _d = cliente.put(ruta, {"youtube_formato": "reel"})
+    igual(r.status_code, 400, "un formato que no existe: 400")
+    r, d = cliente.put(ruta, {"youtube_formato": "auto"})
+    igual((r.status_code, (d or {}).get("youtube_formato")), (200, "auto"), "«auto» vuelve a lo de siempre")
+    # 4. «Comprobar» un programado que ya debió salir: /refrescar con su lote
+    r, d = cliente.post("/api/publicar/refrescar", {"lote": "abc123abc123"})
+    igual((r.status_code, (d or {}).get("estados")), (200, []),
+          "POST /api/publicar/refrescar {lote} pregunta por ese envío y dice cómo quedó")
+    r, _d = cliente.post("/api/publicar/refrescar", {"lote": "../../x"})
+    igual(r.status_code, 400, "un lote que no es un id: 400")
+    r, d = cliente.post("/api/publicar/refrescar")
+    igual(r.status_code, 200, "y sin cuerpo sigue como siempre")
+    r, d = cliente.get("/api/publicar/cola")
+    ok(all("debio_salir" in e for e in (d or {}).get("envios") or []),
+       "cada envío de la cola dice si ya debió salir")
+
+
+def probar_espacio_fijo():
+    """Rama espacio-fijo (20-10-2026): la peticion del catalogo y el ESPACIO FIJO.
+
+    En este proceso y sin el CLI: `_llamar_claude` del catalogo se sustituye por
+    un doble que apunta la instruccion y corta, que es lo que se mira.
+    """
+    seccion("ESPACIO FIJO: LA PETICIÓN LLEGA AL CATÁLOGO")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+
+    catalogo = servidor.PASOS_MODULOS.catalogo_visual
+
+    class _Cortar(Exception):
+        pass
+
+    vistas = []
+
+    def claude_falso(instruccion, *_a, **_k):
+        vistas.append(instruccion)
+        raise _Cortar()
+
+    bloques = [{"id": "B001", "texto": "Entras en la cocina del local.", "personaje": False},
+               {"id": "B002", "texto": "Y sale el pan del horno.", "personaje": False}]
+    base = tempfile.mkdtemp(prefix="estudio_espacio_")
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(base)
+    reales = {"_bloques_del_guion": servidor._bloques_del_guion}
+    real_claude = catalogo._llamar_claude
+    servidor._bloques_del_guion = lambda _ctx: bloques
+    catalogo._llamar_claude = claude_falso
+    try:
+        pid = Proyecto.crear(base, "espacio fijo").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+
+        def proponer(peticion):
+            vistas.clear()
+            try:
+                servidor._correr_catalogo(lambda *_a, **_k: None, ctx,
+                                          {"modelo": "sonnet", "esfuerzo": "medium"},
+                                          peticion)
+            except _Cortar:
+                pass
+            return vistas[0] if vistas else ""
+
+        prompt = proponer("pon todo en la panaderia de la esquina")
+        ok("pon todo en la panaderia de la esquina" in prompt,
+           "CATÁLOGO: la petición del editor llega al prompt (antes se quedaba en "
+           "_correr_catalogo)")
+        ok("LO QUE TE PIDE EL EDITOR" not in proponer(""),
+           "CATÁLOGO: y sin petición el prompt no lleva el bloque")
+        ok("ESPACIO FIJO" not in proponer(""),
+           "CATÁLOGO: sin espacio fijo guardado, el prompt no lo nombra")
+
+        # EL ENCARGO NUEVO: se guarda solo si viene con descripción (regla 1)
+        espacio = {"sitio": "Cocina del local", "descripcion": "a small steel kitchen",
+                   "luz": "day, window light",
+                   "secundarios": [{"nombre": "Fachada", "descripcion": "a blue shop front"}]}
+        firma_antes = ctx.estado.firma("assets")
+        for nada in ({}, {"espacio_fijo": None}, {"espacio_fijo": {}},
+                     {"espacio_fijo": {"sitio": "Cocina", "descripcion": "   "}}):
+            servidor._opciones_al_crear(ctx, "", nada)
+        ok("espacio_fijo" not in (ctx.estado.params("assets") or {}),
+           "ESPACIO FIJO: sin descripción no se escribe nada en assets")
+        igual(ctx.estado.firma("assets"), firma_antes, "ESPACIO FIJO: y la firma de assets no se mueve")
+        for malo in ("una cocina", {"descripcion": 5},
+                     {"descripcion": "x", "secundarios": "fachada"},
+                     {"descripcion": "x" * 5000}):
+            codigo, mensaje = _llamar(servidor._opciones_al_crear, ctx, "", {"espacio_fijo": malo})
+            igual(codigo, 400, f"ESPACIO FIJO: {str(malo)[:30]!r} da 400 ({mensaje})")
+        ok("espacio_fijo" not in (ctx.estado.params("assets") or {}),
+           "ESPACIO FIJO: y uno que no vale tampoco escribe nada")
+        servidor._opciones_al_crear(ctx, "", {"espacio_fijo": dict(espacio, luz="  day,  window light ")})
+        igual((ctx.estado.params("assets") or {}).get("espacio_fijo"), espacio,
+              "ESPACIO FIJO: con descripción se guarda limpio en los params de assets")
+        ok(ctx.estado.firma("assets") != firma_antes,
+           "ESPACIO FIJO: y entra en la firma de assets (cambiarlo deja obsoleto lo que dependa)")
+        prompt = proponer("")
+        ok("ESTE VIDEO TIENE UN ESPACIO FIJO" in prompt and "a small steel kitchen" in prompt
+           and "'fachada' (Fachada)" in prompt,
+           "CATÁLOGO: _correr_catalogo le pasa el espacio fijo guardado al catálogo")
+
+        # LA IMAGEN DEL ESPACIO, al crear: se guarda en el proyecto con ruta relativa
+        import base64 as _b64                                 # noqa: PLC0415
+        from PIL import Image as _Imagen                      # noqa: PLC0415
+        tampon = io.BytesIO()
+        _Imagen.new("RGB", (3000, 1500), (180, 140, 90)).save(tampon, format="JPEG")
+        url = "data:image/jpeg;base64," + _b64.b64encode(tampon.getvalue()).decode()
+        pid2 = Proyecto.crear(base, "espacio con imagen").id
+        Estado(servidor.contexto(pid2).proyecto)
+        ctx2 = servidor.contexto(pid2)
+        codigo, _m = _llamar(servidor._opciones_al_crear, ctx2, "",
+                             {"espacio_fijo": dict(espacio, imagen_nueva="no es una imagen")})
+        igual(codigo, 400, "ESPACIO FIJO: una imagen que no es imagen da 400")
+        servidor._opciones_al_crear(ctx2, "", {"espacio_fijo": dict(
+            espacio, imagen="espacio_fijo/0123456789abcdef.png", imagen_nueva=url)})
+        guardado = (ctx2.estado.params("assets") or {}).get("espacio_fijo") or {}
+        relativa = guardado.get("imagen") or ""
+        ok(re.match(r"^espacio_fijo/[0-9a-f]{16}\.png$", relativa),
+           f"ESPACIO FIJO: la imagen se guarda con ruta RELATIVA al proyecto ({relativa})")
+        ruta = ctx2.proyecto.ruta(*relativa.split("/")) if relativa else ""
+        ok(ruta and os.path.exists(ruta) and max(_Imagen.open(ruta).size) == 1536,
+           "ESPACIO FIJO: en PNG y reducida a 1.536 px de lado (la que mandó el cliente como "
+           "'imagen' se ignora)")
+        sin_imagen = servidor.aplicar_espacio_fijo
+        codigo, respuesta = _llamar(sin_imagen, pid2, {"espacio_fijo": dict(espacio, imagen="espacio_fijo/0123456789abcdef.png")})
+        igual(codigo, 400, "APLICAR: una imagen que no es la guardada da 400")
+        codigo, respuesta = _llamar(sin_imagen, pid2, {"espacio_fijo": {"sitio": "x"}})
+        igual(codigo, 400, "APLICAR: sin descripción, 400")
+        firma_antes = ctx2.estado.firma("assets")
+        codigo, respuesta = _llamar(sin_imagen, pid2, {"espacio_fijo": dict(
+            espacio, luz="night", imagen=relativa)})
+        igual(codigo, 200, f"APLICAR: a un vídeo sin imágenes responde 200 ({respuesta if codigo != 200 else ''})")
+        if codigo == 200:
+            igual(respuesta["espacio_fijo"].get("imagen"), relativa, "APLICAR: conserva la imagen guardada")
+            igual((respuesta["cambios"] or {}).get("imagenes"), 0, "APLICAR: sin imágenes, nada que rehacer")
+            ok(respuesta["cambios"].get("usd_referencia", 0) >= 0, "APLICAR: y dice lo que cuesta la referencia")
+        ok(ctx2.estado.firma("assets") != firma_antes and not ctx2.gestor.listar(activos=True),
+           "APLICAR: guarda (mueve la firma de assets) y no lanza ningún trabajo")
+        for cuerpo, esperado in (({}, 400), ({"planos": ["S001"]}, 400),
+                                 ({"planos": ["S001"], "imagenes": 2}, 400),
+                                 ({"planos": ["S001"], "imagenes": 1}, 409)):
+            codigo, _m = _llamar(servidor.rehacer_planos_del_espacio, pid2, cuerpo)
+            igual(codigo, esperado, f"REHACER: {cuerpo} da {esperado} ({_m})")
+        ok(not ctx2.gestor.listar(activos=True), "REHACER: y ninguno lanza nada")
+    finally:
+        catalogo._llamar_claude = real_claude
+        for nombre, valor in reales.items():
+            setattr(servidor, nombre, valor)
+
+def _video_montado_de_prueba(servidor, base, nombre):
+    """Un vídeo con todos los pasos hechos y su MP4: «montado y al día»."""
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    from nucleo.estado import PASOS                           # noqa: PLC0415
+    pid = Proyecto.crear(base, nombre).id
+    estado = Estado(servidor.contexto(pid).proyecto)
+    for paso in PASOS:
+        estado.completar(paso["id"], {})
+    proyecto = servidor.contexto(pid).proyecto
+    ruta = proyecto.ruta_paso("render", proyecto.version_activa("render"))
+    with open(os.path.join(ruta, "video.mp4"), "wb") as fh:
+        fh.write(b"mp4 de mentira")
+    return pid
+
+
+def probar_cambios_del_encargo_un_montaje():
+    """Arreglos del 19-10 (2): en el Encargo se tocan varias cosas del montaje
+    seguidas sin montar (`remontar: false`), queda la marca «sin aplicar» fuera
+    de los params, y «Aplicar y volver a montar» lanza UN trabajo: si lo
+    pendiente es solo la mezcla, `solo_montar`; si no, capas y montaje."""
+    seccion("ARREGLOS 19-10: VARIOS CAMBIOS DEL ENCARGO, UN SOLO MONTAJE")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_encargo_")
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(base)
+    lanzados, corridos = [], []
+    guardado = (servidor.lanzar_paso, servidor._correr_rehacer_montaje)
+    # un trabajo de verdad en el gestor, que no hace nada: se mira qué se pide
+    servidor.lanzar_paso = (lambda ctx, paso, unidades, **kw:
+                            lanzados.append((paso, kw.get("opciones")))
+                            or ctx.gestor.lanzar("falso", lambda avisar: {}, paso=paso))
+    servidor._correr_rehacer_montaje = (lambda avisar, ctx, tareas, solo_montar=False:
+                                        corridos.append((list(tareas), solo_montar)))
+    try:
+        pid = _video_montado_de_prueba(servidor, base, "encargo diferido")
+        ctx = servidor.contexto(pid)
+        igual(ctx.estado.estado_de("render"), "listo", "el vídeo de prueba está montado y al día")
+        firma = ctx.estado.firma("render")
+        r1 = servidor.cambiar_presencia_musica(pid, {"presencia": "alta", "remontar": False})
+        r2 = servidor.guardar_sonido(pid, {"musica_db": -3, "remontar": False})
+        r3 = servidor.cambiar_volumen_efectos(pid, {"nivel": "altos", "remontar": False})
+        igual((r1.get("trabajo_id"), r2.get("trabajo_id"), r3.get("trabajo_id"), lanzados),
+              (None, None, None, []),
+              "tres cambios seguidos con `remontar: false`: ningún trabajo (y ningún 409)")
+        ctx = servidor.contexto(pid)
+        ok("montaje_pendiente" in ctx.proyecto.config,
+           "queda la marca «sin aplicar» en proyecto.json")
+        ok(all("montaje_pendiente" not in (ctx.estado.params(p) or {})
+               for p in ("callouts", "render")),
+           "y FUERA de los params: no entra en ninguna firma")
+        leido = servidor.leer_montaje(pid)
+        igual((leido.get("sin_aplicar"), leido.get("solo_mezcla")), (True, True),
+              "GET /montaje dice «sin aplicar» y que basta con volver a mezclar")
+        respuesta = servidor.aplicar_montaje(pid)
+        time.sleep(0.5)
+        igual((lanzados, corridos), ([("render", {"solo_montar": True})], []),
+              "«Aplicar» lanza UN trabajo y solo vuelve a mezclar (`solo_montar`)")
+        igual(respuesta.get("solo_mezcla"), True, "y lo dice")
+        ok(not servidor.leer_montaje(pid).get("sin_aplicar"), "y la marca se va")
+        ok(ctx.estado.firma("render") != firma, "(el cambio sí está guardado en el render)")
+
+        # un cambio que toca las capas (los subtítulos): capas y montaje
+        lanzados.clear()
+        pid2 = _video_montado_de_prueba(servidor, base, "encargo con subtitulos")
+        servidor.guardar_sonido(pid2, {"musica_db": 2, "remontar": False})
+        servidor.cambiar_subtitulos(pid2, {"tam": "grande"})
+        leido = servidor.leer_montaje(pid2)
+        igual((leido.get("sin_aplicar"), leido.get("solo_mezcla")), (True, False),
+              "con los subtítulos cambiados ya no es solo mezcla")
+        respuesta = servidor.aplicar_montaje(pid2)
+        time.sleep(0.5)
+        igual((lanzados, corridos), ([], [(["callouts", "render"], False)]),
+              "y «Aplicar» rehace capas y montaje en un solo trabajo")
+
+        # un efecto vetado no toca params: la marca pide mezclar igual
+        lanzados.clear()
+        corridos.clear()
+        pid3 = _video_montado_de_prueba(servidor, base, "encargo con veto")
+        servidor._apuntar_montaje_pendiente(servidor.contexto(pid3), mezcla=True)
+        ok(servidor.leer_montaje(pid3).get("sin_aplicar"),
+           "un veto (sin params) también deja «sin aplicar»")
+        servidor.aplicar_montaje(pid3)
+        time.sleep(0.5)
+        igual(lanzados, [("render", {"solo_montar": True})],
+              "y se aplica con una mezcla aunque el render diga «al día»")
+    finally:
+        servidor.lanzar_paso, servidor._correr_rehacer_montaje = guardado
+        time.sleep(0.5)
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        shutil.rmtree(base, ignore_errors=True)
+
+
+def probar_mezcla_cancelada_se_aplica_con_otra_mezcla():
+    """Arreglos del 19-10 (3): una mezcla cancelada (o un remontaje que
+    falló) deja el render obsoleto solo por claves de mezcla. «Regenerar
+    Vídeo» (la tanda `render` en «pendientes») la aplica con OTRA mezcla
+    (`solo_montar`), no volviendo a renderizar todos los planos."""
+    seccion("ARREGLOS 19-10: UNA MEZCLA CANCELADA SE APLICA CON OTRA MEZCLA")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_mezcla_")
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(base)
+    try:
+        pid = _video_montado_de_prueba(servidor, base, "mezcla cancelada")
+        # el cambio se guardó y su montaje se canceló: el render queda obsoleto
+        servidor.guardar_sonido(pid, {"musica_db": -4, "remontar": False})
+        ctx = servidor.contexto(pid)
+        igual(ctx.estado.estado_de("render"), "obsoleto", "el render queda obsoleto por la mezcla")
+        _funcion, args = servidor._que_hace("render", ctx, {}, "pendientes")
+        igual(args[-1], {"solo_montar": True},
+              "y «Regenerar Vídeo» lo aplica con `solo_montar`: ni un plano otra vez")
+        _funcion, args = servidor._que_hace("render", ctx, {}, "todo")
+        ok(not (args[-1] or {}).get("solo_montar"), "(en «todo», el render de siempre)")
+        # algo que no es mezcla (los subtítulos) obliga a renderizar
+        servidor.cambiar_subtitulos(pid, {"tam": "grande"})
+        ctx = servidor.contexto(pid)
+        ok(not servidor._solo_falta_mezclar(ctx),
+           "con las capas pendientes ya no es solo mezcla")
+        # y una transición (param del render que cambia los clips) tampoco
+        pid2 = _video_montado_de_prueba(servidor, base, "transiciones")
+        servidor.contexto(pid2).estado.actualizar_params("render", {"transiciones": ["fundido"]})
+        ok(not servidor._solo_falta_mezclar(servidor.contexto(pid2)),
+           "ni con otras transiciones: cambian los clips")
+    finally:
+        servidor.fijar_raiz_proyectos(raiz_antes)
+        shutil.rmtree(base, ignore_errors=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Prueba del servicio HTTP")
     parser.add_argument("--conservar", action="store_true",
@@ -6755,6 +7294,7 @@ def main():
         probar_modo_light(cliente)
         probar_video_light(cliente)
         probar_traer_estilo(cliente)
+        probar_cambiar_de_estilo(cliente)
         probar_montaje(cliente)
         probar_estimacion(cliente)
         probar_el_coste_de_las_imagenes(cliente)
@@ -6767,6 +7307,7 @@ def main():
         probar_audio_y_musica_de_la_previa(cliente, carpeta)
         probar_taller_oculto(cliente)
         probar_montaje_por_plano(cliente, carpeta)
+        probar_descargar_imagenes(cliente, carpeta)
         probar_cartelas_y_transiciones(cliente, pid, os.path.join(carpeta, pid))
         probar_direccion(cliente, pid)
         probar_motor_del_plan(cliente, pid)
@@ -6809,7 +7350,12 @@ def main():
         probar_portadas(cliente, pid)
         probar_lo_de_v2h()
         probar_notas_19oct()
+        probar_cambios_del_encargo_un_montaje()
+        probar_mezcla_cancelada_se_aplica_con_otra_mezcla()
         probar_cancelar_en_el_taller()
+        probar_mas_emojis(cliente, carpeta, pid)
+        probar_publicar_20oct(cliente, pid)
+        probar_espacio_fijo()
     finally:
         parar(proceso)
         if not argumentos.conservar:

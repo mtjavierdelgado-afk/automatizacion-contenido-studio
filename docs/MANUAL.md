@@ -1,8 +1,9 @@
-# Cómo se usa Automatización Contenido Studio
+# Cómo se usa CrearIA Studio
 
 Una guía para quien entra por primera vez: qué es cada pantalla, qué hace cada
-campo y qué cuesta cada botón. Se ve en **Configuración → Cómo se usa** (o con
-el botón **?** de arriba) y el asistente la lee: si tienes una duda concreta,
+campo y qué cuesta cada botón. Se ve con el botón **?** de arriba (el panel de
+Ayuda, abierto en el apartado de la pantalla en la que estás) y en
+**Configuración → Cómo se usa**, y el asistente la lee: si tienes una duda concreta,
 pregúntale en la burbuja de abajo a la derecha.
 
 ---
@@ -14,11 +15,41 @@ canal). Después, con ese estilo, cada **vídeo** pasa por cuatro pantallas, en
 este orden: **Encargo → Guion → Imágenes → Vídeo**. La barra de abajo te lleva
 de una a otra. Con el vídeo montado, **Publicar** lo lleva a las redes.
 
-Arriba, debajo del nombre del Studio, está la **barra de módulos**:
-**Inicio** (lo que pasa hoy), **Crear** (estilos y vídeos: todo lo de esta
-guía hasta «Vídeo»), **Publicar** (las redes) y **Automatizar** (la Parrilla
-de guiones y el piloto automático, que llegan más adelante). Al abrir el
-Studio estás en Crear.
+Los **módulos** están en el menú de la izquierda (en el móvil y la tableta, en
+la fila de debajo del nombre): **Inicio** (tu panel: lo que pasa hoy y lo que
+te necesita), **Crear** (estilos y vídeos: todo lo de esta guía hasta
+«Vídeo»), **Publicar** (las redes), **Automatizar** (la Parrilla de guiones y
+Analizar cuentas) y **Configuración**. Al abrir el Studio estás en el
+**Inicio**; Crear (y el logo) te llevan a **Tus proyectos**. Cada pantalla trae
+su «‹ Volver» (o «‹ Mis vídeos», «‹ La cola», «‹ Parrilla») y el «atrás» del
+móvil nunca te saca del Studio.
+
+## Inicio
+
+Tu panel: lo que pasa hoy de un vistazo. Solo lee; abrirlo no gasta ni cambia
+nada.
+
+- **El saludo** dice cuántos vídeos salen esta semana, cuántos están listos para
+  publicar y cuántas cosas te necesitan, con **+ Nuevo vídeo** (te lleva a Crear
+  para elegir el estilo) y **Tus proyectos**.
+- **Cifras del mes**: vídeos creados este mes, envíos programados esta semana,
+  vistas de los últimos 7 días (las que ya trajo Publicar → Resultados) y vídeos
+  listos para publicar.
+- **Te necesitan**: los envíos que fallaron (con «Quitar de la lista»), los que
+  esperan tu OK, lo que sale hoy y los vídeos montados sin publicar.
+- **Esta semana** (publicaciones por día, hoy en color), **Proyectos recientes**
+  (pulsa uno para abrirlo en Crear), **En marcha** (lo que se está generando) y
+  **Lo mejor de los últimos 7 días**.
+- **Arma tu panel** (botón **✎ Personalizar panel**): quita tarjetas (✕),
+  cámbiales el tamaño (S, M, L) y el orden (arrastrándolas por ⋮⋮ o con ↑ ↓), y
+  enciende otras del catálogo: Gasto del mes, Parrilla, Calendario, Por cliente
+  y Novedades. Hay cuatro vistas de partida (Producción, Publicación,
+  Resultados, Mínima) y **Volver al original**. Ahí también pones el **tope de
+  gasto del mes**, que solo sirve para verlo en «Gasto del mes»: no frena nada.
+- Tu panel **se guarda para tu usuario** (si entras con contraseña) o, en un
+  Studio sin login, en este navegador.
+- **El gasto del mes** sale también en el menú de la izquierda, con tu tope, y
+  debajo si el asistente está listo.
 
 ## Lo que cuesta dinero y lo que no
 
@@ -327,8 +358,9 @@ ni lo deja por rehacer.
 
 **Cuentas y ajustes**, en cada proyecto, también tiene **lo fijo**: la hora
 por defecto al programar, la firma y los hashtags que van al final de todos
-los textos, el **tono de los textos** (con su ✦ Guía y ✓ Revisar), **usar
-emojis en los textos** (de fábrica sí; quítalo y Claude no pone ninguno), si se marca
+los textos, el **tono de los textos** (con su ✦ Guía y ✓ Revisar), los
+**emojis en los textos** (Ninguno · Sobrio · Normal · Vistoso; de fábrica
+Vistoso) con los **emojis de la marca**, si se marca
 como hecho con IA, si YouTube avisa a los suscriptores, la privacidad en
 YouTube y las redes que salen marcadas de fábrica. La confirmación antes de
 enviar no se puede quitar.
@@ -507,9 +539,47 @@ En el bloque **Portada** de un vídeo, **Diseñar portada** abre el editor:
 
 Lo de la IA de imágenes se paga y te dice el precio antes: solo el fondo (el
 texto sigue en capas, exacto) o la portada entera con el texto dentro.
+## Automatizar
+
+Lo que prepara los vídeos antes de crearlos. Dos pestañas grandes:
+
+### Parrilla
+
+Cada proyecto tiene sus **matrices de guiones**, y cada guion su estado:
+**pendiente**, **usado** (se pasó al Encargo) o **publicado** (su vídeo ya
+salió en Publicar; cambia solo).
+
+- **Añadir guiones**: subir una matriz (Word, Excel, PDF o texto), pedírselos a
+  Claude (de 1 a 30, sin repetir ideas), escribirlos o pegarlos, **Desde mis
+  resultados** (guiones que repiten lo que mejor te funcionó) o **Conversar con
+  Claude**, un chat para prepararlos hablando, con capturas, búsqueda en
+  internet opcional y tus resultados. Todo se convierte al formato único del
+  guion.
+- **La marca del cliente**: quién es, qué mostrar, qué evitar, el tono y el CTA,
+  una vez por proyecto. Claude la usa en todo lo que escribe para él.
+- **Pasar al Encargo**: abre Crear con el encargo del vídeo relleno con ese
+  guion. Revísalo y pulsa «Generar el guion».
+- Escribir guiones va con tu suscripción de Claude: no cuesta dinero aparte.
+
+### Analizar cuentas
+
+Escribe el @usuario o pega el enlace de un perfil de **TikTok, Instagram o
+YouTube** que no es tuyo y el Studio trae sus vídeos públicos con sus cifras.
+
+- **Primero gratis** (YouTube y la vía oficial de Meta); si no sirve, por
+  **Apify**, de pago (unos céntimos por cuenta). **Antes de pagar siempre
+  pregunta**, con el precio, y hay un tope al mes.
+- **«Que Claude la analice»**: qué temas, ganchos, duración y horarios le
+  funcionan. **«Escribir guiones con lo que le funciona»**: guiones para tu
+  proyecto, inspirados y sin copiar, que van a la Parrilla.
+- Las claves (Google, Meta, Apify) van en **Conexiones**, dentro de esa
+  pestaña, con su guía.
 
 ## Configuración (⚙)
 
+- **Aspecto: la paleta**: Nocturno (la de siempre), Aurora, Brasa o Día (la
+  clara). Solo cambia los colores y se recuerda en este navegador; el botón de
+  sol y luna de arriba pasa de Día a tu paleta oscura.
 - **Las claves**: OpenAI (imágenes), Cartesia (voz), Claude (guion y asistente),
   Jamendo y FreeSound (música y efectos). **Comprobar que funcionan** las prueba
   sin gastar. La de **Upload-Post** (publicar en redes) va en **Publicar en

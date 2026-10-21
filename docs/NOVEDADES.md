@@ -22,7 +22,11 @@ vídeos, estilos, claves y contraseña no se tocan.
   no rehace nada ni cuesta nada: sus reglas entran en las imágenes de foto de
   los vídeos nuevos, y en los ya hechos con «Traer el estilo».
 - **En «Automático» todo sale como antes**, letra por letra: crear o cambiar
-  un tipo no toca ningún vídeo que no lo haya elegido.
+  un tipo no toca ningún vídeo que no lo haya elegido (tampoco lo que vigila
+  el revisor). Si el texto del estilo nombra las palabras de un tipo tuyo, su
+  ficha te lo sugiere con un botón «Usarlo».
+- **Borrar un tipo** lo quita de las listas y de los estilos que lo tenían;
+  los vídeos ya hechos con él siguen igual (sus imágenes no quedan obsoletas).
 - Las reglas de mandos y de equipo de consolas ya no son reglas generales de
   foto: son del tipo EstadoPlay (en Automático siguen entrando igual cuando el
   vídeo habla de consolas). Un estilo fijado en «General» no las recibe nunca.

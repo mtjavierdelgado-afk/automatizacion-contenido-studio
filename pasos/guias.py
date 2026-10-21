@@ -47,9 +47,9 @@ GUIAS = {
             "La «Versión para el generador» es la regla en inglés, concreta y "
             "física, que es lo que lee el generador de imágenes. «Afinar con "
             "Claude» la escribe por ti; si la dejas vacía, va tu texto tal cual.",
-            "Las PALABRAS del tipo («mampara, ducha, baño») sirven para que el "
-            "revisor reconozca el negocio en un estilo en Automático y use sus "
-            "frases; nunca meten sus reglas en un vídeo que no lo ha fijado.",
+            "Las PALABRAS del tipo («mampara, ducha, baño») sirven para que la "
+            "ficha de un estilo en Automático te lo SUGIERA si su texto las "
+            "nombra; nunca deciden nada solas (mínimo 3 letras cada una).",
             "Lo que escribes para el REVISOR (equipo y hacia dónde mira la gente) "
             "es lo que anota como fallo al mirar cada imagen.",
             "Los encuadres siguen siendo los generales de foto (las cartas propias "

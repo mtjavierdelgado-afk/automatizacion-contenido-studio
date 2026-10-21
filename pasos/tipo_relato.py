@@ -479,13 +479,36 @@ def frase_edicion(indice, ref, modo_imagen="ilustracion"):
                 "as a photograph."))
 
 
+#: El cierre de un plano editado: lo ultimo del prompt, por encima de la linea
+#: de direccion, que se escribe con libertad de camara y no sabe de la base.
+CIERRE_EDICION = (
+    "FINAL CHECK, and it overrides anything above about camera, framing or the room: "
+    "this image is an EDIT of reference image {indice}. Keep exactly its camera position, "
+    "height, angle, lens and framing, its walls, floor, ceiling, fixed furniture, fittings "
+    "and layout{acabados}. Change ONLY: {cambio}. People, gestures and small loose objects "
+    "that the scene describes may be added or moved; nothing that belongs to the room itself "
+    "moves, appears or disappears.")
+
+
+def cierre_edicion(indice, ref):
+    cambia = ref.get("cambia") or ""
+    cambio = _texto(ref.get("cambio"), 400) or SIN_CAMBIO
+    return CIERRE_EDICION.format(indice=indice, cambio=cambio,
+                                 acabados="" if cambia == "acabados" else " and finishes")
+
+
 # ------------------------------------------------------------ imagen base
 
 PROMPT_BASE = (
-    "{cabecera} The empty set of this film, seen whole, with nobody in it: {descripcion}. "
-    "Light: {luz}. {antes}Frame it as a clear, level, eye-height view that shows the "
-    "whole layout, as the reference shot every other shot of this place will be "
-    "edited from. No people, no text, no letters.")
+    "{cabecera} The empty set of this film, seen whole, with nobody in it. THE LAYOUT IS "
+    "MANDATORY and is the whole point of this image: every wall, fixture and piece of "
+    "furniture must be exactly where this description puts it, with the materials and "
+    "colours it names, and nothing it does not name: {descripcion}. Before finishing, check "
+    "the description item by item against the picture (what is on the left, what is on "
+    "the back wall, what is on the right, where the door is). Light: {luz}. {antes}Frame "
+    "it as a clear, level, eye-height view from the entrance that shows the whole layout, "
+    "as the reference shot every other shot of this place will be edited from. No people, "
+    "no text, no letters.")
 
 ANTES = {
     "objeto": "Show it in its INITIAL state, before anything changes. ",

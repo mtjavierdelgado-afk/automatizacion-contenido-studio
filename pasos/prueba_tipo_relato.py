@@ -316,6 +316,9 @@ def prueba_referencias_y_prompt():
     ok("Change ONLY: the hinged shower door is replaced by a sliding glass door" in texto,
        "con lo único que cambia")
     ok("Only that object changes" in texto, "y la frase del subtipo «objeto»")
+    ok(texto.rstrip().endswith("No watermarks.") and "FINAL CHECK" in texto
+       and texto.index("FINAL CHECK") > texto.index("Change ONLY"),
+       "y cierra con el recordatorio de la edición, DETRÁS de la escena (la línea que más pesa)")
     refs_det = P6._referencias_escena(escenas[2], plan, dirs, p, dirs["cache"], {},  # noqa: SLF001
                                       anteriores=[])
     igual([r["papel"] for r in refs_det][:2], ["estilo", "espacio"],
@@ -342,6 +345,8 @@ def prueba_referencias_y_prompt():
                                        dirs["cache"], previas, anteriores=["S001"])
     igual([r["papel"] for r in con_bases], ["estilo", "continuidad"],
           "estilo y continuidad, como siempre")
+    ok("FINAL CHECK" not in P6._prompt_completo(limpias[1], con_bases, sin["estilo"]),  # noqa: SLF001
+       "y sin base, ningún cierre de edición")
     # rutas_de_bases no da nada sin modo explicito (aunque haya bases guardadas)
 
     class _Proyecto:

@@ -144,8 +144,12 @@ def _elegir_estilo(api, pedido):
     estilos = [p for p in (lista or {}).get("presets") or [] if p.get("tipo", "canal") == "canal"]
     if pedido:
         return next((p for p in estilos if p.get("id") == pedido), None)
-    foto = [p for p in estilos if "foto" in json.dumps(p, ensure_ascii=False).lower()]
-    return (foto or estilos or [None])[0]
+    # DE FOTO DE VERDAD (`datos.estilo.modo`), no «la palabra foto en algún
+    # sitio»: la primera prueba real (20-10) cogió uno de ilustración porque su
+    # ficha decía «fotogramas»
+    foto = [p for p in estilos
+            if (((p.get("datos") or {}).get("estilo") or {}).get("modo")) == "foto"]
+    return foto[0] if foto else None
 
 
 def _plan_de(raiz):
@@ -256,7 +260,8 @@ def main():
         return cerrar()
     if not est.get("estilo"):
         estilo = _elegir_estilo(api, args.estilo)
-        if not informe.comprueba(bool(estilo), "hay un estilo con el que hacerlo", "crea uno primero"):
+        if not informe.comprueba(bool(estilo), "hay un estilo de FOTO con el que hacerlo",
+                                 "no hay ninguno en modo foto: créalo o pasa --estilo ID"):
             return cerrar()
         est["estilo"] = estilo["id"]
         est["estilo_nombre"] = estilo.get("nombre")
@@ -387,7 +392,13 @@ def main():
                 est.setdefault("juicios", {}).setdefault(k, {})[f"base{intento}"] = juicio
                 informe.comprueba(juicio.get("vale") in ("si", "sí"), "Claude da por buena la imagen base",
                                   f"{juicio.get('vale')}: {juicio.get('por_que')}", solo_aviso=intento == 0)
-                if juicio.get("vale") in ("si", "sí") or intento == 1:
+                if juicio.get("vale") not in ("si", "sí") and intento == 1:
+                    # DOS BASES QUE NO VALEN: no se aprueba ninguna ni se pagan planos
+                    # sobre un sitio que no es el pedido (se paró aquí el 20-10)
+                    informe.apunta("fallo", "ninguna de las dos imágenes base vale: no se dibujan "
+                                   "los planos de este vídeo (míralas en su «El tipo de relato»)")
+                    break
+                if juicio.get("vale") in ("si", "sí"):
                     codigo, ficha = api.post(f"/api/proyectos/{pid}/tipo_relato/base/aprobar",
                                              {"sitio": sitio, "aprobada": True})
                     informe.comprueba(codigo == 200 and (ficha or {}).get("base_aprobada"),
@@ -396,6 +407,10 @@ def main():
                 _c, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
             hecha(f"{k}:base")
 
+        _c, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+        if not (ficha or {}).get("base_aprobada"):
+            informe.apunta("aviso", f"{k}: sin imagen base aprobada, se pasa al siguiente vídeo")
+            continue
         # las imagenes y el montaje
         for tanda, limite in (("video", 3600), ("render", 2400)):
             if not parte(tanda):

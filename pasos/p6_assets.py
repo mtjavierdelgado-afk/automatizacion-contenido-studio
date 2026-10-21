@@ -3068,6 +3068,16 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
                      else _ultima_palabra_idioma(idioma))
     if cierre_idioma:
         lineas.append(cierre_idioma)
+    # EL CIERRE DE UN PLANO EDITADO DESDE LA IMAGEN BASE (rama tipo-de-relato,
+    # prueba real del 20-10): la frase de la imagen 1 va al principio y la linea
+    # de direccion del plano («que se ve aqui», escrita con libertad de camara)
+    # ganaba por ir despues: el revisor marco congruencia en 8 de 12 planos.
+    # Esto va al final, que es la posicion que mas pesa, y SOLO en un plano que
+    # lleva la base: sin ella no se añade nada y el prompt es el de siempre.
+    base = next((r for r in referencias if r.get("papel") == "base"), None)
+    if base is not None:
+        indice = referencias.index(base) + 1
+        lineas.append(tipo_relato.cierre_edicion(indice, base))
     if feedback:
         lineas.append(_bloque_feedback(feedback, foto=True) if foto
                       else _bloque_feedback(feedback))

@@ -440,6 +440,8 @@ def prueba_imagen_base():
                   inicial=puerta)
     ok(puerta in T.prompt_imagen_base(ESPACIO, relato),
        "con «inicial», lo que luego cambia sale YA en la base, donde va (prueba real 21-10)")
+    ok("rigid object at its true size" in T.prompt_imagen_base(ESPACIO, relato),
+       "quieto, recto y a escala: ni torcido ni a medio abrir (la hoja en ángulo del 21-10)")
     hora = dict(T.resolver({"tipo_relato": {"modo": "espacio_que_cambia", "cambia": "hora"}}),
                 inicial=puerta)
     ok(puerta not in T.prompt_imagen_base(ESPACIO, hora), "y en «hora» no se pinta")

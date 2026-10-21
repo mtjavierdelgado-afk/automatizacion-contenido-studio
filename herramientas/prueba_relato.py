@@ -390,8 +390,9 @@ def main():
                         + (f" Y tiene que verse YA, donde dice, lo que luego cambia: «{tr_.get('inicial')}»."
                            if tr_.get("inicial") else "")
                         + " Contesta por separado: 'distribucion' (cada mueble fijo en la pared que "
-                        "dice y la puerta donde dice), 'objeto' (lo que luego cambia está y está donde "
-                        "dice; 'si' si no se pide ninguno) y 'acabados' (colores y materiales). Devuelve SOLO "
+                        "dice y la puerta donde dice), 'objeto' (lo que luego cambia está, está donde "
+                        "dice y es un objeto real a escala: una puerta o un panel recto, vertical y "
+                        "plano, no torcido ni a medio abrir; 'si' si no se pide ninguno) y 'acabados' (colores y materiales). Devuelve SOLO "
                         '{"distribucion": "si" | "no", "objeto": "si" | "no", "acabados": "si" | "no", '
                         '"por_que": "<una frase>"}', raiz)
                     # LO QUE IMPORTA es la distribucion y el objeto: los planos editan la

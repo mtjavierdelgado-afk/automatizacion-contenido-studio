@@ -318,11 +318,16 @@ respecto a esa base. Lo que cambia en este video: {que_cambia}.
   - Añade al JSON, al mismo nivel que 'beats', un campo "inicial": EN INGLES,
     COMO ESTA en la imagen base lo que luego cambia, y DONDE exactamente,
     respecto a lo fijo del sitio (que pared, junto a que mueble, hacia donde
-    abre, que lado lleva las bisagras): «a clear glass hinged shower door on the
-    shower's left edge, hinges on the wall side, opening outward into the room
-    toward the toilet». Es lo que hace que ese objeto salga en la base y no se
-    invente distinto en cada plano. Vacio ("") si lo que cambia no es una cosa
-    que se ve (la hora, los colores).
+    abre, que lado lleva las bisagras): «a closed clear glass hinged shower door,
+    0.7 m wide and 1.9 m tall, on the shower's left edge, hinges on the wall side;
+    it opens outward, toward the toilet». Es lo que hace que ese objeto salga en
+    la base y no se invente distinto en cada plano. Vacio ("") si lo que cambia
+    no es una cosa que se ve (la hora, los colores).
+    Describe UNA posicion quieta (una puerta, CERRADA salvo que la voz pida otra
+    cosa), con su tamaño real y sin movimiento: nada de «swinging», «its arc»,
+    «reaching»; por donde abre se dice como dato («it opens outward, toward the
+    toilet»). Un modelo de imagen que lee un arco dibuja la hoja torcida, a
+    medio abrir y fuera de escala (prueba real del 21-10).
   - Si un cambio tiene geometria (por donde abre una puerta, una marca en el
     suelo, una medida), dila respecto a lo fijo y coherente con "inicial": «blue
     tape on the floor tracing the quarter circle the hinged door sweeps, from
@@ -535,7 +540,10 @@ ANTES = {
 #: Lo que luego cambia, dibujado YA en la base (prueba real del 21-10: sin
 #: esto la base salia sin mampara y cada plano inventaba la suya en otro sitio).
 INICIAL = ("The element that changes later in the film MUST already be in this picture, "
-           "in its initial state, exactly like this and exactly there: {inicial}. ")
+           "in its initial state, exactly like this and exactly there: {inicial}. Draw it as a "
+           "real, rigid object at its true size, standing still in that one position: straight "
+           "edges, truly vertical, flat and rectangular if it is a panel or a door, never bent, "
+           "skewed, faceted or caught half-way through a movement. ")
 
 
 def inicial_de(valor):

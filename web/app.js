@@ -5398,8 +5398,8 @@ function cambiosDelEstiloCarril() {
 function cambiosDelMontaje() {
   const v = APP.light.video;
   if (!v.pid) return { n: 0, hay: false };
-  const est = (APP.light.ajustesMontaje || {})[`v:${v.pid}`];
-  if (!est) return { n: 0, hay: false };
+  // estadoAjustes y no leerlo a pelo: tras recargar la página trae lo apuntado
+  const est = estadoAjustes({ tipo: 'video', pid: v.pid });
   const filas = new Set(Object.keys(est.filasSinAplicar || {}));
   if (est.animoPedido && !est.montandoAnimo) filas.add('musica');
   const montaje = est.montaje || {};
@@ -6185,6 +6185,7 @@ function irAInicioLight() {
      el proyecto elegido, y saliendo del módulo en el que se esté (el logo se
      pulsa también desde Publicar o el Inicio). */
   if (MODULOS.actual !== 'crear') { entrarEnCrear(); return; }
+  if (!puedeSalirDelVideo()) return;
   pararPrevia();
   recordarVideoLight('');
   apuntarCliente('');
@@ -7195,12 +7196,15 @@ async function cargarVideoLight(pid) {
      también el repaso: el deslizador enseñaba el volumen de antes y, al
      comparar con ese, no mandaba nada. Y lo que se quedó «montando la
      música…» con otro vídeo abierto no se queda así para siempre: si ese
-     trabajo sigue, el servidor contesta 409 al segundo intento. */
+     trabajo sigue, el servidor contesta 409 al segundo intento.
+     LO PEDIDO Y SIN MONTAR SE QUEDA (revisión del rediseño, 21-10-2026): el
+     ánimo de la música y las filas apuntadas solo se van al montarlos o al
+     recogerlos un montaje (abajo, `alDiaConElMontaje`). Esto se llama desde
+     treinta sitios y antes borraba el ánimo pedido en silencio. */
   const ajustes = (APP.light.ajustesMontaje || {})[`v:${pid}`];
   if (ajustes) {
     ajustes.cargado = false;
     ajustes.montandoAnimo = false;
-    ajustes.animoPedido = '';
     ajustes.dbEnVuelo = undefined;
   }
   /* EL VÍDEO QUE YA ESTÁ ABIERTO SE RELEE SIN TAPARLO (19-10-2026). Pintar
@@ -7234,6 +7238,7 @@ async function cargarVideoLight(pid) {
     v.estilo = ((proyecto.proyecto || {}).config || {}).estilo_light || '';
     v.fichas = {};
     for (const ficha of (proyecto.pasos || [])) v.fichas[ficha.id] = ficha;
+    alDiaConElMontaje(pid);
     // los bloques se vuelven a leer: lo de «cómo estaban al empezar» ya no vale
     _bloquesAlEditarLight = {};
     // la copia del encargo se rehace de los params que acaban de llegar: lo
@@ -12964,7 +12969,7 @@ function barraDelVideo() {
   if (cambios.hay && hayMp4Light()) {
     const botones = [];
     if (porDibujar) {
-      botones.push(botonDeBarra(h('button', { onclick: () => montarElVideoLight() }, `Montar el vídeo${precio}`), {
+      botones.push(botonDeBarra(h('button', { onclick: () => montarElVideoLight(true) }, `Montar el vídeo${precio}`), {
         secundario: true, disabled: ocupado || !v.audio,
         ayuda: unirAyuda(`Dibuja antes ${porDibujar} ${porDibujar === 1 ? 'imagen que ha quedado vieja' : 'imágenes que han quedado viejas'} `
           + '(se paga, y se pregunta antes) y monta el vídeo con todo, también los cambios del montaje.', plan) }));
@@ -12982,7 +12987,7 @@ function barraDelVideo() {
     return barraDeAccion({ estado: { e: viejo ? 'aviso' : 'pend',
         texto: viejo ? 'Vídeo obsoleto' : (conCambios ? 'Sin montar todavía · con cambios del montaje' : 'Sin montar todavía') },
       plan,
-      botones: [botonDeBarra(h('button', { onclick: () => montarElVideoLight() }, `Montar el vídeo${precio}`), {
+      botones: [botonDeBarra(h('button', { onclick: () => montarElVideoLight(conCambios) }, `Montar el vídeo${precio}`), {
         disabled: ocupado || (quedaRender === false && !conCambios) || !v.audio,
         ayuda: unirAyuda('Encadena los planos que ya has visto, con sus transiciones, '
           + 'la voz y la música, y saca el MP4. No genera ninguna imagen: no '
@@ -18313,8 +18318,78 @@ function estadoAjustes(modo) {
       busqueda: { animo: 'sobrio', extra: '', texto: '', temas: null, buscando: false,
         comercial: true, instrumental: true, pagina: 0 },
       efectos: null, papeles: null, buscaEfecto: { papel: '', texto: '', lista: null, buscando: false } };
+    if (modo.tipo === 'video') restaurarCambiosDelMontaje(APP.light.ajustesMontaje[clave], modo.pid);
   }
   return APP.light.ajustesMontaje[clave];
+}
+
+/* LOS CAMBIOS DEL MONTAJE SIN APLICAR, GUARDADOS EN EL NAVEGADOR por vídeo
+   (revisión del rediseño, 21-10-2026). Las filas apuntadas son para contar
+   («N cambios»: lo guardado ya está en el servidor); el ánimo de la música,
+   en cambio, SOLO vive aquí hasta montarlo, y recargar la página lo perdía.
+   Con la versión del render en la que se apuntaron: un montaje posterior los
+   ha recogido (`alDiaConElMontaje`). Sin almacén, todo sigue en memoria. */
+function claveCambiosDelMontaje(pid) {
+  return `asvs.montajeSinAplicar.${pid}`;
+}
+
+function guardarCambiosDelMontaje(est) {
+  if (!est || !est.pid) return;
+  const filas = Object.keys(est.filasSinAplicar || {});
+  try {
+    if (!filas.length && !est.animoPedido) localStorage.removeItem(claveCambiosDelMontaje(est.pid));
+    else {
+      localStorage.setItem(claveCambiosDelMontaje(est.pid), JSON.stringify({
+        filas, animo: est.animoPedido || '', version: est.filasVersion || 0 }));
+    }
+  } catch (e) { /* sin almacén: se queda en memoria */ }
+}
+
+function restaurarCambiosDelMontaje(est, pid) {
+  est.pid = pid;
+  let guardado = null;
+  try { guardado = JSON.parse(localStorage.getItem(claveCambiosDelMontaje(pid)) || 'null'); } catch (e) { guardado = null; }
+  if (!guardado || typeof guardado !== 'object') return;
+  const filas = Array.isArray(guardado.filas) ? guardado.filas.filter(f => typeof f === 'string') : [];
+  if (filas.length) {
+    est.filasSinAplicar = Object.fromEntries(filas.map(f => [f, true]));
+    est.sinAplicar = true;
+    est.filasVersion = Number(guardado.version) || 0;
+  }
+  if (typeof guardado.animo === 'string' && guardado.animo) est.animoPedido = guardado.animo;
+}
+
+/* La versión activa del render del vídeo abierto (0 sin montar). */
+function versionDelRender() {
+  const ficha = (APP.light.video.fichas || {}).render;
+  return ficha ? Number(versionDe(ficha)) || 0 : 0;
+}
+
+/* UN MONTAJE RECOGE LO APUNTADO (punto 5 de la revisión): lo guardado con
+   `remontar: false` está en los params, y cualquier montaje lo lleva --el de
+   Imágenes, la tanda del vídeo, aplicar las notas--, no solo el de «Montar el
+   vídeo con N cambios». Si el render ha cambiado de versión desde que se
+   apuntaron, ya no están sin aplicar. El ánimo NO: no está en el servidor
+   hasta montarlo, y sigue pendiente. */
+function alDiaConElMontaje(pid) {
+  if (APP.light.video.pid !== pid) return;
+  const est = estadoAjustes({ tipo: 'video', pid });
+  if (!Object.keys(est.filasSinAplicar || {}).length) return;
+  if ((est.filasVersion || 0) !== versionDelRender()) {
+    olvidarCambiosDelMontaje(est, pid);
+    if (est.montaje) est.montaje.sin_aplicar = false;
+  }
+}
+
+/* AVISAR AL SALIR DEL VÍDEO con cambios del montaje sin aplicar: se quedan
+   apuntados (y se vuelven a ver al abrirlo), pero el MP4 no los lleva. */
+function puedeSalirDelVideo() {
+  if (!APP.light.video.pid || trabajoVideoLight()) return true;
+  const cambios = cambiosDelMontaje();
+  if (!cambios.hay) return true;
+  return window.confirm(`Hay ${cambios.n ? `${cambios.n} ${cambios.n === 1 ? 'cambio' : 'cambios'}` : 'cambios'} `
+    + 'del montaje sin aplicar: el vídeo todavía no los lleva. Se quedan apuntados para cuando '
+    + 'vuelvas («Montar el vídeo con los cambios»). ¿Salir igualmente?');
 }
 
 function opcionesBorrador(e) {
@@ -18389,6 +18464,8 @@ function apuntarCambioDeMontaje(est, fila) {
   est.sinAplicar = true;
   est.filasSinAplicar = est.filasSinAplicar || {};
   est.filasSinAplicar[fila || est.abierta || 'montaje'] = true;
+  if (est.pid === APP.light.video.pid) est.filasVersion = versionDelRender();
+  guardarCambiosDelMontaje(est);
   if (est.repintar) est.repintar();
   repintarBarra();
   repintarCarril();
@@ -18414,7 +18491,7 @@ async function montarCambiosDelMontaje() {
   const est = estadoAjustes(modo);
   // UN DOBLE CLIC NO MONTA DOS VECES: las dos marcas se ponen antes de esperar nada
   if (est.aplicando || est.montandoAnimo || trabajoVideoLight()) return;
-  if (!hayMp4Light()) { await montarElVideoLight(); return; }
+  if (!hayMp4Light()) { await montarElVideoLight(true); return; }
   if (est.animoPedido) {
     await montarAnimoPedido(modo, est, async () => {
       try { await cargarAjustesVideo(modo, est); } catch (e) { /* se relee al volver */ }
@@ -18453,9 +18530,10 @@ function precioDeMontarCambios() {
    el de un vídeo que ha quedado viejo. Si por el camino hay que DIBUJAR
    imágenes viejas, se dice cuántas y cuánto y se pregunta: este botón no paga
    en silencio. El plan se pide de nuevo antes de decidir (el de la pantalla
-   puede tener unos segundos). Lleva dentro el ánimo pedido, si lo hay: se
-   monta antes su banda. */
-async function montarElVideoLight() {
+   puede tener unos segundos). Con `conAnimo` lleva dentro el ánimo pedido, si
+   lo hay (se monta antes su banda): lo piden los botones que montan «con los
+   cambios»; el de Imágenes no, y el ánimo sigue pendiente. */
+async function montarElVideoLight(conAnimo) {
   const v = APP.light.video;
   const pid = v.pid;
   if (!pid || MONTANDO_LIGHT[pid] || trabajoVideoLight()) return;
@@ -18473,7 +18551,7 @@ async function montarElVideoLight() {
       + `≈ ${usdCorto(Number(coste.usd_por_generar) || 0)}. ¿Seguir?`)) return;
     const modo = { tipo: 'video', pid, diferir: true };
     const est = estadoAjustes(modo);
-    if (est.animoPedido && !est.montandoAnimo) {
+    if (conAnimo && est.animoPedido && !est.montandoAnimo) {
       await montarAnimoPedido(modo, est, async () => {
         if (videoAbierto().pid === pid && !trabajoVideoLight()) await lanzarTandaLight('render', 'pendientes');
       });
@@ -18508,6 +18586,8 @@ async function aplicarMontajePendiente(modo, est) {
 function olvidarCambiosDelMontaje(est, pid) {
   est.filasSinAplicar = {};
   est.sinAplicar = false;
+  est.pid = est.pid || pid;
+  guardarCambiosDelMontaje(est);
 }
 
 async function cargarAjustesVideo(modo, est) {
@@ -18825,6 +18905,7 @@ function animoDeLaAutomatica(modo, est, repintar) {
           'Ahora suena un tema que elegiste tú. La música automática lo sustituye por '
           + 'temas de este ánimo al montar el vídeo. ¿Seguir?')) { ev.target.value = pedido; return; }
         est.animoPedido = valor && valor !== unico ? valor : '';
+        guardarCambiosDelMontaje(est);
         repintar();
         repintarBarra();
         repintarCarril();
@@ -18850,13 +18931,16 @@ async function montarAnimoPedido(modo, est, alTerminar) {
   try {
     const r = await pedir(`${API.proyecto(modo.pid)}/musica/animo`, {
       method: 'PUT', cuerpo: { animo: est.animoPedido } });
+    /* EL SERVIDOR YA LO TIENE: deja de ser un cambio pendiente de la pantalla
+       (se ve «montando la música…» mientras corre). */
+    est.animoPedido = '';
+    guardarCambiosDelMontaje(est);
     const nombre = ((ANIMOS_MUSICA.find(a => a[0] === r.animo) || [0, r.animo])[1]).toLowerCase();
     toast(r.remontando
       ? `Música: buscando temas «${nombre}» y volviendo a mezclar el vídeo, sin dibujar nada`
       : `Música: buscando temas «${nombre}»`);
     seguirTrabajo(CLAVE_VIDEO_LIGHT, r.trabajo_id, async () => {
       est.montandoAnimo = false;
-      est.animoPedido = '';
       if (alTerminar) await alTerminar();
       if (est.repintar) est.repintar();
       if (MODULOS.actual === 'crear') pintarLight();
@@ -18866,6 +18950,7 @@ async function montarAnimoPedido(modo, est, alTerminar) {
     est.montandoAnimo = false;
     toast(e.message, true);
     if (est.repintar) est.repintar();
+    repintarBarra();
   }
 }
 

@@ -3180,6 +3180,7 @@ def montar_los_cambios_no_paga_imagenes(navegador, datos):
     pg.js(f"await abrirVideoLight('{pid}');")
     ok(_montar_desde_video(pg), "se parte de un vídeo montado al día")
     pedidas = []
+    falso = {"animo": ""}
     plan_viejo = {"tareas": 3, "segundos": 120, "coste": {
         "imagenes": 3, "imagenes_por_generar": 3, "imagenes_hechas": 0,
         "usd_por_generar": 0.25, "usd_total": 0.25}}
@@ -3188,9 +3189,17 @@ def montar_los_cambios_no_paga_imagenes(navegador, datos):
         req = ruta.request
         if req.method == "POST" and ("/generar" in req.url or "/montaje/aplicar" in req.url):
             pedidas.append((req.url, req.post_data or ""))
-            ruta.abort()                          # no se lanza nada de verdad
+            # no se lanza nada de verdad: el servidor «contesta» que no
+            ruta.fulfill(status=409, content_type="application/json",
+                         body=json.dumps({"detail": "prueba: no se lanza nada"}))
         elif req.method == "GET" and "/generar?tanda=render" in req.url:
             ruta.fulfill(status=200, content_type="application/json", body=json.dumps(plan_viejo))
+        elif req.method == "PUT" and "/musica/animo" in req.url and falso["animo"]:
+            # la banda «se monta» con un trabajo que ya terminó: así se ve qué
+            # viene DESPUÉS sin buscar temas en Jamendo
+            pedidas.append((req.url, req.post_data or ""))
+            ruta.fulfill(status=200, content_type="application/json", body=json.dumps(
+                {"trabajo_id": falso["animo"], "animo": "alegre", "remontando": False}))
         else:
             ruta.continue_()
     pg.p.route("**/api/proyectos/**", al_pedir)
@@ -3233,11 +3242,120 @@ def montar_los_cambios_no_paga_imagenes(navegador, datos):
         ok(not any("/generar" in u for u, _d in pedidas),
            f"y diciendo que no, no lanza nada ({pedidas})")
         pg.aceptar = True
+        # (6) SIN MP4 Y CON SOLO EL ÁNIMO PEDIDO: el botón monta el VÍDEO, con
+        # el ánimo dentro (antes montaba la música y ahí se quedaba), y como
+        # hay imágenes viejas, pregunta antes
+        _r, hechos = api.get(f"/api/trabajos?proyecto={pid}")
+        falso["animo"] = next((t.get("id") for t in hechos.get("trabajos") or []
+                               if t.get("estado") == "listo"), "")
+        del pedidas[:]
+        pg.js("const v = APP.light.video; const est = estadoAjustes({ tipo: 'video', pid: v.pid });"
+              " est.aplicando = false; olvidarCambiosDelMontaje(est, v.pid); est.animoPedido = 'alegre';"
+              " v.fichas.render = Object.assign({}, v.fichas.render, { salidas: {} });"
+              " v.vista = 'video'; pintarLight(); await refrescarPlanLight('render', true); repintarBarra();")
+        pg.p.wait_for_timeout(800)
+        ok(pg.visible(".barra-accion button", "Montar el vídeo · ≈ 0.25 $")
+           and not pg.visible(".barra-accion button", "Montar el vídeo con"),
+           "sin MP4 y con el ánimo pedido, la barra ofrece montar el vídeo, con su precio")
+        antes = len(pg.dialogos)
+        pg.pulsar(".barra-accion button", "Montar el vídeo · ≈")
+        pg.p.wait_for_timeout(4000)
+        ok(len(pg.dialogos) > antes, "pregunta antes (hay imágenes viejas que dibujar)")
+        ok(any("/musica/animo" in u for u, _d in pedidas)
+           and any("/generar" in u and '"render"' in d for u, d in pedidas),
+           f"y monta la música con el ánimo y DESPUÉS el vídeo ({[u.rsplit('/', 2)[-2:] for u, _d in pedidas]})")
+        # el 409 de mentira de arriba se apunta en la consola como cualquier
+        # tanda que no se puede lanzar: ese no es un fallo de la pantalla
+        pg.errores[:] = [e for e in pg.errores if "prueba: no se lanza nada" not in e]
     finally:
         pg.p.unroute("**/api/proyectos/**")
     pg.js("const est = estadoAjustes({ tipo: 'video', pid: APP.light.video.pid, diferir: true });"
           " est.aplicando = false; olvidarCambiosDelMontaje(est, APP.light.video.pid);")
     pg.sin_errores("montar los cambios no paga imágenes")
+    pg.cerrar()
+
+
+@escenario
+def los_cambios_del_montaje_no_se_pierden(navegador, datos):
+    """Revisión del rediseño de Crear (21-10-2026). (2) El ánimo de la música
+    pedido y sin montar se borraba en silencio cada vez que se releía el vídeo
+    (`cargarVideoLight`, treinta sitios): ahora se queda, también al recargar
+    la página, y salir del vídeo con él avisa. (5) Lo apuntado lo recoge
+    CUALQUIER montaje (aquí, «Montar el vídeo» de Imágenes): el contador baja,
+    pero el ánimo, que no está en el servidor, sigue pendiente."""
+    pid, api = datos["video"], datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    ok(_montar_desde_video(pg), "se parte de un vídeo montado al día")
+    pg.p.wait_for_timeout(1500)
+
+    def barra():
+        return pg.p.evaluate("() => [...document.querySelectorAll('.barra-accion button')]"
+                             ".map(b => b.innerText).join(' | ')")
+    # EL ÁNIMO, pedido en su selector (sin Jamendo está apagado: se enciende)
+    pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="Música").first \
+        .locator("button", has_text="Cambiar").click()
+    pg.p.wait_for_timeout(800)
+    pg.js("const est = estadoAjustes({ tipo: 'video', pid: APP.light.video.pid });"
+          " est.hayJamendo = true; est.repintar();")
+    animo = pg.p.evaluate("() => { const u = animoUnicoDe(estadoAjustes({ tipo: 'video', "
+                          "pid: APP.light.video.pid })); return ANIMOS_MUSICA.find(a => a[0] !== u)[0]; }")
+    pg.p.locator(".ajustes-en-video select.animo-automatica").first.select_option(animo)
+    pg.p.wait_for_timeout(800)
+    ok("Montar el vídeo con 1 cambio" in barra(), f"pedir un ánimo es 1 cambio sin aplicar ({barra()})")
+    pg.js("await recargarVideoAbierto(); pintarLight();")
+    pg.p.wait_for_timeout(1500)
+    ok("Montar el vídeo con 1 cambio" in barra(),
+       f"releer el vídeo NO borra el ánimo pedido ({barra()})")
+    # RECARGAR LA PÁGINA: sigue ahí (guardado en el navegador, por vídeo)
+    pg.p.reload()
+    pg.p.wait_for_function("() => typeof APP !== 'undefined' && APP.light && APP.light.datos", timeout=30000)
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'video'; pintarLight();")
+    pg.p.wait_for_timeout(2000)
+    ok("Montar el vídeo con 1 cambio" in barra(),
+       f"y recargar la página tampoco ({barra()})")
+    ok(pg.p.evaluate("() => estadoAjustes({ tipo: 'video', pid: APP.light.video.pid }).animoPedido") == animo,
+       "con el mismo ánimo pedido")
+    # SALIR CON ÉL avisa; diciendo que no, te quedas
+    pg.aceptar = False
+    antes = len(pg.dialogos)
+    pg.pulsar(".salida-crear")
+    pg.p.wait_for_timeout(800)
+    ok(len(pg.dialogos) > antes and "sin aplicar" in pg.dialogos[-1],
+       f"salir del vídeo con cambios sin aplicar avisa ({pg.dialogos[antes:]})")
+    ok(pg.p.evaluate(f"() => APP.light.video.pid === '{pid}'"), "y diciendo que no, sigue en el vídeo")
+    pg.aceptar = True
+    # (5) UN AJUSTE DE OTRA FILA, montado por OTRO camino: «Montar el vídeo» de Imágenes
+    pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="💬 Subtítulos").first \
+        .locator("button", has_text="Cambiar").click()
+    pg.p.wait_for_timeout(800)
+    pg.p.locator(".ajustes-en-video .editor-ajuste .campo").filter(
+        has=pg.p.locator("label", has_text="Dónde va")).first.locator("button", has_text="Arriba").click()
+    pg.p.wait_for_timeout(2000)
+    ok("Montar el vídeo con 2 cambios" in barra(), f"los subtítulos son otro cambio: 2 ({barra()})")
+    pg.js("await recargarVideoAbierto();")   # el vídeo ya se sabe obsoleto
+    ir_al_paso(pg, "Imágenes")
+    pg.p.wait_for_timeout(2500)
+    montar = pg.p.locator(".barra-accion button").filter(has_text="Montar el vídeo").first
+    ok(montar.count() and montar.is_enabled(), f"Imágenes ofrece «Montar el vídeo» ({barra()})")
+    if montar.count():
+        montar.click()
+        pg.p.wait_for_timeout(2000)
+    ok(api.libre(pid, 600), "el montaje termina")
+    pg.sin_trabajo(600)
+    pg.p.wait_for_timeout(2000)
+    ir_al_paso(pg, "Vídeo")
+    pg.p.wait_for_timeout(2500)
+    ok("Montar el vídeo con 1 cambio" in barra(),
+       f"ese montaje recoge los subtítulos; el ánimo, que no está en el servidor, sigue pendiente ({barra()})")
+    # se deja como estaba para quien venga detrás
+    pg.js("const est = estadoAjustes({ tipo: 'video', pid: APP.light.video.pid });"
+          " est.animoPedido = ''; olvidarCambiosDelMontaje(est, APP.light.video.pid);")
+    api.put(f"/api/proyectos/{pid}/subtitulos", {"posicion": "auto"})
+    api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})
+    api.libre(pid)
+    pg.sin_errores("los cambios del montaje no se pierden")
     pg.cerrar()
 
 

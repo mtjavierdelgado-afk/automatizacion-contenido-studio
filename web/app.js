@@ -5616,18 +5616,51 @@ function repintarCarril() {
   viejo.replaceWith(carrilCrear(paso));
 }
 
-/* «‹ TUS PROYECTOS»: LA ÚNICA SALIDA DE CREAR (el logo es la otra). Sustituye a
-   «‹ Mis vídeos», «← Volver», «‹ Volver», «‹ Todos los proyectos», «Todos los
-   estilos» y «‹ Volver al vídeo», que llevaban casi al mismo sitio con nombres
-   distintos. Lo escrito en un estilo se guarda antes de irse. */
+/* LA SALIDA DE CREAR (el logo es la otra). Sustituye a «‹ Mis vídeos», «←
+   Volver», «‹ Volver», «‹ Todos los proyectos», «Todos los estilos» y «‹
+   Volver al vídeo», que llevaban casi al mismo sitio con nombres distintos.
+   Lo escrito en un estilo se guarda antes de irse.
+
+   VUELVE AL PROYECTO, NO A LA PORTADA (N3 de las notas de mejoras, «me bota
+   al menú»; revisión del rediseño, 21-10-2026). Desde un vídeo, un estilo o
+   un vídeo nuevo de un proyecto se vuelve a ESE proyecto (sus estilos y sus
+   vídeos, `dentroDeProyecto`) y el botón lleva su nombre: «‹ Estado Play».
+   Desde ahí, «‹ Tus proyectos» lleva a la portada. Sin proyecto (o sin
+   proyectos), a la portada directamente. */
+function proyectoDeLaSalida() {
+  if (!listaClientes().length) return '';
+  const v = APP.light.video || {};
+  if (v.pid) return clienteDeVideo({ id: v.pid, estilo_light: v.estilo || '' });
+  const estilo = estiloDelCarril();
+  return estilo ? clienteDe(estilo) : '';
+}
+
 function salidaTusProyectos() {
+  const cid = proyectoDeLaSalida();
+  const ficha = cid ? fichaCliente(cid) : null;
   return h('button', {
-    clase: 'mini fantasma salida-crear', title: 'Tus proyectos: tus estilos y tus vídeos',
+    clase: 'mini fantasma salida-crear',
+    title: ficha ? `Volver al proyecto «${ficha.nombre}»: sus estilos y sus vídeos`
+      : 'Tus proyectos: tus estilos y tus vídeos',
     onclick: () => {
       if (APP.light.pendiente) volcarPresetLight();
-      irAInicioLight();
+      if (ficha) irAlProyectoLight(cid);
+      else irAInicioLight();
     },
-  }, '‹ Tus proyectos');
+  }, ficha ? `‹ ${ficha.nombre}` : '‹ Tus proyectos');
+}
+
+/* AL PROYECTO desde un vídeo o un estilo: como la portada, pero con el
+   proyecto elegido. El vídeo se cierra en la pantalla, no en el servidor. */
+function irAlProyectoLight(cid) {
+  if (!puedeSalirDelVideo()) return;
+  pararPrevia();
+  recordarVideoLight('');
+  apuntarCliente(cid);
+  APP.light.desdeVideo = '';
+  subirArriba('panel');
+  irALight('galeria');
+  cargarGaleriaLight(true);
 }
 
 /* LA CABECERA DEL VÍDEO: su miniatura, su nombre (✏️ lo cambia ahí mismo, sin

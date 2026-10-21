@@ -22,7 +22,8 @@ te necesita), **Crear** (estilos y vídeos: todo lo de esta guía hasta
 «Vídeo»), **Publicar** (las redes), **Automatizar** (la Parrilla de guiones y
 Analizar cuentas) y **Configuración**. Al abrir el Studio estás en el
 **Inicio**; Crear (y el logo) te llevan a **Tus proyectos**. Cada pantalla trae
-su salida (en Crear, «‹ Tus proyectos»; en los módulos, «‹ Volver», «‹ La
+su salida (en Crear, la del proyecto en el que estás, «‹ Estado Play», y desde
+él «‹ Tus proyectos»; en los módulos, «‹ Volver», «‹ La
 cola», «‹ Parrilla») y el «atrás» del
 móvil nunca te saca del Studio.
 
@@ -94,8 +95,9 @@ Lo que borras o apartas (un estilo, un vídeo) va a la **🗑 Papelera**, arriba
 en la portada y dentro de cada proyecto: desde ahí se **devuelve** cuando
 quieras.
 
-**Volver al inicio** desde cualquier pantalla: **‹ Tus proyectos** (arriba) o
-el **logo**. Lo que se esté generando sigue en el servidor y lo vuelves a ver
+**Salir de un vídeo**: arriba, **‹ <su proyecto>** te deja en ese proyecto (sus
+estilos y sus vídeos), y desde ahí **‹ Tus proyectos** en la portada; el
+**logo** lleva directo a Tus proyectos. Lo que se esté generando sigue en el servidor y lo vuelves a ver
 al abrir ese vídeo; arriba a la derecha se ve qué vídeo se está haciendo
 (púlsalo para ir a él).
 
@@ -224,7 +226,8 @@ Guion · Voz · Imágenes · Vídeo**. Cada paso dice cómo está, con forma y c
 - Debajo de cada nombre, una línea con lo suyo («6 bloques · 115 palabras»,
   «0:53 · Gonzalo», «11 planos»…), y al final, **lo gastado en este vídeo**.
 
-Arriba, **‹ Tus proyectos** (la salida) y la **cabecera del vídeo**: su nombre
+Arriba, la salida (**‹ <su proyecto>**, o **‹ Tus proyectos** si el vídeo no
+es de ninguno) y la **cabecera del vídeo**: su nombre
 (✏️ lo cambia ahí mismo, sin regenerar nada), su estilo (🎨, lleva al paso
 Estilo), su proyecto (📁) y **el gasto** (púlsalo para verlo desglosado).
 

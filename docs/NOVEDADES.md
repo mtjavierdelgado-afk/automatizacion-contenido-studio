@@ -23,9 +23,12 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   aplicar», «Vídeo obsoleto», «1 cambio por traer»), ○ pendiente, · aún no — y
   una línea con lo suyo («6 bloques · 115 palabras», «0:53 · Gonzalo»). Debajo,
   lo gastado en el vídeo. Sustituye a la barra de pasos de abajo.
-- **Una sola salida: «‹ Tus proyectos»** (y el logo). Se fueron «‹ Mis vídeos»,
-  «← Volver», «‹ Volver», «‹ Todos los proyectos», «Todos los estilos» y
-  «‹ Volver al vídeo». Arriba de cada paso, **la cabecera del vídeo**: su
+- **Una sola salida arriba** (y el logo). Desde un vídeo o un estilo de un
+  proyecto **vuelve a ese proyecto** y lleva su nombre («‹ Estado Play»): sus
+  estilos y sus vídeos, no la portada. Desde ahí, «‹ Tus proyectos» lleva a la
+  portada; sin proyecto, la salida ya es «‹ Tus proyectos». Se fueron «‹ Mis
+  vídeos», «← Volver», «‹ Volver», «‹ Todos los proyectos», «Todos los
+  estilos» y «‹ Volver al vídeo». Arriba de cada paso, **la cabecera del vídeo**: su
   nombre (✏️ lo cambia ahí mismo; en «Últimos vídeos», también en su fila),
   su estilo, su proyecto y el gasto.
 - **Una barra de acción pegada abajo en cada paso**: cómo está, qué va a hacer

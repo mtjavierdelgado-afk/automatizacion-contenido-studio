@@ -784,11 +784,21 @@ def del_video_a_su_estilo_y_de_vuelta(navegador, datos):
     ok(pg.p.evaluate(f"() => APP.light.vista === 'elegido' && APP.light.video.pid === '{pid}'"),
        "el carril vuelve a ese vídeo")
     ir_al_paso(pg, "Estilo")
+    # LA SALIDA VUELVE AL PROYECTO DEL VÍDEO, no a la portada (N3: «me bota
+    # al menú»; revisión del rediseño, 21-10-2026), y lleva su nombre
+    ok(pg.esperar(".salida-crear", "‹ Estado Play", 10),
+       "dentro del vídeo, la salida lleva el nombre de su proyecto («‹ Estado Play»)")
+    pg.pulsar(".salida-crear", "Estado Play")
+    pg.p.wait_for_timeout(1200)
+    ok(not pg.visible("h2", "Tus proyectos") and pg.visible("h2", "Estado Play")
+       and pg.p.evaluate("() => !APP.light.video.pid"),
+       "«‹ Estado Play» enseña los estilos del proyecto del vídeo, no «Tus proyectos» (y cierra el vídeo)")
+    ok(pg.visible(".ficha-estilo", "Estado Play Matriz") or pg.visible(".tarjeta-estilo", "Estado Play Matriz"),
+       "con el estilo del vídeo entre ellos")
+    pg.captura("05_salida_desde_el_estilo", entera=False)
     pg.pulsar(".salida-crear", "Tus proyectos")
     pg.p.wait_for_timeout(800)
-    ok(pg.visible("h2", "Tus proyectos") and pg.p.evaluate("() => !APP.light.video.pid"),
-       "«‹ Tus proyectos» es la salida: a la portada, con el vídeo cerrado")
-    pg.captura("05_salida_desde_el_estilo", entera=False)
+    ok(pg.visible("h2", "Tus proyectos"), "y desde el proyecto, «‹ Tus proyectos» lleva a la portada")
     # REGENERAR EL ESTILO pasa por «generando» y vuelve a la ficha: el camino
     # de vuelta al vídeo tiene que seguir ahí (sin gastar: solo las vistas)
     pg.js(f"await abrirVideoLight('{pid}');")
@@ -2992,21 +3002,21 @@ def salir_y_cada_video_lo_suyo(navegador, datos):
     ok(r.status_code == 201 and otro, f"se crea un segundo vídeo ({r.status_code})")
     pg = Pagina(navegador, datos)
 
-    # 1. LAS SALIDAS AL INICIO: «‹ Tus proyectos» (la única de Crear desde el
-    # rediseño, 20-10-2026) y el logo
-    salidas = (("«‹ Tus proyectos»", lambda: pg.pulsar(".salida-crear", "Tus proyectos")),
+    # 1. LAS SALIDAS: la de Crear (desde el rediseño, 20-10-2026; vuelve al
+    # proyecto del vídeo y lleva su nombre, revisión del 21-10) y el logo
+    salidas = (("«‹ Estado Play»", lambda: pg.pulsar(".salida-crear", "Estado Play")),
                ("el logo", lambda: pg.p.click("#cabecera .marca")))
     for vista in ("encargo_video", "guion", "voz", "previa", "video"):
         pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = '{vista}'; pintarLight();")
-        ok(pg.esperar(".salida-crear", "Tus proyectos", 15),
-           f"en la pantalla «{vista}» del vídeo está «‹ Tus proyectos»")
+        ok(pg.esperar(".salida-crear", "‹ Estado Play", 15),
+           f"en la pantalla «{vista}» del vídeo está la salida a su proyecto («‹ Estado Play»)")
     for como, accion in salidas:
         pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'video'; pintarLight();")
         pg.esperar(".cab-video", None, 15)
         accion()
         pg.p.wait_for_timeout(1200)
         ok(pg.p.evaluate("() => APP.light.vista !== 'elegido' && !APP.light.video.pid"),
-           f"{como} saca del vídeo al inicio")
+           f"{como} saca del vídeo")
     pg.captura("19_inicio", entera=False)
 
     # 2. CADA VÍDEO CON SU TRABAJO
@@ -6227,9 +6237,12 @@ def diseno_crearia(navegador, datos):
     ok(pg.esperar(".tarjeta-inicio.tarjeta-saludo", segundos=10)
        and pg.p.evaluate("() => MODULOS.actual") == "inicio", "al entrar en el Studio se abre el Inicio")
     pg.js(f"irAModulo('crear'); await abrirVideoLight('{datos['video']}'); APP.light.video.vista = 'video'; pintarLight();")
-    ok(pg.esperar(".salida-crear", "Tus proyectos", 15), "un vídeo abierto trae su «‹ Tus proyectos» arriba")
+    ok(pg.esperar(".salida-crear", "‹ Estado Play", 15), "un vídeo abierto trae arriba la salida a su proyecto")
+    pg.pulsar(".salida-crear", "Estado Play")
+    ok(pg.esperar("h2", "Estado Play", 10) and not pg.visible("h2", "Tus proyectos"),
+       "que lleva a su proyecto")
     pg.pulsar(".salida-crear", "Tus proyectos")
-    ok(pg.esperar("h2", "Tus proyectos", 10), "y lleva a Tus proyectos")
+    ok(pg.esperar("h2", "Tus proyectos", 10), "y desde ahí, a Tus proyectos")
     pg.js("PUB.seccion = 'resultados'; irAModulo('publicar');")
     ok(pg.esperar(".volver-modulo button", "Volver", 10), "Publicar → Resultados trae «‹ Volver»")
     pg.pulsar(".volver-modulo button", "Volver")

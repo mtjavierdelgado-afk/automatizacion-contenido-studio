@@ -49,12 +49,13 @@ ESCENARIOS = [
         "espacio": {
             "sitio": "bano_mampara",
             "descripcion": (
-                "small apartment bathroom in Lima, 1.5 x 2.4 m, rectangular; toilet on the "
-                "left wall, wall-hung vanity with a single basin and rectangular mirror on "
-                "the back wall, walk-in shower at the far end on the right; door in the near "
-                "short wall; same layout, same camera height and same proportions in every "
-                "shot; large light-grey porcelain tiles on the floor, white walls, chrome "
-                "fittings"),
+                "small apartment bathroom in Lima, 1.5 m wide x 2.4 m deep, seen from the "
+                "door in the near short wall; LEFT long wall: the toilet, near the middle; "
+                "BACK short wall, left half: a wall-hung vanity with a single basin and a "
+                "rectangular mirror above it; RIGHT side, from the back wall forward: a walk-in "
+                "shower 0.9 m deep with a low curb and its glass screen facing the room; same "
+                "layout, same camera height and same proportions in every shot; large "
+                "light-grey porcelain tiles on the floor, white walls, chrome fittings"),
             "luz": "day, soft cool daylight from a small high window plus warm ceiling downlight",
             "secundarios": []},
         "material": (
@@ -388,8 +389,21 @@ def main():
                         "estado inicial."
                         + (f" Y tiene que verse YA, donde dice, lo que luego cambia: «{tr_.get('inicial')}»."
                            if tr_.get("inicial") else "")
-                        + " ¿Lo es? Devuelve SOLO "
-                        '{"vale": "si" | "no", "por_que": "<una frase>"}', raiz)
+                        + " Contesta por separado: 'distribucion' (cada mueble fijo en la pared que "
+                        "dice y la puerta donde dice), 'objeto' (lo que luego cambia está y está donde "
+                        "dice; 'si' si no se pide ninguno) y 'acabados' (colores y materiales). Devuelve SOLO "
+                        '{"distribucion": "si" | "no", "objeto": "si" | "no", "acabados": "si" | "no", '
+                        '"por_que": "<una frase>"}', raiz)
+                    # LO QUE IMPORTA es la distribucion y el objeto: los planos editan la
+                    # base, asi que un color de azulejo distinto sale igual en todos y no
+                    # rompe la continuidad (prueba del 21-10: dos bases tumbadas por el
+                    # beige y la griferia negra)
+                    if "distribucion" in juicio:
+                        if juicio.get("acabados") not in ("si", "sí"):
+                            informe.apunta("aviso", "los acabados de la base no son los pedidos "
+                                                    "(no impide aprobarla)")
+                        juicio["vale"] = "si" if all(juicio.get(x) in ("si", "sí")
+                                                     for x in ("distribucion", "objeto")) else "no"
                 except Exception as fallo:                          # noqa: BLE001
                     juicio = {"vale": "?", "por_que": f"no se pudo preguntar a Claude: {fallo}"}
                 est.setdefault("juicios", {}).setdefault(k, {})[f"base{intento}"] = juicio

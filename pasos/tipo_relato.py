@@ -517,7 +517,9 @@ PROMPT_BASE = (
     "furniture must be exactly where this description puts it, with the materials and "
     "colours it names, and nothing it does not name: {descripcion}. Before finishing, check "
     "the description item by item against the picture (what is on the left, what is on "
-    "the back wall, what is on the right, where the door is). Light: {luz}. {antes}Frame "
+    "the back wall, what is on the right, where the door is). The colours and materials "
+    "named here WIN over any palette of the style (its references and its description): "
+    "take only the look and the rendering from the style, never its colours or finishes. Light: {luz}. {antes}Frame "
     "it as a clear, level, eye-height view from the entrance that shows the whole layout, "
     "as the reference shot every other shot of this place will be edited from. No people, "
     "no text, no letters.")

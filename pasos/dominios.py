@@ -40,6 +40,7 @@ comprueba `prueba_dominios.py` contra la escalera de `main`.
 import json
 import os
 import re
+import sys
 import tempfile
 import threading
 import time
@@ -139,19 +140,37 @@ _LOCK = threading.Lock()
 _CACHE = {}
 
 
+def _raiz_del_servicio():
+    """La carpeta de proyectos del servicio que está corriendo, si lo hay.
+
+    `app.py` la fija con `--proyectos` (las pruebas) o con ESTUDIO_PROYECTOS (el
+    servidor), y la guarda en SU memoria, no en el entorno. Este módulo no puede
+    importar app.py, así que la pregunta a quien ya lo tenga cargado: así los
+    tipos viven siempre al lado de los proyectos con los que se usan, y una
+    prueba con su carpeta aparte no escribe en la de verdad."""
+    for nombre in ("app", "__main__"):
+        modulo = sys.modules.get(nombre)
+        funcion = getattr(modulo, "raiz_proyectos", None)
+        if callable(funcion):
+            try:
+                return funcion()
+            except Exception:                                    # noqa: BLE001
+                return None
+    return None
+
+
 def ruta_usuario(raiz=None):
-    """Donde viven los tipos del dueño.
+    """Donde viven los tipos del dueño: `<proyectos>/_sistema/dominios.json`.
 
     `ESTUDIO_DOMINIOS` (un fichero; lo usan las pruebas) manda. Si no, la
-    carpeta de proyectos que se le pase (la API pasa la suya) o la del entorno,
-    como `profundidad.carpeta_cache`."""
+    carpeta que se le pase, la del servicio que corre (`_raiz_del_servicio`), la
+    del entorno o la de siempre, como `profundidad.carpeta_cache`."""
     propia = os.environ.get("ESTUDIO_DOMINIOS")
     if propia:
         return propia
-    if not raiz:
-        raiz = (os.environ.get("ESTUDIO_PROYECTOS")
-                or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                                "proyectos"))
+    raiz = (raiz or _raiz_del_servicio() or os.environ.get("ESTUDIO_PROYECTOS")
+            or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "proyectos"))
     return os.path.join(raiz, "_sistema", "dominios.json")
 
 

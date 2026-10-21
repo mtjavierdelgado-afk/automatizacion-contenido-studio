@@ -26276,6 +26276,16 @@ function bloqueMejoresPublicar() {
 const TIPOS_NEGOCIO = { lista: null, cargando: false, error: '', abierto: '',
   borrador: null, guardando: false, afinando: {}, promesa: null };
 
+/* Configuración se repinta entera, y al vaciarla el cajón vuelve arriba: aquí,
+   con el editor abierto a media pantalla, cada «+ Añadir regla» te mandaba al
+   principio. Se repinta y se deja donde estaba. */
+function repintarTiposDeNegocio() {
+  const cajon = $('#cuerpo-config');
+  const donde = cajon ? cajon.scrollTop : 0;
+  repintarClaves();
+  if (cajon) cajon.scrollTop = donde;
+}
+
 async function cargarTiposDeNegocio(forzar) {
   if (TIPOS_NEGOCIO.cargando) return TIPOS_NEGOCIO.promesa;
   if (TIPOS_NEGOCIO.lista && !forzar) return TIPOS_NEGOCIO.lista;
@@ -26315,13 +26325,13 @@ function borradorDeTipo(tipo) {
 function abrirTipoDeNegocio(tipo) {
   TIPOS_NEGOCIO.abierto = tipo ? tipo.id : 'nuevo';
   TIPOS_NEGOCIO.borrador = borradorDeTipo(tipo);
-  repintarClaves();
+  repintarTiposDeNegocio();
 }
 
 function cerrarTipoDeNegocio() {
   TIPOS_NEGOCIO.abierto = '';
   TIPOS_NEGOCIO.borrador = null;
-  repintarClaves();
+  repintarTiposDeNegocio();
 }
 
 function separarPalabras(texto) {
@@ -26342,7 +26352,7 @@ async function guardarTipoDeNegocio() {
   };
   const nuevo = !b.id;
   TIPOS_NEGOCIO.guardando = true;
-  repintarClaves();
+  repintarTiposDeNegocio();
   try {
     const r = await pedir(nuevo ? `${BASE}/api/dominios` : `${BASE}/api/dominios/${encodeURIComponent(b.id)}`,
       { method: nuevo ? 'POST' : 'PUT', cuerpo });
@@ -26356,7 +26366,7 @@ async function guardarTipoDeNegocio() {
     toast(`no se ha podido guardar: ${err.message}`, true);
   }
   TIPOS_NEGOCIO.guardando = false;
-  repintarClaves();
+  repintarTiposDeNegocio();
 }
 
 async function borrarTipoDeNegocio(tipo) {
@@ -26378,7 +26388,7 @@ async function borrarTipoDeNegocio(tipo) {
   toast(`Tipo «${tipo.nombre}» borrado`);
   if (TIPOS_NEGOCIO.abierto === tipo.id) { TIPOS_NEGOCIO.abierto = ''; TIPOS_NEGOCIO.borrador = null; }
   await cargarTiposDeNegocio(true);
-  repintarClaves();
+  repintarTiposDeNegocio();
 }
 
 /* «AFINAR CON CLAUDE»: la misma ruta que las reglas del estilo; aquí solo se
@@ -26386,7 +26396,7 @@ async function borrarTipoDeNegocio(tipo) {
 async function afinarReglaDeTipo(regla) {
   if (!String(regla.texto || '').trim()) { toast('escribe primero lo que exige la regla', true); return; }
   TIPOS_NEGOCIO.afinando[regla.id] = true;
-  repintarClaves();
+  repintarTiposDeNegocio();
   try {
     const r = await pedir(`${BASE}/api/reglas-estilo/afinar`, {
       method: 'POST', cuerpo: { texto: regla.texto, palabras: separarPalabras(regla.palabras) } });
@@ -26406,7 +26416,7 @@ async function afinarReglaDeTipo(regla) {
     toast(`no se ha podido afinar: ${err.message}`, true);
   }
   delete TIPOS_NEGOCIO.afinando[regla.id];
-  repintarClaves();
+  repintarTiposDeNegocio();
 }
 
 function tarjetaReglaDeTipo(b, regla, i) {
@@ -26439,7 +26449,7 @@ function tarjetaReglaDeTipo(b, regla, i) {
       }, TIPOS_NEGOCIO.afinando[regla.id] ? 'Afinando…' : '✦ Afinar con Claude'),
       h('button', {
         clase: 'mini fantasma', title: 'Quitar esta regla',
-        onclick: () => { b.reglas = b.reglas.filter(r => r !== regla); repintarClaves(); },
+        onclick: () => { b.reglas = b.reglas.filter(r => r !== regla); repintarTiposDeNegocio(); },
       }, '✕')),
     texto,
     h('div', { clase: 'fila regla-estilo-campos' },
@@ -26465,7 +26475,7 @@ function editorTipoDeNegocio() {
     h('span', { clase: 'crece' }),
     h('button', {
       clase: 'mini', disabled: b.reglas.length >= 20,
-      onclick: () => { b.reglas.push({ id: `n${Date.now()}`, texto: '', en: '', palabras: '', nombre: '', gravedad: 'media' }); repintarClaves(); },
+      onclick: () => { b.reglas.push({ id: `n${Date.now()}`, texto: '', en: '', palabras: '', nombre: '', gravedad: 'media' }); repintarTiposDeNegocio(); },
     }, '+ Añadir regla')));
   if (!b.reglas.length) {
     caja.appendChild(h('div', { clase: 'meta' },
@@ -26532,7 +26542,7 @@ function seccionTiposDeNegocio() {
     + 'sus reglas de foto y lo que vigila el revisor. Se elige en la ficha de cada estilo '
     + '(«Tipo de negocio»); un estilo en Automático sale como siempre.'));
   if (!lista) {
-    if (!TIPOS_NEGOCIO.cargando) cargarTiposDeNegocio().then(repintarClaves);
+    if (!TIPOS_NEGOCIO.cargando) cargarTiposDeNegocio().then(repintarTiposDeNegocio);
     caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo los tipos…'));
     return caja;
   }

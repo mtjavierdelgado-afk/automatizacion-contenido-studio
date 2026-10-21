@@ -267,7 +267,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/presets-light/{preset_id}/aportadas` | Guarda lo que se dice de cada imagen y las ★: {descripciones, destacadas}. |
 | `GET` | `/api/presets-light/{preset_id}/aportadas/{nombre}/imagen` | Una de tus imagenes de referencia, tal cual la subiste. |
 | `GET` | `/api/presets-light/{preset_id}/coste` | Lo que costo hacer este estilo (su taller), desglosado. |
-| `PUT` | `/api/presets-light/{preset_id}/dominio` | Fija el negocio de un estilo: {dominio: "estadoplay" | "general" | null}. |
+| `PUT` | `/api/presets-light/{preset_id}/dominio` | Fija el negocio de un estilo: {dominio: id de un tipo de negocio (de fábrica o propio) | null}. null vuelve a automático. |
 | `POST` | `/api/presets-light/{preset_id}/duplicar` | Una copia del estilo, con su taller. |
 | `GET` | `/api/presets-light/{preset_id}/laminas` | Las laminas de un estilo, limpias y con lo que ensena cada una. |
 | `POST` | `/api/presets-light/{preset_id}/laminas` | Una accion sobre las laminas de un estilo. |
@@ -338,7 +338,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/clientes/{cid}` | Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto. |
 | `PUT` | `/api/clientes/{cid}` | Renombra, oculta o pone clave: {nombre?, oculto?, clave?} ("" la quita). |
 | `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
-| `GET` | `/api/dominios` | Los dominios de fabrica (el negocio de un estilo). -> {dominios, automatico} |
+| `GET` | `/api/dominios` | Los tipos de negocio: los de fábrica y los del dueño (Etapa Foto C). -> {dominios: [{id, nombre, descripcion, de_fabrica, palabras, reglas, revisor, cartas_propias…}], automatico, limites} |
+| `POST` | `/api/dominios` | Crea un tipo propio: {nombre, descripcion?, palabras?, reglas? (formato de las reglas del estilo), revisor?: {equipo?, orientacion?}}. Se guarda en `<proyectos>/_sistema/dominios.json`. 400 si no vale o el nombre se repite |
+| `PUT` | `/api/dominios/{id}` | Cambia un tipo propio (el cuerpo entero). Los de fábrica, 400. -> el tipo + `estilos` que lo tienen fijado |
+| `DELETE` | `/api/dominios/{id}` | Borra un tipo propio. 409 si algún estilo lo tiene fijado; con `?forzar=true` lo borra y esos estilos vuelven a automático. Los de fábrica, 400 |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
 | `GET` | `/api/inicio/resumen` | Lo del Inicio que no sale de otras rutas, en una sola llamada. |

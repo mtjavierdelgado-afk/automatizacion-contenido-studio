@@ -11,6 +11,26 @@ vídeos, estilos, claves y contraseña no se tocan.
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
 
+**Tipos de negocio: los creas tú (21 de octubre, Etapa Foto C)**
+- **Configuración → Tipos de negocio.** Además de los de fábrica (General y
+  EstadoPlay) puedes crear los de tus clientes («Mamparas y baños», «Clínica
+  dental»…): nombre, palabras con las que se reconoce, **reglas de foto** (con
+  «Solo si el plano habla de…» y «Afinar con Claude», como las del estilo) y lo
+  que vigila el **revisor** del equipo y de las miradas. Se guardan fuera del
+  código: `asvs actualizar` no los toca.
+- **En la ficha de un estilo hay un selector «Tipo de negocio».** Elegir uno
+  no rehace nada ni cuesta nada: sus reglas entran en las imágenes de foto de
+  los vídeos nuevos, y en los ya hechos con «Traer el estilo».
+- **En «Automático» todo sale como antes**, letra por letra: crear o cambiar
+  un tipo no toca ningún vídeo que no lo haya elegido.
+- Las reglas de mandos y de equipo de consolas ya no son reglas generales de
+  foto: son del tipo EstadoPlay (en Automático siguen entrando igual cuando el
+  vídeo habla de consolas). Un estilo fijado en «General» no las recibe nunca.
+- Los encuadres de un tipo tuyo son los generales de foto; los encuadres
+  propios por negocio llegarán más adelante.
+- Ojo: cambiar las reglas de un tipo que ya usa un vídeo de foto cambia el
+  prompt de sus imágenes; quedan para rehacer, y rehacerlas se paga.
+
 **El negocio de cada estilo (21 de octubre)**
 - **Lo de EstadoPlay ya no está escrito a mano en el Studio.** Los servicios
   (consolas, simuladores, realidad virtual, karaoke) y cómo se reconocen, las
@@ -25,7 +45,8 @@ vídeos, estilos, claves y contraseña no se tocan.
   baño, unas plantas), el revisor de imágenes ya no busca televisores, mandos
   ni trípodes; mira los objetos y el equipo de ESE vídeo.
 - Un estilo puede fijar su dominio (`PUT /api/presets-light/{id}/dominio`); la
-  pantalla para elegirlo llegará con la Etapa Foto C.
+  pantalla para elegirlo es la de arriba (Etapa Foto C).
+
 **Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.

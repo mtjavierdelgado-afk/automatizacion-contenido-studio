@@ -3359,6 +3359,76 @@ def los_cambios_del_montaje_no_se_pierden(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def regrabar_un_tramo_dice_la_verdad(navegador, datos):
+    """Revisión del rediseño de Crear (21-10-2026), DINERO: «Regrabar este
+    tramo · ≈ X» del paso Voz graba ese tramo Y TODOS los que tienen cambios
+    sin grabar (`p4_voz.plan_regrabado`), y su precio era una proporción del de
+    la toma entera. Ahora el botón dice cuántos más se graban, el precio es el
+    del servidor (y ninguno si no lo hay) y la pregunta trae la cifra real,
+    pedida antes. Aquí no se graba nada: el plan del servidor se finge y el
+    POST se corta."""
+    pid, api = datos["video"], datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    # la toma de prueba es UN tramo: en la pantalla se parte en dos (el
+    # servidor, que es quien diría qué se graba, se finge abajo)
+    secciones = pg.p.evaluate("""() => { const a = APP.light.video.audio || {};
+      const bl = ((a.secciones || [])[0] || {}).bloques || [];
+      if (bl.length < 2) return [];
+      a.secciones = [{ id: 'SB001', bloques: bl.slice(0, 1) }, { id: 'SB002', bloques: bl.slice(1) }];
+      return ['SB001', 'SB002']; }""")
+    ok(len(secciones) >= 2, f"la toma de prueba se puede partir en dos tramos ({secciones})")
+    if len(secciones) < 2:
+        pg.cerrar()
+        return
+    pedida, otra = secciones[0], secciones[1]
+    pedidas = []
+
+    def al_pedir(ruta):
+        req = ruta.request
+        if req.method == "GET" and "/guion/bloques?seccion=" in req.url:
+            ruta.fulfill(status=200, content_type="application/json", body=json.dumps({"regrabar": {
+                "posible": True, "pendientes": [otra], "orden": [pedida, otra],
+                "cambiados": {otra: []}, "caracteres": 400, "usd": 0.09}}))
+        elif req.method == "POST" and "/regrabar" in req.url:
+            pedidas.append(req.url)
+            ruta.fulfill(status=409, content_type="application/json",
+                         body=json.dumps({"detail": "prueba: no se graba nada"}))
+        else:
+            ruta.continue_()
+    pg.p.route("**/api/proyectos/**", al_pedir)
+    try:
+        # el servidor dice que OTRO tramo tiene cambios sin grabar (0,05 $)
+        pg.js(f"const v = APP.light.video; v.estructura = Object.assign({{}}, v.estructura, {{ regrabar: "
+              f"{{ posible: true, pendientes: ['{otra}'], orden: ['{otra}'], cambiados: {{}}, usd: 0.05 }} }});"
+              " v.vista = 'voz'; pintarLight();")
+        pg.p.wait_for_timeout(1000)
+        boton_pedida = pg.p.locator(f".tramo-voz[data-seccion='{pedida}'] button").filter(has_text="Regrabar").first
+        boton_otra = pg.p.locator(f".tramo-voz[data-seccion='{otra}'] button").filter(has_text="Regrabar").first
+        texto_pedida = boton_pedida.inner_text() if boton_pedida.count() else ""
+        texto_otra = boton_otra.inner_text() if boton_otra.count() else ""
+        ok("y 1 más con cambios" in texto_pedida and "$" not in texto_pedida,
+           f"el botón de un tramo dice que se graba con el otro pendiente, sin precio inventado ({texto_pedida!r})")
+        ok(texto_otra.startswith("Regrabar este tramo") and "0.050 $" in texto_otra and "más" not in texto_otra,
+           f"el del tramo pendiente lleva el precio del servidor ({texto_otra!r})")
+        pg.aceptar = False
+        antes = len(pg.dialogos)
+        boton_pedida.click()
+        pg.p.wait_for_timeout(1500)
+        dicho = " ".join(pg.dialogos[antes:])
+        ok("1 tramo más" in dicho and "0.090 $" in dicho,
+           f"la pregunta dice los dos tramos y la cifra real del servidor ({dicho[:160]!r})")
+        ok(not pedidas, f"y diciendo que no, no graba nada ({pedidas})")
+        pg.aceptar = True
+    finally:
+        pg.p.unroute("**/api/proyectos/**")
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.sin_errores("regrabar un tramo dice la verdad")
+    pg.cerrar()
+
+
 def _montar_los_cambios(pg):
     """«Montar el vídeo con N cambios» (decisión 9 del rediseño de Crear): el
     único botón que monta lo cambiado en los ajustes del montaje."""

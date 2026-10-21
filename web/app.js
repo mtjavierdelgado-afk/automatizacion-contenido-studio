@@ -10907,7 +10907,7 @@ function vistaVozLight() {
   const regrabar = barraRegrabarLight();
   if (regrabar) caja.appendChild(regrabar);
 
-  caja.appendChild(tramosDeLaVoz(usdTodo));
+  caja.appendChild(tramosDeLaVoz());
   ponerBarra(barraDeLaVoz);
   return caja;
 }
@@ -10915,7 +10915,7 @@ function vistaVozLight() {
 /* LOS TRAMOS DE LA TOMA, cada uno con sus bloques en karaoke. El contenedor
    lleva `bloques-light` a propósito: es donde `reproductorLight` busca las
    palabras que tiene que ir encendiendo. */
-function tramosDeLaVoz(usdTodo) {
+function tramosDeLaVoz() {
   const v = APP.light.video;
   const lista = h('div', { clase: 'bloques-light tramos-voz' });
   const porBloque = {};
@@ -10924,16 +10924,24 @@ function tramosDeLaVoz(usdTodo) {
   for (const b of ((v.guion || {}).bloques || [])) guionPorId[b.id] = b;
   let secciones = (v.audio.secciones || []).filter(s => (s.bloques || []).length);
   if (!secciones.length) secciones = (v.audio.bloques || []).map(b => ({ id: '', bloques: [b.id] }));
-  const letras = b => textoVisibleLight((porBloque[b] || {}).texto || '').length;
-  const total = (v.audio.bloques || []).reduce((n, b) => n + letras(b.id), 0) || 1;
   const corriendo = !!trabajoVideoLight();
-  /* UNA TARJETA POR BLOQUE, y su tramo detrás: «Regrabar este tramo» graba la
-     SECCIÓN de la toma en la que cae (si son varios bloques, van juntos, y el
-     botón lo dice). */
+  /* LO QUE SE GRABA DE VERDAD AL PULSAR (revisión del rediseño, 21-10-2026):
+     el servidor graba la sección pedida Y TODAS LAS PENDIENTES
+     (`p4_voz.plan_regrabado`: orden = pedida + pendientes). El botón lo dice,
+     y el precio es solo el que ha calculado el servidor: el de
+     `estructura.regrabar` vale exactamente cuando este tramo ya es uno de los
+     pendientes (se graba lo mismo); si no, no se pone ninguno aquí y lo dice
+     la pregunta, que lo pide antes (`regrabarTramoDeLaVoz`). Antes salía una
+     proporción del precio de la toma entera, y de un tramo solo. */
+  const previsto = regrabarPrevistoLight();
+  const pendientes = (previsto && previsto.posible !== false && previsto.pendientes) || [];
   secciones.forEach(sec => {
     const bloques = sec.bloques.filter(bid => porBloque[bid]);
     if (!bloques.length) return;
-    const usd = usdTodo ? usdTodo * bloques.reduce((n, bid) => n + letras(bid), 0) / total : 0;
+    const otros = pendientes.filter(id => id !== sec.id).length;
+    const usd = pendientes.includes(sec.id) ? Number(previsto.usd) || 0 : 0;
+    const etiqueta = (otros ? `Regrabar este tramo y ${otros} más con cambios` : 'Regrabar este tramo')
+      + (usd ? ` · ≈ ${usdCorto(usd)}` : '');
     const juntos = bloques.length > 1 ? `el tramo es ${bloques[0]}–${bloques[bloques.length - 1]}: se graban juntos` : '';
     bloques.forEach(bid => {
       const marcas = porBloque[bid];
@@ -10948,10 +10956,13 @@ function tramosDeLaVoz(usdTodo) {
           onclick: () => oirTramoDeLaVoz(desde, hasta),
         }, '▶ Oír'),
         sec.id ? conAyuda('Vuelve a grabar este tramo con el texto que tiene (sin reescribirlo). '
-          + 'El resto de la toma no se toca.' + (juntos ? ` Ojo: ${juntos}.` : ''), h('button', {
+          + (otros ? `Con él se graban también los ${otros === 1 ? 'otro tramo' : `otros ${otros} tramos`} `
+            + 'que tienen cambios sin grabar: la voz no se da por buena con uno a medias. '
+            : 'El resto de la toma no se toca. ')
+          + 'Antes de grabar dice lo que cuesta.' + (juntos ? ` Ojo: ${juntos}.` : ''), h('button', {
           clase: 'mini', disabled: corriendo,
-          onclick: () => regrabarTramoDeLaVoz(sec.id, usd, juntos),
-        }, `Regrabar este tramo${usd ? ` · ≈ ${usdCorto(usd)}` : ''}`)) : null));
+          onclick: () => regrabarTramoDeLaVoz(sec.id, juntos),
+        }, etiqueta)) : null));
       const bloque = guionPorId[bid] || { id: bid, texto: marcas.texto || '' };
       tarjeta.appendChild(parrafoKaraokeLight(bloque, marcas, textoDeBloqueLight(bloque)));
       lista.appendChild(tarjeta);
@@ -10977,12 +10988,40 @@ function oirTramoDeLaVoz(desde, hasta) {
   audio.play().catch(fallo => avisarAudioFallido(fallo));
 }
 
-async function regrabarTramoDeLaVoz(seccion, usd, juntos) {
-  if (!window.confirm(`¿Regrabar este tramo tal cual${usd ? ` (≈ ${usdCorto(usd)})` : ''}?\n\n`
-    + 'Se vuelve a grabar solo este tramo con el texto que tiene; el resto de la toma no se toca.'
-    + (juntos ? `\n\n(${juntos}.)` : ''))) return;
-  await regrabarPendientesLight(seccion);
+/* REGRABAR UN TRAMO: antes de preguntar se pide al servidor lo que va a grabar
+   de verdad con este tramo (`GET /guion/bloques?seccion=`, el mismo cálculo
+   que la regrabación): qué tramos y cuánto. Sin esa cifra no se inventa
+   ninguna: se dice que no se sabe. */
+async function regrabarTramoDeLaVoz(seccion, juntos) {
+  const v = APP.light.video;
+  if (REGRABANDO_TRAMO[v.pid]) return;          // un doble clic no pregunta dos veces
+  REGRABANDO_TRAMO[v.pid] = true;
+  try {
+    // lo escrito y sin guardar entra en lo que se graba: antes de preguntar
+    await guardarBloquesPendientesLight();
+    let plan = null;
+    try {
+      plan = (await pedir(`${API.guionBloques(v.pid)}?seccion=${encodeURIComponent(seccion)}`)).regrabar;
+    } catch (e) { plan = null; }
+    if (plan && plan.posible === false) { toast(`No se puede regrabar por tramos: ${plan.por_que_no}`, true); return; }
+    const orden = (plan && plan.orden) || [];
+    const otros = orden.filter(id => id !== seccion).length;
+    const usd = plan ? Number(plan.usd) || 0 : 0;
+    const precio = plan ? ` (≈ ${usdCorto(usd)})` : ' (no se ha podido calcular lo que cuesta)';
+    const que = otros
+      ? `¿Regrabar este tramo y ${otros} ${otros === 1 ? 'tramo más' : 'tramos más'} con cambios sin grabar${precio}?\n\n`
+        + `Se graban juntos (${orden.join(', ')}): la voz no se da por buena con uno a medias. `
+        + 'El resto de la toma no se toca.'
+      : `¿Regrabar este tramo tal cual${precio}?\n\n`
+        + 'Se vuelve a grabar solo este tramo con el texto que tiene; el resto de la toma no se toca.';
+    if (!window.confirm(que + (juntos ? `\n\n(${juntos}.)` : ''))) return;
+    await regrabarPendientesLight(seccion);
+  } finally {
+    delete REGRABANDO_TRAMO[v.pid];
+  }
 }
+
+const REGRABANDO_TRAMO = {};
 
 /* LA BARRA DE LA VOZ: grabarla, regrabar lo escrito y, con la voz al día, el
    paso siguiente (generar las imágenes o ponerlas al día). */

@@ -3130,14 +3130,23 @@ def musica_efectos_y_subtitulos_en_el_video(navegador, datos):
     ok(pg.visible(".barra-accion button", "Montar el vídeo con 1 cambio · gratis"),
        "y la barra ofrece «Montar el vídeo con 1 cambio · gratis»")
     pg.captura("n9_un_cambio_sin_aplicar", entera=False)
-    _montar_los_cambios(pg)
+    # EL BOTÓN APLICA (`POST /montaje/aplicar`), y lo pendiente es SOLO la
+    # mezcla: el servidor lo dice en `solo_mezcla` (con él, el trabajo es
+    # volver a mezclar sobre los clips que hay, sin capas ni montaje nuevo)
+    with pg.p.expect_response(lambda r: "/montaje/aplicar" in r.url and r.request.method == "POST",
+                              timeout=20000) as respuesta:
+        _montar_los_cambios(pg)
+    aplicado = respuesta.value.json() if respuesta.value.ok else {}
+    ok(aplicado.get("solo_mezcla") is True,
+       f"el botón aplica los cambios y es SOLO volver a mezclar (solo_mezcla={aplicado.get('solo_mezcla')!r})")
     pg.p.wait_for_timeout(1500)
     ok(api.libre(pid), "la remezcla termina")
     pg.sin_trabajo(300)
     _r, despues = api.get(f"/api/trabajos?proyecto={pid}")
     nuevos = [t for t in despues.get("trabajos") or [] if t.get("id") not in vistos]
-    ok(len(nuevos) == 1 and all(t.get("paso") == "render" for t in nuevos),
-       f"y el botón lanza SOLO una remezcla del render ({[(t.get('nombre'), t.get('paso')) for t in nuevos]})")
+    ok(len(nuevos) == 1 and all(t.get("paso") == "render" and t.get("id") == aplicado.get("trabajo_id")
+                                for t in nuevos),
+       f"y el botón lanza SOLO esa remezcla del render ({[(t.get('nombre'), t.get('paso')) for t in nuevos]})")
     ok(not any(t.get("paso") in ("assets", "voz", "callouts") for t in nuevos),
        "ningún trabajo de imágenes, voz ni rótulos")
     igual_versiones = (_version_de(datos, "assets", "").get("activa"),

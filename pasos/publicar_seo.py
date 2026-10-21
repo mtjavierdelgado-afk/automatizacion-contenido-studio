@@ -205,9 +205,24 @@ def palabra_del_video(datos_video, ajustes, info=None):
     proyecto = str((ajustes or {}).get("palabra_clave") or "").strip()
     if info is None:
         return proyecto
-    if proyecto and SR.es_relevante(proyecto, info, (ajustes or {}).get("zona") or ""):
-        return proyecto
-    return " ".join(str((datos_video or {}).get("palabra_propuesta") or "").split())[:80]
+    return palabra_y_origen(datos_video, ajustes, info)[0]
+
+
+def palabra_y_origen(datos_video, ajustes, info):
+    """(palabra, de dónde sale): «tuya», «proyecto», «propuesta» o "".
+    La propuesta de Claude solo vale si ESTE vídeo la trata (revisión del
+    20-10), y la pantalla dice que es una propuesta sin confirmar."""
+    propia = str((datos_video or {}).get("palabra_clave") or "").strip()
+    if propia:
+        return propia, "tuya"
+    zona = (ajustes or {}).get("zona") or ""
+    proyecto = str((ajustes or {}).get("palabra_clave") or "").strip()
+    if proyecto and SR.es_relevante(proyecto, info, zona):
+        return proyecto, "proyecto"
+    propuesta = " ".join(str((datos_video or {}).get("palabra_propuesta") or "").split())[:80]
+    if propuesta and SR.es_relevante(propuesta, info, zona):
+        return propuesta, "propuesta"
+    return "", ""
 
 
 def secundarias_del_video(ajustes, info=None, tope=8):

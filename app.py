@@ -17643,6 +17643,9 @@ def publicar_probar_youtube():
                               "simulado" if clave else "sin poner")
     else:
         ficha = modulo.probar_youtube(clave)
+        if clave and ficha.get("estado") != "sin_red":
+            # «Probar» gasta 1 unidad; con el cupo gastado, el día queda marcado
+            P.SR.gastar(raiz_proyectos(), 1, agotado="cupo" in str(ficha.get("mensaje") or ""))
     ficha = modulo._tachar([ficha], {"youtube": {"clave": clave}})[0]
     return {"prueba": ficha, "cupo": P.SR.cupo(raiz_proyectos())}
 

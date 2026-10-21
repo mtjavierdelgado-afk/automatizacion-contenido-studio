@@ -23257,6 +23257,11 @@ function bloqueSeoVideo() {
       h('span', { clase: 'meta crece' }, `Claude propone para este vídeo: «${seo.palabra_propuesta}»`),
       h('button', { clase: 'mini', onclick: () => guardarSeoVideoPublicar({ palabra_clave: seo.palabra_propuesta }) }, 'Usarla')));
   }
+  if (seo.palabra_origen === 'propuesta') {
+    b.appendChild(h('div', { clase: 'fila' },
+      h('span', { clase: 'meta crece' }, `En uso: «${seo.palabra}», la que propuso Claude para este vídeo (sin confirmar). Confírmala o escribe otra.`),
+      h('button', { clase: 'mini', onclick: () => guardarSeoVideoPublicar({ palabra_clave: seo.palabra }) }, 'Confirmarla')));
+  }
   if (seo.proyecto_fuera) {
     b.appendChild(h('div', { clase: 'meta' }, `La palabra clave del proyecto («${proyecto}») no se usa aquí: este vídeo no trata de eso, y meterla espanta a quien la busca.`));
   }
@@ -23306,7 +23311,8 @@ function bloqueBusquedasSeo() {
       h('th', {}, 'Competencia'), h('th', {}, 'Tu historial'), h('th', {}, 'Total'), h('th', {}, ''))),
     h('tbody', {}, ...filas.map(c => {
       const comp = c.competencia || null;
-      const enUso = (seo.palabra || '').toLowerCase() === String(c.frase || '').toLowerCase();
+      const plano = x => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+      const enUso = plano(seo.palabra) === plano(c.frase);
       return h('tr', { clase: c.recomendada ? 'recomendada' : '' },
         h('td', {}, h('span', {}, c.frase), h('div', { clase: 'meta' }, `${c.origen || ''}${c.recomendada ? ' · la recomendada' : ''}`)),
         h('td', {}, valor((c.relevancia || {}).valor)),

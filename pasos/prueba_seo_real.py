@@ -84,6 +84,7 @@ class Doble:
         self.sugerencias = {}          # (fuente, q) -> [..]
         self.caido = False
         self.cupo_gastado = False
+        self.clave_mala = False
         self.clave = "AIzaSECRETA1234567890"
 
     def __call__(self, url, timeout=6):
@@ -102,6 +103,9 @@ class Doble:
                 return 200, f'window.google.ac.h({json.dumps([q["q"], [[s, 0] for s in lista]])})'
             return 200, json.dumps([q["q"], lista])
         if "googleapis" in partes.netloc:
+            if self.clave_mala:
+                return 400, json.dumps({"error": {"message": f"API key not valid: {q.get('key')}",
+                                                  "errors": [{"reason": "badRequest"}]}})
             if self.cupo_gastado:
                 return 403, json.dumps({"error": {"message": f"quota exceeded for key {q.get('key')}",
                                                   "errors": [{"reason": "quotaExceeded"}]}})
@@ -147,6 +151,10 @@ def prueba_relevancia():
           "la palabra del proyecto que el vídeo no trata NO es la del vídeo")
     igual(S.palabra_del_video({"palabra_propuesta": "consolas para fiesta infantil"}, GUITARRA, INFO),
           "consolas para fiesta infantil", "en su lugar, la que propuso Claude al leer el vídeo")
+    igual(S.palabra_del_video({"palabra_propuesta": "clases de piano"}, GUITARRA, INFO), "",
+          "una propuesta de Claude que el vídeo no trata tampoco se usa")
+    igual(S.palabra_y_origen({"palabra_propuesta": "consolas para fiesta infantil"}, GUITARRA, INFO)[1],
+          "propuesta", "y la que sí, se usa diciendo que es una propuesta (sin confirmar)")
     igual(S.palabra_del_video({"palabra_clave": "mi frase"}, GUITARRA, INFO), "mi frase",
           "la que escribe la persona manda siempre")
     igual(S.palabra_del_video({}, GUITARRA), "clases de guitarra",
@@ -220,7 +228,7 @@ def prueba_competencia():
     igual(comp["pequenos"], 4, "cuántos son de canales pequeños (menos de 10 mil suscriptores)")
     igual(comp["recientes"], 10, "y cuántos son de los últimos 90 días")
     ok(comp["nivel"] in ("alta", "media", "baja") and len(comp["top"]) == 3, "con su nivel y los tres primeros")
-    url = next(u for u in doble.pedidas if "/search" in u)
+    url = next(u for u in doble.pedidas if "googleapis" in u and "/search" in u)
     ok("regionCode=PE" in url and "relevanceLanguage=es" in url, "la búsqueda es la de Perú en español")
     c = SR.cupo(raiz)
     igual(c["usadas"], 102, "el cupo apunta 102 unidades (búsqueda, vídeos y canales)")
@@ -239,6 +247,18 @@ def prueba_competencia():
     SR.competencia("y otra", raiz, doble.clave)
     igual(len(doble.pedidas), antes, "cupo agotado: ni se pregunta")
     doble.cupo_gastado = False
+    # una clave mala (o la API sin activar): no gasta cupo y para la tanda
+    raiz2 = os.path.join(CARPETA, "comp_mala")
+    doble2 = con_doble()
+    doble2.clave_mala = True
+    real = SR.investigar(INFO, GUITARRA, {"palabra_clave": "fiesta infantil"}, raiz2, posts=[],
+                         clave_yt=doble2.clave)
+    busquedas = [u for u in doble2.pedidas if "googleapis" in u and "/search" in u]
+    igual(len(busquedas), 1, "con una clave mala se intenta UNA vez, no con cada frase")
+    igual(SR.cupo(raiz2)["usadas"], 0, "y no se apunta como gastado (el cupo no «se acaba» solo)")
+    ok(any("Probar" in a for a in real["avisos"]), f"y lo dice, apuntando a «Probar»: {real['avisos']}")
+    ok(doble2.clave not in json.dumps(real, ensure_ascii=False), "sin la clave en el aviso")
+    ok(not real["con_youtube"], "sin datos de YouTube guardados")
 
 
 def prueba_historial():

@@ -1831,16 +1831,21 @@ def seo_real_de(datos):
     real = (datos or {}).get("seo_real")
     if not isinstance(real, dict) or not real.get("candidatas"):
         return None
-    if real.get("con_youtube") and SR.caducada(real):
+    if _con_datos_youtube(real) and SR.caducada(real):
         return SR.sin_youtube(real)
     return real
+
+
+def _con_datos_youtube(real):
+    return any((c.get("competencia") or {}).get("valor") is not None
+               for c in (real or {}).get("candidatas") or [])
 
 
 def _caducar_seo_real(raiz, pid):
     with _lock(pid):
         ficha = _leer_video(raiz, pid)
         real = ficha.get("seo_real")
-        if isinstance(real, dict) and real.get("con_youtube") and SR.caducada(real):
+        if isinstance(real, dict) and _con_datos_youtube(real) and SR.caducada(real):
             ficha["seo_real"] = SR.sin_youtube(real)
             _escribir(_ruta_video(raiz, pid), ficha)
 
@@ -2436,7 +2441,7 @@ def ficha(raiz, info, ajustes):
     compuestos = {r: componer(r, datos["textos"].get(r), ajustes, info, datos.get("capitulos"),
                               datos)
                   for r in REDES}
-    palabra = SEO.palabra_del_video(datos, ajustes, info)
+    palabra, origen = SEO.palabra_y_origen(datos, ajustes, info)
     con_youtube = clave_youtube()
     real = seo_real_de(datos)
     if real is not None and real is not datos.get("seo_real"):
@@ -2501,9 +2506,9 @@ def ficha(raiz, info, ajustes):
             # rama seo-real: la última investigación de búsquedas y si la
             # palabra del proyecto se ha dejado fuera por no ser de este vídeo
             "real": real or {},
+            "palabra_origen": origen,
             "proyecto_fuera": bool(ajustes.get("palabra_clave") and not datos.get("palabra_clave")
-                                   and SEO.palabra_del_video(datos, ajustes, info)
-                                   != str(ajustes.get("palabra_clave") or "").strip()),
+                                   and origen != "proyecto"),
             "con_youtube": bool(con_youtube),
             "cupo_youtube": SR.cupo(raiz) if con_youtube else None,
         },

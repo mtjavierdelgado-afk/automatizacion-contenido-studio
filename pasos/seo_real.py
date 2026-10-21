@@ -173,10 +173,31 @@ class Corpus:
         return False
 
 
+_CORPUS = {}
+_MAX_CORPUS = 64
+
+
+def corpus_de(info, zona=""):
+    """El Corpus del vídeo, guardado por su texto: la ficha se pregunta cada
+    pocos segundos y cada red lo pedía otra vez (revisión del 20-10: ~30 por
+    petición, 150-300 ms en un guion largo)."""
+    clave = (hash(corpus_del_video(info)), str(zona or ""))
+    with _LOCK:
+        hecho = _CORPUS.get(clave)
+    if hecho is not None:
+        return hecho
+    hecho = Corpus(info, zona)
+    with _LOCK:
+        if len(_CORPUS) >= _MAX_CORPUS:
+            _CORPUS.clear()
+        _CORPUS[clave] = hecho
+    return hecho
+
+
 def relevancia(frase, info=None, zona="", corpus=None):
     """{valor 0-100 | None, estan, faltan}: cuánto de la frase sale en el vídeo.
     None si no hay frase o el vídeo no tiene bastante texto para saberlo."""
-    corpus = corpus or Corpus(info, zona)
+    corpus = corpus or corpus_de(info, zona)
     ts = terminos(frase)
     if not ts or not corpus.sabe:
         return {"valor": None, "estan": [], "faltan": []}
@@ -247,7 +268,18 @@ def _de_cache(raiz_p, clave):
     if not raiz_p:
         return None
     with _LOCK:
-        dato = _leer(_ruta_cache(raiz_p)).get(clave)
+        ruta = _ruta_cache(raiz_p)
+        datos = _leer(ruta)
+        ahora = time.time()
+        viejos = [k for k, v in datos.items()
+                  if not isinstance(v, dict) or ahora - float(v.get("t") or 0) >= BORRA_S]
+        if viejos:
+            # también al leer: los datos de YouTube no pasan de 30 días aunque
+            # nadie vuelva a guardar nada en la caché
+            for k in viejos:
+                datos.pop(k, None)
+            _escribir(ruta, datos)
+        dato = datos.get(clave)
     if isinstance(dato, dict) and time.time() - float(dato.get("t") or 0) < CADUCA_S:
         return dato.get("v")
     return None
@@ -447,6 +479,11 @@ def cupo(raiz_p):
             "agotado": agotado}
 
 
+def gastar(raiz_p, unidades, agotado=False):
+    """Apunta unidades gastadas fuera de una búsqueda («Probar» la clave)."""
+    _gastar(raiz_p, unidades, agotado)
+
+
 def _gastar(raiz_p, unidades, agotado=False):
     if not raiz_p:
         return
@@ -477,7 +514,9 @@ def _api(ruta, params, clave):
         motivo = str(datos["error"].get("message") or "")
         razones = [str(e.get("reason") or "") for e in datos["error"].get("errors") or []
                    if isinstance(e, dict)]
-        if any("quota" in r.lower() for r in razones) or "quota" in motivo.lower():
+        cupo_razones = ("quota", "dailylimitexceeded", "ratelimitexceeded")
+        if any(any(c in r.lower() for c in cupo_razones) for r in razones) \
+                or "quota" in motivo.lower():
             return None, "cupo"
     if clave and clave in motivo:
         motivo = motivo.replace(clave, "…")
@@ -522,7 +561,10 @@ def competencia(frase, raiz_p, clave):
                                           "q": frase, "regionCode": PAIS.upper(),
                                           "relevanceLanguage": IDIOMA}, clave)
         if busqueda is None:
-            _gastar(raiz_p, 100, agotado=(error == "cupo"))
+            # una clave mala o la API sin activar no gasta cupo: no se apunta
+            # (antes se apuntaban 100 por frase y el cupo «se acababa» solo)
+            if error == "cupo":
+                _gastar(raiz_p, 0, agotado=True)
             return {"error": error, "texto": ("el cupo de YouTube de hoy está gastado"
                                               if error == "cupo" else error)}
         ids = [((it.get("id") or {}).get("videoId")) for it in busqueda.get("items") or []]
@@ -530,7 +572,7 @@ def competencia(frase, raiz_p, clave):
         total = _num((busqueda.get("pageInfo") or {}).get("totalResults")) or 0
         videos, error = (_api("videos", {"part": "statistics,snippet", "id": ",".join(ids)},
                               clave) if ids else ({"items": []}, ""))
-        _gastar(raiz_p, 101)
+        _gastar(raiz_p, 101 if ids else 100)
         if videos is None:
             return {"error": error, "texto": error}
         items = videos.get("items") or []
@@ -701,7 +743,7 @@ def investigar(info, ajustes, datos_video, raiz_p, posts=None, clave_yt="",
     ajustes = ajustes or {}
     datos_video = datos_video or {}
     zona = str(ajustes.get("zona") or "")
-    corpus = Corpus(info, zona)
+    corpus = corpus_de(info, zona)
     avisos = []
 
     def limpia(x):
@@ -757,8 +799,13 @@ def investigar(info, ajustes, datos_video, raiz_p, posts=None, clave_yt="",
         for c in [c for c in orden if es_relevante(c["frase"], corpus=corpus)][:MAX_COMPETENCIA]:
             comp = competencia(c["frase"], raiz_p, clave_yt)
             c["competencia"] = comp
-            if comp and comp.get("error") == "cupo":
-                avisos.append("el cupo de YouTube de hoy se ha gastado: el resto sin competencia")
+            if comp and comp.get("error"):
+                # cualquier fallo de la API para la tanda: si es la clave, las
+                # demás frases fallarían igual
+                avisos.append("el cupo de YouTube de hoy se ha gastado: el resto sin competencia"
+                              if comp["error"] == "cupo" else
+                              f"YouTube no ha contestado ({comp.get('texto') or comp['error']}): "
+                              "la competencia queda sin dato; mira «Probar» en Configuración")
                 break
             c["oportunidad"] = oportunidad((c["demanda"] or {}).get("valor"), comp)
             _puntuar(c)
@@ -772,7 +819,10 @@ def investigar(info, ajustes, datos_video, raiz_p, posts=None, clave_yt="",
     if sin_red and candidatas:
         avisos.append("el buscador no ha contestado: la demanda queda sin dato esta vez")
     return {"al": dt.datetime.now().strftime("%Y-%m-%dT%H:%M:%S"), "candidatas": candidatas,
-            "con_youtube": bool(clave_yt), "avisos": avisos,
+            # «con_youtube»: hay datos de YouTube guardados (caducan a los 30 días)
+            "con_youtube": any(c.get("competencia") and not c["competencia"].get("error")
+                               for c in candidatas),
+            "clave_youtube": bool(clave_yt), "avisos": avisos,
             "cupo": cupo(raiz_p) if clave_yt and raiz_p else None,
             "sin_corpus": not corpus.sabe}
 

@@ -4636,9 +4636,11 @@ def _ficha_tipo_relato(ctx):
     subida = (params.get("espacio_fijo") or {}).get("imagen") \
         if isinstance(params.get("espacio_fijo"), dict) else None
     catalogo = params.get("catalogo") or {}
+    # sin NINGUN cambio en ningun tramo, todos los planos serian la base tal cual:
+    # falta que Claude diga que cambia (un «antes» sin cambio es normal, todos no)
     sin_cambios = (resuelto["modo"] == "espacio_que_cambia" and tr.activo(resuelto)
                    and bool(catalogo.get("beats"))
-                   and not any(b.get("cambio") or b.get("estado")
+                   and not any(b.get("cambio")
                                for b in catalogo.get("beats") or [] if isinstance(b, dict)))
     return {
         "tipo_relato": {k: v for k, v in guardado.items() if k != "bases"},

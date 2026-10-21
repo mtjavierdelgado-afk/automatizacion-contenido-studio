@@ -89,6 +89,10 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 - **En un vídeo hecho**, «Aplicar el tipo de relato» no dibuja nada: enseña qué
   planos cambiarían y cuánto cuesta rehacerlos, y eliges todos, los marcados o
   ninguno.
+- **`asvs probar relato`** (en la consola del VPS): las tres pruebas reales del
+  tipo de relato, solas y con tope de gasto (5 $ salvo `--tope N`): crea tres
+  vídeos de prueba, aprueba su imagen base, los dibuja y monta, pasa el revisor
+  y pide a Claude que compare cada plano con su base.
 - **«Pedido para el reparto de sitios»**, junto a «El reparto y los sitios» del
   vídeo: una frase que lee Claude al repartir («todo en la cocina; el patio
   solo al final») y «Volver a repartir con este pedido» (no se paga ninguna

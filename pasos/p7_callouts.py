@@ -46,6 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 # nada que colocar -- ni un pixel que mirar.
 
 import camara  # noqa: E402
+import elementos_video  # noqa: E402
 import profundidad  # noqa: E402
 import cartelas  # noqa: E402
 import comun  # noqa: E402
@@ -1853,7 +1854,7 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
     origen = float(escenas[0]["t_in"]) if escenas else 0.0
     total = (float(escenas[-1]["t_out"]) - origen) if escenas else 0.0
 
-    def extras_de(escena, cifras):
+    def extras_de(escena, cifras, elementos=()):
         """Lo que el montaje pone en la capa quieta de este plano. -> svg"""
         piezas = []
         if montaje["barra"] and total > 0:
@@ -1864,6 +1865,13 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
         if cifras:
             piezas.append(fragmento_cifras(
                 cifras, salida, paleta_video, ficha_diseno,
+                float(escena["t_out"]) - float(escena["t_in"])))
+        if elementos:
+            # LOS ELEMENTOS DE ESTE PLANO (rama elementos-video): delante de
+            # la barra y las cifras, detras del subtitulo. Sin elementos no se
+            # escribe nada y la capa sale identica a la de siempre.
+            piezas.append(elementos_video.fragmento(
+                escena, elementos, salida, paleta_video,
                 float(escena["t_out"]) - float(escena["t_in"])))
         return "".join(piezas)
 
@@ -1993,17 +2001,28 @@ def ejecutar(proyecto, params, avisar=None, unidades=None):
             fija, fichas = fija_vacia(escena), []
         elif apagada:
             # el movimiento SI se calcula: el plano sigue teniendo su zoom y su
-            # transicion, lo unico que se va es el texto
+            # transicion, lo unico que se va es el texto. Los ELEMENTOS que
+            # alguien puso a mano en este plano si se quedan (se pidieron).
+            propios = elementos_video.de_plano(p, uid)
             svg, fija, fichas = capa_vacia(lienzo), fija_vacia(escena), []
+            if propios:
+                piezas = extras_de(escena, [], propios)
+                fija = _envoltorio_fijo(piezas, salida) if piezas else fija
+                fichas = elementos_video.fichas(escena, propios,
+                                                float(escena["t_out"]) - float(escena["t_in"]))
         else:
+            propios = elementos_video.de_plano(p, uid)
             svg, fija, fichas = capa_de_escena(
                 escena, p, entrada, banda, aspecto, lienzo, salida,
-                extras=extras_de(escena, cifras),
+                extras=extras_de(escena, cifras, propios),
                 gancho=montaje["gancho"] and indice == 0)
             if cifras:
                 fichas = list(fichas) + [{"tipo": "cifra", "texto": c["texto"],
                                           "desde": c["desde"], "hasta": c["hasta"]}
                                          for c in cifras]
+            if propios:
+                fichas = list(fichas) + elementos_video.fichas(
+                    escena, propios, float(escena["t_out"]) - float(escena["t_in"]))
         medios.escribir_texto(svg_ruta, svg)
         medios.escribir_texto(fija_ruta, fija)
         entrada["capa"] = os.path.relpath(svg_ruta, trabajo)

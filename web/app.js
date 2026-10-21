@@ -11268,6 +11268,7 @@ function vistaPreviaLight() {
 
   if (e.obsoleta) caja.appendChild(avisoImagenObsoleta(e));
   const delPlano = montajeDelPlano(e); if (delPlano) caja.appendChild(delPlano);
+  const elementos = elementosDelPlano(e); if (elementos) caja.appendChild(elementos);
   caja.appendChild(cuadroFeedbackEscena(e));
   /* EL REVISOR: pedir que mire las imágenes y ver lo que dejó (ver
      `panelRevisor`). Sus notas salen abajo, en la lista de siempre. */
@@ -18227,6 +18228,313 @@ function montajeDelPlano(e) {
       h('span', { clase: 'meta' }, elegido ? ` · ${elegido[2]}`
         : ' · cambia solo esta imagen; se aplica al montar el vídeo, gratis')),
     movimiento, profundidad);
+}
+
+/* ELEMENTOS DE ESTA IMAGEN (rama elementos-video, 19-10-2026): el grafismo que
+   salta encima del plano al ritmo de la voz (palabra clave, flecha, insignia,
+   icono…). Se edita una COPIA (`ELEMENTOS_PLANOS.borrador`) y solo se guarda
+   con «Guardar»: cambiarlo deja pendiente ESE plano y se aplica al montar el
+   vídeo, gratis. Claude los propone para la imagen o para todo el vídeo, con
+   una intensidad; proponer no guarda nada. Ver pasos/elementos_video.py. */
+const ELEMENTOS_PLANOS = {
+  pid: '', ficha: null, datos: null, cargando: false, error: '', guardando: '',
+  borrador: {}, vista: {}, viendo: '', proponiendo: '', propuesta: null, intensidad: 'vivo',
+};
+
+const NOMBRES_ELEMENTO = {
+  texto: 'Palabra que salta', insignia: 'Insignia', flecha: 'Flecha', circulo: 'Círculo',
+  rayo: 'Rayo (versus)', icono: 'Icono', etiqueta: 'Etiqueta / precio', banda: 'Banda',
+  subrayado: 'Subrayado', estrellas: 'Estrellas', cinta: 'Cinta',
+};
+const NOMBRES_ENTRADA = { pop: 'Salta', golpe: 'Golpe', desliza: 'Desliza', aparece: 'Aparece suave', dibuja: 'Se dibuja' };
+const NOMBRES_POSICION = {
+  arriba: 'Arriba', centro: 'Centro', izquierda: 'Izquierda', derecha: 'Derecha',
+  arriba_izquierda: 'Arriba a la izquierda', arriba_derecha: 'Arriba a la derecha',
+};
+
+function cargarElementosPlanos(pid) {
+  if (ELEMENTOS_PLANOS.cargando) return;
+  ELEMENTOS_PLANOS.cargando = true;
+  ELEMENTOS_PLANOS.error = '';
+  pedir(`${API.proyecto(pid)}/planos/elementos`)
+    .then(d => { if (ELEMENTOS_PLANOS.pid === pid) ELEMENTOS_PLANOS.datos = d; })
+    .catch(err => { if (ELEMENTOS_PLANOS.pid === pid) ELEMENTOS_PLANOS.error = err.message || 'no se ha podido leer'; })
+    .then(() => { if (ELEMENTOS_PLANOS.pid === pid) ELEMENTOS_PLANOS.cargando = false; repintarVideo(); });
+}
+
+/* Lo que se ve de un plano: su borrador si se está editando; si no, lo guardado. */
+function elementosEnEdicion(sid) {
+  if (ELEMENTOS_PLANOS.borrador[sid]) return ELEMENTOS_PLANOS.borrador[sid];
+  return (((ELEMENTOS_PLANOS.datos || {}).planos || {})[sid]) || [];
+}
+
+function tocarElementos(sid, lista, repintar) {
+  ELEMENTOS_PLANOS.borrador[sid] = lista;
+  delete ELEMENTOS_PLANOS.vista[sid];
+  if (repintar) repintarVideo();
+}
+
+function posicionMasCercana(el) {
+  const pos = (ELEMENTOS_PLANOS.datos || {}).posiciones || {};
+  let mejor = 'arriba', distancia = 9;
+  const x = el.tipo === 'flecha' ? (el.x2 != null ? el.x2 : 0.5) : (el.x != null ? el.x : 0.5);
+  const y = el.tipo === 'flecha' ? (el.y2 != null ? el.y2 : 0.5) : (el.y != null ? el.y : 0.5);
+  Object.entries(pos).forEach(([id, xy]) => {
+    const d = Math.hypot(xy[0] - x, xy[1] - y);
+    if (d < distancia) { distancia = d; mejor = id; }
+  });
+  return mejor;
+}
+
+function colocarElemento(el, posicion) {
+  const xy = (((ELEMENTOS_PLANOS.datos || {}).posiciones || {})[posicion]) || [0.5, 0.2];
+  const nuevo = Object.assign({}, el, { x: xy[0], y: xy[1] });
+  if (el.tipo === 'flecha') Object.assign(nuevo, { x: Math.max(0.05, xy[0] - 0.18), y: Math.min(0.9, xy[1] + 0.14), x2: xy[0], y2: xy[1] });
+  return nuevo;
+}
+
+function elementosDelPlano(e) {
+  const v = videoAbierto();
+  if (!v || !e) return null;
+  if (ELEMENTOS_PLANOS.pid !== v.pid) {
+    // OTRO VÍDEO: se empieza de cero (y se sueltan las vistas pintadas)
+    Object.values(ELEMENTOS_PLANOS.vista).forEach(u => { try { URL.revokeObjectURL(u); } catch (_) { /* nada */ } });
+    Object.assign(ELEMENTOS_PLANOS, { pid: v.pid, ficha: PREVIA.ficha, datos: null, cargando: false, error: '',
+      guardando: '', borrador: {}, vista: {}, viendo: '', proponiendo: '', propuesta: null });
+  } else if (ELEMENTOS_PLANOS.ficha !== PREVIA.ficha) {
+    // EL MISMO VÍDEO RECARGADO (p. ej. al guardar un plano): se relee lo
+    // guardado SIN tirar los borradores ni la propuesta de los demás planos
+    ELEMENTOS_PLANOS.ficha = PREVIA.ficha;
+    if (ELEMENTOS_PLANOS.datos && !ELEMENTOS_PLANOS.cargando) setTimeout(() => cargarElementosPlanos(v.pid), 0);
+  }
+  const d = ELEMENTOS_PLANOS.datos;
+  if (!d) {
+    if (ELEMENTOS_PLANOS.error) {
+      return h('div', { clase: 'elementos-plano' },
+        h('span', { clase: 'meta' }, `Elementos de esta imagen: ${ELEMENTOS_PLANOS.error}`),
+        h('button', { clase: 'mini', onclick: () => cargarElementosPlanos(v.pid) }, 'Reintentar'));
+    }
+    if (!ELEMENTOS_PLANOS.cargando) setTimeout(() => cargarElementosPlanos(v.pid), 0);
+    return null;
+  }
+  if ((d.no_aplica || []).includes(e.id)) return null;
+  const sid = e.id;
+  const lista = elementosEnEdicion(sid);
+  const sinGuardar = !!ELEMENTOS_PLANOS.borrador[sid];
+  const ocupado = ELEMENTOS_PLANOS.guardando === sid;
+  const palabras = String(e.narracion || '').split(/\s+/).filter(Boolean);
+  const caja = h('div', { clase: 'elementos-plano' });
+  caja.appendChild(h('div', { clase: 'montaje-plano-cab' }, h('b', {}, '✨ Elementos de esta imagen'),
+    h('span', { clase: 'meta' }, lista.length ? ` · ${lista.length} · saltan con la voz; se aplican al montar, gratis`
+      : ' · palabras que saltan, flechas, insignias… al ritmo de la voz (gratis)')));
+
+  lista.forEach((el, i) => {
+    // SIEMPRE SOBRE LO ÚLTIMO: la fila se pintó con una lista que ya puede
+    // haber cambiado (se escribe sin repintar), así que se relee aquí
+    const cambiar = cambio => {
+      const nueva = elementosEnEdicion(sid).slice();
+      nueva[i] = Object.assign({}, nueva[i] || el, cambio);
+      tocarElementos(sid, nueva, false);
+    };
+    const fila = h('div', { clase: 'elemento-plano' },
+      h('b', {}, NOMBRES_ELEMENTO[el.tipo] || el.tipo));
+    if (['texto', 'insignia', 'etiqueta', 'banda', 'cinta'].includes(el.tipo)) {
+      fila.appendChild(h('input', { type: 'text', value: el.texto || '', maxlength: 40, 'aria-label': 'Texto',
+        datos: { foco: `elemento-${sid}-${i}` }, oninput: ev => cambiar({ texto: ev.target.value }) }));
+    }
+    if (el.tipo === 'icono') {
+      fila.appendChild(h('select', { 'aria-label': 'Icono', onchange: ev => { cambiar({ icono: ev.target.value }); repintarVideo(); } },
+        ...(d.iconos || []).map(n => h('option', { value: n, selected: n === el.icono }, n))));
+    }
+    fila.appendChild(h('select', { 'aria-label': 'Palabra en la que salta', title: 'La palabra en la que salta',
+      onchange: ev => { cambiar({ palabra: Number(ev.target.value) }); repintarVideo(); } },
+    ...palabras.map((p, k) => h('option', { value: k, selected: k === el.palabra }, `${k + 1} · ${p}`))));
+    if (el.tipo !== 'rayo' && el.tipo !== 'banda') {
+      fila.appendChild(h('select', { 'aria-label': 'Dónde', onchange: ev => {
+        const nueva = elementosEnEdicion(sid).slice();
+        nueva[i] = colocarElemento(nueva[i] || el, ev.target.value);
+        tocarElementos(sid, nueva, true);
+      } }, ...Object.keys(d.posiciones || {}).map(p => h('option', { value: p, selected: p === posicionMasCercana(el) },
+        NOMBRES_POSICION[p] || p))));
+    }
+    fila.appendChild(h('select', { 'aria-label': 'Cómo entra', onchange: ev => { cambiar({ entrada: ev.target.value }); repintarVideo(); } },
+      ...(d.entradas || []).map(n => h('option', { value: n, selected: n === (el.entrada || 'pop') }, NOMBRES_ENTRADA[n] || n))));
+    fila.appendChild(h('button', { clase: 'mini fantasma', disabled: ocupado,
+      onclick: () => { const nueva = elementosEnEdicion(sid).slice(); nueva.splice(i, 1); tocarElementos(sid, nueva, true); } }, 'Quitar'));
+    caja.appendChild(fila);
+  });
+
+  const tipo = h('select', { 'aria-label': 'Elemento que se añade' },
+    ...(d.tipos || []).map(t => h('option', { value: t }, NOMBRES_ELEMENTO[t] || t)));
+  caja.appendChild(h('div', { clase: 'herramientas' }, tipo,
+    h('button', { clase: 'mini', disabled: ocupado || lista.length >= 6, onclick: () => {
+      const t = tipo.value;
+      const base = { tipo: t, palabra: 0, entrada: t === 'flecha' || t === 'circulo' ? 'dibuja' : 'pop',
+        color: ['texto', 'insignia', 'etiqueta', 'subrayado'].includes(t) ? 'acento' : 'alerta',
+        texto: ['texto', 'insignia', 'etiqueta', 'banda', 'cinta'].includes(t) ? (palabras[0] || 'TEXTO').toUpperCase() : undefined,
+        icono: t === 'icono' ? 'estrella' : undefined, tam: t === 'texto' ? 0.1 : (t === 'icono' ? 0.07 : 0.08),
+        estilos: t === 'texto' ? ['contorno', 'sombra'] : undefined };
+      Object.keys(base).forEach(k => base[k] === undefined && delete base[k]);
+      tocarElementos(sid, elementosEnEdicion(sid).concat([colocarElemento(base, 'arriba')]), true);
+    } }, 'Añadir'),
+    h('button', { clase: 'mini', disabled: !!ELEMENTOS_PLANOS.proponiendo,
+      onclick: () => proponerElementos([sid]) },
+    ELEMENTOS_PLANOS.proponiendo === sid ? 'Claude está pensando…' : 'Proponer con Claude'),
+    lista.length ? h('button', { clase: 'mini', disabled: ELEMENTOS_PLANOS.viendo === sid,
+      onclick: () => verElementosDelPlano(sid) }, ELEMENTOS_PLANOS.viendo === sid ? 'Pintando…' : 'Ver cómo queda') : null,
+    h('button', { clase: 'mini fantasma', title: 'Se paga al aplicar la nota: vuelve a dibujar la imagen con el texto dentro',
+      onclick: () => pedirTextoDentroDeImagen(sid, elementosEnEdicion(sid)) }, 'Texto dentro de la imagen (IA, se paga)')));
+  if (ELEMENTOS_PLANOS.vista[sid]) {
+    caja.appendChild(h('img', { clase: 'vista-elementos', src: ELEMENTOS_PLANOS.vista[sid], alt: 'Cómo queda con los elementos' }));
+  }
+  if (sinGuardar) {
+    caja.appendChild(h('div', { clase: 'herramientas' },
+      h('button', { clase: 'mini primario', disabled: ocupado, onclick: () => guardarElementosDelPlano(v.pid, sid) },
+        ocupado ? 'Guardando…' : 'Guardar'),
+      h('button', { clase: 'mini fantasma', disabled: ocupado, onclick: () => {
+        delete ELEMENTOS_PLANOS.borrador[sid]; delete ELEMENTOS_PLANOS.vista[sid]; repintarVideo();
+      } }, 'Descartar'),
+      h('span', { clase: 'meta' }, 'sin guardar')));
+  }
+  caja.appendChild(bloqueElementosDelVideo(v.pid, d));
+  return caja;
+}
+
+/* PARA TODO EL VÍDEO: Claude propone con la intensidad elegida y se aplica de
+   una vez (sumando a lo que ya hay, o en lugar de ello). */
+function bloqueElementosDelVideo(pid, d) {
+  const b = h('div', { clase: 'elementos-video' });
+  const intensidad = h('select', { 'aria-label': 'Intensidad', onchange: ev => { ELEMENTOS_PLANOS.intensidad = ev.target.value; } },
+    ...Object.entries(d.intensidades || {}).map(([id, f]) => h('option', { value: id, selected: id === ELEMENTOS_PLANOS.intensidad },
+      `${f.nombre} (${f.que})`)));
+  b.appendChild(h('div', { clase: 'herramientas' }, h('span', { clase: 'meta' }, 'Todo el vídeo:'), intensidad,
+    h('button', { clase: 'mini', disabled: !!ELEMENTOS_PLANOS.proponiendo, onclick: () => proponerElementos(null) },
+      ELEMENTOS_PLANOS.proponiendo === '*' ? 'Claude está pensando…' : 'Proponer para todo el vídeo')));
+  const p = ELEMENTOS_PLANOS.propuesta;
+  if (p && p.estado === 'listo') {
+    const n = Object.values(p.propuesta || {}).reduce((t, l) => t + l.length, 0);
+    b.appendChild(h('div', { clase: 'caja-aviso fila' },
+      h('span', { clase: 'crece' }, `Claude propone ${n} elemento(s) en ${Object.keys(p.propuesta || {}).length} imagen(es). `
+        + 'Puedes verlos imagen a imagen (salen como «sin guardar») o aplicarlos todos.'),
+      h('button', { clase: 'mini primario', onclick: () => aplicarPropuestaElementos(pid, false) }, 'Aplicar sumando'),
+      h('button', { clase: 'mini', onclick: () => aplicarPropuestaElementos(pid, true) }, 'Aplicar en lugar de lo que hay'),
+      h('button', { clase: 'mini fantasma', onclick: () => {
+        // solo los planos de la propuesta: lo que se esté editando a mano en otros se queda
+        Object.keys(p.propuesta || {}).forEach(sid => { delete ELEMENTOS_PLANOS.borrador[sid]; delete ELEMENTOS_PLANOS.vista[sid]; });
+        ELEMENTOS_PLANOS.propuesta = null; repintarVideo();
+      } }, 'Descartar')));
+  }
+  return b;
+}
+
+async function guardarElementosDelPlano(pid, sid) {
+  ELEMENTOS_PLANOS.guardando = sid;
+  repintarVideo();
+  try {
+    const r = await pedir(`${API.proyecto(pid)}/planos/${encodeURIComponent(sid)}/elementos`,
+      { method: 'PUT', cuerpo: { elementos: ELEMENTOS_PLANOS.borrador[sid] || [] } });
+    if (ELEMENTOS_PLANOS.pid === pid) {
+      ELEMENTOS_PLANOS.datos = r;
+      delete ELEMENTOS_PLANOS.borrador[sid];
+    }
+    if (r.cambiado) {
+      toast(`${sid}: se aplicará al montar el vídeo (gratis)`);
+      await recargarVideoAbierto();
+    }
+  } catch (err) { toast(err.message, true); }
+  ELEMENTOS_PLANOS.guardando = '';
+  repintarVideo();
+}
+
+async function verElementosDelPlano(sid) {
+  const pid = ELEMENTOS_PLANOS.pid;
+  ELEMENTOS_PLANOS.viendo = sid;
+  repintarVideo();
+  try {
+    const pases = typeof cabeceraDePases === 'function' ? cabeceraDePases() : '';
+    const r = await fetch(`${API.proyecto(pid)}/planos/${encodeURIComponent(sid)}/elementos/vista`, {
+      method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, pases ? { 'X-Estudio-Abiertos': pases } : {}),
+      body: JSON.stringify({ elementos: elementosEnEdicion(sid) }) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const blob = await r.blob();
+    if (ELEMENTOS_PLANOS.pid === pid) {
+      if (ELEMENTOS_PLANOS.vista[sid]) URL.revokeObjectURL(ELEMENTOS_PLANOS.vista[sid]);
+      ELEMENTOS_PLANOS.vista[sid] = URL.createObjectURL(blob);
+    }
+  } catch (err) { toast(`no se ha podido pintar: ${err.message}`, true); }
+  ELEMENTOS_PLANOS.viendo = '';
+  repintarVideo();
+}
+
+async function proponerElementos(planos) {
+  const pid = ELEMENTOS_PLANOS.pid;
+  ELEMENTOS_PLANOS.proponiendo = planos ? planos[0] : '*';
+  repintarVideo();
+  try {
+    const lanzada = await pedir(`${API.proyecto(pid)}/elementos/proponer`, { method: 'POST',
+      cuerpo: { intensidad: ELEMENTOS_PLANOS.intensidad, planos: planos || undefined } });
+    let ficha = { estado: 'pensando' };
+    for (let i = 0; i < 400 && ficha.estado === 'pensando'; i += 1) {
+      await new Promise(r => setTimeout(r, 1500));
+      ficha = await pedir(`${API.proyecto(pid)}/elementos/proponer/${lanzada.id}`);
+    }
+    if (ficha.estado === 'error') throw new Error(ficha.error);
+    if (ficha.estado !== 'listo') throw new Error('tarda demasiado: vuelve a pedirlo en un momento');
+    if (ELEMENTOS_PLANOS.pid !== pid) return;
+    const propuesta = ficha.propuesta || {};
+    if (!Object.keys(propuesta).length) toast('Claude no ha visto dónde poner nada aquí');
+    // lo propuesto entra como «sin guardar» en cada imagen, para mirarlo
+    Object.entries(propuesta).forEach(([sid, lista]) => {
+      // SE SUMA A LO QUE YA TIENE (guardado o a medio editar): una propuesta
+      // nunca esconde ni borra lo que alguien puso a mano
+      ELEMENTOS_PLANOS.borrador[sid] = elementosEnEdicion(sid).concat(lista).slice(0, 6);
+      delete ELEMENTOS_PLANOS.vista[sid];
+    });
+    if (!planos) ELEMENTOS_PLANOS.propuesta = ficha;
+  } catch (err) {
+    toast(`no se han podido proponer elementos: ${err.message}`, true);
+  }
+  ELEMENTOS_PLANOS.proponiendo = '';
+  repintarVideo();
+}
+
+async function aplicarPropuestaElementos(pid, reemplazar) {
+  const p = ELEMENTOS_PLANOS.propuesta;
+  if (!p) return;
+  // El borrador de cada plano YA es «lo que había + lo propuesto» (con lo que
+  // se haya retocado): sumando se manda tal cual; «en lugar de» manda solo lo
+  // propuesto. Las dos sustituyen en el servidor, para no sumar dos veces.
+  const planos = {};
+  Object.keys(p.propuesta || {}).forEach(sid => {
+    planos[sid] = reemplazar ? p.propuesta[sid] : (ELEMENTOS_PLANOS.borrador[sid] || p.propuesta[sid]);
+  });
+  try {
+    const r = await pedir(`${API.proyecto(pid)}/elementos/aplicar`, { method: 'POST', cuerpo: { planos, reemplazar: true } });
+    ELEMENTOS_PLANOS.datos = r;
+    ELEMENTOS_PLANOS.propuesta = null;
+    Object.keys(planos).forEach(sid => { delete ELEMENTOS_PLANOS.borrador[sid]; });
+    toast(`${(r.cambiados || []).length} imagen(es) con elementos: se aplican al montar el vídeo (gratis)`
+      + ((r.recortados || []).length ? ` · en ${r.recortados.length} solo caben los 6 primeros` : ''));
+    await recargarVideoAbierto();
+  } catch (err) { toast(err.message, true); }
+  repintarVideo();
+}
+
+async function pedirTextoDentroDeImagen(sid, lista) {
+  const sugerido = ((lista || []).find(x => x.texto) || {}).texto || '';
+  const valores = await dialogo({ titulo: 'Texto dentro de la imagen (se paga)',
+    texto: 'Se apunta como nota de esta imagen: al aplicar las notas, la IA la vuelve a dibujar con el texto DENTRO '
+      + '(un cartel, una pantalla…). Se paga como una imagen nueva y puede escribir mal alguna letra; '
+      + 'el texto en capas de arriba es gratis y siempre exacto.',
+    campos: [{ clave: 'texto', etiqueta: 'Texto', valor: sugerido }], aceptar: 'Apuntar la nota' });
+  if (!valores || !String(valores.texto || '').trim()) return;
+  try {
+    const datos = await pedir(`${API.proyecto(ELEMENTOS_PLANOS.pid)}/planos/${encodeURIComponent(sid)}/elementos/nota-ia`,
+      { method: 'POST', cuerpo: { texto: valores.texto } });
+    if (typeof guardarRepaso === 'function') guardarRepaso(datos);
+    toast('Nota apuntada: sale en la lista de notas; se paga al aplicarla');
+  } catch (err) { toast(err.message, true); }
+  repintarVideo();
 }
 
 function editorMontaje(modo, est, repintar) {

@@ -7045,6 +7045,8 @@ def tipo_de_relato(navegador, datos):
     def parte_estilo():
         preset = datos["preset"]
         pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{preset}' }});")
+        # con el rediseño de Crear, la ficha va en pestañas: el tipo de relato vive en «Cómo se cuenta»
+        pg.js("if (typeof abrirPestanaDeEstilo === 'function') abrirPestanaDeEstilo('cuenta');")
         ok(pg.esperar(".bloque-light h3", "Tipo de relato", 15), "(4) el estilo trae «🧭 Tipo de relato»")
         bloque = pg.p.locator(".bloque-light").filter(has_text="cómo se cuentan por defecto").first
         _r, lista = api.get("/api/presets-light")

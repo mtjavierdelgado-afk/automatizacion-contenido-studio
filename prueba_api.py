@@ -7251,6 +7251,54 @@ def probar_tipo_relato():
         codigo, _m = _llamar(servidor.aprobar_base_relato, pid, {"sitio": "otro"})
         igual(codigo, 404, "BASE: aprobar un sitio sin base da 404")
 
+        # UN ESTADO, UNA IMAGEN (prueba real del 21-10): cada cambio del guion
+        # se dibuja una vez sobre la base y se aprueba como ella
+        abierta = "the hinged door opened outward until it touches the toilet"
+        ctx.estado.actualizar_params("assets", {"catalogo": {
+            "sets": {"bano": {"descripcion": "a small bathroom"}}, "reparto": {},
+            "beats": [{"desde": "B001", "hasta": "B001", "set": "bano", "cambio": "",
+                       "estado": "antes"},
+                      {"desde": "B002", "hasta": "B002", "set": "bano", "cambio": abierta,
+                       "estado": "abierta"}]}})
+        codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+        if codigo == 200:
+            igual([(e["estado"], e["cambio"], e["imagen_url"]) for e in ficha["estados"]],
+                  [("abierta", abierta, None)], "ESTADOS: el guion pide uno, sin imagen todavía")
+            ok(not ficha["listo"], "ESTADOS: y sin él, no está listo para dibujar planos")
+        codigo, _m = _llamar(servidor.generar_base_relato, pid,
+                             {"usd": servidor._usd_por_imagen(ctx), "estado": "abierta"})
+        igual(codigo, 409, f"ESTADOS: sin la base aprobada, no se dibuja ninguno ({_m})")
+        _llamar(servidor.aprobar_base_relato, pid, {"aprobada": True})
+        codigo, _m = _llamar(servidor.generar_base_relato, pid,
+                             {"usd": servidor._usd_por_imagen(ctx), "estado": "volando"})
+        igual(codigo, 404, f"ESTADOS: un estado que no pide el guion da 404 ({_m})")
+        ok(not ctx.gestor.listar(activos=True), "ESTADOS: y no se lanza nada")
+        codigo, _m = _llamar(servidor.aprobar_base_relato, pid, {"estado": "abierta"})
+        igual(codigo, 404, "ESTADOS: aprobar un estado sin imagen da 404")
+        # la imagen del estado, como si se hubiera dibujado (aqui no se paga)
+        _Imagen.new("RGB", (64, 40), (90, 90, 90)).save(
+            ctx.proyecto.ruta("espacio_fijo", "fedcba9876543210.png"))
+        guardado = dict((ctx.estado.params("assets") or {}).get("tipo_relato") or {})
+        guardado["bases"]["bano"]["estados"] = {"abierta": {
+            "imagen": "espacio_fijo/fedcba9876543210.png", "aprobada": False, "cambio": abierta}}
+        ctx.estado.actualizar_params("assets", {"tipo_relato": guardado})
+        codigo, ficha = _llamar(servidor.aprobar_base_relato, pid,
+                                {"estado": "abierta", "aprobada": True})
+        ok(codigo == 200 and ficha["listo"] and ficha["estados"][0]["aprobada"],
+           "ESTADOS: aprobado el estado, todo listo")
+        codigo, _r = _llamar(servidor.imagen_base_relato, pid, "bano", "abierta")
+        igual(codigo, 200, "ESTADOS: la imagen del estado se sirve")
+        bases = servidor.PASOS_MODULOS.p6_assets.rutas_de_bases(
+            ctx.proyecto, ctx.estado.params("assets") or {})
+        ok("bano#abierta" in bases, "ESTADOS: y entra en las bases que editan los planos")
+        ctx.estado.actualizar_params("assets", {"catalogo": dict(
+            (ctx.estado.params("assets") or {})["catalogo"],
+            beats=[{"desde": "B002", "hasta": "B002", "set": "bano",
+                    "cambio": "a curtain instead", "estado": "abierta"}])})
+        codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+        ok(codigo == 200 and not ficha["estados"][0]["vigente"] and not ficha["listo"],
+           "ESTADOS: si se reescribe el cambio, su imagen deja de valer")
+
         # aplicar a un video (sin imagenes): guarda, no dibuja, nada que rehacer
         codigo, ficha = _llamar(servidor.aplicar_tipo_relato, pid,
                                 {"tipo_relato": {"modo": "recorrido"}})

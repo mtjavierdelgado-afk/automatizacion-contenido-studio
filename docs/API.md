@@ -82,9 +82,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/subtitulos/rotos` | {planos}: cuantos planos tienen los subtitulos dibujados con las tildes |
 | `GET` | `/api/proyectos/{pid}/tipo_relato` | El tipo de relato del video: el guardado, el que rige, las bases y los planos que cambian. |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/aplicar` | Guarda el tipo de relato de un video (hecho o no). No dibuja nada. |
-| `POST` | `/api/proyectos/{pid}/tipo_relato/base/aprobar` | {sitio?, aprobada: true|false}: aprueba (o retira) la imagen base del sitio. |
-| `POST` | `/api/proyectos/{pid}/tipo_relato/base/generar` | Genera la imagen base del sitio (SE PAGA una imagen). {usd: lo que se vio} |
-| `GET` | `/api/proyectos/{pid}/tipo_relato/base/imagen` | La imagen base (aprobada o no) de un sitio del video. |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/base/aprobar` | {sitio?, estado?, aprobada: true|false}: aprueba (o retira) la imagen base del sitio, o con `estado` la de ese estado. |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/base/generar` | Genera la imagen base del sitio, o con {estado} la de ese estado (SE PAGA una imagen). {usd: lo que se vio, estado?, otra?} |
+| `GET` | `/api/proyectos/{pid}/tipo_relato/base/imagen` | La imagen base (aprobada o no) de un sitio del video, o la de un estado. |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/base/usar_subida` | La imagen subida del espacio fijo pasa a ser la base, aprobada (gratis). |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/cambios` | En «un espacio que cambia», Claude escribe el cambio de cada tramo (solo texto). |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/rehacer` | Rehace SOLO los planos pedidos de los que cambian con el tipo de relato (se paga). |

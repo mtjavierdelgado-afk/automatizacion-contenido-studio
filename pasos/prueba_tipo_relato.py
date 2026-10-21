@@ -277,12 +277,19 @@ def _p6_y_dirs():
 def prueba_referencias_y_prompt():
     seccion("7] p6: la base va la PRIMERA, sin plano anterior y sin SHOT TYPE")
     P6, carpeta, dirs, estilo, base = _p6_y_dirs()
+    beat = {"cambio": "the hinged shower door is replaced by a sliding glass door",
+            "estado": "despues"}
     relato_crudo = {"modo": "espacio_que_cambia", "cambia": "objeto",
-                    "bases": {"bano_mampara": {"imagen": "espacio_fijo/a1b2c3d4e5f60718.png",
-                                               "aprobada": True}}}
+                    "bases": {"bano_mampara": {
+                        "imagen": "espacio_fijo/a1b2c3d4e5f60718.png", "aprobada": True,
+                        # UN ESTADO, UNA IMAGEN (prueba real del 21-10)
+                        "estados": {"despues": {"imagen": "espacio_fijo/b2c3d4e5f6071829.png",
+                                                "aprobada": True, "cambio": beat["cambio"]}}}}}
     p = {"estilo": {"referencias": [estilo]}, "espacio_fijo": dict(ESPACIO),
          "tipo_relato": relato_crudo, "unidades": {}}
     relato = T.resolver(p)
+    catalogo = {"beats": [dict(beat, set="bano_mampara")]}
+    dirs = dict(dirs, bases={"bano_mampara": base, "bano_mampara#despues": base})
     escenas = [
         {"id": "S001", "set": "bano_mampara", "personajes": [], "narracion": "choca",
          "carta": "general", "encuadre": "a wide establishing shot"},
@@ -291,16 +298,18 @@ def prueba_referencias_y_prompt():
         {"id": "S003", "set": "bano_mampara", "personajes": [], "narracion": "detalle",
          "carta": "detalle", "encuadre": "an extreme close-up"},
     ]
-    beat = {"cambio": "the hinged shower door is replaced by a sliding glass door",
-            "estado": "despues"}
     for e in escenas:
         P6._marcar_edicion(e, beat, relato, "bano_mampara", "ilustracion",   # noqa: SLF001
-                           T.bases_aprobadas(p))
+                           T.bases_aprobadas(p, catalogo))
     ok(escenas[0].get("editar_base") and escenas[1].get("editar_base"),
        "los planos generales del sitio se editan")
     ok(not escenas[2].get("editar_base"), "el de detalle NO (va con la base como referencia)")
-    igual(escenas[1].get("base"), "espacio_fijo/a1b2c3d4e5f60718.png",
-          "el plano lleva la ruta de su base (para la fase 5)")
+    igual(escenas[1].get("base"), "espacio_fijo/b2c3d4e5f6071829.png",
+          "el plano lleva la ruta de la imagen de SU ESTADO (para la fase 5)")
+    igual(escenas[1].get("base_clave"), "bano_mampara#despues", "y su clave «sitio#estado»")
+    otra = T.bases_aprobadas(p, {"beats": [dict(beat, cambio="a curtain instead")]})
+    ok("bano_mampara#despues" not in otra and "bano_mampara" in otra,
+       "si Claude reescribe el cambio, la imagen del estado deja de valer (la base no)")
     ok(not P6._con_encuadre(escenas[1]) and P6._con_encuadre(escenas[2]),   # noqa: SLF001
        "el plano editado no lleva SHOT TYPE; el de detalle sí")
     plan = {"escenas": escenas, "assets": {}}
@@ -313,8 +322,9 @@ def prueba_referencias_y_prompt():
     texto = P6._prompt_completo(escenas[1], refs, p["estilo"])               # noqa: SLF001
     ok("Reference image 1 is THE SHOT TO EDIT ('bano_mampara')" in texto,
        "el prompt presenta la imagen 1 como la que se edita")
-    ok("Change ONLY: the hinged shower door is replaced by a sliding glass door" in texto,
-       "con lo único que cambia")
+    ok("Change ONLY: nothing in the room itself" in texto
+       and "Change ONLY: the hinged" not in texto,
+       "la imagen del estado YA trae el cambio: el plano no lo vuelve a pedir")
     ok("Only that object changes" in texto, "y la frase del subtipo «objeto»")
     ok(texto.rstrip().endswith("No watermarks.") and "FINAL CHECK" in texto
        and texto.index("FINAL CHECK") > texto.index("Change ONLY"),
@@ -324,14 +334,26 @@ def prueba_referencias_y_prompt():
     igual([r["papel"] for r in refs_det][:2], ["estilo", "espacio"],
           "el de detalle lleva la base como referencia del sitio")
     igual(P6.planos_sin_base(plan, dirs), {}, "con la base aprobada no falta ninguna")
-    igual(P6.planos_sin_base(plan, dict(dirs, bases={})), {"bano_mampara": ["S002"]},
+    igual(P6.planos_sin_base(plan, dict(dirs, bases={})), {"bano_mampara#despues": ["S002"]},
           "sin ella, se dice qué planos ESPERAN: los que no tienen imagen (S001 ya la tiene)")
+    igual(P6.planos_sin_base(plan, dict(dirs, bases={"bano_mampara": base})),
+          {"bano_mampara#despues": ["S002"]},
+          "con la base aprobada pero sin la de su estado, también esperan")
     igual(P6.planos_sin_base(plan, dict(dirs, bases={}), unidades=["escena:S001"]),
-          {"bano_mampara": ["S001"]}, "o los pedidos, aunque tengan imagen")
+          {"bano_mampara#despues": ["S001"]}, "o los pedidos, aunque tengan imagen")
     igual(P6.planos_sin_base(plan, dict(dirs, bases={}), unidades=["escena:S003"]), {},
           "y rehacer un plano que no se edita no se bloquea")
     igual(P6.planos_sin_base(plan, dict(dirs, bases={}), rehacer=True),
-          {"bano_mampara": ["S001", "S002"]}, "con «rehacer todo», todos los editados")
+          {"bano_mampara#despues": ["S001", "S002"]}, "con «rehacer todo», todos los editados")
+    antes = dict(escenas[0])
+    P6._marcar_edicion(antes, {"cambio": "", "estado": "antes"}, relato,   # noqa: SLF001
+                       "bano_mampara", "ilustracion", T.bases_aprobadas(p, catalogo))
+    ok(antes.get("editar_base") and "base_clave" not in antes
+       and antes.get("base") == "espacio_fijo/a1b2c3d4e5f60718.png",
+       "un tramo sin cambio (el «antes») edita la base del sitio, sin estado")
+    texto_e = T.prompt_imagen_estado(beat["cambio"])
+    ok(beat["cambio"] in texto_e and "No people" in texto_e and "rigid" in texto_e,
+       "la imagen del estado: la base con UN cambio, vacía, rígida y a escala")
 
     seccion("8] sin modo explícito, las referencias y el prompt son los de siempre")
     sin = {"estilo": {"referencias": [estilo]}, "espacio_fijo": dict(ESPACIO), "unidades": {}}

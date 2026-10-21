@@ -7534,7 +7534,9 @@ function campoImagenDelEspacio(ef, urlGuardada, alCambiar) {
       }, 'Quitarla') : null),
     h('div', { clase: 'pista' }, 'Se adjunta a cada imagen de plano de este sitio (no a los '
       + 'secundarios) para que se reconozca el lugar. Se paga como una referencia más: alrededor '
-      + 'de medio céntimo por imagen.'));
+      + 'de medio céntimo por imagen. Con el tipo de relato «Un espacio que cambia» o «Producto» '
+      + 'no hace falta: el Studio dibuja la imagen base del sitio a partir de esta descripción '
+      + '(en «El tipo de relato», donde la apruebas); si subes una, puedes usarla como base, gratis.'));
 }
 
 function bloqueEspacioFijoLight(e) {
@@ -7832,8 +7834,9 @@ function bloqueTipoRelatoDelVideo() {
   const f = est.ficha || {};
   const corriendo = !!trabajoVideoLight();
   const res = f.resuelto || {};
-  const origen = { video: 'elegido para este vídeo', estilo: 'del estilo',
-    espacio_fijo: 'porque tiene espacio fijo', '': 'por defecto' }[res.origen || ''] || '';
+  const origen = { video: 'elegido para este vídeo: manda sobre el del estilo',
+    estilo: 'el que trae el estilo', espacio_fijo: 'porque tiene espacio fijo',
+    '': 'por defecto' }[res.origen || ''] || '';
   const heredado = f.del_estilo && f.del_estilo.modo
     ? `Lo del estilo: ${nombreRelato(f.del_estilo.modo, f.del_estilo.cambia)}`
     : 'Lo que diga el estilo';
@@ -7869,8 +7872,12 @@ function imagenBaseDelRelato(est, corriendo) {
     return caja;
   }
   if (base) {
-    caja.appendChild(h('img', { src: `${BASE}${base.imagen_url}&v=${Date.now() % 100000}`,
-      alt: 'la imagen base del sitio', clase: 'miniatura-imagen-base' }));
+    // pulsarla la abre a tamaño completo: la miniatura no deja juzgarla (21-10)
+    const url = `${BASE}${base.imagen_url}&v=${Date.now() % 100000}`;
+    caja.appendChild(h('a', { href: url, target: '_blank', rel: 'noopener',
+      title: 'Abrir a tamaño completo' },
+    h('img', { src: url, alt: 'la imagen base del sitio', clase: 'miniatura-imagen-base' })));
+    caja.appendChild(h('div', { clase: 'pista' }, 'Púlsala para verla a tamaño completo.'));
   }
   caja.appendChild(h('div', { clase: 'meta' }, f.base_aprobada
     ? '✓ Aprobada: cada plano del sitio se genera editando esta imagen.'
@@ -7893,11 +7900,13 @@ function imagenBaseDelRelato(est, corriendo) {
     onclick: () => generarBaseDelRelato(!!base, usd) },
   `${base ? 'Otra imagen base' : 'Generar la imagen base'} · ≈ ${usdCorto(usd)}`));
   caja.appendChild(fila);
+  if (f.base_aprobada && (f.estados || []).length) caja.appendChild(estadosDelRelato(est, corriendo, usd));
   if (f.inicial) {
     caja.appendChild(h('div', { clase: 'meta' }, `Lo que luego cambia sale ya en la base, así: «${f.inicial}». `
       + 'Comprueba que está donde va antes de aprobarla.'));
   }
-  caja.appendChild(h('div', { clase: 'pista' }, 'La imagen base es el sitio vacío y entero, en su '
+  caja.appendChild(h('div', { clase: 'pista' }, 'Qué hay en el sitio y dónde lo dice «El espacio '
+    + 'fijo»; aquí se dibuja y se aprueba. La imagen base es el sitio vacío y entero, en su '
     + 'estado inicial. Es lo que garantiza que todas las imágenes sean el mismo sitio con la misma '
     + 'cámara. Los planos de detalle la llevan como referencia.'));
   return caja;
@@ -7963,6 +7972,61 @@ function aplicarTipoRelatoDelVideo() {
   const cuerpo = { tipo_relato: t.modo ? (t.modo === 'espacio_que_cambia'
     ? { modo: t.modo, cambia: t.cambia || 'objeto' } : { modo: t.modo }) : null };
   return accionDelRelato('/aplicar', cuerpo, 'tipo de relato aplicado: no se ha dibujado nada');
+}
+
+/* UN ESTADO, UNA IMAGEN: cada cambio del vídeo (la mampara abierta, la
+   corrediza…) se dibuja UNA vez editando la base aprobada; se aprueba como la
+   base, y los planos de ese estado la editan sin volver a inventarlo. */
+function estadosDelRelato(est, corriendo, usd) {
+  const f = est.ficha || {};
+  const caja = h('div', { clase: 'estados-relato' },
+    h('label', {}, 'Cada estado, dibujado una vez'),
+    h('div', { clase: 'pista' }, 'Cada cambio que pide el guion se dibuja una sola vez sobre la '
+      + 'imagen base. Apruébalos: los planos de cada estado editan su imagen y así salen iguales.'));
+  for (const e of f.estados || []) {
+    const fila = h('div', { clase: `estado-relato${e.aprobada ? ' aprobada' : ''}` });
+    if (e.imagen_url) {
+      const url = `${BASE}${e.imagen_url}&v=${Date.now() % 100000}`;
+      fila.appendChild(h('a', { href: url, target: '_blank', rel: 'noopener',
+        title: 'Abrir a tamaño completo' },
+      h('img', { src: url, alt: `el estado ${e.estado}`, clase: 'miniatura-imagen-base' })));
+    }
+    const lado = h('div', { clase: 'estado-relato-texto' },
+      h('strong', {}, e.estado.replace(/_/g, ' ')),
+      h('div', { clase: 'meta' }, e.cambio),
+      h('div', { clase: 'meta' }, e.aprobada ? '✓ Aprobado.'
+        : (e.imagen_url && e.vigente ? 'Sin aprobar: míralo y apruébalo.'
+          : (e.imagen_url ? 'El cambio se ha reescrito: hace falta otra imagen.'
+            : 'Sin imagen: los planos de este estado esperan a que la apruebes.'))));
+    const botones = h('div', { clase: 'fila' });
+    if (e.imagen_url && e.vigente && !e.aprobada) {
+      botones.appendChild(h('button', { clase: 'mini primario', disabled: est.ocupado,
+        onclick: () => aprobarEstadoDelRelato(e.estado, true) }, 'Aprobar este estado'));
+    }
+    if (e.aprobada) {
+      botones.appendChild(h('button', { clase: 'mini fantasma', disabled: est.ocupado,
+        onclick: () => aprobarEstadoDelRelato(e.estado, false) }, 'Retirar la aprobación'));
+    }
+    botones.appendChild(h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
+      onclick: () => generarEstadoDelRelato(e.estado, !!e.imagen_url, usd) },
+    `${e.imagen_url ? 'Otra imagen' : 'Dibujar este estado'} · ≈ ${usdCorto(usd)}`));
+    lado.appendChild(botones);
+    fila.appendChild(lado);
+    caja.appendChild(fila);
+  }
+  return caja;
+}
+
+function aprobarEstadoDelRelato(estado, aprobada) {
+  const est = relatoDelVideoLight();
+  return accionDelRelato('/base/aprobar', { sitio: (est.ficha || {}).sitio, estado, aprobada },
+    aprobada ? `estado «${estado}» aprobado` : 'aprobación retirada');
+}
+
+function generarEstadoDelRelato(estado, otra, usd) {
+  if (!confirm(`${otra ? 'Otra imagen' : 'Dibujar'} del estado «${estado}»: ≈ ${usdCorto(usd)}.`
+    + '\n\nSe paga una imagen: la base aprobada con ese cambio. Después la miras y la apruebas.')) return;
+  trabajoDelRelato('/base/generar', { estado, otra: !!otra, usd });
 }
 
 function aprobarBaseDelRelato(aprobada) {
@@ -14924,6 +14988,13 @@ async function guardarRelatoEstiloLight() {
 
 function bloqueRelatoEstiloLight(ficha) {
   const caja = h('div', {});
+  // como las reglas: un estilo sin láminas no se puede guardar (el servidor
+  // pide al menos tres fotogramas), así que el selector no se ofrece todavía
+  if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Primero genera el estilo gráfico (las láminas); después podrás elegir su tipo de relato.'));
+    return caja;
+  }
   if (RELATO_LIGHT.id !== ficha.id) {
     setTimeout(() => cargarRelatoEstiloLight(ficha.id), 0);
     caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo el tipo de relato…'));
@@ -14940,9 +15011,10 @@ function bloqueRelatoEstiloLight(ficha) {
   }
   caja.appendChild(selectorTipoRelato(RELATO_LIGHT.relato, guardarRelatoEstiloLight,
     'Documental (por defecto)'));
-  caja.appendChild(h('div', { clase: 'pista' }, 'Es el punto de partida de los vídeos nuevos de '
-    + 'este estilo. En cada vídeo se puede cambiar en su Encargo; a los ya hechos solo llega con '
-    + '«Traer el estilo», que avisa antes de rehacer nada.'));
+  caja.appendChild(h('div', { clase: 'pista' }, 'Es solo el punto de partida de los vídeos nuevos de '
+    + 'este estilo. Si un vídeo elige otro en su Encargo (o la Parrilla lo trae en la línea «Tipo de '
+    + 'relato:»), manda el del vídeo. «Documental» aquí quiere decir que el estilo no impone ninguno. '
+    + 'A los vídeos ya hechos solo llega con «Traer el estilo», que avisa antes de rehacer nada.'));
   if (RELATO_LIGHT.estado) caja.appendChild(h('div', { clase: 'meta' }, RELATO_LIGHT.estado));
   return caja;
 }

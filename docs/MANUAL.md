@@ -241,9 +241,35 @@ Lo que se le pide a este vídeo. Todo se guarda solo mientras escribes.
   hora): cada plano se genera editando una **imagen base** del sitio, que se
   aprueba en el vídeo antes de generar las imágenes (la subida en «El espacio
   fijo», gratis, o una generada, que se paga). **Recorrido**, **Escenario y
-  apoyos**, **Producto** y **Clase** completan la lista. Sin elegir, manda el
-  del estilo. En un vídeo hecho, «Aplicar el tipo de relato» enseña qué planos
-  cambian y cuánto cuesta, y eliges cuáles rehacer.
+  apoyos**, **Producto** y **Clase** completan la lista. En un vídeo hecho,
+  «Aplicar el tipo de relato» enseña qué planos cambian y cuánto cuesta, y
+  eliges cuáles rehacer.
+
+  **Quién manda, de más a menos:** (1) el que elige el vídeo en su Encargo (o
+  la línea «Tipo de relato:» de la Parrilla, que va al Encargo); (2) el del
+  estilo, que es solo el punto de partida de sus vídeos nuevos; (3) si ninguno
+  dice nada y el vídeo tiene espacio fijo, «Escenario y apoyos»; (4) si no,
+  «Documental». Por eso un estilo puede decir «Documental (por defecto)» y su
+  vídeo ser «Un espacio que cambia»: en el estilo, «Documental» quiere decir
+  «no impongo ninguno», y el vídeo eligió el suyo. El Encargo enseña cuál rige
+  y de dónde sale («elegido para este vídeo», «el que trae el estilo»…).
+
+  **El espacio fijo y la imagen base no son lo mismo:** «El espacio fijo» es
+  el TEXTO del sitio (qué hay en cada pared, medidas, materiales, luz) y,
+  opcional, una foto tuya del sitio. La **imagen base** es ese sitio DIBUJADO
+  una vez, vacío y entero, y aprobado por ti: vive en «El tipo de relato». En
+  «Un espacio que cambia» y «Producto» no hace falta subir foto: la base se
+  dibuja de la descripción; si subiste una, puedes usarla como base, gratis.
+  Escribe el espacio fijo de forma que haga verdad lo que cuenta la voz, con
+  distancias: si la mampara choca con el inodoro, que el inodoro esté a menos
+  de lo que mide la hoja.
+
+  **Cada estado, dibujado una vez:** en «Un espacio que cambia», cada cambio
+  que pide el guion (la mampara abierta contra el inodoro, la corrediza…) se
+  dibuja UNA vez editando la base aprobada, y también se aprueba (se ve su
+  coste antes). Los planos de ese estado editan su imagen, así que el objeto
+  sale igual en todos. Sin la base y sus estados aprobados no se paga ningún
+  plano que los edite.
 - **El reparto y los sitios** (en un vídeo hecho): «Pedido para el reparto de
   sitios» es una frase para Claude al repartir; «Volver a repartir con este
   pedido» no paga imágenes.

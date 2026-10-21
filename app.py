@@ -4635,6 +4635,22 @@ def _ficha_tipo_relato(ctx):
     for sid, ficha in (guardado.get("bases") or {}).items():
         bases[sid] = {"aprobada": ficha.get("aprobada", False),
                       "imagen_url": f"/api/proyectos/{ctx.id}/tipo_relato/base/imagen?sitio={sid}"}
+    # UN ESTADO, UNA IMAGEN: los estados que pide el guion y su imagen (si la hay)
+    estados = []
+    try:
+        sitio_e, pedidos = p6.estados_del_relato(ctx.proyecto, params)
+    except Exception:                                       # noqa: BLE001
+        sitio_e, pedidos = None, {}
+    guardados = (((guardado.get("bases") or {}).get(sitio_e) or {}).get("estados") or {}) \
+        if sitio_e else {}
+    for est, cambio in pedidos.items():
+        hecho = guardados.get(est) or {}
+        vigente = bool(hecho) and hecho.get("cambio") == cambio
+        estados.append({
+            "estado": est, "cambio": cambio, "vigente": vigente,
+            "aprobada": bool(vigente and hecho.get("aprobada")),
+            "imagen_url": (f"/api/proyectos/{ctx.id}/tipo_relato/base/imagen?sitio={sitio_e}"
+                           f"&estado={est}") if hecho else None})
     subida = (params.get("espacio_fijo") or {}).get("imagen") \
         if isinstance(params.get("espacio_fijo"), dict) else None
     catalogo = params.get("catalogo") or {}
@@ -4655,6 +4671,10 @@ def _ficha_tipo_relato(ctx):
         "sitio": sitio, "sitio_nombre": (espacio or {}).get("sitio") or sitio,
         "bases": bases,
         "base_aprobada": bool(sitio and (bases.get(sitio) or {}).get("aprobada")),
+        "estados": estados,
+        # todo aprobado: la base y la imagen de cada estado
+        "listo": bool(sitio and (bases.get(sitio) or {}).get("aprobada"))
+                 and all(e["aprobada"] for e in estados),
         "puede_usar_subida": bool(subida and sitio),
         "usd_base": _usd_por_imagen(ctx),
         "calidad": str(params.get("calidad") or "low"),
@@ -4878,9 +4898,39 @@ def _correr_base(avisar, ctx, rehacer):
     return hecho
 
 
+@_medido_en("assets", "base")
+@_con_turno
+def _correr_estado(avisar, ctx, estado, rehacer):
+    """Genera (y paga) la imagen de un estado: la base, cambiada una vez. No la aprueba."""
+    p6 = PASOS_MODULOS.p6_assets
+    avisar(0.1, f"dibujando el estado «{estado}» sobre la imagen base (se paga una imagen)")
+    hecho = p6.generar_imagen_estado(ctx.proyecto, ctx.estado.params("assets") or {},
+                                     estado, rehacer=rehacer)
+    tr = _tipo_relato()
+    with _cerrojo_de_cadena(ctx.id):
+        guardado = _tipo_relato_guardado(ctx)
+        bases = dict(guardado.get("bases") or {})
+        ficha = dict(bases.get(hecho["sitio"]) or {})
+        if not ficha:
+            raise RuntimeError("la imagen base del sitio ha desaparecido mientras se dibujaba")
+        estados = dict(ficha.get("estados") or {})
+        estados[estado] = {"imagen": hecho["imagen"], "aprobada": False,
+                           "cambio": hecho["cambio"]}
+        ficha["estados"] = estados
+        bases[hecho["sitio"]] = ficha
+        guardado["bases"] = bases
+        ctx.estado.actualizar_params("assets", {"tipo_relato": tr.normalizar(guardado)})
+    ctx.bitacora.anotar("tipo_relato_estado", "assets", {
+        "sitio": hecho["sitio"], "estado": estado, "coste": hecho.get("coste"),
+        "origen": hecho.get("origen")})
+    avisar(1.0, f"estado «{estado}» listo: míralo y apruébalo")
+    return hecho
+
+
 @app.post("/api/proyectos/{pid}/tipo_relato/base/generar", status_code=202)
 def generar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
-    """Genera la imagen base del sitio (SE PAGA una imagen). {usd: lo que se vio}"""
+    """Genera la imagen base del sitio, o con {estado} la de ese estado (SE PAGA una
+    imagen). {usd: lo que se vio, estado?, otra?}"""
     tr = _tipo_relato()
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
@@ -4899,8 +4949,19 @@ def generar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
         if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
             raise ErrorApi(409, "hay algo generándose en este vídeo: las imágenes "
                                 "se generan de una tanda en una")
-        trabajo_id = ctx.gestor.lanzar("tipo_relato_base", _correr_base, ctx,
-                                       bool(datos.get("otra")), paso="assets")
+        estado = str(datos.get("estado") or "").strip()
+        if estado:
+            sitio_e, pedidos = PASOS_MODULOS.p6_assets.estados_del_relato(ctx.proyecto, params)
+            if estado not in pedidos:
+                raise ErrorApi(404, f"el estado «{estado}» no está en los cambios de este vídeo")
+            if not tr.bases_aprobadas(params).get(sitio_e):
+                raise ErrorApi(409, "aprueba antes la imagen base: cada estado se dibuja "
+                                    "editándola")
+            trabajo_id = ctx.gestor.lanzar("tipo_relato_estado", _correr_estado, ctx, estado,
+                                           bool(datos.get("otra")), paso="assets")
+        else:
+            trabajo_id = ctx.gestor.lanzar("tipo_relato_base", _correr_base, ctx,
+                                           bool(datos.get("otra")), paso="assets")
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id),
             "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
@@ -4933,7 +4994,8 @@ def usar_subida_como_base(pid: str):
 
 @app.post("/api/proyectos/{pid}/tipo_relato/base/aprobar")
 def aprobar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
-    """{sitio?, aprobada: true|false}: aprueba (o retira) la imagen base del sitio."""
+    """{sitio?, estado?, aprobada: true|false}: aprueba (o retira) la imagen base del
+    sitio, o con `estado` la de ese estado."""
     tr = _tipo_relato()
     ctx = contexto(pid)
     datos = _cuerpo(cuerpo)
@@ -4949,24 +5011,37 @@ def aprobar_base_relato(pid: str, cuerpo: dict = Body(default=None)):
         bases = dict(guardado.get("bases") or {})
         if sitio not in bases:
             raise ErrorApi(404, "ese sitio no tiene imagen base: genérala o usa la subida")
-        bases[sitio] = dict(bases[sitio], aprobada=aprobada)
+        estado = str(datos.get("estado") or "").strip()
+        if estado:
+            estados = dict(bases[sitio].get("estados") or {})
+            if estado not in estados:
+                raise ErrorApi(404, f"el estado «{estado}» no tiene imagen: genérala antes")
+            estados[estado] = dict(estados[estado], aprobada=aprobada)
+            bases[sitio] = dict(bases[sitio], estados=estados)
+        else:
+            bases[sitio] = dict(bases[sitio], aprobada=aprobada)
         guardado["bases"] = bases
         ctx.estado.actualizar_params("assets", {"tipo_relato": tr.normalizar(guardado)})
     ctx.bitacora.anotar("tipo_relato_base_aprobada", "assets",
-                        {"sitio": sitio, "aprobada": bases[sitio]["aprobada"]})
+                        {"sitio": sitio, "estado": estado, "aprobada": aprobada})
     ficha = _ficha_tipo_relato(ctx)
     ficha["cambios"] = _cambios_del_relato(ctx)
     return ficha
 
 
 @app.get("/api/proyectos/{pid}/tipo_relato/base/imagen")
-def imagen_base_relato(pid: str, sitio: str = Query(default="")):
-    """La imagen base (aprobada o no) de un sitio del video."""
+def imagen_base_relato(pid: str, sitio: str = Query(default=""),
+                       estado: str = Query(default="")):
+    """La imagen base (aprobada o no) de un sitio del video, o la de un estado."""
     ctx = contexto(pid)
     bases = _tipo_relato_guardado(ctx).get("bases") or {}
     ficha = bases.get(sitio) or (next(iter(bases.values())) if bases and not sitio else None)
     if not ficha:
         raise ErrorApi(404, "ese sitio no tiene imagen base")
+    if isinstance(estado, str) and estado:      # llamada directa: Query() no es un str
+        ficha = (ficha.get("estados") or {}).get(estado)
+        if not ficha:
+            raise ErrorApi(404, "ese estado no tiene imagen")
     try:
         ruta = ctx.proyecto.ruta(*str(ficha["imagen"]).split("/"))
     except ValueError:
@@ -4996,8 +5071,9 @@ def rehacer_planos_del_relato(pid: str, cuerpo: dict = Body(default=None)):
     if vistas != len(set(pedidos)):
         raise ErrorApi(400, f"se piden {len(set(pedidos))} planos y se confirmaron {vistas}")
     ficha = _ficha_tipo_relato(ctx)
-    if ficha["edita"] and not ficha["base_aprobada"]:
-        raise ErrorApi(409, "falta aprobar la imagen base del sitio antes de rehacer planos")
+    if ficha["edita"] and not ficha["listo"]:
+        raise ErrorApi(409, "falta aprobar la imagen base del sitio (y la de cada estado) "
+                            "antes de rehacer planos")
     with _cerrojo_de_cadena(ctx.id):
         if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
             raise ErrorApi(409, "hay algo generándose en este vídeo: espera a que "
@@ -11221,7 +11297,7 @@ def _impedimentos(ctx, pestana, pendientes):
         except Exception:                                   # noqa: BLE001
             ficha = {}
         faltan = {}
-        if ficha.get("edita") and not ficha.get("base_aprobada"):
+        if ficha.get("edita") and not ficha.get("listo"):
             # SOLO si hay planos que dibujar: un video hecho cuyos planos se
             # conservan se tiene que poder volver a montar sin base
             try:
@@ -11235,8 +11311,8 @@ def _impedimentos(ctx, pestana, pendientes):
                 faltan = {}
         if faltan:
             fuera.append({"tarea": "assets",
-                          "que": "falta aprobar la imagen base del sitio: sin ella no se "
-                                 "dibujan los planos nuevos de ese sitio",
+                          "que": "falta aprobar la imagen base del sitio o la de un "
+                                 "estado: sin ella no se dibujan los planos nuevos que la editan",
                           "donde": "El tipo de relato"})
     return fuera
 

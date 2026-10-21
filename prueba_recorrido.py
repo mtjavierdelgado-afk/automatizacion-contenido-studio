@@ -6570,6 +6570,12 @@ def tipo_de_relato(navegador, datos):
 
     def parte_video():
         pg.sin_trabajo(300)
+        # un sitio del que hacer la imagen base (el último escenario: no molesta a otros)
+        _r, ef = api.get(f"/api/proyectos/{pid}/espacio_fijo")
+        if not ((ef or {}).get("espacio_fijo") or {}).get("descripcion"):
+            api.post(f"/api/proyectos/{pid}/espacio_fijo/aplicar", {"espacio_fijo": {
+                "sitio": "Baño", "descripcion": "a narrow bathroom, toilet on the left",
+                "luz": "day", "secundarios": []}})
         antes = _huellas_de_planos(datos, pid)
         pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; pintarLight();")
         ok(pg.esperar(".bloque-light h3", "El tipo de relato", 15), "(2) el vídeo trae «El tipo de relato»")
@@ -6595,6 +6601,41 @@ def tipo_de_relato(navegador, datos):
             pg.pulsar(".imagen-base-relato button", "Usar la imagen subida")
             ok(pg.esperar(".imagen-base-relato.aprobada", segundos=15),
                "(2) «Usar la imagen subida» la deja aprobada (gratis)")
+        elif ficha.get("sitio"):
+            # sin subida: se genera (el motor de imagen es el falso) y se aprueba
+            pg.pulsar(".imagen-base-relato button", "Generar la imagen base")
+            pg.sin_trabajo(120)
+            pg.js("APP.light.video.relato = null; pintarLight();")
+            ok(pg.esperar(".imagen-base-relato button", "Aprobar esta imagen", 30),
+               "(2) la imagen base generada se puede aprobar")
+            ok(pg.visible(".imagen-base-relato a img"), "(2) con su miniatura, que abre a tamaño completo")
+            pg.pulsar(".imagen-base-relato button", "Aprobar esta imagen")
+            ok(pg.esperar(".imagen-base-relato.aprobada", segundos=15), "(2) y queda aprobada")
+        if pg.visible(".imagen-base-relato.aprobada"):
+            # UN ESTADO, UNA IMAGEN (21-10): Claude escribe qué cambia por tramo
+            # (el CLI falso: «antes» y «despues»), y el estado se dibuja una vez
+            # (motor de imagen falso) y se aprueba en la pantalla
+            r, lanz = api.post(f"/api/proyectos/{pid}/tipo_relato/cambios", {})
+            fin_cambios = api.esperar(lanz["trabajo_id"], 120) if r.status_code == 202 else lanz
+            pg.js("APP.light.video.relato = null; pintarLight();")
+            if pg.esperar(".estados-relato", segundos=20):
+                ok(pg.visible(".estado-relato button", "Dibujar este estado"),
+                   "(2b) cada estado del guion, con «Dibujar este estado» y su precio")
+                pg.pulsar(".estado-relato button", "Dibujar este estado")
+                pg.sin_trabajo(120)
+                pg.js("APP.light.video.relato = null; pintarLight();")
+                ok(pg.esperar(".estado-relato button", "Aprobar este estado", 30),
+                   "(2b) dibujado, se puede aprobar")
+                ok(pg.visible(".estado-relato a img"), "(2b) con su miniatura, que abre a tamaño completo")
+                pg.pulsar(".estado-relato button", "Aprobar este estado")
+                ok(pg.esperar(".estado-relato.aprobada", segundos=15), "(2b) y queda aprobado")
+                _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+                ok(ficha.get("listo"), "(2b) con la base y sus estados aprobados, listo para dibujar")
+                pg.captura("tipo_relato_estados")
+            else:
+                _r, f2 = api.get(f"/api/proyectos/{pid}/tipo_relato")
+                ok(False, "(2b) tras escribir qué cambia, salen los estados del vídeo: "
+                   f"{r.status_code} {str(fin_cambios)[:300]} estados={f2.get('estados')}")
         pg.captura("tipo_relato_video")
         ok(pg.esperar(".bloque-light h3", "El reparto y los sitios", 10),
            "(3) «El reparto y los sitios» con su pedido")
@@ -6610,6 +6651,14 @@ def tipo_de_relato(navegador, datos):
         pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{preset}' }});")
         ok(pg.esperar(".bloque-light h3", "Tipo de relato", 15), "(4) el estilo trae «🧭 Tipo de relato»")
         bloque = pg.p.locator(".bloque-light").filter(has_text="cómo se cuentan por defecto").first
+        _r, lista = api.get("/api/presets-light")
+        fp = next((x for x in (lista or {}).get("presets") or [] if x.get("id") == preset), {})
+        if not (((fp.get("datos") or {}).get("estilo") or {}).get("referencias")):
+            # un estilo sin láminas no se puede guardar: se dice, sin selector
+            ok(pg.esperar(".bloque-light .pista", "podrás elegir su tipo de relato", 15),
+               "(4) sin láminas, dice que primero se genera el estilo (no hay selector que falle)")
+            pg.captura("tipo_relato_estilo")
+            return
         ok(pg.esperar(".bloque-light .tipo-relato select", segundos=15), "(4) con su selector")
         bloque.locator("select").first.select_option("producto")
         fin = time.time() + 10

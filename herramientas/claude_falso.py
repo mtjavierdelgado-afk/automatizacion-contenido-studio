@@ -118,9 +118,11 @@ def responder(entrada):
         # el «qué cambia en cada tramo» de un espacio que cambia (rama
         # tipo-de-relato): un cambio por tramo, con su estado
         tramos = re.findall(r"^- ([A-Z0-9_]+)-([A-Z0-9_]+):", entrada, re.M)
+        # (con un solo tramo, ese cambia: si no, no habria ningun estado que ver)
         return {"beats": [{"desde": d, "hasta": h,
-                           "cambio": "" if i == 0 else "the hinged shower door is a sliding door",
-                           "estado": "antes" if i == 0 else "despues"}
+                           "cambio": "" if i == 0 and len(tramos) > 1
+                           else "the hinged shower door is a sliding door",
+                           "estado": "antes" if i == 0 and len(tramos) > 1 else "despues"}
                           for i, (d, h) in enumerate(tramos)]}
     if "<nota>" in entrada:
         nota = _entre(entrada, "nota")

@@ -3587,6 +3587,12 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .miniatura-imagen-base { display: block; max-width: 260px; max-height: 200px; width: auto;
   border-radius: 8px; border: 1px solid var(--linea); object-fit: contain; }
 .pedido-sitios { display: flex; flex-direction: column; gap: 4px; }
+.estados-relato { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; min-width: 0; }
+.estado-relato { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start;
+  padding: 8px; border: 1px solid var(--linea); border-radius: 8px; min-width: 0; }
+.estado-relato.aprobada { border-color: var(--ok-borde); }
+.estado-relato .miniatura-imagen-base { max-width: 160px; max-height: 160px; }
+.estado-relato-texto { display: flex; flex-direction: column; gap: 4px; flex: 1 1 180px; min-width: 0; }
 
 /* ================================== ARREGLOS DEL 19-10 (segunda tanda)
    Rama `arreglos-19oct`. */

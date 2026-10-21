@@ -290,7 +290,12 @@ def _planos_legibles(proyecto, escenas, imagenes, bloques):
             # planos que lo estan llevan esta linea; los demas, como siempre
             + (f"\n    EDITADO DESDE LA IMAGEN BASE de «{escena.get('set')}»; lo unico "
                f"que se pidio cambiar: {_texto(escena.get('cambio'), 400) or '(nada del sitio: solo la accion)'}"
-               if escena.get("editar_base") else ""))
+               if escena.get("editar_base") and not escena.get("base_clave") else "")
+            # la imagen de un ESTADO ya trae el cambio: el plano no cambia nada
+            + (f"\n    EDITADO DESDE LA IMAGEN BASE de «{escena['base_clave'].replace('#', ' · estado ')}» "
+               f"(que ya muestra: {_texto(escena.get('cambio'), 400)}); lo unico que se pidio "
+               f"cambiar: (nada del sitio: solo la accion)"
+               if escena.get("editar_base") and escena.get("base_clave") else ""))
     return "\n".join(lineas)
 
 
@@ -324,10 +329,14 @@ incongruencia, y la gente o los objetos sueltos que pide la voz tampoco.
 def _referencia_base(proyecto, tanda, bases):
     """El bloque de la imagen base de los sitios editados de la tanda, o ""."""
     texto = ""
-    for sitio in sorted({e.get("set") for e in tanda
-                         if e.get("editar_base") and e.get("set") in (bases or {})}):
+    # la clave es el sitio o, en «un espacio que cambia», la imagen del estado
+    # del plano («sitio#estado»): se compara con la que se edito de verdad
+    for clave in sorted({e.get("base_clave") or e.get("set") for e in tanda
+                         if e.get("editar_base")
+                         and (e.get("base_clave") or e.get("set")) in (bases or {})}):
         texto += REFERENCIA_BASE.format(
-            sitio=sitio, imagen=_copia(proyecto, f"base_{sitio}", bases[sitio]))
+            sitio=clave.replace("#", " · estado "),
+            imagen=_copia(proyecto, "base_" + clave.replace("#", "__"), bases[clave]))
     return texto
 
 

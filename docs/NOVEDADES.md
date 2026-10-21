@@ -79,6 +79,21 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   fijo» (gratis) o una generada (se paga una imagen y ves su coste antes). **Se
   aprueba antes de generar los planos**: sin ella aprobada no se paga ningún
   plano de ese sitio. «Producto» también edita la base (el fondo no se mueve).
+- **Cada estado, dibujado una vez** (21-10, tras la prueba de la mampara): en
+  «Un espacio que cambia», cada cambio del guion (la mampara abierta contra el
+  inodoro, la corrediza) se dibuja UNA vez sobre la imagen base aprobada y lo
+  apruebas igual que la base, viendo su coste. Los planos de ese estado editan
+  su imagen, así que el objeto sale igual en todos; antes cada plano se
+  inventaba la mampara abierta y salía distinta en cada uno. Las miniaturas de
+  la base y de los estados se abren a tamaño completo al pulsarlas.
+- **Quién manda en el tipo de relato, dicho en la pantalla**: el del vídeo
+  manda sobre el del estilo («Documental» en el estilo quiere decir «no impongo
+  ninguno»), y el Encargo dice de dónde sale el que rige. El manual lo explica
+  junto con la diferencia entre «El espacio fijo» (el texto del sitio) y la
+  imagen base (ese sitio dibujado y aprobado).
+- **La distribución tiene que hacer verdad lo que cuenta la voz**: si Claude
+  declara el sitio, pone las distancias (el inodoro a 0,4 m del vidrio si la
+  mampara choca con él); la guía de la Parrilla lo pide también.
 - **Lo que cambia sale ya en la base, en su sitio** (21-10, tras la prueba de
   la mampara): al repartir, Claude escribe cómo está y dónde va lo que luego
   cambia («una mampara batiente en el borde izquierdo de la ducha, que abre

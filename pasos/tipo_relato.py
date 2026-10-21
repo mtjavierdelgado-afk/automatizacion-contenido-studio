@@ -38,6 +38,7 @@ rama. Todo lo nuevo cuelga de `explicito`.
 
 Este modulo solo tiene datos y funciones puras: no lee disco ni llama a nadie.
 """
+import hashlib
 import re
 import unicodedata
 
@@ -171,9 +172,11 @@ def normalizar(crudo):
     {} es «el video no fija tipo de relato» (se resuelve por el estilo o por el
     espacio fijo). Lanza ValueError si llega mal formado.
 
-    `bases` es {sitio: {"imagen": "espacio_fijo/<huella>.png", "aprobada": bool}}:
-    la imagen base de cada sitio y si alguien la ha aprobado. Sin aprobar no se
-    edita ningun plano desde ella."""
+    `bases` es {sitio: {"imagen": "espacio_fijo/<huella>.png", "aprobada": bool,
+    "estados"?: {estado: {imagen, aprobada, cambio}}}}: la imagen base de cada
+    sitio y si alguien la ha aprobado, y en «un espacio que cambia» la imagen de
+    cada ESTADO (la base ya cambiada, una vez). Sin aprobar no se edita ningun
+    plano desde ella."""
     if crudo is None or crudo == "" or crudo == {}:
         return {}
     salida = _normalizar_modo_y_cambia(crudo, "tipo_relato")
@@ -196,10 +199,75 @@ def normalizar(crudo):
                 raise ValueError(f"tipo_relato.bases.{sid}.imagen no es una imagen "
                                  f"guardada del espacio: genérala o súbela otra vez")
             limpias[sid] = {"imagen": imagen, "aprobada": bool(ficha.get("aprobada"))}
+            estados = _normalizar_estados(ficha.get("estados"), sid)
+            if estados:
+                limpias[sid]["estados"] = estados
         if limpias:
             salida["bases"] = limpias
     if not salida.get("modo") and not salida.get("bases"):
         return {}
+    return salida
+
+
+#: Estados distintos por sitio, como mucho (un video de 30 s trae 2-4).
+MAX_ESTADOS = 12
+
+
+def _normalizar_estados(crudo, sid):
+    """Las imagenes de cada estado de un sitio. -> {estado: {imagen, aprobada, cambio}}"""
+    if crudo in (None, {}):
+        return {}
+    if not isinstance(crudo, dict):
+        raise ValueError(f"tipo_relato.bases.{sid}.estados tiene que ser un objeto")
+    if len(crudo) > MAX_ESTADOS:
+        raise ValueError(f"tipo_relato.bases.{sid}.estados: como mucho {MAX_ESTADOS}")
+    salida = {}
+    for estado, ficha in crudo.items():
+        clave = _etiqueta(estado)
+        if not clave or not isinstance(ficha, dict):
+            raise ValueError(f"tipo_relato.bases.{sid}.estados: un estado mal formado")
+        imagen = ficha.get("imagen")
+        if not isinstance(imagen, str) or not RE_IMAGEN_BASE.match(imagen):
+            raise ValueError(f"tipo_relato.bases.{sid}.estados.{clave}.imagen no es una "
+                             f"imagen guardada del espacio")
+        salida[clave] = {"imagen": imagen, "aprobada": bool(ficha.get("aprobada")),
+                         "cambio": _texto(ficha.get("cambio"), 400)}
+    return salida
+
+
+def clave_estado(sitio, estado):
+    """La clave de la imagen de un estado en el mapa de bases: «sitio#estado»."""
+    return f"{sitio}#{estado}"
+
+
+def estado_de(beat):
+    """La etiqueta del estado de un tramo con cambio (o "" si no cambia nada).
+
+    Un tramo con cambio y sin etiqueta recibe una sacada del propio cambio,
+    para que dos tramos con el mismo cambio compartan imagen."""
+    cambio = _texto((beat or {}).get("cambio"), 400)
+    if not cambio:
+        return ""
+    return _etiqueta((beat or {}).get("estado")) or "c" + hashlib.sha1(
+        cambio.encode("utf-8")).hexdigest()[:8]
+
+
+def lleva_estados(relato):
+    """¿Cada estado se dibuja UNA vez, aprobado, y los planos lo editan?
+    Solo en «un espacio que cambia» (prueba real del 21-10: la mampara abierta
+    se reinventaba en cada plano)."""
+    return activo(relato) and relato.get("modo") == "espacio_que_cambia"
+
+
+def estados_del_catalogo(catalogo, sitio=None):
+    """{estado: cambio} de los tramos con cambio, en orden de aparicion."""
+    salida = {}
+    for beat in (catalogo or {}).get("beats") or []:
+        if not isinstance(beat, dict) or (sitio and beat.get("set") not in (None, "", sitio)):
+            continue
+        estado = estado_de(beat)
+        if estado and estado not in salida:
+            salida[estado] = _texto(beat.get("cambio"), 400)
     return salida
 
 
@@ -260,14 +328,28 @@ def edita(relato):
     return activo(relato) and relato.get("modo") in EDITAN
 
 
-def bases_aprobadas(params):
-    """{sitio: ruta relativa} de las bases APROBADAS del video."""
+def bases_aprobadas(params, catalogo=None):
+    """{clave: ruta relativa} de las bases APROBADAS del video.
+
+    La clave es el sitio para la base, y «sitio#estado» (`clave_estado`) para la
+    imagen de un estado aprobada cuyo cambio sigue siendo el del catalogo: si
+    Claude reescribe lo que cambia, esa imagen ya no vale y no entra. Sin
+    `catalogo`, solo las bases de los sitios."""
     try:
         propio = normalizar((params or {}).get("tipo_relato"))
     except ValueError:
         return {}
-    return {sid: ficha["imagen"] for sid, ficha in (propio.get("bases") or {}).items()
-            if ficha.get("aprobada")}
+    salida = {}
+    vigentes = estados_del_catalogo(catalogo) if catalogo is not None else {}
+    for sid, ficha in (propio.get("bases") or {}).items():
+        if not ficha.get("aprobada"):
+            continue
+        salida[sid] = ficha["imagen"]
+        for estado, otra in (ficha.get("estados") or {}).items():
+            if otra.get("aprobada") and otra.get("cambio") and \
+                    vigentes.get(estado) == otra.get("cambio"):
+                salida[clave_estado(sid, estado)] = otra["imagen"]
+    return salida
 
 
 def plano_se_edita(escena, relato, principal, familia=""):
@@ -555,6 +637,20 @@ INICIAL = ("The element that changes later in the film MUST already be in this p
 def inicial_de(valor):
     """El «inicial» que escribe Claude, limpio (o "")."""
     return _texto(valor if isinstance(valor, str) else "", 500)
+
+
+#: La imagen de un estado: la base, ya cambiada, vacia. Se pinta UNA vez y la
+#: aprueba una persona; los planos de ese estado la editan sin cambiar nada.
+PROMPT_ESTADO = (
+    "The same empty set as reference image 1, with nobody in it, seen from exactly the "
+    "same camera, after ONE change: {cambio}. Show the result standing still, as it "
+    "would look in a real photograph: anything that moves (a door, a panel) is drawn "
+    "rigid, straight, at its true size and fixed in the position the change describes. "
+    "No people, no text, no letters.")
+
+
+def prompt_imagen_estado(cambio):
+    return PROMPT_ESTADO.format(cambio=_texto(cambio, 400) or "nothing")
 
 
 def prompt_imagen_base(espacio, relato, cabecera="", inicial=""):

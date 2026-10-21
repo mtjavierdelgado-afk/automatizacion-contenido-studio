@@ -14,9 +14,15 @@ aceptación de la rama:
 
 Por cada una: crea el vídeo con su espacio fijo y su tipo de relato, escribe el
 guion y la voz, reparte los sitios (Claude), GENERA la imagen base (se paga una),
-le pide a Claude que la mire y la aprueba, dibuja los planos editando la base,
-pasa el revisor y lo monta. Al final Claude compara cada plano con su base:
-¿el mismo sitio, la misma cámara, y solo cambia lo pedido?
+le pide a Claude que la mire y la aprueba; dibuja UNA vez cada estado (la base
+con su cambio: la mampara abierta, la corrediza) y lo aprueba igual; dibuja los
+planos editando la imagen de su estado, pasa el revisor, REHACE lo que marca
+(hasta dos rondas, medidas) y lo monta. Al final Claude compara cada plano con
+la imagen que editó: ¿el mismo sitio, la misma cámara, el objeto igual y solo
+cambia lo pedido?
+
+    asvs probar relato --solo a --video ID   sigue un vídeo de prueba ya hecho
+                                             desde su imagen base
 
 EL TOPE: antes de cada cosa que se paga se suma lo ya gastado en estos vídeos y
 lo que va a costar; si pasa del tope, para y lo dice (lo hecho se queda).
@@ -237,6 +243,8 @@ def main():
     def datos_finales():
         return {"proyectos": {k: v["pid"] for k, v in est["videos"].items()},
                 "gastado_usd": round(gastado(), 3), "juicios": est.get("juicios") or {},
+                # las rondas de rehacer: lo que se marco, se rehizo y costo
+                "rondas": est.get("rondas") or {},
                 "estilo": est.get("estilo")}
 
     def cerrar():
@@ -444,37 +452,110 @@ def main():
         if not (ficha or {}).get("base_aprobada"):
             informe.apunta("aviso", f"{k}: sin imagen base aprobada, se pasa al siguiente vídeo")
             continue
+
+        # UN ESTADO, UNA IMAGEN (21-10): cada cambio se dibuja una vez sobre la
+        # base, lo juzga Claude y se aprueba; hasta dos intentos por estado
+        if parte("estados"):
+            api.libre(pid)
+            sitio = (ficha or {}).get("sitio")
+            ruta_base = os.path.join(raiz, *str(((((_leer_tr(raiz)) or {}).get("bases") or {})
+                                                 .get(sitio) or {}).get("imagen") or "").split("/"))
+            for e in (ficha or {}).get("estados") or []:
+                if e.get("aprobada"):
+                    continue
+                vale = False
+                for intento in range(2):
+                    usd = float(ficha.get("usd_base") or 0.1)
+                    if not cabe(usd, f"el estado «{e['estado']}» de {k}"):
+                        return cerrar()
+                    clave_tid = f"tid_estado_{e['estado']}_{intento}"
+                    tid = v.get(clave_tid)
+                    if not tid:
+                        codigo, lanz = api.post(f"/api/proyectos/{pid}/tipo_relato/base/generar",
+                                                {"usd": usd, "estado": e["estado"], "otra": intento > 0})
+                        tid = (lanz or {}).get("trabajo_id")
+                        if not informe.comprueba(codigo == 202 and tid,
+                                                 f"se dibuja el estado «{e['estado']}» (≈ {usd:.3f} $)",
+                                                 f"HTTP {codigo}: {lanz}"):
+                            return cerrar()
+                        v[clave_tid] = tid
+                        guardar()
+                    ok, fin = esperar(tid, 900, f"estado {e['estado']}")
+                    if not informe.comprueba(ok, f"el estado «{e['estado']}» sale",
+                                             f"{fin.get('estado')}: {fin.get('error')}"):
+                        return cerrar()
+                    imagen = ((((((_leer_tr(raiz)) or {}).get("bases") or {}).get(sitio) or {})
+                               .get("estados") or {}).get(e["estado"]) or {}).get("imagen")
+                    ruta = os.path.join(raiz, *str(imagen or "").split("/"))
+                    try:
+                        juicio = PR._juez(                             # noqa: SLF001
+                            f"Lee con Read la IMAGEN BASE: {ruta_base}\ny la imagen de un ESTADO: {ruta}\n"
+                            f"La del estado tiene que ser la MISMA habitación con la misma cámara, vacía, "
+                            f"con UN cambio: «{e['cambio']}». Contesta por separado: 'mismo_sitio' (misma "
+                            "distribución y cámara), 'cambio' (se ve el cambio pedido, y nada más del sitio "
+                            "cambia) y 'objeto' (lo que cambia es un objeto real a escala: recto, plano y "
+                            "vertical si es un vidrio o una puerta; no torcido ni deformado). Devuelve SOLO "
+                            '{"mismo_sitio": "si"|"no", "cambio": "si"|"no", "objeto": "si"|"no", '
+                            '"por_que": "<una frase>"}', raiz)
+                    except Exception as fallo:                          # noqa: BLE001
+                        juicio = {"por_que": f"no se pudo preguntar a Claude: {fallo}"}
+                    est.setdefault("juicios", {}).setdefault(k, {})[f"estado_{e['estado']}_{intento}"] = juicio
+                    vale = all(juicio.get(x) in ("si", "sí") for x in ("mismo_sitio", "cambio", "objeto"))
+                    informe.comprueba(vale, f"Claude da por bueno el estado «{e['estado']}»",
+                                      str(juicio.get("por_que")), solo_aviso=intento == 0)
+                    if vale:
+                        codigo, ficha = api.post(f"/api/proyectos/{pid}/tipo_relato/base/aprobar",
+                                                 {"sitio": sitio, "estado": e["estado"], "aprobada": True})
+                        informe.comprueba(codigo == 200, f"el estado «{e['estado']}» queda aprobado",
+                                          f"HTTP {codigo}")
+                        break
+                    _c, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+                if not vale:
+                    informe.apunta("fallo", f"ninguna imagen del estado «{e['estado']}» vale: no se "
+                                   "dibujan los planos (míralas en su «El tipo de relato»)")
+                    break
+            hecha(f"{k}:estados")
+            _c, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+        if not (ficha or {}).get("listo", (ficha or {}).get("base_aprobada")):
+            informe.apunta("aviso", f"{k}: faltan imágenes de estado aprobadas, se pasa al siguiente vídeo")
+            continue
         # las imagenes y el montaje
-        for tanda, limite in (("video", 3600), ("render", 2400)):
-            if not parte(tanda):
-                continue
+        def tanda_entera(tanda, limite, nombre=None):
+            """Lanza y espera una tanda. -> True si sigue la prueba."""
+            nombre = nombre or tanda
+            if not parte(nombre):
+                return True
             api.libre(pid, 3600)
             extra = ({"tareas": {"plan_cartelas": False, "direccion": False}}
                      if args.sin_opcionales else {})
             _c, plan = api.get(f"/api/proyectos/{pid}/generar?tanda={tanda}&modo=pendientes")
             if plan.get("impedimentos"):
                 informe.apunta("fallo", f"«{tanda}» no se puede lanzar", plan["impedimentos"][0].get("que"))
-                return cerrar()
+                return False
             if plan.get("tareas") == 0:
-                hecha(f"{k}:{tanda}")
-                continue
+                hecha(f"{k}:{nombre}")
+                return True
             prometido = float((plan.get("coste") or {}).get("usd_por_generar") or 0)
             if not cabe(prometido, f"«{tanda}» de {k}"):
-                return cerrar()
-            tid = v.get(f"tid_{tanda}")
+                return False
+            tid = v.get(f"tid_{nombre}")
             if not tid:
                 codigo, lanz = api.post(f"/api/proyectos/{pid}/generar",
                                         {"tanda": tanda, "modo": "pendientes", **extra})
                 tid = (lanz or {}).get("trabajo_id")
                 if not informe.comprueba(codigo == 202 and tid, f"se lanza «{tanda}» (≈ {prometido:.2f} $)",
                                          f"HTTP {codigo}: {lanz}"):
-                    return cerrar()
-                v[f"tid_{tanda}"] = tid
+                    return False
+                v[f"tid_{nombre}"] = tid
                 guardar()
             ok, fin = esperar(tid, limite, tanda)
             if not informe.comprueba(ok, f"«{tanda}» termina bien", f"{fin.get('estado')}: {fin.get('error')}"):
-                return cerrar()
-            hecha(f"{k}:{tanda}")
+                return False
+            hecha(f"{k}:{nombre}")
+            return True
+
+        if not (tanda_entera("video", 3600) and tanda_entera("render", 2400)):
+            return cerrar()
 
         # el revisor
         if parte("revisor"):
@@ -483,6 +564,73 @@ def main():
             if (lanz or {}).get("trabajo_id"):
                 esperar(lanz["trabajo_id"], 1800, "revisor")
             hecha(f"{k}:revisor")
+
+        # REHACER LO QUE MARCA EL REVISOR, HASTA DOS RONDAS (pedido del dueño,
+        # 21-10): rehacer las marcadas, revisarlas otra vez y, si siguen
+        # marcadas, una segunda vez; ahi se corta. Cada ronda queda medida (que
+        # se marco, que se rehizo, cuanto costo) para saber cuantas rondas
+        # merece la pena pagar cuando esto vaya solo.
+        rondas = est.setdefault("rondas", {}).setdefault(k, [])
+        rehizo = False
+        for ronda in (1, 2):
+            if not parte(f"ronda{ronda}"):
+                rehizo = rehizo or any(r.get("rehechas") for r in rondas)
+                continue
+            api.libre(pid)
+            _c, rev = api.get(f"/api/proyectos/{pid}/imagenes/revision")
+            pend = (rev or {}).get("pendientes") or []
+            if not pend:
+                informe.apunta("ok", f"ronda {ronda}: el revisor no marca nada que rehacer")
+                hecha(f"{k}:ronda{ronda}")
+                break
+            usd_img = float((ficha or {}).get("usd_base") or 0.08)
+            if not cabe(len(pend) * usd_img, f"la ronda {ronda} de rehacer de {k}"):
+                return cerrar()
+            antes = gastado()
+            arranque = time.time()
+            planos = sorted({p["plano"] for p in pend})
+            codigo, _r = api.post(f"/api/proyectos/{pid}/imagenes/revision/aplicar",
+                                  {"notas": [p["nota"] for p in pend]})
+            if not informe.comprueba(codigo == 202 or codigo == 200,
+                                     f"ronda {ronda}: se rehacen las {len(planos)} marcadas {planos}",
+                                     f"HTTP {codigo}: {_r}"):
+                return cerrar()
+            # la cola de notas: hasta que no quede nada dibujandose
+            limite = time.time() + 1800
+            visto = None
+            while time.time() < limite:
+                time.sleep(5)
+                _c, cola = api.get(f"/api/proyectos/{pid}/imagenes/cola")
+                trabajo = (cola or {}).get("trabajo") or {}
+                quedan_cola = len((cola or {}).get("cola") or []) + (1 if (cola or {}).get("actual") else 0)
+                hechas = max(0, len(planos) - quedan_cola)
+                linea = (f"     … rehacer ronda {ronda}: {hechas} de {len(planos)} imágenes"
+                         f" · lleva {int(time.time() - arranque)} s"
+                         + (f" · ≈ {int((cola or {}).get('segundos_por_imagen') or 0) * quedan_cola} s más"
+                            if quedan_cola and (cola or {}).get("segundos_por_imagen") else ""))
+                if linea.split(" · lleva")[0] != visto:
+                    print(linea, flush=True)
+                    visto = linea.split(" · lleva")[0]
+                if not quedan_cola and trabajo.get("estado") not in ("pendiente", "ejecutando"):
+                    break
+            api.libre(pid)
+            codigo, lanz = api.post(f"/api/proyectos/{pid}/imagenes/revisar",
+                                    {"planos": planos, "forzar": True})
+            if (lanz or {}).get("trabajo_id"):
+                esperar(lanz["trabajo_id"], 1800, f"revisor ronda {ronda}")
+            _c, rev = api.get(f"/api/proyectos/{pid}/imagenes/revision")
+            quedan = sorted({p["plano"] for p in (rev or {}).get("pendientes") or []})
+            rondas.append({"ronda": ronda, "marcadas": planos, "rehechas": len(planos),
+                           "quedan": quedan, "usd": round(gastado() - antes, 3),
+                           "segundos": round(time.time() - arranque)})
+            rehizo = True
+            informe.comprueba(not quedan, f"ronda {ronda}: tras rehacer, el revisor ya no marca nada",
+                              f"siguen marcadas {quedan}", solo_aviso=ronda == 1)
+            hecha(f"{k}:ronda{ronda}")
+            if not quedan:
+                break
+        if rehizo and not tanda_entera("render", 2400, "render2"):
+            return cerrar()
         plan, carpeta = _plan_de(raiz)
         editados = [e for e in plan.get("escenas") or [] if e.get("editar_base")]
         informe.comprueba(bool(editados), f"{len(editados)} planos se generaron editando la base",
@@ -497,28 +645,46 @@ def main():
         informe.comprueba(not congruencia, "el revisor no marca incumplimientos de congruencia",
                           f"en {congruencia}")
 
-        # el juez: cada plano editado contra su base
+        # el juez: cada plano editado contra la imagen que edito (la base o la de
+        # su estado), y el objeto que cambia igual que en ella
         if parte("juez") and editados:
-            base = os.path.join(raiz, *str(editados[0].get("base") or "").split("/"))
-            lista = "\n".join(f"- {e['id']}: {os.path.join(carpeta, 'escenas', e['id'] + '.png')} "
-                              f"· se pidió cambiar: {e.get('cambio') or '(nada del sitio: solo la acción)'}"
-                              for e in editados)
+            def _ruta_rel(rel):
+                return os.path.join(raiz, *str(rel or "").split("/"))
+            sitio_b = (ficha or {}).get("sitio")
+            base = _ruta_rel(((((_leer_tr(raiz)) or {}).get("bases") or {}).get(sitio_b) or {}).get("imagen"))
+            lista = "\n".join(
+                f"- {e['id']}: {os.path.join(carpeta, 'escenas', e['id'] + '.png')} · editado desde "
+                f"{_ruta_rel(e.get('base')) if e.get('base') else base}"
+                + (f" (la imagen del estado «{e['base_clave'].split('#', 1)[-1]}», que ya muestra: "
+                   f"{e.get('cambio')})" if e.get("base_clave") else
+                   f" · se pidió cambiar: {e.get('cambio') or '(nada del sitio: solo la acción)'}")
+                for e in editados)
             try:
                 juicio = PR._juez(                                 # noqa: SLF001
-                    f"Lee con Read la IMAGEN BASE: {base}\ny cada uno de estos planos:\n{lista}\n"
-                    f"Lo que puede cambiar en este vídeo: {esc['que_cambia']}.\nPara cada plano: ¿es "
-                    "el MISMO sitio que la base (misma distribución, paredes, muebles fijos), con la "
-                    "misma cámara aproximada, y cambia SOLO lo pedido? Devuelve SOLO "
+                    f"Lee con Read la IMAGEN BASE: {base}\ny cada uno de estos planos con la imagen "
+                    f"desde la que se editó (ábrela también):\n{lista}\n"
+                    f"Lo que puede cambiar en este vídeo: {esc['que_cambia']}.\nPara cada plano: "
+                    "'mismo_sitio' (la misma distribución, paredes y muebles fijos que la base, con la "
+                    "misma cámara aproximada), 'solo_lo_pedido' (no cambia nada del sitio fuera de lo "
+                    "pedido) y 'objeto_igual' (lo que cambia —una puerta, un vidrio— está igual que en "
+                    "la imagen desde la que se editó: misma posición, misma apertura, misma forma, recto "
+                    "y a escala). Devuelve SOLO "
                     '{"planos": [{"id": "S001", "mismo_sitio": "si"|"no", "solo_lo_pedido": "si"|"no", '
-                    '"por_que": "<una frase>"}]}', raiz)
+                    '"objeto_igual": "si"|"no", "por_que": "<una frase>"}]}', raiz)
             except Exception as fallo:                              # noqa: BLE001
                 juicio = {"planos": [], "error": str(fallo)}
             est.setdefault("juicios", {}).setdefault(k, {})["planos"] = juicio
             planos = (juicio or {}).get("planos") or []
             malos = [p.get("id") for p in planos if p.get("mismo_sitio") not in ("si", "sí")]
             de_mas = [p.get("id") for p in planos if p.get("solo_lo_pedido") not in ("si", "sí")]
+            objeto = [p.get("id") for p in planos if p.get("objeto_igual") not in ("si", "sí")]
             informe.comprueba(planos and not malos, f"Claude ve el MISMO sitio en los {len(planos)} planos",
                               f"distinto en {malos} {juicio.get('error') or ''}")
+            informe.comprueba(planos and not objeto,
+                              "y lo que cambia (la mampara) sale igual que en su imagen en todos",
+                              f"distinto en {objeto}: "
+                              + "; ".join(f"{p.get('id')}: {p.get('por_que')}" for p in planos
+                                          if p.get("id") in objeto)[:400])
             informe.comprueba(planos and not de_mas, "y solo cambia lo pedido", f"cambia de más en {de_mas}",
                               solo_aviso=True)
             hecha(f"{k}:juez")

@@ -1287,7 +1287,7 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     relato = tipo_relato.resolver(p)
     relato_edita = tipo_relato.edita(relato)
     principal = _sitio_principal(p, catalogo) if relato_edita else None
-    bases_rel = tipo_relato.bases_aprobadas(p) if relato_edita else {}
+    bases_rel = tipo_relato.bases_aprobadas(p, catalogo) if relato_edita else {}
     camaras = _repartir_zoom(escenas, modo=modo,
                              servicios=servicios_del_video(p, texto_video))
 
@@ -1965,14 +1965,24 @@ def _marcar_edicion(escena, beat, relato, principal, modo, bases_rel):
     arrancara los clips de ese sitio desde la misma imagen."""
     familia = _familia_de_carta(escena.get("carta"), modo)
     if not tipo_relato.plano_se_edita(escena, relato, principal, familia):
-        for clave in ("editar_base", "cambio", "estado", "base"):
+        for clave in ("editar_base", "cambio", "estado", "base", "base_clave"):
             escena.pop(clave, None)
         return
     escena["editar_base"] = True
     escena["cambio"] = str(beat.get("cambio") or "").strip()
     escena["estado"] = str(beat.get("estado") or "").strip()
-    if bases_rel.get(principal):
-        escena["base"] = bases_rel[principal]
+    # UN ESTADO, UNA IMAGEN (prueba real del 21-10): un tramo con cambio no
+    # edita la base inicial cambiandola en cada plano --la mampara abierta salia
+    # distinta en cada uno--, sino la imagen de su estado, dibujada una vez y
+    # aprobada. `base_clave` dice cual: el sitio, o «sitio#estado».
+    clave = principal
+    if tipo_relato.lleva_estados(relato) and escena["cambio"]:
+        clave = tipo_relato.clave_estado(principal, tipo_relato.estado_de(beat))
+        escena["base_clave"] = clave
+    else:
+        escena.pop("base_clave", None)
+    if bases_rel.get(clave):
+        escena["base"] = bases_rel[clave]
     else:
         escena.pop("base", None)
 
@@ -4989,8 +4999,8 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
         if faltan:
             raise RuntimeError(
                 "falta aprobar la imagen base de "
-                + ", ".join(f"«{sitio}» ({len(sids)} plano(s))"
-                            for sitio, sids in sorted(faltan.items()))
+                + ", ".join(f"«{clave.replace('#', '», estado «')}» ({len(sids)} plano(s))"
+                            for clave, sids in sorted(faltan.items()))
                 + ": genérala o usa la imagen subida en «El espacio fijo» y "
                   "apruébala antes de generar los planos")
 
@@ -5403,14 +5413,19 @@ def _referencia_del_espacio(escena, p, dirs, cache):
 # dentro de la carpeta del espacio fijo del proyecto.
 
 def rutas_de_bases(proyecto, params):
-    """{sitio: ruta absoluta} de las bases APROBADAS que existen en disco.
+    """{clave: ruta absoluta} de las bases APROBADAS que existen en disco: la
+    del sitio y las de sus estados vigentes («sitio#estado»).
 
     Vacio sin un tipo de relato explicito: asi ningun plano cambia de
     referencias por tener una base guardada de un modo que ya no rige."""
     if proyecto is None or not tipo_relato.activo(tipo_relato.resolver(params)):
         return {}
     salida = {}
-    for sitio, relativa in tipo_relato.bases_aprobadas(params).items():
+    try:
+        catalogo = _catalogo_de(_con_defectos(params), proyecto)
+    except Exception:                                   # noqa: BLE001
+        catalogo = None
+    for sitio, relativa in tipo_relato.bases_aprobadas(params, catalogo).items():
         try:
             ruta = proyecto.ruta(*str(relativa).split("/"))
         except ValueError:
@@ -5424,7 +5439,8 @@ def _referencia_base(escena, p, dirs, cache):
     """[la imagen base que se EDITA] si el plano se genera editandola, o []."""
     if not escena.get("editar_base"):
         return []
-    ruta = ((dirs or {}).get("bases") or {}).get(escena.get("set"))
+    clave = escena.get("base_clave") or escena.get("set")
+    ruta = ((dirs or {}).get("bases") or {}).get(clave)
     if not ruta:
         return []
     relato = tipo_relato.resolver(p)
@@ -5436,7 +5452,8 @@ def _referencia_base(escena, p, dirs, cache):
              "nombre": espacio.get("sitio") or escena["set"],
              "ruta": imagen.normalizar(ruta, cache),
              "modo": relato["modo"], "cambia": relato.get("cambia") or "",
-             "cambio": escena.get("cambio") or ""}]
+             # la imagen de un estado YA trae el cambio: no se vuelve a pedir
+             "cambio": "" if escena.get("base_clave") else (escena.get("cambio") or "")}]
 
 
 def espacio_del_relato(proyecto, params):
@@ -5505,9 +5522,74 @@ def generar_imagen_base(proyecto, params, rehacer=False):
             "origen": meta.get("origen"), "calidad": p["calidad"]}
 
 
+def estados_del_relato(proyecto, params):
+    """Los estados del video que llevan imagen propia. -> (sitio, {estado: cambio})
+
+    Solo en «un espacio que cambia»: los tramos del sitio con cambio, en orden."""
+    relato = tipo_relato.resolver(params)
+    if not tipo_relato.lleva_estados(relato):
+        return None, {}
+    sitio, _espacio = espacio_del_relato(proyecto, params)
+    if not sitio:
+        return None, {}
+    catalogo = _catalogo_de(_con_defectos(params), proyecto) if proyecto is not None \
+        else ((params or {}).get("catalogo") or {})
+    return sitio, tipo_relato.estados_del_catalogo(catalogo, sitio)
+
+
+def prompt_y_refs_de_estado(proyecto, params, estado, cache):
+    """El prompt y las referencias de la imagen de un ESTADO. -> (sitio, cambio, prompt, refs)
+
+    Es la base APROBADA del sitio, editada una vez con el cambio de ese estado
+    (sin gente): la primera referencia, con su papel de «base», y detras las del
+    estilo. Lanza si falta la base aprobada o el estado no existe."""
+    p = _con_defectos(params)
+    sitio, estados = estados_del_relato(proyecto, params)
+    if not sitio or estado not in estados:
+        raise RuntimeError(f"el estado «{estado}» no está en los cambios de este vídeo")
+    ruta = rutas_de_bases(proyecto, params).get(sitio)
+    if not ruta:
+        raise RuntimeError("aprueba antes la imagen base del sitio: cada estado se dibuja "
+                           "editándola")
+    relato = tipo_relato.resolver(params)
+    cambio = estados[estado]
+    imagen = medios.motor("imagen_openai/imagen.py")
+    espacio = p.get("espacio_fijo") or {}
+    base = [{"papel": "base", "principal": True, "nombre": espacio.get("sitio") or sitio,
+             "ruta": imagen.normalizar(ruta, cache), "modo": relato["modo"],
+             "cambia": relato.get("cambia") or "", "cambio": cambio}]
+    escena = {"id": f"ESTADO_{estado}", "prompt": tipo_relato.prompt_imagen_estado(cambio),
+              "personajes": [], "set": sitio, "narracion": ""}
+    refs = base + list(_referencias_estilo(p, cache, escena))
+    formato = p2_brief.comun.ficha_formato(p4_voz.formato_de_salida(proyecto)) \
+        if proyecto is not None else {"id": ""}
+    prompt = _prompt_completo(escena, refs, p["estilo"], formato=formato.get("id") or "")
+    return sitio, cambio, prompt, refs
+
+
+def generar_imagen_estado(proyecto, params, estado, rehacer=False):
+    """Genera (y paga) la imagen de un estado. -> {sitio, estado, cambio, imagen, coste}
+
+    Como la base: se guarda por huella en la carpeta del espacio fijo y NO se
+    aprueba aqui."""
+    p = _con_defectos(params)
+    cache = proyecto.ruta("espacio_fijo", "_refs")
+    os.makedirs(cache, exist_ok=True)
+    sitio, cambio, prompt, refs = prompt_y_refs_de_estado(proyecto, params, estado, cache)
+    temporal = proyecto.ruta("espacio_fijo", "_estado_nuevo.png")
+    formato = p2_brief.comun.ficha_formato(p4_voz.formato_de_salida(proyecto))
+    meta = _producir_imagen(f"estado_{sitio}_{estado}", prompt, [r["ruta"] for r in refs],
+                            temporal, p, rehacer=rehacer, tamano=formato["tamano_imagen"])
+    huella = medios.huella_fichero(temporal)[:16]
+    os.replace(temporal, proyecto.ruta("espacio_fijo", f"{huella}.png"))
+    return {"sitio": sitio, "estado": estado, "cambio": cambio,
+            "imagen": f"espacio_fijo/{huella}.png", "coste": meta.get("coste", 0.0),
+            "origen": meta.get("origen"), "calidad": p["calidad"]}
+
+
 def planos_sin_base(plan, dirs, unidades=None, rehacer=False):
     """Los planos que se van a PRODUCIR editando una base que no esta aprobada.
-    -> {sitio: [sid]}
+    -> {clave: [sid]} (clave: el sitio, o «sitio#estado» para la imagen de un estado)
 
     Solo cuenta los que esta pasada va a dibujar: los pedidos (`unidades`), o
     sin unidades los que no tienen PNG (o todos con `rehacer`). Un plano hecho
@@ -5517,7 +5599,8 @@ def planos_sin_base(plan, dirs, unidades=None, rehacer=False):
     pedidas = set(unidades) if unidades is not None else None
     faltan = {}
     for escena in (plan or {}).get("escenas") or []:
-        if not escena.get("editar_base") or escena.get("set") in bases:
+        clave = escena.get("base_clave") or escena.get("set")
+        if not escena.get("editar_base") or clave in bases:
             continue
         uid = f"escena:{escena['id']}"
         if pedidas is not None:
@@ -5527,7 +5610,7 @@ def planos_sin_base(plan, dirs, unidades=None, rehacer=False):
                                                 f"{escena['id']}.png"))
             va = bool(rehacer) or not hecho
         if va:
-            faltan.setdefault(escena.get("set") or "?", []).append(escena["id"])
+            faltan.setdefault(clave or "?", []).append(escena["id"])
     return faltan
 
 

@@ -1655,12 +1655,13 @@ def cancelar_y_doble_toque_en_el_taller(navegador, datos):
     pg.js(f"APP.trabajos[CLAVE_LIGHT] = {{ id: 'falso', estado: 'ejecutando', progreso: 0.3,"
           f" inicio: Date.now() - 82000 }};"
           f"irALight('generando', {{ plan: {{ segundos: 284, tareas: [] }}, abierto: '{preset}' }});")
-    ok(pg.esperar(".light-generando button", "Cancelar"), "la pantalla de rehacer tiene «Cancelar»")
-    pg.p.evaluate("() => document.querySelector('.light-generando button.peligro').click()")
+    # «Cancelar» va en la barra de acción (rediseño de Crear, 20-10-2026)
+    ok(pg.esperar(".pie-generando button", "Cancelar"), "la pantalla de rehacer tiene «Cancelar»")
+    pg.p.evaluate("() => document.querySelector('.pie-generando button.peligro').click()")
     pg.p.wait_for_timeout(300)
     ok(pg.visible(".light-generando h2", "Cancelando"),
        "al pulsar, el título dice «Cancelando…» sin esperar al servidor")
-    ok(pg.p.evaluate("() => { const b = document.querySelector('.light-generando button.peligro');"
+    ok(pg.p.evaluate("() => { const b = document.querySelector('.pie-generando button.peligro');"
                      " return !!b && b.disabled && b.textContent.includes('Cancelando'); }"),
        "y el botón se apaga con «Cancelando…» (no se puede volver a pedir)")
     pg.captura("16b_cancelando")
@@ -1791,7 +1792,7 @@ def video_nuevo_con_ajustes(navegador, datos):
     material.fill("Un padre y su hijo juegan a un videojuego de carreras. Gana el hijo tres veces.")
     material.dispatch_event("input")
     pg.captura("18_video_nuevo")
-    pg.pulsar("button.primario.grande", "Generar el guion")
+    pg.pulsar(".barra-accion button", "Generar el guion")
     pg.p.wait_for_timeout(4000)
     r, d = api.get("/api/proyectos")
     nuevo = next((x for x in d.get("proyectos") or []
@@ -2133,6 +2134,10 @@ def pegar_imagenes_del_portapapeles(navegador, datos):
     ok(not atendido and [u for u in subidas if "/logos" in u] == logos,
        f"con el cursor en el nombre del vídeo, la imagen pegada NO va al logo (subidas: {subidas[-2:]})")
     pg.p.evaluate("() => document.activeElement && document.activeElement.blur()")
+    # poner el foco en el nombre sube la pantalla hasta él: el logo se vuelve
+    # a poner a la vista (en el carril, «El vídeo» y el logo quedan lejos)
+    pg.p.evaluate("() => document.querySelector('.editor-ajuste.acepta-pegado').scrollIntoView({ block: 'center' })")
+    pg.p.wait_for_timeout(500)
     atendido = pg.p.evaluate(PEGAR_JS, {"selector": None, "texto": "", "color": "#e08020"})
     pg.p.wait_for_timeout(1500)
     ok(not atendido and [u for u in subidas if "/logos" in u] == logos,

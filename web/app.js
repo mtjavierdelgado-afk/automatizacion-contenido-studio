@@ -12077,23 +12077,27 @@ function barraDeLasImagenes(mandos) {
   }
   const aplicar = botonAplicarRepaso();
   const pend = notasDeAhora().filter(n => n.estado !== 'aplicado').length;
+  /* «MONTAR EL VÍDEO» SIGUE A MANO, como estaba en los mandos: al lado y en
+     secundario cuando lo principal es otra cosa (con notas sin aplicar sale
+     apagado y con el motivo, no escondido). */
+  const montarAlLado = () => {
+    const boton = botonRenderizarLight();
+    if (!boton) return [];
+    const b = boton.tagName === 'BUTTON' ? boton : boton.querySelector('button');
+    if (b) b.className = 'secundario-barra';
+    return [boton];
+  };
   if (aplicar) {
     return barraDeAccion({ encima: mandos,
       estado: { e: 'aviso', texto: `${pend} ${pend === 1 ? 'nota' : 'notas'} sin aplicar` },
-      plan: 'se rehacen esas imágenes, una detrás de otra; se paga una por plano', botones: [aplicar] });
+      plan: 'se rehacen esas imágenes, una detrás de otra; se paga una por plano',
+      botones: [...montarAlLado(), aplicar] });
   }
   refrescarPlanLight('video');
   if (quedaTandaLight('video') === true) {
     const n = obsoletasConocidas();
     const accion = accionDeLasImagenes();
-    /* MONTAR SIN PONER AL DÍA sigue a mano (gratis), como estaba en los mandos:
-       al lado, en secundario. */
-    const soloMontar = botonRenderizarLight();
-    if (soloMontar) {
-      const b = soloMontar.tagName === 'BUTTON' ? soloMontar : soloMontar.querySelector('button');
-      if (b) b.className = 'secundario-barra';
-      accion.botones = [soloMontar, ...(accion.botones || [])];
-    }
+    accion.botones = [...montarAlLado(), ...(accion.botones || [])];
     return barraDeAccion(Object.assign({}, accion, { encima: mandos,
         estado: { e: 'aviso', texto: n ? `${n} ${n === 1 ? 'imagen obsoleta' : 'imágenes obsoletas'}` : 'Imágenes por poner al día' } }));
   }

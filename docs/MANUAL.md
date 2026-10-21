@@ -11,9 +11,10 @@ pregúntale en la burbuja de abajo a la derecha.
 ## La idea en una frase
 
 Primero se crea un **estilo** (cómo se ve, cómo se cuenta y cómo suena un
-canal). Después, con ese estilo, cada **vídeo** pasa por cuatro pantallas, en
-este orden: **Encargo → Guion → Imágenes → Vídeo**. La barra de abajo te lleva
-de una a otra. Con el vídeo montado, **Publicar** lo lleva a las redes.
+canal). Después, con ese estilo, cada **vídeo** pasa por seis pasos, en este
+orden: **Estilo → Encargo → Guion → Voz → Imágenes → Vídeo**. El carril de la
+izquierda (en el móvil, la fila de arriba) te lleva de uno a otro y dice cómo
+está cada uno. Con el vídeo montado, **Publicar** lo lleva a las redes.
 
 Los **módulos** están en el menú de la izquierda (en el móvil y la tableta, en
 la fila de debajo del nombre): **Inicio** (tu panel: lo que pasa hoy y lo que
@@ -21,7 +22,9 @@ te necesita), **Crear** (estilos y vídeos: todo lo de esta guía hasta
 «Vídeo»), **Publicar** (las redes), **Automatizar** (la Parrilla de guiones y
 Analizar cuentas) y **Configuración**. Al abrir el Studio estás en el
 **Inicio**; Crear (y el logo) te llevan a **Tus proyectos**. Cada pantalla trae
-su «‹ Volver» (o «‹ Mis vídeos», «‹ La cola», «‹ Parrilla») y el «atrás» del
+su salida (en Crear, la del proyecto en el que estás, «‹ Estado Play», y desde
+él «‹ Tus proyectos»; en los módulos, «‹ Volver», «‹ La
+cola», «‹ Parrilla») y el «atrás» del
 móvil nunca te saca del Studio.
 
 ## Inicio
@@ -64,39 +67,39 @@ nada.
 
 ## Proyectos (clientes)
 
-Arriba de la primera pantalla está la barra de **Proyectos**: una carpeta por
-cliente para tener sus estilos y vídeos separados.
+La primera pantalla de Crear es **Tus proyectos**: una tarjeta por proyecto
+(un cliente, con sus estilos y sus vídeos separados).
 
-- **+ Proyecto** crea uno y lo abre: los estilos que crees con él abierto
-  quedan dentro, y los vídeos van con su estilo.
-- Con un proyecto abierto: **Renombrar**, **Ocultar** (no sale en la lista
-  hasta pulsar «Ver ocultos»), **Poner clave** (se pide para ver sus estilos y
-  vídeos) y **Borrar** (sus estilos y vídeos no se borran: quedan sin proyecto).
-- **Todos** enseña lo que no está oculto ni con clave; **Sin proyecto**, lo que
-  no está en ninguno.
-- Para mover un estilo de proyecto: menú **⋯** de su tarjeta → **Proyecto**.
+- **+ Nuevo proyecto** (la última tarjeta) crea uno. Pulsar una tarjeta entra
+  en él; los estilos que crees dentro quedan en ese proyecto, y los vídeos van
+  con su estilo. **🗂️ Sin proyecto** reúne lo que no está en ninguno.
+- Dentro de un proyecto: **Renombrar**, **Logo** (lo llevan solos los vídeos
+  nuevos de sus estilos), **Ocultar** (no sale en la portada hasta pulsar «Ver
+  los ocultos (N)»), **Poner clave** (se pide para entrar), **Traer un estilo**
+  y **Borrar** (sus estilos y vídeos no se borran: quedan sin proyecto).
+- **Ver los ocultos (N)** los enseña; **Dejar de ocultar** los devuelve a la
+  portada para siempre. **🔒 Cerrar los abiertos** vuelve a pedir la clave.
+- **Últimos vídeos**: los cinco últimos, con su estilo (🎨) y su proyecto (📁).
+  **✏️** les cambia el nombre ahí mismo (Enter guarda, Escape lo deja), **📁**
+  los mueve de proyecto y **Apartar** los manda a la papelera.
 - La clave y ocultar son privacidad de pantalla; la seguridad de verdad es la
   contraseña de acceso al Estudio.
 
-En **Tus vídeos**, cada vídeo dice de qué estilo (🎨) y de qué proyecto (📁)
-salió.
-
 ## Estilos
 
-La primera pantalla. Cada tarjeta es un estilo; **Un estilo nuevo** crea otro.
-
-Un proyecto **oculto** no sale en la portada; con «Ver los ocultos» se ven, y
-**Dejar de ocultar** lo devuelve a la portada para siempre.
+Cada tarjeta es un estilo. **Pulsar la tarjeta** empieza un vídeo nuevo con
+él; **✎ Editar** abre su ficha, y **⋯** tiene **Duplicar** y **Mover a otro
+proyecto**. La última tarjeta, **+ Nuevo estilo**, crea otro.
 
 Lo que borras o apartas (un estilo, un vídeo) va a la **🗑 Papelera**, arriba
 en la portada y dentro de cada proyecto: desde ahí se **devuelve** cuando
-quieras. Dentro de un vídeo, **Estilo** (en la barra de abajo, o «Estilo: …»
-arriba) abre el estilo con el que se hizo.
+quieras.
 
-**Volver al inicio** desde cualquier pantalla de un vídeo: **Inicio** en la
-barra de abajo, **‹ Mis vídeos** arriba, o el **logo**. Lo que se esté
-generando sigue en el servidor y lo vuelves a ver al abrir ese vídeo; arriba a
-la derecha se ve qué vídeo se está haciendo (púlsalo para ir a él).
+**Salir de un vídeo**: arriba, **‹ <su proyecto>** te deja en ese proyecto (sus
+estilos y sus vídeos), y desde ahí **‹ Tus proyectos** en la portada; el
+**logo** lleva directo a Tus proyectos. Lo que se esté generando sigue en el servidor y lo vuelves a ver
+al abrir ese vídeo; arriba a la derecha se ve qué vídeo se está haciendo
+(púlsalo para ir a él).
 
 **Varios vídeos a la vez.** Mientras uno se monta puedes trabajar en otro y
 montarlo también: cada vídeo enseña solo su progreso. Las **imágenes**, en
@@ -105,8 +108,11 @@ dibujando, la barra dice «esperando turno» y empieza sola al acabar el otro.
 
 ### Un estilo nuevo
 
-- **Nombre**: la etiqueta del estilo. Se cambia luego sin regenerar nada.
-- **Estilo gráfico → Imágenes de referencia**: hasta 50 imágenes que ya tengan
+Nombre y proyecto arriba; debajo, las mismas pestañas que la ficha de un
+estilo. Abajo, la barra dice **lo que falta** (pulsa cada aviso para ir a su
+pestaña) y, cuando está todo, **Generar** con cuántas imágenes son.
+
+- **🎨 Cómo se ve → Imágenes de referencia**: hasta 50 imágenes que ya tengan
   el aspecto que quieres. Es lo más importante del estilo: la guía se escribe
   mirándolas. Arrástralas o pulsa la zona para buscarlas.
   - Pulsa una miniatura para verla **en grande** (con ← y → pasas a la
@@ -116,28 +122,30 @@ dibujando, la barra dice «esperando turno» y empieza sola al acabar el otro.
   - **★**: marca las que deben servir sí o sí para dibujar las láminas. La guía
     del estilo mira las 50, pero las láminas se dibujan con una hoja de 8 como
     mucho: primero las marcadas, luego las descritas y el resto repartidas.
-- **Indicaciones (opcional)**: lo que las imágenes no dicen solas («igual pero
-  más frío», «sin personas»).
-- **Tono del guion**: cómo se cuenta (no de qué). Cuanto más concreto, mejor.
-  El botón **Guía** al lado del título da una plantilla y un ejemplo, y
-  **✓ Revisar** comprueba lo que has escrito contra esa guía: dice si sirve,
-  qué falla y por qué, y propone una versión que pones con **Aplicar la
-  versión sugerida** (si no es «Sirve», siempre propone una).
+  - **Indicaciones (opcional)**: lo que las imágenes no dicen solas («igual
+    pero más frío», «sin personas»).
+- **🗣️ Cómo se cuenta (el tono del guion)**: cómo se cuenta (no de qué).
+  Cuanto más concreto, mejor. El botón **Guía** al lado del título da una
+  plantilla y un ejemplo, y **✓ Revisar** comprueba lo que has escrito contra
+  esa guía: dice si sirve, qué falla y por qué, y propone una versión que pones
+  con **Aplicar la versión sugerida** (si no es «Sirve», siempre propone una).
   Está en todos los campos que tienen guía y no cuesta imágenes. El mismo texto
   recibe siempre la misma respuesta, y la versión que propone, revisada otra
-  vez, sale «Sirve»: no se queda buscando errores nuevos en cada vuelta.
-- **Ritmo**: cada cuánto cambia de plano el vídeo. Más rápido = más imágenes =
-  más caro.
-- **Voz**: describe cómo quieres que suene. Debajo, la lista de voces: cada una
-  tiene **▶** para oírla sin elegirla, y un buscador. Si eliges una, esa es la
-  voz y la descripción solo pone la velocidad y el color; si no, la elige el
-  sistema por la descripción. **Tu voz clonada**: clónala en play.cartesia.ai
-  (Voices → Clone Voice) con la misma cuenta cuya clave pusiste en
-  Configuración, y pulsa **Buscar mis voces otra vez**: sale la primera.
-- **Idioma**: el del guion y la voz.
+  vez, sale «Sirve».
+- **⏱️ Ritmo**: cada cuánto cambia de plano el vídeo. Más rápido = más imágenes
+  = más caro.
+- **🎙️ Cómo suena (la voz)**: describe cómo quieres que suene. Debajo, la lista
+  de voces: cada una tiene **▶** para oírla sin elegirla, y un buscador. Si
+  eliges una, esa es la voz y la descripción solo pone la velocidad y el color;
+  si no, la elige el sistema por la descripción. **Tu voz clonada**: clónala en
+  play.cartesia.ai (Voices → Clone Voice) con la misma cuenta cuya clave
+  pusiste en Configuración, y pulsa **Buscar mis voces otra vez**.
+- **🌐 Idioma**: el del guion y la voz.
 - **Generar**: crea el estilo (unos minutos y unas pocas imágenes de muestra).
+  Mientras se monta, la barra dice el tanto por ciento y tiene **Cancelar**.
 
-Si la creación se corta a medias verás **Retomar** y **Empezar de cero**:
+Si la creación se corta a medias verás **Retomar** (en la barra) y, en una
+franja, **Empezar de cero**:
 
 - **Retomar** sigue por donde iba y no vuelve a pagar lo que ya salió bien.
 - **Empezar de cero** olvida ese intento y lo genera todo otra vez (se vuelve a
@@ -145,12 +153,15 @@ Si la creación se corta a medias verás **Retomar** y **Empezar de cero**:
 
 ### La ficha de un estilo
 
-Al abrir un estilo ves sus muestras y cada parte (estilo gráfico, tono, voz).
+La ficha va en **pestañas**: 🎨 Cómo se ve · 📏 Reglas · 🗣️ Cómo se cuenta ·
+🎙️ Cómo suena · ⏱️ Ritmo · 🌐 Nombre, idioma y proyecto. Arriba, **Lo que
+costó** y **Borrar**. Abierta desde un vídeo, es su paso **Estilo** (ver
+«Crear un vídeo: el carril»).
 
-- **Las muestras de arriba** son tus láminas con un **texto de ejemplo** encima
-  («10.000.000 cuentas a la venta», «La nómina entera»…). Ese texto lo pone el
-  Estudio para que veas cómo quedan una cartela y un subtítulo sobre tu estilo:
-  es siempre el mismo, no sale de tus imágenes y nunca va al generador.
+- **Las muestras de arriba** son tus láminas con un **texto de ejemplo** encima.
+  Ese texto lo pone el Estudio para que veas cómo quedan una cartela y un
+  subtítulo sobre tu estilo: es siempre el mismo, no sale de tus imágenes y
+  nunca va al generador.
 
 #### Qué es una lámina (y qué son «las 8 de la hoja»)
 
@@ -164,77 +175,95 @@ Tus imágenes de referencia **no viajan a cada plano**. Se usan para dos cosas:
 
 Cada plano de cada vídeo recibe **esas láminas** (hasta 8) como referencia y
 copia de ellas el trazo, la paleta y la luz. Son lo que da consistencia a tus
-vídeos. Cada lámina es una referencia más para cada plano, pero no cada imagen
-tuya: tus imágenes llegan a los planos a través de la guía y de las láminas.
+vídeos.
 
 En **Las láminas de tu estilo** las ves limpias, con lo que enseña cada una:
 
-- **Regenerar**: la vuelve a dibujar (una imagen, ≈ el precio que pone), con
-  una corrección opcional («sin sombras duras»).
+- **Redibujar esta lámina**: la vuelve a dibujar (una imagen, ≈ el precio que
+  pone), con una corrección opcional («sin sombras duras»).
 - **Cambiar qué enseña**: que enseñe otra cosa («una cocina de noche con luz
   cálida»). Se guarda con el estilo y se respeta al regenerarlo.
 - **Quitar**: sale de la hoja (gratis; su imagen se guarda y **Devolver** no
   cuesta nada). Mínimo 3.
-- **+ Añadir una lámina**: hasta 8, las que caben en la hoja de cada plano. Más
-  de 8 no caben sin cambiar el motor de imágenes (reservado ahora por la Etapa
-  Foto A): lo útil es que cada lámina enseñe lo que más sale en tus vídeos.
+- **+ Añadir una lámina**: hasta 8, las que caben en la hoja de cada plano.
 - **Con qué imágenes tuyas se dibuja cada lámina** (si subiste más de 8): las
-  mismas 8 para todas, o un grupo distinto para cada una, para que cuenten
-  todas tus imágenes. Mismo coste.
+  mismas 8 para todas, o un grupo distinto para cada una. Mismo coste.
 - Cambiar las láminas **no toca los vídeos ya creados**: lo llevan los nuevos,
-  y en uno ya hecho, **Su estilo** en el Encargo te deja traerlo.
+  y en uno ya hecho, **Su estilo** (arriba del paso Estilo) te deja traerlo.
 
 #### Tus imágenes de referencia
 
 Debajo de las láminas están las imágenes que subiste: pulsa una para verla en
 grande, escribe qué mirar en cada una y marca con ★ las que deben ir sí o sí a
 la hoja de las láminas (se guarda solo y no gasta nada). **✕ Quitar** y añadir
-imágenes nuevas sí rehacen la guía y las láminas al pulsar **Regenerar**.
+imágenes nuevas sí rehacen la guía y las láminas al pulsar **Regenerar lo
+pedido**.
 
-- **Lo que se guarda solo**: el texto del tono (es la guía que lee el
-  redactor, tal cual), el ritmo, el nombre, el idioma y los mandos de la voz.
-  No hace falta regenerar nada: el botón de abajo dice **Guardar**.
+#### Lo que se guarda solo y lo que pide regenerar
+
+- **Lo que se guarda solo**: el texto que lee el redactor (en «Cómo se cuenta»,
+  la caja **Lo que lee el redactor**), el ritmo, el nombre, el idioma y los
+  mandos de la voz. La barra de acción dice **Guardar**.
 - **Lo que pide regenerar**: imágenes nuevas o cambiar las **Indicaciones**
-  del estilo gráfico (rehace la guía y las muestras), escribir en **qué le
-  cambiarías** del tono o de la voz. Entonces el botón dice **Regenerar** y
-  cuánto cuesta.
+  del estilo gráfico (rehace la guía y las muestras), escribir en **Pídele un
+  cambio al tono** o **Pídele un cambio a la voz**, o reescribir **Cómo quieres
+  que suene (para regenerarlo entero)**. Las pestañas con algo pedido llevan un
+  punto, y la barra dice **Regenerar lo pedido**, qué y cuánto cuesta.
 - **Voz**: arriba, cómo se pidió; debajo, la voz puesta en la misma lista con
   ▶ que al crear. Cambiarla ahí es inmediato y gratis. En **Opciones
   avanzadas**: velocidad, color y aire entre bloques.
 
+## Crear un vídeo: el carril
+
+Dentro de un vídeo, a la izquierda (en el móvil, una fila arriba que se
+desliza) está **el recorrido**, seis pasos en orden: **Estilo · Encargo ·
+Guion · Voz · Imágenes · Vídeo**. Cada paso dice cómo está, con forma y color:
+
+- **✓** hecho y al día · **●** estás aquí · **⟳ 42 %** generándose ·
+  **!** algo por hacer («Guion obsoleto», «2 tramos sin grabar», «1 imagen
+  obsoleta», «1 nota sin aplicar», «Vídeo obsoleto», «1 cambio por traer») ·
+  **○** pendiente · **·** aún no (con el porqué: «todavía no hay guion»).
+- Debajo de cada nombre, una línea con lo suyo («6 bloques · 115 palabras»,
+  «0:53 · Gonzalo», «11 planos»…), y al final, **lo gastado en este vídeo**.
+
+Arriba, la salida (**‹ <su proyecto>**, o **‹ Tus proyectos** si el vídeo no
+es de ninguno) y la **cabecera del vídeo**: su nombre
+(✏️ lo cambia ahí mismo, sin regenerar nada), su estilo (🎨, lleva al paso
+Estilo), su proyecto (📁) y **el gasto** (púlsalo para verlo desglosado).
+
+Abajo, pegada, **la barra de acción** de cada paso: a la izquierda cómo está,
+en medio lo que va a hacer el botón (tareas, tiempo y precio) y a la derecha
+el botón del siguiente paso con lo que cuesta. Cada acción se llama igual en
+todas partes: **Generar / Regenerar el guion**, **Grabar / Regrabar la voz**,
+**Regrabar N tramos**, **Generar las imágenes**, **Poner al día N imágenes**,
+**Aplicar N notas**, **Montar el vídeo** y **Enviar a Publicar ›**. Mientras
+algo se genera, la barra enseña el progreso y **Parar**.
+
+### Estilo
+
+Arriba, **Su estilo**: si cambiaste el estilo después de crear el vídeo, aquí
+ves qué ha cambiado y lo traes (**Traer** no genera nada; marca lo que habría
+que rehacer, y el carril lo dice). **Cambiar de estilo…** pasa el vídeo a otro
+estilo (con lo que costaría traer cada parte), y **Restaurarlo** devuelve su
+estilo si está en la papelera. Debajo, la ficha entera del estilo, en sus
+pestañas. **Guardar**, en la barra, adelanta el guardado y sigue al Encargo.
+
 ## Encargo
 
-Lo que se le pide a este vídeo. Todo se guarda solo mientras escribes.
+Lo que se le pide a este vídeo, en el mismo orden en un vídeo nuevo y en uno
+hecho. En uno **nuevo** no se guarda nada hasta **Generar el guion** (la
+cabecera dice «borrador»); en uno **hecho** se guarda solo mientras escribes y
+lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
 
 - **El vídeo**: nombre, **duración objetivo** y **formato** (horizontal 16:9 o
   vertical 9:16). Cambiar el formato rehace todas las imágenes.
-- **Qué lleva este vídeo**: interruptores de subtítulos, música y efectos.
-  Cambiarlos rehace solo el montaje. Debajo, todo en automático si no tocas
-  nada:
-  - **Cuánto se oye la música**: Suave, Normal o Alta.
-  - **Elegir la música**: busca por lo que quieras («videojuegos retro»,
-    «fiesta») o por ánimo (24: alegre, divertido, gamer, infantil, lo-fi,
-    rock, sobrio, épico…), con **Solo instrumental**, **Solo uso comercial** y
-    **Ver más**. Escúchalos ahí mismo y fija uno, o **Sube tu música** (MP3,
-    WAV, M4A; tuya o con licencia). **Automática** deja que el ritmo elija
-    varios temas, como siempre.
-  - **Efectos** (en un vídeo ya creado): cada sonido (aire de transición,
-    golpe, tecla, retorno) puede ser automático, uno buscado en FreeSound
-    (con escucha y su licencia) o **el tuyo** subido. En automático se
-    **escucha** cada uno de los elegidos; **✕ Descartar** lo quita para
-    siempre (en todos los vídeos) y **Buscar otros** trae sonidos distintos.
-    **Cuánto se oyen**: bajos, normales o altos.
-  - **Personalizar los subtítulos**: tamaño, letra y forma, caja detrás del
-    texto y color. **Volver a los del estilo** lo deshace.
-  - **Logo**: sube una imagen (mejor PNG con fondo transparente), elige la
-    esquina, el tamaño y la opacidad.
-  - Nada de esto paga imágenes: la música y el logo solo vuelven a montar el
-    MP4, y los subtítulos rehacen las capas de texto al montar.
-- **Su estilo**: si cambiaste el estilo después de crear el vídeo, aquí ves qué
-  ha cambiado y lo traes. Traer no genera nada; marca lo que habría que rehacer.
+- **Qué lleva este vídeo**: interruptores de subtítulos, música y efectos, y
+  debajo los **Ajustes del montaje** (ver Vídeo: es el mismo panel).
 - **El material**: de dónde salen los hechos (pega el texto, notas, un
   artículo). El vídeo cuenta esto, no se inventa los datos.
 - **Las indicaciones** (opcional): cómo quieres que se cuente este vídeo.
+- **Las llamadas a la acción**: qué se pide al espectador y dónde.
+- **El espacio fijo** (opcional): si todo el vídeo pasa en un mismo sitio.
 - **El tipo de relato** (opcional): cómo se cuenta en imágenes. **Documental**
   reparte el guion en sitios; **Un espacio que cambia** es un solo sitio en el
   que cambia solo lo que dice la voz (un objeto, los acabados, el estado o la
@@ -273,30 +302,55 @@ Lo que se le pide a este vídeo. Todo se guarda solo mientras escribes.
 - **El reparto y los sitios** (en un vídeo hecho): «Pedido para el reparto de
   sitios» es una frase para Claude al repartir; «Volver a repartir con este
   pedido» no paga imágenes.
-- **Las llamadas a la acción**: qué se pide al espectador (suscribirse, visitar
-  una web) y dónde.
-- **Generar el guion**: el siguiente paso.
+- **Generar el guion** (barra): crea el vídeo y redacta el guion; no dibuja nada.
 
 ## Guion
 
-El texto que se va a locutar, por bloques.
+El texto que se va a locutar, por bloques. Cada bloque tiene sus mandos a la
+vista: **✂ Partir**, **✎ Editar a mano**, **↻ Cambiar con una frase**,
+**Quitar pausa** (si tiene) y **Quitar** (si lo añadiste tú).
 
-- Escribe directamente sobre un bloque para corregirlo.
-- **+ Añadir bloque** y **Partir** cambian la estructura sin renumerar nada.
+- Escribe sobre un bloque para corregirlo (con la voz grabada, **✎ Editar a
+  mano**). Lo cambiado queda **sin grabar** hasta que regrabes su tramo: la
+  barra ofrece **Regrabar N tramos** con su precio.
+- **+ Añadir bloque** está en cada hueco entre bloques: se añade ahí.
 - Las **pausas** se ven en cada bloque; si hay demasiadas, un aviso amarillo
   ofrece **Quitar las sobrantes**.
-- **Regrabar lo que he escrito**: vuelve a grabar solo los tramos que cambiaste
-  (dice cuánto cuesta antes de pulsar).
-- **Regenerar el guion** lo vuelve a escribir entero (y obliga a rehacer la voz).
+- **Revisar el guion**: dos pestañas, **Ortografía** (tildes, letras y signos;
+  sin voz se revisa sola) y **Redacción (editorial)** (propuestas que aceptas o
+  rechazas una a una, o todas). Lo que aceptes con la voz grabada hay que
+  regrabarlo.
+- **Qué cambiarías del guion entero**: escribe y la barra pasa a **Regenerar el
+  guion**.
 - **Versiones del guion** (abajo): cada vez que se regenera se guarda una
   versión y las anteriores no se borran. **Volver a la versión anterior** la
   recupera; avisa antes de que la voz y las imágenes quedarán por rehacer (eso
   se paga).
 
+## Voz
+
+La narración grabada, con su pantalla: la voz elegida (**Cambiar en el estilo
+›** lleva a «Cómo suena»), el reproductor (de ×1 a ×5) y el guion en karaoke:
+cada palabra se ilumina al sonar y pulsar una salta ahí.
+
+- Cada bloque tiene **▶ Oír** (solo ese trozo) y **Regrabar este tramo**:
+  vuelve a grabar ese tramo tal cual, sin tocar el resto. Si otros tramos
+  tienen cambios sin grabar, se graban con él y el botón lo dice («Regrabar
+  este tramo y 2 más con cambios»). Antes de grabar pregunta, con el precio
+  que calcula el Studio.
+- **Regrabar la voz entera** vuelve a grabar la toma completa (se paga toda).
+- **Hay cambios sin grabar** sale si editaste el guion: **Regrabar lo que he
+  escrito** graba solo esos tramos.
+- Con la voz al día, la barra lleva al paso siguiente: **Generar las
+  imágenes** (con cuántas y cuánto) o **Poner al día N imágenes**.
+
 ## Imágenes
 
-Un plano por cada trozo del guion. Debajo de cada imagen escribes qué le
-cambiarías y pulsas **Guardar nota**. La nota sale abajo en su tarjeta, con:
+Un plano por cada trozo del guion. Arriba, **la tira de planos** (⚠ obsoleta,
+📝 con nota, ✓ revisada): pulsa uno para ir a él. Debajo de la imagen, **Lo
+que dice la voz** y **⬇ Descargar** / **⬇ Descargar todas**; **🎬 Esta imagen**
+(su movimiento y su 2.5D, gratis) y la nota: escribe qué le cambiarías y pulsa
+**Guardar nota**. La nota sale abajo en su tarjeta, con:
 
 - la **miniatura** de esa imagen (la de ahora; al rehacerse, la nueva),
 - el **bloque y el segundo**, y **la frase del guion** que se oye en ella,
@@ -304,40 +358,39 @@ cambiarías y pulsas **Guardar nota**. La nota sale abajo en su tarjeta, con:
   tiempo que lleva y lo que suele tardar), Hecha ✓, Rechazada o Falló, con el
   motivo.
 
-**Rehacer esta imagen** la pone en la cola; **Rehacer N imágenes** pone todas
-las pendientes y dice antes cuánto cuesta y cuánto tardará. Se dibujan **una
-detrás de otra** en el servidor: puedes cerrar o recargar la página y sigue.
-Si escribes **varias notas para la misma imagen**, se juntan y se paga **una**.
+**Rehacer esta imagen** la pone en la cola; **Aplicar N notas** (en la barra)
+pone todas las pendientes y dice antes cuántas imágenes son, cuánto cuestan y
+cuánto tardarán. Se dibujan **una detrás de otra** en el servidor: puedes
+cerrar o recargar la página y sigue. Si escribes **varias notas para la misma
+imagen**, se juntan y se paga **una**.
 
 **Retocar o dibujar desde cero.** «Rehacer esta imagen» **retoca** la de ahora:
-se la enseña al generador para que conserve la composición, y es lo mejor para
-cambios pequeños («que lleve gafas», «más luz»). Para un cambio grande («esto
-tenía que ser una consola, no un televisor») usa **Desde cero**: la dibuja de
-nuevo sin partir de la anterior. Si una ya hecha salió casi igual, pulsa
+es lo mejor para cambios pequeños («que lleve gafas», «más luz»). Para un
+cambio grande usa **Desde cero**. Si una ya hecha salió casi igual, pulsa
 **¿Salió igual? Desde cero**. Cuando está hecha, la tarjeta enseña **cómo era
 antes** debajo de la nueva.
 
-**Nada se pierde.** Cada vez que se rehacen imágenes se guarda una versión
-nueva y las de antes se quedan. Abajo, en **Versiones de las imágenes**,
-**Volver a la versión anterior** (o «Usar esta» en cualquiera de la lista) las
-recupera **sin pagar nada**; el vídeo queda por volver a montar (gratis).
+Los mandos para mirar (**‹**, **♪ Oírla**, **▶ Todo seguido**, **Siguiente
+›**) van pegados encima de la barra; en el teclado, ← → y espacio.
+
+**Nada se pierde.** Abajo, en **Versiones de las imágenes**, **Volver a la
+versión anterior** (o «Usar esta») las recupera **sin pagar nada**; el vídeo
+queda por volver a montar (gratis).
 
 **Al regenerar el guion**, las notas escritas para una frase que ya no se dice
-dejan de aplicarse (el plano nuevo con ese número es otra escena) y se guardan
-plegadas en **Notas de una versión anterior del guion**.
+dejan de aplicarse y se guardan plegadas en **Notas de una versión anterior
+del guion**.
 
-**Una imagen rehecha no entra en el MP4 hasta volver a montarlo**: la pantalla
-Vídeo lo avisa y **Regenerar Vídeo** lo monta (no paga imágenes ya hechas).
+**Una imagen rehecha no entra en el MP4 hasta volver a montarlo**: el carril
+marca el Vídeo y la barra ofrece **Montar el vídeo · gratis**.
 
 **Si OpenAI la rechaza** (su filtro no dibuja marcas, logos ni personajes con
-derechos: «Mario Kart», «Nintendo Switch»…):
+derechos):
 
-1. El Studio lo reintenta solo **describiéndolo sin marcas** («juego de
-   carreras de karts de dibujos», «consola con mandos rojo y azul»): sale lo
-   más parecido posible sin copiar. La nota te cuenta qué cambió.
+1. El Studio lo reintenta solo **describiéndolo sin marcas**: sale lo más
+   parecido posible sin copiar. La nota te cuenta qué cambió.
 2. Si aun así se rechaza, la nota dice **Rechazada por OpenAI** y ofrece
-   **Hacerla sin marcas**: te propone la nota reescrita, la puedes cambiar, y
-   te ofrece quitar las fotos adjuntas (pueden llevar logos).
+   **Hacerla sin marcas**.
 3. Un rechazo **no para las demás**: el resto de la cola sigue.
 
 ### Elementos encima de la imagen
@@ -352,27 +405,41 @@ redibujarla con el texto dentro, y se paga al aplicarla.
 
 ## Vídeo
 
-- **Montar el vídeo** junta imágenes, voz, subtítulos, música y efectos en el MP4.
-- **Ortografía de los subtítulos**: «Revisar la ortografía» propone las tildes,
-  letras y signos que faltan en lo que se lee. Marca las que quieras y «Aplicar
-  las marcadas»: cambia solo el texto del subtítulo (ni voz ni imágenes) y
-  «Regenerar Vídeo» lo monta, gratis. En el **Guion** está el mismo corrector:
-  sin la voz grabada se revisa solo cuando el guion deja de cambiar; con la voz
-  grabada avisa de que corregir es regrabar. Y los campos de texto que se ven
-  o se publican (llamadas a la acción, la ficha de la Parrilla, cada red en
-  Publicar) traen su botón «Revisar ortografía».
+- **Montar el vídeo** (barra) junta imágenes, voz, subtítulos, música y
+  efectos en el MP4, sin pagar imágenes ya hechas.
+- **Ajustes del montaje**: 🎵 Música, 💬 Subtítulos, 🏷️ Logo, ✨ Efectos y
+  🎬 Movimiento y efectos. **Es el mismo panel que en el Encargo, y se comporta
+  igual en los dos sitios: tocar un ajuste lo guarda pero NO monta nada.** La
+  fila dice «· sin aplicar todavía», sale la franja **Hay N cambios del montaje
+  sin aplicar**, y solo el botón de la barra **Montar el vídeo con N cambios ·
+  gratis** los monta, todos de una vez (si solo cambió la mezcla, en segundos).
+  Ese botón no dibuja ninguna imagen: si hay imágenes viejas, al lado sale
+  **Montar el vídeo · ≈ X**, que las dibuja y pregunta antes. Lo cambiado y sin
+  montar se queda apuntado aunque salgas o recargues la página.
+  En un vídeo nuevo, lo que elijas va al borrador y entra en el primer montaje.
+  - **Música**: cuánto se oye (Suave, Normal, Alta) y su ajuste fino, elegir un
+    tema (búsqueda libre o por ánimo, con **Solo instrumental** y **Solo uso
+    comercial**), **Subir mi música**, o la automática con **un ánimo para
+    todo el vídeo** (se busca al montar).
+  - **Efectos**: cada sonido puede ser automático, uno de FreeSound o el tuyo;
+    se escuchan, **✕ Descartar** lo quita para siempre y **Buscar otros** trae
+    sonidos distintos. Cuánto se oyen: bajos, normales o altos.
+  - **Subtítulos**: tamaño, letra y forma, fuente, dónde van, caja y color.
+  - **Logo**: sube una imagen (mejor PNG con fondo transparente), la esquina y
+    el tamaño.
+  - **Movimiento y efectos**: el movimiento de cámara, el estilo de los
+    subtítulos, el gancho, las cifras, la barra de progreso y las transiciones.
+- **Notas del vídeo**: pausa donde algo no encaje, **✎ Comentar este momento**
+  y escribe. **Aplicar N notas** (barra) aplica lo más barato que resuelva cada
+  una y monta.
+- **Revisar**: la ortografía de los subtítulos. Marca las que quieras y
+  «Aplicar las marcadas»: cambia solo el texto del subtítulo y «Montar el
+  vídeo» lo monta, gratis.
 - Si la voz de un vídeo llegó con las tildes rotas («TÃº»), sale el aviso
   **Arreglar los subtítulos**: los vuelve a dibujar y monta, sin pagar nada.
-- **El repaso**: escribe notas sobre el vídeo («la música está alta», «este
-  rótulo sobra») y se aplican rehaciendo solo lo que tocan.
-- **Descargar** baja el MP4. **Por partes…** baja el vídeo con lo que elijas
-  (voz, música, efectos, subtítulos, logo), cada audio suelto en WAV —del largo
-  del vídeo y alineados, como suenan en él— o un ZIP con todo. No cuesta nada;
-  sin subtítulos tarda lo que un montaje porque están dentro de cada fotograma.
-- **El coste** (arriba): púlsalo y sale todo lo gastado de verdad en el vídeo,
-  desglosado, con lo que costó su estilo y lo prometido frente a lo gastado de
-  cada vez que generaste.
-- **Enviar a Publicar** (debajo del vídeo montado): abre su ficha en Publicar.
+- **Descargar** baja el MP4. **Por partes…** baja el vídeo con lo que elijas,
+  cada audio suelto en WAV o un ZIP con todo. No cuesta nada.
+- **Publicar**: con el vídeo al día, la barra dice **Enviar a Publicar ›**.
 
 ## Publicar
 

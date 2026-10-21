@@ -5215,171 +5215,651 @@ async function salirDeStudio() {
   }
 }
 
-/* ============================================ LA BARRA DE ABAJO (modo light)
- *
- * LOS CINCO SITIOS, SIEMPRE EN EL MISMO SITIO.
- *
- * Moverse por el modo light era ir encontrando botones: «‹ Volver» arriba a la
- * izquierda, «El vídeo ›» en una cabecera, «‹ Las diapositivas» en otra. Cada
- * uno en un borde distinto y ninguno diciendo DÓNDE ESTABAS de los pasos. Con
- * la barra, el sitio de navegar es uno y enseña el camino entero:
- * estilos → encargo → guion → diapositivas → vídeo, que es el orden real de
- * las cosas.
- *
- * EL ENCARGO ES UNA PARADA PROPIA (10-09-2026). Antes lo que se le pidió al
- * redactor —el material, la duración, el formato, las indicaciones, las
- * llamadas a la acción— sólo se veía en el formulario de crear el vídeo, y en
- * cuanto había guion ese formulario no se volvía a alcanzar: para cambiar una
- * indicación había que abrir el modo editor. Ahora se vuelve a él igual que se
- * vuelve a un estilo: se lee lo GUARDADO, se corrige ahí mismo con
- * autoguardado, y el pie ofrece regenerar el guion con lo que ha cambiado.
- *
- * VA ABAJO porque esto se repasa desde el móvil, y arriba no llega el pulgar.
- *
- * LO QUE NO SE PUEDE PISAR SE APAGA, no se esconde: un paso que desaparece no
- * dice que aún no toca, dice que no existe. Apagado con su motivo en el title
- * enseña el camino completo desde el primer día.
- */
-const ICONOS_NAV = {
-  inicio: 'M3 11l9-7 9 7 M5 9.5V20h5v-6h4v6h5V9.5',
-  estilos: 'M4 4h6v6H4z M14 4h6v6h-6z M4 14h6v6H4z M14 14h6v6h-6z',
-  encargo: 'M9 3h6v3H9z M7 5h10v16H7z M10 11h5 M10 15h4',
-  guion: 'M6 3h12v18H6z M9 8h6 M9 12h6 M9 16h4',
-  diapositivas: 'M3 6h18v12H3z M8 6v12 M16 6v12',
-  video: 'M3 5h18v14H3z M10 9l5 3-5 3z',
-};
-
-
-/* `h` crea con createElement y un <svg> así no dibuja nada: necesita su espacio
-   de nombres. Es lo unico que hace esta funcion. */
-function iconoNav(d) {
-  const NS = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor');
-  svg.setAttribute('stroke-width', '1.6');
-  svg.setAttribute('stroke-linecap', 'round');
-  svg.setAttribute('stroke-linejoin', 'round');
-  svg.setAttribute('aria-hidden', 'true');
-  const p = document.createElementNS(NS, 'path');
-  p.setAttribute('d', d);
-  svg.appendChild(p);
-  return svg;
-}
-
-
-/* Lo que va anclado abajo ADEMAS de la barra de pasos, si la pantalla de turno
-   lo pone. Se vacia en cada pintado: una barra que sobrevive a un cambio de
-   pantalla se queda ahi conduciendo escenas de una vista que ya no se ve. */
+/* Lo que va anclado abajo, si la pantalla de turno lo pone: su barra de
+   acción. Se vacía en cada pintado: una barra que sobrevive a un cambio de
+   pantalla se queda ahí conduciendo escenas de una vista que ya no se ve. */
 const BARRA_INFERIOR = { nodo: null };
 
 
-function navLight() {
+/* ============================================================ CREAR · CARRIL
+ *
+ * EL REDISEÑO DE CREAR, FORMA «A · CARRIL» (rama `rediseno-crear`, 20-10-2026,
+ * con la maqueta que aprobó el dueño). Dentro de un vídeo la pantalla es:
+ *
+ *   [carril]   ‹ Tus proyectos
+ *              [cabecera: miniatura · nombre ✏️ · 🎨 estilo · 📁 proyecto · gasto]
+ *              [el paso: Estilo · Encargo · Guion · Voz · Imágenes · Vídeo]
+ *              [barra de acción pegada abajo: estado · plan · el botón]
+ *
+ * El carril sustituye a la barra de pasos de abajo (que solo sabía tres estados:
+ * normal, activa y apagada) y a las migas («‹ Mis vídeos», «Estilo: X»). Lo que
+ * dice de cada paso NO se guarda en ningún sitio: se calcula de lo que la
+ * pantalla ya sabe —el estado de cada paso del grafo, el plan de cada tanda, el
+ * trabajo en marcha, las notas sin aplicar, los cambios del estilo por traer y
+ * los del montaje sin aplicar—. Pintar el carril solo LEE: ninguna petición
+ * escribe un param, así que no puede mover una firma (regla 1).
+ *
+ * LA VOZ ES UN PASO PROPIO. Antes no tenía pantalla: se escuchaba en el pie del
+ * guion y se regrababa desde cuatro sitios. Ahora su pantalla es `vistaVozLight`
+ * (`v.vista = 'voz'`).
+ *
+ * EL PASO «ESTILO» DE UN VÍDEO ES LA FICHA DEL ESTILO (`vista 'preset'`) con
+ * `desdeVideo` apuntando a ese vídeo, como hasta ahora, y con «Su estilo»
+ * encima. De un vídeo NUEVO (aún sin pid) se marca con `NUEVO_VIDEO`.
+ */
+const NUEVO_VIDEO = '_nuevo';
+
+const PASOS_CARRIL = [
+  { id: 'estilo', nombre: 'Estilo' },
+  { id: 'encargo', nombre: 'Encargo' },
+  { id: 'guion', nombre: 'Guion' },
+  { id: 'voz', nombre: 'Voz' },
+  { id: 'imagenes', nombre: 'Imágenes' },
+  { id: 'video', nombre: 'Vídeo' },
+];
+
+/* La sub-vista de `elegido` que pinta cada paso (el estilo va aparte). */
+const VISTA_DEL_PASO = { encargo: 'encargo_video', guion: 'guion', voz: 'voz', imagenes: 'previa', video: 'video' };
+const PASO_DE_LA_VISTA = { encargo: 'encargo', encargo_video: 'encargo', guion: 'guion', voz: 'voz',
+  previa: 'imagenes', video: 'video' };
+
+/* Las marcas de cada estado: forma Y color (el color solo no lo distingue todo
+   el mundo). `actual` es «estás aquí». */
+const MARCA_DEL_ESTADO = { hecho: '✓', aviso: '!', curso: '⟳', pend: '○', bloq: '·', actual: '●' };
+// La clase de cada estado, escrita entera para que css_sin_usar la encuentre.
+const CLASE_DEL_ESTADO = { hecho: 'e-hecho', aviso: 'e-aviso', curso: 'e-curso', pend: 'e-pend', bloq: 'e-bloq', actual: 'e-actual' };
+const claseEstado = (e) => CLASE_DEL_ESTADO[e] || 'e-bloq';
+
+/* EN QUÉ PASO DEL CARRIL SE ESTÁ, o '' si la pantalla no es de un vídeo (la
+   galería, un estilo nuevo, la ficha de un estilo abierta desde la galería). */
+function pasoDelCarril() {
+  const L = APP.light;
+  const v = L.video || {};
+  if (!L.datos || L.cargando || L.error) return '';
+  if (L.vista === 'elegido') {
+    if (!v.pid) return v.vista === 'video' ? 'video' : 'encargo';
+    return PASO_DE_LA_VISTA[v.vista] || 'encargo';
+  }
+  if (['preset', 'generando'].includes(L.vista) && L.desdeVideo) {
+    if (L.desdeVideo === NUEVO_VIDEO) return v.pid ? '' : 'estilo';
+    /* LA FICHA DE UN VÍDEO QUE NO ESTÁ CARGADO (se volvió con «atrás» o se
+       recargó la página en ella): se abre por debajo, sin salir de la ficha. */
+    if (v.pid !== L.desdeVideo || (!v.cargadoDe && !v.cargando)) {
+      if (!v.cargando && !v.error && L.cargandoDesde !== L.desdeVideo) {
+        L.cargandoDesde = L.desdeVideo;
+        const pid = L.desdeVideo;
+        setTimeout(() => {
+          recordarVideoLight(pid);
+          APP.light.video.vista = APP.light.video.vista || '';
+          cargarVideoLight(pid).finally(() => { APP.light.cargandoDesde = ''; });
+        }, 0);
+      }
+    }
+    return 'estilo';
+  }
+  return '';
+}
+
+/* El estilo del vídeo de la pantalla: el suyo, o el elegido para uno nuevo. */
+function estiloDelCarril() {
+  const L = APP.light;
+  const v = L.video || {};
+  if (v.pid) return v.estilo || '';
+  return L.abierto || (estiloElegido() || {}).id || '';
+}
+
+/* MOVERSE POR EL CARRIL. Lo que se está mirando en Imágenes se para, como al
+   pulsar cualquier parada de la barra de antes. */
+function irAPasoDelCarril(id, op) {
+  const L = APP.light;
+  const v = L.video;
+  pararPrevia();
+  if (id === 'estilo') {
+    const estilo = estiloDelCarril();
+    if (estilo && fichaLight(estilo)) apuntarClienteDe(clienteDe(estilo));
+    /* EL ESTILO DE ESTE VÍDEO YA NO ESTÁ (borrado, o de un proyecto con clave
+       sin abrir): el paso lo dice y abre «Cambiar de estilo…» (y «Restaurarlo»
+       si está en la papelera). Antes la parada te sacaba al Encargo. */
+    if (v.pid && !fichaLight(estilo)) v.cambioEstilo = { pid: v.pid, abierto: true, partes: {} };
+    irALight('preset', { abierto: estilo, feedback: {}, desdeVideo: v.pid || NUEVO_VIDEO,
+      pestanaEstilo: (op || {}).pestana || 've' });
+    return;
+  }
+  if (!v.pid) {
+    // un vídeo nuevo: el Encargo es el borrador, y Vídeo, sus ajustes del montaje
+    v.vista = id === 'video' ? 'video' : 'encargo';
+    irALight('elegido', { abierto: estiloDelCarril() });
+    return;
+  }
+  v.vista = VISTA_DEL_PASO[id] || 'encargo_video';
+  if (L.vista !== 'elegido') irALight('elegido');
+  else { subirArriba('panel'); pintarLight(); }
+}
+
+/* Qué paso está corriendo, por el nombre del trabajo que ocupa la ranura del
+   vídeo (`generar:guion`, `generar:video+render`, `regrabar_seccion`…). */
+function pasoDelTrabajo(trabajo) {
+  const nombre = String((trabajo || {}).nombre || '').toLowerCase();
+  if (/render|montaje|subtitulos|subtítulos|m[uú]sica|banda|mezcla|exportar/.test(nombre)) return 'video';
+  if (/video|imagen|notas|calidad|espacio|plano/.test(nombre)) return 'imagenes';
+  if (/voz|regrabar|revision_audio|audio/.test(nombre)) return 'voz';
+  if (/guion|reescribir|bloque/.test(nombre)) return 'guion';
+  return 'video';
+}
+
+/* Las notas sin aplicar de un cuaderno (imágenes o vídeo), mire o no esa
+   pantalla. El repaso se lee una vez por vídeo si nadie lo ha pedido aún. */
+function notasSinAplicarDe(cuaderno) {
+  const r = estadoRepaso();
+  if (!r.cargado && !r.cargando && videoAbierto().pid) setTimeout(() => cargarRepaso(), 0);
+  return (r.notas || []).filter(n => pantallaDeNota(n) === cuaderno && n.estado !== 'aplicado').length;
+}
+
+/* Las imágenes obsoletas que se conocen (las cuenta la previsualización). */
+function obsoletasConocidas() {
+  const v = videoAbierto();
+  if (!PREVIA.ficha || PREVIA.pid !== v.pid) return 0;
+  return ((PREVIA.ficha || {}).escenas || []).filter(e => e.obsoleta).length;
+}
+
+/* Los cambios del estilo que este vídeo no tiene: se preguntan una vez por
+   vídeo (solo lectura, `GET .../estilo/cambios`), y «Su estilo» los vuelve a
+   preguntar cada vez que se enseña. */
+function cambiosDelEstiloCarril() {
   const v = APP.light.video;
-  const dentro = APP.light.vista === 'elegido' && !!v.pid;
-  // «UN VIDEO NUEVO»: el formulario de un encargo que aun no es un video. Lo
-  // decia el comentario del Encargo y no lo hacia el codigo: ninguna parada
-  // salia activa (B4, 10-10-2026)
-  const nuevo = APP.light.vista === 'elegido' && !v.pid;
-  const sub = dentro ? v.vista : '';
-  const hayGuion = dentro && !!v.guion;
-  const hayPlanos = dentro && !!versionDe(v.fichas.assets || {});
-  const hayVideo = dentro && (!!v.audio || hayMp4Light());
+  if (!v.pid) return null;
+  if (v.cambiosEstiloDe !== v.pid && !v.cambiosEstiloCargando) {
+    v.cambiosEstiloDe = v.pid;
+    v.cambiosEstilo = null;
+    v.partesEstilo = {};
+    const pid = v.pid;
+    cargarCambiosDelEstilo(v)
+      .then(vale => {
+        if (!vale || APP.light.video.pid !== pid) return;
+        // «Su estilo» en pantalla se quedaba en «comparando…»: esperaba esta
+        // misma respuesta y solo se repintaba el carril
+        if (document.querySelector('.estilo-del-video')) pintarLight();
+        else repintarCarril();
+      });
+  }
+  return v.cambiosEstilo;
+}
 
-  const paradas = [
-    /* INICIO: la portada, con tus estilos y tus vídeos. Hasta el 11-10-2026 la
-       única salida de un vídeo era «Estilos», y al hacer que desde dentro de un
-       vídeo abriera SU estilo (10-10) no quedó ninguna: el dueño se encontró
-       dentro de un vídeo sin forma de volver. Ahora salen tres: esta parada, el
-       logo de arriba y «‹ Mis vídeos» encima de cada pantalla del vídeo. */
-    { id: 'inicio', texto: 'Inicio', puede: true,
-      activa: !['crear', 'generando', 'preset', 'elegido'].includes(APP.light.vista),
-      porque: 'tus estilos y tus vídeos',
-      ir: () => irAInicioLight() },
-    /* DESDE DENTRO DE UN VÍDEO, «Estilos» abre EL ESTILO DE ESE VÍDEO: es la
-       pregunta que se hace desde ahí («¿con qué estilo se hizo?, quiero
-       cambiarlo»), y antes caía en la portada sin decirlo (10-10-2026). La
-       ficha lleva «‹ Volver al vídeo» y su «‹ Volver» de siempre a la galería. */
-    /* Fuera de un vídeo, tus estilos están en Inicio: esta parada solo
-       repetía esa pantalla y pulsarla no hacía nada (11-10-2026). */
-    { id: 'estilos', texto: 'Estilo', puede: dentro || APP.light.vista === 'preset',
-      activa: APP.light.vista === 'preset',
-      porque: dentro && fichaLight(v.estilo)
-        ? `el estilo de este vídeo: «${fichaLight(v.estilo).nombre}»`
-        : dentro ? 'el estilo de este vídeo ya no está'
-        : 'el estilo de un vídeo (abre uno); tus estilos están en Inicio',
-      ir: () => {
-        pararPrevia();
-        if (dentro && fichaLight(v.estilo)) {
-          const pid = v.pid;
-          apuntarClienteDe(clienteDe(v.estilo));
-          irALight('preset', { abierto: v.estilo, feedback: {}, desdeVideo: pid });
-          return;
-        }
-        /* EL ESTILO DE ESTE VÍDEO YA NO ESTÁ (borrado, o de un proyecto con
-           clave sin abrir): se dice y te quedas en el vídeo. Antes te sacaba a
-           la galería sin una palabra (N3 de las notas de mejoras, 13-10-2026). */
-        /* Y SE OFRECE CAMBIARLO (arreglos del 19-10): te lleva a «Su estilo»,
-           en el Encargo, con «Cambiar de estilo…» abierto (y «Restaurarlo» si
-           está en la papelera). */
-        if (dentro) {
-          toast(v.estilo
-            ? 'el estilo de este vídeo ya no está (borrado, o de un proyecto con clave sin abrir): el vídeo sigue igual. Puedes pasarlo a otro estilo'
-            : 'este vídeo no tiene un estilo apuntado: puedes darle uno', true);
-          v.cambioEstilo = { pid: v.pid, abierto: true, partes: {} };
-          v.vista = 'encargo_video';
-          pintarLight();
-          const bloque = document.querySelector('.cambio-de-estilo');
-          if (bloque) bloque.scrollIntoView({ block: 'center' });
-          return;
-        }
-        recordarVideoLight('');
-        irALight('galeria');
-      } },
-    /* EL ENCARGO: lo que se le pidió al redactor, tal cual está guardado en el
-       vídeo abierto, y editable. Sin vídeo abierto no hay nada que revisar (el
-       formulario de crear uno es otra pantalla, `vistaElegidoLight`). Cuenta
-       como «aquí» también en ese formulario: es el encargo de un vídeo que
-       todavía no existe, y la barra tiene que decir en qué parada estás. */
-    { id: 'encargo', texto: 'Encargo', puede: dentro || nuevo,
-      activa: nuevo || (dentro && (sub === 'encargo_video' || sub === 'encargo')),
-      porque: dentro ? 'lo que se pidió para el guion: se lee y se cambia aquí'
-        : nuevo ? 'el encargo del vídeo nuevo: es esta pantalla'
-        : 'abre un vídeo primero',
-      ir: () => { pararPrevia(); v.vista = 'encargo_video'; pintarLight(); } },
-    /* Antes, sin guion, este botón caía en el formulario de crear un vídeo
-       NUEVO —con uno ya abierto—. Ahora va siempre al guion: si no lo hay
-       todavía, esa pantalla lo dice y manda al encargo, que es donde se genera. */
-    { id: 'guion', texto: 'Guion', puede: dentro,
-      activa: dentro && sub === 'guion',
-      porque: dentro ? (hayGuion ? 'el texto y la voz' : 'todavía no hay guion')
-        : 'abre un vídeo primero',
-      ir: () => { pararPrevia(); v.vista = 'guion'; pintarLight(); } },
-    { id: 'diapositivas', texto: 'Imágenes', puede: hayPlanos,
-      activa: sub === 'previa',
-      porque: hayPlanos ? 'la imagen de cada plano, sola'
-        : 'todavía no hay imágenes que mirar',
-      ir: () => { v.vista = 'previa'; pintarLight(); } },
-    { id: 'video', texto: 'Vídeo', puede: hayVideo, activa: sub === 'video',
-      porque: hayVideo ? 'el montaje y el repaso' : 'todavía no hay nada montado',
-      ir: () => { pararPrevia(); v.vista = 'video'; pintarLight(); } },
-  ];
-
-  const barra = h('nav', { clase: 'nav-light', 'aria-label': 'Pasos del vídeo' });
-  paradas.forEach(parada => {
-    const boton = h('button', {
-      clase: 'parada' + (parada.activa ? ' activa' : ''),
-      disabled: !parada.puede,
-      title: parada.porque,
-      'aria-current': parada.activa ? 'page' : null,
-      onclick: () => { if (!parada.activa) parada.ir(); },
+/* PEDIR LO QUE CAMBIARÍA DEL ESTILO, NUMERADO. Lo piden el carril y «Su
+   estilo», y después de «Traer» se pide otra vez: la respuesta de una
+   petición vieja que llega tarde pisaba la nueva (y el carril volvía a decir
+   «2 cambios por traer» de lo ya traído). Solo escribe la ÚLTIMA; devuelve si
+   lo fue. `olvidarCambiosDelEstilo` descarta lo que esté en vuelo. */
+function cargarCambiosDelEstilo(v) {
+  const pid = v.pid;
+  const n = (v.cambiosEstiloPeticion || 0) + 1;
+  v.cambiosEstiloPeticion = n;
+  v.cambiosEstiloCargando = true;
+  return pedir(`${API.proyecto(pid)}/estilo/cambios`)
+    .catch(e => ({ estilo: null, partes: [], por_que_no: e.message }))
+    .then(d => {
+      if (v.cambiosEstiloPeticion !== n) return false;     // hay otra más nueva
+      v.cambiosEstiloCargando = false;
+      if (v.pid !== pid) return false;                       // de otro vídeo
+      v.cambiosEstilo = d;
+      v.cambiosEstiloEn = Date.now();
+      return true;
     });
-    boton.appendChild(iconoNav(ICONOS_NAV[parada.id]));
-    boton.appendChild(h('span', { clase: 'etiqueta' }, parada.texto));
-    barra.appendChild(boton);
+}
+
+function olvidarCambiosDelEstilo(v) {
+  v.cambiosEstiloPeticion = (v.cambiosEstiloPeticion || 0) + 1;
+  v.cambiosEstiloCargando = false;
+  v.cambiosEstilo = null;
+}
+
+/* LOS CAMBIOS DEL MONTAJE SIN APLICAR (decisión 9 del rediseño). Los apunta
+   cada ajuste que se guarda sin montar (`modo.diferir`), por fila: tocar tres
+   veces la música es UN cambio. El servidor solo sabe si hay alguno
+   (`sin_aplicar` de `GET .../montaje`), así que tras recargar la página la
+   cuenta es «los cambios», sin número. */
+function cambiosDelMontaje() {
+  const v = APP.light.video;
+  if (!v.pid) return { n: 0, hay: false };
+  // estadoAjustes y no leerlo a pelo: tras recargar la página trae lo apuntado
+  const est = estadoAjustes({ tipo: 'video', pid: v.pid });
+  const filas = new Set(Object.keys(est.filasSinAplicar || {}));
+  if (est.animoPedido && !est.montandoAnimo) filas.add('musica');
+  const montaje = est.montaje || {};
+  const hay = filas.size > 0 || (!!(est.sinAplicar || montaje.sin_aplicar) && !!montaje.montado);
+  return { n: filas.size, hay, est };
+}
+
+/* EL ESTADO DE CADA PASO, en el orden del carril. Cada uno: `e` (hecho, aviso,
+   curso, pend, bloq), `txt` (la línea de color), `detalle` (la gris), `porque`
+   (el globo cuando no se puede pulsar) y `puede`. */
+function estadosDelCarril() {
+  const L = APP.light;
+  const v = L.video || {};
+  const nuevo = !v.pid;
+  const fichas = v.fichas || {};
+  const est = paso => (fichas[paso] || {}).estado || '';
+  const trabajo = nuevo ? null : trabajoVideoLight();
+  const corre = trabajo ? pasoDelTrabajo(trabajo) : '';
+  const pct = trabajo ? `${Math.round((Number(trabajo.progreso) || 0) * 100)} %` : '';
+  const cola = !nuevo && COLA_IMG.pid === v.pid && (!!COLA_IMG.actual || COLA_IMG.cola.length > 0);
+  const estiloId = estiloDelCarril();
+  const ficha = fichaLight(estiloId);
+  const pasos = {};
+
+  // 1. ESTILO
+  const taller = APP.trabajos[CLAVE_LIGHT] || {};
+  const cambios = nuevo ? null : cambiosDelEstiloCarril();
+  if (L.vista === 'generando' && taller.estado === 'ejecutando') {
+    pasos.estilo = { e: 'curso', txt: `${Math.round((Number(taller.progreso) || 0) * 100)} %`, detalle: 'rehaciendo el estilo' };
+  } else if (!ficha) {
+    const enPapelera = cambios && (cambios.estilo || {}).en_papelera;
+    pasos.estilo = { e: 'aviso', txt: enPapelera ? 'en la papelera' : (estiloId ? 'ya no está' : 'sin estilo'),
+      detalle: 'puedes pasarlo a otro estilo' };
+  } else if (cambios && cambios.estilo && !cambios.al_dia && !cambios.por_que_no) {
+    const n = (cambios.partes || []).filter(p => p.cambia).length;
+    pasos.estilo = { e: 'aviso', txt: n ? `${n} ${n === 1 ? 'cambio' : 'cambios'} por traer` : 'cambios por traer',
+      detalle: ficha.nombre || ficha.id };
+  } else {
+    pasos.estilo = { e: 'hecho', txt: nuevo ? 'elegido' : 'al día', detalle: ficha.nombre || ficha.id };
+  }
+  pasos.estilo.puede = true;
+
+  // 2. ENCARGO
+  if (nuevo) {
+    const e = encargoVideoLight();
+    pasos.encargo = { e: 'pend', txt: 'borrador', puede: true,
+      detalle: `${textoDuracion(e.duracion_objetivo_s)} · ${e.formato === 'vertical' ? 'vertical 9:16' : 'horizontal 16:9'}` };
+  } else {
+    const brief = (fichas.brief || {}).params || {};
+    pasos.encargo = { e: 'hecho', txt: 'guardado', puede: true,
+      detalle: `${textoDuracion(Number(brief.duracion_objetivo_s) || 240)} · `
+        + `${brief.formato === 'vertical' ? 'vertical 9:16' : 'horizontal 16:9'}` };
+  }
+
+  // 3. GUION
+  const guionViejo = ['ingesta', 'brief', 'guion'].some(p => est(p) === 'obsoleto');
+  if (nuevo) pasos.guion = { e: 'bloq', txt: 'aún no', porque: 'todavía no hay guion', puede: false };
+  else if (corre === 'guion') pasos.guion = { e: 'curso', txt: pct, detalle: 'escribiendo el guion', puede: true };
+  else if (!v.guion) pasos.guion = { e: 'pend', txt: 'sin guion', detalle: 'se genera desde el encargo', puede: true };
+  else {
+    const datos = `${v.guion.bloques.length} bloques · ${miles(palabrasDelGuionLight(v))} palabras`;
+    pasos.guion = guionViejo || quedaTandaLight('guion') === true
+      ? { e: 'aviso', txt: 'Guion obsoleto', detalle: datos, puede: true }
+      : { e: 'hecho', txt: 'al día', detalle: datos, puede: true };
+  }
+
+  // 4. VOZ
+  if (nuevo || !v.guion) {
+    pasos.voz = { e: 'bloq', txt: 'aún no', porque: 'todavía no hay guion', puede: false };
+  } else if (corre === 'voz') {
+    pasos.voz = { e: 'curso', txt: pct, detalle: 'grabando la voz', puede: true };
+  } else if (!v.audio) {
+    pasos.voz = { e: 'pend', txt: 'sin grabar', detalle: 'se graba desde el guion', puede: true };
+  } else {
+    const previsto = regrabarPrevistoLight();
+    const tramos = previsto && previsto.posible !== false ? (previsto.pendientes || []).length : 0;
+    const voz = ((ficha || {}).datos || {}).voz || {};
+    const quien = String(voz.voz_nombre || '').split(' - ')[0];
+    const detalle = [mmss(v.audio.duracion), quien].filter(Boolean).join(' · ');
+    if (tramos) pasos.voz = { e: 'aviso', txt: `${tramos} ${tramos === 1 ? 'tramo' : 'tramos'} sin grabar`, detalle, puede: true };
+    else if (est('voz') === 'obsoleto' || v.audio.obsoleto) pasos.voz = { e: 'aviso', txt: 'por regrabar', detalle, puede: true };
+    else pasos.voz = { e: 'hecho', txt: 'al día', detalle, puede: true };
+  }
+
+  // 5. IMÁGENES
+  const hayPlanos = !nuevo && !!versionDe(fichas.assets || {});
+  const notasImg = hayPlanos ? notasSinAplicarDe('imagenes') : 0;
+  if (nuevo || (!hayPlanos && !v.audio)) {
+    pasos.imagenes = { e: 'bloq', txt: 'aún no', porque: 'todavía no hay imágenes que mirar', puede: false };
+  } else if (corre === 'imagenes' || cola) {
+    pasos.imagenes = { e: 'curso', txt: corre === 'imagenes' ? pct : 'dibujando', detalle: 'dibujando los planos', puede: hayPlanos };
+  } else if (!hayPlanos) {
+    pasos.imagenes = { e: 'pend', txt: 'sin generar', detalle: 'se generan desde la voz',
+      porque: 'todavía no hay imágenes que mirar', puede: false };
+  } else {
+    const n = obsoletasConocidas();
+    const planos = ((PREVIA.ficha || {}).escenas || []).length;
+    const detalle = PREVIA.ficha && PREVIA.pid === v.pid ? `${planos} planos` : 'la imagen de cada plano';
+    if (n) pasos.imagenes = { e: 'aviso', txt: `${n} ${n === 1 ? 'imagen obsoleta' : 'imágenes obsoletas'}`, detalle, puede: true };
+    else if (est('assets') === 'obsoleto') pasos.imagenes = { e: 'aviso', txt: 'por poner al día', detalle, puede: true };
+    else if (notasImg) pasos.imagenes = { e: 'aviso', txt: `${notasImg} ${notasImg === 1 ? 'nota' : 'notas'} sin aplicar`, detalle, puede: true };
+    else pasos.imagenes = { e: 'hecho', txt: 'al día', detalle, puede: true };
+  }
+
+  // 6. VÍDEO
+  if (nuevo) {
+    pasos.video = { e: 'pend', txt: 'aún no', detalle: 'ajustes del borrador', puede: true };
+  } else if (corre === 'video') {
+    pasos.video = { e: 'curso', txt: pct, detalle: 'montando el vídeo', puede: true };
+  } else if (!hayMp4Light()) {
+    pasos.video = v.audio
+      ? { e: 'pend', txt: 'sin montar', detalle: 'se monta desde Imágenes', puede: true }
+      : { e: 'bloq', txt: 'aún no', porque: 'todavía no hay nada montado', puede: false };
+  } else {
+    const notasVid = notasSinAplicarDe('video');
+    const montaje = cambiosDelMontaje();
+    const version = versionDe(fichas.render || {});
+    const detalle = [version ? `v${version}` : '', v.audio ? mmss(v.audio.duracion) : ''].filter(Boolean).join(' · ');
+    if (notasVid) pasos.video = { e: 'aviso', txt: `${notasVid} ${notasVid === 1 ? 'nota' : 'notas'} sin aplicar`, detalle, puede: true };
+    else if (montaje.hay) {
+      pasos.video = { e: 'aviso', txt: montaje.n ? `${montaje.n} ${montaje.n === 1 ? 'cambio' : 'cambios'} sin aplicar`
+        : 'cambios sin aplicar', detalle, puede: true };
+    } else if (videoObsoletoLight()) pasos.video = { e: 'aviso', txt: 'Vídeo obsoleto', detalle: `${detalle} · de antes de tus cambios`, puede: true };
+    else pasos.video = { e: 'hecho', txt: 'al día', detalle, puede: true };
+  }
+  return PASOS_CARRIL.map(p => Object.assign({ id: p.id, nombre: p.nombre, detalle: '', porque: '' }, pasos[p.id]));
+}
+
+function marcaEstado(e) {
+  return h('span', { clase: 'marca-estado', 'aria-hidden': 'true' }, h('span', {}, MARCA_DEL_ESTADO[e] || '·'));
+}
+
+/* EL CARRIL: seis pasos en columna (en el móvil, una fila que se desliza) y,
+   debajo, lo gastado en este vídeo. */
+function carrilCrear(actual) {
+  const caja = h('aside', { clase: 'carril-crear', 'aria-label': 'Los pasos del vídeo' });
+  caja.appendChild(h('div', { clase: 'carril-titulo' }, 'El recorrido',
+    h('span', { clase: 'desliza' }, ' · desliza →')));
+  /* VIVO: mientras corre una tanda, su paso dice «⟳ 42 %» y lo gastado sube.
+     Se rehace solo si ha cambiado lo que dice (la huella), así que entre tic
+     y tic los botones son los mismos nodos y un clic no se pierde. */
+  const memoria = { huella: '', nodo: null };
+  caja.appendChild(enVivo(() => {
+    const pasos = estadosDelCarril();
+    const v = APP.light.video;
+    const huella = JSON.stringify([actual, pasos, v.pid ? Number((v.coste || {}).total_usd || 0) : null]);
+    if (huella === memoria.huella && memoria.nodo) {
+      // volver a colgar la fila le devuelve el scroll a cero: se recoloca
+      centrarPasoActivo(memoria.nodo.querySelector('.pasos-carril'));
+      return memoria.nodo;
+    }
+    memoria.huella = huella;
+    memoria.nodo = pasosDelCarril(pasos, actual);
+    return memoria.nodo;
+  }));
+  return caja;
+}
+
+function pasosDelCarril(pasos, actual) {
+  const v = APP.light.video;
+  const caja = h('div', { clase: 'carril-dentro' });
+  const fila = h('nav', { clase: 'pasos-carril' });
+  pasos.forEach((p, i) => {
+    const aqui = p.id === actual;
+    const boton = h('button', {
+      clase: `paso-carril ${claseEstado(aqui ? 'actual' : p.e)}` + (aqui ? ' actual' : ''),
+      // el paso en el que ya estás no lleva a ningún sitio: apagado, pero con su color
+      disabled: aqui || !p.puede,
+      title: p.puede ? (p.porque || `${p.nombre}: ${p.txt}`) : (p.porque || 'todavía no'),
+      'aria-current': aqui ? 'step' : null,
+      datos: { paso: p.id, estado: p.e },
+      onclick: () => irAPasoDelCarril(p.id),
+    },
+      marcaEstado(aqui ? 'actual' : p.e),
+      h('span', { clase: 'paso-textos' },
+        h('b', {}, `${i + 1}. ${p.nombre}`),
+        h('span', { clase: `estado-txt ${claseEstado(p.e)}` }, aqui ? `estás aquí · ${p.txt}` : p.txt),
+        p.detalle ? h('small', {}, p.detalle) : (p.porque && !p.puede ? h('small', {}, p.porque) : null)));
+    fila.appendChild(boton);
   });
+  caja.appendChild(fila);
+  if (v.pid) {
+    const datos = v.coste;
+    const alDia = pasos.filter(p => p.e === 'hecho').length;
+    caja.appendChild(h('button', {
+      clase: 'gasto-video', title: 'Lo gastado en este vídeo: pulsa para verlo desglosado',
+      onclick: () => abrirCosteDelVideo(v.pid),
+    },
+      h('span', { clase: 'meta' }, 'Gasto de este vídeo'),
+      h('b', {}, datos ? `$ ${Number(datos.total_usd || 0).toFixed(2)}` : '$ —'),
+      h('span', { clase: 'meta' }, `${alDia} de ${pasos.length} pasos al día`)));
+  }
+  centrarPasoActivo(fila);
+  return caja;
+}
+
+/* EN EL MÓVIL EL PASO ACTIVO SE CENTRA SOLO en la fila (sin mover la página:
+   `scrollIntoView` arrastraría también el scroll del panel). */
+function centrarPasoActivo(fila) {
+  setTimeout(() => {
+    const activo = fila && fila.querySelector('.paso-carril.actual');
+    if (!activo || fila.scrollWidth <= fila.clientWidth + 2) return;
+    const dentro = activo.getBoundingClientRect().left - fila.getBoundingClientRect().left + fila.scrollLeft;
+    fila.scrollLeft = Math.max(0, dentro - (fila.clientWidth - activo.offsetWidth) / 2);
+  }, 0);
+}
+
+/* El carril se repinta solo, sin el resto de la pantalla (una lectura que
+   llega cuando ya se ha pintado: los cambios del estilo, el repaso). */
+function repintarCarril() {
+  const viejo = document.querySelector('#panel .carril-crear');
+  const paso = pasoDelCarril();
+  if (!viejo || !paso) return;
+  viejo.replaceWith(carrilCrear(paso));
+}
+
+/* LA SALIDA DE CREAR (el logo es la otra). Sustituye a «‹ Mis vídeos», «←
+   Volver», «‹ Volver», «‹ Todos los proyectos», «Todos los estilos» y «‹
+   Volver al vídeo», que llevaban casi al mismo sitio con nombres distintos.
+   Lo escrito en un estilo se guarda antes de irse.
+
+   VUELVE AL PROYECTO, NO A LA PORTADA (N3 de las notas de mejoras, «me bota
+   al menú»; revisión del rediseño, 21-10-2026). Desde un vídeo, un estilo o
+   un vídeo nuevo de un proyecto se vuelve a ESE proyecto (sus estilos y sus
+   vídeos, `dentroDeProyecto`) y el botón lleva su nombre: «‹ Estado Play».
+   Desde ahí, «‹ Tus proyectos» lleva a la portada. Sin proyecto (o sin
+   proyectos), a la portada directamente. */
+function proyectoDeLaSalida() {
+  if (!listaClientes().length) return '';
+  const v = APP.light.video || {};
+  if (v.pid) return clienteDeVideo({ id: v.pid, estilo_light: v.estilo || '' });
+  const estilo = estiloDelCarril();
+  return estilo ? clienteDe(estilo) : '';
+}
+
+function salidaTusProyectos() {
+  const cid = proyectoDeLaSalida();
+  const ficha = cid ? fichaCliente(cid) : null;
+  return h('button', {
+    clase: 'mini fantasma salida-crear',
+    title: ficha ? `Volver al proyecto «${ficha.nombre}»: sus estilos y sus vídeos`
+      : 'Tus proyectos: tus estilos y tus vídeos',
+    onclick: () => {
+      if (APP.light.pendiente) volcarPresetLight();
+      if (ficha) irAlProyectoLight(cid);
+      else irAInicioLight();
+    },
+  }, ficha ? `‹ ${ficha.nombre}` : '‹ Tus proyectos');
+}
+
+/* AL PROYECTO desde un vídeo o un estilo: como la portada, pero con el
+   proyecto elegido. El vídeo se cierra en la pantalla, no en el servidor. */
+function irAlProyectoLight(cid) {
+  if (!puedeSalirDelVideo()) return;
+  pararPrevia();
+  recordarVideoLight('');
+  apuntarCliente(cid);
+  APP.light.desdeVideo = '';
+  subirArriba('panel');
+  irALight('galeria');
+  cargarGaleriaLight(true);
+}
+
+/* LA CABECERA DEL VÍDEO: su miniatura, su nombre (✏️ lo cambia ahí mismo, sin
+   regenerar nada), su estilo (lleva al paso Estilo), su proyecto y lo gastado. */
+function cabeceraDelVideo() {
+  const L = APP.light;
+  const v = L.video;
+  const nuevo = !v.pid;
+  const estilo = fichaLight(estiloDelCarril());
+  const cid = nuevo ? clienteDe((estilo || {}).id || '')
+    : clienteDeVideo({ id: v.pid, estilo_light: v.estilo });
+  const cliente = fichaCliente(cid);
+  const vertical = formatoDelVideo() === 'vertical' || (nuevo && encargoVideoLight().formato === 'vertical');
+  const miniatura = estilo && estilo.hay_miniatura
+    ? h('img', { clase: 'miniatura-video' + (vertical ? ' vertical' : ''), alt: '',
+      src: API.presetCanalMiniatura(estilo.id, estilo.modificado) })
+    : h('span', { clase: 'miniatura-video vacia' + (vertical ? ' vertical' : '') });
+  const nombre = nuevo ? (encargoVideoLight().nombre || 'Un vídeo nuevo') : (v.nombre || v.pid);
+  const editando = !nuevo && L.renombrando === v.pid;
+  const lineaNombre = h('div', { clase: 'nombre-video' });
+  if (editando) {
+    lineaNombre.appendChild(campoRenombrar(v.pid, nombre));
+  } else {
+    lineaNombre.appendChild(h('b', {}, nombre));
+    if (nuevo) {
+      lineaNombre.appendChild(h('span', { clase: 'pastilla borrador' }, 'borrador: no se guarda hasta Generar el guion'));
+    } else {
+      lineaNombre.appendChild(h('button', {
+        clase: 'mini fantasma renombrar', title: 'Cambiar el nombre (no regenera nada)',
+        'aria-label': `Cambiar el nombre de ${nombre}`,
+        onclick: () => { L.renombrando = v.pid; pintarLight(); },
+      }, '✏️'));
+    }
+  }
+  return h('div', { clase: 'cab-video' },
+    miniatura,
+    h('div', { clase: 'datos' },
+      lineaNombre,
+      h('div', { clase: 'chips-video' },
+        h('button', {
+          clase: 'chip-enlace', title: 'El estilo de este vídeo: abre el paso Estilo',
+          onclick: () => irAPasoDelCarril('estilo'),
+        }, `🎨 ${estilo ? (estilo.nombre || estilo.id) : (estiloDelCarril() ? 'estilo que ya no está' : 'sin estilo')}`),
+        cliente ? h('span', { clase: 'chip-enlace' }, `📁 ${cliente.nombre}`) : null)),
+    nuevo ? null : costeLight());
+}
+
+/* EL NOMBRE, CAMBIADO EN SU SITIO (la cabecera del vídeo y cada fila de «Tus
+   vídeos»). Sustituye a la ventana del navegador (`prompt`). Enter guarda,
+   Escape lo deja como estaba; salir del campo también guarda. */
+function campoRenombrar(pid, antes) {
+  /* LO ESCRITO SOBREVIVE A UN REPINTADO (la pantalla se repinta sola): se
+     guarda aquí al teclear y el campo nuevo sale con ello. Antes, el campo
+     viejo salía del documento, eso es un `blur`, y el `blur` guardaba el
+     nombre a medias. */
+  const borrador = APP.light.renombrandoTexto;
+  const sigue = !!(borrador && borrador.pid === pid);
+  const entrada = h('input', {
+    type: 'text', value: sigue ? borrador.texto : antes, clase: 'renombrar-campo', 'aria-label': 'Nombre del vídeo',
+    datos: { foco: `renombrar-${pid}` },
+  });
+  entrada.addEventListener('input', () => { APP.light.renombrandoTexto = { pid, texto: entrada.value }; });
+  let hecho = false;
+  const terminar = guardar => {
+    if (hecho) return;
+    hecho = true;
+    APP.light.renombrando = '';
+    APP.light.renombrandoTexto = null;
+    const nombre = String(entrada.value || '').trim();
+    if (guardar && nombre && nombre !== antes) guardarNombreDeVideo(pid, nombre);
+    else pintarLight();
+  };
+  entrada.addEventListener('keydown', ev => {
+    if (ev.key === 'Enter') { ev.preventDefault(); terminar(true); }
+    else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); terminar(false); }
+  });
+  /* salir del campo guarda; que lo quite un repintado, no: entonces ya hay otro
+     campo con lo escrito (y el foco vuelve a él) */
+  entrada.addEventListener('blur', () => setTimeout(() => { if (entrada.isConnected) terminar(true); }, 0));
+  if (!sigue) setTimeout(() => { try { entrada.focus(); entrada.select(); } catch (e) { /* da igual */ } }, 0);
+  return h('span', { clase: 'renombrar-en-linea' }, entrada,
+    h('button', { clase: 'mini primario', onmousedown: ev => ev.preventDefault(),
+      onclick: () => terminar(true) }, 'Guardar'));
+}
+
+/* ------------------------------------------------------- la barra de acción
+ *
+ * UNA POR PASO, PEGADA ABAJO, y siempre igual: a la izquierda el estado del
+ * paso («Guion obsoleto», «2 tramos sin grabar»), en medio el plan (lo que va a
+ * hacer y lo que cuesta, lo mismo que decía el globo del botón), a la derecha
+ * el botón del siguiente paso con su coste. Mientras corre algo, la barra de
+ * progreso ocupa el estado y el plan, y a la derecha sale «Parar».
+ *
+ * Sustituye a los cuatro pies de antes (el del encargo, el del guion, los
+ * mandos de las diapositivas y el del vídeo), que tenían botones distintos
+ * para lo mismo. `op`:
+ *   estado      {e, texto}           e: hecho, aviso, curso, pend, bloq
+ *   plan        texto                (opcional)
+ *   botones     [nodos]              a la derecha, el principal el último
+ *   corriendo   bool                 pinta el progreso de `tanda` y «Parar»
+ *   tanda       la tanda del plan    (para la barra de progreso)
+ *   encima      nodo                 lo que va pegado encima (los mandos de Imágenes)
+ *   clase       clase extra
+ */
+function barraDeAccion(op) {
+  const barra = h('div', { clase: 'barra-accion' + (op.clase ? ` ${op.clase}` : '') });
+  if (op.encima) barra.appendChild(op.encima);
+  const dentro = h('div', { clase: 'dentro' + (op.corriendo ? ' corriendo' : '') });
+  if (op.corriendo) {
+    dentro.appendChild(h('div', { clase: 'progreso' }, op.progreso || barraTandaLight(op.tanda)));
+  } else {
+    const e = (op.estado || {}).e || 'pend';
+    dentro.appendChild(h('div', { clase: `estado ${claseEstado(e)}` }, marcaEstado(e),
+      h('span', {}, (op.estado || {}).texto || '')));
+    dentro.appendChild(h('div', { clase: 'plan' }, op.plan || ''));
+  }
+  dentro.appendChild(h('div', { clase: 'derecha' }, ...(op.botones || [])));
+  barra.appendChild(dentro);
   return barra;
+}
+
+/* LA BARRA SE REPINTA SOLA, sin el resto de la pantalla: lo que se escribe en
+   un campo puede cambiar su botón («Qué cambiarías del guion entero» →
+   «Regenerar el guion»), y repintar el panel entero le quitaría el cursor. */
+function ponerBarra(hacer) {
+  BARRA_INFERIOR.hacer = hacer;
+  BARRA_INFERIOR.nodo = hacer();
+}
+
+function repintarBarra() {
+  const viejo = BARRA_INFERIOR.nodo;
+  if (!viejo || !viejo.isConnected || !BARRA_INFERIOR.hacer) return;
+  const nuevo = BARRA_INFERIOR.hacer();
+  viejo.replaceWith(nuevo);
+  BARRA_INFERIOR.nodo = nuevo;
+  ajustarAltoDeLaBarra();
+}
+
+/* LA BURBUJA DEL ASISTENTE VA ENCIMA DE LA BARRA, que no mide siempre lo
+   mismo (en Imágenes lleva los mandos encima; en el móvil, el plan en otra
+   fila). Se mide al pintarla y se pasa a `--alto-pie`, que es lo que usa la
+   burbuja; sin barra, el de la hoja de estilo. Por CSSOM: la CSP no deja
+   atributos `style`. */
+function ajustarAltoDeLaBarra() {
+  requestAnimationFrame(() => {
+    const barra = BARRA_INFERIOR.nodo;
+    const raiz = document.documentElement.style;
+    if (barra && barra.isConnected && barra.offsetHeight) raiz.setProperty('--alto-pie', `${barra.offsetHeight}px`);
+    else raiz.removeProperty('--alto-pie');
+  });
+}
+
+/* Los vídeos con una tanda pedida (`lanzarTandaLight`) o un «Montar el vídeo»
+   pulsado (`montarElVideoLight`) y sin contestar todavía: sus botones de la
+   barra se apagan hasta que contesten. */
+const LANZANDO_TANDA = {};
+const MONTANDO_LIGHT = {};
+
+/* El botón principal de una barra: grande, con su ayuda larga en el globo. */
+/* El botón llega ya hecho, con su texto escrito en la llamada, para que el
+ * inventario de botones lo lea; aquí se le pone la ropa de la barra. */
+function botonDeBarra(boton, op) {
+  const o = op || {};
+  boton.className = (o.secundario ? 'secundario-barra' : 'primario principal') + (o.clase ? ` ${o.clase}` : '');
+  /* mientras se lanza algo de este vídeo (una tanda, un montaje), ningún botón
+     de la barra se puede volver a pulsar: el segundo clic pagaría otra vez */
+  const pid = (APP.light.video || {}).pid;
+  boton.disabled = !!o.disabled || !!(pid && (LANZANDO_TANDA[pid] || MONTANDO_LIGHT[pid]));
+  if (o.title) boton.title = o.title;
+  return conAyuda(o.ayuda || '', boton);
+}
+
+/* «Parar», el mismo en todas las barras. */
+function pararDeBarra(ayuda) {
+  return conAyuda(ayuda || 'Corta la tanda donde esté. Lo que ya se ha generado se queda hecho y no '
+    + 'hay que volver a pagarlo.', botonPararVideo());
 }
 
 
@@ -5666,6 +6146,7 @@ function pintarLightAhora() {
      mandos de una diapositiva se quedaban conduciendo escenas desde el
      guion, donde no hay ninguna que conducir. */
   BARRA_INFERIOR.nodo = null;
+  BARRA_INFERIOR.hacer = null;
   // Se pide la galería sola la primera vez. Este pintado lo dispara cualquier
   // cosa (arrancar, abrir un proyecto, cambiar de modo), así que engancharlo a
   // uno solo de esos caminos dejaba la pantalla en «cargando…» para siempre
@@ -5701,45 +6182,65 @@ function pintarLightAhora() {
       }, 'Reintentar')));
     return;
   }
-  try {
-    if (APP.light.vista === 'crear') contenido.appendChild(vistaCrearLight());
-    else if (APP.light.vista === 'generando') contenido.appendChild(vistaGenerandoLight());
-    else if (APP.light.vista === 'preset') contenido.appendChild(vistaPresetLight());
-    else if (APP.light.vista === 'elegido') {
-      /* TRES VISTAS DENTRO DE «elegido», y la elige LO QUE HAY: el encargo
-         mientras no haya vídeo, el guion en cuanto lo hay, y el vídeo cuando se
-         está montando o ya está. Un menú de tres pestañas aquí sería pedirle a
-         quien mira que elija en cuál de los tres momentos está. */
-      const sub = APP.light.video.vista;
-      if (!APP.light.video.cargando) contenido.appendChild(migasDelVideoLight());
-      if (APP.light.video.cargando) {
-        contenido.appendChild(h('div', { clase: 'cargando' }, 'abriendo el vídeo…'));
-      } else if (APP.light.video.error) {
-        contenido.appendChild(cajaError(APP.light.video.error));
-      } else if (sub === 'video') contenido.appendChild(vistaVideoLight());
-      else if (sub === 'previa') {
-        contenido.appendChild(vistaPreviaLight());
-        const versiones = bloqueVersionesLight('assets');
-        if (versiones) contenido.appendChild(versiones);
-      } else if (sub === 'guion') {
-        contenido.appendChild(vistaGuionLight());
-        const versiones = bloqueVersionesLight('guion');
-        if (versiones) contenido.appendChild(versiones);
-      }
-      else if (sub === 'encargo_video') contenido.appendChild(vistaEncargoVideoLight());
-      else contenido.appendChild(vistaElegidoLight());
+  /* DENTRO DE UN VÍDEO, EL CARRIL (rediseño de Crear, 20-10-2026): el carril
+     a la izquierda y, a la derecha, «‹ Tus proyectos», la cabecera del vídeo,
+     el paso, el pie del sistema y la barra de acción. Fuera de un vídeo (la
+     galería, un estilo nuevo, la ficha de un estilo), la columna de siempre. */
+  const paso = pasoDelCarril();
+  let donde = contenido;
+  if (paso) {
+    contenido.classList.add('con-carril');
+    donde = h('div', { clase: 'paso-crear' });
+    try {
+      contenido.appendChild(carrilCrear(paso));
+      donde.appendChild(salidaTusProyectos());
+      donde.appendChild(cabeceraDelVideo());
+    } catch (e) {
+      donde.appendChild(cajaError(`fallo pintando el carril: ${e.message}`));
+      console.error(e);
     }
-    else contenido.appendChild(vistaGaleriaLight());
+    contenido.appendChild(donde);
+  }
+  try {
+    if (APP.light.vista === 'crear') donde.appendChild(vistaCrearLight());
+    else if (APP.light.vista === 'generando') donde.appendChild(vistaGenerandoLight());
+    else if (APP.light.vista === 'preset') donde.appendChild(vistaPresetLight());
+    else if (APP.light.vista === 'elegido') {
+      /* LAS VISTAS DE «elegido», una por paso del carril. Al abrir un vídeo la
+         elige LO QUE HAY (`cargarVideoLight`); después, el carril. */
+      const v = APP.light.video;
+      const sub = v.vista;
+      if (v.cargando) {
+        donde.appendChild(h('div', { clase: 'cargando' }, 'abriendo el vídeo…'));
+      } else if (v.error) {
+        donde.appendChild(cajaError(v.error));
+      } else if (!v.pid && sub === 'video') donde.appendChild(vistaVideoNuevoLight());
+      else if (sub === 'video') donde.appendChild(vistaVideoLight());
+      else if (sub === 'previa') {
+        donde.appendChild(vistaPreviaLight());
+        const versiones = bloqueVersionesLight('assets');
+        if (versiones) donde.appendChild(versiones);
+      } else if (sub === 'voz') donde.appendChild(vistaVozLight());
+      else if (sub === 'guion') {
+        donde.appendChild(vistaGuionLight());
+        const versiones = bloqueVersionesLight('guion');
+        if (versiones) donde.appendChild(versiones);
+      }
+      else if (sub === 'encargo_video' && v.pid) donde.appendChild(vistaEncargoVideoLight());
+      else donde.appendChild(vistaElegidoLight());
+    }
+    else donde.appendChild(vistaGaleriaLight());
+    if (paso) pintarBloquesExtraDelPaso(donde, paso);
   } catch (e) {
-    contenido.appendChild(cajaError(`fallo pintando el modo light: ${e.message}`));
+    donde.appendChild(cajaError(`fallo pintando el modo light: ${e.message}`));
     console.error(e);
   }
-  /* FUERA DE `contenido`, pegadas al panel: dentro se irían con el scroll del
-     documento y dejarían de estar donde se las busca. Y fuera pueden ir de
-     borde a borde, que dentro no: la columna tiene ancho maximo. */
-  contenido.appendChild(pieSistema());
-  if (BARRA_INFERIOR.nodo) contenedor.appendChild(BARRA_INFERIOR.nodo);
-  contenedor.appendChild(navLight());
+  /* LA BARRA DE ACCIÓN VA LA ÚLTIMA y pegada abajo: con carril, dentro de la
+     columna del paso (así no pasa por debajo del carril); sin él, colgada del
+     panel, de borde a borde, como las barras de antes. */
+  donde.appendChild(pieSistema());
+  if (BARRA_INFERIOR.nodo) (paso ? donde : contenedor).appendChild(BARRA_INFERIOR.nodo);
+  ajustarAltoDeLaBarra();
 }
 
 /* A LA PORTADA desde donde sea (la parada «Inicio», el logo, «‹ Mis vídeos»).
@@ -5750,30 +6251,13 @@ function irAInicioLight() {
      el proyecto elegido, y saliendo del módulo en el que se esté (el logo se
      pulsa también desde Publicar o el Inicio). */
   if (MODULOS.actual !== 'crear') { entrarEnCrear(); return; }
+  if (!puedeSalirDelVideo()) return;
   pararPrevia();
   recordarVideoLight('');
   apuntarCliente('');
   APP.light.desdeVideo = '';
   irALight('galeria');
   cargarGaleriaLight(true);
-}
-
-/* «‹ Mis vídeos / nombre del vídeo», encima de cada pantalla del vídeo. */
-function migasDelVideoLight() {
-  const v = APP.light.video;
-  const estilo = fichaLight(v.estilo);
-  return h('div', { clase: 'migas migas-video' },
-    h('button', { clase: 'mini fantasma', title: 'Volver a tus estilos y tus vídeos',
-      onclick: () => irAInicioLight() }, '‹ Mis vídeos'),
-    h('span', { clase: 'meta migas-nombre' }, v.pid ? `/ ${v.nombre || v.pid}` : '/ vídeo nuevo'),
-    h('span', { clase: 'crece' }),
-    estilo ? h('button', { clase: 'mini fantasma', title: 'Abrir el estilo con el que se hace este vídeo',
-      onclick: () => {
-        pararPrevia();
-        apuntarClienteDe(clienteDe(v.estilo));
-        irALight('preset', { abierto: v.estilo, feedback: {}, desdeVideo: v.pid });
-      } },
-    `Estilo: ${estilo.nombre}`) : null);
 }
 
 /* VOLVER A LA VERSIÓN ANTERIOR DE UN PASO (11-10-2026). Cada vez que se
@@ -5850,6 +6334,10 @@ function irALight(vista, extra) {
   APP.light.vista = vista;
   // «‹ Volver al vídeo» solo vale para la ficha a la que se llegó desde él
   APP.light.desdeVideo = '';
+  /* LA FICHA DE UN ESTILO SE ABRE EN «🎨 CÓMO SE VE» (rediseño de Crear), salvo
+     que quien la abre pida otra pestaña; ir y volver por «generando» no la
+     cambia. */
+  if (vista === 'preset' && !enFicha) APP.light.pestanaEstilo = 've';
   Object.assign(APP.light, extra || {});
   /* ...Y SIGUE VALIENDO MIENTRAS SE CORRIGE ESE ESTILO: regenerarlo pasa por
      «generando» y vuelve a la ficha, y ese ir y volver borraba el camino de
@@ -6296,7 +6784,8 @@ function dentroDeProyecto(caja, cid) {
   const ficha = fichaCliente(cid);
   const nombre = ficha ? ficha.nombre : 'Sin proyecto';
   caja.appendChild(h('div', { clase: 'migas' },
-    h('button', { clase: 'mini fantasma', onclick: () => elegirCliente('') }, '‹ Todos los proyectos'),
+    h('button', { clase: 'mini fantasma salida-crear', title: 'Tus proyectos: todos, en tarjetas',
+      onclick: () => elegirCliente('') }, '‹ Tus proyectos'),
     h('span', { clase: 'crece' }),
     botonPapeleraLight()));
   caja.appendChild(h('div', { clase: 'light-cab cab-proyecto' },
@@ -6439,6 +6928,12 @@ async function repararEstiloDeVideo(video) {
 
 /* Una fila de «Tus vídeos»: abrir, de dónde salió, y sus mandos. */
 function filaVideoLight(video) {
+  /* EL NOMBRE SE CAMBIA EN LA PROPIA FILA (rediseño de Crear): era una ventana
+     del navegador (`prompt`). */
+  if (APP.light.renombrando === video.id) {
+    return h('div', { clase: 'video-light renombrando' },
+      campoRenombrar(video.id, video.nombre || video.id));
+  }
   return h('div', { clase: 'video-light' },
     h('button', { clase: 'abrir', title: 'Seguir con este vídeo', onclick: () => abrirVideoLight(video.id) },
       h('span', { clase: 'nombre' }, video.nombre || video.id),
@@ -6448,7 +6943,8 @@ function filaVideoLight(video) {
     /* EL LAPIZ VA FUERA DEL BOTON DE ABRIR: un botón dentro de otro no es HTML
        válido y el clic acabaría abriendo el vídeo en vez de renombrarlo. */
     h('button', { clase: 'mini fantasma renombrar', title: 'Cambiar el nombre',
-      'aria-label': `Cambiar el nombre de ${video.nombre || video.id}`, onclick: () => renombrarVideoLight(video) }, '✏️'),
+      'aria-label': `Cambiar el nombre de ${video.nombre || video.id}`,
+      onclick: () => { APP.light.renombrando = video.id; pintarLight(); } }, '✏️'),
     listaClientes().length ? h('button', { clase: 'mini fantasma', title: 'Moverlo a otro proyecto',
       onclick: () => moverVideoACliente(video) }, '📁') : null,
     h('button', { clase: 'mini fantasma peligro', title: 'A la papelera de proyectos',
@@ -6456,8 +6952,10 @@ function filaVideoLight(video) {
 }
 
 /* PULSAR UNA TARJETA LA ELIGE Y PASA AL SIGUIENTE PASO, no la abre. Lo que se
-   hace con un estilo el 95 % de las veces es usarlo para un vídeo; editarlo es
-   lo raro, y por eso vive en el menú de los tres puntos junto a duplicarlo. */
+   hace con un estilo el 95 % de las veces es usarlo para un vídeo. Editarlo
+   vivía escondido en el menú de los tres puntos; desde el rediseño de Crear
+   (20-10-2026) «✎ Editar» va a la vista en la propia tarjeta, y en «⋯» quedan
+   Duplicar y Mover a otro proyecto. */
 function tarjetaEstiloLight(ficha, conProyecto) {
   const vinetas = ficha.vinetas || [];
   const cliente = conProyecto ? fichaCliente(clienteDe(ficha.id)) : null;
@@ -6478,7 +6976,12 @@ function tarjetaEstiloLight(ficha, conProyecto) {
           // del orden, y el orden se rompe en cuanto una línea no sale
           ...vinetas.map(v => h('li', {},
             h('span', { clase: 'ico' }, v.icono || '·'), v.texto || v))))),
-    menuDeEstilo(ficha));
+    h('div', { clase: 'pie-tarjeta' },
+      h('button', {
+        clase: 'mini editar-estilo', title: 'Abrir la ficha del estilo para cambiarlo',
+        onclick: ev => { ev.stopPropagation(); editarEstiloLight(ficha); },
+      }, '✎ Editar'),
+      menuDeEstilo(ficha)));
 }
 
 function tarjetaNuevoEstilo(cuantos, cliente) {
@@ -6504,25 +7007,26 @@ function videosLight() {
    la ETIQUETA y no la carpeta: el id es la clave de todo lo demas (ver el
    docstring de `renombrar_proyecto` en app.py). Por eso se puede llamar sobre un
    video terminado sin dejar obsoleta ni una imagen. */
-async function renombrarVideoLight(video) {
-  const antes = video.nombre || video.id;
-  const puesto = window.prompt('¿Cómo se llama este vídeo?', antes);
-  if (puesto === null) return;                       // cancelar no es renombrar
-  const nombre = puesto.trim();
-  if (!nombre || nombre === antes) return;
+async function guardarNombreDeVideo(pid, nombre) {
   try {
-    const datos = await pedir(API.proyecto(video.id),
+    const datos = await pedir(API.proyecto(pid),
       { method: 'PUT', cuerpo: { nombre } });
     const ahora = (datos.proyecto || {}).nombre || nombre;
     /* SI ES EL VIDEO ABIERTO, tambien se le cambia aqui: `APP.light.video.nombre`
        es una copia que se hizo al abrirlo, y sin esto la cabecera seguiria
-       diciendo el nombre viejo hasta la proxima recarga. */
-    if (APP.light.video && APP.light.video.pid === video.id) {
+       diciendo el nombre viejo hasta la proxima recarga. Y la copia del
+       encargo, que lo enseña en su campo «Nombre». */
+    if (APP.light.video && APP.light.video.pid === pid) {
       APP.light.video.nombre = ahora;
+      const pedido = APP.light.video.pedido;
+      if (pedido && pedido.pid === pid) { pedido.copia.nombre = ahora; pedido.guardado.nombre = ahora; }
     }
     await cargarGaleriaLight(true);
     toast(`ahora se llama «${ahora}»`);
-  } catch (e) { toast(`no se ha podido renombrar: ${e.message}`, true); }
+  } catch (e) {
+    toast(`no se ha podido renombrar: ${e.message}`, true);
+    pintarLight();
+  }
 }
 
 async function apartarVideoLight(video) {
@@ -6559,7 +7063,6 @@ async function descartarTallerLight(taller) {
    un div con un botón grande dentro. */
 function menuDeEstilo(ficha) {
   const menu = h('div', { clase: 'menu-estilo plegado' },
-    h('button', { clase: 'mini fantasma', onclick: () => editarEstiloLight(ficha) }, 'Editar'),
     h('button', { clase: 'mini fantasma', onclick: () => duplicarEstiloLight(ficha) }, 'Duplicar'),
     listaClientes().length ? h('button', { clase: 'mini fantasma', onclick: () => moverEstiloACliente(ficha) },
       'Mover a otro proyecto') : null);
@@ -6576,7 +7079,7 @@ function menuDeEstilo(ficha) {
 }
 
 function editarEstiloLight(ficha) {
-  irALight('preset', { abierto: ficha.id, feedback: {} });
+  irALight('preset', { abierto: ficha.id, feedback: {}, pestanaEstilo: 've' });
 }
 
 async function duplicarEstiloLight(ficha) {
@@ -6759,12 +7262,15 @@ async function cargarVideoLight(pid) {
      también el repaso: el deslizador enseñaba el volumen de antes y, al
      comparar con ese, no mandaba nada. Y lo que se quedó «montando la
      música…» con otro vídeo abierto no se queda así para siempre: si ese
-     trabajo sigue, el servidor contesta 409 al segundo intento. */
+     trabajo sigue, el servidor contesta 409 al segundo intento.
+     LO PEDIDO Y SIN MONTAR SE QUEDA (revisión del rediseño, 21-10-2026): el
+     ánimo de la música y las filas apuntadas solo se van al montarlos o al
+     recogerlos un montaje (abajo, `alDiaConElMontaje`). Esto se llama desde
+     treinta sitios y antes borraba el ánimo pedido en silencio. */
   const ajustes = (APP.light.ajustesMontaje || {})[`v:${pid}`];
   if (ajustes) {
     ajustes.cargado = false;
     ajustes.montandoAnimo = false;
-    ajustes.animoPedido = '';
     ajustes.dbEnVuelo = undefined;
   }
   /* EL VÍDEO QUE YA ESTÁ ABIERTO SE RELEE SIN TAPARLO (19-10-2026). Pintar
@@ -6798,6 +7304,7 @@ async function cargarVideoLight(pid) {
     v.estilo = ((proyecto.proyecto || {}).config || {}).estilo_light || '';
     v.fichas = {};
     for (const ficha of (proyecto.pasos || [])) v.fichas[ficha.id] = ficha;
+    alDiaConElMontaje(pid);
     // los bloques se vuelven a leer: lo de «cómo estaban al empezar» ya no vale
     _bloquesAlEditarLight = {};
     // la copia del encargo se rehace de los params que acaban de llegar: lo
@@ -7035,15 +7542,8 @@ function videoObsoletoLight() {
     .some(paso => (v.fichas[paso] || {}).estado === 'obsoleto');
 }
 
-function pastillaObsoletoLight() {
-  if (!videoObsoletoLight()) return null;
-  return h('span', {
-    clase: 'pastilla obsoleto',
-    title: 'has cambiado el guion o el audio después de montarlo, así que el '
-      + 'vídeo que hay no dice lo de ahora. Al generarlo se rehace SOLO lo que '
-      + 'ha cambiado: lo que siga valiendo no se vuelve a pagar.',
-  }, 'Obsoleto');
-}
+/* La pastilla «OBSOLETO» del pie se fue con el rediseño de Crear: lo dicen el
+   carril (⚠ «Vídeo obsoleto») y el estado de la barra de acción. */
 
 function hayMp4Light() {
   const ficha = videoAbierto().fichas.render;
@@ -7104,20 +7604,113 @@ function bloqueEditadoLight(bloque) {
  * Duración y material. Todo lo demás —el estilo gráfico, el tono, la
  * voz, el ritmo, la calidad, el grafismo— lo trae el ESTILO, que es justamente
  * lo que un estilo es. Preguntarlo otra vez aquí sería no haberlo elegido. */
+/* =========================================== LOS BLOQUES DEL ENCARGO
+ *
+ * PUNTO DE ENGANCHE. Los dos Encargos (el de un vídeo nuevo y el de uno ya
+ * creado) son el MISMO paso y pintan ESTA lista, en este orden. Para añadir
+ * un bloque al Encargo, añade aquí su función: una línea
+ *     { id: 'mi-bloque', pinta: c => miBloque(c) },
+ * en el sitio en que deba salir. `c` trae { nuevo, v, e, ficha }: `nuevo` es
+ * true en un vídeo nuevo (`e` es el borrador de la página: no se guarda nada
+ * hasta «Generar el guion»); en uno creado, `e` es la copia del pedido que se
+ * guarda sola (`programarGuardadoEncargo` escucha `input`/`change` de todo el
+ * paso). `ficha` es el estilo. Devolver null es no pintar nada. Regla 1: un
+ * bloque nuevo NO escribe nada en `e` al pintarse. Los demás pasos tienen su
+ * propio enganche: `BLOQUES_EXTRA_DEL_PASO`, más abajo. */
+const BLOQUES_DEL_ENCARGO = [
+  { id: 'video', pinta: c => bloqueLight('El vídeo', 'cómo se llama y cuánto dura', ...campoDelNombreEncargo(c),
+    duracionLight(c.e, c.nuevo ? undefined : c.ficha),
+    selectorFormato(c.e.formato, valor => { c.e.formato = valor; if (!c.nuevo) programarGuardadoEncargo(); })) },
+  { id: 'lleva', pinta: c => c.nuevo
+    ? bloqueLight('Qué lleva este vídeo', 'lo que se produce y lo que no; apagar algo no cuesta nada',
+      llevaConAjustes(c.e, c.ficha))
+    : bloqueLight('Qué lleva este vídeo', 'cambiarlo rehace solo el montaje: ninguna imagen se vuelve a pagar',
+      bloqueLlevaDelVideo()) },
+  { id: 'material', pinta: c => bloqueLight('El material', 'de dónde salen los hechos que se van a contar',
+    materialLight(c.e)) },
+  /* LAS INDICACIONES, detrás del material y en su propio bloque: los hechos son
+     una cosa y CÓMO contarlos es otra. Cuando iban en la misma caja, lo escrito
+     detrás del material lo leía el documentalista y no el guionista: salía un
+     guion que no hacía caso a algo que nadie le había dicho. */
+  { id: 'indicaciones', pinta: c => bloqueLight('Las indicaciones', 'cómo quieres que se cuente (opcional)',
+    campoArea('', c.e.indicaciones, valor => { c.e.indicaciones = valor; },
+      'céntrate en el mecanismo, no en las personas; no fuerces una historia '
+      + 'de personaje', c.nuevo ? undefined : 'encargo-indicaciones')) },
+  { id: 'palabra-clave', pinta: c => (c.nuevo ? null : pistaPalabraClaveEncargo(c.v)) },
+  /* LAS LLAMADAS A LA ACCIÓN son de ESTE vídeo y se deciden aquí. No viajan en
+     el estilo a propósito: si viajaran, elegir un estilo pisaría lo que acabas
+     de escribir para este vídeo. */
+  { id: 'cta', pinta: c => bloqueLight('Las llamadas a la acción', 'cuándo se presenta y qué le pides a quien lo ve',
+    bloqueCTA(c.e.cta, c.nuevo ? { repintar: pintarLight }
+      : { alCambiar: programarGuardadoEncargo, repintar: pintarLight })) },
+  // el espacio fijo (rama tipo-de-relato): sus funciones, sin tocarlas por dentro
+  { id: 'espacio-fijo', pinta: c => (c.nuevo
+    ? bloqueLight('El espacio fijo', 'si todo el vídeo pasa en un mismo sitio (opcional)', bloqueEspacioFijoLight(c.e))
+    : bloqueLight('El espacio fijo', 'todo el vídeo en un mismo sitio: se aplica como corrección',
+      bloqueEspacioFijoDelVideo())) },
+  // el tipo de relato (rama tipo-de-relato): detrás del espacio fijo, que da el sitio de la base
+  { id: 'tipo-relato', pinta: c => (c.nuevo
+    ? bloqueLight('El tipo de relato', 'cómo se cuenta en imágenes (opcional)', bloqueTipoRelatoLight(c.e))
+    : bloqueLight('El tipo de relato', 'cómo se cuenta en imágenes: se aplica como corrección',
+      bloqueTipoRelatoDelVideo())) },
+  { id: 'reparto-sitios', pinta: c => (c.nuevo ? null
+    : bloqueLight('El reparto y los sitios', 'quién sale y dónde ocurre, deducido del guion',
+      bloquePedidoSitiosDelVideo())) },
+];
+
+/* PUNTO DE ENGANCHE DE CADA PASO del carril. Para añadir un bloque al final
+ * de un paso (debajo de lo suyo y encima de la barra de acción), añade aquí
+ * su función a la lista de ese paso: `c => nodo` (o null para no pintar
+ * nada), con `c = { paso, v }`. En el Encargo, mejor en
+ * `BLOQUES_DEL_ENCARGO`, que deja elegir el sitio entre los demás bloques.
+ * Regla 1: pintar no escribe nada. */
+const BLOQUES_EXTRA_DEL_PASO = {
+  estilo: [],
+  encargo: [],
+  guion: [],
+  voz: [],
+  imagenes: [],
+  video: [],
+};
+
+function pintarBloquesExtraDelPaso(donde, paso) {
+  (BLOQUES_EXTRA_DEL_PASO[paso] || []).forEach(pinta => {
+    const nodo = pinta({ paso, v: APP.light.video });
+    if (nodo) donde.appendChild(nodo);
+  });
+}
+
+function pintarBloquesDelEncargo(caja, c) {
+  BLOQUES_DEL_ENCARGO.forEach(b => {
+    const nodo = b.pinta(c);
+    if (nodo) { if (nodo.dataset) nodo.dataset.bloque = b.id; caja.appendChild(nodo); }
+  });
+}
+
+/* El nombre: en un vídeo creado lleva su `data-foco` (el foco sobrevive al
+   repintado) y dice que cambiarlo no regenera nada. */
+function campoDelNombreEncargo(c) {
+  if (c.nuevo) {
+    return [campoTexto('Nombre', c.e.nombre, v => { c.e.nombre = v; },
+      { pista: 'La crisis del agua en el sur', ayuda: 'Es el nombre del proyecto y '
+        + 'lo que el redactor lee como «de qué va este vídeo».' })];
+  }
+  const nombre = campoTexto('Nombre', c.e.nombre, valor => { c.e.nombre = valor; },
+    { pista: 'La crisis del agua en el sur',
+      ayuda: 'Es la etiqueta del vídeo en la lista. Cambiarla no regenera nada.' });
+  const entrada = nombre.querySelector('input');
+  if (entrada) entrada.dataset.foco = 'encargo-nombre';
+  return [nombre];
+}
+
 function vistaElegidoLight() {
   const ficha = fichaLight(APP.light.abierto) || estiloElegido();
   const e = encargoVideoLight();
   const caja = h('div', { clase: 'light-form' });
-  caja.appendChild(h('div', { clase: 'light-cab' },
-    /* VOLVER A LA GALERIA. La barra de abajo ya tiene «Estilos», pero hace otra
-       cosa: OLVIDA el vídeo empezado (`recordarVideoLight('')`), que es lo que
-       hay que hacer al salir de uno y no al arrepentirse de empezar otro. Este
-       solo vuelve, y por eso el aviso de «Tienes un vídeo empezado» sigue ahí
-       cuando entras otra vez. */
-    h('button', {
-      clase: 'mini fantasma volver', title: 'Volver a tus estilos y tus vídeos',
-      onclick: () => { pararPrevia(); irALight('galeria'); },
-    }, '← Volver'),
+  /* EL MISMO PASO QUE EL ENCARGO DE UN VÍDEO HECHO, en el mismo orden (rediseño
+     de Crear). Aquí no se guarda nada en el servidor hasta «Generar el guion»:
+     es un borrador en la página, y la cabecera lo dice. */
+  caja.appendChild(h('div', { clase: 'light-cab cab-paso' },
     h('h2', {}, 'Un vídeo nuevo'),
     h('span', { clase: 'meta' }, ficha ? `con «${ficha.nombre}»` : 'sin estilo')));
 
@@ -7126,6 +7719,9 @@ function vistaElegidoLight() {
       + 'Vuelve a la galería y elige uno.'));
     return caja;
   }
+  caja.appendChild(h('div', { clase: 'caja-info' },
+    'Lo que se le va a pedir al redactor. No se guarda nada hasta «Generar el guion», abajo: '
+    + 'entonces se crea el vídeo y se redacta su guion (no se dibuja nada todavía).'));
 
   // Un vídeo a medias tiene prioridad sobre empezar otro: se generó durante
   // minutos y se está mirando desde el móvil.
@@ -7144,56 +7740,46 @@ function vistaElegidoLight() {
         }, 'Empezar otro'))));
   }
 
-  caja.appendChild(bloqueLight('El vídeo', 'cómo se llama y cuánto dura',
-    campoTexto('Nombre', e.nombre,
-      v => { e.nombre = v; },
-      { pista: 'La crisis del agua en el sur', ayuda: 'Es el nombre del proyecto y '
-        + 'lo que el redactor lee como «de qué va este vídeo».' }),
-    duracionLight(e),
-    selectorFormato(e.formato, v => { e.formato = v; })));
-
   if (!e.lleva) e.lleva = { voz: true, subtitulos: true, musica: true, efectos: true };
-  caja.appendChild(bloqueLight('Qué lleva este vídeo',
-    'lo que se produce y lo que no; apagar algo no cuesta nada',
-    llevaConAjustes(e, ficha)));
-
-  caja.appendChild(bloqueLight('El material',
-    'de dónde salen los hechos que se van a contar',
-    materialLight(e)));
-
-  /* LAS INDICACIONES, detrás del material y en su propio bloque: los hechos son
-     una cosa y CÓMO contarlos es otra. Cuando iban en la misma caja, lo escrito
-     detrás del material lo leía el documentalista y no el guionista: salía un
-     guion que no hacía caso a algo que nadie le había dicho. */
-  caja.appendChild(bloqueLight('Las indicaciones',
-    'cómo quieres que se cuente (opcional)',
-    campoArea('', e.indicaciones, v => { e.indicaciones = v; },
-      'céntrate en el mecanismo, no en las personas; no fuerces una historia '
-      + 'de personaje')));
-
-  caja.appendChild(bloqueLight('El tipo de relato',
-    'cómo se cuenta en imágenes (opcional)',
-    bloqueTipoRelatoLight(e)));
-
-  caja.appendChild(bloqueLight('El espacio fijo',
-    'si todo el vídeo pasa en un mismo sitio (opcional)',
-    bloqueEspacioFijoLight(e)));
-
-  /* LAS LLAMADAS A LA ACCIÓN son de ESTE vídeo y se deciden aquí. No viajan en
-     el estilo a propósito: si viajaran, elegir un estilo pisaría lo que acabas
-     de escribir para este vídeo. */
   if (!e.cta) e.cta = ctaPorDefecto();
-  caja.appendChild(bloqueLight('Las llamadas a la acción',
-    'cuándo se presenta y qué le pides a quien lo ve',
-    bloqueCTA(e.cta, { repintar: pintarLight })));
+  pintarBloquesDelEncargo(caja, { nuevo: true, v: APP.light.video, e, ficha });
 
-  const aviso = h('div', { clase: 'pista coste-del-encargo' });
-  const boton = h('button', {
-    clase: 'primario grande',
-    onclick: () => crearYGenerarLight(ficha),
-  }, 'Generar el guion');
-  caja.appendChild(h('div', { clase: 'fila cierre' }, boton, aviso));
-  pintarCosteDelEncargoLight(e, aviso);
+  ponerBarra(() => barraDelEncargoNuevo(ficha));
+  return caja;
+}
+
+/* LA BARRA DE UN VÍDEO NUEVO: «Generar el guion», con lo que costará el vídeo
+   entero (crea el vídeo y redacta; no dibuja nada). La misma en el Encargo y
+   en Vídeo (los ajustes del montaje del borrador). */
+function barraDelEncargoNuevo(ficha) {
+  const e = encargoVideoLight();
+  const plan = h('div', { clase: 'coste-del-encargo' });
+  pintarCosteDelEncargoLight(e, plan);
+  return barraDeAccion({ estado: { e: 'pend', texto: 'Borrador: aún no se ha guardado nada' }, plan,
+    botones: [botonDeBarra(h('button', { onclick: () => crearYGenerarLight(ficha) }, 'Generar el guion'),
+      { ayuda: 'Crea el vídeo y redacta el guion con tu cuenta de Claude (gratis). No dibuja nada todavía: '
+        + 'las imágenes se generan después, con su precio delante.' })] });
+}
+
+/* EL PASO VÍDEO DE UN VÍDEO NUEVO: todavía no hay nada montado, pero los
+   ajustes del montaje (el mismo panel que en el Encargo) se pueden dejar
+   elegidos: van al borrador y entran en el primer montaje. */
+function vistaVideoNuevoLight() {
+  const ficha = fichaLight(APP.light.abierto) || estiloElegido();
+  const e = encargoVideoLight();
+  if (!e.lleva) e.lleva = { voz: true, subtitulos: true, musica: true, efectos: true };
+  const caja = h('div', { clase: 'light-video light-video-nuevo' });
+  caja.appendChild(h('div', { clase: 'light-cab cab-paso' }, h('h2', {}, 'Vídeo')));
+  caja.appendChild(h('div', { clase: 'caja-info' },
+    'Todavía no hay vídeo: se monta después del guion, la voz y las imágenes. Lo que elijas aquí '
+    + '(la música, los subtítulos, el logo, los efectos y el movimiento) se queda en el borrador y '
+    + 'entra en el primer montaje. Es el mismo panel que en el Encargo.'));
+  if (!ficha) {
+    caja.appendChild(cajaError('No se sabe con qué estilo hacer este vídeo. Vuelve a tus proyectos y elige uno.'));
+    return caja;
+  }
+  caja.appendChild(ajustesDelMontaje({ tipo: 'borrador', e, estilo: ficha.id }, e.lleva));
+  ponerBarra(() => barraDelEncargoNuevo(ficha));
   return caja;
 }
 
@@ -8306,22 +8892,17 @@ function vistaEncargoVideoLight() {
   const estilo = fichaLight(v.estilo);
   const e = pedidoDelVideoLight().copia;
   const caja = h('div', { clase: 'light-form light-encargo' });
-  caja.appendChild(h('div', { clase: 'light-cab' },
-    h('h2', {}, 'El encargo'),
-    h('span', { clase: 'meta' },
-      (estilo ? `con «${estilo.nombre}»` : (v.estilo ? `con «${v.estilo}»` : ''))
-      + (() => {
-        const cliente = fichaCliente(clienteDeVideo({ id: v.pid, estilo_light: v.estilo }));
-        return cliente ? ` · 📁 ${cliente.nombre}` : '';
-      })()),
-    h('span', { clase: 'crece' }),
-    costeLight()));
+  /* EL MISMO ORDEN QUE EL DE UN VÍDEO NUEVO (rediseño de Crear): qué es, el
+     vídeo, qué lleva (con los ajustes del montaje), el material, las
+     indicaciones, las llamadas a la acción y el espacio fijo. «Su estilo» se
+     fue al paso Estilo, que es donde se cambia el estilo. */
+  caja.appendChild(h('div', { clase: 'light-cab cab-paso' }, h('h2', {}, 'El encargo')));
 
   if (ERRORES[CLAVE_VIDEO_LIGHT]) caja.appendChild(errorDelVideo());
 
   caja.appendChild(h('div', { clase: v.guion ? 'caja-aviso' : 'caja-info' }, v.guion
     ? 'Esto es lo que se le pidió al redactor, y de aquí salió el guion que hay. '
-      + 'Lo que cambies se guarda solo y deja el guion obsoleto: el pie ofrece '
+      + 'Lo que cambies se guarda solo y deja el guion obsoleto: la barra de abajo ofrece '
       + 'regenerarlo, y con él se rehacen después la voz y las imágenes que ya '
       + 'no cuadren; lo que siga valiendo no se vuelve a pagar. El nombre se '
       + 'cambia sin regenerar nada. El formato rehace TODAS las imágenes.'
@@ -8336,43 +8917,9 @@ function vistaEncargoVideoLight() {
   caja.addEventListener('input', programarGuardadoEncargo);
   caja.addEventListener('change', programarGuardadoEncargo);
 
-  const nombre = campoTexto('Nombre', e.nombre, valor => { e.nombre = valor; },
-    { pista: 'La crisis del agua en el sur',
-      ayuda: 'Es la etiqueta del vídeo en la lista. Cambiarla no regenera nada.' });
-  const entradaNombre = nombre.querySelector('input');
-  if (entradaNombre) entradaNombre.dataset.foco = 'encargo-nombre';
-  caja.appendChild(bloqueLight('El vídeo', 'cómo se llama y cuánto dura',
-    nombre,
-    duracionLight(e, estilo),
-    selectorFormato(e.formato, valor => { e.formato = valor; programarGuardadoEncargo(); })));
+  pintarBloquesDelEncargo(caja, { nuevo: false, v, e, ficha: estilo });
 
-  caja.appendChild(bloqueLight('Qué lleva este vídeo',
-    'cambiarlo rehace solo el montaje: ninguna imagen se vuelve a pagar',
-    bloqueLlevaDelVideo()));
-
-  caja.appendChild(bloqueLight('Su estilo',
-    'los cambios que hagas en el estilo no llegan solos: se traen desde aquí',
-    bloqueEstiloDelVideo()));
-
-  caja.appendChild(bloqueLight('El material',
-    'de dónde salen los hechos que se van a contar',
-    materialLight(e)));
-
-  caja.appendChild(bloqueLight('Las indicaciones',
-    'cómo quieres que se cuente (opcional)',
-    campoArea('', e.indicaciones, valor => { e.indicaciones = valor; },
-      'céntrate en el mecanismo, no en las personas; no fuerces una historia '
-      + 'de personaje', 'encargo-indicaciones')));
-
-  caja.appendChild(pistaPalabraClaveEncargo(v));
-  caja.appendChild(bloqueLight('Las llamadas a la acción',
-    'cuándo se presenta y qué le pides a quien lo ve',
-    bloqueCTA(e.cta, { alCambiar: programarGuardadoEncargo, repintar: pintarLight })));
-  caja.appendChild(bloqueLight('El espacio fijo', 'todo el vídeo en un mismo sitio: se aplica como corrección', bloqueEspacioFijoDelVideo()));
-  caja.appendChild(bloqueLight('El tipo de relato', 'cómo se cuenta en imágenes: se aplica como corrección', bloqueTipoRelatoDelVideo()));
-  caja.appendChild(bloqueLight('El reparto y los sitios', 'quién sale y dónde ocurre, deducido del guion', bloquePedidoSitiosDelVideo()));
-
-  BARRA_INFERIOR.nodo = pieDeEncargo();
+  ponerBarra(pieDeEncargo);
   return caja;
 }
 
@@ -8386,26 +8933,44 @@ function pieDeEncargo() {
   refrescarPlanLight('guion');
   const queda = quedaTandaLight('guion');
   const hayGuion = !!v.guion;
-  return h('div', { clase: 'pie-guion pie-encargo' },
-    conAyuda(unirAyuda(ayudaEncargo(hayGuion, queda), textoDelPlan('guion')),
-      h('button', {
-        clase: 'primario',
-        disabled: corriendo || queda === false,
-        /* 'pendientes' y no 'todo': REHACER UNA COSA REHACE ESA COSA. Lo que
-           se ha tocado aquí ya ha dejado obsoleto lo suyo, y eso es lo que
-           entra; lo que sigue al día se salta. */
-        onclick: () => lanzarTandaLight('guion', 'pendientes'),
-      }, hayGuion ? 'Regenerar el guion' : 'Generar el guion')),
-    corriendo ? barraTandaLight('guion') : h('span', { clase: 'crece' }),
-    corriendo ? conAyuda(
-      'Corta la tanda donde esté. Lo que ya se ha generado se queda hecho y no '
-      + 'hay que volver a pagarlo.',
-      botonPararVideo()) : null,
-    (!corriendo && hayGuion && queda) ? h('span', {
-      clase: 'pastilla obsoleto',
-      title: 'has cambiado el encargo después de escribir el guion, así que el '
-        + 'guion que hay no dice lo de ahora.',
-    }, 'Guion obsoleto') : null);
+  if (corriendo) {
+    return barraDeAccion({ clase: 'pie-encargo', corriendo: true, tanda: 'guion',
+      botones: [pararDeBarra()] });
+  }
+  /* DOS COSAS SE PUEDEN QUEDAR PENDIENTES AQUÍ, y cada una tiene su botón: el
+     guion (si cambió el encargo) y el montaje (si cambiaron sus ajustes). Con
+     el guion al día, montar es lo principal; con el guion viejo, regenerarlo,
+     y montar va al lado. */
+  const cambios = cambiosDelMontaje();
+  /* CON MP4, MONTAR LOS CAMBIOS ES APLICARLOS (`POST /montaje/aplicar`): ni una
+     imagen, gratis de verdad. Sin MP4 es el primer montaje, que puede tener
+     imágenes viejas que dibujar: entonces su precio (o nada mientras no se
+     sabe) y la pregunta antes de pagar. Sin voz todavía no se puede montar:
+     los cambios entran en el primer montaje. */
+  const mp4 = hayMp4Light();
+  if (cambios.hay && !mp4) refrescarPlanLight('render');
+  const ocupado = !!(cambios.est && (cambios.est.aplicando || cambios.est.montandoAnimo));
+  const montar = cambios.hay && (mp4 || v.audio) ? botonDeBarra(h('button', { onclick:
+    () => montarCambiosDelMontaje() }, `${textoMontarCambios(cambios)}${precioDeMontarCambios()}`), {
+      secundario: queda !== false,
+      disabled: ocupado,
+      ayuda: mp4 ? 'Monta el vídeo una sola vez con todo lo cambiado en los ajustes del montaje: '
+        + 'ninguna imagen, gratis.'
+        : unirAyuda('Monta el vídeo por primera vez, con los cambios del montaje dentro.', textoDelPlan('render')) }) : null;
+  /* 'pendientes' y no 'todo': REHACER UNA COSA REHACE ESA COSA. Lo que se ha
+     tocado aquí ya ha dejado obsoleto lo suyo, y eso es lo que entra; lo que
+     sigue al día se salta. */
+  const guion = botonDeBarra(h('button', { onclick: () => lanzarTandaLight('guion', 'pendientes') },
+    hayGuion ? 'Regenerar el guion' : 'Generar el guion'), {
+      disabled: queda === false,
+      secundario: !!montar && queda === false,
+      ayuda: unirAyuda(ayudaEncargo(hayGuion, queda), textoDelPlan('guion')) });
+  const estado = (hayGuion && queda) ? { e: 'aviso', texto: 'Guion obsoleto' }
+    : cambios.hay ? { e: 'aviso', texto: `Encargo guardado · ${cambios.n ? `${cambios.n} ${cambios.n === 1 ? 'cambio' : 'cambios'}` : 'cambios'} del montaje sin aplicar` }
+      : { e: hayGuion ? 'hecho' : 'pend', texto: hayGuion ? 'Encargo guardado · el guion lo recoge todo' : 'Encargo guardado' };
+  return barraDeAccion({ clase: 'pie-encargo', estado,
+    plan: queda === false ? 'El guion ya recoge todo lo que hay en este encargo' : textoDelPlan('guion'),
+    botones: queda === false ? [guion, montar] : [montar, guion] });
 }
 
 function ayudaEncargo(hayGuion, queda) {
@@ -8425,11 +8990,8 @@ function ayudaEncargo(hayGuion, queda) {
 /* Repinta SOLO el pie, como `repintarPieDeEstilo`: el formulario no se puede
    rehacer mientras se escribe en él. */
 function repintarPieDeEncargo() {
-  const viejo = document.querySelector('.pie-encargo');
-  if (!viejo || APP.light.video.vista !== 'encargo_video') return;
-  const nuevo = pieDeEncargo();
-  viejo.replaceWith(nuevo);
-  BARRA_INFERIOR.nodo = nuevo;
+  if (APP.light.video.vista !== 'encargo_video') return;
+  repintarBarra();
 }
 
 /* AUTOGUARDADO: 900 ms después del último toque, la misma espera que el estilo. */
@@ -8520,7 +9082,7 @@ const ORTOGRAFIA_VIVA = new Map();
 
 function claveOrtografia(pid, fuente) { return `${pid}|${fuente}`; }
 
-function panelOrtografia(fuente) {
+function panelOrtografia(fuente, opciones) {
   const v = APP.light.video;
   const est = ORTOGRAFIA_VIVA.get(claveOrtografia(v.pid, fuente)) || {};
   const titulo = fuente === 'guion' ? 'Ortografía del guion' : 'Ortografía de los subtítulos';
@@ -8540,7 +9102,7 @@ function panelOrtografia(fuente) {
     est.estado === 'pensando' ? 'Revisando…' : (est.estado ? 'Revisar otra vez' : 'Revisar la ortografía')),
     // LA REVISIÓN EDITORIAL, al lado (arreglos del 19-10): sus propuestas
     // salen en su propio panel, debajo (`panelEditorial`)
-    fuente === 'guion' ? botonRevisionEditorial() : null);
+    fuente === 'guion' && !(opciones || {}).sinEditorial ? botonRevisionEditorial() : null);
   caja.appendChild(cab);
   if (fuente === 'guion') programarOrtografiaGuion();
   if (est.estado === 'pensando') {
@@ -8603,7 +9165,7 @@ function panelOrtografia(fuente) {
           ? (conVoz ? 'se guardan en el guion y la voz de esos bloques queda por regrabar (se paga); '
             + 'para que solo se lea bien, corrige los subtítulos en Vídeo (gratis)'
             : 'se guardan en el guion; la voz se graba después con ellas')
-          : 'se quedan como texto del subtítulo de cada plano: «Regenerar Vídeo» las monta')));
+          : 'se quedan como texto del subtítulo de cada plano: «Montar el vídeo» las monta')));
     }
   }
   return caja;
@@ -8829,7 +9391,7 @@ function botonRevisionEditorial() {
   return h('button', {
     clase: 'mini', disabled: est.estado === 'pensando' || !!trabajoVideoLight(),
     title: 'sintaxis, concordancia, puntuación, repeticiones y claridad, como un corrector editorial',
-    onclick: () => revisarEditorial(),
+    onclick: () => { v.revisarTab = 'editorial'; revisarEditorial(); },
   }, est.estado === 'pensando' ? 'Revisando la redacción…' : 'Revisión editorial');
 }
 
@@ -9145,6 +9707,19 @@ async function lanzarTandaLight(tanda, modo) {
   const v = APP.light.video;
   if (!v.pid) return;
   const pid = v.pid;
+  /* UN DOBLE CLIC NO LANZA DOS TANDAS (y las de pago se pagarían dos veces si
+     el servidor no frenara la segunda): mientras la primera no contesta, los
+     botones de la barra se apagan (`botonDeBarra`) y esta no sale. */
+  if (LANZANDO_TANDA[pid]) return;
+  LANZANDO_TANDA[pid] = true;
+  repintarBarra();
+  try { await lanzarTandaLightYa(tanda, modo, v, pid); } finally {
+    delete LANZANDO_TANDA[pid];
+    repintarBarra();
+  }
+}
+
+async function lanzarTandaLightYa(tanda, modo, v, pid) {
   limpiarError(CLAVE_VIDEO_LIGHT);
   try {
     const datos = await pedir(`${API.proyecto(pid)}/generar`, {
@@ -9826,13 +10401,14 @@ function abrirDescargaPorPartes(pid) {
 function vistaGuionLight() {
   const v = APP.light.video;
   const caja = h('div', { clase: 'light-guion' });
-  caja.appendChild(h('div', { clase: 'light-cab' },
-    h('h2', {}, (v.guion || {}).titulo || v.nombre || 'El guion'),
-    h('span', { clase: 'meta' }, v.guion
+  caja.appendChild(h('div', { clase: 'light-cab cab-paso' },
+    h('h2', {}, 'Guion'),
+    h('span', { clase: 'meta cifra-paso' }, v.guion
       ? `${v.guion.bloques.length} bloques · ${miles(palabrasDelGuionLight(v))} palabras`
-      : ''),
-    h('span', { clase: 'crece' }),
-    costeLight()));
+      : '')));
+  caja.appendChild(h('div', { clase: 'pista entrada-paso' },
+    'Lo que dice la voz, bloque a bloque. Lo que edites aquí queda «sin grabar» hasta que '
+    + 'regrabes ese tramo (en la barra de abajo o en Voz).'));
 
   if (ERRORES[CLAVE_VIDEO_LIGHT]) caja.appendChild(errorDelVideo());
 
@@ -9848,9 +10424,9 @@ function vistaGuionLight() {
          pantalla no tenía ningún camino: el pie ofrece el audio, que sin guion
          no se puede. El camino es el encargo. */
       corriendo ? null : h('button', {
-        clase: 'mini', onclick: () => { v.vista = 'encargo_video'; pintarLight(); },
+        clase: 'mini', onclick: () => irAPasoDelCarril('encargo'),
       }, 'Ir al encargo')));
-    BARRA_INFERIOR.nodo = pieLight();
+    ponerBarra(barraDelGuion);
     return caja;
   }
 
@@ -9864,14 +10440,13 @@ function vistaGuionLight() {
   const pausas = barraPausasLight();
   if (pausas) caja.appendChild(pausas);
   // si algo quedó viejo (un cambio de estilo traído, por ejemplo), qué pulsar
-  const siguiente = siguientePasoLight();
+  const siguiente = siguientePasoLight('guion');
   if (siguiente) caja.appendChild(siguiente);
   /* LA ORTOGRAFÍA DEL GUION: antes de grabar es gratis y se revisa sola; con
      la voz ya grabada corregir es regrabar (lo dice el panel), y para que solo
-     se lea bien están los subtítulos, en la pantalla Vídeo. */
-  caja.appendChild(panelOrtografia('guion'));
-  const editorial = panelEditorial();
-  if (editorial) caja.appendChild(editorial);
+     se lea bien están los subtítulos, en la pantalla Vídeo. Con la revisión
+     editorial, en UN panel con dos pestañas (rediseño de Crear). */
+  caja.appendChild(revisarElGuion());
 
   // EL REPRODUCTOR VIVE EN LA BARRA DE ABAJO (ver `pieLight`). Estaba arriba
   // del guion para que los mandos no se fueran con el scroll; la barra fija lo
@@ -9883,9 +10458,46 @@ function vistaGuionLight() {
      hacia que la PRIMERA pasada los marcara todos «editado» y solo se
      corrigiera al repintar. Va con freno, asi que no es una peticion mas. */
   refrescarPlanLight('voz');
-  caja.appendChild(promptGeneralLight());
   caja.appendChild(bloquesLight());
-  BARRA_INFERIOR.nodo = pieLight();
+  caja.appendChild(promptGeneralLight());
+  ponerBarra(barraDelGuion);
+  return caja;
+}
+
+/* «REVISAR EL GUION»: la ortografía y la revisión editorial, que iban en dos
+   cajas que se avisaban entre sí, en un panel con dos pestañas. Por dentro, lo
+   de siempre (`panelOrtografia('guion')` y `panelEditorial`). */
+function revisarElGuion() {
+  const v = APP.light.video;
+  const editorial = EDITORIAL_VIVA.get(v.pid);
+  if (editorial && editorial.estado === 'pensando' && v.revisarTab !== 'editorial' && !v.revisarTabElegida) {
+    v.revisarTab = 'editorial';
+  }
+  const tab = v.revisarTab === 'editorial' ? 'editorial' : 'ortografia';
+  const caja = h('div', { clase: 'revisar-guion' });
+  caja.appendChild(h('div', { clase: 'fila revisar-cab' },
+    h('b', {}, 'Revisar el guion'),
+    h('span', { clase: 'crece' }),
+    h('span', { clase: 'meta' }, 'gratis: lo hace tu cuenta de Claude')));
+  const pestana = (id, texto) => h('button', {
+    clase: 'pestana-crear' + (tab === id ? ' activa' : ''), role: 'tab',
+    'aria-selected': tab === id ? 'true' : 'false',
+    onclick: () => { v.revisarTab = id; v.revisarTabElegida = true; pintarLight(); },
+  }, texto);
+  caja.appendChild(h('div', { clase: 'pestanas-crear', role: 'tablist' },
+    pestana('ortografia', 'Ortografía'), pestana('editorial', 'Redacción (editorial)')));
+  if (tab === 'ortografia') {
+    caja.appendChild(panelOrtografia('guion', { sinEditorial: true }));
+  } else {
+    const panel = panelEditorial();
+    if (panel) caja.appendChild(panel);
+    else {
+      caja.appendChild(h('div', { clase: 'fila panel-ortografia panel-editorial-vacio' },
+        h('span', { clase: 'meta crece' }, 'sintaxis, concordancia, puntuación, repeticiones y claridad, '
+          + 'como un corrector editorial; propone y tú aceptas o rechazas cada cambio'),
+        botonRevisionEditorial()));
+    }
+  }
   return caja;
 }
 
@@ -9895,21 +10507,20 @@ function vistaGuionLight() {
 function promptGeneralLight() {
   const v = APP.light.video;
   const area = h('textarea', {
-    rows: 2, placeholder: 'Qué cambiarías del guion entero: «más directo», '
+    rows: 3, placeholder: 'Qué cambiarías del guion entero: «más directo», '
       + '«quita los tecnicismos», «empieza por el robo»…',
-    oninput: ev => { v.promptGeneral = ev.target.value; },
+    datos: { foco: 'guion-entero' },
+    /* SIN BOTÓN PROPIO (rediseño de Crear): con algo escrito, la barra de
+       abajo pasa a «Regenerar el guion». Era el cuarto sitio con ese botón. */
+    oninput: ev => { v.promptGeneral = ev.target.value; repintarBarra(); },
   });
   area.value = v.promptGeneral || '';
   return h('div', { clase: 'prompt-general' },
+    h('label', { clase: 'etiqueta-bloque' }, 'Qué cambiarías del guion entero'),
     cajaCampo(area, { clase: 'area' }),
-    h('div', { clase: 'fila' },
-      h('button', {
-        clase: 'mini', disabled: !!trabajoVideoLight(),
-        onclick: () => reescribirGuionLight(),
-      }, v.audio ? 'Regenerar el guion y el audio' : 'Regenerar el guion'),
-      h('span', { clase: 'meta' }, v.audio
-        ? 'vuelve a redactar y a grabar la toma entera'
-        : 'vuelve a redactar con esa instrucción delante')));
+    h('div', { clase: 'meta' }, 'vuelve a redactar con esa instrucción delante: cuando escribas algo, '
+      + 'la barra de abajo ofrece «Regenerar el guion»'
+      + (v.audio ? ' (la voz queda por regrabar).' : '.')));
 }
 
 async function reescribirGuionLight() {
@@ -9952,19 +10563,26 @@ function bloquesLight() {
     if (!seccionDe[bid]) seccionDe[bid] = { id: sid, bloques: [bid] };
   }
 
-  const barra = barraRegrabarLight();
-  if (barra) lista.appendChild(barra);
-  lista.appendChild(v.anadiendo ? formularioAnadirLight() : h('div', { clase: 'fila acciones-guion' },
-    h('button', {
-      clase: 'mini fantasma', disabled: !!trabajoVideoLight(),
-      onclick: () => {
-        const ultimo = (v.guion.bloques[v.guion.bloques.length - 1] || {}).id;
-        v.anadiendo = { texto: '', donde: 'final', ancla: ultimo };
-        v.partiendo = null;
-        pintarLight();
-      },
-    }, '+ Añadir bloque'),
-    h('span', { clase: 'meta' }, 'antes o después de cualquier bloque, al principio o al final')));
+  /* «+ AÑADIR BLOQUE» EN CADA HUECO (rediseño de Crear): se añade donde se
+     quiere, y el formulario se abre ahí mismo (con sus «Antes de / Después de»
+     por si se quiere cambiar). «Hay cambios sin grabar» se fue al paso Voz y a
+     la barra de abajo («Regrabar N tramos»). */
+  const corriendo = !!trabajoVideoLight();
+  const hueco = (donde, ancla) => {
+    const aqui = v.anadiendo && v.anadiendo.hueco === `${donde}:${ancla || ''}`;
+    if (aqui) return formularioAnadirLight();
+    return h('div', { clase: 'hueco-anadir' },
+      h('button', {
+        clase: 'mini fantasma anadir-bloque', disabled: corriendo,
+        title: donde === 'principio' ? 'Añadir un bloque al principio' : `Añadir un bloque después de ${ancla}`,
+        onclick: () => {
+          v.anadiendo = { texto: '', donde, ancla, hueco: `${donde}:${ancla || ''}` };
+          v.partiendo = null;
+          pintarLight();
+        },
+      }, '+ Añadir bloque'));
+  };
+  lista.appendChild(hueco('principio', (v.guion.bloques[0] || {}).id));
 
   for (const bloque of v.guion.bloques) {
     const texto = textoDeBloqueLight(bloque);
@@ -9985,6 +10603,8 @@ function bloquesLight() {
     ficha.appendChild(h('div', { clase: 'cabecera' },
       h('span', { clase: 'id' }, bloque.id),
       insertado ? h('span', { clase: 'pastilla nuevo' }, 'añadido') : null,
+      hayAudio && !editando && textoVisibleLight(texto) !== textoVisibleLight(conAudio.texto || texto)
+        ? h('span', { clase: 'pastilla tocado' }, 'sin grabar') : null,
       ...pausasDeBloqueLight(bloque.id).map(p => h('span', {
         clase: 'pastilla pausa' + (p.final ? ' al-final' : ''),
         title: p.final
@@ -10001,7 +10621,7 @@ function bloquesLight() {
       h('button', {
         clase: 'mini fantasma', disabled: !!trabajoVideoLight(),
         onclick: () => abrirPartirLight(bloque),
-      }, 'Partir'),
+      }, '✂ Partir'),
       insertado ? h('button', {
         clase: 'mini fantasma', disabled: !!trabajoVideoLight(),
         onclick: () => quitarBloqueLight(bloque),
@@ -10017,14 +10637,14 @@ function bloquesLight() {
           }
           pintarLight();
         },
-      }, editando ? 'Hecho' : 'Editar a mano') : null,
+      }, editando ? 'Hecho' : '✎ Editar a mano') : null,
       h('button', {
         clase: 'mini fantasma',
         onclick: () => {
           v.abierto = v.abierto === bloque.id ? '' : bloque.id;
           pintarLight();
         },
-      }, v.abierto === bloque.id ? 'Cerrar' : 'Cambiar con una frase')));
+      }, v.abierto === bloque.id ? 'Cerrar' : '↻ Cambiar con una frase')));
 
     if (v.partiendo && v.partiendo.bid === bloque.id) {
       ficha.appendChild(editorPartirLight());
@@ -10036,7 +10656,9 @@ function bloquesLight() {
          vieja y parecía que la edición se había perdido. */
       ficha.appendChild(h('p', { clase: 'texto-bloque sin-grabar' }, textoVisibleLight(texto)));
     } else if (hayAudio && !editando) {
-      ficha.appendChild(parrafoKaraokeLight(bloque, conAudio, texto));
+      /* EL KARAOKE SE FUE AL PASO VOZ: aquí se lee el texto (lo que dice la
+         toma), y «✎ Editar a mano» lo abre para corregirlo. */
+      ficha.appendChild(h('p', { clase: 'texto-bloque' }, textoVisibleLight(conAudio.texto || texto)));
     } else {
       const visible = textoVisibleLight(texto);
       const area = h('textarea', {
@@ -10051,6 +10673,7 @@ function bloquesLight() {
 
     if (v.abierto === bloque.id) ficha.appendChild(mandosBloqueLight(bloque, seccionDe));
     lista.appendChild(ficha);
+    lista.appendChild(hueco('despues', bloque.id));
   }
   return lista;
 }
@@ -10669,13 +11292,13 @@ function ayudaDiapositivas(hayVideo, obsoleto, queda) {
   if (queda === false) {
     // U3: la parada de la barra se llama «Imágenes» (antes «Diapositivas»)
     return 'Las imágenes ya recogen el guion y el audio de ahora. Para '
-      + 'verlas, «Imágenes» en la barra de abajo: no cuesta nada.';
+      + 'verlas, «Imágenes» en el carril: no cuesta nada.';
   }
   if (hayVideo && obsoleto) {
     return 'Vuelve a partir los subtítulos con los tiempos del audio de ahora y '
-      + 'redibuja las capas de los planos afectados. Una imagen solo se vuelve '
+      + 'redibuja las imágenes de los planos afectados. Una imagen solo se vuelve '
       + 'a pagar si el cambio altera su prompt; cambiar una palabra suelta no '
-      + 'lo hace. No monta el MP4: eso es «Montar el vídeo», después de mirarlo.';
+      + 'lo hace. No monta el MP4: eso es «Montar el vídeo», después de mirarlas.';
   }
   return 'Dibuja los planos, les monta los subtítulos y las cartelas y prepara '
     + 'la música. Para ahí, en Imágenes, para que lo mires antes de '
@@ -10683,86 +11306,326 @@ function ayudaDiapositivas(hayVideo, obsoleto, queda) {
 }
 
 
-function pieLight() {
+/* LA BARRA DEL GUION (rediseño de Crear): lo que queda por hacer después del
+   texto. Con algo escrito en «Qué cambiarías del guion entero», regenerarlo;
+   con el guion viejo, regenerarlo o grabar tal cual; si no, la voz (grabarla,
+   regrabar lo escrito) y, con la voz al día, las imágenes. El reproductor se
+   fue al paso Voz. */
+function barraDelGuion() {
+  const v = APP.light.video;
+  if (trabajoVideoLight()) {
+    return barraDeAccion({ corriendo: true, tanda: 'voz', botones: [pararDeBarra()] });
+  }
+  refrescarPlanLight('guion');
+  const viejo = ['ingesta', 'brief', 'guion'].some(p => ((v.fichas[p] || {}).estado) === 'obsoleto');
+  const pedido = String(v.promptGeneral || '').trim();
+  if (pedido) {
+    return barraDeAccion({ estado: { e: 'aviso', texto: 'Hay un cambio pedido para el guion entero' },
+      plan: v.audio ? 'vuelve a redactar; la voz queda por regrabar' : 'vuelve a redactar con esa instrucción delante',
+      botones: [botonDeBarra(h('button', { onclick: () => reescribirGuionLight() }, 'Regenerar el guion'),
+        { ayuda: 'Vuelve a redactar el guion con lo que has escrito delante (con tu cuenta de Claude, gratis). '
+          + 'La voz y las imágenes de lo que cambie quedan por rehacer.' })] });
+  }
+  if (!v.guion) {
+    return barraDeAccion({ estado: { e: 'pend', texto: 'Todavía no hay guion' },
+      plan: 'se genera desde el encargo',
+      botones: [botonDeBarra(h('button', { onclick: () => irAPasoDelCarril('encargo') }, 'Ir al encargo'))] });
+  }
+  const voz = accionDeLaVoz();
+  if (viejo) {
+    /* EL GUION VIEJO: regenerarlo, o grabar la voz con el texto que se ve (lo
+       mismo que ofrece la franja de arriba). Con la voz ya grabada con este
+       texto, solo regenerarlo. */
+    const grabada = v.audio && ((v.fichas.voz || {}).estado) === 'listo';
+    return barraDeAccion({ estado: { e: 'aviso', texto: 'Guion obsoleto' },
+      plan: textoDelPlan('guion'),
+      botones: [
+        grabada ? null : botonDeBarra(h('button', { onclick:
+          () => lanzarTandaLight('voz', 'pendientes') }, v.audio ? 'Regrabar la voz tal cual' : 'Grabar la voz tal cual'), { secundario: true,
+            ayuda: 'Graba la voz con el texto que ves, sin reescribir el guion.' }),
+        botonDeBarra(h('button', { onclick: () => lanzarTandaLight('guion', 'pendientes') }, 'Regenerar el guion'),
+          { ayuda: ayudaEncargo(true, true) })] });
+  }
+  if (voz) return barraDeAccion(Object.assign({}, voz, { estado: voz.estado }));
+  const sig = accionDeLasImagenes();
+  return barraDeAccion(Object.assign({}, sig, { estado: { e: 'hecho', texto: 'Guion y voz al día' } }));
+}
+
+/* ------------------------------------------------------------- la voz
+ *
+ * LA VOZ, UN PASO CON SU PANTALLA (rediseño de Crear, 20-10-2026). Antes no
+ * tenía: se elegía en el estilo, se escuchaba en el pie del guion y se regrababa
+ * desde el pie, desde cada bloque, desde «Hay cambios sin grabar» y desde
+ * «Siguiente paso». Aquí está todo junto: la voz elegida, la toma con su
+ * reproductor, el guion con karaoke (cada palabra se ilumina al sonar y pulsarla
+ * salta ahí) y, por tramo, «▶ Oír» y «Regrabar este tramo». Nada nuevo por
+ * dentro: el tramo es la SECCIÓN de la toma, la misma unidad que ya se regrababa
+ * (`regrabar_seccion`), y regrabarlo sin pedir nada lo graba tal cual. */
+function vistaVozLight() {
+  const v = APP.light.video;
+  const caja = h('div', { clase: 'light-voz' });
+  caja.appendChild(h('div', { clase: 'light-cab cab-paso' },
+    h('h2', {}, 'Voz'),
+    h('span', { clase: 'meta cifra-paso' }, v.audio ? mmss(v.audio.duracion) : '')));
+  caja.appendChild(h('div', { clase: 'pista entrada-paso' },
+    'La narración grabada. Escúchala con el guion delante: cada palabra se ilumina al sonar '
+    + 'y pulsar una salta ahí. Regraba solo el tramo que no te guste.'));
+  if (ERRORES[CLAVE_VIDEO_LIGHT]) caja.appendChild(errorDelVideo());
+
+  // LA VOZ ELEGIDA, la del estilo; se cambia allí
+  const ficha = fichaLight(v.estilo);
+  const voz = ((ficha || {}).datos || {}).voz || {};
+  const origen = ((ficha || {}).datos || {}).origen || {};
+  const tarjeta = h('div', { clase: 'bloque-voz-video' });
+  tarjeta.appendChild(h('div', { clase: 'fila' },
+    h('div', { clase: 'crece' },
+      h('div', { clase: 'meta' }, 'La voz'),
+      h('b', {}, voz.voz_nombre || voz.voz_id || 'sin voz elegida'),
+      ficha ? h('span', { clase: 'meta' }, ` · ${nombreIdiomaLight(ficha.idioma || 'es')}`
+        + (origen.voz_prompt ? ` (pedida así: «${origen.voz_prompt}»)` : '')) : null),
+    h('button', {
+      clase: 'mini', title: 'La voz es del estilo: se cambia en su pestaña «Cómo suena»',
+      onclick: () => irAPasoDelCarril('estilo', { pestana: 'suena' }),
+    }, 'Cambiar en el estilo ›')));
+  if (!v.audio) {
+    tarjeta.appendChild(h('div', { clase: 'caja-info' }, v.guion
+      ? 'Todavía no hay voz grabada. «Grabar la voz», abajo, la graba entera con el guion de ahora.'
+      : 'Todavía no hay guion: la voz se graba con él.'));
+    caja.appendChild(tarjeta);
+    ponerBarra(barraDeLaVoz);
+    return caja;
+  }
+  tarjeta.appendChild(reproductorLight());
+  refrescarPlanLight('voz', false, 'todo');
+  const todo = (v.planes || {})['voz:todo'];
+  const usdTodo = Number((((todo || {}).coste) || {}).usd_total) || 0;
+  tarjeta.appendChild(h('div', { clase: 'fila' },
+    conAyuda(unirAyuda(ayudaAudio(true, true), textoDelPlan(clavePlanLight('voz', 'todo'))),
+      h('button', {
+        clase: 'mini', disabled: !!trabajoVideoLight(),
+        onclick: () => lanzarTandaLight('voz', 'todo'),
+      }, `Regrabar la voz entera${usdTodo ? ` · ≈ ${usdCorto(usdTodo)}` : ''}`)),
+    h('span', { clase: 'meta' }, 'vuelve a grabar la toma ENTERA: se paga toda otra vez.')));
+  caja.appendChild(tarjeta);
+
+  const siguiente = siguientePasoLight('voz');
+  if (siguiente) caja.appendChild(siguiente);
+  const regrabar = barraRegrabarLight();
+  if (regrabar) caja.appendChild(regrabar);
+
+  caja.appendChild(tramosDeLaVoz());
+  ponerBarra(barraDeLaVoz);
+  return caja;
+}
+
+/* LOS TRAMOS DE LA TOMA, cada uno con sus bloques en karaoke. El contenedor
+   lleva `bloques-light` a propósito: es donde `reproductorLight` busca las
+   palabras que tiene que ir encendiendo. */
+function tramosDeLaVoz() {
+  const v = APP.light.video;
+  const lista = h('div', { clase: 'bloques-light tramos-voz' });
+  const porBloque = {};
+  for (const b of (v.audio.bloques || [])) porBloque[b.id] = b;
+  const guionPorId = {};
+  for (const b of ((v.guion || {}).bloques || [])) guionPorId[b.id] = b;
+  let secciones = (v.audio.secciones || []).filter(s => (s.bloques || []).length);
+  if (!secciones.length) secciones = (v.audio.bloques || []).map(b => ({ id: '', bloques: [b.id] }));
+  const corriendo = !!trabajoVideoLight();
+  /* LO QUE SE GRABA DE VERDAD AL PULSAR (revisión del rediseño, 21-10-2026):
+     el servidor graba la sección pedida Y TODAS LAS PENDIENTES
+     (`p4_voz.plan_regrabado`: orden = pedida + pendientes). El botón lo dice,
+     y el precio es solo el que ha calculado el servidor: el de
+     `estructura.regrabar` vale exactamente cuando este tramo ya es uno de los
+     pendientes (se graba lo mismo); si no, no se pone ninguno aquí y lo dice
+     la pregunta, que lo pide antes (`regrabarTramoDeLaVoz`). Antes salía una
+     proporción del precio de la toma entera, y de un tramo solo. */
+  const previsto = regrabarPrevistoLight();
+  const pendientes = (previsto && previsto.posible !== false && previsto.pendientes) || [];
+  secciones.forEach(sec => {
+    const bloques = sec.bloques.filter(bid => porBloque[bid]);
+    if (!bloques.length) return;
+    const otros = pendientes.filter(id => id !== sec.id).length;
+    const usd = pendientes.includes(sec.id) ? Number(previsto.usd) || 0 : 0;
+    const etiqueta = (otros ? `Regrabar este tramo y ${otros} más con cambios` : 'Regrabar este tramo')
+      + (usd ? ` · ≈ ${usdCorto(usd)}` : '');
+    const juntos = bloques.length > 1 ? `el tramo es ${bloques[0]}–${bloques[bloques.length - 1]}: se graban juntos` : '';
+    bloques.forEach(bid => {
+      const marcas = porBloque[bid];
+      const desde = Number(marcas.t_in) || 0;
+      const hasta = Number(marcas.t_out) || desde;
+      const tarjeta = h('div', { clase: 'parrafo-guion tramo-voz', datos: { seccion: sec.id || '', bloque: bid } });
+      tarjeta.appendChild(h('div', { clase: 'cabecera' },
+        h('span', { clase: 'id' }, `${bid} · ${mmss(desde)}–${mmss(hasta)}`),
+        h('span', { clase: 'crece' }),
+        h('button', {
+          clase: 'mini', title: 'Oír solo este bloque',
+          onclick: () => oirTramoDeLaVoz(desde, hasta),
+        }, '▶ Oír'),
+        sec.id ? conAyuda('Vuelve a grabar este tramo con el texto que tiene (sin reescribirlo). '
+          + (otros ? `Con él se graban también los ${otros === 1 ? 'otro tramo' : `otros ${otros} tramos`} `
+            + 'que tienen cambios sin grabar: la voz no se da por buena con uno a medias. '
+            : 'El resto de la toma no se toca. ')
+          + 'Antes de grabar dice lo que cuesta.' + (juntos ? ` Ojo: ${juntos}.` : ''), h('button', {
+          clase: 'mini', disabled: corriendo,
+          onclick: () => regrabarTramoDeLaVoz(sec.id, juntos),
+        }, etiqueta)) : null));
+      const bloque = guionPorId[bid] || { id: bid, texto: marcas.texto || '' };
+      tarjeta.appendChild(parrafoKaraokeLight(bloque, marcas, textoDeBloqueLight(bloque)));
+      lista.appendChild(tarjeta);
+    });
+  });
+  return lista;
+}
+
+/* «▶ Oír»: la toma desde el principio del tramo, y se para al acabarlo. */
+function oirTramoDeLaVoz(desde, hasta) {
+  const audio = _audioLight;
+  if (!audio) return;
+  if (audio._finTramo) audio.removeEventListener('timeupdate', audio._finTramo);
+  audio._finTramo = () => {
+    if (audio.currentTime >= hasta) {
+      audio.pause();
+      audio.removeEventListener('timeupdate', audio._finTramo);
+      audio._finTramo = null;
+    }
+  };
+  audio.addEventListener('timeupdate', audio._finTramo);
+  audio.currentTime = desde;
+  audio.play().catch(fallo => avisarAudioFallido(fallo));
+}
+
+/* REGRABAR UN TRAMO: antes de preguntar se pide al servidor lo que va a grabar
+   de verdad con este tramo (`GET /guion/bloques?seccion=`, el mismo cálculo
+   que la regrabación): qué tramos y cuánto. Sin esa cifra no se inventa
+   ninguna: se dice que no se sabe. */
+async function regrabarTramoDeLaVoz(seccion, juntos) {
+  const v = APP.light.video;
+  if (REGRABANDO_TRAMO[v.pid]) return;          // un doble clic no pregunta dos veces
+  REGRABANDO_TRAMO[v.pid] = true;
+  try {
+    // lo escrito y sin guardar entra en lo que se graba: antes de preguntar
+    await guardarBloquesPendientesLight();
+    let plan = null;
+    try {
+      plan = (await pedir(`${API.guionBloques(v.pid)}?seccion=${encodeURIComponent(seccion)}`)).regrabar;
+    } catch (e) { plan = null; }
+    if (plan && plan.posible === false) { toast(`No se puede regrabar por tramos: ${plan.por_que_no}`, true); return; }
+    const orden = (plan && plan.orden) || [];
+    const otros = orden.filter(id => id !== seccion).length;
+    const usd = plan ? Number(plan.usd) || 0 : 0;
+    const precio = plan ? ` (≈ ${usdCorto(usd)})` : ' (no se ha podido calcular lo que cuesta)';
+    const que = otros
+      ? `¿Regrabar este tramo y ${otros} ${otros === 1 ? 'tramo más' : 'tramos más'} con cambios sin grabar${precio}?\n\n`
+        + `Se graban juntos (${orden.join(', ')}): la voz no se da por buena con uno a medias. `
+        + 'El resto de la toma no se toca.'
+      : `¿Regrabar este tramo tal cual${precio}?\n\n`
+        + 'Se vuelve a grabar solo este tramo con el texto que tiene; el resto de la toma no se toca.';
+    if (!window.confirm(que + (juntos ? `\n\n(${juntos}.)` : ''))) return;
+    await regrabarPendientesLight(seccion);
+  } finally {
+    delete REGRABANDO_TRAMO[v.pid];
+  }
+}
+
+const REGRABANDO_TRAMO = {};
+
+/* LA BARRA DE LA VOZ: grabarla, regrabar lo escrito y, con la voz al día, el
+   paso siguiente (generar las imágenes o ponerlas al día). */
+function barraDeLaVoz() {
   const v = APP.light.video;
   const corriendo = !!trabajoVideoLight();
-  /* Los dos botones necesitan saber si a SU tanda le queda algo, y quien lo
-     pregunta era la barra de cada una. Ahora la barra es una sola, asi que el
-     plan de la otra se pide aqui. Como efecto y no como hijo: es `async`, y
-     ponerla en el arbol pintaba «[object Promise]» en mitad de la barra. */
-  refrescarPlanLight('video');
-  const hayGuion = !!v.guion;
-  const hayAudio = !!v.audio;
-  const hayVideo = hayMp4Light();
-  const obsoleto = videoObsoletoLight();
-  /* SE PIDEN LOS DOS PLANES SIEMPRE, no solo mientras algo corre.
-
-     `quedaTandaLight` devuelve `null` mientras no se sabe, y el unico sitio que
-     los pedia era la barra de progreso -- que solo se pinta si hay algo
-     corriendo --. O sea que con la pantalla parada no se sabia nunca, y
-     `bloqueEditadoLight` se quedaba marcando «editado» para siempre bloques que
-     ya estaban grabados. Van con freno (`PLANES_LIGHT`), asi que llamarlas en
-     cada repintado no son dos peticiones por segundo. */
-  refrescarPlanLight('voz');
-  refrescarPlanLight('video');
-  /* EL PRECIO DEL BOTON, DEL MODO CON EL QUE LANZA (D5): con audio, 'todo'. */
-  const modoVoz = hayAudio ? 'todo' : 'pendientes';
-  refrescarPlanLight('voz', false, modoVoz);
-  const quedaVoz = quedaTandaLight('voz');
-  const quedaVideo = quedaTandaLight('video');
-  return h('div', { clase: 'pie-guion' },
-    conAyuda(unirAyuda(ayudaAudio(hayAudio, quedaVoz),
-      textoDelPlan(quedaVoz === false ? 'voz' : clavePlanLight('voz', modoVoz))),
-      h('button', {
-        clase: 'primario',
-        disabled: corriendo || !hayGuion || quedaVoz === false,
-        onclick: () => lanzarTandaLight('voz', modoVoz),
-      }, hayAudio ? 'Regenerar Audio' : 'Generar Audio')),
-    /* EN MEDIO Y A TODO EL HUECO QUE SOBRE: es lo unico de la barra que cambia
-       solo, y entre los dos botones se ve sin buscarla. Cuando no corre nada no
-       se pinta y los botones se quedan uno a cada lado.
-
-       Y ES UNA, NO DOS. Los dos botones comparten el mismo trabajo
-       (`CLAVE_VIDEO_LIGHT`), asi que pintar la barra de cada tanda daba dos
-       barras identicas avanzando a la vez. El plan de la otra tanda se sigue
-       refrescando -- lo necesitan los botones para apagarse -- pero sin pintar
-       nada. */
-    /* EN MEDIO: mientras algo corre, el progreso; el resto del tiempo, el
-       reproductor. Los dos ocupan el mismo hueco porque nunca hacen falta a la
-       vez -- mientras se graba la toma, la que hay ya no es la que va a
-       quedar. */
-    /* UNO SOLO EN MEDIO, Y ES EL QUE CRECE. Iban dos `crece` vacios haciendo
-       de cuna, asi que el hueco se repartia en tres y el reproductor se
-       quedaba con su ancho de fabrica en el centro. Ahora crece el de en
-       medio, y cuando no hay nada que poner ahi el hueco lo llena un `crece`
-       vacio -- que es lo que deja los dos botones en los extremos. */
-    corriendo ? barraTandaLight('voz')
-      : (hayAudio ? reproductorLight() : h('span', { clase: 'crece' })),
-    corriendo ? conAyuda(
-      'Corta la tanda donde esté. Lo que ya se ha generado se queda hecho y no '
-      + 'hay que volver a pagarlo.',
-      botonPararVideo()) : null,
-    conAyuda(!hayAudio
-      ? 'Primero hace falta el audio: los subtítulos se colocan con sus '
-        + 'tiempos, así que sin voz no hay dónde ponerlos.'
-      : unirAyuda(ayudaDiapositivas(hayVideo, obsoleto, quedaVideo),
-                  textoDelPlan('video')),
-      h('button', {
-        clase: 'primario',
-        disabled: corriendo || !hayAudio || (hayVideo && !obsoleto)
-                  || quedaVideo === false,
-        onclick: () => lanzarTandaLight('video'),
-      }, (hayVideo && obsoleto) ? 'Poner al día las imágenes'
-         : 'Generar imágenes')),
-    /* LA PASTILLA SOLO SI ESTE BOTON TIENE ALGO QUE HACER.
-       Miraba el estado de los pasos y el boton mira el PLAN, y no son lo
-       mismo: regenerar las capas deja el MP4 viejo --y eso es verdad-- pero la
-       tanda de aqui no monta el MP4, asi que salia «Obsoleto» al lado de un
-       boton apagado que decia «no queda nada por generar». Lo viejo era el
-       MP4, y esa pastilla vive en la pantalla del video, que es donde se
-       acciona. */
-    quedaVideo === false ? null : pastillaObsoletoLight());
+  if (corriendo) {
+    return barraDeAccion({ corriendo: true, tanda: 'voz', botones: [pararDeBarra()] });
+  }
+  const accion = accionDeLaVoz();
+  if (accion) return barraDeAccion(accion);
+  // LA VOZ AL DÍA: lo siguiente son las imágenes
+  const sig = accionDeLasImagenes();
+  return barraDeAccion(Object.assign({}, sig, {
+    estado: { e: 'hecho', texto: `Voz al día${v.audio ? ` · ${mmss(v.audio.duracion)}` : ''}` } }));
 }
+
+/* ¿QUEDA VOZ POR GRABAR? Del plan de la tanda 'voz', pero mirando el paso
+   `voz` y no la tanda entera: la tanda lleva además la revisión por secciones
+   (`revision_audio`, gratis), y con solo esa pendiente la voz está al día y no
+   hay nada que pagar. `null` mientras no se sabe. */
+function vozPorGrabar() {
+  const plan = (APP.light.video.planes || {}).voz;
+  if (!plan) return null;
+  if (!Number(plan.tareas)) return false;
+  const pendientes = (plan.fases || []).flatMap(f => f.pendientes || []);
+  return pendientes.length ? pendientes.includes('voz') : true;
+}
+
+/* LO QUE QUEDA DE LA VOZ, o null si está al día. Lo comparten la barra del
+   guion y la de la voz: es el mismo botón con el mismo nombre en las dos. */
+function accionDeLaVoz() {
+  const v = APP.light.video;
+  if (!v.guion) {
+    return { estado: { e: 'bloq', texto: 'Sin guion todavía' }, plan: 'la voz se graba con el guion',
+      botones: [botonDeBarra(h('button', { onclick: () => irAPasoDelCarril('encargo') }, 'Ir al encargo'))] };
+  }
+  refrescarPlanLight('voz');
+  const quedaVoz = vozPorGrabar();
+  if (!v.audio) {
+    const plan = textoDelPlan('voz');
+    const usd = Number((((v.planes || {}).voz || {}).coste || {}).usd_total) || 0;
+    return { estado: { e: 'pend', texto: 'Voz sin grabar' }, plan,
+      botones: [botonDeBarra(h('button', { onclick:
+        () => lanzarTandaLight('voz', 'pendientes') }, `Grabar la voz${usd ? ` · ≈ ${usdCorto(usd)}` : ''}`),
+        { ayuda: unirAyuda(ayudaAudio(false, quedaVoz), plan), disabled: quedaVoz === false })] };
+  }
+  const previsto = regrabarPrevistoLight();
+  const tramos = previsto && previsto.posible !== false ? (previsto.pendientes || []).length : 0;
+  if (tramos) {
+    return { estado: { e: 'aviso', texto: `${tramos} ${tramos === 1 ? 'tramo' : 'tramos'} sin grabar` },
+      plan: 'lo que has escrito todavía no se oye',
+      botones: [botonDeBarra(h('button', { onclick:
+        () => regrabarPendientesLight(previsto.pendientes[0]) }, `Regrabar ${tramos} ${tramos === 1 ? 'tramo' : 'tramos'} · ≈ ${usdCorto(previsto.usd)}`),
+        { ayuda: 'Vuelve a grabar SOLO los tramos con cambios, con lo que has escrito. Las imágenes no se tocan ahora.' })] };
+  }
+  if (quedaVoz === true) {
+    const plan = textoDelPlan('voz');
+    return { estado: { e: 'aviso', texto: 'La voz no dice el guion de ahora' }, plan,
+      botones: [botonDeBarra(h('button', { onclick: () => lanzarTandaLight('voz', 'pendientes') }, 'Regrabar la voz'),
+        { ayuda: unirAyuda('Vuelve a grabar lo que ha quedado viejo de la voz.', plan) })] };
+  }
+  return null;
+}
+
+/* EL PASO DE LAS IMÁGENES, desde la voz (y desde el guion con la voz al día):
+   generarlas, ponerlas al día o, si ya lo están, ir a mirarlas. */
+function accionDeLasImagenes() {
+  const v = APP.light.video;
+  refrescarPlanLight('video');
+  const hayPlanos = !!versionDe(v.fichas.assets || {});
+  const quedaVideo = quedaTandaLight('video');
+  const plan = textoDelPlan('video');
+  const coste = ((((v.planes || {}).video) || {}).coste) || {};
+  const usd = Number(coste.imagenes_hechas ? coste.usd_por_generar : coste.usd_total) || 0;
+  const n = Number(coste.imagenes_hechas ? coste.imagenes_por_generar : coste.imagenes) || 0;
+  if (!hayPlanos) {
+    return { plan, botones: [botonDeBarra(h('button', { onclick:
+      () => lanzarTandaLight('video') }, `Generar las imágenes${n ? ` · ${n}` : ''}${usd ? ` · ≈ ${usdCorto(usd)}` : ''}`),
+      { ayuda: unirAyuda(ayudaDiapositivas(false, false, quedaVideo), plan), disabled: quedaVideo === false })] };
+  }
+  if (quedaVideo === true) {
+    const etiqueta = n ? `Poner al día ${n} ${n === 1 ? 'imagen' : 'imágenes'}` : 'Poner al día las imágenes';
+    /* CON LA COLA DE NOTAS DIBUJANDO NO SE OFRECE: el servidor la frena (409),
+       pero un botón encendido que contesta «no» es un botón que miente. Sale
+       apagado y con el motivo. */
+    const dibujando = COLA_IMG.pid === v.pid && (!!COLA_IMG.actual || COLA_IMG.cola.length > 0);
+    return { plan, botones: [botonDeBarra(h('button', { onclick:
+      () => lanzarTandaLight('video') }, etiqueta + (usd ? ` · ≈ ${usdCorto(usd)}` : '')),
+      { disabled: dibujando,
+        ayuda: dibujando ? 'Se están dibujando las imágenes de tus notas, una detrás de otra. '
+          + 'Cuando acaben, se pueden poner al día las demás.'
+          : unirAyuda(ayudaDiapositivas(hayMp4Light(), true, quedaVideo), plan) })] };
+  }
+  return { plan: 'Las imágenes ya recogen el guion y la voz de ahora.',
+    botones: [botonDeBarra(h('button', { onclick: () => irAPasoDelCarril('imagenes') }, 'Imágenes ›'))] };
+}
+
 
 /* --------------------------------------------------------------- el vídeo */
 
@@ -11584,13 +12447,15 @@ function vistaPreviaLight() {
   const escenas = (PREVIA.ficha || {}).escenas || [];
   const e = escenaPrevia();
 
-  caja.appendChild(h('div', { clase: 'light-cab' },
-    h('h2', {}, 'Las imágenes, una a una'),
-    h('span', { clase: 'meta' },
+  caja.appendChild(h('div', { clase: 'light-cab cab-paso' },
+    h('h2', {}, 'Imágenes'),
+    h('span', { clase: 'meta cifra-paso' },
       escenas.length ? `escena ${PREVIA.i + 1} de ${escenas.length}` : ''),
-    obsoletasEnLaCabecera(escenas),
     h('span', { clase: 'crece' }),
-    costeLight()));
+    obsoletasEnLaCabecera(escenas)));
+  caja.appendChild(h('div', { clase: 'pista entrada-paso' },
+    'La imagen de cada plano, una a una. Deja una nota en la que no cuadre; las notas se aplican '
+    + 'todas juntas desde la barra de abajo.'));
   const otraCalidad = avisoOtraCalidadLight();
   if (otraCalidad) caja.appendChild(otraCalidad);
 
@@ -11616,6 +12481,8 @@ function vistaPreviaLight() {
       'no hay ninguna escena que mirar todavía'));
     return caja;
   }
+
+  caja.appendChild(tiraDeLasEscenas(escenas));
 
   /* EL PLANO: la imagen, su capa de rótulos encima y el subtítulo debajo del
      todo. Las tres en el MISMO cuadro y en el orden en el que se dibujan en el
@@ -11749,14 +12616,92 @@ function vistaPreviaLight() {
      arriba dejaba a las diapositivas siendo la unica que no seguia la regla. */
   /* «APLICAR» TAMBIEN AQUI, pero haciendo lo de aqui: encolar todas las notas
      de esta pantalla. Cada tarjeta tiene ademas el suyo para ir una a una. */
-  const ultima = () => mandos.children[mandos.children.length - 1] || null;
-  const aplicar = botonAplicarRepaso();
-  if (aplicar) mandos.insertBefore(aplicar, ultima());
-  const montar = botonRenderizarLight();
-  if (montar) mandos.insertBefore(montar, ultima());
-  BARRA_INFERIOR.nodo = mandos;
+  /* DESDE EL REDISEÑO DE CREAR, las acciones van en la barra de acción
+     («Aplicar N notas», «Poner al día N imágenes», «Montar el vídeo») y los
+     mandos de mirar quedan pegados ENCIMA de ella. */
+  ponerBarra(() => barraDeLasImagenes(mandos));
   return caja;
 }
+
+/* LA TIRA DE MINIATURAS: todos los planos de un vistazo, con lo que falta
+   marcado (⚠ obsoleta, 📝 con nota sin aplicar, ✓ revisada por el revisor).
+   Pulsar una va a esa escena. Es nueva del rediseño; no pide nada que no
+   hubiera: las miniaturas son las de la rejilla (`?mini=1`). */
+function tiraDeLasEscenas(escenas) {
+  const v = videoAbierto();
+  const tira = h('div', { clase: 'tira-escenas', role: 'list' });
+  const conNota = new Set((estadoRepaso().notas || [])
+    .filter(n => pantallaDeNota(n) === 'imagenes' && n.estado !== 'aplicado' && n.plano).map(n => n.plano));
+  const revisadas = new Set(Object.keys(((REVISOR.ficha || {}).planos) || {}));
+  escenas.forEach((e, i) => {
+    const marcas = [];
+    if (e.obsoleta) marcas.push(h('span', { clase: 'marca-mini obsoleta', title: 'obsoleta' }, '⚠'));
+    if (conNota.has(e.id)) marcas.push(h('span', { clase: 'marca-mini nota', title: 'con nota sin aplicar' }, '📝'));
+    else if (revisadas.has(e.id)) marcas.push(h('span', { clase: 'marca-mini revisada', title: 'revisada' }, '✓'));
+    tira.appendChild(h('button', {
+      clase: 'escena-mini' + (i === PREVIA.i ? ' actual' : '') + (e.obsoleta ? ' obsoleta' : ''),
+      role: 'listitem', title: `${e.id}${e.bloque ? ` · ${e.bloque}` : ''}`,
+      'aria-current': i === PREVIA.i ? 'true' : null, disabled: i === PREVIA.i,
+      onclick: () => irAEscenaPrevia(i - PREVIA.i),
+    },
+      e.imagen ? h('img', { src: `${API.archivo(v.pid, e.imagen)}?mini=1`, alt: '', loading: 'lazy' }) : null,
+      h('span', { clase: 'id-mini' }, e.id), ...marcas));
+  });
+  // la actual, a la vista (sin mover la página)
+  setTimeout(() => {
+    const actual = tira.querySelector('.escena-mini.actual');
+    if (!actual || tira.scrollWidth <= tira.clientWidth + 2) return;
+    const dentro = actual.getBoundingClientRect().left - tira.getBoundingClientRect().left + tira.scrollLeft;
+    tira.scrollLeft = Math.max(0, dentro - (tira.clientWidth - actual.offsetWidth) / 2);
+  }, 0);
+  return tira;
+}
+
+/* LA BARRA DE IMÁGENES: con notas, aplicarlas; con imágenes viejas, ponerlas
+   al día; con el vídeo sin montar o viejo, montarlo; si no, ir a verlo. Los
+   mandos de mirar (‹ ♪ Oírla ▶ Todo seguido · Siguiente ›) van encima. */
+function barraDeLasImagenes(mandos) {
+  if (trabajoVideoLight()) {
+    return barraDeAccion({ encima: mandos, corriendo: true, tanda: 'video', botones: [pararDeBarra()] });
+  }
+  const aplicar = botonAplicarRepaso();
+  const pend = notasDeAhora().filter(n => n.estado !== 'aplicado').length;
+  /* «MONTAR EL VÍDEO» SIGUE A MANO, como estaba en los mandos: al lado y en
+     secundario cuando lo principal es otra cosa (con notas sin aplicar sale
+     apagado y con el motivo, no escondido). */
+  const montarAlLado = () => {
+    const boton = botonRenderizarLight();
+    if (!boton) return [];
+    const b = boton.tagName === 'BUTTON' ? boton : boton.querySelector('button');
+    if (b) b.className = 'secundario-barra';
+    return [boton];
+  };
+  if (aplicar) {
+    return barraDeAccion({ encima: mandos,
+      estado: { e: 'aviso', texto: `${pend} ${pend === 1 ? 'nota' : 'notas'} sin aplicar` },
+      plan: 'se rehacen esas imágenes, una detrás de otra; se paga una por plano',
+      botones: [...montarAlLado(), aplicar] });
+  }
+  refrescarPlanLight('video');
+  if (quedaTandaLight('video') === true) {
+    const n = obsoletasConocidas();
+    const accion = accionDeLasImagenes();
+    accion.botones = [...montarAlLado(), ...(accion.botones || [])];
+    return barraDeAccion(Object.assign({}, accion, { encima: mandos,
+        estado: { e: 'aviso', texto: n ? `${n} ${n === 1 ? 'imagen obsoleta' : 'imágenes obsoletas'}` : 'Imágenes por poner al día' } }));
+  }
+  const montar = botonRenderizarLight();
+  if (montar) {
+    refrescarPlanLight('render');
+    return barraDeAccion({ encima: mandos,
+      estado: { e: hayMp4Light() ? 'aviso' : 'hecho', texto: hayMp4Light() ? 'El vídeo es de antes de estas imágenes' : 'Imágenes al día' },
+      plan: textoDelPlan('render'), botones: [montar] });
+  }
+  return barraDeAccion({ encima: mandos, estado: { e: 'hecho', texto: 'Imágenes al día' },
+    plan: `${((PREVIA.ficha || {}).escenas || []).length} planos`,
+    botones: [botonDeBarra(h('button', { onclick: () => irAPasoDelCarril('video') }, 'Vídeo ›'))] });
+}
+
 
 /* ------------------------------------------------ el revisor de imágenes
  *
@@ -12375,6 +13320,7 @@ async function guardarNotaEscena(escena) {
  * leen como el mismo gesto. Aqui la etiqueta ya dice lo que hace. */
 function botonRenderizarLight() {
   if (hayMp4Light() && !videoObsoletoLight()) return null;
+  refrescarPlanLight('render');   // su precio: el botón no dice «gratis» sin saberlo
   const corriendo = !!trabajoVideoLight();
   /* CON NOTAS SIN APLICAR, ESTE BOTON HACE MENOS que el de al lado: «Aplicar»
      reparte las notas, redibuja lo que toquen y DESPUES monta; esto solo monta,
@@ -12390,15 +13336,15 @@ function botonRenderizarLight() {
         + 'la voz y la música, y saca el MP4. No genera ninguna imagen: no cuesta '
         + 'dinero, cuesta tiempo de máquina.', textoDelPlan('render')),
     h('button', {
-      clase: notasSinAplicar ? 'mini' : 'avisa',
+      clase: notasSinAplicar ? 'secundario-barra' : 'primario principal',
       disabled: corriendo || notasSinAplicar,
       onclick: () => {
         pararPrevia();
         videoAbierto().vista = 'video';
         repintarVideo();
-        lanzarTandaLight('render');
+        montarElVideoLight();
       },
-    }, 'Montar el vídeo'));
+    }, `Montar el vídeo${precioDeMontarLight()}`));
 }
 
 /* LAS FLECHAS DEL TECLADO. Pasar de escena es el gesto que se repite
@@ -12424,16 +13370,14 @@ document.addEventListener('keydown', ev => {
 function vistaVideoLight() {
   const v = videoAbierto();
   const caja = h('div', { clase: 'light-video' });
-  /* ATRAS VA A LAS DIAPOSITIVAS, NO AL GUION. Del video montado se sale hacia
-     atras para MIRAR otra vez lo que se monto --cada escena con su imagen, su
-     capa y sus subtitulos--, no para releer el texto. El guion sigue a un paso
-     de distancia, detras de esa pantalla, que es el orden en que se hicieron
-     las cosas. Si no hay planos no hay nada que mirar y se va al guion, que es
-     de donde se venia. */
-  caja.appendChild(h('div', { clase: 'light-cab' },
-    h('h2', {}, v.nombre || 'El vídeo'),
-    h('span', { clase: 'crece' }),
-    costeLight()));
+  const version = versionDe(v.fichas.render || {});
+  caja.appendChild(h('div', { clase: 'light-cab cab-paso' },
+    h('h2', {}, 'Vídeo'),
+    h('span', { clase: 'meta cifra-paso' }, [version && hayMp4Light() ? `v${version}` : '',
+      v.audio ? mmss(v.audio.duracion) : ''].filter(Boolean).join(' · '))));
+  caja.appendChild(h('div', { clase: 'pista entrada-paso' },
+    'El montaje con la voz, la música, los subtítulos y el logo. Cambiar algo aquí solo vuelve a '
+    + 'montar: gratis.'));
 
   if (ERRORES[CLAVE_VIDEO_LIGHT]) caja.appendChild(errorDelVideo());
 
@@ -12449,8 +13393,8 @@ function vistaVideoLight() {
     const porDibujar = Number(coste.imagenes_por_generar) || 0;
     caja.appendChild(h('div', { clase: 'caja-aviso' },
       'Este vídeo es de ANTES de tus últimos cambios (por ejemplo, imágenes rehechas '
-      + 'en «Imágenes»): lo que ves aquí todavía no los lleva. Pulsa «Regenerar Vídeo» '
-      + 'abajo para volver a montarlo con ellos.'
+      + 'en «Imágenes»): lo que ves aquí todavía no los lleva. «Montar el vídeo», en la '
+      + 'barra de abajo, lo vuelve a montar con ellos.'
       + (porDibujar ? ` Ojo: además se dibujarán ${porDibujar} imagen(es) que han quedado `
         + `viejas (≈ ${usdCorto(Number(coste.usd_por_generar) || 0)}).` : ' No se dibuja ninguna imagen.')));
   }
@@ -12478,8 +13422,6 @@ function vistaVideoLight() {
         'Arreglar los subtítulos')));
   }
 
-  if (hayMp4Light()) caja.appendChild(panelOrtografia('subtitulos'));
-
   const marco = h('div', { clase: `marco-video ${formatoDelVideo()}` });
   if (hayMp4Light() && !trabajoVideoLight()) {
     marco.appendChild(videoLight());
@@ -12497,12 +13439,6 @@ function vistaVideoLight() {
   }
   caja.appendChild(marco);
 
-  /* LA MÚSICA, LOS EFECTOS Y LOS SUBTÍTULOS, justo debajo del vídeo montado
-     (N9 de las notas de mejoras, 13-10-2026): es donde se oye lo que se
-     quiere cambiar. Cada fila es una línea cerrada; no empuja el repaso. */
-  if (hayMp4Light() && !trabajoVideoLight()) caja.appendChild(ajustesEnElVideo());
-  meter(caja, [bloquePublicarEnVideo(v)]);  // Publicar en redes (rama publicar-redes-1)
-
   /* LA TIRA DE VINETAS SOLO MIENTRAS SE GENERA.
      Con el video ya montado esta pantalla es para VERLO y comentarlo, y
      cuarenta miniaturas debajo del reproductor empujan el repaso fuera de
@@ -12517,75 +13453,104 @@ function vistaVideoLight() {
     caja.appendChild(tira);
   }
 
-  /* AQUI SE MONTA EL MP4, ASI QUE LA TANDA ES 'render' Y NO 'video'.
-   *
-   * Lanzaba 'video', que lleva `sin: ['render']` y por tanto NO monta ningun
-   * MP4: en la pantalla del video, el boton que dice «Regenerar Vídeo» no
-   * regeneraba el video. Y de ahi salia el mensaje contradictorio de al lado
-   * --«Obsoleto» junto a «al día: no queda nada por generar»--: las dos frases
-   * eran ciertas y hablaban de tandas distintas. Medido: 'video' 0 tareas,
-   * 'render' 1.
-   *
-   * EL MODO. Con el video obsoleto va 'pendientes': lo obsoleto es exactamente
-   * lo que ha quedado viejo, y 'todo' volveria a rehacer los clips de un video
-   * entero por haber cambiado una frase. Y ya NUNCA 'todo' desde aqui: ver el
-   * botón de abajo. */
-  const notasSinAplicar = estadoRepaso().pendientes > 0;
-  const pie = h('div', { clase: 'pie-guion' },
-    /* CON NOTAS SIN APLICAR ESTE BOTON SOBRA, y no por repetirse: es que hace
-       MENOS. «Aplicar» reparte las notas, redibuja lo que toquen y despues
-       monta el MP4; esto solo monta el MP4, o sea que gasta un render entero
-       para dejarte el mismo video sin tus notas. Se queda, apagado y con el
-       motivo puesto, en vez de esconderse: desaparecer no explica nada. */
-    conAyuda(notasSinAplicar
-      ? 'Tienes notas del repaso sin aplicar. Esto solo volvería a montar el MP4 '
-        + 'y saldría igual, sin ellas. Usa «Aplicar los cambios» de abajo: '
-        + 'aplica y monta, en un solo trabajo.'
-      : (quedaTandaLight('render') === false
-        ? 'El MP4 está al día con los planos y el audio de ahora. Volver a '
-          + 'montarlo daría el mismo fichero.'
-        : unirAyuda('Encadena los planos que ya has visto, con sus transiciones, '
-          + 'la voz y la música, y saca el MP4. No genera ninguna imagen: no '
-          + 'cuesta dinero, cuesta tiempo de máquina.', textoDelPlan('render'))),
-      h('button', {
-        clase: notasSinAplicar ? 'mini' : 'primario',
-        disabled: !!trabajoVideoLight() || notasSinAplicar
-                  || quedaTandaLight('render') === false,
-        /* SIEMPRE 'pendientes'. Con el MP4 al día iba 'todo', y 'todo' en esta
-           tanda REDIBUJA LAS IMÁGENES de todo el vídeo (la tanda lleva la
-           pestaña de las imágenes): bastaba que quedara algo menor sin hacer
-           --la música sin elegir-- para que el botón se encendiera y pulsarlo
-           pagara el vídeo entero otra vez (visto en el recorrido, 11-10-2026). */
-        onclick: () => lanzarTandaLight('render', 'pendientes'),
-      }, hayMp4Light() ? 'Regenerar Vídeo' : 'Generar Vídeo')),
-    quedaTandaLight('render') === false ? null : pastillaObsoletoLight(),
-    h('span', { clase: 'crece' }),
-    barraTandaLight('render'),
-    trabajoVideoLight() ? conAyuda(
-      'Corta el montaje donde esté. Los clips ya encadenados se quedan hechos.',
-      botonPararVideo()) : null,
-    /* EL MISMO ORDEN QUE EN EL GUION: a la izquierda lo que se le hace al
-       video, en medio lo que esta pasando, y a la derecha lo que se hace CON el
-       video ya montado. Estaba mezclado --boton, pastilla, progreso, aplicar,
-       una frase suelta y descargar-- y no habia forma de leer los grupos. */
-    h('span', { clase: 'crece' }),
-    botonAplicarRepaso(),
-    hayMp4Light() ? conAyuda(
-      'Baja el MP4 tal y como está ahora mismo.',
-      h('a', {
-        clase: 'boton mini', href: urlMp4Light(), download: '',
-      }, 'Descargar')) : null,
-    hayMp4Light() ? conAyuda(
-      'Sin música, sin efectos, sin subtítulos, sin voz… o cada audio suelto, para usarlo en otro sitio. Gratis.',
-      h('button', { clase: 'mini', onclick: () => abrirDescargaPorPartes(v.pid) }, 'Por partes…')) : null);
-  BARRA_INFERIOR.nodo = pie;
+  /* LOS AJUSTES DEL MONTAJE, el MISMO panel que en el Encargo y con el mismo
+     comportamiento (decisión 9 del rediseño): lo que se toca se guarda sin
+     montar, y lo monta la barra de abajo. Se ven también sin MP4 (sus
+     cambios entran en el primer montaje); mientras se monta, no. */
+  if (!trabajoVideoLight()) caja.appendChild(ajustesEnElVideo());
 
   /* EL REPASO VA DEBAJO DEL VÍDEO Y SOLO CUANDO HAY VÍDEO. Antes de eso no hay
      nada que comentar, y una caja de texto vacía debajo de una barra de
-     progreso invita a escribir sobre algo que todavía no existe. */
-  if (hayMp4Light() && !trabajoVideoLight()) caja.appendChild(panelRepaso());
+     progreso invita a escribir sobre algo que todavía no existe. Al lado, la
+     ortografía de los subtítulos («Revisar»); debajo, descargar y publicar. */
+  if (hayMp4Light() && !trabajoVideoLight()) {
+    const revisar = h('div', { clase: 'caja-video revisar-video' },
+      h('h3', {}, 'Revisar'), panelOrtografia('subtitulos'));
+    caja.appendChild(h('div', { clase: 'rejilla-video' }, panelRepaso(), revisar));
+    const descargar = h('div', { clase: 'caja-video descargar-video' },
+      h('h3', {}, 'Descargar'),
+      h('div', { clase: 'fila' },
+        conAyuda('Baja el MP4 tal y como está ahora mismo.',
+          h('a', { clase: 'boton mini', href: urlMp4Light(), download: '' }, '⬇ Descargar')),
+        conAyuda('Sin música, sin efectos, sin subtítulos, sin voz… o cada audio suelto, para usarlo en otro sitio. Gratis.',
+          h('button', { clase: 'mini', onclick: () => abrirDescargaPorPartes(v.pid) }, 'Por partes…'))),
+      h('div', { clase: 'meta' }, 'el MP4 tal y como está ahora mismo, o sin música, sin efectos, sin subtítulos… gratis'));
+    caja.appendChild(h('div', { clase: 'rejilla-video' }, descargar,
+      bloquePublicarEnVideo(v) || h('span', {})));  // Publicar en redes (rama publicar-redes-1)
+  }
+  ponerBarra(barraDelVideo);
   return caja;
 }
+
+/* LA BARRA DEL VÍDEO (rediseño de Crear): aplicar las notas del vídeo,
+   montarlo (con los cambios del montaje o porque quedó viejo) o, con todo al
+   día, mandarlo a Publicar.
+
+   AQUI SE MONTA EL MP4, ASI QUE LA TANDA ES 'render' Y NO 'video', y SIEMPRE
+   'pendientes': 'todo' en esta tanda REDIBUJA LAS IMÁGENES de todo el vídeo
+   (la tanda lleva la pestaña de las imágenes; visto en el recorrido,
+   11-10-2026). Con notas sin aplicar, montar a secas haría MENOS que
+   «Aplicar» (gastaría el render para dejarte el vídeo sin tus notas): por eso
+   entonces el botón es el de aplicar. */
+function barraDelVideo() {
+  const v = videoAbierto();
+  if (trabajoVideoLight()) {
+    return barraDeAccion({ corriendo: true, tanda: 'render',
+      botones: [pararDeBarra('Corta el montaje donde esté. Los clips ya encadenados se quedan hechos.')] });
+  }
+  refrescarPlanLight('render');
+  const quedaRender = quedaTandaLight('render');
+  const pend = notasSinAplicarDe('video');
+  const plan = textoDelPlan('render');
+  if (pend && hayMp4Light()) {
+    return barraDeAccion({ estado: { e: 'aviso', texto: `${pend} ${pend === 1 ? 'nota' : 'notas'} sin aplicar` },
+      plan: 'se aplica lo más barato que resuelva cada nota, y se monta',
+      botones: [botonAplicarRepaso()] });
+  }
+  const cambios = cambiosDelMontaje();
+  const coste = ((((v.planes || {}).render) || {}).coste) || {};
+  const porDibujar = Number(coste.imagenes_por_generar) || 0;
+  // el de la tanda: nada mientras no llega el plan (no se promete «gratis»)
+  const precio = precioDeMontarLight();
+  const ocupado = !!(cambios.est && (cambios.est.aplicando || cambios.est.montandoAnimo));
+  /* CON MP4 Y CAMBIOS DEL MONTAJE: aplicarlos, gratis siempre. Si además hay
+     imágenes viejas, montar con ellas es OTRO botón, con su precio y su
+     pregunta. Sin MP4 no se mira esto: el botón de abajo monta el vídeo con
+     los cambios dentro (antes, con solo el ánimo pedido, montaba la música y
+     no el vídeo). */
+  if (cambios.hay && hayMp4Light()) {
+    const botones = [];
+    if (porDibujar) {
+      botones.push(botonDeBarra(h('button', { onclick: () => montarElVideoLight(true) }, `Montar el vídeo${precio}`), {
+        secundario: true, disabled: ocupado || !v.audio,
+        ayuda: unirAyuda(`Dibuja antes ${porDibujar} ${porDibujar === 1 ? 'imagen que ha quedado vieja' : 'imágenes que han quedado viejas'} `
+          + '(se paga, y se pregunta antes) y monta el vídeo con todo, también los cambios del montaje.', plan) }));
+    }
+    botones.push(botonDeBarra(h('button', { onclick: () => montarCambiosDelMontaje() }, `${textoMontarCambios(cambios)} · gratis`), {
+      disabled: ocupado,
+      ayuda: 'Monta el vídeo una sola vez con todo lo cambiado en los ajustes del montaje. '
+        + 'Ninguna imagen: gratis.' + (porDibujar ? ' Las imágenes viejas se quedan como están.' : '') }));
+    return barraDeAccion({ estado: { e: 'aviso', texto: `${cambios.n ? `${cambios.n} ${cambios.n === 1 ? 'cambio' : 'cambios'}` : 'Cambios'} del montaje sin aplicar` },
+      plan: 'vuelve a mezclar o a montar, sin dibujar ninguna imagen', botones });
+  }
+  if (!hayMp4Light() || quedaRender === true || videoObsoletoLight()) {
+    const viejo = hayMp4Light();
+    const conCambios = !viejo && cambios.hay;
+    return barraDeAccion({ estado: { e: viejo ? 'aviso' : 'pend',
+        texto: viejo ? 'Vídeo obsoleto' : (conCambios ? 'Sin montar todavía · con cambios del montaje' : 'Sin montar todavía') },
+      plan,
+      botones: [botonDeBarra(h('button', { onclick: () => montarElVideoLight(conCambios) }, `Montar el vídeo${precio}`), {
+        disabled: ocupado || (quedaRender === false && !conCambios) || !v.audio,
+        ayuda: unirAyuda('Encadena los planos que ya has visto, con sus transiciones, '
+          + 'la voz y la música, y saca el MP4. No genera ninguna imagen: no '
+          + 'cuesta dinero, cuesta tiempo de máquina.', plan) })] });
+  }
+  return barraDeAccion({ estado: { e: 'hecho', texto: 'Vídeo al día' },
+    plan: 'el MP4 está al día con los planos y la voz de ahora',
+    botones: [botonDeBarra(h('button', { onclick: () => abrirPublicarVideo(v.pid) }, 'Enviar a Publicar ›'),
+      { ayuda: 'Textos por red, programar y subir a TikTok, Reels, YouTube y Facebook.' })] });
+}
+
 /* ==========================================================================
    EL REPASO: escribir sobre el vídeo montado, y aplicarlo
 
@@ -12684,7 +13649,7 @@ function panelRepaso() {
 
   const caja = h('div', { clase: 'repaso' });
   caja.appendChild(h('div', { clase: 'repaso-cab' },
-    h('h3', {}, 'El repaso'),
+    h('h3', {}, 'Notas del vídeo'),
     h('span', { clase: 'meta' },
       r.notas.length
         ? `${r.notas.length} ${r.notas.length === 1 ? 'nota' : 'notas'}`
@@ -13752,8 +14717,12 @@ function botonAplicarRepaso() {
       'Rehace las imágenes de todas las notas pendientes, una detrás de otra. '
       + 'Si hay varias notas para la misma imagen, se juntan y se paga una sola. '
       + 'Si OpenAI rechaza una, las demás siguen y esa nota te dice por qué.',
-      h('button', { clase: 'avisa', onclick: encolarTodasLasImagenes },
-        `Rehacer ${n} ${n === 1 ? 'imagen' : 'imágenes'}`
+      /* «APLICAR N NOTAS» (rediseño de Crear): el mismo nombre que en Vídeo
+         («Rehacer N imágenes» aquí y «Aplicar N cambios» allí eran la misma
+         acción con dos nombres). N son las notas; se paga una imagen por plano. */
+      h('button', { clase: 'primario principal', onclick: encolarTodasLasImagenes },
+        `Aplicar ${vivas.length} ${vivas.length === 1 ? 'nota' : 'notas'}`
+        + ` · ${n} ${n === 1 ? 'imagen' : 'imágenes'}`
         + (delRevisor ? ` (${delRevisor} del revisor)` : '')
         + ` · ≈ ${usdCorto(n * COLA_IMG.usdPorImagen)}`
         + ` · ~${mmss(n * COLA_IMG.segundosPorImagen)}`));
@@ -13769,10 +14738,10 @@ function botonAplicarRepaso() {
         + 'repaga una imagen si de verdad hay que volver a dibujar ese plano. '
         + 'Al terminar, monta el MP4 con los cambios dentro.'),
     h('button', {
-      clase: 'avisa', disabled: corriendo,
+      clase: 'primario principal', disabled: corriendo,
       onclick: () => (cuadernoDeAhora() === 'imagenes'
         ? encolarTodasLasImagenes() : aplicarRepaso()),
-    }, `Aplicar ${pend} ${pend === 1 ? 'cambio' : 'cambios'}`));
+    }, `Aplicar ${pend} ${pend === 1 ? 'nota' : 'notas'}`));
 }
 
 
@@ -13834,11 +14803,8 @@ async function aplicarRepaso() {
 function vistaCrearLight() {
   const e = encargoLight();
   const caja = h('div', { clase: 'light-form' });
+  caja.appendChild(salidaTusProyectos());
   caja.appendChild(h('div', { clase: 'light-cab' },
-    h('button', {
-      clase: 'mini fantasma', title: 'Volver a tus estilos',
-      onclick: () => irALight('galeria'),
-    }, '‹ Volver'),
     h('h2', {}, 'Un estilo nuevo')));
 
   caja.appendChild(campoTexto('Nombre', e.nombre,
@@ -13855,40 +14821,86 @@ function vistaCrearLight() {
       v => { e.cliente = v; tocarEncargoLight(); }));
   }
 
-  const cajas = h('div', {});
-
-  cajas.appendChild(bloqueLight('🎨 Estilo gráfico',
-    'las imágenes, las cartelas y los subtítulos', camposEstiloLight()));
+  /* EN PESTAÑAS, LAS MISMAS QUE LA FICHA (rediseño de Crear): un estilo nuevo
+     es la ficha de un estilo que todavía no existe. Por dentro, los bloques de
+     siempre. */
+  const paneles = {};
+  paneles.ve = bloqueLight('🎨 Estilo gráfico',
+    'las imágenes, las cartelas y los subtítulos', camposEstiloLight());
+  paneles.reglas = bloqueLight('📏 Reglas del estilo', 'lo que ninguna imagen puede romper',
+    h('div', { clase: 'pista' },
+      'Primero genera el estilo gráfico (las láminas); después podrás ponerle reglas.'));
 
   /* EL TONO SE ESCRIBE, y con eso basta: no hay nada que copiar de ningún
      sitio, hay algo que decidir. De este párrafo salen las instrucciones con
      las que se redacta cada guion del canal, así que cuanto más concreto sea
      menos se lo inventa. */
-  cajas.appendChild(bloqueLight('🗣️ Tono del guion', 'cómo se cuenta, nunca de qué',
+  paneles.cuenta = bloqueLight('🗣️ Tono del guion', 'cómo se cuenta, nunca de qué',
     conGuia(campoArea('', e.tono_prompt, v => { e.tono_prompt = v; tocarEncargoLight(); },
       'como quien te lo cuenta en la barra de un bar y del tema sabe más que tú: '
-      + 'frases cortas, sin adjetivos de relleno, los datos hablan solos'))));
+      + 'frases cortas, sin adjetivos de relleno, los datos hablan solos')));
 
   /* EL RITMO VA ANTES QUE LA VOZ, y no es orden estético: el ritmo entra en la
      decisión de la voz —«el montaje va a planos de 2 s»— y además le rellena la
      velocidad si tú no la pides. Decidirlo después sería decidirlo al revés. */
-  cajas.appendChild(bloqueLight('⏱️ Ritmo', 'cada cuánto corta el vídeo',
+  paneles.ritmo = bloqueLight('⏱️ Ritmo', 'cada cuánto corta el vídeo',
     sliderRitmo(e.ritmo, v => { e.ritmo = v; tocarEncargoLight(); },
-      () => claveCosteRitmo(e.estilo_modo))));
+      () => claveCosteRitmo(e.estilo_modo)));
 
-  cajas.appendChild(bloqueLight('🎙️ Voz', 'quién lo locuta',
+  paneles.suena = bloqueLight('🎙️ Voz', 'quién lo locuta',
     conGuia(campoArea('', e.voz_prompt, v => { e.voz_prompt = v; tocarEncargoLight(); },
       'grave, pausada, sin sonar a locutor de anuncio')),
-    selectorVozPropiaLight(e)));
+    selectorVozPropiaLight(e));
 
-  cajas.appendChild(bloqueLight('🌐 Idioma', 'se cambia luego sin regenerar nada',
+  paneles.idioma = bloqueLight('🌐 Idioma', 'se cambia luego sin regenerar nada',
     campoSelect('', e.idioma,
       idiomasLight().map(i => ({ valor: i.valor, nombre: i.nombre })),
-      v => { e.idioma = v; tocarEncargoLight(); })));
+      v => { e.idioma = v; tocarEncargoLight(); }));
 
-  caja.appendChild(cajas);
-  caja.appendChild(pieDeCreacion());
+  caja.appendChild(pestanasDeEstilo(paneles, new Set(), PESTANAS_ESTILO_NUEVO));
+  /* ESTE ESTILO SE QUEDÓ A MEDIAS: la explicación y «Empezar de cero», en una
+     franja; «Retomar» es el botón de la barra. */
+  if (APP.light.taller) caja.appendChild(franjaEstiloAMedias());
+  ponerBarra(pieDeCreacion);
   return caja;
+}
+
+const PESTANAS_ESTILO_NUEVO = [
+  { id: 've', texto: '🎨 Cómo se ve' },
+  { id: 'reglas', texto: '📏 Reglas' },
+  { id: 'cuenta', texto: '🗣️ Cómo se cuenta' },
+  { id: 'ritmo', texto: '⏱️ Ritmo' },
+  { id: 'suena', texto: '🎙️ Cómo suena' },
+  { id: 'idioma', texto: '🌐 Idioma' },
+];
+
+/* Qué pestaña arregla cada cosa que falta (los avisos del servidor). */
+function pestanaDelAviso(texto) {
+  const t = String(texto || '').toLowerCase();
+  if (/estilo gráfico|imagen/.test(t)) return 've';
+  if (/tono/.test(t)) return 'cuenta';
+  if (/voz/.test(t)) return 'suena';
+  if (/idioma/.test(t)) return 'idioma';
+  if (/ritmo/.test(t)) return 'ritmo';
+  return '';
+}
+
+function franjaEstiloAMedias() {
+  return h('div', { clase: 'caja-aviso estilo-a-medias' },
+    h('b', {}, 'Este estilo se quedó a medias'),
+    ' (falló o se paró). «Retomar» aprovecha lo que ya salió bien —no vuelve a '
+    + 'pagar las imágenes hechas— y sigue por donde iba. ',
+    h('button', {
+      clase: 'mini fantasma',
+      title: 'Olvida el intento a medias y genera el estilo entero otra vez',
+      onclick: () => {
+        if (!window.confirm('¿Olvidar el intento a medias y generar el estilo entero '
+          + 'otra vez? Lo que ya se hizo se vuelve a generar y a pagar.')) return;
+        APP.light.taller = null;
+        pintarLight();
+      },
+    }, 'Empezar de cero'),
+    ' olvida ese intento y lo genera todo otra vez (se vuelve a pagar).');
 }
 
 /* Una caja: a la izquierda QUÉ es, a la derecha el campo. Las dos columnas son
@@ -14500,33 +15512,31 @@ const NOMBRE_DEL_ESTILO_FALTA = 'ponle un nombre al estilo: es lo que se lee en 
   + 'su tarjeta y lo que lo distingue de los demás';
 
 function pieDeCreacion() {
-  const caja = h('div', { clase: 'pie-light' });
+  /* LA BARRA DE UN ESTILO NUEVO: «Generar» (o «Retomar») con lo que costará,
+     y a la izquierda lo que falta, cada cosa con un enlace a su pestaña. */
   const aMedias = APP.light.taller;
   const boton = h('button', {
-    clase: 'primario', disabled: true,
+    clase: 'primario principal', disabled: true,
     onclick: () => lanzarPresetLight(aMedias || undefined),
   }, aMedias ? 'Retomar' : 'Generar');
-  const nota = h('span', { clase: 'meta' }, 'comprobando…');
-  caja.appendChild(h('div', { clase: 'fila' }, boton, nota));
-  if (aMedias) {
-    /* LAS DOS SALIDAS, DICHAS. «Empezar de cero» a secas no decía nada: ni que
-       hay un intento a medias, ni que olvidarlo vuelve a pagar lo ya hecho. */
-    caja.appendChild(h('div', { clase: 'pista' },
-      h('b', {}, 'Este estilo se quedó a medias'),
-      ' (falló o se paró). «Retomar» aprovecha lo que ya salió bien —no vuelve a '
-      + 'pagar las imágenes hechas— y sigue por donde iba. ',
-      h('button', {
-        clase: 'mini fantasma',
-        title: 'Olvida el intento a medias y genera el estilo entero otra vez',
-        onclick: () => {
-          if (!window.confirm('¿Olvidar el intento a medias y generar el estilo entero '
-            + 'otra vez? Lo que ya se hizo se vuelve a generar y a pagar.')) return;
-          APP.light.taller = null;
-          pintarLight();
-        },
-      }, 'Empezar de cero'),
-      ' olvida ese intento y lo genera todo otra vez (se vuelve a pagar).'));
-  }
+  const estado = h('div', { clase: 'estado e-pend' }, marcaEstado('pend'), h('span', {}, 'comprobando…'));
+  const nota = h('div', { clase: 'plan' });
+  const barra = h('div', { clase: 'barra-accion pie-light pie-creacion' },
+    h('div', { clase: 'dentro' }, estado, nota, h('div', { clase: 'derecha' }, boton)));
+  const decir = (e, texto) => {
+    estado.className = `estado ${claseEstado(e)}`;
+    vaciar(estado).append(marcaEstado(e), h('span', {}, texto));
+  };
+  const falta = avisos => {
+    decir('aviso', `Falta${avisos.length === 1 ? '' : 'n'} ${avisos.length} ${avisos.length === 1 ? 'cosa' : 'cosas'}`);
+    vaciar(nota).append(...avisos.map(texto => {
+      const pestana = pestanaDelAviso(texto);
+      return pestana
+        ? h('button', { clase: 'enlace aviso aviso-falta', title: 'Ir a esa pestaña',
+          onclick: () => abrirPestanaDeEstilo(pestana) }, texto)
+        : h('span', { clase: 'aviso aviso-falta' }, texto);
+    }));
+  };
 
   const comprobar = () => {
     // SIN NOMBRE NO SE PREGUNTA (B3, 10-10-2026): abrir «Un estilo nuevo»
@@ -14534,26 +15544,29 @@ function pieDeCreacion() {
     // cada tecla. Lo que falta se dice aqui mismo.
     if (!String(encargoParaServidor().nombre || '').trim()) {
       boton.disabled = true;
-      vaciar(nota).append(h('span', { clase: 'aviso' }, NOMBRE_DEL_ESTILO_FALTA));
+      falta([NOMBRE_DEL_ESTILO_FALTA]);
       return;
     }
     pedir(API.presetLightPlan(), { method: 'POST', cuerpo: encargoParaServidor() })
       .then(datos => {
         const plan = datos.plan || {};
         const imagenes = Number(plan.imagenes) || 0;
-        vaciar(nota).append(
-          `unos ${duracionCorta(plan.segundos || 0)}`,
+        const usd = Number(plan.usd || plan.usd_total || ((plan.coste || {}).usd_total)) || 0;
+        decir('hecho', 'Listo para generar');
+        vaciar(nota).append(`unos ${duracionCorta(plan.segundos || 0)}`,
           imagenes ? ` · ${imagenes} imágenes` : '');
+        boton.textContent = (aMedias ? 'Retomar' : 'Generar')
+          + (imagenes ? ` · ${imagenes} imágenes` : '') + (usd ? ` ≈ ${usdCorto(usd)}` : '');
         boton.disabled = false;
       })
       .catch(err => {
         boton.disabled = true;
-        vaciar(nota).append(h('span', { clase: 'aviso' }, err.message));
+        falta(String(err.message || '').split(/\n|; /).map(x => x.trim()).filter(Boolean));
       });
   };
   APP.light.comprobar = comprobar;
   comprobar();
-  return caja;
+  return barra;
 }
 
 /* Se ha tocado un campo del formulario: se vuelve a preguntar qué falta y
@@ -14672,13 +15685,17 @@ function vistaGenerandoLight() {
   });
   caja.appendChild(lista);
 
-  caja.appendChild(h('div', { clase: 'fila' },
-    h('button', {
+  caja.appendChild(h('div', { clase: 'meta' },
+    'Puedes cerrar esta pestaña: sigue corriendo en el servidor.'));
+  /* «CANCELAR», EN LA BARRA DE ACCIÓN como todos los botones (rediseño de
+     Crear), con el tanto por ciento al lado. */
+  ponerBarra(() => barraDeAccion({ clase: 'pie-generando',
+    estado: { e: 'curso', texto: cancelando ? 'Cancelando…' : `${Math.round(fraccion * 100)} % · ${APP.light.abierto ? 'rehaciendo el estilo' : 'montando el estilo'}` },
+    plan: previsto > 0 && restante > 5 && !cancelando ? `quedan ~${duracionCorta(restante)}` : '',
+    botones: [h('button', {
       clase: 'mini peligro', disabled: cancelando,
       onclick: async () => { await cancelar(CLAVE_LIGHT); },
-    }, cancelando ? 'Cancelando…' : 'Cancelar'),
-    h('span', { clase: 'meta' },
-      'Puedes cerrar esta pestaña: sigue corriendo en el servidor.')));
+    }, cancelando ? 'Cancelando…' : 'Cancelar')] }));
   return caja;
 }
 
@@ -15057,29 +16074,104 @@ function bloqueReglasLight(ficha) {
 }
 
 
+/* LA FICHA DE UN ESTILO, EN PESTAÑAS (rediseño de Crear, 20-10-2026). Era
+   una pared de bloques uno detrás de otro; ahora cada bloque es una pestaña:
+   🎨 Cómo se ve · 📏 Reglas · 🗣️ Cómo se cuenta · 🎙️ Cómo suena · ⏱️ Ritmo ·
+   🌐 Nombre, idioma y proyecto. Por dentro, los mismos bloques de siempre (con
+   su título, que es lo que decide su guía). Las pestañas que no se ven se
+   pintan igual, escondidas: así el autoguardado, las láminas que llegan y los
+   repintados parciales encuentran su sitio. Una pestaña con algo pedido para
+   regenerar lleva un punto.
+
+   ABIERTA DESDE UN VÍDEO es su paso «Estilo»: arriba, «Su estilo» (lo que el
+   vídeo tiene del estilo y lo que puede traer), que antes vivía en el Encargo. */
+const PESTANAS_ESTILO = [
+  { id: 've', texto: '🎨 Cómo se ve' },
+  { id: 'reglas', texto: '📏 Reglas' },
+  { id: 'cuenta', texto: '🗣️ Cómo se cuenta' },
+  { id: 'suena', texto: '🎙️ Cómo suena' },
+  { id: 'ritmo', texto: '⏱️ Ritmo' },
+  { id: 'nombre', texto: '🌐 Nombre, idioma y proyecto' },
+];
+const PESTANA_DE_PARTE = { estilo: 've', tono: 'cuenta', voz: 'suena' };
+
+function pestanasDeEstilo(paneles, puntos, lista) {
+  const pestanas = lista || PESTANAS_ESTILO;
+  const actual = pestanas.some(p => p.id === APP.light.pestanaEstilo) ? APP.light.pestanaEstilo : pestanas[0].id;
+  const tira = h('div', { clase: 'pestanas-crear pestanas-estilo', role: 'tablist' });
+  const caja = h('div', { clase: 'ficha-en-pestanas' }, tira);
+  pestanas.forEach(p => {
+    tira.appendChild(h('button', {
+      clase: 'pestana-crear' + (p.id === actual ? ' activa' : ''), role: 'tab',
+      'aria-selected': p.id === actual ? 'true' : 'false', datos: { pestana: p.id },
+      title: puntos.has(p.id) ? 'aquí hay algo pedido para regenerar' : null,
+      onclick: () => abrirPestanaDeEstilo(p.id),
+    }, p.texto, puntos.has(p.id) ? h('span', { clase: 'punto', 'aria-label': 'algo pedido' }) : null));
+    const panel = h('div', { clase: 'panel-estilo', role: 'tabpanel', datos: { pestana: p.id } }, paneles[p.id]);
+    panel.hidden = p.id !== actual;
+    caja.appendChild(panel);
+  });
+  return caja;
+}
+
+/* Abrir una pestaña de la ficha (o del estilo nuevo) sin repintar: los
+   paneles ya están, escondidos. */
+function abrirPestanaDeEstilo(id) {
+  APP.light.pestanaEstilo = id;
+  document.querySelectorAll('.pestanas-estilo').forEach(tira => {
+    const caja = tira.parentNode;
+    tira.querySelectorAll('.pestana-crear').forEach(b => {
+      const esta = b.dataset.pestana === id;
+      b.classList.toggle('activa', esta);
+      b.setAttribute('aria-selected', esta ? 'true' : 'false');
+    });
+    caja.querySelectorAll(':scope > .panel-estilo').forEach(panel => { panel.hidden = panel.dataset.pestana !== id; });
+  });
+}
+
+/* Las pestañas con algo pedido llevan su punto (sin repintar la ficha). */
+function repintarPuntosDeEstilo(ficha) {
+  const pedidas = new Set(partesPedidas(ficha).map(p => PESTANA_DE_PARTE[p]).filter(Boolean));
+  document.querySelectorAll('.pestanas-estilo .pestana-crear').forEach(b => {
+    const punto = b.querySelector('.punto');
+    const quiere = pedidas.has(b.dataset.pestana);
+    if (quiere && !punto) b.appendChild(h('span', { clase: 'punto', 'aria-label': 'algo pedido' }));
+    else if (!quiere && punto) punto.remove();
+  });
+}
+
 function vistaPresetLight() {
   const ficha = fichaLight(APP.light.abierto);
+  const enVideo = pasoDelCarril() === 'estilo';
+  const v = APP.light.video;
+  const caja = h('div', { clase: 'light-preset' });
+  if (!enVideo) caja.appendChild(salidaTusProyectos());
+  else {
+    caja.appendChild(h('div', { clase: 'light-cab cab-paso' }, h('h2', {}, 'Estilo')));
+    caja.appendChild(h('div', { clase: 'pista entrada-paso' },
+      'Cómo se ve, cómo se cuenta y cómo suena. Arriba, lo que este vídeo tiene del estilo; '
+      + 'debajo, el estilo entero.'));
+    if (v.pid && !v.cargando) {
+      caja.appendChild(bloqueLight('Su estilo',
+        'los cambios que hagas en el estilo no llegan solos: se traen desde aquí',
+        bloqueEstiloDelVideo()));
+    }
+  }
   if (!ficha) {
-    return h('div', { clase: 'caja-info' }, 'ese estilo ya no está. ',
-      APP.light.desdeVideo
-        ? h('button', { clase: 'mini', onclick: () => abrirVideoLight(APP.light.desdeVideo) }, '‹ Volver al vídeo')
-        : h('button', { clase: 'mini', onclick: () => irALight('galeria') }, 'Volver'));
+    caja.appendChild(h('div', { clase: 'caja-info' }, enVideo
+      ? 'El estilo de este vídeo ya no está (borrado, o de un proyecto con clave sin abrir): el vídeo '
+        + 'sigue igual. Arriba, en «Su estilo», puedes restaurarlo o pasar el vídeo a otro estilo.'
+      : 'ese estilo ya no está.'));
+    return caja;
   }
   const datos = ficha.datos || {};
   const origen = datos.origen || {};
-  const caja = h('div', { clase: 'light-preset' });
-  caja.appendChild(h('div', { clase: 'light-cab' },
-    APP.light.desdeVideo ? h('button', {
-      clase: 'mini', onclick: () => abrirVideoLight(APP.light.desdeVideo),
-      title: 'Volver al vídeo desde el que has abierto este estilo',
-    }, '‹ Volver al vídeo') : null,
-    h('button', {
-      clase: 'mini fantasma', onclick: () => irALight('galeria'),
-      title: 'Volver a tus estilos',
-    }, APP.light.desdeVideo ? 'Todos los estilos' : '‹ Volver'),
-    h('h2', {}, ficha.nombre || ficha.id),
-    APP.light.desdeVideo ? h('span', { clase: 'meta' }, 'el estilo de tu vídeo') : null,
-    h('span', { clase: 'crece' }),
+  caja.appendChild(h('div', { clase: 'light-cab cab-ficha' },
+    h('div', { clase: 'crece' },
+      enVideo ? h('div', { clase: 'meta etiqueta-ficha' }, 'El estilo') : null,
+      h('h2', {}, ficha.nombre || ficha.id),
+      h('div', { clase: 'meta' }, 'Lo que cambias se guarda solo. Lo que pide redibujar o reescribir '
+        + 'se junta y lo lanza la barra de abajo.')),
     h('button', {
       clase: 'mini', title: 'Lo que costó hacer este estilo, desglosado',
       onclick: () => abrirCosteDelEstilo(ficha.id),
@@ -15099,69 +16191,75 @@ function vistaPresetLight() {
      indicación que sobrevive se vuelve a aplicar la próxima vez que regeneres,
      y un feedback que se evapora hay que volver a escribirlo. */
   grafico.appendChild(fuenteDeEstiloLight(ficha));
-  caja.appendChild(bloqueLight('🎨 Estilo gráfico',
-    'las imágenes, las cartelas y los subtítulos', grafico));
+  const paneles = {};
+  paneles.ve = bloqueLight('🎨 Estilo gráfico',
+    'las imágenes, las cartelas y los subtítulos', grafico);
 
   // 📏 las reglas del estilo: lo que ningún plano puede romper
-  caja.appendChild(bloqueLight('📏 Reglas del estilo',
-    'lo que ninguna imagen puede romper', bloqueReglasLight(ficha)));
+  paneles.reglas = bloqueLight('📏 Reglas del estilo',
+    'lo que ninguna imagen puede romper', bloqueReglasLight(ficha));
 
-  // 🧭 el tipo de relato por defecto de los vídeos de este estilo (rama tipo-de-relato)
-  caja.appendChild(bloqueLight('🧭 Tipo de relato',
-    'cómo se cuentan por defecto los vídeos de este estilo', bloqueRelatoEstiloLight(ficha)));
-
-  /* 🗣️ EL TONO, ENTERO Y EDITABLE.
-     Aquí se enseñaba `tono_resumen`: cuatro líneas cortadas con «…». La guía
-     que hay debajo son casi dos mil palabras, así que la pantalla la hacía
-     parecer «muy corta» y a medias cuando el problema estaba en otro sitio.
-     Ahora se enseña LA GUÍA COMPLETA —el párrafo más los rasgos, que es
-     exactamente lo que se le pega al redactor— y se puede corregir a mano ahí
-     mismo: autoguardado, como todo lo demás, sin botón de confirmar. */
-  const tono = h('div', {});
+  /* 🗣️ EL TONO, ENTERO Y EDITABLE, en tres cajas CON NOMBRE (rediseño de
+     Crear): eran tres textareas seguidos sin decir cuál era cuál. 1) lo que lee
+     el redactor (la guía completa, autoguardado); 2) pedirle un cambio (lo
+     junta la barra de abajo); 3) la fuente, para reescribirlo entero, plegada
+     porque se usa poco. */
+  const tono = h('div', { clase: 'tono-en-cajas' });
   const guiaTono = (datos.guion || {}).instrucciones || '';
-  if (guiaTono) {
-    grafico.dataset.tiene = '1';
-    tono.appendChild(h('div', { clase: 'meta' },
-      `${cifra(String(guiaTono).split(/\s+/).filter(Boolean).length)} palabras`
-      + (origen.tono_resumen
-        ? ` · ${String(origen.tono_resumen).split('\n')[0]}` : '')));
-    tono.appendChild(campoTexto('', guiaTono,
-      v => guardarPresetLight(ficha.id, { instrucciones: v }),
-      { filas: 16,
-        ayuda: 'Es lo que lee el redactor, tal cual. Se guarda solo; '
-             + 'regenerar el tono lo reescribe entero.' }));
-  } else {
-    tono.appendChild(h('div', { clase: 'pista' }, 'sin instrucciones todavía'));
-  }
-  tono.appendChild(fuenteDeTonoLight(ficha));
-  tono.appendChild(cajaDeRehacer(ficha, 'tono'));
-  caja.appendChild(bloqueLight('🗣️ Tono del guion',
-    'cómo se cuenta, nunca de qué', tono));
+  tono.appendChild(h('div', { clase: 'caja-con-nombre' },
+    h('div', { clase: 'etiqueta-caja' }, 'Lo que lee el redactor (se guarda solo)',
+      guiaTono ? h('span', { clase: 'meta' }, ` · ${cifra(String(guiaTono).split(/\s+/).filter(Boolean).length)} palabras`
+        + (origen.tono_resumen ? ` · ${String(origen.tono_resumen).split('\n')[0]}` : '')) : null),
+    guiaTono
+      ? campoTexto('', guiaTono,
+        v => guardarPresetLight(ficha.id, { instrucciones: v }),
+        { filas: 16,
+          ayuda: 'Es lo que lee el redactor, tal cual. Se guarda solo; '
+               + 'regenerar el tono lo reescribe entero.' })
+      : h('div', { clase: 'pista' }, 'sin instrucciones todavía')));
+  if (guiaTono) grafico.dataset.tiene = '1';
+  tono.appendChild(h('div', { clase: 'caja-con-nombre' },
+    h('div', { clase: 'etiqueta-caja' }, 'Pídele un cambio al tono'),
+    cajaDeRehacer(ficha, 'tono')));
+  const fuente = h('details', { clase: 'caja-con-nombre plegable-fuente' },
+    h('summary', { clase: 'etiqueta-caja' }, 'Cómo quieres que suene (para regenerarlo entero)'),
+    fuenteDeTonoLight(ficha));
+  if (fuenteTonoCambiadaLight(ficha)) fuente.open = true;
+  tono.appendChild(fuente);
+  // 🧭 el tipo de relato por defecto de los vídeos de este estilo (rama tipo-de-relato)
+  paneles.cuenta = h('div', {},
+    bloqueLight('🧭 Tipo de relato', 'cómo se cuentan por defecto los vídeos de este estilo',
+      bloqueRelatoEstiloLight(ficha)),
+    bloqueLight('🗣️ Tono del guion', 'cómo se cuenta, nunca de qué', tono));
 
   // ⏱️ el ritmo: se cambia y ya, no rehace nada
-  caja.appendChild(bloqueLight('⏱️ Ritmo', 'cada cuánto corta el vídeo',
+  paneles.ritmo = bloqueLight('⏱️ Ritmo', 'cada cuánto corta el vídeo',
     sliderRitmo((ficha.origen_ritmo || ritmoPorDefecto()),
-      v => guardarPresetLight(ficha.id, { ritmo: v }),
-      () => claveCosteRitmo(((ficha.datos || {}).estilo || {}).modo, ficha.calidad_nuevo))));
+      valor => guardarPresetLight(ficha.id, { ritmo: valor }),
+      () => claveCosteRitmo(((ficha.datos || {}).estilo || {}).modo, ficha.calidad_nuevo)));
 
   // 🎙️ la voz, con su escucha
   const voz = h('div', {});
   voz.appendChild(escuchaDeVoz(ficha));
-  voz.appendChild(cajaDeRehacer(ficha, 'voz'));
-  caja.appendChild(bloqueLight('🎙️ Voz', 'quién lo locuta', voz));
+  voz.appendChild(h('div', { clase: 'caja-con-nombre' },
+    h('div', { clase: 'etiqueta-caja' }, 'Pídele un cambio a la voz'),
+    cajaDeRehacer(ficha, 'voz')));
+  paneles.suena = bloqueLight('🎙️ Voz', 'quién lo locuta', voz);
 
   // 🌐 lo que se cambia a mano. Autoguardado, como todo lo demás.
   const cliente = fichaCliente(clienteDe(ficha.id));
-  caja.appendChild(bloqueLight('🌐 Nombre, idioma y proyecto', 'se cambian sin regenerar nada',
-    campoTexto('', ficha.nombre, v => guardarPresetLight(ficha.id, { nombre: v })),
+  paneles.nombre = bloqueLight('🌐 Nombre, idioma y proyecto', 'se cambian sin regenerar nada',
+    campoTexto('', ficha.nombre, valor => guardarPresetLight(ficha.id, { nombre: valor })),
     listaClientes().length ? h('div', { clase: 'fila' },
       h('span', { clase: 'meta' }, cliente ? `En el proyecto 📁 ${cliente.nombre}` : 'Sin proyecto'),
       h('button', { clase: 'mini', onclick: () => moverEstiloACliente(ficha) }, 'Cambiar de proyecto')) : null,
     campoSelect('', ficha.idioma_pantalla || ficha.idioma || 'es',
       idiomasLight().map(i => ({ valor: i.valor, nombre: i.nombre })),
-      v => guardarPresetLight(ficha.id, { idioma: v }, true))));
+      valor => guardarPresetLight(ficha.id, { idioma: valor }, true)));
 
-  caja.appendChild(pieDeEstilo(ficha));
+  const puntos = new Set(partesPedidas(ficha).map(p => PESTANA_DE_PARTE[p]).filter(Boolean));
+  caja.appendChild(pestanasDeEstilo(paneles, puntos));
+  ponerBarra(() => pieDeEstilo(ficha));
   return caja;
 }
 
@@ -15294,7 +16392,7 @@ function laminasDelEstilo(ficha) {
       h('div', { clase: 'meta' }, l.explicacion),
       h('div', { clase: 'herramientas' },
         h('button', { clase: 'mini', title: `Dibujarla otra vez: una imagen${precio}`,
-          onclick: () => regenerarLamina(ficha, l, precio) }, 'Regenerar'),
+          onclick: () => regenerarLamina(ficha, l, precio) }, 'Redibujar esta lámina'),
         h('button', { clase: 'mini', title: 'Que enseñe otra cosa',
           onclick: () => cambiarLamina(ficha, l, precio) }, 'Cambiar qué enseña'),
         d.laminas.length > d.min
@@ -15350,11 +16448,11 @@ function maxTextoLamina() {
 
 async function regenerarLamina(ficha, lamina, precio) {
   const r = await dialogo({
-    titulo: `Regenerar «${lamina.titulo}»`,
+    titulo: `Redibujar «${lamina.titulo}»`,
     texto: `Se dibuja otra vez con tu estilo: una imagen${precio}. Si quieres, di qué le corregirías.`,
     campos: [{ clave: 'texto', tipo: 'textarea', etiqueta: 'Qué le corregirías (opcional)',
       max: maxTextoLamina(), pista: 'sin sombras duras, y la persona mirando a cámara' }],
-    aceptar: 'Regenerar',
+    aceptar: 'Redibujar',
   });
   if (!r) return;
   accionLaminas(ficha, { accion: 'regenerar', lamina: lamina.id, texto: r.texto || '' });
@@ -16328,80 +17426,69 @@ function imagenesDePartes(pedidas) {
 function pieDeEstilo(ficha) {
   const pedidas = partesPedidas(ficha);
   const partes = (APP.light.datos || {}).partes || {};
-  const caja = h('div', { clase: 'pie-light' });
+  const enVideo = pasoDelCarril() === 'estilo';
   if (pedidas.length) {
     const plan = imagenesDePartes(pedidas);
     // apagado con cualquier petición del taller en camino; «Leyendo tu
     // corrección…» solo si es la de rehacer (no la de una lámina)
     const lanzando = !!APP.light.lanzando;
     const leyendo = lanzando && APP.light.lanzando !== 'laminas';
-    caja.appendChild(h('div', { clase: 'fila' },
-      h('button', {
-        clase: 'primario', disabled: lanzando,
-        onclick: () => regenerarPedidasLight(ficha, pedidas),
-      }, leyendo ? 'Leyendo tu corrección…' : 'Regenerar'),
-      h('span', { clase: 'meta' },
-        `${pedidas.map(p => partes[p] || p).join(' y ')} · ${plan}`
-        + ((fuenteCambiadaLight(ficha) || fuenteTonoCambiadaLight(ficha))
-          ? ' · desde la fuente nueva' : ''))));
+    const notas = [];
     /* CON EL ESTILO, ESA CIFRA ES UN TECHO Y NO UN PRECIO, y hay que decirlo:
        el motor lee lo que has escrito y decide qué hace falta rehacer, así que
        lo normal es que gaste menos. Decir el precio antes de pulsar es la regla
        de la casa; una cifra que el motor va a desmentir hacia abajo miente
-       igual que una que se queda corta. Es la misma forma en que el repaso
-       enuncia su política antes de aplicar. */
+       igual que una que se queda corta. */
     if (pedidas.includes('estilo') && !fuenteCambiadaLight(ficha)) {
-      caja.appendChild(h('div', { clase: 'meta' },
-        'Es un techo, no un precio: el motor lee lo que has escrito y rehace '
+      notas.push('Es un techo, no un precio: el motor lee lo que has escrito y rehace '
         + 'sólo lo que haga falta. Si basta con el texto en pantalla —el '
         + 'tamaño del subtítulo, su caja, la familia de los rótulos— no se '
-        + 'dibuja ninguna imagen.'));
+        + 'dibuja ninguna imagen.');
     }
-    /* UNA LÁMINA SE CAMBIA CON SU PROPIO BOTÓN. Este «Regenerar» lee lo que
-       has escrito y, si no ve a qué lámina va o has cambiado las imágenes o el
+    /* UNA LÁMINA SE CAMBIA CON SU PROPIO BOTÓN. Este botón lee lo que has
+       escrito y, si no ve a qué lámina va o has cambiado las imágenes o el
        tipo de imagen, las redibuja TODAS: cinco imágenes de más por una (N2 de
        las notas de mejoras, 13-10-2026). Se dice antes de pulsar. */
     const origenDelEstilo = (ficha.datos || {}).origen || {};
-    if (pedidas.includes('estilo')
-        && origenDelEstilo.estilo_imagenes && origenDelEstilo.taller) {
-      // LO QUE DE VERDAD LO REHACE TODO, lo mismo que mira el servidor
-      // (`material` en regenerar_preset_light): imágenes nuevas o quitadas, o
-      // el tipo de imagen. Cambiar solo las indicaciones pasa por el reparto.
+    if (pedidas.includes('estilo') && origenDelEstilo.estilo_imagenes && origenDelEstilo.taller) {
       const f = APP.light.fuente || {};
       const todas = f.preset === ficha.id && (modoCambiadoLight(ficha)
         || (f.quitar || []).length > 0 || (f.estilo_imagenes || []).length > 0);
-      caja.appendChild(h('div', { clase: 'meta' },
-        todas
-          ? 'Con imágenes o tipo de imagen nuevos se redibujan todas las láminas.'
-          : 'Para cambiar una sola lámina, usa el «Regenerar» de esa lámina en '
-            + '«Las láminas de tu estilo»: dibuja solo esa.'));
+      notas.push(todas
+        ? 'Con imágenes o tipo de imagen nuevos se redibujan todas las láminas.'
+        : 'Para cambiar una sola lámina, usa el «Redibujar esta lámina» de esa lámina en '
+          + '«Las láminas de tu estilo»: dibuja solo esa.');
     }
-  } else {
-    caja.appendChild(h('div', { clase: 'fila' },
-      h('button', {
-        clase: 'primario',
-        onclick: async () => {
-          await volcarPresetLight();
-          await cargarGaleriaLight(true);
-          irALight('galeria');
-          toast(`«${ficha.nombre}» guardado`);
-        },
-      }, 'Guardar'),
-      h('span', { clase: 'meta' },
-        'lo que cambias se guarda solo; esto lo adelanta y vuelve a tus estilos')));
+    const que = `${pedidas.map(p => partes[p] || p).join(' y ')} · ${plan}`
+      + ((fuenteCambiadaLight(ficha) || fuenteTonoCambiadaLight(ficha)) ? ' · desde la fuente nueva' : '');
+    return barraDeAccion({ clase: 'pie-light',
+      estado: { e: 'aviso', texto: 'Hay cambios pedidos (las pestañas con punto)' },
+      plan: h('span', {}, que, notas.length ? h('span', { clase: 'notas-pie' }, ` · ${notas.join(' ')}`) : null),
+      botones: [botonDeBarra(h('button', { onclick:
+        () => regenerarPedidasLight(ficha, pedidas) }, leyendo ? 'Leyendo tu corrección…' : 'Regenerar lo pedido'), { disabled: lanzando, ayuda: `Regenera ${que}. ${notas.join(' ')}` })] });
   }
-  return caja;
+  const traer = enVideo ? ((APP.light.video.cambiosEstilo || {}).partes || []).filter(p => p.cambia).length : 0;
+  return barraDeAccion({ clase: 'pie-light',
+    estado: { e: 'hecho', texto: 'Estilo guardado' + (traer ? ` · ${traer} ${traer === 1 ? 'cambio' : 'cambios'} por traer arriba` : '') },
+    plan: enVideo ? 'lo que cambias se guarda solo; esto lo adelanta y sigue al Encargo'
+      : 'lo que cambias se guarda solo; esto lo adelanta y vuelve a tus estilos',
+    botones: [botonDeBarra(h('button', { onclick: async () => {
+      await volcarPresetLight();
+      await cargarGaleriaLight(true);
+      if (enVideo) irAPasoDelCarril('encargo');
+      else irALight('galeria');
+      toast(`«${ficha.nombre}» guardado`);
+    } }, 'Guardar'))] });
 }
 
-/* Repinta SOLO el pie. El formulario entero no se puede repintar mientras
-   escribes: tira el foco del campo, que es la misma razón por la que el
-   autoguardado tampoco repinta (ver INTERFAZ.md). */
+/* Repinta SOLO la barra (y los puntos de las pestañas). El formulario entero
+   no se puede repintar mientras escribes: tira el foco del campo, que es la
+   misma razón por la que el autoguardado tampoco repinta (ver INTERFAZ.md). */
 function repintarPieDeEstilo() {
-  const viejo = document.querySelector('.light-preset .pie-light');
-  if (!viejo) return;
   const ficha = fichaLight(APP.light.abierto);
-  if (!ficha) return;
-  viejo.replaceWith(pieDeEstilo(ficha));
+  if (!ficha || APP.light.vista !== 'preset') return;
+  repintarBarra();
+  repintarPuntosDeEstilo(ficha);
 }
 
 /* Rehacer varias partes es lanzarlas una detrás de otra: cada una es su propio
@@ -17752,9 +18839,11 @@ function bloqueLlevaDelVideo() {
         cargar();
       }
     }));
-    /* EN EL ENCARGO SE GUARDA SIN MONTAR (`diferir`, 19-10-2026): se tocan
-       varias cosas seguidas y se montan todas a la vez con «Aplicar y volver
-       a montar». La pantalla Vídeo sigue montando con cada cambio. */
+    /* SE GUARDA SIN MONTAR (`diferir`, 19-10-2026): se tocan varias cosas
+       seguidas y se montan todas a la vez con «Montar el vídeo con N
+       cambios», en la barra de abajo. Desde el rediseño de Crear (decisión
+       9), la pantalla Vídeo hace lo mismo: el mismo panel, el mismo
+       comportamiento. */
     caja.appendChild(ajustesDelMontaje({ tipo: 'video', pid: v.pid, diferir: true }, v.lleva));
   };
   const cargar = async () => {
@@ -17787,10 +18876,6 @@ async function leerLlevaDelVideo(v) {
 function ajustesEnElVideo() {
   const v = videoAbierto();
   const caja = h('div', { clase: 'ajustes-en-video' });
-  caja.appendChild(h('h3', {}, 'Música, efectos y subtítulos'));
-  caja.appendChild(h('div', { clase: 'pista' },
-    'Cambiar esto solo vuelve a mezclar el sonido o a rotular el texto y monta el MP4 otra vez: '
-    + 'no se redibuja ninguna imagen ni se regraba la voz.'));
   if (!v.lleva || v.llevaDe !== v.pid) {
     if (v.leyendoLleva !== v.pid) {
       const pid = v.leyendoLleva = v.pid;
@@ -17802,7 +18887,10 @@ function ajustesEnElVideo() {
     caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
     return caja;
   }
-  caja.appendChild(ajustesDelMontaje({ tipo: 'video', pid: v.pid }, v.lleva));
+  /* DECISIÓN 9 DEL REDISEÑO (20-10-2026): el MISMO comportamiento que en el
+     Encargo. Tocar un ajuste lo guarda SIN montar (`diferir`); se monta todo
+     de una vez con «Montar el vídeo con N cambios», en la barra de abajo. */
+  caja.appendChild(ajustesDelMontaje({ tipo: 'video', pid: v.pid, diferir: true }, v.lleva));
   return caja;
 }
 
@@ -17861,8 +18949,78 @@ function estadoAjustes(modo) {
       busqueda: { animo: 'sobrio', extra: '', texto: '', temas: null, buscando: false,
         comercial: true, instrumental: true, pagina: 0 },
       efectos: null, papeles: null, buscaEfecto: { papel: '', texto: '', lista: null, buscando: false } };
+    if (modo.tipo === 'video') restaurarCambiosDelMontaje(APP.light.ajustesMontaje[clave], modo.pid);
   }
   return APP.light.ajustesMontaje[clave];
+}
+
+/* LOS CAMBIOS DEL MONTAJE SIN APLICAR, GUARDADOS EN EL NAVEGADOR por vídeo
+   (revisión del rediseño, 21-10-2026). Las filas apuntadas son para contar
+   («N cambios»: lo guardado ya está en el servidor); el ánimo de la música,
+   en cambio, SOLO vive aquí hasta montarlo, y recargar la página lo perdía.
+   Con la versión del render en la que se apuntaron: un montaje posterior los
+   ha recogido (`alDiaConElMontaje`). Sin almacén, todo sigue en memoria. */
+function claveCambiosDelMontaje(pid) {
+  return `asvs.montajeSinAplicar.${pid}`;
+}
+
+function guardarCambiosDelMontaje(est) {
+  if (!est || !est.pid) return;
+  const filas = Object.keys(est.filasSinAplicar || {});
+  try {
+    if (!filas.length && !est.animoPedido) localStorage.removeItem(claveCambiosDelMontaje(est.pid));
+    else {
+      localStorage.setItem(claveCambiosDelMontaje(est.pid), JSON.stringify({
+        filas, animo: est.animoPedido || '', version: est.filasVersion || 0 }));
+    }
+  } catch (e) { /* sin almacén: se queda en memoria */ }
+}
+
+function restaurarCambiosDelMontaje(est, pid) {
+  est.pid = pid;
+  let guardado = null;
+  try { guardado = JSON.parse(localStorage.getItem(claveCambiosDelMontaje(pid)) || 'null'); } catch (e) { guardado = null; }
+  if (!guardado || typeof guardado !== 'object') return;
+  const filas = Array.isArray(guardado.filas) ? guardado.filas.filter(f => typeof f === 'string') : [];
+  if (filas.length) {
+    est.filasSinAplicar = Object.fromEntries(filas.map(f => [f, true]));
+    est.sinAplicar = true;
+    est.filasVersion = Number(guardado.version) || 0;
+  }
+  if (typeof guardado.animo === 'string' && guardado.animo) est.animoPedido = guardado.animo;
+}
+
+/* La versión activa del render del vídeo abierto (0 sin montar). */
+function versionDelRender() {
+  const ficha = (APP.light.video.fichas || {}).render;
+  return ficha ? Number(versionDe(ficha)) || 0 : 0;
+}
+
+/* UN MONTAJE RECOGE LO APUNTADO (punto 5 de la revisión): lo guardado con
+   `remontar: false` está en los params, y cualquier montaje lo lleva --el de
+   Imágenes, la tanda del vídeo, aplicar las notas--, no solo el de «Montar el
+   vídeo con N cambios». Si el render ha cambiado de versión desde que se
+   apuntaron, ya no están sin aplicar. El ánimo NO: no está en el servidor
+   hasta montarlo, y sigue pendiente. */
+function alDiaConElMontaje(pid) {
+  if (APP.light.video.pid !== pid) return;
+  const est = estadoAjustes({ tipo: 'video', pid });
+  if (!Object.keys(est.filasSinAplicar || {}).length) return;
+  if ((est.filasVersion || 0) !== versionDelRender()) {
+    olvidarCambiosDelMontaje(est, pid);
+    if (est.montaje) est.montaje.sin_aplicar = false;
+  }
+}
+
+/* AVISAR AL SALIR DEL VÍDEO con cambios del montaje sin aplicar: se quedan
+   apuntados (y se vuelven a ver al abrirlo), pero el MP4 no los lleva. */
+function puedeSalirDelVideo() {
+  if (!APP.light.video.pid || trabajoVideoLight()) return true;
+  const cambios = cambiosDelMontaje();
+  if (!cambios.hay) return true;
+  return window.confirm(`Hay ${cambios.n ? `${cambios.n} ${cambios.n === 1 ? 'cambio' : 'cambios'}` : 'cambios'} `
+    + 'del montaje sin aplicar: el vídeo todavía no los lleva. Se quedan apuntados para cuando '
+    + 'vuelvas («Montar el vídeo con los cambios»). ¿Salir igualmente?');
 }
 
 function opcionesBorrador(e) {
@@ -17890,7 +19048,7 @@ function ajustesDelMontaje(modo, lleva) {
     if (lleva.musica !== false) caja.appendChild(filaAjuste(modo, est, 'musica', pintar));
     if (lleva.subtitulos !== false) caja.appendChild(filaAjuste(modo, est, 'subtitulos', pintar));
     caja.appendChild(filaAjuste(modo, est, 'logo', pintar));
-    if (lleva.efectos !== false && modo.tipo === 'video') caja.appendChild(filaAjuste(modo, est, 'efectos', pintar));
+    if (lleva.efectos !== false) caja.appendChild(filaAjuste(modo, est, 'efectos', pintar));
     caja.appendChild(filaAjuste(modo, est, 'montaje', pintar));
   };
   // LA LECTURA PINTA EN LOS QUE ESTÉN EN PANTALLA: la pantalla puede pintar
@@ -17908,36 +19066,159 @@ function ajustesDelMontaje(modo, lleva) {
   return caja;
 }
 
-/* «Hay cambios del montaje sin aplicar» (solo en el Encargo, `diferir`): lo
-   guardado con `remontar: false` se monta todo de una vez. El servidor decide
-   si basta con volver a mezclar (segundos) o hay que rehacer capas y montaje. */
+/* «HAY N CAMBIOS DEL MONTAJE SIN APLICAR», en el Encargo y en Vídeo: lo
+   guardado con `remontar: false` se monta todo de una vez con el botón de la
+   barra de abajo («Montar el vídeo con N cambios»). El servidor decide si basta
+   con volver a mezclar (segundos) o hay que rehacer capas y montaje. */
 function franjaSinAplicar(modo, est) {
   if (!modo.diferir || modo.tipo !== 'video') return null;
-  const montaje = est.montaje || {};
-  if (!montaje.montado || !(est.sinAplicar || montaje.sin_aplicar)) return null;
-  const enMarcha = !!trabajoVideoLight();
+  const cambios = cambiosDelMontaje();
+  if (!cambios.hay) return null;
+  const enMarcha = !!trabajoVideoLight() || !!est.montandoAnimo;
   return h('div', { clase: 'franja-sin-aplicar' },
     h('span', { clase: 'crece' }, enMarcha ? 'Montando el vídeo con tus cambios…'
-      : 'Hay cambios del montaje sin aplicar'),
-    h('button', {
-      clase: 'mini primario', disabled: enMarcha || !!est.aplicando,
-      title: 'Monta el vídeo una sola vez con todo lo cambiado: ninguna imagen, gratis',
-      onclick: () => aplicarMontajePendiente(modo, est),
-    }, est.aplicando ? 'Aplicando…' : 'Aplicar y volver a montar'));
+      : `Hay ${cambios.n ? `${cambios.n} ${cambios.n === 1 ? 'cambio' : 'cambios'}` : 'cambios'} del montaje sin aplicar`),
+    enMarcha ? null : h('span', { clase: 'meta' },
+      `se montan con «${textoMontarCambios(cambios)}», en la barra de abajo`));
+}
+
+/* Lo que dice el botón que los monta. */
+function textoMontarCambios(cambios) {
+  const c = cambios || cambiosDelMontaje();
+  return c.n ? `Montar el vídeo con ${c.n} ${c.n === 1 ? 'cambio' : 'cambios'}` : 'Montar el vídeo con los cambios';
+}
+
+/* APUNTAR UN CAMBIO GUARDADO SIN MONTAR, en la fila del ajuste que esté
+   abierta (la música, los subtítulos…): tocar tres veces la música es UN
+   cambio. Repinta los dos sitios donde se ve: el panel y la barra. */
+function apuntarCambioDeMontaje(est, fila) {
+  est.sinAplicar = true;
+  est.filasSinAplicar = est.filasSinAplicar || {};
+  est.filasSinAplicar[fila || est.abierta || 'montaje'] = true;
+  if (est.pid === APP.light.video.pid) est.filasVersion = versionDelRender();
+  guardarCambiosDelMontaje(est);
+  if (est.repintar) est.repintar();
+  repintarBarra();
+  repintarCarril();
+}
+
+/* «MONTAR EL VÍDEO CON N CAMBIOS» (decisión 9 del rediseño de Crear). Lo único
+   que monta lo que se cambió en los ajustes del montaje, y NUNCA PAGA:
+     - un ánimo para la música automática, pedido y sin montar: se monta su
+       banda (`PUT /musica/animo`, que remezcla si el montaje estaba al día) y,
+       si después sigue quedando algo, se aplica;
+     - si no, `POST /montaje/aplicar`: una mezcla si basta, o capas y montaje.
+       «Ni una imagen» (lo dice el servidor), aunque haya imágenes viejas.
+   Las imágenes viejas son OTRO botón, con su precio y su confirmación
+   (`montarElVideoLight`). Antes, con alguna obsoleta, esto lanzaba la tanda
+   del vídeo y las redibujaba sin preguntar desde un botón que decía «gratis».
+   Sin MP4 no hay nada que aplicar: se monta el vídeo con los cambios dentro,
+   como el primer montaje (y eso sí pregunta si paga). */
+async function montarCambiosDelMontaje() {
+  const v = APP.light.video;
+  const pid = v.pid;
+  if (!pid) return;
+  const modo = { tipo: 'video', pid, diferir: true };
+  const est = estadoAjustes(modo);
+  // UN DOBLE CLIC NO MONTA DOS VECES: las dos marcas se ponen antes de esperar nada
+  if (est.aplicando || est.montandoAnimo || trabajoVideoLight()) return;
+  if (!hayMp4Light()) { await montarElVideoLight(true); return; }
+  if (est.animoPedido) {
+    await montarAnimoPedido(modo, est, async () => {
+      try { await cargarAjustesVideo(modo, est); } catch (e) { /* se relee al volver */ }
+      const m = est.montaje || {};
+      if (videoAbierto().pid === pid && m.montado && (m.sin_aplicar || m.pendiente) && !trabajoVideoLight()) {
+        await aplicarMontajePendiente(modo, est);
+      } else {
+        olvidarCambiosDelMontaje(est, pid);
+        if (est.repintar) est.repintar();
+        try { await recargarVideoAbierto(); } catch (e) { /* se relee al volver */ }
+      }
+    });
+    return;
+  }
+  await aplicarMontajePendiente(modo, est);
+}
+
+/* LO QUE CUESTA MONTAR EL VÍDEO POR LA TANDA ('render', pendientes), para el
+   texto del botón: « · ≈ 0,40 $» si dibuja imágenes viejas, « · gratis» si no,
+   y NADA mientras no ha llegado el plan (no se promete gratis sin saberlo). */
+function precioDeMontarLight() {
+  const plan = (APP.light.video.planes || {}).render;
+  if (!plan) return '';
+  const coste = plan.coste || {};
+  const n = Number(coste.imagenes_por_generar) || 0;
+  return n ? ` · ≈ ${usdCorto(Number(coste.usd_por_generar) || 0)}` : ' · gratis';
+}
+
+/* El precio de montar con los cambios del montaje: con MP4 es aplicarlos
+   (gratis siempre); sin él, el primer montaje (el de la tanda). */
+function precioDeMontarCambios() {
+  return hayMp4Light() ? ' · gratis' : precioDeMontarLight();
+}
+
+/* MONTAR EL VÍDEO POR LA TANDA ('render', pendientes): el primer montaje, o
+   el de un vídeo que ha quedado viejo. Si por el camino hay que DIBUJAR
+   imágenes viejas, se dice cuántas y cuánto y se pregunta: este botón no paga
+   en silencio. El plan se pide de nuevo antes de decidir (el de la pantalla
+   puede tener unos segundos). Con `conAnimo` lleva dentro el ánimo pedido, si
+   lo hay (se monta antes su banda): lo piden los botones que montan «con los
+   cambios»; el de Imágenes no, y el ánimo sigue pendiente. */
+async function montarElVideoLight(conAnimo) {
+  const v = APP.light.video;
+  const pid = v.pid;
+  if (!pid || MONTANDO_LIGHT[pid] || trabajoVideoLight()) return;
+  MONTANDO_LIGHT[pid] = true;
+  repintarBarra();
+  try {
+    await refrescarPlanLight('render', true);
+    if (videoAbierto().pid !== pid) return;
+    const plan = (v.planes || {}).render;
+    if (!plan) { toast('No se ha podido saber qué cuesta montarlo: vuelve a probar en un momento', true); return; }
+    const coste = plan.coste || {};
+    const n = Number(coste.imagenes_por_generar) || 0;
+    if (n && !window.confirm(`Para montar el vídeo hay que dibujar antes ${n} `
+      + `${n === 1 ? 'imagen que ha quedado vieja' : 'imágenes que han quedado viejas'}: `
+      + `≈ ${usdCorto(Number(coste.usd_por_generar) || 0)}. ¿Seguir?`)) return;
+    const modo = { tipo: 'video', pid, diferir: true };
+    const est = estadoAjustes(modo);
+    if (conAnimo && est.animoPedido && !est.montandoAnimo) {
+      await montarAnimoPedido(modo, est, async () => {
+        if (videoAbierto().pid === pid && !trabajoVideoLight()) await lanzarTandaLight('render', 'pendientes');
+      });
+      return;
+    }
+    await lanzarTandaLight('render', 'pendientes');
+  } finally {
+    delete MONTANDO_LIGHT[pid];
+    repintarBarra();
+  }
 }
 
 async function aplicarMontajePendiente(modo, est) {
+  if (est.aplicando) return;
   est.aplicando = true;
   if (est.repintar) est.repintar();
+  repintarBarra();
   try {
     const r = await pedir(`${API.proyecto(modo.pid)}/montaje/aplicar`, { method: 'POST' });
-    est.sinAplicar = false;
+    olvidarCambiosDelMontaje(est, modo.pid);
     if (est.montaje) { est.montaje.sin_aplicar = false; est.montaje.pendiente = false; }
     if (est.subtitulos) est.subtitulos.pendiente = false;
     avisoDeMontaje(r, r.solo_mezcla ? 'Cambios del montaje (solo la mezcla)' : 'Cambios del montaje');
   } catch (e) { toast(e.message, true); }
   est.aplicando = false;
   if (est.repintar) est.repintar();
+  repintarBarra();
+}
+
+/* LOS CAMBIOS DEL MONTAJE YA RECOGIDOS por un montaje: las filas apuntadas. El
+   ánimo pedido NO: ese solo lo recoge su propio `PUT /musica/animo`. */
+function olvidarCambiosDelMontaje(est, pid) {
+  est.filasSinAplicar = {};
+  est.sinAplicar = false;
+  est.pid = est.pid || pid;
+  guardarCambiosDelMontaje(est);
 }
 
 async function cargarAjustesVideo(modo, est) {
@@ -17995,7 +19276,12 @@ function filaAjuste(modo, est, cual, repintar) {
   const fila = h('div', { clase: 'fila-ajuste' + (abierta ? ' abierta' : '') });
   fila.appendChild(h('div', { clase: 'fila-ajuste-cab' },
     h('b', {}, nombres[cual]),
-    h('span', { clase: 'meta crece' }, resumenAjuste(modo, est, cual)),
+    h('span', { clase: 'meta crece' }, (() => {
+      /* LO GUARDADO SIN MONTAR SE DICE EN SU FILA (decisión 9 del rediseño) */
+      const resumen = resumenAjuste(modo, est, cual);
+      const pendiente = (est.filasSinAplicar || {})[cual] || (cual === 'musica' && est.animoPedido);
+      return pendiente && !/sin aplicar todavía/.test(resumen) ? `${resumen} · sin aplicar todavía` : resumen;
+    })()),
     h('button', { clase: 'mini', onclick: () => { est.abierta = abierta ? '' : cual; repintar(); } },
       abierta ? 'Cerrar' : 'Cambiar')));
   if (abierta) {
@@ -18058,11 +19344,15 @@ function resumenAjuste(modo, est, cual) {
 /* Lo que devuelve la API al cambiar algo que vuelve a montar el vídeo. */
 function avisoDeMontaje(r, quePasa, modo) {
   if (modo && modo.diferir && !(r && r.trabajo_id)) {
-    // el Encargo: guardado, y se aplica con lo demás en un solo montaje
+    // guardado, y se aplica con lo demás en un solo montaje (decisión 9)
     const est = estadoAjustes(modo);
-    est.sinAplicar = true;
-    toast(`${quePasa}: guardado. Se aplica con «Aplicar y volver a montar»`);
-    if (est.repintar) est.repintar();
+    if (r && r.montado === false) {
+      toast(`${quePasa}: guardado. Se aplicará al montar el vídeo`);
+      if (est.repintar) est.repintar();
+      return;
+    }
+    toast(`${quePasa}: guardado, sin aplicar todavía. Se monta con «Montar el vídeo con los cambios», abajo`);
+    apuntarCambioDeMontaje(est);
     return;
   }
   if (r && r.trabajo_id) {
@@ -18229,48 +19519,70 @@ function animoDeLaAutomatica(modo, est, repintar) {
   const pedido = est.animoPedido || unico;
   const caja = h('div', { clase: 'campo' });
   caja.appendChild(h('label', {}, 'Automática con un ánimo para todo el vídeo'));
-  const montar = async () => {
-    /* UN TEMA ELEGIDO A MANO se sustituye por la automática: se dice antes. */
-    if ((est.musica || {}).tema && !window.confirm(
-      'Ahora suena un tema que elegiste tú. La música automática lo sustituye por '
-      + 'temas de este ánimo. ¿Seguir?')) return;
-    est.montandoAnimo = true; repintar();
-    try {
-      const r = await pedir(`${API.proyecto(modo.pid)}/musica/animo`, {
-        method: 'PUT', cuerpo: { animo: est.animoPedido } });
-      const nombre = ((ANIMOS_MUSICA.find(a => a[0] === r.animo) || [0, r.animo])[1]).toLowerCase();
-      toast(r.remontando
-        ? `Música: buscando temas «${nombre}» y volviendo a mezclar el vídeo, sin dibujar nada`
-        : `Música: buscando temas «${nombre}». Entrará al montar el vídeo`);
-      seguirTrabajo(CLAVE_VIDEO_LIGHT, r.trabajo_id, async () => {
-        est.montandoAnimo = false;
-        est.animoPedido = '';
-        try { await cargarAjustesVideo(modo, est); } catch (e) { /* se relee al volver */ }
-        est.repintar();
-        try { await recargarVideoAbierto(); } catch (e) { /* se relee al volver */ }
-      });
-    } catch (e) {
-      est.montandoAnimo = false;
-      toast(e.message, true);
-      repintar();
-    }
-  };
+  /* ELEGIR NO MONTA (decisión 9 del rediseño de Crear): el ánimo elegido queda
+     «sin aplicar todavía» y lo monta «Montar el vídeo con N cambios», con todo
+     lo demás. Antes tenía su propio botón, «Montar la música con este ánimo»,
+     que montaba en el acto. Se queda en la pantalla, no en el servidor: este
+     cambio no escribe nada hasta montarlo (`PUT /musica/animo` lo hace al
+     terminar de montar la banda). */
   caja.appendChild(h('div', { clase: 'fila' },
     h('select', {
       'aria-label': 'Ánimo de la música automática', clase: 'animo-automatica', value: pedido,
-      onchange: ev => { est.animoPedido = ev.target.value; repintar(); } },
+      disabled: !est.hayJamendo || !!est.montandoAnimo,
+      onchange: async ev => {
+        const valor = ev.target.value;
+        /* UN TEMA ELEGIDO A MANO se sustituye por la automática: se dice antes. */
+        if (valor && (est.musica || {}).tema && !window.confirm(
+          'Ahora suena un tema que elegiste tú. La música automática lo sustituye por '
+          + 'temas de este ánimo al montar el vídeo. ¿Seguir?')) { ev.target.value = pedido; return; }
+        est.animoPedido = valor && valor !== unico ? valor : '';
+        guardarCambiosDelMontaje(est);
+        repintar();
+        repintarBarra();
+        repintarCarril();
+      } },
     h('option', { value: '' }, 'Según el ritmo (cada tramo el suyo)'),
     ...ANIMOS_MUSICA.map(([id, nombre]) => h('option', { value: id }, nombre))),
-    h('button', {
-      clase: 'mini',
-      disabled: !est.animoPedido || est.montandoAnimo || !est.hayJamendo,
-      onclick: montar,
-    }, est.montandoAnimo ? 'montando la música…' : 'Montar la música con este ánimo')));
+    est.montandoAnimo ? h('span', { clase: 'meta' }, 'montando la música…')
+      : (est.animoPedido ? h('span', { clase: 'meta sin-aplicar' }, '· sin aplicar todavía') : null)));
   caja.appendChild(h('div', { clase: 'pista' }, !est.hayJamendo
     ? 'Hace falta la clave de Jamendo (Configuración): los temas se buscan allí.'
     : (unico ? 'Ahora suena toda con este ánimo. ' : '')
-      + 'Busca un tema de ese ánimo para cada tramo y vuelve a mezclar: no se dibuja nada.'));
+      + 'Al montar el vídeo se busca un tema de ese ánimo para cada tramo y se vuelve a mezclar: no se dibuja nada.'));
   return caja;
+}
+
+/* MONTAR LA MÚSICA CON EL ÁNIMO PEDIDO (lo llama «Montar el vídeo con N
+   cambios»): la banda nueva y, si el montaje estaba al día, la mezcla. */
+async function montarAnimoPedido(modo, est, alTerminar) {
+  if (est.montandoAnimo) return;
+  est.montandoAnimo = true;
+  if (est.repintar) est.repintar();
+  repintarBarra();
+  try {
+    const r = await pedir(`${API.proyecto(modo.pid)}/musica/animo`, {
+      method: 'PUT', cuerpo: { animo: est.animoPedido } });
+    /* EL SERVIDOR YA LO TIENE: deja de ser un cambio pendiente de la pantalla
+       (se ve «montando la música…» mientras corre). */
+    est.animoPedido = '';
+    guardarCambiosDelMontaje(est);
+    const nombre = ((ANIMOS_MUSICA.find(a => a[0] === r.animo) || [0, r.animo])[1]).toLowerCase();
+    toast(r.remontando
+      ? `Música: buscando temas «${nombre}» y volviendo a mezclar el vídeo, sin dibujar nada`
+      : `Música: buscando temas «${nombre}»`);
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, r.trabajo_id, async () => {
+      est.montandoAnimo = false;
+      if (alTerminar) await alTerminar();
+      if (est.repintar) est.repintar();
+      if (MODULOS.actual === 'crear') pintarLight();
+    }, () => refrescarVivosLight(), modo.pid);
+    if (MODULOS.actual === 'crear') pintarLight();
+  } catch (e) {
+    est.montandoAnimo = false;
+    toast(e.message, true);
+    if (est.repintar) est.repintar();
+    repintarBarra();
+  }
 }
 
 function buscadorDeTemas(modo, est, repintar, fijarTema, puesto) {
@@ -18373,6 +19685,16 @@ function subirAudioPropio(familia, modo, alSubir, texto) {
    FreeSound por lo que quieras o subido por ti. */
 function editorEfectos(modo, est, repintar) {
   const caja = h('div', { clase: 'editor-ajuste' });
+  /* EN UN VÍDEO NUEVO NO HAY NADA QUE ELEGIR TODAVÍA: los efectos se buscan
+     en FreeSound al montar, según los cortes del vídeo, y no hay opción al
+     crearlo que los fije. Se dice, en vez de esconder la fila. */
+  if (modo.tipo === 'borrador') {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Automáticos: se buscan en FreeSound al montar el vídeo, según sus cortes. Cuando esté montado '
+      + 'podrás oírlos, descartarlos, elegir otros o subir los tuyos aquí mismo (y en Vídeo). '
+      + 'Para que no lleve ninguno, apaga «✨ Efectos» arriba.'));
+    return caja;
+  }
   if (!est.leido) { caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…')); return caja; }
   const bf = est.buscaEfecto;
   /* LO QUE TENÍA LA MÚSICA Y LOS EFECTOS NO (11-10-2026): cuánto se oyen,
@@ -18413,7 +19735,10 @@ function editorEfectos(modo, est, repintar) {
       repintar();
       seguirTrabajo(`efectos_${modo.pid}`, r.trabajo_id, async t => {
         est.buscandoOtros = '';
-        if (t.estado === 'listo') toast('Efectos nuevos: se oyen al volver a montar el vídeo');
+        if (t.estado === 'listo') {
+          toast('Efectos nuevos: se oyen al volver a montar el vídeo');
+          if (modo.diferir && (est.montaje || {}).montado) apuntarCambioDeMontaje(est, 'efectos');
+        }
         await releer();
       });
     } catch (e) { toast(e.message, true); }
@@ -18541,7 +19866,7 @@ function editorSubtitulos(modo, est, repintar) {
     try {
       const r = await pedir(`${API.proyecto(modo.pid)}/subtitulos`, { method: 'PUT', cuerpo: cambios });
       est.subtitulos = await pedir(`${API.proyecto(modo.pid)}/subtitulos`);
-      if (modo.diferir && r.cambiado) est.sinAplicar = true;
+      if (modo.diferir && r.cambiado && est.subtitulos.montado) apuntarCambioDeMontaje(est, 'subtitulos');
     } catch (e) { toast(e.message, true); }
     if (modo.diferir && est.repintar) est.repintar(); else repintar();
   };
@@ -18574,22 +19899,8 @@ function editorSubtitulos(modo, est, repintar) {
     pie.appendChild(h('button', { clase: 'mini', onclick: () => cambiar({ automatico: true }) },
       'Volver a los del estilo'));
   }
-  if (!borrador && modo.diferir && actual.montado && actual.pendiente) {
-    pie.appendChild(h('span', { clase: 'meta' }, 'se aplican con «Aplicar y volver a montar», arriba'));
-  } else if (!borrador && actual.montado && actual.pendiente) {
-    pie.appendChild(h('button', {
-      clase: 'mini primario',
-      onclick: async () => {
-        try {
-          const r = await pedir(`${API.proyecto(modo.pid)}/subtitulos/aplicar`, { method: 'POST' });
-          avisoDeMontaje(r, 'Subtítulos');
-          est.subtitulos.pendiente = false;
-        } catch (e) { toast(e.message, true); }
-        repintar();
-      },
-    }, 'Aplicar ahora'));
-    pie.appendChild(h('span', { clase: 'meta' },
-      'rehace las capas de texto y vuelve a montar el vídeo: unos minutos, ninguna imagen'));
+  if (!borrador && actual.montado && actual.pendiente) {
+    pie.appendChild(h('span', { clase: 'meta' }, '· sin aplicar todavía: se montan con el botón de la barra de abajo'));
   } else if (!borrador) {
     pie.appendChild(h('span', { clase: 'meta' },
       actual.montado ? 'aplicados' : 'se aplicarán al montar el vídeo'));
@@ -19092,7 +20403,7 @@ function editorMontaje(modo, est, repintar) {
       if (transiciones) cuerpo.transiciones = transiciones;
       est.montaje = await pedir(`${API.proyecto(modo.pid)}/montaje`, { method: 'PUT', cuerpo });
       MONTAJE_PLANOS.datos = null;   // «Como el vídeo (…)» dice el de ahora
-      if (modo.diferir && est.montaje.cambiado) est.sinAplicar = true;
+      if (modo.diferir && est.montaje.cambiado && est.montaje.montado) apuntarCambioDeMontaje(est, 'montaje');
     } catch (err) { toast(err.message, true); }
     if (modo.diferir && est.repintar) est.repintar(); else repintar();
   };
@@ -19146,22 +20457,8 @@ function editorMontaje(modo, est, repintar) {
     pie.appendChild(h('span', { clase: 'meta' }, esCortoElEncargo(modo.e, datos)
       ? 'Automático en un vídeo de hasta 2 minutos: vivo, subtítulos de redes, gancho, cifras y barra.'
       : 'Automático en un vídeo largo: lo de siempre.'));
-  } else if (modo.diferir && est.montaje.montado && est.montaje.pendiente) {
-    pie.appendChild(h('span', { clase: 'meta' }, 'se aplica con «Aplicar y volver a montar», arriba'));
   } else if (est.montaje.montado && est.montaje.pendiente) {
-    pie.appendChild(h('button', {
-      clase: 'mini primario',
-      onclick: async () => {
-        try {
-          const r = await pedir(`${API.proyecto(modo.pid)}/montaje/aplicar`, { method: 'POST' });
-          avisoDeMontaje(r, 'Movimiento y efectos');
-          est.montaje.pendiente = false;
-        } catch (err) { toast(err.message, true); }
-        repintar();
-      },
-    }, 'Aplicar ahora'));
-    pie.appendChild(h('span', { clase: 'meta' },
-      'rehace las capas y vuelve a montar el vídeo: unos minutos, ninguna imagen'));
+    pie.appendChild(h('span', { clase: 'meta' }, '· sin aplicar todavía: se monta con el botón de la barra de abajo'));
   } else {
     pie.appendChild(h('span', { clase: 'meta' },
       est.montaje.montado ? 'aplicado' : 'se aplicará al montar el vídeo'));
@@ -19535,18 +20832,11 @@ function bloqueEstiloDelVideo() {
         + (total ? ` (≈ ${usdCorto(total)} al generar)` : '') : 'Traer')));
   };
   const cargar = async () => {
-    v.cambiosEstiloCargando = true;
-    try {
-      v.cambiosEstilo = await pedir(`${API.proyecto(v.pid)}/estilo/cambios`);
-    } catch (e) {
-      v.cambiosEstilo = { estilo: null, partes: [], por_que_no: e.message };
-    }
-    v.cambiosEstiloEn = Date.now();
-    v.cambiosEstiloCargando = false;
+    if (!(await cargarCambiosDelEstilo(v))) return;
     // la pantalla se ha podido repintar mientras tanto (abrir un vídeo pinta
     // varias veces): esta caja ya no es la que se ve, y pintarla no serviría
-    if (!caja.isConnected && v.vista === 'encargo_video') pintarLight();
-    else pintar();
+    if (!caja.isConnected && pasoDelCarril() === 'estilo') pintarLight();
+    else { pintar(); repintarCarril(); repintarBarra(); }
   };
   /* SE VUELVE A PREGUNTAR CADA VEZ QUE SE ENSEÑA, no una vez por vídeo. Se
      guardaba la primera respuesta y ya: cambiar el aire entre bloques en el
@@ -19568,7 +20858,7 @@ function bloqueEstiloDelVideo() {
    el guion tiene su botón en el encargo, el audio en el guion y las imágenes en
    su pestaña. Aquí se dice el PRIMER paso que falta, con su botón al lado, en
    el orden en que se rehacen (guion → audio → imágenes y montaje). */
-function siguientePasoLight() {
+function siguientePasoLight(solo) {
   const v = APP.light.video;
   const estado = paso => (v.fichas[paso] || {}).estado;
   const corriendo = !!trabajoVideoLight();
@@ -19576,7 +20866,7 @@ function siguientePasoLight() {
     h('div', { clase: 'crece' }, h('strong', {}, 'Siguiente paso: '), texto),
     boton ? h('button', { clase: 'mini primario', disabled: corriendo, onclick: accion }, boton) : null);
   if (!v.guion) return null;
-  if (['ingesta', 'brief', 'guion'].some(p => estado(p) === 'obsoleto')) {
+  if ((!solo || solo === 'guion') && ['ingesta', 'brief', 'guion'].some(p => estado(p) === 'obsoleto')) {
     const motivos = motivosGuionViejoLight();
     const porque = motivos.length ? `cambió ${listaConY(motivos)} desde que se escribió`
       : 'cambió algo de lo que se le pidió';
@@ -19598,24 +20888,21 @@ function siguientePasoLight() {
       h('div', { clase: 'crece' }, h('strong', {}, 'El guion está marcado como viejo: '),
         `${porque}. Si quieres que se reescriba con eso, regenéralo (lo que editaste `
         + 'a mano se conserva). Si el texto de abajo ya te sirve, '
-        + (v.audio ? 'puedes regrabar el audio con él tal cual.' : 'puedes generar el audio con él tal cual.')),
+        + (v.audio ? 'puedes regrabar la voz con él tal cual.' : 'puedes grabar la voz con él tal cual.')),
       h('button', { clase: 'mini primario', disabled: corriendo,
         onclick: () => lanzarTandaLight('guion', 'pendientes') }, 'Regenerar el guion'),
       h('button', { clase: 'mini', disabled: corriendo,
         onclick: () => lanzarTandaLight('voz', 'pendientes') },
-      v.audio ? 'Regrabar el audio tal cual' : 'Generar el audio tal cual'));
+      v.audio ? 'Regrabar la voz tal cual' : 'Grabar la voz tal cual'));
   }
-  if (v.audio && estado('voz') === 'obsoleto') {
+  if ((!solo || solo === 'voz') && v.audio && estado('voz') === 'obsoleto') {
     const plan = textoDelPlan('voz');
     return aviso('el audio ya no corresponde a la voz del estilo. Regrábalo: las '
       + 'imágenes no se vuelven a pagar.' + (plan ? ` (${plan})` : ''),
-    'Regrabar el audio', () => lanzarTandaLight('voz', 'pendientes'));
+    'Regrabar la voz', () => lanzarTandaLight('voz', 'pendientes'));
   }
-  if (v.audio && videoObsoletoLight()) {
-    return aviso('las imágenes o el vídeo montado quedaron viejos. Ponlos al día '
-      + 'desde aquí o con «Poner al día las imágenes» en el guion: solo se paga lo '
-      + 'que haya cambiado.', 'Poner al día las imágenes', () => lanzarTandaLight('video'));
-  }
+  /* «LAS IMÁGENES O EL VÍDEO QUEDARON VIEJOS» ya no sale aquí: lo dicen el
+     carril y la barra de la Voz y de Imágenes («Poner al día N imágenes»). */
   return null;
 }
 
@@ -19761,10 +21048,13 @@ async function pasarAEstiloLight(partes) {
       method: 'PUT', cuerpo: { estilo: c.destino, partes: partes.map(p => p.id) },
     });
     v.cambioEstilo = null;
-    v.cambiosEstilo = null;
+    olvidarCambiosDelEstilo(v);
+    v.cambiosEstiloDe = '';
     toast(`Ahora es del estilo «${(r.estilo || {}).nombre || c.destino}».`
-      + ((r.traidas || []).length ? ' Debajo tienes el siguiente paso.' : ''));
+      + ((r.traidas || []).length ? ' El carril dice qué hay que rehacer.' : ''));
     await cargarClientes();
+    // en el paso Estilo, la ficha que se ve pasa a ser la del estilo nuevo
+    if (pasoDelCarril() === 'estilo') APP.light.abierto = c.destino;
     await cargarVideoLight(v.pid);
   } catch (e) { toast(`no se ha podido cambiar de estilo: ${e.message}`, true); }
 }
@@ -19774,7 +21064,7 @@ async function restaurarEstiloDelVideo(id) {
   try {
     await pedir(`${BASE}/api/presets-canal/papelera/${encodeURIComponent(id)}/restaurar`, { method: 'POST' });
     toast('Estilo restaurado: vuelve a estar en tus estilos.');
-    v.cambiosEstilo = null;
+    olvidarCambiosDelEstilo(v);
     await cargarGaleriaLight(true);
   } catch (e) { toast(`no se ha podido restaurar: ${e.message}`, true); }
 }
@@ -19789,7 +21079,7 @@ async function traerEstiloLight(partes, total) {
     const r = await pedir(`${API.proyecto(v.pid)}/estilo/traer`, {
       method: 'POST', cuerpo: { partes: partes.map(p => p.id) },
     });
-    v.cambiosEstilo = null;
+    olvidarCambiosDelEstilo(v);
     toast((r.traidas || []).length
       ? 'Traído. Debajo tienes el siguiente paso.'
       : 'No había nada que cambiar.');
@@ -19978,13 +21268,17 @@ function apartadosDeLaPantalla() {
   if (MODULOS.actual === 'publicar') return ['Publicar'];
   if (MODULOS.actual === 'automatizar') return ['Automatizar'];
   const vista = APP.light.vista;
-  if (vista === 'preset' || vista === 'crear' || vista === 'generando') return ['Estilos'];
+  if (vista === 'preset' || vista === 'crear' || vista === 'generando') {
+    return APP.light.desdeVideo ? ['Crear un vídeo: el carril', 'Estilos'] : ['Estilos'];
+  }
   if (vista === 'elegido') {
     const sub = (APP.light.video || {}).vista;
-    if (sub === 'guion') return ['Guion'];
-    if (sub === 'previa') return ['Imágenes'];
-    if (sub === 'video') return ['Vídeo'];
-    return ['Encargo'];
+    const carril = 'Crear un vídeo: el carril';
+    if (sub === 'guion') return [carril, 'Guion'];
+    if (sub === 'voz') return [carril, 'Voz'];
+    if (sub === 'previa') return [carril, 'Imágenes'];
+    if (sub === 'video') return [carril, 'Vídeo'];
+    return [carril, 'Encargo'];
   }
   return ['La idea en una frase', 'Proyectos', 'Estilos'];
 }

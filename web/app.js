@@ -5372,15 +5372,10 @@ function cambiosDelEstiloCarril() {
     v.cambiosEstiloDe = v.pid;
     v.cambiosEstilo = null;
     v.partesEstilo = {};
-    v.cambiosEstiloCargando = true;
     const pid = v.pid;
-    pedir(`${API.proyecto(pid)}/estilo/cambios`)
-      .then(d => { if (v.pid === pid) v.cambiosEstilo = d; })
-      .catch(e => { if (v.pid === pid) v.cambiosEstilo = { estilo: null, partes: [], por_que_no: e.message }; })
-      .then(() => {
-        v.cambiosEstiloCargando = false;
-        v.cambiosEstiloEn = Date.now();
-        if (APP.light.video.pid !== pid) return;
+    cargarCambiosDelEstilo(v)
+      .then(vale => {
+        if (!vale || APP.light.video.pid !== pid) return;
         // «Su estilo» en pantalla se quedaba en «comparando…»: esperaba esta
         // misma respuesta y solo se repintaba el carril
         if (document.querySelector('.estilo-del-video')) pintarLight();
@@ -5388,6 +5383,34 @@ function cambiosDelEstiloCarril() {
       });
   }
   return v.cambiosEstilo;
+}
+
+/* PEDIR LO QUE CAMBIARÍA DEL ESTILO, NUMERADO. Lo piden el carril y «Su
+   estilo», y después de «Traer» se pide otra vez: la respuesta de una
+   petición vieja que llega tarde pisaba la nueva (y el carril volvía a decir
+   «2 cambios por traer» de lo ya traído). Solo escribe la ÚLTIMA; devuelve si
+   lo fue. `olvidarCambiosDelEstilo` descarta lo que esté en vuelo. */
+function cargarCambiosDelEstilo(v) {
+  const pid = v.pid;
+  const n = (v.cambiosEstiloPeticion || 0) + 1;
+  v.cambiosEstiloPeticion = n;
+  v.cambiosEstiloCargando = true;
+  return pedir(`${API.proyecto(pid)}/estilo/cambios`)
+    .catch(e => ({ estilo: null, partes: [], por_que_no: e.message }))
+    .then(d => {
+      if (v.cambiosEstiloPeticion !== n) return false;     // hay otra más nueva
+      v.cambiosEstiloCargando = false;
+      if (v.pid !== pid) return false;                       // de otro vídeo
+      v.cambiosEstilo = d;
+      v.cambiosEstiloEn = Date.now();
+      return true;
+    });
+}
+
+function olvidarCambiosDelEstilo(v) {
+  v.cambiosEstiloPeticion = (v.cambiosEstiloPeticion || 0) + 1;
+  v.cambiosEstiloCargando = false;
+  v.cambiosEstilo = null;
 }
 
 /* LOS CAMBIOS DEL MONTAJE SIN APLICAR (decisión 9 del rediseño). Los apunta
@@ -5712,15 +5735,23 @@ function cabeceraDelVideo() {
    vídeos»). Sustituye a la ventana del navegador (`prompt`). Enter guarda,
    Escape lo deja como estaba; salir del campo también guarda. */
 function campoRenombrar(pid, antes) {
+  /* LO ESCRITO SOBREVIVE A UN REPINTADO (la pantalla se repinta sola): se
+     guarda aquí al teclear y el campo nuevo sale con ello. Antes, el campo
+     viejo salía del documento, eso es un `blur`, y el `blur` guardaba el
+     nombre a medias. */
+  const borrador = APP.light.renombrandoTexto;
+  const sigue = !!(borrador && borrador.pid === pid);
   const entrada = h('input', {
-    type: 'text', value: antes, clase: 'renombrar-campo', 'aria-label': 'Nombre del vídeo',
+    type: 'text', value: sigue ? borrador.texto : antes, clase: 'renombrar-campo', 'aria-label': 'Nombre del vídeo',
     datos: { foco: `renombrar-${pid}` },
   });
+  entrada.addEventListener('input', () => { APP.light.renombrandoTexto = { pid, texto: entrada.value }; });
   let hecho = false;
   const terminar = guardar => {
     if (hecho) return;
     hecho = true;
     APP.light.renombrando = '';
+    APP.light.renombrandoTexto = null;
     const nombre = String(entrada.value || '').trim();
     if (guardar && nombre && nombre !== antes) guardarNombreDeVideo(pid, nombre);
     else pintarLight();
@@ -5729,8 +5760,10 @@ function campoRenombrar(pid, antes) {
     if (ev.key === 'Enter') { ev.preventDefault(); terminar(true); }
     else if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); terminar(false); }
   });
-  entrada.addEventListener('blur', () => terminar(true));
-  setTimeout(() => { try { entrada.focus(); entrada.select(); } catch (e) { /* da igual */ } }, 0);
+  /* salir del campo guarda; que lo quite un repintado, no: entonces ya hay otro
+     campo con lo escrito (y el foco vuelve a él) */
+  entrada.addEventListener('blur', () => setTimeout(() => { if (entrada.isConnected) terminar(true); }, 0));
+  if (!sigue) setTimeout(() => { try { entrada.focus(); entrada.select(); } catch (e) { /* da igual */ } }, 0);
   return h('span', { clase: 'renombrar-en-linea' }, entrada,
     h('button', { clase: 'mini primario', onmousedown: ev => ev.preventDefault(),
       onclick: () => terminar(true) }, 'Guardar'));
@@ -11138,9 +11171,16 @@ function accionDeLasImagenes() {
   }
   if (quedaVideo === true) {
     const etiqueta = n ? `Poner al día ${n} ${n === 1 ? 'imagen' : 'imágenes'}` : 'Poner al día las imágenes';
+    /* CON LA COLA DE NOTAS DIBUJANDO NO SE OFRECE: el servidor la frena (409),
+       pero un botón encendido que contesta «no» es un botón que miente. Sale
+       apagado y con el motivo. */
+    const dibujando = COLA_IMG.pid === v.pid && (!!COLA_IMG.actual || COLA_IMG.cola.length > 0);
     return { plan, botones: [botonDeBarra(h('button', { onclick:
       () => lanzarTandaLight('video') }, etiqueta + (usd ? ` · ≈ ${usdCorto(usd)}` : '')),
-      { ayuda: unirAyuda(ayudaDiapositivas(hayMp4Light(), true, quedaVideo), plan) })] };
+      { disabled: dibujando,
+        ayuda: dibujando ? 'Se están dibujando las imágenes de tus notas, una detrás de otra. '
+          + 'Cuando acaben, se pueden poner al día las demás.'
+          : unirAyuda(ayudaDiapositivas(hayMp4Light(), true, quedaVideo), plan) })] };
   }
   return { plan: 'Las imágenes ya recogen el guion y la voz de ahora.',
     botones: [botonDeBarra(h('button', { onclick: () => irAPasoDelCarril('imagenes') }, 'Imágenes ›'))] };
@@ -20273,14 +20313,7 @@ function bloqueEstiloDelVideo() {
         + (total ? ` (≈ ${usdCorto(total)} al generar)` : '') : 'Traer')));
   };
   const cargar = async () => {
-    v.cambiosEstiloCargando = true;
-    try {
-      v.cambiosEstilo = await pedir(`${API.proyecto(v.pid)}/estilo/cambios`);
-    } catch (e) {
-      v.cambiosEstilo = { estilo: null, partes: [], por_que_no: e.message };
-    }
-    v.cambiosEstiloEn = Date.now();
-    v.cambiosEstiloCargando = false;
+    if (!(await cargarCambiosDelEstilo(v))) return;
     // la pantalla se ha podido repintar mientras tanto (abrir un vídeo pinta
     // varias veces): esta caja ya no es la que se ve, y pintarla no serviría
     if (!caja.isConnected && pasoDelCarril() === 'estilo') pintarLight();
@@ -20496,7 +20529,7 @@ async function pasarAEstiloLight(partes) {
       method: 'PUT', cuerpo: { estilo: c.destino, partes: partes.map(p => p.id) },
     });
     v.cambioEstilo = null;
-    v.cambiosEstilo = null;
+    olvidarCambiosDelEstilo(v);
     v.cambiosEstiloDe = '';
     toast(`Ahora es del estilo «${(r.estilo || {}).nombre || c.destino}».`
       + ((r.traidas || []).length ? ' El carril dice qué hay que rehacer.' : ''));
@@ -20512,7 +20545,7 @@ async function restaurarEstiloDelVideo(id) {
   try {
     await pedir(`${BASE}/api/presets-canal/papelera/${encodeURIComponent(id)}/restaurar`, { method: 'POST' });
     toast('Estilo restaurado: vuelve a estar en tus estilos.');
-    v.cambiosEstilo = null;
+    olvidarCambiosDelEstilo(v);
     await cargarGaleriaLight(true);
   } catch (e) { toast(`no se ha podido restaurar: ${e.message}`, true); }
 }
@@ -20527,7 +20560,7 @@ async function traerEstiloLight(partes, total) {
     const r = await pedir(`${API.proyecto(v.pid)}/estilo/traer`, {
       method: 'POST', cuerpo: { partes: partes.map(p => p.id) },
     });
-    v.cambiosEstilo = null;
+    olvidarCambiosDelEstilo(v);
     toast((r.traidas || []).length
       ? 'Traído. Debajo tienes el siguiente paso.'
       : 'No había nada que cambiar.');

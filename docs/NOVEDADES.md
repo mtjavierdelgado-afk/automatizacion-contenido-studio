@@ -40,7 +40,10 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   (antes también «Generar / Regenerar Vídeo») y «Enviar a Publicar ›».
 - **La Voz tiene su paso**: la voz elegida («Cambiar en el estilo ›»), el
   reproductor, el guion en karaoke y, en cada bloque, **«▶ Oír»** y
-  **«Regrabar este tramo»** con su precio. **«Regrabar la voz entera»**
+  **«Regrabar este tramo»**. Si otros tramos tienen cambios sin grabar, se
+  graban con él (la voz no se da por buena a medias) y el botón lo dice
+  («Regrabar este tramo y 2 más con cambios»); antes de grabar pregunta con
+  el precio que calcula el servidor. **«Regrabar la voz entera»**
   sustituye a «Regenerar Audio».
 - **Guion**: los mandos de cada bloque se ven siempre (✂ Partir · ✎ Editar a
   mano · ↻ Cambiar con una frase); «+ Añadir bloque» en cada hueco; **«Revisar
@@ -74,6 +77,13 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   los monta, todos de una vez. Se fueron «Aplicar ahora», «Aplicar y volver a
   montar» y «Montar la música con este ánimo» (el ánimo se elige y entra al
   montar). Antes, en Vídeo, cada cambio volvía a montar el vídeo.
+  «Montar el vídeo con N cambios» **no dibuja ninguna imagen nunca**: si hay
+  imágenes que se han quedado viejas, montar con ellas es otro botón, «Montar
+  el vídeo · ≈ X», que pregunta antes cuántas y cuánto. Lo pedido y sin
+  montar (el ánimo de la música también) **no se pierde** al moverte por el
+  vídeo ni al recargar la página; salir del vídeo con ello te lo recuerda, y
+  si el vídeo se monta por otro camino (desde Imágenes, por ejemplo) el
+  contador baja solo.
 - Nada de esto cambia lo que se genera ni lo que se paga: los mismos pasos,
   los mismos parámetros y las mismas firmas.
 

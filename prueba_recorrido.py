@@ -3439,6 +3439,53 @@ def regrabar_un_tramo_dice_la_verdad(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def menores_de_la_revision_de_crear(navegador, datos):
+    """Revisión del rediseño de Crear (21-10-2026), lo menor: (a) con la cola
+    de notas dibujando, Imágenes no ofrece «Poner al día N imágenes» (sale
+    apagado); (b) de dos peticiones de los cambios del estilo solo escribe la
+    última; (c) un repintado no guarda el nombre a medias de la cabecera."""
+    pid, api = datos["video"], datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    apagado = pg.p.evaluate("""() => { const v = APP.light.video;
+      v.planes.video = { tareas: 2, coste: { imagenes: 3, imagenes_por_generar: 2, imagenes_hechas: 1,
+        usd_por_generar: 0.1, usd_total: 0.15 } };
+      const antes = [COLA_IMG.pid, COLA_IMG.actual];
+      COLA_IMG.pid = v.pid; COLA_IMG.actual = { plano: 'S001' };
+      const boton = n => (n.tagName === 'BUTTON' ? n : n.querySelector('button'));
+      const con = boton(accionDeLasImagenes().botones[0]);
+      COLA_IMG.pid = antes[0]; COLA_IMG.actual = antes[1];
+      const sin = boton(accionDeLasImagenes().botones[0]);
+      return [con.innerText || con.textContent, con.disabled, sin.disabled]; }""")
+    ok("Poner al día" in apagado[0] and apagado[1] and not apagado[2],
+       f"(a) con la cola de notas dibujando, «Poner al día» sale apagado; sin ella, no ({apagado})")
+    ultima = pg.p.evaluate("""async () => { const v = APP.light.video;
+      const r = await Promise.all([cargarCambiosDelEstilo(v), cargarCambiosDelEstilo(v)]);
+      return r; }""")
+    ok(ultima == [False, True], f"(b) de dos peticiones de los cambios del estilo solo escribe la última ({ultima})")
+    _r, ficha = api.get(f"/api/proyectos/{pid}")
+    nombre = (ficha.get("proyecto") or {}).get("nombre") or ""
+    pg.pulsar(".cab-video button.renombrar")
+    pg.p.wait_for_timeout(400)
+    campo = pg.p.locator(".cab-video input.renombrar-campo").first
+    campo.fill("Nombre a me")
+    campo.dispatch_event("input")
+    pg.js("pintarLight();")
+    pg.p.wait_for_timeout(800)
+    _r, ficha = api.get(f"/api/proyectos/{pid}")
+    sigue = pg.p.evaluate("() => (document.querySelector('.cab-video input.renombrar-campo') || {}).value")
+    ok(((ficha.get("proyecto") or {}).get("nombre") or "") == nombre and sigue == "Nombre a me",
+       f"(c) un repintado no guarda el nombre a medias, y lo escrito sigue en el campo ({sigue!r})")
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(500)
+    _r, ficha = api.get(f"/api/proyectos/{pid}")
+    ok(((ficha.get("proyecto") or {}).get("nombre") or "") == nombre, "y Escape lo deja como estaba")
+    pg.sin_errores("lo menor de la revisión de Crear")
+    pg.cerrar()
+
+
 def _montar_los_cambios(pg):
     """«Montar el vídeo con N cambios» (decisión 9 del rediseño de Crear): el
     único botón que monta lo cambiado en los ajustes del montaje."""

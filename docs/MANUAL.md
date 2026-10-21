@@ -295,8 +295,11 @@ La narración grabada, con su pantalla: la voz elegida (**Cambiar en el estilo
 ›** lleva a «Cómo suena»), el reproductor (de ×1 a ×5) y el guion en karaoke:
 cada palabra se ilumina al sonar y pulsar una salta ahí.
 
-- Cada bloque tiene **▶ Oír** (solo ese trozo) y **Regrabar este tramo**, con
-  su precio: vuelve a grabar ese tramo tal cual, sin tocar el resto.
+- Cada bloque tiene **▶ Oír** (solo ese trozo) y **Regrabar este tramo**:
+  vuelve a grabar ese tramo tal cual, sin tocar el resto. Si otros tramos
+  tienen cambios sin grabar, se graban con él y el botón lo dice («Regrabar
+  este tramo y 2 más con cambios»). Antes de grabar pregunta, con el precio
+  que calcula el Studio.
 - **Regrabar la voz entera** vuelve a grabar la toma completa (se paga toda).
 - **Hay cambios sin grabar** sale si editaste el guion: **Regrabar lo que he
   escrito** graba solo esos tramos.
@@ -372,6 +375,9 @@ redibujarla con el texto dentro, y se paga al aplicarla.
   fila dice «· sin aplicar todavía», sale la franja **Hay N cambios del montaje
   sin aplicar**, y solo el botón de la barra **Montar el vídeo con N cambios ·
   gratis** los monta, todos de una vez (si solo cambió la mezcla, en segundos).
+  Ese botón no dibuja ninguna imagen: si hay imágenes viejas, al lado sale
+  **Montar el vídeo · ≈ X**, que las dibuja y pregunta antes. Lo cambiado y sin
+  montar se queda apuntado aunque salgas o recargues la página.
   En un vídeo nuevo, lo que elijas va al borrador y entra en el primer montaje.
   - **Música**: cuánto se oye (Suave, Normal, Alta) y su ajuste fino, elegir un
     tema (búsqueda libre o por ánimo, con **Solo instrumental** y **Solo uso

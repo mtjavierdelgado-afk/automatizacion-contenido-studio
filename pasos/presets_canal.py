@@ -143,7 +143,10 @@ TIPOS = {
         # 'reglas' son las reglas del estilo (pasos/reglas_estilo.py): solo se
         # guardan si hay alguna, igual que 'modo'.
         "claves": ("referencias", "guia", "url", "moodboard",
-                   "calidad", "min_s", "max_s", "min_s_rotulos", "modo", "reglas"),
+                   "calidad", "min_s", "max_s", "min_s_rotulos", "modo", "reglas",
+                   # el negocio (rama dominio-negocio): id de uno de fabrica de
+                   # pasos/dominios.py; solo se guarda si no es automatico
+                   "dominio"),
         "pasos": ("assets",),
     },
     # El id se queda en 'rotulos' aunque ya no haya rotulos: es la clave con la
@@ -243,6 +246,14 @@ def _reglas_estilo():
     return reglas_estilo
 
 
+def _dominios():
+    try:
+        from . import dominios                                    # noqa: PLC0415
+    except ImportError:                                           # pragma: no cover
+        import dominios                                           # noqa: PLC0415
+    return dominios
+
+
 def _limpiar_datos(tipo, datos):
     """Deja solo las claves declaradas del tipo, y protesta por las demas."""
     if not isinstance(datos, dict):
@@ -267,6 +278,15 @@ def _limpiar_datos(tipo, datos):
             limpios["reglas"] = reglas
         else:
             limpios.pop("reglas")
+    if tipo == "estilo" and "dominio" in limpios:
+        try:
+            dominio = _dominios().normalizar(limpios["dominio"])
+        except ValueError as fallo:
+            raise ErrorPreset(f"dominio: {fallo}") from None
+        if dominio:
+            limpios["dominio"] = dominio
+        else:
+            limpios.pop("dominio")
     if tipo == "canal":
         # un canal es un paquete de los otros tipos: cada bloque se valida con
         # las reglas de SU tipo, o el paquete se convierte en el agujero por
@@ -1130,6 +1150,12 @@ def cambios_para(ficha, params_actuales=None):
             estilo["reglas"] = copy.deepcopy(datos["reglas"])
         else:
             estilo.pop("reglas", None)
+        # EL NEGOCIO, igual: lo pone un estilo que lo fija y lo QUITA uno que no
+        # (rama dominio-negocio). Un video y un estilo sin el no reciben nada.
+        if datos.get("dominio"):
+            estilo["dominio"] = datos["dominio"]
+        else:
+            estilo.pop("dominio", None)
         cambios["assets"] = {"estilo": estilo}
         # la calidad y la duracion de plano son params sueltos de assets, no van
         # dentro del diccionario 'estilo'
@@ -1221,6 +1247,8 @@ def datos_de_params(params_por_paso, incluir=ORDEN):
             bloque["modo"] = "foto"
         if estilo.get("reglas"):
             bloque["reglas"] = copy.deepcopy(estilo["reglas"])
+        if estilo.get("dominio"):
+            bloque["dominio"] = estilo["dominio"]
         for clave in ("calidad", "min_s", "max_s", "min_s_rotulos"):
             if assets.get(clave) not in (None, ""):
                 bloque[clave] = copy.deepcopy(assets[clave])

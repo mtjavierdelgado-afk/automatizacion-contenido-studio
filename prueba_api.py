@@ -7150,6 +7150,22 @@ def probar_espacio_fijo():
         for nombre, valor in reales.items():
             setattr(servidor, nombre, valor)
 
+def probar_dominios():
+    """Rama dominio-negocio (21-10-2026): listar los dominios y fijar el de un estilo."""
+    seccion("DOMINIOS: EL NEGOCIO DE UN ESTILO")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    codigo, d = _llamar(servidor.listar_dominios)
+    ok(codigo == 200 and {x["id"] for x in d.get("dominios") or []} == {"general", "estadoplay"},
+       f"GET /api/dominios: general y estadoplay ({codigo})")
+    codigo, _m = _llamar(servidor.guardar_dominio_estilo, "no-existe", {"dominio": "general"})
+    ok(codigo in (400, 404), f"fijar el dominio de un estilo que no existe: {codigo}")
+    codigo, _m = _llamar(servidor.guardar_dominio_estilo, "x", {})
+    igual(codigo, 400, "sin 'dominio', 400")
+    codigo, _m = _llamar(servidor.guardar_dominio_estilo, "x", {"dominio": "telenovela"})
+    igual(codigo, 400, "un dominio que no existe, 400")
+
+
 def _video_montado_de_prueba(servidor, base, nombre):
     """Un vídeo con todos los pasos hechos y su MP4: «montado y al día»."""
     from nucleo import Estado, Proyecto                       # noqa: PLC0415
@@ -7378,6 +7394,7 @@ def main():
         probar_mas_emojis(cliente, carpeta, pid)
         probar_publicar_20oct(cliente, pid)
         probar_espacio_fijo()
+        probar_dominios()
     finally:
         parar(proceso)
         if not argumentos.conservar:

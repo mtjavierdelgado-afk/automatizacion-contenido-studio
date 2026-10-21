@@ -10,6 +10,22 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
+
+**El negocio de cada estilo (21 de octubre)**
+- **Lo de EstadoPlay ya no está escrito a mano en el Studio.** Los servicios
+  (consolas, simuladores, realidad virtual, karaoke) y cómo se reconocen, las
+  cartas de foto con estaciones y trípodes, y lo que el revisor de imágenes
+  mira del equipo («una tele sobre un mueble cuando va en su trípode», «mandos
+  de otro color») son ahora el **dominio** «EstadoPlay». Hay otro de fábrica,
+  **General**, para cualquier negocio.
+- **Sin elegir nada, todo sale igual que antes**: si el vídeo habla de
+  consolas o mandos es EstadoPlay, y si no, General. Las cartas, los prompts y
+  las imágenes ya hechas no cambian.
+- **Lo único que cambia sin pedirlo**: en un vídeo que no es de consolas (un
+  baño, unas plantas), el revisor de imágenes ya no busca televisores, mandos
+  ni trípodes; mira los objetos y el equipo de ESE vídeo.
+- Un estilo puede fijar su dominio (`PUT /api/presets-light/{id}/dominio`); la
+  pantalla para elegirlo llegará con la Etapa Foto C.
 **Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.

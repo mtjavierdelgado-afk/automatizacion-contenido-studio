@@ -3156,6 +3156,82 @@ def musica_efectos_y_subtitulos_en_el_video(navegador, datos):
     pg.cerrar()
 
 
+@escenario
+def montar_los_cambios_no_paga_imagenes(navegador, datos):
+    """Revisión del rediseño de Crear (21-10-2026), DINERO: con imágenes que se
+    han quedado viejas y un ajuste del montaje cambiado, «Montar el vídeo con 1
+    cambio · gratis» del Encargo lanzaba la tanda del vídeo, que las redibuja
+    y se paga, sin preguntar. Ahora aplica (`POST /montaje/aplicar`, ni una
+    imagen) y montar con las imágenes viejas es otro botón con su precio, que
+    pregunta antes. Aquí no se lanza nada de verdad: las dos peticiones se
+    cortan y el plan de la tanda dice que hay 3 imágenes por dibujar."""
+    pid, api = datos["video"], datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js(f"await abrirVideoLight('{pid}');")
+    ok(_montar_desde_video(pg), "se parte de un vídeo montado al día")
+    pedidas = []
+    plan_viejo = {"tareas": 3, "segundos": 120, "coste": {
+        "imagenes": 3, "imagenes_por_generar": 3, "imagenes_hechas": 0,
+        "usd_por_generar": 0.25, "usd_total": 0.25}}
+
+    def al_pedir(ruta):
+        req = ruta.request
+        if req.method == "POST" and ("/generar" in req.url or "/montaje/aplicar" in req.url):
+            pedidas.append((req.url, req.post_data or ""))
+            ruta.abort()                          # no se lanza nada de verdad
+        elif req.method == "GET" and "/generar?tanda=render" in req.url:
+            ruta.fulfill(status=200, content_type="application/json", body=json.dumps(plan_viejo))
+        else:
+            ruta.continue_()
+    pg.p.route("**/api/proyectos/**", al_pedir)
+    try:
+        ir_al_paso(pg, "Encargo")
+        pg.p.wait_for_timeout(1500)
+        # un ajuste guardado sin montar (lo que apunta la pantalla al guardarlo)
+        # y las imágenes viejas
+        pg.js("const est = estadoAjustes({ tipo: 'video', pid: APP.light.video.pid, diferir: true });"
+              " est.montaje = Object.assign({}, est.montaje, { montado: true });"
+              " apuntarCambioDeMontaje(est, 'musica');"
+              " APP.light.video.fichas.assets = Object.assign({}, APP.light.video.fichas.assets, { estado: 'obsoleto' });"
+              " await refrescarPlanLight('render', true); repintarBarra();")
+        pg.p.wait_for_timeout(600)
+        ok(pg.visible(".barra-accion button", "Montar el vídeo con 1 cambio · gratis"),
+           "el Encargo ofrece «Montar el vídeo con 1 cambio · gratis»")
+        pg.pulsar(".barra-accion button", "Montar el vídeo con 1 cambio")
+        pg.p.wait_for_timeout(1500)
+        ok(not any("/generar" in u for u, _d in pedidas),
+           f"y NO lanza la tanda del vídeo, que redibujaría las imágenes viejas ({pedidas})")
+        ok(any("/montaje/aplicar" in u for u, _d in pedidas),
+           f"lo que hace es aplicar los cambios, gratis ({pedidas})")
+        # en Vídeo: los dos botones, cada uno con lo que cuesta
+        del pedidas[:]
+        pg.js("const est = estadoAjustes({ tipo: 'video', pid: APP.light.video.pid, diferir: true });"
+              " est.aplicando = false; apuntarCambioDeMontaje(est, 'musica');"
+              " APP.light.video.vista = 'video'; pintarLight();")
+        pg.p.wait_for_timeout(1200)
+        pg.js("await refrescarPlanLight('render', true); repintarBarra();")
+        pg.p.wait_for_timeout(600)
+        ok(pg.visible(".barra-accion button", "Montar el vídeo con 1 cambio · gratis")
+           and pg.visible(".barra-accion button", "Montar el vídeo · ≈ 0.25 $"),
+           "en Vídeo: aplicar los cambios (gratis) y, aparte, montar con las imágenes viejas con su precio")
+        pg.aceptar = False
+        antes = len(pg.dialogos)
+        pg.pulsar(".barra-accion button", "Montar el vídeo · ≈")
+        pg.p.wait_for_timeout(1500)
+        ok(len(pg.dialogos) > antes and "3 imágenes" in pg.dialogos[-1],
+           f"el de pago pregunta antes, con cuántas imágenes y su precio ({pg.dialogos[antes:]})")
+        ok(not any("/generar" in u for u, _d in pedidas),
+           f"y diciendo que no, no lanza nada ({pedidas})")
+        pg.aceptar = True
+    finally:
+        pg.p.unroute("**/api/proyectos/**")
+    pg.js("const est = estadoAjustes({ tipo: 'video', pid: APP.light.video.pid, diferir: true });"
+          " est.aplicando = false; olvidarCambiosDelMontaje(est, APP.light.video.pid);")
+    pg.sin_errores("montar los cambios no paga imágenes")
+    pg.cerrar()
+
+
 def _montar_los_cambios(pg):
     """«Montar el vídeo con N cambios» (decisión 9 del rediseño de Crear): el
     único botón que monta lo cambiado en los ajustes del montaje."""

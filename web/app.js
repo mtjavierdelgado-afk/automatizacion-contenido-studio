@@ -5770,13 +5770,22 @@ function ajustarAltoDeLaBarra() {
   });
 }
 
+/* Los vídeos con una tanda pedida (`lanzarTandaLight`) o un «Montar el vídeo»
+   pulsado (`montarElVideoLight`) y sin contestar todavía: sus botones de la
+   barra se apagan hasta que contesten. */
+const LANZANDO_TANDA = {};
+const MONTANDO_LIGHT = {};
+
 /* El botón principal de una barra: grande, con su ayuda larga en el globo. */
 /* El botón llega ya hecho, con su texto escrito en la llamada, para que el
  * inventario de botones lo lea; aquí se le pone la ropa de la barra. */
 function botonDeBarra(boton, op) {
   const o = op || {};
   boton.className = (o.secundario ? 'secundario-barra' : 'primario principal') + (o.clase ? ` ${o.clase}` : '');
-  boton.disabled = !!o.disabled;
+  /* mientras se lanza algo de este vídeo (una tanda, un montaje), ningún botón
+     de la barra se puede volver a pulsar: el segundo clic pagaría otra vez */
+  const pid = (APP.light.video || {}).pid;
+  boton.disabled = !!o.disabled || !!(pid && (LANZANDO_TANDA[pid] || MONTANDO_LIGHT[pid]));
   if (o.title) boton.title = o.title;
   return conAyuda(o.ayuda || '', boton);
 }
@@ -8422,11 +8431,21 @@ function pieDeEncargo() {
      el guion al día, montar es lo principal; con el guion viejo, regenerarlo,
      y montar va al lado. */
   const cambios = cambiosDelMontaje();
-  const montar = cambios.hay ? botonDeBarra(h('button', { onclick:
-    () => montarCambiosDelMontaje() }, `${textoMontarCambios(cambios)} · gratis`), {
+  /* CON MP4, MONTAR LOS CAMBIOS ES APLICARLOS (`POST /montaje/aplicar`): ni una
+     imagen, gratis de verdad. Sin MP4 es el primer montaje, que puede tener
+     imágenes viejas que dibujar: entonces su precio (o nada mientras no se
+     sabe) y la pregunta antes de pagar. Sin voz todavía no se puede montar:
+     los cambios entran en el primer montaje. */
+  const mp4 = hayMp4Light();
+  if (cambios.hay && !mp4) refrescarPlanLight('render');
+  const ocupado = !!(cambios.est && (cambios.est.aplicando || cambios.est.montandoAnimo));
+  const montar = cambios.hay && (mp4 || v.audio) ? botonDeBarra(h('button', { onclick:
+    () => montarCambiosDelMontaje() }, `${textoMontarCambios(cambios)}${precioDeMontarCambios()}`), {
       secundario: queda !== false,
-      ayuda: 'Monta el vídeo una sola vez con todo lo cambiado en los ajustes del montaje: '
-        + 'ninguna imagen, gratis.' }) : null;
+      disabled: ocupado,
+      ayuda: mp4 ? 'Monta el vídeo una sola vez con todo lo cambiado en los ajustes del montaje: '
+        + 'ninguna imagen, gratis.'
+        : unirAyuda('Monta el vídeo por primera vez, con los cambios del montaje dentro.', textoDelPlan('render')) }) : null;
   /* 'pendientes' y no 'todo': REHACER UNA COSA REHACE ESA COSA. Lo que se ha
      tocado aquí ya ha dejado obsoleto lo suyo, y eso es lo que entra; lo que
      sigue al día se salta. */
@@ -9177,6 +9196,19 @@ async function lanzarTandaLight(tanda, modo) {
   const v = APP.light.video;
   if (!v.pid) return;
   const pid = v.pid;
+  /* UN DOBLE CLIC NO LANZA DOS TANDAS (y las de pago se pagarían dos veces si
+     el servidor no frenara la segunda): mientras la primera no contesta, los
+     botones de la barra se apagan (`botonDeBarra`) y esta no sale. */
+  if (LANZANDO_TANDA[pid]) return;
+  LANZANDO_TANDA[pid] = true;
+  repintarBarra();
+  try { await lanzarTandaLightYa(tanda, modo, v, pid); } finally {
+    delete LANZANDO_TANDA[pid];
+    repintarBarra();
+  }
+}
+
+async function lanzarTandaLightYa(tanda, modo, v, pid) {
   limpiarError(CLAVE_VIDEO_LIGHT);
   try {
     const datos = await pedir(`${API.proyecto(pid)}/generar`, {
@@ -12731,6 +12763,7 @@ async function guardarNotaEscena(escena) {
  * leen como el mismo gesto. Aqui la etiqueta ya dice lo que hace. */
 function botonRenderizarLight() {
   if (hayMp4Light() && !videoObsoletoLight()) return null;
+  refrescarPlanLight('render');   // su precio: el botón no dice «gratis» sin saberlo
   const corriendo = !!trabajoVideoLight();
   /* CON NOTAS SIN APLICAR, ESTE BOTON HACE MENOS que el de al lado: «Aplicar»
      reparte las notas, redibuja lo que toquen y DESPUES monta; esto solo monta,
@@ -12752,9 +12785,9 @@ function botonRenderizarLight() {
         pararPrevia();
         videoAbierto().vista = 'video';
         repintarVideo();
-        lanzarTandaLight('render');
+        montarElVideoLight();
       },
-    }, 'Montar el vídeo · gratis'));
+    }, `Montar el vídeo${precioDeMontarLight()}`));
 }
 
 /* LAS FLECHAS DEL TECLADO. Pasar de escena es el gesto que se repite
@@ -12920,20 +12953,37 @@ function barraDelVideo() {
   const cambios = cambiosDelMontaje();
   const coste = ((((v.planes || {}).render) || {}).coste) || {};
   const porDibujar = Number(coste.imagenes_por_generar) || 0;
-  const precio = porDibujar ? ` · ≈ ${usdCorto(Number(coste.usd_por_generar) || 0)}` : ' · gratis';
-  if (cambios.hay) {
+  // el de la tanda: nada mientras no llega el plan (no se promete «gratis»)
+  const precio = precioDeMontarLight();
+  const ocupado = !!(cambios.est && (cambios.est.aplicando || cambios.est.montandoAnimo));
+  /* CON MP4 Y CAMBIOS DEL MONTAJE: aplicarlos, gratis siempre. Si además hay
+     imágenes viejas, montar con ellas es OTRO botón, con su precio y su
+     pregunta. Sin MP4 no se mira esto: el botón de abajo monta el vídeo con
+     los cambios dentro (antes, con solo el ánimo pedido, montaba la música y
+     no el vídeo). */
+  if (cambios.hay && hayMp4Light()) {
+    const botones = [];
+    if (porDibujar) {
+      botones.push(botonDeBarra(h('button', { onclick: () => montarElVideoLight() }, `Montar el vídeo${precio}`), {
+        secundario: true, disabled: ocupado || !v.audio,
+        ayuda: unirAyuda(`Dibuja antes ${porDibujar} ${porDibujar === 1 ? 'imagen que ha quedado vieja' : 'imágenes que han quedado viejas'} `
+          + '(se paga, y se pregunta antes) y monta el vídeo con todo, también los cambios del montaje.', plan) }));
+    }
+    botones.push(botonDeBarra(h('button', { onclick: () => montarCambiosDelMontaje() }, `${textoMontarCambios(cambios)} · gratis`), {
+      disabled: ocupado,
+      ayuda: 'Monta el vídeo una sola vez con todo lo cambiado en los ajustes del montaje. '
+        + 'Ninguna imagen: gratis.' + (porDibujar ? ' Las imágenes viejas se quedan como están.' : '') }));
     return barraDeAccion({ estado: { e: 'aviso', texto: `${cambios.n ? `${cambios.n} ${cambios.n === 1 ? 'cambio' : 'cambios'}` : 'Cambios'} del montaje sin aplicar` },
-      plan: porDibujar ? plan : 'vuelve a mezclar o a montar, sin dibujar ninguna imagen',
-      botones: [botonDeBarra(h('button', { onclick: () => montarCambiosDelMontaje() }, `${textoMontarCambios(cambios)}${precio}`), {
-        ayuda: 'Monta el vídeo una sola vez con todo lo cambiado en los ajustes del montaje. '
-          + (porDibujar ? `Además se dibujan ${porDibujar} imagen(es) que han quedado viejas.` : 'Ninguna imagen: gratis.') })] });
+      plan: 'vuelve a mezclar o a montar, sin dibujar ninguna imagen', botones });
   }
   if (!hayMp4Light() || quedaRender === true || videoObsoletoLight()) {
     const viejo = hayMp4Light();
-    return barraDeAccion({ estado: { e: viejo ? 'aviso' : 'pend', texto: viejo ? 'Vídeo obsoleto' : 'Sin montar todavía' },
+    const conCambios = !viejo && cambios.hay;
+    return barraDeAccion({ estado: { e: viejo ? 'aviso' : 'pend',
+        texto: viejo ? 'Vídeo obsoleto' : (conCambios ? 'Sin montar todavía · con cambios del montaje' : 'Sin montar todavía') },
       plan,
-      botones: [botonDeBarra(h('button', { onclick: () => lanzarTandaLight('render', 'pendientes') }, `Montar el vídeo${precio}`), {
-        disabled: quedaRender === false || !v.audio,
+      botones: [botonDeBarra(h('button', { onclick: () => montarElVideoLight() }, `Montar el vídeo${precio}`), {
+        disabled: ocupado || (quedaRender === false && !conCambios) || !v.audio,
         ayuda: unirAyuda('Encadena los planos que ya has visto, con sus transiciones, '
           + 'la voz y la música, y saca el MP4. No genera ninguna imagen: no '
           + 'cuesta dinero, cuesta tiempo de máquina.', plan) })] });
@@ -18345,19 +18395,26 @@ function apuntarCambioDeMontaje(est, fila) {
 }
 
 /* «MONTAR EL VÍDEO CON N CAMBIOS» (decisión 9 del rediseño de Crear). Lo único
-   que monta lo que se cambió en los ajustes del montaje:
+   que monta lo que se cambió en los ajustes del montaje, y NUNCA PAGA:
      - un ánimo para la música automática, pedido y sin montar: se monta su
        banda (`PUT /musica/animo`, que remezcla si el montaje estaba al día) y,
        si después sigue quedando algo, se aplica;
-     - con imágenes o planos que han quedado viejos, la tanda del vídeo
-       ('render', pendientes), que monta también los ajustes guardados;
      - si no, `POST /montaje/aplicar`: una mezcla si basta, o capas y montaje.
-   Ninguno dibuja una imagen salvo el segundo, que dice antes su precio. */
+       «Ni una imagen» (lo dice el servidor), aunque haya imágenes viejas.
+   Las imágenes viejas son OTRO botón, con su precio y su confirmación
+   (`montarElVideoLight`). Antes, con alguna obsoleta, esto lanzaba la tanda
+   del vídeo y las redibujaba sin preguntar desde un botón que decía «gratis».
+   Sin MP4 no hay nada que aplicar: se monta el vídeo con los cambios dentro,
+   como el primer montaje (y eso sí pregunta si paga). */
 async function montarCambiosDelMontaje() {
   const v = APP.light.video;
   const pid = v.pid;
+  if (!pid) return;
   const modo = { tipo: 'video', pid, diferir: true };
   const est = estadoAjustes(modo);
+  // UN DOBLE CLIC NO MONTA DOS VECES: las dos marcas se ponen antes de esperar nada
+  if (est.aplicando || est.montandoAnimo || trabajoVideoLight()) return;
+  if (!hayMp4Light()) { await montarElVideoLight(); return; }
   if (est.animoPedido) {
     await montarAnimoPedido(modo, est, async () => {
       try { await cargarAjustesVideo(modo, est); } catch (e) { /* se relee al volver */ }
@@ -18365,37 +18422,92 @@ async function montarCambiosDelMontaje() {
       if (videoAbierto().pid === pid && m.montado && (m.sin_aplicar || m.pendiente) && !trabajoVideoLight()) {
         await aplicarMontajePendiente(modo, est);
       } else {
-        est.filasSinAplicar = {};
-        est.sinAplicar = false;
+        olvidarCambiosDelMontaje(est, pid);
         if (est.repintar) est.repintar();
         try { await recargarVideoAbierto(); } catch (e) { /* se relee al volver */ }
       }
     });
     return;
   }
-  const coste = ((((v.planes || {}).render) || {}).coste) || {};
-  if (Number(coste.imagenes_por_generar) > 0 || ((v.fichas.assets || {}).estado) === 'obsoleto') {
-    est.filasSinAplicar = {};
-    est.sinAplicar = false;
-    lanzarTandaLight('render', 'pendientes');
-    return;
-  }
   await aplicarMontajePendiente(modo, est);
 }
 
+/* LO QUE CUESTA MONTAR EL VÍDEO POR LA TANDA ('render', pendientes), para el
+   texto del botón: « · ≈ 0,40 $» si dibuja imágenes viejas, « · gratis» si no,
+   y NADA mientras no ha llegado el plan (no se promete gratis sin saberlo). */
+function precioDeMontarLight() {
+  const plan = (APP.light.video.planes || {}).render;
+  if (!plan) return '';
+  const coste = plan.coste || {};
+  const n = Number(coste.imagenes_por_generar) || 0;
+  return n ? ` · ≈ ${usdCorto(Number(coste.usd_por_generar) || 0)}` : ' · gratis';
+}
+
+/* El precio de montar con los cambios del montaje: con MP4 es aplicarlos
+   (gratis siempre); sin él, el primer montaje (el de la tanda). */
+function precioDeMontarCambios() {
+  return hayMp4Light() ? ' · gratis' : precioDeMontarLight();
+}
+
+/* MONTAR EL VÍDEO POR LA TANDA ('render', pendientes): el primer montaje, o
+   el de un vídeo que ha quedado viejo. Si por el camino hay que DIBUJAR
+   imágenes viejas, se dice cuántas y cuánto y se pregunta: este botón no paga
+   en silencio. El plan se pide de nuevo antes de decidir (el de la pantalla
+   puede tener unos segundos). Lleva dentro el ánimo pedido, si lo hay: se
+   monta antes su banda. */
+async function montarElVideoLight() {
+  const v = APP.light.video;
+  const pid = v.pid;
+  if (!pid || MONTANDO_LIGHT[pid] || trabajoVideoLight()) return;
+  MONTANDO_LIGHT[pid] = true;
+  repintarBarra();
+  try {
+    await refrescarPlanLight('render', true);
+    if (videoAbierto().pid !== pid) return;
+    const plan = (v.planes || {}).render;
+    if (!plan) { toast('No se ha podido saber qué cuesta montarlo: vuelve a probar en un momento', true); return; }
+    const coste = plan.coste || {};
+    const n = Number(coste.imagenes_por_generar) || 0;
+    if (n && !window.confirm(`Para montar el vídeo hay que dibujar antes ${n} `
+      + `${n === 1 ? 'imagen que ha quedado vieja' : 'imágenes que han quedado viejas'}: `
+      + `≈ ${usdCorto(Number(coste.usd_por_generar) || 0)}. ¿Seguir?`)) return;
+    const modo = { tipo: 'video', pid, diferir: true };
+    const est = estadoAjustes(modo);
+    if (est.animoPedido && !est.montandoAnimo) {
+      await montarAnimoPedido(modo, est, async () => {
+        if (videoAbierto().pid === pid && !trabajoVideoLight()) await lanzarTandaLight('render', 'pendientes');
+      });
+      return;
+    }
+    await lanzarTandaLight('render', 'pendientes');
+  } finally {
+    delete MONTANDO_LIGHT[pid];
+    repintarBarra();
+  }
+}
+
 async function aplicarMontajePendiente(modo, est) {
+  if (est.aplicando) return;
   est.aplicando = true;
   if (est.repintar) est.repintar();
+  repintarBarra();
   try {
     const r = await pedir(`${API.proyecto(modo.pid)}/montaje/aplicar`, { method: 'POST' });
-    est.sinAplicar = false;
-    est.filasSinAplicar = {};
+    olvidarCambiosDelMontaje(est, modo.pid);
     if (est.montaje) { est.montaje.sin_aplicar = false; est.montaje.pendiente = false; }
     if (est.subtitulos) est.subtitulos.pendiente = false;
     avisoDeMontaje(r, r.solo_mezcla ? 'Cambios del montaje (solo la mezcla)' : 'Cambios del montaje');
   } catch (e) { toast(e.message, true); }
   est.aplicando = false;
   if (est.repintar) est.repintar();
+  repintarBarra();
+}
+
+/* LOS CAMBIOS DEL MONTAJE YA RECOGIDOS por un montaje: las filas apuntadas. El
+   ánimo pedido NO: ese solo lo recoge su propio `PUT /musica/animo`. */
+function olvidarCambiosDelMontaje(est, pid) {
+  est.filasSinAplicar = {};
+  est.sinAplicar = false;
 }
 
 async function cargarAjustesVideo(modo, est) {
@@ -18731,8 +18843,10 @@ function animoDeLaAutomatica(modo, est, repintar) {
 /* MONTAR LA MÚSICA CON EL ÁNIMO PEDIDO (lo llama «Montar el vídeo con N
    cambios»): la banda nueva y, si el montaje estaba al día, la mezcla. */
 async function montarAnimoPedido(modo, est, alTerminar) {
+  if (est.montandoAnimo) return;
   est.montandoAnimo = true;
   if (est.repintar) est.repintar();
+  repintarBarra();
   try {
     const r = await pedir(`${API.proyecto(modo.pid)}/musica/animo`, {
       method: 'PUT', cuerpo: { animo: est.animoPedido } });

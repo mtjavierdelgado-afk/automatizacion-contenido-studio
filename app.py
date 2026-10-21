@@ -18385,7 +18385,9 @@ def publicar_youtube_vuelta(request: Request, state: str = Query(default=""),
                             code: str = Query(default=""), error: str = Query(default="")):
     """Adonde vuelve Google con el permiso: cambia el código por el token."""
     SC = _canal_seo()
-    volver = request.url.path.rsplit("/api/", 1)[0] + "/"
+    # el enlace de vuelta sale de la dirección del intento (la que vio el
+    # navegador), no de la ruta: detrás de un proxy que quita /v2/ sería «/»
+    volver = SC.volver_de(state) or request.url.path.rsplit("/api/", 1)[0] + "/"
     if error:
         return _pagina_vuelta("No se ha conectado el canal",
                               "Google dice: " + str(error)[:120] + ". Puedes volver a intentarlo "

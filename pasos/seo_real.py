@@ -785,7 +785,7 @@ def investigar(info, ajustes, datos_video, raiz_p, posts=None, clave_yt="",
         if normal(frase) and normal(frase) not in vistas:
             vistas.add(normal(frase))
             unicas.append((frase, origen))
-    unicas = unicas[:6]
+    unicas = unicas[:5 + len(del_canal_aqui)]
 
     candidatas = []
     sugeridas = []

@@ -163,6 +163,11 @@ def prueba_claves():
     igual(C.leer()["youtube_oauth"]["refresh"], "ref-x", "guardar otra clave no toca la conexión")
     C.guardar({"youtube_oauth": {"cliente_id": "999-otro.apps.googleusercontent.com", "secreto": "otro"}})
     igual(C.leer()["youtube_oauth"]["refresh"], "", "cambiar de cliente olvida la conexión (era de otro)")
+    try:
+        C.guardar({"youtube_oauth": {"cliente_id": "777-x.apps.googleusercontent.com", "secreto": C.CONSERVAR}})
+        ok(False, "otro cliente con el secreto de antes se rechaza")
+    except C.ErrorClaves:
+        ok(True, "otro cliente con el secreto de antes se rechaza (cada cliente, su secreto)")
     C.guardar({"youtube_oauth": {"cliente_id": CLIENTE, "secreto": SECRETO,
                                  "refresh": "inyectado", "canal": "falso"}})
     igual(C.leer()["youtube_oauth"]["refresh"], "", "la pantalla no puede escribir el token")
@@ -181,6 +186,8 @@ def prueba_conectar():
         ok(True, "una dirección de vuelta que no es la del Studio se rechaza")
     url = SC.empezar(VUELTA)
     q = dict(urllib.parse.parse_qsl(urllib.parse.urlparse(url).query))
+    igual(SC.volver_de(q["state"]), "https://estudio.ejemplo.pe/v2/",
+          "«Volver al Studio» sale de la vuelta del intento (con su /v2/)")
     ok(url.startswith(SC.URL_AUTH) and q["client_id"] == CLIENTE and q["redirect_uri"] == VUELTA,
        "la URL de Google lleva el cliente y la vuelta")
     ok("yt-analytics.readonly" in q["scope"] and q["access_type"] == "offline" and q["prompt"] == "consent",
@@ -236,6 +243,27 @@ def prueba_caido():
     except SC.ErrorCanal as fallo:
         ok(fallo.caido and "Volver a conectar" in str(fallo), f"un token caducado se dice: {fallo}")
     ok(bool(C.resumen()["youtube_oauth"]["caido"]), "y queda apuntado para la pantalla")
+    # una conexión nueva mientras otro hilo refrescaba con la vieja: no se marca
+    C.conexion_youtube(caido="")
+    original = SC.oauth
+    llamadas = {"n": 0}
+
+    def cambia_en_medio():
+        llamadas["n"] += 1
+        datos = original()
+        if llamadas["n"] > 2:   # conectado() y _acceso leen el viejo; al fallar, ya hay otro
+            datos["refresh"] = "ref-nuevo"
+        return datos
+    SC.oauth = cambia_en_medio
+    SC._TOKEN.clear()
+    try:
+        SC.busquedas_del_canal(CARPETA, forzar=True)
+    except SC.ErrorCanal:
+        pass
+    finally:
+        SC.oauth = original
+    igual(C.resumen()["youtube_oauth"]["caido"], "",
+          "si el token cambió mientras tanto (se volvió a conectar), no se marca cortada")
     g.refresh_malo = False
     SC.busquedas_del_canal(CARPETA, forzar=True)
     igual(C.resumen()["youtube_oauth"]["caido"], "", "cuando vuelve a funcionar, se borra la marca")
@@ -294,6 +322,8 @@ def prueba_trends():
     g.trends_429 = False
     t = SC.tendencias(["otra frase"], raiz)
     ok(t["frases"]["otra frase"]["sentido"], "y no se guardó: la siguiente vez se vuelve a preguntar")
+    igual(SC._medir([0.0] * 52), None, "una frase de nicho en ceros es «sin dato», no «estable»")
+    igual(SC._medir([0.0] * 50 + [1.0, 0.0]), None, "y casi en ceros tampoco sube «+100 %»")
     c = {"frase": "x", "demanda": {"valor": 50, "nivel": "baja", "textos": []}}
     SC.con_tendencia(c, {"sentido": "sube", "texto": "sube en YouTube"})
     ok(c["demanda"]["valor"] == 58 and "Google Trends" in c["demanda"]["textos"][-1],

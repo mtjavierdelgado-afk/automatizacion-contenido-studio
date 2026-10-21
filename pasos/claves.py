@@ -380,6 +380,8 @@ def _fusionar(actual, peticion):
         cliente = str(pedida.get("cliente_id") or "").strip()
         secreto = str(pedida.get("secreto") or "").strip()
         if secreto == CONSERVAR:
+            if cliente != actual["youtube_oauth"]["cliente_id"]:
+                raise ErrorClaves("con otro ID de cliente hace falta su secreto")
             secreto = actual["youtube_oauth"]["secreto"]
         if cliente and not cliente.endswith(".apps.googleusercontent.com"):
             raise ErrorClaves("el ID de cliente de Google termina en "

@@ -235,6 +235,16 @@ def empezar(redireccion):
         "prompt": "consent", "include_granted_scopes": "true", "state": estado_})
 
 
+def volver_de(estado_):
+    """La dirección del Studio de ese intento (para el enlace «Volver al
+    Studio»), sacada de su vuelta: sirve aunque el proxy quite el prefijo."""
+    with _LOCK:
+        intento = _INTENTOS.get(str(estado_ or ""))
+    if not intento:
+        return ""
+    return intento["redireccion"].rsplit("/api/publicar/youtube/oauth/vuelta", 1)[0] + "/"
+
+
 def terminar(estado_, codigo, raiz_p=None):
     """La vuelta de Google: cambia el código por el token y apunta el canal.
     -> resumen de la conexión. ErrorCanal con un texto para la persona."""
@@ -316,8 +326,11 @@ def _acceso():
     if cod != 200 or not respuesta.get("access_token"):
         error = str(respuesta.get("error") or "")
         if error in ("invalid_grant", "unauthorized_client", "invalid_client"):
-            # el token caducó (app «en prueba»: 7 días) o se quitó el permiso
-            CLAVES.conexion_youtube(caido=dt.datetime.now().strftime("%Y-%m-%dT%H:%M"))
+            # el token caducó (app «en prueba»: 7 días) o se quitó el permiso.
+            # Solo si sigue siendo el MISMO token: si alguien acaba de volver a
+            # conectar, el nuevo no está cortado (revisión del 21-10)
+            if oauth().get("refresh") == refresh:
+                CLAVES.conexion_youtube(caido=dt.datetime.now().strftime("%Y-%m-%dT%H:%M"))
             raise ErrorCanal("Google ha cortado la conexión con tu canal (si tu app de Google "
                              "Cloud está «en prueba», lo hace cada 7 días): pulsa «Volver a "
                              "conectar» en Configuración", 409, caido=True)
@@ -347,7 +360,9 @@ def _informe(params):
     if cod == 401:
         with _LOCK:
             _TOKEN.clear()
-        raise ErrorCanal("Google no acepta el acceso al canal: vuelve a conectarlo", 409, caido=True)
+        # el acceso de una hora se rechazó: se pide otro la próxima vez (no es
+        # la conexión cortada; esa la dice el refresco)
+        raise ErrorCanal("Google no ha aceptado el acceso al canal esta vez: vuelve a intentarlo", 502)
     if cod != 200:
         motivo = ((datos.get("error") or {}).get("message") if isinstance(datos.get("error"), dict)
                   else datos.get("error")) or f"HTTP {cod}"
@@ -496,7 +511,7 @@ def _serie(frases, propiedad):
     url = f"{URL_TRENDS}/explore?" + urllib.parse.urlencode({
         "hl": "es-419", "tz": "300", "req": json.dumps(peticion, ensure_ascii=False)})
     cod, texto = HTTP("GET", url)
-    if cod == 429 or cod == 0 or cod != 200:
+    if cod != 200:
         # la primera vez Trends pide una galleta: se coge en la portada y se reintenta
         HTTP("GET", f"https://trends.google.com/trends/explore?geo={SR.PAIS.upper()}")
         cod, texto = HTTP("GET", url)
@@ -516,6 +531,8 @@ def _serie(frases, propiedad):
     puntos = ((_json(_sin_prefijo(texto)).get("default") or {}).get("timelineData")) or []
     series = {f: [] for f in frases}
     for p in puntos:
+        if p.get("isPartial"):
+            continue                      # la semana a medias: bajaría la tendencia
         valores = p.get("value") or []
         for i, f in enumerate(frases):
             if i < len(valores):
@@ -525,8 +542,11 @@ def _serie(frases, propiedad):
 
 def _medir(serie):
     """{indice 0-100 (media de las 12 últimas semanas), cambio % (12 últimas
-    frente a las 12 anteriores)} o None si no hay serie."""
+    frente a las 12 anteriores)} o None si no hay serie o casi no hay datos
+    (una frase de nicho sale en ceros: eso es «sin dato», no «estable")."""
     if not serie or len(serie) < 8:
+        return None
+    if max(serie) <= 0 or statistics.mean(serie) < 1:
         return None
     ultimas = serie[-12:]
     previas = serie[-24:-12] or serie[:len(serie) // 2]

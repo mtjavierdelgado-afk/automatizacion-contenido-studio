@@ -23897,25 +23897,47 @@ function vueltaOAuthYouTube() {
 }
 
 let ESCUCHA_FOCO_CANAL = false;
+const CANAL_PENDIENTE = { desde: 0 };
 
 function seccionCanalYouTube(ficha) {
   const yo = (ficha && ficha.youtube_oauth) || {};
+  /* AL VOLVER DE LA PESTAÑA DE GOOGLE: solo mientras hay una conexión a medias,
+     solo las claves, y solo se repinta si el canal cambió (revisión del 21-10:
+     repintar a cada foco borraba lo que se estaba pegando). */
   if (!ESCUCHA_FOCO_CANAL) {
     ESCUCHA_FOCO_CANAL = true;
-    window.addEventListener('focus', () => {
-      const cajon = $('#config');
-      if (cajon && !cajon.classList.contains('plegado')) cargarClaves().then(repintarClaves).catch(() => {});
+    window.addEventListener('focus', async () => {
+      const pendiente = CANAL_PENDIENTE.desde && Date.now() - CANAL_PENDIENTE.desde < 15 * 60 * 1000;
+      if (!pendiente) { CANAL_PENDIENTE.desde = 0; return; }
+      try {
+        const r = await pedir(API.claves());
+        const antes = ((estadoConfig().ficha || {}).youtube_oauth) || {};
+        const ahora = r.youtube_oauth || {};
+        if (ahora.conectado !== antes.conectado || ahora.desde !== antes.desde || ahora.caido !== antes.caido) {
+          estadoConfig().ficha = Object.assign({}, estadoConfig().ficha, { youtube_oauth: ahora });
+          CANAL_PENDIENTE.desde = 0;
+          repintarClaves();
+          if (ahora.conectado && !ahora.caido) toast(`Canal conectado: ${ahora.canal || 'tu canal'}`);
+        }
+      } catch (e) { /* se vuelve a mirar en el próximo foco */ }
     });
   }
   const id = h('input', { type: 'text', value: yo.cliente_id || '', placeholder: '…apps.googleusercontent.com' });
   const secreto = h('input', { type: 'password', placeholder: yo.puesta ? 'puesto (no hace falta volver a escribirlo)' : 'secreto del cliente' });
   const vuelta = vueltaOAuthYouTube();
   const conectar = async () => {
+    // la pestaña se abre YA (en el clic): abierta después de un await, Safari
+    // y Firefox la bloquean como ventana emergente
+    const pestana = window.open('', '_blank');
     try {
       const r = await pedir(rutaPublicar('/youtube/oauth/empezar'), { method: 'POST', cuerpo: { redireccion: vuelta } });
-      window.open(r.url, '_blank', 'noopener');
+      CANAL_PENDIENTE.desde = Date.now();
+      if (pestana) { pestana.opener = null; pestana.location.href = r.url; } else location.href = r.url;
       toast('Da permiso en la pestaña de Google y vuelve aquí');
-    } catch (e) { toast(e.message, true); }
+    } catch (e) {
+      if (pestana) pestana.close();
+      toast(e.message, true);
+    }
   };
   const estado = yo.conectado
     ? (yo.caido ? pastillaEstado('error', 'conexión cortada') : pastillaEstado('ok', yo.canal || 'conectado'))
@@ -24214,8 +24236,10 @@ function bloqueEncontraronSeo() {
   if (canal.caido) caja.appendChild(h('div', { clase: 'meta aviso-busquedas' }, 'Google cortó la conexión con tu canal: vuelve a conectarlo en Configuración.'));
   if ((seo.errores || {}).encontraron) caja.appendChild(cajaError(seo.errores.encontraron));
   if (!res.al) return caja;
-  const pct = res.porcentaje_visto !== undefined ? `${String(res.porcentaje_visto).replace('.', ',')} % visto de media` : '';
-  caja.appendChild(h('div', { clase: 'meta' }, `${res.vistas || 0} vistas · ${pct} · ${String(res.duracion_media_s || 0).replace('.', ',')} s de media (desde ${res.desde || '—'})`));
+  const partes = [`${res.vistas || 0} vistas`];
+  if (res.porcentaje_visto !== undefined && res.porcentaje_visto !== null) partes.push(`${String(res.porcentaje_visto).replace('.', ',')} % visto de media`);
+  if (res.duracion_media_s) partes.push(`${String(res.duracion_media_s).replace('.', ',')} s de media`);
+  caja.appendChild(h('div', { clase: 'meta' }, `${partes.join(' · ')} (desde ${res.desde || '—'})`));
   const busquedas = res.busquedas || [];
   if (!busquedas.length) {
     caja.appendChild(h('div', { clase: 'meta' }, 'Todavía nadie ha llegado a este vídeo buscando en YouTube (o son tan pocos que YouTube no los cuenta).'));

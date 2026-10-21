@@ -1892,8 +1892,9 @@ def _investigar(raiz, info, ajustes, videos, cid):
     if SC.conectado():
         try:
             filas = SC.busquedas_del_canal(raiz)
-        except SC.ErrorCanal as fallo:
-            avisos_canal.append(f"tu canal: {fallo}")
+        except Exception as fallo:                          # noqa: BLE001
+            # lo del canal es un añadido: si falla, se dice y se investiga igual
+            avisos_canal.append(f"tu canal: {str(fallo)[:200]}")
     real = SR.investigar(info, ajustes, datos, raiz, posts=posts, clave_yt=clave_youtube(),
                          del_canal=filas, enriquecer=_enriquecer(raiz, filas))
     real["avisos"] = avisos_canal + list(real.get("avisos") or [])

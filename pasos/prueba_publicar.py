@@ -2604,6 +2604,23 @@ def prueba_20oct_programado():
         os.environ.pop("ESTUDIO_UPLOADPOST_SIMULADO", None)
 
 
+def prueba_portada_mandada():
+    """portadas-2 (21-10): el envío dice qué portada se mandó a cada red, para
+    saber si la que no salió es cosa de aquí o de la red."""
+    seccion("4g] qué portada se mandó a cada red (portadas-2)")
+    import publicar as P
+    ok(P.portada_mandada("instagram", {}, [("cover_image", "/x.jpg")]) == "tu imagen de portada",
+       "Instagram con imagen: «tu imagen de portada»")
+    ok("segundo 3,5" in P.portada_mandada("instagram", {"thumb_offset": "3500"}, []), "o el fotograma, en segundos")
+    ok("cover_image" in P.portada_mandada("tiktok", {}, [("tiktok_cover_image", "/x.jpg")]),
+       "TikTok con imagen avisa de que necesita el permiso «cover_image»")
+    ok("verificado" in P.portada_mandada("youtube", {}, [("thumbnail", "/x.jpg")]), "YouTube, del canal verificado")
+    ok(P.portada_mandada("youtube", {}, []) == "" and P.portada_mandada("facebook", {}, []) == "",
+       "sin nada, vacío: la puso la red")
+    ok("portada" in P._envio_publico_campos({"portada": "tu imagen de portada"}),
+       "y la ficha del envío lo enseña")
+
+
 def main():
     print("PRUEBA DE PUBLICAR")
     prueba_piezas()
@@ -2623,6 +2640,7 @@ def main():
     prueba_20oct_idioma()
     prueba_20oct_short()
     prueba_20oct_programado()
+    prueba_portada_mandada()
     if shutil.which("ffmpeg"):
         prueba_portada()
     if shutil.which("ffmpeg"):

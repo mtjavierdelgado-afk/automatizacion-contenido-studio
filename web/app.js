@@ -20541,7 +20541,8 @@ async function descargarPortada() {
       try { const datos = await r.json(); motivo = (datos.error && (datos.error.mensaje || datos.error)) || motivo; } catch (e) { /* no era JSON */ }
       throw new Error(String(motivo));
     }
-    const nombre = ((r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/) || [])[1] || 'portada.png';
+    // (sin comillas dentro de una expresión regular: parten los analizadores de herramientas/)
+    const nombre = ((r.headers.get('Content-Disposition') || '').split('filename=')[1] || '').replace(/\x22/g, '').trim() || 'portada.png';
     bajarBlobPortada(await r.blob(), nombre);
     avisoPortada('Portada descargada ✓');
   } catch (e) { avisoPortada(`no se ha podido descargar: ${e.message}`, true); }

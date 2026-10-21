@@ -14,6 +14,66 @@ vídeos, estilos, claves y contraseña no se tocan.
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
+**Crear, rediseñado: el carril de seis pasos (20 de octubre)**
+- **El recorrido de un vídeo, a la izquierda** (en el móvil, una fila arriba
+  que se desliza y se centra sola en el paso en el que estás): **Estilo ·
+  Encargo · Guion · Voz · Imágenes · Vídeo**. Cada paso dice cómo está, con
+  forma y color — ✓ hecho, ● estás aquí, ⟳ 42 % generándose, ! algo por hacer
+  («Guion obsoleto», «2 tramos sin grabar», «1 imagen obsoleta», «1 nota sin
+  aplicar», «Vídeo obsoleto», «1 cambio por traer»), ○ pendiente, · aún no — y
+  una línea con lo suyo («6 bloques · 115 palabras», «0:53 · Gonzalo»). Debajo,
+  lo gastado en el vídeo. Sustituye a la barra de pasos de abajo.
+- **Una sola salida: «‹ Tus proyectos»** (y el logo). Se fueron «‹ Mis vídeos»,
+  «← Volver», «‹ Volver», «‹ Todos los proyectos», «Todos los estilos» y
+  «‹ Volver al vídeo». Arriba de cada paso, **la cabecera del vídeo**: su
+  nombre (✏️ lo cambia ahí mismo; en «Últimos vídeos», también en su fila),
+  su estilo, su proyecto y el gasto.
+- **Una barra de acción pegada abajo en cada paso**: cómo está, qué va a hacer
+  el botón (tareas, tiempo, precio) y el botón del siguiente paso con su coste.
+  **Cada acción se llama igual en todas partes**: «Generar / Regenerar el
+  guion», «Grabar / Regrabar la voz», «Regrabar N tramos», «Generar las
+  imágenes», «Poner al día N imágenes», «Aplicar N notas» (antes «Rehacer N
+  imágenes» en Imágenes y «Aplicar N cambios» en Vídeo), «Montar el vídeo»
+  (antes también «Generar / Regenerar Vídeo») y «Enviar a Publicar ›».
+- **La Voz tiene su paso**: la voz elegida («Cambiar en el estilo ›»), el
+  reproductor, el guion en karaoke y, en cada bloque, **«▶ Oír»** y
+  **«Regrabar este tramo»** con su precio. **«Regrabar la voz entera»**
+  sustituye a «Regenerar Audio».
+- **Guion**: los mandos de cada bloque se ven siempre (✂ Partir · ✎ Editar a
+  mano · ↻ Cambiar con una frase); «+ Añadir bloque» en cada hueco; **«Revisar
+  el guion»** con dos pestañas, Ortografía y Redacción (editorial); «Qué
+  cambiarías del guion entero» ya no tiene botón propio: con algo escrito, la
+  barra dice «Regenerar el guion».
+- **Imágenes**: la tira de todos los planos arriba (⚠ obsoleta, 📝 con nota,
+  ✓ revisada); los mandos para mirar, pegados encima de la barra.
+- **Vídeo**: «Notas del vídeo» (antes «El repaso»), «Revisar» (la ortografía
+  de los subtítulos), «Descargar» y «Publicar» en cajas debajo del vídeo.
+- **El Estilo de un vídeo es su primer paso**: arriba, «Su estilo» (traer los
+  cambios del estilo, cambiar de estilo, restaurarlo), que antes estaba en el
+  Encargo; debajo, la ficha entera.
+- **La ficha de un estilo, en pestañas**: 🎨 Cómo se ve · 📏 Reglas · 🗣️ Cómo
+  se cuenta · 🎙️ Cómo suena · ⏱️ Ritmo · 🌐 Nombre, idioma y proyecto. El tono,
+  en tres cajas con nombre: «Lo que lee el redactor (se guarda solo)», «Pídele
+  un cambio al tono» y «Cómo quieres que suene (para regenerarlo entero)». Cada
+  lámina tiene **«Redibujar esta lámina»** (antes «Regenerar», que chocaba con
+  el de abajo), y la barra dice **«Regenerar lo pedido»**, con un punto en las
+  pestañas que piden algo. Un estilo nuevo usa las mismas pestañas, y la barra
+  dice lo que falta (cada aviso lleva a su pestaña).
+- **La tarjeta de un estilo**: pulsarla sigue empezando un vídeo nuevo, y ahora
+  lleva **«✎ Editar»** a la vista; en «⋯» quedan Duplicar y Mover a otro
+  proyecto.
+- **Los ajustes del montaje ya no montan solos (el único cambio de cómo se
+  comporta algo).** Son el mismo panel en el Encargo y en Vídeo (también en un
+  vídeo nuevo, que los guarda en el borrador): tocar la música, los
+  subtítulos, el logo, los efectos o el movimiento lo guarda y la fila dice
+  «· sin aplicar todavía»; sale la franja «Hay N cambios del montaje sin
+  aplicar», y **solo** «Montar el vídeo con N cambios · gratis», en la barra,
+  los monta, todos de una vez. Se fueron «Aplicar ahora», «Aplicar y volver a
+  montar» y «Montar la música con este ánimo» (el ánimo se elige y entra al
+  montar). Antes, en Vídeo, cada cambio volvía a montar el vídeo.
+- Nada de esto cambia lo que se genera ni lo que se paga: los mismos pasos,
+  los mismos parámetros y las mismas firmas.
+
 **Publicar: arreglos del 20 de octubre**
 - **El Short de YouTube vuelve a subir.** Upload-Post rechazaba el idioma del
   audio «es-419» («Invalid defaultAudioLanguage format»): solo acepta códigos

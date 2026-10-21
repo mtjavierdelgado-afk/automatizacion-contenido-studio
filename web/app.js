@@ -5307,14 +5307,19 @@ function estiloDelCarril() {
 
 /* MOVERSE POR EL CARRIL. Lo que se está mirando en Imágenes se para, como al
    pulsar cualquier parada de la barra de antes. */
-function irAPasoDelCarril(id) {
+function irAPasoDelCarril(id, op) {
   const L = APP.light;
   const v = L.video;
   pararPrevia();
   if (id === 'estilo') {
     const estilo = estiloDelCarril();
     if (estilo && fichaLight(estilo)) apuntarClienteDe(clienteDe(estilo));
-    irALight('preset', { abierto: estilo, feedback: {}, desdeVideo: v.pid || NUEVO_VIDEO });
+    /* EL ESTILO DE ESTE VÍDEO YA NO ESTÁ (borrado, o de un proyecto con clave
+       sin abrir): el paso lo dice y abre «Cambiar de estilo…» (y «Restaurarlo»
+       si está en la papelera). Antes la parada te sacaba al Encargo. */
+    if (v.pid && !fichaLight(estilo)) v.cambioEstilo = { pid: v.pid, abierto: true, partes: {} };
+    irALight('preset', { abierto: estilo, feedback: {}, desdeVideo: v.pid || NUEVO_VIDEO,
+      pestanaEstilo: (op || {}).pestana || 've' });
     return;
   }
   if (!v.pid) {
@@ -5740,6 +5745,21 @@ function repintarBarra() {
   const nuevo = BARRA_INFERIOR.hacer();
   viejo.replaceWith(nuevo);
   BARRA_INFERIOR.nodo = nuevo;
+  ajustarAltoDeLaBarra();
+}
+
+/* LA BURBUJA DEL ASISTENTE VA ENCIMA DE LA BARRA, que no mide siempre lo
+   mismo (en Imágenes lleva los mandos encima; en el móvil, el plan en otra
+   fila). Se mide al pintarla y se pasa a `--alto-pie`, que es lo que usa la
+   burbuja; sin barra, el de la hoja de estilo. Por CSSOM: la CSP no deja
+   atributos `style`. */
+function ajustarAltoDeLaBarra() {
+  requestAnimationFrame(() => {
+    const barra = BARRA_INFERIOR.nodo;
+    const raiz = document.documentElement.style;
+    if (barra && barra.isConnected && barra.offsetHeight) raiz.setProperty('--alto-pie', `${barra.offsetHeight}px`);
+    else raiz.removeProperty('--alto-pie');
+  });
 }
 
 /* El botón principal de una barra: grande, con su ayuda larga en el globo. */
@@ -6135,6 +6155,7 @@ function pintarLightAhora() {
      panel, de borde a borde, como las barras de antes. */
   donde.appendChild(pieSistema());
   if (BARRA_INFERIOR.nodo) (paso ? donde : contenedor).appendChild(BARRA_INFERIOR.nodo);
+  ajustarAltoDeLaBarra();
 }
 
 /* A LA PORTADA desde donde sea (la parada «Inicio», el logo, «‹ Mis vídeos»).
@@ -6227,6 +6248,10 @@ function irALight(vista, extra) {
   APP.light.vista = vista;
   // «‹ Volver al vídeo» solo vale para la ficha a la que se llegó desde él
   APP.light.desdeVideo = '';
+  /* LA FICHA DE UN ESTILO SE ABRE EN «🎨 CÓMO SE VE» (rediseño de Crear), salvo
+     que quien la abre pida otra pestaña; ir y volver por «generando» no la
+     cambia. */
+  if (vista === 'preset' && !enFicha) APP.light.pestanaEstilo = 've';
   Object.assign(APP.light, extra || {});
   /* ...Y SIGUE VALIENDO MIENTRAS SE CORRIGE ESE ESTILO: regenerarlo pasa por
      «generando» y vuelve a la ficha, y ese ir y volver borraba el camino de
@@ -6968,7 +6993,7 @@ function menuDeEstilo(ficha) {
 }
 
 function editarEstiloLight(ficha) {
-  irALight('preset', { abierto: ficha.id, feedback: {} });
+  irALight('preset', { abierto: ficha.id, feedback: {}, pestanaEstilo: 've' });
 }
 
 async function duplicarEstiloLight(ficha) {
@@ -8572,7 +8597,7 @@ function panelOrtografia(fuente, opciones) {
           ? (conVoz ? 'se guardan en el guion y la voz de esos bloques queda por regrabar (se paga); '
             + 'para que solo se lea bien, corrige los subtítulos en Vídeo (gratis)'
             : 'se guardan en el guion; la voz se graba después con ellas')
-          : 'se quedan como texto del subtítulo de cada plano: «Regenerar Vídeo» las monta')));
+          : 'se quedan como texto del subtítulo de cada plano: «Montar el vídeo» las monta')));
     }
   }
   return caja;
@@ -9886,7 +9911,7 @@ function revisarElGuion() {
     const panel = panelEditorial();
     if (panel) caja.appendChild(panel);
     else {
-      caja.appendChild(h('div', { clase: 'fila' },
+      caja.appendChild(h('div', { clase: 'fila panel-ortografia panel-editorial-vacio' },
         h('span', { clase: 'meta crece' }, 'sintaxis, concordancia, puntuación, repeticiones y claridad, '
           + 'como un corrector editorial; propone y tú aceptas o rechazas cada cambio'),
         botonRevisionEditorial()));
@@ -10686,13 +10711,13 @@ function ayudaDiapositivas(hayVideo, obsoleto, queda) {
   if (queda === false) {
     // U3: la parada de la barra se llama «Imágenes» (antes «Diapositivas»)
     return 'Las imágenes ya recogen el guion y el audio de ahora. Para '
-      + 'verlas, «Imágenes» en la barra de abajo: no cuesta nada.';
+      + 'verlas, «Imágenes» en el carril: no cuesta nada.';
   }
   if (hayVideo && obsoleto) {
     return 'Vuelve a partir los subtítulos con los tiempos del audio de ahora y '
-      + 'redibuja las capas de los planos afectados. Una imagen solo se vuelve '
+      + 'redibuja las imágenes de los planos afectados. Una imagen solo se vuelve '
       + 'a pagar si el cambio altera su prompt; cambiar una palabra suelta no '
-      + 'lo hace. No monta el MP4: eso es «Montar el vídeo», después de mirarlo.';
+      + 'lo hace. No monta el MP4: eso es «Montar el vídeo», después de mirarlas.';
   }
   return 'Dibuja los planos, les monta los subtítulos y las cartelas y prepara '
     + 'la música. Para ahí, en Imágenes, para que lo mires antes de '
@@ -10779,7 +10804,7 @@ function vistaVozLight() {
         + (origen.voz_prompt ? ` (pedida así: «${origen.voz_prompt}»)` : '')) : null),
     h('button', {
       clase: 'mini', title: 'La voz es del estilo: se cambia en su pestaña «Cómo suena»',
-      onclick: () => { APP.light.pestanaEstilo = 'suena'; irAPasoDelCarril('estilo'); },
+      onclick: () => irAPasoDelCarril('estilo', { pestana: 'suena' }),
     }, 'Cambiar en el estilo ›')));
   if (!v.audio) {
     tarjeta.appendChild(h('div', { clase: 'caja-info' }, v.guion
@@ -14038,6 +14063,7 @@ function botonAplicarRepaso() {
          acción con dos nombres). N son las notas; se paga una imagen por plano. */
       h('button', { clase: 'primario principal', onclick: encolarTodasLasImagenes },
         `Aplicar ${vivas.length} ${vivas.length === 1 ? 'nota' : 'notas'}`
+        + ` · ${n} ${n === 1 ? 'imagen' : 'imágenes'}`
         + (delRevisor ? ` (${delRevisor} del revisor)` : '')
         + ` · ≈ ${usdCorto(n * COLA_IMG.usdPorImagen)}`
         + ` · ~${mmss(n * COLA_IMG.segundosPorImagen)}`));
@@ -14998,13 +15024,17 @@ function vistaGenerandoLight() {
   });
   caja.appendChild(lista);
 
-  caja.appendChild(h('div', { clase: 'fila' },
-    h('button', {
+  caja.appendChild(h('div', { clase: 'meta' },
+    'Puedes cerrar esta pestaña: sigue corriendo en el servidor.'));
+  /* «CANCELAR», EN LA BARRA DE ACCIÓN como todos los botones (rediseño de
+     Crear), con el tanto por ciento al lado. */
+  ponerBarra(() => barraDeAccion({ clase: 'pie-generando',
+    estado: { e: 'curso', texto: cancelando ? 'Cancelando…' : `${Math.round(fraccion * 100)} % · ${APP.light.abierto ? 'rehaciendo el estilo' : 'montando el estilo'}` },
+    plan: previsto > 0 && restante > 5 && !cancelando ? `quedan ~${duracionCorta(restante)}` : '',
+    botones: [h('button', {
       clase: 'mini peligro', disabled: cancelando,
       onclick: async () => { await cancelar(CLAVE_LIGHT); },
-    }, cancelando ? 'Cancelando…' : 'Cancelar'),
-    h('span', { clase: 'meta' },
-      'Puedes cerrar esta pestaña: sigue corriendo en el servidor.')));
+    }, cancelando ? 'Cancelando…' : 'Cancelar')] }));
   return caja;
 }
 
@@ -20056,13 +20086,17 @@ function apartadosDeLaPantalla() {
   if (MODULOS.actual === 'publicar') return ['Publicar'];
   if (MODULOS.actual === 'automatizar') return ['Automatizar'];
   const vista = APP.light.vista;
-  if (vista === 'preset' || vista === 'crear' || vista === 'generando') return ['Estilos'];
+  if (vista === 'preset' || vista === 'crear' || vista === 'generando') {
+    return APP.light.desdeVideo ? ['Crear un vídeo: el carril', 'Estilos'] : ['Estilos'];
+  }
   if (vista === 'elegido') {
     const sub = (APP.light.video || {}).vista;
-    if (sub === 'guion') return ['Guion'];
-    if (sub === 'previa') return ['Imágenes'];
-    if (sub === 'video') return ['Vídeo'];
-    return ['Encargo'];
+    const carril = 'Crear un vídeo: el carril';
+    if (sub === 'guion') return [carril, 'Guion'];
+    if (sub === 'voz') return [carril, 'Voz'];
+    if (sub === 'previa') return [carril, 'Imágenes'];
+    if (sub === 'video') return [carril, 'Vídeo'];
+    return [carril, 'Encargo'];
   }
   return ['La idea en una frase', 'Proyectos', 'Estilos'];
 }

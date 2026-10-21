@@ -3336,35 +3336,34 @@ def los_cambios_del_montaje_no_se_pierden(navegador, datos):
        f"salir del vídeo con cambios sin aplicar avisa ({pg.dialogos[antes:]})")
     ok(pg.p.evaluate(f"() => APP.light.video.pid === '{pid}'"), "y diciendo que no, sigue en el vídeo")
     pg.aceptar = True
-    # (5) UN AJUSTE DE OTRA FILA, montado por OTRO camino: «Montar el vídeo» de Imágenes
-    pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="💬 Subtítulos").first \
-        .locator("button", has_text="Cambiar").click()
-    pg.p.wait_for_timeout(800)
-    pg.p.locator(".ajustes-en-video .editor-ajuste .campo").filter(
-        has=pg.p.locator("label", has_text="Dónde va")).first.locator("button", has_text="Arriba").click()
-    pg.p.wait_for_timeout(2000)
-    ok("Montar el vídeo con 2 cambios" in barra(), f"los subtítulos son otro cambio: 2 ({barra()})")
-    pg.js("await recargarVideoAbierto();")   # el vídeo ya se sabe obsoleto
-    ir_al_paso(pg, "Imágenes")
-    pg.p.wait_for_timeout(2500)
-    montar = pg.p.locator(".barra-accion button").filter(has_text="Montar el vídeo").first
-    ok(montar.count() and montar.is_enabled(), f"Imágenes ofrece «Montar el vídeo» ({barra()})")
-    if montar.count():
-        montar.click()
+    try:
+        # (5) UN AJUSTE DE OTRA FILA, montado por OTRO camino que el botón de la
+        # barra (aquí, por la API: como la tanda de Imágenes o aplicar las notas,
+        # la pantalla no se entera de quién lo lanzó)
+        pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="💬 Subtítulos").first \
+            .locator("button", has_text="Cambiar").click()
+        pg.p.wait_for_timeout(800)
+        pg.p.locator(".ajustes-en-video .editor-ajuste .campo").filter(
+            has=pg.p.locator("label", has_text="Dónde va")).first.locator("button", has_text="Arriba").click()
         pg.p.wait_for_timeout(2000)
-    ok(api.libre(pid, 600), "el montaje termina")
-    pg.sin_trabajo(600)
-    pg.p.wait_for_timeout(2000)
-    ir_al_paso(pg, "Vídeo")
-    pg.p.wait_for_timeout(2500)
-    ok("Montar el vídeo con 1 cambio" in barra(),
-       f"ese montaje recoge los subtítulos; el ánimo, que no está en el servidor, sigue pendiente ({barra()})")
-    # se deja como estaba para quien venga detrás
-    pg.js("const est = estadoAjustes({ tipo: 'video', pid: APP.light.video.pid });"
-          " est.animoPedido = ''; olvidarCambiosDelMontaje(est, APP.light.video.pid);")
-    api.put(f"/api/proyectos/{pid}/subtitulos", {"posicion": "auto"})
-    api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})
-    api.libre(pid)
+        ok("Montar el vídeo con 2 cambios" in barra(), f"los subtítulos son otro cambio: 2 ({barra()})")
+        r, _d = api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})
+        ok(r.status_code == 202, f"el vídeo se monta por otro camino ({r.status_code})")
+        ok(api.libre(pid, 600), "el montaje termina")
+        pg.js("await recargarVideoAbierto(); pintarLight();")
+        pg.p.wait_for_timeout(2000)
+        ir_al_paso(pg, "Vídeo")
+        pg.p.wait_for_timeout(2500)
+        ok("Montar el vídeo con 1 cambio" in barra(),
+           f"ese montaje recoge los subtítulos; el ánimo, que no está en el servidor, sigue pendiente ({barra()})")
+    finally:
+        # se deja como estaba para quien venga detrás, pase lo que pase
+        pg.js("const est = estadoAjustes({ tipo: 'video', pid: APP.light.video.pid });"
+              " est.animoPedido = ''; olvidarCambiosDelMontaje(est, APP.light.video.pid);")
+        api.libre(pid)
+        api.put(f"/api/proyectos/{pid}/subtitulos", {"posicion": "auto"})
+        api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})
+        api.libre(pid)
     pg.sin_errores("los cambios del montaje no se pierden")
     pg.cerrar()
 

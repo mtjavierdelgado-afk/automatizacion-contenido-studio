@@ -58,6 +58,7 @@ suites=(
   pasos/prueba_presets_light.py pasos/prueba_modo_foto.py
   pasos/prueba_publicar.py pasos/prueba_parrilla.py pasos/prueba_cuentas.py
   pasos/prueba_espacio_fijo.py
+  pasos/prueba_seo_real.py
   prueba_recorrido.py
 )
 

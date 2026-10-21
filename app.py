@@ -17608,6 +17608,45 @@ def publicar_palabra_para_encargo(peticion: Request, estilo: str = Query(default
     return {"palabra": ajustes.get("palabra_clave") or "", "zona": ajustes.get("zona") or ""}
 
 
+# =================================================================== SEO REAL
+# Rama `seo-real` (20-10-2026): «Investigar búsquedas» en la ficha de un vídeo
+# (autocompletado de YouTube y Google para Perú, competencia con la API de
+# datos de YouTube si hay clave, y cómo le fue a cada frase en la cuenta) y
+# «Probar» la clave de YouTube. Va en hilo y se sigue preguntando por la ficha
+# (`seo.trabajando.investigar`, `seo.real`). Nada entra en ninguna firma.
+
+@app.post("/api/publicar/videos/{pid}/seo/investigar", status_code=202)
+def publicar_investigar_seo(pid: str, peticion: Request):
+    """Investiga las búsquedas de verdad para la palabra clave de este vídeo."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    P = _publicar()
+    ajustes = P.ajustes_de(raiz_proyectos(), info["cliente"])
+    del_proyecto = [v for v in _videos_para_publicar(peticion) if v["cliente"] == info["cliente"]]
+    cid_res = "" if info["cliente"] in ("", P.SIN_PROYECTO) else info["cliente"]
+    _por_publicar(P.lanzar_investigar, raiz_proyectos(), info, ajustes, del_proyecto, cid_res)
+    anotar_global("publicar_seo_investigar", {"proyecto": ctx.id})
+    return {"trabajando": True}
+
+
+@app.post("/api/publicar/youtube/probar")
+def publicar_probar_youtube():
+    """Prueba la clave de la API de datos de YouTube (gasta 1 unidad del cupo)
+    y dice lo que queda hoy. La clave nunca sale en la respuesta."""
+    P = _publicar()
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    modulo = PASOS_MODULOS.comprobar_claves
+    clave = P.clave_youtube()
+    if P.SR.simulado():
+        ficha = modulo._ficha("youtube", "ok" if clave else "sin_clave",
+                              "simulado" if clave else "sin poner")
+    else:
+        ficha = modulo.probar_youtube(clave)
+    ficha = modulo._tachar([ficha], {"youtube": {"clave": clave}})[0]
+    return {"prueba": ficha, "cupo": P.SR.cupo(raiz_proyectos())}
+
+
 # =================================================================== PARRILLA
 # Automatizar → Parrilla (rama `parrilla`, 17-10-2026): matrices de guiones por
 # proyecto, en el formato unico del anexo, y «Pasar al Encargo». Bloque propio

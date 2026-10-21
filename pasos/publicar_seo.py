@@ -77,6 +77,7 @@ _RAIZ = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _RAIZ not in _sys.path:
     _sys.path.insert(0, _RAIZ)
 from motores.publicar_uploadpost import cliente as _UP         # noqa: E402
+import seo_real as SR                                          # noqa: E402
 
 RANGO_HASHTAGS = {"tiktok": (3, 5), "instagram": (5, 8), "youtube": (3, 5), "facebook": (2, 4),
                   **_RD.HASHTAGS}
@@ -189,10 +190,33 @@ def validar(k, v):
     return v
 
 
-def palabra_del_video(datos_video, ajustes):
-    """La palabra clave que manda en este vídeo: la suya o la del proyecto."""
+def palabra_del_video(datos_video, ajustes, info=None):
+    """La palabra clave que manda en este vídeo.
+
+    La suya, si la tiene. Si no, la del proyecto SOLO si el vídeo trata de eso
+    (rama seo-real, 20-10: la nota pedía meter «alquiler de consolas en Lima»
+    en vídeos que no iban de alquilar consolas); si no lo trata, la que propuso
+    Claude al leer el vídeo; si tampoco, ninguna. Sin `info` (quien no tiene
+    el vídeo a mano, como la cuenta de lo ya publicado) es la de antes: la
+    suya o la del proyecto."""
     propia = str((datos_video or {}).get("palabra_clave") or "").strip()
-    return propia or str((ajustes or {}).get("palabra_clave") or "").strip()
+    if propia:
+        return propia
+    proyecto = str((ajustes or {}).get("palabra_clave") or "").strip()
+    if info is None:
+        return proyecto
+    if proyecto and SR.es_relevante(proyecto, info, (ajustes or {}).get("zona") or ""):
+        return proyecto
+    return " ".join(str((datos_video or {}).get("palabra_propuesta") or "").split())[:80]
+
+
+def secundarias_del_video(ajustes, info=None, tope=8):
+    """Las secundarias del proyecto que ESTE vídeo trata (todas, sin `info`)."""
+    todas = lista((ajustes or {}).get("secundarias"), tope)
+    if info is None:
+        return todas
+    corpus = SR.Corpus(info, (ajustes or {}).get("zona") or "")
+    return [s for s in todas if SR.es_relevante(s, corpus=corpus)]
 
 
 def hashtag_de(frase):
@@ -201,17 +225,29 @@ def hashtag_de(frase):
 
 # -------------------------------------------------------- lo que se pide a Claude
 
-def bloque_instruccion(ajustes, palabra, redes, recientes=None, aprendido=None):
+def bloque_instruccion(ajustes, palabra, redes, recientes=None, aprendido=None, info=None,
+                       busquedas=""):
     """El apartado SEO de la instrucción de los textos. Vacío si el proyecto no
-    tiene ni palabra clave ni zona (los textos salen como antes)."""
+    tiene ni palabra clave ni zona (los textos salen como antes). Con `info`,
+    las secundarias que el vídeo no trata no se piden (rama seo-real), y
+    `busquedas` son las frases que la gente busca de verdad (`seo_real`)."""
     ajustes = ajustes or {}
-    secundarias = lista(ajustes.get("secundarias"), 8)
+    secundarias = secundarias_del_video(ajustes, info)
     zona = str(ajustes.get("zona") or "").strip()
     evitar = lista(ajustes.get("evitar"), 20)
     banco = {k: lista(ajustes.get(f"hashtags_{k}"), 20) for k in ("amplios", "nicho", "locales")}
     if not (palabra or secundarias or zona or any(banco.values())):
         return ""
-    lineas = ["SEO (que se ENCUENTRE el vídeo; con naturalidad, nunca listas de palabras)"]
+    lineas = ["SEO (que se ENCUENTRE el vídeo; con naturalidad, nunca listas de palabras)",
+              "- NUNCA metas una palabra clave de algo que el vídeo no trata: quien la busque "
+              "y no lo encuentre se va, y eso hunde el vídeo."]
+    if not palabra and info is not None:
+        lineas.append("- Este vídeo no tiene palabra clave todavía: usa la frase más concreta "
+                      "que alguien escribiría en el buscador para encontrar ESTE vídeo (de lo "
+                      "que trata de verdad) y ponla en la primera línea y al principio del título.")
+    if busquedas:
+        lineas.append("- Lo que la gente BUSCA de verdad (autocompletado de YouTube y Google, "
+                      "Perú), solo frases que el vídeo trata; usa las que encajen:\n" + busquedas)
     if palabra:
         lineas.append(f"- Palabra clave de ESTE vídeo: «{palabra}». Va en la PRIMERA LÍNEA de "
                       "cada red; al PRINCIPIO del título de YouTube y de Facebook; y en YouTube "
@@ -224,8 +260,8 @@ def bloque_instruccion(ajustes, palabra, redes, recientes=None, aprendido=None):
     if evitar:
         lineas.append("- NO uses nunca: " + "; ".join(f"«{e}»" for e in evitar) + ".")
     if any(banco.values()):
-        lineas.append("- Banco de hashtags del proyecto (elige de aquí y ROTA: no pongas siempre "
-                      "el mismo bloque): " + "; ".join(
+        lineas.append("- Banco de hashtags del proyecto (elige de aquí SOLO los que tengan que "
+                      "ver con este vídeo, y ROTA: no pongas siempre el mismo bloque): " + "; ".join(
                           f"{k}: {', '.join(v)}" for k, v in banco.items() if v) + ".")
     if recientes:
         lineas.append("- Hashtags que ya salieron en los últimos vídeos (cambia al menos la "
@@ -258,6 +294,18 @@ Zona: {zona}
 Palabras a evitar: {evitar}
 </seo>
 
+<guion>
+{guion}
+</guion>
+
+<busquedas_reales>
+{busquedas}
+</busquedas_reales>
+
+<lo_que_mejor_funciono_en_la_cuenta>
+{aprendido}
+</lo_que_mejor_funciono_en_la_cuenta>
+
 <textos_actuales>
 {textos}
 </textos_actuales>
@@ -268,6 +316,12 @@ Palabras a evitar: {evitar}
 
 REGLAS DE CADA RED
 {reglas}
+
+NUNCA metas una palabra clave de algo que el vídeo no trata (mira el guion): si la
+palabra clave de arriba no es de este vídeo, no la fuerces y propón otra en
+"palabra_clave". Si hay búsquedas reales, prefiere esas frases (son lo que la gente
+escribe) siempre que el vídeo trate de eso. Aprende de los ganchos que mejor
+funcionaron en la cuenta (el estilo, no las palabras).
 
 Para cada red: arregla los fallos de la nota y lo que veas (palabra clave al principio
 del título y en la primera línea, primera línea que enganche, hashtags en su rango y
@@ -487,11 +541,16 @@ def campos_extra(red, textos_red, ajustes, datos_video, info, palabra):
     return campos, avisos
 
 
-def etiquetas_youtube(ajustes, palabra, tags):
+def etiquetas_youtube(ajustes, palabra, tags, info=None):
     """Las etiquetas (tags) de YouTube: la palabra del vídeo, la del proyecto,
-    las secundarias y los hashtags, sin repetir y en menos de 450 caracteres."""
-    candidatas = [palabra, (ajustes or {}).get("palabra_clave")]
-    candidatas += lista((ajustes or {}).get("secundarias"), 8)
+    las secundarias y los hashtags, sin repetir y en menos de 450 caracteres.
+    Con `info`, las del proyecto que el vídeo no trata se quedan fuera."""
+    proyecto = (ajustes or {}).get("palabra_clave")
+    if info is not None and proyecto and not SR.es_relevante(proyecto, info,
+                                                            (ajustes or {}).get("zona") or ""):
+        proyecto = ""
+    candidatas = [palabra, proyecto]
+    candidatas += secundarias_del_video(ajustes, info)
     candidatas += list(tags or [])
     salida, largo = [], 0
     for c in candidatas:
@@ -549,8 +608,8 @@ def nota(red, textos_red, compuesto, ajustes, datos_video, info, palabra):
                   "palabra clave en las dos primeras líneas de la descripción"
                   if contiene(dos, palabra) else "las dos primeras líneas de la descripción no la dicen", 10)
     else:
-        punto("palabra", False, "sin palabra clave: ponla en este vídeo o en el proyecto "
-              f"({DONDE_SEO_PROYECTO})", 20)
+        punto("palabra", False, "sin palabra clave para este vídeo: escríbela o pulsa "
+              "«Investigar búsquedas»", 20)
     if red == "youtube":
         n = len(titulo)
         punto("titulo_largo", 40 <= n <= 70, f"título de {n} caracteres" + ("" if 40 <= n <= 70 else

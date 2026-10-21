@@ -4122,6 +4122,18 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 .punto-seo.ok { color: var(--ok); }
 .punto-seo.aviso { color: var(--aviso); }
 .gancho-seo { gap: 8px; padding: 4px 8px; border: 1px solid var(--linea); border-radius: 7px; background: var(--hueco); }
+/* SEO de verdad (rama seo-real): las tres partes de la nota y las búsquedas */
+.parte-seo { padding: 4px 6px; border-left: 2px solid var(--linea); margin: 4px 0; min-width: 0; }
+.parte-seo > .fila { gap: 8px; align-items: center; }
+.parte-seo .meta { overflow-wrap: anywhere; }
+.titulo-forma-seo { font-size: 12px; color: var(--tenue); margin-top: 8px; }
+.busquedas-seo { margin: 8px 0; padding: 6px 8px; border: 1px solid var(--linea); border-radius: 8px; background: var(--hueco); }
+.busquedas-seo > summary { cursor: pointer; }
+.busquedas-seo > .fila { gap: 8px; align-items: center; flex-wrap: wrap; }
+.tabla-busquedas td, .tabla-busquedas th { font-size: 12px; padding: 4px 6px; vertical-align: top; }
+.tabla-busquedas tr.recomendada td { background: var(--panel); }
+.tabla-busquedas tr.recomendada td:first-child { border-left: 2px solid var(--ok); }
+.aviso-busquedas { color: var(--aviso); }
 .pista-palabra-clave:empty { display: none; }
 .pista-palabra-clave { margin: 8px 0; }
 @media (max-width: 600px) {

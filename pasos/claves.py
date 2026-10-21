@@ -111,6 +111,10 @@ def _vacio():
         # Publicar en redes (rama publicar-redes-1): sin ella se prepara todo y
         # se publica a mano; no para nada del video.
         "uploadpost": {"clave": ""},
+        # La API de datos de YouTube (rama seo-real): opcional, solo para medir la
+        # competencia de una palabra clave. Sin ella el SEO sigue con el
+        # autocompletado y las métricas propias.
+        "youtube": {"clave": ""},
         "claude_cli": {"cuentas": []},
     }
 
@@ -136,6 +140,8 @@ def leer():
         # guardar cualquier otra clave reescribia el .env y la borraba.
         if not datos["uploadpost"]["clave"]:
             datos["uploadpost"]["clave"] = _valores_env().get("UPLOADPOST_API_KEY", "") or ""
+        if not datos["youtube"]["clave"]:
+            datos["youtube"]["clave"] = _valores_env().get("YOUTUBE_API_KEY", "") or ""
         return datos
 
 
@@ -165,7 +171,7 @@ def _normalizar(datos):
     elif isinstance(cartesia, str):
         base["cartesia"]["clave"] = cartesia.strip()
 
-    for suelta in ("jamendo", "freesound", "uploadpost"):
+    for suelta in ("jamendo", "freesound", "uploadpost", "youtube"):
         cruda = datos.get(suelta)
         if isinstance(cruda, dict):
             base[suelta]["clave"] = str(cruda.get("clave") or "").strip()
@@ -253,6 +259,7 @@ def adoptar_env():
     datos["jamendo"]["clave"] = valores.get("JAMENDO_CLIENT_ID", "") or ""
     datos["freesound"]["clave"] = valores.get("FREESOUND_API_KEY", "") or ""
     datos["uploadpost"]["clave"] = valores.get("UPLOADPOST_API_KEY", "") or ""
+    datos["youtube"]["clave"] = valores.get("YOUTUBE_API_KEY", "") or ""
     return datos
 
 
@@ -339,7 +346,7 @@ def _fusionar(actual, peticion):
     # es la que ya habia. Sin eso, editar la de Jamendo borraria la de Cartesia,
     # porque la clave de verdad no baja al navegador NUNCA y la pantalla manda
     # el centinela en su lugar.
-    for suelta in ("cartesia", "jamendo", "freesound", "uploadpost"):
+    for suelta in ("cartesia", "jamendo", "freesound", "uploadpost", "youtube"):
         if suelta in peticion:
             ficha = peticion.get(suelta)
             clave = ficha.get("clave") if isinstance(ficha, dict) else ficha
@@ -485,11 +492,14 @@ def espejar_env(datos=None):
         nuestras["FREESOUND_API_KEY"] = datos["freesound"]["clave"]
     if datos["uploadpost"]["clave"]:
         nuestras["UPLOADPOST_API_KEY"] = datos["uploadpost"]["clave"]
+    if datos["youtube"]["clave"]:
+        nuestras["YOUTUBE_API_KEY"] = datos["youtube"]["clave"]
 
     # Los nombres que ESTA pantalla escribe. Lo que no este aqui se conserva tal
     # cual y en su orden: un .env puede tener cosas que nadie de aqui gestiona.
     gestionadas = {"OPENAI_API_KEY", "CARTESIA_API_KEY",
-                   "JAMENDO_CLIENT_ID", "FREESOUND_API_KEY", "UPLOADPOST_API_KEY"} | {
+                   "JAMENDO_CLIENT_ID", "FREESOUND_API_KEY", "UPLOADPOST_API_KEY",
+                   "YOUTUBE_API_KEY"} | {
         f"OPENAI_API_KEY_{i}" for i in range(2, MAX_OPENAI + 1)}
 
     lineas, puestas = [], set()
@@ -574,6 +584,10 @@ def resumen(datos=None):
         "uploadpost": {
             "puesta": bool(datos["uploadpost"]["clave"]),
             "cola": tapar(datos["uploadpost"]["clave"]),
+        },
+        "youtube": {
+            "puesta": bool(datos["youtube"]["clave"]),
+            "cola": tapar(datos["youtube"]["clave"]),
         },
         "fichero": FICHERO,
         "max_openai": MAX_OPENAI,

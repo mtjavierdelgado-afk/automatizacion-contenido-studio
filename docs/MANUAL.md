@@ -460,6 +460,24 @@ Business no dan cifras por post, así que no se preguntan.
   el **primer comentario**, **Dame 3 ganchos** (tres primeras líneas para
   elegir) y, en Instagram, **colaboradores** y **etiquetas**.
 
+**El SEO de verdad** (20-10):
+- **La palabra clave tiene que ser del vídeo.** Si la del proyecto no sale en
+  el guion ni en el material, no se usa en ese vídeo, y la ficha te lo dice.
+  Si el vídeo no tiene ninguna, escríbela o usa una de «Búsquedas reales».
+- **Búsquedas reales → Investigar búsquedas**: el Studio pregunta al
+  autocompletado de YouTube y Google (Perú) qué frases de tu vídeo busca la
+  gente. La tabla dice de cada una **Del vídeo** (cuánto la trata), **Demanda**,
+  **Competencia** (solo con la clave de YouTube), **Tu historial** (1× es tu
+  media; 2× es el doble de vistas que lo normal en tu cuenta) y el **Total**.
+  **Usar** la pone como palabra clave del vídeo. No cuesta nada ni usa Claude.
+- **La nota de cada red** tiene tres partes: Relevancia, Demanda y Tu
+  historial. La nota es la media de las que tienen dato («2 de 3 partes
+  medidas»). Debajo, los **detalles de forma**, que se arreglan con su botón
+  pero no suben ni bajan la nota.
+- **La clave de YouTube** (opcional) va en **Configuración → YouTube
+  (búsquedas SEO)**: en console.cloud.google.com, activa la «YouTube Data
+  API v3» y crea una «Clave de API». Unas 100 búsquedas gratis al día.
+
 **Después de publicar** la ficha se queda donde estaba, para seguir con las
 otras redes: arriba dice **Ya publicado en** (con el enlace a cada post) y
 **En camino** (lo programado o subiendo), y al lado de cada red su último

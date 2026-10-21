@@ -14,6 +14,36 @@ vídeos, estilos, claves y contraseña no se tocan.
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
+**Publicar: SEO de verdad (20 de octubre)**
+- **La palabra clave sale del vídeo.** Antes la nota pedía meter la palabra
+  del proyecto (por ejemplo «alquiler de consolas en Lima») aunque el vídeo
+  tratara de otra cosa. Ahora, si el guion y el material no la tratan, no se
+  usa: ni en la nota, ni en lo que se pide a Claude, ni en las etiquetas de
+  YouTube, ni en el nombre del MP4. Lo mismo con las secundarias. La ficha lo
+  dice («no se usa aquí: este vídeo no trata de eso»). La que escribas tú en
+  la ficha manda siempre.
+- **«Investigar búsquedas»** (bloque «Búsquedas reales» de la ficha, gratis y
+  sin Claude): pregunta al autocompletado de YouTube y de Google (Perú, en
+  español) qué frases de este vídeo se buscan de verdad, y enseña una tabla
+  con cada frase: cuánto la trata el vídeo, su demanda, su competencia en
+  YouTube, cómo le fue en tu cuenta y un total. Con «Usar» la pones de
+  palabra clave del vídeo. Solo salen frases que el vídeo trata.
+- **La nota SEO, en tres partes**: **Relevancia** (la palabra es del vídeo y
+  está en el título y la primera línea), **Demanda** (se busca, y con la clave
+  de YouTube, si está muy copada) y **Tu historial** (las vistas de tus
+  publicaciones con esa palabra frente a lo normal de tu cuenta, con al menos
+  3 publicaciones). La nota es la media de las partes que tienen dato, y dice
+  cuántas son. Los **detalles de forma** (largo, número de hashtags, CTA,
+  ubicación, portada) siguen saliendo con su botón, pero aparte y **sin contar**.
+- **«Optimizar SEO con Claude» y «Que Claude escriba»** ahora leen el guion,
+  usan las búsquedas reales y los ganchos que mejor funcionaron en tu cuenta,
+  y tienen prohibido meter palabras que el vídeo no trata.
+- **Clave de YouTube (opcional)** en **Configuración → YouTube (búsquedas
+  SEO)**, con «Probar». Es una API key de Google Cloud con la «YouTube Data
+  API v3». Es gratis, da unas 100 búsquedas al día (el Studio lleva la cuenta)
+  y no caduca. Sin ella todo funciona igual, salvo la competencia. Los datos
+  de YouTube se guardan 30 días como mucho, como pide su política.
+
 **Publicar: arreglos del 20 de octubre**
 - **El Short de YouTube vuelve a subir.** Upload-Post rechazaba el idioma del
   audio «es-419» («Invalid defaultAudioLanguage format»): solo acepta códigos

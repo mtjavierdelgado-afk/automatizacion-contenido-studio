@@ -7299,6 +7299,40 @@ def probar_tipo_relato():
         ok(codigo == 200 and not ficha["estados"][0]["vigente"] and not ficha["listo"],
            "ESTADOS: si se reescribe el cambio, su imagen deja de valer")
 
+        # EL AVISO FALSO DEL 21-10: «3 planos cambiarían con el espacio fijo»
+        # en los que el revisor acababa de rehacer (editados desde su estado,
+        # con el prompt reescrito por el corrector). Solo el que de verdad no
+        # lleva la descripcion se ofrece.
+        desc = "a narrow bathroom, toilet on the left"
+        ctx.estado.actualizar_params("assets", {
+            "espacio_fijo": {"sitio": "Baño", "descripcion": desc, "luz": "day",
+                             "secundarios": []},
+            "catalogo": {"sets": {"bano": {"descripcion": desc}}, "reparto": {}, "beats": []}})
+        carpeta = tempfile.mkdtemp(prefix="cambios_espacio_")
+        os.makedirs(os.path.join(carpeta, "escenas"))
+        fichas = {"S001": {"prompt": "a bathroom"},
+                  "S002": {"prompt": "a bathroom", "referencias": [{"papel": "base"}]},
+                  "S003": {"prompt": "rewritten", "corrector": {"alcance": "retoque"}}}
+        for sid, f in fichas.items():
+            _Imagen.new("RGB", (8, 8)).save(os.path.join(carpeta, "escenas", f"{sid}.png"))
+            with open(os.path.join(carpeta, "escenas", f"{sid}.json"), "w", encoding="utf-8") as fh:
+                json.dump(f, fh)
+        p6 = servidor.PASOS_MODULOS.p6_assets
+        guardados = (p6.plan_actual, p6.sitios_previstos, servidor._carpetas_de_assets,
+                     servidor._escenas_que_pagan)
+        try:
+            p6.plan_actual = lambda *_a, **_k: {"escenas": [
+                {"id": sid, "set": "bano", "prompt": f"{desc}. something"} for sid in fichas]}
+            p6.sitios_previstos = lambda _p, _params, escenas: ["bano" for _ in escenas]
+            servidor._carpetas_de_assets = lambda _ctx: [carpeta]
+            servidor._escenas_que_pagan = lambda plan: plan["escenas"]
+            cambios = servidor._cambios_del_espacio(ctx)
+        finally:
+            (p6.plan_actual, p6.sitios_previstos, servidor._carpetas_de_assets,
+             servidor._escenas_que_pagan) = guardados
+        igual([x["id"] for x in cambios["planos"]], ["S001"],
+              "AVISO FALSO: ni el editado desde la base ni el rehecho con nota se ofrecen otra vez")
+
         # aplicar a un video (sin imagenes): guarda, no dibuja, nada que rehacer
         codigo, ficha = _llamar(servidor.aplicar_tipo_relato, pid,
                                 {"tipo_relato": {"modo": "recorrido"}})

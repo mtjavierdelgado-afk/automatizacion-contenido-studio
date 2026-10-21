@@ -4448,9 +4448,20 @@ def _cambios_del_espacio(ctx):
             if ficha is None:
                 continue
             salida["hechas"] += 1
-            descripcion = str((sets.get(sitio) or {}).get("descripcion") or "")
+            descripcion = " ".join(str((sets.get(sitio) or {}).get("descripcion") or "").split())
             prompt = " ".join(str(ficha.get("prompt") or "").split())
-            falta_desc = bool(descripcion) and " ".join(descripcion.split()) not in prompt
+            falta_desc = bool(descripcion) and descripcion not in prompt
+            # NO ES UN CAMBIO (aviso falso del 21-10, prueba de la mampara):
+            # - un plano EDITADO desde la imagen base (o la de su estado): el
+            #   sitio lo pone esa imagen, no la descripcion;
+            # - un plano rehecho con nota: el corrector reescribe el prompt y la
+            #   descripcion no queda literal, pero partio del plan de ahora, que
+            #   si la lleva.
+            # Ofrecia pagar otra vez los planos que el revisor acababa de rehacer.
+            editado = any(r.get("papel") == "base" for r in ficha.get("referencias") or [])
+            del_plan = descripcion in " ".join(str(escena.get("prompt") or "").split())
+            if falta_desc and (editado or (ficha.get("corrector") and del_plan)):
+                falta_desc = False
             falta_img = (sitio == principal and con_imagen
                          and not any(r.get("papel") == "espacio"
                                      for r in ficha.get("referencias") or []))

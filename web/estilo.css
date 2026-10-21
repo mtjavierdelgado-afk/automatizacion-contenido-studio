@@ -4197,6 +4197,12 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 .tabla-busquedas tr.recomendada td { background: var(--panel); }
 .tabla-busquedas tr.recomendada td:first-child { border-left: 2px solid var(--ok); }
 .aviso-busquedas { color: var(--aviso); }
+/* SEO fase 3 (rama seo-real-3): «Cómo te encontraron» y el canal en Configuración */
+.encontraron-seo { margin: 8px 0; padding: 6px 8px; border: 1px solid var(--linea); border-radius: 8px; background: var(--hueco); display: flex; flex-direction: column; gap: 4px; }
+.encontraron-seo > .fila { gap: 8px; align-items: center; flex-wrap: wrap; }
+.busqueda-encontrada { gap: 8px; font-size: 12px; padding: 2px 4px; border-bottom: 1px solid var(--linea-suave); }
+.busqueda-encontrada > .crece { min-width: 0; overflow-wrap: anywhere; }
+.canal-youtube .vuelta-oauth { font-size: 11px; overflow-wrap: anywhere; min-width: 0; }
 .pista-palabra-clave:empty { display: none; }
 .pista-palabra-clave { margin: 8px 0; }
 @media (max-width: 600px) {

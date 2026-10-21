@@ -98,6 +98,10 @@ class ErrorClaves(ValueError):
 
 # --------------------------------------------------------------- lectura
 
+YOUTUBE_OAUTH_VACIO = {"cliente_id": "", "secreto": "", "refresh": "", "canal": "",
+                       "canal_id": "", "conectado": "", "caido": ""}
+
+
 def _vacio():
     return {
         "version": 1,
@@ -115,6 +119,10 @@ def _vacio():
         # competencia de una palabra clave. Sin ella el SEO sigue con el
         # autocompletado y las métricas propias.
         "youtube": {"clave": ""},
+        # El canal de YouTube conectado con OAuth (rama seo-real-3): el cliente
+        # de Google Cloud que pega la persona y lo que deja la conexión (el
+        # token de refresco y el canal). No va al .env: solo lo usa Publicar.
+        "youtube_oauth": dict(YOUTUBE_OAUTH_VACIO),
         "claude_cli": {"cuentas": []},
     }
 
@@ -177,6 +185,9 @@ def _normalizar(datos):
             base[suelta]["clave"] = str(cruda.get("clave") or "").strip()
         elif isinstance(cruda, str):
             base[suelta]["clave"] = cruda.strip()
+    oauth = datos.get("youtube_oauth")
+    if isinstance(oauth, dict):
+        base["youtube_oauth"] = {k: str(oauth.get(k) or "").strip() for k in YOUTUBE_OAUTH_VACIO}
     base["claude_cli"]["cuentas"] = _cuentas_cli_de(datos.get("claude_cli"))
     return base
 
@@ -357,12 +368,47 @@ def _fusionar(actual, peticion):
         else:
             salida[suelta] = actual[suelta]
 
+    # EL CLIENTE DE GOOGLE (rama seo-real-3): la pantalla manda cliente_id y
+    # secreto (este, con CONSERVAR si no se toca). El token y el canal son del
+    # servidor (los deja la conexión): la pantalla no los puede escribir, y
+    # cambiar de cliente los borra (eran de otro).
+    salida["youtube_oauth"] = dict(actual["youtube_oauth"])
+    if "youtube_oauth" in peticion:
+        pedida = peticion.get("youtube_oauth")
+        if not isinstance(pedida, dict):
+            raise ErrorClaves("'youtube_oauth' es {cliente_id, secreto}")
+        cliente = str(pedida.get("cliente_id") or "").strip()
+        secreto = str(pedida.get("secreto") or "").strip()
+        if secreto == CONSERVAR:
+            secreto = actual["youtube_oauth"]["secreto"]
+        if cliente and not cliente.endswith(".apps.googleusercontent.com"):
+            raise ErrorClaves("el ID de cliente de Google termina en "
+                              "«.apps.googleusercontent.com»: cópialo entero")
+        if cliente != actual["youtube_oauth"]["cliente_id"] or not cliente:
+            salida["youtube_oauth"] = dict(YOUTUBE_OAUTH_VACIO)
+        salida["youtube_oauth"]["cliente_id"] = cliente
+        salida["youtube_oauth"]["secreto"] = secreto if cliente else ""
+
     if "claude_cli" in peticion:
         salida["claude_cli"]["cuentas"] = _cuentas_cli_pedidas(
             peticion.get("claude_cli"), actual["claude_cli"]["cuentas"])
     else:
         salida["claude_cli"] = actual["claude_cli"]
     return salida
+
+
+def conexion_youtube(**cambios):
+    """Lo que deja (o quita) la conexión del canal: refresh, canal, canal_id,
+    conectado, caido. Solo el servidor la llama, nunca la pantalla. -> resumen"""
+    with _LOCK:
+        datos = leer()
+        oauth = dict(datos["youtube_oauth"])
+        for k, v in cambios.items():
+            if k in ("refresh", "canal", "canal_id", "conectado", "caido"):
+                oauth[k] = str(v or "")
+        datos["youtube_oauth"] = oauth
+        _escribir_json(FICHERO, datos)
+        return resumen(datos)
 
 
 def _cuentas_cli_pedidas(crudo, actuales):
@@ -588,6 +634,15 @@ def resumen(datos=None):
         "youtube": {
             "puesta": bool(datos["youtube"]["clave"]),
             "cola": tapar(datos["youtube"]["clave"]),
+        },
+        # sin el secreto ni el token: solo si están y qué canal se conectó
+        "youtube_oauth": {
+            "puesta": bool(datos["youtube_oauth"]["cliente_id"] and datos["youtube_oauth"]["secreto"]),
+            "cliente_id": datos["youtube_oauth"]["cliente_id"],
+            "conectado": bool(datos["youtube_oauth"]["refresh"]),
+            "canal": datos["youtube_oauth"]["canal"],
+            "desde": datos["youtube_oauth"]["conectado"],
+            "caido": datos["youtube_oauth"]["caido"],
         },
         "fichero": FICHERO,
         "max_openai": MAX_OPENAI,

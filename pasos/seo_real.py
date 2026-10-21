@@ -737,9 +737,14 @@ def _puntuar(c):
 
 
 def investigar(info, ajustes, datos_video, raiz_p, posts=None, clave_yt="",
-               espera_s=0.15):
+               espera_s=0.15, del_canal=None, enriquecer=None):
     """La investigación de un vídeo: las frases candidatas, de las semillas del
-    vídeo y lo que el buscador completa, solo las que el vídeo trata."""
+    vídeo y lo que el buscador completa, solo las que el vídeo trata.
+
+    Fase 3 (rama seo-real-3): `del_canal` son las búsquedas de YouTube que ya
+    traen vistas al canal ([{termino, vistas}]): las que el vídeo trata entran
+    como semillas. `enriquecer(candidatas, avisos)` (el canal y Google Trends,
+    de `seo_canal`) toca las candidatas antes de puntuarlas otra vez."""
     ajustes = ajustes or {}
     datos_video = datos_video or {}
     zona = str(ajustes.get("zona") or "")
@@ -765,6 +770,14 @@ def investigar(info, ajustes, datos_video, raiz_p, posts=None, clave_yt="",
                 avisos.append(f"«{frase}» (del proyecto) no se usa: el vídeo no trata de eso")
             continue
         semillas.append((frase, origen))
+    # las búsquedas que ya te traen vistas (canal conectado), las dos primeras
+    # que este vídeo trata, justo detrás de la tuya
+    del_canal_aqui = [limpia(f.get("termino")) for f in (del_canal or [])
+                      if limpia(f.get("termino"))
+                      and 2 <= len(normal(f.get("termino")).split()) <= 6
+                      and relevancia(f.get("termino"), corpus=corpus)["valor"] is not None
+                      and es_relevante(f.get("termino"), corpus=corpus)][:2]
+    semillas[1 if propia else 0:1 if propia else 0] = [(f, "ya te trae vistas") for f in del_canal_aqui]
     if len(semillas) < 2:
         semillas += [(f, "del guion") for f in frases_del_video(info)]
     vistas, unicas = set(), []
@@ -772,7 +785,7 @@ def investigar(info, ajustes, datos_video, raiz_p, posts=None, clave_yt="",
         if normal(frase) and normal(frase) not in vistas:
             vistas.add(normal(frase))
             unicas.append((frase, origen))
-    unicas = unicas[:5]
+    unicas = unicas[:6]
 
     candidatas = []
     sugeridas = []
@@ -794,6 +807,13 @@ def investigar(info, ajustes, datos_video, raiz_p, posts=None, clave_yt="",
             time.sleep(espera_s)
     for c in candidatas:
         _puntuar(c)
+    if enriquecer:
+        try:
+            enriquecer(candidatas, avisos)
+        except Exception as fallo:                          # noqa: BLE001
+            avisos.append(f"no se ha podido añadir lo del canal ni Trends: {str(fallo)[:160]}")
+        for c in candidatas:
+            _puntuar(c)
     if clave_yt:
         orden = sorted(candidatas, key=lambda c: -(c.get("puntuacion") or 0))
         for c in [c for c in orden if es_relevante(c["frase"], corpus=corpus)][:MAX_COMPETENCIA]:

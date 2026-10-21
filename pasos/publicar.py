@@ -81,6 +81,7 @@ from motores.publicar_uploadpost import cliente as UP  # noqa: E402
 from motores.publicar_uploadpost import simulado as UP_SIMULADO  # noqa: E402
 import publicar_seo as SEO                                     # noqa: E402
 import seo_real as SR                                          # noqa: E402
+import seo_canal as SC                                         # noqa: E402
 import publicar_redes as RD                                    # noqa: E402
 from nucleo.proyecto import escribir_json, leer_json  # noqa: E402
 
@@ -1886,7 +1887,17 @@ def _investigar(raiz, info, ajustes, videos, cid):
     pid = info["pid"]
     datos = _leer_video(raiz, pid)
     posts = posts_con_cifras(raiz, videos, cid)
-    real = SR.investigar(info, ajustes, datos, raiz, posts=posts, clave_yt=clave_youtube())
+    # fase 3 (seo-real-3): lo que ya te trae vistas en YouTube y Google Trends
+    avisos_canal, filas = [], []
+    if SC.conectado():
+        try:
+            filas = SC.busquedas_del_canal(raiz)
+        except SC.ErrorCanal as fallo:
+            avisos_canal.append(f"tu canal: {fallo}")
+    real = SR.investigar(info, ajustes, datos, raiz, posts=posts, clave_yt=clave_youtube(),
+                         del_canal=filas, enriquecer=_enriquecer(raiz, filas))
+    real["avisos"] = avisos_canal + list(real.get("avisos") or [])
+    real["con_canal"] = bool(filas)
     real["ganchos"] = aprendido_de_resultados(raiz, videos, cid)
     with _lock(pid):
         ficha = _leer_video(raiz, pid)
@@ -1894,6 +1905,56 @@ def _investigar(raiz, info, ajustes, videos, cid):
         _escribir(_ruta_video(raiz, pid), ficha)
     _log("seo_investigado", {"video": pid, "candidatas": len(real["candidatas"]),
                              "youtube": real["con_youtube"]})
+
+
+def _enriquecer(raiz, filas):
+    """Lo de la fase 3 sobre las candidatas: el canal (sus búsquedas ya suman a
+    «Tu historial») y Google Trends para las cinco mejores (sube o baja)."""
+    def hecho(candidatas, avisos):
+        for c in candidatas:
+            SC.con_el_canal(c, filas)
+        mejores = sorted(candidatas, key=lambda c: -(c.get("puntuacion") or 0))[:5]
+        t = SC.tendencias([c["frase"] for c in mejores], raiz)
+        if t.get("error"):
+            avisos.append(f"Google Trends (experimental): {t['error']}; la tendencia queda sin dato")
+        for c in mejores:
+            SC.con_tendencia(c, (t.get("frases") or {}).get(" ".join(c["frase"].split())[:80]))
+    return hecho
+
+
+def video_de_youtube(datos):
+    """El id del vídeo publicado en YouTube (el último con enlace), o ""."""
+    for e in reversed(datos.get("envios") or []):
+        if e.get("red") == "youtube" and e.get("estado") in ("publicado", "a_mano"):
+            vid = SC.id_de_youtube(e.get("url"))
+            if vid:
+                return vid
+    return ""
+
+
+def _encontraron(raiz, info):
+    pid = info["pid"]
+    vid = video_de_youtube(_leer_video(raiz, pid))
+    try:
+        resultado = SC.como_te_encontraron(raiz, vid)
+    except SC.ErrorCanal as fallo:
+        raise RuntimeError(str(fallo)) from None
+    with _lock(pid):
+        ficha = _leer_video(raiz, pid)
+        ficha["seo_youtube"] = resultado
+        _escribir(_ruta_video(raiz, pid), ficha)
+    _log("seo_encontraron", {"video": pid, "busquedas": len(resultado.get("busquedas") or [])})
+
+
+def lanzar_encontraron(raiz, info, en_hilo=True):
+    """«Cómo te encontraron»: lo que dice YouTube Analytics del vídeo ya
+    publicado (en hilo; `seo.trabajando.encontraron`)."""
+    if not SC.conectado():
+        raise ErrorPublicar("conecta antes tu canal de YouTube en Configuración", 409)
+    if not video_de_youtube(_leer_video(raiz, info["pid"])):
+        raise ErrorPublicar("este vídeo todavía no está publicado en YouTube (o no tiene su enlace)", 409)
+    _en_marcha("encontraron", info["pid"])
+    _lanzar_seo("encontraron", info["pid"], lambda: _encontraron(raiz, info), en_hilo)
 
 
 def lanzar_investigar(raiz, info, ajustes, videos, cid, en_hilo=True):
@@ -2511,6 +2572,12 @@ def ficha(raiz, info, ajustes):
                                    and origen != "proyecto"),
             "con_youtube": bool(con_youtube),
             "cupo_youtube": SR.cupo(raiz) if con_youtube else None,
+            # fase 3 (seo-real-3): el canal conectado y lo que dijo del vídeo
+            "canal": SC.estado(),
+            # lo de YouTube Analytics, 30 días como mucho (como lo de la API de datos)
+            "encontraron": ({} if SR.caducada(datos.get("seo_youtube"))
+                            else datos.get("seo_youtube") or {}),
+            "en_youtube": bool(video_de_youtube(datos)),
         },
         "escribiendo": pid in _ESCRIBIENDO, "error_textos": _ERRORES_TEXTOS.get(pid, ""),
         "error_redes": _REDES_FALLIDAS.get(pid, []) if pid in _ERRORES_TEXTOS else [],

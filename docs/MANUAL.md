@@ -487,6 +487,21 @@ Business no dan cifras por post, así que no se preguntan.
 - **La clave de YouTube** (opcional) va en **Configuración → YouTube
   (búsquedas SEO)**: en console.cloud.google.com, activa la «YouTube Data
   API v3» y crea una «Clave de API». Unas 100 búsquedas gratis al día.
+- **Tu canal** (opcional, **Configuración → YouTube: tu canal**). En el mismo
+  proyecto de Google Cloud:
+  1. Activa la «YouTube Analytics API».
+  2. En «Pantalla de consentimiento de OAuth», tipo «Externo», y añádete como
+     usuario de prueba.
+  3. En «Credenciales → Crear credenciales → ID de cliente de OAuth», tipo
+     «Aplicación web», con la **URI de redireccionamiento autorizada** que te
+     enseña el Studio (botón «Copiar»).
+  4. Pega el ID de cliente y el secreto, **Guardar** y **Conectar mi canal**.
+
+  Con el canal, «Investigar búsquedas» suma lo que ya te trae vistas en
+  YouTube, y en un vídeo publicado sale **Cómo te encontraron en YouTube**. Si
+  la app sigue «en prueba», Google corta cada 7 días: **Volver a conectar**.
+- La columna **Tendencia** (Google Trends, experimental) dice si la frase sube
+  o baja en Perú. Si Trends no contesta, queda en «—».
 
 **Después de publicar** la ficha se queda donde estaba, para seguir con las
 otras redes: arriba dice **Ya publicado en** (con el enlace a cada post) y

@@ -822,6 +822,15 @@ def prueba_studio():
         r = s.post(base + "/api/publicar/youtube/probar")
         ok(r.status_code == 200 and r.json()["prueba"]["estado"] == "sin_clave",
            "«Probar» la clave de YouTube sin clave puesta: lo dice")
+        # rama seo-real-3: el canal con OAuth
+        r = s.post(base + "/api/publicar/youtube/oauth/empezar",
+                   json={"redireccion": base + "/api/publicar/youtube/oauth/vuelta"})
+        igual(r.status_code, 409, "«Conectar mi canal» sin el cliente de Google: lo pide antes")
+        r = s.get(base + "/api/publicar/youtube/oauth/vuelta", params={"state": "inventado", "code": "x"})
+        ok(r.status_code == 200 and "No se ha conectado" in r.text and "<script" not in r.text,
+           "una vuelta de Google que no es de un intento: una página que lo dice (sin scripts)")
+        igual(s.post(base + "/api/publicar/videos/fiesta/seo/encontraron").status_code, 409,
+              "«Cómo te encontraron» sin canal conectado: lo dice")
 
         # --- proyecto con clave
         r = s.post(base + "/api/clientes", json={"nombre": "Cliente secreto"})

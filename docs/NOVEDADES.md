@@ -14,6 +14,26 @@ vídeos, estilos, claves y contraseña no se tocan.
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
+**Publicar: SEO con tu canal y Google Trends (21 de octubre)**
+- **Conecta tu canal de YouTube** en **Configuración → YouTube: tu canal**
+  (opcional). Se crea en Google Cloud un «ID de cliente de OAuth» (aplicación
+  web) con la dirección de vuelta que enseña esa sección, se pegan el ID y el
+  secreto y se pulsa **Conectar mi canal**. El Studio solo pide permiso de
+  LECTURA (estadísticas y datos del canal). El secreto y el permiso se guardan
+  en el almacén de claves y nunca bajan a la pantalla.
+- Con el canal conectado, **«Investigar búsquedas»** añade **las búsquedas que
+  ya te traen vistas en YouTube** (últimos 90 días) que el vídeo trata, y esas
+  vistas suben **Tu historial**.
+- En un vídeo ya publicado en YouTube, **«Cómo te encontraron en YouTube»**:
+  sus vistas, el % visto de media y las búsquedas que le trajeron gente.
+- **Columna «Tendencia»** (Google Trends, experimental): si la frase **sube,
+  baja o está estable** en Perú (los últimos 3 meses frente a los 3 anteriores,
+  en YouTube y en Google). Ajusta un poco la demanda. Trends no tiene una API
+  abierta: si no contesta, la columna queda sin dato y se dice.
+- Si tu app de Google Cloud está **«en prueba»**, Google corta la conexión cada
+  7 días: Configuración lo marca («conexión cortada») y ofrece **Volver a
+  conectar**. **Desconectar** quita el permiso en Google y en el Studio.
+
 **Publicar: SEO de verdad (20 de octubre)**
 - **La palabra clave sale del vídeo.** Antes la nota pedía meter la palabra
   del proyecto (por ejemplo «alquiler de consolas en Lima») aunque el vídeo

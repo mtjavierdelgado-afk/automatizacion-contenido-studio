@@ -60,6 +60,7 @@ suites=(
   pasos/prueba_publicar.py pasos/prueba_parrilla.py pasos/prueba_cuentas.py
   pasos/prueba_espacio_fijo.py
   pasos/prueba_seo_real.py
+  pasos/prueba_seo_canal.py
   prueba_recorrido.py
 )
 

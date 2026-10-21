@@ -6581,5 +6581,40 @@ def publicar_seo_real(navegador, datos):
     api.put(f"/api/publicar/proyectos/{cid}", {"palabra_clave": ""})
     api.put(f"/api/publicar/videos/{pid}", {"palabra_clave": ""})
 
+
+@escenario
+def publicar_seo_canal(navegador, datos):
+    """Rama seo-real-3 (21-10): Configuración → «YouTube: tu canal» con la
+    dirección de vuelta para copiar y el ID de cliente; en la ficha, la
+    columna «Tendencia» de las búsquedas. Sin conectar nada de verdad."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js("conmutarConfig(true);")
+    ok(pg.esperar("#cuerpo-config h3", "YouTube: tu canal", 10), "Configuración tiene «YouTube: tu canal»")
+    ok(pg.visible("#cuerpo-config .canal-youtube code", "/api/publicar/youtube/oauth/vuelta"),
+       "con la dirección de vuelta para copiar en Google Cloud")
+    pg.p.locator(".canal-youtube input[type=text]").first.fill("123-abc.apps.googleusercontent.com")
+    pg.p.locator(".canal-youtube input[type=password]").first.fill("GOCSPX-prueba")
+    pg.pulsar(".canal-youtube button", "Guardar")
+    ok(pg.esperar(".canal-youtube button", "Conectar mi canal", 8), "guardado el cliente: «Conectar mi canal»")
+    _r, claves = api.get("/api/claves")
+    ok("GOCSPX-prueba" not in json.dumps(claves), "el secreto no baja a la pantalla")
+    pg.sin_errores("el canal de YouTube en Configuración")
+    pg.cerrar()
+    pg = Pagina(navegador, datos)
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["instagram"], "textos": {
+        "instagram": {"descripcion": "Un reel para la tendencia", "cta": "Escríbenos", "hashtags": ["lima"]}}})
+    pg.js(f"abrirPublicarVideo('{pid}'); PUB.busquedasAbiertas = true;")
+    ok(pg.esperar(".busquedas-seo button[data-accion=investigar-busquedas]", segundos=15), "la ficha con sus búsquedas")
+    pg.pulsar(".busquedas-seo button[data-accion=investigar-busquedas]")
+    ok(pg.esperar(".tabla-busquedas th", "Tendencia", 20), "la tabla trae la columna «Tendencia»")
+    pg.captura("publicar_seo_canal")
+    pg.sin_errores("las búsquedas con la tendencia")
+    pg.cerrar()
+    _r, claves = api.get("/api/claves")
+    api.put("/api/claves", {"youtube_oauth": {"cliente_id": "", "secreto": ""}})
+
 if __name__ == "__main__":
     sys.exit(main())

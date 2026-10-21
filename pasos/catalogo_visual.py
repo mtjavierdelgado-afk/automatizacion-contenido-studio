@@ -1097,22 +1097,26 @@ def espacio_del_catalogo(catalogo):
                                     "luz": str(ficha.get("luz") or "")[:MAX_LUZ]})
 
 
-def _aplicar_relato(catalogo, crudos, relato, espacio, ids_bloque):
+def _aplicar_relato(catalogo, crudos, relato, espacio, ids_bloque, inicial_crudo=""):
     """Lo que impone el tipo de relato sobre el catalogo limpio. Sin modo
     explicito no hace NADA (y no se llama).
 
     - Un solo sitio: el del espacio fijo o, si no hay, el que declaro Claude
       (`espacio_del_catalogo`), impuesto con `_aplicar_espacio_fijo`.
-    - En «un espacio que cambia», el `cambio` y el `estado` de cada tramo.
+    - En «un espacio que cambia», el `cambio` y el `estado` de cada tramo, y el
+      `inicial` (como esta en la base lo que luego cambia) en `relato`.
     - `relato` en el catalogo: dice con que modo se repartio."""
     if not espacio:
         propio = espacio_del_catalogo(catalogo)
         if propio:
             catalogo = _aplicar_espacio_fijo(catalogo, propio, ids_bloque)
+    inicial = ""
     if relato["modo"] == "espacio_que_cambia":
         tipo_relato.anotar_cambios(crudos, catalogo.get("beats"))
+        inicial = tipo_relato.inicial_de(inicial_crudo)
     catalogo["relato"] = {k: v for k, v in (("modo", relato["modo"]),
-                                            ("cambia", relato.get("cambia")))
+                                            ("cambia", relato.get("cambia")),
+                                            ("inicial", inicial))
                           if v}
     return catalogo
 
@@ -1169,6 +1173,7 @@ LOS TRAMOS (no los cambies: solo añade a cada uno su cambio y su estado)
 DEVUELVE EXACTAMENTE ESTE JSON, sin nada alrededor:
 
 {{
+  "inicial": "<en ingles: como esta y donde, en la imagen base, lo que luego cambia; o vacio>",
   "beats": [
     {{"desde": "<id de bloque>", "hasta": "<id de bloque>",
       "cambio": "<en ingles, o vacio>", "estado": "<etiqueta corta>"}}
@@ -1231,7 +1236,9 @@ def proponer_cambios(bloques, catalogo, relato, ajuste=None, avisar=None,
     salida = dict(catalogo or {})
     salida["beats"] = beats
     salida["relato"] = {k: v for k, v in (("modo", relato["modo"]),
-                                          ("cambia", relato.get("cambia"))) if v}
+                                          ("cambia", relato.get("cambia")),
+                                          ("inicial", tipo_relato.inicial_de(
+                                              (crudo or {}).get("inicial")))) if v}
     return salida, avisos
 
 
@@ -1313,7 +1320,7 @@ def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
         catalogo = _aplicar_espacio_fijo(catalogo, espacio, ids_bloque)
     if relato:
         catalogo = _aplicar_relato(catalogo, (crudo or {}).get("beats"), relato,
-                                   espacio, ids_bloque)
+                                   espacio, ids_bloque, (crudo or {}).get("inicial"))
     estadisticas.anotar(PASO, segundos, tamano=palabras, ajuste=elegido,
                         proyecto=proyecto_id, unidades=len(catalogo["beats"]),
                         detalle={"modelo": modelo, "esfuerzo": esfuerzo,

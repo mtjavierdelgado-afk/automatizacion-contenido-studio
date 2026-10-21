@@ -79,6 +79,12 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   fijo» (gratis) o una generada (se paga una imagen y ves su coste antes). **Se
   aprueba antes de generar los planos**: sin ella aprobada no se paga ningún
   plano de ese sitio. «Producto» también edita la base (el fondo no se mueve).
+- **Lo que cambia sale ya en la base, en su sitio** (21-10, tras la prueba de
+  la mampara): al repartir, Claude escribe cómo está y dónde va lo que luego
+  cambia («una mampara batiente en el borde izquierdo de la ducha, que abre
+  hacia el inodoro») y la imagen base lo dibuja así. Antes la base salía sin
+  mampara y cada plano inventaba la suya en otro sitio. La ficha de la base
+  lo enseña para que compruebes que está donde va antes de aprobarla.
 - **El revisor compara cada plano editado con su base**: si cambió algo que no
   se pidió (la distribución, la cámara, un mueble fijo), lo marca como
   congruencia de gravedad alta.

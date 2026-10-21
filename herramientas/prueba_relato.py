@@ -385,7 +385,10 @@ def main():
                     juicio = PR._juez(                             # noqa: SLF001
                         f"Lee esta imagen con Read: {ruta_base}\nTiene que ser la IMAGEN BASE de un sitio: "
                         f"«{esc['espacio']['descripcion']}». Vacío, entero, sin gente y sin texto, en su "
-                        "estado inicial. ¿Lo es? Devuelve SOLO "
+                        "estado inicial."
+                        + (f" Y tiene que verse YA, donde dice, lo que luego cambia: «{tr_.get('inicial')}»."
+                           if tr_.get("inicial") else "")
+                        + " ¿Lo es? Devuelve SOLO "
                         '{"vale": "si" | "no", "por_que": "<una frase>"}', raiz)
                 except Exception as fallo:                          # noqa: BLE001
                     juicio = {"vale": "?", "por_que": f"no se pudo preguntar a Claude: {fallo}"}

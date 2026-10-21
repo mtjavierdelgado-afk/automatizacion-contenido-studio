@@ -315,6 +315,18 @@ respecto a esa base. Lo que cambia en este video: {que_cambia}.
         «montada», «noche». Dos tramos con el mismo estado tienen el MISMO cambio.
   - La imagen base es el sitio en su estado inicial{antes}: dila en la
     'descripcion' del sitio si la escribes tu.
+  - Añade al JSON, al mismo nivel que 'beats', un campo "inicial": EN INGLES,
+    COMO ESTA en la imagen base lo que luego cambia, y DONDE exactamente,
+    respecto a lo fijo del sitio (que pared, junto a que mueble, hacia donde
+    abre, que lado lleva las bisagras): «a clear glass hinged shower door on the
+    shower's left edge, hinges on the wall side, opening outward into the room
+    toward the toilet». Es lo que hace que ese objeto salga en la base y no se
+    invente distinto en cada plano. Vacio ("") si lo que cambia no es una cosa
+    que se ve (la hora, los colores).
+  - Si un cambio tiene geometria (por donde abre una puerta, una marca en el
+    suelo, una medida), dila respecto a lo fijo y coherente con "inicial": «blue
+    tape on the floor tracing the quarter circle the hinged door sweeps, from
+    its hinge at the shower's left edge out toward the toilet».
   - 'accion' sigue siendo lo que se ve (alguien que abre la puerta, una mano que
     señala), pero sin mover paredes, muebles fijos ni camara.
 
@@ -518,11 +530,27 @@ ANTES = {
 }
 
 
-def prompt_imagen_base(espacio, relato, cabecera=""):
-    """El prompt de la imagen base generada de un sitio (vacio, estado inicial)."""
+#: Lo que luego cambia, dibujado YA en la base (prueba real del 21-10: sin
+#: esto la base salia sin mampara y cada plano inventaba la suya en otro sitio).
+INICIAL = ("The element that changes later in the film MUST already be in this picture, "
+           "in its initial state, exactly like this and exactly there: {inicial}. ")
+
+
+def inicial_de(valor):
+    """El «inicial» que escribe Claude, limpio (o "")."""
+    return _texto(valor if isinstance(valor, str) else "", 500)
+
+
+def prompt_imagen_base(espacio, relato, cabecera="", inicial=""):
+    """El prompt de la imagen base generada de un sitio (vacio, estado inicial).
+
+    `inicial` (o el de `relato`): como esta y donde lo que luego cambia."""
     descripcion = _texto((espacio or {}).get("descripcion"), 2000) or "the set"
     luz = _texto((espacio or {}).get("luz"), 400) or "soft even daylight"
     antes = ANTES.get((relato or {}).get("cambia") or "", "") \
         if (relato or {}).get("modo") == "espacio_que_cambia" else ""
+    inicial = inicial_de(inicial or (relato or {}).get("inicial"))
+    if antes and inicial and (relato or {}).get("cambia") in ("objeto", "estado"):
+        antes += INICIAL.format(inicial=inicial)
     return PROMPT_BASE.format(cabecera=_texto(cabecera, 400), descripcion=descripcion,
                               luz=luz, antes=antes).strip()

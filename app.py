@@ -4659,6 +4659,9 @@ def _ficha_tipo_relato(ctx):
         "usd_base": _usd_por_imagen(ctx),
         "calidad": str(params.get("calidad") or "low"),
         "faltan_cambios": sin_cambios,
+        # como esta en la base lo que luego cambia (lo escribe Claude al repartir)
+        "inicial": str(((catalogo.get("relato") or {}) if isinstance(catalogo.get("relato"), dict)
+                        else {}).get("inicial") or ""),
     }
 
 
@@ -4775,8 +4778,13 @@ def aplicar_tipo_relato(pid: str, cuerpo: dict = Body(default=None)):
                     catalogo, avisos = catalogo_mod.ajustar_catalogo(guardado, espacio, ids)
                 except ValueError as fallo:
                     raise ErrorApi(400, str(fallo))
+                previo = guardado.get("relato") if isinstance(guardado.get("relato"), dict) else {}
+                mismo = (previo.get("modo"), previo.get("cambia")) == (relato["modo"],
+                                                                       relato.get("cambia"))
                 catalogo["relato"] = {k: v for k, v in (("modo", relato["modo"]),
-                                                        ("cambia", relato.get("cambia"))) if v}
+                                                        ("cambia", relato.get("cambia")),
+                                                        ("inicial", previo.get("inicial")
+                                                         if mismo else "")) if v}
                 if relato["modo"] != "espacio_que_cambia":
                     for beat in catalogo.get("beats") or []:
                         beat.pop("cambio", None)

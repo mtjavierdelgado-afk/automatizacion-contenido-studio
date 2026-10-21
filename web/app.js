@@ -7893,6 +7893,10 @@ function imagenBaseDelRelato(est, corriendo) {
     onclick: () => generarBaseDelRelato(!!base, usd) },
   `${base ? 'Otra imagen base' : 'Generar la imagen base'} · ≈ ${usdCorto(usd)}`));
   caja.appendChild(fila);
+  if (f.inicial) {
+    caja.appendChild(h('div', { clase: 'meta' }, `Lo que luego cambia sale ya en la base, así: «${f.inicial}». `
+      + 'Comprueba que está donde va antes de aprobarla.'));
+  }
   caja.appendChild(h('div', { clase: 'pista' }, 'La imagen base es el sitio vacío y entero, en su '
     + 'estado inicial. Es lo que garantiza que todas las imágenes sean el mismo sitio con la misma '
     + 'cámara. Los planos de detalle la llevan como referencia.'));

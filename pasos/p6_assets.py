@@ -5469,7 +5469,9 @@ def prompt_y_refs_de_base(proyecto, params, cache):
         raise RuntimeError("no hay sitio del que hacer la imagen base: escribe el "
                            "espacio fijo (o deduce antes el reparto y los sitios)")
     relato = tipo_relato.resolver(params)
-    texto = tipo_relato.prompt_imagen_base(espacio, relato)
+    catalogo = _catalogo_de(p, proyecto) if proyecto is not None else (p.get("catalogo") or {})
+    inicial = ((catalogo or {}).get("relato") or {}).get("inicial") or ""
+    texto = tipo_relato.prompt_imagen_base(espacio, relato, inicial=inicial)
     escena = {"id": "BASE", "prompt": texto, "personajes": [], "set": sitio,
               "narracion": ""}
     refs = list(_referencias_estilo(p, cache, escena))

@@ -434,6 +434,21 @@ def prueba_imagen_base():
                                                                        "cambia": "objeto"}}))
     ok(ESPACIO["descripcion"] in texto and ESPACIO["luz"] in texto, "con la descripción y la luz")
     ok("INITIAL state" in texto and "No people" in texto, "vacío y en el «antes»")
+    ok("MUST already be in this picture" not in texto, "sin «inicial», nada de lo que cambia")
+    puerta = "a hinged glass door on the shower's left edge, opening toward the toilet"
+    relato = dict(T.resolver({"tipo_relato": {"modo": "espacio_que_cambia", "cambia": "objeto"}}),
+                  inicial=puerta)
+    ok(puerta in T.prompt_imagen_base(ESPACIO, relato),
+       "con «inicial», lo que luego cambia sale YA en la base, donde va (prueba real 21-10)")
+    hora = dict(T.resolver({"tipo_relato": {"modo": "espacio_que_cambia", "cambia": "hora"}}),
+                inicial=puerta)
+    ok(puerta not in T.prompt_imagen_base(ESPACIO, hora), "y en «hora» no se pinta")
+    import catalogo_visual as CV                                  # noqa: PLC0415
+    cat = CV._aplicar_relato({"sets": {"b": {"descripcion": "a bathroom"}},     # noqa: SLF001
+                              "beats": [{"desde": "B01", "hasta": "B01", "set": "b"}]},
+                             [{"desde": "B01", "hasta": "B01", "cambio": "", "estado": "antes"}],
+                             relato, {"sitio": "b"}, ["B01"], "  " + puerta + "  ")
+    igual(cat["relato"].get("inicial"), puerta, "el catálogo guarda el «inicial» de Claude")
 
 
 def main():

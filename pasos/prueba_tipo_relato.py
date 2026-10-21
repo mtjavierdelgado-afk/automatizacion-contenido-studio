@@ -310,6 +310,10 @@ def prueba_referencias_y_prompt():
     otra = T.bases_aprobadas(p, {"beats": [dict(beat, cambio="a curtain instead")]})
     ok("bano_mampara#despues" not in otra and "bano_mampara" in otra,
        "si Claude reescribe el cambio, la imagen del estado deja de valer (la base no)")
+    otro_sitio = {"beats": [dict(beat, set="patio", cambio="the gate is open"),
+                            dict(beat, set="bano_mampara")]}
+    ok("bano_mampara#despues" in T.bases_aprobadas(p, otro_sitio),
+       "el mismo estado en otro sitio, con otro cambio, no tapa el de este (revisión del 21-10)")
     ok(not P6._con_encuadre(escenas[1]) and P6._con_encuadre(escenas[2]),   # noqa: SLF001
        "el plano editado no lleva SHOT TYPE; el de detalle sí")
     plan = {"escenas": escenas, "assets": {}}

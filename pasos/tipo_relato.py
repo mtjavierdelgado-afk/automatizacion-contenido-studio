@@ -340,11 +340,12 @@ def bases_aprobadas(params, catalogo=None):
     except ValueError:
         return {}
     salida = {}
-    vigentes = estados_del_catalogo(catalogo) if catalogo is not None else {}
     for sid, ficha in (propio.get("bases") or {}).items():
         if not ficha.get("aprobada"):
             continue
         salida[sid] = ficha["imagen"]
+        # los cambios vigentes DE ESTE SITIO (como la pantalla y la generacion)
+        vigentes = estados_del_catalogo(catalogo, sid) if catalogo is not None else {}
         for estado, otra in (ficha.get("estados") or {}).items():
             if otra.get("aprobada") and otra.get("cambio") and \
                     vigentes.get(estado) == otra.get("cambio"):

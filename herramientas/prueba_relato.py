@@ -49,13 +49,15 @@ ESCENARIOS = [
         "espacio": {
             "sitio": "bano_mampara",
             "descripcion": (
-                "small apartment bathroom in Lima, 1.5 m wide x 2.4 m deep, seen from the "
-                "door in the near short wall; LEFT long wall: the toilet, near the middle; "
-                "BACK short wall, left half: a wall-hung vanity with a single basin and a "
-                "rectangular mirror above it; RIGHT side, from the back wall forward: a walk-in "
-                "shower 0.9 m deep with a low curb and its glass screen facing the room; same "
-                "layout, same camera height and same proportions in every shot; large "
-                "light-grey porcelain tiles on the floor, white walls, chrome fittings"),
+                "narrow apartment bathroom in Lima, 1.5 m wide x 2.4 m deep, seen from the "
+                "door in the near short wall; FAR END: a walk-in shower across the whole width, "
+                "0.9 m deep, with a low curb and a straight glass front parallel to the back "
+                "wall, facing the camera; LEFT long wall: the toilet, right in front of the "
+                "shower, its bowl only 0.4 m from the glass front; RIGHT long wall, near the "
+                "entrance: a small wall-hung vanity with a single basin and a mirror; the room "
+                "is tight on purpose: there is no free floor between the shower and the "
+                "toilet; same layout, same camera height and same proportions in every shot; "
+                "large light-grey porcelain tiles on the floor, white walls, chrome fittings"),
             "luz": "day, soft cool daylight from a small high window plus warm ceiling downlight",
             "secundarios": []},
         "material": (

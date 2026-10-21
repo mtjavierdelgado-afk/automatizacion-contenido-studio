@@ -821,6 +821,9 @@ GUIAS = {
             "las imágenes (mejor en inglés, que es lo que lee el generador).",
             "«Tipo de relato: espacio_que_cambia (acabados)» junto con ESPACIO FIJO "
             "para un antes y después o varias versiones del mismo sitio.",
+            "Un ESPACIO FIJO que haga verdad lo que cuenta la voz, con distancias: si "
+            "la mampara choca con el inodoro, «the toilet bowl only 0.4 m from the "
+            "shower glass»; un baño holgado dibuja lo contrario del vídeo.",
         ],
         "no": [
             "Diálogos entre personajes: el Studio narra con UNA voz (en «exacto» "

@@ -328,6 +328,12 @@ respecto a esa base. Lo que cambia en este video: {que_cambia}.
     «reaching»; por donde abre se dice como dato («it opens outward, toward the
     toilet»). Un modelo de imagen que lee un arco dibuja la hoja torcida, a
     medio abrir y fuera de escala (prueba real del 21-10).
+  - La distribucion y "inicial" tienen que hacer VERDAD lo que cuenta la voz, a
+    la vista: si la voz dice que la puerta choca con el inodoro, el inodoro esta
+    dentro de su barrido (mas cerca de la puerta que el ancho de la hoja); si dice
+    que no cabe, que se vea que no cabe. Si escribes tu la 'descripcion' del sitio,
+    pon las distancias que lo hacen verdad («the toilet bowl only 0.4 m from the
+    glass front»); un baño holgado contradice el video entero.
   - Si un cambio tiene geometria (por donde abre una puerta, una marca en el
     suelo, una medida), dila respecto a lo fijo y coherente con "inicial": «blue
     tape on the floor tracing the quarter circle the hinged door sweeps, from

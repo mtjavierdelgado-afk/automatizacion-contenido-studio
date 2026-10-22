@@ -148,6 +148,9 @@ TIPOS = {
         "claves": ("referencias", "guia", "url", "moodboard",
                    "calidad", "min_s", "max_s", "min_s_rotulos", "modo", "reglas",
                    "relato",
+                   # el negocio (rama dominio-negocio): id de uno de fabrica de
+                   # pasos/dominios.py; solo se guarda si no es automatico
+                   "dominio",
                    # que dibujan las imagenes (rama guion-visual): solo "guion"
                    # se guarda; la voz es no tenerlo
                    "imagenes"),
@@ -266,6 +269,14 @@ def _tipo_relato():
     return tipo_relato
 
 
+def _dominios():
+    try:
+        from . import dominios                                    # noqa: PLC0415
+    except ImportError:                                           # pragma: no cover
+        import dominios                                           # noqa: PLC0415
+    return dominios
+
+
 def _limpiar_datos(tipo, datos):
     """Deja solo las claves declaradas del tipo, y protesta por las demas."""
     if not isinstance(datos, dict):
@@ -299,6 +310,15 @@ def _limpiar_datos(tipo, datos):
             limpios["relato"] = relato
         else:
             limpios.pop("relato")
+    if tipo == "estilo" and "dominio" in limpios:
+        try:
+            dominio = _dominios().normalizar(limpios["dominio"])
+        except ValueError as fallo:
+            raise ErrorPreset(f"dominio: {fallo}") from None
+        if dominio:
+            limpios["dominio"] = dominio
+        else:
+            limpios.pop("dominio")
     if tipo == "estilo" and "imagenes" in limpios:
         try:
             imagenes = _guion_visual().normalizar_modo(limpios["imagenes"])
@@ -1183,6 +1203,12 @@ def cambios_para(ficha, params_actuales=None):
             estilo["relato"] = copy.deepcopy(datos["relato"])
         else:
             estilo.pop("relato", None)
+        # EL NEGOCIO, igual: lo pone un estilo que lo fija y lo QUITA uno que no
+        # (rama dominio-negocio). Un video y un estilo sin el no reciben nada.
+        if datos.get("dominio"):
+            estilo["dominio"] = datos["dominio"]
+        else:
+            estilo.pop("dominio", None)
         # QUE DIBUJAN LAS IMAGENES, igual (rama guion-visual)
         if datos.get("imagenes") == "guion":
             estilo["imagenes"] = "guion"
@@ -1281,6 +1307,8 @@ def datos_de_params(params_por_paso, incluir=ORDEN):
             bloque["reglas"] = copy.deepcopy(estilo["reglas"])
         if (estilo.get("relato") or {}).get("modo"):
             bloque["relato"] = copy.deepcopy(estilo["relato"])
+        if estilo.get("dominio"):
+            bloque["dominio"] = estilo["dominio"]
         if estilo.get("imagenes") == "guion":
             bloque["imagenes"] = "guion"
         for clave in ("calidad", "min_s", "max_s", "min_s_rotulos"):

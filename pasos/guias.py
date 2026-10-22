@@ -1058,17 +1058,29 @@ GUIAS = {
     "palabra_clave": {
         "titulo": "Palabra clave (SEO)",
         "donde": "Publicar → Cuentas y ajustes → SEO de este proyecto, y la ficha de cada vídeo",
-        "usa": "pasos/publicar_seo.py (bloque_instruccion, nota, etiquetas_youtube, nombre_fichero)",
+        "usa": "pasos/publicar_seo.py (palabra_del_video, bloque_instruccion, nota, etiquetas_youtube, "
+               "nombre_fichero), pasos/seo_real.py (relevancia, investigar, nota) y "
+               "pasos/seo_canal.py (tu canal y Google Trends)",
         "que_hace": [
             "Es la frase por la que quieres que te ENCUENTREN. Claude la pone en la "
             "primera línea de cada red, al principio del título de YouTube y "
             "Facebook y otra vez en las dos primeras líneas de la descripción de "
             "YouTube.",
-            "La del proyecto vale para todos sus vídeos; la de un vídeo (en su ficha) "
-            "manda sobre ella. Al escribir los textos, Claude propone una más "
+            "La del proyecto vale para los vídeos que TRATAN de eso: si el guion y el "
+            "material de un vídeo no la dicen, en ese vídeo no se usa (ni en la nota, "
+            "ni en lo que se pide a Claude, ni en las etiquetas). La de un vídeo (en "
+            "su ficha) manda siempre. Al escribir los textos, Claude propone una más "
             "concreta para ese vídeo, y tú la aceptas o no.",
+            "«Investigar búsquedas» (en la ficha) te dice qué frases de tu vídeo busca "
+            "la gente de verdad (autocompletado de YouTube y Google), cuánta "
+            "competencia tienen (con la clave de YouTube) y cómo te fueron en tu "
+            "cuenta. «Usar» pone la elegida como palabra del vídeo.",
+            "Con tu canal de YouTube conectado (Configuración → YouTube: tu canal), "
+            "también salen las búsquedas que ya te traen vistas, y la columna "
+            "«Tendencia» (Google Trends) dice si una frase sube o baja en Perú.",
             "También va en las etiquetas de YouTube y en el nombre con el que se sube "
-            "el MP4. La nota SEO de cada red mira si está donde tiene que estar.",
+            "el MP4. La nota SEO de cada red mide si es del vídeo, si se busca y cómo "
+            "te fue; dónde está colocada cuenta dentro de la relevancia.",
         ],
         "si": [
             "Una frase de 2 a 6 palabras, como la escribiría tu cliente en el "
@@ -1082,6 +1094,8 @@ GUIAS = {
             "Frases que nadie escribe («soluciones lúdicas integrales»).",
             "Repetir la misma palabra clave en todos los vídeos si cada uno va de "
             "otra cosa: para eso está la de cada vídeo.",
+            "Una palabra que el vídeo no trata, por mucho que se busque: quien la "
+            "busca no encuentra lo que espera, se va, y eso hunde el vídeo.",
         ],
         "plantilla": (
             "PRINCIPAL: [lo que haces] en [ciudad]\n"

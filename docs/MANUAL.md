@@ -585,6 +585,39 @@ Business no dan cifras por post, así que no se preguntan.
   el **primer comentario**, **Dame 3 ganchos** (tres primeras líneas para
   elegir) y, en Instagram, **colaboradores** y **etiquetas**.
 
+**El SEO de verdad** (20-10):
+- **La palabra clave tiene que ser del vídeo.** Si la del proyecto no sale en
+  el guion ni en el material, no se usa en ese vídeo, y la ficha te lo dice.
+  Si el vídeo no tiene ninguna, escríbela o usa una de «Búsquedas reales».
+- **Búsquedas reales → Investigar búsquedas**: el Studio pregunta al
+  autocompletado de YouTube y Google (Perú) qué frases de tu vídeo busca la
+  gente. La tabla dice de cada una **Del vídeo** (cuánto la trata), **Demanda**,
+  **Competencia** (solo con la clave de YouTube), **Tu historial** (1× es tu
+  media; 2× es el doble de vistas que lo normal en tu cuenta) y el **Total**.
+  **Usar** la pone como palabra clave del vídeo. No cuesta nada ni usa Claude.
+- **La nota de cada red** tiene tres partes: Relevancia, Demanda y Tu
+  historial. La nota es la media de las que tienen dato («2 de 3 partes
+  medidas»). Debajo, los **detalles de forma**, que se arreglan con su botón
+  pero no suben ni bajan la nota.
+- **La clave de YouTube** (opcional) va en **Configuración → YouTube
+  (búsquedas SEO)**: en console.cloud.google.com, activa la «YouTube Data
+  API v3» y crea una «Clave de API». Unas 100 búsquedas gratis al día.
+- **Tu canal** (opcional, **Configuración → YouTube: tu canal**). En el mismo
+  proyecto de Google Cloud:
+  1. Activa la «YouTube Analytics API».
+  2. En «Pantalla de consentimiento de OAuth», tipo «Externo», y añádete como
+     usuario de prueba.
+  3. En «Credenciales → Crear credenciales → ID de cliente de OAuth», tipo
+     «Aplicación web», con la **URI de redireccionamiento autorizada** que te
+     enseña el Studio (botón «Copiar»).
+  4. Pega el ID de cliente y el secreto, **Guardar** y **Conectar mi canal**.
+
+  Con el canal, «Investigar búsquedas» suma lo que ya te trae vistas en
+  YouTube, y en un vídeo publicado sale **Cómo te encontraron en YouTube**. Si
+  la app sigue «en prueba», Google corta cada 7 días: **Volver a conectar**.
+- La columna **Tendencia** (Google Trends, experimental) dice si la frase sube
+  o baja en Perú. Si Trends no contesta, queda en «—».
+
 **Después de publicar** la ficha se queda donde estaba, para seguir con las
 otras redes: arriba dice **Ya publicado en** (con el enlace a cada post) y
 **En camino** (lo programado o subiendo), y al lado de cada red su último
@@ -679,27 +712,63 @@ se ve **qué portada recibe cada red** y, en cada envío, cuál se mandó.
 
 ## Automatizar
 
-Lo que prepara los vídeos antes de crearlos. Dos pestañas grandes:
+Lo que prepara los vídeos antes de crearlos. Arriba, el **proyecto** (el
+cliente) como un chip que se cambia al pulsarlo, y **«+ Añadir guiones»**, que
+está siempre a mano. La **«i»** junto al título recuerda que la Parrilla es
+opcional: el Encargo de un vídeo se sigue pudiendo llenar a mano en Crear.
+Debajo, cinco pestañas: **Parrilla · Añadir guiones · Conversar con Claude ·
+Cuentas que te gustan · Marca del cliente**.
 
 ### Parrilla
 
-Cada proyecto tiene sus **matrices de guiones**, y cada guion su estado:
-**pendiente**, **usado** (se pasó al Encargo) o **publicado** (su vídeo ya
-salió en Publicar; cambia solo).
+Cada proyecto tiene sus **matrices de guiones**, y la Parrilla es un
+**tablero** con una columna por estado: **Pendientes** (nadie lo ha usado),
+**Usados** (se pasaron al Encargo) y **Publicados** (su vídeo ya salió en
+Publicar; cambia solo). En el móvil se ve una columna y las otras están en sus
+botones, con cuántos guiones tiene cada una.
 
-- **Añadir guiones**: subir una matriz (Word, Excel, PDF o texto), pedírselos a
-  Claude (de 1 a 30, sin repetir ideas), escribirlos o pegarlos, **Desde mis
-  resultados** (guiones que repiten lo que mejor te funcionó) o **Conversar con
-  Claude**, un chat para prepararlos hablando, con capturas, búsqueda en
-  internet opcional y tus resultados. Todo se convierte al formato único del
-  guion.
-- **La marca del cliente**: quién es, qué mostrar, qué evitar, el tono y el CTA,
-  una vez por proyecto. Claude la usa en todo lo que escribe para él.
-- **Pasar al Encargo**: abre Crear con el encargo del vídeo relleno con ese
-  guion. Revísalo y pulsa «Generar el guion».
-- Escribir guiones va con tu suscripción de Claude: no cuesta dinero aparte.
+- **Arriba, la marca del cliente**: «Marca de X: ✓ guardada» o, si falta,
+  «Sin marca: Claude escribirá sin saber quién es el cliente…» con
+  **«Apuntarla ›»**.
+- **Buscar por título o ID** y las **matrices como filtro**. Con una matriz
+  elegida se ve de dónde salió y puedes **Renombrarla** o **Borrarla** (te
+  pregunta antes; los vídeos ya hechos con ella no se tocan).
+- **Pulsar una tarjeta abre su ficha** en un panel a la derecha (a pantalla
+  completa en el móvil), sin perder la Parrilla de vista:
+  - **Guion**: uso, formato y duración, el texto entero, Copiar, Revisar
+    ortografía, Guardar el texto / Descartar cambios y sus avisos.
+  - **Al Encargo**: lo que irá a «Un vídeo nuevo» y **con qué estilo**.
+  - **Estado**: volver a pendiente, marcar como publicado, usar su marca para
+    el proyecto y borrar el guion (pregunta antes).
+  - Abajo, siempre a la vista, **«Pasar al Encargo con «estilo» ›»**: abre
+    Crear con el encargo relleno con ese guion. Revísalo y pulsa «Generar el
+    guion» (antes no se crea ni se gasta nada). Si no se puede (el texto está a
+    medio cambiar, no hay estilo…), la barra dice por qué.
+  - Se cierra con «×», con Escape o pulsando fuera.
+- El **piloto automático** llegará más adelante: sale como «próximamente».
 
-### Analizar cuentas
+### Añadir guiones
+
+Primero eliges **de dónde salen**, con una tarjeta por camino y **lo que
+cuesta**: subir un documento (Word, Excel, PDF o texto), pedírselos a Claude
+(de 1 a 30, sin repetir ideas), **Desde mis resultados** (guiones que repiten
+lo que mejor te funcionó), escribirlos o pegarlos (sin Claude si ya están en el
+formato), **desde una cuenta que te guste** (te lleva a «Cuentas que te
+gustan») o **conversando con Claude** (te lleva al chat). Debajo, su
+formulario, «Cómo se usa» y «Dónde se guardan», y abajo la **barra** con el
+botón («Subir y convertir», «Pedir a Claude», «Escribir desde mis resultados»,
+«Convertir con Claude» o «Guardar en la Parrilla») y lo que gasta. Escribir
+guiones va con tu suscripción de Claude: no cuesta dinero aparte.
+
+### Conversar con Claude
+
+Un chat para preparar guiones hablando: a la izquierda tus conversaciones
+(«+ Nueva», «Borrar esta conversación») y a la derecha la conversación, con
+capturas, **🌐 Buscar en internet**, **📊 Con mis resultados**, una cuenta
+analizada como referencia y el modelo. Cada guion que escriba en el formato del
+Studio sale con su **«Guardar en la Parrilla»**.
+
+### Cuentas que te gustan
 
 Escribe el @usuario o pega el enlace de un perfil de **TikTok, Instagram o
 YouTube** que no es tuyo y el Studio trae sus vídeos públicos con sus cifras.
@@ -707,11 +776,19 @@ YouTube** que no es tuyo y el Studio trae sus vídeos públicos con sus cifras.
 - **Primero gratis** (YouTube y la vía oficial de Meta); si no sirve, por
   **Apify**, de pago (unos céntimos por cuenta). **Antes de pagar siempre
   pregunta**, con el precio, y hay un tope al mes.
-- **«Que Claude la analice»**: qué temas, ganchos, duración y horarios le
-  funcionan. **«Escribir guiones con lo que le funciona»**: guiones para tu
-  proyecto, inspirados y sin copiar, que van a la Parrilla.
-- Las claves (Google, Meta, Apify) van en **Conexiones**, dentro de esa
+- Las ya leídas salen como **tarjetas** (red, cuántos vídeos, cuándo y si está
+  analizada). Abierta una, en dos columnas: **«Qué le funciona»** («Que Claude
+  la analice»: temas, ganchos, duración y horarios) y **«Para tu proyecto»**
+  («Escribir guiones con lo que le funciona», inspirados y sin copiar, que van
+  a la Parrilla, o «Hablar de ella en el chat»), y debajo **Sus vídeos**.
+- Las claves (Google, Meta, Apify) siguen en **Conexiones**, arriba de esa
   pestaña, con su guía.
+
+### Marca del cliente
+
+Quién es, qué mostrar, qué evitar, el tono, el CTA y otras reglas, una vez por
+proyecto, en dos columnas, con **«Guardar la marca»** en la barra de abajo.
+Claude la usa en todo lo que escribe para él.
 
 ## Configuración (⚙)
 

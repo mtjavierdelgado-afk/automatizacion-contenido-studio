@@ -280,6 +280,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/presets-light/{preset_id}/aportadas` | Guarda lo que se dice de cada imagen y las ★: {descripciones, destacadas}. |
 | `GET` | `/api/presets-light/{preset_id}/aportadas/{nombre}/imagen` | Una de tus imagenes de referencia, tal cual la subiste. |
 | `GET` | `/api/presets-light/{preset_id}/coste` | Lo que costo hacer este estilo (su taller), desglosado. |
+| `PUT` | `/api/presets-light/{preset_id}/dominio` | Fija el negocio de un estilo: {dominio: "estadoplay" | "general" | null}. |
 | `POST` | `/api/presets-light/{preset_id}/duplicar` | Una copia del estilo, con su taller. |
 | `GET` | `/api/presets-light/{preset_id}/imagenes` | Qué dibujan por defecto las imágenes de los vídeos de un estilo. |
 | `PUT` | `/api/presets-light/{preset_id}/imagenes` | {imagenes: "guion" | null}: el defecto de los vídeos NUEVOS de este estilo. |
@@ -354,6 +355,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/clientes/{cid}` | Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto. |
 | `PUT` | `/api/clientes/{cid}` | Renombra, oculta o pone clave: {nombre?, oculto?, clave?} ("" la quita). |
 | `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
+| `GET` | `/api/dominios` | Los dominios de fabrica (el negocio de un estilo). -> {dominios, automatico} |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
 | `GET` | `/api/inicio/resumen` | Lo del Inicio que no sale de otras rutas, en una sola llamada. |
@@ -459,7 +461,13 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/publicar/videos/{pid}/portada/proponer/{rid}` | Como van las portadas propuestas, y cuales son al terminar. |
 | `POST` | `/api/publicar/videos/{pid}/portada/usar` | La pinta a tamano real y la deja como portada del video (como si la |
 | `POST` | `/api/publicar/videos/{pid}/portada/vista` | La portada pintada en pequeno, para la pantalla: {diseno, ancho?, |
+| `POST` | `/api/publicar/videos/{pid}/seo/encontraron` | «Cómo te encontraron»: las búsquedas de YouTube que trajeron vistas a |
+| `POST` | `/api/publicar/videos/{pid}/seo/investigar` | Investiga las búsquedas de verdad para la palabra clave de este vídeo. |
 | `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
+| `POST` | `/api/publicar/youtube/oauth/desconectar` | Olvida el permiso del canal (y lo que se trajo de él). |
+| `POST` | `/api/publicar/youtube/oauth/empezar` | {redireccion} (la dirección de vuelta de ESTE Studio) -> {url} de Google |
+| `GET` | `/api/publicar/youtube/oauth/vuelta` | Adonde vuelve Google con el permiso: cambia el código por el token. |
+| `POST` | `/api/publicar/youtube/probar` | Prueba la clave de la API de datos de YouTube (gasta 1 unidad del cupo) |
 | `POST` | `/api/reglas-estilo/afinar` | Claude reescribe una regla para el generador: {texto, nombre?, palabras?}. |
 | `GET` | `/api/reglas-estilo/afinar/{rid}` | Como va «Afinar con Claude», y la propuesta al terminar. |
 | `GET` | `/api/sistema/estilos-perdidos` | Los videos que apuntan a imagenes de estilo que ya no estan. Solo mira. |
@@ -478,4 +486,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**364 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**372 endpoints.** Escrito por `generar_api.py` desde `app.py`.

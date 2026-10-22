@@ -82,8 +82,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/subtitulos/rotos` | {planos}: cuantos planos tienen los subtitulos dibujados con las tildes |
 | `GET` | `/api/proyectos/{pid}/tipo_relato` | El tipo de relato del video: el guardado, el que rige, las bases y los planos que cambian. |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/aplicar` | Guarda el tipo de relato de un video (hecho o no). No dibuja nada. |
-| `POST` | `/api/proyectos/{pid}/tipo_relato/base/aprobar` | {sitio?, estado?, aprobada: true|false}: aprueba (o retira) la imagen base del sitio, o con `estado` la de ese estado. |
-| `POST` | `/api/proyectos/{pid}/tipo_relato/base/generar` | Genera la imagen base del sitio, o con {estado} la de ese estado (SE PAGA una imagen). {usd: lo que se vio, estado?, otra?} |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/base/aprobar` | {sitio?, estado?, aprobada: true|false}: aprueba (o retira) la imagen base del |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/base/generar` | Genera la imagen base del sitio, o con {estado} la de ese estado (SE PAGA una |
 | `GET` | `/api/proyectos/{pid}/tipo_relato/base/imagen` | La imagen base (aprobada o no) de un sitio del video, o la de un estado. |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/base/usar_subida` | La imagen subida del espacio fijo pasa a ser la base, aprobada (gratis). |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/cambios` | En «un espacio que cambia», Claude escribe el cambio de cada tramo (solo texto). |
@@ -423,12 +423,12 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/proyectos/{cid}/perfil` | Apunta el perfil de Upload-Post del proyecto: {perfil, crear?}. Si ya |
 | `GET` | `/api/publicar/proyectos/{cid}/perfiles` | Los perfiles que hay de verdad en Upload-Post, para elegir uno: los que |
 | `GET` | `/api/publicar/proyectos/{cid}/tableros` | Los tableros de Pinterest del perfil del proyecto: [{id, nombre}]. |
-| `POST` | `/api/publicar/refrescar` | Pregunta a Upload-Post por los envios que siguen en el aire. Con `{lote}` («Comprobar» de un programado que ya debió salir, 20-10) pregunta solo por ese, ya, y devuelve `estados` de ese lote. |
+| `POST` | `/api/publicar/refrescar` | Pregunta a Upload-Post por los envios que siguen en el aire. |
 | `GET` | `/api/publicar/resultados` | El resumen de un proyecto (lo que ya se sabe; no pregunta a nadie). |
 | `GET` | `/api/publicar/videos/{pid}` | La ficha de publicar de un video: redes, textos, encaje, envios. |
-| `PUT` | `/api/publicar/videos/{pid}` | {redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?, youtube_formato?: auto\|short\|video} (Short o vídeo normal en YouTube, 20-10) |
+| `PUT` | `/api/publicar/videos/{pid}` | {redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?, |
 | `POST` | `/api/publicar/videos/{pid}/a-mano` | «Lo he subido yo»: {red, url?}. Queda en el historial. |
-| `POST` | `/api/publicar/videos/{pid}/emojis` | «✨ Más emojis»: {red, campo: titulo\|descripcion, texto?} → {texto, antes, despues}, el MISMO texto con emojis añadidos (haiku, en la petición). No guarda nada; si Claude cambia una palabra o un hashtag, 422. |
+| `POST` | `/api/publicar/videos/{pid}/emojis` | «✨ Más emojis» (rama `textos-emojis`): {red, campo: titulo|descripcion, |
 | `POST` | `/api/publicar/videos/{pid}/enviar` | {redes, modo: ahora|programar|pendiente, cuando?, confirmado, repetir?} |
 | `POST` | `/api/publicar/videos/{pid}/envios/{eid}/cancelar` | Cancela lo programado (en Upload-Post) o lo que esperaba tu OK, y quita |
 | `POST` | `/api/publicar/videos/{pid}/envios/{eid}/confirmar` | Un envio que esperaba tu OK sale: {confirmado, modo?, cuando?}. |
@@ -440,11 +440,14 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/videos/{pid}/optimizar` | Claude revisa el SEO de los textos: {redes}. Deja una PROPUESTA campo a |
 | `POST` | `/api/publicar/videos/{pid}/portada` | Sube una imagen de portada (multipart, campo «portada»). |
 | `GET` | `/api/publicar/videos/{pid}/portada.jpg` | La imagen de portada subida para este vídeo. |
+| `POST` | `/api/publicar/videos/{pid}/portada/descargar` | La portada a tamaño real, para guardarla (respaldo): {diseno}. PNG |
 | `GET` | `/api/publicar/videos/{pid}/portada/diseno` | El diseno de portada de este video (el guardado o uno de partida, SIN |
 | `PUT` | `/api/publicar/videos/{pid}/portada/diseno` | Guarda el diseno (para retocarlo otro dia). No cambia la portada. |
 | `POST` | `/api/publicar/videos/{pid}/portada/fondo` | Sube una imagen para el fondo (multipart, campo «imagen»). -> {nombre} |
 | `GET` | `/api/publicar/videos/{pid}/portada/fondos/{nombre}` | Un fondo subido o hecho con IA. |
 | `POST` | `/api/publicar/videos/{pid}/portada/ia` | Dibuja con la IA de imagenes (SE PAGA): {diseno, que: "fondo"|"portada", |
+| `POST` | `/api/publicar/videos/{pid}/portada/ideas-ia` | Claude lee el guion entero y propone tres ideas de imagen, cada una con |
+| `GET` | `/api/publicar/videos/{pid}/portada/ideas-ia/{rid}` | Cómo van las ideas de imagen, y cuáles son al terminar. |
 | `GET` | `/api/publicar/videos/{pid}/portada/planos/{sid}.jpg` | La imagen de un plano, en pequeno, para elegir el fondo. |
 | `POST` | `/api/publicar/videos/{pid}/portada/plantilla` | Rehace el diseno con otra plantilla: {plantilla, paleta?, fuente?, |
 | `POST` | `/api/publicar/videos/{pid}/portada/proponer` | Claude propone tres portadas (suscripcion, sin coste aparte). -> {id}; |
@@ -470,4 +473,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**356 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**359 endpoints.** Escrito por `generar_api.py` desde `app.py`.

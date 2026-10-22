@@ -81,6 +81,15 @@ def responder(entrada):
                                     "entrada": "dibuja", "color": "alerta"})
         planos["NOEXISTE"] = [{"tipo": "texto", "texto": "x", "palabra": 0}]
         return {"planos": planos}
+    if "ideas DISTINTAS de imagen" in entrada:
+        # las ideas de imagen para la IA (portadas-2): cada una con su prompt
+        return {"ideas": [
+            {"titulo": "La sala llena", "prompt": "Una sala de fiesta con diez pantallas encendidas y "
+             "niños jugando con mandos, luz azul de neón, plano general desde la puerta", "por_que": "se ve la escala"},
+            {"titulo": "El mando en primer plano", "prompt": "Primer plano de unas manos sujetando un mando "
+             "de consola, fondo desenfocado con luces de colores, mucho contraste", "por_que": "se entiende en un segundo"},
+            {"titulo": "Cara de sorpresa", "prompt": "Un adulto sorprendido delante de una pantalla gigante "
+             "con un videojuego, boca abierta, luz cálida", "por_que": "las caras atraen clics"}]}
     if "director de arte de miniaturas" in entrada:
         # las portadas propuestas (pasos/portadas.py): tres distintas
         return {"propuestas": [

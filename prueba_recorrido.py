@@ -2651,13 +2651,16 @@ def ortografia_de_los_subtitulos(navegador, datos):
        "y lo propuesto sigue ahí aunque la pantalla se repinte")
     _r, antes = api.get(f"/api/proyectos/{pid}")
     estado_assets = {p.get("id"): p.get("estado") for p in antes.get("pasos") or []}.get("assets")
+    # la voz se compara con como estaba ANTES: en la pasada entera otro
+    # escenario puede dejar el guion (y la voz) en obsoleto, y eso no es de aquí
+    estado_voz = {p.get("id"): p.get("estado") for p in antes.get("pasos") or []}.get("voz")
     pg.captura("18_ortografia", entera=False)
     pg.pulsar(".panel-ortografia button", "Aplicar las marcadas")
     pg.p.wait_for_timeout(2000)
     _r, despues = api.get(f"/api/proyectos/{pid}")
     estados = {p.get("id"): p.get("estado") for p in despues.get("pasos") or []}
-    ok(estados.get("assets") == estado_assets and estados.get("voz") != "obsoleto",
-       f"aplicarlas no toca ni la voz ni las imágenes ({estados})")
+    ok(estados.get("assets") == estado_assets and estados.get("voz") == estado_voz,
+       f"aplicarlas no toca ni la voz ni las imágenes ({estados}; antes, voz {estado_voz})")
     ok(pg.esperar(".caja-aviso", "ANTES de tus últimos cambios", 15),
        "y el Vídeo dice que hay que volver a montarlo")
     ok("No se dibuja ninguna imagen" in pg.p.locator(".caja-aviso").filter(
@@ -5422,12 +5425,15 @@ def portadas_disenadas(navegador, datos):
     pg.p.wait_for_timeout(800)
     ok(pg.p.evaluate("() => PORT.diseno.plantilla") == "oferta", "y se puede usar una")
     # el fondo con IA, con el precio delante (motor de imágenes simulado)
-    antes = len(pg.dialogos)
     pg.pulsar(".capa-portada button", "Hacer el fondo con IA")
+    # portadas-2: antes de pagar, el prompt a la vista y el precio en el botón
+    ok(pg.esperar(".capa-portada .antes-de-pagar textarea", segundos=15), "antes de pagar enseña el prompt")
+    precio = pg.p.locator(".capa-portada .antes-de-pagar button", has_text="Dibujar").inner_text()
+    pg.pulsar(".capa-portada .antes-de-pagar button", "Dibujar")
     fin = time.time() + 90
     while time.time() < fin and pg.p.evaluate("() => (PORT.diseno.fondo || {}).tipo") != "ia":
         pg.p.wait_for_timeout(700)
-    ok(len(pg.dialogos) > antes and "$" in pg.dialogos[-1], "antes de pagar enseña el precio y pregunta")
+    ok("$" in precio, f"y el precio, en el botón que paga ({precio})")
     ok(pg.p.evaluate("() => PORT.diseno.fondo.tipo") == "ia" and pg.p.evaluate("() => !!PORT.diseno.fondo.imagen"),
        "el fondo hecho con IA queda puesto")
     hecho = pg.p.evaluate("() => PORT.diseno.fondo.imagen")
@@ -5436,7 +5442,7 @@ def portadas_disenadas(navegador, datos):
     # cambiar la paleta no se lleva lo hecho a mano
     n_antes = pg.p.evaluate("() => PORT.diseno.elementos.length")
     pg.p.evaluate("() => { PORT.diseno.elementos.push({tipo: 'icono', icono: 'fuego', x: 0.1, y: 0.1}); }")
-    pg.p.locator(".capa-portada select").nth(1).select_option("fiesta")
+    pg.p.locator(".capa-portada .campo-portada", has_text="Paleta").locator("select").select_option("fiesta")
     pg.p.wait_for_timeout(1500)
     ok(pg.p.evaluate("() => PORT.diseno.elementos.length") == n_antes + 1
        and pg.p.evaluate("() => PORT.diseno.paleta") == "fiesta",
@@ -6909,6 +6915,162 @@ def publicar_arreglos_del_20_10(navegador, datos):
     parte("el calendario y los filtros", parte_calendario)
     pg.sin_errores("los arreglos de Publicar del 20-10")
     pg.cerrar()
+
+
+# ======================================================================
+# PORTADAS-2 (21-10-2026). Tramo propio, al final.
+
+@escenario
+def portadas_2_capas_y_pantalla_quieta(navegador, datos):
+    """Notas del dueño del 21-10: la imagen sale limpia (la plantilla ya no le
+    mete efectos), el texto pequeño de arriba sale al escribirlo, lo añadido
+    se queda al cambiar de plantilla, «Guardar diseño» se ve, se descarga la
+    portada, la IA enseña el prompt antes de pagar; en Publicar, red por red
+    qué portada se manda; y la pantalla no se mueve al llegar los ganchos."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    ruta = os.path.join(datos["proyectos"], "_sistema", "publicar", "portadas", f"{pid}.diseno.json")
+    if os.path.exists(ruta):
+        os.remove(ruta)          # empezar de un diseño de partida
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    api.post(f"/api/publicar/proyectos/{cid}/perfil", {})
+    api.post(f"/api/publicar/proyectos/{cid}/conectar", {"redes": ["tiktok", "instagram", "youtube"]})
+    api.post(f"/api/publicar/proyectos/{cid}/cuentas")
+    pg = Pagina(navegador, datos, nombre="portadas_2")
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    ok(pg.esperar(".portada-publicar button", "Diseñar portada", 20), "Publicar abre la ficha")
+    ok(pg.visible(".portada-por-red", "Qué portada recibe cada red"), "red por red, qué portada se manda")
+    ok(pg.visible(".portada-por-red", "Facebook") or pg.visible(".portada-por-red", "Instagram"),
+       "con las redes marcadas")
+    pg.pulsar(".portada-publicar button", "Diseñar portada")
+    ok(pg.esperar(".vista-portada-grande img", segundos=30), "se abre el editor")
+    d = pg.p.evaluate("() => PORT.diseno")
+    ok(d.get("efectos") == {}, f"la imagen empieza SIN ajustes ({d.get('efectos')})")
+    ok((d.get("fondo") or {}).get("tipo") == "plano", "y el fondo de partida es la imagen de un plano, limpia")
+    ok(pg.visible(".lleva-portada", "tal cual"), "«Esta imagen lleva» dice que va tal cual")
+    # el texto pequeño de arriba sale al escribirlo
+    pg.p.locator(".capa-portada input[data-foco=portada-antetitulo]").fill("SOLO HOY")
+    pg.p.wait_for_timeout(300)
+    ok(pg.p.evaluate("() => PORT.diseno.elementos.some(e => e.rol === 'antetitulo' && e.texto === 'SOLO HOY')"),
+       "el texto pequeño de arriba tiene dónde salir aunque estuviera vacío")
+    # añadir: nace en un hueco libre y se queda al cambiar de plantilla
+    pg.p.locator(".capa-portada select[aria-label='Elemento que se añade']").select_option("insignia")
+    pg.pulsar(".capa-portada button", "Añadir")
+    pg.p.wait_for_timeout(400)
+    nuevo = pg.p.evaluate("() => PORT.diseno.elementos[PORT.diseno.elementos.length - 1]")
+    ok(nuevo.get("propio") and abs((nuevo.get("x") or 0.5) - 0.5) + abs((nuevo.get("y") or 0.5) - 0.5) > 0.1,
+       f"lo añadido no nace encima del título, en el centro ({nuevo.get('x')}, {nuevo.get('y')})")
+    ok(pg.visible(".capa-portada .aviso-portada", "añadido"), "y se avisa dentro del editor")
+    pg.pulsar(".capa-portada .plantilla-portada", "Pregunta")
+    pg.p.wait_for_timeout(1200)
+    ok(pg.p.evaluate("() => PORT.diseno.plantilla") == "pregunta"
+       and pg.p.evaluate("() => PORT.diseno.elementos.some(e => e.propio && e.tipo === 'insignia')"),
+       "cambiar de plantilla conserva lo añadido a mano")
+    ok(pg.p.evaluate("() => JSON.stringify(PORT.diseno.efectos)") == "{}", "y no le mete efectos a la foto")
+    # el look de la plantilla, opcional, y «Sin ajustes»
+    pg.pulsar(".capa-portada button", "Poner el look de la plantilla")
+    pg.p.wait_for_timeout(500)
+    ok(pg.p.evaluate("() => Object.keys(PORT.diseno.efectos).length") > 0 and pg.visible(".lleva-portada .pastilla-lleva", "Contraste"),
+       "el look se pone solo si se pide, y se ve en «Esta imagen lleva»")
+    pg.pulsar(".capa-portada button", "Sin ajustes")
+    pg.p.wait_for_timeout(500)
+    ok(pg.p.evaluate("() => JSON.stringify(PORT.diseno.efectos)") == "{}", "«Sin ajustes» deja la imagen tal cual")
+    # restablecer un elemento
+    pg.p.evaluate("() => { const e = PORT.diseno.elementos.find(x => x.rol === 'titulo'); e.x = 0.1; e.tam = 0.03; pintarEditorPortada(); }")
+    fila = pg.p.locator(".capa-portada .elemento-portada", has_text="Título").first
+    fila.locator("button", has_text="Restablecer").click()
+    pg.p.wait_for_timeout(300)
+    ok(pg.p.evaluate("() => { const e = PORT.diseno.elementos.find(x => x.rol === 'titulo'); return e.x !== 0.1 && e.tam !== 0.03; }"),
+       "«Restablecer» devuelve el elemento a como nació")
+    # sin paleta
+    pg.p.locator(".capa-portada .campo-portada", has_text="Paleta").locator("select").select_option("ninguna")
+    pg.p.wait_for_timeout(1200)
+    ok(pg.p.evaluate("() => PORT.diseno.paleta") == "ninguna", "se puede quitar la paleta («Sin paleta»)")
+    # guardar se ve, y el aviso flotante queda por encima del editor
+    pg.pulsar(".capa-portada button", "Guardar diseño")
+    ok(pg.esperar(".capa-portada .aviso-portada", "guardado", 10), "«Guardar diseño» dice que se ha guardado, dentro del editor")
+    z = pg.p.evaluate("() => [Number(getComputedStyle(document.getElementById('toast')).zIndex), Number(getComputedStyle(document.querySelector('.capa-portada')).zIndex)]")
+    ok(z[0] > z[1], f"y el aviso flotante sale por ENCIMA de la capa del editor ({z})")
+    # descargar
+    with pg.p.expect_download(timeout=30000) as bajada:
+        pg.pulsar(".capa-portada button", "Descargar portada")
+    ok(bajada.value.suggested_filename.endswith(".png"), f"«Descargar portada» baja el PNG ({bajada.value.suggested_filename})")
+    # la IA: ideas de Claude y el prompt editable antes de pagar
+    pg.pulsar(".capa-portada button", "Ideas de imagen con Claude")
+    ok(pg.esperar(".capa-portada .idea-ia-portada", "La sala llena", 60), "Claude propone ideas de imagen con su prompt")
+    pg.p.locator(".capa-portada .idea-ia-portada", has_text="La sala llena").locator("button", has_text="Fondo con esta idea").click()
+    ok(pg.esperar(".capa-portada .antes-de-pagar textarea", segundos=15), "antes de pagar sale el prompt")
+    ok("diez pantallas" in pg.p.locator(".capa-portada .antes-de-pagar textarea").input_value(),
+       "y es el de la idea elegida, para cambiarlo si se quiere")
+    pg.pulsar(".capa-portada .antes-de-pagar button", "Cancelar")
+    ok(not pg.visible(".capa-portada .antes-de-pagar"), "y se puede no pagar")
+    # UN DOBLE CLIC EN «Dibujar» PAGA UNA SOLA IMAGEN (revisión del 21-10)
+    def de_ia():
+        _r, lista = api.get(f"/api/trabajos?proyecto={pid}")
+        lista = lista if isinstance(lista, list) else (lista or {}).get("trabajos") or []
+        return len([t for t in lista if str(t.get("tipo") or t.get("nombre") or "").startswith("portada_ia")])
+    antes_ia = de_ia()
+    pg.pulsar(".capa-portada button", "Hacer el fondo con IA")
+    pg.esperar(".capa-portada .antes-de-pagar button", "Dibujar", 15)
+    pg.p.evaluate("() => { const b = [...document.querySelectorAll('.capa-portada .antes-de-pagar button')].find(x => x.textContent.includes('Dibujar')); b.click(); b.click(); }")
+    fin = time.time() + 90
+    while time.time() < fin and pg.p.evaluate("() => !!PORT.ia"):
+        pg.p.wait_for_timeout(700)
+    ok(de_ia() - antes_ia == 1, f"un doble clic en «Dibujar» lanza UNA imagen ({de_ia() - antes_ia})")
+    pg.captura("portadas_2_editor", entera=False)
+    pg.p.evaluate("() => { PORT.cambiado = false; }")
+    pg.pulsar(".capa-portada button", "Cerrar")
+    pg.sin_errores("portadas-2")
+    pg.cerrar()
+
+    # LA PANTALLA NO SE MUEVE al llegar los ganchos de una red de más arriba.
+    # Se sostiene sola (en la pasada entera otros escenarios dejan la ficha a
+    # su manera): tres redes con texto, cada una con su «Dame 3 ganchos».
+    r, _d = api.put(f"/api/publicar/videos/{pid}", {
+        "redes": ["tiktok", "instagram", "youtube"],
+        "textos": {"tiktok": {"descripcion": "Alquila consolas para tu fiesta en Lima"},
+                   "instagram": {"descripcion": "Tu fiesta con consolas y pantallas gigantes"},
+                   "youtube": {"titulo": "Consolas para fiestas en Lima",
+                               "descripcion": "Así montamos una fiesta con diez consolas"}}})
+    ok(r.status_code == 200, f"la ficha con tres redes y sus textos ({r.status_code})")
+    movil = Pagina(navegador, datos, ancho=390, alto=780, nombre="portadas_2_movil")
+    movil.js(f"abrirPublicarVideo('{pid}');")
+    movil.esperar(".ficha-publicar .nombre-ficha", segundos=20)
+    movil.p.wait_for_timeout(1200)
+    pos = ("() => { const b = [...document.querySelectorAll('#modulo button')].filter(x => /ganchos|pensando/.test(x.textContent))[1];"
+           " return b ? Math.round(b.getBoundingClientRect().top) : null; }")
+    llegan = ("() => { const red = (PUB.ficha.redes || [])[0] || 'tiktok';"
+              " PUB.ficha.seo = Object.assign({}, PUB.ficha.seo, {ganchos: Object.assign({}, (PUB.ficha.seo || {}).ganchos,"
+              " {[red]: ['Un gancho largo para ocupar sitio en la pantalla del móvil uno', 'Un gancho largo para ocupar sitio en la pantalla del móvil dos',"
+              " 'Un gancho largo para ocupar sitio en la pantalla del móvil tres']})}); pintarModulo(); }")
+    ponerse = ("() => { const b = [...document.querySelectorAll('#modulo button')].filter(x => x.textContent.includes('Dame 3 ganchos'))[1];"
+               " const m = document.getElementById('modulo'); m.scrollTop += b.getBoundingClientRect().top - 200; }")
+    if movil.p.locator("#modulo button", has_text="Dame 3 ganchos").count() >= 2:
+        movil.p.evaluate(ponerse)
+        movil.p.wait_for_timeout(300)
+        antes = movil.p.evaluate(pos)
+        movil.p.evaluate(llegan)
+        movil.p.wait_for_timeout(500)
+        despues = movil.p.evaluate(pos)
+        ok(antes is not None and despues is not None and abs(despues - antes) <= 4,
+           f"al llegar los ganchos de otra red, lo que se mira no se mueve ({antes} → {despues})")
+        # y la comprobación SÍ caza el fallo: sin el ancla, se mueve
+        movil.p.evaluate("() => { PUB.ficha.seo.ganchos = {}; pintarModulo(); }")
+        movil.p.evaluate(ponerse)
+        movil.p.wait_for_timeout(300)
+        movil.p.evaluate("() => { window.__ancla = volverAlAncla; volverAlAncla = () => {}; }")
+        antes = movil.p.evaluate(pos)
+        movil.p.evaluate(llegan)
+        movil.p.wait_for_timeout(500)
+        despues = movil.p.evaluate(pos)
+        movil.p.evaluate("() => { volverAlAncla = window.__ancla; }")
+        ok(despues is not None and antes is not None and abs(despues - antes) > 40,
+           f"(sin el ancla la pantalla sí se movía: {antes} → {despues})")
+    else:
+        ok(False, "la ficha de prueba tiene al menos dos redes con «Dame 3 ganchos»")
+    movil.sin_errores("la pantalla quieta en Publicar")
+    movil.cerrar()
 
 
 # ======================================================================

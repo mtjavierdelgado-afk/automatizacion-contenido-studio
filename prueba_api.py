@@ -7156,8 +7156,9 @@ def probar_dominios():
     sys.path.insert(0, RAIZ_ESTUDIO)
     import app as servidor                                    # noqa: PLC0415
     codigo, d = _llamar(servidor.listar_dominios)
-    ok(codigo == 200 and {x["id"] for x in d.get("dominios") or []} == {"general", "estadoplay"},
-       f"GET /api/dominios: general y estadoplay ({codigo})")
+    ok(codigo == 200 and [x["id"] for x in d.get("dominios") or []][:1] == ["general"]
+       and "estadoplay" not in {x["id"] for x in d.get("dominios") or []},
+       f"GET /api/dominios: el general, y ningún negocio de fábrica ({codigo})")
     codigo, _m = _llamar(servidor.guardar_dominio_estilo, "no-existe", {"dominio": "general"})
     ok(codigo in (400, 404), f"fijar el dominio de un estilo que no existe: {codigo}")
     codigo, _m = _llamar(servidor.guardar_dominio_estilo, "x", {})
@@ -7194,82 +7195,72 @@ def probar_dominios():
 
 
 def probar_tipos_de_negocio():
-    """Etapa Foto C (21-10-2026): crear, cambiar y borrar tipos de negocio, y
-    fijar uno propio en un estilo."""
-    seccion("TIPOS DE NEGOCIO: LOS DEL DUEÑO")
+    """Etapa Foto C (21-10-2026): la ficha del negocio de cada proyecto y que
+    sus estilos la lleven."""
+    seccion("LA FICHA DEL NEGOCIO DE CADA PROYECTO")
     sys.path.insert(0, RAIZ_ESTUDIO)
     import app as servidor                                    # noqa: PLC0415
     from PIL import Image as _Imagen                          # noqa: PLC0415
-    base = tempfile.mkdtemp(prefix="estudio_tipos_")
+    base = tempfile.mkdtemp(prefix="estudio_negocio_")
     antes_env = os.environ.get("ESTUDIO_DOMINIOS")
     os.environ["ESTUDIO_DOMINIOS"] = os.path.join(base, "_sistema", "dominios.json")
+    raiz_antes = servidor.raiz_proyectos()
+    servidor.fijar_raiz_proyectos(os.path.join(base, "proyectos"))
     presets = servidor._presets()
     antes = presets.FICHERO
     try:
         presets.FICHERO = os.path.join(base, "presets.json")
-        cuerpo = {"nombre": "Clínica dental", "palabras": "dentista, sonrisa",
-                  "reglas": [{"texto": "Batas blancas limpias", "palabras": ["bata"]}],
-                  "revisor": {"equipo": "el sillón no es de dentista"}}
-        codigo, t = _llamar(servidor.crear_dominio, cuerpo)
-        ok(codigo == 200 and t.get("id") == "clinica-dental" and not t.get("de_fabrica"),
-           f"POST /api/dominios lo crea ({codigo} {t.get('id')})")
-        ok(os.path.exists(os.environ["ESTUDIO_DOMINIOS"]), "en su fichero de _sistema")
-        igual(t.get("palabras"), ["dentista", "sonrisa"], "con sus palabras")
-        igual((t.get("revisor") or {}).get("equipo"), "el sillón no es de dentista",
-              "y lo que vigila el revisor")
-        codigo, d = _llamar(servidor.listar_dominios)
-        igual([x["id"] for x in d.get("dominios") or []],
-              ["general", "estadoplay", "clinica-dental"], "GET lo lista detrás de los de fábrica")
-        codigo, _m = _llamar(servidor.crear_dominio, cuerpo)
-        igual(codigo, 400, "otro con el mismo nombre, 400")
-        codigo, _m = _llamar(servidor.crear_dominio, {"nombre": ""})
-        igual(codigo, 400, "sin nombre, 400")
-        codigo, _m = _llamar(servidor.cambiar_dominio, "estadoplay", {"nombre": "x"})
-        igual(codigo, 400, "un tipo de fábrica no se cambia, 400")
-        codigo, _m = _llamar(servidor.borrar_dominio, "general")
-        igual(codigo, 400, "ni se borra, 400")
-        codigo, _m = _llamar(servidor.cambiar_dominio, "no-existe", {"nombre": "x"})
-        igual(codigo, 400, "cambiar uno que no existe, 400")
-
+        cid = servidor.crear_cliente({"nombre": "Suyu"})["cliente"]["id"]
+        otro = servidor.crear_cliente({"nombre": "Otro"})["cliente"]["id"]
         refs = []
         for i in range(3):
             ruta = os.path.join(base, f"r{i}.png")
             _Imagen.new("RGB", (64, 40), (40 * i, 90, 160)).save(ruta)
             refs.append(ruta)
-        ficha = presets.guardar("canal", "Dental", {"estilo": {"referencias": refs},
-                                                    "guion": {"instrucciones": "x"}})
-        pid = ficha["id"]
-        codigo, r = _llamar(servidor.guardar_dominio_estilo, pid, {"dominio": "clinica-dental"})
-        ok(codigo == 200 and r.get("dominio") == "clinica-dental",
-           f"un estilo puede fijar un tipo propio ({codigo} {r})")
-        codigo, t = _llamar(servidor.cambiar_dominio, "clinica-dental",
-                            dict(cuerpo, descripcion="sonrisas"))
-        ok(codigo == 200 and t.get("descripcion") == "sonrisas"
-           and [e["id"] for e in t.get("estilos") or []] == [pid],
-           "PUT lo cambia y dice qué estilos lo usan")
-        codigo, t = _llamar(servidor.cambiar_dominio, "CLINICA-Dental", dict(cuerpo, descripcion="x"))
-        igual(codigo, 200, "el id en mayúsculas en la URL vale igual (B4)")
-        codigo, t = _llamar(servidor.dominio_de_estilo, pid)
-        igual(t.get("dominio"), "clinica-dental", "GET …/dominio dice el fijado")
-        codigo, m = _llamar(servidor.borrar_dominio, "clinica-dental")
-        ok(codigo == 409 and "Dental" in str(m), f"borrarlo con un estilo que lo usa: 409 ({codigo})")
-        codigo, r = _llamar(servidor.borrar_dominio, "clinica-dental", True)
-        ok(codigo == 200 and r.get("borrado") == "clinica-dental", "con forzar, se borra")
-        estilo = presets.leer(pid)["datos"]["estilo"]
-        ok("dominio" not in estilo and len(estilo.get("referencias") or []) == 3,
-           "y el estilo que lo tenía vuelve a automático, con el resto intacto")
-        codigo, _m = _llamar(servidor.borrar_dominio, "clinica-dental")
-        igual(codigo, 404, "borrar uno que ya no está, 404")
-        # EL REVISOR recibe las mismas reglas de la casa que el generador: las de
-        # consolas, ahora en su tipo, siguen llegándole en automático
+        pid = presets.guardar("canal", "Reformas foto", {"estilo": {"referencias": refs},
+                                                         "guion": {"instrucciones": "x"}})["id"]
+        servidor.asignar_estilo_a_cliente(pid, {"cliente": cid})
+        estilo = lambda: presets.leer(pid)["datos"]["estilo"]      # noqa: E731
+        codigo, r = _llamar(servidor.leer_negocio_cliente, cid)
+        ok(codigo == 200 and r.get("negocio") is None and r.get("estilos") == 1,
+           f"GET …/negocio de un proyecto sin ficha: null ({codigo} {r})")
+        codigo, _m = _llamar(servidor.leer_negocio_cliente, "no-existe")
+        igual(codigo, 404, "un proyecto que no existe, 404")
+        cuerpo = {"nombre": "Mamparas y baños a medida",
+                  "reglas": [{"texto": "Mamparas de vidrio transparente", "palabras": ["mampara"]}],
+                  "revisor": {"equipo": "la mampara no es de vidrio"}}
+        codigo, r = _llamar(servidor.guardar_negocio_cliente, cid, cuerpo)
+        ok(codigo == 200 and r["negocio"]["id"] == f"cliente-{cid}" and r.get("estilos") == 1,
+           f"PUT …/negocio la guarda y se la pone a su estilo ({codigo} {r})")
+        igual(estilo().get("dominio"), f"cliente-{cid}", "el estilo la lleva en estilo.dominio")
+        igual(len(estilo().get("referencias") or []), 3, "sin tocar el resto del estilo")
+        codigo, _m = _llamar(servidor.guardar_negocio_cliente, cid, {"nombre": ""})
+        igual(codigo, 400, "sin decir qué hace, 400")
+        servidor.asignar_estilo_a_cliente(pid, {"cliente": otro})
+        ok("dominio" not in estilo(), "moverlo a un proyecto sin ficha se la quita")
+        servidor.asignar_estilo_a_cliente(pid, {"cliente": cid})
+        igual(estilo().get("dominio"), f"cliente-{cid}", "y volverlo a su proyecto se la pone")
+        codigo, r = _llamar(servidor.borrar_negocio_cliente, cid)
+        ok(codigo == 200 and "dominio" not in estilo(),
+           "DELETE …/negocio la quita y su estilo vuelve a lo general")
+        codigo, _m = _llamar(servidor.borrar_negocio_cliente, cid)
+        igual(codigo, 404, "quitar una que ya no está, 404")
+        _llamar(servidor.guardar_negocio_cliente, cid, cuerpo)
+        servidor.borrar_cliente(cid)
+        ok("dominio" not in estilo(), "borrar el proyecto deja su estilo en lo general")
+        igual(servidor.PASOS_MODULOS.dominios.de_cliente(cid), None, "y su ficha se va con él")
+        # EL REVISOR recibe las mismas reglas de la casa que el generador
         foto = {"modo": "foto", "referencias": ["a.png"]}
         plan = {"escenas": [{"prompt": "two kids hold game controllers"}]}
-        ok("GAME CONTROLLERS" in servidor._reglas_para_revisor(foto, plan),
-           "el revisor recibe las reglas de consolas en un vídeo de consolas (automático)")
-        ok("GAME CONTROLLERS" not in servidor._reglas_para_revisor(dict(foto, dominio="general"), plan),
-           "y no si el estilo fija «General»")
+        ok("GAME CONTROLLERS" not in servidor._reglas_para_revisor(foto, plan),
+           "sin ficha, el revisor no recibe reglas de consolas")
+        _llamar(servidor.guardar_negocio_cliente, otro, cuerpo)
+        ok("Mamparas de vidrio" in servidor._reglas_para_revisor(
+            dict(foto, dominio=f"cliente-{otro}"), {"escenas": [{"prompt": "una mampara"}]}),
+           "con ficha, recibe sus reglas")
     finally:
         presets.FICHERO = antes
+        servidor.fijar_raiz_proyectos(raiz_antes)
         if antes_env is None:
             os.environ.pop("ESTUDIO_DOMINIOS", None)
         else:

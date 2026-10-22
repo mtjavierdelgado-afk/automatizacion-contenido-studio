@@ -11,29 +11,24 @@ vídeos, estilos, claves y contraseña no se tocan.
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
 
-**Tipos de negocio: los creas tú (21 de octubre, Etapa Foto C)**
-- **Configuración → Tipos de negocio.** Además de los de fábrica (General y
-  EstadoPlay) puedes crear los de tus clientes («Mamparas y baños», «Clínica
-  dental»…): nombre, palabras con las que se reconoce, **reglas de foto** (con
-  «Solo si el plano habla de…» y «Afinar con Claude», como las del estilo) y lo
-  que vigila el **revisor** del equipo y de las miradas. Se guardan fuera del
-  código: `asvs actualizar` no los toca.
-- **En la ficha de un estilo hay un selector «Tipo de negocio».** Elegir uno
-  no rehace nada ni cuesta nada: sus reglas entran en las imágenes de foto de
-  los vídeos nuevos, y en los ya hechos con «Traer el estilo».
-- **En «Automático» todo sale como antes**, letra por letra: crear o cambiar
-  un tipo no toca ningún vídeo que no lo haya elegido (tampoco lo que vigila
-  el revisor). Si el texto del estilo nombra las palabras de un tipo tuyo, su
-  ficha te lo sugiere con un botón «Usarlo».
-- **Borrar un tipo** lo quita de las listas y de los estilos que lo tenían;
-  los vídeos ya hechos con él siguen igual (sus imágenes no quedan obsoletas).
-- Las reglas de mandos y de equipo de consolas ya no son reglas generales de
-  foto: son del tipo EstadoPlay (en Automático siguen entrando igual cuando el
-  vídeo habla de consolas). Un estilo fijado en «General» no las recibe nunca.
-- Los encuadres de un tipo tuyo son los generales de foto; los encuadres
-  propios por negocio llegarán más adelante.
-- Ojo: cambiar las reglas de un tipo que ya usa un vídeo de foto cambia el
-  prompt de sus imágenes; quedan para rehacer, y rehacerlas se paga.
+**La ficha del negocio de cada cliente (21 de octubre, Etapa Foto C)**
+- **El Studio ya no trae ningún negocio de fábrica**, ni EstadoPlay ni ningún
+  otro: sirve igual para cualquier cliente. Sin ficha, todo es «general»: las
+  fotos no llevan reglas de ningún negocio y se reparten los encuadres
+  generales de foto. Lo que antes se metía solo en los vídeos de consolas (los
+  encuadres de estaciones y trípodes, las reglas de mandos y equipo) ya no está.
+- **Crear → tu proyecto → «Ficha del negocio».** Cada proyecto (cliente) tiene
+  la suya: qué hace el negocio, sus **reglas de foto** (con «Solo si el plano
+  habla de…» y «Afinar con Claude», como las del estilo) y lo que vigila el
+  **revisor** del equipo o producto y de las miradas. Se guarda fuera del
+  código: `asvs actualizar` no la toca. «Copiar la de otro proyecto» la trae de
+  otro cliente parecido.
+- **Todos los estilos del proyecto la usan solos**, y en la pestaña «Reglas» de
+  cada estilo se ve, sin editarla, encima de las reglas del estilo, con un botón
+  para ir a cambiarla. Llega a los vídeos nuevos al crearlos y a los ya hechos
+  con «Traer el estilo».
+- Ojo: cambiar las reglas de la ficha de un proyecto con vídeos de foto cambia
+  el prompt de sus imágenes; quedan para rehacer, y rehacerlas se paga.
 
 **El negocio de cada estilo (21 de octubre)**
 - **Lo de EstadoPlay ya no está escrito a mano en el Studio.** Los servicios
@@ -48,8 +43,8 @@ vídeos, estilos, claves y contraseña no se tocan.
 - **Lo único que cambia sin pedirlo**: en un vídeo que no es de consolas (un
   baño, unas plantas), el revisor de imágenes ya no busca televisores, mandos
   ni trípodes; mira los objetos y el equipo de ESE vídeo.
-- Un estilo puede fijar su dominio (`PUT /api/presets-light/{id}/dominio`); la
-  pantalla para elegirlo es la de arriba (Etapa Foto C).
+- (Esto se quedó atrás con la Etapa Foto C, arriba: EstadoPlay ya no viene de
+  fábrica y cada cliente lleva su ficha del negocio en su proyecto.)
 
 **Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar

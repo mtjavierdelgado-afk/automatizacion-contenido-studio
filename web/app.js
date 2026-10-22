@@ -2490,7 +2490,6 @@ function pintarConfig() {
   caja.appendChild(seccionOpenAI(ficha));
   caja.appendChild(seccionCalidadImagen());
   caja.appendChild(seccionRevisor());
-  caja.appendChild(seccionTiposDeNegocio());  // Etapa Foto C
   caja.appendChild(seccionDictado());
   caja.appendChild(seccionZonaHoraria());
   caja.appendChild(seccionCartesia(ficha));
@@ -6804,9 +6803,13 @@ function dentroDeProyecto(caja, cid) {
         ficha.oculto ? 'Ya se ve en la portada' : 'Oculto: sale con «Ver los ocultos»') },
       ficha.oculto ? 'Dejar de ocultar' : 'Ocultar'),
       h('button', { clase: 'mini', onclick: () => claveCliente(ficha) }, ficha.con_clave ? 'Clave ✓' : 'Poner clave'),
+      h('button', { clase: 'mini' + (APP.light.negocioProyecto === cid ? ' activo' : ''),
+        onclick: () => abrirPanelNegocio(cid) },
+      negocioDe(cid) ? 'Ficha del negocio ✓' : 'Ficha del negocio'),  // Etapa Foto C
       h('button', { clase: 'mini', onclick: () => traerEstiloACliente(ficha) }, 'Traer un estilo'),
       h('button', { clase: 'mini fantasma peligro', onclick: () => borrarCliente(ficha) }, 'Borrar')));
     if (APP.light.logoProyecto === cid) caja.appendChild(panelLogoProyecto(ficha));
+    if (APP.light.negocioProyecto === cid) caja.appendChild(panelNegocioProyecto(ficha));  // Etapa Foto C
   }
   seccionEstilos(caja, estilosDeCliente(cid), cid);
   seccionVideos(caja, videosDeCliente(cid), cid);
@@ -15524,6 +15527,7 @@ function tarjetaReglaLight(regla, i) {
 
 function bloqueReglasLight(ficha) {
   const caja = h('div', {});
+  caja.appendChild(bloqueNegocioDelEstilo(ficha));  // Etapa Foto C
   if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
     caja.appendChild(h('div', { clase: 'pista' },
       'Primero genera el estilo gráfico (las láminas); después podrás ponerle reglas.'));
@@ -16621,7 +16625,6 @@ function fuenteDeEstiloLight(ficha) {
       f.modo = v; repintarPieDeEstilo();
       avisoTipoDeImagen(v, (f.existentes || []).length + (f.estilo_imagenes || []).length > 0);
     }));
-  caja.appendChild(selectorTipoDeNegocio(ficha));  // Etapa Foto C
   caja.appendChild(imagenesDelEstilo(ficha, f));
   caja.appendChild(h('div', { clase: 'meta' },
     'Añadir imágenes nuevas (se suman a las de arriba). Añadir o quitar imágenes, '
@@ -27549,151 +27552,137 @@ function bloqueMejoresPublicar() {
   return b;
 }
 
-/* ======================================================== TIPOS DE NEGOCIO
- *
- * Etapa Foto C (21-10-2026, pedido del dueño: «nada de un cliente metido en el
- * código»). Lo que el Studio sabe de UN tipo de cliente —sus reglas de foto y lo
- * que vigila el revisor— son datos (`pasos/dominios.py`): los de fábrica
- * (General, EstadoPlay) viajan con el código y los del dueño se crean aquí y
- * viven en `<proyectos>/_sistema/dominios.json`.
- *
- * DOS SITIOS: Configuración → Tipos de negocio (crear, cambiar, borrar) y el
- * selector «Tipo de negocio» de la ficha de un estilo (fijar uno). Un estilo en
- * Automático sale como siempre: nada de esto toca un vídeo que no lo haya
- * elegido.
- *
- * El editor NO se guarda solo, a diferencia de las reglas del estilo: cambiar un
- * tipo que ya usa un vídeo de foto deja sus imágenes para rehacer, así que
- * guardar es un botón y se dice antes. */
-const TIPOS_NEGOCIO = { lista: null, cargando: false, error: '', abierto: '',
-  borrador: null, guardando: false, afinando: {}, promesa: null };
 
-/* Configuración se repinta entera, y al vaciarla el cajón vuelve arriba: aquí,
-   con el editor abierto a media pantalla, cada «+ Añadir regla» te mandaba al
-   principio. Se repinta y se deja donde estaba. */
-function repintarTiposDeNegocio() {
-  const cajon = $('#cuerpo-config');
-  const donde = cajon ? cajon.scrollTop : 0;
-  repintarClaves();
-  if (cajon) cajon.scrollTop = donde;
-}
+/* ===================================================== LA FICHA DEL NEGOCIO
+ *
+ * Etapa Foto C (21-10-2026, decisiones del dueño: «nada de un cliente metido en
+ * el código» y «el negocio es del proyecto, no de Configuración»). Cada
+ * proyecto (cliente) tiene SU ficha del negocio: qué hace, sus reglas de foto y
+ * lo que vigila el revisor (`pasos/dominios.py`, `/api/clientes/{cid}/negocio`).
+ * Todos los estilos del proyecto la usan solos; en la pestaña «Reglas» de cada
+ * estilo se ve, sin editarla, encima de las reglas propias del estilo.
+ *
+ * DOS SITIOS: el botón «Ficha del negocio» dentro del proyecto (abre el panel
+ * para llenarla, como el del logo) y `bloqueNegocioDelEstilo` en «Reglas».
+ *
+ * El editor NO se guarda solo, a diferencia de las reglas del estilo: cambiar la
+ * ficha de un proyecto con vídeos de foto deja sus imágenes para rehacer, así
+ * que guardar es un botón y se dice antes. */
+const NEGOCIOS = { porCliente: {}, cargando: {}, borrador: null, deCliente: '',
+  guardando: false, afinando: {} };
 
-async function cargarTiposDeNegocio(forzar) {
-  // pedida otra vez mientras va una: se espera esa y se vuelve a leer (lo
-  // recién guardado podría no estar en la que iba)
-  if (TIPOS_NEGOCIO.cargando) {
-    await TIPOS_NEGOCIO.promesa;
-    if (!forzar) return TIPOS_NEGOCIO.lista;
+/* La ficha de un proyecto: undefined mientras se lee, null si no tiene. */
+function negocioDe(cid) {
+  if (!cid || cid === '_sin') return null;
+  if (cid in NEGOCIOS.porCliente) return NEGOCIOS.porCliente[cid];
+  if (!NEGOCIOS.cargando[cid]) {
+    NEGOCIOS.cargando[cid] = true;
+    pedir(`${BASE}/api/clientes/${encodeURIComponent(cid)}/negocio`)
+      .then(r => { NEGOCIOS.porCliente[cid] = r.negocio || null; })
+      .catch(() => { NEGOCIOS.porCliente[cid] = null; })
+      .finally(() => { delete NEGOCIOS.cargando[cid]; pintarLight(); });
   }
-  if (TIPOS_NEGOCIO.lista && !forzar) return TIPOS_NEGOCIO.lista;
-  TIPOS_NEGOCIO.cargando = true;
-  TIPOS_NEGOCIO.promesa = (async () => {
-    try {
-      const r = await pedir(`${BASE}/api/dominios`);
-      TIPOS_NEGOCIO.lista = r.dominios || [];
-      TIPOS_NEGOCIO.error = '';
-    } catch (err) {
-      TIPOS_NEGOCIO.error = err.message;
-      if (!TIPOS_NEGOCIO.lista) TIPOS_NEGOCIO.lista = [];
-    }
-    TIPOS_NEGOCIO.cargando = false;
-    return TIPOS_NEGOCIO.lista;
-  })();
-  return TIPOS_NEGOCIO.promesa;
+  return undefined;
 }
 
-function borradorDeTipo(tipo) {
-  const t = tipo || {};
+function borradorDeNegocio(negocio) {
+  const n = negocio || {};
   return {
-    id: t.id || '',
-    nombre: t.nombre || '',
-    descripcion: t.descripcion || '',
-    palabras: (t.palabras || []).join(', '),
-    reglas: (t.reglas || []).map((r, i) => ({
+    nombre: n.nombre || '',
+    reglas: (n.reglas || []).map((r, i) => ({
       id: r.id || `r${i + 1}`, texto: r.texto || '', en: r.en || '', enDe: r.texto || '',
       palabras: (r.palabras || []).join(', '), nombre: r.nombre || '',
       gravedad: r.gravedad || 'media',
     })),
-    equipo: ((t.revisor_propio || {}).equipo) || '',
-    orientacion: ((t.revisor_propio || {}).orientacion) || '',
+    equipo: (n.revisor || {}).equipo || '',
+    orientacion: (n.revisor || {}).orientacion || '',
   };
 }
 
-function abrirTipoDeNegocio(tipo) {
-  TIPOS_NEGOCIO.abierto = tipo ? tipo.id : 'nuevo';
-  TIPOS_NEGOCIO.borrador = borradorDeTipo(tipo);
-  repintarTiposDeNegocio();
-}
-
-function cerrarTipoDeNegocio() {
-  TIPOS_NEGOCIO.abierto = '';
-  TIPOS_NEGOCIO.borrador = null;
-  repintarTiposDeNegocio();
+function abrirPanelNegocio(cid) {
+  const abierto = APP.light.negocioProyecto === cid;
+  APP.light.negocioProyecto = abierto ? '' : cid;
+  if (!abierto) {
+    APP.light.logoProyecto = '';
+    NEGOCIOS.deCliente = cid;
+    NEGOCIOS.borrador = borradorDeNegocio(NEGOCIOS.porCliente[cid]);
+  }
+  pintarLight();
 }
 
 function separarPalabras(texto) {
   return String(texto || '').split(',').map(p => p.trim()).filter(Boolean);
 }
 
-async function guardarTipoDeNegocio() {
-  const b = TIPOS_NEGOCIO.borrador;
-  if (!b || TIPOS_NEGOCIO.guardando) return;
-  if (!String(b.nombre).trim()) { toast('ponle un nombre al tipo de negocio', true); return; }
+async function guardarNegocio(cliente) {
+  const b = NEGOCIOS.borrador;
+  if (!b || NEGOCIOS.guardando) return;
+  if (!String(b.nombre).trim()) { toast('escribe qué hace este negocio', true); return; }
   const cuerpo = {
-    nombre: b.nombre, descripcion: b.descripcion, palabras: separarPalabras(b.palabras),
+    nombre: b.nombre,
     reglas: b.reglas.filter(r => String(r.texto || '').trim()).map(r => ({
       id: r.id, texto: r.texto, en: r.en || '', nombre: r.nombre || '',
       gravedad: r.gravedad || 'media', palabras: separarPalabras(r.palabras),
     })),
     revisor: { equipo: b.equipo, orientacion: b.orientacion },
   };
-  const nuevo = !b.id;
-  TIPOS_NEGOCIO.guardando = true;
-  repintarTiposDeNegocio();
+  NEGOCIOS.guardando = true;
+  pintarLight();
   try {
-    const r = await pedir(nuevo ? `${BASE}/api/dominios` : `${BASE}/api/dominios/${encodeURIComponent(b.id)}`,
-      { method: nuevo ? 'POST' : 'PUT', cuerpo });
-    const usan = (r.estilos || []).length;
-    toast(nuevo ? `Tipo «${r.nombre}» creado: elígelo en la ficha de un estilo`
-      : `Guardado${usan ? `: lo usan ${usan} estilo${usan === 1 ? '' : 's'}` : ''}`);
-    TIPOS_NEGOCIO.abierto = '';
-    TIPOS_NEGOCIO.borrador = null;
-    await cargarTiposDeNegocio(true);
+    const r = await pedir(`${BASE}/api/clientes/${encodeURIComponent(cliente.id)}/negocio`,
+      { method: 'PUT', cuerpo });
+    NEGOCIOS.porCliente[cliente.id] = r.negocio;
+    NEGOCIOS.borrador = borradorDeNegocio(r.negocio);
+    toast(`Ficha del negocio guardada${r.estilos ? `: la usan sus ${r.estilos} estilo${r.estilos === 1 ? '' : 's'}` : ''}`);
+    await cargarGaleriaLight(true);
   } catch (err) {
     toast(`no se ha podido guardar: ${err.message}`, true);
   }
-  TIPOS_NEGOCIO.guardando = false;
-  repintarTiposDeNegocio();
+  NEGOCIOS.guardando = false;
+  pintarLight();
 }
 
-async function borrarTipoDeNegocio(tipo) {
-  if (!window.confirm(`¿Borrar el tipo de negocio «${tipo.nombre}»?`)) return;
-  const url = `${BASE}/api/dominios/${encodeURIComponent(tipo.id)}`;
+async function borrarNegocio(cliente) {
+  if (!window.confirm(`¿Quitar la ficha del negocio de «${cliente.nombre}»? Sus estilos volverán a lo general.`)) return;
   try {
-    await pedir(url, { method: 'DELETE' });
+    await pedir(`${BASE}/api/clientes/${encodeURIComponent(cliente.id)}/negocio`, { method: 'DELETE' });
+    NEGOCIOS.porCliente[cliente.id] = null;
+    NEGOCIOS.borrador = borradorDeNegocio(null);
+    toast('Ficha del negocio quitada');
+    await cargarGaleriaLight(true);
   } catch (err) {
-    // 409: lo tiene fijado algún estilo. Se dice cuáles, y se pregunta otra vez
-    if (err.status !== 409) { toast(`no se ha podido borrar: ${err.message}`, true); return; }
-    if (!window.confirm(`${err.message}. ¿Borrarlo igualmente?`)) return;
-    try {
-      await pedir(`${url}?forzar=true`, { method: 'DELETE' });
-    } catch (err2) {
-      toast(`no se ha podido borrar: ${err2.message}`, true);
-      return;
-    }
+    toast(`no se ha podido quitar: ${err.message}`, true);
   }
-  toast(`Tipo «${tipo.nombre}» borrado`);
-  if (TIPOS_NEGOCIO.abierto === tipo.id) { TIPOS_NEGOCIO.abierto = ''; TIPOS_NEGOCIO.borrador = null; }
-  await cargarTiposDeNegocio(true);
-  repintarTiposDeNegocio();
+  pintarLight();
+}
+
+/* COPIAR LA DE OTRO PROYECTO: se trae al editor, y se guarda con «Guardar». */
+async function copiarNegocioDeOtro(cliente) {
+  const otros = listaClientes().filter(c => c.id !== cliente.id && clienteAbierto(c));
+  if (!otros.length) { toast('no hay otro proyecto del que copiarla', true); return; }
+  const r = await dialogo({ titulo: 'Copiar la ficha de otro proyecto',
+    texto: 'Se trae a este editor; no se guarda hasta que pulses «Guardar la ficha».',
+    campos: [{ clave: 'cid', etiqueta: 'De qué proyecto', tipo: 'select', valor: otros[0].id,
+      opciones: otros.map(c => ({ valor: c.id, nombre: c.nombre })) }],
+    aceptar: 'Copiar' });
+  if (!r || !r.cid) return;
+  try {
+    const datos = await pedir(`${BASE}/api/clientes/${encodeURIComponent(r.cid)}/negocio`);
+    if (!datos.negocio) { toast('ese proyecto no tiene ficha del negocio', true); return; }
+    NEGOCIOS.borrador = borradorDeNegocio(datos.negocio);
+    toast('Copiada: revísala y pulsa «Guardar la ficha»');
+  } catch (err) {
+    toast(err.message, true);
+  }
+  pintarLight();
 }
 
 /* «AFINAR CON CLAUDE»: la misma ruta que las reglas del estilo; aquí solo se
    usa la versión en inglés, que es lo que lee el generador. */
-async function afinarReglaDeTipo(regla) {
+async function afinarReglaDeNegocio(regla) {
   if (!String(regla.texto || '').trim()) { toast('escribe primero lo que exige la regla', true); return; }
-  TIPOS_NEGOCIO.afinando[regla.id] = true;
-  repintarTiposDeNegocio();
+  NEGOCIOS.afinando[regla.id] = true;
+  pintarLight();
   try {
     const r = await pedir(`${BASE}/api/reglas-estilo/afinar`, {
       method: 'POST', cuerpo: { texto: regla.texto, palabras: separarPalabras(regla.palabras) } });
@@ -27713,11 +27702,17 @@ async function afinarReglaDeTipo(regla) {
   } catch (err) {
     toast(`no se ha podido afinar: ${err.message}`, true);
   }
-  delete TIPOS_NEGOCIO.afinando[regla.id];
-  repintarTiposDeNegocio();
+  delete NEGOCIOS.afinando[regla.id];
+  pintarLight();
 }
 
-function tarjetaReglaDeTipo(b, regla, i) {
+function tarjetaReglaDeNegocio(b, regla, i) {
+  const en = h('textarea', {
+    rows: 2, value: regla.en, 'aria-label': `Versión para el generador de la regla ${i + 1}`,
+    placeholder: 'opcional: la regla en inglés, que es como mejor la sigue el generador («Afinar con Claude» la escribe)',
+    oninput: ev => { regla.en = ev.target.value; regla.enDe = regla.texto; },
+  });
+  en.dataset.foco = `negocio-regla:${regla.id}:en`;
   const texto = h('textarea', {
     rows: 2, value: regla.texto, 'aria-label': `Qué exige la regla ${i + 1}`,
     placeholder: 'qué se exige, como se lo dirías a un fotógrafo: «las mamparas son de vidrio transparente con perfiles finos»',
@@ -27725,37 +27720,31 @@ function tarjetaReglaDeTipo(b, regla, i) {
       regla.texto = ev.target.value;
       /* LA VERSIÓN EN INGLÉS ERA DE TU TEXTO DE ANTES, y es la que lee el
          generador: si cambias el tuyo, se vacía (y se puede volver a afinar). */
-      if (regla.en && regla.enDe !== undefined && regla.enDe !== regla.texto) {
+      if (regla.en && regla.enDe !== regla.texto) {
         regla.en = ''; en.value = '';
         en.placeholder = 'cambiaste tu texto: la versión en inglés de antes ya no vale. Pulsa «Afinar con Claude» otra vez o déjala vacía';
       }
     },
   });
-  texto.dataset.foco = `tipo-regla:${regla.id}:texto`;
+  texto.dataset.foco = `negocio-regla:${regla.id}:texto`;
   const palabras = h('input', {
     type: 'text', value: regla.palabras, 'aria-label': `Cuándo aplica la regla ${i + 1}`,
     placeholder: 'vacío = en todos los planos · o palabras: mampara, ducha',
     oninput: ev => { regla.palabras = ev.target.value; },
   });
-  palabras.dataset.foco = `tipo-regla:${regla.id}:palabras`;
-  const en = h('textarea', {
-    rows: 2, value: regla.en, 'aria-label': `Versión para el generador de la regla ${i + 1}`,
-    placeholder: 'opcional: la regla en inglés, que es como mejor la sigue el generador («Afinar con Claude» la escribe)',
-    oninput: ev => { regla.en = ev.target.value; regla.enDe = regla.texto; },
-  });
-  en.dataset.foco = `tipo-regla:${regla.id}:en`;
+  palabras.dataset.foco = `negocio-regla:${regla.id}:palabras`;
   return h('div', { clase: 'regla-estilo' },
     h('div', { clase: 'fila' },
       h('span', { clase: 'meta' }, `Regla ${i + 1}`),
       h('span', { clase: 'crece' }),
       h('button', {
-        clase: 'mini', disabled: !!TIPOS_NEGOCIO.afinando[regla.id],
+        clase: 'mini', disabled: !!NEGOCIOS.afinando[regla.id],
         title: 'Claude la reescribe en inglés, concreta y física, para el generador de imágenes',
-        onclick: () => afinarReglaDeTipo(regla),
-      }, TIPOS_NEGOCIO.afinando[regla.id] ? 'Afinando…' : '✦ Afinar con Claude'),
+        onclick: () => afinarReglaDeNegocio(regla),
+      }, NEGOCIOS.afinando[regla.id] ? 'Afinando…' : '✦ Afinar con Claude'),
       h('button', {
         clase: 'mini fantasma', title: 'Quitar esta regla',
-        onclick: () => { b.reglas = b.reglas.filter(r => r !== regla); repintarTiposDeNegocio(); },
+        onclick: () => { b.reglas = b.reglas.filter(r => r !== regla); pintarLight(); },
       }, '✕')),
     texto,
     h('div', { clase: 'fila regla-estilo-campos' },
@@ -27764,164 +27753,107 @@ function tarjetaReglaDeTipo(b, regla, i) {
       h('span', { clase: 'meta' }, 'Versión para el generador (inglés, opcional)'), en));
 }
 
-function editorTipoDeNegocio() {
-  const b = TIPOS_NEGOCIO.borrador;
-  const caja = h('div', { clase: 'editor-tipo-negocio' },
-    h('h4', {}, b.id ? `Cambiar «${b.nombre}»` : 'Nuevo tipo de negocio'));
-  caja.appendChild(campoTexto('Nombre', b.nombre, v => { b.nombre = v; },
-    { pista: 'p. ej. «Mamparas y baños»' }));
-  caja.appendChild(campoTexto('Descripción (opcional)', b.descripcion, v => { b.descripcion = v; },
-    { pista: 'para quien lo elige en un estilo' }));
-  caja.appendChild(campoTexto('Palabras con las que se reconoce', b.palabras, v => { b.palabras = v; },
-    { pista: 'mampara, ducha, baño',
-      ayuda: 'Separadas por comas. Si el texto de un estilo en Automático las nombra, su '
-        + 'ficha te sugiere este tipo. Nunca deciden nada solas: el tipo solo se usa si lo eliges.' }));
+/* EL PANEL DEL PROYECTO: la ficha del negocio, para llenarla o cambiarla. */
+function panelNegocioProyecto(cliente) {
+  const caja = h('div', { clase: 'panel-negocio-proyecto' });
+  const actual = negocioDe(cliente.id);
+  if (actual === undefined) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo la ficha del negocio…'));
+    return caja;
+  }
+  if (!NEGOCIOS.borrador || NEGOCIOS.deCliente !== cliente.id) {
+    NEGOCIOS.deCliente = cliente.id;
+    NEGOCIOS.borrador = borradorDeNegocio(actual);
+  }
+  const b = NEGOCIOS.borrador;
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('h3', {}, 'Ficha del negocio'),
+    botonGuia('tipo_negocio', null),
+    h('span', { clase: 'crece' }),
+    actual ? pastillaEstado('ok', 'la usan sus estilos') : pastillaEstado('', 'sin ficha: lo general')));
+  caja.appendChild(h('div', { clase: 'pista' },
+    'Lo que el Studio debe saber de este cliente para que sus fotos parezcan de verdad. '
+    + 'Todos los estilos de este proyecto la usan solos: llega a los vídeos nuevos y a los ya '
+    + 'hechos con «Traer el estilo».'));
+  caja.appendChild(campoTexto('Qué hace este negocio', b.nombre, v => { b.nombre = v; },
+    { pista: 'Mamparas y baños a medida en Lima' }));
   caja.appendChild(h('div', { clase: 'fila' },
     h('strong', {}, 'Reglas de foto'),
     h('span', { clase: 'crece' }),
     h('button', {
       clase: 'mini', disabled: b.reglas.length >= 20,
-      onclick: () => { b.reglas.push({ id: `n${Date.now()}`, texto: '', en: '', palabras: '', nombre: '', gravedad: 'media' }); repintarTiposDeNegocio(); },
+      onclick: () => {
+        b.reglas.push({ id: `n${Date.now()}`, texto: '', en: '', enDe: '', palabras: '', nombre: '', gravedad: 'media' });
+        pintarLight();
+      },
     }, '+ Añadir regla')));
   if (!b.reglas.length) {
     caja.appendChild(h('div', { clase: 'meta' },
-      'Sin reglas: lo que el generador suele hacer mal en este negocio (materiales, cómo se '
+      'Sin reglas todavía: lo que el generador suele hacer mal en este negocio (materiales, cómo se '
       + 'monta o se usa el producto, el sitio). Entran en cada imagen de foto, junto a las de la casa.'));
   }
-  b.reglas.forEach((r, i) => caja.appendChild(tarjetaReglaDeTipo(b, r, i)));
+  b.reglas.forEach((r, i) => caja.appendChild(tarjetaReglaDeNegocio(b, r, i)));
   caja.appendChild(h('strong', {}, 'Lo que vigila el revisor'));
   caja.appendChild(campoArea('El equipo o el producto', b.equipo, v => { b.equipo = v; },
     'vacío = lo general · p. ej. «la mampara no es de vidrio, flota sin perfiles o tiene un tamaño imposible»',
-    'tipo-revisor-equipo'));
+    'negocio-revisor-equipo'));
   caja.appendChild(campoArea('Hacia dónde mira la gente', b.orientacion, v => { b.orientacion = v; },
     'vacío = lo general · p. ej. «el instalador mira lo que hace, no a cámara»',
-    'tipo-revisor-orientacion'));
-  if (b.id) {
+    'negocio-revisor-orientacion'));
+  if (actual) {
     caja.appendChild(h('div', { clase: 'meta revisor-fallo' },
-      'Si algún vídeo de foto ya usa este tipo, cambiar sus reglas cambia el prompt de sus '
-      + 'imágenes: quedarán para rehacer, y rehacerlas se paga.'));
+      'Si algún vídeo de foto de este proyecto ya usa la ficha, cambiar sus reglas cambia el '
+      + 'prompt de sus imágenes: quedarán para rehacer, y rehacerlas se paga.'));
   }
   caja.appendChild(h('div', { clase: 'fila' },
-    h('button', { clase: 'primario', disabled: TIPOS_NEGOCIO.guardando, onclick: guardarTipoDeNegocio },
-      TIPOS_NEGOCIO.guardando ? 'Guardando…' : (b.id ? 'Guardar los cambios' : 'Crear el tipo')),
-    h('button', { clase: 'fantasma', onclick: cerrarTipoDeNegocio }, 'Cancelar')));
+    h('button', { clase: 'primario', disabled: NEGOCIOS.guardando, onclick: () => guardarNegocio(cliente) },
+      NEGOCIOS.guardando ? 'Guardando…' : 'Guardar la ficha'),
+    h('button', { clase: 'mini', onclick: () => copiarNegocioDeOtro(cliente) }, 'Copiar la de otro proyecto'),
+    h('span', { clase: 'crece' }),
+    actual ? h('button', { clase: 'mini fantasma peligro', onclick: () => borrarNegocio(cliente) }, 'Quitar la ficha') : null));
   return caja;
 }
 
-function filaTipoDeNegocio(t) {
-  const abierto = TIPOS_NEGOCIO.abierto === t.id;
-  const fila = h('div', { clase: 'tipo-negocio' },
-    h('div', { clase: 'fila' },
-      h('strong', {}, t.nombre),
-      t.de_fabrica ? h('span', { clase: 'pastilla' }, 'de fábrica') : null,
-      h('span', { clase: 'crece' }),
-      t.de_fabrica ? null : h('button', { clase: 'mini', onclick: () => abrirTipoDeNegocio(t) }, '✎ Editar'),
-      t.de_fabrica ? null : h('button', {
-        clase: 'mini fantasma', title: 'Borrar este tipo', onclick: () => borrarTipoDeNegocio(t),
-      }, 'Borrar')),
-    t.descripcion ? h('div', { clase: 'meta' }, t.descripcion) : null,
-    h('div', { clase: 'meta' },
-      `${(t.reglas || []).length} regla${(t.reglas || []).length === 1 ? '' : 's'} de foto`
-      + (t.cartas_propias ? ' · encuadres propios' : ' · encuadres generales de foto')
-      + ((t.palabras || []).length ? ` · se reconoce por: ${t.palabras.join(', ')}` : '')));
-  if (t.de_fabrica && (t.reglas || []).length) {
-    fila.appendChild(h('details', {},
-      h('summary', { clase: 'meta' }, 'Ver sus reglas'),
-      ...(t.reglas || []).map(r => h('div', { clase: 'meta' },
-        `• ${r.texto}${r.condicional ? ' (solo si el plano habla de eso)' : ''}`))));
-  }
-  if (abierto && TIPOS_NEGOCIO.borrador) fila.appendChild(editorTipoDeNegocio());
-  return fila;
-}
-
-function seccionTiposDeNegocio() {
-  const lista = TIPOS_NEGOCIO.lista;
-  const propios = (lista || []).filter(t => !t.de_fabrica).length;
-  const caja = h('section', { clase: 'bloque-config bloque-tipos-negocio' },
-    h('div', { clase: 'fila' },
-      h('h3', {}, 'Tipos de negocio'),
-      botonGuia('tipo_negocio', null),
-      h('span', { clase: 'crece' }),
-      lista ? pastillaEstado('ok', `${propios} tuyo${propios === 1 ? '' : 's'}`) : null));
-  caja.appendChild(h('div', { clase: 'pista' },
-    'Lo que el Studio sabe de un tipo de cliente para que sus fotos parezcan de verdad: '
-    + 'sus reglas de foto y lo que vigila el revisor. Se elige en la ficha de cada estilo '
-    + '(«Tipo de negocio»); un estilo en Automático sale como siempre.'));
-  if (!lista) {
-    if (!TIPOS_NEGOCIO.cargando) cargarTiposDeNegocio().then(repintarTiposDeNegocio);
-    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo los tipos…'));
+/* EN LA PESTAÑA «REGLAS» DEL ESTILO: el negocio de su proyecto, sin editarlo,
+   encima de las reglas propias del estilo. Así se ve en un solo sitio todo lo
+   que cada imagen tiene que cumplir. */
+function bloqueNegocioDelEstilo(ficha) {
+  const cid = clienteDe(ficha.id);
+  const cliente = fichaCliente(cid);
+  const caja = h('div', { clase: 'negocio-del-estilo' });
+  const ir = () => {
+    if (!cliente) return;
+    APP.light.negocioProyecto = cid;
+    NEGOCIOS.deCliente = '';
+    elegirCliente(cid);
+  };
+  if (!cliente) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Negocio: lo general. Este estilo no está en ningún proyecto; mételo en el de su cliente '
+      + 'para que use la ficha del negocio de ese cliente.'));
     return caja;
   }
-  if (TIPOS_NEGOCIO.error) {
-    caja.appendChild(h('div', { clase: 'meta revisor-fallo' }, `No se han podido leer: ${TIPOS_NEGOCIO.error}`));
+  const negocio = negocioDe(cid);
+  if (negocio === undefined) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo la ficha del negocio…'));
+    return caja;
   }
-  lista.forEach(t => caja.appendChild(filaTipoDeNegocio(t)));
-  if (TIPOS_NEGOCIO.abierto === 'nuevo' && TIPOS_NEGOCIO.borrador) {
-    caja.appendChild(editorTipoDeNegocio());
-  } else if (!TIPOS_NEGOCIO.abierto) {
-    caja.appendChild(h('div', { clase: 'fila' },
-      h('button', { clase: 'mini', onclick: () => abrirTipoDeNegocio(null) }, '+ Nuevo tipo de negocio')));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('strong', {}, negocio ? `Negocio: ${negocio.nombre}` : 'Negocio: lo general'),
+    h('span', { clase: 'crece' }),
+    h('button', { clase: 'mini', onclick: ir }, negocio ? '✎ Editar la ficha' : 'Llenar la ficha del negocio')));
+  if (!negocio) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      `El proyecto «${cliente.nombre}» no tiene ficha del negocio: sus imágenes no llevan reglas de ningún negocio.`));
+    return caja;
   }
+  caja.appendChild(h('div', { clase: 'pista' },
+    `Viene de la ficha del proyecto «${cliente.nombre}»: se cambia allí y vale para todos sus estilos.`));
+  if (!(negocio.reglas || []).length) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'La ficha no tiene reglas de foto.'));
+  }
+  (negocio.reglas || []).forEach(r => caja.appendChild(h('div', { clase: 'regla-negocio' },
+    h('span', { clase: 'pastilla' }, 'del negocio'),
+    h('span', {}, r.texto + ((r.palabras || []).length ? ` (solo si habla de: ${r.palabras.join(', ')})` : '')))));
   return caja;
-}
-
-/* EL SELECTOR DE LA FICHA DEL ESTILO. Guarda al elegir (no al abrir: regla 1),
-   y solo el tipo; no rehace la guía ni las láminas ni ninguna imagen. Llega a
-   los vídeos nuevos al crearlos y a los hechos con «Traer el estilo». */
-function selectorTipoDeNegocio(ficha) {
-  const estilo = (ficha.datos || {}).estilo || {};
-  const lista = TIPOS_NEGOCIO.lista;
-  if (!lista) {
-    if (!TIPOS_NEGOCIO.cargando) cargarTiposDeNegocio().then(() => pintarLight());
-    return h('div', { clase: 'campo' }, h('label', {}, 'Tipo de negocio'),
-      h('div', { clase: 'cargando' }, 'leyendo los tipos…'));
-  }
-  /* SIN ESTILO GRÁFICO TODAVÍA (sin láminas) el servidor no deja fijarlo: se
-     dice aquí en vez de dejar elegir y contestar con un error. */
-  if (!(estilo.referencias || []).length) {
-    const apagado = campoSelect('Tipo de negocio', '', [{ valor: '', nombre: 'Automático' }], () => {},
-      'Genera primero el estilo gráfico (las láminas); después podrás elegir su tipo de negocio.');
-    apagado.querySelector('select').disabled = true;
-    apagado.classList.add('selector-tipo-negocio');
-    return apagado;
-  }
-  const actual = lista.some(t => t.id === estilo.dominio) ? estilo.dominio : '';
-  const opciones = [{ valor: '', nombre: 'Automático (como siempre: según el texto del vídeo)' }]
-    .concat(lista.map(t => ({ valor: t.id, nombre: t.nombre })));
-  const campo = campoSelect('Tipo de negocio', actual, opciones, async v => {
-    try {
-      const r = await pedir(`${API.presetLight(ficha.id)}/dominio`,
-        { method: 'PUT', cuerpo: { dominio: v || null } });
-      ficha.datos = ficha.datos || {};
-      ficha.datos.estilo = Object.assign({}, ficha.datos.estilo || {});
-      if (r.dominio) ficha.datos.estilo.dominio = r.dominio; else delete ficha.datos.estilo.dominio;
-      if (r.cambiado) {
-        toast('Guardado: llega a los vídeos nuevos, y a los ya hechos con «Traer el estilo»');
-      }
-    } catch (err) {
-      toast(`no se ha podido guardar: ${err.message}`, true);
-      pintarLight();
-    }
-  }, 'Sus reglas de foto y lo que vigila el revisor. Los tipos se crean y se cambian en '
-    + 'Configuración → Tipos de negocio. Guardarlo no rehace nada ni cuesta nada.');
-  campo.classList.add('selector-tipo-negocio');
-  /* LA SUGERENCIA: si está en Automático y su texto nombra las palabras de un
-     tipo tuyo, se dice. Solo se dice: elegirlo sigue siendo tuyo (regla 1). */
-  if (!actual) {
-    const hueco = h('div', { clase: 'meta sugerencia-tipo-negocio' });
-    campo.appendChild(hueco);
-    pedir(`${API.presetLight(ficha.id)}/dominio`).then(r => {
-      if (!r.sugerido || !hueco.isConnected) return;
-      hueco.appendChild(h('span', {}, `Este estilo parece de «${r.sugerido.nombre}». `));
-      hueco.appendChild(h('button', {
-        clase: 'mini', onclick: () => {
-          const s = campo.querySelector('select');
-          s.value = r.sugerido.id;
-          s.dispatchEvent(new Event('change'));
-          hueco.remove();
-        },
-      }, 'Usarlo'));
-    }).catch(() => {});
-  }
-  return campo;
 }

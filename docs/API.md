@@ -267,7 +267,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/presets-light/{preset_id}/aportadas` | Guarda lo que se dice de cada imagen y las ★: {descripciones, destacadas}. |
 | `GET` | `/api/presets-light/{preset_id}/aportadas/{nombre}/imagen` | Una de tus imagenes de referencia, tal cual la subiste. |
 | `GET` | `/api/presets-light/{preset_id}/coste` | Lo que costo hacer este estilo (su taller), desglosado. |
-| `PUT` | `/api/presets-light/{preset_id}/dominio` | Fija el negocio de un estilo: {dominio: id de un tipo de negocio (de fábrica o propio) | null}. null vuelve a automático. |
+| `PUT` | `/api/presets-light/{preset_id}/dominio` | Fija el negocio de un estilo: {dominio: «general», el id de una ficha del negocio o null}. null vuelve a automático. |
 | `POST` | `/api/presets-light/{preset_id}/duplicar` | Una copia del estilo, con su taller. |
 | `GET` | `/api/presets-light/{preset_id}/laminas` | Las laminas de un estilo, limpias y con lo que ensena cada una. |
 | `POST` | `/api/presets-light/{preset_id}/laminas` | Una accion sobre las laminas de un estilo. |
@@ -337,12 +337,11 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/clientes/videos/{video_id}` | Mueve un video a otro proyecto ("" lo devuelve al de su estilo). |
 | `DELETE` | `/api/clientes/{cid}` | Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto. |
 | `PUT` | `/api/clientes/{cid}` | Renombra, oculta o pone clave: {nombre?, oculto?, clave?} ("" la quita). |
+| `GET` | `/api/clientes/{cid}/negocio` | La ficha del negocio de un proyecto (Etapa Foto C). -> {negocio: ficha\|null, estilos} |
+| `PUT` | `/api/clientes/{cid}/negocio` | Crea o cambia la ficha del negocio de un proyecto: {nombre (qué hace), reglas? (formato de las reglas del estilo), revisor?: {equipo?, orientacion?}}. Se la pone a todos sus estilos (`estilo.dominio`). -> {negocio, estilos} |
+| `DELETE` | `/api/clientes/{cid}/negocio` | Quita la ficha: sus estilos vuelven a lo general; los vídeos ya hechos no cambian |
 | `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
-| `GET` | `/api/dominios` | Los tipos de negocio: los de fábrica y los del dueño (Etapa Foto C). -> {dominios: [{id, nombre, descripcion, de_fabrica, palabras, reglas, revisor, cartas_propias…}], automatico, limites} |
-| `POST` | `/api/dominios` | Crea un tipo propio: {nombre, descripcion?, palabras?, reglas? (formato de las reglas del estilo), revisor?: {equipo?, orientacion?}}. Se guarda en `<proyectos>/_sistema/dominios.json`. 400 si no vale o el nombre se repite |
-| `PUT` | `/api/dominios/{tid}` | Cambia un tipo propio (el cuerpo entero). Los de fábrica, 400. -> el tipo + `estilos` que lo tienen fijado |
-| `GET` | `/api/presets-light/{preset_id}/dominio` | El tipo fijado en un estilo y, en automático, el tipo propio que su texto parece nombrar (solo sugerencia). -> {dominio, sugerido} |
-| `DELETE` | `/api/dominios/{tid}` | Borra un tipo propio. 409 si algún estilo lo tiene fijado; con `?forzar=true` lo borra y esos estilos vuelven a automático; queda marcado como borrado para que los vídeos ya hechos con él no cambien. Los de fábrica, 400 |
+| `GET` | `/api/dominios` | El negocio general y las fichas del negocio de los proyectos (Etapa Foto C). -> {dominios, automatico} |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
 | `GET` | `/api/inicio/resumen` | Lo del Inicio que no sale de otras rutas, en una sola llamada. |

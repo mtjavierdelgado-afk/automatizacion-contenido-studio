@@ -11324,7 +11324,7 @@ def _impedimentos(ctx, pestana, pendientes):
             fuera.append({"tarea": "assets",
                           "que": "falta aprobar la imagen base del sitio o la de un "
                                  "estado: sin ella no se dibujan los planos nuevos que la editan",
-                          "donde": "El tipo de relato"})
+                          "donde": "Imágenes → La imagen base"})
     return fuera
 
 

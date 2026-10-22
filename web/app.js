@@ -7843,6 +7843,14 @@ const BLOQUES_DEL_ENCARGO = [
     ? bloqueLight('El espacio fijo', 'si todo el vídeo pasa en un mismo sitio (opcional)', bloqueEspacioFijoLight(c.e))
     : bloqueLight('El espacio fijo', 'todo el vídeo en un mismo sitio: se aplica como corrección',
       bloqueEspacioFijoDelVideo())) },
+  // el tipo de relato (rama tipo-de-relato): detrás del espacio fijo, que da el sitio de la base
+  { id: 'tipo-relato', pinta: c => (c.nuevo
+    ? bloqueLight('El tipo de relato', 'cómo se cuenta en imágenes (opcional)', bloqueTipoRelatoLight(c.e))
+    : bloqueLight('El tipo de relato', 'cómo se cuenta en imágenes: se aplica como corrección',
+      bloqueTipoRelatoDelVideo())) },
+  { id: 'reparto-sitios', pinta: c => (c.nuevo ? null
+    : bloqueLight('El reparto y los sitios', 'quién sale y dónde ocurre, deducido del guion',
+      bloquePedidoSitiosDelVideo())) },
 ];
 
 /* PUNTO DE ENGANCHE DE CADA PASO del carril. Para añadir un bloque al final
@@ -8307,7 +8315,9 @@ function campoImagenDelEspacio(ef, urlGuardada, alCambiar) {
       }, 'Quitarla') : null),
     h('div', { clase: 'pista' }, 'Se adjunta a cada imagen de plano de este sitio (no a los '
       + 'secundarios) para que se reconozca el lugar. Se paga como una referencia más: alrededor '
-      + 'de medio céntimo por imagen.'));
+      + 'de medio céntimo por imagen. Con el tipo de relato «Un espacio que cambia» o «Producto» '
+      + 'no hace falta: el Studio dibuja la imagen base del sitio a partir de esta descripción '
+      + '(en «El tipo de relato», donde la apruebas); si subes una, puedes usarla como base, gratis.'));
 }
 
 function bloqueEspacioFijoLight(e) {
@@ -8486,6 +8496,434 @@ async function rehacerPlanosDelEspacio(planos, unidad) {
   }
 }
 
+/* EL TIPO DE RELATO (rama tipo-de-relato, 20-10-2026): CÓMO se cuenta el vídeo
+ * en imágenes (`pasos/tipo_relato.py`). Habla de estructura, nunca de un
+ * negocio. Se elige en el Encargo (viaja en `opcionesParaCrear` SOLO si se
+ * eligió uno: sin elegir manda el del estilo y no se escribe nada), lo trae la
+ * Parrilla con «Tipo de relato:», o se aplica a un vídeo hecho como corrección
+ * (`POST /tipo_relato/aplicar`, gratis), igual que el espacio fijo. Los modos
+ * que EDITAN («Un espacio que cambia», «Producto») necesitan la imagen base del
+ * sitio aprobada antes de pagar ningún plano. */
+const MODOS_RELATO = [
+  { valor: 'documental', nombre: 'Documental' },
+  { valor: 'espacio_que_cambia', nombre: 'Un espacio que cambia' },
+  { valor: 'recorrido', nombre: 'Recorrido' },
+  { valor: 'escenario_y_apoyos', nombre: 'Escenario y apoyos' },
+  { valor: 'producto', nombre: 'Producto' },
+  { valor: 'clase', nombre: 'Clase' },
+];
+const CAMBIA_RELATO = [
+  { valor: 'objeto', nombre: 'Un objeto' },
+  { valor: 'acabados', nombre: 'Los acabados' },
+  { valor: 'estado', nombre: 'El estado (obra, montaje, terminado)' },
+  { valor: 'hora', nombre: 'La hora (la luz y la gente)' },
+];
+const AYUDA_RELATO = {
+  documental: 'El guion se reparte en sitios, como siempre.',
+  espacio_que_cambia: 'Un solo sitio que se ve siempre igual; cada plano cambia solo lo que dice '
+    + 'la voz. Cada plano se genera EDITANDO una imagen base del sitio, que apruebas antes.',
+  recorrido: 'Varios ambientes de un mismo lugar, con la misma luz, materiales y estilo.',
+  escenario_y_apoyos: 'Un sitio principal con sus secundarios (el espacio fijo de siempre).',
+  producto: 'El producto manda y el fondo no se mueve: cada plano edita la imagen base del fondo.',
+  clase: 'Una clase: de momento se cuenta como un recorrido.',
+};
+
+function nombreRelato(modo, cambia) {
+  const m = MODOS_RELATO.find(x => x.valor === modo);
+  let texto = m ? m.nombre : 'Documental';
+  const c = CAMBIA_RELATO.find(x => x.valor === cambia);
+  if (modo === 'espacio_que_cambia' && c) texto += ` (${c.nombre.split(' (')[0].toLowerCase()})`;
+  return texto;
+}
+
+/* El selector: el modo y, en «Un espacio que cambia», qué cambia. `rel` es
+   {modo, cambia}; `heredado` el texto de la primera opción (lo que rige si no
+   se elige nada). */
+function selectorTipoRelato(rel, alCambiar, heredado) {
+  const caja = h('div', { clase: 'tipo-relato' });
+  caja.appendChild(campoSelect('Tipo de relato', rel.modo || '',
+    [{ valor: '', nombre: heredado || 'Lo que diga el estilo' }, ...MODOS_RELATO],
+    v => { rel.modo = v; if (v === 'espacio_que_cambia' && !rel.cambia) rel.cambia = 'objeto'; alCambiar(); },
+    rel.modo ? AYUDA_RELATO[rel.modo] : 'Sin elegir, manda el del estilo; si el estilo no trae '
+      + 'ninguno, con espacio fijo es «Escenario y apoyos» y sin él, «Documental».'));
+  if (rel.modo === 'espacio_que_cambia') {
+    caja.appendChild(campoSelect('Qué cambia', rel.cambia || 'objeto', CAMBIA_RELATO,
+      v => { rel.cambia = v; alCambiar(); }));
+  }
+  return caja;
+}
+
+function tipoRelatoDelEncargo(r) {
+  const t = (r && typeof r === 'object') ? r : {};
+  return { modo: String(t.modo || ''), cambia: String(t.cambia || '') };
+}
+
+function tipoRelatoParaCrear(e) {
+  const t = e.tipo_relato;
+  if (!t || !t.modo) return null;
+  return t.modo === 'espacio_que_cambia' ? { modo: t.modo, cambia: t.cambia || 'objeto' }
+    : { modo: t.modo };
+}
+
+function bloqueTipoRelatoLight(e) {
+  if (!e.tipo_relato) e.tipo_relato = tipoRelatoDelEncargo(null);
+  const caja = h('div', {});
+  caja.appendChild(selectorTipoRelato(e.tipo_relato, pintarLight));
+  if (['espacio_que_cambia', 'producto'].includes(e.tipo_relato.modo)) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Al crear el vídeo, aprueba su imagen base en '
+      + '«El tipo de relato» del vídeo antes de generar las imágenes: sube una en «El espacio fijo» '
+      + '(gratis) o genérala (se paga una imagen, con su coste delante).'));
+  }
+  return caja;
+}
+
+/* EL TIPO DE RELATO DE UN VÍDEO YA CREADO. El estado vive en
+   `APP.light.video.relato` para que el repintado no pierda lo elegido. */
+function relatoDelVideoLight() {
+  const v = APP.light.video;
+  if (v.relato && v.relato.pid === v.pid) return v.relato;
+  const pid = v.pid;
+  v.relato = { pid, cargado: false, ficha: null, copia: { modo: '', cambia: '' },
+    marcados: new Set(), ocupado: false, error: '', pedido: '' };
+  pedir(`${API.proyecto(pid)}/tipo_relato`).then(d => {
+    const est = APP.light.video.relato;
+    if (!est || est.pid !== pid) return;
+    leerRelatoDelServidor(est, d);
+    pintarLight();
+  }).catch(err => {
+    const est = APP.light.video.relato;
+    if (!est || est.pid !== pid) return;
+    est.cargado = true;
+    est.error = err.message;
+    pintarLight();
+  });
+  return v.relato;
+}
+
+function leerRelatoDelServidor(est, d) {
+  est.cargado = true;
+  est.error = '';
+  est.ficha = d || {};
+  est.copia = tipoRelatoDelEncargo((d || {}).tipo_relato);
+  est.cambios = (d || {}).cambios || null;
+  est.marcados = new Set(((est.cambios || {}).planos || []).map(x => x.id));
+}
+
+function bloqueTipoRelatoDelVideo() {
+  const est = relatoDelVideoLight();
+  if (!est.cargado) return h('div', { clase: 'cargando' }, 'cargando…');
+  const f = est.ficha || {};
+  const corriendo = !!trabajoVideoLight();
+  const res = f.resuelto || {};
+  const origen = { video: 'elegido para este vídeo: manda sobre el del estilo',
+    estilo: 'el que trae el estilo', espacio_fijo: 'porque tiene espacio fijo',
+    '': 'por defecto' }[res.origen || ''] || '';
+  const heredado = f.del_estilo && f.del_estilo.modo
+    ? `Lo del estilo: ${nombreRelato(f.del_estilo.modo, f.del_estilo.cambia)}`
+    : 'Lo que diga el estilo';
+  const caja = h('div', { clase: 'tipo-relato' },
+    h('div', { clase: 'meta' }, `Ahora: ${res.nombre || nombreRelato(res.modo, res.cambia)} (${origen})`),
+    selectorTipoRelato(est.copia, pintarLight, heredado),
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'primario', disabled: corriendo || est.ocupado,
+        onclick: () => aplicarTipoRelatoDelVideo() }, 'Aplicar el tipo de relato'),
+      h('span', { clase: 'meta' }, 'gratis: no se dibuja nada; después eliges qué planos rehacer')));
+  if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
+  if (f.faltan_cambios) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      'Falta decir qué cambia en cada tramo. Lo escribe Claude leyendo el guion (no se paga '
+      + 'ninguna imagen).',
+      h('div', { clase: 'fila' }, h('button', { clase: 'mini', disabled: corriendo || est.ocupado,
+        onclick: () => escribirCambiosDelRelato() }, 'Escribir qué cambia en cada tramo'))));
+  }
+  if (f.edita) caja.appendChild(imagenBaseDelRelato(est, corriendo));
+  if (est.cambios) caja.appendChild(cambiosDelRelato(est, corriendo));
+  return caja;
+}
+
+function imagenBaseDelRelato(est, corriendo) {
+  const f = est.ficha || {};
+  const base = (f.bases || {})[f.sitio] || null;
+  const usd = Number(f.usd_base || 0);
+  const caja = h('div', { clase: `imagen-base-relato${f.base_aprobada ? ' aprobada' : ''}` },
+    h('label', {}, `Imagen base de «${f.sitio_nombre || f.sitio || 'el sitio'}»`));
+  if (!f.sitio) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Todavía no hay sitio: escribe el espacio fijo '
+      + 'o deduce antes el reparto y los sitios.'));
+    return caja;
+  }
+  if (base) {
+    // pulsarla la abre a tamaño completo: la miniatura no deja juzgarla (21-10)
+    const url = `${BASE}${base.imagen_url}&v=${Date.now() % 100000}`;
+    caja.appendChild(h('a', { href: url, target: '_blank', rel: 'noopener',
+      title: 'Abrir a tamaño completo' },
+    h('img', { src: url, alt: 'la imagen base del sitio', clase: 'miniatura-imagen-base' })));
+    caja.appendChild(h('div', { clase: 'pista' }, 'Púlsala para verla a tamaño completo.'));
+  }
+  caja.appendChild(h('div', { clase: 'meta' }, f.base_aprobada
+    ? '✓ Aprobada: cada plano del sitio se genera editando esta imagen.'
+    : (base ? 'Sin aprobar: mírala y apruébala antes de generar los planos.'
+      : 'Sin imagen base: los planos de este sitio no se generan hasta que la apruebes.')));
+  const fila = h('div', { clase: 'fila' });
+  if (base && !f.base_aprobada) {
+    fila.appendChild(h('button', { clase: 'mini primario', disabled: est.ocupado,
+      onclick: () => aprobarBaseDelRelato(true) }, 'Aprobar esta imagen'));
+  }
+  if (base && f.base_aprobada) {
+    fila.appendChild(h('button', { clase: 'mini fantasma', disabled: est.ocupado,
+      onclick: () => aprobarBaseDelRelato(false) }, 'Retirar la aprobación'));
+  }
+  if (f.puede_usar_subida) {
+    fila.appendChild(h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
+      onclick: () => usarSubidaComoBase() }, 'Usar la imagen subida del espacio · gratis'));
+  }
+  fila.appendChild(h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
+    onclick: () => generarBaseDelRelato(!!base, usd) },
+  `${base ? 'Otra imagen base' : 'Generar la imagen base'} · ≈ ${usdCorto(usd)}`));
+  caja.appendChild(fila);
+  if (f.base_aprobada && (f.estados || []).length) caja.appendChild(estadosDelRelato(est, corriendo, usd));
+  if (f.inicial) {
+    caja.appendChild(h('div', { clase: 'meta' }, `Lo que luego cambia sale ya en la base, así: «${f.inicial}». `
+      + 'Comprueba que está donde va antes de aprobarla.'));
+  }
+  caja.appendChild(h('div', { clase: 'pista' }, 'Qué hay en el sitio y dónde lo dice «El espacio '
+    + 'fijo»; aquí se dibuja y se aprueba. La imagen base es el sitio vacío y entero, en su '
+    + 'estado inicial. Es lo que garantiza que todas las imágenes sean el mismo sitio con la misma '
+    + 'cámara. Los planos de detalle la llevan como referencia.'));
+  return caja;
+}
+
+function cambiosDelRelato(est, corriendo) {
+  const c = est.cambios;
+  const planos = c.planos || [];
+  const unidad = Number(c.usd_por_imagen || 0);
+  if (!planos.length) {
+    return h('div', { clase: 'caja-info cambios-espacio-fijo' },
+      `Ningún plano hecho cambia con este tipo de relato${c.hechas ? ` (${c.hechas} con imagen)` : ''}: `
+      + 'lo que se dibuje desde ahora ya sale así.');
+  }
+  const f = est.ficha || {};
+  const bloqueado = f.edita && !f.base_aprobada;
+  const marcados = planos.filter(x => est.marcados.has(x.id)).map(x => x.id);
+  const lista = h('div', { clase: 'lista-espacio-fijo' });
+  planos.forEach(x => {
+    lista.appendChild(h('label', { clase: 'fila-espacio-fijo' },
+      h('input', { type: 'checkbox', checked: est.marcados.has(x.id),
+        onchange: ev => { if (ev.target.checked) est.marcados.add(x.id); else est.marcados.delete(x.id); pintarLight(); } }),
+      h('span', { clase: 'id' }, x.id),
+      h('span', { clase: 'crece' }, x.narracion || '', h('span', { clase: 'meta' }, ` · ${x.sitio || 'sin sitio'}`))));
+  });
+  return h('div', { clase: 'caja-aviso cambios-espacio-fijo' },
+    h('div', {}, `${planos.length} ${planos.length === 1 ? 'plano cambiaría' : 'planos cambiarían'} `
+      + `con el tipo de relato. Rehacer cada uno cuesta ≈ ${usdCorto(unidad)}. Nada se rehace `
+      + 'hasta que lo pidas; lo que no rehagas se queda como está.'
+      + (bloqueado ? ' Antes aprueba la imagen base.' : '')),
+    lista,
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', disabled: corriendo || est.ocupado || bloqueado,
+        onclick: () => rehacerPlanosDelRelato(planos.map(x => x.id), unidad) },
+      `Rehacer los ${planos.length} · ≈ ${usdCorto(planos.length * unidad)}`),
+      h('button', { clase: 'mini', disabled: corriendo || est.ocupado || bloqueado || !marcados.length,
+        onclick: () => rehacerPlanosDelRelato(marcados, unidad) },
+      `Solo los marcados (${marcados.length}) · ≈ ${usdCorto(marcados.length * unidad)}`),
+      h('button', { clase: 'mini fantasma',
+        onclick: () => { est.cambios = null; toast('no se rehace ninguno: el vídeo se queda como está'); pintarLight(); } },
+      'Ninguno')));
+}
+
+async function accionDelRelato(ruta, cuerpo, mensaje) {
+  const est = relatoDelVideoLight();
+  est.ocupado = true;
+  pintarLight();
+  try {
+    const d = await pedir(`${API.proyecto(est.pid)}/tipo_relato${ruta}`,
+      { method: 'POST', cuerpo: cuerpo || {} });
+    leerRelatoDelServidor(est, d);
+    if (mensaje) toast(mensaje);
+  } catch (err) {
+    est.error = err.message;
+  }
+  est.ocupado = false;
+  pintarLight();
+}
+
+function aplicarTipoRelatoDelVideo() {
+  const est = relatoDelVideoLight();
+  const t = est.copia;
+  const cuerpo = { tipo_relato: t.modo ? (t.modo === 'espacio_que_cambia'
+    ? { modo: t.modo, cambia: t.cambia || 'objeto' } : { modo: t.modo }) : null };
+  return accionDelRelato('/aplicar', cuerpo, 'tipo de relato aplicado: no se ha dibujado nada');
+}
+
+/* UN ESTADO, UNA IMAGEN: cada cambio del vídeo (la mampara abierta, la
+   corrediza…) se dibuja UNA vez editando la base aprobada; se aprueba como la
+   base, y los planos de ese estado la editan sin volver a inventarlo. */
+function estadosDelRelato(est, corriendo, usd) {
+  const f = est.ficha || {};
+  const caja = h('div', { clase: 'estados-relato' },
+    h('label', {}, 'Cada estado, dibujado una vez'),
+    h('div', { clase: 'pista' }, 'Cada cambio que pide el guion se dibuja una sola vez sobre la '
+      + 'imagen base. Apruébalos: los planos de cada estado editan su imagen y así salen iguales.'));
+  for (const e of f.estados || []) {
+    const fila = h('div', { clase: `estado-relato${e.aprobada ? ' aprobada' : ''}` });
+    if (e.imagen_url) {
+      const url = `${BASE}${e.imagen_url}&v=${Date.now() % 100000}`;
+      fila.appendChild(h('a', { href: url, target: '_blank', rel: 'noopener',
+        title: 'Abrir a tamaño completo' },
+      h('img', { src: url, alt: `el estado ${e.estado}`, clase: 'miniatura-imagen-base' })));
+    }
+    const lado = h('div', { clase: 'estado-relato-texto' },
+      h('strong', {}, e.estado.replace(/_/g, ' ')),
+      h('div', { clase: 'meta' }, e.cambio),
+      h('div', { clase: 'meta' }, e.aprobada ? '✓ Aprobado.'
+        : (e.imagen_url && e.vigente ? 'Sin aprobar: míralo y apruébalo.'
+          : (e.imagen_url ? 'El cambio se ha reescrito: hace falta otra imagen.'
+            : 'Sin imagen: los planos de este estado esperan a que la apruebes.'))));
+    const botones = h('div', { clase: 'fila' });
+    if (e.imagen_url && e.vigente && !e.aprobada) {
+      botones.appendChild(h('button', { clase: 'mini primario', disabled: est.ocupado,
+        onclick: () => aprobarEstadoDelRelato(e.estado, true) }, 'Aprobar este estado'));
+    }
+    if (e.aprobada) {
+      botones.appendChild(h('button', { clase: 'mini fantasma', disabled: est.ocupado,
+        onclick: () => aprobarEstadoDelRelato(e.estado, false) }, 'Retirar la aprobación'));
+    }
+    botones.appendChild(h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
+      onclick: () => generarEstadoDelRelato(e.estado, !!e.imagen_url, usd) },
+    `${e.imagen_url ? 'Otra imagen' : 'Dibujar este estado'} · ≈ ${usdCorto(usd)}`));
+    lado.appendChild(botones);
+    fila.appendChild(lado);
+    caja.appendChild(fila);
+  }
+  return caja;
+}
+
+function aprobarEstadoDelRelato(estado, aprobada) {
+  const est = relatoDelVideoLight();
+  return accionDelRelato('/base/aprobar', { sitio: (est.ficha || {}).sitio, estado, aprobada },
+    aprobada ? `estado «${estado}» aprobado` : 'aprobación retirada');
+}
+
+function generarEstadoDelRelato(estado, otra, usd) {
+  if (!confirm(`${otra ? 'Otra imagen' : 'Dibujar'} del estado «${estado}»: ≈ ${usdCorto(usd)}.`
+    + '\n\nSe paga una imagen: la base aprobada con ese cambio. Después la miras y la apruebas.')) return;
+  trabajoDelRelato('/base/generar', { estado, otra: !!otra, usd });
+}
+
+function aprobarBaseDelRelato(aprobada) {
+  const est = relatoDelVideoLight();
+  return accionDelRelato('/base/aprobar', { sitio: (est.ficha || {}).sitio, aprobada },
+    aprobada ? 'imagen base aprobada' : 'aprobación retirada');
+}
+
+function usarSubidaComoBase() {
+  return accionDelRelato('/base/usar_subida', {}, 'la imagen subida es ahora la imagen base, aprobada');
+}
+
+/* Los dos trabajos del tipo de relato (la imagen base, que se paga, y los
+   cambios por tramo, que no) se siguen con la barra del vídeo y al terminar se
+   vuelve a leer la ficha. */
+async function trabajoDelRelato(ruta, cuerpo) {
+  const est = relatoDelVideoLight();
+  const pid = est.pid;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(`${API.proyecto(pid)}/tipo_relato${ruta}`,
+      { method: 'POST', cuerpo: cuerpo || {} });
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (['listo', 'error', 'cancelado'].includes(trabajo.estado)) {
+        const ahora = APP.light.video.relato;
+        if (ahora && ahora.pid === pid) APP.light.video.relato = null;
+      }
+      pintarLight();
+    }, () => refrescarVivosLight(), pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
+}
+
+function generarBaseDelRelato(otra, usd) {
+  if (!confirm(`${otra ? 'Otra imagen base' : 'Generar la imagen base'} del sitio: ≈ ${usdCorto(usd)}.`
+    + '\n\nSe paga una imagen. Después la miras y la apruebas.')) return;
+  trabajoDelRelato('/base/generar', { otra: !!otra, usd });
+}
+
+function escribirCambiosDelRelato() {
+  trabajoDelRelato('/cambios', {});
+}
+
+async function rehacerPlanosDelRelato(planos, unidad) {
+  const est = relatoDelVideoLight();
+  const pid = est.pid;
+  if (!planos.length) return;
+  if (!confirm(`Rehacer ${planos.length} ${planos.length === 1 ? 'imagen' : 'imágenes'} con el `
+    + `tipo de relato: ≈ ${usdCorto(planos.length * unidad)}.\n\nSolo esas; las demás no se `
+    + 'tocan. Después hay que volver a montar el vídeo.')) return;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(`${API.proyecto(pid)}/tipo_relato/rehacer`, {
+      method: 'POST', cuerpo: { planos, imagenes: planos.length },
+    });
+    est.cambios = null;
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') {
+        reiniciarPrevia();
+        await cargarVideoLight(pid);
+        refrescarPlanLight('video', true);
+        APP.light.video.relato = null;
+      }
+      pintarLight();
+    }, () => { refrescarPlanosLight(); refrescarVivosLight(); }, pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
+}
+
+/* «PEDIDO PARA EL REPARTO DE SITIOS», junto a «El reparto y los sitios»: una
+   frase corta que llega a Claude al repartir (el backend ya la recibía:
+   `POST /escenarios` con `peticion`). Con un pedido escrito se vuelve a
+   repartir aunque el guion no haya cambiado. No dibuja nada. */
+function bloquePedidoSitiosDelVideo() {
+  const est = relatoDelVideoLight();
+  const corriendo = !!trabajoVideoLight();
+  return h('div', { clase: 'pedido-sitios' },
+    campoTexto('Pedido para el reparto de sitios', est.pedido, x => { est.pedido = x; },
+      { pista: 'todo en la cocina; el patio solo en el último tramo' }),
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', disabled: corriendo || !String(est.pedido || '').trim(),
+        onclick: () => repartirSitiosConPedido() }, 'Volver a repartir con este pedido'),
+      h('span', { clase: 'meta' }, 'lo lee Claude (no se paga ninguna imagen); las imágenes '
+        + 'hechas se quedan hasta que pidas rehacerlas')));
+}
+
+async function repartirSitiosConPedido() {
+  const est = relatoDelVideoLight();
+  const pid = est.pid;
+  const peticion = String(est.pedido || '').trim().slice(0, 400);
+  if (!peticion) return;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(API.escenarios(pid), { method: 'POST', cuerpo: { peticion, rehacer: true } });
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') {
+        toast('reparto y sitios repartidos de nuevo con tu pedido');
+        APP.light.video.relato = null;
+        APP.light.video.espacio = null;
+        await cargarVideoLight(pid);
+      }
+      pintarLight();
+    }, () => refrescarVivosLight(), pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
+}
+
 /* Lo elegido en «Ajustes del montaje» del borrador, tal como lo entiende
    `_opciones_al_crear`. Lo que no se eligió no viaja: queda automático. */
 function opcionesParaCrear(e) {
@@ -8504,6 +8942,8 @@ function opcionesParaCrear(e) {
   if (op.ritmo) salida.ritmo = op.ritmo;
   const espacio = espacioFijoParaCrear(e);
   if (espacio) salida.espacio_fijo = espacio;
+  const relato = tipoRelatoParaCrear(e);
+  if (relato) salida.tipo_relato = relato;
   return salida;
 }
 
@@ -14726,6 +15166,8 @@ const GUIA_DE_BLOQUE = {
   'El material': 'material',
   'Las indicaciones': 'indicaciones',
   'Las llamadas a la acción': 'cta',
+  'El tipo de relato': 'tipo_relato',
+  '🧭 Tipo de relato': 'tipo_relato',
 };
 
 /* «REVISAR»: lo escrito en el campo, contra su guía (pasos/revisar_campo.py).
@@ -15771,6 +16213,79 @@ function tarjetaReglaLight(regla, i) {
   return tarjeta;
 }
 
+/* EL TIPO DE RELATO POR DEFECTO DEL ESTILO (`estilo.relato`, rama
+   tipo-de-relato). Se guarda al elegirlo (`PUT /presets-light/{id}/relato`) y no
+   toca ningún vídeo: llega a los nuevos al crearlos y a los hechos con «Traer el
+   estilo». Documental es no tenerlo. */
+const RELATO_LIGHT = { id: '', relato: null, cargando: false, estado: '', error: '' };
+
+async function cargarRelatoEstiloLight(id) {
+  RELATO_LIGHT.id = id;
+  RELATO_LIGHT.relato = null;
+  RELATO_LIGHT.error = '';
+  RELATO_LIGHT.estado = '';
+  RELATO_LIGHT.cargando = true;
+  try {
+    const r = await pedir(`${API.presetLight(id)}/relato`);
+    if (RELATO_LIGHT.id !== id) return;
+    RELATO_LIGHT.relato = tipoRelatoDelEncargo(r.relato);
+  } catch (err) {
+    if (RELATO_LIGHT.id === id) RELATO_LIGHT.error = err.message;
+  }
+  RELATO_LIGHT.cargando = false;
+  pintarLight();
+}
+
+async function guardarRelatoEstiloLight() {
+  const id = RELATO_LIGHT.id;
+  const t = RELATO_LIGHT.relato || {};
+  const relato = t.modo && t.modo !== 'documental'
+    ? (t.modo === 'espacio_que_cambia' ? { modo: t.modo, cambia: t.cambia || 'objeto' } : { modo: t.modo })
+    : null;
+  RELATO_LIGHT.estado = 'guardando…';
+  pintarLight();
+  try {
+    const r = await pedir(`${API.presetLight(id)}/relato`, { method: 'PUT', cuerpo: { relato } });
+    if (RELATO_LIGHT.id === id) RELATO_LIGHT.estado = r.cambiado ? 'guardado ✓' : 'sin cambios';
+  } catch (err) {
+    if (RELATO_LIGHT.id === id) RELATO_LIGHT.estado = `no se ha podido guardar: ${err.message}`;
+  }
+  pintarLight();
+}
+
+function bloqueRelatoEstiloLight(ficha) {
+  const caja = h('div', {});
+  // como las reglas: un estilo sin láminas no se puede guardar (el servidor
+  // pide al menos tres fotogramas), así que el selector no se ofrece todavía
+  if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Primero genera el estilo gráfico (las láminas); después podrás elegir su tipo de relato.'));
+    return caja;
+  }
+  if (RELATO_LIGHT.id !== ficha.id) {
+    setTimeout(() => cargarRelatoEstiloLight(ficha.id), 0);
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo el tipo de relato…'));
+    return caja;
+  }
+  if (RELATO_LIGHT.error) {
+    caja.appendChild(cajaError(RELATO_LIGHT.error));
+    caja.appendChild(h('button', { clase: 'mini', onclick: () => cargarRelatoEstiloLight(ficha.id) }, 'Reintentar'));
+    return caja;
+  }
+  if (RELATO_LIGHT.cargando || !RELATO_LIGHT.relato) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo el tipo de relato…'));
+    return caja;
+  }
+  caja.appendChild(selectorTipoRelato(RELATO_LIGHT.relato, guardarRelatoEstiloLight,
+    'Documental (por defecto)'));
+  caja.appendChild(h('div', { clase: 'pista' }, 'Es solo el punto de partida de los vídeos nuevos de '
+    + 'este estilo. Si un vídeo elige otro en su Encargo (o la Parrilla lo trae en la línea «Tipo de '
+    + 'relato:»), manda el del vídeo. «Documental» aquí quiere decir que el estilo no impone ninguno. '
+    + 'A los vídeos ya hechos solo llega con «Traer el estilo», que avisa antes de rehacer nada.'));
+  if (RELATO_LIGHT.estado) caja.appendChild(h('div', { clase: 'meta' }, RELATO_LIGHT.estado));
+  return caja;
+}
+
 function bloqueReglasLight(ficha) {
   const caja = h('div', {});
   if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
@@ -15961,7 +16476,11 @@ function vistaPresetLight() {
     fuenteDeTonoLight(ficha));
   if (fuenteTonoCambiadaLight(ficha)) fuente.open = true;
   tono.appendChild(fuente);
-  paneles.cuenta = bloqueLight('🗣️ Tono del guion', 'cómo se cuenta, nunca de qué', tono);
+  // 🧭 el tipo de relato por defecto de los vídeos de este estilo (rama tipo-de-relato)
+  paneles.cuenta = h('div', {},
+    bloqueLight('🧭 Tipo de relato', 'cómo se cuentan por defecto los vídeos de este estilo',
+      bloqueRelatoEstiloLight(ficha)),
+    bloqueLight('🗣️ Tono del guion', 'cómo se cuenta, nunca de qué', tono));
 
   // ⏱️ el ritmo: se cambia y ya, no rehace nada
   paneles.ritmo = bloqueLight('⏱️ Ritmo', 'cada cuánto corta el vídeo',
@@ -26634,6 +27153,8 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   if (r.formato === 'vertical' || r.formato === 'horizontal') e.formato = r.formato;
   /* el espacio fijo es del guion: uno sin él deja el campo vacío */
   e.espacio_fijo = espacioFijoDelEncargo(r.espacio_fijo);
+  /* y el tipo de relato, si el guion lo trae («Tipo de relato:»); si no, sin elegir */
+  e.tipo_relato = tipoRelatoDelEncargo(r.tipo_relato);
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.datos = null;
   irAModulo('crear');

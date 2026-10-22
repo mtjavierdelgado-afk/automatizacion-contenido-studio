@@ -42,11 +42,12 @@ import unicodedata
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
-    from . import cli_claude, comun, estadisticas
+    from . import cli_claude, comun, estadisticas, tipo_relato
 except ImportError:  # ejecutado con la carpeta pasos directamente en sys.path
     import cli_claude
     import comun
     import estadisticas
+    import tipo_relato
 
 PASO = "catalogo_visual"
 
@@ -949,14 +950,31 @@ def _cambiar_tramo(texto, desde, hasta, nuevo):
     return texto[:inicio] + nuevo + texto[fin:]
 
 
-def _criterio(planos, min_s, max_s, espacio=None):
-    """El criterio del prompt. Sin espacio fijo, el de siempre, byte a byte."""
+def _criterio(planos, min_s, max_s, espacio=None, relato=None):
+    """El criterio del prompt. Sin espacio fijo ni tipo de relato EXPLICITO, el
+    de siempre, byte a byte.
+
+    Con un tipo de relato explicito que no sea documental (rama tipo-de-relato):
+    el video pasa en UN sitio, asi que sin la cuenta de planos por sitio y sin
+    lugares que rotular; si nadie ha escrito el espacio fijo, Claude declara el
+    sitio (`SETS_UN_SITIO`), y detras va lo que el modo añade (que cambia en cada
+    tramo, la ficha de un recorrido, el fondo de un producto)."""
+    activo = tipo_relato.activo(relato)
     texto = CRITERIO.format(planos_por_set=PLANOS_POR_SET,
-                            cuantos_planos=("" if espacio else
+                            cuantos_planos=("" if espacio or activo else
                                             _cuantos_planos(planos, min_s, max_s)),
                             regiones_mapa=", ".join(regiones_de_mapa()) or "ninguna")
-    if not espacio:
+    if not espacio and not activo:
         return texto
+    extra = tipo_relato.criterio_extra(relato) if activo else ""
+    if not espacio:
+        texto = _cambiar_tramo(texto, "SETS — donde ocurre", "REALES — lo que existe",
+                               tipo_relato.SETS_UN_SITIO.format(
+                                   nombre=tipo_relato.nombre(relato["modo"],
+                                                             relato.get("cambia")))
+                               + extra)
+        return _cambiar_tramo(texto, "LUGARES — el rotulo que situa", "CAPITULOS — donde",
+                              LUGARES_ESPACIO_FIJO)
     principal, secundarios = ids_del_espacio(espacio)
     if secundarios:
         salvo = (", salvo los que el guion situe CLARAMENTE en uno de estos sitios "
@@ -978,7 +996,8 @@ def _criterio(planos, min_s, max_s, espacio=None):
                            SETS_ESPACIO_FIJO.format(
                                principal=principal,
                                nombre=f" ({espacio['sitio']})" if espacio.get("sitio") else "",
-                               descripcion=espacio["descripcion"], luz=luz, salvo=salvo))
+                               descripcion=espacio["descripcion"], luz=luz, salvo=salvo)
+                           + extra)
     return _cambiar_tramo(texto, "LUGARES — el rotulo que situa", "CAPITULOS — donde",
                           LUGARES_ESPACIO_FIJO)
 
@@ -1056,6 +1075,52 @@ def _aplicar_espacio_fijo(ficha, espacio, ids_bloque):
     return ficha
 
 
+def espacio_del_catalogo(catalogo):
+    """El espacio fijo que sale del sitio MAS usado por los tramos. -> {} o espacio
+
+    Es lo que fija un tipo de relato de un solo sitio cuando nadie ha escrito el
+    espacio fijo: el sitio que Claude declaro (o, en un catalogo ya guardado, el
+    que mas tramos tiene) pasa a ser el unico, con su descripcion y su luz."""
+    sets = (catalogo or {}).get("sets") or {}
+    cuenta = {}
+    for beat in (catalogo or {}).get("beats") or []:
+        if isinstance(beat, dict) and beat.get("set") in sets:
+            cuenta[beat["set"]] = cuenta.get(beat["set"], 0) + 1
+    elegido = max(cuenta, key=lambda sid: (cuenta[sid], sid)) if cuenta else \
+        (sorted(sets)[0] if sets else None)
+    ficha = sets.get(elegido) or {}
+    descripcion = " ".join(str(ficha.get("descripcion") or "").split())
+    if not elegido or not descripcion:
+        return {}
+    return normalizar_espacio_fijo({"sitio": elegido,
+                                    "descripcion": descripcion[:MAX_DESCRIPCION_SITIO],
+                                    "luz": str(ficha.get("luz") or "")[:MAX_LUZ]})
+
+
+def _aplicar_relato(catalogo, crudos, relato, espacio, ids_bloque, inicial_crudo=""):
+    """Lo que impone el tipo de relato sobre el catalogo limpio. Sin modo
+    explicito no hace NADA (y no se llama).
+
+    - Un solo sitio: el del espacio fijo o, si no hay, el que declaro Claude
+      (`espacio_del_catalogo`), impuesto con `_aplicar_espacio_fijo`.
+    - En «un espacio que cambia», el `cambio` y el `estado` de cada tramo, y el
+      `inicial` (como esta en la base lo que luego cambia) en `relato`.
+    - `relato` en el catalogo: dice con que modo se repartio."""
+    if not espacio:
+        propio = espacio_del_catalogo(catalogo)
+        if propio:
+            catalogo = _aplicar_espacio_fijo(catalogo, propio, ids_bloque)
+    inicial = ""
+    if relato["modo"] == "espacio_que_cambia":
+        tipo_relato.anotar_cambios(crudos, catalogo.get("beats"))
+        inicial = tipo_relato.inicial_de(inicial_crudo)
+    catalogo["relato"] = {k: v for k, v in (("modo", relato["modo"]),
+                                            ("cambia", relato.get("cambia")),
+                                            ("inicial", inicial))
+                          if v}
+    return catalogo
+
+
 def ajustar_catalogo(catalogo, espacio, ids_bloque):
     """Un catalogo YA GUARDADO, ajustado al espacio fijo, sin llamar a nadie.
 
@@ -1086,6 +1151,97 @@ def ajustar_catalogo(catalogo, espacio, ids_bloque):
     return salida, ficha["avisos"]
 
 
+INSTRUCCION_CAMBIOS = """Eres el director de arte de un video. El video pasa entero en
+UN sitio que se dibuja siempre igual, y cada plano se va a generar EDITANDO una
+imagen base de ese sitio. Lee el guion y di, tramo a tramo, QUE CAMBIA respecto
+a la imagen base.
+
+EL SITIO
+<<<
+{sitio}
+>>>
+
+{criterio}
+GUION COMPLETO, BLOQUE A BLOQUE
+<<<
+{guion}
+>>>
+
+LOS TRAMOS (no los cambies: solo añade a cada uno su cambio y su estado)
+{tramos}
+
+DEVUELVE EXACTAMENTE ESTE JSON, sin nada alrededor:
+
+{{
+  "inicial": "<en ingles: como esta y donde, en la imagen base, lo que luego cambia; o vacio>",
+  "beats": [
+    {{"desde": "<id de bloque>", "hasta": "<id de bloque>",
+      "cambio": "<en ingles, o vacio>", "estado": "<etiqueta corta>"}}
+  ]
+}}
+"""
+
+
+def proponer_cambios(bloques, catalogo, relato, ajuste=None, avisar=None,
+                     proyecto_id=None, cwd=None):
+    """El `cambio` y el `estado` de cada tramo de un catalogo YA GUARDADO.
+
+    Es lo que hace falta para pasar a «un espacio que cambia» un video hecho
+    (decision del dueño del 20-10: se acepta que cueste uso de Claude). No
+    reparte sitios ni toca nada mas: los tramos son los que habia. Solo texto;
+    ninguna imagen. -> (catalogo con cambios, avisos)"""
+    if not tipo_relato.activo(relato) or relato.get("modo") != "espacio_que_cambia":
+        raise ValueError("solo «un espacio que cambia» lleva cambios por tramo")
+    beats = [dict(b) for b in (catalogo or {}).get("beats") or [] if isinstance(b, dict)]
+    if not beats:
+        raise RuntimeError("el catálogo no tiene tramos: deduce antes el reparto y los sitios")
+    bloques = [b for b in (bloques or []) if str(b.get("id") or "").strip()]
+    if not bloques:
+        raise RuntimeError("no hay guion que leer: genera el guion antes")
+    sets = (catalogo or {}).get("sets") or {}
+    sitio = "\n".join(f"{sid}: {(f or {}).get('descripcion') or sid}" for sid, f in sets.items())
+    tramos = "\n".join(f"- {b['desde']}-{b['hasta']}: {b.get('accion') or ''}" for b in beats)
+    ajuste = ajuste or {}
+    modelo = ajuste.get("modelo") or MODELO_POR_DEFECTO
+    esfuerzo = ajuste.get("esfuerzo") or ESFUERZO_POR_DEFECTO
+    guion, _ = comun.recortar(_guion_legible(bloques), 90000,
+                              "[...guion recortado por longitud...]")
+    instruccion = INSTRUCCION_CAMBIOS.format(
+        sitio=sitio or "(sin descripcion)", criterio=tipo_relato.criterio_extra(relato),
+        guion=guion, tramos=tramos)
+    avance = None
+    if avisar is not None:
+        avance = estadisticas.Avance(
+            avisar, 0.05, 0.9, estadisticas.estimar(PASO, tamano=len(guion) // 6,
+                                                    ajuste={"modelo": modelo,
+                                                            "esfuerzo": esfuerzo}),
+            f"leyendo el guion para decir qué cambia en cada tramo, con {modelo}")
+        avance.arrancar()
+    arranque = time.time()
+    try:
+        texto, _sobre = _llamar_claude(instruccion, modelo, esfuerzo, cwd, avance)
+    finally:
+        if avance is not None:
+            avance.parar()
+    estadisticas.anotar(PASO, time.time() - arranque, ajuste={"modelo": modelo,
+                                                              "esfuerzo": esfuerzo},
+                        proyecto=proyecto_id, unidades=len(beats),
+                        detalle={"que": "cambios_por_tramo"})
+    crudo = comun.extraer_json(texto, "los cambios por tramo")
+    tipo_relato.anotar_cambios((crudo or {}).get("beats"), beats)
+    avisos = []
+    sin = [f"{b['desde']}-{b['hasta']}" for b in beats if not b.get("cambio")]
+    if sin and len(sin) == len(beats):
+        avisos.append("ningún tramo trae cambio: todos los planos se verán como la base")
+    salida = dict(catalogo or {})
+    salida["beats"] = beats
+    salida["relato"] = {k: v for k, v in (("modo", relato["modo"]),
+                                          ("cambia", relato.get("cambia")),
+                                          ("inicial", tipo_relato.inicial_de(
+                                              (crudo or {}).get("inicial")))) if v}
+    return salida, avisos
+
+
 def _especie_legible(regla):
     regla = " ".join(str(regla or "").split())
     return ESPECIE.format(regla=regla) if regla else ""
@@ -1093,7 +1249,7 @@ def _especie_legible(regla):
 
 def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
              cwd=None, peticion="", planos=0, min_s=None, max_s=None,
-             regla_personajes="", espacio_fijo=None):
+             regla_personajes="", espacio_fijo=None, relato=None):
     """Propone el catalogo visual del video. NO lo guarda: eso lo hace una persona.
 
     'bloques' son los del guion, con id y texto, EN ORDEN. Se manda el guion
@@ -1109,8 +1265,13 @@ def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
     `normalizar_espacio_fijo`): todo el video en UN sitio. Cambia la parte de
     sitios del prompt (sin la cuenta de planos por sitio) y se impone despues
     por codigo. Sin el, el prompt y el resultado son los de siempre.
+
+    'relato' es el tipo de relato resuelto (`tipo_relato.resolver`). Solo si es
+    EXPLICITO y no documental cambia algo: un solo sitio y lo que el modo pide
+    (ver `_criterio` y `_aplicar_relato`).
     """
     espacio = normalizar_espacio_fijo(espacio_fijo)
+    relato = relato if tipo_relato.activo(relato) else None
     ajuste = ajuste or {}
     modelo = ajuste.get("modelo") or MODELO_POR_DEFECTO
     esfuerzo = ajuste.get("esfuerzo") or ESFUERZO_POR_DEFECTO
@@ -1129,7 +1290,7 @@ def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
         tema=(brief or {}).get("resumen") or (brief or {}).get("tema") or "sin brief",
         peticion=PETICION.format(texto=peticion) if peticion else "",
         especie=_especie_legible(regla_personajes),
-        criterio=_criterio(planos, min_s, max_s, espacio),
+        criterio=_criterio(planos, min_s, max_s, espacio, relato),
         guion=guion)
 
     palabras = sum(comun.contar_palabras(b.get("texto", "")) for b in bloques)
@@ -1153,9 +1314,13 @@ def proponer(bloques, brief=None, ajuste=None, avisar=None, proyecto_id=None,
         raise
     segundos = avance.parar() if avance is not None else time.time() - arranque
 
-    catalogo = _limpiar(comun.extraer_json(texto, "el catalogo"), ids_bloque)
+    crudo = comun.extraer_json(texto, "el catalogo")
+    catalogo = _limpiar(crudo, ids_bloque)
     if espacio:
         catalogo = _aplicar_espacio_fijo(catalogo, espacio, ids_bloque)
+    if relato:
+        catalogo = _aplicar_relato(catalogo, (crudo or {}).get("beats"), relato,
+                                   espacio, ids_bloque, (crudo or {}).get("inicial"))
     estadisticas.anotar(PASO, segundos, tamano=palabras, ajuste=elegido,
                         proyecto=proyecto_id, unidades=len(catalogo["beats"]),
                         detalle={"modelo": modelo, "esfuerzo": esfuerzo,

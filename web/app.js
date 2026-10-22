@@ -838,13 +838,32 @@ function nombreDe(id) {
 
 let relojToast = null;
 
+/* DOS AVISOS SEGUIDOS NO SE PISAN (arreglos-crear-movil, 21-10-2026). Al
+   acabar un montaje salían dos el mismo milisegundo («El vídeo: Listo» y «el
+   vídeo ya está montado de nuevo») y el primero no llegaba a verse. Si llega
+   otro con el de antes todavía recién puesto, se apilan: el anterior encima y
+   el nuevo debajo, y los dos cuentan su tiempo desde ahora. */
+const AVISO_FLOTANTE = { desde: 0, lineas: [] };
+
 function toast(texto, malo) {
   const n = $('#toast');
-  n.textContent = texto;
-  n.classList.toggle('malo', !!malo);
+  apartarAvisoDeLaBarra();
+  const ahora = Date.now();
+  const recien = n.classList.contains('ver') && ahora - AVISO_FLOTANTE.desde < 2500;
+  const lineas = recien ? AVISO_FLOTANTE.lineas.filter(l => l.texto !== String(texto)).slice(-1) : [];
+  lineas.push({ texto: String(texto), malo: !!malo });
+  AVISO_FLOTANTE.lineas = lineas;
+  AVISO_FLOTANTE.desde = ahora;
+  if (lineas.length === 1) n.textContent = lineas[0].texto;
+  else {
+    vaciar(n);
+    lineas.forEach(l => n.appendChild(h('div', { clase: 'linea-aviso' }, l.texto)));
+  }
+  const algunMalo = lineas.some(l => l.malo);
+  n.classList.toggle('malo', algunMalo);
   n.classList.add('ver');
   clearTimeout(relojToast);
-  relojToast = setTimeout(() => n.classList.remove('ver'), malo ? 6000 : 3000);
+  relojToast = setTimeout(() => n.classList.remove('ver'), algunMalo ? 6000 : 3000);
 }
 
 /* Todo fallo acaba aqui: se ve en la propia pestana, no solo en consola. En la
@@ -5555,6 +5574,21 @@ function marcaEstado(e) {
   return h('span', { clase: 'marca-estado', 'aria-hidden': 'true' }, h('span', {}, MARCA_DEL_ESTADO[e] || '·'));
 }
 
+/* EL CARRIL NO SE MUEVE SOLO (arreglos-crear-movil, 21-10-2026). En el móvil
+   la fila de pasos se desliza, y «parpadeaba»: cada refresco (dos por segundo
+   con algo en marcha) volvía a colgar la fila, eso le pone el desplazamiento a
+   cero, y el centrado llegaba un `setTimeout` después; entre medias se pintaba
+   el paso 1. Lo que se deslizaba a mano también volvía solo, y cada clic en un
+   paso construía la fila 4–6 veces. Ahora:
+     · la fila es UNA mientras no cambie lo que dice (la huella vive aquí, no en
+       cada pintado), y refrescar sin cambios no la descuelga;
+     · al colgarla (pintado entero, refresco con cambios) se le devuelve en el
+       acto el desplazamiento que tenía (`x`, que apunta su propio `scroll`, o
+       sea también lo deslizado a mano), antes de que el navegador pinte;
+     · se centra en el paso activo SOLO al cambiar de paso o de vídeo.
+   Solo pantalla: no lee ni escribe nada del vídeo. */
+const CARRIL_VISTA = { paso: '', pid: '', x: null, mano: false, huella: '', nodo: null };
+
 /* EL CARRIL: seis pasos en columna (en el móvil, una fila que se desliza) y,
    debajo, lo gastado en este vídeo. */
 function carrilCrear(actual) {
@@ -5564,21 +5598,54 @@ function carrilCrear(actual) {
   /* VIVO: mientras corre una tanda, su paso dice «⟳ 42 %» y lo gastado sube.
      Se rehace solo si ha cambiado lo que dice (la huella), así que entre tic
      y tic los botones son los mismos nodos y un clic no se pierde. */
-  const memoria = { huella: '', nodo: null };
   caja.appendChild(enVivo(() => {
     const pasos = estadosDelCarril();
     const v = APP.light.video;
-    const huella = JSON.stringify([actual, pasos, v.pid ? Number((v.coste || {}).total_usd || 0) : null]);
-    if (huella === memoria.huella && memoria.nodo) {
-      // volver a colgar la fila le devuelve el scroll a cero: se recoloca
-      centrarPasoActivo(memoria.nodo.querySelector('.pasos-carril'));
-      return memoria.nodo;
-    }
-    memoria.huella = huella;
-    memoria.nodo = pasosDelCarril(pasos, actual);
-    return memoria.nodo;
-  }));
+    const huella = JSON.stringify([actual, v.pid || '', pasos, v.pid ? Number((v.coste || {}).total_usd || 0) : null]);
+    if (huella === CARRIL_VISTA.huella && CARRIL_VISTA.nodo) return CARRIL_VISTA.nodo;
+    CARRIL_VISTA.huella = huella;
+    CARRIL_VISTA.nodo = pasosDelCarril(pasos, actual);
+    return CARRIL_VISTA.nodo;
+  }, () => colocarCarril(actual)));
   return caja;
+}
+
+/* LA FILA, YA COLGADA: o se centra (paso o vídeo nuevos) o vuelve a donde
+   estaba. Síncrono a propósito: con un `setTimeout` el navegador llega a pintar
+   la fila en el paso 1. */
+function colocarCarril(actual) {
+  const fila = document.querySelector('#panel .pasos-carril');
+  if (!fila) return;
+  if (!fila.dataset.vigilada) {
+    fila.dataset.vigilada = '1';
+    fila.addEventListener('scroll', () => { if (fila.isConnected) CARRIL_VISTA.x = fila.scrollLeft; },
+      { passive: true });
+    // lo toca una persona (dedo, ratón, rueda): desde ahí manda lo que deje
+    const aMano = () => { CARRIL_VISTA.mano = true; };
+    ['pointerdown', 'touchstart', 'wheel'].forEach(ev => fila.addEventListener(ev, aMano, { passive: true }));
+  }
+  const pid = (APP.light.video || {}).pid || '';
+  if (CARRIL_VISTA.paso !== actual || CARRIL_VISTA.pid !== pid || CARRIL_VISTA.x === null) {
+    CARRIL_VISTA.paso = actual;
+    CARRIL_VISTA.pid = pid;
+    CARRIL_VISTA.mano = false;
+    BARRA_MAS.abierta = false;   // el «⋯» de la barra era del paso de antes
+    centrarPasoActivo(fila);
+  } else {
+    if (Math.abs(fila.scrollLeft - CARRIL_VISTA.x) > 1) fila.scrollLeft = CARRIL_VISTA.x;
+    /* SI NADIE LO HA DESLIZADO y el paso activo se ha quedado a medias (los
+       pasos cambian de ancho: «⟳ 42 %», «1 cambio sin aplicar»), se vuelve a
+       centrar, en el acto. Lo deslizado a mano no se toca. */
+    if (!CARRIL_VISTA.mano && !pasoActivoALaVista(fila)) centrarPasoActivo(fila);
+  }
+  CARRIL_VISTA.x = fila.scrollLeft;
+}
+
+function pasoActivoALaVista(fila) {
+  const activo = fila.querySelector('.paso-carril.actual');
+  if (!activo || fila.scrollWidth <= fila.clientWidth + 2) return true;
+  const f = fila.getBoundingClientRect(), a = activo.getBoundingClientRect();
+  return a.left >= f.left - 2 && a.right <= f.right + 2;
 }
 
 function pasosDelCarril(pasos, actual) {
@@ -5615,19 +5682,17 @@ function pasosDelCarril(pasos, actual) {
       h('b', {}, datos ? `$ ${Number(datos.total_usd || 0).toFixed(2)}` : '$ —'),
       h('span', { clase: 'meta' }, `${alDia} de ${pasos.length} pasos al día`)));
   }
-  centrarPasoActivo(fila);
   return caja;
 }
 
 /* EN EL MÓVIL EL PASO ACTIVO SE CENTRA SOLO en la fila (sin mover la página:
-   `scrollIntoView` arrastraría también el scroll del panel). */
+   `scrollIntoView` arrastraría también el scroll del panel). Con la fila ya
+   colgada y en el acto (ver `colocarCarril`). */
 function centrarPasoActivo(fila) {
-  setTimeout(() => {
-    const activo = fila && fila.querySelector('.paso-carril.actual');
-    if (!activo || fila.scrollWidth <= fila.clientWidth + 2) return;
-    const dentro = activo.getBoundingClientRect().left - fila.getBoundingClientRect().left + fila.scrollLeft;
-    fila.scrollLeft = Math.max(0, dentro - (fila.clientWidth - activo.offsetWidth) / 2);
-  }, 0);
+  const activo = fila && fila.isConnected && fila.querySelector('.paso-carril.actual');
+  if (!activo || fila.scrollWidth <= fila.clientWidth + 2) return;
+  const dentro = activo.getBoundingClientRect().left - fila.getBoundingClientRect().left + fila.scrollLeft;
+  fila.scrollLeft = Math.max(0, dentro - (fila.clientWidth - activo.offsetWidth) / 2);
 }
 
 /* El carril se repinta solo, sin el resto de la pantalla (una lectura que
@@ -5637,6 +5702,7 @@ function repintarCarril() {
   const paso = pasoDelCarril();
   if (!viejo || !paso) return;
   viejo.replaceWith(carrilCrear(paso));
+  colocarCarril(paso);
 }
 
 /* LA SALIDA DE CREAR (el logo es la otra). Sustituye a «‹ Mis vídeos», «←
@@ -5788,19 +5854,62 @@ function campoRenombrar(pid, antes) {
  *   encima      nodo                 lo que va pegado encima (los mandos de Imágenes)
  *   clase       clase extra
  */
+/* EN EL MÓVIL, UNA FILA (arreglos-crear-movil, 21-10-2026). La barra llegaba a
+ * tapar la mitad de la pantalla: el botón principal se quedaba la columna y el
+ * estado salía con una palabra por renglón, el plan en otra fila y en Imágenes
+ * un segundo botón; y cambiaba de alto con cada estado de una tanda. En ≤700 px
+ * es una fila de alto fijo: el estado en una línea (con su marca) y el botón
+ * principal. Lo demás —el estado entero, el plan y los botones secundarios— va
+ * en «⋯», que lo abre ENCIMA de la barra sin cambiarle el alto (pulsar el
+ * estado también lo abre). En pantalla ancha «⋯» no sale y todo se ve como
+ * siempre. Ningún botón cambia de lo que hace: solo de sitio. */
+const BARRA_MAS = { abierta: false };
+
+function esMovilCrear() {
+  try { return window.matchMedia('(max-width: 700px)').matches; } catch (e) { return false; }
+}
+
+function alternarMasDeLaBarra() {
+  BARRA_MAS.abierta = !BARRA_MAS.abierta;
+  repintarBarra();
+}
+
 function barraDeAccion(op) {
-  const barra = h('div', { clase: 'barra-accion' + (op.clase ? ` ${op.clase}` : '') });
+  const botones = (op.botones || []).filter(Boolean);
+  const esSecundario = n => !!(n.matches && (n.matches('.secundario-barra') || n.querySelector('.secundario-barra')));
+  const secundarios = botones.filter(esSecundario);
+  const principales = botones.filter(n => !esSecundario(n));
+  const textoEstado = (op.estado || {}).texto || '';
+  const hayMas = !op.corriendo && !!(secundarios.length || op.plan || textoEstado);
+  const abierta = hayMas && BARRA_MAS.abierta;
+  const barra = h('div', { clase: 'barra-accion' + (op.clase ? ` ${op.clase}` : '') + (abierta ? ' abierta' : '') });
   if (op.encima) barra.appendChild(op.encima);
   const dentro = h('div', { clase: 'dentro' + (op.corriendo ? ' corriendo' : '') });
   if (op.corriendo) {
     dentro.appendChild(h('div', { clase: 'progreso' }, op.progreso || barraTandaLight(op.tanda)));
   } else {
     const e = (op.estado || {}).e || 'pend';
-    dentro.appendChild(h('div', { clase: `estado ${claseEstado(e)}` }, marcaEstado(e),
-      h('span', {}, (op.estado || {}).texto || '')));
+    dentro.appendChild(h('div', { clase: `estado ${claseEstado(e)}`, title: textoEstado || null,
+      onclick: () => { if (hayMas && esMovilCrear()) alternarMasDeLaBarra(); } }, marcaEstado(e),
+      h('span', { clase: 'texto-estado' }, textoEstado)));
     dentro.appendChild(h('div', { clase: 'plan' }, op.plan || ''));
   }
-  dentro.appendChild(h('div', { clase: 'derecha' }, ...(op.botones || [])));
+  /* «⋯» Y LO QUE ABRE. En pantalla ancha la caja no existe para la maquetación
+     (`display: contents`) y su texto no se ve: los secundarios quedan a la
+     izquierda del principal, como siempre. */
+  const mas = hayMas ? h('div', { clase: 'mas-de-la-barra',
+    onclick: ev => { if (ev.target.closest && ev.target.closest('button')) BARRA_MAS.abierta = false; } },
+    h('div', { clase: 'mas-texto' },
+      textoEstado ? h('b', {}, textoEstado) : null,
+      op.plan ? h('span', { clase: 'meta' }, op.plan) : null),
+    secundarios.length ? h('div', { clase: 'secundarios-barra' }, ...secundarios) : null) : null;
+  dentro.appendChild(h('div', { clase: 'derecha' }, mas,
+    hayMas ? h('button', {
+      clase: 'mini fantasma boton-mas-barra', 'aria-expanded': abierta ? 'true' : 'false',
+      'aria-label': 'Más: el estado entero, el plan y los otros botones',
+      title: 'El estado entero, el plan y los otros botones', onclick: alternarMasDeLaBarra,
+    }, '⋯') : null,
+    ...principales));
   barra.appendChild(dentro);
   return barra;
 }
@@ -5833,8 +5942,87 @@ function ajustarAltoDeLaBarra() {
     const raiz = document.documentElement.style;
     if (barra && barra.isConnected && barra.offsetHeight) raiz.setProperty('--alto-pie', `${barra.offsetHeight}px`);
     else raiz.removeProperty('--alto-pie');
+    apartarAvisoDeLaBarra();
   });
 }
+
+/* EL AVISO FLOTANTE NO TAPA LA BARRA (arreglos-crear-movil). Salía justo donde
+   está la barra pegada, encima de su botón principal, 3 s (6 s si era un
+   error). Aquí solo se publica cuánto ocupa la barra que se VE desde abajo
+   (`--alto-barra-accion`) y una clase en <body>; la regla que sube el aviso
+   está en el bloque CREAR · CARRIL de estilo.css (la capa de `#toast` es de
+   otra rama y no se toca). Se mide también al sacar cada aviso: así vale
+   aunque se haya cambiado de módulo y la barra ya no se vea. */
+function apartarAvisoDeLaBarra() {
+  const barra = document.querySelector('#panel .barra-accion');
+  let alto = 0;
+  if (barra && barra.getClientRects().length) {
+    const r = barra.getBoundingClientRect();
+    if (r.height > 0 && r.top < window.innerHeight) alto = Math.round(window.innerHeight - r.top);
+  }
+  if (alto > 0) document.documentElement.style.setProperty('--alto-barra-accion', `${alto}px`);
+  else document.documentElement.style.removeProperty('--alto-barra-accion');
+  document.body.classList.toggle('con-barra-accion', alto > 0);
+}
+
+/* UN AVISO QUE EN EL MÓVIL ES UNA LÍNEA (arreglos-crear-movil, 21-10-2026).
+   «Hay algo por actualizar» se decía en la barra, en el carril, en una caja y
+   en una franja, y en el móvil la caja y la franja eran un cuarto de la
+   pantalla antes de llegar al reproductor. El detalle no se quita: en el móvil
+   sale plegado en una línea y se abre al tocarlo; en pantalla ancha, la caja
+   de siempre. Lo que se abre o se cierra a mano se recuerda entre repintados. */
+const AVISOS_PLEGADOS = {};
+
+function avisoPlegable(clave, resumen, detalle, clase) {
+  const extra = clase ? ` ${clase}` : '';
+  if (!esMovilCrear()) return h('div', { clase: `caja-aviso${extra}` }, detalle);
+  const caja = h('details', { clase: `caja-aviso aviso-plegable${extra}` },
+    h('summary', {}, h('span', { clase: 'resumen-aviso' }, resumen)),
+    h('div', { clase: 'detalle-aviso' }, detalle));
+  if (AVISOS_PLEGADOS[clave]) caja.open = true;
+  caja.addEventListener('toggle', () => { AVISOS_PLEGADOS[clave] = caja.open; });
+  return caja;
+}
+
+/* AL CRUZAR LOS 700 PX (girar el teléfono, estrechar la ventana) cambia lo que
+   va en la barra y lo que se pliega: se vuelve a pintar Crear, sin más. */
+try {
+  window.matchMedia('(max-width: 700px)').addEventListener('change', () => {
+    BARRA_MAS.abierta = false;
+    if (typeof MODULOS !== 'undefined' && MODULOS.actual === 'crear' && pasoDelCarril()) pintarLight();
+  });
+} catch (e) { /* un navegador sin matchMedia: se queda como se pintó */ }
+
+/* ESCRIBIENDO CON EL TECLADO DEL MÓVIL ABIERTO (arreglos-crear-movil). La
+   cabecera y la barra pegada se quedaban y al campo le tocaban 130 px (19 px a
+   360×740). Con un campo de texto con el foco, en ≤700 px y con el teclado
+   abierto (el visor visible encoge: `visualViewport`), la barra de acción, la
+   cabecera de arriba y la burbuja se apartan (`body.escribiendo-movil`, en
+   estilo.css); al salir del campo vuelven. */
+const TECLADO_MOVIL = { ancho: 0, alto: 0 };
+
+function mirarTecladoMovil() {
+  const vv = window.visualViewport;
+  const ancho = window.innerWidth;
+  const alto = vv ? vv.height : window.innerHeight;
+  if (ancho !== TECLADO_MOVIL.ancho) { TECLADO_MOVIL.ancho = ancho; TECLADO_MOVIL.alto = 0; }
+  const escribe = esCampoDeTexto(document.activeElement);
+  // el alto sin teclado es el mayor visto con este ancho y sin escribir
+  if (!escribe || !TECLADO_MOVIL.alto) TECLADO_MOVIL.alto = Math.max(TECLADO_MOVIL.alto, alto);
+  const si = escribe && esMovilCrear() && alto < TECLADO_MOVIL.alto * 0.8
+    && typeof MODULOS !== 'undefined' && MODULOS.actual === 'crear';
+  if (document.body.classList.contains('escribiendo-movil') === si) return;
+  document.body.classList.toggle('escribiendo-movil', si);
+  ajustarAltoDeLaBarra();
+}
+
+try {
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', mirarTecladoMovil);
+  window.addEventListener('resize', mirarTecladoMovil);
+  document.addEventListener('focusin', () => setTimeout(mirarTecladoMovil, 0));
+  document.addEventListener('focusout', () => setTimeout(mirarTecladoMovil, 0));
+  setTimeout(mirarTecladoMovil, 0);   // el alto sin teclado, al cargar
+} catch (e) { /* sin visor: la barra se queda donde está */ }
 
 /* Los vídeos con una tanda pedida (`lanzarTandaLight`) o un «Montar el vídeo»
    pulsado (`montarElVideoLight`) y sin contestar todavía: sus botones de la
@@ -6143,9 +6331,11 @@ window.addEventListener('popstate', ev => {
  * documento y volver a pintarlas seria escribir en un panel que se tiro. */
 const VIVOS = [];
 
-function enVivo(pinta) {
+/* `alColgar` (opcional): lo que hay que hacer con lo pintado YA en el
+   documento, en el mismo turno (el carril le devuelve su desplazamiento). */
+function enVivo(pinta, alColgar) {
   const caja = h('div', { clase: 'vivo' });
-  VIVOS.push({ caja, pinta });
+  VIVOS.push({ caja, pinta, alColgar });
   const dentro = pinta();
   if (dentro) caja.appendChild(dentro);
   return caja;
@@ -6158,7 +6348,7 @@ function refrescarVivosLight() {
   if (!VIVOS.length) return;
   const foco = recordarFoco();
   try {
-    VIVOS.forEach(({ caja, pinta }) => {
+    VIVOS.forEach(({ caja, pinta, alColgar }) => {
       if (!caja.isConnected) return;
       /* NO SE LE QUITA EL SITIO A LO QUE SE ESTA USANDO. Si el foco esta
          dentro de la caja, se deja como esta hasta el siguiente pintado
@@ -6166,8 +6356,12 @@ function refrescarVivosLight() {
          viene a arreglar, no uno que pueda permitirse repetir. */
       if (caja.contains(document.activeElement)) return;
       const dentro = pinta();
+      /* LO QUE NO HA CAMBIADO NO SE DESCUELGA: volver a colgar el mismo nodo
+         le pone el scroll a cero (el carril saltaba al paso 1 en cada tic). */
+      if (dentro && caja.childNodes.length === 1 && caja.firstChild === dentro) return;
       vaciar(caja);
       if (dentro) caja.appendChild(dentro);
+      if (alColgar) alColgar();
     });
   } finally {
     devolverFoco(foco);
@@ -6231,6 +6425,7 @@ function pintarLightAhora() {
     donde = h('div', { clase: 'paso-crear' });
     try {
       contenido.appendChild(carrilCrear(paso));
+      colocarCarril(paso);   // ya colgado: su desplazamiento, antes de pintar
       donde.appendChild(salidaTusProyectos());
       donde.appendChild(cabeceraDelVideo());
     } catch (e) {
@@ -8938,13 +9133,15 @@ function vistaEncargoVideoLight() {
 
   if (ERRORES[CLAVE_VIDEO_LIGHT]) caja.appendChild(errorDelVideo());
 
-  caja.appendChild(h('div', { clase: v.guion ? 'caja-aviso' : 'caja-info' }, v.guion
-    ? 'Esto es lo que se le pidió al redactor, y de aquí salió el guion que hay. '
+  /* en el móvil, plegado en una línea (ver `avisoPlegable`) */
+  caja.appendChild(v.guion
+    ? avisoPlegable('encargo-con-guion', 'Lo que cambies aquí deja el guion obsoleto',
+      'Esto es lo que se le pidió al redactor, y de aquí salió el guion que hay. '
       + 'Lo que cambies se guarda solo y deja el guion obsoleto: la barra de abajo ofrece '
       + 'regenerarlo, y con él se rehacen después la voz y las imágenes que ya '
       + 'no cuadren; lo que siga valiendo no se vuelve a pagar. El nombre se '
-      + 'cambia sin regenerar nada. El formato rehace TODAS las imágenes.'
-    : 'Lo que se le va a pedir al redactor. Se guarda solo; cuando esté, '
+      + 'cambia sin regenerar nada. El formato rehace TODAS las imágenes.')
+    : h('div', { clase: 'caja-info' }, 'Lo que se le va a pedir al redactor. Se guarda solo; cuando esté, '
       + '«Generar el guion» abajo.'));
 
   /* TODO LO QUE SE TECLEA O SE MARCA AQUÍ DENTRO PROGRAMA UN VOLCADO. Por
@@ -12656,8 +12853,16 @@ function vistaPreviaLight() {
      de esta pantalla. Cada tarjeta tiene ademas el suyo para ir una a una. */
   /* DESDE EL REDISEÑO DE CREAR, las acciones van en la barra de acción
      («Aplicar N notas», «Poner al día N imágenes», «Montar el vídeo») y los
-     mandos de mirar quedan pegados ENCIMA de ella. */
-  ponerBarra(() => barraDeLasImagenes(mandos));
+     mandos de mirar quedan pegados ENCIMA de ella.
+     EN EL MÓVIL, ENCIMA DE LA IMAGEN (arreglos-crear-movil, 21-10-2026):
+     pegados encima de la barra eran otra franja fija, y barra más mandos
+     tapaban hasta la mitad de la pantalla. Ahí se pasa de plano también
+     deslizando la imagen. */
+  if (esMovilCrear()) {
+    mandos.classList.add('en-la-pagina');
+    marco.before(mandos);
+    ponerBarra(() => barraDeLasImagenes(null));
+  } else ponerBarra(() => barraDeLasImagenes(mandos));
   return caja;
 }
 
@@ -13429,7 +13634,12 @@ function vistaVideoLight() {
        paga. Sale del plan del servidor, la misma cifra que el botón. */
     const coste = (((v.planes || {}).render || {}).coste) || {};
     const porDibujar = Number(coste.imagenes_por_generar) || 0;
-    caja.appendChild(h('div', { clase: 'caja-aviso' },
+    /* EN EL MÓVIL, UNA LÍNEA QUE SE ABRE (arreglos-crear-movil): la barra ya
+       dice «Vídeo obsoleto» y este aviso, abierto, empujaba el reproductor
+       una pantalla abajo. El precio, si lo hay, va en la línea. */
+    caja.appendChild(avisoPlegable('video-obsoleto',
+      'Este vídeo es de ANTES de tus últimos cambios'
+        + (porDibujar ? ` · se dibujarán ${porDibujar} imagen(es), ≈ ${usdCorto(Number(coste.usd_por_generar) || 0)}` : ''),
       'Este vídeo es de ANTES de tus últimos cambios (por ejemplo, imágenes rehechas '
       + 'en «Imágenes»): lo que ves aquí todavía no los lleva. «Montar el vídeo», en la '
       + 'barra de abajo, lo vuelve a montar con ellos.'
@@ -13460,9 +13670,23 @@ function vistaVideoLight() {
         'Arreglar los subtítulos')));
   }
 
+  /* MIENTRAS SE MONTA, LA PANTALLA NO SE DESMONTA (arreglos-crear-movil,
+     21-10-2026). Antes, con un trabajo en marcha, se quitaban el reproductor,
+     los ajustes y el repaso: el paso medía un tercio (3155 → 1183 px en un
+     móvil), el navegador recortaba el scroll y estabas tocando los subtítulos
+     y acababas mirando un recuadro vacío; al terminar no volvía. Ahora todo
+     sigue en su sitio, apagado (`inert`: ni se pulsa ni se escribe), y el
+     reproductor enseña el MP4 de ahora con «montando…» encima. El MP4 de la
+     versión activa no se toca hasta que el montaje nuevo se sella. */
+  const trabajo = trabajoVideoLight();
   const marco = h('div', { clase: `marco-video ${formatoDelVideo()}` });
-  if (hayMp4Light() && !trabajoVideoLight()) {
+  if (hayMp4Light() && (!trabajo || !v.planos.length)) {
     marco.appendChild(videoLight());
+    if (trabajo) {
+      marco.classList.add('montando');
+      marco.appendChild(h('div', { clase: 'sello sello-montando' },
+        'montando el vídeo nuevo… este es el de antes hasta que acabe'));
+    }
   } else if (v.planos.length) {
     // el último que ha caído, grande: es lo que se acaba de generar
     const ultimo = v.planos[v.planos.length - 1];
@@ -13494,17 +13718,28 @@ function vistaVideoLight() {
   /* LOS AJUSTES DEL MONTAJE, el MISMO panel que en el Encargo y con el mismo
      comportamiento (decisión 9 del rediseño): lo que se toca se guarda sin
      montar, y lo monta la barra de abajo. Se ven también sin MP4 (sus
-     cambios entran en el primer montaje); mientras se monta, no. */
-  if (!trabajoVideoLight()) caja.appendChild(ajustesEnElVideo());
+     cambios entran en el primer montaje); mientras se monta, a la vista pero
+     apagados (ver «MIENTRAS SE MONTA» arriba). */
+  const apagadoSiMonta = nodo => {
+    if (!trabajo) return nodo;
+    return h('div', { clase: 'apagado-montando', inert: true, 'aria-disabled': 'true',
+      title: 'Mientras se monta el vídeo no se puede cambiar: espera a que acabe' }, nodo);
+  };
+  if (trabajo) {
+    caja.appendChild(h('div', { clase: 'pista aviso-montando' },
+      'Mientras se monta, lo de aquí abajo se queda quieto; al acabar se puede tocar otra vez.'));
+  }
+  caja.appendChild(apagadoSiMonta(ajustesEnElVideo()));
 
   /* EL REPASO VA DEBAJO DEL VÍDEO Y SOLO CUANDO HAY VÍDEO. Antes de eso no hay
      nada que comentar, y una caja de texto vacía debajo de una barra de
      progreso invita a escribir sobre algo que todavía no existe. Al lado, la
-     ortografía de los subtítulos («Revisar»); debajo, descargar y publicar. */
-  if (hayMp4Light() && !trabajoVideoLight()) {
+     ortografía de los subtítulos («Revisar»); debajo, descargar y publicar.
+     Mientras se monta un vídeo que ya tenía MP4, se queda, apagado. */
+  if (hayMp4Light()) {
     const revisar = h('div', { clase: 'caja-video revisar-video' },
       h('h3', {}, 'Revisar'), panelOrtografia('subtitulos'));
-    caja.appendChild(h('div', { clase: 'rejilla-video' }, panelRepaso(), revisar));
+    caja.appendChild(apagadoSiMonta(h('div', { clase: 'rejilla-video' }, panelRepaso(), revisar)));
     const descargar = h('div', { clase: 'caja-video descargar-video' },
       h('h3', {}, 'Descargar'),
       h('div', { clase: 'fila' },
@@ -13513,8 +13748,8 @@ function vistaVideoLight() {
         conAyuda('Sin música, sin efectos, sin subtítulos, sin voz… o cada audio suelto, para usarlo en otro sitio. Gratis.',
           h('button', { clase: 'mini', onclick: () => abrirDescargaPorPartes(v.pid) }, 'Por partes…'))),
       h('div', { clase: 'meta' }, 'el MP4 tal y como está ahora mismo, o sin música, sin efectos, sin subtítulos… gratis'));
-    caja.appendChild(h('div', { clase: 'rejilla-video' }, descargar,
-      bloquePublicarEnVideo(v) || h('span', {})));  // Publicar en redes (rama publicar-redes-1)
+    caja.appendChild(apagadoSiMonta(h('div', { clase: 'rejilla-video' }, descargar,
+      bloquePublicarEnVideo(v) || h('span', {}))));  // Publicar en redes (rama publicar-redes-1)
   }
   ponerBarra(barraDelVideo);
   return caja;
@@ -14454,15 +14689,30 @@ function tarjetaNotaImagen(plano, notas, vieja) {
   const conAntes = notas.filter(n => n.antes && estadoDeImagen(plano, n) === 'hecha');
   const antes = conAntes.length ? conAntes[conAntes.length - 1].antes : '';
   const columna = h('div', { clase: 'nota-columna' });
+  /* MIENTRAS SE DIBUJA, EL HUECO YA ESTÁ (arreglos-crear-movil, 21-10-2026):
+     al llegar la nueva se metía «ahora · antes» y la de antes encima del texto
+     y la tarjeta bajaba 154 px de golpe. Ahora, pedida (en cola o dibujándose),
+     arriba va el hueco de la nueva y abajo la de ahora, que es la que quedará
+     como «antes»: al llegar, solo cambia la de arriba. */
+  const pidiendo = !vieja && e && e.imagen && estados.some(s => s === 'corriendo' || s === 'en cola');
   // la imagen de ahora de ese número es de OTRA escena: a una nota vieja no se le pone
-  if (vieja) {
+  if (pidiendo) {
+    columna.appendChild(h('button', { clase: 'nota-mini nota-hueco', title: 'Ver esta imagen en grande arriba', onclick: ir },
+      h('span', { clase: 'meta' }, estados.includes('corriendo') ? 'dibujando la nueva…' : 'la nueva, en cola…')));
+    columna.appendChild(h('div', { clase: 'nota-antes-ahora meta' }, '▲ ahora · antes ▼'));
+    columna.appendChild(h('button', {
+      clase: 'nota-mini nota-antes', title: 'Cómo es ahora, antes de esta nota (pulsa para verla en grande)',
+      onclick: () => lupa(API.archivo(v.pid, e.imagen)),
+    }, h('img', { src: `${API.archivo(v.pid, e.imagen)}?mini=512&v=${encodeURIComponent(ultima)}`,
+      alt: `${plano} antes`, loading: 'lazy' })));
+  } else if (vieja) {
     columna.appendChild(h('div', { clase: 'nota-mini' }, h('span', { clase: 'meta' }, 'versión anterior')));
   } else columna.appendChild(h('button', { clase: 'nota-mini', title: 'Ver esta imagen en grande arriba', onclick: ir },
     e && e.imagen
       ? h('img', { src: `${API.archivo(v.pid, e.imagen)}?mini=512&v=${encodeURIComponent(ultima)}`,
         alt: plano, loading: 'lazy' })
       : h('span', { clase: 'meta' }, 'sin imagen')));
-  if (!vieja && antes && e && antes !== e.imagen) {
+  if (!pidiendo && !vieja && antes && e && antes !== e.imagen) {
     columna.appendChild(h('div', { clase: 'nota-antes-ahora meta' }, '▲ ahora · antes ▼'));
     columna.appendChild(h('button', {
       clase: 'nota-mini nota-antes', title: 'Cómo era antes de esta nota (pulsa para verla en grande)',
@@ -19113,7 +19363,10 @@ function franjaSinAplicar(modo, est) {
   const cambios = cambiosDelMontaje();
   if (!cambios.hay) return null;
   const enMarcha = !!trabajoVideoLight() || !!est.montandoAnimo;
-  return h('div', { clase: 'franja-sin-aplicar' },
+  /* en el móvil es UNA línea (la barra de abajo ya lleva el botón que la
+     resuelve): «se montan con…» se queda en el globo */
+  return h('div', { clase: 'franja-sin-aplicar',
+    title: enMarcha ? null : `Se montan con «${textoMontarCambios(cambios)}», en la barra de abajo` },
     h('span', { clase: 'crece' }, enMarcha ? 'Montando el vídeo con tus cambios…'
       : `Hay ${cambios.n ? `${cambios.n} ${cambios.n === 1 ? 'cambio' : 'cambios'}` : 'cambios'} del montaje sin aplicar`),
     enMarcha ? null : h('span', { clase: 'meta' },

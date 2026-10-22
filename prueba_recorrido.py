@@ -5364,9 +5364,15 @@ def lo_de_v2h_en_la_pantalla(navegador, datos):
     ok(pg.esperar(".previa-mandos"), "la pantalla de Imágenes en el móvil")
     burbuja = pg.p.locator(".burbuja-asistente").bounding_box()
     siguiente = pg.p.locator(".previa-mandos button", has_text="Siguiente").first.bounding_box()
-    ok(burbuja and siguiente and burbuja["y"] + burbuja["height"] <= siguiente["y"],
-       f"B10: la burbuja no pisa «Siguiente ›» ({burbuja and burbuja['y'] + burbuja['height']} "
-       f"frente a {siguiente and siguiente['y']})")
+    # desde arreglos-crear-movil (21-10-2026) los mandos van encima de la
+    # imagen en el móvil, no pegados encima de la barra: lo que importa es que
+    # no se pisen
+    pisa = bool(burbuja and siguiente
+                and burbuja["x"] < siguiente["x"] + siguiente["width"] and siguiente["x"] < burbuja["x"] + burbuja["width"]
+                and burbuja["y"] < siguiente["y"] + siguiente["height"] and siguiente["y"] < burbuja["y"] + burbuja["height"])
+    ok(burbuja and siguiente and not pisa,
+       f"B10: la burbuja no pisa «Siguiente ›» (burbuja {burbuja and (round(burbuja['x']), round(burbuja['y']))} "
+       f"frente a {siguiente and (round(siguiente['x']), round(siguiente['y']))})")
     pg.pulsar(".burbuja-asistente")
     ok(pg.esperar("#asistente:not(.plegado)", segundos=5), "el asistente se abre a pantalla completa")
     ok(not pg.visible(".minimizar-burbuja"), "U1: y el «–» de la burbuja no queda encima del chat")
@@ -7066,6 +7072,295 @@ def portadas_2_capas_y_pantalla_quieta(navegador, datos):
     movil.sin_errores("la pantalla quieta en Publicar")
     movil.cerrar()
 
+
+# ======================================================================
+# CREAR EN EL MÓVIL (rama `arreglos-crear-movil`, 21-10-2026). Tramo propio y
+# al final. Lo que vio el dueño en el teléfono: el carril parpadeaba al paso 1
+# con cada refresco, el paso Vídeo se vaciaba al pulsar «Montar», la barra
+# cambiaba de alto y tapaba media pantalla, el aviso flotante tapaba su botón
+# y escribiendo una nota no quedaba sitio. Se mide POR FOTOGRAMA
+# (requestAnimationFrame), como el diagnóstico: a 25 fps un vídeo no caza un
+# destello de un fotograma.
+
+#: La sonda: cada fotograma apunta el scroll del panel, su alto, el
+#: desplazamiento de la fila del carril, si el paso activo se ve dentro de ella,
+#: el alto de la barra y dónde empieza el panel (lo de encima es la cabecera).
+#: Cuenta además cuántas filas del carril se construyen.
+SONDA_FOTOGRAMAS = r"""() => {
+  window.__fot = []; window.__parar_fot = false; window.__filas_carril = 0;
+  if (!window.__pasosDelCarrilEnvuelto) {
+    window.__pasosDelCarrilEnvuelto = true;
+    const original = pasosDelCarril;
+    pasosDelCarril = function () { window.__filas_carril += 1; return original.apply(this, arguments); };
+  }
+  const q = s => document.querySelector(s);
+  const paso = () => {
+    const panel = q('#panel'), fila = q('#panel .pasos-carril');
+    const act = q('#panel .paso-carril.actual'), barra = q('.barra-accion');
+    const fr = fila ? fila.getBoundingClientRect() : null, ar = act ? act.getBoundingClientRect() : null;
+    const br = barra && barra.getClientRects().length ? barra.getBoundingClientRect() : null;
+    window.__fot.push({
+      t: Math.round(performance.now()), top: Math.round(panel.scrollTop), alto: panel.scrollHeight,
+      x: fila ? Math.round(fila.scrollLeft) : -1,
+      dentro: !!(fr && ar && ar.left >= fr.left - 2 && ar.right <= fr.right + 2),
+      barra: br ? Math.round(br.height) : 0, cab: Math.round(panel.getBoundingClientRect().top),
+      paso: act ? (act.dataset.paso || '') : '',
+    });
+    if (!window.__parar_fot) requestAnimationFrame(paso);
+  };
+  requestAnimationFrame(paso);
+}"""
+
+#: Lo que tapan la cabecera (todo lo que hay encima del panel) y la barra.
+TAPADO = r"""() => {
+  const panel = document.querySelector('#panel'), barra = document.querySelector('.barra-accion');
+  const cab = Math.max(0, Math.round(panel.getBoundingClientRect().top));
+  const b = barra && barra.getClientRects().length ? Math.round(barra.getBoundingClientRect().height) : 0;
+  return { cab, barra: b, vh: innerHeight, pct: Math.round(1000 * (cab + b) / innerHeight) / 10 };
+}"""
+
+#: Cuánto pisa el aviso flotante a los botones de la barra (px²).
+SOLAPE_AVISO = r"""() => {
+  const t = document.querySelector('#toast');
+  if (!t || !t.classList.contains('ver')) return -1;
+  const a = t.getBoundingClientRect();
+  let total = 0;
+  document.querySelectorAll('.barra-accion button').forEach(b => {
+    if (!b.getClientRects().length) return;
+    const r = b.getBoundingClientRect();
+    const x = Math.max(0, Math.min(a.right, r.right) - Math.max(a.left, r.left));
+    const y = Math.max(0, Math.min(a.bottom, r.bottom) - Math.max(a.top, r.top));
+    total += x * y;
+  });
+  return Math.round(total);
+}"""
+
+
+def _fotogramas(pg):
+    return pg.p.evaluate("() => { window.__parar_fot = true; return window.__fot || []; }")
+
+
+def _cambiar_donde_van_los_subtitulos(pg, destino=None):
+    """Abre «Subtítulos» de los ajustes del montaje del paso Vídeo y cambia
+    «Dónde va» (a `destino`, o a la otra de Arriba/Abajo). -> la elegida."""
+    fila = pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="Subtítulos").first
+    if not pg.p.locator(".ajustes-en-video .editor-ajuste .campo").filter(
+            has=pg.p.locator("label", has_text="Dónde va")).count():
+        fila.locator("button", has_text="Cambiar").click()
+        pg.p.wait_for_timeout(800)
+    campo = pg.p.locator(".ajustes-en-video .editor-ajuste .campo").filter(
+        has=pg.p.locator("label", has_text="Dónde va")).first
+    if not destino:
+        activa = campo.locator("button.activo, button.elegido, button[aria-pressed=true]", has_text="Arriba").count()
+        destino = "Abajo" if activa else "Arriba"
+    campo.locator("button", has_text=destino).first.click()
+    pg.p.wait_for_timeout(1500)
+    return destino
+
+
+@escenario
+def crear_en_el_movil(navegador, datos):
+    """arreglos-crear-movil (21-10-2026): en el móvil, con un montaje en marcha,
+    el carril no salta, el paso Vídeo no se vacía, la barra no cambia de alto
+    ni tapa más de un cuarto de pantalla con la cabecera, el aviso no pisa sus
+    botones, dos avisos no se pisan y escribiendo queda sitio. Y en escritorio,
+    el paso Vídeo tampoco se vacía al montar."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    freno = os.path.join(os.path.dirname(datos["proyectos"]), "ffmpeg_lento")
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="crear en el móvil")
+    # 0) «Un estilo nuevo» no pasa por barraDeAccion ni tiene «⋯»: lo que falta
+    #    para poder generar tiene que verse también en el móvil (revisión, 22-10)
+    pg.js("APP.light.encargo = null; irALight('crear', { taller: null });")
+    ok(pg.esperar("input, textarea"), "MÓVIL: «Un estilo nuevo» se abre")
+    pg.p.wait_for_timeout(1200)
+    ok(pg.visible(".pie-creacion .plan .aviso-falta", "nombre al estilo"),
+       "MÓVIL: en «Un estilo nuevo» se ve lo que falta («ponle un nombre al estilo»)")
+    pg.js("APP.light.encargo = null;")
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.p.wait_for_timeout(1500)
+
+    # 1) barra + cabecera, paso a paso, a 390×844
+    for paso in ("Estilo", "Encargo", "Guion", "Voz", "Imágenes", "Vídeo"):
+        ir_al_paso(pg, paso)
+        pg.p.wait_for_timeout(1500)
+        pg.p.evaluate("() => { const p = document.querySelector('#panel'); p.scrollTop = 600; }")
+        pg.p.wait_for_timeout(500)
+        t = pg.p.evaluate(TAPADO)
+        ok(t["pct"] <= 25, f"MÓVIL 390: en {paso}, barra + cabecera tapan ≤ 25 % "
+           f"({t['cab']} + {t['barra']} px = {t['pct']} %)")
+    pg.captura("movil_390_video", entera=False)
+
+    # 2) «⋯» abre lo demás ENCIMA de la barra, sin cambiarle el alto
+    alto_barra = pg.p.evaluate(TAPADO)["barra"]
+    if pg.visible(".barra-accion .boton-mas-barra"):
+        pg.pulsar(".barra-accion .boton-mas-barra")
+        ok(pg.visible(".barra-accion .mas-de-la-barra"), "MÓVIL: «⋯» abre el estado entero y el plan")
+        ok(abs(pg.p.evaluate(TAPADO)["barra"] - alto_barra) <= 2,
+           "MÓVIL: y la barra no cambia de alto al abrirlo")
+        pg.captura("movil_390_barra_abierta", entera=False)
+        pg.pulsar(".barra-accion .boton-mas-barra")
+        ok(not pg.visible(".barra-accion .mas-de-la-barra"), "MÓVIL: «⋯» otra vez lo cierra")
+    else:
+        ok(False, "MÓVIL: la barra del vídeo lleva «⋯» con el estado entero y el plan")
+
+    # 3) dos avisos seguidos no se pisan, y no tapan los botones de la barra
+    pg.p.evaluate("() => { toast('Primer aviso de prueba'); toast('Segundo aviso de prueba'); }")
+    pg.p.wait_for_timeout(300)
+    texto = pg.toast()
+    ok("Primer aviso" in texto and "Segundo aviso" in texto,
+       f"MÓVIL: dos avisos seguidos se ven los dos ({texto!r})")
+    solape = pg.p.evaluate(SOLAPE_AVISO)
+    ok(solape == 0, f"MÓVIL: el aviso flotante no pisa los botones de la barra ({solape} px²)")
+    pg.p.wait_for_timeout(3500)
+
+    # 4) el montaje: se cambia un ajuste con la pantalla bajada y se monta
+    _cambiar_donde_van_los_subtitulos(pg)
+    pg.p.evaluate("() => { const c = document.querySelector('.ajustes-en-video'); "
+                  "if (c) c.scrollIntoView({block: 'center'}); }")
+    pg.p.wait_for_timeout(800)
+    with open(freno, "w", encoding="utf-8"):
+        pass
+    try:
+        pg.p.evaluate(SONDA_FOTOGRAMAS)
+        pg.p.wait_for_timeout(600)
+        pg.p.evaluate("() => { const b = [...document.querySelectorAll('.barra-accion button')]"
+                      ".find(x => /Montar el vídeo con/.test(x.innerText)); if (b) b.click(); }")
+        pg.p.wait_for_timeout(1200)
+        solape = pg.p.evaluate(SOLAPE_AVISO)
+        ok(solape <= 0, f"MÓVIL: el aviso del montaje no pisa «Parar» ({solape} px²)")
+        pg.captura("movil_390_montando", entera=False)
+        pg.p.wait_for_timeout(4800)
+        fot = _fotogramas(pg)
+        corriendo = pg.p.evaluate("() => ((APP.trabajos[CLAVE_VIDEO_LIGHT] || {}).estado) === 'ejecutando'")
+        ok(corriendo, "MÓVIL: el montaje sigue en marcha mientras se mide")
+        ok(len(fot) > 60, f"MÓVIL: la sonda ha visto los fotogramas ({len(fot)})")
+        if fot:
+            xs = [f["x"] for f in fot]
+            # Reajustarse sí: el paso activo cambia de ancho («⟳ N %», «2
+            # notas sin aplicar») y la fila se recoloca para que siga entero a
+            # la vista. Lo que no puede es PARPADEAR (un valor de 1–3
+            # fotogramas que vuelve al de antes: el salto al paso 1) ni dejar
+            # el paso activo fuera.
+            tramos = []
+            for x in xs:
+                if tramos and tramos[-1][0] == x:
+                    tramos[-1][1] += 1
+                else:
+                    tramos.append([x, 1])
+            destellos = sum(1 for a, b, c in zip(tramos, tramos[1:], tramos[2:])
+                            if b[1] <= 3 and a[0] == c[0])
+            ok(destellos == 0 and min(xs) >= xs[0] - 150 and all(f["dentro"] for f in fot),
+               f"MÓVIL: con el montaje en marcha el carril no parpadea ni salta al paso 1 "
+               f"({destellos} destellos, desplazamiento {sorted(set(xs))[:6]}, "
+               f"{sum(1 for f in fot if not f['dentro'])} fotogramas con el paso activo fuera)")
+            altos = [f["alto"] for f in fot]
+            ok(min(altos) >= 0.85 * altos[0],
+               f"MÓVIL: el paso Vídeo no se vacía al montar (alto {altos[0]} → mín {min(altos)})")
+            tops = [f["top"] for f in fot]
+            ok(max(abs(x - tops[0]) for x in tops) <= 40,
+               f"MÓVIL: y la pantalla sigue donde estaba (scroll {tops[0]} → {min(tops)}…{max(tops)})")
+            barras = [f["barra"] for f in fot if f["barra"]]
+            ok(barras and max(barras) - min(barras) <= 6,
+               f"MÓVIL: la barra no cambia de alto al montar ({min(barras or [0])}–{max(barras or [0])} px)")
+            peor = max(f["cab"] + f["barra"] for f in fot)
+            ok(peor <= 0.25 * 844, f"MÓVIL: barra + cabecera ≤ 25 % durante el montaje ({peor} px)")
+        # lo deslizado a mano en el carril se queda donde se dejó
+        pg.p.evaluate(SONDA_FOTOGRAMAS)
+        # (el dedo: un `pointerdown` y el desplazamiento)
+        pg.p.evaluate("() => { const f = document.querySelector('#panel .pasos-carril'); if (f) {"
+                      " f.dispatchEvent(new PointerEvent('pointerdown', {bubbles: true})); f.scrollLeft = 0; } }")
+        pg.p.wait_for_timeout(2500)
+        fot = _fotogramas(pg)
+        ok(fot and fot[-1]["x"] <= 5,
+           f"MÓVIL: lo deslizado a mano en el carril no vuelve solo (ahora en {fot and fot[-1]['x']})")
+    finally:
+        try:
+            os.remove(freno)
+        except OSError:
+            pass
+    pg.sin_trabajo()
+    pg.p.wait_for_timeout(2000)
+
+    # 5) cambiar de paso: la fila se construye una vez y el paso se ve
+    pg.p.evaluate(SONDA_FOTOGRAMAS)
+    ir_al_paso(pg, "Imágenes")
+    pg.p.wait_for_timeout(2500)
+    fot = _fotogramas(pg)
+    filas = pg.p.evaluate("() => window.__filas_carril")
+    nuevos = [f for f in fot if f["paso"] == "imagenes"]
+    ok(filas <= 2, f"MÓVIL: cambiar de paso construye el carril una vez ({filas})")
+    ok(nuevos and len({f["x"] for f in nuevos}) <= 1 and nuevos[-1]["dentro"],
+       f"MÓVIL: y el paso nuevo sale centrado de una vez, sin pasar por el paso 1 "
+       f"({sorted({f['x'] for f in nuevos})[:6]})")
+
+    # 6) escribiendo una nota con el teclado abierto: la barra y la cabecera se apartan
+    pg.js("PREVIA.i = 2; repintarVideo();")
+    area = pg.p.locator(".previa-feedback textarea").first
+    if area.count():
+        area.click()
+        pg.p.set_viewport_size({"width": 390, "height": 464})
+        pg.p.wait_for_timeout(800)
+        t = pg.p.evaluate(TAPADO)
+        util = t["vh"] - t["cab"] - t["barra"]
+        ok(util >= 0.75 * t["vh"], f"MÓVIL: escribiendo con el teclado abierto queda sitio "
+           f"({util} de {t['vh']} px; cabecera {t['cab']}, barra {t['barra']})")
+        pg.captura("movil_390_escribiendo", entera=False)
+        pg.p.evaluate("() => document.activeElement && document.activeElement.blur()")
+        pg.p.set_viewport_size({"width": 390, "height": 844})
+        pg.p.wait_for_timeout(800)
+        ok(pg.visible(".barra-accion"), "MÓVIL: al dejar de escribir la barra vuelve")
+    else:
+        ok(False, "MÓVIL: la nota de la imagen se puede escribir")
+    pg.sin_errores("crear en el móvil (390)")
+    pg.cerrar()
+
+    # 7) a 360×740, barra + cabecera ≤ 25 % en cada paso
+    pg = Pagina(navegador, datos, ancho=360, alto=740, nombre="crear en el móvil 360")
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.p.wait_for_timeout(1500)
+    for paso in ("Estilo", "Encargo", "Guion", "Voz", "Imágenes", "Vídeo"):
+        ir_al_paso(pg, paso)
+        pg.p.wait_for_timeout(1500)
+        pg.p.evaluate("() => { const p = document.querySelector('#panel'); p.scrollTop = 600; }")
+        pg.p.wait_for_timeout(500)
+        t = pg.p.evaluate(TAPADO)
+        ok(t["pct"] <= 25, f"MÓVIL 360: en {paso}, barra + cabecera tapan ≤ 25 % "
+           f"({t['cab']} + {t['barra']} px = {t['pct']} %)")
+        if paso in ("Imágenes", "Vídeo"):
+            pg.captura(f"movil_360_{'imagenes' if paso == 'Imágenes' else 'video'}", entera=False)
+    pg.sin_errores("crear en el móvil (360)")
+    pg.cerrar()
+
+    # 8) en escritorio, el paso Vídeo tampoco se vacía al montar (y se deja
+    #    «Dónde va» como estaba)
+    pg = Pagina(navegador, datos, nombre="crear al montar, escritorio")
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.p.wait_for_timeout(1500)
+    ir_al_paso(pg, "Vídeo")
+    pg.p.wait_for_timeout(1500)
+    _cambiar_donde_van_los_subtitulos(pg)
+    pg.p.evaluate("() => { const c = document.querySelector('.ajustes-en-video'); "
+                  "if (c) c.scrollIntoView({block: 'center'}); }")
+    pg.p.wait_for_timeout(800)
+    pg.p.evaluate(SONDA_FOTOGRAMAS)
+    pg.p.wait_for_timeout(400)
+    pg.p.evaluate("() => { const b = [...document.querySelectorAll('.barra-accion button')]"
+                  ".find(x => /Montar el vídeo con/.test(x.innerText)); if (b) b.click(); }")
+    pg.p.wait_for_timeout(1500)
+    fot = _fotogramas(pg)
+    if fot:
+        altos = [f["alto"] for f in fot]
+        tops = [f["top"] for f in fot]
+        ok(min(altos) >= 0.85 * altos[0],
+           f"ESCRITORIO: el paso Vídeo no se vacía al montar (alto {altos[0]} → mín {min(altos)})")
+        ok(max(abs(x - tops[0]) for x in tops) <= 40,
+           f"ESCRITORIO: y la pantalla sigue donde estaba (scroll {tops[0]} → {min(tops)}…{max(tops)})")
+    pg.captura("escritorio_montando", entera=False)
+    pg.sin_trabajo()
+    pg.sin_errores("crear al montar, en escritorio")
+    pg.cerrar()
 
 
 

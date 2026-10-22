@@ -4555,3 +4555,111 @@ button.aviso-falta { background: none; border: none; padding: 0; min-height: 0; 
   border-radius: 8px; background: var(--boton); color: var(--texto); text-decoration: none; font-size: 13px;
 }
 .descargar-video a.boton:hover { border-color: var(--acento); }
+
+/* ---- arreglos-crear-movil (21-10-2026): el Crear nuevo en el móvil
+ * Sigue siendo el bloque CREAR · CARRIL. Colores, solo con variables. */
+
+/* la barra: «⋯» y lo que abre. En pantalla ancha no existen para la
+   maquetación (los secundarios quedan a la izquierda del principal) */
+.barra-accion .mas-de-la-barra, .barra-accion .secundarios-barra { display: contents; }
+.barra-accion .mas-texto, .barra-accion .boton-mas-barra { display: none; }
+.barra-accion .estado .texto-estado { min-width: 0; }
+/* el progreso de una tanda, en UNA línea: con dos o tres la barra cambiaba de
+   alto a cada tic y la burbuja subía y bajaba con ella */
+.barra-accion .progreso .meta { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+@media (max-width: 700px) {
+  .barra-accion { padding: 8px 0 calc(8px + env(safe-area-inset-bottom, 0px)); }
+  .barra-accion .dentro, .barra-accion .dentro.corriendo {
+    grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; min-height: 46px;
+  }
+  .barra-accion .plan { display: none; }
+  /* «Un estilo nuevo» (pieDeCreacion) no pasa por barraDeAccion ni tiene «⋯»:
+     su plan es LO QUE FALTA para poder generar, y tiene que verse. */
+  .barra-accion.pie-creacion .plan { display: block; grid-column: 1 / -1; white-space: normal; }
+  .barra-accion .estado { font-size: 13px; cursor: pointer; }
+  .barra-accion .estado .texto-estado { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .barra-accion .derecha { flex-wrap: nowrap; min-width: 0; gap: 6px; }
+  .barra-accion .principal {
+    max-width: 58vw; padding: 6px 12px; font-size: 13.5px; line-height: 1.2;
+    white-space: normal; text-align: center; min-height: 44px;
+  }
+  .barra-accion .boton-mas-barra {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 40px; min-height: 40px; padding: 0 8px; font-size: 18px; line-height: 1;
+  }
+  .barra-accion .boton-mas-barra[aria-expanded="true"] { border-color: var(--acento); color: var(--acento); }
+  .barra-accion .mas-de-la-barra { display: none; }
+  /* ABIERTO: encima de la barra, sin cambiarle el alto */
+  .barra-accion.abierta .mas-de-la-barra {
+    display: flex; flex-direction: column; gap: 10px;
+    position: absolute; left: 8px; right: 8px; bottom: calc(100% + 6px); z-index: 9;
+    padding: 12px; border: 1px solid var(--linea); border-radius: 12px;
+    background: var(--panel); color: var(--texto); box-shadow: var(--sombra);
+  }
+  .barra-accion.abierta .mas-texto { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+  .barra-accion.abierta .mas-texto .meta { font-family: var(--letra-cifra); }
+  .barra-accion.abierta .secundarios-barra { display: flex; flex-wrap: wrap; gap: 8px; }
+  .barra-accion.abierta .secundarios-barra .secundario-barra { white-space: normal; }
+  body:has(.barra-accion.abierta) .burbuja-asistente,
+  body:has(.barra-accion.abierta) .minimizar-burbuja { visibility: hidden; }
+
+  /* la cabecera del vídeo: el nombre en una línea y el gasto en una pastilla
+     (el desglose, al pulsarla, como siempre) */
+  .cab-video { flex-wrap: nowrap; gap: 10px; padding: 8px 10px; }
+  .cab-video .datos { flex: 1 1 auto; gap: 2px; }
+  .nombre-video { flex-wrap: nowrap; }
+  .nombre-video b {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
+    overflow-wrap: normal; font-size: 16px;
+  }
+  .chips-video { flex-wrap: nowrap; overflow: hidden; }
+  .chips-video .chip-enlace { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex: 0 1 auto; }
+  .cab-video .coste-light { flex: 0 0 auto; margin-left: 0; padding: 4px 10px; border-radius: 999px; gap: 6px; }
+  .cab-video .coste-light .prov:not(.total), .cab-video .coste-light .presupuesto,
+  .cab-video .coste-light .prov.total b { display: none; }
+
+  /* «hay cambios del montaje sin aplicar», en una línea */
+  .franja-sin-aplicar { flex-wrap: nowrap; padding: 6px 12px; }
+  .franja-sin-aplicar .crece { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .franja-sin-aplicar .meta { display: none; }
+
+  /* ESCRIBIENDO CON EL TECLADO ABIERTO (`mirarTecladoMovil`): fuera lo fijo */
+  body.escribiendo-movil .barra-accion,
+  body.escribiendo-movil #cabecera, body.escribiendo-movil #barra-modulos,
+  body.escribiendo-movil .burbuja-asistente, body.escribiendo-movil .minimizar-burbuja,
+  body.escribiendo-movil .pestana-asistente { display: none; }
+}
+
+/* el aviso plegable: en el móvil, una línea que se abre (`avisoPlegable`) */
+.caja-aviso.aviso-plegable { padding-top: 8px; padding-bottom: 8px; }
+.aviso-plegable > summary { cursor: pointer; list-style: none; display: flex; gap: 6px; align-items: center; min-width: 0; }
+.aviso-plegable > summary::-webkit-details-marker { display: none; }
+.aviso-plegable > summary::before { content: 'ⓘ'; flex: none; }
+.aviso-plegable > summary::after { content: '▾'; flex: none; margin-left: auto; }
+.aviso-plegable[open] > summary::after { content: '▴'; }
+.aviso-plegable .resumen-aviso { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; font-weight: 600; }
+.aviso-plegable[open] .resumen-aviso { white-space: normal; }
+.aviso-plegable .detalle-aviso { margin-top: 6px; }
+
+/* el paso Vídeo mientras se monta: todo en su sitio, apagado */
+.apagado-montando { display: flex; flex-direction: column; gap: 14px; opacity: .55; }
+.apagado-montando > * { margin-top: 0; margin-bottom: 0; }
+.marco-video .sello-montando { top: 9px; bottom: auto; }
+
+/* la tarjeta de una nota mientras se dibuja: el hueco de la nueva */
+.nota-imagen .nota-hueco { display: grid; place-items: center; width: 100%; border: 1px dashed var(--linea-fuerte); }
+
+/* Imágenes en el móvil: los mandos de mirar, encima de la imagen */
+.previa-mandos.en-la-pagina {
+  position: static; margin: 0; padding: 4px 0; box-shadow: none; border-top: none; background: none;
+}
+
+/* EL AVISO FLOTANTE, ENCIMA DE LA BARRA Y AL LADO DE LA BURBUJA
+   (`apartarAvisoDeLaBarra` publica cuánto ocupa la barra). Regla aparte y más
+   específica: la capa de `#toast` es de otra rama. */
+body.con-barra-accion #toast { bottom: calc(var(--alto-barra-accion, 62px) + 12px); right: 82px; }
+@media (max-width: 620px) {
+  body.con-barra-accion #toast { left: 12px; right: 76px; bottom: calc(var(--alto-barra-accion, 62px) + 10px); }
+}
+#toast .linea-aviso + .linea-aviso { margin-top: 4px; padding-top: 4px; border-top: 1px solid currentColor; }

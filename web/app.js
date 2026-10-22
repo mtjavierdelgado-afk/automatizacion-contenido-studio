@@ -26655,6 +26655,7 @@ function vigilarTrabajoParrilla() {
           toast(`${cuantosGuiones((nuevo.guiones || []).length)} en la Parrilla`);
           vaciarFormParrilla();
           PAR.seccion = 'parrilla';
+          PAR.matrizFiltro = 'todas';   // que se vean los nuevos, estén en la matriz que estén
         } else {
           toast(nuevo.error || 'no se han podido convertir', true);
         }
@@ -27056,6 +27057,7 @@ async function lanzarParrilla() {
       toast(`${cuantosGuiones((r.guiones || []).length)} guardados`);
       vaciarFormParrilla();
       PAR.seccion = 'parrilla';
+      PAR.matrizFiltro = 'todas';
       await cargarParrilla(true);
       return;
     }

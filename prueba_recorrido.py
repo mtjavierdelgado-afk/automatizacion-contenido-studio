@@ -5275,6 +5275,40 @@ def automatizar_tablero_y_panel(navegador, datos):
     pg.pulsar(".cajon-guion button", "Descartar cambios")
     ok(not pg.p.evaluate("() => document.querySelector('.pie-cajon .boton-pasar-encargo').disabled"),
        "al descartar, se vuelve a encender")
+    # CERRAR NO PIERDE LO ESCRITO (revisión independiente, 22-10): Escape con el
+    # foco en el texto no cierra, y × con cambios pregunta (Seguir / Descartar / Guardar)
+    area = pg.p.locator("#modulo [data-foco=parrilla-texto]")
+    original = area.input_value()
+    area.fill(original + "\n- revisar la luz")
+    area.focus()
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    ok(pg.visible(".cajon-guion") and pg.visible(".cajon-guion .guardar-texto-guion:not([disabled])"),
+       "Escape con el foco en el texto no cierra el panel")
+    pg.pulsar(".cajon-guion .cerrar-cajon")
+    ok(pg.esperar(".capa-dialogo", "Tienes cambios sin guardar en «TB01", 5),
+       "cerrar con el texto a medio cambiar pregunta antes")
+    pg.pulsar(".capa-dialogo button", "Seguir editando")
+    ok(pg.visible(".cajon-guion") and "revisar la luz" in pg.p.locator("#modulo [data-foco=parrilla-texto]").input_value(),
+       "«Seguir editando» deja el panel abierto con lo escrito")
+    pg.p.mouse.click(30, 300)
+    ok(pg.esperar(".capa-dialogo", "cambios sin guardar", 5), "pulsar fuera también pregunta")
+    pg.pulsar(".capa-dialogo button", "Guardar")
+    pg.p.wait_for_timeout(1500)
+    _r, g1 = api.get(f"/api/parrilla/proyectos/{cid}/guiones/{ids.get('TB01')}")
+    ok(not pg.visible(".cajon-guion") and "revisar la luz" in ((g1 or {}).get("texto") or ""),
+       "«Guardar» lo guarda (como «Guardar el texto») y cierra")
+    pg.pulsar(".tarjeta-guion", "TB01")
+    area = pg.p.locator("#modulo [data-foco=parrilla-texto]")
+    area.fill(original)
+    pg.pulsar(".cajon-guion .cerrar-cajon")
+    ok(pg.esperar(".capa-dialogo", "cambios sin guardar", 5), "(otra vez, para descartar)")
+    pg.pulsar(".capa-dialogo button", "Descartar")
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible(".cajon-guion"), "«Descartar» cierra sin guardar")
+    pg.pulsar(".tarjeta-guion", "TB01")
+    ok("revisar la luz" in pg.p.locator("#modulo [data-foco=parrilla-texto]").input_value(),
+       "y al reabrirlo está lo guardado, no lo descartado")
     pg.pulsar(".pestanas-cajon button", "Estado")
     pg.pulsar(".cajon-guion button", "Borrar el guion")
     ok(pg.esperar(".capa-dialogo", "No se puede deshacer", 5), "«Borrar el guion» pregunta antes")
@@ -5339,6 +5373,12 @@ def automatizar_tablero_y_panel(navegador, datos):
        and pg.p.locator(".columna-tablero[data-columna=pendiente] .tarjeta-guion").count() >= 3,
        "y quedan en «Pendientes»")
 
+    # si la marca no se pudo leer no se dice «Sin marca» (no se sabe)
+    pg.js("PAR.marca = { marca: {}, campos: [], error: 'sin red' }; pintarModulo();")
+    ok(pg.visible(".linea-marca", "No se pudo leer la marca") and not pg.visible(".linea-marca", "Sin marca"),
+       "una marca que no se pudo leer lo dice, con «Reintentar»")
+    pg.pulsar(".linea-marca button", "Reintentar")
+    ok(pg.esperar(".linea-marca", "Sin marca de Tablero de prueba", 10), "y «Reintentar» la vuelve a leer")
     # la marca: se guarda en la barra y la Parrilla lo dice
     pg.pulsar(".linea-marca button", "Apuntarla")
     ok(pg.esperar(".marca-parrilla [data-foco=marca-quien]", segundos=10), "«Apuntarla ›» lleva a la marca")
@@ -5376,6 +5416,16 @@ def automatizar_tablero_y_panel(navegador, datos):
         pg.pulsar(".tarjeta-origen", "Pedir a Claude")
         barra = pg.p.locator(".anadir-parrilla .barra-accion").bounding_box()
         ok(barra and barra["height"] <= 80, f"{ancho}: la barra de Añadir, en una fila ({barra and round(barra['height'])} px)")
+        pg.p.evaluate("() => toast('aviso de prueba')")
+        pg.p.wait_for_timeout(400)
+        tapa = pg.p.evaluate("() => { const t = document.querySelector('#toast').getBoundingClientRect(); "
+                             "const b = document.querySelector('.anadir-parrilla .barra-accion').getBoundingClientRect(); "
+                             "return t.bottom > b.top + 1; }")
+        ok(not tapa, f"{ancho}: el aviso flotante sale encima de la barra, sin tapar su botón")
+        pg.pulsar(".anadir-parrilla .boton-mas-barra")
+        ok(pg.visible(".anadir-parrilla .barra-accion.abierta") and
+           not pg.p.evaluate("() => BARRA_MAS.abiertas.crear"), f"{ancho}: «⋯» abierto aquí no abre el de Crear")
+        pg.pulsar(".anadir-parrilla .boton-mas-barra")
         for que in ("anadir", "chat", "cuentas", "marca", "parrilla"):
             pg.js(f"irASeccionParrilla('{que}');")
             ancho_pagina = pg.p.evaluate("() => document.documentElement.scrollWidth")
@@ -7354,7 +7404,13 @@ def _cambiar_donde_van_los_subtitulos(pg, destino=None):
     fila = pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="Subtítulos").first
     if not pg.p.locator(".ajustes-en-video .editor-ajuste .campo").filter(
             has=pg.p.locator("label", has_text="Dónde va")).count():
-        fila.locator("button", has_text="Cambiar").click()
+        boton = fila.locator("button", has_text="Cambiar")
+        # habilitado y fuera de lo `inert` (el paso Vídeo lo está mientras monta)
+        fin = time.time() + 120
+        while time.time() < fin and not pg.p.evaluate(
+                "(b) => !!b && !b.disabled && !b.closest('[inert]')", boton.first.element_handle()):
+            pg.p.wait_for_timeout(500)
+        boton.click()
         pg.p.wait_for_timeout(800)
     campo = pg.p.locator(".ajustes-en-video .editor-ajuste .campo").filter(
         has=pg.p.locator("label", has_text="Dónde va")).first
@@ -7488,7 +7544,9 @@ def crear_en_el_movil(navegador, datos):
             os.remove(freno)
         except OSError:
             pass
-    pg.sin_trabajo()
+    # con la máquina cargada el montaje tarda: si se sigue sin esperar, el paso
+    # Vídeo sigue `inert` y el 8) no puede pulsar «Cambiar»
+    ok(pg.sin_trabajo(600), "MÓVIL: el montaje del móvil termina")
     pg.p.wait_for_timeout(2000)
 
     # 5) cambiar de paso: la fila se construye una vez y el paso se ve
@@ -7545,6 +7603,7 @@ def crear_en_el_movil(navegador, datos):
     #    «Dónde va» como estaba)
     pg = Pagina(navegador, datos, nombre="crear al montar, escritorio")
     pg.js(f"await abrirVideoLight('{pid}');")
+    pg.sin_trabajo(600)
     pg.p.wait_for_timeout(1500)
     ir_al_paso(pg, "Vídeo")
     pg.p.wait_for_timeout(1500)

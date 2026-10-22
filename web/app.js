@@ -5863,7 +5863,22 @@ function campoRenombrar(pid, antes) {
  * en «⋯», que lo abre ENCIMA de la barra sin cambiarle el alto (pulsar el
  * estado también lo abre). En pantalla ancha «⋯» no sale y todo se ve como
  * siempre. Ningún botón cambia de lo que hace: solo de sitio. */
-const BARRA_MAS = { abierta: false };
+/* ABIERTO O CERRADO, POR PANTALLA (rediseno-automatizar): Crear y cada
+   pestaña de Automatizar (y su panel) llevan el suyo; abrir el «⋯» en una no
+   deja abierto el de la otra. `abierta` lee y escribe el de la pantalla en la
+   que se está. */
+function claveBarraMas() {
+  if (typeof MODULOS === 'undefined' || MODULOS.actual === 'crear') return 'crear';
+  if (MODULOS.actual === 'automatizar' && typeof PAR !== 'undefined') {
+    return `automatizar:${PAR.fichaAbierta ? 'ficha' : PAR.seccion || ''}`;
+  }
+  return MODULOS.actual || '';
+}
+const BARRA_MAS = {
+  abiertas: {},
+  get abierta() { return !!this.abiertas[claveBarraMas()]; },
+  set abierta(v) { this.abiertas[claveBarraMas()] = !!v; },
+};
 
 function esMovilCrear() {
   try { return window.matchMedia('(max-width: 700px)').matches; } catch (e) { return false; }
@@ -5954,7 +5969,9 @@ function ajustarAltoDeLaBarra() {
    otra rama y no se toca). Se mide también al sacar cada aviso: así vale
    aunque se haya cambiado de módulo y la barra ya no se vea. */
 function apartarAvisoDeLaBarra() {
-  const barra = document.querySelector('#panel .barra-accion');
+  // la de Crear o la del módulo que se ve (Automatizar): la que tenga caja en pantalla
+  const barra = [...document.querySelectorAll('#panel .barra-accion, #modulo .barra-accion')]
+    .find(b => b.getClientRects().length) || null;
   let alto = 0;
   if (barra && barra.getClientRects().length) {
     const r = barra.getBoundingClientRect();
@@ -5988,7 +6005,7 @@ function avisoPlegable(clave, resumen, detalle, clase) {
    va en la barra y lo que se pliega: se vuelve a pintar Crear, sin más. */
 try {
   window.matchMedia('(max-width: 700px)').addEventListener('change', () => {
-    BARRA_MAS.abierta = false;
+    BARRA_MAS.abiertas = {};
     if (typeof MODULOS !== 'undefined' && MODULOS.actual === 'crear' && pasoDelCarril()) pintarLight();
   });
 } catch (e) { /* un navegador sin matchMedia: se queda como se pintó */ }
@@ -26890,7 +26907,7 @@ function nombreProyectoParrilla() {
 
 /* La marca guardada del proyecto: null mientras no se sabe, false si no hay. */
 function marcaGuardadaParrilla() {
-  if (!PAR.marca) return null;
+  if (!PAR.marca || PAR.marca.error) return null;
   const m = PAR.marca.marca || {};
   return Object.entries(m).some(([k, v]) => k !== 'al' && String(v || '').trim()) ? m : false;
 }
@@ -27078,7 +27095,19 @@ function datosMatrizParrilla(m) {
 
 /* LA MARCA SE VE SIEMPRE (Claude la usa en todo): una línea arriba de la
    Parrilla, guardada o no, con el camino a su pestaña. */
+function reintentarMarcaParrilla() {
+  PAR.marca = null;
+  PAR.marcaBorrador = null;
+  cargarMarcaParrilla();
+}
+
 function lineaMarcaParrilla() {
+  // si no se pudo leer, no se dice «Sin marca» (no se sabe): se dice eso y se puede reintentar
+  if (PAR.marca && PAR.marca.error) {
+    return h('div', { clase: 'caja-error fila linea-marca' },
+      h('span', { clase: 'crece' }, 'No se pudo leer la marca del proyecto.'),
+      h('button', { clase: 'mini', onclick: () => reintentarMarcaParrilla() }, 'Reintentar'));
+  }
   const m = marcaGuardadaParrilla();
   if (m === null) return null;
   const nombre = nombreProyectoParrilla();
@@ -27193,8 +27222,10 @@ function tarjetaGuionParrilla(g, m, conMatriz) {
 
 async function abrirGuionParrilla(gid) {
   try {
+    const mismo = PAR.guion && PAR.guion.id === gid;
     PAR.guion = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(gid)}`));
-    PAR.borradorTexto = null;
+    // EL MISMO GUION SE REABRE CON LO QUE SE ESTABA ESCRIBIENDO (revisión 22-10)
+    if (!mismo) PAR.borradorTexto = null;
     PAR.encargoIndice = 0;
     PAR.estiloElegido = PAR.guion.estilo || '';
     PAR.fichaAbierta = true;
@@ -27464,15 +27495,59 @@ async function lanzarParrilla() {
  */
 const PESTANAS_FICHA = [['guion', 'Guion'], ['encargo', 'Al Encargo'], ['estado', 'Estado']];
 
-function cerrarFichaParrilla() {
+/* CERRAR NO PIERDE LO ESCRITO (revisión independiente, 22-10): con el texto
+   del guion a medio cambiar, se pregunta antes: Guardar (lo mismo que «Guardar
+   el texto»), Descartar (lo mismo que «Descartar cambios») o Seguir editando. */
+function textoSinGuardarParrilla() {
+  return !!(PAR.guion && PAR.borradorTexto !== null && PAR.borradorTexto !== PAR.guion.texto);
+}
+
+function preguntarCambiosGuionParrilla(titulo) {
+  return new Promise(resolver => {
+    const capa = h('div', { clase: 'capa-dialogo cambios-guion' });
+    const teclas = ev => { if (ev.key === 'Escape') { ev.stopPropagation(); cerrar('seguir'); } };
+    const cerrar = valor => {
+      capa.remove();
+      document.removeEventListener('keydown', teclas, true);
+      resolver(valor);
+    };
+    capa.appendChild(h('div', { clase: 'dialogo', role: 'dialog', 'aria-modal': 'true' },
+      h('h3', {}, 'Cambios sin guardar'),
+      h('div', { clase: 'meta' }, `Tienes cambios sin guardar en «${titulo}».`),
+      h('div', { clase: 'dialogo-botones' },
+        h('button', { type: 'button', clase: 'mini fantasma', onclick: () => cerrar('seguir') }, 'Seguir editando'),
+        h('button', { type: 'button', clase: 'mini peligro', onclick: () => cerrar('descartar') }, 'Descartar'),
+        h('button', { type: 'button', clase: 'mini primario', onclick: () => cerrar('guardar') }, 'Guardar'))));
+    capa.addEventListener('click', ev => { if (ev.target === capa) cerrar('seguir'); });
+    document.addEventListener('keydown', teclas, true);
+    document.body.appendChild(capa);
+    setTimeout(() => { const b = capa.querySelector('button.primario'); if (b) b.focus(); }, 0);
+  });
+}
+
+async function cerrarFichaParrilla() {
+  if (textoSinGuardarParrilla()) {
+    const g = PAR.guion;
+    const que = await preguntarCambiosGuionParrilla([g.codigo, g.titulo].filter(Boolean).join(' — ') || 'este guion');
+    if (que === 'seguir') return;
+    if (que === 'guardar') {
+      await guardarGuionParrilla({ texto: PAR.borradorTexto });
+      if (textoSinGuardarParrilla()) return;   // no se pudo guardar: se queda abierto (el aviso ya lo dice)
+    } else {
+      PAR.borradorTexto = null;
+    }
+  }
   PAR.fichaAbierta = false;
   pintarModulo();
 }
 
-// Escape cierra el panel, salvo que haya otra cosa abierta encima (una guía, una pregunta)
+/* Escape cierra el panel, salvo que haya otra cosa abierta encima (una guía,
+   una pregunta) o que se esté escribiendo en un campo del panel. */
 window.addEventListener('keydown', ev => {
   if (ev.key !== 'Escape' || typeof MODULOS === 'undefined' || MODULOS.actual !== 'automatizar' || !PAR.fichaAbierta) return;
   if (document.querySelector('.capa-dialogo, #ventana-guia, .velo-guia, #lupa')) return;
+  const foco = document.activeElement;
+  if (foco && foco.closest && foco.closest('.cajon-guion') && /^(TEXTAREA|INPUT|SELECT)$/.test(foco.tagName)) return;
   cerrarFichaParrilla();
 }, true);
 
@@ -27803,7 +27878,7 @@ async function cargarMarcaParrilla() {
   } catch (e) {
     if (cid !== PAR.cid) return;
     toast(`no se ha podido leer la marca: ${e.message}`, true);
-    PAR.marca = { marca: {}, campos: [] };
+    PAR.marca = { marca: {}, campos: [], error: e.message };
     PAR.marcaBorrador = {};
   }
   PAR.marcaCargando = false;
@@ -27816,6 +27891,11 @@ function seccionMarcaParrilla() {
   if (!PAR.marca) {
     setTimeout(cargarMarcaParrilla, 0);
     caja.appendChild(h('div', { clase: 'cargando' }, 'cargando…'));
+    return caja;
+  }
+  if (PAR.marca.error) {
+    caja.appendChild(cajaError(`No se pudo leer la marca: ${PAR.marca.error}`));
+    caja.appendChild(h('button', { clase: 'mini', onclick: () => reintentarMarcaParrilla() }, 'Reintentar'));
     return caja;
   }
   const b = PAR.marcaBorrador || {};

@@ -438,11 +438,14 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/videos/{pid}/optimizar` | Claude revisa el SEO de los textos: {redes}. Deja una PROPUESTA campo a |
 | `POST` | `/api/publicar/videos/{pid}/portada` | Sube una imagen de portada (multipart, campo «portada»). |
 | `GET` | `/api/publicar/videos/{pid}/portada.jpg` | La imagen de portada subida para este vídeo. |
+| `POST` | `/api/publicar/videos/{pid}/portada/descargar` | La portada a tamaño real, para guardarla (respaldo): {diseno}. PNG |
 | `GET` | `/api/publicar/videos/{pid}/portada/diseno` | El diseno de portada de este video (el guardado o uno de partida, SIN |
 | `PUT` | `/api/publicar/videos/{pid}/portada/diseno` | Guarda el diseno (para retocarlo otro dia). No cambia la portada. |
 | `POST` | `/api/publicar/videos/{pid}/portada/fondo` | Sube una imagen para el fondo (multipart, campo «imagen»). -> {nombre} |
 | `GET` | `/api/publicar/videos/{pid}/portada/fondos/{nombre}` | Un fondo subido o hecho con IA. |
 | `POST` | `/api/publicar/videos/{pid}/portada/ia` | Dibuja con la IA de imagenes (SE PAGA): {diseno, que: "fondo"|"portada", |
+| `POST` | `/api/publicar/videos/{pid}/portada/ideas-ia` | Claude lee el guion entero y propone tres ideas de imagen, cada una con |
+| `GET` | `/api/publicar/videos/{pid}/portada/ideas-ia/{rid}` | Cómo van las ideas de imagen, y cuáles son al terminar. |
 | `GET` | `/api/publicar/videos/{pid}/portada/planos/{sid}.jpg` | La imagen de un plano, en pequeno, para elegir el fondo. |
 | `POST` | `/api/publicar/videos/{pid}/portada/plantilla` | Rehace el diseno con otra plantilla: {plantilla, paleta?, fuente?, |
 | `POST` | `/api/publicar/videos/{pid}/portada/proponer` | Claude propone tres portadas (suscripcion, sin coste aparte). -> {id}; |
@@ -468,4 +471,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**354 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**357 endpoints.** Escrito por `generar_api.py` desde `app.py`.

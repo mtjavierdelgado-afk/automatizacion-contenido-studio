@@ -89,6 +89,8 @@ class Mundo:
         self.redes = []
         self.textos = {}
         self.montado = {"vid_basica": True, "vid_relato": True}
+        self.perfil = "studio_estadoplay"
+        self.salud = 200
 
 
 def servidor(mundo):
@@ -126,18 +128,18 @@ def servidor(mundo):
                             if mundo.investigando == 0 else {},
                             "trabajando": {"investigar": {}} if mundo.investigando > 0 else {},
                             "errores": {}},
-                    "envios": envios}
+                    "envios": envios, "ajustes": {"perfil": mundo.perfil}}
 
         def do_GET(self):
             mundo.peticiones.append(("GET", self.path))
             ruta = self.path
             if ruta == "/api/salud":
-                return self._responder(200, {"ok": True})
+                return self._responder(mundo.salud, {"ok": mundo.salud == 200})
             if ruta == "/api/publicar/estado":
                 return self._responder(200, {"clave": {"puesta": True}})
             if ruta == "/api/publicar/proyectos":
                 return self._responder(200, {"proyectos": [
-                    {"id": "_sin", "nombre": "Vídeos sin proyecto", "ajustes": {}},
+                    {"id": "_sin", "nombre": "Vídeos sin proyecto", "ajustes": {"perfil": "studio_sin"}},
                     {"id": "c1", "nombre": "EstadoPlay", "ajustes": {"perfil": "studio_estadoplay"}},
                     {"id": "c2", "nombre": "Suyu", "ajustes": {"perfil": "studio_suyu"}}]})
             m = re.match(r"^/api/proyectos/([^/]+)/coste$", ruta)
@@ -172,7 +174,7 @@ def servidor(mundo):
             if m:
                 cuentas = ({"tiktok": {"usuario": "estadoplay"}, "youtube": {"usuario": "EstadoPlay"},
                             "instagram": None, "facebook": {"usuario": "x", "reconectar": True}}
-                           if m.group(1) == "c1" else {"tiktok": None})
+                           if m.group(1) in ("c1", "_sin") else {"tiktok": None})
                 return self._responder(200, {"existe": True, "ajustes": {"cuentas": cuentas}})
             m = re.match(r"^/api/publicar/videos/([^/]+)/(.+)$", ruta)
             if m:
@@ -285,6 +287,7 @@ def prueba_completa():
         ok(not os.path.exists(PC._ruta_config(proyectos)), "y no deja configuración")     # noqa: SLF001
         ok("EstadoPlay" in salida and "Suyu" not in salida.split("¿En qué cuenta")[1].split("0)")[0],
            "solo ofrece proyectos con alguna cuenta conectada")
+        ok("Vídeos sin proyecto" not in salida, "«Vídeos sin proyecto» no se ofrece (no se puede mover ahí)")
         ok("facebook" not in salida.split("Redes de")[1].split("¿En cuáles")[0],
            "una cuenta que pide reconectar no se ofrece")
         # preparar: elegir EstadoPlay, solo TikTok, confirmar
@@ -342,9 +345,9 @@ def prueba_completa():
         ok(codigo == 1, "y la prueba sale CON FALLOS (el tope cuenta como fallo)")
         srv2.shutdown()
 
-        # RETOMAR: una parte empezada se sigue con --seguir
+        # RETOMAR: una parte empezada (y sin informe todavía) se sigue con --seguir
         est = {"inicio": 0, "tope": 5, "publicar": None, "hechas": ["claves", "basica"],
-               "empezadas": {"relato": 1.0}, "lineas": [], "videos": {"basica": "vid_basica"},
+               "empezadas": {"relato": __import__("time").time() + 60}, "lineas": [], "videos": {"basica": "vid_basica"},
                "resultados": {}}
         PC._escribir_json(PC._ruta_estado(proyectos), est)                                  # noqa: SLF001
         _hijos(hijos, {"fallos": 0, "proyecto": "vid_basica"},
@@ -358,6 +361,49 @@ def prueba_completa():
         ok("--seguir" in open(os.path.join(hijos, "args_prueba_relato.py.txt")).read().splitlines()[-1],
            "y la parte que estaba empezada se sigue con --seguir")
         srv3.shutdown()
+
+        # EL STUDIO NO CONTESTA AL RETOMAR: pausa, y el estado NO se borra
+        est = {"inicio": 0, "tope": 5, "publicar": None, "hechas": ["claves", "basica"],
+               "empezadas": {"basica": 1.0}, "lineas": [], "videos": {"basica": "vid_basica"},
+               "resultados": {}}
+        PC._escribir_json(PC._ruta_estado(proyectos), est)                                  # noqa: SLF001
+        mundo4 = Mundo()
+        mundo4.salud = 503
+        srv4 = servidor(mundo4)
+        codigo, salida = _correr(["--api", f"http://127.0.0.1:{srv4.server_address[1]}", "--hijos", hijos,
+                                  "--pausa", "0.01", "--seguir"])
+        ok(codigo == 2 and "EN PAUSA" in salida, "si el Studio no contesta, la prueba queda en pausa")
+        ok(os.path.exists(PC._ruta_estado(proyectos)), "y lo hecho se conserva para retomarla")      # noqa: SLF001
+        srv4.shutdown()
+
+        # UNA HIJA QUE YA TERMINÓ antes del corte: se usa su informe, no se relanza
+        est = {"inicio": 0, "tope": 5, "publicar": None, "hechas": ["claves", "basica"],
+               "empezadas": {"relato": 1.0}, "lineas": [], "videos": {"basica": "vid_basica"},
+               "resultados": {}}
+        PC._escribir_json(PC._ruta_estado(proyectos), est)                                  # noqa: SLF001
+        carpeta_inf = os.path.join(proyectos, "_sistema", "pruebas_reales")
+        PC._escribir_json(os.path.join(carpeta_inf, "relato_2099-01-01_0000.json"),           # noqa: SLF001
+                          {"fallos": 0, "proyectos": {"a": "vid_relato"}, "lineas": []})
+        os.remove(os.path.join(hijos, "args_prueba_relato.py.txt"))
+        mundo5 = Mundo()
+        srv5 = servidor(mundo5)
+        codigo, salida = _correr(["--api", f"http://127.0.0.1:{srv5.server_address[1]}", "--hijos", hijos,
+                                  "--pausa", "0.01", "--seguir"])
+        ok("ya había terminado antes del corte" in salida, "una parte ya terminada usa su informe")
+        ok(not os.path.exists(os.path.join(hijos, "args_prueba_relato.py.txt")),
+           "y no vuelve a lanzar (ni a pagar) la prueba de foto")
+        srv5.shutdown()
+
+        # EL PERFIL CAMBIÓ desde que se confirmó: no se publica
+        PC._escribir_json(PC._ruta_config(proyectos), config)                              # noqa: SLF001
+        mundo6 = Mundo()
+        mundo6.perfil = "otro_perfil"
+        srv6 = servidor(mundo6)
+        codigo, salida = _correr(["--api", f"http://127.0.0.1:{srv6.server_address[1]}", "--hijos", hijos,
+                                  "--pausa", "0.01"])
+        ok("ha cambiado desde que lo confirmaste" in salida and not mundo6.enviado,
+           "si el perfil cambió desde la confirmación, no publica")
+        srv6.shutdown()
     finally:
         PR._juez = viejo_juez                                         # noqa: SLF001
         srv.shutdown()

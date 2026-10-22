@@ -165,7 +165,8 @@ def preparar(api, proyectos, args):
     opciones = []
     print("Mirando qué cuentas tiene conectadas cada proyecto…")
     for fila in (lista or {}).get("proyectos") or []:
-        if not ((fila.get("ajustes") or {}).get("perfil")):
+        # «Vídeos sin proyecto» no vale: el vídeo de prueba no se puede mover ahí
+        if fila.get("id") == "_sin" or not ((fila.get("ajustes") or {}).get("perfil")):
             continue
         codigo, vistas = api.post(f"/api/publicar/proyectos/{fila['id']}/cuentas")
         cuentas = (((vistas or {}).get("ajustes") or {}).get("cuentas")) or {}
@@ -380,10 +381,23 @@ def main():
 
     # 1. EL SERVIDOR Y LAS CLAVES (siempre: es gratis y pueden haber cambiado)
     est["hechas"] = [f for f in est["hechas"] if f != "claves"]
+    def pausar(motivo):
+        """Para SIN cerrar: el estado se queda y repetir el comando la retoma
+        donde iba. Un Studio reiniciándose o un 429 de OpenAI no puede borrar
+        lo hecho, o la siguiente vez se volvería a pagar todo (revisión 22-10)."""
+        guardar()
+        print(f"\nPRUEBA COMPLETA EN PAUSA: {motivo}.\nLo hecho se conserva: cuando esté "
+              "arreglado, escribe otra vez  asvs probar completo  y sigue donde iba.", flush=True)
+        return 2
+
     if parte("claves"):
-        codigo, _s = api.get("/api/salud")
+        for _intento in range(6):
+            codigo, _s = api.get("/api/salud")
+            if codigo == 200:
+                break
+            time.sleep(10 * args.pausa / 5)
         if not informe.comprueba(codigo == 200, "el Studio contesta", f"HTTP {codigo}"):
-            return cerrar()
+            return pausar("el Studio no contesta (mira  asvs estado)")
         _c, claves = api.post("/api/claves/probar", {"claude": True})
         estados = {p.get("proveedor"): p for p in (claves or {}).get("pruebas") or []}
         for prov in ("openai", "cartesia", "claude"):
@@ -397,7 +411,7 @@ def main():
         if not args.sin_claves and any((estados.get(x) or {}).get("estado") not in ("ok", None)
                                        for x in ("openai", "cartesia")):
             informe.apunta("fallo", "sin las claves de OpenAI y Cartesia no se puede seguir")
-            return cerrar()
+            return pausar("las claves de OpenAI o Cartesia no responden (míralas en Configuración)")
         hecha("claves")
 
     # 2 y 3. LAS PRUEBAS QUE YA HABÍA, como hijas: cada una con su retomar
@@ -408,6 +422,13 @@ def main():
             t0 = time.time()
             est["empezadas"][fase] = t0
             guardar()
+        if seguir:
+            # LA HIJA YA TERMINÓ (dejó su informe) y la que se cortó fue esta:
+            # se usa su informe; lanzarla con --seguir empezaría otro vídeo pagado
+            datos = informe_de_hijo(carpeta, patron, t0)
+            if datos:
+                print("     (esta parte ya había terminado antes del corte: se usa su informe)", flush=True)
+                return 0, datos
         orden = [sys.executable, "-u", os.path.join(args.hijos, guion),
                  "--api", args.api] + extra + (["--seguir"] if seguir else []) \
             + (["--sin-claves"] if args.sin_claves else [])
@@ -415,14 +436,23 @@ def main():
         datos = informe_de_hijo(carpeta, patron, t0)
         return codigo, datos
 
+    def video_a_medias(fichero, clave=None):
+        """El vídeo de una hija que se cortó sin informe (de su estado a medias):
+        lo que gastó cuenta para el tope."""
+        datos = _leer_json(os.path.join(carpeta, fichero)) or {}
+        if clave:
+            return ((datos.get("videos") or {}).get(clave) or {}).get("pid")
+        return datos.get("proyecto")
+
     if parte("basica"):
         if gastado() + MINIMO_BASICA > tope:
             informe.apunta("fallo", "PARADA POR EL TOPE antes del vídeo normal",
                            f"gastado {gastado():.2f} $ + ≈ {MINIMO_BASICA:.2f} $ pasaría de {tope:.2f} $")
             return cerrar()
         codigo, datos = hija("basica", "prueba_real.py", r"\d{4}-\d{2}-\d{2}_\d{4}\.json", [])
-        if datos and datos.get("proyecto"):
-            est["videos"]["basica"] = datos["proyecto"]
+        pid_b = (datos or {}).get("proyecto") or video_a_medias("en_curso.json")
+        if pid_b:
+            est["videos"]["basica"] = pid_b
         est["resultados"]["basica"] = _resumen_hijo(datos, codigo)
         informe.comprueba(bool(datos) and not datos.get("fallos"),
                           f"el vídeo normal sale bien ({_texto_resumen(datos)})",
@@ -437,7 +467,8 @@ def main():
         else:
             codigo, datos = hija("relato", "prueba_relato.py", r"relato_\d{4}-\d{2}-\d{2}_\d{4}\.json",
                                  ["--solo", est.get("escenario") or "a", "--tope", f"{queda:.2f}"])
-            pid = ((datos or {}).get("proyectos") or {}).get(est.get("escenario") or "a")
+            pid = ((datos or {}).get("proyectos") or {}).get(est.get("escenario") or "a") \
+                or video_a_medias("en_curso_relato.json", est.get("escenario") or "a")
             if pid:
                 est["videos"]["relato"] = pid
             est["resultados"]["relato"] = _resumen_hijo(datos, codigo)
@@ -554,6 +585,14 @@ def main():
             hecha("publicar")
             return cerrar()
         if not est.get("enviado"):
+            _c, ficha = api.get(f"/api/publicar/videos/{pid}")
+            perfil_ahora = str(((ficha or {}).get("ajustes") or {}).get("perfil") or "")
+            if perfil_ahora.lower() != str(est["publicar"].get("perfil") or "").lower():
+                informe.apunta("fallo", "el perfil de Upload-Post de ese proyecto ha cambiado desde que "
+                               "lo confirmaste: no se publica", f"ahora «{perfil_ahora}», confirmado "
+                               f"«{est['publicar'].get('perfil')}»")
+                hecha("publicar")
+                return cerrar()
             codigo, r = api.post(f"/api/publicar/videos/{pid}/enviar",
                                  {"redes": redes, "modo": "ahora", "confirmado": True})
             if not informe.comprueba(codigo == 202, f"se envía a {', '.join(redes)}",

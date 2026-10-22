@@ -457,14 +457,36 @@ probar() {
     registro="$carpeta/registro_completa.log"; pidf="$carpeta/proceso_completa.pid"
     aviso="La prueba completa hace vídeos de verdad (tope 5 \$ salvo --tope N), PUBLICA en la cuenta que elijas y tarda 1-2 horas."
   fi
+  local ver="" args="" otro otra comando="asvs probar"
+  [ -n "$completo" ] && comando="asvs probar completo"
+  [ "$guion" = "herramientas/prueba_relato.py" ] && comando="asvs probar relato"
   if [ "${1:-}" = "nueva" ]; then seguir=""; shift; fi
-  if [ "${1:-}" = "ver" ]; then shift; fi
+  if [ "${1:-}" = "ver" ]; then ver=1; shift; fi
+  # cada argumento citado: con espacios o comillas llega entero al bash de abajo
+  if [ $# -gt 0 ]; then args="$(printf '%q ' "$@")"; fi
   sudo -u "$USUARIO" mkdir -p "$carpeta"
   pid="$(cat "$pidf" 2>/dev/null || true)"
   if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
     echo "La prueba real ya está corriendo (proceso $pid). Te enseño cómo va;"
-    echo "si la consola se corta, sigue sola: vuelve a escribir  asvs probar  para verla."
+    echo "si la consola se corta, sigue sola: vuelve a escribir  $comando  para verla."
+  elif [ -n "$ver" ]; then
+    # «ver» solo enseña: nada en marcha, el registro de la última y ya
+    echo "No hay ninguna prueba de este tipo en marcha. La última:"
+    echo
+    cat "$registro" 2>/dev/null || echo "(todavía no se ha hecho ninguna)"
+    return
   else
+    # UNA PRUEBA DE PAGO A LA VEZ: dos tandas de imagenes a la vez rompen la
+    # regla 2 de CLAUDE.md, y la completa comparte el estado de la prueba real
+    for otra in "$carpeta"/proceso.pid "$carpeta"/proceso_relato.pid "$carpeta"/proceso_completa.pid; do
+      [ "$otra" = "$pidf" ] && continue
+      otro="$(cat "$otra" 2>/dev/null || true)"
+      if [ -n "$otro" ] && kill -0 "$otro" 2>/dev/null; then
+        echo "Ya hay otra prueba de pago corriendo (proceso $otro, $(basename "$otra"))."
+        echo "Espera a que termine: dos a la vez se pisan y gastan el doble."
+        return 0
+      fi
+    done
     if [ -n "$seguir" ] && [ -f "$carpeta/$estado" ]; then
       echo "Hay una prueba real a medias: la sigo donde se quedó (sin volver a pagar lo hecho)."
     else
@@ -474,19 +496,21 @@ probar() {
         # las preguntas, AQUI y con la consola: la prueba desligada no puede preguntar
         sudo -u "$USUARIO" -H bash -c "set -a; . '$RAIZ/datos/entorno'; set +a; cd '$RAIZ/app' && \
           PUERTO='${puerto:-8110}' '$RAIZ/venv/bin/python' -u $guion --preparar \
-          --api 'http://127.0.0.1:${puerto:-8110}' $*" || return 0
+          --api 'http://127.0.0.1:${puerto:-8110}' $args" || return 0
       fi
     fi
-    echo "Corre APARTE de esta consola: si se corta, sigue sola. Para volver a verla:  asvs probar"
+    echo "Corre APARTE de esta consola: si se corta, sigue sola. Para volver a verla:  $comando"
     sudo -u "$USUARIO" bash -c "set -a; . '$RAIZ/datos/entorno'; set +a; cd '$RAIZ/app' && \
       PUERTO='${puerto:-8110}' setsid nohup '$RAIZ/venv/bin/python' -u $guion \
-      --api 'http://127.0.0.1:${puerto:-8110}' $seguir $* > '$registro' 2>&1 < /dev/null & echo \$! > '$pidf'"
+      --api 'http://127.0.0.1:${puerto:-8110}' $seguir $args > '$registro' 2>&1 < /dev/null & echo \$! > '$pidf'"
     sleep 1
     pid="$(cat "$pidf" 2>/dev/null || true)"
   fi
   echo
-  # enseña el registro hasta que la prueba acaba (Ctrl+C solo deja de mirar)
-  tail -n +1 -f --pid="${pid:-1}" "$registro" 2>/dev/null || true
+  # enseña el registro hasta que la prueba acaba (Ctrl+C solo deja de mirar);
+  # sin proceso (no arrancó) no se espera a nadie: se enseña lo que dijo
+  if [ -z "$pid" ]; then cat "$registro" 2>/dev/null || true; return 0; fi
+  tail -n +1 -f --pid="$pid" "$registro" 2>/dev/null || true
 }
 
 # LA REVISION GRATIS (herramientas/revisar.py): todas las suites de pruebas.sh
@@ -519,14 +543,19 @@ revisar() {
     # ficheros de root dentro del codigo (las caches de Python)
     rm -rf "/tmp/estudio_prueba_visual" "/tmp/estudio_pruebas_estadisticas.json" 2>/dev/null || true
     chown -R "$USUARIO:$USUARIO" "$RAIZ/app" 2>/dev/null || true
-    sudo -u "$USUARIO" -H bash -c "cd '$RAIZ/app' && PYTHON='$RAIZ/venv/bin/python' \
+    # del entorno del servicio, SOLO las herramientas (el navegador del VPS,
+    # ffmpeg, las fuentes, los lotes): sin ESTUDIO_EDGE, Edge no arranca bajo
+    # AppArmor. Los datos de verdad (proyectos, claves, ajustes) NO se pasan.
+    sudo -u "$USUARIO" -H bash -c "set -a; . <(grep -E '^ESTUDIO_(EDGE|FFMPEG|FFPROBE|FUENTES|FUENTES_GRAFISMO|LOTES|MODELO_PROFUNDIDAD|MOTORES)=' '$RAIZ/datos/entorno' 2>/dev/null); set +a; \
+      cd '$RAIZ/app' && PYTHON='$RAIZ/venv/bin/python' \
       setsid nohup '$RAIZ/venv/bin/python' -u herramientas/revisar.py --informes '$carpeta' \
       > '$registro' 2>&1 < /dev/null & echo \$! > '$pidf'"
     sleep 1
     pid="$(cat "$pidf" 2>/dev/null || true)"
   fi
   echo
-  tail -n +1 -f --pid="${pid:-1}" "$registro" 2>/dev/null || true
+  if [ -z "$pid" ]; then cat "$registro" 2>/dev/null || true; return 0; fi
+  tail -n +1 -f --pid="$pid" "$registro" 2>/dev/null || true
 }
 
 # COMPARAR EL GUION CON DOS MODELOS (herramientas/comparar_guion.py). La lista

@@ -76,6 +76,17 @@ QUE_PRUEBA = {
     "prueba_recorrido.py": "la pantalla entera, botón por botón",
 }
 
+#: Las variables del entorno que señalan DATOS de verdad del servicio: las
+#: suites no deben verlas (cada una monta los suyos). Las de las herramientas
+#: (ESTUDIO_EDGE, ESTUDIO_FFMPEG, ESTUDIO_FUENTES, ESTUDIO_LOTES…) sí pasan: sin
+#: ESTUDIO_EDGE el navegador no arranca en el VPS (revisión del 22-10).
+DATOS_DEL_SERVICIO = {
+    "ESTUDIO_PROYECTOS", "ESTUDIO_SECRETOS", "ESTUDIO_AJUSTES", "ESTUDIO_PRESETS",
+    "ESTUDIO_COSTE_GLOBAL", "ESTUDIO_BITACORA_GLOBAL", "ESTUDIO_ESTADISTICAS",
+    "ESTUDIO_RECETAS", "ESTUDIO_TARIFAS", "ESTUDIO_ENV", "ESTUDIO_API",
+    "ESTUDIO_PRONUNCIACIONES", "ESTUDIO_ASISTENTE_HISTORIAL", "ESTUDIO_METRICAS_AUTO",
+}
+
 #: Tiempo de una suite sin medida anterior (segundos).
 POR_DEFECTO_S = 60
 POR_DEFECTO_ESPECIALES = {"prueba_recorrido.py": 900, "prueba_api.py": 240,
@@ -237,7 +248,10 @@ def informe_final(marcador, detalles, analisis, codigo):
     if raras:
         lineas.append("\nLAS HERRAMIENTAS DE ANÁLISIS DICEN (no siempre es un fallo):")
         lineas += [f"  · {l.strip()[:160]}" for l in raras]
-    if not mal:
+    if not mal and codigo != 0:
+        lineas.append("\npruebas.sh terminó con error sin decir qué prueba falló (mira las primeras "
+                      "líneas del registro: ¿falta Python?).")
+    elif not mal:
         lineas.append("\nTodo lo que se prueba sin gastar funciona. Para probar con vídeos de verdad: "
                       " asvs probar completo")
     else:
@@ -273,7 +287,8 @@ def main():
     # LAS SUITES NO VEN EL ENTORNO DEL SERVICIO: cada una monta sus datos de
     # prueba, y con ESTUDIO_PROYECTOS, ESTUDIO_SECRETOS o ESTUDIO_AJUSTES del
     # servicio puestos una suite despistada escribiria en los de verdad
-    entorno = {k: v for k, v in os.environ.items() if not k.startswith("ESTUDIO_")}
+    entorno = {k: v for k, v in os.environ.items() if k not in DATOS_DEL_SERVICIO
+               and not k.startswith("ESTUDIO_BANCO")}
     proceso = subprocess.Popen(orden, cwd=os.path.dirname(os.path.abspath(args.pruebas)), env=entorno,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                text=True, encoding="utf-8", errors="replace", bufsize=1)

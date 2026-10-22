@@ -4590,9 +4590,11 @@ def parrilla_de_guiones(navegador, datos):
     pg = Pagina(navegador, datos)
     pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
     ok(pg.esperar(".parrilla h2", "Automatizar"), "Automatizar abre la Parrilla (ya no es una pestaña vacía)")
-    ok(pg.visible(".parrilla .pestanas-publicar button", "Piloto automático"),
+    # rediseno-automatizar (22-10): el piloto, una tarjeta «próximamente» (no una pestaña que no se pulsa)
+    ok(pg.esperar(".piloto-parrilla", "Piloto automático", 10) and pg.visible(".piloto-parrilla .pastilla", "próximamente"),
        "el piloto automático sale como «próximamente»")
-    ok(pg.visible(".parrilla-opcional", "opcional"), "y dice que la Parrilla es opcional")
+    pg.pulsar(".cab-automatizar .boton-i")
+    ok(pg.visible(".parrilla-opcional", "opcional"), "y la «i» dice que la Parrilla es opcional")
     pg.js(f"elegirProyectoParrilla('{cid}');")
     pg.p.wait_for_timeout(800)
     ok(pg.esperar(".vacio-parrilla h3", "Todavía no hay guiones"), "un proyecto sin guiones lo dice")
@@ -4614,42 +4616,46 @@ def parrilla_de_guiones(navegador, datos):
     pg.p.locator("#modulo [data-foco=parrilla-pegar]").fill(guion)
     pg.p.locator(".anadir-parrilla input[data-foco=parrilla-nombre]").fill("Octubre")
     pg.pulsar(".anadir-parrilla button.primario", "Guardar en la Parrilla")
-    ok(pg.esperar(".fila-guion .titulo-guion", "EP01 — Fregadero simple o doble", 10),
+    ok(pg.esperar(".tarjeta-guion .titulo-guion", "EP01 — Fregadero simple o doble", 10),
        "guardado en la Parrilla, en su matriz")
-    ok(pg.visible(".cab-matriz h3", "Octubre"), "con el nombre de la matriz")
-    ok(pg.visible(".fila-guion .pastilla", "pendiente"), "pendiente")
+    ok(pg.visible(".chip-matriz", "Octubre"), "con el nombre de la matriz")
+    ok(pg.visible(".columna-tablero[data-columna=pendiente] .tarjeta-guion", "EP01"), "pendiente")
 
     # pedir a Claude (el doble)
-    pg.pulsar(".filtros-parrilla button", "Añadir guiones")
+    pg.pulsar(".cab-automatizar .anadir-cabecera", "Añadir guiones")
     pg.pulsar(".origen-parrilla button", "Pedir a Claude")
     pg.p.locator("#modulo [data-foco=parrilla-peticion]").fill("ideas de alquiler de consolas para fiestas")
     pg.p.locator("#modulo [data-foco=parrilla-cuantos]").fill("3")
     pg.pulsar(".anadir-parrilla button.primario", "Pedir a Claude")
     ok(pg.esperar(".trabajo-parrilla", "guardados", 25), "Claude los escribe y lo dice")
-    ok(pg.p.locator(".fila-guion").count() >= 4, "salen en la Parrilla")
+    ok(pg.p.locator(".tarjeta-guion").count() >= 4, "salen en la Parrilla")
 
     # subir un Word
     docx = os.path.join(datos["base"], "matriz_parrilla.docx")
     _docx_de_prueba(docx, ["Cumpleaños con consola", "---", "Karaoke en casa"])
-    pg.pulsar(".filtros-parrilla button", "Añadir guiones")
+    pg.pulsar(".cab-automatizar .anadir-cabecera", "Añadir guiones")
     pg.pulsar(".origen-parrilla button", "Subir un documento")
     pg.p.set_input_files(".anadir-parrilla input[type=file]", docx)
     pg.p.wait_for_timeout(400)
     ok(pg.visible(".anadir-parrilla .meta", "matriz_parrilla.docx"), "el Word elegido se ve")
     pg.pulsar(".anadir-parrilla button.primario", "Subir y convertir")
-    ok(pg.esperar(".cab-matriz h3", "matriz_parrilla", 25), "convertido, en una matriz con el nombre del fichero")
+    ok(pg.esperar(".chip-matriz", "matriz_parrilla", 25), "convertido, en una matriz con el nombre del fichero")
     pg.captura("parrilla_lista")
 
-    # la ficha
-    pg.pulsar(".fila-guion .titulo-guion", "EP01")
+    # la ficha, en su panel lateral (rediseno-automatizar): Guion · Al Encargo · Estado
+    pg.pulsar(".tarjeta-guion", "EP01")
     ok(pg.esperar(".ficha-parrilla h3", "EP01"), "la ficha del guion")
+    pg.pulsar(".pestanas-cajon button", "Al Encargo")
     ok(pg.visible(".encargo-parrilla .material-parrilla", "Por dentro, no."), "con lo que irá al Encargo")
     ok(pg.visible(".encargo-parrilla .pista", "Esto YA es el guion"), "uso exacto: «Esto YA es el guion»")
+    pg.pulsar(".pestanas-cajon button", "Guion")
     pg.p.locator(".ficha-parrilla .rejilla-parrilla select").first.select_option("adaptar")
     pg.p.wait_for_timeout(1200)
     texto = pg.p.evaluate("() => (document.querySelector('#modulo [data-foco=parrilla-texto]') || {}).value || ''")
     ok("Uso: adaptar" in texto, "cambiar el uso cambia su línea en el texto")
+    pg.pulsar(".pestanas-cajon button", "Al Encargo")
     ok(pg.visible(".encargo-parrilla .dato-encargo", "Escríbenos"), "y la llamada a la acción pasa a ir «al final»")
+    pg.pulsar(".pestanas-cajon button", "Guion")
     pg.p.locator(".ficha-parrilla .boton-guia").first.click()
     ok(pg.esperar("#ventana-guia h2", "El formato del guion", 10), "«✦ Guía» abre la guía del formato")
     ok(pg.visible("#ventana-guia pre", "GUION ORIGINAL"), "con el prompt del anexo para otra IA")
@@ -4658,8 +4664,10 @@ def parrilla_de_guiones(navegador, datos):
     pg.captura("parrilla_ficha")
 
     # pasar al Encargo: llena «Un vídeo nuevo» y no crea nada
+    ok(pg.visible(".ficha-parrilla", "EP01"), "Escape cierra la guía, no el panel")
+    pg.pulsar(".pestanas-cajon button", "Al Encargo")
     pg.p.locator(".pasar-encargo select").first.select_option(datos["preset"])
-    pg.pulsar(".pasar-encargo button", "Pasar al Encargo")
+    pg.pulsar(".pie-cajon .boton-pasar-encargo", "Pasar al Encargo")
     fin = time.time() + 10
     while time.time() < fin and not pg.p.evaluate("() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"):
         pg.p.wait_for_timeout(300)
@@ -4674,8 +4682,8 @@ def parrilla_de_guiones(navegador, datos):
     _r, despues = api.get("/api/proyectos")
     ok(len((despues or {}).get("proyectos") or []) == n_antes, "sin crear ningún vídeo")
     pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
-    ok(pg.esperar(".ficha-parrilla .pastilla", "usado", 10) or pg.esperar(".fila-guion .pastilla", "usado", 10),
-       "el guion queda «usado»")
+    ok(pg.esperar(".columna-tablero[data-columna=usado] .tarjeta-guion", "EP01", 10),
+       "el guion queda «usado» (en su columna)")
     pg.sin_errores("la Parrilla")
     pg.cerrar()
 
@@ -4684,13 +4692,14 @@ def parrilla_de_guiones(navegador, datos):
     pg.js("document.documentElement.dataset.tema = 'claro';")
     pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
     pg.js(f"elegirProyectoParrilla('{cid}');")
-    ok(pg.esperar(".fila-guion", segundos=10), "en el móvil se ven los guiones")
+    ok(pg.esperar(".tarjeta-guion", segundos=10), "en el móvil se ven los guiones")
     for seccion_ in ("parrilla", "anadir"):
         pg.js(f"irASeccionParrilla('{seccion_}');")
         ancho = pg.p.evaluate("() => document.documentElement.scrollWidth")
         ok(ancho <= 391, f"«{seccion_}» cabe a lo ancho en el móvil ({ancho} px)")
-    pg.pulsar(".pestanas-publicar button", "Parrilla")
-    pg.pulsar(".fila-guion button", "Abrir")
+    pg.pulsar(".pestanas-automatizar button", "Parrilla")
+    pg.pulsar(".selector-columnas button", "Pendientes")
+    pg.pulsar(".tarjeta-guion")
     ok(pg.esperar(".ficha-parrilla", segundos=10), "la ficha en el móvil")
     ancho = pg.p.evaluate("() => document.documentElement.scrollWidth")
     ok(ancho <= 391, f"y cabe ({ancho} px)")
@@ -5072,18 +5081,19 @@ def parrilla_marca_chat_y_resultados(navegador, datos):
     pg = Pagina(navegador, datos)
     pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
     pg.js(f"elegirProyectoParrilla('{cid}');")
-    pg.pulsar(".pestanas-publicar button", "Marca del cliente")
+    pg.pulsar(".pestanas-automatizar button", "Marca del cliente")
     ok(pg.esperar(".marca-parrilla [data-foco=marca-quien]", segundos=10), "la pestaña de la marca del cliente")
     pg.p.locator("[data-foco=marca-quien]").fill("EstadoPlay, consolas para fiestas en Lima")
     pg.p.locator("[data-foco=marca-cta]").fill("Escríbenos por WhatsApp")
-    pg.pulsar(".marca-parrilla button", "Guardar la marca")
-    ok(pg.esperar(".marca-parrilla .pista", "guardada el", 10), "se guarda")
+    pg.pulsar(".marca-parrilla .barra-accion button", "Guardar la marca")
+    ok(pg.esperar(".marca-parrilla .barra-accion", "guardada el", 10), "se guarda")
     _r, marca = datos["api"].get(f"/api/parrilla/proyectos/{cid}/marca")
     ok(((marca or {}).get("marca") or {}).get("cta") == "Escríbenos por WhatsApp", "y queda en el servidor")
 
-    pg.pulsar(".pestanas-publicar button", "Añadir guiones")
+    pg.pulsar(".pestanas-automatizar button", "Añadir guiones")
     pg.pulsar(".origen-parrilla button", "Conversar con Claude")
     ok(pg.esperar(".chat-parrilla .chat-vacio", segundos=10), "el chat, vacío, explica qué se puede hacer")
+    ok(pg.visible(".pestanas-automatizar button.activa", "Conversar con Claude"), "en su propia pestaña")
     png = os.path.join(datos["base"], "captura_chat.png")
     _png(png, (200, 80, 120))
     pg.p.locator("[data-foco=parrilla-chat]").fill("Hazme un guion para un cumpleaños infantil")
@@ -5099,11 +5109,12 @@ def parrilla_marca_chat_y_resultados(navegador, datos):
     ok(pg.esperar(".guardar-chat .pastilla", "en la Parrilla", 10), "«Guardar en la Parrilla» lo guarda")
     pg.captura("parrilla_chat")
 
+    pg.pulsar(".pestanas-automatizar button", "Añadir guiones")
     pg.pulsar(".origen-parrilla button", "Desde mis resultados")
     ok(pg.esperar(".anadir-parrilla .caja-aviso", "Actualizar", 10) or pg.esperar(".post-parrilla", segundos=5),
        "«Desde mis resultados» enseña los vídeos o dice cómo tenerlos")
-    pg.pulsar(".pestanas-publicar button", "Parrilla")
-    ok(pg.esperar(".cab-matriz h3", "Conversación", 10), "el guion del chat está en la Parrilla")
+    pg.pulsar(".pestanas-automatizar button", "Parrilla")
+    ok(pg.esperar(".chip-matriz", "Conversación", 10), "el guion del chat está en la Parrilla")
     pg.sin_errores("la marca, el chat y los resultados")
     pg.cerrar()
 
@@ -5132,7 +5143,7 @@ def parrilla_analizar_una_cuenta(navegador, datos):
     pg = Pagina(navegador, datos)
     pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
     pg.js(f"elegirProyectoParrilla('{cid}');")
-    pg.pulsar(".pestanas-publicar button", "Analizar una cuenta")
+    pg.pulsar(".pestanas-automatizar button", "Cuentas que te gustan")
     ok(pg.esperar(".conexiones-cuentas", segundos=10), "la pestaña con sus Conexiones")
     ok(pg.visible(".conexiones-cuentas .caja-aviso", "SIMULADO"), "avisa de que es simulado")
     pg.p.locator("[data-foco=conexion-apify_token]").fill("apify_api_recorrido_1234")
@@ -5154,9 +5165,9 @@ def parrilla_analizar_una_cuenta(navegador, datos):
     ok(pg.esperar(".texto-analisis", "QUÉ LE FUNCIONA", 20), "el análisis")
     pg.captura("cuenta_analizada")
     pg.pulsar(".guiones-cuenta button.primario", "Escribir guiones")
-    ok(pg.esperar(".cab-matriz .meta", "con lo que le funciona a @personal_lucia", 25),
+    ok(pg.esperar('.chip-matriz[title*="con lo que le funciona a @personal_lucia"]', segundos=25),
        "los guiones van a la Parrilla, diciendo de qué cuenta salen")
-    pg.pulsar(".pestanas-publicar button", "Analizar una cuenta")
+    pg.pulsar(".pestanas-automatizar button", "Cuentas que te gustan")
     pg.pulsar(".cuentas-guardadas button", "personal_lucia")
     pg.pulsar(".guiones-cuenta button", "Hablar de ella en el chat")
     ok(pg.esperar(".chat-parrilla", segundos=10), "«Hablar de ella en el chat» abre el chat")
@@ -5176,6 +5187,269 @@ def parrilla_analizar_una_cuenta(navegador, datos):
     ok(ancho <= 391, f"la cuenta cabe a lo ancho en el móvil ({ancho} px)")
     pg.sin_errores("analizar una cuenta en el móvil")
     pg.cerrar()
+
+
+@escenario
+def automatizar_tablero_y_panel(navegador, datos):
+    """rediseno-automatizar (22-10-2026, maqueta aprobada por el dueño): la
+    cabecera con el proyecto y «+ Añadir guiones», las cinco pestañas (sin las
+    que no se podían pulsar), la marca a la vista, el tablero Pendientes ·
+    Usados · Publicados con sus filtros, la ficha en un panel lateral con
+    «Pasar al Encargo ›» siempre abajo, las tarjetas de dónde salen los
+    guiones con su coste (el doble de Claude: nada se paga) y el móvil."""
+    api = datos["api"]
+    r, d = api.post("/api/clientes", {"nombre": "Tablero de prueba"})
+    cid = ((d or {}).get("cliente") or {}).get("id")
+    ok(r.status_code in (200, 201) and cid, f"un proyecto nuevo para el tablero ({r.status_code})")
+    plantilla = ("{c} — {t}\nCliente / proyecto: Tablero\nUso: adaptar\nRed: Reels\nFormato: vertical\n"
+                 "Duración: 30 s\nObjetivo: que pidan\nCTA: Escríbenos\nTono: cercano\n\n"
+                 "ESCENA 1\nVisual: una consola\nVoz: «{t}.»\n\n"
+                 "PARA EL ENCARGO\n- Material: {t}, en Lima.\n- Indicaciones: cercano\n"
+                 "- Llamadas a la acción: Escríbenos\n- Duración: 30 s · Formato: vertical\n\nAVISOS\n- ninguno")
+    matriz = ""
+    for c, t in (("TB01", "Uno pendiente"), ("TB02", "Otro pendiente"), ("TB03", "Uno usado"), ("TB04", "Uno publicado")):
+        cuerpo = {"texto": plantilla.format(c=c, t=t)}
+        cuerpo.update({"matriz": matriz} if matriz else {"nombre": "Tablero"})
+        r, d = api.post(f"/api/parrilla/proyectos/{cid}/guiones", cuerpo)
+        matriz = matriz or (d or {}).get("matriz") or ""
+    _r, todo = api.get(f"/api/parrilla/proyectos/{cid}")
+    ids = {g["codigo"]: g["id"] for m in (todo or {}).get("matrices", []) for g in m.get("guiones", [])}
+    api.put(f"/api/parrilla/proyectos/{cid}/guiones/{ids.get('TB03')}", {"estado": "usado"})
+    api.put(f"/api/parrilla/proyectos/{cid}/guiones/{ids.get('TB04')}", {"estado": "publicado"})
+    ok(len(ids) == 4, f"cuatro guiones sembrados en una matriz ({len(ids)})")
+
+    pg = Pagina(navegador, datos, nombre="automatizar tablero")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    ok(pg.esperar(".tarjeta-guion", "TB01", 10), "el tablero del proyecto")
+    # la cabecera: el proyecto como chip y «+ Añadir guiones»
+    ok(pg.p.evaluate("() => (document.querySelector('.chip-proyecto-auto select') || {}).value") == cid,
+       "el proyecto, como chip en la cabecera")
+    ok(pg.visible(".cab-automatizar .anadir-cabecera", "+ Añadir guiones"), "con «+ Añadir guiones» al lado")
+    pestanas = pg.p.evaluate("() => [...document.querySelectorAll('.pestanas-automatizar button')].map(b => b.textContent.trim())")
+    ok(pestanas == ["Parrilla", "Añadir guiones", "Conversar con Claude", "Cuentas que te gustan", "Marca del cliente"],
+       f"cinco pestañas, todas pulsables: {pestanas}")
+    ok(pg.p.evaluate("() => ![...document.querySelectorAll('#modulo button[disabled]')].some(b => "
+                     "/Piloto|Ficha de un guion/.test(b.textContent))"), "sin pestañas desactivadas")
+    # la marca, a la vista
+    ok(pg.visible(".linea-marca.caja-aviso", "Sin marca de Tablero de prueba"), "sin marca, lo dice arriba de la Parrilla")
+    ok(pg.visible(".pestanas-automatizar button .punto"), "y su pestaña lleva un punto")
+    # el tablero por estado
+    cuentas = pg.p.evaluate("() => Object.fromEntries([...document.querySelectorAll('.columna-tablero')].map(c => "
+                            "[c.dataset.columna, c.querySelectorAll('.tarjeta-guion').length]))")
+    ok(cuentas == {"pendiente": 2, "usado": 1, "publicado": 1}, f"tres columnas por estado: {cuentas}")
+    pg.p.locator("[data-foco=parrilla-buscar]").fill("TB02")
+    pg.p.wait_for_timeout(500)
+    ok(pg.p.locator(".tarjeta-guion").count() == 1 and pg.visible(".columna-tablero .vacia-columna", "Ninguno con este filtro"),
+       "el buscador filtra el tablero")
+    pg.p.locator("[data-foco=parrilla-buscar]").fill("")
+    pg.pulsar(".chip-matriz", "Tablero (4)")
+    ok(pg.esperar(".cab-matriz h3", "Tablero", 5), "una matriz elegida enseña sus datos")
+    pg.pulsar(".cab-matriz button", "Renombrar")
+    ok(pg.esperar(".capa-dialogo input", segundos=5), "«Renombrar» pregunta en un panel de la casa (sin prompt)")
+    pg.p.locator(".capa-dialogo input").first.fill("Tablero renombrado")
+    pg.p.locator(".capa-dialogo button[type=submit]").click()
+    ok(pg.esperar(".chip-matriz", "Tablero renombrado", 10), "y la renombra")
+    pg.pulsar(".cab-matriz button", "Borrar")
+    ok(pg.esperar(".capa-dialogo", "No se puede deshacer", 5), "«Borrar» la matriz pregunta antes, con su aviso")
+    pg.pulsar(".capa-dialogo button", "Cancelar")
+    pg.p.wait_for_timeout(400)
+    ok(pg.p.locator(".tarjeta-guion").count() == 4, "y al cancelar no se borra nada")
+    pg.captura("automatizar_tablero")
+
+    # la ficha, en el panel lateral
+    pg.pulsar(".tarjeta-guion", "TB01")
+    ok(pg.esperar(".cajon-guion h3", "TB01", 10), "pulsar una tarjeta abre su ficha en el panel lateral")
+    ok(pg.visible(".tarjeta-guion", "TB02"), "sin perder la Parrilla de vista (detrás)")
+    for pestana in ("Guion", "Al Encargo", "Estado"):
+        pg.pulsar(".pestanas-cajon button", pestana)
+        ok(pg.visible(".pie-cajon .boton-pasar-encargo", "Pasar al Encargo"),
+           f"«Pasar al Encargo ›» a la vista desde «{pestana}»")
+    pg.pulsar(".pestanas-cajon button", "Guion")
+    area = pg.p.locator("#modulo [data-foco=parrilla-texto]")
+    area.fill(area.input_value() + "\n")
+    pg.p.wait_for_timeout(300)
+    ok(pg.p.evaluate("() => document.querySelector('.pie-cajon .boton-pasar-encargo').disabled")
+       and pg.visible(".pie-cajon .texto-estado", "Guarda antes el texto"),
+       "con el texto a medio cambiar, «Pasar al Encargo» se apaga y dice por qué")
+    pg.pulsar(".cajon-guion button", "Descartar cambios")
+    ok(not pg.p.evaluate("() => document.querySelector('.pie-cajon .boton-pasar-encargo').disabled"),
+       "al descartar, se vuelve a encender")
+    # CERRAR NO PIERDE LO ESCRITO (revisión independiente, 22-10): Escape con el
+    # foco en el texto no cierra, y × con cambios pregunta (Seguir / Descartar / Guardar)
+    area = pg.p.locator("#modulo [data-foco=parrilla-texto]")
+    original = area.input_value()
+    area.fill(original + "\n- revisar la luz")
+    area.focus()
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    ok(pg.visible(".cajon-guion") and pg.visible(".cajon-guion .guardar-texto-guion:not([disabled])"),
+       "Escape con el foco en el texto no cierra el panel")
+    pg.pulsar(".cajon-guion .cerrar-cajon")
+    ok(pg.esperar(".capa-dialogo", "Tienes cambios sin guardar en «TB01", 5),
+       "cerrar con el texto a medio cambiar pregunta antes")
+    pg.pulsar(".capa-dialogo button", "Seguir editando")
+    ok(pg.visible(".cajon-guion") and "revisar la luz" in pg.p.locator("#modulo [data-foco=parrilla-texto]").input_value(),
+       "«Seguir editando» deja el panel abierto con lo escrito")
+    pg.p.mouse.click(30, 300)
+    ok(pg.esperar(".capa-dialogo", "cambios sin guardar", 5), "pulsar fuera también pregunta")
+    pg.pulsar(".capa-dialogo button", "Guardar")
+    pg.p.wait_for_timeout(1500)
+    _r, g1 = api.get(f"/api/parrilla/proyectos/{cid}/guiones/{ids.get('TB01')}")
+    ok(not pg.visible(".cajon-guion") and "revisar la luz" in ((g1 or {}).get("texto") or ""),
+       "«Guardar» lo guarda (como «Guardar el texto») y cierra")
+    pg.pulsar(".tarjeta-guion", "TB01")
+    area = pg.p.locator("#modulo [data-foco=parrilla-texto]")
+    area.fill(original)
+    pg.pulsar(".cajon-guion .cerrar-cajon")
+    ok(pg.esperar(".capa-dialogo", "cambios sin guardar", 5), "(otra vez, para descartar)")
+    pg.pulsar(".capa-dialogo button", "Descartar")
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible(".cajon-guion"), "«Descartar» cierra sin guardar")
+    pg.pulsar(".tarjeta-guion", "TB01")
+    ok("revisar la luz" in pg.p.locator("#modulo [data-foco=parrilla-texto]").input_value(),
+       "y al reabrirlo está lo guardado, no lo descartado")
+    pg.pulsar(".pestanas-cajon button", "Estado")
+    pg.pulsar(".cajon-guion button", "Borrar el guion")
+    ok(pg.esperar(".capa-dialogo", "No se puede deshacer", 5), "«Borrar el guion» pregunta antes")
+    pg.pulsar(".capa-dialogo button", "Cancelar")
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible(".cajon-guion"), "Escape cierra el panel")
+    pg.pulsar(".tarjeta-guion", "TB01")
+    pg.p.mouse.click(30, 300)
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible(".cajon-guion"), "pulsar fuera también")
+    pg.captura("automatizar_ficha")
+
+    # «Pasar al Encargo ›»: llena «Un vídeo nuevo» y no crea nada
+    _r, antes = api.get("/api/proyectos")
+    pg.pulsar(".tarjeta-guion", "TB02")
+    pg.pulsar(".pestanas-cajon button", "Al Encargo")
+    pg.p.locator(".pasar-encargo select").first.select_option(datos["preset"])
+    pg.p.wait_for_timeout(300)
+    pg.pulsar(".pie-cajon .boton-pasar-encargo", "Pasar al Encargo")
+    if pg.esperar(".capa-dialogo", "medio escribir", 3):
+        pg.pulsar(".capa-dialogo button[type=submit]")
+    fin = time.time() + 10
+    while time.time() < fin and not pg.p.evaluate("() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"):
+        pg.p.wait_for_timeout(300)
+    material = pg.p.evaluate("() => (APP.light.video.encargo || {}).material || ''")
+    ok(material == "Otro pendiente, en Lima.", f"«Pasar al Encargo ›» llena «Un vídeo nuevo»: {material!r}")
+    _r, despues = api.get("/api/proyectos")
+    ok(len((despues or {}).get("proyectos") or []) == len((antes or {}).get("proyectos") or []), "sin crear ningún vídeo")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    ok(pg.esperar(".columna-tablero[data-columna=usado] .tarjeta-guion", "TB02", 10), "y el guion pasa a «Usados»")
+
+    # añadir guiones: las tarjetas de dónde salen, con su coste
+    pg.pulsar(".cab-automatizar .anadir-cabecera")
+    ok(pg.esperar(".cab-anadir h3", "De dónde salen", 5), "«+ Añadir guiones» pregunta de dónde salen")
+    costes = pg.p.evaluate("() => [...document.querySelectorAll('.tarjeta-origen')].map(t => "
+                           "[t.querySelector('b').textContent, t.querySelector('.coste-origen').textContent])")
+    ok(len(costes) == 6 and all(c for _n, c in costes), f"seis tarjetas, cada una con su coste: {costes}")
+    ok(not pg.visible(".anadir-parrilla .barra-accion"), "sin elegir, no hay botón que lanzar")
+    pg.pulsar(".tarjeta-origen", "Desde una cuenta que te guste")
+    ok(pg.esperar(".conexiones-cuentas", segundos=5) and pg.visible(".pestanas-automatizar button.activa", "Cuentas"),
+       "«Desde una cuenta que te guste» lleva a Cuentas que te gustan (con sus claves, como antes)")
+    pg.pulsar(".pestanas-automatizar button", "Añadir guiones")
+    pg.pulsar(".tarjeta-origen", "Conversar con Claude")
+    ok(pg.esperar(".chat-parrilla .lista-chats", segundos=5), "«Conversar con Claude» lleva al chat, en su pestaña")
+    pg.pulsar(".pestanas-automatizar button", "Añadir guiones")
+    pg.pulsar(".tarjeta-origen", "Escribir o pegar")
+    pg.p.locator(".anadir-parrilla input[type=checkbox]").first.check()
+    pg.p.wait_for_timeout(300)
+    ok(pg.visible(".anadir-parrilla .barra-accion .plan", "No usa Claude.") and
+       pg.visible(".anadir-parrilla .barra-accion button.primario", "Guardar en la Parrilla"),
+       "pegado en el formato: «Guardar en la Parrilla», sin Claude")
+    pg.pulsar(".tarjeta-origen", "Pedir a Claude")
+    ok(pg.visible(".anadir-parrilla .barra-accion .plan", "Usa Claude (tokens de la suscripción, sin coste en dólares).")
+       and pg.visible(".anadir-parrilla .barra-accion button.primario", "Pedir a Claude"),
+       "pedir: el botón de siempre en la barra, con la misma línea de coste")
+    pg.p.locator("#modulo [data-foco=parrilla-peticion]").fill("ideas para el tablero")
+    pg.p.locator("#modulo [data-foco=parrilla-cuantos]").fill("2")
+    pg.pulsar(".anadir-parrilla .barra-accion button.primario", "Pedir a Claude")
+    ok(pg.esperar(".trabajo-parrilla", "guardados", 25), "Claude (el doble) los escribe y lo dice")
+    ok(pg.esperar(".columna-tablero[data-columna=pendiente] .tarjeta-guion", segundos=5)
+       and pg.p.locator(".columna-tablero[data-columna=pendiente] .tarjeta-guion").count() >= 3,
+       "y quedan en «Pendientes»")
+
+    # si la marca no se pudo leer no se dice «Sin marca» (no se sabe)
+    pg.js("PAR.marca = { marca: {}, campos: [], error: 'sin red' }; pintarModulo();")
+    ok(pg.visible(".linea-marca", "No se pudo leer la marca") and not pg.visible(".linea-marca", "Sin marca"),
+       "una marca que no se pudo leer lo dice, con «Reintentar»")
+    pg.pulsar(".linea-marca button", "Reintentar")
+    ok(pg.esperar(".linea-marca", "Sin marca de Tablero de prueba", 10), "y «Reintentar» la vuelve a leer")
+    # la marca: se guarda en la barra y la Parrilla lo dice
+    pg.pulsar(".linea-marca button", "Apuntarla")
+    ok(pg.esperar(".marca-parrilla [data-foco=marca-quien]", segundos=10), "«Apuntarla ›» lleva a la marca")
+    pg.p.locator("[data-foco=marca-quien]").fill("Tablero, consolas para fiestas")
+    pg.pulsar(".marca-parrilla .barra-accion button", "Guardar la marca")
+    pg.pulsar(".pestanas-automatizar button", "Parrilla")
+    ok(pg.esperar(".linea-marca.caja-info", "✓ guardada", 10), "y la Parrilla enseña la marca guardada")
+    ok(not pg.visible(".pestanas-automatizar button .punto"), "sin el punto en su pestaña")
+
+    # UNA PREGUNTA CADA VEZ (revisión de Publicar, 22-10): pulsar «Borrar el
+    # guion» y luego Enter no vuelve a pulsar el botón de detrás (dos paneles):
+    # el foco está en el panel y Enter acepta
+    pg.pulsar(".columna-tablero[data-columna=publicado] .tarjeta-guion", "TB04")
+    pg.pulsar(".pestanas-cajon button", "Estado")
+    pg.pulsar(".cajon-guion button", "Borrar el guion")
+    ok(pg.p.evaluate("() => !!document.activeElement && !!document.activeElement.closest('.capa-dialogo')"),
+       "la pregunta se lleva el foco (no se queda en el botón de detrás)")
+    pg.p.keyboard.press("Enter")
+    pg.p.wait_for_timeout(300)
+    paneles = pg.p.locator(".capa-dialogo").count()
+    pg.p.wait_for_timeout(1200)
+    r, _g = api.get(f"/api/parrilla/proyectos/{cid}/guiones/{ids.get('TB04')}")
+    ok(paneles <= 1 and r.status_code == 404 and not pg.visible(".capa-dialogo"),
+       f"Enter acepta la pregunta, sin apilar otra ({paneles} paneles, guion {r.status_code})")
+    pg.p.evaluate("() => document.querySelectorAll('.capa-dialogo').forEach(x => x.remove())")
+    pg.sin_errores("el Automatizar nuevo")
+    pg.cerrar()
+
+    # el móvil (390 y 360), con el tema claro
+    for ancho in (390, 360):
+        pg = Pagina(navegador, datos, ancho=ancho, alto=780, nombre=f"automatizar {ancho}")
+        pg.js("document.documentElement.dataset.tema = 'claro';")
+        pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+        pg.js(f"elegirProyectoParrilla('{cid}');")
+        ok(pg.esperar(".selector-columnas", segundos=10), f"{ancho}: las columnas, como botones")
+        visibles = pg.p.evaluate("() => [...document.querySelectorAll('.columna-tablero')].filter(c => c.offsetParent).map(c => c.dataset.columna)")
+        ok(visibles == ["pendiente"], f"{ancho}: una columna a la vista: {visibles}")
+        pg.pulsar(".selector-columnas button", "Usados")
+        visibles = pg.p.evaluate("() => [...document.querySelectorAll('.columna-tablero')].filter(c => c.offsetParent).map(c => c.dataset.columna)")
+        ok(visibles == ["usado"], f"{ancho}: «Usados» enseña la suya: {visibles}")
+        ancho_pagina = pg.p.evaluate("() => document.documentElement.scrollWidth")
+        ok(ancho_pagina <= ancho + 1, f"{ancho}: el tablero cabe a lo ancho ({ancho_pagina} px)")
+        pg.pulsar(".columna-tablero[data-columna=usado] .tarjeta-guion")
+        caja = pg.p.locator(".cajon-guion").bounding_box()
+        ok(caja and caja["width"] >= ancho - 1 and caja["x"] <= 1, f"{ancho}: la ficha, a pantalla completa ({caja})")
+        barra = pg.p.locator(".pie-cajon").bounding_box()
+        ok(barra and barra["height"] <= 80 and barra["y"] + barra["height"] <= 781,
+           f"{ancho}: su barra, en una fila y abajo ({barra})")
+        pg.captura(f"automatizar_ficha_{ancho}", entera=False)
+        pg.pulsar(".cajon-guion .cerrar-cajon")
+        pg.pulsar(".pestanas-automatizar button", "Añadir guiones")
+        pg.pulsar(".tarjeta-origen", "Pedir a Claude")
+        barra = pg.p.locator(".anadir-parrilla .barra-accion").bounding_box()
+        ok(barra and barra["height"] <= 80, f"{ancho}: la barra de Añadir, en una fila ({barra and round(barra['height'])} px)")
+        pg.p.evaluate("() => toast('aviso de prueba')")
+        pg.p.wait_for_timeout(400)
+        tapa = pg.p.evaluate("() => { const t = document.querySelector('#toast').getBoundingClientRect(); "
+                             "const b = document.querySelector('.anadir-parrilla .barra-accion').getBoundingClientRect(); "
+                             "return t.bottom > b.top + 1; }")
+        ok(not tapa, f"{ancho}: el aviso flotante sale encima de la barra, sin tapar su botón")
+        pg.pulsar(".anadir-parrilla .boton-mas-barra")
+        ok(pg.visible(".anadir-parrilla .barra-accion.abierta") and
+           not pg.p.evaluate("() => BARRA_MAS.abiertas.crear"), f"{ancho}: «⋯» abierto aquí no abre el de Crear")
+        pg.pulsar(".anadir-parrilla .boton-mas-barra")
+        for que in ("anadir", "chat", "cuentas", "marca", "parrilla"):
+            pg.js(f"irASeccionParrilla('{que}');")
+            ancho_pagina = pg.p.evaluate("() => document.documentElement.scrollWidth")
+            ok(ancho_pagina <= ancho + 1, f"{ancho}: «{que}» cabe a lo ancho ({ancho_pagina} px)")
+        pg.captura(f"automatizar_movil_{ancho}", entera=False)
+        pg.sin_errores(f"el Automatizar nuevo a {ancho} px")
+        pg.cerrar()
 
 
 # ======================================================================
@@ -6609,10 +6883,11 @@ def parrilla_con_espacio_fijo(navegador, datos):
     pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
     pg.js(f"elegirProyectoParrilla('{cid}');")
     pg.p.wait_for_timeout(800)
-    pg.pulsar(".fila-guion .titulo-guion", "EF01")
+    pg.pulsar(".tarjeta-guion .titulo-guion", "EF01")
     ok(pg.esperar(".ficha-parrilla h3", "EF01"), "su ficha")
+    pg.pulsar(".pestanas-cajon button", "Al Encargo")
     pg.p.locator(".pasar-encargo select").first.select_option(datos["preset"])
-    pg.pulsar(".pasar-encargo button", "Pasar al Encargo")
+    pg.pulsar(".pie-cajon .boton-pasar-encargo", "Pasar al Encargo")
     fin = time.time() + 10
     while time.time() < fin and not pg.p.evaluate(
             "() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"):
@@ -7146,7 +7421,13 @@ def _cambiar_donde_van_los_subtitulos(pg, destino=None):
     fila = pg.p.locator(".ajustes-en-video .fila-ajuste").filter(has_text="Subtítulos").first
     if not pg.p.locator(".ajustes-en-video .editor-ajuste .campo").filter(
             has=pg.p.locator("label", has_text="Dónde va")).count():
-        fila.locator("button", has_text="Cambiar").click()
+        boton = fila.locator("button", has_text="Cambiar")
+        # habilitado y fuera de lo `inert` (el paso Vídeo lo está mientras monta)
+        fin = time.time() + 120
+        while time.time() < fin and not pg.p.evaluate(
+                "(b) => !!b && !b.disabled && !b.closest('[inert]')", boton.first.element_handle()):
+            pg.p.wait_for_timeout(500)
+        boton.click()
         pg.p.wait_for_timeout(800)
     campo = pg.p.locator(".ajustes-en-video .editor-ajuste .campo").filter(
         has=pg.p.locator("label", has_text="Dónde va")).first
@@ -7280,7 +7561,9 @@ def crear_en_el_movil(navegador, datos):
             os.remove(freno)
         except OSError:
             pass
-    pg.sin_trabajo()
+    # con la máquina cargada el montaje tarda: si se sigue sin esperar, el paso
+    # Vídeo sigue `inert` y el 8) no puede pulsar «Cambiar»
+    ok(pg.sin_trabajo(600), "MÓVIL: el montaje del móvil termina")
     pg.p.wait_for_timeout(2000)
 
     # 5) cambiar de paso: la fila se construye una vez y el paso se ve
@@ -7337,6 +7620,7 @@ def crear_en_el_movil(navegador, datos):
     #    «Dónde va» como estaba)
     pg = Pagina(navegador, datos, nombre="crear al montar, escritorio")
     pg.js(f"await abrirVideoLight('{pid}');")
+    pg.sin_trabajo(600)
     pg.p.wait_for_timeout(1500)
     ir_al_paso(pg, "Vídeo")
     pg.p.wait_for_timeout(1500)
@@ -7402,10 +7686,11 @@ def tipo_de_relato(navegador, datos):
         pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
         pg.js(f"elegirProyectoParrilla('{cid}');")
         pg.p.wait_for_timeout(800)
-        pg.pulsar(".fila-guion .titulo-guion", "TR01")
+        pg.pulsar(".tarjeta-guion .titulo-guion", "TR01")
         ok(pg.esperar(".ficha-parrilla h3", "TR01"), "(1) su ficha")
+        pg.pulsar(".pestanas-cajon button", "Al Encargo")
         pg.p.locator(".pasar-encargo select").first.select_option(datos["preset"])
-        pg.pulsar(".pasar-encargo button", "Pasar al Encargo")
+        pg.pulsar(".pie-cajon .boton-pasar-encargo", "Pasar al Encargo")
         fin = time.time() + 10
         while time.time() < fin and not pg.p.evaluate(
                 "() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"):

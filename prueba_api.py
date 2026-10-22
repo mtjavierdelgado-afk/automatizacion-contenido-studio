@@ -7217,7 +7217,7 @@ def probar_tipos_de_negocio():
             ruta = os.path.join(base, f"r{i}.png")
             _Imagen.new("RGB", (64, 40), (40 * i, 90, 160)).save(ruta)
             refs.append(ruta)
-        pid = presets.guardar("canal", "Reformas foto", {"estilo": {"referencias": refs},
+        pid = presets.guardar("canal", "Reformas foto", {"estilo": {"referencias": refs, "modo": "foto"},
                                                          "guion": {"instrucciones": "x"}})["id"]
         servidor.asignar_estilo_a_cliente(pid, {"cliente": cid})
         estilo = lambda: presets.leer(pid)["datos"]["estilo"]      # noqa: E731
@@ -7249,6 +7249,25 @@ def probar_tipos_de_negocio():
         servidor.borrar_cliente(cid)
         ok("dominio" not in estilo(), "borrar el proyecto deja su estilo en lo general")
         igual(servidor.PASOS_MODULOS.dominios.de_cliente(cid), None, "y su ficha se va con él")
+        # LA RUTA DE FIJAR A MANO solo acepta la ficha del propio proyecto
+        _llamar(servidor.guardar_negocio_cliente, otro, cuerpo)
+        pid2 = presets.guardar("canal", "Otro foto", {"estilo": {"referencias": refs, "modo": "foto"},
+                                                      "guion": {"instrucciones": "x"}})["id"]
+        codigo, _m = _llamar(servidor.guardar_dominio_estilo, pid2, {"dominio": f"cliente-{otro}"})
+        igual(codigo, 400, "fijar la ficha de un proyecto que no es el del estilo, 400")
+        # UNA COPIA no se lleva la ficha del original
+        servidor.asignar_estilo_a_cliente(pid2, {"cliente": otro})
+        ok(presets.leer(pid2)["datos"]["estilo"].get("dominio") == f"cliente-{otro}",
+           "un estilo de foto del proyecto la recibe")
+        pid3 = presets.guardar("canal", "Dibujo", {"estilo": {"referencias": refs},
+                                                   "guion": {"instrucciones": "x"}})["id"]
+        servidor.asignar_estilo_a_cliente(pid3, {"cliente": otro})
+        ok("dominio" not in presets.leer(pid3)["datos"]["estilo"],
+           "uno de dibujo no la lleva (no movería sus firmas)")
+        codigo, copia = _llamar(servidor.duplicar_preset_light, pid2, {})
+        nuevo = ((copia if isinstance(copia, dict) else {}).get("preset") or {}).get("id")
+        ok(nuevo and "dominio" not in presets.leer(nuevo)["datos"]["estilo"],
+           "duplicarlo: la copia, sin proyecto, no se lleva la ficha")
         # EL REVISOR recibe las mismas reglas de la casa que el generador
         foto = {"modo": "foto", "referencias": ["a.png"]}
         plan = {"escenas": [{"prompt": "two kids hold game controllers"}]}

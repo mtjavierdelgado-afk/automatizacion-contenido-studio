@@ -230,11 +230,9 @@ def prueba_borrar():
     antes = _prompt(BANOS, fijo)
     ok(D.borrar_de_cliente("cl1"), "se borra")
     igual(D.de_cliente("cl1"), None, "el proyecto se queda sin ficha")
-    try:
-        D.normalizar("cliente-cl1")
-        ok(False, "una ficha borrada no se puede fijar")
-    except ValueError:
-        ok(True, "una ficha borrada no se puede fijar")
+    ok(not any(t["id"] == "cliente-cl1" for t in D.listar()), "deja de salir en la lista")
+    igual(D.normalizar("cliente-cl1"), "cliente-cl1",
+          "un estilo que se quedó con ella se puede seguir guardando (revisión: copia y papelera)")
     igual(_prompt(BANOS, fijo), antes,
           "pero un vídeo ya hecho con ella saca el MISMO prompt: nada queda para rehacer")
     ok(not D.borrar_de_cliente("cl1"), "borrar una que no está: False")

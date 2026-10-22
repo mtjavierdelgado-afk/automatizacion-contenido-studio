@@ -27568,21 +27568,29 @@ function bloqueMejoresPublicar() {
  * El editor NO se guarda solo, a diferencia de las reglas del estilo: cambiar la
  * ficha de un proyecto con vídeos de foto deja sus imágenes para rehacer, así
  * que guardar es un botón y se dice antes. */
-const NEGOCIOS = { porCliente: {}, cargando: {}, borrador: null, deCliente: '',
+const NEGOCIOS = { porCliente: {}, cargando: {}, fallo: {}, borrador: null, deCliente: '',
   guardando: false, afinando: {} };
 
-/* La ficha de un proyecto: undefined mientras se lee, null si no tiene. */
+/* La ficha de un proyecto: undefined mientras se lee, null si no tiene. Un
+   fallo al leerla NO se guarda como «no tiene» (se enseñaría vacía y guardar
+   borraría la de verdad): se dice y se ofrece reintentar. */
 function negocioDe(cid) {
   if (!cid || cid === '_sin') return null;
   if (cid in NEGOCIOS.porCliente) return NEGOCIOS.porCliente[cid];
+  if (NEGOCIOS.fallo[cid]) return undefined;
   if (!NEGOCIOS.cargando[cid]) {
     NEGOCIOS.cargando[cid] = true;
     pedir(`${BASE}/api/clientes/${encodeURIComponent(cid)}/negocio`)
-      .then(r => { NEGOCIOS.porCliente[cid] = r.negocio || null; })
-      .catch(() => { NEGOCIOS.porCliente[cid] = null; })
+      .then(r => { NEGOCIOS.porCliente[cid] = r.negocio || null; delete NEGOCIOS.fallo[cid]; })
+      .catch(err => { NEGOCIOS.fallo[cid] = err.message || 'no se ha podido leer'; })
       .finally(() => { delete NEGOCIOS.cargando[cid]; pintarLight(); });
   }
   return undefined;
+}
+
+function reintentarNegocio(cid) {
+  delete NEGOCIOS.fallo[cid];
+  pintarLight();
 }
 
 function borradorDeNegocio(negocio) {
@@ -27604,8 +27612,9 @@ function abrirPanelNegocio(cid) {
   APP.light.negocioProyecto = abierto ? '' : cid;
   if (!abierto) {
     APP.light.logoProyecto = '';
-    NEGOCIOS.deCliente = cid;
-    NEGOCIOS.borrador = borradorDeNegocio(NEGOCIOS.porCliente[cid]);
+    // el borrador se siembra en el panel CUANDO la ficha esté leída, nunca antes
+    NEGOCIOS.deCliente = '';
+    NEGOCIOS.borrador = null;
   }
   pintarLight();
 }
@@ -27682,18 +27691,24 @@ async function copiarNegocioDeOtro(cliente) {
 async function afinarReglaDeNegocio(regla) {
   if (!String(regla.texto || '').trim()) { toast('escribe primero lo que exige la regla', true); return; }
   NEGOCIOS.afinando[regla.id] = true;
+  const textoPedido = regla.texto;
   pintarLight();
   try {
     const r = await pedir(`${BASE}/api/reglas-estilo/afinar`, {
-      method: 'POST', cuerpo: { texto: regla.texto, palabras: separarPalabras(regla.palabras) } });
+      method: 'POST', cuerpo: { texto: textoPedido, palabras: separarPalabras(regla.palabras) } });
     let listo = false;
     for (let i = 0; i < 90 && !listo; i += 1) {
       await new Promise(seguir => setTimeout(seguir, 2000));
       const f = await pedir(`${BASE}/api/reglas-estilo/afinar/${encodeURIComponent(r.id)}`);
       if (f.estado === 'listo') {
-        regla.en = (f.propuesta || {}).en || regla.en;
-        regla.enDe = regla.texto;
-        if (!regla.nombre) regla.nombre = (f.propuesta || {}).nombre || '';
+        // escrita para el texto de ANTES: si lo cambiaste mientras tanto, no vale
+        if (regla.texto !== textoPedido) {
+          toast('Cambiaste la regla mientras Claude la afinaba: vuelve a pulsar «Afinar»', true);
+        } else {
+          regla.en = (f.propuesta || {}).en || regla.en;
+          regla.enDe = textoPedido;
+          if (!regla.nombre) regla.nombre = (f.propuesta || {}).nombre || '';
+        }
         listo = true;
       }
       if (f.estado === 'error') { toast(`no se ha podido afinar: ${f.error || ''}`, true); listo = true; }
@@ -27758,7 +27773,12 @@ function panelNegocioProyecto(cliente) {
   const caja = h('div', { clase: 'panel-negocio-proyecto' });
   const actual = negocioDe(cliente.id);
   if (actual === undefined) {
-    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo la ficha del negocio…'));
+    if (NEGOCIOS.fallo[cliente.id]) {
+      caja.appendChild(cajaError(`No se ha podido leer la ficha: ${NEGOCIOS.fallo[cliente.id]}`));
+      caja.appendChild(h('button', { clase: 'mini', onclick: () => reintentarNegocio(cliente.id) }, 'Reintentar'));
+    } else {
+      caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo la ficha del negocio…'));
+    }
     return caja;
   }
   if (!NEGOCIOS.borrador || NEGOCIOS.deCliente !== cliente.id) {
@@ -27825,6 +27845,7 @@ function bloqueNegocioDelEstilo(ficha) {
     if (!cliente) return;
     APP.light.negocioProyecto = cid;
     NEGOCIOS.deCliente = '';
+    NEGOCIOS.borrador = null;
     apuntarCliente(cid);
     irALight('galeria');
   };
@@ -27836,7 +27857,10 @@ function bloqueNegocioDelEstilo(ficha) {
   }
   const negocio = negocioDe(cid);
   if (negocio === undefined) {
-    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo la ficha del negocio…'));
+    caja.appendChild(NEGOCIOS.fallo[cid]
+      ? h('div', { clase: 'meta' }, `No se ha podido leer la ficha del negocio: ${NEGOCIOS.fallo[cid]}`,
+        ' ', h('button', { clase: 'mini', onclick: () => reintentarNegocio(cid) }, 'Reintentar'))
+      : h('div', { clase: 'cargando' }, 'leyendo la ficha del negocio…'));
     return caja;
   }
   caja.appendChild(h('div', { clase: 'fila' },

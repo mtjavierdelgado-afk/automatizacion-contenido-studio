@@ -385,7 +385,10 @@ def normalizar(valor, raiz=None):
     clave = valor.strip().lower()
     if clave in ("", "auto", "automatico", "automático"):
         return AUTOMATICO
-    if clave not in todos(raiz):
+    # LAS BORRADAS TAMBIÉN VALEN AQUÍ: un estilo que se quedó con una (una
+    # copia, uno de la papelera) tiene que poder guardarse; lo que no se puede
+    # es ELEGIRLA de nuevo, y eso lo decide la API, no esto
+    if obtener(clave, raiz) is None:
         raise ValueError(f"«{valor}» no es la ficha de ningún negocio")
     return clave
 

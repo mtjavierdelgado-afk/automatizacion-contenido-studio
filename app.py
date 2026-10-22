@@ -12082,6 +12082,9 @@ def restaurar_preset_canal(pid: str):
     él: se apartaron juntos (`borrar_preset_light`) y sin el taller el estilo
     vuelve sin sus láminas ni su escucha."""
     ficha = _preset_o_400(lambda p: p.restaurar(pid))
+    # mientras estuvo en la papelera pudo cambiar la ficha de su proyecto
+    if PASOS_MODULOS is not None:
+        _negocio_al_estilo(pid)
     taller = ((ficha.get("datos") or {}).get("origen") or {}).get("taller") if isinstance(ficha, dict) else ""
     devuelto = ""
     if taller and not os.path.isdir(os.path.join(raiz_proyectos(), taller)):
@@ -13281,9 +13284,15 @@ def _correr_preset_light_dentro(avisar, ctx, encargo, solo, preset_id, retomar,
     if encargo.get("cliente") and not preset_id:
         try:
             CLIENTES.asignar(raiz_proyectos(), ficha["id"], encargo["cliente"])
-            _negocio_al_estilo(ficha["id"])     # su ficha del negocio (Etapa Foto C)
         except CLIENTES.ErrorCliente as fallo:
             ctx.bitacora.anotar("aviso", None, {"cliente": str(fallo)})
+    # LA FICHA DEL NEGOCIO DE SU PROYECTO (Etapa Foto C), al crearlo y al rehacerlo:
+    # rehacer puede ser el momento en que el estilo tiene láminas por primera vez,
+    # o en que pasa a foto
+    try:
+        _negocio_al_estilo(ficha["id"])
+    except Exception as fallo:                                # noqa: BLE001
+        ctx.bitacora.anotar("aviso", None, {"negocio": str(fallo)})
     salida["resumen"] = ficha.get("resumen") or ""
     salida["coste_usd"] = round(salida["coste_usd"], 4)
     avisar(1.0, f"preset «{ficha['nombre']}» listo", PUBLICO_LISTO)
@@ -13738,6 +13747,10 @@ def duplicar_preset_light(preset_id: str, cuerpo: dict = Body(default=None)):
                                                   os.path.basename(una)))
             except OSError:
                 pass
+    # LA COPIA NO SE LLEVA LA FICHA DEL NEGOCIO del original: la recibe la de su
+    # proyecto (ninguna hasta que se meta en uno), Etapa Foto C
+    if PASOS_MODULOS is not None:
+        _negocio_al_estilo(nueva["id"])
     return {"preset": nueva, "de": preset_id}
 
 
@@ -14672,12 +14685,14 @@ def guardar_reglas_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
 # La pantalla para elegirlo llega con la Etapa Foto C: aqui, leerlo y fijarlo.
 
 @app.get("/api/dominios")
-def listar_dominios():
+def listar_dominios(peticion: Request = None):
     """El negocio general y las fichas de los clientes (Etapa Foto C).
     -> {dominios, automatico}"""
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
-    return {"dominios": PASOS_MODULOS.dominios.listar(),
+    cerrados = _cerrados(peticion) if peticion is not None else set()
+    return {"dominios": [d for d in PASOS_MODULOS.dominios.listar()
+                         if (d.get("cliente") or "") not in cerrados],
             "automatico": "sin ficha: el general, sin reglas de ningún negocio"}
 
 
@@ -14712,6 +14727,10 @@ def _negocio_al_estilo(preset_id):
         estilo = dict(contenido.get("estilo") or {})
         if not estilo.get("referencias"):
             return ""              # sin estilo gráfico todavía: no hay donde
+        if estilo.get("modo") != "foto":
+            # la ficha solo cambia las imágenes de FOTO: en un estilo de dibujo
+            # no se escribe, y así no mueve la firma de sus vídeos al traerlo
+            tid = ""
         if (estilo.get("dominio") or "") == tid:
             return tid
         if tid:
@@ -14742,25 +14761,34 @@ def _cliente_que_existe(cid):
     return cid
 
 
+def _negocio_abierto(peticion, cid):
+    """El proyecto existe y quien pide puede verlo (los de clave, con su pase)."""
+    cid = _cliente_que_existe(cid)
+    if peticion is not None and cid in _cerrados(peticion):
+        raise ErrorApi(403, "este proyecto tiene clave: ábrelo primero")
+    return cid
+
+
 @app.get("/api/clientes/{cid}/negocio")
-def leer_negocio_cliente(cid: str):
+def leer_negocio_cliente(cid: str, peticion: Request = None):
     """La ficha del negocio de un proyecto. -> {negocio: ficha|null, estilos}"""
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
-    cid = _cliente_que_existe(cid)
+    cid = _negocio_abierto(peticion, cid)
     crudo = PASOS_MODULOS.dominios.de_cliente(cid)
     return {"negocio": PASOS_MODULOS.dominios.publicar(crudo) if crudo else None,
             "estilos": len(_estilos_del_cliente(cid))}
 
 
 @app.put("/api/clientes/{cid}/negocio")
-def guardar_negocio_cliente(cid: str, cuerpo: dict = Body(default=None)):
+def guardar_negocio_cliente(cid: str, cuerpo: dict = Body(default=None),
+                            peticion: Request = None):
     """Crea o cambia la ficha del negocio de un proyecto: {nombre, reglas?,
     revisor?: {equipo?, orientacion?}}. Se la pone a todos sus estilos.
     -> {negocio, estilos: cuántos la llevan}"""
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
-    cid = _cliente_que_existe(cid)
+    cid = _negocio_abierto(peticion, cid)
     try:
         crudo = PASOS_MODULOS.dominios.guardar_de_cliente(cid, _cuerpo(cuerpo))
     except ValueError as fallo:
@@ -14771,12 +14799,12 @@ def guardar_negocio_cliente(cid: str, cuerpo: dict = Body(default=None)):
 
 
 @app.delete("/api/clientes/{cid}/negocio")
-def borrar_negocio_cliente(cid: str):
+def borrar_negocio_cliente(cid: str, peticion: Request = None):
     """Quita la ficha del negocio de un proyecto: sus estilos vuelven a
     automático (general). Los vídeos ya creados no cambian."""
     if PASOS_MODULOS is None:
         raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
-    cid = _cliente_que_existe(cid)
+    cid = _negocio_abierto(peticion, cid)
     if not PASOS_MODULOS.dominios.borrar_de_cliente(cid):
         raise ErrorApi(404, "este proyecto no tiene ficha del negocio")
     for pid in _estilos_del_cliente(cid):
@@ -14801,6 +14829,13 @@ def guardar_dominio_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
         dominio = PASOS_MODULOS.dominios.normalizar(datos.get("dominio"))
     except ValueError as fallo:
         raise ErrorApi(400, str(fallo))
+    # una ficha de cliente, solo la del PROYECTO de este estilo y si sigue viva
+    # (Etapa Foto C): la de otro cliente o una borrada no se eligen
+    if dominio and dominio not in PASOS_MODULOS.dominios.DE_FABRICA:
+        cid = CLIENTES.cliente_de(raiz_proyectos(), estilo_id=preset_id) or ""
+        propia = PASOS_MODULOS.dominios.de_cliente(cid) if cid else None
+        if not propia or propia["id"] != dominio:
+            raise ErrorApi(400, "esa ficha del negocio no es la del proyecto de este estilo")
     with presets.lock_de(presets.FICHERO):
         ficha = _preset_o_400(lambda p: p.leer(preset_id))
         if ficha.get("tipo") != "canal":

@@ -5001,8 +5001,9 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
                 "falta aprobar la imagen base de "
                 + ", ".join(f"«{clave.replace('#', '», estado «')}» ({len(sids)} plano(s))"
                             for clave, sids in sorted(faltan.items()))
-                + ": genérala o usa la imagen subida en «El espacio fijo» y "
-                  "apruébala antes de generar los planos")
+                + ": ve al paso «Imágenes» (bloque «La imagen base») o al Encargo "
+                  "(«El tipo de relato»), genérala o usa la imagen subida del espacio "
+                  "fijo, y apruébala (y la de cada estado) antes de generar los planos")
 
     # REHACER UNA COSA REHACE ESA COSA. Aqui habia siete lineas de CASCADA:
     # pedir un asset metia detras todas las escenas que lo usan, asi que pulsar

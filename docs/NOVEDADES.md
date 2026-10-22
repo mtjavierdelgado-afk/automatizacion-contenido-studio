@@ -14,6 +14,15 @@ vídeos, estilos, claves y contraseña no se tocan.
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
+**Arreglos urgentes (22 de octubre, tarde)**
+- **La imagen base, también en «Imágenes».** Con un tipo de relato que edita
+  («Un espacio que cambia», «Producto»), el paso Imágenes enseña ahora el
+  bloque «La imagen base» mientras falte aprobar la base o la de algún estado:
+  se genera, se usa la subida y se aprueba ahí mismo. El aviso de error dice
+  dónde está (antes mandaba a «El espacio fijo», donde no se aprueba).
+- **Los menús desplegables se leen**: la lista de opciones ya no sale en blanco
+  con letra blanca (el selector de proyecto de Automatizar).
+
 **Automatizar, con la cara nueva (22 de octubre)**
 - **El proyecto, arriba como un chip**, y **«+ Añadir guiones»** siempre a
   mano. La «i» del título explica que la Parrilla es opcional.

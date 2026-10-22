@@ -7938,9 +7938,25 @@ const BLOQUES_EXTRA_DEL_PASO = {
   encargo: [],
   guion: [],
   voz: [],
-  imagenes: [],
+  // la imagen base del tipo de relato, a mano donde se generan los planos (22-10)
+  imagenes: [c => bloqueBaseEnImagenes(c)],
   video: [],
 };
+
+/* LA IMAGEN BASE, TAMBIÉN EN «IMÁGENES» (arreglo urgente, 22-10-2026). Con un
+   tipo de relato que edita, los planos no se generan sin la base (y la de cada
+   estado) aprobada, y el aviso mandaba a buscarla a otro paso. Aquí sale el
+   MISMO bloque del Encargo (`imagenBaseDelRelato`, sin tocarlo por dentro),
+   solo mientras falte algo por aprobar. Pintar no escribe nada (regla 1). */
+function bloqueBaseEnImagenes(c) {
+  if (!c.v || !c.v.pid) return null;
+  const est = relatoDelVideoLight();
+  if (!est.cargado || est.error) return null;
+  const f = est.ficha || {};
+  if (!f.edita || f.listo) return null;
+  return bloqueLight('La imagen base', 'apruébala antes de generar los planos: cada plano la edita',
+    imagenBaseDelRelato(est, !!trabajoVideoLight()));
+}
 
 function pintarBloquesExtraDelPaso(donde, paso) {
   (BLOQUES_EXTRA_DEL_PASO[paso] || []).forEach(pinta => {

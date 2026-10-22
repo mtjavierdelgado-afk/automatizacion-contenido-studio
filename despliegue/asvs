@@ -15,7 +15,10 @@
 #      asvs repositorio  de donde se baja el codigo (y cambiarlo: asvs repositorio usuario/repo)
 #      asvs probar       la prueba real: un video de 30 s con tus claves (~1 $), comprobado solo;
 #      asvs probar relato  las 3 pruebas del tipo de relato (tope 5 $, o --tope N)
+#      asvs probar completo  TODO con videos de verdad y publicando en la cuenta que elijas
+#                        (tope 5 $, o --tope N; --sin-publicar para no subir nada)
 #                        si la consola se corta sigue sola, y repetirlo la vuelve a enseñar o la retoma
+#      asvs revisar      todas las pruebas gratis (boton por boton), con barra e informe
 #      asvs comparar-guion  el guion de un video escrito con sonnet y con opus, a ciegas
 #                        (sin tocar el video; solo tokens de la suscripcion). Sin nada: la lista
 # -----------------------------------------------------------------------------
@@ -443,6 +446,17 @@ probar() {
     registro="$carpeta/registro_relato.log"; pidf="$carpeta/proceso_relato.pid"
     aviso="La prueba del tipo de relato hace 3 videos de 30 s (tope 5 \$ salvo --tope N) y tarda 45-90 min."
   fi
+  # `asvs probar completo`: el Studio entero con videos de verdad (rama
+  # pruebas-completas). Antes de lanzarla pregunta, con la persona delante, en
+  # que cuenta publicar y pide confirmarlo (--preparar); despues va desligada
+  local completo=""
+  if [ "${1:-}" = "completo" ]; then
+    shift
+    completo=1
+    guion="herramientas/prueba_completa.py"; estado="en_curso_completa.json"
+    registro="$carpeta/registro_completa.log"; pidf="$carpeta/proceso_completa.pid"
+    aviso="La prueba completa hace vídeos de verdad (tope 5 \$ salvo --tope N), PUBLICA en la cuenta que elijas y tarda 1-2 horas."
+  fi
   if [ "${1:-}" = "nueva" ]; then seguir=""; shift; fi
   if [ "${1:-}" = "ver" ]; then shift; fi
   sudo -u "$USUARIO" mkdir -p "$carpeta"
@@ -456,6 +470,12 @@ probar() {
     else
       echo "$aviso"
       echo "No toca tus videos: crea videos nuevos de prueba que se quedan en tu Studio."
+      if [ -n "$completo" ]; then
+        # las preguntas, AQUI y con la consola: la prueba desligada no puede preguntar
+        sudo -u "$USUARIO" -H bash -c "set -a; . '$RAIZ/datos/entorno'; set +a; cd '$RAIZ/app' && \
+          PUERTO='${puerto:-8110}' '$RAIZ/venv/bin/python' -u $guion --preparar \
+          --api 'http://127.0.0.1:${puerto:-8110}' $*" || return 0
+      fi
     fi
     echo "Corre APARTE de esta consola: si se corta, sigue sola. Para volver a verla:  asvs probar"
     sudo -u "$USUARIO" bash -c "set -a; . '$RAIZ/datos/entorno'; set +a; cd '$RAIZ/app' && \
@@ -466,6 +486,46 @@ probar() {
   fi
   echo
   # enseña el registro hasta que la prueba acaba (Ctrl+C solo deja de mirar)
+  tail -n +1 -f --pid="${pid:-1}" "$registro" 2>/dev/null || true
+}
+
+# LA REVISION GRATIS (herramientas/revisar.py): todas las suites de pruebas.sh
+# con barra de progreso e informe en espanol. Corre COMO EL USUARIO DEL
+# SERVICIO: como root, Edge no arranca y la cuenta de Claude no tiene sesion,
+# y salian fallos que no lo eran (22-10-2026). Desligada de la consola como la
+# prueba real; `asvs revisar ver` la vuelve a enseñar. NO carga el entorno del
+# servicio: las suites montan sus propios datos y no deben ver los de verdad.
+revisar() {
+  local carpeta registro pidf pid
+  carpeta="$(grep -m1 '^ESTUDIO_PROYECTOS=' "$RAIZ/datos/entorno" 2>/dev/null | cut -d= -f2- || true)"
+  carpeta="${carpeta:-$RAIZ/datos/proyectos}/_sistema/pruebas_reales"
+  registro="$carpeta/registro_revisar.log"
+  pidf="$carpeta/proceso_revisar.pid"
+  sudo -u "$USUARIO" mkdir -p "$carpeta"
+  pid="$(cat "$pidf" 2>/dev/null || true)"
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    echo "La revisión ya está corriendo (proceso $pid). Te enseño cómo va;"
+    echo "si la consola se corta, sigue sola: vuelve a escribir  asvs revisar  para verla."
+  elif [ "${1:-}" = "ver" ]; then
+    echo "No hay ninguna revisión en marcha. La última:"
+    echo
+    cat "$registro" 2>/dev/null || echo "(todavía no se ha hecho ninguna)"
+    return
+  else
+    echo "La revisión prueba TODO el Studio sin gastar nada (motores simulados) y tarda 20-40 min."
+    echo "Mejor cuando no estés generando: usa bastante la máquina."
+    echo "Corre APARTE de esta consola: si se corta, sigue sola. Para volver a verla:  asvs revisar"
+    # lo que dejo una revision corrida como root: su carpeta temporal y
+    # ficheros de root dentro del codigo (las caches de Python)
+    rm -rf "/tmp/estudio_prueba_visual" "/tmp/estudio_pruebas_estadisticas.json" 2>/dev/null || true
+    chown -R "$USUARIO:$USUARIO" "$RAIZ/app" 2>/dev/null || true
+    sudo -u "$USUARIO" -H bash -c "cd '$RAIZ/app' && PYTHON='$RAIZ/venv/bin/python' \
+      setsid nohup '$RAIZ/venv/bin/python' -u herramientas/revisar.py --informes '$carpeta' \
+      > '$registro' 2>&1 < /dev/null & echo \$! > '$pidf'"
+    sleep 1
+    pid="$(cat "$pidf" 2>/dev/null || true)"
+  fi
+  echo
   tail -n +1 -f --pid="${pid:-1}" "$registro" 2>/dev/null || true
 }
 
@@ -519,7 +579,8 @@ case "${1:-estado}" in
   https)       https ;;
   repositorio) repositorio "${2:-}" ;;
   probar)      shift; probar "$@" ;;
+  revisar)     shift; revisar "$@" ;;
   comparar-guion) shift; comparar_guion "$@" ;;
-  -h|--help|ayuda) sed -n '5,19p' "$0" | sed 's/^#  \{0,1\}//' ;;
+  -h|--help|ayuda) sed -n '5,23p' "$0" | sed 's/^#  \{0,1\}//' ;;
   *) echo "No entiendo «$1». Prueba:  asvs ayuda"; exit 1 ;;
 esac

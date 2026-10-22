@@ -125,7 +125,12 @@ está lista cede su turno a la siguiente lista (salvo las que dependen de ella).
 5. `etapa-foto-c` (sale de `dominio-negocio`)
 6. `rediseno-automatizar`
 7. `rediseno-proyectos` (encaja la Ficha del negocio de `etapa-foto-c` en
-   `SECCIONES_AJUSTES_PROYECTO` si `etapa-foto-c` ya está unida)
+   `SECCIONES_AJUSTES_PROYECTO` si `etapa-foto-c` ya está unida: una línea
+   `{ id: 'ficha-negocio', titulo: 'Ficha del negocio', pinta: c => panelNegocioProyecto(c.cliente) }`;
+   el botón «✎ Editar la ficha» de `bloqueNegocioDelEstilo` pasa a poner
+   `APP.light.ajustesProyecto = cid` (abre el cajón) en vez de
+   `APP.light.negocioProyecto`, y sobran `abrirPanelNegocio` y su botón en la
+   fila de mandos, que ya no existe)
 8. `rediseno-publicar` (encaja `bloquePortadaPublicar`, el bloque PUBLICAR ·
    SEO y la clave de YouTube en su sitio nuevo; cambia la línea de las claves
    de Automatizar)

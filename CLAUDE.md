@@ -110,7 +110,7 @@ Quien la retome hace antes `git merge origin/main` (la voz habrá cambiado) y la
 vuelve a apuntar en la tabla. Mientras siga en pausa, `v2-fase-4b` sigue
 esperando, porque depende de ella.
 
-### Cola de unión (decisión del dueño, 22-10-2026)
+### Cola de unión (decisión del dueño, 22-10-2026; reordenada el 22-10 por choques medidos)
 
 Se une de una en una, en este orden. Antes de cada unión: la rama hace
 `git merge origin/main`, pasa sus pruebas y la revisión independiente; el
@@ -118,25 +118,33 @@ dueño hace la instantánea de Hostinger; se une; `asvs actualizar`; se
 comprueba que el Studio arranca. Solo entonces la siguiente. Una rama que no
 está lista cede su turno a la siguiente lista (salvo las que dependen de ella).
 
-1. `portadas-2` — **unida el 22-10-2026**
-2. `seo-real`
-3. `seo-real-3` (sale de `seo-real`)
-4. `dominio-negocio`
-5. `etapa-foto-c` (sale de `dominio-negocio`)
-6. `rediseno-automatizar`
-7. `rediseno-proyectos` (encaja la Ficha del negocio de `etapa-foto-c` en
-   `SECCIONES_AJUSTES_PROYECTO` si `etapa-foto-c` ya está unida: una línea
-   `{ id: 'ficha-negocio', titulo: 'Ficha del negocio', pinta: c => panelNegocioProyecto(c.cliente) }`;
-   el botón «✎ Editar la ficha» de `bloqueNegocioDelEstilo` pasa a poner
-   `APP.light.ajustesProyecto = cid` (abre el cajón) en vez de
-   `APP.light.negocioProyecto`, y sobran `abrirPanelNegocio` y su botón en la
-   fila de mandos, que ya no existe)
-8. `rediseno-publicar` (encaja `bloquePortadaPublicar`, el bloque PUBLICAR ·
-   SEO y la clave de YouTube en su sitio nuevo; cambia la línea de las claves
-   de Automatizar)
+Ya unidas: `tipo-de-relato`, `arreglos-crear-movil`, `portadas-2` (21/22-10).
 
-Los rediseños van al final a propósito: son los que mueven de sitio piezas de
-las demás, así que les toca a ellos encajarlas al ponerse al día.
+El orden sale de unir de prueba cada rama con main y con las demás
+(`git merge-tree`, 22-10): primero las que hoy no chocan con nada, y las que
+tienen que encajar piezas de otras, detrás de esas otras.
+
+1. `dominio-negocio` — al día con main, sin choques.
+2. `rediseno-automatizar` — sin choques.
+3. `rediseno-proyectos` — choque trivial (NOVEDADES, estilo.css).
+4. `seo-real` — se pone al día con main (choques triviales: NOVEDADES, el final
+   de `prueba_recorrido.py`, una línea de `pruebas.sh`/`.ps1`).
+5. `seo-real-3` (sale de `seo-real`).
+6. `rediseno-publicar` — encaja el SEO de 4 y 5 en sus pasos nuevos y la línea
+   de las claves de Automatizar (todo anotado en su informe). **Si 4 y 5 no
+   están listas cuando le toque, pasa delante** y son ellas las que encajan
+   su bloque PUBLICAR · SEO en el paso SEO de la ficha y en la pestaña de cada
+   red, sin cambiarlo por dentro.
+7. `etapa-foto-c` (sale de `dominio-negocio`) — la que más tiene que poner al
+   día: le faltan ~50 cambios de main (`tipo-de-relato`, `dominio-negocio`
+   actualizada) y encaja su Ficha del negocio en `SECCIONES_AJUSTES_PROYECTO`:
+   una línea `{ id: 'ficha-negocio', titulo: 'Ficha del negocio', pinta: c => panelNegocioProyecto(c.cliente) }`;
+   el botón «✎ Editar la ficha» de `bloqueNegocioDelEstilo` pone
+   `APP.light.ajustesProyecto = cid` en vez de `APP.light.negocioProyecto`, y
+   sobran `abrirPanelNegocio` y su botón en la fila de mandos.
+8. `guion-visual` — cuando esté lista; choca con `dominio-negocio` en
+   `p6_assets.py` y `presets_canal.py` (al ponerse al día, sumar `imagenes` a
+   la tupla de claves del Estilo junto a `relato` y `dominio`).
 
 ### El orden acordado
 

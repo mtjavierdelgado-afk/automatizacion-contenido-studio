@@ -50,6 +50,9 @@ MAX_TEXTO = 1200
 #: Lo que se pide de una vez. Un vídeo trae dos o tres estados y una línea de
 #: `inicial`; el tope es para que un catálogo raro no mande cien frases juntas.
 POR_LLAMADA = 30
+#: El tope de un cambio de estado (`tipo_relato._texto(..., 400)`): uno más
+#: largo se cortaría al leerlo, así que se rechaza en vez de guardarlo.
+MAX_INGLES = 400
 REINTENTOS_JSON = 1
 
 _LOCK = threading.Lock()
@@ -234,8 +237,12 @@ def al_ingles(texto, anterior="", cwd=None):
     datos = _pedir_json(INSTRUCCION_EN.format(anterior=_limpio(anterior)[:MAX_TEXTO] or "(none)",
                                               texto=limpio),
                         SISTEMA_EN, "el paso al ingles", cwd)
-    ingles = _limpio(datos.get("ingles"))[:400]
+    ingles = _limpio(datos.get("ingles"))
     if not ingles or not re.search(r"[A-Za-z]", ingles):
         raise ErrorTraduccion("Claude no ha devuelto el cambio en inglés; vuelve a "
                               "intentarlo. No se ha cambiado nada.")
+    # NO SE RECORTA: lo recortado es lo que se dibujaria, a medias y sin decirlo
+    if len(ingles) > MAX_INGLES:
+        raise ErrorTraduccion("el cambio es demasiado largo para mandarlo a dibujar: "
+                              "escríbelo más corto. No se ha cambiado nada.")
     return ingles

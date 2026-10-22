@@ -161,7 +161,8 @@ def prueba_al_ingles():
        "sin español no se llama a Claude")
     largo = "x" * 900
     salida, _d = _con_doble([json.dumps({"ingles": largo})], lambda: T.al_ingles("algo"))
-    igual(len(salida), 400, "el inglés se recorta al tope de un cambio (400)")
+    ok(isinstance(salida, T.ErrorTraduccion),
+       "un inglés más largo que el tope de un cambio (400) se rechaza, no se recorta")
 
 
 def main():

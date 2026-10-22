@@ -7949,6 +7949,20 @@ def relato_en_espanol(pg, api, pid):
     _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
     ok(((ficha.get("traduccion") or {}).get("faltan")) == 0,
        f"(2c) el servidor ya no echa en falta ninguna traducción ({ficha.get('traduccion')})")
+    # UN ERROR EN EL ACTO (revisión del 22-10): Claude no devuelve nada y el
+    # hilo acaba antes de que conteste el POST. El texto NO se pierde.
+    pg.pulsar(".estado-relato button", "✎ Cambiar")
+    pg.p.locator(".estado-relato .relato-editor textarea").first.fill("ROMPER esto a propósito")
+    pg.pulsar(".estado-relato .relato-editor button", "Guardar el cambio")
+    pg.p.wait_for_timeout(3500)
+    ok(pg.esperar(".estado-relato .relato-editor textarea", segundos=10)
+       and pg.p.locator(".estado-relato .relato-editor textarea").first.input_value()
+       == "ROMPER esto a propósito",
+       "(2c) si Claude falla, el editor sigue abierto con lo que escribiste")
+    ok(any("No se ha guardado" in a for a in pg.avisos()), f"(2c) y lo dice ({pg.avisos()[-2:]})")
+    _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+    ok(((ficha.get("estados") or [{}])[0]).get("aprobada"), "(2c) y el estado sigue aprobado")
+    pg.pulsar(".estado-relato .relato-editor button", "Cancelar")
     pg.pulsar(".estado-relato button", "✎ Cambiar")
     ok(pg.esperar(".estado-relato .relato-editor textarea", segundos=5), "(2c) «✎ Cambiar» abre el editor")
     pg.p.locator(".estado-relato .relato-editor textarea").first.fill("la mampara es corrediza de vidrio")

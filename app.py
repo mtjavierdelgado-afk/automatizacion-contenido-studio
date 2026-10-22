@@ -4705,10 +4705,15 @@ def _ficha_tipo_relato(ctx):
 
 
 @app.get("/api/proyectos/{pid}/tipo_relato")
-def leer_tipo_relato(pid: str):
-    """El tipo de relato del video: el guardado, el que rige, las bases y los planos que cambian."""
+def leer_tipo_relato(pid: str, ligero: bool = False):
+    """El tipo de relato del video: el guardado, el que rige, las bases y los planos que cambian.
+
+    Con `?ligero=1` no se calculan los planos que cambian (lee la ficha de cada
+    imagen): es lo que pide la pantalla cada dos segundos mientras traduce."""
     ctx = contexto(pid)
     ficha = _ficha_tipo_relato(ctx)
+    if ligero:
+        return ficha
     ficha["cambios"] = _cambios_del_relato(ctx) if _tipo_relato_guardado(ctx) else None
     return ficha
 
@@ -4935,6 +4940,10 @@ def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
                             "pulsa antes «Escribir qué cambia en cada tramo»")
     if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
         raise ErrorApi(409, "hay algo generándose en este vídeo: cámbialo cuando termine")
+    with _COLA_LOCK:
+        if _cola_dibujando(ctx):
+            raise ErrorApi(409, "se están rehaciendo imágenes con tus notas: cámbialo "
+                                "cuando terminen")
     anterior = pedidos[estado]
     mod = _traducciones()
     raiz = ctx.proyecto.raiz
@@ -4942,7 +4951,9 @@ def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
     def correr():
         ingles = mod.al_ingles(es, anterior=anterior, cwd=RAIZ_ESTUDIO)
         with _cerrojo_de_cadena(ctx.id):
-            if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            with _COLA_LOCK:
+                dibujando = _cola_dibujando(ctx)
+            if dibujando or _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
                 raise RuntimeError("se ha empezado a generar algo en este vídeo mientras "
                                    "se traducía: vuelve a guardar el cambio cuando termine")
             catalogo = copy.deepcopy((ctx.estado.params("assets") or {}).get("catalogo") or {})
@@ -4952,7 +4963,10 @@ def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
                     continue
                 if tr.estado_de(beat) != estado:
                     continue
-                if " ".join(str(beat.get("cambio") or "").split()) != " ".join(anterior.split()):
+                # comparado COMO LO LEE `estados_del_catalogo` (recortado a su
+                # tope): un cambio largo escrito a mano no da un falso «se ha
+                # reescrito»
+                if tr._texto(beat.get("cambio"), 400) != tr._texto(anterior, 400):
                     raise RuntimeError("los cambios de este estado se han reescrito mientras "
                                        "se traducía: vuelve a abrirlo y guárdalo otra vez")
                 beat["cambio"] = ingles
@@ -4962,7 +4976,7 @@ def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
                 tocados += 1
             if not tocados:
                 raise RuntimeError(f"el estado «{estado}» ya no está en el reparto")
-            if ingles != " ".join(anterior.split()):
+            if ingles != tr._texto(anterior, 400):
                 ctx.estado.actualizar_params("assets", {"catalogo": catalogo})
         mod.guardar(raiz, {ingles: es})
         ctx.bitacora.anotar("tipo_relato_estado_editado", "assets",

@@ -7480,6 +7480,10 @@ def probar_relato_en_espanol():
         igual(codigo, 200, f"LEER: 200 ({ficha if codigo != 200 else ''})")
         if codigo != 200:
             return
+        ok("cambios" in ficha, "LEER: la lectura normal trae los planos que cambian")
+        _c, ligera = _llamar(servidor.leer_tipo_relato, pid, True)
+        ok("cambios" not in ligera and "traduccion" in ligera,
+           "LEER: ?ligero=1 (lo que pregunta la pantalla mientras traduce) no los calcula")
         estado = ficha["estados"][0]
         igual((estado["estado"], estado["cambio_es"], ficha["inicial_es"]), ("despues", "", ""),
               "LEER: sin traducir, el español va vacío (la pantalla enseña el inglés)")

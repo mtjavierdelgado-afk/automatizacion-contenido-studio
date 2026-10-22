@@ -811,6 +811,26 @@ def prueba_studio():
               "«Dame 3 ganchos» se lanza")
         r = s.post(base + f"/api/publicar/proyectos/{P.SIN_PROYECTO}/palabras")
         igual(r.status_code, 202, "«Proponer palabras clave» se lanza")
+        # rama seo-real: «Investigar búsquedas» (simulado: sin salir a internet)
+        r = s.post(base + "/api/publicar/videos/fiesta/seo/investigar")
+        igual(r.status_code, 202, "«Investigar búsquedas» se lanza")
+        f = _esperar(s, base + "/api/publicar/videos/fiesta",
+                     lambda d: not d["seo"]["trabajando"].get("investigar"))
+        ok((f["seo"].get("real") or {}).get("candidatas"), "y deja las frases investigadas en la ficha")
+        ok(all(n.get("partes") for n in f["seo"]["notas"].values() if n.get("nota")),
+           "la nota de cada red viene en tres partes")
+        r = s.post(base + "/api/publicar/youtube/probar")
+        ok(r.status_code == 200 and r.json()["prueba"]["estado"] == "sin_clave",
+           "«Probar» la clave de YouTube sin clave puesta: lo dice")
+        # rama seo-real-3: el canal con OAuth
+        r = s.post(base + "/api/publicar/youtube/oauth/empezar",
+                   json={"redireccion": base + "/api/publicar/youtube/oauth/vuelta"})
+        igual(r.status_code, 409, "«Conectar mi canal» sin el cliente de Google: lo pide antes")
+        r = s.get(base + "/api/publicar/youtube/oauth/vuelta", params={"state": "inventado", "code": "x"})
+        ok(r.status_code == 200 and "No se ha conectado" in r.text and "<script" not in r.text,
+           "una vuelta de Google que no es de un intento: una página que lo dice (sin scripts)")
+        igual(s.post(base + "/api/publicar/videos/fiesta/seo/encontraron").status_code, 409,
+              "«Cómo te encontraron» sin canal conectado: lo dice")
 
         # --- proyecto con clave
         r = s.post(base + "/api/clientes", json={"nombre": "Cliente secreto"})
@@ -2287,7 +2307,7 @@ def prueba_notas_19oct():
        "y los demás puntos también llevan el suyo")
     ok(all("Lo fijo" not in x["texto"] for x in n["puntos"])
        and "Cuentas y ajustes → SEO de este proyecto" in ids["ubicacion"]["texto"]
-       and "Cuentas y ajustes → SEO de este proyecto" in ids["palabra"]["texto"],
+       and "Investigar búsquedas" in ids["palabra"]["texto"],
        "dónde se pone la ubicación y la palabra clave, con el nombre real de la pantalla")
     con = S.nota("youtube", dict(textos, titulo="Fiesta"), {}, P.AJUSTES_DEFECTO, {}, INFO, "consolas en Lima")
     ok({"palabra_titulo", "palabra_primera", "palabra_descripcion", "titulo_largo"} <=
@@ -2330,8 +2350,10 @@ def prueba_notas_19oct():
               "la palabra clave que propone la revisión queda para «Usar»")
         nuevos = dict(f["textos"]["instagram"], **{c: v["despues"] for c, v in prop["campos"].items()})
         datos = P._leer_video(raiz, "n19")
-        esperada = S.nota("instagram", nuevos, P.componer("instagram", nuevos, ajustes, info, None, datos),
-                          ajustes, datos, info, S.palabra_del_video(datos, ajustes))["nota"]
+        # LA nota es la de tres partes (rama seo-real), con la palabra que
+        # manda en ESTE vídeo
+        esperada = P.nota_seo("instagram", nuevos, P.componer("instagram", nuevos, ajustes, info, None, datos),
+                              ajustes, datos, info, S.palabra_del_video(datos, ajustes, info))["nota"]
         igual(f["seo"].get("notas_con_propuesta", {}).get("instagram"), esperada,
               "«con estos cambios»: la nota del Studio sobre los textos propuestos")
         ok(esperada > f["seo"]["notas"]["instagram"]["nota"],

@@ -575,6 +575,39 @@ Business no dan cifras por post, así que no se preguntan.
   el **primer comentario**, **Dame 3 ganchos** (tres primeras líneas para
   elegir) y, en Instagram, **colaboradores** y **etiquetas**.
 
+**El SEO de verdad** (20-10):
+- **La palabra clave tiene que ser del vídeo.** Si la del proyecto no sale en
+  el guion ni en el material, no se usa en ese vídeo, y la ficha te lo dice.
+  Si el vídeo no tiene ninguna, escríbela o usa una de «Búsquedas reales».
+- **Búsquedas reales → Investigar búsquedas**: el Studio pregunta al
+  autocompletado de YouTube y Google (Perú) qué frases de tu vídeo busca la
+  gente. La tabla dice de cada una **Del vídeo** (cuánto la trata), **Demanda**,
+  **Competencia** (solo con la clave de YouTube), **Tu historial** (1× es tu
+  media; 2× es el doble de vistas que lo normal en tu cuenta) y el **Total**.
+  **Usar** la pone como palabra clave del vídeo. No cuesta nada ni usa Claude.
+- **La nota de cada red** tiene tres partes: Relevancia, Demanda y Tu
+  historial. La nota es la media de las que tienen dato («2 de 3 partes
+  medidas»). Debajo, los **detalles de forma**, que se arreglan con su botón
+  pero no suben ni bajan la nota.
+- **La clave de YouTube** (opcional) va en **Configuración → YouTube
+  (búsquedas SEO)**: en console.cloud.google.com, activa la «YouTube Data
+  API v3» y crea una «Clave de API». Unas 100 búsquedas gratis al día.
+- **Tu canal** (opcional, **Configuración → YouTube: tu canal**). En el mismo
+  proyecto de Google Cloud:
+  1. Activa la «YouTube Analytics API».
+  2. En «Pantalla de consentimiento de OAuth», tipo «Externo», y añádete como
+     usuario de prueba.
+  3. En «Credenciales → Crear credenciales → ID de cliente de OAuth», tipo
+     «Aplicación web», con la **URI de redireccionamiento autorizada** que te
+     enseña el Studio (botón «Copiar»).
+  4. Pega el ID de cliente y el secreto, **Guardar** y **Conectar mi canal**.
+
+  Con el canal, «Investigar búsquedas» suma lo que ya te trae vistas en
+  YouTube, y en un vídeo publicado sale **Cómo te encontraron en YouTube**. Si
+  la app sigue «en prueba», Google corta cada 7 días: **Volver a conectar**.
+- La columna **Tendencia** (Google Trends, experimental) dice si la frase sube
+  o baja en Perú. Si Trends no contesta, queda en «—».
+
 **Después de publicar** la ficha se queda donde estaba, para seguir con las
 otras redes: arriba dice **Ya publicado en** (con el enlace a cada post) y
 **En camino** (lo programado o subiendo), y al lado de cada red su último

@@ -207,6 +207,30 @@ def probar_freesound(clave):
                                       f"{_texto_corto(respuesta)}")
 
 
+def probar_youtube(clave):
+    """La API de datos de YouTube (rama seo-real). `i18nRegions` cuesta 1 unidad
+    del cupo diario (10.000) y no busca nada."""
+    if not clave:
+        return _ficha("youtube", "sin_clave", "no hay clave de YouTube; el SEO mide la "
+                                              "demanda sin la competencia")
+    respuesta, fallo = _pedir("GET", "https://www.googleapis.com/youtube/v3/i18nRegions",
+                              params={"part": "snippet", "hl": "es", "key": clave})
+    if respuesta is None:
+        return _ficha("youtube", "sin_red", f"no se ha podido hablar con YouTube: {fallo}")
+    if respuesta.status_code == 200:
+        return _ficha("youtube", "ok", "la clave vale: la API de datos de YouTube contesta "
+                                       "(gastado 1 de las 10.000 unidades de hoy)")
+    motivo = _texto_corto(respuesta)
+    if respuesta.status_code == 403 and "quota" in motivo.lower():
+        return _ficha("youtube", "mal", "la clave vale, pero el cupo de hoy está gastado "
+                                        "(se renueva a medianoche, hora del Pacífico)")
+    if respuesta.status_code in (400, 403):
+        return _ficha("youtube", "mal", f"YouTube no acepta la clave ({respuesta.status_code}): "
+                                        f"{motivo}. Comprueba que en Google Cloud está "
+                                        "activada la «YouTube Data API v3»")
+    return _ficha("youtube", "mal", f"YouTube contesta {respuesta.status_code}: {motivo}")
+
+
 def probar_claude(cuentas):
     """Una ficha por cuenta del CLI con sesion, con lo que apunta salud_cli."""
     fichas = []
@@ -236,7 +260,8 @@ def probar_todas(cuentas_claude=(), con_claude=True):
         for proveedor, puesta in (("openai", bool(almacen["openai"])),
                                   ("cartesia", bool(almacen["cartesia"]["clave"])),
                                   ("jamendo", bool(almacen["jamendo"]["clave"])),
-                                  ("freesound", bool(almacen["freesound"]["clave"]))):
+                                  ("freesound", bool(almacen["freesound"]["clave"]))) + (
+                (("youtube", True),) if almacen.get("youtube", {}).get("clave") else ()):
             fichas.append(_ficha(proveedor, "ok" if puesta else "sin_clave",
                                  "simulado" if puesta else "sin poner"))
         if con_claude:
@@ -248,6 +273,10 @@ def probar_todas(cuentas_claude=(), con_claude=True):
         (probar_jamendo, almacen["jamendo"]["clave"]),
         (probar_freesound, almacen["freesound"]["clave"]),
     )
+    # la de YouTube es opcional: solo se prueba si está puesta (sin ella no
+    # falta nada, y una ficha más en rojo asustaría)
+    if (almacen.get("youtube") or {}).get("clave"):
+        pruebas += ((probar_youtube, almacen["youtube"]["clave"]),)
     for funcion, clave in pruebas:
         try:
             fichas.append(funcion(clave))
@@ -266,6 +295,7 @@ def probar_todas(cuentas_claude=(), con_claude=True):
 
 NOMBRES = {"openai": "OpenAI (imágenes)", "cartesia": "Cartesia (voz)",
            "jamendo": "Jamendo (música)", "freesound": "FreeSound (efectos)",
+           "youtube": "YouTube (búsquedas SEO)",
            "claude": "Claude"}
 
 

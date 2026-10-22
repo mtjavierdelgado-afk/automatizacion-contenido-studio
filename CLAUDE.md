@@ -92,9 +92,7 @@ cambies a ciegas: dilo en tu conversación para que el dueño lo coordine.
 
 | Rama abierta | Ficheros reservados | Desde |
 |---|---|---|
-| `seo-real` | **SEO de verdad en Publicar** (pedido del dueño, 20-10; fases 1 y 2 de las tres acordadas): la palabra clave sale del vídeo (nunca una del proyecto que el vídeo no trata), la demanda del autocompletado de YouTube y Google para Perú, la competencia con la API de datos de YouTube (clave opcional en Configuración, con su cupo y caché de 30 días como mucho), y lo aprendido de las métricas de la propia cuenta; nota en tres partes (Relevancia, Demanda, Tu historial) y los detalles de forma aparte, sin inflarla. Nada entra en ninguna firma. **Propios:** `pasos/seo_real.py` y `pasos/prueba_seo_real.py` (nuevos). **Por zonas:** `pasos/publicar_seo.py` (`palabra_del_video`, `bloque_instruccion`, `INSTRUCCION_OPTIMIZAR`); en `pasos/publicar.py` `ficha` (el bloque `seo`), `_optimizar` y una función nueva de investigar junto a las de SEO; `pasos/claves.py` (la clave suelta `youtube`, como `uploadpost`); `pasos/comprobar_claves.py` (probar la de YouTube); en `pasos/guias.py` SOLO la entrada «Palabra clave (SEO)»; en `app.py` un bloque SEO REAL nuevo justo antes del de PARRILLA; en `web/app.js` el bloque PUBLICAR · SEO (`bloqueSeoVideo`, `seoDeRedPublicar` y vecinas) y una sección de clave junto a `seccionClaveUploadPost`; clases nuevas en `web/estilo.css` antes de las de Publicar; `pruebas.sh`/`pruebas.ps1` (una línea); `docs/NOVEDADES.md`, `docs/API.md`, `docs/MANUAL.md` (un apartado); `pasos/prueba_publicar.py` y un tramo al final de `prueba_recorrido.py`. No toca lo reservado por las otras ramas | 20-10-2026 |
 | `dominio-negocio` | **El negocio sale de los datos, no del código** (pedido del dueño, 20-10): lo que hoy es de EstadoPlay (servicios y cómo se reconocen, la escalera de cartas de foto de servicios, el criterio «equipo»/«orientación» del revisor) pasa a ser un DOMINIO de fábrica en `pasos/dominios.py`, con los MISMOS valores, y un estilo puede fijar el suyo (`estilo.dominio`). Sin dominio guardado se detecta por el texto como hoy: escalera, cartas y firmas byte a byte iguales (regla 1; la escalera expandida idéntica en longitud y orden). Sin pantalla nueva (eso es la Etapa Foto C). **Propios:** `pasos/dominios.py` y `pasos/prueba_dominios.py` (nuevos). **Por zonas:** `pasos/encuadres.py` (`SERVICIOS*`, `servicios_en_texto`, `servicios_de`, `escalera_para`, `carta_de`/`repartir` solo en cómo eligen escalera); `pasos/p6_assets.py` SOLO `servicios_del_video` y `_asignar_cartas`/`_informe_cartas` (el dominio que pasan); `pasos/revisor_imagenes.py` el texto de «equipo»/«orientación» de `INSTRUCCION` y `REFERENCIA` (no lo de la imagen base, que es de `tipo-de-relato`); `pasos/presets_canal.py` la clave `dominio` del Estilo (misma tupla que `relato` de `tipo-de-relato`: al unir se suman); en `app.py` una ruta de solo lectura `GET /api/dominios` junto al bloque TIPO DE RELATO (`tipo-de-relato` ya está unida, 21-10: al ponerse al día, sumar `dominio` a la tupla de claves del Estilo junto a `relato` y conservar las líneas de la imagen base del revisor); `pruebas.sh`/`pruebas.ps1` (una línea); `docs/NOVEDADES.md`, `docs/API.md`; `pasos/prueba_encuadres.py`. No toca `web/app.js` | 21-10-2026 |
-| `seo-real-3` | **SEO fase 3** (pedido del dueño, 21-10): el canal de YouTube conectado con OAuth (YouTube Analytics: las búsquedas que ya traen vistas al canal y, por vídeo publicado, cómo lo encontraron y su retención) y Google Trends experimental (si una frase sube o baja en Perú, Google y YouTube). Credenciales y token en el almacén de claves; datos fuera de toda firma. **Sale de `seo-real`** y se une DESPUÉS de ella. **Propios:** `pasos/seo_canal.py` y `pasos/prueba_seo_canal.py` (nuevos). **Por zonas:** lo reservado por `seo-real` (`pasos/seo_real.py`, el bloque SEO de `pasos/publicar.py`, `pasos/claves.py` con la entrada `youtube_oauth`, el bloque SEO REAL de `app.py`, el bloque PUBLICAR · SEO y la sección de clave de YouTube de `web/app.js`, sus clases de `web/estilo.css`); `pruebas.sh`/`pruebas.ps1` (una línea); `docs/NOVEDADES.md`, `docs/API.md`, `docs/MANUAL.md` (un apartado); `pasos/prueba_seo_real.py` y un tramo al final de `prueba_recorrido.py`. No toca lo reservado por las otras ramas | 21-10-2026 |
 | `etapa-foto-c` | **La ficha del negocio de cada cliente** (pedido del dueño, 21-10; la Etapa Foto C reducida: «nada de un cliente metido en el código»). Sale de `dominio-negocio` y se une DESPUÉS de ella. De fábrica SOLO queda el tipo `general` (`pasos/dominios_fabrica.json`): EstadoPlay sale del código entero (sus cartas de consolas y sus reglas de mandos/equipo; decisión del dueño, sus vídeos viejos pueden cambiar). Cada proyecto (cliente) tiene SU ficha del negocio (qué hace, reglas de foto, lo que vigila el revisor) en `<proyectos>/_sistema/dominios.json`, con id `cliente-<cid>`, y la API la escribe en `estilo.dominio` de sus estilos de FOTO. **Propios:** `pasos/dominios.py` (tras unirse `dominio-negocio`), `pasos/dominios_fabrica.json`, `pasos/prueba_dominios.py`. **Por zonas:** `motores/reglas/reglas.py` (`para`/`bloque_prompt` con `extra`) y `reglas_foto.json` (sin reglas de ningún negocio, con un hueco); `pasos/encuadres.py` (`SERVICIOS*`/`ESCALERA_FOTO` vacíos y la familia de las cartas de un negocio en `carta_de`); `pasos/revisor_imagenes.py` (el defecto de `REFERENCIA` = general); en `pasos/p6_assets.py` SOLO la línea de las reglas de la casa de `_prompt_completo`; `pasos/moodboard.py` SOLO `_reglas_de`; en `app.py` el bloque LA FICHA DEL NEGOCIO (rutas `/api/clientes/{cid}/negocio`, `_negocio_al_estilo`) junto a `GET /api/dominios`, `_reglas_para_revisor` (`extra`), y UNA llamada a `_negocio_al_estilo` en `asignar_estilo_a_cliente`, `borrar_cliente`, `duplicar_preset_light`, `restaurar_preset_canal` y tras `_congelar_preset` (creación del estilo); en `web/app.js` el bloque LA FICHA DEL NEGOCIO al final, un botón y su panel en `dentroDeProyecto` (junto al del logo) y UNA línea al principio de `bloqueReglasLight`; un bloque LA FICHA DEL NEGOCIO en `web/estilo.css` (junto a `.regla-estilo-propuesta`); `pasos/prueba_modo_foto.py` (secciones 5, 6 y 9); `prueba_api.py` (una sección); `pruebas.sh`/`pruebas.ps1` (una línea), `docs/NOVEDADES.md`, `docs/API.md`, `pasos/guias.py` (la entrada «Ficha del negocio» y una frase de «estilo_grafico») y un tramo al final de `prueba_recorrido.py`. Ya NO toca Configuración ni el selector de `fuenteDeEstiloLight`. No toca lo reservado por las otras ramas | 21-10-2026 |
 | `rediseno-automatizar` | **Nueva interfaz de Automatizar** (maqueta aprobada por el dueño, 22-10: https://claude.ai/artifact/XKHvdT3eKxHgLvxdVzbZ4A, módulo Automatizar). Solo cómo se ve y dónde está cada cosa, con el sistema de Crear: proyecto en la cabecera con «+ Añadir guiones», Parrilla como tablero Pendientes · Usados · Publicados, la ficha de un guion en un panel lateral con «Pasar al Encargo ›», elegir de dónde salen los guiones con tarjetas que dicen lo que cuesta, el chat con Claude en su pestaña, la marca del cliente arriba; se quitan las pestañas que no se podían pulsar. Ningún param nuevo ni por defecto (regla 1), nada nuevo que pague, ninguna ruta se quita. **Las claves de YouTube/Meta/Apify NO se mueven aquí** (van a Configuración en otra rama, después de `seo-real`/`seo-real-3`). **Por zonas:** en `web/app.js` el bloque AUTOMATIZAR y AUTOMATIZAR → PARRILLA (`vistaParrilla` y vecinas); un bloque AUTOMATIZAR · TABLERO en `web/estilo.css`; `docs/NOVEDADES.md`, `docs/MANUAL.md` (el apartado de Automatizar); los escenarios de Automatizar de `prueba_recorrido.py`. No toca lo reservado por las otras ramas | 22-10-2026 |
 | `rediseno-proyectos` | **Nueva interfaz de Tus proyectos y de la pantalla de un proyecto** (maqueta aprobada por el dueño, 22-10: https://claude.ai/artifact/XKHvdT3eKxHgLvxdVzbZ4A). Solo cómo se ve y dónde está cada cosa: «+ Nuevo vídeo» a la vista, buscador, «Sigue donde lo dejaste» con tarjetas con miniatura y estado, filtros de vídeos y vista tarjetas/lista, «⋯» por vídeo (Renombrar, Mover, Apartar), los botones de gestión del proyecto en «⚙ Ajustes del proyecto» (panel lateral), tocar un estilo abre «Nuevo vídeo / Editar». Ningún param nuevo ni por defecto, nada que pague, ninguna ruta se quita. **Coordinación con `etapa-foto-c` (autorizada por el dueño, 22-10, se programan a la vez):** el panel de Ajustes del proyecto lleva una lista de secciones (`SECCIONES_AJUSTES_PROYECTO`) con un hueco para «Ficha del negocio»: quien se una segundo coloca ahí el botón y el panel de la ficha, sin cambiarlos por dentro. **Por zonas:** en `web/app.js` la portada de Crear y `dentroDeProyecto` con sus vecinas (tarjetas de proyecto, de estilo y filas de vídeo); un bloque PROYECTOS · TARJETAS en `web/estilo.css`; `docs/NOVEDADES.md`, `docs/MANUAL.md` (su apartado); los escenarios de la portada y del proyecto en `prueba_recorrido.py` | 22-10-2026 |
@@ -110,7 +108,7 @@ Quien la retome hace antes `git merge origin/main` (la voz habrá cambiado) y la
 vuelve a apuntar en la tabla. Mientras siga en pausa, `v2-fase-4b` sigue
 esperando, porque depende de ella.
 
-### Cola de unión (decisión del dueño, 22-10-2026)
+### Cola de unión (decisión del dueño, 22-10-2026; reordenada el 22-10 por choques medidos)
 
 Se une de una en una, en este orden. Antes de cada unión: la rama hace
 `git merge origin/main`, pasa sus pruebas y la revisión independiente; el
@@ -118,25 +116,33 @@ dueño hace la instantánea de Hostinger; se une; `asvs actualizar`; se
 comprueba que el Studio arranca. Solo entonces la siguiente. Una rama que no
 está lista cede su turno a la siguiente lista (salvo las que dependen de ella).
 
-1. `portadas-2` — **unida el 22-10-2026**
-2. `seo-real`
-3. `seo-real-3` (sale de `seo-real`)
-4. `dominio-negocio`
-5. `etapa-foto-c` (sale de `dominio-negocio`)
-6. `rediseno-automatizar`
-7. `rediseno-proyectos` (encaja la Ficha del negocio de `etapa-foto-c` en
-   `SECCIONES_AJUSTES_PROYECTO` si `etapa-foto-c` ya está unida: una línea
-   `{ id: 'ficha-negocio', titulo: 'Ficha del negocio', pinta: c => panelNegocioProyecto(c.cliente) }`;
-   el botón «✎ Editar la ficha» de `bloqueNegocioDelEstilo` pasa a poner
-   `APP.light.ajustesProyecto = cid` (abre el cajón) en vez de
-   `APP.light.negocioProyecto`, y sobran `abrirPanelNegocio` y su botón en la
-   fila de mandos, que ya no existe)
-8. `rediseno-publicar` (encaja `bloquePortadaPublicar`, el bloque PUBLICAR ·
-   SEO y la clave de YouTube en su sitio nuevo; cambia la línea de las claves
-   de Automatizar)
+Ya unidas: `tipo-de-relato`, `arreglos-crear-movil`, `portadas-2` (21/22-10),
+`seo-real` con `seo-real-3` (22-10, en una sola unión y por delante de 1-3 a
+petición del dueño: estaban probadas en el servidor).
 
-Los rediseños van al final a propósito: son los que mueven de sitio piezas de
-las demás, así que les toca a ellos encajarlas al ponerse al día.
+El orden sale de unir de prueba cada rama con main y con las demás
+(`git merge-tree`, 22-10): primero las que hoy no chocan con nada, y las que
+tienen que encajar piezas de otras, detrás de esas otras.
+
+1. `dominio-negocio` — al día con main, sin choques.
+2. `rediseno-automatizar` — sin choques.
+3. `rediseno-proyectos` — choque trivial (NOVEDADES, estilo.css).
+4. ~~`seo-real`~~ y 5. ~~`seo-real-3`~~ — UNIDAS (22-10).
+6. `rediseno-publicar` — encaja el SEO ya unido (el bloque PUBLICAR · SEO:
+   `bloqueSeoVideo`, `bloqueBusquedasSeo`, `bloqueEncontraronSeo`,
+   `seoDeRedPublicar`; y en Configuración `seccionClaveYouTube` y
+   `seccionCanalYouTube`) en sus pasos nuevos, sin cambiarlo por dentro, y la
+   línea de las claves de Automatizar (todo anotado en su informe).
+7. `etapa-foto-c` (sale de `dominio-negocio`) — la que más tiene que poner al
+   día: le faltan ~50 cambios de main (`tipo-de-relato`, `dominio-negocio`
+   actualizada) y encaja su Ficha del negocio en `SECCIONES_AJUSTES_PROYECTO`:
+   una línea `{ id: 'ficha-negocio', titulo: 'Ficha del negocio', pinta: c => panelNegocioProyecto(c.cliente) }`;
+   el botón «✎ Editar la ficha» de `bloqueNegocioDelEstilo` pone
+   `APP.light.ajustesProyecto = cid` en vez de `APP.light.negocioProyecto`, y
+   sobran `abrirPanelNegocio` y su botón en la fila de mandos.
+8. `guion-visual` — cuando esté lista; choca con `dominio-negocio` en
+   `p6_assets.py` y `presets_canal.py` (al ponerse al día, sumar `imagenes` a
+   la tupla de claves del Estilo junto a `relato` y `dominio`).
 
 ### El orden acordado
 

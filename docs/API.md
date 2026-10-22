@@ -454,7 +454,13 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/publicar/videos/{pid}/portada/proponer/{rid}` | Como van las portadas propuestas, y cuales son al terminar. |
 | `POST` | `/api/publicar/videos/{pid}/portada/usar` | La pinta a tamano real y la deja como portada del video (como si la |
 | `POST` | `/api/publicar/videos/{pid}/portada/vista` | La portada pintada en pequeno, para la pantalla: {diseno, ancho?, |
+| `POST` | `/api/publicar/videos/{pid}/seo/encontraron` | «Cómo te encontraron»: las búsquedas de YouTube que trajeron vistas a |
+| `POST` | `/api/publicar/videos/{pid}/seo/investigar` | Investiga las búsquedas de verdad para la palabra clave de este vídeo. |
 | `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
+| `POST` | `/api/publicar/youtube/oauth/desconectar` | Olvida el permiso del canal (y lo que se trajo de él). |
+| `POST` | `/api/publicar/youtube/oauth/empezar` | {redireccion} (la dirección de vuelta de ESTE Studio) -> {url} de Google |
+| `GET` | `/api/publicar/youtube/oauth/vuelta` | Adonde vuelve Google con el permiso: cambia el código por el token. |
+| `POST` | `/api/publicar/youtube/probar` | Prueba la clave de la API de datos de YouTube (gasta 1 unidad del cupo) |
 | `POST` | `/api/reglas-estilo/afinar` | Claude reescribe una regla para el generador: {texto, nombre?, palabras?}. |
 | `GET` | `/api/reglas-estilo/afinar/{rid}` | Como va «Afinar con Claude», y la propuesta al terminar. |
 | `GET` | `/api/sistema/estilos-perdidos` | Los videos que apuntan a imagenes de estilo que ya no estan. Solo mira. |
@@ -473,4 +479,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**359 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**365 endpoints.** Escrito por `generar_api.py` desde `app.py`.

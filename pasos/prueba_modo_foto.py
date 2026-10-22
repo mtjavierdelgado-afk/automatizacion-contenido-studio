@@ -615,66 +615,78 @@ def prueba_modo_foto():
 
 # ================================================ 5 · la escalera de foto
 
+#: UN NEGOCIO DE PRUEBA con cartas propias y servicios, para probar el filtro
+#: por servicios sin que el Studio traiga ninguno de fábrica (Etapa Foto C:
+#: «nada de un cliente metido en el código»; antes esto era EstadoPlay).
+NEGOCIO_CON_CARTAS = {
+    "id": "prueba", "nombre": "negocio de prueba",
+    "servicios": ("barcos", "motos"),
+    "en_texto": {"barcos": (r"\\bbarcos?\\b",), "motos": (r"\\bmotos?\\b",)},
+    "escalera": (
+        {"id": "foto_t_puerto", "familia": "lejos", "peso": 2, "servicios": "todos",
+         "nombre": "puerto", "encuadre": "a wide shot of the harbour"},
+        {"id": "foto_t_cubierta", "familia": "medio", "peso": 2,
+         "servicios": ("barcos",), "nombre": "cubierta",
+         "encuadre": "a medium shot on the deck"},
+        {"id": "foto_t_casco", "familia": "cerca", "peso": 2,
+         "servicios": ("motos",), "nombre": "casco",
+         "encuadre": "a close-up of the helmet"},
+        {"id": "foto_t_manos", "familia": "cerca", "peso": 2, "servicios": "todos",
+         "nombre": "manos", "encuadre": "a close-up of the hands at work"},
+        {"id": "foto_t_luz", "familia": "luz", "peso": 1, "servicios": "todos",
+         "nombre": "contraluz", "encuadre": "a silhouette against the sun"},
+        {"id": "foto_t_alto", "familia": "lejos", "peso": 1, "servicios": "todos",
+         "nombre": "desde arriba", "encuadre": "a high-angle shot over the place"},
+        {"id": "foto_t_perfil", "familia": "medio", "peso": 2, "servicios": "todos",
+         "nombre": "perfil", "encuadre": "a side profile of two people"},
+        {"id": "foto_t_detalle", "familia": "cerca", "peso": 1, "servicios": "todos",
+         "nombre": "detalle", "encuadre": "a detail of the gear"},
+        {"id": "foto_t_suelo", "familia": "angulo", "peso": 1, "servicios": "todos",
+         "nombre": "a ras de suelo", "encuadre": "a low angle from the ground"},
+    ),
+    "revisor": {}, "reglas": [], "por_defecto": ("barcos",),
+}
+
+
 def prueba_escalera_foto():
-    titulo("5 · la escalera de foto")
-    ids = [c["id"] for c in encuadres.ESCALERA_FOTO]
-    igual(len(ids), 13, "trece cartas")
-    igual(len(set(ids)), 13, "con ids unicos")
-    ok(not set(ids) & set(encuadres.POR_ID),
-       "y ninguno se confunde con uno de la de ilustracion")
-    for carta in encuadres.ESCALERA_FOTO:
-        ok(carta["familia"] in ("lejos", "medio", "cerca", "luz", "angulo"),
-           f"{carta['id']}: familia conocida")
-        ok(int(carta.get("peso") or 0) >= 1, f"{carta['id']}: peso")
-        suyos = carta.get("servicios")
-        ok(suyos == "todos" or all(s in encuadres.SERVICIOS for s in suyos),
-           f"{carta['id']}: servicios conocidos")
-        ok(carta["encuadre"] == carta["encuadre"].strip()
-           and carta["encuadre"][0].islower()
-           and not carta["encuadre"].endswith("."),
-           f"{carta['id']}: encuadre en ingles, para pegar tras «SHOT TYPE: »")
-        ok(not carta.get("abstracta"), f"{carta['id']}: no es abstracta")
+    titulo("5 · sin negocio, ninguna escalera de un cliente")
+    igual(encuadres.ESCALERA_FOTO, (), "el Studio no trae cartas de ningún negocio")
+    igual(encuadres.SERVICIOS, (), "ni servicios")
+    igual(encuadres.escalera_de("foto"), encuadres.ESCALERA_FOTO_GENERAL,
+          "la escalera de foto es la general")
     igual(encuadres.escalera_para("ilustracion", ["simuladores"]),
           encuadres.ESCALERA, "en ilustracion los servicios no filtran nada")
+    igual(encuadres.escalera_para("foto", ["consolas"]), encuadres.ESCALERA_FOTO_GENERAL,
+          "pedir «consolas» sin un negocio que las tenga: la general")
 
-    titulo("5 · servicios")
-    igual(encuadres.servicios_de(None), (),
-          "sin servicios no se supone ninguno (antes: consolas)")
-    igual(encuadres.servicios_de("vr, Karaoke ,raro"), ("vr", "karaoke"),
-          "se limpian y se quedan los conocidos")
+    titulo("5 · un negocio con cartas propias (el filtro por servicios)")
+    d = NEGOCIO_CON_CARTAS
+    igual(encuadres.servicios_de(None, d), (), "sin servicios no se supone ninguno")
+    igual(encuadres.servicios_de("motos, Barcos ,raro", d), ("motos", "barcos"),
+          "se limpian y se quedan los del negocio")
     escenas = [{"id": f"S{n:03d}"} for n in range(1, 400)]
-    base = encuadres.repartir(escenas, semilla=7, modo="foto",
-                              servicios=["consolas"])
-    salen = {c["id"] for c in base.values()}
-    ok("foto_pedales" not in salen and "foto_vr" not in salen,
-       "sin simuladores ni VR no salen pedales ni cuerpo con visor")
-    ok({"foto_manos", "foto_estacion", "foto_hombro"} <= salen,
-       "y si las manos, la estacion y el hombro")
-    todos = encuadres.repartir(escenas, semilla=7, modo="foto",
-                               servicios=list(encuadres.SERVICIOS))
-    igual({c["id"] for c in todos.values()}, set(ids),
-          "con todos los servicios salen las trece")
-    karaoke = encuadres.repartir(escenas, semilla=7, modo="foto",
-                                 servicios=["karaoke"])
-    sal = {c["id"] for c in karaoke.values()}
-    ok("foto_manos" not in sal and "foto_perfil" in sal,
-       "solo karaoke: perfil si, manos en el mando no")
+    barcos = encuadres.repartir(escenas, semilla=7, modo="foto", servicios=["barcos"], dominio=d)
+    salen = {c["id"] for c in barcos.values()}
+    ok("foto_t_casco" not in salen and {"foto_t_cubierta", "foto_t_puerto"} <= salen,
+       "con barcos: la cubierta sí y el casco (de motos) no")
+    todos = encuadres.repartir(escenas, semilla=7, modo="foto", servicios=["barcos", "motos"], dominio=d)
+    igual({c["id"] for c in todos.values()}, {c["id"] for c in d["escalera"]},
+          "con todos sus servicios salen todas sus cartas")
+    igual(encuadres.escalera_para("foto", [], d), encuadres.ESCALERA_FOTO_GENERAL,
+          "un negocio sin servicios pedidos reparte la general")
 
     titulo("5 · las reglas del reparto, tambien en foto")
-    for nombre, reparto in (("base", base), ("todos", todos)):
+    for nombre, reparto in (("barcos", barcos), ("todos", todos)):
         orden = [reparto[e["id"]] for e in escenas]
         seguidas = [i for i in range(1, len(orden))
                     if orden[i]["familia"] == orden[i - 1]["familia"]]
         igual(seguidas, [], f"{nombre}: nunca dos familias seguidas")
     igual([c["id"] for c in encuadres.repartir(escenas, 7, modo="foto",
-                                                servicios=["consolas"])
-           .values()], [c["id"] for c in base.values()],
-          "determinista: misma semilla, mismas cartas")
+                                                servicios=["barcos"], dominio=d).values()],
+          [c["id"] for c in barcos.values()], "determinista: misma semilla, mismas cartas")
     forzado = encuadres.repartir(escenas[:5], 7, modo="foto",
-                                 forzadas={"S002": "foto_pedales",
-                                           "S003": "diagrama"})
-    igual(forzado["S002"]["id"], "foto_pedales",
-          "una carta de foto forzada a mano manda, aunque salte el filtro")
+                                 forzadas={"S002": "foto_g_bajo", "S003": "diagrama"})
+    igual(forzado["S002"]["id"], "foto_g_bajo", "una carta de foto forzada a mano manda")
     ok(forzado["S003"]["id"].startswith("foto_"),
        "una carta de ilustracion forzada no vale en foto")
 
@@ -689,14 +701,6 @@ def prueba_escalera_foto():
     igual(informe["planos_repetidos"], 0, "el informe ve sus familias")
     ok(all(c["id"].startswith("foto_") for c in informe["escalera"]),
        "y ofrece la escalera de foto para forzar a mano")
-    planos = [{"id": f"S{n:03d}"} for n in range(1, 200)]
-    p6_assets._asignar_cartas(planos, p6_assets._con_defectos(      # noqa: SLF001
-        {"semilla": 3, "servicios": ["simuladores"],
-         "estilo": dict(ESTILO_FOTO)}))
-    cartas = {e["carta"] for e in planos}
-    ok("foto_pedales" in cartas and "foto_perfil" not in cartas,
-       "el param 'servicios' de assets llega al reparto: con simuladores salen "
-       "los pedales y no el perfil (que es de consolas y karaoke)")
 
 
 # ================================================= 6 a 8 · las correcciones
@@ -714,21 +718,11 @@ DE_CONSOLAS = re.compile(r"controller|tripod|gameplay|game screen|console",
 def prueba_correcciones():
     reglas = medios.motor("reglas/reglas.py")
 
-    titulo("6 · las reglas de consolas solo en videos de consolas (A1)")
-    # desde la Etapa Foto C viven en su TIPO DE NEGOCIO (pasos/dominios_fabrica.json)
-    # y entran por el hueco `reglas-del-negocio` de reglas_foto.json
-    con_condicion = p6_assets.dominios.reglas_de_foto({})
+    titulo("6 · sin ficha del negocio, ninguna regla de un negocio (A1 y Etapa C)")
     ok(not any(r.get("solo_si") for r in reglas.cargar("foto")["reglas"]),
-       "en reglas_foto.json ya no queda ninguna regla de un negocio")
-    ok(len(con_condicion) >= 2, "hay reglas de foto con «solo_si» (mandos y equipo)")
-    for regla in con_condicion:
-        ok(not reglas.aplica(regla), f"{regla['id']}: sin contexto no entra")
-        ok(not reglas.aplica(regla, "a woman waters the plants on her balcony"),
-           f"{regla['id']}: en un video de plantas no entra")
-        ok(reglas.aplica(regla, "two kids hold game controllers in front of the TV"),
-           f"{regla['id']}: con mandos en la escena, entra")
-        ok(reglas.aplica(regla, "Fiesta con CONSOLAS en Lima"),
-           f"{regla['id']}: en castellano y en mayusculas, tambien")
+       "en reglas_foto.json no queda ninguna regla de un negocio")
+    igual(p6_assets.dominios.reglas_de_foto({}), [],
+          "sin ficha, el negocio no aporta ninguna regla")
     generales = [r for r in reglas.cargar("foto")["reglas"]
                  if not r.get("solo_si") and not r.get("hueco")]
     for regla in generales:
@@ -739,31 +733,17 @@ def prueba_correcciones():
     igual(reglas.bloque_prompt("prompt_imagen", contexto="game controllers"),
           reglas.bloque_prompt("prompt_imagen"),
           "en ilustracion el contexto no cambia nada")
-
     plantas = {"prompt": "a woman waters the plants on a sunny balcony",
                "luz": "morning"}
     consolas = {"prompt": "four kids play a racing video game on a big TV",
                 "luz": "afternoon"}
-    prompt = p6_assets._prompt_completo(plantas, LAMINA, ESTILO_FOTO)  # noqa: SLF001
-    igual(DE_CONSOLAS.findall(prompt), [],
-          "un plano de plantas en foto no lleva nada de consolas")
-    ok("HANDS ARE PHOTOGRAPHED" in prompt,
-       "pero si la regla general de las manos")
-    prompt = p6_assets._prompt_completo(consolas, LAMINA, ESTILO_FOTO)  # noqa: SLF001
-    ok("GAMING EQUIPMENT IS SET UP" in prompt and "GAME CONTROLLERS" in prompt,
-       "un plano con videojuegos lleva las reglas del equipo y de los mandos")
-    prompt = p6_assets._prompt_completo(                            # noqa: SLF001
-        plantas, LAMINA, ESTILO_FOTO, feedback="que se vea una consola en la mesa")
-    ok("GAMING EQUIPMENT IS SET UP" in prompt,
-       "la nota del revisor tambien cuenta: pide una consola y entra la regla")
-    estilo_consolas = dict(ESTILO_FOTO, prompt="birthday parties with game consoles")
-    prompt = p6_assets._prompt_completo(plantas, LAMINA, estilo_consolas)  # noqa: SLF001
-    ok("GAMING EQUIPMENT IS SET UP" in prompt,
-       "un estilo de fiestas con consolas las lleva en todos sus planos")
+    for escena, nombre in ((plantas, "plantas"), (consolas, "consolas")):
+        prompt = p6_assets._prompt_completo(escena, LAMINA, ESTILO_FOTO)  # noqa: SLF001
+        ok("GAMING EQUIPMENT IS SET UP" not in prompt and "GAME CONTROLLERS" not in prompt,
+           f"un plano de {nombre} sin ficha no lleva reglas de consolas")
+        ok("HANDS ARE PHOTOGRAPHED" in prompt, f"{nombre}: si la regla general de las manos")
     igual(DE_CONSOLAS.findall(moodboard._reglas_de(reglas, ESTILO_FOTO)), [],  # noqa: SLF001
-          "las laminas de un estilo foto cualquiera no llevan consolas")
-    ok("GAMING EQUIPMENT IS SET UP" in moodboard._reglas_de(reglas, estilo_consolas),  # noqa: SLF001
-       "las de un estilo de consolas si")
+          "las laminas de un estilo foto sin ficha no llevan consolas")
 
     titulo("7 · la calidad con la que nace un video (A2)")
     os.environ["ESTUDIO_AJUSTES"] = os.path.join(tempfile.mkdtemp(), "ajustes.json")
@@ -808,12 +788,8 @@ def prueba_correcciones():
     general = encuadres.ESCALERA_FOTO_GENERAL
     ids_g = [c["id"] for c in general]
     igual(len(set(ids_g)), len(ids_g), "ids unicos")
-    ok(not set(ids_g) & set(encuadres.POR_ID) and not set(ids_g) & {
-        c["id"] for c in encuadres.ESCALERA_FOTO},
-       "ninguno se confunde con los de ilustracion ni con los de consolas")
-    igual({c["familia"] for c in general},
-          {c["familia"] for c in encuadres.ESCALERA_FOTO},
-          "las mismas familias que la de consolas")
+    ok(not set(ids_g) & set(encuadres.POR_ID),
+       "ninguno se confunde con los de ilustracion")
     for carta in general:
         igual(DE_CONSOLAS.findall(carta["encuadre"])
               + re.findall(r"\bTV\b|station|screen|pouf", carta["encuadre"],
@@ -825,10 +801,6 @@ def prueba_correcciones():
           "sin servicios, la general")
     igual(encuadres.servicios_en_texto("a woman waters the plants"), (),
           "un texto de plantas no nombra ningun servicio")
-    igual(encuadres.servicios_en_texto("Fiesta con CONSOLAS y karaoke"),
-          ("consolas", "karaoke"), "consolas y karaoke se reconocen en castellano")
-    igual(encuadres.servicios_en_texto("a kid in a VR headset"), ("vr",),
-          "y la realidad virtual")
     planos = [{"id": f"S{n:03d}"} for n in range(1, 60)]
     p6_assets._asignar_cartas(planos, p6_assets._con_defectos(      # noqa: SLF001
         {"semilla": 3, "estilo": dict(ESTILO_FOTO)}),
@@ -837,19 +809,10 @@ def prueba_correcciones():
        "un video foto de plantas reparte solo cartas de la general")
     planos = [{"id": f"S{n:03d}"} for n in range(1, 60)]
     p6_assets._asignar_cartas(planos, p6_assets._con_defectos(      # noqa: SLF001
-        {"semilla": 3, "estilo": dict(ESTILO_FOTO)}),
+        {"semilla": 3, "estilo": dict(ESTILO_FOTO, prompt="parties with consoles")}),
         texto='{"objetos": [{"descripcion": "two game controllers"}]}')
-    ok(all(e["carta"].startswith("foto_") and not e["carta"].startswith("foto_g_")
-           for e in planos),
-       "uno cuyo guion saca mandos reparte las de consolas")
-    planos = [{"id": f"S{n:03d}"} for n in range(1, 60)]
-    p6_assets._asignar_cartas(planos, p6_assets._con_defectos(      # noqa: SLF001
-        {"semilla": 3, "estilo": dict(ESTILO_FOTO, prompt="parties with consoles")}))
-    ok(all(not e["carta"].startswith("foto_g_") for e in planos),
-       "y uno cuyo estilo es de fiestas con consolas, tambien")
-    igual(p6_assets.servicios_del_video({"servicios": ["vr"], "estilo": {}},
-                                        "game controllers"), ["vr"],
-          "el param 'servicios' puesto a mano manda sobre lo que diga el texto")
+    ok(all(e["carta"].startswith("foto_g_") for e in planos),
+       "uno de consolas sin ficha del negocio también reparte la general (Etapa C)")
 
 
 def main():

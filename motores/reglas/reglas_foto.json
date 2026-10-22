@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "descripcion": "Reglas transversales del MODO FOTO (estilo.modo = \"foto\", Etapa Foto A). Sustituyen a las de reglas.json, que se escribieron y se aprenden para video cartoon, en todo prompt de un video fotografico. Viven en un fichero aparte porque `asvs actualizar` no sobrescribe reglas.json (es lo que reescribe el destilador en el servidor) y una regla nueva puesta alli no llegaria nunca. Este fichero SI se actualiza con el codigo. Escritas en ingles porque se concatenan tal cual a un prompt en ingles. LAS REGLAS CON `solo_si` SON DE UN TIPO DE VIDEO, NO DE TODOS: solo entran cuando el estilo, la escena o la nota del revisor nombran alguna de sus palabras (expresiones regulares, sin distinguir mayusculas). Las de un negocio concreto (las de consolas y videojuegos, por ejemplo) ya no viven aqui sino en su TIPO DE NEGOCIO (pasos/dominios_fabrica.json), y entran en el HUECO `reglas-del-negocio`; van con `solo_si` porque el modo foto es para cualquier proyecto, y pedirle a un video de plantas que monte los televisores en su tripode es meterle pantallas y mandos donde no los hay.",
+  "descripcion": "Reglas transversales del MODO FOTO (estilo.modo = \"foto\", Etapa Foto A). Sustituyen a las de reglas.json, que se escribieron y se aprenden para video cartoon, en todo prompt de un video fotografico. Viven en un fichero aparte porque `asvs actualizar` no sobrescribe reglas.json (es lo que reescribe el destilador en el servidor) y una regla nueva puesta alli no llegaria nunca. Este fichero SI se actualiza con el codigo. Escritas en ingles porque se concatenan tal cual a un prompt en ingles. LAS REGLAS CON `solo_si` SON DE UN TIPO DE VIDEO, NO DE TODOS: solo entran cuando el estilo, la escena o la nota del revisor nombran alguna de sus palabras (expresiones regulares, sin distinguir mayusculas). Las de un negocio concreto no viven aqui: van en la FICHA DEL NEGOCIO de su cliente (Crear → el proyecto) y entran en el HUECO `reglas-del-negocio`. El modo foto es para cualquier proyecto.",
   "reglas": [
     {
       "id": "foto-hora-y-luz-explicitas",
@@ -23,7 +23,7 @@
       "ambito": "prompt_imagen",
       "prioridad": 1,
       "regla": "HANDS ARE PHOTOGRAPHED, NOT INVENTED: every visible hand has five fingers with real anatomy, knuckles and nails, and whatever it holds -- a cup, a phone, a tool, a plant, another hand -- is gripped the way a real hand grips it, never floating. Never extra, fused or missing fingers. When a hand adds nothing to the shot, keep it out of frame rather than render it badly.",
-      "por_que": "Las manos son lo primero que delata una foto generada, en cualquier tema. La parte de mandos, volantes y VR es de los videos de consolas y vive en foto-manos-con-mandos.",
+      "por_que": "Las manos son lo primero que delata una foto generada, en cualquier tema. Lo que un negocio necesite de las manos con SU producto va en la ficha de su negocio.",
       "fecha": "2026-10-11"
     },
     {

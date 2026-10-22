@@ -1,36 +1,30 @@
 """
-EL DOMINIO DE UN NEGOCIO (rama dominio-negocio, 21-10-2026).
+EL NEGOCIO DE CADA CLIENTE (rama dominio-negocio y Etapa Foto C, 21-10-2026).
 
-Lo de EstadoPlay salió del código a `pasos/dominios.py`. Lo que se comprueba:
+Decisión del dueño: «nada de un cliente metido en el código». El Studio solo
+trae un tipo de negocio, el GENERAL; el de cada cliente es una FICHA que se
+llena en su proyecto (`dominios.guardar_de_cliente`). Lo que se comprueba:
 
-  1. LOS MISMOS DATOS: la escalera de foto de servicios, los servicios y sus
-     patrones son los de antes, y la escalera expandida por peso es idéntica en
-     longitud y en orden (de eso depende el sorteo de cartas: `carta_de`).
-  2. SIN DOMINIO FIJADO, EL MISMO REPARTO: para muchos vídeos de prueba, las
-     cartas que salen son las mismas que con el `encuadres` de antes de la rama.
-  3. CON DOMINIO FIJADO: «general» reparte la escalera general aunque el texto
-     hable de consolas; «estadoplay» la de servicios aunque no las nombre.
-  4. EL REVISOR: con EstadoPlay, la instrucción es letra por letra la de antes;
-     en un vídeo que no es de consolas, sin televisores ni mandos.
-  5. EL PRESET DE ESTILO guarda `dominio` y lo lleva y lo quita.
-
-Y de la Etapa Foto C (tipos de negocio como datos, editables):
-
-  6. LAS REGLAS DE FOTO SIGUEN AL TIPO: en automático, el bloque de reglas de
-     cada encargo es letra por letra el de antes (las de consolas salieron de
-     `reglas_foto.json` a su tipo y vuelven a entrar en el mismo sitio);
-     fijado en general, ninguna de consolas; fijado en EstadoPlay, las suyas.
-  7. LOS TIPOS DEL DUEÑO: se crean, se cambian y se borran en su fichero; sus
-     reglas entran SOLO si un estilo los fija, con sus «solo si…»; crear uno
-     no cambia ni una letra de un vídeo en automático; los de fábrica no se
-     tocan; lo que no vale se rechaza con su motivo.
+  1. NINGÚN CLIENTE EN EL CÓDIGO: de fábrica solo «general»; ni el fichero de
+     datos ni las reglas de foto nombran consolas, mandos ni EstadoPlay.
+  2. SIN FICHA, LO GENERAL: la escalera general de foto, ninguna regla de un
+     negocio y el revisor general; en ilustración el reparto es el de antes.
+  3. LA FICHA DE UN CLIENTE: se guarda en su fichero; sus reglas entran SOLO en
+     los estilos que la llevan, en su hueco y con sus «solo si…»; sus láminas
+     también; el revisor vigila lo que se escribió; las cartas son las generales.
+  4. BORRARLA: deja de poder fijarse, pero un vídeo ya hecho con ella saca el
+     mismo prompt; un fichero roto no tumba nada.
+  5. LO QUE NO VALE se rechaza con su motivo.
+  6. EL PRESET DE ESTILO guarda `dominio` y lo lleva y lo quita.
 
 En memoria, sin el CLI y sin pagar nada.
 
     python pasos/prueba_dominios.py
 """
 import importlib.util
+import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -39,7 +33,7 @@ RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, RAIZ)
 sys.path.insert(0, os.path.join(RAIZ, "pasos"))
 
-# los tipos del dueño de esta prueba, en un fichero suyo: nunca en el de verdad
+# las fichas de esta prueba, en un fichero suyo: nunca en el de verdad
 os.environ["ESTUDIO_DOMINIOS"] = os.path.join(tempfile.mkdtemp(prefix="dominios_"),
                                               "dominios.json")
 
@@ -69,7 +63,7 @@ def seccion(titulo):
     print(f"\n{titulo}")
 
 
-#: El commit de `main` con el que se abrió la rama: lo de ANTES.
+#: El commit de `main` con el que se abrió la rama dominio-negocio: lo de ANTES.
 ANTES = "9b2f114"
 
 
@@ -90,349 +84,227 @@ def _de_antes(ruta, nombre):
     return modulo
 
 
-TEXTOS = [
-    "",
-    "una fiesta con consolas y mandos para todos",
-    "un baño pequeño con mampara corrediza",
-    "simuladores de carreras con volante y pedales, y realidad virtual",
-    "karaoke en la sala, con PS5 y Xbox",
-    "plantas de interior junto a una ventana",
-]
+#: Lo que delata a un cliente concreto metido en los datos del Studio.
+DE_UN_CLIENTE = re.compile(r"consol|mando|controller|tripod|tr[ií]pode|gaming|"
+                           r"karaoke|simulador|estado ?play", re.IGNORECASE)
+
+ESTILO_FOTO = {"referencias": ["a.png"], "modo": "foto",
+               "guia": {"guia": "natural light photography", "resumen_es": "foto"}}
+LAMINA = [{"papel": "lamina", "cuantas": 6, "ruta": "l.png"}]
+BANOS = {"prompt": "a couple chooses a glass shower screen in a small bathroom",
+         "luz": "morning"}
+PLANTAS = {"prompt": "a woman waters the plants", "luz": "morning"}
+MANDOS = {"prompt": "two kids hold game controllers in front of the TV", "luz": "night"}
 
 
-def prueba_mismos_datos(antes):
-    seccion("1] los datos de EstadoPlay son los de antes")
+def _prompt(escena, estilo):
+    import p6_assets as P6                                        # noqa: PLC0415
+    return P6._prompt_completo(escena, LAMINA, estilo)             # noqa: SLF001
+
+
+def prueba_ningun_cliente():
+    seccion("1] ningún cliente en el código")
+    igual(list(D.DE_FABRICA), ["general"], "de fábrica solo hay «general»")
+    with open(D.RUTA_FABRICA, encoding="utf-8") as fh:
+        datos = json.load(fh)
+    igual(DE_UN_CLIENTE.findall(json.dumps(datos["dominios"], ensure_ascii=False)), [],
+          "el fichero de datos no nombra consolas, mandos ni EstadoPlay")
+    with open(os.path.join(RAIZ, "motores", "reglas", "reglas_foto.json"), encoding="utf-8") as fh:
+        foto = json.load(fh)
+    igual(DE_UN_CLIENTE.findall(json.dumps(foto["reglas"], ensure_ascii=False)), [],
+          "ni las reglas de foto de la casa")
+    ok(any(r.get("hueco") == "negocio" for r in foto["reglas"]),
+       "que guardan el hueco donde entran las de la ficha del negocio")
+    igual((E.SERVICIOS, E.SERVICIOS_EN_TEXTO, E.ESCALERA_FOTO), ((), {}, ()),
+          "encuadres no trae servicios ni cartas de ningún negocio")
+
+
+def prueba_sin_ficha():
+    seccion("2] sin ficha, lo general")
+    import medios                                                 # noqa: PLC0415
+    import revisor_imagenes as R                                  # noqa: PLC0415
+    reglas = medios.motor("reglas/reglas.py")
+    igual(D.reglas_de_foto({}), [], "ninguna regla de un negocio")
+    igual(D.de_estilo({}, "dos mandos y una consola")[0]["id"], "general",
+          "aunque el texto hable de consolas: el general")
+    igual(D.frases_revisor({}, "consolas"), dict(D.REVISOR_GENERAL), "y el revisor general")
+    for escena, nombre in ((MANDOS, "mandos"), (PLANTAS, "plantas")):
+        texto = _prompt(escena, ESTILO_FOTO)
+        ok("GAME CONTROLLERS" not in texto and "GAMING EQUIPMENT" not in texto,
+           f"un plano de {nombre} no recibe reglas de consolas")
+    escenas = [{"id": f"S{i:03d}"} for i in range(1, 41)]
+    for texto in ("una fiesta con consolas y mandos", "un baño con mampara"):
+        cartas = E.repartir(escenas, semilla=3, modo="foto",
+                            servicios=list(E.servicios_en_texto(texto)))
+        ok(all(c["id"].startswith("foto_g_") for c in cartas.values()),
+           f"«{texto}»: cartas de la escalera general de foto")
+    antes = _de_antes("pasos/encuadres.py", "encuadres")
     if antes is None:
         ok(False, "no se ha podido leer encuadres.py de antes (¿sin git?)")
         return
-    igual(E.ESCALERA_FOTO, antes.ESCALERA_FOTO, "la escalera de foto de servicios, igual")
-    igual(E.ESCALERA_FOTO_GENERAL, antes.ESCALERA_FOTO_GENERAL, "la general, igual")
-    igual(E.ESCALERA, antes.ESCALERA, "la de ilustración, igual")
-    igual(E.SERVICIOS, antes.SERVICIOS, "los servicios, igual")
-    igual(E.SERVICIOS_EN_TEXTO, antes.SERVICIOS_EN_TEXTO, "y sus patrones, igual")
-    igual([c["id"] for c in E._repartidas(E.ESCALERA_FOTO)],             # noqa: SLF001
-          [c["id"] for c in antes._repartidas(antes.ESCALERA_FOTO)],     # noqa: SLF001
-          "la escalera expandida por peso: misma longitud y mismo orden")
-    ok(D.ESTADOPLAY["escalera"] is E.ESCALERA_FOTO, "y encuadres usa el MISMO objeto del dominio")
+    for semilla in (0, 7, 12345):
+        ahora = {k: v["id"] for k, v in E.repartir(escenas, semilla=semilla).items()}
+        vieja = {k: v["id"] for k, v in antes.repartir(escenas, semilla=semilla).items()}
+        igual(ahora, vieja, f"ilustración, semilla {semilla}: las mismas cartas que antes")
+    for semilla in (0, 7):
+        ahora = {k: v["id"] for k, v in E.repartir(escenas, semilla=semilla, modo="foto").items()}
+        vieja = {k: v["id"] for k, v in antes.repartir(escenas, semilla=semilla, modo="foto").items()}
+        igual(ahora, vieja, f"foto sin servicios, semilla {semilla}: las mismas cartas que antes")
+    ok("GAME CONTROLLERS" not in reglas.bloque_prompt(
+        "prompt_imagen", modo="foto", contexto="game controllers",
+        extra=D.reglas_de_foto({})), "el bloque de reglas de la casa tampoco")
+    import moodboard as M                                         # noqa: PLC0415
+    igual(DE_UN_CLIENTE.findall(M._reglas_de(reglas, ESTILO_FOTO)), [],  # noqa: SLF001
+          "ni las láminas")
+    import revisor_imagenes                                       # noqa: PLC0415,F401
+    igual(R._frases({}, {"escenas": [{"prompt": "players with controllers"}]}),  # noqa: SLF001
+          dict(D.REVISOR_GENERAL), "el revisor de imágenes usa las frases generales")
 
 
-def prueba_mismo_reparto(antes):
-    seccion("2] sin dominio fijado, las cartas son las de antes")
-    if antes is None:
-        return
-    escenas = [{"id": f"S{i:03d}"} for i in range(1, 41)]
-    for modo in ("ilustracion", "foto"):
-        for texto in TEXTOS:
-            servicios = list(E.servicios_en_texto(texto))
-            for semilla in (0, 7, 12345):
-                ahora = {k: v["id"] for k, v in E.repartir(
-                    escenas, semilla=semilla, modo=modo, servicios=servicios).items()}
-                vieja = {k: v["id"] for k, v in antes.repartir(
-                    escenas, semilla=semilla, modo=modo, servicios=servicios).items()}
-                if ahora != vieja:
-                    ok(False, f"{modo}, «{texto[:30]}», semilla {semilla}: cartas distintas")
-                    return
-    ok(True, "40 planos × 2 modos × 6 textos × 3 semillas: las mismas cartas")
-    for texto in TEXTOS:
-        igual(D.servicios_en_texto(texto), antes.servicios_en_texto(texto),
-              f"servicios de «{texto[:30]}», los mismos")
+FICHA_SUYU = {
+    "nombre": "Mamparas y baños a medida",
+    "reglas": [
+        {"texto": "Las mamparas son de vidrio templado transparente, con perfiles finos.",
+         "en": "SHOWER SCREENS ARE CLEAR TEMPERED GLASS with thin metal profiles.",
+         "palabras": ["mampara", "shower screen"]},
+        {"texto": "Los baños están limpios y ordenados, sin botes de marca.",
+         "en": "BATHROOMS ARE CLEAN AND TIDY, no branded bottles."}],
+    "revisor": {"equipo": "la mampara no es de vidrio o los perfiles son gruesos"},
+}
 
 
-def prueba_dominio_fijado():
-    seccion("3] con el dominio fijado en el estilo")
+def prueba_ficha_de_cliente():
+    seccion("3] la ficha del negocio de un cliente")
+    import medios                                                 # noqa: PLC0415
+    import moodboard as M                                         # noqa: PLC0415
     import p6_assets as P6                                        # noqa: PLC0415
-    general = {"estilo": {"dominio": "general", "prompt": "una fiesta con consolas y mandos"}}
-    igual(P6.servicios_del_video(general, "consolas por todas partes"), [],
-          "«general»: ningún servicio aunque el texto hable de consolas")
-    igual(E.escalera_para("foto", [], D.GENERAL), E.ESCALERA_FOTO_GENERAL,
-          "y la escalera es la general")
-    ep = {"estilo": {"dominio": "estadoplay", "prompt": "un cumpleaños"}}
-    igual(P6.servicios_del_video(ep, "tarta y globos"), ["consolas"],
-          "«estadoplay» sin servicios nombrados: los suyos de siempre (consolas)")
-    igual(P6.servicios_del_video(ep, "con simuladores de carreras"), ["simuladores"],
-          "y si nombra otro, ese")
-    auto = {"estilo": {"prompt": "un cumpleaños"}}
-    igual(P6.servicios_del_video(auto, "tarta y globos"), [],
-          "sin fijar y sin servicios en el texto: ninguno, como antes")
-    igual(D.de_estilo({}, "con mandos")[0]["id"], "estadoplay", "automático: el texto delata EstadoPlay")
-    igual(D.de_estilo({}, "un baño")[0]["id"], "general", "automático: y si no, general")
+    import revisor_imagenes as R                                  # noqa: PLC0415
+    reglas = medios.motor("reglas/reglas.py")
+    igual(D.de_cliente("cl1"), None, "un proyecto sin ficha: None")
+    sin_ficha = {n: _prompt(e, ESTILO_FOTO) for n, e in (("banos", BANOS), ("plantas", PLANTAS))}
+    lamina_antes = M._reglas_de(reglas, ESTILO_FOTO)               # noqa: SLF001
+
+    ficha = D.guardar_de_cliente("cl1", FICHA_SUYU)
+    igual(ficha["id"], "cliente-cl1", "su id sale del proyecto")
+    ok(os.path.exists(os.environ["ESTUDIO_DOMINIOS"]), "y se guarda en su fichero")
+    igual(D.de_cliente("cl1")["nombre"], "Mamparas y baños a medida", "se lee")
+    igual(D.normalizar("Cliente-CL1"), "cliente-cl1", "un estilo puede llevarla")
+    igual({n: _prompt(e, ESTILO_FOTO) for n, e in (("banos", BANOS), ("plantas", PLANTAS))},
+          sin_ficha, "guardarla NO cambia ni una letra de un estilo que no la lleva")
+    igual(M._reglas_de(reglas, ESTILO_FOTO), lamina_antes, "ni de sus láminas")  # noqa: SLF001
+
+    fijo = dict(ESTILO_FOTO, dominio="cliente-cl1")
+    texto = _prompt(BANOS, fijo)
+    ok("SHOWER SCREENS ARE CLEAR TEMPERED GLASS" in texto,
+       "con la ficha: su regla «solo si mampara» entra en un plano de mamparas")
+    ok("BATHROOMS ARE CLEAN AND TIDY" in texto, "y la que no tiene «solo si», también")
+    texto = _prompt(PLANTAS, fijo)
+    ok("SHOWER SCREENS" not in texto and "BATHROOMS ARE CLEAN" in texto,
+       "en un plano sin mamparas, solo la que entra siempre")
+    ok(texto.index("HANDS ARE PHOTOGRAPHED") < texto.index("BATHROOMS ARE CLEAN")
+       < texto.index(reglas.para("prompt_imagen", modo="foto")[-1][:40]),
+       "y entran en su hueco, entre las de la casa")
+    ok("BATHROOMS ARE CLEAN" in M._reglas_de(reglas, fijo), "sus láminas también")  # noqa: SLF001
+    igual(_prompt(BANOS, dict(fijo, modo="ilustracion")),
+          _prompt(BANOS, dict(ESTILO_FOTO, modo="ilustracion")),
+          "en ilustración la ficha no cambia el prompt")
+    escenas = [{"id": f"S{i:03d}", "prompt": "mampara"} for i in range(1, 30)]
+    P6._asignar_cartas(escenas, P6._con_defectos({"semilla": 4, "estilo": fijo}),  # noqa: SLF001
+                       "mamparas")
+    ok({e["carta"] for e in escenas} <= {c["id"] for c in E.ESCALERA_FOTO_GENERAL},
+       "sus cartas son las de la escalera general de foto")
+    frases = R._frases(fijo, {"escenas": [{"prompt": "x"}]})        # noqa: SLF001
+    igual(frases["equipo"], "la mampara no es de vidrio o los perfiles son gruesos",
+          "el revisor vigila lo que se escribió del equipo")
+    igual(frases["manos"], D.REVISOR_GENERAL["manos"], "y lo demás, como el general")
+    D.guardar_de_cliente("cl1", dict(FICHA_SUYU, reglas=[]))
+    ok("BATHROOMS ARE CLEAN" not in _prompt(BANOS, fijo), "cambiarla cambia lo que entra")
+    D.guardar_de_cliente("cl1", FICHA_SUYU)
+    ok(any(t["id"] == "cliente-cl1" and not t["de_fabrica"] for t in D.listar()),
+       "listar la enseña, detrás del general")
+
+
+def prueba_borrar():
+    seccion("4] borrar la ficha")
+    fijo = dict(ESTILO_FOTO, dominio="cliente-cl1")
+    antes = _prompt(BANOS, fijo)
+    ok(D.borrar_de_cliente("cl1"), "se borra")
+    igual(D.de_cliente("cl1"), None, "el proyecto se queda sin ficha")
+    try:
+        D.normalizar("cliente-cl1")
+        ok(False, "una ficha borrada no se puede fijar")
+    except ValueError:
+        ok(True, "una ficha borrada no se puede fijar")
+    igual(_prompt(BANOS, fijo), antes,
+          "pero un vídeo ya hecho con ella saca el MISMO prompt: nada queda para rehacer")
+    ok(not D.borrar_de_cliente("cl1"), "borrar una que no está: False")
+    with open(os.environ["ESTUDIO_DOMINIOS"], "w", encoding="utf-8") as fh:
+        fh.write("{roto")
+    igual(D.de_usuario(), {}, "un fichero roto no tumba nada")
+    igual(_prompt(BANOS, fijo), _prompt(BANOS, ESTILO_FOTO), "y el vídeo sale como general")
+    os.remove(os.environ["ESTUDIO_DOMINIOS"])
+
+
+def prueba_lo_que_no_vale():
+    seccion("5] lo que no vale")
+    for malo, motivo in (({"nombre": ""}, "sin decir qué hace"),
+                         ({"nombre": "x" * 200}, "demasiado largo"),
+                         ({"nombre": "Otro", "reglas": [{"texto": "x", "gravedad": "rara"}]},
+                          "una regla rara"),
+                         ({"nombre": "Otro", "revisor": "no"}, "revisor que no es objeto"),
+                         ("no es un objeto", "no es un objeto")):
+        try:
+            D.guardar_de_cliente("cl2", malo)
+            ok(False, f"{motivo}: tenía que rechazarse")
+        except ValueError:
+            ok(True, f"{motivo}: se rechaza")
+    for cid in ("", "../x", "   "):
+        try:
+            D.guardar_de_cliente(cid, {"nombre": "x"}) if cid.strip("./") else D.id_de_cliente(cid)
+            ok(cid == "../x", f"proyecto {cid!r}: se limpia o se rechaza")
+        except ValueError:
+            ok(True, f"proyecto {cid!r}: se rechaza")
+    igual(D.id_de_cliente("../X"), "cliente-x", "el id se limpia: nada de rutas")
     for malo in ("telenovela", 3):
         try:
             D.normalizar(malo)
             ok(False, f"{malo!r} tiene que dar ValueError")
         except ValueError:
             ok(True, f"{malo!r} da ValueError")
-    igual(D.normalizar(None), "", "sin nada, automático")
-    igual([D.normalizar(x) for x in (" ", "Auto", "AUTOMATICO", " General ")], ["", "", "", "general"],
-          "se limpia antes de comparar")
+    igual([D.normalizar(x) for x in (None, " ", "Auto", " General ")], ["", "", "", "general"],
+          "automático y general se limpian")
     igual(D.fijado("no es un dict"), None, "un estilo que no es un objeto: automático")
-    igual(D.fijado({"dominio": "basura"}), None, "un valor guardado roto es automático, no un fallo")
-
-
-def prueba_revisor():
-    seccion("4] el revisor: las frases del negocio")
-    import revisor_imagenes as R                                  # noqa: PLC0415
-    antes = _de_antes("pasos/revisor_imagenes.py", "revisor_imagenes")
-    huecos = dict(n=3, titulo="t", formato="vertical", estilo="e", guia="g", encargo="x",
-                  reglas="r", reglas_estilo="", referencia="", planos="p", tipos="a | b")
-    if antes is None:
-        ok(False, "no se ha podido leer revisor_imagenes.py de antes")
-        return
-    ep = D.REVISOR_ESTADOPLAY
-    igual(R.INSTRUCCION.format(**huecos, f_equipo=ep["equipo"], f_congruencia=ep["congruencia"],
-                               f_manos=ep["manos"], f_orientacion=ep["orientacion"]),
-          antes.INSTRUCCION.format(**huecos),
-          "con EstadoPlay, la instrucción es letra por letra la de antes")
-    igual(R.REFERENCIA.format(continuidad=ep["continuidad"], plano="P"),
-          antes.REFERENCIA.format(plano="P"), "y la referencia del plano de antes también")
-    general = R._frases({"prompt": "un baño con mampara"},                # noqa: SLF001
-                        {"escenas": [{"prompt": "a small bathroom"}]})
-    texto = R.INSTRUCCION.format(**huecos, f_equipo=general["equipo"],
-                                 f_congruencia=general["congruencia"],
-                                 f_manos=general["manos"], f_orientacion=general["orientacion"])
-    ok("tripode" not in texto and "mandos" not in texto and "consola" not in texto,
-       "un vídeo de baños: sin trípodes, mandos ni consolas en el criterio")
-    igual(R._frases({"prompt": "fiesta"}, {}, guia="Sala:\nconsolas en fila")["equipo"],  # noqa: SLF001
-          ep["equipo"], "la guía en texto, con saltos de línea, también delata las consolas")
-    igual(R._frases({"prompt": "fiesta"},                                  # noqa: SLF001
-                    {"escenas": [{"prompt": "two players with controllers"}]})["equipo"],
-          ep["equipo"], "y uno de consolas, el criterio de EstadoPlay")
+    igual(D.fijado({"dominio": "basura"}), None, "un valor guardado roto es automático")
 
 
 def prueba_presets():
-    seccion("5] el preset de Estilo guarda `dominio`")
+    seccion("6] el preset de Estilo guarda `dominio`")
     import presets_canal as PC                                    # noqa: PLC0415
-    igual(PC._limpiar_datos("estilo", {"calidad": "low", "dominio": "General"}),  # noqa: SLF001
-          {"calidad": "low", "dominio": "general"}, "normalizado")
+    D.guardar_de_cliente("cl3", {"nombre": "Clínica dental"})
+    igual(PC._limpiar_datos("estilo", {"calidad": "low", "dominio": "Cliente-CL3"}),  # noqa: SLF001
+          {"calidad": "low", "dominio": "cliente-cl3"}, "normalizado")
     igual(PC._limpiar_datos("estilo", {"calidad": "low", "dominio": ""}),         # noqa: SLF001
           {"calidad": "low"}, "automático no se guarda")
     try:
         PC._limpiar_datos("estilo", {"calidad": "low", "dominio": "x"})          # noqa: SLF001
-        ok(False, "un dominio que no existe tiene que dar ErrorPreset")
+        ok(False, "una ficha que no existe tiene que dar ErrorPreset")
     except PC.ErrorPreset:
-        ok(True, "un dominio que no existe da ErrorPreset")
-    datos = PC.datos_de_params({"assets": {"estilo": {"referencias": [], "dominio": "general"}}})
-    igual((datos.get("estilo") or {}).get("dominio"), "general", "guardar el estilo de un vídeo lo lleva")
+        ok(True, "una ficha que no existe da ErrorPreset")
+    datos = PC.datos_de_params({"assets": {"estilo": {"referencias": [], "dominio": "cliente-cl3"}}})
+    igual((datos.get("estilo") or {}).get("dominio"), "cliente-cl3",
+          "guardar el estilo de un vídeo la lleva")
     sin = PC.datos_de_params({"assets": {"estilo": {"referencias": []}}})
-    ok("dominio" not in (sin.get("estilo") or {}), "y uno sin dominio no lo inventa")
-
-
-def _reglas_de_antes():
-    """`motores/reglas/reglas.py` y `reglas_foto.json` de `ANTES`, juntos."""
-    carpeta = tempfile.mkdtemp(prefix="reglas_antes_")
-    try:
-        for nombre in ("reglas.py", "reglas_foto.json"):
-            codigo = subprocess.run(
-                ["git", "-C", RAIZ, "show", f"{ANTES}:motores/reglas/{nombre}"],
-                capture_output=True, text=True, check=True).stdout
-            with open(os.path.join(carpeta, nombre), "w", encoding="utf-8") as fh:
-                fh.write(codigo)
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    spec = importlib.util.spec_from_file_location("reglas_antes",
-                                                  os.path.join(carpeta, "reglas.py"))
-    modulo = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(modulo)
-    return modulo
-
-
-CONTEXTOS = ["", "a woman waters the plants", "four kids hold game controllers",
-             "Fiesta con CONSOLAS en Lima", "gamers at an e-sports final",
-             "a racing wheel and pedals", "un baño con mampara",
-             "que se vea una consola en la mesa"]
-
-
-def prueba_reglas_siguen_al_tipo():
-    seccion("6] las reglas de foto siguen al tipo de negocio")
-    import medios                                                 # noqa: PLC0415
-    reglas = medios.motor("reglas/reglas.py")
-    antes = _reglas_de_antes()
-    if antes is None:
-        ok(False, "no se ha podido leer reglas.py de antes")
-        return
-    for ambito in ("prompt_imagen", "reparto"):
-        for contexto in CONTEXTOS:
-            if reglas.bloque_prompt(ambito, modo="foto", contexto=contexto,
-                                    extra=D.reglas_de_foto({})) != \
-                    antes.bloque_prompt(ambito, modo="foto", contexto=contexto):
-                ok(False, f"{ambito}, «{contexto}»: el bloque de reglas cambió")
-                break
-        else:
-            ok(True, f"{ambito}: en automático, {len(CONTEXTOS)} encargos con el "
-                     "bloque de reglas letra por letra el de antes")
-    ok(not any(r.get("solo_si") for r in reglas.cargar("foto")["reglas"]),
-       "en reglas_foto.json no queda ninguna regla de un negocio")
-    ok(any(r.get("hueco") == "negocio" for r in reglas.cargar("foto")["reglas"]),
-       "y queda el hueco donde entran las del tipo")
-    mandos = "four kids hold game controllers"
-    igual(reglas.bloque_prompt("prompt_imagen", modo="foto", contexto=mandos,
-                               extra=D.reglas_de_foto({"dominio": "general"})),
-          reglas.bloque_prompt("prompt_imagen", modo="foto", contexto=""),
-          "fijado en «general»: ni una regla de consolas aunque el plano tenga mandos")
-    ok("GAME CONTROLLERS" in reglas.bloque_prompt(
-        "prompt_imagen", modo="foto", contexto=mandos,
-        extra=D.reglas_de_foto({"dominio": "estadoplay"})),
-       "fijado en «estadoplay»: las suyas, con su «solo si»")
-
-
-def _prompt(escena, estilo):
-    import p6_assets as P6                                        # noqa: PLC0415
-    lamina = [{"papel": "lamina", "cuantas": 6, "ruta": "l.png"}]
-    return P6._prompt_completo(escena, lamina, estilo)             # noqa: SLF001
-
-
-def prueba_tipos_del_dueno():
-    seccion("7] los tipos de negocio del dueño")
-    import p6_assets as P6                                        # noqa: PLC0415
-    import moodboard as M                                         # noqa: PLC0415
-    import medios                                                 # noqa: PLC0415
-    import revisor_imagenes as R                                  # noqa: PLC0415
-    reglas = medios.motor("reglas/reglas.py")
-    estilo = {"referencias": ["a.png"], "modo": "foto",
-              "guia": {"guia": "natural light photography", "resumen_es": "foto"}}
-    banos = {"prompt": "a couple chooses a glass shower screen in a small bathroom",
-             "luz": "morning"}
-    plantas = {"prompt": "a woman waters the plants", "luz": "morning"}
-    sin_tipos = {(n, k): _prompt(e, dict(estilo, prompt=k))
-                 for n, e in (("banos", banos), ("plantas", plantas))
-                 for k in ("", "bathroom remodeling")}
-    lamina_antes = M._reglas_de(reglas, estilo)                    # noqa: SLF001
-    igual(D.de_usuario(), {}, "sin fichero: ningún tipo propio")
-
-    creado = D.guardar({
-        "nombre": "Mamparas y baños", "descripcion": "reformas de baño",
-        "palabras": "mampara, baño, ducha",
-        "reglas": [
-            {"texto": "Las mamparas son de vidrio templado transparente, con perfiles finos.",
-             "en": "SHOWER SCREENS ARE CLEAR TEMPERED GLASS with thin metal profiles.",
-             "palabras": ["mampara", "shower screen"]},
-            {"texto": "Los baños están limpios y ordenados, sin botes de marca.",
-             "en": "BATHROOMS ARE CLEAN AND TIDY, no branded bottles."}],
-        "revisor": {"equipo": "las mamparas no son de vidrio o los perfiles son gruesos"}})
-    igual(creado["id"], "mamparas-y-banos", "se crea con un id sacado del nombre")
-    ok(os.path.exists(os.environ["ESTUDIO_DOMINIOS"]), "y se guarda en su fichero")
-    igual(D.normalizar("Mamparas-y-Banos"), "mamparas-y-banos", "un estilo puede fijarlo")
-
-    cambiado = {k: _prompt(e, dict(estilo, prompt=p)) for k, e, p in
-                [(k, banos if k[0] == "banos" else plantas, k[1]) for k in sin_tipos]}
-    igual(cambiado, sin_tipos,
-          "crear un tipo NO cambia ni una letra de un vídeo en automático, "
-          "aunque el texto nombre sus palabras")
-    igual(M._reglas_de(reglas, estilo), lamina_antes,               # noqa: SLF001
-          "ni de sus láminas")
-
-    fijo = dict(estilo, dominio="mamparas-y-banos")
-    texto = _prompt(banos, fijo)
-    ok("SHOWER SCREENS ARE CLEAR TEMPERED GLASS" in texto,
-       "fijado: su regla con «solo si mampara/shower screen» entra en un plano de mamparas")
-    ok("BATHROOMS ARE CLEAN AND TIDY" in texto, "y la que no tiene «solo si», también")
-    texto = _prompt(plantas, fijo)
-    ok("SHOWER SCREENS" not in texto and "BATHROOMS ARE CLEAN" in texto,
-       "en un plano sin mamparas, solo la que entra siempre")
-    ok(texto.index("HANDS ARE PHOTOGRAPHED") < texto.index("BATHROOMS ARE CLEAN")
-       < texto.index(reglas.para("prompt_imagen", modo="foto")[-1][:40]),
-       "y entran en su hueco, entre las de la casa")
-    ok("GAME CONTROLLERS" not in _prompt({"prompt": "kids with game controllers"}, fijo),
-       "un tipo propio no arrastra las reglas de consolas")
-    ok("BATHROOMS ARE CLEAN" in M._reglas_de(reglas, fijo),        # noqa: SLF001
-       "sus láminas también llevan sus reglas")
-    igual(_prompt(banos, dict(fijo, modo="ilustracion")),
-          _prompt(banos, {k: v for k, v in fijo.items() if k not in ("modo", "dominio")}
-                  | {"modo": "ilustracion"}),
-          "en ilustración el tipo no cambia el prompt")
-
-    escenas = [{"id": f"S{i:03d}", "prompt": "mampara"} for i in range(1, 30)]
-    P6._asignar_cartas(escenas, P6._con_defectos({"semilla": 4, "estilo": fijo}),  # noqa: SLF001
-                       "mamparas")
-    general = {e["carta"] for e in escenas}
-    ok(general <= {c["id"] for c in E.ESCALERA_FOTO_GENERAL},
-       "sus cartas son las de la escalera general de foto")
-    frases = R._frases(fijo, {"escenas": [{"prompt": "x"}]})          # noqa: SLF001
-    igual(frases["equipo"], "las mamparas no son de vidrio o los perfiles son gruesos",
-          "el revisor vigila lo que se escribió del equipo")
-    igual(frases["manos"], D.REVISOR_GENERAL["manos"], "y lo demás, como el general")
-    igual(R._frases({}, {"escenas": [{"prompt": "una ducha nueva"}]})["equipo"],  # noqa: SLF001
-          D.REVISOR_GENERAL["equipo"],
-          "en automático, un tipo propio NO cambia lo que vigila el revisor (revisión independiente, M1)")
-    igual((D.sugerido("una ducha nueva") or {}).get("id"), "mamparas-y-banos",
-          "sus palabras solo sirven para SUGERIRLO (con o sin tildes)")
-    igual(D.sugerido("plantas en la terraza"), None, "y si no las nombra, nada")
-    igual(R._frases({}, {"escenas": [{"prompt": "consolas y una ducha"}]})["equipo"],  # noqa: SLF001
-          D.REVISOR_ESTADOPLAY["equipo"], "pero los de fábrica van primero, como antes")
-
-    D.guardar({"nombre": "Mamparas y baños", "palabras": ["mampara"],
-               "reglas": []}, "mamparas-y-banos")
-    ok("BATHROOMS ARE CLEAN" not in _prompt(banos, fijo), "cambiarlo cambia lo que entra")
-    for malo, motivo in (({"nombre": ""}, "sin nombre"),
-                         ({"nombre": "x" * 90}, "nombre largo"),
-                         ({"nombre": "Otro", "palabras": ["p"] * 0 + [f"p{i}" for i in range(40)]},
-                          "demasiadas palabras"),
-                         ({"nombre": "Otro", "reglas": [{"texto": "x", "gravedad": "rara"}]},
-                          "una regla rara"),
-                         ({"nombre": "General (cualquier negocio)"}, "nombre de uno de fábrica"),
-                         ({"nombre": "mamparas y baños"}, "nombre repetido"),
-                         ("no es un objeto", "no es un objeto")):
-        try:
-            D.guardar(malo)
-            ok(False, f"{motivo}: tenía que rechazarse")
-        except ValueError:
-            ok(True, f"{motivo}: se rechaza")
-    for tid in ("estadoplay", "general"):
-        try:
-            D.guardar({"nombre": "Cambio"}, tid)
-            ok(False, f"{tid}: un tipo de fábrica no se cambia")
-        except ValueError:
-            ok(True, f"{tid}: un tipo de fábrica no se cambia")
-        try:
-            D.borrar(tid)
-            ok(False, f"{tid}: ni se borra")
-        except ValueError:
-            ok(True, f"{tid}: ni se borra")
-    otro = D.guardar({"nombre": "Mamparas & baños!"})
-    ok(otro["id"] != "mamparas-y-banos", f"dos nombres con el mismo id se separan ({otro['id']})")
-    ok(any(t["id"] == otro["id"] and not t["de_fabrica"] for t in D.listar()),
-       "listar enseña los del dueño")
-    ok([t["id"] for t in D.listar()][:2] == ["general", "estadoplay"],
-       "con los de fábrica delante")
-
-    prompt_fijo = _prompt(banos, fijo)
-    ok(D.borrar("mamparas-y-banos"), "se borra")
-    ok(not any(t["id"] == "mamparas-y-banos" for t in D.listar()), "deja de salir en la lista")
-    try:
-        D.normalizar("mamparas-y-banos")
-        ok(False, "un tipo borrado no se puede fijar")
-    except ValueError:
-        ok(True, "un tipo borrado no se puede fijar")
-    igual(_prompt(banos, fijo), prompt_fijo,
-          "pero un vídeo ya creado con él saca el MISMO prompt: sus imágenes no quedan obsoletas (M2)")
-    ok(not D.borrar("mamparas-y-banos"), "borrar uno que no está: False")
-    otra = D.guardar({"nombre": "Mamparas y baños", "reglas": [{"texto": "otra cosa", "en": "OTHER RULE."}]})
-    ok(otra["id"] != "mamparas-y-banos", f"crear otro con el mismo nombre da otro id ({otra['id']})")
-    ok("OTHER RULE" not in _prompt(banos, fijo), "y no se le cuela al vídeo del borrado")
-    for corta in ("de", "\u0301", "x"):
-        try:
-            D.guardar({"nombre": f"Corta {len(corta)}{corta[:1]}", "palabras": [corta.encode().decode("unicode_escape")]})
-            ok(False, f"palabra «{corta}»: tenía que rechazarse")
-        except ValueError:
-            ok(True, f"una palabra demasiado corta («{corta}») se rechaza (B5)")
-
-    with open(os.environ["ESTUDIO_DOMINIOS"], "w", encoding="utf-8") as fh:
-        fh.write("{roto")
-    igual(D.de_usuario(), {}, "un fichero roto no tumba nada: ningún tipo propio")
-    igual(_prompt(banos, estilo), sin_tipos[("banos", "")], "y los vídeos salen como siempre")
-    os.remove(os.environ["ESTUDIO_DOMINIOS"])
+    ok("dominio" not in (sin.get("estilo") or {}), "y uno sin ella no la inventa")
 
 
 def main():
-    print("PRUEBA DE LOS DOMINIOS")
-    antes = _de_antes("pasos/encuadres.py", "encuadres")
-    prueba_mismos_datos(antes)
-    prueba_mismo_reparto(antes)
-    prueba_dominio_fijado()
-    prueba_revisor()
+    print("PRUEBA DEL NEGOCIO DE CADA CLIENTE")
+    prueba_ningun_cliente()
+    prueba_sin_ficha()
+    prueba_ficha_de_cliente()
+    prueba_borrar()
+    prueba_lo_que_no_vale()
     prueba_presets()
-    prueba_reglas_siguen_al_tipo()
-    prueba_tipos_del_dueno()
     print("\n" + "=" * 70)
     if _fallos:
         print(f"FALLAN {len(_fallos)} de {_ok + len(_fallos)} comprobaciones:")

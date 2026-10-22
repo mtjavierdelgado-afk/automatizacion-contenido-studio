@@ -27,34 +27,32 @@ lado de cada una (`usa`): si ese codigo cambia, la guia se revisa con el.
 GUIAS = {
     # ------------------------------------------------------------------ estilo
     "tipo_negocio": {
-        "titulo": "Tipo de negocio",
-        "donde": "Configuración → Tipos de negocio (y el selector «Tipo de negocio» "
-                 "en la ficha de un estilo)",
+        "titulo": "Ficha del negocio",
+        "donde": "Crear → tu proyecto (el cliente) → «Ficha del negocio»; se ve, sin "
+                 "editarla, en la pestaña «Reglas» de cada estilo del proyecto",
         "usa": "pasos/dominios.py (validar, reglas_de_foto, frases_revisor), "
                "motores/reglas/reglas_foto.json (el hueco reglas-del-negocio), "
                "pasos/p6_assets.py y pasos/revisor_imagenes.py",
         "que_hace": [
-            "Un tipo de negocio reúne lo que el Studio debe saber de UN tipo de "
-            "cliente para que sus fotos parezcan de verdad: sus reglas de foto y "
-            "lo que el revisor tiene que vigilar. Los de fábrica son «General» y "
-            "«EstadoPlay»; los tuyos los creas aquí y se guardan fuera del código.",
-            "SOLO SE USA SI UN ESTILO LO FIJA (selector «Tipo de negocio» de su "
-            "ficha). En «Automático» todo sale como siempre: crear o cambiar un "
-            "tipo no toca ningún vídeo que no lo haya elegido.",
+            "La ficha del negocio dice lo que el Studio debe saber de ESTE cliente "
+            "para que sus fotos parezcan de verdad: qué hace, sus reglas de foto y "
+            "lo que tiene que vigilar el revisor. Se llena una vez por proyecto.",
+            "TODOS LOS ESTILOS DEL PROYECTO LA USAN SOLOS: llega a los vídeos nuevos "
+            "al crearlos y a los ya hechos con «Traer el estilo». Un proyecto sin "
+            "ficha usa lo general: ninguna regla de ningún negocio.",
+            "El Studio no trae ningún negocio de fábrica: ni EstadoPlay ni ningún "
+            "otro. Todo lo de un cliente está en su ficha.",
             "Cada REGLA entra en el prompt de cada imagen de foto, junto a las "
             "reglas de la casa. Si le pones palabras en «Solo si el plano habla "
             "de…», solo entra en los planos que las nombran; si no, en todos.",
             "La «Versión para el generador» es la regla en inglés, concreta y "
             "física, que es lo que lee el generador de imágenes. «Afinar con "
             "Claude» la escribe por ti; si la dejas vacía, va tu texto tal cual.",
-            "Las PALABRAS del tipo («mampara, ducha, baño») sirven para que la "
-            "ficha de un estilo en Automático te lo SUGIERA si su texto las "
-            "nombra; nunca deciden nada solas (mínimo 3 letras cada una).",
-            "Lo que escribes para el REVISOR (equipo y hacia dónde mira la gente) "
-            "es lo que anota como fallo al mirar cada imagen.",
-            "Los encuadres siguen siendo los generales de foto (las cartas propias "
-            "de cada negocio llegarán más adelante).",
-            "Cambiar las reglas de un tipo que ya usa un vídeo de foto cambia el "
+            "Lo que escribes para el REVISOR (el equipo o producto, y hacia dónde "
+            "mira la gente) es lo que anota como fallo al mirar cada imagen.",
+            "Los encuadres son los generales de foto (los propios de cada negocio "
+            "llegarán más adelante).",
+            "Cambiar las reglas de una ficha que ya usa un vídeo de foto cambia el "
             "prompt de sus imágenes: quedan para rehacer, y rehacerlas se paga.",
         ],
         "si": [
@@ -74,15 +72,13 @@ GUIAS = {
             "Más de 20 reglas: una lista larga deja de leerse entera.",
         ],
         "plantilla": (
-            "NOMBRE: [el negocio, p. ej. «Mamparas y baños»]\n"
-            "PALABRAS: [3 a 8 palabras con las que se nombra en un guion]\n"
+            "QUÉ HACE: [el negocio, p. ej. «Mamparas y baños a medida en Lima»]\n"
             "REGLA 1: [qué tiene que verse siempre bien] — solo si: [palabras]\n"
             "REGLA 2: [...]\n"
             "REVISOR · EQUIPO: [el fallo del producto o del equipo que verías a la primera]\n"
             "REVISOR · MIRADAS: [hacia dónde tiene que mirar la gente]"),
         "ejemplo": (
-            "NOMBRE: Mamparas y baños\n"
-            "PALABRAS: mampara, ducha, baño, vidrio templado\n"
+            "QUÉ HACE: Mamparas y baños a medida en Lima\n"
             "REGLA 1: Las mamparas son de vidrio templado transparente, con "
             "perfiles finos de aluminio y sin reflejos que tapen el baño — solo "
             "si: mampara, ducha\n"
@@ -92,16 +88,16 @@ GUIAS = {
             "tiene un tamaño imposible para el baño.\n"
             "REVISOR · MIRADAS: el instalador mira lo que hace, no a cámara."),
         "prompt_ia": (
-            "Ayúdame a escribir el TIPO DE NEGOCIO de un cliente para un sistema que "
-            "genera fotos realistas con IA. Dame: un nombre; de 3 a 8 palabras con las "
-            "que se nombra el negocio en un guion; hasta 8 reglas de foto, cada una una "
-            "exigencia física y comprobable sobre lo que el generador suele hacer mal en "
-            "ese negocio (materiales, cómo se monta o se usa el producto, el sitio, la "
-            "ropa del personal), con las palabras que la activan si solo vale para "
-            "ciertos planos; y dos frases para el revisor: el fallo del producto o del "
-            "equipo que se vería a la primera, y hacia dónde tiene que mirar la gente. "
-            "Sin marcas ni logos de terceros, sin luz ni paleta (eso es del estilo).\n\n"
-            "EL NEGOCIO:\n[describe aquí qué vende o qué servicio da el cliente]"),
+            "Ayúdame a escribir la FICHA DEL NEGOCIO de un cliente para un sistema "
+            "que genera fotos realistas con IA. Dame: qué hace el negocio en una "
+            "línea; hasta 8 reglas de foto, cada una una exigencia física y "
+            "comprobable sobre lo que el generador suele hacer mal en ese negocio "
+            "(materiales, cómo se monta o se usa el producto, el sitio, la ropa del "
+            "personal), con las palabras que la activan si solo vale para ciertos "
+            "planos; y dos frases para el revisor: el fallo del producto o del "
+            "equipo que se vería a la primera, y hacia dónde tiene que mirar la "
+            "gente. Sin marcas ni logos de terceros, sin luz ni paleta (eso es del "
+            "estilo).\n\nEL NEGOCIO:\n[describe aquí qué vende o qué servicio da el cliente]"),
     },
     "estilo_grafico": {
         "titulo": "Indicaciones del estilo gráfico",
@@ -116,8 +112,8 @@ GUIAS = {
             "(trazo, relleno, dedos), y cada imagen se pide como foto de un "
             "fotógrafo profesional, con sus propias reglas y sus propios "
             "encuadres (plano general, manos en la acción, reacción...). Sirve "
-            "para cualquier proyecto; si el vídeo va de consolas, se suman solos "
-            "los encuadres y las reglas de EstadoPlay.",
+            "para cualquier proyecto; lo propio de cada negocio (sus reglas de "
+            "foto) va en la «Ficha del negocio» de su proyecto.",
             "Las IMÁGENES que subes son la fuente principal: el sistema las mira y "
             "escribe una guía de dibujo de 260 a 400 palabras que va dentro de "
             "cada imagen que se genera. Sube de 1 a 24 (mejor 5 o más), todas con el aspecto "

@@ -16,26 +16,23 @@ Aquí cada negocio es un TIPO, con todo lo suyo junto:
   reglas      sus reglas de foto (Etapa C), que entran en el hueco
               `reglas-del-negocio` de `motores/reglas/reglas_foto.json`.
 
-NINGÚN NEGOCIO EN EL CÓDIGO (Etapa C: «nada de un cliente metido en el
-código»). Los de fábrica viven en `dominios_fabrica.json`, que viaja con el
-código:
-  estadoplay  los valores de antes, mismo orden y mismos pesos;
+NINGÚN NEGOCIO EN EL CÓDIGO (Etapa C, decisión del dueño: «nada de un
+cliente metido en el código»). De fábrica solo hay uno, en
+`dominios_fabrica.json`:
   general     ningún servicio: la escalera general de foto y un revisor que
-              no habla de consolas.
-Los que crea el dueño en Configuración viven en `<proyectos>/_sistema/
-dominios.json` (ver más abajo).
+              no habla de ningún equipo en concreto.
+El negocio de cada cliente es una FICHA que se llena en su proyecto y vive en
+`<proyectos>/_sistema/dominios.json` (ver más abajo). Lo que antes era de
+EstadoPlay (sus cartas de consolas, sus reglas de mandos y equipo) ya no viene
+con el Studio: el dueño lo escribe en la ficha de su proyecto si lo quiere.
 
 QUÉ TIPO RIGE (`de_estilo`, `reglas_de_foto`):
-  - el que fije el estilo (`estilo.dominio`);
-  - si no fija ninguno: AUTOMÁTICO, que es exactamente lo de antes, byte a
-    byte: las cartas de EstadoPlay si el texto nombra sus servicios, las
-    reglas de consolas si el encargo habla de consolas (`solo_si`).
+  - el que fije el estilo (`estilo.dominio`): la ficha de su cliente;
+  - si no fija ninguno: el general, sin reglas de ningún negocio.
 
-LA REGLA QUE NO SE PUEDE ROMPER: la escalera de EstadoPlay expandida por peso
-tiene que quedar idéntica en longitud y en orden. `encuadres.carta_de` sortea
-con `arranque % len(fondo)`: una carta de más, de menos o en otro sitio cambia
-la carta de casi todos los planos de foto y deja sus imágenes obsoletas. Lo
-comprueba `prueba_dominios.py` contra la escalera de `main`.
+Y SI ALGÚN DÍA vuelve un tipo con escalera propia: el sorteo de cartas
+(`encuadres.carta_de`) va por `arranque % len(fondo)`, así que añadir, quitar o
+mover una carta cambia la carta de casi todos los planos de ese tipo.
 """
 import json
 import os
@@ -84,14 +81,12 @@ def _cargar_fabrica():
 DE_FABRICA = _cargar_fabrica()
 
 GENERAL = DE_FABRICA["general"]
-ESTADOPLAY = DE_FABRICA["estadoplay"]
 
-#: Los nombres de antes de la Etapa C, para quien los lea (`encuadres`, las
-#: pruebas): los MISMOS objetos que hay dentro de cada tipo.
-SERVICIOS = ESTADOPLAY["servicios"]
-SERVICIOS_EN_TEXTO = ESTADOPLAY["en_texto"]
-ESCALERA_FOTO = ESTADOPLAY["escalera"]
-REVISOR_ESTADOPLAY = ESTADOPLAY["revisor"]
+#: Lo que lee `encuadres` cuando un vídeo no tiene negocio: nada de ningún
+#: cliente (antes, lo de EstadoPlay). Los mismos objetos que el tipo general.
+SERVICIOS = GENERAL["servicios"]
+SERVICIOS_EN_TEXTO = GENERAL["en_texto"]
+ESCALERA_FOTO = GENERAL["escalera"]
 REVISOR_GENERAL = GENERAL["revisor"]
 
 
@@ -99,40 +94,33 @@ REVISOR_GENERAL = GENERAL["revisor"]
 AUTOMATICO = ""
 
 
-# ============================================== los tipos que crea el dueño
+# ======================================== la ficha del negocio de un cliente
 #
-# Etapa Foto C (21-10-2026): «nada de un cliente metido en el código». El dueño
-# crea en Configuración los tipos de SUS clientes (baños, plantas, una clínica)
-# con lo que se puede decir sin programar:
+# Etapa Foto C (21-10-2026): «nada de un cliente metido en el código». El
+# negocio de cada cliente es una FICHA que se llena en su proyecto (Crear → el
+# proyecto → «Ficha del negocio»), una por proyecto:
 #
-#   nombre       como se llama («Mamparas y baños»)
-#   descripcion  para quien lo elige
-#   palabras     con que palabras se reconoce: la ficha del estilo lo SUGIERE
-#                si su texto las nombra (`sugerido`). Nunca deciden nada solas
+#   nombre       qué hace el negocio («Mamparas y baños a medida»)
 #   reglas       sus reglas de foto, con el formato de las reglas del estilo
-#                (`pasos/reglas_estilo.py`: texto, palabras «solo si», versión
+#                (`pasos/reglas_estilo.py`: texto, palabras «solo si…», versión
 #                afinada en inglés)
-#   revisor      lo que el revisor vigila del EQUIPO y de hacia dónde MIRA la
-#                gente; lo demás, como el general
+#   revisor      lo que el revisor vigila del EQUIPO o PRODUCTO y de hacia dónde
+#                MIRA la gente; lo demás, como el general
 #
-# No llevan escalera propia (cartas de encuadre por negocio: más adelante): se
-# reparte la general de foto.
+# Su id es `cliente-<id del proyecto>` y la llevan en `estilo.dominio` los
+# estilos de ese proyecto (lo pone la API al guardar la ficha y al mover un
+# estilo de proyecto). No lleva escalera propia: se reparte la general de foto.
 #
 # VIVEN FUERA DEL CÓDIGO, en `<proyectos>/_sistema/dominios.json`, como las
-# notas: `asvs actualizar` renueva el código y no los toca.
+# notas: `asvs actualizar` renueva el código y no las toca.
 #
-# Y SOLO ENTRAN SI UN ESTILO LOS FIJA. En automático un vídeo sigue saliendo
-# byte a byte como antes: crear o cambiar un tipo no puede mover la firma de
-# las imágenes de ningún vídeo que no lo haya elegido (regla 1 de CLAUDE.md).
+# Un estilo SIN ficha (sin proyecto, o su proyecto no la ha llenado) es
+# automático: general, sin reglas de ningún negocio.
 
-MAX_TIPOS = 50
-MAX_NOMBRE = 80
-MAX_DESCRIPCION = 300
-MAX_PALABRAS = 30
-MAX_PALABRA = 40
+MAX_NOMBRE = 120
 MAX_FRASE = 400
 
-#: Lo del revisor que se puede escribir en un tipo propio.
+#: Lo del revisor que se puede escribir en una ficha.
 FRASES_EDITABLES = ("equipo", "orientacion")
 
 _LOCK = threading.Lock()
@@ -144,8 +132,8 @@ def _raiz_del_servicio():
 
     `app.py` la fija con `--proyectos` (las pruebas) o con ESTUDIO_PROYECTOS (el
     servidor), y la guarda en SU memoria, no en el entorno. Este módulo no puede
-    importar app.py, así que la pregunta a quien ya lo tenga cargado: así los
-    tipos viven siempre al lado de los proyectos con los que se usan, y una
+    importar app.py, así que la pregunta a quien ya lo tenga cargado: así las
+    fichas viven siempre al lado de los proyectos con los que se usan, y una
     prueba con su carpeta aparte no escribe en la de verdad."""
     for nombre in ("app", "__main__"):
         modulo = sys.modules.get(nombre)
@@ -159,7 +147,7 @@ def _raiz_del_servicio():
 
 
 def ruta_usuario(raiz=None):
-    """Donde viven los tipos del dueño: `<proyectos>/_sistema/dominios.json`.
+    """Donde viven las fichas: `<proyectos>/_sistema/dominios.json`.
 
     `ESTUDIO_DOMINIOS` (un fichero; lo usan las pruebas) manda. Si no, la
     carpeta que se le pase, la del servicio que corre (`_raiz_del_servicio`), la
@@ -196,11 +184,6 @@ def patron_de_palabra(palabra):
     return r"(?<![\w])" + "".join(trozos)
 
 
-def _slug(nombre):
-    base = re.sub(r"[^a-z0-9]+", "-", _llano(nombre)).strip("-")[:32]
-    return base or "tipo"
-
-
 def _limpio(valor, tope):
     return " ".join(str(valor or "").split())[:tope]
 
@@ -213,38 +196,25 @@ def _reglas_estilo():
     return reglas_estilo
 
 
+def id_de_cliente(cid):
+    """El id de la ficha del negocio de un proyecto. ValueError si no vale."""
+    limpio = re.sub(r"[^a-z0-9_-]", "", str(cid or "").strip().lower())
+    if not limpio:
+        raise ValueError("ese proyecto no existe")
+    return f"cliente-{limpio}"
+
+
 def validar(datos):
     """Lo que manda la pantalla, limpio. -> dict (sin id ni fechas)
 
     Lanza ValueError con el motivo para la persona."""
     if not isinstance(datos, dict):
-        raise ValueError("un tipo de negocio es un objeto")
+        raise ValueError("la ficha del negocio es un objeto")
     nombre = _limpio(datos.get("nombre"), MAX_NOMBRE + 1)
     if not nombre:
-        raise ValueError("ponle un nombre al tipo de negocio")
+        raise ValueError("escribe qué hace este negocio")
     if len(nombre) > MAX_NOMBRE:
-        raise ValueError(f"el nombre es demasiado largo (máximo {MAX_NOMBRE})")
-    descripcion = _limpio(datos.get("descripcion"), MAX_DESCRIPCION + 1)
-    if len(descripcion) > MAX_DESCRIPCION:
-        raise ValueError(f"la descripción es demasiado larga (máximo {MAX_DESCRIPCION})")
-    palabras = datos.get("palabras") or []
-    if isinstance(palabras, str):
-        palabras = palabras.split(",")
-    if not isinstance(palabras, list):
-        raise ValueError("las palabras son una lista")
-    limpias = []
-    for p in palabras:
-        p = _limpio(p, MAX_PALABRA + 1)
-        if not p:
-            continue
-        if len(p) > MAX_PALABRA:
-            raise ValueError(f"«{p[:20]}…» es demasiado larga para una palabra")
-        if len(re.sub(r"[^a-z0-9]", "", _llano(p))) < 3:
-            raise ValueError(f"«{p}» es demasiado corta para reconocer nada")
-        if _llano(p) not in {_llano(x) for x in limpias}:
-            limpias.append(p)
-    if len(limpias) > MAX_PALABRAS:
-        raise ValueError(f"como mucho {MAX_PALABRAS} palabras")
+        raise ValueError(f"«qué hace» es demasiado largo (máximo {MAX_NOMBRE})")
     reglas_estilo = _reglas_estilo()
     try:
         reglas = reglas_estilo.normalizar(datos.get("reglas"))
@@ -260,13 +230,11 @@ def validar(datos):
             raise ValueError(f"la frase del revisor «{clave}» es demasiado larga")
         if frase:
             revisor[clave] = frase
-    salida = {"nombre": nombre, "descripcion": descripcion, "palabras": limpias,
-              "reglas": reglas, "revisor": revisor}
-    return salida
+    return {"nombre": nombre, "reglas": reglas, "revisor": revisor}
 
 
-def _de_usuario_a_tipo(crudo):
-    """Un tipo del dueño, tal cual se guarda -> con la forma de los de fábrica."""
+def _a_tipo(crudo):
+    """Una ficha, tal cual se guarda -> con la forma de los tipos de fábrica."""
     tid = crudo["id"]
     reglas = []
     for r in crudo.get("reglas") or []:
@@ -279,20 +247,18 @@ def _de_usuario_a_tipo(crudo):
     revisor.update({k: v for k, v in (crudo.get("revisor") or {}).items()
                     if k in FRASES_EDITABLES and v})
     return {
-        "id": tid, "nombre": crudo["nombre"],
-        "descripcion": crudo.get("descripcion") or "",
-        "servicios": (), "en_texto": {}, "escalera": (), "por_defecto": (),
-        "revisor": revisor, "reglas": reglas,
-        "palabras": tuple(crudo.get("palabras") or ()),
-        "de_fabrica": False,
+        "id": tid, "nombre": crudo["nombre"], "cliente": crudo.get("cliente") or "",
+        "descripcion": "", "servicios": (), "en_texto": {}, "escalera": (),
+        "por_defecto": (), "revisor": revisor, "reglas": reglas,
+        "palabras": (), "de_fabrica": False,
         # lo que se escribió, para volver a enseñarlo en la pantalla
         "crudo": crudo,
     }
 
 
 def _leer_usuario(ruta):
-    """{id: crudo} del fichero del dueño. Un fichero roto no tumba nada: sin
-    tipos propios, y los estilos que los fijaban vuelven a automático."""
+    """{id: crudo} del fichero. Un fichero roto no tumba nada: sin fichas, y
+    los estilos que las tenían se leen como automáticos."""
     try:
         info = os.stat(ruta)
     except OSError:
@@ -304,114 +270,103 @@ def _leer_usuario(ruta):
         with open(ruta, "r", encoding="utf-8") as fh:
             datos = json.load(fh)
         lista = datos.get("dominios") if isinstance(datos, dict) else None
-        tipos = {}
+        fichas = {}
         for crudo in lista or []:
             if (isinstance(crudo, dict) and crudo.get("id")
                     and crudo["id"] not in DE_FABRICA and crudo.get("nombre")):
-                tipos[crudo["id"]] = crudo
+                fichas[crudo["id"]] = crudo
     except (OSError, ValueError):
-        tipos = {}
+        fichas = {}
     _CACHE.clear()
-    _CACHE[clave] = tipos
-    return tipos
+    _CACHE[clave] = fichas
+    return fichas
 
 
-def _escribir_usuario(ruta, tipos):
+def _escribir_usuario(ruta, fichas):
     carpeta = os.path.dirname(ruta)
     os.makedirs(carpeta, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=carpeta, prefix=".dominios-", suffix=".json")
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        json.dump({"version": 1, "dominios": list(tipos.values())}, fh,
+        json.dump({"version": 1, "dominios": list(fichas.values())}, fh,
                   ensure_ascii=False, indent=2)
     os.replace(tmp, ruta)
     _CACHE.clear()
 
 
 def de_usuario(raiz=None, con_borrados=False):
-    """{id: tipo} de los que creó el dueño, ya con la forma de los de fábrica.
+    """{id: tipo} de las fichas de los clientes.
 
-    Los BORRADOS no salen (ni en la lista ni para fijarlos), pero se guardan:
-    un vídeo ya creado con ese tipo en su copia del estilo lo sigue leyendo
-    igual (`obtener`), así que borrar no deja sus imágenes obsoletas, y crear
-    otro con el mismo nombre no le cuela las reglas del nuevo (otro id)."""
-    return {tid: _de_usuario_a_tipo(c) for tid, c in _leer_usuario(ruta_usuario(raiz)).items()
+    Las BORRADAS no salen, pero se guardan: un vídeo ya creado con esa ficha en
+    su copia del estilo la sigue leyendo igual (`obtener`), así que borrar no
+    deja sus imágenes para rehacer."""
+    return {tid: _a_tipo(c) for tid, c in _leer_usuario(ruta_usuario(raiz)).items()
             if con_borrados or not c.get("borrado")}
 
 
 def todos(raiz=None):
-    """{id: tipo}: los de fábrica y después los del dueño (sin los borrados)."""
+    """{id: tipo}: el general y después las fichas de los clientes."""
     salida = dict(DE_FABRICA)
     salida.update(de_usuario(raiz))
     return salida
 
 
 def obtener(tid, raiz=None):
-    """El tipo con ese id, o None. Incluye los borrados: ver `de_usuario`."""
+    """El tipo con ese id, o None. Incluye las fichas borradas: ver `de_usuario`."""
     if not tid:
         return None
     clave = str(tid).strip().lower()
     return DE_FABRICA.get(clave) or de_usuario(raiz, con_borrados=True).get(clave)
 
 
-def guardar(datos, tid=None, raiz=None):
-    """Crea (sin `tid`) o cambia un tipo del dueño. -> el tipo guardado (crudo)
+def de_cliente(cid, raiz=None):
+    """La ficha del negocio de un proyecto (crudo, como se escribió) o None."""
+    try:
+        tid = id_de_cliente(cid)
+    except ValueError:
+        return None
+    crudo = _leer_usuario(ruta_usuario(raiz)).get(tid)
+    if not crudo or crudo.get("borrado"):
+        return None
+    return crudo
 
-    Lanza ValueError: datos que no valen, un id de fábrica (esos no se
-    cambian), uno que no existe o demasiados."""
+
+def guardar_de_cliente(cid, datos, raiz=None):
+    """Crea o cambia la ficha del negocio de un proyecto. -> la ficha (crudo)"""
     limpio = validar(datos)
+    tid = id_de_cliente(cid)
     ruta = ruta_usuario(raiz)
     with _LOCK:
-        tipos = dict(_leer_usuario(ruta))
+        fichas = dict(_leer_usuario(ruta))
         ahora = time.strftime("%Y-%m-%dT%H:%M:%S")
-        if tid:
-            tid = str(tid).strip().lower()
-            if tid in DE_FABRICA:
-                raise ValueError("los tipos de fábrica no se cambian: crea uno tuyo")
-            if tid not in tipos or tipos[tid].get("borrado"):
-                raise ValueError(f"no hay ningún tipo «{tid}»")
-            anterior = tipos[tid]
-            nuevo = dict(limpio, id=tid, creado=anterior.get("creado") or ahora,
-                         cambiado=ahora)
-        else:
-            if len(tipos) >= MAX_TIPOS:
-                raise ValueError(f"como mucho {MAX_TIPOS} tipos de negocio propios")
-            nombres = {_llano(c.get("nombre")) for c in tipos.values() if not c.get("borrado")}
-            nombres |= {_llano(d["nombre"]) for d in DE_FABRICA.values()}
-            if _llano(limpio["nombre"]) in nombres:
-                raise ValueError(f"ya hay un tipo que se llama «{limpio['nombre']}»")
-            base = _slug(limpio["nombre"])
-            tid, n = base, 2
-            while tid in tipos or tid in DE_FABRICA or tid in ("auto", "automatico"):
-                tid = f"{base}-{n}"
-                n += 1
-            nuevo = dict(limpio, id=tid, creado=ahora, cambiado=ahora)
-        if tid in tipos and _sin_fechas(tipos[tid]) == _sin_fechas(nuevo):
-            return tipos[tid]
-        tipos[tid] = nuevo
-        _escribir_usuario(ruta, tipos)
-    return nuevo
+        anterior = fichas.get(tid) or {}
+        nueva = dict(limpio, id=tid, cliente=str(cid),
+                     creado=(anterior.get("creado") if not anterior.get("borrado") else None)
+                     or ahora, cambiado=ahora)
+        if anterior and not anterior.get("borrado") and \
+                _sin_fechas(anterior) == _sin_fechas(nueva):
+            return anterior
+        fichas[tid] = nueva
+        _escribir_usuario(ruta, fichas)
+    return nueva
 
 
 def _sin_fechas(crudo):
     return {k: v for k, v in crudo.items() if k not in ("creado", "cambiado")}
 
 
-def borrar(tid, raiz=None):
-    """Quita un tipo del dueño. -> bool (si estaba). Los de fábrica, ValueError.
+def borrar_de_cliente(cid, raiz=None):
+    """Quita la ficha de un proyecto. -> bool (si estaba)
 
-    Se MARCA como borrado y no se quita del fichero (ver `de_usuario`): deja de
-    salir y de poder fijarse; la API quita la clave de los estilos que lo
-    tenían, y los vídeos ya creados con él siguen como estaban."""
-    tid = str(tid or "").strip().lower()
-    if tid in DE_FABRICA:
-        raise ValueError("los tipos de fábrica no se borran")
+    Se MARCA como borrada (ver `de_usuario`): sus estilos vuelven a automático
+    (la API les quita la clave) y los vídeos ya creados siguen como estaban."""
+    tid = id_de_cliente(cid)
     ruta = ruta_usuario(raiz)
     with _LOCK:
-        tipos = dict(_leer_usuario(ruta))
-        if tid not in tipos or tipos[tid].get("borrado"):
+        fichas = dict(_leer_usuario(ruta))
+        if tid not in fichas or fichas[tid].get("borrado"):
             return False
-        tipos[tid] = dict(tipos[tid], borrado=time.strftime("%Y-%m-%dT%H:%M:%S"))
-        _escribir_usuario(ruta, tipos)
+        fichas[tid] = dict(fichas[tid], borrado=time.strftime("%Y-%m-%dT%H:%M:%S"))
+        _escribir_usuario(ruta, fichas)
     return True
 
 
@@ -420,20 +375,18 @@ def borrar(tid, raiz=None):
 
 def normalizar(valor, raiz=None):
     """Lo que se guarda en `estilo.dominio`. -> "" (automático) o el id de un
-    tipo que existe (de fábrica o del dueño).
+    tipo que existe (el general o la ficha de un cliente).
 
     Lanza ValueError con un id que no existe."""
     if valor is None:
         return AUTOMATICO
     if not isinstance(valor, str):
-        raise ValueError("el tipo de negocio es el id de uno que exista: "
-                         + ", ".join(todos(raiz)))
+        raise ValueError("el negocio es el id de una ficha que exista")
     clave = valor.strip().lower()
     if clave in ("", "auto", "automatico", "automático"):
         return AUTOMATICO
     if clave not in todos(raiz):
-        raise ValueError(f"«{valor}» no es un tipo de negocio "
-                         f"(valen: {', '.join(todos(raiz))})")
+        raise ValueError(f"«{valor}» no es la ficha de ningún negocio")
     return clave
 
 
@@ -448,50 +401,25 @@ def fijado(estilo, raiz=None):
 
 
 def servicios_en_texto(texto, dominio=None):
-    """Los servicios que nombra un texto, según los patrones del dominio
-    (sin dominio, los de EstadoPlay: lo de siempre). -> tupla"""
+    """Los servicios que nombra un texto, según los patrones del tipo (sin
+    tipo, ninguno: el general no tiene). -> tupla"""
     texto = str(texto or "")
-    patrones = (dominio or ESTADOPLAY)["en_texto"]
+    patrones = (dominio or GENERAL)["en_texto"]
     if not texto or not patrones:
         return ()
     return tuple(nombre for nombre, lista in patrones.items()
                  if any(re.search(pat, texto, flags=re.IGNORECASE) for pat in lista))
 
 
-def _lo_nombra(dominio, texto):
-    """Si un texto delata ese tipo: por sus servicios (los de fábrica) o por
-    sus palabras (los del dueño)."""
-    if not texto:
-        return False
-    if dominio.get("en_texto"):
-        return bool(servicios_en_texto(texto, dominio))
-    return any(re.search(patron_de_palabra(p), texto, flags=re.IGNORECASE)
-               for p in dominio.get("palabras") or ())
-
-
 def de_estilo(estilo, texto="", raiz=None):
-    """El tipo que rige: el fijado o, en automático, el que delata el texto.
+    """El tipo que rige: el fijado o, sin fijar, el general. -> (tipo, automatico)
 
-    -> (dominio, automatico: bool). En automático solo se prueban los de
-    FÁBRICA (EstadoPlay si el texto nombra sus servicios; si no, general): un
-    tipo del dueño no cambia nada de un vídeo que no lo haya elegido, tampoco
-    lo que vigila el revisor (que en modo autónomo decide qué se rehace)."""
+    `texto` se queda por compatibilidad: desde la Etapa Foto C nada se adivina
+    por el texto del vídeo."""
     propio = fijado(estilo, raiz)
     if propio is not None:
         return propio, False
-    for dominio in DE_FABRICA.values():
-        if _lo_nombra(dominio, str(texto or "")):
-            return dominio, True
     return GENERAL, True
-
-
-def sugerido(texto, raiz=None):
-    """El tipo del dueño cuyas palabras salen en un texto, o None. Solo para
-    SUGERIRLO en la ficha del estilo: no decide nada por su cuenta."""
-    for dominio in de_usuario(raiz).values():
-        if _lo_nombra(dominio, str(texto or "")):
-            return dominio
-    return None
 
 
 def frases_revisor(estilo, texto="", raiz=None):
@@ -501,48 +429,31 @@ def frases_revisor(estilo, texto="", raiz=None):
 
 
 def reglas_de_foto(estilo, raiz=None):
-    """LAS REGLAS DE FOTO DEL NEGOCIO que pueden entrar en un prompt. -> [regla]
+    """LAS REGLAS DE FOTO DEL NEGOCIO que entran en un prompt. -> [regla]
 
     Con el formato de `motores/reglas/reglas_foto.json`; entran en su hueco
-    `reglas-del-negocio` y cada una con su `solo_si`, si lo lleva.
-
-    - Tipo FIJADO: las suyas (las de general: ninguna; un vídeo de un estilo
-      fijado en general no recibe las de consolas aunque hable de mandos).
-    - AUTOMÁTICO: las reglas CONDICIONALES de los de fábrica, que es justo lo
-      que había antes en `reglas_foto.json` (las de consolas, con su `solo_si`).
-      Las de los tipos del dueño no: crear un tipo no cambia ningún vídeo que no
-      lo haya elegido.
-    """
+    `reglas-del-negocio`, cada una con su `solo_si` si lo lleva. Las de la ficha
+    del cliente si el estilo la tiene; si no, ninguna."""
     propio = fijado(estilo, raiz)
-    if propio is not None:
-        return [dict(r) for r in propio.get("reglas") or []]
-    return [dict(r) for d in DE_FABRICA.values()
-            for r in d.get("reglas") or [] if r.get("solo_si")]
+    if propio is None:
+        return []
+    return [dict(r) for r in propio.get("reglas") or []]
+
+
+def publicar(crudo):
+    """Una ficha para la pantalla. -> dict"""
+    return {"id": crudo["id"], "cliente": crudo.get("cliente") or "",
+            "nombre": crudo["nombre"],
+            "reglas": [dict(r) for r in crudo.get("reglas") or []],
+            "revisor": dict(crudo.get("revisor") or {}),
+            "creado": crudo.get("creado") or "", "cambiado": crudo.get("cambiado") or ""}
 
 
 def listar(raiz=None):
-    """Los tipos, para la pantalla: los de fábrica (de solo lectura) y los del
-    dueño, con lo que hace falta para enseñarlos y editarlos."""
-    salida = []
-    for d in todos(raiz).values():
-        ficha = {"id": d["id"], "nombre": d["nombre"],
-                 "descripcion": d.get("descripcion") or "",
-                 "de_fabrica": bool(d.get("de_fabrica")),
-                 "servicios": list(d["servicios"]),
-                 "cartas_propias": bool(d.get("escalera")),
-                 "revisor": {k: " ".join(str(d["revisor"].get(k) or "").split())
-                             for k in FRASES_EDITABLES}}
-        if d.get("de_fabrica"):
-            ficha["palabras"] = list(d["servicios"])
-            ficha["reglas"] = [{"id": r["id"], "texto": r["regla"],
-                                "condicional": bool(r.get("solo_si"))}
-                               for r in d.get("reglas") or []]
-        else:
-            crudo = d.get("crudo") or {}
-            ficha["palabras"] = list(crudo.get("palabras") or [])
-            ficha["reglas"] = [dict(r) for r in crudo.get("reglas") or []]
-            ficha["revisor_propio"] = dict(crudo.get("revisor") or {})
-            ficha["creado"] = crudo.get("creado") or ""
-            ficha["cambiado"] = crudo.get("cambiado") or ""
-        salida.append(ficha)
+    """El general y las fichas de los clientes, para la pantalla."""
+    salida = [{"id": d["id"], "nombre": d["nombre"], "de_fabrica": True,
+               "descripcion": d.get("descripcion") or ""}
+              for d in DE_FABRICA.values()]
+    for tipo in de_usuario(raiz).values():
+        salida.append(dict(publicar(tipo["crudo"]), de_fabrica=False))
     return salida

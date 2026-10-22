@@ -7008,6 +7008,14 @@ def crear_en_el_movil(navegador, datos):
     api.libre(pid)
     freno = os.path.join(os.path.dirname(datos["proyectos"]), "ffmpeg_lento")
     pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="crear en el móvil")
+    # 0) «Un estilo nuevo» no pasa por barraDeAccion ni tiene «⋯»: lo que falta
+    #    para poder generar tiene que verse también en el móvil (revisión, 22-10)
+    pg.js("APP.light.encargo = null; irALight('crear', { taller: null });")
+    ok(pg.esperar("input, textarea"), "MÓVIL: «Un estilo nuevo» se abre")
+    pg.p.wait_for_timeout(1200)
+    ok(pg.visible(".pie-creacion", "nombre al estilo"),
+       "MÓVIL: en «Un estilo nuevo» se ve lo que falta («ponle un nombre al estilo»)")
+    pg.js("APP.light.encargo = null;")
     pg.js(f"await abrirVideoLight('{pid}');")
     pg.p.wait_for_timeout(1500)
 

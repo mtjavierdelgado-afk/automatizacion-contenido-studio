@@ -48,7 +48,11 @@ FORMATOS = {"9:16": (1080, 1920), "16:9": (1280, 720), "4:5": (1080, 1350), "1:1
 ZONAS = {
     "9:16": [{"x": 0, "y": 0, "w": 1, "h": 0.14, "que": "arriba: la barra de la red"},
              {"x": 0, "y": 0.65, "w": 1, "h": 0.35, "que": "abajo: el texto del post y los botones"},
-             {"x": 0.85, "y": 0.4, "w": 0.15, "h": 0.6, "que": "derecha: me gusta, comentar, compartir"}],
+             {"x": 0.85, "y": 0.4, "w": 0.15, "h": 0.6, "que": "derecha: me gusta, comentar, compartir"},
+             # la cuadrícula del perfil de Instagram enseña el centro en 3:4:
+             # lo de fuera de este marco no se ve ahí (21-10)
+             {"x": 0, "y": 0.125, "w": 1, "h": 0.75, "que": "Instagram, en la cuadrícula: solo esto (3:4)",
+              "marco": True}],
     "16:9": [{"x": 0.78, "y": 0.82, "w": 0.22, "h": 0.18, "que": "la duración del vídeo"}],
     "4:5": [],
     "1:1": [],
@@ -70,6 +74,19 @@ PALETAS = {
              "alerta": "#ffffff", "texto": "#ffffff", "contorno": "#5a0008"},
     "calido": {"nombre": "Cálido (diseño vs función)", "fondo": "#2b1d14", "acento": "#ff9a3c",
                "alerta": "#8a7dff", "texto": "#ffffff", "contorno": "#1a120c"},
+    # SIN PALETA (portadas-2, 21-10): texto blanco con borde negro y nada que
+    # resalte en color. Para quien no quiere que los colores los elija nadie.
+    "ninguna": {"nombre": "Sin paleta (blanco y negro)", "fondo": "#111111", "acento": "#ffffff",
+                "alerta": "#000000", "texto": "#ffffff", "contorno": "#000000"},
+}
+
+#: Lo que hace cada capa, para decirlo en la pantalla (portadas-2, 21-10).
+CAPAS = {
+    "imagen": "La imagen de fondo y, si quieres, sus ajustes (contraste, color, brillo, viñeta, "
+              "oscurecer). Es lo ÚNICO que toca la foto, y empieza sin ajustes: tal cual llega.",
+    "plantilla": "Dónde va cada texto y cada elemento. No toca la foto.",
+    "paleta": "Los colores de los textos y los elementos (título, resaltado, insignias, flechas). "
+              "No toca la foto. «Sin paleta»: blanco con borde negro.",
 }
 
 #: Los textos que puede pedir una plantilla. La pantalla ensena solo los suyos.
@@ -102,8 +119,9 @@ def _titulo(t, pal, fuente, x, y, tam=0.17, ancho=0.86, lineas=2, estilos=None, 
 
 
 def _ante(t, pal, fuente, x, y, tam=0.045, alinear="centro"):
-    if not _texto(t, "antetitulo"):
-        return None
+    # SIEMPRE EXISTE, aunque esté vacío (portadas-2, 21-10): antes solo se
+    # creaba si ya tenía texto al elegir la plantilla, y lo que se escribía
+    # después no tenía dónde salir. Vacío no pinta nada.
     return {"tipo": "texto", "rol": "antetitulo", "texto": _texto(t, "antetitulo"), "x": x, "y": y,
             "tam": tam, "ancho": 0.7, "lineas": 1, "fuente": "bebas" if fuente != "bebas" else "anton",
             "color": pal["texto"], "contorno": pal["contorno"], "estilos": ["contorno"],
@@ -132,8 +150,7 @@ def _versus(t, pal, f, fmt):
          "y": 0.42 if v else 0.5, "tam": 0.13, "forma": "circulo", "color": "#e53935",
          "contorno": "#ffffff", "brillo": True, "fuente": f},
     ]
-    if _texto(t, "antetitulo"):
-        els.append(_ante(t, pal, f, 0.3 if v else 0.25, 0.155 if v else 0.08))
+    els.append(_ante(t, pal, f, 0.3 if v else 0.25, 0.155 if v else 0.08))
     return "diagonal", els, {"contraste": 1.12, "saturacion": 1.2, "vineta": 0.35}
 
 
@@ -179,7 +196,7 @@ def _pregunta(t, pal, f, fmt):
 def _oferta(t, pal, f, fmt):
     v = fmt == "9:16"
     els = [
-        {"tipo": "rafaga", "x": 0.5, "y": 0.35 if v else 0.5, "color": "#ffffff", "opacidad": 0.14},
+        {"tipo": "rafaga", "rol": "look", "oculto": True, "x": 0.5, "y": 0.35 if v else 0.5, "color": "#ffffff", "opacidad": 0.14},
         _titulo(t, pal, f, *(_p(fmt, (0.5, 0.2), (0.32, 0.3))), tam=0.12, ancho=0.86 if v else 0.6),
         {"tipo": "insignia", "rol": "etiqueta", "texto": _texto(t, "etiqueta", "S/ 99"),
          "x": 0.5 if v else 0.75, "y": 0.42 if v else 0.55, "tam": 0.17, "forma": "estallido",
@@ -221,7 +238,7 @@ def _error(t, pal, f, fmt):
 def _tutorial(t, pal, f, fmt):
     v = fmt == "9:16"
     els = [
-        _ante(t, pal, f, 0.5 if v else 0.3, 0.16 if v else 0.14) or
+        _ante(t, pal, f, 0.5 if v else 0.3, 0.16 if v else 0.14) if _texto(t, "antetitulo") else
         {"tipo": "etiqueta", "rol": "antetitulo", "texto": "CÓMO", "x": 0.5 if v else 0.2,
          "y": 0.16 if v else 0.15, "tam": 0.06, "color": pal["acento"]},
         _titulo(t, pal, f, *(_p(fmt, (0.5, 0.3), (0.34, 0.45))), tam=0.14, ancho=0.86 if v else 0.6,
@@ -325,7 +342,7 @@ def _detras(t, pal, f, fmt):
          "tam": 0.045, "color": "#111111", "color_texto": "#ff2d2d", "rot": 0},
         _titulo(t, pal, "marker", *(_p(fmt, (0.5, 0.3), (0.4, 0.75))), tam=0.11, ancho=0.86 if v else 0.7,
                 lineas=2, estilos=["sombra"], mayusculas=False),
-        {"tipo": "marco", "tam": 0.012, "color": "#ffffff"},
+        {"tipo": "marco", "rol": "look", "oculto": True, "tam": 0.012, "color": "#ffffff"},
     ]
     return "uno", els, {"saturacion": 0.85, "vineta": 0.4}
 
@@ -354,7 +371,7 @@ def _evento(t, pal, f, fmt):
          "color": pal["acento"], "contorno": "#ffffff", "fuente": f},
         _titulo(t, pal, f, *(_p(fmt, (0.45, 0.32), (0.4, 0.5))), tam=0.14, ancho=0.82 if v else 0.62,
                 estilos=["contorno", "sombra", "brillo"]),
-        {"tipo": "rafaga", "x": 0.5, "y": 0.45, "opacidad": 0.1},
+        {"tipo": "rafaga", "rol": "look", "oculto": True, "x": 0.5, "y": 0.45, "opacidad": 0.1},
     ]
     return "uno", els, {"contraste": 1.12, "saturacion": 1.25, "vineta": 0.4}
 
@@ -435,6 +452,7 @@ def catalogo():
         "formatos": {k: {"ancho": v[0], "alto": v[1], "zonas": ZONAS[k]} for k, v in FORMATOS.items()},
         "fondos": list(FONDOS),
         "disposiciones": list(DISPOSICIONES),
+        "capas": CAPAS,
     }
 
 
@@ -454,14 +472,41 @@ def de_plantilla(plantilla, textos=None, paleta="gamer", fuente="anton", formato
     fuente = fuente if fuente in grafismo.FUENTES else "anton"
     base = normalizar(base) if base else None
     textos = dict((base or {}).get("textos") or {}, **{k: v for k, v in (textos or {}).items() if v is not None})
-    disposicion, elementos, efectos = PLANTILLAS[plantilla][3](textos, PALETAS[paleta], fuente, formato)
+    disposicion, elementos, look = PLANTILLAS[plantilla][3](textos, PALETAS[paleta], fuente, formato)
+    # QUÉ PAPEL TIENE CADA COLOR: la misma plantilla con una paleta de marcas
+    # dice qué color salió de qué papel (dos papeles pueden valer lo mismo,
+    # como en «Sin paleta», y por valor no se distinguen)
+    marcas = {k: f"@{k}" for k in grafismo.PAPELES_PALETA}
+    marcas["nombre"] = ""
+    _d, con_marcas, _l = PLANTILLAS[plantilla][3](textos, marcas, fuente, formato)
     fondo_previo = dict((base or {}).get("fondo") or {})
     fondo_nuevo = dict(fondo_previo, **(fondo or {}))
     fondo_nuevo["disposicion"] = disposicion
+    # LA IMAGEN, LIMPIA (portadas-2, 21-10): la plantilla ya no mete efectos en
+    # la foto. Los suyos quedan como «look» que se aplica con un botón; los
+    # ajustes que la persona ya puso se quedan al cambiar de plantilla.
+    efectos = dict((base or {}).get("efectos") or {})
+    nuevos = []
+    for el, marcado in zip(elementos, con_marcas):
+        if el:
+            el = dict(el)
+            # (y solo si de verdad salió de ese papel: hay plantillas que, si
+            # el papel no les vale, ponen un color fijo)
+            papeles = {c: str(marcado.get(c))[1:] for c in grafismo.CAMPOS_COLOR
+                       if str((marcado or {}).get(c) or "").startswith("@")
+                       and el.get(c) == PALETAS[paleta][str(marcado.get(c))[1:]]}
+            # siempre, aunque vacío: un color de la plantilla que no es de
+            # ningún papel (el rojo de la «X») es fijo y no se repinta
+            el["papeles"] = papeles
+            # «Restablecer» no vuelve a esconder lo que se enseñó a propósito
+            el["orig"] = {k: v for k, v in el.items() if k not in ("texto", "orig", "oculto")}
+            nuevos.append(el)
+    # LO AÑADIDO A MANO SE QUEDA al cambiar de plantilla
+    propios = [e for e in (base or {}).get("elementos") or [] if e.get("propio")]
     return normalizar({
         "version": VERSION, "plantilla": plantilla, "formato": formato, "paleta": paleta,
         "fuente": fuente, "textos": textos, "fondo": fondo_nuevo,
-        "elementos": [e for e in elementos if e], "efectos": efectos,
+        "elementos": (nuevos + propios)[:grafismo.MAX_ELEMENTOS], "efectos": efectos, "look": look,
     })
 
 
@@ -520,6 +565,7 @@ def normalizar(diseno):
         "fondo": _limpiar_fondo(d.get("fondo")),
         "elementos": grafismo.limpiar_elementos(d.get("elementos")),
         "efectos": _limpiar_efectos(d.get("efectos")),
+        "look": _limpiar_efectos(d.get("look")),
         "modo": "ia" if d.get("modo") == "ia" else "capas",
     }
 
@@ -603,14 +649,22 @@ def cambiar_estilo(diseno, paleta=None, fuente=None, formato=None):
     nueva. Las posiciones son relativas: valen en cualquier formato."""
     d = normalizar(diseno)
     vieja, nueva = PALETAS[d["paleta"]], PALETAS.get(paleta) or PALETAS[d["paleta"]]
-    cambio_color = {vieja[k].lower(): nueva[k] for k in ("fondo", "acento", "alerta", "texto", "contorno")}
     for el in d["elementos"]:
-        for campo in ("color", "contorno", "acento", "color_texto"):
-            valor = str(el.get(campo) or "").lower()
-            if valor in cambio_color:
-                el[campo] = cambio_color[valor]
-        if fuente in grafismo.FUENTES and el.get("fuente") in (None, d["fuente"]):
-            el["fuente"] = fuente
+        papeles = el.get("papeles")
+        for cual in (el, el.get("orig")):
+            if not isinstance(cual, dict):
+                continue
+            for campo in grafismo.CAMPOS_COLOR:
+                if campo not in cual:
+                    continue
+                if papeles is not None:
+                    # de la plantilla: por papel, exacto; sin papel, color fijo
+                    if campo in papeles:
+                        cual[campo] = nueva[papeles[campo]]
+                else:
+                    cual[campo] = _color_en_paleta(cual.get(campo), campo, vieja, nueva)
+            if fuente in grafismo.FUENTES and cual.get("fuente") in (None, d["fuente"]):
+                cual["fuente"] = fuente
     if paleta in PALETAS:
         d["paleta"] = paleta
     if fuente in grafismo.FUENTES:
@@ -618,6 +672,24 @@ def cambiar_estilo(diseno, paleta=None, fuente=None, formato=None):
     if formato in FORMATOS:
         d["formato"] = formato
     return normalizar(d)
+
+
+#: Qué papel de la paleta se mira primero según el campo. Con una sola tabla
+#: de color a color, dos papeles del mismo color (en «Sin paleta» el texto y
+#: el resaltado son blancos) se confundían y el resaltado se perdía al volver.
+_PAPELES_DE_CAMPO = {"acento": ("acento", "alerta", "texto"), "contorno": ("contorno", "fondo"),
+                     "color": ("texto", "acento", "alerta", "fondo", "contorno"),
+                     "color_texto": ("texto", "contorno", "acento")}
+
+
+def _color_en_paleta(valor, campo, vieja, nueva):
+    """El color de un campo en la paleta nueva, si era uno de la vieja."""
+    if valor is None:
+        return None
+    for papel in _PAPELES_DE_CAMPO[campo]:
+        if str(valor).lower() == vieja[papel].lower():
+            return nueva[papel]
+    return valor
 
 
 def ruta_fondo(raiz_publicar, nombre):
@@ -669,6 +741,14 @@ def svg_guias(formato, W, H):
     piezas = []
     for z in ZONAS.get(formato) or []:
         x, y, w, h = z["x"] * W, z["y"] * H, z["w"] * W, z["h"] * H
+        if z.get("marco"):
+            # un MARCO (lo que SÍ se ve), no una zona tapada: amarillo, sin relleno
+            piezas.append(f'<rect x="{x + 3:.0f}" y="{y:.0f}" width="{w - 6:.0f}" height="{h:.0f}" fill="none" '
+                          f'stroke="#ffd400" stroke-width="6" stroke-dasharray="26 14"/>'
+                          f'<text x="{x + 14:.0f}" y="{y + h - 18:.0f}" font-family="Verdana, sans-serif" '
+                          f'font-size="30" fill="#ffd400" stroke="#000" stroke-width="5" paint-order="stroke">'
+                          f'{grafismo.escapar(z["que"])}</text>')
+            continue
         piezas.append(f'<rect x="{x:.0f}" y="{y:.0f}" width="{w:.0f}" height="{h:.0f}" fill="#ff0000" '
                       f'opacity="0.22" stroke="#ff0000" stroke-width="4" stroke-dasharray="18 12"/>'
                       f'<text x="{x + 14:.0f}" y="{y + 44:.0f}" font-family="Verdana, sans-serif" '
@@ -787,15 +867,30 @@ def proponer(info, formato, base=None, n=3, cwd=None):
 TAMANO_IA = {"9:16": "vertical", "16:9": "apaisado", "4:5": "vertical", "1:1": "cuadrado"}
 
 
+#: Las reglas que van SIEMPRE al final del prompt, lo escriba quien lo escriba
+#: (Claude, la persona o la plantilla): sin ellas un prompt editado a mano
+#: podía pedir un fondo con letras encima del título de las capas.
+CIERRE_FONDO = ("Muy importante: SIN texto, letras, números, logotipos ni marcas de agua en la imagen. "
+                "Deja un espacio limpio en {sitio} para un titular grande que se pone después.")
+CIERRE_PORTADA = ("Escribe EXACTAMENTE estos textos, con sus tildes y eñes, y ningún otro: {textos}. "
+                  "Letras grandes y gruesas, con borde oscuro, que se lean en pequeño. Sin marcas de agua.")
+SITIO_TITULAR = {"9:16": "la mitad de arriba", "16:9": "el lado izquierdo", "4:5": "la parte de arriba",
+                 "1:1": "la parte de arriba"}
+MAX_PROMPT = 1500
+
+
+def _de_que_va(info):
+    texto = " ".join(str(info.get("resumen") or info.get("titulo") or "").split())[:1200].rstrip(" .")
+    return f"{texto}." if texto else "un negocio."
+
+
 def prompt_fondo_ia(diseno, info):
-    """El fondo hecho por la IA, SIN texto, con sitio para el titulo."""
+    """El fondo hecho por la IA, SIN texto, con sitio para el titulo. Lo que
+    se le manda se ve y se puede cambiar en la pantalla antes de pagar."""
     d = normalizar(diseno)
-    sitio = {"9:16": "the upper half", "16:9": "the left side", "4:5": "the upper part", "1:1": "the top"}[d["formato"]]
-    return (f"Eye-catching background for a social media cover about: "
-            f"{' '.join(str(info.get('resumen') or info.get('titulo') or '').split())[:600]}. "
-            f"Bold, vivid colors, strong contrast, a single clear subject, cinematic light. "
-            f"Leave clean empty space in {sitio} for a big headline added later. "
-            f"ABSOLUTELY NO text, letters, numbers, logos or watermarks in the image.")
+    return (f"Imagen de fondo para la portada de un vídeo para redes sobre: {_de_que_va(info)} "
+            f"Un solo protagonista claro, colores vivos, buen contraste y luz de cine. "
+            f"Formato {d['formato']}.")
 
 
 def prompt_portada_ia(diseno, info):
@@ -803,12 +898,90 @@ def prompt_portada_ia(diseno, info):
     Se paga y puede escribir alguna letra mal: la pantalla lo dice."""
     d = normalizar(diseno)
     nombre = PLANTILLAS[d["plantilla"]][0]
-    textos = [v for k, v in d["textos"].items() if v]
-    comillas = " / ".join(f'"{t}"' for t in textos) or f'"{info.get("titulo") or ""}"'
     pal = PALETAS[d["paleta"]]
-    return (f"High click-through social media thumbnail, style «{nombre}», for: "
-            f"{' '.join(str(info.get('resumen') or info.get('titulo') or '').split())[:500]}. "
-            f"Render EXACTLY this text, spelled exactly as written including accents and Ñ: {comillas}. "
-            f"Huge bold condensed letters with thick black outline and drop shadow, "
-            f"colors {pal['acento']} and {pal['texto']} over a {pal['fondo']} mood, "
-            f"high contrast, punchy saturated look, readable at small size, no other text, no watermark.")
+    colores = ("blanco y negro" if d["paleta"] == "ninguna"
+               else f"{pal['acento']} y {pal['texto']} sobre un ambiente {pal['fondo']}")
+    return (f"Miniatura para redes, estilo «{nombre}», de un vídeo sobre: {_de_que_va(info)} "
+            f"Una composición simple: un protagonista claro y el texto grande. Colores {colores}, "
+            f"mucho contraste. Formato {d['formato']}.")
+
+
+def textos_para_ia(diseno, info=None):
+    d = normalizar(diseno)
+    textos = [v for v in d["textos"].values() if v]
+    return " / ".join(f"«{t}»" for t in textos) or f"«{(info or {}).get('titulo') or ''}»"
+
+
+def prompt_final(que, prompt, diseno, info=None):
+    """El prompt que se manda de verdad: el de la pantalla (o el de partida)
+    más las reglas fijas del final. -> str"""
+    d = normalizar(diseno)
+    base = " ".join(str(prompt or "").split())[:MAX_PROMPT]
+    if not base:
+        base = prompt_portada_ia(d, info or {}) if que == "portada" else prompt_fondo_ia(d, info or {})
+    if que == "portada":
+        return f"{base} {CIERRE_PORTADA.format(textos=textos_para_ia(d, info))}"
+    return f"{base} {CIERRE_FONDO.format(sitio=SITIO_TITULAR[d['formato']])}"
+
+
+# ------------------------------------------------------------------ ideas de imagen con Claude
+
+INSTRUCCION_IDEAS_IA = """Eres director de arte de miniaturas para redes (YouTube, Instagram, TikTok).
+Lee el guion y propón {n} ideas DISTINTAS de imagen para la portada de este
+vídeo. Cada idea es una escena concreta y fotografiable: quién o qué sale, qué
+hace, dónde, el encuadre y la luz. Nada genérico («gente feliz», «fondo
+colorido»): algo que solo encaje con ESTE vídeo y que se entienda en un
+segundo en un móvil.
+
+Cada idea trae:
+- "titulo": 2–5 palabras para reconocerla.
+- "prompt": la descripción para la IA de imágenes, en castellano, 40–90
+  palabras. NO pidas texto, letras ni logotipos dentro (el texto va aparte).
+- "por_que": una frase con por qué haría clic la gente.
+
+<video>
+Título del post: {titulo}
+Textos de la portada: {textos}
+Plantilla: {plantilla}
+Negocio: {negocio}
+Guion: {guion}
+</video>
+
+Contesta SOLO con este JSON:
+{{"ideas": [{{"titulo": "...", "prompt": "...", "por_que": "..."}}]}}"""
+
+
+def instruccion_ideas_ia(info, diseno, n=3):
+    d = normalizar(diseno)
+    return INSTRUCCION_IDEAS_IA.format(
+        n=n, titulo=str(info.get("titulo") or "")[:200], textos=textos_para_ia(d, info),
+        plantilla=PLANTILLAS[d["plantilla"]][0], negocio=str(info.get("negocio") or "")[:300],
+        guion=" ".join(str(info.get("guion") or info.get("resumen") or "").split())[:6000])
+
+
+def leer_ideas_ia(datos, n=3):
+    salida = []
+    for idea in ((datos or {}).get("ideas") or [])[:n * 3]:
+        if len(salida) >= n:
+            break
+        if not isinstance(idea, dict):
+            continue
+        prompt = " ".join(str(idea.get("prompt") or "").split())[:MAX_PROMPT]
+        if len(prompt) < 20:
+            continue
+        salida.append({"titulo": " ".join(str(idea.get("titulo") or "").split())[:60] or "Idea",
+                       "prompt": prompt, "por_que": " ".join(str(idea.get("por_que") or "").split())[:200]})
+    return salida
+
+
+def proponer_ideas_ia(info, diseno, n=3, cwd=None):
+    """Tres ideas de imagen de Claude (suscripción, no se paga aparte)."""
+    import cli_claude                                         # noqa: PLC0415
+    import comun                                              # noqa: PLC0415
+    texto, _sobre = cli_claude.ejecutar(
+        instruccion_ideas_ia(info, diseno, n), modelo="sonnet", esfuerzo="low", cwd=cwd,
+        base_tiempo_s=180, extra=["--no-session-persistence"], para="las ideas de imagen de la portada")
+    ideas = leer_ideas_ia(comun.extraer_json(texto, "las ideas de imagen"), n)
+    if not ideas:
+        raise RuntimeError("Claude no ha propuesto ninguna idea que se pueda usar; vuelve a pedirlo")
+    return ideas

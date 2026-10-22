@@ -6182,6 +6182,20 @@ def probar_portadas(cliente, pid):
     igual(r.status_code, 404, "un plano que no existe: 404")
     r, _d = cliente.get(f"/api/publicar/videos/{pid}/portada/proponer/noexiste")
     igual(r.status_code, 404, "una propuesta que no existe: 404")
+    # portadas-2 (21-10): el prompt se ve antes de pagar y se puede cambiar
+    ok(precio.get("prompt") and "«A»" in (precio.get("prompt_final") or ""),
+       "sin confirmar, enseña el prompt y el que se mandaría (con los textos exactos)")
+    r, propio = cliente.post(f"/api/publicar/videos/{pid}/portada/ia",
+                             {"diseno": p["diseno"], "que": "fondo", "prompt": "Una sala con diez pantallas"})
+    ok(r.status_code == 202 and propio.get("prompt") == "Una sala con diez pantallas"
+       and "SIN texto" in (propio.get("prompt_final") or "") and "trabajo_id" not in propio,
+       "un prompt escrito a mano se respeta y lleva siempre las reglas del final")
+    r, _d = cliente.post(f"/api/publicar/videos/{pid}/portada/ideas-ia", {"diseno": "no"})
+    igual(r.status_code, 400, "pedir ideas sin diseño: 400 (y no llama a Claude)")
+    r, _d = cliente.get(f"/api/publicar/videos/{pid}/portada/ideas-ia/noexiste")
+    igual(r.status_code, 404, "unas ideas que no existen: 404")
+    r, _d = cliente.post(f"/api/publicar/videos/{pid}/portada/descargar", {"diseno": "no"})
+    igual(r.status_code, 400, "descargar sin diseño: 400")
 
 
 def probar_ortografia_de_campos(cliente, pid):

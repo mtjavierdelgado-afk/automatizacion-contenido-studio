@@ -853,7 +853,16 @@ _CAMPOS = {"tipo": str, "texto": str, "x": float, "y": float, "x2": float, "y2":
            "resaltar": list, "alinear": str, "mayusculas": bool, "rot": float,
            "forma": str, "icono": str, "curva": float, "aspecto": float,
            "quiebros": float, "semilla": float, "opacidad": float, "brillo": bool,
-           "oculto": bool, "rol": str, "valor": float, "esquina": str, "rayos": float}
+           "oculto": bool, "rol": str, "valor": float, "esquina": str, "rayos": float,
+           # portadas-2 (21-10): `propio` = lo añadió la persona (cambiar de
+           # plantilla lo conserva); `orig` = cómo nació, para «Restablecer»
+           "propio": bool, "orig": dict,
+           # qué papel de la paleta pinta cada color ({"color": "acento"}):
+           # cambiar de paleta repinta por papel, no por valor
+           "papeles": "papeles"}
+
+PAPELES_PALETA = ("fondo", "acento", "alerta", "texto", "contorno")
+CAMPOS_COLOR = ("color", "contorno", "acento", "color_texto")
 
 MAX_ELEMENTOS = 24
 
@@ -880,6 +889,15 @@ def limpiar_elementos(lista):
                 el[campo] = bool(valor)
             elif tipo is list and isinstance(valor, list):
                 el[campo] = [str(v)[:40] for v in valor[:12]]
+            elif tipo == "papeles" and isinstance(valor, dict):
+                el[campo] = {str(k): str(v) for k, v in valor.items()
+                             if k in CAMPOS_COLOR and v in PAPELES_PALETA}
+            elif tipo is dict and isinstance(valor, dict):
+                # un nivel: el «orig» no lleva otro «orig» dentro
+                limpio = limpiar_elementos([dict({k: v for k, v in valor.items() if k != "orig"},
+                                                 tipo=crudo["tipo"])])
+                if limpio:
+                    el[campo] = limpio[0]
         salida.append(el)
     return salida
 

@@ -6619,7 +6619,16 @@ def portadas_2_capas_y_pantalla_quieta(navegador, datos):
     pg.sin_errores("portadas-2")
     pg.cerrar()
 
-    # LA PANTALLA NO SE MUEVE al llegar los ganchos de una red de más arriba
+    # LA PANTALLA NO SE MUEVE al llegar los ganchos de una red de más arriba.
+    # Se sostiene sola (en la pasada entera otros escenarios dejan la ficha a
+    # su manera): tres redes con texto, cada una con su «Dame 3 ganchos».
+    r, _d = api.put(f"/api/publicar/videos/{pid}", {
+        "redes": ["tiktok", "instagram", "youtube"],
+        "textos": {"tiktok": {"descripcion": "Alquila consolas para tu fiesta en Lima"},
+                   "instagram": {"descripcion": "Tu fiesta con consolas y pantallas gigantes"},
+                   "youtube": {"titulo": "Consolas para fiestas en Lima",
+                               "descripcion": "Así montamos una fiesta con diez consolas"}}})
+    ok(r.status_code == 200, f"la ficha con tres redes y sus textos ({r.status_code})")
     movil = Pagina(navegador, datos, ancho=390, alto=780, nombre="portadas_2_movil")
     movil.js(f"abrirPublicarVideo('{pid}');")
     movil.esperar(".ficha-publicar .nombre-ficha", segundos=20)

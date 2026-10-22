@@ -6707,15 +6707,27 @@ function origenDeVideo(video) {
 /* UN DIÁLOGO DE LA CASA, en vez de los `prompt` del navegador: con su diseño,
    con campo de contraseña de verdad (no se ve lo que se escribe) y con
    desplegables. Devuelve los valores o null si se cancela. */
+/* UNA PREGUNTA CADA VEZ (revisión de Publicar, 22-10-2026): el foco se
+   quedaba en el botón que la abrió, detrás del panel, y Enter lo volvía a
+   pulsar: dos paneles apilados (en Publicar, publicar dos veces). Ahora el foco
+   pasa al panel (su primer campo o su botón de aceptar) y, mientras hay una
+   abierta, otra llamada no abre nada encima: contesta «cancelar» (null). */
+const DIALOGO_ABIERTO = { capa: null };
+
 function dialogo(op) {
   const { titulo, texto, campos = [], aceptar = 'Aceptar', cancelar = 'Cancelar', peligro = false } = op;
+  // la de verdad abierta (una capa quitada desde fuera ya no cuenta)
+  if (DIALOGO_ABIERTO.capa && DIALOGO_ABIERTO.capa.isConnected) return Promise.resolve(null);
+  try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) { /* nada */ }
   return new Promise(resolver => {
     const valores = {};
     const capa = h('div', { clase: 'capa-dialogo' });
+    DIALOGO_ABIERTO.capa = capa;
     const teclas = ev => { if (ev.key === 'Escape') cerrar(null); };
     const cerrar = valor => {
       capa.remove();
       document.removeEventListener('keydown', teclas);
+      if (DIALOGO_ABIERTO.capa === capa) DIALOGO_ABIERTO.capa = null;
       resolver(valor);
     };
     const campo = c => {
@@ -6762,7 +6774,12 @@ function dialogo(op) {
     capa.addEventListener('click', ev => { if (ev.target === capa) cerrar(null); });
     document.addEventListener('keydown', teclas);
     document.body.appendChild(capa);
-    setTimeout(() => { const f = formulario.querySelector('input, select, textarea'); if (f) f.focus(); }, 0);
+    const enfocar = () => {
+      const f = formulario.querySelector('input, select, textarea') || formulario.querySelector('button[type=submit]');
+      if (f) f.focus();
+    };
+    enfocar();               // ya, para que un Enter seguido no vaya al botón de detrás
+    setTimeout(enfocar, 0);
   });
 }
 

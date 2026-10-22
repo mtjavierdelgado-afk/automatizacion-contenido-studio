@@ -5387,6 +5387,23 @@ def automatizar_tablero_y_panel(navegador, datos):
     pg.pulsar(".pestanas-automatizar button", "Parrilla")
     ok(pg.esperar(".linea-marca.caja-info", "✓ guardada", 10), "y la Parrilla enseña la marca guardada")
     ok(not pg.visible(".pestanas-automatizar button .punto"), "sin el punto en su pestaña")
+
+    # UNA PREGUNTA CADA VEZ (revisión de Publicar, 22-10): pulsar «Borrar el
+    # guion» y luego Enter no vuelve a pulsar el botón de detrás (dos paneles):
+    # el foco está en el panel y Enter acepta
+    pg.pulsar(".columna-tablero[data-columna=publicado] .tarjeta-guion", "TB04")
+    pg.pulsar(".pestanas-cajon button", "Estado")
+    pg.pulsar(".cajon-guion button", "Borrar el guion")
+    ok(pg.p.evaluate("() => !!document.activeElement && !!document.activeElement.closest('.capa-dialogo')"),
+       "la pregunta se lleva el foco (no se queda en el botón de detrás)")
+    pg.p.keyboard.press("Enter")
+    pg.p.wait_for_timeout(300)
+    paneles = pg.p.locator(".capa-dialogo").count()
+    pg.p.wait_for_timeout(1200)
+    r, _g = api.get(f"/api/parrilla/proyectos/{cid}/guiones/{ids.get('TB04')}")
+    ok(paneles <= 1 and r.status_code == 404 and not pg.visible(".capa-dialogo"),
+       f"Enter acepta la pregunta, sin apilar otra ({paneles} paneles, guion {r.status_code})")
+    pg.p.evaluate("() => document.querySelectorAll('.capa-dialogo').forEach(x => x.remove())")
     pg.sin_errores("el Automatizar nuevo")
     pg.cerrar()
 

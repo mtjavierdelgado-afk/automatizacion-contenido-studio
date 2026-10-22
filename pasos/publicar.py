@@ -55,6 +55,7 @@ LO QUE NO SE NEGOCIA
    ultimos caracteres.
 """
 import datetime as dt
+import base64
 import hashlib
 import json
 import os
@@ -2234,7 +2235,20 @@ def guardar_imagen_portada(raiz, pid, contenido, extension):
     return ficha["portada"]
 
 
-def campos_portada(raiz, info, datos, redes, lote="vista"):
+#: Las redes que admiten portada por Upload-Post (21-10-2026). Las demás
+#: (Threads, Bluesky, Discord, Telegram, Mastodon, Google) no tienen ningún
+#: campo de portada: no se les manda nada.
+REDES_CON_PORTADA = ("instagram", "tiktok", "youtube", "facebook", "linkedin", "x", "pinterest")
+
+
+def tiktok_puede_portada(ajustes):
+    """¿La cuenta de TikTok del proyecto tiene la capacidad «cover_image»?
+    (la dice Upload-Post al ver las cuentas)."""
+    cuenta = ((ajustes or {}).get("cuentas") or {}).get("tiktok") or {}
+    return "cover_image" in (cuenta.get("capacidades") or [])
+
+
+def campos_portada(raiz, info, datos, redes, lote="vista", ajustes=None):
     """(campos, ficheros) de la portada para Upload-Post, segun lo elegido."""
     portada = portada_de(datos)
     campos, ficheros = {}, []
@@ -2253,7 +2267,8 @@ def campos_portada(raiz, info, datos, redes, lote="vista"):
     if ms is not None and duracion_ms > 0:
         ms = max(0, min(int(ms), duracion_ms - 100))
     foto = imagen
-    if not foto and (("youtube" in redes and portada["youtube"]) or "facebook" in redes):
+    if not foto and (("youtube" in redes and portada["youtube"])
+                     or any(r in redes for r in ("facebook", "linkedin", "x"))):
         try:
             foto = fotograma(info.get("mp4"), ms, ruta_portada(raiz, info["pid"], lote))
         except ErrorPublicar:
@@ -2264,7 +2279,7 @@ def campos_portada(raiz, info, datos, redes, lote="vista"):
         else:
             campos["thumb_offset"] = str(ms)
     if "tiktok" in redes:
-        if imagen and portada["tiktok_imagen"]:
+        if imagen and (portada["tiktok_imagen"] or tiktok_puede_portada(ajustes)):
             ficheros.append(("tiktok_cover_image", imagen))
         elif ms is not None:
             campos["cover_timestamp"] = int(ms)
@@ -2274,6 +2289,22 @@ def campos_portada(raiz, info, datos, redes, lote="vista"):
     if "facebook" in redes and foto and \
             encaje_de("facebook", info, datos).get("tipo") != "Reel":
         ficheros.append(("facebook_thumbnail", foto))
+    # LINKEDIN Y X (21-10): el mismo campo «thumbnail» que YouTube. YouTube va
+    # en su propia subida cuando sale con otras redes; aun así, si va en la
+    # misma, solo se manda si a YouTube también se le quería mandar.
+    otras = [r for r in ("linkedin", "x") if r in redes]
+    if otras and foto and not any(n == "thumbnail" for n, _r in ficheros) \
+            and ("youtube" not in redes or portada["youtube"]) \
+            and os.path.getsize(foto) <= MAX_BYTES_MINIATURA:
+        ficheros.append(("thumbnail", foto))
+    # PINTEREST: la imagen (en base64) o el momento del vídeo, en segundos
+    if "pinterest" in redes:
+        if imagen:
+            with open(imagen, "rb") as fh:
+                campos["pinterest_cover_image_data"] = base64.b64encode(fh.read()).decode("ascii")
+            campos["pinterest_cover_image_content_type"] = "image/jpeg"
+        elif ms is not None:
+            campos["pinterest_cover_image_key_frame_time"] = str(max(0, int(ms) // 1000))
     return campos, ficheros
 
 
@@ -2300,6 +2331,14 @@ def portada_mandada(red, campos, ficheros):
         return "tu miniatura (solo si el canal está verificado)" if "thumbnail" in nombres else ""
     if red == "facebook":
         return "tu miniatura" if "facebook_thumbnail" in nombres else ""
+    if red in ("linkedin", "x"):
+        return "tu miniatura" if "thumbnail" in nombres else ""
+    if red == "pinterest":
+        if "pinterest_cover_image_data" in campos:
+            return "tu imagen de portada"
+        if "pinterest_cover_image_key_frame_time" in campos:
+            return f"el fotograma del segundo {campos['pinterest_cover_image_key_frame_time']}"
+        return ""
     return None          # una red sin portada por Upload-Post: no se dice nada
 
 
@@ -2404,6 +2443,8 @@ def ficha(raiz, info, ajustes):
         "desactualizada": desactualizada, "escritos": datos.get("escritos") or "",
         "editado": bool(datos.get("editado")),
         "portada": portada_de(datos),
+        # ¿la cuenta de TikTok tiene «cover_image»? (portadas-2: entonces lleva tu imagen sola)
+        "tiktok_portada_propia": tiktok_puede_portada(ajustes),
         # cuántos emojis lleva cada texto y si se queda corto (aviso aparte: la
         # nota SEO no lo cuenta)
         "emojis": emojis_de_ficha(datos["textos"], ajustes, REDES),
@@ -2688,7 +2729,7 @@ def _subir_lote(raiz, info, ajustes, lote, en_hilo=True):
                        info, None, datos)
         campos["title"] = gbp["texto"][:RD.LIMITES["google_business"]]
     try:
-        extra, ficheros = campos_portada(raiz, info, datos, redes, lote)
+        extra, ficheros = campos_portada(raiz, info, datos, redes, lote, ajustes=ajustes)
     except Exception as fallo:                              # noqa: BLE001
         # la portada nunca deja un envio colgado: sale sin ella
         _log("portada_fallo", {"video": pid, "error": str(fallo)[:300]})

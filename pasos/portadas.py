@@ -48,7 +48,11 @@ FORMATOS = {"9:16": (1080, 1920), "16:9": (1280, 720), "4:5": (1080, 1350), "1:1
 ZONAS = {
     "9:16": [{"x": 0, "y": 0, "w": 1, "h": 0.14, "que": "arriba: la barra de la red"},
              {"x": 0, "y": 0.65, "w": 1, "h": 0.35, "que": "abajo: el texto del post y los botones"},
-             {"x": 0.85, "y": 0.4, "w": 0.15, "h": 0.6, "que": "derecha: me gusta, comentar, compartir"}],
+             {"x": 0.85, "y": 0.4, "w": 0.15, "h": 0.6, "que": "derecha: me gusta, comentar, compartir"},
+             # la cuadrícula del perfil de Instagram enseña el centro en 3:4:
+             # lo de fuera de este marco no se ve ahí (21-10)
+             {"x": 0, "y": 0.125, "w": 1, "h": 0.75, "que": "Instagram, en la cuadrícula: solo esto (3:4)",
+              "marco": True}],
     "16:9": [{"x": 0.78, "y": 0.82, "w": 0.22, "h": 0.18, "que": "la duración del vídeo"}],
     "4:5": [],
     "1:1": [],
@@ -737,6 +741,14 @@ def svg_guias(formato, W, H):
     piezas = []
     for z in ZONAS.get(formato) or []:
         x, y, w, h = z["x"] * W, z["y"] * H, z["w"] * W, z["h"] * H
+        if z.get("marco"):
+            # un MARCO (lo que SÍ se ve), no una zona tapada: amarillo, sin relleno
+            piezas.append(f'<rect x="{x + 3:.0f}" y="{y:.0f}" width="{w - 6:.0f}" height="{h:.0f}" fill="none" '
+                          f'stroke="#ffd400" stroke-width="6" stroke-dasharray="26 14"/>'
+                          f'<text x="{x + 14:.0f}" y="{y + h - 18:.0f}" font-family="Verdana, sans-serif" '
+                          f'font-size="30" fill="#ffd400" stroke="#000" stroke-width="5" paint-order="stroke">'
+                          f'{grafismo.escapar(z["que"])}</text>')
+            continue
         piezas.append(f'<rect x="{x:.0f}" y="{y:.0f}" width="{w:.0f}" height="{h:.0f}" fill="#ff0000" '
                       f'opacity="0.22" stroke="#ff0000" stroke-width="4" stroke-dasharray="18 12"/>'
                       f'<text x="{x + 14:.0f}" y="{y + 44:.0f}" font-family="Verdana, sans-serif" '

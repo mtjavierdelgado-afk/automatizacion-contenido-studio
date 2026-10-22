@@ -23036,23 +23036,29 @@ function bloquePortadaPublicar() {
    suya. */
 function portadaPorRedPublicar(f) {
   const p = f.portada || {};
-  const redes = (f.redes || []).filter(r => ['instagram', 'tiktok', 'youtube', 'facebook'].includes(r));
+  const conPortada = ['instagram', 'tiktok', 'youtube', 'facebook', 'linkedin', 'x', 'pinterest'];
+  const redes = (f.redes || []).filter(r => conPortada.includes(r));
+  const sinPortada = (f.redes || []).filter(r => !conPortada.includes(r));
   const caja = h('div', { clase: 'portada-por-red' }, h('b', {}, 'Qué portada recibe cada red:'));
-  if (!redes.length) {
+  if (!(f.redes || []).length) {
     caja.appendChild(h('span', { clase: 'meta' }, 'Marca alguna red arriba para verlo.'));
     return caja;
   }
   const seg = ms => `el fotograma del segundo ${(ms / 1000).toFixed(1).replace('.', ',')}`;
-  const nombres = { instagram: 'Instagram', tiktok: 'TikTok', youtube: 'YouTube', facebook: 'Facebook' };
+  const nombres = { instagram: 'Instagram', tiktok: 'TikTok', youtube: 'YouTube', facebook: 'Facebook',
+    linkedin: 'LinkedIn', x: 'X', pinterest: 'Pinterest' };
+  const tiktokPuede = !!f.tiktok_portada_propia;
   redes.forEach(red => {
     let que = '';
     let ok = true;
     if (red === 'instagram') {
-      que = p.imagen ? 'tu imagen ✓' : p.ms != null ? `${seg(p.ms)} ✓` : 'ninguna: la elige Instagram';
+      que = p.imagen ? 'tu imagen ✓ (en la cuadrícula del perfil se ve el centro, 3:4)' : p.ms != null ? `${seg(p.ms)} ✓` : 'ninguna: la elige Instagram';
       ok = !!(p.imagen || p.ms != null);
     } else if (red === 'tiktok') {
-      if (p.imagen && p.tiktok_imagen) que = 'tu imagen (solo si tu cuenta tiene el permiso «cover_image» en Upload-Post; si no, la ignora)';
-      else if (p.ms != null) que = `${seg(p.ms)} ✓ (TikTok no acepta una imagen propia sin ese permiso)`;
+      if (p.imagen && (p.tiktok_imagen || tiktokPuede)) {
+        que = tiktokPuede ? 'tu imagen ✓ (tu cuenta tiene el permiso «cover_image»)'
+          : 'tu imagen, si tu cuenta tiene el permiso «cover_image» (si no, TikTok la ignora)';
+      } else if (p.ms != null) que = `${seg(p.ms)} ✓ (sin el permiso «cover_image», TikTok solo acepta un fotograma)`;
       else { que = p.imagen ? 'ninguna: TikTok no acepta tu imagen sin el permiso «cover_image». Elige un fotograma para TikTok' : 'ninguna: la elige TikTok'; ok = false; }
     } else if (red === 'youtube') {
       if (!p.youtube) { que = 'ninguna: marca «Mandarla también a YouTube» (necesita el canal verificado)'; ok = false; }
@@ -23060,13 +23066,25 @@ function portadaPorRedPublicar(f) {
       else { que = 'ninguna: elige una imagen o un fotograma'; ok = false; }
     } else if (red === 'facebook') {
       const reel = ((f.encaje || {}).facebook || {}).tipo === 'Reel';
-      if (reel) { que = 'ninguna: sale como Reel y Facebook no admite portada en los Reels'; ok = false; }
-      else if (p.imagen) que = 'tu imagen ✓';
+      if (reel) { que = 'ninguna: sale como Reel (vertical de hasta 90 s) y Facebook no admite portada en los Reels'; ok = false; }
+      else if (p.imagen) que = 'tu imagen ✓ (sale como vídeo)';
       else if (p.ms != null) que = `${seg(p.ms)} ✓`;
       else { que = 'ninguna: la elige Facebook'; ok = false; }
+    } else if (red === 'linkedin' || red === 'x') {
+      if (p.imagen) que = 'tu imagen ✓';
+      else if (p.ms != null) que = `${seg(p.ms)} ✓`;
+      else { que = `ninguna: la elige ${nombres[red]}`; ok = false; }
+    } else if (red === 'pinterest') {
+      if (p.imagen) que = 'tu imagen ✓';
+      else if (p.ms != null) que = `${seg(p.ms)} ✓`;
+      else { que = 'ninguna: la elige Pinterest'; ok = false; }
     }
     caja.appendChild(h('div', { clase: `fila portada-red${ok ? '' : ' sin-portada'}` }, h('b', {}, `${nombres[red]}:`), h('span', {}, que)));
   });
+  if (sinPortada.length) {
+    caja.appendChild(h('div', { clase: 'fila portada-red sin-portada' },
+      h('span', {}, `${sinPortada.length === 1 ? 'Esta red no admite' : 'Estas redes no admiten'} portada: ${sinPortada.map(r => NOMBRES_RED[r] || r).join(', ')}.`)));
+  }
   return caja;
 }
 

@@ -1852,6 +1852,18 @@ def prueba_portada():
     vertical = dict(info, formato="vertical", duracion_s=3)
     _c, ficheros = P.campos_portada(raiz, vertical, datos, ["facebook"])
     igual(ficheros, [], "un Reel de Facebook no lleva miniatura")
+    largo = dict(info, formato="vertical", duracion_s=180)
+    _c, ficheros = P.campos_portada(raiz, largo, datos, ["facebook"])
+    igual([c for c, _r in ficheros], ["facebook_thumbnail"], "un vídeo largo de Facebook (no Reel) sí lleva portada")
+    # portadas-2 (21-10): LinkedIn, X y Pinterest también; las demás, nada
+    campos, ficheros = P.campos_portada(raiz, info, {"portada": {"ms": 2000}}, ["linkedin", "x", "pinterest", "threads"])
+    igual([c for c, _r in ficheros], ["thumbnail"], "LinkedIn y X reciben la miniatura (una sola vez)")
+    igual(campos, {"pinterest_cover_image_key_frame_time": "2"}, "Pinterest, el momento en segundos; Threads, nada")
+    _c, ficheros = P.campos_portada(raiz, info, {"portada": {"ms": 2000, "youtube": False}}, ["youtube", "linkedin"])
+    igual(ficheros, [], "con YouTube sin marcar en la misma subida, la miniatura de LinkedIn no se cuela en YouTube")
+    ok(P.tiktok_puede_portada({"cuentas": {"tiktok": {"capacidades": ["comments", "cover_image"]}}})
+       and not P.tiktok_puede_portada({"cuentas": {"tiktok": {"capacidades": []}}}) and not P.tiktok_puede_portada({}),
+       "se sabe si la cuenta de TikTok tiene el permiso «cover_image»")
     for contenido, que in ((b"#EXTM3U\n#EXT-X-MEDIA-SEQUENCE:0\nfile:///etc/passwd\n", "una lista HLS"),
                            (b"no soy una imagen", "texto")):
         try:
@@ -2617,7 +2629,13 @@ def prueba_portada_mandada():
     ok("verificado" in P.portada_mandada("youtube", {}, [("thumbnail", "/x.jpg")]), "YouTube, del canal verificado")
     ok(P.portada_mandada("youtube", {}, []) == "" and P.portada_mandada("facebook", {}, []) == "",
        "sin nada, vacío: la puso la red")
-    ok(P.portada_mandada("linkedin", {}, []) is None, "una red sin portada no dice «ninguna»: no dice nada")
+    ok(P.portada_mandada("threads", {}, []) is None, "una red sin portada no dice «ninguna»: no dice nada")
+    ok(P.portada_mandada("linkedin", {}, [("thumbnail", "/x")]) == "tu miniatura"
+       and "segundo 2" in P.portada_mandada("pinterest", {"pinterest_cover_image_key_frame_time": "2"}, []),
+       "LinkedIn y Pinterest dicen lo que se les mandó")
+    ok(UP._capacidades(["cover_image", "comments"]) == ["comments", "cover_image"]
+       and UP._capacidades({"cover_image": True, "x": False}) == ["cover_image"] and UP._capacidades(None) == [],
+       "las capacidades de una cuenta se leen como lista o como {nombre: sí/no}")
     ok("portada" in P._envio_publico_campos({"portada": "tu imagen de portada"}),
        "y la ficha del envío lo enseña")
 

@@ -123,6 +123,14 @@ def responder(entrada):
                     "sugerida": limpio + " (revisado)"}
         return {"veredicto": "sirve", "resumen": "Cumple la guía.", "problemas": [],
                 "sugerida": ""}
+    if "<traducir_al_espanol>" in entrada:
+        # lo que se manda a dibujar, en español (rama estados-en-espanol): cada
+        # texto con «ES:» delante, para que la pantalla enseñe que es la traducción
+        textos = re.findall(r'<t id="([^"]+)">(.*?)</t>', _entre(entrada, "traducir_al_espanol"), re.S)
+        return {"traducciones": {tid: "ES: " + texto.strip() for tid, texto in textos}}
+    if "<pasar_al_ingles>" in entrada:
+        # el cambio reescrito en español, de vuelta al inglés que se manda
+        return {"ingles": "EN: " + _entre(entrada, "pasar_al_ingles")}
     if "LOS TRAMOS (no los cambies" in entrada:
         # el «qué cambia en cada tramo» de un espacio que cambia (rama
         # tipo-de-relato): un cambio por tramo, con su estado

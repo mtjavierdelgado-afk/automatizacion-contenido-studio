@@ -11,6 +11,19 @@ vídeos, estilos, claves y contraseña no se tocan.
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
 
+**Los estados del tipo de relato, en español (22 de octubre)**
+- **Cada estado se lee en español.** En «Un espacio que cambia», el cambio de
+  cada estado (y lo que la imagen base ya trae) sale en español, con el inglés
+  que se manda a dibujar plegado debajo. Lo traduce Claude solo, con tu
+  membresía, y no toca nada del vídeo: ni imágenes, ni firmas, ni precios.
+- **«Dónde se usa»**: cada estado y la imagen base dicen en qué bloques del
+  guion salen y qué planos los usan.
+- **✎ Cambiar**: reescribes el estado en español, Claude lo pasa al inglés y
+  se guarda. Antes te avisa de que ese estado pierde su aprobación y pide otra
+  imagen (y de cuántos planos suyos quedarán para rehacer); no se dibuja nada
+  solo.
+
+
 **El negocio de cada estilo (21 de octubre)**
 - **Lo de EstadoPlay ya no está escrito a mano en el Studio.** Los servicios
   (consolas, simuladores, realidad virtual, karaoke) y cómo se reconocen, las

@@ -3554,6 +3554,21 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .estado-relato .miniatura-imagen-base { max-width: 160px; max-height: 160px; }
 .estado-relato-texto { display: flex; flex-direction: column; gap: 4px; flex: 1 1 180px; min-width: 0; }
 
+/* ---- ESTADOS EN ESPAÑOL (rama estados-en-espanol, 22-10): el cambio de cada
+   estado en español, el inglés que se manda plegado, dónde se usa y el editor */
+.relato-es { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.relato-es-texto { color: var(--texto); font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
+.relato-es-ingles { min-width: 0; }
+.relato-es-ingles summary { cursor: pointer; color: var(--tenue); font-size: 12px; }
+.relato-es-ingles .meta { margin-top: 4px; font-style: italic; overflow-wrap: anywhere; }
+.relato-donde { display: flex; flex-direction: column; gap: 2px; padding: 6px 8px; min-width: 0;
+  border-left: 3px solid var(--acento); border-radius: 4px; background: var(--hueco); }
+.relato-donde-titulo { font-size: 11px; font-weight: 600; letter-spacing: .04em;
+  text-transform: uppercase; color: var(--acento); }
+.relato-donde .meta { overflow-wrap: anywhere; }
+.relato-editor { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.relato-editor textarea { width: 100%; box-sizing: border-box; }
+
 /* ================================== ARREGLOS DEL 19-10 (segunda tanda)
    Rama `arreglos-19oct`. */
 /* el Encargo: los cambios del montaje guardados sin montar */

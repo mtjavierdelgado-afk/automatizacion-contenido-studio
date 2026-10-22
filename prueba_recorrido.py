@@ -7771,6 +7771,7 @@ def tipo_de_relato(navegador, datos):
                 _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
                 ok(ficha.get("listo"), "(2b) con la base y sus estados aprobados, listo para dibujar")
                 pg.captura("tipo_relato_estados")
+                relato_en_espanol(pg, api, pid)
             else:
                 _r, f2 = api.get(f"/api/proyectos/{pid}/tipo_relato")
                 ok(False, "(2b) tras escribir qué cambia, salen los estados del vídeo: "
@@ -7931,6 +7932,44 @@ def publicar_seo_canal(navegador, datos):
     pg.cerrar()
     _r, claves = api.get("/api/claves")
     api.put("/api/claves", {"youtube_oauth": {"cliente_id": "", "secreto": ""}})
+
+def relato_en_espanol(pg, api, pid):
+    """Rama estados-en-espanol (22-10): con un estado aprobado en pantalla, su
+    cambio sale en español (lo traduce sola la pantalla, con el CLI falso:
+    «ES: …»), con el inglés plegado y «Dónde se usa»; «✎ Cambiar» lo reescribe
+    en español, pasa al inglés («EN: …») y el estado pide otra imagen. No se
+    paga nada: ni traducir ni editar dibujan."""
+    ok(pg.esperar(".estado-relato .relato-es-texto", "ES:", 25),
+       "(2c) el cambio del estado sale en español, traducido solo al abrir")
+    ok(pg.visible(".estado-relato .relato-es-ingles summary", "En inglés"),
+       "(2c) con el inglés que se manda, plegado debajo")
+    ok(pg.visible(".estado-relato .relato-donde", "Dónde se usa")
+       and pg.visible(".estado-relato .relato-donde .meta", "Bloque"),
+       "(2c) y «Dónde se usa», con sus bloques del guion")
+    _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+    ok(((ficha.get("traduccion") or {}).get("faltan")) == 0,
+       f"(2c) el servidor ya no echa en falta ninguna traducción ({ficha.get('traduccion')})")
+    pg.pulsar(".estado-relato button", "✎ Cambiar")
+    ok(pg.esperar(".estado-relato .relato-editor textarea", segundos=5), "(2c) «✎ Cambiar» abre el editor")
+    pg.p.locator(".estado-relato .relato-editor textarea").first.fill("la mampara es corrediza de vidrio")
+    pg.dialogos.clear()
+    pg.pulsar(".estado-relato .relato-editor button", "Guardar el cambio")
+    ok(any("pierde su aprobación" in d for d in pg.dialogos),
+       f"(2c) antes de guardar avisa de que el estado pide otra imagen ({pg.dialogos[-1:]})")
+    ok(pg.esperar(".estado-relato .relato-es-texto", "la mampara es corrediza de vidrio", 25),
+       "(2c) guardado: sale lo escrito en español")
+    ok(pg.esperar(".estado-relato .meta", "hace falta otra imagen", 15),
+       "(2c) y el estado dice que hace falta otra imagen")
+    _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+    primero = (ficha.get("estados") or [{}])[0]
+    ok(str(primero.get("cambio") or "").startswith("EN: ") and not primero.get("aprobada"),
+       f"(2c) por dentro va en inglés y ya no está aprobado ({str(primero.get('cambio'))[:60]})")
+    _r, vivos = api.get(f"/api/trabajos?proyecto={pid}&activos=1")
+    lista = vivos if isinstance(vivos, list) else ((vivos or {}).get("trabajos") or [])
+    ok(not lista, f"(2c) ni traducir ni editar lanzan ningún trabajo ({len(lista)})")
+    pg.captura("tipo_relato_en_espanol")
+    pg.sin_errores("los estados en español")
+
 
 if __name__ == "__main__":
     sys.exit(main())

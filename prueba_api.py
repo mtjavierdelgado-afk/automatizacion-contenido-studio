@@ -7395,6 +7395,178 @@ def probar_tipo_relato():
             setattr(servidor, nombre, valor)
 
 
+def probar_relato_en_espanol():
+    """Rama estados-en-espanol (22-10-2026): cada estado en español, dónde se usa
+    y reescribirlo en español.
+
+    En este proceso y sin el CLI: `al_espanol`/`al_ingles` son dobles. Lo que se
+    mira: traducir no mueve NINGUNA firma ni param (regla 1), «dónde se usa»
+    sale de los bloques y del plan, y editar reescribe solo los tramos de ese
+    estado, con la misma etiqueta, y su imagen deja de valer. Nada se paga.
+    """
+    seccion("TIPO DE RELATO EN ESPAÑOL: TRADUCIR, DÓNDE SE USA Y EDITAR")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    from PIL import Image as _Imagen                          # noqa: PLC0415
+
+    mod = servidor._traducciones()
+    p6 = servidor.PASOS_MODULOS.p6_assets
+    bloques = [{"id": "B001", "texto": "Este baño era el más feo de la casa.", "personaje": False},
+               {"id": "B002", "texto": "Cambiamos el piso y el mueble.", "personaje": False},
+               {"id": "B003", "texto": "Y quedó el más bonito de la casa.", "personaje": False}]
+    abierta = "floor and all walls in the same ivory porcelain tile"
+    inicial = "grey floor tiles across the whole floor"
+    llamadas = []
+
+    def espanol_falso(textos, cwd=None):
+        llamadas.append(("es", list(textos)))
+        return {t: "ES " + t for t in textos}
+
+    def ingles_falso(texto, anterior="", cwd=None):
+        llamadas.append(("en", texto, anterior))
+        return "EN " + texto
+
+    def esperar():
+        for _ in range(200):
+            with servidor._LOCK_TRADUCIENDO:
+                estado = (servidor._TRADUCIENDO.get(pid) or {}).get("estado")
+            if estado != "pensando":
+                return estado
+            time.sleep(0.02)
+        return "pensando"
+
+    base = tempfile.mkdtemp(prefix="estudio_relato_es_")
+    servidor.fijar_raiz_proyectos(base)
+    reales = {"_bloques_del_guion": servidor._bloques_del_guion}
+    reales_mod = {"al_espanol": mod.al_espanol, "al_ingles": mod.al_ingles}
+    real_plan = p6.plan_actual
+    servidor._bloques_del_guion = lambda _ctx: bloques
+    mod.al_espanol, mod.al_ingles = espanol_falso, ingles_falso
+    try:
+        pid = Proyecto.crear(base, "relato en español").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        espacio = {"sitio": "Baño", "descripcion": "a small bathroom", "luz": "day",
+                   "secundarios": []}
+        servidor._opciones_al_crear(ctx, "", {"espacio_fijo": espacio, "tipo_relato": {
+            "modo": "espacio_que_cambia", "cambia": "acabados"}})
+        os.makedirs(ctx.proyecto.ruta("espacio_fijo"), exist_ok=True)
+        _Imagen.new("RGB", (64, 40), (200, 200, 200)).save(
+            ctx.proyecto.ruta("espacio_fijo", "0123456789abcdef.png"))
+        ctx.estado.actualizar_params("assets", {"espacio_fijo": dict(
+            espacio, imagen="espacio_fijo/0123456789abcdef.png")})
+        _llamar(servidor.usar_subida_como_base, pid)
+        ctx.estado.actualizar_params("assets", {"catalogo": {
+            "sets": {"bano": {"descripcion": "a small bathroom"}}, "reparto": {},
+            "relato": {"modo": "espacio_que_cambia", "cambia": "acabados", "inicial": inicial},
+            "beats": [{"desde": "B001", "hasta": "B001", "set": "bano", "cambio": "",
+                       "estado": "antes"},
+                      {"desde": "B002", "hasta": "B003", "set": "bano", "cambio": abierta,
+                       "estado": "despues"}]}})
+        _Imagen.new("RGB", (64, 40), (90, 90, 90)).save(
+            ctx.proyecto.ruta("espacio_fijo", "fedcba9876543210.png"))
+        guardado = dict((ctx.estado.params("assets") or {}).get("tipo_relato") or {})
+        guardado["bases"]["bano"]["estados"] = {"despues": {
+            "imagen": "espacio_fijo/fedcba9876543210.png", "aprobada": True, "cambio": abierta}}
+        ctx.estado.actualizar_params("assets", {"tipo_relato": guardado})
+        p6.plan_actual = lambda *_a, **_k: {"escenas": [
+            {"id": "S001", "editar_base": True, "cambio": ""},
+            {"id": "S002", "editar_base": True, "cambio": abierta, "base_clave": "bano#despues"},
+            {"id": "S003", "editar_base": True, "cambio": "algo viejo", "base_clave": "bano#despues"},
+            {"id": "S004", "carta": "detalle"}]}
+
+        codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+        igual(codigo, 200, f"LEER: 200 ({ficha if codigo != 200 else ''})")
+        if codigo != 200:
+            return
+        estado = ficha["estados"][0]
+        igual((estado["estado"], estado["cambio_es"], ficha["inicial_es"]), ("despues", "", ""),
+              "LEER: sin traducir, el español va vacío (la pantalla enseña el inglés)")
+        igual(ficha["traduccion"]["faltan"], 2, "LEER: faltan el cambio y lo que trae la base")
+        igual([b["id"] for b in estado["donde"]["bloques"]], ["B002", "B003"],
+              "DÓNDE: los bloques del tramo, desde..hasta")
+        igual(estado["donde"]["bloques"][0]["n"], 2, "DÓNDE: con su número de bloque")
+        igual(estado["donde"]["planos"], ["S002", "S003"],
+              "DÓNDE: los planos por la clave de su imagen (también el de texto viejo)")
+        igual(([b["id"] for b in ficha["donde_base"]["bloques"]], ficha["donde_base"]["planos"]),
+              (["B001"], ["S001"]), "DÓNDE: la base, con los tramos y planos del «antes»")
+
+        firma = ctx.estado.firma("assets")
+        params = json.loads(json.dumps(ctx.estado.params("assets")))
+        llamadas.clear()
+        codigo, ficha = _llamar(servidor.traducir_tipo_relato, pid, {"auto": True})
+        igual(codigo, 200, f"TRADUCIR: 200 ({ficha if codigo != 200 else ''})")
+        igual(esperar(), "listo", "TRADUCIR: termina")
+        igual(sorted(llamadas[0][1]) if llamadas else None, sorted([abierta, inicial]),
+              "TRADUCIR: pide solo lo que falta, en una llamada")
+        codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+        igual((ficha["estados"][0]["cambio_es"], ficha["inicial_es"],
+               ficha["traduccion"]["faltan"]), ("ES " + abierta, "ES " + inicial, 0),
+              "TRADUCIR: la ficha trae el español")
+        igual(ctx.estado.firma("assets"), firma, "TRADUCIR: la firma de assets NO se mueve")
+        igual(ctx.estado.params("assets"), params, "TRADUCIR: y ningún param cambia (regla 1)")
+        ok(os.path.exists(os.path.join(ctx.proyecto.raiz, "traducciones.json")),
+           "TRADUCIR: va al fichero del proyecto")
+        llamadas.clear()
+        _llamar(servidor.traducir_tipo_relato, pid, {})
+        igual((esperar(), llamadas), ("listo", []), "TRADUCIR: sin nada que falte, no llama a Claude")
+
+        # tras un error, la pantalla (auto) no reintenta sola; el botón sí
+        with servidor._LOCK_TRADUCIENDO:
+            servidor._TRADUCIENDO[pid] = {"estado": "error", "tipo": "traducir", "error": "x"}
+        os.remove(os.path.join(ctx.proyecto.raiz, "traducciones.json"))
+        llamadas.clear()
+        _llamar(servidor.traducir_tipo_relato, pid, {"auto": True})
+        igual((esperar(), llamadas), ("error", []), "ERROR: «auto» no se relanza tras un error")
+        _llamar(servidor.traducir_tipo_relato, pid, {})
+        igual((esperar(), len(llamadas)), ("listo", 1), "ERROR: el botón «Traducir» sí")
+
+        # EDITAR EN ESPAÑOL
+        for cuerpo, esperado in (({"estado": "despues"}, 400),
+                                 ({"estado": "volando", "es": "algo"}, 404),
+                                 ({"estado": "despues", "es": "x" * 1300}, 400)):
+            codigo, _m = _llamar(servidor.editar_estado_relato, pid, cuerpo)
+            igual(codigo, esperado, f"EDITAR: {str(cuerpo)[:40]} da {esperado} ({_m})")
+        firma = ctx.estado.firma("assets")
+        llamadas.clear()
+        nuevo = "piso y paredes de porcelanato marfil, mueble de nogal"
+        codigo, ficha = _llamar(servidor.editar_estado_relato, pid,
+                                {"estado": "despues", "es": nuevo})
+        igual(codigo, 200, f"EDITAR: 200 ({ficha if codigo != 200 else ''})")
+        igual(esperar(), "listo", "EDITAR: termina")
+        igual(llamadas[:1], [("en", nuevo, abierta)],
+              "EDITAR: Claude recibe el español y la instrucción anterior")
+        beats = (ctx.estado.params("assets") or {})["catalogo"]["beats"]
+        igual([(b["cambio"], b["estado"]) for b in beats],
+              [("", "antes"), ("EN " + nuevo, "despues")],
+              "EDITAR: solo los tramos de ese estado, con la MISMA etiqueta")
+        codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+        e = ficha["estados"][0]
+        igual((e["estado"], e["cambio"], e["cambio_es"], e["vigente"], e["aprobada"]),
+              ("despues", "EN " + nuevo, nuevo, False, False),
+              "EDITAR: el estado lleva lo escrito en español y su imagen deja de valer")
+        ok(not ficha["listo"], "EDITAR: y ya no está todo listo para dibujar")
+        ok(ctx.estado.firma("assets") != firma, "EDITAR: (la firma se mueve: el estado cambió)")
+        igual(e["donde"]["planos"], ["S002", "S003"],
+              "EDITAR: dónde se usa sigue saliendo con el plan viejo (por la clave)")
+
+        # con algo generándose no se edita
+        reales_t = servidor._trabajo_de_cadena
+        servidor._trabajo_de_cadena = lambda _ctx: {"id": "x"}
+        try:
+            codigo, _m = _llamar(servidor.editar_estado_relato, pid,
+                                 {"estado": "despues", "es": "otra cosa"})
+        finally:
+            servidor._trabajo_de_cadena = reales_t
+        igual(codigo, 409, f"EDITAR: con algo generándose, 409 ({_m})")
+    finally:
+        mod.al_espanol, mod.al_ingles = reales_mod["al_espanol"], reales_mod["al_ingles"]
+        p6.plan_actual = real_plan
+        for nombre, valor in reales.items():
+            setattr(servidor, nombre, valor)
+
+
 def probar_dominios():
     """Rama dominio-negocio (21-10-2026): listar los dominios y fijar el de un estilo."""
     seccion("DOMINIOS: EL NEGOCIO DE UN ESTILO")
@@ -7667,6 +7839,7 @@ def main():
         probar_publicar_20oct(cliente, pid)
         probar_espacio_fijo()
         probar_tipo_relato()
+        probar_relato_en_espanol()
         probar_dominios()
     finally:
         parar(proceso)

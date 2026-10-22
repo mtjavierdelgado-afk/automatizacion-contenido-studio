@@ -4033,18 +4033,12 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 
 /* ================================================= AUTOMATIZAR → PARRILLA
    (rama `parrilla`, 17-10-2026). Todo lo de la Parrilla, aquí al final. */
-.proyecto-parrilla { gap: 8px; flex-wrap: wrap; margin: 4px 0 6px; }
-.proyecto-parrilla select { max-width: 320px; min-width: 0; flex: 0 1 auto; }
 .parrilla-opcional { margin: 0 0 10px; }
 .trabajo-parrilla { gap: 8px; margin: 8px 0; align-items: center; min-width: 0; overflow-wrap: anywhere; }
 .filtros-parrilla { gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
 .filtros-parrilla .buscar-parrilla { flex: 1 1 180px; min-width: 0; }
-.matriz-parrilla { margin-bottom: 12px; }
 .cab-matriz { gap: 8px; flex-wrap: wrap; align-items: baseline; }
 .cab-matriz h3 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-.fila-guion { gap: 8px; padding: 6px 0; border-top: 1px solid var(--linea-suave); flex-wrap: wrap; min-width: 0; }
-.fila-guion .titulo-guion { max-width: 100%; text-align: left; white-space: normal; overflow-wrap: anywhere; font-weight: 600; }
-.fila-guion .datos-guion, .fila-guion .video-guion { min-width: 0; overflow-wrap: anywhere; }
 .vacio-parrilla p { margin: 6px 0 12px; }
 .origen-parrilla { flex-wrap: wrap; }
 .anadir-parrilla textarea, .ficha-parrilla textarea { width: 100%; box-sizing: border-box; }
@@ -4054,8 +4048,6 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 .rejilla-parrilla label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--tenue); min-width: 0; }
 .rejilla-parrilla label.ancha { grid-column: 1 / -1; }
 .rejilla-parrilla select, .rejilla-parrilla input { min-width: 0; max-width: 100%; }
-.cab-ficha-parrilla { gap: 8px; align-items: center; flex-wrap: wrap; }
-.cab-ficha-parrilla h3 { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .avisos-guion ul, .avisos-encargo { margin: 6px 0 0; padding-left: 18px; }
 .encargo-parrilla .dato-encargo { display: flex; flex-direction: column; gap: 2px; margin: 8px 0; min-width: 0; }
 .encargo-parrilla .dato-encargo .valor { white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -4067,8 +4059,7 @@ a.boton-enlace.destacado { background: var(--degradado); color: var(--sobre-acen
 .pasar-encargo label { display: flex; gap: 6px; align-items: center; min-width: 0; flex-wrap: wrap; }
 .pasar-encargo select { max-width: 260px; min-width: 0; }
 @media (max-width: 600px) {
-  .proyecto-parrilla select, .pasar-encargo select { max-width: 100%; flex: 1 1 100%; }
-  .fila-guion .crece { display: none; }
+  .pasar-encargo select { max-width: 100%; flex: 1 1 100%; }
 }
 
 /* ================================================================ PUBLICAR · SEO
@@ -4828,4 +4819,237 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
   .cab-videos .crece { display: none; }
   .acciones-video .mini { min-height: 40px; }
   .acciones-video .mas-video { min-width: 44px; }
+
+/* ======================================================= AUTOMATIZAR · TABLERO
+ *
+ * La nueva cara de Automatizar (rama `rediseno-automatizar`, 22-10-2026, con
+ * la maqueta aprobada por el dueño): el proyecto como chip en la cabecera, las
+ * pestañas de Crear, la Parrilla en tablero por estado, la ficha de un guion en
+ * un panel lateral (a pantalla completa en el móvil), las tarjetas de «De dónde
+ * salen» con su coste y la barra de acción de Crear. Colores, SOLO con las
+ * variables del tema: valen en las cuatro paletas y en claro y oscuro. */
+
+/* ---- la cabecera: título con su «i», el proyecto y «+ Añadir guiones» */
+.cab-automatizar {
+  display: flex; gap: 10px 16px; flex-wrap: wrap; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.cab-automatizar .izq { min-width: 0; display: flex; flex-direction: column; gap: 4px; flex: 1 1 260px; }
+.titulo-automatizar { gap: 8px; flex-wrap: nowrap; }
+.titulo-automatizar h2 { margin: 0; font-size: 28px; }
+.boton-i {
+  width: 24px; height: 24px; min-height: 0; padding: 0; border-radius: 50%;
+  display: inline-grid; place-items: center; font-size: 12px; font-weight: 700; font-style: italic;
+}
+.boton-i.activo { border-color: var(--acento); color: var(--acento); }
+.cab-automatizar .parrilla-opcional { margin: 0; max-width: 70ch; }
+.cab-automatizar .acc { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; min-width: 0; }
+.chip-proyecto-auto {
+  display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%;
+  border: 1px solid var(--acento-borde); background: var(--marcado); border-radius: 999px;
+  padding: 2px 4px 2px 12px; color: var(--texto); font-weight: 600;
+}
+.chip-proyecto-auto select {
+  border: 0; background: transparent; color: var(--texto); font-weight: 600;
+  padding: 6px 4px; min-width: 0; max-width: 300px;
+}
+.cab-automatizar .anadir-cabecera { padding: 9px 16px; border-radius: 12px; }
+.pestanas-automatizar { margin: 4px 0 12px; }
+
+/* ---- la Parrilla: la marca, los filtros y el tablero */
+.linea-marca { gap: 8px 12px; margin: 0 0 12px; white-space: normal; align-items: center; }
+.linea-marca .crece { min-width: 0; overflow-wrap: anywhere; }
+.tablero-parrilla .filtros-parrilla { align-items: center; gap: 8px; margin: 0 0 10px; }
+.tablero-parrilla .filtros-parrilla .buscar-parrilla { flex: 0 1 260px; }
+.chips-matrices { display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.chip-matriz {
+  border: 1px solid var(--linea); background: var(--panel); color: var(--texto); border-radius: 999px;
+  padding: 5px 12px; font-size: 13px; min-height: 0; max-width: 100%; overflow-wrap: anywhere; text-align: left;
+}
+.chip-matriz.activa { border-color: var(--acento); background: var(--marcado); font-weight: 600; }
+.tablero-parrilla .cab-matriz { margin: 0 0 10px; }
+.selector-columnas { display: none; }
+.tablero-guiones {
+  display: grid; gap: 12px; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start;
+  margin-bottom: 14px;
+}
+.columna-tablero {
+  min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px;
+  border: 1px solid var(--linea); border-radius: 14px; background: var(--hueco);
+}
+.cab-columna {
+  display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center;
+  padding: 2px 2px 8px; border-bottom: 1px solid var(--linea);
+}
+.cab-columna .meta { flex-basis: 100%; }
+.vacia-columna { margin: 4px 2px; }
+.tarjeta-guion {
+  display: flex; flex-direction: column; align-items: stretch; gap: 5px; width: 100%; min-width: 0;
+  padding: 9px 11px; border: 1px solid var(--linea); border-radius: 11px; background: var(--panel);
+  color: var(--texto); text-align: left; white-space: normal;
+}
+.tarjeta-guion:hover:not(:disabled) { border-color: var(--acento); background: var(--hover); }
+.tarjeta-guion.abierta { border-color: var(--acento); box-shadow: 0 0 0 1px var(--acento) inset; }
+.cab-tarjeta-guion { gap: 6px; flex-wrap: nowrap; align-items: flex-start; justify-content: space-between; }
+.cab-tarjeta-guion .titulo-guion { font-size: 13.5px; line-height: 1.3; min-width: 0; overflow-wrap: anywhere; }
+.tarjeta-guion .datos-guion, .tarjeta-guion .video-guion { overflow-wrap: anywhere; min-width: 0; }
+.pie-tarjeta-guion { gap: 6px 8px; }
+.pie-tarjeta-guion .chip-enlace { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.piloto-parrilla { border-style: dashed; gap: 8px 10px; }
+.piloto-parrilla .meta { min-width: 0; }
+
+/* ---- la ficha de un guion: un panel a la derecha */
+.capa-cajon-guion {
+  /* encima de la burbuja y su «–» (65-67), debajo del aviso (70) y de las preguntas (90) */
+  position: fixed; inset: 0; z-index: 68; background: var(--velo);
+  display: flex; justify-content: flex-end;
+}
+.cajon-guion {
+  width: min(680px, 100%); height: 100%; display: flex; flex-direction: column; min-width: 0;
+  background: var(--bg); border-left: 1px solid var(--linea); box-shadow: var(--sombra);
+}
+.cab-cajon {
+  display: flex; gap: 10px; align-items: flex-start; padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--linea-suave);
+}
+.datos-cajon { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.datos-cajon h3 { margin: 0; font-size: 17px; line-height: 1.3; overflow-wrap: anywhere; }
+.datos-cajon .meta { overflow-wrap: anywhere; }
+.cerrar-cajon { font-size: 20px; line-height: 1; min-width: 36px; min-height: 36px; padding: 0 8px; }
+.pestanas-cajon { padding: 0 12px; flex: none; }
+.cuerpo-cajon {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+}
+.cuerpo-cajon > div { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.cuerpo-cajon h4 { margin: 0; }
+.cuerpo-cajon .rejilla-parrilla { margin: 0; }
+.cuerpo-cajon .fila { min-width: 0; }
+.cuerpo-cajon textarea { width: 100%; box-sizing: border-box; }
+.borrar-guion { border-top: 1px solid var(--linea-suave); padding-top: 12px; margin-top: 6px; }
+.cajon-guion .barra-accion.pie-cajon {
+  position: relative; margin: 0; padding: 10px 16px calc(10px + env(safe-area-inset-bottom, 0px));
+}
+.cajon-guion .pie-cajon .dentro { grid-template-columns: minmax(0, 1fr) auto; }
+.cajon-guion .pie-cajon .plan { display: none; }
+.cajon-guion .pie-cajon .principal { white-space: normal; text-align: center; }
+
+/* ---- añadir guiones: las tarjetas de dónde salen, con su coste */
+.cab-anadir { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; }
+.cab-anadir h3 { margin: 0; }
+.origenes-parrilla {
+  display: grid; gap: 10px; margin-bottom: 14px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+}
+.tarjeta-origen {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 5px; min-width: 0;
+  padding: 12px 14px; border: 1px solid var(--linea); border-radius: 14px; background: var(--panel);
+  color: var(--texto); text-align: left; white-space: normal;
+}
+.tarjeta-origen:hover:not(:disabled) { border-color: var(--acento); background: var(--hover); }
+.tarjeta-origen.activa { border-color: var(--acento); background: var(--marcado); }
+.tarjeta-origen b { font-size: 14.5px; }
+.tarjeta-origen .meta { line-height: 1.4; }
+.icono-origen { font-size: 22px; line-height: 1; }
+.coste-origen { text-transform: none; letter-spacing: 0; font-size: 11.5px; white-space: normal; text-align: left; }
+/* LA BARRA, PEGADA ABAJO DEL TODO: `#modulo` lleva 60 px de relleno abajo y
+   lo pegado se queda por encima de ese relleno; así la burbuja del asistente
+   (que se coloca encima de una barra de --alto-pie) no tapa su botón */
+.anadir-parrilla > .barra-accion, .marca-parrilla > .barra-accion { margin-top: 4px; bottom: -60px; }
+
+/* ---- conversar con Claude: la lista a la izquierda, el hilo a la derecha */
+.chat-seccion .chat-parrilla {
+  display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 14px; align-items: start;
+}
+.lista-chats {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 10px;
+  border: 1px solid var(--linea); border-radius: 14px; background: var(--panel);
+}
+.conversaciones-chat { display: flex; flex-direction: column; gap: 4px; max-height: 52vh; overflow-y: auto; }
+.conv-chat {
+  display: flex; flex-direction: column; gap: 2px; min-width: 0; text-align: left; white-space: normal;
+  padding: 7px 9px; border: 1px solid transparent; border-radius: 10px; background: none; color: var(--texto);
+}
+.conv-chat b { font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.conv-chat.activa { border-color: var(--acento); background: var(--marcado); }
+.pie-lista-chats { gap: 6px; }
+.hilo-chat {
+  display: flex; flex-direction: column; gap: 10px; min-width: 0; padding: 10px;
+  border: 1px solid var(--linea); border-radius: 14px; background: var(--panel);
+}
+.hilo-chat .chat-mensajes { min-height: 260px; }
+.chip-interruptor {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--linea); background: var(--hueco); font-size: 13px; cursor: pointer;
+  text-transform: none; letter-spacing: normal; color: var(--texto); font-weight: 500;
+}
+.chip-interruptor:has(input:checked) { border-color: var(--acento); background: var(--marcado); }
+
+/* ---- la marca del cliente: dos columnas */
+.campos-marca { display: grid; gap: 10px 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 8px; }
+.campos-marca .campo-marca { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.campos-marca textarea { width: 100%; box-sizing: border-box; }
+
+/* ---- cuentas que te gustan: las ya leídas como tarjetas, la abierta en dos columnas */
+.leidas-cuentas h3 { margin: 4px 0 8px; }
+.leidas-cuentas .cuentas-guardadas {
+  display: grid; gap: 8px; margin: 0 0 14px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+}
+.tarjeta-cuenta {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; white-space: normal;
+  padding: 10px 12px; border: 1px solid var(--linea); border-radius: 12px; background: var(--panel);
+  color: var(--texto); text-align: left;
+}
+.tarjeta-cuenta b { overflow-wrap: anywhere; }
+.tarjeta-cuenta.activa { border-color: var(--acento); background: var(--marcado); }
+.dos-columnas-cuenta { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.dos-columnas-cuenta > .analisis-cuenta, .dos-columnas-cuenta > .guiones-cuenta { min-width: 0; }
+
+/* ---- la tableta: el chat en una columna */
+@media (max-width: 900px) {
+  .chat-seccion .chat-parrilla { grid-template-columns: minmax(0, 1fr); }
+  .conversaciones-chat { max-height: 180px; }
+  .dos-columnas-cuenta { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---- el móvil: una columna del tablero a la vista, el panel a pantalla
+   completa y la barra en una fila (la de Crear tras `arreglos-crear-movil`) */
+@media (max-width: 700px) {
+  .titulo-automatizar h2 { font-size: 24px; }
+  .cab-automatizar .acc { width: 100%; flex-wrap: nowrap; }
+  .chip-proyecto-auto { flex: 1 1 auto; }
+  .chip-proyecto-auto select { max-width: none; width: 100%; }
+  .cab-automatizar .anadir-cabecera { flex: none; white-space: nowrap; }
+  .tablero-parrilla .filtros-parrilla .buscar-parrilla { flex: 1 1 100%; }
+  .chips-matrices { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; width: 100%; padding-bottom: 2px; }
+  .chips-matrices::-webkit-scrollbar { display: none; }
+  .chip-matriz { flex: none; white-space: nowrap; }
+  .selector-columnas {
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; margin-bottom: 10px;
+    padding: 3px; border: 1px solid var(--linea); border-radius: 12px; background: var(--hueco);
+  }
+  .selector-columnas button {
+    display: flex; gap: 6px; align-items: center; justify-content: center; min-width: 0;
+    border: 0; background: none; border-radius: 9px; padding: 7px 4px; color: var(--tenue); font-size: 13px;
+  }
+  .selector-columnas button.activa { background: var(--marcado); color: var(--texto); font-weight: 700; }
+  .cuenta-columna { font-family: var(--letra-cifra); font-size: 12px; }
+  .tablero-guiones { grid-template-columns: minmax(0, 1fr); }
+  .columna-tablero.fuera-movil { display: none; }
+  /* el nombre y el número ya están en el botón de la columna */
+  .columna-tablero .cab-columna > b, .columna-tablero .cab-columna > .pastilla { display: none; }
+  .cab-columna { padding-bottom: 6px; }
+  .cajon-guion { width: 100%; border-left: 0; }
+  .cab-cajon { padding: 10px 12px 8px; }
+  .cuerpo-cajon { padding: 12px; }
+  .cajon-guion .barra-accion.pie-cajon { padding-left: 12px; padding-right: 12px; }
+  .campos-marca { grid-template-columns: minmax(0, 1fr); }
+  /* las tarjetas de dónde salen, de dos en dos y sin la explicación (va en su globo) */
+  .origenes-parrilla { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tarjeta-origen { padding: 10px; gap: 4px; }
+  .tarjeta-origen > .meta { display: none; }
+  .tarjeta-origen b { font-size: 13.5px; line-height: 1.25; }
+  .icono-origen { font-size: 18px; }
+  .coste-origen { font-size: 10.5px; padding: 1px 7px; }
 }

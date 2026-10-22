@@ -110,6 +110,29 @@ Quien la retome hace antes `git merge origin/main` (la voz habrá cambiado) y la
 vuelve a apuntar en la tabla. Mientras siga en pausa, `v2-fase-4b` sigue
 esperando, porque depende de ella.
 
+### Cola de unión (decisión del dueño, 22-10-2026)
+
+Se une de una en una, en este orden. Antes de cada unión: la rama hace
+`git merge origin/main`, pasa sus pruebas y la revisión independiente; el
+dueño hace la instantánea de Hostinger; se une; `asvs actualizar`; se
+comprueba que el Studio arranca. Solo entonces la siguiente. Una rama que no
+está lista cede su turno a la siguiente lista (salvo las que dependen de ella).
+
+1. `portadas-2`
+2. `seo-real`
+3. `seo-real-3` (sale de `seo-real`)
+4. `dominio-negocio`
+5. `etapa-foto-c` (sale de `dominio-negocio`)
+6. `rediseno-automatizar`
+7. `rediseno-proyectos` (encaja la Ficha del negocio de `etapa-foto-c` en
+   `SECCIONES_AJUSTES_PROYECTO` si `etapa-foto-c` ya está unida)
+8. `rediseno-publicar` (encaja `bloquePortadaPublicar`, el bloque PUBLICAR ·
+   SEO y la clave de YouTube en su sitio nuevo; cambia la línea de las claves
+   de Automatizar)
+
+Los rediseños van al final a propósito: son los que mueven de sitio piezas de
+las demás, así que les toca a ellos encajarlas al ponerse al día.
+
 ### El orden acordado
 
 `parrilla` (Automatizar → Parrilla) se unió a `main` el 17-10-2026, y

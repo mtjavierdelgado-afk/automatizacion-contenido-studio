@@ -7068,11 +7068,22 @@ def crear_en_el_movil(navegador, datos):
         ok(len(fot) > 60, f"MÓVIL: la sonda ha visto los fotogramas ({len(fot)})")
         if fot:
             xs = [f["x"] for f in fot]
-            # unos px sí: el paso activo cambia de ancho con «⟳ N %» y la
-            # fila se reajusta para que siga entero a la vista
-            ok(max(abs(x - xs[0]) for x in xs) <= 24 and all(f["dentro"] for f in fot),
-               f"MÓVIL: con el montaje en marcha el carril no se mueve ni salta al paso 1 "
-               f"(desplazamiento {sorted(set(xs))[:6]}, "
+            # Reajustarse sí: el paso activo cambia de ancho («⟳ N %», «2
+            # notas sin aplicar») y la fila se recoloca para que siga entero a
+            # la vista. Lo que no puede es PARPADEAR (un valor de 1–3
+            # fotogramas que vuelve al de antes: el salto al paso 1) ni dejar
+            # el paso activo fuera.
+            tramos = []
+            for x in xs:
+                if tramos and tramos[-1][0] == x:
+                    tramos[-1][1] += 1
+                else:
+                    tramos.append([x, 1])
+            destellos = sum(1 for a, b, c in zip(tramos, tramos[1:], tramos[2:])
+                            if b[1] <= 3 and a[0] == c[0])
+            ok(destellos == 0 and min(xs) >= xs[0] - 150 and all(f["dentro"] for f in fot),
+               f"MÓVIL: con el montaje en marcha el carril no parpadea ni salta al paso 1 "
+               f"({destellos} destellos, desplazamiento {sorted(set(xs))[:6]}, "
                f"{sum(1 for f in fot if not f['dentro'])} fotogramas con el paso activo fuera)")
             altos = [f["alto"] for f in fot]
             ok(min(altos) >= 0.85 * altos[0],

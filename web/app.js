@@ -22639,7 +22639,7 @@ function pintarBarraModulos() {
   const enlaces = h('div', { clase: 'modulos-enlaces' });
   [['inicio', 'Inicio', 'Tu panel: lo que pasa hoy y lo que te necesita'],
     ['crear', 'Crear', 'Tus estilos y tus vídeos'],
-    ['publicar', 'Publicar', 'Cola, calendario, textos por red y cuentas'],
+    ['publicar', 'Publicar', 'Calendario, vídeos por publicar, resultados y ajustes'],
     ['automatizar', 'Automatizar', 'La Parrilla de guiones y Analizar cuentas']]
     .forEach(([id, texto, ayuda]) => enlaces.appendChild(h('a', {
       href: '#', clase: `boton-modulo${MODULOS.actual === id ? ' activo' : ''}`, title: ayuda,
@@ -24299,7 +24299,7 @@ function mesPublicar(c) {
   (c.dias || []).forEach(dia => {
     const fuera = !dia.startsWith(mesActual);
     const delDia = enviosDelDiaPublicar(c, dia);
-    const celda = h('div', { clase: `dia-publicar dia-mes-pub${dia === c.hoy ? ' hoy' : ''}${fuera ? ' fuera-mes' : ''}` },
+    const celda = h('div', { clase: `dia-publicar dia-mes-pub${dia === c.hoy ? ' hoy' : ''}${fuera ? ' fuera-mes' : ''}`, datos: { dia } },
       h('span', { clase: 'num-dia' }, String(Number(dia.slice(8, 10)))));
     delDia.slice(0, TOPE_DIA_MES_PUB).forEach(e => celda.appendChild(lineaEnvioPublicar(e, true)));
     if (delDia.length > TOPE_DIA_MES_PUB) celda.appendChild(botonMasDelDiaPublicar(dia, delDia.length - TOPE_DIA_MES_PUB));

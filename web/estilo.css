@@ -4657,7 +4657,7 @@ body.con-barra-accion #toast { bottom: calc(var(--alto-barra-accion, 62px) + 12p
 .con-pestanas-publicar, .publicar-ficha-carril { display: flex; flex-direction: column; gap: 14px; }
 .cab-modulo-publicar { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .cab-modulo-publicar h2 { font-size: 30px; margin: 0; }
-.pestanas-publicar { display: flex; flex-wrap: nowrap; gap: 2px; }
+.con-pestanas-publicar > .pestanas-publicar { display: flex; flex-wrap: nowrap; gap: 2px; }
 .pestanas-publicar .pestana-crear { font-size: 14.5px; padding: 9px 14px; }
 .cuenta-pestana {
   min-width: 20px; padding: 0 6px; border-radius: 999px; font-size: 11.5px; line-height: 19px; text-align: center;
@@ -4934,3 +4934,8 @@ body.en-modulo:has(#modulo .barra-publicar) #toast { bottom: calc(var(--alto-pie
 .paso-seo-publicar .seo-video > .fila:first-child > h3 { visibility: hidden; }
 .rejilla-resultados .fila-mejor { flex-wrap: wrap; }
 .rejilla-resultados .fila-mejor .crece { flex: 1 1 100%; }
+/* en el tema claro `--blanco` sobre el fondo del aviso no se lee: el título de
+   la franja, del color del aviso */
+.franja-necesitan .cab-necesitan > b, .estado-conexiones-cuentas b { color: inherit; }
+/* la barra de la ficha, pegada al borde de abajo (sin el respiro de #modulo) */
+body.en-modulo #modulo:has(.barra-publicar) { padding-bottom: 0; }

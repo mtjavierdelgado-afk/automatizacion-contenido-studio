@@ -1285,9 +1285,20 @@ def planificar(proyecto, params, inventario=None, replantear=False,
         tramos_b = tramos_de_bloque(meta)
         bloque_de = [(tramos_b[i][2] if i >= 0 else "")
                      for i in (_bloque_en(w, tramos_b) for w in palabras)]
-        segmentos, lineas_gv, avisos_gv = guion_visual.segmentos(palabras, bloque_de,
-                                                                  lineas_gv)
-    else:
+        # VIGENTE SOLO SI CASA CON LA VOZ DE AHORA: si el guion se rehizo y algun
+        # bloque del guion visual ya no esta, se corta como siempre (voz) y el
+        # pago se para en `ejecutar` hasta volver a aprobarlo (revision 22-10)
+        fuera = guion_visual.fuera_de_la_voz(lineas_gv, [t[2] for t in tramos_b])
+        if fuera:
+            avisos_gv = [f"el guion visual nombra bloques que ya no están en la voz "
+                         f"({', '.join(fuera)}): vuelve a revisarlo y aprobarlo"]
+            lineas_gv = None
+        else:
+            segmentos, lineas_gv, avisos_gv = guion_visual.segmentos(palabras, bloque_de,
+                                                                      lineas_gv)
+            if not segmentos:
+                lineas_gv = None
+    if not lineas_gv:
         segmentos = segmentar.heredar(palabras, crudo,
                                       adelanto=adelanto, cola=cola,
                                       minimo=p["min_s"], maximo=p["max_s"],
@@ -1297,6 +1308,7 @@ def planificar(proyecto, params, inventario=None, replantear=False,
                                             adelanto=adelanto, cola=cola, muros=muros,
                                             reparto=reparto_corte)
     escenas = [dict(e) for e in segmentar.construir_escenas(segmentos)]
+    guion_ok = bool(lineas_gv)
     if lineas_gv:
         for escena, linea in zip(escenas, lineas_gv):
             if linea:
@@ -1304,6 +1316,11 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # EL CORTE, TAL CUAL SALIO. Se guarda antes de que nadie lo toque: es lo
     # unico contra lo que la proxima pasada puede reconocer donde cortaba.
     corte_crudo = [e.get("narracion") or "" for e in escenas]
+    if lineas_gv:
+        # EL CORTE DE LA VOZ SE CONSERVA: el de las lineas no se apunta como
+        # «el corte de antes», o al volver a «lo que dice la voz» se heredaria
+        # y las imagenes ya pagadas en modo voz no se reconocerian (revision 22-10)
+        corte_crudo = list((previo or {}).get("corte") or [])
     _marcar_origen(escenas, meta)
     reparto = _heredar_ids(escenas, previo)
     # Los beats vienen por rango de BLOQUES y los planos van por reloj: se
@@ -1339,8 +1356,8 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     informe = segmentar.informe(escenas, p["min_s"], p["max_s"],
                                 reparto=reparto_corte)
     informe["camaras"] = camaras
-    if lineas_gv:
-        informe["guion_visual"] = {"planos": len(lineas_gv), "avisos": avisos_gv}
+    if lineas_gv or avisos_gv:
+        informe["guion_visual"] = {"planos": len(lineas_gv or []), "avisos": avisos_gv}
     # Las marcas de palabra viajan con el plano: son lo que permite que un
     # rotulo entre cuando se dice lo que rotula y no al empezar el plano. Van
     # ANTES de repartir las cartelas porque ahora las cartelas tambien las usan:
@@ -1349,7 +1366,14 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     for escena, segmento in zip(escenas, segmentos):
         escena["marcas"] = [[round(float(w["s"]), 3), round(float(w["e"]), 3)]
                             for w in segmento[2]]
-    informe["cartelas"] = _marcar_cartelas(escenas, beats, p)
+    if lineas_gv:
+        # EN MODO GUION NO HAY CARTELAS NI RETOQUES POR PLANO DE ANTES: se
+        # anclaban a planos de la voz y con otro corte se tragarian lineas del
+        # guion visual sin avisar (revision 22-10). Lo que se ve se escribe en
+        # el guion visual.
+        informe["cartelas"] = {"puestas": [], "avisos": [], "idioma": ""}
+    else:
+        informe["cartelas"] = _marcar_cartelas(escenas, beats, p)
 
     # QUE SE VE EN CADA PLANO, si alguien lo ha dirigido. Va ANTES de escribir
     # los prompts porque es una linea mas del prompt (ver `_con_direccion`), y
@@ -1363,7 +1387,7 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # si no esta, no cambia nada. Los dos viven en los params POR UNIDAD, que es
     # lo que hace que escribir uno ensucie SU plano y no los 299.
     for escena in escenas:
-        ajustes = _ajustes_unidad(p, f"escena:{escena['id']}")
+        ajustes = {} if escena.get("linea_gv") else _ajustes_unidad(p, f"escena:{escena['id']}")
         linea = " ".join(str(ajustes.get("direccion") or "").split())
         if linea:
             escena["direccion"] = linea
@@ -1430,8 +1454,7 @@ def planificar(proyecto, params, inventario=None, replantear=False,
             # para ESTE plano sigue mandando), y el estado del objeto sale de
             # la linea, no del tramo de voz
             escena["accion"] = linea["visual"]
-            if not escena.get("direccion"):
-                escena["direccion"] = linea["visual"]
+            escena["direccion"] = linea["visual"]
             beat = dict(beat, **guion_visual.estado_de_linea(
                 linea, tipo_relato.estados_del_catalogo(catalogo, principal)
                 if principal else {}))
@@ -1498,6 +1521,9 @@ def planificar(proyecto, params, inventario=None, replantear=False,
         "corte": corte_crudo,
         "informe": informe,
     }
+    if guion_visual.modo_de(p) == "guion":
+        # si el guion visual aprobado cortó este plan (lo mira `ejecutar` antes de pagar)
+        plan["guion_visual_ok"] = guion_ok
     plan["assets"] = _assets_necesarios(plan, catalogo, p)
     plan["dependencias"] = {f"escena:{e['id']}": _assets_de_escena(e)
                             for e in escenas}
@@ -5053,10 +5079,11 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
         # CON «LO QUE DICE EL GUION», SIN GUION VISUAL APROBADO NO SE PAGA NADA
         # (rama guion-visual): se dibujaria lo que dice la voz, que es justo lo
         # que se ha pedido que no pase
-        if guion_visual.modo_de(p) == "guion" and not guion_visual.activo(p):
+        if guion_visual.modo_de(p) == "guion" and not plan.get("guion_visual_ok"):
             raise RuntimeError("este vídeo dibuja lo que dice el guion y su guion visual "
-                               "no está aprobado: revísalo y apruébalo en «Guion visual» "
-                               "(paso Imágenes) antes de generar los planos")
+                               "no está aprobado o ya no casa con la voz: revísalo y "
+                               "apruébalo en «Guion visual» (paso Imágenes) antes de "
+                               "generar los planos")
         faltan = planos_sin_base(plan, dirs, unidades=unidades, rehacer=rehacer)
         if faltan:
             raise RuntimeError(

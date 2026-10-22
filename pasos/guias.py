@@ -961,7 +961,7 @@ GUIAS = {
             "CTA: …\n"
             "Tono: …\n"
             "Tipo de relato: … (opcional; quita la línea si no hace falta)\n"
-            "Imágenes: guion (opcional; quita la línea si las imágenes ilustran la voz)\n"
+            "Imágenes: … (opcional: «guion» si cada imagen sigue su línea «Visual:»; si no, quita la línea)\n"
             "\n"
             "ESPACIO FIJO (solo si todo el vídeo ocurre en un mismo sitio; si no, quita esta sección)\n"
             "- Sitio: [nombre corto del sitio]\n"

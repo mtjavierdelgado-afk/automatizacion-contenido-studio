@@ -185,7 +185,7 @@ Objetivo: …
 CTA: …
 Tono: …
 Tipo de relato: … (opcional; quita la línea si no hace falta)
-Imágenes: guion (opcional; quita la línea si las imágenes ilustran la voz)
+Imágenes: … (opcional: «guion» si cada imagen sigue su línea «Visual:»; si no, quita la línea)
 
 ESPACIO FIJO (solo si todo el vídeo ocurre en un mismo sitio; si no, quita esta sección)
 - Sitio: [nombre corto del sitio]
@@ -702,6 +702,14 @@ def _imagenes(g, valor):
     except ImportError:                                           # pragma: no cover
         import guion_visual                                       # noqa: PLC0415
     limpio = re.sub(r"\(.*?\)", "", str(valor or "")).strip()
+    # la plantilla sin rellenar («…», «voz | guion») no elige nada: si contara,
+    # un guion que copia la linea tal cual pasaria el video a modo guion
+    # sin que nadie lo pidiera (revision del 22-10)
+    if not limpio or "…" in limpio or "|" in limpio or "[" in limpio:
+        return
+    if guion_visual._llano(limpio).strip() == "voz":
+        g["imagenes"] = "voz"
+        return
     try:
         modo = guion_visual.normalizar_modo(limpio)
     except ValueError:
@@ -829,14 +837,14 @@ def encargo_de(guion, indice=0):
     # lineas viajan siempre que las haya: se guardan solo si el video dibuja lo
     # que dice el guion (al crear, `_opciones_al_crear`)
     if g.get("imagenes"):
-        extra["imagenes"] = g["imagenes"]
+        extra["imagenes"] = g["imagenes"]      # «guion» o «voz» explícito
     if g.get("imagenes_aviso"):
         avisos.append(g["imagenes_aviso"])
     visuales = [{"voz": _sin_comillas(e.get("voz")), "visual": list(e.get("visual") or [])}
                 for e in g.get("escenas") or [] if e.get("visual")]
     if visuales:
         extra["visuales"] = visuales
-        if not g.get("imagenes"):
+        if g.get("imagenes") != "guion":
             avisos.append("el guion trae líneas «Visual:», pero las imágenes dibujarán lo que "
                           "dice la voz: elige «Lo que dice el guion» en el Encargo para usarlas")
     return {**extra, "nombre": nombre[:60], "material": material, "indicaciones": indicaciones,

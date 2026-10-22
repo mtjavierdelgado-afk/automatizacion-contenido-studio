@@ -7850,7 +7850,7 @@ const BLOQUES_DEL_ENCARGO = [
       bloqueTipoRelatoDelVideo())) },
   // qué dibujan las imágenes (rama guion-visual): la voz o el guion
   { id: 'imagenes', pinta: c => (c.nuevo
-    ? bloqueLight('Qué dibujan las imágenes', 'la voz o el guion visual (opcional)', bloqueImagenesLight(c.e))
+    ? bloqueLight('Qué dibujan las imágenes', 'la voz o el guion visual (opcional)', bloqueImagenesLight(c.e, c.ficha))
     : bloqueLight('Qué dibujan las imágenes', 'la voz o el guion visual: se aplica como corrección',
       bloqueImagenesDelVideo())) },
   { id: 'reparto-sitios', pinta: c => (c.nuevo ? null
@@ -16309,18 +16309,27 @@ const AYUDA_IMAGENES = 'Lo que dice la voz: cada imagen ilustra su frase, como s
   + 'de la Parrilla o un borrador de Claude que tú apruebas) y la voz solo marca los tiempos.';
 
 /* En un vídeo NUEVO: el borrador del Encargo (`e`), sin escribir nada al pintar. */
-function bloqueImagenesLight(e) {
+function bloqueImagenesLight(e, ficha) {
   const trae = (e.visuales || []).length;
+  const delEstilo = ((((ficha || {}).datos || {}).estilo || {}).imagenes === 'guion')
+    ? 'lo que dice el guion' : 'lo que dice la voz';
+  const opciones = [
+    { valor: '', nombre: `Lo que diga el estilo (${delEstilo})` },
+    { valor: 'voz', nombre: 'Lo que dice la voz' },
+    { valor: 'guion', nombre: 'Lo que dice el guion' },
+  ];
   return h('div', { clase: 'guion-visual' },
-    campoSelect('Qué dibujan las imágenes', e.imagenes || '', MODOS_IMAGENES,
+    campoSelect('Qué dibujan las imágenes', e.imagenes || '', opciones,
       v => { e.imagenes = v; pintarLight(); },
       AYUDA_IMAGENES + (trae ? ` El guion de la Parrilla trae ${trae} escena(s) con líneas «Visual:»: `
-        + (e.imagenes === 'guion' ? 'se usarán como guion visual.' : 'con «Lo que dice la voz» no se usan.') : '')));
+        + 'se guardan con el vídeo y son el guion visual cuando las imágenes siguen el guion.' : '')));
 }
 
 function imagenesParaCrear(e) {
-  if (e.imagenes !== 'guion') return null;
-  return { imagenes: 'guion', visuales: (e.visuales || []).slice(0, 400) };
+  const salida = {};
+  if (['guion', 'voz'].includes(e.imagenes)) salida.imagenes = e.imagenes;
+  if ((e.visuales || []).length) salida.visuales = e.visuales.slice(0, 400);
+  return Object.keys(salida).length ? salida : null;
 }
 
 /* En un vídeo HECHO: la ficha del servidor y una copia del guion visual. */
@@ -16362,6 +16371,9 @@ async function pedirGv(ruta, metodo, cuerpo, mensaje) {
     leerGvDelServidor(est, d);
     if (mensaje) toast(mensaje);
     if (d && d.trabajo_id) seguirTrabajoGv(d.trabajo_id, est.pid);
+    /* el estado del vídeo (obsoletos, coste, lo que impide dibujar) cambia
+       con el modo y la aprobación: se vuelve a leer */
+    if (ruta !== '') cargarVideoLight(est.pid).then(() => pintarLight()).catch(() => {});
   } catch (err) {
     est.error = err.message;
   }
@@ -16425,10 +16437,14 @@ function editorGuionVisual() {
     caja.appendChild(h('div', { clase: 'caja-aviso' },
       `El guion de la Parrilla trae ${f.propuesta.length} línea(s) «Visual:», ya atadas a sus bloques.`,
       h('div', { clase: 'fila' }, h('button', { clase: 'mini primario', disabled: est.ocupado || corriendo,
-        onclick: () => { est.copia = f.propuesta.map(p => Object.assign({}, p)); est.tocado = true; pintarLight(); } },
+        onclick: () => { est.copia = f.propuesta.map(p => Object.assign({}, p)); tocarGv(est); } },
       'Usar estas líneas'))));
   }
   (f.avisos || []).forEach(a => caja.appendChild(h('div', { clase: 'meta' }, `⚠ ${a}`)));
+  if ((f.fuera_de_la_voz || []).length) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' }, `El guion cambió: los bloques ${f.fuera_de_la_voz.join(', ')} `
+      + 'ya no están en la voz. Corrige esos planos (o pide otro guion visual) y vuelve a aprobarlo.'));
+  }
   const avisoDe = {};
   (f.comprobacion || []).forEach(a => { avisoDe[a.plano] = a.que; });
   est.copia.forEach((p, i) => {
@@ -16436,27 +16452,28 @@ function editorGuionVisual() {
       h('div', { clase: 'plano-gv-cabeza' },
         h('strong', {}, p.id || `nuevo ${i + 1}`),
         h('span', { clase: 'meta' }, `voz: «${recortar(textoDe[p.bloque] || '', 90)}»`)),
-      campoSelect('Bloque de la voz', p.bloque || '', bloques, val => { p.bloque = val; est.tocado = true; pintarLight(); }),
+      campoSelect('Bloque de la voz', p.bloque || '', bloques, val => { p.bloque = val; tocarGv(est); pintarLight(); }),
       h('label', {}, 'Qué se ve'),
-      h('textarea', { rows: 2, value: p.visual || '', oninput: ev => { p.visual = ev.target.value; est.tocado = true; } }),
+      h('textarea', { rows: 2, value: p.visual || '', datos: { foco: `gv-visual-${i}` },
+        oninput: ev => { p.visual = ev.target.value; tocarGv(est); } }),
       h('label', {}, 'Cámara (opcional)'),
       h('input', { type: 'text', value: p.camara || '', placeholder: 'plano general desde la puerta',
-        oninput: ev => { p.camara = ev.target.value; est.tocado = true; } }));
+        datos: { foco: `gv-camara-${i}` }, oninput: ev => { p.camara = ev.target.value; tocarGv(est); } }));
     if ((f.estados || []).length) {
       fila.appendChild(campoSelect('Estado del objeto', p.estado || '', estados,
-        val => { p.estado = val; est.tocado = true; pintarLight(); }));
+        val => { p.estado = val; tocarGv(est); }));
     }
     if (p.id && avisoDe[p.id]) fila.appendChild(h('div', { clase: 'caja-aviso' }, `Contradice lo fijo: ${avisoDe[p.id]}`));
     fila.appendChild(h('div', { clase: 'fila' }, h('button', { clase: 'mini fantasma', disabled: est.ocupado,
-      onclick: () => { est.copia.splice(i, 1); est.tocado = true; pintarLight(); } }, 'Quitar')));
+      onclick: () => { est.copia.splice(i, 1); tocarGv(est); } }, 'Quitar')));
     caja.appendChild(fila);
   });
   const ultimo = est.copia.length ? est.copia[est.copia.length - 1].bloque : ((f.bloques || [])[0] || {}).id;
   const fila = h('div', { clase: 'fila' },
     h('button', { clase: 'mini', disabled: est.ocupado || !bloques.length,
-      onclick: () => { est.copia.push({ bloque: ultimo || '', visual: '' }); est.tocado = true; pintarLight(); } },
+      onclick: () => { est.copia.push({ bloque: ultimo || '', visual: '' }); tocarGv(est); } },
     '+ Añadir plano'),
-    h('button', { clase: 'mini', disabled: est.ocupado || corriendo || !est.copia.length,
+    h('button', { clase: 'mini', disabled: est.ocupado || corriendo || !est.tocado,
       onclick: () => pedirGv('', 'PUT', { planos: est.copia.filter(p => String(p.visual || '').trim()) },
         'guion visual guardado (sin aprobar)') }, 'Guardar'),
     h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
@@ -16474,6 +16491,14 @@ function editorGuionVisual() {
     : (est.tocado ? 'Hay cambios sin guardar.' : 'Sin aprobar: los planos no se dibujan hasta que lo apruebes.')));
   if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
   return caja;
+}
+
+/* Algo cambió en la copia: la primera vez se repinta (para que «Guardar» y
+   «Aprobar» digan la verdad); el foco sobrevive por su `data-foco`. */
+function tocarGv(est) {
+  const antes = est.tocado;
+  est.tocado = true;
+  if (!antes) pintarLight();
 }
 
 /* Aprobar lo que se VE: si hay cambios escritos, primero se guardan. */
@@ -27431,7 +27456,7 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   /* y el tipo de relato, si el guion lo trae («Tipo de relato:»); si no, sin elegir */
   e.tipo_relato = tipoRelatoDelEncargo(r.tipo_relato);
   /* qué dibujan las imágenes y las líneas «Visual:» (rama guion-visual) */
-  e.imagenes = r.imagenes === 'guion' ? 'guion' : '';
+  e.imagenes = ['guion', 'voz'].includes(r.imagenes) ? r.imagenes : '';
   e.visuales = Array.isArray(r.visuales) ? r.visuales : [];
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.datos = null;

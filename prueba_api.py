@@ -7401,12 +7401,14 @@ def probar_guion_visual():
         Estado(servidor.contexto(pid).proyecto)
         ctx = servidor.contexto(pid)
         firma = ctx.estado.firma("assets")
-        for nada in ({}, {"imagenes": None}, {"imagenes": ""}, {"imagenes": "voz"},
-                     {"visuales": [{"voz": "x", "visual": ["y"]}]}):
+        for nada in ({}, {"imagenes": None}, {"imagenes": ""}, {"visuales": "no es una lista"}):
             servidor._opciones_al_crear(ctx, "", nada)
         ok("imagenes" not in (ctx.estado.params("assets") or {})
            and "guion_visual" not in (ctx.estado.params("assets") or {}),
-           "GUION VISUAL: sin elegir «guion», no se escribe nada (regla 1)")
+           "GUION VISUAL: sin elegir nada, no se escribe nada (regla 1)")
+        codigo, _m = _llamar(servidor.aprobar_guion_visual, pid, {"aprobado": False})
+        ok("guion_visual" not in (ctx.estado.params("assets") or {}),
+           "GUION VISUAL: retirar la aprobación de nada no escribe nada")
         igual(ctx.estado.firma("assets"), firma, "GUION VISUAL: y la firma no se mueve")
         codigo, _m = _llamar(servidor._opciones_al_crear, ctx, "", {"imagenes": "telenovela"})
         igual(codigo, 400, "GUION VISUAL: un modo que no existe da 400")
@@ -7433,7 +7435,7 @@ def probar_guion_visual():
         ok(codigo == 200 and len(f["guion_visual"]["planos"]) == 3 and not f["aprobado"],
            "GUION VISUAL: guardarlo lo deja sin aprobar")
         real_listo = servidor._asistente_listo
-        servidor._asistente_listo = lambda: False       # sin comprobar con Claude aquí
+        servidor._asistente_listo = lambda: (False, "", None, [], False)  # sin Claude aquí
         try:
             codigo, f = _llamar(servidor.aprobar_guion_visual, pid, {"aprobado": True})
         finally:
@@ -7446,8 +7448,12 @@ def probar_guion_visual():
         ok(codigo == 200 and f["modo"] == "voz" and "imagenes" not in (ctx.estado.params("assets") or {}),
            "GUION VISUAL: null vuelve a lo del estilo y quita la clave")
         codigo, f = _llamar(servidor.guardar_modo_guion_visual, pid, {"imagenes": "voz"})
+        ok(codigo == 200 and "imagenes" not in (ctx.estado.params("assets") or {}),
+           "GUION VISUAL: «voz» con un estilo que no dice guion no escribe nada (regla 1)")
+        ctx.estado.actualizar_params("assets", {"estilo": {"imagenes": "guion"}})
+        codigo, f = _llamar(servidor.guardar_modo_guion_visual, pid, {"imagenes": "voz"})
         ok(codigo == 200 and (ctx.estado.params("assets") or {}).get("imagenes") == "voz",
-           "GUION VISUAL: «voz» explícito se guarda (para mandar sobre un estilo que diga guion)")
+           "GUION VISUAL: con un estilo que dice guion, «voz» explícito se guarda y manda")
         codigo, _m = _llamar(servidor.guardar_imagenes_estilo, "no-existe", {"imagenes": "guion"})
         ok(codigo in (400, 404), f"GUION VISUAL: el estilo que no existe da error ({codigo})")
     finally:

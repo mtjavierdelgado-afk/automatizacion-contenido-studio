@@ -157,7 +157,7 @@ def normalizar(crudo, bloques_validos=None):
 def normalizar_visuales(crudo):
     """Las escenas de la Parrilla: [{voz, visual: [lineas]}]."""
     if not isinstance(crudo, list):
-        raise ValueError("guion_visual.visuales tiene que ser una lista")
+        return []
     salida = []
     for escena in crudo[:MAX_PLANOS]:
         if not isinstance(escena, dict):
@@ -239,6 +239,14 @@ def segmentos(palabras, bloque_de, planos):
     -> (segmentos [(inicio, fin, palabras)], lineas [plano], avisos)."""
     if not palabras:
         return [], [], []
+    # UNA PALABRA SIN BLOQUE (el redondeo del t_in deja la primera fuera, o un
+    # hueco entre dos bloques) va con su vecino: si no, partiria un bloque en
+    # dos y sus lineas saldrian repetidas (revision del 22-10)
+    bloque_de = list(bloque_de)
+    primero = next((b for b in bloque_de if b), "")
+    for i, bid in enumerate(bloque_de):
+        if not bid:
+            bloque_de[i] = bloque_de[i - 1] if i else primero
     por_bloque = {}
     for plano in planos or []:
         por_bloque.setdefault(plano["bloque"], []).append(plano)
@@ -252,17 +260,14 @@ def segmentos(palabras, bloque_de, planos):
     avisos = []
     usados = set()
     cortes, lineas = [], []
-    anterior = None
+    pendiente = None          # palabras de bloques sin lineas ANTES de la primera
     for bid, ini, fin in tramos:
         suyas = por_bloque.get(bid) or []
         if not suyas:
-            if anterior is None:
-                anterior = (planos or [None])[0]
-            if cortes and lineas and lineas[-1] is anterior:
+            if lineas:
                 cortes[-1][1] = fin            # se alarga el plano que se veia
-            else:
-                cortes.append([ini, fin])
-                lineas.append(anterior)
+            elif pendiente is None:
+                pendiente = ini                # van con el primer plano que haya
             continue
         usados.add(bid)
         n = min(len(suyas), fin - ini)
@@ -272,15 +277,27 @@ def segmentos(palabras, bloque_de, planos):
         for k in range(n):
             a = ini + (fin - ini) * k // n
             b = ini + (fin - ini) * (k + 1) // n
+            if pendiente is not None:
+                a, pendiente = pendiente, None
             cortes.append([a, b])
             lineas.append(suyas[k])
-        anterior = suyas[n - 1]
     for bid in por_bloque:
         if bid not in usados and bid not in {t[0] for t in tramos}:
             avisos.append(f"el bloque {bid} del guion visual no está en la voz: "
                           f"sus planos no salen")
+    if not cortes:
+        # ninguna linea casa con la voz de ahora (el guion se rehizo con otros
+        # bloques): no hay corte que valga y quien llama tiene que pararse
+        return [], [], avisos + ["ningún plano del guion visual casa con la voz de "
+                                 "ahora: vuelve a revisarlo y aprobarlo"]
     segs = [(palabras[a]["s"], palabras[b - 1]["e"], palabras[a:b]) for a, b in cortes]
     return segs, lineas, avisos
+
+
+def fuera_de_la_voz(planos, bloques):
+    """Los bloques del guion visual que ya no estan en el guion de ahora."""
+    validos = {str(b).upper() for b in bloques or []}
+    return sorted({p["bloque"] for p in planos or [] if p.get("bloque") not in validos})
 
 
 def estado_de_linea(plano, estados):

@@ -112,6 +112,12 @@ def prueba_parrilla():
     sin = P.encargo_de(P.leer_guion(guion.replace("Imágenes: guion\n", "")))
     ok("imagenes" not in sin and sin.get("visuales"), "sin la línea, las líneas viajan pero no se elige nada")
     ok(any("Lo que dice el guion" in a for a in sin["avisos"]), "y se avisa de que no se usarán")
+    for linea in ("Imágenes: … (opcional: «guion» si cada imagen sigue su línea «Visual:»; si no, quita la línea)",
+                  "Imágenes: voz | guion  (opcional)"):
+        ok(not P.leer_guion("X — t\n" + linea + "\n").get("imagenes"),
+           f"la plantilla sin rellenar no elige nada ({linea[:22]}…)")
+    igual(P.leer_guion("X — t\nImágenes: voz\n").get("imagenes"), "voz",
+          "«Imágenes: voz» explícito se guarda (manda sobre un estilo que diga guion)")
     bloques = [{"id": "B001", "texto": "Este error de mampara te deja sin espacio."},
                {"id": "B002", "texto": "Una corrediza te devuelve el espacio."}]
     planos, avisos = G.casar(G.normalizar_visuales(enc["visuales"]), bloques)
@@ -139,6 +145,19 @@ def prueba_corte():
                                        G.normalizar({"planos": PLANOS[:1] * 3})["planos"])
     igual(len(segs), 2, "más líneas que palabras: se quedan tantas como palabras")
     ok(avisos, "y se avisa")
+    # revisión del 22-10: los bordes
+    dos = G.normalizar({"planos": [{"bloque": "B002", "visual": "a"},
+                                   {"bloque": "B003", "visual": "b"}]})["planos"]
+    segs, lineas, _a = G.segmentos(_palabras(9), ["B001"] * 3 + ["B002"] * 3 + ["B003"] * 3, dos)
+    igual([l["visual"] for l in lineas], ["a", "b"],
+          "un bloque del principio sin líneas va con el primer plano, sin repetirlo")
+    igual([len(x[2]) for x in segs], [6, 3], "y le suma sus palabras")
+    segs, lineas, _a = G.segmentos(_palabras(7), ["", "B002", "B002", "", "B002", "B003", "B003"], dos)
+    igual([l["visual"] for l in lineas], ["a", "b"],
+          "una palabra sin bloque (redondeo, hueco) no parte su bloque en dos")
+    segs, lineas, avisos = G.segmentos(_palabras(4), ["B009"] * 4, dos)
+    ok(not segs and avisos, "ninguna línea casa con la voz: no hay corte y se dice")
+    igual(G.fuera_de_la_voz(dos, ["B002"]), ["B003"], "los bloques que ya no están en la voz")
 
 
 def prueba_prompt_y_estado():

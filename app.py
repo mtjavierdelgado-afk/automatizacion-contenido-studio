@@ -5175,6 +5175,7 @@ def _ficha_guion_visual(ctx):
         # no se guardan hasta que alguien las mira y guarda (regla 1)
         propuesta, avisos = gv.casar(guardado["visuales"], bloques)
     espacio, reparto, estados = _fijo_del_video(ctx)
+    fuera = gv.fuera_de_la_voz(guardado.get("planos"), [b["id"] for b in bloques])
     comprobacion = PASOS_MODULOS.medios.leer_json(_ruta_comprobacion_gv(ctx), {}) or {}
     if comprobacion.get("huella") != gv.huella(guardado.get("planos")):
         comprobacion = {}
@@ -5186,7 +5187,9 @@ def _ficha_guion_visual(ctx):
             "guion_visual": guardado, "propuesta": propuesta, "avisos": avisos,
             "bloques": bloques, "estados": sorted(estados), "reparto": sorted(reparto),
             "comprobacion": comprobacion.get("avisos"),
-            "aprobado": bool(guardado.get("aprobado"))}
+            # bloques del guion visual que ya no estan en el guion: no vale hasta revisarlo
+            "fuera_de_la_voz": fuera,
+            "aprobado": bool(guardado.get("aprobado")) and not fuera}
 
 
 @app.get("/api/proyectos/{pid}/guion_visual")
@@ -5208,7 +5211,10 @@ def guardar_modo_guion_visual(pid: str, cuerpo: dict = Body(default=None)):
         raise ErrorApi(400, "manda {imagenes: guion | voz | null}")
     crudo = datos.get("imagenes")
     if crudo not in (None, "") and gv._llano(crudo).strip() == "voz":
-        valor = "voz"
+        # «la voz» explicita solo hace falta para mandar sobre un estilo que
+        # diga «guion»; si no, es lo de siempre y no se escribe nada (regla 1)
+        estilo = (ctx.estado.params("assets") or {}).get("estilo")
+        valor = "voz" if (estilo if isinstance(estilo, dict) else {}).get("imagenes") == "guion" else ""
     else:
         try:
             valor = gv.normalizar_modo(crudo)
@@ -5335,9 +5341,9 @@ def aprobar_guion_visual(pid: str, cuerpo: dict = Body(default=None)):
             raise ErrorApi(400, str(fallo))
         if aprobado and not guardado.get("planos"):
             raise ErrorApi(409, "no hay guion visual que aprobar: escríbelo, guárdalo o pídeselo a Claude")
-        if guardado.get("aprobado") != aprobado:
+        if guardado and bool(guardado.get("aprobado")) != aprobado:
             ctx.estado.actualizar_params("assets", {"guion_visual": dict(guardado, aprobado=aprobado)})
-        if aprobado and _asistente_listo():
+        if aprobado and _asistente_listo()[0]:
             trabajo_id = ctx.gestor.lanzar("guion_visual_comprobar", _correr_comprobar_gv, ctx,
                                            guardado["planos"], paso="assets")
     if trabajo_id:
@@ -11607,7 +11613,10 @@ def _impedimentos(ctx, pestana, pendientes):
         try:
             gv = _guion_visual()
             params_a = ctx.estado.params("assets") or {}
-            sin_aprobar = gv.modo_de(params_a) == "guion" and not gv.activo(params_a)
+            planos_a = gv.activo(params_a)
+            sin_aprobar = gv.modo_de(params_a) == "guion" and (
+                not planos_a or bool(gv.fuera_de_la_voz(
+                    planos_a, [b.get("id") for b in _bloques_del_guion(ctx)])))
         except Exception:                                   # noqa: BLE001
             sin_aprobar = False
         if sin_aprobar:
@@ -17388,16 +17397,24 @@ def _opciones_al_crear(ctx, preset_id, opciones):
     # con el las lineas «Visual:» de la Parrilla, si las hay, para casarlas con
     # el guion cuando exista. Sin elegir, nada (regla 1).
     gv = _guion_visual()
-    try:
-        imagenes = gv.normalizar_modo(opciones.get("imagenes"))
-        visuales = gv.normalizar_visuales(opciones.get("visuales") or [])
-    except ValueError as fallo:
-        raise ErrorApi(400, str(fallo))
+    crudo_img = opciones.get("imagenes")
+    if crudo_img not in (None, "") and gv._llano(crudo_img).strip() == "voz":
+        imagenes = "voz"       # «Imágenes: voz» explícito: manda sobre el estilo
+    else:
+        try:
+            imagenes = gv.normalizar_modo(crudo_img)
+        except ValueError as fallo:
+            raise ErrorApi(400, str(fallo))
+    visuales = gv.normalizar_visuales(opciones.get("visuales") or [])
+    cambios = {}
     if imagenes:
-        cambios = {"imagenes": imagenes}
-        if visuales:
-            cambios["guion_visual"] = {"origen": "parrilla", "planos": [],
-                                       "aprobado": False, "visuales": visuales}
+        cambios["imagenes"] = imagenes
+    if visuales:
+        # las lineas «Visual:» del guion de la Parrilla se guardan siempre que
+        # lleguen: si el estilo dice «guion», o se elige despues, no se pierden
+        cambios["guion_visual"] = {"origen": "parrilla", "planos": [],
+                                   "aprobado": False, "visuales": visuales}
+    if cambios:
         ctx.estado.actualizar_params("assets", cambios)
     presencia = opciones.get("presencia")
     if presencia:

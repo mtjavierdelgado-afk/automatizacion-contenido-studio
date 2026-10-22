@@ -28124,6 +28124,32 @@ async function borrarGuionParrilla(g) {
   } catch (e) { toast(`no se ha podido borrar: ${e.message}`, true); }
 }
 
+/* SOLTAR EL VÍDEO ABIERTO (rama `encargo-limpio`, 22-10-2026). Crear tiene UN
+   vídeo abierto (`APP.light.video.pid`) y el formulario de «Un vídeo nuevo»
+   solo se pinta con `pid` vacío (`nuevo = !v.pid`). «Pasar al Encargo» llenaba
+   el borrador pero dejaba abierto el vídeo de antes: la pantalla enseñaba el
+   texto del que se estaba montando y no se sabía de quién eran los botones
+   del carril (lo vio el dueño, 22-10).
+
+   Soltar es solo de la PANTALLA: no se cancela ni se toca nada en el servidor.
+   El trabajo que corra sigue allí; su seguimiento ya no repinta ni recarga
+   este vídeo porque `seguirTrabajo` solo llama a su `alTerminar` si su vídeo
+   sigue abierto, y al reabrirlo `reengancharTandaLight` lo vuelve a enganchar.
+   Es lo mismo que hace `volverAlSitio` al ir a un vídeo nuevo, y el resto de
+   lo de ese vídeo lo rehace `cargarVideoLight` al abrirlo. -> el nombre del
+   vídeo soltado, o '' si no había ninguno. */
+function soltarVideoAbiertoLight() {
+  const v = APP.light.video;
+  if (!v.pid) return '';
+  const nombre = v.nombre || v.pid;
+  pararPrevia();
+  recordarVideoLight('');
+  // la copia editable del encargo era la de ESE vídeo
+  v.pedido = null;
+  v.error = '';
+  return nombre;
+}
+
 /* PASAR AL ENCARGO: se pregunta ANTES de marcar nada si el formulario de «Un
    vídeo nuevo» ya tiene un borrador (sería pisar un vídeo a medio escribir), y
    se rellena con lo que dice el servidor. Lo demás del formulario (qué lleva,
@@ -28169,9 +28195,14 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.fichaAbierta = false;
   PAR.datos = null;
+  const soltado = soltarVideoAbiertoLight();
   irAModulo('crear');
   elegirEstiloLight(ficha);
   toast(`Encargo lleno con «${recortar(r.nombre || 'el guion', 40)}»: revísalo y pulsa «Generar el guion»`);
+  if (soltado) {
+    setTimeout(() => toast(`«${recortar(soltado, 40)}» sigue trabajando por su cuenta: `
+      + 'lo abres cuando quieras desde Tus proyectos'), 1600);
+  }
   (r.avisos || []).slice(0, 2).forEach(a => setTimeout(() => toast(a, true), 3200));
 }
 

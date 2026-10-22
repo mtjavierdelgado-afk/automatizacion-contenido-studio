@@ -7932,5 +7932,67 @@ def publicar_seo_canal(navegador, datos):
     _r, claves = api.get("/api/claves")
     api.put("/api/claves", {"youtube_oauth": {"cliente_id": "", "secreto": ""}})
 
+
+@escenario
+def encargo_limpio_suelta_el_video(navegador, datos):
+    """Rama encargo-limpio (22-10): con un vídeo ABIERTO en Crear, «Pasar al
+    Encargo» desde la Parrilla lo suelta y deja «Un vídeo nuevo» limpio. Antes
+    la pantalla seguía enseñando el vídeo abierto (lo vio el dueño mientras uno
+    se montaba). Soltar es solo de la pantalla: el vídeo no se toca."""
+    api, pid, cid = datos["api"], datos["video"], datos["cliente"]
+    guion = ("EL01 — Limpio\nCliente / proyecto: Prueba\nUso: adaptar\nRed: Reels\n"
+             "Formato: vertical\nDuración: 30 s\nObjetivo: probar\nCTA: Escríbenos\n"
+             "Tono: cercano\n\nESCENA 1\nVisual: una mesa\nVoz: «Encargo limpio.»\n\n"
+             "PARA EL ENCARGO\n- Material: Material del encargo limpio.\n"
+             "- Indicaciones: cercano\n- Llamadas a la acción: Escríbenos\n"
+             "- Duración: 30 s · Formato: vertical\n\nAVISOS\n- ninguno")
+    r, hecho = api.post(f"/api/parrilla/proyectos/{cid}/guiones",
+                        {"texto": guion, "nombre": "Encargo limpio"})
+    ok(r.status_code == 201 and (hecho or {}).get("guiones"),
+       f"el guion de prueba se guarda ({r.status_code})")
+    _r, antes = api.get(f"/api/proyectos/{pid}")
+    _r, lista_antes = api.get("/api/proyectos")
+    pg = Pagina(navegador, datos, nombre="encargo limpio")
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.p.wait_for_timeout(1500)
+    nombre = pg.p.evaluate("() => APP.light.video.nombre || ''")
+    ok(pg.p.evaluate(f"() => APP.light.video.pid === '{pid}'"), "hay un vídeo abierto en Crear")
+    pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+    pg.js(f"elegirProyectoParrilla('{cid}');")
+    pg.p.wait_for_timeout(800)
+    pg.pulsar(".tarjeta-guion .titulo-guion", "EL01")
+    pg.pulsar(".pestanas-cajon button", "Al Encargo")
+    pg.p.locator(".pasar-encargo select").first.select_option(datos["preset"])
+    pg.p.wait_for_timeout(300)
+    pg.pulsar(".pie-cajon .boton-pasar-encargo", "Pasar al Encargo")
+    if pg.esperar(".capa-dialogo", "medio escribir", 3):
+        pg.pulsar(".capa-dialogo button[type=submit]")
+    fin = time.time() + 10
+    while time.time() < fin and not pg.p.evaluate(
+            "() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"):
+        pg.p.wait_for_timeout(300)
+    pg.p.wait_for_timeout(500)
+    ok(pg.p.evaluate("() => APP.light.video.pid === ''"), "el vídeo de antes queda soltado")
+    ok(pg.p.evaluate("() => !localStorage.getItem('estudio.light.video')"),
+       "y no se reabre solo al recargar")
+    ok(pg.visible(".cab-video .pastilla.borrador"), "la cabecera es la de «Un vídeo nuevo» (borrador)")
+    cabecera = pg.p.evaluate("() => (document.querySelector('.cab-video') || {}).innerText || ''")
+    ok(not nombre or nombre not in cabecera, f"sin el nombre del vídeo de antes ({nombre!r})")
+    ok(pg.p.evaluate("() => (APP.light.video.encargo || {}).material") == "Material del encargo limpio.",
+       "con el material del guion")
+    ok(pg.esperar("#toast, .toast", "sigue trabajando", 6), "y avisa de que el otro sigue por su cuenta")
+    _r, despues = api.get(f"/api/proyectos/{pid}")
+    ok(json.dumps((antes or {}).get("pasos"), sort_keys=True) == json.dumps((despues or {}).get("pasos"), sort_keys=True),
+       "el vídeo soltado no se toca en el servidor")
+    _r, lista_despues = api.get("/api/proyectos")
+    ok(len((lista_despues or {}).get("proyectos") or []) == len((lista_antes or {}).get("proyectos") or []),
+       "sin crear ningún vídeo")
+    pg.js(f"await abrirVideoLight('{pid}');")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.p.evaluate(f"() => APP.light.video.pid === '{pid}'"), "y se vuelve a abrir sin problema")
+    pg.captura("encargo_limpio")
+    pg.sin_errores("encargo limpio")
+    pg.cerrar()
+
 if __name__ == "__main__":
     sys.exit(main())

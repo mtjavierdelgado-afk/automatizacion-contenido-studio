@@ -7161,13 +7161,17 @@ def portadas_2_capas_y_pantalla_quieta(navegador, datos):
     # LA PANTALLA NO SE MUEVE al llegar los ganchos de una red de más arriba.
     # Se sostiene sola (en la pasada entera otros escenarios dejan la ficha a
     # su manera): tres redes con texto, cada una con su «Dame 3 ganchos».
+    # cuatro redes (rediseno-publicar): en el paso SEO del móvil, con tres la
+    # página no da para bajar el segundo «Dame 3 ganchos» hasta arriba y el
+    # control de «sin el ancla se mueve» se quedaba pegado al fondo
     r, _d = api.put(f"/api/publicar/videos/{pid}", {
-        "redes": ["tiktok", "instagram", "youtube"],
+        "redes": ["tiktok", "instagram", "youtube", "facebook"],
         "textos": {"tiktok": {"descripcion": "Alquila consolas para tu fiesta en Lima"},
                    "instagram": {"descripcion": "Tu fiesta con consolas y pantallas gigantes"},
                    "youtube": {"titulo": "Consolas para fiestas en Lima",
-                               "descripcion": "Así montamos una fiesta con diez consolas"}}})
-    ok(r.status_code == 200, f"la ficha con tres redes y sus textos ({r.status_code})")
+                               "descripcion": "Así montamos una fiesta con diez consolas"},
+                   "facebook": {"descripcion": "Consolas para tu fiesta en Lima"}}})
+    ok(r.status_code == 200, f"la ficha con cuatro redes y sus textos ({r.status_code})")
     movil = Pagina(navegador, datos, ancho=390, alto=780, nombre="portadas_2_movil")
     movil.js(f"abrirPublicarVideo('{pid}');")
     movil.esperar(".ficha-publicar .nombre-ficha", segundos=20)

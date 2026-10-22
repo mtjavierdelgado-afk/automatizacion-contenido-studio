@@ -14,6 +14,37 @@ vídeos, estilos, claves y contraseña no se tocan.
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
+**Tus proyectos y la pantalla de un proyecto, nuevas (22 de octubre)**
+- **«+ Nuevo vídeo» en Crear**, arriba en la portada y en cada proyecto: pregunta
+  **¿con qué estilo?** y abre el Encargo de un vídeo nuevo (lo mismo que pulsar
+  un estilo). Al lado, **+ Nuevo proyecto** y la **🗑 Papelera · N**.
+- **Un buscador** que filtra vídeos, estilos y proyectos de la página.
+- **⚠ Te necesitan** junta arriba lo que antes iba suelto: los vídeos que
+  perdieron imágenes (**Reparar**) y los estilos a medias (**Retomar** /
+  **Apartar**).
+- **«Sigue donde lo dejaste»** (antes «Últimos vídeos») en tarjetas que dicen
+  **cómo va cada vídeo** en Crear («✓ Montado», «⚠ Vídeo obsoleto», «● En el
+  Guion», «⟳ 42 % · Dibujando los planos») y en Publicar («○ Listo para
+  publicar», «◷ jue 22/10 12:00 · 4 redes», «✓ Publicado en 2 redes»), con la
+  fecha legible («hoy 17:31»), **Publicar ›** si está montado y **⋯** con
+  Renombrar, Mover a otro proyecto y Apartar. Se acaba el «Apartar» rojo en
+  cada fila.
+- **Tarjetas de proyecto** con su logo o su inicial, sus tres últimos vídeos y
+  sus marcas («🔒 con clave», «oculto», «2 listos para publicar»). **Ver ocultos
+  (N)** es un interruptor, y cada oculto trae su «Dejar de ocultar».
+- **Dentro de un proyecto**, los mandos (nombre, logo, ocultar, clave, borrar)
+  pasan a **⚙ Ajustes del proyecto**, un panel a la derecha; **Borrar el
+  proyecto** queda abajo, en la zona de peligro, con su explicación.
+- **Tocar un estilo abre su menú**: **▶ Nuevo vídeo con este estilo**, **✎
+  Editar el estilo**, Duplicar, Mover y Apartar («✎ Editar» sigue en la
+  tarjeta). **⇄ Traer un estilo de otro proyecto** es una tarjeta más.
+- **Los vídeos del proyecto se filtran** por estado (Todos · En curso · Listos ·
+  Programados · Publicados) y se ven en tarjetas o en lista.
+- **«Apartar»** es el nombre de todo lo que va a la papelera (antes también
+  «Descartar»); se puede devolver.
+- Nada de esto gasta ni cambia ningún vídeo: el estado de cada tarjeta lo lee
+  el Studio de lo que ya sabe (una consulta nueva de solo lectura).
+
 **Crear en el móvil, arreglado (21 de octubre)**
 - **El recorrido ya no parpadea**: la fila de pasos de arriba saltaba al paso 1
   y volvía cada medio segundo mientras algo se generaba. Ahora se queda quieta,

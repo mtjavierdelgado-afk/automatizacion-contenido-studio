@@ -7492,7 +7492,7 @@ function cerrarAjustesProyecto() {
 
 function cajonAjustesProyecto(ficha) {
   const c = { cid: ficha.id, cliente: ficha };
-  const cuerpo = h('div', { clase: 'cuerpo-cajon' });
+  const cuerpo = h('div', { clase: 'cuerpo-ajustes' });
   SECCIONES_AJUSTES_PROYECTO.forEach(seccion => {
     const nodo = seccion.pinta(c);
     if (!nodo) return;
@@ -7502,7 +7502,7 @@ function cajonAjustesProyecto(ficha) {
   const capa = h('div', { clase: 'capa-ajustes-proyecto',
     onclick: ev => { if (ev.target === capa) cerrarAjustesProyecto(); } },
   h('aside', { clase: 'cajon-proyecto', role: 'dialog', 'aria-label': `Ajustes de ${ficha.nombre}`, tabindex: '-1' },
-    h('div', { clase: 'cab-cajon' },
+    h('div', { clase: 'cab-ajustes' },
       h('b', {}, `⚙ Ajustes de ${ficha.nombre}`),
       h('span', { clase: 'crece' }),
       h('button', { clase: 'mini fantasma', title: 'Cerrar', 'aria-label': 'Cerrar', onclick: cerrarAjustesProyecto }, '×')),

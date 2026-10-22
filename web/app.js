@@ -2516,6 +2516,8 @@ function pintarConfig() {
   caja.appendChild(seccionCLI());
   caja.appendChild(seccionOtrasClaves(ficha));
   caja.appendChild(seccionClaveUploadPost(ficha));  // Publicar en redes (rama publicar-redes-1)
+  caja.appendChild(seccionClaveYouTube(ficha));  // búsquedas SEO (rama seo-real)
+  caja.appendChild(seccionCanalYouTube(ficha));  // tu canal con OAuth (rama seo-real-3)
   caja.appendChild(seccionClavesAnalizarCuentas());  // analizar cuentas: YouTube, Meta y Apify (rediseno-publicar)
   caja.appendChild(h('div', { clase: 'fila' },
     h('button', {
@@ -23849,6 +23851,8 @@ async function cargarPublicar(silencio) {
           const error = ((PUB.ficha.seo || {}).errores || {})[t];
           if (error) toast(error, true);
           else toast(t === 'optimizar' ? 'Revisión SEO lista: acepta lo que te guste'
+            : t === 'investigar' ? 'Búsquedas investigadas: elige la frase con «Usar»'
+            : t === 'encontraron' ? 'Listo: así te encontraron en YouTube'
             : 'Tres ganchos listos: elige uno');
         });
       }
@@ -27215,6 +27219,133 @@ function estadoConexionesCuentas() {
       } }, 'Configurar ›'));
 }
 
+/* LA CLAVE DE LA API DE DATOS DE YOUTUBE (rama seo-real), opcional: con ella
+   «Investigar búsquedas» mide también la competencia. Gratis, con un cupo
+   diario (~100 búsquedas); no caduca. */
+function seccionClaveYouTube(ficha) {
+  const yt = (ficha && ficha.youtube) || {};
+  const puesta = !!yt.puesta;
+  const campo = h('input', { type: 'password', placeholder: puesta ? `puesta (${yt.cola || ''})` : 'sin poner' });
+  const resultado = h('div', { clase: 'meta' });
+  return h('section', { clase: 'bloque-config' },
+    h('h3', {}, 'YouTube (búsquedas SEO)'),
+    h('div', { clase: 'pista' },
+      'Opcional. Una API key de Google Cloud con la «YouTube Data API v3» activada (console.cloud.google.com → '
+      + 'APIs y servicios → Credenciales → Crear credenciales → Clave de API). Con ella, «Investigar búsquedas» en '
+      + 'Publicar mide la competencia de cada frase en YouTube. Es gratis, con unas 100 búsquedas al día; no caduca. '
+      + 'Sin ella se mide igual la demanda (autocompletado) y tu historial.'),
+    h('div', { clase: 'fila' },
+      h('b', {}, 'YouTube Data API'), h('span', { clase: 'crece' }),
+      pastillaEstado(puesta ? 'ok' : 'vacio', puesta ? yt.cola || '' : 'sin poner')),
+    h('div', { clase: 'fila-clave' }, campo,
+      h('button', { clase: 'mini', onclick: () => {
+        if (!campo.value.trim()) { toast('escribe la clave', true); return; }
+        guardarClaves({ youtube: { clave: campo.value.trim() } });
+        campo.value = '';
+      } }, 'Cambiar'),
+      puesta ? h('button', { clase: 'mini', onclick: async () => {
+        resultado.textContent = 'probando…';
+        try {
+          const r = await pedir(rutaPublicar('/youtube/probar'), { method: 'POST' });
+          resultado.textContent = `${r.prueba.estado === 'ok' ? '✓' : '⚠'} ${r.prueba.mensaje}`
+            + (r.cupo ? ` · quedan ~${r.cupo.busquedas} búsquedas hoy` : '');
+        } catch (e) { resultado.textContent = e.message; }
+      } }, 'Probar') : null,
+      puesta ? h('button', { clase: 'mini fantasma peligro',
+        onclick: () => guardarClaves({ youtube: { clave: '' } }) }, 'Quitar') : null),
+    resultado);
+}
+
+/* TU CANAL DE YOUTUBE (rama seo-real-3): YouTube Analytics con OAuth. La
+   persona crea en Google Cloud un «ID de cliente de OAuth» (aplicación web)
+   con la dirección de vuelta que se enseña aquí, pega el ID y el secreto y
+   pulsa «Conectar mi canal». Google se abre en otra pestaña y vuelve a
+   `/api/publicar/youtube/oauth/vuelta`; al volver a esta, Configuración se
+   pone al día sola (al recuperar el foco). */
+function vueltaOAuthYouTube() {
+  return `${location.origin}${BASE}/api/publicar/youtube/oauth/vuelta`;
+}
+
+let ESCUCHA_FOCO_CANAL = false;
+const CANAL_PENDIENTE = { desde: 0 };
+
+function seccionCanalYouTube(ficha) {
+  const yo = (ficha && ficha.youtube_oauth) || {};
+  /* AL VOLVER DE LA PESTAÑA DE GOOGLE: solo mientras hay una conexión a medias,
+     solo las claves, y solo se repinta si el canal cambió (revisión del 21-10:
+     repintar a cada foco borraba lo que se estaba pegando). */
+  if (!ESCUCHA_FOCO_CANAL) {
+    ESCUCHA_FOCO_CANAL = true;
+    window.addEventListener('focus', async () => {
+      const pendiente = CANAL_PENDIENTE.desde && Date.now() - CANAL_PENDIENTE.desde < 15 * 60 * 1000;
+      if (!pendiente) { CANAL_PENDIENTE.desde = 0; return; }
+      try {
+        const r = await pedir(API.claves());
+        const antes = ((estadoConfig().ficha || {}).youtube_oauth) || {};
+        const ahora = r.youtube_oauth || {};
+        if (ahora.conectado !== antes.conectado || ahora.desde !== antes.desde || ahora.caido !== antes.caido) {
+          estadoConfig().ficha = Object.assign({}, estadoConfig().ficha, { youtube_oauth: ahora });
+          CANAL_PENDIENTE.desde = 0;
+          repintarClaves();
+          if (ahora.conectado && !ahora.caido) toast(`Canal conectado: ${ahora.canal || 'tu canal'}`);
+        }
+      } catch (e) { /* se vuelve a mirar en el próximo foco */ }
+    });
+  }
+  const id = h('input', { type: 'text', value: yo.cliente_id || '', placeholder: '…apps.googleusercontent.com' });
+  const secreto = h('input', { type: 'password', placeholder: yo.puesta ? 'puesto (no hace falta volver a escribirlo)' : 'secreto del cliente' });
+  const vuelta = vueltaOAuthYouTube();
+  const conectar = async () => {
+    // la pestaña se abre YA (en el clic): abierta después de un await, Safari
+    // y Firefox la bloquean como ventana emergente
+    const pestana = window.open('', '_blank');
+    try {
+      const r = await pedir(rutaPublicar('/youtube/oauth/empezar'), { method: 'POST', cuerpo: { redireccion: vuelta } });
+      CANAL_PENDIENTE.desde = Date.now();
+      if (pestana) { pestana.opener = null; pestana.location.href = r.url; } else location.href = r.url;
+      toast('Da permiso en la pestaña de Google y vuelve aquí');
+    } catch (e) {
+      if (pestana) pestana.close();
+      toast(e.message, true);
+    }
+  };
+  const estado = yo.conectado
+    ? (yo.caido ? pastillaEstado('error', 'conexión cortada') : pastillaEstado('ok', yo.canal || 'conectado'))
+    : pastillaEstado(yo.puesta ? 'parcial' : 'vacio', yo.puesta ? 'sin conectar' : 'sin poner');
+  return h('section', { clase: 'bloque-config canal-youtube' },
+    h('h3', {}, 'YouTube: tu canal'),
+    h('div', { clase: 'pista' },
+      'Opcional. Conecta tu canal y el SEO aprende de él: qué búsquedas ya te traen vistas en YouTube y, '
+      + 'de cada vídeo publicado, cómo te encontraron y cuánto lo vieron. En console.cloud.google.com, en el '
+      + 'mismo proyecto de la clave de YouTube: activa la «YouTube Analytics API», configura la pantalla de '
+      + 'consentimiento (tipo «Externo», tú como usuario de prueba) y crea Credenciales → «ID de cliente de '
+      + 'OAuth» → «Aplicación web», con esta URI de redireccionamiento autorizada:'),
+    h('div', { clase: 'fila' }, h('code', { clase: 'crece vuelta-oauth' }, vuelta),
+      h('button', { clase: 'mini', onclick: () => { navigator.clipboard && navigator.clipboard.writeText(vuelta); toast('Copiada'); } }, 'Copiar')),
+    h('div', { clase: 'fila' }, h('b', {}, 'Canal'), h('span', { clase: 'crece' }), estado),
+    yo.conectado && yo.desde ? h('div', { clase: 'meta' }, `Conectado el ${String(yo.desde).replace('T', ' ')}.`) : null,
+    yo.caido ? h('div', { clase: 'meta aviso-busquedas' }, 'Google cortó la conexión. Si tu app de Google Cloud está «en prueba», lo hace cada 7 días: vuelve a conectar (o publícala en la pantalla de consentimiento para que no caduque).') : null,
+    h('div', { clase: 'fila-clave' }, id, secreto,
+      h('button', { clase: 'mini', onclick: () => {
+        const cliente = id.value.trim();
+        if (!cliente) { toast('pega el ID de cliente', true); return; }
+        if (!secreto.value.trim() && (!yo.puesta || cliente !== yo.cliente_id)) { toast('pega también el secreto', true); return; }
+        guardarClaves({ youtube_oauth: { cliente_id: cliente, secreto: secreto.value.trim() || CONSERVAR_CLAVE } });
+        secreto.value = '';
+      } }, 'Guardar')),
+    h('div', { clase: 'fila' },
+      yo.puesta ? h('button', { clase: 'mini primario', datos: { accion: 'conectar-canal' }, onclick: conectar },
+        yo.conectado ? 'Volver a conectar' : 'Conectar mi canal') : null,
+      yo.conectado ? h('button', { clase: 'mini fantasma peligro', onclick: async () => {
+        try {
+          estadoConfig().ficha = Object.assign({}, estadoConfig().ficha,
+            await pedir(rutaPublicar('/youtube/oauth/desconectar'), { method: 'POST' }));
+          repintarClaves();
+          toast('Canal desconectado');
+        } catch (e) { toast(e.message, true); }
+      } }, 'Desconectar') : null));
+}
+
 /* ================================================================ PUBLICAR · SEO
  * Rama `publicar-seo` (18-10-2026). Lo que hace que un vídeo se ENCUENTRE:
  * la palabra clave del proyecto y la de cada vídeo, los campos que acepta
@@ -27361,7 +27492,8 @@ function bloqueSeoVideo() {
   b.appendChild(h('div', { clase: 'fila campos-seo' },
     h('label', { clase: 'etiqueta-campo' }, 'Palabra clave de este vídeo',
       h('input', { type: 'text', value: 'palabra_clave' in (PUB.seoBorrador || {}) ? PUB.seoBorrador.palabra_clave : (seo.palabra_propia || ''),
-        placeholder: proyecto || `la del proyecto (${DONDE_SEO_PROYECTO})`, datos: { foco: 'seo-palabra-video' },
+        placeholder: seo.palabra && !seo.palabra_propia ? seo.palabra : (proyecto && !seo.proyecto_fuera ? proyecto : 'la frase que alguien buscaría para encontrar ESTE vídeo'),
+        datos: { foco: 'seo-palabra-video' },
         oninput: ev => { PUB.seoBorrador = Object.assign(PUB.seoBorrador || {}, { palabra_clave: ev.target.value }); },
         onchange: async ev => { await guardarSeoVideoPublicar({ palabra_clave: ev.target.value }); delete PUB.seoBorrador.palabra_clave; } })),
     botonGuia('palabra_clave', campo)));
@@ -27370,14 +27502,140 @@ function bloqueSeoVideo() {
       h('span', { clase: 'meta crece' }, `Claude propone para este vídeo: «${seo.palabra_propuesta}»`),
       h('button', { clase: 'mini', onclick: () => guardarSeoVideoPublicar({ palabra_clave: seo.palabra_propuesta }) }, 'Usarla')));
   }
-  if (!seo.palabra) {
-    b.appendChild(h('div', { clase: 'caja-aviso' }, `Ni este vídeo ni su proyecto tienen palabra clave: sin ella los textos no se posicionan para nada en concreto. Ponla aquí o en ${DONDE_SEO_PROYECTO}.`));
+  if (seo.palabra_origen === 'propuesta') {
+    b.appendChild(h('div', { clase: 'fila' },
+      h('span', { clase: 'meta crece' }, `En uso: «${seo.palabra}», la que propuso Claude para este vídeo (sin confirmar). Confírmala o escribe otra.`),
+      h('button', { clase: 'mini', onclick: () => guardarSeoVideoPublicar({ palabra_clave: seo.palabra }) }, 'Confirmarla')));
   }
+  if (seo.proyecto_fuera) {
+    b.appendChild(h('div', { clase: 'meta' }, `La palabra clave del proyecto («${proyecto}») no se usa aquí: este vídeo no trata de eso, y meterla espanta a quien la busca.`));
+  }
+  if (!seo.palabra) {
+    b.appendChild(h('div', { clase: 'caja-aviso' }, 'Este vídeo no tiene palabra clave: sin ella los textos no se posicionan para nada en concreto. Escríbela o pulsa «Investigar búsquedas» y elige una de las que la gente busca.'));
+  }
+  for (const bloque of [bloqueBusquedasSeo(), bloqueEncontraronSeo()]) if (bloque) b.appendChild(bloque);
   if (seo.nombre_fichero) b.appendChild(h('div', { clase: 'meta' }, `El MP4 se sube como «${seo.nombre_fichero}» (el del proyecto no cambia).`));
   if ((seo.errores || {}).optimizar) b.appendChild(cajaError(seo.errores.optimizar));
   const propuesta = (seo.propuesta || {}).redes || {};
   if (Object.keys(propuesta).length) b.appendChild(propuestaSeoPublicar(propuesta));
   return b;
+}
+
+/* «INVESTIGAR BÚSQUEDAS» (rama seo-real, 20-10): lo que la gente busca de
+   verdad (autocompletado de YouTube y Google, Perú), la competencia en YouTube
+   si hay clave, y cómo le fue a cada frase en tu cuenta. Solo frases que el
+   vídeo trata. «Usar» la deja como palabra clave del vídeo; no cambia ningún
+   texto (para eso, «Optimizar SEO», que ya usa estas búsquedas). */
+function bloqueBusquedasSeo() {
+  const f = PUB.ficha;
+  const seo = f.seo || {};
+  const real = seo.real || {};
+  const trabajando = !!(seo.trabajando || {}).investigar;
+  PUB.busquedasAbiertas = PUB.busquedasAbiertas === undefined ? true : PUB.busquedasAbiertas;
+  const caja = h('details', { clase: 'busquedas-seo', open: !!PUB.busquedasAbiertas,
+    ontoggle: ev => { PUB.busquedasAbiertas = ev.currentTarget.open; } },
+  h('summary', {}, h('b', {}, 'Búsquedas reales'),
+    real.al ? h('span', { clase: 'meta' }, ` · investigado el ${String(real.al).slice(0, 10)}`) : h('span', { clase: 'meta' }, ' · sin investigar')));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('span', { clase: 'meta crece' }, seo.con_youtube
+      ? `Con la competencia de YouTube${seo.cupo_youtube ? ` (quedan ~${seo.cupo_youtube.busquedas} búsquedas hoy)` : ''}.`
+      : 'Sin clave de YouTube: se mide la demanda, no la competencia (la clave es opcional, en Configuración).'),
+    h('button', { clase: 'mini', disabled: trabajando, datos: { accion: 'investigar-busquedas' },
+      title: 'Pregunta al buscador qué frases de este vídeo se buscan de verdad. Gratis y sin Claude.',
+      onclick: () => investigarBusquedasPublicar() }, trabajando ? 'Investigando…' : (real.al ? 'Volver a investigar' : 'Investigar búsquedas'))));
+  if ((seo.errores || {}).investigar) caja.appendChild(cajaError(seo.errores.investigar));
+  // lo de la palabra del proyecto ya lo dice el bloque de arriba
+  (real.avisos || []).filter(a => !(seo.proyecto_fuera && a.includes('(del proyecto)')))
+    .forEach(a => caja.appendChild(h('div', { clase: 'meta aviso-busquedas' }, a)));
+  if (real.sin_corpus) caja.appendChild(h('div', { clase: 'meta' }, 'El vídeo no tiene guion ni material: no se puede comprobar qué frases trata.'));
+  const filas = (real.candidatas || []);
+  if (!filas.length) return caja;
+  const valor = v => (v === null || v === undefined) ? '—' : String(v);
+  const tabla = h('table', { clase: 'tabla tabla-busquedas' },
+    h('thead', {}, h('tr', {}, h('th', {}, 'Frase'), h('th', {}, 'Del vídeo'), h('th', {}, 'Demanda'),
+      h('th', {}, 'Competencia'), h('th', {}, 'Tendencia'), h('th', {}, 'Tu historial'), h('th', {}, 'Total'), h('th', {}, ''))),
+    h('tbody', {}, ...filas.map(c => {
+      const comp = c.competencia || null;
+      const plano = x => String(x || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+      const enUso = plano(seo.palabra) === plano(c.frase);
+      return h('tr', { clase: c.recomendada ? 'recomendada' : '' },
+        h('td', {}, h('span', {}, c.frase), h('div', { clase: 'meta' }, `${c.origen || ''}${c.recomendada ? ' · la recomendada' : ''}`)),
+        h('td', {}, valor((c.relevancia || {}).valor)),
+        h('td', { title: ((c.demanda || {}).textos || []).join(' · ') }, (c.demanda || {}).nivel || '—'),
+        h('td', { title: comp && !comp.error ? `mediana ${comp.mediana_vistas} vistas · ${comp.pequenos} canales pequeños` : (comp && comp.texto) || '' },
+          comp ? (comp.error ? 'sin dato' : comp.nivel) : '—'),
+        h('td', { title: (c.tendencia || {}).texto || 'Google Trends (experimental): sin dato' },
+          ({ sube: '↑ sube', baja: '↓ baja', estable: '→ estable' })[(c.tendencia || {}).sentido] || '—'),
+        h('td', { title: (c.historial || {}).texto || '' },
+          (c.historial || {}).veces !== null && (c.historial || {}).veces !== undefined
+            ? `${String(c.historial.veces).replace('.', ',')}×`
+            : ((c.canal || {}).vistas ? `${c.canal.vistas} vistas` : '—')),
+        h('td', {}, h('b', {}, valor(c.puntuacion))),
+        h('td', {}, enUso ? h('span', { clase: 'pastilla ok' }, 'en uso')
+          : h('button', { clase: 'mini', onclick: () => guardarSeoVideoPublicar({ palabra_clave: c.frase }) }, 'Usar')));
+    })));
+  caja.appendChild(h('div', { clase: 'tabla-desliza' }, tabla));
+  caja.appendChild(h('div', { clase: 'meta' }, 'Del vídeo: cuánto de la frase sale en el guion o el material. '
+    + 'Tendencia: si se busca más o menos que hace 3 meses en Perú (Google Trends, experimental). '
+    + 'Tu historial: las vistas de tus publicaciones con esa frase frente a lo normal de tu cuenta (1× = tu media) '
+    + 'o, con tu canal conectado, las vistas que ya te trae esa búsqueda en YouTube. '
+    + 'Total: lo que pesan las tres partes con dato.'));
+  return caja;
+}
+
+/* «CÓMO TE ENCONTRARON» (rama seo-real-3): de un vídeo ya publicado en
+   YouTube, con el canal conectado, las búsquedas que le trajeron vistas y
+   cuánto se vio (YouTube Analytics). Sale solo si está publicado en YouTube. */
+function bloqueEncontraronSeo() {
+  const f = PUB.ficha;
+  const seo = f.seo || {};
+  if (!seo.en_youtube) return null;
+  const canal = seo.canal || {};
+  const res = seo.encontraron || {};
+  const trabajando = !!(seo.trabajando || {}).encontraron;
+  const caja = h('div', { clase: 'encontraron-seo' },
+    h('div', { clase: 'fila' }, h('b', { clase: 'crece' }, 'Cómo te encontraron en YouTube'),
+      canal.conectado ? h('button', { clase: 'mini', disabled: trabajando, datos: { accion: 'encontraron' },
+        title: 'Lo que dice YouTube Analytics de este vídeo: búsquedas que le trajeron vistas y retención',
+        onclick: () => encontraronPublicar() }, trabajando ? 'Preguntando…' : (res.al ? 'Volver a mirar' : 'Mirarlo')) : null));
+  if (!canal.conectado) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Conecta tu canal en Configuración → YouTube: tu canal, y aquí verás con qué búsquedas llegó la gente a este vídeo y cuánto lo vio.'));
+    return caja;
+  }
+  if (canal.caido) caja.appendChild(h('div', { clase: 'meta aviso-busquedas' }, 'Google cortó la conexión con tu canal: vuelve a conectarlo en Configuración.'));
+  if ((seo.errores || {}).encontraron) caja.appendChild(cajaError(seo.errores.encontraron));
+  if (!res.al) return caja;
+  const partes = [`${res.vistas || 0} vistas`];
+  if (res.porcentaje_visto !== undefined && res.porcentaje_visto !== null) partes.push(`${String(res.porcentaje_visto).replace('.', ',')} % visto de media`);
+  if (res.duracion_media_s) partes.push(`${String(res.duracion_media_s).replace('.', ',')} s de media`);
+  caja.appendChild(h('div', { clase: 'meta' }, `${partes.join(' · ')} (desde ${res.desde || '—'})`));
+  const busquedas = res.busquedas || [];
+  if (!busquedas.length) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Todavía nadie ha llegado a este vídeo buscando en YouTube (o son tan pocos que YouTube no los cuenta).'));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'meta' }, 'Búsquedas que le trajeron vistas (la primera suele ser la mejor palabra clave para el próximo vídeo así):'));
+  busquedas.slice(0, 10).forEach(x => caja.appendChild(h('div', { clase: 'fila busqueda-encontrada' },
+    h('span', { clase: 'crece' }, x.termino), h('span', { clase: 'meta' }, `${x.vistas} vistas`))));
+  return caja;
+}
+
+async function encontraronPublicar() {
+  try {
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/seo/encontraron`), { method: 'POST' });
+    const f = PUB.ficha;
+    f.seo = Object.assign({}, f.seo, { trabajando: Object.assign({}, (f.seo || {}).trabajando, { encontraron: {} }) });
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function investigarBusquedasPublicar() {
+  try {
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/seo/investigar`), { method: 'POST' });
+    const f = PUB.ficha;
+    f.seo = Object.assign({}, f.seo, { trabajando: Object.assign({}, (f.seo || {}).trabajando, { investigar: {} }) });
+    pintarModulo();
+  } catch (e) { toast(e.message, true); }
 }
 
 async function guardarSeoVideoPublicar(cambios) {
@@ -27491,6 +27749,10 @@ function campoSeoVideo(campo, etiqueta, ejemplo) {
 
 /* Por red: la nota SEO (sin Claude), el primer comentario, lo de Instagram
    (colaboradores, etiquetas) y «Dame 3 ganchos». */
+/* Los puntos de forma que dicen DÓNDE está la palabra clave: cuentan dentro
+   de Relevancia (los mismos que `seo_real.PUNTOS_DE_SITIO`). */
+const PUNTOS_DE_SITIO_SEO = ['palabra_titulo', 'palabra_primera', 'palabra_descripcion'];
+
 function seoDeRedPublicar(red) {
   const f = PUB.ficha;
   const seo = f.seo || {};
@@ -27499,11 +27761,15 @@ function seoDeRedPublicar(red) {
   const caja = h('div', { clase: 'seo-red' });
   PUB.notaAbierta = PUB.notaAbierta || {};
   const clase = n.nota >= 80 ? 'ok' : n.nota >= 50 ? 'aviso' : 'error';
+  const partes = n.partes || [];
+  const conDato = partes.filter(p => p.valor !== null && p.valor !== undefined).length;
+  const forma = (n.puntos || []).filter(x => !PUNTOS_DE_SITIO_SEO.includes(x.id) && x.id !== 'palabra');
   const detalle = h('details', { clase: 'nota-seo', open: !!PUB.notaAbierta[red],
     ontoggle: ev => { PUB.notaAbierta[red] = ev.currentTarget.open; } },
   h('summary', {}, h('span', { clase: `pastilla ${clase}` }, `SEO ${n.nota}/100`),
-    ` ${(n.puntos || []).filter(x => !x.ok).length} por mejorar`));
-  (n.puntos || []).forEach(x => {
+    partes.length ? ` · ${conDato} de ${partes.length} partes medidas` : '',
+    forma.filter(x => !x.ok).length ? ` · ${forma.filter(x => !x.ok).length} detalles de forma` : ''));
+  const punto = x => {
     detalle.appendChild(h('div', { clase: `punto-seo fila ${x.ok ? 'ok' : 'aviso'}`, datos: { punto: x.id || '' } },
       h('span', { clase: 'crece' }, `${x.ok ? '✓' : '⚠'} ${x.texto}`),
       x.ok ? null : accionPuntoSeoPublicar(red, x)));
@@ -27512,7 +27778,25 @@ function seoDeRedPublicar(red) {
         + 'Facebook de tu zona (por ejemplo, el de «Lima, Perú»), no el nombre. La «Guía» de al lado del campo dice cómo '
         + 'encontrarlo. Vale para todos los vídeos del proyecto.'));
     }
+  };
+  /* LAS TRES PARTES (rama seo-real): lo que de verdad posiciona. Los puntos
+     de dónde está la palabra van dentro de Relevancia, con su botón. */
+  partes.forEach(p => {
+    const sin = p.valor === null || p.valor === undefined;
+    const c = sin ? '' : p.valor >= 70 ? 'ok' : p.valor >= 40 ? 'aviso' : 'error';
+    detalle.appendChild(h('div', { clase: 'parte-seo', datos: { parte: p.id } },
+      h('div', { clase: 'fila' }, h('b', { clase: 'crece' }, p.nombre),
+        h('span', { clase: `pastilla ${c}`.trim() }, sin ? 'sin dato' : `${p.valor}/100`)),
+      ...(p.textos || []).filter(t => t && !(p.id === 'relevancia'
+        && (n.puntos || []).some(x => PUNTOS_DE_SITIO_SEO.includes(x.id) && x.texto === t)))
+        .map(t => h('div', { clase: 'meta' }, t))));
+    if (p.id === 'relevancia') (n.puntos || []).filter(x => PUNTOS_DE_SITIO_SEO.includes(x.id) || x.id === 'palabra').forEach(punto);
   });
+  if (!partes.length) (n.puntos || []).forEach(punto);
+  else if (forma.length) {
+    detalle.appendChild(h('div', { clase: 'titulo-forma-seo' }, 'Detalles de forma (se enseñan, pero no cuentan en la nota)'));
+    forma.forEach(punto);
+  }
   caja.appendChild(detalle);
   caja.appendChild(h('label', { clase: 'etiqueta-campo' },
     red === 'tiktok' && !(f.ajustes || {}).tt_comentarios_puede

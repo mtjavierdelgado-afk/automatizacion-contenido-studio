@@ -7967,6 +7967,115 @@ def publicar_enter_no_pregunta_dos_veces(navegador, datos):
     finally:
         pg.cerrar()
 
+@escenario
+def publicar_seo_real(navegador, datos):
+    """Rama seo-real (20-10): la nota SEO en tres partes (Relevancia, Demanda,
+    Tu historial) con la forma aparte, «Investigar búsquedas» con su tabla y
+    «Usar», la palabra del proyecto que el vídeo no trata fuera, y la casilla
+    de la clave de YouTube en Configuración. En el móvil, sin salirse."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    # una palabra del proyecto que este vídeo NO trata: no tiene que salir
+    api.put(f"/api/publicar/proyectos/{cid}", {"palabra_clave": "clases de guitarra eléctrica"})
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["instagram"], "palabra_clave": "", "textos": {
+        "instagram": {"descripcion": "Un reel para el SEO de verdad", "cta": "Escríbenos",
+                      "hashtags": ["lima", "fiesta", "consolas"]}}})
+    pg = Pagina(navegador, datos)
+    pg.js(f"abrirPublicarVideo('{pid}');")
+    _paso_ficha(pg, "seo")  # rediseno-publicar: el SEO va en su paso de la ficha
+    ok(pg.esperar(".seo-video .busquedas-seo", "Búsquedas reales", 15), "la ficha tiene «Búsquedas reales»")
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    if ficha["seo"].get("proyecto_fuera"):
+        ok(pg.visible(".seo-video .meta", "no se usa aquí"),
+           "la palabra del proyecto que el vídeo no trata se dice que no se usa")
+    ok(ficha["seo"]["palabra"] != "clases de guitarra eléctrica" or not ficha["seo"].get("proyecto_fuera"),
+       "y no es la palabra del vídeo")
+    pg.js("PUB.notaAbierta = {instagram: true}; pintarModulo();")
+    nota = ".nota-de-red-publicar[data-red=instagram] .nota-seo"  # rediseno-publicar: en el paso SEO
+    ok(pg.esperar(f"{nota} .parte-seo b", "Relevancia", 5), "la nota trae la parte de Relevancia")
+    ok(pg.visible(f"{nota} .parte-seo b", "Demanda") and pg.visible(f"{nota} .parte-seo b", "Tu historial"),
+       "y la de Demanda y Tu historial")
+    ok(pg.visible(f"{nota} .parte-seo .meta", "Investigar búsquedas"), "sin investigar, dice cómo medir la demanda")
+    ok(pg.visible(f"{nota} .titulo-forma-seo", "no cuentan"), "los detalles de forma, aparte y sin contar")
+    pg.pulsar('.busquedas-seo button[data-accion="investigar-busquedas"]')
+    ok(pg.esperar(".tabla-busquedas tbody tr", segundos=20), "«Investigar búsquedas»: la tabla de frases")
+    ok(pg.visible(".tabla-busquedas th", "Demanda"), "con su demanda, competencia, historial y total")
+    pg.pulsar(".tabla-busquedas tbody tr button", "Usar")
+    pg.p.wait_for_timeout(1500)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    ok(bool(ficha["seo"]["palabra_propia"]), f"«Usar» la deja como palabra del vídeo: {ficha['seo']['palabra_propia']!r}")
+    ok(pg.esperar(".tabla-busquedas .pastilla", "en uso", 8), "y la tabla la marca «en uso»")
+    pg.js("PUB.notaAbierta = {instagram: true}; pintarModulo();")
+    pg.p.wait_for_timeout(500)
+    ok(not pg.visible(f"{nota} .parte-seo .meta", "sin investigar"), "la nota ya tiene la demanda investigada")
+    pg.captura("publicar_seo_real")
+    pg.sin_errores("el SEO de verdad")
+    pg.cerrar()
+    # la clave de YouTube en Configuración
+    pg = Pagina(navegador, datos)
+    pg.js("conmutarConfig(true);")
+    ok(pg.esperar("#cuerpo-config h3", "YouTube (búsquedas SEO)", 10),
+       "Configuración tiene la casilla de la clave de YouTube")
+    ok(pg.visible("#cuerpo-config .pista", "YouTube Data API v3"), "y dice qué API activar")
+    pg.sin_errores("la clave de YouTube en Configuración")
+    pg.cerrar()
+    for tema in ("oscuro", "claro"):
+        pg = Pagina(navegador, datos, ancho=390, alto=844, nombre=f"seo real móvil {tema}")
+        pg.js(f"document.documentElement.dataset.tema = '{tema}'; abrirPublicarVideo('{pid}');")
+        pg.p.wait_for_timeout(2500)
+        _paso_ficha(pg, "seo")
+        pg.js("PUB.notaAbierta = {instagram: true}; PUB.busquedasAbiertas = true; pintarModulo();")
+        pg.p.wait_for_timeout(500)
+        ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+        ok(ancho <= 2, f"las búsquedas y la nota caben en un móvil, tema {tema} ({ancho}px)")
+        texto = pg.p.evaluate("() => document.querySelector('#modulo').innerText")
+        malos = sorted(set(x.group(0) for x in TEXTOS_MALOS.finditer(texto)))
+        ok(not malos, f"sin «undefined», «NaN» ni «null» ({malos})")
+        pg.captura(f"publicar_seo_real_movil_{tema}", entera=False)
+        pg.sin_errores(f"el SEO de verdad en el móvil ({tema})")
+        pg.cerrar()
+    api.put(f"/api/publicar/proyectos/{cid}", {"palabra_clave": ""})
+    api.put(f"/api/publicar/videos/{pid}", {"palabra_clave": ""})
+
+
+@escenario
+def publicar_seo_canal(navegador, datos):
+    """Rama seo-real-3 (21-10): Configuración → «YouTube: tu canal» con la
+    dirección de vuelta para copiar y el ID de cliente; en la ficha, la
+    columna «Tendencia» de las búsquedas. Sin conectar nada de verdad."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    pg = Pagina(navegador, datos)
+    pg.js("conmutarConfig(true);")
+    ok(pg.esperar("#cuerpo-config h3", "YouTube: tu canal", 10), "Configuración tiene «YouTube: tu canal»")
+    ok(pg.visible("#cuerpo-config .canal-youtube code", "/api/publicar/youtube/oauth/vuelta"),
+       "con la dirección de vuelta para copiar en Google Cloud")
+    pg.p.locator(".canal-youtube input[type=text]").first.fill("123-abc.apps.googleusercontent.com")
+    pg.p.locator(".canal-youtube input[type=password]").first.fill("GOCSPX-prueba")
+    pg.pulsar(".canal-youtube button", "Guardar")
+    ok(pg.esperar(".canal-youtube button", "Conectar mi canal", 8), "guardado el cliente: «Conectar mi canal»")
+    _r, claves = api.get("/api/claves")
+    ok("GOCSPX-prueba" not in json.dumps(claves), "el secreto no baja a la pantalla")
+    pg.sin_errores("el canal de YouTube en Configuración")
+    pg.cerrar()
+    pg = Pagina(navegador, datos)
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["instagram"], "textos": {
+        "instagram": {"descripcion": "Un reel para la tendencia", "cta": "Escríbenos", "hashtags": ["lima"]}}})
+    pg.js(f"abrirPublicarVideo('{pid}'); PUB.busquedasAbiertas = true;")
+    _paso_ficha(pg, "seo")
+    ok(pg.esperar(".busquedas-seo button[data-accion=investigar-busquedas]", segundos=15), "la ficha con sus búsquedas")
+    pg.pulsar(".busquedas-seo button[data-accion=investigar-busquedas]")
+    ok(pg.esperar(".tabla-busquedas th", "Tendencia", 20), "la tabla trae la columna «Tendencia»")
+    pg.captura("publicar_seo_canal")
+    pg.sin_errores("las búsquedas con la tendencia")
+    pg.cerrar()
+    _r, claves = api.get("/api/claves")
+    api.put("/api/claves", {"youtube_oauth": {"cliente_id": "", "secreto": ""}})
+
 
 if __name__ == "__main__":
     sys.exit(main())

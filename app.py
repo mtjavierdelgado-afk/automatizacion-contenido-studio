@@ -19062,6 +19062,124 @@ def publicar_palabra_para_encargo(peticion: Request, estilo: str = Query(default
     return {"palabra": ajustes.get("palabra_clave") or "", "zona": ajustes.get("zona") or ""}
 
 
+# =================================================================== SEO REAL
+# Rama `seo-real` (20-10-2026): «Investigar búsquedas» en la ficha de un vídeo
+# (autocompletado de YouTube y Google para Perú, competencia con la API de
+# datos de YouTube si hay clave, y cómo le fue a cada frase en la cuenta) y
+# «Probar» la clave de YouTube. Va en hilo y se sigue preguntando por la ficha
+# (`seo.trabajando.investigar`, `seo.real`). Nada entra en ninguna firma.
+
+@app.post("/api/publicar/videos/{pid}/seo/investigar", status_code=202)
+def publicar_investigar_seo(pid: str, peticion: Request):
+    """Investiga las búsquedas de verdad para la palabra clave de este vídeo."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    P = _publicar()
+    ajustes = P.ajustes_de(raiz_proyectos(), info["cliente"])
+    del_proyecto = [v for v in _videos_para_publicar(peticion) if v["cliente"] == info["cliente"]]
+    cid_res = "" if info["cliente"] in ("", P.SIN_PROYECTO) else info["cliente"]
+    _por_publicar(P.lanzar_investigar, raiz_proyectos(), info, ajustes, del_proyecto, cid_res)
+    anotar_global("publicar_seo_investigar", {"proyecto": ctx.id})
+    return {"trabajando": True}
+
+
+@app.post("/api/publicar/youtube/probar")
+def publicar_probar_youtube():
+    """Prueba la clave de la API de datos de YouTube (gasta 1 unidad del cupo)
+    y dice lo que queda hoy. La clave nunca sale en la respuesta."""
+    P = _publicar()
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    modulo = PASOS_MODULOS.comprobar_claves
+    clave = P.clave_youtube()
+    if P.SR.simulado():
+        ficha = modulo._ficha("youtube", "ok" if clave else "sin_clave",
+                              "simulado" if clave else "sin poner")
+    else:
+        ficha = modulo.probar_youtube(clave)
+        if clave and ficha.get("estado") != "sin_red":
+            # «Probar» gasta 1 unidad; con el cupo gastado, el día queda marcado
+            P.SR.gastar(raiz_proyectos(), 1, agotado="cupo" in str(ficha.get("mensaje") or ""))
+    ficha = modulo._tachar([ficha], {"youtube": {"clave": clave}})[0]
+    return {"prueba": ficha, "cupo": P.SR.cupo(raiz_proyectos())}
+
+
+# Fase 3 (rama `seo-real-3`, 21-10-2026): el canal de YouTube conectado con
+# OAuth (YouTube Analytics) y «Cómo te encontraron» de un vídeo publicado.
+# El secreto y el token viven en el almacén de claves; la pantalla solo ve si
+# está conectado y qué canal (`/api/claves` → `youtube_oauth`).
+
+def _canal_seo():
+    P = _publicar()
+    return P.SC
+
+
+@app.post("/api/publicar/youtube/oauth/empezar")
+def publicar_youtube_conectar(cuerpo: dict = Body(default=None)):
+    """{redireccion} (la dirección de vuelta de ESTE Studio) -> {url} de Google
+    a la que mandar a la persona para que dé permiso a leer su canal."""
+    SC = _canal_seo()
+    try:
+        return {"url": SC.empezar(_cuerpo(cuerpo).get("redireccion"))}
+    except SC.ErrorCanal as fallo:
+        raise ErrorApi(fallo.codigo, str(fallo)) from None
+
+
+def _pagina_vuelta(titulo, texto, volver):
+    """La página a la que vuelve Google: sin scripts ni estilos en línea (CSP)."""
+    import html as _html                                       # noqa: PLC0415
+    return HTMLResponse(
+        "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        f"<title>{_html.escape(titulo)}</title></head><body>"
+        f"<h1>{_html.escape(titulo)}</h1><p>{_html.escape(texto)}</p>"
+        f"<p><a href=\"{_html.escape(volver)}\">Volver al Studio</a> (o cierra esta pestaña: "
+        "Configuración se pone al día sola)</p></body></html>",
+        headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/publicar/youtube/oauth/vuelta")
+def publicar_youtube_vuelta(request: Request, state: str = Query(default=""),
+                            code: str = Query(default=""), error: str = Query(default="")):
+    """Adonde vuelve Google con el permiso: cambia el código por el token."""
+    SC = _canal_seo()
+    # el enlace de vuelta sale de la dirección del intento (la que vio el
+    # navegador), no de la ruta: detrás de un proxy que quita /v2/ sería «/»
+    volver = SC.volver_de(state) or request.url.path.rsplit("/api/", 1)[0] + "/"
+    if error:
+        return _pagina_vuelta("No se ha conectado el canal",
+                              "Google dice: " + str(error)[:120] + ". Puedes volver a intentarlo "
+                              "desde Configuración.", volver)
+    try:
+        resumen = SC.terminar(state, code, raiz_proyectos())
+    except SC.ErrorCanal as fallo:
+        return _pagina_vuelta("No se ha conectado el canal", str(fallo), volver)
+    anotar_global("publicar_youtube_conectado", {"canal": resumen["youtube_oauth"]["canal"]})
+    return _pagina_vuelta("Canal de YouTube conectado",
+                          f"Conectado: {resumen['youtube_oauth']['canal'] or 'tu canal'}. Ya puedes "
+                          "usar «Investigar búsquedas» con lo que te trae vistas en YouTube.", volver)
+
+
+@app.post("/api/publicar/youtube/oauth/desconectar")
+def publicar_youtube_desconectar():
+    """Olvida el permiso del canal (y lo que se trajo de él)."""
+    SC = _canal_seo()
+    resumen = SC.desconectar(raiz_proyectos())
+    anotar_global("publicar_youtube_desconectado", {})
+    return resumen
+
+
+@app.post("/api/publicar/videos/{pid}/seo/encontraron", status_code=202)
+def publicar_como_te_encontraron(pid: str, peticion: Request):
+    """«Cómo te encontraron»: las búsquedas de YouTube que trajeron vistas a
+    este vídeo y su retención (YouTube Analytics, canal conectado)."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    P = _publicar()
+    _por_publicar(P.lanzar_encontraron, raiz_proyectos(), info)
+    return {"trabajando": True}
+
+
 # =================================================================== PARRILLA
 # Automatizar → Parrilla (rama `parrilla`, 17-10-2026): matrices de guiones por
 # proyecto, en el formato unico del anexo, y «Pasar al Encargo». Bloque propio

@@ -24933,6 +24933,10 @@ async function cambiarRedesPublicar(red, puesta) {
 }
 
 async function escribirTextosPublicar(redes, reintento) {
+  return conCerrojoPublicar(() => pedirTextosAClaudePublicar(redes, reintento));
+}
+
+async function pedirTextosAClaudePublicar(redes, reintento) {
   if (!redes.length) { toast('elige al menos una red', true); return; }
   const f = PUB.ficha;
   const hay = redes.some(r => ((f.textos || {})[r] || {}).descripcion);
@@ -25457,10 +25461,10 @@ function barraFichaPublicar(f) {
       return;
     }
     confirmarEnvioPublicar(modo);
-  } }, texto), { disabled: PUB.enviando || !!motivo, title: motivo || '' });
+  } }, texto), { disabled: PUB.enviando || PUB.preguntando || !!motivo, title: motivo || '' });
   const esperar = modo === 'mano' ? null : botonDeBarra(h('button', { type: 'button',
     onclick: () => dejarPendientePublicar(modo) }, 'Dejar esperando mi OK'),
-  { secundario: true, disabled: PUB.enviando || !redes.length,
+  { secundario: true, disabled: PUB.enviando || PUB.preguntando || !redes.length,
     title: 'Lo deja preparado sin enviarlo: saldrá en «Te necesitan» hasta que des el OK' });
   const barra = barraDeAccion({
     clase: 'barra-publicar',
@@ -25850,12 +25854,45 @@ const VIVOS_PUBLICAR = ['enviando', 'programado', 'publicando', 'publicado', 'co
    Devuelve true si se acepta. */
 async function preguntarPublicar(texto, op) {
   const o = op || {};
-  const r = await dialogo({ titulo: o.titulo || 'Publicar', texto: h('div', { clase: 'texto-pregunta-publicar' }, texto),
+  /* EL FOCO, FUERA DEL BOTÓN QUE ABRIÓ LA PREGUNTA (revisión de rediseno-publicar):
+     se quedaba en el botón de la barra, detrás del panel, y Enter lo volvía a
+     pulsar: dos paneles apilados y, aceptando los dos, dos envíos. Se suelta y
+     se pone en «aceptar» del panel (`dialogo` no lo hace si no hay campos). */
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  const pregunta = dialogo({ titulo: o.titulo || 'Publicar', texto: h('div', { clase: 'texto-pregunta-publicar' }, texto),
     aceptar: o.aceptar || 'Aceptar', cancelar: o.cancelar || 'Cancelar', peligro: !!o.peligro });
-  return !!r;
+  setTimeout(() => {
+    const capas = document.querySelectorAll('.capa-dialogo');
+    const ultima = capas.length ? capas[capas.length - 1] : null;
+    const aceptar = ultima ? ultima.querySelector('.dialogo-botones button[type=submit]') : null;
+    if (aceptar && !ultima.querySelector('input, select, textarea')) aceptar.focus();
+  }, 0);
+  return !!(await pregunta);
+}
+
+/* UNA COSA A LA VEZ EN PUBLICAR (revisión de rediseno-publicar): lo que envía,
+   publica o gasta (programar, publicar ahora, dejar esperando, dar el OK,
+   reintentar, cancelar, apuntar a mano, pedir los textos, las cifras) no se
+   puede lanzar otra vez mientras pregunta o manda: un segundo clic o un Enter
+   no abre otro panel ni manda otro envío. Los botones de la barra se apagan
+   mientras tanto (`PUB.preguntando`). */
+async function conCerrojoPublicar(hacer) {
+  if (PUB.preguntando) return undefined;
+  PUB.preguntando = true;
+  if (MODULOS.actual === 'publicar') repintarPublicarSinPisar();
+  try {
+    return await hacer();
+  } finally {
+    PUB.preguntando = false;
+    if (MODULOS.actual === 'publicar') repintarPublicarSinPisar();
+  }
 }
 
 async function confirmarEnvioPublicar(modo, repetir) {
+  return conCerrojoPublicar(() => enviarFichaPublicar(modo, repetir));
+}
+
+async function enviarFichaPublicar(modo, repetir) {
   const f = PUB.ficha;
   let redes = (f.redes || []).filter(r => ((f.encaje || {})[r] || {}).nivel !== 'error');
   if (!redes.length) { toast('elige al menos una red', true); return; }
@@ -25946,6 +25983,10 @@ function avisoTrasEnvioCola() {
 }
 
 async function dejarPendientePublicar(modo) {
+  return conCerrojoPublicar(() => dejarPendienteFichaPublicar(modo));
+}
+
+async function dejarPendienteFichaPublicar(modo) {
   const f = PUB.ficha;
   const redes = (f.redes || []).filter(r => ((f.encaje || {})[r] || {}).nivel !== 'error');
   if (!redes.length) { toast('elige al menos una red', true); return; }
@@ -25966,6 +26007,10 @@ async function dejarPendientePublicar(modo) {
 }
 
 async function confirmarPendientePublicar(envio) {
+  return conCerrojoPublicar(() => darOkEnvioPublicar(envio));
+}
+
+async function darOkEnvioPublicar(envio) {
   /* también desde «Te necesitan» y el panel del día (rediseno-publicar): con el
      `pid` del envío y la hora de la cola si no hay ficha abierta */
   const pid = envio.pid || PUB.pid;
@@ -25989,6 +26034,10 @@ async function confirmarPendientePublicar(envio) {
 }
 
 async function reintentarEnvioPublicar(envio) {
+  return conCerrojoPublicar(() => reintentarEnvioFichaPublicar(envio));
+}
+
+async function reintentarEnvioFichaPublicar(envio) {
   if (!(await preguntarPublicar(`¿Volver a mandar ${NOMBRES_RED[envio.red]}?\n\nVa con la misma clave que la primera vez: `
     + 'si a Upload-Post ya le llegó, no se publica otra vez.', { titulo: 'Reintentar', aceptar: 'Volver a mandar' }))) return;
   try {
@@ -25999,6 +26048,10 @@ async function reintentarEnvioPublicar(envio) {
 }
 
 async function cancelarEnvioPublicar(envio) {
+  return conCerrojoPublicar(() => quitarOCancelarEnvioPublicar(envio));
+}
+
+async function quitarOCancelarEnvioPublicar(envio) {
   const pid = envio.pid || PUB.pid;
   const quitar = ['fallido', 'comprobar'].includes(envio.estado);
   const pregunta = envio.estado === 'fallido'
@@ -26020,6 +26073,10 @@ async function cancelarEnvioPublicar(envio) {
 }
 
 async function marcarAManoPublicar(red) {
+  return conCerrojoPublicar(() => apuntarAManoPublicar(red));
+}
+
+async function apuntarAManoPublicar(red) {
   // el enlace, en un panel de la casa (antes un prompt() del navegador)
   const r = await dialogo({ titulo: `Ya lo subí a ${CORTOS_RED[red] || red}`,
     campos: [{ clave: 'url', etiqueta: `Enlace del post en ${NOMBRES_RED[red]} (opcional):`, pista: 'https://…' }],
@@ -26297,6 +26354,10 @@ function autoCambiadaPublicar() {
 }
 
 async function guardarAutoPublicar() {
+  return conCerrojoPublicar(() => guardarAutoConCostePublicar());
+}
+
+async function guardarAutoConCostePublicar() {
   const e = eleccionAutoPublicar();
   let coste = PUB.costeAuto;
   try {
@@ -26316,6 +26377,10 @@ async function guardarAutoPublicar() {
 }
 
 async function correrAutoPublicar() {
+  return conCerrojoPublicar(() => pedirCifrasAhoraPublicar());
+}
+
+async function pedirCifrasAhoraPublicar() {
   const c = (PUB.metricasAuto || {}).coste || {};
   if (!(await preguntarPublicar('Pedir las cifras ahora, en segundo plano.\n\n'
     + `Gasta ${c.consultas_vuelta != null ? c.consultas_vuelta : 'unas'} consulta(s) del cupo de Upload-Post `

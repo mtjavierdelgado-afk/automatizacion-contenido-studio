@@ -39,6 +39,9 @@ estar, nada nuevo se paga y las preguntas dicen lo mismo de siempre.
 - **Las confirmaciones**, en un panel de la casa (no la ventanita del
   navegador), con las mismas frases y botones que dicen lo que hacen
   («Enviar solo a TikTok», «No enviar nada»). «Ya lo subí a…» pide el enlace ahí.
+  El panel se lleva el foco (Enter es aceptar) y, mientras pregunta, el botón de
+  la barra se apaga: un Enter o un doble clic ya no abren otra pregunta encima
+  ni publican dos veces.
 - **Resultados**: periodo en **7 · 30 · 90 días**, cifras grandes y los bloques
   en dos columnas. **Ajustes** (antes «Cuentas y ajustes»): a la izquierda
   General y cada proyecto con su estado; a la derecha sus pestañas **Conexión ·

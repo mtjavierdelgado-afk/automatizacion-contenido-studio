@@ -4512,7 +4512,8 @@ def publicar_lo_del_16_de_octubre(navegador, datos):
     _paso_ficha(pg, "textos")
     pg.pulsar(".ficha-publicar button", "Que Claude escriba los textos")
     texto = _panel_casa(pg, segundos=3)     # con textos ya escritos, pregunta antes de sustituirlos
-    ok(not texto or "Claude volverá a escribir los textos" in texto, f"(con textos, lo pregunta en un panel: {texto[:50]!r})")
+    ok("Claude volverá a escribir los textos de:" in texto and "Lo que hayas cambiado a mano" in texto,
+       f"con textos ya escritos, antes de sustituirlos pregunta (la misma frase de siempre): {texto[:60]!r}")
     ok(pg.esperar(".estado-textos .escribiendo-textos", "Claude está escribiendo", 5),
        "mientras escribe, se ve «Claude está escribiendo los textos…»")
     ok(pg.esperar(".estado-textos .caja-error", "no se han podido escribir", 20),
@@ -7187,6 +7188,13 @@ def portadas_2_capas_y_pantalla_quieta(navegador, datos):
     ponerse = ("() => { const b = [...document.querySelectorAll('#modulo button')].filter(x => x.textContent.includes('Dame 3 ganchos'))[1];"
                " const m = document.getElementById('modulo'); m.scrollTop += b.getBoundingClientRect().top - 200; }")
     if movil.p.locator("#modulo button", has_text="Dame 3 ganchos").count() >= 2:
+        # sitio de sobra debajo, para que bajar el segundo «Dame 3 ganchos»
+        # hasta arriba no dependa de lo que otros escenarios dejaron en la ficha
+        movil.p.evaluate("() => document.getElementById('modulo').style.setProperty('padding-bottom', '1600px', 'important')")
+        # y sin el refresco de la ficha mientras se mide: con envíos de otros
+        # escenarios en curso, la ficha se vuelve a pedir cada pocos segundos y
+        # se llevaba los ganchos puestos a mano (las dos medidas daban igual)
+        movil.p.evaluate("() => { window.__cargar = cargarPublicar; cargarPublicar = async () => {}; }")
         movil.p.evaluate(ponerse)
         movil.p.wait_for_timeout(300)
         antes = movil.p.evaluate(pos)
@@ -7204,7 +7212,7 @@ def portadas_2_capas_y_pantalla_quieta(navegador, datos):
         movil.p.evaluate(llegan)
         movil.p.wait_for_timeout(500)
         despues = movil.p.evaluate(pos)
-        movil.p.evaluate("() => { volverAlAncla = window.__ancla; }")
+        movil.p.evaluate("() => { volverAlAncla = window.__ancla; cargarPublicar = window.__cargar; }")
         ok(despues is not None and antes is not None and abs(despues - antes) > 40,
            f"(sin el ancla la pantalla sí se movía: {antes} → {despues})")
     else:
@@ -7876,6 +7884,88 @@ def claves_de_analizar_cuentas_en_configuracion(navegador, datos):
         pg.sin_errores(f"las claves en el móvil ({tema})")
         pg.cerrar()
     api.put("/api/parrilla/cuentas/conexiones", {"tope_usd": tope_antes if tope_antes is not None else 5})
+
+
+@escenario
+def publicar_enter_no_pregunta_dos_veces(navegador, datos):
+    """Fallo de la revisión (22-10): el foco se quedaba en el botón de la barra,
+    detrás del panel de confirmación; un Enter abría OTRO panel encima, y con
+    «Publicar ahora» (o «Sí, otra vez») aceptar los dos publicaba dos veces.
+    Ahora el panel se lleva el foco y Publicar no pregunta dos cosas a la vez
+    (`conCerrojoPublicar`): un Enter es aceptar, y un doble «Publicar ahora»
+    manda UN envío."""
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, ficha = api.get(f"/api/publicar/videos/{pid}")
+    cid = ficha.get("cliente") or "_sin"
+    api.post(f"/api/publicar/proyectos/{cid}/perfil", {})
+    api.post(f"/api/publicar/proyectos/{cid}/conectar", {"redes": ["tiktok", "instagram", "youtube"]})
+    api.post(f"/api/publicar/proyectos/{cid}/cuentas")
+    api.put(f"/api/publicar/videos/{pid}", {"redes": ["tiktok"], "textos": {"tiktok": {"descripcion": "TikTok de prueba"}}})
+
+    def vivos():
+        _r, f = api.get(f"/api/publicar/videos/{pid}")
+        return [e for e in f.get("envios", []) if e.get("red") == "tiktok" and e.get("estado") != "cancelado"]
+
+    antes = len(vivos())
+    pg = Pagina(navegador, datos)
+    try:
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        ok(pg.esperar(".barra-publicar button.principal", "Programar para", 20), "la ficha, con «Programar para…»")
+        pg.p.locator(".barra-publicar button.principal").first.click()
+        pg.esperar(".capa-dialogo", segundos=5)
+        pg.p.wait_for_timeout(300)
+        ok(pg.p.evaluate("() => !!document.activeElement && !!document.activeElement.closest('.capa-dialogo')"),
+           "el panel se lleva el foco (no se queda en el botón de detrás)")
+        ok(pg.p.locator(".barra-publicar button.principal").first.is_disabled(),
+           "y el botón de la barra se apaga mientras pregunta")
+        # Enter acepta; si el envío trae otra pregunta detrás (ya se mandó a
+        # TikTok: «¿otra vez?»), sale DESPUÉS y sola, nunca dos a la vez.
+        encima = 0
+        for _ in range(4):
+            pg.p.keyboard.press("Enter")
+            pg.p.wait_for_timeout(1500)
+            n = pg.p.locator(".capa-dialogo").count()
+            encima = max(encima, n)
+            if not n:
+                break
+        ok(encima <= 1 and pg.p.locator(".capa-dialogo").count() == 0,
+           f"Enter acepta el panel; nunca hay dos a la vez ({encima})")
+        fin = time.time() + 10
+        while time.time() < fin and len(vivos()) == antes:
+            time.sleep(0.4)
+        n = len(vivos()) - antes
+        ok(n == 1, f"y se programa UNA vez ({n})")
+
+        # El doble «Publicar ahora»: dos pulsaciones seguidas antes de que el panel salga.
+        api.libre(pid)
+        antes = len(vivos())
+        pg.js(f"abrirPublicarVideo('{pid}');")
+        _paso_ficha(pg, "cuando")
+        pg.pulsar('.opcion-modo-publicar[data-modo="ahora"]')
+        ok(pg.esperar(".barra-publicar button.principal", "Publicar ahora", 5), "«Publicar ahora ›» en la barra")
+        pg.p.evaluate("() => { const b = document.querySelector('.barra-publicar button.principal'); b.click(); b.click(); }")
+        pg.p.wait_for_timeout(800)
+        n = pg.p.locator(".capa-dialogo").count()
+        ok(n == 1, f"dos pulsaciones: UN panel ({n})")
+        encima = n
+        for _ in range(6):                      # se acepta todo lo que salga, como alguien con prisa
+            n = pg.p.locator(".capa-dialogo").count()
+            encima = max(encima, n)
+            if not n:
+                break
+            pg.p.locator(".capa-dialogo .dialogo-botones button[type=submit]").last.click()
+            pg.p.wait_for_timeout(1500)
+        ok(encima <= 1, f"y las preguntas que siguen salen de una en una ({encima})")
+        fin = time.time() + 10
+        while time.time() < fin and len(vivos()) == antes:
+            time.sleep(0.4)
+        time.sleep(2)
+        n = len(vivos()) - antes
+        ok(n == 1, f"y se manda UN envío, no dos ({n})")
+    finally:
+        pg.cerrar()
 
 
 if __name__ == "__main__":

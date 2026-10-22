@@ -2130,7 +2130,6 @@ button.primario.grande { padding: 9px 18px; font-size: 14px; }
    fila, a 375 px la barra se queda en 57 px y la línea que dice lo que va a
    hacer y lo que cuesta —que es la mitad de por qué existe— no se puede leer.
    Los botones arriba y la barra debajo, a todo el ancho. */
-}
 
 /* ==========================================================================
    EL REPASO: las notas escritas sobre el vídeo montado
@@ -4819,6 +4818,7 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
   .cab-videos .crece { display: none; }
   .acciones-video .mini { min-height: 40px; }
   .acciones-video .mas-video { min-width: 44px; }
+}
 
 /* ======================================================= AUTOMATIZAR · TABLERO
  *

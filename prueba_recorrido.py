@@ -1702,9 +1702,27 @@ def tus_proyectos_rediseno(navegador, datos):
     pg.js(f"APP.light.datos.sueltos = [{{ id: 'taller_falso', nombre: 'Estilo a medias de prueba', "
           f"actualizado: '2026-10-20T18:02:00', cliente: '{datos['cliente']}' }}]; pintarLight();")
     ok(pg.visible(".te-necesitan", "Estilo a medias de prueba") and pg.visible(".te-necesitan button", "Retomar")
-       and pg.visible(".te-necesitan button", "Apartar"),
-       "«Te necesitan» enseña el estilo a medias con «Retomar» y «Apartar»")
+       and pg.visible(".te-necesitan button", "Descartar"),
+       "«Te necesitan» enseña el estilo a medias con «Retomar» y «Descartar»")
     pg.js("APP.light.datos.sueltos = []; pintarLight();")
+    # MÁS DE 120 VÍDEOS (revisión del 22-10): el estado se pide en lotes de 40,
+    # como mucho dos a la vez, y un vídeo que no vuelve no se da por perdido
+    ok(pg.p.evaluate("() => partirEnLotes(Array.from({ length: 130 }, (_, i) => 'v' + i), 40).map(l => l.length).join(',')")
+       == "40,40,40,10", "130 ids se parten en lotes de 40, 40, 40 y 10")
+    pg.p.evaluate("() => { window.__lotes = []; window.__enVueloMax = 0; const _p = pedir;"
+                  " pedir = function (url, ...r) { const m = String(url).match(/_resumen\\?ids=([^&]*)/);"
+                  " if (m) { window.__lotes.push(decodeURIComponent(m[1]).split(',').length);"
+                  " window.__enVueloMax = Math.max(window.__enVueloMax, TUS_PROYECTOS.enVuelo); }"
+                  " return _p.call(this, url, ...r); }; }")
+    pg.js(f"const reales = videosLight(); TUS_PROYECTOS.estados = {{}}; TUS_PROYECTOS.espera = {{}};"
+          f" asegurarEstadosDeVideos(Array.from({{ length: 130 }}, (_, i) => ({{ id: 'falso_' + i }})).concat(reales));")
+    pg.p.wait_for_timeout(4000)
+    lotes = pg.p.evaluate("() => window.__lotes")
+    ok(lotes and max(lotes) <= 40 and sum(lotes) == 131 and pg.p.evaluate("() => window.__enVueloMax") <= 2,
+       f"131 vídeos se piden en lotes de 40 como mucho, dos a la vez ({lotes})")
+    ok(pg.p.evaluate(f"() => !!TUS_PROYECTOS.estados['{pid}'] && !('falso_3' in TUS_PROYECTOS.estados)"
+                     " && TUS_PROYECTOS.espera['falso_3'] > Date.now()"),
+       "el vídeo de verdad tiene su estado, y los que no vuelven se vuelven a preguntar más tarde (no quedan en blanco)")
     # ⚙ AJUSTES DEL PROYECTO: las secciones, en su orden
     pg.pulsar(".cab-proyecto button", "Ajustes del proyecto")
     ok(pg.esperar(".cajon-proyecto"), "«⚙ Ajustes del proyecto» abre el cajón")

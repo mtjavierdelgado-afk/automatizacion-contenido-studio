@@ -21,7 +21,7 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 - **Un buscador** que filtra vídeos, estilos y proyectos de la página.
 - **⚠ Te necesitan** junta arriba lo que antes iba suelto: los vídeos que
   perdieron imágenes (**Reparar**) y los estilos a medias (**Retomar** /
-  **Apartar**).
+  **Descartar**).
 - **«Sigue donde lo dejaste»** (antes «Últimos vídeos») en tarjetas que dicen
   **cómo va cada vídeo** en Crear («✓ Montado», «⚠ Vídeo obsoleto», «● En el
   Guion», «⟳ 42 % · Dibujando los planos») y en Publicar («○ Listo para
@@ -40,8 +40,7 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   tarjeta). **⇄ Traer un estilo de otro proyecto** es una tarjeta más.
 - **Los vídeos del proyecto se filtran** por estado (Todos · En curso · Listos ·
   Programados · Publicados) y se ven en tarjetas o en lista.
-- **«Apartar»** es el nombre de todo lo que va a la papelera (antes también
-  «Descartar»); se puede devolver.
+- **«Apartar»** manda un vídeo o un estilo a la papelera; se puede devolver.
 - Nada de esto gasta ni cambia ningún vídeo: el estado de cada tarjeta lo lee
   el Studio de lo que ya sabe (una consulta nueva de solo lectura).
 

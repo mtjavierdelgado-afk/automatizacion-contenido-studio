@@ -78,7 +78,7 @@ ve en la página.
   No gasta nada hasta que generas el guion.
 - **⚠ Te necesitan** (solo si hay algo): los vídeos que perdieron sus imágenes
   de estilo (**Reparar**, gratis) y los estilos que se quedaron a medias
-  (**Retomar** sigue sin volver a pagar lo hecho; **Apartar** lo manda a la
+  (**Retomar** sigue sin volver a pagar lo hecho; **Descartar** lo manda a la
   papelera).
 - **Sigue donde lo dejaste**: los cinco últimos vídeos en tarjetas, con su
   proyecto (📁), su estilo (🎨), la fecha («hoy 17:31», «ayer», «lun 19/10») y

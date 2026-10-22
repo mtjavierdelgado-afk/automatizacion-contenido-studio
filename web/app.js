@@ -6930,8 +6930,11 @@ const TUS_PROYECTOS = {
   datos: null,           // la lista de la galería con la que se pidió lo de abajo
   cola: null,            // GET /api/publicar/cola
   papelera: null,        // cuántas cosas hay en la papelera
-  estados: {},           // pid -> resumen de `/api/proyectos/_resumen` (null: no se pudo)
+  estados: {},           // pid -> resumen de `/api/proyectos/_resumen` (solo los que volvieron)
   pidiendo: new Set(),
+  espera: {},            // pid -> hasta cuándo no se vuelve a preguntar (no volvió o falló)
+  lotes: [],             // los lotes de ids que faltan por pedir
+  enVuelo: 0,
   reloj: null,           // vuelve a mirar los vídeos que se están generando
   escuchando: false,
 };
@@ -6953,6 +6956,8 @@ function datosDeTusProyectos() {
   TUS_PROYECTOS.datos = APP.light.datos;
   TUS_PROYECTOS.estados = {};
   TUS_PROYECTOS.pidiendo.clear();
+  TUS_PROYECTOS.espera = {};
+  TUS_PROYECTOS.lotes = [];
   TUS_PROYECTOS.cola = null;
   const datos = APP.light.datos;
   pedir(rutaPublicar('/cola')).then(cola => {
@@ -6984,24 +6989,62 @@ function repintarTusProyectos() {
   pintarLight();
 }
 
-/* Pide el resumen de los vídeos que se van a enseñar y aún no lo tienen. */
+/* Pide el resumen de los vídeos que se van a enseñar y aún no lo tienen.
+   EN LOTES DE 40 Y COMO MUCHO DOS A LA VEZ (revisión del 22-10): todos los ids
+   en una sola URL pasaban de 8 KB con ~150 vídeos (nginx contesta 414) y el
+   servidor solo resume 120 por petición. Un vídeo que no vuelve en la
+   respuesta (o una petición que falla) no se da por perdido: se vuelve a
+   preguntar en un repintado de dentro de un rato. */
+const LOTE_DE_TARJETAS = 40;
+const LOTES_A_LA_VEZ = 2;
+const ESPERA_PARA_REPREGUNTAR_MS = 20000;
+
+function partirEnLotes(lista, tamano) {
+  const lotes = [];
+  for (let i = 0; i < lista.length; i += tamano) lotes.push(lista.slice(i, i + tamano));
+  return lotes;
+}
+
 function asegurarEstadosDeVideos(videos) {
+  const ahora = Date.now();
   const faltan = videos.map(v => v.id)
-    .filter(id => !(id in TUS_PROYECTOS.estados) && !TUS_PROYECTOS.pidiendo.has(id));
+    .filter(id => !(id in TUS_PROYECTOS.estados) && !TUS_PROYECTOS.pidiendo.has(id)
+      && !((TUS_PROYECTOS.espera[id] || 0) > ahora));
   if (!faltan.length) return;
   faltan.forEach(id => TUS_PROYECTOS.pidiendo.add(id));
-  const datos = TUS_PROYECTOS.datos;
-  pedir(`${BASE}/api/proyectos/_resumen?${consulta({ ids: faltan.join(',') })}`).then(r => {
-    if (TUS_PROYECTOS.datos !== datos) return;
-    faltan.forEach(id => {
-      TUS_PROYECTOS.estados[id] = ((r || {}).videos || {})[id] || null;
+  TUS_PROYECTOS.lotes.push(...partirEnLotes(faltan, LOTE_DE_TARJETAS));
+  pedirLotesDeEstados();
+}
+
+function pedirLotesDeEstados() {
+  while (TUS_PROYECTOS.enVuelo < LOTES_A_LA_VEZ && TUS_PROYECTOS.lotes.length) {
+    const lote = TUS_PROYECTOS.lotes.shift();
+    const datos = TUS_PROYECTOS.datos;
+    const aplazar = id => {
+      TUS_PROYECTOS.espera[id] = Date.now() + ESPERA_PARA_REPREGUNTAR_MS;
       TUS_PROYECTOS.pidiendo.delete(id);
+    };
+    TUS_PROYECTOS.enVuelo += 1;
+    pedir(`${BASE}/api/proyectos/_resumen?${consulta({ ids: lote.join(',') })}`).then(r => {
+      if (TUS_PROYECTOS.datos !== datos) return;
+      const vueltos = (r || {}).videos || {};
+      lote.forEach(id => {
+        if (vueltos[id]) {
+          TUS_PROYECTOS.estados[id] = vueltos[id];
+          delete TUS_PROYECTOS.espera[id];
+          TUS_PROYECTOS.pidiendo.delete(id);
+        } else aplazar(id);
+      });
+      repintarTusProyectos();
+      vigilarVideosEnCurso();
+    }).catch(() => {
+      if (TUS_PROYECTOS.datos !== datos) return;
+      lote.forEach(aplazar);
+    }).finally(() => {
+      TUS_PROYECTOS.enVuelo -= 1;
+      pedirLotesDeEstados();
     });
-    repintarTusProyectos();
-    vigilarVideosEnCurso();
-  }).catch(() => {
-    faltan.forEach(id => { TUS_PROYECTOS.estados[id] = null; TUS_PROYECTOS.pidiendo.delete(id); });
-  });
+  }
 }
 
 /* Un vídeo que se está generando cambia solo: se vuelve a mirar cada pocos
@@ -7691,7 +7734,7 @@ function franjaTeNecesitan(cid) {
         h('span', { clase: 'meta crece' }, `${taller.nombre} · ${fechaAmable(taller.actualizado) || ''}`),
         h('button', { clase: 'mini', onclick: () => irALight('crear', { taller: taller.id }) }, 'Retomar'),
         h('button', { clase: 'mini peligro', title: 'A la papelera (se puede devolver)',
-          onclick: () => descartarTallerLight(taller) }, 'Apartar')))));
+          onclick: () => descartarTallerLight(taller) }, 'Descartar')))));
   }
   return franja;
 }
@@ -7881,7 +7924,7 @@ async function apartarVideoLight(video) {
 }
 
 async function descartarTallerLight(taller) {
-  if (!window.confirm(`¿Apartar «${taller.nombre}»?
+  if (!window.confirm(`¿Descartar «${taller.nombre}»?
 
 `
     + 'Va a la papelera, no se borra del todo.')) return;
@@ -7890,9 +7933,9 @@ async function descartarTallerLight(taller) {
       { method: 'DELETE' });
     if (APP.light.taller === taller.id) APP.light.taller = null;
     await cargarGaleriaLight(true);
-    toast('intento apartado: está en la papelera');
+    toast('intento descartado');
   } catch (e) {
-    toast(`no se ha podido apartar: ${e.message}`, true);
+    toast(`no se ha podido descartar: ${e.message}`, true);
   }
 }
 

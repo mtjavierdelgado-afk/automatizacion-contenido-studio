@@ -2651,13 +2651,16 @@ def ortografia_de_los_subtitulos(navegador, datos):
        "y lo propuesto sigue ahí aunque la pantalla se repinte")
     _r, antes = api.get(f"/api/proyectos/{pid}")
     estado_assets = {p.get("id"): p.get("estado") for p in antes.get("pasos") or []}.get("assets")
+    # la voz se compara con como estaba ANTES: en la pasada entera otro
+    # escenario puede dejar el guion (y la voz) en obsoleto, y eso no es de aquí
+    estado_voz = {p.get("id"): p.get("estado") for p in antes.get("pasos") or []}.get("voz")
     pg.captura("18_ortografia", entera=False)
     pg.pulsar(".panel-ortografia button", "Aplicar las marcadas")
     pg.p.wait_for_timeout(2000)
     _r, despues = api.get(f"/api/proyectos/{pid}")
     estados = {p.get("id"): p.get("estado") for p in despues.get("pasos") or []}
-    ok(estados.get("assets") == estado_assets and estados.get("voz") != "obsoleto",
-       f"aplicarlas no toca ni la voz ni las imágenes ({estados})")
+    ok(estados.get("assets") == estado_assets and estados.get("voz") == estado_voz,
+       f"aplicarlas no toca ni la voz ni las imágenes ({estados}; antes, voz {estado_voz})")
     ok(pg.esperar(".caja-aviso", "ANTES de tus últimos cambios", 15),
        "y el Vídeo dice que hay que volver a montarlo")
     ok("No se dibuja ninguna imagen" in pg.p.locator(".caja-aviso").filter(

@@ -3427,6 +3427,7 @@ button.coste-light { cursor: pointer; font: inherit; color: inherit; }
 .panel-negocio-proyecto h3 { margin: 0; font-size: 14px; }
 .panel-negocio-proyecto .regla-estilo-en { display: flex; flex-direction: column; gap: 4px; }
 .panel-negocio-proyecto .regla-estilo-en textarea { width: 100%; }
+.panel-negocio-proyecto .regla-estilo-campos input[type="text"] { flex: none; width: 100%; }
 .negocio-del-estilo { display: flex; flex-direction: column; gap: 6px; padding-bottom: 10px;
   margin-bottom: 10px; border-bottom: 1px dashed var(--linea); }
 .negocio-del-estilo .fila { align-items: center; gap: 8px; flex-wrap: wrap; }

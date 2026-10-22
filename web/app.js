@@ -27825,7 +27825,8 @@ function bloqueNegocioDelEstilo(ficha) {
     if (!cliente) return;
     APP.light.negocioProyecto = cid;
     NEGOCIOS.deCliente = '';
-    elegirCliente(cid);
+    apuntarCliente(cid);
+    irALight('galeria');
   };
   if (!cliente) {
     caja.appendChild(h('div', { clase: 'pista' },

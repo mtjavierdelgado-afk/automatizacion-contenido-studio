@@ -50,6 +50,7 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   Pinterest**. Las redes sin portada (Threads, Bluesky…) no reciben nada.
 - **La pantalla de Publicar ya no se mueve** al llegar los 3 ganchos de otra
   red o al pulsar dos a la vez: se queda anclada a lo que estabas mirando.
+
 **Crear en el móvil, arreglado (21 de octubre)**
 - **El recorrido ya no parpadea**: la fila de pasos de arriba saltaba al paso 1
   y volvía cada medio segundo mientras algo se generaba. Ahora se queda quieta,

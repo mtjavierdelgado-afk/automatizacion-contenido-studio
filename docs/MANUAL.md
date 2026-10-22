@@ -264,6 +264,44 @@ lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
 - **Las indicaciones** (opcional): cómo quieres que se cuente este vídeo.
 - **Las llamadas a la acción**: qué se pide al espectador y dónde.
 - **El espacio fijo** (opcional): si todo el vídeo pasa en un mismo sitio.
+- **El tipo de relato** (opcional): cómo se cuenta en imágenes. **Documental**
+  reparte el guion en sitios; **Un espacio que cambia** es un solo sitio en el
+  que cambia solo lo que dice la voz (un objeto, los acabados, el estado o la
+  hora): cada plano se genera editando una **imagen base** del sitio, que se
+  aprueba en el vídeo antes de generar las imágenes (la subida en «El espacio
+  fijo», gratis, o una generada, que se paga). **Recorrido**, **Escenario y
+  apoyos**, **Producto** y **Clase** completan la lista. En un vídeo hecho,
+  «Aplicar el tipo de relato» enseña qué planos cambian y cuánto cuesta, y
+  eliges cuáles rehacer.
+
+  **Quién manda, de más a menos:** (1) el que elige el vídeo en su Encargo (o
+  la línea «Tipo de relato:» de la Parrilla, que va al Encargo); (2) el del
+  estilo, que es solo el punto de partida de sus vídeos nuevos; (3) si ninguno
+  dice nada y el vídeo tiene espacio fijo, «Escenario y apoyos»; (4) si no,
+  «Documental». Por eso un estilo puede decir «Documental (por defecto)» y su
+  vídeo ser «Un espacio que cambia»: en el estilo, «Documental» quiere decir
+  «no impongo ninguno», y el vídeo eligió el suyo. El Encargo enseña cuál rige
+  y de dónde sale («elegido para este vídeo», «el que trae el estilo»…).
+
+  **El espacio fijo y la imagen base no son lo mismo:** «El espacio fijo» es
+  el TEXTO del sitio (qué hay en cada pared, medidas, materiales, luz) y,
+  opcional, una foto tuya del sitio. La **imagen base** es ese sitio DIBUJADO
+  una vez, vacío y entero, y aprobado por ti: vive en «El tipo de relato». En
+  «Un espacio que cambia» y «Producto» no hace falta subir foto: la base se
+  dibuja de la descripción; si subiste una, puedes usarla como base, gratis.
+  Escribe el espacio fijo de forma que haga verdad lo que cuenta la voz, con
+  distancias: si la mampara choca con el inodoro, que el inodoro esté a menos
+  de lo que mide la hoja.
+
+  **Cada estado, dibujado una vez:** en «Un espacio que cambia», cada cambio
+  que pide el guion (la mampara abierta contra el inodoro, la corrediza…) se
+  dibuja UNA vez editando la base aprobada, y también se aprueba (se ve su
+  coste antes). Los planos de ese estado editan su imagen, así que el objeto
+  sale igual en todos. Sin la base y sus estados aprobados no se paga ningún
+  plano que los edite.
+- **El reparto y los sitios** (en un vídeo hecho): «Pedido para el reparto de
+  sitios» es una frase para Claude al repartir; «Volver a repartir con este
+  pedido» no paga imágenes.
 - **Generar el guion** (barra): crea el vídeo y redacta el guion; no dibuja nada.
 
 ## Guion
@@ -635,20 +673,33 @@ Más abajo:
 
 ### Diseñar la portada
 
-En el bloque **Portada** de un vídeo, **Diseñar portada** abre el editor:
+En el bloque **Portada** de un vídeo, **Diseñar portada** abre el editor. Va
+por capas, y cada una hace UNA cosa:
 
-1. **Plantilla**: elige una de las 21 (Versus, Top N, Oferta…). Cada una
-   coloca sus textos y su grafismo; cambiar de plantilla conserva lo escrito.
-2. **Textos**: de 1 a 3 palabras por campo. Más de 4 bajan los clics.
-3. **Fondo**: un fotograma, un plano, una imagen tuya o una hecha con IA. Las
-   plantillas partidas (Versus, Antes / Después, Mito) usan dos.
-4. **Elementos**: muévelos, agrándalos, gíralos, cámbiales el color o
-   escóndelos; «Añadir» pone más (flecha, círculo, insignia, icono…).
-5. **Proponer 3 portadas con Claude** si no sabes por dónde empezar.
-6. **Usar como portada**: la deja como la imagen que va a las redes.
+1. **Imagen**: el fondo (un plano, que va tal cual; un fotograma del vídeo, que
+   trae los subtítulos; una imagen tuya o una hecha con IA). Los **ajustes**
+   (contraste, color, brillo, viñeta, oscurecer) empiezan apagados; **«Sin
+   ajustes»** los quita y **«Poner el look de la plantilla»** pone los que ella
+   sugiere. Es lo único que toca la foto.
+2. **Plantilla**: una de las 21 (Versus, Top N, Oferta…). Coloca los textos y
+   el grafismo; cambiarla conserva lo escrito y lo que añadiste.
+3. **Colores y letra**: la paleta pinta textos y elementos, nunca la foto.
+   **«Sin paleta»**: blanco con borde negro.
 
-Lo de la IA de imágenes se paga y te dice el precio antes: solo el fondo (el
-texto sigue en capas, exacto) o la portada entera con el texto dentro.
+Debajo de la vista, **«Esta imagen lleva: …»** dice qué hay encima de la foto;
+la ✕ lo quita. **Textos**: de 1 a 3 palabras por campo. **Elementos**:
+muévelos, agrándalos, gíralos, cámbiales el color, escóndelos o
+**«Restablecer»**; «Añadir» pone más en un hueco libre.
+
+**Proponer 3 portadas con Claude** (plantilla, textos y colores) e **Ideas de
+imagen con Claude** (tres escenas con su prompt) no se pagan aparte. La IA de
+imágenes sí: antes de pagar ves el prompt, puedes cambiarlo, y el precio va en
+el botón **«Dibujar»**. Recomendado: el fondo con IA y el texto en capas.
+
+**Guardar diseño** (para retocarla otro día), **⬇ Descargar portada** (PNG, de
+respaldo) y **Usar como portada** (la que va a las redes). En el bloque Portada
+se ve **qué portada recibe cada red** y, en cada envío, cuál se mandó.
+
 ## Automatizar
 
 Lo que prepara los vídeos antes de crearlos. Dos pestañas grandes:

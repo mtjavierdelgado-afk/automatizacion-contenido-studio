@@ -838,13 +838,32 @@ function nombreDe(id) {
 
 let relojToast = null;
 
+/* DOS AVISOS SEGUIDOS NO SE PISAN (arreglos-crear-movil, 21-10-2026). Al
+   acabar un montaje salían dos el mismo milisegundo («El vídeo: Listo» y «el
+   vídeo ya está montado de nuevo») y el primero no llegaba a verse. Si llega
+   otro con el de antes todavía recién puesto, se apilan: el anterior encima y
+   el nuevo debajo, y los dos cuentan su tiempo desde ahora. */
+const AVISO_FLOTANTE = { desde: 0, lineas: [] };
+
 function toast(texto, malo) {
   const n = $('#toast');
-  n.textContent = texto;
-  n.classList.toggle('malo', !!malo);
+  apartarAvisoDeLaBarra();
+  const ahora = Date.now();
+  const recien = n.classList.contains('ver') && ahora - AVISO_FLOTANTE.desde < 2500;
+  const lineas = recien ? AVISO_FLOTANTE.lineas.filter(l => l.texto !== String(texto)).slice(-1) : [];
+  lineas.push({ texto: String(texto), malo: !!malo });
+  AVISO_FLOTANTE.lineas = lineas;
+  AVISO_FLOTANTE.desde = ahora;
+  if (lineas.length === 1) n.textContent = lineas[0].texto;
+  else {
+    vaciar(n);
+    lineas.forEach(l => n.appendChild(h('div', { clase: 'linea-aviso' }, l.texto)));
+  }
+  const algunMalo = lineas.some(l => l.malo);
+  n.classList.toggle('malo', algunMalo);
   n.classList.add('ver');
   clearTimeout(relojToast);
-  relojToast = setTimeout(() => n.classList.remove('ver'), malo ? 6000 : 3000);
+  relojToast = setTimeout(() => n.classList.remove('ver'), algunMalo ? 6000 : 3000);
 }
 
 /* Todo fallo acaba aqui: se ve en la propia pestana, no solo en consola. En la
@@ -5557,6 +5576,21 @@ function marcaEstado(e) {
   return h('span', { clase: 'marca-estado', 'aria-hidden': 'true' }, h('span', {}, MARCA_DEL_ESTADO[e] || '·'));
 }
 
+/* EL CARRIL NO SE MUEVE SOLO (arreglos-crear-movil, 21-10-2026). En el móvil
+   la fila de pasos se desliza, y «parpadeaba»: cada refresco (dos por segundo
+   con algo en marcha) volvía a colgar la fila, eso le pone el desplazamiento a
+   cero, y el centrado llegaba un `setTimeout` después; entre medias se pintaba
+   el paso 1. Lo que se deslizaba a mano también volvía solo, y cada clic en un
+   paso construía la fila 4–6 veces. Ahora:
+     · la fila es UNA mientras no cambie lo que dice (la huella vive aquí, no en
+       cada pintado), y refrescar sin cambios no la descuelga;
+     · al colgarla (pintado entero, refresco con cambios) se le devuelve en el
+       acto el desplazamiento que tenía (`x`, que apunta su propio `scroll`, o
+       sea también lo deslizado a mano), antes de que el navegador pinte;
+     · se centra en el paso activo SOLO al cambiar de paso o de vídeo.
+   Solo pantalla: no lee ni escribe nada del vídeo. */
+const CARRIL_VISTA = { paso: '', pid: '', x: null, mano: false, huella: '', nodo: null };
+
 /* EL CARRIL: seis pasos en columna (en el móvil, una fila que se desliza) y,
    debajo, lo gastado en este vídeo. */
 function carrilCrear(actual) {
@@ -5566,21 +5600,54 @@ function carrilCrear(actual) {
   /* VIVO: mientras corre una tanda, su paso dice «⟳ 42 %» y lo gastado sube.
      Se rehace solo si ha cambiado lo que dice (la huella), así que entre tic
      y tic los botones son los mismos nodos y un clic no se pierde. */
-  const memoria = { huella: '', nodo: null };
   caja.appendChild(enVivo(() => {
     const pasos = estadosDelCarril();
     const v = APP.light.video;
-    const huella = JSON.stringify([actual, pasos, v.pid ? Number((v.coste || {}).total_usd || 0) : null]);
-    if (huella === memoria.huella && memoria.nodo) {
-      // volver a colgar la fila le devuelve el scroll a cero: se recoloca
-      centrarPasoActivo(memoria.nodo.querySelector('.pasos-carril'));
-      return memoria.nodo;
-    }
-    memoria.huella = huella;
-    memoria.nodo = pasosDelCarril(pasos, actual);
-    return memoria.nodo;
-  }));
+    const huella = JSON.stringify([actual, v.pid || '', pasos, v.pid ? Number((v.coste || {}).total_usd || 0) : null]);
+    if (huella === CARRIL_VISTA.huella && CARRIL_VISTA.nodo) return CARRIL_VISTA.nodo;
+    CARRIL_VISTA.huella = huella;
+    CARRIL_VISTA.nodo = pasosDelCarril(pasos, actual);
+    return CARRIL_VISTA.nodo;
+  }, () => colocarCarril(actual)));
   return caja;
+}
+
+/* LA FILA, YA COLGADA: o se centra (paso o vídeo nuevos) o vuelve a donde
+   estaba. Síncrono a propósito: con un `setTimeout` el navegador llega a pintar
+   la fila en el paso 1. */
+function colocarCarril(actual) {
+  const fila = document.querySelector('#panel .pasos-carril');
+  if (!fila) return;
+  if (!fila.dataset.vigilada) {
+    fila.dataset.vigilada = '1';
+    fila.addEventListener('scroll', () => { if (fila.isConnected) CARRIL_VISTA.x = fila.scrollLeft; },
+      { passive: true });
+    // lo toca una persona (dedo, ratón, rueda): desde ahí manda lo que deje
+    const aMano = () => { CARRIL_VISTA.mano = true; };
+    ['pointerdown', 'touchstart', 'wheel'].forEach(ev => fila.addEventListener(ev, aMano, { passive: true }));
+  }
+  const pid = (APP.light.video || {}).pid || '';
+  if (CARRIL_VISTA.paso !== actual || CARRIL_VISTA.pid !== pid || CARRIL_VISTA.x === null) {
+    CARRIL_VISTA.paso = actual;
+    CARRIL_VISTA.pid = pid;
+    CARRIL_VISTA.mano = false;
+    BARRA_MAS.abierta = false;   // el «⋯» de la barra era del paso de antes
+    centrarPasoActivo(fila);
+  } else {
+    if (Math.abs(fila.scrollLeft - CARRIL_VISTA.x) > 1) fila.scrollLeft = CARRIL_VISTA.x;
+    /* SI NADIE LO HA DESLIZADO y el paso activo se ha quedado a medias (los
+       pasos cambian de ancho: «⟳ 42 %», «1 cambio sin aplicar»), se vuelve a
+       centrar, en el acto. Lo deslizado a mano no se toca. */
+    if (!CARRIL_VISTA.mano && !pasoActivoALaVista(fila)) centrarPasoActivo(fila);
+  }
+  CARRIL_VISTA.x = fila.scrollLeft;
+}
+
+function pasoActivoALaVista(fila) {
+  const activo = fila.querySelector('.paso-carril.actual');
+  if (!activo || fila.scrollWidth <= fila.clientWidth + 2) return true;
+  const f = fila.getBoundingClientRect(), a = activo.getBoundingClientRect();
+  return a.left >= f.left - 2 && a.right <= f.right + 2;
 }
 
 function pasosDelCarril(pasos, actual) {
@@ -5617,19 +5684,17 @@ function pasosDelCarril(pasos, actual) {
       h('b', {}, datos ? `$ ${Number(datos.total_usd || 0).toFixed(2)}` : '$ —'),
       h('span', { clase: 'meta' }, `${alDia} de ${pasos.length} pasos al día`)));
   }
-  centrarPasoActivo(fila);
   return caja;
 }
 
 /* EN EL MÓVIL EL PASO ACTIVO SE CENTRA SOLO en la fila (sin mover la página:
-   `scrollIntoView` arrastraría también el scroll del panel). */
+   `scrollIntoView` arrastraría también el scroll del panel). Con la fila ya
+   colgada y en el acto (ver `colocarCarril`). */
 function centrarPasoActivo(fila) {
-  setTimeout(() => {
-    const activo = fila && fila.querySelector('.paso-carril.actual');
-    if (!activo || fila.scrollWidth <= fila.clientWidth + 2) return;
-    const dentro = activo.getBoundingClientRect().left - fila.getBoundingClientRect().left + fila.scrollLeft;
-    fila.scrollLeft = Math.max(0, dentro - (fila.clientWidth - activo.offsetWidth) / 2);
-  }, 0);
+  const activo = fila && fila.isConnected && fila.querySelector('.paso-carril.actual');
+  if (!activo || fila.scrollWidth <= fila.clientWidth + 2) return;
+  const dentro = activo.getBoundingClientRect().left - fila.getBoundingClientRect().left + fila.scrollLeft;
+  fila.scrollLeft = Math.max(0, dentro - (fila.clientWidth - activo.offsetWidth) / 2);
 }
 
 /* El carril se repinta solo, sin el resto de la pantalla (una lectura que
@@ -5639,6 +5704,7 @@ function repintarCarril() {
   const paso = pasoDelCarril();
   if (!viejo || !paso) return;
   viejo.replaceWith(carrilCrear(paso));
+  colocarCarril(paso);
 }
 
 /* LA SALIDA DE CREAR (el logo es la otra). Sustituye a «‹ Mis vídeos», «←
@@ -5790,19 +5856,62 @@ function campoRenombrar(pid, antes) {
  *   encima      nodo                 lo que va pegado encima (los mandos de Imágenes)
  *   clase       clase extra
  */
+/* EN EL MÓVIL, UNA FILA (arreglos-crear-movil, 21-10-2026). La barra llegaba a
+ * tapar la mitad de la pantalla: el botón principal se quedaba la columna y el
+ * estado salía con una palabra por renglón, el plan en otra fila y en Imágenes
+ * un segundo botón; y cambiaba de alto con cada estado de una tanda. En ≤700 px
+ * es una fila de alto fijo: el estado en una línea (con su marca) y el botón
+ * principal. Lo demás —el estado entero, el plan y los botones secundarios— va
+ * en «⋯», que lo abre ENCIMA de la barra sin cambiarle el alto (pulsar el
+ * estado también lo abre). En pantalla ancha «⋯» no sale y todo se ve como
+ * siempre. Ningún botón cambia de lo que hace: solo de sitio. */
+const BARRA_MAS = { abierta: false };
+
+function esMovilCrear() {
+  try { return window.matchMedia('(max-width: 700px)').matches; } catch (e) { return false; }
+}
+
+function alternarMasDeLaBarra() {
+  BARRA_MAS.abierta = !BARRA_MAS.abierta;
+  repintarBarra();
+}
+
 function barraDeAccion(op) {
-  const barra = h('div', { clase: 'barra-accion' + (op.clase ? ` ${op.clase}` : '') });
+  const botones = (op.botones || []).filter(Boolean);
+  const esSecundario = n => !!(n.matches && (n.matches('.secundario-barra') || n.querySelector('.secundario-barra')));
+  const secundarios = botones.filter(esSecundario);
+  const principales = botones.filter(n => !esSecundario(n));
+  const textoEstado = (op.estado || {}).texto || '';
+  const hayMas = !op.corriendo && !!(secundarios.length || op.plan || textoEstado);
+  const abierta = hayMas && BARRA_MAS.abierta;
+  const barra = h('div', { clase: 'barra-accion' + (op.clase ? ` ${op.clase}` : '') + (abierta ? ' abierta' : '') });
   if (op.encima) barra.appendChild(op.encima);
   const dentro = h('div', { clase: 'dentro' + (op.corriendo ? ' corriendo' : '') });
   if (op.corriendo) {
     dentro.appendChild(h('div', { clase: 'progreso' }, op.progreso || barraTandaLight(op.tanda)));
   } else {
     const e = (op.estado || {}).e || 'pend';
-    dentro.appendChild(h('div', { clase: `estado ${claseEstado(e)}` }, marcaEstado(e),
-      h('span', {}, (op.estado || {}).texto || '')));
+    dentro.appendChild(h('div', { clase: `estado ${claseEstado(e)}`, title: textoEstado || null,
+      onclick: () => { if (hayMas && esMovilCrear()) alternarMasDeLaBarra(); } }, marcaEstado(e),
+      h('span', { clase: 'texto-estado' }, textoEstado)));
     dentro.appendChild(h('div', { clase: 'plan' }, op.plan || ''));
   }
-  dentro.appendChild(h('div', { clase: 'derecha' }, ...(op.botones || [])));
+  /* «⋯» Y LO QUE ABRE. En pantalla ancha la caja no existe para la maquetación
+     (`display: contents`) y su texto no se ve: los secundarios quedan a la
+     izquierda del principal, como siempre. */
+  const mas = hayMas ? h('div', { clase: 'mas-de-la-barra',
+    onclick: ev => { if (ev.target.closest && ev.target.closest('button')) BARRA_MAS.abierta = false; } },
+    h('div', { clase: 'mas-texto' },
+      textoEstado ? h('b', {}, textoEstado) : null,
+      op.plan ? h('span', { clase: 'meta' }, op.plan) : null),
+    secundarios.length ? h('div', { clase: 'secundarios-barra' }, ...secundarios) : null) : null;
+  dentro.appendChild(h('div', { clase: 'derecha' }, mas,
+    hayMas ? h('button', {
+      clase: 'mini fantasma boton-mas-barra', 'aria-expanded': abierta ? 'true' : 'false',
+      'aria-label': 'Más: el estado entero, el plan y los otros botones',
+      title: 'El estado entero, el plan y los otros botones', onclick: alternarMasDeLaBarra,
+    }, '⋯') : null,
+    ...principales));
   barra.appendChild(dentro);
   return barra;
 }
@@ -5835,8 +5944,87 @@ function ajustarAltoDeLaBarra() {
     const raiz = document.documentElement.style;
     if (barra && barra.isConnected && barra.offsetHeight) raiz.setProperty('--alto-pie', `${barra.offsetHeight}px`);
     else raiz.removeProperty('--alto-pie');
+    apartarAvisoDeLaBarra();
   });
 }
+
+/* EL AVISO FLOTANTE NO TAPA LA BARRA (arreglos-crear-movil). Salía justo donde
+   está la barra pegada, encima de su botón principal, 3 s (6 s si era un
+   error). Aquí solo se publica cuánto ocupa la barra que se VE desde abajo
+   (`--alto-barra-accion`) y una clase en <body>; la regla que sube el aviso
+   está en el bloque CREAR · CARRIL de estilo.css (la capa de `#toast` es de
+   otra rama y no se toca). Se mide también al sacar cada aviso: así vale
+   aunque se haya cambiado de módulo y la barra ya no se vea. */
+function apartarAvisoDeLaBarra() {
+  const barra = document.querySelector('#panel .barra-accion');
+  let alto = 0;
+  if (barra && barra.getClientRects().length) {
+    const r = barra.getBoundingClientRect();
+    if (r.height > 0 && r.top < window.innerHeight) alto = Math.round(window.innerHeight - r.top);
+  }
+  if (alto > 0) document.documentElement.style.setProperty('--alto-barra-accion', `${alto}px`);
+  else document.documentElement.style.removeProperty('--alto-barra-accion');
+  document.body.classList.toggle('con-barra-accion', alto > 0);
+}
+
+/* UN AVISO QUE EN EL MÓVIL ES UNA LÍNEA (arreglos-crear-movil, 21-10-2026).
+   «Hay algo por actualizar» se decía en la barra, en el carril, en una caja y
+   en una franja, y en el móvil la caja y la franja eran un cuarto de la
+   pantalla antes de llegar al reproductor. El detalle no se quita: en el móvil
+   sale plegado en una línea y se abre al tocarlo; en pantalla ancha, la caja
+   de siempre. Lo que se abre o se cierra a mano se recuerda entre repintados. */
+const AVISOS_PLEGADOS = {};
+
+function avisoPlegable(clave, resumen, detalle, clase) {
+  const extra = clase ? ` ${clase}` : '';
+  if (!esMovilCrear()) return h('div', { clase: `caja-aviso${extra}` }, detalle);
+  const caja = h('details', { clase: `caja-aviso aviso-plegable${extra}` },
+    h('summary', {}, h('span', { clase: 'resumen-aviso' }, resumen)),
+    h('div', { clase: 'detalle-aviso' }, detalle));
+  if (AVISOS_PLEGADOS[clave]) caja.open = true;
+  caja.addEventListener('toggle', () => { AVISOS_PLEGADOS[clave] = caja.open; });
+  return caja;
+}
+
+/* AL CRUZAR LOS 700 PX (girar el teléfono, estrechar la ventana) cambia lo que
+   va en la barra y lo que se pliega: se vuelve a pintar Crear, sin más. */
+try {
+  window.matchMedia('(max-width: 700px)').addEventListener('change', () => {
+    BARRA_MAS.abierta = false;
+    if (typeof MODULOS !== 'undefined' && MODULOS.actual === 'crear' && pasoDelCarril()) pintarLight();
+  });
+} catch (e) { /* un navegador sin matchMedia: se queda como se pintó */ }
+
+/* ESCRIBIENDO CON EL TECLADO DEL MÓVIL ABIERTO (arreglos-crear-movil). La
+   cabecera y la barra pegada se quedaban y al campo le tocaban 130 px (19 px a
+   360×740). Con un campo de texto con el foco, en ≤700 px y con el teclado
+   abierto (el visor visible encoge: `visualViewport`), la barra de acción, la
+   cabecera de arriba y la burbuja se apartan (`body.escribiendo-movil`, en
+   estilo.css); al salir del campo vuelven. */
+const TECLADO_MOVIL = { ancho: 0, alto: 0 };
+
+function mirarTecladoMovil() {
+  const vv = window.visualViewport;
+  const ancho = window.innerWidth;
+  const alto = vv ? vv.height : window.innerHeight;
+  if (ancho !== TECLADO_MOVIL.ancho) { TECLADO_MOVIL.ancho = ancho; TECLADO_MOVIL.alto = 0; }
+  const escribe = esCampoDeTexto(document.activeElement);
+  // el alto sin teclado es el mayor visto con este ancho y sin escribir
+  if (!escribe || !TECLADO_MOVIL.alto) TECLADO_MOVIL.alto = Math.max(TECLADO_MOVIL.alto, alto);
+  const si = escribe && esMovilCrear() && alto < TECLADO_MOVIL.alto * 0.8
+    && typeof MODULOS !== 'undefined' && MODULOS.actual === 'crear';
+  if (document.body.classList.contains('escribiendo-movil') === si) return;
+  document.body.classList.toggle('escribiendo-movil', si);
+  ajustarAltoDeLaBarra();
+}
+
+try {
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', mirarTecladoMovil);
+  window.addEventListener('resize', mirarTecladoMovil);
+  document.addEventListener('focusin', () => setTimeout(mirarTecladoMovil, 0));
+  document.addEventListener('focusout', () => setTimeout(mirarTecladoMovil, 0));
+  setTimeout(mirarTecladoMovil, 0);   // el alto sin teclado, al cargar
+} catch (e) { /* sin visor: la barra se queda donde está */ }
 
 /* Los vídeos con una tanda pedida (`lanzarTandaLight`) o un «Montar el vídeo»
    pulsado (`montarElVideoLight`) y sin contestar todavía: sus botones de la
@@ -5949,6 +6137,44 @@ function devolverScroll(id, clave) {
   const c = clave();
   if (!c || c !== m.clave) return;
   if (Math.abs(caja.scrollTop - m.top) > 1) caja.scrollTop = m.top;
+}
+
+/* EL ANCLA (portadas-2, 21-10-2026). Devolver la MISMA altura no basta: si al
+   repintar crece algo que está más arriba (llegan los 3 ganchos de otra red,
+   sale «Claude está pensando…»), lo que se estaba mirando baja y la pantalla
+   «se mueve» aunque `scrollTop` sea el mismo (medido en móvil: 275 px). Antes
+   de repintar se apunta el primer título o etiqueta visible y a qué distancia
+   del borde estaba; después se corrige para dejarlo en el mismo sitio. Se
+   buscan títulos y etiquetas, que no cambian de texto; un botón sí cambia
+   («Dame 3 ganchos» → «Claude está pensando…»). */
+const SELECTOR_ANCLA = 'h2, h3, h4, label, b, .nombre-ficha';
+const textoDeAncla = el => (el.textContent || '').trim().slice(0, 80);
+
+function anclaDeScroll(id, clave) {
+  const caja = document.getElementById(id);
+  // sin sitio (cargando, o en Crear) no hay ancla, como en `devolverScroll`
+  if (!caja || !caja.scrollTop || !clave()) return null;
+  const arriba = caja.getBoundingClientRect().top;
+  const todos = Array.from(caja.querySelectorAll(SELECTOR_ANCLA));
+  const el = todos.find(x => {
+    const r = x.getBoundingClientRect();
+    return r.height > 0 && r.top >= arriba - 2 && textoDeAncla(x);
+  });
+  if (!el) return null;
+  const texto = textoDeAncla(el);
+  const n = todos.filter(x => x.tagName === el.tagName && textoDeAncla(x) === texto).indexOf(el);
+  return { id, sitio: clave(), tag: el.tagName, texto, n, distancia: el.getBoundingClientRect().top - arriba };
+}
+
+function volverAlAncla(ancla, clave) {
+  if (!ancla || !ancla.texto || !ancla.sitio || clave() !== ancla.sitio) return;
+  const caja = document.getElementById(ancla.id);
+  if (!caja) return;
+  const el = Array.from(caja.querySelectorAll(SELECTOR_ANCLA))
+    .filter(x => x.tagName === ancla.tag && textoDeAncla(x) === ancla.texto)[ancla.n];
+  if (!el) return;
+  const salto = (el.getBoundingClientRect().top - caja.getBoundingClientRect().top) - ancla.distancia;
+  if (Math.abs(salto) > 1) caja.scrollTop += salto;
 }
 
 function subirArriba(id) {
@@ -6107,9 +6333,11 @@ window.addEventListener('popstate', ev => {
  * documento y volver a pintarlas seria escribir en un panel que se tiro. */
 const VIVOS = [];
 
-function enVivo(pinta) {
+/* `alColgar` (opcional): lo que hay que hacer con lo pintado YA en el
+   documento, en el mismo turno (el carril le devuelve su desplazamiento). */
+function enVivo(pinta, alColgar) {
   const caja = h('div', { clase: 'vivo' });
-  VIVOS.push({ caja, pinta });
+  VIVOS.push({ caja, pinta, alColgar });
   const dentro = pinta();
   if (dentro) caja.appendChild(dentro);
   return caja;
@@ -6122,7 +6350,7 @@ function refrescarVivosLight() {
   if (!VIVOS.length) return;
   const foco = recordarFoco();
   try {
-    VIVOS.forEach(({ caja, pinta }) => {
+    VIVOS.forEach(({ caja, pinta, alColgar }) => {
       if (!caja.isConnected) return;
       /* NO SE LE QUITA EL SITIO A LO QUE SE ESTA USANDO. Si el foco esta
          dentro de la caja, se deja como esta hasta el siguiente pintado
@@ -6130,8 +6358,12 @@ function refrescarVivosLight() {
          viene a arreglar, no uno que pueda permitirse repetir. */
       if (caja.contains(document.activeElement)) return;
       const dentro = pinta();
+      /* LO QUE NO HA CAMBIADO NO SE DESCUELGA: volver a colgar el mismo nodo
+         le pone el scroll a cero (el carril saltaba al paso 1 en cada tic). */
+      if (dentro && caja.childNodes.length === 1 && caja.firstChild === dentro) return;
       vaciar(caja);
       if (dentro) caja.appendChild(dentro);
+      if (alColgar) alColgar();
     });
   } finally {
     devolverFoco(foco);
@@ -6195,6 +6427,7 @@ function pintarLightAhora() {
     donde = h('div', { clase: 'paso-crear' });
     try {
       contenido.appendChild(carrilCrear(paso));
+      colocarCarril(paso);   // ya colgado: su desplazamiento, antes de pintar
       donde.appendChild(salidaTusProyectos());
       donde.appendChild(cabeceraDelVideo());
     } catch (e) {
@@ -7650,6 +7883,14 @@ const BLOQUES_DEL_ENCARGO = [
     ? bloqueLight('El espacio fijo', 'si todo el vídeo pasa en un mismo sitio (opcional)', bloqueEspacioFijoLight(c.e))
     : bloqueLight('El espacio fijo', 'todo el vídeo en un mismo sitio: se aplica como corrección',
       bloqueEspacioFijoDelVideo())) },
+  // el tipo de relato (rama tipo-de-relato): detrás del espacio fijo, que da el sitio de la base
+  { id: 'tipo-relato', pinta: c => (c.nuevo
+    ? bloqueLight('El tipo de relato', 'cómo se cuenta en imágenes (opcional)', bloqueTipoRelatoLight(c.e))
+    : bloqueLight('El tipo de relato', 'cómo se cuenta en imágenes: se aplica como corrección',
+      bloqueTipoRelatoDelVideo())) },
+  { id: 'reparto-sitios', pinta: c => (c.nuevo ? null
+    : bloqueLight('El reparto y los sitios', 'quién sale y dónde ocurre, deducido del guion',
+      bloquePedidoSitiosDelVideo())) },
 ];
 
 /* PUNTO DE ENGANCHE DE CADA PASO del carril. Para añadir un bloque al final
@@ -8114,7 +8355,9 @@ function campoImagenDelEspacio(ef, urlGuardada, alCambiar) {
       }, 'Quitarla') : null),
     h('div', { clase: 'pista' }, 'Se adjunta a cada imagen de plano de este sitio (no a los '
       + 'secundarios) para que se reconozca el lugar. Se paga como una referencia más: alrededor '
-      + 'de medio céntimo por imagen.'));
+      + 'de medio céntimo por imagen. Con el tipo de relato «Un espacio que cambia» o «Producto» '
+      + 'no hace falta: el Studio dibuja la imagen base del sitio a partir de esta descripción '
+      + '(en «El tipo de relato», donde la apruebas); si subes una, puedes usarla como base, gratis.'));
 }
 
 function bloqueEspacioFijoLight(e) {
@@ -8293,6 +8536,434 @@ async function rehacerPlanosDelEspacio(planos, unidad) {
   }
 }
 
+/* EL TIPO DE RELATO (rama tipo-de-relato, 20-10-2026): CÓMO se cuenta el vídeo
+ * en imágenes (`pasos/tipo_relato.py`). Habla de estructura, nunca de un
+ * negocio. Se elige en el Encargo (viaja en `opcionesParaCrear` SOLO si se
+ * eligió uno: sin elegir manda el del estilo y no se escribe nada), lo trae la
+ * Parrilla con «Tipo de relato:», o se aplica a un vídeo hecho como corrección
+ * (`POST /tipo_relato/aplicar`, gratis), igual que el espacio fijo. Los modos
+ * que EDITAN («Un espacio que cambia», «Producto») necesitan la imagen base del
+ * sitio aprobada antes de pagar ningún plano. */
+const MODOS_RELATO = [
+  { valor: 'documental', nombre: 'Documental' },
+  { valor: 'espacio_que_cambia', nombre: 'Un espacio que cambia' },
+  { valor: 'recorrido', nombre: 'Recorrido' },
+  { valor: 'escenario_y_apoyos', nombre: 'Escenario y apoyos' },
+  { valor: 'producto', nombre: 'Producto' },
+  { valor: 'clase', nombre: 'Clase' },
+];
+const CAMBIA_RELATO = [
+  { valor: 'objeto', nombre: 'Un objeto' },
+  { valor: 'acabados', nombre: 'Los acabados' },
+  { valor: 'estado', nombre: 'El estado (obra, montaje, terminado)' },
+  { valor: 'hora', nombre: 'La hora (la luz y la gente)' },
+];
+const AYUDA_RELATO = {
+  documental: 'El guion se reparte en sitios, como siempre.',
+  espacio_que_cambia: 'Un solo sitio que se ve siempre igual; cada plano cambia solo lo que dice '
+    + 'la voz. Cada plano se genera EDITANDO una imagen base del sitio, que apruebas antes.',
+  recorrido: 'Varios ambientes de un mismo lugar, con la misma luz, materiales y estilo.',
+  escenario_y_apoyos: 'Un sitio principal con sus secundarios (el espacio fijo de siempre).',
+  producto: 'El producto manda y el fondo no se mueve: cada plano edita la imagen base del fondo.',
+  clase: 'Una clase: de momento se cuenta como un recorrido.',
+};
+
+function nombreRelato(modo, cambia) {
+  const m = MODOS_RELATO.find(x => x.valor === modo);
+  let texto = m ? m.nombre : 'Documental';
+  const c = CAMBIA_RELATO.find(x => x.valor === cambia);
+  if (modo === 'espacio_que_cambia' && c) texto += ` (${c.nombre.split(' (')[0].toLowerCase()})`;
+  return texto;
+}
+
+/* El selector: el modo y, en «Un espacio que cambia», qué cambia. `rel` es
+   {modo, cambia}; `heredado` el texto de la primera opción (lo que rige si no
+   se elige nada). */
+function selectorTipoRelato(rel, alCambiar, heredado) {
+  const caja = h('div', { clase: 'tipo-relato' });
+  caja.appendChild(campoSelect('Tipo de relato', rel.modo || '',
+    [{ valor: '', nombre: heredado || 'Lo que diga el estilo' }, ...MODOS_RELATO],
+    v => { rel.modo = v; if (v === 'espacio_que_cambia' && !rel.cambia) rel.cambia = 'objeto'; alCambiar(); },
+    rel.modo ? AYUDA_RELATO[rel.modo] : 'Sin elegir, manda el del estilo; si el estilo no trae '
+      + 'ninguno, con espacio fijo es «Escenario y apoyos» y sin él, «Documental».'));
+  if (rel.modo === 'espacio_que_cambia') {
+    caja.appendChild(campoSelect('Qué cambia', rel.cambia || 'objeto', CAMBIA_RELATO,
+      v => { rel.cambia = v; alCambiar(); }));
+  }
+  return caja;
+}
+
+function tipoRelatoDelEncargo(r) {
+  const t = (r && typeof r === 'object') ? r : {};
+  return { modo: String(t.modo || ''), cambia: String(t.cambia || '') };
+}
+
+function tipoRelatoParaCrear(e) {
+  const t = e.tipo_relato;
+  if (!t || !t.modo) return null;
+  return t.modo === 'espacio_que_cambia' ? { modo: t.modo, cambia: t.cambia || 'objeto' }
+    : { modo: t.modo };
+}
+
+function bloqueTipoRelatoLight(e) {
+  if (!e.tipo_relato) e.tipo_relato = tipoRelatoDelEncargo(null);
+  const caja = h('div', {});
+  caja.appendChild(selectorTipoRelato(e.tipo_relato, pintarLight));
+  if (['espacio_que_cambia', 'producto'].includes(e.tipo_relato.modo)) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Al crear el vídeo, aprueba su imagen base en '
+      + '«El tipo de relato» del vídeo antes de generar las imágenes: sube una en «El espacio fijo» '
+      + '(gratis) o genérala (se paga una imagen, con su coste delante).'));
+  }
+  return caja;
+}
+
+/* EL TIPO DE RELATO DE UN VÍDEO YA CREADO. El estado vive en
+   `APP.light.video.relato` para que el repintado no pierda lo elegido. */
+function relatoDelVideoLight() {
+  const v = APP.light.video;
+  if (v.relato && v.relato.pid === v.pid) return v.relato;
+  const pid = v.pid;
+  v.relato = { pid, cargado: false, ficha: null, copia: { modo: '', cambia: '' },
+    marcados: new Set(), ocupado: false, error: '', pedido: '' };
+  pedir(`${API.proyecto(pid)}/tipo_relato`).then(d => {
+    const est = APP.light.video.relato;
+    if (!est || est.pid !== pid) return;
+    leerRelatoDelServidor(est, d);
+    pintarLight();
+  }).catch(err => {
+    const est = APP.light.video.relato;
+    if (!est || est.pid !== pid) return;
+    est.cargado = true;
+    est.error = err.message;
+    pintarLight();
+  });
+  return v.relato;
+}
+
+function leerRelatoDelServidor(est, d) {
+  est.cargado = true;
+  est.error = '';
+  est.ficha = d || {};
+  est.copia = tipoRelatoDelEncargo((d || {}).tipo_relato);
+  est.cambios = (d || {}).cambios || null;
+  est.marcados = new Set(((est.cambios || {}).planos || []).map(x => x.id));
+}
+
+function bloqueTipoRelatoDelVideo() {
+  const est = relatoDelVideoLight();
+  if (!est.cargado) return h('div', { clase: 'cargando' }, 'cargando…');
+  const f = est.ficha || {};
+  const corriendo = !!trabajoVideoLight();
+  const res = f.resuelto || {};
+  const origen = { video: 'elegido para este vídeo: manda sobre el del estilo',
+    estilo: 'el que trae el estilo', espacio_fijo: 'porque tiene espacio fijo',
+    '': 'por defecto' }[res.origen || ''] || '';
+  const heredado = f.del_estilo && f.del_estilo.modo
+    ? `Lo del estilo: ${nombreRelato(f.del_estilo.modo, f.del_estilo.cambia)}`
+    : 'Lo que diga el estilo';
+  const caja = h('div', { clase: 'tipo-relato' },
+    h('div', { clase: 'meta' }, `Ahora: ${res.nombre || nombreRelato(res.modo, res.cambia)} (${origen})`),
+    selectorTipoRelato(est.copia, pintarLight, heredado),
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'primario', disabled: corriendo || est.ocupado,
+        onclick: () => aplicarTipoRelatoDelVideo() }, 'Aplicar el tipo de relato'),
+      h('span', { clase: 'meta' }, 'gratis: no se dibuja nada; después eliges qué planos rehacer')));
+  if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
+  if (f.faltan_cambios) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      'Falta decir qué cambia en cada tramo. Lo escribe Claude leyendo el guion (no se paga '
+      + 'ninguna imagen).',
+      h('div', { clase: 'fila' }, h('button', { clase: 'mini', disabled: corriendo || est.ocupado,
+        onclick: () => escribirCambiosDelRelato() }, 'Escribir qué cambia en cada tramo'))));
+  }
+  if (f.edita) caja.appendChild(imagenBaseDelRelato(est, corriendo));
+  if (est.cambios) caja.appendChild(cambiosDelRelato(est, corriendo));
+  return caja;
+}
+
+function imagenBaseDelRelato(est, corriendo) {
+  const f = est.ficha || {};
+  const base = (f.bases || {})[f.sitio] || null;
+  const usd = Number(f.usd_base || 0);
+  const caja = h('div', { clase: `imagen-base-relato${f.base_aprobada ? ' aprobada' : ''}` },
+    h('label', {}, `Imagen base de «${f.sitio_nombre || f.sitio || 'el sitio'}»`));
+  if (!f.sitio) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Todavía no hay sitio: escribe el espacio fijo '
+      + 'o deduce antes el reparto y los sitios.'));
+    return caja;
+  }
+  if (base) {
+    // pulsarla la abre a tamaño completo: la miniatura no deja juzgarla (21-10)
+    const url = `${BASE}${base.imagen_url}&v=${Date.now() % 100000}`;
+    caja.appendChild(h('a', { href: url, target: '_blank', rel: 'noopener',
+      title: 'Abrir a tamaño completo' },
+    h('img', { src: url, alt: 'la imagen base del sitio', clase: 'miniatura-imagen-base' })));
+    caja.appendChild(h('div', { clase: 'pista' }, 'Púlsala para verla a tamaño completo.'));
+  }
+  caja.appendChild(h('div', { clase: 'meta' }, f.base_aprobada
+    ? '✓ Aprobada: cada plano del sitio se genera editando esta imagen.'
+    : (base ? 'Sin aprobar: mírala y apruébala antes de generar los planos.'
+      : 'Sin imagen base: los planos de este sitio no se generan hasta que la apruebes.')));
+  const fila = h('div', { clase: 'fila' });
+  if (base && !f.base_aprobada) {
+    fila.appendChild(h('button', { clase: 'mini primario', disabled: est.ocupado,
+      onclick: () => aprobarBaseDelRelato(true) }, 'Aprobar esta imagen'));
+  }
+  if (base && f.base_aprobada) {
+    fila.appendChild(h('button', { clase: 'mini fantasma', disabled: est.ocupado,
+      onclick: () => aprobarBaseDelRelato(false) }, 'Retirar la aprobación'));
+  }
+  if (f.puede_usar_subida) {
+    fila.appendChild(h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
+      onclick: () => usarSubidaComoBase() }, 'Usar la imagen subida del espacio · gratis'));
+  }
+  fila.appendChild(h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
+    onclick: () => generarBaseDelRelato(!!base, usd) },
+  `${base ? 'Otra imagen base' : 'Generar la imagen base'} · ≈ ${usdCorto(usd)}`));
+  caja.appendChild(fila);
+  if (f.base_aprobada && (f.estados || []).length) caja.appendChild(estadosDelRelato(est, corriendo, usd));
+  if (f.inicial) {
+    caja.appendChild(h('div', { clase: 'meta' }, `Lo que luego cambia sale ya en la base, así: «${f.inicial}». `
+      + 'Comprueba que está donde va antes de aprobarla.'));
+  }
+  caja.appendChild(h('div', { clase: 'pista' }, 'Qué hay en el sitio y dónde lo dice «El espacio '
+    + 'fijo»; aquí se dibuja y se aprueba. La imagen base es el sitio vacío y entero, en su '
+    + 'estado inicial. Es lo que garantiza que todas las imágenes sean el mismo sitio con la misma '
+    + 'cámara. Los planos de detalle la llevan como referencia.'));
+  return caja;
+}
+
+function cambiosDelRelato(est, corriendo) {
+  const c = est.cambios;
+  const planos = c.planos || [];
+  const unidad = Number(c.usd_por_imagen || 0);
+  if (!planos.length) {
+    return h('div', { clase: 'caja-info cambios-espacio-fijo' },
+      `Ningún plano hecho cambia con este tipo de relato${c.hechas ? ` (${c.hechas} con imagen)` : ''}: `
+      + 'lo que se dibuje desde ahora ya sale así.');
+  }
+  const f = est.ficha || {};
+  const bloqueado = f.edita && !f.base_aprobada;
+  const marcados = planos.filter(x => est.marcados.has(x.id)).map(x => x.id);
+  const lista = h('div', { clase: 'lista-espacio-fijo' });
+  planos.forEach(x => {
+    lista.appendChild(h('label', { clase: 'fila-espacio-fijo' },
+      h('input', { type: 'checkbox', checked: est.marcados.has(x.id),
+        onchange: ev => { if (ev.target.checked) est.marcados.add(x.id); else est.marcados.delete(x.id); pintarLight(); } }),
+      h('span', { clase: 'id' }, x.id),
+      h('span', { clase: 'crece' }, x.narracion || '', h('span', { clase: 'meta' }, ` · ${x.sitio || 'sin sitio'}`))));
+  });
+  return h('div', { clase: 'caja-aviso cambios-espacio-fijo' },
+    h('div', {}, `${planos.length} ${planos.length === 1 ? 'plano cambiaría' : 'planos cambiarían'} `
+      + `con el tipo de relato. Rehacer cada uno cuesta ≈ ${usdCorto(unidad)}. Nada se rehace `
+      + 'hasta que lo pidas; lo que no rehagas se queda como está.'
+      + (bloqueado ? ' Antes aprueba la imagen base.' : '')),
+    lista,
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', disabled: corriendo || est.ocupado || bloqueado,
+        onclick: () => rehacerPlanosDelRelato(planos.map(x => x.id), unidad) },
+      `Rehacer los ${planos.length} · ≈ ${usdCorto(planos.length * unidad)}`),
+      h('button', { clase: 'mini', disabled: corriendo || est.ocupado || bloqueado || !marcados.length,
+        onclick: () => rehacerPlanosDelRelato(marcados, unidad) },
+      `Solo los marcados (${marcados.length}) · ≈ ${usdCorto(marcados.length * unidad)}`),
+      h('button', { clase: 'mini fantasma',
+        onclick: () => { est.cambios = null; toast('no se rehace ninguno: el vídeo se queda como está'); pintarLight(); } },
+      'Ninguno')));
+}
+
+async function accionDelRelato(ruta, cuerpo, mensaje) {
+  const est = relatoDelVideoLight();
+  est.ocupado = true;
+  pintarLight();
+  try {
+    const d = await pedir(`${API.proyecto(est.pid)}/tipo_relato${ruta}`,
+      { method: 'POST', cuerpo: cuerpo || {} });
+    leerRelatoDelServidor(est, d);
+    if (mensaje) toast(mensaje);
+  } catch (err) {
+    est.error = err.message;
+  }
+  est.ocupado = false;
+  pintarLight();
+}
+
+function aplicarTipoRelatoDelVideo() {
+  const est = relatoDelVideoLight();
+  const t = est.copia;
+  const cuerpo = { tipo_relato: t.modo ? (t.modo === 'espacio_que_cambia'
+    ? { modo: t.modo, cambia: t.cambia || 'objeto' } : { modo: t.modo }) : null };
+  return accionDelRelato('/aplicar', cuerpo, 'tipo de relato aplicado: no se ha dibujado nada');
+}
+
+/* UN ESTADO, UNA IMAGEN: cada cambio del vídeo (la mampara abierta, la
+   corrediza…) se dibuja UNA vez editando la base aprobada; se aprueba como la
+   base, y los planos de ese estado la editan sin volver a inventarlo. */
+function estadosDelRelato(est, corriendo, usd) {
+  const f = est.ficha || {};
+  const caja = h('div', { clase: 'estados-relato' },
+    h('label', {}, 'Cada estado, dibujado una vez'),
+    h('div', { clase: 'pista' }, 'Cada cambio que pide el guion se dibuja una sola vez sobre la '
+      + 'imagen base. Apruébalos: los planos de cada estado editan su imagen y así salen iguales.'));
+  for (const e of f.estados || []) {
+    const fila = h('div', { clase: `estado-relato${e.aprobada ? ' aprobada' : ''}` });
+    if (e.imagen_url) {
+      const url = `${BASE}${e.imagen_url}&v=${Date.now() % 100000}`;
+      fila.appendChild(h('a', { href: url, target: '_blank', rel: 'noopener',
+        title: 'Abrir a tamaño completo' },
+      h('img', { src: url, alt: `el estado ${e.estado}`, clase: 'miniatura-imagen-base' })));
+    }
+    const lado = h('div', { clase: 'estado-relato-texto' },
+      h('strong', {}, e.estado.replace(/_/g, ' ')),
+      h('div', { clase: 'meta' }, e.cambio),
+      h('div', { clase: 'meta' }, e.aprobada ? '✓ Aprobado.'
+        : (e.imagen_url && e.vigente ? 'Sin aprobar: míralo y apruébalo.'
+          : (e.imagen_url ? 'El cambio se ha reescrito: hace falta otra imagen.'
+            : 'Sin imagen: los planos de este estado esperan a que la apruebes.'))));
+    const botones = h('div', { clase: 'fila' });
+    if (e.imagen_url && e.vigente && !e.aprobada) {
+      botones.appendChild(h('button', { clase: 'mini primario', disabled: est.ocupado,
+        onclick: () => aprobarEstadoDelRelato(e.estado, true) }, 'Aprobar este estado'));
+    }
+    if (e.aprobada) {
+      botones.appendChild(h('button', { clase: 'mini fantasma', disabled: est.ocupado,
+        onclick: () => aprobarEstadoDelRelato(e.estado, false) }, 'Retirar la aprobación'));
+    }
+    botones.appendChild(h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
+      onclick: () => generarEstadoDelRelato(e.estado, !!e.imagen_url, usd) },
+    `${e.imagen_url ? 'Otra imagen' : 'Dibujar este estado'} · ≈ ${usdCorto(usd)}`));
+    lado.appendChild(botones);
+    fila.appendChild(lado);
+    caja.appendChild(fila);
+  }
+  return caja;
+}
+
+function aprobarEstadoDelRelato(estado, aprobada) {
+  const est = relatoDelVideoLight();
+  return accionDelRelato('/base/aprobar', { sitio: (est.ficha || {}).sitio, estado, aprobada },
+    aprobada ? `estado «${estado}» aprobado` : 'aprobación retirada');
+}
+
+function generarEstadoDelRelato(estado, otra, usd) {
+  if (!confirm(`${otra ? 'Otra imagen' : 'Dibujar'} del estado «${estado}»: ≈ ${usdCorto(usd)}.`
+    + '\n\nSe paga una imagen: la base aprobada con ese cambio. Después la miras y la apruebas.')) return;
+  trabajoDelRelato('/base/generar', { estado, otra: !!otra, usd });
+}
+
+function aprobarBaseDelRelato(aprobada) {
+  const est = relatoDelVideoLight();
+  return accionDelRelato('/base/aprobar', { sitio: (est.ficha || {}).sitio, aprobada },
+    aprobada ? 'imagen base aprobada' : 'aprobación retirada');
+}
+
+function usarSubidaComoBase() {
+  return accionDelRelato('/base/usar_subida', {}, 'la imagen subida es ahora la imagen base, aprobada');
+}
+
+/* Los dos trabajos del tipo de relato (la imagen base, que se paga, y los
+   cambios por tramo, que no) se siguen con la barra del vídeo y al terminar se
+   vuelve a leer la ficha. */
+async function trabajoDelRelato(ruta, cuerpo) {
+  const est = relatoDelVideoLight();
+  const pid = est.pid;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(`${API.proyecto(pid)}/tipo_relato${ruta}`,
+      { method: 'POST', cuerpo: cuerpo || {} });
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (['listo', 'error', 'cancelado'].includes(trabajo.estado)) {
+        const ahora = APP.light.video.relato;
+        if (ahora && ahora.pid === pid) APP.light.video.relato = null;
+      }
+      pintarLight();
+    }, () => refrescarVivosLight(), pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
+}
+
+function generarBaseDelRelato(otra, usd) {
+  if (!confirm(`${otra ? 'Otra imagen base' : 'Generar la imagen base'} del sitio: ≈ ${usdCorto(usd)}.`
+    + '\n\nSe paga una imagen. Después la miras y la apruebas.')) return;
+  trabajoDelRelato('/base/generar', { otra: !!otra, usd });
+}
+
+function escribirCambiosDelRelato() {
+  trabajoDelRelato('/cambios', {});
+}
+
+async function rehacerPlanosDelRelato(planos, unidad) {
+  const est = relatoDelVideoLight();
+  const pid = est.pid;
+  if (!planos.length) return;
+  if (!confirm(`Rehacer ${planos.length} ${planos.length === 1 ? 'imagen' : 'imágenes'} con el `
+    + `tipo de relato: ≈ ${usdCorto(planos.length * unidad)}.\n\nSolo esas; las demás no se `
+    + 'tocan. Después hay que volver a montar el vídeo.')) return;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(`${API.proyecto(pid)}/tipo_relato/rehacer`, {
+      method: 'POST', cuerpo: { planos, imagenes: planos.length },
+    });
+    est.cambios = null;
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') {
+        reiniciarPrevia();
+        await cargarVideoLight(pid);
+        refrescarPlanLight('video', true);
+        APP.light.video.relato = null;
+      }
+      pintarLight();
+    }, () => { refrescarPlanosLight(); refrescarVivosLight(); }, pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
+}
+
+/* «PEDIDO PARA EL REPARTO DE SITIOS», junto a «El reparto y los sitios»: una
+   frase corta que llega a Claude al repartir (el backend ya la recibía:
+   `POST /escenarios` con `peticion`). Con un pedido escrito se vuelve a
+   repartir aunque el guion no haya cambiado. No dibuja nada. */
+function bloquePedidoSitiosDelVideo() {
+  const est = relatoDelVideoLight();
+  const corriendo = !!trabajoVideoLight();
+  return h('div', { clase: 'pedido-sitios' },
+    campoTexto('Pedido para el reparto de sitios', est.pedido, x => { est.pedido = x; },
+      { pista: 'todo en la cocina; el patio solo en el último tramo' }),
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'mini', disabled: corriendo || !String(est.pedido || '').trim(),
+        onclick: () => repartirSitiosConPedido() }, 'Volver a repartir con este pedido'),
+      h('span', { clase: 'meta' }, 'lo lee Claude (no se paga ninguna imagen); las imágenes '
+        + 'hechas se quedan hasta que pidas rehacerlas')));
+}
+
+async function repartirSitiosConPedido() {
+  const est = relatoDelVideoLight();
+  const pid = est.pid;
+  const peticion = String(est.pedido || '').trim().slice(0, 400);
+  if (!peticion) return;
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const datos = await pedir(API.escenarios(pid), { method: 'POST', cuerpo: { peticion, rehacer: true } });
+    seguirTrabajo(CLAVE_VIDEO_LIGHT, datos.trabajo_id, async trabajo => {
+      if (trabajo.estado === 'listo') {
+        toast('reparto y sitios repartidos de nuevo con tu pedido');
+        APP.light.video.relato = null;
+        APP.light.video.espacio = null;
+        await cargarVideoLight(pid);
+      }
+      pintarLight();
+    }, () => refrescarVivosLight(), pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
+}
+
 /* Lo elegido en «Ajustes del montaje» del borrador, tal como lo entiende
    `_opciones_al_crear`. Lo que no se eligió no viaja: queda automático. */
 function opcionesParaCrear(e) {
@@ -8311,6 +8982,8 @@ function opcionesParaCrear(e) {
   if (op.ritmo) salida.ritmo = op.ritmo;
   const espacio = espacioFijoParaCrear(e);
   if (espacio) salida.espacio_fijo = espacio;
+  const relato = tipoRelatoParaCrear(e);
+  if (relato) salida.tipo_relato = relato;
   return salida;
 }
 
@@ -8462,13 +9135,15 @@ function vistaEncargoVideoLight() {
 
   if (ERRORES[CLAVE_VIDEO_LIGHT]) caja.appendChild(errorDelVideo());
 
-  caja.appendChild(h('div', { clase: v.guion ? 'caja-aviso' : 'caja-info' }, v.guion
-    ? 'Esto es lo que se le pidió al redactor, y de aquí salió el guion que hay. '
+  /* en el móvil, plegado en una línea (ver `avisoPlegable`) */
+  caja.appendChild(v.guion
+    ? avisoPlegable('encargo-con-guion', 'Lo que cambies aquí deja el guion obsoleto',
+      'Esto es lo que se le pidió al redactor, y de aquí salió el guion que hay. '
       + 'Lo que cambies se guarda solo y deja el guion obsoleto: la barra de abajo ofrece '
       + 'regenerarlo, y con él se rehacen después la voz y las imágenes que ya '
       + 'no cuadren; lo que siga valiendo no se vuelve a pagar. El nombre se '
-      + 'cambia sin regenerar nada. El formato rehace TODAS las imágenes.'
-    : 'Lo que se le va a pedir al redactor. Se guarda solo; cuando esté, '
+      + 'cambia sin regenerar nada. El formato rehace TODAS las imágenes.')
+    : h('div', { clase: 'caja-info' }, 'Lo que se le va a pedir al redactor. Se guarda solo; cuando esté, '
       + '«Generar el guion» abajo.'));
 
   /* TODO LO QUE SE TECLEA O SE MARCA AQUÍ DENTRO PROGRAMA UN VOLCADO. Por
@@ -12180,8 +12855,16 @@ function vistaPreviaLight() {
      de esta pantalla. Cada tarjeta tiene ademas el suyo para ir una a una. */
   /* DESDE EL REDISEÑO DE CREAR, las acciones van en la barra de acción
      («Aplicar N notas», «Poner al día N imágenes», «Montar el vídeo») y los
-     mandos de mirar quedan pegados ENCIMA de ella. */
-  ponerBarra(() => barraDeLasImagenes(mandos));
+     mandos de mirar quedan pegados ENCIMA de ella.
+     EN EL MÓVIL, ENCIMA DE LA IMAGEN (arreglos-crear-movil, 21-10-2026):
+     pegados encima de la barra eran otra franja fija, y barra más mandos
+     tapaban hasta la mitad de la pantalla. Ahí se pasa de plano también
+     deslizando la imagen. */
+  if (esMovilCrear()) {
+    mandos.classList.add('en-la-pagina');
+    marco.before(mandos);
+    ponerBarra(() => barraDeLasImagenes(null));
+  } else ponerBarra(() => barraDeLasImagenes(mandos));
   return caja;
 }
 
@@ -12953,7 +13636,12 @@ function vistaVideoLight() {
        paga. Sale del plan del servidor, la misma cifra que el botón. */
     const coste = (((v.planes || {}).render || {}).coste) || {};
     const porDibujar = Number(coste.imagenes_por_generar) || 0;
-    caja.appendChild(h('div', { clase: 'caja-aviso' },
+    /* EN EL MÓVIL, UNA LÍNEA QUE SE ABRE (arreglos-crear-movil): la barra ya
+       dice «Vídeo obsoleto» y este aviso, abierto, empujaba el reproductor
+       una pantalla abajo. El precio, si lo hay, va en la línea. */
+    caja.appendChild(avisoPlegable('video-obsoleto',
+      'Este vídeo es de ANTES de tus últimos cambios'
+        + (porDibujar ? ` · se dibujarán ${porDibujar} imagen(es), ≈ ${usdCorto(Number(coste.usd_por_generar) || 0)}` : ''),
       'Este vídeo es de ANTES de tus últimos cambios (por ejemplo, imágenes rehechas '
       + 'en «Imágenes»): lo que ves aquí todavía no los lleva. «Montar el vídeo», en la '
       + 'barra de abajo, lo vuelve a montar con ellos.'
@@ -12984,9 +13672,23 @@ function vistaVideoLight() {
         'Arreglar los subtítulos')));
   }
 
+  /* MIENTRAS SE MONTA, LA PANTALLA NO SE DESMONTA (arreglos-crear-movil,
+     21-10-2026). Antes, con un trabajo en marcha, se quitaban el reproductor,
+     los ajustes y el repaso: el paso medía un tercio (3155 → 1183 px en un
+     móvil), el navegador recortaba el scroll y estabas tocando los subtítulos
+     y acababas mirando un recuadro vacío; al terminar no volvía. Ahora todo
+     sigue en su sitio, apagado (`inert`: ni se pulsa ni se escribe), y el
+     reproductor enseña el MP4 de ahora con «montando…» encima. El MP4 de la
+     versión activa no se toca hasta que el montaje nuevo se sella. */
+  const trabajo = trabajoVideoLight();
   const marco = h('div', { clase: `marco-video ${formatoDelVideo()}` });
-  if (hayMp4Light() && !trabajoVideoLight()) {
+  if (hayMp4Light() && (!trabajo || !v.planos.length)) {
     marco.appendChild(videoLight());
+    if (trabajo) {
+      marco.classList.add('montando');
+      marco.appendChild(h('div', { clase: 'sello sello-montando' },
+        'montando el vídeo nuevo… este es el de antes hasta que acabe'));
+    }
   } else if (v.planos.length) {
     // el último que ha caído, grande: es lo que se acaba de generar
     const ultimo = v.planos[v.planos.length - 1];
@@ -13018,17 +13720,28 @@ function vistaVideoLight() {
   /* LOS AJUSTES DEL MONTAJE, el MISMO panel que en el Encargo y con el mismo
      comportamiento (decisión 9 del rediseño): lo que se toca se guarda sin
      montar, y lo monta la barra de abajo. Se ven también sin MP4 (sus
-     cambios entran en el primer montaje); mientras se monta, no. */
-  if (!trabajoVideoLight()) caja.appendChild(ajustesEnElVideo());
+     cambios entran en el primer montaje); mientras se monta, a la vista pero
+     apagados (ver «MIENTRAS SE MONTA» arriba). */
+  const apagadoSiMonta = nodo => {
+    if (!trabajo) return nodo;
+    return h('div', { clase: 'apagado-montando', inert: true, 'aria-disabled': 'true',
+      title: 'Mientras se monta el vídeo no se puede cambiar: espera a que acabe' }, nodo);
+  };
+  if (trabajo) {
+    caja.appendChild(h('div', { clase: 'pista aviso-montando' },
+      'Mientras se monta, lo de aquí abajo se queda quieto; al acabar se puede tocar otra vez.'));
+  }
+  caja.appendChild(apagadoSiMonta(ajustesEnElVideo()));
 
   /* EL REPASO VA DEBAJO DEL VÍDEO Y SOLO CUANDO HAY VÍDEO. Antes de eso no hay
      nada que comentar, y una caja de texto vacía debajo de una barra de
      progreso invita a escribir sobre algo que todavía no existe. Al lado, la
-     ortografía de los subtítulos («Revisar»); debajo, descargar y publicar. */
-  if (hayMp4Light() && !trabajoVideoLight()) {
+     ortografía de los subtítulos («Revisar»); debajo, descargar y publicar.
+     Mientras se monta un vídeo que ya tenía MP4, se queda, apagado. */
+  if (hayMp4Light()) {
     const revisar = h('div', { clase: 'caja-video revisar-video' },
       h('h3', {}, 'Revisar'), panelOrtografia('subtitulos'));
-    caja.appendChild(h('div', { clase: 'rejilla-video' }, panelRepaso(), revisar));
+    caja.appendChild(apagadoSiMonta(h('div', { clase: 'rejilla-video' }, panelRepaso(), revisar)));
     const descargar = h('div', { clase: 'caja-video descargar-video' },
       h('h3', {}, 'Descargar'),
       h('div', { clase: 'fila' },
@@ -13037,8 +13750,8 @@ function vistaVideoLight() {
         conAyuda('Sin música, sin efectos, sin subtítulos, sin voz… o cada audio suelto, para usarlo en otro sitio. Gratis.',
           h('button', { clase: 'mini', onclick: () => abrirDescargaPorPartes(v.pid) }, 'Por partes…'))),
       h('div', { clase: 'meta' }, 'el MP4 tal y como está ahora mismo, o sin música, sin efectos, sin subtítulos… gratis'));
-    caja.appendChild(h('div', { clase: 'rejilla-video' }, descargar,
-      bloquePublicarEnVideo(v) || h('span', {})));  // Publicar en redes (rama publicar-redes-1)
+    caja.appendChild(apagadoSiMonta(h('div', { clase: 'rejilla-video' }, descargar,
+      bloquePublicarEnVideo(v) || h('span', {}))));  // Publicar en redes (rama publicar-redes-1)
   }
   ponerBarra(barraDelVideo);
   return caja;
@@ -13978,15 +14691,30 @@ function tarjetaNotaImagen(plano, notas, vieja) {
   const conAntes = notas.filter(n => n.antes && estadoDeImagen(plano, n) === 'hecha');
   const antes = conAntes.length ? conAntes[conAntes.length - 1].antes : '';
   const columna = h('div', { clase: 'nota-columna' });
+  /* MIENTRAS SE DIBUJA, EL HUECO YA ESTÁ (arreglos-crear-movil, 21-10-2026):
+     al llegar la nueva se metía «ahora · antes» y la de antes encima del texto
+     y la tarjeta bajaba 154 px de golpe. Ahora, pedida (en cola o dibujándose),
+     arriba va el hueco de la nueva y abajo la de ahora, que es la que quedará
+     como «antes»: al llegar, solo cambia la de arriba. */
+  const pidiendo = !vieja && e && e.imagen && estados.some(s => s === 'corriendo' || s === 'en cola');
   // la imagen de ahora de ese número es de OTRA escena: a una nota vieja no se le pone
-  if (vieja) {
+  if (pidiendo) {
+    columna.appendChild(h('button', { clase: 'nota-mini nota-hueco', title: 'Ver esta imagen en grande arriba', onclick: ir },
+      h('span', { clase: 'meta' }, estados.includes('corriendo') ? 'dibujando la nueva…' : 'la nueva, en cola…')));
+    columna.appendChild(h('div', { clase: 'nota-antes-ahora meta' }, '▲ ahora · antes ▼'));
+    columna.appendChild(h('button', {
+      clase: 'nota-mini nota-antes', title: 'Cómo es ahora, antes de esta nota (pulsa para verla en grande)',
+      onclick: () => lupa(API.archivo(v.pid, e.imagen)),
+    }, h('img', { src: `${API.archivo(v.pid, e.imagen)}?mini=512&v=${encodeURIComponent(ultima)}`,
+      alt: `${plano} antes`, loading: 'lazy' })));
+  } else if (vieja) {
     columna.appendChild(h('div', { clase: 'nota-mini' }, h('span', { clase: 'meta' }, 'versión anterior')));
   } else columna.appendChild(h('button', { clase: 'nota-mini', title: 'Ver esta imagen en grande arriba', onclick: ir },
     e && e.imagen
       ? h('img', { src: `${API.archivo(v.pid, e.imagen)}?mini=512&v=${encodeURIComponent(ultima)}`,
         alt: plano, loading: 'lazy' })
       : h('span', { clase: 'meta' }, 'sin imagen')));
-  if (!vieja && antes && e && antes !== e.imagen) {
+  if (!pidiendo && !vieja && antes && e && antes !== e.imagen) {
     columna.appendChild(h('div', { clase: 'nota-antes-ahora meta' }, '▲ ahora · antes ▼'));
     columna.appendChild(h('button', {
       clase: 'nota-mini nota-antes', title: 'Cómo era antes de esta nota (pulsa para verla en grande)',
@@ -14478,6 +15206,8 @@ const GUIA_DE_BLOQUE = {
   'El material': 'material',
   'Las indicaciones': 'indicaciones',
   'Las llamadas a la acción': 'cta',
+  'El tipo de relato': 'tipo_relato',
+  '🧭 Tipo de relato': 'tipo_relato',
 };
 
 /* «REVISAR»: lo escrito en el campo, contra su guía (pasos/revisar_campo.py).
@@ -15523,6 +16253,79 @@ function tarjetaReglaLight(regla, i) {
   return tarjeta;
 }
 
+/* EL TIPO DE RELATO POR DEFECTO DEL ESTILO (`estilo.relato`, rama
+   tipo-de-relato). Se guarda al elegirlo (`PUT /presets-light/{id}/relato`) y no
+   toca ningún vídeo: llega a los nuevos al crearlos y a los hechos con «Traer el
+   estilo». Documental es no tenerlo. */
+const RELATO_LIGHT = { id: '', relato: null, cargando: false, estado: '', error: '' };
+
+async function cargarRelatoEstiloLight(id) {
+  RELATO_LIGHT.id = id;
+  RELATO_LIGHT.relato = null;
+  RELATO_LIGHT.error = '';
+  RELATO_LIGHT.estado = '';
+  RELATO_LIGHT.cargando = true;
+  try {
+    const r = await pedir(`${API.presetLight(id)}/relato`);
+    if (RELATO_LIGHT.id !== id) return;
+    RELATO_LIGHT.relato = tipoRelatoDelEncargo(r.relato);
+  } catch (err) {
+    if (RELATO_LIGHT.id === id) RELATO_LIGHT.error = err.message;
+  }
+  RELATO_LIGHT.cargando = false;
+  pintarLight();
+}
+
+async function guardarRelatoEstiloLight() {
+  const id = RELATO_LIGHT.id;
+  const t = RELATO_LIGHT.relato || {};
+  const relato = t.modo && t.modo !== 'documental'
+    ? (t.modo === 'espacio_que_cambia' ? { modo: t.modo, cambia: t.cambia || 'objeto' } : { modo: t.modo })
+    : null;
+  RELATO_LIGHT.estado = 'guardando…';
+  pintarLight();
+  try {
+    const r = await pedir(`${API.presetLight(id)}/relato`, { method: 'PUT', cuerpo: { relato } });
+    if (RELATO_LIGHT.id === id) RELATO_LIGHT.estado = r.cambiado ? 'guardado ✓' : 'sin cambios';
+  } catch (err) {
+    if (RELATO_LIGHT.id === id) RELATO_LIGHT.estado = `no se ha podido guardar: ${err.message}`;
+  }
+  pintarLight();
+}
+
+function bloqueRelatoEstiloLight(ficha) {
+  const caja = h('div', {});
+  // como las reglas: un estilo sin láminas no se puede guardar (el servidor
+  // pide al menos tres fotogramas), así que el selector no se ofrece todavía
+  if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Primero genera el estilo gráfico (las láminas); después podrás elegir su tipo de relato.'));
+    return caja;
+  }
+  if (RELATO_LIGHT.id !== ficha.id) {
+    setTimeout(() => cargarRelatoEstiloLight(ficha.id), 0);
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo el tipo de relato…'));
+    return caja;
+  }
+  if (RELATO_LIGHT.error) {
+    caja.appendChild(cajaError(RELATO_LIGHT.error));
+    caja.appendChild(h('button', { clase: 'mini', onclick: () => cargarRelatoEstiloLight(ficha.id) }, 'Reintentar'));
+    return caja;
+  }
+  if (RELATO_LIGHT.cargando || !RELATO_LIGHT.relato) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo el tipo de relato…'));
+    return caja;
+  }
+  caja.appendChild(selectorTipoRelato(RELATO_LIGHT.relato, guardarRelatoEstiloLight,
+    'Documental (por defecto)'));
+  caja.appendChild(h('div', { clase: 'pista' }, 'Es solo el punto de partida de los vídeos nuevos de '
+    + 'este estilo. Si un vídeo elige otro en su Encargo (o la Parrilla lo trae en la línea «Tipo de '
+    + 'relato:»), manda el del vídeo. «Documental» aquí quiere decir que el estilo no impone ninguno. '
+    + 'A los vídeos ya hechos solo llega con «Traer el estilo», que avisa antes de rehacer nada.'));
+  if (RELATO_LIGHT.estado) caja.appendChild(h('div', { clase: 'meta' }, RELATO_LIGHT.estado));
+  return caja;
+}
+
 function bloqueReglasLight(ficha) {
   const caja = h('div', {});
   if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
@@ -15713,7 +16516,11 @@ function vistaPresetLight() {
     fuenteDeTonoLight(ficha));
   if (fuenteTonoCambiadaLight(ficha)) fuente.open = true;
   tono.appendChild(fuente);
-  paneles.cuenta = bloqueLight('🗣️ Tono del guion', 'cómo se cuenta, nunca de qué', tono);
+  // 🧭 el tipo de relato por defecto de los vídeos de este estilo (rama tipo-de-relato)
+  paneles.cuenta = h('div', {},
+    bloqueLight('🧭 Tipo de relato', 'cómo se cuentan por defecto los vídeos de este estilo',
+      bloqueRelatoEstiloLight(ficha)),
+    bloqueLight('🗣️ Tono del guion', 'cómo se cuenta, nunca de qué', tono));
 
   // ⏱️ el ritmo: se cambia y ya, no rehace nada
   paneles.ritmo = bloqueLight('⏱️ Ritmo', 'cada cuánto corta el vídeo',
@@ -18558,7 +19365,10 @@ function franjaSinAplicar(modo, est) {
   const cambios = cambiosDelMontaje();
   if (!cambios.hay) return null;
   const enMarcha = !!trabajoVideoLight() || !!est.montandoAnimo;
-  return h('div', { clase: 'franja-sin-aplicar' },
+  /* en el móvil es UNA línea (la barra de abajo ya lleva el botón que la
+     resuelve): «se montan con…» se queda en el globo */
+  return h('div', { clase: 'franja-sin-aplicar',
+    title: enMarcha ? null : `Se montan con «${textoMontarCambios(cambios)}», en la barra de abajo` },
     h('span', { clase: 'crece' }, enMarcha ? 'Montando el vídeo con tus cambios…'
       : `Hay ${cambios.n ? `${cambios.n} ${cambios.n === 1 ? 'cambio' : 'cambios'}` : 'cambios'} del montaje sin aplicar`),
     enMarcha ? null : h('span', { clase: 'meta' },
@@ -21299,6 +22109,7 @@ const PORT = {
   pid: '', catalogo: null, diseno: null, planos: [], formatoVideo: '9:16', duracion: 0,
   cambiado: false, vista: '', pidiendo: 0, reloj: null, guias: true, error: '',
   propuestas: null, proponiendo: false, ia: null, abierto: false, fondos: [], cortar: null,
+  aviso: null, ideas: null, pensandoIdeas: false, iaPendiente: null,
 };
 
 function campoPortada(etiqueta, control, ayuda) {
@@ -21310,7 +22121,8 @@ async function abrirEditorPortada(pid) {
   // TODO lo del vídeo anterior fuera: su vista, sus propuestas, lo que pensaba
   if (PORT.vista) URL.revokeObjectURL(PORT.vista);
   Object.assign(PORT, { pid, abierto: true, error: '', propuestas: null, ia: null, cambiado: false,
-    proponiendo: false, vista: '', diseno: null, fondos: [] });
+    proponiendo: false, vista: '', diseno: null, fondos: [], aviso: null, ideas: null, pensandoIdeas: false,
+    iaPendiente: null });
   PORT.pidiendo += 1;
   try {
     if (!PORT.catalogo) PORT.catalogo = await pedir(`${BASE}/api/portadas/catalogo`);
@@ -21397,6 +22209,88 @@ function pintarVistaPortada() {
     PORT.error ? cajaError(PORT.error) : null].filter(Boolean));
 }
 
+/* EL EDITOR, EN TRES CAPAS (portadas-2, 21-10-2026). Antes la plantilla metía
+   efectos en la foto y la paleta y los efectos se mezclaban: «filtro tras
+   filtro». Ahora cada capa hace UNA cosa y tiene su interruptor:
+     1 · Imagen: el fondo y, si se quiere, sus ajustes (lo ÚNICO que toca la foto).
+     2 · Plantilla: dónde va cada texto y cada elemento.
+     3 · Colores: el color de textos y elementos («Sin paleta»: blanco y negro).
+   «Esta imagen lleva: …» dice en todo momento qué hay encima de la foto, con
+   una ✕ para quitar cada cosa. */
+const NOMBRES_AJUSTE_PORTADA = {
+  contraste: 'Contraste', saturacion: 'Color', brillo: 'Brillo', vineta: 'Viñeta', oscurecer: 'Oscurecer abajo',
+};
+const NEUTRO_PORTADA = { contraste: 1, saturacion: 1, brillo: 1, vineta: 0, oscurecer: 0 };
+const NOMBRES_LOOK_PORTADA = { rafaga: 'Rayos de luz', marco: 'Marco' };
+
+function cabecerasPortada(extra) {
+  const pases = typeof cabeceraDePases === 'function' ? cabeceraDePases() : '';
+  return Object.assign({}, extra || {}, pases ? { 'X-Estudio-Abiertos': pases } : {});
+}
+
+function bajarBlobPortada(blob, nombre) {
+  const url = URL.createObjectURL(blob);
+  const a = h('a', { href: url, download: nombre });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+/* EL AVISO, DENTRO DEL EDITOR: el aviso flotante salía DEBAJO de la capa del
+   editor y «Guardar diseño» parecía no hacer nada (notas del 21-10). Ahora va
+   en la cabecera del editor y, además, el flotante por encima de la capa. */
+function avisoPortada(texto, malo) {
+  PORT.aviso = { texto, malo: !!malo, hora: new Date() };
+  toast(texto, !!malo);
+  const sitio = document.querySelector('.capa-portada .aviso-portada');
+  if (sitio) sitio.replaceWith(pintarAvisoPortada());
+}
+
+function pintarAvisoPortada() {
+  const a = PORT.aviso;
+  if (!a) return h('span', { clase: 'aviso-portada meta' }, PORT.cambiado ? 'Cambios sin guardar' : '');
+  const hora = a.hora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+  return h('span', { clase: `aviso-portada${a.malo ? ' malo' : ' bueno'}`, role: 'status' }, `${a.texto} · ${hora}`);
+}
+
+/* QUÉ LLEVA LA IMAGEN ENCIMA, con su ✕. */
+function loQueLlevaPortada(d) {
+  const cat = PORT.catalogo || {};
+  const f = d.fondo || {};
+  const cosas = [];
+  const fondo = { fotograma: 'Fotograma del vídeo montado (trae los subtítulos y rótulos del vídeo)',
+    plano: `Imagen del plano ${(f.planos || []).join(' y ') || '—'}, tal cual se generó`,
+    subida: 'Una imagen tuya', ia: 'Una imagen hecha con IA' }[f.tipo] || 'Sin imagen';
+  cosas.push({ texto: `Fondo: ${fondo}` });
+  if (d.modo === 'ia') {
+    cosas.push({ texto: 'La portada la hizo la IA entera (sin capas encima)',
+      quitar: () => { d.modo = 'capas'; tocarPortada(true); } });
+  }
+  Object.keys(NOMBRES_AJUSTE_PORTADA).forEach(k => {
+    const v = (d.efectos || {})[k];
+    if (v == null || Math.abs(Number(v) - NEUTRO_PORTADA[k]) < 0.001) return;
+    cosas.push({ texto: `${NOMBRES_AJUSTE_PORTADA[k]} ${String(Number(v).toFixed(2)).replace('.', ',')}`,
+      quitar: () => { const e = Object.assign({}, d.efectos); delete e[k]; d.efectos = e; tocarPortada(true); } });
+  });
+  (d.elementos || []).forEach(el => {
+    if (el.rol === 'look' && !el.oculto) {
+      cosas.push({ texto: NOMBRES_LOOK_PORTADA[el.tipo] || el.tipo, quitar: () => { el.oculto = true; tocarPortada(true); } });
+    }
+  });
+  if (d.paleta && d.paleta !== 'ninguna') {
+    const pal = (cat.paletas || []).find(p => p.id === d.paleta) || {};
+    cosas.push({ texto: `Colores de la paleta «${pal.nombre || d.paleta}» en textos y elementos (la foto no)`,
+      quitar: () => cambiarPlantillaPortada({ paleta: 'ninguna' }) });
+  }
+  const caja = h('div', { clase: 'lleva-portada' }, h('b', {}, 'Esta imagen lleva:'));
+  cosas.forEach(c => caja.appendChild(h('span', { clase: 'pastilla-lleva' }, c.texto,
+    c.quitar ? h('button', { clase: 'quitar-lleva', type: 'button', title: 'Quitarlo', 'aria-label': `Quitar: ${c.texto}`,
+      onclick: c.quitar }, '✕') : null)));
+  if (cosas.length === 1 && d.modo !== 'ia') caja.appendChild(h('span', { clase: 'meta' }, 'nada más: la imagen va tal cual.'));
+  return caja;
+}
+
 function pintarEditorPortada() {
   if (!PORT.abierto || !PORT.diseno) return;
   let capa = document.querySelector('.capa-portada');
@@ -21407,27 +22301,44 @@ function pintarEditorPortada() {
   }
   const d = PORT.diseno;
   const cat = PORT.catalogo || {};
+  const capas = cat.capas || {};
   const plantilla = (cat.plantillas || []).find(p => p.id === d.plantilla) || {};
   const mandos = h('div', { clase: 'mandos-portada' });
 
-  // --- formato y plantilla
-  mandos.appendChild(h('div', { clase: 'fila' },
-    campoPortada('Formato', h('select', { onchange: ev => cambiarPlantillaPortada({ formato: ev.target.value }) },
-      ...Object.keys(cat.formatos || {}).map(f => h('option', { value: f, selected: f === d.formato },
-        `${f}${f === PORT.formatoVideo ? ' (el del vídeo)' : ''}`)))),
-    campoPortada('Paleta', h('select', { onchange: ev => cambiarPlantillaPortada({ paleta: ev.target.value }) },
-      ...(cat.paletas || []).map(p => h('option', { value: p.id, selected: p.id === d.paleta }, p.nombre)))),
-    campoPortada('Letra', h('select', { onchange: ev => cambiarPlantillaPortada({ fuente: ev.target.value }) },
-      ...(cat.fuentes || []).map(f => h('option', { value: f.id, selected: f.id === d.fuente },
-        `${f.nombre}${f.lista ? '' : ' (aún no está: se usa una parecida)'}`))))));
+  // --- 1 · la imagen (el fondo y sus ajustes)
+  const imagen = bloqueFondoPortada(d);
+  imagen.prepend(h('div', { clase: 'meta' }, capas.imagen || ''));
+  imagen.querySelector('h4').textContent = '1 · Imagen';
+  mandos.appendChild(imagen);
+  mandos.appendChild(bloqueAjustesPortada(d));
+
+  // --- 2 · la plantilla
   const rejilla = h('div', { clase: 'plantillas-portada' });
   (cat.plantillas || []).forEach(p => rejilla.appendChild(h('button', {
     clase: `mini plantilla-portada${p.id === d.plantilla ? ' elegida' : ''}`, title: p.cuando, type: 'button',
     onclick: () => cambiarPlantillaPortada({ plantilla: p.id }) }, p.nombre)));
-  mandos.appendChild(h('div', { clase: 'bloque' }, h('h4', {}, 'Plantilla'),
+  mandos.appendChild(h('div', { clase: 'bloque' }, h('h4', {}, '2 · Plantilla'),
+    h('div', { clase: 'meta' }, capas.plantilla || ''),
+    campoPortada('Formato', h('select', { onchange: ev => cambiarPlantillaPortada({ formato: ev.target.value }) },
+      ...Object.keys(cat.formatos || {}).map(f => h('option', { value: f, selected: f === d.formato },
+        `${f}${f === PORT.formatoVideo ? ' (el del vídeo)' : ''}`)))),
     h('div', { clase: 'meta' }, plantilla.cuando || ''), rejilla));
 
-  // --- textos de la plantilla
+  // --- 3 · los colores
+  const pal = (cat.paletas || []).find(p => p.id === d.paleta) || {};
+  mandos.appendChild(h('div', { clase: 'bloque' }, h('h4', {}, '3 · Colores y letra'),
+    h('div', { clase: 'meta' }, capas.paleta || ''),
+    h('div', { clase: 'fila' },
+      campoPortada('Paleta', h('select', { onchange: ev => cambiarPlantillaPortada({ paleta: ev.target.value }) },
+        ...(cat.paletas || []).map(p => h('option', { value: p.id, selected: p.id === d.paleta }, p.nombre)))),
+      h('span', { clase: 'muestras-paleta', title: 'texto · resaltado · aviso · borde' },
+        ...['texto', 'acento', 'alerta', 'contorno'].map(k => h('span', { clase: 'muestra-color', title: { texto: 'texto', acento: 'resaltado', alerta: 'aviso', contorno: 'borde' }[k],
+          estilo: /^#[0-9a-f]{6}$/i.test(pal[k] || '') ? `background:${pal[k]}` : '' }))),
+      campoPortada('Letra', h('select', { onchange: ev => cambiarPlantillaPortada({ fuente: ev.target.value }) },
+        ...(cat.fuentes || []).map(f => h('option', { value: f.id, selected: f.id === d.fuente },
+          `${f.nombre}${f.lista ? '' : ' (aún no está: se usa una parecida)'}`)))))));
+
+  // --- los textos de la plantilla
   const textos = h('div', { clase: 'bloque' }, h('h4', {}, 'Textos'),
     h('div', { clase: 'meta' }, 'Pocas palabras: de 1 a 3 por campo se leen en el móvil; más de 4 bajan los clics.'));
   (plantilla.campos || ['titulo']).forEach(campo => {
@@ -21441,19 +22352,6 @@ function pintarEditorPortada() {
   });
   mandos.appendChild(textos);
 
-  // --- el fondo
-  mandos.appendChild(bloqueFondoPortada(d));
-
-  // --- los efectos de la foto
-  const efectos = h('div', { clase: 'bloque' }, h('h4', {}, 'Efectos de la imagen'));
-  [['contraste', 'Contraste', 0.5, 1.8, 1], ['saturacion', 'Color', 0, 2, 1], ['brillo', 'Brillo', 0.5, 1.6, 1],
-    ['vineta', 'Viñeta', 0, 1, 0], ['oscurecer', 'Oscurecer abajo', 0, 1, 0]].forEach(([clave, nombre, min, max, def]) => {
-    const valor = (d.efectos || {})[clave] != null ? d.efectos[clave] : def;
-    efectos.appendChild(campoPortada(nombre, h('input', { type: 'range', min, max, step: 0.05, value: valor,
-      oninput: ev => { d.efectos = Object.assign({}, d.efectos, { [clave]: Number(ev.target.value) }); tocarPortada(false); } })));
-  });
-  mandos.appendChild(efectos);
-
   // --- los elementos, uno a uno
   mandos.appendChild(bloqueElementosPortada(d));
 
@@ -21462,20 +22360,385 @@ function pintarEditorPortada() {
 
   const vista = h('div', { clase: 'columna-vista-portada' },
     h('div', { clase: 'vista-portada-grande' }),
+    loQueLlevaPortada(d),
     h('label', { clase: 'casilla-red' }, h('input', { type: 'checkbox', checked: PORT.guias,
       onchange: ev => { PORT.guias = ev.target.checked; refrescarVistaPortada(true); } }),
     ' Ver lo que tapan las redes (no sale en la portada)'),
     d.modo === 'ia' ? h('div', { clase: 'caja-aviso' }, 'Esta portada la ha hecho la IA con el texto dentro: '
-      + 'revisa que lo haya escrito bien. Para volver a las capas, elige otra plantilla.') : null);
+      + 'revisa que lo haya escrito bien. Mientras esté así, los textos, elementos y ajustes de aquí no se pintan. ',
+    h('button', { clase: 'mini', type: 'button', onclick: () => { d.modo = 'capas'; tocarPortada(true); } }, 'Volver a capas')) : null);
 
   capa.replaceChildren(h('div', { clase: 'panel-portada' },
     h('div', { clase: 'fila cab-portada' }, h('h3', { clase: 'crece' }, 'Diseñar portada'),
+      pintarAvisoPortada(),
       h('button', { clase: 'mini', type: 'button', onclick: () => guardarDisenoPortada() }, 'Guardar diseño'),
+      h('button', { clase: 'mini', type: 'button', title: 'La portada a tamaño real, en PNG, para tenerla de respaldo',
+        onclick: () => descargarPortada() }, '⬇ Descargar portada'),
       h('button', { clase: 'primario', type: 'button', onclick: () => usarPortada() }, 'Usar como portada'),
       h('button', { clase: 'mini fantasma', type: 'button', onclick: () => cerrarEditorPortada() }, 'Cerrar')),
     h('div', { clase: 'cuerpo-portada' }, vista, mandos)));
   pintarVistaPortada();
   mandos.scrollTop = scroll;
+}
+
+/* LOS AJUSTES DE LA IMAGEN: apagados de partida; «Sin ajustes» los quita
+   todos y «Look de la plantilla» pone los que sugiere ella (y sus rayos o su
+   marco), a la vista en los deslizadores. */
+function bloqueAjustesPortada(d) {
+  const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Ajustes de la imagen'),
+    h('div', { clase: 'meta' }, 'Opcionales: se aplican una sola vez, sobre la imagen de fondo.'));
+  [['contraste', 0.5, 1.8], ['saturacion', 0, 2], ['brillo', 0.5, 1.6], ['vineta', 0, 1], ['oscurecer', 0, 1]].forEach(([clave, min, max]) => {
+    const valor = (d.efectos || {})[clave] != null ? d.efectos[clave] : NEUTRO_PORTADA[clave];
+    b.appendChild(campoPortada(NOMBRES_AJUSTE_PORTADA[clave], h('input', { type: 'range', min, max, step: 0.05, value: valor,
+      'aria-label': NOMBRES_AJUSTE_PORTADA[clave],
+      oninput: ev => { d.efectos = Object.assign({}, d.efectos, { [clave]: Number(ev.target.value) }); tocarPortada(false); },
+      onchange: () => tocarPortada(true) })));
+  });
+  const look = d.look || {};
+  const hayLook = Object.keys(look).length || (d.elementos || []).some(e => e.rol === 'look');
+  b.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', type: 'button', disabled: !Object.keys(d.efectos || {}).length,
+      onclick: () => { d.efectos = {}; tocarPortada(true); } }, 'Sin ajustes (la imagen tal cual)'),
+    hayLook ? h('button', { clase: 'mini fantasma', type: 'button', title: 'Lo que sugiere la plantilla: se ve en los deslizadores y se quita con «Sin ajustes»',
+      onclick: () => {
+        d.efectos = Object.assign({}, look);
+        (d.elementos || []).forEach(e => { if (e.rol === 'look') e.oculto = false; });
+        tocarPortada(true);
+      } }, 'Poner el look de la plantilla') : null));
+  return b;
+}
+
+/* DÓNDE NACE UN ELEMENTO NUEVO: en un hueco libre (antes nacía en el centro,
+   pequeño y encima del título, y parecía que no salía). */
+function sitioLibrePortada(d) {
+  const huecos = [[0.22, 0.78], [0.78, 0.78], [0.5, 0.88], [0.8, 0.14], [0.2, 0.14], [0.5, 0.62], [0.82, 0.45], [0.18, 0.45]];
+  const ocupados = (d.elementos || []).filter(e => !e.oculto && e.x != null && e.y != null);
+  return huecos.find(([x, y]) => !ocupados.some(e => Math.hypot(e.x - x, e.y - y) < 0.16)) || huecos[0];
+}
+
+const NUEVOS_ELEMENTOS_PORTADA = {
+  texto: { texto: 'NUEVO', tam: 0.11, estilos: ['contorno', 'sombra'] },
+  insignia: { texto: 'VS', tam: 0.15, forma: 'circulo' },
+  flecha: { tam: 0.03 },
+  circulo: { tam: 0.2 }, rayo: {}, icono: { icono: 'estrella', tam: 0.13 },
+  etiqueta: { texto: 'GRATIS', tam: 0.08 }, banda: { texto: 'SOLO HOY', y: 0.86 },
+  marco: {}, subrayado: { tam: 0.3 }, estrellas: { tam: 0.08 }, cinta: { texto: 'NUEVO' },
+  rafaga: { opacidad: 0.15 },
+};
+const NOMBRES_ELEMENTO_PORTADA = {
+  texto: 'Texto', insignia: 'Insignia', flecha: 'Flecha', circulo: 'Círculo', rayo: 'Rayo (versus)', icono: 'Icono',
+  etiqueta: 'Etiqueta / precio', banda: 'Banda', marco: 'Marco', subrayado: 'Subrayado', estrellas: 'Estrellas',
+  cinta: 'Cinta', rafaga: 'Rayos de luz',
+};
+
+function bloqueElementosPortada(d) {
+  const cat = PORT.catalogo || {};
+  const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Elementos'));
+  (d.elementos || []).forEach((el, i) => {
+    const fila = h('div', { clase: `elemento-portada${el.oculto ? ' escondido-portada' : ''}${el.propio ? ' propio-portada' : ''}` });
+    const nombre = NOMBRES_ELEMENTO_PORTADA[el.tipo] || el.tipo;
+    const cab = h('div', { clase: 'fila' }, h('b', { clase: 'crece' }, `${i + 1}. ${nombre}`
+      + (el.rol && el.rol !== 'look' ? ` · ${(cat.campos || {})[el.rol] || el.rol}` : '')
+      + (el.rol === 'look' ? ' · del look de la plantilla' : '') + (el.propio ? ' · añadido' : '')),
+    el.orig ? h('button', { clase: 'mini fantasma', type: 'button', title: 'Vuelve a como nació (sitio, tamaño, giro y colores; el texto se queda)',
+      onclick: () => {
+        const texto = el.texto;
+        Object.keys(el).forEach(k => { if (!['tipo', 'texto', 'orig', 'propio', 'rol', 'oculto', 'papeles'].includes(k)) delete el[k]; });
+        Object.assign(el, el.orig);
+        if (texto != null) el.texto = texto;
+        tocarPortada(true);
+      } }, 'Restablecer') : null,
+    h('button', { clase: 'mini fantasma', type: 'button', title: el.oculto ? 'Enseñar' : 'Esconder',
+      onclick: () => { el.oculto = !el.oculto; tocarPortada(true); } }, el.oculto ? 'Enseñar' : 'Esconder'),
+    h('button', { clase: 'mini fantasma', type: 'button', title: 'Quitar',
+      onclick: () => { d.elementos.splice(i, 1); tocarPortada(true); } }, 'Quitar'));
+    fila.appendChild(cab);
+    if (['texto', 'insignia', 'etiqueta', 'banda', 'cinta'].includes(el.tipo) && !el.rol) {
+      fila.appendChild(h('input', { type: 'text', value: el.texto || '', maxlength: 80, 'aria-label': 'Texto',
+        oninput: ev => { el.texto = ev.target.value; tocarPortada(false); } }));
+    }
+    if (el.tipo === 'icono') {
+      fila.appendChild(h('select', { 'aria-label': 'Icono', onchange: ev => { el.icono = ev.target.value; tocarPortada(false); } },
+        ...(cat.iconos || []).map(n => h('option', { value: n, selected: n === el.icono }, n))));
+    }
+    if (el.tipo === 'texto') {
+      const estilos = h('div', { clase: 'fila estilos-portada' });
+      Object.entries(cat.estilos_texto || {}).forEach(([id, que]) => estilos.appendChild(h('label', { clase: 'casilla-red', title: que },
+        h('input', { type: 'checkbox', checked: (el.estilos || []).includes(id),
+          onchange: ev => {
+            const lista = new Set(el.estilos || []);
+            if (ev.target.checked) lista.add(id); else lista.delete(id);
+            el.estilos = Array.from(lista);
+            tocarPortada(false);
+          } }), ` ${id}`)));
+      fila.appendChild(estilos);
+    }
+    const deslizadores = h('div', { clase: 'fila deslizadores-portada' });
+    [['x', '↔', 0, 1], ['y', '↕', 0, 1], ['tam', 'tamaño', 0.01, 0.6], ['rot', 'giro', -45, 45]].forEach(([clave, etiqueta, min, max]) => {
+      if (clave === 'tam' && ['rayo', 'rafaga'].includes(el.tipo)) return;
+      deslizadores.appendChild(h('label', { clase: 'deslizador-portada' }, h('span', {}, etiqueta),
+        h('input', { type: 'range', min, max, step: clave === 'rot' ? 1 : 0.005, 'aria-label': `${nombre}: ${etiqueta}`,
+          value: el[clave] != null ? el[clave] : (clave === 'rot' ? 0 : clave === 'tam' ? 0.1 : 0.5),
+          oninput: ev => { el[clave] = Number(ev.target.value); tocarPortada(false); } })));
+    });
+    fila.appendChild(deslizadores);
+    fila.appendChild(h('label', { clase: 'casilla-red' }, 'Color ',
+      h('input', { type: 'color', value: /^#[0-9a-f]{6}$/i.test(el.color || '') ? el.color : '#ffffff',
+        onchange: ev => {
+          el.color = ev.target.value;
+          // un color elegido a mano ya no es de la paleta: no se repinta al cambiarla
+          if (el.papeles) { el.papeles = Object.assign({}, el.papeles); delete el.papeles.color; }
+          tocarPortada(false);
+        } })));
+    b.appendChild(fila);
+  });
+  const elegir = h('select', { 'aria-label': 'Elemento que se añade' },
+    ...Object.entries(cat.elementos || {}).map(([id, que]) => h('option', { value: id }, `${NOMBRES_ELEMENTO_PORTADA[id] || id}: ${que}`)));
+  b.appendChild(h('div', { clase: 'fila' }, elegir,
+    h('button', { clase: 'mini', type: 'button', onclick: () => {
+      const tipo = elegir.value;
+      const pal = ((PORT.catalogo || {}).paletas || []).find(p => p.id === d.paleta) || {};
+      const [x, y] = sitioLibrePortada(d);
+      // un color que se vea: el del aviso de la paleta (en «Sin paleta», blanco)
+      const color = tipo === 'texto' ? (pal.texto || '#ffffff')
+        : (d.paleta === 'ninguna' ? '#ffffff' : (pal.alerta || '#ff2b2b'));
+      const nuevo = Object.assign({ tipo, x, y, fuente: d.fuente, color, contorno: pal.contorno || '#000000',
+        acento: pal.acento, propio: true }, NUEVOS_ELEMENTOS_PORTADA[tipo] || {});
+      // qué papel de la paleta pinta cada color: al cambiar de paleta se repinta
+      nuevo.papeles = { contorno: 'contorno', acento: 'acento' };
+      if (tipo === 'texto') nuevo.papeles.color = 'texto';
+      else if (d.paleta !== 'ninguna') nuevo.papeles.color = 'alerta';
+      if (tipo === 'flecha') Object.assign(nuevo, { x: Math.max(0.08, x - 0.2), y: Math.min(0.92, y + 0.1), x2: x, y2: y });
+      nuevo.orig = Object.assign({}, nuevo);
+      delete nuevo.orig.texto;
+      d.elementos = (d.elementos || []).concat([nuevo]);
+      tocarPortada(true);
+      avisoPortada(`${NOMBRES_ELEMENTO_PORTADA[tipo] || tipo} añadido: está en la lista de elementos (el último)`);
+    } }, 'Añadir')));
+  return b;
+}
+
+function bloqueAyudasPortada() {
+  const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Ayuda'));
+  b.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', type: 'button', disabled: PORT.proponiendo, onclick: () => proponerPortadas() },
+      PORT.proponiendo ? 'Claude está pensando…' : 'Proponer 3 portadas con Claude'),
+    h('span', { clase: 'meta' }, 'Lee el guion y propone plantilla, textos y colores. No se paga aparte.')));
+  if (PORT.propuestas && PORT.propuestas.length) {
+    const lista = h('div', { clase: 'propuestas-portada' });
+    PORT.propuestas.forEach((p, i) => lista.appendChild(h('div', { clase: 'propuesta-portada' },
+      h('b', {}, `${i + 1}. ${(((PORT.catalogo || {}).plantillas || []).find(x => x.id === p.diseno.plantilla) || {}).nombre || p.diseno.plantilla}`),
+      h('span', { clase: 'meta' }, Object.values(p.diseno.textos || {}).filter(Boolean).join(' · ')),
+      p.por_que ? h('span', { clase: 'meta' }, p.por_que) : null,
+      h('button', { clase: 'mini', type: 'button', onclick: () => {
+        // la propuesta trae su plantilla, textos y colores; la imagen, sus
+        // ajustes y lo añadido a mano se quedan
+        const actual = PORT.diseno;
+        // (lo añadido a mano ya viene dentro: el servidor la hizo sobre este diseño)
+        PORT.diseno = Object.assign({}, p.diseno, {
+          fondo: Object.assign({}, actual.fondo, { disposicion: p.diseno.fondo.disposicion }),
+          efectos: actual.efectos || {} });
+        tocarPortada(true);
+      } }, 'Usar esta'))));
+    b.appendChild(lista);
+  }
+
+  b.appendChild(h('h4', {}, 'Con la IA de imágenes (se paga)'));
+  b.appendChild(h('div', { clase: 'meta' }, 'Recomendado: el FONDO con IA y el texto en capas (exacto y editable). '
+    + 'La portada ENTERA con el texto dentro es más vistosa, pero menos constante y puede escribir mal alguna letra.'));
+  b.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', type: 'button', disabled: !!PORT.pensandoIdeas, onclick: () => pedirIdeasIA() },
+      PORT.pensandoIdeas ? 'Claude está leyendo el guion…' : 'Ideas de imagen con Claude'),
+    h('span', { clase: 'meta' }, 'Tres escenas pensadas para ESTE vídeo, con su prompt. No se paga aparte.')));
+  (PORT.ideas || []).forEach((idea, i) => {
+    const area = h('textarea', { rows: 3, maxlength: 1500, 'aria-label': `Prompt de la idea ${i + 1}`,
+      oninput: ev => { idea.prompt = ev.target.value; } }, idea.prompt);
+    b.appendChild(h('div', { clase: 'idea-ia-portada' },
+      h('b', {}, `${i + 1}. ${idea.titulo}`), idea.por_que ? h('span', { clase: 'meta' }, idea.por_que) : null,
+      area,
+      h('div', { clase: 'fila' },
+        h('button', { clase: 'mini', type: 'button', disabled: !!PORT.ia, onclick: () => prepararIA('fondo', idea.prompt) }, 'Fondo con esta idea'),
+        h('button', { clase: 'mini fantasma', type: 'button', disabled: !!PORT.ia, onclick: () => prepararIA('portada', idea.prompt) }, 'Portada entera con esta idea'))));
+  });
+  b.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', type: 'button', disabled: !!PORT.ia, onclick: () => prepararIA('fondo', '') }, 'Hacer el fondo con IA'),
+    h('button', { clase: 'mini', type: 'button', disabled: !!PORT.ia, onclick: () => prepararIA('portada', '') }, 'Hacer la portada entera con IA')));
+  // ANTES DE PAGAR: el prompt a la vista y editable, y el precio
+  const p = PORT.iaPendiente;
+  if (p) {
+    const calidad = h('select', { 'aria-label': 'Calidad de la imagen', onchange: ev => { p.calidad = ev.target.value; prepararIA(p.que, p.prompt, p.calidad); } },
+      ...[['low', 'Calidad baja'], ['medium', 'Calidad media'], ['high', 'Calidad alta']].map(([v, t]) => h('option', { value: v, selected: v === p.calidad }, t)));
+    const area = h('textarea', { rows: 5, maxlength: 1500, 'aria-label': 'Prompt que se manda a la IA',
+      oninput: ev => { p.prompt = ev.target.value; } }, p.prompt);
+    b.appendChild(h('div', { clase: 'caja-aviso antes-de-pagar' },
+      h('b', {}, p.que === 'portada' ? 'La portada ENTERA con IA' : 'El FONDO con IA (sin texto)'),
+      h('span', { clase: 'meta' }, 'Esto es lo que se le pide a la IA. Cámbialo si quieres:'),
+      area,
+      h('span', { clase: 'meta' }, p.que === 'portada'
+        ? 'Siempre se añade al final: que escriba exactamente tus textos, con tildes, y nada más.'
+        : 'Siempre se añade al final: sin letras ni logotipos, y con sitio para el titular.'),
+      h('div', { clase: 'fila' }, calidad,
+        h('button', { clase: 'primario mini', type: 'button', disabled: !!p.enviando, onclick: () => portadaConIA(p) },
+          `Dibujar (≈ ${Number((p.precio || {}).usd || 0).toFixed(3)} $)`),
+        h('button', { clase: 'mini fantasma', type: 'button', onclick: () => { PORT.iaPendiente = null; pintarEditorPortada(); } }, 'Cancelar'))));
+  }
+  if (PORT.ia) b.appendChild(h('div', { clase: 'cargando' }, PORT.ia));
+  return b;
+}
+
+async function cambiarPlantillaPortada(cambios) {
+  try {
+    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/plantilla`), {
+      method: 'POST', cuerpo: Object.assign({ diseno: PORT.diseno }, cambios) });
+    PORT.diseno = r.diseno;
+    tocarPortada(true);
+  } catch (e) { avisoPortada(e.message, true); }
+}
+
+async function guardarDisenoPortada() {
+  try {
+    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/diseno`), {
+      method: 'PUT', cuerpo: { diseno: PORT.diseno } });
+    PORT.diseno = r.diseno;
+    PORT.cambiado = false;
+    avisoPortada('Diseño guardado ✓');
+  } catch (e) { avisoPortada(`no se ha guardado: ${e.message}`, true); }
+}
+
+async function descargarPortada() {
+  const pid = PORT.pid;
+  try {
+    avisoPortada('Pintando la portada a tamaño real…');
+    const r = await fetch(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/descargar`), {
+      method: 'POST', headers: cabecerasPortada({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ diseno: PORT.diseno }) });
+    if (!r.ok) {
+      let motivo = `HTTP ${r.status}`;
+      try { const datos = await r.json(); motivo = (datos.error && (datos.error.mensaje || datos.error)) || motivo; } catch (e) { /* no era JSON */ }
+      throw new Error(String(motivo));
+    }
+    // (sin comillas dentro de una expresión regular: parten los analizadores de herramientas/)
+    const nombre = ((r.headers.get('Content-Disposition') || '').split('filename=')[1] || '').replace(/\x22/g, '').trim() || 'portada.png';
+    bajarBlobPortada(await r.blob(), nombre);
+    avisoPortada('Portada descargada ✓');
+  } catch (e) { avisoPortada(`no se ha podido descargar: ${e.message}`, true); }
+}
+
+async function usarPortada() {
+  try {
+    avisoPortada('Pintando la portada a tamaño real…');
+    const ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/usar`), {
+      method: 'POST', cuerpo: { diseno: PORT.diseno } });
+    PORT.cambiado = false;
+    if (PUB.pid === PORT.pid) PUB.ficha = ficha;
+    cerrarEditorPortada();
+    toast('Portada puesta: es la que se mandará a las redes');
+    if (typeof pintarModulo === 'function') pintarModulo();
+  } catch (e) { avisoPortada(`no se ha podido poner la portada: ${e.message}`, true); }
+}
+
+/* Lo que se pide a Claude se sigue preguntando (un minuto pasa del proxy). */
+async function seguirPeticionPortada(ruta, cuerpo) {
+  const lanzada = await pedir(ruta, { method: 'POST', cuerpo });
+  let ficha = { estado: 'pensando' };
+  for (let i = 0; i < 400 && ficha.estado === 'pensando'; i += 1) {
+    await new Promise(r => setTimeout(r, 1500));
+    ficha = await pedir(`${ruta}/${lanzada.id}`);
+  }
+  if (ficha.estado === 'error') throw new Error(ficha.error);
+  if (ficha.estado !== 'listo') throw new Error('tarda demasiado: vuelve a pedirlo en un momento');
+  return ficha;
+}
+
+async function proponerPortadas() {
+  const pid = PORT.pid;
+  PORT.proponiendo = true;
+  pintarEditorPortada();
+  try {
+    const ficha = await seguirPeticionPortada(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/proponer`), { diseno: PORT.diseno });
+    // SOLO si seguimos en el mismo vídeo: las de A no salen en el editor de B
+    if (PORT.pid !== pid || !PORT.abierto) return;
+    PORT.propuestas = ficha.propuestas || [];
+  } catch (e) {
+    if (PORT.pid === pid) avisoPortada(`no se han podido proponer portadas: ${e.message}`, true);
+  }
+  if (PORT.pid !== pid) return;
+  PORT.proponiendo = false;
+  pintarEditorPortada();
+}
+
+async function pedirIdeasIA() {
+  const pid = PORT.pid;
+  PORT.pensandoIdeas = true;
+  pintarEditorPortada();
+  try {
+    const ficha = await seguirPeticionPortada(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/ideas-ia`), { diseno: PORT.diseno });
+    if (PORT.pid !== pid || !PORT.abierto) return;
+    PORT.ideas = ficha.ideas || [];
+  } catch (e) {
+    if (PORT.pid === pid) avisoPortada(`no se han podido pedir ideas: ${e.message}`, true);
+  }
+  if (PORT.pid !== pid) return;
+  PORT.pensandoIdeas = false;
+  pintarEditorPortada();
+}
+
+/* PASO 1 DE LA IA: el prompt y el precio a la vista, SIN gastar nada. */
+async function prepararIA(que, prompt, calidad) {
+  const pid = PORT.pid;
+  try {
+    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/ia`), { method: 'POST',
+      cuerpo: { diseno: PORT.diseno, que, calidad: calidad || 'low', prompt: prompt || undefined } });
+    if (PORT.pid !== pid) return;
+    PORT.iaPendiente = { que, calidad: r.calidad, prompt: r.prompt, precio: r.precio };
+    pintarEditorPortada();
+    const caja = document.querySelector('.capa-portada .antes-de-pagar');
+    if (caja) caja.scrollIntoView({ block: 'nearest' });
+  } catch (e) { avisoPortada(e.message, true); }
+}
+
+/* PASO 2: se paga y se dibuja con el prompt de la pantalla. */
+async function portadaConIA(p) {
+  const pid = PORT.pid;
+  const ruta = rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/ia`);
+  // UN SOLO PAGO: un doble clic en «Dibujar» mandaba dos `confirmado` y se
+  // dibujaban (y se pagaban) dos imágenes
+  if (p.enviando || PORT.ia) return;
+  p.enviando = true;
+  PORT.ia = 'Mandando a la IA…';
+  pintarEditorPortada();
+  try {
+    const lanzado = await pedir(ruta, { method: 'POST',
+      cuerpo: { diseno: PORT.diseno, que: p.que, calidad: p.calidad, prompt: p.prompt, confirmado: true } });
+    PORT.iaPendiente = null;
+    PORT.ia = 'Dibujando con la IA…';
+    pintarEditorPortada();
+    let t = { estado: 'ejecutando' };
+    for (let i = 0; i < 400 && !['listo', 'error', 'cancelado'].includes(t.estado); i += 1) {
+      await new Promise(r => setTimeout(r, 2000));
+      t = await pedir(API.trabajo(lanzado.trabajo_id));
+      if (t.mensaje) PORT.ia = `Dibujando con la IA… ${t.mensaje}`;
+    }
+    if (t.estado !== 'listo') throw new Error(t.error || t.mensaje || `el trabajo ha acabado «${t.estado}»`);
+    const r = t.resultado || {};
+    /* SOLO EN SU VÍDEO. Si entretanto se cerró el editor o se abrió el de
+       otro vídeo, la imagen no se pierde: el servidor la apunta en el diseño
+       guardado y sale en «Fondos ya hechos» al volver a abrirlo. */
+    if (PORT.pid !== pid || !PORT.abierto) return;
+    PORT.fondos = [r.nombre].concat((PORT.fondos || []).filter(x => x !== r.nombre));
+    PORT.diseno.fondo = Object.assign({}, PORT.diseno.fondo, { tipo: 'ia', imagen: r.nombre });
+    if (p.que === 'portada') PORT.diseno.modo = 'ia';
+    PORT.ia = null;
+    tocarPortada(true);
+    avisoPortada(p.que === 'portada' ? 'Portada hecha con IA: revisa el texto' : 'Fondo hecho con IA ✓');
+    return;
+  } catch (e) {
+    if (PORT.pid === pid) avisoPortada(`no se ha podido hacer con la IA: ${e.message}`, true);
+  }
+  p.enviando = false;
+  if (PORT.pid !== pid || !PORT.abierto) return;
+  PORT.ia = null;
+  pintarEditorPortada();
 }
 
 function bloqueFondoPortada(d) {
@@ -21554,208 +22817,6 @@ function bloqueFondoPortada(d) {
     b.appendChild(lista);
   }
   return b;
-}
-
-const NUEVOS_ELEMENTOS_PORTADA = {
-  texto: { texto: 'NUEVO', tam: 0.09, estilos: ['contorno', 'sombra'] },
-  insignia: { texto: 'VS', tam: 0.09, forma: 'circulo' },
-  flecha: { x: 0.3, y: 0.6, x2: 0.5, y2: 0.5 },
-  circulo: { tam: 0.12 }, rayo: {}, icono: { icono: 'estrella', tam: 0.07 },
-  etiqueta: { texto: 'GRATIS', tam: 0.06 }, banda: { texto: 'SOLO HOY', y: 0.86 },
-  marco: {}, subrayado: { y: 0.4 }, estrellas: { y: 0.6 }, cinta: { texto: 'NUEVO' },
-  rafaga: { opacidad: 0.15 },
-};
-
-function bloqueElementosPortada(d) {
-  const cat = PORT.catalogo || {};
-  const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Elementos'));
-  (d.elementos || []).forEach((el, i) => {
-    const fila = h('div', { clase: `elemento-portada${el.oculto ? ' escondido-portada' : ''}` });
-    const cab = h('div', { clase: 'fila' }, h('b', { clase: 'crece' }, `${i + 1}. ${el.tipo}`
-      + (el.rol ? ` · ${(cat.campos || {})[el.rol] || el.rol}` : '')),
-    h('button', { clase: 'mini fantasma', type: 'button', title: el.oculto ? 'Enseñar' : 'Esconder',
-      onclick: () => { el.oculto = !el.oculto; tocarPortada(true); } }, el.oculto ? 'Enseñar' : 'Esconder'),
-    h('button', { clase: 'mini fantasma', type: 'button', title: 'Quitar',
-      onclick: () => { d.elementos.splice(i, 1); tocarPortada(true); } }, 'Quitar'));
-    fila.appendChild(cab);
-    if (['texto', 'insignia', 'etiqueta', 'banda', 'cinta'].includes(el.tipo) && !el.rol) {
-      fila.appendChild(h('input', { type: 'text', value: el.texto || '', maxlength: 80,
-        oninput: ev => { el.texto = ev.target.value; tocarPortada(false); } }));
-    }
-    if (el.tipo === 'icono') {
-      fila.appendChild(h('select', { onchange: ev => { el.icono = ev.target.value; tocarPortada(false); } },
-        ...(cat.iconos || []).map(n => h('option', { value: n, selected: n === el.icono }, n))));
-    }
-    if (el.tipo === 'texto') {
-      const estilos = h('div', { clase: 'fila estilos-portada' });
-      Object.entries(cat.estilos_texto || {}).forEach(([id, que]) => estilos.appendChild(h('label', { clase: 'casilla-red', title: que },
-        h('input', { type: 'checkbox', checked: (el.estilos || []).includes(id),
-          onchange: ev => {
-            const lista = new Set(el.estilos || []);
-            if (ev.target.checked) lista.add(id); else lista.delete(id);
-            el.estilos = Array.from(lista);
-            tocarPortada(false);
-          } }), ` ${id}`)));
-      fila.appendChild(estilos);
-    }
-    const deslizadores = h('div', { clase: 'fila deslizadores-portada' });
-    [['x', '↔', 0, 1], ['y', '↕', 0, 1], ['tam', 'tamaño', 0.01, 0.6], ['rot', 'giro', -45, 45]].forEach(([clave, nombre, min, max]) => {
-      if (clave === 'tam' && ['rayo', 'rafaga'].includes(el.tipo)) return;
-      deslizadores.appendChild(h('label', { clase: 'deslizador-portada' }, h('span', {}, nombre),
-        h('input', { type: 'range', min, max, step: clave === 'rot' ? 1 : 0.005,
-          value: el[clave] != null ? el[clave] : (clave === 'rot' ? 0 : clave === 'tam' ? 0.1 : 0.5),
-          oninput: ev => { el[clave] = Number(ev.target.value); tocarPortada(false); } })));
-    });
-    fila.appendChild(deslizadores);
-    {
-      fila.appendChild(h('label', { clase: 'casilla-red' }, 'Color ',
-        h('input', { type: 'color', value: /^#[0-9a-f]{6}$/i.test(el.color || '') ? el.color : '#ffffff',
-          onchange: ev => { el.color = ev.target.value; tocarPortada(false); } })));
-    }
-    b.appendChild(fila);
-  });
-  const elegir = h('select', { 'aria-label': 'Elemento que se añade' },
-    ...Object.entries(cat.elementos || {}).map(([id, que]) => h('option', { value: id }, `${id}: ${que}`)));
-  b.appendChild(h('div', { clase: 'fila' }, elegir,
-    h('button', { clase: 'mini', type: 'button', onclick: () => {
-      const tipo = elegir.value;
-      const pal = ((PORT.catalogo || {}).paletas || []).find(p => p.id === d.paleta) || {};
-      d.elementos = (d.elementos || []).concat([Object.assign({ tipo, x: 0.5, y: 0.5, fuente: d.fuente,
-        color: tipo === 'texto' ? (pal.texto || '#ffffff') : (pal.acento || '#ffd400'),
-        contorno: pal.contorno || '#000000', acento: pal.acento }, NUEVOS_ELEMENTOS_PORTADA[tipo] || {})]);
-      tocarPortada(true);
-    } }, 'Añadir')));
-  return b;
-}
-
-function bloqueAyudasPortada() {
-  const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Ayuda'));
-  b.appendChild(h('div', { clase: 'fila' },
-    h('button', { clase: 'mini', type: 'button', disabled: PORT.proponiendo, onclick: () => proponerPortadas() },
-      PORT.proponiendo ? 'Claude está pensando…' : 'Proponer 3 portadas con Claude'),
-    h('span', { clase: 'meta' }, 'Lee el guion y propone plantilla, textos y colores. No se paga aparte.')));
-  if (PORT.propuestas && PORT.propuestas.length) {
-    const lista = h('div', { clase: 'propuestas-portada' });
-    PORT.propuestas.forEach((p, i) => lista.appendChild(h('div', { clase: 'propuesta-portada' },
-      h('b', {}, `${i + 1}. ${(((PORT.catalogo || {}).plantillas || []).find(x => x.id === p.diseno.plantilla) || {}).nombre || p.diseno.plantilla}`),
-      h('span', { clase: 'meta' }, Object.values(p.diseno.textos || {}).filter(Boolean).join(' · ')),
-      p.por_que ? h('span', { clase: 'meta' }, p.por_que) : null,
-      h('button', { clase: 'mini', type: 'button', onclick: () => {
-        PORT.diseno = Object.assign({}, p.diseno, { fondo: Object.assign({}, PORT.diseno.fondo, { disposicion: p.diseno.fondo.disposicion }) });
-        tocarPortada(true);
-      } }, 'Usar esta'))));
-    b.appendChild(lista);
-  }
-  b.appendChild(h('h4', {}, 'Con la IA de imágenes (se paga)'));
-  b.appendChild(h('div', { clase: 'meta' }, 'Opción 1: solo el FONDO, sin texto; el texto sigue en capas, exacto y editable. '
-    + 'Opción 2: la portada ENTERA con el texto dentro; más vistosa, pero la IA puede escribir mal alguna letra.'));
-  const calidad = h('select', { 'aria-label': 'Calidad de la imagen' },
-    h('option', { value: 'low' }, 'Calidad baja'), h('option', { value: 'medium' }, 'Calidad media'),
-    h('option', { value: 'high' }, 'Calidad alta'));
-  b.appendChild(h('div', { clase: 'fila' }, calidad,
-    h('button', { clase: 'mini', type: 'button', disabled: !!PORT.ia, onclick: () => portadaConIA('fondo', calidad.value) },
-      'Hacer el fondo con IA'),
-    h('button', { clase: 'mini', type: 'button', disabled: !!PORT.ia, onclick: () => portadaConIA('portada', calidad.value) },
-      'Hacer la portada entera con IA')));
-  if (PORT.ia) b.appendChild(h('div', { clase: 'cargando' }, PORT.ia));
-  return b;
-}
-
-async function cambiarPlantillaPortada(cambios) {
-  try {
-    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/plantilla`), {
-      method: 'POST', cuerpo: Object.assign({ diseno: PORT.diseno }, cambios) });
-    PORT.diseno = r.diseno;
-    tocarPortada(true);
-  } catch (e) { toast(e.message, true); }
-}
-
-async function guardarDisenoPortada() {
-  try {
-    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/diseno`), {
-      method: 'PUT', cuerpo: { diseno: PORT.diseno } });
-    PORT.diseno = r.diseno;
-    PORT.cambiado = false;
-    toast('Diseño de la portada guardado');
-  } catch (e) { toast(e.message, true); }
-}
-
-async function usarPortada() {
-  try {
-    toast('Pintando la portada a tamaño real…');
-    const ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/usar`), {
-      method: 'POST', cuerpo: { diseno: PORT.diseno } });
-    PORT.cambiado = false;
-    if (PUB.pid === PORT.pid) PUB.ficha = ficha;
-    toast('Portada puesta: es la que se mandará a las redes');
-    cerrarEditorPortada();
-    if (typeof pintarModulo === 'function') pintarModulo();
-  } catch (e) { toast(`no se ha podido poner la portada: ${e.message}`, true); }
-}
-
-async function proponerPortadas() {
-  const pid = PORT.pid;
-  PORT.proponiendo = true;
-  pintarEditorPortada();
-  const ruta = rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/proponer`);
-  try {
-    const lanzada = await pedir(ruta, { method: 'POST', cuerpo: { diseno: PORT.diseno } });
-    let ficha = { estado: 'pensando' };
-    for (let i = 0; i < 400 && ficha.estado === 'pensando'; i += 1) {
-      await new Promise(r => setTimeout(r, 1500));
-      ficha = await pedir(`${ruta}/${lanzada.id}`);
-    }
-    if (ficha.estado === 'error') throw new Error(ficha.error);
-    if (ficha.estado !== 'listo') throw new Error('tarda demasiado: vuelve a pedirlo en un momento');
-    // SOLO si seguimos en el mismo vídeo: las de A no salen en el editor de B
-    if (PORT.pid !== pid || !PORT.abierto) return;
-    PORT.propuestas = ficha.propuestas || [];
-  } catch (e) {
-    if (PORT.pid === pid) toast(`no se han podido proponer portadas: ${e.message}`, true);
-  }
-  if (PORT.pid !== pid) return;
-  PORT.proponiendo = false;
-  pintarEditorPortada();
-}
-
-async function portadaConIA(que, calidad) {
-  const pid = PORT.pid;
-  const ruta = rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/ia`);
-  try {
-    const precio = await pedir(ruta, { method: 'POST', cuerpo: { diseno: PORT.diseno, que, calidad } });
-    const usd = Number((precio.precio || {}).usd || 0).toFixed(3);
-    const aviso = que === 'portada'
-      ? `La IA hará la portada ENTERA con el texto dentro (puede escribir mal alguna letra). Cuesta unos ${usd} $. ¿Seguimos?`
-      : `La IA hará solo el fondo, sin texto; el texto sigue en capas. Cuesta unos ${usd} $. ¿Seguimos?`;
-    if (!window.confirm(aviso)) return;
-    const lanzado = await pedir(ruta, { method: 'POST', cuerpo: { diseno: PORT.diseno, que, calidad, confirmado: true } });
-    PORT.ia = 'Dibujando con la IA…';
-    pintarEditorPortada();
-    let t = { estado: 'ejecutando' };
-    for (let i = 0; i < 400 && !['listo', 'error', 'cancelado'].includes(t.estado); i += 1) {
-      await new Promise(r => setTimeout(r, 2000));
-      t = await pedir(API.trabajo(lanzado.trabajo_id));
-      if (t.mensaje) PORT.ia = `Dibujando con la IA… ${t.mensaje}`;
-    }
-    if (t.estado !== 'listo') throw new Error(t.error || t.mensaje || `el trabajo ha acabado «${t.estado}»`);
-    const r = t.resultado || {};
-    /* SOLO EN SU VÍDEO. Si entretanto se cerró el editor o se abrió el de
-       otro vídeo, la imagen no se pierde: el servidor la apunta en el diseño
-       guardado y sale en «Fondos ya hechos» al volver a abrirlo. */
-    if (PORT.pid !== pid || !PORT.abierto) return;
-    PORT.fondos = [r.nombre].concat((PORT.fondos || []).filter(x => x !== r.nombre));
-    PORT.diseno.fondo = Object.assign({}, PORT.diseno.fondo, { tipo: 'ia', imagen: r.nombre });
-    if (que === 'portada') PORT.diseno.modo = 'ia';
-    toast(que === 'portada' ? 'Portada hecha con IA: revisa el texto' : 'Fondo hecho con IA');
-    PORT.ia = null;
-    tocarPortada(true);
-    return;
-  } catch (e) {
-    if (PORT.pid === pid) toast(`no se ha podido hacer con la IA: ${e.message}`, true);
-  }
-  if (PORT.pid !== pid || !PORT.abierto) return;
-  PORT.ia = null;
-  pintarEditorPortada();
 }
 
 /* ================================================================== PUBLICAR
@@ -22005,6 +23066,7 @@ function pintarModulo() {
   sellarHistoriaModulo();
   const foco = document.activeElement && document.activeElement.dataset
     ? document.activeElement.dataset.foco : '';
+  const ancla = anclaDeScroll('modulo', claveScrollModulo);
   vaciar(m);
   const volver = barraVolverModulo();  // «‹ Volver» (diseno-crearia)
   if (volver) m.appendChild(volver);
@@ -22028,6 +23090,7 @@ function pintarModulo() {
     }
   }
   devolverScroll('modulo', claveScrollModulo);
+  volverAlAncla(ancla, claveScrollModulo);
 }
 
 /* -------------------------------------------------------------- INICIO
@@ -23979,8 +25042,10 @@ function bloquePortadaPublicar() {
   const etiqueta = h('span', { clase: 'meta' }, p.imagen ? 'Imagen subida'
     : p.ms != null ? `Fotograma del segundo ${(p.ms / 1000).toFixed(1)}` : 'Cada red elige la suya (no has elegido ninguna)');
   let reloj = null;
+  // con imagen propia el deslizador sigue vivo: es el momento para TikTok,
+  // que sin el permiso «cover_image» solo acepta un fotograma
   const deslizador = h('input', { type: 'range', min: 0, max: dur, step: 100, value: msVista,
-    disabled: !!p.imagen, 'aria-label': 'Momento del vídeo para la portada',
+    'aria-label': p.imagen ? 'Fotograma para TikTok' : 'Momento del vídeo para la portada',
     oninput: ev => {
       PUB.portadaMs = Number(ev.target.value);
       etiqueta.textContent = `Segundo ${(PUB.portadaMs / 1000).toFixed(1)} (sin guardar)`;
@@ -24013,10 +25078,12 @@ function bloquePortadaPublicar() {
       etiqueta,
       deslizador,
       h('div', { clase: 'fila' },
-        h('button', { clase: 'mini', disabled: !!p.imagen, onclick: () => guardarPortada({ ms: Number(deslizador.value) }) },
-          'Usar este fotograma'),
+        h('button', { clase: 'mini', onclick: () => guardarPortada({ ms: Number(deslizador.value) }) },
+          p.imagen ? 'Este fotograma para TikTok' : 'Usar este fotograma'),
         h('label', { clase: 'boton mini', for: `portada-${f.pid}` }, 'Subir una imagen'), entrada,
         h('button', { clase: 'mini primario', onclick: () => abrirEditorPortada(f.pid) }, 'Diseñar portada'),
+        p.imagen ? h('button', { clase: 'mini', title: 'Guardar una copia de la portada (respaldo)',
+          onclick: () => descargarPortadaPublicar(f.pid, p.imagen) }, '⬇ Descargar portada') : null,
         p.imagen ? h('button', { clase: 'mini fantasma', onclick: () => guardarPortada({ quitar_imagen: true }) }, 'Quitar la imagen') : null,
         (p.ms != null || p.imagen) ? h('button', { clase: 'mini fantasma',
           onclick: () => guardarPortada({ ms: null, quitar_imagen: true }) }, 'Que cada red elija') : null),
@@ -24027,9 +25094,75 @@ function bloquePortadaPublicar() {
         p.imagen ? h('label', { clase: 'casilla-red', title: 'TikTok solo acepta una imagen propia si tu cuenta tiene esa función; si no, usa el fotograma' },
           h('input', { type: 'checkbox', checked: !!p.tiktok_imagen, onchange: ev => guardarPortada({ tiktok_imagen: ev.target.checked }) }),
           ' Usar la imagen también en TikTok') : null),
-      h('div', { clase: 'meta' }, 'Instagram y TikTok usan el fotograma elegido; Facebook, solo si sale como vídeo (no como Reel). '
-        + 'Una imagen subida va a Instagram y Facebook (y a YouTube o TikTok si lo marcas).'))));
+      portadaPorRedPublicar(f))));
   return b;
+}
+
+/* RED POR RED, QUÉ PORTADA SE VA A MANDAR (portadas-2, 21-10). Es la misma
+   regla que `publicar.campos_portada`: lo que cada red acepta por Upload-Post.
+   Antes solo había una frase general y no se sabía por qué una red ponía la
+   suya. */
+function portadaPorRedPublicar(f) {
+  const p = f.portada || {};
+  const conPortada = ['instagram', 'tiktok', 'youtube', 'facebook', 'linkedin', 'x', 'pinterest'];
+  const redes = (f.redes || []).filter(r => conPortada.includes(r));
+  const sinPortada = (f.redes || []).filter(r => !conPortada.includes(r));
+  const caja = h('div', { clase: 'portada-por-red' }, h('b', {}, 'Qué portada recibe cada red:'));
+  if (!(f.redes || []).length) {
+    caja.appendChild(h('span', { clase: 'meta' }, 'Marca alguna red arriba para verlo.'));
+    return caja;
+  }
+  const seg = ms => `el fotograma del segundo ${(ms / 1000).toFixed(1).replace('.', ',')}`;
+  const nombres = { instagram: 'Instagram', tiktok: 'TikTok', youtube: 'YouTube', facebook: 'Facebook',
+    linkedin: 'LinkedIn', x: 'X', pinterest: 'Pinterest' };
+  const tiktokPuede = !!f.tiktok_portada_propia;
+  redes.forEach(red => {
+    let que = '';
+    let ok = true;
+    if (red === 'instagram') {
+      que = p.imagen ? 'tu imagen ✓ (en la cuadrícula del perfil se ve el centro, 3:4)' : p.ms != null ? `${seg(p.ms)} ✓` : 'ninguna: la elige Instagram';
+      ok = !!(p.imagen || p.ms != null);
+    } else if (red === 'tiktok') {
+      if (p.imagen && (p.tiktok_imagen || tiktokPuede)) {
+        que = tiktokPuede ? 'tu imagen ✓ (tu cuenta tiene el permiso «cover_image»)'
+          : 'tu imagen, si tu cuenta tiene el permiso «cover_image» (si no, TikTok la ignora)';
+      } else if (p.ms != null) que = `${seg(p.ms)} ✓ (sin el permiso «cover_image», TikTok solo acepta un fotograma)`;
+      else { que = p.imagen ? 'ninguna: TikTok no acepta tu imagen sin el permiso «cover_image». Elige un fotograma para TikTok' : 'ninguna: la elige TikTok'; ok = false; }
+    } else if (red === 'youtube') {
+      if (!p.youtube) { que = 'ninguna: marca «Mandarla también a YouTube» (necesita el canal verificado)'; ok = false; }
+      else if (p.imagen || p.ms != null) que = 'tu miniatura, si el canal está verificado (en el carrusel de Shorts YouTube suele enseñar un fotograma)';
+      else { que = 'ninguna: elige una imagen o un fotograma'; ok = false; }
+    } else if (red === 'facebook') {
+      const reel = ((f.encaje || {}).facebook || {}).tipo === 'Reel';
+      if (reel) { que = 'ninguna: sale como Reel (vertical de hasta 90 s) y Facebook no admite portada en los Reels'; ok = false; }
+      else if (p.imagen) que = 'tu imagen ✓ (sale como vídeo)';
+      else if (p.ms != null) que = `${seg(p.ms)} ✓`;
+      else { que = 'ninguna: la elige Facebook'; ok = false; }
+    } else if (red === 'linkedin' || red === 'x') {
+      if (p.imagen) que = 'tu imagen ✓';
+      else if (p.ms != null) que = `${seg(p.ms)} ✓`;
+      else { que = `ninguna: la elige ${nombres[red]}`; ok = false; }
+    } else if (red === 'pinterest') {
+      if (p.imagen) que = 'tu imagen ✓';
+      else if (p.ms != null) que = `${seg(p.ms)} ✓`;
+      else { que = 'ninguna: la elige Pinterest'; ok = false; }
+    }
+    caja.appendChild(h('div', { clase: `fila portada-red${ok ? '' : ' sin-portada'}` }, h('b', {}, `${nombres[red]}:`), h('span', {}, que)));
+  });
+  if (sinPortada.length) {
+    caja.appendChild(h('div', { clase: 'fila portada-red sin-portada' },
+      h('span', {}, `${sinPortada.length === 1 ? 'Esta red no admite' : 'Estas redes no admiten'} portada: ${sinPortada.map(r => NOMBRES_RED[r] || r).join(', ')}.`)));
+  }
+  return caja;
+}
+
+async function descargarPortadaPublicar(pid, sello) {
+  try {
+    const r = await fetch(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada.jpg?s=${encodeURIComponent(sello || '')}`),
+      { headers: cabecerasPortada() });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    bajarBlobPortada(await r.blob(), `${slugDeDescarga((PUB.ficha || {}).nombre || pid)}_portada.jpg`);
+  } catch (e) { toast(`no se ha podido descargar la portada: ${e.message}`, true); }
 }
 
 function bloqueCuandoPublicar() {
@@ -24324,6 +25457,9 @@ function filasEnvioFicha(e) {
     pastillaEstadoEnvio(e.estado),
     debioSalirPublicar(e),
     h('span', { clase: 'crece meta motivo-envio' }, e.error || e.nota || ''),
+    // QUÉ PORTADA SE MANDÓ (portadas-2): los envíos de antes no lo saben
+    e.portada != null ? h('span', { clase: 'meta portada-envio' },
+      `Portada: ${e.portada || 'ninguna (la puso la red)'}`) : null,
     botonComprobarPublicar(e),
     e.metricas && textoMetricas(e.metricas)
       ? h('span', { clase: 'metricas-envio', title: `actualizado ${fechaCorta(e.metricas.al)}` },
@@ -26666,6 +27802,8 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   if (r.formato === 'vertical' || r.formato === 'horizontal') e.formato = r.formato;
   /* el espacio fijo es del guion: uno sin él deja el campo vacío */
   e.espacio_fijo = espacioFijoDelEncargo(r.espacio_fijo);
+  /* y el tipo de relato, si el guion lo trae («Tipo de relato:»); si no, sin elegir */
+  e.tipo_relato = tipoRelatoDelEncargo(r.tipo_relato);
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.datos = null;
   irAModulo('crear');

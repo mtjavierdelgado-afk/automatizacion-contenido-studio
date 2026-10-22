@@ -354,6 +354,83 @@ GUIAS = {
         ),
     },
 
+    # ------------------------------------------------------------ tipo_relato
+    "tipo_relato": {
+        "titulo": "El tipo de relato",
+        "donde": "Un vídeo nuevo → El tipo de relato; un vídeo hecho → El tipo de "
+                 "relato; el estilo → 🧭 Tipo de relato; la Parrilla → «Tipo de relato:»",
+        "usa": "pasos/tipo_relato.py (resolver, la frase de edición), "
+               "pasos/catalogo_visual.py (proponer, proponer_cambios), "
+               "pasos/p6_assets.py (la imagen base y la edición de cada plano) y "
+               "pasos/revisor_imagenes.py (compara con la base)",
+        "que_hace": [
+            "Dice CÓMO se cuenta el vídeo en imágenes, no de qué negocio es: "
+            "Documental (el guion se reparte en sitios, como siempre), Un espacio "
+            "que cambia, Recorrido, Escenario y apoyos, Producto o Clase.",
+            "«Un espacio que cambia» es UN sitio que se ve siempre igual y en el que "
+            "cambia SOLO lo que dice la voz: un objeto, los acabados (materiales y "
+            "colores, misma geometría y ángulo), el estado (obra, montaje, terminado) "
+            "o la hora (la luz y la gente). Claude escribe qué cambia en cada tramo, "
+            "y cada plano se genera EDITANDO una imagen base del sitio con la misma "
+            "cámara. Los planos de detalle la llevan como referencia.",
+            "La imagen base es el sitio vacío y entero en su estado inicial: la "
+            "subida en «El espacio fijo» (gratis) o una generada (se paga una "
+            "imagen, con su coste delante). Se mira y se aprueba antes de generar "
+            "los planos: sin ella aprobada no se paga ningún plano de ese sitio.",
+            "«Producto» también edita la base: el fondo no se mueve y cambia el "
+            "producto. «Recorrido», «Escenario y apoyos» y «Clase» llevan la base "
+            "como referencia del sitio, porque la acción y el encuadre cambian.",
+            "Qué manda: lo elegido en el vídeo (o en la Parrilla); si no, lo del "
+            "estilo; si tampoco, con espacio fijo es «Escenario y apoyos» y sin él, "
+            "«Documental». Sin elegir nada, el vídeo sale exactamente como antes.",
+            "En un vídeo hecho, «Aplicar el tipo de relato» no dibuja nada: enseña "
+            "qué planos cambiarían y cuánto cuesta rehacerlos, y eliges todos, los "
+            "marcados o ninguno.",
+            "El revisor compara cada plano editado con su base: si cambió algo que "
+            "no se pidió (la distribución, la cámara, un mueble fijo), lo marca "
+            "como congruencia de gravedad alta.",
+        ],
+        "si": [
+            "Escribe el espacio fijo con la distribución entera (qué hay en cada "
+            "pared, medidas, materiales): es lo que dibuja la imagen base.",
+            "«Un espacio que cambia (acabados)» para tres paletas del mismo sitio; "
+            "«(objeto)» para un antes y después de una pieza; «(estado)» para una "
+            "sala vacía → montada → en uso.",
+            "Mira la imagen base antes de aprobarla: todo lo que salga en ella sale "
+            "en todos los planos.",
+        ],
+        "no": [
+            "Escribir «mantener el mismo espacio» como regla del estilo: eso lo "
+            "decide el tipo de relato, no las reglas.",
+            "Esperar planos de detalle con la cámara de la base: van como referencia.",
+            "Aprobar una base con gente o texto: se copiaría a todos los planos.",
+        ],
+        "plantilla": (
+            "Tipo de relato: [documental | espacio_que_cambia (objeto | acabados | "
+            "estado | hora) | recorrido | escenario_y_apoyos | producto | clase]"
+        ),
+        "ejemplo": (
+            "D01-2 — 3 paletas para un baño sin ventana\n"
+            "Tipo de relato: espacio_que_cambia (acabados)\n"
+            "\n"
+            "ESPACIO FIJO\n"
+            "- Sitio: Baño sin ventana\n"
+            "- Descripción: small windowless apartment bathroom, 1.5 x 2.4 m; toilet on "
+            "the left wall, wall-hung vanity and mirror on the back wall, walk-in shower "
+            "on the right; same layout and camera height in every shot\n"
+            "- Luz: warm ceiling downlight and mirror light\n"
+            "- Secundarios: ninguno"
+        ),
+        "prompt_ia": (
+            "Lee este guion y dime qué tipo de relato le va mejor para contarlo en "
+            "imágenes fijas: documental (cambia de sitio), espacio_que_cambia (un "
+            "mismo sitio en el que solo cambia lo que dice la voz; di si cambia un "
+            "objeto, los acabados, el estado o la hora), recorrido, "
+            "escenario_y_apoyos, producto o clase. Contesta con una sola línea "
+            "«Tipo de relato: …» y una frase de por qué.\n\nGUION:\n[pega aquí]"
+        ),
+    },
+
     # --------------------------------------------------------------------- cta
     "cta": {
         "titulo": "Las llamadas a la acción",
@@ -695,8 +772,8 @@ GUIAS = {
         "titulo": "El formato del guion (Parrilla)",
         "donde": "Automatizar → Añadir guiones, y la ficha de un guion",
         "usa": "pasos/parrilla.py (leer_guion, encargo_de, el prompt de conversión), "
-               "«Pasar al Encargo» en web/app.js y, para ESPACIO FIJO, "
-               "pasos/catalogo_visual.py (proponer)",
+               "«Pasar al Encargo» en web/app.js y, para ESPACIO FIJO y «Tipo de "
+               "relato:», pasos/catalogo_visual.py (proponer) y pasos/tipo_relato.py",
         "que_hace": [
             "Todo guion de la Parrilla vive en ESTE formato, venga de un Word, un PDF, "
             "un Excel, de Claude o pegado. Lo que subes o pegas lo convierte Claude; "
@@ -723,6 +800,16 @@ GUIAS = {
             "sitúe en un secundario) y no pone cabeceras de sitio. Sin descripción "
             "no cuenta. La imagen del sitio (opcional) se sube en «El espacio fijo» "
             "de «Un vídeo nuevo» después de «Pasar al Encargo».",
+            "«Tipo de relato:» (opcional, en la cabecera) dice CÓMO se cuenta en "
+            "imágenes: «espacio_que_cambia (objeto | acabados | estado | hora)» es un "
+            "sitio que se ve siempre igual y en el que solo cambia lo que dice la voz "
+            "(cada plano se genera editando una imagen base que apruebas antes); "
+            "«recorrido», varios ambientes de un mismo lugar con la misma luz y "
+            "materiales; «escenario_y_apoyos», un sitio con secundarios; «producto», "
+            "el producto manda y el fondo no se mueve; «clase», una clase. Vale la "
+            "clave o el nombre («Un espacio que cambia (acabados)»), con o sin "
+            "tildes. Sin la línea, manda el tipo de relato del estilo; si tampoco "
+            "hay, con ESPACIO FIJO es «escenario y apoyos» y sin él, «documental».",
         ],
         "si": [
             "Una línea de cabecera por dato: «Uso:», «Formato:», «Duración:»…",
@@ -732,6 +819,11 @@ GUIAS = {
             "«Duración: la elijo en el Encargo» si el original no la dice.",
             "La descripción de ESPACIO FIJO como la quieres ver: va tal cual a todas "
             "las imágenes (mejor en inglés, que es lo que lee el generador).",
+            "«Tipo de relato: espacio_que_cambia (acabados)» junto con ESPACIO FIJO "
+            "para un antes y después o varias versiones del mismo sitio.",
+            "Un ESPACIO FIJO que haga verdad lo que cuenta la voz, con distancias: si "
+            "la mampara choca con el inodoro, «the toilet bowl only 0.4 m from the "
+            "shower glass»; un baño holgado dibuja lo contrario del vídeo.",
         ],
         "no": [
             "Diálogos entre personajes: el Studio narra con UNA voz (en «exacto» "
@@ -751,6 +843,8 @@ GUIAS = {
             "Objetivo: [qué tiene que conseguir]\n"
             "CTA: [qué se pide al final]\n"
             "Tono: [cómo suena]\n"
+            "Tipo de relato: documental | espacio_que_cambia (objeto | acabados | estado | hora) "
+            "| recorrido | escenario_y_apoyos | producto | clase  (opcional: deja uno o bórrala)\n"
             "\n"
             "ESPACIO FIJO (opcional: bórralo si el vídeo cambia de sitio)\n"
             "- Sitio: [nombre corto]\n"
@@ -840,6 +934,7 @@ GUIAS = {
             "6. Las reglas fijas del cliente (qué mostrar, qué evitar, colores, frases de marca) van a MARCA DEL CLIENTE, no dentro de las escenas.\n"
             "7. No inventes datos: teléfonos, precios o enlaces solo si están en el original. Si falta el CTA, pon [FALTA CTA].\n"
             "8. ESPACIO FIJO solo si el original dice que todo el vídeo ocurre en un mismo sitio (un local, una cocina, un plató). Si no lo dice, no pongas esa sección.\n"
+            "9. \"Tipo de relato\" solo si el original pide una forma concreta de contarlo en imágenes: \"espacio_que_cambia (objeto | acabados | estado | hora)\" si es UN sitio que se ve siempre igual y en el que solo cambia lo que dice la voz (un antes y después, tres paletas, una sala vacía → montada); \"recorrido\" si son varios ambientes de un mismo lugar; \"escenario_y_apoyos\" si es un sitio con otros secundarios; \"producto\" si el producto manda y el fondo no cambia; \"clase\" si es una clase. Si no lo pide, quita la línea.\n"
             "\n"
             "AJUSTE POR RED (en \"adaptar\" aplícalo; en \"exacto\" solo avisa con ⚠ si algo no encaja)\n"
             "- TikTok / Reels / Shorts: vertical. Gancho en los primeros 2–3 s. Un cambio de plano cada 1–3 s. Texto en pantalla frecuente y grande, que refuerce la voz. CTA corto (comenta, guárdalo, link en bio, escríbenos). En TikTok, las palabras clave del tema dichas en la voz.\n"
@@ -859,6 +954,7 @@ GUIAS = {
             "Objetivo: …\n"
             "CTA: …\n"
             "Tono: …\n"
+            "Tipo de relato: … (opcional; quita la línea si no hace falta)\n"
             "\n"
             "ESPACIO FIJO (solo si todo el vídeo ocurre en un mismo sitio; si no, quita esta sección)\n"
             "- Sitio: [nombre corto del sitio]\n"
@@ -1400,7 +1496,7 @@ for _red, (_nombre, _tope, _hace, _si, _no, _plantilla, _ejemplo) in _REDES_NUEV
                       "VÍDEO:\n[pega aquí el guion o un resumen]"),
     }
 
-ORDEN = ("estilo_grafico", "tono", "voz", "material", "indicaciones", "cta",
+ORDEN = ("estilo_grafico", "tono", "voz", "material", "indicaciones", "tipo_relato", "cta",
          "texto_tiktok", "texto_instagram", "texto_youtube", "texto_facebook",
          "tono_redes", "guion_parrilla", "pedir_guiones", "marca_cliente",
          "chat_guiones", "analizar_cuenta", "conexiones_cuentas",

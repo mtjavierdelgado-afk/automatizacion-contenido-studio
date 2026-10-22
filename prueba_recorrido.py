@@ -6905,5 +6905,182 @@ def publicar_arreglos_del_20_10(navegador, datos):
     pg.cerrar()
 
 
+
+# tipo-de-relato (20-10-2026): el tipo de relato en la Parrilla y el Encargo,
+# aplicado a un vídeo hecho (gratis, con su imagen base) y por defecto en el
+# estilo. Nada de esto paga una imagen.
+@escenario
+def tipo_de_relato(navegador, datos):
+    """Parrilla con «Tipo de relato:» → el Encargo lo trae y lo manda al crear;
+    un vídeo hecho → «El tipo de relato» → «Aplicar» no lanza nada → la imagen
+    base con su precio; el pedido del reparto de sitios; y el estilo lo guarda."""
+    api = datos["api"]
+    cid = datos["cliente"]
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="tipo de relato")
+
+    def parte(nombre, fn):
+        try:
+            fn()
+        except Exception as fallo:                           # noqa: BLE001
+            traceback.print_exc()
+            ok(False, f"{nombre} se cortó: {type(fallo).__name__}: {str(fallo)[:120]}")
+
+    def parte_parrilla():
+        guion = ("TR01 — Mampara que choca\nCliente / proyecto: Baños\nUso: adaptar\nRed: Reels\n"
+                 "Formato: vertical\nDuración: 30 s\nObjetivo: que pidan\nCTA: Escríbenos\n"
+                 "Tono: cercano\nTipo de relato: Un espacio que cambia (objeto)\n\n"
+                 "ESPACIO FIJO\n- Sitio: bano_mampara\n"
+                 "- Descripción: small apartment bathroom, toilet on the left wall\n"
+                 "- Luz: day, soft cool daylight\n- Secundarios: ninguno\n\n"
+                 "ESCENA 1\nVisual: la mampara\nVoz: «La mampara choca.»\n\n"
+                 "PARA EL ENCARGO\n- Material: La mampara choca con el inodoro.\n"
+                 "- Indicaciones: cercano\n- Llamadas a la acción: Escríbenos\n"
+                 "- Duración: 30 s · Formato: vertical\n\nAVISOS\n- ninguno")
+        r, hecho = api.post(f"/api/parrilla/proyectos/{cid}/guiones",
+                            {"texto": guion, "nombre": "Tipo de relato"})
+        ok(r.status_code == 201 and (hecho or {}).get("guiones"),
+           f"(1) el guion con «Tipo de relato:» se guarda ({r.status_code})")
+        pg.pulsar("#barra-modulos .boton-modulo", "Automatizar")
+        pg.js(f"elegirProyectoParrilla('{cid}');")
+        pg.p.wait_for_timeout(800)
+        pg.pulsar(".fila-guion .titulo-guion", "TR01")
+        ok(pg.esperar(".ficha-parrilla h3", "TR01"), "(1) su ficha")
+        pg.p.locator(".pasar-encargo select").first.select_option(datos["preset"])
+        pg.pulsar(".pasar-encargo button", "Pasar al Encargo")
+        fin = time.time() + 10
+        while time.time() < fin and not pg.p.evaluate(
+                "() => MODULOS.actual === 'crear' && APP.light.vista === 'elegido'"):
+            pg.p.wait_for_timeout(300)
+        ok(pg.esperar(".bloque-light h3", "El tipo de relato", 10),
+           "(1) «Un vídeo nuevo» trae el bloque «El tipo de relato»")
+        enviado = pg.p.evaluate("() => opcionesParaCrear(APP.light.video.encargo).tipo_relato || null")
+        ok(enviado == {"modo": "espacio_que_cambia", "cambia": "objeto"},
+           f"(1) relleno con lo del guion y es lo que se manda al crear: {enviado}")
+        ok(pg.visible(".tipo-relato .pista", "imagen base"), "(1) y avisa de la imagen base")
+        pg.captura("tipo_relato_encargo")
+        pg.p.locator(".tipo-relato select").first.select_option("")
+        pg.p.wait_for_timeout(300)
+        ok(pg.p.evaluate("() => !('tipo_relato' in opcionesParaCrear(APP.light.video.encargo))"),
+           "(1) sin elegir, no se manda nada (regla 1)")
+
+    def parte_video():
+        pg.sin_trabajo(300)
+        # un sitio del que hacer la imagen base (el último escenario: no molesta a otros)
+        _r, ef = api.get(f"/api/proyectos/{pid}/espacio_fijo")
+        if not ((ef or {}).get("espacio_fijo") or {}).get("descripcion"):
+            api.post(f"/api/proyectos/{pid}/espacio_fijo/aplicar", {"espacio_fijo": {
+                "sitio": "Baño", "descripcion": "a narrow bathroom, toilet on the left",
+                "luz": "day", "secundarios": []}})
+        antes = _huellas_de_planos(datos, pid)
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; pintarLight();")
+        ok(pg.esperar(".bloque-light h3", "El tipo de relato", 15), "(2) el vídeo trae «El tipo de relato»")
+        ok(pg.esperar(".tipo-relato button", "Aplicar el tipo de relato", 15), "(2) con «Aplicar»")
+        caja = pg.p.locator(".bloque-light").filter(has_text="cómo se cuenta en imágenes").first
+        caja.locator("select").first.select_option("espacio_que_cambia")
+        pg.p.wait_for_timeout(400)
+        caja = pg.p.locator(".bloque-light").filter(has_text="cómo se cuenta en imágenes").first
+        ok(caja.locator("select").count() >= 2, "(2) en «Un espacio que cambia» sale «Qué cambia»")
+        caja.locator("button", has_text="Aplicar el tipo de relato").first.click()
+        ok(pg.esperar(".imagen-base-relato", segundos=20), "(2) aplicado: sale la imagen base del sitio")
+        _r, vivos = api.get(f"/api/trabajos?proyecto={pid}&activos=1")
+        lista = vivos if isinstance(vivos, list) else (vivos.get("trabajos") or [])
+        ok(not lista, f"(2) aplicar no lanza ningún trabajo ({len(lista)})")
+        ok(_huellas_de_planos(datos, pid) == antes, "(2) ni toca ninguna imagen")
+        _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+        ok((ficha.get("resuelto") or {}).get("modo") == "espacio_que_cambia" and ficha.get("edita"),
+           f"(2) el servidor guarda el modo: {(ficha.get('resuelto') or {}).get('modo')}")
+        ok(pg.visible(".imagen-base-relato button", "Generar la imagen base") or
+           pg.visible(".imagen-base-relato button", "Otra imagen base")
+           or not ficha.get("sitio"), "(2) con «Generar la imagen base» y su precio")
+        if ficha.get("puede_usar_subida"):
+            pg.pulsar(".imagen-base-relato button", "Usar la imagen subida")
+            ok(pg.esperar(".imagen-base-relato.aprobada", segundos=15),
+               "(2) «Usar la imagen subida» la deja aprobada (gratis)")
+        elif ficha.get("sitio"):
+            # sin subida: se genera (el motor de imagen es el falso) y se aprueba
+            pg.pulsar(".imagen-base-relato button", "Generar la imagen base")
+            pg.sin_trabajo(120)
+            pg.js("APP.light.video.relato = null; pintarLight();")
+            ok(pg.esperar(".imagen-base-relato button", "Aprobar esta imagen", 30),
+               "(2) la imagen base generada se puede aprobar")
+            ok(pg.visible(".imagen-base-relato a img"), "(2) con su miniatura, que abre a tamaño completo")
+            pg.pulsar(".imagen-base-relato button", "Aprobar esta imagen")
+            ok(pg.esperar(".imagen-base-relato.aprobada", segundos=15), "(2) y queda aprobada")
+        if pg.visible(".imagen-base-relato.aprobada"):
+            # UN ESTADO, UNA IMAGEN (21-10): Claude escribe qué cambia por tramo
+            # (el CLI falso: «antes» y «despues»), y el estado se dibuja una vez
+            # (motor de imagen falso) y se aprueba en la pantalla
+            r, lanz = api.post(f"/api/proyectos/{pid}/tipo_relato/cambios", {})
+            fin_cambios = api.esperar(lanz["trabajo_id"], 120) if r.status_code == 202 else lanz
+            pg.js("APP.light.video.relato = null; pintarLight();")
+            if pg.esperar(".estados-relato", segundos=20):
+                ok(pg.visible(".estado-relato button", "Dibujar este estado"),
+                   "(2b) cada estado del guion, con «Dibujar este estado» y su precio")
+                pg.pulsar(".estado-relato button", "Dibujar este estado")
+                pg.sin_trabajo(120)
+                pg.js("APP.light.video.relato = null; pintarLight();")
+                ok(pg.esperar(".estado-relato button", "Aprobar este estado", 30),
+                   "(2b) dibujado, se puede aprobar")
+                ok(pg.visible(".estado-relato a img"), "(2b) con su miniatura, que abre a tamaño completo")
+                pg.pulsar(".estado-relato button", "Aprobar este estado")
+                ok(pg.esperar(".estado-relato.aprobada", segundos=15), "(2b) y queda aprobado")
+                _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+                ok(ficha.get("listo"), "(2b) con la base y sus estados aprobados, listo para dibujar")
+                pg.captura("tipo_relato_estados")
+            else:
+                _r, f2 = api.get(f"/api/proyectos/{pid}/tipo_relato")
+                ok(False, "(2b) tras escribir qué cambia, salen los estados del vídeo: "
+                   f"{r.status_code} {str(fin_cambios)[:300]} estados={f2.get('estados')}")
+        pg.captura("tipo_relato_video")
+        ok(pg.esperar(".bloque-light h3", "El reparto y los sitios", 10),
+           "(3) «El reparto y los sitios» con su pedido")
+        ok(pg.visible(".pedido-sitios button", "Volver a repartir con este pedido"),
+           "(3) y «Volver a repartir con este pedido»")
+        # vuelta a lo de antes, para no cambiar nada de lo que venga detrás
+        r, _d = api.post(f"/api/proyectos/{pid}/tipo_relato/aplicar", {"tipo_relato": None})
+        ok(r.status_code == 200, f"(2) y se puede volver a lo del estilo ({r.status_code})")
+        pg.js("APP.light.video.relato = null; pintarLight();")
+
+    def parte_estilo():
+        preset = datos["preset"]
+        pg.js(f"await cargarGaleriaLight(true); irALight('preset', {{ abierto: '{preset}' }});")
+        # con el rediseño de Crear, la ficha va en pestañas: el tipo de relato vive en «Cómo se cuenta»
+        pg.js("if (typeof abrirPestanaDeEstilo === 'function') abrirPestanaDeEstilo('cuenta');")
+        ok(pg.esperar(".bloque-light h3", "Tipo de relato", 15), "(4) el estilo trae «🧭 Tipo de relato»")
+        bloque = pg.p.locator(".bloque-light").filter(has_text="cómo se cuentan por defecto").first
+        _r, lista = api.get("/api/presets-light")
+        fp = next((x for x in (lista or {}).get("presets") or [] if x.get("id") == preset), {})
+        if not (((fp.get("datos") or {}).get("estilo") or {}).get("referencias")):
+            # un estilo sin láminas no se puede guardar: se dice, sin selector
+            ok(pg.esperar(".bloque-light .pista", "podrás elegir su tipo de relato", 15),
+               "(4) sin láminas, dice que primero se genera el estilo (no hay selector que falle)")
+            pg.captura("tipo_relato_estilo")
+            return
+        ok(pg.esperar(".bloque-light .tipo-relato select", segundos=15), "(4) con su selector")
+        bloque.locator("select").first.select_option("producto")
+        fin = time.time() + 10
+        relato = {}
+        while time.time() < fin and relato.get("modo") != "producto":
+            pg.p.wait_for_timeout(500)
+            _r, d = api.get(f"/api/presets-light/{preset}/relato")
+            relato = (d or {}).get("relato") or {}
+        ok(relato == {"modo": "producto"}, f"(4) elegirlo lo guarda en el estilo: {relato}")
+        bloque = pg.p.locator(".bloque-light").filter(has_text="cómo se cuentan por defecto").first
+        bloque.locator("select").first.select_option("")
+        fin = time.time() + 10
+        while time.time() < fin and relato:
+            pg.p.wait_for_timeout(500)
+            _r, d = api.get(f"/api/presets-light/{preset}/relato")
+            relato = (d or {}).get("relato") or {}
+        ok(relato == {}, "(4) y documental es no tenerlo")
+        pg.captura("tipo_relato_estilo")
+
+    parte("la Parrilla y el Encargo", parte_parrilla)
+    parte("un vídeo hecho", parte_video)
+    parte("el estilo", parte_estilo)
+    pg.sin_errores("el tipo de relato")
+    pg.cerrar()
+
 if __name__ == "__main__":
     sys.exit(main())

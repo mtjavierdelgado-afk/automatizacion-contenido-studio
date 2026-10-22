@@ -14,6 +14,7 @@
 #      asvs https        (re)intentar el certificado
 #      asvs repositorio  de donde se baja el codigo (y cambiarlo: asvs repositorio usuario/repo)
 #      asvs probar       la prueba real: un video de 30 s con tus claves (~1 $), comprobado solo;
+#      asvs probar relato  las 3 pruebas del tipo de relato (tope 5 $, o --tope N)
 #                        si la consola se corta sigue sola, y repetirlo la vuelve a enseñar o la retoma
 #      asvs comparar-guion  el guion de un video escrito con sonnet y con opus, a ciegas
 #                        (sin tocar el video; solo tokens de la suscripcion). Sin nada: la lista
@@ -427,11 +428,21 @@ https() {
 # se quedo (--seguir) si el proceso murio. `asvs probar nueva` empieza otra.
 probar() {
   local puerto carpeta registro pidf pid seguir="--seguir"
+  local guion="herramientas/prueba_real.py" estado="en_curso.json"
+  local aviso="La prueba real gasta ~0,6-1 \$ (un video de 30 s en calidad baja) y tarda 15-25 min."
   puerto="$(_puerto)"
   carpeta="$(grep -m1 '^ESTUDIO_PROYECTOS=' "$RAIZ/datos/entorno" 2>/dev/null | cut -d= -f2- || true)"
   carpeta="${carpeta:-$RAIZ/datos/proyectos}/_sistema/pruebas_reales"
   registro="$carpeta/registro.log"
   pidf="$carpeta/proceso.pid"
+  # `asvs probar relato`: las tres pruebas del tipo de relato (rama
+  # tipo-de-relato), con su propio registro y su propio estado
+  if [ "${1:-}" = "relato" ]; then
+    shift
+    guion="herramientas/prueba_relato.py"; estado="en_curso_relato.json"
+    registro="$carpeta/registro_relato.log"; pidf="$carpeta/proceso_relato.pid"
+    aviso="La prueba del tipo de relato hace 3 videos de 30 s (tope 5 \$ salvo --tope N) y tarda 45-90 min."
+  fi
   if [ "${1:-}" = "nueva" ]; then seguir=""; shift; fi
   if [ "${1:-}" = "ver" ]; then shift; fi
   sudo -u "$USUARIO" mkdir -p "$carpeta"
@@ -440,15 +451,15 @@ probar() {
     echo "La prueba real ya está corriendo (proceso $pid). Te enseño cómo va;"
     echo "si la consola se corta, sigue sola: vuelve a escribir  asvs probar  para verla."
   else
-    if [ -n "$seguir" ] && [ -f "$carpeta/en_curso.json" ]; then
+    if [ -n "$seguir" ] && [ -f "$carpeta/$estado" ]; then
       echo "Hay una prueba real a medias: la sigo donde se quedó (sin volver a pagar lo hecho)."
     else
-      echo "La prueba real gasta ~0,6-1 \$ (un video de 30 s en calidad baja) y tarda 15-25 min."
-      echo "No toca tus videos: crea uno nuevo, «Prueba real <fecha>»."
+      echo "$aviso"
+      echo "No toca tus videos: crea videos nuevos de prueba que se quedan en tu Studio."
     fi
     echo "Corre APARTE de esta consola: si se corta, sigue sola. Para volver a verla:  asvs probar"
     sudo -u "$USUARIO" bash -c "set -a; . '$RAIZ/datos/entorno'; set +a; cd '$RAIZ/app' && \
-      PUERTO='${puerto:-8110}' setsid nohup '$RAIZ/venv/bin/python' -u herramientas/prueba_real.py \
+      PUERTO='${puerto:-8110}' setsid nohup '$RAIZ/venv/bin/python' -u $guion \
       --api 'http://127.0.0.1:${puerto:-8110}' $seguir $* > '$registro' 2>&1 < /dev/null & echo \$! > '$pidf'"
     sleep 1
     pid="$(cat "$pidf" 2>/dev/null || true)"

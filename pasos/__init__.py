@@ -36,6 +36,9 @@ from . import direccion  # noqa: E402,F401
 # en vez de una linea que el codigo encaja entre modulos. Va detras de direccion
 # porque reutiliza su 'dirigible'
 from . import redactor  # noqa: E402,F401
+# tipo_relato (como se cuenta un video en imagenes) solo tiene datos y
+# funciones puras; lo usan el catalogo, p6, el revisor y la pantalla
+from . import tipo_relato  # noqa: E402,F401
 from . import catalogo_visual, estilo  # noqa: E402,F401
 # cadencia (tiempo <-> palabras) y fuentes (de donde sale el material) los usan
 # p2, p3 y app.py. Van DECLARADOS y no colandose de rebote como atributo del

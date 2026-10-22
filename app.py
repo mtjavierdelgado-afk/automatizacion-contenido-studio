@@ -1321,6 +1321,57 @@ def listar_proyectos(peticion: Request):
     return {"proyectos": fichas, "raiz": raiz_proyectos()}
 
 
+#: Los pasos que dicen «por dónde va» un vídeo en su tarjeta de Tus proyectos.
+PASOS_DE_LA_TARJETA = ("guion", "voz", "assets", "render")
+#: Como mucho, cuántos vídeos se resumen por petición.
+MAX_RESUMEN_TARJETAS = 120
+
+
+# OJO AL ORDEN: declarada ANTES que GET /api/proyectos/{pid}, como la papelera.
+# El «_» delante no lo puede llevar ningún vídeo (`contexto` los rechaza).
+@app.get("/api/proyectos/_resumen")
+def resumen_de_tarjetas(peticion: Request, ids: str = Query(default="")):
+    """Por dónde va cada vídeo, para su tarjeta en Tus proyectos (rediseño de
+    Tus proyectos, 22-10-2026). SOLO LEE: no escribe nada, no lanza nada y no
+    cuesta nada; es lo mismo que la pantalla sabría abriendo cada vídeo
+    (`GET /api/proyectos/{pid}`), en una sola llamada y sin los params.
+
+    ?ids=a,b,c -> {videos: {pid: {pasos: {guion|voz|assets|render: estado},
+    imagenes_obsoletas, trabajo: {paso, progreso} | null}}}. Lo de un proyecto
+    con clave cerrado no sale; un vídeo que no se puede abrir, tampoco."""
+    pedidos = [i for i in dict.fromkeys(str(ids or "").split(",")) if i][:MAX_RESUMEN_TARJETAS]
+    cerrados = _cerrados(peticion)
+    asignaciones = CLIENTES._leer(raiz_proyectos()) if cerrados else None
+    salida = {}
+    for pid in pedidos:
+        try:
+            ctx = contexto(pid)
+        except ErrorApi:
+            continue
+        if ctx.proyecto.config.get(CONFIG_TALLER):
+            continue
+        if cerrados and CLIENTES.cliente_de(
+                raiz_proyectos(), ctx.proyecto.config.get(CONFIG_ESTILO_LIGHT) or "",
+                ctx.id, datos=asignaciones) in cerrados:
+            continue
+        try:
+            estado = ctx.estado
+            pasos = {p: estado.estado_de(p) for p in PASOS_DE_LA_TARJETA}
+            sin_hacer = set(estado.unidades_sin_hacer("assets") or [])
+            obsoletas = [u for u in (estado.unidades_obsoletas("assets") or [])
+                         if u not in sin_hacer]
+        except Exception:                                   # noqa: BLE001
+            continue
+        trabajo = None
+        for ficha in ctx.gestor.listar(activos=True):
+            trabajo = {"paso": ficha.get("paso") or "",
+                       "progreso": ficha.get("progreso") or 0}
+            break
+        salida[ctx.id] = {"pasos": pasos, "imagenes_obsoletas": len(obsoletas),
+                          "trabajo": trabajo}
+    return {"videos": salida}
+
+
 #: Tope del nombre visible de un proyecto. No lo pide ningun formato: es que la
 #: lista del modo light lo pinta en una linea, y un nombre de mil caracteres
 #: rompe la fila sin avisar de nada.

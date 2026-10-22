@@ -574,19 +574,21 @@ def portada_y_proyectos(navegador, datos):
     ok(pg.visible("h2", "Tus proyectos"), "la portada enseña «Tus proyectos»")
     ok(pg.visible(".tarjeta-proyecto", "Estado Play"), "se ve la tarjeta de Estado Play")
     ok(not pg.visible(".tarjeta-proyecto", "Suyu"), "el proyecto oculto no se ve de entrada")
-    ok(pg.visible("button", "Ver los ocultos"), "y hay un botón para ver los ocultos")
-    pg.pulsar("button", "Ver los ocultos")
+    # rediseño de Tus proyectos (22-10-2026): «Ver ocultos (N)» es un chip que
+    # se enciende y se apaga, en la fila del título «Proyectos»
+    ok(pg.visible("button.chip-filtro", "Ver ocultos (1)"), "y hay un botón para ver los ocultos")
+    pg.pulsar("button.chip-filtro", "Ver ocultos")
     ok(pg.visible(".tarjeta-proyecto", "Suyu"),
-       "«Ver los ocultos» ENSEÑA el proyecto oculto (con tamaño en pantalla)")
+       "«Ver ocultos» ENSEÑA el proyecto oculto (con tamaño en pantalla)")
     pg.captura("01_portada_con_ocultos")
-    pg.pulsar("button", "Esconder los ocultos")
-    ok(not pg.visible(".tarjeta-proyecto", "Suyu"), "y «Esconder» lo vuelve a esconder")
+    pg.pulsar("button.chip-filtro", "Ver ocultos")
+    ok(not pg.visible(".tarjeta-proyecto", "Suyu"), "y pulsarlo otra vez lo vuelve a esconder")
     # DEJAR DE OCULTARLO desde la portada (11-10-2026: «lo mantiene como un
-    # oculto visible»)
-    pg.pulsar("button", "Ver los ocultos")
-    ok(pg.visible(".ocultos-portada button", "Dejar de ocultar"),
-       "con los ocultos a la vista, cada uno tiene «Dejar de ocultar»")
-    pg.pulsar(".ocultos-portada button", "Dejar de ocultar")
+    # oculto visible»), ahora dentro de su propia tarjeta
+    pg.pulsar("button.chip-filtro", "Ver ocultos")
+    ok(pg.visible(".tarjeta-proyecto.es-oculto button", "Dejar de ocultar"),
+       "con los ocultos a la vista, cada uno tiene «Dejar de ocultar» en su tarjeta")
+    pg.pulsar(".tarjeta-proyecto.es-oculto button", "Dejar de ocultar")
     pg.p.wait_for_timeout(1000)
     _r, d = api.get("/api/clientes")
     ok(not any(c.get("oculto") for c in d.get("clientes") or [] if c.get("id") == datos["cliente_oculto"]),
@@ -602,7 +604,7 @@ def portada_y_proyectos(navegador, datos):
     api.put(f"/api/clientes/{datos['cliente']}", {"clave": "1234"})
     pg.js("await cargarClientes(); pintarLight();")
     ok(pg.visible(".tarjeta-proyecto", "con clave"), "un proyecto con clave lo dice en su tarjeta")
-    pg.pulsar(".tarjeta-proyecto", "Estado Play")
+    pg.pulsar(".tarjeta-proyecto .abrir-proyecto", "Estado Play")
     ok(pg.esperar(".capa-dialogo input"), "al pulsarlo pide la clave")
     pg.p.locator(".capa-dialogo input").first.fill("1234")
     pg.p.locator(".capa-dialogo button[type=submit]").click()
@@ -768,9 +770,9 @@ def del_video_a_su_estilo_y_de_vuelta(navegador, datos):
     pg = Pagina(navegador, datos)
     pg.js("await cargarGaleriaLight(true); elegirCliente(''); irALight('galeria');")
     ok(pg.visible("h2", "Tus proyectos"), "se empieza en la portada de proyectos")
-    ok(pg.esperar(".video-light button.abrir", "Padres vs hijos"),
-       "el vídeo de prueba sale en «Últimos vídeos»")
-    pg.pulsar(".video-light button.abrir", "Padres vs hijos")
+    ok(pg.esperar(".tarjeta-video button.abrir-video", "Padres vs hijos"),
+       "el vídeo de prueba sale en «Sigue donde lo dejaste»")
+    pg.pulsar(".tarjeta-video button.abrir-video", "Padres vs hijos")
     pg.esperar(".pasos-carril button", "Estilo")
     pg.p.wait_for_timeout(1000)
     ir_al_paso(pg, "Estilo")
@@ -1536,29 +1538,222 @@ def proyectos_a_mano(navegador, datos):
     pg.p.locator(".capa-dialogo input").first.fill("Cliente de prueba")
     pg.p.locator(".capa-dialogo button[type=submit]").click()
     ok(pg.esperar("h2", "Cliente de prueba"), "y entra en el proyecto nuevo")
-    pg.pulsar(".mandos-proyecto button", "Renombrar")
-    pg.p.locator(".capa-dialogo input").first.fill("Cliente renombrado")
-    pg.p.locator(".capa-dialogo button[type=submit]").click()
+    # rediseño de Tus proyectos (22-10-2026): todo eso vive en «⚙ Ajustes del
+    # proyecto», un cajón a la derecha, y no en una fila de seis botones
+    pg.pulsar(".abrir-ajustes-proyecto")
+    ok(pg.esperar(".cajon-proyecto", "Zona de peligro"), "«⚙ Ajustes del proyecto» abre su cajón")
+    pg.p.locator(".cajon-proyecto .nombre-proyecto input").fill("Cliente renombrado")
+    pg.pulsar(".cajon-proyecto .nombre-proyecto button", "Guardar")
     ok(pg.esperar("h2", "Cliente renombrado"), "se renombra")
-    pg.pulsar(".mandos-proyecto button", "Logo")
     logo = _png(os.path.join(datos["base"], "logo.png"), (250, 200, 30))
-    pg.p.locator(".panel-logo-proyecto input[type=file]").set_input_files(logo)
-    ok(pg.esperar(".mandos-proyecto button", "Logo ✓", 15), "se le pone logo")
-    pg.pulsar(".mandos-proyecto button", "Ocultar")
-    ok(pg.esperar(".pastilla", "oculto"), "se oculta (y lo dice)")
-    pg.pulsar(".mandos-proyecto button", "Poner clave")
+    pg.p.locator(".cajon-proyecto .panel-logo-proyecto input[type=file]").set_input_files(logo)
+    ok(pg.esperar(".cab-proyecto .pastilla", "logo ✓", 15), "se le pone logo")
+    pg.p.locator(".cajon-proyecto .ajustes-visibilidad input.conmutador").click()
+    ok(pg.esperar(".cab-proyecto .pastilla", "oculto"), "se oculta (y lo dice)")
+    pg.pulsar(".cajon-proyecto button", "Poner clave")
     pg.p.locator(".capa-dialogo input").nth(0).fill("abcd")
     pg.p.locator(".capa-dialogo input").nth(1).fill("abcd")
     pg.p.locator(".capa-dialogo button[type=submit]").click()
-    ok(pg.esperar(".mandos-proyecto button", "Clave ✓", 10), "se le pone clave")
+    ok(pg.esperar(".cajon-proyecto button", "Cambiar o quitar la clave", 10), "se le pone clave")
     pg.captura("15_proyecto_a_mano")
-    pg.pulsar(".mandos-proyecto button", "Borrar")
+    pg.pulsar(".cajon-proyecto button", "Borrar el proyecto")
+    ok(pg.esperar(".capa-dialogo", "Se borra solo la carpeta", 5),
+       "«Borrar el proyecto» pregunta antes, con su explicación")
     if pg.esperar(".capa-dialogo button", "Borrar", 5):
         pg.pulsar(".capa-dialogo button", "Borrar")
     ok(pg.esperar("h2", "Tus proyectos"), "se borra y vuelve a la portada")
     ok(not pg.visible(".tarjeta-proyecto", "Cliente renombrado"), "y ya no está")
     pg.sin_errores("los proyectos a mano")
     pg.cerrar()
+
+
+@escenario
+def tus_proyectos_rediseno(navegador, datos):
+    """El rediseño de Tus proyectos (rama `rediseno-proyectos`, 22-10-2026):
+    el estado de cada vídeo sale de una ruta de solo lectura, «+ Nuevo vídeo»
+    abre «¿con qué estilo?» (lo mismo que pulsar un estilo), el buscador filtra
+    sin perder el foco, «⋯» por vídeo, el menú de un estilo, los filtros por
+    estado y la vista de lista, el cajón «⚙ Ajustes del proyecto» y el móvil.
+    Nada de esto escribe ni paga: se mira cada petición que sale."""
+    api, pid = datos["api"], datos["video"]
+    api.libre(pid)
+    # LA RUTA DEL ESTADO: solo lectura, y lo de un proyecto con clave no sale
+    r, d = api.get(f"/api/proyectos/_resumen?ids={pid},no_existe")
+    resumen = (d.get("videos") or {}).get(pid) or {}
+    ok(r.status_code == 200 and (resumen.get("pasos") or {}).get("render") == "listo"
+       and "no_existe" not in (d.get("videos") or {}),
+       f"GET /api/proyectos/_resumen dice por dónde va cada vídeo ({resumen})")
+    api.put(f"/api/clientes/{datos['cliente']}", {"clave": "4321"})
+    _r, d = api.get(f"/api/proyectos/_resumen?ids={pid}")
+    ok(pid not in (d.get("videos") or {}), "y no dice nada de un vídeo de un proyecto con clave cerrado")
+    api.put(f"/api/clientes/{datos['cliente']}", {"clave": ""})
+
+    pg = Pagina(navegador, datos)
+    pg.aceptar = False
+    escrituras = []
+    pg.p.on("request", lambda q: escrituras.append(f"{q.method} {q.url.split('/api/', 1)[-1]}")
+            if q.method in ("PUT", "POST", "DELETE", "PATCH") and "/api/" in q.url
+            and not re.search(r"/api/(asistente|sistema/revis|me$|logout|ortografia|estimacion$|presets-light/plan$)",
+                              q.url) else None)
+    pg.js("elegirCliente(''); recordarVideoLight(''); await cargarGaleriaLight(true); irALight('galeria');")
+    ok(pg.visible(".cab-tus-proyectos button.nuevo-video", "+ Nuevo vídeo")
+       and pg.visible(".cab-tus-proyectos button", "+ Nuevo proyecto"),
+       "la portada tiene «+ Nuevo vídeo» y «+ Nuevo proyecto» arriba")
+    ok(pg.esperar(".cab-tus-proyectos button", "Papelera ·", 10), "y la papelera con su número")
+    ok(pg.esperar(".tarjeta-video .estado-tarjeta", "Montado", 15),
+       "la tarjeta del vídeo dice cómo va en Crear («✓ Montado»)")
+    ok(pg.esperar(".tarjeta-video .estado-tarjeta", "Listo para publicar", 15)
+       or pg.visible(".tarjeta-video .estado-tarjeta", "Programado")
+       or pg.visible(".tarjeta-video .estado-tarjeta", "Publicado"),
+       "y cómo va en Publicar")
+    ok("📁 Estado Play · 🎨 Estado Play Matriz" in pg.p.locator(".tarjeta-video", has_text="Padres vs hijos").first.inner_text(),
+       "con «📁 proyecto · 🎨 estilo» y la fecha legible")
+    pg.captura("16_tus_proyectos")
+    # EL BUSCADOR: filtra lo que se ve y el foco sigue en el campo al repintar
+    caja = pg.p.locator(".buscador-proyectos input")
+    caja.click()
+    caja.press_sequentially("zzq", delay=60)
+    pg.p.wait_for_timeout(500)
+    ok(caja.input_value() == "zzq" and pg.p.evaluate("() => document.activeElement && document.activeElement.type === 'search'"),
+       "el buscador no pierde lo escrito ni el foco al repintar")
+    ok(not pg.visible(".tarjeta-video", "Padres vs hijos") and pg.visible(".tarjetas-video .pista", "Ningún vídeo"),
+       "una búsqueda sin nada lo dice")
+    caja.fill("")
+    caja.press_sequentially("padres", delay=40)
+    pg.p.wait_for_timeout(500)
+    ok(pg.visible(".tarjeta-video", "Padres vs hijos") and not pg.visible(".tarjeta-proyecto", "Suyu"),
+       "y con «padres» sale el vídeo y no los proyectos que no casan")
+    caja.fill("")
+    pg.js("APP.light.busca = ''; pintarLight();")
+    # «⋯» DE UN VÍDEO: Renombrar, Mover y Apartar (que pregunta antes)
+    tarjeta = ".tarjeta-video:has-text('Padres vs hijos')"
+    pg.pulsar(f"{tarjeta} .mas-video")
+    ok(pg.visible(".menu-de-video button", "Renombrar") and pg.visible(".menu-de-video button", "Mover a otro proyecto")
+       and pg.visible(".menu-de-video button", "Apartar"), "«⋯» abre Renombrar, Mover a otro proyecto y Apartar")
+    pg.captura("16_menu_del_video", entera=False)
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible(".menu-de-video"), "Escape lo cierra")
+    pg.pulsar(f"{tarjeta} .mas-video")
+    pg.pulsar(".menu-de-video button", "Renombrar")
+    ok(pg.esperar(".tarjeta-video.renombrando input"), "«Renombrar» pone el nombre en un campo en la propia tarjeta")
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    pg.pulsar(f"{tarjeta} .mas-video")
+    antes = len(pg.dialogos)
+    pg.pulsar(".menu-de-video button", "Apartar")
+    pg.p.wait_for_timeout(600)
+    ok(len(pg.dialogos) > antes and "Apartar" in pg.dialogos[-1] and "papelera" in pg.dialogos[-1],
+       "«Apartar» pregunta antes (y dice que va a la papelera)")
+    ok(pg.visible(".tarjeta-video", "Padres vs hijos"), "y cancelado, el vídeo sigue ahí")
+    # «Publicar ›» lleva a su ficha de Publicar
+    pg.pulsar(f"{tarjeta} .chip-publicar")
+    pg.p.wait_for_timeout(1500)
+    ok(pg.p.evaluate(f"() => MODULOS.actual === 'publicar' && PUB.pid === '{pid}'"),
+       "«Publicar ›» abre la ficha del vídeo en Publicar")
+    pg.js("irAModulo('crear'); elegirCliente(''); irALight('galeria');")
+    # «+ NUEVO VÍDEO»: ¿con qué estilo? Elegir uno es lo mismo que pulsar su tarjeta
+    pg.pulsar(".cab-tus-proyectos button.nuevo-video")
+    ok(pg.esperar("#nuevo-video .elige-estilo", "Estado Play Matriz"),
+       "«+ Nuevo vídeo» pregunta con qué estilo, agrupado por proyecto")
+    ok(pg.visible("#nuevo-video", "📁 Estado Play"), "con el nombre de cada proyecto")
+    pg.captura("16_nuevo_video", entera=False)
+    pg.pulsar("#nuevo-video .elige-estilo", "Estado Play Matriz")
+    pg.p.wait_for_timeout(1200)
+    ok(pg.p.evaluate(f"() => APP.light.vista === 'elegido' && !APP.light.video.pid "
+                     f"&& (estiloElegido() || {{}}).id === '{datos['preset']}'"),
+       "y elegir el estilo abre el Encargo de un vídeo nuevo con él")
+    # DENTRO DEL PROYECTO
+    pg.js(f"recordarVideoLight(''); elegirCliente('{datos['cliente']}'); irALight('galeria');")
+    pg.p.wait_for_timeout(800)
+    ok(pg.visible(".cab-proyecto h2", "Estado Play") and pg.visible(".cab-proyecto button", "Ajustes del proyecto")
+       and pg.visible(".cab-proyecto button.nuevo-video", "+ Nuevo vídeo"),
+       "dentro de un proyecto: su cabecera con «⚙ Ajustes del proyecto» y «+ Nuevo vídeo»")
+    ok(not pg.visible("button", "Renombrar") and not pg.visible(".mandos-proyecto"),
+       "sin la fila de seis mandos de antes")
+    ok(pg.visible(".ficha-estilo .editar-estilo", "Editar"), "«✎ Editar» sigue a la vista en la tarjeta del estilo")
+    ok(pg.visible(".ficha-estilo.traer", "Traer un estilo de otro proyecto"), "«⇄ Traer un estilo» es una tarjeta más")
+    pg.pulsar(".ficha-estilo .cara-y-cuerpo", "Estado Play Matriz")
+    ok(pg.visible(".menu-de-estilo button", "Nuevo vídeo con este estilo") and pg.visible(".menu-de-estilo button", "Editar el estilo")
+       and pg.visible(".menu-de-estilo button", "Duplicar") and pg.visible(".menu-de-estilo button", "Mover a otro proyecto"),
+       "tocar un estilo abre «▶ Nuevo vídeo con este estilo / ✎ Editar el estilo / Duplicar / Mover»")
+    pg.captura("16_menu_del_estilo", entera=False)
+    pg.pulsar(".menu-de-estilo button", "Editar el estilo")
+    pg.p.wait_for_timeout(800)
+    ok(pg.p.evaluate(f"() => APP.light.vista === 'preset' && APP.light.abierto === '{datos['preset']}'"),
+       "«✎ Editar el estilo» abre su ficha")
+    pg.js(f"elegirCliente('{datos['cliente']}'); irALight('galeria');")
+    pg.p.wait_for_timeout(800)
+    # LOS FILTROS Y LA LISTA
+    ok(pg.esperar(".chips-filtro-videos button", "Listos 1", 15) and pg.visible(".chips-filtro-videos button", "Todos 1")
+       and pg.visible(".chips-filtro-videos button", "En curso 0"),
+       "los chips de estado cuentan los vídeos (Todos 1 · En curso 0 · Listos 1)")
+    pg.pulsar(".chips-filtro-videos button", "En curso")
+    ok(pg.visible(".tarjetas-video .pista", "Ningún vídeo con este filtro") and not pg.visible(".tarjeta-video", "Padres vs hijos"),
+       "«En curso» lo filtra")
+    pg.pulsar(".chips-filtro-videos button", "Listos")
+    ok(pg.visible(".tarjeta-video", "Padres vs hijos"), "«Listos» lo enseña")
+    pg.pulsar(".conmutador-vista button", "Lista")
+    ok(pg.visible(".tarjetas-video.en-lista .tarjeta-video.en-lista", "Padres vs hijos"), "«☰ Lista» lo pone en filas")
+    pg.captura("16_proyecto_en_lista")
+    pg.pulsar(".conmutador-vista button", "Tarjetas")
+    ok(pg.visible(".tarjetas-video:not(.en-lista) .tarjeta-video", "Padres vs hijos"), "y «▦ Tarjetas» lo devuelve")
+    # «TE NECESITAN»: los estilos a medias, arriba y con «Apartar»
+    pg.js(f"APP.light.datos.sueltos = [{{ id: 'taller_falso', nombre: 'Estilo a medias de prueba', "
+          f"actualizado: '2026-10-20T18:02:00', cliente: '{datos['cliente']}' }}]; pintarLight();")
+    ok(pg.visible(".te-necesitan", "Estilo a medias de prueba") and pg.visible(".te-necesitan button", "Retomar")
+       and pg.visible(".te-necesitan button", "Apartar"),
+       "«Te necesitan» enseña el estilo a medias con «Retomar» y «Apartar»")
+    pg.js("APP.light.datos.sueltos = []; pintarLight();")
+    # ⚙ AJUSTES DEL PROYECTO: las secciones, en su orden
+    pg.pulsar(".cab-proyecto button", "Ajustes del proyecto")
+    ok(pg.esperar(".cajon-proyecto"), "«⚙ Ajustes del proyecto» abre el cajón")
+    titulos = pg.p.evaluate("() => [...document.querySelectorAll('.cajon-proyecto .titulo-ajustes')].map(t => t.textContent)")
+    ok(titulos[:2] == ["Nombre", "Logo"] and titulos[-1] == "Zona de peligro"
+       and all(t in titulos for t in ("Visibilidad", "Clave", "Publicar")),
+       f"con Nombre, Logo, Visibilidad, Clave, Publicar y la zona de peligro abajo ({titulos})")
+    ok(pg.p.evaluate("() => SECCIONES_AJUSTES_PROYECTO.map(s => s.id).join(',')")
+       == "nombre,logo,visibilidad,clave,publicar,peligro",
+       "hechas con SECCIONES_AJUSTES_PROYECTO (la Ficha del negocio entrará como una sección más)")
+    ok(pg.visible(".cajon-proyecto .zona-peligro", "quedan en «Sin proyecto»"),
+       "«Borrar el proyecto» lleva su explicación delante")
+    caja = pg.p.locator(".cajon-proyecto .nombre-proyecto input")
+    caja.fill("Nombre a medias")
+    pg.js("pintarLight();")
+    ok(pg.p.locator(".cajon-proyecto .nombre-proyecto input").input_value() == "Nombre a medias",
+       "lo escrito en «Nombre» sobrevive a un repintado")
+    pg.captura("16_ajustes_del_proyecto", entera=False)
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible(".cajon-proyecto"), "Escape cierra el cajón")
+    _r, d = api.get("/api/clientes")
+    ok(any(c.get("nombre") == "Estado Play" for c in d.get("clientes") or []), "y sin «Guardar» no se cambió el nombre")
+    pg.pulsar(".cab-proyecto button", "Ajustes del proyecto")
+    pg.pulsar(".cajon-proyecto button", "tono y SEO")
+    pg.p.wait_for_timeout(1200)
+    ok(pg.p.evaluate("() => MODULOS.actual === 'publicar'"), "«Perfil de Upload-Post, tono y SEO ›» lleva a Publicar")
+    ok(not escrituras, f"nada de esto escribe en el servidor -- {escrituras[:6]}")
+    pg.sin_errores("Tus proyectos (rediseño)")
+    pg.cerrar()
+    # EN EL MÓVIL: una columna, sin salirse, y el cajón a pantalla completa
+    for ancho in (390, 360):
+        pg = Pagina(navegador, datos, ancho=ancho, alto=820)
+        pg.js("elegirCliente(''); recordarVideoLight(''); await cargarGaleriaLight(true); irALight('galeria');")
+        pg.p.wait_for_timeout(1200)
+        ok(pg.p.evaluate("() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1"
+                         " && document.querySelector('#panel').scrollWidth <= document.querySelector('#panel').clientWidth + 1"),
+           f"a {ancho} px la portada no se sale por los lados")
+        pg.js(f"elegirCliente('{datos['cliente']}'); irALight('galeria');")
+        pg.p.wait_for_timeout(1000)
+        columnas = pg.p.evaluate("() => new Set([...document.querySelectorAll('.tarjetas-video .tarjeta-video, .galeria-estilos > *')]"
+                                 ".map(e => Math.round(e.getBoundingClientRect().left))).size")
+        ok(columnas == 1, f"a {ancho} px las tarjetas van en una columna ({columnas})")
+        pg.pulsar(".cab-proyecto button", "Ajustes del proyecto")
+        ancho_cajon = pg.p.evaluate("() => Math.round(document.querySelector('.cajon-proyecto').getBoundingClientRect().width)")
+        ok(abs(ancho_cajon - ancho) <= 2, f"a {ancho} px el cajón ocupa la pantalla entera ({ancho_cajon})")
+        pg.captura(f"16_movil_{ancho}_ajustes", entera=False)
+        pg.sin_errores(f"Tus proyectos a {ancho} px")
+        pg.cerrar()
 
 
 @escenario
@@ -3680,7 +3875,7 @@ def atras_del_movil_dentro_del_studio(navegador, datos):
     pg.p.wait_for_timeout(500)
     ok(pg.visible("h2", "Tus proyectos"), "se empieza en la portada")
     portada = pg.p.evaluate("() => history.length")
-    pg.pulsar(".video-light button.abrir", "Padres vs hijos")
+    pg.pulsar(".tarjeta-video button.abrir-video", "Padres vs hijos")
     pg.esperar(".pasos-carril button", "Vídeo")
     pg.p.wait_for_timeout(1500)
     ok(pg.p.evaluate("() => history.length") > portada,

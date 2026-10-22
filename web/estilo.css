@@ -4747,7 +4747,8 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
   position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px;
   padding: 14px 16px; border-bottom: 1px solid var(--linea); background: var(--panel);
 }
-.cab-cajon b { font-family: var(--letra-titulo); font-size: 16px; overflow-wrap: anywhere; }
+.cab-cajon b { font-family: var(--letra-titulo); font-size: 16px; overflow-wrap: anywhere; min-width: 0; }
+.cab-cajon .crece { flex: 1; }
 .cuerpo-cajon { display: flex; flex-direction: column; padding: 4px 16px 24px; }
 .seccion-ajustes { display: flex; flex-direction: column; gap: 8px; padding: 16px 0; border-bottom: 1px solid var(--linea-suave); }
 .seccion-ajustes:last-child { border-bottom: 0; }

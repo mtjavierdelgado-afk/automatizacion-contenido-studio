@@ -7378,5 +7378,55 @@ def tipo_de_relato(navegador, datos):
     pg.sin_errores("el tipo de relato")
     pg.cerrar()
 
+
+# ============================================================== GUION VISUAL
+# guion-visual (22-10-2026): «Qué dibujan las imágenes» en el Encargo de un
+# vídeo hecho, el guion visual en el paso Imágenes (proponer con el CLI falso,
+# aprobar) y vuelta a lo de antes. No dibuja ni paga nada.
+@escenario
+def guion_visual(navegador, datos):
+    """Encargo → «Lo que dice el guion» → Imágenes → «Proponer con Claude» →
+    planos → «Aprobar el guion visual» → vuelve a «lo que diga el estilo»."""
+    api = datos["api"]
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="guion visual")
+    try:
+        pg.sin_trabajo(300)
+        antes = _huellas_de_planos(datos, pid)
+        pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'encargo_video'; "
+              "APP.light.video.gv = null; pintarLight();")
+        ok(pg.esperar(".bloque-light h3", "Qué dibujan las imágenes", 15),
+           "(1) el Encargo trae «Qué dibujan las imágenes»")
+        caja = pg.p.locator(".bloque-light").filter(has_text="la voz o el guion visual").first
+        caja.locator("select").first.select_option("guion")
+        fin = time.time() + 15
+        modo = ""
+        while time.time() < fin and modo != "guion":
+            pg.p.wait_for_timeout(500)
+            _r, f = api.get(f"/api/proyectos/{pid}/guion_visual")
+            modo = (f or {}).get("modo")
+        ok(modo == "guion", f"(1) elegir «Lo que dice el guion» lo guarda ({modo})")
+        ok(_huellas_de_planos(datos, pid) == antes, "(1) y no toca ninguna imagen")
+        pg.js(f"APP.light.video.vista = 'previa'; APP.light.video.gv = null; pintarLight();")
+        ok(pg.esperar(".editor-gv", segundos=20), "(2) el paso Imágenes trae el editor del guion visual")
+        ok(pg.visible(".editor-gv button", "Proponer con Claude"), "(2) con «Proponer con Claude · solo texto»")
+        pg.pulsar(".editor-gv button", "Proponer con Claude")
+        pg.sin_trabajo(120)
+        pg.js("APP.light.video.gv = null; pintarLight();")
+        ok(pg.esperar(".plano-gv", segundos=30), "(2) Claude propone planos, uno por fila")
+        ok(pg.visible(".editor-gv button", "Aprobar el guion visual"), "(2) y se puede aprobar")
+        pg.captura("guion_visual_propuesto")
+        pg.pulsar(".editor-gv button", "Aprobar el guion visual")
+        ok(pg.esperar(".editor-gv.aprobado", segundos=20), "(3) aprobado")
+        _r, f = api.get(f"/api/proyectos/{pid}/guion_visual")
+        ok((f or {}).get("aprobado"), "(3) el servidor lo tiene aprobado")
+        pg.sin_trabajo(120)
+        pg.captura("guion_visual_aprobado")
+    finally:
+        r, _d = api.put(f"/api/proyectos/{pid}/guion_visual/modo", {"imagenes": None})
+        ok(getattr(r, "status_code", 0) == 200, "(4) y se vuelve a lo que diga el estilo")
+        pg.sin_errores("el guion visual")
+        pg.cerrar()
+
 if __name__ == "__main__":
     sys.exit(main())

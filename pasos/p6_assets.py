@@ -2967,7 +2967,11 @@ def _prompt_completo(escena, referencias, estilo, feedback="", idioma="",
     bloque = (reglas.bloque_prompt("prompt_imagen", modo="foto",
                                    contexto=contexto_de_reglas(estilo, escena,
                                                                feedback),
-                                   extra=dominios.reglas_de_foto(estilo))
+                                   extra=dominios.reglas_de_foto(estilo),
+                                   contexto_plano=" ".join(
+                                       str(t) for t in ((escena or {}).get("prompt"),
+                                                        (escena or {}).get("luz"),
+                                                        feedback) if t))
               if foto else reglas.bloque_prompt("prompt_imagen"))
     if bloque:
         lineas.append(bloque)

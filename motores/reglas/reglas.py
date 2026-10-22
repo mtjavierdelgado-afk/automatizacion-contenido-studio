@@ -95,7 +95,8 @@ def _con_negocio(lista, extra):
     return salida
 
 
-def para(ambito, como_texto=True, modo="ilustracion", contexto=None, extra=None):
+def para(ambito, como_texto=True, modo="ilustracion", contexto=None, extra=None,
+         contexto_plano=None):
     """Reglas de un ambito, ordenadas por prioridad.
 
     `contexto` solo decide las reglas con `solo_si` (ver `aplica`); las demas
@@ -103,8 +104,15 @@ def para(ambito, como_texto=True, modo="ilustracion", contexto=None, extra=None)
     `_con_negocio`); sin ellas, las del fichero solas.
     """
     datos = cargar(modo)
+    # las de la FICHA DEL NEGOCIO con «solo si el plano habla de…» miran SOLO el
+    # plano (su escena y la nota), no la guía del estilo: si la guía nombra la
+    # palabra, entrarían en todos los planos (lo vio el dueño con VR y
+    # simuladores, 21-10). Sin `contexto_plano`, el de siempre.
     filtradas = [r for r in _con_negocio(datos["reglas"], extra)
-                 if r.get("ambito") == ambito and aplica(r, contexto)]
+                 if r.get("ambito") == ambito
+                 and aplica(r, contexto_plano if (r.get("solo_en_plano")
+                                                  and contexto_plano is not None)
+                            else contexto)]
     filtradas.sort(key=lambda r: r.get("prioridad", 9))
     if not como_texto:
         return filtradas
@@ -112,7 +120,7 @@ def para(ambito, como_texto=True, modo="ilustracion", contexto=None, extra=None)
 
 
 def bloque_prompt(ambito="prompt_imagen", modo="ilustracion", contexto=None,
-                  extra=None):
+                  extra=None, contexto_plano=None):
     """Devuelve las reglas como un parrafo listo para concatenar a un prompt.
 
     Con `modo="foto"` salen las de `reglas_foto.json` y ninguna de las de
@@ -120,7 +128,8 @@ def bloque_prompt(ambito="prompt_imagen", modo="ilustracion", contexto=None,
     texto del encargo con el que se deciden las reglas con `solo_si`, y `extra`
     las del tipo de negocio del video (`dominios.reglas_de_foto`).
     """
-    lineas = para(ambito, modo=modo, contexto=contexto, extra=extra)
+    lineas = para(ambito, modo=modo, contexto=contexto, extra=extra,
+                  contexto_plano=contexto_plano)
     if not lineas:
         return ""
     return " ".join(lineas)

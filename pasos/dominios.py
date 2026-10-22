@@ -242,6 +242,8 @@ def _a_tipo(crudo):
                  "prioridad": 1, "regla": r.get("en") or r["texto"]}
         if r.get("palabras"):
             regla["solo_si"] = [patron_de_palabra(p) for p in r["palabras"]]
+            # se decide con el texto del PLANO, no con la guía del estilo
+            regla["solo_en_plano"] = True
         reglas.append(regla)
     revisor = dict(GENERAL["revisor"])
     revisor.update({k: v for k, v in (crudo.get("revisor") or {}).items()

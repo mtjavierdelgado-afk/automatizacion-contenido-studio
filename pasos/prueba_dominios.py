@@ -205,6 +205,10 @@ def prueba_ficha_de_cliente():
        < texto.index(reglas.para("prompt_imagen", modo="foto")[-1][:40]),
        "y entran en su hueco, entre las de la casa")
     ok("BATHROOMS ARE CLEAN" in M._reglas_de(reglas, fijo), "sus láminas también")  # noqa: SLF001
+    guia_mamparas = dict(fijo, prompt="reformas de baños con mamparas de vidrio")
+    ok("SHOWER SCREENS" not in _prompt(PLANTAS, guia_mamparas),
+       "una regla «solo si mampara» NO entra en un plano sin mamparas aunque la guía del "
+       "estilo hable de mamparas (se decide por el plano)")
     igual(_prompt(BANOS, dict(fijo, modo="ilustracion")),
           _prompt(BANOS, dict(ESTILO_FOTO, modo="ilustracion")),
           "en ilustración la ficha no cambia el prompt")

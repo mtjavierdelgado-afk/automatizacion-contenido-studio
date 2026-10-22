@@ -171,6 +171,63 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   **«Ocultar el texto»** lo quita (y la imagen vuelve a su tamaño); el
   navegador se acuerda de tu elección.
 
+**El tipo de relato: el mismo sitio en todas las imágenes (20 de octubre)**
+- **Nuevo «El tipo de relato»** en el Encargo, en un vídeo hecho y en el estilo
+  (🧭 Tipo de relato): dice CÓMO se cuenta el vídeo en imágenes, nunca de qué
+  negocio es. **Documental** (lo de siempre), **Un espacio que cambia**,
+  **Recorrido**, **Escenario y apoyos**, **Producto** y **Clase** (de momento,
+  como un recorrido).
+- **Un espacio que cambia** es un solo sitio que se ve siempre igual y en el
+  que cambia SOLO lo que dice la voz: un objeto, los acabados (misma geometría
+  y ángulo), el estado (obra, montaje, terminado) o la hora (la luz y la
+  gente). Claude escribe qué cambia en cada tramo y **cada plano se genera
+  editando una imagen base del sitio, con la misma cámara**. Los planos de
+  detalle la llevan como referencia. Era el fallo del Reel del baño: cada
+  imagen salía con un baño distinto.
+- **La imagen base** es el sitio vacío y entero: la que subiste en «El espacio
+  fijo» (gratis) o una generada (se paga una imagen y ves su coste antes). **Se
+  aprueba antes de generar los planos**: sin ella aprobada no se paga ningún
+  plano de ese sitio. «Producto» también edita la base (el fondo no se mueve).
+- **Cada estado, dibujado una vez** (21-10, tras la prueba de la mampara): en
+  «Un espacio que cambia», cada cambio del guion (la mampara abierta contra el
+  inodoro, la corrediza) se dibuja UNA vez sobre la imagen base aprobada y lo
+  apruebas igual que la base, viendo su coste. Los planos de ese estado editan
+  su imagen, así que el objeto sale igual en todos; antes cada plano se
+  inventaba la mampara abierta y salía distinta en cada uno. Las miniaturas de
+  la base y de los estados se abren a tamaño completo al pulsarlas.
+- **Quién manda en el tipo de relato, dicho en la pantalla**: el del vídeo
+  manda sobre el del estilo («Documental» en el estilo quiere decir «no impongo
+  ninguno»), y el Encargo dice de dónde sale el que rige. El manual lo explica
+  junto con la diferencia entre «El espacio fijo» (el texto del sitio) y la
+  imagen base (ese sitio dibujado y aprobado).
+- **La distribución tiene que hacer verdad lo que cuenta la voz**: si Claude
+  declara el sitio, pone las distancias (el inodoro a 0,4 m del vidrio si la
+  mampara choca con él); la guía de la Parrilla lo pide también.
+- **Lo que cambia sale ya en la base, en su sitio** (21-10, tras la prueba de
+  la mampara): al repartir, Claude escribe cómo está y dónde va lo que luego
+  cambia («una mampara batiente en el borde izquierdo de la ducha, que abre
+  hacia el inodoro») y la imagen base lo dibuja así. Antes la base salía sin
+  mampara y cada plano inventaba la suya en otro sitio. La ficha de la base
+  lo enseña para que compruebes que está donde va antes de aprobarla.
+- **El revisor compara cada plano editado con su base**: si cambió algo que no
+  se pidió (la distribución, la cámara, un mueble fijo), lo marca como
+  congruencia de gravedad alta.
+- **Qué manda**: lo elegido en el vídeo (o la línea **«Tipo de relato:»** de la
+  Parrilla, con la clave o el nombre, con o sin tildes); si no, lo del estilo;
+  si tampoco, con espacio fijo es «Escenario y apoyos» y sin él, «Documental».
+  **Sin elegir nada, los vídeos salen exactamente como antes.**
+- **En un vídeo hecho**, «Aplicar el tipo de relato» no dibuja nada: enseña qué
+  planos cambiarían y cuánto cuesta rehacerlos, y eliges todos, los marcados o
+  ninguno.
+- **`asvs probar relato`** (en la consola del VPS): las tres pruebas reales del
+  tipo de relato, solas y con tope de gasto (5 $ salvo `--tope N`): crea tres
+  vídeos de prueba, aprueba su imagen base, los dibuja y monta, pasa el revisor
+  y pide a Claude que compare cada plano con su base.
+- **«Pedido para el reparto de sitios»**, junto a «El reparto y los sitios» del
+  vídeo: una frase que lee Claude al repartir («todo en la cocina; el patio
+  solo al final») y «Volver a repartir con este pedido» (no se paga ninguna
+  imagen; las hechas se quedan hasta que pidas rehacerlas).
+
 **El espacio fijo: todo el vídeo en un mismo sitio (20 de octubre)**
 - **En la Parrilla, un guion puede traer «ESPACIO FIJO»** (opcional), con
   `- Sitio:` (un nombre corto), `- Descripción:` (cómo es el sitio, en una

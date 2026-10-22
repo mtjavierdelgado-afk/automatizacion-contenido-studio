@@ -14,6 +14,29 @@ vídeos, estilos, claves y contraseña no se tocan.
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
+**Automatizar, con la cara nueva (22 de octubre)**
+- **El proyecto, arriba como un chip**, y **«+ Añadir guiones»** siempre a
+  mano. La «i» del título explica que la Parrilla es opcional.
+- **Cinco pestañas que se pueden pulsar**: Parrilla · Añadir guiones ·
+  Conversar con Claude · Cuentas que te gustan (antes «Analizar una cuenta») ·
+  Marca del cliente. Se fueron «Ficha de un guion» y «Piloto automático», que
+  estaban apagadas: el piloto sale como tarjeta «próximamente».
+- **La Parrilla es un tablero**: Pendientes · Usados · Publicados, con el
+  buscador y las matrices como filtro (Renombrar y Borrar preguntan en un
+  panel). En el móvil, una columna con su botón.
+- **La marca del cliente se ve siempre**: una línea arriba de la Parrilla
+  («✓ guardada» o «Sin marca… Apuntarla ›») y un punto en su pestaña si falta.
+- **La ficha de un guion se abre en un panel a la derecha** (a pantalla
+  completa en el móvil) con Guion · Al Encargo · Estado, y **«Pasar al Encargo
+  ›»** siempre abajo, con el estilo elegido y, si no se puede, el porqué.
+- **Añadir guiones empieza por seis tarjetas** que dicen lo que cuesta cada
+  camino; el botón va en la barra de abajo, con el mismo coste de siempre.
+- **El chat con Claude tiene su pestaña**, con tus conversaciones a la
+  izquierda. Las cuentas ya leídas salen como tarjetas y la abierta en dos
+  columnas.
+- Nada cambia de lo que hace: las mismas confirmaciones (también la de pagar
+  a Apify) y las claves de YouTube, Meta y Apify donde estaban.
+
 **Crear en el móvil, arreglado (21 de octubre)**
 - **El recorrido ya no parpadea**: la fila de pasos de arriba saltaba al paso 1
   y volvía cada medio segundo mientras algo se generaba. Ahora se queda quieta,

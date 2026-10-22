@@ -7980,7 +7980,18 @@ def encargo_limpio_suelta_el_video(navegador, datos):
     ok(not nombre or nombre not in cabecera, f"sin el nombre del vídeo de antes ({nombre!r})")
     ok(pg.p.evaluate("() => (APP.light.video.encargo || {}).material") == "Material del encargo limpio.",
        "con el material del guion")
-    ok(pg.esperar("#toast, .toast", "sigue trabajando", 6), "y avisa de que el otro sigue por su cuenta")
+    ok(pg.esperar("#toast, .toast", "queda en Tus proyectos", 6),
+       "y avisa de que el otro queda en Tus proyectos (estaba quieto: no dice «sigue trabajando»)")
+    ok(pg.p.evaluate("() => APP.light.video.guion === null && APP.light.video.vista === 'encargo'"),
+       "sin el guion del vídeo soltado en memoria")
+    # «atrás» una vez: a la Parrilla, nunca al guion del vídeo soltado sin vídeo
+    pg.p.go_back()
+    pg.p.wait_for_timeout(1200)
+    ok(pg.p.evaluate("() => MODULOS.actual === 'automatizar' || "
+                     "(APP.light.video.pid === '' && ['encargo', ''].includes(APP.light.video.vista))"),
+       "«atrás» no pinta lo que quedaba del vídeo soltado")
+    pg.pulsar("#barra-modulos .boton-modulo", "Crear")
+    pg.p.wait_for_timeout(600)
     _r, despues = api.get(f"/api/proyectos/{pid}")
     ok(json.dumps((antes or {}).get("pasos"), sort_keys=True) == json.dumps((despues or {}).get("pasos"), sort_keys=True),
        "el vídeo soltado no se toca en el servidor")

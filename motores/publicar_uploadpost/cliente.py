@@ -116,6 +116,17 @@ def idioma_audio_youtube(codigo):
     return candidato if FORMA_IDIOMA_AUDIO.match(candidato) else ""
 
 
+def _capacidades(bruto):
+    """Las capacidades de una cuenta, como lista de nombres cortos."""
+    if isinstance(bruto, dict):
+        nombres = [k for k, v in bruto.items() if v]
+    elif isinstance(bruto, (list, tuple)):
+        nombres = [x.get("name") if isinstance(x, dict) else x for x in bruto]
+    else:
+        nombres = []
+    return sorted({str(n).strip()[:40] for n in nombres if n and str(n).strip()})[:30]
+
+
 def campos_para_enviar(campos):
     """Los campos de una subida tal como los acepta Upload-Post (hoy: el idioma
     del audio de YouTube). Devuelve una copia; no toca la que llega."""
@@ -337,6 +348,9 @@ class ClienteUploadPost:
                     "usuario": str(valor.get("username") or valor.get("handle") or ""),
                     "foto": str(valor.get("social_images") or ""),
                     "reconectar": bool(valor.get("reauth_required")),
+                    # lo que esa cuenta deja hacer (p. ej. «cover_image» en
+                    # TikTok: la portada propia). Lista o {nombre: bool}
+                    "capacidades": _capacidades(valor.get("capabilities")),
                 }
             elif isinstance(valor, str) and valor.strip():
                 # alguna respuesta vieja trae un texto en vez de la ficha

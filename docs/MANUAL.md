@@ -683,20 +683,33 @@ Más abajo:
 
 ### Diseñar la portada
 
-En el paso **Portada** de un vídeo, **Diseñar portada** abre el editor:
+En el paso **Portada** de un vídeo, **Diseñar portada** abre el editor. Va
+por capas, y cada una hace UNA cosa:
 
-1. **Plantilla**: elige una de las 21 (Versus, Top N, Oferta…). Cada una
-   coloca sus textos y su grafismo; cambiar de plantilla conserva lo escrito.
-2. **Textos**: de 1 a 3 palabras por campo. Más de 4 bajan los clics.
-3. **Fondo**: un fotograma, un plano, una imagen tuya o una hecha con IA. Las
-   plantillas partidas (Versus, Antes / Después, Mito) usan dos.
-4. **Elementos**: muévelos, agrándalos, gíralos, cámbiales el color o
-   escóndelos; «Añadir» pone más (flecha, círculo, insignia, icono…).
-5. **Proponer 3 portadas con Claude** si no sabes por dónde empezar.
-6. **Usar como portada**: la deja como la imagen que va a las redes.
+1. **Imagen**: el fondo (un plano, que va tal cual; un fotograma del vídeo, que
+   trae los subtítulos; una imagen tuya o una hecha con IA). Los **ajustes**
+   (contraste, color, brillo, viñeta, oscurecer) empiezan apagados; **«Sin
+   ajustes»** los quita y **«Poner el look de la plantilla»** pone los que ella
+   sugiere. Es lo único que toca la foto.
+2. **Plantilla**: una de las 21 (Versus, Top N, Oferta…). Coloca los textos y
+   el grafismo; cambiarla conserva lo escrito y lo que añadiste.
+3. **Colores y letra**: la paleta pinta textos y elementos, nunca la foto.
+   **«Sin paleta»**: blanco con borde negro.
 
-Lo de la IA de imágenes se paga y te dice el precio antes: solo el fondo (el
-texto sigue en capas, exacto) o la portada entera con el texto dentro.
+Debajo de la vista, **«Esta imagen lleva: …»** dice qué hay encima de la foto;
+la ✕ lo quita. **Textos**: de 1 a 3 palabras por campo. **Elementos**:
+muévelos, agrándalos, gíralos, cámbiales el color, escóndelos o
+**«Restablecer»**; «Añadir» pone más en un hueco libre.
+
+**Proponer 3 portadas con Claude** (plantilla, textos y colores) e **Ideas de
+imagen con Claude** (tres escenas con su prompt) no se pagan aparte. La IA de
+imágenes sí: antes de pagar ves el prompt, puedes cambiarlo, y el precio va en
+el botón **«Dibujar»**. Recomendado: el fondo con IA y el texto en capas.
+
+**Guardar diseño** (para retocarla otro día), **⬇ Descargar portada** (PNG, de
+respaldo) y **Usar como portada** (la que va a las redes). En el bloque Portada
+se ve **qué portada recibe cada red** y, en cada envío, cuál se mandó.
+
 ## Automatizar
 
 Lo que prepara los vídeos antes de crearlos. Dos pestañas grandes:

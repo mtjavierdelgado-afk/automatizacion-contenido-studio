@@ -47,8 +47,46 @@ estar, nada nuevo se paga y las preguntas dicen lo mismo de siempre.
   Configuración**, con las demás y como las de Música y efectos; «Probar todas
   las claves» también las prueba. En Automatizar queda su estado y
   **Configurar ›**.
-- El **editor de portadas** no cambia aquí: «Diseñar portada» (paso Portada)
-  abre el de siempre.
+- El **editor de portadas** no se rediseña aquí: «Diseñar portada» (paso
+  Portada) abre el de «Portadas, segunda vuelta», con su «Qué portada recibe
+  cada red» debajo.
+
+**Portadas, segunda vuelta (21 de octubre)**
+- **La imagen sale limpia.** Las plantillas ya no meten efectos en la foto
+  (contraste, color, viñeta, oscurecido, rayos de luz). Su «look» queda como un
+  botón aparte, **«Poner el look de la plantilla»**, y **«Sin ajustes»** lo
+  quita todo. La portada nueva empieza con la imagen de un plano tal cual (el
+  fotograma del vídeo montado trae los subtítulos).
+- **Tres capas, cada una con su interruptor:** **1 · Imagen** (el fondo y sus
+  ajustes: lo único que toca la foto), **2 · Plantilla** (dónde va cada texto y
+  elemento) y **3 · Colores** (los de los textos y elementos; **«Sin paleta»**
+  los deja en blanco con borde negro).
+- **«Esta imagen lleva: …»** debajo de la vista: qué hay encima de la foto, con
+  una ✕ para quitar cada cosa.
+- **El texto pequeño de arriba** sale al escribirlo (antes solo si ya estaba
+  escrito al elegir la plantilla).
+- **Elementos:** lo añadido nace en un hueco libre, más grande y de un color
+  que se ve; **se conserva al cambiar de plantilla**; y cada elemento tiene
+  **«Restablecer»** (vuelve a como nació, sin tocar su texto).
+- **«Guardar diseño» se ve:** «Diseño guardado ✓» con la hora en la cabecera
+  del editor. Los avisos flotantes salían por debajo del editor.
+- **«⬇ Descargar portada»**, en el editor (PNG a tamaño real) y en el bloque
+  Portada de Publicar (la puesta), para tener respaldo.
+- **IA con el prompt a la vista:** **«Ideas de imagen con Claude»** lee el
+  guion entero y propone tres escenas con su prompt; antes de pagar se ve el
+  prompt (editable) y el precio en el botón **«Dibujar»**. Las reglas del final
+  van siempre: el fondo sin letras; la portada entera con tus textos exactos.
+- **Publicar: qué portada recibe cada red**, red por red, y en cada envío
+  **qué portada se mandó**. Instagram acepta tu imagen (en la cuadrícula del
+  perfil se ve el centro en 3:4: el editor lo marca en amarillo con «Ver lo que
+  tapan las redes»); TikTok, tu imagen si la cuenta tiene el permiso
+  «cover_image» de Upload-Post (el Studio lo detecta al «Ver cuentas»; si no, un
+  fotograma, que ahora se puede elegir aunque haya imagen); YouTube solo con el
+  canal verificado y la casilla marcada; Facebook, cuando sale como vídeo
+  (largo u horizontal), no en los Reels; y ahora también **LinkedIn, X y
+  Pinterest**. Las redes sin portada (Threads, Bluesky…) no reciben nada.
+- **La pantalla de Publicar ya no se mueve** al llegar los 3 ganchos de otra
+  red o al pulsar dos a la vez: se queda anclada a lo que estabas mirando.
 
 **Crear en el móvil, arreglado (21 de octubre)**
 - **El recorrido ya no parpadea**: la fila de pasos de arriba saltaba al paso 1

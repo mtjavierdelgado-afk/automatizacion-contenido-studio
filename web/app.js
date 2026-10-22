@@ -27513,6 +27513,9 @@ function bloqueSeoVideo() {
   if (!seo.palabra) {
     b.appendChild(h('div', { clase: 'caja-aviso' }, 'Este vídeo no tiene palabra clave: sin ella los textos no se posicionan para nada en concreto. Escríbela o pulsa «Investigar búsquedas» y elige una de las que la gente busca.'));
   }
+  /* Los dos pueden no tener nada que enseñar (p. ej. «Cómo te encontraron»
+     solo con el vídeo en YouTube) y devuelven null: appendChild(null) rompía
+     la ficha entera de Publicar (22-10-2026). */
   for (const bloque of [bloqueBusquedasSeo(), bloqueEncontraronSeo()]) if (bloque) b.appendChild(bloque);
   if (seo.nombre_fichero) b.appendChild(h('div', { clase: 'meta' }, `El MP4 se sube como «${seo.nombre_fichero}» (el del proyecto no cambia).`));
   if ((seo.errores || {}).optimizar) b.appendChild(cajaError(seo.errores.optimizar));

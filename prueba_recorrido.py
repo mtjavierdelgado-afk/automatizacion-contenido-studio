@@ -7013,7 +7013,7 @@ def crear_en_el_movil(navegador, datos):
     pg.js("APP.light.encargo = null; irALight('crear', { taller: null });")
     ok(pg.esperar("input, textarea"), "MÓVIL: «Un estilo nuevo» se abre")
     pg.p.wait_for_timeout(1200)
-    ok(pg.visible(".pie-creacion", "nombre al estilo"),
+    ok(pg.visible(".pie-creacion .plan .aviso-falta", "nombre al estilo"),
        "MÓVIL: en «Un estilo nuevo» se ve lo que falta («ponle un nombre al estilo»)")
     pg.js("APP.light.encargo = null;")
     pg.js(f"await abrirVideoLight('{pid}');")

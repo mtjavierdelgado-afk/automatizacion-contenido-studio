@@ -6986,6 +6986,8 @@ function escucharTusProyectos() {
   TUS_PROYECTOS.escuchando = true;
   document.addEventListener('keydown', ev => {
     if (ev.key !== 'Escape') return;
+    // con una pregunta encima (la clave, borrar), Escape cierra solo la pregunta
+    if (document.querySelector('.capa-dialogo')) return;
     if (APP.light.menuTarjeta) { APP.light.menuTarjeta = ''; pintarLight(); }
     else if (APP.light.ajustesProyecto) cerrarAjustesProyecto();
   });

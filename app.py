@@ -11624,6 +11624,13 @@ def probar_claves(cuerpo: dict = Body(default=None)):
             raise ErrorApi(500, f"no se ha podido leer el almacén de claves: {fallo}")
     modulo = PASOS_MODULOS.comprobar_claves
     pruebas = modulo.probar_todas(cuentas_claude=cuentas, con_claude=con_claude)
+    # las de analizar cuentas (YouTube, Meta, Apify), que viven en Configuración (rediseno-publicar)
+    if CUENTAS is not None:
+        try:
+            pruebas += CUENTAS.probar_conexiones()
+        except Exception as fallo:  # noqa: BLE001
+            pruebas.append({"proveedor": "lectura_youtube", "estado": "sin_red",
+                            "mensaje": f"la prueba ha fallado: {type(fallo).__name__}: {fallo}"})
     for cuenta in cuentas:
         if cuenta.get("id"):
             _olvidar_sesion(cuenta["id"])

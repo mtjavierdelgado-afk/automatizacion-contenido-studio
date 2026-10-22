@@ -651,3 +651,54 @@ def lanzar_analisis(raiz, red, usuario, en_hilo=True):
         _correr(tid, fn)
     return trabajo(tid)
 
+
+
+# --------------------------------------------- «Probar todas las claves»
+
+def probar_conexiones():
+    """Las tres claves de analizar cuentas contra su servicio, para «Probar
+    todas las claves» de Configuración (rama `rediseno-publicar`: las claves
+    pasaron allí). -> [{proveedor, estado, mensaje}] con los estados de
+    `comprobar_claves` (ok · mal · sin_clave · sin_red).
+
+    Llamadas que NO cuestan dinero: YouTube `i18nRegions` (1 unidad del cupo
+    gratis de 10.000 al día), Meta `me` y Apify `users/me` (no corren ningún
+    actor). En modo simulado no se sale a ningún sitio: puesta = funciona."""
+    c = _claves()
+    fichas = []
+
+    def ficha(proveedor, estado, mensaje):
+        fichas.append({"proveedor": proveedor, "estado": estado, "mensaje": mensaje})
+
+    pruebas = (
+        ("lectura_youtube", c.get("youtube_clave"), "no hay clave de YouTube para leer cuentas"),
+        ("lectura_instagram", c.get("meta_token"), "no hay token de Meta para leer cuentas de Instagram"),
+        ("lectura_apify", c.get("apify_token"), "no hay token de Apify (el servicio de pago, de respaldo)"),
+    )
+    for proveedor, clave, sin in pruebas:
+        if not clave:
+            ficha(proveedor, "sin_clave", sin)
+            continue
+        if _simular():
+            ficha(proveedor, "ok", "simulado")
+            continue
+        try:
+            if proveedor == "lectura_youtube":
+                codigo, datos = F._pedir(f"{F.BASE_YOUTUBE}/i18nRegions?part=snippet&hl=es", claves=(clave,),
+                                         bases=_bases(), cabeceras_extra={"X-Goog-Api-Key": clave}, plazo=15)
+            elif proveedor == "lectura_instagram":
+                codigo, datos = F._pedir(f"{F.BASE_META}/{_version_meta()}/me?fields=id", claves=(clave,),
+                                         bases=_bases(), cabeceras_extra={"Authorization": f"Bearer {clave}"}, plazo=15)
+            else:
+                codigo, datos = F._pedir(f"{F.BASE_APIFY}/users/me", claves=(clave,), bases=_bases(),
+                                         cabeceras_extra={"Authorization": f"Bearer {clave}"}, plazo=15)
+        except F.ErrorLectura as fallo:
+            ficha(proveedor, "sin_red", str(fallo))
+            continue
+        if 200 <= codigo < 300 and not (isinstance(datos, dict) and datos.get("error")):
+            ficha(proveedor, "ok", "la clave vale: el servicio contesta")
+            continue
+        error = (datos or {}).get("error") if isinstance(datos, dict) else None
+        motivo = (error.get("message") if isinstance(error, dict) else error) or datos
+        ficha(proveedor, "mal", F._tachar(f"el servicio no acepta la clave ({codigo}): {str(motivo)[:200]}", clave))
+    return fichas

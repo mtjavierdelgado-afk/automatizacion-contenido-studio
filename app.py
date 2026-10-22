@@ -17861,8 +17861,12 @@ def _diseno_inicial(ctx, info):
     titulo = titulo or info.get("titulo") or info.get("nombre") or ""
     # 3-4 palabras: una portada no es el titulo del post
     corto = " ".join(str(titulo).split()[:4])
+    # EL FONDO DE PARTIDA ES LA IMAGEN DE UN PLANO, tal cual (portadas-2,
+    # 21-10): el fotograma sale del vídeo montado y trae subtítulos y rótulos.
+    planos = _planos_para_portada(ctx)
+    fondo = {"tipo": "plano", "planos": [planos[0]["sid"]]} if planos else None
     return P.de_plantilla("titular", {"titulo": corto}, "gamer", "anton",
-                          P.formato_de_video(info.get("formato")))
+                          P.formato_de_video(info.get("formato")), fondo=fondo)
 
 
 @app.get("/api/portadas/catalogo")
@@ -18152,7 +18156,7 @@ def _correr_portada_ia(avisar, ctx, que, prompt, referencias, calidad, tamano):
         pass
     ctx.bitacora.anotar("portada_ia", "publicar", {"que": que, "calidad": calidad,
                                                    "coste_usd": meta.get("coste")})
-    return {"nombre": nombre, "que": que, "coste_usd": meta.get("coste")}
+    return {"nombre": nombre, "que": que, "coste_usd": meta.get("coste"), "prompt": prompt}
 
 
 @app.post("/api/publicar/videos/{pid}/portada/ia", status_code=202)
@@ -18168,16 +18172,103 @@ def portada_ia(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
     que = "portada" if datos.get("que") == "portada" else "fondo"
     calidad = datos.get("calidad") if datos.get("calidad") in ("low", "medium", "high") else "low"
     precio = AJUSTES.precio_por_imagen(calidad)
-    if datos.get("confirmado") is not True:
-        return {"precio": precio, "que": que, "calidad": calidad}
     P = _portadas()
     entrada = {"titulo": info.get("titulo") or info.get("nombre"), "resumen": _resumen_para_portada(info)}
-    prompt = P.prompt_portada_ia(diseno, entrada) if que == "portada" else P.prompt_fondo_ia(diseno, entrada)
+    # EL PROMPT SE VE Y SE PUEDE CAMBIAR (portadas-2, 21-10): sin `prompt` va
+    # el de partida; con él, el de la pantalla. Las reglas del final (sin
+    # letras en el fondo; los textos exactos en la portada) van SIEMPRE.
+    propio = str(datos.get("prompt") or "").strip()
+    de_partida = P.prompt_portada_ia(diseno, entrada) if que == "portada" else P.prompt_fondo_ia(diseno, entrada)
+    prompt = P.prompt_final(que, propio or de_partida, diseno, entrada)
+    if datos.get("confirmado") is not True:
+        return {"precio": precio, "que": que, "calidad": calidad, "prompt": propio or de_partida,
+                "prompt_final": prompt}
     referencias = _rutas_fondo_portada(ctx, info, diseno)
     trabajo_id = ctx.gestor.lanzar(f"portada_ia_{que}", _correr_portada_ia, ctx, que, prompt,
                                    referencias, calidad, P.TAMANO_IA[diseno["formato"]])
     _registrar_trabajo(trabajo_id, ctx.id)
     return {"trabajo_id": trabajo_id, "precio": precio}
+
+
+def _guion_para_portada(info):
+    """El guion entero (no solo el principio) para que Claude piense la imagen."""
+    textos = [str(b.get("texto") or "") for b in info.get("guion") or [] if isinstance(b, dict)]
+    return " ".join(" ".join(textos).split())[:6000] or str(info.get("material") or "")[:6000]
+
+
+@app.post("/api/publicar/videos/{pid}/portada/ideas-ia", status_code=202)
+def portada_ideas_ia(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """Claude lee el guion entero y propone tres ideas de imagen, cada una con
+    su prompt editable (suscripción, sin coste aparte): {diseno}. -> {id}; el
+    resultado, en GET. No dibuja ni guarda nada."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    diseno = _diseno_de_cuerpo(cuerpo)
+    entrada = {"titulo": info.get("titulo") or info.get("nombre"), "guion": _guion_para_portada(info),
+               "negocio": info.get("cliente_nombre") or ""}
+    rid = uuid.uuid4().hex[:12]
+    with _LOCK_PORTADAS:
+        # UNA A LA VEZ POR VÍDEO: cerrar y abrir el editor lanzaba otra (cupo)
+        for otro, ficha in _PROPUESTAS_PORTADA.items():
+            if ficha.get("proyecto") == ctx.id and ficha.get("estado") == "pensando" and ficha.get("ideas_ia"):
+                return {"id": otro, "estado": "pensando"}
+        for viejo in list(_PROPUESTAS_PORTADA)[:-19]:
+            _PROPUESTAS_PORTADA.pop(viejo, None)
+        _PROPUESTAS_PORTADA[rid] = {"estado": "pensando", "proyecto": ctx.id, "ideas_ia": True}
+
+    def correr():
+        try:
+            ficha = {"estado": "listo", "proyecto": ctx.id,
+                     "ideas": _portadas().proponer_ideas_ia(entrada, diseno, cwd=RAIZ_ESTUDIO)}
+        except Exception as fallo:                          # noqa: BLE001
+            error = str(fallo)[:600]
+            if CLI_CLAUDE.es_pasajero(fallo):
+                error = ("La sesión de Claude se estaba renovando y no ha contestado. "
+                         f"Vuelve a pedirlo en un minuto.\n\n{error}")
+            ficha = {"estado": "error", "proyecto": ctx.id, "error": error}
+        with _LOCK_PORTADAS:
+            _PROPUESTAS_PORTADA[rid] = ficha
+
+    threading.Thread(target=correr, daemon=True, name=f"ideas-portada-{rid}").start()
+    return {"id": rid, "estado": "pensando"}
+
+
+@app.get("/api/publicar/videos/{pid}/portada/ideas-ia/{rid}")
+def portada_ideas_ia_estado(pid: str, rid: str, peticion: Request):
+    """Cómo van las ideas de imagen, y cuáles son al terminar."""
+    return portada_propuestas(pid, rid, peticion)
+
+
+@app.post("/api/publicar/videos/{pid}/portada/descargar")
+def portada_descargar(pid: str, peticion: Request, cuerpo: dict = Body(default=None)):
+    """La portada a tamaño real, para guardarla (respaldo): {diseno}. PNG
+    como adjunto. No guarda ni cambia nada."""
+    ctx = _ctx_publicable(pid, peticion)
+    info = _info_para_publicar(ctx)
+    diseno = _diseno_de_cuerpo(cuerpo)
+    rutas = _rutas_fondo_portada(ctx, info, diseno)
+    destino = os.path.join(_raiz_publicar(), "portadas", "vistas", f"bajada_{uuid.uuid4().hex[:12]}.png")
+    if not _VISTAS_PORTADA.acquire(timeout=20):
+        raise ErrorApi(503, "hay otras portadas pintándose: vuelve a intentarlo en un momento")
+    try:
+        _portadas().renderizar(diseno, rutas, destino)
+        with open(destino, "rb") as fh:
+            contenido = fh.read()
+    except Exception as fallo:                              # noqa: BLE001
+        raise ErrorApi(500, f"no he podido pintar la portada: {fallo}")
+    finally:
+        _VISTAS_PORTADA.release()
+        try:
+            os.remove(destino)
+        except OSError:
+            pass
+    nombre = identificador(info.get("nombre") or ctx.id)[:60] or "portada"
+    formato = diseno["formato"].replace(":", "x")
+    return Response(contenido, media_type="image/png", headers={
+        "Cache-Control": "no-store",
+        "Content-Disposition": f'attachment; filename="{nombre}_portada_{formato}.png"'})
+
+
 # ===================================================== DESCARGAS DE IMÁGENES
 # Rama `imagenes-texto` (20-10-2026), pedido del dueño: bajarse las imágenes
 # que se han creado. Una a una no hace falta ruta: la diapositiva enlaza el

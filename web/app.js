@@ -5869,7 +5869,22 @@ function campoRenombrar(pid, antes) {
  * en «⋯», que lo abre ENCIMA de la barra sin cambiarle el alto (pulsar el
  * estado también lo abre). En pantalla ancha «⋯» no sale y todo se ve como
  * siempre. Ningún botón cambia de lo que hace: solo de sitio. */
-const BARRA_MAS = { abierta: false };
+/* ABIERTO O CERRADO, POR PANTALLA (rediseno-automatizar): Crear y cada
+   pestaña de Automatizar (y su panel) llevan el suyo; abrir el «⋯» en una no
+   deja abierto el de la otra. `abierta` lee y escribe el de la pantalla en la
+   que se está. */
+function claveBarraMas() {
+  if (typeof MODULOS === 'undefined' || MODULOS.actual === 'crear') return 'crear';
+  if (MODULOS.actual === 'automatizar' && typeof PAR !== 'undefined') {
+    return `automatizar:${PAR.fichaAbierta ? 'ficha' : PAR.seccion || ''}`;
+  }
+  return MODULOS.actual || '';
+}
+const BARRA_MAS = {
+  abiertas: {},
+  get abierta() { return !!this.abiertas[claveBarraMas()]; },
+  set abierta(v) { this.abiertas[claveBarraMas()] = !!v; },
+};
 
 function esMovilCrear() {
   try { return window.matchMedia('(max-width: 700px)').matches; } catch (e) { return false; }
@@ -5960,7 +5975,9 @@ function ajustarAltoDeLaBarra() {
    otra rama y no se toca). Se mide también al sacar cada aviso: así vale
    aunque se haya cambiado de módulo y la barra ya no se vea. */
 function apartarAvisoDeLaBarra() {
-  const barra = document.querySelector('#panel .barra-accion');
+  // la de Crear o la del módulo que se ve (Automatizar): la que tenga caja en pantalla
+  const barra = [...document.querySelectorAll('#panel .barra-accion, #modulo .barra-accion')]
+    .find(b => b.getClientRects().length) || null;
   let alto = 0;
   if (barra && barra.getClientRects().length) {
     const r = barra.getBoundingClientRect();
@@ -5994,7 +6011,7 @@ function avisoPlegable(clave, resumen, detalle, clase) {
    va en la barra y lo que se pliega: se vuelve a pintar Crear, sin más. */
 try {
   window.matchMedia('(max-width: 700px)').addEventListener('change', () => {
-    BARRA_MAS.abierta = false;
+    BARRA_MAS.abiertas = {};
     if (typeof MODULOS !== 'undefined' && MODULOS.actual === 'crear' && pasoDelCarril()) pintarLight();
   });
 } catch (e) { /* un navegador sin matchMedia: se queda como se pintó */ }
@@ -6696,15 +6713,27 @@ function origenDeVideo(video) {
 /* UN DIÁLOGO DE LA CASA, en vez de los `prompt` del navegador: con su diseño,
    con campo de contraseña de verdad (no se ve lo que se escribe) y con
    desplegables. Devuelve los valores o null si se cancela. */
+/* UNA PREGUNTA CADA VEZ (revisión de Publicar, 22-10-2026): el foco se
+   quedaba en el botón que la abrió, detrás del panel, y Enter lo volvía a
+   pulsar: dos paneles apilados (en Publicar, publicar dos veces). Ahora el foco
+   pasa al panel (su primer campo o su botón de aceptar) y, mientras hay una
+   abierta, otra llamada no abre nada encima: contesta «cancelar» (null). */
+const DIALOGO_ABIERTO = { capa: null };
+
 function dialogo(op) {
   const { titulo, texto, campos = [], aceptar = 'Aceptar', cancelar = 'Cancelar', peligro = false } = op;
+  // la de verdad abierta (una capa quitada desde fuera ya no cuenta)
+  if (DIALOGO_ABIERTO.capa && DIALOGO_ABIERTO.capa.isConnected) return Promise.resolve(null);
+  try { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); } catch (e) { /* nada */ }
   return new Promise(resolver => {
     const valores = {};
     const capa = h('div', { clase: 'capa-dialogo' });
+    DIALOGO_ABIERTO.capa = capa;
     const teclas = ev => { if (ev.key === 'Escape') cerrar(null); };
     const cerrar = valor => {
       capa.remove();
       document.removeEventListener('keydown', teclas);
+      if (DIALOGO_ABIERTO.capa === capa) DIALOGO_ABIERTO.capa = null;
       resolver(valor);
     };
     const campo = c => {
@@ -6751,7 +6780,12 @@ function dialogo(op) {
     capa.addEventListener('click', ev => { if (ev.target === capa) cerrar(null); });
     document.addEventListener('keydown', teclas);
     document.body.appendChild(capa);
-    setTimeout(() => { const f = formulario.querySelector('input, select, textarea'); if (f) f.focus(); }, 0);
+    const enfocar = () => {
+      const f = formulario.querySelector('input, select, textarea') || formulario.querySelector('button[type=submit]');
+      if (f) f.focus();
+    };
+    enfocar();               // ya, para que un Enter seguido no vaya al botón de detrás
+    setTimeout(enfocar, 0);
   });
 }
 
@@ -25858,19 +25892,11 @@ const VIVOS_PUBLICAR = ['enviando', 'programado', 'publicando', 'publicado', 'co
    Devuelve true si se acepta. */
 async function preguntarPublicar(texto, op) {
   const o = op || {};
-  /* EL FOCO, FUERA DEL BOTÓN QUE ABRIÓ LA PREGUNTA (revisión de rediseno-publicar):
-     se quedaba en el botón de la barra, detrás del panel, y Enter lo volvía a
-     pulsar: dos paneles apilados y, aceptando los dos, dos envíos. Se suelta y
-     se pone en «aceptar» del panel (`dialogo` no lo hace si no hay campos). */
-  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  /* El foco y «una pregunta cada vez» los pone `dialogo` (de main, 22-10);
+     aquí, encima, el cerrojo de Publicar (`conCerrojoPublicar`) apaga la barra
+     mientras se pregunta o se manda. */
   const pregunta = dialogo({ titulo: o.titulo || 'Publicar', texto: h('div', { clase: 'texto-pregunta-publicar' }, texto),
     aceptar: o.aceptar || 'Aceptar', cancelar: o.cancelar || 'Cancelar', peligro: !!o.peligro });
-  setTimeout(() => {
-    const capas = document.querySelectorAll('.capa-dialogo');
-    const ultima = capas.length ? capas[capas.length - 1] : null;
-    const aceptar = ultima ? ultima.querySelector('.dialogo-botones button[type=submit]') : null;
-    if (aceptar && !ultima.querySelector('input, select, textarea')) aceptar.focus();
-  }, 0);
   return !!(await pregunta);
 }
 
@@ -27093,7 +27119,7 @@ function seccionClaveUploadPost(ficha) {
 }
 
 /* LAS CLAVES DE ANALIZAR CUENTAS, EN CONFIGURACIÓN (rediseno-publicar,
-   decisión del dueño del 21-10): estaban en Automatizar → Analizar una cuenta,
+   decisión del dueño del 21-10): estaban en Automatizar → Cuentas que te gustan,
    en un plegable «Conexiones», fuera de las demás claves y de «Probar todas
    las claves». Ahora son un bloque más, con el patrón de «Música y efectos»:
    nombre, «…1234»/«sin poner», pista, campo, Guardar/Cambiar y Quitar; y lo
@@ -27128,7 +27154,7 @@ async function guardarConexionConfig(cambios) {
 function seccionClavesAnalizarCuentas() {
   const caja = h('section', { clase: 'bloque-config claves-cuentas', id: 'conf-cuentas' },
     h('h3', {}, 'Analizar cuentas — YouTube, Instagram y Apify'),
-    h('div', { clase: 'pista' }, 'Para leer las cuentas de otros en Automatizar → Analizar una cuenta. Primero se usan '
+    h('div', { clase: 'pista' }, 'Para leer las cuentas de otros en Automatizar → Cuentas que te gustan. Primero se usan '
       + 'las vías gratis (YouTube y la oficial de Instagram). Apify, de pago, solo cuando esas no sirven: TikTok '
       + 'siempre, y las cuentas de Instagram que no son profesionales. Las claves se guardan en el servidor y aquí '
       + 'solo se ven sus cuatro últimos caracteres. Son de todo el Studio, no de un proyecto.'));
@@ -27968,10 +27994,15 @@ function pistaPalabraClaveEncargo(v) {
  */
 const PAR = {
   seccion: 'parrilla', cid: '', proyectos: null, estilos: [], datos: null, guion: null,
-  cargando: false, cargadoAl: 0, maxPedir: 30, error: '', filtro: 'todos', buscar: '', reloj: null, trabajo: null,
+  cargando: false, cargadoAl: 0, maxPedir: 30, error: '', buscar: '', reloj: null, trabajo: null,
   borradorTexto: null, guardando: false, estiloElegido: '', encargoIndice: 0, turno: 0, repintar: false,
+  // rediseno-automatizar (22-10-2026): el tablero, la ficha en un panel lateral
+  // y la ayuda «i». Todo es de la pantalla: nada de esto se guarda en ningún sitio
+  matrizFiltro: 'todas', columna: 'pendiente', fichaAbierta: false, fichaPestana: 'guion', fichaScroll: 0,
+  verAyuda: false,
   form: {
-    origen: 'subir', modo: 'adaptar', matriz: '', nombre: '', red: '', formato: '',
+    // sin origen elegido: «Añadir guiones» enseña primero las tarjetas de dónde salen
+    origen: '', modo: 'adaptar', matriz: '', nombre: '', red: '', formato: '',
     duracion_s: '', notas: '', texto: '', yaFormato: false, peticion: '', cuantos: 5,
     fichero: null,
   },
@@ -27984,7 +28015,7 @@ const PAR = {
   // analizar-cuentas (18-10-2026): las cuentas leídas son de todo el Studio
   cuentas: null, cuentaAbierta: null, cuentaTrabajo: null, cuentaReloj: null, cuentasCargando: false, cuentaPedida: null,
   cuentaForm: { red: 'tiktok', texto: '', cuantos: 30 }, cuentaGuiones: { cuantos: 5, modo: 'adaptar', peticion: '' },
-  chatCuenta: '', conexionesAbiertas: null,
+  chatCuenta: '',
 };
 const ESTADOS_GUION = { pendiente: 'pendiente', usado: 'usado', publicado: 'publicado' };
 const CLASE_GUION = { pendiente: '', usado: 'ejecutando', publicado: 'ok' };
@@ -28019,7 +28050,7 @@ async function cargarParrilla(silencio) {
     PAR.datos = datos;
     // uno en marcha se sigue (se recargó la página); uno ya acabado no se vuelve a anunciar
     if (PAR.datos.trabajo && PAR.datos.trabajo.estado === 'trabajando' && !PAR.trabajo) PAR.trabajo = PAR.datos.trabajo;
-    if (PAR.seccion === 'ficha' && PAR.guion) {
+    if (PAR.fichaAbierta && PAR.guion) {
       const guion = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(PAR.guion.id)}`));
       if (turno !== PAR.turno) return;
       PAR.guion = guion;
@@ -28027,7 +28058,7 @@ async function cargarParrilla(silencio) {
   } catch (e) {
     if (turno !== PAR.turno) return;
     PAR.error = e.message;
-    if (e.status === 404 && PAR.seccion === 'ficha') { PAR.seccion = 'parrilla'; PAR.guion = null; }
+    if (e.status === 404 && PAR.fichaAbierta) { PAR.fichaAbierta = false; PAR.guion = null; }
   }
   PAR.cargando = false;
   PAR.cargadoAl = Date.now();
@@ -28073,14 +28104,50 @@ function elegirProyectoParrilla(cid) {
     chat: null, chats: null, chatTexto: '', chatCapturas: [], marcaCargando: false,
     resultadosCargando: false, chatScroll: null });
   if (PAR.seccion === 'ficha') PAR.seccion = 'parrilla';
+  PAR.fichaAbierta = false;
+  PAR.matrizFiltro = 'todas';
   try { localStorage.setItem('estudio.parrilla.proyecto', cid); } catch (e) { /* sin almacén */ }
   cargarParrilla();
 }
 
 function irASeccionParrilla(seccion) {
   PAR.seccion = seccion;
+  PAR.fichaAbierta = false;
   subirArriba('modulo');
   pintarModulo();
+}
+
+/* ------------------------------------- EL MÓDULO (rediseno-automatizar, 22-10-2026)
+ *
+ * La maqueta aprobada por el dueño, con el sistema de Crear: el proyecto como
+ * chip en la cabecera con «+ Añadir guiones», cinco pestañas que se pueden
+ * pulsar (Parrilla · Añadir guiones · Conversar con Claude · Cuentas que te
+ * gustan · Marca del cliente), la Parrilla como tablero por estado y la ficha
+ * de un guion en un panel lateral. SOLO cambia dónde está cada cosa: las rutas,
+ * los costes y las confirmaciones son los de antes, y nada de lo de aquí se
+ * guarda (regla 1). Las claves de YouTube, Meta y Apify siguen donde estaban
+ * («Cuentas que te gustan» → Conexiones): van a Configuración en otra rama.
+ */
+const PESTANAS_AUTOMATIZAR = [
+  ['parrilla', 'Parrilla'], ['anadir', 'Añadir guiones'], ['chat', 'Conversar con Claude'],
+  ['cuentas', 'Cuentas que te gustan'], ['marca', 'Marca del cliente'],
+];
+const COLUMNAS_PARRILLA = [
+  ['pendiente', 'Pendientes', 'nadie lo ha usado'],
+  ['usado', 'Usados', 'pasados al Encargo, en Crear'],
+  ['publicado', 'Publicados', 'su vídeo ya salió en Publicar'],
+];
+
+function nombreProyectoParrilla() {
+  if (PAR.cid === '_sin') return '';
+  return ((PAR.proyectos || []).find(p => p.id === PAR.cid) || {}).nombre || '';
+}
+
+/* La marca guardada del proyecto: null mientras no se sabe, false si no hay. */
+function marcaGuardadaParrilla() {
+  if (!PAR.marca || PAR.marca.error) return null;
+  const m = PAR.marca.marca || {};
+  return Object.entries(m).some(([k, v]) => k !== 'al' && String(v || '').trim()) ? m : false;
 }
 
 function vistaParrilla() {
@@ -28094,35 +28161,16 @@ function vistaParrilla() {
   }
   // al volver a Automatizar con una conversión en marcha, se vuelve a preguntar
   if (PAR.trabajo && PAR.trabajo.estado === 'trabajando' && !PAR.reloj) setTimeout(vigilarTrabajoParrilla, 0);
-  const caja = h('div', { clase: 'automatizar parrilla' });
-  const pestanas = h('div', { clase: 'pestanas-publicar', role: 'tablist' });
-  [['parrilla', 'Parrilla'], ['anadir', 'Añadir guiones'], ['cuentas', 'Analizar una cuenta'], ['marca', 'Marca del cliente'],
-    ['ficha', PAR.guion ? recortar(PAR.guion.titulo || PAR.guion.codigo || 'Guion', 26) : 'Ficha de un guion']]
-    .forEach(([id, texto]) => pestanas.appendChild(h('button', {
-      clase: `mini${PAR.seccion === id ? ' activo' : ' fantasma'}`, role: 'tab',
-      'aria-selected': PAR.seccion === id ? 'true' : 'false',
-      disabled: id === 'ficha' && !PAR.guion,
-      title: id === 'ficha' && !PAR.guion ? 'abre un guion de la Parrilla' : '',
-      onclick: () => irASeccionParrilla(id),
-    }, texto)));
-  pestanas.appendChild(h('button', {
-    clase: 'mini fantasma', disabled: true, title: 'Llega en una rama posterior (lala-2)',
-  }, 'Piloto automático · próximamente'));
-  caja.appendChild(h('div', { clase: 'light-cab' }, h('h2', {}, 'Automatizar'), h('span', { clase: 'crece' }), pestanas));
+  // LO DE ANTES SIGUE LLEGANDO: el chat era un origen de «Añadir guiones» y la
+  // ficha una pestaña; quien llegue así acaba en su sitio nuevo
+  if (PAR.seccion === 'anadir' && PAR.form.origen === 'chat') { PAR.seccion = 'chat'; PAR.form.origen = ''; }
+  if (PAR.seccion === 'ficha') { PAR.seccion = 'parrilla'; if (PAR.guion) PAR.fichaAbierta = true; }
+  // la marca se ve siempre (la línea de la Parrilla y el punto de su pestaña): solo se LEE
+  if (PAR.datos && !PAR.marca && !PAR.marcaCargando) setTimeout(cargarMarcaParrilla, 0);
 
-  if (PAR.proyectos && PAR.proyectos.length) {
-    const sel = h('select', { 'aria-label': 'Proyecto', onchange: ev => elegirProyectoParrilla(ev.target.value) },
-      PAR.proyectos.map(p => {
-        const c = p.cuentas || {};
-        const total = (c.pendiente || 0) + (c.usado || 0) + (c.publicado || 0);
-        return h('option', { value: p.id, selected: p.id === PAR.cid ? true : null },
-          `${p.nombre}${total ? ` · ${cuantosGuiones(total)}` : ''}`);
-      }));
-    caja.appendChild(h('div', { clase: 'fila proyecto-parrilla' }, h('b', {}, 'Proyecto'), sel,
-      h('span', { clase: 'meta crece' }, 'Cada proyecto tiene sus matrices de guiones.')));
-  }
-  caja.appendChild(h('div', { clase: 'pista parrilla-opcional' },
-    'La Parrilla es opcional: el Encargo de un vídeo se sigue pudiendo llenar a mano en Crear.'));
+  const caja = h('div', { clase: 'automatizar parrilla' });
+  caja.appendChild(cabeceraAutomatizar());
+  caja.appendChild(pestanasAutomatizar());
   if (PAR.error) {
     caja.appendChild(cajaError(PAR.error));
     caja.appendChild(h('button', { clase: 'mini', onclick: () => cargarParrilla() }, 'Reintentar'));
@@ -28133,11 +28181,53 @@ function vistaParrilla() {
     return caja;
   }
   if (PAR.seccion === 'anadir') caja.appendChild(seccionAnadirParrilla());
+  else if (PAR.seccion === 'chat') caja.appendChild(seccionChatParrilla());
   else if (PAR.seccion === 'marca') caja.appendChild(seccionMarcaParrilla());
   else if (PAR.seccion === 'cuentas') caja.appendChild(seccionCuentasParrilla());
-  else if (PAR.seccion === 'ficha' && PAR.guion) caja.appendChild(seccionFichaParrilla());
   else caja.appendChild(seccionListaParrilla());
+  if (PAR.fichaAbierta && PAR.guion) caja.appendChild(cajonGuionParrilla());
   return caja;
+}
+
+function cabeceraAutomatizar() {
+  const izq = h('div', { clase: 'izq' },
+    h('div', { clase: 'fila titulo-automatizar' }, h('h2', {}, 'Automatizar'),
+      h('button', { type: 'button', clase: `mini fantasma boton-i${PAR.verAyuda ? ' activo' : ''}`,
+        'aria-expanded': PAR.verAyuda ? 'true' : 'false', 'aria-label': 'Qué es la Parrilla',
+        title: 'Qué es la Parrilla', onclick: () => { PAR.verAyuda = !PAR.verAyuda; pintarModulo(); } }, 'i')),
+    PAR.verAyuda ? h('div', { clase: 'pista parrilla-opcional' },
+      'La Parrilla es opcional: el Encargo de un vídeo se sigue pudiendo llenar a mano en Crear. '
+      + 'Cada proyecto tiene sus matrices de guiones.') : null);
+  const acc = h('div', { clase: 'acc' });
+  if (PAR.proyectos && PAR.proyectos.length) {
+    const sel = h('select', { 'aria-label': 'Proyecto', onchange: ev => elegirProyectoParrilla(ev.target.value) },
+      PAR.proyectos.map(p => {
+        const c = p.cuentas || {};
+        const total = (c.pendiente || 0) + (c.usado || 0) + (c.publicado || 0);
+        return h('option', { value: p.id, selected: p.id === PAR.cid ? true : null },
+          `${p.nombre}${total ? ` · ${cuantosGuiones(total)}` : ''}`);
+      }));
+    acc.appendChild(h('label', { clase: 'chip-proyecto-auto', title: 'El proyecto (el cliente): cada uno tiene sus matrices de guiones' },
+      h('span', { 'aria-hidden': 'true' }, '📁'), sel));
+  }
+  acc.appendChild(h('button', { clase: 'primario anadir-cabecera', onclick: () => irASeccionParrilla('anadir') }, '+ Añadir guiones'));
+  return h('div', { clase: 'cab-automatizar' }, izq, acc);
+}
+
+function pestanasAutomatizar() {
+  const sinMarca = marcaGuardadaParrilla() === false;
+  return h('nav', { clase: 'pestanas-crear pestanas-automatizar', role: 'tablist', 'aria-label': 'Automatizar' },
+    PESTANAS_AUTOMATIZAR.map(([id, texto]) => h('button', {
+      type: 'button', role: 'tab', clase: `pestana-crear${PAR.seccion === id ? ' activa' : ''}`,
+      'aria-selected': PAR.seccion === id ? 'true' : 'false',
+      title: id === 'marca' && sinMarca ? 'Este proyecto no tiene marca: Claude escribe sin saber quién es el cliente' : null,
+      onclick: () => irASeccionParrilla(id),
+    }, texto, id === 'marca' && sinMarca ? h('span', { clase: 'punto', 'aria-hidden': 'true' }) : null)));
+}
+
+/* Una pregunta de la casa (en vez de `confirm`), con el MISMO texto de antes. */
+async function preguntarParrilla(titulo, texto, aceptar, peligro) {
+  return !!(await dialogo({ titulo, texto, aceptar, peligro: !!peligro }));
 }
 
 /* ---------------------------------------------------- el trabajo de Claude */
@@ -28184,6 +28274,7 @@ function vigilarTrabajoParrilla() {
           toast(`${cuantosGuiones((nuevo.guiones || []).length)} en la Parrilla`);
           vaciarFormParrilla();
           PAR.seccion = 'parrilla';
+          PAR.matrizFiltro = 'todas';   // que se vean los nuevos, estén en la matriz que estén
         } else {
           toast(nuevo.error || 'no se han podido convertir', true);
         }
@@ -28226,90 +28317,170 @@ function datosGuionCorto(g) {
   return trozos.join(' · ');
 }
 
+function origenMatrizParrilla(m) {
+  const origen = m.origen || {};
+  return { subir: origen.fichero ? `de «${origen.fichero}»` : 'de un documento', pegar: 'pegada',
+    pedir: 'escrita por Claude', escribir: 'escrita a mano', vacia: '',
+    chat: 'de una conversación con Claude', resultados: 'desde tus resultados',
+    cuenta: origen.cuenta ? `con lo que le funciona a ${origen.cuenta}` : 'desde una cuenta analizada' }[origen.tipo] || '';
+}
+
+function datosMatrizParrilla(m) {
+  const deDonde = origenMatrizParrilla(m);
+  return `${cuantosGuiones((m.guiones || []).length)}${deDonde ? ` · ${deDonde}` : ''}`
+    + `${m.creada ? ` · ${m.creada.slice(0, 10)}` : ''}`;
+}
+
+/* LA MARCA SE VE SIEMPRE (Claude la usa en todo): una línea arriba de la
+   Parrilla, guardada o no, con el camino a su pestaña. */
+function reintentarMarcaParrilla() {
+  PAR.marca = null;
+  PAR.marcaBorrador = null;
+  cargarMarcaParrilla();
+}
+
+function lineaMarcaParrilla() {
+  // si no se pudo leer, no se dice «Sin marca» (no se sabe): se dice eso y se puede reintentar
+  if (PAR.marca && PAR.marca.error) {
+    return h('div', { clase: 'caja-error fila linea-marca' },
+      h('span', { clase: 'crece' }, 'No se pudo leer la marca del proyecto.'),
+      h('button', { clase: 'mini', onclick: () => reintentarMarcaParrilla() }, 'Reintentar'));
+  }
+  const m = marcaGuardadaParrilla();
+  if (m === null) return null;
+  const nombre = nombreProyectoParrilla();
+  if (!m) {
+    return h('div', { clase: 'caja-aviso fila linea-marca' },
+      h('span', { clase: 'crece' }, h('b', {}, nombre ? `Sin marca de ${nombre}:` : 'Sin marca:'),
+        ' Claude escribirá sin saber quién es el cliente, qué mostrar ni qué evitar.'),
+      h('button', { clase: 'mini', onclick: () => irASeccionParrilla('marca') }, 'Apuntarla ›'));
+  }
+  return h('div', { clase: 'caja-info fila linea-marca' },
+    h('span', { clase: 'crece' }, `${nombre ? `Marca de ${nombre}` : 'Marca'}: ✓ guardada`
+      + `${m.al ? ` el ${m.al.replace('T', ' ').slice(0, 16)}` : ''} — Claude la usa en todo lo que escribe para este proyecto.`),
+    h('button', { clase: 'mini fantasma', onclick: () => irASeccionParrilla('marca') }, 'Editar ›'));
+}
+
+function tarjetaPilotoParrilla() {
+  return h('div', { clase: 'bloque fila piloto-parrilla' },
+    h('b', {}, '🤖 Piloto automático'), h('span', { clase: 'pastilla' }, 'próximamente'),
+    h('span', { clase: 'meta crece' }, 'Llega en una rama posterior (lala-2). No ocupa una pestaña hasta que exista.'));
+}
+
+/* EL TABLERO: tres columnas por estado (en el móvil, una a la vista y las
+   otras con su botón), con el buscador y las matrices como filtro arriba. */
 function seccionListaParrilla() {
-  const caja = h('div', { clase: 'seccion-parrilla' });
+  const caja = h('div', { clase: 'seccion-parrilla tablero-parrilla' });
   const d = PAR.datos;
   if (!d) return caja;
-  const c = d.cuentas || {};
-  const total = (c.pendiente || 0) + (c.usado || 0) + (c.publicado || 0);
-  if (!(d.matrices || []).length) {
+  const linea = lineaMarcaParrilla();
+  if (linea) caja.appendChild(linea);
+  const matrices = d.matrices || [];
+  if (!matrices.length) {
     caja.appendChild(h('div', { clase: 'bloque vacio-parrilla' },
       h('h3', {}, 'Todavía no hay guiones en este proyecto'),
       h('p', { clase: 'meta' }, 'Sube una matriz (Word, PDF o Excel), pídele guiones a Claude o pega uno. '
         + 'Todo se convierte al formato del Studio y queda aquí, listo para pasar al Encargo.'),
       h('button', { clase: 'primario', onclick: () => irASeccionParrilla('anadir') }, 'Añadir guiones')));
+    caja.appendChild(tarjetaPilotoParrilla());
     return caja;
   }
-  const filtros = h('div', { clase: 'fila filtros-parrilla' });
-  [['todos', `Todos (${total})`], ['pendiente', `Pendientes (${c.pendiente || 0})`],
-    ['usado', `Usados (${c.usado || 0})`], ['publicado', `Publicados (${c.publicado || 0})`]]
-    .forEach(([id, texto]) => filtros.appendChild(h('button', {
-      clase: `mini${PAR.filtro === id ? ' activo' : ' fantasma'}`,
-      onclick: () => { PAR.filtro = id; pintarModulo(); },
-    }, texto)));
+  if (PAR.matrizFiltro !== 'todas' && !matrices.some(m => m.id === PAR.matrizFiltro)) PAR.matrizFiltro = 'todas';
+  const elegida = matrices.find(m => m.id === PAR.matrizFiltro) || null;
+  const total = matrices.reduce((n, m) => n + (m.guiones || []).length, 0);
+
   const buscar = h('input', {
-    type: 'search', clase: 'buscar-parrilla', placeholder: 'Buscar por título o ID',
+    type: 'search', clase: 'buscar-parrilla', placeholder: 'Buscar por título o ID', 'aria-label': 'Buscar por título o ID',
     value: PAR.buscar, oninput: ev => { PAR.buscar = ev.target.value; pintarModulo(); },
   });
   buscar.dataset.foco = 'parrilla-buscar';
-  filtros.appendChild(buscar);
-  filtros.appendChild(h('button', { clase: 'mini primario', onclick: () => irASeccionParrilla('anadir') }, '+ Añadir guiones'));
-  caja.appendChild(filtros);
+  const chip = (id, texto, ayuda) => h('button', {
+    type: 'button', clase: `chip-matriz${PAR.matrizFiltro === id ? ' activa' : ''}`,
+    'aria-pressed': PAR.matrizFiltro === id ? 'true' : 'false', title: ayuda || null,
+    onclick: () => { PAR.matrizFiltro = id; pintarModulo(); },
+  }, texto);
+  caja.appendChild(h('div', { clase: 'fila filtros-parrilla' }, buscar,
+    h('div', { clase: 'chips-matrices', role: 'group', 'aria-label': 'Matrices' },
+      chip('todas', `Todas las matrices (${total})`),
+      matrices.map(m => chip(m.id, `${m.nombre} (${(m.guiones || []).length})`, datosMatrizParrilla(m))))));
+  if (elegida) {
+    caja.appendChild(h('div', { clase: 'fila cab-matriz' },
+      h('h3', {}, elegida.nombre), h('span', { clase: 'meta crece' }, datosMatrizParrilla(elegida)),
+      h('button', { clase: 'mini fantasma', onclick: () => renombrarMatrizParrilla(elegida) }, 'Renombrar'),
+      h('button', { clase: 'mini fantasma peligro', onclick: () => borrarMatrizParrilla(elegida) }, 'Borrar')));
+    if (!(elegida.guiones || []).length) {
+      caja.appendChild(h('div', { clase: 'meta' }, 'Vacía: añade guiones desde «Añadir guiones».'));
+    }
+  }
 
   const texto = PAR.buscar.trim().toLowerCase();
-  (d.matrices || []).forEach(m => {
-    const guiones = (m.guiones || []).filter(g => (PAR.filtro === 'todos' || g.estado === PAR.filtro)
-      && (!texto || `${g.codigo} ${g.titulo}`.toLowerCase().includes(texto)));
-    const bloque = h('div', { clase: 'bloque matriz-parrilla' });
-    const origen = m.origen || {};
-    const deDonde = { subir: origen.fichero ? `de «${origen.fichero}»` : 'de un documento', pegar: 'pegada',
-      pedir: 'escrita por Claude', escribir: 'escrita a mano', vacia: '',
-      chat: 'de una conversación con Claude', resultados: 'desde tus resultados',
-      cuenta: origen.cuenta ? `con lo que le funciona a ${origen.cuenta}` : 'desde una cuenta analizada' }[origen.tipo] || '';
-    bloque.appendChild(h('div', { clase: 'fila cab-matriz' },
-      h('h3', {}, m.nombre),
-      h('span', { clase: 'meta' }, `${cuantosGuiones((m.guiones || []).length)}${deDonde ? ` · ${deDonde}` : ''}`
-        + `${m.creada ? ` · ${m.creada.slice(0, 10)}` : ''}`),
-      h('span', { clase: 'crece' }),
-      h('button', { clase: 'mini fantasma', onclick: () => renombrarMatrizParrilla(m) }, 'Renombrar'),
-      h('button', { clase: 'mini fantasma peligro', onclick: () => borrarMatrizParrilla(m) }, 'Borrar')));
-    if (!guiones.length) {
-      bloque.appendChild(h('div', { clase: 'meta' }, (m.guiones || []).length
-        ? 'Ninguno con este filtro.' : 'Vacía: añade guiones desde «Añadir guiones».'));
-    }
-    guiones.forEach(g => bloque.appendChild(filaGuionParrilla(g)));
-    caja.appendChild(bloque);
+  const lista = [];
+  matrices.forEach(m => {
+    if (elegida && m.id !== elegida.id) return;
+    (m.guiones || []).forEach(g => {
+      if (!texto || `${g.codigo} ${g.titulo}`.toLowerCase().includes(texto)) lista.push({ g, m });
+    });
   });
+  const de = estado => lista.filter(x => (x.g.estado || 'pendiente') === estado);
+  if (!COLUMNAS_PARRILLA.some(([id]) => id === PAR.columna)) PAR.columna = 'pendiente';
+  // en el móvil: un botón por columna (con su número) y una columna a la vista
+  caja.appendChild(h('div', { clase: 'selector-columnas', role: 'tablist', 'aria-label': 'Columna' },
+    COLUMNAS_PARRILLA.map(([id, nombre]) => h('button', {
+      type: 'button', role: 'tab', clase: PAR.columna === id ? 'activa' : '',
+      'aria-selected': PAR.columna === id ? 'true' : 'false',
+      onclick: () => { PAR.columna = id; pintarModulo(); },
+    }, nombre, h('span', { clase: 'cuenta-columna' }, String(de(id).length))))));
+  caja.appendChild(h('div', { clase: 'tablero-guiones' }, COLUMNAS_PARRILLA.map(([id, nombre, explica]) => {
+    const suyos = de(id);
+    return h('section', { clase: `columna-tablero${PAR.columna === id ? '' : ' fuera-movil'}`, datos: { columna: id } },
+      h('div', { clase: 'cab-columna' }, h('b', {}, nombre),
+        h('span', { clase: `pastilla ${CLASE_GUION[id] || ''}`.trim() }, String(suyos.length)),
+        h('span', { clase: 'meta' }, explica)),
+      suyos.length ? suyos.map(x => tarjetaGuionParrilla(x.g, x.m, !elegida))
+        : h('p', { clase: 'meta vacia-columna' }, texto ? 'Ninguno con este filtro.' : 'Ninguno.'));
+  })));
+  caja.appendChild(tarjetaPilotoParrilla());
   return caja;
 }
 
-function filaGuionParrilla(g) {
-  return h('div', { clase: 'fila fila-guion' },
-    h('button', { clase: 'mini fantasma titulo-guion', title: 'Abrir la ficha de este guion', onclick: () => abrirGuionParrilla(g.id) },
-      [g.codigo, g.titulo].filter(Boolean).join(' — ') || 'Guion sin título'),
-    h('span', { clase: 'meta datos-guion' }, datosGuionCorto(g)),
-    g.avisos ? h('span', { clase: 'pastilla obsoleto', title: 'Avisos ⚠ del guion: míralos en la ficha' }, `⚠ ${g.avisos}`) : null,
-    g.video_nombre ? h('span', { clase: 'meta video-guion', title: 'El vídeo que se hizo con este guion' }, `▸ ${g.video_nombre}`) : null,
-    h('span', { clase: 'crece' }),
-    pastillaGuion(g.estado),
-    h('button', { clase: 'mini', onclick: () => abrirGuionParrilla(g.id) }, 'Abrir'));
+function tarjetaGuionParrilla(g, m, conMatriz) {
+  const abierta = PAR.fichaAbierta && PAR.guion && PAR.guion.id === g.id;
+  return h('button', {
+    type: 'button', clase: `tarjeta-guion${abierta ? ' abierta' : ''}`, title: 'Abrir la ficha de este guion',
+    onclick: () => abrirGuionParrilla(g.id),
+  },
+  h('span', { clase: 'fila cab-tarjeta-guion' },
+    h('b', { clase: 'titulo-guion' }, [g.codigo, g.titulo].filter(Boolean).join(' — ') || 'Guion sin título'),
+    g.avisos ? h('span', { clase: 'pastilla obsoleto', title: 'Avisos ⚠ del guion: míralos en la ficha' }, `⚠ ${g.avisos}`) : null),
+  h('span', { clase: 'meta datos-guion' }, datosGuionCorto(g)),
+  conMatriz || g.video_nombre ? h('span', { clase: 'fila pie-tarjeta-guion' },
+    conMatriz ? h('span', { clase: 'chip-enlace' }, m.nombre) : null,
+    g.video_nombre ? h('span', { clase: 'meta video-guion', title: 'El vídeo que se hizo con este guion' }, `▸ ${g.video_nombre}`) : null) : null);
 }
 
 async function abrirGuionParrilla(gid) {
   try {
+    const mismo = PAR.guion && PAR.guion.id === gid;
     PAR.guion = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(gid)}`));
-    PAR.borradorTexto = null;
+    // EL MISMO GUION SE REABRE CON LO QUE SE ESTABA ESCRIBIENDO (revisión 22-10)
+    if (!mismo) PAR.borradorTexto = null;
     PAR.encargoIndice = 0;
     PAR.estiloElegido = PAR.guion.estilo || '';
-    irASeccionParrilla('ficha');
+    PAR.fichaAbierta = true;
+    PAR.fichaPestana = 'guion';
+    PAR.fichaScroll = 0;
+    pintarModulo();
+    setTimeout(() => { const x = document.querySelector('#modulo .cajon-guion .cerrar-cajon'); if (x) x.focus({ preventScroll: true }); }, 0);
   } catch (e) {
     toast(`no se ha podido abrir el guion: ${e.message}`, true);
   }
 }
 
 async function renombrarMatrizParrilla(m) {
-  const nombre = prompt('Nombre de la matriz', m.nombre);
-  if (nombre === null || !nombre.trim() || nombre.trim() === m.nombre) return;
+  const r = await dialogo({ titulo: 'Renombrar la matriz',
+    campos: [{ clave: 'nombre', etiqueta: 'Nombre de la matriz', valor: m.nombre }], aceptar: 'Guardar' });
+  const nombre = r ? String(r.nombre || '') : '';
+  if (!nombre.trim() || nombre.trim() === m.nombre) return;
   try {
     await pedir(rutaProyectoParrilla(`/matrices/${encodeURIComponent(m.id)}`), { method: 'PUT', cuerpo: { nombre } });
     await cargarParrilla(true);
@@ -28318,11 +28489,12 @@ async function renombrarMatrizParrilla(m) {
 
 async function borrarMatrizParrilla(m) {
   const n = (m.guiones || []).length;
-  if (!confirm(`¿Borrar la matriz «${m.nombre}»${n ? ` y sus ${cuantosGuiones(n)}` : ''}? No se puede deshacer `
-    + '(los vídeos que ya se hicieron con ellos no se tocan).')) return;
+  if (!await preguntarParrilla('Borrar la matriz', `¿Borrar la matriz «${m.nombre}»${n ? ` y sus ${cuantosGuiones(n)}` : ''}? `
+    + 'No se puede deshacer (los vídeos que ya se hicieron con ellos no se tocan).', 'Borrar la matriz', true)) return;
   try {
     await pedir(rutaProyectoParrilla(`/matrices/${encodeURIComponent(m.id)}`), { method: 'DELETE' });
-    if (PAR.guion && PAR.guion.matriz === m.id) PAR.guion = null;
+    if (PAR.guion && PAR.guion.matriz === m.id) { PAR.guion = null; PAR.fichaAbierta = false; }
+    PAR.matrizFiltro = 'todas';
     toast('matriz borrada');
     await cargarParrilla(true);
   } catch (e) { toast(`no se ha podido borrar: ${e.message}`, true); }
@@ -28330,28 +28502,50 @@ async function borrarMatrizParrilla(m) {
 
 /* ------------------------------------------------------- añadir guiones */
 
+/* DE DÓNDE SALEN: una tarjeta por camino, con lo que cuesta (rediseno-
+   automatizar). Las dos últimas llevan a su pestaña: la cuenta que te gusta
+   (que puede pasar por Apify, de pago, y PREGUNTA antes con el precio) y el
+   chat. El coste de cada botón es el mismo de antes y se repite en la barra. */
+const ORIGENES_PARRILLA = [
+  ['subir', '📄', 'Subir un documento', 'Una matriz en Word, PDF o Excel', 'Claude · sin coste en dólares'],
+  ['pedir', '✍️', 'Pedir a Claude', 'Claude escribe guiones nuevos de una vez', 'Claude · sin coste en dólares'],
+  ['resultados', '📊', 'Desde mis resultados', 'Guiones nuevos a partir de tus vídeos que mejor funcionaron',
+    'Claude · sin coste en dólares'],
+  ['pegar', '📋', 'Escribir o pegar', 'Un guion (o varios) escrito o pegado', 'sin Claude si ya está en el formato'],
+  ['cuenta', '📈', 'Desde una cuenta que te guste', 'Lo que le funciona a otra cuenta, para tu marca',
+    'gratis o Apify: céntimos, y pregunta antes'],
+  ['chat', '💬', 'Conversar con Claude', 'Un chat para preparar guiones hablando, con capturas y, si quieres, internet',
+    'Claude · sin coste en dólares'],
+];
+
+function tarjetasOrigenParrilla() {
+  const f = PAR.form;
+  return h('div', { clase: 'origenes-parrilla origen-parrilla', role: 'group', 'aria-label': 'De dónde salen' },
+    ORIGENES_PARRILLA.map(([id, icono, nombre, explica, coste]) => h('button', {
+      type: 'button', clase: `tarjeta-origen${f.origen === id ? ' activa' : ''}`, 'aria-pressed': f.origen === id ? 'true' : 'false',
+      title: explica,
+      onclick: () => {
+        if (id === 'cuenta') { irASeccionParrilla('cuentas'); return; }
+        if (id === 'chat') { irASeccionParrilla('chat'); return; }
+        f.origen = id;
+        pintarModulo();
+      },
+    }, h('span', { clase: 'icono-origen', 'aria-hidden': 'true' }, icono), h('b', {}, nombre),
+    h('span', { clase: 'meta' }, explica), h('span', { clase: 'pastilla coste-origen' }, coste))));
+}
+
 function seccionAnadirParrilla() {
   const f = PAR.form;
   const caja = h('div', { clase: 'seccion-parrilla anadir-parrilla' });
   const enMarcha = PAR.trabajo && PAR.trabajo.estado === 'trabajando' && PAR.trabajo.cid === PAR.cid;
-
-  const origenes = h('div', { clase: 'tira-modos origen-parrilla' });
-  [['subir', 'Subir un documento', 'Una matriz en Word, PDF o Excel'],
-    ['pedir', 'Pedir a Claude', 'Claude escribe guiones nuevos de una vez'],
-    ['chat', 'Conversar con Claude', 'Un chat para preparar guiones hablando, con capturas y, si quieres, internet'],
-    ['resultados', 'Desde mis resultados', 'Guiones nuevos a partir de tus vídeos que mejor funcionaron'],
-    ['pegar', 'Escribir o pegar', 'Un guion (o varios) escrito o pegado']]
-    .forEach(([id, texto, ayuda]) => origenes.appendChild(h('button', {
-      clase: `mini${f.origen === id ? ' activo' : ''}`, title: ayuda,
-      onclick: () => { f.origen = id; pintarModulo(); },
-    }, texto)));
-  caja.appendChild(h('div', { clase: 'bloque' }, h('h3', {}, 'De dónde salen'), origenes));
-  // EL CHAT ocupa la sección entera: sus guiones se guardan uno a uno desde
-  // cada respuesta, así que no lleva «Cómo se usa» ni «Dónde se guardan»
-  if (f.origen === 'chat') {
-    caja.appendChild(panelChatParrilla());
+  if (!ORIGENES_PARRILLA.some(([id]) => id === f.origen) || f.origen === 'cuenta' || f.origen === 'chat') f.origen = '';
+  if (!f.origen) {
+    caja.appendChild(h('div', { clase: 'cab-anadir' }, h('h3', {}, '¿De dónde salen los guiones?'),
+      h('div', { clase: 'pista' }, 'Todo se convierte al formato del Studio y queda en la Parrilla, listo para pasar al Encargo.')));
+    caja.appendChild(tarjetasOrigenParrilla());
     return caja;
   }
+  caja.appendChild(tarjetasOrigenParrilla());
 
   const bloque = h('div', { clase: 'bloque' });
   if (f.origen === 'resultados') {
@@ -28454,10 +28648,13 @@ function seccionAnadirParrilla() {
   const etiqueta = f.origen === 'subir' ? 'Subir y convertir'
     : f.origen === 'pedir' ? 'Pedir a Claude'
       : f.origen === 'resultados' ? 'Escribir desde mis resultados' : sinClaude ? 'Guardar en la Parrilla' : 'Convertir con Claude';
-  caja.appendChild(h('div', { clase: 'fila cierre' },
-    h('button', { clase: 'primario', disabled: enMarcha ? true : null, onclick: () => lanzarParrilla() }, etiqueta),
-    h('span', { clase: 'pista' }, enMarcha ? 'Espera a que acabe la conversión en marcha.'
-      : sinClaude ? 'No usa Claude.' : 'Usa Claude (tokens de la suscripción, sin coste en dólares).')));
+  const coste = enMarcha ? 'Espera a que acabe la conversión en marcha.'
+    : sinClaude ? 'No usa Claude.' : 'Usa Claude (tokens de la suscripción, sin coste en dólares).';
+  const elegido = ORIGENES_PARRILLA.find(([id]) => id === f.origen) || [];
+  const lanzar = h('button', { disabled: enMarcha ? true : null, onclick: () => lanzarParrilla() }, `${etiqueta} ›`);
+  lanzar.className = 'primario principal lanzar-parrilla';
+  caja.appendChild(barraAutomatizar({ estado: { e: enMarcha ? 'curso' : 'actual', texto: `${elegido[1] || ''} ${elegido[2] || ''}`.trim() },
+    plan: coste, botones: [lanzar] }));
   return caja;
 }
 
@@ -28470,7 +28667,8 @@ function vaciarFormParrilla() {
 }
 
 async function usarPlantillaParrilla() {
-  if (PAR.form.texto.trim() && !confirm('El campo ya tiene texto. ¿Lo reemplazo por la plantilla?')) return;
+  if (PAR.form.texto.trim() && !await preguntarParrilla('Escribir uno con la plantilla',
+    'El campo ya tiene texto. ¿Lo reemplazo por la plantilla?', 'Reemplazarlo')) return;
   try {
     const r = await pedir(`${rutaParrilla('/plantilla')}?${consulta({ proyecto: PAR.cid })}`);
     PAR.form.texto = r.texto || '';
@@ -28492,6 +28690,7 @@ async function lanzarParrilla() {
       toast(`${cuantosGuiones((r.guiones || []).length)} guardados`);
       vaciarFormParrilla();
       PAR.seccion = 'parrilla';
+      PAR.matrizFiltro = 'todas';
       await cargarParrilla(true);
       return;
     }
@@ -28525,19 +28724,159 @@ async function lanzarParrilla() {
   }
 }
 
-/* ------------------------------------------------------ la ficha de un guion */
+/* ------------------------------------------------------ la ficha de un guion
+ *
+ * UN PANEL LATERAL (rediseno-automatizar): la Parrilla no se pierde de vista.
+ * Tres pestañas (Guion · Al Encargo · Estado) y abajo, siempre a la vista, la
+ * barra con «Pasar al Encargo ›» y el motivo cuando no se puede. En el móvil,
+ * a pantalla completa. Se cierra con «×», con Escape o pulsando fuera.
+ */
+const PESTANAS_FICHA = [['guion', 'Guion'], ['encargo', 'Al Encargo'], ['estado', 'Estado']];
 
-function seccionFichaParrilla() {
+/* CERRAR NO PIERDE LO ESCRITO (revisión independiente, 22-10): con el texto
+   del guion a medio cambiar, se pregunta antes: Guardar (lo mismo que «Guardar
+   el texto»), Descartar (lo mismo que «Descartar cambios») o Seguir editando. */
+function textoSinGuardarParrilla() {
+  return !!(PAR.guion && PAR.borradorTexto !== null && PAR.borradorTexto !== PAR.guion.texto);
+}
+
+function preguntarCambiosGuionParrilla(titulo) {
+  return new Promise(resolver => {
+    const capa = h('div', { clase: 'capa-dialogo cambios-guion' });
+    const teclas = ev => { if (ev.key === 'Escape') { ev.stopPropagation(); cerrar('seguir'); } };
+    const cerrar = valor => {
+      capa.remove();
+      document.removeEventListener('keydown', teclas, true);
+      resolver(valor);
+    };
+    capa.appendChild(h('div', { clase: 'dialogo', role: 'dialog', 'aria-modal': 'true' },
+      h('h3', {}, 'Cambios sin guardar'),
+      h('div', { clase: 'meta' }, `Tienes cambios sin guardar en «${titulo}».`),
+      h('div', { clase: 'dialogo-botones' },
+        h('button', { type: 'button', clase: 'mini fantasma', onclick: () => cerrar('seguir') }, 'Seguir editando'),
+        h('button', { type: 'button', clase: 'mini peligro', onclick: () => cerrar('descartar') }, 'Descartar'),
+        h('button', { type: 'button', clase: 'mini primario', onclick: () => cerrar('guardar') }, 'Guardar'))));
+    capa.addEventListener('click', ev => { if (ev.target === capa) cerrar('seguir'); });
+    document.addEventListener('keydown', teclas, true);
+    document.body.appendChild(capa);
+    setTimeout(() => { const b = capa.querySelector('button.primario'); if (b) b.focus(); }, 0);
+  });
+}
+
+async function cerrarFichaParrilla() {
+  if (textoSinGuardarParrilla()) {
+    const g = PAR.guion;
+    const que = await preguntarCambiosGuionParrilla([g.codigo, g.titulo].filter(Boolean).join(' — ') || 'este guion');
+    if (que === 'seguir') return;
+    if (que === 'guardar') {
+      await guardarGuionParrilla({ texto: PAR.borradorTexto });
+      if (textoSinGuardarParrilla()) return;   // no se pudo guardar: se queda abierto (el aviso ya lo dice)
+    } else {
+      PAR.borradorTexto = null;
+    }
+  }
+  PAR.fichaAbierta = false;
+  pintarModulo();
+}
+
+/* Escape cierra el panel, salvo que haya otra cosa abierta encima (una guía,
+   una pregunta) o que se esté escribiendo en un campo del panel. */
+window.addEventListener('keydown', ev => {
+  if (ev.key !== 'Escape' || typeof MODULOS === 'undefined' || MODULOS.actual !== 'automatizar' || !PAR.fichaAbierta) return;
+  if (document.querySelector('.capa-dialogo, #ventana-guia, .velo-guia, #lupa')) return;
+  const foco = document.activeElement;
+  if (foco && foco.closest && foco.closest('.cajon-guion') && /^(TEXTAREA|INPUT|SELECT)$/.test(foco.tagName)) return;
+  cerrarFichaParrilla();
+}, true);
+
+/* Los estilos con los que se puede pasar: los del proyecto primero; si no
+   tiene, todos. Elige el primero si no hay ninguno elegido (es de la página). */
+function estilosParaPasarParrilla() {
+  const propios = PAR.estilos.filter(x => x.cliente === PAR.cid);
+  const lista = propios.length ? propios : PAR.estilos;
+  if (!PAR.estiloElegido || !lista.some(x => x.id === PAR.estiloElegido)) {
+    PAR.estiloElegido = (lista[0] || {}).id || '';
+  }
+  return lista;
+}
+
+/* La barra de una pestaña de Automatizar: la de Crear. Su «⋯» del móvil se
+   repinta con el módulo (la de Crear se repinta sola, con su panel). */
+function barraAutomatizar(op) {
+  const barra = barraDeAccion(op);
+  barra.querySelectorAll('.boton-mas-barra, .estado').forEach(b => b.addEventListener('click', () => {
+    if (esMovilCrear()) setTimeout(pintarModulo, 0);
+  }));
+  return barra;
+}
+
+function cajonGuionParrilla() {
   const g = PAR.guion;
-  const caja = h('div', { clase: 'seccion-parrilla ficha-parrilla' });
-  caja.appendChild(h('div', { clase: 'fila cab-ficha-parrilla' },
-    h('button', { clase: 'mini fantasma', onclick: () => irASeccionParrilla('parrilla') }, '‹ Parrilla'),
-    h('h3', { clase: 'crece' }, [g.codigo, g.titulo].filter(Boolean).join(' — ') || 'Guion sin título'),
-    pastillaGuion(g.estado)));
-  caja.appendChild(h('div', { clase: 'meta' }, `En «${g.matriz_nombre}»`
-    + (g.video_nombre ? ` · vídeo: ${g.video_nombre}` : '')
-    + (g.usado_al ? ` · pasado al Encargo el ${g.usado_al.replace('T', ' ').slice(0, 16)}` : '')));
+  const titulo = [g.codigo, g.titulo].filter(Boolean).join(' — ') || 'Guion sin título';
+  const cambiado = PAR.borradorTexto !== null && PAR.borradorTexto !== g.texto;
+  if (!PESTANAS_FICHA.some(([id]) => id === PAR.fichaPestana)) PAR.fichaPestana = 'guion';
+  const cajon = h('aside', { clase: 'cajon-guion ficha-parrilla', role: 'dialog', 'aria-modal': 'true', 'aria-label': titulo });
+  cajon.appendChild(h('div', { clase: 'cab-cajon' },
+    h('div', { clase: 'datos-cajon' }, h('h3', {}, titulo),
+      h('div', { clase: 'meta' }, `En «${g.matriz_nombre}»`
+        + (g.video_nombre ? ` · vídeo: ${g.video_nombre}` : '')
+        + (g.usado_al ? ` · pasado al Encargo el ${g.usado_al.replace('T', ' ').slice(0, 16)}` : ''))),
+    pastillaGuion(g.estado),
+    h('button', { type: 'button', clase: 'mini fantasma cerrar-cajon', title: 'Cerrar (vuelve a la Parrilla)',
+      'aria-label': 'Cerrar', onclick: () => cerrarFichaParrilla() }, '×')));
+  const avisos = ((g.leido || {}).avisos || []).length;
+  cajon.appendChild(h('nav', { clase: 'pestanas-crear pestanas-cajon', role: 'tablist' },
+    PESTANAS_FICHA.map(([id, texto]) => h('button', {
+      type: 'button', role: 'tab', clase: `pestana-crear${PAR.fichaPestana === id ? ' activa' : ''}`,
+      'aria-selected': PAR.fichaPestana === id ? 'true' : 'false',
+      onclick: () => { PAR.fichaPestana = id; PAR.fichaScroll = 0; pintarModulo(); },
+    }, texto, id === 'guion' && avisos ? h('span', { clase: 'punto', title: 'Avisos del guion', 'aria-hidden': 'true' }) : null))));
+  const cuerpo = h('div', { clase: 'cuerpo-cajon' });
+  if (PAR.fichaPestana === 'encargo') cuerpo.appendChild(bloqueEncargoParrilla(g));
+  else if (PAR.fichaPestana === 'estado') cuerpo.appendChild(bloqueEstadoGuionParrilla(g));
+  else cuerpo.appendChild(bloqueTextoGuionParrilla(g));
+  cuerpo.addEventListener('scroll', () => { PAR.fichaScroll = cuerpo.scrollTop; }, { passive: true });
+  cajon.appendChild(cuerpo);
+  cajon.appendChild(pieCajonParrilla(g, cambiado));
+  // el sitio en el que se estaba, al repintar (la Parrilla se recarga sola)
+  const arriba = PAR.fichaScroll || 0;
+  if (arriba) setTimeout(() => { if (cuerpo.isConnected) cuerpo.scrollTop = arriba; }, 0);
+  const capa = h('div', { clase: 'capa-cajon-guion', onclick: ev => { if (ev.target === capa) cerrarFichaParrilla(); } }, cajon);
+  return capa;
+}
 
+/* El motivo que se ve en la barra cuando «Pasar al Encargo» no se puede. */
+function motivoPasarParrilla(g, sinGuardar) {
+  const encargos = g.encargo || [];
+  const i = Math.min(PAR.encargoIndice || 0, Math.max(0, encargos.length - 1));
+  const e = encargos[i] || {};
+  const lista = estilosParaPasarParrilla();
+  if (sinGuardar) return { e: 'aviso', texto: 'Guarda antes el texto' };
+  if (!lista.length) return { e: 'aviso', texto: 'No hay ningún estilo: crea uno en Crear.' };
+  if (!e.material) return { e: 'aviso', texto: 'El guion no tiene material' };
+  return { e: 'pend', texto: `Rellena el Encargo de «Un vídeo nuevo» en Crear${encargos.length > 1 ? ` (vídeo ${i + 1} de ${encargos.length})` : ''}` };
+}
+
+function pieCajonParrilla(g, sinGuardar) {
+  const encargos = g.encargo || [];
+  const i = Math.min(PAR.encargoIndice || 0, Math.max(0, encargos.length - 1));
+  const e = encargos[i] || {};
+  const lista = estilosParaPasarParrilla();
+  const estilo = lista.find(x => x.id === PAR.estiloElegido);
+  const sinMaterial = !lista.length || !e.material;
+  const boton = h('button', {
+    disabled: sinMaterial || sinGuardar ? true : null, datos: { sinMaterial: sinMaterial ? '1' : '0' },
+    title: sinGuardar ? 'Guarda antes el texto' : !e.material ? 'El guion no tiene material' : '',
+    onclick: () => pasarAlEncargoParrilla(g, i, PAR.estiloElegido),
+  }, estilo ? `Pasar al Encargo con «${recortar(estilo.nombre, 30)}» ›` : 'Pasar al Encargo ›');
+  boton.className = 'primario principal boton-pasar-encargo';
+  return barraAutomatizar({ clase: 'pie-cajon', estado: motivoPasarParrilla(g, sinGuardar), botones: [boton] });
+}
+
+/* «Guion»: uso, formato y duración (cambian su línea del texto), el texto
+   entero, su ortografía, guardar o descartar, y los avisos. */
+function bloqueTextoGuionParrilla(g) {
+  const caja = h('div', { clase: 'ficha-texto-guion' });
   // Lo rápido: uso, formato y duración (cambian la línea del texto). Con el
   // texto a medio editar se apagan: se aplicarían al texto GUARDADO y «Guardar
   // el texto» los desharía después sin decir nada.
@@ -28554,20 +28893,19 @@ function seccionFichaParrilla() {
     disabled: borradorPendiente ? true : null, value: g.duracion_s || '',
     placeholder: 'en el Encargo', onchange: ev => guardarGuionParrilla({ duracion_s: ev.target.value ? Number(ev.target.value) : null }) });
   duracion.dataset.foco = 'parrilla-ficha-duracion';
-  caja.appendChild(h('div', { clase: 'bloque' },
-    h('div', { clase: 'rejilla-parrilla' }, h('label', {}, 'Uso', uso), h('label', {}, 'Formato', formato),
-      h('label', {}, 'Duración (s)', duracion)),
-    h('div', { clase: 'pista' }, borradorPendiente
-      ? 'Guarda o descarta antes los cambios del texto.'
-      : 'Cambiar esto cambia su línea en el texto de abajo (y en «Para el Encargo» si hay uno solo).')));
+  caja.appendChild(h('div', { clase: 'rejilla-parrilla' }, h('label', {}, 'Uso', uso), h('label', {}, 'Formato', formato),
+    h('label', {}, 'Duración (s)', duracion)));
+  caja.appendChild(h('div', { clase: 'pista' }, borradorPendiente
+    ? 'Guarda o descarta antes los cambios del texto.'
+    : 'Cambiar esto cambia su línea en el texto de abajo (y en «Para el Encargo» si hay uno solo).'));
 
   // El texto entero: es la verdad del guion
   const texto = PAR.borradorTexto !== null ? PAR.borradorTexto : g.texto;
   const cambiado = PAR.borradorTexto !== null && PAR.borradorTexto !== g.texto;
-  const area = h('textarea', { rows: 18, clase: 'texto-guion',
+  const area = h('textarea', { rows: 16, clase: 'texto-guion',
     /* SIN REPINTAR mientras se escribe (se llevaría el cursor): solo se
        encienden «Guardar» y «Descartar», y se apaga «Pasar al Encargo», que
-       pasaría el texto GUARDADO y no el que se ve. */
+       pasaría el texto GUARDADO y no el que se ve (con su motivo en la barra). */
     oninput: ev => {
       PAR.borradorTexto = ev.target.value;
       const sinCambios = PAR.borradorTexto === g.texto;
@@ -28579,32 +28917,34 @@ function seccionFichaParrilla() {
         pasar.disabled = !sinCambios || pasar.dataset.sinMaterial === '1';
         pasar.title = sinCambios ? '' : 'Guarda antes el texto';
       }
+      const motivo = document.querySelector('#modulo .pie-cajon .texto-estado');
+      if (motivo) motivo.textContent = motivoPasarParrilla(g, !sinCambios).texto;
     } });
   area.value = texto;
   area.dataset.foco = 'parrilla-texto';
-  caja.appendChild(h('div', { clase: 'bloque' },
-    h('div', { clase: 'fila' }, h('h3', {}, 'El guion'), h('span', { clase: 'crece' }),
-      botonGuia('guion_parrilla', () => document.querySelector('#modulo [data-foco="parrilla-texto"]')),
-      h('button', { clase: 'mini', onclick: () => copiarTexto(PAR.borradorTexto !== null ? PAR.borradorTexto : g.texto) }, 'Copiar')),
-    area,
-    ortografiaDeCampo(`parrilla-${g.id || g.codigo || ''}`, {
-      leer: () => (PAR.borradorTexto !== null ? PAR.borradorTexto : g.texto),
-      poner: nuevo => { PAR.borradorTexto = nuevo; pintarModulo(); } }),
-    h('div', { clase: 'fila' },
-      h('button', { clase: 'primario mini guardar-texto-guion', disabled: cambiado ? null : true,
-        onclick: () => guardarGuionParrilla({ texto: PAR.borradorTexto }) }, 'Guardar el texto'),
-      h('button', { clase: 'mini fantasma descartar-texto-guion', disabled: cambiado ? null : true,
-        onclick: () => { PAR.borradorTexto = null; pintarModulo(); } }, 'Descartar cambios'),
-      h('span', { clase: 'pista' }, 'En el formato del Studio. Lo que va al Encargo se lee de «PARA EL ENCARGO».'))));
-
+  caja.appendChild(h('div', { clase: 'fila' }, h('h4', {}, 'El guion'), h('span', { clase: 'crece' }),
+    botonGuia('guion_parrilla', () => document.querySelector('#modulo [data-foco="parrilla-texto"]')),
+    h('button', { clase: 'mini', onclick: () => copiarTexto(PAR.borradorTexto !== null ? PAR.borradorTexto : g.texto) }, 'Copiar')));
+  caja.appendChild(area);
+  caja.appendChild(ortografiaDeCampo(`parrilla-${g.id || g.codigo || ''}`, {
+    leer: () => (PAR.borradorTexto !== null ? PAR.borradorTexto : g.texto),
+    poner: nuevo => { PAR.borradorTexto = nuevo; pintarModulo(); } }));
+  caja.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'primario mini guardar-texto-guion', disabled: cambiado ? null : true,
+      onclick: () => guardarGuionParrilla({ texto: PAR.borradorTexto }) }, 'Guardar el texto'),
+    h('button', { clase: 'mini fantasma descartar-texto-guion', disabled: cambiado ? null : true,
+      onclick: () => { PAR.borradorTexto = null; pintarModulo(); } }, 'Descartar cambios'),
+    h('span', { clase: 'pista' }, 'En el formato del Studio. Lo que va al Encargo se lee de «PARA EL ENCARGO».')));
   const avisos = (g.leido || {}).avisos || [];
   if (avisos.length) {
     caja.appendChild(h('div', { clase: 'caja-aviso avisos-guion' }, h('b', {}, 'Avisos del guion'),
       h('ul', {}, avisos.map(a => h('li', {}, a)))));
   }
+  return caja;
+}
 
-  caja.appendChild(bloqueEncargoParrilla(g, cambiado));
-
+/* «Estado»: pendiente → usado → publicado, a mano, y borrar el guion. */
+function bloqueEstadoGuionParrilla(g) {
   const estados = h('div', { clase: 'fila' });
   if (g.estado !== 'pendiente') {
     estados.appendChild(h('button', { clase: 'mini', onclick: () => guardarGuionParrilla({ estado: 'pendiente' }) }, 'Volver a pendiente'));
@@ -28618,19 +28958,20 @@ function seccionFichaParrilla() {
     estados.appendChild(h('button', { clase: 'mini fantasma', title: 'Copia su MARCA DEL CLIENTE, su tono y su CTA a la marca '
       + 'del proyecto (solo lo que esté vacío)', onclick: () => marcaDesdeGuionParrilla(g) }, 'Usar su marca para el proyecto'));
   }
-  estados.appendChild(h('span', { clase: 'crece' }));
-  estados.appendChild(h('button', { clase: 'mini fantasma peligro', onclick: () => borrarGuionParrilla(g) }, 'Borrar el guion'));
-  caja.appendChild(h('div', { clase: 'bloque' }, h('h3', {}, 'Estado'),
+  return h('div', { clase: 'ficha-estado-guion' },
     h('div', { clase: 'pista' }, 'Pendiente: nadie lo ha usado. Usado: se pasó al Encargo (y se enlaza solo con el vídeo '
-      + 'que se cree con él). Publicado: ese vídeo ya salió en Publicar.'), estados));
-  return caja;
+      + 'que se cree con él). Publicado: ese vídeo ya salió en Publicar.'), estados,
+    h('div', { clase: 'fila borrar-guion' },
+      h('button', { clase: 'mini fantasma peligro', onclick: () => borrarGuionParrilla(g) }, 'Borrar el guion')));
 }
 
-function bloqueEncargoParrilla(g, sinGuardar) {
+/* «Al Encargo»: lo que irá a «Un vídeo nuevo» y con qué estilo. El botón
+   está en la barra de abajo, a la vista desde las tres pestañas. */
+function bloqueEncargoParrilla(g) {
   const encargos = g.encargo || [];
   const i = Math.min(PAR.encargoIndice || 0, Math.max(0, encargos.length - 1));
   const e = encargos[i] || {};
-  const bloque = h('div', { clase: 'bloque encargo-parrilla' }, h('h3', {}, 'Lo que irá al Encargo'));
+  const bloque = h('div', { clase: 'encargo-parrilla' }, h('h4', {}, 'Lo que irá al Encargo'));
   if (encargos.length > 1) {
     const tira = h('div', { clase: 'tira-modos' });
     encargos.forEach((x, n) => tira.appendChild(h('button', {
@@ -28653,20 +28994,11 @@ function bloqueEncargoParrilla(g, sinGuardar) {
     bloque.appendChild(h('ul', { clase: 'avisos-encargo' }, e.avisos.map(a => h('li', { clase: 'meta' }, a))));
   }
   // con qué estilo: los del proyecto primero; si no tiene, todos
-  const propios = PAR.estilos.filter(x => x.cliente === PAR.cid);
-  const lista = propios.length ? propios : PAR.estilos;
-  if (!PAR.estiloElegido || !lista.some(x => x.id === PAR.estiloElegido)) {
-    PAR.estiloElegido = (lista[0] || {}).id || '';
-  }
-  const estilo = h('select', { onchange: ev => { PAR.estiloElegido = ev.target.value; } },
+  const lista = estilosParaPasarParrilla();
+  const estilo = h('select', { onchange: ev => { PAR.estiloElegido = ev.target.value; pintarModulo(); } },
     lista.map(x => h('option', { value: x.id, selected: x.id === PAR.estiloElegido ? true : null }, x.nombre)));
   bloque.appendChild(h('div', { clase: 'fila pasar-encargo' },
-    lista.length ? h('label', {}, 'Con el estilo ', estilo) : h('span', { clase: 'meta' }, 'No hay ningún estilo: crea uno en Crear.'),
-    h('span', { clase: 'crece' }),
-    h('button', { clase: 'primario boton-pasar-encargo', disabled: !lista.length || !e.material || sinGuardar ? true : null,
-      datos: { sinMaterial: !lista.length || !e.material ? '1' : '0' },
-      title: sinGuardar ? 'Guarda antes el texto' : !e.material ? 'El guion no tiene material' : '',
-      onclick: () => pasarAlEncargoParrilla(g, i, PAR.estiloElegido) }, 'Pasar al Encargo')));
+    lista.length ? h('label', {}, 'Con el estilo ', estilo) : h('span', { clase: 'meta' }, 'No hay ningún estilo: crea uno en Crear.')));
   bloque.appendChild(h('div', { clase: 'pista' }, 'Llena «Un vídeo nuevo» en Crear (nombre, material, indicaciones, llamadas '
     + 'a la acción, duración y formato) y marca el guion como usado. No se crea nada ni se gasta nada hasta que pulses '
     + '«Generar el guion» allí.'));
@@ -28683,7 +29015,8 @@ async function guardarGuionParrilla(cambios) {
   PAR.guardando = true;
   try {
     if ('estado' in cambios && cambios.estado === 'pendiente' && PAR.guion.video
-      && !confirm('Vuelve a pendiente y se olvida el vídeo con el que se enlazó (el vídeo no se toca). ¿Sigo?')) return;
+      && !await preguntarParrilla('Volver a pendiente', 'Vuelve a pendiente y se olvida el vídeo con el que se enlazó '
+        + '(el vídeo no se toca). ¿Sigo?', 'Volver a pendiente')) return;
     PAR.guion = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(PAR.guion.id)}`),
       { method: 'PUT', cuerpo: cambios });
     if ('texto' in cambios) PAR.borradorTexto = null;
@@ -28697,10 +29030,12 @@ async function guardarGuionParrilla(cambios) {
 }
 
 async function borrarGuionParrilla(g) {
-  if (!confirm(`¿Borrar «${[g.codigo, g.titulo].filter(Boolean).join(' — ') || 'este guion'}»? No se puede deshacer.`)) return;
+  if (!await preguntarParrilla('Borrar el guion', `¿Borrar «${[g.codigo, g.titulo].filter(Boolean).join(' — ') || 'este guion'}»? `
+    + 'No se puede deshacer.', 'Borrar el guion', true)) return;
   try {
     await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(g.id)}`), { method: 'DELETE' });
     PAR.guion = null;
+    PAR.fichaAbierta = false;
     PAR.seccion = 'parrilla';
     toast('guion borrado');
     await cargarParrilla(true);
@@ -28724,7 +29059,8 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   if (!ficha) { toast('ese estilo no está en Crear: recarga la página', true); return; }
   const actual = APP.light.video.encargo;
   if (actual && (String(actual.material || '').trim() || String(actual.indicaciones || '').trim())
-    && !confirm('Ya tienes un vídeo nuevo a medio escribir en Crear. ¿Lo reemplazo por este guion?')) return;
+    && !await preguntarParrilla('Pasar al Encargo', 'Ya tienes un vídeo nuevo a medio escribir en Crear. '
+      + '¿Lo reemplazo por este guion?', 'Reemplazarlo')) return;
   let datos;
   try {
     datos = await pedir(rutaProyectoParrilla(`/guiones/${encodeURIComponent(g.id)}/encargo`),
@@ -28749,6 +29085,7 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   /* y el tipo de relato, si el guion lo trae («Tipo de relato:»); si no, sin elegir */
   e.tipo_relato = tipoRelatoDelEncargo(r.tipo_relato);
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
+  PAR.fichaAbierta = false;
   PAR.datos = null;
   irAModulo('crear');
   elegirEstiloLight(ficha);
@@ -28779,11 +29116,12 @@ async function cargarMarcaParrilla() {
   } catch (e) {
     if (cid !== PAR.cid) return;
     toast(`no se ha podido leer la marca: ${e.message}`, true);
-    PAR.marca = { marca: {}, campos: [] };
+    PAR.marca = { marca: {}, campos: [], error: e.message };
     PAR.marcaBorrador = {};
   }
   PAR.marcaCargando = false;
-  if (MODULOS.actual === 'automatizar' && PAR.seccion === 'marca') repintarParrillaSinPisar();
+  // la línea de la marca de la Parrilla y el punto de su pestaña también la enseñan
+  if (MODULOS.actual === 'automatizar') repintarParrillaSinPisar();
 }
 
 function seccionMarcaParrilla() {
@@ -28793,32 +29131,42 @@ function seccionMarcaParrilla() {
     caja.appendChild(h('div', { clase: 'cargando' }, 'cargando…'));
     return caja;
   }
+  if (PAR.marca.error) {
+    caja.appendChild(cajaError(`No se pudo leer la marca: ${PAR.marca.error}`));
+    caja.appendChild(h('button', { clase: 'mini', onclick: () => reintentarMarcaParrilla() }, 'Reintentar'));
+    return caja;
+  }
   const b = PAR.marcaBorrador || {};
   const guardada = PAR.marca.marca || {};
-  const cambiada = (PAR.marca.campos || []).some(c => (b[c.id] || '') !== (guardada[c.id] || ''));
-  const bloque = h('div', { clase: 'bloque' },
+  const hayCambios = () => (PAR.marca.campos || []).some(x => (b[x.id] || '') !== (guardada[x.id] || ''));
+  const cambiada = hayCambios();
+  caja.appendChild(h('div', { clase: 'cab-anadir' },
     h('div', { clase: 'fila' }, h('h3', {}, 'La marca del cliente'), h('span', { clase: 'crece' }),
       botonGuia('marca_cliente', null)),
     h('div', { clase: 'pista' }, 'Se apunta una vez para todo el proyecto y Claude la usa en todo lo que escribe '
       + 'o convierte para él: subir, pegar, pedir, «Desde mis resultados» y la conversación. Así no hay que repetirla '
-      + 'en cada guion.'));
+      + 'en cada guion.')));
+  const campos = h('div', { clase: 'campos-marca' });
   (PAR.marca.campos || []).forEach(c => {
-    const area = h('textarea', { rows: c.id === 'quien' || c.id === 'otras' ? 3 : 2, placeholder: c.ayuda,
+    const area = h('textarea', { rows: c.id === 'quien' || c.id === 'otras' ? 4 : 3, placeholder: c.ayuda,
       oninput: ev => {
         b[c.id] = ev.target.value;
         const boton = document.querySelector('#modulo .guardar-marca');
-        if (boton) boton.disabled = !(PAR.marca.campos || []).some(x => (b[x.id] || '') !== (guardada[x.id] || ''));
+        if (boton) boton.disabled = !hayCambios();
+        const plan = document.querySelector('#modulo .marca-parrilla .barra-accion .plan');
+        if (plan) plan.textContent = hayCambios() ? 'Hay cambios sin guardar' : '';
       } });
     area.value = b[c.id] || '';
     area.dataset.foco = `marca-${c.id}`;
-    bloque.appendChild(h('label', { clase: 'campo-marca' }, h('span', { clase: 'meta' }, c.nombre), area));
+    campos.appendChild(h('label', { clase: 'campo-marca' }, h('span', { clase: 'meta' }, c.nombre), area));
   });
-  bloque.appendChild(h('div', { clase: 'fila cierre' },
-    h('button', { clase: 'primario guardar-marca', disabled: cambiada ? null : true,
-      onclick: () => guardarMarcaParrilla() }, 'Guardar la marca'),
-    h('span', { clase: 'pista' }, guardada.al ? `guardada el ${guardada.al.replace('T', ' ').slice(0, 16)}`
-      : 'todavía sin guardar')));
-  caja.appendChild(bloque);
+  caja.appendChild(campos);
+  const guardar = h('button', { disabled: cambiada ? null : true, onclick: () => guardarMarcaParrilla() }, 'Guardar la marca');
+  guardar.className = 'primario principal guardar-marca';
+  caja.appendChild(barraAutomatizar({
+    estado: { e: guardada.al ? 'hecho' : 'pend',
+      texto: guardada.al ? `guardada el ${guardada.al.replace('T', ' ').slice(0, 16)}` : 'todavía sin guardar' },
+    plan: cambiada ? 'Hay cambios sin guardar' : '', botones: [guardar] }));
   return caja;
 }
 
@@ -28954,27 +29302,45 @@ async function cargarChatsParrilla() {
   vigilarChatParrilla();
 }
 
+/* «CONVERSAR CON CLAUDE», EN SU PESTAÑA (rediseno-automatizar): a la izquierda
+   las conversaciones y a la derecha el hilo, como un chat. Es lo mismo de
+   antes (las mismas rutas y los mismos mandos), con la lista a la vista. */
+function seccionChatParrilla() {
+  return h('div', { clase: 'seccion-parrilla chat-seccion' }, panelChatParrilla());
+}
+
 function panelChatParrilla() {
-  const caja = h('div', { clase: 'bloque chat-parrilla' });
+  const caja = h('div', { clase: 'chat-parrilla' });
   if (PAR.chats === null) {
     PAR.chats = [];
     setTimeout(cargarChatsParrilla, 0);
   }
   if (PAR.chat && PAR.chat.ocupada && !PAR.chatReloj) setTimeout(vigilarChatParrilla, 0);
-  const lista = h('select', { 'aria-label': 'Conversaciones', onchange: ev => abrirChatParrilla(ev.target.value) },
-    [h('option', { value: '' }, PAR.chat && !PAR.chats.some(c => c.id === PAR.chat.id)
-      ? 'Conversación nueva' : 'Elige una conversación')]
-      .concat((PAR.chats || []).map(c => h('option', { value: c.id, selected: PAR.chat && PAR.chat.id === c.id ? true : null },
-        `${c.titulo} · ${c.tocada}`))));
-  caja.appendChild(h('div', { clase: 'fila cab-chat' },
-    h('h3', {}, 'Conversar con Claude'), h('span', { clase: 'crece' }),
-    (PAR.chats || []).length ? lista : null,
-    h('button', { clase: 'mini', onclick: () => nuevoChatParrilla() }, '+ Nueva'),
+  const lista = h('aside', { clase: 'lista-chats' },
+    h('div', { clase: 'fila cab-chat' }, h('h3', {}, 'Conversaciones'), h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini', onclick: () => nuevoChatParrilla() }, '+ Nueva')));
+  const nueva = PAR.chat && !(PAR.chats || []).some(c => c.id === PAR.chat.id);
+  const conversaciones = h('div', { clase: 'conversaciones-chat' });
+  if (nueva) {
+    conversaciones.appendChild(h('div', { clase: 'conv-chat activa', 'aria-current': 'true' },
+      h('b', {}, 'Conversación nueva'), h('span', { clase: 'meta' }, 'sin mensajes todavía')));
+  }
+  (PAR.chats || []).forEach(c => {
+    const activa = PAR.chat && PAR.chat.id === c.id;
+    conversaciones.appendChild(h('button', {
+      type: 'button', clase: `conv-chat${activa ? ' activa' : ''}`, 'aria-current': activa ? 'true' : null,
+      title: c.titulo, onclick: () => abrirChatParrilla(c.id),
+    }, h('b', {}, recortar(c.titulo || 'Conversación', 48)), h('span', { clase: 'meta' }, c.tocada || '')));
+  });
+  if (!nueva && !(PAR.chats || []).length) conversaciones.appendChild(h('div', { clase: 'meta' }, 'Ninguna todavía.'));
+  lista.appendChild(conversaciones);
+  lista.appendChild(h('div', { clase: 'fila pie-lista-chats' },
     PAR.chat && (PAR.chat.turnos || []).length
-      ? h('button', { clase: 'mini fantasma peligro', onclick: () => borrarChatParrilla() }, 'Borrar') : null,
+      ? h('button', { clase: 'mini fantasma peligro', onclick: () => borrarChatParrilla() }, 'Borrar esta conversación') : null,
+    h('span', { clase: 'crece' }),
     botonGuia('chat_guiones', () => document.querySelector('#modulo [data-foco="parrilla-chat"]'))));
-  caja.appendChild(mensajesChatParrilla());
-  caja.appendChild(entradaChatParrilla());
+  caja.appendChild(lista);
+  caja.appendChild(h('section', { clase: 'hilo-chat' }, mensajesChatParrilla(), entradaChatParrilla()));
   return caja;
 }
 
@@ -29084,7 +29450,7 @@ function entradaChatParrilla() {
   const capturas = h('div', { clase: 'fila capturas-chat' }, PAR.chatCapturas.map((c, i) => h('span', { clase: 'pastilla' },
     `📎 ${recortar(c.name || 'captura', 24)}`,
     h('button', { clase: 'mini fantasma', title: 'Quitar', onclick: () => { PAR.chatCapturas.splice(i, 1); pintarModulo(); } }, '×'))));
-  const interruptor = (clave, texto, ayuda) => h('label', { clase: 'plano interruptor-chat', title: ayuda },
+  const interruptor = (clave, texto, ayuda) => h('label', { clase: 'plano interruptor-chat chip-interruptor', title: ayuda },
     h('input', { type: 'checkbox', checked: PAR[clave] ? true : null, onchange: ev => { PAR[clave] = ev.target.checked; } }),
     h('span', {}, texto));
   const modelos = h('select', { 'aria-label': 'Modelo', onchange: ev => { PAR.chatModelo = ev.target.value; } },
@@ -29224,7 +29590,8 @@ async function guardarGuionesChatParrilla(turno, indices) {
 }
 
 async function borrarChatParrilla() {
-  if (!PAR.chat || !confirm('¿Borrar esta conversación? Los guiones que guardaste en la Parrilla se quedan.')) return;
+  if (!PAR.chat || !await preguntarParrilla('Borrar la conversación',
+    '¿Borrar esta conversación? Los guiones que guardaste en la Parrilla se quedan.', 'Borrar', true)) return;
   const id = PAR.chat.id;
   pararChatParrilla();
   try {
@@ -29277,9 +29644,8 @@ function seccionCuentasParrilla() {
   return caja;
 }
 
-/* ------------------------------------------------------------ conexiones */
-
-/* Las claves de YouTube, Meta y Apify se escriben en Configuración
+/* ------------------------------------------------------------ conexiones
+ * Las claves de YouTube, Meta y Apify se escriben en Configuración
    (`seccionClavesAnalizarCuentas`, rediseno-publicar); aquí queda su estado
    (`estadoConexionesCuentas`). Guardar y buscar la cuenta de Instagram siguen
    aquí y los usan las dos. */
@@ -29340,13 +29706,22 @@ function bloqueTraerCuenta() {
     bloque.appendChild(h('div', { clase: 'caja-error texto-error-cuenta' }, t.error));
   }
   const lista = (PAR.cuentas.cuentas || []);
-  if (lista.length) {
-    bloque.appendChild(h('div', { clase: 'fila cuentas-guardadas' }, h('span', { clase: 'meta' }, 'Ya leídas:'),
-      lista.slice(0, 20).map(c => h('button', { clase: `mini${PAR.cuentaAbierta && PAR.cuentaAbierta.usuario === c.usuario
-        && PAR.cuentaAbierta.red === c.red ? ' activo' : ' fantasma'}`, title: `${c.videos} vídeos · ${c.traida.replace('T', ' ').slice(0, 16)}`,
-      onclick: () => abrirCuentaParrilla(c.red, c.usuario) }, `${NOMBRE_RED_CUENTA[c.red] || c.red} · @${c.usuario}${c.analizada ? ' ✓' : ''}`))));
-  }
-  return bloque;
+  if (!lista.length) return bloque;
+  /* LAS YA LEÍDAS, COMO TARJETAS (rediseno-automatizar): red, cuántos vídeos,
+     cuándo se leyó y si Claude ya la analizó. Abrir una no paga nada. */
+  return h('div', { clase: 'cuentas-y-leidas' }, bloque,
+    h('div', { clase: 'leidas-cuentas' }, h('h3', {}, 'Ya leídas'),
+      h('div', { clase: 'cuentas-guardadas' }, lista.slice(0, 20).map(c => {
+        const abierta = PAR.cuentaAbierta && PAR.cuentaAbierta.usuario === c.usuario && PAR.cuentaAbierta.red === c.red;
+        return h('button', { type: 'button', clase: `tarjeta-cuenta${abierta ? ' activa' : ''}`,
+          'aria-pressed': abierta ? 'true' : 'false',
+          title: `${c.videos} vídeos · ${String(c.traida || '').replace('T', ' ').slice(0, 16)}`,
+          onclick: () => abrirCuentaParrilla(c.red, c.usuario) },
+        h('b', {}, `@${c.usuario}`),
+        h('span', { clase: 'meta' }, `${NOMBRE_RED_CUENTA[c.red] || c.red} · ${c.videos} vídeos · leída el `
+          + `${String(c.traida || '').replace('T', ' ').slice(0, 10)}`),
+        h('span', { clase: `pastilla${c.analizada ? ' ok' : ''}` }, c.analizada ? '✓ analizada' : 'sin analizar'));
+      }))));
 }
 
 async function traerCuentaParrilla(forzar, pagar, pedida) {
@@ -29490,7 +29865,6 @@ function bloqueCuentaAbierta(d) {
   } else {
     analisis.appendChild(h('div', { clase: 'pista' }, 'Claude compara sus vídeos con más y con menos vistas: temas, ganchos, duración, cuándo publica e ideas para ti.'));
   }
-  bloque.appendChild(analisis);
 
   const g = PAR.cuentaGuiones;
   const cuantos = h('input', { type: 'number', min: 1, max: PAR.maxPedir || 30, value: g.cuantos, clase: 'numero-corto',
@@ -29501,12 +29875,13 @@ function bloqueCuentaAbierta(d) {
   peticion.dataset.foco = 'cuenta-peticion';
   const uso = h('select', { 'aria-label': 'Uso', onchange: ev => { g.modo = ev.target.value; } },
     [['adaptar', 'adaptar'], ['exacto', 'exacto']].map(([v, t]) => h('option', { value: v, selected: g.modo === v ? true : null }, t)));
-  bloque.appendChild(h('div', { clase: 'guiones-cuenta' }, h('h4', {}, 'Para tu proyecto'),
+  // en dos columnas: «Qué le funciona» y «Para tu proyecto»
+  bloque.appendChild(h('div', { clase: 'dos-columnas-cuenta' }, analisis, h('div', { clase: 'guiones-cuenta' }, h('h4', {}, 'Para tu proyecto'),
     h('div', { clase: 'fila' }, h('label', {}, 'Guiones'), cuantos, h('label', {}, 'Uso'), uso, peticion),
     h('div', { clase: 'fila' },
       h('button', { clase: 'primario', onclick: () => guionesDesdeCuentaParrilla(d) }, 'Escribir guiones con lo que le funciona'),
       h('button', { clase: 'mini', onclick: () => chatConCuentaParrilla(d) }, 'Hablar de ella en el chat'),
-      h('span', { clase: 'pista' }, `Van a la Parrilla de ${((PAR.proyectos || []).find(p => p.id === PAR.cid) || {}).nombre || 'este proyecto'}, con tu marca. Se inspiran, no copian.`))));
+      h('span', { clase: 'pista' }, `Van a la Parrilla de ${((PAR.proyectos || []).find(p => p.id === PAR.cid) || {}).nombre || 'este proyecto'}, con tu marca. Se inspiran, no copian.`)))));
 
   const tabla = h('div', { clase: 'videos-cuenta' });
   (d.videos || []).forEach((v, i) => {
@@ -29532,7 +29907,8 @@ async function analizarCuentaParrilla(d) {
 }
 
 async function borrarCuentaParrilla(d) {
-  if (!confirm(`¿Olvidar @${d.usuario}? Se borran sus vídeos leídos y su análisis (los guiones que ya escribiste se quedan).`)) return;
+  if (!await preguntarParrilla('Olvidar la cuenta', `¿Olvidar @${d.usuario}? Se borran sus vídeos leídos y su análisis `
+    + '(los guiones que ya escribiste se quedan).', 'Olvidar', true)) return;
   try {
     await pedir(rutaCuentas(`/${encodeURIComponent(d.red)}/${encodeURIComponent(d.usuario)}`), { method: 'DELETE' });
     PAR.cuentaAbierta = null;
@@ -29557,9 +29933,8 @@ async function guionesDesdeCuentaParrilla(d) {
 
 function chatConCuentaParrilla(d) {
   PAR.chatCuenta = `${d.red}:${d.usuario}`;
-  PAR.form.origen = 'chat';
   if (!PAR.chatTexto.trim()) PAR.chatTexto = `¿Qué le funciona a @${d.usuario} y qué podría hacer yo con eso?`;
-  irASeccionParrilla('anadir');
+  irASeccionParrilla('chat');
 }
 
 /* En el chat: «📈 Con una cuenta analizada». Las cuentas se piden una vez. */

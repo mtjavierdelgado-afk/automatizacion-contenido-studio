@@ -23,6 +23,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 |---|---|---|
 | `GET` | `/api/proyectos` | Proyectos disponibles, del mas reciente al mas antiguo. |
 | `POST` | `/api/proyectos` | Crea un proyecto nuevo a partir de {"nombre"}. |
+| `GET` | `/api/proyectos/_resumen` | Por dónde va cada vídeo (`?ids=a,b`), para su tarjeta en Tus proyectos. Solo lee. |
 | `DELETE` | `/api/proyectos/papelera` | Vacia la papelera entera. Tampoco tiene vuelta atras. |
 | `GET` | `/api/proyectos/papelera` | Proyectos apartados, del mas recientemente apartado al mas antiguo. |
 | `DELETE` | `/api/proyectos/papelera/{carpeta}` | Borra DE VERDAD un proyecto apartado. No hay vuelta atras. |

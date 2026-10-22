@@ -14,6 +14,36 @@ vídeos, estilos, claves y contraseña no se tocan.
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
+**Crear en el móvil, arreglado (21 de octubre)**
+- **El recorrido ya no parpadea**: la fila de pasos de arriba saltaba al paso 1
+  y volvía cada medio segundo mientras algo se generaba. Ahora se queda quieta,
+  solo se centra al cambiar de paso, y lo que deslizas con el dedo se queda
+  donde lo dejas.
+- **Al pulsar «Montar» el paso Vídeo ya no se vacía**: el reproductor (con el
+  vídeo de antes y «montando…» encima), los ajustes del montaje y el repaso se
+  quedan en su sitio, apagados hasta que acaba. La pantalla no salta a otro
+  sitio, ni en el móvil ni en el ordenador.
+- **La barra de abajo, en el móvil, es una fila**: cómo está el paso, en una
+  línea, y el botón principal. Lo demás (el estado entero, lo que va a hacer y
+  cuánto cuesta, y los otros botones) está en **«⋯»** (o tocando el estado),
+  que se abre encima de la barra. Ya no cambia de alto mientras se genera.
+  En Imágenes, ‹ ♪ Oírla ▶ Siguiente › van encima de la imagen.
+- **La cabecera del vídeo, más baja en el móvil**: el nombre en una línea y el
+  gasto en una pastilla (al tocarla, el desglose, como siempre).
+- **Los avisos de «hay algo por actualizar», en una línea en el móvil**: «Este
+  vídeo es de ANTES de tus últimos cambios» y la explicación del Encargo se
+  abren al tocarlos; «Hay cambios del montaje sin aplicar» queda en una línea
+  (el botón que lo resuelve ya está en la barra).
+- **El aviso flotante (abajo) ya no tapa el botón de la barra**: sale encima
+  de ella, al lado de la burbuja. Y si llegan dos seguidos, se ven los dos.
+- **Escribiendo con el teclado del móvil abierto** (una nota, un texto), la
+  barra de abajo, la cabecera de arriba y la burbuja se apartan hasta que
+  dejas de escribir.
+- **Al pedir una imagen con una nota, su tarjeta ya deja el sitio** de la
+  nueva («dibujando la nueva…» arriba y la de ahora como «antes» abajo): al
+  llegar ya no empuja el texto hacia abajo.
+- Nada de esto cambia qué hace ningún botón ni cuánto cuesta.
+
 **Crear, rediseñado: el carril de seis pasos (20 de octubre)**
 - **El recorrido de un vídeo, a la izquierda** (en el móvil, una fila arriba
   que se desliza y se centra sola en el paso en el que estás): **Estilo ·

@@ -80,6 +80,14 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/subtitulos/aplicar` | Rehace las capas de texto y vuelve a montar el video. Ni una imagen. |
 | `POST` | `/api/proyectos/{pid}/subtitulos/rehacer` | Rehace los subtitulos (y monta) de un video cuya voz llego con las |
 | `GET` | `/api/proyectos/{pid}/subtitulos/rotos` | {planos}: cuantos planos tienen los subtitulos dibujados con las tildes |
+| `GET` | `/api/proyectos/{pid}/tipo_relato` | El tipo de relato del video: el guardado, el que rige, las bases y los planos que cambian. |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/aplicar` | Guarda el tipo de relato de un video (hecho o no). No dibuja nada. |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/base/aprobar` | {sitio?, estado?, aprobada: true|false}: aprueba (o retira) la imagen base del sitio, o con `estado` la de ese estado. |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/base/generar` | Genera la imagen base del sitio, o con {estado} la de ese estado (SE PAGA una imagen). {usd: lo que se vio, estado?, otra?} |
+| `GET` | `/api/proyectos/{pid}/tipo_relato/base/imagen` | La imagen base (aprobada o no) de un sitio del video, o la de un estado. |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/base/usar_subida` | La imagen subida del espacio fijo pasa a ser la base, aprobada (gratis). |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/cambios` | En «un espacio que cambia», Claude escribe el cambio de cada tramo (solo texto). |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/rehacer` | Rehace SOLO los planos pedidos de los que cambian con el tipo de relato (se paga). |
 
 ## Pasos: estado, params y ejecución
 
@@ -275,6 +283,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/presets-light/{preset_id}/regenerar` | Rehace UNA de las tres partes con una frase de feedback. |
 | `GET` | `/api/presets-light/{preset_id}/reglas` | Las reglas de un estilo. -> {reglas, gravedades, maximo} |
 | `PUT` | `/api/presets-light/{preset_id}/reglas` | Guarda las reglas de un estilo: {reglas: [{id?, nombre, texto, palabras?, |
+| `GET` | `/api/presets-light/{preset_id}/relato` | El tipo de relato por defecto de un estilo (rama tipo-de-relato). |
+| `PUT` | `/api/presets-light/{preset_id}/relato` | Guarda el tipo de relato por defecto de un estilo: {relato: {modo, cambia?}}. |
 | `POST` | `/api/presets-light/{preset_id}/video` | Un proyecto de video nuevo con ese estilo ya aplicado. -> la ficha. |
 | `POST` | `/api/presets-light/{preset_id}/voz/previsualizar` | Unos segundos con la voz de este estilo, para escucharla. |
 
@@ -460,4 +470,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**346 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**356 endpoints.** Escrito por `generar_api.py` desde `app.py`.

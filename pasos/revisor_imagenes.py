@@ -282,7 +282,17 @@ def _planos_legibles(proyecto, escenas, imagenes, bloques):
             f"    se pidio (en ingles): {_texto(escena.get('prompt'), 700) or '(sin descripcion)'}\n"
             f"    tipo de plano: {_texto(escena.get('encuadre'), 200) or '(libre)'}"
             + (f"\n    personajes: {', '.join(escena.get('personajes') or [])}"
-               if escena.get("personajes") else ""))
+               if escena.get("personajes") else "")
+            # EDITADO DESDE LA IMAGEN BASE (rama tipo-de-relato): solo los
+            # planos que lo estan llevan esta linea; los demas, como siempre
+            + (f"\n    EDITADO DESDE LA IMAGEN BASE de «{escena.get('set')}»; lo unico "
+               f"que se pidio cambiar: {_texto(escena.get('cambio'), 400) or '(nada del sitio: solo la accion)'}"
+               if escena.get("editar_base") and not escena.get("base_clave") else "")
+            # la imagen de un ESTADO ya trae el cambio: el plano no cambia nada
+            + (f"\n    EDITADO DESDE LA IMAGEN BASE de «{escena['base_clave'].replace('#', ' · estado ')}» "
+               f"(que ya muestra: {_texto(escena.get('cambio'), 400)}); lo unico que se pidio "
+               f"cambiar: (nada del sitio: solo la accion)"
+               if escena.get("editar_base") and escena.get("base_clave") else ""))
     return "\n".join(lineas)
 
 
@@ -294,6 +304,36 @@ para ver si el primer plano de la lista mantiene {continuidad} que venia de ante
 {plano}
 
 """
+
+
+#: La imagen base de un sitio (rama tipo-de-relato). Los planos que se generan
+#: EDITANDOLA tienen que ser ese mismo sitio, con la misma camara: todo lo que
+#: cambie fuera de lo pedido es congruencia, y de gravedad alta.
+REFERENCIA_BASE = """LA IMAGEN BASE DE «{sitio}» (abrela con Read, pero NO la juzgues ni la
+pongas en tu respuesta): los planos marcados «EDITADO DESDE LA IMAGEN BASE» se
+generaron editandola. Comparalos con ella uno a uno. La distribucion, la camara
+(posicion, altura, angulo), las paredes, el suelo, los muebles fijos y los
+acabados tienen que ser LOS MISMOS que en la base, salvo lo que diga «lo unico
+que se pidio cambiar» de cada plano. Cualquier otro cambio del sitio es un
+problema de tipo "congruencia" con gravedad "alta". El cambio pedido NO es una
+incongruencia, y la gente o los objetos sueltos que pide la voz tampoco.
+  imagen base: {imagen}
+
+"""
+
+
+def _referencia_base(proyecto, tanda, bases):
+    """El bloque de la imagen base de los sitios editados de la tanda, o ""."""
+    texto = ""
+    # la clave es el sitio o, en «un espacio que cambia», la imagen del estado
+    # del plano («sitio#estado»): se compara con la que se edito de verdad
+    for clave in sorted({e.get("base_clave") or e.get("set") for e in tanda
+                         if e.get("editar_base")
+                         and (e.get("base_clave") or e.get("set")) in (bases or {})}):
+        texto += REFERENCIA_BASE.format(
+            sitio=clave.replace("#", " · estado "),
+            imagen=_copia(proyecto, "base_" + clave.replace("#", "__"), bases[clave]))
+    return texto
 
 
 def _frases(estilo, plan, guia="", encargo=""):
@@ -423,13 +463,16 @@ def entradas_de(texto):
 
 def revisar(proyecto, plan, imagenes, planos, estilo=None, encargo="",
             reglas="", guia="", formato="", ajuste=None, avisar=None,
-            reglas_estilo=""):
+            reglas_estilo="", bases=None):
     """Mira esos planos y devuelve {plano: ficha}. Los que no se pudieron mirar
     no salen (y se vuelven a mirar la proxima vez).
 
     `imagenes` es {plano: ruta absoluta}; `estilo` el dict del estilo del video
     (su `prompt` son las indicaciones que escribio la persona); `guia` la guia
     escrita ya en texto; `reglas` las reglas de la casa ya en texto.
+    `bases` es {sitio: ruta absoluta} de las imagenes base aprobadas (tipo de
+    relato explicito, `p6_assets.rutas_de_bases`): los planos editados desde
+    una se comparan con ella. Sin bases, la instruccion es la de siempre.
     """
     avisar = avisar or (lambda *a, **k: None)
     escenas = [e for e in (plan.get("escenas") or [])
@@ -455,7 +498,8 @@ def revisar(proyecto, plan, imagenes, planos, estilo=None, encargo="",
             reglas=reglas or "(sin reglas)",
             reglas_estilo=(BLOQUE_REGLAS_ESTILO.format(reglas=reglas_estilo)
                            if reglas_estilo else ""),
-            referencia=_referencia_de(proyecto, plan, ids[0], imagenes, bloques, frases),
+            referencia=(_referencia_base(proyecto, tanda, bases)
+                        + _referencia_de(proyecto, plan, ids[0], imagenes, bloques, frases)),
             planos=_planos_legibles(proyecto, tanda, imagenes, bloques),
             tipos=" | ".join(TIPOS),
             f_equipo=frases["equipo"], f_congruencia=frases["congruencia"],

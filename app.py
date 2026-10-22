@@ -13877,12 +13877,16 @@ def _congelar_preset(ctx, encargo, preset_id=None):
         try:
             anterior = presets.leer(preset_id)
             reglas = ((anterior.get("datos") or {}).get("estilo") or {}).get("reglas")
+            # el negocio del estilo, por lo mismo (rama dominio-negocio)
+            dominio = ((anterior.get("datos") or {}).get("estilo") or {}).get("dominio")
             # el tipo de relato por defecto, por lo mismo (rama tipo-de-relato)
             relato = ((anterior.get("datos") or {}).get("estilo") or {}).get("relato")
         except Exception:                                    # noqa: BLE001
-            reglas = relato = None
+            reglas = dominio = relato = None
         if reglas:
             datos.setdefault("estilo", {})["reglas"] = copy.deepcopy(reglas)
+        if dominio:
+            datos.setdefault("estilo", {})["dominio"] = dominio
         if relato:
             datos.setdefault("estilo", {})["relato"] = copy.deepcopy(relato)
     # `estilo_modo` solo si es foto (ver `presets_light.origen_de`)
@@ -15298,6 +15302,66 @@ def guardar_relato_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
             raise ErrorApi(400, str(fallo))
     anotar_global("relato_estilo", {"preset": preset_id, "modo": relato.get("modo")})
     return {"relato": relato, "cambiado": True}
+
+
+# ------------------------------------------------------------------ DOMINIOS
+#
+# Rama dominio-negocio (21-10-2026). Lo de cada negocio (servicios, cartas de
+# foto, frases del revisor) vive en `pasos/dominios.py`. Un estilo puede fijar
+# el suyo (`estilo.dominio`); sin fijar, se detecta por el texto como siempre.
+# La pantalla para elegirlo llega con la Etapa Foto C: aqui, leerlo y fijarlo.
+
+@app.get("/api/dominios")
+def listar_dominios():
+    """Los dominios de fabrica (el negocio de un estilo). -> {dominios, automatico}"""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    return {"dominios": PASOS_MODULOS.dominios.listar(),
+            "automatico": "sin fijar: se detecta por el texto del vídeo, como siempre"}
+
+
+@app.put("/api/presets-light/{preset_id}/dominio")
+def guardar_dominio_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
+    """Fija el negocio de un estilo: {dominio: "estadoplay" | "general" | null}.
+    null (o "") vuelve a la deteccion automatica. No toca ningun video: llega a
+    los nuevos al crearlos y a los hechos con «Traer el estilo»."""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    presets = _presets()
+    datos = _cuerpo(cuerpo)
+    if "dominio" not in datos:
+        raise ErrorApi(400, "manda {dominio: id} (null vuelve a automático)")
+    try:
+        dominio = PASOS_MODULOS.dominios.normalizar(datos.get("dominio"))
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    with presets.lock_de(presets.FICHERO):
+        ficha = _preset_o_400(lambda p: p.leer(preset_id))
+        if ficha.get("tipo") != "canal":
+            raise ErrorApi(400, "esto no es un preset de canal")
+        contenido = copy.deepcopy(ficha.get("datos") or {})
+        estilo = dict(contenido.get("estilo") or {})
+        if dominio and not estilo.get("referencias"):
+            raise ErrorApi(400, "este estilo todavía no tiene su estilo gráfico (las "
+                                "láminas): genéralo antes de fijarle el negocio")
+        if (estilo.get("dominio") or "") == dominio:
+            return {"dominio": dominio, "cambiado": False}
+        if dominio:
+            estilo["dominio"] = dominio
+        else:
+            estilo.pop("dominio", None)
+        if estilo:
+            contenido["estilo"] = estilo
+        else:
+            contenido.pop("estilo", None)
+        try:
+            presets.guardar("canal", ficha.get("nombre") or "", contenido,
+                            nota=ficha.get("nota") or "",
+                            miniatura=ficha.get("miniatura") or "", pid=preset_id)
+        except presets.ErrorPreset as fallo:
+            raise ErrorApi(400, str(fallo))
+    anotar_global("dominio_estilo", {"preset": preset_id, "dominio": dominio or "automatico"})
+    return {"dominio": dominio, "cambiado": True}
 
 
 @app.post("/api/reglas-estilo/afinar", status_code=202)

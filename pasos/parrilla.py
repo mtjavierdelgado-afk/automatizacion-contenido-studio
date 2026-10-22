@@ -163,7 +163,8 @@ _REGLAS = """REGLAS GENERALES
 6. Las reglas fijas del cliente (qué mostrar, qué evitar, colores, frases de marca) van a MARCA DEL CLIENTE, no dentro de las escenas.
 7. No inventes datos: teléfonos, precios o enlaces solo si están en el original. Si falta el CTA, pon [FALTA CTA].
 8. ESPACIO FIJO solo si el original dice que todo el vídeo ocurre en un mismo sitio (un local, una cocina, un plató). Si no lo dice, no pongas esa sección.
-9. "Tipo de relato" solo si el original pide una forma concreta de contarlo en imágenes: "espacio_que_cambia (objeto | acabados | estado | hora)" si es UN sitio que se ve siempre igual y en el que solo cambia lo que dice la voz (un antes y después, tres paletas, una sala vacía → montada); "recorrido" si son varios ambientes de un mismo lugar; "escenario_y_apoyos" si es un sitio con otros secundarios; "producto" si el producto manda y el fondo no cambia; "clase" si es una clase. Si no lo pide, quita la línea."""
+9. "Tipo de relato" solo si el original pide una forma concreta de contarlo en imágenes: "espacio_que_cambia (objeto | acabados | estado | hora)" si es UN sitio que se ve siempre igual y en el que solo cambia lo que dice la voz (un antes y después, tres paletas, una sala vacía → montada); "recorrido" si son varios ambientes de un mismo lugar; "escenario_y_apoyos" si es un sitio con otros secundarios; "producto" si el producto manda y el fondo no cambia; "clase" si es una clase. Si no lo pide, quita la línea.
+10. "Imágenes: guion" solo si el original pide que las imágenes sigan las líneas «Visual:» y no lo que dice la voz (un guion de plano a plano, con su cámara); entonces cada línea «Visual:» es una imagen fija concreta, con quién, dónde, qué hace y desde dónde se ve. Si no lo pide, quita la línea."""
 
 _AJUSTE_RED = """AJUSTE POR RED (en "adaptar" aplícalo; en "exacto" solo avisa con ⚠ si algo no encaja)
 - TikTok / Reels / Shorts: vertical. Gancho en los primeros 2–3 s. Un cambio de plano cada 1–3 s. Texto en pantalla frecuente y grande, que refuerce la voz. CTA corto (comenta, guárdalo, link en bio, escríbenos). En TikTok, las palabras clave del tema dichas en la voz.
@@ -184,6 +185,7 @@ Objetivo: …
 CTA: …
 Tono: …
 Tipo de relato: … (opcional; quita la línea si no hace falta)
+Imágenes: guion (opcional; quita la línea si las imágenes ilustran la voz)
 
 ESPACIO FIJO (solo si todo el vídeo ocurre en un mismo sitio; si no, quita esta sección)
 - Sitio: [nombre corto del sitio]
@@ -398,6 +400,8 @@ _CABECERAS = {
     "locucion estimada": "locucion", "objetivo": "objetivo", "cta": "cta", "tono": "tono",
     # rama tipo-de-relato: como se cuenta en imagenes (opcional)
     "tipo de relato": "tipo_relato", "tipo relato": "tipo_relato",
+    # rama guion-visual: que dibujan las imagenes, la voz o el guion (opcional)
+    "imágenes": "imagenes", "imagenes": "imagenes",
 }
 
 
@@ -529,6 +533,8 @@ def leer_guion(texto):
                 g["formato"] = _uno_de(valor, FORMATOS)
             elif clave == "tipo_relato":
                 _tipo_relato(g, valor)
+            elif clave == "imagenes":
+                _imagenes(g, valor)
             elif clave:
                 g[clave] = valor
             continue
@@ -688,6 +694,24 @@ def _es_cabecera(linea):
     return bool(_cabecera(linea)[0])
 
 
+def _imagenes(g, valor):
+    """«Imágenes: guion | voz» → g["imagenes"] (rama guion-visual). La nota entre
+    paréntesis de la plantilla se ignora; un valor que no se entiende avisa."""
+    try:
+        from . import guion_visual                                # noqa: PLC0415
+    except ImportError:                                           # pragma: no cover
+        import guion_visual                                       # noqa: PLC0415
+    limpio = re.sub(r"\(.*?\)", "", str(valor or "")).strip()
+    try:
+        modo = guion_visual.normalizar_modo(limpio)
+    except ValueError:
+        g["imagenes_aviso"] = (f"«Imágenes: {limpio}» no se entiende: vale «guion» o «voz»; "
+                               "se dibuja lo que dice la voz")
+        return
+    if modo:
+        g["imagenes"] = modo
+
+
 def _cabecera(linea):
     m = re.match(r"^([A-Za-zÁÉÍÓÚáéíóúñÑ /]+?)\s*:\s*(.*)$", linea)
     if not m:
@@ -801,6 +825,20 @@ def encargo_de(guion, indice=0):
         extra["tipo_relato"] = dict(g["tipo_relato"])
     if g.get("tipo_relato_aviso"):
         avisos.append(g["tipo_relato_aviso"])
+    # que dibujan las imagenes y las lineas «Visual:» (rama guion-visual). Las
+    # lineas viajan siempre que las haya: se guardan solo si el video dibuja lo
+    # que dice el guion (al crear, `_opciones_al_crear`)
+    if g.get("imagenes"):
+        extra["imagenes"] = g["imagenes"]
+    if g.get("imagenes_aviso"):
+        avisos.append(g["imagenes_aviso"])
+    visuales = [{"voz": _sin_comillas(e.get("voz")), "visual": list(e.get("visual") or [])}
+                for e in g.get("escenas") or [] if e.get("visual")]
+    if visuales:
+        extra["visuales"] = visuales
+        if not g.get("imagenes"):
+            avisos.append("el guion trae líneas «Visual:», pero las imágenes dibujarán lo que "
+                          "dice la voz: elige «Lo que dice el guion» en el Encargo para usarlas")
     return {**extra, "nombre": nombre[:60], "material": material, "indicaciones": indicaciones,
             "llamadas": llamadas, "cta": cta, "duracion_objetivo_s": int(duracion) if duracion else None,
             "formato": formato, "guion_propio": exacto, "uso": uso or "adaptar",
@@ -864,7 +902,8 @@ def plantilla_vacia(cliente=""):
             "Locución estimada: … palabras ≈ … s\nObjetivo: [qué tiene que conseguir]\n"
             "CTA: [qué se pide al final]\nTono: [cómo suena]\n"
             "Tipo de relato: documental | espacio_que_cambia (objeto | acabados | estado | hora) "
-            "| recorrido | escenario_y_apoyos | producto | clase  (opcional: deja uno o bórrala)\n\n"
+            "| recorrido | escenario_y_apoyos | producto | clase  (opcional: deja uno o bórrala)\n"
+            "Imágenes: voz | guion  (opcional: «guion» si cada imagen sigue su línea «Visual:»)\n\n"
             "ESPACIO FIJO (opcional: bórralo si el vídeo cambia de sitio)\n- Sitio: [nombre corto]\n"
             "- Descripción: [cómo es el sitio, en una frase; va tal cual a todas las imágenes]\n"
             "- Luz: [hora del día y fuente de luz]\n- Secundarios: ninguno\n\n"

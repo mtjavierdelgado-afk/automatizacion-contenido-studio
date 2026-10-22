@@ -70,6 +70,7 @@ import catalogo_visual  # noqa: E402
 import corrector  # noqa: E402
 import reglas_estilo  # noqa: E402
 import tipo_relato  # noqa: E402
+import guion_visual  # noqa: E402
 import cta  # noqa: E402
 import encuadres  # noqa: E402
 import estadisticas  # noqa: E402
@@ -1158,6 +1159,26 @@ def _asignar_cartas(escenas, p, texto=""):
     return cartas
 
 
+def _aplicar_lineas_gv(escenas, catalogo):
+    """La camara y la gente de cada linea del guion visual (rama guion-visual).
+
+    La camara de la linea va LITERAL como encuadre (el SHOT TYPE del prompt) y
+    el plano deja de ser abstracto; sin camara, la carta repartida de siempre.
+    Los personajes de la linea mandan sobre los del tramo, pero solo los que
+    estan en el reparto (lo fijo manda: uno inventado no tiene hoja)."""
+    reparto = (catalogo or {}).get("reparto") or {}
+    for escena in escenas:
+        linea = escena.get("linea_gv")
+        if not linea:
+            continue
+        if linea.get("camara"):
+            escena["encuadre"] = linea["camara"]
+            escena.pop("abstracta", None)
+        if linea.get("personajes"):
+            gente = [q for q in linea["personajes"] if q in reparto]
+            escena["personajes"] = gente
+
+
 def _repartir_zoom(escenas, modo="ilustracion", servicios=None):
     """El zoom de cada plano, alternado. Se juega en el CORTE, sobre la imagen.
 
@@ -1255,15 +1276,31 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # donde cortaba de verdad, heredar del resultado es exactamente el fallo de
     # arriba.
     crudo = [{"narracion": x} for x in ((previo or {}).get("corte") or [])]
-    segmentos = segmentar.heredar(palabras, crudo,
-                                  adelanto=adelanto, cola=cola,
-                                  minimo=p["min_s"], maximo=p["max_s"],
-                                  reparto=reparto_corte)
-    if not segmentos:
-        segmentos = segmentar.segmentar(palabras, p["min_s"], p["max_s"],
-                                        adelanto=adelanto, cola=cola, muros=muros,
-                                        reparto=reparto_corte)
+    # EL GUION VISUAL MANDA EN EL CORTE (rama guion-visual): con «lo que dice el
+    # guion» y el guion visual aprobado, un plano por linea visual, sobre el
+    # reloj de la voz. Sin el, `lineas_gv` es None y el corte es el de siempre.
+    lineas_gv = guion_visual.activo(p)
+    avisos_gv = []
+    if lineas_gv:
+        tramos_b = tramos_de_bloque(meta)
+        bloque_de = [(tramos_b[i][2] if i >= 0 else "")
+                     for i in (_bloque_en(w, tramos_b) for w in palabras)]
+        segmentos, lineas_gv, avisos_gv = guion_visual.segmentos(palabras, bloque_de,
+                                                                  lineas_gv)
+    else:
+        segmentos = segmentar.heredar(palabras, crudo,
+                                      adelanto=adelanto, cola=cola,
+                                      minimo=p["min_s"], maximo=p["max_s"],
+                                      reparto=reparto_corte)
+        if not segmentos:
+            segmentos = segmentar.segmentar(palabras, p["min_s"], p["max_s"],
+                                            adelanto=adelanto, cola=cola, muros=muros,
+                                            reparto=reparto_corte)
     escenas = [dict(e) for e in segmentar.construir_escenas(segmentos)]
+    if lineas_gv:
+        for escena, linea in zip(escenas, lineas_gv):
+            if linea:
+                escena["linea_gv"] = dict(linea)
     # EL CORTE, TAL CUAL SALIO. Se guarda antes de que nadie lo toque: es lo
     # unico contra lo que la proxima pasada puede reconocer donde cortaba.
     corte_crudo = [e.get("narracion") or "" for e in escenas]
@@ -1281,6 +1318,8 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # simuladores...): lo que el guion ha decidido que sale, en el catalogo
     texto_video = json.dumps(catalogo or {}, ensure_ascii=False)
     _asignar_cartas(escenas, p, texto=texto_video)
+    if lineas_gv:
+        _aplicar_lineas_gv(escenas, catalogo)
     modo = modo_de(p["estilo"])
     # EL TIPO DE RELATO (rama tipo-de-relato). Solo con un modo EXPLICITO que
     # edita: sin el, `relato_edita` es False y ningun plano cambia.
@@ -1300,6 +1339,8 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     informe = segmentar.informe(escenas, p["min_s"], p["max_s"],
                                 reparto=reparto_corte)
     informe["camaras"] = camaras
+    if lineas_gv:
+        informe["guion_visual"] = {"planos": len(lineas_gv), "avisos": avisos_gv}
     # Las marcas de palabra viajan con el plano: son lo que permite que un
     # rotulo entre cuando se dice lo que rotula y no al empezar el plano. Van
     # ANTES de repartir las cartelas porque ahora las cartelas tambien las usan:
@@ -1382,6 +1423,18 @@ def planificar(proyecto, params, inventario=None, replantear=False,
             escena["accion"] = str(beat["accion"]).strip()
         if beat.get("tono"):
             escena["tono"] = str(beat["tono"]).strip()
+        linea = escena.get("linea_gv")
+        if linea:
+            # LO QUE SE VE LO DICE EL GUION VISUAL, no la voz: su linea es la
+            # accion y la direccion del plano (una direccion escrita a mano
+            # para ESTE plano sigue mandando), y el estado del objeto sale de
+            # la linea, no del tramo de voz
+            escena["accion"] = linea["visual"]
+            if not escena.get("direccion"):
+                escena["direccion"] = linea["visual"]
+            beat = dict(beat, **guion_visual.estado_de_linea(
+                linea, tipo_relato.estados_del_catalogo(catalogo, principal)
+                if principal else {}))
         if relato_edita:
             _marcar_edicion(escena, beat, relato, principal, modo, bases_rel)
         escena["prompt"] = _prompt_visual(escena, beat, catalogo, modo=modo)
@@ -2239,7 +2292,9 @@ def _con_narracion(base, escena):
     piso y no el foro de siempre con otro retoque.
     """
     linea = (escena.get("narracion") or "").strip()
-    if not linea:
+    # CON EL GUION VISUAL, LA FRASE NO LLEGA AL DIBUJANTE (rama guion-visual):
+    # lo que se ve lo dice su linea visual (ya en la direccion del plano)
+    if not linea or escena.get("linea_gv"):
         return base
     momento = (f'This shot accompanies the narration line: "{linea}". '
                f"Show the specific moment that line describes -- or, when the "
@@ -4995,6 +5050,13 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     # cada plano, que es justo lo que este modo viene a quitar. Se para ANTES
     # de gastar nada y se dice donde se aprueba.
     if not solo_assets:
+        # CON «LO QUE DICE EL GUION», SIN GUION VISUAL APROBADO NO SE PAGA NADA
+        # (rama guion-visual): se dibujaria lo que dice la voz, que es justo lo
+        # que se ha pedido que no pase
+        if guion_visual.modo_de(p) == "guion" and not guion_visual.activo(p):
+            raise RuntimeError("este vídeo dibuja lo que dice el guion y su guion visual "
+                               "no está aprobado: revísalo y apruébalo en «Guion visual» "
+                               "(paso Imágenes) antes de generar los planos")
         faltan = planos_sin_base(plan, dirs, unidades=unidades, rehacer=rehacer)
         if faltan:
             raise RuntimeError(

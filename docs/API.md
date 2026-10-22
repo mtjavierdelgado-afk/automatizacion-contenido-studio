@@ -88,6 +88,11 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/tipo_relato/base/usar_subida` | La imagen subida del espacio fijo pasa a ser la base, aprobada (gratis). |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/cambios` | En «un espacio que cambia», Claude escribe el cambio de cada tramo (solo texto). |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/rehacer` | Rehace SOLO los planos pedidos de los que cambian con el tipo de relato (se paga). |
+| `GET` | `/api/proyectos/{pid}/guion_visual` | Qué dibujan las imágenes de un vídeo, su guion visual y lo que hay que revisar. |
+| `PUT` | `/api/proyectos/{pid}/guion_visual` | {planos: [{bloque, visual, camara?, estado?, personajes?}]}: el guion visual escrito o corregido a mano. Guardarlo lo deja SIN aprobar. |
+| `POST` | `/api/proyectos/{pid}/guion_visual/aprobar` | {aprobado: true|false}. Aprobar lanza también la comprobación contra lo fijo (solo texto): sus avisos salen en la ficha, no bloquean. |
+| `PUT` | `/api/proyectos/{pid}/guion_visual/modo` | {imagenes: "guion" | "voz" | null}: qué dibujan las imágenes de ESTE vídeo. |
+| `POST` | `/api/proyectos/{pid}/guion_visual/proponer` | Claude escribe el guion visual leyendo el guion entero (solo texto, no se paga ninguna imagen). Sustituye al que hubiera, sin aprobar. |
 
 ## Pasos: estado, params y ejecución
 
@@ -284,6 +289,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/presets-light/{preset_id}/reglas` | Guarda las reglas de un estilo: {reglas: [{id?, nombre, texto, palabras?, |
 | `GET` | `/api/presets-light/{preset_id}/relato` | El tipo de relato por defecto de un estilo (rama tipo-de-relato). |
 | `PUT` | `/api/presets-light/{preset_id}/relato` | Guarda el tipo de relato por defecto de un estilo: {relato: {modo, cambia?}}. |
+| `GET` | `/api/presets-light/{preset_id}/imagenes` | Qué dibujan por defecto las imágenes de los vídeos de un estilo. |
+| `PUT` | `/api/presets-light/{preset_id}/imagenes` | {imagenes: "guion" | null}: el defecto de los vídeos NUEVOS de este estilo. |
 | `POST` | `/api/presets-light/{preset_id}/video` | Un proyecto de video nuevo con ese estilo ya aplicado. -> la ficha. |
 | `POST` | `/api/presets-light/{preset_id}/voz/previsualizar` | Unos segundos con la voz de este estilo, para escucharla. |
 
@@ -468,4 +475,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**354 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**361 endpoints.** Escrito por `generar_api.py` desde `app.py`.

@@ -5126,6 +5126,282 @@ def _tipo_relato_pedido(opciones):
         raise ErrorApi(400, str(fallo))
 
 
+# ------------------------------------------------------------ GUION VISUAL
+#
+# Rama guion-visual (22-10-2026). «Qué dibujan las imágenes»: lo que dice la
+# voz (como siempre, sin guardar nada) o lo que dice el guion. Con el guion,
+# cada linea del guion visual es un plano; sale de las lineas «Visual:» de la
+# Parrilla o de un borrador de Claude, y una persona lo aprueba antes de pagar
+# ninguna imagen. Ver pasos/guion_visual.py.
+
+def _guion_visual():
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    return PASOS_MODULOS.guion_visual
+
+
+def _ruta_comprobacion_gv(ctx):
+    return ctx.proyecto.ruta("guion_visual_comprobacion.json")
+
+
+def _fijo_del_video(ctx):
+    """(espacio, reparto, estados) que el guion visual no puede contradecir."""
+    params = ctx.estado.params("assets") or {}
+    p6 = PASOS_MODULOS.p6_assets
+    try:
+        sitio, espacio = p6.espacio_del_relato(ctx.proyecto, params)
+    except Exception:                                       # noqa: BLE001
+        sitio, espacio = None, {}
+    reparto = ((params.get("catalogo") or {}).get("reparto") or {})
+    try:
+        _s, estados = p6.estados_del_relato(ctx.proyecto, params)
+    except Exception:                                       # noqa: BLE001
+        estados = {}
+    return espacio or {}, reparto, estados or {}
+
+
+def _ficha_guion_visual(ctx):
+    gv = _guion_visual()
+    params = ctx.estado.params("assets") or {}
+    try:
+        guardado = gv.normalizar(params.get("guion_visual"))
+    except ValueError:
+        guardado = {}
+    bloques = [{"id": str(b.get("id")), "texto": str(b.get("texto") or "")}
+               for b in _bloques_del_guion(ctx)]
+    propuesta, avisos = [], []
+    if not guardado.get("planos") and guardado.get("visuales"):
+        # las lineas «Visual:» de la Parrilla, casadas con el guion de ahora;
+        # no se guardan hasta que alguien las mira y guarda (regla 1)
+        propuesta, avisos = gv.casar(guardado["visuales"], bloques)
+    espacio, reparto, estados = _fijo_del_video(ctx)
+    comprobacion = PASOS_MODULOS.medios.leer_json(_ruta_comprobacion_gv(ctx), {}) or {}
+    if comprobacion.get("huella") != gv.huella(guardado.get("planos")):
+        comprobacion = {}
+    estilo = params.get("estilo") if isinstance(params.get("estilo"), dict) else {}
+    return {"modo": gv.modo_de(params),
+            "del_video": params.get("imagenes") or "",
+            "del_estilo": estilo.get("imagenes") or "",
+            "modos": [{"clave": k, "nombre": v} for k, v in gv.MODOS.items()],
+            "guion_visual": guardado, "propuesta": propuesta, "avisos": avisos,
+            "bloques": bloques, "estados": sorted(estados), "reparto": sorted(reparto),
+            "comprobacion": comprobacion.get("avisos"),
+            "aprobado": bool(guardado.get("aprobado"))}
+
+
+@app.get("/api/proyectos/{pid}/guion_visual")
+def leer_guion_visual(pid: str):
+    """Qué dibujan las imágenes de un vídeo, su guion visual y lo que hay que revisar."""
+    return _ficha_guion_visual(contexto(pid))
+
+
+@app.put("/api/proyectos/{pid}/guion_visual/modo")
+def guardar_modo_guion_visual(pid: str, cuerpo: dict = Body(default=None)):
+    """{imagenes: "guion" | "voz" | null}: qué dibujan las imágenes de ESTE vídeo.
+
+    null vuelve a lo que diga el estilo (y quita la clave). No dibuja nada: los
+    planos hechos cambian de firma y se ofrecen para rehacer como siempre."""
+    gv = _guion_visual()
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    if "imagenes" not in datos:
+        raise ErrorApi(400, "manda {imagenes: guion | voz | null}")
+    crudo = datos.get("imagenes")
+    if crudo not in (None, "") and gv._llano(crudo).strip() == "voz":
+        valor = "voz"
+    else:
+        try:
+            valor = gv.normalizar_modo(crudo)
+        except ValueError as fallo:
+            raise ErrorApi(400, str(fallo))
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo en marcha en este vídeo: espera a que termine")
+        params = ctx.estado.params("assets") or {}
+        if (params.get("imagenes") or "") != (valor or ""):
+            if valor:
+                ctx.estado.actualizar_params("assets", {"imagenes": valor})
+            else:
+                ctx.estado.set_params("assets", {k: v for k, v in params.items()
+                                                 if k != "imagenes"})
+    ctx.bitacora.anotar("guion_visual_modo", "assets", {"imagenes": valor or "estilo"})
+    return _ficha_guion_visual(ctx)
+
+
+@app.put("/api/proyectos/{pid}/guion_visual")
+def guardar_guion_visual(pid: str, cuerpo: dict = Body(default=None)):
+    """{planos: [{bloque, visual, camara?, estado?, personajes?}]}: el guion visual
+    escrito o corregido a mano. Guardarlo lo deja SIN aprobar."""
+    gv = _guion_visual()
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    planos = datos.get("planos")
+    if not isinstance(planos, list):
+        raise ErrorApi(400, "manda {planos: [...]}")
+    validos = {str(b.get("id")).upper() for b in _bloques_del_guion(ctx)}
+    if not validos:
+        raise ErrorApi(409, "todavía no hay guion: genéralo antes de escribir el guion visual")
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo en marcha en este vídeo: espera a que termine")
+        params = ctx.estado.params("assets") or {}
+        try:
+            antes = gv.normalizar(params.get("guion_visual"))
+            nuevo = gv.normalizar({"origen": datos.get("origen") or antes.get("origen") or "manual",
+                                   "planos": planos, "aprobado": False,
+                                   "visuales": antes.get("visuales") or []}, validos)
+        except ValueError as fallo:
+            raise ErrorApi(400, str(fallo))
+        ctx.estado.actualizar_params("assets", {"guion_visual": nuevo})
+    ctx.bitacora.anotar("guion_visual_guardado", "assets", {"planos": len(nuevo["planos"])})
+    return _ficha_guion_visual(ctx)
+
+
+@_medido_en("assets", "guion_visual")
+def _correr_proponer_gv(avisar, ctx, ajuste):
+    """Claude escribe el borrador del guion visual (solo texto)."""
+    gv = _guion_visual()
+    espacio, reparto, estados = _fijo_del_video(ctx)
+    planos, avisos = gv.proponer(_bloques_del_guion(ctx), espacio=espacio, reparto=reparto,
+                                 estados=estados, ajuste=ajuste, avisar=avisar,
+                                 proyecto_id=ctx.id, cwd=ctx.proyecto.raiz)
+    with _cerrojo_de_cadena(ctx.id):
+        params = ctx.estado.params("assets") or {}
+        try:
+            antes = gv.normalizar(params.get("guion_visual"))
+        except ValueError:
+            antes = {}
+        nuevo = gv.normalizar({"origen": "claude", "planos": planos, "aprobado": False,
+                               "visuales": antes.get("visuales") or []})
+        ctx.estado.actualizar_params("assets", {"guion_visual": nuevo})
+    ctx.bitacora.anotar("guion_visual_propuesto", "assets", {"planos": len(planos)})
+    avisar(1.0, "guion visual escrito: revísalo y apruébalo")
+    return {"planos": len(planos), "avisos": avisos}
+
+
+@app.post("/api/proyectos/{pid}/guion_visual/proponer", status_code=202)
+def proponer_guion_visual(pid: str, cuerpo: dict = Body(default=None)):
+    """Claude escribe el guion visual leyendo el guion entero (solo texto, no se
+    paga ninguna imagen). Sustituye al que hubiera, sin aprobar."""
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    if not _bloques_del_guion(ctx):
+        raise ErrorApi(409, "todavía no hay guion: genéralo antes")
+    por_fase = CLI_CLAUDE.por_defecto_de("catalogo_visual")
+    ajuste = _ajuste_cli(datos, por_fase["modelo"], por_fase["esfuerzo"])
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo en marcha en este vídeo: espera a que termine")
+        trabajo_id = ctx.gestor.lanzar("guion_visual_proponer", _correr_proponer_gv, ctx,
+                                       ajuste, paso="assets")
+    _registrar_trabajo(trabajo_id, ctx.id)
+    return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id),
+            "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
+
+
+@_medido_en("assets", "guion_visual")
+def _correr_comprobar_gv(avisar, ctx, planos):
+    """Cruza el guion visual con lo fijo (solo texto) y lo deja apuntado."""
+    gv = _guion_visual()
+    espacio, reparto, estados = _fijo_del_video(ctx)
+    avisar(0.1, "comprobando el guion visual contra el sitio, el reparto y los estados")
+    avisos = gv.comprobar(planos, espacio=espacio, reparto=reparto, estados=estados,
+                          cwd=ctx.proyecto.raiz, proyecto_id=ctx.id)
+    PASOS_MODULOS.medios.escribir_json(_ruta_comprobacion_gv(ctx),
+                                       {"huella": gv.huella(planos), "avisos": avisos})
+    avisar(1.0, f"{len(avisos)} plano(s) contradicen lo fijo" if avisos
+           else "nada contradice lo fijo")
+    return {"avisos": avisos}
+
+
+@app.post("/api/proyectos/{pid}/guion_visual/aprobar")
+def aprobar_guion_visual(pid: str, cuerpo: dict = Body(default=None)):
+    """{aprobado: true|false}. Aprobar lanza también la comprobación contra lo
+    fijo (solo texto): sus avisos salen en la ficha, no bloquean."""
+    gv = _guion_visual()
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    aprobado = datos.get("aprobado", True)
+    if not isinstance(aprobado, bool):
+        raise ErrorApi(400, "'aprobado' tiene que ser true o false")
+    trabajo_id = None
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo en marcha en este vídeo: espera a que termine")
+        params = ctx.estado.params("assets") or {}
+        try:
+            guardado = gv.normalizar(params.get("guion_visual"))
+        except ValueError as fallo:
+            raise ErrorApi(400, str(fallo))
+        if aprobado and not guardado.get("planos"):
+            raise ErrorApi(409, "no hay guion visual que aprobar: escríbelo, guárdalo o pídeselo a Claude")
+        if guardado.get("aprobado") != aprobado:
+            ctx.estado.actualizar_params("assets", {"guion_visual": dict(guardado, aprobado=aprobado)})
+        if aprobado and _asistente_listo():
+            trabajo_id = ctx.gestor.lanzar("guion_visual_comprobar", _correr_comprobar_gv, ctx,
+                                           guardado["planos"], paso="assets")
+    if trabajo_id:
+        _registrar_trabajo(trabajo_id, ctx.id)
+    ctx.bitacora.anotar("guion_visual_aprobado", "assets", {"aprobado": aprobado})
+    ficha = _ficha_guion_visual(ctx)
+    ficha["trabajo_id"] = trabajo_id
+    return ficha
+
+
+@app.get("/api/presets-light/{preset_id}/imagenes")
+def leer_imagenes_estilo(preset_id: str):
+    """Qué dibujan por defecto las imágenes de los vídeos de un estilo."""
+    ficha = _preset_o_400(lambda p: p.leer(preset_id))
+    if ficha.get("tipo") != "canal":
+        raise ErrorApi(400, "esto no es un preset de canal")
+    estilo = (ficha.get("datos") or {}).get("estilo") or {}
+    gv = _guion_visual()
+    return {"imagenes": estilo.get("imagenes") or "",
+            "modos": [{"clave": k, "nombre": v} for k, v in gv.MODOS.items()]}
+
+
+@app.put("/api/presets-light/{preset_id}/imagenes")
+def guardar_imagenes_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
+    """{imagenes: "guion" | null}: el defecto de los vídeos NUEVOS de este estilo.
+    No toca ningún vídeo hecho (llega con «Traer el estilo», con su aviso)."""
+    presets = _presets()
+    gv = _guion_visual()
+    datos = _cuerpo(cuerpo)
+    if "imagenes" not in datos:
+        raise ErrorApi(400, "manda {imagenes: guion | null}")
+    try:
+        valor = gv.normalizar_modo(datos.get("imagenes"))
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    with presets.lock_de(presets.FICHERO):
+        ficha = _preset_o_400(lambda p: p.leer(preset_id))
+        if ficha.get("tipo") != "canal":
+            raise ErrorApi(400, "esto no es un preset de canal")
+        contenido = copy.deepcopy(ficha.get("datos") or {})
+        estilo = dict(contenido.get("estilo") or {})
+        if (estilo.get("imagenes") or "") == valor:
+            return {"imagenes": valor, "cambiado": False}
+        if valor and not estilo.get("referencias"):
+            raise ErrorApi(400, "este estilo todavía no tiene su estilo gráfico (las "
+                                "láminas): genéralo antes")
+        if valor:
+            estilo["imagenes"] = valor
+        else:
+            estilo.pop("imagenes", None)
+        if estilo:
+            contenido["estilo"] = estilo
+        else:
+            contenido.pop("estilo", None)
+        try:
+            presets.guardar("canal", ficha.get("nombre") or "", contenido,
+                            nota=ficha.get("nota") or "",
+                            miniatura=ficha.get("miniatura") or "", pid=preset_id)
+        except presets.ErrorPreset as fallo:
+            raise ErrorApi(400, str(fallo))
+    anotar_global("imagenes_estilo", {"preset": preset_id, "imagenes": valor or "voz"})
+    return {"imagenes": valor, "cambiado": True}
+
+
 # --------------------------------------------------------------- conservacion
 #
 # Un cambio en una etapa anterior ya no arrasa lo de despues. Se analiza que se
@@ -11325,6 +11601,20 @@ def _impedimentos(ctx, pestana, pendientes):
                           "que": "falta aprobar la imagen base del sitio o la de un "
                                  "estado: sin ella no se dibujan los planos nuevos que la editan",
                           "donde": "El tipo de relato"})
+    # el guion visual (rama guion-visual): con «lo que dice el guion» y sin
+    # aprobarlo, no se dibuja (p6 tambien para, antes de pagar)
+    if "assets" in ids:
+        try:
+            gv = _guion_visual()
+            params_a = ctx.estado.params("assets") or {}
+            sin_aprobar = gv.modo_de(params_a) == "guion" and not gv.activo(params_a)
+        except Exception:                                   # noqa: BLE001
+            sin_aprobar = False
+        if sin_aprobar:
+            fuera.append({"tarea": "assets",
+                          "que": "las imágenes siguen el guion y el guion visual no está "
+                                 "aprobado: revísalo y apruébalo antes de dibujar",
+                          "donde": "Guion visual"})
     return fuera
 
 
@@ -17094,6 +17384,21 @@ def _opciones_al_crear(ctx, preset_id, opciones):
     relato = _tipo_relato_pedido(opciones)
     if relato:
         ctx.estado.actualizar_params("assets", {"tipo_relato": relato})
+    # QUE DIBUJAN LAS IMAGENES (rama guion-visual). Solo «guion» se escribe, y
+    # con el las lineas «Visual:» de la Parrilla, si las hay, para casarlas con
+    # el guion cuando exista. Sin elegir, nada (regla 1).
+    gv = _guion_visual()
+    try:
+        imagenes = gv.normalizar_modo(opciones.get("imagenes"))
+        visuales = gv.normalizar_visuales(opciones.get("visuales") or [])
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    if imagenes:
+        cambios = {"imagenes": imagenes}
+        if visuales:
+            cambios["guion_visual"] = {"origen": "parrilla", "planos": [],
+                                       "aprobado": False, "visuales": visuales}
+        ctx.estado.actualizar_params("assets", cambios)
     presencia = opciones.get("presencia")
     if presencia:
         if presencia not in sonido.PRESENCIAS:

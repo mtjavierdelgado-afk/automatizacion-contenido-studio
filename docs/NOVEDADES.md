@@ -14,6 +14,27 @@ vídeos, estilos, claves y contraseña no se tocan.
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 
+**Qué dibujan las imágenes: la voz o el guion (22 de octubre)**
+- **Nuevo, en el Encargo: «Qué dibujan las imágenes».** «Lo que dice la voz» es
+  lo de siempre (cada imagen ilustra su frase) y es lo que tienen todos los
+  vídeos si no eliges nada. Con **«Lo que dice el guion»**, cada imagen sigue su
+  línea del **guion visual** y la frase de la voz ya no llega al dibujante: la
+  voz solo marca cuándo entra cada plano. Es lo que faltaba para la mampara: la
+  voz puede hablar de la corrediza sin que se dibuje la corrediza.
+- **El guion visual** es la lista de planos: qué se ve, la cámara («plano general
+  desde la puerta») y, en «Un espacio que cambia», el estado del objeto (la
+  mampara abierta, la corrediza). Sale de las líneas «Visual:» de tu guion de la
+  Parrilla (ya no se pierden) o de **«Proponer con Claude»**, que lo escribe
+  leyendo el guion entero. Se revisa, se corrige y **se aprueba en el paso
+  Imágenes** antes de dibujar: sin aprobar no se paga ningún plano. Escribirlo,
+  proponerlo y aprobarlo es solo texto.
+- **Lo fijo manda:** al aprobar, Claude comprueba cada línea contra el sitio, el
+  reparto y los estados aprobados, y avisa del plano que pide algo que no existe
+  (se dibujará lo fijo).
+- En la Parrilla, la línea de cabecera **«Imágenes: guion»** lo elige; en el
+  estilo, «🎬 Qué dibujan las imágenes» (pestaña «Cómo se cuenta») es el punto de
+  partida de sus vídeos nuevos. El del vídeo manda.
+
 **Crear en el móvil, arreglado (21 de octubre)**
 - **El recorrido ya no parpadea**: la fila de pasos de arriba saltaba al paso 1
   y volvía cada medio segundo mientras algo se generaba. Ahora se queda quieta,

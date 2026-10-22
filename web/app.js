@@ -6137,6 +6137,44 @@ function devolverScroll(id, clave) {
   if (Math.abs(caja.scrollTop - m.top) > 1) caja.scrollTop = m.top;
 }
 
+/* EL ANCLA (portadas-2, 21-10-2026). Devolver la MISMA altura no basta: si al
+   repintar crece algo que está más arriba (llegan los 3 ganchos de otra red,
+   sale «Claude está pensando…»), lo que se estaba mirando baja y la pantalla
+   «se mueve» aunque `scrollTop` sea el mismo (medido en móvil: 275 px). Antes
+   de repintar se apunta el primer título o etiqueta visible y a qué distancia
+   del borde estaba; después se corrige para dejarlo en el mismo sitio. Se
+   buscan títulos y etiquetas, que no cambian de texto; un botón sí cambia
+   («Dame 3 ganchos» → «Claude está pensando…»). */
+const SELECTOR_ANCLA = 'h2, h3, h4, label, b, .nombre-ficha';
+const textoDeAncla = el => (el.textContent || '').trim().slice(0, 80);
+
+function anclaDeScroll(id, clave) {
+  const caja = document.getElementById(id);
+  // sin sitio (cargando, o en Crear) no hay ancla, como en `devolverScroll`
+  if (!caja || !caja.scrollTop || !clave()) return null;
+  const arriba = caja.getBoundingClientRect().top;
+  const todos = Array.from(caja.querySelectorAll(SELECTOR_ANCLA));
+  const el = todos.find(x => {
+    const r = x.getBoundingClientRect();
+    return r.height > 0 && r.top >= arriba - 2 && textoDeAncla(x);
+  });
+  if (!el) return null;
+  const texto = textoDeAncla(el);
+  const n = todos.filter(x => x.tagName === el.tagName && textoDeAncla(x) === texto).indexOf(el);
+  return { id, sitio: clave(), tag: el.tagName, texto, n, distancia: el.getBoundingClientRect().top - arriba };
+}
+
+function volverAlAncla(ancla, clave) {
+  if (!ancla || !ancla.texto || !ancla.sitio || clave() !== ancla.sitio) return;
+  const caja = document.getElementById(ancla.id);
+  if (!caja) return;
+  const el = Array.from(caja.querySelectorAll(SELECTOR_ANCLA))
+    .filter(x => x.tagName === ancla.tag && textoDeAncla(x) === ancla.texto)[ancla.n];
+  if (!el) return;
+  const salto = (el.getBoundingClientRect().top - caja.getBoundingClientRect().top) - ancla.distancia;
+  if (Math.abs(salto) > 1) caja.scrollTop += salto;
+}
+
 function subirArriba(id) {
   const caja = document.getElementById(id);
   if (caja) caja.scrollTop = 0;
@@ -22654,6 +22692,7 @@ const PORT = {
   pid: '', catalogo: null, diseno: null, planos: [], formatoVideo: '9:16', duracion: 0,
   cambiado: false, vista: '', pidiendo: 0, reloj: null, guias: true, error: '',
   propuestas: null, proponiendo: false, ia: null, abierto: false, fondos: [], cortar: null,
+  aviso: null, ideas: null, pensandoIdeas: false, iaPendiente: null,
 };
 
 function campoPortada(etiqueta, control, ayuda) {
@@ -22665,7 +22704,8 @@ async function abrirEditorPortada(pid) {
   // TODO lo del vídeo anterior fuera: su vista, sus propuestas, lo que pensaba
   if (PORT.vista) URL.revokeObjectURL(PORT.vista);
   Object.assign(PORT, { pid, abierto: true, error: '', propuestas: null, ia: null, cambiado: false,
-    proponiendo: false, vista: '', diseno: null, fondos: [] });
+    proponiendo: false, vista: '', diseno: null, fondos: [], aviso: null, ideas: null, pensandoIdeas: false,
+    iaPendiente: null });
   PORT.pidiendo += 1;
   try {
     if (!PORT.catalogo) PORT.catalogo = await pedir(`${BASE}/api/portadas/catalogo`);
@@ -22752,6 +22792,88 @@ function pintarVistaPortada() {
     PORT.error ? cajaError(PORT.error) : null].filter(Boolean));
 }
 
+/* EL EDITOR, EN TRES CAPAS (portadas-2, 21-10-2026). Antes la plantilla metía
+   efectos en la foto y la paleta y los efectos se mezclaban: «filtro tras
+   filtro». Ahora cada capa hace UNA cosa y tiene su interruptor:
+     1 · Imagen: el fondo y, si se quiere, sus ajustes (lo ÚNICO que toca la foto).
+     2 · Plantilla: dónde va cada texto y cada elemento.
+     3 · Colores: el color de textos y elementos («Sin paleta»: blanco y negro).
+   «Esta imagen lleva: …» dice en todo momento qué hay encima de la foto, con
+   una ✕ para quitar cada cosa. */
+const NOMBRES_AJUSTE_PORTADA = {
+  contraste: 'Contraste', saturacion: 'Color', brillo: 'Brillo', vineta: 'Viñeta', oscurecer: 'Oscurecer abajo',
+};
+const NEUTRO_PORTADA = { contraste: 1, saturacion: 1, brillo: 1, vineta: 0, oscurecer: 0 };
+const NOMBRES_LOOK_PORTADA = { rafaga: 'Rayos de luz', marco: 'Marco' };
+
+function cabecerasPortada(extra) {
+  const pases = typeof cabeceraDePases === 'function' ? cabeceraDePases() : '';
+  return Object.assign({}, extra || {}, pases ? { 'X-Estudio-Abiertos': pases } : {});
+}
+
+function bajarBlobPortada(blob, nombre) {
+  const url = URL.createObjectURL(blob);
+  const a = h('a', { href: url, download: nombre });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
+
+/* EL AVISO, DENTRO DEL EDITOR: el aviso flotante salía DEBAJO de la capa del
+   editor y «Guardar diseño» parecía no hacer nada (notas del 21-10). Ahora va
+   en la cabecera del editor y, además, el flotante por encima de la capa. */
+function avisoPortada(texto, malo) {
+  PORT.aviso = { texto, malo: !!malo, hora: new Date() };
+  toast(texto, !!malo);
+  const sitio = document.querySelector('.capa-portada .aviso-portada');
+  if (sitio) sitio.replaceWith(pintarAvisoPortada());
+}
+
+function pintarAvisoPortada() {
+  const a = PORT.aviso;
+  if (!a) return h('span', { clase: 'aviso-portada meta' }, PORT.cambiado ? 'Cambios sin guardar' : '');
+  const hora = a.hora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
+  return h('span', { clase: `aviso-portada${a.malo ? ' malo' : ' bueno'}`, role: 'status' }, `${a.texto} · ${hora}`);
+}
+
+/* QUÉ LLEVA LA IMAGEN ENCIMA, con su ✕. */
+function loQueLlevaPortada(d) {
+  const cat = PORT.catalogo || {};
+  const f = d.fondo || {};
+  const cosas = [];
+  const fondo = { fotograma: 'Fotograma del vídeo montado (trae los subtítulos y rótulos del vídeo)',
+    plano: `Imagen del plano ${(f.planos || []).join(' y ') || '—'}, tal cual se generó`,
+    subida: 'Una imagen tuya', ia: 'Una imagen hecha con IA' }[f.tipo] || 'Sin imagen';
+  cosas.push({ texto: `Fondo: ${fondo}` });
+  if (d.modo === 'ia') {
+    cosas.push({ texto: 'La portada la hizo la IA entera (sin capas encima)',
+      quitar: () => { d.modo = 'capas'; tocarPortada(true); } });
+  }
+  Object.keys(NOMBRES_AJUSTE_PORTADA).forEach(k => {
+    const v = (d.efectos || {})[k];
+    if (v == null || Math.abs(Number(v) - NEUTRO_PORTADA[k]) < 0.001) return;
+    cosas.push({ texto: `${NOMBRES_AJUSTE_PORTADA[k]} ${String(Number(v).toFixed(2)).replace('.', ',')}`,
+      quitar: () => { const e = Object.assign({}, d.efectos); delete e[k]; d.efectos = e; tocarPortada(true); } });
+  });
+  (d.elementos || []).forEach(el => {
+    if (el.rol === 'look' && !el.oculto) {
+      cosas.push({ texto: NOMBRES_LOOK_PORTADA[el.tipo] || el.tipo, quitar: () => { el.oculto = true; tocarPortada(true); } });
+    }
+  });
+  if (d.paleta && d.paleta !== 'ninguna') {
+    const pal = (cat.paletas || []).find(p => p.id === d.paleta) || {};
+    cosas.push({ texto: `Colores de la paleta «${pal.nombre || d.paleta}» en textos y elementos (la foto no)`,
+      quitar: () => cambiarPlantillaPortada({ paleta: 'ninguna' }) });
+  }
+  const caja = h('div', { clase: 'lleva-portada' }, h('b', {}, 'Esta imagen lleva:'));
+  cosas.forEach(c => caja.appendChild(h('span', { clase: 'pastilla-lleva' }, c.texto,
+    c.quitar ? h('button', { clase: 'quitar-lleva', type: 'button', title: 'Quitarlo', 'aria-label': `Quitar: ${c.texto}`,
+      onclick: c.quitar }, '✕') : null)));
+  if (cosas.length === 1 && d.modo !== 'ia') caja.appendChild(h('span', { clase: 'meta' }, 'nada más: la imagen va tal cual.'));
+  return caja;
+}
+
 function pintarEditorPortada() {
   if (!PORT.abierto || !PORT.diseno) return;
   let capa = document.querySelector('.capa-portada');
@@ -22762,27 +22884,44 @@ function pintarEditorPortada() {
   }
   const d = PORT.diseno;
   const cat = PORT.catalogo || {};
+  const capas = cat.capas || {};
   const plantilla = (cat.plantillas || []).find(p => p.id === d.plantilla) || {};
   const mandos = h('div', { clase: 'mandos-portada' });
 
-  // --- formato y plantilla
-  mandos.appendChild(h('div', { clase: 'fila' },
-    campoPortada('Formato', h('select', { onchange: ev => cambiarPlantillaPortada({ formato: ev.target.value }) },
-      ...Object.keys(cat.formatos || {}).map(f => h('option', { value: f, selected: f === d.formato },
-        `${f}${f === PORT.formatoVideo ? ' (el del vídeo)' : ''}`)))),
-    campoPortada('Paleta', h('select', { onchange: ev => cambiarPlantillaPortada({ paleta: ev.target.value }) },
-      ...(cat.paletas || []).map(p => h('option', { value: p.id, selected: p.id === d.paleta }, p.nombre)))),
-    campoPortada('Letra', h('select', { onchange: ev => cambiarPlantillaPortada({ fuente: ev.target.value }) },
-      ...(cat.fuentes || []).map(f => h('option', { value: f.id, selected: f.id === d.fuente },
-        `${f.nombre}${f.lista ? '' : ' (aún no está: se usa una parecida)'}`))))));
+  // --- 1 · la imagen (el fondo y sus ajustes)
+  const imagen = bloqueFondoPortada(d);
+  imagen.prepend(h('div', { clase: 'meta' }, capas.imagen || ''));
+  imagen.querySelector('h4').textContent = '1 · Imagen';
+  mandos.appendChild(imagen);
+  mandos.appendChild(bloqueAjustesPortada(d));
+
+  // --- 2 · la plantilla
   const rejilla = h('div', { clase: 'plantillas-portada' });
   (cat.plantillas || []).forEach(p => rejilla.appendChild(h('button', {
     clase: `mini plantilla-portada${p.id === d.plantilla ? ' elegida' : ''}`, title: p.cuando, type: 'button',
     onclick: () => cambiarPlantillaPortada({ plantilla: p.id }) }, p.nombre)));
-  mandos.appendChild(h('div', { clase: 'bloque' }, h('h4', {}, 'Plantilla'),
+  mandos.appendChild(h('div', { clase: 'bloque' }, h('h4', {}, '2 · Plantilla'),
+    h('div', { clase: 'meta' }, capas.plantilla || ''),
+    campoPortada('Formato', h('select', { onchange: ev => cambiarPlantillaPortada({ formato: ev.target.value }) },
+      ...Object.keys(cat.formatos || {}).map(f => h('option', { value: f, selected: f === d.formato },
+        `${f}${f === PORT.formatoVideo ? ' (el del vídeo)' : ''}`)))),
     h('div', { clase: 'meta' }, plantilla.cuando || ''), rejilla));
 
-  // --- textos de la plantilla
+  // --- 3 · los colores
+  const pal = (cat.paletas || []).find(p => p.id === d.paleta) || {};
+  mandos.appendChild(h('div', { clase: 'bloque' }, h('h4', {}, '3 · Colores y letra'),
+    h('div', { clase: 'meta' }, capas.paleta || ''),
+    h('div', { clase: 'fila' },
+      campoPortada('Paleta', h('select', { onchange: ev => cambiarPlantillaPortada({ paleta: ev.target.value }) },
+        ...(cat.paletas || []).map(p => h('option', { value: p.id, selected: p.id === d.paleta }, p.nombre)))),
+      h('span', { clase: 'muestras-paleta', title: 'texto · resaltado · aviso · borde' },
+        ...['texto', 'acento', 'alerta', 'contorno'].map(k => h('span', { clase: 'muestra-color', title: { texto: 'texto', acento: 'resaltado', alerta: 'aviso', contorno: 'borde' }[k],
+          estilo: /^#[0-9a-f]{6}$/i.test(pal[k] || '') ? `background:${pal[k]}` : '' }))),
+      campoPortada('Letra', h('select', { onchange: ev => cambiarPlantillaPortada({ fuente: ev.target.value }) },
+        ...(cat.fuentes || []).map(f => h('option', { value: f.id, selected: f.id === d.fuente },
+          `${f.nombre}${f.lista ? '' : ' (aún no está: se usa una parecida)'}`)))))));
+
+  // --- los textos de la plantilla
   const textos = h('div', { clase: 'bloque' }, h('h4', {}, 'Textos'),
     h('div', { clase: 'meta' }, 'Pocas palabras: de 1 a 3 por campo se leen en el móvil; más de 4 bajan los clics.'));
   (plantilla.campos || ['titulo']).forEach(campo => {
@@ -22796,19 +22935,6 @@ function pintarEditorPortada() {
   });
   mandos.appendChild(textos);
 
-  // --- el fondo
-  mandos.appendChild(bloqueFondoPortada(d));
-
-  // --- los efectos de la foto
-  const efectos = h('div', { clase: 'bloque' }, h('h4', {}, 'Efectos de la imagen'));
-  [['contraste', 'Contraste', 0.5, 1.8, 1], ['saturacion', 'Color', 0, 2, 1], ['brillo', 'Brillo', 0.5, 1.6, 1],
-    ['vineta', 'Viñeta', 0, 1, 0], ['oscurecer', 'Oscurecer abajo', 0, 1, 0]].forEach(([clave, nombre, min, max, def]) => {
-    const valor = (d.efectos || {})[clave] != null ? d.efectos[clave] : def;
-    efectos.appendChild(campoPortada(nombre, h('input', { type: 'range', min, max, step: 0.05, value: valor,
-      oninput: ev => { d.efectos = Object.assign({}, d.efectos, { [clave]: Number(ev.target.value) }); tocarPortada(false); } })));
-  });
-  mandos.appendChild(efectos);
-
   // --- los elementos, uno a uno
   mandos.appendChild(bloqueElementosPortada(d));
 
@@ -22817,20 +22943,385 @@ function pintarEditorPortada() {
 
   const vista = h('div', { clase: 'columna-vista-portada' },
     h('div', { clase: 'vista-portada-grande' }),
+    loQueLlevaPortada(d),
     h('label', { clase: 'casilla-red' }, h('input', { type: 'checkbox', checked: PORT.guias,
       onchange: ev => { PORT.guias = ev.target.checked; refrescarVistaPortada(true); } }),
     ' Ver lo que tapan las redes (no sale en la portada)'),
     d.modo === 'ia' ? h('div', { clase: 'caja-aviso' }, 'Esta portada la ha hecho la IA con el texto dentro: '
-      + 'revisa que lo haya escrito bien. Para volver a las capas, elige otra plantilla.') : null);
+      + 'revisa que lo haya escrito bien. Mientras esté así, los textos, elementos y ajustes de aquí no se pintan. ',
+    h('button', { clase: 'mini', type: 'button', onclick: () => { d.modo = 'capas'; tocarPortada(true); } }, 'Volver a capas')) : null);
 
   capa.replaceChildren(h('div', { clase: 'panel-portada' },
     h('div', { clase: 'fila cab-portada' }, h('h3', { clase: 'crece' }, 'Diseñar portada'),
+      pintarAvisoPortada(),
       h('button', { clase: 'mini', type: 'button', onclick: () => guardarDisenoPortada() }, 'Guardar diseño'),
+      h('button', { clase: 'mini', type: 'button', title: 'La portada a tamaño real, en PNG, para tenerla de respaldo',
+        onclick: () => descargarPortada() }, '⬇ Descargar portada'),
       h('button', { clase: 'primario', type: 'button', onclick: () => usarPortada() }, 'Usar como portada'),
       h('button', { clase: 'mini fantasma', type: 'button', onclick: () => cerrarEditorPortada() }, 'Cerrar')),
     h('div', { clase: 'cuerpo-portada' }, vista, mandos)));
   pintarVistaPortada();
   mandos.scrollTop = scroll;
+}
+
+/* LOS AJUSTES DE LA IMAGEN: apagados de partida; «Sin ajustes» los quita
+   todos y «Look de la plantilla» pone los que sugiere ella (y sus rayos o su
+   marco), a la vista en los deslizadores. */
+function bloqueAjustesPortada(d) {
+  const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Ajustes de la imagen'),
+    h('div', { clase: 'meta' }, 'Opcionales: se aplican una sola vez, sobre la imagen de fondo.'));
+  [['contraste', 0.5, 1.8], ['saturacion', 0, 2], ['brillo', 0.5, 1.6], ['vineta', 0, 1], ['oscurecer', 0, 1]].forEach(([clave, min, max]) => {
+    const valor = (d.efectos || {})[clave] != null ? d.efectos[clave] : NEUTRO_PORTADA[clave];
+    b.appendChild(campoPortada(NOMBRES_AJUSTE_PORTADA[clave], h('input', { type: 'range', min, max, step: 0.05, value: valor,
+      'aria-label': NOMBRES_AJUSTE_PORTADA[clave],
+      oninput: ev => { d.efectos = Object.assign({}, d.efectos, { [clave]: Number(ev.target.value) }); tocarPortada(false); },
+      onchange: () => tocarPortada(true) })));
+  });
+  const look = d.look || {};
+  const hayLook = Object.keys(look).length || (d.elementos || []).some(e => e.rol === 'look');
+  b.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', type: 'button', disabled: !Object.keys(d.efectos || {}).length,
+      onclick: () => { d.efectos = {}; tocarPortada(true); } }, 'Sin ajustes (la imagen tal cual)'),
+    hayLook ? h('button', { clase: 'mini fantasma', type: 'button', title: 'Lo que sugiere la plantilla: se ve en los deslizadores y se quita con «Sin ajustes»',
+      onclick: () => {
+        d.efectos = Object.assign({}, look);
+        (d.elementos || []).forEach(e => { if (e.rol === 'look') e.oculto = false; });
+        tocarPortada(true);
+      } }, 'Poner el look de la plantilla') : null));
+  return b;
+}
+
+/* DÓNDE NACE UN ELEMENTO NUEVO: en un hueco libre (antes nacía en el centro,
+   pequeño y encima del título, y parecía que no salía). */
+function sitioLibrePortada(d) {
+  const huecos = [[0.22, 0.78], [0.78, 0.78], [0.5, 0.88], [0.8, 0.14], [0.2, 0.14], [0.5, 0.62], [0.82, 0.45], [0.18, 0.45]];
+  const ocupados = (d.elementos || []).filter(e => !e.oculto && e.x != null && e.y != null);
+  return huecos.find(([x, y]) => !ocupados.some(e => Math.hypot(e.x - x, e.y - y) < 0.16)) || huecos[0];
+}
+
+const NUEVOS_ELEMENTOS_PORTADA = {
+  texto: { texto: 'NUEVO', tam: 0.11, estilos: ['contorno', 'sombra'] },
+  insignia: { texto: 'VS', tam: 0.15, forma: 'circulo' },
+  flecha: { tam: 0.03 },
+  circulo: { tam: 0.2 }, rayo: {}, icono: { icono: 'estrella', tam: 0.13 },
+  etiqueta: { texto: 'GRATIS', tam: 0.08 }, banda: { texto: 'SOLO HOY', y: 0.86 },
+  marco: {}, subrayado: { tam: 0.3 }, estrellas: { tam: 0.08 }, cinta: { texto: 'NUEVO' },
+  rafaga: { opacidad: 0.15 },
+};
+const NOMBRES_ELEMENTO_PORTADA = {
+  texto: 'Texto', insignia: 'Insignia', flecha: 'Flecha', circulo: 'Círculo', rayo: 'Rayo (versus)', icono: 'Icono',
+  etiqueta: 'Etiqueta / precio', banda: 'Banda', marco: 'Marco', subrayado: 'Subrayado', estrellas: 'Estrellas',
+  cinta: 'Cinta', rafaga: 'Rayos de luz',
+};
+
+function bloqueElementosPortada(d) {
+  const cat = PORT.catalogo || {};
+  const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Elementos'));
+  (d.elementos || []).forEach((el, i) => {
+    const fila = h('div', { clase: `elemento-portada${el.oculto ? ' escondido-portada' : ''}${el.propio ? ' propio-portada' : ''}` });
+    const nombre = NOMBRES_ELEMENTO_PORTADA[el.tipo] || el.tipo;
+    const cab = h('div', { clase: 'fila' }, h('b', { clase: 'crece' }, `${i + 1}. ${nombre}`
+      + (el.rol && el.rol !== 'look' ? ` · ${(cat.campos || {})[el.rol] || el.rol}` : '')
+      + (el.rol === 'look' ? ' · del look de la plantilla' : '') + (el.propio ? ' · añadido' : '')),
+    el.orig ? h('button', { clase: 'mini fantasma', type: 'button', title: 'Vuelve a como nació (sitio, tamaño, giro y colores; el texto se queda)',
+      onclick: () => {
+        const texto = el.texto;
+        Object.keys(el).forEach(k => { if (!['tipo', 'texto', 'orig', 'propio', 'rol', 'oculto', 'papeles'].includes(k)) delete el[k]; });
+        Object.assign(el, el.orig);
+        if (texto != null) el.texto = texto;
+        tocarPortada(true);
+      } }, 'Restablecer') : null,
+    h('button', { clase: 'mini fantasma', type: 'button', title: el.oculto ? 'Enseñar' : 'Esconder',
+      onclick: () => { el.oculto = !el.oculto; tocarPortada(true); } }, el.oculto ? 'Enseñar' : 'Esconder'),
+    h('button', { clase: 'mini fantasma', type: 'button', title: 'Quitar',
+      onclick: () => { d.elementos.splice(i, 1); tocarPortada(true); } }, 'Quitar'));
+    fila.appendChild(cab);
+    if (['texto', 'insignia', 'etiqueta', 'banda', 'cinta'].includes(el.tipo) && !el.rol) {
+      fila.appendChild(h('input', { type: 'text', value: el.texto || '', maxlength: 80, 'aria-label': 'Texto',
+        oninput: ev => { el.texto = ev.target.value; tocarPortada(false); } }));
+    }
+    if (el.tipo === 'icono') {
+      fila.appendChild(h('select', { 'aria-label': 'Icono', onchange: ev => { el.icono = ev.target.value; tocarPortada(false); } },
+        ...(cat.iconos || []).map(n => h('option', { value: n, selected: n === el.icono }, n))));
+    }
+    if (el.tipo === 'texto') {
+      const estilos = h('div', { clase: 'fila estilos-portada' });
+      Object.entries(cat.estilos_texto || {}).forEach(([id, que]) => estilos.appendChild(h('label', { clase: 'casilla-red', title: que },
+        h('input', { type: 'checkbox', checked: (el.estilos || []).includes(id),
+          onchange: ev => {
+            const lista = new Set(el.estilos || []);
+            if (ev.target.checked) lista.add(id); else lista.delete(id);
+            el.estilos = Array.from(lista);
+            tocarPortada(false);
+          } }), ` ${id}`)));
+      fila.appendChild(estilos);
+    }
+    const deslizadores = h('div', { clase: 'fila deslizadores-portada' });
+    [['x', '↔', 0, 1], ['y', '↕', 0, 1], ['tam', 'tamaño', 0.01, 0.6], ['rot', 'giro', -45, 45]].forEach(([clave, etiqueta, min, max]) => {
+      if (clave === 'tam' && ['rayo', 'rafaga'].includes(el.tipo)) return;
+      deslizadores.appendChild(h('label', { clase: 'deslizador-portada' }, h('span', {}, etiqueta),
+        h('input', { type: 'range', min, max, step: clave === 'rot' ? 1 : 0.005, 'aria-label': `${nombre}: ${etiqueta}`,
+          value: el[clave] != null ? el[clave] : (clave === 'rot' ? 0 : clave === 'tam' ? 0.1 : 0.5),
+          oninput: ev => { el[clave] = Number(ev.target.value); tocarPortada(false); } })));
+    });
+    fila.appendChild(deslizadores);
+    fila.appendChild(h('label', { clase: 'casilla-red' }, 'Color ',
+      h('input', { type: 'color', value: /^#[0-9a-f]{6}$/i.test(el.color || '') ? el.color : '#ffffff',
+        onchange: ev => {
+          el.color = ev.target.value;
+          // un color elegido a mano ya no es de la paleta: no se repinta al cambiarla
+          if (el.papeles) { el.papeles = Object.assign({}, el.papeles); delete el.papeles.color; }
+          tocarPortada(false);
+        } })));
+    b.appendChild(fila);
+  });
+  const elegir = h('select', { 'aria-label': 'Elemento que se añade' },
+    ...Object.entries(cat.elementos || {}).map(([id, que]) => h('option', { value: id }, `${NOMBRES_ELEMENTO_PORTADA[id] || id}: ${que}`)));
+  b.appendChild(h('div', { clase: 'fila' }, elegir,
+    h('button', { clase: 'mini', type: 'button', onclick: () => {
+      const tipo = elegir.value;
+      const pal = ((PORT.catalogo || {}).paletas || []).find(p => p.id === d.paleta) || {};
+      const [x, y] = sitioLibrePortada(d);
+      // un color que se vea: el del aviso de la paleta (en «Sin paleta», blanco)
+      const color = tipo === 'texto' ? (pal.texto || '#ffffff')
+        : (d.paleta === 'ninguna' ? '#ffffff' : (pal.alerta || '#ff2b2b'));
+      const nuevo = Object.assign({ tipo, x, y, fuente: d.fuente, color, contorno: pal.contorno || '#000000',
+        acento: pal.acento, propio: true }, NUEVOS_ELEMENTOS_PORTADA[tipo] || {});
+      // qué papel de la paleta pinta cada color: al cambiar de paleta se repinta
+      nuevo.papeles = { contorno: 'contorno', acento: 'acento' };
+      if (tipo === 'texto') nuevo.papeles.color = 'texto';
+      else if (d.paleta !== 'ninguna') nuevo.papeles.color = 'alerta';
+      if (tipo === 'flecha') Object.assign(nuevo, { x: Math.max(0.08, x - 0.2), y: Math.min(0.92, y + 0.1), x2: x, y2: y });
+      nuevo.orig = Object.assign({}, nuevo);
+      delete nuevo.orig.texto;
+      d.elementos = (d.elementos || []).concat([nuevo]);
+      tocarPortada(true);
+      avisoPortada(`${NOMBRES_ELEMENTO_PORTADA[tipo] || tipo} añadido: está en la lista de elementos (el último)`);
+    } }, 'Añadir')));
+  return b;
+}
+
+function bloqueAyudasPortada() {
+  const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Ayuda'));
+  b.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', type: 'button', disabled: PORT.proponiendo, onclick: () => proponerPortadas() },
+      PORT.proponiendo ? 'Claude está pensando…' : 'Proponer 3 portadas con Claude'),
+    h('span', { clase: 'meta' }, 'Lee el guion y propone plantilla, textos y colores. No se paga aparte.')));
+  if (PORT.propuestas && PORT.propuestas.length) {
+    const lista = h('div', { clase: 'propuestas-portada' });
+    PORT.propuestas.forEach((p, i) => lista.appendChild(h('div', { clase: 'propuesta-portada' },
+      h('b', {}, `${i + 1}. ${(((PORT.catalogo || {}).plantillas || []).find(x => x.id === p.diseno.plantilla) || {}).nombre || p.diseno.plantilla}`),
+      h('span', { clase: 'meta' }, Object.values(p.diseno.textos || {}).filter(Boolean).join(' · ')),
+      p.por_que ? h('span', { clase: 'meta' }, p.por_que) : null,
+      h('button', { clase: 'mini', type: 'button', onclick: () => {
+        // la propuesta trae su plantilla, textos y colores; la imagen, sus
+        // ajustes y lo añadido a mano se quedan
+        const actual = PORT.diseno;
+        // (lo añadido a mano ya viene dentro: el servidor la hizo sobre este diseño)
+        PORT.diseno = Object.assign({}, p.diseno, {
+          fondo: Object.assign({}, actual.fondo, { disposicion: p.diseno.fondo.disposicion }),
+          efectos: actual.efectos || {} });
+        tocarPortada(true);
+      } }, 'Usar esta'))));
+    b.appendChild(lista);
+  }
+
+  b.appendChild(h('h4', {}, 'Con la IA de imágenes (se paga)'));
+  b.appendChild(h('div', { clase: 'meta' }, 'Recomendado: el FONDO con IA y el texto en capas (exacto y editable). '
+    + 'La portada ENTERA con el texto dentro es más vistosa, pero menos constante y puede escribir mal alguna letra.'));
+  b.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', type: 'button', disabled: !!PORT.pensandoIdeas, onclick: () => pedirIdeasIA() },
+      PORT.pensandoIdeas ? 'Claude está leyendo el guion…' : 'Ideas de imagen con Claude'),
+    h('span', { clase: 'meta' }, 'Tres escenas pensadas para ESTE vídeo, con su prompt. No se paga aparte.')));
+  (PORT.ideas || []).forEach((idea, i) => {
+    const area = h('textarea', { rows: 3, maxlength: 1500, 'aria-label': `Prompt de la idea ${i + 1}`,
+      oninput: ev => { idea.prompt = ev.target.value; } }, idea.prompt);
+    b.appendChild(h('div', { clase: 'idea-ia-portada' },
+      h('b', {}, `${i + 1}. ${idea.titulo}`), idea.por_que ? h('span', { clase: 'meta' }, idea.por_que) : null,
+      area,
+      h('div', { clase: 'fila' },
+        h('button', { clase: 'mini', type: 'button', disabled: !!PORT.ia, onclick: () => prepararIA('fondo', idea.prompt) }, 'Fondo con esta idea'),
+        h('button', { clase: 'mini fantasma', type: 'button', disabled: !!PORT.ia, onclick: () => prepararIA('portada', idea.prompt) }, 'Portada entera con esta idea'))));
+  });
+  b.appendChild(h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', type: 'button', disabled: !!PORT.ia, onclick: () => prepararIA('fondo', '') }, 'Hacer el fondo con IA'),
+    h('button', { clase: 'mini', type: 'button', disabled: !!PORT.ia, onclick: () => prepararIA('portada', '') }, 'Hacer la portada entera con IA')));
+  // ANTES DE PAGAR: el prompt a la vista y editable, y el precio
+  const p = PORT.iaPendiente;
+  if (p) {
+    const calidad = h('select', { 'aria-label': 'Calidad de la imagen', onchange: ev => { p.calidad = ev.target.value; prepararIA(p.que, p.prompt, p.calidad); } },
+      ...[['low', 'Calidad baja'], ['medium', 'Calidad media'], ['high', 'Calidad alta']].map(([v, t]) => h('option', { value: v, selected: v === p.calidad }, t)));
+    const area = h('textarea', { rows: 5, maxlength: 1500, 'aria-label': 'Prompt que se manda a la IA',
+      oninput: ev => { p.prompt = ev.target.value; } }, p.prompt);
+    b.appendChild(h('div', { clase: 'caja-aviso antes-de-pagar' },
+      h('b', {}, p.que === 'portada' ? 'La portada ENTERA con IA' : 'El FONDO con IA (sin texto)'),
+      h('span', { clase: 'meta' }, 'Esto es lo que se le pide a la IA. Cámbialo si quieres:'),
+      area,
+      h('span', { clase: 'meta' }, p.que === 'portada'
+        ? 'Siempre se añade al final: que escriba exactamente tus textos, con tildes, y nada más.'
+        : 'Siempre se añade al final: sin letras ni logotipos, y con sitio para el titular.'),
+      h('div', { clase: 'fila' }, calidad,
+        h('button', { clase: 'primario mini', type: 'button', disabled: !!p.enviando, onclick: () => portadaConIA(p) },
+          `Dibujar (≈ ${Number((p.precio || {}).usd || 0).toFixed(3)} $)`),
+        h('button', { clase: 'mini fantasma', type: 'button', onclick: () => { PORT.iaPendiente = null; pintarEditorPortada(); } }, 'Cancelar'))));
+  }
+  if (PORT.ia) b.appendChild(h('div', { clase: 'cargando' }, PORT.ia));
+  return b;
+}
+
+async function cambiarPlantillaPortada(cambios) {
+  try {
+    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/plantilla`), {
+      method: 'POST', cuerpo: Object.assign({ diseno: PORT.diseno }, cambios) });
+    PORT.diseno = r.diseno;
+    tocarPortada(true);
+  } catch (e) { avisoPortada(e.message, true); }
+}
+
+async function guardarDisenoPortada() {
+  try {
+    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/diseno`), {
+      method: 'PUT', cuerpo: { diseno: PORT.diseno } });
+    PORT.diseno = r.diseno;
+    PORT.cambiado = false;
+    avisoPortada('Diseño guardado ✓');
+  } catch (e) { avisoPortada(`no se ha guardado: ${e.message}`, true); }
+}
+
+async function descargarPortada() {
+  const pid = PORT.pid;
+  try {
+    avisoPortada('Pintando la portada a tamaño real…');
+    const r = await fetch(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/descargar`), {
+      method: 'POST', headers: cabecerasPortada({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ diseno: PORT.diseno }) });
+    if (!r.ok) {
+      let motivo = `HTTP ${r.status}`;
+      try { const datos = await r.json(); motivo = (datos.error && (datos.error.mensaje || datos.error)) || motivo; } catch (e) { /* no era JSON */ }
+      throw new Error(String(motivo));
+    }
+    // (sin comillas dentro de una expresión regular: parten los analizadores de herramientas/)
+    const nombre = ((r.headers.get('Content-Disposition') || '').split('filename=')[1] || '').replace(/\x22/g, '').trim() || 'portada.png';
+    bajarBlobPortada(await r.blob(), nombre);
+    avisoPortada('Portada descargada ✓');
+  } catch (e) { avisoPortada(`no se ha podido descargar: ${e.message}`, true); }
+}
+
+async function usarPortada() {
+  try {
+    avisoPortada('Pintando la portada a tamaño real…');
+    const ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/usar`), {
+      method: 'POST', cuerpo: { diseno: PORT.diseno } });
+    PORT.cambiado = false;
+    if (PUB.pid === PORT.pid) PUB.ficha = ficha;
+    cerrarEditorPortada();
+    toast('Portada puesta: es la que se mandará a las redes');
+    if (typeof pintarModulo === 'function') pintarModulo();
+  } catch (e) { avisoPortada(`no se ha podido poner la portada: ${e.message}`, true); }
+}
+
+/* Lo que se pide a Claude se sigue preguntando (un minuto pasa del proxy). */
+async function seguirPeticionPortada(ruta, cuerpo) {
+  const lanzada = await pedir(ruta, { method: 'POST', cuerpo });
+  let ficha = { estado: 'pensando' };
+  for (let i = 0; i < 400 && ficha.estado === 'pensando'; i += 1) {
+    await new Promise(r => setTimeout(r, 1500));
+    ficha = await pedir(`${ruta}/${lanzada.id}`);
+  }
+  if (ficha.estado === 'error') throw new Error(ficha.error);
+  if (ficha.estado !== 'listo') throw new Error('tarda demasiado: vuelve a pedirlo en un momento');
+  return ficha;
+}
+
+async function proponerPortadas() {
+  const pid = PORT.pid;
+  PORT.proponiendo = true;
+  pintarEditorPortada();
+  try {
+    const ficha = await seguirPeticionPortada(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/proponer`), { diseno: PORT.diseno });
+    // SOLO si seguimos en el mismo vídeo: las de A no salen en el editor de B
+    if (PORT.pid !== pid || !PORT.abierto) return;
+    PORT.propuestas = ficha.propuestas || [];
+  } catch (e) {
+    if (PORT.pid === pid) avisoPortada(`no se han podido proponer portadas: ${e.message}`, true);
+  }
+  if (PORT.pid !== pid) return;
+  PORT.proponiendo = false;
+  pintarEditorPortada();
+}
+
+async function pedirIdeasIA() {
+  const pid = PORT.pid;
+  PORT.pensandoIdeas = true;
+  pintarEditorPortada();
+  try {
+    const ficha = await seguirPeticionPortada(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/ideas-ia`), { diseno: PORT.diseno });
+    if (PORT.pid !== pid || !PORT.abierto) return;
+    PORT.ideas = ficha.ideas || [];
+  } catch (e) {
+    if (PORT.pid === pid) avisoPortada(`no se han podido pedir ideas: ${e.message}`, true);
+  }
+  if (PORT.pid !== pid) return;
+  PORT.pensandoIdeas = false;
+  pintarEditorPortada();
+}
+
+/* PASO 1 DE LA IA: el prompt y el precio a la vista, SIN gastar nada. */
+async function prepararIA(que, prompt, calidad) {
+  const pid = PORT.pid;
+  try {
+    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/ia`), { method: 'POST',
+      cuerpo: { diseno: PORT.diseno, que, calidad: calidad || 'low', prompt: prompt || undefined } });
+    if (PORT.pid !== pid) return;
+    PORT.iaPendiente = { que, calidad: r.calidad, prompt: r.prompt, precio: r.precio };
+    pintarEditorPortada();
+    const caja = document.querySelector('.capa-portada .antes-de-pagar');
+    if (caja) caja.scrollIntoView({ block: 'nearest' });
+  } catch (e) { avisoPortada(e.message, true); }
+}
+
+/* PASO 2: se paga y se dibuja con el prompt de la pantalla. */
+async function portadaConIA(p) {
+  const pid = PORT.pid;
+  const ruta = rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/ia`);
+  // UN SOLO PAGO: un doble clic en «Dibujar» mandaba dos `confirmado` y se
+  // dibujaban (y se pagaban) dos imágenes
+  if (p.enviando || PORT.ia) return;
+  p.enviando = true;
+  PORT.ia = 'Mandando a la IA…';
+  pintarEditorPortada();
+  try {
+    const lanzado = await pedir(ruta, { method: 'POST',
+      cuerpo: { diseno: PORT.diseno, que: p.que, calidad: p.calidad, prompt: p.prompt, confirmado: true } });
+    PORT.iaPendiente = null;
+    PORT.ia = 'Dibujando con la IA…';
+    pintarEditorPortada();
+    let t = { estado: 'ejecutando' };
+    for (let i = 0; i < 400 && !['listo', 'error', 'cancelado'].includes(t.estado); i += 1) {
+      await new Promise(r => setTimeout(r, 2000));
+      t = await pedir(API.trabajo(lanzado.trabajo_id));
+      if (t.mensaje) PORT.ia = `Dibujando con la IA… ${t.mensaje}`;
+    }
+    if (t.estado !== 'listo') throw new Error(t.error || t.mensaje || `el trabajo ha acabado «${t.estado}»`);
+    const r = t.resultado || {};
+    /* SOLO EN SU VÍDEO. Si entretanto se cerró el editor o se abrió el de
+       otro vídeo, la imagen no se pierde: el servidor la apunta en el diseño
+       guardado y sale en «Fondos ya hechos» al volver a abrirlo. */
+    if (PORT.pid !== pid || !PORT.abierto) return;
+    PORT.fondos = [r.nombre].concat((PORT.fondos || []).filter(x => x !== r.nombre));
+    PORT.diseno.fondo = Object.assign({}, PORT.diseno.fondo, { tipo: 'ia', imagen: r.nombre });
+    if (p.que === 'portada') PORT.diseno.modo = 'ia';
+    PORT.ia = null;
+    tocarPortada(true);
+    avisoPortada(p.que === 'portada' ? 'Portada hecha con IA: revisa el texto' : 'Fondo hecho con IA ✓');
+    return;
+  } catch (e) {
+    if (PORT.pid === pid) avisoPortada(`no se ha podido hacer con la IA: ${e.message}`, true);
+  }
+  p.enviando = false;
+  if (PORT.pid !== pid || !PORT.abierto) return;
+  PORT.ia = null;
+  pintarEditorPortada();
 }
 
 function bloqueFondoPortada(d) {
@@ -22909,208 +23400,6 @@ function bloqueFondoPortada(d) {
     b.appendChild(lista);
   }
   return b;
-}
-
-const NUEVOS_ELEMENTOS_PORTADA = {
-  texto: { texto: 'NUEVO', tam: 0.09, estilos: ['contorno', 'sombra'] },
-  insignia: { texto: 'VS', tam: 0.09, forma: 'circulo' },
-  flecha: { x: 0.3, y: 0.6, x2: 0.5, y2: 0.5 },
-  circulo: { tam: 0.12 }, rayo: {}, icono: { icono: 'estrella', tam: 0.07 },
-  etiqueta: { texto: 'GRATIS', tam: 0.06 }, banda: { texto: 'SOLO HOY', y: 0.86 },
-  marco: {}, subrayado: { y: 0.4 }, estrellas: { y: 0.6 }, cinta: { texto: 'NUEVO' },
-  rafaga: { opacidad: 0.15 },
-};
-
-function bloqueElementosPortada(d) {
-  const cat = PORT.catalogo || {};
-  const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Elementos'));
-  (d.elementos || []).forEach((el, i) => {
-    const fila = h('div', { clase: `elemento-portada${el.oculto ? ' escondido-portada' : ''}` });
-    const cab = h('div', { clase: 'fila' }, h('b', { clase: 'crece' }, `${i + 1}. ${el.tipo}`
-      + (el.rol ? ` · ${(cat.campos || {})[el.rol] || el.rol}` : '')),
-    h('button', { clase: 'mini fantasma', type: 'button', title: el.oculto ? 'Enseñar' : 'Esconder',
-      onclick: () => { el.oculto = !el.oculto; tocarPortada(true); } }, el.oculto ? 'Enseñar' : 'Esconder'),
-    h('button', { clase: 'mini fantasma', type: 'button', title: 'Quitar',
-      onclick: () => { d.elementos.splice(i, 1); tocarPortada(true); } }, 'Quitar'));
-    fila.appendChild(cab);
-    if (['texto', 'insignia', 'etiqueta', 'banda', 'cinta'].includes(el.tipo) && !el.rol) {
-      fila.appendChild(h('input', { type: 'text', value: el.texto || '', maxlength: 80,
-        oninput: ev => { el.texto = ev.target.value; tocarPortada(false); } }));
-    }
-    if (el.tipo === 'icono') {
-      fila.appendChild(h('select', { onchange: ev => { el.icono = ev.target.value; tocarPortada(false); } },
-        ...(cat.iconos || []).map(n => h('option', { value: n, selected: n === el.icono }, n))));
-    }
-    if (el.tipo === 'texto') {
-      const estilos = h('div', { clase: 'fila estilos-portada' });
-      Object.entries(cat.estilos_texto || {}).forEach(([id, que]) => estilos.appendChild(h('label', { clase: 'casilla-red', title: que },
-        h('input', { type: 'checkbox', checked: (el.estilos || []).includes(id),
-          onchange: ev => {
-            const lista = new Set(el.estilos || []);
-            if (ev.target.checked) lista.add(id); else lista.delete(id);
-            el.estilos = Array.from(lista);
-            tocarPortada(false);
-          } }), ` ${id}`)));
-      fila.appendChild(estilos);
-    }
-    const deslizadores = h('div', { clase: 'fila deslizadores-portada' });
-    [['x', '↔', 0, 1], ['y', '↕', 0, 1], ['tam', 'tamaño', 0.01, 0.6], ['rot', 'giro', -45, 45]].forEach(([clave, nombre, min, max]) => {
-      if (clave === 'tam' && ['rayo', 'rafaga'].includes(el.tipo)) return;
-      deslizadores.appendChild(h('label', { clase: 'deslizador-portada' }, h('span', {}, nombre),
-        h('input', { type: 'range', min, max, step: clave === 'rot' ? 1 : 0.005,
-          value: el[clave] != null ? el[clave] : (clave === 'rot' ? 0 : clave === 'tam' ? 0.1 : 0.5),
-          oninput: ev => { el[clave] = Number(ev.target.value); tocarPortada(false); } })));
-    });
-    fila.appendChild(deslizadores);
-    {
-      fila.appendChild(h('label', { clase: 'casilla-red' }, 'Color ',
-        h('input', { type: 'color', value: /^#[0-9a-f]{6}$/i.test(el.color || '') ? el.color : '#ffffff',
-          onchange: ev => { el.color = ev.target.value; tocarPortada(false); } })));
-    }
-    b.appendChild(fila);
-  });
-  const elegir = h('select', { 'aria-label': 'Elemento que se añade' },
-    ...Object.entries(cat.elementos || {}).map(([id, que]) => h('option', { value: id }, `${id}: ${que}`)));
-  b.appendChild(h('div', { clase: 'fila' }, elegir,
-    h('button', { clase: 'mini', type: 'button', onclick: () => {
-      const tipo = elegir.value;
-      const pal = ((PORT.catalogo || {}).paletas || []).find(p => p.id === d.paleta) || {};
-      d.elementos = (d.elementos || []).concat([Object.assign({ tipo, x: 0.5, y: 0.5, fuente: d.fuente,
-        color: tipo === 'texto' ? (pal.texto || '#ffffff') : (pal.acento || '#ffd400'),
-        contorno: pal.contorno || '#000000', acento: pal.acento }, NUEVOS_ELEMENTOS_PORTADA[tipo] || {})]);
-      tocarPortada(true);
-    } }, 'Añadir')));
-  return b;
-}
-
-function bloqueAyudasPortada() {
-  const b = h('div', { clase: 'bloque' }, h('h4', {}, 'Ayuda'));
-  b.appendChild(h('div', { clase: 'fila' },
-    h('button', { clase: 'mini', type: 'button', disabled: PORT.proponiendo, onclick: () => proponerPortadas() },
-      PORT.proponiendo ? 'Claude está pensando…' : 'Proponer 3 portadas con Claude'),
-    h('span', { clase: 'meta' }, 'Lee el guion y propone plantilla, textos y colores. No se paga aparte.')));
-  if (PORT.propuestas && PORT.propuestas.length) {
-    const lista = h('div', { clase: 'propuestas-portada' });
-    PORT.propuestas.forEach((p, i) => lista.appendChild(h('div', { clase: 'propuesta-portada' },
-      h('b', {}, `${i + 1}. ${(((PORT.catalogo || {}).plantillas || []).find(x => x.id === p.diseno.plantilla) || {}).nombre || p.diseno.plantilla}`),
-      h('span', { clase: 'meta' }, Object.values(p.diseno.textos || {}).filter(Boolean).join(' · ')),
-      p.por_que ? h('span', { clase: 'meta' }, p.por_que) : null,
-      h('button', { clase: 'mini', type: 'button', onclick: () => {
-        PORT.diseno = Object.assign({}, p.diseno, { fondo: Object.assign({}, PORT.diseno.fondo, { disposicion: p.diseno.fondo.disposicion }) });
-        tocarPortada(true);
-      } }, 'Usar esta'))));
-    b.appendChild(lista);
-  }
-  b.appendChild(h('h4', {}, 'Con la IA de imágenes (se paga)'));
-  b.appendChild(h('div', { clase: 'meta' }, 'Opción 1: solo el FONDO, sin texto; el texto sigue en capas, exacto y editable. '
-    + 'Opción 2: la portada ENTERA con el texto dentro; más vistosa, pero la IA puede escribir mal alguna letra.'));
-  const calidad = h('select', { 'aria-label': 'Calidad de la imagen' },
-    h('option', { value: 'low' }, 'Calidad baja'), h('option', { value: 'medium' }, 'Calidad media'),
-    h('option', { value: 'high' }, 'Calidad alta'));
-  b.appendChild(h('div', { clase: 'fila' }, calidad,
-    h('button', { clase: 'mini', type: 'button', disabled: !!PORT.ia, onclick: () => portadaConIA('fondo', calidad.value) },
-      'Hacer el fondo con IA'),
-    h('button', { clase: 'mini', type: 'button', disabled: !!PORT.ia, onclick: () => portadaConIA('portada', calidad.value) },
-      'Hacer la portada entera con IA')));
-  if (PORT.ia) b.appendChild(h('div', { clase: 'cargando' }, PORT.ia));
-  return b;
-}
-
-async function cambiarPlantillaPortada(cambios) {
-  try {
-    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/plantilla`), {
-      method: 'POST', cuerpo: Object.assign({ diseno: PORT.diseno }, cambios) });
-    PORT.diseno = r.diseno;
-    tocarPortada(true);
-  } catch (e) { toast(e.message, true); }
-}
-
-async function guardarDisenoPortada() {
-  try {
-    const r = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/diseno`), {
-      method: 'PUT', cuerpo: { diseno: PORT.diseno } });
-    PORT.diseno = r.diseno;
-    PORT.cambiado = false;
-    toast('Diseño de la portada guardado');
-  } catch (e) { toast(e.message, true); }
-}
-
-async function usarPortada() {
-  try {
-    toast('Pintando la portada a tamaño real…');
-    const ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/usar`), {
-      method: 'POST', cuerpo: { diseno: PORT.diseno } });
-    PORT.cambiado = false;
-    if (PUB.pid === PORT.pid) PUB.ficha = ficha;
-    toast('Portada puesta: es la que se mandará a las redes');
-    cerrarEditorPortada();
-    if (typeof pintarModulo === 'function') pintarModulo();
-  } catch (e) { toast(`no se ha podido poner la portada: ${e.message}`, true); }
-}
-
-async function proponerPortadas() {
-  const pid = PORT.pid;
-  PORT.proponiendo = true;
-  pintarEditorPortada();
-  const ruta = rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/proponer`);
-  try {
-    const lanzada = await pedir(ruta, { method: 'POST', cuerpo: { diseno: PORT.diseno } });
-    let ficha = { estado: 'pensando' };
-    for (let i = 0; i < 400 && ficha.estado === 'pensando'; i += 1) {
-      await new Promise(r => setTimeout(r, 1500));
-      ficha = await pedir(`${ruta}/${lanzada.id}`);
-    }
-    if (ficha.estado === 'error') throw new Error(ficha.error);
-    if (ficha.estado !== 'listo') throw new Error('tarda demasiado: vuelve a pedirlo en un momento');
-    // SOLO si seguimos en el mismo vídeo: las de A no salen en el editor de B
-    if (PORT.pid !== pid || !PORT.abierto) return;
-    PORT.propuestas = ficha.propuestas || [];
-  } catch (e) {
-    if (PORT.pid === pid) toast(`no se han podido proponer portadas: ${e.message}`, true);
-  }
-  if (PORT.pid !== pid) return;
-  PORT.proponiendo = false;
-  pintarEditorPortada();
-}
-
-async function portadaConIA(que, calidad) {
-  const pid = PORT.pid;
-  const ruta = rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/ia`);
-  try {
-    const precio = await pedir(ruta, { method: 'POST', cuerpo: { diseno: PORT.diseno, que, calidad } });
-    const usd = Number((precio.precio || {}).usd || 0).toFixed(3);
-    const aviso = que === 'portada'
-      ? `La IA hará la portada ENTERA con el texto dentro (puede escribir mal alguna letra). Cuesta unos ${usd} $. ¿Seguimos?`
-      : `La IA hará solo el fondo, sin texto; el texto sigue en capas. Cuesta unos ${usd} $. ¿Seguimos?`;
-    if (!window.confirm(aviso)) return;
-    const lanzado = await pedir(ruta, { method: 'POST', cuerpo: { diseno: PORT.diseno, que, calidad, confirmado: true } });
-    PORT.ia = 'Dibujando con la IA…';
-    pintarEditorPortada();
-    let t = { estado: 'ejecutando' };
-    for (let i = 0; i < 400 && !['listo', 'error', 'cancelado'].includes(t.estado); i += 1) {
-      await new Promise(r => setTimeout(r, 2000));
-      t = await pedir(API.trabajo(lanzado.trabajo_id));
-      if (t.mensaje) PORT.ia = `Dibujando con la IA… ${t.mensaje}`;
-    }
-    if (t.estado !== 'listo') throw new Error(t.error || t.mensaje || `el trabajo ha acabado «${t.estado}»`);
-    const r = t.resultado || {};
-    /* SOLO EN SU VÍDEO. Si entretanto se cerró el editor o se abrió el de
-       otro vídeo, la imagen no se pierde: el servidor la apunta en el diseño
-       guardado y sale en «Fondos ya hechos» al volver a abrirlo. */
-    if (PORT.pid !== pid || !PORT.abierto) return;
-    PORT.fondos = [r.nombre].concat((PORT.fondos || []).filter(x => x !== r.nombre));
-    PORT.diseno.fondo = Object.assign({}, PORT.diseno.fondo, { tipo: 'ia', imagen: r.nombre });
-    if (que === 'portada') PORT.diseno.modo = 'ia';
-    toast(que === 'portada' ? 'Portada hecha con IA: revisa el texto' : 'Fondo hecho con IA');
-    PORT.ia = null;
-    tocarPortada(true);
-    return;
-  } catch (e) {
-    if (PORT.pid === pid) toast(`no se ha podido hacer con la IA: ${e.message}`, true);
-  }
-  if (PORT.pid !== pid || !PORT.abierto) return;
-  PORT.ia = null;
-  pintarEditorPortada();
 }
 
 /* ================================================================== PUBLICAR
@@ -23360,6 +23649,7 @@ function pintarModulo() {
   sellarHistoriaModulo();
   const foco = document.activeElement && document.activeElement.dataset
     ? document.activeElement.dataset.foco : '';
+  const ancla = anclaDeScroll('modulo', claveScrollModulo);
   vaciar(m);
   const volver = barraVolverModulo();  // «‹ Volver» (diseno-crearia)
   if (volver) m.appendChild(volver);
@@ -23383,6 +23673,7 @@ function pintarModulo() {
     }
   }
   devolverScroll('modulo', claveScrollModulo);
+  volverAlAncla(ancla, claveScrollModulo);
 }
 
 /* -------------------------------------------------------------- INICIO
@@ -25332,8 +25623,10 @@ function bloquePortadaPublicar() {
   const etiqueta = h('span', { clase: 'meta' }, p.imagen ? 'Imagen subida'
     : p.ms != null ? `Fotograma del segundo ${(p.ms / 1000).toFixed(1)}` : 'Cada red elige la suya (no has elegido ninguna)');
   let reloj = null;
+  // con imagen propia el deslizador sigue vivo: es el momento para TikTok,
+  // que sin el permiso «cover_image» solo acepta un fotograma
   const deslizador = h('input', { type: 'range', min: 0, max: dur, step: 100, value: msVista,
-    disabled: !!p.imagen, 'aria-label': 'Momento del vídeo para la portada',
+    'aria-label': p.imagen ? 'Fotograma para TikTok' : 'Momento del vídeo para la portada',
     oninput: ev => {
       PUB.portadaMs = Number(ev.target.value);
       etiqueta.textContent = `Segundo ${(PUB.portadaMs / 1000).toFixed(1)} (sin guardar)`;
@@ -25366,10 +25659,12 @@ function bloquePortadaPublicar() {
       etiqueta,
       deslizador,
       h('div', { clase: 'fila' },
-        h('button', { clase: 'mini', disabled: !!p.imagen, onclick: () => guardarPortada({ ms: Number(deslizador.value) }) },
-          'Usar este fotograma'),
+        h('button', { clase: 'mini', onclick: () => guardarPortada({ ms: Number(deslizador.value) }) },
+          p.imagen ? 'Este fotograma para TikTok' : 'Usar este fotograma'),
         h('label', { clase: 'boton mini', for: `portada-${f.pid}` }, 'Subir una imagen'), entrada,
         h('button', { clase: 'mini primario', onclick: () => abrirEditorPortada(f.pid) }, 'Diseñar portada'),
+        p.imagen ? h('button', { clase: 'mini', title: 'Guardar una copia de la portada (respaldo)',
+          onclick: () => descargarPortadaPublicar(f.pid, p.imagen) }, '⬇ Descargar portada') : null,
         p.imagen ? h('button', { clase: 'mini fantasma', onclick: () => guardarPortada({ quitar_imagen: true }) }, 'Quitar la imagen') : null,
         (p.ms != null || p.imagen) ? h('button', { clase: 'mini fantasma',
           onclick: () => guardarPortada({ ms: null, quitar_imagen: true }) }, 'Que cada red elija') : null),
@@ -25380,9 +25675,75 @@ function bloquePortadaPublicar() {
         p.imagen ? h('label', { clase: 'casilla-red', title: 'TikTok solo acepta una imagen propia si tu cuenta tiene esa función; si no, usa el fotograma' },
           h('input', { type: 'checkbox', checked: !!p.tiktok_imagen, onchange: ev => guardarPortada({ tiktok_imagen: ev.target.checked }) }),
           ' Usar la imagen también en TikTok') : null),
-      h('div', { clase: 'meta' }, 'Instagram y TikTok usan el fotograma elegido; Facebook, solo si sale como vídeo (no como Reel). '
-        + 'Una imagen subida va a Instagram y Facebook (y a YouTube o TikTok si lo marcas).'))));
+      portadaPorRedPublicar(f))));
   return b;
+}
+
+/* RED POR RED, QUÉ PORTADA SE VA A MANDAR (portadas-2, 21-10). Es la misma
+   regla que `publicar.campos_portada`: lo que cada red acepta por Upload-Post.
+   Antes solo había una frase general y no se sabía por qué una red ponía la
+   suya. */
+function portadaPorRedPublicar(f) {
+  const p = f.portada || {};
+  const conPortada = ['instagram', 'tiktok', 'youtube', 'facebook', 'linkedin', 'x', 'pinterest'];
+  const redes = (f.redes || []).filter(r => conPortada.includes(r));
+  const sinPortada = (f.redes || []).filter(r => !conPortada.includes(r));
+  const caja = h('div', { clase: 'portada-por-red' }, h('b', {}, 'Qué portada recibe cada red:'));
+  if (!(f.redes || []).length) {
+    caja.appendChild(h('span', { clase: 'meta' }, 'Marca alguna red arriba para verlo.'));
+    return caja;
+  }
+  const seg = ms => `el fotograma del segundo ${(ms / 1000).toFixed(1).replace('.', ',')}`;
+  const nombres = { instagram: 'Instagram', tiktok: 'TikTok', youtube: 'YouTube', facebook: 'Facebook',
+    linkedin: 'LinkedIn', x: 'X', pinterest: 'Pinterest' };
+  const tiktokPuede = !!f.tiktok_portada_propia;
+  redes.forEach(red => {
+    let que = '';
+    let ok = true;
+    if (red === 'instagram') {
+      que = p.imagen ? 'tu imagen ✓ (en la cuadrícula del perfil se ve el centro, 3:4)' : p.ms != null ? `${seg(p.ms)} ✓` : 'ninguna: la elige Instagram';
+      ok = !!(p.imagen || p.ms != null);
+    } else if (red === 'tiktok') {
+      if (p.imagen && (p.tiktok_imagen || tiktokPuede)) {
+        que = tiktokPuede ? 'tu imagen ✓ (tu cuenta tiene el permiso «cover_image»)'
+          : 'tu imagen, si tu cuenta tiene el permiso «cover_image» (si no, TikTok la ignora)';
+      } else if (p.ms != null) que = `${seg(p.ms)} ✓ (sin el permiso «cover_image», TikTok solo acepta un fotograma)`;
+      else { que = p.imagen ? 'ninguna: TikTok no acepta tu imagen sin el permiso «cover_image». Elige un fotograma para TikTok' : 'ninguna: la elige TikTok'; ok = false; }
+    } else if (red === 'youtube') {
+      if (!p.youtube) { que = 'ninguna: marca «Mandarla también a YouTube» (necesita el canal verificado)'; ok = false; }
+      else if (p.imagen || p.ms != null) que = 'tu miniatura, si el canal está verificado (en el carrusel de Shorts YouTube suele enseñar un fotograma)';
+      else { que = 'ninguna: elige una imagen o un fotograma'; ok = false; }
+    } else if (red === 'facebook') {
+      const reel = ((f.encaje || {}).facebook || {}).tipo === 'Reel';
+      if (reel) { que = 'ninguna: sale como Reel (vertical de hasta 90 s) y Facebook no admite portada en los Reels'; ok = false; }
+      else if (p.imagen) que = 'tu imagen ✓ (sale como vídeo)';
+      else if (p.ms != null) que = `${seg(p.ms)} ✓`;
+      else { que = 'ninguna: la elige Facebook'; ok = false; }
+    } else if (red === 'linkedin' || red === 'x') {
+      if (p.imagen) que = 'tu imagen ✓';
+      else if (p.ms != null) que = `${seg(p.ms)} ✓`;
+      else { que = `ninguna: la elige ${nombres[red]}`; ok = false; }
+    } else if (red === 'pinterest') {
+      if (p.imagen) que = 'tu imagen ✓';
+      else if (p.ms != null) que = `${seg(p.ms)} ✓`;
+      else { que = 'ninguna: la elige Pinterest'; ok = false; }
+    }
+    caja.appendChild(h('div', { clase: `fila portada-red${ok ? '' : ' sin-portada'}` }, h('b', {}, `${nombres[red]}:`), h('span', {}, que)));
+  });
+  if (sinPortada.length) {
+    caja.appendChild(h('div', { clase: 'fila portada-red sin-portada' },
+      h('span', {}, `${sinPortada.length === 1 ? 'Esta red no admite' : 'Estas redes no admiten'} portada: ${sinPortada.map(r => NOMBRES_RED[r] || r).join(', ')}.`)));
+  }
+  return caja;
+}
+
+async function descargarPortadaPublicar(pid, sello) {
+  try {
+    const r = await fetch(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada.jpg?s=${encodeURIComponent(sello || '')}`),
+      { headers: cabecerasPortada() });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    bajarBlobPortada(await r.blob(), `${slugDeDescarga((PUB.ficha || {}).nombre || pid)}_portada.jpg`);
+  } catch (e) { toast(`no se ha podido descargar la portada: ${e.message}`, true); }
 }
 
 function bloqueCuandoPublicar() {
@@ -25677,6 +26038,9 @@ function filasEnvioFicha(e) {
     pastillaEstadoEnvio(e.estado),
     debioSalirPublicar(e),
     h('span', { clase: 'crece meta motivo-envio' }, e.error || e.nota || ''),
+    // QUÉ PORTADA SE MANDÓ (portadas-2): los envíos de antes no lo saben
+    e.portada != null ? h('span', { clase: 'meta portada-envio' },
+      `Portada: ${e.portada || 'ninguna (la puso la red)'}`) : null,
     botonComprobarPublicar(e),
     e.metricas && textoMetricas(e.metricas)
       ? h('span', { clase: 'metricas-envio', title: `actualizado ${fechaCorta(e.metricas.al)}` },

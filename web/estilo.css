@@ -485,6 +485,11 @@ button.peligro:hover:not(:disabled) { border-color: var(--aviso); }
 button.mini { padding: 3px 8px; font-size: 12px; border-radius: 6px; }
 button.fantasma { background: transparent; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--acento); }
+/* LAS OPCIONES DE UN DESPLEGABLE llevan su propio fondo (arreglo urgente,
+   22-10-2026): un <select> con fondo transparente (el chip del proyecto de
+   Automatizar) dejaba la lista nativa en blanco con la letra clara encima. */
+select option, select optgroup { background-color: var(--panel); color: var(--texto); }
+select option:disabled { color: var(--tenue2); }
 textarea { width: 100%; resize: vertical; line-height: 1.55; }
 input[type=range] { padding: 0; background: none; border: none; accent-color: var(--acento); }
 input[type=checkbox] { accent-color: var(--acento); width: 15px; height: 15px; }

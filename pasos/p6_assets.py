@@ -70,6 +70,7 @@ import catalogo_visual  # noqa: E402
 import corrector  # noqa: E402
 import reglas_estilo  # noqa: E402
 import tipo_relato  # noqa: E402
+import dominios  # noqa: E402
 import cta  # noqa: E402
 import encuadres  # noqa: E402
 import estadisticas  # noqa: E402
@@ -1115,8 +1116,15 @@ def servicios_del_video(p, texto=""):
     """
     if p.get("servicios"):
         return p.get("servicios")
-    return list(encuadres.servicios_en_texto(
-        contexto_de_reglas(p.get("estilo") or {}) + " " + str(texto or "")))
+    contexto = contexto_de_reglas(p.get("estilo") or {}) + " " + str(texto or "")
+    # EL DOMINIO DEL NEGOCIO, si el estilo lo fija (rama dominio-negocio): sus
+    # patrones y, si el texto no nombra ninguno, sus servicios de siempre. Sin
+    # fijar, lo de antes, letra por letra.
+    propio = dominios.fijado(p.get("estilo"))
+    if propio is not None:
+        return list(dominios.servicios_en_texto(contexto, propio)
+                    or propio.get("por_defecto") or ())
+    return list(encuadres.servicios_en_texto(contexto))
 
 
 def _asignar_cartas(escenas, p, texto=""):
@@ -1141,7 +1149,8 @@ def _asignar_cartas(escenas, p, texto=""):
         cartas = encuadres.repartir(
             escenas, semilla=p.get("semilla", 0),
             forzadas={k: v for k, v in forzadas.items() if v},
-            modo="foto", servicios=servicios_del_video(p, texto))
+            modo="foto", servicios=servicios_del_video(p, texto),
+            dominio=dominios.fijado(p.get("estilo")))
     else:
         cartas = encuadres.repartir(
             escenas, semilla=p.get("semilla", 0),
@@ -1158,7 +1167,7 @@ def _asignar_cartas(escenas, p, texto=""):
     return cartas
 
 
-def _repartir_zoom(escenas, modo="ilustracion", servicios=None):
+def _repartir_zoom(escenas, modo="ilustracion", servicios=None, dominio=None):
     """El zoom de cada plano, alternado. Se juega en el CORTE, sobre la imagen.
 
     No necesita ninguna caja ni ningun ancla sobre el que centrarse: el
@@ -1167,10 +1176,10 @@ def _repartir_zoom(escenas, modo="ilustracion", servicios=None):
     segmentar = medios.motor("guion/segmentar.py")
     for indice, escena in enumerate(escenas):
         escena["zoom"] = segmentar.alternar_zoom(indice, None)
-    return _informe_cartas(escenas, modo=modo, servicios=servicios)
+    return _informe_cartas(escenas, modo=modo, servicios=servicios, dominio=dominio)
 
 
-def _informe_cartas(escenas, modo="ilustracion", servicios=None):
+def _informe_cartas(escenas, modo="ilustracion", servicios=None, dominio=None):
     """Que ha salido del reparto de cartas.
 
     'planos_repetidos' cuenta planos SEGUIDOS de la misma familia, que es la
@@ -1196,7 +1205,7 @@ def _informe_cartas(escenas, modo="ilustracion", servicios=None):
         # menos y, sobre todo, imposible que se desincronicen.
         # En modo foto, la suya: lo que se ofrece es lo que se puede repartir.
         "escalera": [{"id": c["id"], "nombre": c["nombre"]}
-                     for c in encuadres.escalera_para(modo, servicios)],
+                     for c in encuadres.escalera_para(modo, servicios, dominio)],
     }
 
 
@@ -1289,7 +1298,8 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     principal = _sitio_principal(p, catalogo) if relato_edita else None
     bases_rel = tipo_relato.bases_aprobadas(p, catalogo) if relato_edita else {}
     camaras = _repartir_zoom(escenas, modo=modo,
-                             servicios=servicios_del_video(p, texto_video))
+                             servicios=servicios_del_video(p, texto_video),
+                             dominio=dominios.fijado(p.get("estilo")))
 
     # Las duraciones definitivas ANTES de decidir los rotulos: un plano de menos
     # de tres segundos no admite ninguno, y eso solo se sabe una vez repartidos
@@ -5001,8 +5011,9 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
                 "falta aprobar la imagen base de "
                 + ", ".join(f"«{clave.replace('#', '», estado «')}» ({len(sids)} plano(s))"
                             for clave, sids in sorted(faltan.items()))
-                + ": genérala o usa la imagen subida en «El espacio fijo» y "
-                  "apruébala antes de generar los planos")
+                + ": ve al paso «Imágenes» (bloque «La imagen base») o al Encargo "
+                  "(«El tipo de relato»), genérala o usa la imagen subida del espacio "
+                  "fijo, y apruébala (y la de cada estado) antes de generar los planos")
 
     # REHACER UNA COSA REHACE ESA COSA. Aqui habia siete lineas de CASCADA:
     # pedir un asset metia detras todas las escenas que lo usan, asi que pulsar

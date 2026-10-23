@@ -46,10 +46,11 @@ import threading
 import time
 
 try:
-    from . import cli_claude, comun, estadisticas, repaso
+    from . import cli_claude, comun, dominios, estadisticas, repaso
 except ImportError:  # ejecutado con la carpeta pasos directamente en sys.path
     import cli_claude
     import comun
+    import dominios
     import estadisticas
     import repaso
 
@@ -131,16 +132,12 @@ QUE BUSCAR, y en este orden:
     el estilo tiene); la gravedad es la de la regla.
   - guion: la imagen no cuenta lo que dice la voz (otra accion, otro numero de
     personas, otro momento).
-  - equipo: el equipo no es el que mandan las indicaciones o esta montado
-    como no se monta (una tele sobre un mueble cuando va en su tripode, un
-    monitor gigante, mandos de otro color o de otra consola, cables imposibles).
-  - congruencia: el mismo sitio o la misma estacion cambia de un plano a otro
-    sin que el guion lo pida.
+  - equipo: {f_equipo}
+  - congruencia: {f_congruencia}
   - personas: gente que no deberia estar, caras o cuerpos deformes, una
     persona que no deberia salir con cara segun las indicaciones.
-  - manos: dedos de mas o de menos, manos fundidas con el mando o con otra mano.
-  - orientacion: la gente no mira a donde tiene que mirar (jugadores de
-    espaldas a la tele, mirando a camara cuando juegan).
+  - manos: {f_manos}
+  - orientacion: {f_orientacion}
   - estilo: no parece del mismo video (otra luz, otra paleta, render en vez de
     foto, dibujo en vez de foto o al reves).
   - texto: letras, logos o marcas que nadie pidio, o texto ilegible.
@@ -303,8 +300,7 @@ def _planos_legibles(proyecto, escenas, imagenes, bloques):
 #: de la tanda. Solo para comparar la continuidad, nunca para juzgarlo.
 REFERENCIA = """EL PLANO DE ANTES, SOLO COMO REFERENCIA (abrelo con Read, pero NO lo
 juzgues ni lo pongas en tu respuesta: ya se reviso o se revisa aparte). Sirve
-para ver si el primer plano de la lista mantiene el mismo sitio, la misma
-estacion, los mismos mandos y la misma gente que venia de antes:
+para ver si el primer plano de la lista mantiene {continuidad} que venia de antes:
 {plano}
 
 """
@@ -340,7 +336,17 @@ def _referencia_base(proyecto, tanda, bases):
     return texto
 
 
-def _referencia_de(proyecto, plan, primero, imagenes, bloques):
+def _frases(estilo, plan, guia="", encargo=""):
+    """Las frases del revisor que hablan del equipo del negocio (rama
+    dominio-negocio): las del dominio que fija el estilo o, en automático, las
+    de EstadoPlay si el vídeo nombra sus servicios y las generales si no. Antes
+    eran siempre las de consolas, también en un vídeo de baños."""
+    texto = " ".join([str((estilo or {}).get("prompt") or ""), str(guia or ""), str(encargo or "")]
+                     + [str(e.get("prompt") or "") for e in (plan or {}).get("escenas") or []])
+    return dominios.frases_revisor(estilo, texto)
+
+
+def _referencia_de(proyecto, plan, primero, imagenes, bloques, frases=None):
     """El texto del plano que va justo antes de `primero` en el video, o "".
 
     Los grupos se miran por separado, y sin esto el ultimo plano de un grupo y
@@ -357,6 +363,7 @@ def _referencia_de(proyecto, plan, primero, imagenes, bloques):
     if anterior is None:
         return ""
     return REFERENCIA.format(
+        continuidad=(frases or dominios.REVISOR_ESTADOPLAY)["continuidad"],
         plano=_planos_legibles(proyecto, [anterior], imagenes, bloques))
 
 
@@ -476,6 +483,7 @@ def revisar(proyecto, plan, imagenes, planos, estilo=None, encargo="",
     modelo, esfuerzo = _ajuste(ajuste)
     estilo = estilo if isinstance(estilo, dict) else {}
     salida, fallos = {}, []
+    frases = _frases(estilo, plan, guia, encargo)
     tandas = [escenas[i:i + POR_LLAMADA] for i in range(0, len(escenas), POR_LLAMADA)]
     for n, tanda in enumerate(tandas):
         ids = [str(e.get("id")) for e in tanda]
@@ -491,9 +499,11 @@ def revisar(proyecto, plan, imagenes, planos, estilo=None, encargo="",
             reglas_estilo=(BLOQUE_REGLAS_ESTILO.format(reglas=reglas_estilo)
                            if reglas_estilo else ""),
             referencia=(_referencia_base(proyecto, tanda, bases)
-                        + _referencia_de(proyecto, plan, ids[0], imagenes, bloques)),
+                        + _referencia_de(proyecto, plan, ids[0], imagenes, bloques, frases)),
             planos=_planos_legibles(proyecto, tanda, imagenes, bloques),
-            tipos=" | ".join(TIPOS))
+            tipos=" | ".join(TIPOS),
+            f_equipo=frases["equipo"], f_congruencia=frases["congruencia"],
+            f_manos=frases["manos"], f_orientacion=frases["orientacion"])
         # CON SU AVANCE: es lo que corta la llamada al CLI si alguien cancela
         # el trabajo (lo mata `cli_claude` desde `al_cancelar`). Sin el, cancelar
         # esperaba a que acabara la tanda de ocho, que pueden ser siete minutos.

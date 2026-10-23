@@ -7438,6 +7438,49 @@ def probar_tipo_relato():
             setattr(servidor, nombre, valor)
 
 
+def probar_dominios():
+    """Rama dominio-negocio (21-10-2026): listar los dominios y fijar el de un estilo."""
+    seccion("DOMINIOS: EL NEGOCIO DE UN ESTILO")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    codigo, d = _llamar(servidor.listar_dominios)
+    ok(codigo == 200 and {x["id"] for x in d.get("dominios") or []} == {"general", "estadoplay"},
+       f"GET /api/dominios: general y estadoplay ({codigo})")
+    codigo, _m = _llamar(servidor.guardar_dominio_estilo, "no-existe", {"dominio": "general"})
+    ok(codigo in (400, 404), f"fijar el dominio de un estilo que no existe: {codigo}")
+    codigo, _m = _llamar(servidor.guardar_dominio_estilo, "x", {})
+    igual(codigo, 400, "sin 'dominio', 400")
+    codigo, _m = _llamar(servidor.guardar_dominio_estilo, "x", {"dominio": "telenovela"})
+    igual(codigo, 400, "un dominio que no existe, 400")
+    # EL CAMINO BUENO, con un estilo de verdad en un almacén aparte
+    from PIL import Image as _Imagen                          # noqa: PLC0415
+    base = tempfile.mkdtemp(prefix="estudio_dominio_")
+    presets = servidor._presets()
+    antes = presets.FICHERO
+    try:
+        presets.FICHERO = os.path.join(base, "presets.json")
+        refs = []
+        for i in range(3):
+            ruta = os.path.join(base, f"r{i}.png")
+            _Imagen.new("RGB", (64, 40), (40 * i, 90, 160)).save(ruta)
+            refs.append(ruta)
+        ficha = presets.guardar("canal", "Con dominio", {"estilo": {"referencias": refs},
+                                                         "guion": {"instrucciones": "x"}})
+        pid = ficha["id"]
+        codigo, r = _llamar(servidor.guardar_dominio_estilo, pid, {"dominio": " General "})
+        ok(codigo == 200 and r == {"dominio": "general", "cambiado": True},
+           f"fijar «General» lo guarda ({codigo} {r})")
+        igual((presets.leer(pid)["datos"]["estilo"]).get("dominio"), "general", "y queda en el estilo")
+        codigo, r = _llamar(servidor.guardar_dominio_estilo, pid, {"dominio": "general"})
+        ok(codigo == 200 and r.get("cambiado") is False, "repetirlo no cambia nada")
+        codigo, r = _llamar(servidor.guardar_dominio_estilo, pid, {"dominio": None})
+        estilo = presets.leer(pid)["datos"]["estilo"]
+        ok(codigo == 200 and "dominio" not in estilo and len(estilo.get("referencias") or []) == 3,
+           "null vuelve a automático: se quita la clave y el resto del estilo se queda")
+    finally:
+        presets.FICHERO = antes
+
+
 def _video_montado_de_prueba(servidor, base, nombre):
     """Un vídeo con todos los pasos hechos y su MP4: «montado y al día»."""
     from nucleo import Estado, Proyecto                       # noqa: PLC0415
@@ -7668,6 +7711,7 @@ def main():
         probar_publicar_20oct(cliente, pid)
         probar_espacio_fijo()
         probar_tipo_relato()
+        probar_dominios()
     finally:
         parar(proceso)
         if not argumentos.conservar:

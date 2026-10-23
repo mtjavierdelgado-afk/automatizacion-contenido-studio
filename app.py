@@ -1321,6 +1321,119 @@ def listar_proyectos(peticion: Request):
     return {"proyectos": fichas, "raiz": raiz_proyectos()}
 
 
+#: Los pasos que dicen «por dónde va» un vídeo en su tarjeta de Tus proyectos.
+PASOS_DE_LA_TARJETA = ("guion", "voz", "assets", "render")
+#: Como mucho, cuántos vídeos se resumen por petición (la pantalla pide en
+#: lotes de 40: así la URL nunca se acerca al tope de nginx).
+MAX_RESUMEN_TARJETAS = 120
+
+
+class _EstadoDeSoloLectura(Estado):
+    """Las cuentas de `Estado` (firmas, unidades obsoletas) sobre un documento
+    ya leído, SIN su constructor: no toma el cerrojo, no recupera copias, no
+    crea un estado.json nuevo ni guarda nada. Solo para resumir; no se guarda en
+    ningún sitio y se tira al acabar la petición."""
+
+    def __init__(self, doc):                                # noqa: D107
+        for paso in PASOS:
+            doc["pasos"].setdefault(paso["id"], {
+                "params": {}, "activa": None, "firma": None, "salidas": {},
+                "unidades": {}, "invalidadas": [], "marca": None, "versiones": []})
+        self._doc = doc
+        self._cache = {}
+
+    def _sincronizar(self):
+        """Nada que recargar: el documento es una foto leída para esta petición."""
+
+
+def _resumen_de_estado(doc):
+    """Por dónde va un vídeo, de su estado.json ya leído. -> dict
+
+    Lo mismo que diría `Estado.estado_de` (misma firma, mismas marcas), sin
+    escribir nada."""
+    from nucleo.estado import CORRECCIONES                  # noqa: PLC0415
+    est = _EstadoDeSoloLectura(doc)
+    pasos = {}
+    for paso_id in PASOS_DE_LA_TARJETA:
+        datos = est._doc["pasos"][paso_id]
+        firma = est._firma(paso_id)
+        marca = datos.get("marca")
+        if isinstance(marca, dict) and marca.get("firma") == firma \
+                and marca.get("estado") in ("ejecutando", "error"):
+            pasos[paso_id] = marca["estado"]
+            continue
+        if datos.get("activa") is None:
+            bloqueado = any(est._doc["pasos"][d].get("activa") is None
+                            for d in PASOS_POR_ID[paso_id]["depende_de"])
+            pasos[paso_id] = "bloqueado" if bloqueado else "pendiente"
+            continue
+        propia = datos.get("firma_propia")
+        if paso_id in CORRECCIONES and propia is not None:
+            viejo = propia != est._firma(paso_id, propias=False)
+        else:
+            viejo = datos.get("firma") != firma
+        pasos[paso_id] = "obsoleto" if viejo or est._unidades_obsoletas(paso_id) else "listo"
+    guardadas = est._doc["pasos"]["assets"].get("unidades") or {}
+    obsoletas = [u for u in est._unidades_obsoletas("assets") if isinstance(guardadas.get(u), dict)]
+    return {"pasos": pasos, "imagenes_obsoletas": len(obsoletas)}
+
+
+# OJO AL ORDEN: declarada ANTES que GET /api/proyectos/{pid}, como la papelera.
+# El «_» delante no lo puede llevar ningún vídeo (`contexto` los rechaza).
+@app.get("/api/proyectos/_resumen")
+def resumen_de_tarjetas(peticion: Request, ids: str = Query(default="")):
+    """Por dónde va cada vídeo, para su tarjeta en Tus proyectos (rediseño de
+    Tus proyectos, 22-10-2026).
+
+    DE SOLO LECTURA DE VERDAD: no abre el vídeo (`contexto`, que puede guardar
+    estado.json, adoptar un id o crear un estado nuevo), sino que LEE su
+    estado.json y su proyecto.json tal cual y hace las cuentas en memoria. No
+    escribe ni cachea nada; un vídeo sin estado.json o con uno ilegible no sale.
+    El trabajo en curso sale del gestor del vídeo si ya está abierto en este
+    servicio (si no lo está, no puede tener nada corriendo).
+
+    ?ids=a,b,c -> {videos: {pid: {pasos: {guion|voz|assets|render: estado},
+    imagenes_obsoletas, trabajo: {paso, progreso} | null}}}. Lo de un proyecto
+    con clave cerrado y los talleres de estilo no salen."""
+    pedidos = [i for i in dict.fromkeys(str(ids or "").split(",")) if i][:MAX_RESUMEN_TARJETAS]
+    cerrados = _cerrados(peticion)
+    asignaciones = CLIENTES._leer(raiz_proyectos()) if cerrados else None
+    salida = {}
+    for pid in pedidos:
+        if not ID_VALIDO.match(pid) or pid.startswith("_"):
+            continue
+        raiz = os.path.join(raiz_proyectos(), pid)
+        if not os.path.isdir(raiz):
+            continue
+        try:
+            config = leer_json(os.path.join(raiz, "proyecto.json"), {}, estricto=True) or {}
+            doc = leer_json(os.path.join(raiz, "estado.json"), None, estricto=True)
+        except (ValueError, OSError):
+            continue
+        if not isinstance(config, dict) or config.get(CONFIG_TALLER):
+            continue
+        if not isinstance(doc, dict) or not isinstance(doc.get("pasos"), dict):
+            continue
+        if cerrados and CLIENTES.cliente_de(
+                raiz_proyectos(), config.get(CONFIG_ESTILO_LIGHT) or "",
+                pid, datos=asignaciones) in cerrados:
+            continue
+        try:
+            resumen = _resumen_de_estado(doc)
+        except Exception:                                   # noqa: BLE001
+            continue
+        trabajo = None
+        with _LOCK:
+            ctx = _CONTEXTOS.get(pid)
+        if ctx is not None:
+            for ficha in ctx.gestor.listar(activos=True):
+                trabajo = {"paso": ficha.get("paso") or "",
+                           "progreso": ficha.get("progreso") or 0}
+                break
+        salida[pid] = dict(resumen, trabajo=trabajo)
+    return {"videos": salida}
+
+
 #: Tope del nombre visible de un proyecto. No lo pide ningun formato: es que la
 #: lista del modo light lo pinta en una linea, y un nombre de mil caracteres
 #: rompe la fila sin avisar de nada.

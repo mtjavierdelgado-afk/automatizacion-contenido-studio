@@ -56,11 +56,42 @@ def clases_que_esconden(css):
     return salida
 
 
+def llaves_sueltas(css):
+    """Las líneas con una «}» de más y cuántas «{» quedan sin cerrar al final.
+    Las dos cosas no dan error en ningún sitio: una «}» de más se come la regla
+    siguiente, y una «{» sin cerrar mete el resto del fichero dentro de ella
+    (22-10-2026: un @media del móvil sin cerrar dejaba sin estilos el panel de
+    la ficha de un guion de Automatizar en el ordenador)."""
+    sobran, nivel, linea, i = [], 0, 1, 0
+    while i < len(css):
+        if css.startswith("/*", i):
+            j = css.find("*/", i + 2)
+            j = len(css) if j < 0 else j + 2
+            linea += css.count("\n", i, j)
+            i = j
+            continue
+        c = css[i]
+        if c == "\n":
+            linea += 1
+        elif c == "{":
+            nivel += 1
+        elif c == "}":
+            if nivel == 0:
+                sobran.append(linea)
+            else:
+                nivel -= 1
+        i += 1
+    return sobran, nivel
+
+
 def main():
     css = io.open(os.path.join(RAIZ, "web", "estilo.css"), encoding="utf-8").read()
     js = io.open(os.path.join(RAIZ, "web", "app.js"), encoding="utf-8").read()
     esconden = clases_que_esconden(css)
     print(f"PRUEBA DE CLASES QUE ESCONDEN ({', '.join(sorted(esconden)) or 'ninguna'})")
+    sobran, abiertas = llaves_sueltas(css)
+    ok(not sobran, f"estilo.css sin «}}» de más (líneas {sobran})")
+    ok(abiertas == 0, f"estilo.css cierra todas sus llaves (quedan {abiertas} abiertas)")
     ok(bool(esconden), "se encuentran las clases que esconden (la prueba mira algo)")
     for clase in sorted(esconden):
         # 'x' + ' clase'  /  `x ${...} clase`  /  clase: 'otra clase'

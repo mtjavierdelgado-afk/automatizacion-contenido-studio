@@ -7942,7 +7942,12 @@ const BLOQUES_EXTRA_DEL_PASO = {
   estilo: [],
   encargo: [],
   guion: [],
-  voz: [],
+  /* ANTES DE LA PRIMERA TANDA, en la Voz: el paso Imágenes sigue bloqueado
+     hasta que haya planos, y «Generar las imágenes» se pulsa desde aquí. Sin
+     esto, la imagen base y el guion visual que hay que aprobar ANTES de pagar
+     no se podían alcanzar (visto por el dueño, 23-10). */
+  voz: [c => (sinPlanosTodavia(c) ? bloqueBaseEnImagenes(c) : null),
+    c => (sinPlanosTodavia(c) ? editorGuionVisual() : null)],
   // la imagen base del tipo de relato y el guion visual, a mano donde se generan los planos
   imagenes: [c => bloqueBaseEnImagenes(c), c => editorGuionVisual()],
   video: [],
@@ -7961,6 +7966,12 @@ function bloqueBaseEnImagenes(c) {
   if (!f.edita || f.listo) return null;
   return bloqueLight('La imagen base', 'apruébala antes de generar los planos: cada plano la edita',
     imagenBaseDelRelato(est, !!trabajoVideoLight()));
+}
+
+/* Un vídeo con voz y sin ninguna tanda de imágenes todavía. */
+function sinPlanosTodavia(c) {
+  if (!c.v || !c.v.pid || !c.v.audio) return false;
+  return !versionDe((c.v.fichas || {}).assets || {});
 }
 
 function pintarBloquesExtraDelPaso(donde, paso) {

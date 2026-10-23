@@ -290,6 +290,49 @@ def probar_salud_y_proyectos(cliente):
     return pid, (gemelo.get("proyecto") or {}).get("id")
 
 
+def probar_resumen_de_tarjetas(cliente, carpeta, pid, virgen):
+    """GET /api/proyectos/_resumen (rediseño de Tus proyectos, 22-10-2026): lo
+    mismo que dice abrir el vídeo, y DE SOLO LECTURA de verdad: llamarla no
+    cambia la fecha de ningún fichero de los vídeos ni crea un estado.json."""
+    seccion("EL RESUMEN DE LAS TARJETAS (solo lectura)")
+    suelto = os.path.join(carpeta, "sin_estado_todavia")
+    os.makedirs(suelto, exist_ok=True)
+    with open(os.path.join(suelto, "proyecto.json"), "w", encoding="utf-8") as fh:
+        json.dump({"id": "sin_estado_todavia", "nombre": "Sin estado"}, fh)
+
+    def fechas():
+        vistas = {}
+        for raiz, _dirs, ficheros in os.walk(carpeta):
+            for nombre in ficheros:
+                ruta = os.path.join(raiz, nombre)
+                try:
+                    vistas[ruta] = os.stat(ruta).st_mtime_ns
+                except OSError:
+                    pass
+        return vistas
+    antes = fechas()
+    time.sleep(0.05)
+    r, d = cliente.get(f"/api/proyectos/_resumen?ids={pid},{virgen},sin_estado_todavia,no_existe,_sistema")
+    despues = fechas()
+    igual(r.status_code, 200, "GET /api/proyectos/_resumen responde 200")
+    videos = d.get("videos") or {}
+    ok(pid in videos and virgen in videos, f"resume los vídeos pedidos ({sorted(videos)})")
+    ok("sin_estado_todavia" not in videos and "no_existe" not in videos and "_sistema" not in videos,
+       "y salta los que no tienen estado.json, los que no existen y las carpetas del sistema")
+    cambiados = sorted(x for x in set(antes) | set(despues) if antes.get(x) != despues.get(x))
+    ok(not cambiados, f"llamarla no cambia ni crea ningún fichero de los vídeos -- {cambiados[:5]}")
+    ok(not os.path.exists(os.path.join(suelto, "estado.json")), "ni crea el estado.json de un vídeo que no lo tiene")
+    _r, ficha = cliente.get(f"/api/proyectos/{pid}")
+    reales = {p.get("id"): p.get("estado") for p in ficha.get("pasos") or []}
+    igual(videos.get(pid, {}).get("pasos"), {k: reales.get(k) for k in ("guion", "voz", "assets", "render")},
+          "y dice lo mismo que abrir el vídeo (estado de guion, voz, imágenes y montaje)")
+    muchos = ",".join(f"falso_{i}" for i in range(130)) + f",{pid}"
+    r, d = cliente.get(f"/api/proyectos/_resumen?ids={muchos}")
+    ok(r.status_code == 200 and pid not in (d.get("videos") or {}),
+       "con más de 120 ids solo mira los 120 primeros (la pantalla pide de 40 en 40)")
+    shutil.rmtree(suelto, ignore_errors=True)
+
+
 def probar_renombrar(cliente, pid):
     """Cambiar el nombre de un proyecto cambia la ETIQUETA, no la carpeta."""
     seccion("RENOMBRAR UN PROYECTO")
@@ -7586,6 +7629,7 @@ def main():
 
         sembrar(os.path.join(carpeta, pid))
         tid, salidas = probar_ejecucion(cliente, base, pid)
+        probar_resumen_de_tarjetas(cliente, carpeta, pid, virgen)
         probar_versiones(cliente, pid)
         probar_archivos(cliente, pid, salidas)
         probar_feedback(cliente, pid)

@@ -8627,7 +8627,8 @@ const CAMBIA_RELATO = [
 const AYUDA_RELATO = {
   documental: 'El guion se reparte en sitios, como siempre.',
   espacio_que_cambia: 'Un solo sitio que se ve siempre igual; cada plano cambia solo lo que dice '
-    + 'la voz. Cada plano se genera EDITANDO una imagen base del sitio, que apruebas antes.',
+    + 'la voz (o, con «Lo que dice el guion», su línea del guion visual). Cada plano se genera '
+    + 'EDITANDO una imagen base del sitio, que apruebas antes.',
   recorrido: 'Varios ambientes de un mismo lugar, con la misma luz, materiales y estilo.',
   escenario_y_apoyos: 'Un sitio principal con sus secundarios (el espacio fijo de siempre).',
   producto: 'El producto manda y el fondo no se mueve: cada plano edita la imagen base del fondo.',

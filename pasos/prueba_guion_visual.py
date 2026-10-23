@@ -177,6 +177,9 @@ def prueba_prompt_y_estado():
     igual(escenas[0]["encuadre"], "close-up of the hinge", "la cámara de la línea es el encuadre")
     ok("abstracta" not in escenas[0], "y el plano deja de ser abstracto")
     igual(escenas[0]["personajes"], ["mujer"], "solo los personajes que están en el reparto")
+    sin_gente = [dict(escena, personajes=["mujer"], linea_gv={"visual": "the empty shower"})]
+    P6._aplicar_lineas_gv(sin_gente, {"reparto": {"mujer": {}}})                # noqa: SLF001
+    igual(sin_gente[0]["personajes"], [], "una línea que no nombra a nadie: plano sin gente")
     estados = {"abierta": "the hinged door swung open", "corrediza": "a sliding door"}
     igual(G.estado_de_linea({"estado": "corrediza"}, estados),
           {"cambio": "a sliding door", "estado": "corrediza"}, "el estado sale de la línea")

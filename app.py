@@ -5167,7 +5167,9 @@ def _ficha_guion_visual(ctx):
         guardado = gv.normalizar(params.get("guion_visual"))
     except ValueError:
         guardado = {}
-    bloques = [{"id": str(b.get("id")), "texto": str(b.get("texto") or "")}
+    # sin las marcas de la voz (<break .../>): son de la locucion, no de lo que se lee
+    bloques = [{"id": str(b.get("id")),
+                "texto": re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", str(b.get("texto") or ""))).strip()}
                for b in _bloques_del_guion(ctx)]
     propuesta, avisos = [], []
     if not guardado.get("planos") and guardado.get("visuales"):

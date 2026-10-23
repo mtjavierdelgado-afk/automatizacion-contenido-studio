@@ -126,6 +126,11 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   leyendo el guion entero. Se revisa, se corrige y **se aprueba en el paso
   Imágenes** antes de dibujar: sin aprobar no se paga ningún plano. Escribirlo,
   proponerlo y aprobarlo es solo texto.
+- **Antes de la primera tanda**, el guion visual y la imagen base salen en el paso
+  **Voz**, encima de «Generar las imágenes» (el paso Imágenes sigue cerrado hasta
+  que hay planos).
+- **Sin gente si la línea no la nombra:** en modo guion, una persona solo sale
+  en el plano cuya línea la pide.
 - **Lo fijo manda:** al aprobar, Claude comprueba cada línea contra el sitio, el
   reparto y los estados aprobados, y avisa del plano que pide algo que no existe
   (se dibujará lo fijo).

@@ -1186,6 +1186,11 @@ def _aplicar_lineas_gv(escenas, catalogo):
         if linea.get("personajes"):
             gente = [q for q in linea["personajes"] if q in reparto]
             escena["personajes"] = gente
+        else:
+            # SIN GENTE EN LA LINEA, SIN GENTE EN EL PLANO (prueba real, 23-10): la
+            # del tramo sale de la frase de la voz, que en modo guion no manda;
+            # con ella aparecia una persona en planos que nadie la pedia.
+            escena["personajes"] = []
 
 
 def _repartir_zoom(escenas, modo="ilustracion", servicios=None, dominio=None):

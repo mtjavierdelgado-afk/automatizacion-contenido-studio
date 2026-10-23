@@ -7961,6 +7961,16 @@ def guion_visual(navegador, datos):
             modo = (f or {}).get("modo")
         ok(modo == "guion", f"(1) elegir «Lo que dice el guion» lo guarda ({modo})")
         ok(_huellas_de_planos(datos, pid) == antes, "(1) y no toca ninguna imagen")
+        # (1b) visto por el dueño el 23-10: ANTES de la primera tanda el paso
+        # Imágenes está bloqueado, así que el guion visual tiene que salir en la
+        # Voz (donde está «Generar las imágenes"). Se simula «sin planos».
+        pg.js("APP.light.video._assets = APP.light.video.fichas.assets; "
+              "APP.light.video.fichas.assets = {}; APP.light.video.vista = 'voz'; "
+              "APP.light.video.gv = null; pintarLight();")
+        ok(pg.esperar(".editor-gv", segundos=20),
+           "(1b) sin imágenes todavía, la Voz trae el editor del guion visual")
+        pg.captura("guion_visual_en_la_voz")
+        pg.js("APP.light.video.fichas.assets = APP.light.video._assets; pintarLight();")
         pg.js(f"APP.light.video.vista = 'previa'; APP.light.video.gv = null; pintarLight();")
         ok(pg.esperar(".editor-gv", segundos=20), "(2) el paso Imágenes trae el editor del guion visual")
         ok(pg.visible(".editor-gv button", "Proponer con Claude"), "(2) con «Proponer con Claude · solo texto»")

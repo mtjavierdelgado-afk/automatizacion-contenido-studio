@@ -123,6 +123,15 @@ def responder(entrada):
                     "sugerida": limpio + " (revisado)"}
         return {"veredicto": "sirve", "resumen": "Cumple la guía.", "problemas": [],
                 "sugerida": ""}
+    if "Escribe el GUION VISUAL" in entrada:
+        # el borrador del guion visual (rama guion-visual): un plano por bloque
+        bloques = re.findall(r"^\[([A-Z0-9_]+)\]", entrada, re.M)
+        return {"planos": [{"bloque": b, "visual": f"wide shot of the room while {b} is heard",
+                            "camara": "wide shot, eye level", "estado": "", "personajes": []}
+                           for b in bloques]}
+    if "script supervisor" in entrada:
+        # la comprobacion del guion visual contra lo fijo: nada que decir
+        return {"avisos": []}
     if "LOS TRAMOS (no los cambies" in entrada:
         # el «qué cambia en cada tramo» de un espacio que cambia (rama
         # tipo-de-relato): un cambio por tramo, con su estado

@@ -1321,6 +1321,119 @@ def listar_proyectos(peticion: Request):
     return {"proyectos": fichas, "raiz": raiz_proyectos()}
 
 
+#: Los pasos que dicen «por dónde va» un vídeo en su tarjeta de Tus proyectos.
+PASOS_DE_LA_TARJETA = ("guion", "voz", "assets", "render")
+#: Como mucho, cuántos vídeos se resumen por petición (la pantalla pide en
+#: lotes de 40: así la URL nunca se acerca al tope de nginx).
+MAX_RESUMEN_TARJETAS = 120
+
+
+class _EstadoDeSoloLectura(Estado):
+    """Las cuentas de `Estado` (firmas, unidades obsoletas) sobre un documento
+    ya leído, SIN su constructor: no toma el cerrojo, no recupera copias, no
+    crea un estado.json nuevo ni guarda nada. Solo para resumir; no se guarda en
+    ningún sitio y se tira al acabar la petición."""
+
+    def __init__(self, doc):                                # noqa: D107
+        for paso in PASOS:
+            doc["pasos"].setdefault(paso["id"], {
+                "params": {}, "activa": None, "firma": None, "salidas": {},
+                "unidades": {}, "invalidadas": [], "marca": None, "versiones": []})
+        self._doc = doc
+        self._cache = {}
+
+    def _sincronizar(self):
+        """Nada que recargar: el documento es una foto leída para esta petición."""
+
+
+def _resumen_de_estado(doc):
+    """Por dónde va un vídeo, de su estado.json ya leído. -> dict
+
+    Lo mismo que diría `Estado.estado_de` (misma firma, mismas marcas), sin
+    escribir nada."""
+    from nucleo.estado import CORRECCIONES                  # noqa: PLC0415
+    est = _EstadoDeSoloLectura(doc)
+    pasos = {}
+    for paso_id in PASOS_DE_LA_TARJETA:
+        datos = est._doc["pasos"][paso_id]
+        firma = est._firma(paso_id)
+        marca = datos.get("marca")
+        if isinstance(marca, dict) and marca.get("firma") == firma \
+                and marca.get("estado") in ("ejecutando", "error"):
+            pasos[paso_id] = marca["estado"]
+            continue
+        if datos.get("activa") is None:
+            bloqueado = any(est._doc["pasos"][d].get("activa") is None
+                            for d in PASOS_POR_ID[paso_id]["depende_de"])
+            pasos[paso_id] = "bloqueado" if bloqueado else "pendiente"
+            continue
+        propia = datos.get("firma_propia")
+        if paso_id in CORRECCIONES and propia is not None:
+            viejo = propia != est._firma(paso_id, propias=False)
+        else:
+            viejo = datos.get("firma") != firma
+        pasos[paso_id] = "obsoleto" if viejo or est._unidades_obsoletas(paso_id) else "listo"
+    guardadas = est._doc["pasos"]["assets"].get("unidades") or {}
+    obsoletas = [u for u in est._unidades_obsoletas("assets") if isinstance(guardadas.get(u), dict)]
+    return {"pasos": pasos, "imagenes_obsoletas": len(obsoletas)}
+
+
+# OJO AL ORDEN: declarada ANTES que GET /api/proyectos/{pid}, como la papelera.
+# El «_» delante no lo puede llevar ningún vídeo (`contexto` los rechaza).
+@app.get("/api/proyectos/_resumen")
+def resumen_de_tarjetas(peticion: Request, ids: str = Query(default="")):
+    """Por dónde va cada vídeo, para su tarjeta en Tus proyectos (rediseño de
+    Tus proyectos, 22-10-2026).
+
+    DE SOLO LECTURA DE VERDAD: no abre el vídeo (`contexto`, que puede guardar
+    estado.json, adoptar un id o crear un estado nuevo), sino que LEE su
+    estado.json y su proyecto.json tal cual y hace las cuentas en memoria. No
+    escribe ni cachea nada; un vídeo sin estado.json o con uno ilegible no sale.
+    El trabajo en curso sale del gestor del vídeo si ya está abierto en este
+    servicio (si no lo está, no puede tener nada corriendo).
+
+    ?ids=a,b,c -> {videos: {pid: {pasos: {guion|voz|assets|render: estado},
+    imagenes_obsoletas, trabajo: {paso, progreso} | null}}}. Lo de un proyecto
+    con clave cerrado y los talleres de estilo no salen."""
+    pedidos = [i for i in dict.fromkeys(str(ids or "").split(",")) if i][:MAX_RESUMEN_TARJETAS]
+    cerrados = _cerrados(peticion)
+    asignaciones = CLIENTES._leer(raiz_proyectos()) if cerrados else None
+    salida = {}
+    for pid in pedidos:
+        if not ID_VALIDO.match(pid) or pid.startswith("_"):
+            continue
+        raiz = os.path.join(raiz_proyectos(), pid)
+        if not os.path.isdir(raiz):
+            continue
+        try:
+            config = leer_json(os.path.join(raiz, "proyecto.json"), {}, estricto=True) or {}
+            doc = leer_json(os.path.join(raiz, "estado.json"), None, estricto=True)
+        except (ValueError, OSError):
+            continue
+        if not isinstance(config, dict) or config.get(CONFIG_TALLER):
+            continue
+        if not isinstance(doc, dict) or not isinstance(doc.get("pasos"), dict):
+            continue
+        if cerrados and CLIENTES.cliente_de(
+                raiz_proyectos(), config.get(CONFIG_ESTILO_LIGHT) or "",
+                pid, datos=asignaciones) in cerrados:
+            continue
+        try:
+            resumen = _resumen_de_estado(doc)
+        except Exception:                                   # noqa: BLE001
+            continue
+        trabajo = None
+        with _LOCK:
+            ctx = _CONTEXTOS.get(pid)
+        if ctx is not None:
+            for ficha in ctx.gestor.listar(activos=True):
+                trabajo = {"paso": ficha.get("paso") or "",
+                           "progreso": ficha.get("progreso") or 0}
+                break
+        salida[pid] = dict(resumen, trabajo=trabajo)
+    return {"videos": salida}
+
+
 #: Tope del nombre visible de un proyecto. No lo pide ningun formato: es que la
 #: lista del modo light lo pinta en una linea, y un nombre de mil caracteres
 #: rompe la fila sin avisar de nada.
@@ -5124,6 +5237,290 @@ def _tipo_relato_pedido(opciones):
                                           if k in ("modo", "cambia")})
     except ValueError as fallo:
         raise ErrorApi(400, str(fallo))
+
+
+# ------------------------------------------------------------ GUION VISUAL
+#
+# Rama guion-visual (22-10-2026). «Qué dibujan las imágenes»: lo que dice la
+# voz (como siempre, sin guardar nada) o lo que dice el guion. Con el guion,
+# cada linea del guion visual es un plano; sale de las lineas «Visual:» de la
+# Parrilla o de un borrador de Claude, y una persona lo aprueba antes de pagar
+# ninguna imagen. Ver pasos/guion_visual.py.
+
+def _guion_visual():
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    return PASOS_MODULOS.guion_visual
+
+
+def _ruta_comprobacion_gv(ctx):
+    return ctx.proyecto.ruta("guion_visual_comprobacion.json")
+
+
+def _fijo_del_video(ctx):
+    """(espacio, reparto, estados) que el guion visual no puede contradecir."""
+    params = ctx.estado.params("assets") or {}
+    p6 = PASOS_MODULOS.p6_assets
+    try:
+        sitio, espacio = p6.espacio_del_relato(ctx.proyecto, params)
+    except Exception:                                       # noqa: BLE001
+        sitio, espacio = None, {}
+    reparto = ((params.get("catalogo") or {}).get("reparto") or {})
+    try:
+        _s, estados = p6.estados_del_relato(ctx.proyecto, params)
+    except Exception:                                       # noqa: BLE001
+        estados = {}
+    return espacio or {}, reparto, estados or {}
+
+
+def _ficha_guion_visual(ctx):
+    gv = _guion_visual()
+    params = ctx.estado.params("assets") or {}
+    try:
+        guardado = gv.normalizar(params.get("guion_visual"))
+    except ValueError:
+        guardado = {}
+    # sin las marcas de la voz (<break .../>): son de la locucion, no de lo que se lee
+    bloques = [{"id": str(b.get("id")),
+                "texto": re.sub(r"\s+", " ", re.sub(r"<[^>]*>", " ", str(b.get("texto") or ""))).strip()}
+               for b in _bloques_del_guion(ctx)]
+    propuesta, avisos = [], []
+    if not guardado.get("planos") and guardado.get("visuales"):
+        # las lineas «Visual:» de la Parrilla, casadas con el guion de ahora;
+        # no se guardan hasta que alguien las mira y guarda (regla 1)
+        propuesta, avisos = gv.casar(guardado["visuales"], bloques)
+    espacio, reparto, estados = _fijo_del_video(ctx)
+    fuera = gv.fuera_de_la_voz(guardado.get("planos"), [b["id"] for b in bloques])
+    comprobacion = PASOS_MODULOS.medios.leer_json(_ruta_comprobacion_gv(ctx), {}) or {}
+    if comprobacion.get("huella") != gv.huella(guardado.get("planos")):
+        comprobacion = {}
+    estilo = params.get("estilo") if isinstance(params.get("estilo"), dict) else {}
+    return {"modo": gv.modo_de(params),
+            "del_video": params.get("imagenes") or "",
+            "del_estilo": estilo.get("imagenes") or "",
+            "modos": [{"clave": k, "nombre": v} for k, v in gv.MODOS.items()],
+            "guion_visual": guardado, "propuesta": propuesta, "avisos": avisos,
+            "bloques": bloques, "estados": sorted(estados), "reparto": sorted(reparto),
+            "comprobacion": comprobacion.get("avisos"),
+            # bloques del guion visual que ya no estan en el guion: no vale hasta revisarlo
+            "fuera_de_la_voz": fuera,
+            "aprobado": bool(guardado.get("aprobado")) and not fuera}
+
+
+@app.get("/api/proyectos/{pid}/guion_visual")
+def leer_guion_visual(pid: str):
+    """Qué dibujan las imágenes de un vídeo, su guion visual y lo que hay que revisar."""
+    return _ficha_guion_visual(contexto(pid))
+
+
+@app.put("/api/proyectos/{pid}/guion_visual/modo")
+def guardar_modo_guion_visual(pid: str, cuerpo: dict = Body(default=None)):
+    """{imagenes: "guion" | "voz" | null}: qué dibujan las imágenes de ESTE vídeo.
+
+    null vuelve a lo que diga el estilo (y quita la clave). No dibuja nada: los
+    planos hechos cambian de firma y se ofrecen para rehacer como siempre."""
+    gv = _guion_visual()
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    if "imagenes" not in datos:
+        raise ErrorApi(400, "manda {imagenes: guion | voz | null}")
+    crudo = datos.get("imagenes")
+    if crudo not in (None, "") and gv._llano(crudo).strip() == "voz":
+        # «la voz» explicita solo hace falta para mandar sobre un estilo que
+        # diga «guion»; si no, es lo de siempre y no se escribe nada (regla 1)
+        estilo = (ctx.estado.params("assets") or {}).get("estilo")
+        valor = "voz" if (estilo if isinstance(estilo, dict) else {}).get("imagenes") == "guion" else ""
+    else:
+        try:
+            valor = gv.normalizar_modo(crudo)
+        except ValueError as fallo:
+            raise ErrorApi(400, str(fallo))
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo en marcha en este vídeo: espera a que termine")
+        params = ctx.estado.params("assets") or {}
+        if (params.get("imagenes") or "") != (valor or ""):
+            if valor:
+                ctx.estado.actualizar_params("assets", {"imagenes": valor})
+            else:
+                ctx.estado.set_params("assets", {k: v for k, v in params.items()
+                                                 if k != "imagenes"})
+    ctx.bitacora.anotar("guion_visual_modo", "assets", {"imagenes": valor or "estilo"})
+    return _ficha_guion_visual(ctx)
+
+
+@app.put("/api/proyectos/{pid}/guion_visual")
+def guardar_guion_visual(pid: str, cuerpo: dict = Body(default=None)):
+    """{planos: [{bloque, visual, camara?, estado?, personajes?}]}: el guion visual
+    escrito o corregido a mano. Guardarlo lo deja SIN aprobar."""
+    gv = _guion_visual()
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    planos = datos.get("planos")
+    if not isinstance(planos, list):
+        raise ErrorApi(400, "manda {planos: [...]}")
+    validos = {str(b.get("id")).upper() for b in _bloques_del_guion(ctx)}
+    if not validos:
+        raise ErrorApi(409, "todavía no hay guion: genéralo antes de escribir el guion visual")
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo en marcha en este vídeo: espera a que termine")
+        params = ctx.estado.params("assets") or {}
+        try:
+            antes = gv.normalizar(params.get("guion_visual"))
+            nuevo = gv.normalizar({"origen": datos.get("origen") or antes.get("origen") or "manual",
+                                   "planos": planos, "aprobado": False,
+                                   "visuales": antes.get("visuales") or []}, validos)
+        except ValueError as fallo:
+            raise ErrorApi(400, str(fallo))
+        ctx.estado.actualizar_params("assets", {"guion_visual": nuevo})
+    ctx.bitacora.anotar("guion_visual_guardado", "assets", {"planos": len(nuevo["planos"])})
+    return _ficha_guion_visual(ctx)
+
+
+@_medido_en("assets", "guion_visual")
+def _correr_proponer_gv(avisar, ctx, ajuste):
+    """Claude escribe el borrador del guion visual (solo texto)."""
+    gv = _guion_visual()
+    espacio, reparto, estados = _fijo_del_video(ctx)
+    planos, avisos = gv.proponer(_bloques_del_guion(ctx), espacio=espacio, reparto=reparto,
+                                 estados=estados, ajuste=ajuste, avisar=avisar,
+                                 proyecto_id=ctx.id, cwd=ctx.proyecto.raiz)
+    with _cerrojo_de_cadena(ctx.id):
+        params = ctx.estado.params("assets") or {}
+        try:
+            antes = gv.normalizar(params.get("guion_visual"))
+        except ValueError:
+            antes = {}
+        nuevo = gv.normalizar({"origen": "claude", "planos": planos, "aprobado": False,
+                               "visuales": antes.get("visuales") or []})
+        ctx.estado.actualizar_params("assets", {"guion_visual": nuevo})
+    ctx.bitacora.anotar("guion_visual_propuesto", "assets", {"planos": len(planos)})
+    avisar(1.0, "guion visual escrito: revísalo y apruébalo")
+    return {"planos": len(planos), "avisos": avisos}
+
+
+@app.post("/api/proyectos/{pid}/guion_visual/proponer", status_code=202)
+def proponer_guion_visual(pid: str, cuerpo: dict = Body(default=None)):
+    """Claude escribe el guion visual leyendo el guion entero (solo texto, no se
+    paga ninguna imagen). Sustituye al que hubiera, sin aprobar."""
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    if not _bloques_del_guion(ctx):
+        raise ErrorApi(409, "todavía no hay guion: genéralo antes")
+    por_fase = CLI_CLAUDE.por_defecto_de("catalogo_visual")
+    ajuste = _ajuste_cli(datos, por_fase["modelo"], por_fase["esfuerzo"])
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo en marcha en este vídeo: espera a que termine")
+        trabajo_id = ctx.gestor.lanzar("guion_visual_proponer", _correr_proponer_gv, ctx,
+                                       ajuste, paso="assets")
+    _registrar_trabajo(trabajo_id, ctx.id)
+    return {"trabajo_id": trabajo_id, "trabajo": ctx.gestor.estado(trabajo_id),
+            "eventos": f"/api/trabajos/{trabajo_id}/eventos"}
+
+
+@_medido_en("assets", "guion_visual")
+def _correr_comprobar_gv(avisar, ctx, planos):
+    """Cruza el guion visual con lo fijo (solo texto) y lo deja apuntado."""
+    gv = _guion_visual()
+    espacio, reparto, estados = _fijo_del_video(ctx)
+    avisar(0.1, "comprobando el guion visual contra el sitio, el reparto y los estados")
+    avisos = gv.comprobar(planos, espacio=espacio, reparto=reparto, estados=estados,
+                          cwd=ctx.proyecto.raiz, proyecto_id=ctx.id)
+    PASOS_MODULOS.medios.escribir_json(_ruta_comprobacion_gv(ctx),
+                                       {"huella": gv.huella(planos), "avisos": avisos})
+    avisar(1.0, f"{len(avisos)} plano(s) contradicen lo fijo" if avisos
+           else "nada contradice lo fijo")
+    return {"avisos": avisos}
+
+
+@app.post("/api/proyectos/{pid}/guion_visual/aprobar")
+def aprobar_guion_visual(pid: str, cuerpo: dict = Body(default=None)):
+    """{aprobado: true|false}. Aprobar lanza también la comprobación contra lo
+    fijo (solo texto): sus avisos salen en la ficha, no bloquean."""
+    gv = _guion_visual()
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    aprobado = datos.get("aprobado", True)
+    if not isinstance(aprobado, bool):
+        raise ErrorApi(400, "'aprobado' tiene que ser true o false")
+    trabajo_id = None
+    with _cerrojo_de_cadena(ctx.id):
+        if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+            raise ErrorApi(409, "hay algo en marcha en este vídeo: espera a que termine")
+        params = ctx.estado.params("assets") or {}
+        try:
+            guardado = gv.normalizar(params.get("guion_visual"))
+        except ValueError as fallo:
+            raise ErrorApi(400, str(fallo))
+        if aprobado and not guardado.get("planos"):
+            raise ErrorApi(409, "no hay guion visual que aprobar: escríbelo, guárdalo o pídeselo a Claude")
+        if guardado and bool(guardado.get("aprobado")) != aprobado:
+            ctx.estado.actualizar_params("assets", {"guion_visual": dict(guardado, aprobado=aprobado)})
+        if aprobado and _asistente_listo()[0]:
+            trabajo_id = ctx.gestor.lanzar("guion_visual_comprobar", _correr_comprobar_gv, ctx,
+                                           guardado["planos"], paso="assets")
+    if trabajo_id:
+        _registrar_trabajo(trabajo_id, ctx.id)
+    ctx.bitacora.anotar("guion_visual_aprobado", "assets", {"aprobado": aprobado})
+    ficha = _ficha_guion_visual(ctx)
+    ficha["trabajo_id"] = trabajo_id
+    return ficha
+
+
+@app.get("/api/presets-light/{preset_id}/imagenes")
+def leer_imagenes_estilo(preset_id: str):
+    """Qué dibujan por defecto las imágenes de los vídeos de un estilo."""
+    ficha = _preset_o_400(lambda p: p.leer(preset_id))
+    if ficha.get("tipo") != "canal":
+        raise ErrorApi(400, "esto no es un preset de canal")
+    estilo = (ficha.get("datos") or {}).get("estilo") or {}
+    gv = _guion_visual()
+    return {"imagenes": estilo.get("imagenes") or "",
+            "modos": [{"clave": k, "nombre": v} for k, v in gv.MODOS.items()]}
+
+
+@app.put("/api/presets-light/{preset_id}/imagenes")
+def guardar_imagenes_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
+    """{imagenes: "guion" | null}: el defecto de los vídeos NUEVOS de este estilo.
+    No toca ningún vídeo hecho (llega con «Traer el estilo», con su aviso)."""
+    presets = _presets()
+    gv = _guion_visual()
+    datos = _cuerpo(cuerpo)
+    if "imagenes" not in datos:
+        raise ErrorApi(400, "manda {imagenes: guion | null}")
+    try:
+        valor = gv.normalizar_modo(datos.get("imagenes"))
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    with presets.lock_de(presets.FICHERO):
+        ficha = _preset_o_400(lambda p: p.leer(preset_id))
+        if ficha.get("tipo") != "canal":
+            raise ErrorApi(400, "esto no es un preset de canal")
+        contenido = copy.deepcopy(ficha.get("datos") or {})
+        estilo = dict(contenido.get("estilo") or {})
+        if (estilo.get("imagenes") or "") == valor:
+            return {"imagenes": valor, "cambiado": False}
+        if valor and not estilo.get("referencias"):
+            raise ErrorApi(400, "este estilo todavía no tiene su estilo gráfico (las "
+                                "láminas): genéralo antes")
+        if valor:
+            estilo["imagenes"] = valor
+        else:
+            estilo.pop("imagenes", None)
+        if estilo:
+            contenido["estilo"] = estilo
+        else:
+            contenido.pop("estilo", None)
+        try:
+            presets.guardar("canal", ficha.get("nombre") or "", contenido,
+                            nota=ficha.get("nota") or "",
+                            miniatura=ficha.get("miniatura") or "", pid=preset_id)
+        except presets.ErrorPreset as fallo:
+            raise ErrorApi(400, str(fallo))
+    anotar_global("imagenes_estilo", {"preset": preset_id, "imagenes": valor or "voz"})
+    return {"imagenes": valor, "cambiado": True}
 
 
 # --------------------------------------------------------------- conservacion
@@ -11324,7 +11721,24 @@ def _impedimentos(ctx, pestana, pendientes):
             fuera.append({"tarea": "assets",
                           "que": "falta aprobar la imagen base del sitio o la de un "
                                  "estado: sin ella no se dibujan los planos nuevos que la editan",
-                          "donde": "El tipo de relato"})
+                          "donde": "Imágenes → La imagen base"})
+    # el guion visual (rama guion-visual): con «lo que dice el guion» y sin
+    # aprobarlo, no se dibuja (p6 tambien para, antes de pagar)
+    if "assets" in ids:
+        try:
+            gv = _guion_visual()
+            params_a = ctx.estado.params("assets") or {}
+            planos_a = gv.activo(params_a)
+            sin_aprobar = gv.modo_de(params_a) == "guion" and (
+                not planos_a or bool(gv.fuera_de_la_voz(
+                    planos_a, [b.get("id") for b in _bloques_del_guion(ctx)])))
+        except Exception:                                   # noqa: BLE001
+            sin_aprobar = False
+        if sin_aprobar:
+            fuera.append({"tarea": "assets",
+                          "que": "las imágenes siguen el guion y el guion visual no está "
+                                 "aprobado: revísalo y apruébalo antes de dibujar",
+                          "donde": "Guion visual"})
     return fuera
 
 
@@ -13884,12 +14298,16 @@ def _congelar_preset(ctx, encargo, preset_id=None):
         try:
             anterior = presets.leer(preset_id)
             reglas = ((anterior.get("datos") or {}).get("estilo") or {}).get("reglas")
+            # el negocio del estilo, por lo mismo (rama dominio-negocio)
+            dominio = ((anterior.get("datos") or {}).get("estilo") or {}).get("dominio")
             # el tipo de relato por defecto, por lo mismo (rama tipo-de-relato)
             relato = ((anterior.get("datos") or {}).get("estilo") or {}).get("relato")
         except Exception:                                    # noqa: BLE001
-            reglas = relato = None
+            reglas = dominio = relato = None
         if reglas:
             datos.setdefault("estilo", {})["reglas"] = copy.deepcopy(reglas)
+        if dominio:
+            datos.setdefault("estilo", {})["dominio"] = dominio
         if relato:
             datos.setdefault("estilo", {})["relato"] = copy.deepcopy(relato)
     # `estilo_modo` solo si es foto (ver `presets_light.origen_de`)
@@ -15305,6 +15723,66 @@ def guardar_relato_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
             raise ErrorApi(400, str(fallo))
     anotar_global("relato_estilo", {"preset": preset_id, "modo": relato.get("modo")})
     return {"relato": relato, "cambiado": True}
+
+
+# ------------------------------------------------------------------ DOMINIOS
+#
+# Rama dominio-negocio (21-10-2026). Lo de cada negocio (servicios, cartas de
+# foto, frases del revisor) vive en `pasos/dominios.py`. Un estilo puede fijar
+# el suyo (`estilo.dominio`); sin fijar, se detecta por el texto como siempre.
+# La pantalla para elegirlo llega con la Etapa Foto C: aqui, leerlo y fijarlo.
+
+@app.get("/api/dominios")
+def listar_dominios():
+    """Los dominios de fabrica (el negocio de un estilo). -> {dominios, automatico}"""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    return {"dominios": PASOS_MODULOS.dominios.listar(),
+            "automatico": "sin fijar: se detecta por el texto del vídeo, como siempre"}
+
+
+@app.put("/api/presets-light/{preset_id}/dominio")
+def guardar_dominio_estilo(preset_id: str, cuerpo: dict = Body(default=None)):
+    """Fija el negocio de un estilo: {dominio: "estadoplay" | "general" | null}.
+    null (o "") vuelve a la deteccion automatica. No toca ningun video: llega a
+    los nuevos al crearlos y a los hechos con «Traer el estilo»."""
+    if PASOS_MODULOS is None:
+        raise ErrorApi(503, f"los pasos no se han podido cargar: {ERROR_PASOS}")
+    presets = _presets()
+    datos = _cuerpo(cuerpo)
+    if "dominio" not in datos:
+        raise ErrorApi(400, "manda {dominio: id} (null vuelve a automático)")
+    try:
+        dominio = PASOS_MODULOS.dominios.normalizar(datos.get("dominio"))
+    except ValueError as fallo:
+        raise ErrorApi(400, str(fallo))
+    with presets.lock_de(presets.FICHERO):
+        ficha = _preset_o_400(lambda p: p.leer(preset_id))
+        if ficha.get("tipo") != "canal":
+            raise ErrorApi(400, "esto no es un preset de canal")
+        contenido = copy.deepcopy(ficha.get("datos") or {})
+        estilo = dict(contenido.get("estilo") or {})
+        if dominio and not estilo.get("referencias"):
+            raise ErrorApi(400, "este estilo todavía no tiene su estilo gráfico (las "
+                                "láminas): genéralo antes de fijarle el negocio")
+        if (estilo.get("dominio") or "") == dominio:
+            return {"dominio": dominio, "cambiado": False}
+        if dominio:
+            estilo["dominio"] = dominio
+        else:
+            estilo.pop("dominio", None)
+        if estilo:
+            contenido["estilo"] = estilo
+        else:
+            contenido.pop("estilo", None)
+        try:
+            presets.guardar("canal", ficha.get("nombre") or "", contenido,
+                            nota=ficha.get("nota") or "",
+                            miniatura=ficha.get("miniatura") or "", pid=preset_id)
+        except presets.ErrorPreset as fallo:
+            raise ErrorApi(400, str(fallo))
+    anotar_global("dominio_estilo", {"preset": preset_id, "dominio": dominio or "automatico"})
+    return {"dominio": dominio, "cambiado": True}
 
 
 @app.post("/api/reglas-estilo/afinar", status_code=202)
@@ -17101,6 +17579,29 @@ def _opciones_al_crear(ctx, preset_id, opciones):
     relato = _tipo_relato_pedido(opciones)
     if relato:
         ctx.estado.actualizar_params("assets", {"tipo_relato": relato})
+    # QUE DIBUJAN LAS IMAGENES (rama guion-visual). Solo «guion» se escribe, y
+    # con el las lineas «Visual:» de la Parrilla, si las hay, para casarlas con
+    # el guion cuando exista. Sin elegir, nada (regla 1).
+    gv = _guion_visual()
+    crudo_img = opciones.get("imagenes")
+    if crudo_img not in (None, "") and gv._llano(crudo_img).strip() == "voz":
+        imagenes = "voz"       # «Imágenes: voz» explícito: manda sobre el estilo
+    else:
+        try:
+            imagenes = gv.normalizar_modo(crudo_img)
+        except ValueError as fallo:
+            raise ErrorApi(400, str(fallo))
+    visuales = gv.normalizar_visuales(opciones.get("visuales") or [])
+    cambios = {}
+    if imagenes:
+        cambios["imagenes"] = imagenes
+    if visuales:
+        # las lineas «Visual:» del guion de la Parrilla se guardan siempre que
+        # lleguen: si el estilo dice «guion», o se elige despues, no se pierden
+        cambios["guion_visual"] = {"origen": "parrilla", "planos": [],
+                                   "aprobado": False, "visuales": visuales}
+    if cambios:
+        ctx.estado.actualizar_params("assets", cambios)
     presencia = opciones.get("presencia")
     if presencia:
         if presencia not in sonido.PRESENCIAS:

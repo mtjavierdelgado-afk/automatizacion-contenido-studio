@@ -67,29 +67,66 @@ nada.
 
 ## Proyectos (clientes)
 
-La primera pantalla de Crear es **Tus proyectos**: una tarjeta por proyecto
-(un cliente, con sus estilos y sus vídeos separados).
+La primera pantalla de Crear es **Tus proyectos**. Arriba, **+ Nuevo vídeo**,
+**+ Nuevo proyecto** y la **🗑 Papelera · N** (con cuántas cosas tiene), y un
+**buscador** («Buscar un vídeo, un estilo o un proyecto…») que filtra lo que se
+ve en la página.
 
-- **+ Nuevo proyecto** (la última tarjeta) crea uno. Pulsar una tarjeta entra
-  en él; los estilos que crees dentro quedan en ese proyecto, y los vídeos van
-  con su estilo. **🗂️ Sin proyecto** reúne lo que no está en ninguno.
-- Dentro de un proyecto: **Renombrar**, **Logo** (lo llevan solos los vídeos
-  nuevos de sus estilos), **Ocultar** (no sale en la portada hasta pulsar «Ver
-  los ocultos (N)»), **Poner clave** (se pide para entrar), **Traer un estilo**
-  y **Borrar** (sus estilos y vídeos no se borran: quedan sin proyecto).
-- **Ver los ocultos (N)** los enseña; **Dejar de ocultar** los devuelve a la
-  portada para siempre. **🔒 Cerrar los abiertos** vuelve a pedir la clave.
-- **Últimos vídeos**: los cinco últimos, con su estilo (🎨) y su proyecto (📁).
-  **✏️** les cambia el nombre ahí mismo (Enter guarda, Escape lo deja), **📁**
-  los mueve de proyecto y **Apartar** los manda a la papelera.
-- La clave y ocultar son privacidad de pantalla; la seguridad de verdad es la
-  contraseña de acceso al Estudio.
+- **+ Nuevo vídeo** pregunta **¿con qué estilo?** (los estilos de cada
+  proyecto, agrupados) y abre el Encargo de un vídeo nuevo con el que elijas:
+  es lo mismo que «▶ Nuevo vídeo con este estilo» en la tarjeta de un estilo.
+  No gasta nada hasta que generas el guion.
+- **⚠ Te necesitan** (solo si hay algo): los vídeos que perdieron sus imágenes
+  de estilo (**Reparar**, gratis) y los estilos que se quedaron a medias
+  (**Retomar** sigue sin volver a pagar lo hecho; **Descartar** lo manda a la
+  papelera).
+- **Sigue donde lo dejaste**: los cinco últimos vídeos en tarjetas, con su
+  proyecto (📁), su estilo (🎨), la fecha («hoy 17:31», «ayer», «lun 19/10») y
+  **cómo van**: en Crear («✓ Montado», «⚠ 1 imagen obsoleta», «● En el Guion»,
+  «⟳ 42 % · Dibujando los planos») y en Publicar («○ Listo para publicar»,
+  «◷ jue 22/10 12:00 · 4 redes», «✓ Publicado en 2 redes», «⚠ Un envío
+  falló»). Pulsar la tarjeta abre el vídeo; **Publicar ›** (si está montado)
+  abre su ficha en Publicar; **⋯** tiene **✏️ Renombrar** (ahí mismo: Enter
+  guarda, Escape lo deja), **📁 Mover a otro proyecto** y **Apartar** (a la
+  papelera: se puede devolver).
+- **Proyectos**: una tarjeta por cliente con su logo (o su inicial), cuántos
+  estilos y vídeos tiene, sus tres últimos vídeos y sus marcas («🔒 con
+  clave», «oculto», «2 listos para publicar»). **🗂️ Sin proyecto** reúne lo que
+  no está en ninguno y **+ Nuevo proyecto** crea otro. **Ver ocultos (N)**
+  enseña los ocultos, y cada uno trae su **Dejar de ocultar**; **🔒 Cerrar los
+  abiertos** vuelve a pedir la clave.
+
+**Dentro de un proyecto**: **‹ Tus proyectos** para salir; arriba su logo, su
+nombre y sus marcas, **+ Nuevo vídeo** (con los estilos de este proyecto) y
+**⚙ Ajustes del proyecto**, un panel a la derecha (a pantalla completa en el
+móvil) con:
+
+- **Nombre** (escríbelo y **Guardar**),
+- **Logo** (subir, pegar con Ctrl+V, quitar, esquina y tamaño; lo llevan solos
+  los vídeos NUEVOS de sus estilos),
+- **Visibilidad** («Oculto en la portada»: sale solo con «Ver ocultos»),
+- **Clave** (**Poner clave** / **Cambiar o quitar la clave**; se pide para
+  entrar en cada pestaña nueva),
+- **Publicar** (el perfil de Upload-Post, el tono y el SEO del proyecto viven en
+  Publicar: el botón te lleva),
+- y abajo, en la zona de peligro, **Borrar el proyecto** (sus estilos y vídeos
+  NO se borran: quedan en «Sin proyecto»; lo pregunta antes).
+
+Debajo, sus **estilos** y sus **vídeos**. Los vídeos se filtran con los chips
+**Todos · En curso · Listos · Programados · Publicados** y se ven en **▦
+Tarjetas** o en **☰ Lista** (se acuerda en este navegador).
+
+La clave y ocultar son privacidad de pantalla; la seguridad de verdad es la
+contraseña de acceso al Estudio.
 
 ## Estilos
 
-Cada tarjeta es un estilo. **Pulsar la tarjeta** empieza un vídeo nuevo con
-él; **✎ Editar** abre su ficha, y **⋯** tiene **Duplicar** y **Mover a otro
-proyecto**. La última tarjeta, **+ Nuevo estilo**, crea otro.
+Cada tarjeta es un estilo. **Pulsar la tarjeta** abre un menú pequeño: **▶
+Nuevo vídeo con este estilo** (el Encargo de un vídeo nuevo), **✎ Editar el
+estilo** (su ficha), **Duplicar**, **Mover a otro proyecto** y **Apartar** (a
+la papelera). **✎ Editar** sigue también a la vista en la tarjeta. Al final,
+**+ Nuevo estilo** crea otro y, dentro de un proyecto, **⇄ Traer un estilo de
+otro proyecto** lo mueve aquí con sus vídeos.
 
 Lo que borras o apartas (un estilo, un vídeo) va a la **🗑 Papelera**, arriba
 en la portada y dentro de cada proyecto: desde ahí se **devuelve** cuando
@@ -299,6 +336,16 @@ lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
   coste antes). Los planos de ese estado editan su imagen, así que el objeto
   sale igual en todos. Sin la base y sus estados aprobados no se paga ningún
   plano que los edite.
+- **Qué dibujan las imágenes** (opcional): **lo que dice la voz** (por defecto:
+  cada imagen ilustra su frase) o **lo que dice el guion**: cada imagen sigue su
+  línea del **guion visual** y la voz solo marca los tiempos. El guion visual
+  sale de las líneas «Visual:» de la Parrilla o de «Proponer con Claude», y se
+  revisa y se aprueba en el paso **Imágenes** (bloque «Guion visual»): por plano,
+  el bloque de la voz durante el que se ve, qué se ve, la cámara y, en «Un
+  espacio que cambia», el estado del objeto. Sin aprobar no se dibuja nada. Al
+  aprobar, Claude avisa de los planos que contradicen lo fijo (el sitio, el
+  reparto, los estados): manda lo fijo. Quién manda: el vídeo, luego el estilo
+  («🎬 Qué dibujan las imágenes» en «Cómo se cuenta»), luego la voz.
 - **El reparto y los sitios** (en un vídeo hecho): «Pedido para el reparto de
   sitios» es una frase para Claude al repartir; «Volver a repartir con este
   pedido» no paga imágenes.

@@ -28,6 +28,7 @@ conservaron los ids, las familias, los pesos y el orden EXACTOS.
 """
 import re
 
+import dominios
 import medios
 
 
@@ -163,8 +164,10 @@ POR_ID = {carta["id"]: carta for carta in ESCALERA}
 # Los ids llevan el prefijo `foto_` para que no se confundan nunca con los de
 # la escalera de ilustracion en un informe o en una carta forzada a mano.
 
-#: Los servicios que una carta de foto puede pedir.
-SERVICIOS = ("consolas", "simuladores", "vr", "karaoke")
+#: Los servicios que una carta de foto puede pedir. Los de EstadoPlay, que
+#: viven en su DOMINIO (`pasos/dominios.py`, rama dominio-negocio): aqui quedan
+#: los mismos objetos con el nombre de siempre, para todo el que los lea.
+SERVICIOS = dominios.ESTADOPLAY["servicios"]
 
 #: Lo que se supone cuando un video no dice que servicios lleva Y su texto no
 #: nombra ninguno: NINGUNO, y entonces reparte la escalera GENERAL de foto (ver
@@ -173,22 +176,14 @@ SERVICIOS = ("consolas", "simuladores", "vr", "karaoke")
 #: el televisor en su tripode»: el modo foto es para cualquier proyecto.
 SERVICIOS_POR_DEFECTO = ()
 
+SERVICIOS_EN_TEXTO = dominios.ESTADOPLAY["en_texto"]
+
+#: (Lo que sigue describe `SERVICIOS_EN_TEXTO`, que vive en el dominio.)
 #: COMO SE RECONOCE CADA SERVICIO EN EL TEXTO DEL VIDEO (la guia del estilo, su
 #: prompt, el catalogo visual del guion). Mientras la Etapa Foto C no lo ponga en
 #: pantalla, es lo que hace que un video de EstadoPlay siga saliendo con sus
 #: planos de consolas sin que nadie tenga que decirlo. Expresiones regulares, sin
 #: distinguir mayusculas; en ingles y en castellano.
-SERVICIOS_EN_TEXTO = {
-    "consolas": (r"\bconsol(e|es|a|as)\b", r"\bcontrollers?\b", r"\bgamepads?\b",
-                 r"\bmandos?\b", r"\bvideo ?games?\b", r"\bvideojuegos?\b",
-                 r"\bgameplay\b", r"\bgaming\b", r"\bplaystation\b",
-                 r"\bps[345]\b", r"\bxbox\b", r"\bnintendo\b"),
-    "simuladores": (r"\bsimulat(or|ors)\b", r"\bsimuladore?s?\b",
-                    r"\bracing (rig|sim|wheel)s?\b", r"\bpedals?\b.*\bwheel\b"),
-    "vr": (r"\bvr\b", r"\bvirtual reality\b", r"\brealidad virtual\b",
-           r"\bmeta quest\b"),
-    "karaoke": (r"\bkaraoke\b",),
-}
 
 
 def servicios_en_texto(texto):
@@ -200,76 +195,11 @@ def servicios_en_texto(texto):
                  if any(re.search(pat, texto, flags=re.IGNORECASE)
                         for pat in patrones))
 
-ESCALERA_FOTO = (
-    {"id": "foto_sala", "familia": "lejos", "peso": 2, "servicios": "todos",
-     "nombre": "sala completa",
-     "encuadre": ("a wide shot of the whole room taken from a corner at "
-                  "standing height, every gaming station and the party table "
-                  "visible, guests small within the space")},
-
-    {"id": "foto_picado", "familia": "lejos", "peso": 1, "servicios": "todos",
-     "nombre": "picado",
-     "encuadre": ("a high-angle shot taken from a staircase or a mezzanine "
-                  "looking down on the gaming stations and the guests around "
-                  "them")},
-
-    {"id": "foto_estacion", "familia": "medio", "peso": 3, "servicios": "todos",
-     "nombre": "estación completa",
-     "encuadre": ("the full gaming station in frame: the TV on its tripod "
-                  "stand, the low black side table, the console, and two "
-                  "players seen from behind")},
-
-    {"id": "foto_hombro", "familia": "medio", "peso": 2,
-     "servicios": ("consolas", "simuladores"), "nombre": "sobre el hombro",
-     "encuadre": ("an over-the-shoulder shot of one player looking at the "
-                  "screen, their hands and the controller soft in the "
-                  "foreground")},
-
-    {"id": "foto_perfil", "familia": "medio", "peso": 2,
-     "servicios": ("consolas", "karaoke"), "nombre": "perfil de jugadores",
-     "encuadre": ("a side profile of two players next to each other, their "
-                  "faces lit by the glow of the screen")},
-
-    {"id": "foto_reaccion", "familia": "medio", "peso": 2, "servicios": "todos",
-     "nombre": "reacción",
-     "encuadre": ("the people watching behind the players, laughing or "
-                  "cheering, the game screen softly out of focus")},
-
-    {"id": "foto_vr", "familia": "medio", "peso": 1, "servicios": ("vr",),
-     "nombre": "cuerpo VR",
-     "encuadre": ("a full-body shot of one player wearing a VR headset, arms "
-                  "extended holding both controllers, the room around them")},
-
-    {"id": "foto_manos", "familia": "cerca", "peso": 3,
-     "servicios": ("consolas", "simuladores"), "nombre": "manos",
-     "encuadre": ("a close-up of hands on the controller or on the steering "
-                  "wheel, thumbs and fingers in action")},
-
-    {"id": "foto_detalle", "familia": "cerca", "peso": 2, "servicios": "todos",
-     "nombre": "detalle de equipo",
-     "encuadre": ("a detail of the console and the controllers resting on the "
-                  "low black side table, a cable running to the tripod")},
-
-    {"id": "foto_pedales", "familia": "cerca", "peso": 1,
-     "servicios": ("simuladores",), "nombre": "pies en pedales",
-     "encuadre": ("a low close-up of sneakers pressing the three metal pedals "
-                  "of the racing simulator")},
-
-    {"id": "foto_pantalla", "familia": "cerca", "peso": 2, "servicios": "todos",
-     "nombre": "pantalla al frente",
-     "encuadre": ("the game screen large in the foreground, the players' "
-                  "silhouettes at the edge of the frame")},
-
-    {"id": "foto_contraluz", "familia": "luz", "peso": 1, "servicios": "todos",
-     "nombre": "contraluz",
-     "encuadre": ("the players in silhouette against a bright window, the "
-                  "screen glowing in front of them")},
-
-    {"id": "foto_suelo", "familia": "angulo", "peso": 1,
-     "servicios": ("consolas", "vr"), "nombre": "a ras de suelo",
-     "encuadre": ("a low angle from floor level between the poufs, looking up "
-                  "towards the TV and the players")},
-)
+#: La escalera de foto de los servicios de alquiler: la de EstadoPlay, en su
+#: dominio. MISMOS objetos, mismo orden y mismos pesos que antes de la rama
+#: dominio-negocio: el sorteo de `carta_de` va por `len(fondo)` y una carta de
+#: mas o de menos le cambiaria la carta a casi todos los planos.
+ESCALERA_FOTO = dominios.ESTADOPLAY["escalera"]
 
 #: LA ESCALERA GENERAL DE FOTO, la de cualquier proyecto que no sea de un
 #: servicio de alquiler. La de arriba se escribio para EstadoPlay --estaciones,
@@ -364,18 +294,20 @@ def por_id_de(modo="ilustracion"):
     return POR_ID_FOTO if modo == "foto" else POR_ID
 
 
-def servicios_de(valor):
+def servicios_de(valor, dominio=None):
     """Los servicios de un video, limpios y conocidos. -> tupla
 
     Vacio o sin ninguno conocido es el servicio base (`SERVICIOS_POR_DEFECTO`).
-    Admite una lista o una cadena separada por comas.
+    Admite una lista o una cadena separada por comas. `dominio` dice cuales son
+    «conocidos» (sin el, los de EstadoPlay: lo de siempre).
     """
+    conocidos = SERVICIOS if dominio is None else tuple(dominio.get("servicios") or ())
     if isinstance(valor, str):
         valor = valor.split(",")
     limpios = []
     for crudo in (valor or []):
         nombre = str(crudo or "").strip().lower()
-        if nombre in SERVICIOS and nombre not in limpios:
+        if nombre in conocidos and nombre not in limpios:
             limpios.append(nombre)
     return tuple(limpios) or SERVICIOS_POR_DEFECTO
 
@@ -388,20 +320,26 @@ def _vale_para(carta, servicios):
     return any(s in servicios for s in suyos)
 
 
-def escalera_para(modo="ilustracion", servicios=None):
+def escalera_para(modo="ilustracion", servicios=None, dominio=None):
     """La escalera sobre la que se reparte: la del modo, filtrada por servicios.
 
     El filtro solo existe en el modo foto. En ilustracion devuelve `ESCALERA`
     tal cual, sin mirar `servicios`: el reparto de siempre no cambia ni en el
     orden.
+
+    `dominio` (rama dominio-negocio) es el del negocio del video, ya resuelto
+    (`dominios.de_estilo`). Sin el, la escalera de servicios es la de EstadoPlay,
+    como siempre. Un dominio sin escalera propia (el general) reparte siempre
+    la general.
     """
     if modo != "foto":
         return ESCALERA
-    suyos = servicios_de(servicios)
-    if not suyos:
+    propia = ESCALERA_FOTO if dominio is None else tuple(dominio.get("escalera") or ())
+    suyos = servicios_de(servicios, dominio)
+    if not suyos or not propia:
         # un video que no es de un servicio de alquiler: la general
         return ESCALERA_FOTO_GENERAL
-    return tuple(c for c in ESCALERA_FOTO if _vale_para(c, suyos))
+    return tuple(c for c in propia if _vale_para(c, suyos))
 
 
 #: Cuantos planos hacia atras se mira para no repetir FAMILIA. Regla dura. Dos y
@@ -423,7 +361,7 @@ def _repartidas(escalera=ESCALERA):
 
 
 def carta_de(sid, previas=(), semilla=0, forzada="", modo="ilustracion",
-             servicios=None):
+             servicios=None, dominio=None):
     """Que clase de plano es este. Determinista, y nunca la familia de al lado.
 
     'previas' son los ids de carta de los planos que van justo antes, en orden.
@@ -451,7 +389,7 @@ def carta_de(sid, previas=(), semilla=0, forzada="", modo="ilustracion",
                for p in previas[-VENTANA_FAMILIA:]}
     vetadas.discard(None)
     recientes = set(previas[-VENTANA_CARTA:])
-    fondo = _repartidas(escalera_para(modo, servicios))
+    fondo = _repartidas(escalera_para(modo, servicios, dominio))
     arranque = medios.desempatar(semilla, sid, "carta") % len(fondo)
     orden = [fondo[(arranque + i) % len(fondo)] for i in range(len(fondo))]
     libres = [c for c in orden if c["familia"] not in vetadas]
@@ -462,7 +400,7 @@ def carta_de(sid, previas=(), semilla=0, forzada="", modo="ilustracion",
 
 
 def repartir(escenas, semilla=0, forzadas=None, modo="ilustracion",
-             servicios=None):
+             servicios=None, dominio=None):
     """Una carta por plano, en orden y con las dos reglas puestas.
 
     Va aparte de `carta_de` porque el reparto depende del ORDEN -- cada plano
@@ -475,7 +413,7 @@ def repartir(escenas, semilla=0, forzadas=None, modo="ilustracion",
         if not sid:
             continue
         carta = carta_de(sid, previas, semilla, forzadas.get(sid, ""),
-                         modo=modo, servicios=servicios)
+                         modo=modo, servicios=servicios, dominio=dominio)
         cartas[sid] = carta
         previas.append(carta["id"])
     return cartas

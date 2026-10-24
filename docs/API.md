@@ -23,6 +23,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 |---|---|---|
 | `GET` | `/api/proyectos` | Proyectos disponibles, del mas reciente al mas antiguo. |
 | `POST` | `/api/proyectos` | Crea un proyecto nuevo a partir de {"nombre"}. |
+| `GET` | `/api/proyectos/_resumen` | Por dónde va cada vídeo (`?ids=a,b`, hasta 120; la pantalla pide de 40 en 40), para su tarjeta en Tus proyectos. Lee estado.json y proyecto.json sin abrir el vídeo: no escribe ni cachea nada. |
 | `DELETE` | `/api/proyectos/papelera` | Vacia la papelera entera. Tampoco tiene vuelta atras. |
 | `GET` | `/api/proyectos/papelera` | Proyectos apartados, del mas recientemente apartado al mas antiguo. |
 | `DELETE` | `/api/proyectos/papelera/{carpeta}` | Borra DE VERDAD un proyecto apartado. No hay vuelta atras. |
@@ -82,8 +83,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/subtitulos/rotos` | {planos}: cuantos planos tienen los subtitulos dibujados con las tildes |
 | `GET` | `/api/proyectos/{pid}/tipo_relato` | El tipo de relato del video: el guardado, el que rige, las bases y los planos que cambian. |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/aplicar` | Guarda el tipo de relato de un video (hecho o no). No dibuja nada. |
-| `POST` | `/api/proyectos/{pid}/tipo_relato/base/aprobar` | {sitio?, estado?, aprobada: true|false}: aprueba (o retira) la imagen base del sitio, o con `estado` la de ese estado. |
-| `POST` | `/api/proyectos/{pid}/tipo_relato/base/generar` | Genera la imagen base del sitio, o con {estado} la de ese estado (SE PAGA una imagen). {usd: lo que se vio, estado?, otra?} |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/base/aprobar` | {sitio?, estado?, aprobada: true|false}: aprueba (o retira) la imagen base del |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/base/generar` | Genera la imagen base del sitio, o con {estado} la de ese estado (SE PAGA una |
 | `GET` | `/api/proyectos/{pid}/tipo_relato/base/imagen` | La imagen base (aprobada o no) de un sitio del video, o la de un estado. |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/base/usar_subida` | La imagen subida del espacio fijo pasa a ser la base, aprobada (gratis). |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/cambios` | En «un espacio que cambia», Claude escribe el cambio de cada tramo (solo texto). |
@@ -147,6 +148,11 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/proyectos/{pid}/guion/bloques/{bid}` | Quita un bloque AÑADIDO a mano. Los del guion original no se quitan. |
 | `POST` | `/api/proyectos/{pid}/guion/bloques/{bid}/partir` | Parte un bloque: {trozos: [texto, texto, ...]}. El primero se queda en el. |
 | `POST` | `/api/proyectos/{pid}/guion/pausas/quitar` | Quita las pausas largas de unos bloques: {bloques: [ids]} o {sobrantes: true}. |
+| `GET` | `/api/proyectos/{pid}/guion_visual` | Qué dibujan las imágenes de un vídeo, su guion visual y lo que hay que revisar. |
+| `PUT` | `/api/proyectos/{pid}/guion_visual` | {planos: [{bloque, visual, camara?, estado?, personajes?}]}: el guion visual |
+| `POST` | `/api/proyectos/{pid}/guion_visual/aprobar` | {aprobado: true|false}. Aprobar lanza también la comprobación contra lo |
+| `PUT` | `/api/proyectos/{pid}/guion_visual/modo` | {imagenes: "guion" | "voz" | null}: qué dibujan las imágenes de ESTE vídeo. |
+| `POST` | `/api/proyectos/{pid}/guion_visual/proponer` | Claude escribe el guion visual leyendo el guion entero (solo texto, no se |
 
 ## Voz
 
@@ -275,7 +281,10 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/presets-light/{preset_id}/aportadas` | Guarda lo que se dice de cada imagen y las ★: {descripciones, destacadas}. |
 | `GET` | `/api/presets-light/{preset_id}/aportadas/{nombre}/imagen` | Una de tus imagenes de referencia, tal cual la subiste. |
 | `GET` | `/api/presets-light/{preset_id}/coste` | Lo que costo hacer este estilo (su taller), desglosado. |
+| `PUT` | `/api/presets-light/{preset_id}/dominio` | Fija el negocio de un estilo: {dominio: "estadoplay" | "general" | null}. |
 | `POST` | `/api/presets-light/{preset_id}/duplicar` | Una copia del estilo, con su taller. |
+| `GET` | `/api/presets-light/{preset_id}/imagenes` | Qué dibujan por defecto las imágenes de los vídeos de un estilo. |
+| `PUT` | `/api/presets-light/{preset_id}/imagenes` | {imagenes: "guion" | null}: el defecto de los vídeos NUEVOS de este estilo. |
 | `GET` | `/api/presets-light/{preset_id}/laminas` | Las laminas de un estilo, limpias y con lo que ensena cada una. |
 | `POST` | `/api/presets-light/{preset_id}/laminas` | Una accion sobre las laminas de un estilo. |
 | `GET` | `/api/presets-light/{preset_id}/laminas/{lamina}/imagen` | Una lamina LIMPIA, sin texto encima: la que va en la hoja de cada plano. |
@@ -347,6 +356,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/clientes/{cid}` | Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto. |
 | `PUT` | `/api/clientes/{cid}` | Renombra, oculta o pone clave: {nombre?, oculto?, clave?} ("" la quita). |
 | `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
+| `GET` | `/api/dominios` | Los dominios de fabrica (el negocio de un estilo). -> {dominios, automatico} |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
 | `GET` | `/api/inicio/resumen` | Lo del Inicio que no sale de otras rutas, en una sola llamada. |
@@ -421,12 +431,12 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/publicar/proyectos/{cid}/perfil` | Apunta el perfil de Upload-Post del proyecto: {perfil, crear?}. Si ya |
 | `GET` | `/api/publicar/proyectos/{cid}/perfiles` | Los perfiles que hay de verdad en Upload-Post, para elegir uno: los que |
 | `GET` | `/api/publicar/proyectos/{cid}/tableros` | Los tableros de Pinterest del perfil del proyecto: [{id, nombre}]. |
-| `POST` | `/api/publicar/refrescar` | Pregunta a Upload-Post por los envios que siguen en el aire. Con `{lote}` («Comprobar» de un programado que ya debió salir, 20-10) pregunta solo por ese, ya, y devuelve `estados` de ese lote. |
+| `POST` | `/api/publicar/refrescar` | Pregunta a Upload-Post por los envios que siguen en el aire. |
 | `GET` | `/api/publicar/resultados` | El resumen de un proyecto (lo que ya se sabe; no pregunta a nadie). |
 | `GET` | `/api/publicar/videos/{pid}` | La ficha de publicar de un video: redes, textos, encaje, envios. |
-| `PUT` | `/api/publicar/videos/{pid}` | {redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?, youtube_formato?: auto\|short\|video} (Short o vídeo normal en YouTube, 20-10) |
+| `PUT` | `/api/publicar/videos/{pid}` | {redes?, textos?: {red: {titulo, descripcion, cta, hashtags}}, capitulos?, |
 | `POST` | `/api/publicar/videos/{pid}/a-mano` | «Lo he subido yo»: {red, url?}. Queda en el historial. |
-| `POST` | `/api/publicar/videos/{pid}/emojis` | «✨ Más emojis»: {red, campo: titulo\|descripcion, texto?} → {texto, antes, despues}, el MISMO texto con emojis añadidos (haiku, en la petición). No guarda nada; si Claude cambia una palabra o un hashtag, 422. |
+| `POST` | `/api/publicar/videos/{pid}/emojis` | «✨ Más emojis» (rama `textos-emojis`): {red, campo: titulo|descripcion, |
 | `POST` | `/api/publicar/videos/{pid}/enviar` | {redes, modo: ahora|programar|pendiente, cuando?, confirmado, repetir?} |
 | `POST` | `/api/publicar/videos/{pid}/envios/{eid}/cancelar` | Cancela lo programado (en Upload-Post) o lo que esperaba tu OK, y quita |
 | `POST` | `/api/publicar/videos/{pid}/envios/{eid}/confirmar` | Un envio que esperaba tu OK sale: {confirmado, modo?, cuando?}. |
@@ -452,13 +462,13 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/publicar/videos/{pid}/portada/proponer/{rid}` | Como van las portadas propuestas, y cuales son al terminar. |
 | `POST` | `/api/publicar/videos/{pid}/portada/usar` | La pinta a tamano real y la deja como portada del video (como si la |
 | `POST` | `/api/publicar/videos/{pid}/portada/vista` | La portada pintada en pequeno, para la pantalla: {diseno, ancho?, |
-| `POST` | `/api/publicar/videos/{pid}/seo/encontraron` | «Cómo te encontraron»: las búsquedas de YouTube que trajeron vistas a este vídeo y su retención (YouTube Analytics, canal conectado). |
+| `POST` | `/api/publicar/videos/{pid}/seo/encontraron` | «Cómo te encontraron»: las búsquedas de YouTube que trajeron vistas a |
 | `POST` | `/api/publicar/videos/{pid}/seo/investigar` | Investiga las búsquedas de verdad para la palabra clave de este vídeo. |
 | `POST` | `/api/publicar/videos/{pid}/textos` | Claude escribe los textos de las redes pedidas: {redes}. Se sigue |
 | `POST` | `/api/publicar/youtube/oauth/desconectar` | Olvida el permiso del canal (y lo que se trajo de él). |
-| `POST` | `/api/publicar/youtube/oauth/empezar` | {redireccion} (la dirección de vuelta de ESTE Studio) -> {url} de Google a la que mandar a la persona para que dé permiso a leer su canal. |
+| `POST` | `/api/publicar/youtube/oauth/empezar` | {redireccion} (la dirección de vuelta de ESTE Studio) -> {url} de Google |
 | `GET` | `/api/publicar/youtube/oauth/vuelta` | Adonde vuelve Google con el permiso: cambia el código por el token. |
-| `POST` | `/api/publicar/youtube/probar` | Prueba la clave de la API de datos de YouTube (gasta 1 unidad del cupo) y dice lo que queda hoy. |
+| `POST` | `/api/publicar/youtube/probar` | Prueba la clave de la API de datos de YouTube (gasta 1 unidad del cupo) |
 | `POST` | `/api/reglas-estilo/afinar` | Claude reescribe una regla para el generador: {texto, nombre?, palabras?}. |
 | `GET` | `/api/reglas-estilo/afinar/{rid}` | Como va «Afinar con Claude», y la propuesta al terminar. |
 | `GET` | `/api/sistema/estilos-perdidos` | Los videos que apuntan a imagenes de estilo que ya no estan. Solo mira. |
@@ -477,4 +487,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**357 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**372 endpoints.** Escrito por `generar_api.py` desde `app.py`.

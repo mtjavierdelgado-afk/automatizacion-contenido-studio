@@ -6691,6 +6691,12 @@ function apuntarClienteDe(cid) {
 
 function elegirCliente(cid) {
   apuntarCliente(cid);
+  // lo de la página (rediseño de Tus proyectos): cada sitio empieza limpio
+  APP.light.busca = '';
+  APP.light.filtroVideos = 'todos';
+  APP.light.menuTarjeta = '';
+  APP.light.ajustesProyecto = '';
+  APP.light.nombreProyecto = null;
   subirArriba('panel');
   pintarLight();
 }
@@ -6706,7 +6712,7 @@ function videosDeCliente(cid) {
 function origenDeVideo(video) {
   const estilo = fichaLight(video.estilo_light || '');
   const cliente = fichaCliente(clienteDeVideo(video));
-  return [estilo ? `🎨 ${estilo.nombre || estilo.id}` : '', cliente ? `📁 ${cliente.nombre}` : '']
+  return [cliente ? `📁 ${cliente.nombre}` : '', estilo ? `🎨 ${estilo.nombre || estilo.id}` : '']
     .filter(Boolean).join(' · ');
 }
 
@@ -6842,14 +6848,6 @@ async function cambiarCliente(ficha, cambios, aviso) {
   } catch (e) { toast(e.message, true); }
 }
 
-async function renombrarCliente(ficha) {
-  const r = await dialogo({ titulo: 'Renombrar el proyecto',
-    campos: [{ clave: 'nombre', etiqueta: 'Nombre', valor: ficha.nombre }], aceptar: 'Guardar' });
-  if (r && r.nombre.trim() && r.nombre.trim() !== ficha.nombre) {
-    cambiarCliente(ficha, { nombre: r.nombre }, 'Proyecto renombrado');
-  }
-}
-
 async function claveCliente(ficha) {
   const r = await dialogo({ titulo: ficha.con_clave ? 'Cambiar o quitar la clave' : 'Poner clave',
     texto: 'Con clave, sus estilos y vídeos no se ven hasta escribirla (en cada pestaña nueva). '
@@ -6885,6 +6883,7 @@ async function borrarCliente(ficha) {
     await pedir(`${BASE}/api/clientes/${encodeURIComponent(ficha.id)}`, { method: 'DELETE' });
     await cargarClientes();
     elegirCliente('');
+    toast('Proyecto borrado: sus estilos y vídeos están en «Sin proyecto»');
   } catch (e) { toast(e.message, true); }
 }
 
@@ -6937,152 +6936,692 @@ async function traerEstiloACliente(ficha) {
     await pedir(`${BASE}/api/clientes/estilos/${encodeURIComponent(r.estilo)}`,
       { method: 'PUT', cuerpo: { cliente: ficha.id } });
     await cargarClientes();
+    toast(`«${(fichaLight(r.estilo) || {}).nombre || r.estilo}» ya está en ${ficha.nombre}`);
     pintarLight();
   } catch (e) { toast(e.message, true); }
 }
 
+/* ============================================ PROYECTOS · TARJETAS
+ *
+ * Tus proyectos y la pantalla de un proyecto en la línea de Crear (rama
+ * `rediseno-proyectos`, maqueta aprobada por el dueño el 22-10-2026). SOLO
+ * cambia cómo se ve y dónde está cada cosa: las rutas, los diálogos y las
+ * confirmaciones son los de antes.
+ *
+ *   portada            cabecera con «+ Nuevo vídeo», «+ Nuevo proyecto» y la
+ *                      papelera con su número; un buscador; «Te necesitan»
+ *                      (vídeos que perdieron imágenes, estilos a medias);
+ *                      «Sigue donde lo dejaste» (tarjetas con su estado) y las
+ *                      tarjetas de los proyectos
+ *   dentro de uno      «‹ Tus proyectos», cabecera con logo, chips, «+ Nuevo
+ *                      vídeo» y «⚙ Ajustes del proyecto» (un cajón a la
+ *                      derecha, hecho con SECCIONES_AJUSTES_PROYECTO); sus
+ *                      estilos (tocar uno abre un menú) y sus vídeos, con
+ *                      filtros por estado y vista de tarjetas o de lista
+ *
+ * EL ESTADO DE CADA VÍDEO SALE DE LO QUE EL STUDIO YA DEVUELVE, sin escribir
+ * nada: por dónde va en Crear, de `GET /api/proyectos/_resumen` (los mismos
+ * estados que se ven al abrirlo, en una llamada), y lo de Publicar, de
+ * `GET /api/publicar/cola`. Lo de la página (búsqueda, filtro, menú abierto,
+ * cajón) vive en `APP.light` y no se guarda en ningún sitio; la vista
+ * tarjetas/lista, en localStorage (es de quien mira).
+ */
+const TUS_PROYECTOS = {
+  datos: null,           // la lista de la galería con la que se pidió lo de abajo
+  cola: null,            // GET /api/publicar/cola
+  papelera: null,        // cuántas cosas hay en la papelera
+  estados: {},           // pid -> resumen de `/api/proyectos/_resumen` (solo los que volvieron)
+  pidiendo: new Set(),
+  espera: {},            // pid -> hasta cuándo no se vuelve a preguntar (no volvió o falló)
+  lotes: [],             // los lotes de ids que faltan por pedir
+  enVuelo: 0,
+  reloj: null,           // vuelve a mirar los vídeos que se están generando
+  escuchando: false,
+};
+const CLAVE_VISTA_VIDEOS = 'estudio.light.vistaVideos';
+const FILTROS_DE_VIDEOS = [['todos', 'Todos'], ['curso', 'En curso'], ['listos', 'Listos'],
+  ['programados', 'Programados'], ['publicados', 'Publicados']];
+const TRABAJO_EN_LA_TARJETA = {
+  ingesta: 'Leyendo el material', brief: 'Preparando el encargo', guion: 'Escribiendo el guion',
+  voz: 'Grabando la voz', revision_audio: 'Revisando la voz', assets: 'Dibujando los planos',
+  callouts: 'Preparando los rótulos', render: 'Montando el vídeo',
+};
+const PASOS_DE_LA_TARJETA = ['guion', 'voz', 'assets', 'render'];
+const DIAS_DE_LA_TARJETA = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+
+/* Lo de la portada que no viene en la lista de la galería: se pide una vez
+   por cada lectura de la galería (`cargarGaleriaLight` cambia `APP.light.datos`). */
+function datosDeTusProyectos() {
+  if (TUS_PROYECTOS.datos === APP.light.datos) return;
+  TUS_PROYECTOS.datos = APP.light.datos;
+  TUS_PROYECTOS.estados = {};
+  TUS_PROYECTOS.pidiendo.clear();
+  TUS_PROYECTOS.espera = {};
+  TUS_PROYECTOS.lotes = [];
+  TUS_PROYECTOS.cola = null;
+  const datos = APP.light.datos;
+  pedir(rutaPublicar('/cola')).then(cola => {
+    if (TUS_PROYECTOS.datos !== datos) return;
+    TUS_PROYECTOS.cola = cola;
+    repintarTusProyectos();
+  }).catch(() => { if (TUS_PROYECTOS.datos === datos) TUS_PROYECTOS.cola = { listos: [], envios: [] }; });
+  contarPapelera().then(n => {
+    if (TUS_PROYECTOS.datos !== datos) return;
+    TUS_PROYECTOS.papelera = n;
+    repintarTusProyectos();
+  }).catch(() => {});
+}
+
+/* Lo mismo que cuenta la capa de la papelera (`abrirPapelera`): los vídeos y
+   los estilos apartados, sin los talleres que vuelven con su estilo. */
+async function contarPapelera() {
+  let presets = [];
+  try { presets = listaDe((await pedir(API.presetsCanal())).papelera) || []; } catch (e) { presets = []; }
+  const datos = await pedir(API.papelera());
+  const conSuEstilo = new Set(presets.map(p => (((p.datos || {}).origen) || {}).taller).filter(Boolean));
+  const lista = (listaDe(datos.papelera) || []).filter(f => !(f.taller && conSuEstilo.has(f.id)));
+  return lista.length + presets.length;
+}
+
+function repintarTusProyectos() {
+  if (typeof MODULOS !== 'undefined' && MODULOS.actual !== 'crear') return;
+  if ((APP.light.vista || 'galeria') !== 'galeria') return;
+  pintarLight();
+}
+
+/* Pide el resumen de los vídeos que se van a enseñar y aún no lo tienen.
+   EN LOTES DE 40 Y COMO MUCHO DOS A LA VEZ (revisión del 22-10): todos los ids
+   en una sola URL pasaban de 8 KB con ~150 vídeos (nginx contesta 414) y el
+   servidor solo resume 120 por petición. Un vídeo que no vuelve en la
+   respuesta (o una petición que falla) no se da por perdido: se vuelve a
+   preguntar en un repintado de dentro de un rato. */
+const LOTE_DE_TARJETAS = 40;
+const LOTES_A_LA_VEZ = 2;
+const ESPERA_PARA_REPREGUNTAR_MS = 20000;
+
+function partirEnLotes(lista, tamano) {
+  const lotes = [];
+  for (let i = 0; i < lista.length; i += tamano) lotes.push(lista.slice(i, i + tamano));
+  return lotes;
+}
+
+function asegurarEstadosDeVideos(videos) {
+  const ahora = Date.now();
+  const faltan = videos.map(v => v.id)
+    .filter(id => !(id in TUS_PROYECTOS.estados) && !TUS_PROYECTOS.pidiendo.has(id)
+      && !((TUS_PROYECTOS.espera[id] || 0) > ahora));
+  if (!faltan.length) return;
+  faltan.forEach(id => TUS_PROYECTOS.pidiendo.add(id));
+  TUS_PROYECTOS.lotes.push(...partirEnLotes(faltan, LOTE_DE_TARJETAS));
+  pedirLotesDeEstados();
+}
+
+function pedirLotesDeEstados() {
+  while (TUS_PROYECTOS.enVuelo < LOTES_A_LA_VEZ && TUS_PROYECTOS.lotes.length) {
+    const lote = TUS_PROYECTOS.lotes.shift();
+    const datos = TUS_PROYECTOS.datos;
+    const aplazar = id => {
+      TUS_PROYECTOS.espera[id] = Date.now() + ESPERA_PARA_REPREGUNTAR_MS;
+      TUS_PROYECTOS.pidiendo.delete(id);
+    };
+    TUS_PROYECTOS.enVuelo += 1;
+    pedir(`${BASE}/api/proyectos/_resumen?${consulta({ ids: lote.join(',') })}`).then(r => {
+      if (TUS_PROYECTOS.datos !== datos) return;
+      const vueltos = (r || {}).videos || {};
+      lote.forEach(id => {
+        if (vueltos[id]) {
+          TUS_PROYECTOS.estados[id] = vueltos[id];
+          delete TUS_PROYECTOS.espera[id];
+          TUS_PROYECTOS.pidiendo.delete(id);
+        } else aplazar(id);
+      });
+      repintarTusProyectos();
+      vigilarVideosEnCurso();
+    }).catch(() => {
+      if (TUS_PROYECTOS.datos !== datos) return;
+      lote.forEach(aplazar);
+    }).finally(() => {
+      TUS_PROYECTOS.enVuelo -= 1;
+      pedirLotesDeEstados();
+    });
+  }
+}
+
+/* Un vídeo que se está generando cambia solo: se vuelve a mirar cada pocos
+   segundos mientras la portada esté a la vista. */
+function vigilarVideosEnCurso() {
+  if (TUS_PROYECTOS.reloj) return;
+  const enCurso = () => Object.keys(TUS_PROYECTOS.estados)
+    .filter(id => (TUS_PROYECTOS.estados[id] || {}).trabajo);
+  if (!enCurso().length) return;
+  TUS_PROYECTOS.reloj = setTimeout(() => {
+    TUS_PROYECTOS.reloj = null;
+    enCurso().forEach(id => { delete TUS_PROYECTOS.estados[id]; });
+    repintarTusProyectos();
+  }, 6000);
+}
+
+/* El menú «⋯» de una tarjeta y el cajón se cierran con Escape o pulsando fuera. */
+function escucharTusProyectos() {
+  if (TUS_PROYECTOS.escuchando) return;
+  TUS_PROYECTOS.escuchando = true;
+  document.addEventListener('keydown', ev => {
+    if (ev.key !== 'Escape') return;
+    // con una pregunta encima (la clave, borrar), Escape cierra solo la pregunta
+    if (document.querySelector('.capa-dialogo')) return;
+    if (APP.light.menuTarjeta) { APP.light.menuTarjeta = ''; pintarLight(); }
+    else if (APP.light.ajustesProyecto) cerrarAjustesProyecto();
+  });
+  document.addEventListener('click', ev => {
+    if (!APP.light.menuTarjeta) return;
+    if (ev.target.closest && ev.target.closest('.menu-tarjeta, .abre-menu')) return;
+    APP.light.menuTarjeta = '';
+    pintarLight();
+  });
+}
+
+function abrirMenuTarjeta(clave) {
+  APP.light.menuTarjeta = APP.light.menuTarjeta === clave ? '' : clave;
+  pintarLight();
+}
+
+/* Cierra el menú y deja que la acción siga (las que preguntan, preguntan). */
+function desdeMenuTarjeta(hacer) {
+  return () => {
+    APP.light.menuTarjeta = '';
+    pintarLight();
+    hacer();
+  };
+}
+
+function vistaDeVideos() {
+  try { return localStorage.getItem(CLAVE_VISTA_VIDEOS) === 'lista' ? 'lista' : 'tarjetas'; } catch (e) { return 'tarjetas'; }
+}
+
+function ponerVistaDeVideos(vista) {
+  try { localStorage.setItem(CLAVE_VISTA_VIDEOS, vista); } catch (e) { /* sin almacén */ }
+  pintarLight();
+}
+
+function sinTildes(texto) {
+  return String(texto || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+function casaConLaBusqueda(...textos) {
+  const q = sinTildes(APP.light.busca || '').trim();
+  return !q || sinTildes(textos.join(' ')).includes(q);
+}
+
+/* «hoy 17:31», «ayer 09:02», «lun 19/10», y la fecha entera si es de otro año. */
+function fechaAmable(iso) {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if (!m) return fechaCorta(iso);
+  const dia = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const dias = Math.round((hoy - dia) / 86400000);
+  if (dias === 0) return `hoy ${m[4]}:${m[5]}`;
+  if (dias === 1) return `ayer ${m[4]}:${m[5]}`;
+  if (dia.getFullYear() !== hoy.getFullYear()) return `${m[3]}/${m[2]}/${m[1]}`;
+  return `${DIAS_DE_LA_TARJETA[dia.getDay()]} ${m[3]}/${m[2]}`;
+}
+
+/* Un tono fijo por nombre (para la inicial de un proyecto o de un vídeo sin
+   miniatura): siempre el mismo para el mismo cliente. */
+function tonoDe(texto) {
+  let suma = 0;
+  for (const letra of String(texto || '')) suma = (suma * 31 + letra.charCodeAt(0)) % 997;
+  return suma % 4;
+}
+
+function inicialDe(texto) {
+  return (String(texto || '?').trim().charAt(0) || '?').toUpperCase();
+}
+
+/* ---- el estado de un vídeo, en la tarjeta */
+
+/* Por dónde va en Crear, con las marcas del carril. null mientras se pregunta. */
+function estadoCrearDeVideo(video) {
+  const r = TUS_PROYECTOS.estados[video.id];
+  if (!r) return null;
+  if (r.trabajo) {
+    const pct = Math.round((Number(r.trabajo.progreso) || 0) * 100);
+    return { e: 'curso', m: '⟳', t: `${pct} % · ${TRABAJO_EN_LA_TARJETA[r.trabajo.paso] || 'Trabajando'}` };
+  }
+  const p = r.pasos || {};
+  if (p.render === 'listo') return { e: 'hecho', m: '✓', t: 'Montado' };
+  const NOMBRE = { guion: 'el guion', voz: 'la voz', assets: 'las imágenes', render: 'el montaje' };
+  const fallo = PASOS_DE_LA_TARJETA.find(paso => p[paso] === 'error');
+  if (fallo) return { e: 'aviso', m: '⚠', t: `Falló ${NOMBRE[fallo]}` };
+  if (p.guion === 'obsoleto') return { e: 'aviso', m: '⚠', t: 'Guion obsoleto' };
+  if (p.voz === 'obsoleto') return { e: 'aviso', m: '⚠', t: 'Voz por regrabar' };
+  if (r.imagenes_obsoletas) {
+    return { e: 'aviso', m: '⚠', t: `${plural(r.imagenes_obsoletas, 'imagen obsoleta', 'imágenes obsoletas')}` };
+  }
+  if (p.render === 'obsoleto') return { e: 'aviso', m: '⚠', t: 'Vídeo obsoleto' };
+  if (PASOS_DE_LA_TARJETA.some(paso => p[paso] === 'ejecutando')) return { e: 'curso', m: '⟳', t: 'Trabajando' };
+  const DONDE = { guion: 'En el Guion', voz: 'En la Voz', assets: 'En las Imágenes', render: 'Por montar' };
+  const paso = PASOS_DE_LA_TARJETA.find(x => p[x] !== 'listo');
+  return { e: 'pend', m: '●', t: DONDE[paso] || 'Por montar' };
+}
+function montadoDe(video) {
+  const cola = TUS_PROYECTOS.cola;
+  if (cola && (cola.listos || []).some(v => v.pid === video.id)) return true;
+  return ((TUS_PROYECTOS.estados[video.id] || {}).pasos || {}).render === 'listo';
+}
+
+function enviosDeVideo(video) {
+  const listo = ((TUS_PROYECTOS.cola || {}).listos || []).find(v => v.pid === video.id);
+  return listo ? (listo.envios || {}) : null;
+}
+
+/* «jue 22/10 12:00», de un `cuando` en hora de Lima («2026-10-22T12:00…»). */
+function cuandoDeEnvio(cuando) {
+  const m = String(cuando || '').match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+  if (!m) return '';
+  const dia = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return `${DIAS_DE_LA_TARJETA[dia.getDay()]} ${m[3]}/${m[2]} ${m[4]}:${m[5]}`;
+}
+
+/* Lo que Publicar ya sabe del vídeo, en una línea. null si no está montado. */
+function estadoPublicarDeVideo(video) {
+  const envios = enviosDeVideo(video);
+  if (!envios) return null;
+  const estados = Object.values(envios);
+  if (estados.some(e => e === 'fallido' || e === 'comprobar')) return { e: 'aviso', m: '⚠', t: 'Un envío falló' };
+  if (estados.includes('espera_ok')) return { e: 'aviso', m: '⏸', t: 'Espera tu OK' };
+  const cola = TUS_PROYECTOS.cola || {};
+  const ahora = String(cola.ahora || '');
+  const proximos = (cola.envios || [])
+    .filter(e => e.pid === video.id && ['programado', 'enviando'].includes(e.estado)
+      && String(e.cuando || '') >= ahora)
+    .sort((a, b) => String(a.cuando).localeCompare(String(b.cuando)));
+  if (proximos.length) {
+    const primero = proximos[0].cuando;
+    const redes = new Set(proximos.filter(e => e.cuando === primero).map(e => e.red));
+    return { e: 'curso', m: '◷', t: `${cuandoDeEnvio(primero)} · ${plural(redes.size, 'red', 'redes')}`, que: 'Programado' };
+  }
+  const programadas = estados.filter(e => ['programado', 'enviando', 'publicando'].includes(e)).length;
+  if (programadas) return { e: 'curso', m: '◷', t: `Programado · ${plural(programadas, 'red', 'redes')}` };
+  const salieron = estados.filter(e => e === 'publicado' || e === 'a_mano').length;
+  if (salieron) return { e: 'hecho', m: '✓', t: `Publicado en ${plural(salieron, 'red', 'redes')}` };
+  return { e: 'pend', m: '○', t: 'Listo para publicar' };
+}
+
+function pasaElFiltro(video, filtro) {
+  const envios = Object.values(enviosDeVideo(video) || {});
+  if (filtro === 'curso') {
+    const e = estadoCrearDeVideo(video);
+    return !!e && e.e !== 'hecho';
+  }
+  if (filtro === 'listos') return montadoDe(video);
+  if (filtro === 'programados') return envios.some(e => ['programado', 'espera_ok', 'enviando', 'publicando'].includes(e));
+  if (filtro === 'publicados') return envios.some(e => e === 'publicado' || e === 'a_mano');
+  return true;
+}
+
+function chipDeEstado(estado) {
+  return h('span', { clase: `estado-tarjeta e-${estado.e}`, title: estado.que ? `${estado.que} ${estado.t}` : estado.t },
+    h('i', { 'aria-hidden': 'true' }, estado.m),
+    estado.que ? h('span', { clase: 'solo-lector' }, `${estado.que} `) : null,
+    estado.t);
+}
+
+/* ---- la galería: sin proyectos, la portada o dentro de uno */
+
 function vistaGaleriaLight() {
-  const caja = h('div', {});
-  caja.appendChild(avisoEstilosPerdidos());
+  const caja = h('div', { clase: 'tus-proyectos' });
+  datosDeTusProyectos();
+  escucharTusProyectos();
   const lista = listaClientes();
   const elegido = clienteElegido();
-  if (!lista.length) {
-    // SIN PROYECTOS: la galería de siempre, con la invitación a ordenarla
-    caja.appendChild(h('div', { clase: 'invitacion-proyectos' },
-      h('div', {}, h('b', {}, '¿Trabajas para varios clientes? '),
-        'Crea un proyecto por cliente y tendrás sus estilos y vídeos separados (con logo propio y, si quieres, clave).'),
-      h('button', { clase: 'mini primario', onclick: crearCliente }, '+ Nuevo proyecto'),
-      botonPapeleraLight()));
-    seccionEstilos(caja, presetsLight(), '');
-    seccionVideos(caja, videosLight(), '');
-    seccionSueltos(caja, null);
-    return caja;
-  }
-  if (!elegido) {
-    portadaDeProyectos(caja, lista);
-    return caja;
-  }
-  dentroDeProyecto(caja, elegido);
+  if (!lista.length) portadaSinProyectos(caja);
+  else if (!elegido) portadaDeProyectos(caja, lista);
+  else dentroDeProyecto(caja, elegido);
   return caja;
 }
 
-/* LA PAPELERA, A LA VISTA. «Borrar» un estilo y «Apartar» un vídeo dicen «se
-   puede recuperar desde la papelera», y la papelera solo se abría desde el
-   menú de proyectos del modo editor, que en esta pantalla no se ve: lo
-   prometido no tenía puerta (11-10-2026). */
+/* LA PAPELERA, A LA VISTA y con su número. «Apartar» un vídeo o un estilo
+   dice «se puede devolver desde la papelera», y la papelera solo se abría
+   desde el menú del modo editor, que en esta pantalla no se ve: lo prometido
+   no tenía puerta (11-10-2026). */
 function botonPapeleraLight() {
-  return h('button', { clase: 'mini fantasma', title: 'Lo que has borrado o apartado: se puede devolver',
-    onclick: () => abrirPapelera() }, '🗑 Papelera');
+  const n = TUS_PROYECTOS.papelera;
+  return h('button', { clase: 'mini boton-papelera', title: 'Lo que has apartado: se puede devolver',
+    onclick: () => abrirPapelera() }, n === null || n === undefined ? '🗑 Papelera' : `🗑 Papelera · ${n}`);
 }
 
-/* LA PORTADA: una tarjeta por proyecto. */
+function botonNuevoVideo(cid) {
+  return h('button', { clase: 'primario nuevo-video', title: 'Elige el estilo y empieza su Encargo',
+    onclick: () => abrirNuevoVideo(cid) }, '+ Nuevo vídeo');
+}
+
+function buscadorDeProyectos(pista) {
+  const entrada = h('input', { type: 'search', value: APP.light.busca || '', placeholder: pista,
+    'aria-label': 'Buscar', datos: { foco: 'buscar-proyectos' } });
+  entrada.addEventListener('input', () => { APP.light.busca = entrada.value; pintarLight(); });
+  return h('label', { clase: 'buscador-proyectos' }, h('span', { 'aria-hidden': 'true' }, '🔎'), entrada);
+}
+
+/* SIN PROYECTOS: la galería de siempre, con la invitación a ordenarla. */
+function portadaSinProyectos(caja) {
+  const estilos = presetsLight();
+  const videos = videosLight();
+  caja.appendChild(h('div', { clase: 'cab-tus-proyectos' },
+    h('div', { clase: 'izq' }, h('h2', {}, 'Tus vídeos'),
+      h('span', { clase: 'meta' }, `${plural(estilos.length, 'estilo', 'estilos')} · ${plural(videos.length, 'vídeo', 'vídeos')}`)),
+    h('div', { clase: 'acc' }, botonPapeleraLight(), botonNuevoVideo(''))));
+  caja.appendChild(h('div', { clase: 'invitacion-proyectos' },
+    h('div', {}, h('b', {}, '¿Trabajas para varios clientes? '),
+      'Crea un proyecto por cliente y tendrás sus estilos y vídeos separados (con logo propio y, si quieres, clave).'),
+    h('button', { clase: 'mini primario', onclick: crearCliente }, '+ Nuevo proyecto')));
+  caja.appendChild(buscadorDeProyectos('Buscar un vídeo o un estilo…'));
+  const necesitan = franjaTeNecesitan(null);
+  if (necesitan) caja.appendChild(necesitan);
+  seccionEstilos(caja, estilos.filter(f => casaConLaBusqueda(f.nombre, f.id)), '');
+  seccionVideos(caja, videos.filter(v => casaConLaBusqueda(v.nombre, v.id, origenDeVideo(v))), '', 'Tus vídeos');
+}
+
+/* LA PORTADA: lo último que se movió y una tarjeta por proyecto. */
 function portadaDeProyectos(caja, lista) {
-  const visibles = lista.filter(c => !c.oculto || APP.light.verOcultos);
   const ocultos = lista.filter(c => c.oculto).length;
+  const verOcultos = !!APP.light.verOcultos;
+  const deUnVisible = v => {
+    const ficha = fichaCliente(clienteDeVideo(v));
+    return !ficha || !ficha.oculto || verOcultos;
+  };
+  const todos = videosLight();
+  caja.appendChild(h('div', { clase: 'cab-tus-proyectos' },
+    h('div', { clase: 'izq' }, h('h2', {}, 'Tus proyectos'),
+      h('span', { clase: 'meta' }, `${plural(lista.length, 'proyecto', 'proyectos')} · ${plural(todos.length, 'vídeo', 'vídeos')}`)),
+    h('div', { clase: 'acc' },
+      botonPapeleraLight(),
+      h('button', { clase: 'mini', onclick: crearCliente }, '+ Nuevo proyecto'),
+      botonNuevoVideo(''))));
+  caja.appendChild(buscadorDeProyectos('Buscar un vídeo, un estilo o un proyecto…'));
+  const necesitan = franjaTeNecesitan(null);
+  if (necesitan) caja.appendChild(necesitan);
+
+  // SIGUE DONDE LO DEJASTE: lo último que se movió, de los proyectos que se ven
+  const busca = !!(APP.light.busca || '').trim();
+  const recientes = todos.filter(deUnVisible).filter(v => casaConLaBusqueda(v.nombre, v.id, origenDeVideo(v)));
+  const cuantos = busca ? 20 : 5;
+  if (recientes.length || busca) {
+    caja.appendChild(h('div', { clase: 'light-cab' },
+      h('h3', {}, 'Sigue donde lo dejaste'),
+      h('span', { clase: 'meta' }, recientes.length > cuantos
+        ? `los ${cuantos} últimos de ${recientes.length}` : plural(recientes.length, 'vídeo', 'vídeos'))));
+    caja.appendChild(rejillaDeVideos(recientes.slice(0, cuantos), false,
+      'Ningún vídeo con esa búsqueda.'));
+  }
+
+  // LOS PROYECTOS
+  const proyectos = lista.filter(c => !c.oculto || verOcultos)
+    .filter(c => casaConLaBusqueda(c.nombre, ...estilosDeCliente(c.id).map(f => f.nombre)));
   caja.appendChild(h('div', { clase: 'light-cab' },
-    h('h2', {}, 'Tus proyectos'),
-    h('span', { clase: 'meta' }, `${lista.length} proyecto${lista.length === 1 ? '' : 's'}`),
+    h('h3', {}, 'Proyectos'),
+    h('span', { clase: 'meta' }, 'un cliente, con sus estilos y vídeos'),
     h('span', { clase: 'crece' }),
-    ocultos ? h('button', { clase: 'mini fantasma', onclick: () => {
-      APP.light.verOcultos = !APP.light.verOcultos; pintarLight(); } },
-    APP.light.verOcultos ? 'Esconder los ocultos' : `Ver los ocultos (${ocultos})`) : null,
+    ocultos ? h('button', { clase: 'mini chip-filtro' + (verOcultos ? ' activo' : ''),
+      'aria-pressed': verOcultos ? 'true' : 'false', title: 'Los proyectos ocultos no salen en la portada',
+      onclick: () => { APP.light.verOcultos = !APP.light.verOcultos; pintarLight(); } },
+    `Ver ocultos (${ocultos})`) : null,
     Object.keys(pasesAbiertos()).length ? h('button', { clase: 'mini fantasma',
       title: 'Vuelve a pedir la clave de los proyectos que has abierto', onclick: cerrarProyectosConClave },
-    '🔒 Cerrar los abiertos') : null,
-    botonPapeleraLight()));
+    '🔒 Cerrar los abiertos') : null));
   const rejilla = h('div', { clase: 'galeria-proyectos' });
-  visibles.forEach(ficha => rejilla.appendChild(tarjetaProyecto(ficha)));
+  proyectos.forEach(ficha => rejilla.appendChild(tarjetaProyecto(ficha)));
   const sueltosEstilos = estilosDeCliente('_sin').length;
   const sueltosVideos = videosDeCliente('_sin').length;
-  if (sueltosEstilos || sueltosVideos) {
+  if ((sueltosEstilos || sueltosVideos) && casaConLaBusqueda('Sin proyecto')) {
     rejilla.appendChild(h('button', { clase: 'tarjeta-proyecto sin', onclick: () => elegirCliente('_sin') },
-      h('div', { clase: 'icono-proyecto' }, '🗂️'),
-      h('div', { clase: 'nombre' }, 'Sin proyecto'),
-      h('div', { clase: 'meta' }, `${sueltosEstilos} estilo${sueltosEstilos === 1 ? '' : 's'} · `
-        + `${sueltosVideos} vídeo${sueltosVideos === 1 ? '' : 's'}`)));
+      h('span', { clase: 'icono-proyecto' }, '🗂️'),
+      h('span', { clase: 'nombre' }, 'Sin proyecto'),
+      h('span', { clase: 'meta' }, `${plural(sueltosEstilos, 'estilo', 'estilos')} · ${plural(sueltosVideos, 'vídeo', 'vídeos')}`)));
   }
   rejilla.appendChild(h('button', { clase: 'tarjeta-proyecto nuevo', onclick: crearCliente },
-    h('div', { clase: 'icono-proyecto' }, '+'),
-    h('div', { clase: 'nombre' }, 'Nuevo proyecto'),
-    h('div', { clase: 'meta' }, 'un cliente, con sus estilos y vídeos')));
+    h('span', { clase: 'icono-proyecto' }, '+'),
+    h('span', { clase: 'nombre' }, 'Nuevo proyecto'),
+    h('span', { clase: 'meta' }, 'un cliente, con sus estilos y vídeos')));
   caja.appendChild(rejilla);
-  /* LOS OCULTOS, CON SU BOTÓN PARA DEJAR DE SERLO. «Ver los ocultos» solo los
-     enseña: el proyecto seguía oculto, y la forma de volver a mostrarlo estaba
-     dentro de él («Mostrar en la portada»), donde nadie la buscaba. Se leía
-     como «no me deja quitarlo de ocultos» (11-10-2026). */
-  const listaOcultos = lista.filter(c => c.oculto);
-  if (APP.light.verOcultos && listaOcultos.length) {
-    const caja2 = h('div', { clase: 'sueltos ocultos-portada' },
-      h('b', {}, listaOcultos.length === 1 ? 'Oculto: 1 proyecto' : `${listaOcultos.length} proyectos ocultos`),
-      h('span', { clase: 'meta' }, ' — se ven porque has pulsado «Ver los ocultos». Para que vuelvan a salir siempre:'));
-    listaOcultos.forEach(ficha => caja2.appendChild(h('div', { clase: 'fila' },
-      h('span', { clase: 'crece' }, ficha.nombre),
-      h('button', { clase: 'mini primario',
-        onclick: () => cambiarCliente(ficha, { oculto: false }, `«${ficha.nombre}» ya se ve en la portada`) },
-      'Dejar de ocultar'))));
-    caja.appendChild(caja2);
+}
+
+/* El logo del proyecto o su inicial en un color fijo (🔒 si está cerrado). */
+function insigniaDeProyecto(ficha, grande) {
+  const abierto = clienteAbierto(ficha);
+  if (ficha.logo && abierto) {
+    return h('img', { clase: 'insignia-proyecto con-logo' + (grande ? ' grande' : ''), alt: '',
+      src: `${BASE}/api/logos/${encodeURIComponent(ficha.logo.fichero)}` });
   }
-  // lo último que se movió, de los proyectos que se ven: para seguir sin buscar
-  const recientes = videosLight().filter(v => {
-    const cid = clienteDeVideo(v);
-    const ficha = fichaCliente(cid);
-    return !ficha || (!ficha.oculto || APP.light.verOcultos);
-  }).slice(0, 5);
-  if (recientes.length) seccionVideos(caja, recientes, '', 'Últimos vídeos');
-  seccionSueltos(caja, '');
+  return h('span', { clase: `insignia-proyecto tono-${tonoDe(ficha.nombre)}` + (grande ? ' grande' : ''), 'aria-hidden': 'true' },
+    abierto ? inicialDe(ficha.nombre) : '🔒');
 }
 
 function tarjetaProyecto(ficha) {
   const abierto = clienteAbierto(ficha);
   const estilos = estilosDeCliente(ficha.id).length;
-  const videos = videosDeCliente(ficha.id).length;
-  return h('button', {
-    clase: 'tarjeta-proyecto' + (ficha.oculto ? ' es-oculto' : ''),
-    title: abierto ? 'Abrir el proyecto' : 'Tiene clave: pulsa para escribirla',
-    onclick: () => entrarEnCliente(ficha),
-  },
-    ficha.logo && abierto
-      ? h('img', { clase: 'logo-proyecto', alt: '', src: `${BASE}/api/logos/${encodeURIComponent(ficha.logo.fichero)}` })
-      : h('div', { clase: 'icono-proyecto' }, abierto ? '📁' : '🔒'),
-    h('div', { clase: 'nombre' }, ficha.nombre),
-    h('div', { clase: 'meta' }, abierto
-      ? `${estilos} estilo${estilos === 1 ? '' : 's'} · ${videos} vídeo${videos === 1 ? '' : 's'}`
-        + (ficha.con_clave ? ' · 🔓 abierto' : '')
-      : 'con clave'),
-    ficha.oculto ? h('div', { clase: 'meta' }, 'oculto') : null);
+  const videos = videosDeCliente(ficha.id);
+  const listos = abierto ? videos.filter(v => estadoPublicarDeVideo(v)
+    && estadoPublicarDeVideo(v).t === 'Listo para publicar').length : 0;
+  return h('div', { clase: 'tarjeta-proyecto' + (ficha.oculto ? ' es-oculto' : '') },
+    h('button', {
+      clase: 'abrir-proyecto',
+      title: abierto ? 'Abrir el proyecto' : 'Tiene clave: pulsa para escribirla',
+      onclick: () => entrarEnCliente(ficha),
+    },
+      h('span', { clase: 'fila-nombre' }, insigniaDeProyecto(ficha), h('span', { clase: 'nombre' }, ficha.nombre)),
+      h('span', { clase: 'meta' }, abierto
+        ? `${plural(estilos, 'estilo', 'estilos')} · ${plural(videos.length, 'vídeo', 'vídeos')}`
+        : 'con clave'),
+      abierto ? h('span', { clase: 'tira-miniaturas' },
+        ...(videos.length ? videos.slice(0, 3).map(v => miniaturaDeVideo(v)) : [h('span', { clase: 'meta' }, 'sin vídeos todavía')]))
+        : null,
+      h('span', { clase: 'chips-proyecto' },
+        ficha.con_clave ? h('span', { clase: 'pastilla' }, abierto ? '🔓 abierto' : '🔒 con clave') : null,
+        ficha.oculto ? h('span', { clase: 'pastilla' }, 'oculto') : null,
+        listos ? h('span', { clase: 'pastilla ok' }, `${listos} ${listos === 1 ? 'listo' : 'listos'} para publicar`) : null)),
+    /* LOS OCULTOS, CON SU BOTÓN PARA DEJAR DE SERLO, dentro de su tarjeta.
+       «Ver ocultos» solo los enseña: la forma de volver a mostrarlo estaba
+       dentro del proyecto, donde nadie la buscaba (11-10-2026). */
+    ficha.oculto ? h('div', { clase: 'pie-proyecto' },
+      h('button', { clase: 'mini primario',
+        onclick: () => cambiarCliente(ficha, { oculto: false }, `«${ficha.nombre}» ya se ve en la portada`) },
+      'Dejar de ocultar')) : null);
 }
 
 /* DENTRO DE UN PROYECTO (o de «Sin proyecto»). */
 function dentroDeProyecto(caja, cid) {
   const ficha = fichaCliente(cid);
   const nombre = ficha ? ficha.nombre : 'Sin proyecto';
-  caja.appendChild(h('div', { clase: 'migas' },
-    h('button', { clase: 'mini fantasma salida-crear', title: 'Tus proyectos: todos, en tarjetas',
-      onclick: () => elegirCliente('') }, '‹ Tus proyectos'),
-    h('span', { clase: 'crece' }),
-    botonPapeleraLight()));
-  caja.appendChild(h('div', { clase: 'light-cab cab-proyecto' },
-    ficha && ficha.logo ? h('img', { clase: 'logo-proyecto pequeno', alt: '',
-      src: `${BASE}/api/logos/${encodeURIComponent(ficha.logo.fichero)}` }) : null,
-    h('h2', {}, `${ficha ? (ficha.con_clave ? '🔒 ' : '📁 ') : '🗂️ '}${nombre}`),
-    ficha && ficha.oculto ? h('span', { clase: 'pastilla' }, 'oculto') : null));
-  if (ficha) {
-    caja.appendChild(h('div', { clase: 'mandos-proyecto' },
-      h('button', { clase: 'mini', onclick: () => renombrarCliente(ficha) }, 'Renombrar'),
-      h('button', { clase: 'mini' + (APP.light.logoProyecto === cid ? ' activo' : ''),
-        onclick: () => { APP.light.logoProyecto = APP.light.logoProyecto === cid ? '' : cid; pintarLight(); } },
-      ficha.logo ? 'Logo ✓' : 'Logo'),
-      h('button', { clase: 'mini', onclick: () => cambiarCliente(ficha, { oculto: !ficha.oculto },
-        ficha.oculto ? 'Ya se ve en la portada' : 'Oculto: sale con «Ver los ocultos»') },
-      ficha.oculto ? 'Dejar de ocultar' : 'Ocultar'),
-      h('button', { clase: 'mini', onclick: () => claveCliente(ficha) }, ficha.con_clave ? 'Clave ✓' : 'Poner clave'),
-      h('button', { clase: 'mini', onclick: () => traerEstiloACliente(ficha) }, 'Traer un estilo'),
-      h('button', { clase: 'mini fantasma peligro', onclick: () => borrarCliente(ficha) }, 'Borrar')));
-    if (APP.light.logoProyecto === cid) caja.appendChild(panelLogoProyecto(ficha));
+  const estilos = estilosDeCliente(cid);
+  const videos = videosDeCliente(cid);
+  caja.appendChild(h('button', { clase: 'mini fantasma salida-crear', title: 'Tus proyectos: todos, en tarjetas',
+    onclick: () => elegirCliente('') }, '‹ Tus proyectos'));
+  caja.appendChild(h('div', { clase: 'cab-tus-proyectos cab-proyecto' },
+    h('div', { clase: 'izq con-insignia' },
+      ficha ? insigniaDeProyecto(ficha, true) : h('span', { clase: 'insignia-proyecto grande sin' }, '🗂️'),
+      h('div', { clase: 'titulo-proyecto' },
+        h('h2', {}, nombre),
+        h('span', { clase: 'chips-proyecto' },
+          ficha && ficha.con_clave ? h('span', { clase: 'pastilla' }, '🔓 abierto · con clave') : null,
+          ficha && ficha.oculto ? h('span', { clase: 'pastilla' }, 'oculto') : null,
+          h('span', { clase: 'pastilla' }, `${plural(estilos.length, 'estilo', 'estilos')} · ${plural(videos.length, 'vídeo', 'vídeos')}`),
+          ficha && ficha.logo ? h('span', { clase: 'pastilla ok' }, 'logo ✓') : null))),
+    h('div', { clase: 'acc' },
+      ficha ? h('button', { clase: 'mini abrir-ajustes-proyecto', title: 'Nombre, logo, ocultar, clave y borrar',
+        onclick: () => abrirAjustesProyecto(cid) }, '⚙ Ajustes del proyecto') : null,
+      botonPapeleraLight(),
+      botonNuevoVideo(cid))));
+  caja.appendChild(buscadorDeProyectos(`Buscar en ${nombre}…`));
+  const necesitan = franjaTeNecesitan(cid);
+  if (necesitan) caja.appendChild(necesitan);
+  seccionEstilos(caja, estilos.filter(f => casaConLaBusqueda(f.nombre, f.id)), cid);
+  seccionVideosDelProyecto(caja, videos.filter(v => casaConLaBusqueda(v.nombre, v.id, origenDeVideo(v))), cid);
+  if (ficha && APP.light.ajustesProyecto === cid) caja.appendChild(cajonAjustesProyecto(ficha));
+}
+
+/* ---- «⚙ Ajustes del proyecto»: un cajón a la derecha
+ *
+ * Lo que antes era una fila de seis botones encima de los estilos. Cada
+ * sección es una entrada de esta lista, en este orden: `pinta(c)` devuelve el
+ * nodo (o null para no salir), con `c = { cid, cliente }`. Para añadir una, una
+ * línea aquí; no otro botón suelto en la cabecera. */
+const SECCIONES_AJUSTES_PROYECTO = [
+  { id: 'nombre', titulo: 'Nombre', pinta: c => seccionNombreDelProyecto(c) },
+  { id: 'logo', titulo: 'Logo', pinta: c => panelLogoProyecto(c.cliente) },
+  // la Ficha del negocio de etapa-foto-c entra aquí como una sección más (id
+  // reservado `ficha-negocio`), con su botón y su panel tal cual:
+  // { id: 'ficha-negocio', titulo: 'Ficha del negocio', pinta: c => … },
+  { id: 'visibilidad', titulo: 'Visibilidad', pinta: c => seccionVisibilidadDelProyecto(c) },
+  { id: 'clave', titulo: 'Clave', pinta: c => seccionClaveDelProyecto(c) },
+  { id: 'publicar', titulo: 'Publicar', pinta: () => seccionPublicarDelProyecto() },
+  { id: 'peligro', titulo: 'Zona de peligro', pinta: c => seccionPeligroDelProyecto(c) },
+];
+
+function abrirAjustesProyecto(cid) {
+  APP.light.ajustesProyecto = cid;
+  APP.light.menuTarjeta = '';
+  pintarLight();
+  setTimeout(() => {
+    const cajon = document.querySelector('.cajon-proyecto');
+    if (cajon) cajon.focus({ preventScroll: true });
+  }, 0);
+}
+
+function cerrarAjustesProyecto() {
+  APP.light.ajustesProyecto = '';
+  APP.light.nombreProyecto = null;
+  pintarLight();
+}
+
+function cajonAjustesProyecto(ficha) {
+  const c = { cid: ficha.id, cliente: ficha };
+  const cuerpo = h('div', { clase: 'cuerpo-ajustes' });
+  SECCIONES_AJUSTES_PROYECTO.forEach(seccion => {
+    const nodo = seccion.pinta(c);
+    if (!nodo) return;
+    cuerpo.appendChild(h('section', { clase: `seccion-ajustes ajustes-${seccion.id}` },
+      h('h3', { clase: 'titulo-ajustes' }, seccion.titulo), nodo));
+  });
+  const capa = h('div', { clase: 'capa-ajustes-proyecto',
+    onclick: ev => { if (ev.target === capa) cerrarAjustesProyecto(); } },
+  h('aside', { clase: 'cajon-proyecto', role: 'dialog', 'aria-label': `Ajustes de ${ficha.nombre}`, tabindex: '-1' },
+    h('div', { clase: 'cab-ajustes' },
+      h('b', {}, `⚙ Ajustes de ${ficha.nombre}`),
+      h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini fantasma', title: 'Cerrar', 'aria-label': 'Cerrar', onclick: cerrarAjustesProyecto }, '×')),
+    cuerpo));
+  return capa;
+}
+
+/* El nombre se cambia en su campo; lo escrito sobrevive a un repintado. */
+function seccionNombreDelProyecto(c) {
+  const borrador = APP.light.nombreProyecto;
+  const valor = borrador && borrador.cid === c.cid ? borrador.texto : c.cliente.nombre;
+  const entrada = h('input', { type: 'text', value: valor, 'aria-label': 'Nombre del proyecto',
+    datos: { foco: 'nombre-proyecto' } });
+  entrada.addEventListener('input', () => { APP.light.nombreProyecto = { cid: c.cid, texto: entrada.value }; });
+  const guardar = () => {
+    const nombre = entrada.value.trim();
+    if (!nombre || nombre === c.cliente.nombre) return;
+    APP.light.nombreProyecto = null;
+    cambiarCliente(c.cliente, { nombre }, 'Proyecto renombrado');
+  };
+  entrada.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); guardar(); } });
+  return h('div', { clase: 'fila nombre-proyecto' }, entrada,
+    h('button', { clase: 'mini primario', onclick: guardar }, 'Guardar'));
+}
+
+function seccionVisibilidadDelProyecto(c) {
+  const ficha = c.cliente;
+  const casilla = h('input', { type: 'checkbox', clase: 'conmutador', checked: !!ficha.oculto,
+    'aria-label': 'Oculto en la portada',
+    onchange: ev => cambiarCliente(ficha, { oculto: ev.target.checked },
+      ev.target.checked ? 'Oculto: sale con «Ver ocultos»' : 'Ya se ve en la portada') });
+  return h('label', { clase: 'interruptor-tarjeta' }, casilla,
+    h('span', { clase: 'textos' }, h('b', {}, 'Oculto en la portada'),
+      h('span', { clase: 'meta' }, 'Sale solo con «Ver ocultos». No borra nada.')));
+}
+
+function seccionClaveDelProyecto(c) {
+  const ficha = c.cliente;
+  return h('div', { clase: 'col-ajustes' },
+    h('div', { clase: 'pista' }, 'Con clave, sus estilos y vídeos no se ven hasta escribirla (en cada pestaña nueva). '
+      + 'Es privacidad de pantalla: la seguridad de verdad es la contraseña de acceso al Studio.'),
+    h('div', { clase: 'fila' },
+      h('span', { clase: 'pastilla' }, ficha.con_clave ? '🔒 con clave' : 'sin clave'),
+      h('button', { clase: 'mini', onclick: () => claveCliente(ficha) },
+        ficha.con_clave ? 'Cambiar o quitar la clave' : 'Poner clave')));
+}
+
+function seccionPublicarDelProyecto() {
+  return h('div', { clase: 'col-ajustes' },
+    h('div', { clase: 'pista' }, 'El perfil de Upload-Post, el tono de los textos y el SEO de este proyecto viven en Publicar.'),
+    h('div', {}, h('button', { clase: 'mini', onclick: () => {
+      APP.light.ajustesProyecto = '';
+      irASeccionPublicar('cuentas');
+    } }, 'Perfil de Upload-Post, tono y SEO de este proyecto ›')));
+}
+
+function seccionPeligroDelProyecto(c) {
+  return h('div', { clase: 'col-ajustes zona-peligro' },
+    h('div', { clase: 'pista' }, 'Se borra solo la carpeta: sus estilos y vídeos NO se borran, quedan en «Sin proyecto».'),
+    h('div', {}, h('button', { clase: 'mini peligro', onclick: () => borrarCliente(c.cliente) }, 'Borrar el proyecto')));
+}
+
+/* ---- «+ Nuevo vídeo»: ¿con qué estilo?
+ *
+ * Un acceso nuevo, no una función nueva: elegir un estilo aquí es lo mismo que
+ * pulsar «▶ Nuevo vídeo con este estilo» en su tarjeta (`elegirEstiloLight`),
+ * que abre el Encargo de un vídeo nuevo. Fuera de un proyecto salen los estilos
+ * de todos los que se ven, agrupados; dentro, solo los suyos. */
+function abrirNuevoVideo(cid) {
+  const viejo = document.getElementById('nuevo-video');
+  if (viejo) viejo.remove();
+  const grupos = [];
+  if (cid) grupos.push({ cid, nombre: '', estilos: estilosDeCliente(cid) });
+  else if (!listaClientes().length) grupos.push({ cid: '', nombre: '', estilos: presetsLight() });
+  else {
+    listaClientes().filter(c => !c.oculto || APP.light.verOcultos)
+      .forEach(c => grupos.push({ cid: c.id, nombre: c.nombre, estilos: estilosDeCliente(c.id) }));
+    grupos.push({ cid: '_sin', nombre: 'Sin proyecto', estilos: estilosDeCliente('_sin') });
   }
-  seccionEstilos(caja, estilosDeCliente(cid), cid);
-  seccionVideos(caja, videosDeCliente(cid), cid);
-  seccionSueltos(caja, cid === '_sin' ? '' : cid);
+  const conEstilos = grupos.filter(g => g.estilos.length);
+  const teclas = ev => { if (ev.key === 'Escape') cerrar(); };
+  const cerrar = () => { capa.remove(); document.removeEventListener('keydown', teclas); };
+  const cuerpo = h('div', { clase: 'cuerpo-nuevo-video' });
+  conEstilos.forEach(g => {
+    cuerpo.appendChild(h('div', { clase: 'grupo-nuevo-video' },
+      g.nombre ? h('span', { clase: 'titulo-ajustes' }, `📁 ${g.nombre}`) : null,
+      h('div', { clase: 'rejilla-nuevo-video' }, ...g.estilos.map(f => h('button', {
+        clase: 'elige-estilo', title: `Un vídeo nuevo con «${f.nombre || f.id}»`,
+        onclick: () => { cerrar(); elegirEstiloLight(f); },
+      },
+        caraDeEstilo(f),
+        h('b', {}, `▶ ${f.nombre || f.id}`),
+        h('span', { clase: 'meta' }, (f.vinetas || []).map(v => v.texto || v).join(' · ')))))));
+  });
+  if (!conEstilos.length) {
+    cuerpo.appendChild(h('div', { clase: 'pista' }, cid
+      ? 'Este proyecto todavía no tiene estilos: crea uno primero.'
+      : 'Todavía no hay ningún estilo: crea uno primero.'));
+  }
+  cuerpo.appendChild(h('div', {}, h('button', { clase: 'mini', onclick: () => {
+    cerrar();
+    APP.light.encargo = null;
+    irALight('crear', { taller: null });
+  } }, '+ Crear un estilo nuevo')));
+  const capa = h('div', { clase: 'capa-dialogo', id: 'nuevo-video',
+    onclick: ev => { if (ev.target === capa) cerrar(); } },
+  h('div', { clase: 'dialogo dialogo-nuevo-video', role: 'dialog', 'aria-label': 'Un vídeo nuevo: ¿con qué estilo?' },
+    h('div', { clase: 'fila' },
+      h('div', { clase: 'crece' }, h('h3', {}, 'Un vídeo nuevo: ¿con qué estilo?'),
+        h('div', { clase: 'meta' }, 'Elegir el estilo abre el Encargo de un vídeo nuevo (lo mismo que «▶ Nuevo vídeo con este estilo» en su tarjeta).')),
+      h('button', { type: 'button', clase: 'mini fantasma', title: 'Cerrar', 'aria-label': 'Cerrar', onclick: cerrar }, '×')),
+    cuerpo));
+  document.addEventListener('keydown', teclas);
+  document.body.appendChild(capa);
+  setTimeout(() => { const b = capa.querySelector('.elige-estilo, button'); if (b) b.focus(); }, 0);
 }
 
 /* El logo del proyecto: lo llevan de fábrica los vídeos NUEVOS de sus estilos. */
@@ -7130,67 +7669,6 @@ function panelLogoProyecto(ficha) {
   return caja;
 }
 
-function seccionEstilos(caja, fichas, cid) {
-  const ficha = fichaCliente(cid);
-  caja.appendChild(h('div', { clase: 'light-cab' },
-    h('h3', {}, ficha ? `Estilos de ${ficha.nombre}` : (cid === '_sin' ? 'Estilos sin proyecto' : 'Tus estilos')),
-    h('span', { clase: 'meta' }, fichas.length
-      ? `${fichas.length} estilo${fichas.length === 1 ? '' : 's'}`
-      : 'una estética, un tono, una voz y un idioma')));
-  const rejilla = h('div', { clase: 'galeria-estilos' });
-  fichas.forEach(f => rejilla.appendChild(tarjetaEstiloLight(f, !cid)));
-  rejilla.appendChild(tarjetaNuevoEstilo(fichas.length, ficha));
-  caja.appendChild(rejilla);
-}
-
-function seccionVideos(caja, videos, cid, titulo) {
-  if (!videos.length) return;
-  const ficha = fichaCliente(cid);
-  caja.appendChild(h('div', { clase: 'light-cab' },
-    h('h3', {}, titulo || (ficha ? `Vídeos de ${ficha.nombre}` : (cid === '_sin' ? 'Vídeos sin proyecto' : 'Tus vídeos'))),
-    h('span', { clase: 'meta' }, `${videos.length} vídeo${videos.length === 1 ? '' : 's'}`)));
-  const lista = h('div', { clase: 'videos-light' });
-  videos.forEach(video => lista.appendChild(filaVideoLight(video)));
-  caja.appendChild(lista);
-}
-
-/* LOS INTENTOS A MEDIAS de un estilo. Un taller nace antes que su estilo, así
-   que una generación que falla deja una carpeta sin nadie que la borre: se
-   enseña con sus dos salidas. Dentro de un proyecto, solo los suyos. */
-function seccionSueltos(caja, cid) {
-  let sueltos = (APP.light.datos || {}).sueltos || [];
-  if (cid !== null) sueltos = sueltos.filter(t => !cid || (t.cliente || '') === cid);
-  if (!sueltos.length) return;
-  const aviso = h('div', { clase: 'sueltos' },
-    h('b', {}, sueltos.length === 1 ? 'Un estilo a medias' : `${sueltos.length} estilos a medias`),
-    h('span', { clase: 'meta' }, ' — se quedaron sin terminar. «Retomar» sigue por donde iba sin volver a pagar lo hecho.'));
-  sueltos.forEach(taller => aviso.appendChild(h('div', { clase: 'fila' },
-    h('span', { clase: 'meta crece' }, `${taller.nombre} · ${fechaCorta(taller.actualizado) || ''}`),
-    h('button', { clase: 'mini', onclick: () => irALight('crear', { taller: taller.id }) }, 'Retomar'),
-    h('button', { clase: 'mini peligro', onclick: () => descartarTallerLight(taller) }, 'Descartar'))));
-  caja.appendChild(aviso);
-}
-
-/* LOS VÍDEOS QUE PERDIERON SUS IMÁGENES DE ESTILO (antes del 10-10-2026,
-   guardar un estilo podía cambiarles el nombre). Se reparan aquí, sin
-   regenerar nada (`/api/proyectos/{pid}/reparar-estilo`). */
-function avisoEstilosPerdidos() {
-  const caja = h('div', {});
-  const perdidos = (APP.light.datos || {}).perdidos || [];
-  if (!perdidos.length) return caja;
-  caja.appendChild(h('div', { clase: 'sueltos aviso-perdidos' },
-    h('b', {}, perdidos.length === 1 ? 'Un vídeo ha perdido sus imágenes de estilo'
-      : `${perdidos.length} vídeos han perdido sus imágenes de estilo`),
-    h('span', { clase: 'meta' }, ' — pasaba al volver a guardar un estilo y ya no puede pasar. '
-      + 'Repararlo las vuelve a apuntar a las que sí están: no regenera ni cobra nada.'),
-    ...perdidos.map(video => h('div', { clase: 'fila' },
-      h('span', { clase: 'meta crece' }, `${video.nombre} · ${video.rotas.length} imagen${video.rotas.length === 1 ? '' : 'es'}`),
-      video.reparable
-        ? h('button', { clase: 'mini primario', onclick: () => repararEstiloDeVideo(video) }, 'Reparar')
-        : h('span', { clase: 'meta' }, 'no hay otra que la sustituya: pregúntale al asistente')))));
-  return caja;
-}
-
 async function repararEstiloDeVideo(video) {
   try {
     const r = await pedir(`${API.proyecto(video.id)}/reparar-estilo`, { method: 'POST', cuerpo: { aplicar: true } });
@@ -7199,62 +7677,222 @@ async function repararEstiloDeVideo(video) {
   } catch (e) { toast(e.message, true); }
 }
 
-/* Una fila de «Tus vídeos»: abrir, de dónde salió, y sus mandos. */
-function filaVideoLight(video) {
-  /* EL NOMBRE SE CAMBIA EN LA PROPIA FILA (rediseño de Crear): era una ventana
-     del navegador (`prompt`). */
-  if (APP.light.renombrando === video.id) {
-    return h('div', { clase: 'video-light renombrando' },
-      campoRenombrar(video.id, video.nombre || video.id));
-  }
-  return h('div', { clase: 'video-light' },
-    h('button', { clase: 'abrir', title: 'Seguir con este vídeo', onclick: () => abrirVideoLight(video.id) },
-      h('span', { clase: 'nombre' }, video.nombre || video.id),
-      // DE QUÉ ESTILO (y proyecto) SALIÓ, para saber de quién es cada vídeo
-      h('span', { clase: 'meta' }, [origenDeVideo(video), fechaCorta(video.actualizado)]
-        .filter(Boolean).join(' · '))),
-    /* EL LAPIZ VA FUERA DEL BOTON DE ABRIR: un botón dentro de otro no es HTML
-       válido y el clic acabaría abriendo el vídeo en vez de renombrarlo. */
-    h('button', { clase: 'mini fantasma renombrar', title: 'Cambiar el nombre',
-      'aria-label': `Cambiar el nombre de ${video.nombre || video.id}`,
-      onclick: () => { APP.light.renombrando = video.id; pintarLight(); } }, '✏️'),
-    listaClientes().length ? h('button', { clase: 'mini fantasma', title: 'Moverlo a otro proyecto',
-      onclick: () => moverVideoACliente(video) }, '📁') : null,
-    h('button', { clase: 'mini fantasma peligro', title: 'A la papelera de proyectos',
-      onclick: () => apartarVideoLight(video) }, 'Apartar'));
+function seccionEstilos(caja, fichas, cid) {
+  const ficha = fichaCliente(cid);
+  caja.appendChild(h('div', { clase: 'light-cab' },
+    h('h3', {}, ficha ? `Estilos de ${ficha.nombre}` : (cid === '_sin' ? 'Estilos sin proyecto' : 'Tus estilos')),
+    h('span', { clase: 'meta' }, fichas.length
+      ? `${plural(fichas.length, 'estilo', 'estilos')} · pulsa uno para empezar un vídeo con él o editarlo`
+      : 'una estética, un tono, una voz y un idioma')));
+  const rejilla = h('div', { clase: 'galeria-estilos' });
+  fichas.forEach(f => rejilla.appendChild(tarjetaEstiloLight(f, !cid)));
+  if (cid !== '_sin') rejilla.appendChild(tarjetaNuevoEstilo(fichas.length, ficha));
+  if (ficha) rejilla.appendChild(tarjetaTraerEstilo(ficha));
+  caja.appendChild(rejilla);
 }
 
-/* PULSAR UNA TARJETA LA ELIGE Y PASA AL SIGUIENTE PASO, no la abre. Lo que se
-   hace con un estilo el 95 % de las veces es usarlo para un vídeo. Editarlo
-   vivía escondido en el menú de los tres puntos; desde el rediseño de Crear
-   (20-10-2026) «✎ Editar» va a la vista en la propia tarjeta, y en «⋯» quedan
-   Duplicar y Mover a otro proyecto. */
+/* Los vídeos en tarjetas (la portada y «Sin proyectos»). */
+function seccionVideos(caja, videos, cid, titulo) {
+  if (!videos.length) return;
+  const ficha = fichaCliente(cid);
+  caja.appendChild(h('div', { clase: 'light-cab' },
+    h('h3', {}, titulo || (ficha ? `Vídeos de ${ficha.nombre}` : 'Tus vídeos')),
+    h('span', { clase: 'meta' }, plural(videos.length, 'vídeo', 'vídeos'))));
+  caja.appendChild(rejillaDeVideos(videos, false));
+}
+
+/* Los vídeos de un proyecto: chips de estado para filtrar y tarjetas o lista. */
+function seccionVideosDelProyecto(caja, videos, cid) {
+  const ficha = fichaCliente(cid);
+  const lista = vistaDeVideos() === 'lista';
+  const filtro = APP.light.filtroVideos || 'todos';
+  asegurarEstadosDeVideos(videos);
+  caja.appendChild(h('div', { clase: 'light-cab cab-videos' },
+    h('h3', {}, ficha ? `Vídeos de ${ficha.nombre}` : 'Vídeos sin proyecto'),
+    h('span', { clase: 'meta' }, plural(videosDeCliente(cid).length, 'vídeo', 'vídeos')),
+    h('span', { clase: 'crece' }),
+    h('div', { clase: 'conmutador-vista', role: 'group', 'aria-label': 'Cómo se ven los vídeos' },
+      h('button', { clase: 'mini' + (lista ? ' fantasma' : ' activo'), 'aria-pressed': lista ? 'false' : 'true',
+        onclick: () => ponerVistaDeVideos('tarjetas') }, '▦ Tarjetas'),
+      h('button', { clase: 'mini' + (lista ? ' activo' : ' fantasma'), 'aria-pressed': lista ? 'true' : 'false',
+        onclick: () => ponerVistaDeVideos('lista') }, '☰ Lista'))));
+  caja.appendChild(h('div', { clase: 'chips-filtro-videos', role: 'group', 'aria-label': 'Filtrar los vídeos por estado' },
+    ...FILTROS_DE_VIDEOS.map(([clave, nombre]) => h('button', {
+      clase: 'mini chip-filtro' + (filtro === clave ? ' activo' : ''), 'aria-pressed': filtro === clave ? 'true' : 'false',
+      onclick: () => { APP.light.filtroVideos = clave; pintarLight(); },
+    }, `${nombre} ${videos.filter(v => pasaElFiltro(v, clave)).length}`))));
+  const vistos = videos.filter(v => pasaElFiltro(v, filtro));
+  caja.appendChild(rejillaDeVideos(vistos, lista, videosDeCliente(cid).length
+    ? (videos.length ? 'Ningún vídeo con este filtro.' : 'Ningún vídeo con esa búsqueda.')
+    : 'Todavía no hay vídeos: pulsa «+ Nuevo vídeo» o un estilo.'));
+}
+
+function rejillaDeVideos(videos, enLista, vacio) {
+  asegurarEstadosDeVideos(videos);
+  const rejilla = h('div', { clase: 'tarjetas-video' + (enLista ? ' en-lista' : '') });
+  videos.forEach(video => rejilla.appendChild(tarjetaVideoLight(video, enLista)));
+  if (!videos.length && vacio) rejilla.appendChild(h('div', { clase: 'pista' }, vacio));
+  return rejilla;
+}
+
+/* TE NECESITAN: los vídeos que perdieron sus imágenes de estilo (antes del
+   10-10-2026, guardar un estilo podía cambiarles el nombre; se reparan sin
+   regenerar nada, `/api/proyectos/{pid}/reparar-estilo`) y los estilos a
+   medias (un taller nace antes que su estilo, así que una generación que falla
+   deja una carpeta sin nadie que la borre). Juntos y arriba: antes iban uno
+   arriba y otro abajo del todo. Dentro de un proyecto, solo los suyos. */
+function franjaTeNecesitan(cid) {
+  const dentro = cid !== null && cid !== undefined;
+  const delProyecto = pid => {
+    if (!dentro) return true;
+    const video = videosLight().find(v => v.id === pid);
+    return !!video && clienteDeVideo(video) === (cid === '_sin' ? '' : cid);
+  };
+  const perdidos = ((APP.light.datos || {}).perdidos || []).filter(v => delProyecto(v.id));
+  let sueltos = (APP.light.datos || {}).sueltos || [];
+  if (dentro) sueltos = sueltos.filter(t => (t.cliente || '') === (cid === '_sin' ? '' : cid));
+  if (!perdidos.length && !sueltos.length) return null;
+  const franja = h('div', { clase: 'te-necesitan' },
+    h('b', { clase: 'titulo-te-necesitan' }, `⚠ Te necesitan · ${perdidos.length + sueltos.length}`));
+  if (perdidos.length) {
+    franja.appendChild(h('div', { clase: 'grupo-te-necesitan aviso-perdidos' },
+      h('div', {}, h('b', {}, perdidos.length === 1 ? 'Un vídeo ha perdido sus imágenes de estilo'
+        : `${perdidos.length} vídeos han perdido sus imágenes de estilo`),
+      h('span', { clase: 'meta' }, ' — pasaba al volver a guardar un estilo y ya no puede pasar. '
+        + 'Repararlo las vuelve a apuntar a las que sí están: no regenera ni cobra nada.')),
+      ...perdidos.map(video => h('div', { clase: 'fila' },
+        h('span', { clase: 'meta crece' }, `${video.nombre} · ${plural(video.rotas.length, 'imagen', 'imágenes')}`),
+        video.reparable
+          ? h('button', { clase: 'mini primario', onclick: () => repararEstiloDeVideo(video) }, 'Reparar')
+          : h('span', { clase: 'meta' }, 'no hay otra que la sustituya: pregúntale al asistente')))));
+  }
+  if (sueltos.length) {
+    franja.appendChild(h('div', { clase: 'grupo-te-necesitan estilos-a-medias' },
+      h('div', {}, h('b', {}, sueltos.length === 1 ? 'Un estilo a medias' : `${sueltos.length} estilos a medias`),
+        h('span', { clase: 'meta' }, ' — se quedaron sin terminar. «Retomar» sigue por donde iba sin volver a pagar lo hecho.')),
+      ...sueltos.map(taller => h('div', { clase: 'fila' },
+        h('span', { clase: 'meta crece' }, `${taller.nombre} · ${fechaAmable(taller.actualizado) || ''}`),
+        h('button', { clase: 'mini', onclick: () => irALight('crear', { taller: taller.id }) }, 'Retomar'),
+        h('button', { clase: 'mini peligro', title: 'A la papelera (se puede devolver)',
+          onclick: () => descartarTallerLight(taller) }, 'Descartar')))));
+  }
+  return franja;
+}
+
+/* La miniatura de un vídeo: la de su estilo (como en la cabecera del vídeo en
+   Crear) o, si el estilo no tiene, su inicial en un color fijo. */
+function miniaturaDeVideo(video) {
+  const estilo = fichaLight(video.estilo_light || '');
+  if (estilo && estilo.hay_miniatura) {
+    return h('img', { clase: 'miniatura-tarjeta', alt: '', loading: 'lazy',
+      src: API.presetCanalMiniatura(estilo.id, estilo.modificado) });
+  }
+  return h('span', { clase: `miniatura-tarjeta vacia tono-${tonoDe(video.estilo_light || video.nombre || video.id)}`,
+    'aria-hidden': 'true' }, inicialDe(video.nombre || video.id));
+}
+
+/* UNA TARJETA DE VÍDEO: abrir (donde toca), de dónde salió, cómo va en Crear
+   y en Publicar, «Publicar ›» si está montado y «⋯» con lo demás. Se acaba el
+   «Apartar» rojo repetido en cada fila. */
+function tarjetaVideoLight(video, enLista) {
+  const nombre = video.nombre || video.id;
+  /* EL NOMBRE SE CAMBIA EN LA PROPIA TARJETA (rediseño de Crear): era una
+     ventana del navegador (`prompt`). */
+  if (APP.light.renombrando === video.id) {
+    return h('div', { clase: 'tarjeta-video renombrando' + (enLista ? ' en-lista' : '') },
+      campoRenombrar(video.id, nombre));
+  }
+  const crear = estadoCrearDeVideo(video);
+  const publicar = estadoPublicarDeVideo(video);
+  const abierto = APP.light.menuTarjeta === `v:${video.id}`;
+  return h('div', { clase: 'tarjeta-video' + (enLista ? ' en-lista' : '') + (abierto ? ' con-menu' : '') },
+    h('button', { clase: 'abrir-video', title: 'Seguir con este vídeo', onclick: () => abrirVideoLight(video.id) },
+      miniaturaDeVideo(video),
+      h('span', { clase: 'cuerpo-video' },
+        h('span', { clase: 'nombre' }, nombre),
+        // DE QUÉ PROYECTO Y ESTILO SALIÓ, para saber de quién es cada vídeo
+        h('span', { clase: 'meta' }, [origenDeVideo(video), fechaAmable(video.actualizado)].filter(Boolean).join(' · ')),
+        h('span', { clase: 'estados-video' },
+          crear ? chipDeEstado(crear) : null,
+          publicar && (!crear || crear.e !== 'curso') ? chipDeEstado(publicar) : null))),
+    /* LOS BOTONES VAN FUERA DEL DE ABRIR: un botón dentro de otro no es HTML
+       válido y el clic acabaría abriendo el vídeo. */
+    h('div', { clase: 'acciones-video' },
+      montadoDe(video) ? h('button', { clase: 'mini chip-publicar', title: 'Su ficha en Publicar',
+        onclick: () => abrirPublicarVideo(video.id) }, 'Publicar ›') : null,
+      h('button', { clase: 'mini fantasma abre-menu mas-video', title: 'Renombrar, mover o apartar',
+        'aria-label': `Más opciones de ${nombre}`, 'aria-haspopup': 'menu', 'aria-expanded': abierto ? 'true' : 'false',
+        onclick: () => abrirMenuTarjeta(`v:${video.id}`) }, '⋯'),
+      abierto ? menuDeVideo(video) : null));
+}
+
+function menuDeVideo(video) {
+  return h('div', { clase: 'menu-tarjeta menu-de-video', role: 'menu' },
+    h('button', { clase: 'mini fantasma', role: 'menuitem', title: 'Cambiar el nombre (no regenera nada)',
+      onclick: desdeMenuTarjeta(() => { APP.light.renombrando = video.id; pintarLight(); }) }, '✏️ Renombrar'),
+    listaClientes().length ? h('button', { clase: 'mini fantasma', role: 'menuitem',
+      onclick: desdeMenuTarjeta(() => moverVideoACliente(video)) }, '📁 Mover a otro proyecto') : null,
+    h('button', { clase: 'mini fantasma peligro', role: 'menuitem', title: 'A la papelera (se puede devolver)',
+      onclick: desdeMenuTarjeta(() => apartarVideoLight(video)) },
+    'Apartar', h('span', { clase: 'meta' }, ' · a la papelera: se puede devolver')));
+}
+
+/* La cara de un estilo: su hoja de muestras o, si aún no tiene, una franja
+   corta con su tono (sin el hueco enorme de «sin muestras»). */
+function caraDeEstilo(ficha) {
+  if (ficha.hay_miniatura) {
+    return h('div', { clase: 'cara' },
+      h('img', { src: API.presetCanalMiniatura(ficha.id, ficha.modificado), alt: '', loading: 'lazy' }));
+  }
+  return h('div', { clase: `cara sin-muestras tono-${tonoDe(ficha.nombre || ficha.id)}` },
+    h('span', { clase: 'sin-cara' }, 'sin muestras todavía'));
+}
+
+/* PULSAR UNA TARJETA DE ESTILO ABRE SU MENÚ: «▶ Nuevo vídeo con este estilo»
+   (lo de antes al pulsarla, `elegirEstiloLight`) y «✎ Editar el estilo», y
+   debajo Duplicar, Mover y Apartar. «✎ Editar» sigue a la vista en la tarjeta
+   (rediseño de Crear, 20-10-2026). La tarjeta es un div con botones dentro:
+   un botón dentro de otro no es HTML válido. */
 function tarjetaEstiloLight(ficha, conProyecto) {
   const vinetas = ficha.vinetas || [];
   const cliente = conProyecto ? fichaCliente(clienteDe(ficha.id)) : null;
-  return h('div', { clase: 'ficha-estilo' },
+  const abierto = APP.light.menuTarjeta === `e:${ficha.id}`;
+  return h('div', { clase: 'ficha-estilo' + (abierto ? ' con-menu' : '') },
     h('button', {
-      clase: 'cara-y-cuerpo', title: 'Usar este estilo',
-      onclick: () => elegirEstiloLight(ficha),
+      clase: 'cara-y-cuerpo abre-menu', title: 'Nuevo vídeo con este estilo, editarlo, duplicarlo o moverlo',
+      'aria-haspopup': 'menu', 'aria-expanded': abierto ? 'true' : 'false',
+      onclick: () => abrirMenuTarjeta(`e:${ficha.id}`),
     },
-      h('div', { clase: 'cara' }, ficha.hay_miniatura
-        ? h('img', { src: API.presetCanalMiniatura(ficha.id, ficha.modificado), alt: '', loading: 'lazy' })
-        : h('div', { clase: 'sin-cara' }, 'sin muestras')),
+      caraDeEstilo(ficha),
       h('div', { clase: 'cuerpo' },
         h('div', { clase: 'nombre' }, ficha.nombre || ficha.id),
         cliente ? h('div', { clase: 'chip-proyecto' }, `📁 ${cliente.nombre}`) : null,
         h('ul', { clase: 'vinetas' },
-          // el icono lo manda el servidor con cada línea (`presets_canal.vinetas_de`):
-          // aquí no hay forma de saber cuál es el idioma y cuál la voz sin deducirlo
-          // del orden, y el orden se rompe en cuanto una línea no sale
+          // el icono lo manda el servidor con cada línea (`presets_canal.vinetas_de`)
           ...vinetas.map(v => h('li', {},
             h('span', { clase: 'ico' }, v.icono || '·'), v.texto || v))))),
     h('div', { clase: 'pie-tarjeta' },
       h('button', {
         clase: 'mini editar-estilo', title: 'Abrir la ficha del estilo para cambiarlo',
         onclick: ev => { ev.stopPropagation(); editarEstiloLight(ficha); },
-      }, '✎ Editar'),
-      menuDeEstilo(ficha)));
+      }, '✎ Editar')),
+    abierto ? menuDeEstilo(ficha) : null);
+}
+
+function menuDeEstilo(ficha) {
+  return h('div', { clase: 'menu-tarjeta menu-de-estilo', role: 'menu' },
+    h('button', { clase: 'primario', role: 'menuitem', onclick: desdeMenuTarjeta(() => elegirEstiloLight(ficha)) },
+      '▶ Nuevo vídeo con este estilo'),
+    h('button', { clase: 'mini', role: 'menuitem', onclick: desdeMenuTarjeta(() => editarEstiloLight(ficha)) },
+      '✎ Editar el estilo'),
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'mini fantasma', role: 'menuitem', onclick: desdeMenuTarjeta(() => duplicarEstiloLight(ficha)) },
+        'Duplicar'),
+      listaClientes().length ? h('button', { clase: 'mini fantasma', role: 'menuitem',
+        onclick: desdeMenuTarjeta(() => moverEstiloACliente(ficha)) }, 'Mover a otro proyecto') : null),
+    h('button', { clase: 'mini fantasma peligro', role: 'menuitem', title: 'A la papelera (se puede devolver)',
+      onclick: desdeMenuTarjeta(() => borrarPresetLight(ficha)) },
+    'Apartar', h('span', { clase: 'meta' }, ' · a la papelera')));
 }
 
 function tarjetaNuevoEstilo(cuantos, cliente) {
@@ -7262,11 +7900,21 @@ function tarjetaNuevoEstilo(cuantos, cliente) {
     clase: 'ficha-estilo nuevo', title: 'Crear un estilo nuevo',
     onclick: () => { APP.light.encargo = null; irALight('crear', { taller: null }); },
   },
-    h('div', { clase: 'cara' }, h('span', { clase: 'mas' }, '+')),
     h('div', { clase: 'cuerpo' },
-      h('div', { clase: 'nombre' }, cliente ? `Nuevo estilo en ${cliente.nombre}`
-        : (cuantos ? 'Otro estilo' : 'Tu primer estilo')),
+      h('div', { clase: 'nombre' }, cliente ? `+ Nuevo estilo en ${cliente.nombre}`
+        : (cuantos ? '+ Otro estilo' : '+ Tu primer estilo')),
       h('div', { clase: 'pista' }, 'unas imágenes y cómo suena')));
+}
+
+/* «Traer un estilo» sale de la fila de mandos: es de los estilos. */
+function tarjetaTraerEstilo(ficha) {
+  return h('button', {
+    clase: 'ficha-estilo nuevo traer', title: 'Mover aquí un estilo de otro proyecto (con sus vídeos)',
+    onclick: () => traerEstiloACliente(ficha),
+  },
+    h('div', { clase: 'cuerpo' },
+      h('div', { clase: 'nombre' }, '⇄ Traer un estilo de otro proyecto'),
+      h('div', { clase: 'pista' }, 'lo mueve aquí con sus vídeos')));
 }
 
 /* Los vídeos hechos con este modo, del más reciente al más antiguo. Los sirve
@@ -7311,7 +7959,7 @@ async function apartarVideoLight(video) {
     await pedir(API.apartar(video.id), { method: 'DELETE' });
     if (videoLightGuardado() === video.id) recordarVideoLight('');
     await cargarGaleriaLight(true);
-    toast('vídeo apartado');
+    toast('vídeo apartado: está en la papelera');
   } catch (e) { toast(`no se ha podido apartar: ${e.message}`, true); }
 }
 
@@ -7329,26 +7977,6 @@ async function descartarTallerLight(taller) {
   } catch (e) {
     toast(`no se ha podido descartar: ${e.message}`, true);
   }
-}
-
-/* Los tres puntos. Va fuera del botón de la tarjeta —un botón dentro de otro no
-   es HTML válido y el clic acabaría eligiendo el estilo— y por eso la tarjeta es
-   un div con un botón grande dentro. */
-function menuDeEstilo(ficha) {
-  const menu = h('div', { clase: 'menu-estilo plegado' },
-    h('button', { clase: 'mini fantasma', onclick: () => duplicarEstiloLight(ficha) }, 'Duplicar'),
-    listaClientes().length ? h('button', { clase: 'mini fantasma', onclick: () => moverEstiloACliente(ficha) },
-      'Mover a otro proyecto') : null);
-  const puntos = h('button', {
-    clase: 'puntos', title: 'Más opciones',
-    onclick: ev => {
-      ev.stopPropagation();
-      const abierto = menu.classList.contains('plegado');
-      document.querySelectorAll('.menu-estilo').forEach(m => m.classList.add('plegado'));
-      menu.classList.toggle('plegado', !abierto);
-    },
-  }, '⋯');
-  return h('div', { clase: 'esquina' }, puntos, menu);
 }
 
 function editarEstiloLight(ficha) {
@@ -7926,6 +8554,11 @@ const BLOQUES_DEL_ENCARGO = [
     ? bloqueLight('El tipo de relato', 'cómo se cuenta en imágenes (opcional)', bloqueTipoRelatoLight(c.e))
     : bloqueLight('El tipo de relato', 'cómo se cuenta en imágenes: se aplica como corrección',
       bloqueTipoRelatoDelVideo())) },
+  // qué dibujan las imágenes (rama guion-visual): la voz o el guion
+  { id: 'imagenes', pinta: c => (c.nuevo
+    ? bloqueLight('Qué dibujan las imágenes', 'la voz o el guion visual (opcional)', bloqueImagenesLight(c.e, c.ficha))
+    : bloqueLight('Qué dibujan las imágenes', 'la voz o el guion visual: se aplica como corrección',
+      bloqueImagenesDelVideo())) },
   { id: 'reparto-sitios', pinta: c => (c.nuevo ? null
     : bloqueLight('El reparto y los sitios', 'quién sale y dónde ocurre, deducido del guion',
       bloquePedidoSitiosDelVideo())) },
@@ -7941,10 +8574,37 @@ const BLOQUES_EXTRA_DEL_PASO = {
   estilo: [],
   encargo: [],
   guion: [],
-  voz: [],
-  imagenes: [],
+  /* ANTES DE LA PRIMERA TANDA, en la Voz: el paso Imágenes sigue bloqueado
+     hasta que haya planos, y «Generar las imágenes» se pulsa desde aquí. Sin
+     esto, la imagen base y el guion visual que hay que aprobar ANTES de pagar
+     no se podían alcanzar (visto por el dueño, 23-10). */
+  voz: [c => (sinPlanosTodavia(c) ? bloqueBaseEnImagenes(c) : null),
+    c => (sinPlanosTodavia(c) ? editorGuionVisual() : null)],
+  // la imagen base del tipo de relato y el guion visual, a mano donde se generan los planos
+  imagenes: [c => bloqueBaseEnImagenes(c), c => editorGuionVisual()],
   video: [],
 };
+
+/* LA IMAGEN BASE, TAMBIÉN EN «IMÁGENES» (arreglo urgente, 22-10-2026). Con un
+   tipo de relato que edita, los planos no se generan sin la base (y la de cada
+   estado) aprobada, y el aviso mandaba a buscarla a otro paso. Aquí sale el
+   MISMO bloque del Encargo (`imagenBaseDelRelato`, sin tocarlo por dentro),
+   solo mientras falte algo por aprobar. Pintar no escribe nada (regla 1). */
+function bloqueBaseEnImagenes(c) {
+  if (!c.v || !c.v.pid) return null;
+  const est = relatoDelVideoLight();
+  if (!est.cargado || est.error) return null;
+  const f = est.ficha || {};
+  if (!f.edita || f.listo) return null;
+  return bloqueLight('La imagen base', 'apruébala antes de generar los planos: cada plano la edita',
+    imagenBaseDelRelato(est, !!trabajoVideoLight()));
+}
+
+/* Un vídeo con voz y sin ninguna tanda de imágenes todavía. */
+function sinPlanosTodavia(c) {
+  if (!c.v || !c.v.pid || !c.v.audio) return false;
+  return !versionDe((c.v.fichas || {}).assets || {});
+}
 
 function pintarBloquesExtraDelPaso(donde, paso) {
   (BLOQUES_EXTRA_DEL_PASO[paso] || []).forEach(pinta => {
@@ -8599,7 +9259,8 @@ const CAMBIA_RELATO = [
 const AYUDA_RELATO = {
   documental: 'El guion se reparte en sitios, como siempre.',
   espacio_que_cambia: 'Un solo sitio que se ve siempre igual; cada plano cambia solo lo que dice '
-    + 'la voz. Cada plano se genera EDITANDO una imagen base del sitio, que apruebas antes.',
+    + 'la voz (o, con «Lo que dice el guion», su línea del guion visual). Cada plano se genera '
+    + 'EDITANDO una imagen base del sitio, que apruebas antes.',
   recorrido: 'Varios ambientes de un mismo lugar, con la misma luz, materiales y estilo.',
   escenario_y_apoyos: 'Un sitio principal con sus secundarios (el espacio fijo de siempre).',
   producto: 'El producto manda y el fondo no se mueve: cada plano edita la imagen base del fondo.',
@@ -9022,6 +9683,8 @@ function opcionesParaCrear(e) {
   if (espacio) salida.espacio_fijo = espacio;
   const relato = tipoRelatoParaCrear(e);
   if (relato) salida.tipo_relato = relato;
+  const imagenes = imagenesParaCrear(e);
+  if (imagenes) Object.assign(salida, imagenes);
   return salida;
 }
 
@@ -16364,6 +17027,296 @@ function bloqueRelatoEstiloLight(ficha) {
   return caja;
 }
 
+/* ============================================ GUION VISUAL (rama guion-visual)
+   «Qué dibujan las imágenes»: lo que dice la voz (como siempre: no se guarda
+   nada) o lo que dice el guion. Con el guion, cada línea del guion visual es un
+   plano, y la frase de la voz no llega al dibujante: solo marca los tiempos.
+   Pintar no escribe nada (regla 1): el editor trabaja sobre una copia y solo
+   guarda al pulsar. */
+const MODOS_IMAGENES = [
+  { valor: '', nombre: 'Lo que dice la voz (por defecto)' },
+  { valor: 'guion', nombre: 'Lo que dice el guion' },
+];
+const AYUDA_IMAGENES = 'Lo que dice la voz: cada imagen ilustra su frase, como siempre. '
+  + 'Lo que dice el guion: cada imagen sigue su línea del guion visual (las líneas «Visual:» '
+  + 'de la Parrilla o un borrador de Claude que tú apruebas) y la voz solo marca los tiempos.';
+
+/* En un vídeo NUEVO: el borrador del Encargo (`e`), sin escribir nada al pintar. */
+function bloqueImagenesLight(e, ficha) {
+  const trae = (e.visuales || []).length;
+  const delEstilo = ((((ficha || {}).datos || {}).estilo || {}).imagenes === 'guion')
+    ? 'lo que dice el guion' : 'lo que dice la voz';
+  const opciones = [
+    { valor: '', nombre: `Lo que diga el estilo (${delEstilo})` },
+    { valor: 'voz', nombre: 'Lo que dice la voz' },
+    { valor: 'guion', nombre: 'Lo que dice el guion' },
+  ];
+  return h('div', { clase: 'guion-visual' },
+    campoSelect('Qué dibujan las imágenes', e.imagenes || '', opciones,
+      v => { e.imagenes = v; pintarLight(); },
+      AYUDA_IMAGENES + (trae ? ` El guion de la Parrilla trae ${trae} escena(s) con líneas «Visual:»: `
+        + 'se guardan con el vídeo y son el guion visual cuando las imágenes siguen el guion.' : '')));
+}
+
+function imagenesParaCrear(e) {
+  const salida = {};
+  if (['guion', 'voz'].includes(e.imagenes)) salida.imagenes = e.imagenes;
+  if ((e.visuales || []).length) salida.visuales = e.visuales.slice(0, 400);
+  return Object.keys(salida).length ? salida : null;
+}
+
+/* En un vídeo HECHO: la ficha del servidor y una copia del guion visual. */
+function gvDelVideoLight() {
+  const v = APP.light.video;
+  if (v.gv && v.gv.pid === v.pid) return v.gv;
+  const pid = v.pid;
+  v.gv = { pid, cargado: false, ficha: null, copia: [], tocado: false, ocupado: false, error: '' };
+  pedir(`${API.proyecto(pid)}/guion_visual`).then(d => {
+    const est = APP.light.video.gv;
+    if (!est || est.pid !== pid) return;
+    leerGvDelServidor(est, d);
+    pintarLight();
+  }).catch(err => {
+    const est = APP.light.video.gv;
+    if (!est || est.pid !== pid) return;
+    est.cargado = true;
+    est.error = err.message;
+    pintarLight();
+  });
+  return v.gv;
+}
+
+function leerGvDelServidor(est, d) {
+  est.cargado = true;
+  est.error = '';
+  est.ficha = d || {};
+  const planos = ((d || {}).guion_visual || {}).planos || [];
+  est.copia = planos.map(p => Object.assign({}, p));
+  est.tocado = false;
+}
+
+async function pedirGv(ruta, metodo, cuerpo, mensaje) {
+  const est = gvDelVideoLight();
+  est.ocupado = true;
+  pintarLight();
+  try {
+    const d = await pedir(`${API.proyecto(est.pid)}/guion_visual${ruta}`, { method: metodo, cuerpo: cuerpo || {} });
+    leerGvDelServidor(est, d);
+    if (mensaje) toast(mensaje);
+    if (d && d.trabajo_id) seguirTrabajoGv(d.trabajo_id, est.pid);
+    /* el estado del vídeo (obsoletos, coste, lo que impide dibujar) cambia
+       con el modo y la aprobación: se vuelve a leer */
+    if (ruta !== '') cargarVideoLight(est.pid).then(() => pintarLight()).catch(() => {});
+  } catch (err) {
+    est.error = err.message;
+  }
+  est.ocupado = false;
+  pintarLight();
+}
+
+function seguirTrabajoGv(trabajoId, pid) {
+  seguirTrabajo(CLAVE_VIDEO_LIGHT, trabajoId, async trabajo => {
+    if (['listo', 'error', 'cancelado'].includes(trabajo.estado)) {
+      const ahora = APP.light.video.gv;
+      if (ahora && ahora.pid === pid) APP.light.video.gv = null;
+    }
+    pintarLight();
+  }, () => refrescarVivosLight(), pid);
+}
+
+function bloqueImagenesDelVideo() {
+  const est = gvDelVideoLight();
+  if (!est.cargado) return h('div', { clase: 'cargando' }, 'cargando…');
+  const f = est.ficha || {};
+  const delEstilo = f.del_estilo === 'guion' ? 'lo que dice el guion' : 'lo que dice la voz';
+  const opciones = [
+    { valor: '', nombre: `Lo que diga el estilo (${delEstilo})` },
+    { valor: 'voz', nombre: 'Lo que dice la voz' },
+    { valor: 'guion', nombre: 'Lo que dice el guion' },
+  ];
+  const caja = h('div', { clase: 'guion-visual' },
+    h('div', { clase: 'meta' }, `Ahora: ${f.modo === 'guion' ? 'lo que dice el guion' : 'lo que dice la voz'}`),
+    campoSelect('Qué dibujan las imágenes', f.del_video || '', opciones,
+      v => pedirGv('/modo', 'PUT', { imagenes: v || null },
+        'guardado: no se dibuja nada; los planos que cambien se ofrecen para rehacer'),
+      AYUDA_IMAGENES));
+  if (f.modo === 'guion') {
+    caja.appendChild(h('div', { clase: 'pista' }, f.aprobado
+      ? '✓ El guion visual está aprobado: está en el paso Imágenes.'
+      : 'El guion visual se revisa y se aprueba en el paso Imágenes, antes de dibujar.'));
+  }
+  if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
+  return caja;
+}
+
+/* EL EDITOR, en el paso Imágenes (encima de la barra): solo en modo guion. */
+function editorGuionVisual() {
+  const v = APP.light.video;
+  if (!v || !v.pid) return null;
+  const est = gvDelVideoLight();
+  if (!est.cargado || (est.ficha || {}).modo !== 'guion') return null;
+  const f = est.ficha || {};
+  const corriendo = !!trabajoVideoLight();
+  const bloques = (f.bloques || []).map(b => ({ valor: b.id, nombre: `${b.id} · ${recortar(b.texto, 50)}` }));
+  const textoDe = {};
+  (f.bloques || []).forEach(b => { textoDe[b.id] = b.texto; });
+  const estados = [{ valor: '', nombre: 'la base (sin cambio)' }, ...(f.estados || []).map(e => ({ valor: e, nombre: e }))];
+  const caja = h('div', { clase: `guion-visual editor-gv${f.aprobado ? ' aprobado' : ''}` },
+    h('h3', {}, 'Guion visual'),
+    h('div', { clase: 'pista' }, 'Cada línea es un plano: lo que se VE, con su cámara y, si lo hay, '
+      + 'el estado del objeto que cambia. La voz de su bloque va al lado solo como referencia: '
+      + 'no llega al dibujante. Es solo texto: guardar, proponer o aprobar no paga imágenes.'));
+  if (!est.copia.length && (f.propuesta || []).length) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      `El guion de la Parrilla trae ${f.propuesta.length} línea(s) «Visual:», ya atadas a sus bloques.`,
+      h('div', { clase: 'fila' }, h('button', { clase: 'mini primario', disabled: est.ocupado || corriendo,
+        onclick: () => { est.copia = f.propuesta.map(p => Object.assign({}, p)); tocarGv(est); } },
+      'Usar estas líneas'))));
+  }
+  (f.avisos || []).forEach(a => caja.appendChild(h('div', { clase: 'meta' }, `⚠ ${a}`)));
+  if ((f.fuera_de_la_voz || []).length) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' }, `El guion cambió: los bloques ${f.fuera_de_la_voz.join(', ')} `
+      + 'ya no están en la voz. Corrige esos planos (o pide otro guion visual) y vuelve a aprobarlo.'));
+  }
+  const avisoDe = {};
+  (f.comprobacion || []).forEach(a => { avisoDe[a.plano] = a.que; });
+  est.copia.forEach((p, i) => {
+    const fila = h('div', { clase: 'plano-gv' },
+      h('div', { clase: 'plano-gv-cabeza' },
+        h('strong', {}, p.id || `nuevo ${i + 1}`),
+        h('span', { clase: 'meta' }, `voz: «${recortar(textoDe[p.bloque] || '', 90)}»`)),
+      campoSelect('Bloque de la voz', p.bloque || '', bloques, val => { p.bloque = val; tocarGv(est); pintarLight(); }),
+      h('label', {}, 'Qué se ve'),
+      h('textarea', { rows: 2, value: p.visual || '', datos: { foco: `gv-visual-${i}` },
+        oninput: ev => { p.visual = ev.target.value; tocarGv(est); } }),
+      h('label', {}, 'Cámara (opcional)'),
+      h('input', { type: 'text', value: p.camara || '', placeholder: 'plano general desde la puerta',
+        datos: { foco: `gv-camara-${i}` }, oninput: ev => { p.camara = ev.target.value; tocarGv(est); } }));
+    if ((f.estados || []).length) {
+      fila.appendChild(campoSelect('Estado del objeto', p.estado || '', estados,
+        val => { p.estado = val; tocarGv(est); }));
+    }
+    if (p.id && avisoDe[p.id]) fila.appendChild(h('div', { clase: 'caja-aviso' }, `Contradice lo fijo: ${avisoDe[p.id]}`));
+    fila.appendChild(h('div', { clase: 'fila' }, h('button', { clase: 'mini fantasma', disabled: est.ocupado,
+      onclick: () => { est.copia.splice(i, 1); tocarGv(est); } }, 'Quitar')));
+    caja.appendChild(fila);
+  });
+  const ultimo = est.copia.length ? est.copia[est.copia.length - 1].bloque : ((f.bloques || [])[0] || {}).id;
+  const fila = h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', disabled: est.ocupado || !bloques.length,
+      onclick: () => { est.copia.push({ bloque: ultimo || '', visual: '' }); tocarGv(est); } },
+    '+ Añadir plano'),
+    h('button', { clase: 'mini', disabled: est.ocupado || corriendo || !est.tocado,
+      onclick: () => pedirGv('', 'PUT', { planos: est.copia.filter(p => String(p.visual || '').trim()) },
+        'guion visual guardado (sin aprobar)') }, 'Guardar'),
+    h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
+      onclick: () => proponerGuionVisual(!!est.copia.length) }, 'Proponer con Claude · solo texto'));
+  if (est.copia.length) {
+    fila.appendChild(f.aprobado && !est.tocado
+      ? h('button', { clase: 'mini fantasma', disabled: est.ocupado || corriendo,
+        onclick: () => pedirGv('/aprobar', 'POST', { aprobado: false }, 'aprobación retirada') }, 'Retirar la aprobación')
+      : h('button', { clase: 'mini primario', disabled: est.ocupado || corriendo,
+        onclick: () => aprobarGuionVisual() }, 'Aprobar el guion visual'));
+  }
+  caja.appendChild(fila);
+  caja.appendChild(h('div', { clase: 'meta' }, f.aprobado
+    ? '✓ Aprobado: cada plano se dibuja desde su línea.'
+    : (est.tocado ? 'Hay cambios sin guardar.' : 'Sin aprobar: los planos no se dibujan hasta que lo apruebes.')));
+  if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
+  return caja;
+}
+
+/* Algo cambió en la copia: la primera vez se repinta (para que «Guardar» y
+   «Aprobar» digan la verdad); el foco sobrevive por su `data-foco`. */
+function tocarGv(est) {
+  const antes = est.tocado;
+  est.tocado = true;
+  if (!antes) pintarLight();
+}
+
+/* Aprobar lo que se VE: si hay cambios escritos, primero se guardan. */
+async function aprobarGuionVisual() {
+  const est = gvDelVideoLight();
+  if (est.tocado) {
+    await pedirGv('', 'PUT', { planos: est.copia.filter(p => String(p.visual || '').trim()) });
+    if (est.error) return;
+  }
+  await pedirGv('/aprobar', 'POST', { aprobado: true }, 'guion visual aprobado: ya se pueden dibujar los planos');
+}
+
+async function proponerGuionVisual(sustituye) {
+  if (sustituye && !confirm('Claude escribirá un guion visual nuevo leyendo el guion entero y sustituirá '
+    + 'al que hay (sin aprobar). Es solo texto: no se paga ninguna imagen.')) return;
+  const est = gvDelVideoLight();
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const d = await pedir(`${API.proyecto(est.pid)}/guion_visual/proponer`, { method: 'POST', cuerpo: {} });
+    seguirTrabajoGv(d.trabajo_id, est.pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
+}
+
+/* El defecto del ESTILO, en «Cómo se cuenta». Como el tipo de relato: sin
+   láminas no se ofrece (el servidor no guarda un estilo sin fotogramas). */
+const IMAGENES_LIGHT = { id: '', valor: null, cargando: false, estado: '', error: '' };
+
+async function cargarImagenesEstiloLight(id) {
+  Object.assign(IMAGENES_LIGHT, { id, valor: null, error: '', estado: '', cargando: true });
+  try {
+    const r = await pedir(`${API.presetLight(id)}/imagenes`);
+    if (IMAGENES_LIGHT.id === id) IMAGENES_LIGHT.valor = r.imagenes || '';
+  } catch (err) {
+    if (IMAGENES_LIGHT.id === id) IMAGENES_LIGHT.error = err.message;
+  }
+  IMAGENES_LIGHT.cargando = false;
+  pintarLight();
+}
+
+async function guardarImagenesEstiloLight(valor) {
+  const id = IMAGENES_LIGHT.id;
+  IMAGENES_LIGHT.valor = valor;
+  IMAGENES_LIGHT.estado = 'guardando…';
+  pintarLight();
+  try {
+    const r = await pedir(`${API.presetLight(id)}/imagenes`, { method: 'PUT', cuerpo: { imagenes: valor || null } });
+    if (IMAGENES_LIGHT.id === id) IMAGENES_LIGHT.estado = r.cambiado ? 'guardado ✓' : 'sin cambios';
+  } catch (err) {
+    if (IMAGENES_LIGHT.id === id) IMAGENES_LIGHT.estado = `no se ha podido guardar: ${err.message}`;
+  }
+  pintarLight();
+}
+
+function bloqueImagenesEstiloLight(ficha) {
+  const caja = h('div', {});
+  if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Primero genera el estilo gráfico (las láminas); después podrás elegir qué dibujan sus imágenes.'));
+    return caja;
+  }
+  if (IMAGENES_LIGHT.id !== ficha.id) {
+    setTimeout(() => cargarImagenesEstiloLight(ficha.id), 0);
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+    return caja;
+  }
+  if (IMAGENES_LIGHT.error) {
+    caja.appendChild(cajaError(IMAGENES_LIGHT.error));
+    return caja;
+  }
+  if (IMAGENES_LIGHT.cargando || IMAGENES_LIGHT.valor === null) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+    return caja;
+  }
+  caja.appendChild(campoSelect('Qué dibujan las imágenes', IMAGENES_LIGHT.valor, MODOS_IMAGENES,
+    v => guardarImagenesEstiloLight(v), AYUDA_IMAGENES));
+  caja.appendChild(h('div', { clase: 'pista' }, 'Es el punto de partida de los vídeos nuevos de este '
+    + 'estilo; cada vídeo puede cambiarlo en su Encargo, y el del vídeo manda.'));
+  if (IMAGENES_LIGHT.estado) caja.appendChild(h('div', { clase: 'meta' }, IMAGENES_LIGHT.estado));
+  return caja;
+}
+
 function bloqueReglasLight(ficha) {
   const caja = h('div', {});
   if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
@@ -16558,6 +17511,8 @@ function vistaPresetLight() {
   paneles.cuenta = h('div', {},
     bloqueLight('🧭 Tipo de relato', 'cómo se cuentan por defecto los vídeos de este estilo',
       bloqueRelatoEstiloLight(ficha)),
+    bloqueLight('🎬 Qué dibujan las imágenes', 'la voz o el guion visual, por defecto en sus vídeos',
+      bloqueImagenesEstiloLight(ficha)),
     bloqueLight('🗣️ Tono del guion', 'cómo se cuenta, nunca de qué', tono));
 
   // ⏱️ el ritmo: se cambia y ya, no rehace nada
@@ -29084,6 +30039,9 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   e.espacio_fijo = espacioFijoDelEncargo(r.espacio_fijo);
   /* y el tipo de relato, si el guion lo trae («Tipo de relato:»); si no, sin elegir */
   e.tipo_relato = tipoRelatoDelEncargo(r.tipo_relato);
+  /* qué dibujan las imágenes y las líneas «Visual:» (rama guion-visual) */
+  e.imagenes = ['guion', 'voz'].includes(r.imagenes) ? r.imagenes : '';
+  e.visuales = Array.isArray(r.visuales) ? r.visuales : [];
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.fichaAbierta = false;
   PAR.datos = null;

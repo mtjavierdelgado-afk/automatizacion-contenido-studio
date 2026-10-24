@@ -3218,6 +3218,8 @@ textarea.autoalto, textarea.crece.autoalto { max-height: 60vh; overflow-y: auto;
 }
 .error-cerrable { position: relative; }
 .error-cerrable > .mini { position: absolute; top: 8px; right: 8px; }
+/* el texto no pasa por debajo del «Cerrar» (notas del dueño, 24-10: lo pisaba) */
+.error-cerrable > .caja-error { padding-right: 88px; }
 .papel-efecto { display: flex; flex-direction: column; gap: 6px; padding: 8px 0;
   border-bottom: 1px solid var(--linea-suave); }
 .papel-efecto audio, .tema-musica audio { max-width: 100%; height: 32px; }

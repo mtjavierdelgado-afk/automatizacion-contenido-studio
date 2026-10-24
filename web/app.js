@@ -14266,27 +14266,43 @@ function botonRenderizarLight() {
   const corriendo = !!trabajoVideoLight();
   /* CON NOTAS SIN APLICAR, ESTE BOTON HACE MENOS que el de al lado: «Aplicar»
      reparte las notas, redibuja lo que toquen y DESPUES monta; esto solo monta,
-     o sea que gasta el render entero para dejarte el video sin tus notas. Es la
-     misma regla que en la pantalla del video. Apagado y con el motivo puesto,
-     no escondido: desaparecer no explica nada. */
+     con las imágenes como están. Antes se apagaba; ahora se puede (notas del
+     dueño, 24-10-2026: «que se me permita montar aunque el revisor pida
+     rehacer imágenes»), en secundario y PREGUNTANDO antes: las notas se quedan
+     apuntadas para aplicarlas cuando quieras. */
   const notasSinAplicar = estadoRepaso().pendientes > 0;
   return conAyuda(
     notasSinAplicar
-      ? 'Tienes notas del repaso sin aplicar. Esto solo montaría el MP4 y '
-        + 'saldría sin ellas. Usa «Aplicar», que aplica y monta de una vez.'
+      ? 'Tienes notas del repaso (o del revisor) sin aplicar. Esto monta el MP4 con '
+        + 'las imágenes como están ahora; las notas se quedan apuntadas y las '
+        + 'puedes aplicar después con «Aplicar».'
       : unirAyuda('Encadena los planos que acabas de mirar, con sus transiciones, '
         + 'la voz y la música, y saca el MP4. No genera ninguna imagen: no cuesta '
         + 'dinero, cuesta tiempo de máquina.', textoDelPlan('render')),
     h('button', {
       clase: notasSinAplicar ? 'secundario-barra' : 'primario principal',
-      disabled: corriendo || notasSinAplicar,
+      disabled: corriendo,
       onclick: () => {
+        if (notasSinAplicar && !confirmarMontarConNotas()) return;
         pararPrevia();
         videoAbierto().vista = 'video';
         repintarVideo();
         montarElVideoLight();
       },
     }, `Montar el vídeo${precioDeMontarLight()}`));
+}
+
+/* Montar con notas sin aplicar: se pregunta, diciendo cuántas son del
+   revisor, y las notas se quedan para después (no se borra ninguna). */
+function confirmarMontarConNotas() {
+  const notas = (estadoRepaso().notas || []).filter(n => n.estado !== 'aplicado');
+  const n = notas.length || estadoRepaso().pendientes || 0;
+  if (!n) return true;
+  const delRevisor = notas.filter(x => x.autor === 'revisor').length;
+  return window.confirm(`Quedan ${n} ${n === 1 ? 'nota' : 'notas'} sin aplicar`
+    + (delRevisor ? ` (${delRevisor} del revisor de imágenes)` : '')
+    + '. Se monta el vídeo con las imágenes como están ahora: las notas se quedan '
+    + 'apuntadas y las puedes aplicar después. ¿Montar así?');
 }
 
 /* LAS FLECHAS DEL TECLADO. Pasar de escena es el gesto que se repite
@@ -14475,9 +14491,16 @@ function barraDelVideo() {
   const pend = notasSinAplicarDe('video');
   const plan = textoDelPlan('render');
   if (pend && hayMp4Light()) {
+    /* y si el vídeo quedó viejo, montarlo tal cual también se puede, en
+       secundario y preguntando (notas del dueño, 24-10-2026) */
+    const montar = botonRenderizarLight();
+    if (montar) {
+      const b = montar.tagName === 'BUTTON' ? montar : montar.querySelector('button');
+      if (b) b.className = 'secundario-barra';
+    }
     return barraDeAccion({ estado: { e: 'aviso', texto: `${pend} ${pend === 1 ? 'nota' : 'notas'} sin aplicar` },
       plan: 'se aplica lo más barato que resuelva cada nota, y se monta',
-      botones: [botonAplicarRepaso()] });
+      botones: [...(montar ? [montar] : []), botonAplicarRepaso()] });
   }
   const cambios = cambiosDelMontaje();
   const coste = ((((v.planes || {}).render) || {}).coste) || {};

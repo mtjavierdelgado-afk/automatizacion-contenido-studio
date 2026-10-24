@@ -11110,14 +11110,24 @@ function filaCoste(que, cuantas, usd, nota) {
 function tablaDeGasto(d, incluirEstilo) {
   const img = d.imagenes || {};
   const voz = d.voz || {};
+  /* POR TIPO DE IMAGEN (notas del dueño, 24-10-2026): las del vídeo (planos
+     nuevos y rehechos), la imagen base del tipo de relato con sus estados, las
+     referencias del reparto y las portadas, cada una en su fila. */
   const filas = [
-    filaCoste('Imágenes nuevas', `${(img.nuevas || {}).cuantas || 0}`, (img.nuevas || {}).usd || 0,
-      'una por plano'),
-    filaCoste('Imágenes rehechas', `${(img.rehechas || {}).cuantas || 0}`, (img.rehechas || {}).usd || 0,
-      'notas, «Desde cero», regenerar'),
-    filaCoste('Personajes (hojas del reparto)', `${(img.personajes || {}).cuantas || 0}`,
-      (img.personajes || {}).usd || 0, ''),
+    filaCoste('Planos del vídeo: nuevos', `${(img.nuevas || {}).cuantas || 0}`, (img.nuevas || {}).usd || 0,
+      'una por plano, la primera vez'),
+    filaCoste('Planos del vídeo: rehechos', `${(img.rehechas || {}).cuantas || 0}`, (img.rehechas || {}).usd || 0,
+      'notas, revisor, «Desde cero», regenerar'),
   ];
+  if ((img.base || {}).cuantas) {
+    filas.push(filaCoste('Tipo de relato: imagen base y estados', `${img.base.cuantas}`, img.base.usd || 0,
+      'el sitio y cada estado, también las «Otra»'));
+  }
+  filas.push(filaCoste('Referencias: hojas del reparto', `${(img.personajes || {}).cuantas || 0}`,
+    (img.personajes || {}).usd || 0, 'personajes, mapas y cabeceras'));
+  if ((img.portadas || {}).cuantas) {
+    filas.push(filaCoste('Portadas', `${img.portadas.cuantas}`, img.portadas.usd || 0, 'dibujadas con IA en Publicar'));
+  }
   if ((img.otras || {}).cuantas) {
     filas.push(filaCoste('Otras imágenes', `${img.otras.cuantas}`, img.otras.usd || 0, 'láminas, pruebas'));
   }

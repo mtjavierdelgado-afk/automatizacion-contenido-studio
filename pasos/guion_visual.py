@@ -222,7 +222,11 @@ def efectivo(params, bloques):
 # ------------------------------------------------------------ casar con el guion
 
 def _palabras(texto):
-    return [w for w in re.findall(r"[a-z0-9ñ]+", _llano(texto)) if len(w) > 2]
+    # sin las marcas de la voz (<break time=.../>, <spell>…): sus palabras
+    # («break», «time») casarian bloques que no tienen nada que ver, y el texto
+    # del guion (la pantalla) y el de la voz (p6) tienen que casar IGUAL
+    sin_marcas = re.sub(r"<[^>]*>", " ", str(texto or ""))
+    return [w for w in re.findall(r"[a-z0-9ñ]+", _llano(sin_marcas)) if len(w) > 2]
 
 
 def casar(visuales, bloques):

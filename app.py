@@ -16499,7 +16499,8 @@ def _planos_previstos(ctx):
                                                    _bloques_del_guion(ctx))
     except Exception:                                       # noqa: BLE001
         lineas = None
-    if lineas:
+    if lineas and not _guion_visual().fuera_de_la_voz(
+            lineas, [b["id"] for b in _bloques_del_guion(ctx)]):
         return {"total": len(lineas), "con_imagen": len(lineas),
                 "origen": "el guion visual aprobado"}
     plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}

@@ -240,6 +240,10 @@ def prueba_la_voz_no_se_cuela():
     aprobado = {"imagenes": "guion", "guion_visual": {**guardado["guion_visual"], "aprobado": True}}
     igual(G.efectivo(aprobado, bloques)[1], "aprobado", "aprobado a mano: lo aprobado")
     igual(G.efectivo({}, bloques), (None, ""), "sin nada guardado, nada (regla 1)")
+    con_marcas = [{"id": "B001", "texto": 'La batiente choca con el inodoro.<break time="1s"/>'},
+                  {"id": "B002", "texto": 'Una corrediza <spell>se</spell> desliza por un riel.'}]
+    igual(G.efectivo(base, con_marcas), G.efectivo(base, bloques),
+          "las marcas de la voz no cambian cómo casan (pantalla y p6 casan igual)")
 
 
 def main():

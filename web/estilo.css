@@ -5058,3 +5058,13 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
   .icono-origen { font-size: 18px; }
   .coste-origen { font-size: 10.5px; padding: 1px 7px; }
 }
+
+/* ============================================ GUION VISUAL (rama guion-visual) */
+.guion-visual { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.editor-gv { padding: 12px; border: 1px solid var(--linea); border-radius: 10px; margin-top: 10px; }
+.editor-gv.aprobado { border-color: var(--ok-borde); }
+.plano-gv { display: flex; flex-direction: column; gap: 4px; padding: 8px; border: 1px solid var(--linea);
+  border-radius: 8px; min-width: 0; }
+.plano-gv textarea, .plano-gv input[type="text"] { width: 100%; box-sizing: border-box; }
+.plano-gv-cabeza { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; min-width: 0; }
+.plano-gv-cabeza .meta { overflow-wrap: anywhere; }

@@ -336,6 +336,16 @@ lo que cambies deja el guion obsoleto: la barra ofrece **Regenerar el guion**.
   coste antes). Los planos de ese estado editan su imagen, así que el objeto
   sale igual en todos. Sin la base y sus estados aprobados no se paga ningún
   plano que los edite.
+- **Qué dibujan las imágenes** (opcional): **lo que dice la voz** (por defecto:
+  cada imagen ilustra su frase) o **lo que dice el guion**: cada imagen sigue su
+  línea del **guion visual** y la voz solo marca los tiempos. El guion visual
+  sale de las líneas «Visual:» de la Parrilla o de «Proponer con Claude», y se
+  revisa y se aprueba en el paso **Imágenes** (bloque «Guion visual»): por plano,
+  el bloque de la voz durante el que se ve, qué se ve, la cámara y, en «Un
+  espacio que cambia», el estado del objeto. Sin aprobar no se dibuja nada. Al
+  aprobar, Claude avisa de los planos que contradicen lo fijo (el sitio, el
+  reparto, los estados): manda lo fijo. Quién manda: el vídeo, luego el estilo
+  («🎬 Qué dibujan las imágenes» en «Cómo se cuenta»), luego la voz.
 - **El reparto y los sitios** (en un vídeo hecho): «Pedido para el reparto de
   sitios» es una frase para Claude al repartir; «Volver a repartir con este
   pedido» no paga imágenes.

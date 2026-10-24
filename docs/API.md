@@ -148,6 +148,11 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/proyectos/{pid}/guion/bloques/{bid}` | Quita un bloque AÑADIDO a mano. Los del guion original no se quitan. |
 | `POST` | `/api/proyectos/{pid}/guion/bloques/{bid}/partir` | Parte un bloque: {trozos: [texto, texto, ...]}. El primero se queda en el. |
 | `POST` | `/api/proyectos/{pid}/guion/pausas/quitar` | Quita las pausas largas de unos bloques: {bloques: [ids]} o {sobrantes: true}. |
+| `GET` | `/api/proyectos/{pid}/guion_visual` | Qué dibujan las imágenes de un vídeo, su guion visual y lo que hay que revisar. |
+| `PUT` | `/api/proyectos/{pid}/guion_visual` | {planos: [{bloque, visual, camara?, estado?, personajes?}]}: el guion visual |
+| `POST` | `/api/proyectos/{pid}/guion_visual/aprobar` | {aprobado: true|false}. Aprobar lanza también la comprobación contra lo |
+| `PUT` | `/api/proyectos/{pid}/guion_visual/modo` | {imagenes: "guion" | "voz" | null}: qué dibujan las imágenes de ESTE vídeo. |
+| `POST` | `/api/proyectos/{pid}/guion_visual/proponer` | Claude escribe el guion visual leyendo el guion entero (solo texto, no se |
 
 ## Voz
 
@@ -278,6 +283,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/presets-light/{preset_id}/coste` | Lo que costo hacer este estilo (su taller), desglosado. |
 | `PUT` | `/api/presets-light/{preset_id}/dominio` | Fija el negocio de un estilo: {dominio: "estadoplay" | "general" | null}. |
 | `POST` | `/api/presets-light/{preset_id}/duplicar` | Una copia del estilo, con su taller. |
+| `GET` | `/api/presets-light/{preset_id}/imagenes` | Qué dibujan por defecto las imágenes de los vídeos de un estilo. |
+| `PUT` | `/api/presets-light/{preset_id}/imagenes` | {imagenes: "guion" | null}: el defecto de los vídeos NUEVOS de este estilo. |
 | `GET` | `/api/presets-light/{preset_id}/laminas` | Las laminas de un estilo, limpias y con lo que ensena cada una. |
 | `POST` | `/api/presets-light/{preset_id}/laminas` | Una accion sobre las laminas de un estilo. |
 | `GET` | `/api/presets-light/{preset_id}/laminas/{lamina}/imagen` | Una lamina LIMPIA, sin texto encima: la que va en la hoja de cada plano. |
@@ -480,4 +487,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**365 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**372 endpoints.** Escrito por `generar_api.py` desde `app.py`.

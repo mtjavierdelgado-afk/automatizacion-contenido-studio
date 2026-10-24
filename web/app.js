@@ -8550,6 +8550,11 @@ const BLOQUES_DEL_ENCARGO = [
     ? bloqueLight('El tipo de relato', 'cómo se cuenta en imágenes (opcional)', bloqueTipoRelatoLight(c.e))
     : bloqueLight('El tipo de relato', 'cómo se cuenta en imágenes: se aplica como corrección',
       bloqueTipoRelatoDelVideo())) },
+  // qué dibujan las imágenes (rama guion-visual): la voz o el guion
+  { id: 'imagenes', pinta: c => (c.nuevo
+    ? bloqueLight('Qué dibujan las imágenes', 'la voz o el guion visual (opcional)', bloqueImagenesLight(c.e, c.ficha))
+    : bloqueLight('Qué dibujan las imágenes', 'la voz o el guion visual: se aplica como corrección',
+      bloqueImagenesDelVideo())) },
   { id: 'reparto-sitios', pinta: c => (c.nuevo ? null
     : bloqueLight('El reparto y los sitios', 'quién sale y dónde ocurre, deducido del guion',
       bloquePedidoSitiosDelVideo())) },
@@ -8565,9 +8570,14 @@ const BLOQUES_EXTRA_DEL_PASO = {
   estilo: [],
   encargo: [],
   guion: [],
-  voz: [],
-  // la imagen base del tipo de relato, a mano donde se generan los planos (22-10)
-  imagenes: [c => bloqueBaseEnImagenes(c)],
+  /* ANTES DE LA PRIMERA TANDA, en la Voz: el paso Imágenes sigue bloqueado
+     hasta que haya planos, y «Generar las imágenes» se pulsa desde aquí. Sin
+     esto, la imagen base y el guion visual que hay que aprobar ANTES de pagar
+     no se podían alcanzar (visto por el dueño, 23-10). */
+  voz: [c => (sinPlanosTodavia(c) ? bloqueBaseEnImagenes(c) : null),
+    c => (sinPlanosTodavia(c) ? editorGuionVisual() : null)],
+  // la imagen base del tipo de relato y el guion visual, a mano donde se generan los planos
+  imagenes: [c => bloqueBaseEnImagenes(c), c => editorGuionVisual()],
   video: [],
 };
 
@@ -8584,6 +8594,12 @@ function bloqueBaseEnImagenes(c) {
   if (!f.edita || f.listo) return null;
   return bloqueLight('La imagen base', 'apruébala antes de generar los planos: cada plano la edita',
     imagenBaseDelRelato(est, !!trabajoVideoLight()));
+}
+
+/* Un vídeo con voz y sin ninguna tanda de imágenes todavía. */
+function sinPlanosTodavia(c) {
+  if (!c.v || !c.v.pid || !c.v.audio) return false;
+  return !versionDe((c.v.fichas || {}).assets || {});
 }
 
 function pintarBloquesExtraDelPaso(donde, paso) {
@@ -9239,7 +9255,8 @@ const CAMBIA_RELATO = [
 const AYUDA_RELATO = {
   documental: 'El guion se reparte en sitios, como siempre.',
   espacio_que_cambia: 'Un solo sitio que se ve siempre igual; cada plano cambia solo lo que dice '
-    + 'la voz. Cada plano se genera EDITANDO una imagen base del sitio, que apruebas antes.',
+    + 'la voz (o, con «Lo que dice el guion», su línea del guion visual). Cada plano se genera '
+    + 'EDITANDO una imagen base del sitio, que apruebas antes.',
   recorrido: 'Varios ambientes de un mismo lugar, con la misma luz, materiales y estilo.',
   escenario_y_apoyos: 'Un sitio principal con sus secundarios (el espacio fijo de siempre).',
   producto: 'El producto manda y el fondo no se mueve: cada plano edita la imagen base del fondo.',
@@ -9662,6 +9679,8 @@ function opcionesParaCrear(e) {
   if (espacio) salida.espacio_fijo = espacio;
   const relato = tipoRelatoParaCrear(e);
   if (relato) salida.tipo_relato = relato;
+  const imagenes = imagenesParaCrear(e);
+  if (imagenes) Object.assign(salida, imagenes);
   return salida;
 }
 
@@ -17004,6 +17023,296 @@ function bloqueRelatoEstiloLight(ficha) {
   return caja;
 }
 
+/* ============================================ GUION VISUAL (rama guion-visual)
+   «Qué dibujan las imágenes»: lo que dice la voz (como siempre: no se guarda
+   nada) o lo que dice el guion. Con el guion, cada línea del guion visual es un
+   plano, y la frase de la voz no llega al dibujante: solo marca los tiempos.
+   Pintar no escribe nada (regla 1): el editor trabaja sobre una copia y solo
+   guarda al pulsar. */
+const MODOS_IMAGENES = [
+  { valor: '', nombre: 'Lo que dice la voz (por defecto)' },
+  { valor: 'guion', nombre: 'Lo que dice el guion' },
+];
+const AYUDA_IMAGENES = 'Lo que dice la voz: cada imagen ilustra su frase, como siempre. '
+  + 'Lo que dice el guion: cada imagen sigue su línea del guion visual (las líneas «Visual:» '
+  + 'de la Parrilla o un borrador de Claude que tú apruebas) y la voz solo marca los tiempos.';
+
+/* En un vídeo NUEVO: el borrador del Encargo (`e`), sin escribir nada al pintar. */
+function bloqueImagenesLight(e, ficha) {
+  const trae = (e.visuales || []).length;
+  const delEstilo = ((((ficha || {}).datos || {}).estilo || {}).imagenes === 'guion')
+    ? 'lo que dice el guion' : 'lo que dice la voz';
+  const opciones = [
+    { valor: '', nombre: `Lo que diga el estilo (${delEstilo})` },
+    { valor: 'voz', nombre: 'Lo que dice la voz' },
+    { valor: 'guion', nombre: 'Lo que dice el guion' },
+  ];
+  return h('div', { clase: 'guion-visual' },
+    campoSelect('Qué dibujan las imágenes', e.imagenes || '', opciones,
+      v => { e.imagenes = v; pintarLight(); },
+      AYUDA_IMAGENES + (trae ? ` El guion de la Parrilla trae ${trae} escena(s) con líneas «Visual:»: `
+        + 'se guardan con el vídeo y son el guion visual cuando las imágenes siguen el guion.' : '')));
+}
+
+function imagenesParaCrear(e) {
+  const salida = {};
+  if (['guion', 'voz'].includes(e.imagenes)) salida.imagenes = e.imagenes;
+  if ((e.visuales || []).length) salida.visuales = e.visuales.slice(0, 400);
+  return Object.keys(salida).length ? salida : null;
+}
+
+/* En un vídeo HECHO: la ficha del servidor y una copia del guion visual. */
+function gvDelVideoLight() {
+  const v = APP.light.video;
+  if (v.gv && v.gv.pid === v.pid) return v.gv;
+  const pid = v.pid;
+  v.gv = { pid, cargado: false, ficha: null, copia: [], tocado: false, ocupado: false, error: '' };
+  pedir(`${API.proyecto(pid)}/guion_visual`).then(d => {
+    const est = APP.light.video.gv;
+    if (!est || est.pid !== pid) return;
+    leerGvDelServidor(est, d);
+    pintarLight();
+  }).catch(err => {
+    const est = APP.light.video.gv;
+    if (!est || est.pid !== pid) return;
+    est.cargado = true;
+    est.error = err.message;
+    pintarLight();
+  });
+  return v.gv;
+}
+
+function leerGvDelServidor(est, d) {
+  est.cargado = true;
+  est.error = '';
+  est.ficha = d || {};
+  const planos = ((d || {}).guion_visual || {}).planos || [];
+  est.copia = planos.map(p => Object.assign({}, p));
+  est.tocado = false;
+}
+
+async function pedirGv(ruta, metodo, cuerpo, mensaje) {
+  const est = gvDelVideoLight();
+  est.ocupado = true;
+  pintarLight();
+  try {
+    const d = await pedir(`${API.proyecto(est.pid)}/guion_visual${ruta}`, { method: metodo, cuerpo: cuerpo || {} });
+    leerGvDelServidor(est, d);
+    if (mensaje) toast(mensaje);
+    if (d && d.trabajo_id) seguirTrabajoGv(d.trabajo_id, est.pid);
+    /* el estado del vídeo (obsoletos, coste, lo que impide dibujar) cambia
+       con el modo y la aprobación: se vuelve a leer */
+    if (ruta !== '') cargarVideoLight(est.pid).then(() => pintarLight()).catch(() => {});
+  } catch (err) {
+    est.error = err.message;
+  }
+  est.ocupado = false;
+  pintarLight();
+}
+
+function seguirTrabajoGv(trabajoId, pid) {
+  seguirTrabajo(CLAVE_VIDEO_LIGHT, trabajoId, async trabajo => {
+    if (['listo', 'error', 'cancelado'].includes(trabajo.estado)) {
+      const ahora = APP.light.video.gv;
+      if (ahora && ahora.pid === pid) APP.light.video.gv = null;
+    }
+    pintarLight();
+  }, () => refrescarVivosLight(), pid);
+}
+
+function bloqueImagenesDelVideo() {
+  const est = gvDelVideoLight();
+  if (!est.cargado) return h('div', { clase: 'cargando' }, 'cargando…');
+  const f = est.ficha || {};
+  const delEstilo = f.del_estilo === 'guion' ? 'lo que dice el guion' : 'lo que dice la voz';
+  const opciones = [
+    { valor: '', nombre: `Lo que diga el estilo (${delEstilo})` },
+    { valor: 'voz', nombre: 'Lo que dice la voz' },
+    { valor: 'guion', nombre: 'Lo que dice el guion' },
+  ];
+  const caja = h('div', { clase: 'guion-visual' },
+    h('div', { clase: 'meta' }, `Ahora: ${f.modo === 'guion' ? 'lo que dice el guion' : 'lo que dice la voz'}`),
+    campoSelect('Qué dibujan las imágenes', f.del_video || '', opciones,
+      v => pedirGv('/modo', 'PUT', { imagenes: v || null },
+        'guardado: no se dibuja nada; los planos que cambien se ofrecen para rehacer'),
+      AYUDA_IMAGENES));
+  if (f.modo === 'guion') {
+    caja.appendChild(h('div', { clase: 'pista' }, f.aprobado
+      ? '✓ El guion visual está aprobado: está en el paso Imágenes.'
+      : 'El guion visual se revisa y se aprueba en el paso Imágenes, antes de dibujar.'));
+  }
+  if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
+  return caja;
+}
+
+/* EL EDITOR, en el paso Imágenes (encima de la barra): solo en modo guion. */
+function editorGuionVisual() {
+  const v = APP.light.video;
+  if (!v || !v.pid) return null;
+  const est = gvDelVideoLight();
+  if (!est.cargado || (est.ficha || {}).modo !== 'guion') return null;
+  const f = est.ficha || {};
+  const corriendo = !!trabajoVideoLight();
+  const bloques = (f.bloques || []).map(b => ({ valor: b.id, nombre: `${b.id} · ${recortar(b.texto, 50)}` }));
+  const textoDe = {};
+  (f.bloques || []).forEach(b => { textoDe[b.id] = b.texto; });
+  const estados = [{ valor: '', nombre: 'la base (sin cambio)' }, ...(f.estados || []).map(e => ({ valor: e, nombre: e }))];
+  const caja = h('div', { clase: `guion-visual editor-gv${f.aprobado ? ' aprobado' : ''}` },
+    h('h3', {}, 'Guion visual'),
+    h('div', { clase: 'pista' }, 'Cada línea es un plano: lo que se VE, con su cámara y, si lo hay, '
+      + 'el estado del objeto que cambia. La voz de su bloque va al lado solo como referencia: '
+      + 'no llega al dibujante. Es solo texto: guardar, proponer o aprobar no paga imágenes.'));
+  if (!est.copia.length && (f.propuesta || []).length) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' },
+      `El guion de la Parrilla trae ${f.propuesta.length} línea(s) «Visual:», ya atadas a sus bloques.`,
+      h('div', { clase: 'fila' }, h('button', { clase: 'mini primario', disabled: est.ocupado || corriendo,
+        onclick: () => { est.copia = f.propuesta.map(p => Object.assign({}, p)); tocarGv(est); } },
+      'Usar estas líneas'))));
+  }
+  (f.avisos || []).forEach(a => caja.appendChild(h('div', { clase: 'meta' }, `⚠ ${a}`)));
+  if ((f.fuera_de_la_voz || []).length) {
+    caja.appendChild(h('div', { clase: 'caja-aviso' }, `El guion cambió: los bloques ${f.fuera_de_la_voz.join(', ')} `
+      + 'ya no están en la voz. Corrige esos planos (o pide otro guion visual) y vuelve a aprobarlo.'));
+  }
+  const avisoDe = {};
+  (f.comprobacion || []).forEach(a => { avisoDe[a.plano] = a.que; });
+  est.copia.forEach((p, i) => {
+    const fila = h('div', { clase: 'plano-gv' },
+      h('div', { clase: 'plano-gv-cabeza' },
+        h('strong', {}, p.id || `nuevo ${i + 1}`),
+        h('span', { clase: 'meta' }, `voz: «${recortar(textoDe[p.bloque] || '', 90)}»`)),
+      campoSelect('Bloque de la voz', p.bloque || '', bloques, val => { p.bloque = val; tocarGv(est); pintarLight(); }),
+      h('label', {}, 'Qué se ve'),
+      h('textarea', { rows: 2, value: p.visual || '', datos: { foco: `gv-visual-${i}` },
+        oninput: ev => { p.visual = ev.target.value; tocarGv(est); } }),
+      h('label', {}, 'Cámara (opcional)'),
+      h('input', { type: 'text', value: p.camara || '', placeholder: 'plano general desde la puerta',
+        datos: { foco: `gv-camara-${i}` }, oninput: ev => { p.camara = ev.target.value; tocarGv(est); } }));
+    if ((f.estados || []).length) {
+      fila.appendChild(campoSelect('Estado del objeto', p.estado || '', estados,
+        val => { p.estado = val; tocarGv(est); }));
+    }
+    if (p.id && avisoDe[p.id]) fila.appendChild(h('div', { clase: 'caja-aviso' }, `Contradice lo fijo: ${avisoDe[p.id]}`));
+    fila.appendChild(h('div', { clase: 'fila' }, h('button', { clase: 'mini fantasma', disabled: est.ocupado,
+      onclick: () => { est.copia.splice(i, 1); tocarGv(est); } }, 'Quitar')));
+    caja.appendChild(fila);
+  });
+  const ultimo = est.copia.length ? est.copia[est.copia.length - 1].bloque : ((f.bloques || [])[0] || {}).id;
+  const fila = h('div', { clase: 'fila' },
+    h('button', { clase: 'mini', disabled: est.ocupado || !bloques.length,
+      onclick: () => { est.copia.push({ bloque: ultimo || '', visual: '' }); tocarGv(est); } },
+    '+ Añadir plano'),
+    h('button', { clase: 'mini', disabled: est.ocupado || corriendo || !est.tocado,
+      onclick: () => pedirGv('', 'PUT', { planos: est.copia.filter(p => String(p.visual || '').trim()) },
+        'guion visual guardado (sin aprobar)') }, 'Guardar'),
+    h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
+      onclick: () => proponerGuionVisual(!!est.copia.length) }, 'Proponer con Claude · solo texto'));
+  if (est.copia.length) {
+    fila.appendChild(f.aprobado && !est.tocado
+      ? h('button', { clase: 'mini fantasma', disabled: est.ocupado || corriendo,
+        onclick: () => pedirGv('/aprobar', 'POST', { aprobado: false }, 'aprobación retirada') }, 'Retirar la aprobación')
+      : h('button', { clase: 'mini primario', disabled: est.ocupado || corriendo,
+        onclick: () => aprobarGuionVisual() }, 'Aprobar el guion visual'));
+  }
+  caja.appendChild(fila);
+  caja.appendChild(h('div', { clase: 'meta' }, f.aprobado
+    ? '✓ Aprobado: cada plano se dibuja desde su línea.'
+    : (est.tocado ? 'Hay cambios sin guardar.' : 'Sin aprobar: los planos no se dibujan hasta que lo apruebes.')));
+  if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
+  return caja;
+}
+
+/* Algo cambió en la copia: la primera vez se repinta (para que «Guardar» y
+   «Aprobar» digan la verdad); el foco sobrevive por su `data-foco`. */
+function tocarGv(est) {
+  const antes = est.tocado;
+  est.tocado = true;
+  if (!antes) pintarLight();
+}
+
+/* Aprobar lo que se VE: si hay cambios escritos, primero se guardan. */
+async function aprobarGuionVisual() {
+  const est = gvDelVideoLight();
+  if (est.tocado) {
+    await pedirGv('', 'PUT', { planos: est.copia.filter(p => String(p.visual || '').trim()) });
+    if (est.error) return;
+  }
+  await pedirGv('/aprobar', 'POST', { aprobado: true }, 'guion visual aprobado: ya se pueden dibujar los planos');
+}
+
+async function proponerGuionVisual(sustituye) {
+  if (sustituye && !confirm('Claude escribirá un guion visual nuevo leyendo el guion entero y sustituirá '
+    + 'al que hay (sin aprobar). Es solo texto: no se paga ninguna imagen.')) return;
+  const est = gvDelVideoLight();
+  limpiarError(CLAVE_VIDEO_LIGHT);
+  try {
+    const d = await pedir(`${API.proyecto(est.pid)}/guion_visual/proponer`, { method: 'POST', cuerpo: {} });
+    seguirTrabajoGv(d.trabajo_id, est.pid);
+    pintarLight();
+  } catch (err) {
+    mostrarError(CLAVE_VIDEO_LIGHT, err);
+    pintarLight();
+  }
+}
+
+/* El defecto del ESTILO, en «Cómo se cuenta». Como el tipo de relato: sin
+   láminas no se ofrece (el servidor no guarda un estilo sin fotogramas). */
+const IMAGENES_LIGHT = { id: '', valor: null, cargando: false, estado: '', error: '' };
+
+async function cargarImagenesEstiloLight(id) {
+  Object.assign(IMAGENES_LIGHT, { id, valor: null, error: '', estado: '', cargando: true });
+  try {
+    const r = await pedir(`${API.presetLight(id)}/imagenes`);
+    if (IMAGENES_LIGHT.id === id) IMAGENES_LIGHT.valor = r.imagenes || '';
+  } catch (err) {
+    if (IMAGENES_LIGHT.id === id) IMAGENES_LIGHT.error = err.message;
+  }
+  IMAGENES_LIGHT.cargando = false;
+  pintarLight();
+}
+
+async function guardarImagenesEstiloLight(valor) {
+  const id = IMAGENES_LIGHT.id;
+  IMAGENES_LIGHT.valor = valor;
+  IMAGENES_LIGHT.estado = 'guardando…';
+  pintarLight();
+  try {
+    const r = await pedir(`${API.presetLight(id)}/imagenes`, { method: 'PUT', cuerpo: { imagenes: valor || null } });
+    if (IMAGENES_LIGHT.id === id) IMAGENES_LIGHT.estado = r.cambiado ? 'guardado ✓' : 'sin cambios';
+  } catch (err) {
+    if (IMAGENES_LIGHT.id === id) IMAGENES_LIGHT.estado = `no se ha podido guardar: ${err.message}`;
+  }
+  pintarLight();
+}
+
+function bloqueImagenesEstiloLight(ficha) {
+  const caja = h('div', {});
+  if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
+    caja.appendChild(h('div', { clase: 'pista' },
+      'Primero genera el estilo gráfico (las láminas); después podrás elegir qué dibujan sus imágenes.'));
+    return caja;
+  }
+  if (IMAGENES_LIGHT.id !== ficha.id) {
+    setTimeout(() => cargarImagenesEstiloLight(ficha.id), 0);
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+    return caja;
+  }
+  if (IMAGENES_LIGHT.error) {
+    caja.appendChild(cajaError(IMAGENES_LIGHT.error));
+    return caja;
+  }
+  if (IMAGENES_LIGHT.cargando || IMAGENES_LIGHT.valor === null) {
+    caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo…'));
+    return caja;
+  }
+  caja.appendChild(campoSelect('Qué dibujan las imágenes', IMAGENES_LIGHT.valor, MODOS_IMAGENES,
+    v => guardarImagenesEstiloLight(v), AYUDA_IMAGENES));
+  caja.appendChild(h('div', { clase: 'pista' }, 'Es el punto de partida de los vídeos nuevos de este '
+    + 'estilo; cada vídeo puede cambiarlo en su Encargo, y el del vídeo manda.'));
+  if (IMAGENES_LIGHT.estado) caja.appendChild(h('div', { clase: 'meta' }, IMAGENES_LIGHT.estado));
+  return caja;
+}
+
 function bloqueReglasLight(ficha) {
   const caja = h('div', {});
   if (!(((ficha.datos || {}).estilo || {}).referencias || []).length) {
@@ -17198,6 +17507,8 @@ function vistaPresetLight() {
   paneles.cuenta = h('div', {},
     bloqueLight('🧭 Tipo de relato', 'cómo se cuentan por defecto los vídeos de este estilo',
       bloqueRelatoEstiloLight(ficha)),
+    bloqueLight('🎬 Qué dibujan las imágenes', 'la voz o el guion visual, por defecto en sus vídeos',
+      bloqueImagenesEstiloLight(ficha)),
     bloqueLight('🗣️ Tono del guion', 'cómo se cuenta, nunca de qué', tono));
 
   // ⏱️ el ritmo: se cambia y ya, no rehace nada
@@ -28794,6 +29105,9 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   e.espacio_fijo = espacioFijoDelEncargo(r.espacio_fijo);
   /* y el tipo de relato, si el guion lo trae («Tipo de relato:»); si no, sin elegir */
   e.tipo_relato = tipoRelatoDelEncargo(r.tipo_relato);
+  /* qué dibujan las imágenes y las líneas «Visual:» (rama guion-visual) */
+  e.imagenes = ['guion', 'voz'].includes(r.imagenes) ? r.imagenes : '';
+  e.visuales = Array.isArray(r.visuales) ? r.visuales : [];
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.fichaAbierta = false;
   PAR.datos = null;

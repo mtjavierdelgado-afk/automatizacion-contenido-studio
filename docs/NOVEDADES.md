@@ -142,6 +142,32 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   y no caduca. Sin ella todo funciona igual, salvo la competencia. Los datos
   de YouTube se guardan 30 días como mucho, como pide su política.
 
+**Qué dibujan las imágenes: la voz o el guion (22 de octubre)**
+- **Nuevo, en el Encargo: «Qué dibujan las imágenes».** «Lo que dice la voz» es
+  lo de siempre (cada imagen ilustra su frase) y es lo que tienen todos los
+  vídeos si no eliges nada. Con **«Lo que dice el guion»**, cada imagen sigue su
+  línea del **guion visual** y la frase de la voz ya no llega al dibujante: la
+  voz solo marca cuándo entra cada plano. Es lo que faltaba para la mampara: la
+  voz puede hablar de la corrediza sin que se dibuje la corrediza.
+- **El guion visual** es la lista de planos: qué se ve, la cámara («plano general
+  desde la puerta») y, en «Un espacio que cambia», el estado del objeto (la
+  mampara abierta, la corrediza). Sale de las líneas «Visual:» de tu guion de la
+  Parrilla (ya no se pierden) o de **«Proponer con Claude»**, que lo escribe
+  leyendo el guion entero. Se revisa, se corrige y **se aprueba en el paso
+  Imágenes** antes de dibujar: sin aprobar no se paga ningún plano. Escribirlo,
+  proponerlo y aprobarlo es solo texto.
+- **Antes de la primera tanda**, el guion visual y la imagen base salen en el paso
+  **Voz**, encima de «Generar las imágenes» (el paso Imágenes sigue cerrado hasta
+  que hay planos).
+- **Sin gente si la línea no la nombra:** en modo guion, una persona solo sale
+  en el plano cuya línea la pide.
+- **Lo fijo manda:** al aprobar, Claude comprueba cada línea contra el sitio, el
+  reparto y los estados aprobados, y avisa del plano que pide algo que no existe
+  (se dibujará lo fijo).
+- En la Parrilla, la línea de cabecera **«Imágenes: guion»** lo elige; en el
+  estilo, «🎬 Qué dibujan las imágenes» (pestaña «Cómo se cuenta») es el punto de
+  partida de sus vídeos nuevos. El del vídeo manda.
+
 **Portadas, segunda vuelta (21 de octubre)**
 - **La imagen sale limpia.** Las plantillas ya no meten efectos en la foto
   (contraste, color, viñeta, oscurecido, rayos de luz). Su «look» queda como un

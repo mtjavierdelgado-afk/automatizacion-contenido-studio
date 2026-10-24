@@ -13619,8 +13619,8 @@ function barraDeLasImagenes(mandos) {
   const aplicar = botonAplicarRepaso();
   const pend = notasDeAhora().filter(n => n.estado !== 'aplicado').length;
   /* «MONTAR EL VÍDEO» SIGUE A MANO, como estaba en los mandos: al lado y en
-     secundario cuando lo principal es otra cosa (con notas sin aplicar sale
-     apagado y con el motivo, no escondido). */
+     secundario cuando lo principal es otra cosa (con notas sin aplicar se
+     puede pulsar y pregunta antes: notas del dueño, 24-10-2026). */
   const montarAlLado = () => {
     const boton = botonRenderizarLight();
     if (!boton) return [];
@@ -14311,8 +14311,9 @@ function confirmarMontarConNotas() {
   const delRevisor = notas.filter(x => x.autor === 'revisor').length;
   return window.confirm(`Quedan ${n} ${n === 1 ? 'nota' : 'notas'} sin aplicar`
     + (delRevisor ? ` (${delRevisor} del revisor de imágenes)` : '')
-    + '. Se monta el vídeo con las imágenes como están ahora: las notas se quedan '
-    + 'apuntadas y las puedes aplicar después. ¿Montar así?');
+    + '. Se monta el vídeo sin aplicarlas: las notas se quedan apuntadas y las '
+    + 'puedes aplicar después (si alguna imagen ha quedado vieja, antes te decimos '
+    + 'cuánto cuesta dibujarla). ¿Montar así?');
 }
 
 /* LAS FLECHAS DEL TECLADO. Pasar de escena es el gesto que se repite

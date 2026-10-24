@@ -8220,23 +8220,34 @@ def notas_del_24_10(navegador, datos):
         pg.p.wait_for_timeout(1200)
         r = pg.js("""
           const rep = estadoRepaso(); const antes = [rep.notas, rep.pendientes];
-          const vo = window.videoObsoletoLight;
+          const vo = window.videoObsoletoLight, mo = window.montarElVideoLight, c = window.confirm;
           rep.notas = [{ id: 'x', autor: 'revisor', estado: 'pendiente', texto: 'rehacer el mando' }];
           rep.pendientes = 1;
+          let montajes = 0, pregunta = '', respuesta = false;
           window.videoObsoletoLight = () => true;
-          let nodo = null;
-          try { nodo = botonRenderizarLight(); } finally { window.videoObsoletoLight = vo; }
-          const b = nodo && (nodo.tagName === 'BUTTON' ? nodo : nodo.querySelector('button'));
-          let pregunta = ''; const c = window.confirm;
-          window.confirm = t => { pregunta = t; return false; };
-          let sigue = true;
-          try { sigue = confirmarMontarConNotas(); } finally { window.confirm = c; }
-          rep.notas = antes[0]; rep.pendientes = antes[1];
-          return { hay: !!b, apagado: b ? b.disabled : null, pregunta, sigue };""") or {}
+          window.montarElVideoLight = () => { montajes += 1; };
+          window.confirm = t => { pregunta = t; return respuesta; };
+          const salida = {};
+          try {
+            const nodo = botonRenderizarLight();
+            const b = nodo && (nodo.tagName === 'BUTTON' ? nodo : nodo.querySelector('button'));
+            salida.hay = !!b; salida.apagado = b ? b.disabled : null;
+            if (b) {
+              b.click(); salida.trasCancelar = montajes;
+              respuesta = true; b.click(); salida.trasAceptar = montajes;
+            }
+            salida.pregunta = pregunta;
+          } finally {
+            window.videoObsoletoLight = vo; window.montarElVideoLight = mo; window.confirm = c;
+            rep.notas = antes[0]; rep.pendientes = antes[1];
+          }
+          return salida;""") or {}
         ok(r.get("hay") and r.get("apagado") is False,
            f"con una nota del revisor sin aplicar, «Montar el vídeo» se puede pulsar ({r})")
-        ok("1 del revisor" in (r.get("pregunta") or "") and r.get("sigue") is False,
-           f"y pregunta antes, diciendo que es del revisor; «Cancelar» no monta ({r.get('pregunta')!r})")
+        ok("1 del revisor" in (r.get("pregunta") or "") and r.get("trasCancelar") == 0,
+           f"al pulsarlo pregunta antes, diciendo que es del revisor; «Cancelar» no monta ({r})")
+        ok(r.get("trasAceptar") == 1, f"y «Aceptar» monta ({r})")
+        pg.js(f"await abrirVideoLight('{pid}'); repintarVideo();")
         # el error con «Cerrar»: el texto no pasa por debajo del botón
         pg.js("ERRORES[CLAVE_VIDEO_LIGHT] = 'falta aprobar la imagen base de «bano_calido» (1 plano(s)), "
               "«bano_calido», estado «despues» (4 plano(s)): genérala o usa la imagen en «El espacio fijo» "

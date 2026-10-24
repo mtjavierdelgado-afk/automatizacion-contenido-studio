@@ -191,6 +191,34 @@ def activo(params):
     return gv["planos"] or None
 
 
+def efectivo(params, bloques):
+    """Los planos que mandan y de donde salen. -> (planos, "aprobado"|"parrilla") o (None, "").
+
+    Como `activo`, y ademas (rama guion-visual-2, decision B del dueño, 24-10):
+    las lineas «Visual:» que trajo la Parrilla se dan por APROBADAS solas si
+    casan limpias con el guion de ahora -- todas con su bloque, sin avisos y en
+    el orden del guion --. Asi un lote de la Parrilla no se para a esperar en
+    cada video. Si casan mal, o si las inventa Claude, se espera al dueño como
+    siempre. Nada se escribe: en cuanto alguien guarda el guion visual a mano,
+    manda lo guardado."""
+    if modo_de(params) != "guion":
+        return None, ""
+    try:
+        gv = normalizar((params or {}).get("guion_visual"))
+    except ValueError:
+        return None, ""
+    if gv.get("aprobado") and gv.get("planos"):
+        return gv["planos"], "aprobado"
+    if gv.get("planos") or gv.get("origen") != "parrilla" or not gv.get("visuales"):
+        return None, ""
+    planos, avisos = casar(gv["visuales"], bloques)
+    orden = [str(b.get("id") or "").upper() for b in (bloques or [])]
+    indices = [orden.index(pl["bloque"]) for pl in planos if pl["bloque"] in orden]
+    if not planos or avisos or len(indices) != len(planos) or indices != sorted(indices):
+        return None, ""
+    return [{"id": f"V{i + 1:03d}", **pl} for i, pl in enumerate(planos)], "parrilla"
+
+
 # ------------------------------------------------------------ casar con el guion
 
 def _palabras(texto):

@@ -201,6 +201,47 @@ def prueba_estilo():
     ok("imagenes" not in (sin.get("estilo") or {}), "y uno sin él no lo inventa")
 
 
+def prueba_la_voz_no_se_cuela():
+    seccion("7] la voz no se cuela y la Parrilla vale sola (guion-visual-2)")
+    import p6_assets as P6                                        # noqa: PLC0415
+    catalogo = {"sets": {"bano": {"descripcion": "a small bathroom"}}, "reparto": {}}
+    beat = {"prompt": "THE VOICE SAYS a sliding door saves space"}
+    con = {"id": "S001", "set": "bano", "narracion": "una corrediza ahorra espacio",
+           "personajes": [], "linea_gv": {"visual": "the hinged door hits the toilet"},
+           "direccion": "the hinged door hits the toilet"}
+    prompt = P6._prompt_visual(con, beat, catalogo)                 # noqa: SLF001
+    ok("THE VOICE SAYS" not in prompt and "hinged door hits" in prompt,
+       f"con línea, el prompt del beat (escrito desde la voz) no entra ({prompt[:120]!r})")
+    sin = {k: v for k, v in con.items() if k not in ("linea_gv", "direccion")}
+    ok("THE VOICE SAYS" in P6._prompt_visual(sin, beat, catalogo),  # noqa: SLF001
+       "sin línea, el prompt del beat entra como siempre")
+    bloques = [{"id": "B001", "texto": "La batiente choca con el inodoro."},
+               {"id": "B002", "texto": "Una corrediza se desliza por un riel."}]
+    visuales = [{"voz": "La batiente choca con el inodoro", "visual": ["the door hits"]},
+                {"voz": "Una corrediza se desliza", "visual": ["the rail", "open slider"]}]
+    base = {"imagenes": "guion", "guion_visual": {"origen": "parrilla", "planos": [], "visuales": visuales}}
+    planos, origen = G.efectivo(base, bloques)
+    igual(origen, "parrilla", "las líneas de la Parrilla que casan limpias valen solas")
+    igual([(p["id"], p["bloque"]) for p in planos], [("V001", "B001"), ("V002", "B002"), ("V003", "B002")],
+          "con su bloque y su id, en orden")
+    igual(G.efectivo({**base, "imagenes": "voz"}, bloques), (None, ""), "en modo voz, nada")
+    igual(G.efectivo({"imagenes": "guion", "guion_visual": {**base["guion_visual"], "origen": "claude"}},
+                     bloques), (None, ""), "si no vienen de la Parrilla, se espera al dueño")
+    raro = [{"voz": "xyzzy plugh", "visual": ["x"]}]
+    igual(G.efectivo({"imagenes": "guion", "guion_visual": {"origen": "parrilla", "visuales": raro}},
+                     bloques), (None, ""), "si no casan, se espera al dueño")
+    reves = list(reversed(visuales))
+    igual(G.efectivo({"imagenes": "guion", "guion_visual": {"origen": "parrilla", "visuales": reves}},
+                     bloques), (None, ""), "si salen fuera del orden del guion, se espera al dueño")
+    guardado = {"imagenes": "guion", "guion_visual": {"origen": "parrilla", "visuales": visuales,
+                                                      "planos": [{"bloque": "B001", "visual": "mio"}]}}
+    igual(G.efectivo(guardado, bloques), (None, ""),
+          "guardado a mano y sin aprobar: manda lo guardado, y espera")
+    aprobado = {"imagenes": "guion", "guion_visual": {**guardado["guion_visual"], "aprobado": True}}
+    igual(G.efectivo(aprobado, bloques)[1], "aprobado", "aprobado a mano: lo aprobado")
+    igual(G.efectivo({}, bloques), (None, ""), "sin nada guardado, nada (regla 1)")
+
+
 def main():
     print("PRUEBA DEL GUION VISUAL")
     prueba_modo()
@@ -209,6 +250,7 @@ def main():
     prueba_corte()
     prueba_prompt_y_estado()
     prueba_estilo()
+    prueba_la_voz_no_se_cuela()
     print("\n" + "=" * 70)
     if _fallos:
         print(f"FALLAN {len(_fallos)} de {_ok + len(_fallos)} comprobaciones:")

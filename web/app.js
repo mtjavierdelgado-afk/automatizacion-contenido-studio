@@ -17163,8 +17163,11 @@ function editorGuionVisual() {
       + 'el estado del objeto que cambia. La voz de su bloque va al lado solo como referencia: '
       + 'no llega al dibujante. Es solo texto: guardar, proponer o aprobar no paga imágenes.'));
   if (!est.copia.length && (f.propuesta || []).length) {
-    caja.appendChild(h('div', { clase: 'caja-aviso' },
-      `El guion de la Parrilla trae ${f.propuesta.length} línea(s) «Visual:», ya atadas a sus bloques.`,
+    caja.appendChild(h('div', { clase: f.aprobado_solo ? 'pista' : 'caja-aviso' },
+      f.aprobado_solo
+        ? `Se dibujan las ${f.propuesta.length} línea(s) «Visual:» que trajo la Parrilla, ya atadas a sus bloques `
+          + '(casan con el guion: valen sin aprobarlas a mano). Para cambiarlas, «Usar estas líneas», edita y aprueba.'
+        : `El guion de la Parrilla trae ${f.propuesta.length} línea(s) «Visual:», ya atadas a sus bloques.`,
       h('div', { clase: 'fila' }, h('button', { clase: 'mini primario', disabled: est.ocupado || corriendo,
         onclick: () => { est.copia = f.propuesta.map(p => Object.assign({}, p)); tocarGv(est); } },
       'Usar estas líneas'))));
@@ -17216,7 +17219,8 @@ function editorGuionVisual() {
   }
   caja.appendChild(fila);
   caja.appendChild(h('div', { clase: 'meta' }, f.aprobado
-    ? '✓ Aprobado: cada plano se dibuja desde su línea.'
+    ? (f.aprobado_solo && !est.copia.length ? '✓ Las líneas de la Parrilla valen: cada plano se dibuja desde su línea.'
+      : '✓ Aprobado: cada plano se dibuja desde su línea.')
     : (est.tocado ? 'Hay cambios sin guardar.' : 'Sin aprobar: los planos no se dibujan hasta que lo apruebes.')));
   if (est.error) caja.appendChild(h('div', { clase: 'caja-aviso' }, est.error));
   return caja;

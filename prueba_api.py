@@ -7748,7 +7748,7 @@ def probar_quitar_imagen():
         {"id": "S004", "narracion": "Así quedó."},
         {"id": "S005", "narracion": "El más bonito."}]}
     p6.plan_actual = lambda *_a, **_k: plan
-    servidor._pasada_sin_dibujar = lambda ctx, nombre: (
+    servidor._pasada_sin_dibujar = lambda ctx, nombre, restaurar=None: (
         lanzadas.append(nombre) or {"trabajo": "t1", "trabajo_id": "t1"})
     try:
         pid = Proyecto.crear(base, "quitar imagen").id
@@ -7773,10 +7773,20 @@ def probar_quitar_imagen():
         codigo, ficha = _llamar(servidor.quitar_imagen, pid, "S002", {"hacia": "anterior"})
         igual(codigo, 200, f"QUITAR: S002 hacia la anterior, 200 ({ficha if codigo != 200 else ''})")
         igual(lanzadas, ["quitar_imagen"], "QUITAR: lanza la pasada que no dibuja")
+        # SI LA PASADA NO SE PUEDE LANZAR, lo apuntado se deshace
+        def no_se_puede(*_a, **_k):
+            raise servidor.ErrorApi(409, "'assets' ya se está ejecutando")
+        servidor._pasada_sin_dibujar = no_se_puede
+        codigo, _m = _llamar(servidor.quitar_imagen, pid, "S005", {"hacia": "anterior"})
+        igual(codigo, 409, "QUITAR: sin poder lanzar la pasada, 409")
+        ok(all(e["id"] != "S005" for e in qp.leer(ctx.proyecto.raiz)),
+           "QUITAR: y S005 no se queda apuntado como quitado")
+        servidor._pasada_sin_dibujar = lambda ctx, nombre, restaurar=None: (
+            lanzadas.append(nombre) or {"trabajo": "t1", "trabajo_id": "t1"})
         if codigo == 200:
             igual((ficha.get("trabajo"), ficha.get("hacia")), ("t1", "S001"), "QUITAR: dice el trabajo y a quién va")
         igual(qp.leer(ctx.proyecto.raiz),
-              [{"texto": p6._texto_clave(plan["escenas"][1]), "hacia": "anterior", "id": "S002"}],
+              [{"texto": p6._texto_clave(plan["escenas"][1]), "hacia": "anterior", "id": "S002", "n": 0}],
               "QUITAR: va al fichero del proyecto, por su texto")
         igual(ctx.estado.firma("assets"), firma, "QUITAR: la firma de assets NO se mueve")
         igual(ctx.estado.params("assets") or {}, params, "QUITAR: ni un param cambia (regla 1)")
@@ -7796,6 +7806,11 @@ def probar_quitar_imagen():
         igual((qp.leer(ctx.proyecto.raiz), lanzadas[-1]), ([], "devolver_imagen"),
               "DESHACER: sale del fichero y vuelve a cortar")
         igual(ctx.estado.firma("assets"), firma, "DESHACER: la firma sigue igual")
+        # lo apuntado que el plan no refleja sale en la previa, con su deshacer
+        qp.quitar(ctx.proyecto.raiz, "así quedó", "anterior", "S004")
+        igual([x["id"] for x in servidor._quitados_sin_aplicar(ctx, plan)], ["S004"],
+              "PREVIA: lo quitado que el corte no refleja se enseña para deshacerlo")
+        qp.reponer(ctx.proyecto.raiz, [])
     finally:
         p6.plan_actual, servidor._pasada_sin_dibujar = real_plan, real_pasada
 

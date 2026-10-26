@@ -73,7 +73,14 @@ def leer(raiz):
         texto = str(entrada.get("texto") or "").strip()
         hacia = str(entrada.get("hacia") or "")
         if texto and hacia in HACIA:
-            salida.append({"texto": texto, "hacia": hacia, "id": str(entrada.get("id") or "")})
+            try:
+                n = max(0, int(entrada.get("n") or 0))
+            except (TypeError, ValueError):
+                n = 0
+            limpia = {"texto": texto, "hacia": hacia, "id": str(entrada.get("id") or ""), "n": n}
+            if isinstance(entrada.get("unidad"), dict):
+                limpia["unidad"] = entrada["unidad"]
+            salida.append(limpia)
     return salida
 
 
@@ -98,30 +105,67 @@ def _escribir(raiz, entradas):
         raise
 
 
-def quitar(raiz, texto, hacia, sid=""):
-    """Apunta que el plano que dice `texto` se quita y su voz va `hacia`."""
+def quitar(raiz, texto, hacia, sid="", n=0, unidad=None):
+    """Apunta que el plano que dice `texto` se quita y su voz va `hacia`.
+
+    `n`: cuantos planos ANTES que el dicen exactamente lo mismo (una frase
+    repetida son dos planos: se quita el que se pulso, no el primero).
+    `unidad`: sus params por unidad (la direccion, la nota...), que el nucleo
+    borra al retirarlo; se guardan aqui para devolverselos al deshacer."""
     if hacia not in HACIA:
         raise ValueError("«hacia» tiene que ser «anterior» o «siguiente»")
     texto = str(texto or "").strip()
     if not texto:
         raise ValueError("ese plano no dice nada: no se puede reconocer después")
+    entrada = {"texto": texto, "hacia": hacia, "id": str(sid or ""), "n": max(0, int(n or 0))}
+    if isinstance(unidad, dict) and unidad:
+        entrada["unidad"] = unidad
     with _LOCK:
-        entradas = [e for e in leer(raiz) if e["texto"] != texto]
-        entradas.append({"texto": texto, "hacia": hacia, "id": str(sid or "")})
+        entradas = [e for e in leer(raiz) if (e["texto"], e["n"]) != (texto, entrada["n"])]
+        entradas.append(entrada)
         _escribir(raiz, entradas)
     return entradas
 
 
-def devolver(raiz, texto):
-    """Deshace: el plano que dice `texto` vuelve. -> True si estaba quitado."""
+def devolver(raiz, texto, n=0):
+    """Deshace: el plano que dice `texto` vuelve. -> la entrada que se quito
+    (con su `unidad`, si la guardaba), o None si no estaba quitado."""
     texto = str(texto or "").strip()
     with _LOCK:
         entradas = leer(raiz)
-        quedan = [e for e in entradas if e["texto"] != texto]
-        if len(quedan) == len(entradas):
-            return False
-        _escribir(raiz, quedan)
-    return True
+        fuera = [e for e in entradas if (e["texto"], e["n"]) == (texto, int(n or 0))]
+        if not fuera:
+            return None
+        _escribir(raiz, [e for e in entradas if e not in fuera])
+    return fuera[0]
+
+
+def restaurar(raiz, entrada):
+    """Vuelve a apuntar una entrada tal cual (si lanzar la pasada falla)."""
+    with _LOCK:
+        entradas = [e for e in leer(raiz)
+                    if (e["texto"], e["n"]) != (entrada["texto"], entrada["n"])]
+        entradas.append(entrada)
+        _escribir(raiz, entradas)
+
+
+def reponer(raiz, entradas):
+    """Deja el fichero exactamente con `entradas` (deshacer un intento fallido)."""
+    with _LOCK:
+        _escribir(raiz, list(entradas or []))
+
+
+def ocurrencia(escenas, i, clave):
+    """Cuantos planos antes de `i` dicen lo mismo que el plano `i`."""
+    texto = clave(escenas[i])
+    return sum(1 for e in escenas[:i] if clave(e) == texto)
+
+
+def tiene_continuacion(escenas, i):
+    """Si el plano siguiente es la segunda mitad de este (copia su imagen):
+    quitar este dejaria su imagen en pantalla igualmente."""
+    return (i + 1 < len(escenas)
+            and escenas[i + 1].get("sigue_a") == escenas[i].get("id"))
 
 
 def se_puede_quitar(escena, sin_imagen):
@@ -164,7 +208,8 @@ def _juntar(hogar, quitado, delante):
     hogar.setdefault("absorbe", []).extend(quitado.get("absorbe") or [])
     hogar["absorbe"].append(
         {"id": quitado["id"], "lado": "antes" if delante else "despues",
-         "narracion": quitado.get("narracion_imagen") or quitado.get("narracion") or ""})
+         "narracion": quitado.get("narracion_imagen") or quitado.get("narracion") or "",
+         "n": int(quitado.pop("_n_quitado", 0) or 0)})
 
 
 def aplicar(escenas, raiz, clave, sin_imagen):
@@ -179,12 +224,17 @@ def aplicar(escenas, raiz, clave, sin_imagen):
         salida["sin_casar"] = list(entradas) if entradas else []
         return salida
     pendientes = list(entradas)
+    vistos = {}
     i = 0
     while i < len(escenas):
         escena = escenas[i]
         texto = clave(escena)
-        entrada = next((e for e in pendientes if e["texto"] == texto), None)
-        if entrada is None or not se_puede_quitar(escena, sin_imagen):
+        # la ocurrencia en el corte ORIGINAL: un plano ya quitado tambien cuenta
+        n = vistos.get(texto, 0)
+        vistos[texto] = n + 1
+        entrada = next((e for e in pendientes if (e["texto"], e["n"]) == (texto, n)), None)
+        if (entrada is None or not se_puede_quitar(escena, sin_imagen)
+                or tiene_continuacion(escenas, i)):
             i += 1
             continue
         j = i - 1 if entrada["hacia"] == "anterior" else i + 1
@@ -192,6 +242,7 @@ def aplicar(escenas, raiz, clave, sin_imagen):
             i += 1
             continue
         pendientes.remove(entrada)
+        escena["_n_quitado"] = n
         _juntar(escenas[j], escena, delante=(j > i))
         salida["absorbidos"].append(escena["id"])
         del escenas[i]

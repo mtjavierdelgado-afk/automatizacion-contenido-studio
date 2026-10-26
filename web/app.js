@@ -13740,6 +13740,7 @@ function vistaPreviaLight() {
   if (e.obsoleta) caja.appendChild(avisoImagenObsoleta(e));
   const delPlano = montajeDelPlano(e); if (delPlano) caja.appendChild(delPlano);
   const elementos = elementosDelPlano(e); if (elementos) caja.appendChild(elementos);
+  const sinAplicar = quitadosSinAplicar(); if (sinAplicar) caja.appendChild(sinAplicar);
   const ajustar = ajustarImagenDelPlano(e, escenas); if (ajustar) caja.appendChild(ajustar);
   caja.appendChild(cuadroFeedbackEscena(e));
   /* EL REVISOR: pedir que mire las imágenes y ver lo que dejó (ver
@@ -14380,18 +14381,37 @@ function ajustarImagenDelPlano(e, escenas) {
         + '(también gratis). Se puede deshacer.'));
     const botones = h('div', { clase: 'fila' });
     if (q.anterior) {
-      botones.appendChild(h('button', { clase: 'mini primario', onclick: () => quitarImagen(e, 'anterior', q.anterior) },
+      botones.appendChild(h('button', { clase: 'mini primario', disabled: PREVIA.guardando,
+        onclick: () => quitarImagen(e, 'anterior', q.anterior) },
         `Su voz pasa a ${q.anterior} (la anterior)`));
     }
     if (q.siguiente) {
-      botones.appendChild(h('button', { clase: 'mini primario', onclick: () => quitarImagen(e, 'siguiente', q.siguiente) },
+      botones.appendChild(h('button', { clase: 'mini primario', disabled: PREVIA.guardando,
+        onclick: () => quitarImagen(e, 'siguiente', q.siguiente) },
         `Su voz pasa a ${q.siguiente} (la siguiente)`));
     }
-    botones.appendChild(h('button', { clase: 'mini fantasma',
+    botones.appendChild(h('button', { clase: 'mini fantasma', disabled: PREVIA.guardando,
       onclick: () => { PREVIA.quitando = null; repintarVideo(); } }, 'Cancelar'));
     elegir.appendChild(botones);
     caja.appendChild(elegir);
   }
+  return caja;
+}
+
+/* LO QUITADO QUE ESTE CORTE NO REFLEJA (la pasada falló o se canceló, o se
+   volvió a una versión anterior de las imágenes): nunca se queda algo quitado
+   sin su «Deshacer». */
+function quitadosSinAplicar() {
+  const lista = (PREVIA.ficha || {}).quitados_sin_aplicar || [];
+  if (!lista.length) return null;
+  const caja = h('div', { clase: 'ajustar-imagen caja-aviso' },
+    h('span', { clase: 'ajustar-imagen-titulo' }, 'Imágenes quitadas que este corte aún no refleja'),
+    h('div', { clase: 'meta' }, 'Se aplicarán la próxima vez que se pongan al día las imágenes. '
+      + 'Si no querías quitarlas, deshazlo aquí.'));
+  lista.forEach(a => caja.appendChild(h('div', { clase: 'fila ajustar-absorbe' },
+    h('span', { clase: 'meta crece' }, `${a.id || 'Una imagen'}: «${recortar(legible(a.narracion), 90)}»`),
+    h('button', { clase: 'mini', disabled: PREVIA.guardando || !!trabajoVideoLight(),
+      onclick: () => devolverImagenQuitada(a) }, 'Deshacer'))));
   return caja;
 }
 
@@ -14435,7 +14455,7 @@ async function devolverImagenQuitada(a) {
   repintarVideo();
   try {
     const d = await pedir(`${API.proyecto(v.pid)}/planos/devolver`,
-      { method: 'POST', cuerpo: { narracion: a.narracion } });
+      { method: 'POST', cuerpo: { narracion: a.narracion, n: a.n || 0 } });
     seguirPasadaDeCorte(v.pid, d.trabajo, a.id,
       `${a.id} vuelve a estar. Monta el vídeo para verlo (gratis)`);
   } catch (err) {

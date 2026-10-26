@@ -3843,7 +3843,8 @@ def _recolocar_escenas(carpeta, escenas):
     return informe
 
 def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
-                     forzar=False, notas_repaso=None, proyecto=None):
+                     forzar=False, notas_repaso=None, proyecto=None,
+                     solo_conservar=False):
     """Genera los planos y devuelve el coste. En fila o en cadenas paralelas.
 
     Por que cadenas y no planos sueltos
@@ -3977,6 +3978,12 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                          != _texto_clave(escena)))
                 with cerrojo:
                     resultados[uid] = ficha
+                continue
+
+            # SOLO CONSERVAR (la pasada que vuelve a cortar tras quitar una
+            # imagen, rama unir-planos): lo que no esta hecho se queda como
+            # estaba --pendiente-- y no se dibuja ni se paga nada.
+            if solo_conservar:
                 continue
 
             if cartelas.sin_imagen(escena):
@@ -4150,7 +4157,9 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                      **({} if cartelas.sin_imagen(escena)
                         else {"png": os.path.relpath(destino, trabajo)}),
                      "cartela": (escena.get("cartela") or {}).get("plantilla"),
-                     "narracion": escena["narracion"],
+                     # la frase para la que se DIBUJA: en un plano que lleva
+                     # la voz de un quitado, la suya (unir-planos)
+                     "narracion": escena.get("narracion_imagen") or escena["narracion"],
                      "t_in": escena["t_in"], "t_out": escena["t_out"],
                      "set": escena.get("set"),
                      "componente": escena.get("componente"),
@@ -5017,7 +5026,7 @@ MOTOR_CAMBIOS = {
 }
 
 OPCIONES_EJECUCION = ("solo_assets", "replantear", "rehacer", "tipos",
-                      "conservar_piezas")
+                      "conservar_piezas", "solo_cortar", "restaurar")
 
 
 def _anotar_tiempo(paso, arranque, hechas, detalle=None, proyecto=None):
@@ -5053,7 +5062,7 @@ def _anotar_tiempo(paso, arranque, hechas, detalle=None, proyecto=None):
 
 def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
              replantear=False, rehacer=False, tipos=None, previo=None,
-             conservar_piezas=False):
+             conservar_piezas=False, solo_cortar=False, restaurar=None):
     """Construye assets y escenas. Si unidades no es None, solo esas.
 
     Con solo_assets se para despues de los assets (sets, reparto, mapas y
@@ -5118,7 +5127,13 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     # cosa que editar: generarlos sin ella seria pagar un sitio reinventado en
     # cada plano, que es justo lo que este modo viene a quitar. Se para ANTES
     # de gastar nada y se dice donde se aprueba.
-    if not solo_assets:
+    # SOLO CORTAR (rama unir-planos): vuelve a cortar y conserva lo que ya
+    # esta dibujado. No pide ninguna unidad, no genera hojas ni planos y no
+    # paga nada: por eso tampoco hace falta que haya base ni guion visual
+    # aprobados (son los guardianes de lo que se PAGA).
+    if solo_cortar:
+        unidades = []
+    if not solo_assets and not solo_cortar:
         # CON «LO QUE DICE EL GUION», SIN GUION VISUAL APROBADO NO SE PAGA NADA
         # (rama guion-visual): se dibujaria lo que dice la voz, que es justo lo
         # que se ha pedido que no pase
@@ -5180,6 +5195,15 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     inventario = {}
     pendientes = [(uid, ficha) for uid, ficha in sorted(necesarios.items())
                   if tipos is None or ficha["tipo"] in tipos]
+    if solo_cortar:
+        # ni una hoja ni una pieza: se hereda lo que ya habia (como en
+        # `solo_assets`, mas abajo) y lo que falte sigue faltando
+        pendientes = []
+        previos = (medios.leer_json(os.path.join(trabajo, "assets.json"), {})
+                   or {}).get("resultados") or {}
+        for uid, salida in previos.items():
+            if uid in necesarios:
+                resultados[uid] = salida
     for indice, (uid, ficha) in enumerate(pendientes):
         # El numero va en el mensaje, no solo en la barra: "12 de 44" dice de
         # un vistazo cuanto queda; un porcentaje hay que traducirlo mentalmente.
@@ -5284,7 +5308,7 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     coste = _generar_escenas(plan, dirs, p, trabajo, toca, unidades,
                              resultados, avisar, forzar=rehacer,
                              notas_repaso=_notas_del_repaso(proyecto),
-                             proyecto=proyecto)
+                             proyecto=proyecto, solo_conservar=solo_cortar)
 
     avisar(0.96, "comprobando que no hay planos repetidos")
     # Los que comparten imagen A PROPOSITO salen del PLAN: la segunda mitad de
@@ -5321,6 +5345,18 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
         rehechas = dict(resultados)
     else:
         rehechas = {uid: ficha for uid, ficha in resultados.items() if uid in pedidas}
+    # LO QUE SE DEVUELVE TRAS «QUITAR» (unir-planos): su imagen ya estaba
+    # dibujada para ESA frase y se conserva, pero al retirarla el estado
+    # olvido su registro. Se sella aqui --por su frase, nunca por su numero--
+    # para que no salga «por rehacer» y nadie la vuelva a pagar.
+    if solo_cortar and restaurar:
+        textos = {medios.normalizar_texto(t) for t in restaurar}
+        for escena in escenas:
+            uid = f"escena:{escena.get('id')}"
+            if (uid in resultados and uid not in rehechas
+                    and _texto_clave(escena) in textos
+                    and (resultados[uid] or {}).get("origen") == "conservado"):
+                rehechas[uid] = resultados[uid]
     conservadas = sorted(uid for uid in resultados if uid not in rehechas)
 
     generadas = sum(1 for r in resultados.values() if r.get("origen") == "generada")

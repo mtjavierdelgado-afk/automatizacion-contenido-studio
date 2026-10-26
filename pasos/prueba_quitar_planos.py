@@ -81,7 +81,7 @@ def prueba_guardar():
     raiz = nueva_raiz()
     igual(Q.leer(raiz), [], "sin fichero, nada quitado")
     Q.quitar(raiz, "este baño era el más feo", "siguiente", "S001")
-    igual(Q.leer(raiz), [{"texto": "este baño era el más feo", "hacia": "siguiente", "id": "S001"}],
+    igual(Q.leer(raiz), [{"texto": "este baño era el más feo", "hacia": "siguiente", "id": "S001", "n": 0}],
           "apuntado con su texto, su lado y el número que tenía")
     Q.quitar(raiz, "este baño era el más feo", "anterior", "S001")
     igual(len(Q.leer(raiz)), 1, "volver a quitarlo cambia el lado, no duplica")
@@ -91,7 +91,10 @@ def prueba_guardar():
             ok(False, f"{malo} tenía que fallar")
         except ValueError:
             ok(True, f"{malo} se rechaza")
-    ok(Q.devolver(raiz, "este baño era el más feo"), "deshacer lo devuelve")
+    Q.quitar(raiz, "este baño era el más feo", "anterior", "S001", unidad={"direccion": "una mano"})
+    devuelta = Q.devolver(raiz, "este baño era el más feo")
+    ok(devuelta and devuelta.get("unidad") == {"direccion": "una mano"},
+       "deshacer lo devuelve, con los params por unidad que tenía")
     ok(not os.path.exists(Q.ruta(raiz)), "sin nada quitado no queda fichero")
     ok(not Q.devolver(raiz, "otra cosa"), "deshacer algo que no estaba: False")
     with open(Q.ruta(raiz), "w", encoding="utf-8") as fh:
@@ -116,7 +119,7 @@ def prueba_juntar():
     igual(s2["narracion_imagen"], "con baldosas grises", "se le reconoce por lo que se dibujó")
     igual(s2["prompt"], "prompt de S002", "su dibujo (prompt) no cambia")
     igual(s2["corte"], "corte-S002", "su corte de salida sigue siendo el suyo")
-    igual(s2["absorbe"], [{"id": "S001", "lado": "antes", "narracion": "Este baño era el más feo"}],
+    igual(s2["absorbe"], [{"id": "S001", "lado": "antes", "narracion": "Este baño era el más feo", "n": 0}],
           "y dice de quién lleva la voz")
 
     raiz = nueva_raiz()
@@ -162,6 +165,27 @@ def prueba_lo_que_no():
     ok(not hecho["absorbidos"], "hacia una cartela sobre imagen: tampoco (su texto va a su ritmo)")
 
 
+def prueba_repetidas_y_continuacion():
+    seccion("4b. UNA FRASE REPETIDA Y UN PLANO CON CONTINUACIÓN")
+    raiz = nueva_raiz()
+    escenas = video()
+    escenas[2]["narracion"] = "con baldosas grises"
+    igual(Q.ocurrencia(escenas, 2, clave), 1, "el tercero es la segunda vez que se dice")
+    Q.quitar(raiz, "con baldosas grises", "siguiente", "S003", n=1)
+    hecho = Q.aplicar(escenas, raiz, clave, sin_imagen)
+    igual(hecho["absorbidos"], ["S003"], "se quita el que se pulsó, no el primero que lo dice")
+    raiz = nueva_raiz()
+    Q.quitar(raiz, "con baldosas grises", "siguiente", "S002", n=0)
+    Q.quitar(raiz, "con baldosas grises", "anterior", "S003", n=1)
+    igual(len(Q.leer(raiz)), 2, "y se pueden quitar los dos")
+    raiz = nueva_raiz()
+    Q.quitar(raiz, "con baldosas grises", "anterior", "S002")
+    escenas = video()
+    escenas[2]["sigue_a"] = "S002"
+    hecho = Q.aplicar(escenas, raiz, clave, sin_imagen)
+    ok(not hecho["absorbidos"], "un plano cuya segunda mitad va detrás no se quita")
+
+
 def prueba_cadenas():
     seccion("5. CADENAS Y LO QUE YA NO CASA")
     raiz = nueva_raiz()
@@ -200,6 +224,7 @@ def main():
     prueba_guardar()
     prueba_juntar()
     prueba_lo_que_no()
+    prueba_repetidas_y_continuacion()
     prueba_cadenas()
     prueba_sin_fichero()
     shutil.rmtree(_TEMPORAL, ignore_errors=True)

@@ -601,7 +601,8 @@ def _correr_paso_marcado(avisar, ctx, paso_id, modulo, unidades, opciones):
                                        unidades=unidades, **extra)
             return modulo.ejecutar(ctx.proyecto, params, avisar, **extra)
 
-    if paso_id == "assets":
+    # la pasada que solo vuelve a cortar (unir-planos) no dibuja: no espera turno
+    if paso_id == "assets" and not extra.get("solo_cortar"):
         resultado = _con_turno_de_imagenes(avisar, ctx, correr)
     elif paso_id == "render" and not extra.get("solo_montar"):
         resultado = _con_turno_de_montaje(avisar, ctx, correr)
@@ -7272,7 +7273,7 @@ def _vecinos_para_quitar(plan, sid):
         return None
     i = ids.index(sid)
     salida = {"anterior": None, "siguiente": None}
-    if not qp.se_puede_quitar(escenas[i], sin_imagen):
+    if not qp.se_puede_quitar(escenas[i], sin_imagen) or qp.tiene_continuacion(escenas, i):
         return salida
     if i > 0 and qp.puede_recibir(escenas[i - 1], sin_imagen):
         salida["anterior"] = ids[i - 1]
@@ -7292,7 +7293,8 @@ def _quitar_en_la_previa(plan, escena):
         salida["quitar"] = vecinos
     if escena.get("absorbe"):
         salida["absorbe"] = [{"id": a.get("id"), "lado": a.get("lado"),
-                              "narracion": a.get("narracion") or ""}
+                              "narracion": a.get("narracion") or "",
+                              "n": int(a.get("n") or 0)}
                              for a in escena["absorbe"] if isinstance(a, dict)]
     return salida
 
@@ -7306,11 +7308,32 @@ def _sin_nada_en_marcha(ctx, que):
                                 "cuando terminen")
 
 
-def _pasada_sin_dibujar(ctx, nombre):
-    """La pasada de imágenes que solo vuelve a cortar: ninguna unidad pedida,
-    así que no se dibuja ni se paga nada. -> {trabajo, trabajo_id}"""
-    tid = lanzar_paso(ctx, "assets", [], nombre=nombre)
+def _pasada_sin_dibujar(ctx, nombre, restaurar=None):
+    """La pasada de imágenes que solo vuelve a cortar (`solo_cortar`): ninguna
+    unidad pedida, sin hojas ni planos nuevos, sin esperar turno de imágenes.
+    No se dibuja ni se paga nada. `restaurar`: frases de planos devueltos, que
+    se sellan con su imagen de siempre. -> {trabajo, trabajo_id}"""
+    opciones = {"solo_cortar": True}
+    if restaurar:
+        opciones["restaurar"] = list(restaurar)
+    tid = lanzar_paso(ctx, "assets", [], nombre=nombre, opciones=opciones)
     return {"trabajo": tid, "trabajo_id": tid}
+
+
+def _quitados_sin_aplicar(ctx, plan):
+    """Lo apuntado como quitado que el plan de ahora NO refleja (la pasada
+    fallo o se cancelo, o se volvio a una version anterior): se enseña con su
+    «Deshacer» para que nunca quede algo quitado sin forma de devolverlo."""
+    p6 = PASOS_MODULOS.p6_assets
+    aplicados = set()
+    for escena in plan.get("escenas") or []:
+        for a in escena.get("absorbe") or []:
+            if isinstance(a, dict):
+                aplicados.add((p6._texto_clave({"narracion": a.get("narracion")}),
+                               int(a.get("n") or 0)))
+    return [{"id": e.get("id"), "narracion": e["texto"], "n": e["n"], "hacia": e["hacia"]}
+            for e in _quitar_planos().leer(ctx.proyecto.raiz)
+            if (e["texto"], e["n"]) not in aplicados]
 
 
 @app.post("/api/proyectos/{pid}/planos/{sid}/quitar", status_code=202)
@@ -7331,9 +7354,21 @@ def quitar_imagen(pid: str, sid: str, cuerpo: dict = Body(default=None)):
         if not vecinos.get(hacia):
             raise ErrorApi(409, f"la voz de {sid} no puede pasar a la imagen {hacia}: "
                                 "no la hay, o es una cartela o la continuación de otra")
-        escena = next(e for e in plan["escenas"] if str(e.get("id")) == sid)
-        _quitar_planos().quitar(ctx.proyecto.raiz, p6._texto_clave(escena), hacia, sid)
-        ficha = _pasada_sin_dibujar(ctx, "quitar_imagen")
+        escenas = [e for e in plan["escenas"] if e.get("id")]
+        i = next(n for n, e in enumerate(escenas) if str(e.get("id")) == sid)
+        qp = _quitar_planos()
+        unidad = ((ctx.estado.params("assets") or {}).get("unidades") or {}).get(f"escena:{sid}")
+        antes = qp.leer(ctx.proyecto.raiz)
+        qp.quitar(ctx.proyecto.raiz, p6._texto_clave(escenas[i]), hacia, sid,
+                  n=qp.ocurrencia(escenas, i, p6._texto_clave),
+                  unidad=unidad if isinstance(unidad, dict) else None)
+        try:
+            ficha = _pasada_sin_dibujar(ctx, "quitar_imagen")
+        except Exception:
+            # sin pasada no se aplica: lo apuntado se deshace, o quedaria
+            # quitado a medias (y sin «Deshacer» en la pantalla)
+            qp.reponer(ctx.proyecto.raiz, antes)
+            raise
     ctx.bitacora.anotar("imagen_quitada", "assets",
                         {"plano": sid, "hacia": hacia, "a": vecinos[hacia]})
     return dict(ficha, quitada=sid, hacia=vecinos[hacia])
@@ -7345,15 +7380,46 @@ def devolver_imagen(pid: str, cuerpo: dict = Body(default=None)):
     -> el trabajo (gratis) que vuelve a cortar."""
     ctx = contexto(pid)
     p6 = PASOS_MODULOS.p6_assets
-    narracion = str(_cuerpo(cuerpo).get("narracion") or "")
+    datos = _cuerpo(cuerpo)
+    narracion = str(datos.get("narracion") or "")
     texto = p6._texto_clave({"narracion": narracion})
+    try:
+        n = max(0, int(datos.get("n") or 0))
+    except (TypeError, ValueError):
+        raise ErrorApi(400, "'n' tiene que ser un número")
     if not texto:
         raise ErrorApi(400, "manda {narracion}: lo que decía la imagen quitada")
+    qp = _quitar_planos()
     with _cerrojo_de_cadena(ctx.id):
         _sin_nada_en_marcha(ctx, "deshazlo")
-        if not _quitar_planos().devolver(ctx.proyecto.raiz, texto):
+        entrada = qp.devolver(ctx.proyecto.raiz, texto, n)
+        if entrada is None:
             raise ErrorApi(404, "esa imagen no está quitada")
-        ficha = _pasada_sin_dibujar(ctx, "devolver_imagen")
+        # SUS PARAMS POR UNIDAD (la dirección, la nota...), que el núcleo borró
+        # al retirarla. Solo si el corte de ahora la tiene en el mismo número
+        # (el que se lleva su voz la nombra con él): si no, se dejan fuera
+        # antes que escribirlos en otro plano.
+        uid = f"escena:{entrada['id']}"
+        plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+        en_su_sitio = any(a.get("id") == entrada["id"] and int(a.get("n") or 0) == n
+                          for e in plan.get("escenas") or []
+                          for a in e.get("absorbe") or [] if isinstance(a, dict))
+        repuso = False
+        if entrada.get("unidad") and entrada["id"] and en_su_sitio:
+            unidades = (ctx.estado.params("assets") or {}).get("unidades") or {}
+            if uid not in unidades:
+                ctx.estado.actualizar_params("assets", {"unidades": {uid: entrada["unidad"]}})
+                repuso = True
+        try:
+            ficha = _pasada_sin_dibujar(ctx, "devolver_imagen", restaurar=[texto])
+        except Exception:
+            qp.restaurar(ctx.proyecto.raiz, entrada)
+            if repuso:
+                with ctx.estado._lock:
+                    params = copy.deepcopy(ctx.estado.params("assets") or {})
+                    (params.get("unidades") or {}).pop(uid, None)
+                    ctx.estado.set_params("assets", params)
+            raise
     ctx.bitacora.anotar("imagen_devuelta", "assets", {"narracion": narracion[:120]})
     return dict(ficha, devuelta=True)
 
@@ -7448,6 +7514,8 @@ def leer_previsualizacion(pid: str):
     render = ctx.estado.params("render") or {}
     return {
         "escenas": escenas,
+        # lo apuntado como quitado que este corte aún no refleja (unir-planos)
+        "quitados_sin_aplicar": _quitados_sin_aplicar(ctx, plan),
         "audio": _audio_de_la_toma(ctx),
         # LA MUSICA Y LOS EFECTOS SOLO PARA EL PLAY SEGUIDO. Escena a escena se
         # oye la VOZ y nada mas: lo que se esta juzgando ahi es si la imagen

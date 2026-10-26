@@ -8937,6 +8937,16 @@ def quitar_e_igualar_imagenes(navegador, datos):
                for n in (repaso.get("notas") or [])),
        "y no guarda nada hasta que tú la guardes")
     pg.js(f"PREVIA.borrador['{sid}'] = ''; repintarVideo();")
+    # UNA IMAGEN QUE FALTA (una tanda cancelada, una rechazada por el filtro):
+    # la pasada que vuelve a cortar NO puede dibujarla (revisión del 26-10)
+    falta = next((e["id"] for e in reversed(escenas) if e.get("imagen")
+                  and e["id"] not in (sid, vecino)), None)
+    activa = _version_de(datos, "assets", "")
+    version = activa.get("activa") or activa.get("n") or activa.get("version")
+    carpeta = os.path.join(datos["proyectos"], pid, "pasos", "assets", f"v{version}", "escenas")
+    apartada = os.path.join(datos["capturas"], f"{falta}.apartada.png")
+    if falta:
+        shutil.move(os.path.join(carpeta, f"{falta}.png"), apartada)
     pg.pulsar(".ajustar-imagen button", "Quitar esta imagen")
     ok(pg.visible(".ajustar-quitar .meta", "Gratis"), "al quitar, dice que es gratis y se deshace")
     pg.pulsar(".ajustar-quitar button", f"Su voz pasa a {vecino}")
@@ -8953,6 +8963,13 @@ def quitar_e_igualar_imagenes(navegador, datos):
     ok(abs(float(hogar.get("t_out") or 0) - float(elegida["t_out"])) < 0.01,
        f"{vecino} dura hasta donde acababa {sid}")
     despues = _huellas_de_planos(datos, pid)
+    if falta:
+        ok(falta not in despues, f"la imagen que faltaba ({falta}) sigue sin dibujarse: no se ha pagado")
+        activa = _version_de(datos, "assets", "")
+        version = activa.get("activa") or activa.get("n") or activa.get("version")
+        shutil.copy(apartada, os.path.join(datos["proyectos"], pid, "pasos", "assets",
+                                           f"v{version}", "escenas", f"{falta}.png"))
+        despues = _huellas_de_planos(datos, pid)
     ok(all(despues.get(x) == antes.get(x) for x in ids if x in antes),
        "ninguna imagen ha cambiado: la que se queda conserva su dibujo")
     _r, assets = api.get(f"/api/proyectos/{pid}/pasos/assets")
@@ -8985,6 +9002,9 @@ def quitar_e_igualar_imagenes(navegador, datos):
     ok(_huellas_de_planos(datos, pid).get(sid) == antes.get(sid), f"la misma imagen de {sid}, sin pagar otra")
     hogar = next((e for e in previa.get("escenas") or [] if e["id"] == vecino), {})
     ok(not hogar.get("absorbe"), f"y {vecino} vuelve a ser solo suyo")
+    _r, assets = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    ok(f"escena:{sid}" not in (assets.get("unidades_obsoletas") or []),
+       f"{sid} no queda «por rehacer»: se sella con su imagen de siempre ({assets.get('unidades_obsoletas')})")
     r, lanz = api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})
     if r.status_code == 202:
         api.esperar(lanz.get("trabajo_id"), 600)

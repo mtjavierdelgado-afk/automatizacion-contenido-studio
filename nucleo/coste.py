@@ -712,20 +712,19 @@ def reportar_openai(usage, calidad, tamano, imagenes=1, operacion="imagen",
                    usd_estimado=True, detalle=ficha)
 
 
-#: Las etiquetas que Cartesia entiende dentro del texto. NO SE LEEN EN VOZ ALTA
-#: y la documentacion de Cartesia dice que cada <break> cuenta como UN caracter;
-#: se aplica lo mismo a <speed>, <volume> y <emotion>, que son de la misma
-#: familia. De <spell> se dice lo que lleva dentro, asi que cuenta su contenido
-#: y nada de la etiqueta. Antes se contaba `<break time="1200ms"/>` como 23
-#: caracteres: el gasto de voz salia unos centimos por encima en cada video.
-_ETIQUETA_VOZ = re.compile(r'<(?:break|speed|volume|emotion)\b[^<>]*>', re.I)
-_ETIQUETA_SPELL = re.compile(r'</?\s*spell\s*>', re.I)
+#: La pausa que Cartesia entiende dentro del texto. No se lee en voz alta, y
+#: la documentacion de Cartesia dice que cada <break> cuenta como UN caracter.
+#: Antes se contaba `<break time="1200ms"/>` como 23: el gasto de voz salia
+#: unos centimos por encima en cada video. Las demas etiquetas (<speed>,
+#: <volume>, <emotion>, <spell>) se siguen contando enteras A PROPOSITO:
+#: Cartesia no dice como las cobra, y pasarse por arriba es preferible a
+#: ensenar un gasto que no es (revision del 26-10).
+_ETIQUETA_PAUSA = re.compile(r'<break\b[^<>]*>', re.I)
 
 
 def caracteres_cobrados(texto):
-    """Los caracteres de ese texto que cobra Cartesia: cada etiqueta, uno."""
-    texto = str(texto or "")
-    return len(_ETIQUETA_SPELL.sub("", _ETIQUETA_VOZ.sub("x", texto)))
+    """Los caracteres de ese texto que cobra Cartesia: cada pausa, uno."""
+    return len(_ETIQUETA_PAUSA.sub("x", str(texto or "")))
 
 
 def reportar_tts(caracteres, operacion="sintesis", unidad=None, tokens=None,
@@ -844,7 +843,8 @@ def _medir_toma_por_contexto(original):
     medidor. Y no chirriaba, porque un hueco en el importe del TTS es
     exactamente lo que se pinta cuando falta la tarifa por caracter.
 
-    Se cuentan los caracteres que se ENVIARON, sumando las entradas del
+    Se cuentan los caracteres que se COBRAN (`caracteres_cobrados`: cada pausa,
+    uno) sumando las entradas del
     contexto, y se anota DESPUES: si la llamada revienta sin haber devuelto
     nada no hay recuento fiable, y un hueco es mejor que un numero inventado.
 
@@ -973,7 +973,7 @@ def _medir_imagen(original):
         # Y EL IMPORTE DE VERDAD SE DEVUELVE, no solo se anota.
         #
         # El motor trae en `meta["coste"]` el precio de su TABLA POR IMAGEN
-        # (0,006 $ en calidad baja), que es la parte pequena: la API cobra
+        # (0,005 $ en calidad baja), que es la parte pequena: la API cobra
         # ademas los tokens de entrada, y aqui la entrada son las referencias de
         # estilo, de reparto y las dos de continuidad que lleva cada plano. Ese
         # numero es el que p6 sumaba para su resumen y el que acababa en la

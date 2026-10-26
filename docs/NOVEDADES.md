@@ -13,10 +13,10 @@ vídeos, estilos, claves y contraseña no se tocan.
   imagen, el Studio la calcula con la tabla oficial de gpt-image-2. En calidad
   baja, apaisada o vertical, son 0,005 $ (antes apuntaba 0,006 $, el precio de
   la cuadrada). Lo normal es que OpenAI sí lo diga, y entonces manda su cifra.
-- **La voz, sin contar las marcas como texto**: una pausa (`<break …/>`) o un
-  cambio de velocidad o de emoción cuenta como UN carácter, como cobra Cartesia,
-  y `<spell>` solo lo que deletrea. Antes una pausa contaba como 23 caracteres.
-  El gasto de voz baja unos céntimos por vídeo.
+- **La voz, sin contar las pausas como texto**: cada pausa (`<break …/>`)
+  cuenta como UN carácter, como cobra Cartesia. Antes contaba como 23. El gasto
+  de voz baja unos céntimos por vídeo. Las demás marcas se siguen contando
+  enteras, porque Cartesia no dice cómo las cobra y es mejor pasarse que quedarse corto.
 - La tabla nueva llega al servidor sola con `asvs actualizar` (si no editaste
   las tarifas a mano).
 

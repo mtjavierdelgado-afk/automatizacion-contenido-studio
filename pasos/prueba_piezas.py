@@ -6093,8 +6093,8 @@ def prueba_costes_menores():
 
     (1) Sin `usage`, una imagen apaisada o vertical en calidad baja cuesta lo
     que dice la tabla oficial de gpt-image-2 (0,005 $), no la del cuadrado.
-    (2) La voz apunta lo que COBRA Cartesia: cada etiqueta de pausa o de voz es
-    un caracter y <spell> solo cuenta lo que deletrea."""
+    (2) La voz apunta lo que COBRA Cartesia: cada pausa <break> es un caracter;
+    las demas etiquetas, enteras (por arriba)."""
     titulo("coste: tabla de respaldo por tamano y caracteres cobrados de la voz")
     from motores.imagen_openai import imagen as motor_imagen   # noqa: PLC0415
     with open(os.path.join(RAIZ, "tarifas.json"), encoding="utf-8") as fh:
@@ -6107,11 +6107,9 @@ def prueba_costes_menores():
     igual(coste.caracteres_cobrados("Hola mundo."), 11, "un texto sin marcas cuenta todo")
     igual(coste.caracteres_cobrados('Hola<break time="1200ms"/> mundo.'), 12,
           "una pausa cuenta como UN caracter, no como los 23 de la etiqueta")
-    igual(coste.caracteres_cobrados('<speed ratio="0.8"/>Uno <emotion value="calm"/>dos'
-                                    '<speed ratio="1"/>'), 10,
-          "speed y emotion, tambien uno cada una")
-    igual(coste.caracteres_cobrados("La <spell>NBA</spell> juega."), 13,
-          "<spell> cuenta lo que deletrea y nada de la etiqueta")
+    igual(coste.caracteres_cobrados('<speed ratio="0.8"/>Uno'), 23,
+          "las demas etiquetas se cuentan enteras: Cartesia no dice como las cobra")
+    igual(coste.caracteres_cobrados("a < b y <breakfast>"), 19, "el texto normal con «<» no se toca")
     igual(coste.caracteres_cobrados(None), 0, "sin texto, cero")
     apuntes = []
     original = coste._anotar

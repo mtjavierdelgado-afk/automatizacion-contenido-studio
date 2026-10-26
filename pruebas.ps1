@@ -80,6 +80,7 @@ $suites = @(
   'pasos\prueba_seo_canal.py',
   'pasos\prueba_tipo_relato.py',
   'pasos\prueba_dominios.py',
+  'pasos\prueba_traducciones.py',
   'pasos\prueba_guion_visual.py',
   'pasos\prueba_consumo_claude.py',
   'prueba_recorrido.py'

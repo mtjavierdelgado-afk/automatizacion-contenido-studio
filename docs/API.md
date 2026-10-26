@@ -23,7 +23,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 |---|---|---|
 | `GET` | `/api/proyectos` | Proyectos disponibles, del mas reciente al mas antiguo. |
 | `POST` | `/api/proyectos` | Crea un proyecto nuevo a partir de {"nombre"}. |
-| `GET` | `/api/proyectos/_resumen` | Por dónde va cada vídeo (`?ids=a,b`, hasta 120; la pantalla pide de 40 en 40), para su tarjeta en Tus proyectos. Lee estado.json y proyecto.json sin abrir el vídeo: no escribe ni cachea nada. |
+| `GET` | `/api/proyectos/_resumen` | Por dónde va cada vídeo, para su tarjeta en Tus proyectos (rediseño de |
 | `DELETE` | `/api/proyectos/papelera` | Vacia la papelera entera. Tampoco tiene vuelta atras. |
 | `GET` | `/api/proyectos/papelera` | Proyectos apartados, del mas recientemente apartado al mas antiguo. |
 | `DELETE` | `/api/proyectos/papelera/{carpeta}` | Borra DE VERDAD un proyecto apartado. No hay vuelta atras. |
@@ -88,7 +88,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/tipo_relato/base/imagen` | La imagen base (aprobada o no) de un sitio del video, o la de un estado. |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/base/usar_subida` | La imagen subida del espacio fijo pasa a ser la base, aprobada (gratis). |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/cambios` | En «un espacio que cambia», Claude escribe el cambio de cada tramo (solo texto). |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/estado/editar` | Reescribe en ESPAÑOL el cambio de un estado. {estado, es} |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/rehacer` | Rehace SOLO los planos pedidos de los que cambian con el tipo de relato (se paga). |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/traducir` | Traduce al español lo que falte (cada cambio y `inicial`). {auto?: bool} |
 
 ## Pasos: estado, params y ejecución
 
@@ -490,4 +492,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**372 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**375 endpoints.** Escrito por `generar_api.py` desde `app.py`.

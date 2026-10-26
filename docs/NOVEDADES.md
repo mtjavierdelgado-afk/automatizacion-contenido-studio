@@ -10,6 +10,24 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
+**Tus notas de mejoras (24 de octubre)**
+- **El asistente habla en español de Latinoamérica**: tutea, nada de
+  «vosotros», «vale», «ordenador» ni «móvil».
+- **Montar el vídeo aunque queden notas sin aplicar** (también las del revisor
+  de imágenes): «Montar el vídeo» ya no se apaga. Pregunta antes, dice cuántas
+  notas quedan y cuántas son del revisor, y las notas se quedan apuntadas para
+  aplicarlas cuando quieras.
+- **«✨ Más emojis» y los textos de Publicar reparten los emojis**: en el título
+  y en el texto van también al principio y ENTRE palabras (justo después de la
+  palabra que ilustran), no solo al final. Nunca en lugar de la palabra clave.
+- **El coste del vídeo, por tipo de imagen**: planos nuevos, planos rehechos
+  (notas, revisor, regenerar), la imagen base del tipo de relato con sus
+  estados, las referencias del reparto y las portadas, cada una en su fila.
+  Antes la imagen base y los estados se sumaban a «Personajes».
+- **El corrector ya no se rompe con comillas en el guion** («comenta "BAÑO"»):
+  esa era la «respuesta rota» que no se arreglaba ni con «Revisar otra vez».
+- El botón «Cerrar» de un error ya no tapa el final del mensaje.
+
 **El medidor de Claude: cuánto te queda de la membresía (25 de octubre)**
 - **El cupo de verdad**: el Studio lee del propio Claude cuánto llevas usado de
   la **ventana de 5 horas** y de la **semana**, y a qué hora se reinicia cada
@@ -71,6 +89,18 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 - El vídeo soltado **no se toca**: lo que estuviera haciendo (montaje,
   imágenes…) sigue en el servidor, y lo vuelves a abrir desde Tus proyectos.
   Un aviso te lo recuerda.
+
+**Los estados del tipo de relato, en español (22 de octubre)**
+- **Cada estado se lee en español.** En «Un espacio que cambia», el cambio de
+  cada estado (y lo que la imagen base ya trae) sale en español, con el inglés
+  que se manda a dibujar plegado debajo. Lo traduce Claude solo, con tu
+  membresía, y no toca nada del vídeo: ni imágenes, ni firmas, ni precios.
+- **«Dónde se usa»**: cada estado y la imagen base dicen en qué bloques del
+  guion salen y qué planos los usan.
+- **✎ Cambiar**: reescribes el estado en español, Claude lo pasa al inglés y
+  se guarda. Antes te avisa de que ese estado pierde su aprobación y pide otra
+  imagen (y de cuántos planos suyos quedarán para rehacer); no se dibuja nada
+  solo.
 
 **«Lo que dice el guion», sin que se cuele la voz (24 de octubre)**
 - **Las líneas «Visual:» de la Parrilla valen solas.** Si casan con el guion

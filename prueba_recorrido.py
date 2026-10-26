@@ -3137,7 +3137,7 @@ def coste_en_detalle(navegador, datos):
     pg.pulsar("button.coste-light")
     ok(pg.esperar("#coste-video", "Coste del vídeo", 15), "y abre el coste del vídeo")
     texto = pg.p.locator("#coste-video").inner_text()
-    for parte in ("Imágenes nuevas", "Imágenes rehechas", "Personajes", "Voz", "Claude",
+    for parte in ("Planos del vídeo: nuevos", "Planos del vídeo: rehechos", "Referencias", "Voz", "Claude",
                   "Música", "Efectos", "Su estilo"):
         ok(parte in texto, f"con «{parte}»")
     _r, total = api.get(f"/api/proyectos/{pid}/coste")
@@ -8132,6 +8132,7 @@ def tipo_de_relato(navegador, datos):
                 _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
                 ok(ficha.get("listo"), "(2b) con la base y sus estados aprobados, listo para dibujar")
                 pg.captura("tipo_relato_estados")
+                relato_en_espanol(pg, api, pid)
             else:
                 _r, f2 = api.get(f"/api/proyectos/{pid}/tipo_relato")
                 ok(False, "(2b) tras escribir qué cambia, salen los estados del vídeo: "
@@ -8574,6 +8575,57 @@ def publicar_seo_canal(navegador, datos):
     _r, claves = api.get("/api/claves")
     api.put("/api/claves", {"youtube_oauth": {"cliente_id": "", "secreto": ""}})
 
+def relato_en_espanol(pg, api, pid):
+    """Rama estados-en-espanol (22-10): con un estado aprobado en pantalla, su
+    cambio sale en español (lo traduce sola la pantalla, con el CLI falso:
+    «ES: …»), con el inglés plegado y «Dónde se usa»; «✎ Cambiar» lo reescribe
+    en español, pasa al inglés («EN: …») y el estado pide otra imagen. No se
+    paga nada: ni traducir ni editar dibujan."""
+    ok(pg.esperar(".estado-relato .relato-es-texto", "ES:", 25),
+       "(2c) el cambio del estado sale en español, traducido solo al abrir")
+    ok(pg.visible(".estado-relato .relato-es-ingles summary", "En inglés"),
+       "(2c) con el inglés que se manda, plegado debajo")
+    ok(pg.visible(".estado-relato .relato-donde", "Dónde se usa")
+       and pg.visible(".estado-relato .relato-donde .meta", "Bloque"),
+       "(2c) y «Dónde se usa», con sus bloques del guion")
+    _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+    ok(((ficha.get("traduccion") or {}).get("faltan")) == 0,
+       f"(2c) el servidor ya no echa en falta ninguna traducción ({ficha.get('traduccion')})")
+    # UN ERROR EN EL ACTO (revisión del 22-10): Claude no devuelve nada y el
+    # hilo acaba antes de que conteste el POST. El texto NO se pierde.
+    pg.pulsar(".estado-relato button", "✎ Cambiar")
+    pg.p.locator(".estado-relato .relato-editor textarea").first.fill("ROMPER esto a propósito")
+    pg.pulsar(".estado-relato .relato-editor button", "Guardar el cambio")
+    pg.p.wait_for_timeout(3500)
+    ok(pg.esperar(".estado-relato .relato-editor textarea", segundos=10)
+       and pg.p.locator(".estado-relato .relato-editor textarea").first.input_value()
+       == "ROMPER esto a propósito",
+       "(2c) si Claude falla, el editor sigue abierto con lo que escribiste")
+    ok(any("No se ha guardado" in a for a in pg.avisos()), f"(2c) y lo dice ({pg.avisos()[-2:]})")
+    _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+    ok(((ficha.get("estados") or [{}])[0]).get("aprobada"), "(2c) y el estado sigue aprobado")
+    pg.pulsar(".estado-relato .relato-editor button", "Cancelar")
+    pg.pulsar(".estado-relato button", "✎ Cambiar")
+    ok(pg.esperar(".estado-relato .relato-editor textarea", segundos=5), "(2c) «✎ Cambiar» abre el editor")
+    pg.p.locator(".estado-relato .relato-editor textarea").first.fill("la mampara es corrediza de vidrio")
+    pg.dialogos.clear()
+    pg.pulsar(".estado-relato .relato-editor button", "Guardar el cambio")
+    ok(any("pierde su aprobación" in d for d in pg.dialogos),
+       f"(2c) antes de guardar avisa de que el estado pide otra imagen ({pg.dialogos[-1:]})")
+    ok(pg.esperar(".estado-relato .relato-es-texto", "la mampara es corrediza de vidrio", 25),
+       "(2c) guardado: sale lo escrito en español")
+    ok(pg.esperar(".estado-relato .meta", "hace falta otra imagen", 15),
+       "(2c) y el estado dice que hace falta otra imagen")
+    _r, ficha = api.get(f"/api/proyectos/{pid}/tipo_relato")
+    primero = (ficha.get("estados") or [{}])[0]
+    ok(str(primero.get("cambio") or "").startswith("EN: ") and not primero.get("aprobada"),
+       f"(2c) por dentro va en inglés y ya no está aprobado ({str(primero.get('cambio'))[:60]})")
+    _r, vivos = api.get(f"/api/trabajos?proyecto={pid}&activos=1")
+    lista = vivos if isinstance(vivos, list) else ((vivos or {}).get("trabajos") or [])
+    ok(not lista, f"(2c) ni traducir ni editar lanzan ningún trabajo ({len(lista)})")
+    pg.captura("tipo_relato_en_espanol")
+    pg.sin_errores("los estados en español")
+
 
 # ============================================================== GUION VISUAL
 # guion-visual (22-10-2026): «Qué dibujan las imágenes» en el Encargo de un
@@ -8632,6 +8684,64 @@ def guion_visual(navegador, datos):
         r, _d = api.put(f"/api/proyectos/{pid}/guion_visual/modo", {"imagenes": None})
         ok(getattr(r, "status_code", 0) == 200, "(4) y se vuelve a lo que diga el estilo")
         pg.sin_errores("el guion visual")
+        pg.cerrar()
+
+# ============================================================ NOTAS DEL 24-10
+@escenario
+def notas_del_24_10(navegador, datos):
+    """Notas de mejoras del dueño (24-10-2026): montar el vídeo aunque el
+    revisor haya dejado notas de rehacer (preguntando antes), y el «Cerrar» de
+    un error que no pisa el texto."""
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="notas del 24-10")
+    try:
+        pg.sin_trabajo(300)
+        pg.js(f"await abrirVideoLight('{pid}');")
+        ir_al_paso(pg, "Imágenes")
+        pg.p.wait_for_timeout(1200)
+        r = pg.js("""
+          const rep = estadoRepaso(); const antes = [rep.notas, rep.pendientes];
+          const vo = window.videoObsoletoLight, mo = window.montarElVideoLight, c = window.confirm;
+          rep.notas = [{ id: 'x', autor: 'revisor', estado: 'pendiente', texto: 'rehacer el mando' }];
+          rep.pendientes = 1;
+          let montajes = 0, pregunta = '', respuesta = false;
+          window.videoObsoletoLight = () => true;
+          window.montarElVideoLight = () => { montajes += 1; };
+          window.confirm = t => { pregunta = t; return respuesta; };
+          const salida = {};
+          try {
+            const nodo = botonRenderizarLight();
+            const b = nodo && (nodo.tagName === 'BUTTON' ? nodo : nodo.querySelector('button'));
+            salida.hay = !!b; salida.apagado = b ? b.disabled : null;
+            if (b) {
+              b.click(); salida.trasCancelar = montajes;
+              respuesta = true; b.click(); salida.trasAceptar = montajes;
+            }
+            salida.pregunta = pregunta;
+          } finally {
+            window.videoObsoletoLight = vo; window.montarElVideoLight = mo; window.confirm = c;
+            rep.notas = antes[0]; rep.pendientes = antes[1];
+          }
+          return salida;""") or {}
+        ok(r.get("hay") and r.get("apagado") is False,
+           f"con una nota del revisor sin aplicar, «Montar el vídeo» se puede pulsar ({r})")
+        ok("1 del revisor" in (r.get("pregunta") or "") and r.get("trasCancelar") == 0,
+           f"al pulsarlo pregunta antes, diciendo que es del revisor; «Cancelar» no monta ({r})")
+        ok(r.get("trasAceptar") == 1, f"y «Aceptar» monta ({r})")
+        pg.js(f"await abrirVideoLight('{pid}'); repintarVideo();")
+        # el error con «Cerrar»: el texto no pasa por debajo del botón
+        pg.js("ERRORES[CLAVE_VIDEO_LIGHT] = 'falta aprobar la imagen base de «bano_calido» (1 plano(s)), "
+              "«bano_calido», estado «despues» (4 plano(s)): genérala o usa la imagen en «El espacio fijo» "
+              "y apruébala antes de generar los planos'; repintarVideo();")
+        ok(pg.esperar(".error-cerrable", "falta aprobar", 10), "sale el error con su «Cerrar»")
+        cajas = pg.p.evaluate("""() => { const e = document.querySelector('.error-cerrable');
+          const t = e.querySelector('.titular').getBoundingClientRect();
+          const b = e.querySelector(':scope > .mini').getBoundingClientRect();
+          return { t: t.right, b: b.left }; }""")
+        ok(cajas["t"] <= cajas["b"] + 1, f"y el texto no pasa por debajo del «Cerrar» ({cajas})")
+        pg.js("limpiarError(CLAVE_VIDEO_LIGHT); repintarVideo();")
+        pg.sin_errores("las notas del 24-10")
+    finally:
         pg.cerrar()
 
 

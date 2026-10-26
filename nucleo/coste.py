@@ -733,7 +733,11 @@ def reportar_claude(sobre, operacion="cli", unidad=None, detalle=None):
     usage = sobre.get("usage") if isinstance(sobre.get("usage"), dict) else {}
     cache = (int(usage.get("cache_creation_input_tokens") or 0)
              + int(usage.get("cache_read_input_tokens") or 0))
-    ficha = {}
+    # LAS DOS CACHÉS APARTE (medidor-claude-2): la leída cuesta ~10 % y la
+    # creada algo más que la entrada; sumadas en `tokens.cache` una llamada
+    # pequeña parecía de 40 mil. `tokens` no cambia (lo leen los históricos).
+    ficha = {"cache_creada": int(usage.get("cache_creation_input_tokens") or 0),
+             "cache_leida": int(usage.get("cache_read_input_tokens") or 0)}
     if sobre.get("model"):
         ficha["modelo"] = sobre["model"]
     if sobre.get("duration_ms") is not None:

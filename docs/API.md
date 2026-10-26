@@ -353,8 +353,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/` | La interfaz del Estudio. |
-| `GET` | `/api/claude/consumo` | El medidor de Claude (solo lee): el cupo de cada cuenta, los avisos al |
-| `POST` | `/api/claude/consumo/medir` | «Medir ahora»: una llamada mínima por cuenta (haiku, una palabra) para |
+| `GET` | `/api/claude/consumo` | El medidor de Claude: cupo de cada cuenta, avisos y consumo (solo lee). |
+| `POST` | `/api/claude/consumo/medir` | «Medir ahora»: lee el cupo de cada cuenta con una llamada mínima. |
 | `GET` | `/api/clientes` | Los proyectos (clientes) y a cual pertenece cada estilo. |
 | `POST` | `/api/clientes` | Un proyecto nuevo: {nombre}. |
 | `PUT` | `/api/clientes/estilos/{preset_id}` | Mueve un estilo (y sus videos) a un proyecto: {cliente} ("" lo saca). |
@@ -362,7 +362,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `DELETE` | `/api/clientes/{cid}` | Borra el proyecto. Sus estilos y videos NO se borran: quedan sin proyecto. |
 | `PUT` | `/api/clientes/{cid}` | Renombra, oculta o pone clave: {nombre?, oculto?, clave?} ("" la quita). |
 | `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
-| `GET` | `/api/cola_studio` | La cola de todo el Studio: imágenes, montaje y lo demás que trabaja. |
+| `GET` | `/api/cola_studio` | La cola de todo el Studio (solo lee; sin nombres de proyectos con clave). |
 | `GET` | `/api/dominios` | Los dominios de fabrica (el negocio de un estilo). -> {dominios, automatico} |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |

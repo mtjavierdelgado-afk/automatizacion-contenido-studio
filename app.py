@@ -2394,7 +2394,10 @@ def _es_taller(ctx):
 
 @app.get("/api/cola_studio")
 def cola_del_studio(peticion: Request):
-    """La cola de todo el Studio: imágenes, montaje y lo demás que trabaja."""
+    """La cola de todo el Studio (solo lee; sin nombres de proyectos con clave).
+
+    Imágenes y montaje con `ahora` (quién tiene el turno) y `fila` (quién
+    espera, por orden de llegada), y `trabajando`: lo demás en marcha."""
     try:
         cerrados = CLIENTES.cerrados_para(raiz_proyectos(), peticion.headers.get("x-estudio-abiertos"))
     except Exception:                                       # noqa: BLE001
@@ -2494,6 +2497,15 @@ def _nombre_de_pid(pid, cerrados):
     return {"nombre": config.get("nombre") or pid, "video": True}
 
 
+def _claude_del_video(pid):
+    """Lo de Claude de un vídeo para «Coste del vídeo» (medidor-claude-2). None
+    si no hay registro (vídeos de antes del medidor): la tabla usa el coste."""
+    try:
+        return CONSUMO_CLAUDE.del_video(pid) if CONSUMO_CLAUDE is not None else None
+    except Exception:                                       # noqa: BLE001
+        return None
+
+
 def _consumo_de_claude(peticion):
     cc = CONSUMO_CLAUDE
     if cc is None:
@@ -2521,9 +2533,11 @@ def _consumo_de_claude(peticion):
 
 @app.get("/api/claude/consumo")
 def consumo_de_claude(peticion: Request):
-    """El medidor de Claude (solo lee): el cupo de cada cuenta, los avisos al
-    70 % y al 90 % y el consumo de los últimos días. Si toca (más de 15 min y
-    ha habido llamadas), lanza una medida en segundo plano: no espera a ella."""
+    """El medidor de Claude: cupo de cada cuenta, avisos y consumo (solo lee).
+
+    El cupo (ventanas de 5 h y semana), los avisos al 70 % y al 90 % y el
+    consumo de los últimos días. Si toca (más de 15 min y ha habido llamadas),
+    lanza una medida en segundo plano: no espera a ella."""
     if CONSUMO_CLAUDE is not None and not CONSUMO_CLAUDE.midiendo():
         for cuenta in _cuentas_para_medir():
             try:
@@ -2536,8 +2550,10 @@ def consumo_de_claude(peticion: Request):
 
 @app.post("/api/claude/consumo/medir")
 def medir_consumo_de_claude(peticion: Request):
-    """«Medir ahora»: una llamada mínima por cuenta (haiku, una palabra) para
-    leer su cupo. Espera a la medida (unos segundos)."""
+    """«Medir ahora»: lee el cupo de cada cuenta con una llamada mínima.
+
+    Una llamada a haiku de una palabra por cuenta; espera a la medida (unos
+    segundos) y devuelve lo mismo que el GET."""
     if CONSUMO_CLAUDE is None:
         raise ErrorApi(503, "el medidor de Claude no se ha podido cargar")
     # a la vez y con tope: detrás del proxy una petición de un minuto se corta
@@ -3684,9 +3700,20 @@ def _desglose_de_eventos(eventos):
         elif prov == "claude_cli":
             op = str(e.get("operacion") or "claude")
             t = e.get("tokens") or {}
-            ficha = claude.setdefault(op, {"llamadas": 0, "tokens": 0})
+            ficha = claude.setdefault(op, {"llamadas": 0, "tokens": 0, "cache": 0})
             ficha["llamadas"] += 1
-            ficha["tokens"] += int(t.get("entrada") or 0) + int(t.get("salida") or 0) + int(t.get("cache") or 0)
+            # TOKENS NUEVOS Y DE CACHÉ, aparte (medidor-claude-2): la caché
+            # leída cuesta ~10 % y sumada inflaba la cifra. Los eventos viejos
+            # no traen el desglose: su caché entera cuenta como «de caché».
+            detalle_e = e.get("detalle") if isinstance(e.get("detalle"), dict) else {}
+            leida = detalle_e.get("cache_leida")
+            cache = int(t.get("cache") or 0)
+            try:
+                leida = cache if leida is None else max(0, min(cache, int(leida or 0)))
+            except (TypeError, ValueError):
+                leida = cache
+            ficha["tokens"] += int(t.get("entrada") or 0) + int(t.get("salida") or 0) + (cache - leida)
+            ficha["cache"] += leida
     return {
         "imagenes": {k: {"cuantas": v[0], "usd": round(v[1], 4)} for k, v in imagenes.items()},
         "imagenes_confirmadas": confirmadas, "imagenes_estimadas": estimadas,
@@ -3694,6 +3721,7 @@ def _desglose_de_eventos(eventos):
         "claude": sorted(({"para": k, **v} for k, v in claude.items()),
                          key=lambda x: -x["tokens"]),
         "claude_tokens": sum(v["tokens"] for v in claude.values()),
+        "claude_cache": sum(v["cache"] for v in claude.values()),
         "usd": round(sum(v[1] for v in imagenes.values()) + sum(v[1] for v in voz.values()), 4),
     }
 
@@ -3779,6 +3807,7 @@ def coste_en_detalle(pid: str):
     calidad = str((ctx.estado.params("assets") or {}).get("calidad") or "low")
     return {
         "proyecto": ctx.id, "total_usd": detalle["usd"], **detalle,
+        "claude_consumo": _claude_del_video(ctx.id),
         "musica": {"usd": 0.0, "titulo": musica.get("titulo") or musica.get("nombre") or "",
                    "fuente": musica.get("fuente") or musica.get("origen") or (
                        "subida por ti" if musica.get("propia") else "Jamendo"),

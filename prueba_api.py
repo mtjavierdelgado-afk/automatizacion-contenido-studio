@@ -4630,6 +4630,27 @@ def probar_medidor_claude(cliente):
     ok(isinstance((datos or {}).get("avisos"), list), "y la lista de avisos")
 
 
+def probar_claude_en_coste(cliente, pid):
+    """Rama medidor-claude-2 (26-10-2026): «Coste del vídeo» trae lo de Claude
+    con los tokens nuevos y los de caché aparte, y el desglose del coste separa
+    la caché leída (de los eventos con el detalle nuevo)."""
+    seccion("CLAUDE EN EL COSTE DEL VÍDEO (26-10)")
+    respuesta, datos = cliente.get(f"/api/proyectos/{pid}/coste/detalle")
+    igual(respuesta.status_code, 200, "GET /coste/detalle responde 200")
+    ok("claude_consumo" in (datos or {}), "trae «claude_consumo» (None si el vídeo es de antes del medidor)")
+    ok(isinstance((datos or {}).get("claude_cache"), int), "y la caché de Claude aparte de los tokens nuevos")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    d = servidor._desglose_de_eventos([
+        {"proveedor": "claude_cli", "operacion": "guion",
+         "tokens": {"entrada": 10, "salida": 90, "cache": 31000},
+         "detalle": {"cache_leida": 30000, "cache_creada": 1000}},
+        {"proveedor": "claude_cli", "operacion": "guion",
+         "tokens": {"entrada": 5, "salida": 5, "cache": 2000}}])
+    igual((d["claude_tokens"], d["claude_cache"]), (1110, 32000),
+          "nuevos = entrada + salida + caché creada; la leída (y la de eventos viejos sin desglose) va aparte")
+
+
 def probar_cola_de_montaje(cliente):
     """Rama cola-montaje (25-10-2026): montar va de uno en uno en todo el
     Studio y por orden de llegada, «Solo montar» no espera, y
@@ -8225,6 +8246,7 @@ def main():
         probar_cola_de_montaje(cliente)
         probar_medidor_claude(cliente)
         probar_coste_en_detalle(cliente, pid)
+        probar_claude_en_coste(cliente, pid)
         probar_sistema(cliente)
         probar_lo_que_lleva(cliente)
         probar_salud_de_las_cuentas(cliente)

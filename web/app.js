@@ -24028,6 +24028,7 @@ function pintarBarraModulos() {
     }, texto, id === 'publicar' && PUB.avisos
       ? h('span', { clase: 'aviso-modulo', title: 'Envíos que fallaron o esperan tu OK' }, String(PUB.avisos))
       : null)));
+  enlaces.appendChild(botonColaDelMenu());
   enlaces.appendChild(h('a', {
     href: '#', clase: 'boton-modulo modulo-config', title: 'Claves, cuentas, la paleta, novedades y notas',
     onclick: ev => { ev.preventDefault(); conmutarConfig(true); },
@@ -24072,6 +24073,215 @@ function gastoDelMenu() {
     caja.appendChild(h('span', { clase: 'meta' }, 'sin tope (ponlo en Inicio → Personalizar)'));
   }
   return caja;
+}
+
+/* ============================================================ COLA DEL STUDIO
+ *
+ * Rama cola-montaje (25-10-2026). Con varios vídeos a la vez, lo que se
+ * dibuja y lo que se monta van de uno en uno en todo el Studio (cada uno con
+ * su fila, por orden de llegada: `_TURNO_IMAGENES` y `_TURNO_MONTAJE` en
+ * app.py). Aquí se ve todo junto, sin entrar vídeo por vídeo: el botón «Cola»
+ * de la barra de módulos lleva cuántos vídeos tienen algo en marcha, y abre un
+ * panel lateral con quién dibuja, quién se monta, quién espera y en qué orden,
+ * y lo demás que trabaja (guion, voz…), con «Abrir» y «Cancelar».
+ *
+ * Solo lee (`GET /api/cola_studio`) salvo «Cancelar», que es el mismo
+ * `POST /api/trabajos/{id}/cancelar` de siempre y pregunta antes. El panel
+ * vive fuera de `pintarLight` (una capa propia en <body>): abrirlo no repinta
+ * ni toca el vídeo que haya abierto. Se pregunta cada 4 s con el panel abierto
+ * y cada 15 s si no, y nada con la pestaña escondida.
+ */
+const COLA_STUDIO = { datos: null, abierto: false, reloj: null, huella: '', pidiendo: false };
+
+function cuentaColaStudio() {
+  const d = COLA_STUDIO.datos;
+  if (!d) return 0;
+  // los de un proyecto con clave llegan sin pid: cada trabajo cuenta como uno
+  const videos = new Set((d.trabajando || []).map((t, i) => t.pid || `sin-pid-${i}`));
+  return videos.size;
+}
+
+function botonColaDelMenu() {
+  arrancarColaStudio();
+  const n = cuentaColaStudio();
+  return h('a', {
+    href: '#', clase: 'boton-modulo modulo-cola',
+    title: 'Qué se dibuja, qué se monta y quién espera, en todo el Studio',
+    datos: { modulo: 'cola' },
+    onclick: ev => { ev.preventDefault(); abrirColaStudio(); },
+    'aria-label': n ? `Cola del Studio: ${n} trabajando` : 'Cola del Studio',
+  }, h('span', { 'aria-hidden': 'true' }, '⏳'), h('span', { clase: 'nombre-cola' }, 'Cola'),
+  n ? h('span', { clase: 'aviso-modulo aviso-cola', title: `${n} ${n === 1 ? 'vídeo trabajando' : 'vídeos trabajando'}` }, String(n)) : null);
+}
+
+function arrancarColaStudio() {
+  if (COLA_STUDIO.reloj) return;
+  const vuelta = async () => {
+    if (!document.hidden) await refrescarColaStudio();
+    COLA_STUDIO.reloj = setTimeout(vuelta, COLA_STUDIO.abierto ? 4000 : 15000);
+  };
+  COLA_STUDIO.reloj = setTimeout(vuelta, 0);
+}
+
+async function refrescarColaStudio() {
+  if (COLA_STUDIO.pidiendo) return;
+  COLA_STUDIO.pidiendo = true;
+  try {
+    const datos = await pedir(`${BASE}/api/cola_studio`);
+    const { ahora, ...resto } = datos || {};
+    const huella = JSON.stringify(resto, (k, v) => (k === 'segundos' || k === 'progreso' ? undefined : v));
+    COLA_STUDIO.datos = datos;
+    if (huella !== COLA_STUDIO.huella) {
+      COLA_STUDIO.huella = huella;
+      repintarBotonCola();
+    }
+    if (COLA_STUDIO.abierto) pintarColaStudio();
+  } catch (e) {
+    /* sin la cola no se rompe nada: el botón se queda como estaba */
+  } finally {
+    COLA_STUDIO.pidiendo = false;
+  }
+}
+
+function repintarBotonCola() {
+  const viejo = document.querySelector('#barra-modulos .modulo-cola');
+  if (viejo) viejo.replaceWith(botonColaDelMenu());
+}
+
+function abrirColaStudio() {
+  COLA_STUDIO.abierto = true;
+  pintarColaStudio();
+  // al ritmo de 4 s desde YA, no cuando venza la vuelta de 15 s que había
+  clearTimeout(COLA_STUDIO.reloj);
+  COLA_STUDIO.reloj = null;
+  arrancarColaStudio();
+  setTimeout(() => {
+    const cajon = document.querySelector('.cajon-cola');
+    if (cajon) cajon.focus({ preventScroll: true });
+  }, 0);
+}
+
+function cerrarColaStudio() {
+  COLA_STUDIO.abierto = false;
+  const capa = document.getElementById('capa-cola-studio');
+  if (capa) capa.remove();
+}
+
+function hacePocoCola(desde, ahora) {
+  if (!desde) return '';
+  const s = Math.max(0, Math.round((Number(ahora) || Date.now() / 1000) - Number(desde)));
+  return s < 60 ? 'hace un momento' : `hace ${duracionCorta(s)}`;
+}
+
+function abrirVideoDeLaCola(pid) {
+  cerrarColaStudio();
+  irAModulo('crear');
+  abrirVideoLight(pid);
+}
+
+async function cancelarDesdeLaCola(t) {
+  if (!t.trabajo) return;
+  const si = await dialogo({ titulo: 'Cancelar', peligro: true, aceptar: 'Cancelar el trabajo', cancelar: 'No',
+    texto: `¿Cancelar «${legibleCorto(t.nombre)}»? Lo ya hecho y pagado se queda; lo que falte no se hace.` });
+  if (!si) return;
+  try {
+    await pedir(API.cancelar(t.trabajo), { method: 'POST' });
+    toast('cancelación pedida');
+  } catch (e) {
+    toast(`no se ha podido cancelar: ${e.message}`, true);
+  }
+  refrescarColaStudio();
+}
+
+function filaDeLaCola(plaza, puesto, ahora, extra) {
+  const fila = h('div', { clase: `fila-cola${puesto ? ' en-espera' : ' trabajando'}` });
+  fila.appendChild(h('span', { clase: 'puesto-cola' }, puesto ? `${puesto}.º` : '▶'));
+  const textos = h('div', { clase: 'textos-cola' },
+    h('b', {}, legibleCorto(plaza.nombre || 'otro vídeo')),
+    h('span', { clase: 'meta' }, (puesto ? 'esperando, ' : 'empezó ') + hacePocoCola(plaza.desde, ahora)));
+  if (extra) textos.appendChild(extra);
+  fila.appendChild(textos);
+  if (plaza.video && plaza.pid) {
+    fila.appendChild(h('button', { clase: 'mini', title: 'Abrir este vídeo', onclick: () => abrirVideoDeLaCola(plaza.pid) }, 'Abrir'));
+  }
+  return fila;
+}
+
+function seccionTurnoCola(titulo, turno, vacio, ahora) {
+  const t = turno || {};
+  const caja = h('section', { clase: 'seccion-ajustes seccion-cola' },
+    h('h3', { clase: 'titulo-ajustes' }, titulo));
+  if (!t.ahora && !(t.fila || []).length) {
+    caja.appendChild(h('div', { clase: 'pista' }, vacio));
+    return caja;
+  }
+  if (t.ahora) caja.appendChild(filaDeLaCola(t.ahora, 0, ahora));
+  (t.fila || []).forEach((plaza, i) => caja.appendChild(filaDeLaCola(plaza, i + 1, ahora)));
+  return caja;
+}
+
+function seccionTrabajandoCola(lista, ahora) {
+  const caja = h('section', { clase: 'seccion-ajustes seccion-cola' },
+    h('h3', { clase: 'titulo-ajustes' }, 'Todo lo que está en marcha'));
+  if (!lista.length) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Nada trabajando ahora mismo.'));
+    return caja;
+  }
+  lista.forEach(t => {
+    const extra = h('div', { clase: 'avance-cola' },
+      barraDeProgreso(t.progreso || 0),
+      h('span', { clase: 'meta' }, `${Math.round((t.progreso || 0) * 100)} %`
+        + (t.mensaje ? ` · ${legibleCorto(t.mensaje)}` : '')
+        + (t.cancelando ? ' · cancelando…' : '')));
+    const fila = filaDeLaCola({ nombre: t.nombre, pid: t.pid, video: t.video,
+      desde: (Number(ahora) || 0) - (Number(t.segundos) || 0) }, 0, ahora, extra);
+    if (t.trabajo && !t.cancelando) {
+      fila.appendChild(h('button', { clase: 'mini fantasma', title: 'Cancelar este trabajo',
+        onclick: () => cancelarDesdeLaCola(t) }, 'Cancelar'));
+    }
+    caja.appendChild(fila);
+  });
+  return caja;
+}
+
+function pintarColaStudio() {
+  if (!COLA_STUDIO.abierto) return;
+  const d = COLA_STUDIO.datos;
+  const cuerpo = h('div', { clase: 'cuerpo-ajustes' });
+  if (!d) {
+    cuerpo.appendChild(h('div', { clase: 'cargando' }, 'mirando…'));
+  } else {
+    cuerpo.appendChild(h('div', { clase: 'pista' },
+      'Las imágenes y el montaje van de uno en uno en todo el Studio, por orden de llegada: '
+      + 'puedes lanzar varios vídeos y cada uno espera su turno solo. El guion y la voz no esperan.'));
+    cuerpo.appendChild(seccionTurnoCola('🎨 Imágenes', d.imagenes, 'Nada dibujándose.', d.ahora));
+    cuerpo.appendChild(seccionTurnoCola('🎬 Montaje', d.montaje, 'Nada montándose.', d.ahora));
+    cuerpo.appendChild(seccionTrabajandoCola(d.trabajando || [], d.ahora));
+  }
+  const capa = h('div', { id: 'capa-cola-studio', clase: 'capa-ajustes-proyecto capa-cola',
+    onclick: ev => { if (ev.target === capa) cerrarColaStudio(); },
+    onkeydown: ev => { if (ev.key === 'Escape') cerrarColaStudio(); } },
+  h('aside', { clase: 'cajon-proyecto cajon-cola', role: 'dialog', 'aria-label': 'Cola del Studio', tabindex: '-1' },
+    h('div', { clase: 'cab-ajustes' },
+      h('b', {}, '⏳ Cola del Studio'),
+      h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini fantasma', title: 'Cerrar', 'aria-label': 'Cerrar', onclick: cerrarColaStudio }, '×')),
+    cuerpo));
+  const vieja = document.getElementById('capa-cola-studio');
+  if (vieja) {
+    /* repintar cada 4 s no salta arriba ni roba el foco: solo lo devuelve al
+       cajón si estaba dentro (un diálogo de «Cancelar» abierto se lo queda) */
+    const scroll = (vieja.querySelector('.cajon-cola') || {}).scrollTop || 0;
+    const teniaFoco = vieja.contains(document.activeElement);
+    vieja.replaceWith(capa);
+    const cajon = capa.querySelector('.cajon-cola');
+    if (cajon) {
+      cajon.scrollTop = scroll;
+      if (teniaFoco) cajon.focus({ preventScroll: true });
+    }
+  } else {
+    document.body.appendChild(capa);
+  }
 }
 
 function dolares(n, redondo) {

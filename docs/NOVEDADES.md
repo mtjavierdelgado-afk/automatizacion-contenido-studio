@@ -29,6 +29,22 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 - Si cierras el editor mientras la IA o Claude trabajan, el resultado sale en
   el aviso flotante de siempre, para que no se pierda.
 
+**Varios vídeos a la vez: la cola de montaje y la «Cola del Studio» (25 de octubre)**
+- **El montaje va de uno en uno**, como ya iban las imágenes. Puedes lanzar
+  varios vídeos seguidos: el que llega mientras otro se monta espera su turno
+  solo, y la barra dice a quién espera y en qué puesto va («esperando turno de
+  montaje: se está montando «…» (vas 2.º en la fila)»). Así cada vídeo sale
+  antes: dos montajes a la vez se repartían la máquina y terminaban los dos al
+  final. Mientras espera se puede cancelar.
+- **«Solo montar»** (volver a mezclar sobre los clips que ya hay, segundos) no
+  espera.
+- **Las imágenes y el montaje atienden por orden de llegada**: el primero que
+  pidió turno es el primero en entrar.
+- **Nuevo botón «⏳ Cola»** en la barra de módulos, con cuántos vídeos están
+  trabajando. Abre un panel con qué se está dibujando, qué se está montando,
+  quién espera y en qué orden, y todo lo demás que está en marcha (guion, voz…),
+  con «Abrir» para ir al vídeo y «Cancelar».
+
 **«Pasar al Encargo» con el formulario limpio (22 de octubre)**
 - Si tenías un vídeo abierto en Crear (por ejemplo, montándose) y pasabas otro
   guion desde la Parrilla, la pantalla seguía enseñando el vídeo de antes y no

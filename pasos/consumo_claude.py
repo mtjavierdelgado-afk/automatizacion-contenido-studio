@@ -38,6 +38,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -66,8 +68,15 @@ NOMBRES_VENTANA = {
     "seven_day_sonnet": "Semana (Sonnet)",
 }
 
+#: El registro se poda al pasar de este tamaño: se queda lo de los últimos DIAS_GUARDAR.
+MAX_BYTES = 4 * 1024 * 1024
+DIAS_GUARDAR = 35
+
 _LOCK = threading.Lock()
 _MIDIENDO = set()
+#: {clave de cuenta: epoch de su última llamada de trabajo}, para no recorrer
+#: el registro entero en cada GET (`toca_medir`). Tras reiniciar, se mira el fichero.
+_ULTIMA = {}
 
 
 # ------------------------------------------------------------------ ficheros
@@ -128,7 +137,11 @@ def _contexto():
             import sys                                    # noqa: PLC0415
             sys.path.insert(0, RAIZ_ESTUDIO)
             from nucleo import coste                      # noqa: PLC0415
-        actual = coste.contexto_actual()
+        # SOLO EL DE ESTE HILO: `contexto_actual` cae al único trabajo activo
+        # del proceso, y una llamada del asistente o de la Parrilla se
+        # apuntaría al vídeo que estuviera trabajando a la vez
+        pila = getattr(coste._LOCAL, "pila", None)
+        actual = pila[-1] if pila else None
         if actual is None:
             return "", ""
         return str(actual.medidor.proyecto.id or ""), str(actual.paso or "")
@@ -150,6 +163,25 @@ def _append(registro):
     with _LOCK:
         with open(ruta, "a", encoding="utf-8") as fh:
             fh.write(linea + "\n")
+        try:
+            if os.path.getsize(ruta) > MAX_BYTES:
+                _podar(ruta)
+        except OSError:
+            pass
+
+
+def _podar(ruta):
+    """Se queda con lo de los últimos DIAS_GUARDAR (con `_LOCK` tomado)."""
+    desde = time.time() - DIAS_GUARDAR * 86400
+    temporal = ruta + ".poda"
+    with open(ruta, "r", encoding="utf-8") as origen, open(temporal, "w", encoding="utf-8") as destino:
+        for linea in origen:
+            try:
+                if float(json.loads(linea).get("t") or 0) >= desde:
+                    destino.write(linea)
+            except (ValueError, TypeError, AttributeError):
+                continue
+    os.replace(temporal, ruta)
 
 
 # ---------------------------------------------------------------- registrar
@@ -179,6 +211,8 @@ def anotar(cuenta, sobre, para=""):
             "proyecto": proyecto,
             "paso": paso,
         })
+        if para != "medir el cupo":
+            _ULTIMA[clave_de(cuenta)] = time.time()
     except Exception:                                     # noqa: BLE001 -- es un registro
         pass
 
@@ -189,18 +223,22 @@ def anotar_fallo(cuenta, fallo, para=""):
         estado, mensaje = _salud().clasificar(fallo)
     except Exception:                                     # noqa: BLE001
         return
-    if estado != "cupo":
-        return
     try:
+        if estado != "cupo":
+            # lo que vence o falla también ha gastado: se cuenta (sin tokens)
+            _append({"t": round(time.time(), 3), "tipo": "fallo", "cuenta": etiqueta_de(cuenta),
+                     "clave": clave_de(cuenta), "para": str(para or "")[:80], "estado": estado})
+            return
         _append({"t": round(time.time(), 3), "tipo": "cupo", "cuenta": etiqueta_de(cuenta),
                  "clave": clave_de(cuenta), "para": str(para or "")[:80],
                  "mensaje": str(mensaje or "")[:300]})
-        cupos = leer_cupo()
-        ficha = dict(cupos.get(clave_de(cuenta)) or {})
-        ficha.update(cuenta=etiqueta_de(cuenta), estado="rejected",
-                     mensaje=str(mensaje or "")[:300], agotado_en=round(time.time(), 3))
-        cupos[clave_de(cuenta)] = ficha
-        _escribir_cupo(cupos)
+        with _LOCK:
+            cupos = leer_cupo()
+            ficha = dict(cupos.get(clave_de(cuenta)) or {})
+            ficha.update(cuenta=etiqueta_de(cuenta), estado="rejected",
+                         mensaje=str(mensaje or "")[:300], agotado_en=round(time.time(), 3))
+            cupos[clave_de(cuenta)] = ficha
+            _escribir_cupo(cupos)
     except Exception:                                     # noqa: BLE001
         pass
 
@@ -213,10 +251,10 @@ def leer_registro(desde=0.0):
             for linea in fh:
                 try:
                     r = json.loads(linea)
-                except ValueError:
+                    if isinstance(r, dict) and float(r.get("t") or 0) >= desde:
+                        salida.append(r)
+                except (ValueError, TypeError):
                     continue
-                if isinstance(r, dict) and float(r.get("t") or 0) >= desde:
-                    salida.append(r)
     except OSError:
         return []
     return salida
@@ -240,8 +278,8 @@ def _escribir_cupo(datos):
     try:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=os.path.dirname(ruta),
                                          prefix=".cupo-", suffix=".tmp", delete=False) as fh:
-            json.dump(datos, fh, ensure_ascii=False, indent=2)
             temporal = fh.name
+            json.dump(datos, fh, ensure_ascii=False, indent=2)
         os.replace(temporal, ruta)
         temporal = None
     finally:
@@ -295,28 +333,67 @@ def _cupo_simulado():
                                "seven_day": {"utilization": 0.18, "resetsAt": int(ahora + 4 * 86400)}}}
 
 
+def _correr_medida(cuenta):
+    """La llamada mínima, con su árbol de procesos y una carpeta de un solo uso:
+    sin carpeta propia el CLI cargaba el CLAUDE.md del Studio (decenas de miles
+    de tokens) en cada medida. -> (rate_limit_info, sobre)"""
+    cli = _cli()
+    orden = cli.construir_orden(MODELO_MEDIDA, ESFUERZO_MEDIDA,
+                                herramientas_vetadas=cli.HERRAMIENTAS_VETADAS)
+    i = orden.index("--output-format")
+    orden[i + 1] = "stream-json"
+    orden[i + 2:i + 2] = ["--verbose", "--no-session-persistence"]
+    carpeta_vacia = tempfile.mkdtemp(prefix="medir_cupo_")
+    try:
+        proceso = subprocess.Popen(orden, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, cwd=carpeta_vacia, env=cli.entorno(cuenta),
+                                   **getattr(cli, "SIN_VENTANA", {}), **getattr(cli, "GRUPO_PROPIO", {}))
+        if getattr(cli, "GRUPO_PROPIO", None):
+            proceso._grupo_propio = True
+        try:
+            crudo, _error = proceso.communicate(INSTRUCCION.encode("utf-8"), timeout=TIEMPO_MEDIDA_S)
+        except subprocess.TimeoutExpired:
+            cli.matar_arbol(proceso)
+            raise RuntimeError(f"el CLI no contestó en {TIEMPO_MEDIDA_S} s")
+        return leer_salida_medida(crudo.decode("utf-8", errors="replace"))
+    finally:
+        shutil.rmtree(carpeta_vacia, ignore_errors=True)
+
+
 def medir(cuenta=None):
     """UNA llamada mínima para leer el cupo de esa cuenta. -> su ficha.
 
     Va con su propia orden (la de `cli_claude.construir_orden` con stream-json):
-    las llamadas de trabajo no cambian de formato."""
+    las llamadas de trabajo no cambian de formato. Si ya se está midiendo esa
+    cuenta (otra pestaña, la medida sola), espera a esa y devuelve su ficha."""
     clave = clave_de(cuenta)
+    with _LOCK:
+        ocupada = clave in _MIDIENDO
+        if not ocupada:
+            _MIDIENDO.add(clave)
+    if ocupada:
+        tope = time.time() + TIEMPO_MEDIDA_S
+        while time.time() < tope:
+            with _LOCK:
+                if clave not in _MIDIENDO:
+                    break
+            time.sleep(0.3)
+        return leer_cupo().get(clave) or {}
+    try:
+        return _medir(cuenta, clave)
+    finally:
+        with _LOCK:
+            _MIDIENDO.discard(clave)
+
+
+def _medir(cuenta, clave):
     ficha = {"cuenta": etiqueta_de(cuenta), "medido_en": round(time.time(), 3)}
     if simulado():
         info, sobre = _cupo_simulado(), None
         ficha["simulado"] = True
     else:
-        cli = _cli()
         try:
-            orden = cli.construir_orden(MODELO_MEDIDA, ESFUERZO_MEDIDA,
-                                        herramientas_vetadas=cli.HERRAMIENTAS_VETADAS)
-            i = orden.index("--output-format")
-            orden[i + 1] = "stream-json"
-            orden.insert(i + 2, "--verbose")
-            proceso = subprocess.run(orden, input=INSTRUCCION.encode("utf-8"),
-                                     capture_output=True, timeout=TIEMPO_MEDIDA_S,
-                                     env=cli.entorno(cuenta), **getattr(cli, "SIN_VENTANA", {}))
-            info, sobre = leer_salida_medida(proceso.stdout.decode("utf-8", errors="replace"))
+            info, sobre = _correr_medida(cuenta)
         except Exception as fallo:                        # noqa: BLE001
             info, sobre = None, None
             ficha["error"] = f"{type(fallo).__name__}: {str(fallo)[:200]}"
@@ -345,19 +422,10 @@ def medir(cuenta=None):
 
 def medir_en_segundo_plano(cuenta=None):
     """Lanza `medir` en un hilo si no hay ya una medida de esa cuenta. -> bool"""
-    clave = clave_de(cuenta)
     with _LOCK:
-        if clave in _MIDIENDO:
+        if clave_de(cuenta) in _MIDIENDO:
             return False
-        _MIDIENDO.add(clave)
-
-    def correr():
-        try:
-            medir(cuenta)
-        finally:
-            with _LOCK:
-                _MIDIENDO.discard(clave)
-    threading.Thread(target=correr, name=f"cupo-{clave[-12:]}", daemon=True).start()
+    threading.Thread(target=medir, args=(cuenta,), name="medir-cupo", daemon=True).start()
     return True
 
 
@@ -377,6 +445,9 @@ def toca_medir(cuenta=None, ahora=None):
     if ahora - ultima < CADA_S:
         return False
     clave = clave_de(cuenta)
+    if clave in _ULTIMA:
+        return _ULTIMA[clave] > ultima
+    # tras reiniciar el servicio no hay memoria: se mira el fichero (una vez)
     return any(r.get("tipo") == "llamada" and r.get("clave") == clave and r.get("para") != "medir el cupo"
                and float(r.get("t") or 0) > ultima for r in leer_registro(ultima))
 
@@ -394,6 +465,15 @@ def _sumar(caja, r):
     caja["salida"] += _numero(r.get("salida"))
     if isinstance(r.get("usd"), (int, float)):
         caja["usd"] = round(caja["usd"] + float(r["usd"]), 4)
+
+
+def tarea_de(para):
+    """«el corrector del plano 12» y «el revisor de imágenes (p1–p8)» son la
+    misma tarea para el resumen: sin números ni paréntesis."""
+    texto = re.sub(r"\([^)]*\)", "", str(para or ""))
+    texto = re.sub(r"\s*\b[\w-]*\d[\w–-]*", "", texto)
+    texto = re.sub(r"\s+", " ", texto).strip(" :·-")
+    return texto or "otra"
 
 
 def _caja(**extra):
@@ -422,7 +502,7 @@ def resumen(ahora=None, dias=DIAS_RESUMEN):
         if dia == dia_de_hoy:
             _sumar(hoy, r)
         _sumar(por_dia.setdefault(dia, _caja(fecha=dia)), r)
-        tarea = r.get("para") or "otra"
+        tarea = tarea_de(r.get("para"))
         _sumar(por_tarea.setdefault(tarea, _caja(tarea=tarea)), r)
         if r.get("proyecto"):
             _sumar(por_video.setdefault(r["proyecto"], _caja(pid=r["proyecto"])), r)
@@ -459,7 +539,8 @@ def avisos(cupos, ahora=None):
                 a["cuenta"] == (ficha.get("cuenta") or "principal") and a["nivel"] == "malo" for a in salida):
             salida.append({"nivel": "malo", "cuenta": ficha.get("cuenta") or "principal",
                            "ventana": "", "nombre": "Cupo agotado", "uso": 1.0,
-                           "reinicia": None, "mensaje": ficha.get("mensaje") or ""})
+                           "reinicia": None, "mensaje": ficha.get("mensaje") or "",
+                           "agotado_en": ficha.get("agotado_en")})
     return sorted(salida, key=lambda a: -a["uso"])
 
 

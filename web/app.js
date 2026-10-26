@@ -24303,7 +24303,7 @@ function pintarColaStudio() {
  *
  * Nada de aquí escribe params ni paga: medir es UNA llamada mínima a haiku.
  */
-const MEDIDOR_CLAUDE = { datos: null, reloj: null, pidiendo: false, midiendo: false, error: '' };
+const MEDIDOR_CLAUDE = { datos: null, reloj: null, pidiendo: false, midiendo: false, error: '', detalleAbierto: false };
 
 function arrancarMedidorClaude() {
   if (MEDIDOR_CLAUDE.reloj) return;
@@ -24360,7 +24360,7 @@ function nivelCupo(uso) {
   return uso >= u.malo ? 'malo' : (uso >= u.ojo ? 'ojo' : '');
 }
 
-function porcentaje(uso) {
+function porcentajeCupo(uso) {
   return `${Math.round((Number(uso) || 0) * 100)} %`;
 }
 
@@ -24393,7 +24393,7 @@ function filaVentana(clave, v) {
   return h('div', { clase: `ventana-claude ${nivel}` },
     h('div', { clase: 'fila-ventana' },
       h('span', {}, nombreVentana(clave)),
-      h('b', {}, porcentaje(v.uso))),
+      h('b', {}, porcentajeCupo(v.uso))),
     barraDeProgreso(v.uso, nivel === 'malo' ? 'pasado' : (nivel === 'ojo' ? 'coral' : '')),
     v.reinicia ? h('span', { clase: 'meta' }, `se reinicia ${cuandoSeReinicia(v.reinicia)}`) : null);
 }
@@ -24430,8 +24430,8 @@ function medidorClaudeDelMenu() {
     if (peor) {
       avisoMovil.classList.remove('sin-aviso');
       avisoMovil.classList.add(peor.nivel);
-      avisoMovil.textContent = `⚠ Claude ${porcentaje(peor.uso)}`;
-      avisoMovil.title = `${peor.nombre}: ${porcentaje(peor.uso)} usado`;
+      avisoMovil.textContent = `⚠ Claude ${porcentajeCupo(peor.uso)}`;
+      avisoMovil.title = `${peor.nombre}: ${porcentajeCupo(peor.uso)} usado`;
     }
   }
   /* el cuadro sale en la barra lateral (ordenador) y la pastilla en la fila
@@ -24458,7 +24458,7 @@ function avisarCupoClaude() {
   const vistos = new Set([...guardados, ...AVISADOS_CLAUDE]);
   const nuevos = [];
   (d.avisos || []).forEach(a => {
-    const clave = `${a.cuenta}|${a.ventana}|${a.nivel}|${a.reinicia || ''}`;
+    const clave = `${a.cuenta}|${a.ventana}|${a.nivel}|${a.reinicia || a.agotado_en || ''}`;
     if (vistos.has(clave)) return;
     vistos.add(clave);
     AVISADOS_CLAUDE.add(clave);
@@ -24468,8 +24468,8 @@ function avisarCupoClaude() {
     const cuando = a.reinicia ? ` Se reinicia ${cuandoSeReinicia(a.reinicia)}.` : '';
     const texto = a.ventana
       ? (a.nivel === 'malo'
-        ? `⚠ Claude: llevas el ${porcentaje(a.uso)} de tu ${a.nombre.toLowerCase()}. Si se agota, el guion, la Parrilla y el asistente se paran.${cuando}`
-        : `Claude: llevas el ${porcentaje(a.uso)} de tu ${a.nombre.toLowerCase()}.${cuando}`)
+        ? `⚠ Claude: llevas el ${porcentajeCupo(a.uso)} de tu ${a.nombre.toLowerCase()}. Si se agota, el guion, la Parrilla y el asistente se paran.${cuando}`
+        : `Claude: llevas el ${porcentajeCupo(a.uso)} de tu ${a.nombre.toLowerCase()}.${cuando}`)
       : `⛔ Claude: cupo agotado. ${a.mensaje || ''}`;
     toast(texto, a.nivel === 'malo');
   }, i * 3500));
@@ -24542,8 +24542,11 @@ function seccionConsumoClaude() {
     (r.por_cuenta || []).length > 1 ? tablaConsumoClaude('Por cuenta', r.por_cuenta, 'Cuenta', f => f.cuenta) : null,
   ].filter(Boolean);
   if (tablas.length) {
-    caja.appendChild(h('details', { clase: 'detalle-consumo-claude' },
-      h('summary', {}, 'En qué se ha gastado'), ...tablas));
+    /* repintar cada minuto no lo cierra: se recuerda si estaba abierto */
+    const detalle = h('details', { clase: 'detalle-consumo-claude', open: MEDIDOR_CLAUDE.detalleAbierto },
+      h('summary', {}, 'En qué se ha gastado'), ...tablas);
+    detalle.addEventListener('toggle', () => { MEDIDOR_CLAUDE.detalleAbierto = detalle.open; });
+    caja.appendChild(detalle);
   } else {
     caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay llamadas apuntadas.'));
   }

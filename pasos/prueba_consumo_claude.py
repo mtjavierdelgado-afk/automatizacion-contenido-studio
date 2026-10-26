@@ -25,7 +25,8 @@ import tempfile
 import time
 
 # LO DE ESTA SUITE NO VA AL ALMACÉN DE VERDAD (ni la salud ni el consumo)
-os.environ["ESTUDIO_SECRETOS"] = tempfile.mkdtemp(prefix="secretos_consumo_")
+CARPETA_SECRETOS = tempfile.mkdtemp(prefix="secretos_consumo_")
+os.environ["ESTUDIO_SECRETOS"] = CARPETA_SECRETOS
 os.environ.pop("ESTUDIO_SIMULAR", None)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -211,8 +212,29 @@ def main():
         comprobar(v.get("five_hour", {}).get("uso") == 0.13 and v.get("seven_day", {}).get("uso") == 0.04
                   and (sobre or {}).get("result") == "ok",
                   "la línea medida el 25-10 con el CLI 2.1.310 se lee entera")
+        print("8. LAS TAREAS SE AGRUPAN Y EL REGISTRO SE PODA")
+        comprobar(cc.tarea_de("el corrector del plano 12") == cc.tarea_de("el corrector del plano 7")
+                  == "el corrector del plano", "«el corrector del plano 12» y «… 7» son la misma tarea")
+        comprobar(cc.tarea_de("el revisor de imágenes (p1–p8)") == "el revisor de imágenes",
+                  "sin lo de entre paréntesis")
+        viejo = time.time() - (cc.DIAS_GUARDAR + 3) * 86400
+        with open(cc.fichero_registro(), "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"t": viejo, "tipo": "llamada", "para": "viejísima"}) + "\n")
+            fh.write('{"t": "no es un número"}\n')
+        comprobar(any(r.get("para") == "viejísima" for r in cc.leer_registro()),
+                  "una línea con un «t» raro no rompe la lectura")
+        tope = cc.MAX_BYTES
+        try:
+            cc.MAX_BYTES = 1
+            cc.anotar(None, {"usage": {}}, "la que poda")
+        finally:
+            cc.MAX_BYTES = tope
+        quedan = [r.get("para") for r in cc.leer_registro()]
+        comprobar("viejísima" not in quedan and "la que poda" in quedan,
+                  "al pasar del tamaño se poda lo de hace más de DIAS_GUARDAR y lo nuevo se queda")
     finally:
         shutil.rmtree(carpeta, ignore_errors=True)
+        shutil.rmtree(CARPETA_SECRETOS, ignore_errors=True)
 
     if FALLOS:
         print(f"\nFALLARON {len(FALLOS)} de {CUENTAS} comprobaciones:")

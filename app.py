@@ -5289,6 +5289,9 @@ def _ficha_guion_visual(ctx):
         # las lineas «Visual:» de la Parrilla, casadas con el guion de ahora;
         # no se guardan hasta que alguien las mira y guarda (regla 1)
         propuesta, avisos = gv.casar(guardado["visuales"], bloques)
+    # las de la Parrilla que casan limpias valen como aprobadas (guion-visual-2)
+    _planos_ef, origen_ef = gv.efectivo(params, bloques)
+    auto = origen_ef == "parrilla"
     espacio, reparto, estados = _fijo_del_video(ctx)
     fuera = gv.fuera_de_la_voz(guardado.get("planos"), [b["id"] for b in bloques])
     comprobacion = PASOS_MODULOS.medios.leer_json(_ruta_comprobacion_gv(ctx), {}) or {}
@@ -5304,7 +5307,9 @@ def _ficha_guion_visual(ctx):
             "comprobacion": comprobacion.get("avisos"),
             # bloques del guion visual que ya no estan en el guion: no vale hasta revisarlo
             "fuera_de_la_voz": fuera,
-            "aprobado": bool(guardado.get("aprobado")) and not fuera}
+            # «parrilla»: las lineas de la Parrilla, aprobadas solas
+            "aprobado_solo": auto,
+            "aprobado": (bool(guardado.get("aprobado")) or auto) and not fuera}
 
 
 @app.get("/api/proyectos/{pid}/guion_visual")
@@ -11728,7 +11733,7 @@ def _impedimentos(ctx, pestana, pendientes):
         try:
             gv = _guion_visual()
             params_a = ctx.estado.params("assets") or {}
-            planos_a = gv.activo(params_a)
+            planos_a, _origen = gv.efectivo(params_a, _bloques_del_guion(ctx))
             sin_aprobar = gv.modo_de(params_a) == "guion" and (
                 not planos_a or bool(gv.fuera_de_la_voz(
                     planos_a, [b.get("id") for b in _bloques_del_guion(ctx)])))
@@ -16486,6 +16491,18 @@ def _planos_previstos(ctx):
     porque el precio hay que decirlo antes de que exista ningun plan.
     """
     light = PASOS_MODULOS.presets_light
+    # CON EL GUION VISUAL APROBADO SE CUENTAN SUS LINEAS (rama guion-visual-2):
+    # cada linea es un plano, y la cuenta por duracion o el plan cortado por la
+    # voz prometian otra cifra (prueba real del 23-10: «8 imágenes» y salieron 6)
+    try:
+        lineas, _origen = _guion_visual().efectivo(ctx.estado.params("assets") or {},
+                                                   _bloques_del_guion(ctx))
+    except Exception:                                       # noqa: BLE001
+        lineas = None
+    if lineas and not _guion_visual().fuera_de_la_voz(
+            lineas, [b["id"] for b in _bloques_del_guion(ctx)]):
+        return {"total": len(lineas), "con_imagen": len(lineas),
+                "origen": "el guion visual aprobado"}
     plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
     escenas = plan.get("escenas") or []
     if escenas:

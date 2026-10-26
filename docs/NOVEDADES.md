@@ -11,6 +11,19 @@ vídeos, estilos, claves y contraseña no se tocan.
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
 
+**«Lo que dice el guion», sin que se cuele la voz (24 de octubre)**
+- **Las líneas «Visual:» de la Parrilla valen solas.** Si casan con el guion
+  (cada una con su bloque y en orden), se dibujan sin tener que aprobarlas a
+  mano: un lote de la Parrilla ya no se para en cada vídeo. Si no casan, o si
+  el guion visual lo escribe Claude, se espera a que lo apruebes, como antes.
+  Si lo cambias y lo guardas, vuelve a pedir tu aprobación.
+- **La voz ya no llega por la puerta de atrás:** la nota que acompaña a la
+  imagen del plano vecino dice lo que SE VE en él (su línea), no lo que dice
+  la voz, y la plantilla de escena escrita desde la voz ya no entra delante de
+  tu línea. Tampoco sale una composición «abstracta»: la línea dice lo que se ve.
+- **El precio cuenta una imagen por línea** del guion visual (antes podía
+  prometer otra cifra: «8 imágenes» y salían 6).
+
 **El negocio de cada estilo (21 de octubre)**
 - **Lo de EstadoPlay ya no está escrito a mano en el Studio.** Los servicios
   (consolas, simuladores, realidad virtual, karaoke) y cómo se reconocen, las

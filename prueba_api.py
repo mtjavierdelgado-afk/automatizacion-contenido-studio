@@ -4631,14 +4631,19 @@ def probar_cola_de_montaje(cliente):
         hilos[-1].start()
         time.sleep(0.4)
     time.sleep(2.5)
-    respuesta, cola = cliente.get("/api/cola_studio")
+    # el servidor de las pruebas es OTRO proceso (con sus turnos vacíos): por
+    # HTTP se mira la forma, y lo de estos turnos, llamando a la ruta aquí
+    respuesta, por_http = cliente.get("/api/cola_studio")
     igual(respuesta.status_code, 200, "GET /api/cola_studio responde 200")
+    ok({"imagenes", "montaje", "trabajando"} <= set(por_http or {}),
+       "con imágenes, montaje y lo que está en marcha")
+    cola = servidor.cola_del_studio(type("Peticion", (), {"headers": {}})())
     m = (cola or {}).get("montaje") or {}
     igual(((m.get("ahora") or {}).get("nombre")), "Vídeo A", "la cola dice quién se está montando")
     igual([x.get("nombre") for x in m.get("fila") or []], ["Vídeo B", "Vídeo C"],
           "y quién espera, por orden de llegada")
-    ok("imagenes" in (cola or {}) and isinstance((cola or {}).get("trabajando"), list),
-       "y trae también las imágenes y lo demás que trabaja")
+    ok(isinstance((cola or {}).get("trabajando"), list) and not (m.get("ahora") or {}).get("video"),
+       "un turno de algo que no es un vídeo abierto no ofrece «Abrir»")
     ok(not orden, "con otro vídeo montándose, los demás esperan su turno")
     ok(any("se está montando «Vídeo A»" in x for x in mensajes.get("Vídeo B", [])),
        f"la barra dice a quién espera ({(mensajes.get('Vídeo B') or [''])[:1]})")
@@ -4664,6 +4669,32 @@ def probar_cola_de_montaje(cliente):
         turno["quien"] = ""
         turno["cerrojo"].release()
     ok(not turno["fila"], "y sale de la fila")
+
+    # CANCELAR ES EN EL ACTO: con `al_cancelar`, la espera no aguanta al latido
+    turno["cerrojo"].acquire()
+    turno["quien"] = "Otro"
+    pedido = {"si": False, "fn": None}
+
+    def _avisar(*_a, **_k):
+        if pedido["si"]:
+            raise Cancelado("parado")
+    _avisar.al_cancelar = lambda fn: (pedido.update(fn=fn), (lambda: None))[1]
+
+    def _pedir_cancelar():
+        time.sleep(1.5)
+        pedido["si"] = True
+        pedido["fn"]()
+    threading.Thread(target=_pedir_cancelar).start()
+    empezo = time.time()
+    try:
+        servidor._con_turno_de_montaje(_avisar, _Ctx("Vídeo E"), lambda: "no")
+        ok(False, "cancelar en el acto")
+    except Cancelado:
+        tardo = time.time() - empezo - 1.5
+        ok(tardo < 1.2, f"cancelar mientras espera es en el acto ({tardo:.1f} s)")
+    finally:
+        turno["quien"] = ""
+        turno["cerrojo"].release()
 
     # «Solo montar» no espera: se mira en _correr_paso_marcado
     import inspect                                            # noqa: PLC0415

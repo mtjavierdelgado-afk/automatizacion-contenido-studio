@@ -8726,7 +8726,9 @@ def cola_del_studio(navegador, datos):
     for titulo in ("Imágenes", "Montaje", "Todo lo que está en marcha"):
         ok(pg.visible(".cajon-cola .titulo-ajustes", titulo), f"con su sección «{titulo}»")
     # con una cola de mentira, las filas dicen quién trabaja y en qué puesto
-    pg.js(f"""COLA_STUDIO.datos = {{ ahora: Date.now() / 1000,
+    # sin sondear mientras tanto: la siguiente vuelta pondría la cola de verdad (vacía)
+    pg.js(f"""clearTimeout(COLA_STUDIO.reloj); COLA_STUDIO.pidiendo = true;
+        COLA_STUDIO.datos = {{ ahora: Date.now() / 1000,
         imagenes: {{ ahora: null, fila: [] }},
         montaje: {{ ahora: {{ pid: '{pid}', nombre: 'Vídeo que se monta', desde: Date.now() / 1000 - 90, video: true }},
                     fila: [{{ pid: '', nombre: 'El segundo', desde: Date.now() / 1000 - 30, video: false }},
@@ -8738,6 +8740,7 @@ def cola_del_studio(navegador, datos):
     ok(puestos == ["1.º", "2.º"], f"y quién espera, en orden ({puestos})")
     ok(pg.visible(".cajon-cola .fila-cola.trabajando button", "Abrir"), "el que es un vídeo se puede abrir")
     pg.captura("cola_del_studio")
+    pg.js("COLA_STUDIO.pidiendo = false; COLA_STUDIO.reloj = null; arrancarColaStudio();")
     pg.p.keyboard.press("Escape")
     pg.p.wait_for_timeout(400)
     ok(not pg.visible(".cajon-cola"), "Escape lo cierra")

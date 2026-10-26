@@ -24001,7 +24001,8 @@ const COLA_STUDIO = { datos: null, abierto: false, reloj: null, huella: '', pidi
 function cuentaColaStudio() {
   const d = COLA_STUDIO.datos;
   if (!d) return 0;
-  const videos = new Set((d.trabajando || []).map(t => t.pid || t.nombre));
+  // los de un proyecto con clave llegan sin pid: cada trabajo cuenta como uno
+  const videos = new Set((d.trabajando || []).map((t, i) => t.pid || `sin-pid-${i}`));
   return videos.size;
 }
 
@@ -24055,7 +24056,10 @@ function repintarBotonCola() {
 function abrirColaStudio() {
   COLA_STUDIO.abierto = true;
   pintarColaStudio();
-  refrescarColaStudio();
+  // al ritmo de 4 s desde YA, no cuando venza la vuelta de 15 s que había
+  clearTimeout(COLA_STUDIO.reloj);
+  COLA_STUDIO.reloj = null;
+  arrancarColaStudio();
   setTimeout(() => {
     const cajon = document.querySelector('.cajon-cola');
     if (cajon) cajon.focus({ preventScroll: true });

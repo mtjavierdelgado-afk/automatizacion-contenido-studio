@@ -454,6 +454,11 @@ def _esperar_turno(turno, avisar, ctx, funcion, frase_de, evento, paso):
     nombre = (getattr(ctx.proyecto, "config", None) or {}).get("nombre") or ctx.id
     plaza = {"pid": ctx.id, "nombre": nombre, "desde": time.time()}
     cerrojo = turno["cerrojo"]
+    # CANCELAR ES EN EL ACTO (CLAUDE.md): el gestor llama a esto al pedirlo, y
+    # la espera se despierta y pregunta a `avisar`, que lanza Cancelado
+    parar = threading.Event()
+    registrar = getattr(avisar, "al_cancelar", None)
+    quitar = registrar(parar.set) if callable(registrar) else None
     with _FILAS_LOCK:
         turno["fila"].append(plaza)
     avisado, ultimo = False, 0.0
@@ -461,10 +466,12 @@ def _esperar_turno(turno, avisar, ctx, funcion, frase_de, evento, paso):
         while True:
             with _FILAS_LOCK:
                 puesto = next((i for i, x in enumerate(turno["fila"]) if x is plaza), 0) + 1
-            if puesto == 1 and cerrojo.acquire(timeout=1):
+            if puesto == 1 and cerrojo.acquire(timeout=0.5):
                 break
             if puesto > 1:
-                time.sleep(1)
+                parar.wait(0.5)
+            if parar.is_set():
+                _avisar_espera(avisar, "cancelando…")     # lanza Cancelado
             if time.time() - ultimo >= 3 or not avisado:
                 if avisado or puesto > 1 or cerrojo.locked():
                     quien = turno["quien"] or "otro vídeo"
@@ -476,6 +483,8 @@ def _esperar_turno(turno, avisar, ctx, funcion, frase_de, evento, paso):
     finally:
         with _FILAS_LOCK:
             turno["fila"] = [x for x in turno["fila"] if x is not plaza]
+        if callable(quitar):
+            quitar()
     try:
         with _FILAS_LOCK:
             turno.update(quien=nombre, pid=ctx.id, desde=time.time())
@@ -2374,6 +2383,14 @@ def listar_trabajos(proyecto: str = Query(default=None),
 # filas de `_TURNO_IMAGENES` y `_TURNO_MONTAJE`, por orden de llegada), y los
 # demás trabajos en marcha de los vídeos que el servidor tiene abiertos. Un
 # vídeo de un proyecto con clave sin abrir sale sin nombre y sin enlace.
+def _es_taller(ctx):
+    """El proyecto de trabajo de un estilo (láminas, guía…), no un vídeo."""
+    try:
+        return bool((ctx.proyecto.config or {}).get(CONFIG_TALLER))
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
 @app.get("/api/cola_studio")
 def cola_del_studio(peticion: Request):
     """La cola de todo el Studio: imágenes, montaje y lo demás que trabaja."""
@@ -2387,9 +2404,12 @@ def cola_del_studio(peticion: Request):
             return plaza
         plaza = dict(plaza)
         pid = plaza.get("pid") or ""
-        try:
-            ctx = contexto(pid)
-        except Exception:                                   # noqa: BLE001 -- un estilo, no un vídeo
+        # SOLO LO QUE YA ESTÁ EN MEMORIA: `contexto()` crearía uno nuevo (y al
+        # crearlo limpia marcas en estado.json); un GET no escribe nada
+        with _LOCK:
+            ctx = _CONTEXTOS.get(pid)
+        if ctx is None or _es_taller(ctx):
+            # el taller de un estilo (láminas, imagen base) no es un vídeo: sin «Abrir»
             plaza["video"] = False
             return plaza
         plaza["video"] = True
@@ -2413,12 +2433,13 @@ def cola_del_studio(peticion: Request):
             continue
         if not vivos:
             continue
-        cerrado = bool(cerrados) and _cliente_del_video(ctx.proyecto) in cerrados
+        taller = _es_taller(ctx)
+        cerrado = not taller and bool(cerrados) and _cliente_del_video(ctx.proyecto) in cerrados
         nombre = ("un vídeo de un proyecto con clave" if cerrado
                   else (ctx.proyecto.config or {}).get("nombre") or pid)
         for f in vivos:
             trabajando.append({
-                "pid": "" if cerrado else pid, "nombre": nombre, "video": not cerrado,
+                "pid": "" if cerrado else pid, "nombre": nombre, "video": not (cerrado or taller),
                 "trabajo": "" if cerrado else f.get("id"), "paso": f.get("paso"),
                 "tarea": f.get("nombre"), "estado": f.get("estado"),
                 "progreso": f.get("progreso"), "mensaje": "" if cerrado else (f.get("publico") or f.get("mensaje") or ""),

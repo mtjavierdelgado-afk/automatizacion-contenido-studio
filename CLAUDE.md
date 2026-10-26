@@ -151,6 +151,9 @@ tienen que encajar piezas de otras, detrás de esas otras.
 14. `medidor-claude` — cuando esté lista; solo choques de AÑADIR con las abiertas
    (docs, `pruebas.sh`, `prueba_api.py`, `prueba_recorrido.py`; la línea de
    `pintarConfig` va en otro sitio que la de `vidiq-1`).
+15. `unir-planos` — lista (26-10): pruebas y dos revisiones independientes en verde;
+   puede unirse en cuanto esté probada en el servidor, cediéndole el turno las
+   que no estén listas.
 
 **En espera, sin abrir: `medidor-claude-2`** — el consumo de Claude dentro de la tabla de gasto de
 cada vídeo. Se abre cuando se una `notas-24oct`, que toca `tablaDeGasto` y `_desglose_de_eventos`.

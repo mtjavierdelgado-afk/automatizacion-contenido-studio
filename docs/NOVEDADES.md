@@ -24,8 +24,10 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
   rechaza la imagen: elegir un plano sin personas con poca ropa, marcas o
   logos, o usar el texto en capas), y el texto técnico va plegado en «Ver
   detalle».
-- **«Avisos (N)»** guarda los últimos 10 del editor, con su hora: cerrar uno
-  no lo borra de ahí.
+- **«Avisos (N)»** guarda los últimos 10 del editor, con su hora, mientras
+  sigas con el mismo vídeo: cerrar uno no lo borra de ahí.
+- Si cierras el editor mientras la IA o Claude trabajan, el resultado sale en
+  el aviso flotante de siempre, para que no se pierda.
 
 **«Lo que dice el guion», sin que se cuele la voz (24 de octubre)**
 - **Las líneas «Visual:» de la Parrilla valen solas.** Si casan con el guion

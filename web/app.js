@@ -23114,9 +23114,11 @@ function campoPortada(etiqueta, control, ayuda) {
 async function abrirEditorPortada(pid) {
   // TODO lo del vídeo anterior fuera: su vista, sus propuestas, lo que pensaba
   if (PORT.vista) URL.revokeObjectURL(PORT.vista);
+  // «Avisos» se guarda mientras sea el mismo vídeo; con otro, empieza vacío
+  const avisosPrevios = PORT.pid === pid ? (PORT.avisos || []) : [];
   Object.assign(PORT, { pid, abierto: true, error: '', propuestas: null, ia: null, cambiado: false,
     proponiendo: false, vista: '', diseno: null, fondos: [], aviso: null, ideas: null, pensandoIdeas: false,
-    iaPendiente: null, avisos: [], verAvisos: false });
+    iaPendiente: null, avisos: avisosPrevios, verAvisos: false, detallesAbiertos: {} });
   clearTimeout(PORT.relojAviso);
   PORT.pidiendo += 1;
   try {
@@ -23244,39 +23246,50 @@ function bajarBlobPortada(blob, nombre) {
      lo borra de ahí. Se vacía al abrir el editor de otro vídeo. */
 const MAX_AVISOS_PORTADA = 10;
 
-/* El error de la máquina, dicho en una línea que se entienda y con qué hacer. */
+/* El error de la máquina, dicho en una línea que se entienda y con qué hacer.
+   Se conserva QUÉ falló («No se ha guardado», «No se ha podido descargar»):
+   lo de antes de los primeros dos puntos, si es corto. */
 function resumenErrorPortada(texto) {
-  const t = String(texto || '');
-  if (/RechazoSeguridad|filtro de seguridad|safety|moderation/i.test(t)) {
-    return 'OpenAI rechazó la imagen por su filtro de seguridad (no se cobra). Elige de fondo un plano sin personas '
-      + 'con poca ropa, marcas, logos ni personajes conocidos, o usa el texto en capas sin IA.';
+  const t = String(texto || '').trim();
+  const corte = t.indexOf(': ');
+  const pre = corte > 0 && corte <= 60 ? t.slice(0, corte) : '';
+  const resto = pre ? t.slice(corte + 2) : t;
+  let que = '';
+  if (/RechazoSeguridad|filtro de seguridad|safety|moderation/i.test(resto)) {
+    que = 'OpenAI rechazó la imagen por su filtro de seguridad. Elige de fondo un plano sin personas con poca ropa, '
+      + 'marcas, logos ni personajes conocidos, o usa el texto en capas sin IA.';
+  } else if (/HTTP 5\d\d|no he podido pintar|Failed to fetch|NetworkError/i.test(resto)) {
+    que = 'El servidor no ha podido terminarlo. Vuelve a intentarlo en un momento.';
+  } else if (/sesión de Claude|cupo|quota|rate limit/i.test(resto)) {
+    que = 'Claude no ha contestado (sesión o cupo). Vuelve a pedirlo en un minuto.';
+  } else {
+    // lo demás: la primera frase, corta (sin «lookbehind»: un Safari viejo no lo
+    // entiende y se pararía todo el fichero)
+    const primera = (resto.match(/^[\s\S]*?[.!?](?=\s|$)/) || [resto])[0];
+    que = primera.length > 160 ? `${primera.slice(0, 157)}…` : primera;
   }
-  if (/HTTP 5\d\d|no he podido pintar|Failed to fetch|NetworkError/i.test(t)) {
-    return 'El servidor no ha podido terminarlo. Vuelve a intentarlo en un momento.';
-  }
-  if (/sesión de Claude|cupo|quota|rate limit/i.test(t)) {
-    return 'Claude no ha contestado (sesión o cupo). Vuelve a pedirlo en un minuto.';
-  }
-  // lo demás: la primera frase, corta
-  // (sin «lookbehind»: un Safari viejo no lo entiende y se pararía todo el fichero)
-  const primera = (t.match(/^[\s\S]*?[.!?](?=\s|$)/) || [t])[0];
-  return primera.length > 160 ? `${primera.slice(0, 157)}…` : primera;
+  return pre ? `${pre.charAt(0).toUpperCase()}${pre.slice(1)}. ${que}` : que;
 }
 
 function avisoPortada(texto, malo, clave) {
   const ahora = new Date();
-  const corto = malo ? resumenErrorPortada(texto) : String(texto || '');
-  const aviso = { texto: corto, detalle: malo && corto !== String(texto) ? String(texto) : '', malo: !!malo,
+  const original = String(texto || '');
+  // «Pintando…»: algo a medias. Ni se guarda en «Avisos» ni se va solo
+  const aMedias = !malo && /…$/.test(original);
+  const corto = malo ? resumenErrorPortada(original) : original;
+  const aviso = { texto: corto, detalle: malo && corto !== original ? original : '', malo: !!malo,
     hora: ahora, clave: clave || '', id: `${ahora.getTime()}-${Math.random().toString(36).slice(2, 6)}` };
+  // SIN EL EDITOR A LA VISTA (se cerró mientras la IA o Claude trabajaban):
+  // el aviso flotante de siempre, para que no se pierda
+  if (!PORT.abierto || !document.querySelector('.capa-portada')) toast(corto, !!malo);
   const actual = PORT.aviso;
-  // un aviso que no es un error ni el éxito de lo que falló NO tapa un error
-  // que sigue a la vista (p. ej. «Pintando…» mientras se ve el fallo de la IA)
-  const tapaError = actual && actual.malo && !malo && !(clave && actual.clave === clave);
-  // lo que aún está pasando («Pintando…») no se guarda: solo cómo acabó
-  if (!/…$/.test(corto)) PORT.avisos = [aviso].concat(PORT.avisos || []).slice(0, MAX_AVISOS_PORTADA);
+  // solo lo que está a medias, de OTRA cosa, no tapa un error a la vista; lo
+  // que acaba bien sí se enseña («Diseño guardado ✓»), y el error queda en «Avisos»
+  const tapaError = actual && actual.malo && aMedias && !(clave && actual.clave === clave);
+  if (!aMedias) PORT.avisos = [aviso].concat(PORT.avisos || []).slice(0, MAX_AVISOS_PORTADA);
   if (!tapaError) PORT.aviso = aviso;
   clearTimeout(PORT.relojAviso);
-  if (!malo && !tapaError) {
+  if (!malo && !aMedias && !tapaError) {
     PORT.relojAviso = setTimeout(() => {
       if (PORT.aviso && PORT.aviso.id === aviso.id) { PORT.aviso = null; repintarAvisoPortada(); }
     }, 6000);
@@ -23306,8 +23319,9 @@ function pintarAvisoPortada() {
   if (a) {
     caja.appendChild(h('div', { clase: `aviso-portada${a.malo ? ' malo' : ' bueno'}`, role: a.malo ? 'alert' : 'status' },
       h('span', { clase: 'crece' }, `${a.texto} · ${horaPortada(a.hora)}`),
-      a.detalle ? h('details', { clase: 'detalle-aviso-portada' }, h('summary', {}, 'Ver detalle'),
-        h('span', {}, a.detalle)) : null,
+      a.detalle ? h('details', { clase: 'detalle-aviso-portada', open: !!(PORT.detallesAbiertos || {})[a.id],
+        ontoggle: ev => { PORT.detallesAbiertos = Object.assign({}, PORT.detallesAbiertos, { [a.id]: ev.currentTarget.open }); } },
+      h('summary', {}, 'Ver detalle'), h('span', {}, a.detalle)) : null,
       h('button', { clase: 'cerrar-aviso-portada', type: 'button', title: 'Cerrar este aviso (sigue en «Avisos»)',
         'aria-label': 'Cerrar el aviso', onclick: () => cerrarAvisoPortada() }, '✕')));
   } else if (PORT.cambiado) {
@@ -23320,7 +23334,9 @@ function pintarAvisoPortada() {
     lista.forEach(x => historial.appendChild(h('div', { clase: `fila linea-aviso-portada${x.malo ? ' malo' : ''}` },
       h('span', { clase: 'meta' }, horaPortada(x.hora)),
       h('span', { clase: 'crece' }, `${x.malo ? '⚠ ' : '✓ '}${x.texto}`),
-      x.detalle ? h('details', {}, h('summary', {}, 'detalle'), h('span', { clase: 'meta' }, x.detalle)) : null)));
+      x.detalle ? h('details', { open: !!(PORT.detallesAbiertos || {})[`h-${x.id}`],
+        ontoggle: ev => { PORT.detallesAbiertos = Object.assign({}, PORT.detallesAbiertos, { [`h-${x.id}`]: ev.currentTarget.open }); } },
+      h('summary', {}, 'detalle'), h('span', { clase: 'meta' }, x.detalle)) : null)));
     caja.appendChild(historial);
   }
   return caja;

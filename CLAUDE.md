@@ -152,7 +152,7 @@ tienen que encajar piezas de otras, detrás de esas otras.
 15. `unir-planos` — lista (26-10): pruebas y dos revisiones independientes en verde;
    puede unirse en cuanto esté probada en el servidor, cediéndole el turno las
    que no estén listas.
-16. `medidor-claude-2` — cuando esté lista; solo choques de AÑADIR con las abiertas
+16. `medidor-claude-2` — lista (26-10): pruebas y revisión independiente en verde; se une en cuanto esté probada en el servidor. Solo choques de AÑADIR con las abiertas
    (docs, `prueba_api.py`, `prueba_recorrido.py`).
 
 

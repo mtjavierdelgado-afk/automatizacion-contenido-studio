@@ -132,7 +132,8 @@ def responder(entrada):
         # lo que se ve en una imagen insertada (rama insertar-imagen): «EN:» y el
         # español; «ROMPER» en el texto, sin respuesta
         que = _entre(entrada, "imagen_nueva")
-        return {"direccion": "" if "ROMPER" in que else "close-up, EN: " + que}
+        return {"direccion": "" if "ROMPER" in que else "close-up, EN: " + que,
+                "personas": "persona" in que}
     if "<pasar_al_ingles>" in entrada:
         # el cambio reescrito en español, de vuelta al inglés que se manda
         texto = _entre(entrada, "pasar_al_ingles")

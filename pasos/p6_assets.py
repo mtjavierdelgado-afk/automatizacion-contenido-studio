@@ -3867,7 +3867,7 @@ def _recolocar_escenas(carpeta, escenas):
 
 def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                      forzar=False, notas_repaso=None, proyecto=None,
-                     solo_conservar=False):
+                     solo_conservar=False, solo_pedidas=None):
     """Genera los planos y devuelve el coste. En fila o en cadenas paralelas.
 
     Por que cadenas y no planos sueltos
@@ -4007,6 +4007,10 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
             # imagen, rama unir-planos): lo que no esta hecho se queda como
             # estaba --pendiente-- y no se dibuja ni se paga nada.
             if solo_conservar:
+                continue
+            # SOLO LAS PEDIDAS (la imagen insertada, rama insertar-imagen): se
+            # confirmó el precio de UNA; otra que falte se queda pendiente
+            if solo_pedidas is not None and uid not in solo_pedidas:
                 continue
 
             if cartelas.sin_imagen(escena):
@@ -5049,7 +5053,7 @@ MOTOR_CAMBIOS = {
 }
 
 OPCIONES_EJECUCION = ("solo_assets", "replantear", "rehacer", "tipos",
-                      "conservar_piezas", "solo_cortar", "restaurar")
+                      "conservar_piezas", "solo_cortar", "restaurar", "solo_pedidas")
 
 
 def _anotar_tiempo(paso, arranque, hechas, detalle=None, proyecto=None):
@@ -5085,7 +5089,7 @@ def _anotar_tiempo(paso, arranque, hechas, detalle=None, proyecto=None):
 
 def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
              replantear=False, rehacer=False, tipos=None, previo=None,
-             conservar_piezas=False, solo_cortar=False, restaurar=None):
+             conservar_piezas=False, solo_cortar=False, restaurar=None, solo_pedidas=False):
     """Construye assets y escenas. Si unidades no es None, solo esas.
 
     Con solo_assets se para despues de los assets (sets, reparto, mapas y
@@ -5218,9 +5222,11 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     inventario = {}
     pendientes = [(uid, ficha) for uid, ficha in sorted(necesarios.items())
                   if tipos is None or ficha["tipo"] in tipos]
-    if solo_cortar:
+    if solo_cortar or solo_pedidas:
         # ni una hoja ni una pieza: se hereda lo que ya habia (como en
-        # `solo_assets`, mas abajo) y lo que falte sigue faltando
+        # `solo_assets`, mas abajo) y lo que falte sigue faltando. Con
+        # `solo_pedidas` (la imagen insertada, rama insertar-imagen) tampoco:
+        # se paga la imagen confirmada y NADA mas
         pendientes = []
         previos = (medios.leer_json(os.path.join(trabajo, "assets.json"), {})
                    or {}).get("resultados") or {}
@@ -5331,7 +5337,8 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     coste = _generar_escenas(plan, dirs, p, trabajo, toca, unidades,
                              resultados, avisar, forzar=rehacer,
                              notas_repaso=_notas_del_repaso(proyecto),
-                             proyecto=proyecto, solo_conservar=solo_cortar)
+                             proyecto=proyecto, solo_conservar=solo_cortar,
+                             solo_pedidas=set(unidades or []) if solo_pedidas else None)
 
     avisar(0.96, "comprobando que no hay planos repetidos")
     # Los que comparten imagen A PROPOSITO salen del PLAN: la segunda mitad de

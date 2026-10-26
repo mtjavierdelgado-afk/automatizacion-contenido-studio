@@ -13772,6 +13772,7 @@ function vistaPreviaLight() {
   const delPlano = montajeDelPlano(e); if (delPlano) caja.appendChild(delPlano);
   const elementos = elementosDelPlano(e); if (elementos) caja.appendChild(elementos);
   const sinAplicar = quitadosSinAplicar(); if (sinAplicar) caja.appendChild(sinAplicar);
+  const sinDibujar = insertadosSinAplicar(); if (sinDibujar) caja.appendChild(sinDibujar); // insertar-imagen
   const ajustar = ajustarImagenDelPlano(e, escenas); if (ajustar) caja.appendChild(ajustar);
   caja.appendChild(cuadroFeedbackEscena(e));
   /* EL REVISOR: pedir que mire las imágenes y ver lo que dejó (ver
@@ -14372,6 +14373,7 @@ const NOTA_IGUALAR = (lado, id) => `Que sea el mismo sitio que la imagen ${lado}
   + 'ángulo de la cámara o lo que pasa en ella.';
 
 function ajustarImagenDelPlano(e, escenas) {
+  insertarAlDia();
   const q = e.quitar || {};
   const absorbe = e.absorbe || [];
   const i = escenas.findIndex(x => x.id === e.id);
@@ -14510,7 +14512,21 @@ async function devolverImagenQuitada(a) {
    UNA imagen, con su precio confirmado antes. Deshacer es gratis.
    `INSERTAR.abierto` es el plano con el panel abierto, y lo escrito vive aquí
    (nunca como param) hasta que se pulsa insertar. */
-const INSERTAR = { abierto: '', palabra: 0, que: '', precio: null, estado: '', siguiendo: false };
+const INSERTAR = { pid: '', abierto: '', palabra: 0, que: '', precio: null, estado: '', siguiendo: false };
+
+/* OTRO VÍDEO, OTRO PANEL: lo escrito y el precio eran del de antes. Y si al
+   volver (o al recargar) el servidor sigue preparando una, se sigue. */
+function insertarAlDia() {
+  const pid = videoAbierto().pid;
+  if (!pid || INSERTAR.pid === pid) return;
+  Object.assign(INSERTAR, { pid, abierto: '', palabra: 0, que: '', precio: null, estado: '', siguiendo: false });
+  pedir(`${API.proyecto(pid)}/planos/insertar`).then(d => {
+    if (INSERTAR.pid !== pid || d.estado !== 'pensando') return;
+    INSERTAR.estado = 'pensando';
+    seguirInsercion(pid, d.plano);
+    repintarVideo();
+  }).catch(() => { /* sin estado: no hay nada que seguir */ });
+}
 
 async function abrirInsertarImagen(e) {
   if (INSERTAR.abierto === e.id) { INSERTAR.abierto = ''; repintarVideo(); return; }
@@ -14530,14 +14546,17 @@ function panelInsertarImagen(e) {
   if (INSERTAR.abierto !== e.id || !e.insertar) return null;
   const palabras = (e.insertar.palabras || []).map(legible);
   const caja = h('div', { clase: 'insertar-imagen' },
-    h('div', { clase: 'meta' }, `Pulsa la palabra donde empieza la imagen nueva. ${e.id} conserva su `
+    h('div', { clase: 'meta' }, `Pulsa la palabra donde empieza la imagen nueva (cada imagen dura `
+      + `al menos un segundo). ${e.id} conserva su `
       + 'dibujo y se queda con lo de antes; la nueva, con el mismo sitio y estilo, se queda con el resto.'));
   const chips = h('div', { clase: 'insertar-palabras' });
+  const validas = new Set(e.insertar.validas || []);
   palabras.forEach((p, k) => {
     chips.appendChild(h('button', {
       clase: `mini insertar-palabra${k === INSERTAR.palabra ? ' sel' : ''}${k && k >= INSERTAR.palabra && INSERTAR.palabra ? ' nueva' : ''}`,
-      type: 'button', disabled: k === 0, 'aria-pressed': k === INSERTAR.palabra ? 'true' : 'false',
-      title: k === 0 ? 'La imagen nueva no puede empezar en la primera palabra' : `La nueva empieza en «${p}»`,
+      type: 'button', disabled: !validas.has(k), 'aria-pressed': k === INSERTAR.palabra ? 'true' : 'false',
+      title: validas.has(k) ? `La nueva empieza en «${p}»`
+        : 'Ahí una de las dos imágenes duraría menos de un segundo',
       onclick: () => { INSERTAR.palabra = k; repintarVideo(); } }, p));
   });
   caja.appendChild(chips);
@@ -14625,6 +14644,23 @@ function seguirInsercion(pid, sid) {
   setTimeout(vuelta, 1000);
 }
 
+/* LO INSERTADO QUE NO LLEGÓ A DIBUJARSE (la tanda falló o se canceló): nunca
+   se queda apuntado sin su «Deshacer». */
+function insertadosSinAplicar() {
+  const lista = (PREVIA.ficha || {}).insertados_sin_aplicar || [];
+  if (!lista.length) return null;
+  const caja = h('div', { clase: 'ajustar-imagen caja-aviso' },
+    h('span', { clase: 'ajustar-imagen-titulo' }, 'Imágenes insertadas que no llegaron a dibujarse'),
+    h('div', { clase: 'meta' }, 'Deshazlas aquí (gratis); después puedes volver a insertarlas.'));
+  lista.forEach(a => caja.appendChild(h('div', { clase: 'fila ajustar-absorbe' },
+    h('span', { clase: 'meta crece' }, `En ${a.id || 'una imagen'}`
+      + (a.que ? `: «${recortar(a.que, 90)}»` : '')),
+    h('button', { clase: 'mini', disabled: PREVIA.guardando || !!trabajoVideoLight(),
+      onclick: () => deshacerImagenInsertada({ id: a.id, insertada: { en: a.id, texto: a.texto, n: a.n,
+        palabra: a.palabra } }, true) }, 'Deshacer'))));
+  return caja;
+}
+
 function imagenInsertadaDelPlano(e) {
   const ins = e.insertada;
   if (!ins) return null;
@@ -14635,10 +14671,11 @@ function imagenInsertadaDelPlano(e) {
       onclick: () => deshacerImagenInsertada(e) }, 'Deshacer · quitar esta imagen nueva'));
 }
 
-async function deshacerImagenInsertada(e) {
+async function deshacerImagenInsertada(e, sinDibujar) {
   const v = videoAbierto();
   const ins = e.insertada || {};
-  if (!confirm(`¿Quitar ${e.id}? ${ins.en} recupera toda su voz con su dibujo de siempre. Gratis.`)) return;
+  if (!sinDibujar
+      && !confirm(`¿Quitar ${e.id}? ${ins.en} recupera toda su voz con su dibujo de siempre. Gratis.`)) return;
   PREVIA.guardando = true;
   repintarVideo();
   try {

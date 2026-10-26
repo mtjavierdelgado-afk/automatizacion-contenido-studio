@@ -7914,22 +7914,27 @@ def probar_insertar_imagen():
 
     def plano(sid, texto, **extra):
         palabras = texto.split()
-        return dict({"id": sid, "narracion": texto, "prompt": f"prompt {sid}",
+        return dict({"id": sid, "narracion": texto, "prompt": f"prompt {sid}", "t_in": 0.0,
+                     "t_out": len(palabras) * 0.5,
                      "marcas": [[i * 0.5, i * 0.5 + 0.4] for i in range(len(palabras))]}, **extra)
     plan = {"escenas": [plano("S001", "Este baño era el más feo con baldosas grises."),
                         plano("S002", "Y llega el cambio.", cartela={"plantilla": "cifra", "fondo": "negro"}),
                         plano("S003", "Así quedó.")]}
     lanzadas, pasadas = [], []
     real = {"plan": p6.plan_actual, "lanzar": servidor.lanzar_paso,
-            "pasada": servidor._pasada_sin_dibujar, "ingles": ip.al_ingles}
+            "pasada": servidor._pasada_sin_dibujar, "ingles": ip.al_ingles,
+            "ruta": servidor._ruta_de_version}
+    dibujadas = {"S001", "S003"}
+    servidor._ruta_de_version = lambda ctx, paso, *partes: (
+        f"pasos/{paso}/v1/{'/'.join(partes)}" if partes and partes[-1][:-4] in dibujadas else None)
     p6.plan_actual = lambda *_a, **_k: plan
-    servidor.lanzar_paso = lambda ctx, paso, unidades, **k: (lanzadas.append((paso, unidades, k.get("nombre")))
-                                                            or "t-insertar")
+    servidor.lanzar_paso = lambda ctx, paso, unidades, **k: (
+        lanzadas.append((paso, unidades, k.get("nombre"), k.get("opciones"))) or "t-insertar")
     servidor._pasada_sin_dibujar = lambda ctx, nombre, restaurar=None: (
         pasadas.append(nombre) or {"trabajo": "t-corte", "trabajo_id": "t-corte"})
     ip.al_ingles = lambda que, prompt="", narracion="", cwd=None: (
         (_ for _ in ()).throw(ip.ErrorDireccion("Claude no contesta")) if "ROMPER" in que
-        else f"close-up, EN: {que}")
+        else {"direccion": f"close-up, EN: {que}", "personas": False})
 
     def esperar(pid):
         for _ in range(100):
@@ -7959,8 +7964,17 @@ def probar_insertar_imagen():
             igual(codigo, esperado, f"INSERTAR: {sid} {cuerpo} da {esperado} ({_m})")
         igual(lanzadas, [], "INSERTAR: lo rechazado no lanza nada")
         previa = servidor._quitar_en_la_previa(plan, plan["escenas"][0])
-        igual(len((previa.get("insertar") or {}).get("palabras") or []), 9,
-              "PREVIA: S001 ofrece insertar, con sus nueve palabras")
+        igual(((previa.get("insertar") or {}).get("validas"), len((previa.get("insertar") or {}).get("palabras") or [])),
+              ([2, 3, 4, 5, 6, 7], 9),
+              "PREVIA: S001 ofrece insertar, con sus nueve palabras y las que dejan un segundo a cada lado")
+        codigo, _m = _llamar(servidor.insertar_imagen, pid, "S001", dict(bien, palabra=1))
+        igual(codigo, 400, f"INSERTAR: en una palabra que deja menos de un segundo, 400 ({_m})")
+        codigo, _m = _llamar(servidor.insertar_imagen, pid, "S003", dict(bien, palabra=1))
+        igual(codigo, 400, "INSERTAR: en un plano demasiado corto, 400")
+        dibujadas.discard("S001")
+        codigo, _m = _llamar(servidor.insertar_imagen, pid, "S001", bien)
+        igual(codigo, 409, f"INSERTAR: en una imagen sin dibujar, 409 ({_m})")
+        dibujadas.add("S001")
         ok("insertar" not in servidor._quitar_en_la_previa(plan, plan["escenas"][1]),
            "PREVIA: una cartela no")
         # CLAUDE NO CONTESTA: nada apuntado ni lanzado, y el motivo se ve
@@ -7978,14 +7992,14 @@ def probar_insertar_imagen():
         final = esperar(pid)
         igual((final.get("estado"), ip.leer(ctx.proyecto.raiz)), ("error", []),
               "INSERTAR: sin poder lanzar la tanda, no queda nada apuntado")
-        servidor.lanzar_paso = lambda ctx, paso, unidades, **k: (lanzadas.append((paso, unidades, k.get("nombre")))
-                                                                or "t-insertar")
+        servidor.lanzar_paso = lambda ctx, paso, unidades, **k: (
+            lanzadas.append((paso, unidades, k.get("nombre"), k.get("opciones"))) or "t-insertar")
         codigo, _f = _llamar(servidor.insertar_imagen, pid, "S001", bien)
         final = esperar(pid)
         igual((final.get("estado"), final.get("nuevo"), final.get("trabajo_id")),
               ("lanzado", "S001B", "t-insertar"), "INSERTAR: lanzada, como S001B")
-        igual(lanzadas, [("assets", ["escena:S001B"], "insertar_imagen")],
-              "INSERTAR: una tanda con UNA unidad pedida: la nueva")
+        igual(lanzadas, [("assets", ["escena:S001B"], "insertar_imagen", {"solo_pedidas": True})],
+              "INSERTAR: una tanda con UNA unidad pedida, y solo esa (no dibuja otras que falten)")
         igual([(e["texto"], e["n"], e["palabra"], e["letra"], e["direccion"]) for e in ip.leer(ctx.proyecto.raiz)],
               [(p6._texto_clave(plan["escenas"][0]), 0, 6, "B", "close-up, EN: las baldosas de cerca")],
               "INSERTAR: apuntada en el fichero del proyecto, con su dirección en inglés")
@@ -8002,6 +8016,14 @@ def probar_insertar_imagen():
               "PREVIA: la insertada se puede deshacer y no se vuelve a partir")
         ok("insertar" not in servidor._quitar_en_la_previa(partido, partido["escenas"][0]),
            "PREVIA: la partida tampoco se vuelve a partir")
+        # LA TANDA FALLÓ (el plan no tiene S001B): sale para deshacerla, y
+        # mientras tanto no se inserta otra
+        igual([x["palabra"] for x in servidor._insertados_sin_aplicar(ctx, plan)], [6],
+              "PREVIA: lo insertado que no llegó a dibujarse se enseña para deshacerlo")
+        codigo, _m = _llamar(servidor.insertar_imagen, pid, "S001", dict(bien, palabra=3))
+        igual(codigo, 409, "INSERTAR: con una sin dibujar pendiente, no se inserta otra")
+        igual(servidor._insertados_sin_aplicar(ctx, partido), [],
+              "PREVIA: con S001B en el corte, no hay nada pendiente")
         # DESHACER
         codigo, _m = _llamar(servidor.deshacer_imagen_insertada, pid, {"texto": "otra", "palabra": 6})
         igual(codigo, 404, "DESHACER: algo que no está insertado, 404")
@@ -8015,6 +8037,7 @@ def probar_insertar_imagen():
     finally:
         p6.plan_actual, servidor.lanzar_paso = real["plan"], real["lanzar"]
         servidor._pasada_sin_dibujar, ip.al_ingles = real["pasada"], real["ingles"]
+        servidor._ruta_de_version = real["ruta"]
 
 
 def probar_dominios():

@@ -7633,7 +7633,9 @@ def _insertar_en_la_previa(plan, escena):
         escenas = [e for e in (plan.get("escenas") or []) if e.get("id")]
         i = next((n for n, e in enumerate(escenas) if e.get("id") == escena.get("id")), None)
         if i is not None and ip.se_puede_partir(escenas, i, PASOS_MODULOS.p6_assets._sin_imagen):
-            salida["insertar"] = {"palabras": ip.palabras_de(escena)}
+            validas = ip.palabras_validas(escena)
+            if validas:
+                salida["insertar"] = {"palabras": ip.palabras_de(escena), "validas": validas}
     except Exception:                                       # noqa: BLE001
         pass
     if isinstance(escena.get("insertada"), dict):
@@ -7642,6 +7644,19 @@ def _insertar_en_la_previa(plan, escena):
                                "n": int(ins.get("n") or 0), "palabra": int(ins.get("palabra") or 0),
                                "que": ins.get("que") or ""}
     return salida
+
+
+def _insertados_sin_aplicar(ctx, plan):
+    """Lo apuntado como insertado que el corte de ahora NO tiene (la tanda
+    falló o se canceló, o se volvió a una versión anterior): se enseña con su
+    «Deshacer», como lo quitado (`_quitados_sin_aplicar`)."""
+    puestos = {(i.get("texto"), int(i.get("n") or 0), int(i.get("palabra") or 0))
+               for e in plan.get("escenas") or [] if isinstance(e.get("insertada"), dict)
+               for i in [e["insertada"]]}
+    return [{"id": e["id"], "texto": e["texto"], "n": e["n"], "palabra": e["palabra"],
+             "que": e.get("que") or ""}
+            for e in _insertar_planos().leer(ctx.proyecto.raiz)
+            if (e["texto"], e["n"], e["palabra"]) not in puestos]
 
 
 def _ficha_insertando(ctx):
@@ -7696,11 +7711,21 @@ def insertar_imagen(pid: str, sid: str, cuerpo: dict = Body(default=None)):
         if not 1 <= palabra < len(palabras):
             raise ErrorApi(400, f"la imagen nueva tiene que empezar entre la palabra 2 y la "
                                 f"{len(palabras)} de {sid}")
+        if palabra not in ip.palabras_validas(escenas[i]):
+            raise ErrorApi(400, f"ahí uno de los dos trozos duraría menos de "
+                                f"{ip.MIN_TROZO_S:g} s: elige otra palabra")
+        # SOLO SE PARTE UNA IMAGEN DIBUJADA, y sin nada pendiente de insertar:
+        # la tanda pide UNA imagen y lo demás no se toca (revisión del 26-10)
+        if not _ruta_de_version(ctx, "assets", "escenas", f"{sid}.png"):
+            raise ErrorApi(409, f"{sid} todavía no tiene imagen: dibújala antes de insertar otra")
+        if _insertados_sin_aplicar(ctx, plan):
+            raise ErrorApi(409, "hay una imagen insertada que no llegó a dibujarse: deshazla o "
+                                "vuelve a intentarla antes de insertar otra")
         texto = p6._texto_clave(escenas[i])
         # LA OCURRENCIA EN EL CORTE ANTES DE QUITAR, como la cuenta `aplicar`:
         # los planos de antes que dicen lo mismo y los quitados que viven en
         # el `absorbe` de su vecino (los de `sid` mismo no: no se parte uno así)
-        n = (sum(1 for e in escenas[:i] if p6._texto_clave(e) == texto)
+        n = (sum(1 for e in escenas[:i] if p6._texto_clave(e) == texto and not e.get("insertada"))
              + sum(1 for e in escenas[:i] for a in e.get("absorbe") or []
                    if isinstance(a, dict) and p6._texto_clave({"narracion": a.get("narracion")}) == texto))
         with _LOCK_INSERTANDO:
@@ -7712,8 +7737,12 @@ def insertar_imagen(pid: str, sid: str, cuerpo: dict = Body(default=None)):
     def hilo():
         ficha = {"plano": sid}
         try:
-            direccion = ip.al_ingles(que, prompt=prompt, narracion=narracion, cwd=RAIZ_ESTUDIO)
+            pedido = ip.al_ingles(que, prompt=prompt, narracion=narracion, cwd=RAIZ_ESTUDIO)
             with _cerrojo_de_cadena(ctx.id):
+                # y el precio que se confirmó sigue siendo el de ahora
+                if abs(_precio_de_una_imagen(ctx)[1] - usd) > 0.0005:
+                    raise ErrorApi(409, "el precio de una imagen ha cambiado mientras se "
+                                        "preparaba: vuelve a mirarlo y confírmalo otra vez")
                 # lo de antes de pensar puede haber cambiado: se mira otra vez
                 _sin_nada_en_marcha(ctx, "insértala")
                 plan_ahora = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
@@ -7722,13 +7751,15 @@ def insertar_imagen(pid: str, sid: str, cuerpo: dict = Body(default=None)):
                     raise ErrorApi(409, f"{sid} ha cambiado mientras se preparaba: vuelve a pedirla")
                 antes = ip.leer(ctx.proyecto.raiz)
                 entradas = ip.insertar(ctx.proyecto.raiz, texto, n, palabra, sid, que=que,
-                                       direccion=direccion)
+                                       direccion=pedido["direccion"],
+                                       personas=pedido["personas"])
                 nueva = next(e for e in entradas if (e["texto"], e["n"], e["palabra"]) == (texto, n, palabra))
                 nuevo = f"{sid}{nueva['letra']}"
                 try:
                     trabajo_id = lanzar_paso(ctx, "assets", [f"escena:{nuevo}"],
                                              nombre="insertar_imagen", evento="imagen_insertada",
-                                             datos={"plano": sid, "nuevo": nuevo, "usd": usd})
+                                             datos={"plano": sid, "nuevo": nuevo, "usd": usd},
+                                             opciones={"solo_pedidas": True})
                 except Exception:
                     # sin tanda no se apunta: quedaría un plano sin imagen
                     ip.reponer(ctx.proyecto.raiz, antes)
@@ -7869,6 +7900,8 @@ def leer_previsualizacion(pid: str):
         "escenas": escenas,
         # lo apuntado como quitado que este corte aún no refleja (unir-planos)
         "quitados_sin_aplicar": _quitados_sin_aplicar(ctx, plan),
+        # y lo insertado que no llegó a dibujarse (insertar-imagen)
+        "insertados_sin_aplicar": _insertados_sin_aplicar(ctx, plan),
         "audio": _audio_de_la_toma(ctx),
         # LA MUSICA Y LOS EFECTOS SOLO PARA EL PLAY SEGUIDO. Escena a escena se
         # oye la VOZ y nada mas: lo que se esta juzgando ahi es si la imagen

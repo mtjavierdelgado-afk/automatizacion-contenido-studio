@@ -9160,13 +9160,24 @@ def insertar_una_imagen(navegador, datos):
     _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
     escenas = previa.get("escenas") or []
     elegida = next((e for e in escenas[1:] if e.get("insertar") and e.get("imagen")
-                    and len((e["insertar"].get("palabras") or [])) >= 3), None)
+                    and (e["insertar"].get("validas") or [])), None)
     ok(elegida is not None, "hay una imagen en la que se puede insertar otra")
     if elegida is None:
         return
     sid, nuevo = elegida["id"], elegida["id"] + "B"
     palabras = elegida["insertar"]["palabras"]
+    k = elegida["insertar"]["validas"][0]
     antes = _huellas_de_planos(datos, pid)
+    # UNA IMAGEN QUE FALTA en otro plano (una tanda cancelada): la tanda de la
+    # insertada NO la dibuja, se pagó UNA (revisión del 26-10)
+    falta = next((e["id"] for e in reversed(escenas) if e.get("imagen") and e["id"] != sid), None)
+    activa = _version_de(datos, "assets", "")
+    version = activa.get("activa") or activa.get("n") or activa.get("version")
+    apartada = os.path.join(datos["capturas"], f"{falta}.apartada_insertar.png")
+    if falta:
+        shutil.move(os.path.join(datos["proyectos"], pid, "pasos", "assets", f"v{version}",
+                                 "escenas", f"{falta}.png"), apartada)
+        antes.pop(falta, None)
     _r, assets_antes = api.get(f"/api/proyectos/{pid}/pasos/assets")
     pg = Pagina(navegador, datos, nombre="insertar imagen")
     pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
@@ -9178,8 +9189,11 @@ def insertar_una_imagen(navegador, datos):
     ok(pg.p.locator(".insertar-imagen button[data-accion=insertar-imagen]").first.is_disabled(),
        "sin palabra ni texto, el botón de insertar está apagado")
     ok(pg.p.locator(".insertar-palabra").first.is_disabled(), "la primera palabra no se puede elegir")
-    pg.p.locator(".insertar-palabra").nth(2).click()
-    elegida_txt = pg.p.locator(".insertar-palabra").nth(2).inner_text().strip()
+    ok(pg.p.locator(".insertar-palabra").nth(k).is_enabled()
+       and pg.p.locator(".insertar-palabra:disabled").count() == len(palabras) - len(elegida["insertar"]["validas"]),
+       "solo se pueden pulsar las palabras que dejan un segundo a cada lado")
+    pg.p.locator(".insertar-palabra").nth(k).click()
+    elegida_txt = pg.p.locator(".insertar-palabra").nth(k).inner_text().strip()
     ok(pg.esperar(".insertar-reparto", f"nueva: «{elegida_txt}", 5),
        f"al pulsar una palabra dice qué se queda cada imagen («{elegida_txt}…»)")
     pg.p.locator(".insertar-imagen textarea").first.fill("un primer plano de las baldosas")
@@ -9194,14 +9208,20 @@ def insertar_una_imagen(navegador, datos):
     ok(nuevo in por_id and por_id[nuevo].get("imagen"), f"{nuevo} está en el vídeo, con su imagen")
     ids = [e["id"] for e in previa.get("escenas") or []]
     ok(nuevo in ids and ids.index(nuevo) == ids.index(sid) + 1, f"{nuevo} va justo detrás de {sid}")
-    ok(por_id.get(sid, {}).get("narracion", "").split() == palabras[:2]
-       and (por_id.get(nuevo, {}).get("narracion") or "").split() == palabras[2:],
+    ok(por_id.get(sid, {}).get("narracion", "").split() == palabras[:k]
+       and (por_id.get(nuevo, {}).get("narracion") or "").split() == palabras[k:],
        f"{sid} se queda con lo de antes y {nuevo} con el resto de la voz")
     despues = _huellas_de_planos(datos, pid)
     ok(despues.get(sid) == antes.get(sid), f"{sid} conserva su dibujo")
     ok(nuevo in despues and despues[nuevo] not in antes.values(), f"{nuevo} tiene una imagen nueva")
     ok(all(despues.get(x) == antes.get(x) for x in antes if x != nuevo and x in despues),
        "ninguna otra imagen cambia: se paga solo la nueva")
+    if falta:
+        ok(falta not in despues, f"la que faltaba ({falta}) sigue sin dibujarse: no se ha pagado")
+        activa = _version_de(datos, "assets", "")
+        version = activa.get("activa") or activa.get("n") or activa.get("version")
+        shutil.copy(apartada, os.path.join(datos["proyectos"], pid, "pasos", "assets",
+                                           f"v{version}", "escenas", f"{falta}.png"))
     _r, assets = api.get(f"/api/proyectos/{pid}/pasos/assets")
     ok(set(assets.get("unidades_obsoletas") or []) <= set(assets_antes.get("unidades_obsoletas") or []),
        f"y no deja imágenes por rehacer ({assets.get('unidades_obsoletas')})")

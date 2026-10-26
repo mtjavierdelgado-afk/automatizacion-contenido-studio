@@ -101,7 +101,7 @@ def prueba_guardar():
                direccion="close-up of the grey tiles")
     igual(I.leer(raiz), [{"texto": TEXTO, "n": 0, "palabra": 6, "id": "S001", "letra": "B",
                           "que": "las baldosas grises de cerca",
-                          "direccion": "close-up of the grey tiles"}], "apuntada con todo")
+                          "direccion": "close-up of the grey tiles", "personas": True}], "apuntada con todo")
     I.insertar(raiz, TEXTO, 0, 6, "S001", que="otra", direccion="another")
     igual([e["que"] for e in I.leer(raiz)], ["otra"], "otra vez en la misma palabra la pisa")
     for nombre, args in (("sin texto", ("", 0, 3)), ("en la primera palabra", (TEXTO, 0, 0)),
@@ -136,6 +136,7 @@ def prueba_partir():
     igual((s1["t_in"], s1["t_out"], s1["duracion"]), (0.0, 3.0, 3.0), "dura hasta que empieza «con»")
     igual(s1["corte"], "ninguno", "y su corte de salida es el de su última palabra («feo»)")
     igual(s1["partida_en"], ["S001B"], "dice en qué se partió")
+    ok("encuadre" not in s1b, "la nueva no hereda el encuadre (lo dice su dirección)")
     igual(s1b["narracion"], "con baldosas grises.", "S001B dice el resto")
     igual(len(s1b["marcas"]), 3, "con sus tres marcas")
     igual((s1b["t_in"], s1b["t_out"], s1b["corte"]), (3.0, 4.5, "fuerte"),
@@ -148,6 +149,27 @@ def prueba_partir():
           "con su dirección y su prompt nuevo")
     igual(s1b["insertada"], {"en": "S001", "texto": TEXTO, "n": 0, "palabra": 6, "que": "las baldosas de cerca"},
           "y dice de dónde sale, para deshacerla")
+
+
+def prueba_lo_que_no_hereda():
+    seccion("2b. LO QUE LA NUEVA NO HEREDA (revisión del 26-10)")
+    raiz = nueva_raiz()
+    I.insertar(raiz, TEXTO, 0, 6, "S001", direccion="detail of the tiles", personas=False)
+    escenas = video()
+    escenas[0].update({"componente": "mapa", "editar_base": True, "cambio": "new tiles",
+                       "estado": "despues", "base": "b.png", "base_clave": "bano#despues",
+                       "primer_termino": "ana", "carta": "detalle"})
+    I.aplicar(escenas, raiz, clave, sin_imagen, preparar, tipo_de_corte)
+    s1, s1b = escenas[0], escenas[1]
+    ok(not any(k in s1b for k in ("componente", "editar_base", "cambio", "estado", "base",
+                                  "base_clave", "carta", "primer_termino")),
+       "ni el mapa que copia, ni la edición de la base, ni su carta: la nueva se dibuja")
+    igual(s1b["personajes"], [], "y sin gente si lo que se pide no la lleva")
+    igual((s1["componente"], s1["editar_base"], s1["personajes"]), ("mapa", True, ["ana"]),
+          "el plano partido no cambia nada de eso")
+    seccion("2c. LAS PALABRAS DONDE SE PUEDE EMPEZAR: UN SEGUNDO A CADA LADO")
+    igual(I.palabras_validas(video()[0]), [2, 3, 4, 5, 6, 7], "en un plano de 4,5 s y nueve palabras")
+    igual(I.palabras_validas(video()[1]), [], "en uno de 1,5 s, ninguna")
 
 
 def prueba_dos():
@@ -245,7 +267,11 @@ def prueba_al_ingles():
     salida, vistas = _con_doble(['```json\n{"direccion": "Close-up of the grey tiles."}\n```'],
                                 lambda: I.al_ingles("las baldosas grises de cerca",
                                                     prompt="A small bathroom", narracion="con baldosas"))
-    igual(salida, "Close-up of the grey tiles.", "devuelve la dirección, aunque venga envuelta")
+    igual(salida, {"direccion": "Close-up of the grey tiles.", "personas": True},
+          "devuelve la dirección, aunque venga envuelta (sin decir nada de gente: con gente)")
+    salida, _v = _con_doble(['{"direccion": "Detail shot of the tiles.", "personas": false}'],
+                            lambda: I.al_ingles("las baldosas"))
+    igual(salida["personas"], False, "y dice si sale gente")
     instruccion, kwargs = vistas[0]
     ok("<imagen_nueva>" in instruccion and "las baldosas grises de cerca" in instruccion
        and "A small bathroom" in instruccion and "con baldosas" in instruccion,
@@ -265,6 +291,7 @@ def main():
     print("PRUEBA DE INSERTAR IMÁGENES")
     prueba_guardar()
     prueba_partir()
+    prueba_lo_que_no_hereda()
     prueba_dos()
     prueba_lo_que_no()
     prueba_repetida()

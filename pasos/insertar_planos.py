@@ -97,7 +97,7 @@ def leer(raiz):
                        "id": str(entrada.get("id") or ""),
                        "letra": letra if len(letra) == 1 and letra in LETRAS else "",
                        "que": " ".join(str(entrada.get("que") or "").split())[:MAX_QUE],
-                       "direccion": direccion})
+                       "direccion": direccion, "personas": bool(entrada.get("personas", True))})
     return salida
 
 
@@ -134,7 +134,7 @@ def letra_libre(entradas, texto, n):
     return next((l for l in LETRAS if l not in usadas), "")
 
 
-def insertar(raiz, texto, n, palabra, sid="", que="", direccion="", letra=""):
+def insertar(raiz, texto, n, palabra, sid="", que="", direccion="", letra="", personas=True):
     """Apunta una imagen nueva en el plano que dice `texto` (la `n`-ésima vez),
     desde su palabra número `palabra` (0 = la primera; tiene que ser >= 1).
     -> las entradas tal como quedan."""
@@ -148,7 +148,8 @@ def insertar(raiz, texto, n, palabra, sid="", que="", direccion="", letra=""):
     if not direccion:
         raise ValueError("falta lo que se ve en la imagen nueva")
     entrada = {"texto": texto, "n": _entero(n) or 0, "palabra": palabra, "id": str(sid or ""),
-               "que": " ".join(str(que or "").split())[:MAX_QUE], "direccion": direccion}
+               "que": " ".join(str(que or "").split())[:MAX_QUE], "direccion": direccion,
+               "personas": bool(personas)}
     with _LOCK:
         entradas = [e for e in leer(raiz) if _llave(e) != _llave(entrada)]
         entrada["letra"] = (letra if letra in LETRAS and len(letra) == 1
@@ -184,6 +185,22 @@ def palabras_de(escena):
     palabras = str((escena or {}).get("narracion") or "").split()
     marcas = (escena or {}).get("marcas") or []
     return palabras if len(palabras) >= 2 and len(palabras) == len(marcas) else []
+
+
+#: Lo que dura como poco cada trozo: menos no se llega a ver
+MIN_TROZO_S = 1.0
+
+
+def palabras_validas(escena):
+    """Las palabras (por su número) en las que puede empezar una imagen nueva:
+    las que dejan al menos `MIN_TROZO_S` a cada lado."""
+    palabras = palabras_de(escena)
+    marcas = (escena or {}).get("marcas") or []
+    if not palabras:
+        return []
+    t_in, t_out = float(escena.get("t_in") or 0.0), float(escena.get("t_out") or 0.0)
+    return [k for k in range(1, len(palabras))
+            if float(marcas[k][0]) - t_in >= MIN_TROZO_S and t_out - float(marcas[k][0]) >= MIN_TROZO_S]
 
 
 def se_puede_partir(escenas, i, sin_imagen):
@@ -225,9 +242,19 @@ def _partir(escena, cortes, palabras, tipo_de_corte):
                           else round(float(marcas[fin][0]), 3))
         nueva["corte"] = (corte_final if fin == len(palabras)
                           else tipo_de_corte(palabras[fin - 1]))
+        # LO QUE ES DEL PLANO PARTIDO Y NO DE LA NUEVA (revisión del 26-10):
+        # su frase, su párrafo redactado, sus rótulos, su encuadre y su carta;
+        # la edición de la base (un detalle no es la base con otra cámara: se
+        # dibuja normal, con la de antes como referencia de continuidad) y el
+        # mapa o gráfico que copia (la nueva se DIBUJA). Y la gente, si lo que
+        # se pide no la lleva.
         for clave in ("narracion_imagen", "redactado", "capa_vectorial", "hereda_de",
-                      "absorbe", "partida_en"):
+                      "absorbe", "partida_en", "encuadre", "carta", "componente",
+                      "editar_base", "cambio", "estado", "base", "base_clave"):
             nueva.pop(clave, None)
+        if not entrada.get("personas", True):
+            nueva["personajes"] = []
+            nueva.pop("primer_termino", None)
         nueva["capa_vectorial"] = []
         nueva["direccion"] = entrada["direccion"]
         nueva["insertada"] = {"en": escena["id"], "texto": entrada["texto"], "n": entrada["n"],
@@ -308,6 +335,8 @@ the English shot direction for it, the way a director writes one line per shot:
 - It is the same place and the same moment as the image it comes from (below),
   so do not describe the place again unless the Spanish changes it.
 - One or two sentences, present tense. No style words, no camera brands.
+- Say whether PEOPLE appear in the new image: only if the Spanish asks for
+  them or the action needs someone (a hand, a person doing something).
 
 <imagen_de_la_que_sale>
 {prompt}
@@ -321,12 +350,13 @@ the English shot direction for it, the way a director writes one line per shot:
 {que}
 </imagen_nueva>
 
-Return ONLY this JSON: {{"direccion": "<the English shot direction>"}}"""
+Return ONLY this JSON: {{"direccion": "<the English shot direction>", "personas": true or false}}"""
 
 
 def al_ingles(que, prompt="", narracion="", cwd=None):
     """Lo que se ve, escrito en español, pasado a la dirección en inglés de
-    la imagen nueva. Lanza `ErrorDireccion` si no sale nada utilizable."""
+    la imagen nueva. -> {"direccion", "personas": si sale gente}. Lanza
+    `ErrorDireccion` si no sale nada utilizable."""
     limpio = " ".join(str(que or "").split())[:MAX_QUE]
     if not limpio:
         raise ErrorDireccion("escribe qué quieres que se vea en la imagen nueva")
@@ -351,6 +381,6 @@ def al_ingles(que, prompt="", narracion="", cwd=None):
         if len(direccion) > MAX_DIRECCION:
             raise ErrorDireccion("lo que se ve es demasiado largo para una imagen: escríbelo "
                                  "más corto. No se ha cambiado nada.")
-        return direccion
+        return {"direccion": direccion, "personas": datos.get("personas") is not False}
     raise ErrorDireccion("Claude devolvió una respuesta que no se ha podido leer; vuelve a "
                          f"intentarlo. No se ha cambiado nada.\n\n{ultimo}")

@@ -29,6 +29,16 @@ cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.
 - Si cierras el editor mientras la IA o Claude trabajan, el resultado sale en
   el aviso flotante de siempre, para que no se pierda.
 
+**«Pasar al Encargo» con el formulario limpio (22 de octubre)**
+- Si tenías un vídeo abierto en Crear (por ejemplo, montándose) y pasabas otro
+  guion desde la Parrilla, la pantalla seguía enseñando el vídeo de antes y no
+  quedaba claro de quién eran los botones. Ahora «Pasar al Encargo» **suelta el
+  vídeo abierto** y te deja «Un vídeo nuevo» limpio, con el guion de la
+  Parrilla.
+- El vídeo soltado **no se toca**: lo que estuviera haciendo (montaje,
+  imágenes…) sigue en el servidor, y lo vuelves a abrir desde Tus proyectos.
+  Un aviso te lo recuerda.
+
 **«Lo que dice el guion», sin que se cuele la voz (24 de octubre)**
 - **Las líneas «Visual:» de la Parrilla valen solas.** Si casan con el guion
   (cada una con su bloque y en orden), se dibujan sin tener que aprobarlas a

@@ -5410,7 +5410,7 @@ button.tarjeta-proyecto.sin, button.tarjeta-proyecto.nuevo { padding: 14px; min-
 .medidor-claude .ver-consumo { align-self: flex-start; padding-left: 0; font-size: 12px; }
 .barra-modulos .aviso-claude { border: 1px solid var(--aviso-borde); background: var(--aviso-fondo); color: var(--aviso-texto); cursor: pointer; }
 .barra-modulos .aviso-claude.malo { border-color: var(--malo-borde); background: var(--malo-fondo); color: var(--malo); }
-.barra-modulos .aviso-claude.oculto { display: none; }
+.barra-modulos .aviso-claude.sin-aviso { display: none; }
 @media (min-width: 1200px) {
   body.con-menu .barra-modulos .aviso-claude { display: none; }
 }

@@ -24412,7 +24412,7 @@ function medidorClaudeDelMenu() {
   const caja = h('div', { clase: 'gasto-menu medidor-claude',
     title: 'Lo usado de tu membresía de Claude (guion, Parrilla, asistente…)' });
   caja.appendChild(h('span', { clase: 'gasto-etiqueta' }, 'Claude · membresía'));
-  const avisoMovil = h('button', { type: 'button', clase: 'boton-modulo aviso-claude oculto',
+  const avisoMovil = h('button', { type: 'button', clase: 'boton-modulo aviso-claude sin-aviso',
     onclick: () => abrirConsumoClaude() });
   if (!d) {
     caja.appendChild(h('span', { clase: 'meta' }, MEDIDOR_CLAUDE.error ? 'sin datos' : 'mirando…'));
@@ -24428,7 +24428,7 @@ function medidorClaudeDelMenu() {
       `${haceCuantoClaude(cuenta.medido_en)} · ver detalle`));
     const peor = (d.avisos || [])[0];
     if (peor) {
-      avisoMovil.classList.remove('oculto');
+      avisoMovil.classList.remove('sin-aviso');
       avisoMovil.classList.add(peor.nivel);
       avisoMovil.textContent = `⚠ Claude ${porcentaje(peor.uso)}`;
       avisoMovil.title = `${peor.nombre}: ${porcentaje(peor.uso)} usado`;

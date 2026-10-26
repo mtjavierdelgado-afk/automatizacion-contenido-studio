@@ -8707,5 +8707,59 @@ def encargo_limpio_suelta_el_video(navegador, datos):
     pg.sin_errores("encargo limpio")
     pg.cerrar()
 
+
+@escenario
+def cola_del_studio(navegador, datos):
+    """Rama cola-montaje (25-10): el botón «Cola» de la barra de módulos abre
+    el panel «Cola del Studio» con Imágenes, Montaje y lo que está en marcha;
+    las filas dicen quién trabaja y en qué puesto espera cada uno; se cierra
+    con la × y con Escape, y en el móvil la barra sigue cabiendo."""
+    pid = datos["video"]
+    api = datos["api"]
+    r, cola = api.get("/api/cola_studio")
+    ok(getattr(r, "status_code", 0) == 200 and {"imagenes", "montaje", "trabajando"} <= set(cola or {}),
+       f"GET /api/cola_studio responde con las tres partes ({getattr(r, 'status_code', 0)})")
+    pg = Pagina(navegador, datos, nombre="cola del studio")
+    ok(pg.esperar("#barra-modulos .modulo-cola", segundos=10), "la barra de módulos tiene «Cola»")
+    pg.pulsar("#barra-modulos .modulo-cola")
+    ok(pg.esperar(".cajon-cola .cab-ajustes b", "Cola del Studio", 8), "y abre el panel «Cola del Studio»")
+    for titulo in ("Imágenes", "Montaje", "Todo lo que está en marcha"):
+        ok(pg.visible(".cajon-cola .titulo-ajustes", titulo), f"con su sección «{titulo}»")
+    # con una cola de mentira, las filas dicen quién trabaja y en qué puesto
+    pg.js(f"""COLA_STUDIO.datos = {{ ahora: Date.now() / 1000,
+        imagenes: {{ ahora: null, fila: [] }},
+        montaje: {{ ahora: {{ pid: '{pid}', nombre: 'Vídeo que se monta', desde: Date.now() / 1000 - 90, video: true }},
+                    fila: [{{ pid: '', nombre: 'El segundo', desde: Date.now() / 1000 - 30, video: false }},
+                           {{ pid: '', nombre: 'El tercero', desde: Date.now() / 1000 - 10, video: false }}] }},
+        trabajando: [] }}; pintarColaStudio();""")
+    ok(pg.visible(".cajon-cola .fila-cola.trabajando", "Vídeo que se monta"), "quién se está montando")
+    puestos = pg.p.evaluate("() => [...document.querySelectorAll('.cajon-cola .fila-cola.en-espera .puesto-cola')]"
+                            ".map(x => x.textContent)")
+    ok(puestos == ["1.º", "2.º"], f"y quién espera, en orden ({puestos})")
+    ok(pg.visible(".cajon-cola .fila-cola.trabajando button", "Abrir"), "el que es un vídeo se puede abrir")
+    pg.captura("cola_del_studio")
+    pg.p.keyboard.press("Escape")
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible(".cajon-cola"), "Escape lo cierra")
+    pg.pulsar("#barra-modulos .modulo-cola")
+    pg.esperar(".cajon-cola", segundos=5)
+    pg.pulsar(".cajon-cola .cab-ajustes button")
+    pg.p.wait_for_timeout(400)
+    ok(not pg.visible(".cajon-cola"), "y la × también")
+    pg.sin_errores("la cola del Studio")
+    pg.cerrar()
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="cola móvil")
+    pg.p.wait_for_timeout(1500)
+    caja = pg.p.evaluate("() => { const b = document.querySelector('#barra-modulos'); "
+                         "return b ? [b.scrollWidth, b.clientWidth] : [0, 0]; }")
+    ok(caja[0] <= caja[1] + 2, f"con «Cola», la barra de módulos sigue cabiendo en 390 px ({caja})")
+    pg.pulsar("#barra-modulos .modulo-cola")
+    ok(pg.esperar(".cajon-cola", segundos=5), "y en el móvil se abre igual")
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    ok(ancho <= 2, f"sin salirse por los lados ({ancho}px)")
+    pg.captura("cola_del_studio_movil", entera=False)
+    pg.sin_errores("la cola del Studio en el móvil")
+    pg.cerrar()
+
 if __name__ == "__main__":
     sys.exit(main())

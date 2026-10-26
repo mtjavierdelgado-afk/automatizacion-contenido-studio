@@ -274,7 +274,8 @@ _deshacer_config() {
 #: tarifas.de_fabrica.json (el primer update tras medidor-claude-2). Al cambiar
 #: tarifas.json en el repo, se anade aqui su huella (sha256sum tarifas.json).
 TARIFAS_PUBLICADAS="e876f7c9ef25d480d5a84b118c291903a4a1ab7f82637aed2880e59053682b1f
-9f9825684653091514af97d8623961b8844c14bba5d5a5b0533bf5f51d7b88fc"
+9f9825684653091514af97d8623961b8844c14bba5d5a5b0533bf5f51d7b88fc
+25bd9f527db53da0f4a17d5c15ec9426cd2756ae0da0c6ef18ab542cc808733b"
 
 _tarifas_al_dia() {
   local nueva="$1" datos="$2" actual fabrica huella de_fabrica=0

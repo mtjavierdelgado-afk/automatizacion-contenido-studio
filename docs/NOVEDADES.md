@@ -1,6 +1,18 @@
 # Novedades de CrearIA Studio
 
 Lo que ha cambiado en el sistema, de lo más nuevo a lo más antiguo. Se ve en
+**Dos ajustes finos del gasto (26 de octubre)**
+- **Imágenes sin detalle de OpenAI**: cuando OpenAI no dice lo que cobró por una
+  imagen, el Studio la calcula con la tabla oficial de gpt-image-2. En calidad
+  baja, apaisada o vertical, son 0,005 $ (antes apuntaba 0,006 $, el precio de
+  la cuadrada). Lo normal es que OpenAI sí lo diga, y entonces manda su cifra.
+- **La voz, sin contar las marcas como texto**: una pausa (`<break …/>`) o un
+  cambio de velocidad o de emoción cuenta como UN carácter, como cobra Cartesia,
+  y `<spell>` solo lo que deletrea. Antes una pausa contaba como 23 caracteres.
+  El gasto de voz baja unos céntimos por vídeo.
+- `asvs actualizar` pone al día la tabla de tarifas del servidor sola, si no la
+  editaste a mano.
+
 **Configuración → Novedades**, y el asistente lo lee para estar al día.
 
 Para actualizar el servidor: en la consola del VPS, `asvs actualizar`. Tus

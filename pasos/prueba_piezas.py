@@ -6088,6 +6088,43 @@ def prueba_cancelar_montaje():
         shutil.rmtree(base, ignore_errors=True)
 
 
+def prueba_costes_menores():
+    """Costes-menores (26-10): la tabla de respaldo y los caracteres de la voz.
+
+    (1) Sin `usage`, una imagen apaisada o vertical en calidad baja cuesta lo
+    que dice la tabla oficial de gpt-image-2 (0,005 $), no la del cuadrado.
+    (2) La voz apunta lo que COBRA Cartesia: cada etiqueta de pausa o de voz es
+    un caracter y <spell> solo cuenta lo que deletrea."""
+    titulo("coste: tabla de respaldo por tamano y caracteres cobrados de la voz")
+    from motores.imagen_openai import imagen as motor_imagen   # noqa: PLC0415
+    with open(os.path.join(RAIZ, "tarifas.json"), encoding="utf-8") as fh:
+        tabla = json.load(fh)["openai"]["usd_por_imagen"]
+    igual((tabla["1536x1024"]["low"], tabla["1024x1536"]["low"], tabla["1024x1024"]["low"]),
+          (0.005, 0.005, 0.006), "la tabla de respaldo baja: 0,005 apaisada y vertical, 0,006 cuadrada")
+    igual((motor_imagen._precio("low", "apaisado"), motor_imagen._precio("medium", "vertical"),
+           motor_imagen._precio("high", "cuadrado")), (0.005, 0.041, 0.211),
+          "el motor lleva el precio de su tamano")
+    igual(coste.caracteres_cobrados("Hola mundo."), 11, "un texto sin marcas cuenta todo")
+    igual(coste.caracteres_cobrados('Hola<break time="1200ms"/> mundo.'), 12,
+          "una pausa cuenta como UN caracter, no como los 23 de la etiqueta")
+    igual(coste.caracteres_cobrados('<speed ratio="0.8"/>Uno <emotion value="calm"/>dos'
+                                    '<speed ratio="1"/>'), 10,
+          "speed y emotion, tambien uno cada una")
+    igual(coste.caracteres_cobrados("La <spell>NBA</spell> juega."), 13,
+          "<spell> cuenta lo que deletrea y nada de la etiqueta")
+    igual(coste.caracteres_cobrados(None), 0, "sin texto, cero")
+    apuntes = []
+    original = coste._anotar
+    try:
+        coste._anotar = lambda *a, **k: apuntes.append(k) or {}       # noqa: SLF001
+        envuelta = coste._medir_toma_por_contexto(lambda *a, **k: "ok")  # noqa: SLF001
+        envuelta(['Uno.<break time="500ms"/>', "Dos."], {"modelo": "sonic-3"})
+    finally:
+        coste._anotar = original
+    igual((apuntes[0]["cantidad"]["caracteres"], apuntes[0]["detalle"]["enviados"]),
+          (9, 29), "la toma apunta los cobrados y guarda los enviados en el detalle")
+
+
 def main():
     _prohibir_pagar()
     # EL HISTORICO DE TIEMPOS, A UNA COPIA. Guarda 30 muestras por paso, asi
@@ -6156,6 +6193,7 @@ def main():
     prueba_montaje_por_plano()
     prueba_cancelar_montaje()
     prueba_revision_editorial()
+    prueba_costes_menores()
 
     print("\n" + "=" * 70)
     if _fallos:

@@ -31,7 +31,18 @@ from PIL import Image
 API_URL = "https://api.openai.com/v1/images/edits"
 MODELO = "gpt-image-2"
 
-PRECIO = {"low": 0.006, "medium": 0.041, "high": 0.165}
+#: Lo que OpenAI cobra por la imagen DEVUELTA (gpt-image-2, tabla oficial):
+#: apaisado y vertical cuestan lo mismo; el cuadrado, mas en media y alta. Es
+#: solo la parte pequena del gasto (la entrada de referencias va aparte) y solo
+#: sirve de freno y de respaldo: el medidor lo pisa con el `usage` de verdad.
+PRECIO = {"low": 0.005, "medium": 0.041, "high": 0.165}
+PRECIO_CUADRADO = {"low": 0.006, "medium": 0.053, "high": 0.211}
+
+
+def _precio(quality, tamano):
+    """USD de la imagen devuelta para esa calidad y tamano."""
+    tabla = PRECIO_CUADRADO if tamano == "cuadrado" else PRECIO
+    return tabla.get(quality, PRECIO.get(quality, 0.0))
 TAMANOS = {"apaisado": "1536x1024", "cuadrado": "1024x1024", "vertical": "1024x1536"}
 
 _gasto = {"usd": 0.0, "llamadas": 0}
@@ -902,7 +913,7 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
         if r.status_code == 200:
             payload = r.json()
             png = base64.b64decode(payload["data"][0]["b64_json"])
-            _gasto["usd"] += PRECIO[quality]
+            _gasto["usd"] += _precio(quality, tamano)
             _gasto["llamadas"] += 1
             # 'usage' es el unico recuento real de tokens de esta llamada y solo
             # existe aqui: se devuelve tal cual para que el medidor no lo estime
@@ -911,7 +922,7 @@ def generar(prompt, referencias, *, quality="low", tamano="apaisado",
                                                     cuando=time.time()))
             return png, {"segundos": round(segundos, 1), "quality": quality,
                          "sin_marcas": prompt is not original,
-                         "refs": len(referencias), "coste": PRECIO[quality],
+                         "refs": len(referencias), "coste": _precio(quality, tamano),
                          "modelo": MODELO, "tamano": TAMANOS[tamano],
                          "usage": payload.get("usage") or {}}
 

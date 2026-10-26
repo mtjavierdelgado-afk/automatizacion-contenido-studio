@@ -712,6 +712,22 @@ def reportar_openai(usage, calidad, tamano, imagenes=1, operacion="imagen",
                    usd_estimado=True, detalle=ficha)
 
 
+#: Las etiquetas que Cartesia entiende dentro del texto. NO SE LEEN EN VOZ ALTA
+#: y la documentacion de Cartesia dice que cada <break> cuenta como UN caracter;
+#: se aplica lo mismo a <speed>, <volume> y <emotion>, que son de la misma
+#: familia. De <spell> se dice lo que lleva dentro, asi que cuenta su contenido
+#: y nada de la etiqueta. Antes se contaba `<break time="1200ms"/>` como 23
+#: caracteres: el gasto de voz salia unos centimos por encima en cada video.
+_ETIQUETA_VOZ = re.compile(r'<(?:break|speed|volume|emotion)\b[^<>]*>', re.I)
+_ETIQUETA_SPELL = re.compile(r'</?\s*spell\s*>', re.I)
+
+
+def caracteres_cobrados(texto):
+    """Los caracteres de ese texto que cobra Cartesia: cada etiqueta, uno."""
+    texto = str(texto or "")
+    return len(_ETIQUETA_SPELL.sub("", _ETIQUETA_VOZ.sub("x", texto)))
+
+
 def reportar_tts(caracteres, operacion="sintesis", unidad=None, tokens=None,
                  detalle=None):
     """Anota una sintesis con los caracteres que el motor de voz envio de verdad."""
@@ -809,8 +825,9 @@ def _medir_toma_real(original):
         # se anota DESPUES y con el texto que se envio: si la llamada revienta
         # no hay recuento fiable y preferimos un hueco a un numero inventado
         cfg = cfg if isinstance(cfg, dict) else {}
-        reportar_tts(len(texto or ""), operacion="toma",
-                     detalle={"modelo": cfg.get("modelo"),
+        reportar_tts(caracteres_cobrados(texto), operacion="toma",
+                     detalle={"enviados": len(texto or ""),
+                              "modelo": cfg.get("modelo"),
                               "voz_id": cfg.get("voz_id"),
                               "idioma": cfg.get("idioma")})
         return resultado
@@ -856,8 +873,9 @@ def _medir_toma_por_contexto(original):
             raise
         cfg = cfg if isinstance(cfg, dict) else {}
         piezas = list(trozos or [])
-        reportar_tts(sum(len(str(t or "")) for t in piezas), operacion="toma",
-                     detalle={"modelo": cfg.get("modelo"),
+        reportar_tts(sum(caracteres_cobrados(t) for t in piezas), operacion="toma",
+                     detalle={"enviados": sum(len(str(t or "")) for t in piezas),
+                              "modelo": cfg.get("modelo"),
                               "voz_id": cfg.get("voz_id"),
                               "idioma": cfg.get("idioma"),
                               "secciones": len(piezas)})

@@ -14402,6 +14402,8 @@ function seguirPasadaDeCorte(pid, tid, irA, mensaje) {
     if (trabajo.estado === 'listo') toast(mensaje);
     else if (trabajo.estado === 'error') toast(`no se ha podido: ${trabajo.error || 'falló'}`, true);
     if (videoAbierto().pid === pid) {
+      // el carril y la barra: el vídeo queda por volver a montar
+      try { await refrescarFichasLight(); } catch (_e) { /* se ve al volver */ }
       reiniciarPrevia();
       if (irA) PREVIA.recordada = { pid, id: irA };
       await cargarPreviaLight();

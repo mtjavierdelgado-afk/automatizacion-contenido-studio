@@ -10,6 +10,19 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
+**Quitar una imagen o igualarla con la de al lado (26 de octubre)**
+- **«Quitar esta imagen»** (en cada diapositiva de Imágenes, «Ajustar esta
+  imagen»): lo que se oye en ella pasa a la imagen de antes o a la de después,
+  la que tú elijas. Esa imagen se alarga y conserva su dibujo: no se paga nada.
+  Los números no cambian (si quitas S002, el vídeo va de S001 a S003). Después
+  hay que volver a montar el vídeo, que también es gratis.
+- **«Deshacer»**: la imagen que se lleva la voz lo dice («Lleva también la voz
+  de S002») y la devuelve con su misma imagen, sin pagar otra.
+- **«Igualar con la anterior / la siguiente»**: te deja escrita la nota para
+  rehacer esa imagen con la de al lado como referencia (mismo sitio, acabados y
+  luz). Se paga solo cuando la rehagas, como cualquier nota.
+- No se pueden quitar las cartelas ni pasar la voz a una cartela.
+
 **Con el nuevo diseño empieza la versión 3.1.** Reúne todo lo de la V2.0 que
 está debajo (imágenes, música y efectos, Publicar, la Parrilla, Analizar
 cuentas y las notas del 19 de octubre) más la interfaz nueva de CrearIA Studio.

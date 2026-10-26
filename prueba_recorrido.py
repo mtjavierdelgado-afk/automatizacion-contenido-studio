@@ -8901,5 +8901,97 @@ def cola_del_studio(navegador, datos):
     pg.sin_errores("la cola del Studio en el móvil")
     pg.cerrar()
 
+
+
+# ============================================================ UNIR PLANOS
+# unir-planos (26-10-2026): en la diapositiva de Imágenes, «Igualar con la
+# anterior» escribe la nota; «Quitar esta imagen» pasa su voz a la de antes,
+# que conserva su dibujo, sin pagar nada; «Deshacer» la devuelve, también
+# gratis y con su misma imagen.
+@escenario
+def quitar_e_igualar_imagenes(navegador, datos):
+    pid = datos["video"]
+    api = datos["api"]
+    api.libre(pid)
+    _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+    escenas = previa.get("escenas") or []
+    elegida = next((e for e in escenas[1:] if (e.get("quitar") or {}).get("anterior")
+                    and e.get("imagen")), None)
+    ok(elegida is not None, "hay una imagen que se puede quitar hacia la anterior")
+    if elegida is None:
+        return
+    sid, vecino = elegida["id"], elegida["quitar"]["anterior"]
+    antes = _huellas_de_planos(datos, pid)
+    _r, assets_antes = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    pg = Pagina(navegador, datos, nombre="quitar imagen")
+    pg.js(f"await abrirVideoLight('{pid}'); APP.light.video.vista = 'previa'; pintarLight();")
+    pg.p.wait_for_function("() => (PREVIA.ficha || {}).escenas", timeout=20000)
+    pg.js(f"PREVIA.i = PREVIA.ficha.escenas.findIndex(x => x.id === '{sid}'); repintarVideo();")
+    ok(pg.esperar(".ajustar-imagen", "Ajustar esta imagen", 10), "la diapositiva trae «Ajustar esta imagen»")
+    pg.pulsar(".ajustar-imagen button", f"Igualar con la anterior ({vecino})")
+    nota = pg.p.evaluate(f"() => PREVIA.borrador['{sid}'] || ''")
+    ok(vecino in nota and "mismo sitio" in nota,
+       f"«Igualar con la anterior» deja escrita la nota con {vecino} ({nota[:60]})")
+    _r, repaso = api.get(f"/api/proyectos/{pid}/repaso")
+    ok(not any(n.get("plano") == sid and "mismo sitio" in str(n.get("texto"))
+               for n in (repaso.get("notas") or [])),
+       "y no guarda nada hasta que tú la guardes")
+    pg.js(f"PREVIA.borrador['{sid}'] = ''; repintarVideo();")
+    pg.pulsar(".ajustar-imagen button", "Quitar esta imagen")
+    ok(pg.visible(".ajustar-quitar .meta", "Gratis"), "al quitar, dice que es gratis y se deshace")
+    pg.pulsar(".ajustar-quitar button", f"Su voz pasa a {vecino}")
+    pg.p.wait_for_timeout(1500)
+    api.libre(pid, 300)
+    pg.p.wait_for_timeout(2500)
+    _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+    ids = [e["id"] for e in previa.get("escenas") or []]
+    ok(sid not in ids, f"{sid} ya no está en el vídeo")
+    hogar = next((e for e in previa.get("escenas") or [] if e["id"] == vecino), {})
+    ok([a.get("id") for a in hogar.get("absorbe") or []] == [sid]
+       and elegida["narracion"] in hogar.get("narracion", ""),
+       f"{vecino} lleva también lo que se oía en {sid}")
+    ok(abs(float(hogar.get("t_out") or 0) - float(elegida["t_out"])) < 0.01,
+       f"{vecino} dura hasta donde acababa {sid}")
+    despues = _huellas_de_planos(datos, pid)
+    ok(all(despues.get(x) == antes.get(x) for x in ids if x in antes),
+       "ninguna imagen ha cambiado: la que se queda conserva su dibujo")
+    _r, assets = api.get(f"/api/proyectos/{pid}/pasos/assets")
+    ok(not (assets.get("unidades_obsoletas") or []) or
+       set(assets.get("unidades_obsoletas") or []) <= set(assets_antes.get("unidades_obsoletas") or []),
+       f"y no deja imágenes por rehacer ({assets.get('unidades_obsoletas')})")
+    _r, callouts = api.get(f"/api/proyectos/{pid}/pasos/callouts")
+    _r, render = api.get(f"/api/proyectos/{pid}/pasos/render")
+    ok(render.get("estado") == "obsoleto",
+       f"el vídeo queda por volver a montar ({callouts.get('estado')}, {render.get('estado')})")
+    ok(pg.esperar(".ajustar-absorbe", f"Lleva también la voz de {sid}", 20),
+       f"la diapositiva de {vecino} dice que lleva su voz, con «Deshacer»")
+    ok(pg.visible(".pasos-carril", "Vídeo") and pg.p.evaluate(
+        "() => ((APP.light.video.fichas || {}).render || {}).estado") == "obsoleto",
+       "el carril también lo dice (sin recargar la página)")
+    pg.captura("quitar_imagen")
+    # Y SE MONTA: el plano que se queda dura los dos, gratis
+    r, lanz = api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})
+    fin = api.esperar(lanz.get("trabajo_id"), 600) if r.status_code == 202 else lanz
+    _r, render = api.get(f"/api/proyectos/{pid}/pasos/render")
+    ok(render.get("estado") == "listo", f"el vídeo se monta con la imagen quitada ({str(fin)[:160]})")
+    ok(_huellas_de_planos(datos, pid) == despues, "y montar no dibuja ninguna imagen")
+    pg.pulsar(".ajustar-absorbe button", "Deshacer")
+    pg.p.wait_for_timeout(1500)
+    api.libre(pid, 300)
+    pg.p.wait_for_timeout(2500)
+    _r, previa = api.get(f"/api/proyectos/{pid}/previsualizacion")
+    vuelta = next((e for e in previa.get("escenas") or [] if e["id"] == sid), None)
+    ok(vuelta is not None and vuelta.get("imagen"), f"«Deshacer» devuelve {sid}, con su imagen")
+    ok(_huellas_de_planos(datos, pid).get(sid) == antes.get(sid), f"la misma imagen de {sid}, sin pagar otra")
+    hogar = next((e for e in previa.get("escenas") or [] if e["id"] == vecino), {})
+    ok(not hogar.get("absorbe"), f"y {vecino} vuelve a ser solo suyo")
+    r, lanz = api.post(f"/api/proyectos/{pid}/montaje/aplicar", {})
+    if r.status_code == 202:
+        api.esperar(lanz.get("trabajo_id"), 600)
+    _r, render = api.get(f"/api/proyectos/{pid}/pasos/render")
+    ok(render.get("estado") == "listo", "y se vuelve a montar como estaba")
+    pg.sin_errores("quitar e igualar imágenes")
+    pg.cerrar()
+
 if __name__ == "__main__":
     sys.exit(main())

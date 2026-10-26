@@ -136,9 +136,11 @@ def se_puede_quitar(escena, sin_imagen):
 
 
 def puede_recibir(escena, sin_imagen):
-    """Si este plano puede quedarse con la voz de un vecino: tiene que tener
-    imagen propia (no una cartela de fondo negro ni una continuación)."""
-    return bool(escena) and not sin_imagen(escena) and not escena.get("sigue_a")
+    """Si este plano puede quedarse con la voz de un vecino: tiene que ser una
+    imagen normal. Ni una cartela (su texto entra al ritmo de SUS palabras, y
+    con las del vecino se descolocaría) ni una continuación de otro plano."""
+    return (bool(escena) and not sin_imagen(escena) and not escena.get("sigue_a")
+            and not escena.get("cartela"))
 
 
 def _juntar(hogar, quitado, delante):

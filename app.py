@@ -7308,8 +7308,9 @@ def _sin_nada_en_marcha(ctx, que):
 
 def _pasada_sin_dibujar(ctx, nombre):
     """La pasada de imágenes que solo vuelve a cortar: ninguna unidad pedida,
-    así que no se dibuja ni se paga nada."""
-    return lanzar_paso(ctx, "assets", [], nombre=nombre)
+    así que no se dibuja ni se paga nada. -> {trabajo, trabajo_id}"""
+    tid = lanzar_paso(ctx, "assets", [], nombre=nombre)
+    return {"trabajo": tid, "trabajo_id": tid}
 
 
 @app.post("/api/proyectos/{pid}/planos/{sid}/quitar", status_code=202)

@@ -154,6 +154,12 @@ def prueba_lo_que_no():
     escenas[1]["cartela"] = {"fondo": "negro"}
     hecho = Q.aplicar(escenas, raiz, clave, sin_imagen)
     ok(not hecho["absorbidos"], "hacia una cartela de fondo negro: no (no tiene imagen)")
+    raiz = nueva_raiz()
+    Q.quitar(raiz, "este baño era el más feo", "siguiente", "S001")
+    escenas = video()
+    escenas[1]["cartela"] = {"fondo": "imagen"}
+    hecho = Q.aplicar(escenas, raiz, clave, sin_imagen)
+    ok(not hecho["absorbidos"], "hacia una cartela sobre imagen: tampoco (su texto va a su ritmo)")
 
 
 def prueba_cadenas():

@@ -2514,10 +2514,12 @@ function pintarConfig() {
   caja.appendChild(seccionCartesia(ficha));
   caja.appendChild(seccionPronunciacion());
   caja.appendChild(seccionCLI());
+  caja.appendChild(seccionConsumoClaude());  // el medidor de Claude (medidor-claude)
   caja.appendChild(seccionOtrasClaves(ficha));
   caja.appendChild(seccionClaveUploadPost(ficha));  // Publicar en redes (rama publicar-redes-1)
   caja.appendChild(seccionClaveYouTube(ficha));  // búsquedas SEO (rama seo-real)
   caja.appendChild(seccionCanalYouTube(ficha));  // tu canal con OAuth (rama seo-real-3)
+  caja.appendChild(seccionClavesAnalizarCuentas());  // analizar cuentas: YouTube, Meta y Apify (rediseno-publicar)
   caja.appendChild(h('div', { clase: 'fila' },
     h('button', {
       clase: 'mini fantasma',
@@ -3105,6 +3107,9 @@ async function probarCuentaCLI(cid) {
 const NOMBRES_PROVEEDOR = {
   openai: 'OpenAI — imágenes', cartesia: 'Cartesia — voz', jamendo: 'Jamendo — música',
   freesound: 'FreeSound — efectos', claude: 'Claude',
+  // las de analizar cuentas (rediseno-publicar: pasaron de Automatizar a Configuración)
+  lectura_youtube: 'YouTube — analizar cuentas', lectura_instagram: 'Instagram — analizar cuentas',
+  lectura_apify: 'Apify — analizar cuentas',
 };
 
 function bloquePruebaClaves() {
@@ -9341,6 +9346,19 @@ function leerRelatoDelServidor(est, d) {
   est.copia = tipoRelatoDelEncargo((d || {}).tipo_relato);
   est.cambios = (d || {}).cambios || null;
   est.marcados = new Set(((est.cambios || {}).planos || []).map(x => x.id));
+  traduccionAlLeerRelato(est);
+}
+
+/* Lo que falte en español se pide solo al abrir (una vez: tras un error no se
+   reintenta solo, lo decide el servidor con `auto`), y si ya se está
+   traduciendo se sigue hasta que acabe. */
+function traduccionAlLeerRelato(est) {
+  const t = (est.ficha || {}).traduccion || {};
+  if (t.estado === 'pensando') seguirTraduccionRelato(est);
+  else if (t.faltan > 0 && t.estado !== 'error' && !est.autoTraducido) {
+    est.autoTraducido = true;
+    traducirRelato(true, est);
+  }
 }
 
 function bloqueTipoRelatoDelVideo() {
@@ -9398,6 +9416,8 @@ function imagenBaseDelRelato(est, corriendo) {
     ? '✓ Aprobada: cada plano del sitio se genera editando esta imagen.'
     : (base ? 'Sin aprobar: mírala y apruébala antes de generar los planos.'
       : 'Sin imagen base: los planos de este sitio no se generan hasta que la apruebes.')));
+  const dondeBase = dondeSeUsaRelato(f.donde_base);
+  if (dondeBase) caja.appendChild(dondeBase);
   const fila = h('div', { clase: 'fila' });
   if (base && !f.base_aprobada) {
     fila.appendChild(h('button', { clase: 'mini primario', disabled: est.ocupado,
@@ -9417,8 +9437,9 @@ function imagenBaseDelRelato(est, corriendo) {
   caja.appendChild(fila);
   if (f.base_aprobada && (f.estados || []).length) caja.appendChild(estadosDelRelato(est, corriendo, usd));
   if (f.inicial) {
-    caja.appendChild(h('div', { clase: 'meta' }, `Lo que luego cambia sale ya en la base, así: «${f.inicial}». `
-      + 'Comprueba que está donde va antes de aprobarla.'));
+    caja.appendChild(h('div', { clase: 'meta' }, 'Lo que luego cambia sale ya en la base, así. '
+      + 'Comprueba que está donde va antes de aprobarla:'));
+    caja.appendChild(textoRelatoEnEspanol(est, f.inicial_es, f.inicial, ''));
   }
   caja.appendChild(h('div', { clase: 'pista' }, 'Qué hay en el sitio y dónde lo dice «El espacio '
     + 'fijo»; aquí se dibuja y se aprueba. La imagen base es el sitio vacío y entero, en su '
@@ -9506,9 +9527,12 @@ function estadosDelRelato(est, corriendo, usd) {
         title: 'Abrir a tamaño completo' },
       h('img', { src: url, alt: `el estado ${e.estado}`, clase: 'miniatura-imagen-base' })));
     }
+    const editando = est.editandoEstado && est.editandoEstado.estado === e.estado;
     const lado = h('div', { clase: 'estado-relato-texto' },
       h('strong', {}, e.estado.replace(/_/g, ' ')),
-      h('div', { clase: 'meta' }, e.cambio),
+      editando ? editorEstadoRelato(est, e, usd)
+        : textoRelatoEnEspanol(est, e.cambio_es, e.cambio, e.estado),
+      dondeSeUsaRelato(e.donde),
       h('div', { clase: 'meta' }, e.aprobada ? '✓ Aprobado.'
         : (e.imagen_url && e.vigente ? 'Sin aprobar: míralo y apruébalo.'
           : (e.imagen_url ? 'El cambio se ha reescrito: hace falta otra imagen.'
@@ -9525,11 +9549,221 @@ function estadosDelRelato(est, corriendo, usd) {
     botones.appendChild(h('button', { clase: 'mini', disabled: est.ocupado || corriendo,
       onclick: () => generarEstadoDelRelato(e.estado, !!e.imagen_url, usd) },
     `${e.imagen_url ? 'Otra imagen' : 'Dibujar este estado'} · ≈ ${usdCorto(usd)}`));
+    if (!editando) {
+      botones.appendChild(h('button', { clase: 'mini fantasma',
+        disabled: est.ocupado || corriendo || traduciendoRelato(est),
+        onclick: () => { est.editandoEstado = { estado: e.estado, texto: e.cambio_es || '' }; pintarLight(); } },
+      '✎ Cambiar'));
+    }
     lado.appendChild(botones);
     fila.appendChild(lado);
     caja.appendChild(fila);
   }
   return caja;
+}
+
+/* EN ESPAÑOL, DÓNDE SE USA Y CAMBIAR (rama estados-en-espanol, 22-10). Lo que
+   se manda a dibujar sigue en inglés; aquí se lee en español (traducido por
+   Claude con la membresía y guardado aparte, sin tocar ninguna firma) con el
+   inglés plegado debajo, y se reescribe en español: el servidor lo pasa al
+   inglés. Mientras Claude traduce, la ficha se vuelve a leer sola. */
+function traduciendoRelato(est) {
+  return ((est.ficha || {}).traduccion || {}).estado === 'pensando';
+}
+
+function textoRelatoEnEspanol(est, es, en, estado) {
+  if (!en) return null;
+  const t = (est.ficha || {}).traduccion || {};
+  const caja = h('div', { clase: 'relato-es' });
+  if (t.estado === 'pensando' && t.tipo === 'editar' && t.estado_relato === estado) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Pasando tu cambio al inglés…'));
+    // mientras tanto se enseña lo que se acaba de escribir, no lo de antes
+    if (est.pendienteEstado && est.pendienteEstado.estado === estado) es = est.pendienteEstado.texto;
+  }
+  if (es) {
+    caja.appendChild(h('div', { clase: 'relato-es-texto' }, es));
+    caja.appendChild(h('details', { clase: 'relato-es-ingles' },
+      h('summary', {}, 'En inglés (lo que se manda a dibujar)'),
+      h('div', { clase: 'meta' }, en)));
+    return caja;
+  }
+  caja.appendChild(h('div', { clase: 'meta' }, en));
+  if (t.estado === 'pensando' && t.tipo === 'traducir') {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Traduciendo al español…'));
+  } else {
+    if (t.estado === 'error' && t.error) {
+      caja.appendChild(h('div', { clase: 'pista' }, `No se ha podido traducir: ${partirError(t.error).titular}`));
+    }
+    caja.appendChild(h('div', { clase: 'fila' }, h('button', { clase: 'mini',
+      disabled: est.ocupado || traduciendoRelato(est), onclick: () => traducirRelato(false, est) },
+    'Traducir al español'), h('span', { clase: 'meta' }, 'gratis: lo hace Claude con tu membresía')));
+  }
+  return caja;
+}
+
+function dondeSeUsaRelato(donde) {
+  const d = donde || {};
+  const bloques = d.bloques || [];
+  const planos = d.planos || [];
+  if (!bloques.length && !planos.length) return null;
+  const caja = h('div', { clase: 'relato-donde' }, h('span', { clase: 'relato-donde-titulo' }, 'Dónde se usa'));
+  bloques.slice(0, 3).forEach(b => caja.appendChild(
+    h('div', { clase: 'meta' }, `Bloque ${b.n} · «${b.texto}»`)));
+  if (bloques.length > 3) caja.appendChild(h('div', { clase: 'meta' }, `y ${bloques.length - 3} bloques más`));
+  caja.appendChild(h('div', { clase: 'meta' }, planos.length
+    ? `${planos.length === 1 ? 'Plano' : 'Planos'}: ${planos.join(', ')}`
+    : 'Todavía no hay planos hechos con esta imagen.'));
+  return caja;
+}
+
+function editorEstadoRelato(est, e, usd) {
+  const ed = est.editandoEstado;
+  const area = h('textarea', { rows: 3, value: ed.texto,
+    'aria-label': `qué cambia en el estado ${e.estado}`,
+    placeholder: 'Describe en español qué cambia en este estado: materiales, colores, muebles…',
+    oninput: ev => { ed.texto = ev.target.value; } });
+  return h('div', { clase: 'relato-editor' },
+    area,
+    h('div', { clase: 'pista' }, 'Escríbelo en español: Claude lo pasa al inglés, que es lo que se manda '
+      + 'a dibujar. Al guardarlo, este estado necesitará otra imagen; no se dibuja nada hasta que la pidas.'),
+    h('details', { clase: 'relato-es-ingles' },
+      h('summary', {}, 'Ahora, en inglés'), h('div', { clase: 'meta' }, e.cambio)),
+    h('div', { clase: 'fila' },
+      h('button', { clase: 'mini primario', disabled: est.ocupado || traduciendoRelato(est),
+        onclick: () => guardarEstadoRelato(est, e, usd) }, 'Guardar el cambio'),
+      h('button', { clase: 'mini fantasma', onclick: () => { est.editandoEstado = null; pintarLight(); } },
+        'Cancelar')));
+}
+
+async function traducirRelato(auto, est) {
+  est = est || relatoDelVideoLight();
+  const pid = est.pid;
+  try {
+    const d = await pedir(`${API.proyecto(pid)}/tipo_relato/traducir`,
+      { method: 'POST', cuerpo: { auto: !!auto } });
+    if (!est.ficha || APP.light.video.relato !== est) return;
+    est.ficha = d;
+    pintarLight();
+    seguirTraduccionRelato(est);
+  } catch (err) {
+    if (!auto) toast(err.message, true);
+  }
+}
+
+async function guardarEstadoRelato(est, e, usd) {
+  const ed = est.editandoEstado;
+  const texto = String((ed || {}).texto || '').trim();
+  if (!texto) { toast('escribe el cambio en español antes de guardarlo', true); return; }
+  if (texto === (e.cambio_es || '').trim()) { est.editandoEstado = null; pintarLight(); return; }
+  const planos = ((e.donde || {}).planos || []).length;
+  const lineas = [`Guardar el cambio del estado «${e.estado.replace(/_/g, ' ')}»`, '',
+    'Claude lo pasa al inglés (gratis, con tu membresía). Después:'];
+  if (e.imagen_url) {
+    lineas.push(`· este estado pierde su aprobación y hará falta otra imagen (≈ ${usdCorto(usd)}, `
+      + 'solo cuando la pidas)');
+  }
+  if (planos) {
+    lineas.push(`· ${planos === 1 ? 'su plano quedará' : `sus ${planos} planos quedarán`} para rehacer `
+      + `(≈ ${usdCorto(planos * usd)} si ${planos === 1 ? 'lo rehaces' : 'los rehaces'})`);
+  }
+  lineas.push('· los demás planos conservan su imagen: «Imágenes» puede contarlos como pendientes, '
+    + 'pero al ponerlos al día salen de la caché sin pagar');
+  lineas.push('', 'No se dibuja nada ahora.');
+  if (!confirm(lineas.join('\n'))) return;
+  const pid = est.pid;
+  est.ocupado = true;
+  pintarLight();
+  try {
+    const d = await pedir(`${API.proyecto(pid)}/tipo_relato/estado/editar`,
+      { method: 'POST', cuerpo: { estado: e.estado, es: texto } });
+    if (APP.light.video.relato === est) {
+      est.ficha = d;
+      est.pendienteEstado = { estado: e.estado, texto };
+      est.recargarAlTraducir = true;
+      // el editor se cierra solo si va bien (`terminarTraduccionRelato`): con
+      // un error tu texto sigue ahí para volver a guardarlo
+      if (traduciendoRelato(est)) est.editandoEstado = null;
+      if (traduciendoRelato(est)) seguirTraduccionRelato(est);
+      else terminarTraduccionRelato(est, d);
+    }
+  } catch (err) {
+    toast(err.message, true);
+  }
+  est.ocupado = false;
+  pintarLight();
+}
+
+/* Mientras Claude traduce, se vuelve a leer la ficha cada dos segundos. Solo
+   la ficha: lo elegido en la pantalla (el modo sin aplicar, los planos
+   marcados) no se pisa. Al terminar una EDICIÓN sí se lee todo, porque cambian
+   los planos que habría que rehacer. */
+function seguirTraduccionRelato(est) {
+  if (est.siguiendoTraduccion || !traduciendoRelato(est)) return;
+  est.siguiendoTraduccion = true;
+  const pid = est.pid;
+  let fallos = 0;
+  const vuelta = async () => {
+    if (APP.light.video.relato !== est || est.pid !== pid) { est.siguiendoTraduccion = false; return; }
+    try {
+      // ligero: sin recalcular los planos que cambian (lee cada imagen)
+      const d = await pedir(`${API.proyecto(pid)}/tipo_relato?ligero=1`);
+      if (APP.light.video.relato !== est) { est.siguiendoTraduccion = false; return; }
+      fallos = 0;
+      if ((d.traduccion || {}).estado === 'pensando') {
+        est.ficha = Object.assign({}, d, { cambios: est.cambios });
+        setTimeout(vuelta, 2000);
+        return;
+      }
+      est.siguiendoTraduccion = false;
+      if (est.recargarAlTraducir) {
+        // al terminar una edición, la ficha entera (cambian los planos a rehacer)
+        terminarTraduccionRelato(est, await pedir(`${API.proyecto(pid)}/tipo_relato`));
+      } else {
+        est.ficha = d;
+        pintarLight();
+      }
+    } catch (_err) {
+      // UN CORTE DE RED NO DEJA LA PANTALLA «PENSANDO» PARA SIEMPRE: se
+      // reintenta con más espera, y pasados unos intentos se deja de
+      // preguntar y se suelta el «pensando» de la pantalla
+      fallos += 1;
+      if (fallos < 6 && APP.light.video.relato === est) { setTimeout(vuelta, 2000 * fallos); return; }
+      est.siguiendoTraduccion = false;
+      if (est.ficha && est.ficha.traduccion) {
+        est.ficha.traduccion = Object.assign({}, est.ficha.traduccion,
+          { estado: 'error', error: 'Se ha perdido la conexión con el Studio mientras se traducía: '
+            + 'recarga la página para ver cómo quedó.' });
+      }
+      est.recargarAlTraducir = false;
+      est.pendienteEstado = null;
+      pintarLight();
+    }
+  };
+  setTimeout(vuelta, 2000);
+}
+
+/* Lo que pasa cuando la traducción o la edición termina, haya llegado con la
+   respuesta del POST (un error en el acto) o al preguntar. */
+function terminarTraduccionRelato(est, d) {
+  const t = (d || {}).traduccion || {};
+  const texto = (est.pendienteEstado || {}).texto;
+  const estado = (est.pendienteEstado || {}).estado;
+  est.pendienteEstado = null;
+  if (est.recargarAlTraducir) {
+    est.recargarAlTraducir = false;
+    leerRelatoDelServidor(est, d);
+    if (t.tipo === 'editar' && t.estado === 'error') {
+      // tu texto vuelve al editor, para corregirlo o volver a guardarlo
+      if (estado) est.editandoEstado = { estado, texto: texto || '' };
+      toast(`No se ha guardado: ${partirError(t.error).titular}`, true);
+    } else if (t.tipo === 'editar') {
+      est.editandoEstado = null;
+      toast('cambio guardado: falta su imagen nueva');
+    }
+  } else {
+    est.ficha = d;
+  }
+  pintarLight();
 }
 
 function aprobarEstadoDelRelato(estado, aprobada) {
@@ -11109,14 +11343,24 @@ function filaCoste(que, cuantas, usd, nota) {
 function tablaDeGasto(d, incluirEstilo) {
   const img = d.imagenes || {};
   const voz = d.voz || {};
+  /* POR TIPO DE IMAGEN (notas del dueño, 24-10-2026): las del vídeo (planos
+     nuevos y rehechos), la imagen base del tipo de relato con sus estados, las
+     referencias del reparto y las portadas, cada una en su fila. */
   const filas = [
-    filaCoste('Imágenes nuevas', `${(img.nuevas || {}).cuantas || 0}`, (img.nuevas || {}).usd || 0,
-      'una por plano'),
-    filaCoste('Imágenes rehechas', `${(img.rehechas || {}).cuantas || 0}`, (img.rehechas || {}).usd || 0,
-      'notas, «Desde cero», regenerar'),
-    filaCoste('Personajes (hojas del reparto)', `${(img.personajes || {}).cuantas || 0}`,
-      (img.personajes || {}).usd || 0, ''),
+    filaCoste('Planos del vídeo: nuevos', `${(img.nuevas || {}).cuantas || 0}`, (img.nuevas || {}).usd || 0,
+      'una por plano, la primera vez'),
+    filaCoste('Planos del vídeo: rehechos', `${(img.rehechas || {}).cuantas || 0}`, (img.rehechas || {}).usd || 0,
+      'notas, revisor, «Desde cero», regenerar'),
   ];
+  if ((img.base || {}).cuantas) {
+    filas.push(filaCoste('Tipo de relato: imagen base y estados', `${img.base.cuantas}`, img.base.usd || 0,
+      'el sitio y cada estado, también las «Otra»'));
+  }
+  filas.push(filaCoste('Referencias: hojas del reparto', `${(img.personajes || {}).cuantas || 0}`,
+    (img.personajes || {}).usd || 0, 'personajes, mapas y cabeceras'));
+  if ((img.portadas || {}).cuantas) {
+    filas.push(filaCoste('Portadas', `${img.portadas.cuantas}`, img.portadas.usd || 0, 'dibujadas con IA en Publicar'));
+  }
   if ((img.otras || {}).cuantas) {
     filas.push(filaCoste('Otras imágenes', `${img.otras.cuantas}`, img.otras.usd || 0, 'láminas, pruebas'));
   }
@@ -13506,6 +13750,8 @@ function vistaPreviaLight() {
   if (e.obsoleta) caja.appendChild(avisoImagenObsoleta(e));
   const delPlano = montajeDelPlano(e); if (delPlano) caja.appendChild(delPlano);
   const elementos = elementosDelPlano(e); if (elementos) caja.appendChild(elementos);
+  const sinAplicar = quitadosSinAplicar(); if (sinAplicar) caja.appendChild(sinAplicar);
+  const ajustar = ajustarImagenDelPlano(e, escenas); if (ajustar) caja.appendChild(ajustar);
   caja.appendChild(cuadroFeedbackEscena(e));
   /* EL REVISOR: pedir que mire las imágenes y ver lo que dejó (ver
      `panelRevisor`). Sus notas salen abajo, en la lista de siempre. */
@@ -13608,8 +13854,8 @@ function barraDeLasImagenes(mandos) {
   const aplicar = botonAplicarRepaso();
   const pend = notasDeAhora().filter(n => n.estado !== 'aplicado').length;
   /* «MONTAR EL VÍDEO» SIGUE A MANO, como estaba en los mandos: al lado y en
-     secundario cuando lo principal es otra cosa (con notas sin aplicar sale
-     apagado y con el motivo, no escondido). */
+     secundario cuando lo principal es otra cosa (con notas sin aplicar se
+     puede pulsar y pregunta antes: notas del dueño, 24-10-2026). */
   const montarAlLado = () => {
     const boton = botonRenderizarLight();
     if (!boton) return [];
@@ -14095,6 +14341,140 @@ function esTactil() {
  * dibujando otra vez. Un segundo camino se habría quedado viejo el día que
  * alguien tocara esa elección.
  */
+/* AJUSTAR ESTA IMAGEN (rama unir-planos, 25-10): cuando dos imágenes seguidas
+   no casan. «Igualar con la anterior/siguiente» deja escrita la nota para
+   rehacerla con la de al lado como referencia (se paga al rehacerla, como
+   cualquier nota). «Quitar esta imagen» pasa lo que se oye en ella a la de al
+   lado, que conserva su dibujo: no se paga nada, y se deshace igual. */
+const NOTA_IGUALAR = (lado, id) => `Que sea el mismo sitio que la imagen ${lado} (${id}): `
+  + 'mismos acabados, misma luz, mismos muebles y objetos, mismo estilo. Solo cambia el '
+  + 'ángulo de la cámara o lo que pasa en ella.';
+
+function ajustarImagenDelPlano(e, escenas) {
+  const q = e.quitar || {};
+  const absorbe = e.absorbe || [];
+  const i = escenas.findIndex(x => x.id === e.id);
+  const ant = i > 0 ? escenas[i - 1] : null;
+  const sig = i >= 0 && i + 1 < escenas.length ? escenas[i + 1] : null;
+  const conImagen = x => x && x.imagen && !x.cartela;
+  if (!absorbe.length && !q.anterior && !q.siguiente && !conImagen(ant) && !conImagen(sig)) return null;
+  const caja = h('div', { clase: 'ajustar-imagen' },
+    h('span', { clase: 'ajustar-imagen-titulo' }, 'Ajustar esta imagen'));
+  absorbe.forEach(a => caja.appendChild(h('div', { clase: 'fila ajustar-absorbe' },
+    h('span', { clase: 'meta crece' }, `Lleva también la voz de ${a.id}, que quitaste: `
+      + `«${recortar(legible(a.narracion), 90)}»`),
+    h('button', { clase: 'mini', disabled: PREVIA.guardando || !!trabajoVideoLight(),
+      onclick: () => devolverImagenQuitada(a) }, `Deshacer · volver a poner ${a.id}`))));
+  const fila = h('div', { clase: 'fila' });
+  [['anterior', ant], ['siguiente', sig]].forEach(([lado, vecino]) => {
+    if (!conImagen(vecino) || !e.imagen) return;
+    fila.appendChild(h('button', { clase: 'mini',
+      title: `Escribe la nota para rehacer ${e.id} con ${vecino.id} como referencia. `
+        + 'Se paga una imagen cuando la rehagas.',
+      onclick: () => {
+        PREVIA.borrador[e.id] = NOTA_IGUALAR(lado, vecino.id);
+        repintarVideo();
+        toast(`nota escrita abajo: revísala y guárdala para rehacer ${e.id}`);
+      } }, `Igualar con la ${lado} (${vecino.id})`));
+  });
+  if (q.anterior || q.siguiente) {
+    fila.appendChild(h('button', { clase: 'mini fantasma',
+      disabled: PREVIA.guardando || !!trabajoVideoLight(),
+      onclick: () => { PREVIA.quitando = PREVIA.quitando === e.id ? null : e.id; repintarVideo(); } },
+    'Quitar esta imagen…'));
+  }
+  if (fila.childNodes.length) caja.appendChild(fila);
+  if (PREVIA.quitando === e.id) {
+    const elegir = h('div', { clase: 'ajustar-quitar' },
+      h('div', { clase: 'meta' }, `Lo que se oye en ${e.id} pasa a la imagen de al lado, que se alarga `
+        + 'y conserva su dibujo. Gratis: no se dibuja nada. Después hay que volver a montar el vídeo '
+        + '(también gratis). Se puede deshacer.'));
+    const botones = h('div', { clase: 'fila' });
+    if (q.anterior) {
+      botones.appendChild(h('button', { clase: 'mini primario', disabled: PREVIA.guardando,
+        onclick: () => quitarImagen(e, 'anterior', q.anterior) },
+        `Su voz pasa a ${q.anterior} (la anterior)`));
+    }
+    if (q.siguiente) {
+      botones.appendChild(h('button', { clase: 'mini primario', disabled: PREVIA.guardando,
+        onclick: () => quitarImagen(e, 'siguiente', q.siguiente) },
+        `Su voz pasa a ${q.siguiente} (la siguiente)`));
+    }
+    botones.appendChild(h('button', { clase: 'mini fantasma', disabled: PREVIA.guardando,
+      onclick: () => { PREVIA.quitando = null; repintarVideo(); } }, 'Cancelar'));
+    elegir.appendChild(botones);
+    caja.appendChild(elegir);
+  }
+  return caja;
+}
+
+/* LO QUITADO QUE ESTE CORTE NO REFLEJA (la pasada falló o se canceló, o se
+   volvió a una versión anterior de las imágenes): nunca se queda algo quitado
+   sin su «Deshacer». */
+function quitadosSinAplicar() {
+  const lista = (PREVIA.ficha || {}).quitados_sin_aplicar || [];
+  if (!lista.length) return null;
+  const caja = h('div', { clase: 'ajustar-imagen caja-aviso' },
+    h('span', { clase: 'ajustar-imagen-titulo' }, 'Imágenes quitadas que este corte aún no refleja'),
+    h('div', { clase: 'meta' }, 'Se aplicarán la próxima vez que se pongan al día las imágenes. '
+      + 'Si no querías quitarlas, deshazlo aquí.'));
+  lista.forEach(a => caja.appendChild(h('div', { clase: 'fila ajustar-absorbe' },
+    h('span', { clase: 'meta crece' }, `${a.id || 'Una imagen'}: «${recortar(legible(a.narracion), 90)}»`),
+    h('button', { clase: 'mini', disabled: PREVIA.guardando || !!trabajoVideoLight(),
+      onclick: () => devolverImagenQuitada(a) }, 'Deshacer'))));
+  return caja;
+}
+
+/* La pasada que vuelve a cortar no dibuja nada: al acabar se vuelve a pedir la
+   previa, y se queda mirando la imagen que se lleva la voz. */
+function seguirPasadaDeCorte(pid, tid, irA, mensaje) {
+  seguirTrabajo(CLAVE_VIDEO_LIGHT, tid, async trabajo => {
+    if (trabajo.estado === 'listo') toast(mensaje);
+    else if (trabajo.estado === 'error') toast(`no se ha podido: ${trabajo.error || 'falló'}`, true);
+    if (videoAbierto().pid === pid) {
+      // el carril y la barra: el vídeo queda por volver a montar
+      try { await refrescarFichasLight(); } catch (_e) { /* se ve al volver */ }
+      reiniciarPrevia();
+      if (irA) PREVIA.recordada = { pid, id: irA };
+      await cargarPreviaLight();
+    }
+    pintarLight();
+  }, () => refrescarVivosLight(), pid);
+}
+
+async function quitarImagen(e, hacia, a) {
+  const v = videoAbierto();
+  PREVIA.guardando = true;
+  repintarVideo();
+  try {
+    const d = await pedir(`${API.proyecto(v.pid)}/planos/${encodeURIComponent(e.id)}/quitar`,
+      { method: 'POST', cuerpo: { hacia } });
+    PREVIA.quitando = null;
+    seguirPasadaDeCorte(v.pid, d.trabajo, a,
+      `${e.id} quitada: su voz va con ${a}. Monta el vídeo para verlo (gratis)`);
+  } catch (err) {
+    toast(err.message, true);
+  }
+  PREVIA.guardando = false;
+  repintarVideo();
+}
+
+async function devolverImagenQuitada(a) {
+  const v = videoAbierto();
+  PREVIA.guardando = true;
+  repintarVideo();
+  try {
+    const d = await pedir(`${API.proyecto(v.pid)}/planos/devolver`,
+      { method: 'POST', cuerpo: { narracion: a.narracion, n: a.n || 0 } });
+    seguirPasadaDeCorte(v.pid, d.trabajo, a.id,
+      `${a.id} vuelve a estar. Monta el vídeo para verlo (gratis)`);
+  } catch (err) {
+    toast(err.message, true);
+  }
+  PREVIA.guardando = false;
+  repintarVideo();
+}
+
 function cuadroFeedbackEscena(escena) {
   /* LAS APLICADAS NO SE ENSEÑAN. Una nota es algo que PIDES; en cuanto está
      hecha deja de ser una petición y pasa a ser historia, y dejarla ahí hace
@@ -14265,27 +14645,44 @@ function botonRenderizarLight() {
   const corriendo = !!trabajoVideoLight();
   /* CON NOTAS SIN APLICAR, ESTE BOTON HACE MENOS que el de al lado: «Aplicar»
      reparte las notas, redibuja lo que toquen y DESPUES monta; esto solo monta,
-     o sea que gasta el render entero para dejarte el video sin tus notas. Es la
-     misma regla que en la pantalla del video. Apagado y con el motivo puesto,
-     no escondido: desaparecer no explica nada. */
+     con las imágenes como están. Antes se apagaba; ahora se puede (notas del
+     dueño, 24-10-2026: «que se me permita montar aunque el revisor pida
+     rehacer imágenes»), en secundario y PREGUNTANDO antes: las notas se quedan
+     apuntadas para aplicarlas cuando quieras. */
   const notasSinAplicar = estadoRepaso().pendientes > 0;
   return conAyuda(
     notasSinAplicar
-      ? 'Tienes notas del repaso sin aplicar. Esto solo montaría el MP4 y '
-        + 'saldría sin ellas. Usa «Aplicar», que aplica y monta de una vez.'
+      ? 'Tienes notas del repaso (o del revisor) sin aplicar. Esto monta el MP4 con '
+        + 'las imágenes como están ahora; las notas se quedan apuntadas y las '
+        + 'puedes aplicar después con «Aplicar».'
       : unirAyuda('Encadena los planos que acabas de mirar, con sus transiciones, '
         + 'la voz y la música, y saca el MP4. No genera ninguna imagen: no cuesta '
         + 'dinero, cuesta tiempo de máquina.', textoDelPlan('render')),
     h('button', {
       clase: notasSinAplicar ? 'secundario-barra' : 'primario principal',
-      disabled: corriendo || notasSinAplicar,
+      disabled: corriendo,
       onclick: () => {
+        if (notasSinAplicar && !confirmarMontarConNotas()) return;
         pararPrevia();
         videoAbierto().vista = 'video';
         repintarVideo();
         montarElVideoLight();
       },
     }, `Montar el vídeo${precioDeMontarLight()}`));
+}
+
+/* Montar con notas sin aplicar: se pregunta, diciendo cuántas son del
+   revisor, y las notas se quedan para después (no se borra ninguna). */
+function confirmarMontarConNotas() {
+  const notas = (estadoRepaso().notas || []).filter(n => n.estado !== 'aplicado');
+  const n = notas.length || estadoRepaso().pendientes || 0;
+  if (!n) return true;
+  const delRevisor = notas.filter(x => x.autor === 'revisor').length;
+  return window.confirm(`Quedan ${n} ${n === 1 ? 'nota' : 'notas'} sin aplicar`
+    + (delRevisor ? ` (${delRevisor} del revisor de imágenes)` : '')
+    + '. Se monta el vídeo sin aplicarlas: las notas se quedan apuntadas y las '
+    + 'puedes aplicar después (si alguna imagen ha quedado vieja, antes te decimos '
+    + 'cuánto cuesta dibujarla). ¿Montar así?');
 }
 
 /* LAS FLECHAS DEL TECLADO. Pasar de escena es el gesto que se repite
@@ -14474,9 +14871,16 @@ function barraDelVideo() {
   const pend = notasSinAplicarDe('video');
   const plan = textoDelPlan('render');
   if (pend && hayMp4Light()) {
+    /* y si el vídeo quedó viejo, montarlo tal cual también se puede, en
+       secundario y preguntando (notas del dueño, 24-10-2026) */
+    const montar = botonRenderizarLight();
+    if (montar) {
+      const b = montar.tagName === 'BUTTON' ? montar : montar.querySelector('button');
+      if (b) b.className = 'secundario-barra';
+    }
     return barraDeAccion({ estado: { e: 'aviso', texto: `${pend} ${pend === 1 ? 'nota' : 'notas'} sin aplicar` },
       plan: 'se aplica lo más barato que resuelva cada nota, y se monta',
-      botones: [botonAplicarRepaso()] });
+      botones: [...(montar ? [montar] : []), botonAplicarRepaso()] });
   }
   const cambios = cambiosDelMontaje();
   const coste = ((((v.planes || {}).render) || {}).coste) || {};
@@ -23103,6 +23507,7 @@ const PORT = {
   cambiado: false, vista: '', pidiendo: 0, reloj: null, guias: true, error: '',
   propuestas: null, proponiendo: false, ia: null, abierto: false, fondos: [], cortar: null,
   aviso: null, ideas: null, pensandoIdeas: false, iaPendiente: null,
+  avisos: [], verAvisos: false, relojAviso: null,
 };
 
 function campoPortada(etiqueta, control, ayuda) {
@@ -23113,9 +23518,12 @@ function campoPortada(etiqueta, control, ayuda) {
 async function abrirEditorPortada(pid) {
   // TODO lo del vídeo anterior fuera: su vista, sus propuestas, lo que pensaba
   if (PORT.vista) URL.revokeObjectURL(PORT.vista);
+  // «Avisos» se guarda mientras sea el mismo vídeo; con otro, empieza vacío
+  const avisosPrevios = PORT.pid === pid ? (PORT.avisos || []) : [];
   Object.assign(PORT, { pid, abierto: true, error: '', propuestas: null, ia: null, cambiado: false,
     proponiendo: false, vista: '', diseno: null, fondos: [], aviso: null, ideas: null, pensandoIdeas: false,
-    iaPendiente: null });
+    iaPendiente: null, avisos: avisosPrevios, verAvisos: false, detallesAbiertos: {} });
+  clearTimeout(PORT.relojAviso);
   PORT.pidiendo += 1;
   try {
     if (!PORT.catalogo) PORT.catalogo = await pedir(`${BASE}/api/portadas/catalogo`);
@@ -23230,21 +23638,112 @@ function bajarBlobPortada(blob, nombre) {
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
-/* EL AVISO, DENTRO DEL EDITOR: el aviso flotante salía DEBAJO de la capa del
-   editor y «Guardar diseño» parecía no hacer nada (notas del 21-10). Ahora va
-   en la cabecera del editor y, además, el flotante por encima de la capa. */
-function avisoPortada(texto, malo) {
-  PORT.aviso = { texto, malo: !!malo, hora: new Date() };
-  toast(texto, !!malo);
-  const sitio = document.querySelector('.capa-portada .aviso-portada');
+/* EL AVISO, DENTRO DEL EDITOR (portadas-2, 21-10) Y QUE SE PUEDE CERRAR
+   (avisos-portada, 25-10, pedido del dueño: un error largo tapaba la cabecera
+   y no se iba).
+   - Lo que sale bien se va solo a los 6 s.
+   - Un error se queda hasta su ✕ o hasta que LO MISMO (`clave`: guardar,
+     descargar, ia…) sale bien: entonces lo sustituye el aviso bueno.
+   - Una línea con qué pasó y qué hacer; el texto técnico, plegado en «Ver
+     detalle».
+   - «Avisos (N)» guarda los últimos 10 de la sesión del editor: cerrar uno no
+     lo borra de ahí. Se vacía al abrir el editor de otro vídeo. */
+const MAX_AVISOS_PORTADA = 10;
+
+/* El error de la máquina, dicho en una línea que se entienda y con qué hacer.
+   Se conserva QUÉ falló («No se ha guardado», «No se ha podido descargar»):
+   lo de antes de los primeros dos puntos, si es corto. */
+function resumenErrorPortada(texto) {
+  const t = String(texto || '').trim();
+  const corte = t.indexOf(': ');
+  const pre = corte > 0 && corte <= 60 ? t.slice(0, corte) : '';
+  const resto = pre ? t.slice(corte + 2) : t;
+  let que = '';
+  if (/RechazoSeguridad|filtro de seguridad|safety|moderation/i.test(resto)) {
+    que = 'OpenAI rechazó la imagen por su filtro de seguridad. Elige de fondo un plano sin personas con poca ropa, '
+      + 'marcas, logos ni personajes conocidos, o usa el texto en capas sin IA.';
+  } else if (/HTTP 5\d\d|no he podido pintar|Failed to fetch|NetworkError/i.test(resto)) {
+    que = 'El servidor no ha podido terminarlo. Vuelve a intentarlo en un momento.';
+  } else if (/sesión de Claude|cupo|quota|rate limit/i.test(resto)) {
+    que = 'Claude no ha contestado (sesión o cupo). Vuelve a pedirlo en un minuto.';
+  } else {
+    // lo demás: la primera frase, corta (sin «lookbehind»: un Safari viejo no lo
+    // entiende y se pararía todo el fichero)
+    const primera = (resto.match(/^[\s\S]*?[.!?](?=\s|$)/) || [resto])[0];
+    que = primera.length > 160 ? `${primera.slice(0, 157)}…` : primera;
+  }
+  return pre ? `${pre.charAt(0).toUpperCase()}${pre.slice(1)}. ${que}` : que;
+}
+
+function avisoPortada(texto, malo, clave) {
+  const ahora = new Date();
+  const original = String(texto || '');
+  // «Pintando…»: algo a medias. Ni se guarda en «Avisos» ni se va solo
+  const aMedias = !malo && /…$/.test(original);
+  const corto = malo ? resumenErrorPortada(original) : original;
+  const aviso = { texto: corto, detalle: malo && corto !== original ? original : '', malo: !!malo,
+    hora: ahora, clave: clave || '', id: `${ahora.getTime()}-${Math.random().toString(36).slice(2, 6)}` };
+  // SIN EL EDITOR A LA VISTA (se cerró mientras la IA o Claude trabajaban):
+  // el aviso flotante de siempre, para que no se pierda
+  if (!PORT.abierto || !document.querySelector('.capa-portada')) toast(corto, !!malo);
+  const actual = PORT.aviso;
+  // solo lo que está a medias, de OTRA cosa, no tapa un error a la vista; lo
+  // que acaba bien sí se enseña («Diseño guardado ✓»), y el error queda en «Avisos»
+  const tapaError = actual && actual.malo && aMedias && !(clave && actual.clave === clave);
+  if (!aMedias) PORT.avisos = [aviso].concat(PORT.avisos || []).slice(0, MAX_AVISOS_PORTADA);
+  if (!tapaError) PORT.aviso = aviso;
+  clearTimeout(PORT.relojAviso);
+  if (!malo && !aMedias && !tapaError) {
+    PORT.relojAviso = setTimeout(() => {
+      if (PORT.aviso && PORT.aviso.id === aviso.id) { PORT.aviso = null; repintarAvisoPortada(); }
+    }, 6000);
+  }
+  repintarAvisoPortada();
+}
+
+function cerrarAvisoPortada() {
+  clearTimeout(PORT.relojAviso);
+  PORT.aviso = null;
+  repintarAvisoPortada();
+}
+
+function repintarAvisoPortada() {
+  const sitio = document.querySelector('.capa-portada .avisos-portada');
   if (sitio) sitio.replaceWith(pintarAvisoPortada());
+}
+
+function horaPortada(fecha) {
+  return fecha.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
 }
 
 function pintarAvisoPortada() {
   const a = PORT.aviso;
-  if (!a) return h('span', { clase: 'aviso-portada meta' }, PORT.cambiado ? 'Cambios sin guardar' : '');
-  const hora = a.hora.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
-  return h('span', { clase: `aviso-portada${a.malo ? ' malo' : ' bueno'}`, role: 'status' }, `${a.texto} · ${hora}`);
+  const lista = PORT.avisos || [];
+  const caja = h('div', { clase: 'avisos-portada' });
+  if (a) {
+    caja.appendChild(h('div', { clase: `aviso-portada${a.malo ? ' malo' : ' bueno'}`, role: a.malo ? 'alert' : 'status' },
+      h('span', { clase: 'crece' }, `${a.texto} · ${horaPortada(a.hora)}`),
+      a.detalle ? h('details', { clase: 'detalle-aviso-portada', open: !!(PORT.detallesAbiertos || {})[a.id],
+        ontoggle: ev => { PORT.detallesAbiertos = Object.assign({}, PORT.detallesAbiertos, { [a.id]: ev.currentTarget.open }); } },
+      h('summary', {}, 'Ver detalle'), h('span', {}, a.detalle)) : null,
+      h('button', { clase: 'cerrar-aviso-portada', type: 'button', title: 'Cerrar este aviso (sigue en «Avisos»)',
+        'aria-label': 'Cerrar el aviso', onclick: () => cerrarAvisoPortada() }, '✕')));
+  } else if (PORT.cambiado) {
+    caja.appendChild(h('span', { clase: 'meta' }, 'Cambios sin guardar'));
+  }
+  if (lista.length) {
+    const historial = h('details', { clase: 'historial-avisos-portada', open: !!PORT.verAvisos,
+      ontoggle: ev => { PORT.verAvisos = ev.currentTarget.open; } },
+    h('summary', {}, `Avisos (${lista.length})`));
+    lista.forEach(x => historial.appendChild(h('div', { clase: `fila linea-aviso-portada${x.malo ? ' malo' : ''}` },
+      h('span', { clase: 'meta' }, horaPortada(x.hora)),
+      h('span', { clase: 'crece' }, `${x.malo ? '⚠ ' : '✓ '}${x.texto}`),
+      x.detalle ? h('details', { open: !!(PORT.detallesAbiertos || {})[`h-${x.id}`],
+        ontoggle: ev => { PORT.detallesAbiertos = Object.assign({}, PORT.detallesAbiertos, { [`h-${x.id}`]: ev.currentTarget.open }); } },
+      h('summary', {}, 'detalle'), h('span', { clase: 'meta' }, x.detalle)) : null)));
+    caja.appendChild(historial);
+  }
+  return caja;
 }
 
 /* QUÉ LLEVA LA IMAGEN ENCIMA, con su ✕. */
@@ -23363,12 +23862,12 @@ function pintarEditorPortada() {
 
   capa.replaceChildren(h('div', { clase: 'panel-portada' },
     h('div', { clase: 'fila cab-portada' }, h('h3', { clase: 'crece' }, 'Diseñar portada'),
-      pintarAvisoPortada(),
       h('button', { clase: 'mini', type: 'button', onclick: () => guardarDisenoPortada() }, 'Guardar diseño'),
       h('button', { clase: 'mini', type: 'button', title: 'La portada a tamaño real, en PNG, para tenerla de respaldo',
         onclick: () => descargarPortada() }, '⬇ Descargar portada'),
       h('button', { clase: 'primario', type: 'button', onclick: () => usarPortada() }, 'Usar como portada'),
       h('button', { clase: 'mini fantasma', type: 'button', onclick: () => cerrarEditorPortada() }, 'Cerrar')),
+    pintarAvisoPortada(),
     h('div', { clase: 'cuerpo-portada' }, vista, mandos)));
   pintarVistaPortada();
   mandos.scrollTop = scroll;
@@ -23585,7 +24084,7 @@ async function cambiarPlantillaPortada(cambios) {
       method: 'POST', cuerpo: Object.assign({ diseno: PORT.diseno }, cambios) });
     PORT.diseno = r.diseno;
     tocarPortada(true);
-  } catch (e) { avisoPortada(e.message, true); }
+  } catch (e) { avisoPortada(e.message, true, 'plantilla'); }
 }
 
 async function guardarDisenoPortada() {
@@ -23594,14 +24093,14 @@ async function guardarDisenoPortada() {
       method: 'PUT', cuerpo: { diseno: PORT.diseno } });
     PORT.diseno = r.diseno;
     PORT.cambiado = false;
-    avisoPortada('Diseño guardado ✓');
-  } catch (e) { avisoPortada(`no se ha guardado: ${e.message}`, true); }
+    avisoPortada('Diseño guardado ✓', false, 'guardar');
+  } catch (e) { avisoPortada(`no se ha guardado: ${e.message}`, true, 'guardar'); }
 }
 
 async function descargarPortada() {
   const pid = PORT.pid;
   try {
-    avisoPortada('Pintando la portada a tamaño real…');
+    avisoPortada('Pintando la portada a tamaño real…', false, 'descargar');
     const r = await fetch(rutaPublicar(`/videos/${encodeURIComponent(pid)}/portada/descargar`), {
       method: 'POST', headers: cabecerasPortada({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({ diseno: PORT.diseno }) });
@@ -23613,13 +24112,13 @@ async function descargarPortada() {
     // (sin comillas dentro de una expresión regular: parten los analizadores de herramientas/)
     const nombre = ((r.headers.get('Content-Disposition') || '').split('filename=')[1] || '').replace(/\x22/g, '').trim() || 'portada.png';
     bajarBlobPortada(await r.blob(), nombre);
-    avisoPortada('Portada descargada ✓');
-  } catch (e) { avisoPortada(`no se ha podido descargar: ${e.message}`, true); }
+    avisoPortada('Portada descargada ✓', false, 'descargar');
+  } catch (e) { avisoPortada(`no se ha podido descargar: ${e.message}`, true, 'descargar'); }
 }
 
 async function usarPortada() {
   try {
-    avisoPortada('Pintando la portada a tamaño real…');
+    avisoPortada('Pintando la portada a tamaño real…', false, 'usar');
     const ficha = await pedir(rutaPublicar(`/videos/${encodeURIComponent(PORT.pid)}/portada/usar`), {
       method: 'POST', cuerpo: { diseno: PORT.diseno } });
     PORT.cambiado = false;
@@ -23627,7 +24126,7 @@ async function usarPortada() {
     cerrarEditorPortada();
     toast('Portada puesta: es la que se mandará a las redes');
     if (typeof pintarModulo === 'function') pintarModulo();
-  } catch (e) { avisoPortada(`no se ha podido poner la portada: ${e.message}`, true); }
+  } catch (e) { avisoPortada(`no se ha podido poner la portada: ${e.message}`, true, 'usar'); }
 }
 
 /* Lo que se pide a Claude se sigue preguntando (un minuto pasa del proxy). */
@@ -23653,7 +24152,7 @@ async function proponerPortadas() {
     if (PORT.pid !== pid || !PORT.abierto) return;
     PORT.propuestas = ficha.propuestas || [];
   } catch (e) {
-    if (PORT.pid === pid) avisoPortada(`no se han podido proponer portadas: ${e.message}`, true);
+    if (PORT.pid === pid) avisoPortada(`no se han podido proponer portadas: ${e.message}`, true, 'proponer');
   }
   if (PORT.pid !== pid) return;
   PORT.proponiendo = false;
@@ -23669,7 +24168,7 @@ async function pedirIdeasIA() {
     if (PORT.pid !== pid || !PORT.abierto) return;
     PORT.ideas = ficha.ideas || [];
   } catch (e) {
-    if (PORT.pid === pid) avisoPortada(`no se han podido pedir ideas: ${e.message}`, true);
+    if (PORT.pid === pid) avisoPortada(`no se han podido pedir ideas: ${e.message}`, true, 'ideas');
   }
   if (PORT.pid !== pid) return;
   PORT.pensandoIdeas = false;
@@ -23687,7 +24186,7 @@ async function prepararIA(que, prompt, calidad) {
     pintarEditorPortada();
     const caja = document.querySelector('.capa-portada .antes-de-pagar');
     if (caja) caja.scrollIntoView({ block: 'nearest' });
-  } catch (e) { avisoPortada(e.message, true); }
+  } catch (e) { avisoPortada(e.message, true, 'ia'); }
 }
 
 /* PASO 2: se paga y se dibuja con el prompt de la pantalla. */
@@ -23723,10 +24222,10 @@ async function portadaConIA(p) {
     if (p.que === 'portada') PORT.diseno.modo = 'ia';
     PORT.ia = null;
     tocarPortada(true);
-    avisoPortada(p.que === 'portada' ? 'Portada hecha con IA: revisa el texto' : 'Fondo hecho con IA ✓');
+    avisoPortada(p.que === 'portada' ? 'Portada hecha con IA: revisa el texto' : 'Fondo hecho con IA ✓', false, 'ia');
     return;
   } catch (e) {
-    if (PORT.pid === pid) avisoPortada(`no se ha podido hacer con la IA: ${e.message}`, true);
+    if (PORT.pid === pid) avisoPortada(`no se ha podido hacer con la IA: ${e.message}`, true, 'ia');
   }
   p.enviando = false;
   if (PORT.pid !== pid || !PORT.abierto) return;
@@ -23919,7 +24418,7 @@ function pintarBarraModulos() {
   const enlaces = h('div', { clase: 'modulos-enlaces' });
   [['inicio', 'Inicio', 'Tu panel: lo que pasa hoy y lo que te necesita'],
     ['crear', 'Crear', 'Tus estilos y tus vídeos'],
-    ['publicar', 'Publicar', 'Cola, calendario, textos por red y cuentas'],
+    ['publicar', 'Publicar', 'Calendario, vídeos por publicar, resultados y ajustes'],
     ['automatizar', 'Automatizar', 'La Parrilla de guiones y Analizar cuentas']]
     .forEach(([id, texto, ayuda]) => enlaces.appendChild(h('a', {
       href: '#', clase: `boton-modulo${MODULOS.actual === id ? ' activo' : ''}`, title: ayuda,
@@ -23929,12 +24428,14 @@ function pintarBarraModulos() {
     }, texto, id === 'publicar' && PUB.avisos
       ? h('span', { clase: 'aviso-modulo', title: 'Envíos que fallaron o esperan tu OK' }, String(PUB.avisos))
       : null)));
+  enlaces.appendChild(botonColaDelMenu());
   enlaces.appendChild(h('a', {
     href: '#', clase: 'boton-modulo modulo-config', title: 'Claves, cuentas, la paleta, novedades y notas',
     onclick: ev => { ev.preventDefault(); conmutarConfig(true); },
   }, 'Configuración'));
   barra.appendChild(enlaces);
   barra.appendChild(gastoDelMenu());
+  barra.appendChild(medidorClaudeDelMenu());
   barra.appendChild(h('button', { type: 'button', id: 'menu-asistente', clase: 'menu-asistente',
     title: 'Abrir el asistente', onclick: () => conmutarAsistente(true) }));
   pintarEstadoAsistenteMenu();
@@ -23972,6 +24473,484 @@ function gastoDelMenu() {
   } else {
     caja.appendChild(h('span', { clase: 'meta' }, 'sin tope (ponlo en Inicio → Personalizar)'));
   }
+  return caja;
+}
+
+/* ============================================================ COLA DEL STUDIO
+ *
+ * Rama cola-montaje (25-10-2026). Con varios vídeos a la vez, lo que se
+ * dibuja y lo que se monta van de uno en uno en todo el Studio (cada uno con
+ * su fila, por orden de llegada: `_TURNO_IMAGENES` y `_TURNO_MONTAJE` en
+ * app.py). Aquí se ve todo junto, sin entrar vídeo por vídeo: el botón «Cola»
+ * de la barra de módulos lleva cuántos vídeos tienen algo en marcha, y abre un
+ * panel lateral con quién dibuja, quién se monta, quién espera y en qué orden,
+ * y lo demás que trabaja (guion, voz…), con «Abrir» y «Cancelar».
+ *
+ * Solo lee (`GET /api/cola_studio`) salvo «Cancelar», que es el mismo
+ * `POST /api/trabajos/{id}/cancelar` de siempre y pregunta antes. El panel
+ * vive fuera de `pintarLight` (una capa propia en <body>): abrirlo no repinta
+ * ni toca el vídeo que haya abierto. Se pregunta cada 4 s con el panel abierto
+ * y cada 15 s si no, y nada con la pestaña escondida.
+ */
+const COLA_STUDIO = { datos: null, abierto: false, reloj: null, huella: '', pidiendo: false };
+
+function cuentaColaStudio() {
+  const d = COLA_STUDIO.datos;
+  if (!d) return 0;
+  // los de un proyecto con clave llegan sin pid: cada trabajo cuenta como uno
+  const videos = new Set((d.trabajando || []).map((t, i) => t.pid || `sin-pid-${i}`));
+  return videos.size;
+}
+
+function botonColaDelMenu() {
+  arrancarColaStudio();
+  const n = cuentaColaStudio();
+  return h('a', {
+    href: '#', clase: 'boton-modulo modulo-cola',
+    title: 'Qué se dibuja, qué se monta y quién espera, en todo el Studio',
+    datos: { modulo: 'cola' },
+    onclick: ev => { ev.preventDefault(); abrirColaStudio(); },
+    'aria-label': n ? `Cola del Studio: ${n} trabajando` : 'Cola del Studio',
+  }, h('span', { 'aria-hidden': 'true' }, '⏳'), h('span', { clase: 'nombre-cola' }, 'Cola'),
+  n ? h('span', { clase: 'aviso-modulo aviso-cola', title: `${n} ${n === 1 ? 'vídeo trabajando' : 'vídeos trabajando'}` }, String(n)) : null);
+}
+
+function arrancarColaStudio() {
+  if (COLA_STUDIO.reloj) return;
+  const vuelta = async () => {
+    if (!document.hidden) await refrescarColaStudio();
+    COLA_STUDIO.reloj = setTimeout(vuelta, COLA_STUDIO.abierto ? 4000 : 15000);
+  };
+  COLA_STUDIO.reloj = setTimeout(vuelta, 0);
+}
+
+async function refrescarColaStudio() {
+  if (COLA_STUDIO.pidiendo) return;
+  COLA_STUDIO.pidiendo = true;
+  try {
+    const datos = await pedir(`${BASE}/api/cola_studio`);
+    const { ahora, ...resto } = datos || {};
+    const huella = JSON.stringify(resto, (k, v) => (k === 'segundos' || k === 'progreso' ? undefined : v));
+    COLA_STUDIO.datos = datos;
+    if (huella !== COLA_STUDIO.huella) {
+      COLA_STUDIO.huella = huella;
+      repintarBotonCola();
+    }
+    if (COLA_STUDIO.abierto) pintarColaStudio();
+  } catch (e) {
+    /* sin la cola no se rompe nada: el botón se queda como estaba */
+  } finally {
+    COLA_STUDIO.pidiendo = false;
+  }
+}
+
+function repintarBotonCola() {
+  const viejo = document.querySelector('#barra-modulos .modulo-cola');
+  if (viejo) viejo.replaceWith(botonColaDelMenu());
+}
+
+function abrirColaStudio() {
+  COLA_STUDIO.abierto = true;
+  pintarColaStudio();
+  // al ritmo de 4 s desde YA, no cuando venza la vuelta de 15 s que había
+  clearTimeout(COLA_STUDIO.reloj);
+  COLA_STUDIO.reloj = null;
+  arrancarColaStudio();
+  setTimeout(() => {
+    const cajon = document.querySelector('.cajon-cola');
+    if (cajon) cajon.focus({ preventScroll: true });
+  }, 0);
+}
+
+function cerrarColaStudio() {
+  COLA_STUDIO.abierto = false;
+  const capa = document.getElementById('capa-cola-studio');
+  if (capa) capa.remove();
+}
+
+function hacePocoCola(desde, ahora) {
+  if (!desde) return '';
+  const s = Math.max(0, Math.round((Number(ahora) || Date.now() / 1000) - Number(desde)));
+  return s < 60 ? 'hace un momento' : `hace ${duracionCorta(s)}`;
+}
+
+function abrirVideoDeLaCola(pid) {
+  cerrarColaStudio();
+  irAModulo('crear');
+  abrirVideoLight(pid);
+}
+
+async function cancelarDesdeLaCola(t) {
+  if (!t.trabajo) return;
+  const si = await dialogo({ titulo: 'Cancelar', peligro: true, aceptar: 'Cancelar el trabajo', cancelar: 'No',
+    texto: `¿Cancelar «${legibleCorto(t.nombre)}»? Lo ya hecho y pagado se queda; lo que falte no se hace.` });
+  if (!si) return;
+  try {
+    await pedir(API.cancelar(t.trabajo), { method: 'POST' });
+    toast('cancelación pedida');
+  } catch (e) {
+    toast(`no se ha podido cancelar: ${e.message}`, true);
+  }
+  refrescarColaStudio();
+}
+
+function filaDeLaCola(plaza, puesto, ahora, extra) {
+  const fila = h('div', { clase: `fila-cola${puesto ? ' en-espera' : ' trabajando'}` });
+  fila.appendChild(h('span', { clase: 'puesto-cola' }, puesto ? `${puesto}.º` : '▶'));
+  const textos = h('div', { clase: 'textos-cola' },
+    h('b', {}, legibleCorto(plaza.nombre || 'otro vídeo')),
+    h('span', { clase: 'meta' }, (puesto ? 'esperando, ' : 'empezó ') + hacePocoCola(plaza.desde, ahora)));
+  if (extra) textos.appendChild(extra);
+  fila.appendChild(textos);
+  if (plaza.video && plaza.pid) {
+    fila.appendChild(h('button', { clase: 'mini', title: 'Abrir este vídeo', onclick: () => abrirVideoDeLaCola(plaza.pid) }, 'Abrir'));
+  }
+  return fila;
+}
+
+function seccionTurnoCola(titulo, turno, vacio, ahora) {
+  const t = turno || {};
+  const caja = h('section', { clase: 'seccion-ajustes seccion-cola' },
+    h('h3', { clase: 'titulo-ajustes' }, titulo));
+  if (!t.ahora && !(t.fila || []).length) {
+    caja.appendChild(h('div', { clase: 'pista' }, vacio));
+    return caja;
+  }
+  if (t.ahora) caja.appendChild(filaDeLaCola(t.ahora, 0, ahora));
+  (t.fila || []).forEach((plaza, i) => caja.appendChild(filaDeLaCola(plaza, i + 1, ahora)));
+  return caja;
+}
+
+function seccionTrabajandoCola(lista, ahora) {
+  const caja = h('section', { clase: 'seccion-ajustes seccion-cola' },
+    h('h3', { clase: 'titulo-ajustes' }, 'Todo lo que está en marcha'));
+  if (!lista.length) {
+    caja.appendChild(h('div', { clase: 'pista' }, 'Nada trabajando ahora mismo.'));
+    return caja;
+  }
+  lista.forEach(t => {
+    const extra = h('div', { clase: 'avance-cola' },
+      barraDeProgreso(t.progreso || 0),
+      h('span', { clase: 'meta' }, `${Math.round((t.progreso || 0) * 100)} %`
+        + (t.mensaje ? ` · ${legibleCorto(t.mensaje)}` : '')
+        + (t.cancelando ? ' · cancelando…' : '')));
+    const fila = filaDeLaCola({ nombre: t.nombre, pid: t.pid, video: t.video,
+      desde: (Number(ahora) || 0) - (Number(t.segundos) || 0) }, 0, ahora, extra);
+    if (t.trabajo && !t.cancelando) {
+      fila.appendChild(h('button', { clase: 'mini fantasma', title: 'Cancelar este trabajo',
+        onclick: () => cancelarDesdeLaCola(t) }, 'Cancelar'));
+    }
+    caja.appendChild(fila);
+  });
+  return caja;
+}
+
+function pintarColaStudio() {
+  if (!COLA_STUDIO.abierto) return;
+  const d = COLA_STUDIO.datos;
+  const cuerpo = h('div', { clase: 'cuerpo-ajustes' });
+  if (!d) {
+    cuerpo.appendChild(h('div', { clase: 'cargando' }, 'mirando…'));
+  } else {
+    cuerpo.appendChild(h('div', { clase: 'pista' },
+      'Las imágenes y el montaje van de uno en uno en todo el Studio, por orden de llegada: '
+      + 'puedes lanzar varios vídeos y cada uno espera su turno solo. El guion y la voz no esperan.'));
+    cuerpo.appendChild(seccionTurnoCola('🎨 Imágenes', d.imagenes, 'Nada dibujándose.', d.ahora));
+    cuerpo.appendChild(seccionTurnoCola('🎬 Montaje', d.montaje, 'Nada montándose.', d.ahora));
+    cuerpo.appendChild(seccionTrabajandoCola(d.trabajando || [], d.ahora));
+  }
+  const capa = h('div', { id: 'capa-cola-studio', clase: 'capa-ajustes-proyecto capa-cola',
+    onclick: ev => { if (ev.target === capa) cerrarColaStudio(); },
+    onkeydown: ev => { if (ev.key === 'Escape') cerrarColaStudio(); } },
+  h('aside', { clase: 'cajon-proyecto cajon-cola', role: 'dialog', 'aria-label': 'Cola del Studio', tabindex: '-1' },
+    h('div', { clase: 'cab-ajustes' },
+      h('b', {}, '⏳ Cola del Studio'),
+      h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini fantasma', title: 'Cerrar', 'aria-label': 'Cerrar', onclick: cerrarColaStudio }, '×')),
+    cuerpo));
+  const vieja = document.getElementById('capa-cola-studio');
+  if (vieja) {
+    /* repintar cada 4 s no salta arriba ni roba el foco: solo lo devuelve al
+       cajón si estaba dentro (un diálogo de «Cancelar» abierto se lo queda) */
+    const scroll = (vieja.querySelector('.cajon-cola') || {}).scrollTop || 0;
+    const teniaFoco = vieja.contains(document.activeElement);
+    vieja.replaceWith(capa);
+    const cajon = capa.querySelector('.cajon-cola');
+    if (cajon) {
+      cajon.scrollTop = scroll;
+      if (teniaFoco) cajon.focus({ preventScroll: true });
+    }
+  } else {
+    document.body.appendChild(capa);
+  }
+}
+
+/* ========================================================== MEDIDOR DE CLAUDE
+ *
+ * Rama medidor-claude (25-10-2026). Cuánto queda de la membresía de Claude y en
+ * qué se gasta, para que un cupo agotado no pille por sorpresa. El cupo de
+ * verdad (ventana de 5 h y semana, con su hora de reinicio) lo da el propio
+ * CLI y lo guarda `pasos/consumo_claude.py`; la pantalla solo lo lee
+ * (`GET /api/claude/consumo`, cada minuto) y pide medir («Medir ahora»).
+ *
+ *   - En la barra lateral, bajo «Gasto del mes»: una barra por ventana.
+ *   - Al pasar del 70 % y del 90 % de una ventana, un aviso (una vez por
+ *     ventana y nivel hasta que se reinicie; recordado en este navegador) y,
+ *     en el móvil, una pastilla «⚠ Claude N %» en la barra de módulos.
+ *   - En Configuración, «Consumo de Claude»: el cupo de cada cuenta y lo
+ *     gastado por día, tarea, vídeo y cuenta.
+ *
+ * Nada de aquí escribe params ni paga: medir es UNA llamada mínima a haiku.
+ */
+const MEDIDOR_CLAUDE = { datos: null, reloj: null, pidiendo: false, midiendo: false, error: '', detalleAbierto: false };
+
+function arrancarMedidorClaude() {
+  if (MEDIDOR_CLAUDE.reloj) return;
+  const vuelta = async () => {
+    if (!document.hidden) await refrescarMedidorClaude();
+    MEDIDOR_CLAUDE.reloj = setTimeout(vuelta, MEDIDOR_CLAUDE.datos && MEDIDOR_CLAUDE.datos.midiendo ? 8000 : 60000);
+  };
+  MEDIDOR_CLAUDE.reloj = setTimeout(vuelta, 0);
+}
+
+async function refrescarMedidorClaude() {
+  if (MEDIDOR_CLAUDE.pidiendo) return;
+  MEDIDOR_CLAUDE.pidiendo = true;
+  try {
+    MEDIDOR_CLAUDE.datos = await pedir(`${BASE}/api/claude/consumo`);
+    MEDIDOR_CLAUDE.error = '';
+    avisarCupoClaude();
+  } catch (e) {
+    MEDIDOR_CLAUDE.error = e.message || 'no se ha podido leer';
+  } finally {
+    MEDIDOR_CLAUDE.pidiendo = false;
+  }
+  repintarMedidorClaude();
+}
+
+async function medirClaudeAhora() {
+  if (MEDIDOR_CLAUDE.midiendo) return;
+  MEDIDOR_CLAUDE.midiendo = true;
+  repintarMedidorClaude();
+  try {
+    MEDIDOR_CLAUDE.datos = await pedir(`${BASE}/api/claude/consumo/medir`, { method: 'POST' });
+    MEDIDOR_CLAUDE.error = '';
+    const sin = (MEDIDOR_CLAUDE.datos.cupo || []).filter(c => !Object.keys(c.ventanas || {}).length);
+    toast(sin.length ? 'medido, pero el CLI no dio el cupo de alguna cuenta' : 'cupo de Claude al día', !!sin.length);
+    avisarCupoClaude();
+  } catch (e) {
+    toast(`no se ha podido medir: ${e.message}`, true);
+  } finally {
+    MEDIDOR_CLAUDE.midiendo = false;
+  }
+  repintarMedidorClaude();
+}
+
+function repintarMedidorClaude() {
+  [['#medidor-claude-menu', medidorClaudeDelMenu], ['#seccion-consumo-claude', seccionConsumoClaude]]
+    .forEach(([sel, pinta]) => {
+      const viejo = document.querySelector(sel);
+      if (viejo) viejo.replaceWith(pinta());
+    });
+}
+
+function nivelCupo(uso) {
+  const u = MEDIDOR_CLAUDE.datos && MEDIDOR_CLAUDE.datos.umbrales || { ojo: 0.7, malo: 0.9 };
+  return uso >= u.malo ? 'malo' : (uso >= u.ojo ? 'ojo' : '');
+}
+
+function porcentajeCupo(uso) {
+  return `${Math.round((Number(uso) || 0) * 100)} %`;
+}
+
+/* «a las 21:30» hoy, «mañana a las 08:00», «el lun 26 a las 08:00» */
+function cuandoSeReinicia(epoch) {
+  if (!epoch) return '';
+  const d = new Date(Number(epoch) * 1000);
+  const hoy = new Date();
+  const hora = d.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+  const dias = Math.round((new Date(d.toDateString()) - new Date(hoy.toDateString())) / 86400000);
+  if (dias <= 0) return `a las ${hora}`;
+  if (dias === 1) return `mañana a las ${hora}`;
+  return `el ${d.toLocaleDateString('es', { weekday: 'short', day: 'numeric' })} a las ${hora}`;
+}
+
+function nombreVentana(clave) {
+  const d = MEDIDOR_CLAUDE.datos || {};
+  return (d.nombres || {})[clave] || clave;
+}
+
+/* Las ventanas de una cuenta, la de 5 h primero. */
+function ventanasDe(cuenta) {
+  const orden = ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet'];
+  return Object.entries((cuenta || {}).ventanas || {})
+    .sort(([a], [b]) => (orden.indexOf(a) + 99) % 99 - (orden.indexOf(b) + 99) % 99);
+}
+
+function filaVentana(clave, v) {
+  const nivel = nivelCupo(v.uso);
+  return h('div', { clase: `ventana-claude ${nivel}` },
+    h('div', { clase: 'fila-ventana' },
+      h('span', {}, nombreVentana(clave)),
+      h('b', {}, porcentajeCupo(v.uso))),
+    barraDeProgreso(v.uso, nivel === 'malo' ? 'pasado' : (nivel === 'ojo' ? 'coral' : '')),
+    v.reinicia ? h('span', { clase: 'meta' }, `se reinicia ${cuandoSeReinicia(v.reinicia)}`) : null);
+}
+
+function haceCuantoClaude(epoch) {
+  if (!epoch) return 'sin medir';
+  const s = Math.max(0, Math.round(Date.now() / 1000 - Number(epoch)));
+  if (s < 60) return 'medido ahora';
+  if (s < 3600) return `medido hace ${Math.round(s / 60)} min`;
+  return `medido hace ${Math.round(s / 3600)} h`;
+}
+
+function medidorClaudeDelMenu() {
+  arrancarMedidorClaude();
+  const d = MEDIDOR_CLAUDE.datos;
+  const caja = h('div', { clase: 'gasto-menu medidor-claude',
+    title: 'Lo usado de tu membresía de Claude (guion, Parrilla, asistente…)' });
+  caja.appendChild(h('span', { clase: 'gasto-etiqueta' }, 'Claude · membresía'));
+  const avisoMovil = h('button', { type: 'button', clase: 'boton-modulo aviso-claude sin-aviso',
+    onclick: () => abrirConsumoClaude() });
+  if (!d) {
+    caja.appendChild(h('span', { clase: 'meta' }, MEDIDOR_CLAUDE.error ? 'sin datos' : 'mirando…'));
+  } else {
+    const cuenta = (d.cupo || [])[0] || {};
+    const ventanas = ventanasDe(cuenta);
+    if (!ventanas.length) {
+      caja.appendChild(h('span', { clase: 'meta' }, cuenta.estado === 'rejected' ? '⛔ cupo agotado' : 'sin medir todavía'));
+    } else {
+      ventanas.slice(0, 3).forEach(([clave, v]) => caja.appendChild(filaVentana(clave, v)));
+    }
+    caja.appendChild(h('button', { type: 'button', clase: 'mini fantasma ver-consumo', onclick: () => abrirConsumoClaude() },
+      `${haceCuantoClaude(cuenta.medido_en)} · ver detalle`));
+    const peor = (d.avisos || [])[0];
+    if (peor) {
+      avisoMovil.classList.remove('sin-aviso');
+      avisoMovil.classList.add(peor.nivel);
+      avisoMovil.textContent = `⚠ Claude ${porcentajeCupo(peor.uso)}`;
+      avisoMovil.title = `${peor.nombre}: ${porcentajeCupo(peor.uso)} usado`;
+    }
+  }
+  /* el cuadro sale en la barra lateral (ordenador) y la pastilla en la fila
+     de módulos (móvil): los dos en una envoltura, que es lo que se repinta */
+  return h('div', { id: 'medidor-claude-menu', clase: 'medidor-claude-envoltura' }, caja, avisoMovil);
+}
+
+function abrirConsumoClaude() {
+  conmutarConfig(true);
+  setTimeout(() => {
+    const s = document.getElementById('seccion-consumo-claude');
+    if (s) s.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  }, 400);
+}
+
+/* UN AVISO POR VENTANA Y NIVEL hasta que la ventana se reinicie. Lo ya avisado
+   se recuerda en este navegador (si no se puede, se avisa una vez por carga). */
+const AVISADOS_CLAUDE = new Set();
+function avisarCupoClaude() {
+  const d = MEDIDOR_CLAUDE.datos;
+  if (!d) return;
+  let guardados = [];
+  try { guardados = JSON.parse(localStorage.getItem('estudio.claude.avisados') || '[]'); } catch (e) { guardados = []; }
+  const vistos = new Set([...guardados, ...AVISADOS_CLAUDE]);
+  const nuevos = [];
+  (d.avisos || []).forEach(a => {
+    const clave = `${a.cuenta}|${a.ventana}|${a.nivel}|${a.reinicia || a.agotado_en || ''}`;
+    if (vistos.has(clave)) return;
+    vistos.add(clave);
+    AVISADOS_CLAUDE.add(clave);
+    nuevos.push(a);
+  });
+  nuevos.slice(0, 2).forEach((a, i) => setTimeout(() => {
+    const cuando = a.reinicia ? ` Se reinicia ${cuandoSeReinicia(a.reinicia)}.` : '';
+    const texto = a.ventana
+      ? (a.nivel === 'malo'
+        ? `⚠ Claude: llevas el ${porcentajeCupo(a.uso)} de tu ${a.nombre.toLowerCase()}. Si se agota, el guion, la Parrilla y el asistente se paran.${cuando}`
+        : `Claude: llevas el ${porcentajeCupo(a.uso)} de tu ${a.nombre.toLowerCase()}.${cuando}`)
+      : `⛔ Claude: cupo agotado. ${a.mensaje || ''}`;
+    toast(texto, a.nivel === 'malo');
+  }, i * 3500));
+  try { localStorage.setItem('estudio.claude.avisados', JSON.stringify([...vistos].slice(-40))); } catch (e) { /* sin almacén */ }
+}
+
+function tablaConsumoClaude(titulo, filas, columna, nombreDe) {
+  if (!filas || !filas.length) return null;
+  const cuerpo = h('tbody');
+  filas.forEach(f => cuerpo.appendChild(h('tr', {},
+    h('td', { clase: 'que' }, nombreDe(f)),
+    h('td', {}, String(f.llamadas)),
+    h('td', {}, f.tokens >= 1e6 ? `${(f.tokens / 1e6).toFixed(1).replace('.', ',')} M` : `${Math.round(f.tokens / 1000)} k`),
+    h('td', {}, dolares(f.usd)))));
+  return h('div', { clase: 'tabla-consumo-claude' },
+    h('b', {}, titulo),
+    h('table', {},
+      h('thead', {}, h('tr', {}, h('th', {}, columna), h('th', {}, 'Llamadas'), h('th', {}, 'Tokens'),
+        h('th', { title: 'Lo que costaría por API. Con la membresía no se cobra: sirve para comparar.' }, '≈ $ API'))),
+      cuerpo));
+}
+
+function seccionConsumoClaude() {
+  arrancarMedidorClaude();
+  const d = MEDIDOR_CLAUDE.datos;
+  const caja = h('section', { id: 'seccion-consumo-claude', clase: 'bloque-config consumo-claude' },
+    h('div', { clase: 'fila' },
+      h('h3', {}, 'Consumo de Claude (tu membresía)'),
+      h('span', { clase: 'crece' }),
+      h('button', { clase: 'mini', disabled: MEDIDOR_CLAUDE.midiendo, onclick: () => medirClaudeAhora(),
+        title: 'Una llamada mínima (haiku, una palabra) para leer tu cupo de verdad' },
+      MEDIDOR_CLAUDE.midiendo ? 'Midiendo…' : 'Medir ahora')),
+    h('div', { clase: 'pista' },
+      'Lo que dice Anthropic de tu cupo: la ventana de 5 horas y la semanal, con la hora a la que se reinicia '
+      + 'cada una. Avisa al 70 % y al 90 %. Se mide solo cada 15 minutos mientras se usa Claude, o cuando pulsas '
+      + '«Medir ahora». Abajo, en qué se ha gastado los últimos días.'));
+  if (!d) {
+    caja.appendChild(h('div', { clase: 'cargando' }, MEDIDOR_CLAUDE.error ? `no se ha podido leer: ${MEDIDOR_CLAUDE.error}` : 'mirando…'));
+    return caja;
+  }
+  (d.cupo || []).forEach(cuenta => {
+    const tarjeta = h('div', { clase: 'cupo-cuenta-claude' },
+      h('div', { clase: 'fila' },
+        h('b', {}, (d.cupo || []).length > 1 ? `Cuenta «${cuenta.cuenta || 'principal'}»` : 'Tu cuenta'),
+        h('span', { clase: 'crece' }),
+        h('span', { clase: 'meta' }, haceCuantoClaude(cuenta.medido_en) + (cuenta.simulado ? ' (simulado)' : ''))));
+    const ventanas = ventanasDe(cuenta);
+    if (!ventanas.length) {
+      tarjeta.appendChild(h('div', { clase: 'meta' }, cuenta.estado === 'rejected'
+        ? `⛔ Cupo agotado. ${cuenta.mensaje || ''}`
+        : 'Sin medir todavía: pulsa «Medir ahora».'));
+    }
+    ventanas.forEach(([clave, v]) => tarjeta.appendChild(filaVentana(clave, v)));
+    if (cuenta.pago_extra) tarjeta.appendChild(h('div', { clase: 'meta' }, 'Usando el uso extra de pago de tu plan.'));
+    if (cuenta.error) tarjeta.appendChild(h('div', { clase: 'meta' }, `Última medida: ${legibleCorto(cuenta.error)}`));
+    caja.appendChild(tarjeta);
+  });
+  const r = d.resumen || {};
+  if (r.hoy) {
+    caja.appendChild(h('div', { clase: 'meta' },
+      `Hoy: ${r.hoy.llamadas} llamadas (≈ ${dolares(r.hoy.usd)} por API) · últimos ${r.dias || 7} días: `
+      + `${r.semana.llamadas} llamadas (≈ ${dolares(r.semana.usd)})`));
+  }
+  const tablas = [
+    tablaConsumoClaude('Por día', r.por_dia, 'Día', f => f.fecha),
+    tablaConsumoClaude('Por tarea', r.por_tarea, 'Tarea', f => f.tarea),
+    tablaConsumoClaude('Por vídeo', r.por_video, 'Vídeo', f => (f.video && f.pid
+      ? h('a', { href: '#', onclick: ev => { ev.preventDefault(); conmutarConfig(false); irAModulo('crear'); abrirVideoLight(f.pid); } }, legibleCorto(f.nombre))
+      : legibleCorto(f.nombre || '—'))),
+    (r.por_cuenta || []).length > 1 ? tablaConsumoClaude('Por cuenta', r.por_cuenta, 'Cuenta', f => f.cuenta) : null,
+  ].filter(Boolean);
+  if (tablas.length) {
+    /* repintar cada minuto no lo cierra: se recuerda si estaba abierto */
+    const detalle = h('details', { clase: 'detalle-consumo-claude', open: MEDIDOR_CLAUDE.detalleAbierto },
+      h('summary', {}, 'En qué se ha gastado'), ...tablas);
+    detalle.addEventListener('toggle', () => { MEDIDOR_CLAUDE.detalleAbierto = detalle.open; });
+    caja.appendChild(detalle);
+  } else {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Todavía no hay llamadas apuntadas.'));
+  }
+  (r.agotados || []).slice(-2).forEach(a => caja.appendChild(h('div', { clase: 'meta' },
+    `⛔ Se agotó el cupo el ${new Date(Number(a.t) * 1000).toLocaleString('es')}: ${legibleCorto(a.mensaje || '')}`)));
   return caja;
 }
 
@@ -24027,6 +25006,8 @@ function irAModulo(nombre, opciones) {
   }
   document.body.classList.toggle('en-modulo', nombre !== 'crear');
   if (nombre !== 'publicar') pararRelojPublicar();
+  // la barra de la ficha de Publicar se queda atrás: la burbuja vuelve abajo (Crear pone la suya)
+  if (antes === 'publicar' && nombre !== 'publicar') document.documentElement.style.removeProperty('--alto-pie');
   pintarBarraModulos();
   if (nombre === 'crear') {
     pintarLight();
@@ -24184,11 +25165,10 @@ window.addEventListener('popstate', ev => {
 function barraVolverModulo() {
   const m = MODULOS.actual;
   let destino = null;
-  if (m === 'publicar') {
-    if (PUB.seccion === 'ficha') return null;
-    destino = PUB.seccion === 'cola' || !PUB.seccion
-      ? ['al Inicio', () => irAModulo('inicio')] : ['a la cola', () => irASeccionPublicar('cola')];
-  } else if (m === 'automatizar') {
+  /* En Publicar ya no (rediseno-publicar): las pestañas son el camino y el
+     vídeo tiene su salida «‹ Publicar»; era un tercer «volver». */
+  if (m === 'publicar') return null;
+  if (m === 'automatizar') {
     if (PAR.seccion === 'ficha') return null;
     destino = PAR.seccion === 'parrilla' || !PAR.seccion
       ? ['al Inicio', () => irAModulo('inicio')] : ['a la Parrilla', () => irASeccionParrilla('parrilla')];
@@ -24820,6 +25800,8 @@ function vistaAutomatizar() {
 async function cargarPublicar(silencio) {
   let terminoDeEscribir = false;
   if (!silencio) { PUB.cargando = true; pintarModulo(); }
+  // «Te necesitan» y el aviso de la clave salen en todas las pestañas (rediseno-publicar)
+  if (!silencio && !['cola', 'porpublicar'].includes(PUB.seccion)) refrescarAvisosPublicar();
   PUB.error = '';
   try {
     if (PUB.seccion === 'ficha' && PUB.pid) {
@@ -25037,6 +26019,8 @@ function pararRelojPublicar() {
 }
 
 function olvidarEnvioPublicar() {
+  PUB.pasoFicha = '';   // otro vídeo empieza en su primer paso útil
+  PUB.redFicha = '';
   PUB.seoBorrador = {};
   PUB.modoEnvio = '';
   PUB.cuandoEnvio = '';
@@ -25050,6 +26034,9 @@ function olvidarEnvioPublicar() {
    guardar, se pregunta antes de perderlo. */
 async function irASeccionPublicar(seccion, pid) {
   if (!(await guardarPendientePublicar())) return;
+  // «‹ Publicar» vuelve a la pestaña de la que se vino (rediseno-publicar)
+  if (seccion === 'ficha' && PUB.seccion !== 'ficha') PUB.vuelta = PUB.seccion || 'cola';
+  if (seccion !== 'cola') PUB.diaAbierto = '';
   PUB.seccion = seccion;
   if (seccion === 'ficha') PUB.avisoCola = null;
   if (pid !== undefined && pid !== PUB.pid) olvidarEnvioPublicar();
@@ -25063,35 +26050,124 @@ async function abrirPublicarVideo(pid) {
   if (!pid) return;
   if (!(await guardarPendientePublicar())) return;
   if (pid !== PUB.pid) olvidarEnvioPublicar();
+  PUB.vuelta = 'cola';
   PUB.seccion = 'ficha';
   PUB.pid = pid;
   PUB.ficha = null;
   irAModulo('publicar', { pub: true });
 }
 
+/* ======================================================= PUBLICAR · PESTAÑAS
+ *
+ * LA INTERFAZ NUEVA DE PUBLICAR (rama `rediseno-publicar`, 22-10-2026, con la
+ * maqueta que aprobó el dueño). Solo cómo se ve y dónde está cada cosa: las
+ * mismas rutas, los mismos datos y las mismas frases.
+ *   - Cuatro pestañas de verdad: Calendario · Por publicar · Resultados ·
+ *     Ajustes. Por dentro siguen llamándose como antes (`cola`, `cuentas`):
+ *     Inicio, el historial y la memoria de scroll los usan.
+ *   - «Te necesitan» es una franja arriba de TODAS las pestañas y de la ficha
+ *     (antes solo salía en la cola), plegable; y el aviso de Upload-Post
+ *     simulado o sin clave, también arriba en todas.
+ *   - La ficha de un vídeo ya no es pestaña: es la pantalla del vídeo, con su
+ *     salida «‹ Publicar», un carril de seis pasos y una barra de acción.
+ *   - Ningún param nuevo ni escrito por defecto: lo que se elige aquí (paso,
+ *     red, día, pestaña de ajustes) vive en `PUB`, en la página.
+ */
+const PESTANAS_PUBLICAR = [['cola', 'Calendario'], ['porpublicar', 'Por publicar'],
+  ['resultados', 'Resultados'], ['cuentas', 'Ajustes']];
+
+/* La cola de la que salen «Te necesitan», el aviso de la clave y cuántos hay
+   por publicar: la de la pestaña si se está en ella; si no, la que se pide
+   aparte (`refrescarAvisosPublicar`). Lo que te necesita llega siempre entero
+   (el servidor lo da aunque sea de otra semana). */
+function colaParaAvisosPublicar() {
+  if (['cola', 'porpublicar'].includes(PUB.seccion) && PUB.cola) return PUB.cola;
+  return PUB.colaAvisos || PUB.cola || null;
+}
+
+function claveConocidaPublicar() {
+  return (colaParaAvisosPublicar() || {}).clave || (PUB.ficha || {}).clave
+    || (PUB.proyectos || {}).clave || (PUB.resultados || {}).clave || null;
+}
+
 function vistaPublicar() {
-  const caja = h('div', { clase: 'publicar' });
-  const pestanas = h('div', { clase: 'pestanas-publicar', role: 'tablist' });
-  [['cola', 'Cola y calendario'], ['ficha', PUB.ficha && PUB.seccion === 'ficha' ? recortar(PUB.ficha.nombre, 28) : 'Ficha de un vídeo'],
-    ['resultados', 'Resultados'], ['cuentas', 'Cuentas y ajustes']].forEach(([id, texto]) => pestanas.appendChild(h('button', {
-    clase: `mini${PUB.seccion === id ? ' activo' : ' fantasma'}`, role: 'tab',
-    'aria-selected': PUB.seccion === id ? 'true' : 'false',
-    disabled: id === 'ficha' && !PUB.pid,
-    title: id === 'ficha' && !PUB.pid ? 'elige un vídeo en la cola' : '',
+  if (PUB.seccion === 'ficha') return vistaFichaPublicar();
+  altoBarraFichaPublicar();   // fuera de la ficha no hay barra: la burbuja baja
+  const caja = h('div', { clase: 'publicar con-pestanas-publicar' });
+  const listos = ((colaParaAvisosPublicar() || {}).listos || []).length;
+  caja.appendChild(h('div', { clase: 'cab-modulo-publicar' },
+    h('h2', {}, 'Publicar'),
+    h('span', { clase: 'meta' }, 'Textos por red, programar, subir y medir')));
+  const pestanas = h('nav', { clase: 'pestanas-crear pestanas-publicar', role: 'tablist', 'aria-label': 'Publicar' });
+  PESTANAS_PUBLICAR.forEach(([id, texto]) => pestanas.appendChild(h('button', {
+    type: 'button', role: 'tab', clase: `pestana-crear${PUB.seccion === id ? ' activa' : ''}`,
+    'aria-selected': PUB.seccion === id ? 'true' : 'false', datos: { seccion: id },
     onclick: () => irASeccionPublicar(id),
-  }, texto)));
-  caja.appendChild(h('div', { clase: 'light-cab' }, h('h2', {}, 'Publicar'), h('span', { clase: 'crece' }),
-    pestanas));
+  }, texto, id === 'porpublicar' && listos ? h('span', { clase: 'cuenta-pestana' }, String(listos)) : null)));
+  caja.appendChild(pestanas);
   if (PUB.error) caja.appendChild(cajaError(PUB.error));
-  const yaHay = { cola: PUB.cola, ficha: PUB.ficha, cuentas: PUB.proyectos, resultados: PUB.resultados };
+  const aviso = avisoClavePublicar(claveConocidaPublicar());
+  if (aviso) caja.appendChild(aviso);
+  const necesitan = franjaNecesitanPublicar();
+  if (necesitan) caja.appendChild(necesitan);
+  const yaHay = { cola: PUB.cola, porpublicar: PUB.cola, cuentas: PUB.proyectos, resultados: PUB.resultados };
   if (PUB.cargando && !yaHay[PUB.seccion]) {
     caja.appendChild(h('div', { clase: 'cargando' }, 'cargando…'));
     return caja;
   }
-  if (PUB.seccion === 'ficha') caja.appendChild(seccionFichaPublicar());
-  else if (PUB.seccion === 'cuentas') caja.appendChild(seccionCuentasPublicar());
+  if (PUB.seccion === 'cuentas') caja.appendChild(seccionAjustesPublicar());
   else if (PUB.seccion === 'resultados') caja.appendChild(seccionResultadosPublicar());
-  else caja.appendChild(seccionColaPublicar());
+  else if (PUB.seccion === 'porpublicar') caja.appendChild(seccionPorPublicar());
+  else caja.appendChild(seccionCalendarioPublicar());
+  return caja;
+}
+
+/* «TE NECESITAN», UNA FRANJA ARRIBA DE TODO PUBLICAR: los que esperan tu OK,
+   los fallos y lo programado que ya debió salir. Plegada dice cuántos y de qué;
+   «Ver» enseña las mismas filas de siempre (`filaEnvioCola`) y, en las que
+   esperan, «Dar el OK» (antes solo se daba dentro de la ficha). */
+function enviosQueTeNecesitanPublicar() {
+  const c = colaParaAvisosPublicar() || {};
+  const vistos = new Set();
+  return (c.esperan_ok || []).concat(c.fallidos || [], (c.envios || []).filter(e => e.debio_salir))
+    .filter(e => {
+      const clave = e.id || `${e.pid}|${e.red}|${e.cuando}`;
+      if (vistos.has(clave)) return false;
+      vistos.add(clave);
+      return true;
+    });
+}
+
+function franjaNecesitanPublicar() {
+  const lista = enviosQueTeNecesitanPublicar();
+  if (!lista.length) return null;
+  const cuenta = filtro => lista.filter(filtro).length;
+  const fallos = cuenta(e => e.estado === 'fallido');
+  const comprobar = cuenta(e => e.estado === 'comprobar');
+  const ok = cuenta(e => e.estado === 'espera_ok');
+  const debio = cuenta(e => e.debio_salir && !['fallido', 'comprobar', 'espera_ok'].includes(e.estado));
+  const partes = [fallos ? plural(fallos, 'fallo', 'fallos') : '',
+    comprobar ? `${comprobar} por comprobar` : '',
+    ok ? `${ok} ${ok === 1 ? 'espera' : 'esperan'} tu OK` : '',
+    debio ? `${debio} sin confirmar` : ''].filter(Boolean);
+  const abierta = !!PUB.necesitanAbierto;
+  const caja = h('section', { clase: `franja-necesitan ${fallos || comprobar ? 'caja-error' : 'caja-aviso'}`,
+    'aria-label': 'Te necesitan' },
+  h('div', { clase: 'fila cab-necesitan' },
+    h('b', {}, `⚠ Te necesitan · ${lista.length}`),
+    h('span', { clase: 'crece resumen-necesitan' }, partes.join(' · ')),
+    h('button', { type: 'button', clase: 'mini', 'aria-expanded': abierta ? 'true' : 'false',
+      onclick: () => { PUB.necesitanAbierto = !abierta; pintarModulo(); } }, abierta ? 'Ocultar' : 'Ver')));
+  if (abierta) {
+    lista.forEach(e => {
+      const fila = filaEnvioCola(e);
+      if (e.estado === 'espera_ok') {
+        fila.appendChild(h('button', { type: 'button', clase: 'mini primario',
+          onclick: () => confirmarPendientePublicar(e) }, 'Dar el OK'));
+      }
+      caja.appendChild(fila);
+    });
+  }
   return caja;
 }
 
@@ -25155,7 +26231,9 @@ function nombreEnvioPublicar(e) {
 function refrescarAvisosPublicar() {
   pedir(rutaPublicar('/cola')).then(c => {
     PUB.avisos = (c.esperan_ok || []).length + (c.fallidos || []).length;
+    PUB.colaAvisos = c;   // la franja «Te necesitan» de las otras pestañas y de la ficha
     pintarBarraModulos();
+    if (MODULOS.actual === 'publicar' && !['cola', 'porpublicar'].includes(PUB.seccion)) repintarPublicarSinPisar();
   }).catch(() => {});
 }
 
@@ -25262,6 +26340,16 @@ function mesDeHoyPublicar() {
   return hoy.slice(0, 7);
 }
 
+/* La miniatura de un vídeo en Publicar: la de su estilo, como en la cabecera de
+   un vídeo de Crear (`cabeceraDelVideo`). No pide nada nuevo al servidor. */
+function miniaturaVideoPublicar(estilo, vertical) {
+  const ficha = estilo ? fichaLight(estilo) : null;
+  const clase = `miniatura-video${vertical ? ' vertical' : ''}`;
+  return ficha && ficha.hay_miniatura
+    ? h('img', { clase, alt: '', loading: 'lazy', src: API.presetCanalMiniatura(ficha.id, ficha.modificado) })
+    : h('span', { clase: `${clase} vacia`, 'aria-hidden': 'true' });
+}
+
 function filaListoPublicar(v) {
   const redes = h('span', { clase: 'redes-video' });
   redesVisiblesPublicar(v).forEach(r => {
@@ -25271,59 +26359,315 @@ function filaListoPublicar(v) {
       title: `${NOMBRES_RED[r]}: ${estado ? ESTADOS_ENVIO[estado] : 'sin publicar'}`,
     }, CORTOS_RED[r]));
   });
-  return h('div', { clase: 'fila fila-listo' },
-    h('b', { clase: 'nombre-listo' }, v.nombre || v.pid),
-    v.cliente_nombre ? h('span', { clase: 'meta' }, v.cliente_nombre) : null,
-    v.estilo_nombre ? h('span', { clase: 'meta estilo-listo' }, `· ${recortar(v.estilo_nombre, 24)}`) : null,
-    h('span', { clase: 'crece' }), redes,
-    h('button', { clase: 'primario mini', onclick: () => irASeccionPublicar('ficha', v.pid) },
-      v.textos ? 'Abrir' : 'Preparar'));
+  return h('div', { clase: 'fila fila-listo', datos: { pid: v.pid } },
+    miniaturaVideoPublicar(v.estilo),
+    h('div', { clase: 'datos-listo crece' },
+      h('b', { clase: 'nombre-listo' }, v.nombre || v.pid),
+      h('span', { clase: 'meta' }, [v.cliente_nombre ? `📁 ${v.cliente_nombre}` : '📁 Sin proyecto',
+        v.estilo_nombre ? `🎨 ${recortar(v.estilo_nombre, 28)}` : ''].filter(Boolean).join(' · '))),
+    redes,
+    h('button', { type: 'button', clase: 'primario mini', onclick: () => irASeccionPublicar('ficha', v.pid) },
+      v.textos ? 'Abrir ›' : 'Preparar ›'));
 }
 
-function seccionColaPublicar() {
+/* ------------------------------------------------- PUBLICAR · POR PUBLICAR
+   La lista de vídeos listos, ahora en su pestaña, con SUS filtros (que antes
+   estaban encima del calendario y no lo filtraban). Se acuerdan en este
+   navegador, como antes. */
+function seccionPorPublicar() {
   const c = PUB.cola || {};
-  const caja = h('div', { clase: 'cola-publicar' });
-  const aviso = avisoClavePublicar(c.clave);
-  if (aviso) caja.appendChild(aviso);
+  const caja = h('div', { clase: 'cola-publicar por-publicar' });
   const todos = c.listos || [];
-  const porPid = {};
-  todos.forEach(v => { porPid[v.pid] = v; });
   const f = filtrosCola();
   const filtrando = Object.keys(FILTROS_COLA_DEFECTO).some(k => k !== 'agrupar' && f[k]);
-  // un envío pasa si su vídeo pasa (o, si su vídeo no está en la lista, por el proyecto y el texto)
-  const pasaEnvio = e => {
-    const v = porPid[e.pid];
-    if (v) return pasaFiltroCola(v);
-    return pasaFiltroCola({ nombre: e.video, pid: e.pid, cliente: e.cliente, cliente_nombre: e.cliente_nombre, envios: {} });
-  };
+  const visibles = todos.filter(pasaFiltroCola);
+  const listos = h('section', { clase: 'bloque bloque-por-publicar' }, h('div', { clase: 'fila' },
+    h('h3', { clase: 'crece' }, 'Vídeos listos para publicar'),
+    todos.length ? h('span', { clase: 'meta' }, filtrando ? `${visibles.length} de ${todos.length}` : `${todos.length}`) : null));
+  if (todos.length) listos.appendChild(barraFiltrosCola(todos));
+  if (!todos.length) {
+    listos.appendChild(h('div', { clase: 'meta' },
+      'Todavía no hay ningún vídeo montado. Se hacen en Crear; desde la pantalla Vídeo, «Enviar a Publicar».'));
+  } else if (!visibles.length) {
+    listos.appendChild(h('div', { clase: 'meta' }, 'Ningún vídeo cumple estos filtros.'));
+  }
+  const tope = 30 + (PUB.verMasListos || 0);
+  const mostrar = visibles.slice(0, tope);
+  const lista = h('div', { clase: 'lista-listos' });
+  if (f.agrupar) {
+    const grupos = new Map();
+    mostrar.forEach(v => {
+      const nombre = v.cliente_nombre || 'Sin proyecto';
+      if (!grupos.has(nombre)) grupos.set(nombre, []);
+      grupos.get(nombre).push(v);
+    });
+    [...grupos.entries()].sort((x, y) => x[0].localeCompare(y[0], 'es')).forEach(([nombre, deEse]) => {
+      lista.appendChild(h('div', { clase: 'grupo-listos' }, h('div', { clase: 'cab-grupo' }, `${nombre} (${deEse.length})`),
+        ...deEse.map(filaListoPublicar)));
+    });
+  } else {
+    mostrar.forEach(v => lista.appendChild(filaListoPublicar(v)));
+  }
+  listos.appendChild(lista);
+  if (visibles.length > tope) {
+    listos.appendChild(h('button', { type: 'button', clase: 'mini', onclick: () => { PUB.verMasListos = (PUB.verMasListos || 0) + 30; pintarModulo(); } },
+      `Ver ${Math.min(30, visibles.length - tope)} más`));
+  }
+  caja.appendChild(listos);
+  return caja;
+}
 
+/* ------------------------------------------------- PUBLICAR · CALENDARIO
+ *
+ * LA FORMA B (decisión del dueño, 21-10-2026): cada publicación es UNA LÍNEA
+ * —hora · red arriba y el vídeo debajo—, con el color de su estado en el borde
+ * y su marca a la derecha (◷ programado, ✓ publicado, ⏸ espera tu OK, ⚠ falló).
+ * Cada día enseña 6 y «+N más», que abre el día entero en un panel lateral
+ * (también la cabecera del día). En el móvil, los siete días se eligen arriba
+ * (con cuántas publicaciones lleva cada uno) y el elegido sale a todo lo ancho.
+ * El mes, igual en pequeño: 3 líneas y «+N más». La agenda, la semana en una
+ * columna. El calendario sigue SIN filtros (decisión del 20-10): lo enseña todo.
+ */
+const CODIGOS_RED = {
+  tiktok: 'TT', instagram: 'IG', youtube: 'YT', facebook: 'FB', linkedin: 'IN', x: 'X', threads: 'TH',
+  pinterest: 'PI', bluesky: 'BS', discord: 'DC', telegram: 'TG', mastodon: 'MA', google_business: 'GB',
+};
+const MARCAS_ENVIO = {
+  programado: '◷', enviando: '⟳', publicando: '⟳', publicado: '✓', a_mano: '✓',
+  espera_ok: '⏸', fallido: '⚠', comprobar: '⚠', cancelado: '×',
+};
+const TOPE_DIA_SEMANA_PUB = 6;
+const TOPE_DIA_MES_PUB = 3;
+const DIAS_CORTOS_PUB = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+
+function mayusculaPublicar(texto) { return texto ? texto.charAt(0).toUpperCase() + texto.slice(1) : ''; }
+
+function diaLargoPublicar(dia) {
+  return mayusculaPublicar(new Date(`${dia}T12:00:00Z`).toLocaleDateString('es-PE',
+    { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' }));
+}
+
+/* Lo de un día, por hora y, a la misma hora, en el orden de las redes. */
+function enviosDelDiaPublicar(c, dia) {
+  const orden = Object.keys(NOMBRES_RED);
+  return ((c || {}).envios || []).filter(e => e.estado !== 'cancelado' && String(e.cuando || '').startsWith(dia))
+    .sort((a, b) => String(a.cuando || '').slice(0, 16).localeCompare(String(b.cuando || '').slice(0, 16))
+      || orden.indexOf(a.red) - orden.indexOf(b.red));
+}
+
+function claseEstadoEnvioPublicar(e) { return `k-${CLASE_ESTADO[e.estado] || 'nada'}`; }
+
+function tituloEnvioPublicar(e) {
+  return `${String(e.cuando || '').slice(11, 16)} · ${NOMBRES_RED[e.red] || e.red}`
+    + `${e.tipo && e.red === 'youtube' ? ` (${e.tipo})` : ''} · ${e.video || e.pid} · ${ESTADOS_ENVIO[e.estado] || e.estado}`
+    + (e.debio_salir ? ' · debería haber salido ya' : '');
+}
+
+/* UNA PUBLICACIÓN, UNA LÍNEA. Pulsarla abre la ficha del vídeo; su globo lo
+   dice todo entero (hora, red, vídeo y estado). */
+function lineaEnvioPublicar(e, enElMes) {
+  const hora = String(e.cuando || '').slice(11, 16);
+  const clase = `linea-pub envio-dia ${claseEstadoEnvioPublicar(e)}${e.debio_salir ? ' debio-salir' : ''}${enElMes ? ' una' : ''}`;
+  const abrir = () => irASeccionPublicar('ficha', e.pid);
+  if (enElMes) {
+    return h('button', { type: 'button', clase, title: tituloEnvioPublicar(e), onclick: abrir },
+      h('span', { clase: 'cifra-pub' }, hora), ' ', h('b', {}, CODIGOS_RED[e.red] || e.red), ` ${e.video || e.pid}`);
+  }
+  return h('button', { type: 'button', clase, title: tituloEnvioPublicar(e), onclick: abrir },
+    h('span', { clase: 'lp-arriba' },
+      h('span', { clase: 'cifra-pub' }, hora),
+      h('span', { clase: 'lp-red' }, nombreEnvioPublicar(e)),
+      h('span', { clase: 'lp-estado', 'aria-hidden': 'true' }, MARCAS_ENVIO[e.estado] || '')),
+    h('span', { clase: 'lp-video' }, e.video || e.pid));
+}
+
+function botonMasDelDiaPublicar(dia, cuantos) {
+  return h('button', { type: 'button', clase: 'mas-del-dia', title: 'Ver el día entero',
+    onclick: () => abrirDiaPublicar(dia) }, `+${cuantos} más`);
+}
+
+function abrirDiaPublicar(dia) {
+  PUB.diaAbierto = dia;
+  pintarModulo();
+}
+
+function cerrarDiaPublicar() {
+  PUB.diaAbierto = '';
+  pintarModulo();
+}
+
+function leyendaEstadosPublicar() {
+  return h('div', { clase: 'leyenda-estados-pub' },
+    ...[['programado', 'programado'], ['publicado', 'publicado'], ['espera_ok', 'espera tu OK'], ['fallido', 'falló']]
+      .map(([estado, texto]) => h('span', { clase: `chip-estado-pub ${claseEstadoEnvioPublicar({ estado })}` },
+        h('i', { 'aria-hidden': 'true' }, MARCAS_ENVIO[estado]), texto)),
+    h('span', { clase: 'meta' }, 'TT TikTok · IG Reels · YT YouTube · FB Facebook'));
+}
+
+/* La semana en el ordenador: siete columnas, cada una con 6 líneas y «+N más». */
+function semanaPublicar(c) {
+  const rejilla = h('div', { clase: 'cal-semana-pub calendario-publicar' });
+  (c.dias || []).forEach(dia => {
+    const delDia = enviosDelDiaPublicar(c, dia);
+    const columna = h('div', { clase: `cal-dia-pub dia-publicar${dia === c.hoy ? ' hoy' : ''}`, datos: { dia } },
+      h('button', { type: 'button', clase: 'dia-cab-pub', title: 'Ver el día entero', onclick: () => abrirDiaPublicar(dia) },
+        h('b', {}, mayusculaPublicar(cuandoLegible(dia))),
+        h('span', { clase: 'meta' }, delDia.length ? plural(delDia.length, 'publicación', 'publicaciones') : '')));
+    if (!delDia.length) columna.appendChild(h('span', { clase: 'meta dia-vacio' }, '—'));
+    delDia.slice(0, TOPE_DIA_SEMANA_PUB).forEach(e => columna.appendChild(lineaEnvioPublicar(e)));
+    if (delDia.length > TOPE_DIA_SEMANA_PUB) columna.appendChild(botonMasDelDiaPublicar(dia, delDia.length - TOPE_DIA_SEMANA_PUB));
+    rejilla.appendChild(columna);
+  });
+  return rejilla;
+}
+
+/* La semana en el móvil: los siete días arriba y el elegido debajo, en la
+   misma forma (6 líneas y «+N más»). Se acabó la tira de columnas de 120 px. */
+function semanaMovilPublicar(c) {
+  const dias = c.dias || [];
+  let elegido = PUB.diaMovil;
+  if (!dias.includes(elegido)) elegido = dias.includes(c.hoy) ? c.hoy : dias[0];
+  const selector = h('div', { clase: 'selector-dias-pub', role: 'tablist', 'aria-label': 'Día de la semana' });
+  dias.forEach(d => {
+    const n = enviosDelDiaPublicar(c, d).length;
+    selector.appendChild(h('button', { type: 'button', role: 'tab', clase: d === c.hoy ? 'hoy' : '',
+      'aria-selected': d === elegido ? 'true' : 'false',
+      title: `${diaLargoPublicar(d)}: ${n ? plural(n, 'publicación', 'publicaciones') : 'nada'}`,
+      onclick: () => { PUB.diaMovil = d; pintarModulo(); } },
+    h('span', {}, DIAS_CORTOS_PUB[new Date(`${d}T12:00:00Z`).getUTCDay()]),
+    h('b', {}, String(Number(d.slice(8, 10)))),
+    h('small', {}, n ? String(n) : '·')));
+  });
+  const caja = h('div', { clase: 'cal-semana-movil' }, selector);
+  if (!elegido) return caja;
+  const delDia = enviosDelDiaPublicar(c, elegido);
+  const dia = h('div', { clase: 'dia-movil-pub' },
+    h('button', { type: 'button', clase: 'dia-cab-pub', title: 'Ver el día entero', onclick: () => abrirDiaPublicar(elegido) },
+      h('b', {}, diaLargoPublicar(elegido)),
+      h('span', { clase: 'meta' }, delDia.length ? plural(delDia.length, 'publicación', 'publicaciones') : '')));
+  if (!delDia.length) dia.appendChild(h('div', { clase: 'meta' }, 'Nada programado este día.'));
+  delDia.slice(0, TOPE_DIA_SEMANA_PUB).forEach(e => dia.appendChild(lineaEnvioPublicar(e)));
+  if (delDia.length > TOPE_DIA_SEMANA_PUB) dia.appendChild(botonMasDelDiaPublicar(elegido, delDia.length - TOPE_DIA_SEMANA_PUB));
+  caja.appendChild(dia);
+  return caja;
+}
+
+/* El mes: seis semanas, como un calendario de pared, con 3 líneas por día. En
+   el móvil, solo los días con algo, uno por fila. */
+function mesPublicar(c) {
+  const mesActual = PUB.mes || mesDeHoyPublicar();
+  const rejilla = h('div', { clase: 'calendario-publicar calendario-mes cal-mes-pub' });
+  ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'].forEach(d => rejilla.appendChild(h('div', { clase: 'cab-semana' }, d)));
+  const movil = h('div', { clase: 'mes-movil-pub' });
+  (c.dias || []).forEach(dia => {
+    const fuera = !dia.startsWith(mesActual);
+    const delDia = enviosDelDiaPublicar(c, dia);
+    const celda = h('div', { clase: `dia-publicar dia-mes-pub${dia === c.hoy ? ' hoy' : ''}${fuera ? ' fuera-mes' : ''}`, datos: { dia } },
+      h('span', { clase: 'num-dia' }, String(Number(dia.slice(8, 10)))));
+    delDia.slice(0, TOPE_DIA_MES_PUB).forEach(e => celda.appendChild(lineaEnvioPublicar(e, true)));
+    if (delDia.length > TOPE_DIA_MES_PUB) celda.appendChild(botonMasDelDiaPublicar(dia, delDia.length - TOPE_DIA_MES_PUB));
+    rejilla.appendChild(celda);
+    if (!fuera && delDia.length) {
+      const videos = new Set(delDia.map(e => e.pid)).size;
+      movil.appendChild(h('button', { type: 'button', clase: 'fila-mes-pub', title: 'Ver el día entero',
+        onclick: () => abrirDiaPublicar(dia) },
+      h('b', {}, mayusculaPublicar(cuandoLegible(dia))),
+      h('span', { clase: 'meta crece' }, `${plural(videos, 'vídeo', 'vídeos')} · ${plural(delDia.length, 'publicación', 'publicaciones')}`),
+      h('span', { clase: 'puntos-pub', 'aria-hidden': 'true' },
+        ...delDia.slice(0, 8).map(e => h('i', { clase: `punto-pub ${claseEstadoEnvioPublicar(e)}` })))));
+    }
+  });
+  if (!movil.children.length) movil.appendChild(h('div', { clase: 'meta' }, 'Nada este mes.'));
+  return h('div', { clase: 'mes-pub' }, rejilla, movil);
+}
+
+/* La agenda: la semana en una columna, un vídeo y hora por fila con sus redes. */
+function agendaPublicar(c) {
+  const caja = h('div', { clase: 'agenda-pub' });
+  (c.dias || []).forEach(dia => {
+    const delDia = enviosDelDiaPublicar(c, dia);
+    const grupos = new Map();
+    delDia.forEach(e => {
+      const clave = `${String(e.cuando || '').slice(0, 16)}|${e.pid}`;
+      if (!grupos.has(clave)) grupos.set(clave, []);
+      grupos.get(clave).push(e);
+    });
+    const seccion = h('section', { clase: `agenda-dia-pub${dia === c.hoy ? ' hoy' : ''}` },
+      h('div', { clase: 'fila agenda-cab-pub' }, h('b', {}, `${diaLargoPublicar(dia)}${dia === c.hoy ? ' · hoy' : ''}`),
+        h('span', { clase: 'meta' }, delDia.length
+          ? `${plural(grupos.size, 'vídeo', 'vídeos')} · ${plural(delDia.length, 'publicación', 'publicaciones')}` : 'nada programado')));
+    grupos.forEach(envios => {
+      const e = envios[0];
+      seccion.appendChild(h('div', { clase: 'fila fila-agenda-pub' },
+        h('span', { clase: 'cifra-pub' }, String(e.cuando || '').slice(11, 16)),
+        h('button', { type: 'button', clase: 'mini fantasma nombre-envio', title: 'Abrir la ficha de este vídeo',
+          onclick: () => irASeccionPublicar('ficha', e.pid) }, e.video || e.pid),
+        h('span', { clase: 'redes-video crece' }, ...envios.map(x => h('span', {
+          clase: `chip-estado-pub ${claseEstadoEnvioPublicar(x)}`, title: tituloEnvioPublicar(x) },
+        h('i', { 'aria-hidden': 'true' }, MARCAS_ENVIO[x.estado] || ''), CORTOS_RED[x.red] || x.red)))));
+    });
+    caja.appendChild(seccion);
+  });
+  return caja;
+}
+
+/* El día entero, en un panel lateral: todas sus publicaciones por hora, cada
+   una con su red, su vídeo (→ su ficha), su proyecto, su estado y lo que se
+   puede hacer con ella. Escape o el velo lo cierran. */
+function filaEnvioDiaPublicar(e) {
+  const fallo = ['fallido', 'comprobar'].includes(e.estado);
+  return h('div', { clase: `fila fila-dia-pub ${claseEstadoEnvioPublicar(e)}`, datos: { envio: e.id || '' } },
+    h('b', { clase: 'lp-red' }, nombreEnvioPublicar(e)),
+    h('button', { type: 'button', clase: 'mini fantasma nombre-envio', title: 'Abrir la ficha de este vídeo',
+      onclick: () => { PUB.diaAbierto = ''; irASeccionPublicar('ficha', e.pid); } }, e.video || e.pid),
+    e.cliente_nombre ? h('span', { clase: 'meta' }, e.cliente_nombre) : null,
+    h('span', { clase: 'crece' }),
+    pastillaEstadoEnvio(e.estado),
+    debioSalirPublicar(e), botonComprobarPublicar(e),
+    e.estado === 'espera_ok' ? h('button', { type: 'button', clase: 'mini primario',
+      onclick: () => confirmarPendientePublicar(e) }, 'Dar el OK') : null,
+    fallo && e.superado ? h('span', { clase: 'meta motivo-cola' },
+      e.superado_como === 'reenviado' ? 'se volvió a mandar' : 'ya salió en otro envío') : null,
+    fallo && !e.superado ? h('button', { type: 'button', clase: 'mini fantasma',
+      title: 'Quitarlo de «Te necesitan» (no borra nada en la red)',
+      onclick: () => cancelarEnvioPublicar(e) }, 'Quitar de la lista') : null,
+    e.url ? h('a', { href: e.url, target: '_blank', rel: 'noopener', clase: 'mini' }, 'Ver') : null);
+}
+
+function panelDiaPublicar(c) {
+  const dia = PUB.diaAbierto;
+  if (!dia) return null;
+  const delDia = enviosDelDiaPublicar(c, dia);
+  const videos = new Set(delDia.map(e => e.pid)).size;
+  const capa = h('div', { clase: 'capa-dia-publicar' });
+  capa.addEventListener('click', ev => { if (ev.target === capa) cerrarDiaPublicar(); });
+  const panel = h('aside', { clase: 'panel-dia-publicar dia-abierto', role: 'dialog', 'aria-label': diaLargoPublicar(dia) },
+    h('div', { clase: 'fila cab-panel-dia' },
+      h('b', { clase: 'crece' }, diaLargoPublicar(dia)),
+      h('span', { clase: 'meta' }, `${plural(delDia.length, 'publicación', 'publicaciones')} · ${plural(videos, 'vídeo', 'vídeos')}`),
+      h('button', { type: 'button', clase: 'mini', onclick: cerrarDiaPublicar }, 'Cerrar')),
+    leyendaEstadosPublicar());
+  const horas = [...new Set(delDia.map(e => String(e.cuando || '').slice(11, 16)))];
+  horas.forEach(hora => panel.appendChild(h('section', { clase: 'hora-dia-pub' },
+    h('div', { clase: 'etiqueta-hora-pub' }, hora),
+    ...delDia.filter(e => String(e.cuando || '').slice(11, 16) === hora).map(filaEnvioDiaPublicar))));
+  if (!delDia.length) panel.appendChild(h('div', { clase: 'meta' }, 'Nada este día.'));
+  capa.appendChild(panel);
+  return capa;
+}
+
+document.addEventListener('keydown', ev => {
+  if (ev.key !== 'Escape' || typeof MODULOS === 'undefined' || MODULOS.actual !== 'publicar' || !PUB.diaAbierto) return;
+  ev.stopPropagation();
+  cerrarDiaPublicar();
+});
+
+function seccionCalendarioPublicar() {
+  const c = PUB.cola || {};
+  const caja = h('div', { clase: 'cola-publicar calendario-pub' });
   const trasEnvio = avisoTrasEnvioCola();
   if (trasEnvio) caja.appendChild(trasEnvio);
-  if (todos.length) caja.appendChild(barraFiltrosCola(todos));
-  /* LOS FILTROS SON DE LA LISTA (notas del 20-10: «el calendario cambia con los
-     filtros y confunde»). El calendario enseña SIEMPRE todo lo de la semana o
-     el mes; los filtros solo cambian «Vídeos listos» y «Te necesitan», y se
-     dice cuántos de estos esconden. */
-  if (filtrando) {
-    caja.appendChild(h('div', { clase: 'meta nota-filtros-cola' },
-      'Los filtros solo cambian la lista de vídeos y «Te necesitan»: el calendario enseña siempre todo lo programado y publicado.'));
-  }
-
-  // lo programado que ya debió salir y Upload-Post no ha confirmado, también (20-10)
-  const todaAtencion = (c.esperan_ok || []).concat(c.fallidos || [], (c.envios || []).filter(e => e.debio_salir));
-  const atencion = todaAtencion.filter(pasaEnvio);
-  if (atencion.length || todaAtencion.length) {
-    const b = h('div', { clase: 'bloque bloque-atencion' }, h('h3', {}, 'Te necesitan'));
-    atencion.forEach(e => b.appendChild(filaEnvioCola(e)));
-    if (todaAtencion.length > atencion.length) {
-      b.appendChild(h('div', { clase: 'meta' }, `${todaAtencion.length - atencion.length} más que no cumplen los filtros.`));
-    }
-    caja.appendChild(b);
-  }
-
-  // EL CALENDARIO: la semana o el mes
-  const vista = PUB.vistaCal === 'mes' ? 'mes' : 'semana';
-  const cal = h('div', { clase: 'bloque' });
+  const vista = ['mes', 'agenda'].includes(PUB.vistaCal) ? PUB.vistaCal : 'semana';
   const desde = c.desde || '';
   const mover = paso => {
     if (vista === 'mes') {
@@ -25336,98 +26680,49 @@ function seccionColaPublicar() {
       base.setUTCDate(base.getUTCDate() + paso * 7);
       PUB.desde = base.toISOString().slice(0, 10);
     }
+    PUB.diaAbierto = '';
     cargarPublicar();
   };
   const cambiarVista = otra => {
+    if (otra === vista) return;
     PUB.vistaCal = otra;
     PUB.diaAbierto = '';
     if (otra === 'mes') { PUB.mes = PUB.mes || mesDeHoyPublicar(); PUB.desde = inicioCalendarioPublicar('mes', PUB.mes); } else PUB.desde = '';
     cargarPublicar();
   };
+  const dias = c.dias || [];
+  const ultimo = dias[dias.length - 1] || '';
   const titulo = vista === 'mes'
-    ? (t => t.charAt(0).toUpperCase() + t.slice(1))(new Date(`${PUB.mes || mesDeHoyPublicar()}-15T12:00:00Z`)
+    ? mayusculaPublicar(new Date(`${PUB.mes || mesDeHoyPublicar()}-15T12:00:00Z`)
       .toLocaleDateString('es-PE', { month: 'long', year: 'numeric', timeZone: 'UTC' }))
-    : 'La semana';
-  cal.appendChild(h('div', { clase: 'fila' },
+    : (dias.length ? `La semana del ${Number(dias[0].slice(8, 10))} al ${Number(ultimo.slice(8, 10))}/${Number(ultimo.slice(5, 7))}` : 'La semana');
+  const cal = h('section', { clase: 'bloque calendario-b' });
+  cal.appendChild(h('div', { clase: 'fila cab-calendario-pub' },
     h('h3', { clase: 'titulo-calendario' }, titulo), h('span', { clase: 'meta' }, 'hora de Lima'),
     h('span', { clase: 'crece' }),
-    h('span', { clase: 'pestanas-publicar vista-cal' },
-      h('button', { clase: `mini${vista === 'semana' ? ' activo' : ''}`, onclick: () => cambiarVista('semana') }, 'Semana'),
-      h('button', { clase: `mini${vista === 'mes' ? ' activo' : ''}`, onclick: () => cambiarVista('mes') }, 'Mes')),
-    h('button', { clase: 'mini fantasma', title: vista === 'mes' ? 'Mes anterior' : 'Semana anterior', onclick: () => mover(-1) }, '‹'),
-    h('button', { clase: 'mini fantasma', onclick: () => {
-      PUB.mes = mesDeHoyPublicar(); PUB.desde = inicioCalendarioPublicar(vista, PUB.mes); if (vista !== 'mes') PUB.desde = ''; cargarPublicar();
-    } }, 'Hoy'),
-    h('button', { clase: 'mini fantasma', title: vista === 'mes' ? 'Mes siguiente' : 'Semana siguiente', onclick: () => mover(1) }, '›')));
-  const rejilla = h('div', { clase: `calendario-publicar${vista === 'mes' ? ' calendario-mes' : ''}` });
-  if (vista === 'mes') ['lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'].forEach(d => rejilla.appendChild(h('div', { clase: 'cab-semana' }, d)));
-  const mesActual = PUB.mes || mesDeHoyPublicar();
-  // el calendario, SIN los filtros (ver arriba)
-  const enviosVisibles = (c.envios || []).filter(e => e.estado !== 'cancelado');
-  const TOPE_DIA = vista === 'mes' ? 3 : 99;
-  (c.dias || []).forEach(dia => {
-    const fuera = vista === 'mes' && !dia.startsWith(mesActual);
-    const columna = h('div', { clase: `dia-publicar${dia === c.hoy ? ' hoy' : ''}${fuera ? ' fuera-mes' : ''}${PUB.diaAbierto === dia ? ' abierto' : ''}` },
-      h('div', { clase: 'dia-cab' }, vista === 'mes' ? String(Number(dia.slice(8, 10))) : cuandoLegible(dia)));
-    const delDia = enviosVisibles.filter(e => String(e.cuando || '').startsWith(dia));
-    if (!delDia.length && vista !== 'mes') columna.appendChild(h('div', { clase: 'meta dia-vacio' }, '—'));
-    delDia.slice(0, TOPE_DIA).forEach(e => columna.appendChild(h('button', {
-      clase: `envio-dia ${CLASE_ESTADO[e.estado] || ''}${e.debio_salir ? ' debio-salir' : ''}`,
-      title: `${NOMBRES_RED[e.red]}${e.tipo && e.red === 'youtube' ? ` (${e.tipo})` : ''} · ${e.video} · ${ESTADOS_ENVIO[e.estado] || e.estado}`
-        + (e.debio_salir ? ' · debería haber salido ya' : ''),
-      onclick: () => irASeccionPublicar('ficha', e.pid),
-    }, h('span', { clase: 'hora' }, String(e.cuando || '').slice(11, 16)),
-    ` ${CORTOS_RED[e.red]} · ${recortar(e.video || '', vista === 'mes' ? 12 : 22)}`)));
-    if (delDia.length > TOPE_DIA) {
-      columna.appendChild(h('button', { clase: 'mini fantasma mas-del-dia',
-        onclick: () => { PUB.diaAbierto = PUB.diaAbierto === dia ? '' : dia; pintarModulo(); } },
-      `+${delDia.length - TOPE_DIA} más`));
-    }
-    rejilla.appendChild(columna);
-  });
-  cal.appendChild(rejilla);
-  if (PUB.diaAbierto) {
-    const delDia = enviosVisibles.filter(e => String(e.cuando || '').startsWith(PUB.diaAbierto));
-    const lista = h('div', { clase: 'dia-abierto' }, h('div', { clase: 'fila' },
-      h('b', { clase: 'crece' }, cuandoLegible(PUB.diaAbierto)),
-      h('button', { clase: 'mini fantasma', onclick: () => { PUB.diaAbierto = ''; pintarModulo(); } }, 'Cerrar')));
-    delDia.forEach(e => lista.appendChild(filaEnvioCola(e)));
-    cal.appendChild(lista);
+    h('span', { clase: 'vista-cal selector-pub', role: 'group', 'aria-label': 'Vista' },
+      ...[['semana', 'Semana'], ['mes', 'Mes'], ['agenda', 'Agenda']].map(([id, texto]) => h('button', {
+        type: 'button', clase: `mini${vista === id ? ' activo' : ''}`, 'aria-pressed': vista === id ? 'true' : 'false',
+        onclick: () => cambiarVista(id) }, texto))),
+    h('span', { clase: 'mover-cal-pub' },
+      h('button', { type: 'button', clase: 'mini fantasma', title: vista === 'mes' ? 'Mes anterior' : 'Semana anterior', onclick: () => mover(-1) }, '‹'),
+      h('button', { type: 'button', clase: 'mini fantasma', onclick: () => {
+        PUB.mes = mesDeHoyPublicar(); PUB.desde = inicioCalendarioPublicar(vista, PUB.mes); if (vista !== 'mes') PUB.desde = '';
+        PUB.diaMovil = ''; PUB.diaAbierto = ''; cargarPublicar();
+      } }, 'Hoy'),
+      h('button', { type: 'button', clase: 'mini fantasma', title: vista === 'mes' ? 'Mes siguiente' : 'Semana siguiente', onclick: () => mover(1) }, '›'))));
+  cal.appendChild(leyendaEstadosPublicar());
+  if (vista === 'mes') cal.appendChild(mesPublicar(c));
+  else if (vista === 'agenda') cal.appendChild(agendaPublicar(c));
+  else {
+    cal.appendChild(semanaPublicar(c));
+    cal.appendChild(semanaMovilPublicar(c));
   }
+  cal.appendChild(h('div', { clase: 'meta pista-calendario' }, 'El calendario enseña siempre todo lo programado y publicado (sin filtros).'
+    + (vista === 'agenda' ? '' : ` Cada día enseña sus ${vista === 'mes' ? TOPE_DIA_MES_PUB : TOPE_DIA_SEMANA_PUB} primeras publicaciones; «+N más» abre el día entero.`)));
   caja.appendChild(cal);
-
-  // LOS VÍDEOS LISTOS, filtrados, agrupados si se pide y de 30 en 30
-  const visibles = todos.filter(pasaFiltroCola);
-  const listos = h('div', { clase: 'bloque' }, h('div', { clase: 'fila' },
-    h('h3', { clase: 'crece' }, 'Vídeos listos para publicar'),
-    todos.length ? h('span', { clase: 'meta' }, filtrando ? `${visibles.length} de ${todos.length}` : `${todos.length}`) : null));
-  if (!todos.length) {
-    listos.appendChild(h('div', { clase: 'meta' },
-      'Todavía no hay ningún vídeo montado. Se hacen en Crear; desde la pantalla Vídeo, «Enviar a Publicar».'));
-  } else if (!visibles.length) {
-    listos.appendChild(h('div', { clase: 'meta' }, 'Ningún vídeo cumple estos filtros.'));
-  }
-  const tope = 30 + (PUB.verMasListos || 0);
-  const mostrar = visibles.slice(0, tope);
-  if (f.agrupar) {
-    const grupos = new Map();
-    mostrar.forEach(v => {
-      const nombre = v.cliente_nombre || 'Sin proyecto';
-      if (!grupos.has(nombre)) grupos.set(nombre, []);
-      grupos.get(nombre).push(v);
-    });
-    [...grupos.entries()].sort((x, y) => x[0].localeCompare(y[0], 'es')).forEach(([nombre, lista]) => {
-      listos.appendChild(h('div', { clase: 'grupo-listos' }, h('div', { clase: 'cab-grupo' }, `${nombre} (${lista.length})`),
-        ...lista.map(filaListoPublicar)));
-    });
-  } else {
-    mostrar.forEach(v => listos.appendChild(filaListoPublicar(v)));
-  }
-  if (visibles.length > tope) {
-    listos.appendChild(h('button', { clase: 'mini', onclick: () => { PUB.verMasListos = (PUB.verMasListos || 0) + 30; pintarModulo(); } },
-      `Ver ${Math.min(30, visibles.length - tope)} más`));
-  }
-  caja.appendChild(listos);
+  const panel = panelDiaPublicar(c);
+  if (panel) caja.appendChild(panel);
   return caja;
 }
 
@@ -25610,12 +26905,16 @@ async function cambiarRedesPublicar(red, puesta) {
 }
 
 async function escribirTextosPublicar(redes, reintento) {
+  return conCerrojoPublicar(() => pedirTextosAClaudePublicar(redes, reintento));
+}
+
+async function pedirTextosAClaudePublicar(redes, reintento) {
   if (!redes.length) { toast('elige al menos una red', true); return; }
   const f = PUB.ficha;
   const hay = redes.some(r => ((f.textos || {})[r] || {}).descripcion);
-  if (hay && !reintento && !confirm('Claude volverá a escribir los textos de: '
+  if (hay && !reintento && !(await preguntarPublicar('Claude volverá a escribir los textos de: '
     + redes.map(r => NOMBRES_RED[r]).join(', ') + '.\n\nLo que hayas cambiado a mano en esas redes se sustituye. '
-    + 'Va con tu suscripción de Claude (no se paga aparte).')) return;
+    + 'Va con tu suscripción de Claude (no se paga aparte).', { titulo: 'Escribir los textos', aceptar: 'Escribirlos' }))) return;
   try {
     await guardarTextosPublicar();
     await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/textos`), { method: 'POST', cuerpo: { redes } });
@@ -25710,109 +27009,457 @@ async function cambiarFormatoYoutubePublicar(valor) {
   } catch (e) { toast(e.message, true); }
 }
 
-function seccionFichaPublicar() {
+/* ------------------------------------------------- PUBLICAR · UN VÍDEO
+ *
+ * LA FICHA, EN CARRIL (rediseno-publicar, con la forma «A · Carril» de Crear):
+ * la pantalla de un vídeo con su salida «‹ Publicar», su cabecera, seis pasos
+ * con estado —Redes · Textos · SEO · Portada · Cuándo · Envíos— y UNA barra de
+ * acción abajo con el botón de lo elegido en «Cuándo» («Programar para … ›»,
+ * «Publicar ahora ›», «Ya lo subí… ›») y, a su izquierda, por qué no se puede
+ * todavía. Antes era una columna de 4.300 px con el botón a 3.000 px.
+ * Los bloques de otras ramas se ENCAJAN aquí sin cambiarlos por dentro:
+ * `bloqueSeoVideo` y `seoDeRedPublicar` (seo-real, seo-real-3) en SEO y
+ * Textos, y `bloquePortadaPublicar` (portadas-2) en Portada.
+ */
+const PASOS_FICHA_PUBLICAR = [['redes', 'Redes'], ['textos', 'Textos'], ['seo', 'SEO'],
+  ['portada', 'Portada'], ['cuando', 'Cuándo'], ['envios', 'Envíos']];
+
+/* Las redes a las que se puede mandar (las marcadas que encajan). */
+function redesDeLaFichaPublicar(f) {
+  return (f.redes || []).filter(r => ((f.encaje || {})[r] || {}).nivel !== 'error');
+}
+
+function pasoFichaPublicar(f) {
+  const ids = PASOS_FICHA_PUBLICAR.map(x => x[0]);
+  if (ids.includes(PUB.pasoFicha)) return PUB.pasoFicha;
+  return (f.redes || []).length ? 'textos' : 'redes';
+}
+
+function irAPasoFichaPublicar(id) {
+  PUB.pasoFicha = id;
+  BARRA_MAS.abierta = false;
+  subirArriba('modulo');
+  pintarModulo();
+}
+
+/* El estado de cada paso: {e, txt, detalle}, con las marcas de Crear. */
+function estadoPasoFichaPublicar(id, f) {
+  const redes = redesDeLaFichaPublicar(f);
+  if (id === 'redes') {
+    return redes.length ? { e: 'hecho', txt: plural(redes.length, 'red', 'redes'), detalle: redes.map(r => CORTOS_RED[r]).join(', ') }
+      : { e: 'aviso', txt: 'ninguna red', detalle: 'elige al menos una' };
+  }
+  if (id === 'textos') {
+    if (f.escribiendo) return { e: 'curso', txt: 'Claude escribiendo', detalle: 'suele tardar menos de un minuto' };
+    if (f.error_textos) return { e: 'aviso', txt: 'no se han podido escribir', detalle: 'mira el motivo' };
+    if (!redes.length) return { e: 'pend', txt: 'sin redes', detalle: 'elige antes las redes' };
+    const faltan = redes.filter(r => !String(textosDeFicha(r).descripcion || '').trim());
+    return faltan.length
+      ? { e: 'aviso', txt: `falta ${faltan.map(r => CORTOS_RED[r]).join(', ')}`, detalle: `${redes.length - faltan.length} de ${redes.length} escritos` }
+      : { e: 'hecho', txt: `${redes.length} de ${redes.length}`, detalle: f.desactualizada ? 'desactualizados' : 'escritos' };
+  }
+  if (id === 'seo') {
+    const seo = f.seo || {};
+    if ((seo.trabajando || {}).optimizar) return { e: 'curso', txt: 'Claude revisando', detalle: 'la revisión SEO' };
+    const notas = redes.map(r => ((seo.notas || {})[r] || {}).nota).filter(n => typeof n === 'number');
+    const media = notas.length ? Math.round(notas.reduce((a, b) => a + b, 0) / notas.length) : null;
+    return { e: media === null ? 'pend' : media >= 80 ? 'hecho' : 'aviso',
+      txt: media === null ? 'sin textos' : `${media}/100 de media`,
+      detalle: seo.palabra ? `«${seo.palabra}»` : 'sin palabra clave' };
+  }
+  if (id === 'portada') {
+    const p = f.portada || {};
+    if (p.imagen) return { e: 'hecho', txt: 'imagen subida', detalle: p.youtube ? 'también a YouTube' : '' };
+    if (p.ms != null) return { e: 'hecho', txt: `fotograma ${(p.ms / 1000).toFixed(1).replace('.', ',')} s`, detalle: p.youtube ? 'también a YouTube' : '' };
+    return { e: 'pend', txt: 'cada red la suya', detalle: 'no has elegido ninguna' };
+  }
+  if (id === 'cuando') {
+    const modo = PUB.modoEnvio || 'programar';
+    if (modo === 'ahora') return { e: 'hecho', txt: 'Publicar ahora', detalle: 'en cuanto confirmes' };
+    if (modo === 'mano') return { e: 'hecho', txt: 'Solo a mano', detalle: 'tú lo subes' };
+    return { e: 'hecho', txt: 'Programar', detalle: cuandoLegible(PUB.cuandoEnvio || f.hora_sugerida) };
+  }
+  const vivos = (f.envios || []).filter(e => e.estado !== 'cancelado');
+  if (!vivos.length) return { e: 'pend', txt: 'nada todavía', detalle: '' };
+  const n = estado => vivos.filter(e => e.estado === estado).length;
+  const partes = [n('programado') ? `${n('programado')} programado${n('programado') > 1 ? 's' : ''}` : '',
+    n('publicado') + n('a_mano') ? `${n('publicado') + n('a_mano')} publicado${n('publicado') + n('a_mano') > 1 ? 's' : ''}` : '',
+    n('espera_ok') ? `${n('espera_ok')} espera${n('espera_ok') > 1 ? 'n' : ''} tu OK` : ''].filter(Boolean);
+  const mal = vivos.some(e => ['fallido', 'comprobar'].includes(e.estado));
+  return { e: mal ? 'aviso' : 'hecho', txt: partes.join(' · ') || plural(vivos.length, 'envío', 'envíos'),
+    detalle: mal ? 'alguno falló' : 'cifras y lo que se mandó' };
+}
+
+function carrilFichaPublicar(f, actual) {
+  const caja = h('aside', { clase: 'carril-crear carril-publicar', 'aria-label': 'Los pasos para publicar este vídeo' });
+  caja.appendChild(h('div', { clase: 'carril-titulo' }, 'Publicar este vídeo', h('span', { clase: 'desliza' }, ' · desliza →')));
+  const fila = h('nav', { clase: 'pasos-carril pasos-publicar' });
+  PASOS_FICHA_PUBLICAR.forEach(([id, nombre], i) => {
+    const p = estadoPasoFichaPublicar(id, f);
+    const aqui = id === actual;
+    fila.appendChild(h('button', {
+      type: 'button', clase: `paso-carril ${claseEstado(aqui ? 'actual' : p.e)}${aqui ? ' actual' : ''}`,
+      disabled: aqui, title: `${nombre}: ${p.txt}${p.detalle ? ` · ${p.detalle}` : ''}`,
+      'aria-current': aqui ? 'step' : null, datos: { paso: id, estado: p.e },
+      onclick: () => irAPasoFichaPublicar(id),
+    }, marcaEstado(aqui ? 'actual' : p.e),
+    h('span', { clase: 'paso-textos' },
+      h('b', {}, `${i + 1}. ${nombre}`),
+      h('span', { clase: `estado-txt ${claseEstado(p.e)}` }, aqui ? `estás aquí · ${p.txt}` : p.txt),
+      p.detalle ? h('small', {}, p.detalle) : null)));
+  });
+  caja.appendChild(fila);
+  const clave = f.clave || {};
+  caja.appendChild(h('div', { clase: 'gasto-video perfil-publicar' },
+    h('span', { clase: 'meta' }, 'Upload-Post'),
+    h('b', {}, (f.ajustes || {}).perfil || 'sin perfil'),
+    h('span', { clase: 'meta' }, clave.simulado ? 'simulado: nada sale de verdad'
+      : clave.puesta ? 'con su clave' : 'sin clave: se publica a mano')));
+  return caja;
+}
+
+/* En el móvil la fila de pasos se desliza: el paso de ahora, a la vista. Y la
+   burbuja del asistente va ENCIMA de la barra de acción, como en Crear: se
+   mide la barra y se pasa a `--alto-pie` (por CSSOM: la CSP no deja `style`). */
+function altoBarraFichaPublicar() {
+  requestAnimationFrame(() => {
+    const barra = document.querySelector('#modulo .barra-publicar');
+    const raiz = document.documentElement.style;
+    if (barra && barra.isConnected && barra.offsetHeight) raiz.setProperty('--alto-pie', `${barra.offsetHeight}px`);
+    else if (MODULOS.actual !== 'crear') raiz.removeProperty('--alto-pie');
+  });
+}
+
+function centrarPasoFichaPublicar() {
+  altoBarraFichaPublicar();
+  requestAnimationFrame(() => {
+    const fila = document.querySelector('#modulo .pasos-publicar');
+    const activo = fila && fila.querySelector('.paso-carril.actual');
+    if (!activo || fila.scrollWidth <= fila.clientWidth + 2) return;
+    const dentro = activo.getBoundingClientRect().left - fila.getBoundingClientRect().left + fila.scrollLeft;
+    fila.scrollLeft = Math.max(0, dentro - (fila.clientWidth - activo.offsetWidth) / 2);
+  });
+}
+
+/* La cabecera del vídeo, como la de Crear: miniatura (la de su estilo),
+   nombre, proyecto, estilo, formato y duración, «Descargar MP4» y «Abrir en
+   Crear ›». El estilo sale de la lista de vídeos listos (la ficha no lo trae). */
+function cabeceraVideoPublicar(f) {
+  const listo = ((colaParaAvisosPublicar() || {}).listos || []).find(v => v.pid === f.pid) || {};
+  const vertical = f.formato === 'vertical';
+  return h('div', { clase: 'cab-video cab-video-publicar' },
+    miniaturaVideoPublicar(listo.estilo, vertical),
+    h('div', { clase: 'datos' },
+      h('div', { clase: 'nombre-video' }, h('b', { clase: 'nombre-ficha' }, f.nombre)),
+      h('div', { clase: 'chips-video' },
+        h('span', { clase: 'chip-enlace' }, `📁 ${f.cliente_nombre || 'Sin proyecto'}`),
+        listo.estilo_nombre ? h('span', { clase: 'chip-enlace' }, `🎨 ${listo.estilo_nombre}`) : null,
+        h('span', { clase: 'chip-enlace' }, `${f.formato} · ${mmss(f.duracion_s)}`))),
+    h('div', { clase: 'fila acciones-cab-publicar' },
+      f.mp4 ? h('a', { clase: 'boton-enlace mini', href: API.archivo(f.pid, f.mp4), download: `${f.pid}.mp4` }, '⬇ Descargar MP4') : null,
+      h('button', { type: 'button', clase: 'mini fantasma', title: 'Abrir este vídeo en Crear',
+        onclick: async () => { if (!(await guardarPendientePublicar())) return; irAModulo('crear'); abrirVideoLight(f.pid); } },
+      'Abrir en Crear ›')));
+}
+
+function cabPasoPublicar(titulo, entrada, ...extra) {
+  return h('div', { clase: 'cab-paso-publicar' },
+    h('div', { clase: 'crece' }, h('h2', {}, titulo), entrada ? h('div', { clase: 'meta entrada-paso' }, entrada) : null),
+    ...extra);
+}
+
+function vistaFichaPublicar() {
   const f = PUB.ficha;
-  const caja = h('div', { clase: 'ficha-publicar' });
-  if (!f) {
-    caja.appendChild(h('div', { clase: 'meta' }, PUB.pid ? 'cargando…' : 'Elige un vídeo en la cola.'));
+  const caja = h('div', { clase: 'publicar publicar-ficha-carril' });
+  const salida = h('button', { type: 'button', clase: 'mini fantasma salida-crear salida-publicar',
+    title: 'Volver a Publicar: el calendario y los vídeos', onclick: () => irASeccionPublicar(PUB.vuelta || 'cola') }, '‹ Publicar');
+  if (PUB.error) caja.appendChild(cajaError(PUB.error));
+  if (!f || (PUB.pid && f.pid !== PUB.pid)) {
+    caja.appendChild(h('div', { clase: 'paso-publicar' }, salida,
+      h('div', { clase: 'meta' }, PUB.pid ? 'cargando…' : 'Elige un vídeo en el calendario o en «Por publicar».')));
     return caja;
   }
-  caja.appendChild(h('div', { clase: 'fila' },
-    h('button', { clase: 'mini fantasma', onclick: () => irASeccionPublicar('cola') }, '‹ La cola'),
-    h('b', { clase: 'crece nombre-ficha' }, f.nombre),
-    f.cliente_nombre ? h('span', { clase: 'pastilla' }, f.cliente_nombre) : null,
-    h('span', { clase: 'meta' }, `${f.formato} · ${mmss(f.duracion_s)}`)));
+  const actual = pasoFichaPublicar(f);
+  if (f.montado) caja.appendChild(carrilFichaPublicar(f, actual));
+  const main = h('div', { clase: `paso-publicar ficha-publicar paso-${actual}` });
+  /* LOS BOTONES DE LA NOTA SEO llevan a su campo (`accionPuntoSeoPublicar`, del
+     bloque PUBLICAR · SEO, que no se toca). Con la ficha en pasos el campo puede
+     estar en otro paso o en otra pestaña de red: ANTES de que el botón lo
+     busque se abre donde está (el repintado es síncrono, así que lo encuentra). */
+  main.addEventListener('click', ev => {
+    const boton = ev.target.closest && ev.target.closest('button[data-punto], a[data-punto]');
+    if (!boton) return;
+    const id = boton.dataset.punto || '';
+    const red = (boton.closest('[data-red]') || {}).dataset ? boton.closest('[data-red]').dataset.red : '';
+    if (id === 'ubicacion') { PUB.ajSel = f.cliente || '_sin'; PUB.ajTab = 'seo'; return; }
+    let paso = '';
+    if (id === 'portada') paso = 'portada';
+    else if (id === 'palabra') paso = boton.tagName === 'BUTTON' && /Escribir/.test(boton.textContent) ? 'seo' : '';
+    else if (red) paso = 'textos';
+    if (!paso) return;
+    if (paso === actual && (paso !== 'textos' || PUB.redFicha === red)) return;
+    PUB.pasoFicha = paso;
+    if (paso === 'textos' && red) PUB.redFicha = red;
+    pintarModulo();
+  }, true);
+  main.appendChild(salida);
+  main.appendChild(cabeceraVideoPublicar(f));
   const aviso = avisoClavePublicar(f.clave);
-  if (aviso) caja.appendChild(aviso);
+  if (aviso) main.appendChild(aviso);
+  const necesitan = franjaNecesitanPublicar();
+  if (necesitan) main.appendChild(necesitan);
   if (!f.montado) {
-    caja.appendChild(h('div', { clase: 'caja-aviso' },
+    main.appendChild(h('div', { clase: 'caja-aviso' },
       'Este vídeo todavía no está montado. Termínalo en Crear y vuelve: se publica el MP4.'));
+    caja.appendChild(main);
     return caja;
   }
   if (f.desactualizada) {
-    caja.appendChild(h('div', { clase: 'caja-aviso fila' },
+    main.appendChild(h('div', { clase: 'caja-aviso fila' },
       h('span', { clase: 'crece' }, 'La ficha está desactualizada: el guion o el montaje han cambiado desde que se '
         + 'escribieron los textos. Revísalos o pide otros.'),
-      h('button', { clase: 'mini', onclick: () => escribirTextosPublicar(f.redes || []) }, 'Escribirlos otra vez')));
+      h('button', { type: 'button', clase: 'mini', onclick: () => escribirTextosPublicar(f.redes || []) }, 'Escribirlos otra vez')));
   }
   if (f.programados_viejos) {
-    caja.appendChild(h('div', { clase: 'caja-aviso' },
+    main.appendChild(h('div', { clase: 'caja-aviso' },
       `${f.programados_viejos} envío(s) programado(s) llevan el MP4 de antes del último montaje. `
       + 'Si quieres que salga el nuevo, cancélalo y vuelve a programarlo.'));
   }
   const yaSalio = resumenPublicadoFicha(f);
-  if (yaSalio) caja.appendChild(yaSalio);
+  if (yaSalio) main.appendChild(yaSalio);
+  const pintores = { redes: pasoRedesPublicar, textos: pasoTextosPublicar, seo: pasoSeoPublicar,
+    portada: pasoPortadaPublicar, cuando: pasoCuandoPublicar, envios: pasoEnviosPublicar };
+  main.appendChild(h('div', { clase: `contenido-paso-publicar` }, pintores[actual](f)));
+  main.appendChild(barraFichaPublicar(f));
+  caja.appendChild(main);
+  centrarPasoFichaPublicar();
+  return caja;
+}
 
-  // LAS REDES
+/* 1 · REDES: dónde sale (las del proyecto), lo que avisa cada una y cómo sale
+   en YouTube. */
+function pasoRedesPublicar(f) {
+  const caja = h('div', { clase: 'paso-redes-publicar' },
+    cabPasoPublicar('Redes', 'Dónde sale este vídeo. Las que ves son las de su proyecto.'));
   const ultimos = ultimoEnvioPorRed(f);
-  const redes = h('div', { clase: 'bloque' }, h('h3', {}, 'Redes'));
-  const fila = h('div', { clase: 'fila redes-ficha' });
+  const redes = h('div', { clase: 'bloque' });
+  const fila = h('div', { clase: 'redes-ficha' });
   redesVisiblesPublicar(f).forEach(r => {
     const enc = (f.encaje || {})[r] || {};
     const cuenta = (f.cuentas || {})[r];
-    fila.appendChild(h('label', { clase: `casilla-red${enc.nivel === 'error' ? ' apagada' : ''}`,
+    fila.appendChild(h('label', { clase: `casilla-red tarjeta-red-publicar${enc.nivel === 'error' ? ' apagada' : ''}`,
       title: enc.texto || (cuenta ? `cuenta: ${cuenta.nombre}` : '') },
     h('input', { type: 'checkbox', checked: (f.redes || []).includes(r), disabled: enc.nivel === 'error',
       onchange: ev => cambiarRedesPublicar(r, ev.target.checked) }),
-    ` ${NOMBRES_RED[r]}`,
-    enc.tipo ? h('span', { clase: 'meta' }, ` · ${enc.tipo}`) : null,
+    h('span', { clase: 'nombre-red-publicar' }, NOMBRES_RED[r],
+      enc.tipo ? h('span', { clase: 'meta' }, ` · ${enc.tipo}`) : null),
     enc.nivel === 'aviso' || enc.nivel === 'error'
       ? h('span', { clase: `pastilla ${enc.nivel === 'error' ? 'error' : 'aviso'}` }, '!') : null,
     ultimos[r] ? h('span', { clase: `pastilla red-mini ${CLASE_ESTADO[ultimos[r].estado] || ''}` },
-      ESTADOS_ENVIO[ultimos[r].estado] || ultimos[r].estado) : null));
+      ESTADOS_ENVIO[ultimos[r].estado] || ultimos[r].estado) : h('span', { clase: 'meta' }, 'sin publicar')));
   });
   redes.appendChild(fila);
   Object.keys(NOMBRES_RED).filter(r => (f.redes || []).includes(r) && ((f.encaje || {})[r] || {}).texto)
     .forEach(r => redes.appendChild(h('div', { clase: 'meta' }, `${NOMBRES_RED[r]}: ${f.encaje[r].texto}`)));
   const formatoYt = formatoYoutubePublicar(f);
   if (formatoYt) redes.appendChild(formatoYt);
-  // lo que falta en los ajustes del proyecto (el tablero de Pinterest…)
+  const aAjustes = (tab, texto) => h('button', { type: 'button', clase: 'mini',
+    onclick: () => irAAjustesDelVideoPublicar(f, tab) }, texto);
   const faltaAjuste = (f.redes || []).filter(r => ((f.formato_redes || {})[r] || {}).falta);
   if (faltaAjuste.length) {
     redes.appendChild(h('div', { clase: 'caja-aviso fila' },
       h('span', { clase: 'crece' }, faltaAjuste.map(r => f.formato_redes[r].falta).join(' · ')),
-      h('button', { clase: 'mini', onclick: () => irASeccionPublicar('cuentas') }, 'Cuentas y ajustes')));
+      aAjustes('redes', 'Ajustes ›')));
   }
   if (redesVisiblesPublicar(f).length <= REDES_CLASICAS_PUB.length) {
     redes.appendChild(h('div', { clase: 'meta' }, 'LinkedIn, X, Threads, Pinterest, Bluesky, Discord, Telegram, '
-      + 'Mastodon y Google Business se añaden en Cuentas y ajustes → Redes de este proyecto.'));
+      + 'Mastodon y Google Business se añaden en ',
+    h('a', { href: '#', clase: 'enlace-ajustes-publicar', onclick: ev => { ev.preventDefault(); irAAjustesDelVideoPublicar(f, 'redes'); } },
+      'Ajustes → Redes de este proyecto'), '.'));
   }
-  // las cuentas, si ya se miraron: una red sin cuenta no se deja enviar
   const sinCuenta = (f.ajustes || {}).cuentas_vistas
     ? (f.redes || []).filter(r => r in (f.cuentas || {})
       && (!(f.cuentas || {})[r] || (f.cuentas[r] || {}).reconectar)) : [];
   if (sinCuenta.length) {
     redes.appendChild(h('div', { clase: 'caja-aviso fila' },
       h('span', { clase: 'crece' }, `${sinCuenta.map(r => NOMBRES_RED[r]).join(', ')}: sin cuenta conectada en `
-        + 'Upload-Post. Conéctala desde Cuentas y ajustes, o quítala de las redes.'),
-      h('button', { clase: 'mini', onclick: () => irASeccionPublicar('cuentas') }, 'Cuentas y ajustes')));
+        + 'Upload-Post. Conéctala desde Ajustes → Conexión, o quítala de las redes.'),
+      aAjustes('conexion', 'Ajustes ›')));
   }
-  redes.appendChild(h('div', { clase: 'fila' },
-    h('button', { clase: 'primario mini', disabled: f.escribiendo || !(f.redes || []).length,
-      onclick: () => escribirTextosPublicar(f.redes || []) },
-    f.escribiendo ? 'Claude está escribiendo…' : 'Que Claude escriba los textos'),
-    h('span', { clase: 'meta' }, 'Desde el encargo, el guion final y la duración real, con las reglas de cada red.'),
-    h('span', { clase: 'crece' }),
-    h('a', { clase: 'boton-enlace mini', href: API.archivo(f.pid, f.mp4), download: `${f.pid}.mp4` }, 'Descargar MP4')));
-  redes.appendChild(estadoTextosPublicar(f));
   caja.appendChild(redes);
-
-  // LOS TEXTOS POR RED, con la pastilla de guardado fija encima
-  if ((f.redes || []).length) caja.appendChild(h('div', { clase: 'fila fila-guardado-publicar' }, pastillaGuardadoPublicar()));
-  (f.redes || []).forEach(r => caja.appendChild(bloqueTextoRed(r)));
-
-  // EL SEO DEL VÍDEO: palabra clave, «Optimizar SEO» y su propuesta
-  if ((f.redes || []).length) caja.appendChild(bloqueSeoVideo());
-
-  // LA PORTADA
-  if ((f.redes || []).length && f.mp4) caja.appendChild(bloquePortadaPublicar());
-
-  // CUÁNDO
-  if ((f.redes || []).length) caja.appendChild(bloqueCuandoPublicar());
-
-  // LOS ENVÍOS
-  caja.appendChild(bloqueEnviosFicha());
   return caja;
+}
+
+/* Publicar → Ajustes, con el proyecto de este vídeo y su pestaña abiertos. */
+function irAAjustesDelVideoPublicar(f, tab) {
+  PUB.ajSel = f.cliente || '_sin';
+  PUB.ajTab = tab || 'conexion';
+  irASeccionPublicar('cuentas');
+}
+
+/* 2 · TEXTOS: «Que Claude escriba los textos» arriba y un texto por red en
+   pestañas (✓/⚠ y su nota SEO), cada una con sus campos y «Así sale». */
+function pasoTextosPublicar(f) {
+  const redes = f.redes || [];
+  const caja = h('div', { clase: 'paso-textos-publicar' },
+    cabPasoPublicar('Textos', 'Un texto por red. Se guarda solo al escribir.', redes.length ? pastillaGuardadoPublicar() : null));
+  caja.appendChild(h('div', { clase: 'caja-info fila escribir-textos-publicar' },
+    h('span', { clase: 'crece' }, h('b', {}, 'Que Claude escriba los textos'),
+      ' — desde el encargo, el guion final y la duración real, con las reglas de cada red. Va con tu suscripción de Claude.'),
+    h('button', { type: 'button', clase: 'primario mini', disabled: f.escribiendo || !redes.length,
+      onclick: () => escribirTextosPublicar(redes) },
+    f.escribiendo ? 'Claude está escribiendo…' : 'Que Claude escriba los textos')));
+  caja.appendChild(estadoTextosPublicar(f));
+  if (!redes.length) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Elige antes alguna red en «Redes».'));
+    return caja;
+  }
+  if (!redes.includes(PUB.redFicha)) PUB.redFicha = redes[0];
+  const notas = (f.seo || {}).notas || {};
+  const tabs = h('nav', { clase: 'pestanas-crear pestanas-redes-publicar', role: 'tablist', 'aria-label': 'Texto de cada red' });
+  redes.forEach(r => {
+    const escrito = String(textosDeFicha(r).descripcion || '').trim();
+    const nota = (notas[r] || {}).nota;
+    tabs.appendChild(h('button', { type: 'button', role: 'tab', datos: { red: r },
+      clase: `pestana-crear${r === PUB.redFicha ? ' activa' : ''}`, 'aria-selected': r === PUB.redFicha ? 'true' : 'false',
+      onclick: () => { if (r === PUB.redFicha) return; PUB.redFicha = r; pintarModulo(); } },
+    `${escrito ? '✓' : '⚠'} ${NOMBRES_RED[r]}`,
+    typeof nota === 'number' ? h('span', { clase: `pastilla ${nota >= 80 ? 'ok' : nota >= 50 ? 'aviso' : 'error'}` }, `SEO ${nota}`) : null));
+  });
+  caja.appendChild(tabs);
+  caja.appendChild(bloqueTextoRed(PUB.redFicha));
+  return caja;
+}
+
+/* 3 · SEO: la palabra clave del vídeo, «Optimizar SEO con Claude» y su
+   propuesta, y la nota de cada red, juntas. */
+function pasoSeoPublicar(f) {
+  const caja = h('div', { clase: 'paso-seo-publicar' },
+    cabPasoPublicar('SEO', 'Lo que hace que este vídeo se encuentre: su palabra clave, la revisión de Claude y la nota de cada red, juntas.',
+      h('button', { type: 'button', clase: 'mini fantasma', onclick: () => irAAjustesDelVideoPublicar(f, 'seo') }, 'SEO de este proyecto ›')));
+  if (!(f.redes || []).length) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'Elige antes alguna red en «Redes».'));
+    return caja;
+  }
+  caja.appendChild(bloqueSeoVideo());  // lo encaja aquí rediseno-publicar; seo-real/seo-real-3 lo cambian por dentro
+  caja.appendChild(h('h3', { clase: 'titulo-notas-seo' }, 'La nota de cada red'));
+  const rejilla = h('div', { clase: 'notas-seo-publicar' });
+  (f.redes || []).forEach(r => rejilla.appendChild(h('section', { clase: 'nota-de-red-publicar', datos: { red: r } },
+    h('b', {}, NOMBRES_RED[r]),
+    seoDeRedPublicar(r))));  // lo encaja aquí rediseno-publicar; seo-real/seo-real-3 lo cambian por dentro
+  caja.appendChild(rejilla);
+  return caja;
+}
+
+/* 4 · PORTADA: el bloque de siempre; «Diseñar portada» abre el editor de hoy. */
+function pasoPortadaPublicar(f) {
+  const caja = h('div', { clase: 'paso-portada-publicar' },
+    cabPasoPublicar('Portada', 'Un fotograma del vídeo, una imagen tuya o una portada diseñada. Sin elegir nada, cada red pone la suya.'));
+  if (!(f.redes || []).length || !f.mp4) {
+    caja.appendChild(h('div', { clase: 'meta' }, 'La portada se elige con un vídeo montado y alguna red marcada.'));
+    return caja;
+  }
+  caja.appendChild(bloquePortadaPublicar());  // lo encaja aquí rediseno-publicar; portadas-2 lo cambia por dentro
+  return caja;
+}
+
+/* 5 · CUÁNDO: tres tarjetas (programar, ahora, a mano). El botón de abajo hace
+   lo que se elige aquí; nada sale sin confirmarlo. */
+const MODOS_ENVIO_PUBLICAR = [['programar', 'Programar', 'el día y la hora que digas (hora de Lima)'],
+  ['ahora', 'Publicar ahora', 'se sube en cuanto confirmes'],
+  ['mano', 'Solo a mano', 'copias, descargas y lo subes tú']];
+
+function pasoCuandoPublicar(f) {
+  const caja = h('div', { clase: 'paso-cuando-publicar cuando-publicar' },
+    cabPasoPublicar('Cuándo', 'El botón de abajo hace lo que elijas aquí. Nada sale sin confirmarlo.'));
+  const elegido = PUB.modoEnvio || 'programar';
+  caja.appendChild(h('div', { clase: 'opciones-modo-publicar', role: 'radiogroup', 'aria-label': 'Cuándo' },
+    ...MODOS_ENVIO_PUBLICAR.map(([id, texto, ayuda]) => h('button', {
+      type: 'button', role: 'radio', clase: 'opcion-modo-publicar', datos: { modo: id },
+      'aria-checked': elegido === id ? 'true' : 'false',
+      onclick: () => { if (PUB.modoEnvio === id) return; PUB.modoEnvio = id; pintarModulo(); },
+    }, h('b', {}, texto), h('span', { clase: 'meta' }, ayuda)))));
+  if (elegido !== 'mano' && !(f.ajustes || {}).perfil) {
+    caja.appendChild(h('div', { clase: 'caja-aviso fila' },
+      h('span', { clase: 'crece' }, 'Este proyecto no tiene perfil de Upload-Post todavía.'),
+      h('button', { type: 'button', clase: 'mini', onclick: () => irAAjustesDelVideoPublicar(f, 'conexion') }, 'Ajustes ›')));
+  }
+  if (elegido === 'programar') {
+    if (!PUB.cuandoEnvio) PUB.cuandoEnvio = f.hora_sugerida;
+    caja.appendChild(h('div', { clase: 'bloque' },
+      h('div', { clase: 'fila' },
+        h('label', { clase: 'etiqueta-campo' }, 'Día y hora',
+          h('input', { type: 'datetime-local', value: PUB.cuandoEnvio, datos: { foco: 'cuando' },
+            onchange: ev => { PUB.cuandoEnvio = ev.target.value; repintarPublicarSinPisar(); } })),
+        h('span', { clase: 'meta' }, 'hora de Lima')),
+      sugerenciasCuandoPublicar(f)));
+  } else if (elegido === 'ahora') {
+    caja.appendChild(h('div', { clase: 'meta' }, '«Publicar ahora ›» lo sube en cuanto confirmes. Una vez publicado no se puede deshacer desde aquí.'));
+  } else {
+    const fila = h('div', { clase: 'fila' });
+    (f.redes || []).forEach(r => fila.appendChild(h('button', { type: 'button', clase: 'mini',
+      onclick: () => marcarAManoPublicar(r) }, `Ya lo subí a ${CORTOS_RED[r]}`)));
+    caja.appendChild(h('div', { clase: 'bloque a-mano-publicar' },
+      h('div', { clase: 'meta' }, 'Copia el texto de cada red, descarga el MP4 y súbelo tú. Después, márcalo como subido para que quede en el historial.'),
+      fila));
+  }
+  return caja;
+}
+
+/* 6 · ENVÍOS: lo mandado de este vídeo, red por red, con sus cifras. */
+function pasoEnviosPublicar() {
+  return h('div', { clase: 'paso-envios-publicar' },
+    cabPasoPublicar('Envíos', 'Lo que se ha mandado de este vídeo, red por red, con sus cifras.'),
+    bloqueEnviosFicha());
+}
+
+/* LA BARRA DE ACCIÓN de la ficha (la de Crear): el estado o el motivo, el plan
+   y el botón de lo elegido en «Cuándo». */
+function barraFichaPublicar(f) {
+  const modo = PUB.modoEnvio || 'programar';
+  if (modo === 'programar' && !PUB.cuandoEnvio) PUB.cuandoEnvio = f.hora_sugerida;
+  const redes = redesDeLaFichaPublicar(f);
+  const motivo = modo === 'mano' ? (redes.length ? '' : 'Elige al menos una red en la que se pueda publicar este vídeo.')
+    : motivoNoPublicar(f);
+  const texto = modo === 'mano' ? 'Ya lo subí… ›' : modo === 'ahora' ? 'Publicar ahora ›'
+    : `Programar para ${cuandoLegible(PUB.cuandoEnvio)} ›`;
+  const perfil = (f.ajustes || {}).perfil;
+  const plan = `${plural(redes.length, 'red', 'redes')} · ${modo === 'mano' ? 'sin Upload-Post'
+    : `${plural(subidasDeEnvioPublicar(redes), 'subida', 'subidas')} a Upload-Post · perfil ${perfil || '—'}`}`;
+  const principal = botonDeBarra(h('button', { type: 'button', onclick: () => {
+    if (modo === 'mano') {
+      if (pasoFichaPublicar(f) !== 'cuando') irAPasoFichaPublicar('cuando');
+      toast('Marca en qué red lo subiste: «Ya lo subí a …»');
+      return;
+    }
+    confirmarEnvioPublicar(modo);
+  } }, texto), { disabled: PUB.enviando || PUB.preguntando || !!motivo, title: motivo || '' });
+  const esperar = modo === 'mano' ? null : botonDeBarra(h('button', { type: 'button',
+    onclick: () => dejarPendientePublicar(modo) }, 'Dejar esperando mi OK'),
+  { secundario: true, disabled: PUB.enviando || PUB.preguntando || !redes.length,
+    title: 'Lo deja preparado sin enviarlo: saldrá en «Te necesitan» hasta que des el OK' });
+  const barra = barraDeAccion({
+    clase: 'barra-publicar',
+    estado: motivo ? { e: 'aviso', texto: motivo }
+      : { e: 'hecho', texto: modo === 'mano' ? 'Todo listo para subirlo a mano' : 'Todo listo para enviar' },
+    plan, botones: [esperar, principal],
+  });
+  /* «⋯» en el móvil: la barra de Crear se repinta por su cuenta (`repintarBarra`);
+     esta se abre y se cierra en su sitio. */
+  const alternar = () => {
+    const abierta = !barra.classList.contains('abierta');
+    barra.classList.toggle('abierta', abierta);
+    const mas = barra.querySelector('.boton-mas-barra');
+    if (mas) mas.setAttribute('aria-expanded', abierta ? 'true' : 'false');
+  };
+  [barra.querySelector('.boton-mas-barra'), barra.querySelector('.dentro > .estado')].forEach(viejo => {
+    if (!viejo) return;
+    const nuevo = viejo.cloneNode(true);
+    nuevo.addEventListener('click', () => { if (viejo.classList.contains('estado') && !esMovilCrear()) return; alternar(); });
+    viejo.replaceWith(nuevo);
+  });
+  barra.classList.remove('abierta');
+  return barra;
 }
 
 /* LOS EMOJIS (rama `textos-emojis`, 20-10): el nivel del proyecto (Ninguno ·
@@ -25903,49 +27550,54 @@ function avisoEmojisPublicar(red, campo) {
     + `(${dato.hay} de ${dato.minimo} como mínimo): pulsa «✨ Más emojis».`);
 }
 
+/* EL TEXTO DE UNA RED, en su pestaña del paso Textos: los campos a la
+   izquierda y, a la derecha, «Así sale» en un marco de teléfono (antes un
+   plegable al final). La nota SEO, el primer comentario y los ganchos son
+   `seoDeRedPublicar` (del bloque PUBLICAR · SEO), encajado aquí tal cual. */
 function bloqueTextoRed(red) {
   const f = PUB.ficha;
   const t = textosDeFicha(red);
   const compuesto = (f.compuestos || {})[red] || {};
   const b = h('div', { clase: 'bloque texto-red', datos: { red } });
-  b.appendChild(h('div', { clase: 'fila' }, h('h3', {}, NOMBRES_RED[red]),
+  const campos = h('div', { clase: 'campos-texto-red' });
+  campos.appendChild(h('div', { clase: 'fila' }, h('h3', {}, NOMBRES_RED[red]),
     h('span', { clase: 'crece' }),
-    h('button', { clase: 'mini', title: 'Copiar el texto tal como sale en la red',
+    h('button', { type: 'button', clase: 'mini', title: 'Copiar el texto tal como sale en la red',
       onclick: () => (String(textosDeFicha(red).descripcion || '').trim()
         ? copiarTexto(compuesto.texto || '') : toast('Todavía no hay texto que copiar en esta red', true)) }, 'Copiar texto'),
-    compuesto.titulo ? h('button', { clase: 'mini', onclick: () => copiarTexto(compuesto.titulo) }, 'Copiar título') : null,
-    h('button', { clase: 'mini fantasma', title: 'Que Claude reescriba solo esta red',
+    compuesto.titulo ? h('button', { type: 'button', clase: 'mini', onclick: () => copiarTexto(compuesto.titulo) }, 'Copiar título') : null,
+    h('button', { type: 'button', clase: 'mini fantasma', title: 'Que Claude reescriba solo esta red',
       disabled: f.escribiendo, onclick: () => escribirTextosPublicar([red]) }, 'Reescribir')));
   const campoTexto = () => document.querySelector(`.texto-red[data-red="${red}"] textarea`);
-  b.appendChild(h('div', { clase: 'fila guia-y-revisar' },
+  campos.appendChild(h('div', { clase: 'fila guia-y-revisar' },
     botonGuia(`texto_${red}`, campoTexto),
     botonRevisarPublicar(`texto_${red}`, f.pid, campoTexto)));
   const formato = (f.formato_redes || {})[red] || {};
   const maxTitulo = formato.titulo || (red === 'youtube' ? 100 : red === 'facebook' ? 255 : 0);
   if (maxTitulo) {
     const largo = (t.titulo || '').length;
-    b.appendChild(h('div', { clase: 'fila fila-campo-emojis' }, h('label', { clase: 'etiqueta-campo crece' },
+    campos.appendChild(h('div', { clase: 'fila fila-campo-emojis' }, h('label', { clase: 'etiqueta-campo crece' },
       red === 'youtube' ? `Título (${largo}/70: más largo se corta en el móvil)`
         : red === 'facebook' ? 'Título' : `Título (${largo}/${maxTitulo})`), botonMasEmojisPublicar(red, 'titulo')));
-    b.appendChild(h('input', { type: 'text', value: t.titulo || '', maxlength: maxTitulo,
+    campos.appendChild(h('input', { type: 'text', value: t.titulo || '', maxlength: maxTitulo, 'aria-label': `Título de ${NOMBRES_RED[red]}`,
       datos: { foco: `${red}-titulo` }, oninput: ev => editarTextoPublicar(red, 'titulo', ev.target.value) }));
     const avisoTitulo = avisoEmojisPublicar(red, 'titulo');
-    if (avisoTitulo) b.appendChild(avisoTitulo);
+    if (avisoTitulo) campos.appendChild(avisoTitulo);
   }
-  b.appendChild(h('div', { clase: 'fila fila-campo-emojis' }, h('label', { clase: 'etiqueta-campo crece' },
+  campos.appendChild(h('div', { clase: 'fila fila-campo-emojis' }, h('label', { clase: 'etiqueta-campo crece' },
     formato.limite && formato.limite < 1000 ? `Texto (hasta ${formato.limite} caracteres con todo)` : 'Texto'),
   botonMasEmojisPublicar(red, 'descripcion')));
   if (!maxTitulo && !['discord', 'telegram'].includes(red)) {
-    b.appendChild(h('div', { clase: 'meta' }, `${NOMBRES_RED[red]} no tiene título aparte: la PRIMERA LÍNEA del texto `
+    campos.appendChild(h('div', { clase: 'meta' }, `${NOMBRES_RED[red]} no tiene título aparte: la PRIMERA LÍNEA del texto `
       + `es lo que se ve sin pulsar «más», así que hace de título.`));
   }
-  b.appendChild(h('textarea', { rows: 4, value: t.descripcion || '', datos: { foco: `${red}-descripcion` },
-    oninput: ev => editarTextoPublicar(red, 'descripcion', ev.target.value) }));
+  campos.appendChild(h('textarea', { rows: 5, value: t.descripcion || '', 'aria-label': `Texto de ${NOMBRES_RED[red]}`,
+    datos: { foco: `${red}-descripcion` }, oninput: ev => editarTextoPublicar(red, 'descripcion', ev.target.value) }));
   const avisoTexto = avisoEmojisPublicar(red, 'descripcion');
-  if (avisoTexto) b.appendChild(avisoTexto);
-  b.appendChild(panelRevisionPublicar(`texto_${red}`, f.pid, campoTexto));
+  if (avisoTexto) campos.appendChild(avisoTexto);
+  campos.appendChild(panelRevisionPublicar(`texto_${red}`, f.pid, campoTexto));
   if (formato.alt) {
-    b.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Texto alternativo (lo que se ve en el vídeo, para quien no puede verlo)',
+    campos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Texto alternativo (lo que se ve en el vídeo, para quien no puede verlo)',
       h('input', { type: 'text', value: t.alt || '', maxlength: formato.alt, datos: { foco: `${red}-alt` },
         oninput: ev => editarTextoPublicar(red, 'alt', ev.target.value) })));
   }
@@ -25956,17 +27608,25 @@ function bloqueTextoRed(red) {
   pie.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Hashtags',
     h('input', { type: 'text', value: (t.hashtags || []).map(x => `#${x}`).join(' '), datos: { foco: `${red}-hashtags` },
       oninput: ev => editarTextoPublicar(red, 'hashtags', ev.target.value) })));
-  b.appendChild(pie);
-  b.appendChild(seoDeRedPublicar(red));
-  b.appendChild(ortografiaDeRedPublicar(red));
+  campos.appendChild(pie);
+  campos.appendChild(seoDeRedPublicar(red));  // lo encaja aquí rediseno-publicar; seo-real/seo-real-3 lo cambian por dentro
+  campos.appendChild(ortografiaDeRedPublicar(red));
   if (red === 'youtube' && (f.capitulos || []).length) {
-    b.appendChild(h('div', { clase: 'meta' }, 'Capítulos: '
+    campos.appendChild(h('div', { clase: 'meta' }, 'Capítulos: '
       + f.capitulos.map(c => `${mmss(c.t)} ${c.titulo}`).join(' · ')));
   }
-  b.appendChild(h('details', { clase: 'asi-sale' },
-    h('summary', {}, `Así sale (${(compuesto.texto || '').length} caracteres)`),
-    h('pre', { clase: 'texto-compuesto' }, compuesto.texto || '—')));
-  (compuesto.avisos || []).forEach(a => b.appendChild(h('div', { clase: 'meta aviso-red' }, `⚠ ${a}`)));
+  (compuesto.avisos || []).forEach(a => campos.appendChild(h('div', { clase: 'meta aviso-red' }, `⚠ ${a}`)));
+  // «ASÍ SALE», en un marco de teléfono con la portada: lo que se manda, compuesto
+  const pantalla = h('div', { clase: 'pantalla-telefono' },
+    miniaturaVideoPublicar((((colaParaAvisosPublicar() || {}).listos || []).find(v => v.pid === f.pid) || {}).estilo,
+      f.formato === 'vertical'),
+    h('span', { clase: 'etiqueta-telefono' }, `Así sale en ${CORTOS_RED[red] || red} · ${(compuesto.texto || '').length} caracteres`),
+    compuesto.titulo ? h('b', { clase: 'titulo-telefono' }, compuesto.titulo) : null,
+    h('pre', { clase: 'texto-compuesto texto-telefono' }, compuesto.texto || '—'));
+  const telefono = h('aside', { clase: 'asi-sale-telefono', 'aria-label': `Así sale en ${NOMBRES_RED[red]}` },
+    h('div', { clase: 'marco-telefono' }, pantalla));
+  b.appendChild(campos);
+  b.appendChild(telefono);
   return b;
 }
 
@@ -25989,9 +27649,9 @@ function motivoNoPublicar(f) {
   if ((f.ajustes || {}).cuentas_vistas) {
     const sin = redes.filter(r => !(f.cuentas || {})[r]);
     if (sin.length) return `${sin.map(r => NOMBRES_RED[r]).join(', ')} no tiene${sin.length > 1 ? 'n' : ''} cuenta conectada `
-      + 'en Upload-Post: quítala o conéctala en Cuentas y ajustes.';
+      + 'en Upload-Post: quítala o conéctala en Ajustes → Conexión.';
     const re = redes.filter(r => ((f.cuentas || {})[r] || {}).reconectar);
-    if (re.length) return `Hay que volver a conectar ${re.map(r => NOMBRES_RED[r]).join(', ')} (Cuentas y ajustes → Conectar).`;
+    if (re.length) return `Hay que volver a conectar ${re.map(r => NOMBRES_RED[r]).join(', ')} (Ajustes → Conexión → Conectar).`;
   }
   return '';
 }
@@ -26158,54 +27818,45 @@ async function descargarPortadaPublicar(pid, sello) {
   } catch (e) { toast(`no se ha podido descargar la portada: ${e.message}`, true); }
 }
 
-function bloqueCuandoPublicar() {
-  const f = PUB.ficha;
-  const b = h('div', { clase: 'bloque cuando-publicar' }, h('h3', {}, 'Cuándo'));
-  const elegido = PUB.modoEnvio || 'programar';
-  const opciones = h('div', { clase: 'fila' });
-  [['ahora', 'Publicar ahora'], ['programar', 'Programar'], ['mano', 'Solo a mano']].forEach(([id, texto]) =>
-    opciones.appendChild(h('label', { clase: 'casilla-red' },
-      h('input', { type: 'radio', name: 'modo-envio', checked: elegido === id,
-        onchange: () => { PUB.modoEnvio = id; pintarModulo(); } }), ` ${texto}`)));
-  b.appendChild(opciones);
-  if (elegido === 'programar') {
-    if (!PUB.cuandoEnvio) PUB.cuandoEnvio = f.hora_sugerida;
-    b.appendChild(h('div', { clase: 'fila' },
-      h('input', { type: 'datetime-local', value: PUB.cuandoEnvio, datos: { foco: 'cuando' },
-        onchange: ev => { PUB.cuandoEnvio = ev.target.value; } }),
-      h('span', { clase: 'meta' }, 'hora de Lima')));
-    b.appendChild(sugerenciasCuandoPublicar(f));
-  }
-  if (elegido === 'mano') {
-    b.appendChild(h('div', { clase: 'meta' },
-      'Copia el texto de cada red, descarga el MP4 y súbelo tú. Después, márcalo como subido para que quede en el historial.'));
-    const fila = h('div', { clase: 'fila' });
-    (f.redes || []).forEach(r => fila.appendChild(h('button', { clase: 'mini',
-      onclick: () => marcarAManoPublicar(r) }, `Ya lo subí a ${CORTOS_RED[r]}`)));
-    b.appendChild(fila);
-    return b;
-  }
-  const perfil = (f.ajustes || {}).perfil;
-  if (!perfil) {
-    b.appendChild(h('div', { clase: 'caja-aviso fila' },
-      h('span', { clase: 'crece' }, 'Este proyecto no tiene perfil de Upload-Post todavía.'),
-      h('button', { clase: 'mini', onclick: () => irASeccionPublicar('cuentas') }, 'Cuentas y ajustes')));
-  }
-  const motivo = motivoNoPublicar(f);
-  b.appendChild(h('div', { clase: 'fila' },
-    h('button', { clase: 'primario', disabled: PUB.enviando || !!motivo, title: motivo || '',
-      onclick: () => confirmarEnvioPublicar(elegido) },
-    elegido === 'ahora' ? 'Publicar ahora…' : 'Programar…'),
-    motivo ? h('span', { clase: 'meta motivo-no-publicar' }, motivo) : null,
-    h('button', { clase: 'mini fantasma', disabled: PUB.enviando,
-      title: 'Lo deja preparado sin enviarlo: saldrá en «Te necesitan» hasta que des el OK',
-      onclick: () => dejarPendientePublicar(elegido) }, 'Dejar esperando mi OK')));
-  return b;
-}
-
 const VIVOS_PUBLICAR = ['enviando', 'programado', 'publicando', 'publicado', 'comprobar', 'a_mano'];
 
+/* LAS PREGUNTAS DE PUBLICAR, EN UN PANEL DE LA CASA (rediseno-publicar): las
+   MISMAS frases que los confirm() del navegador de antes, con botones que dicen
+   lo que hacen («Programar», «Enviar solo a TikTok», «No enviar nada»).
+   Devuelve true si se acepta. */
+async function preguntarPublicar(texto, op) {
+  const o = op || {};
+  /* El foco y «una pregunta cada vez» los pone `dialogo` (de main, 22-10);
+     aquí, encima, el cerrojo de Publicar (`conCerrojoPublicar`) apaga la barra
+     mientras se pregunta o se manda. */
+  const pregunta = dialogo({ titulo: o.titulo || 'Publicar', texto: h('div', { clase: 'texto-pregunta-publicar' }, texto),
+    aceptar: o.aceptar || 'Aceptar', cancelar: o.cancelar || 'Cancelar', peligro: !!o.peligro });
+  return !!(await pregunta);
+}
+
+/* UNA COSA A LA VEZ EN PUBLICAR (revisión de rediseno-publicar): lo que envía,
+   publica o gasta (programar, publicar ahora, dejar esperando, dar el OK,
+   reintentar, cancelar, apuntar a mano, pedir los textos, las cifras) no se
+   puede lanzar otra vez mientras pregunta o manda: un segundo clic o un Enter
+   no abre otro panel ni manda otro envío. Los botones de la barra se apagan
+   mientras tanto (`PUB.preguntando`). */
+async function conCerrojoPublicar(hacer) {
+  if (PUB.preguntando) return undefined;
+  PUB.preguntando = true;
+  if (MODULOS.actual === 'publicar') repintarPublicarSinPisar();
+  try {
+    return await hacer();
+  } finally {
+    PUB.preguntando = false;
+    if (MODULOS.actual === 'publicar') repintarPublicarSinPisar();
+  }
+}
+
 async function confirmarEnvioPublicar(modo, repetir) {
+  return conCerrojoPublicar(() => enviarFichaPublicar(modo, repetir));
+}
+
+async function enviarFichaPublicar(modo, repetir) {
   const f = PUB.ficha;
   let redes = (f.redes || []).filter(r => ((f.encaje || {})[r] || {}).nivel !== 'error');
   if (!redes.length) { toast('elige al menos una red', true); return; }
@@ -26219,11 +27870,13 @@ async function confirmarEnvioPublicar(modo, repetir) {
     const faltan = redes.filter(r => !ya.includes(r));
     const nombres = ya.map(r => NOMBRES_RED[r]).join(', ');
     if (faltan.length) {
-      if (!confirm(`Ya está publicado o programado en ${nombres}: ahí no se vuelve a enviar.\n\n`
-        + `Aceptar: enviar solo a ${faltan.map(r => NOMBRES_RED[r]).join(', ')}. Cancelar: no enviar nada.`)) return;
+      if (!(await preguntarPublicar(`Ya está publicado o programado en ${nombres}: ahí no se vuelve a enviar.`,
+        { titulo: 'Ya enviado', aceptar: `Enviar solo a ${faltan.map(r => CORTOS_RED[r]).join(', ')}`,
+          cancelar: 'No enviar nada' }))) return;
       redes = faltan;
     } else {
-      if (!confirm(`Ya está publicado o programado en ${nombres}. ¿Publicarlo OTRA VEZ ahí?`)) return;
+      if (!(await preguntarPublicar(`Ya está publicado o programado en ${nombres}. ¿Publicarlo OTRA VEZ ahí?`,
+        { titulo: 'Ya enviado', aceptar: 'Sí, otra vez', cancelar: 'No' }))) return;
       repetir = true;
     }
   }
@@ -26235,7 +27888,8 @@ async function confirmarEnvioPublicar(modo, repetir) {
     + ` «${f.nombre}» en:\n\n${lineas}\n\nCon el perfil de Upload-Post «${(f.ajustes || {}).perfil}». `
     + 'Una vez publicado no se puede deshacer desde aquí.'
     + avisoSubidasPublicar(redes);
-  if (!confirm(texto)) return;
+  if (!(await preguntarPublicar(texto, { titulo: modo === 'ahora' ? 'Publicar ahora' : 'Programar',
+    aceptar: modo === 'ahora' ? 'Publicar ahora' : 'Programar' }))) return;
   PUB.enviando = true;
   pintarModulo();
   let hecho = false;
@@ -26253,7 +27907,7 @@ async function confirmarEnvioPublicar(modo, repetir) {
   if (hecho) {
     const nombres = redes.map(r => NOMBRES_RED[r]).join(', ');
     cerrarFichaTrasEnvio(f, modo === 'ahora' ? `Enviado a ${nombres}: se está subiendo ✓`
-      : `Programado para ${cuandoLegible(cuando)} en ${nombres} ✓`);
+      : `Programado para ${cuandoLegible(cuando)} en ${nombres} ✓`, cuando);
     return;
   }
   cargarPublicar(true);
@@ -26265,11 +27919,21 @@ async function confirmarEnvioPublicar(modo, repetir) {
    el aviso arriba y un botón para volver a la ficha. Solo si los textos quedaron
    guardados: con un guardado fallido, la ficha se queda abierta y lo escrito
    también. Guardar textos a secas NO cierra: se sigue escribiendo. */
-function cerrarFichaTrasEnvio(f, mensaje) {
+function cerrarFichaTrasEnvio(f, mensaje, cuando) {
   toast(mensaje);
   PUB.avisoCola = { texto: mensaje, pid: f.pid, nombre: f.nombre };
   PUB.modoEnvio = '';
   PUB.cuandoEnvio = '';
+  /* al Calendario, en la semana de ese día (rediseno-publicar) y, en el móvil,
+     con ese día elegido */
+  if (cuando && /^\d{4}-\d\d-\d\d/.test(cuando)) {
+    const dia = new Date(`${cuando.slice(0, 10)}T12:00:00Z`);
+    dia.setUTCDate(dia.getUTCDate() - ((dia.getUTCDay() + 6) % 7));
+    PUB.vistaCal = 'semana';
+    PUB.desde = dia.toISOString().slice(0, 10);
+    PUB.diaMovil = cuando.slice(0, 10);
+  }
+  PUB.diaAbierto = '';
   irASeccionPublicar('cola');
 }
 
@@ -26283,6 +27947,10 @@ function avisoTrasEnvioCola() {
 }
 
 async function dejarPendientePublicar(modo) {
+  return conCerrojoPublicar(() => dejarPendienteFichaPublicar(modo));
+}
+
+async function dejarPendienteFichaPublicar(modo) {
   const f = PUB.ficha;
   const redes = (f.redes || []).filter(r => ((f.encaje || {})[r] || {}).nivel !== 'error');
   if (!redes.length) { toast('elige al menos una red', true); return; }
@@ -26294,7 +27962,7 @@ async function dejarPendientePublicar(modo) {
     });
     if (guardado) {
       cerrarFichaTrasEnvio(f, `Queda esperando tu OK${cuando ? ` para ${cuandoLegible(cuando)}` : ''}`
-        + ` en ${redes.map(r => NOMBRES_RED[r]).join(', ')} ✓ (sale en «Te necesitan»)`);
+        + ` en ${redes.map(r => NOMBRES_RED[r]).join(', ')} ✓ (sale en «Te necesitan»)`, cuando);
       return;
     }
     toast('Queda esperando tu OK');
@@ -26303,25 +27971,39 @@ async function dejarPendientePublicar(modo) {
 }
 
 async function confirmarPendientePublicar(envio) {
-  const pasada = !envio.sin_hora && envio.cuando
-    && envio.cuando.slice(0, 16) <= PUB.ficha.ahora.slice(0, 16);
+  return conCerrojoPublicar(() => darOkEnvioPublicar(envio));
+}
+
+async function darOkEnvioPublicar(envio) {
+  /* también desde «Te necesitan» y el panel del día (rediseno-publicar): con el
+     `pid` del envío y la hora de la cola si no hay ficha abierta */
+  const pid = envio.pid || PUB.pid;
+  const ahora = String((PUB.ficha && PUB.ficha.pid === pid ? PUB.ficha.ahora : '')
+    || (colaParaAvisosPublicar() || {}).ahora || '');
+  const pasada = !envio.sin_hora && envio.cuando && ahora
+    && envio.cuando.slice(0, 16) <= ahora.slice(0, 16);
   const texto = `¿Dar el OK a ${NOMBRES_RED[envio.red]}?\n\n`
     + (envio.sin_hora ? 'Saldrá ahora.'
       : pasada ? `Su hora (${cuandoLegible(envio.cuando)}) ya pasó: saldrá ahora.`
         : `Saldrá ${cuandoLegible(envio.cuando)} (hora de Lima).`);
-  if (!confirm(texto)) return;
+  if (!(await preguntarPublicar(texto, { titulo: 'Dar el OK', aceptar: 'Dar el OK' }))) return;
   try {
-    await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/envios/${envio.id}/confirmar`), {
+    await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/envios/${envio.id}/confirmar`), {
       method: 'POST', cuerpo: pasada ? { confirmado: true, modo: 'ahora' } : { confirmado: true },
     });
     toast('Enviado');
   } catch (e) { toast(e.message, true); }
+  if (!['cola', 'porpublicar'].includes(PUB.seccion)) refrescarAvisosPublicar();
   cargarPublicar(true);
 }
 
 async function reintentarEnvioPublicar(envio) {
-  if (!confirm(`¿Volver a mandar ${NOMBRES_RED[envio.red]}?\n\nVa con la misma clave que la primera vez: `
-    + 'si a Upload-Post ya le llegó, no se publica otra vez.')) return;
+  return conCerrojoPublicar(() => reintentarEnvioFichaPublicar(envio));
+}
+
+async function reintentarEnvioFichaPublicar(envio) {
+  if (!(await preguntarPublicar(`¿Volver a mandar ${NOMBRES_RED[envio.red]}?\n\nVa con la misma clave que la primera vez: `
+    + 'si a Upload-Post ya le llegó, no se publica otra vez.', { titulo: 'Reintentar', aceptar: 'Volver a mandar' }))) return;
   try {
     await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/envios/${envio.id}/reintentar`), { method: 'POST' });
     toast('Reintentando…');
@@ -26330,6 +28012,10 @@ async function reintentarEnvioPublicar(envio) {
 }
 
 async function cancelarEnvioPublicar(envio) {
+  return conCerrojoPublicar(() => quitarOCancelarEnvioPublicar(envio));
+}
+
+async function quitarOCancelarEnvioPublicar(envio) {
   const pid = envio.pid || PUB.pid;
   const quitar = ['fallido', 'comprobar'].includes(envio.estado);
   const pregunta = envio.estado === 'fallido'
@@ -26339,7 +28025,8 @@ async function cancelarEnvioPublicar(envio) {
         + 'volver a publicarlo sin aviso: hazlo solo si allí no está.'
       : `¿Cancelar ${NOMBRES_RED[envio.red]}${envio.estado === 'programado'
       ? ' (y las redes que iban en su misma subida a Upload-Post)' : ''}?`;
-  if (!confirm(pregunta)) return;
+  if (!(await preguntarPublicar(pregunta, quitar ? { titulo: 'Quitar de la lista', aceptar: 'Quitar de la lista' }
+    : { titulo: 'Cancelar', aceptar: 'Cancelar el envío', cancelar: 'No', peligro: true }))) return;
   try {
     await pedir(rutaPublicar(`/videos/${encodeURIComponent(pid)}/envios/${envio.id}/cancelar`), { method: 'POST' });
     toast(quitar ? 'Quitado de la lista' : 'Cancelado');
@@ -26350,8 +28037,16 @@ async function cancelarEnvioPublicar(envio) {
 }
 
 async function marcarAManoPublicar(red) {
-  const url = prompt(`Enlace del post en ${NOMBRES_RED[red]} (opcional):`, '');
-  if (url === null) return;
+  return conCerrojoPublicar(() => apuntarAManoPublicar(red));
+}
+
+async function apuntarAManoPublicar(red) {
+  // el enlace, en un panel de la casa (antes un prompt() del navegador)
+  const r = await dialogo({ titulo: `Ya lo subí a ${CORTOS_RED[red] || red}`,
+    campos: [{ clave: 'url', etiqueta: `Enlace del post en ${NOMBRES_RED[red]} (opcional):`, pista: 'https://…' }],
+    aceptar: 'Apuntarlo' });
+  if (!r) return;
+  const url = String(r.url || '').trim();
   try {
     await pedir(rutaPublicar(`/videos/${encodeURIComponent(PUB.pid)}/a-mano`), { method: 'POST', cuerpo: { red, url } });
     toast('Apuntado en el historial');
@@ -26623,14 +28318,18 @@ function autoCambiadaPublicar() {
 }
 
 async function guardarAutoPublicar() {
+  return conCerrojoPublicar(() => guardarAutoConCostePublicar());
+}
+
+async function guardarAutoConCostePublicar() {
   const e = eleccionAutoPublicar();
   let coste = PUB.costeAuto;
   try {
     if (!coste || coste.error) coste = await pedir(rutaPublicar('/metricas-auto/coste'), { method: 'POST', cuerpo: e });
   } catch (err) { toast(err.message, true); return; }
   // la confirmación con lo que gasta va SIEMPRE antes de guardar
-  if (!confirm(`${e.frecuencia === 'apagada' ? 'Apagar las cifras automáticas' : 'Cifras automáticas'}\n\n`
-    + `${coste.texto}\n\n¿Guardar?`)) return;
+  if (!(await preguntarPublicar(`${e.frecuencia === 'apagada' ? 'Apagar las cifras automáticas' : 'Cifras automáticas'}\n\n`
+    + `${coste.texto}\n\n¿Guardar?`, { titulo: 'Cifras automáticas', aceptar: 'Guardar' }))) return;
   try {
     PUB.metricasAuto = await pedir(rutaPublicar('/metricas-auto'), { method: 'PUT', cuerpo: e });
     PUB.eleccionAuto = null;
@@ -26642,10 +28341,15 @@ async function guardarAutoPublicar() {
 }
 
 async function correrAutoPublicar() {
+  return conCerrojoPublicar(() => pedirCifrasAhoraPublicar());
+}
+
+async function pedirCifrasAhoraPublicar() {
   const c = (PUB.metricasAuto || {}).coste || {};
-  if (!confirm('Pedir las cifras ahora, en segundo plano.\n\n'
+  if (!(await preguntarPublicar('Pedir las cifras ahora, en segundo plano.\n\n'
     + `Gasta ${c.consultas_vuelta != null ? c.consultas_vuelta : 'unas'} consulta(s) del cupo de Upload-Post `
-    + `(0 $: van incluidas en su plan) y tarda unos ${Math.max(1, Math.round(c.minutos_vuelta || 1))} min.\n\n¿Seguir?`)) return;
+    + `(0 $: van incluidas en su plan) y tarda unos ${Math.max(1, Math.round(c.minutos_vuelta || 1))} min.\n\n¿Seguir?`,
+  { titulo: 'Pedir las cifras ahora', aceptar: 'Pedirlas' }))) return;
   try {
     await pedir(rutaPublicar('/metricas-auto/ahora'), { method: 'POST' });
     toast('Pidiendo las cifras en segundo plano: puedes seguir con otra cosa');
@@ -26732,27 +28436,215 @@ function lineaMetricasAutoPublicar() {
       ? 'Cifras automáticas apagadas: se piden al pulsar «Actualizar».'
       : `Cifras automáticas: ${textoUltimaAutoPublicar(m.ultima)}`
         + `${m.proxima ? ` · próxima ${fechaCorta(m.proxima).slice(0, 16)}` : ''}`),
-    h('button', { clase: 'mini fantasma', onclick: () => irASeccionPublicar('cuentas') },
-      m.frecuencia === 'apagada' ? 'Encenderlas' : 'Cambiar'));
+    h('button', { type: 'button', clase: 'mini fantasma', onclick: () => { PUB.ajSel = 'general'; irASeccionPublicar('cuentas'); } },
+      m.frecuencia === 'apagada' ? 'Encenderlas ›' : 'Cambiar ›'));
 }
 
-function seccionCuentasPublicar() {
+/* ------------------------------------------------- PUBLICAR · AJUSTES
+ *
+ * ANTES «CUENTAS Y AJUSTES»: todos los proyectos seguidos, cada uno con tres
+ * plegables (3.000 px). Ahora, como un panel de ajustes: a la izquierda un
+ * carril con «General» (Upload-Post y las cifras automáticas, que son de todo
+ * el Studio) y cada proyecto con su estado; a la derecha, el elegido en
+ * pestañas: Conexión · Redes · Textos · SEO. Todo se guarda al cambiar, como
+ * antes, y por las mismas rutas.
+ */
+const PESTANAS_AJUSTES_PUBLICAR = [['conexion', 'Conexión'], ['redes', 'Redes'], ['textos', 'Textos'], ['seo', 'SEO']];
+
+function estadoProyectoAjustesPublicar(p) {
+  const a = p.ajustes || {};
+  if (!a.perfil) return { e: p.id === '_sin' ? 'pend' : 'aviso', txt: 'sin perfil de Upload-Post' };
+  const n = Object.values(a.cuentas || {}).filter(Boolean).length;
+  return { e: n ? 'hecho' : 'aviso',
+    txt: `${n ? plural(n, 'cuenta', 'cuentas') : 'sin cuentas'} · ${a.palabra_clave ? `«${a.palabra_clave}»` : 'sin palabra clave'}` };
+}
+
+function seccionAjustesPublicar() {
   const datos = PUB.proyectos || {};
-  const caja = h('div', { clase: 'cuentas-publicar' });
+  const proyectos = datos.proyectos || [];
+  if (PUB.ajSel !== 'general' && !proyectos.some(p => p.id === PUB.ajSel)) PUB.ajSel = 'general';
+  const sel = PUB.ajSel || 'general';
+  const caja = h('div', { clase: 'cuentas-publicar ajustes-publicar' });
   const clave = datos.clave || {};
-  caja.appendChild(h('div', { clase: 'bloque' },
-    h('h3', {}, 'Upload-Post'),
-    h('div', { clase: 'fila' },
-      h('span', { clase: `pastilla ${clave.puesta ? 'ok' : 'aviso'}` },
-        clave.simulado ? 'simulado' : clave.puesta ? `clave puesta ${clave.cola || ''}` : 'sin clave'),
-      clave.origen && !clave.simulado ? h('span', { clase: 'meta' }, `(de ${clave.origen === 'env' ? 'el .env de secretos'
-        : clave.origen === 'entorno' ? 'el entorno del servicio' : 'Configuración'})`) : null,
-      h('span', { clase: 'crece' }),
-      h('button', { clase: 'mini', disabled: !clave.puesta, onclick: probarClavePublicar }, 'Probar')),
-    clave.puesta ? null : avisoClavePublicar(clave)));
-  caja.appendChild(bloqueMetricasAutoPublicar());
-  (datos.proyectos || []).forEach(p => caja.appendChild(tarjetaProyectoPublicar(p)));
+  const carril = h('aside', { clase: 'carril-crear carril-ajustes-publicar', 'aria-label': 'Ajustes de Publicar' },
+    h('div', { clase: 'carril-titulo' }, 'Ajustes de Publicar', h('span', { clase: 'desliza' }, ' · desliza →')));
+  const fila = h('nav', { clase: 'pasos-carril' });
+  const elegir = id => { if (PUB.ajSel === id) return; PUB.ajSel = id; subirArriba('modulo'); pintarModulo(); };
+  const general = { e: clave.puesta ? 'hecho' : 'aviso', txt: 'Upload-Post y cifras automáticas' };
+  [['general', 'General', general]].concat(proyectos.map(p => [p.id, p.nombre, estadoProyectoAjustesPublicar(p)]))
+    .forEach(([id, nombre, est]) => {
+      const aqui = id === sel;
+      fila.appendChild(h('button', { type: 'button', clase: `paso-carril ${claseEstado(aqui ? 'actual' : est.e)}${aqui ? ' actual' : ''}`,
+        'aria-current': aqui ? 'true' : null, datos: { ajuste: id }, onclick: () => elegir(id) },
+      marcaEstado(aqui ? 'actual' : est.e),
+      h('span', { clase: 'paso-textos' }, h('b', {}, nombre), h('span', { clase: `estado-txt ${claseEstado(est.e)}` }, est.txt))));
+    });
+  carril.appendChild(fila);
+  caja.appendChild(carril);
+  const panel = h('div', { clase: 'panel-ajustes-publicar' });
+  if (sel === 'general') {
+    panel.appendChild(h('div', { clase: 'bloque' },
+      h('h3', {}, 'Upload-Post'),
+      h('div', { clase: 'fila' },
+        h('span', { clase: `pastilla ${clave.puesta ? 'ok' : 'aviso'}` },
+          clave.simulado ? 'simulado' : clave.puesta ? `clave puesta ${clave.cola || ''}` : 'sin clave'),
+        clave.origen && !clave.simulado ? h('span', { clase: 'meta' }, `(de ${clave.origen === 'env' ? 'el .env de secretos'
+          : clave.origen === 'entorno' ? 'el entorno del servicio' : 'Configuración'})`) : null,
+        h('span', { clase: 'crece' }),
+        h('button', { type: 'button', clase: 'mini', disabled: !clave.puesta, onclick: probarClavePublicar }, 'Probar')),
+      h('div', { clase: 'meta' }, 'La clave se pone en Configuración → Publicar en redes (nunca en un chat).')));
+    panel.appendChild(bloqueMetricasAutoPublicar());
+  } else {
+    const p = proyectos.find(x => x.id === sel);
+    const tab = PESTANAS_AJUSTES_PUBLICAR.some(x => x[0] === PUB.ajTab) ? PUB.ajTab : 'conexion';
+    const proyecto = h('div', { clase: 'bloque proyecto-publicar', datos: { proyecto: p.id } },
+      h('div', { clase: 'fila' }, h('h3', { clase: 'crece' }, p.nombre), h('span', { clase: 'pastilla ok' }, '✓ Se guarda al cambiar')));
+    const tabs = h('nav', { clase: 'pestanas-crear pestanas-ajustes-publicar', role: 'tablist', 'aria-label': `Ajustes de ${p.nombre}` });
+    PESTANAS_AJUSTES_PUBLICAR.forEach(([id, texto]) => tabs.appendChild(h('button', {
+      type: 'button', role: 'tab', clase: `pestana-crear${tab === id ? ' activa' : ''}`, datos: { pestana: id },
+      'aria-selected': tab === id ? 'true' : 'false', onclick: () => { if (PUB.ajTab === id) return; PUB.ajTab = id; pintarModulo(); },
+    }, texto)));
+    proyecto.appendChild(tabs);
+    const dentro = h('div', { clase: 'pestana-ajustes-publicar' });
+    if (tab === 'conexion') conexionProyectoPublicar(p, dentro);
+    else if (tab === 'redes') {
+      // las plegables de antes, abiertas: la pestaña ya dice qué son
+      PUB.redesAbiertas = Object.assign(PUB.redesAbiertas || {}, { [p.id]: true });
+      dentro.appendChild(bloqueRedesProyectoPublicar(p));
+      dentro.appendChild(redesDeFabricaPublicar(p));
+    } else if (tab === 'textos') dentro.appendChild(loFijoProyectoPublicar(p));
+    else {
+      PUB.seoAbierto = Object.assign(PUB.seoAbierto || {}, { [p.id]: true });
+      dentro.appendChild(bloqueSeoProyecto(p));  // lo encaja aquí rediseno-publicar; seo-real/seo-real-3 lo cambian por dentro
+    }
+    proyecto.appendChild(dentro);
+    panel.appendChild(proyecto);
+  }
+  caja.appendChild(panel);
   return caja;
+}
+
+/* CONEXIÓN: el perfil de Upload-Post del proyecto y sus cuentas. */
+function conexionProyectoPublicar(p, b) {
+  const a = p.ajustes || {};
+  /* EL PERFIL. Se apunta con «Usar este perfil» o Enter (no al cambiar el
+     valor: guardar con onchange no repintaba y dependía de que cambiara), y
+     el servidor lo ADOPTA si ya existe en Upload-Post (sin mirar mayúsculas)
+     aunque el plan esté lleno. «Crear perfil» manda lo escrito. */
+  PUB.perfilEscrito = PUB.perfilEscrito || {};
+  const escrito = () => {
+    const c = document.querySelector(`input[data-perfil="${p.id}"]`);
+    return (c ? c.value : (PUB.perfilEscrito[p.id] || '')).trim();
+  };
+  const usar = crear => {
+    const valor = escrito() || (crear ? p.perfil_sugerido || '' : '');
+    if (!valor) { toast('Escribe el nombre del perfil o elígelo de la lista', true); return; }
+    delete PUB.perfilEscrito[p.id];
+    accionProyectoPublicar(p.id, 'perfil', { perfil: valor, crear });
+  };
+  const valorCampo = p.id in PUB.perfilEscrito ? PUB.perfilEscrito[p.id] : (a.perfil || '');
+  b.appendChild(h('div', { clase: 'fila fila-perfil' },
+    h('label', { clase: 'etiqueta-campo' }, 'Perfil de Upload-Post',
+      h('input', { type: 'text', value: valorCampo, placeholder: p.perfil_sugerido || '',
+        datos: { perfil: p.id, foco: `perfil-${p.id}` },
+        oninput: ev => { PUB.perfilEscrito[p.id] = ev.target.value; },
+        onkeydown: ev => { if (ev.key === 'Enter') { ev.preventDefault(); usar(false); } } }))));
+  b.appendChild(h('div', { clase: 'fila' },
+    h('button', { type: 'button', clase: 'mini', title: 'Apunta este perfil si ya existe en Upload-Post',
+      onclick: () => usar(false) }, 'Usar este perfil'),
+    a.perfil ? null : h('button', { type: 'button', clase: 'mini', title: 'Lo crea en Upload-Post con el nombre escrito (o el sugerido)',
+      onclick: () => usar(true) }, 'Crear perfil'),
+    h('button', { type: 'button', clase: 'mini', onclick: () => cargarPerfilesCuentaPublicar(p.id) }, 'Elegir de mi cuenta'),
+    a.perfil ? h('button', { type: 'button', clase: 'mini', onclick: () => accionProyectoPublicar(p.id, 'cuentas') }, 'Ver cuentas') : null,
+    a.perfil ? h('button', { type: 'button', clase: 'mini primario', title: 'Abre la página de Upload-Post para conectar o volver a conectar las cuentas de este cliente',
+      onclick: () => accionProyectoPublicar(p.id, 'conectar', { volver_a: location.href }) }, 'Conectar') : null));
+  if ((PUB.perfilNoExiste || {})[p.id]) {
+    b.appendChild(h('div', { clase: 'caja-aviso' },
+      `Upload-Post no tiene ningún perfil «${a.perfil}». Elige uno de los que tienes o pulsa «Crear perfil».`));
+  }
+  const lista = (PUB.perfilesCuenta || {})[p.id];
+  if (lista) b.appendChild(elegirPerfilPublicar(p, lista));
+  if (!a.perfil) {
+    b.appendChild(h('div', { clase: 'meta' }, 'Sin perfil no se puede programar ni publicar desde aquí (sí preparar los textos y subir a mano).'));
+    return;
+  }
+  const cuentas = h('div', { clase: 'fila cuentas-proyecto' });
+  // las redes de este proyecto, y las que tengan cuenta conectada aunque no estén
+  Object.keys(NOMBRES_RED).filter(r => redesVisiblesPublicar(a).includes(r) || (a.cuentas || {})[r]).forEach(r => {
+    const c = (a.cuentas || {})[r];
+    cuentas.appendChild(h('span', { clase: `pastilla ${c ? (c.reconectar ? 'aviso' : 'ok') : 'apagada'}`,
+      title: c ? (c.reconectar ? 'hay que volver a conectarla' : c.nombre) : 'sin conectar' },
+    `${CORTOS_RED[r]}${c ? `: ${recortar(c.nombre, 18)}` : ''}`));
+  });
+  b.appendChild(cuentas);
+}
+
+/* REDES (2/2): las que salen marcadas de fábrica en sus vídeos. */
+function redesDeFabricaPublicar(p) {
+  const a = p.ajustes || {};
+  const guardar = (campo, valor) => guardarAjustePublicar(p.id, { [campo]: valor });
+  const redes = h('div', { clase: 'fila redes-de-fabrica' }, h('span', { clase: 'meta' }, 'Redes marcadas de fábrica:'));
+  redesVisiblesPublicar(a).forEach(r => redes.appendChild(h('label', { clase: 'casilla-red' },
+    h('input', { type: 'checkbox', checked: (a.redes || []).includes(r), onchange: ev => {
+      const lista = new Set(a.redes || []);
+      if (ev.target.checked) lista.add(r); else lista.delete(r);
+      a.redes = Object.keys(NOMBRES_RED).filter(x => lista.has(x));
+      guardar('redes', a.redes);
+    } }), ` ${CORTOS_RED[r]}`)));
+  return redes;
+}
+
+/* TEXTOS (antes «Lo fijo de este proyecto»): hora, YouTube, firma, hashtags
+   fijos, tono con su guía y su «Revisar», página de Facebook, emojis y las dos
+   casillas. */
+function loFijoProyectoPublicar(p) {
+  const a = p.ajustes || {};
+  const guardar = (campo, valor) => guardarAjustePublicar(p.id, { [campo]: valor });
+  const fijos = h('div', { clase: 'ajustes-fijos lo-fijo-publicar' });
+  fijos.appendChild(h('div', { clase: 'fila' },
+    h('label', { clase: 'etiqueta-campo' }, 'Hora por defecto (Lima)',
+      h('input', { type: 'time', value: a.hora || '19:00', onchange: ev => guardar('hora', ev.target.value) })),
+    h('label', { clase: 'etiqueta-campo' }, 'YouTube',
+      h('select', { onchange: ev => guardar('privacidad_youtube', ev.target.value) },
+        ...[['public', 'público'], ['unlisted', 'oculto'], ['private', 'privado']].map(([v, t]) =>
+          h('option', { value: v, selected: a.privacidad_youtube === v }, t))))));
+  fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Firma (va al final de cada texto)',
+    h('input', { type: 'text', value: a.firma || '', onchange: ev => guardar('firma', ev.target.value) })));
+  fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Hashtags fijos',
+    h('input', { type: 'text', value: a.hashtags || '', placeholder: '#marca #ciudad',
+      onchange: ev => guardar('hashtags', ev.target.value) })));
+  /* EL TONO, CON SU GUÍA Y SU «REVISAR», como los campos de Crear. Se guarda
+     al salir del campo y también tras dejar de teclear: «Usar en el campo» y
+     «Aplicar la versión sugerida» escriben con un evento `input`. */
+  let relojTono = null;
+  const campoTono = () => document.querySelector(`textarea[data-tono="${p.id}"]`);
+  fijos.appendChild(h('div', { clase: 'fila guia-y-revisar' },
+    h('span', { clase: 'etiqueta-tono' }, 'Tono de los textos'),
+    h('span', { clase: 'crece' }),
+    botonGuia('tono_redes', campoTono),
+    botonRevisarPublicar('tono_redes', p.id, campoTono)));
+  fijos.appendChild(h('textarea', { rows: 3, value: a.tono || '', datos: { tono: p.id, foco: `tono-${p.id}` },
+    placeholder: 'CÓMO SUENA: de tú, cercano… (pulsa «Guía» para ver la plantilla)',
+    oninput: ev => {
+      clearTimeout(relojTono);
+      const v = ev.target.value;
+      a.tono = v;
+      relojTono = setTimeout(() => guardar('tono', v), 1200);
+    },
+    onchange: ev => { clearTimeout(relojTono); a.tono = ev.target.value; guardar('tono', ev.target.value); } }));
+  fijos.appendChild(panelRevisionPublicar('tono_redes', p.id, campoTono));
+  fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Página de Facebook (solo si hay más de una)',
+    h('input', { type: 'text', value: a.facebook_pagina || '', onchange: ev => guardar('facebook_pagina', ev.target.value) })));
+  fijos.appendChild(ajusteEmojisPublicar(p, a, guardar));
+  const casillas = h('div', { clase: 'fila' });
+  [['marcar_ia', 'Marcar como hecho con IA'],
+    ['avisar_youtube', 'Avisar a los suscriptores de YouTube']]
+    .forEach(([campo, texto]) => casillas.appendChild(h('label', { clase: 'casilla-red' },
+      h('input', { type: 'checkbox', checked: !!a[campo], onchange: ev => guardar(campo, ev.target.checked) }),
+      ` ${texto}`)));
+  casillas.appendChild(h('span', { clase: 'meta' }, 'La confirmación antes de enviar no se puede quitar.'));
+  fijos.appendChild(casillas);
+  return fijos;
 }
 
 /* El desplegable «Elegir un perfil que ya tengo en Upload-Post»: los de la
@@ -26886,119 +28778,6 @@ function avisoSubidasPublicar(redes) {
     + `gasta ${n} subidas del mes de Upload-Post.`;
 }
 
-function tarjetaProyectoPublicar(p) {
-  const a = p.ajustes || {};
-  const b = h('div', { clase: 'bloque proyecto-publicar' }, h('h3', {}, p.nombre));
-  const guardar = (campo, valor) => guardarAjustePublicar(p.id, { [campo]: valor });
-  /* EL PERFIL. Se apunta con «Usar este perfil» o Enter (no al cambiar el
-     valor: guardar con onchange no repintaba y dependía de que cambiara), y
-     el servidor lo ADOPTA si ya existe en Upload-Post (sin mirar mayúsculas)
-     aunque el plan esté lleno. «Crear perfil» manda lo escrito. */
-  PUB.perfilEscrito = PUB.perfilEscrito || {};
-  const escrito = () => {
-    const c = document.querySelector(`input[data-perfil="${p.id}"]`);
-    return (c ? c.value : (PUB.perfilEscrito[p.id] || '')).trim();
-  };
-  const usar = crear => {
-    const valor = escrito() || (crear ? p.perfil_sugerido || '' : '');
-    if (!valor) { toast('Escribe el nombre del perfil o elígelo de la lista', true); return; }
-    delete PUB.perfilEscrito[p.id];
-    accionProyectoPublicar(p.id, 'perfil', { perfil: valor, crear });
-  };
-  const valorCampo = p.id in PUB.perfilEscrito ? PUB.perfilEscrito[p.id] : (a.perfil || '');
-  b.appendChild(h('div', { clase: 'fila fila-perfil' },
-    h('label', { clase: 'etiqueta-campo' }, 'Perfil de Upload-Post',
-      h('input', { type: 'text', value: valorCampo, placeholder: p.perfil_sugerido || '',
-        datos: { perfil: p.id, foco: `perfil-${p.id}` },
-        oninput: ev => { PUB.perfilEscrito[p.id] = ev.target.value; },
-        onkeydown: ev => { if (ev.key === 'Enter') { ev.preventDefault(); usar(false); } } })),
-    h('button', { clase: 'mini', title: 'Apunta este perfil si ya existe en Upload-Post',
-      onclick: () => usar(false) }, 'Usar este perfil'),
-    a.perfil ? null : h('button', { clase: 'mini', title: 'Lo crea en Upload-Post con el nombre escrito (o el sugerido)',
-      onclick: () => usar(true) }, 'Crear perfil'),
-    h('button', { clase: 'mini', onclick: () => cargarPerfilesCuentaPublicar(p.id) }, 'Elegir de mi cuenta'),
-    a.perfil ? h('button', { clase: 'mini', onclick: () => accionProyectoPublicar(p.id, 'cuentas') }, 'Ver cuentas') : null,
-    a.perfil ? h('button', { clase: 'mini primario', title: 'Abre la página de Upload-Post para conectar o volver a conectar las cuentas de este cliente',
-      onclick: () => accionProyectoPublicar(p.id, 'conectar', { volver_a: location.href }) }, 'Conectar') : null));
-  if ((PUB.perfilNoExiste || {})[p.id]) {
-    b.appendChild(h('div', { clase: 'caja-aviso' },
-      `Upload-Post no tiene ningún perfil «${a.perfil}». Elige uno de los que tienes o pulsa «Crear perfil».`));
-  }
-  const lista = (PUB.perfilesCuenta || {})[p.id];
-  if (lista) b.appendChild(elegirPerfilPublicar(p, lista));
-  const cuentas = h('div', { clase: 'fila cuentas-proyecto' });
-  // las redes de este proyecto, y las que tengan cuenta conectada aunque no estén
-  Object.keys(NOMBRES_RED).filter(r => redesVisiblesPublicar(a).includes(r) || (a.cuentas || {})[r]).forEach(r => {
-    const c = (a.cuentas || {})[r];
-    cuentas.appendChild(h('span', { clase: `pastilla ${c ? (c.reconectar ? 'aviso' : 'ok') : 'apagada'}`,
-      title: c ? (c.reconectar ? 'hay que volver a conectarla' : c.nombre) : 'sin conectar' },
-    `${CORTOS_RED[r]}${c ? `: ${recortar(c.nombre, 18)}` : ''}`));
-  });
-  if (a.perfil) b.appendChild(cuentas);
-  // abierto o cerrado, como lo dejaste: el bloque se rehace al repintar
-  PUB.fijosAbiertos = PUB.fijosAbiertos || {};
-  const fijos = h('details', { clase: 'ajustes-fijos', open: !!PUB.fijosAbiertos[p.id],
-    ontoggle: ev => { PUB.fijosAbiertos[p.id] = ev.currentTarget.open; } },
-  h('summary', {}, 'Lo fijo de este proyecto'));
-  fijos.appendChild(h('div', { clase: 'fila' },
-    h('label', { clase: 'etiqueta-campo' }, 'Hora por defecto (Lima)',
-      h('input', { type: 'time', value: a.hora || '19:00', onchange: ev => guardar('hora', ev.target.value) })),
-    h('label', { clase: 'etiqueta-campo' }, 'YouTube',
-      h('select', { onchange: ev => guardar('privacidad_youtube', ev.target.value) },
-        ...[['public', 'público'], ['unlisted', 'oculto'], ['private', 'privado']].map(([v, t]) =>
-          h('option', { value: v, selected: a.privacidad_youtube === v }, t))))));
-  fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Firma (va al final de cada texto)',
-    h('input', { type: 'text', value: a.firma || '', onchange: ev => guardar('firma', ev.target.value) })));
-  fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Hashtags fijos',
-    h('input', { type: 'text', value: a.hashtags || '', placeholder: '#marca #ciudad',
-      onchange: ev => guardar('hashtags', ev.target.value) })));
-  /* EL TONO, CON SU GUÍA Y SU «REVISAR», como los campos de Crear. Se guarda
-     al salir del campo y también tras dejar de teclear: «Usar en el campo» y
-     «Aplicar la versión sugerida» escriben con un evento `input`. */
-  let relojTono = null;
-  const campoTono = () => document.querySelector(`textarea[data-tono="${p.id}"]`);
-  fijos.appendChild(h('div', { clase: 'fila guia-y-revisar' },
-    h('span', { clase: 'etiqueta-tono' }, 'Tono de los textos'),
-    h('span', { clase: 'crece' }),
-    botonGuia('tono_redes', campoTono),
-    botonRevisarPublicar('tono_redes', p.id, campoTono)));
-  fijos.appendChild(h('textarea', { rows: 3, value: a.tono || '', datos: { tono: p.id, foco: `tono-${p.id}` },
-    placeholder: 'CÓMO SUENA: de tú, cercano… (pulsa «Guía» para ver la plantilla)',
-    oninput: ev => {
-      clearTimeout(relojTono);
-      const v = ev.target.value;
-      a.tono = v;
-      relojTono = setTimeout(() => guardar('tono', v), 1200);
-    },
-    onchange: ev => { clearTimeout(relojTono); a.tono = ev.target.value; guardar('tono', ev.target.value); } }));
-  fijos.appendChild(panelRevisionPublicar('tono_redes', p.id, campoTono));
-  fijos.appendChild(h('label', { clase: 'etiqueta-campo' }, 'Página de Facebook (solo si hay más de una)',
-    h('input', { type: 'text', value: a.facebook_pagina || '', onchange: ev => guardar('facebook_pagina', ev.target.value) })));
-  fijos.appendChild(ajusteEmojisPublicar(p, a, guardar));
-  const casillas = h('div', { clase: 'fila' });
-  [['marcar_ia', 'Marcar como hecho con IA'],
-    ['avisar_youtube', 'Avisar a los suscriptores de YouTube']]
-    .forEach(([campo, texto]) => casillas.appendChild(h('label', { clase: 'casilla-red' },
-      h('input', { type: 'checkbox', checked: !!a[campo], onchange: ev => guardar(campo, ev.target.checked) }),
-      ` ${texto}`)));
-  casillas.appendChild(h('span', { clase: 'meta' }, 'La confirmación antes de enviar no se puede quitar.'));
-  fijos.appendChild(casillas);
-  const redes = h('div', { clase: 'fila' }, h('span', { clase: 'meta' }, 'Redes marcadas de fábrica:'));
-  redesVisiblesPublicar(a).forEach(r => redes.appendChild(h('label', { clase: 'casilla-red' },
-    h('input', { type: 'checkbox', checked: (a.redes || []).includes(r), onchange: ev => {
-      const lista = new Set(a.redes || []);
-      if (ev.target.checked) lista.add(r); else lista.delete(r);
-      a.redes = Object.keys(NOMBRES_RED).filter(x => lista.has(x));
-      guardar('redes', a.redes);
-    } }), ` ${CORTOS_RED[r]}`)));
-  fijos.appendChild(redes);
-  b.appendChild(fijos);
-  // DESPUÉS de lo fijo: «.ajustes-fijos > summary» (el primero) es lo fijo
-  b.appendChild(bloqueRedesProyectoPublicar(p));
-  b.appendChild(bloqueSeoProyecto(p));
-  return b;
-}
-
 /* ----------------------------------------- en la pantalla Vídeo de Crear */
 
 /* El bloque «Publicar» debajo del vídeo montado: el botón para llevarlo a
@@ -27043,32 +28822,33 @@ async function actualizarResultadosPublicar() {
   await cargarPublicar(true);
 }
 
+/* RESULTADOS, ORDENADO (rediseno-publicar): una fila de mandos (proyecto,
+   periodo en segmentos, «Informe del mes» y «Actualizar»), la línea de las
+   cifras automáticas, las cinco cifras en grande y los bloques de siempre en
+   una rejilla de dos columnas. Los datos y lo que se pide, los de antes. */
 function seccionResultadosPublicar() {
   if (PUB.verInforme) return seccionInformePublicar();
   const r = PUB.resultados || {};
   const caja = h('div', { clase: 'resultados-publicar' });
   const proyectos = ((PUB.proyectos || {}).proyectos || []);
-  caja.appendChild(h('div', { clase: 'fila' },
-    h('select', { onchange: ev => { PUB.proyectoResultados = ev.target.value; cargarPublicar(); } },
-      ...proyectos.map(x => h('option', { value: x.id, selected: x.id === PUB.proyectoResultados }, x.nombre))),
-    h('select', { onchange: ev => { PUB.diasResultados = Number(ev.target.value); cargarPublicar(); } },
-      ...[[7, 'últimos 7 días'], [30, 'últimos 30 días'], [90, 'últimos 90 días']].map(([v, t]) =>
-        h('option', { value: v, selected: (PUB.diasResultados || 30) === v }, t))),
+  const dias = PUB.diasResultados || 30;
+  caja.appendChild(h('div', { clase: 'fila mandos-resultados' },
+    h('select', { 'aria-label': 'Proyecto', onchange: ev => { PUB.proyectoResultados = ev.target.value; cargarPublicar(); } },
+      ...proyectos.map(x => h('option', { value: x.id, selected: x.id === PUB.proyectoResultados }, `📁 ${x.nombre}`))),
+    h('span', { clase: 'vista-cal selector-pub periodo-resultados', role: 'group', 'aria-label': 'Periodo' },
+      ...[[7, '7 días'], [30, '30 días'], [90, '90 días']].map(([v, t]) => h('button', {
+        type: 'button', clase: `mini${dias === v ? ' activo' : ''}`, 'aria-pressed': dias === v ? 'true' : 'false',
+        title: `los últimos ${v} días`, onclick: () => { if (dias === v) return; PUB.diasResultados = v; cargarPublicar(); } }, t))),
     h('span', { clase: 'crece' }),
     r.mirado ? h('span', { clase: 'meta' }, `cifras de ${fechaCorta(r.mirado)}`) : null,
-    h('button', { clase: 'mini', title: 'El mes de este proyecto, para enseñárselo al cliente (imprimible)',
+    h('button', { type: 'button', clase: 'mini', title: 'El mes de este proyecto, para enseñárselo al cliente (imprimible)',
       onclick: () => { PUB.verInforme = true; PUB.informe = null; cargarPublicar(); } }, 'Informe del mes'),
-    h('button', { clase: 'primario mini', disabled: PUB.midiendo || !(r.clave || {}).puesta,
+    h('button', { type: 'button', clase: 'primario mini', disabled: PUB.midiendo || !(r.clave || {}).puesta,
       title: 'Pide a Upload-Post las cifras de lo publicado y los seguidores de cada cuenta',
       onclick: actualizarResultadosPublicar }, PUB.midiendo ? 'pidiendo…' : 'Actualizar')));
-  /* sin `r.clave` (la carga falló y el error ya está arriba) no hay aviso que
-     poner: `avisoClavePublicar` devuelve null y appendChild(null) rompía la
-     pantalla entera («fallo pintando el módulo») tapando el error de verdad */
-  const avisoClave = (r.clave && !r.clave.puesta) ? avisoClavePublicar(r.clave) : null;
-  if (avisoClave) caja.appendChild(avisoClave);
   caja.appendChild(lineaMetricasAutoPublicar());
   const total = r.total || {};
-  caja.appendChild(h('div', { clase: 'cifras-publicar' },
+  caja.appendChild(h('div', { clase: 'cifras-publicar cifras-grandes-publicar' },
     ...[['posts', 'publicaciones'], ['vistas', 'vistas'], ['me_gusta', 'me gusta'],
       ['comentarios', 'comentarios'], ['compartidos', 'compartidos']].map(([k, t]) =>
       h('div', { clase: 'cifra' }, h('b', {}, typeof total[k] === 'number' ? numeroCorto(total[k]) : '—'),
@@ -27077,14 +28857,15 @@ function seccionResultadosPublicar() {
     caja.appendChild(h('div', { clase: 'meta' }, `${r.sin_cifras} publicación(es) sin cifras todavía: `
       + 'las subidas a mano no se pueden medir desde aquí, y TikTok tarda unas horas en darlas.'));
   }
-  if (r.periodos) caja.appendChild(bloquePeriodosPublicar(r.periodos));
-  caja.appendChild(bloqueMejoresPublicar());
-  caja.appendChild(bloquePalabrasGanchosPublicar());
-  caja.appendChild(bloqueHorariosPublicar());
+  const rejilla = h('div', { clase: 'rejilla-resultados' });
+  if (r.periodos) rejilla.appendChild(bloquePeriodosPublicar(r.periodos));
+  rejilla.appendChild(bloqueMejoresPublicar());
+  rejilla.appendChild(bloqueHorariosPublicar());
+  rejilla.appendChild(bloquePalabrasGanchosPublicar());
   const redes = h('div', { clase: 'bloque' }, h('h3', {}, 'Por red'));
   const tabla = h('div', { clase: 'tabla-redes' });
   // las del proyecto, más cualquiera con publicaciones o seguidores
-  const delProyecto = ((PUB.proyectos || {}).proyectos || []).find(x => x.id === PUB.proyectoResultados) || {};
+  const delProyecto = proyectos.find(x => x.id === PUB.proyectoResultados) || {};
   Object.keys(NOMBRES_RED).filter(red => redesVisiblesPublicar(delProyecto.ajustes).includes(red)
     || ((r.por_red || {})[red] || {}).posts || (r.seguidores || {})[red]).forEach(red => {
     const pr = (r.por_red || {})[red] || {};
@@ -27099,17 +28880,18 @@ function seccionResultadosPublicar() {
   });
   redes.appendChild(tabla);
   if (r.seguidores_al) redes.appendChild(h('div', { clase: 'meta' }, `seguidores a ${fechaCorta(r.seguidores_al)}`));
-  caja.appendChild(redes);
+  rejilla.appendChild(redes);
   const videos = h('div', { clase: 'bloque' }, h('h3', {}, 'Los vídeos, de más a menos vistos'));
   if (!(r.videos || []).length) {
     videos.appendChild(h('div', { clase: 'meta' }, 'Nada publicado en este periodo.'));
   }
-  (r.videos || []).forEach(v => videos.appendChild(h('div', { clase: 'fila fila-listo' },
-    h('button', { clase: 'mini fantasma nombre-envio', onclick: () => irASeccionPublicar('ficha', v.pid) }, v.nombre),
+  (r.videos || []).forEach(v => videos.appendChild(h('div', { clase: 'fila fila-listo fila-resultado' },
+    h('button', { type: 'button', clase: 'mini fantasma nombre-envio', onclick: () => irASeccionPublicar('ficha', v.pid) }, v.nombre),
     h('span', { clase: 'crece meta' }, textoMetricas(v) || 'sin cifras todavía'),
     h('span', { clase: 'redes-video' }, ...Object.keys(v.redes || {}).map(red =>
       h('span', { clase: 'pastilla red-mini ok', title: textoMetricas(v.redes[red]) || 'sin cifras' }, CORTOS_RED[red]))))));
-  caja.appendChild(videos);
+  rejilla.appendChild(videos);
+  caja.appendChild(rejilla);
   return caja;
 }
 
@@ -27255,7 +29037,7 @@ function seccionClaveUploadPost(ficha) {
     h('h3', {}, 'Publicar en redes'),
     h('div', { clase: 'pista' },
       'La API key de upload-post.com (su panel → API Keys). Con ella, el módulo Publicar sube y programa en '
-      + 'TikTok, Reels, YouTube y Facebook (se prueba en Publicar → Cuentas y ajustes). '
+      + 'TikTok, Reels, YouTube y Facebook (se prueba en Publicar → Ajustes). '
       + 'Sin ella se prepara todo y se publica a mano.'),
     h('div', { clase: 'fila' },
       h('b', {}, 'Upload-Post'), h('span', { clase: 'crece' }),
@@ -27268,6 +29050,133 @@ function seccionClaveUploadPost(ficha) {
       } }, 'Cambiar'),
       puesta ? h('button', { clase: 'mini fantasma peligro',
         onclick: () => guardarClaves({ uploadpost: { clave: '' } }) }, 'Quitar') : null));
+}
+
+/* LAS CLAVES DE ANALIZAR CUENTAS, EN CONFIGURACIÓN (rediseno-publicar,
+   decisión del dueño del 21-10): estaban en Automatizar → Cuentas que te gustan,
+   en un plegable «Conexiones», fuera de las demás claves y de «Probar todas
+   las claves». Ahora son un bloque más, con el patrón de «Música y efectos»:
+   nombre, «…1234»/«sin poner», pista, campo, Guardar/Cambiar y Quitar; y lo
+   que ya había: desde qué cuenta se mira Instagram, «Usar el servicio de
+   pago…», el tope y lo gastado. MISMO almacén y MISMAS rutas que antes
+   (`/api/parrilla/cuentas/conexiones`): solo cambia dónde está el formulario.
+   Son de todo el Studio, no de un proyecto. En Automatizar queda su estado y
+   «Configurar ›» (`estadoConexionesCuentas`). */
+const CONEXIONES_CONFIG = { pidiendo: false, error: '' };
+
+async function cargarConexionesConfig() {
+  if (CONEXIONES_CONFIG.pidiendo) return;
+  CONEXIONES_CONFIG.pidiendo = true;
+  try {
+    PAR.cuentas = await pedir(rutaCuentas());
+    CONEXIONES_CONFIG.error = '';
+  } catch (e) {
+    CONEXIONES_CONFIG.error = e.message;
+  } finally {
+    CONEXIONES_CONFIG.pidiendo = false;
+  }
+  repintarClaves();
+}
+
+/* Guardar por la ruta de siempre y, con un token de Meta nuevo, buscar desde
+   qué cuenta se mira (como hacía el plegable de Automatizar). */
+async function guardarConexionConfig(cambios) {
+  await guardarConexionCuentas(cambios);
+  repintarClaves();
+}
+
+function seccionClavesAnalizarCuentas() {
+  const caja = h('section', { clase: 'bloque-config claves-cuentas', id: 'conf-cuentas' },
+    h('h3', {}, 'Analizar cuentas — YouTube, Instagram y Apify'),
+    h('div', { clase: 'pista' }, 'Para leer las cuentas de otros en Automatizar → Cuentas que te gustan. Primero se usan '
+      + 'las vías gratis (YouTube y la oficial de Instagram). Apify, de pago, solo cuando esas no sirven: TikTok '
+      + 'siempre, y las cuentas de Instagram que no son profesionales. Las claves se guardan en el servidor y aquí '
+      + 'solo se ven sus cuatro últimos caracteres. Son de todo el Studio, no de un proyecto.'));
+  const datos = (typeof PAR !== 'undefined' && PAR.cuentas) || null;
+  if (!datos || !datos.conexiones) {
+    if (CONEXIONES_CONFIG.error) caja.appendChild(cajaError(CONEXIONES_CONFIG.error));
+    else {
+      caja.appendChild(h('div', { clase: 'cargando' }, 'leyendo las conexiones…'));
+      setTimeout(cargarConexionesConfig, 0);
+    }
+    return caja;
+  }
+  const c = datos.conexiones;
+  const gasto = Number(datos.gasto_mes || 0);
+  if (c.simulado) caja.appendChild(h('div', { clase: 'caja-aviso' }, 'Modo SIMULADO: no se lee ninguna red ni se paga nada.'));
+  const clave = (titulo, pista, campo, estado, extra) => {
+    const puesta = !!estado.puesta;
+    const entrada = h('input', { type: 'password', autocomplete: 'off', 'aria-label': titulo,
+      placeholder: puesta ? `puesta (${estado.cola || ''})` : 'sin poner', datos: { conexion: campo } });
+    caja.appendChild(h('div', { clase: 'fila' },
+      h('b', {}, titulo), h('span', { clase: 'crece' }),
+      pastillaEstado(puesta ? 'ok' : 'vacio', puesta ? estado.cola || 'puesta' : 'sin poner'),
+      botonGuia('conexiones_cuentas', null)));
+    caja.appendChild(h('div', { clase: 'pista' }, pista));
+    caja.appendChild(h('div', { clase: 'fila-clave' }, entrada,
+      h('button', { type: 'button', clase: 'mini', onclick: () => {
+        if (!entrada.value.trim()) { toast('pega la clave', true); return; }
+        guardarConexionConfig({ [campo]: entrada.value.trim() });
+        entrada.value = '';
+      } }, puesta ? 'Cambiar' : 'Guardar'),
+      puesta ? h('button', { type: 'button', clase: 'mini fantasma peligro',
+        onclick: () => guardarConexionConfig({ [campo]: '' }) }, 'Quitar') : null));
+    if (extra) caja.appendChild(extra);
+  };
+  const meta = c.meta || {};
+  clave('YouTube (gratis)', 'Una clave de API de Google Cloud con «YouTube Data API v3» activada. Da '
+    + 'vistas, likes y comentarios de cualquier canal público.', 'youtube_clave', c.youtube || {});
+  clave('Instagram (gratis, vía oficial de Meta)', 'Un token de tu app de Meta para UNA cuenta tuya, la de '
+    + 'tu negocio o una solo para el Studio: tiene que ser profesional y estar vinculada a una Página de Facebook. Para '
+    + 'cambiar de cuenta, pega el token nuevo y pulsa «Volver a buscar». Solo ve cuentas profesionales (la mayoría de negocios).',
+  'meta_token', meta, meta.puesta ? h('div', { clase: 'fila' },
+    meta.ig_id ? h('span', { clase: 'meta' }, `Se mira desde: @${meta.ig_usuario || meta.ig_id}`)
+      : h('span', { clase: 'meta' }, 'Falta saber desde qué cuenta se mira'),
+    h('button', { type: 'button', clase: 'mini', onclick: async () => { await buscarMiInstagramCuentas(); repintarClaves(); } },
+      meta.ig_id ? 'Volver a buscar' : 'Buscar mi cuenta'),
+    meta.caduca ? h('span', { clase: meta.caducando ? 'pastilla obsoleto' : 'meta' }, `el token caduca hacia el ${meta.caduca}`) : null) : null);
+  clave('Apify (de pago, de respaldo)', 'El token de tu cuenta de apify.com. El plan gratis trae 5 $ '
+    + 'al mes; leer una cuenta cuesta unos céntimos.', 'apify_token', c.apify || {});
+  const tope = h('input', { type: 'number', min: 0, max: 500, step: 0.5, value: c.tope_usd, clase: 'numero-corto',
+    'aria-label': 'Tope al mes ($)', datos: { conexion: 'tope_usd' } });
+  caja.appendChild(h('div', { clase: 'fila pago-cuentas' },
+    h('label', { clase: 'plano' }, h('input', { type: 'checkbox', checked: c.pago ? true : null,
+      onchange: ev => guardarConexionConfig({ pago: ev.target.checked }) }),
+    h('span', {}, 'Usar el servicio de pago cuando lo gratis no sirva'))));
+  caja.appendChild(h('div', { clase: 'fila pago-cuentas' },
+    h('label', {}, 'Tope al mes ($)'), tope,
+    h('button', { type: 'button', clase: 'mini', onclick: () => guardarConexionConfig({ tope_usd: tope.value }) }, 'Guardar tope'),
+    h('span', { clase: 'meta' }, `gastado este mes: ${gasto.toFixed(2)} $ de ${Number(c.tope_usd || 0).toFixed(2)} $`)));
+  return caja;
+}
+
+/* EN AUTOMATIZAR, SOLO SU ESTADO: qué claves faltan, lo gastado y «Configurar ›»,
+   que abre Configuración en este bloque. Lo llama UNA línea de Automatizar
+   (`seccionCuentasParrilla`). */
+function estadoConexionesCuentas() {
+  const c = (PAR.cuentas || {}).conexiones || {};
+  const gasto = Number((PAR.cuentas || {}).gasto_mes || 0);
+  const meta = c.meta || {};
+  const partes = [
+    (c.youtube || {}).puesta ? '✓ YouTube conectado' : '⚠ Falta la clave de YouTube',
+    meta.puesta ? (meta.ig_id ? `✓ Instagram desde @${meta.ig_usuario || meta.ig_id}` : '⚠ Instagram sin cuenta desde la que mirar')
+      : '⚠ Falta el token de Instagram',
+    (c.apify || {}).puesta ? '✓ Apify conectado' : '— Apify sin poner (de pago, de respaldo)',
+  ];
+  return h('div', { clase: `caja-${(c.youtube || {}).puesta || meta.ig_id ? 'info' : 'aviso'} fila estado-conexiones-cuentas` },
+    h('span', { clase: 'crece' }, h('b', {}, 'Conexiones (de todo el Studio): '),
+      `${partes.join(' · ')} · gastado este mes ${gasto.toFixed(2)} $ de ${Number(c.tope_usd || 0).toFixed(2)} $`,
+      c.simulado ? ' · modo SIMULADO' : ''),
+    h('button', { type: 'button', clase: 'mini', title: 'Las claves de YouTube, Instagram y Apify están en Configuración',
+      onclick: () => {
+        conmutarConfig(true);
+        const ir = (n = 0) => {
+          const b = document.querySelector('#conf-cuentas');
+          if (b) { try { b.scrollIntoView({ block: 'start' }); } catch (e) { /* sin scroll */ } }
+          else if (n < 20) setTimeout(() => ir(n + 1), 150);
+        };
+        ir();
+      } }, 'Configurar ›'));
 }
 
 /* LA CLAVE DE LA API DE DATOS DE YOUTUBE (rama seo-real), opcional: con ella
@@ -28040,7 +29949,7 @@ const PAR = {
   // analizar-cuentas (18-10-2026): las cuentas leídas son de todo el Studio
   cuentas: null, cuentaAbierta: null, cuentaTrabajo: null, cuentaReloj: null, cuentasCargando: false, cuentaPedida: null,
   cuentaForm: { red: 'tiktok', texto: '', cuantos: 30 }, cuentaGuiones: { cuantos: 5, modo: 'adaptar', peticion: '' },
-  chatCuenta: '', conexionesAbiertas: null,
+  chatCuenta: '',
 };
 const ESTADOS_GUION = { pendiente: 'pendiente', usado: 'usado', publicado: 'publicado' };
 const CLASE_GUION = { pendiente: '', usado: 'ejecutando', publicado: 'ok' };
@@ -29067,6 +30976,57 @@ async function borrarGuionParrilla(g) {
   } catch (e) { toast(`no se ha podido borrar: ${e.message}`, true); }
 }
 
+/* SOLTAR EL VÍDEO ABIERTO (rama `encargo-limpio`, 22-10-2026). Crear tiene UN
+   vídeo abierto (`APP.light.video.pid`) y el formulario de «Un vídeo nuevo»
+   solo se pinta con `pid` vacío (`nuevo = !v.pid`). «Pasar al Encargo» llenaba
+   el borrador pero dejaba abierto el vídeo de antes: la pantalla enseñaba el
+   texto del que se estaba montando y no se sabía de quién eran los botones
+   del carril (lo vio el dueño, 22-10).
+
+   Soltar es solo de la PANTALLA: no se cancela ni se toca nada en el servidor.
+   El trabajo que corra sigue allí; su seguimiento ya no repinta ni recarga
+   este vídeo porque `seguirTrabajo` solo llama a su `alTerminar` si su vídeo
+   sigue abierto, y al reabrirlo `reengancharTandaLight` lo vuelve a enganchar.
+   Es lo mismo que hace `volverAlSitio` al ir a un vídeo nuevo, y el resto de
+   lo de ese vídeo lo rehace `cargarVideoLight` al abrirlo.
+   -> {nombre, ocupado} del vídeo soltado, o null si no había ninguno. */
+function soltarVideoAbiertoLight() {
+  const v = APP.light.video;
+  if (!v.pid) return null;
+  const pid = v.pid;
+  const nombre = v.nombre || pid;
+  // ¿ESTABA HACIENDO ALGO? Solo para el aviso: soltar no lo cambia
+  const ranura = APP.trabajos[CLAVE_VIDEO_LIGHT] || {};
+  const ocupado = (ranura.estado === 'ejecutando' && ranura.pid === pid)
+    || (COLA_IMG.pid === pid && !!(COLA_IMG.actual || COLA_IMG.cola.length));
+  /* reiniciarPrevia y no solo pararPrevia: `formatoDelVideo` lee primero
+     `PREVIA.ficha.formato`, y un vídeo vertical soltado dejaba vertical la
+     cabecera del borrador. Recuerda la escena para cuando se reabra. */
+  reiniciarPrevia();
+  /* LA COLA DE IMÁGENES de ese vídeo se deja de mirar (sigue en el servidor):
+     su vigilante no para con pid vacío y repintaba el formulario mientras se
+     escribe. Al reabrirlo la retoma `retomarColaDeImagenes`. */
+  if (COLA_IMG.pid === pid) olvidarCola();
+  recordarVideoLight('');
+  /* LA VISTA, YA LA DEL BORRADOR: con la de antes («guion», «previa»…) la
+     entrada de historial que apunta `irAModulo` la guardaba, y «atrás»
+     pintaba el guion del vídeo soltado sin vídeo. Lo que era de él se tira:
+     `cargarVideoLight` lo rehace al reabrirlo. */
+  v.vista = 'encargo';
+  v.pedido = null;
+  v.error = '';
+  v.guion = null;
+  v.audio = null;
+  v.fichas = {};
+  v.planos = [];
+  v.plan = null;
+  v.planDe = '';
+  v.planes = {};
+  v.coste = null;
+  v.cargadoDe = '';
+  return { nombre, ocupado };
+}
+
 /* PASAR AL ENCARGO: se pregunta ANTES de marcar nada si el formulario de «Un
    vídeo nuevo» ya tiene un borrador (sería pisar un vídeo a medio escribir), y
    se rellena con lo que dice el servidor. Lo demás del formulario (qué lleva,
@@ -29115,9 +31075,26 @@ async function pasarAlEncargoParrilla(g, indice, estiloId) {
   PAR.guion = Object.assign({}, PAR.guion, { estado: g.estado === 'publicado' ? 'publicado' : 'usado' });
   PAR.fichaAbierta = false;
   PAR.datos = null;
+  const soltado = soltarVideoAbiertoLight();
+  /* La pantalla de Crear se pone ANTES de entrar, como en `entrarEnCrear`:
+     así la entrada de historial que abre `irAModulo` ya es la del borrador
+     con este estilo, y «atrás» no cae en el vídeo soltado. */
+  try { localStorage.setItem('estudio.light.estilo', ficha.id); } catch (err) { /* sin almacén */ }
+  APP.light.vista = 'elegido';
+  APP.light.abierto = ficha.id;
+  APP.light.desdeVideo = '';
+  APP.light.video.vista = 'encargo';
+  /* Sin `elegirEstiloLight` detrás: hace lo mismo pero con un segundo
+     pintado, que apilaba otra entrada y pedía dos «atrás» para salir. */
+  subirArriba('panel');
   irAModulo('crear');
-  elegirEstiloLight(ficha);
   toast(`Encargo lleno con «${recortar(r.nombre || 'el guion', 40)}»: revísalo y pulsa «Generar el guion»`);
+  if (soltado) {
+    const quien = `«${recortar(soltado.nombre, 40)}»`;
+    setTimeout(() => toast(soltado.ocupado
+      ? `${quien} sigue trabajando por su cuenta: lo abres cuando quieras desde Tus proyectos`
+      : `${quien} queda en Tus proyectos, tal como estaba`), 1600);
+  }
   (r.avisos || []).slice(0, 2).forEach(a => setTimeout(() => toast(a, true), 3200));
 }
 
@@ -29666,76 +31643,17 @@ function seccionCuentasParrilla() {
   if (PAR.cuentaTrabajo && PAR.cuentaTrabajo.estado === 'trabajando' && !PAR.cuentaReloj) {
     setTimeout(vigilarCuentaParrilla, 0);
   }
-  // claves de analizar cuentas: las mueve rediseno-publicar (a Configuración). Se pintan SOLO desde aquí
-  caja.appendChild(bloqueConexionesCuentas());
+  caja.appendChild(estadoConexionesCuentas());  // las claves, en Configuración: lo encaja aquí rediseno-publicar
   caja.appendChild(bloqueTraerCuenta());
   if (PAR.cuentaAbierta) caja.appendChild(bloqueCuentaAbierta(PAR.cuentaAbierta));
   return caja;
 }
 
 /* ------------------------------------------------------------ conexiones
- * claves de analizar cuentas: las mueve rediseno-publicar. Un bloque aislado,
- * igual que antes de rediseno-automatizar, y pintado desde un único sitio
- * (`seccionCuentasParrilla`): la otra rama solo cambia esa línea. */
-
-function bloqueConexionesCuentas() {
-  const c = PAR.cuentas.conexiones || {};
-  const gasto = Number(PAR.cuentas.gasto_mes || 0);
-  const topeUsd = Number(c.tope_usd || 0);
-  const algunaGratis = (c.youtube || {}).puesta || ((c.meta || {}).puesta && (c.meta || {}).ig_id);
-  // ABIERTO o cerrado como se dejó: al guardar una clave no se cierra solo
-  if (PAR.conexionesAbiertas === null) PAR.conexionesAbiertas = !algunaGratis && !(c.apify || {}).puesta;
-  const detalles = h('details', { clase: 'bloque conexiones-cuentas', open: PAR.conexionesAbiertas ? true : null,
-    ontoggle: ev => { PAR.conexionesAbiertas = ev.target.open; } });
-  detalles.appendChild(h('summary', {}, h('b', {}, 'Conexiones'),
-    h('span', { clase: 'meta' }, ` · YouTube ${(c.youtube || {}).puesta ? '✓' : '—'} · Instagram ${(c.meta || {}).ig_id ? '✓' : '—'}`
-      + ` · Apify ${(c.apify || {}).puesta ? '✓' : '—'} · gastado este mes ${gasto.toFixed(2)} $ de ${topeUsd.toFixed(2)} $`)));
-  if (c.simulado) detalles.appendChild(h('div', { clase: 'caja-aviso' }, 'Modo SIMULADO: no se lee ninguna red ni se paga nada.'));
-  detalles.appendChild(h('div', { clase: 'pista' }, 'Primero se usan las vías gratis (YouTube y la oficial de Instagram). '
-    + 'Apify, de pago, solo cuando esas no sirven: TikTok siempre, y las cuentas de Instagram que no son profesionales. '
-    + 'Las claves se guardan en el servidor y aquí solo se ven sus cuatro últimos caracteres.'));
-
-  const fila = (titulo, ayuda, campo, estado, extra) => {
-    const input = h('input', { type: 'password', placeholder: estado.puesta ? `puesta (${estado.cola || ''})` : 'sin poner',
-      autocomplete: 'off' });
-    input.dataset.foco = `conexion-${campo}`;
-    return h('div', { clase: 'conexion-cuenta' },
-      h('div', { clase: 'fila' }, h('b', {}, titulo), h('span', { clase: 'crece' }),
-        pastillaEstado(estado.puesta ? 'ok' : 'vacio', estado.puesta ? estado.cola || 'puesta' : 'sin poner'),
-        botonGuia('conexiones_cuentas', null)),
-      h('div', { clase: 'pista' }, ayuda),
-      h('div', { clase: 'fila-clave' }, input,
-        h('button', { clase: 'mini', onclick: () => {
-          if (!input.value.trim()) { toast('pega la clave', true); return; }
-          guardarConexionCuentas({ [campo]: input.value.trim() });
-        } }, estado.puesta ? 'Cambiar' : 'Guardar'),
-        estado.puesta ? h('button', { clase: 'mini fantasma peligro', onclick: () => guardarConexionCuentas({ [campo]: '' }) }, 'Quitar') : null),
-      extra || null);
-  };
-  const meta = c.meta || {};
-  detalles.appendChild(fila('YouTube (gratis)', 'Una clave de API de Google Cloud con «YouTube Data API v3» activada. Da '
-    + 'vistas, likes y comentarios de cualquier canal público.', 'youtube_clave', c.youtube || {}));
-  detalles.appendChild(fila('Instagram (gratis, vía oficial de Meta)', 'Un token de tu app de Meta para UNA cuenta tuya, la de '
-    + 'tu negocio o una solo para el Studio: tiene que ser profesional y estar vinculada a una Página de Facebook. Para '
-    + 'cambiar de cuenta, pega el token nuevo y pulsa «Volver a buscar». Solo ve cuentas profesionales (la mayoría de negocios).',
-  'meta_token', meta, meta.puesta ? h('div', { clase: 'fila' },
-    meta.ig_id ? h('span', { clase: 'meta' }, `Se mira desde: @${meta.ig_usuario || meta.ig_id}`) : h('span', { clase: 'meta' }, 'Falta saber desde qué cuenta se mira'),
-    h('button', { clase: 'mini', onclick: () => buscarMiInstagramCuentas() }, meta.ig_id ? 'Volver a buscar' : 'Buscar mi cuenta'),
-    meta.caduca ? h('span', { clase: meta.caducando ? 'pastilla obsoleto' : 'meta' }, `el token caduca hacia el ${meta.caduca}`) : null) : null));
-  detalles.appendChild(fila('Apify (de pago, de respaldo)', 'El token de tu cuenta de apify.com. El plan gratis trae 5 $ '
-    + 'al mes; leer una cuenta cuesta unos céntimos.', 'apify_token', c.apify || {}));
-  const tope = h('input', { type: 'number', min: 0, max: 500, step: 0.5, value: c.tope_usd, clase: 'numero-corto' });
-  tope.dataset.foco = 'conexion-tope';
-  detalles.appendChild(h('div', { clase: 'fila pago-cuentas' },
-    h('label', { clase: 'plano' }, h('input', { type: 'checkbox', checked: c.pago ? true : null,
-      onchange: ev => guardarConexionCuentas({ pago: ev.target.checked }) }),
-    h('span', {}, 'Usar el servicio de pago cuando lo gratis no sirva')),
-    h('label', {}, 'Tope al mes ($)'), tope,
-    h('button', { clase: 'mini', onclick: () => guardarConexionCuentas({ tope_usd: tope.value }) }, 'Guardar tope'),
-    h('span', { clase: 'meta' }, `gastado este mes: ${gasto.toFixed(2)} $`)));
-  return detalles;
-}
-
+ * Las claves de YouTube, Meta y Apify se escriben en Configuración
+   (`seccionClavesAnalizarCuentas`, rediseno-publicar); aquí queda su estado
+   (`estadoConexionesCuentas`). Guardar y buscar la cuenta de Instagram siguen
+   aquí y los usan las dos. */
 async function guardarConexionCuentas(cambios) {
   try {
     const r = await pedir(rutaCuentas('/conexiones'), { method: 'PUT', cuerpo: cambios });

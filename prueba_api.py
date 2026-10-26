@@ -4564,6 +4564,20 @@ def probar_coste_en_detalle(cliente, pid):
     img = d.get("imagenes") or {}
     ok(all(k in img for k in ("nuevas", "rehechas", "personajes")),
        "las imágenes separadas en nuevas, rehechas y personajes")
+    ok(all(k in img for k in ("base", "portadas")),
+       "y aparte la imagen base del tipo de relato y las portadas (notas del dueño, 24-10)")
+    import app as servidor                                    # noqa: PLC0415
+    falsos = [{"proveedor": "openai", "unidad": u, "usd": usd, "paso": paso,
+               "cantidad": {"imagenes": 1}}
+              for u, usd, paso in (("escena:S001", 0.05, "assets"), ("escena:S001", 0.05, "assets"),
+                                   ("asset:base_sala", 0.08, "assets"),
+                                   ("asset:estado_sala_despues", 0.08, "assets"),
+                                   ("asset:rosa", 0.04, "assets"), ("portada", 0.2, "publicar"),
+                                   ("", 0.01, "estilo"))]
+    partes = servidor._desglose_de_eventos(falsos)["imagenes"]
+    igual({k: v["cuantas"] for k, v in partes.items()},
+          {"nuevas": 1, "rehechas": 1, "base": 2, "personajes": 1, "portadas": 1, "otras": 1},
+          "cada imagen va a su tipo: plano nuevo, rehecho, base y estados, reparto, portada, otra")
     _r, total = cliente.get(f"/api/proyectos/{pid}/coste")
     ok(abs(float(d.get("total_usd") or 0) - float(total.get("total_usd") or 0)) < 0.01,
        f"y el total cuadra con el de la cabecera ({d.get('total_usd')} / {total.get('total_usd')})")
@@ -4592,6 +4606,137 @@ def probar_coste_en_detalle(cliente, pid):
     igual(r.status_code, 404, "un fichero no preparado es un 404")
     r, _d = cliente.get(f"/api/proyectos/{pid}/exportes/..%2F..%2Festado.json")
     ok(r.status_code in (404, 400), f"y no se sale de la carpeta de exportes ({r.status_code})")
+
+
+def probar_medidor_claude(cliente):
+    """Rama medidor-claude (25-10-2026): GET /api/claude/consumo lee el cupo y
+    el resumen sin salir al CLI, y «Medir ahora» con ESTUDIO_SIMULAR da un cupo
+    simulado con sus ventanas y sus avisos."""
+    seccion("EL MEDIDOR DE CLAUDE (25-10)")
+    respuesta, datos = cliente.get("/api/claude/consumo")
+    igual(respuesta.status_code, 200, "GET /api/claude/consumo responde 200")
+    ok({"cupo", "avisos", "resumen", "umbrales"} <= set(datos or {}),
+       "con el cupo, los avisos, el resumen y los umbrales")
+    igual((datos or {}).get("umbrales"), {"ojo": 0.7, "malo": 0.9}, "avisa al 70 % y al 90 %")
+    ok(isinstance(((datos or {}).get("resumen") or {}).get("por_tarea"), list), "el resumen trae lo de cada tarea")
+    ok(not (datos or {}).get("midiendo"), "con ESTUDIO_SIMULAR no mide solo al mirar")
+    respuesta, datos = cliente.post("/api/claude/consumo/medir", {})
+    igual(respuesta.status_code, 200, "«Medir ahora» responde 200")
+    cupo = ((datos or {}).get("cupo") or [{}])[0]
+    ok(cupo.get("simulado") and set(cupo.get("ventanas") or {}) >= {"five_hour", "seven_day"},
+       f"simulado: un cupo con la ventana de 5 h y la semana ({sorted(cupo.get('ventanas') or {})})")
+    ok(all(0 <= v.get("uso", -1) <= 1 and v.get("reinicia") for v in (cupo.get("ventanas") or {}).values()),
+       "cada ventana con su fracción usada y su hora de reinicio")
+    ok(isinstance((datos or {}).get("avisos"), list), "y la lista de avisos")
+
+
+def probar_cola_de_montaje(cliente):
+    """Rama cola-montaje (25-10-2026): montar va de uno en uno en todo el
+    Studio y por orden de llegada, «Solo montar» no espera, y
+    GET /api/cola_studio enseña quién trabaja y quién espera."""
+    seccion("LA COLA DE MONTAJE Y LA COLA DEL STUDIO (25-10)")
+    import threading                                          # noqa: PLC0415
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo.trabajos import Cancelado                     # noqa: PLC0415
+
+    class _Bitacora:
+        def anotar(self, *_a, **_k):
+            pass
+
+    class _Ctx:
+        def __init__(self, nombre):
+            self.id = nombre.lower().replace(" ", "_")
+            self.proyecto = type("P", (), {"config": {"nombre": nombre}})()
+            self.bitacora = _Bitacora()
+
+    turno = servidor._TURNO_MONTAJE
+    orden, mensajes = [], {}
+    suelta = threading.Event()
+
+    def montar(nombre, funcion):
+        mensajes[nombre] = []
+        servidor._con_turno_de_montaje(
+            lambda v, m="", publico="": mensajes[nombre].append(m), _Ctx(nombre), funcion)
+
+    hilos = [threading.Thread(target=montar, args=("Vídeo A", lambda: (suelta.wait(20), orden.append("A"))))]
+    hilos[0].start()
+    time.sleep(0.4)
+    for nombre in ("Vídeo B", "Vídeo C"):
+        hilos.append(threading.Thread(target=montar, args=(nombre, lambda n=nombre[-1]: orden.append(n))))
+        hilos[-1].start()
+        time.sleep(0.4)
+    time.sleep(2.5)
+    # el servidor de las pruebas es OTRO proceso (con sus turnos vacíos): por
+    # HTTP se mira la forma, y lo de estos turnos, llamando a la ruta aquí
+    respuesta, por_http = cliente.get("/api/cola_studio")
+    igual(respuesta.status_code, 200, "GET /api/cola_studio responde 200")
+    ok({"imagenes", "montaje", "trabajando"} <= set(por_http or {}),
+       "con imágenes, montaje y lo que está en marcha")
+    cola = servidor.cola_del_studio(type("Peticion", (), {"headers": {}})())
+    m = (cola or {}).get("montaje") or {}
+    igual(((m.get("ahora") or {}).get("nombre")), "Vídeo A", "la cola dice quién se está montando")
+    igual([x.get("nombre") for x in m.get("fila") or []], ["Vídeo B", "Vídeo C"],
+          "y quién espera, por orden de llegada")
+    ok(isinstance((cola or {}).get("trabajando"), list) and not (m.get("ahora") or {}).get("video"),
+       "un turno de algo que no es un vídeo abierto no ofrece «Abrir»")
+    ok(not orden, "con otro vídeo montándose, los demás esperan su turno")
+    ok(any("se está montando «Vídeo A»" in x for x in mensajes.get("Vídeo B", [])),
+       f"la barra dice a quién espera ({(mensajes.get('Vídeo B') or [''])[:1]})")
+    ok(any("2.º en la fila" in x for x in mensajes.get("Vídeo C", [])),
+       f"y en qué puesto va ({(mensajes.get('Vídeo C') or [''])[:1]})")
+    suelta.set()
+    for hilo in hilos:
+        hilo.join(20)
+    igual(orden, ["A", "B", "C"], "se montan de uno en uno y por orden de llegada")
+    ok(not turno["cerrojo"].locked() and not turno["fila"] and not turno["quien"],
+       "y al acabar el turno queda libre")
+
+    def _cancelado(*_a, **_k):
+        raise Cancelado("parado")
+    turno["cerrojo"].acquire()
+    turno["quien"] = "Otro"
+    try:
+        servidor._con_turno_de_montaje(_cancelado, _Ctx("Vídeo D"), lambda: "no")
+        ok(False, "parar mientras espera el montaje corta la espera")
+    except Cancelado:
+        ok(True, "parar mientras espera el montaje corta la espera")
+    finally:
+        turno["quien"] = ""
+        turno["cerrojo"].release()
+    ok(not turno["fila"], "y sale de la fila")
+
+    # CANCELAR ES EN EL ACTO: con `al_cancelar`, la espera no aguanta al latido
+    turno["cerrojo"].acquire()
+    turno["quien"] = "Otro"
+    pedido = {"si": False, "fn": None}
+
+    def _avisar(*_a, **_k):
+        if pedido["si"]:
+            raise Cancelado("parado")
+    _avisar.al_cancelar = lambda fn: (pedido.update(fn=fn), (lambda: None))[1]
+
+    def _pedir_cancelar():
+        time.sleep(1.5)
+        pedido["si"] = True
+        pedido["fn"]()
+    threading.Thread(target=_pedir_cancelar).start()
+    empezo = time.time()
+    try:
+        servidor._con_turno_de_montaje(_avisar, _Ctx("Vídeo E"), lambda: "no")
+        ok(False, "cancelar en el acto")
+    except Cancelado:
+        tardo = time.time() - empezo - 1.5
+        ok(tardo < 1.2, f"cancelar mientras espera es en el acto ({tardo:.1f} s)")
+    finally:
+        turno["quien"] = ""
+        turno["cerrojo"].release()
+
+    # «Solo montar» no espera: se mira en _correr_paso_marcado
+    import inspect                                            # noqa: PLC0415
+    fuente = inspect.getsource(servidor._correr_paso_marcado)
+    ok('paso_id == "render" and not extra.get("solo_montar")' in fuente,
+       "«Solo montar» (remezclar, segundos) no hace cola; montar entero sí")
 
 
 def probar_turno_y_notas_de_otro_texto():
@@ -7438,6 +7583,295 @@ def probar_tipo_relato():
             setattr(servidor, nombre, valor)
 
 
+def probar_relato_en_espanol():
+    """Rama estados-en-espanol (22-10-2026): cada estado en español, dónde se usa
+    y reescribirlo en español.
+
+    En este proceso y sin el CLI: `al_espanol`/`al_ingles` son dobles. Lo que se
+    mira: traducir no mueve NINGUNA firma ni param (regla 1), «dónde se usa»
+    sale de los bloques y del plan, y editar reescribe solo los tramos de ese
+    estado, con la misma etiqueta, y su imagen deja de valer. Nada se paga.
+    """
+    seccion("TIPO DE RELATO EN ESPAÑOL: TRADUCIR, DÓNDE SE USA Y EDITAR")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+    from PIL import Image as _Imagen                          # noqa: PLC0415
+
+    mod = servidor._traducciones()
+    p6 = servidor.PASOS_MODULOS.p6_assets
+    bloques = [{"id": "B001", "texto": "Este baño era el más feo de la casa.", "personaje": False},
+               {"id": "B002", "texto": "Cambiamos el piso y el mueble.", "personaje": False},
+               {"id": "B003", "texto": "Y quedó el más bonito de la casa.", "personaje": False}]
+    abierta = "floor and all walls in the same ivory porcelain tile"
+    inicial = "grey floor tiles across the whole floor"
+    llamadas = []
+
+    def espanol_falso(textos, cwd=None):
+        llamadas.append(("es", list(textos)))
+        return {t: "ES " + t for t in textos}
+
+    def ingles_falso(texto, anterior="", cwd=None):
+        llamadas.append(("en", texto, anterior))
+        return "EN " + texto
+
+    def esperar():
+        for _ in range(200):
+            with servidor._LOCK_TRADUCIENDO:
+                estado = (servidor._TRADUCIENDO.get(pid) or {}).get("estado")
+            if estado != "pensando":
+                return estado
+            time.sleep(0.02)
+        return "pensando"
+
+    base = tempfile.mkdtemp(prefix="estudio_relato_es_")
+    servidor.fijar_raiz_proyectos(base)
+    reales = {"_bloques_del_guion": servidor._bloques_del_guion}
+    reales_mod = {"al_espanol": mod.al_espanol, "al_ingles": mod.al_ingles}
+    real_plan = p6.plan_actual
+    servidor._bloques_del_guion = lambda _ctx: bloques
+    mod.al_espanol, mod.al_ingles = espanol_falso, ingles_falso
+    try:
+        pid = Proyecto.crear(base, "relato en español").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        espacio = {"sitio": "Baño", "descripcion": "a small bathroom", "luz": "day",
+                   "secundarios": []}
+        servidor._opciones_al_crear(ctx, "", {"espacio_fijo": espacio, "tipo_relato": {
+            "modo": "espacio_que_cambia", "cambia": "acabados"}})
+        os.makedirs(ctx.proyecto.ruta("espacio_fijo"), exist_ok=True)
+        _Imagen.new("RGB", (64, 40), (200, 200, 200)).save(
+            ctx.proyecto.ruta("espacio_fijo", "0123456789abcdef.png"))
+        ctx.estado.actualizar_params("assets", {"espacio_fijo": dict(
+            espacio, imagen="espacio_fijo/0123456789abcdef.png")})
+        _llamar(servidor.usar_subida_como_base, pid)
+        ctx.estado.actualizar_params("assets", {"catalogo": {
+            "sets": {"bano": {"descripcion": "a small bathroom"}}, "reparto": {},
+            "relato": {"modo": "espacio_que_cambia", "cambia": "acabados", "inicial": inicial},
+            "beats": [{"desde": "B001", "hasta": "B001", "set": "bano", "cambio": "",
+                       "estado": "antes"},
+                      {"desde": "B002", "hasta": "B003", "set": "bano", "cambio": abierta,
+                       "estado": "despues"}]}})
+        _Imagen.new("RGB", (64, 40), (90, 90, 90)).save(
+            ctx.proyecto.ruta("espacio_fijo", "fedcba9876543210.png"))
+        guardado = dict((ctx.estado.params("assets") or {}).get("tipo_relato") or {})
+        guardado["bases"]["bano"]["estados"] = {"despues": {
+            "imagen": "espacio_fijo/fedcba9876543210.png", "aprobada": True, "cambio": abierta}}
+        ctx.estado.actualizar_params("assets", {"tipo_relato": guardado})
+        p6.plan_actual = lambda *_a, **_k: {"escenas": [
+            {"id": "S001", "editar_base": True, "cambio": ""},
+            {"id": "S002", "editar_base": True, "cambio": abierta, "base_clave": "bano#despues"},
+            {"id": "S003", "editar_base": True, "cambio": "algo viejo", "base_clave": "bano#despues"},
+            {"id": "S004", "carta": "detalle"}]}
+
+        codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+        igual(codigo, 200, f"LEER: 200 ({ficha if codigo != 200 else ''})")
+        if codigo != 200:
+            return
+        ok("cambios" in ficha, "LEER: la lectura normal trae los planos que cambian")
+        _c, ligera = _llamar(servidor.leer_tipo_relato, pid, True)
+        ok("cambios" not in ligera and "traduccion" in ligera,
+           "LEER: ?ligero=1 (lo que pregunta la pantalla mientras traduce) no los calcula")
+        estado = ficha["estados"][0]
+        igual((estado["estado"], estado["cambio_es"], ficha["inicial_es"]), ("despues", "", ""),
+              "LEER: sin traducir, el español va vacío (la pantalla enseña el inglés)")
+        igual(ficha["traduccion"]["faltan"], 2, "LEER: faltan el cambio y lo que trae la base")
+        igual([b["id"] for b in estado["donde"]["bloques"]], ["B002", "B003"],
+              "DÓNDE: los bloques del tramo, desde..hasta")
+        igual(estado["donde"]["bloques"][0]["n"], 2, "DÓNDE: con su número de bloque")
+        igual(estado["donde"]["planos"], ["S002", "S003"],
+              "DÓNDE: los planos por la clave de su imagen (también el de texto viejo)")
+        igual(([b["id"] for b in ficha["donde_base"]["bloques"]], ficha["donde_base"]["planos"]),
+              (["B001"], ["S001"]), "DÓNDE: la base, con los tramos y planos del «antes»")
+
+        firma = ctx.estado.firma("assets")
+        params = json.loads(json.dumps(ctx.estado.params("assets")))
+        llamadas.clear()
+        codigo, ficha = _llamar(servidor.traducir_tipo_relato, pid, {"auto": True})
+        igual(codigo, 200, f"TRADUCIR: 200 ({ficha if codigo != 200 else ''})")
+        igual(esperar(), "listo", "TRADUCIR: termina")
+        igual(sorted(llamadas[0][1]) if llamadas else None, sorted([abierta, inicial]),
+              "TRADUCIR: pide solo lo que falta, en una llamada")
+        codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+        igual((ficha["estados"][0]["cambio_es"], ficha["inicial_es"],
+               ficha["traduccion"]["faltan"]), ("ES " + abierta, "ES " + inicial, 0),
+              "TRADUCIR: la ficha trae el español")
+        igual(ctx.estado.firma("assets"), firma, "TRADUCIR: la firma de assets NO se mueve")
+        igual(ctx.estado.params("assets"), params, "TRADUCIR: y ningún param cambia (regla 1)")
+        ok(os.path.exists(os.path.join(ctx.proyecto.raiz, "traducciones.json")),
+           "TRADUCIR: va al fichero del proyecto")
+        llamadas.clear()
+        _llamar(servidor.traducir_tipo_relato, pid, {})
+        igual((esperar(), llamadas), ("listo", []), "TRADUCIR: sin nada que falte, no llama a Claude")
+
+        # tras un error, la pantalla (auto) no reintenta sola; el botón sí
+        with servidor._LOCK_TRADUCIENDO:
+            servidor._TRADUCIENDO[pid] = {"estado": "error", "tipo": "traducir", "error": "x"}
+        os.remove(os.path.join(ctx.proyecto.raiz, "traducciones.json"))
+        llamadas.clear()
+        _llamar(servidor.traducir_tipo_relato, pid, {"auto": True})
+        igual((esperar(), llamadas), ("error", []), "ERROR: «auto» no se relanza tras un error")
+        _llamar(servidor.traducir_tipo_relato, pid, {})
+        igual((esperar(), len(llamadas)), ("listo", 1), "ERROR: el botón «Traducir» sí")
+
+        # EDITAR EN ESPAÑOL
+        for cuerpo, esperado in (({"estado": "despues"}, 400),
+                                 ({"estado": "volando", "es": "algo"}, 404),
+                                 ({"estado": "despues", "es": "x" * 1300}, 400)):
+            codigo, _m = _llamar(servidor.editar_estado_relato, pid, cuerpo)
+            igual(codigo, esperado, f"EDITAR: {str(cuerpo)[:40]} da {esperado} ({_m})")
+        firma = ctx.estado.firma("assets")
+        llamadas.clear()
+        nuevo = "piso y paredes de porcelanato marfil, mueble de nogal"
+        codigo, ficha = _llamar(servidor.editar_estado_relato, pid,
+                                {"estado": "despues", "es": nuevo})
+        igual(codigo, 200, f"EDITAR: 200 ({ficha if codigo != 200 else ''})")
+        igual(esperar(), "listo", "EDITAR: termina")
+        igual(llamadas[:1], [("en", nuevo, abierta)],
+              "EDITAR: Claude recibe el español y la instrucción anterior")
+        beats = (ctx.estado.params("assets") or {})["catalogo"]["beats"]
+        igual([(b["cambio"], b["estado"]) for b in beats],
+              [("", "antes"), ("EN " + nuevo, "despues")],
+              "EDITAR: solo los tramos de ese estado, con la MISMA etiqueta")
+        codigo, ficha = _llamar(servidor.leer_tipo_relato, pid)
+        e = ficha["estados"][0]
+        igual((e["estado"], e["cambio"], e["cambio_es"], e["vigente"], e["aprobada"]),
+              ("despues", "EN " + nuevo, nuevo, False, False),
+              "EDITAR: el estado lleva lo escrito en español y su imagen deja de valer")
+        ok(not ficha["listo"], "EDITAR: y ya no está todo listo para dibujar")
+        ok(ctx.estado.firma("assets") != firma, "EDITAR: (la firma se mueve: el estado cambió)")
+        igual(e["donde"]["planos"], ["S002", "S003"],
+              "EDITAR: dónde se usa sigue saliendo con el plan viejo (por la clave)")
+
+        # con algo generándose no se edita
+        reales_t = servidor._trabajo_de_cadena
+        servidor._trabajo_de_cadena = lambda _ctx: {"id": "x"}
+        try:
+            codigo, _m = _llamar(servidor.editar_estado_relato, pid,
+                                 {"estado": "despues", "es": "otra cosa"})
+        finally:
+            servidor._trabajo_de_cadena = reales_t
+        igual(codigo, 409, f"EDITAR: con algo generándose, 409 ({_m})")
+    finally:
+        mod.al_espanol, mod.al_ingles = reales_mod["al_espanol"], reales_mod["al_ingles"]
+        p6.plan_actual = real_plan
+        for nombre, valor in reales.items():
+            setattr(servidor, nombre, valor)
+
+
+def probar_quitar_imagen():
+    """Rama unir-planos (26-10-2026): «Quitar esta imagen» y «Deshacer».
+
+    En este proceso: el plan es un doble y la pasada que vuelve a cortar se
+    apunta en vez de lanzarse. Lo que se mira: lo que se rechaza, que lo
+    quitado va a un fichero del proyecto y NO a params (ni una firma se
+    mueve), y que deshacer lo quita del fichero. Nada se paga."""
+    seccion("QUITAR UNA IMAGEN: LA VOZ AL VECINO, Y DESHACER")
+    sys.path.insert(0, RAIZ_ESTUDIO)
+    import app as servidor                                    # noqa: PLC0415
+    from nucleo import Estado, Proyecto                       # noqa: PLC0415
+
+    p6 = servidor.PASOS_MODULOS.p6_assets
+    qp = servidor._quitar_planos()
+    base = tempfile.mkdtemp(prefix="estudio_quitar_")
+    servidor.fijar_raiz_proyectos(base)
+    lanzadas = []
+    real_plan, real_pasada = p6.plan_actual, servidor._pasada_sin_dibujar
+    plan = {"escenas": [
+        {"id": "S001", "narracion": "Este baño era el más feo."},
+        {"id": "S002", "narracion": "Con baldosas grises."},
+        {"id": "S003", "narracion": "Y llega el cambio.", "cartela": {"plantilla": "cifra", "fondo": "negro"}},
+        {"id": "S004", "narracion": "Así quedó."},
+        {"id": "S005", "narracion": "El más bonito."}]}
+    p6.plan_actual = lambda *_a, **_k: plan
+    servidor._pasada_sin_dibujar = lambda ctx, nombre, restaurar=None: (
+        lanzadas.append(nombre) or {"trabajo": "t1", "trabajo_id": "t1"})
+    try:
+        pid = Proyecto.crear(base, "quitar imagen").id
+        Estado(servidor.contexto(pid).proyecto)
+        ctx = servidor.contexto(pid)
+        firma = ctx.estado.firma("assets")
+        params = json.loads(json.dumps(ctx.estado.params("assets") or {}))
+        for sid, cuerpo, esperado in (("S002", {}, 400), ("S002", {"hacia": "arriba"}, 400),
+                                      ("S099", {"hacia": "anterior"}, 404),
+                                      ("S001", {"hacia": "anterior"}, 409),
+                                      ("S003", {"hacia": "anterior"}, 409),
+                                      ("S002", {"hacia": "siguiente"}, 409),
+                                      ("S004", {"hacia": "anterior"}, 409)):
+            codigo, _m = _llamar(servidor.quitar_imagen, pid, sid, cuerpo)
+            igual(codigo, esperado, f"QUITAR: {sid} {cuerpo} da {esperado} ({_m})")
+        igual(lanzadas, [], "QUITAR: lo rechazado no lanza nada")
+        vecinos = servidor._vecinos_para_quitar(plan, "S002")
+        igual(vecinos, {"anterior": "S001", "siguiente": None},
+              "QUITAR: S002 puede ir a S001, no a una cartela")
+        igual(servidor._quitar_en_la_previa(plan, plan["escenas"][2]), {},
+              "PREVIA: una cartela no ofrece quitarse")
+        codigo, ficha = _llamar(servidor.quitar_imagen, pid, "S002", {"hacia": "anterior"})
+        igual(codigo, 200, f"QUITAR: S002 hacia la anterior, 200 ({ficha if codigo != 200 else ''})")
+        igual(lanzadas, ["quitar_imagen"], "QUITAR: lanza la pasada que no dibuja")
+        # SI LA PASADA NO SE PUEDE LANZAR, lo apuntado se deshace
+        def no_se_puede(*_a, **_k):
+            raise servidor.ErrorApi(409, "'assets' ya se está ejecutando")
+        servidor._pasada_sin_dibujar = no_se_puede
+        codigo, _m = _llamar(servidor.quitar_imagen, pid, "S005", {"hacia": "anterior"})
+        igual(codigo, 409, "QUITAR: sin poder lanzar la pasada, 409")
+        ok(all(e["id"] != "S005" for e in qp.leer(ctx.proyecto.raiz)),
+           "QUITAR: y S005 no se queda apuntado como quitado")
+        servidor._pasada_sin_dibujar = lambda ctx, nombre, restaurar=None: (
+            lanzadas.append(nombre) or {"trabajo": "t1", "trabajo_id": "t1"})
+        if codigo == 200:
+            igual((ficha.get("trabajo"), ficha.get("hacia")), ("t1", "S001"), "QUITAR: dice el trabajo y a quién va")
+        igual(qp.leer(ctx.proyecto.raiz),
+              [{"texto": p6._texto_clave(plan["escenas"][1]), "hacia": "anterior", "id": "S002", "n": 0,
+                "fresca": True}],
+              "QUITAR: va al fichero del proyecto, por su texto")
+        igual(ctx.estado.firma("assets"), firma, "QUITAR: la firma de assets NO se mueve")
+        igual(ctx.estado.params("assets") or {}, params, "QUITAR: ni un param cambia (regla 1)")
+        reales_t = servidor._trabajo_de_cadena
+        servidor._trabajo_de_cadena = lambda _ctx: {"id": "x"}
+        try:
+            codigo, _m = _llamar(servidor.quitar_imagen, pid, "S004", {"hacia": "siguiente"})
+        finally:
+            servidor._trabajo_de_cadena = reales_t
+        igual(codigo, 409, f"QUITAR: con algo en marcha, 409 ({_m})")
+        codigo, _m = _llamar(servidor.devolver_imagen, pid, {})
+        igual(codigo, 400, "DESHACER: sin la frase, 400")
+        codigo, _m = _llamar(servidor.devolver_imagen, pid, {"narracion": "otra cosa"})
+        igual(codigo, 404, "DESHACER: algo que no está quitado, 404")
+        codigo, _m = _llamar(servidor.devolver_imagen, pid, {"narracion": "Con  baldosas grises."})
+        igual(codigo, 200, f"DESHACER: con lo que decía, 200 ({_m if codigo != 200 else ''})")
+        igual((qp.leer(ctx.proyecto.raiz), lanzadas[-1]), ([], "devolver_imagen"),
+              "DESHACER: sale del fichero y vuelve a cortar")
+        igual(ctx.estado.firma("assets"), firma, "DESHACER: la firma sigue igual")
+        # UNA FRASE REPETIDA CON UNA YA QUITADA (revisión del 26-10): S002 dice
+        # lo mismo que S004 y ya está quitada (vive en S001): S004 es la
+        # SEGUNDA vez que se dice, no la primera
+        plan_rep = {"escenas": [
+            {"id": "S001", "narracion": "Este baño era el más feo. Con baldosas grises.",
+             "narracion_imagen": "Este baño era el más feo.",
+             "absorbe": [{"id": "S002", "lado": "despues", "narracion": "Con baldosas grises.", "n": 0}]},
+            {"id": "S003", "narracion": "Y llega el cambio."},
+            {"id": "S004", "narracion": "Con baldosas grises."},
+            {"id": "S005", "narracion": "El más bonito."}]}
+        p6.plan_actual = lambda *_a, **_k: plan_rep
+        qp.reponer(ctx.proyecto.raiz, [{"texto": "con baldosas grises", "hacia": "anterior",
+                                        "id": "S002", "n": 0}])
+        codigo, _m = _llamar(servidor.quitar_imagen, pid, "S004", {"hacia": "anterior"})
+        igual(codigo, 200, f"REPETIDA: quitar S004, 200 ({_m if codigo != 200 else ''})")
+        igual(sorted((e["id"], e["n"]) for e in qp.leer(ctx.proyecto.raiz)),
+              [("S002", 0), ("S004", 1)],
+              "REPETIDA: S004 se apunta como la segunda vez (n=1), sin pisar a S002")
+        qp.reponer(ctx.proyecto.raiz, [])
+        p6.plan_actual = lambda *_a, **_k: plan
+        # lo apuntado que el plan no refleja sale en la previa, con su deshacer
+        qp.quitar(ctx.proyecto.raiz, "así quedó", "anterior", "S004")
+        igual([x["id"] for x in servidor._quitados_sin_aplicar(ctx, plan)], ["S004"],
+              "PREVIA: lo quitado que el corte no refleja se enseña para deshacerlo")
+        qp.reponer(ctx.proyecto.raiz, [])
+    finally:
+        p6.plan_actual, servidor._pasada_sin_dibujar = real_plan, real_pasada
+
+
 def probar_dominios():
     """Rama dominio-negocio (21-10-2026): listar los dominios y fijar el de un estilo."""
     seccion("DOMINIOS: EL NEGOCIO DE UN ESTILO")
@@ -7851,6 +8285,8 @@ def main():
         probar_la_foto_del_asistente(cliente, pid)
         probar_onboarding(cliente)
         probar_turno_y_notas_de_otro_texto()
+        probar_cola_de_montaje(cliente)
+        probar_medidor_claude(cliente)
         probar_coste_en_detalle(cliente, pid)
         probar_sistema(cliente)
         probar_lo_que_lleva(cliente)
@@ -7886,6 +8322,8 @@ def main():
         probar_publicar_20oct(cliente, pid)
         probar_espacio_fijo()
         probar_tipo_relato()
+        probar_relato_en_espanol()
+        probar_quitar_imagen()
         probar_dominios()
         probar_tipos_de_negocio()
         probar_guion_visual()

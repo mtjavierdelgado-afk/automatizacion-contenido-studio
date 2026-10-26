@@ -72,6 +72,7 @@ import reglas_estilo  # noqa: E402
 import tipo_relato  # noqa: E402
 import dominios  # noqa: E402
 import guion_visual  # noqa: E402
+import quitar_planos  # noqa: E402
 import cta  # noqa: E402
 import encuadres  # noqa: E402
 import estadisticas  # noqa: E402
@@ -556,7 +557,11 @@ def _marcar_origen(escenas, meta):
 
 
 def _texto_clave(escena):
-    return medios.normalizar_texto(escena.get("narracion") or "")
+    # `narracion_imagen`: la frase para la que se DIBUJO un plano que ademas
+    # lleva la voz de un vecino quitado (`quitar_planos`). Es con la que se le
+    # reconoce: su PNG no se mueve ni sale «obsoleto» por llevar mas voz.
+    return medios.normalizar_texto(escena.get("narracion_imagen")
+                                   or escena.get("narracion") or "")
 
 
 def _emparejar_con_previo(escenas, anteriores):
@@ -1504,6 +1509,15 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # las CARTELAS, y eso lo descuenta `_marcar_cartelas` mas arriba.
     informe["estirados"] = []
 
+    # LAS IMAGENES QUITADAS A MANO (rama unir-planos): su voz pasa al vecino,
+    # que conserva su dibujo. Va DESPUES de escribir los prompts --el del que
+    # se queda no cambia-- y de todo lo que se decide por plano. Sin
+    # `planos_quitados.json` no toca nada (ver `pasos/quitar_planos.py`).
+    quitados = quitar_planos.aplicar(escenas, getattr(proyecto, "raiz", None),
+                                     _texto_clave, _sin_imagen)
+    if quitados["absorbidos"] or quitados["sin_casar"]:
+        informe["quitados"] = quitados
+
     plan = {
         "proyecto": proyecto.id,
         # Con que reglas se corto este plan. Ver MOTOR_PLAN: no entra en ninguna
@@ -1572,7 +1586,8 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # que viajan los planos que deja fuera un recorte.
     absorbidos = sorted({f["absorbido"] for f in
                          (informe.get("cartelas") or {}).get("seguidas") or []
-                         if f.get("absorbido")})
+                         if f.get("absorbido")}
+                        | set(quitados["absorbidos"]))
     # EL PLAN ES LA VERDAD DE QUE PLANOS HAY: un id que sigue en el plan no se
     # retira aunque venga en las dos listas. Los ids son POSICIONALES, asi que
     # un S003 del plan anterior que ya no existe y un S003 del plan de ahora son
@@ -3836,7 +3851,8 @@ def _recolocar_escenas(carpeta, escenas):
     return informe
 
 def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
-                     forzar=False, notas_repaso=None, proyecto=None):
+                     forzar=False, notas_repaso=None, proyecto=None,
+                     solo_conservar=False):
     """Genera los planos y devuelve el coste. En fila o en cadenas paralelas.
 
     Por que cadenas y no planos sueltos
@@ -3970,6 +3986,12 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                          != _texto_clave(escena)))
                 with cerrojo:
                     resultados[uid] = ficha
+                continue
+
+            # SOLO CONSERVAR (la pasada que vuelve a cortar tras quitar una
+            # imagen, rama unir-planos): lo que no esta hecho se queda como
+            # estaba --pendiente-- y no se dibuja ni se paga nada.
+            if solo_conservar:
                 continue
 
             if cartelas.sin_imagen(escena):
@@ -4143,7 +4165,9 @@ def _generar_escenas(plan, dirs, p, trabajo, toca, unidades, resultados, avisar,
                      **({} if cartelas.sin_imagen(escena)
                         else {"png": os.path.relpath(destino, trabajo)}),
                      "cartela": (escena.get("cartela") or {}).get("plantilla"),
-                     "narracion": escena["narracion"],
+                     # la frase para la que se DIBUJA: en un plano que lleva
+                     # la voz de un quitado, la suya (unir-planos)
+                     "narracion": escena.get("narracion_imagen") or escena["narracion"],
                      "t_in": escena["t_in"], "t_out": escena["t_out"],
                      "set": escena.get("set"),
                      "componente": escena.get("componente"),
@@ -5010,7 +5034,7 @@ MOTOR_CAMBIOS = {
 }
 
 OPCIONES_EJECUCION = ("solo_assets", "replantear", "rehacer", "tipos",
-                      "conservar_piezas")
+                      "conservar_piezas", "solo_cortar", "restaurar")
 
 
 def _anotar_tiempo(paso, arranque, hechas, detalle=None, proyecto=None):
@@ -5046,7 +5070,7 @@ def _anotar_tiempo(paso, arranque, hechas, detalle=None, proyecto=None):
 
 def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
              replantear=False, rehacer=False, tipos=None, previo=None,
-             conservar_piezas=False):
+             conservar_piezas=False, solo_cortar=False, restaurar=None):
     """Construye assets y escenas. Si unidades no es None, solo esas.
 
     Con solo_assets se para despues de los assets (sets, reparto, mapas y
@@ -5111,7 +5135,13 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     # cosa que editar: generarlos sin ella seria pagar un sitio reinventado en
     # cada plano, que es justo lo que este modo viene a quitar. Se para ANTES
     # de gastar nada y se dice donde se aprueba.
-    if not solo_assets:
+    # SOLO CORTAR (rama unir-planos): vuelve a cortar y conserva lo que ya
+    # esta dibujado. No pide ninguna unidad, no genera hojas ni planos y no
+    # paga nada: por eso tampoco hace falta que haya base ni guion visual
+    # aprobados (son los guardianes de lo que se PAGA).
+    if solo_cortar:
+        unidades = []
+    if not solo_assets and not solo_cortar:
         # CON «LO QUE DICE EL GUION», SIN GUION VISUAL APROBADO NO SE PAGA NADA
         # (rama guion-visual): se dibujaria lo que dice la voz, que es justo lo
         # que se ha pedido que no pase
@@ -5173,6 +5203,15 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     inventario = {}
     pendientes = [(uid, ficha) for uid, ficha in sorted(necesarios.items())
                   if tipos is None or ficha["tipo"] in tipos]
+    if solo_cortar:
+        # ni una hoja ni una pieza: se hereda lo que ya habia (como en
+        # `solo_assets`, mas abajo) y lo que falte sigue faltando
+        pendientes = []
+        previos = (medios.leer_json(os.path.join(trabajo, "assets.json"), {})
+                   or {}).get("resultados") or {}
+        for uid, salida in previos.items():
+            if uid in necesarios:
+                resultados[uid] = salida
     for indice, (uid, ficha) in enumerate(pendientes):
         # El numero va en el mensaje, no solo en la barra: "12 de 44" dice de
         # un vistazo cuanto queda; un porcentaje hay que traducirlo mentalmente.
@@ -5277,7 +5316,7 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
     coste = _generar_escenas(plan, dirs, p, trabajo, toca, unidades,
                              resultados, avisar, forzar=rehacer,
                              notas_repaso=_notas_del_repaso(proyecto),
-                             proyecto=proyecto)
+                             proyecto=proyecto, solo_conservar=solo_cortar)
 
     avisar(0.96, "comprobando que no hay planos repetidos")
     # Los que comparten imagen A PROPOSITO salen del PLAN: la segunda mitad de
@@ -5314,6 +5353,26 @@ def ejecutar(proyecto, params, avisar=None, unidades=None, solo_assets=False,
         rehechas = dict(resultados)
     else:
         rehechas = {uid: ficha for uid, ficha in resultados.items() if uid in pedidas}
+    # LO QUE SE DEVUELVE TRAS «QUITAR» (unir-planos): su imagen ya estaba
+    # dibujada para ESA frase y se conserva, pero al retirarla el estado
+    # olvido su registro. Se sella aqui --por su frase, nunca por su numero--
+    # para que no salga «por rehacer» y nadie la vuelva a pagar.
+    # `restaurar` = [{"uid", "texto"}]: SOLO esa unidad, SOLO si dice esa
+    # frase y SOLO si su imagen conservada no esta marcada obsoleta. Quien la
+    # pide (app.py) ya ha comprobado que estaba al dia cuando se quito.
+    if solo_cortar and restaurar:
+        por_id = {f"escena:{e.get('id')}": e for e in escenas}
+        for pedido_r in restaurar:
+            if not isinstance(pedido_r, dict):
+                continue
+            uid = str(pedido_r.get("uid") or "")
+            escena = por_id.get(uid)
+            ficha_r = resultados.get(uid) or {}
+            if (escena is not None and uid not in rehechas
+                    and _texto_clave(escena) == medios.normalizar_texto(pedido_r.get("texto"))
+                    and ficha_r.get("origen") == "conservado"
+                    and not ficha_r.get("obsoleta")):
+                rehechas[uid] = ficha_r
     conservadas = sorted(uid for uid in resultados if uid not in rehechas)
 
     generadas = sum(1 for r in resultados.values() if r.get("origen") == "generada")

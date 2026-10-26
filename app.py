@@ -410,32 +410,119 @@ def _motores_congelados():
 #: CLAUDE.md): dos tandas a la vez tardan el doble por imagen y pierden el
 #: registro del gasto. Con un trabajo por video, nada impedia dibujar en dos
 #: videos a la vez (11-10-2026: el dueño queria trabajar en otro video mientras
-#: uno se montaba). Montar, la voz y el guion SI van en paralelo; dibujar espera
-#: su turno aqui, con la barra diciendo a quien espera.
-_TURNO_IMAGENES = {"cerrojo": threading.Lock(), "quien": ""}
+#: uno se montaba). La voz y el guion SI van en paralelo; dibujar espera su
+#: turno aqui, con la barra diciendo a quien espera.
+#:
+#: Y MONTAR TAMBIEN, DE UNO EN UNO (rama cola-montaje, 25-10-2026). El render
+#: ya reparte un video en tantos procesos como nucleos (`ESTUDIO_LOTES`; el VPS
+#: tiene 4): dos montajes a la vez se reparten la misma maquina y terminan los
+#: dos al final, en vez de uno a la mitad de tiempo y el otro a la misma hora.
+#: «Solo montar» (remezclar sobre los clips que hay, segundos) NO espera.
+#:
+#: LAS DOS FILAS ATIENDEN POR ORDEN DE LLEGADA (`fila`): con el cerrojo a secas
+#: cualquiera de los que esperaban podia colarse, y la vista «Cola del Studio»
+#: enseñaria un orden que no es el de verdad. `quien`/`pid`/`desde` son de quien
+#: tiene el turno; `fila`, de quienes esperan. Todo se lee con `_FILAS_LOCK`.
+_FILAS_LOCK = threading.Lock()
+
+
+def _turno_nuevo():
+    return {"cerrojo": threading.Lock(), "quien": "", "pid": "", "desde": 0.0,
+            "fila": [], "local": threading.local()}
+
+
+_TURNO_IMAGENES = _turno_nuevo()
+_TURNO_MONTAJE = _turno_nuevo()
+
+
+def _avisar_espera(avisar, frase):
+    # avisar LANZA Cancelado si se pide parar: la espera se puede cancelar
+    try:
+        avisar(0.0, frase, publico=frase)
+    except TypeError:
+        avisar(0.0, frase)        # un avisar sin «publico» (las tareas del estilo)
+
+
+def _esperar_turno(turno, avisar, ctx, funcion, frase_de, evento, paso):
+    """Corre `funcion()` con el turno de `turno`; espera, por orden de llegada,
+    si otro vídeo lo tiene. `frase_de(quien, puesto)` es lo que dice la barra."""
+    local = turno["local"]
+    if getattr(local, "dentro", 0):
+        # el MISMO hilo ya tiene el turno (una tarea dentro de otra): no se
+        # espera a sí mismo
+        return funcion()
+    nombre = (getattr(ctx.proyecto, "config", None) or {}).get("nombre") or ctx.id
+    plaza = {"pid": ctx.id, "nombre": nombre, "desde": time.time()}
+    cerrojo = turno["cerrojo"]
+    # CANCELAR ES EN EL ACTO (CLAUDE.md): el gestor llama a esto al pedirlo, y
+    # la espera se despierta y pregunta a `avisar`, que lanza Cancelado
+    parar = threading.Event()
+    registrar = getattr(avisar, "al_cancelar", None)
+    quitar = registrar(parar.set) if callable(registrar) else None
+    with _FILAS_LOCK:
+        turno["fila"].append(plaza)
+    avisado, ultimo = False, 0.0
+    try:
+        while True:
+            with _FILAS_LOCK:
+                puesto = next((i for i, x in enumerate(turno["fila"]) if x is plaza), 0) + 1
+            if puesto == 1 and cerrojo.acquire(timeout=0.5):
+                break
+            if puesto > 1:
+                parar.wait(0.5)
+            if parar.is_set():
+                _avisar_espera(avisar, "cancelando…")     # lanza Cancelado
+            if time.time() - ultimo >= 3 or not avisado:
+                if avisado or puesto > 1 or cerrojo.locked():
+                    quien = turno["quien"] or "otro vídeo"
+                    _avisar_espera(avisar, frase_de(quien, puesto))
+                    ultimo = time.time()
+                    if not avisado:
+                        ctx.bitacora.anotar(evento, paso, {"espera_a": quien, "puesto": puesto})
+                        avisado = True
+    finally:
+        with _FILAS_LOCK:
+            turno["fila"] = [x for x in turno["fila"] if x is not plaza]
+        if callable(quitar):
+            quitar()
+    try:
+        with _FILAS_LOCK:
+            turno.update(quien=nombre, pid=ctx.id, desde=time.time())
+        local.dentro = 1
+        return funcion()
+    finally:
+        local.dentro = 0
+        with _FILAS_LOCK:
+            turno.update(quien="", pid="", desde=0.0)
+        cerrojo.release()
+
+
+def _en_la_fila(puesto):
+    return "" if puesto <= 1 else f" (vas {puesto}.º en la fila)"
 
 
 def _con_turno_de_imagenes(avisar, ctx, funcion):
     """Corre `funcion()` con el turno de dibujar. Espera si otro video dibuja."""
-    cerrojo = _TURNO_IMAGENES["cerrojo"]
-    avisado = False
-    while not cerrojo.acquire(timeout=3):
-        quien = _TURNO_IMAGENES["quien"] or "otro vídeo"
-        # avisar LANZA Cancelado si se pide parar: la espera se puede cancelar
-        frase = f"esperando turno: se están dibujando las imágenes de «{quien}»"
-        try:
-            avisar(0.0, frase, publico=frase)
-        except TypeError:
-            avisar(0.0, frase)        # un avisar sin «publico» (las tareas del estilo)
-        if not avisado:
-            ctx.bitacora.anotar("turno_imagenes", "assets", {"espera_a": quien})
-            avisado = True
-    try:
-        _TURNO_IMAGENES["quien"] = (ctx.proyecto.config or {}).get("nombre") or ctx.id
-        return funcion()
-    finally:
-        _TURNO_IMAGENES["quien"] = ""
-        cerrojo.release()
+    return _esperar_turno(
+        _TURNO_IMAGENES, avisar, ctx, funcion,
+        lambda quien, puesto: (f"esperando turno: se están dibujando las imágenes de «{quien}»"
+                               + _en_la_fila(puesto)),
+        "turno_imagenes", "assets")
+
+
+def _con_turno_de_montaje(avisar, ctx, funcion):
+    """Corre `funcion()` con el turno de montar. Espera si otro video se monta."""
+    return _esperar_turno(
+        _TURNO_MONTAJE, avisar, ctx, funcion,
+        lambda quien, puesto: f"esperando turno de montaje: se está montando «{quien}»" + _en_la_fila(puesto),
+        "turno_montaje", "render")
+
+
+def _foto_de_turno(turno):
+    """Quién tiene el turno y quién espera, por orden. Con `_FILAS_LOCK`."""
+    ahora = {"pid": turno["pid"], "nombre": turno["quien"], "desde": turno["desde"]} \
+        if turno["quien"] else None
+    return {"ahora": ahora, "fila": [dict(x) for x in turno["fila"]]}
 
 
 def _medido_en(paso, unidad=None):
@@ -514,8 +601,13 @@ def _correr_paso_marcado(avisar, ctx, paso_id, modulo, unidades, opciones):
                                        unidades=unidades, **extra)
             return modulo.ejecutar(ctx.proyecto, params, avisar, **extra)
 
-    resultado = (_con_turno_de_imagenes(avisar, ctx, correr) if paso_id == "assets"
-                 else correr())
+    # la pasada que solo vuelve a cortar (unir-planos) no dibuja: no espera turno
+    if paso_id == "assets" and not extra.get("solo_cortar"):
+        resultado = _con_turno_de_imagenes(avisar, ctx, correr)
+    elif paso_id == "render" and not extra.get("solo_montar"):
+        resultado = _con_turno_de_montaje(avisar, ctx, correr)
+    else:
+        resultado = correr()
 
     salidas, mapa = _desmontar(modulo, resultado)
 
@@ -2295,6 +2387,179 @@ def listar_trabajos(proyecto: str = Query(default=None),
     return {"trabajos": fichas}
 
 
+# ============================================================ COLA DEL STUDIO
+# rama cola-montaje (25-10-2026): lo que la vista «Cola del Studio» enseña.
+# Solo lee: quién dibuja y quién espera, quién se monta y quién espera (las
+# filas de `_TURNO_IMAGENES` y `_TURNO_MONTAJE`, por orden de llegada), y los
+# demás trabajos en marcha de los vídeos que el servidor tiene abiertos. Un
+# vídeo de un proyecto con clave sin abrir sale sin nombre y sin enlace.
+def _es_taller(ctx):
+    """El proyecto de trabajo de un estilo (láminas, guía…), no un vídeo."""
+    try:
+        return bool((ctx.proyecto.config or {}).get(CONFIG_TALLER))
+    except Exception:                                       # noqa: BLE001
+        return False
+
+
+@app.get("/api/cola_studio")
+def cola_del_studio(peticion: Request):
+    """La cola de todo el Studio: imágenes, montaje y lo demás que trabaja."""
+    try:
+        cerrados = CLIENTES.cerrados_para(raiz_proyectos(), peticion.headers.get("x-estudio-abiertos"))
+    except Exception:                                       # noqa: BLE001
+        cerrados = set()
+
+    def _vestir(plaza):
+        if not plaza:
+            return plaza
+        plaza = dict(plaza)
+        pid = plaza.get("pid") or ""
+        # SOLO LO QUE YA ESTÁ EN MEMORIA: `contexto()` crearía uno nuevo (y al
+        # crearlo limpia marcas en estado.json); un GET no escribe nada
+        with _LOCK:
+            ctx = _CONTEXTOS.get(pid)
+        if ctx is None or _es_taller(ctx):
+            # el taller de un estilo (láminas, imagen base) no es un vídeo: sin «Abrir»
+            plaza["video"] = False
+            return plaza
+        plaza["video"] = True
+        if cerrados and _cliente_del_video(ctx.proyecto) in cerrados:
+            plaza.update(pid="", nombre="un vídeo de un proyecto con clave", video=False)
+        return plaza
+
+    with _FILAS_LOCK:
+        turnos = {"imagenes": _foto_de_turno(_TURNO_IMAGENES),
+                  "montaje": _foto_de_turno(_TURNO_MONTAJE)}
+    for t in turnos.values():
+        t["ahora"] = _vestir(t["ahora"])
+        t["fila"] = [_vestir(x) for x in t["fila"]]
+    with _LOCK:
+        abiertos = list(_CONTEXTOS.items())
+    trabajando = []
+    for pid, ctx in abiertos:
+        try:
+            vivos = ctx.gestor.listar(activos=True)
+        except Exception:                                   # noqa: BLE001
+            continue
+        if not vivos:
+            continue
+        taller = _es_taller(ctx)
+        cerrado = not taller and bool(cerrados) and _cliente_del_video(ctx.proyecto) in cerrados
+        nombre = ("un vídeo de un proyecto con clave" if cerrado
+                  else (ctx.proyecto.config or {}).get("nombre") or pid)
+        for f in vivos:
+            trabajando.append({
+                "pid": "" if cerrado else pid, "nombre": nombre, "video": not (cerrado or taller),
+                "trabajo": "" if cerrado else f.get("id"), "paso": f.get("paso"),
+                "tarea": f.get("nombre"), "estado": f.get("estado"),
+                "progreso": f.get("progreso"), "mensaje": "" if cerrado else (f.get("publico") or f.get("mensaje") or ""),
+                "segundos": f.get("segundos"), "cancelando": f.get("cancelando"),
+            })
+    return {**turnos, "trabajando": trabajando, "ahora": time.time()}
+
+
+# ========================================================== CONSUMO DE CLAUDE
+# rama medidor-claude (25-10-2026): el medidor de la membresía de Claude. El
+# cupo de verdad (ventana de 5 h y semana) lo da el propio CLI y lo guarda
+# `pasos/consumo_claude.py`; aquí solo se lee, se pide medir y se viste el
+# resumen (nombres de los vídeos, sin los de proyectos con clave sin abrir).
+try:
+    import consumo_claude as CONSUMO_CLAUDE  # noqa: E402  (pasos/ ya está en sys.path)
+except Exception:                                           # noqa: BLE001
+    CONSUMO_CLAUDE = None
+
+
+def _cuentas_para_medir():
+    try:
+        return list(CLI_CLAUDE.cuentas()) or [CLI_CLAUDE.POR_DEFECTO]
+    except Exception:                                       # noqa: BLE001
+        return [{"etiqueta": "", "config_dir": ""}]
+
+
+def _nombre_de_pid(pid, cerrados):
+    """Nombre de un vídeo sin abrir su contexto (un GET no crea nada)."""
+    with _LOCK:
+        ctx = _CONTEXTOS.get(pid)
+    if ctx is not None:
+        config = ctx.proyecto.config or {}
+        proyecto = ctx.proyecto
+    else:
+        if not ID_VALIDO.match(str(pid or "")) or str(pid).startswith("_"):
+            return None
+        try:
+            with open(os.path.join(raiz_proyectos(), pid, "proyecto.json"), "r", encoding="utf-8") as fh:
+                config = json.load(fh) or {}
+        except (OSError, ValueError):
+            return None
+        proyecto = type("P", (), {"config": config, "id": pid})()
+    if config.get(CONFIG_TALLER):
+        return {"nombre": f"estilo · {config.get('nombre') or pid}", "video": False}
+    if cerrados:
+        try:
+            if _cliente_del_video(proyecto) in cerrados:
+                return {"nombre": "un vídeo de un proyecto con clave", "video": False, "cerrado": True}
+        except Exception:                                   # noqa: BLE001
+            pass
+    return {"nombre": config.get("nombre") or pid, "video": True}
+
+
+def _consumo_de_claude(peticion):
+    cc = CONSUMO_CLAUDE
+    if cc is None:
+        raise ErrorApi(503, "el medidor de Claude no se ha podido cargar")
+    try:
+        cerrados = CLIENTES.cerrados_para(raiz_proyectos(), peticion.headers.get("x-estudio-abiertos"))
+    except Exception:                                       # noqa: BLE001
+        cerrados = set()
+    cuentas = _cuentas_para_medir()
+    claves = {cc.clave_de(c): cc.etiqueta_de(c) for c in cuentas}
+    todos = cc.leer_cupo()
+    cupo = [dict(todos.get(k) or {"cuenta": etiqueta, "estado": "sin_medir", "ventanas": {}}, clave=k)
+            for k, etiqueta in claves.items()]
+    resumen = cc.resumen()
+    for fila in resumen["por_video"]:
+        visto = _nombre_de_pid(fila["pid"], cerrados) or {"nombre": fila["pid"], "video": False}
+        fila.update(visto)
+        if visto.get("cerrado"):
+            fila["pid"] = ""
+    return {"cupo": cupo, "avisos": cc.avisos({c["clave"]: c for c in cupo}),
+            "resumen": resumen, "midiendo": cc.midiendo(),
+            "umbrales": {"ojo": cc.UMBRAL_OJO, "malo": cc.UMBRAL_MALO},
+            "nombres": cc.NOMBRES_VENTANA, "simulado": cc.simulado(), "ahora": time.time()}
+
+
+@app.get("/api/claude/consumo")
+def consumo_de_claude(peticion: Request):
+    """El medidor de Claude (solo lee): el cupo de cada cuenta, los avisos al
+    70 % y al 90 % y el consumo de los últimos días. Si toca (más de 15 min y
+    ha habido llamadas), lanza una medida en segundo plano: no espera a ella."""
+    if CONSUMO_CLAUDE is not None and not CONSUMO_CLAUDE.midiendo():
+        for cuenta in _cuentas_para_medir():
+            try:
+                if CONSUMO_CLAUDE.toca_medir(cuenta):
+                    CONSUMO_CLAUDE.medir_en_segundo_plano(cuenta)
+            except Exception:                               # noqa: BLE001
+                pass
+    return _consumo_de_claude(peticion)
+
+
+@app.post("/api/claude/consumo/medir")
+def medir_consumo_de_claude(peticion: Request):
+    """«Medir ahora»: una llamada mínima por cuenta (haiku, una palabra) para
+    leer su cupo. Espera a la medida (unos segundos)."""
+    if CONSUMO_CLAUDE is None:
+        raise ErrorApi(503, "el medidor de Claude no se ha podido cargar")
+    # a la vez y con tope: detrás del proxy una petición de un minuto se corta
+    hilos = [threading.Thread(target=CONSUMO_CLAUDE.medir, args=(c,), daemon=True)
+             for c in _cuentas_para_medir()]
+    for hilo in hilos:
+        hilo.start()
+    tope = time.time() + 50
+    for hilo in hilos:
+        hilo.join(max(0.1, tope - time.time()))
+    return _consumo_de_claude(peticion)
+
+
 @app.get("/api/trabajos/{tid}")
 def leer_trabajo(tid: str):
     """Estado y progreso de un trabajo."""
@@ -3386,8 +3651,14 @@ def coste_por_paso(pid: str):
 
 def _desglose_de_eventos(eventos):
     """Lo gastado en un proyecto, por partes y con lo confirmado aparte."""
-    imagenes = {"nuevas": [0, 0.0], "rehechas": [0, 0.0], "personajes": [0, 0.0],
-                "otras": [0, 0.0]}
+    # POR TIPO DE IMAGEN (notas del dueño, 24-10-2026: «diferenciar el coste de
+    # las imágenes del tipo de relato del de las imágenes a montar, las
+    # regeneradas, las referencias…»). La imagen base de un sitio y la de cada
+    # estado pasan por el mismo `_producir_imagen` que las hojas del reparto
+    # (`asset:base_<sitio>`, `asset:estado_<sitio>_<estado>`) y se contaban como
+    # personajes; las portadas, como «otras».
+    imagenes = {"nuevas": [0, 0.0], "rehechas": [0, 0.0], "base": [0, 0.0],
+                "personajes": [0, 0.0], "portadas": [0, 0.0], "otras": [0, 0.0]}
     vistas = set()
     confirmadas = estimadas = 0
     voz = {"grabacion": [0, 0.0], "regrabaciones": [0, 0.0]}
@@ -3400,8 +3671,12 @@ def _desglose_de_eventos(eventos):
             if unidad.startswith("escena:"):
                 clave = "rehechas" if unidad in vistas else "nuevas"
                 vistas.add(unidad)
+            elif unidad.startswith(("asset:base_", "asset:estado_")) or unidad == "base":
+                clave = "base"
             elif unidad.startswith("asset:"):
                 clave = "personajes"
+            elif unidad.startswith("portada") or e.get("paso") == "publicar":
+                clave = "portadas"
             else:
                 clave = "otras"
             n = int((e.get("cantidad") or {}).get("imagenes") or 1)
@@ -4793,6 +5068,11 @@ def _ficha_tipo_relato(ctx):
                    and bool(catalogo.get("beats"))
                    and not any(b.get("cambio")
                                for b in catalogo.get("beats") or [] if isinstance(b, dict)))
+    inicial = str(((catalogo.get("relato") or {}) if isinstance(catalogo.get("relato"), dict)
+                   else {}).get("inicial") or "")
+    # EN ESPAÑOL Y DÓNDE SE USA (rama estados-en-espanol): solo lectura, de un
+    # fichero del proyecto y del plan. No escribe nada (regla 1).
+    en_espanol = _relato_en_espanol(ctx, params, sitio_e, pedidos, estados, inicial)
     return {
         "tipo_relato": {k: v for k, v in guardado.items() if k != "bases"},
         "resuelto": dict(resuelto, nombre=tr.nombre(resuelto["modo"], resuelto.get("cambia"))),
@@ -4813,18 +5093,295 @@ def _ficha_tipo_relato(ctx):
         "calidad": str(params.get("calidad") or "low"),
         "faltan_cambios": sin_cambios,
         # como esta en la base lo que luego cambia (lo escribe Claude al repartir)
-        "inicial": str(((catalogo.get("relato") or {}) if isinstance(catalogo.get("relato"), dict)
-                        else {}).get("inicial") or ""),
+        "inicial": inicial,
+        "inicial_es": en_espanol["inicial_es"],
+        # los planos y bloques de la imagen base (los del «antes»)
+        "donde_base": en_espanol["donde_base"],
+        "traduccion": en_espanol["traduccion"],
     }
 
 
 @app.get("/api/proyectos/{pid}/tipo_relato")
-def leer_tipo_relato(pid: str):
-    """El tipo de relato del video: el guardado, el que rige, las bases y los planos que cambian."""
+def leer_tipo_relato(pid: str, ligero: bool = False):
+    """El tipo de relato del video: el guardado, el que rige, las bases y los planos que cambian.
+
+    Con `?ligero=1` no se calculan los planos que cambian (lee la ficha de cada
+    imagen): es lo que pide la pantalla cada dos segundos mientras traduce."""
     ctx = contexto(pid)
     ficha = _ficha_tipo_relato(ctx)
+    if ligero:
+        return ficha
     ficha["cambios"] = _cambios_del_relato(ctx) if _tipo_relato_guardado(ctx) else None
     return ficha
+
+
+# ------------------------------------------- TIPO DE RELATO · EN ESPAÑOL
+#
+# Rama estados-en-espanol (22-10-2026, pedido del dueño). Los cambios de cada
+# estado y lo que la base ya trae (`inicial`) se escriben en INGLÉS, que es lo
+# que se manda a dibujar; aquí se enseñan en español (`pasos/traducciones.py`,
+# un fichero del proyecto FUERA de params y de toda firma), con DÓNDE SE USA
+# cada imagen (bloques del guion y planos), y se pueden reescribir en español:
+# Claude lo pasa al inglés y se guarda en el `cambio` de los tramos de ESE
+# estado. Traducir no cambia nada; editar mueve el estado (pierde la
+# aprobación y pide otra imagen, que no se dibuja sola).
+#
+# Las dos cosas llaman a Claude y tardan unos segundos: van en un hilo, como la
+# ortografía, y NO como trabajo del vídeo (no bloquean generar ni montar). La
+# pantalla vuelve a leer la ficha mientras `traduccion.estado` sea «pensando».
+
+_TRADUCIENDO = {}
+_LOCK_TRADUCIENDO = threading.Lock()
+
+
+def _traducciones():
+    return getattr(PASOS_MODULOS, "traducciones", None) or __import__("traducciones")
+
+
+def _relato_en_espanol(ctx, params, sitio, pedidos, estados, inicial):
+    """Pega a cada estado su `cambio_es` y su `donde`, y devuelve lo demás.
+
+    -> {"inicial_es", "donde_base", "traduccion": {estado, tipo, error, faltan}}.
+    Nada de esto puede tumbar la ficha: sin plan o sin guion, «dónde» va vacío."""
+    textos = [e["cambio"] for e in estados if e.get("cambio")] + ([inicial] if inicial else [])
+    try:
+        mod = _traducciones()
+        traducidos = mod.de(ctx.proyecto.raiz, textos)
+    except Exception:                                       # noqa: BLE001
+        traducidos = {}
+    limpio = lambda t: " ".join(str(t or "").split())        # noqa: E731
+    try:
+        donde = _donde_se_usa_relato(ctx, params, sitio, pedidos)
+    except Exception:                                       # noqa: BLE001
+        donde = {}
+    for e in estados:
+        e["cambio_es"] = traducidos.get(limpio(e.get("cambio")), "")
+        e["donde"] = donde.get(e["estado"]) or {"bloques": [], "planos": []}
+    with _LOCK_TRADUCIENDO:
+        marcha = dict(_TRADUCIENDO.get(ctx.id) or {})
+    faltan = sum(1 for t in textos if not traducidos.get(limpio(t)))
+    return {"inicial_es": traducidos.get(limpio(inicial), "") if inicial else "",
+            "donde_base": donde.get("") or {"bloques": [], "planos": []},
+            "traduccion": {"estado": marcha.get("estado") or "listo",
+                           "tipo": marcha.get("tipo") or "",
+                           "estado_relato": marcha.get("estado_relato") or "",
+                           "error": marcha.get("error") or "",
+                           "faltan": faltan}}
+
+
+def _donde_se_usa_relato(ctx, params, sitio, pedidos):
+    """{estado: {"bloques": [{id, n, texto}], "planos": [ids]}}; la clave "" es la
+    imagen base (los tramos sin cambio, el «antes»).
+
+    Los BLOQUES salen del catálogo (cada tramo dice desde/hasta qué bloque del
+    guion), así que se saben aunque no haya imágenes. Los PLANOS salen del plan
+    cortado: los que editan la imagen de ese estado (mismo `cambio`) o la base
+    (editan y sin cambio). Sin plan, la lista va vacía y la pantalla lo dice."""
+    tr = _tipo_relato()
+    if not sitio:
+        return {}
+    catalogo = params.get("catalogo") or {}
+    bloques = _bloques_del_guion(ctx)
+    posicion = {b["id"].upper(): i for i, b in enumerate(bloques)}
+    salida = {}
+
+    def ficha(clave):
+        return salida.setdefault(clave, {"bloques": [], "planos": [], "_vistos": set()})
+
+    for beat in catalogo.get("beats") or []:
+        if not isinstance(beat, dict) or beat.get("set") not in (None, "", sitio):
+            continue
+        estado = tr.estado_de(beat)
+        if estado and estado not in pedidos:
+            continue
+        desde = posicion.get(str(beat.get("desde") or "").strip().upper())
+        hasta = posicion.get(str(beat.get("hasta") or beat.get("desde") or "").strip().upper())
+        if desde is None:
+            continue
+        hasta = desde if hasta is None or hasta < desde else hasta
+        f = ficha(estado)
+        for i in range(desde, hasta + 1):
+            if i in f["_vistos"]:
+                continue
+            f["_vistos"].add(i)
+            texto = " ".join(bloques[i]["texto"].split())
+            f["bloques"].append({"id": bloques[i]["id"], "n": i + 1,
+                                 "texto": texto[:110] + ("…" if len(texto) > 110 else "")})
+    por_cambio = {" ".join(str(c or "").split()): est for est, c in pedidos.items()}
+    plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+    for escena in plan.get("escenas") or []:
+        if not escena.get("editar_base") or not escena.get("id"):
+            continue
+        cambio = " ".join(str(escena.get("cambio") or "").split())
+        # POR LA CLAVE DE SU IMAGEN primero («sitio#estado», `_marcar_edicion`):
+        # sigue valiendo cuando se acaba de editar el cambio y el plan todavía
+        # lleva el texto de antes. Por el texto, solo si no la trae.
+        clave = str(escena.get("base_clave") or "")
+        if "#" in clave:
+            estado = clave.split("#", 1)[1]
+            if estado not in pedidos:
+                continue
+        elif cambio:
+            estado = por_cambio.get(cambio)
+            if estado is None:
+                continue
+        else:
+            estado = ""
+        ficha(estado)["planos"].append(str(escena["id"]))
+    for f in salida.values():
+        f["bloques"].sort(key=lambda b: b["n"])
+        f.pop("_vistos", None)
+    return salida
+
+
+def _textos_del_relato(ctx):
+    """Los textos en inglés que se enseñan traducidos: cada cambio y `inicial`."""
+    p6 = PASOS_MODULOS.p6_assets
+    params = ctx.estado.params("assets") or {}
+    try:
+        _sitio, pedidos = p6.estados_del_relato(ctx.proyecto, params)
+    except Exception:                                       # noqa: BLE001
+        pedidos = {}
+    catalogo = params.get("catalogo") or {}
+    relato = catalogo.get("relato") if isinstance(catalogo.get("relato"), dict) else {}
+    textos = [c for c in pedidos.values() if c]
+    if (relato or {}).get("inicial"):
+        textos.append(relato["inicial"])
+    return textos
+
+
+def _error_para_persona(fallo):
+    error = str(fallo)[:600]
+    if CLI_CLAUDE.es_pasajero(fallo):
+        error = ("La sesión de Claude se estaba renovando y no ha contestado. Vuelve a "
+                 f"intentarlo en un minuto; no se ha cambiado nada.\n\n{error}")
+    return error
+
+
+def _lanzar_traduccion(ctx, tipo, correr, estado_relato=""):
+    """Corre `correr()` en un hilo y deja su estado en `_TRADUCIENDO[pid]`.
+    -> False si ya había una en marcha para este vídeo."""
+    with _LOCK_TRADUCIENDO:
+        if (_TRADUCIENDO.get(ctx.id) or {}).get("estado") == "pensando":
+            return False
+        _TRADUCIENDO[ctx.id] = {"estado": "pensando", "tipo": tipo,
+                                "estado_relato": estado_relato}
+
+    def hilo():
+        try:
+            correr()
+            ficha = {"estado": "listo", "tipo": tipo, "estado_relato": estado_relato}
+        except Exception as fallo:                          # noqa: BLE001
+            ficha = {"estado": "error", "tipo": tipo, "estado_relato": estado_relato,
+                     "error": _error_para_persona(fallo)}
+        with _LOCK_TRADUCIENDO:
+            _TRADUCIENDO[ctx.id] = ficha
+
+    threading.Thread(target=hilo, daemon=True, name=f"traducir-{ctx.id}").start()
+    return True
+
+
+@app.post("/api/proyectos/{pid}/tipo_relato/traducir")
+def traducir_tipo_relato(pid: str, cuerpo: dict = Body(default=None)):
+    """Traduce al español lo que falte (cada cambio y `inicial`). {auto?: bool}
+
+    No cambia ningún param ni ninguna firma: la traducción va a
+    `<proyecto>/traducciones.json`. Con `auto` (lo pide la pantalla sola al
+    abrir) no se relanza tras un error: así una sesión de Claude caída no se
+    reintenta cada vez que se repinta; el botón «Traducir» sí. -> la ficha."""
+    ctx = contexto(pid)
+    auto = bool(_cuerpo(cuerpo).get("auto"))
+    mod = _traducciones()
+    faltan = mod.faltan(ctx.proyecto.raiz, _textos_del_relato(ctx))
+    with _LOCK_TRADUCIENDO:
+        previo = dict(_TRADUCIENDO.get(ctx.id) or {})
+    if faltan and not (auto and previo.get("estado") == "error"):
+        raiz = ctx.proyecto.raiz
+
+        def correr():
+            hechas = mod.al_espanol(faltan, cwd=RAIZ_ESTUDIO)
+            mod.guardar(raiz, hechas)
+            if not hechas:
+                raise mod.ErrorTraduccion("Claude no ha devuelto ninguna traducción; "
+                                          "vuelve a pedirla.")
+            ctx.bitacora.anotar("tipo_relato_traducido", "assets", {"textos": len(hechas)})
+
+        _lanzar_traduccion(ctx, "traducir", correr)
+    return _ficha_tipo_relato(ctx)
+
+
+@app.post("/api/proyectos/{pid}/tipo_relato/estado/editar")
+def editar_estado_relato(pid: str, cuerpo: dict = Body(default=None)):
+    """Reescribe en ESPAÑOL el cambio de un estado. {estado, es}
+
+    Claude lo pasa al inglés (en un hilo) y se guarda en el `cambio` de todos
+    los tramos de ese estado, con la misma etiqueta: su imagen deja de valer
+    (pierde la aprobación y pide otra) y sus planos quedan para rehacer. No se
+    dibuja nada. -> la ficha, con `traduccion.estado` «pensando»."""
+    tr = _tipo_relato()
+    p6 = PASOS_MODULOS.p6_assets
+    ctx = contexto(pid)
+    datos = _cuerpo(cuerpo)
+    estado = str(datos.get("estado") or "").strip()
+    es = " ".join(str(datos.get("es") or "").split())
+    if not es:
+        raise ErrorApi(400, "escribe el cambio en español")
+    if len(es) > 1200:
+        raise ErrorApi(400, "el cambio es demasiado largo: como mucho 1.200 letras")
+    params = ctx.estado.params("assets") or {}
+    sitio, pedidos = p6.estados_del_relato(ctx.proyecto, params)
+    if not sitio or estado not in pedidos:
+        raise ErrorApi(404, f"este vídeo no tiene el estado «{estado}»")
+    if not ((params.get("catalogo") or {}).get("beats")):
+        raise ErrorApi(409, "los cambios de este vídeo no están guardados en el reparto: "
+                            "pulsa antes «Escribir qué cambia en cada tramo»")
+    if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+        raise ErrorApi(409, "hay algo generándose en este vídeo: cámbialo cuando termine")
+    with _COLA_LOCK:
+        if _cola_dibujando(ctx):
+            raise ErrorApi(409, "se están rehaciendo imágenes con tus notas: cámbialo "
+                                "cuando terminen")
+    anterior = pedidos[estado]
+    mod = _traducciones()
+    raiz = ctx.proyecto.raiz
+
+    def correr():
+        ingles = mod.al_ingles(es, anterior=anterior, cwd=RAIZ_ESTUDIO)
+        with _cerrojo_de_cadena(ctx.id):
+            with _COLA_LOCK:
+                dibujando = _cola_dibujando(ctx)
+            if dibujando or _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+                raise RuntimeError("se ha empezado a generar algo en este vídeo mientras "
+                                   "se traducía: vuelve a guardar el cambio cuando termine")
+            catalogo = copy.deepcopy((ctx.estado.params("assets") or {}).get("catalogo") or {})
+            tocados = 0
+            for beat in catalogo.get("beats") or []:
+                if not isinstance(beat, dict) or beat.get("set") not in (None, "", sitio):
+                    continue
+                if tr.estado_de(beat) != estado:
+                    continue
+                # comparado COMO LO LEE `estados_del_catalogo` (recortado a su
+                # tope): un cambio largo escrito a mano no da un falso «se ha
+                # reescrito»
+                if tr._texto(beat.get("cambio"), 400) != tr._texto(anterior, 400):
+                    raise RuntimeError("los cambios de este estado se han reescrito mientras "
+                                       "se traducía: vuelve a abrirlo y guárdalo otra vez")
+                beat["cambio"] = ingles
+                # la MISMA etiqueta: es lo que mantiene el estado (y su sitio
+                # en el mapa de bases) aunque cambie su texto
+                beat["estado"] = estado
+                tocados += 1
+            if not tocados:
+                raise RuntimeError(f"el estado «{estado}» ya no está en el reparto")
+            if ingles != tr._texto(anterior, 400):
+                ctx.estado.actualizar_params("assets", {"catalogo": catalogo})
+        mod.guardar(raiz, {ingles: es})
+        ctx.bitacora.anotar("tipo_relato_estado_editado", "assets",
+                            {"estado": estado, "tramos": tocados})
+
+    if not _lanzar_traduccion(ctx, "editar", correr, estado_relato=estado):
+        raise ErrorApi(409, "ya se está traduciendo algo de este vídeo: espera unos segundos")
+    return _ficha_tipo_relato(ctx)
 
 
 def _cambios_del_relato(ctx):
@@ -6811,6 +7368,198 @@ def aceptar_imagen_obsoleta(pid: str, sid: str):
     return {"ok": True, "id": sid}
 
 
+# ------------------------------------------------ QUITAR UNA IMAGEN (unir-planos)
+#
+# Rama unir-planos (25-10-2026, pedido del dueño). «Quitar esta imagen»: lo que
+# se oye en ella pasa a la de antes o a la de después, que conserva su dibujo.
+# Se apunta en `<proyecto>/planos_quitados.json` (`pasos/quitar_planos.py`,
+# FUERA de params: ahí explica por qué) y se lanza una pasada de imágenes SIN
+# NINGUNA UNIDAD PEDIDA, que no dibuja nada: solo vuelve a cortar y deja una
+# versión nueva. Detrás quedan los rótulos y el montaje, gratis, con «Montar».
+# Deshacer es lo mismo al revés, y tampoco paga: si la imagen quitada ya no
+# estuviera, el plano vuelve sin imagen y se dibuja solo si se pide.
+
+def _quitar_planos():
+    return getattr(PASOS_MODULOS, "quitar_planos", None) or __import__("quitar_planos")
+
+
+def _vecinos_para_quitar(plan, sid):
+    """{"anterior": id|None, "siguiente": id|None} a los que puede ir la voz de
+    `sid`; None en los dos si `sid` no se puede quitar."""
+    qp = _quitar_planos()
+    sin_imagen = PASOS_MODULOS.p6_assets._sin_imagen
+    escenas = [e for e in (plan.get("escenas") or []) if e.get("id")]
+    ids = [str(e["id"]) for e in escenas]
+    if sid not in ids:
+        return None
+    i = ids.index(sid)
+    salida = {"anterior": None, "siguiente": None}
+    if not qp.se_puede_quitar(escenas[i], sin_imagen) or qp.tiene_continuacion(escenas, i):
+        return salida
+    if i > 0 and qp.puede_recibir(escenas[i - 1], sin_imagen):
+        salida["anterior"] = ids[i - 1]
+    if i + 1 < len(escenas) and qp.puede_recibir(escenas[i + 1], sin_imagen):
+        salida["siguiente"] = ids[i + 1]
+    return salida
+
+
+def _quitar_en_la_previa(plan, escena):
+    """Lo que la diapositiva necesita para «Quitar esta imagen» y «Deshacer»."""
+    try:
+        vecinos = _vecinos_para_quitar(plan, str(escena.get("id") or "")) or {}
+    except Exception:                                       # noqa: BLE001
+        vecinos = {}
+    salida = {}
+    if vecinos.get("anterior") or vecinos.get("siguiente"):
+        salida["quitar"] = vecinos
+    if escena.get("absorbe"):
+        salida["absorbe"] = [{"id": a.get("id"), "lado": a.get("lado"),
+                              "narracion": a.get("narracion") or "",
+                              "n": int(a.get("n") or 0)}
+                             for a in escena["absorbe"] if isinstance(a, dict)]
+    return salida
+
+
+def _sin_nada_en_marcha(ctx, que):
+    if _trabajo_de_cadena(ctx) is not None or ctx.gestor.listar(activos=True):
+        raise ErrorApi(409, f"hay algo en marcha en este vídeo: {que} cuando termine")
+    with _COLA_LOCK:
+        if _cola_dibujando(ctx):
+            raise ErrorApi(409, f"se están rehaciendo imágenes con tus notas: {que} "
+                                "cuando terminen")
+
+
+def _pasada_sin_dibujar(ctx, nombre, restaurar=None):
+    """La pasada de imágenes que solo vuelve a cortar (`solo_cortar`): ninguna
+    unidad pedida, sin hojas ni planos nuevos, sin esperar turno de imágenes.
+    No se dibuja ni se paga nada. `restaurar`: [{uid, texto}] del plano devuelto,
+    que se sella con su imagen de siempre si sigue diciendo eso y su imagen no
+    está obsoleta. -> {trabajo, trabajo_id}"""
+    opciones = {"solo_cortar": True}
+    if restaurar:
+        opciones["restaurar"] = list(restaurar)
+    tid = lanzar_paso(ctx, "assets", [], nombre=nombre, opciones=opciones)
+    return {"trabajo": tid, "trabajo_id": tid}
+
+
+def _quitados_sin_aplicar(ctx, plan):
+    """Lo apuntado como quitado que el plan de ahora NO refleja (la pasada
+    fallo o se cancelo, o se volvio a una version anterior): se enseña con su
+    «Deshacer» para que nunca quede algo quitado sin forma de devolverlo."""
+    p6 = PASOS_MODULOS.p6_assets
+    aplicados = set()
+    for escena in plan.get("escenas") or []:
+        for a in escena.get("absorbe") or []:
+            if isinstance(a, dict):
+                aplicados.add((p6._texto_clave({"narracion": a.get("narracion")}),
+                               int(a.get("n") or 0)))
+    return [{"id": e.get("id"), "narracion": e["texto"], "n": e["n"], "hacia": e["hacia"]}
+            for e in _quitar_planos().leer(ctx.proyecto.raiz)
+            if (e["texto"], e["n"]) not in aplicados]
+
+
+@app.post("/api/proyectos/{pid}/planos/{sid}/quitar", status_code=202)
+def quitar_imagen(pid: str, sid: str, cuerpo: dict = Body(default=None)):
+    """Quita la imagen `sid`: su voz pasa a la de antes o a la de después.
+    {hacia: "anterior"|"siguiente"} -> el trabajo (gratis) que vuelve a cortar."""
+    ctx = contexto(pid)
+    p6 = PASOS_MODULOS.p6_assets
+    hacia = str(_cuerpo(cuerpo).get("hacia") or "")
+    if hacia not in _quitar_planos().HACIA:
+        raise ErrorApi(400, "di a qué imagen pasa la voz: «anterior» o «siguiente»")
+    with _cerrojo_de_cadena(ctx.id):
+        _sin_nada_en_marcha(ctx, "quítala")
+        plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+        vecinos = _vecinos_para_quitar(plan, sid)
+        if vecinos is None:
+            raise ErrorApi(404, f"este vídeo no tiene la imagen {sid}")
+        if not vecinos.get(hacia):
+            raise ErrorApi(409, f"la voz de {sid} no puede pasar a la imagen {hacia}: "
+                                "no la hay, o es una cartela o la continuación de otra")
+        escenas = [e for e in plan["escenas"] if e.get("id")]
+        i = next(n for n, e in enumerate(escenas) if str(e.get("id")) == sid)
+        qp = _quitar_planos()
+        unidad = ((ctx.estado.params("assets") or {}).get("unidades") or {}).get(f"escena:{sid}")
+        antes = qp.leer(ctx.proyecto.raiz)
+        texto = p6._texto_clave(escenas[i])
+        # LA OCURRENCIA EN EL CORTE ORIGINAL, como la cuenta `aplicar`: los
+        # planos de antes que dicen lo mismo, tambien los ya quitados (viven
+        # en el `absorbe` de su vecino; los de `sid` mismo, solo los de antes)
+        def quitados_iguales(escena, solo_antes=False):
+            return sum(1 for a in escena.get("absorbe") or []
+                       if isinstance(a, dict) and (not solo_antes or a.get("lado") == "antes")
+                       and p6._texto_clave({"narracion": a.get("narracion")}) == texto)
+        n = (qp.ocurrencia(escenas, i, p6._texto_clave)
+             + sum(quitados_iguales(e) for e in escenas[:i])
+             + quitados_iguales(escenas[i], solo_antes=True))
+        # si estaba al dia al quitarla: solo entonces se sella al deshacer
+        fresca = f"escena:{sid}" not in set(ctx.estado.unidades_obsoletas("assets") or [])
+        qp.quitar(ctx.proyecto.raiz, texto, hacia, sid, n=n,
+                  unidad=unidad if isinstance(unidad, dict) else None, fresca=fresca)
+        try:
+            ficha = _pasada_sin_dibujar(ctx, "quitar_imagen")
+        except Exception:
+            # sin pasada no se aplica: lo apuntado se deshace, o quedaria
+            # quitado a medias (y sin «Deshacer» en la pantalla)
+            qp.reponer(ctx.proyecto.raiz, antes)
+            raise
+    ctx.bitacora.anotar("imagen_quitada", "assets",
+                        {"plano": sid, "hacia": hacia, "a": vecinos[hacia]})
+    return dict(ficha, quitada=sid, hacia=vecinos[hacia])
+
+
+@app.post("/api/proyectos/{pid}/planos/devolver", status_code=202)
+def devolver_imagen(pid: str, cuerpo: dict = Body(default=None)):
+    """Deshace «Quitar esta imagen». {narracion: lo que decía la imagen quitada}
+    -> el trabajo (gratis) que vuelve a cortar."""
+    ctx = contexto(pid)
+    p6 = PASOS_MODULOS.p6_assets
+    datos = _cuerpo(cuerpo)
+    narracion = str(datos.get("narracion") or "")
+    texto = p6._texto_clave({"narracion": narracion})
+    try:
+        n = max(0, int(datos.get("n") or 0))
+    except (TypeError, ValueError):
+        raise ErrorApi(400, "'n' tiene que ser un número")
+    if not texto:
+        raise ErrorApi(400, "manda {narracion}: lo que decía la imagen quitada")
+    qp = _quitar_planos()
+    with _cerrojo_de_cadena(ctx.id):
+        _sin_nada_en_marcha(ctx, "deshazlo")
+        entrada = qp.devolver(ctx.proyecto.raiz, texto, n)
+        if entrada is None:
+            raise ErrorApi(404, "esa imagen no está quitada")
+        # SUS PARAMS POR UNIDAD (la dirección, la nota...), que el núcleo borró
+        # al retirarla. Solo si el corte de ahora la tiene en el mismo número
+        # (el que se lleva su voz la nombra con él): si no, se dejan fuera
+        # antes que escribirlos en otro plano.
+        uid = f"escena:{entrada['id']}"
+        plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+        en_su_sitio = any(a.get("id") == entrada["id"] and int(a.get("n") or 0) == n
+                          for e in plan.get("escenas") or []
+                          for a in e.get("absorbe") or [] if isinstance(a, dict))
+        repuso = False
+        if entrada.get("unidad") and entrada["id"] and en_su_sitio:
+            unidades = (ctx.estado.params("assets") or {}).get("unidades") or {}
+            if uid not in unidades:
+                ctx.estado.actualizar_params("assets", {"unidades": {uid: entrada["unidad"]}})
+                repuso = True
+        restaurar = ([{"uid": uid, "texto": texto}]
+                     if en_su_sitio and entrada["id"] and entrada.get("fresca") else None)
+        try:
+            ficha = _pasada_sin_dibujar(ctx, "devolver_imagen", restaurar=restaurar)
+        except Exception:
+            qp.restaurar(ctx.proyecto.raiz, entrada)
+            if repuso:
+                with ctx.estado._lock:
+                    params = copy.deepcopy(ctx.estado.params("assets") or {})
+                    (params.get("unidades") or {}).pop(uid, None)
+                    ctx.estado.set_params("assets", params)
+            raise
+    ctx.bitacora.anotar("imagen_devuelta", "assets", {"narracion": narracion[:120]})
+    return dict(ficha, devuelta=True)
+
+
 @app.get("/api/proyectos/{pid}/previsualizacion")
 def leer_previsualizacion(pid: str):
     """Las piezas para ver el video sin montarlo. -> {escenas, audio, ...}"""
@@ -6869,6 +7618,9 @@ def leer_previsualizacion(pid: str):
             # y si el dibujo que hay ya no es de lo que aqui se dice. Va vacio
             # cuando esta al dia: es una excepcion, no un campo de todos.
             **_obsolescencia(ctx, escena),
+            # «Quitar esta imagen» (a qué vecinos puede ir su voz) y la voz de
+            # los quitados que lleva (rama unir-planos)
+            **_quitar_en_la_previa(plan, escena),
             # EL CUADRO YA COMPUESTO, cuando existe, y manda sobre todo lo
             # demas. `p7_callouts.previsualizar` compone lo MISMO que renderiza
             # `p8_render` --la imagen dentro del transform de camara, la capa
@@ -6898,6 +7650,8 @@ def leer_previsualizacion(pid: str):
     render = ctx.estado.params("render") or {}
     return {
         "escenas": escenas,
+        # lo apuntado como quitado que este corte aún no refleja (unir-planos)
+        "quitados_sin_aplicar": _quitados_sin_aplicar(ctx, plan),
         "audio": _audio_de_la_toma(ctx),
         # LA MUSICA Y LOS EFECTOS SOLO PARA EL PLAY SEGUIDO. Escena a escena se
         # oye la VOZ y nada mas: lo que se esta juzgando ahi es si la imagen
@@ -12055,6 +12809,13 @@ def probar_claves(cuerpo: dict = Body(default=None)):
             raise ErrorApi(500, f"no se ha podido leer el almacén de claves: {fallo}")
     modulo = PASOS_MODULOS.comprobar_claves
     pruebas = modulo.probar_todas(cuentas_claude=cuentas, con_claude=con_claude)
+    # las de analizar cuentas (YouTube, Meta, Apify), que viven en Configuración (rediseno-publicar)
+    if CUENTAS is not None:
+        try:
+            pruebas += CUENTAS.probar_conexiones()
+        except Exception as fallo:  # noqa: BLE001
+            pruebas.append({"proveedor": "lectura_youtube", "estado": "sin_red",
+                            "mensaje": f"la prueba ha fallado: {type(fallo).__name__}: {fallo}"})
     for cuenta in cuentas:
         if cuenta.get("id"):
             _olvidar_sesion(cuenta["id"])

@@ -23,7 +23,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 |---|---|---|
 | `GET` | `/api/proyectos` | Proyectos disponibles, del mas reciente al mas antiguo. |
 | `POST` | `/api/proyectos` | Crea un proyecto nuevo a partir de {"nombre"}. |
-| `GET` | `/api/proyectos/_resumen` | Por dónde va cada vídeo (`?ids=a,b`, hasta 120; la pantalla pide de 40 en 40), para su tarjeta en Tus proyectos. Lee estado.json y proyecto.json sin abrir el vídeo: no escribe ni cachea nada. |
+| `GET` | `/api/proyectos/_resumen` | Por dónde va cada vídeo, para su tarjeta en Tus proyectos (rediseño de |
 | `DELETE` | `/api/proyectos/papelera` | Vacia la papelera entera. Tampoco tiene vuelta atras. |
 | `GET` | `/api/proyectos/papelera` | Proyectos apartados, del mas recientemente apartado al mas antiguo. |
 | `DELETE` | `/api/proyectos/papelera/{carpeta}` | Borra DE VERDAD un proyecto apartado. No hay vuelta atras. |
@@ -57,12 +57,14 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `POST` | `/api/proyectos/{pid}/ortografia/descartar` | Lo que se deja SIN marcar al aplicar: {rid, ids: [...]}. Esos textos se |
 | `POST` | `/api/proyectos/{pid}/ortografia/revisar` | Revisa la ortografia de {fuente: "subtitulos"} (los del video) o de |
 | `GET` | `/api/proyectos/{pid}/ortografia/{rid}` | Como va la revision de ortografia, y lo que propone al terminar. |
+| `POST` | `/api/proyectos/{pid}/planos/devolver` | Deshace «Quitar esta imagen». {narracion: lo que decía la imagen quitada} |
 | `GET` | `/api/proyectos/{pid}/planos/elementos` | {planos: {sid: [elementos]}, no_aplica, tipos, entradas, intensidades, |
 | `GET` | `/api/proyectos/{pid}/planos/montaje` | {video, planos: {sid: {movimiento?, profundidad?}}, no_aplica, niveles, profundidad} |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/elementos` | {elementos: [...]} de UN plano (vacia, los quita). Deja pendientes ese |
 | `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/nota-ia` | LA OTRA OPCION (se paga al aplicarla): una nota de imagen que pide |
 | `POST` | `/api/proyectos/{pid}/planos/{sid}/elementos/vista` | La imagen del plano con sus elementos encima, quietos (todos a la vez), |
 | `PUT` | `/api/proyectos/{pid}/planos/{sid}/montaje` | {movimiento?: quieto|sobrio|vivo|dinamico|null, profundidad?: true|false|null} |
+| `POST` | `/api/proyectos/{pid}/planos/{sid}/quitar` | Quita la imagen `sid`: su voz pasa a la de antes o a la de después. |
 | `POST` | `/api/proyectos/{pid}/presets-canal/{preset_id}/aplicar` | Copia los valores del preset a los params de los pasos que toque. |
 | `GET` | `/api/proyectos/{pid}/previsualizacion` | Las piezas para ver el video sin montarlo. -> {escenas, audio, ...} |
 | `PUT` | `/api/proyectos/{pid}/redactor` | Guarda el prompt escrito de cada plano. Un prompt vacío lo quita. |
@@ -88,7 +90,9 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `GET` | `/api/proyectos/{pid}/tipo_relato/base/imagen` | La imagen base (aprobada o no) de un sitio del video, o la de un estado. |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/base/usar_subida` | La imagen subida del espacio fijo pasa a ser la base, aprobada (gratis). |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/cambios` | En «un espacio que cambia», Claude escribe el cambio de cada tramo (solo texto). |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/estado/editar` | Reescribe en ESPAÑOL el cambio de un estado. {estado, es} |
 | `POST` | `/api/proyectos/{pid}/tipo_relato/rehacer` | Rehace SOLO los planos pedidos de los que cambian con el tipo de relato (se paga). |
+| `POST` | `/api/proyectos/{pid}/tipo_relato/traducir` | Traduce al español lo que falte (cada cambio y `inicial`). {auto?: bool} |
 
 ## Pasos: estado, params y ejecución
 
@@ -349,6 +353,8 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | | Ruta | Qué hace |
 |---|---|---|
 | `GET` | `/` | La interfaz del Estudio. |
+| `GET` | `/api/claude/consumo` | El medidor de Claude (solo lee): el cupo de cada cuenta, los avisos al |
+| `POST` | `/api/claude/consumo/medir` | «Medir ahora»: una llamada mínima por cuenta (haiku, una palabra) para |
 | `GET` | `/api/clientes` | Los proyectos (clientes) y a cual pertenece cada estilo. |
 | `POST` | `/api/clientes` | Un proyecto nuevo: {nombre}. |
 | `PUT` | `/api/clientes/estilos/{preset_id}` | Mueve un estilo (y sus videos) a un proyecto: {cliente} ("" lo saca). |
@@ -359,6 +365,7 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 | `PUT` | `/api/clientes/{cid}/negocio` | Crea o cambia la ficha del negocio de un proyecto: {nombre (qué hace), reglas? (formato de las reglas del estilo), revisor?: {equipo?, orientacion?}}. Se la pone a todos sus estilos (`estilo.dominio`). -> {negocio, estilos} |
 | `DELETE` | `/api/clientes/{cid}/negocio` | Quita la ficha: sus estilos vuelven a lo general; los vídeos ya hechos no cambian |
 | `POST` | `/api/clientes/{cid}/abrir` | Comprueba la clave de un proyecto. 403 si no es. |
+| `GET` | `/api/cola_studio` | La cola de todo el Studio: imágenes, montaje y lo demás que trabaja. |
 | `GET` | `/api/dominios` | El negocio general y las fichas del negocio de los proyectos (Etapa Foto C). -> {dominios, automatico} |
 | `GET` | `/api/inicio/panel` | El panel guardado de ese usuario, o {panel: null} si no tiene. |
 | `PUT` | `/api/inicio/panel` | Guarda el panel de un usuario: {usuario, panel} (panel null lo borra). |
@@ -490,4 +497,4 @@ Reglas que valen para toda la API y no se repiten en cada fila:
 
 ---
 
-**372 endpoints.** Escrito por `generar_api.py` desde `app.py`.
+**380 endpoints.** Escrito por `generar_api.py` desde `app.py`.

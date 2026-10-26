@@ -9167,5 +9167,36 @@ def descripcion_de_cada_plano(navegador, datos):
     ok((assets_despues or {}).get("firma") == (assets or {}).get("firma") and (assets or {}).get("firma"),
        "ni mueve la firma de las imágenes")
 
+
+@escenario
+def claude_en_el_coste_del_video(navegador, datos):
+    """Rama medidor-claude-2 (26-10): en «Coste del vídeo» la fila de Claude
+    dice los tokens nuevos (y los de caché aparte, si hay), y en Configuración
+    la tabla del medidor tiene las columnas «Tokens nuevos» y «De caché»."""
+    pid = datos["video"]
+    pg = Pagina(navegador, datos, nombre="claude en el coste")
+    pg.js(f"abrirCosteDelVideo('{pid}');")
+    ok(pg.esperar("#coste-video .tabla-coste th", "Claude", 15), "«Coste del vídeo» tiene su fila de Claude")
+    fila = pg.p.evaluate("() => { const th = [...document.querySelectorAll('#coste-video .tabla-coste th')]"
+                         ".find(x => x.textContent === 'Claude'); return th ? th.parentElement.innerText : ''; }")
+    ok("tokens nuevos" in fila and "suscripción" in fila, f"con los tokens nuevos y que va por la suscripción ({fila!r})")
+    pg.captura("claude_en_el_coste")
+    pg.sin_errores("Claude en el coste del vídeo")
+    pg.cerrar()
+    pg = Pagina(navegador, datos, nombre="columnas del medidor")
+    pg.js("""MEDIDOR_CLAUDE.datos = { umbrales: { ojo: 0.7, malo: 0.9 }, nombres: {}, avisos: [], cupo: [],
+        resumen: { dias: 7, hoy: { llamadas: 1, tokens: 100, cache: 30000, usd: 0.01 },
+                   semana: { llamadas: 1, tokens: 100, cache: 30000, usd: 0.01 },
+                   por_dia: [{ fecha: '2026-10-26', llamadas: 1, tokens: 100, cache: 30000, usd: 0.01 }],
+                   por_tarea: [], por_video: [], por_cuenta: [], agotados: [] } };
+        MEDIDOR_CLAUDE.detalleAbierto = true; conmutarConfig(true);""")
+    pg.p.wait_for_timeout(1500)
+    pg.js("clearTimeout(MEDIDOR_CLAUDE.reloj); MEDIDOR_CLAUDE.pidiendo = true; repintarMedidorClaude();")
+    cabeza = pg.p.evaluate("() => [...document.querySelectorAll('#seccion-consumo-claude .tabla-consumo-claude th')]"
+                           ".map(x => x.textContent)")
+    ok("Tokens nuevos" in cabeza and "De caché" in cabeza, f"el medidor separa nuevos y de caché ({cabeza})")
+    pg.sin_errores("las columnas del medidor")
+    pg.cerrar()
+
 if __name__ == "__main__":
     sys.exit(main())

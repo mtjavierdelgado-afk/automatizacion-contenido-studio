@@ -11372,7 +11372,19 @@ function tablaDeGasto(d, incluirEstilo) {
       voz.regrabaciones.usd || 0, 'tramos regrabados'));
   }
   if (incluirEstilo !== false) {
-    filas.push(filaCoste('Claude', `${miles(d.claude_tokens || 0)} tokens`, 0,
+    /* CLAUDE DE ESTE VÍDEO (medidor-claude-2): del registro del medidor, que
+       lleva todas sus llamadas; sin él (vídeos de antes), del coste. Los
+       tokens nuevos y los de caché, aparte. */
+    /* EL REGISTRO SOLO SI ESTÁ ENTERO: empezó con el medidor (26-10) y se poda
+       a 35 días, así que un vídeo con el guion de antes tendría ahí solo lo de
+       hoy. Si cuenta menos llamadas que el coste del vídeo, manda el coste. */
+    const enCoste = (d.claude || []).reduce((n, x) => n + (Number(x.llamadas) || 0), 0);
+    const c = d.claude_consumo && d.claude_consumo.llamadas >= enCoste ? d.claude_consumo : null;
+    filas.push(c
+      ? filaCoste('Claude', `${c.llamadas} llamadas · ${tokensCorto(c.tokens)} tokens nuevos + ${tokensCorto(c.cache)} de caché`, 0,
+        `va por tu suscripción: no se cobra aparte (≈ ${dolares(c.usd)} si fuera por API)`)
+      : filaCoste('Claude', `${tokensCorto(d.claude_tokens || 0)} tokens nuevos`
+        + (d.claude_cache ? ` + ${tokensCorto(d.claude_cache)} de caché` : ''), 0,
       'va por tu suscripción: no se cobra aparte'));
   }
   return h('table', { clase: 'tabla tabla-coste' }, h('tbody', {}, ...filas));
@@ -11414,6 +11426,14 @@ async function abrirCosteDelVideo(pid) {
     + '. La voz, por los caracteres que se enviaron a Cartesia.'));
   cuerpo.appendChild(h('h2', {}, 'Este vídeo'));
   cuerpo.appendChild(tablaDeGasto(d));
+  /* Claude de este vídeo, por tarea (medidor-claude-2) */
+  const cv = d.claude_consumo;
+  const claudeVideo = cv && tablaConsumoClaude('Claude, por tarea', cv.por_tarea, 'Tarea', f => f.tarea);
+  if (claudeVideo) {
+    const desde = cv.desde ? new Date(Number(cv.desde) * 1000).toLocaleDateString('es') : '';
+    cuerpo.appendChild(h('details', { clase: 'detalle-consumo-claude claude-del-video' },
+      h('summary', {}, `Claude en este vídeo, por tarea${desde ? ` (desde el ${desde})` : ''}`), claudeVideo));
+  }
   const m = d.musica || {};
   const ef = d.efectos || {};
   cuerpo.appendChild(h('table', { clase: 'tabla tabla-coste' }, h('tbody', {},
@@ -11443,10 +11463,10 @@ async function abrirCosteDelVideo(pid) {
   cuerpo.appendChild(h('div', { clase: 'meta' },
     `Lo que se promete antes de pulsar usa ${usdCorto(precio.usd)} por imagen: ${precio.fuente || ''}.`));
   if ((d.claude || []).length) {
-    const det = h('details', {}, h('summary', {}, 'Claude, por para qué se usó (tokens)'));
+    const det = h('details', {}, h('summary', {}, 'Claude, por para qué se usó (del coste del vídeo)'));
     det.appendChild(h('table', { clase: 'tabla tabla-coste' }, h('tbody', {},
       ...d.claude.slice(0, 15).map(c => filaCoste(c.para, `${c.llamadas} llamada(s)`, 0,
-        `${miles(c.tokens)} tokens`)))));
+        `${tokensCorto(c.tokens)} tokens nuevos${c.cache ? ` + ${tokensCorto(c.cache)} de caché` : ''}`)))));
     cuerpo.appendChild(det);
   }
 }
@@ -24990,18 +25010,31 @@ function avisarCupoClaude() {
   try { localStorage.setItem('estudio.claude.avisados', JSON.stringify([...vistos].slice(-40))); } catch (e) { /* sin almacén */ }
 }
 
+/* «12 k», «1,3 M»: los tokens en corto */
+function tokensCorto(n) {
+  const v = Number(n) || 0;
+  if (v >= 999500) return `${(v / 1e6).toFixed(1).replace('.', ',')} M`;
+  if (v >= 1000) return `${Math.round(v / 1000)} k`;
+  return String(v);
+}
+
+/* TOKENS NUEVOS Y DE CACHÉ, aparte (medidor-claude-2): la caché leída cuesta
+   ~10 % del precio, y sumada inflaba la cifra de cualquier llamada. */
 function tablaConsumoClaude(titulo, filas, columna, nombreDe) {
   if (!filas || !filas.length) return null;
   const cuerpo = h('tbody');
   filas.forEach(f => cuerpo.appendChild(h('tr', {},
     h('td', { clase: 'que' }, nombreDe(f)),
     h('td', {}, String(f.llamadas)),
-    h('td', {}, f.tokens >= 1e6 ? `${(f.tokens / 1e6).toFixed(1).replace('.', ',')} M` : `${Math.round(f.tokens / 1000)} k`),
+    h('td', {}, tokensCorto(f.tokens)),
+    h('td', { clase: 'meta' }, tokensCorto(f.cache)),
     h('td', {}, dolares(f.usd)))));
   return h('div', { clase: 'tabla-consumo-claude' },
     h('b', {}, titulo),
     h('table', {},
-      h('thead', {}, h('tr', {}, h('th', {}, columna), h('th', {}, 'Llamadas'), h('th', {}, 'Tokens'),
+      h('thead', {}, h('tr', {}, h('th', {}, columna), h('th', {}, 'Llamadas'),
+        h('th', { title: 'Entrada, salida y caché creada: lo que de verdad pesa' }, 'Tokens nuevos'),
+        h('th', { title: 'Leídos de la caché: cuestan ~10 % de un token nuevo' }, 'De caché'),
         h('th', { title: 'Lo que costaría por API. Con la membresía no se cobra: sirve para comparar.' }, '≈ $ API'))),
       cuerpo));
 }

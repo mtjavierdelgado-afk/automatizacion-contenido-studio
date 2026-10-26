@@ -140,16 +140,21 @@ def prueba_sin_ficha():
            f"«{texto}»: cartas de la escalera general de foto")
     antes = _de_antes("pasos/encuadres.py", "encuadres")
     if antes is None:
-        ok(False, "no se ha podido leer encuadres.py de antes (¿sin git?)")
-        return
-    for semilla in (0, 7, 12345):
-        ahora = {k: v["id"] for k, v in E.repartir(escenas, semilla=semilla).items()}
-        vieja = {k: v["id"] for k, v in antes.repartir(escenas, semilla=semilla).items()}
-        igual(ahora, vieja, f"ilustración, semilla {semilla}: las mismas cartas que antes")
-    for semilla in (0, 7):
-        ahora = {k: v["id"] for k, v in E.repartir(escenas, semilla=semilla, modo="foto").items()}
-        vieja = {k: v["id"] for k, v in antes.repartir(escenas, semilla=semilla, modo="foto").items()}
-        igual(ahora, vieja, f"foto sin servicios, semilla {semilla}: las mismas cartas que antes")
+        # En el servidor el código llega SIN .git (`asvs actualizar` lo excluye),
+        # y en un clon superficial puede faltar ese commit: la comparación con
+        # el reparto de antes no se puede hacer ahí, pero no es un fallo de la
+        # rama. Se dice y se sigue con el resto de comprobaciones.
+        print(f"  omitido  comparar el reparto con el de antes: no hay git "
+              f"o falta el commit {ANTES} (se comprueba en un clon con historia)")
+    else:
+        for semilla in (0, 7, 12345):
+            ahora = {k: v["id"] for k, v in E.repartir(escenas, semilla=semilla).items()}
+            vieja = {k: v["id"] for k, v in antes.repartir(escenas, semilla=semilla).items()}
+            igual(ahora, vieja, f"ilustración, semilla {semilla}: las mismas cartas que antes")
+        for semilla in (0, 7):
+            ahora = {k: v["id"] for k, v in E.repartir(escenas, semilla=semilla, modo="foto").items()}
+            vieja = {k: v["id"] for k, v in antes.repartir(escenas, semilla=semilla, modo="foto").items()}
+            igual(ahora, vieja, f"foto sin servicios, semilla {semilla}: las mismas cartas que antes")
     ok("GAME CONTROLLERS" not in reglas.bloque_prompt(
         "prompt_imagen", modo="foto", contexto="game controllers",
         extra=D.reglas_de_foto({})), "el bloque de reglas de la casa tampoco")

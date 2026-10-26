@@ -8849,5 +8849,50 @@ def cola_del_studio(navegador, datos):
     pg.sin_errores("la cola del Studio en el móvil")
     pg.cerrar()
 
+
+@escenario
+def medidor_de_claude(navegador, datos):
+    """Rama medidor-claude (25-10): el cuadro «Claude · membresía» en la barra
+    lateral con una barra por ventana, la sección «Consumo de Claude» en
+    Configuración con «Medir ahora» (simulado: sin salir al CLI), el aviso al
+    pasar del 70 % y, en el móvil, la barra de módulos sin salirse."""
+    pg = Pagina(navegador, datos, nombre="medidor de claude")
+    ok(pg.esperar("#medidor-claude-menu .medidor-claude .gasto-etiqueta", "Claude", 15),
+       "la barra lateral tiene el cuadro «Claude · membresía»")
+    pg.js("conmutarConfig(true);")
+    ok(pg.esperar("#seccion-consumo-claude h3", "Consumo de Claude", 15), "Configuración tiene «Consumo de Claude»")
+    pg.pulsar("#seccion-consumo-claude button", "Medir ahora")
+    ok(pg.esperar("#seccion-consumo-claude .meta", "simulado", 20), "«Medir ahora» mide (simulado, sin salir al CLI)")
+    ventanas = pg.p.evaluate("() => [...document.querySelectorAll('#seccion-consumo-claude .ventana-claude .fila-ventana')]"
+                             ".map(x => x.innerText.replace(/\\s+/g, ' ').trim())")
+    ok(any("5 horas" in v and "42 %" in v for v in ventanas) and any("Semana" in v for v in ventanas),
+       f"con la ventana de 5 horas y la semana ({ventanas})")
+    ok(pg.visible("#seccion-consumo-claude .ventana-claude .meta", "se reinicia"), "y cuándo se reinicia cada una")
+    ok(pg.p.evaluate("() => !!document.querySelector('#medidor-claude-menu .ventana-claude')"),
+       "y el cuadro de la barra lateral se rellena con las ventanas")
+    pg.captura("medidor_claude_config")
+    # un cupo al 91 %: aviso una vez y la pastilla del móvil
+    pg.js("""MEDIDOR_CLAUDE.datos = Object.assign({}, MEDIDOR_CLAUDE.datos, {
+        avisos: [{ nivel: 'malo', cuenta: 'principal', ventana: 'five_hour', nombre: 'Ventana de 5 horas',
+                   uso: 0.91, reinicia: Date.now() / 1000 + 3600 }] });
+        try { localStorage.removeItem('estudio.claude.avisados'); } catch (e) {}
+        AVISADOS_CLAUDE.clear(); avisarCupoClaude(); repintarMedidorClaude();""")
+    ok(pg.esperar("#toast, .toast", "91 %", 6), "al pasar del 90 % avisa, con el porcentaje")
+    pg.sin_errores("el medidor de Claude")
+    pg.cerrar()
+    pg = Pagina(navegador, datos, ancho=390, alto=844, nombre="medidor móvil")
+    pg.p.wait_for_timeout(2000)
+    caja = pg.p.evaluate("() => { const b = document.querySelector('#barra-modulos'); "
+                         "return b ? [b.scrollWidth, b.clientWidth] : [0, 0]; }")
+    ok(caja[0] <= caja[1] + 2, f"con el medidor, la barra de módulos sigue cabiendo en 390 px ({caja})")
+    ok(not pg.visible("#barra-modulos .medidor-claude"), "en el móvil el cuadro no sale en la fila de módulos")
+    pg.js("conmutarConfig(true);")
+    ok(pg.esperar("#seccion-consumo-claude h3", "Consumo de Claude", 15), "y la sección se ve en el móvil")
+    ancho = pg.p.evaluate("() => document.documentElement.scrollWidth - document.documentElement.clientWidth")
+    ok(ancho <= 2, f"sin salirse por los lados ({ancho}px)")
+    pg.captura("medidor_claude_movil", entera=False)
+    pg.sin_errores("el medidor de Claude en el móvil")
+    pg.cerrar()
+
 if __name__ == "__main__":
     sys.exit(main())

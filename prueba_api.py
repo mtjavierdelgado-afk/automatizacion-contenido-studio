@@ -4594,6 +4594,28 @@ def probar_coste_en_detalle(cliente, pid):
     ok(r.status_code in (404, 400), f"y no se sale de la carpeta de exportes ({r.status_code})")
 
 
+def probar_medidor_claude(cliente):
+    """Rama medidor-claude (25-10-2026): GET /api/claude/consumo lee el cupo y
+    el resumen sin salir al CLI, y «Medir ahora» con ESTUDIO_SIMULAR da un cupo
+    simulado con sus ventanas y sus avisos."""
+    seccion("EL MEDIDOR DE CLAUDE (25-10)")
+    respuesta, datos = cliente.get("/api/claude/consumo")
+    igual(respuesta.status_code, 200, "GET /api/claude/consumo responde 200")
+    ok({"cupo", "avisos", "resumen", "umbrales"} <= set(datos or {}),
+       "con el cupo, los avisos, el resumen y los umbrales")
+    igual((datos or {}).get("umbrales"), {"ojo": 0.7, "malo": 0.9}, "avisa al 70 % y al 90 %")
+    ok(isinstance(((datos or {}).get("resumen") or {}).get("por_tarea"), list), "el resumen trae lo de cada tarea")
+    ok(not (datos or {}).get("midiendo"), "con ESTUDIO_SIMULAR no mide solo al mirar")
+    respuesta, datos = cliente.post("/api/claude/consumo/medir", {})
+    igual(respuesta.status_code, 200, "«Medir ahora» responde 200")
+    cupo = ((datos or {}).get("cupo") or [{}])[0]
+    ok(cupo.get("simulado") and set(cupo.get("ventanas") or {}) >= {"five_hour", "seven_day"},
+       f"simulado: un cupo con la ventana de 5 h y la semana ({sorted(cupo.get('ventanas') or {})})")
+    ok(all(0 <= v.get("uso", -1) <= 1 and v.get("reinicia") for v in (cupo.get("ventanas") or {}).values()),
+       "cada ventana con su fracción usada y su hora de reinicio")
+    ok(isinstance((datos or {}).get("avisos"), list), "y la lista de avisos")
+
+
 def probar_cola_de_montaje(cliente):
     """Rama cola-montaje (25-10-2026): montar va de uno en uno en todo el
     Studio y por orden de llegada, «Solo montar» no espera, y
@@ -7870,6 +7892,7 @@ def main():
         probar_onboarding(cliente)
         probar_turno_y_notas_de_otro_texto()
         probar_cola_de_montaje(cliente)
+        probar_medidor_claude(cliente)
         probar_coste_en_detalle(cliente, pid)
         probar_sistema(cliente)
         probar_lo_que_lleva(cliente)

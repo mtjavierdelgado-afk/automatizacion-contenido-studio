@@ -5547,8 +5547,16 @@ def _referencia_del_espacio(escena, p, dirs, cache):
     if bases and clave in bases:
         imagen = medios.motor("imagen_openai/imagen.py")
         espacio = p.get("espacio_fijo") or {}
-        return [{"papel": "espacio",
-                 "nombre": espacio.get("sitio") or escena["set"],
+        nombre = espacio.get("sitio") or escena["set"]
+        if espacio.get("descripcion"):
+            # la base de OTRO ambiente (un secundario, tipo-de-relato-2), con SU nombre
+            try:
+                principal, secundarios = catalogo_visual.ids_del_espacio(espacio)
+            except Exception:                               # noqa: BLE001
+                principal, secundarios = None, {}
+            if escena["set"] != principal and escena["set"] in secundarios:
+                nombre = secundarios[escena["set"]].get("nombre") or escena["set"]
+        return [{"papel": "espacio", "nombre": nombre,
                  "ruta": imagen.normalizar(bases[clave], cache)}]
     ruta = (dirs or {}).get("espacio_fijo")
     espacio = p.get("espacio_fijo") or {}

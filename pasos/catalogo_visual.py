@@ -1098,7 +1098,7 @@ def espacio_del_catalogo(catalogo, ambientes=False):
     # con `ambientes` (recorrido y clase, tipo-de-relato-2) los demas sitios
     # que usa algun tramo son secundarios: los ambientes del mismo lugar
     secundarios = [{"nombre": sid, "descripcion": " ".join(
-                        str((sets.get(sid) or {}).get("descripcion") or "").split())}
+                        str((sets.get(sid) or {}).get("descripcion") or "").split())[:MAX_DESCRIPCION_SITIO]}
                    for sid in sorted(cuenta, key=lambda s: (-cuenta[s], s))
                    if ambientes and sid != elegido][:MAX_SECUNDARIOS]
     crudo = {"sitio": elegido, "descripcion": descripcion[:MAX_DESCRIPCION_SITIO],
@@ -1118,11 +1118,14 @@ def _aplicar_relato(catalogo, crudos, relato, espacio, ids_bloque, inicial_crudo
       `inicial` (como esta en la base lo que luego cambia) en `relato`.
     - `relato` en el catalogo: dice con que modo se repartio."""
     ambientes = relato["modo"] in tipo_relato.AMBIENTES
+    declarados = not espacio
     if not espacio:
         propio = espacio_del_catalogo(catalogo, ambientes=ambientes)
         if propio:
             catalogo = _aplicar_espacio_fijo(catalogo, propio, ids_bloque)
-    if ambientes:
+    # solo en los ambientes que declaro Claude: un espacio fijo escrito a mano
+    # conserva la luz que su autor le dio a cada secundario
+    if ambientes and declarados:
         # LA MISMA LUZ EN TODOS LOS AMBIENTES: es el mismo lugar a la misma hora
         sets = catalogo.get("sets") or {}
         principal = next(iter(sets), None)

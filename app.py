@@ -4868,8 +4868,8 @@ def _cambios_del_relato(ctx):
             salida["hechas"] += 1
             papeles = {r.get("papel") for r in ficha.get("referencias") or []
                        if isinstance(r, dict)}
-            familia = (PASOS_MODULOS.encuadres.por_id_de(modo_img).get(escena.get("carta") or "")
-                       or {}).get("familia", "")
+            # la MISMA cuenta que el plan: en modo guion manda la camara de su linea
+            familia = PASOS_MODULOS.p6_assets._familia_del_plano(escena, modo_img)
             editaria = tr.plano_se_edita(dict(escena, set=previsto), relato, sitio, familia)
             cambia = False
             if editaria:

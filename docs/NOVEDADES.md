@@ -24,7 +24,9 @@ vídeos, estilos, claves y contraseña no se tocan.
 - **En «Lo que dice el guion», un primer plano es un primer plano.** Con «Un
   espacio que cambia», una línea cuya cámara pide un primer plano o un detalle
   ya no edita la imagen base (que fijaba la cámara de siempre): la lleva de
-  referencia, con el estado de su objeto, y respeta su encuadre.
+  referencia, con el estado de su objeto, y respeta su encuadre. Los vídeos
+  que ya estaban en «Lo que dice el guion» con un espacio que cambia pueden
+  ofrecer rehacer esos primeros planos: solo se rehacen si lo pides.
 
 **«Lo que dice el guion», sin que se cuele la voz (24 de octubre)**
 - **Las líneas «Visual:» de la Parrilla valen solas.** Si casan con el guion

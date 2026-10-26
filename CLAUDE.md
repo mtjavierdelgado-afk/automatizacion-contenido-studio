@@ -152,6 +152,7 @@ tienen que encajar piezas de otras, detrás de esas otras.
 15. ~~`unir-planos`~~ — UNIDA (26-10).
 16. ~~`medidor-claude-2`~~ — UNIDA (26-10).
 17. `costes-menores` — lista (26-10): pruebas y revisión independiente en verde; se une en cuanto esté probada en el servidor.
+18. `descripcion-planos` — lista (26-10): pruebas y revisión independiente en verde. Solo choques de AÑADIR con las abiertas (docs, `prueba_api.py`, `prueba_recorrido.py`, `herramientas/claude_falso.py`).
 
 
 

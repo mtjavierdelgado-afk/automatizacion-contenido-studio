@@ -178,7 +178,7 @@ def _texto(valor, tope=600):
 
 def _plano(valor):
     limpio = str(valor or "").strip().upper()
-    return limpio if re.fullmatch(r"S\d{3,4}", limpio) else None
+    return limpio if re.fullmatch(r"S\d{3,4}[B-J]?", limpio) else None  # S004B: insertada
 
 
 def _bloque(valor):

@@ -128,6 +128,11 @@ def responder(entrada):
         # texto con «ES:» delante, para que la pantalla enseñe que es la traducción
         textos = re.findall(r'<t id="([^"]+)">(.*?)</t>', _entre(entrada, "traducir_al_espanol"), re.S)
         return {"traducciones": {tid: "ES: " + texto.strip() for tid, texto in textos}}
+    if "<imagen_nueva>" in entrada:
+        # lo que se ve en una imagen insertada (rama insertar-imagen): «EN:» y el
+        # español; «ROMPER» en el texto, sin respuesta
+        que = _entre(entrada, "imagen_nueva")
+        return {"direccion": "" if "ROMPER" in que else "close-up, EN: " + que}
     if "<pasar_al_ingles>" in entrada:
         # el cambio reescrito en español, de vuelta al inglés que se manda
         texto = _entre(entrada, "pasar_al_ingles")

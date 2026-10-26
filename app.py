@@ -7437,6 +7437,8 @@ def _quitar_en_la_previa(plan, escena):
                               "narracion": a.get("narracion") or "",
                               "n": int(a.get("n") or 0)}
                              for a in escena["absorbe"] if isinstance(a, dict)]
+    # e «Insertar una imagen aquí…» y su deshacer (rama insertar-imagen)
+    salida.update(_insertar_en_la_previa(plan, escena))
     return salida
 
 
@@ -7578,6 +7580,201 @@ def devolver_imagen(pid: str, cuerpo: dict = Body(default=None)):
             raise
     ctx.bitacora.anotar("imagen_devuelta", "assets", {"narracion": narracion[:120]})
     return dict(ficha, devuelta=True)
+
+
+# --------------------------------------- INSERTAR UNA IMAGEN (insertar-imagen)
+#
+# Rama insertar-imagen (26-10-2026, pedido del dueño). Lo contrario de quitar:
+# se elige la palabra de un plano donde empieza una imagen nueva y se escribe en
+# español qué se ve. Claude lo pasa al inglés (en un hilo: tarda segundos y el
+# proxy corta a los sesenta), se apunta en `<proyecto>/planos_insertados.json`
+# (`pasos/insertar_planos.py`, FUERA de params) y se lanza la pasada de
+# imágenes con la nueva como ÚNICA unidad pedida: se paga UNA imagen, con el
+# precio confirmado antes. El plano partido conserva su dibujo. Deshacer es la
+# pasada que solo corta (`_pasada_sin_dibujar`), gratis.
+
+_INSERTANDO = {}
+_LOCK_INSERTANDO = threading.Lock()
+
+
+def _insertar_planos():
+    return getattr(PASOS_MODULOS, "insertar_planos", None) or __import__("insertar_planos")
+
+
+def _precio_de_una_imagen(ctx):
+    params = ctx.estado.params("assets") or {}
+    calidad = str(params.get("calidad") or "low")
+    precio = AJUSTES.precio_por_imagen(calidad, modo=PASOS_MODULOS.p6_assets.modo_de(
+        params.get("estilo")))
+    return calidad, round(float((precio or {}).get("usd") or 0.0), 4)
+
+
+def _donde_insertar(plan, sid):
+    """-> (escenas, i) del plano `sid` si admite una imagen insertada; si no,
+    ErrorApi con el motivo."""
+    ip = _insertar_planos()
+    escenas = [e for e in (plan.get("escenas") or []) if e.get("id")]
+    i = next((n for n, e in enumerate(escenas) if str(e["id"]) == sid), None)
+    if i is None:
+        raise ErrorApi(404, f"este vídeo no tiene la imagen {sid}")
+    if not ip.se_puede_partir(escenas, i, PASOS_MODULOS.p6_assets._sin_imagen):
+        raise ErrorApi(409, f"en {sid} no se puede insertar una imagen: es una cartela, "
+                            "la continuación de otra, ya es una insertada o lleva la voz "
+                            "de una quitada")
+    return escenas, i
+
+
+def _insertar_en_la_previa(plan, escena):
+    """Lo que la diapositiva necesita para «Insertar una imagen aquí…» y para
+    deshacer una insertada."""
+    salida = {}
+    try:
+        ip = _insertar_planos()
+        escenas = [e for e in (plan.get("escenas") or []) if e.get("id")]
+        i = next((n for n, e in enumerate(escenas) if e.get("id") == escena.get("id")), None)
+        if i is not None and ip.se_puede_partir(escenas, i, PASOS_MODULOS.p6_assets._sin_imagen):
+            salida["insertar"] = {"palabras": ip.palabras_de(escena)}
+    except Exception:                                       # noqa: BLE001
+        pass
+    if isinstance(escena.get("insertada"), dict):
+        ins = escena["insertada"]
+        salida["insertada"] = {"en": ins.get("en"), "texto": ins.get("texto"),
+                               "n": int(ins.get("n") or 0), "palabra": int(ins.get("palabra") or 0),
+                               "que": ins.get("que") or ""}
+    return salida
+
+
+def _ficha_insertando(ctx):
+    calidad, usd = _precio_de_una_imagen(ctx)
+    with _LOCK_INSERTANDO:
+        marcha = dict(_INSERTANDO.get(ctx.id) or {})
+    return dict({"estado": "quieto"}, **marcha, precio={"usd": usd, "calidad": calidad})
+
+
+@app.get("/api/proyectos/{pid}/planos/insertar")
+def leer_insercion(pid: str):
+    """Cómo va la última imagen insertada y lo que cuesta una. -> {estado,
+    precio: {usd, calidad}, trabajo_id?, nuevo?, error?}"""
+    return _ficha_insertando(contexto(pid))
+
+
+@app.post("/api/proyectos/{pid}/planos/{sid}/insertar", status_code=202)
+def insertar_imagen(pid: str, sid: str, cuerpo: dict = Body(default=None)):
+    """Inserta una imagen nueva en `sid`. {palabra, que, usd}
+
+    `palabra`: desde qué palabra (0 = la primera; tiene que ser >= 1) va la
+    nueva. `que`: lo que se ve, en español. `usd`: el precio de una imagen que
+    se confirmó; si ya no es ese, no se lanza nada (409). Claude pasa `que` al
+    inglés en un hilo y después se apunta y se lanza la tanda de UNA imagen.
+    -> la ficha, con `estado` «pensando»."""
+    ctx = contexto(pid)
+    p6 = PASOS_MODULOS.p6_assets
+    ip = _insertar_planos()
+    datos = _cuerpo(cuerpo)
+    que = " ".join(str(datos.get("que") or "").split())
+    try:
+        palabra = int(datos.get("palabra"))
+    except (TypeError, ValueError):
+        raise ErrorApi(400, "di desde qué palabra va la imagen nueva")
+    if not que:
+        raise ErrorApi(400, "escribe qué quieres que se vea en la imagen nueva")
+    if len(que) > ip.MAX_QUE:
+        raise ErrorApi(400, f"escríbelo en menos de {ip.MAX_QUE} letras")
+    _calidad, usd = _precio_de_una_imagen(ctx)
+    try:
+        visto = round(float(datos.get("usd")), 4)
+    except (TypeError, ValueError):
+        raise ErrorApi(400, "hace falta 'usd': el precio que se confirmó")
+    if abs(visto - usd) > 0.0005:
+        raise ErrorApi(409, f"una imagen cuesta ahora {usd:.3f} $, no {visto:.3f} $: vuelve a "
+                            "mirarlo antes de confirmar", {"usd": usd})
+    with _cerrojo_de_cadena(ctx.id):
+        _sin_nada_en_marcha(ctx, "insértala")
+        plan = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+        escenas, i = _donde_insertar(plan, sid)
+        palabras = ip.palabras_de(escenas[i])
+        if not 1 <= palabra < len(palabras):
+            raise ErrorApi(400, f"la imagen nueva tiene que empezar entre la palabra 2 y la "
+                                f"{len(palabras)} de {sid}")
+        texto = p6._texto_clave(escenas[i])
+        # LA OCURRENCIA EN EL CORTE ANTES DE QUITAR, como la cuenta `aplicar`:
+        # los planos de antes que dicen lo mismo y los quitados que viven en
+        # el `absorbe` de su vecino (los de `sid` mismo no: no se parte uno así)
+        n = (sum(1 for e in escenas[:i] if p6._texto_clave(e) == texto)
+             + sum(1 for e in escenas[:i] for a in e.get("absorbe") or []
+                   if isinstance(a, dict) and p6._texto_clave({"narracion": a.get("narracion")}) == texto))
+        with _LOCK_INSERTANDO:
+            if (_INSERTANDO.get(ctx.id) or {}).get("estado") == "pensando":
+                raise ErrorApi(409, "ya se está preparando otra imagen nueva en este vídeo")
+            _INSERTANDO[ctx.id] = {"estado": "pensando", "plano": sid}
+    prompt, narracion = escenas[i].get("prompt") or "", " ".join(palabras[palabra:])
+
+    def hilo():
+        ficha = {"plano": sid}
+        try:
+            direccion = ip.al_ingles(que, prompt=prompt, narracion=narracion, cwd=RAIZ_ESTUDIO)
+            with _cerrojo_de_cadena(ctx.id):
+                # lo de antes de pensar puede haber cambiado: se mira otra vez
+                _sin_nada_en_marcha(ctx, "insértala")
+                plan_ahora = p6.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
+                escenas_ahora, j = _donde_insertar(plan_ahora, sid)
+                if p6._texto_clave(escenas_ahora[j]) != texto:
+                    raise ErrorApi(409, f"{sid} ha cambiado mientras se preparaba: vuelve a pedirla")
+                antes = ip.leer(ctx.proyecto.raiz)
+                entradas = ip.insertar(ctx.proyecto.raiz, texto, n, palabra, sid, que=que,
+                                       direccion=direccion)
+                nueva = next(e for e in entradas if (e["texto"], e["n"], e["palabra"]) == (texto, n, palabra))
+                nuevo = f"{sid}{nueva['letra']}"
+                try:
+                    trabajo_id = lanzar_paso(ctx, "assets", [f"escena:{nuevo}"],
+                                             nombre="insertar_imagen", evento="imagen_insertada",
+                                             datos={"plano": sid, "nuevo": nuevo, "usd": usd})
+                except Exception:
+                    # sin tanda no se apunta: quedaría un plano sin imagen
+                    ip.reponer(ctx.proyecto.raiz, antes)
+                    raise
+            ctx.bitacora.anotar("imagen_insertada", "assets",
+                                {"plano": sid, "nuevo": nuevo, "palabra": palabra})
+            ficha.update(estado="lanzado", nuevo=nuevo, trabajo_id=trabajo_id)
+        except Exception as fallo:                          # noqa: BLE001
+            mensaje = fallo.mensaje if isinstance(fallo, ErrorApi) else _error_para_persona(fallo)
+            ficha.update(estado="error", error=mensaje)
+        with _LOCK_INSERTANDO:
+            _INSERTANDO[ctx.id] = ficha
+
+    threading.Thread(target=hilo, daemon=True, name=f"insertar-{ctx.id}").start()
+    return _ficha_insertando(ctx)
+
+
+@app.post("/api/proyectos/{pid}/planos/insertadas/deshacer", status_code=202)
+def deshacer_imagen_insertada(pid: str, cuerpo: dict = Body(default=None)):
+    """Quita una imagen insertada: el plano del que salió recupera toda su voz,
+    con su dibujo de siempre. {texto, n, palabra} (lo que trae `insertada` en la
+    previa) -> el trabajo (gratis) que vuelve a cortar."""
+    ctx = contexto(pid)
+    ip = _insertar_planos()
+    datos = _cuerpo(cuerpo)
+    texto = str(datos.get("texto") or "").strip()
+    try:
+        n, palabra = int(datos.get("n") or 0), int(datos.get("palabra"))
+    except (TypeError, ValueError):
+        raise ErrorApi(400, "manda {texto, n, palabra}: lo que trae la imagen insertada")
+    if not texto:
+        raise ErrorApi(400, "manda {texto, n, palabra}: lo que trae la imagen insertada")
+    with _cerrojo_de_cadena(ctx.id):
+        _sin_nada_en_marcha(ctx, "deshazlo")
+        antes = ip.leer(ctx.proyecto.raiz)
+        entrada = ip.deshacer(ctx.proyecto.raiz, texto, n, palabra)
+        if entrada is None:
+            raise ErrorApi(404, "esa imagen no está insertada")
+        try:
+            ficha = _pasada_sin_dibujar(ctx, "deshacer_insertada")
+        except Exception:
+            ip.reponer(ctx.proyecto.raiz, antes)
+            raise
+    ctx.bitacora.anotar("imagen_insertada_deshecha", "assets",
+                        {"plano": entrada.get("id"), "palabra": palabra})
+    return dict(ficha, deshecha=True)
 
 
 @app.get("/api/proyectos/{pid}/previsualizacion")

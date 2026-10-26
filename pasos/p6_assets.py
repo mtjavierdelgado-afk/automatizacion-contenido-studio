@@ -73,6 +73,7 @@ import tipo_relato  # noqa: E402
 import dominios  # noqa: E402
 import guion_visual  # noqa: E402
 import quitar_planos  # noqa: E402
+import insertar_planos  # noqa: E402
 import cta  # noqa: E402
 import encuadres  # noqa: E402
 import estadisticas  # noqa: E402
@@ -1508,6 +1509,28 @@ def planificar(proyecto, params, inventario=None, replantear=False,
     # hay cabeceras de sitio. Lo que sigue estirando --y ahora fundiendo-- son
     # las CARTELAS, y eso lo descuenta `_marcar_cartelas` mas arriba.
     informe["estirados"] = []
+
+    # LAS IMAGENES INSERTADAS A MANO (rama insertar-imagen): el plano se parte
+    # y la nueva lleva su prompt propio, con su direccion. Va ANTES de quitar
+    # (lo quitado se reconoce por el corte con las insertadas ya puestas) y
+    # sin `planos_insertados.json` no toca nada (ver `pasos/insertar_planos.py`).
+    beat_de = {id(e): b for e, b in zip(escenas, beats)}
+
+    def _preparar_insertada(nueva, partida):
+        beat = beat_de.get(id(partida)) or {}
+        if nueva.get("linea_gv"):
+            beat = dict(beat, **guion_visual.estado_de_linea(
+                nueva["linea_gv"], tipo_relato.estados_del_catalogo(catalogo, principal)
+                if principal else {}))
+        # el encuadre lo dice su direccion: la carta del plano partido no es suya
+        nueva.pop("encuadre", None)
+        nueva["prompt"] = _prompt_visual(nueva, beat, catalogo, modo=modo)
+
+    insertados = insertar_planos.aplicar(escenas, getattr(proyecto, "raiz", None), _texto_clave,
+                                         _sin_imagen, _preparar_insertada,
+                                         segmentar.tipo_de_corte)
+    if insertados["insertados"] or insertados["sin_casar"]:
+        informe["insertados"] = insertados
 
     # LAS IMAGENES QUITADAS A MANO (rama unir-planos): su voz pasa al vecino,
     # que conserva su dibujo. Va DESPUES de escribir los prompts --el del que

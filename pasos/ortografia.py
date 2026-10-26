@@ -96,7 +96,9 @@ EXACTAMENTE lo que se oye, asi que:
 Devuelve SOLO este JSON, con UNICAMENTE los textos que cambian (si ninguno
 cambia, {{"correcciones": {{}}}}):
 {{"correcciones": {{"<id>": {{"texto": "<el texto entero corregido>",
-                            "cambios": [["<mal>", "<bien>"]]}}}}}}"""
+                            "cambios": [["<mal>", "<bien>"]]}}}}}}
+Un solo JSON y nada más: sin comentarios ni una segunda versión. Un texto que
+ya está bien no se pone."""
 
 
 class ErrorOrtografia(RuntimeError):
@@ -182,12 +184,42 @@ def reparar_comillas(texto):
     return "".join(salida)
 
 
-def leer_json(respuesta, que):
-    """`comun.extraer_json`, y si no se puede leer, otra vez con las comillas
-    del texto escapadas (`reparar_comillas`). Si tampoco, el error de antes."""
+def _objetos_json(texto):
+    """Todos los objetos JSON que se pueden leer en el texto, en orden."""
+    texto = str(texto or "")
+    decodificador, salida, i = json.JSONDecoder(), [], 0
+    while True:
+        i = texto.find("{", i)
+        if i < 0:
+            return salida
+        try:
+            objeto, fin = decodificador.raw_decode(texto, i)
+        except ValueError:
+            i += 1
+            continue
+        if isinstance(objeto, dict):
+            salida.append(objeto)
+        i = fin
+
+
+def leer_json(respuesta, que, clave=None):
+    """`comun.extraer_json`, y si no se puede leer:
+
+    1. EL MODELO QUE SE CORRIGE A SÍ MISMO (26-10-2026, visto con el CLI de
+       verdad): contesta un JSON, escribe «Wait — that text is already
+       correct. Correct output:» y manda OTRO. Cortar de la primera llave a la
+       última junta los dos y no se lee, y a veces pasa en los dos intentos. Se
+       leen los objetos uno a uno y vale el ÚLTIMO que trae `clave` (el que el
+       modelo da por bueno).
+    2. Las comillas del texto sin escapar (`reparar_comillas`).
+    Si nada sirve, el error de antes."""
     try:
         return comun.extraer_json(respuesta, que)
     except RuntimeError as fallo:
+        for candidato in (respuesta, reparar_comillas(respuesta)):
+            objetos = [o for o in _objetos_json(candidato) if not clave or clave in o]
+            if objetos:
+                return objetos[-1]
         try:
             return comun.extraer_json(reparar_comillas(respuesta), que)
         except RuntimeError:
@@ -208,7 +240,7 @@ def _pedir_tanda(trozo, cwd):
             base_tiempo_s=180, sistema=SISTEMA,
             extra=["--no-session-persistence"], para="la revision de ortografia")
         try:
-            datos = leer_json(respuesta, "la revision de ortografia")
+            datos = leer_json(respuesta, "la revision de ortografia", "correcciones")
         except RuntimeError as fallo:
             ultimo = str(fallo)
             continue
@@ -463,7 +495,7 @@ def _pedir_tanda_editorial(trozo, cwd):
             base_tiempo_s=240, sistema=SISTEMA_EDITORIAL,
             extra=["--no-session-persistence"], para="la revision editorial")
         try:
-            datos = leer_json(respuesta, "la revision editorial")
+            datos = leer_json(respuesta, "la revision editorial", "propuestas")
         except RuntimeError as fallo:
             ultimo = str(fallo)
             continue

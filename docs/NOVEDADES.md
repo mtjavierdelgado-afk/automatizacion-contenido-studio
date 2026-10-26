@@ -38,6 +38,10 @@ vídeos, estilos, claves y contraseña no se tocan.
   Antes la imagen base y los estados se sumaban a «Personajes».
 - **El corrector ya no se rompe con comillas en el guion** («comenta "BAÑO"»):
   esa era la «respuesta rota» que no se arreglaba ni con «Revisar otra vez».
+- **Y tampoco cuando Claude se corrige a sí mismo** (26 de octubre): a veces
+  contestaba, escribía «espera, ese texto ya estaba bien» y mandaba otra
+  respuesta detrás. Ahora vale la última. Era la «respuesta rota» de un guion
+  sin comillas.
 - El botón «Cerrar» de un error ya no tapa el final del mensaje.
 
 **El medidor de Claude: cuánto te queda de la membresía (25 de octubre)**

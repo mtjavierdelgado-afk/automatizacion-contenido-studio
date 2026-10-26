@@ -17350,11 +17350,30 @@ def _imagenes_ya_generadas(ctx, planos, rehara=frozenset()):
     imagenes, 7,13 $». El precio era el del VIDEO ENTERO y no el de lo que
     faltaba, asi que retomar parecia costar lo mismo que empezar de cero -- y
     con esa cifra delante lo razonable es no pulsar.
+
+    CON EL GUION VISUAL MANDANDO TAMBIEN SE CUENTA (26-10-2026). Desde
+    guion-visual-2 `_planos_previstos` cuenta las lineas del guion visual
+    (origen «el guion visual aprobado», tambien las de la Parrilla) y aqui solo
+    se miraba el origen del plan cortado: lo hecho salia CERO, y «Montar el
+    video» pedia dibujar las 6 imagenes de un video con las 6 al dia («6
+    imagenes que han quedado viejas»). Redibujar no lo arreglaba --la cuenta
+    volvia a dar cero--, asi que el aviso volvia en cada version. Lo que hay en
+    disco es el mismo hecho venga de donde venga el numero de planos; el
+    `min(hechas, imagenes)` de quien llama cubre un guion visual con menos
+    lineas que el plan cortado.
     """
-    if rehara is None or planos.get("origen") != "el plan de este video":
+    if rehara is None or planos.get("origen") not in ("el plan de este video",
+                                                      "el guion visual aprobado"):
         return 0
     plan = PASOS_MODULOS.p6_assets.plan_actual(ctx.proyecto, "assets", estado=ctx.estado) or {}
     escenas = _escenas_que_pagan(plan)
+    if planos.get("origen") == "el guion visual aprobado":
+        # SOLO LOS PLANOS QUE VA A TENER EL GUION VISUAL (S001..SNNN, los ids
+        # son por posicion): un plan cortado antes, mas largo y con un hueco
+        # dentro, no puede tapar con sus PNG de sobra una imagen que p6 si
+        # dibujara (revision independiente del 26-10)
+        validos = {f"S{n:03d}" for n in range(1, int(planos.get("con_imagen") or 0) + 1)}
+        escenas = [e for e in escenas if str(e.get("id") or "") in validos]
     # EN LA CARPETA DE TRABAJO MIENTRAS SE GENERA, Y EN LA VERSION UNA VEZ
     # SELLADA. Mirar solo la de trabajo daba CERO en cuanto el paso terminaba
     # --que es justo cuando hay 216 imagenes hechas-- y el boton volvia a pedir

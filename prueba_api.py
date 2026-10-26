@@ -7962,6 +7962,34 @@ def probar_guion_visual():
            "GUION VISUAL: con las líneas de la Parrilla, generar no se para a esperar")
         igual(servidor._planos_previstos(ctx)["con_imagen"], 3,
               "GUION VISUAL: el precio cuenta una imagen por línea")
+        # LO YA DIBUJADO NO SE VUELVE A COBRAR (arreglo del 26-10): con el guion
+        # visual mandando, «Montar el vídeo» pedía dibujar las 6 imágenes de un
+        # vídeo con las 6 al día («6 imágenes que han quedado viejas»), porque
+        # `_imagenes_ya_generadas` solo contaba lo hecho con el plan cortado
+        trabajo = ctx.proyecto.ruta_trabajo("assets", crear=True)
+        os.makedirs(os.path.join(trabajo, "escenas"), exist_ok=True)
+        with open(os.path.join(trabajo, "plan.json"), "w", encoding="utf-8") as fh:
+            json.dump({"escenas": [{"id": f"S00{n}"} for n in (1, 2, 3)]}, fh)
+        for n in (1, 2, 3):
+            with open(os.path.join(trabajo, "escenas", f"S00{n}.png"), "wb") as fh:
+                fh.write(b"png")
+        coste = servidor._coste_previsto(ctx, ["video"])
+        igual((coste["imagenes_hechas"], coste["imagenes_por_generar"]), (3, 0),
+              "GUION VISUAL: con las 3 imágenes ya dibujadas, montar no pide dibujar ninguna")
+        os.remove(os.path.join(trabajo, "escenas", "S003.png"))
+        igual(servidor._coste_previsto(ctx, ["video"])["imagenes_por_generar"], 1,
+              "GUION VISUAL: y si falta una, pide esa sola")
+        # un plan cortado antes y MÁS LARGO (5 planos) con un hueco en S002: sus
+        # PNG de sobra (S004, S005) no tapan el que p6 sí dibujará
+        with open(os.path.join(trabajo, "plan.json"), "w", encoding="utf-8") as fh:
+            json.dump({"escenas": [{"id": f"S00{n}"} for n in (1, 2, 3, 4, 5)]}, fh)
+        os.remove(os.path.join(trabajo, "escenas", "S002.png"))
+        for n in (3, 4, 5):
+            with open(os.path.join(trabajo, "escenas", f"S00{n}.png"), "wb") as fh:
+                fh.write(b"png")
+        igual(servidor._coste_previsto(ctx, ["video"])["imagenes_por_generar"], 1,
+              "GUION VISUAL: un plan viejo más largo no tapa la imagen que falta")
+        shutil.rmtree(trabajo)
         codigo, _m = _llamar(servidor.aprobar_guion_visual, pid, {"aprobado": True})
         igual(codigo, 409, "GUION VISUAL: no se aprueba uno vacío")
         codigo, _m = _llamar(servidor.guardar_guion_visual, pid,

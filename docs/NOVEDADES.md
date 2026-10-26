@@ -10,6 +10,14 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
+**Arreglo: «Montar el vídeo» pedía dibujar imágenes que ya estaban (26 de octubre)**
+- En los vídeos con **guion visual** (aprobado, o con las líneas que trae la
+  Parrilla), «Montar el vídeo» avisaba «hay que dibujar antes N imágenes que han
+  quedado viejas» y ponía su precio, aunque todas estuvieran dibujadas y al día.
+  Era un fallo de la cuenta: no contaba lo ya dibujado. Rehacer las imágenes no
+  lo quitaba, y por eso el aviso volvía en cada versión.
+- Ahora cuenta lo que ya está dibujado: con las imágenes al día, montar dice
+  «gratis», y si falta alguna pide solo esa.
 **Quitar una imagen o igualarla con la de al lado (26 de octubre)**
 - **«Quitar esta imagen»** (en cada diapositiva de Imágenes, «Ajustar esta
   imagen»): lo que se oye en ella pasa a la imagen de antes o a la de después,

@@ -10,6 +10,19 @@ vídeos, estilos, claves y contraseña no se tocan.
 
 ## V3.1 · octubre de 2026 (CrearIA Studio: la interfaz nueva)
 
+**Lo que se pidió dibujar en cada imagen, en español (26 de octubre)**
+- En **Imágenes**, debajo de cada imagen sale **«Lo que se pidió dibujar»**: una
+  o dos frases en español con lo que se le pidió al dibujante (el sitio, quién
+  sale y qué hace, el encuadre). Sirve para ver de un vistazo por qué una imagen
+  no cuadra con la de al lado.
+- Lo escribe Claude solo al abrir la pantalla, la primera vez y solo para las
+  imágenes que no lo tienen (unas tres llamadas para un vídeo de cuatro
+  minutos, con tu membresía). **No dibuja nada ni cuesta dinero**, y no deja
+  ninguna imagen por rehacer.
+- **«Ver el original en inglés»** despliega el texto que de verdad se manda a
+  dibujar, que sigue en inglés porque el dibujante lo entiende mejor.
+- Si una imagen está marcada como vieja, la frase es lo que se pide ahora, no
+  con lo que se dibujó.
 **Arreglo: «Montar el vídeo» pedía dibujar imágenes que ya estaban (26 de octubre)**
 - En los vídeos con **guion visual** (aprobado, o con las líneas que trae la
   Parrilla), «Montar el vídeo» avisaba «hay que dibujar antes N imágenes que han
